@@ -1,4 +1,4 @@
-# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心）
+# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-4 爱莉桥接）
 
 Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端的唯一 API/WS 入口。
 
@@ -25,6 +25,21 @@ Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端�
 - [x] 消息幂等（`idempotency_key`）、离线消息上线补发
 - [x] 契约测试：两人私聊、群聊、幂等、越权 403/404、WS 连接/重连/补发
 
+### M4-4 爱莉桥接（已完成）
+
+- [x] `elysia_bridge` 应用：`ElysiaProfile`（爱莉应用内身份 ↔ Elysium stream_id 唯一映射）
+- [x] 阶段三 HTTP 客户端（`elysia_client.py`）：service credential 创建/换 session/refresh、
+      inject 入站、命令端点（send/reply 带 Idempotency-Key）、SSE 出站订阅（cursor/history_gap 恢复）
+- [x] 入站：应用内用户给爱莉发消息 → `POST /chat/messages:inject` 注入 Elysium 主链
+      （带 `sender_id`/`platform="elysia-app"`/`chat_type` 回显来源）
+- [x] 出站：`run_bridge` 订阅 `GET /events/stream` → 匹配 stream 的 `chat.message.*`
+      投影为应用内消息（幂等键 `elysia-<event_id>`）→ 广播 `elysia.reply`（走 M4-2 Chat WS）
+- [x] 出站路由：payload `sender_id`/`correlation_id` 定位会话，匹配不到降级默认会话 + warning
+- [x] 断线恢复：SSE `Last-Event-ID`/cursor 补历史，`history_gap` 按 recovery.cursor 重连，心跳不推进 cursor
+- [x] 应用内 WS 断线补发复用 M4-2 `last_message_seq`（`resume` 帧）
+- [x] 契约测试：inject 入站、SSE 出站投影、profile REST 权限、订阅循环断线/重连/401 恢复、
+      主体性边界（应用绝不生成爱莉第一人称内容）
+
 ## 目录结构
 
 ```text
@@ -35,7 +50,7 @@ backend/
 ├── apps/
 │   ├── accounts/           # 用户/认证/好友/在线状态（M4-1）
 │   ├── chat/               # 私聊/群聊/消息/已读/撤回（M4-2）
-│   └── elysia_bridge/      # M4-4 占位
+│   └── elysia_bridge/      # 爱莉桥接：profile/inject/SSE 出站/订阅循环（M4-4）
 └── tests/                  # 契约测试
 ```
 
@@ -85,6 +100,16 @@ python -m pytest
   撤回限时、已读回执、群管理、禁言、越权 403/404
 - Chat WebSocket：合法 token 连接、subscribe 基线、两人互发广播、断线补发、
   非成员订阅忽略/收不到广播、慢消费者不阻塞
+- 爱莉桥接（mock Elysium，不依赖真实服务）：
+  - `ElysiaProfile` 生命周期/唯一约束/enabled 关闭
+  - 凭据流程：创建 secret 只显示一次、换 session、refresh 轮换、撤销 401 恢复
+  - inject 入站：合法请求体 + 应用内消息落库、非爱莉会话不注入、缺凭据 ProfileNotConfigured
+  - SSE 出站投影：匹配 stream 落库（幂等 `elysia-<event_id>`）+ 广播 `elysia.reply`、
+    路由（sender_id/correlation）、降级 + warning、无会话返回 None
+  - 订阅循环：断线按 cursor 重连、history_gap 按 recovery.cursor、心跳不推进 cursor、
+    401 refresh 恢复、stop 优雅退出
+  - profile REST：登录可读、管理员写、越权 403、未初始化 404、`:test` 冒烟 503/200
+  - 主体性边界：落库内容 == 投影原文，应用从不伪造爱莉发言
 
 ## 配置说明（环境变量）
 
@@ -97,6 +122,10 @@ python -m pytest
 | `JWT_ACCESS_MINUTES` | 30 | access 有效期 |
 | `JWT_REFRESH_DAYS` | 7 | refresh 有效期 |
 | `MESSAGE_RECALL_SECONDS` | 120 | 消息撤回限时窗口（秒） |
+| `ELYSIA_BASE_URL` | 空 | 阶段三 Elysium API 根地址（不含 `/api/v1`） |
+| `ELYSIA_CREDENTIAL_FILE` | `runtime/elysia_credential.json` | service credential 落盘路径（Git 忽略） |
+| `ELYSIA_SSE_RECONNECT_SECONDS` | 3.0 | SSE 断线重连有界退避初始间隔（秒） |
+| `ELYSIA_SSE_EVENT_TYPES` | `chat.message` | SSE 订阅事件类型前缀过滤 |
 
 密钥只存在于本机 `.env`（Git 忽略），文档与仓库不含真实密钥。
 
@@ -152,6 +181,44 @@ python -m pytest
 - 事件帧：`message.new / message.recall / message.read / typing`，`sender_id` 由前端过滤；
 - 慢消费者（`ChannelFull`）被服务层捕获记 warning，不阻塞其他成员；
 - 心跳 `ping` -> `pong`。
+
+### 爱莉桥接（M4-4，`/api/v1/elysia/`）
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/elysia/profile/` | 读取当前爱莉 profile（应用级单例） | 登录 |
+| POST | `/elysia/profile/` | 初始化（绑定 user + stream_id） | 系统管理员 |
+| PATCH/PUT | `/elysia/profile/` | 更新 enabled/display_name/chat_type/platform | 系统管理员 |
+| POST | `/elysia/profile/:test` | 连接冒烟（验证凭据/session，不真正 inject） | 系统管理员 |
+
+**爱莉聊天闭环（入站/出站）**：
+
+1. **入站**：用户与爱莉私聊（爱莉是一个真实 `User`，可被搜索/私聊/@/加群）→
+   应用内消息落库（M4-2 `create_message`）→ `on_user_message_to_elysia` 判断该会话含爱莉
+   profile → `POST /api/v1/chat/messages:inject` 注入 Elysium 主链（带 `sender_id` 回显，
+   `platform="elysia-app"`）。inject 失败不阻塞/回滚用户消息（视图层 try/except + 日志）。
+2. **出站**：`python manage.py run_bridge` 订阅 `GET /api/v1/events/stream`，按
+   `event_type=chat.message.*` + `stream_id` 匹配 → 从 payload 回显 `sender_id`/`correlation_id`
+   定位应用内会话 → `create_message`（sender=爱莉 user，`idempotency_key=elysia-<event_id>` 幂等）
+   → 广播 `elysia.reply`（走 M4-2 Chat WS，消费者处理器 `elysia_reply`）。
+3. **断线恢复**：SSE 断线按最后 cursor（`Last-Event-ID`）补历史；`history_gap` 错误帧按
+   `recovery.cursor` 重连；应用内 WS 断线复用 `resume`/`last_message_seq` 补发。
+
+**出站路由降级**：payload 无法回显 `sender_id`/`correlation` 时，降级到爱莉 profile 的
+最近私聊会话 + warning（不静默丢弃，见失败路径留日志）；无任何私聊会话则返回 None。
+
+### 已知取舍（M4-4）
+
+- **首期以 SSE 投影为"爱莉已回复"依据**：SSE 出现 `chat.message.*` 即投影落库广播；
+  `delivery_confirmed` 回执链路本期不做（记录取舍，后续可补）。
+- **命令端点 send/reply 已打通链路但非主路径**：`elysia_client` 实现且契约测试覆盖
+  （凭据/scope/幂等键/结果解析）；因 `elysia-app` 平台在阶段三 `ProviderFacadeRegistry`
+  无真实 facade，真实发送会 `capability_disabled`，故主路径是 SSE 投影。
+- **出站来源回显是最大未决点**：inject 注入的消息无 `reply_target`，爱莉回复能否可靠回显
+  `sender_id` 需真实 E2E 验证；不能则需与阶段三协调补契约（公共契约缺陷先说明再动）。
+- **`display_name`/`chat_type`/`created_at` 为补充字段**（开发文档 §4 未列，接口驱动补充，已注明）。
+- **SSE 订阅单 owner**：多应用实例需 Redis 锁占位，本期单实例即可。
+- **凭据安全**：secret 一次性落盘本机 `runtime/`（Git 忽略），token 只存内存，重启用 secret 重换。
 
 ### 已知取舍（M4-2）
 

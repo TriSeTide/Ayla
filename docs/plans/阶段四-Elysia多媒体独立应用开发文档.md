@@ -328,7 +328,7 @@ elysia_profile        id, user_id(爱莉在应用内用户), stream_id(爱莉str
 - **M4-1 基座**：Django 5 + Channels 4 + Redis 脚手架；用户模型 + JWT + 好友；健康检查；Docker Compose（MySQL/Redis/MinIO）。✅ 已完成
 - **M4-2 聊天核心**：消息模型 + 私聊/群聊 REST + WebSocket Consumers + 离线补发 + 已读/撤回/引用。✅ 已完成（见 [阶段四-M4-2聊天核心开发步骤.md](./阶段四-M4-2聊天核心开发步骤.md)）
 - **M4-3 媒体**：对象存储上传 + 缩略图/波形 + 表情包 + 文件。
-- **M4-4 爱莉桥接**：service credential 获取 + inject 入站 + SSE 出站投影 + 爱莉用户身份 + `elysia.reply` 事件。
+- **M4-4 爱莉桥接**：service credential 获取 + inject 入站 + SSE 出站投影 + 爱莉用户身份 + `elysia.reply` 事件。✅ 契约层已完成（见 [阶段四-M4-4爱莉桥接开发步骤.md](./阶段四-M4-4爱莉桥接开发步骤.md)；真实 E2E 待 Elysium 运行 + credential 验收）
 - **M4-5 语音**：LiveKit 集成 + 语音频道 + token 签发 + 爱莉 Voice Live 接入。
 - **M4-6 直播**：SRS/MediaMTX 集成 + 直播间 + 弹幕 + 爱莉直播订阅。
 - **M4-7 桌游**：狼人杀房间 + 玩家视图 + AI 玩家 + 复盘。

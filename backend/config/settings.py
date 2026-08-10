@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "apps.accounts",
     "apps.chat",
+    "apps.elysia_bridge",
 ]
 
 MIDDLEWARE = [
@@ -143,6 +144,21 @@ USE_TZ = True
 
 # 聊天：消息撤回限时窗口（秒）
 MESSAGE_RECALL_SECONDS = env.int("MESSAGE_RECALL_SECONDS", default=120)
+
+# ---------- 爱莉桥接（M4-4） ----------
+# ELYSIA_BASE_URL：阶段三 Elysium API 根地址（不含 /api/v1 前缀，客户端拼接）。
+# ELYSIA_CREDENTIAL_FILE：service credential 一次性 secret 落盘路径（本机配置，
+#   Git 忽略，不提交仓库；access/refresh token 只存内存，重启后用它重换 session）。
+# ELYSIA_SSE_RECONNECT_SECONDS：SSE 断线重连的有界退避初始间隔。
+ELYSIA_BASE_URL = env.str("ELYSIA_BASE_URL", default="")
+ELYSIA_CREDENTIAL_FILE = env.str(
+    "ELYSIA_CREDENTIAL_FILE",
+    default=str(BASE_DIR / "runtime" / "elysia_credential.json"),
+)
+ELYSIA_SSE_RECONNECT_SECONDS = env.float("ELYSIA_SSE_RECONNECT_SECONDS", default=3.0)
+ELYSIA_SSE_EVENT_TYPES = env.list(
+    "ELYSIA_SSE_EVENT_TYPES", default=["chat.message"]
+)
 
 # 静态/媒体
 STATIC_URL = "static/"

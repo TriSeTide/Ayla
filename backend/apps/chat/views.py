@@ -6,6 +6,8 @@ chat 视图 —— 私聊/群聊/消息/已读/撤回/群管理 REST。
 - 禁言成员发消息 → 403；
 - 群管理（加/踢/禁言/改公告/改角色）仅群主/管理员。
 """
+import logging
+
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
@@ -21,6 +23,8 @@ from .serializers import (
     CreateMessageSerializer,
     MessageSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -240,6 +244,14 @@ class MessageView(APIView):
         )
         # 只有真正落库后才广播
         services.broadcast_message_new(msg)
+        # 爱莉桥接：若该会话对端是爱莉，把用户消息 inject 到 Elysium 主链
+        # （失败不阻塞/不回滚用户消息；仅告警，由桥接重试或人工处理）
+        try:
+            from apps.elysia_bridge.services import on_user_message_to_elysia
+
+            on_user_message_to_elysia(message=msg, conversation=conv)
+        except Exception:
+            logger.exception("elysia bridge inject failed for message %s", msg.id)
         return Response(MessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
 

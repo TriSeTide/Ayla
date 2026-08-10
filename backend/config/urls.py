@@ -6,6 +6,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", include("apps.accounts.urls")),
     path("api/v1/chat/", include("apps.chat.urls")),
-    # 后续里程碑追加：
-    # path("api/v1/bridge/", include("apps.elysia_bridge.urls")),
+    path("api/v1/elysia/", include("apps.elysia_bridge.urls")),
 ]
