@@ -60,12 +60,14 @@ web/
 ## 启动方式
 
 ```bash
-# 0) 前置：后端已启动（见 backend/README.md），默认 http://127.0.0.1:8000
+# 0) 前置：后端已启动（见 backend/README.md）
+#    注意：Ayla 后端在 8100 端口启动（8000 被 Elysium 主进程占用）
+#    Ayla/backend/.venv/Scripts/python.exe manage.py runserver 127.0.0.1:8100
 
 # 1) 安装依赖
 npm install
 
-# 2) 启动 dev server（默认代理到 127.0.0.1:8000）
+# 2) 启动 dev server（默认代理到 127.0.0.1:8100）
 npm run dev
 
 # 3) 构建
@@ -81,7 +83,7 @@ npm run test
 |---|---|---|
 | `VITE_API_BASE_URL` | 空（走 Vite proxy） | 生产环境 API 根地址，如 `https://app.example.com` |
 | `VITE_WS_BASE_URL` | 空（走 Vite proxy，`ws:` 自动） | 生产环境 WS 根地址，如 `wss://app.example.com` |
-| `VITE_DEV_PROXY_TARGET` | `http://127.0.0.1:8000` | 仅开发；Vite dev proxy 目标后端地址 |
+| `VITE_DEV_PROXY_TARGET` | `http://127.0.0.1:8100` | 仅开发；Vite dev proxy 目标后端地址（Ayla 后端在 8100） |
 
 开发默认同源走 Vite proxy（`/api` → 后端、`/ws` → 后端，`ws: true`），无需 CORS。
 后端 `ALLOWED_HOSTS=["*"]` 已放行本地。
