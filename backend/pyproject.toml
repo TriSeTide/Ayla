@@ -1,0 +1,42 @@
+[project]
+name = "elysia-backend"
+version = "0.1.0"
+description = "Elysia 独立应用后端 —— Django 5 + Channels 4 + Redis（阶段四）"
+requires-python = ">=3.11"
+dependencies = [
+    "Django>=5.0,<5.3",
+    "channels>=4.0,<5.0",
+    "channels-redis>=4.2,<5.0",
+    "daphne>=4.0,<5.0",
+    "djangorestframework>=3.15,<4.0",
+    "djangorestframework-simplejwt>=5.3,<6.0",
+    "redis>=5.0,<6.0",
+    "django-redis>=5.4,<6.0",
+    "django-environ>=0.11,<1.0",
+    "cryptography>=42.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["apps*", "config*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings_test"
+python_files = ["test_*.py", "*_tests.py"]
+testpaths = ["tests", "apps"]
+addopts = "-q --no-header"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

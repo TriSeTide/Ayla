@@ -1,0 +1,61 @@
+# Elysia 独立应用 —— 基础设施编排（M4-1 基座）
+# 仅编排基础设施：MySQL 8 / Redis 7 / MinIO。
+# Django 应用本地开发用 venv 直接跑，生产再补应用容器。
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: elysia-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-elysia_dev_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-elysia}
+      MYSQL_USER: ${MYSQL_USER:-elysia}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-elysia_dev_pass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-elysia_dev_root}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: elysia-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: elysia-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-elysia_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-elysia_minio_pass}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # 控制台
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:
