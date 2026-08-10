@@ -17,6 +17,7 @@ from channels.auth import AuthMiddlewareStack  # noqa: E402
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 
 from apps.accounts.routing import websocket_urlpatterns as accounts_ws  # noqa: E402
+from apps.chat.routing import websocket_urlpatterns as chat_ws  # noqa: E402
 
 application = ProtocolTypeRouter(
     {
@@ -24,7 +25,8 @@ application = ProtocolTypeRouter(
         "websocket": AuthMiddlewareStack(
             URLRouter(
                 accounts_ws
-                # 后续里程碑在此追加 chat / livestream / tabletop 等 ws 路由
+                + chat_ws
+                # 后续里程碑在此追加 livestream / tabletop 等 ws 路由
             )
         ),
     }

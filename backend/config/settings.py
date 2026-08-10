@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "apps.accounts",
+    "apps.chat",
 ]
 
 MIDDLEWARE = [
@@ -139,6 +140,9 @@ LANGUAGE_CODE = "zh-hans"
 TIME_ZONE = env.str("TIME_ZONE", default="Asia/Shanghai")
 USE_I18N = True
 USE_TZ = True
+
+# 聊天：消息撤回限时窗口（秒）
+MESSAGE_RECALL_SECONDS = env.int("MESSAGE_RECALL_SECONDS", default=120)
 
 # 静态/媒体
 STATIC_URL = "static/"

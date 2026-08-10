@@ -325,8 +325,8 @@ elysia_profile        id, user_id(爱莉在应用内用户), stream_id(爱莉str
 > 每个里程碑交付：代码 + 契约测试 + 端到端演示 + 更新部署文档。
 
 ### 阶段四（Django 后端）
-- **M4-1 基座**：Django 5 + Channels 4 + Redis 脚手架；用户模型 + JWT + 好友；健康检查；Docker Compose（MySQL/Redis/MinIO）。
-- **M4-2 聊天核心**：消息模型 + 私聊/群聊 REST + WebSocket Consumers + 离线补发 + 已读/撤回/引用。
+- **M4-1 基座**：Django 5 + Channels 4 + Redis 脚手架；用户模型 + JWT + 好友；健康检查；Docker Compose（MySQL/Redis/MinIO）。✅ 已完成
+- **M4-2 聊天核心**：消息模型 + 私聊/群聊 REST + WebSocket Consumers + 离线补发 + 已读/撤回/引用。✅ 已完成（见 [阶段四-M4-2聊天核心开发步骤.md](./阶段四-M4-2聊天核心开发步骤.md)）
 - **M4-3 媒体**：对象存储上传 + 缩略图/波形 + 表情包 + 文件。
 - **M4-4 爱莉桥接**：service credential 获取 + inject 入站 + SSE 出站投影 + 爱莉用户身份 + `elysia.reply` 事件。
 - **M4-5 语音**：LiveKit 集成 + 语音频道 + token 签发 + 爱莉 Voice Live 接入。
