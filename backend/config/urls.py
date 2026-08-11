@@ -7,4 +7,6 @@ urlpatterns = [
     path("api/v1/", include("apps.accounts.urls")),
     path("api/v1/chat/", include("apps.chat.urls")),
     path("api/v1/elysia/", include("apps.elysia_bridge.urls")),
+    path("api/v1/media/", include("apps.media.urls")),
+    path("api/v1/emoji/", include("apps.emoji.urls")),
 ]

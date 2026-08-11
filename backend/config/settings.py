@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.chat",
     "apps.elysia_bridge",
+    "apps.media",
+    "apps.emoji",
 ]
 
 MIDDLEWARE = [
@@ -144,6 +146,27 @@ USE_TZ = True
 
 # 聊天：消息撤回限时窗口（秒）
 MESSAGE_RECALL_SECONDS = env.int("MESSAGE_RECALL_SECONDS", default=120)
+
+# ---------- 媒体（M4-3） ----------
+# S3/MinIO 对象存储：全部走 env，默认值仅本地开发（与 docker-compose 默认一致）。
+# S3_STORAGE_BACKEND=fake 时使用内存 FakeStorage（测试/无 MinIO 环境）。
+S3_ENDPOINT_URL = env.str("S3_ENDPOINT_URL", default="http://127.0.0.1:9000")
+S3_ACCESS_KEY = env.str("S3_ACCESS_KEY", default="elysia_minio")
+S3_SECRET_KEY = env.str("S3_SECRET_KEY", default="elysia_minio_pass")
+S3_BUCKET = env.str("S3_BUCKET", default="elysia-media")
+S3_REGION = env.str("S3_REGION", default="us-east-1")
+S3_PUBLIC = env.bool("S3_PUBLIC", default=False)  # 私密媒体，不得进入共享缓存
+S3_STORAGE_BACKEND = env.str("S3_STORAGE_BACKEND", default="s3")
+
+# 分类型大小上限（字节）
+MEDIA_MAX_IMAGE_BYTES = env.int("MEDIA_MAX_IMAGE_BYTES", default=10 * 1024 * 1024)
+MEDIA_MAX_VOICE_BYTES = env.int("MEDIA_MAX_VOICE_BYTES", default=30 * 1024 * 1024)
+MEDIA_MAX_FILE_BYTES = env.int("MEDIA_MAX_FILE_BYTES", default=50 * 1024 * 1024)
+MEDIA_MAX_EMOJI_BYTES = env.int("MEDIA_MAX_EMOJI_BYTES", default=5 * 1024 * 1024)
+
+# 上传会话 TTL（秒）与缩略图长边（px）
+MEDIA_TMP_TTL_SECONDS = env.int("MEDIA_TMP_TTL_SECONDS", default=600)
+MEDIA_THUMB_MAX = env.int("MEDIA_THUMB_MAX", default=320)
 
 # ---------- 爱莉桥接（M4-4） ----------
 # ELYSIA_BASE_URL：阶段三 Elysium API 根地址（不含 /api/v1 前缀，客户端拼接）。

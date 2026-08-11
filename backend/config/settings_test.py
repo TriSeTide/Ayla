@@ -30,6 +30,9 @@ DATABASES = {
 
 DEBUG = False
 
+# 测试用内存 FakeStorage，不依赖真实 MinIO（M4-3）
+S3_STORAGE_BACKEND = "fake"
+
 # 日志压缩，测试输出干净
 LOGGING = {
     "version": 1,

@@ -42,11 +42,12 @@ class TestMessageCreate:
         body = resp.json()
         for field in [
             "id", "conversation_id", "sender_id", "type", "content",
-            "media_id", "reply_to", "status", "seq", "created_at",
+            "media_id", "media", "reply_to", "status", "seq", "created_at",
         ]:
             assert field in body
         assert isinstance(body["id"], str)
         assert isinstance(body["seq"], int)
+        assert body["media"] is None  # 文本消息无媒体引用
 
     def test_idempotent_resend_returns_original(self, auth_client, user_factory):
         b = user_factory(username="ms3_b")
@@ -150,9 +151,38 @@ class TestMessageCreate:
         )
         assert resp.status_code == 403
 
-    def test_send_image_message_placeholder_media(self, auth_client, user_factory):
+    def test_send_image_message_with_real_media(self, auth_client, user_factory):
+        """M4-3：发图片消息必须带存在且 ready 的真实媒体（三步上传后引用）。"""
         b = user_factory(username="ms9_b")
         ca, _ = auth_client(username="ms9_a")
+        conv = make_private(ca, auth_as(b))
+        # 上传真实图片媒体
+        from apps.media.tests.conftest import upload_image
+
+        media_id, _ = upload_image(ca)
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "type": "image",
+                "content": "图片引用",
+                "media_id": media_id,
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["type"] == "image"
+        assert body["media_id"] == media_id
+        # M4-3：media 升级为 descriptor 对象
+        assert body["media"]["media_id"] == media_id
+        assert body["media"]["kind"] == "image"
+        assert body["media"]["status"] == "ready"
+
+    def test_send_image_with_invalid_media_400(self, auth_client, user_factory):
+        """M4-3：假/不存在 media_id → 400 media_not_found（原 M4-2 占位行为的契约变更）。"""
+        b = user_factory(username="ms9b_b")
+        ca, _ = auth_client(username="ms9b_a")
         conv = make_private(ca, auth_as(b))
         resp = ca.post(
             f"/api/v1/chat/conversations/{conv['id']}/messages/",
@@ -164,9 +194,54 @@ class TestMessageCreate:
             },
             format="json",
         )
-        assert resp.status_code == 201
-        assert resp.json()["type"] == "image"
-        assert resp.json()["media_id"] == "media-placeholder-1"
+        assert resp.status_code == 400
+        assert "media_not_found" in str(resp.json())
+
+    def test_send_media_message_without_access_403(self, auth_client, user_factory):
+        """M4-3：用别人 media_id 发消息 → 403 media_access_denied。"""
+        owner_client, owner = auth_client(username="ms9c_o")
+        from apps.media.tests.conftest import upload_image
+
+        media_id, _ = upload_image(owner_client)
+        # 另两人建立会话，但媒体属于 owner，发送者无访问权
+        b = user_factory(username="ms9c_b")
+        a = user_factory(username="ms9c_a")
+        ca = auth_as(a)
+        cb = auth_as(b)
+        conv_a = make_private(ca, cb)
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv_a['id']}/messages/",
+            {
+                "type": "image",
+                "content": "盗用",
+                "media_id": media_id,
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 403
+
+    def test_send_media_message_type_mismatch_400(self, auth_client, user_factory):
+        """M4-3：media kind 与消息 type 不匹配 → 400 media_type_mismatch。"""
+        b = user_factory(username="ms9d_b")
+        ca, _ = auth_client(username="ms9d_a")
+        conv = make_private(ca, auth_as(b))
+        from apps.media.tests.conftest import upload_image
+
+        # 上传 image 媒体，但发 voice 消息
+        media_id, _ = upload_image(ca, kind="image", mime_type="image/png")
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "type": "voice",
+                "content": "",
+                "media_id": media_id,
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "media_type_mismatch" in str(resp.json())
 
 
 @pytest.mark.django_db

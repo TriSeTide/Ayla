@@ -1,6 +1,7 @@
 """chat DRF 序列化器。"""
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
 from apps.accounts.serializers import UserPublicSerializer
 
@@ -31,6 +32,8 @@ class MessageSerializer(serializers.ModelSerializer):
     status = serializers.CharField(read_only=True)
     seq = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+    # M4-3：media 从字符串 media_id 升级为 descriptor 对象（无引用为 null）
+    media = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -41,6 +44,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "type",
             "content",
             "media_id",
+            "media",
             "reply_to",
             "status",
             "seq",
@@ -50,6 +54,19 @@ class MessageSerializer(serializers.ModelSerializer):
 
     def get_reply_to(self, obj):
         return str(obj.reply_to_id) if obj.reply_to_id else None
+
+    def get_media(self, obj):
+        """media descriptor：media_id 引用的 MediaObjectSerializer（无引用为 null）。"""
+        media_id = obj.media_id
+        if not media_id:
+            return None
+        from apps.media.models import MediaObject
+        from apps.media.serializers import MediaObjectSerializer
+
+        media = MediaObject.objects.filter(media_id=media_id).first()
+        if media is None:
+            return None
+        return MediaObjectSerializer(media, context=self.context).data
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -151,8 +168,50 @@ class CreateMessageSerializer(serializers.Serializer):
         max_length=64, required=False, allow_blank=True, default=None
     )
 
+    # M4-3：媒体消息类型（type=image/voice/file/emoji 时 media_id 必填并校验）
+    MEDIA_TYPES = {
+        Message.TYPE_IMAGE,
+        Message.TYPE_VOICE,
+        Message.TYPE_FILE,
+        Message.TYPE_EMOJI,
+    }
+
     def validate_media_id(self, value):
         return value or None
 
     def validate_idempotency_key(self, value):
         return value or None
+
+    def validate(self, attrs):
+        msg_type = attrs.get("type") or Message.TYPE_TEXT
+        media_id = attrs.get("media_id")
+        if msg_type in self.MEDIA_TYPES:
+            if not media_id:
+                raise serializers.ValidationError(
+                    {"media_id": "媒体消息必须携带 media_id"}
+                )
+            from apps.media.models import MediaObject
+            from apps.media.services import can_access_media
+
+            media = MediaObject.objects.filter(media_id=media_id).first()
+            if media is None:
+                raise serializers.ValidationError(
+                    {"media_id": "media_not_found"}
+                )
+            if media.status != MediaObject.STATUS_READY:
+                raise serializers.ValidationError(
+                    {"media_id": "media_not_ready"}
+                )
+            if media.kind != msg_type:
+                raise serializers.ValidationError(
+                    {"media_id": "media_type_mismatch"}
+                )
+            # 访问权：调用方对该媒体有访问权（防拿别人 media_id 发消息）
+            # 越权是授权问题 → PermissionDenied（403），与 400 类校验错误区分
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            if user is not None and not can_access_media(user, media):
+                raise PermissionDenied(
+                    {"media_id": "media_access_denied"}
+                )
+        return attrs

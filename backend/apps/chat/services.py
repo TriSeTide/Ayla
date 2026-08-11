@@ -247,6 +247,7 @@ async def _group_send_async(conversation_id, event: dict) -> None:
 
 
 def _message_new_event(message: Message) -> dict:
+    # M4-3：media 从字符串 media_id 升级为 descriptor 对象（无引用为 null）
     return {
         "type": "chat.message.new",
         "conversation_id": str(message.conversation_id),
@@ -254,11 +255,24 @@ def _message_new_event(message: Message) -> dict:
         "sender_id": message.sender_id,
         "content": message.content,
         "msg_type": message.type,
-        "media": message.media_id,
+        "media": _media_descriptor(message.media_id),
         "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
         "seq": message.seq,
         "ts": message.created_at.isoformat(),
     }
+
+
+def _media_descriptor(media_id: str | None):
+    """媒体 descriptor：media_id 引用 MediaObject 则返回 descriptor，否则 None。"""
+    if not media_id:
+        return None
+    from apps.media.models import MediaObject
+    from apps.media.serializers import MediaObjectSerializer
+
+    media = MediaObject.objects.filter(media_id=media_id).first()
+    if media is None:
+        return None
+    return MediaObjectSerializer(media).data
 
 
 def broadcast_message_new(message: Message) -> None:
