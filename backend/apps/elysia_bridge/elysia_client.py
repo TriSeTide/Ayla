@@ -148,6 +148,122 @@ class SessionTokens:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class VoiceCallStatus:
+    """阶段三 VoiceCallStatus 的只读投影（M4-5 §4.1）。"""
+
+    call_id: str
+    episode_id: str | None = None
+    state: str = ""
+    mode: str = ""
+    provider: str = ""
+    created_at: str | None = None
+    updated_at: str | None = None
+    resumable: bool = False
+    connected: bool = False
+    input_audio_bytes: int = 0
+    output_audio_bytes: int = 0
+    interruptions: int = 0
+    failure_reason: str | None = None
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "VoiceCallStatus":
+        return cls(
+            call_id=str(data.get("call_id") or ""),
+            episode_id=data.get("episode_id"),
+            state=str(data.get("state") or ""),
+            mode=str(data.get("mode") or ""),
+            provider=str(data.get("provider") or ""),
+            created_at=data.get("created_at"),
+            updated_at=data.get("updated_at"),
+            resumable=bool(data.get("resumable", False)),
+            connected=bool(data.get("connected", False)),
+            input_audio_bytes=int(data.get("input_audio_bytes") or 0),
+            output_audio_bytes=int(data.get("output_audio_bytes") or 0),
+            interruptions=int(data.get("interruptions") or 0),
+            failure_reason=data.get("failure_reason"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceCallTicket:
+    """阶段三 WSTicketResponse 的只读投影（短时、单次、绑定 scope/origin）。"""
+
+    ticket: str
+    url: str = ""
+    expires_at: str | None = None
+    resource: str = ""
+    subprotocol: str = ""
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "VoiceCallTicket":
+        return cls(
+            ticket=str(data.get("ticket") or ""),
+            url=str(data.get("url") or ""),
+            expires_at=data.get("expires_at"),
+            resource=str(data.get("resource") or ""),
+            subprotocol=str(data.get("subprotocol") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceCallCreated:
+    """POST /voice-calls 响应：call + 一次性 participant ticket。"""
+
+    call: VoiceCallStatus
+    connection: VoiceCallTicket
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "VoiceCallCreated":
+        return cls(
+            call=VoiceCallStatus.from_mapping(data.get("call") or {}),
+            connection=VoiceCallTicket.from_mapping(data.get("connection") or {}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceTranscriptEntry:
+    """单条转写（role: user/assistant）。"""
+
+    sequence: int = 0
+    occurred_at: str | None = None
+    role: str = ""
+    text: str = ""
+    provider_event_id: str | None = None
+    visibility: str = ""
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "VoiceTranscriptEntry":
+        return cls(
+            sequence=int(data.get("sequence") or 0),
+            occurred_at=data.get("occurred_at"),
+            role=str(data.get("role") or ""),
+            text=str(data.get("text") or ""),
+            provider_event_id=data.get("provider_event_id"),
+            visibility=str(data.get("visibility") or ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceTranscriptPage:
+    """阶段三 VoiceTranscriptPage 的只读投影。"""
+
+    transcripts: tuple[VoiceTranscriptEntry, ...] = ()
+    next_cursor: str | None = None
+    has_more: bool = False
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "VoiceTranscriptPage":
+        return cls(
+            transcripts=tuple(
+                VoiceTranscriptEntry.from_mapping(t)
+                for t in (data.get("transcripts") or [])
+            ),
+            next_cursor=data.get("next_cursor"),
+            has_more=bool(data.get("has_more", False)),
+        )
+
+
 def _extract_error(response: httpx.Response) -> ElysiaClientError:
     """把阶段三错误响应映射为客户端异常（保留 code/status/recovery）。"""
     try:
@@ -367,6 +483,155 @@ class ElysiaClient:
         )
         return CommandAccepted.from_mapping(self._handle(response))
 
+    # ---------- 语音通话（M4-5 §4.1 控制面 REST，全部需 Bearer） ----------
+
+    def create_voice_call(
+        self,
+        *,
+        access_token: str,
+        mode: str = "auto",
+    ) -> VoiceCallCreated:
+        """POST /voice-calls —— 创建通话 + 一次性 participant ticket。
+
+        应用侧以 service credential 调用，应用本身就是该通话的参与者/拥有者
+        （owner_actor_id = credential 的 actor_id）。
+        """
+        response = self._client.post(
+            "/api/v1/voice-calls",
+            json={"mode": mode},
+            headers=self._headers(access_token),
+        )
+        return VoiceCallCreated.from_mapping(self._handle(response))
+
+    def get_voice_call(
+        self,
+        *,
+        access_token: str,
+        call_id: str,
+    ) -> VoiceCallStatus:
+        """GET /voice-calls/{call_id} —— 通话状态与安全指标。"""
+        response = self._client.get(
+            f"/api/v1/voice-calls/{call_id}",
+            headers=self._headers(access_token),
+        )
+        return VoiceCallStatus.from_mapping(self._handle(response))
+
+    def _voice_call_command(
+        self,
+        *,
+        access_token: str,
+        call_id: str,
+        action: str,
+        idempotency_key: str,
+        body: Mapping[str, Any] | None = None,
+    ) -> CommandAccepted:
+        """POST /voice-calls/{call_id}:<action> —— 命令必须带 Idempotency-Key。"""
+        response = self._client.post(
+            f"/api/v1/voice-calls/{call_id}:{action}",
+            json=dict(body or {}),
+            headers={
+                **self._headers(access_token),
+                "Idempotency-Key": idempotency_key,
+            },
+        )
+        return CommandAccepted.from_mapping(self._handle(response))
+
+    def resume_voice_call(
+        self, *, access_token: str, call_id: str, idempotency_key: str
+    ) -> CommandAccepted:
+        """POST :resume —— 恢复可恢复通话。"""
+        return self._voice_call_command(
+            access_token=access_token, call_id=call_id, action="resume",
+            idempotency_key=idempotency_key,
+        )
+
+    def interrupt_voice_call(
+        self,
+        *,
+        access_token: str,
+        call_id: str,
+        idempotency_key: str,
+        played_audio_ms: int = 0,
+    ) -> CommandAccepted:
+        """POST :interrupt —— 清空播放并中断当前回复。"""
+        return self._voice_call_command(
+            access_token=access_token, call_id=call_id, action="interrupt",
+            idempotency_key=idempotency_key,
+            body={"played_audio_ms": played_audio_ms},
+        )
+
+    def end_voice_call(
+        self, *, access_token: str, call_id: str, idempotency_key: str
+    ) -> CommandAccepted:
+        """POST :end —— 结束通话（幂等：重复调用返回同一命令）。"""
+        return self._voice_call_command(
+            access_token=access_token, call_id=call_id, action="end",
+            idempotency_key=idempotency_key,
+        )
+
+    def send_voice_call_text(
+        self,
+        *,
+        access_token: str,
+        call_id: str,
+        text: str,
+        idempotency_key: str,
+    ) -> CommandAccepted:
+        """POST /voice-calls/{call_id}/text —— 向实时会话注入文本（1~8000 字符）。"""
+        if not text or not (1 <= len(text) <= 8000):
+            raise ValueError("voice call text must be 1~8000 chars")
+        response = self._client.post(
+            f"/api/v1/voice-calls/{call_id}/text",
+            json={"text": text},
+            headers={
+                **self._headers(access_token),
+                "Idempotency-Key": idempotency_key,
+            },
+        )
+        return CommandAccepted.from_mapping(self._handle(response))
+
+    def get_voice_call_transcripts(
+        self,
+        *,
+        access_token: str,
+        call_id: str,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> VoiceTranscriptPage:
+        """GET /voice-calls/{call_id}/transcripts —— 授权转写历史。"""
+        params: dict[str, str] = {}
+        if cursor:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = str(limit)
+        response = self._client.get(
+            f"/api/v1/voice-calls/{call_id}/transcripts",
+            params=params,
+            headers=self._headers(access_token),
+        )
+        return VoiceTranscriptPage.from_mapping(self._handle(response))
+
+    def issue_voice_call_ticket(
+        self,
+        *,
+        access_token: str,
+        call_id: str,
+        role: str,
+        origin: str = "",
+    ) -> VoiceCallTicket:
+        """POST /voice-calls/{call_id}/tickets —— 生成短时、单次、绑定 scope 的 WS ticket。
+
+        role: participant（voice_call:operate）/ observer（voice_call:observe）。
+        """
+        if role not in ("participant", "observer"):
+            raise ValueError("voice call ticket role must be participant|observer")
+        response = self._client.post(
+            f"/api/v1/voice-calls/{call_id}/tickets",
+            json={"role": role, "origin": origin},
+            headers=self._headers(access_token),
+        )
+        return VoiceCallTicket.from_mapping(self._handle(response))
+
     # ---------- SSE 出站订阅（只读观察通道） ----------
 
     async def stream_sse(
@@ -506,4 +771,9 @@ __all__ = [
     "ElysiaTransportError",
     "ElysiaUnauthenticated",
     "SessionTokens",
+    "VoiceCallCreated",
+    "VoiceCallStatus",
+    "VoiceCallTicket",
+    "VoiceTranscriptEntry",
+    "VoiceTranscriptPage",
 ]

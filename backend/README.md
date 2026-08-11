@@ -1,4 +1,4 @@
-# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-3 媒体 + M4-4 爱莉桥接）
+# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-3 媒体 + M4-4 爱莉桥接 + M4-5 语音）
 
 Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端的唯一 API/WS 入口。
 
@@ -62,6 +62,21 @@ Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端�
 - [x] 契约测试：inject 入站、SSE 出站投影、profile REST 权限、订阅循环断线/重连/401 恢复、
       主体性边界（应用绝不生成爱莉第一人称内容）
 
+### M4-5 语音（契约层完成，端到端未验收）
+
+- [x] `voice` 应用：语音频道（Discord 风格）+ 频道成员（presence 心跳持久化）
+- [x] LiveKit 集成（`livekit.py`）：`AccessToken` + `VideoGrants` 签发（identity/room/grants/TTL），
+      无配置时显式失败（不生成裸 token）
+- [x] 频道 REST（`/api/v1/voice/`）：列表/详情/建/改名称（仅 owner）/加入（返回 LiveKit token）/离开/心跳/成员
+- [x] `voice.state` 广播：频道组 `voice_chan_{id}`（独立于会话组 `chat_conv_{id}`），
+      组广播捕获 ChannelFull 不阻塞慢消费者
+- [x] `VoiceConsumer` WS（`/ws/voice/?token=<jwt>`）：成员校验后订阅频道组收 `voice.state`
+- [x] presence 超时：超过 `VOICE_MEMBER_TIMEOUT_SECONDS` 未心跳的成员标记离开 + 广播（后台任务契约）
+- [x] 配置接线：`LIVEKIT_*` / `VOICE_*` 环境变量；`docker-compose.yml` 追加 livekit 服务
+- [ ] 爱莉 Voice Live 桥接（`elysia_bridge` 扩展，M4-5 第 1.2 节）：控制面桥接 + 转写/状态投影 + 文本双向注入 ——
+      **待实施**（依赖阶段三 voice-calls 挂载 + 真实 credential 验收）
+- [ ] 端到端验收：真人语音频道 P95<500ms / 爱莉入会闭环 —— **未验收**（需 LiveKit 运行 + Elysium 运行）
+
 ## 目录结构
 
 ```text
@@ -74,7 +89,8 @@ backend/
 │   ├── chat/               # 私聊/群聊/消息/已读/撤回（M4-2）
 │   ├── media/              # 媒体对象/受控三步上传/下载/派生/访问控制（M4-3）
 │   ├── emoji/              # 表情包/收藏/检索/系统包（M4-3）
-│   └── elysia_bridge/      # 爱莉桥接：profile/inject/SSE 出站/订阅循环（M4-4）
+│   ├── elysia_bridge/      # 爱莉桥接：profile/inject/SSE 出站/订阅循环（M4-4）
+│   └── voice/              # 语音频道：LiveKit 集成 + voice.state 广播（M4-5）
 └── tests/                  # 契约测试
 ```
 
@@ -99,14 +115,19 @@ python manage.py runserver 0.0.0.0:8000
 生产部署：`daphne -b 0.0.0.0 -p 8000 config.asgi:application`，
 前端由 Nginx 反代，WS 需带升级头（见开发文档 10 节）。
 
-## 基础设施（MySQL/Redis/MinIO）
+## 基础设施（MySQL/Redis/MinIO/LiveKit）
 
 ```bash
 docker compose -f ../docker-compose.yml up -d
 ```
 
 仅本地聊天/测试可不启动 MySQL（默认 SQLite）；Presence/实时功能需要 Redis；
-媒体上传需要 MinIO/S3（`S3_STORAGE_BACKEND=s3`；测试/离线场景可切 `fake`）。
+媒体上传需要 MinIO/S3（`S3_STORAGE_BACKEND=s3`；测试/离线场景可切 `fake`）；
+语音频道（M4-5）需要 LiveKit（`elysia-livekit`，端口 7880/7881）。
+
+LiveKit key/secret：docker 首启 `--dev` 模式自动生成并打印到容器日志；
+生产用 `livekit-server generate-keys` 预生成后写入 `backend/.env` 的
+`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`（**不提交仓库**）。
 
 ## 测试
 
@@ -140,6 +161,12 @@ python -m pytest
     401 refresh 恢复、stop 优雅退出
   - profile REST：登录可读、管理员写、越权 403、未初始化 404、`:test` 冒烟 503/200
   - 主体性边界：落库内容 == 投影原文，应用从不伪造爱莉发言
+- 语音频道（mock LiveKit，不依赖真实 LiveKit）：
+  - 频道模型：`room_name` 唯一、成员 `(channel, user)` 唯一、owner 语义
+  - LiveKit token：identity/room/grants/TTL 正确；无配置显式失败
+  - 频道 REST：建/查/改（仅 owner）/加入（token）/离开/心跳/成员；越权 403/404、未登录 401
+  - `voice.state` 广播：订阅频道组收到 join/left/heartbeat；非成员不订阅
+  - presence 超时：超过 `VOICE_MEMBER_TIMEOUT_SECONDS` 未心跳 → 标记离开 + 广播
 
 ## 配置说明（环境变量）
 
@@ -168,6 +195,11 @@ python -m pytest
 | `MEDIA_MAX_EMOJI_BYTES` | 5242880 | 表情上限（5MB） |
 | `MEDIA_TMP_TTL_SECONDS` | 600 | 上传临时会话 TTL（秒） |
 | `MEDIA_THUMB_MAX` | 320 | 缩略图最大边长（px） |
+| `LIVEKIT_API_KEY` | 空 | LiveKit API key（本机配置，不提交仓库） |
+| `LIVEKIT_API_SECRET` | 空 | LiveKit API secret（本机配置，不提交仓库） |
+| `LIVEKIT_WS_URL` | `ws://127.0.0.1:7880` | 前端连接 LiveKit 的 WS 地址 |
+| `LIVEKIT_TOKEN_TTL_SECONDS` | 600 | 访问 token 有效期（秒），前端过期前重签 |
+| `VOICE_MEMBER_TIMEOUT_SECONDS` | 120 | presence 心跳超时（秒），超过标记离开 |
 
 密钥只存在于本机 `.env`（Git 忽略），文档与仓库不含真实密钥。
 
@@ -258,6 +290,34 @@ descriptor 对象（`media_id` 引用不存在时仍为 null）；发媒体消�
 - 慢消费者（`ChannelFull`）被服务层捕获记 warning，不阻塞其他成员；
 - 心跳 `ping` -> `pong`。
 
+### 语音频道（M4-5，`/api/v1/voice/`）
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/channels/` | 频道列表（含人数、我的状态） | 登录 |
+| POST | `/channels/` | 建频道 `{name}`（自动生成 `room_name`） | 登录 |
+| GET | `/channels/<id>/` | 频道详情（成员数 + 我的状态） | 登录 |
+| PATCH | `/channels/<id>/` | 改名称 `{name}`（`room_name` 不可改） | 频道 owner |
+| POST | `/channels/<id>/join/` | 加入（落成员表 + 广播 `voice.state` + 返回 LiveKit token） | 登录 |
+| POST | `/channels/<id>/leave/` | 离开（删成员 + 广播 `voice.state`） | 成员 |
+| POST | `/channels/<id>/heartbeat/` | presence 心跳（刷新 `last_seen_at`） | 成员 |
+| GET | `/channels/<id>/members/` | 当前成员列表 | 登录 |
+
+**加入流程**：`POST /join/` → 校验登录 → 写成员表 → 签发 LiveKit token（绑定该用户 + 该房间）
+→ 返回 `{channel_id, room_name, token, ws_url, ttl}`。LiveKit 未配置时返回 503（不伪造 token）。
+
+**`voice.state` 事件**（走 `VoiceConsumer`，`/ws/voice/?token=<jwt>`，订阅 `voice_chan_{id}` 组）：
+
+```json
+{
+  "type": "voice.state",
+  "data": { "channel_id": "3", "user_id": "a5bdf36b...", "state": "joined|left|muted|unmuted|heartbeat", "ts": "..." }
+}
+```
+
+`joined/left/heartbeat` 由成员表变更广播；`muted/unmuted` 由客户端静音时上报（元数据层，不落库强制）。
+`voice.state` 只表达**技术状态**，不是爱莉/用户的情绪判断。
+
 ### 爱莉桥接（M4-4，`/api/v1/elysia/`）
 
 | 方法 | 路径 | 说明 | 权限 |
@@ -295,6 +355,21 @@ descriptor 对象（`media_id` 引用不存在时仍为 null）；发媒体消�
 - **`display_name`/`chat_type`/`created_at` 为补充字段**（开发文档 §4 未列，接口驱动补充，已注明）。
 - **SSE 订阅单 owner**：多应用实例需 Redis 锁占位，本期单实例即可。
 - **凭据安全**：secret 一次性落盘本机 `runtime/`（Git 忽略），token 只存内存，重启用 secret 重换。
+
+### 已知取舍（M4-5）
+
+- **真人 ↔ 爱莉实时双向音频互通是最大未决点**（开发文档 §11 风险表第三行）：LiveKit 是
+  WebRTC（真人多人频道），Voice Live 是浏览器 ↔ Elysium 的 WebSocket + PCM16（一对一，
+  `max_concurrent_sessions=1`），两套媒体传输不能简单翻译；本期只打通**控制面 + 转写/文本**闭环，
+  实时双向音频需 Elysium 侧新增媒体网关契约（公共契约缺陷，先说明再动）。
+- **Voice Live 单并发**：同一时刻只能一个爱莉 Voice Live 通话；多人频道同时要与爱莉语音需排队/限制
+  （本期允许爱莉频道一个活跃通话）。
+- **爱莉 Voice Live 桥接未实施**（第 1.2 节）：控制面 REST / observer 转写投影 / 文本注入属
+  `elysia_bridge` 扩展，依赖阶段三 `plugins/voice_live` 挂载 + 真实 credential 验收，本期 README 如实标注。
+- **`VoiceChannelMember` / `last_seen_at` 为补充表/字段**（开发文档 §4 只有 `voice_channels`，
+  需求 FR-13/16 需要成员持久化）；`last_seen_at` 用于 presence 超时判定。
+- **频道开放加入**：默认类似 Discord 语音频道，邀请制/私有频道留待后续。
+- **LiveKit 密钥安全**：API key/secret 走本机配置（Git 忽略），token 只签给登录用户 + 绑定房间。
 
 ### 已知取舍（M4-2）
 

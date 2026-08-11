@@ -9,4 +9,5 @@ urlpatterns = [
     path("api/v1/elysia/", include("apps.elysia_bridge.urls")),
     path("api/v1/media/", include("apps.media.urls")),
     path("api/v1/emoji/", include("apps.emoji.urls")),
+    path("api/v1/voice/", include("apps.voice.urls")),
 ]

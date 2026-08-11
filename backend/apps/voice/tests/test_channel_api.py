@@ -1,0 +1,137 @@
+"""语音频道 REST 契约测试（M4-5 §10.1：建/查/加入/离开/心跳/越权）。"""
+import pytest
+from django.test import override_settings
+
+from apps.voice import livekit
+from apps.voice.models import VoiceChannel, VoiceChannelMember
+
+
+@pytest.mark.django_db
+def test_create_and_list_channels(auth_client):
+    """登录建频道；列表返回含人数。"""
+    client, user = auth_client()
+    resp = client.post("/api/v1/voice/channels/", {"name": "爱莉的家"}, format="json")
+    assert resp.status_code == 201, resp.content
+    data = resp.json()
+    assert data["name"] == "爱莉的家"
+    assert data["room_name"].startswith("room_")
+    assert data["owner_id"] == user.id
+
+    resp = client.get("/api/v1/voice/channels/")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["member_count"] == 0
+
+
+@pytest.mark.django_db
+def test_create_channel_requires_name(auth_client):
+    client, _ = auth_client()
+    resp = client.post("/api/v1/voice/channels/", {"name": "  "}, format="json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_join_returns_livekit_token(auth_client, monkeypatch):
+    """加入频道 → 落成员表 + 返回 LiveKit token（配置存在时）。"""
+    client, user = auth_client()
+    ch = VoiceChannel.objects.create(name="语音", room_name="room_join", owner=user)
+    monkeypatch.setattr(
+        "apps.voice.views.livekit.issue_token", lambda u, r: "signed-token"
+    )
+    monkeypatch.setattr(
+        "apps.voice.views.settings.LIVEKIT_WS_URL", "ws://127.0.0.1:7880"
+    )
+    monkeypatch.setattr(
+        "apps.voice.views.settings.LIVEKIT_TOKEN_TTL_SECONDS", 600
+    )
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
+    assert resp.status_code == 200, resp.content
+    data = resp.json()
+    assert data["token"] == "signed-token"
+    assert data["room_name"] == "room_join"
+    assert data["ws_url"] == "ws://127.0.0.1:7880"
+    assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
+
+
+@pytest.mark.django_db
+def test_join_fails_without_livekit_config(auth_client, monkeypatch):
+    """LiveKit 未配置时 join 返回 503（不伪造 token）。"""
+    client, user = auth_client()
+    ch = VoiceChannel.objects.create(name="语音", room_name="room_nc", owner=user)
+
+    def _raise(*a, **k):
+        raise livekit.LiveKitNotConfigured("no config")
+
+    monkeypatch.setattr("apps.voice.views.livekit.issue_token", _raise)
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
+    assert resp.status_code == 503
+
+
+@pytest.mark.django_db
+def test_leave_removes_member(auth_client):
+    client, user = auth_client()
+    ch = VoiceChannel.objects.create(name="语音", room_name="room_leave", owner=user)
+    VoiceChannelMember.objects.create(channel=ch, user=user)
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/leave/")
+    assert resp.status_code == 200
+    assert not VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
+
+
+@pytest.mark.django_db
+def test_heartbeat_requires_membership(auth_client):
+    client, user = auth_client()
+    ch = VoiceChannel.objects.create(name="语音", room_name="room_hb", owner=user)
+    # 非成员心跳 → 403
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/heartbeat/")
+    assert resp.status_code == 403
+    # 加入后心跳 → 200
+    VoiceChannelMember.objects.create(channel=ch, user=user)
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/heartbeat/")
+    assert resp.status_code == 200
+
+
+@pytest.mark.django_db
+def test_members_list_only_members(auth_client):
+    client, user = auth_client()
+    _, other = auth_client(username="other")
+    ch = VoiceChannel.objects.create(name="语音", room_name="room_mem", owner=user)
+    VoiceChannelMember.objects.create(channel=ch, user=user)
+    VoiceChannelMember.objects.create(channel=ch, user=other)
+    resp = client.get(f"/api/v1/voice/channels/{ch.id}/members/")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+@pytest.mark.django_db
+def test_rename_only_owner(auth_client):
+    client, owner = auth_client()
+    _, other = auth_client(username="other")
+    ch = VoiceChannel.objects.create(name="原名", room_name="room_rn", owner=owner)
+
+    # other 客户端改名称 → 403（非 owner）
+    other_client, _ = auth_client(username="other")
+    resp = other_client.patch(f"/api/v1/voice/channels/{ch.id}/", {"name": "非法改名"}, format="json")
+    assert resp.status_code == 403
+
+    # owner 客户端改名称 → 200
+    resp = client.patch(f"/api/v1/voice/channels/{ch.id}/", {"name": "新名"}, format="json")
+    assert resp.status_code == 200
+    assert VoiceChannel.objects.get(pk=ch.id).name == "新名"
+
+
+@pytest.mark.django_db
+def test_channel_not_found(auth_client):
+    client, _ = auth_client()
+    resp = client.get("/api/v1/voice/channels/9999/")
+    assert resp.status_code == 404
+    resp = client.post("/api/v1/voice/channels/9999/join/")
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_unauthenticated_rejected():
+    from rest_framework.test import APIClient
+
+    client = APIClient()
+    resp = client.get("/api/v1/voice/channels/")
+    assert resp.status_code in (401, 403)

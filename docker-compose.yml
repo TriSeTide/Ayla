@@ -55,7 +55,29 @@ services:
       timeout: 3s
       retries: 20
 
+  # M4-5 语音：LiveKit SFU（WebRTC 多人语音房间，真人用户之间走 LiveKit）。
+  # key/secret 生成后写进 backend/.env（LIVEKIT_API_KEY / LIVEKIT_API_SECRET），不提交仓库。
+  # 7880 = WS 信令 + WebRTC；7881 = RTC 媒体（UDP）。
+  livekit:
+    image: livekit/livekit-server:v1.7
+    container_name: elysia-livekit
+    restart: unless-stopped
+    command: --dev
+    environment:
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:-devkey: devsecret}
+    ports:
+      - "7880:7880"   # WS + WebRTC 信令
+      - "7881:7881"   # WebRTC 媒体（UDP）
+    volumes:
+      - livekit_data:/livekit
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:7880/"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
 volumes:
   mysql_data:
   redis_data:
   minio_data:
+  livekit_data:

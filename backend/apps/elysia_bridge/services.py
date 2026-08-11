@@ -36,11 +36,16 @@ from django.utils import timezone
 from apps.chat import services as chat_services
 from apps.chat.models import Conversation, Message
 from apps.elysia_bridge.elysia_client import (
+    CommandAccepted,
     ElysiaClient,
     ElysiaHistoryGap,
     ElysiaTransportError,
     ElysiaUnauthenticated,
     EventEnvelope,
+    VoiceCallCreated,
+    VoiceCallStatus,
+    VoiceTranscriptEntry,
+    VoiceTranscriptPage,
 )
 from apps.elysia_bridge.models import ElysiaProfile
 
@@ -52,9 +57,18 @@ User = get_user_model()
 PLATFORM_SERVICE_AUDIENCE = "elysium-platform-service"
 
 # 应用侧最小 scope 集（阶段三 ALL_EXPORTED_SCOPES）
-REQUIRED_SCOPES = ("chat:write", "events:read")
-# SSE 订阅事件类型前缀（chat.py _MESSAGE_FACTS）
-SSE_EVENT_TYPES = ("chat.message",)
+# M4-5 §4.5：给同一把 service credential 追加 voice_call:*（operate/read/observe）；
+# 不授 admin:*，不授本应用不需要的其他 scope（最小权限原则，阶段三 §9）。
+REQUIRED_SCOPES = (
+    "chat:write",
+    "events:read",
+    "events:payload",
+    "voice_call:operate",
+    "voice_call:read",
+    "voice_call:observe",
+)
+# SSE 订阅事件类型前缀（chat.py _MESSAGE_FACTS；M4-5 追加 voice_call.*）
+SSE_EVENT_TYPES = ("chat.message", "voice_call")
 
 
 class BridgeError(Exception):
@@ -501,6 +515,236 @@ def get_injector() -> InboundInjector:
     return _injector
 
 
+# ---------- 爱莉 Voice Live 桥接（M4-5 §5.2 基线方案） ----------
+
+def _get_bridge() -> tuple[ElysiaClient, ElysiaCredentialManager]:
+    """复用 get_injector 的 client/credential（不另建凭据链，M4-5 §0/§2）。"""
+    injector = get_injector()
+    return injector._client, injector._credentials
+
+
+def create_elysia_voice_call(profile: ElysiaProfile, mode: str = "auto") -> VoiceCallCreated:
+    """创建 Voice Live 通话（一次性、单并发）。
+
+    应用侧以 service credential 调用 → 应用本身就是该通话的 participant/拥有者
+    （owner_actor_id = credential 的 actor_id，M4-5 §4.1/§4.5）。
+    """
+    client, credentials = _get_bridge()
+    access_token = credentials.ensure_session(stream_id=profile.stream_id)
+    return client.create_voice_call(access_token=access_token, mode=mode)
+
+
+def get_voice_call_status(profile: ElysiaProfile, call_id: str) -> VoiceCallStatus:
+    """查询通话状态与安全指标（resumable 由 VoiceCallStatus 显式给出）。"""
+    client, credentials = _get_bridge()
+    access_token = credentials.ensure_session(stream_id=profile.stream_id)
+    return client.get_voice_call(access_token=access_token, call_id=call_id)
+
+
+def send_voice_text(profile: ElysiaProfile, call_id: str, text: str) -> CommandAccepted:
+    """向实时会话注入文本（真人想对爱莉说的话，M4-5 §5.2 第 4 步）。
+
+    必须带 Idempotency-Key（幂等硬约束）。幂等键由调用方生成（如 `elysia-voice-text-<event_id>`）。
+    """
+    client, credentials = _get_bridge()
+    access_token = credentials.ensure_session(stream_id=profile.stream_id)
+    return client.send_voice_call_text(
+        access_token=access_token,
+        call_id=call_id,
+        text=text,
+        idempotency_key=f"elysia-voice-text-{_stable_id_hash(call_id + text)}",
+    )
+
+
+def end_voice_call(profile: ElysiaProfile, call_id: str) -> CommandAccepted:
+    """结束通话（幂等：重复调用返回同一命令，M4-5 §5.2 第 5 步）。"""
+    client, credentials = _get_bridge()
+    access_token = credentials.ensure_session(stream_id=profile.stream_id)
+    return client.end_voice_call(
+        access_token=access_token,
+        call_id=call_id,
+        idempotency_key=f"elysia-voice-end-{_stable_id_hash(call_id)}",
+    )
+
+
+def voice_call_transcripts(profile: ElysiaProfile, call_id: str) -> VoiceTranscriptPage:
+    """授权转写历史（只读；应用侧绝不用它伪造爱莉发言）。"""
+    client, credentials = _get_bridge()
+    access_token = credentials.ensure_session(stream_id=profile.stream_id)
+    return client.get_voice_call_transcripts(
+        access_token=access_token, call_id=call_id
+    )
+
+
+def _voice_conversation(profile: ElysiaProfile) -> Conversation | None:
+    """爱莉语音频道绑定的应用内会话。
+
+    倾向「elysia_profile 单例 + 默认语音频道」语义（M4-5 §5.3）：复用 profile 的
+    最近私聊会话（与 M4-4 出站降级一致）；无任何会话则返回 None。
+    """
+    conv = (
+        Conversation.objects.filter(members__user=profile.user)
+        .order_by("-created_at")
+        .first()
+    )
+    return conv
+
+
+def project_voice_transcript(
+    profile: ElysiaProfile,
+    call_id: str,
+    entry: VoiceTranscriptEntry,
+    *,
+    event_id: str,
+) -> Message | None:
+    """把一条**final transcript** 投影为语音频道会话里的爱莉消息（M4-5 §5.2 第 3 步）。
+
+    主体性铁律（AGENTS.md §4.1 / M4-5 §3.3）：
+    - **只投影 `role="assistant"` 的 final transcript**；`role="user"` 或 partial 不落库；
+    - 应用侧**绝不生成爱莉的第一人称内容**：没有 final transcript 就没有爱莉发言；
+    - 幂等键 `elysia-voice-<event_id>`（同 event_id → 同 key，重复不重复落库）。
+
+    返回落库消息；无法路由会话 / 非 assistant / 无文本 → None。
+
+    注意：同步版用 `_group_send_sync` 广播（async_to_sync），只适用线程上下文
+    （REST 视图 / 命令处理器）；事件循环内的广播走异步版 `aproject_voice_transcript`。
+    """
+    if entry.role != "assistant":
+        logger.debug(
+            "voice transcript entry %s role=%s skipped (only assistant final projected)",
+            entry.sequence,
+            entry.role,
+        )
+        return None
+    text = (entry.text or "").strip()
+    if not text:
+        logger.warning("voice transcript %s has no text; skipped", event_id)
+        return None
+    conversation = _voice_conversation(profile)
+    if conversation is None:
+        logger.warning(
+            "voice transcript cannot be routed: no conversation for profile %s (call %s)",
+            profile.user_id,
+            call_id,
+        )
+        return None
+
+    idempotency_key = f"elysia-voice-{_stable_id_hash(event_id)}"
+    try:
+        message = chat_services.create_message(
+            profile.user,
+            conversation,
+            content=text,
+            msg_type=Message.TYPE_TEXT,
+            idempotency_key=idempotency_key,
+        )
+    except IntegrityError:
+        already = chat_services.find_global_by_idempotency_key(idempotency_key)
+        if already is None:
+            raise
+        logger.warning(
+            "voice transcript event %s already projected (message %s, conv %s); skipped",
+            event_id,
+            already.id,
+            already.conversation_id,
+        )
+        return already
+
+    # 广播到会话组（走 M4-2 Chat WS，前端收到 elysia.reply 同款事件）
+    event = _voice_reply_event(message)
+    _group_send_sync(message.conversation_id, event)
+    return message
+
+
+def _voice_reply_event(message: Message) -> dict:
+    """由已落库的爱莉语音消息构造 elysia.reply 事件（source=voice_call）。"""
+    return {
+        "type": "elysia.reply",
+        "conversation_id": str(message.conversation_id),
+        "message_id": str(message.id),
+        "sender_id": str(message.sender_id),
+        "content": message.content,
+        "msg_type": message.type,
+        "media": message.media_id,
+        "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
+        "seq": message.seq,
+        "ts": message.created_at.isoformat(),
+        "source": "voice_call",
+    }
+
+
+async def aproject_voice_transcript(
+    profile: ElysiaProfile,
+    call_id: str,
+    entry: VoiceTranscriptEntry,
+    *,
+    event_id: str,
+) -> Message | None:
+    """异步版：供 run_bridge（asyncio 事件循环）与 async 测试使用。
+
+    DB 侧工作（路由+落库）经 database_sync_to_async 卸载到线程池；广播在 async
+    上下文直接 await group_send，避免 `_group_send_sync` 的 async_to_sync 在事件
+    循环线程跨循环丢消息（与 `aproject_elysia_reply` 同语义）。
+    """
+    message = await database_sync_to_async(_project_voice_into_message)(
+        profile, call_id, entry, event_id=event_id
+    )
+    if message is not None:
+        event = _voice_reply_event(message)
+        await _group_send_async(message.conversation_id, event)
+    return message
+
+
+def _project_voice_into_message(
+    profile: ElysiaProfile,
+    call_id: str,
+    entry: VoiceTranscriptEntry,
+    *,
+    event_id: str,
+) -> Message | None:
+    """投影核心（同步）：路由 + 幂等落库，返回消息；不做广播（由调用方负责）。"""
+    if entry.role != "assistant":
+        logger.debug(
+            "voice transcript entry %s role=%s skipped (only assistant final projected)",
+            entry.sequence,
+            entry.role,
+        )
+        return None
+    text = (entry.text or "").strip()
+    if not text:
+        logger.warning("voice transcript %s has no text; skipped", event_id)
+        return None
+    conversation = _voice_conversation(profile)
+    if conversation is None:
+        logger.warning(
+            "voice transcript cannot be routed: no conversation for profile %s (call %s)",
+            profile.user_id,
+            call_id,
+        )
+        return None
+
+    idempotency_key = f"elysia-voice-{_stable_id_hash(event_id)}"
+    try:
+        return chat_services.create_message(
+            profile.user,
+            conversation,
+            content=text,
+            msg_type=Message.TYPE_TEXT,
+            idempotency_key=idempotency_key,
+        )
+    except IntegrityError:
+        already = chat_services.find_global_by_idempotency_key(idempotency_key)
+        if already is None:
+            raise
+        logger.warning(
+            "voice transcript event %s already projected (message %s, conv %s); skipped",
+            event_id,
+            already.id,
+            already.conversation_id,
+        )
+        return already
+
+
 # ---------- SSE 订阅循环（run_bridge 命令 / 测试共用） ----------
 
 async def _handle_envelope(
@@ -645,8 +889,15 @@ __all__ = [
     "REQUIRED_SCOPES",
     "SSE_EVENT_TYPES",
     "aproject_elysia_reply",
+    "aproject_voice_transcript",
+    "create_elysia_voice_call",
+    "end_voice_call",
     "get_injector",
+    "get_voice_call_status",
     "on_user_message_to_elysia",
     "project_elysia_reply",
+    "project_voice_transcript",
     "run_bridge_loop",
+    "send_voice_text",
+    "voice_call_transcripts",
 ]
