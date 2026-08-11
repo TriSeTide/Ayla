@@ -9,7 +9,7 @@ import { usePresenceStore } from "../stores/presence";
 import { useEffect, useState } from "react";
 
 const NAV_ITEMS = [
-  { to: "/", label: "会话", end: true },
+  { to: "/chat", label: "会话", end: true },
   { to: "/settings", label: "设置", end: false },
 ];
 

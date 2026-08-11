@@ -4,7 +4,7 @@
  */
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { ConversationsPage } from "./pages/ConversationsPage";
+import { ChatPage } from "./pages/ChatPage";
 import { HomeLayout } from "./pages/HomeLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -22,7 +22,9 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<ConversationsPage />} />
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

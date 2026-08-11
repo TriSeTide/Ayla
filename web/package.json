@@ -7,14 +7,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1 --minWorkers=1",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "test:m52": "vitest run src/vitest/message-store.test.ts src/vitest/chat-store.test.ts src/vitest/chat-api.test.ts src/vitest/ws-chat.test.ts --maxWorkers=1 --minWorkers=1"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
+    "uuid": "^9.0.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -24,8 +26,10 @@
     "@types/node": "^20.19.43",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.3.1",
     "jsdom": "^25.0.0",
+    "playwright": "^1.62.1",
     "typescript": "~5.6.2",
     "vite": "^5.4.8",
     "vitest": "^2.1.1"

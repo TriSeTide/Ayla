@@ -4,6 +4,7 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/auth";
+import { chatWS } from "../ws/chat";
 import { presenceClient } from "../ws/presence";
 
 export function useAuth() {
@@ -16,6 +17,7 @@ export function useAuth() {
     async (username: string, password: string) => {
       await useAuthStore.getState().login(username, password);
       presenceClient.connect();
+      chatWS.connect();
     },
     [],
   );
@@ -24,12 +26,14 @@ export function useAuth() {
     async (payload: { username: string; email: string; password: string; nickname?: string }) => {
       await useAuthStore.getState().register(payload);
       presenceClient.connect();
+      chatWS.connect();
     },
     [],
   );
 
   const logout = useCallback(() => {
     presenceClient.disconnect();
+    chatWS.disconnect();
     useAuthStore.getState().logout();
     navigate("/login", { replace: true });
   }, [navigate]);

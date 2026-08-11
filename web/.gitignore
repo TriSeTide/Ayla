@@ -11,3 +11,10 @@ coverage/
 # TS build artifacts
 *.tsbuildinfo
 vite.config.ts.timestamp-*.mjs
+
+# 本地调试产物（不提交）
+.tmp/
+err.txt
+out.json
+out.txt
+scripts/

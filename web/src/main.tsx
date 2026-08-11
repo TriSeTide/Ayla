@@ -8,15 +8,19 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { useAuthStore } from "./stores/auth";
+import { chatWS } from "./ws/chat";
 import { presenceClient } from "./ws/presence";
 import "./styles/global.css";
 
 async function bootstrap() {
   // 恢复会话（无 refresh 则直接标记 initialized）
   await useAuthStore.getState().restoreSession();
-  // 恢复成功后若有 access，连接 presence
+  // 恢复成功后若有 access，连接 presence + chat
   const { accessToken } = useAuthStore.getState();
-  if (accessToken) presenceClient.connect();
+  if (accessToken) {
+    presenceClient.connect();
+    chatWS.connect();
+  }
 }
 
 bootstrap().then(() => {
