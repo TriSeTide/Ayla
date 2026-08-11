@@ -88,6 +88,26 @@ class TestProfileAPI:
         profile = ElysiaProfile.objects.get(user=elysia_user)
         assert profile.enabled is True
         assert profile.chat_type == "private"
+        assert profile.platform == "ayla"
+
+    def test_admin_init_without_stream_id_auto_generates_ayla_stream(self, user_factory):
+        """POST 未提供 stream_id → 自动生成 ayla 独立流（文档 §5.2）。"""
+        from apps.elysia_bridge.models import generate_elysia_stream_id
+
+        client, staff = _staff_client(user_factory)
+        elysia_user = user_factory(username="elysia_auto_stream", nickname="爱莉")
+        resp = client.post(
+            "/api/v1/elysia/profile/",
+            {
+                "user_id": str(elysia_user.id),
+                "display_name": "爱莉",
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        expected = generate_elysia_stream_id(str(elysia_user.id))
+        assert resp.data["stream_id"] == expected
+        assert resp.data["platform"] == "ayla"
 
     def test_double_init_conflicts(self, user_factory):
         client, staff = _staff_client(user_factory)

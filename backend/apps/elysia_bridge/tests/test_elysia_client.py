@@ -177,7 +177,7 @@ def test_inject_message_ok():
         sender_name="汐汐",
         sender_id="user-42",
         chat_type="private",
-        platform="elysia-app",
+        platform="ayla",
     )
     assert result["accepted"] is True
     assert result["message_id"] == "inject_abc"
@@ -186,7 +186,7 @@ def test_inject_message_ok():
     assert body["content"] == "你好，爱莉"
     assert body["sender_id"] == "user-42"
     assert body["chat_type"] == "private"
-    assert body["platform"] == "elysia-app"
+    assert body["platform"] == "ayla"
     assert "Idempotency-Key" not in transport.requests[0].headers  # inject 无幂等键
 
 

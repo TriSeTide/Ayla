@@ -349,6 +349,7 @@ def _project_into_message(
             msg_type=Message.TYPE_TEXT,
             idempotency_key=idempotency_key,
         )
+        return message
     except IntegrityError:
         # 幂等兜底：idempotency_key 是 DB 全局唯一，但 find_by_idempotency_key 按
         # (conversation, key) 查。bridge 重放历史事件时，同 event_id 曾被路由到

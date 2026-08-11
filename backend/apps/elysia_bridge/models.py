@@ -4,7 +4,7 @@
 ElysiaProfile：爱莉在应用内的身份映射（应用级单例）。
 - user       → 爱莉在应用内的真实 User（可被搜索/私聊/@/加群，FR-26），唯一；
 - stream_id  → 爱莉在 Elysium 侧接收该应用消息的聊天流，inject 与 SSE 过滤都用它，唯一；
-- platform   → 注入时 platform 字段（本应用即 "elysia-app"，显式覆盖账本投影）；
+- platform   → 注入时 platform 字段（本应用即 "ayla"，显式覆盖账本投影）；
 - enabled    → 关闭时桥接跳过（不 inject / 不投影出站）。
 
 补充字段（步骤文件 §3.1 注明，不改变开发文档 §4 核心字段）：
@@ -15,15 +15,34 @@ ElysiaProfile：爱莉在应用内的身份映射（应用级单例）。
 主体性约束（AGENTS.md §4.1）：应用侧 messages 表里爱莉作为发送者的消息，
 sender 一律指向本 profile 绑定的应用内 User；内容只能来自 Elysium 出站事件投影，
 应用侧代码绝不生成爱莉的第一人称内容。display_name 只用于应用 UI。
+
+platform/stream_id 对齐 `docs/architecture/Elysium接入Ayla平台模块.md`：
+- platform 默认 `ayla`（独立应用聊天通道的 platform 标识，见文档 §1.1）；
+- stream_id 由 `generate_stream_id("ayla", user_id)` 生成（SHA-256 `ayla_<uid>_private`），
+  与 Elysium `ChatStream.generate_stream_id` 同算法，避开历史飞书流（文档 §5.2）。
 """
 from django.conf import settings
 from django.db import models
 
 
+def generate_elysia_stream_id(user_id: str) -> str:
+    """生成爱莉在 Elysium 侧的独立 ayla 流 stream_id。
+
+    与 Elysium `ChatStream.generate_stream_id`（src/core/models/stream.py）同算法：
+    `private` 流 key = `{platform}_{user_id}_private`，SHA-256 哈希。
+    platform 参与哈希，保证 `ayla_<uid>_private` 与任何历史飞书流
+    （`feishu_<uid>_private`）天然不同（Elysium接入Ayla平台模块.md §5.2）。
+    """
+    import hashlib
+
+    key = f"ayla_{user_id}_private"
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
 class ElysiaProfile(models.Model):
     """爱莉在应用内的唯一身份映射（应用级单例）。"""
 
-    PLATFORM_DEFAULT = "elysia-app"
+    PLATFORM_DEFAULT = "ayla"
     CHAT_TYPE_PRIVATE = "private"
     CHAT_TYPE_GROUP = "group"
     CHAT_TYPE_CHOICES = [

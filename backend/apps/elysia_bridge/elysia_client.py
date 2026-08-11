@@ -411,11 +411,13 @@ class ElysiaClient:
         sender_id: str | None = None,
         sender_cardname: str | None = None,
         chat_type: str = "private",
-        platform: str = "elysia-app",
+        platform: str = "ayla",
     ) -> Mapping[str, Any]:
         """POST /chat/messages:inject —— 同步端点，无 Idempotency-Key。
 
         返回 InboundMessageInjectResult：{message_id, stream_id, accepted}。
+        platform 默认 `ayla`（Elysium接入Ayla平台模块.md §1.1/§2.2，显式传 platform
+        走 Elysium 侧 InboundInjector 快速路径，不扫描账本投影）。
         """
         body: dict[str, Any] = {
             "stream_id": stream_id,
