@@ -1,10 +1,32 @@
-# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-4 爱莉桥接）
+# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-3 媒体 + M4-4 爱莉桥接）
 
 Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端的唯一 API/WS 入口。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`。
 
 ## 当前里程碑
+
+### M4-3 媒体与表情包（已完成）
+
+- [x] `media` 应用：媒体对象（`media_id` 稳定 uuid、`content_hash` sha256、MIME allowlist、
+      文件头嗅探、分类型大小上限）+ 受控上传会话（三步上传）
+- [x] 受控三步上传：`POST /uploads` 创建会话 → `PUT /uploads/{id}` 传二进制（临时前缀）
+      → `POST /uploads/{id}:complete` 校验生成 `media_id`（幂等：同一 upload 重复 complete 返回同一 media_id）
+- [x] 完整性与安全：sha256 + size + MIME + 文件头嗅探同时校验；内容去重（同 hash 复用 media_id）；
+      只允许已登记 media_id 下载，禁止 path traversal
+- [x] 派生与 ready 分离：缩略图（image/emoji，Pillow 等比缩放）与波形（voice WAV，48 段峰值 PNG）
+      派生失败不把媒体置 failed，媒体仍 ready，派生单独标记
+- [x] 下载：`GET /media/{id}/content`（Range 206/416、ETag、`Cache-Control: private, no-store`）、
+      `GET /media/{id}/thumbnail|waveform`（无 → 404）
+- [x] 媒体访问控制（工程硬约束）：owner 永远可访问；消息引用（会话成员可访问）；
+      表情包（系统包全员/个人包仅 owner）；未授权 403/404 不泄露存在性
+- [x] `emoji` 应用：表情包（系统包 owner=None / 个人包）、收藏/取消（`unique(pack, media)` DB 硬约束 +
+      services 幂等 201/200）、检索（tag/名称基础匹配）、系统包管理员切换
+- [x] 消息链接线（M4-2 复用）：`CreateMessageSerializer` 校验 `type=image/voice/file/emoji` 时
+      media 必须存在/ready/类型匹配/有权访问（越权 403）；`MessageSerializer.media` 升级为 descriptor 对象
+- [x] 契约测试：上传-完成-下载闭环、幂等、越权 403/404、MIME/大小/嗅探校验、缩略图/波形派生、
+      表情包 CRUD、系统包权限、发 emoji 消息
+- [x] `manage.py cleanup_media` 清理过期上传会话与孤儿临时对象（手动执行）
 
 ### M4-1 基座（已完成）
 
@@ -50,6 +72,8 @@ backend/
 ├── apps/
 │   ├── accounts/           # 用户/认证/好友/在线状态（M4-1）
 │   ├── chat/               # 私聊/群聊/消息/已读/撤回（M4-2）
+│   ├── media/              # 媒体对象/受控三步上传/下载/派生/访问控制（M4-3）
+│   ├── emoji/              # 表情包/收藏/检索/系统包（M4-3）
 │   └── elysia_bridge/      # 爱莉桥接：profile/inject/SSE 出站/订阅循环（M4-4）
 └── tests/                  # 契约测试
 ```
@@ -81,11 +105,12 @@ python manage.py runserver 0.0.0.0:8000
 docker compose -f ../docker-compose.yml up -d
 ```
 
-仅本地聊天/测试可不启动 MySQL（默认 SQLite）；Presence/实时功能需要 Redis。
+仅本地聊天/测试可不启动 MySQL（默认 SQLite）；Presence/实时功能需要 Redis；
+媒体上传需要 MinIO/S3（`S3_STORAGE_BACKEND=s3`；测试/离线场景可切 `fake`）。
 
 ## 测试
 
-测试使用内存缓存与 InMemory channel layer，**不依赖 Redis/MySQL**：
+测试使用内存缓存、InMemory channel layer 与内存 FakeStorage，**不依赖 Redis/MySQL/MinIO**：
 
 ```bash
 python -m pytest
@@ -98,6 +123,11 @@ python -m pytest
 - 健康检查只读探测
 - 聊天：私聊幂等创建、消息幂等（同 key 200 原消息 / 不同内容 409）、seq 单调、
   撤回限时、已读回执、群管理、禁言、越权 403/404
+- 媒体（M4-3）：三步上传闭环、complete 幂等（同 upload 同一 media_id）、
+  MIME/大小/文件头嗅探校验、缩略图/波形派生、Range 206/416、访问控制
+  （owner/消息引用/表情包、未授权 403/404）、media_id/upload_id 唯一约束
+- 表情包（M4-3）：系统包/个人包、收藏/取消/重复收藏幂等 201/200、
+  非 emoji 拒绝 400、越权收藏 403、系统包全员可见、发 emoji 消息
 - Chat WebSocket：合法 token 连接、subscribe 基线、两人互发广播、断线补发、
   非成员订阅忽略/收不到广播、慢消费者不阻塞
 - 爱莉桥接（mock Elysium，不依赖真实服务）：
@@ -126,6 +156,18 @@ python -m pytest
 | `ELYSIA_CREDENTIAL_FILE` | `runtime/elysia_credential.json` | service credential 落盘路径（Git 忽略） |
 | `ELYSIA_SSE_RECONNECT_SECONDS` | 3.0 | SSE 断线重连有界退避初始间隔（秒） |
 | `ELYSIA_SSE_EVENT_TYPES` | `chat.message` | SSE 订阅事件类型前缀过滤 |
+| `S3_STORAGE_BACKEND` | `s3` | 对象存储后端：`s3`=MinIO/S3；`fake`=内存 FakeStorage（仅测试） |
+| `S3_ENDPOINT_URL` | `http://127.0.0.1:9000` | MinIO/S3 endpoint |
+| `S3_ACCESS_KEY/S3_SECRET_KEY` | `minioadmin` | MinIO/S3 凭据 |
+| `S3_BUCKET` | `elysia-media` | 媒体桶（首传时 create_bucket 幂等） |
+| `S3_REGION` | `us-east-1` | 区域 |
+| `S3_PUBLIC` | false | 对对象加 public-read ACL（默认 false：私密媒体禁止进共享缓存） |
+| `MEDIA_MAX_IMAGE_BYTES` | 10485760 | 图片大小上限（10MB） |
+| `MEDIA_MAX_VOICE_BYTES` | 31457280 | 语音上限（30MB） |
+| `MEDIA_MAX_FILE_BYTES` | 52428800 | 文件上限（50MB） |
+| `MEDIA_MAX_EMOJI_BYTES` | 5242880 | 表情上限（5MB） |
+| `MEDIA_TMP_TTL_SECONDS` | 600 | 上传临时会话 TTL（秒） |
+| `MEDIA_THUMB_MAX` | 320 | 缩略图最大边长（px） |
 
 密钥只存在于本机 `.env`（Git 忽略），文档与仓库不含真实密钥。
 
@@ -172,6 +214,40 @@ python -m pytest
 - 同 `idempotency_key` + 同会话重复 POST：返回 200 + 原消息（不重复落库）；
 - 同 key 但内容不同：返回 409 Conflict；不同会话复用同 key：同样 409。
 - `idempotency_key` 为全局唯一索引（`unique=True`），是 M4-4 爱莉桥接幂等契约的地基。
+
+### 媒体（M4-3，`/api/v1/media/`）
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| POST | `/media/uploads` | 创建受控上传会话 `{kind, expected_size, mime_type}` | 登录 |
+| PUT | `/media/uploads/<upload_id>` | 传二进制（body 原始字节，落到临时前缀） | 会话 owner |
+| POST | `/media/uploads/<upload_id>:complete` | 校验并生成 `media_id`（幂等） | 会话 owner |
+| GET | `/media/<media_id>` | 媒体 descriptor + 处理状态 | 有访问权 |
+| GET | `/media/<media_id>/content` | 原对象下载（Range 206/416、ETag、private no-store） | 有访问权 |
+| GET | `/media/<media_id>/thumbnail` | 缩略图（image/emoji） | 有访问权 |
+| GET | `/media/<media_id>/waveform` | 波形图（voice WAV） | 有访问权 |
+| POST | `/media/<media_id>:save` | 爱莉媒体投影通道预留（本期 501） | 有访问权 |
+
+**媒体 descriptor**：`media_id, kind, mime_type, size, status, width, height, duration, thumbnail, waveform, created_at`（不暴露 `storage_path`）。
+
+**访问控制**：owner 永远可访问；消息引用（media 被某条消息引用，且调用方是该会话成员）；
+表情包（系统包全员/本人个人包）；其余未授权 403/404，不泄露存在性。
+
+**消息 `media` 字段（M4-2 契约升级）**：`MessageSerializer.media` 从字符串 `media_id` 升级为
+descriptor 对象（`media_id` 引用不存在时仍为 null）；发媒体消息（type=image/voice/file/emoji）
+必须携带已存在、ready、类型匹配且调用方有权访问的 `media_id`，越权返回 403 `media_access_denied`。
+
+### 表情包（M4-3，`/api/v1/emoji/`）
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/emoji/packs/` | 我的个人包 + 系统包 | 登录 |
+| POST | `/emoji/packs/` | 建个人包 `{name}`（同名幂等复用） | 登录 |
+| GET | `/emoji/packs/<pack_id>/items/` | 包内表情列表 | 包 owner 或系统包 |
+| POST | `/emoji/packs/<pack_id>/items/` | 收藏 `{media_id, tag?}`（重复收藏幂等 200） | 包 owner |
+| DELETE | `/emoji/packs/<pack_id>/items/<item_id>/` | 取消收藏 | 包 owner |
+| POST | `/emoji/search/` | 按 tag/名称检索 `{keyword}` | 登录 |
+| POST | `/emoji/packs/<pack_id>/set_system/` | 切换系统包 `{is_system}` | 系统管理员 |
 
 ### Chat WebSocket（`/ws/chat/?token=<jwt>`）
 
@@ -227,7 +303,20 @@ python -m pytest
 - @提及：内容里保留 `@昵称` 文本，不做独立 at 表/提醒；
 - 群聊已读：记录 `MessageRead`，不广播群聊已读聚合（避免噪声）；
 - `announcement` 字段为补加字段，与开发文档数据模型略有出入（已在 `models.py` 注明）；
-- `media_id` 为 M4-3 预留，本期不校验对象存储。
+- `media_id` 校验在 M4-3 接通：类型=image/voice/file/emoji 时必须存在/ready/类型匹配/有权访问（M4-2 仅预留不校验）。
+
+### 已知取舍（M4-3）
+
+- **补充字段**：`MediaObject.kind/width/height/duration/thumbnail_path/waveform_path` 与
+  `MediaUploadSession.expires_at/media_id` 为接口驱动补充（descriptor/幂等锚点所需），核心字段与开发文档一致；
+- **派生尽力而为**：缩略图/波形在 `:complete` 同一请求内生成，失败只记 warning、媒体仍 ready；
+  波形仅支持 WAV（PCM16）；其他语音格式可上传但无波形。
+- **文件类型不做魔数强校验**：`kind=file` 任意 allowlist 内 MIME 均可（至少要有内容）；
+  image/emoji 必须有位图魔数（PNG/JPEG/GIF/WebP）；voice 除 WAV/MP3/Ogg 外交由 MIME 判断。
+- **去重复用 media_id**：同 `content_hash` 复用既有 media_id（不改变 owner 语义），首次上传方持原对象；
+- **`media_id:save` 为预留通道**：爱莉媒体投影（应用只渲染/投影，不生成爱莉第一人称内容，AGENTS.md §4.1）本期 501；
+- **清理为手动命令**：`manage.py cleanup_media` 清理过期会话与孤儿临时对象，未接入定时任务；
+- **缩略图质量**：JPEG 白底 quality=80、长边压缩到 `MEDIA_THUMB_MAX`，适合浅色聊天场景。
 
 ## 验收
 
