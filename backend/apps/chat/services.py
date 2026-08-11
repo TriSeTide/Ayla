@@ -107,6 +107,16 @@ def find_by_idempotency_key(conversation, key) -> Message | None:
     return Message.objects.filter(conversation=conversation, idempotency_key=key).first()
 
 
+def find_global_by_idempotency_key(key) -> Message | None:
+    """按全局唯一幂等键查消息（不限定会话）。
+
+    idempotency_key 在 DB 层是全局唯一。`find_by_idempotency_key` 按
+    (conversation, key) 查，桥接重放历史事件时同 key 可能已被路由到其它会话，
+    此时需按全局 key 判定"已投影过"（幂等跳过），见 elysia_bridge 投影兜底。
+    """
+    return Message.objects.filter(idempotency_key=key).first()
+
+
 def create_message(
     user,
     conversation,

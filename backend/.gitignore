@@ -9,3 +9,5 @@ staticfiles/
 .coverage
 *.egg-info/
 runtime/
+# 临时调试脚本（不提交）
+runtime_tmp_test.py

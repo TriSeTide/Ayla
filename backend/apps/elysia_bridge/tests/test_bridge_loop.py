@@ -128,6 +128,13 @@ def _find(conv, key):
     return Message.objects.filter(conversation=conv, idempotency_key=key).first()
 
 
+def _event_key(event_id: str) -> str:
+    """由 event_id 派生真实幂等键（与 elysia_bridge.services._stable_id_hash 一致）。"""
+    import hashlib
+
+    return f"elysia-{hashlib.sha256(event_id.encode('utf-8')).hexdigest()[:24]}"
+
+
 async def _run_until(client, creds, stop, *, profile, target_event_id, **kwargs):
     """跑循环直到收到 target_event_id 后 set stop 并优雅退出。"""
 
@@ -167,7 +174,7 @@ async def test_loop_projects_chat_event_and_broadcasts(user_factory):
     await _run_until(client, creds, stop, profile=profile, target_event_id="evt_loop_1")
 
     # 已投影落库
-    msg = await _find(conv, "elysia-evt_loop_1")
+    msg = await _find(conv, _event_key("evt_loop_1"))
     assert msg is not None
     assert msg.sender_id == profile.user_id
     assert msg.content == "爱莉的回复"
@@ -264,7 +271,7 @@ async def test_loop_resumes_from_history_gap_recovery_cursor(user_factory):
     assert len(client.calls) == 2
     # 第二次连接从 recovery.cursor 重连
     assert client.calls[1].get("cursor") == "safe-cursor-9"
-    assert await _find(conv, "elysia-evt_loop_h2") is not None
+    assert await _find(conv, _event_key("evt_loop_h2")) is not None
 
 
 async def test_loop_heartbeat_does_not_advance_cursor(user_factory):
@@ -324,9 +331,9 @@ async def test_loop_heartbeat_does_not_advance_cursor(user_factory):
     # 第二次重连 cursor 来自 env2（cursor-hb2），env1 的无 cursor 事件未覆盖它
     assert client.calls[1].get("cursor") == "cursor-hb2"
     # env1/env2/env3 全部投影
-    assert await _find(conv, "elysia-evt_loop_hb1") is not None
-    assert await _find(conv, "elysia-evt_loop_hb2") is not None
-    assert await _find(conv, "elysia-evt_loop_hb3") is not None
+    assert await _find(conv, _event_key("evt_loop_hb1")) is not None
+    assert await _find(conv, _event_key("evt_loop_hb2")) is not None
+    assert await _find(conv, _event_key("evt_loop_hb3")) is not None
 
 
 async def test_loop_unauth_refreshes_and_reconnects(user_factory):
@@ -353,7 +360,7 @@ async def test_loop_unauth_refreshes_and_reconnects(user_factory):
     )
 
     assert creds.refreshed == 1
-    assert await _find(conv, "elysia-evt_loop_ua") is not None
+    assert await _find(conv, _event_key("evt_loop_ua")) is not None
 
 
 async def test_loop_stops_gracefully_on_stop_event(user_factory):
@@ -387,4 +394,47 @@ async def test_loop_stops_gracefully_on_stop_event(user_factory):
 
     # 流结束后因 stop 已 set，不再重连
     assert len(client.calls) == 1
-    assert await _find(conv, "elysia-evt_loop_stop") is not None
+    assert await _find(conv, _event_key("evt_loop_stop")) is not None
+
+
+async def test_loop_global_idempotency_key_conflict_skips_replay(user_factory):
+    """重放历史事件：同 event_id 幂等键已存在（曾被路由到其它会话）→ 幂等跳过。
+
+    复现真实缺陷：idempotency_key 是 DB 全局唯一，但 find_by_idempotency_key 按
+    (conversation, key) 查。事件首次投影到会话 A（key 在库），bridge 重放时该
+    事件无法解析 sender、回退到会话 B → 会话 B 插入撞全局唯一约束 → 修复后应
+    按全局 key 找到已存在消息并跳过，不重复落库、不抛错。
+    """
+    profile, user, conv = await _mk_profile(user_factory)
+    # 会话 B：与另一用户建立私聊（key 首次落库的会话）
+    user_b = await database_sync_to_async(user_factory)(username="user_loop_b")
+    conv_b = await database_sync_to_async(chat_services.get_or_create_conversation)(
+        user_b, profile.user
+    )
+    # 先在会话 B 用该 event_id 投影一次（key 落库到 conv_b）
+    key = _event_key("evt_dup_1")
+    first = await database_sync_to_async(chat_services.create_message)(
+        profile.user, conv_b, content="历史回复", idempotency_key=key
+    )
+    assert first.idempotency_key == key
+
+    # 重放：同一事件，payload 带 sender_id（用户 A）→ 路由回会话 A（与 B 不同）
+    env = _envelope(
+        event_id="evt_dup_1",
+        stream_id="stream_loop_1",
+        content="历史回复",
+        cursor="cursor-dup",
+        sender_id=str(user.id),
+    )
+    client = _FakeClient([("event", env)])
+    creds = _FakeCreds()
+    stop = asyncio.Event()
+
+    await _run_until(
+        client, creds, stop, profile=profile, target_event_id="evt_dup_1"
+    )
+
+    # 幂等跳过：不重复落库到 conv（key 仍只属于 conv_b），也不抛错
+    assert await _find(conv_b, key) is not None
+    assert await _find(conv, key) is None
+    assert await _count(conv) == 0

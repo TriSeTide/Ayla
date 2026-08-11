@@ -61,6 +61,13 @@ def _count_messages(conv, key):
     return Message.objects.filter(conversation=conv, idempotency_key=key).count()
 
 
+def _event_key(event_id: str) -> str:
+    """由 event_id 派生真实幂等键（与 elysia_bridge.services._stable_id_hash 一致）。"""
+    import hashlib
+
+    return f"elysia-{hashlib.sha256(event_id.encode('utf-8')).hexdigest()[:24]}"
+
+
 @database_sync_to_async
 def _refresh(obj):
     obj.refresh_from_db()
@@ -127,11 +134,11 @@ async def test_chat_event_projects_message_and_broadcasts_elysia_reply(user_fact
     env = _chat_envelope(sender_id=str(user.id))
     msg = await bridge_services.aproject_elysia_reply(profile, env)
 
-    # 已落库：sender=爱莉 user、内容=payload 原文、幂等键=elysia-<event_id>
+    # 已落库：sender=爱莉 user、内容=payload 原文、幂等键=elysia-<event_id 哈希>
     assert msg is not None
     assert msg.sender_id == profile.user_id
     assert msg.content == "爱莉的回复"
-    assert msg.idempotency_key == f"elysia-{env.event_id}"
+    assert msg.idempotency_key == _event_key(env.event_id)
     assert msg.conversation_id == conv.id
 
     # 用户 WS 收到 elysia.reply 帧
@@ -157,7 +164,7 @@ async def test_repeat_event_is_idempotent(user_factory):
 
     assert first is not None and second is not None
     assert first.id == second.id
-    count = await _count_messages(conv, "elysia-evt_out_dup")
+    count = await _count_messages(conv, _event_key("evt_out_dup"))
     assert count == 1
 
 

@@ -30,6 +30,7 @@ from channels.db import database_sync_to_async
 from channels.exceptions import ChannelFull
 from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.utils import timezone
 
 from apps.chat import services as chat_services
@@ -322,15 +323,34 @@ def _project_into_message(
         )
         return None
 
-    idempotency_key = f"elysia-{envelope.event_id}"
-    message = chat_services.create_message(
-        profile.user,
-        conversation,
-        content=content,
-        msg_type=Message.TYPE_TEXT,
-        idempotency_key=idempotency_key,
-    )
-    return message
+    # 幂等键唯一约束 max_length=64（MySQL 超长会 1406 Data too long）。
+    # Elysium event_id 长达 69 字符，`elysia-` 前缀 + 原文必超 64；用哈希截断
+    # 保持同 event_id → 同 key 的幂等语义，且不超列宽。
+    idempotency_key = f"elysia-{_stable_id_hash(envelope.event_id)}"
+    try:
+        message = chat_services.create_message(
+            profile.user,
+            conversation,
+            content=content,
+            msg_type=Message.TYPE_TEXT,
+            idempotency_key=idempotency_key,
+        )
+    except IntegrityError:
+        # 幂等兜底：idempotency_key 是 DB 全局唯一，但 find_by_idempotency_key 按
+        # (conversation, key) 查。bridge 重放历史事件时，同 event_id 曾被路由到
+        # 其它会话（旧 key 已在库），当前会话查不到 → 插入撞全局唯一约束。
+        # 按全局 key 找已存在的投影：同 key 已存在 = 已投影过，跳过（不重复落库，
+        # 不广播），符合 M4-2/4-4 幂等契约。找不到则原样抛（保留失败可观测）。
+        already = chat_services.find_global_by_idempotency_key(idempotency_key)
+        if already is None:
+            raise
+        logger.warning(
+            "elysia reply event %s already projected (message %s, conv %s); skipped",
+            envelope.event_id,
+            already.id,
+            already.conversation_id,
+        )
+        return already
 
 
 def _group_send_sync(conversation_id, event: dict) -> None:
@@ -357,6 +377,13 @@ async def _group_send_async(conversation_id, event: dict) -> None:
         logger.warning("channel full, dropping elysia.reply for conv %s", conversation_id)
     except Exception:
         logger.exception("group_send elysia.reply failed for conv %s", conversation_id)
+
+
+def _stable_id_hash(value: str, length: int = 24) -> str:
+    """从事件 id 派生稳定短哈希（幂等键用，同 id → 同哈希）。"""
+    import hashlib
+
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
 
 def _extract_content(envelope: EventEnvelope) -> str:
