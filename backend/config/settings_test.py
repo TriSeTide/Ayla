@@ -30,6 +30,9 @@ DATABASES = {
 
 DEBUG = False
 
+# 测试环境不内嵌启动 SSE 出站投影（避免测试触发 lifespan 时连接真实 Elysium）
+ELYSIA_BRIDGE_INLINE = False
+
 # 测试用内存 FakeStorage，不依赖真实 MinIO（M4-3）
 S3_STORAGE_BACKEND = "fake"
 

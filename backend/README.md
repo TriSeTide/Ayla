@@ -108,28 +108,30 @@ cp .env.example .env       # 按需修改（本地默认 SQLite + 本机 Redis�
 # 1) 迁移
 python manage.py migrate
 
-# 2) 一键启动后端（runserver + run_bridge，Ctrl+C 一并退出）
+# 2) 一键启动后端（runserver + 内嵌 SSE 出站投影，Ctrl+C 一并退出）
 python launcher.py                      # 默认 127.0.0.1:8100
 # AYLA_HOST=0.0.0.0 AYLA_PORT=8000 python launcher.py   # 自定义地址/端口
 ```
 
 Windows 可双击仓库根目录 `start_ayla.bat`（等价于 `python launcher.py`）。
 
-`launcher.py` 是 runserver 与 run_bridge（SSE 出站投影）两个子进程的 owner：
-启动前检查端口占用（被占用则报告 PID 并拒绝，不启动第二实例）；任一子进程
-退出即整体退出；Ctrl+C 优雅关闭（子进程自带 SIGINT 处理，超时后兜底 terminate）。
-`runserver` 默认 `--noreload`，代码改动后重启 launcher 生效。
+`launcher.py` 是 runserver 进程的 owner；**run_bridge（SSE 出站投影）已内嵌**
+到 Ayla 后端进程（`apps/elysia_bridge/apps.py::ready()` 启动 daemon 线程，
+单实例文件锁 `runtime/elysia_bridge.lock` 防 reload/多 worker 双启），无需
+第二个进程。`ELYSIA_BRIDGE_INLINE`（默认 True）控制开关。启动前检查端口
+占用（被占用则报告 PID 并拒绝，不启动第二实例）；`runserver` 默认
+`--noreload`，代码改动后重启 launcher 生效。
 
 等价拆分启动（调试/排障用）：
 
 ```bash
-python manage.py runserver 127.0.0.1:8100 --noreload   # 仅后端 API / WS
-python manage.py run_bridge                             # 仅 SSE 出站投影
+ELYSIA_BRIDGE_INLINE=False python manage.py runserver 127.0.0.1:8100 --noreload  # 仅后端 API / WS
+python manage.py run_bridge                                                        # 仅 SSE 出站投影
 ```
 
-生产部署：`daphne -b 0.0.0.0 -p 8000 config.asgi:application`，
-前端由 Nginx 反代，WS 需带升级头（见开发文档 10 节）；出站投影仍需要一个
-`run_bridge` 进程（SSE 订阅 Elysium 事件流）。
+生产部署：`daphne -b 0.0.0.0 -p 8000 config.asgi:application`，内嵌 bridge
+随进程启动（`ELYSIA_BRIDGE_INLINE=True`，文件锁保证单实例）；前端由 Nginx
+反代，WS 需带升级头（见开发文档 10 节）。
 
 ## 基础设施（MySQL/Redis/MinIO/LiveKit）
 

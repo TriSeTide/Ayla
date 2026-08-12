@@ -183,6 +183,9 @@ ELYSIA_SSE_RECONNECT_SECONDS = env.float("ELYSIA_SSE_RECONNECT_SECONDS", default
 ELYSIA_SSE_EVENT_TYPES = env.list(
     "ELYSIA_SSE_EVENT_TYPES", default=["chat.message"]
 )
+# 内嵌出站投影：ASGI lifespan 启动时在 Ayla 后端进程内运行 run_bridge_loop
+# （文件锁保证单实例）。关闭时需独立进程 `manage.py run_bridge`。
+ELYSIA_BRIDGE_INLINE = env.bool("ELYSIA_BRIDGE_INLINE", default=True)
 
 # 静态/媒体
 STATIC_URL = "static/"
