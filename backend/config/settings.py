@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.media",
     "apps.emoji",
     "apps.voice",
+    "apps.live",
 ]
 
 MIDDLEWARE = [
@@ -200,6 +201,19 @@ LIVEKIT_WS_URL = env.str("LIVEKIT_WS_URL", default="ws://127.0.0.1:7880")
 LIVEKIT_TOKEN_TTL_SECONDS = env.int("LIVEKIT_TOKEN_TTL_SECONDS", default=600)
 # presence 心跳超时：超过该秒数未心跳的成员被标记离开（后台任务 owner，见 apps/voice/services.py）
 VOICE_MEMBER_TIMEOUT_SECONDS = env.int("VOICE_MEMBER_TIMEOUT_SECONDS", default=120)
+
+# ---------- 直播（M4-6） ----------
+# SRS 流媒体服务器（docker-compose `srs` 服务，镜像 ossrs/srs:5）。
+# - SRS_API_URL：HTTP API 根（状态查询 /api/v1/streams、健康检查 /api/v1/versions）；
+# - SRS_RTMP_URL / SRS_PLAY_URL：推流/播放地址前缀（stream_key 拼在其后）；
+# - SRS_QUERY_TIMEOUT：状态查询短超时（Django 事件循环不做阻塞 I/O，查询走同步线程）。
+# 默认值仅本地开发；真实部署以环境变量为准。
+SRS_API_URL = env.str("SRS_API_URL", default="http://127.0.0.1:1985")
+SRS_RTMP_URL = env.str("SRS_RTMP_URL", default="rtmp://127.0.0.1:1935/live")
+SRS_PLAY_URL = env.str("SRS_PLAY_URL", default="http://127.0.0.1:8080/live")
+SRS_QUERY_TIMEOUT = env.float("SRS_QUERY_TIMEOUT", default=2.0)
+# 新进直播间历史弹幕条数（默认 50）
+LIVE_DANMAKU_HISTORY_LIMIT = env.int("LIVE_DANMAKU_HISTORY_LIMIT", default=50)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

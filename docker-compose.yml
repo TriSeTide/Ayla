@@ -76,6 +76,24 @@ services:
       timeout: 3s
       retries: 12
 
+  # M4-6 直播：SRS 流媒体服务器（RTMP 推流 + HTTP-FLV/HLS 播放 + HTTP API 状态）。
+  # 1935 RTMP；8080 HTTP-FLV/HLS；1985 HTTP API + WebRTC 信令；8000/udp WebRTC 媒体。
+  # SRS 5 默认配置 conf/srs.conf 已同时启用 RTMP + HTTP-FLV + HLS + WebRTC，无需自定义配置。
+  srs:
+    image: ossrs/srs:5
+    container_name: elysia-srs
+    restart: unless-stopped
+    ports:
+      - "1935:1935"
+      - "8080:8080"
+      - "1985:1985"
+      - "8000:8000/udp"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:1985/api/v1/versions"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
 volumes:
   mysql_data:
   redis_data:

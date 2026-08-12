@@ -24,6 +24,7 @@ from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 from apps.accounts.routing import websocket_urlpatterns as accounts_ws  # noqa: E402
 from apps.chat.routing import websocket_urlpatterns as chat_ws  # noqa: E402
 from apps.voice.routing import websocket_urlpatterns as voice_ws  # noqa: E402
+from apps.live.routing import websocket_urlpatterns as live_ws  # noqa: E402
 
 logger = logging.getLogger("asgi.lifespan")
 
@@ -35,6 +36,7 @@ application = ProtocolTypeRouter(
                 accounts_ws
                 + chat_ws
                 + voice_ws
+                + live_ws
                 # 后续里程碑在此追加 livestream / tabletop 等 ws 路由
             )
         ),

@@ -36,6 +36,11 @@ ELYSIA_BRIDGE_INLINE = False
 # 测试用内存 FakeStorage，不依赖真实 MinIO（M4-3）
 S3_STORAGE_BACKEND = "fake"
 
+# 测试 SRS API 指向假地址：契约测试全部注入 FakeSrsClient（apps/live/tests/conftest.py），
+# 假地址只作"未注入 fake 时快速失败"的保险，绝不触网、不误判"未在播"。
+SRS_API_URL = "http://srs-test.invalid:1985"
+SRS_QUERY_TIMEOUT = 0.1
+
 # 日志压缩，测试输出干净
 LOGGING = {
     "version": 1,

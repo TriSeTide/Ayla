@@ -1,10 +1,28 @@
-# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-3 媒体 + M4-4 爱莉桥接 + M4-5 语音）
+# Elysia 独立应用后端（阶段四 M4-1 基座 + M4-2 聊天核心 + M4-3 媒体 + M4-4 爱莉桥接 + M4-5 语音 + M4-6 直播）
 
 Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端的唯一 API/WS 入口。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`。
 
 ## 当前里程碑
+
+### M4-6 直播（契约层完成，端到端未验收）
+
+- [x] `live` 应用：直播频道（LiveChannel）+ 弹幕（Danmaku）
+- [x] SRS 集成（`srs.py`）：HTTP API 状态查询（`SrsClient` 短超时 + `FakeSrsClient` 测试注入）；
+      `docker-compose.yml` 追加 `srs` 服务（`ossrs/srs:5`，1935/8080/1985/8000udp）
+- [x] 频道 REST（`/api/v1/live/`）：创建/列表/详情/删除、`:start`/`:stop`（乐观标记）、
+      `/status`（**SRS 实时判定**，失败返回 `degraded` 不伪装"未在播"）
+- [x] `stream_key` 安全指纹：`secrets.token_hex(24)` 唯一索引；创建响应回显一次，
+      此后仅 owner 详情可见，非 owner 一律 null（推流指纹绝不外泄给观众）
+- [x] 弹幕：POST 落库 + `live_{id}` 组广播（复用 M4-5 voice.state 模式，落库与广播分离）、
+      历史分页（默认 50、上限 200）
+- [x] `DanmakuConsumer` WS（`/ws/live/{channel_id}/?token=<jwt>`）：JWT 认证、直播间不存在关闭
+- [x] 配置接线：`SRS_*` / `LIVE_*` 环境变量；`.env.example` 同步；`config/urls.py`/`asgi.py` 接线
+- [ ] 真实冒烟（OBS/ffmpeg 推流 → /status live → 拉 HLS/FLV → 弹幕 WS 实时）——
+      **未验收**（需 SRS 运行 + 推流工具，见 docs/plans/阶段四-M4-6直播开发步骤.md §8.2）
+- [ ] 爱莉直播真实对接（FR-19）——**不验收**（依赖阶段三 `/livestream/*` 契约复核 +
+      Elysium 直播意识接入，属未决点，见文档 §6.3）
 
 ### M4-3 媒体与表情包（已完成）
 
@@ -90,7 +108,8 @@ backend/
 │   ├── media/              # 媒体对象/受控三步上传/下载/派生/访问控制（M4-3）
 │   ├── emoji/              # 表情包/收藏/检索/系统包（M4-3）
 │   ├── elysia_bridge/      # 爱莉桥接：profile/inject/SSE 出站/订阅循环（M4-4）
-│   └── voice/              # 语音频道：LiveKit 集成 + voice.state 广播（M4-5）
+│   ├── voice/              # 语音频道：LiveKit 集成 + voice.state 广播（M4-5）
+│   └── live/               # 直播：SRS 集成 + 频道/弹幕 REST + 弹幕 WS（M4-6）
 └── tests/                  # 契约测试
 ```
 
@@ -133,7 +152,7 @@ python manage.py run_bridge                                                     
 随进程启动（`ELYSIA_BRIDGE_INLINE=True`，文件锁保证单实例）；前端由 Nginx
 反代，WS 需带升级头（见开发文档 10 节）。
 
-## 基础设施（MySQL/Redis/MinIO/LiveKit）
+## 基础设施（MySQL/Redis/MinIO/LiveKit/SRS）
 
 ```bash
 docker compose -f ../docker-compose.yml up -d
@@ -141,7 +160,9 @@ docker compose -f ../docker-compose.yml up -d
 
 仅本地聊天/测试可不启动 MySQL（默认 SQLite）；Presence/实时功能需要 Redis；
 媒体上传需要 MinIO/S3（`S3_STORAGE_BACKEND=s3`；测试/离线场景可切 `fake`）；
-语音频道（M4-5）需要 LiveKit（`elysia-livekit`，端口 7880/7881）。
+语音频道（M4-5）需要 LiveKit（`elysia-livekit`，端口 7880/7881）；
+直播（M4-6）需要 SRS（`elysia-srs`，端口 1935 RTMP / 8080 HTTP-FLV/HLS / 1985 HTTP API）。
+SRS 使用默认配置（RTMP + HTTP-FLV + HLS + WebRTC 已内置），无需自定义 conf。
 
 LiveKit key/secret：docker 首启 `--dev` 模式自动生成并打印到容器日志；
 生产用 `livekit-server generate-keys` 预生成后写入 `backend/.env` 的
@@ -185,6 +206,16 @@ python -m pytest
   - 频道 REST：建/查/改（仅 owner）/加入（token）/离开/心跳/成员；越权 403/404、未登录 401
   - `voice.state` 广播：订阅频道组收到 join/left/heartbeat；非成员不订阅
   - presence 超时：超过 `VOICE_MEMBER_TIMEOUT_SECONDS` 未心跳 → 标记离开 + 广播
+- 直播（mock SRS，不依赖真实 SRS）：
+  - 频道模型：`stream_key` 唯一（DB 硬约束）、status choices、弹幕落库/级联删除
+  - SRS 客户端：响应解析、`is_streaming` 判定、非 200/网络错误/坏 payload → `SrsUnavailable`
+    （不伪装"未在播"）、FakeSrsClient 注入
+  - 频道 REST：创建（201 返回 stream_key/rtmp/hls/flv）、stream_key 最小权限（非 owner null）、
+    列表/`?only_live=1`/详情/删除（非 owner 403、直播中 400）、`:start`/`:stop` 状态流转
+  - `/status` SRS 判定：在播→live、未在播→idle、查询失败→degraded（不伪装结果）
+  - 弹幕：POST 落库 + 广播 `live_{id}` 组（RecordingLayer 断言组名/帧）、历史分页（默认 50 上限 200）、
+    空/超长 400、频道不存在 404、未登录 401
+  - 弹幕 WS：JWT 认证收广播帧、无 token/非法 token 关闭、直播间不存在关闭
 
 ## 配置说明（环境变量）
 
@@ -218,6 +249,11 @@ python -m pytest
 | `LIVEKIT_WS_URL` | `ws://127.0.0.1:7880` | 前端连接 LiveKit 的 WS 地址 |
 | `LIVEKIT_TOKEN_TTL_SECONDS` | 600 | 访问 token 有效期（秒），前端过期前重签 |
 | `VOICE_MEMBER_TIMEOUT_SECONDS` | 120 | presence 心跳超时（秒），超过标记离开 |
+| `SRS_API_URL` | `http://127.0.0.1:1985` | SRS HTTP API 根（状态查询/健康检查） |
+| `SRS_RTMP_URL` | `rtmp://127.0.0.1:1935/live` | RTMP 推流地址前缀（stream_key 拼其后，仅 owner 可见） |
+| `SRS_PLAY_URL` | `http://127.0.0.1:8080/live` | HTTP-FLV/HLS 播放地址前缀 |
+| `SRS_QUERY_TIMEOUT` | 2.0 | SRS 状态查询超时（秒） |
+| `LIVE_DANMAKU_HISTORY_LIMIT` | 50 | 新进直播间历史弹幕条数 |
 
 密钥只存在于本机 `.env`（Git 忽略），文档与仓库不含真实密钥。
 
@@ -336,6 +372,49 @@ descriptor 对象（`media_id` 引用不存在时仍为 null）；发媒体消�
 `joined/left/heartbeat` 由成员表变更广播；`muted/unmuted` 由客户端静音时上报（元数据层，不落库强制）。
 `voice.state` 只表达**技术状态**，不是爱莉/用户的情绪判断。
 
+### 直播（M4-6，`/api/v1/live/`）
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/channels/` | 频道列表（含乐观 status；`?only_live=1` 只返回 status=live） | 登录 |
+| POST | `/channels/` | 创建频道 `{title}` → 201 返回 `stream_key`/推流/播放地址 | 登录 |
+| GET | `/channels/<id>/` | 频道详情：owner 可见 `stream_key`+推流地址；他人仅播放地址+状态 | 登录 |
+| POST | `/channels/<id>:start/` | 开播（乐观标记：status→live、started_at=now；不校验 SRS 真实流） | 频道 owner |
+| POST | `/channels/<id>:stop/` | 下播（乐观标记：status→ended、ended_at=now） | 频道 owner |
+| GET | `/channels/<id>/status/` | **SRS 实时判定**：在播→`live` / 未在播→`idle` / SRS 不可用→`degraded` | 登录 |
+| DELETE | `/channels/<id>/` | 删除频道（直播中禁止，先 `:stop`） | 频道 owner |
+| POST | `/channels/<id>/danmaku/` | 发弹幕 `{content}`（≤200）→ 落库 + 广播 `live_{id}` 组 | 登录 |
+| GET | `/channels/<id>/danmaku/?limit=` | 最近弹幕历史（默认 50，上限 200） | 登录 |
+
+**SRS 地址格式**（stream_key 是推流握手指纹，**仅 owner 可见，绝不外泄给观众**）：
+
+| 用途 | 协议 | 地址 |
+|---|---|---|
+| 推流（OBS/ffmpeg） | RTMP | `rtmp://<host>:1935/live/{stream_key}` |
+| 播放 | HTTP-FLV | `http://<host>:8080/live/{stream_key}.flv` |
+| 播放 | HLS | `http://<host>:8080/live/{stream_key}.m3u8` |
+| 状态查询 | HTTP API | `GET http://<host>:1985/api/v1/streams` |
+
+```bash
+# 推流示例（OBS 用自定义流：rtmp://127.0.0.1:1935/live + 流密钥 = stream_key）
+ffmpeg -re -i <源> -c copy -f flv rtmp://127.0.0.1:1935/live/{stream_key}
+```
+
+**状态语义（AGENTS.md §8 状态真实性）**：应用侧 `status` 是乐观标记（`:start`/`:stop`
+更新）；`/status` 以 SRS HTTP API 实时判定为准。SRS 查询失败（超时/网络/非 200）返回
+`{"status": "degraded", "detail": "srs_unavailable"}`，**禁止把查询失败伪装成"未在播"**。
+
+**弹幕 WS（`/ws/live/{channel_id}/?token=<jwt>`）**：连接即校验直播间存在（不存在关闭），
+加入 `live_{id}` 组收弹幕实时帧：
+
+```json
+{ "type": "danmaku", "id": "1", "channel_id": "3",
+  "sender": { "user_id": "...", "nickname": "...", "avatar": "" },
+  "content": "大家好", "created_at": "..." }
+```
+
+弹幕内容原样转发，应用不代判内容意义（审核/过滤属 Elysium 侧能力，AGENTS.md §2）。
+
 ### 爱莉桥接（M4-4，`/api/v1/elysia/`）
 
 | 方法 | 路径 | 说明 | 权限 |
@@ -388,6 +467,21 @@ descriptor 对象（`media_id` 引用不存在时仍为 null）；发媒体消�
   需求 FR-13/16 需要成员持久化）；`last_seen_at` 用于 presence 超时判定。
 - **频道开放加入**：默认类似 Discord 语音频道，邀请制/私有频道留待后续。
 - **LiveKit 密钥安全**：API key/secret 走本机配置（Git 忽略），token 只签给登录用户 + 绑定房间。
+
+### 已知取舍（M4-6）
+
+- **状态真实性以 SRS 为准**：应用侧 `status` 是乐观标记；`/status` 以 SRS HTTP API 实时判定，
+  查询失败返回 `degraded` 不伪装结果；未来可加定时对账（本期不做）。
+- **`stream_key` 安全**：`secrets.token_hex(24)` 唯一索引；创建响应一次回显、仅 owner 详情可见；
+  泄漏风险（截图/日志）需注意，未来可支持重发/轮换 key（本期不做）。
+- **`LiveChannel` 为补充表**（开发文档 §4 直播域未给表结构，按 FR-17/18 补充）：
+  `stream_key`/`status`/`started_at`/`ended_at` 是直播频道最小必要组成；核心语义与 FR-17 对齐。
+- **HLS 延迟 5-15s 可接受**（需求 §4.1）；WebRTC <500ms 可选，本期不验收。
+- **不转码不录制**：OBS 推流侧编码，SRS 不做转码/录制落盘；录制/回放归后续里程碑。
+- **在线人数精确计数**：可选（channels group 连接数），本期不做 UI 层计数。
+- **弹幕不做内容过滤**：审核/过滤属 Elysium 侧能力，应用只落库广播。
+- **爱莉直播真实对接未做**（FR-19）：依赖阶段三 `/livestream/*` 契约复核 + Elysium 直播意识接入
+  （voice_live/livestream 场景意识闭环是 Elysium 侧工作），本期通道预留不验收。
 
 ### 已知取舍（M4-2）
 
