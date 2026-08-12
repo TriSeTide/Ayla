@@ -35,14 +35,31 @@ pytestmark = pytest.mark.usefixtures("transactional_db")
 
 # ---------- fake 客户端 ----------
 
-def _envelope(*, event_id, stream_id, content="回复", cursor=None, sender_id=None):
+def _envelope(
+    *,
+    event_id,
+    stream_id,
+    content="回复",
+    cursor=None,
+    sender_id=None,
+    direction="delivered",
+    event_type=None,
+):
     payload = {"content": content, "metadata": {}}
     if sender_id is not None:
         payload["metadata"]["sender_id"] = sender_id
+    # Elysium 标准 chat 事实的方向字段（_handle_envelope 按它过滤）
+    payload["metadata"]["chat"] = {"direction": direction}
+    if event_type is None:
+        event_type = {
+            "received": "chat.message.received",
+            "requested": "chat.message.send_requested",
+            "delivered": "chat.message.delivery_confirmed",
+        }[direction]
     data = {
         "event_id": event_id,
         "sequence": 1,
-        "event_type": "chat.message.delivery_confirmed",
+        "event_type": event_type,
         "stream_id": stream_id,
         "channel": "elysia-app",
         "actor": {"type": "consciousness", "id": "elysia_1", "display_name": "爱莉"},
@@ -87,16 +104,25 @@ class _FakeClient:
 
 
 class _FakeCreds:
-    def __init__(self, token="token-1"):
+    def __init__(self, token="token-1", refresh_fails=False):
         self.token = token
         self.refreshed = 0
+        self.reset_count = 0
+        self.refresh_fails = refresh_fails
 
     def ensure_session(self, *, stream_id):
         return self.token
 
     def refresh(self):
         self.refreshed += 1
+        if self.refresh_fails:
+            raise RuntimeError("refresh failed (old refresh token invalid)")
         self.token = f"token-{self.refreshed + 1}"
+        return self.token
+
+    def reset_session(self):
+        self.reset_count += 1
+        self.token = f"reset-token-{self.reset_count}"
         return self.token
 
 
@@ -202,6 +228,43 @@ async def test_loop_skips_non_matching_stream(user_factory):
     )
 
     assert await _count(conv) == 0
+
+
+async def test_loop_skips_received_and_requested_chat_events(user_factory):
+    """只投影 direction=delivered；入站（received）与发送请求（requested）不落库。
+
+    复现真实缺陷：bridge 从历史回放时把 chat.message.received（用户消息）也
+    投影成爱莉的回复，并把 send_requested 与 delivery_confirmed 投影成两条
+    重复回复。修复后只有 delivered 事实进入 Ayla 消息表。
+    """
+    profile, user, conv = await _mk_profile(user_factory)
+    env_recv = _envelope(
+        event_id="evt_loop_recv",
+        stream_id="stream_loop_1",
+        content="用户发来的消息",
+        cursor="cursor-rec",
+        direction="received",
+    )
+    env_req = _envelope(
+        event_id="evt_loop_req",
+        stream_id="stream_loop_1",
+        content="爱莉的回复（预发送）",
+        cursor="cursor-req",
+        sender_id=str(user.id),
+        direction="requested",
+    )
+    client = _FakeClient([("event", env_recv), ("event", env_req)])
+    creds = _FakeCreds()
+    stop = asyncio.Event()
+
+    await _run_until(
+        client, creds, stop, profile=profile, target_event_id="evt_loop_req"
+    )
+
+    # 两个方向的事件都被跳过：会话内不新增任何投影
+    assert await _count(conv) == 0
+    assert await _find(conv, _event_key("evt_loop_recv")) is None
+    assert await _find(conv, _event_key("evt_loop_req")) is None
 
 
 async def test_loop_reconnects_with_last_cursor_after_transport_error(user_factory):
@@ -361,6 +424,40 @@ async def test_loop_unauth_refreshes_and_reconnects(user_factory):
 
     assert creds.refreshed == 1
     assert await _find(conv, _event_key("evt_loop_ua")) is not None
+
+
+async def test_loop_unauth_reissues_from_secret_when_refresh_fails(user_factory):
+    """401 且 refresh 失败（旧 refresh_token 失效）→ 用 secret 强制重签恢复。
+
+    复现真实缺陷：Elysium 重启后旧 access/refresh token 签名失效，SSE 401；
+    refresh 用旧 refresh_token 也失败；若只捕获异常不重签，ensure_session 会
+    继续复用内存里的失效 token，陷入 401 重试循环。修复后 refresh 失败必须
+    走 reset_session（secret 重签）。
+    """
+    profile, user, conv = await _mk_profile(user_factory)
+    env = _envelope(
+        event_id="evt_loop_reissue",
+        stream_id="stream_loop_1",
+        content="重签后恢复",
+        cursor="cursor-reissue",
+        sender_id=str(user.id),
+    )
+    client = _FakeClient(
+        [
+            ("raise", ElysiaUnauthenticated("expired")),
+            ("event", env),
+        ]
+    )
+    creds = _FakeCreds(refresh_fails=True)
+    stop = asyncio.Event()
+
+    await _run_until(
+        client, creds, stop, profile=profile, target_event_id="evt_loop_reissue"
+    )
+
+    assert creds.refreshed == 1
+    assert creds.reset_count == 1
+    assert await _find(conv, _event_key("evt_loop_reissue")) is not None
 
 
 async def test_loop_stops_gracefully_on_stop_event(user_factory):

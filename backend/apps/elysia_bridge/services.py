@@ -196,6 +196,17 @@ class ElysiaCredentialManager:
             self._state.refresh_token = tokens.refresh_token
             return tokens.access_token
 
+    def reset_session(self) -> str:
+        """清除内存 session 状态，强制用 secret 重新换 session。
+
+        用于 401/credential_revoked 且 refresh 也失败（如 Elysium 重启导致
+        旧 refresh_token 失效）的恢复路径；ensure_session 会复用内存 token，
+        必须显式重置才能走到 _reissue。
+        """
+        with self._lock:
+            self._state = None
+            return self._reissue(stream_id="")
+
 
 # ---------- 出站路由 ----------
 
@@ -760,14 +771,40 @@ def _project_voice_into_message(
 
 # ---------- SSE 订阅循环（run_bridge 命令 / 测试共用） ----------
 
+def _chat_direction(envelope: EventEnvelope) -> str | None:
+    """读取标准 chat 事实的方向字段（Elysium `metadata.chat.direction`）。
+
+    direction ∈ {received, requested, delivered}：
+    - received：入站消息（Ayla 后端已自行落库，桥接不得再投影）；
+    - requested：发送请求（预发送通知，不是交付事实，投影会与 delivered 重复）；
+    - delivered：最终交付事实（爱莉回复经本通道出站成功，投影为应用内消息）。
+    """
+    payload = envelope.payload
+    if not isinstance(payload, Mapping):
+        return None
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    chat = metadata.get("chat")
+    if not isinstance(chat, Mapping):
+        return None
+    direction = chat.get("direction")
+    return str(direction) if direction else None
+
+
 async def _handle_envelope(
     profile: ElysiaProfile, envelope: EventEnvelope
 ) -> Message | None:
-    """单条出站事件处理：stream 匹配 → 投影落库 + 广播。
+    """单条出站事件处理：stream 匹配 → 方向过滤 → 投影落库 + 广播。
 
-    过滤职责：stream_id 属于本 profile 才投影；不匹配直接忽略（多爱莉/多平台
-    情况下各 profile 各订各的，事件过滤由 client 侧 event_type/stream_id 参数
-    与这里双保险）。
+    过滤职责：
+    1. stream_id 属于本 profile 才投影；不匹配直接忽略（多爱莉/多平台
+       情况下各 profile 各订各的，事件过滤由 client 侧 event_type/stream_id
+       参数与这里双保险）；
+    2. chat.message 事件只投影 `direction=delivered`（最终交付事实），
+       received（入站已由 Ayla 后端落库）与 requested（发送请求，非交付）
+       一律跳过，避免把用户消息投影成爱莉回复、或一条回复投影两次。
+       非 chat 事件（如 voice_call）不套用该方向过滤，保持既有行为。
     """
     if envelope.stream_id and envelope.stream_id != profile.stream_id:
         logger.debug(
@@ -777,6 +814,15 @@ async def _handle_envelope(
             profile.stream_id,
         )
         return None
+    if envelope.is_chat_message:
+        direction = _chat_direction(envelope)
+        if direction != "delivered":
+            logger.debug(
+                "skip chat event %s direction=%s (only delivered facts projected)",
+                envelope.event_id,
+                direction,
+            )
+            return None
     return await aproject_elysia_reply(profile, envelope)
 
 
@@ -861,7 +907,18 @@ async def run_bridge_loop(
                 try:
                     await database_sync_to_async(credentials.refresh)()
                 except Exception:
-                    logger.exception("elysia session refresh failed")
+                    # refresh 失败（如 Elysium 重启后旧 refresh_token 失效）：
+                    # 必须用落盘 secret 强制重签，否则 ensure_session 会继续
+                    # 复用内存里的失效 token，陷入 401 重试循环。
+                    logger.warning(
+                        "elysia session refresh failed; reissuing from secret"
+                    )
+                    try:
+                        await database_sync_to_async(credentials.reset_session)()
+                    except Exception:
+                        logger.exception(
+                            "elysia session reissue from secret failed"
+                        )
                 await _sleep_or_stop(loop, backoff, stop)
                 backoff = min(backoff * 2, max_backoff_seconds)
                 continue
