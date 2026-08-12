@@ -7,7 +7,7 @@
  * - 历史分页用 before_seq 前插。
  */
 import { create } from "zustand";
-import type { ChatMessage } from "../api/types";
+import type { ChatMessage, MediaDescriptor } from "../api/types";
 
 export interface MessageBucket {
   /** 按 seq 升序 */
@@ -26,6 +26,8 @@ interface MessageState {
   readMarks: Record<string, Record<string, string[]>>;
 
   upsertMessage: (convId: string, msg: ChatMessage) => void;
+  /** M5-2.1：WS 消息只带 media_id 时，异步补拉 descriptor 后合并进消息 */
+  mergeMedia: (convId: string, messageId: string, media: MediaDescriptor) => void;
   setRecalled: (convId: string, messageId: string) => void;
   markReadByMessage: (convId: string, messageId: string, userId: string) => void;
   prependHistory: (convId: string, msgs: ChatMessage[], hasMore: boolean) => void;
@@ -61,6 +63,23 @@ export const useMessageStore = create<MessageState>((set) => ({
             ...bucket,
             messages: insertBySeq(bucket.messages, msg),
             lastSeq: Math.max(bucket.lastSeq, msg.seq),
+          },
+        },
+      };
+    }),
+
+  mergeMedia: (convId, messageId, media) =>
+    set((state) => {
+      const bucket = state.buckets[convId];
+      if (!bucket) return state;
+      return {
+        buckets: {
+          ...state.buckets,
+          [convId]: {
+            ...bucket,
+            messages: bucket.messages.map((m) =>
+              m.id === messageId ? { ...m, media } : m,
+            ),
           },
         },
       };

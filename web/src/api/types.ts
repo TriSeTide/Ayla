@@ -97,6 +97,28 @@ export type ApiErrorBody = Record<string, unknown>;
 export type MessageType = "text" | "image" | "voice" | "file" | "emoji" | "system";
 export type MessageStatus = "sent" | "delivered" | "read" | "recalled";
 
+/** 媒体种类（与 backend apps/media/models.py MediaObject.kind 对齐） */
+export type MediaKind = "image" | "voice" | "file" | "emoji";
+
+/** MediaObjectSerializer 字段（M4-3：media 是 descriptor 对象，非裸 media_id） */
+export interface MediaDescriptor {
+  media_id: string;
+  kind: MediaKind;
+  mime_type: string;
+  size: number;
+  status: string;
+  width: number | null;
+  height: number | null;
+  /** 秒（voice） */
+  duration: number | null;
+  /** 相对路径 /api/v1/media/{id}/thumbnail（无缩略图则 null） */
+  thumbnail: string | null;
+  /** 相对路径 /api/v1/media/{id}/waveform（无波形则 null） */
+  waveform: string | null;
+  /** ISO 时间 */
+  created_at: string;
+}
+
 /** MessageSerializer 字段（id/conversation_id/sender_id 均为字符串） */
 export interface ChatMessage {
   id: string;
@@ -105,6 +127,11 @@ export interface ChatMessage {
   type: MessageType;
   content: string;
   media_id: string | null;
+  /**
+   * M4-3+：媒体 descriptor 对象（REST 序列化返回）。
+   * 可选：WS 帧到达时只有字符串 media_id，descriptor 由前端异步补拉后合并。
+   */
+  media?: MediaDescriptor | null;
   reply_to: string | null;
   status: MessageStatus;
   /** 会话内单调递增序号（补发/分页游标） */
@@ -198,6 +225,7 @@ export interface MessageNewFrame {
     sender_id: string;
     content: string;
     type: MessageType;
+    /** WS 协议仍是字符串 media_id（backend consumers.py 直传 msg.media_id）；descriptor 由前端补拉 */
     media: string | null;
     reply_to: string | null;
     seq: number;

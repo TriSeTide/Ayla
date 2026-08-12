@@ -1,55 +1,69 @@
 /**
- * ConversationList：会话列表（文档 §2 components/chat/ConversationList.tsx）。
+ * ConversationList —— 会话列表。
  *
- * - 私聊展示对方昵称/头像/在线状态；群聊展示群名/公告/成员数；
- * - 未读徽标。
+ * 视觉（design.md §11 示例配方）：玻璃底、左头像带在线光环、
+ * 昵称 Nunito 700 15px、预览 13px slate、未读 pink 徽标、选中 ice 胶囊底。
+ * 在线状态双通道：光环 + 「在线/离线」文字（design.md §10）。
  */
 import type { ConversationSummary } from "../../api/types";
 import { usePresenceStore } from "../../stores/presence";
+import { Avatar } from "../Avatar";
 
 export function ConversationList({
   conversations,
   activeId,
+  elysiaUserId,
   onSelect,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
+  elysiaUserId?: string | null;
   onSelect: (id: string) => void;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
 
   if (conversations.length === 0) {
-    return <div className="conv-empty">暂无会话，点击右上角发起</div>;
+    return <div className="conv-empty">暂无会话，点击上方「新会话」发起</div>;
   }
 
   return (
-    <ul className="conversation-list">
+    <ul>
       {conversations.map((conv) => {
         const isPrivate = conv.type === "private";
         const peerOnline = conv.peer ? onlineUsers[conv.peer.id] != null : false;
+        const isElysia = elysiaUserId != null && conv.peer?.id === elysiaUserId;
+        const title = isPrivate
+          ? conv.peer?.nickname || conv.peer?.username || conv.title || "未命名会话"
+          : conv.title || "未命名群聊";
+        const sub = isPrivate
+          ? isElysia
+            ? "爱莉 · 数字生命"
+            : peerOnline
+              ? "在线"
+              : "离线"
+          : conv.announcement || `${conv.member_count} 人`;
         return (
           <li key={conv.id}>
             <button
-              className={`conversation-item ${conv.id === activeId ? "active" : ""}`}
+              type="button"
+              className={`conv-item ${conv.id === activeId ? "active" : ""}`}
               onClick={() => onSelect(conv.id)}
+              aria-current={conv.id === activeId ? "true" : undefined}
             >
-              <span className={`conv-avatar ${isPrivate ? "private" : "group"}`}>
-                {isPrivate
-                  ? (conv.peer?.nickname?.[0] ?? conv.peer?.username?.[0] ?? "?")
-                  : (conv.title?.[0] ?? "群")}
-                {isPrivate && <i className={`presence-dot ${peerOnline ? "online" : ""}`} />}
-              </span>
-              <span className="conv-main">
-                <span className="conv-title">{conv.title || "未命名会话"}</span>
-                {conv.type === "group" && conv.announcement && (
-                  <span className="conv-announcement">{conv.announcement}</span>
-                )}
-                {conv.type === "group" && (
-                  <span className="conv-meta">{conv.member_count} 人</span>
-                )}
+              <Avatar
+                label={title}
+                size={40}
+                online={isPrivate ? peerOnline || isElysia : false}
+                isElysia={isElysia}
+              />
+              <span className="conv-item-body">
+                <span className="conv-item-title">{title}</span>
+                <span className="conv-item-sub">{sub}</span>
               </span>
               {conv.unread_count > 0 && (
-                <span className="conv-unread">{conv.unread_count > 99 ? "99+" : conv.unread_count}</span>
+                <span className="conv-unread" aria-label={`${conv.unread_count} 条未读`}>
+                  {conv.unread_count > 99 ? "99+" : conv.unread_count}
+                </span>
               )}
             </button>
           </li>

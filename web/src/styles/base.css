@@ -1,0 +1,156 @@
+/**
+ * 全局基底：reset、极光背景、focus、滚动条、动效原语。
+ * 事实源：design.md §1 氛围 / §6 层级 / §7 动效 / §10 可访问性。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--bg-aurora) fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 极光背景固定不动，内容在其上滚动（design.md §1） */
+#root {
+  background: transparent;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ul,
+ol,
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--grape-700);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* focus 可见：光环式 focus ring，禁止裸 outline:none（design.md §10） */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 滚动条：细、淡，融进玻璃质感 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(126, 149, 189, 0.35);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(126, 149, 189, 0.55);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- 动效原语 ---- */
+
+/* 消息到达：下方 8px 浮入 + 淡入，180ms，不弹跳（design.md §7） */
+@keyframes frost-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 爱莉光环呼吸：唯一常驻环境动画（design.md §6 签名元素） */
+@keyframes halo-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(247, 150, 255, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(247, 150, 255, 0.9), 0 0 16px rgba(247, 150, 255, 0.45);
+  }
+}
+
+/* 骨架屏脉冲（design.md §7：>300ms 异步加载用骨架，禁白屏） */
+@keyframes frost-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  animation: frost-pulse 1.6s ease-in-out infinite;
+}
+
+/* prefers-reduced-motion：关呼吸/浮入，保留透明度渐变（design.md §7） */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    opacity: 0.8;
+  }
+}
