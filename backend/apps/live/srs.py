@@ -19,7 +19,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-SRS_STREAMS_PATH = "/api/v1/streams"
+SRS_STREAMS_PATH = "/api/v1/streams/"  # 带尾斜杠（SRS 5 对无斜杠返回 302 重定向）
 SRS_VERSIONS_PATH = "/api/v1/versions"
 
 
@@ -35,12 +35,16 @@ class SrsClient:
         self.timeout = timeout if timeout is not None else settings.SRS_QUERY_TIMEOUT
 
     def _get_json(self, path: str) -> dict[str, Any]:
-        """GET {api_url}{path} → 解析 JSON；任何失败抛 SrsUnavailable。"""
+        """GET {api_url}{path} → 解析 JSON；任何失败抛 SrsUnavailable。
+
+        follow_redirects=True：SRS 5 对无尾斜杠端点（如 /api/v1/streams）返回 302
+        重定向到带斜杠版本，不跟随会把正常服务误判为不可用（degraded）。
+        """
         import httpx
 
         url = f"{self.api_url}{path}"
         try:
-            resp = httpx.get(url, timeout=self.timeout)
+            resp = httpx.get(url, timeout=self.timeout, follow_redirects=True)
         except httpx.HTTPError as exc:
             logger.warning("srs http error: url=%s err=%s", url, exc)
             raise SrsUnavailable(f"srs http error: {exc}") from exc
@@ -65,9 +69,19 @@ class SrsClient:
         return streams
 
     def is_streaming(self, app: str, stream: str) -> bool:
-        """streams 中存在 app+stream 匹配即视为在播；查询失败抛 SrsUnavailable。"""
+        """streams 中存在 app+stream 匹配且正在发布（publish.active）即视为在播。
+
+        - SRS 5 的 /api/v1/streams 条目用 `name` 字段承载流名（历史版本为 `stream`），
+          两者都兼容匹配（真实冒烟 2026-08-12 发现：SRS 5.0.213 实际返回 name）；
+        - 已停止的流会以 `publish.active=false` 保留在列表里（冒烟实测），
+          必须校验 publish.active，否则停流后 /status 会误判仍为 live；
+        - 旧版响应无 publish 字段时按活跃处理（保守兼容，不误报停播）。
+        """
         for s in self.list_streams():
-            if s.get("app") == app and s.get("stream") == stream:
+            sname = s.get("name") or s.get("stream")
+            publish = s.get("publish") or {}
+            active = publish.get("active", True)
+            if s.get("app") == app and sname == stream and active:
                 return True
         return False
 
