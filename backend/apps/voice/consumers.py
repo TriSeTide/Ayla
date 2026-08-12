@@ -6,7 +6,7 @@
 """
 import logging
 
-from asgiref.sync import database_sync_to_async
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from .services import _voice_group_name, user_in_channel

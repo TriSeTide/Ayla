@@ -4,8 +4,9 @@
 覆盖：
 - 收到 `chat.message.*` + 匹配 stream → 投影落库（sender=爱莉 user）+ 广播 `elysia.reply`；
 - 幂等：同 event_id 重复投影不重复落库（key=`elysia-<event_id>`）；
-- 出站路由：payload.metadata.sender_id 定位用户会话；correlation_id 定位；
-  匹配不到 → 降级到 profile 默认会话 + warning（不静默丢弃）；
+- 出站路由：标准 payload.metadata.chat.target_user_id 定位用户会话；
+  兼容 payload.metadata.sender_id / correlation_id；匹配不到 → 降级到 profile
+  默认会话 + warning（不静默丢弃）；
 - 无会话 → 返回 None，不落库；
 - 事件无 content → 跳过，不伪造内容；
 - 主体性边界：应用侧从不生成爱莉第一人称内容（只取 payload.content 原文）。
@@ -80,12 +81,15 @@ def _chat_envelope(
     stream_id="stream_elysia_out",
     content="爱莉的回复",
     sender_id=None,
+    target_user_id=None,
     correlation_id=None,
     cursor="cursor-7",
 ):
     payload = {"content": content, "metadata": {}}
     if sender_id is not None:
         payload["metadata"]["sender_id"] = sender_id
+    if target_user_id is not None:
+        payload["metadata"]["chat"] = {"target_user_id": target_user_id}
     data = {
         "event_id": event_id,
         "sequence": 21,
@@ -168,7 +172,7 @@ async def test_repeat_event_is_idempotent(user_factory):
     assert count == 1
 
 
-async def test_routes_by_metadata_sender_id(user_factory):
+async def test_routes_by_standard_chat_target_user_id(user_factory):
     elysia_user, profile, user = await _make_profile(user_factory)
     conv_a = await _mk_private(user, elysia_user)
     # 用户 B（独立创建，避免 email 冲突）
@@ -185,14 +189,29 @@ async def test_routes_by_metadata_sender_id(user_factory):
     user_b = await _mk_b()
     conv_b = await _mk_private(user_b, elysia_user)
 
-    env = _chat_envelope(event_id="evt_out_sa", sender_id=str(user_b.id))
+    env = _chat_envelope(
+        event_id="evt_out_target",
+        target_user_id=str(user_b.id),
+        sender_id=str(user.id),
+    )
     msg = await bridge_services.aproject_elysia_reply(profile, env)
 
-    # 路由到 B 的会话，而非 A 的
+    # 标准 chat.target_user_id 优先于兼容字段，路由到 B 的会话。
     assert msg is not None
     assert msg.conversation_id == conv_b.id
     assert msg.conversation_id != conv_a.id
     assert msg.sender_id == profile.user_id
+
+
+async def test_routes_by_legacy_metadata_sender_id(user_factory):
+    elysia_user, profile, user = await _make_profile(user_factory)
+    conv = await _mk_private(user, elysia_user)
+
+    env = _chat_envelope(event_id="evt_out_sa", sender_id=str(user.id))
+    msg = await bridge_services.aproject_elysia_reply(profile, env)
+
+    assert msg is not None
+    assert msg.conversation_id == conv.id
 
 
 async def test_routes_by_correlation_id(user_factory):

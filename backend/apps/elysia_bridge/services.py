@@ -4,7 +4,7 @@ elysia_bridge.services —— 爱莉桥接核心领域逻辑（供 REST / run_br
 职责（步骤文件 §4 / §5）：
 - 凭据/会话管理：加载一次性 secret → 换 session → 自动 refresh → 失效恢复；
 - 入站 inject：用户给爱莉发消息 → 应用内消息落库 → POST /chat/messages:inject
-  （带 sender_id 回显来源，platform="elysia-app"）；
+  （带 sender_id 回显来源，platform="ayla"）；
 - 出站投影：SSE 收到 chat.message.* 且 stream 匹配 → 定位应用内会话 →
   幂等落库（key=elysia-<event_id>）→ 广播 elysia.reply；
 - 出站路由：从 reply_target/correlation/payload 找回显 sender_id，匹配不到
@@ -203,25 +203,37 @@ def _extract_sender_id(envelope: EventEnvelope) -> str | None:
     """从出站事件里找应用内 sender_id 回显。
 
     优先级（步骤文件 §5.2）：
-    1. payload.metadata.sender_id；
-    2. payload.metadata 里嵌套 dict 的 sender_id；
-    3. correlation_id / causation_id 若形如 `elysia:<user_id>` 之类。
+    1. payload.metadata.chat.target_user_id（Elysium 出站事实的标准路径）；
+    2. payload.metadata.sender_id / user_id / actor_id（兼容旧投影）；
+    3. payload.metadata 里其他嵌套 dict 的同类字段；
+    4. correlation_id / causation_id 若形如 `elysia:<user_id>` 之类。
     返回 None 表示无法回显。
     """
     payload = envelope.payload or {}
     metadata = payload.get("metadata")
     if isinstance(metadata, Mapping):
+        chat = metadata.get("chat")
+        if isinstance(chat, Mapping):
+            target_user_id = chat.get("target_user_id")
+            if isinstance(target_user_id, str) and target_user_id:
+                return target_user_id
         for key in ("sender_id", "user_id", "actor_id"):
             value = metadata.get(key)
             if isinstance(value, str) and value:
                 return value
-    # 嵌套 dict 兜底
-    for value in (payload.get("metadata"), payload.get("content_ref")):
-        if isinstance(value, Mapping):
+        for value in metadata.values():
+            if not isinstance(value, Mapping):
+                continue
             for key in ("sender_id", "user_id", "actor_id"):
                 raw = value.get(key)
                 if isinstance(raw, str) and raw:
                     return raw
+    content_ref = payload.get("content_ref")
+    if isinstance(content_ref, Mapping):
+        for key in ("sender_id", "user_id", "actor_id"):
+            raw = content_ref.get(key)
+            if isinstance(raw, str) and raw:
+                return raw
     # correlation / causation 回显（形如 `elysia:<user_id>` / 纯数字应用内 user id）
     for cid in (envelope.correlation_id, envelope.causation_id):
         if not cid:

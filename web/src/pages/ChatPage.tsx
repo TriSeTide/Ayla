@@ -21,7 +21,7 @@ import { TypingIndicator } from "../components/chat/TypingIndicator";
 import {
   canRecall,
 } from "../components/chat/MessageBubble";
-import { loadMoreHistory, markReadLatest, recallMessage } from "../hooks/useChat";
+import { loadHistory, loadMoreHistory, markReadLatest, recallMessage } from "../hooks/useChat";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
@@ -178,7 +178,8 @@ export function ChatPage() {
       useMessageStore.getState().prependHistory(conversationId, demoMessages(conversationId), false);
       clearUnread(conversationId);
     } else {
-      loadMoreHistory(conversationId).catch(() => {});
+      useMessageStore.getState().openBucket(conversationId);
+      loadHistory(conversationId, undefined, true).catch(() => {});
     }
     // 订阅 WS（增量）
     chatWS.subscribe([conversationId]);
