@@ -7,7 +7,6 @@
 """
 import pytest
 import pytest_asyncio
-from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
@@ -23,6 +22,13 @@ def _make_channel(owner, name="语音", room_name="room_ws"):
 
 
 @database_sync_to_async
+def _mk_user(auth_client, **kwargs):
+    """在 async 测试里经 sync_to_async 调用同步 fixture（避免 SynchronousOnlyOperation）。"""
+    _, user = auth_client(**kwargs)
+    return user
+
+
+@database_sync_to_async
 def _add_member(channel, user):
     VoiceChannelMember.objects.create(channel=channel, user=user)
 
@@ -32,25 +38,25 @@ def _member_exists(channel, user) -> bool:
     return VoiceChannelMember.objects.filter(channel=channel, user=user).exists()
 
 
-def _jwt_headers(user):
+def _ws_url(user) -> str:
+    """WS 连接 URL（JWT 走 query string，与 M4-2 Chat WS 同款握手方式）。"""
     from rest_framework_simplejwt.tokens import RefreshToken
 
     token = RefreshToken.for_user(user).access_token
-    return {"authorization": [f"Bearer {token}"]}
+    return f"/ws/voice/?token={token}"
 
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-async def test_ws_subscribe_receives_voice_state(auth_client):
+async def test_ws_subscribe_receives_voice_state(auth_client, transactional_db):
     """成员订阅频道组后收到 join/left 广播。"""
-    _, user = auth_client()
+    user = await _mk_user(auth_client)
     ch = await _make_channel(user)
     await _add_member(ch, user)
 
     communicator = WebsocketCommunicator(
         consumers.VoiceConsumer.as_asgi(),
-        "/ws/voice/",
-        headers=_jwt_headers(user),
+        _ws_url(user),
     )
     connected, _ = await communicator.connect()
     assert connected
@@ -77,17 +83,16 @@ async def test_ws_subscribe_receives_voice_state(auth_client):
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-async def test_ws_non_member_not_subscribed(auth_client):
+async def test_ws_non_member_not_subscribed(auth_client, transactional_db):
     """非频道成员订阅被忽略（不 group_add，收不到广播）。"""
-    _, user = auth_client()
-    _, other = auth_client(username="other")
+    user = await _mk_user(auth_client)
+    other = await _mk_user(auth_client, username="other")
     ch = await _make_channel(user)
     # 只有 user 是成员，other 不是
 
     communicator = WebsocketCommunicator(
         consumers.VoiceConsumer.as_asgi(),
-        "/ws/voice/",
-        headers=_jwt_headers(other),
+        _ws_url(other),
     )
     connected, _ = await communicator.connect()
     assert connected
@@ -98,14 +103,10 @@ async def test_ws_non_member_not_subscribed(auth_client):
     await layer.group_send(
         services._voice_group_name(ch.id), services._voice_state_event(ch, user, "joined")
     )
-    # 不应收到任何 voice.state；用短超时验证无消息
-    from channels.exceptions import StopConsumer
-
-    try:
-        msg = await communicator.receive_json_from(timeout=0.3)
-        assert msg.get("type") != "voice.state"
-    except Exception:
-        pass  # 超时即符合预期（无广播到达）
+    # 不应收到任何 voice.state；receive_nothing 轮询短窗口验证无消息
+    # （比 receive_json_from(timeout=...) 安全：后者超时会取消 asgiref future，
+    #  导致后续 disconnect 抛 CancelledError）
+    assert await communicator.receive_nothing(timeout=0.3)
 
     await communicator.disconnect()
 
@@ -151,8 +152,10 @@ def test_stale_members_marked_left_and_broadcast(auth_client):
     services.join_channel(ch, user)
     member_other = services.join_channel(ch, other)
 
-    member_other.last_seen_at = timezone.now() - timezone.timedelta(seconds=9999)
-    member_other.save(update_fields=["last_seen_at"])
+    # 用 queryset.update() 绕过 last_seen_at(auto_now) 的 save 覆盖：直接把时间拨回 9999 秒前
+    VoiceChannelMember.objects.filter(pk=member_other.pk).update(
+        last_seen_at=timezone.now() - timezone.timedelta(seconds=9999)
+    )
 
     cleared = services.mark_stale_members_left(ch, timeout_seconds=120)
     assert cleared == 1

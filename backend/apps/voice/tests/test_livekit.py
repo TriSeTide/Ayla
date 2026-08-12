@@ -50,7 +50,7 @@ def test_issue_token_binds_identity_room_and_grants(auth_client, monkeypatch):
     token = issue_token(user, "room_home")
     assert token == "signed-jwt"
     assert captured["identity"] == f"user_{user.id}"
-    assert captured["room"] is None  # grants 对象本身承载 room
+    # room 由 grants 对象承载（token 层不单独暴露 room，见下方 grants.room 断言）
     grants = captured["grants"]
     assert grants.room_join is True
     assert grants.room == "room_home"

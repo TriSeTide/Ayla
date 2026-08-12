@@ -105,11 +105,10 @@ def test_members_list_only_members(auth_client):
 @pytest.mark.django_db
 def test_rename_only_owner(auth_client):
     client, owner = auth_client()
-    _, other = auth_client(username="other")
     ch = VoiceChannel.objects.create(name="原名", room_name="room_rn", owner=owner)
 
-    # other 客户端改名称 → 403（非 owner）
-    other_client, _ = auth_client(username="other")
+    # 非 owner 客户端改名称 → 403（用独立用户名，避免与上方 other 用户 email 撞唯一约束）
+    other_client, _ = auth_client(username="other_rename")
     resp = other_client.patch(f"/api/v1/voice/channels/{ch.id}/", {"name": "非法改名"}, format="json")
     assert resp.status_code == 403
 

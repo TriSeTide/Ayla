@@ -203,11 +203,13 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def elysia_reply(self, event):
-        """爱莉回复投影（M4-4 桥接，来自 elysia_bridge.services.project_elysia_reply）。
+        """爱莉回复投影（M4-4 桥接 + M4-5 语音转写投影，来源见 ``source``）。
 
         事件已按幂等键落库为应用内 Message；这里把「爱莉的这条回复」推给
         该 conversation 组的在线用户。sender_id 即爱莉 profile 绑定的应用内 user。
         应用侧只转发投影内容，绝不生成爱莉的第一人称文本（AGENTS.md §4.1）。
+        ``source`` 区分投影来源：chat（M4-4 聊天投影）与 voice_call（M4-5 语音
+        转写投影，source 缺失时默认 chat，保持 M4-4 老事件兼容）。
         """
         await self.send_json(
             {
@@ -221,6 +223,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "seq": event["seq"],
                     "event_id": event["event_id"],
                     "ts": event["ts"],
+                    "source": event.get("source", "chat"),
                 },
             }
         )

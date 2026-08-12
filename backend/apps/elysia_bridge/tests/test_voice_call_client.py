@@ -53,10 +53,13 @@ class MockTransport(httpx.MockTransport):
         return handler
 
 
-def _client(handlers) -> ElysiaClient:
+def _client(transport: httpx.MockTransport) -> ElysiaClient:
+    """包装已构造的 MockTransport：调用方以 ``transport = MockTransport({...})``
+    构造后传入，这里直接复用实例（不要再包一层 MockTransport，否则把实例
+    当 handlers dict 用，``.get`` 必然 AttributeError）。"""
     return ElysiaClient(
         base_url=BASE,
-        client=httpx.Client(transport=MockTransport(handlers), base_url=BASE),
+        client=httpx.Client(transport=transport, base_url=BASE),
     )
 
 

@@ -1,22 +1,20 @@
 """
 语音频道 WebSocket Consumer —— 订阅频道组 `voice_chan_{id}` 收 `voice.state` 广播（M4-5 §8）。
 
-复用 M4-2 Chat WS 的 JWT 认证与组订阅模式；语音频道用独立组命名空间 `voice_chan_{id}`，
-避免与会话组 `chat_conv_{id}` 语义混淆/撞车。
+复用 M4-2 Chat WS 的 JWT 认证与组订阅模式（`/ws/voice/?token=<jwt>`，解析见
+`apps.accounts.consumers._jwt_user_from_scope`）；语音频道用独立组命名空间
+`voice_chan_{id}`，避免与会话组 `chat_conv_{id}` 语义混淆/撞车。
 """
 import logging
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from apps.accounts.consumers import _jwt_user_from_scope
+
 from .services import _voice_group_name, user_in_channel
 
 logger = logging.getLogger(__name__)
-
-
-def _jwt_user_from_scope(scope):
-    """从 scope 取已认证用户（复用 chat consumers 的同款 JWT 中间件）。"""
-    return scope.get("user")
 
 
 @database_sync_to_async
@@ -44,7 +42,7 @@ class VoiceConsumer(AsyncJsonWebsocketConsumer):
     """WS 订阅语音频道，接收 voice.state 广播。"""
 
     async def connect(self):
-        self.user = _jwt_user_from_scope(self.scope)
+        self.user = await database_sync_to_async(_jwt_user_from_scope)(self.scope)
         if self.user is None or not self.user.is_authenticated:
             await self.close(code=4401)
             return

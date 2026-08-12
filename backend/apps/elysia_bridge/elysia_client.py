@@ -579,9 +579,9 @@ class ElysiaClient:
         text: str,
         idempotency_key: str,
     ) -> CommandAccepted:
-        """POST /voice-calls/{call_id}/text —— 向实时会话注入文本（1~8000 字符）。"""
-        if not text or not (1 <= len(text) <= 8000):
-            raise ValueError("voice call text must be 1~8000 chars")
+        """POST /voice-calls/{call_id}/text —— 向实时会话注入文本（1~8000 字符，拒绝纯空白）。"""
+        if not text or not text.strip() or not (1 <= len(text) <= 8000):
+            raise ValueError("voice call text must be 1~8000 chars and not blank")
         response = self._client.post(
             f"/api/v1/voice-calls/{call_id}/text",
             json={"text": text},

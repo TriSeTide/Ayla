@@ -675,13 +675,17 @@ def project_voice_transcript(
         return already
 
     # 广播到会话组（走 M4-2 Chat WS，前端收到 elysia.reply 同款事件）
-    event = _voice_reply_event(message)
+    event = _voice_reply_event(message, event_id)
     _group_send_sync(message.conversation_id, event)
     return message
 
 
-def _voice_reply_event(message: Message) -> dict:
-    """由已落库的爱莉语音消息构造 elysia.reply 事件（source=voice_call）。"""
+def _voice_reply_event(message: Message, event_id: str) -> dict:
+    """由已落库的爱莉语音消息构造 elysia.reply 事件（source=voice_call）。
+
+    event_id 取投影调用方传入的 transcript event_id（与幂等键 `elysia-voice-<hash>` 同源），
+    供 ChatConsumer.elysia_reply 原样透传（前端可据此去重/溯源）。
+    """
     return {
         "type": "elysia.reply",
         "conversation_id": str(message.conversation_id),
@@ -692,6 +696,7 @@ def _voice_reply_event(message: Message) -> dict:
         "media": message.media_id,
         "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
         "seq": message.seq,
+        "event_id": event_id,
         "ts": message.created_at.isoformat(),
         "source": "voice_call",
     }
@@ -714,7 +719,7 @@ async def aproject_voice_transcript(
         profile, call_id, entry, event_id=event_id
     )
     if message is not None:
-        event = _voice_reply_event(message)
+        event = _voice_reply_event(message, event_id)
         await _group_send_async(message.conversation_id, event)
     return message
 
