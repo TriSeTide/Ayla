@@ -1,11 +1,13 @@
 """弹幕契约测试（M4-6 §8.1）：落库、`live_{id}` 组广播、历史分页、越权、WS。"""
 import pytest
+from channels.db import database_sync_to_async
 from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.live import consumers, services
-from apps.live.models import Danmaku
+from apps.live.models import Danmaku, LiveChannel
+from apps.live.services import gen_stream_key
 
 
 class _RecordingLayer:
@@ -104,15 +106,42 @@ def _jwt_query(user) -> str:
     return f"token={token}"
 
 
+@database_sync_to_async
+def _mk_user(auth_client, **kwargs):
+    """在 async 测试里经 sync_to_async 调用同步 fixture（避免 SynchronousOnlyOperation）。"""
+    _, user = auth_client(**kwargs)
+    return user
+
+
+@database_sync_to_async
+def _make_channel(owner, title="直播间"):
+    return LiveChannel.objects.create(title=title, owner=owner, stream_key=gen_stream_key())
+
+
+def _live_ws_app():
+    """URLRouter 包装的 DanmakuConsumer（模拟真实 /ws/live/{id}/ 路由，scope 含 url_route）。"""
+    from channels.routing import URLRouter
+    from django.urls import re_path
+
+    return URLRouter(
+        [
+            re_path(
+                r"^ws/live/(?P<channel_id>\d+)/$",
+                consumers.DanmakuConsumer.as_asgi(),
+            )
+        ]
+    )
+
+
 @pytest.mark.django_db
 @pytest.mark.asyncio
-async def test_ws_receives_danmaku_broadcast(auth_client, live_channel_factory):
+async def test_ws_receives_danmaku_broadcast(auth_client, transactional_db):
     """WS：JWT 认证成功后加入 live_{id} 组，收到弹幕实时帧。"""
-    _, user = auth_client()
-    ch = live_channel_factory(owner=user)
+    user = await _mk_user(auth_client)
+    ch = await _make_channel(user)
     path = f"/ws/live/{ch.id}/?{_jwt_query(user)}"
 
-    communicator = WebsocketCommunicator(consumers.DanmakuConsumer.as_asgi(), path)
+    communicator = WebsocketCommunicator(_live_ws_app(), path)
     connected, _ = await communicator.connect()
     assert connected
 
@@ -136,21 +165,21 @@ async def test_ws_receives_danmaku_broadcast(auth_client, live_channel_factory):
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-async def test_ws_unauthorized_closed(auth_client, live_channel_factory):
+async def test_ws_unauthorized_closed(auth_client, transactional_db):
     """WS：无 token/非法 token → 连接被关闭（4401）。"""
-    _, user = auth_client()
-    ch = live_channel_factory(owner=user)
+    user = await _mk_user(auth_client)
+    ch = await _make_channel(user)
 
     # 无 token
     communicator = WebsocketCommunicator(
-        consumers.DanmakuConsumer.as_asgi(), f"/ws/live/{ch.id}/"
+        _live_ws_app(), f"/ws/live/{ch.id}/"
     )
     connected, _ = await communicator.connect()
     assert not connected
 
     # 非法 token
     communicator = WebsocketCommunicator(
-        consumers.DanmakuConsumer.as_asgi(), f"/ws/live/{ch.id}/?token=bad-token"
+        _live_ws_app(), f"/ws/live/{ch.id}/?token=bad-token"
     )
     connected, _ = await communicator.connect()
     assert not connected
@@ -158,11 +187,11 @@ async def test_ws_unauthorized_closed(auth_client, live_channel_factory):
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-async def test_ws_missing_channel_closed(auth_client):
+async def test_ws_missing_channel_closed(auth_client, transactional_db):
     """WS：直播间不存在 → 关闭（4404）。"""
-    _, user = auth_client()
+    user = await _mk_user(auth_client)
     communicator = WebsocketCommunicator(
-        consumers.DanmakuConsumer.as_asgi(), f"/ws/live/9999/?{_jwt_query(user)}"
+        _live_ws_app(), f"/ws/live/9999/?{_jwt_query(user)}"
     )
     connected, _ = await communicator.connect()
     assert not connected
