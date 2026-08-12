@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
     command: --dev
     environment:
-      LIVEKIT_KEYS: ${LIVEKIT_KEYS:-devkey: devsecret}
+      LIVEKIT_KEYS: "${LIVEKIT_KEYS:-devkey: devsecret}"
     ports:
       - "7880:7880"   # WS + WebRTC 信令
       - "7881:7881"   # WebRTC 媒体（UDP）
