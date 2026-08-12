@@ -1,10 +1,10 @@
 /**
- * TypingIndicator：对方正在输入。
+ * TypingIndicator —— 对方正在输入。
  */
 export function TypingIndicator({ typing }: { typing: boolean }) {
   if (!typing) return null;
   return (
-    <div className="typing-indicator">
+    <div className="typing-indicator" role="status">
       <span className="typing-dots">
         <i />
         <i />

@@ -1,0 +1,68 @@
+/**
+ * 设计 token ——「千禧冰樱 / Y2K Frost」唯一落盘处。
+ * 事实源：Ayla/docs/design.md §2 色彩 / §3 字体 / §5 刻度 / §6 签名元素。
+ * 组件内禁止散落裸 hex，一律引用本文件变量。
+ */
+
+:root {
+  /* ---- Core ---- */
+  --ice-100: #ecf0f2;
+  --ice-300: #bdd4e9;
+  --ice-500: #9dbfe6;
+  --slate-500: #7e95bd;
+  --indigo-700: #465b92;
+  --sakura-100: #fcd8ff;
+  --sakura-300: #f9b0ff;
+  --glow-500: #f796ff;
+  --pink-500: #f17eb3;
+  --grape-700: #722e88;
+  --surface: #fffafb;
+
+  /* ---- Functional ---- */
+  --bg-aurora: linear-gradient(160deg, #bdd4e9 0%, #ecf0f2 38%, #fcd8ff 100%);
+  --glass-bg: rgba(255, 250, 251, 0.55);
+  --glass-bg-strong: rgba(255, 250, 251, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.65);
+  --text-primary: #465b92;
+  --text-secondary: #7e95bd;
+  --text-on-pink: #722e88;
+  --bubble-self: linear-gradient(135deg, #9dbfe6, #bdd4e9);
+  --bubble-elysia: linear-gradient(135deg, #fcd8ff, #f9b0ff);
+  --bubble-other: rgba(255, 250, 251, 0.72);
+  --glow-shadow: 0 0 16px rgba(247, 150, 255, 0.45);
+  --ring-online: conic-gradient(from 210deg, #9dbfe6, #f9b0ff, #f796ff, #9dbfe6);
+  --card-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+
+  /* ---- Semantic ---- */
+  --success: #3fa97c;
+  --warning: #e8a33d;
+  --destructive: #d64d6e;
+  --focus-ring: 2px solid #f796ff;
+
+  /* ---- Typography ---- */
+  --font-display: "Fredoka", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-body: "Nunito", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-utility: "Space Grotesk", "PingFang SC", monospace;
+
+  /* ---- Spacing / Radius scales ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+
+  --radius-sm: 8px;
+  --radius-input: 12px;
+  --radius-card: 20px;
+  --radius-panel: 24px;
+  --radius-bubble: 18px;
+  --radius-pill: 999px;
+
+  /* ---- Motion ---- */
+  --dur-fast: 180ms;
+  --dur-panel: 240ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+}

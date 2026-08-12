@@ -1,81 +1,26 @@
 /**
- * MessageBubble：单条消息气泡（文档 §2 components/chat/MessageBubble.tsx）。
+ * MessageBubble —— 单条消息气泡。
  *
- * - 类型分派：text 渲染文本；image/voice/file/emoji 渲染占位（M4-3 未做，只渲染）；
- * - 自己/他人区分（sender_id vs 当前用户）；
- * - 已读状态（自己发的最新消息显示"已读/未读"）；撤回态（显示"已撤回"）；
- * - 引用条（点击消息 → 引用 → 发送）。
+ * 视觉（design.md §4 Chat Bubbles）：
+ * - 自己：冰蓝渐变，右下 6px 小角；爱莉：樱粉渐变 + grape 字（专属，不可复用）；
+ *   其他用户：玻璃底；
+ * - 媒体消息（image/emoji/voice/file）走 MediaContent 真实渲染（M5-2.1）；
+ * - 引用回复：左 3px ice 竖条 + 弱化一层；
+ * - 撤回态弱化 + 「已撤回」标签。
  */
-import type { ChatMessage, MessageType } from "../../api/types";
+import type { ChatMessage } from "../../api/types";
 import { RECALL_SECONDS } from "../../hooks/useChat";
-
-const TYPE_LABEL: Record<MessageType, string> = {
-  text: "文本",
-  image: "图片",
-  voice: "语音",
-  file: "文件",
-  emoji: "表情",
-  system: "系统",
-};
+import { MediaContent } from "./MediaContent";
+import { IconQuote, IconUndo } from "../icons";
 
 function timeAgo(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const now = Date.now();
-  const diff = (now - d.getTime()) / 1000;
+  const diff = (Date.now() - d.getTime()) / 1000;
   if (diff < 60) return "刚刚";
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  const h = d.getHours().toString().padStart(2, "0");
-  const m = d.getMinutes().toString().padStart(2, "0");
-  return `${h}:${m}`;
-}
-
-export function MessageBubble({
-  message,
-  isSelf,
-  onQuote,
-}: {
-  message: ChatMessage;
-  isSelf: boolean;
-  onQuote?: (msg: ChatMessage) => void;
-}) {
-  const recalled = message.status === "recalled";
-
-  return (
-    <div className={`message-row ${isSelf ? "self" : "peer"}`}>
-      <div className={`bubble ${recalled ? "recalled" : ""} type-${message.type}`}>
-        {message.type === "text" ? (
-          <p className="bubble-text">{message.content || " "}</p>
-        ) : (
-          <div className="media-placeholder">
-            <span className="media-icon">
-              {message.type === "image" && "🖼"}
-              {message.type === "voice" && "🎙"}
-              {message.type === "file" && "📎"}
-              {message.type === "emoji" && "😀"}
-              {message.type === "system" && "ℹ"}
-            </span>
-            <span className="media-label">{TYPE_LABEL[message.type]}消息（占位）</span>
-            {message.content && <span className="media-desc">{message.content}</span>}
-          </div>
-        )}
-        <div className="bubble-meta">
-          <span className="bubble-time">{timeAgo(message.created_at)}</span>
-          {isSelf && !recalled && (
-            <span className={`read-mark ${message.status === "read" ? "read" : ""}`}>
-              {message.status === "read" ? "已读" : "未读"}
-            </span>
-          )}
-        </div>
-      </div>
-      {!recalled && message.type !== "system" && onQuote && (
-        <button className="quote-btn" onClick={() => onQuote(message)} title="引用回复">
-          引用
-        </button>
-      )}
-      {recalled && <span className="recalled-label">已撤回</span>}
-    </div>
-  );
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** 撤回窗口判断（仅自己、未撤回、created_at 在 120s 内） */
@@ -88,4 +33,100 @@ export function canRecall(
   const created = new Date(message.created_at).getTime();
   if (Number.isNaN(created)) return false;
   return (Date.now() - created) / 1000 <= RECALL_SECONDS;
+}
+
+const MEDIA_TYPES = new Set(["image", "voice", "file", "emoji"]);
+
+export function MessageBubble({
+  message,
+  isSelf,
+  isElysia = false,
+  senderName,
+  quoteText,
+  onQuote,
+  onRecall,
+}: {
+  message: ChatMessage;
+  isSelf: boolean;
+  /** 爱莉消息（专属气泡样式），由父级按 sender 判定 */
+  isElysia?: boolean;
+  /** 群聊显示发送者名 */
+  senderName?: string | null;
+  /** 被引用消息的预览文本（父级解析） */
+  quoteText?: string | null;
+  onQuote?: (msg: ChatMessage) => void;
+  onRecall?: (msg: ChatMessage) => void;
+}) {
+  const recalled = message.status === "recalled";
+  const isMedia = MEDIA_TYPES.has(message.type);
+
+  const bubbleClass = recalled
+    ? "bubble bubble-other recalled"
+    : isSelf
+      ? "bubble bubble-self"
+      : isElysia
+        ? "bubble bubble-elysia"
+        : "bubble bubble-other";
+
+  return (
+    <div className={`msg-row ${isSelf ? "self" : "peer"}`}>
+      <div className="msg-body">
+        {!isSelf && senderName && <span className="msg-sender">{senderName}</span>}
+        <div className={`${bubbleClass} ${isMedia && !recalled ? "bubble-media" : ""}`}>
+          {quoteText != null && !recalled && (
+            <div className="quote-strip" title={quoteText}>
+              {quoteText}
+            </div>
+          )}
+          {recalled ? (
+            <span>{isSelf ? "你撤回了一条消息" : "对方撤回了一条消息"}</span>
+          ) : message.type === "system" ? (
+            <span>{message.content}</span>
+          ) : isMedia ? (
+            <MediaContent msg={message} />
+          ) : (
+            message.content || " "
+          )}
+          {/* 媒体消息附带的说明文字（image/voice 的 content 为补充说明） */}
+          {isMedia && !recalled && message.type !== "file" && message.content?.trim() && (
+            <div style={{ padding: "4px 6px 2px", fontSize: 14 }}>{message.content}</div>
+          )}
+        </div>
+        <div className="bubble-meta">
+          <span className="bubble-time">{timeAgo(message.created_at)}</span>
+          {isSelf && !recalled && (
+            <span className={`read-mark ${message.status === "read" ? "read" : ""}`}>
+              {message.status === "read" ? "已读" : "未读"}
+            </span>
+          )}
+        </div>
+      </div>
+      {!recalled && message.type !== "system" && (onQuote || onRecall) && (
+        <div className="msg-actions">
+          {onQuote && (
+            <button
+              type="button"
+              className="msg-action-btn"
+              onClick={() => onQuote(message)}
+              aria-label="引用回复"
+            >
+              <IconQuote width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+              引用
+            </button>
+          )}
+          {onRecall && (
+            <button
+              type="button"
+              className="msg-action-btn"
+              onClick={() => onRecall(message)}
+              aria-label="撤回消息"
+            >
+              <IconUndo width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+              撤回
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

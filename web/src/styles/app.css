@@ -1,0 +1,1313 @@
+/**
+ * 组件样式 ——「千禧冰樱 / Y2K Frost」。
+ * 事实源：design.md §4 组件配方 / §5 布局 / §6 层级。
+ * 所有颜色、字体、圆角、间距一律引用 tokens.css 变量。
+ */
+
+/* ================= 通用原语 ================= */
+
+/* Primary 按钮：indigo 实底胶囊，hover 加辉光（design.md §4 Buttons） */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out);
+}
+
+.btn-primary {
+  background: var(--indigo-700);
+  color: #fffafb;
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: var(--glow-shadow);
+}
+
+/* Glow CTA：每屏至多 1 个，常驻辉光（design.md §4 Buttons） */
+.btn-glow {
+  background: linear-gradient(135deg, #f9b0ff, #f796ff);
+  color: var(--grape-700);
+  box-shadow: var(--glow-shadow);
+}
+
+.btn-glow:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+/* Ghost：透明底 + 细描边（design.md §4 Buttons） */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(70, 91, 146, 0.35);
+  color: var(--indigo-700);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* 输入框：不透明暖白底保可读，focus 转辉光边（design.md §4 Inputs） */
+.field {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--ice-300);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.field::placeholder {
+  color: var(--slate-500);
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+}
+
+/* 玻璃卡片（design.md §4 Cards） */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-inset);
+}
+
+/* 实心卡片（内容密集区，design.md §4 Cards） */
+.solid-card {
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+
+/* backdrop-filter 降级（design.md §9） */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-card,
+  .auth-card,
+  .chat-sidebar,
+  .conv-item,
+  .bubble-other,
+  .chat-header,
+  .composer,
+  .profile-topbar {
+    background: rgba(255, 250, 251, 0.92);
+  }
+}
+
+/* ================= 认证页 ================= */
+/* 居中单卡悬浮极光上，一屏内蓝粉双系并置（design.md §8 Do） */
+
+.auth-page {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+}
+
+.auth-card {
+  width: min(400px, 100%);
+  padding: var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--glass-inset);
+}
+
+.auth-brand {
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  line-height: 1.15;
+  text-align: center;
+  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.auth-subtitle {
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: calc(var(--sp-3) * -1);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+/* 错误紧贴字段下方（design.md §4 Inputs / ui-ux-pro-max §8） */
+.field-error {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--destructive);
+}
+
+.auth-error {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(214, 77, 110, 0.1);
+  border: 1px solid rgba(214, 77, 110, 0.35);
+  color: var(--destructive);
+  font-size: 13px;
+}
+
+.auth-switch {
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ================= 头像 · 在线光环（签名元素） ================= */
+/* design.md §6：2.5px 锥形渐变环；爱莉额外呼吸辉光；离线褪灰环 */
+
+.avatar {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(135deg, var(--ice-500), var(--ice-300));
+  color: var(--indigo-700);
+  font-family: var(--font-display);
+  font-weight: 500;
+  user-select: none;
+}
+
+.avatar-ring {
+  position: absolute;
+  inset: -2.5px;
+  border-radius: var(--radius-pill);
+  background: var(--ring-online);
+  z-index: -1;
+}
+
+.avatar-ring::after {
+  content: "";
+  position: absolute;
+  inset: 2.5px;
+  border-radius: var(--radius-pill);
+  background: inherit;
+}
+
+/* 光环实现：外层渐变圆环，头像本体盖住内圈 */
+.avatar-halo {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  padding: 2.5px;
+  background: var(--ring-online);
+}
+
+.avatar-halo.is-offline {
+  background: var(--ice-100);
+}
+
+.avatar-halo.is-elysia {
+  animation: halo-breathe 3.2s ease-in-out infinite;
+}
+
+.avatar-halo > .avatar-core {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-weight: 500;
+  user-select: none;
+  overflow: hidden;
+}
+
+.avatar-core-user {
+  background: linear-gradient(135deg, var(--ice-500), var(--ice-300));
+  color: var(--indigo-700);
+}
+
+.avatar-core-elysia {
+  background: linear-gradient(135deg, var(--sakura-100), var(--sakura-300));
+  color: var(--grape-700);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-halo.is-elysia {
+    animation: none;
+    box-shadow: 0 0 8px rgba(247, 150, 255, 0.5);
+  }
+}
+
+/* ================= 聊天页布局 ================= */
+/* 左玻璃侧栏 300px + 主区透出极光（design.md §5 主布局） */
+
+.chat-page {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.chat-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-right: 1px solid var(--glass-border);
+  overflow: hidden;
+}
+
+.chat-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.chat-brand {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---- 爱莉入口卡：粉底 grape 字，辉光归属爱莉身份（design.md §2 辉光纪律） ---- */
+
+.elysia-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3);
+  border-radius: var(--radius-card);
+  background: linear-gradient(135deg, var(--sakura-100), var(--sakura-300));
+  border: 1px solid rgba(247, 150, 255, 0.5);
+  text-align: left;
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out);
+}
+
+.elysia-entry:hover {
+  box-shadow: var(--glow-shadow);
+}
+
+.elysia-entry-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.elysia-entry-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--grape-700);
+}
+
+.elysia-entry-sub {
+  font-size: 13px;
+  color: var(--grape-700);
+  opacity: 0.8;
+}
+
+.elysia-entry-arrow {
+  margin-left: auto;
+  color: var(--grape-700);
+  font-size: 18px;
+}
+
+/* ---- 会话列表 ---- */
+
+.conv-scroll {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 calc(var(--sp-2) * -1);
+  padding: 0 var(--sp-2);
+}
+
+.conv-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3);
+  border-radius: 16px;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.conv-item:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* 选中态：ice 胶囊底（design.md §4 Nav/Sidebar） */
+.conv-item.active {
+  background: rgba(157, 191, 230, 0.35);
+}
+
+.conv-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conv-item-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-item-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 未读徽标：pink 实底白字小圆点（design.md §4 Tags/Badges） */
+.conv-unread {
+  flex-shrink: 0;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+  color: #fffafb;
+  font-family: var(--font-utility);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.conv-empty,
+.conv-loading {
+  padding: var(--sp-6) var(--sp-3);
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ---- 会话搜索/发起 ---- */
+
+.conv-new-btn {
+  width: 100%;
+}
+
+.conv-search-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.search-result-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-input);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.search-result-row:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.search-result-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.search-empty {
+  padding: var(--sp-3);
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.group-create {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* ---- 聊天窗口 ---- */
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.chat-header-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.chat-header-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.chat-notice {
+  margin: var(--sp-3) var(--sp-6) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(232, 163, 61, 0.12);
+  border: 1px solid rgba(232, 163, 61, 0.4);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 消息滚动区：实心卡片浮于极光（design.md §6 层级） */
+.message-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6);
+}
+
+/* 气泡列最大 720px 居中偏左（design.md §5） */
+.message-column {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.load-more-btn {
+  align-self: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-pill);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* 时间分隔条 */
+.time-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-2) 0;
+}
+
+.time-divider::before,
+.time-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(126, 149, 189, 0.3);
+}
+
+.time-divider > span {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+
+/* ---- 消息气泡（design.md §4 Chat Bubbles） ---- */
+
+.msg-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  animation: frost-rise var(--dur-fast) var(--ease-out);
+}
+
+.msg-row.self {
+  flex-direction: row-reverse;
+}
+
+.msg-body {
+  max-width: 72%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.msg-row.self .msg-body {
+  align-items: flex-end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-row {
+    animation: none;
+  }
+}
+
+.bubble {
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 自己：冰蓝渐变 + indigo 字，右下 6px 小角 */
+.bubble-self {
+  background: var(--bubble-self);
+  color: var(--indigo-700);
+  border-radius: var(--radius-bubble) var(--radius-bubble) 6px var(--radius-bubble);
+}
+
+/* 爱莉：樱粉渐变 + grape 字 + 粉描边，左下 6px —— 爱莉专属，不可复用 */
+.bubble-elysia {
+  background: var(--bubble-elysia);
+  color: var(--grape-700);
+  border: 1px solid rgba(247, 150, 255, 0.5);
+  border-radius: var(--radius-bubble) var(--radius-bubble) var(--radius-bubble) 6px;
+}
+
+/* 其他用户：玻璃底 + indigo 字，左下 6px */
+.bubble-other {
+  background: var(--bubble-other);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  color: var(--indigo-700);
+  border-radius: var(--radius-bubble) var(--radius-bubble) var(--radius-bubble) 6px;
+}
+
+.bubble.recalled {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* 群聊发送者名 */
+.msg-sender {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 0 var(--sp-1);
+}
+
+.bubble-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1);
+}
+
+.bubble-time {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+
+.read-mark {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.read-mark.read {
+  color: var(--success);
+}
+
+/* 引用竖条：左 3px ice + 弱化一层（design.md §4 Chat Bubbles） */
+.quote-strip {
+  border-left: 3px solid var(--ice-500);
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-1);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 250, 251, 0.45);
+  opacity: 0.85;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* 气泡操作（引用/撤回）：hover 浮现，键盘可达 */
+.msg-actions {
+  display: flex;
+  gap: var(--sp-1);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.msg-row:hover .msg-actions,
+.msg-row:focus-within .msg-actions {
+  opacity: 1;
+}
+
+.msg-action-btn {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  transition: color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.msg-action-btn:hover {
+  color: var(--indigo-700);
+  box-shadow: var(--glow-shadow);
+}
+
+.recalled-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+  align-self: center;
+}
+
+.empty-chat {
+  padding: var(--sp-12) 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ---- 媒体消息（M5-2.1） ---- */
+
+.media-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-input);
+  background: var(--surface);
+}
+
+.media-image {
+  display: block;
+  max-width: 320px;
+  max-height: 320px;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+}
+
+.media-emoji {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+/* 媒体气泡：媒体消息不需要文字气泡底色，内容自成卡片 */
+.bubble-media {
+  padding: var(--sp-1);
+}
+
+/* 语音：波形 + 时长胶囊 */
+.voice-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 220px;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.voice-play {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--indigo-700);
+  color: #fffafb;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.voice-play:hover {
+  box-shadow: var(--glow-shadow);
+}
+
+.voice-wave {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  object-fit: fill;
+  border-radius: var(--radius-sm);
+}
+
+.voice-duration {
+  flex-shrink: 0;
+  font-family: var(--font-utility);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+
+/* 文件：图标 + 文件名 + 大小 + 下载 */
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 240px;
+  max-width: 320px;
+  padding: var(--sp-3);
+}
+
+.file-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-input);
+  background: var(--ice-100);
+  color: var(--indigo-700);
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-size {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.file-download {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(70, 91, 146, 0.35);
+  color: var(--indigo-700);
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.file-download:hover {
+  background: rgba(157, 191, 230, 0.18);
+  box-shadow: var(--glow-shadow);
+}
+
+/* 媒体占位：加载中 / 失败重试 / 未知 */
+.media-placeholder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 200px;
+  min-height: 56px;
+  padding: var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.media-placeholder.failed {
+  color: var(--destructive);
+  border-color: rgba(214, 77, 110, 0.35);
+}
+
+.media-retry {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--indigo-700);
+  border: 1px solid rgba(70, 91, 146, 0.35);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.media-retry:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* ---- Typing ---- */
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-6);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.typing-dots > i {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--slate-500);
+  animation: frost-pulse 1.2s ease-in-out infinite;
+}
+
+.typing-dots > i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots > i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* ---- 输入区 ---- */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-6) var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-top: 1px solid var(--glass-border);
+}
+
+.composer-error {
+  font-size: 13px;
+  color: var(--destructive);
+}
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.composer-input {
+  flex: 1;
+  resize: none;
+  max-height: 140px;
+  line-height: 1.55;
+}
+
+.composer-send {
+  flex-shrink: 0;
+}
+
+/* 引用条（正在引用） */
+.quote-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  border-left: 3px solid var(--ice-500);
+  background: rgba(255, 250, 251, 0.6);
+}
+
+.quote-bar-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.quote-bar-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.quote-bar-text {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quote-bar-cancel {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.quote-bar-cancel:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* ---- 聊天空态：空屏是行动的邀请 ---- */
+
+.chat-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-8);
+}
+
+.chat-empty-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.chat-empty-sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ---- 演示横幅 ---- */
+
+.demo-banner {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(232, 163, 61, 0.12);
+  border: 1px solid rgba(232, 163, 61, 0.4);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---- 侧栏底部：状态 + 用户 ---- */
+
+.chat-sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--glass-border);
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-100);
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background: var(--success);
+}
+
+.status-dot.connecting {
+  background: var(--warning);
+}
+
+.status-dot.offline {
+  background: var(--slate-500);
+}
+
+.user-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border-radius: var(--radius-input);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.user-strip:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.user-strip-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ================= 个人页 / 设置页 ================= */
+
+.profile-page {
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--sp-8) var(--sp-6);
+}
+
+.profile-column {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.profile-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.profile-topbar-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.profile-card {
+  padding: var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.profile-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.profile-names {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.profile-nickname {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.profile-username {
+  font-family: var(--font-utility);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+
+.profile-signature {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* 在线状态 chip：sakura 底 + grape 字胶囊（design.md §4 Tags/Badges） */
+.status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.status-chip {
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-pill);
+  background: var(--sakura-300);
+  color: var(--grape-700);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out);
+}
+
+.status-chip.active {
+  box-shadow: var(--glow-shadow);
+}
+
+.status-chip:hover {
+  filter: brightness(1.04);
+}
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.profile-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.profile-actions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+}
+
+.profile-saved {
+  font-size: 13px;
+  color: var(--success);
+}
+
+.profile-danger {
+  padding: var(--sp-6);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.profile-danger-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.btn-destructive {
+  background: var(--destructive);
+  color: #fffafb;
+}
+
+.btn-destructive:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+/* ================= 响应式（design.md §9） ================= */
+
+@media (max-width: 768px) {
+  .chat-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(320px, 85vw);
+    transform: translateX(-100%);
+    transition: transform var(--dur-panel) var(--ease-out);
+    box-shadow: 0 0 32px rgba(70, 91, 146, 0.18);
+  }
+
+  .chat-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgba(70, 91, 146, 0.25);
+  }
+
+  /* 移动端辉光降 30%（design.md §9 省电省性能） */
+  .btn-glow,
+  .avatar-halo.is-elysia,
+  .elysia-entry:hover {
+    box-shadow: 0 0 11px rgba(247, 150, 255, 0.32);
+  }
+
+  .message-scroll {
+    padding: var(--sp-4) var(--sp-3);
+  }
+
+  .composer {
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  }
+
+  .msg-body {
+    max-width: 84%;
+  }
+}
+
+@media (min-width: 769px) {
+  .sidebar-toggle {
+    display: none;
+  }
+}

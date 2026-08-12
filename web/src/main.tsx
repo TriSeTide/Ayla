@@ -10,7 +10,9 @@ import App from "./App";
 import { useAuthStore } from "./stores/auth";
 import { chatWS } from "./ws/chat";
 import { presenceClient } from "./ws/presence";
-import "./styles/global.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/app.css";
 
 async function bootstrap() {
   // 恢复会话（无 refresh 则直接标记 initialized）

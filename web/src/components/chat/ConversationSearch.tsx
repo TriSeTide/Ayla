@@ -1,14 +1,13 @@
 /**
- * ConversationSearch：搜索用户 → 发起私聊 / 建群（文档 §3.4 / §2 components/chat/ConversationSearch.tsx）。
- *
- * - 输入关键词搜索用户（GET /users/search/?q=）；
- * - 点击用户 → 发起私聊（POST /conversations/private/ {user_id}）；
- * - 勾选多人 + 输入群名 → 建群（POST /conversations/ {title, member_ids[]}）。
+ * ConversationSearch —— 搜索用户 → 发起私聊 / 勾选多人建群。
+ * 逻辑不变（GET /users/search/、POST /conversations/private/、POST /conversations/），
+ * 视觉按 design.md 玻璃面板 + 字段错误就近展示。
  */
 import { useRef, useState } from "react";
 import * as chatApi from "../../api/chat";
 import { searchUsers } from "../../api/users";
 import type { UserPublic } from "../../api/types";
+import { IconClose, IconPlus } from "../icons";
 
 export function ConversationSearch({
   currentUserId,
@@ -88,64 +87,76 @@ export function ConversationSearch({
 
   if (!open) {
     return (
-      <button className="conv-search-toggle" onClick={() => setOpen(true)}>
-        ＋ 新会话
+      <button type="button" className="btn btn-ghost conv-new-btn" onClick={() => setOpen(true)}>
+        <IconPlus width={15} height={15} />
+        新会话
       </button>
     );
   }
 
   return (
-    <div className="conv-search">
-      <div className="conv-search-head">
-        <strong>发起会话</strong>
-        <button className="conv-search-close" onClick={reset}>
-          ×
+    <div className="glass-card conv-search-panel">
+      <div className="chat-sidebar-head">
+        <strong style={{ fontSize: 14 }}>发起会话</strong>
+        <button type="button" className="quote-bar-cancel" onClick={reset} aria-label="关闭">
+          <IconClose width={14} height={14} />
         </button>
       </div>
       <input
+        className="field"
         autoFocus
         value={query}
         onChange={(e) => doSearch(e.target.value)}
         placeholder="搜索用户名 / 昵称"
       />
-      {error && <div className="send-error">{error}</div>}
-      <ul className="search-results">
+      {error && <div className="field-error">{error}</div>}
+      <ul>
         {results.map((u) => (
-          <li key={u.id} className="search-row">
-            <span className="search-user">
-              <span className="avatar">{u.nickname?.[0] ?? u.username[0]}</span>
-              {u.nickname || u.username}
-            </span>
-            <label className="search-actions">
-              <button onClick={() => void openPrivate(u)} disabled={busy}>
+          <li key={u.id} className="search-result-row">
+            <span className="search-result-name">{u.nickname || u.username}</span>
+            <span className="search-result-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ minHeight: 32, padding: "0 12px", fontSize: 12 }}
+                onClick={() => void openPrivate(u)}
+                disabled={busy}
+              >
                 私聊
               </button>
-              <input
-                type="checkbox"
-                checked={selected.includes(u.id)}
-                onChange={(e) =>
-                  setSelected((prev) =>
-                    e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
-                  )
-                }
-                title="勾选以加入新群"
-              />
-            </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(u.id)}
+                  onChange={(e) =>
+                    setSelected((prev) =>
+                      e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
+                    )
+                  }
+                />
+                入群
+              </label>
+            </span>
           </li>
         ))}
-        {query.trim() && results.length === 0 && (
-          <li className="search-empty">没有匹配的用户</li>
-        )}
+        {query.trim() && results.length === 0 && <li className="search-empty">没有匹配的用户</li>}
       </ul>
       {selected.length > 0 && (
         <div className="group-create">
           <input
+            className="field"
             value={groupTitle}
             onChange={(e) => setGroupTitle(e.target.value)}
-            placeholder="群名（创建群聊）"
+            placeholder="群名"
           />
-          <button onClick={() => void createGroup()} disabled={busy || !groupTitle.trim()}>
-            建群（{selected.length} 人）
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ flexShrink: 0 }}
+            onClick={() => void createGroup()}
+            disabled={busy || !groupTitle.trim()}
+          >
+            建群（{selected.length}）
           </button>
         </div>
       )}
