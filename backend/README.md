@@ -6,7 +6,7 @@ Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端�
 
 ## 当前里程碑
 
-### M4-6 直播（契约层完成，端到端未验收）
+### M4-6 直播（契约测试通过，端到端未验收）
 
 - [x] `live` 应用：直播频道（LiveChannel）+ 弹幕（Danmaku）
 - [x] SRS 集成（`srs.py`）：HTTP API 状态查询（`SrsClient` 短超时 + `FakeSrsClient` 测试注入）；
