@@ -299,6 +299,14 @@ export function ChatPage() {
       <aside className={`chat-sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="chat-sidebar-head">
           <span className="chat-brand">Ayla</span>
+          <button
+            type="button"
+            className="msg-action-btn"
+            onClick={() => navigate("/voice")}
+            aria-label="打开语音频道"
+          >
+            语音
+          </button>
         </div>
         {demoMode && <div className="demo-banner">演示模式 · 后端未连接</div>}
         {elysiaProfile && <ElysiaEntry profile={elysiaProfile} onEnter={handleEnterElysia} />}

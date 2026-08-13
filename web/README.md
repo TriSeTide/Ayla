@@ -1,11 +1,12 @@
-# Elysia Web 前端（阶段五 M5-1 基座 + M5-2 聊天界面）
+# Elysia Web 前端（阶段五 M5-1 基座 + M5-2 聊天界面 + M5-3 语音界面）
 
 React 18 + Vite + TypeScript + Zustand 的 Elysia 多媒体独立应用前端。
 M5-1 为工程基座：认证闭环、路由守卫、全局状态、API 客户端、Presence WebSocket、健康检查；
-M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送、已读/撤回/引用、历史分页、Chat WebSocket、爱莉入口。
+M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送、已读/撤回/引用、历史分页、Chat WebSocket、爱莉入口；
+M5-3 为语音界面：语音频道（加入/离开/心跳/成员同步）、LiveKit 媒体控制（静音/音量）、爱莉语音控制面闭环。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
-> 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md` 与 `../docs/plans/阶段五-M5-2聊天界面开发步骤.md`。
+> 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`。
 
 ## 当前里程碑（M5-1，已完成）
 
@@ -67,6 +68,48 @@ M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送
 
 - 登录后若会话/消息接口不可达（如后端未启动），自动注入 `DEMO_CONVERSATIONS` 演示会话与消息，界面顶部显示"演示模式"横幅，方便无后端查看与调样式；后端恢复后刷新即走真实数据。
 
+## M5-3 语音界面（已完成，契约层）
+
+- [x] 频道列表/建频道：`GET/POST /voice/channels/`；卡片显示名称/人数/mine 标记
+- [x] 加入/离开：`POST join/` 拿 LiveKit token → `livekit-client` 连房间；`POST leave/` 断开媒体；503（LiveKit 未配置）显式提示"语音服务未配置"，不进入媒体连接
+- [x] 通话控制双层：静音 = `localParticipant.setMicrophoneEnabled()`（媒体层，乐观 UI + 失败回滚）；成员音量 = `RemoteAudioTrack.setVolume()`（本地播放偏好，不落库、刷新重置）
+- [x] 成员同步：`voice.state`（joined/left/heartbeat/muted）合并 + WS 重连后 `GET members/` 对账（voice.state 无补发语义）
+- [x] presence 心跳：在频道期间每 40s `POST heartbeat/`（`VOICE_MEMBER_TIMEOUT_SECONDS` 默认 120s 的 1/3 量级）；403（被超时清理）→ 本地重置未加入态；离开/卸载停止，重复加入不叠加定时器
+- [x] 断线恢复双层：应用 WS（voice.state）指数退避重连 + 重 subscribe + 对账；LiveKit 媒体由 SDK 重连，`Reconnecting` → "媒体重连中"（成员面板不清空），`Disconnected` → 提示 + "重新加入"（媒体断线 ≠ 离开频道，不自动 leave/）
+- [x] 爱莉语音控制面闭环：`POST /elysia/voice-calls/` 创建/复用（reused=true 正常接入）、文本注入（空文本前端拦截）、`POST .../end/` 幂等结束、`POST .../poll/` 增量转写投影（语音页只显示"已投影 N 条"中性计数，爱莉发言在聊天链渲染，单一渲染源）
+- [x] 契约测试：44 个（频道 REST/WS 协议/store 合并/LiveKit 封装/加入离开编排/心跳/爱莉编排）
+
+**未验收（需真实 backend + LiveKit + Elysium）**：双人实时语音互通、静音/音量跨端、断线恢复真实链路、心跳超时清理、爱莉语音 E2E（依赖 M4-5 真实 LiveKit 闭环）。
+
+### 加入流程与心跳节奏
+
+1. `POST join/` → `{token, ws_url, room_name, ttl}`（token 是媒体凭据，不打日志、不跨房间复用）；503 → "语音服务未配置"终止。
+2. LiveKit 连接 → 默认关麦加入（避免误入即广播环境音；麦克风权限被拒时保持静音加入并提示）。
+3. `GET members/` 铺底 → 启动 40s 心跳 → Voice WS `subscribe [channel_id]`（**必须先 join 成功再 subscribe**：非成员订阅被服务端静默忽略）。
+4. 离开：`POST leave/` → 断开 LiveKit → 停心跳 → WS 本地退订（服务端无退订帧）。
+5. 异常路径：join 成功但媒体连接失败 → 调 `leave/` 回滚成员状态；心跳 403 → 视为已被移出，本地重置。
+
+### LiveKit 事件映射（livekit/client.ts）
+
+| RoomEvent | store 状态 | UI |
+|---|---|---|
+| `Reconnecting` | `livekit="reconnecting"` | "媒体重连中…"（成员面板不清空） |
+| `Reconnected` | `livekit="connected"` | 恢复 |
+| `Disconnected` | `livekit="failed"` | 提示 + "重新加入"（走 join 幂等路径） |
+| `TrackMuted/TrackUnmuted` | 成员 muted 标记（媒体事实） | 静音图标以 LiveKit 为准 |
+
+token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token 过期断线 → "重新加入"走 `join/` 幂等拿新 token。
+
+### 爱莉语音闭环用法
+
+- 语音页底部"爱莉语音"面板：打开即 `POST /elysia/voice-calls/`（单并发复用 `reused:true` 不报错）；状态每 5s 轮询；文本注入把真人想对爱莉说的话送入 Voice Live；每 10s `POST .../poll/` 触发增量转写投影，爱莉发言出现在聊天页爱莉会话（语音页只显示投影计数）。
+- 主体性铁律：前端不生成任何爱莉第一人称内容；`voice.state` 里爱莉的技术状态只渲染中性标签（"通话中/输出中/接收中"），禁止主观化文案。
+- 错误语义：profile 未初始化/禁用 → 503；Elysium 侧错误 → 502 "爱莉侧不可用"。
+
+### 已知取舍（M5-3 §9）
+
+- 加入默认关麦；音量不落库（本地偏好，刷新重置）；mute 状态双通道（应用层 `voice.state` 前端不上报，媒体事实以 LiveKit `TrackMuted` 为准）；真人 ↔ 爱莉实时双向音频互通本期不做（M4-5 §5.3 未决点，爱莉语音只到控制面 + 文本注入 + 转写投影）。
+
 ## 目录结构
 
 ```text
@@ -85,34 +128,40 @@ web/
     │   ├── auth.ts         # register / login / refresh / me / profile
     │   ├── users.ts        # users/search（M5-2 补实现：搜索用户发起私聊/建群）
     │   ├── chat.ts         # 会话/消息/已读/撤回/typing/群管理 端点（M5-2）
+    │   ├── voice.ts        # 语音频道 REST + 爱莉 voice-calls 编排端点（M5-3）
     │   ├── elysia.ts       # 爱莉 profile（M5-2，只读）
     │   ├── health.ts       # health/live 与 health
-    │   └── types.ts        # 与 backend 序列化器对齐的 TS 类型（含 M5-2 聊天域类型）
+    │   └── types.ts        # 与 backend 序列化器对齐的 TS 类型（含 M5-2 聊天域、M5-3 语音域）
     ├── stores/
     │   ├── auth.ts         # token / 当前用户 / 登录登出 / 会话恢复
     │   ├── presence.ts     # 在线用户集合 + 连接状态
     │   ├── chat.ts         # 会话列表 + 未读数 + 当前会话（M5-2）
-    │   └── message.ts      # 消息分桶（按 conversation_id，seq 有序去重）（M5-2）
+    │   ├── message.ts      # 消息分桶（按 conversation_id，seq 有序去重）（M5-2）
+    │   └── voice.ts        # 频道列表 + 当前频道 + 成员表 + LiveKit/WS 状态（M5-3）
     ├── ws/
     │   ├── presence.ts     # /ws/presence/ 单例 + 心跳 + 重连
-    │   └── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
+    │   ├── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
+    │   └── voice.ts        # /ws/voice/ 单例 + subscribe/重连/重订阅/对账钩子（M5-3）
+    ├── livekit/
+    │   └── client.ts       # livekit-client 薄封装：连接/静音/音量/事件归一（依赖倒置可注入 fake）（M5-3）
     ├── hooks/
     │   ├── useAuth.ts      # 登录/登出/回跳组合封装
     │   ├── useChat.ts      # 打开会话/加载历史/幂等发送/撤回/标已读（M5-2）
-    │   └── useTyping.ts    # typing 节流声明 + 对端 typing 显示（M5-2）
+    │   ├── useTyping.ts    # typing 节流声明 + 对端 typing 显示（M5-2）
+    │   ├── useVoiceChannel.ts  # 加入/离开/心跳/成员同步/断线恢复编排（M5-3）
+    │   └── useElysiaVoice.ts   # 爱莉通话生命周期：创建复用/轮询/文本注入/poll/结束（M5-3）
     ├── pages/
     │   ├── LoginPage.tsx
     │   ├── RegisterPage.tsx
-    │   ├── HomeLayout.tsx  # 受保护主布局（侧边栏 + Outlet）
-    │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口）
-    │   └── SettingsPage.tsx       # 占位
+    │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口，侧栏含语音入口）
+    │   ├── VoicePage.tsx   # M5-3 语音主页面（频道列表 + 当前频道面板 + 爱莉语音面板）
+    │   └── ProfilePage.tsx
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
-    │   ├── elysia/         # ElysiaProfileCard 爱莉入口卡（M5-6 占位）
-    │   └── layout/         # ChatLayout 左侧会话列表 + 右侧聊天窗口
-    ├── styles/global.css
-    └── vitest/             # 单测 + 契约测试（M5-1: auth/presence/guard/client；M5-2: message-store/chat-store/chat-api/ws-chat）
+    │   └── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/ElysiaVoicePanel（M5-3）
+    ├── styles/             # tokens.css / base.css / app.css（含 M5-3 语音组件样式）
+    └── vitest/             # 单测 + 契约测试（M5-1: auth/presence/guard/client；M5-2: message-store/chat-store/chat-api/ws-chat；M5-3: voice-api/voice-store/ws-voice/livekit-client/use-voice-channel/use-elysia-voice）
 ```
 
 ## 启动方式

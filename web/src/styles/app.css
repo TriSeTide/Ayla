@@ -1262,6 +1262,291 @@
   filter: brightness(1.06);
 }
 
+/* ================= M5-3 语音界面 ================= */
+
+.voice-page {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.voice-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 280px;
+  flex-shrink: 0;
+  padding: var(--sp-4) var(--sp-3);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px);
+  border-right: 1px solid var(--glass-border);
+  overflow-y: auto;
+}
+
+.voice-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+  overflow-y: auto;
+}
+
+/* 频道列表 */
+
+.voice-channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.voice-channel-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.voice-channel-card.mine {
+  border-color: var(--indigo-700);
+}
+
+.voice-channel-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.voice-channel-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.voice-mine-tag {
+  font-size: 11px;
+  color: var(--indigo-700);
+  margin-left: var(--sp-1);
+}
+
+/* 建频道 */
+
+.voice-channel-create {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.voice-create-input {
+  flex: 1;
+  min-width: 120px;
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  font-size: 13px;
+}
+
+.voice-create-error {
+  font-size: 12px;
+  color: var(--destructive);
+}
+
+/* 当前频道面板 */
+
+.voice-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 560px;
+  padding: var(--sp-4);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.voice-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.voice-panel-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.voice-panel-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.voice-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.voice-list-empty {
+  padding: var(--sp-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.voice-member-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.voice-member-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.voice-member-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-self-tag {
+  margin-left: var(--sp-1);
+  font-size: 11px;
+  color: var(--indigo-700);
+}
+
+.voice-member-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.voice-muted-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--destructive);
+}
+
+.voice-elysia-state {
+  color: var(--grape-700);
+}
+
+.voice-volume-slider {
+  width: 90px;
+  accent-color: var(--indigo-700);
+}
+
+/* 控制条 */
+
+.voice-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--glass-border);
+}
+
+.voice-mic-btn {
+  min-height: 36px;
+}
+
+.voice-mic-off {
+  background: var(--ice-100);
+  color: var(--text-secondary);
+}
+
+.voice-leave-btn {
+  background: transparent;
+  color: var(--destructive);
+  border: 1px solid var(--destructive);
+}
+
+.voice-conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.voice-rejoin-btn {
+  min-height: 28px;
+  font-size: 12px;
+  padding: 0 var(--sp-3);
+}
+
+.voice-ws-state {
+  color: var(--text-secondary);
+}
+
+/* 爱莉语音面板 */
+
+.elysia-voice-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 560px;
+  padding: var(--sp-4);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.elysia-voice-panel.collapsed {
+  padding: var(--sp-3);
+  align-items: flex-start;
+}
+
+.elysia-voice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.elysia-voice-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+}
+
+.elysia-voice-input {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.elysia-voice-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+@media (max-width: 768px) {
+  .voice-page {
+    flex-direction: column;
+  }
+
+  .voice-sidebar {
+    width: 100%;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid var(--glass-border);
+  }
+}
+
 /* ================= 响应式（design.md §9） ================= */
 
 @media (max-width: 768px) {

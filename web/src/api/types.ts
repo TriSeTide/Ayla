@@ -287,3 +287,114 @@ export type ChatServerFrame =
   | ElysiaReplyFrame
   | ChatErrorFrame
   | PongFrame;
+
+/* ================= M5-3 语音域（对齐 backend/apps/voice/serializers.py + views.py） ================= */
+
+/** VoiceChannelSerializer 字段 + 列表/详情视图补充的 member_count/mine */
+export interface VoiceChannelDescriptor {
+  id: string;
+  name: string;
+  room_name: string;
+  owner_id: string;
+  member_count: number;
+  /** 我是否在该频道（列表/详情视图注入） */
+  mine: boolean;
+  created_at: string;
+}
+
+/** VoiceChannelMemberSerializer 字段 */
+export interface VoiceChannelMemberDescriptor {
+  id: number;
+  user_id: string;
+  joined_at: string;
+  last_seen_at: string;
+}
+
+/** POST /voice/channels/<id>/join/ 返回（LiveKit 媒体凭据，禁止打日志） */
+export interface VoiceJoinResult {
+  channel_id: string;
+  room_name: string;
+  token: string;
+  ws_url: string;
+  /** token TTL（秒，默认 600） */
+  ttl: number;
+  joined: boolean;
+}
+
+/* ---------- 爱莉语音编排（对齐 elysia_bridge/views.py ElysiaVoiceCall*） ---------- */
+
+/** _call_status_data 暴露的安全字段 */
+export interface ElysiaVoiceCallStatus {
+  call_id: string;
+  episode_id: string | null;
+  state: string;
+  mode: string;
+  provider: string;
+  created_at: string;
+  updated_at: string;
+  resumable: boolean;
+  connected: boolean;
+  input_audio_bytes: number;
+  output_audio_bytes: number;
+  interruptions: number;
+  failure_reason: string | null;
+}
+
+/** _ticket_data（WS ticket 信息，不含 secret） */
+export interface ElysiaVoiceConnection {
+  url: string;
+  resource: string;
+  subprotocol: string;
+  expires_at: string;
+}
+
+/** POST /elysia/voice-calls/ 返回（reused=true 为单并发复用的正常路径） */
+export interface ElysiaVoiceCallCreateResult {
+  call: ElysiaVoiceCallStatus;
+  connection: ElysiaVoiceConnection | null;
+  reused: boolean;
+}
+
+/** POST .../text/ 与 .../end/ 返回 */
+export interface ElysiaVoiceCommandResult {
+  command_id: string;
+  status: string;
+  accepted: boolean;
+}
+
+/** POST .../poll/ 返回（增量转写投影计数，中性展示） */
+export interface ElysiaVoicePollResult {
+  projected: unknown[];
+  total: number;
+}
+
+/* ---------- Voice WS 帧（对齐 backend/apps/voice/consumers.py） ---------- */
+
+/** voice.state 的 state 枚举 */
+export type VoiceMemberEventState = "joined" | "left" | "heartbeat" | "muted" | "unmuted";
+
+export interface VoiceSubscribedFrame {
+  type: "voice.subscribed";
+  data: { channel_id: string };
+}
+
+export interface VoiceStateFrame {
+  type: "voice.state";
+  data: {
+    channel_id: string;
+    user_id: string;
+    state: VoiceMemberEventState;
+    ts: string;
+  };
+}
+
+export interface VoiceErrorFrame {
+  type: "error";
+  detail: string;
+}
+
+export type VoiceServerFrame =
+  | VoiceSubscribedFrame
+  | VoiceStateFrame
+  | VoiceErrorFrame
+  | PongFrame;

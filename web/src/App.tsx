@@ -8,6 +8,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { VoicePage } from "./pages/VoicePage";
 
 export default function App() {
   return (
@@ -28,6 +29,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ChatPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice"
+        element={
+          <ProtectedRoute>
+            <VoicePage />
           </ProtectedRoute>
         }
       />
