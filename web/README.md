@@ -1,12 +1,13 @@
-# Elysia Web 前端（阶段五 M5-1 基座 + M5-2 聊天界面 + M5-3 语音界面）
+# Elysia Web 前端（阶段五 M5-1 基座 + M5-2 聊天界面 + M5-3 语音界面 + M5-4 直播界面）
 
 React 18 + Vite + TypeScript + Zustand 的 Elysia 多媒体独立应用前端。
 M5-1 为工程基座：认证闭环、路由守卫、全局状态、API 客户端、Presence WebSocket、健康检查；
 M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送、已读/撤回/引用、历史分页、Chat WebSocket、爱莉入口；
-M5-3 为语音界面：语音频道（加入/离开/心跳/成员同步）、LiveKit 媒体控制（静音/音量）、爱莉语音控制面闭环。
+M5-3 为语音界面：语音频道（加入/离开/心跳/成员同步）、LiveKit 媒体控制（静音/音量）、爱莉语音控制面闭环；
+M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性回显）+ HLS 播放器 + 实时弹幕（WS + 历史对账）+ 主播面板（:start/:stop）。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
-> 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`。
+> 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
 
 ## 当前里程碑（M5-1，已完成）
 
@@ -110,6 +111,49 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 - 加入默认关麦；音量不落库（本地偏好，刷新重置）；mute 状态双通道（应用层 `voice.state` 前端不上报，媒体事实以 LiveKit `TrackMuted` 为准）；真人 ↔ 爱莉实时双向音频互通本期不做（M4-5 §5.3 未决点，爱莉语音只到控制面 + 文本注入 + 转写投影）。
 
+## M5-4 直播界面（已完成，契约层）
+
+- [x] 直播大厅（`/live`）：频道卡片（标题/主播昵称/状态徽章）；`只看在播`（`?only_live=1`）；爱莉直播间按普通频道渲染（owner 是爱莉 user 时加"爱莉"角标，无特殊数据通道，M5-6 预留）
+- [x] 开播指引（`LiveCreate`）：输标题建频道 → 创建响应**一次性回显** `stream_key`/`rtmp_url`（OBS 服务器 + 串流密钥两个复制框，文案"仅本次显示"）；此后仅详情页 owner 可见（契约）
+- [x] HLS 播放器（`player/hls.ts` + `LivePlayer`）：`Hls.isSupported()` 分支（hls.js）/ Safari 原生 HLS；fatal networkError → `startLoad()` 重试、mediaError → `recoverMediaError()`、不可恢复 → "播放失败 + 重试"（重试 = 销毁重建）；`muted autoplay` 起播（浏览器自动播放策略）
+- [x] 状态三态渲染（状态真实性，AGENTS.md §8）：播放器区域按 `/status/` SRS 实时判定——`live` → 播放器、`idle` → "未开播"占位（乐观已开播但无流 → "等待推流信号…"）、`degraded` → **"直播服务状态未知"中性提示（禁止渲染成"未开播"）**；15s 轮询，页面隐藏暂停（`visibilitychange` 恢复）
+- [x] 实时弹幕：WS `danmaku` 帧 + 进房拉最近 50 条历史 + 发送走 REST POST（**成功不乐观插入，等 WS 回帧渲染**——落库与广播分离，单一数据流避免双份）；按 `id` 去重、内存 500 条定长截断；自动滚动 + 上翻时"有新弹幕"提示；纯文本原样渲染（无 `dangerouslySetInnerHTML`）
+- [x] 弹幕 WS（`ws/live.ts`）：`/ws/live/<channel_id>/?token=<jwt>` 单例；指数退避重连（1s→30s）+ 30s 心跳；close 码语义：4401 未认证 → "登录已过期"、4404 频道不存在 → "直播间不存在"（均不重连）；重连成功拉历史对账去重（WS 无补发语义）
+- [x] 主播面板（`LiveOwnerPanel`，仅 owner）：推流地址复制（服务器/串流密钥/FLV 备选）+ `:start` 开播 / `:stop` 下播 + 删除频道（直播中删除被 400 拦 → "请先下播"）；`:start` 后轮询等待 SRS 识别推流
+- [x] 进房/退房编排（`useLiveRoom`）：详情 → `/status/` → 历史弹幕 → 连 WS；退房销毁清单（hls.destroy → 断 WS → 停轮询 → 清 store），重复进房不叠加
+- [x] 契约测试：30 个（`live-api` 10：REST/only_live/403/400/degraded 结构；`live-store` 6：去重/合并/定长/三态；`ws-live` 7：连接/心跳/4401/4404/重连对账钩子；`hls-player` 8：分支/恢复/fatal/销毁幂等）；全量 19 文件 132 例全绿 + `npm run build` 通过
+
+**未验收（需真实 backend + SRS + dev server）**：开播闭环（OBS/ffmpeg 推流 → HLS 出画面）、双浏览器弹幕实时互发、断线重连对账真实链路、停 SRS 的 degraded 真实渲染、越权 UI 验证；爱莉直播（FR-19）不验收（依赖 M4-6 §6.3 Elysium 直播意识接入）。
+
+### 直播状态语义（M5-4 核心约束）
+
+| `/status/` 返回值 | 含义 | 播放器区渲染 |
+|---|---|---|
+| `live` | SRS 检测到真实推流 | video 播放器 |
+| `idle` | SRS 未在播（乐观 `status=live` 时显示"等待推流信号…"） | "未开播"占位 |
+| `degraded` | SRS 不可用（**不是未在播**） | "直播服务状态未知"中性提示 |
+| `null`（未查询） | 首次加载中 | 乐观 `status` 兜底并标注 |
+
+频道 `status` 字段是应用侧**乐观标记**；播放器区域的真实在播判定一律以 `/status/` 为准，乐观标记与 SRS 不一致时以 SRS 为准更新徽章。
+
+### OBS 推流指引（M5-4 §4.5）
+
+1. 大厅「开播」→ 输标题 → 创建成功弹出推流面板（信息仅本次显示，立即复制）：
+   - 服务器：`rtmp://<host>:1935/live`（由 `rtmp_url` 去掉末尾流名）
+   - 串流密钥：`<stream_key>`（48 位 hex）
+2. OBS 设置 → 直播 → 填服务器与串流密钥 → 开始推流。
+3. 直播间点「开播」打乐观标记 → 轮询 `/status/` 至 `live`（SRS 识别推流有秒级延迟，UI 显示"等待推流信号…"）→ 播放器出画面。
+4. stream_key 安全：仅 owner 可见、不打日志、不持久化（刷新后从详情重新拉）；泄漏则删除频道重建。
+
+### 已知取舍（M5-4 §9）
+
+- **弹幕单一数据流**：发送不做乐观插入，统一等 WS 回帧渲染（~100ms 感知延迟换"绝不双份"）；慢网络下输入框显示"发送中"态。
+- **HLS 为主、FLV 可选**：本期播放器只验 HLS（5-15s 延迟属预期，需求 §4.1）；`flv_url` 在主播面板展示供外部播放器使用；要低延迟再引入 flv.js 或评估 WebRTC。
+- **状态轮询 15s**：页面隐藏暂停；WS 频道级 `live.status` 事件后端未实现（M4-6 未做），本期轮询兜底。
+- **不做在线人数/礼物/录制**：FR-18 可选项本期全部不做（M4-6 边界继承）。
+- **爱莉直播 = 普通频道**：owner 是爱莉 user 的频道无特殊数据通道；阶段三 livestream 订阅预留不做（M4-6 §6.3）；FR-19 不验收。
+- **muted autoplay**：播放器默认静音起播（浏览器策略），用户点击取消静音；不绕过浏览器限制。
+
 ## 目录结构
 
 ```text
@@ -129,39 +173,49 @@ web/
     │   ├── users.ts        # users/search（M5-2 补实现：搜索用户发起私聊/建群）
     │   ├── chat.ts         # 会话/消息/已读/撤回/typing/群管理 端点（M5-2）
     │   ├── voice.ts        # 语音频道 REST + 爱莉 voice-calls 编排端点（M5-3）
+    │   ├── live.ts         # 直播频道/状态/弹幕端点（M5-4）
     │   ├── elysia.ts       # 爱莉 profile（M5-2，只读）
     │   ├── health.ts       # health/live 与 health
-    │   └── types.ts        # 与 backend 序列化器对齐的 TS 类型（含 M5-2 聊天域、M5-3 语音域）
+    │   └── types.ts        # 与 backend 序列化器对齐的 TS 类型（含 M5-2 聊天域、M5-3 语音域、M5-4 直播域）
     ├── stores/
     │   ├── auth.ts         # token / 当前用户 / 登录登出 / 会话恢复
     │   ├── presence.ts     # 在线用户集合 + 连接状态
     │   ├── chat.ts         # 会话列表 + 未读数 + 当前会话（M5-2）
     │   ├── message.ts      # 消息分桶（按 conversation_id，seq 有序去重）（M5-2）
-    │   └── voice.ts        # 频道列表 + 当前频道 + 成员表 + LiveKit/WS 状态（M5-3）
+    │   ├── voice.ts        # 频道列表 + 当前频道 + 成员表 + LiveKit/WS 状态（M5-3）
+    │   └── live.ts         # 频道列表 + 当前直播间（详情/SRS 状态/弹幕去重定长）+ WS 状态（M5-4）
     ├── ws/
     │   ├── presence.ts     # /ws/presence/ 单例 + 心跳 + 重连
     │   ├── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
-    │   └── voice.ts        # /ws/voice/ 单例 + subscribe/重连/重订阅/对账钩子（M5-3）
+    │   ├── voice.ts        # /ws/voice/ 单例 + subscribe/重连/重订阅/对账钩子（M5-3）
+    │   └── live.ts         # /ws/live/<id>/ 单例 + 4401/4404 语义 + 重连对账钩子（M5-4）
     ├── livekit/
     │   └── client.ts       # livekit-client 薄封装：连接/静音/音量/事件归一（依赖倒置可注入 fake）（M5-3）
+    ├── player/
+    │   └── hls.ts          # hls.js 薄封装：isSupported 分支/错误恢复/销毁幂等（M5-4）
     ├── hooks/
     │   ├── useAuth.ts      # 登录/登出/回跳组合封装
     │   ├── useChat.ts      # 打开会话/加载历史/幂等发送/撤回/标已读（M5-2）
     │   ├── useTyping.ts    # typing 节流声明 + 对端 typing 显示（M5-2）
     │   ├── useVoiceChannel.ts  # 加入/离开/心跳/成员同步/断线恢复编排（M5-3）
-    │   └── useElysiaVoice.ts   # 爱莉通话生命周期：创建复用/轮询/文本注入/poll/结束（M5-3）
+    │   ├── useElysiaVoice.ts   # 爱莉通话生命周期：创建复用/轮询/文本注入/poll/结束（M5-3）
+    │   ├── useLiveRoom.ts  # 进房/退房编排：详情+状态轮询+WS+历史+销毁清单（M5-4）
+    │   └── useDanmaku.ts   # 弹幕发送（等回帧）/接收/去重/滚动策略（M5-4）
     ├── pages/
     │   ├── LoginPage.tsx
     │   ├── RegisterPage.tsx
-    │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口，侧栏含语音入口）
+    │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口，侧栏含语音/直播入口）
     │   ├── VoicePage.tsx   # M5-3 语音主页面（频道列表 + 当前频道面板 + 爱莉语音面板）
+    │   ├── LiveHallPage.tsx    # M5-4 直播大厅（路由 /live）
+    │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
     │   └── ProfilePage.tsx
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
-    │   └── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/ElysiaVoicePanel（M5-3）
-    ├── styles/             # tokens.css / base.css / app.css（含 M5-3 语音组件样式）
-    └── vitest/             # 单测 + 契约测试（M5-1: auth/presence/guard/client；M5-2: message-store/chat-store/chat-api/ws-chat；M5-3: voice-api/voice-store/ws-voice/livekit-client/use-voice-channel/use-elysia-voice）
+    │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/ElysiaVoicePanel（M5-3）
+    │   └── live/           # LiveHall/LiveCreate/LivePlayer/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4）
+    ├── styles/             # tokens.css / base.css / app.css（含 M5-3 语音、M5-4 直播组件样式）
+    └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 
 ## 启动方式
@@ -180,7 +234,7 @@ npm run dev
 # 3) 构建
 npm run build
 
-# 4) 测试（Vitest：M5-1 auth store / client 401 重放与互斥 / 路由守卫 / presence；M5-2 消息与会话 store / chat API / WS 契约）
+# 4) 测试（Vitest：M5-1 auth store / client 401 重放与互斥 / 路由守卫 / presence；M5-2 消息与会话 store / chat API / WS 契约；M5-3 语音 store/WS/LiveKit；M5-4 直播 API/store/WS/HLS）
 npm run test        # 全量（Windows 沙箱建议串行，已默认 --maxWorkers=1 --minWorkers=1）
 npm run test:m52    # 仅 M5-2 四个测试文件
 ```
