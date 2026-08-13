@@ -18,7 +18,12 @@ from apps.chat.models import Conversation, Message
 from apps.chat import services as chat_services
 from apps.elysia_bridge.models import ElysiaProfile
 from apps.elysia_bridge import services as bridge_services
-from apps.elysia_bridge.services import ProfileNotConfigured, on_user_message_to_elysia
+from apps.elysia_bridge.services import (
+    ElysiaUnauthenticated,
+    InboundInjector,
+    ProfileNotConfigured,
+    on_user_message_to_elysia,
+)
 
 
 @pytest.fixture
@@ -178,3 +183,79 @@ class TestChatViewBridgeHook:
         assert resp.status_code == 201, resp.content
         # 消息已落库（桥接失败不影响用户消息）
         assert Message.objects.filter(conversation=conv, idempotency_key="k-view-1").exists()
+
+
+# ---------- InboundInjector 401 恢复（Elysium 重启后旧 token 失效） ----------
+
+
+class _FakeElysiaClient:
+    """fake ElysiaClient：前 fail_times 次 inject 抛 401，之后返回 accepted。"""
+
+    def __init__(self, fail_times: int = 1, accepted: bool = True):
+        self.calls = 0
+        self.fail_times = fail_times
+        self.accepted = accepted
+
+    def inject_message(self, **kwargs):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise ElysiaUnauthenticated("session revoked after elysium restart")
+        return {"accepted": self.accepted}
+
+
+class _FakeCredentialManager:
+    """fake 凭据管理：记录 reset_session 次数，token 版本递增。"""
+
+    def __init__(self):
+        self.resets = 0
+
+    def ensure_session(self, *, stream_id: str) -> str:
+        return f"token-v{self.resets}"
+
+    def reset_session(self) -> str:
+        self.resets += 1
+        return f"token-v{self.resets}"
+
+
+@pytest.mark.django_db
+class TestInboundInjector401Recovery:
+    def _make(self, fail_times: int = 1):
+        client = _FakeElysiaClient(fail_times=fail_times)
+        creds = _FakeCredentialManager()
+        injector = InboundInjector(client=client, credentials=creds)
+        return injector, client, creds
+
+    def test_401_triggers_reset_and_retry_succeeds(self, elysia_setup):
+        """Elysium 重启后旧 token 401 → reset_session（secret 重签）→ 重试一次成功。"""
+        elysia_user, profile, user = elysia_setup()
+        msg, _ = _send_user_message(user, elysia_user)
+        injector, client, creds = self._make(fail_times=1)
+
+        ok = injector.inject_user_message(message=msg, profile=profile)
+
+        assert ok is True
+        assert client.calls == 2  # 首次 401 + 重试一次
+        assert creds.resets == 1  # 触发一次 secret 重签
+
+    def test_401_retry_still_fails_raises(self, elysia_setup):
+        """重试仍 401 → 继续抛出（视图层 try/except 记录并保留消息）。"""
+        elysia_user, profile, user = elysia_setup()
+        msg, _ = _send_user_message(user, elysia_user)
+        injector, client, creds = self._make(fail_times=2)
+
+        with pytest.raises(ElysiaUnauthenticated):
+            injector.inject_user_message(message=msg, profile=profile)
+        assert client.calls == 2
+        assert creds.resets == 1
+
+    def test_no_401_single_call_no_reset(self, elysia_setup):
+        """正常路径：只 inject 一次，不触发 reset。"""
+        elysia_user, profile, user = elysia_setup()
+        msg, _ = _send_user_message(user, elysia_user)
+        injector, client, creds = self._make(fail_times=0)
+
+        ok = injector.inject_user_message(message=msg, profile=profile)
+
+        assert ok is True
+        assert client.calls == 1
+        assert creds.resets == 0

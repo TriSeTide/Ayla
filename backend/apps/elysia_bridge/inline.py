@@ -25,6 +25,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,12 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 _LOCK_FILENAME = "elysia_bridge.lock"
+
+# 线程级自动重启退避（秒）：run_bridge_loop 的断线重连覆盖 Elysium 未运行/
+# 重启窗口；这里兜底"线程整体异常退出"（例如 Elysium 重启瞬间 ensure_session
+# 的 httpx 连接错误击穿循环），按有界退避自动重启，不依赖手动重启 Ayla 后端。
+_THREAD_RESTART_BASE = 5.0
+_THREAD_RESTART_MAX = 60.0
 
 
 # ---------- 判定与入口 ----------
@@ -82,55 +89,74 @@ def start_bridge_thread() -> None:
 
 
 def _bridge_thread_main(lock_fd: int) -> None:
-    """daemon 线程体：查询 profile → 跑 run_bridge_loop（阻塞至进程退出）。"""
-    try:
-        from apps.elysia_bridge.elysia_client import ElysiaClient
-        from apps.elysia_bridge.models import ElysiaProfile
-        from apps.elysia_bridge.services import (
-            ElysiaCredentialManager,
-            run_bridge_loop,
-        )
+    """daemon 线程体：运行 bridge，异常退出后按有界退避自动重启。
 
-        profile = (
-            ElysiaProfile.objects.filter(enabled=True)
-            .select_related("user")
-            .first()
-        )
-        if profile is None:
-            logger.warning("内嵌 SSE 出站投影跳过：未找到启用的爱莉 profile")
-            return
-
-        base_url = getattr(settings, "ELYSIA_BASE_URL", "").rstrip("/")
-        client = ElysiaClient(base_url=base_url)
-        credentials = ElysiaCredentialManager(
-            client=client,
-            secret_path=getattr(settings, "ELYSIA_CREDENTIAL_FILE", None),
-        )
-        stop_event = asyncio.Event()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        logger.info(
-            "内嵌 SSE 出站投影已启动：stream=%s → %s",
-            profile.stream_id,
-            base_url,
-        )
+    - 单实例锁由本线程在生命周期内持有（进程退出时 fd 关闭自动释放）；
+    - `_run_bridge_once` 每次重建 client/credentials/event loop；
+    - run_bridge_loop 的断线重连负责"Elysium 未运行/重启窗口"的恢复；
+      这里兜底"线程整体异常退出"，退出后 sleep 退避重启，避免依赖
+      手动重启 Ayla 后端才能恢复爱莉双向通道。
+    """
+    restart_delay = _THREAD_RESTART_BASE
+    while True:
         try:
-            loop.run_until_complete(
-                run_bridge_loop(
-                    profile=profile,
-                    client=client,
-                    credentials=credentials,
-                    stop_event=stop_event,
-                )
+            _run_bridge_once(lock_fd)
+            # run_bridge_loop 正常返回（未来显式停止场景）也短暂退避重启
+            logger.info(
+                "内嵌 SSE 出站投影正常结束，%ss 后重启", restart_delay
             )
-        finally:
-            client.close()
-            loop.close()
-    except Exception:  # noqa: BLE001 - 线程异常不击穿 server
-        logger.exception("内嵌 SSE 出站投影线程异常退出")
+        except Exception:  # noqa: BLE001 - 线程异常不击穿 server，走自动重启
+            logger.exception(
+                "内嵌 SSE 出站投影异常退出，%ss 后自动重启", restart_delay
+            )
+        time.sleep(restart_delay)
+        restart_delay = min(restart_delay * 2, _THREAD_RESTART_MAX)
+
+
+def _run_bridge_once(lock_fd: int) -> None:
+    """单轮 bridge 运行：查询 profile → 建 client/credentials/loop → run_bridge_loop。"""
+    from apps.elysia_bridge.elysia_client import ElysiaClient
+    from apps.elysia_bridge.models import ElysiaProfile
+    from apps.elysia_bridge.services import (
+        ElysiaCredentialManager,
+        run_bridge_loop,
+    )
+
+    profile = (
+        ElysiaProfile.objects.filter(enabled=True)
+        .select_related("user")
+        .first()
+    )
+    if profile is None:
+        logger.warning("内嵌 SSE 出站投影跳过：未找到启用的爱莉 profile")
+        raise RuntimeError("no enabled elysia profile")
+
+    base_url = getattr(settings, "ELYSIA_BASE_URL", "").rstrip("/")
+    client = ElysiaClient(base_url=base_url)
+    credentials = ElysiaCredentialManager(
+        client=client,
+        secret_path=getattr(settings, "ELYSIA_CREDENTIAL_FILE", None),
+    )
+    stop_event = asyncio.Event()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    logger.info(
+        "内嵌 SSE 出站投影已启动：stream=%s → %s",
+        profile.stream_id,
+        base_url,
+    )
+    try:
+        loop.run_until_complete(
+            run_bridge_loop(
+                profile=profile,
+                client=client,
+                credentials=credentials,
+                stop_event=stop_event,
+            )
+        )
     finally:
-        _release_lock(lock_fd)
-        logger.info("内嵌 SSE 出站投影已停止")
+        client.close()
+        loop.close()
 
 
 # ---------- 文件锁 ----------

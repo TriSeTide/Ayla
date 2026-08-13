@@ -482,11 +482,42 @@ class InboundInjector:
 
         幂等：inject 同步端点无 Idempotency-Key；但应用内同一消息只应 inject 一次。
         这里由调用方保证（chat 视图落库后只调一次）。
+
+        401 恢复：Elysium 重启会清空其内存 session（旧 access/refresh token 全部
+        失效），这里捕获 ElysiaUnauthenticated → reset_session（用落盘 secret 强制
+        重签）→ 重试一次；仍失败则继续抛出（视图层已有 try/except 记录并保留消息）。
         """
         if not profile.enabled:
             logger.info("elysia profile disabled, skip inject for message %s", message.id)
             return False
-        access_token = self._credentials.ensure_session(stream_id=profile.stream_id)
+        try:
+            access_token = self._credentials.ensure_session(
+                stream_id=profile.stream_id
+            )
+            return self._inject_with_token(
+                message=message, profile=profile, access_token=access_token
+            )
+        except ElysiaUnauthenticated:
+            logger.warning(
+                "elysia inject 401 (stream=%s); reissuing session and retrying once",
+                profile.stream_id,
+            )
+            try:
+                access_token = self._credentials.reset_session()
+            except Exception:  # noqa: BLE001 - 重签失败不伪装成功
+                logger.exception(
+                    "elysia session reissue failed for inject (stream=%s)",
+                    profile.stream_id,
+                )
+                raise
+            return self._inject_with_token(
+                message=message, profile=profile, access_token=access_token
+            )
+
+    def _inject_with_token(
+        self, *, message: Message, profile: ElysiaProfile, access_token: str
+    ) -> bool:
+        """携带指定 access_token 执行 inject；仅由 inject_user_message 调用。"""
         result = self._client.inject_message(
             access_token=access_token,
             stream_id=profile.stream_id,

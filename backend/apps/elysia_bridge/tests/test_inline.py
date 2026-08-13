@@ -81,3 +81,29 @@ async def test_lifespan_startup_shutdown_roundtrip():
         {"type": "lifespan.shutdown.complete"},
     ]
 
+
+
+def test_bridge_thread_restarts_after_crash(monkeypatch):
+    """线程异常退出后按退避自动重启（不依赖手动重启 Ayla 后端）。
+
+    前两次 _run_bridge_once 抛异常（模拟 Elysium 重启瞬间连接错误击穿循环），
+    第三次正常返回；sleep 在第三次后抛 SystemExit 终止测试循环。
+    """
+    calls = {"n": 0}
+
+    def fake_run(lock_fd):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("simulated crash")
+
+    def fake_sleep(delay):
+        if calls["n"] >= 3:
+            raise SystemExit  # 终止测试循环
+
+    monkeypatch.setattr(inline, "_run_bridge_once", fake_run)
+    monkeypatch.setattr(inline.time, "sleep", fake_sleep)
+
+    with pytest.raises(SystemExit):
+        inline._bridge_thread_main(lock_fd=None)
+
+    assert calls["n"] == 3  # 崩溃 2 次后第 3 次正常返回
