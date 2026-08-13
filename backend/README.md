@@ -91,9 +91,18 @@ Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端�
 - [x] `VoiceConsumer` WS（`/ws/voice/?token=<jwt>`）：成员校验后订阅频道组收 `voice.state`
 - [x] presence 超时：超过 `VOICE_MEMBER_TIMEOUT_SECONDS` 未心跳的成员标记离开 + 广播（后台任务契约）
 - [x] 配置接线：`LIVEKIT_*` / `VOICE_*` 环境变量；`docker-compose.yml` 追加 livekit 服务
-- [ ] 爱莉 Voice Live 桥接（`elysia_bridge` 扩展，M4-5 第 1.2 节）：控制面桥接 + 转写/状态投影 + 文本双向注入 ——
-      **待实施**（依赖阶段三 voice-calls 挂载 + 真实 credential 验收）
-- [ ] 端到端验收：真人语音频道 P95<500ms / 爱莉入会闭环 —— **未验收**（需 LiveKit 运行 + Elysium 运行）
+- [x] 爱莉 Voice Live 桥接（`elysia_bridge` 扩展，M4-5 第 1.2 节）——契约层：
+  - voice-call 客户端（`elysia_client.py`）：create/get/resume/interrupt/end/text/transcripts/tickets，
+    命令带 `Idempotency-Key`；
+  - 编排端点（`/api/v1/elysia/voice-calls/`）：创建/复用（单并发，进程内活跃表 + Elysium 状态复核）、
+    详情/文本注入/结束/poll 增量转写投影；
+  - 事件分派：`run_bridge_loop` 收到 `voice_call.transcript.final` → 投影爱莉发言
+    （仅 `role=assistant`，幂等 `elysia-voice-<event_id>`，不伪造）；其余 `voice_call.*` 只记录；
+  - 转写投影主路径为 `GET /voice-calls/{id}/transcripts` 增量轮询（幂等去重）。
+    **已知缺口（公共契约）**：阶段三 `voice_call.*` SSE 事件流未进入 Elysium Life Event 账本
+    （`events/stream` 收不到 voice_call 事件），SSE 事件分派为前瞻兼容；真实闭环走 transcripts 轮询。
+- [ ] 端到端验收：真人语音频道 P95<500ms / 爱莉入会闭环 —— **未验收**
+      （需 LiveKit 运行 + Elysium 运行 + 真实 credential + 阶段三 voice-calls 挂载）
 
 ## 目录结构
 
@@ -199,6 +208,10 @@ python -m pytest
   - 订阅循环：断线按 cursor 重连、history_gap 按 recovery.cursor、心跳不推进 cursor、
     401 refresh 恢复、stop 优雅退出
   - profile REST：登录可读、管理员写、越权 403、未初始化 404、`:test` 冒烟 503/200
+  - voice-call 编排端点：创建/复用（单并发）、详情、文本注入（空 400）、结束（活跃表移除）、
+    poll 投影；profile 未初始化/禁用 503、未登录 401、Elysium 侧错误 502
+  - voice_call 事件分派：`transcript.final` → 投影爱莉发言；`state_changed` 等只记录不投影；
+    payload 不可解析安全忽略；stream 不匹配顶层过滤
   - 主体性边界：落库内容 == 投影原文，应用从不伪造爱莉发言
 - 语音频道（mock LiveKit，不依赖真实 LiveKit）：
   - 频道模型：`room_name` 唯一、成员 `(channel, user)` 唯一、owner 语义

@@ -631,6 +631,117 @@ def voice_call_transcripts(profile: ElysiaProfile, call_id: str) -> VoiceTranscr
     )
 
 
+# ---------- 爱莉 Voice Live 编排（M4-5 §5.2 基线方案，应用内闭环） ----------
+#
+# 编排语义：
+# - Voice Live 是**一对一**意识实例（`max_concurrent_sessions=1`，开发文档 §11 风险表），
+#   同一时刻只允许一个活跃爱莉通话；进程内活跃表做单并发约束，多用户同时要与爱莉
+#   语音时复用同一通话（README 已知取舍 §12）。
+# - 应用侧以 service credential 创建通话 → 应用本身就是该通话的 participant/拥有者
+#   （owner_actor_id = credential 的 actor_id）；爱莉是对话对象，其发言事实由
+#   Elysium 侧 final transcript 的 `role="assistant"` 表达，应用侧只投影不生成。
+# - 事件源取舍：阶段三 `voice_call.*` SSE 事件流尚未进入 Life Event 账本（events/stream
+#   收不到 voice_call 事件，公共契约缺口，见 README）；本期转写投影走
+#   `GET /voice-calls/{call_id}/transcripts` **增量轮询**（cursor 分页，幂等键去重），
+#   不依赖 SSE 事件流，也不改动 Elysium 侧代码。
+
+_ACTIVE_VOICE_CALLS: dict[str, str] = {}
+"""进程内活跃 Voice Live 通话注册（call_id -> profile.stream_id）。
+
+单并发约束：同一时刻只允许一个活跃通话。进程重启后该表清空——但 Elysium 侧
+通话状态是权威（`VoiceCallStatus.resumable` 显式给出），Ayla 重启后新通话可再建；
+旧通话若仍活跃由 Elysium 侧会话超时/应用侧 poll 时按状态收敛（README 取舍）。
+"""
+
+
+def _register_active_voice_call(profile: ElysiaProfile, call_id: str) -> None:
+    _ACTIVE_VOICE_CALLS[call_id] = profile.stream_id
+
+
+def _unregister_active_voice_call(call_id: str) -> None:
+    _ACTIVE_VOICE_CALLS.pop(call_id, None)
+
+
+def ensure_elysia_voice_call(
+    profile: ElysiaProfile, mode: str = "auto"
+) -> dict:
+    """创建/复用爱莉 Voice Live 通话（单并发，M4-5 §5.2 第 1 步）。
+
+    复用规则：进程内活跃表里的 call_id 仍活跃（状态非 ended/failed）→ 返回已有；
+    否则 POST /voice-calls 创建并注册。返回：
+    `{"call": VoiceCallStatus, "connection": VoiceCallTicket | None, "reused": bool}`。
+
+    注意：仅"进程内活跃表"不足以判定 Elysium 侧真实状态——复用前先 GET 一次状态
+    确认（resumable 由 VoiceCallStatus 显式给出，阶段三 §12.5）。
+    """
+    for call_id in list(_ACTIVE_VOICE_CALLS):
+        if _ACTIVE_VOICE_CALLS[call_id] != profile.stream_id:
+            continue
+        try:
+            status = get_voice_call_status(profile, call_id)
+        except Exception:
+            logger.exception(
+                "voice call %s status check failed; will create new", call_id
+            )
+            _unregister_active_voice_call(call_id)
+            continue
+        if status.state not in ("ended", "failed", "suspended"):
+            logger.info(
+                "reusing active voice call %s (state=%s) for stream %s",
+                call_id, status.state, profile.stream_id,
+            )
+            return {
+                "call": status,
+                "connection": None,
+                "reused": True,
+            }
+        _unregister_active_voice_call(call_id)
+
+    created = create_elysia_voice_call(profile, mode=mode)
+    _register_active_voice_call(profile, created.call.call_id)
+    logger.info(
+        "created voice call %s (state=%s) for stream %s",
+        created.call.call_id, created.call.state, profile.stream_id,
+    )
+    return {
+        "call": created.call,
+        "connection": created.connection,
+        "reused": False,
+    }
+
+
+def end_elysia_voice_call(profile: ElysiaProfile, call_id: str) -> CommandAccepted:
+    """结束爱莉 Voice Live 通话（幂等，M4-5 §5.2 第 5 步）+ 从活跃表移除。"""
+    result = end_voice_call(profile, call_id)
+    _unregister_active_voice_call(call_id)
+    return result
+
+
+def poll_voice_transcripts(
+    profile: ElysiaProfile, call_id: str, *, limit: int = 200
+) -> dict:
+    """增量投影转写：拉取授权转写历史 → 把 `role="assistant"` 的 final transcript
+    投影为语音频道会话里的爱莉消息（幂等 `elysia-voice-<event_id 哈希>`，M4-5 §5.2 第 3 步）。
+
+    事件源取舍（见本段 docstring）：阶段三 `voice_call.*` SSE 事件流未进 Life Event
+    账本，本函数以 `GET /voice-calls/{call_id}/transcripts` 轮询为投影主路径；
+    从头拉取（cursor=None），投影幂等键去重保证重复调用不重复落库。
+
+    返回：`{"projected": [message_id, ...], "total": 转写条数}`；无会话可路由/
+    非 assistant 条目不投影（返回 None 不计数）。
+    """
+    page = voice_call_transcripts(profile, call_id)
+    projected: list[str] = []
+    for entry in page.transcripts:
+        # 顺序投影，逐条幂等；call_id 用传入参数（与轮询目标一致，可溯源）
+        message = project_voice_transcript(
+            profile, call_id, entry, event_id=f"voice-poll-{call_id}-{entry.sequence}"
+        )
+        if message is not None:
+            projected.append(str(message.id))
+    return {"projected": projected, "total": len(page.transcripts)}
+
+
 def _voice_conversation(profile: ElysiaProfile) -> Conversation | None:
     """爱莉语音频道绑定的应用内会话。
 
@@ -831,16 +942,17 @@ def _chat_direction(envelope: EventEnvelope) -> str | None:
 async def _handle_envelope(
     profile: ElysiaProfile, envelope: EventEnvelope
 ) -> Message | None:
-    """单条出站事件处理：stream 匹配 → 方向过滤 → 投影落库 + 广播。
+    """单条出站事件处理：stream 匹配 → 事件类型分派 → 投影落库 + 广播。
 
     过滤职责：
     1. stream_id 属于本 profile 才投影；不匹配直接忽略（多爱莉/多平台
        情况下各 profile 各订各的，事件过滤由 client 侧 event_type/stream_id
        参数与这里双保险）；
-    2. chat.message 事件只投影 `direction=delivered`（最终交付事实），
+    2. voice_call.* 事件走 `_handle_voice_event`（transcript.final → 爱莉发言投影；
+       其余只记录不投影）；
+    3. chat.message 事件只投影 `direction=delivered`（最终交付事实），
        received（入站已由 Ayla 后端落库）与 requested（发送请求，非交付）
        一律跳过，避免把用户消息投影成爱莉回复、或一条回复投影两次。
-       非 chat 事件（如 voice_call）不套用该方向过滤，保持既有行为。
     """
     if envelope.stream_id and envelope.stream_id != profile.stream_id:
         logger.debug(
@@ -850,6 +962,8 @@ async def _handle_envelope(
             profile.stream_id,
         )
         return None
+    if envelope.event_type.startswith("voice_call."):
+        return await _handle_voice_event(profile, envelope)
     if envelope.is_chat_message:
         direction = _chat_direction(envelope)
         if direction != "delivered":
@@ -860,6 +974,72 @@ async def _handle_envelope(
             )
             return None
     return await aproject_elysia_reply(profile, envelope)
+
+
+# ---------- voice_call 事件分派（M4-5 §5.2 第 2/3 步） ----------
+
+def _transcript_from_event_payload(
+    payload: Mapping[str, Any] | None,
+) -> VoiceTranscriptEntry | None:
+    """从 voice_call.transcript.final 事件 payload 解析 VoiceTranscriptEntry。
+
+    兼容两种 payload 形态（以 Elysium 侧 voice_call 领域 payload 为准，解析失败
+    安全忽略——**绝不伪造**）：
+    - payload["transcript"] = {sequence, role, text, provider_event_id, ...}
+    - payload 顶层直接是 transcript 字段（sequence/role/text/...）
+    缺 role 与 text 关键字段 → None。
+    """
+    if not isinstance(payload, Mapping):
+        return None
+    raw = payload.get("transcript")
+    if not isinstance(raw, Mapping):
+        raw = payload
+    if not raw.get("role") and not raw.get("text"):
+        return None
+    return VoiceTranscriptEntry.from_mapping(raw)
+
+
+def _voice_call_id_from_event(
+    payload: Mapping[str, Any] | None, fallback: str
+) -> str:
+    """提取 call_id：payload["call_id"] 优先，缺失用事件 id 兜底（保持可溯源）。"""
+    if isinstance(payload, Mapping) and payload.get("call_id"):
+        return str(payload["call_id"])
+    transcript = payload.get("transcript") if isinstance(payload, Mapping) else None
+    if isinstance(transcript, Mapping) and transcript.get("call_id"):
+        return str(transcript["call_id"])
+    return fallback
+
+
+async def _handle_voice_event(
+    profile: ElysiaProfile, envelope: EventEnvelope
+) -> Message | None:
+    """voice_call.* 事件分派：
+
+    - `voice_call.transcript.final` → 解析 transcript → 投影爱莉发言
+      （`aproject_voice_transcript` 只投影 role=assistant，幂等 `elysia-voice-<event_id>`）；
+    - 其余 voice_call.* 事件（state_changed/provider_state_changed/...）→ debug 日志
+      保持可观测，不投影（爱莉技术状态不落库为发言，阶段三 §12.3）。
+    """
+    if envelope.event_type == "voice_call.transcript.final":
+        entry = _transcript_from_event_payload(envelope.payload)
+        if entry is None:
+            logger.debug(
+                "voice_call.transcript.final %s has no parseable transcript; skipped",
+                envelope.event_id,
+            )
+            return None
+        call_id = _voice_call_id_from_event(envelope.payload, envelope.event_id)
+        return await aproject_voice_transcript(
+            profile, call_id, entry, event_id=envelope.event_id
+        )
+    logger.debug(
+        "voice_call event %s (%s) observed for stream %s; not projected",
+        envelope.event_id,
+        envelope.event_type,
+        envelope.stream_id,
+    )
+    return None
 
 
 async def run_bridge_loop(
@@ -997,10 +1177,13 @@ __all__ = [
     "aproject_elysia_reply",
     "aproject_voice_transcript",
     "create_elysia_voice_call",
+    "end_elysia_voice_call",
     "end_voice_call",
+    "ensure_elysia_voice_call",
     "get_injector",
     "get_voice_call_status",
     "on_user_message_to_elysia",
+    "poll_voice_transcripts",
     "project_elysia_reply",
     "project_voice_transcript",
     "run_bridge_loop",

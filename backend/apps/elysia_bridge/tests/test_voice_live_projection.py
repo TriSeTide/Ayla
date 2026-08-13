@@ -26,7 +26,7 @@ from django.urls import path
 from apps.chat import services as chat_services
 from apps.chat.consumers import ChatConsumer
 from apps.chat.models import Message
-from apps.elysia_bridge.elysia_client import VoiceTranscriptEntry
+from apps.elysia_bridge.elysia_client import EventEnvelope, VoiceTranscriptEntry
 from apps.elysia_bridge.models import ElysiaProfile
 from apps.elysia_bridge import services as bridge_services
 
@@ -211,3 +211,110 @@ async def test_sovereignty_boundary_content_is_transcript_verbatim(user_factory)
 
     assert msg is not None
     assert msg.content == "这是我自己的原话，一字不改"
+
+
+# ---------- run_bridge 事件分派（M4-5 §5.2 第 2/3 步，_handle_envelope） ----------
+
+
+def _voice_envelope(
+    *,
+    event_type="voice_call.transcript.final",
+    stream_id="stream_voice_live",
+    payload=None,
+    event_id="evt_voice_dispatch",
+):
+    return EventEnvelope.from_mapping(
+        {
+            "event_id": event_id,
+            "sequence": 31,
+            "event_type": event_type,
+            "stream_id": stream_id,
+            "channel": "elysia-app",
+            "actor": {"type": "consciousness", "id": "elysia_1", "display_name": "爱莉"},
+            "payload": payload or {},
+        }
+    )
+
+
+async def test_handle_envelope_dispatches_voice_transcript_final(user_factory):
+    """voice_call.transcript.final 事件经 _handle_envelope 分派 → 投影爱莉发言。"""
+    elysia_user, profile, user = await _make_profile(user_factory)
+    conv = await _mk_private(user, elysia_user)
+
+    env = _voice_envelope(
+        payload={
+            "call_id": "call_dispatch_1",
+            "transcript": {
+                "sequence": 1,
+                "occurred_at": "2026-08-11T08:01:00Z",
+                "role": "assistant",
+                "text": "我听到了，汐汐",
+                "provider_event_id": "prov_dispatch_1",
+                "visibility": "private",
+            },
+        },
+        event_id="evt_voice_dispatch_1",
+    )
+    msg = await bridge_services._handle_envelope(profile, env)
+
+    assert msg is not None
+    assert msg.sender_id == profile.user_id
+    assert msg.content == "我听到了，汐汐"
+    assert msg.idempotency_key == _event_key("evt_voice_dispatch_1")
+    assert msg.conversation_id == conv.id
+
+
+async def test_handle_envelope_voice_event_non_final_not_projected(user_factory, caplog):
+    """voice_call.state_changed 等状态事件只记录不投影（技术状态不落库为发言）。"""
+    elysia_user, profile, user = await _make_profile(user_factory)
+    conv = await _mk_private(user, elysia_user)
+
+    env = _voice_envelope(
+        event_type="voice_call.state_changed",
+        payload={"call_id": "call_state_1", "state": "active"},
+        event_id="evt_voice_state_1",
+    )
+    with caplog.at_level(logging.DEBUG, logger="apps.elysia_bridge.services"):
+        msg = await bridge_services._handle_envelope(profile, env)
+
+    assert msg is None
+    assert await _total_messages(conv) == 0
+    assert any("voice_call event" in r.message for r in caplog.records)
+
+
+async def test_handle_envelope_voice_transcript_unparseable_safe_ignored(
+    user_factory, caplog
+):
+    """payload 缺 role/text 的 transcript.final → 安全忽略（绝不伪造内容）。"""
+    elysia_user, profile, user = await _make_profile(user_factory)
+    conv = await _mk_private(user, elysia_user)
+
+    env = _voice_envelope(
+        payload={"call_id": "call_bad_1", "transcript": {"sequence": 1}},
+        event_id="evt_voice_bad_1",
+    )
+    with caplog.at_level(logging.DEBUG, logger="apps.elysia_bridge.services"):
+        msg = await bridge_services._handle_envelope(profile, env)
+
+    assert msg is None
+    assert await _total_messages(conv) == 0
+    assert any("no parseable transcript" in r.message for r in caplog.records)
+
+
+async def test_handle_envelope_voice_stream_mismatch_skipped(user_factory, caplog):
+    """stream_id 不匹配的 voice_call 事件在顶层过滤（不投影）。"""
+    elysia_user, profile, user = await _make_profile(user_factory)
+    conv = await _mk_private(user, elysia_user)
+
+    env = _voice_envelope(
+        stream_id="stream_other_voice",
+        payload={
+            "call_id": "call_x",
+            "transcript": {"role": "assistant", "text": "不该被听到"},
+        },
+        event_id="evt_voice_mismatch",
+    )
+    msg = await bridge_services._handle_envelope(profile, env)
+
+    assert msg is None
+    assert await _total_messages(conv) == 0
