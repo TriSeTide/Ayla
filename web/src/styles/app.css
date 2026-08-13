@@ -1596,3 +1596,455 @@
     display: none;
   }
 }
+
+/* ================= M5-4 直播（大厅 / 直播间 / 弹幕 / 主播面板） ================= */
+
+.live-page {
+  display: flex;
+  height: 100vh;
+  background: var(--bg-aurora);
+}
+
+.live-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--glass-bg);
+  border-right: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+}
+
+.live-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6);
+}
+
+.live-hall-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+}
+
+.live-hall-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.live-hall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-4);
+}
+
+.live-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  text-align: left;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.live-card:hover {
+  transform: translateY(-2px);
+}
+
+.live-card-head {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.live-card-title {
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.live-card-owner {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.live-hall-empty {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: var(--sp-12) 0;
+}
+
+.live-badge {
+  display: inline-block;
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-family: var(--font-utility);
+}
+
+.live-badge-live {
+  background: var(--sakura-100);
+  color: var(--text-on-pink);
+}
+
+.live-badge-idle {
+  background: var(--ice-100);
+  color: var(--text-secondary);
+}
+
+.live-badge-ended {
+  background: var(--ice-100);
+  color: var(--text-secondary);
+}
+
+.live-badge-elysia {
+  background: var(--bubble-elysia);
+  color: var(--text-on-pink);
+}
+
+/* ---- 建频道 / 推流指引 ---- */
+
+.live-create-form {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.live-create-input {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+.live-create-input:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.live-create-guide {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.live-create-guide-title {
+  font-family: var(--font-display);
+  color: var(--text-primary);
+}
+
+.live-create-guide-notice {
+  margin: 0;
+  color: var(--warning);
+  font-size: 13px;
+}
+
+.live-copy-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.live-copy-label {
+  flex-shrink: 0;
+  width: 64px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.live-copy-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--ice-100);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.live-guide-dismiss {
+  align-self: flex-end;
+}
+
+.live-form-error {
+  color: var(--destructive);
+  font-size: 13px;
+  margin-top: var(--sp-2);
+}
+
+/* ---- 直播间 ---- */
+
+.live-room {
+  display: flex;
+  height: 100vh;
+  background: var(--bg-aurora);
+}
+
+.live-room-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  overflow-y: auto;
+}
+
+.live-room-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.live-room-title {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-ws-state {
+  font-size: 12px;
+  font-family: var(--font-utility);
+  color: var(--text-secondary);
+}
+
+.live-ws-online {
+  color: var(--success);
+}
+
+.live-player {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: rgba(70, 91, 146, 0.12);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+}
+
+.live-player-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.live-player-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+}
+
+.live-player-degraded {
+  color: var(--warning);
+}
+
+.live-player-error {
+  color: var(--destructive);
+}
+
+.live-room-side {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  border-left: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+}
+
+.live-room-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  height: 100vh;
+  background: var(--bg-aurora);
+  color: var(--text-primary);
+}
+
+/* ---- 弹幕 ---- */
+
+.danmaku-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.danmaku-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.danmaku-empty {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: var(--sp-6) 0;
+  font-size: 13px;
+}
+
+.danmaku-item {
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.danmaku-sender {
+  color: var(--text-secondary);
+  font-family: var(--font-utility);
+  font-size: 12px;
+}
+
+.danmaku-content {
+  color: var(--text-primary);
+}
+
+.danmaku-new-hint {
+  position: absolute;
+  bottom: var(--sp-3);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--sp-1) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--bubble-elysia);
+  color: var(--text-on-pink);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--glow-shadow);
+}
+
+.danmaku-input-area {
+  padding: var(--sp-3);
+  border-top: 1px solid var(--glass-border);
+}
+
+.danmaku-input-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.danmaku-input {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+.danmaku-input:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.danmaku-input-meta {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--sp-1);
+}
+
+.danmaku-counter {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-utility);
+}
+
+/* ---- 主播面板 ---- */
+
+.live-owner-panel {
+  padding: var(--sp-4);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.live-owner-title {
+  font-family: var(--font-display);
+  color: var(--text-primary);
+}
+
+.live-owner-stream {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.live-owner-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.live-owner-waiting {
+  color: var(--warning);
+  font-size: 13px;
+}
+
+.live-danger {
+  color: var(--destructive);
+}
+
+/* ---- 直播响应式 ---- */
+
+@media (max-width: 768px) {
+  .live-page,
+  .live-room {
+    flex-direction: column;
+  }
+
+  .live-sidebar {
+    width: 100%;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .live-room-side {
+    width: 100%;
+    flex: 1;
+    min-height: 240px;
+    border-left: none;
+    border-top: 1px solid var(--glass-border);
+  }
+}

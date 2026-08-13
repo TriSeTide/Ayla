@@ -5,6 +5,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ChatPage } from "./pages/ChatPage";
+import { LiveHallPage } from "./pages/LiveHallPage";
+import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RegisterPage } from "./pages/RegisterPage";
@@ -37,6 +39,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <VoicePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/live"
+        element={
+          <ProtectedRoute>
+            <LiveHallPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/live/:channelId"
+        element={
+          <ProtectedRoute>
+            <LiveRoomPage />
           </ProtectedRoute>
         }
       />

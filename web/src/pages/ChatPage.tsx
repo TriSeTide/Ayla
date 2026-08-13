@@ -307,6 +307,14 @@ export function ChatPage() {
           >
             语音
           </button>
+          <button
+            type="button"
+            className="msg-action-btn"
+            onClick={() => navigate("/live")}
+            aria-label="打开直播大厅"
+          >
+            直播
+          </button>
         </div>
         {demoMode && <div className="demo-banner">演示模式 · 后端未连接</div>}
         {elysiaProfile && <ElysiaEntry profile={elysiaProfile} onEnter={handleEnterElysia} />}

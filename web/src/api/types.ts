@@ -398,3 +398,83 @@ export type VoiceServerFrame =
   | VoiceStateFrame
   | VoiceErrorFrame
   | PongFrame;
+
+/* ================= M5-4 直播域（对齐 backend/apps/live/serializers.py + views.py + consumers.py） ================= */
+
+/** 频道乐观标记（应用侧，非 SRS 实时判定） */
+export type LiveChannelStatus = "idle" | "live" | "ended";
+
+/**
+ * LiveChannelSerializer 字段。
+ * 注意：stream_key / rtmp_url 仅 owner 可见（他人为 null），属正常契约而非缺陷。
+ */
+export interface LiveChannelDescriptor {
+  id: number;
+  title: string;
+  /** 乐观标记（应用侧）；真实在播判定以 GET /status/ 为准 */
+  status: LiveChannelStatus;
+  owner_id: string;
+  is_owner: boolean;
+  /** 仅 owner 非 null（推流指纹，禁止写日志/给观众组件） */
+  stream_key: string | null;
+  /** 仅 owner 非 null */
+  rtmp_url: string | null;
+  /** 全员可见（HLS 播放地址） */
+  hls_url: string;
+  /** 全员可见（HTTP-FLV 备选地址） */
+  flv_url: string;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+}
+
+/** GET /live/channels/<id>/status/ 的 SRS 实时判定 */
+export type LiveSrsStatus = "live" | "idle" | "degraded";
+
+/**
+ * GET /live/channels/<id>/status/ 响应体（services.py）。
+ * degraded = SRS 不可用（服务状态未知），**不是未在播**，UI 必须中性提示。
+ */
+export interface LiveStatusResult {
+  status: LiveSrsStatus;
+  /** "srs" | "srs_unavailable" */
+  source: string;
+  detail: string | null;
+  /** 应用侧乐观标记原样回显 */
+  optimistic: LiveChannelStatus;
+}
+
+/** 弹幕条目（POST 201 含 channel_id；GET 历史条目无 channel_id） */
+export interface DanmakuItem {
+  id: string;
+  channel_id?: string;
+  sender: {
+    user_id: string;
+    nickname: string;
+    avatar: string;
+  };
+  content: string;
+  created_at: string;
+}
+
+/* ---------- 弹幕 WS 帧（对齐 backend/apps/live/consumers.py） ---------- */
+
+/** 服务端 → 客户端：弹幕广播（发送者自己的 WS 也收到回帧，单一数据流） */
+export interface DanmakuFrame {
+  type: "danmaku";
+  id: string;
+  sender: {
+    id: string;
+    nickname: string;
+    avatar?: string;
+  };
+  content: string;
+  created_at: string;
+}
+
+export interface LiveErrorFrame {
+  type: "error";
+  detail: string;
+}
+
+export type LiveServerFrame = DanmakuFrame | LiveErrorFrame | PongFrame;

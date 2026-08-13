@@ -13,6 +13,7 @@
     "test:m52": "vitest run src/vitest/message-store.test.ts src/vitest/chat-store.test.ts src/vitest/chat-api.test.ts src/vitest/ws-chat.test.ts --maxWorkers=1 --minWorkers=1"
   },
   "dependencies": {
+    "hls.js": "^1.7.0",
     "livekit-client": "^2.21.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
