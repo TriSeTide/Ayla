@@ -478,3 +478,22 @@ export interface LiveErrorFrame {
 }
 
 export type LiveServerFrame = DanmakuFrame | LiveErrorFrame | PongFrame;
+
+/* ================= S6 群动态 highlights（对齐 backend/apps/chat/services.py） ================= */
+
+/**
+ * 群动态封面项。三类：live（封面无图）、post（有配图帖，首图缩略图）、game（无图）。
+ * cover_url 为 null 表示该类型无封面字段（前端回退群头像/占位）。
+ * target_url 为后端返回的相对路径（如 /live/1、/posts/1、/games/1）。
+ */
+export interface GroupHighlight {
+  type: "live" | "post" | "game";
+  title: string;
+  cover_url: string | null;
+  target_url: string;
+  /** ISO 时间 */
+  created_at: string;
+}
+
+/** GET /chat/conversations/highlights/?ids= 返回：{群 id 字符串: 动态封面列表} */
+export type ConversationHighlightsMap = Record<string, GroupHighlight[]>;

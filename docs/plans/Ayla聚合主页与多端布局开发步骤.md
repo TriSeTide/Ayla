@@ -132,11 +132,25 @@
 > chat-conversation-route 6）；`npm run build` 通过；Playwright 两形态冒烟（375 窄屏 BottomTabs 五 tab + MessageFAB、
 > 1440 宽屏 TopNav 一级模块、`/chat/g1 → /group/g1` 群聊重定向）均符合预期。
 
-### F2 窄屏主页 + 宽屏 /home 重定向
+### F2 窄屏主页 + 宽屏 /home 重定向 【已验收 2026-08-14】
 
 **新增**：`src/pages/HomePage.tsx`（窄屏群卡片/列表双布局 + 布局开关持久化）；`src/components/home/GroupCard.tsx`（轮播 + 状态角标）、`GroupListItem.tsx`、`LayoutSwitch.tsx`；`src/api/chat.ts` 增 highlights 批量拉取。
 **要点**：卡片轮播 IntersectionObserver 启动/暂停 + reduced-motion 静态首帧；角标优先级 未读 > 直播 > 语音 > 桌游；分页加载更多；空态/骨架屏/失败重试（需求 R-H9）。
 **验收**：双布局切换并持久化；轮播播放群动态；宽屏访问 /home 重定向 `/group/<最近群>`（无群则空态引导）。
+
+> 落地（2026-08-14）：`src/api/chat.ts` 增 `fetchHighlights(ids)`（S6 批量接口 `?ids=` 逗号拼接，空 ids 短路）；
+> `src/components/home/` badges.ts（角标优先级 未读>直播>语音>桌游 纯函数 + 最多 3 个）、GroupCarousel（横向滑轨
+> translateX 300ms + IntersectionObserver 进视口启停 + reduced-motion 静态首帧 + 无动态回退群头像）、
+> GroupCard（封面轮播 + 右上角标列 + 底部群头像/群名）、GroupListItem（行高 64px 玻璃底）、LayoutSwitch（卡片/列表切换）；
+> `src/stores/home.ts`（布局偏好 + 最近群 localStorage 持久化）；`src/pages/HomePage.tsx`（窄屏双布局 + 空态/骨架/失败重试/
+> 增量加载更多 + 宽屏 /home 重定向最近群[无历史第一个群/无群空态引导]）；`src/layout/NarrowTopBar.tsx`（窄屏一级页顶栏：
+> 头像→个人页/搜索胶囊→搜索页/更多菜单，补齐 F1 窄屏无个人页与搜索入口的缺口）；`styles/home.css`。
+> 验证：`tsc` 无错；全量 vitest 200 通过（新增 home-badges 8 / home-store 3 / highlights-api 3 / group-carousel 5 /
+> home-page 7）；`npm run build` 通过；Playwright 冒烟（375 窄屏 TopBar+双布局切换+卡片轮播+未读 99+ 徽标、
+> 1440 宽屏 /home→/group/1 无历史、→/group/2 有最近群）均符合预期。
+> 已知取舍（§7 登记）：列表布局「最新消息摘要」需后端会话列表补 last_message 字段，本期以成员数兜底（不伪造消息预览）；
+> 会话列表后端无分页，卡片布局「加载更多」为前端增量渲染（每批 12，滚到底补一批）；
+> live/voice/game 状态角标数据源由 F4/F5/F7 接入（badges.ts 已定义契约 + 预留字段）。
 
 ### F3 GroupPage 容器 + 群内聊天
 
@@ -204,7 +218,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地（2026-08-14，vitest 174 通过 + build + 两形态冒烟）；F2-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地（2026-08-14）；F2 窄屏主页 + 宽屏 /home 重定向已落地（2026-08-14）；F3-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因
@@ -226,3 +240,4 @@
 - 桌游玩法、扫一扫、个性化、直播间连麦均后续。
 - 宽屏"最近访问群"存 localStorage（无历史取第一个群；无群显示空态）。
 - 窄屏 FAB 弹底部面板 / 宽屏弹上方浮层（design.md §12.5）。
+- F2（2026-08-14）列表布局「最新消息摘要」：后端会话列表无 last_message 字段，本期成员数兜底；会话列表后端无分页，卡片布局「加载更多」为前端增量渲染；live/voice/game 状态角标数据源随 F4/F5/F7 接入。

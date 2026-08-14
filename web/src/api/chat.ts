@@ -11,6 +11,7 @@ import { apiRequest } from "./client";
 import type {
   ChatMessage,
   ConversationDetail,
+  ConversationHighlightsMap,
   ConversationMessagesParams,
   ConversationSummary,
   CreateMessagePayload,
@@ -118,4 +119,13 @@ export function patchConversation(
     method: "PATCH",
     body: payload,
   });
+}
+
+/** GET /chat/conversations/highlights/?ids=1,2,3 —— 批量群动态封面（S6） */
+export function fetchHighlights(convIds: string[]) {
+  if (convIds.length === 0) return Promise.resolve<ConversationHighlightsMap>({});
+  const qs = new URLSearchParams({ ids: convIds.join(",") });
+  return apiRequest<ConversationHighlightsMap>(
+    `/chat/conversations/highlights/?${qs.toString()}`,
+  );
 }

@@ -16,6 +16,7 @@ import { ChatConversationRoute } from "./pages/ChatConversationRoute";
 import { ChatPage } from "./pages/ChatPage";
 import { GroupPage } from "./pages/GroupPage";
 import { GroupScenePage } from "./pages/GroupScenePage";
+import { HomePage } from "./pages/HomePage";
 import { LiveHallPage } from "./pages/LiveHallPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -38,16 +39,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route
-          path="/home"
-          element={
-            <PlaceholderPage
-              title="主页"
-              step="F2"
-              description="群聊集合（卡片/列表双布局 + 群动态轮播）将随 F2 步骤落地"
-            />
-          }
-        />
+        <Route path="/home" element={<HomePage />} />
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/live" element={<LiveHallPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />

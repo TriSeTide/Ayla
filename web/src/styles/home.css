@@ -1,0 +1,445 @@
+/**
+ * 主页样式（F2 窄屏主页 + 群卡片/列表 + 轮播 + 窄屏 TopBar + 布局开关）。
+ * 事实源：design.md §12.6 群卡片与轮播 / §12.9 搜索胶囊；布局文档 §2.1/§2.2。
+ * 全部引用 tokens.css 变量，禁止裸 hex。
+ */
+
+/* ================= 主页骨架（窄屏） ================= */
+
+.home-page {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  /* 底部避让 FAB（底栏在 AppShell 壳层，已占位；FAB 悬浮） */
+  padding-bottom: 68px;
+}
+
+.home-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.home-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ================= 窄屏 TopBar（布局文档 §2.1） ================= */
+
+.narrow-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 56px;
+  padding: 0 var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.narrow-topbar-avatar {
+  flex: none;
+  display: inline-flex;
+}
+
+/* 搜索胶囊（design.md §12.9）：主页顶栏变体，点击进搜索页 */
+.narrow-topbar-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 40px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--ice-300);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.narrow-topbar-search:hover {
+  text-decoration: none;
+  border-color: var(--ice-500);
+}
+
+.narrow-topbar-more {
+  position: relative;
+  flex: none;
+}
+
+.icon-btn-40 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.icon-btn-40:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.narrow-topbar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 160px;
+  padding: var(--sp-2);
+  border-radius: 16px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--card-shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 30;
+}
+
+.narrow-topbar-menu button {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-input);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.narrow-topbar-menu button:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* ================= 布局开关（需求 R-H4） ================= */
+
+.layout-switch {
+  display: inline-flex;
+  gap: var(--sp-2);
+  padding: var(--sp-1);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.layout-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.layout-switch-btn.is-active {
+  background: rgba(157, 191, 230, 0.35);
+  color: var(--text-primary);
+}
+
+/* ================= 群卡片（design.md §12.6） ================= */
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+.group-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.group-card.is-skeleton {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.group-card-main {
+  display: block;
+  position: relative;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+}
+
+.group-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+
+.group-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态角标列：封面右上纵向叠放（design.md §12.6） */
+.group-card-badges {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.group-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  color: #fffafb;
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.group-badge-unread {
+  background: var(--pink-500);
+}
+
+.group-badge-live {
+  background: var(--glow-500);
+  color: #fffafb;
+}
+
+.group-badge-voice {
+  background: var(--ice-500);
+  color: var(--indigo-700);
+}
+
+.group-badge-game {
+  background: var(--sakura-300);
+  color: var(--grape-700);
+}
+
+/* ================= 轮播（design.md §12.6） ================= */
+
+.group-carousel {
+  position: relative;
+  padding: 8px;
+}
+
+.group-carousel-track {
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.group-carousel-slides {
+  display: flex;
+}
+
+.group-carousel-slide {
+  flex: 0 0 100%;
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--ice-100);
+  padding: 0;
+}
+
+.group-carousel-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.group-carousel-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-3);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.group-carousel-fallback-live {
+  background: linear-gradient(135deg, var(--ice-300), var(--ice-500));
+  color: var(--indigo-700);
+}
+
+.group-carousel-fallback-game {
+  background: linear-gradient(135deg, var(--sakura-100), var(--sakura-300));
+  color: var(--grape-700);
+}
+
+.group-carousel-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.group-carousel-badge {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+  color: #fffafb;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.8px;
+}
+
+.group-carousel-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.group-carousel-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-300);
+}
+
+.group-carousel-dot.is-active {
+  background: var(--glow-500);
+}
+
+/* ================= 群列表项（design.md §12.6） ================= */
+
+.home-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--sp-3) var(--sp-3);
+  gap: var(--sp-2);
+}
+
+.group-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 64px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  text-align: left;
+}
+
+.group-list-avatar {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.group-list-status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+}
+
+.group-list-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-list-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-list-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ================= 状态 / 加载（R-H9） ================= */
+
+.home-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-12) var(--sp-6);
+  text-align: center;
+}
+
+.home-load-more {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--sp-3);
+}
+
+.home-load-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-500);
+}
+
+.home-wide-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+  text-align: center;
+}
