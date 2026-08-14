@@ -9,6 +9,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { search as searchApi } from "../api/search";
+import type { SearchResults } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { IconDots, IconMessage, IconSearch } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
@@ -28,6 +30,8 @@ export function TopNav({
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   // 更多菜单：点击外部 / ESC 关闭
@@ -51,7 +55,34 @@ export function TopNav({
     e.preventDefault();
     const q = query.trim();
     navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search");
+    setSearchOpen(false);
   };
+
+  // 内联搜索下拉（去抖 300ms，输入非空才拉）
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchResults(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      searchApi({ q: trimmed, limit: 3 })
+        .then((r) => {
+          setSearchResults(r);
+          setSearchOpen(true);
+        })
+        .catch(() => {});
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const hasDropResults =
+    searchResults != null &&
+    ((searchResults.users?.total ?? 0) > 0 ||
+      (searchResults.groups?.total ?? 0) > 0 ||
+      (searchResults.posts?.total ?? 0) > 0 ||
+      (searchResults.lives?.total ?? 0) > 0 ||
+      (searchResults.games?.total ?? 0) > 0);
 
   return (
     <header className="top-nav">
@@ -89,15 +120,49 @@ export function TopNav({
           )}
         </Link>
 
-        <form className="top-nav-search" role="search" onSubmit={submitSearch}>
-          <IconSearch width={16} height={16} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索"
-            aria-label="全局搜索"
-          />
-        </form>
+        <div className="top-nav-search-wrap">
+          <form className="top-nav-search" role="search" onSubmit={submitSearch}>
+            <IconSearch width={16} height={16} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => hasDropResults && setSearchOpen(true)}
+              onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)}
+              placeholder="搜索"
+              aria-label="全局搜索"
+            />
+          </form>
+          {searchOpen && hasDropResults && (
+            <div className="top-nav-search-panel" role="listbox">
+              {(searchResults!.users?.items ?? []).map((u) => (
+                <button key={u.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/search?q=${encodeURIComponent(query)}`)}>
+                  <Avatar label={u.nickname || u.username} size={28} online={u.online} imageUrl={u.avatar || null} />
+                  <span>{u.nickname || u.username}</span>
+                </button>
+              ))}
+              {(searchResults!.groups?.items ?? []).map((g) => (
+                <button key={g.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/group/${g.id}`)}>
+                  <span>群 · {g.title}</span>
+                </button>
+              ))}
+              {(searchResults!.posts?.items ?? []).map((p) => (
+                <button key={p.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/posts/${p.id}`)}>
+                  <span>帖子 · {(p.title || p.body).slice(0, 20)}</span>
+                </button>
+              ))}
+              {(searchResults!.lives?.items ?? []).map((l) => (
+                <button key={l.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/live/${l.id}`)}>
+                  <span>直播 · {l.title}</span>
+                </button>
+              ))}
+              {(searchResults!.games?.items ?? []).map((g) => (
+                <button key={g.id} type="button" className="search-drop-row" onMouseDown={() => navigate("/games")}>
+                  <span>桌游 · {g.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="top-nav-more" ref={moreRef}>
           <button

@@ -638,3 +638,28 @@ export interface GroupInvite {
   handled_at: string | null;
   created_at: string;
 }
+
+/* ================= S5 聚合搜索（对齐 backend/apps/search） ================= */
+
+/** 群搜索结果项（轻量 dict） */
+export interface SearchGroupItem {
+  id: string;
+  type: "group";
+  title: string;
+  created_at: string;
+}
+
+/** 某类结果组（items + 截断前匹配总数） */
+export interface SearchGroup<T> {
+  items: T[];
+  total: number;
+}
+
+/** GET /search/ 返回：按请求类型分组（只含被请求类型） */
+export interface SearchResults {
+  users?: SearchGroup<UserPublic>;
+  groups?: SearchGroup<SearchGroupItem>;
+  posts?: SearchGroup<Post>;
+  lives?: SearchGroup<LiveChannelDescriptor>;
+  games?: SearchGroup<GameRoom>;
+}

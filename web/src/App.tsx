@@ -21,11 +21,11 @@ import { LiveHubPage } from "./pages/LiveHubPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MessagesPage } from "./pages/MessagesPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { PostDetailPage } from "./pages/PostDetailPage";
 import { PostsHubPage } from "./pages/PostsHubPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { SearchPage } from "./pages/SearchPage";
 import { VoiceHubPage } from "./pages/VoiceHubPage";
 
 export default function App() {
@@ -50,7 +50,7 @@ export default function App() {
         <Route path="/posts/:postId" element={<PostDetailPage />} />
         <Route path="/games" element={<GamesHubPage />} />
         <Route path="/messages" element={<MessagesPage />} />
-        <Route path="/search" element={<PlaceholderPage title="搜索" step="F9" />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />

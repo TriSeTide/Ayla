@@ -12,7 +12,8 @@ F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏�
 F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房；
 F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子；
 F7 为桌游：房间框架（列表/创建/进入占位界面）、join/leave 状态、群内桌游（范围仅该群）、FAB 建桌游室；
-F8 为消息中心：私信/好友双选项卡、申请处理闭环（好友/群邀请/入群申请）、badges 红点聚合。
+F8 为消息中心：私信/好友双选项卡、申请处理闭环（好友/群邀请/入群申请）、badges 红点聚合；
+F9 为全局搜索：五类分组结果、用户资料卡（加好友/发消息）、历史 chips、宽屏顶栏内联下拉。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -275,6 +276,19 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **说明**：红点实时推送（S2 WS 用户级广播 group.request.resolved/group.invite.new）接线后置，30s 轮询 + 处理 action 后即时 fetch 已覆盖"随处理即时刷新"验收。
 
+## F9 全局搜索（已完成）
+
+聚合主页增量第九步（见开发步骤文档 F9）：聚合搜索（只读，后端已完成可见性过滤）。
+
+- [x] `api/search.ts`：`GET /search/?q=&types=&limit=` 五类分组（user/group/post/live/game，每组 items+total）
+- [x] `stores/search.ts`：搜索历史 chips（localStorage 去重栈 + 上限 10 + 清空）
+- [x] `UserProfileCard`：用户资料卡（加好友发起申请 + 发消息进私聊）
+- [x] `SearchPage`：搜索输入（自动聚焦）+ 历史 chips + 五类分组 + 点用户弹资料卡、其余跳对应界面
+- [x] `TopNav` 内联搜索下拉（去抖 300ms，分组前几条，点击跳转）；删除无引用的 PlaceholderPage
+- [x] 契约测试：search-store 4 + search-api 3；全量 vitest 248 通过 + build + 两形态冒烟通过
+
+**F9 已知取舍**（步骤文档 §7 登记）：用户资料卡"好友关系状态展示"后置；桌游室搜索结果跳 /games 列表。
+
 ## 目录结构
 
 ```text
@@ -299,6 +313,7 @@ web/
     │   ├── posts.ts        # 帖子信息流/详情/评论端点（F6）
     │   ├── boardgame.ts    # 桌游室 CRUD + join/leave 端点（F7）
     │   ├── accounts.ts     # badges 全站未读聚合端点（F8）
+    │   ├── search.ts       # 聚合搜索端点（F9）
     │   ├── favorites.ts    # 收藏端点（F6/F10）
     │   ├── elysia.ts       # 爱莉 profile（M5-2，只读）
     │   ├── health.ts       # health/live 与 health
@@ -314,7 +329,8 @@ web/
     │   ├── group.ts        # F3：activeScene（群内子场景单一状态源）+ currentGroupId
     │   ├── shell.ts        # F4：bottomTabsLeaving（窄屏直播间底栏下滑走跨路由动画）
     │   ├── posts.ts        # F6：信息流游标分页 + 收藏集合
-    │   └── badges.ts       # F8：全站未读聚合 + messageBadge 红点
+    │   ├── badges.ts       # F8：全站未读聚合 + messageBadge 红点
+    │   └── search.ts       # F9：搜索历史记录（localStorage）
     ├── ws/
     │   ├── presence.ts     # /ws/presence/ 单例 + 心跳 + 重连
     │   ├── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
@@ -346,16 +362,17 @@ web/
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
     │   ├── GamesHubPage.tsx    # F7 一级桌游（列表 + 进入占位）
     │   ├── MessagesPage.tsx    # F8 消息中心（私信/好友双选项卡 + 申请审批）
+    │   ├── SearchPage.tsx      # F9 全局搜索（五类分组 + 用户资料卡）
     │   ├── ProfilePage.tsx
     │   ├── HomePage.tsx     # F2 窄屏主页（群卡片/列表双布局 + 宽屏 /home 重定向最近群）
     │   ├── PostsHubPage.tsx     # F6 一级帖子信息流（游标分页 + FAB 发帖）
     │   ├── PostDetailPage.tsx   # F6 帖子详情（评论/收藏/删除）
-    │   ├── PlaceholderPage.tsx     # F1 未落地页面占位（标注 F 步骤）
     │   ├── GroupPage.tsx           # F3 群聊场景容器（窄屏进群动画/五子界面/两级点击；宽屏三列）
     │   ├── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
     │   └── group/           # F3-F7：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupPosts / GroupGames / GroupScenePlaceholder
     ├── components/
     │   ├── ProtectedRoute.tsx
+    │   ├── UserProfileCard.tsx  # F9 用户资料卡（加好友/发消息）
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
     │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/VoiceRoomBody/ElysiaVoicePanel（M5-3 + F5）
     │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
@@ -363,7 +380,7 @@ web/
     │   ├── group/          # F3：GroupTopTabs（窄屏上移导航条）
     │   ├── posts/          # F6：PostCard/PostEditor/CommentList
     │   └── boardgame/      # F7：GameRoomCard/GameRoomCreate/GameRoomPlaceholder
-    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）/ messages.css（F8）
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）/ messages.css（F8）/ search.css（F9）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 

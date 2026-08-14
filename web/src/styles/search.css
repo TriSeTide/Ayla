@@ -1,0 +1,241 @@
+/**
+ * 搜索样式（F9）：搜索页（输入 + 历史 chips + 五类分组结果）+ 用户资料卡 +
+ * 宽屏顶栏内联搜索下拉。
+ * 事实源：design.md §12.9 搜索框与结果。
+ */
+
+/* ================= 搜索页 ================= */
+
+.search-page {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 68px;
+}
+
+.search-input-wrap {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) var(--sp-4);
+  padding: 0 var(--sp-4);
+  height: 44px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--ice-300);
+  color: var(--text-secondary);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.search-history {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+
+.search-chip {
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-100);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.search-clear {
+  font-size: 13px;
+  color: var(--slate-500);
+}
+
+.search-loading {
+  padding: var(--sp-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.search-error {
+  padding: var(--sp-3) var(--sp-4);
+  font-size: 13px;
+  color: var(--destructive);
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
+.search-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-2);
+}
+
+.search-group-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.search-more {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ice-500);
+}
+
+.search-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  text-align: left;
+}
+
+.search-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-row-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ================= 用户资料卡（R-S4） ================= */
+
+.user-profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(70, 91, 146, 0.25);
+}
+
+.user-profile-card {
+  width: min(320px, 85vw);
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.user-profile-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: center;
+}
+
+.user-profile-nick {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.user-profile-status {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.user-profile-signature {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 260px;
+}
+
+.user-profile-error {
+  font-size: 12px;
+  color: var(--destructive);
+}
+
+.user-profile-actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: center;
+}
+
+/* ================= 宽屏顶栏内联搜索下拉（design.md §12.9） ================= */
+
+.top-nav-search-wrap {
+  position: relative;
+}
+
+.top-nav-search-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 360px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: var(--sp-2);
+  border-radius: 16px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--card-shadow);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.search-drop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-input);
+  font-size: 14px;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.search-drop-row:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+@media (min-width: 769px) {
+  .search-page {
+    padding-bottom: var(--sp-4);
+  }
+}
