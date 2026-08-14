@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconClose, IconPlus, IconUsers } from "../components/icons";
 import { LiveCreate } from "../components/live/LiveCreate";
+import { VoiceChannelCreate } from "../components/voice/VoiceChannelCreate";
 import type { FabAction } from "./shellConfig";
 
 export function CreateFab({ action }: { action: FabAction }) {
@@ -49,6 +50,7 @@ export function CreateFab({ action }: { action: FabAction }) {
   };
 
   const isLiveCreate = action.handler === "live";
+  const isVoiceCreate = action.handler === "voice";
 
   return (
     <>
@@ -60,6 +62,8 @@ export function CreateFab({ action }: { action: FabAction }) {
           <div className="fab-panel" role="menu" aria-label="创建面板">
             {isLiveCreate ? (
               <LiveCreate onCreated={handleLiveCreated} group={action.groupId} />
+            ) : isVoiceCreate ? (
+              <VoiceChannelCreate group={action.groupId} />
             ) : (
               <button
                 type="button"

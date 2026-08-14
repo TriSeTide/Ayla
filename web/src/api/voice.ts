@@ -30,11 +30,11 @@ export function listVoiceChannels() {
   return apiRequest<VoiceChannelDescriptor[]>("/voice/channels/");
 }
 
-/** POST /voice/channels/ —— 建频道（name 空 → 400） */
-export function createVoiceChannel(name: string) {
+/** POST /voice/channels/ —— 建频道（name 空 → 400；group 可选，群内创建归属该群） */
+export function createVoiceChannel(name: string, group?: string | null) {
   return apiRequest<VoiceChannelDescriptor>("/voice/channels/", {
     method: "POST",
-    body: { name },
+    body: group ? { name, group } : { name },
   });
 }
 

@@ -199,11 +199,24 @@
 > 1440 键盘 ↓ 切换 + 弹幕侧列）均符合预期。
 > 已知取舍（§7 登记）：窄屏直播间弹幕"浮层"沿用 M5-4 底部浮层（覆盖播放器下部）而非重构全屏沉浸视频层；弹幕输入框滑入动画终态断言留待主链路 E2E 统一补。
 
-### F5 语音：一级 tab + 群内语音
+### F5 语音：一级 tab + 群内语音 【已验收 2026-08-14】
 
 **新增/改造**：`src/pages/VoiceHubPage.tsx`（聚合卡片 + 来源标识）；`src/pages/group/GroupVoice.tsx`（群内语音房卡片）；语音房整页（**进房动画同直播间：底栏下滑走+输入框滑入**，复用 `useEnterRoomAnimation`；成员网格 + 控制排 + 房内打字输入框，复用群会话方案：群内语音房输入 = 群消息）。
 **要点**：上麦/静音/离开交互；房内文字消息经群会话（开发文档 §1.9 复用方案）；FAB 创建语音房（群内则归属该群）。
 **验收**：进房上麦、房内打字可送达群会话；返回键回列表（底栏复位）。
+
+> 落地（2026-08-14）：`api/types.ts` VoiceChannelDescriptor 加 visibility/group/group_name（S1）；
+> `api/voice.ts` createVoiceChannel(name, group)；`components/voice/VoiceRoomBody.tsx`（语音房整页：返回头 +
+> 复用 VoiceChannelPanel 成员/控制排 + 房内打字发群会话[仅群语音房 group 非空，复用群会话方案 B10]）；
+> `pages/VoiceHubPage.tsx`（聚合卡片 + 来源标识 + 空态 + 进房底栏下滑走[复用 shell store bottomTabsLeaving] +
+> 输入框滑入，替代 VoicePage）+ 删 VoicePage；`pages/group/GroupVoice.tsx`（群内范围 filter group=groupId + 空态）；
+> `AppShell` 底栏下滑走改由 bottomTabsLeaving 通用驱动（直播/语音房共用，去掉 isLiveRoomRoute 判断）；
+> `VoiceChannelList` 加来源标识；`GroupPage` voice 子界面接 GroupVoice；`CreateFab` handler=voice 接
+> VoiceChannelCreate（group 归属）；`styles/voice.css`。
+> 验证：tsc 无错；全量 vitest 224 通过（新增 group-voice 范围 2 + voice-room-body 房内打字 2）；build 通过；
+> Playwright 冒烟（语音大厅来源标识公开/群名 + FAB 创建语音房 label + 群内语音范围仅本群）符合预期。
+> 已知取舍（§7 登记）：语音房进房动画（底栏下滑走）+ 房内打字送达群消息的端到端验证依赖真实 LiveKit 媒体连接，
+> 冒烟未覆盖（join 走媒体错误回滚路径），对应 UI 结构由单元测试覆盖。
 
 ### F6 帖子全套
 
@@ -248,7 +261,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地（2026-08-14）；F5-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地（2026-08-14）；F6-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因
@@ -273,3 +286,4 @@
 - F2（2026-08-14）列表布局「最新消息摘要」：后端会话列表无 last_message 字段，本期成员数兜底；会话列表后端无分页，卡片布局「加载更多」为前端增量渲染；live/voice/game 状态角标数据源随 F4/F5/F7 接入。
 - F3（2026-08-14）退出群/转让群主/解散群：后端无对应端点（B1-B10 缺口清单与 S1-S6 均未覆盖），群信息界面占位标注，待后端补端点；五子界面滑动采用「手势触发 navigate + key 切换淡入」（开发文档 §2.2 明确用 CSS transition，不保持五页同时挂载）；下拉回主页手势与输入框滑入延迟动画的精确终点断言留待主链路 E2E 阶段统一补。
 - F4（2026-08-14）窄屏直播间弹幕"浮层"沿用 M5-4 底部浮层（覆盖播放器下部）而非重构全屏沉浸视频层；进房动画"底栏下滑走"终态断言留待主链路 E2E 统一补。
+- F5（2026-08-14）语音房进房动画与房内打字送达群消息的端到端验证依赖真实 LiveKit 媒体连接（冒烟未覆盖，join 走媒体错误回滚），UI 结构与房内打字发送路径由单元测试覆盖；公开语音房无独立文字流（B10 后置），打字框仅群语音房显示。

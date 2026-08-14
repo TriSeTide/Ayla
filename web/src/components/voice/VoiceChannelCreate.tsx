@@ -5,7 +5,12 @@ import { useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { useVoiceStore } from "../../stores/voice";
 
-export function VoiceChannelCreate() {
+export function VoiceChannelCreate({
+  group,
+}: {
+  /** 群内创建时归属的群 id（一级 tab 创建为 null，R-F2） */
+  group?: string | null;
+}) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +24,7 @@ export function VoiceChannelCreate() {
     setBusy(true);
     setError(null);
     try {
-      const ch = await voiceApi.createVoiceChannel(trimmed);
+      const ch = await voiceApi.createVoiceChannel(trimmed, group);
       const store = useVoiceStore.getState();
       store.setChannels([{ ...ch, mine: false }, ...store.channels]);
       setName("");

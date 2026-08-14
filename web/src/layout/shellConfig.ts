@@ -71,8 +71,8 @@ export interface FabAction {
   groupId: string | null;
   /** 该创建表单预计落地的步骤标识（F1 阶段点击动作项仅提示，不打开表单） */
   plannedStep: string;
-  /** 已接线的真表单处理（F4 起：直播创建已落地）；undefined = 仍提示落步骤 */
-  handler?: "live";
+  /** 已接线的真表单处理（F4/F5 起：直播/语音创建已落地）；undefined = 仍提示落步骤 */
+  handler?: "live" | "voice";
 }
 
 /**
@@ -87,7 +87,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
     const groupId = groupScene.params.id;
     switch (groupScene.params.scene) {
       case "voice":
-        return { key: "group-voice", label: "创建群内语音房", groupId, plannedStep: "F5" };
+        return { key: "group-voice", label: "创建群内语音房", groupId, plannedStep: "F5", handler: "voice" };
       case "live":
         return { key: "group-live", label: "群内开播", groupId, plannedStep: "F4", handler: "live" };
       case "posts":
@@ -105,7 +105,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
     return { key: "create-group", label: "创建群聊", groupId: null, plannedStep: "F2" };
   }
   if (matchPath({ path: "/voice", end: true }, pathname)) {
-    return { key: "create-voice", label: "创建语音房", groupId: null, plannedStep: "F5" };
+    return { key: "create-voice", label: "创建语音房", groupId: null, plannedStep: "F5", handler: "voice" };
   }
   if (matchPath({ path: "/live", end: true }, pathname)) {
     return { key: "create-live", label: "创建直播间", groupId: null, plannedStep: "F4", handler: "live" };

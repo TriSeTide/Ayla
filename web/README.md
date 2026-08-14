@@ -8,7 +8,8 @@ M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性�
 F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、CreateFAB 随场景创建入口、手势 hook、路由重构（新一级路由 + 旧 /chat 兼容重定向）；
 F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动态轮播、布局开关、最近群重定向；
 F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面滑动、群头像两级点击、群内聊天（复用）、群信息（角色化）、宽屏三列（ServerRail + ChannelSidebar）；
-F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间。
+F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间；
+F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -219,6 +220,20 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **F4 已知取舍**（步骤文档 §7 登记）：窄屏弹幕"浮层"沿用 M5-4 底部浮层（覆盖播放器下部）而非重构全屏沉浸视频层。
 
+## F5 语音：一级 tab + 群内语音（已完成）
+
+聚合主页增量第五步（见开发步骤文档 F5）：在 M5-3 已验证语音能力上补多端布局增量。
+
+- [x] `VoiceChannelDescriptor` 加 `visibility`/`group`/`group_name`（S1）；`createVoiceChannel(name, group)` 群归属
+- [x] `AppShell` 底栏下滑走改为 `bottomTabsLeaving` 通用驱动（直播/语音房共用，移除 isLiveRoomRoute 判断）
+- [x] `VoiceRoomBody`：语音房整页（返回头 + 复用 VoiceChannelPanel 成员/控制排 + 房内打字发群会话，仅群语音房 group 非空显示）
+- [x] `VoiceHubPage`（改造 VoicePage）：聚合卡片 + 来源标识 + 空态 + 进房底栏下滑走 + 输入框滑入
+- [x] `GroupVoice`：群内语音房范围 = 仅该群（filter group）+ 空态；`GroupPage` voice 子界面接入
+- [x] `CreateFab` `handler="voice"` 接 `VoiceChannelCreate`（群内归属）；`VoiceChannelList` 加来源标识
+- [x] 契约测试：group-voice 范围 2 + voice-room-body 房内打字 2；全量 vitest 224 通过 + build + 两形态冒烟通过
+
+**F5 已知取舍**（步骤文档 §7 登记）：进房动画与房内打字送达群消息的端到端验证依赖真实 LiveKit（冒烟未覆盖），UI 结构与发送路径由单测覆盖；公开语音房无独立文字流（B10 后置），打字框仅群语音房显示。
+
 ## 目录结构
 
 ```text
@@ -278,7 +293,8 @@ web/
     │   ├── LoginPage.tsx
     │   ├── RegisterPage.tsx
     │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口，侧栏含语音/直播入口）
-    │   ├── VoicePage.tsx   # M5-3 语音主页面（频道列表 + 当前频道面板 + 爱莉语音面板）
+    │   ├── VoicePage.tsx   # M5-3 语音主页面 → F5 改名 VoiceHubPage（聚合 tab）
+    │   ├── VoiceHubPage.tsx # F5 一级语音聚合（卡片 + 来源标识）
     │   ├── LiveHallPage.tsx    # M5-4 直播大厅 → F4 改名 LiveHubPage（聚合 tab）
     │   ├── LiveHubPage.tsx     # F4 一级直播聚合（网格 + 来源标识）
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
@@ -287,15 +303,15 @@ web/
     │   ├── PlaceholderPage.tsx     # F1 未落地页面占位（标注 F 步骤）
     │   ├── GroupPage.tsx           # F3 群聊场景容器（窄屏进群动画/五子界面/两级点击；宽屏三列）
     │   ├── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
-    │   └── group/           # F3/F4：GroupChat（复用聊天）/ GroupInfo（角色化）/ GroupLive（群内直播）/ GroupScenePlaceholder
+    │   └── group/           # F3/F4/F5：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupScenePlaceholder
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
-    │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/ElysiaVoicePanel（M5-3）
+    │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/VoiceRoomBody/ElysiaVoicePanel（M5-3 + F5）
     │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
     │   ├── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）
     │   └── group/          # F3：GroupTopTabs（窄屏上移导航条）
-    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 

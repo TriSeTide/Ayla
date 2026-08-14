@@ -15,7 +15,7 @@ import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isLiveRoomRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, resolveFabAction, resolveModule } from "./shellConfig";
 
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
@@ -25,15 +25,13 @@ export function AppShell() {
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
   const groupSceneNarrow = isNarrow && isGroupScene(pathname);
-  const liveRoomNarrow = isNarrow && isLiveRoomRoute(pathname);
 
-  // 窄屏进房动画：底栏下滑走（translateY 0→100%，200ms ease-in，R-L2）
-  const leavingStyle = liveRoomNarrow
-    ? {
-        transform: `translateY(${bottomTabsLeaving ? "100%" : "0"})`,
-        transition: "transform 200ms ease-in",
-      }
-    : undefined;
+  // 窄屏进房动画（直播间/语音房，F4/F5）：底栏下滑走（translateY 0→100%，200ms ease-in）
+  // 由 LiveRoomPage / 语音房进房调 shell store 驱动，与进群动画"上移"相反。
+  const leavingStyle = {
+    transform: `translateY(${bottomTabsLeaving ? "100%" : "0"})`,
+    transition: "transform 200ms ease-in",
+  };
 
   return (
     <div className="app-shell" data-form={isNarrow ? "narrow" : "wide"}>
@@ -44,7 +42,11 @@ export function AppShell() {
       {isNarrow && !groupSceneNarrow ? (
         <>
           <MessageFab style={leavingStyle} />
-          <BottomTabs moduleKey={moduleKey} style={leavingStyle} dataFixed={liveRoomNarrow} />
+          <BottomTabs
+            moduleKey={moduleKey}
+            style={leavingStyle}
+            dataFixed={bottomTabsLeaving}
+          />
         </>
       ) : null}
       {fabAction ? <CreateFab action={fabAction} /> : null}

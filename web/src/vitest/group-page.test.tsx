@@ -22,6 +22,9 @@ vi.mock("../pages/group/GroupInfo", () => ({
 vi.mock("../pages/group/GroupLive", () => ({
   GroupLive: () => <div>群内直播内容</div>,
 }));
+vi.mock("../pages/group/GroupVoice", () => ({
+  GroupVoice: () => <div>群内语音内容</div>,
+}));
 vi.mock("../api/chat", () => ({
   getConversation: vi.fn(),
 }));
@@ -88,7 +91,7 @@ describe("GroupPage 窄屏", () => {
     expect(screen.getByText("群聊内容区")).toBeInTheDocument();
   });
 
-  it("非 chat 子界面：live 渲染群内直播（GroupLive），voice 渲染占位", () => {
+  it("非 chat 子界面：live/voice 渲染对应子界面，games 渲染占位", () => {
     mockMatchMedia(true);
     useGroupStore.getState().reset();
     const { unmount } = renderGroup("/group/1/live");
@@ -96,7 +99,7 @@ describe("GroupPage 窄屏", () => {
     unmount();
 
     renderGroup("/group/1/voice");
-    expect(screen.getByText("群内语音")).toBeInTheDocument();
+    expect(screen.getByText("群内语音内容")).toBeInTheDocument();
   });
 
   it("群头像两级点击：非 chat 场景点群头像 → 回聊天", async () => {

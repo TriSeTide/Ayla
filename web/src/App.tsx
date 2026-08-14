@@ -22,7 +22,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RegisterPage } from "./pages/RegisterPage";
-import { VoicePage } from "./pages/VoicePage";
+import { VoiceHubPage } from "./pages/VoiceHubPage";
 
 export default function App() {
   return (
@@ -39,7 +39,7 @@ export default function App() {
       >
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/home" element={<HomePage />} />
-        <Route path="/voice" element={<VoicePage />} />
+        <Route path="/voice" element={<VoiceHubPage />} />
         <Route path="/live" element={<LiveHubPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
         <Route path="/posts" element={<PlaceholderPage title="帖子" step="F6" />} />
