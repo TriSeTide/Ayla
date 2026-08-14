@@ -32,12 +32,12 @@ export function openPrivateConversation(userId: string) {
   });
 }
 
-/** POST /chat/conversations/ —— 建群 {title, member_ids[]} */
+/** POST /chat/conversations/group/ —— 建群 {title, member_ids[]}（后端 GroupCreateView 真实挂载路由） */
 export function createGroupConversation(payload: {
   title: string;
   member_ids: string[];
 }) {
-  return apiRequest<ConversationDetail>("/chat/conversations/", {
+  return apiRequest<ConversationDetail>("/chat/conversations/group/", {
     method: "POST",
     body: payload,
   });

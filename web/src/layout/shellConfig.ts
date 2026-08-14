@@ -79,8 +79,8 @@ export interface FabAction {
   groupId: string | null;
   /** 该创建表单预计落地的步骤标识（F1 阶段点击动作项仅提示，不打开表单） */
   plannedStep: string;
-  /** 已接线的真表单处理（F4-F7 起：直播/语音/发帖/桌游已落地）；undefined = 仍提示落步骤 */
-  handler?: "live" | "voice" | "post" | "game";
+  /** 已接线的真表单处理（F4-F8 起：直播/语音/发帖/桌游已落地；F10 后建群也落地）；undefined = 仍提示落步骤 */
+  handler?: "live" | "voice" | "post" | "game" | "group";
 }
 
 /**
@@ -110,7 +110,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
   if (matchPath({ path: "/group/:id", end: true }, pathname)) return null;
 
   if (matchPath({ path: "/home", end: true }, pathname)) {
-    return { key: "create-group", label: "创建群聊", groupId: null, plannedStep: "F2" };
+    return { key: "create-group", label: "创建群聊", groupId: null, plannedStep: "F2", handler: "group" };
   }
   if (matchPath({ path: "/voice", end: true }, pathname)) {
     return { key: "create-voice", label: "创建语音房", groupId: null, plannedStep: "F5", handler: "voice" };

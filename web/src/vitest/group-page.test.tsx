@@ -5,7 +5,7 @@
  * GroupChat / GroupInfo mock 成轻量组件（避免聊天 WS/API 链路），
  * 聚焦容器/导航/两级点击语义。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary } from "../api/types";
@@ -66,6 +66,7 @@ function renderGroup(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route path="/home" element={<div>主页内容</div>} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
       </Routes>
@@ -121,6 +122,33 @@ describe("GroupPage 窄屏", () => {
     renderGroup("/group/1");
     screen.getByRole("button", { name: "群头像：测试群" }).click();
     await waitFor(() => expect(screen.getByText("群信息界面")).toBeInTheDocument());
+  });
+
+  it("下拉顶部导航条超过阈值 → 返回主页（R-G6）", async () => {
+    mockMatchMedia(true);
+    renderGroup("/group/1");
+    const tabs = document.querySelector(".group-top-tabs");
+    expect(tabs).not.toBeNull();
+
+    // 模拟下拉：start(100,0) → move(100,90)（dy=90 > 80 阈值）→ end
+    fireEvent.touchStart(tabs!, { touches: [{ clientX: 100, clientY: 0 }] });
+    fireEvent.touchMove(tabs!, { touches: [{ clientX: 100, clientY: 90 }] });
+    fireEvent.touchEnd(tabs!, { changedTouches: [{ clientX: 100, clientY: 90 }] });
+
+    await waitFor(() => expect(screen.getByText("主页内容")).toBeInTheDocument());
+  });
+
+  it("下拉未过阈值 → 吸附回原状态，不返回主页", async () => {
+    mockMatchMedia(true);
+    renderGroup("/group/1");
+    const tabs = document.querySelector(".group-top-tabs")!;
+    fireEvent.touchStart(tabs, { touches: [{ clientX: 100, clientY: 0 }] });
+    fireEvent.touchMove(tabs, { touches: [{ clientX: 100, clientY: 40 }] });
+    fireEvent.touchEnd(tabs, { changedTouches: [{ clientX: 100, clientY: 40 }] });
+
+    // 仍停留群聊，未跳主页
+    expect(screen.getByText("群聊内容区")).toBeInTheDocument();
+    expect(screen.queryByText("主页内容")).not.toBeInTheDocument();
   });
 });
 

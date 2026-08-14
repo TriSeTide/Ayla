@@ -102,7 +102,7 @@ class PrivateConversationView(APIView):
 
 
 class GroupCreateView(APIView):
-    """POST /conversations/ —— 建群 {title, member_ids[]}（owner=当前用户）。"""
+    """POST /conversations/group/ —— 建群 {title, member_ids[]}（owner=当前用户）。"""
 
     def post(self, request):
         title = (request.data.get("title") or "").strip()

@@ -6,7 +6,7 @@
  *
  * F1 阶段只接线"弹面板"机制（开发步骤 F1 要点）：
  * - 场景创建动作点击后提示该表单落地的步骤（F2-F7 逐一步替换为真表单）；
- * - 「创建群聊」为真实动作：跳转 /chat（M5-1 会话页侧栏已有建群入口）。
+ * - 「创建群聊」为真实动作：打开 GroupCreateDialog 建群对话框（群名必填，F10 后不再跳 /chat）。
  *
  * 窄屏 = 底部上滑面板（圆角 24px 上沿 + 背景压暗）；宽屏 = FAB 上方浮层。
  */
@@ -57,6 +57,13 @@ export function CreateFab({ action }: { action: FabAction }) {
   const isVoiceCreate = action.handler === "voice";
   const isPostCreate = action.handler === "post";
   const isGameCreate = action.handler === "game";
+  const isGroupCreate = action.handler === "group";
+
+  // 主页 FAB 主动作「创建群聊」：打开建群对话框（R-F3 已落地，不再提示落步骤）
+  const openGroupCreate = () => {
+    setOpen(false);
+    setShowGroupCreate(true);
+  };
 
   return (
     <>
@@ -86,6 +93,16 @@ export function CreateFab({ action }: { action: FabAction }) {
                   navigate(action.groupId ? `/group/${action.groupId}/games` : "/games");
                 }}
               />
+            ) : isGroupCreate ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="fab-panel-item"
+                onClick={openGroupCreate}
+              >
+                <IconUsers width={18} height={18} />
+                <span>{action.label}</span>
+              </button>
             ) : (
               <button
                 type="button"

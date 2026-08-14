@@ -6,9 +6,10 @@
  * - 群头像点击 = 两级语义（R-G4），由父级 onAvatarClick 分支处理，本组件不判断；
  * - 5 小圆点指示当前子界面（仅非聊天子界面显示，布局文档 §2.3）。
  *
- * enterStyle 由 useEnterGroupAnimation 提供（translateY 上移 + transition）。
+ * enterStyle 由 useEnterGroupAnimation 提供（translateY 上移 + transition）；
+ * 下拉回主页（R-G6）手势 handlers 由父级注入，展开到整个导航条区域。
  */
-import type { CSSProperties } from "react";
+import type { CSSProperties, TouchEvent as ReactTouchEvent } from "react";
 import { Avatar } from "../Avatar";
 import { IconGame, IconPost, IconVideo, IconMic } from "../icons";
 import type { GroupScene } from "../../stores/group";
@@ -20,27 +21,34 @@ const TABS: Array<{ scene: GroupScene; label: string; icon: typeof IconMic }> = 
   { scene: "games", label: "桌游", icon: IconGame },
 ];
 
+export interface PullHandlers {
+  onTouchStart: (e: ReactTouchEvent) => void;
+  onTouchMove: (e: ReactTouchEvent) => void;
+  onTouchEnd: (e: ReactTouchEvent) => void;
+  onTouchCancel: () => void;
+}
+
 export function GroupTopTabs({
   groupName,
   activeScene,
   onSelectScene,
   onAvatarClick,
   style,
-  onPointerDown,
+  pullHandlers,
 }: {
   groupName: string;
   activeScene: GroupScene;
   onSelectScene: (scene: GroupScene) => void;
   onAvatarClick: () => void;
-  /** 进群动画 transform + transition（父级注入） */
+  /** 进群动画 + 下拉跟手/退场 transform + transition（父级注入） */
   style?: CSSProperties;
-  /** 下拉回主页手势的起点（父级绑定到整个导航条区域） */
-  onPointerDown?: (e: React.PointerEvent) => void;
+  /** 下拉回主页（R-G6）手势 handlers，绑定到整个导航条区域 */
+  pullHandlers?: PullHandlers;
 }) {
   const showDots = activeScene !== "chat" && activeScene !== "info";
 
   return (
-    <div className="group-top-tabs" style={style} onPointerDown={onPointerDown}>
+    <div className="group-top-tabs" style={style} {...pullHandlers}>
       <nav className="group-top-nav" aria-label="群内场景">
         <ul className="group-top-list">
           {TABS.slice(0, 2).map((t) => {

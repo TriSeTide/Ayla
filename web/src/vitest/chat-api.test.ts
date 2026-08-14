@@ -139,3 +139,28 @@ describe("api/chat 已读/历史分页", () => {
     await expect(chatApi.recallMessage("c1", "m1")).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe("api/chat 会话创建端点", () => {
+  it("createGroupConversation 走后端真实路由 /chat/conversations/group/（非 /conversations/）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "g1", type: "group", title: "新群", announcement: "",
+        owner_id: "o1", members: [], my_role: "owner", member_count: 1,
+        unread_count: 0, created_at: new Date().toISOString(),
+      }, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { useAuthStore } = await import("../stores/auth");
+    useAuthStore.setState({ accessToken: "acc" });
+
+    await chatApi.createGroupConversation({ title: "新群", member_ids: [] });
+
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain("/chat/conversations/group/");
+    expect(url).not.toContain("/chat/conversations/?");
+    // 请求体：title + member_ids（可为空数组）
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ title: "新群", member_ids: [] });
+  });
+});

@@ -178,7 +178,7 @@
 > 1440 宽屏 ServerRail+ChannelSidebar 三列 + 频道侧栏切场景）均符合预期。
 > 已知取舍（§7 登记）：退出群/转让群主/解散群后端无端点（不在 B1-B10/S1-S6 范围），群信息占位标注；
 > 五子界面滑动=手势触发 navigate + key 切换淡入（不强做跟手 translateX，开发文档 §2.2 明确"路由切换用 CSS transition"）；
-> 下拉回主页手势（顶部下滑阈值 80px）+ 输入框滑入延迟动画（R-G1）细节后置，待主链路 E2E 阶段统一补动画终点断言。
+> 下拉回主页手势（顶部下滑阈值 80px，R-G6）与输入框滑入延迟动画（R-G1）随 F10.2 补齐（见 F10.2）。
 
 ### F4 直播：一级 tab + 群内直播 【已验收 2026-08-14】
 
@@ -304,10 +304,27 @@
 
 > 背景（用户 2026-08-14）：不再保留「既含私聊又含群聊」的聚合 ChatPage。私信点进去就是私聊窗口、群聊点进去就是群聊，两者分开；保留下独立私聊聊天界面。
 
-**新增**：`src/pages/PrivateChatPage.tsx`（独立私聊窗口：头像/nickname/在线状态头部 + 返回 `/messages` + MessageList + TypingIndicator + MessageInput，复用 `loadHistory`/`loadMoreHistory`/`markReadLatest`/`recallMessage`）；`src/components/GroupCreateDialog.tsx`（复用 ConversationSearch，`initialOpen` 模态，`onGroupCreated` → `/group/:id`、`onPrivateOpened` → `/chat/:id`）；`src/styles/private.css`（`.private-chat`/`.private-chat-head`/`.group-create-overlay`/`.group-create-dialog`）。
-**改造**：`src/pages/ChatConversationRoute.tsx`（私聊 → PrivateChatPage、群聊 → `<Navigate /group/:id>`、未知 → `getConversation` + skeleton）；`src/App.tsx`（移除 `/chat` 路由与 ChatPage）；`src/pages/HomePage.tsx`（空态「创建群」→ GroupCreateDialog）；`src/layout/CreateFab.tsx`（「创建群聊」→ GroupCreateDialog）；`src/pages/MessagesPage.tsx`（私聊 tab 顶部 ElysiaEntry）；`src/pages/ProfilePage.tsx`（返回 `/home`）；`src/layout/shellConfig.ts`（MODULE_RULES 移除 `/chat`、`/chat/*` → null 高亮）；`src/components/chat/ConversationSearch.tsx`（新增 `initialOpen` prop）。
-**删除**：`src/pages/ChatPage.tsx`（聚合聊天页）。
+**新增**：`src/pages/PrivateChatPage.tsx`（独立私聊窗口：头像/nickname/在线状态头部 + 返回 `/messages` + MessageList + TypingIndicator + MessageInput，复用 `loadHistory`/`loadMoreHistory`/`markReadLatest`/`recallMessage`）；`src/components/GroupCreateDialog.tsx`（建群对话框：群名必填 + 可选成员搜索，建群成功 → `/group/:id`、搜到用户可点「私聊」→ `/chat/:id`）；`src/styles/private.css`（`.private-chat`/`.private-chat-head`/`.group-create-overlay`/`.group-create-dialog`）。
+**改造**：`src/pages/ChatConversationRoute.tsx`（私聊 → PrivateChatPage、群聊 → `<Navigate /group/:id>`、未知 → `getConversation` + skeleton）；`src/App.tsx`（移除 `/chat` 路由与 ChatPage）；`src/pages/HomePage.tsx`（空态「创建群」→ GroupCreateDialog）；`src/layout/CreateFab.tsx`（「创建群聊」→ GroupCreateDialog）；`src/pages/MessagesPage.tsx`（私聊 tab 顶部 ElysiaEntry）；`src/pages/ProfilePage.tsx`（返回 `/home`）；`src/layout/shellConfig.ts`（MODULE_RULES 移除 `/chat`、`/chat/*` → null 高亮）。
+**删除**：`src/pages/ChatPage.tsx`（聚合聊天页）；`src/components/chat/ConversationSearch.tsx`（F10.2 起建群改走 GroupCreateDialog 直接表单，此组件无引用后删除）。
 **验证**：`tsc` 无错；vitest 250 通过（shell / chat-conversation-route 更新断言）；`npm run build` 通过；Playwright 冒烟：`/messages` 私聊 tab 含 ElysiaEntry + 私聊会话 → 点击进 `/chat/p1` 渲染 `.private-chat`；`/chat/5`（群聊）→ `/group/5`；裸 `/chat` → `/home`。
+
+### F10.2 建群表单真正落地 + 下拉返回主页手势 【已验收 2026-08-14】
+
+> 背景（用户 2026-08-14）：F10 删除聚合聊天页后，「创建群聊」仍只弹提示不走真表单；窄屏群聊界面顶部导航条下拉返回主界面的手势也未实现。本次补齐这两处。
+
+**建群表单**（R-F3 最小集「群名必填 + 群头像可选后置」落地）：
+- `src/components/GroupCreateDialog.tsx` 重写：不再复用「先搜用户勾选再建群」的 ConversationSearch，改为**直接建群表单**——群名（必填，非空即可建群）+ 成员搜索（可选，勾选加入 / 点「私聊」发起会话）+ 建群按钮（群名非空即用，`member_ids` 可为空，后端 `GroupCreateView` 兼容空数组）。
+- `src/layout/shellConfig.ts`：`resolveFabAction("/home")` 返回补 `handler: "group"`（`FabAction.handler` 联合类型增 `"group"`）。
+- `src/layout/CreateFab.tsx`：主页 FAB 主动作 `isGroupCreate` 分支 → 点击打开 GroupCreateDialog（**不再走 hint 提示**；此前主页 FAB 面板显示「表单将随 F2 落地」是「建群没做」的根因）。
+- `src/styles/private.css`：`.group-create-search`/`.group-create-chips`/`.group-create-chip`/`.group-create-results`/`.group-create-result`/`.group-create-submit` 全 token 样式。
+
+**下拉返回主页**（R-G6 / design.md §12.12「跟手位移 + 阈值 80px + 回弹 200ms ease-out」落地）：
+- `src/components/group/GroupTopTabs.tsx`：新增 `pullHandlers` prop（touch handlers，展开到顶部导航条根），替换原未接线的 `onPointerDown`。
+- `src/pages/GroupPage.tsx`：新增 `pullOffset`/`leaving` state + `useSwipe`（threshold 80）下拉手势——onMove 跟手 `translateY(dy)`、onEnd 过阈值 → 退场动画（顶栏下移回底部，250ms `--ease-in`）→ `navigate("/home")`；未过阈值回弹（200ms `--ease-out`）。导航到 /home 后 AppShell 自动恢复 BottomTabs。
+- `src/styles/tokens.css`：补 `--ease-in: cubic-bezier(0.4, 0, 1, 1)`（design.md §7「ease-in 出」语义，退出动画用）。
+
+**验证**：`tsc` 无错；vitest 253 通过（新增 shell 主页 FAB 建群对话框 1、group-page 下拉手势过阈值/未过阈值 2）；`npm run build` 通过；Playwright 冒烟：主页 FAB → 建群对话框（群名必填 + 成员可选，建群按钮空名禁用/填名可用）→ 建群 → 跳 `/group/g9`；群聊顶部导航条 touch 下拉 >80px → `/home`（`.bottom-tabs` 复位）。
 
 ## 4. 联调与验证
 

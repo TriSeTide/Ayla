@@ -10,7 +10,7 @@
  * 切换场景 = setActiveScene + navigate（URL 回显）。
  * 输入框显隐（R-G5）由子界面自带：chat 子界面含 MessageInput；voice/games 占位无输入框。
  */
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 import * as chatApi from "../api/chat";
@@ -34,6 +34,10 @@ import { GroupScenePlaceholder } from "./group/GroupScenePlaceholder";
 
 const VALID_SCENES = new Set<string>(GROUP_SCENE_ORDER);
 
+/** 下拉返回主页手势阈值与退场时长（R-G6 / design.md §12.12：阈值 80px，回弹 200ms） */
+const PULL_DOWN_EXIT_THRESHOLD = 80;
+const EXIT_TRANSITION_MS = 250;
+
 export function GroupPage() {
   const { id, scene } = useParams<{ id: string; scene?: string }>();
   const navigate = useNavigate();
@@ -45,6 +49,43 @@ export function GroupPage() {
   const setCurrentGroup = useGroupStore((s) => s.setCurrentGroup);
 
   const { entered } = useEnterGroupAnimation();
+
+  // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/home) ----
+  const [pullOffset, setPullOffset] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const leavingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pullToHome = useCallback(() => {
+    setPullOffset(0);
+    setLeaving(true);
+    useGroupStore.getState().reset();
+    // 退场动画（顶栏下移回底部，250ms）结束回落 /home
+    leavingTimerRef.current = setTimeout(() => navigate("/home"), 250);
+  }, [navigate]);
+
+  useEffect(() => {
+    return () => {
+      if (leavingTimerRef.current) clearTimeout(leavingTimerRef.current);
+    };
+  }, []);
+
+  const pullSwipe = useSwipe(
+    {
+      onMove: (e) => {
+        // 只在垂直方向锁定时跟手；下拉（dy > 0）才位移，上推回弹
+        if (e.axis === "y" && e.dy > 0 && !leaving) setPullOffset(e.dy);
+      },
+      onEnd: (e) => {
+        if (e.direction === "down" && e.dy >= PULL_DOWN_EXIT_THRESHOLD) {
+          pullToHome();
+        } else {
+          setPullOffset(0); // 回弹
+        }
+      },
+      onCancel: () => setPullOffset(0),
+    },
+    { threshold: PULL_DOWN_EXIT_THRESHOLD, lockSlop: 12 },
+  );
 
   const groups = useMemo(
     () => conversations.filter((c) => c.type === "group"),
@@ -166,9 +207,25 @@ export function GroupPage() {
   }
 
   // ---- 窄屏 ----
+  // 顶栏 transform 四态：退场（移回底部 ease-in）> 进群（未 entered 停底部）> 跟手（下拉即时）> 就位（回弹复位）
+  let tabsTransform: string;
+  let tabsTransition: string;
+  if (leaving) {
+    tabsTransform = "translateY(calc(100vh - 64px))";
+    tabsTransition = `transform ${EXIT_TRANSITION_MS}ms var(--ease-in)`;
+  } else if (!entered) {
+    tabsTransform = "translateY(calc(100vh - 64px))";
+    tabsTransition = "transform 250ms var(--ease-out)";
+  } else if (pullOffset > 0) {
+    tabsTransform = `translateY(${pullOffset}px)`;
+    tabsTransition = "none";
+  } else {
+    tabsTransform = "translateY(0)";
+    tabsTransition = "transform 200ms var(--ease-out)";
+  }
   const tabsStyle: CSSProperties = {
-    transform: entered ? "translateY(0)" : "translateY(calc(100vh - 64px))",
-    transition: "transform 250ms var(--ease-out)",
+    transform: tabsTransform,
+    transition: tabsTransition,
   };
 
   return (
@@ -179,6 +236,7 @@ export function GroupPage() {
         onSelectScene={goScene}
         onAvatarClick={handleAvatarClick}
         style={tabsStyle}
+        pullHandlers={pullSwipe.handlers}
       />
 
       {/* 五子界面滑动容器（横向手势；内容单页渲染 + key 切换淡入） */}

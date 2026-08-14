@@ -173,7 +173,7 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `AppShell`：窄屏（≤768px）= 内容 + BottomTabs + MessageFAB + CreateFAB；宽屏（>768px）= TopNav + 内容 + CreateFAB；直播间沉浸路由（`/live/:channelId`）不渲染 chrome
 - [x] `BottomTabs`：五 tab（语音/直播/主页居中凸起/帖子/桌游），主页圆形背板 48px 上浮 8px 选中辉光；badges prop 预留（F8）
 - [x] `TopNav`：头像（→个人页）+ 一级模块链（当前模块 2px `--glow-500` 指示条）+ 消息（未读徽标预留）+ 搜索胶囊（回车进 `/search`）+ 更多菜单（个人主页/退出登录，F10 扩展）
-- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/posts/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；面板 = 场景动作 + 次级「创建群聊」（打开 GroupCreateDialog：搜用户发私聊 / 建群，F10 后不再跳 `/chat`）
+- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/posts/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；面板 = 场景动作 + 次级「创建群聊」（打开 GroupCreateDialog 建群对话框：群名必填 + 成员可选，F10.2 后不跳 `/chat`）
 - [x] 路由重构（`App.tsx`）：`/` → `/home`；新增 `/home /voice /live /live/:id /posts /games /messages /search /profile /group/:id[/:scene]`；受保护页统一挂 AppShell 布局路由；`/chat/:conversationId` 群聊重定向 `/group/:id`、私聊保留（F10 后私聊独立为 PrivateChatPage、裸 `/chat` 移除）；未落地页面渲染 `PlaceholderPage`（标注 F 步骤）
 - [x] 契约测试：新增 use-media-query 3 / use-swipe 8 / shell（路由映射 + 双形态 + FAB 面板）/ chat-conversation-route 6；全量 vitest 174 通过 + `npm run build` 通过 + 两形态（375/1440）冒烟通过
 
@@ -200,14 +200,14 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 - [x] `stores/group.ts`：`activeScene`（chat/live/voice/posts/games/info）单一状态源 + 五子界面顺序（语音|直播|聊天|帖子|桌游，聊天居中）
 - [x] `useEnterGroupAnimation`：进群动画独立封装（底栏上移到顶部，rAF 双帧进入 + reduced-motion 直入）——与 F4 进房动画（底栏下滑走）方向相反，不共用
-- [x] `GroupTopTabs`：窄屏上移后的顶部导航条（四 tab + 中央群头像槽位 + 5 圆点指示），原"主页"槽位形变为群头像（R-G1）
+- [x] `GroupTopTabs`：窄屏上移后的顶部导航条（四 tab + 中央群头像槽位 + 5 圆点指示），原"主页"槽位形变为群头像（R-G1）；F10.2 起接 `pullHandlers` 顶部下拉手势（R-G6）
 - [x] 群头像两级点击（R-G4）：单一 handler 读 `activeScene` 分支——非 chat → 切回聊天；chat → 进群信息；无第二份导航状态
 - [x] `ServerRail`（宽屏 72px 群头像列 + 当前群 3px 指示条 + 未读角标 + 底部用户卡）+ `ChannelSidebar`（群名头进群信息 + 五场景项），宽屏三列 = 主页本身
 - [x] `GroupChat`：复用 MessageList/MessageInput + loadHistory/sendMessage 等（无侧栏/演示数据/爱莉入口）；`GroupInfo`：群资料 + 成员角色标签 + owner/admin 编辑群资料（真功能）+ 管理项占位标注
 - [x] `AppShell` 窄屏群场景隐藏 BottomTabs/MessageFAB（GroupPage 自渲染顶部导航条）；`/group/:id/:scene` 由 GroupPage 统一处理（GroupScenePage 移除）
 - [x] 契约测试：group-store 4 + use-enter-group-animation 2 + group-page 7 + group-info 3；全量 vitest 216 通过 + build + 两形态冒烟通过
 
-**F3 已知取舍**（步骤文档 §7 登记）：退出群/转让群主/解散群后端无端点（群信息占位标注）；五子界面滑动 = 手势触发 navigate + key 切换淡入（开发文档 §2.2 明确用 CSS transition）；下拉回主页手势与输入框滑入延迟动画的精确终点断言留待主链路 E2E 统一补。
+**F3 已知取舍**（步骤文档 §7 登记）：退出群/转让群主/解散群后端无端点（群信息占位标注）；五子界面滑动 = 手势触发 navigate + key 切换淡入（开发文档 §2.2 明确用 CSS transition）；下拉回主页手势（R-G6）与输入框滑入延迟动画随 F10.2 补齐。
 
 ## F4 直播：一级 tab + 群内直播（已完成）
 
@@ -298,6 +298,13 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `ProfilePage` 扩展三分区：我的发帖（scope=mine）/ 我的直播间（owner=我）/ 正在玩的桌游（?mine=1）
 - [x] `TopNav` / `NarrowTopBar` 更多菜单加「我的收藏」（三项：个人主页 / 我的收藏 / 退出登录）
 - [x] 契约测试：favorites-page 3；全量 vitest 251 通过 + build + 两形态冒烟通过
+
+## F10.1/F10.2 删除聚合聊天页 + 建群表单 + 下拉返回主页（已完成）
+
+- [x] **F10.1 拆分私聊/群聊**：删除 `ChatPage`（聚合聊天页）与裸 `/chat`；`PrivateChatPage` 独立私聊窗口；`ChatConversationRoute` 私聊→PrivateChatPage、群聊→`/group/:id`
+- [x] **F10.2 建群表单**（R-F3 最小集）：`GroupCreateDialog` 直接建群表单（群名必填 + 成员搜索可选 + 点「私聊」发起会话）；`shellConfig.resolveFabAction("/home")` 补 `handler:"group"`；`CreateFab` 主页 FAB 打开建群对话框（不再提示落步骤）
+- [x] **F10.2 下拉返回主页**（R-G6）：`GroupTopTabs` 接 `pullHandlers`；`GroupPage` 顶部导航条下拉手势（跟手 translateY + 阈值 80px + 退场动画 250ms）+ `navigate("/home")`；`tokens.css` 补 `--ease-in`
+- [x] 契约测试：shell 3（新增主页 FAB 建群）+ group-page 2（下拉过/未过阈值）；全量 vitest 253 通过 + build + 两形态冒烟通过
 
 ## 目录结构
 

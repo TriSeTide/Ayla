@@ -3,7 +3,7 @@
  * - resolveModule / resolveFabAction / isImmersiveRoute 纯函数路由映射（含需求 §3.5 全表）；
  * - 窄屏渲染 BottomTabs + MessageFAB（无 TopNav）、宽屏渲染 TopNav（无 BottomTabs）；
  * - 直播沉浸路由不渲染 chrome；群聊聊天子界面无 FAB；
- * - CreateFAB 动作面板：场景动作提示步骤、次级「创建群聊」跳转 /chat。
+ * - CreateFAB 动作面板：场景动作提示步骤、次级「创建群聊」打开建群对话框。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -105,7 +105,7 @@ describe("resolveModule", () => {
 
 describe("resolveFabAction", () => {
   it("一级 tab 与群内子场景映射正确", () => {
-    expect(resolveFabAction("/home")?.key).toBe("create-group");
+    expect(resolveFabAction("/home")).toMatchObject({ key: "create-group", handler: "group" });
     expect(resolveFabAction("/voice")?.key).toBe("create-voice");
     expect(resolveFabAction("/live")?.key).toBe("create-live");
     expect(resolveFabAction("/posts")?.key).toBe("create-post");
@@ -195,9 +195,10 @@ describe("CreateFab", () => {
     renderShell("/posts", true);
     fireEvent.click(screen.getByRole("button", { name: "发帖" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "创建群聊" }));
-    // 打开 GroupCreateDialog（含 ConversationSearch 展开面板）
-    await waitFor(() => expect(screen.getByText("发起会话 / 建群")).toBeInTheDocument());
-    expect(screen.getByPlaceholderText("搜索用户名 / 昵称")).toBeInTheDocument();
+    // 打开 GroupCreateDialog（建群表单：群名必填 + 可选成员搜索）
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("群名（必填）")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("搜索成员（可选，可稍后在群内添加）")).toBeInTheDocument();
   });
 
   it("群内开播（F4 已接线）面板渲染创建直播间表单", async () => {
@@ -205,5 +206,16 @@ describe("CreateFab", () => {
     fireEvent.click(screen.getByRole("button", { name: "群内开播" }));
     // F4 起 group-live 动作渲染 LiveCreate 真表单（非 hint 提示）
     expect(screen.getByPlaceholderText("给直播间起个标题")).toBeInTheDocument();
+  });
+
+  it("主页 FAB 主动作「创建群聊」打开建群对话框（R-F3 已接线）", async () => {
+    renderShell("/home", true);
+    fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
+    // 面板显示「创建群聊」动作项，点击打开建群对话框（非 hint 提示）
+    fireEvent.click(screen.getByRole("menuitem", { name: "创建群聊" }));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument(),
+    );
+    expect(screen.getByPlaceholderText("群名（必填）")).toBeInTheDocument();
   });
 });

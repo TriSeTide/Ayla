@@ -78,3 +78,104 @@
   font-weight: 600;
   color: var(--text-primary);
 }
+
+.group-create-dialog .field {
+  width: 100%;
+}
+
+/* 成员搜索输入（带左搜索图标） */
+.group-create-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+
+.group-create-search-icon {
+  position: absolute;
+  left: var(--sp-3);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.group-create-search .field {
+  padding-left: 34px;
+}
+
+/* 已选成员 chips */
+.group-create-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.group-create-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-100);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.group-create-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+}
+
+.group-create-chip-x:hover {
+  color: var(--destructive);
+}
+
+/* 搜索结果列表 */
+.group-create-results {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.group-create-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.group-create-result-check {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+
+.group-create-result-name {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 建群提交按钮 */
+.group-create-submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: var(--sp-3);
+}
