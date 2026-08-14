@@ -1,9 +1,9 @@
 /**
- * ChatConversationRoute 测试（F1 兼容重定向）：
+ * ChatConversationRoute 测试：
  * - 群聊会话（store 命中 / API 返回）→ 重定向 /group/:id；
- * - 私聊会话 → 渲染 ChatPage（旧路径保留兼容）；
- * - 详情查询失败 → 回退 ChatPage 自理。
- * ChatPage/GroupPage/chatApi 全部 mock，避免真实 API/WS 副作用。
+ * - 私聊会话 → 渲染 PrivateChatPage（独立私聊窗口）；
+ * - 详情查询失败 → 回退 PrivateChatPage 自理。
+ * PrivateChatPage/GroupPage/chatApi 全部 mock，避免真实 API/WS 副作用。
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -12,8 +12,8 @@ import type { ConversationDetail } from "../api/types";
 import { useChatStore } from "../stores/chat";
 import { ChatConversationRoute } from "../pages/ChatConversationRoute";
 
-vi.mock("../pages/ChatPage", () => ({
-  ChatPage: () => <div>聊天页本体</div>,
+vi.mock("../pages/PrivateChatPage", () => ({
+  PrivateChatPage: () => <div>私聊窗口本体</div>,
 }));
 
 vi.mock("../api/chat", () => ({
@@ -85,7 +85,7 @@ describe("ChatConversationRoute", () => {
       conversations: [{ ...conv("private"), id: "p1", peer: null } as never],
     });
     renderRoute("/chat/p1");
-    await waitFor(() => expect(screen.getByText("聊天页本体")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
   });
 
   it("store 未命中时查详情：群聊 → 重定向", async () => {
@@ -98,13 +98,13 @@ describe("ChatConversationRoute", () => {
   it("store 未命中时查详情：私聊 → 渲染 ChatPage", async () => {
     vi.mocked(chatApi.getConversation).mockResolvedValue(conv("private"));
     renderRoute("/chat/p2");
-    await waitFor(() => expect(screen.getByText("聊天页本体")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
   });
 
   it("详情查询失败回退 ChatPage 自理", async () => {
     vi.mocked(chatApi.getConversation).mockRejectedValue(new Error("boom"));
     renderRoute("/chat/x");
-    await waitFor(() => expect(screen.getByText("聊天页本体")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
   });
 
   it("详情查询中显示骨架屏", async () => {

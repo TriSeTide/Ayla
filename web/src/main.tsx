@@ -23,6 +23,7 @@ import "./styles/boardgame.css";
 import "./styles/messages.css";
 import "./styles/search.css";
 import "./styles/profile.css";
+import "./styles/private.css";
 
 async function bootstrap() {
   // 恢复会话（无 refresh 则直接标记 initialized）

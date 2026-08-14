@@ -1,19 +1,17 @@
 /**
- * 路由表（聚合主页与多端布局 F1 基座，开发步骤文档 F1 + 开发文档 §2.1）。
+ * 路由表（聚合主页与多端布局：私聊 / 群聊分离）。
  *
  * - /login、/register 公开；其余受保护页统一挂在 AppShell
- *   （窄屏 BottomTabs 系 / 宽屏 TopNav 系，直播间为沉浸式无 chrome）。
- * - 新增一级路由：/home /voice /live /posts /games /messages /search /profile
- *   /group/:id[/*]；页面本体未落地的路由渲染 PlaceholderPage（标注 F 步骤）。
- * - 旧路由兼容：/chat 直达会话列表（M5-1/M5-2 保留）；/chat/:conversationId
- *   群聊会话重定向 /group/:id、私聊会话保留渲染 ChatPage（ChatConversationRoute）。
- * - / 重定向 /home（窄屏主页；宽屏 /home 由 F2 重定向到最近群）。
+ *   （窄屏 BottomTabs 系 / 宽屏 TopNav 系，直播间沉浸）。
+ * - 一级路由：/home /voice /live /posts /games /messages /search /profile /favorites
+ *   /group/:id[/*]；私聊窗口 /chat/:conversationId（PrivateChatPage，
+ *   群聊会话重定向 /group/:id），私聊入口在消息中心 /messages 私信 tab。
+ * - / 重定向 /home（窄屏主页；宽屏 /home 重定向到最近群）。
  */
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppShell } from "./layout/AppShell";
 import { ChatConversationRoute } from "./pages/ChatConversationRoute";
-import { ChatPage } from "./pages/ChatPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
 import { GroupPage } from "./pages/GroupPage";
 import { HomePage } from "./pages/HomePage";
@@ -56,7 +54,6 @@ export default function App() {
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
-        <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
       </Route>
 

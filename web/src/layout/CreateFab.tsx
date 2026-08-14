@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { GameRoomCreate } from "../components/boardgame/GameRoomCreate";
+import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { IconClose, IconPlus, IconUsers } from "../components/icons";
 import { LiveCreate } from "../components/live/LiveCreate";
 import { PostEditor } from "../components/posts/PostEditor";
@@ -22,6 +23,7 @@ import type { FabAction } from "./shellConfig";
 export function CreateFab({ action }: { action: FabAction }) {
   const [open, setOpen] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [showGroupCreate, setShowGroupCreate] = useState(false);
   const navigate = useNavigate();
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -104,7 +106,7 @@ export function CreateFab({ action }: { action: FabAction }) {
                 className="fab-panel-item"
                 onClick={() => {
                   setOpen(false);
-                  navigate("/chat");
+                  setShowGroupCreate(true);
                 }}
               >
                 <IconUsers width={18} height={18} />
@@ -131,6 +133,7 @@ export function CreateFab({ action }: { action: FabAction }) {
           {open ? <IconClose width={24} height={24} /> : <IconPlus width={24} height={24} />}
         </button>
       </div>
+      {showGroupCreate && <GroupCreateDialog onClose={() => setShowGroupCreate(false)} />}
     </>
   );
 }

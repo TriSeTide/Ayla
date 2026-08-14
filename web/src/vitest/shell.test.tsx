@@ -85,8 +85,7 @@ describe("resolveModule", () => {
     ["/home", "home"],
     ["/group/g1", "home"],
     ["/group/g1/live", "home"],
-    ["/chat", "home"],
-    ["/chat/c1", "home"],
+    ["/chat/c1", null], // 私聊窗口无模块高亮
     ["/voice", "voice"],
     ["/live", "live"],
     ["/live/42", "live"],
@@ -192,11 +191,13 @@ describe("CreateFab", () => {
     expect(screen.getByPlaceholderText("正文（必填）")).toBeInTheDocument();
   });
 
-  it("面板含次级「创建群聊」，点击跳转 /chat", async () => {
+  it("面板含次级「创建群聊」，点击打开建群对话框", async () => {
     renderShell("/posts", true);
     fireEvent.click(screen.getByRole("button", { name: "发帖" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "创建群聊" }));
-    await waitFor(() => expect(screen.getByText("聊天内容")).toBeInTheDocument());
+    // 打开 GroupCreateDialog（含 ConversationSearch 展开面板）
+    await waitFor(() => expect(screen.getByText("发起会话 / 建群")).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("搜索用户名 / 昵称")).toBeInTheDocument();
   });
 
   it("群内开播（F4 已接线）面板渲染创建直播间表单", async () => {

@@ -300,6 +300,15 @@
 > 数据渲染 + 收藏入口、收藏页取消收藏按钮）均符合预期。
 > **F1-F10 前端全部落地（2026-08-14）**。
 
+### F10.1 删除聚合聊天页，拆私聊 / 群聊独立入口 【已验收 2026-08-14】
+
+> 背景（用户 2026-08-14）：不再保留「既含私聊又含群聊」的聚合 ChatPage。私信点进去就是私聊窗口、群聊点进去就是群聊，两者分开；保留下独立私聊聊天界面。
+
+**新增**：`src/pages/PrivateChatPage.tsx`（独立私聊窗口：头像/nickname/在线状态头部 + 返回 `/messages` + MessageList + TypingIndicator + MessageInput，复用 `loadHistory`/`loadMoreHistory`/`markReadLatest`/`recallMessage`）；`src/components/GroupCreateDialog.tsx`（复用 ConversationSearch，`initialOpen` 模态，`onGroupCreated` → `/group/:id`、`onPrivateOpened` → `/chat/:id`）；`src/styles/private.css`（`.private-chat`/`.private-chat-head`/`.group-create-overlay`/`.group-create-dialog`）。
+**改造**：`src/pages/ChatConversationRoute.tsx`（私聊 → PrivateChatPage、群聊 → `<Navigate /group/:id>`、未知 → `getConversation` + skeleton）；`src/App.tsx`（移除 `/chat` 路由与 ChatPage）；`src/pages/HomePage.tsx`（空态「创建群」→ GroupCreateDialog）；`src/layout/CreateFab.tsx`（「创建群聊」→ GroupCreateDialog）；`src/pages/MessagesPage.tsx`（私聊 tab 顶部 ElysiaEntry）；`src/pages/ProfilePage.tsx`（返回 `/home`）；`src/layout/shellConfig.ts`（MODULE_RULES 移除 `/chat`、`/chat/*` → null 高亮）；`src/components/chat/ConversationSearch.tsx`（新增 `initialOpen` prop）。
+**删除**：`src/pages/ChatPage.tsx`（聚合聊天页）。
+**验证**：`tsc` 无错；vitest 250 通过（shell / chat-conversation-route 更新断言）；`npm run build` 通过；Playwright 冒烟：`/messages` 私聊 tab 含 ElysiaEntry + 私聊会话 → 点击进 `/chat/p1` 渲染 `.private-chat`；`/chat/5`（群聊）→ `/group/5`；裸 `/chat` → `/home`。
+
 ## 4. 联调与验证
 
 - 后端 dev：`python manage.py runserver 8100`；前端 dev：`npm run dev`（Vite proxy `/api`、`/ws` → 8100）。

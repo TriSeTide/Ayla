@@ -92,8 +92,8 @@ export function ProfilePage() {
           <button
             type="button"
             className="msg-action-btn"
-            onClick={() => navigate("/chat")}
-            aria-label="返回聊天"
+            onClick={() => navigate("/home")}
+            aria-label="返回主页"
           >
             <IconBack width={14} height={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
             返回

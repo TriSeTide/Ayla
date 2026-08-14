@@ -8,10 +8,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
+import { getElysiaProfile } from "../api/elysia";
 import * as usersApi from "../api/users";
-import type { FriendRequest, GroupInvite, GroupJoinRequest } from "../api/types";
+import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { ConversationList } from "../components/chat/ConversationList";
+import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useBadgesStore } from "../stores/badges";
@@ -28,6 +30,14 @@ export function MessagesPage() {
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [invites, setInvites] = useState<GroupInvite[]>([]);
   const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
+  const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
+
+  // 爱莉入口（私信 tab 顶部）
+  useEffect(() => {
+    getElysiaProfile()
+      .then((p) => setElysiaProfile(p.enabled ? p : null))
+      .catch(() => {});
+  }, []);
 
   // 加载会话列表（私信 tab 复用）
   useEffect(() => {
@@ -107,10 +117,21 @@ export function MessagesPage() {
 
       {tab === "chat" ? (
         <div className="messages-private">
+          {elysiaProfile && (
+            <ElysiaEntry
+              profile={elysiaProfile}
+              onEnter={() => {
+                chatApi
+                  .openPrivateConversation(elysiaProfile.user.id)
+                  .then((conv) => navigate(`/chat/${conv.id}`))
+                  .catch(() => {});
+              }}
+            />
+          )}
           <ConversationList
             conversations={privateConvs}
             activeId={null}
-            elysiaUserId={null}
+            elysiaUserId={elysiaProfile?.user.id ?? null}
             onSelect={(id) => navigate(`/chat/${id}`)}
           />
         </div>

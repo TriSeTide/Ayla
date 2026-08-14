@@ -203,7 +203,7 @@ src/
 /profile                ProfilePage（扩展我的帖子/直播间/桌游）
 /group/:id              GroupPage → 默认聊天场景（宽屏 = TopNav+ServerRail+ChannelSidebar 三列）
 /group/:id/(voice|live|posts|games|info)
-/chat/:conversationId   保留（私聊直达），群聊会话重定向 /group/:id
+/chat/:conversationId   私聊 → PrivateChatPage（独立私聊窗口）；群聊会话重定向 /group/:id（裸 /chat 已移除，F10 后）
 ```
 
 ### 2.2 关键交互实现要点（动画方向与点击语义精确化）

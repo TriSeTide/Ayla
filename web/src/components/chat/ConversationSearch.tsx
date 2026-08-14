@@ -13,12 +13,15 @@ export function ConversationSearch({
   currentUserId,
   onPrivateOpened,
   onGroupCreated,
+  initialOpen = false,
 }: {
   currentUserId: string | null;
   onPrivateOpened: (convId: string) => void;
   onGroupCreated: (convId: string) => void;
+  /** 初始即展开（建群对话框/主页空态入口用），不显示「新会话」按钮 */
+  initialOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<UserPublic[]>([]);
   const [selected, setSelected] = useState<string[]>([]);

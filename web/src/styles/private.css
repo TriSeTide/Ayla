@@ -1,0 +1,80 @@
+/**
+ * 私聊聊天界面 + 建群对话框样式（删除 ChatPage 聚合界面后的私聊独立化）。
+ */
+
+/* ================= 私聊聊天界面（PrivateChatPage） ================= */
+
+.private-chat {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.private-chat-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  height: 56px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.private-chat-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.private-chat-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.private-chat-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ================= 建群对话框（GroupCreateDialog） ================= */
+
+.group-create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: rgba(70, 91, 146, 0.25);
+}
+
+.group-create-dialog {
+  width: min(480px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+
+.group-create-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-3);
+}
+
+.group-create-dialog-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}

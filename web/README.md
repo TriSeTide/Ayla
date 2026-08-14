@@ -5,7 +5,7 @@ M5-1 为工程基座：认证闭环、路由守卫、全局状态、API 客户�
 M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送、已读/撤回/引用、历史分页、Chat WebSocket、爱莉入口；
 M5-3 为语音界面：语音频道（加入/离开/心跳/成员同步）、LiveKit 媒体控制（静音/音量）、爱莉语音控制面闭环；
 M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性回显）+ HLS 播放器 + 实时弹幕（WS + 历史对账）+ 主播面板（:start/:stop）；
-F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、CreateFAB 随场景创建入口、手势 hook、路由重构（新一级路由 + 旧 /chat 兼容重定向）；
+F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、CreateFAB 随场景创建入口、手势 hook、路由重构（新一级路由 + 旧 /chat 兼容重定向，后随 F10 移除裸 /chat、私聊独立为 PrivateChatPage）；
 F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动态轮播、布局开关、最近群重定向；
 F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面滑动、群头像两级点击、群内聊天（复用）、群信息（角色化）、宽屏三列（ServerRail + ChannelSidebar）；
 F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间；
@@ -173,8 +173,8 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `AppShell`：窄屏（≤768px）= 内容 + BottomTabs + MessageFAB + CreateFAB；宽屏（>768px）= TopNav + 内容 + CreateFAB；直播间沉浸路由（`/live/:channelId`）不渲染 chrome
 - [x] `BottomTabs`：五 tab（语音/直播/主页居中凸起/帖子/桌游），主页圆形背板 48px 上浮 8px 选中辉光；badges prop 预留（F8）
 - [x] `TopNav`：头像（→个人页）+ 一级模块链（当前模块 2px `--glow-500` 指示条）+ 消息（未读徽标预留）+ 搜索胶囊（回车进 `/search`）+ 更多菜单（个人主页/退出登录，F10 扩展）
-- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/posts/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；面板 = 场景动作 + 次级「创建群聊」（跳 `/chat`）
-- [x] 路由重构（`App.tsx`）：`/` → `/home`；新增 `/home /voice /live /live/:id /posts /games /messages /search /profile /group/:id[/:scene]`；受保护页统一挂 AppShell 布局路由；`/chat/:conversationId` 群聊重定向 `/group/:id`、私聊保留；未落地页面渲染 `PlaceholderPage`（标注 F 步骤）
+- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/posts/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；面板 = 场景动作 + 次级「创建群聊」（打开 GroupCreateDialog：搜用户发私聊 / 建群，F10 后不再跳 `/chat`）
+- [x] 路由重构（`App.tsx`）：`/` → `/home`；新增 `/home /voice /live /live/:id /posts /games /messages /search /profile /group/:id[/:scene]`；受保护页统一挂 AppShell 布局路由；`/chat/:conversationId` 群聊重定向 `/group/:id`、私聊保留（F10 后私聊独立为 PrivateChatPage、裸 `/chat` 移除）；未落地页面渲染 `PlaceholderPage`（标注 F 步骤）
 - [x] 契约测试：新增 use-media-query 3 / use-swipe 8 / shell（路由映射 + 双形态 + FAB 面板）/ chat-conversation-route 6；全量 vitest 174 通过 + `npm run build` 通过 + 两形态（375/1440）冒烟通过
 
 **F1 边界**：页面本体（主页群卡片、群聊容器、帖/桌游等）由 F2-F10 落地；F1 仅搭架 + 统一导航 chrome；`/home` 宽屏重定向最近群属 F2，群内进群动画属 F3，进房动画属 F4。
@@ -311,7 +311,7 @@ web/
 ├── .gitignore
 └── src/
     ├── main.tsx            # 入口：会话恢复 + Router 挂载 + chat WS 启动
-    ├── App.tsx             # 路由表（F1：/home /voice /live /posts /games /messages /search /profile /group/:id[/*] + 旧 /chat 兼容）
+    ├── App.tsx             # 路由表（/home /voice /live /posts /games /messages /search /profile /group/:id[/*] + /chat/:conversationId 私聊/群聊分流；裸 /chat 已移除）
     ├── layout/             # F1/F2/F3：AppShell / BottomTabs / TopNav / CreateFab / MessageFab / NarrowTopBar / ServerRail / ChannelSidebar / shellConfig（路由匹配表）
     ├── api/
     │   ├── client.ts       # fetch 封装：baseURL / Authorization / 错误归一 / 401 刷新重放
@@ -366,7 +366,7 @@ web/
     ├── pages/
     │   ├── LoginPage.tsx
     │   ├── RegisterPage.tsx
-    │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口，侧栏含语音/直播入口）
+    │   ├── PrivateChatPage.tsx # 私聊窗口（头部 + 消息列表 + 输入框；群聊不再走 /chat/:id）
     │   ├── VoiceHubPage.tsx # F5 一级语音聚合（卡片 + 来源标识）
     │   ├── LiveHubPage.tsx     # F4 一级直播聚合（网格 + 来源标识）
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
@@ -379,7 +379,7 @@ web/
     │   ├── PostsHubPage.tsx     # F6 一级帖子信息流（游标分页 + FAB 发帖）
     │   ├── PostDetailPage.tsx   # F6 帖子详情（评论/收藏/删除）
     │   ├── GroupPage.tsx           # F3 群聊场景容器（窄屏进群动画/五子界面/两级点击；宽屏三列）
-    │   ├── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
+    │   ├── ChatConversationRoute.tsx # /chat/:id：私聊 → PrivateChatPage、群聊 → /group/:id；裸 /chat 已移除
     │   └── group/           # F3-F7：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupPosts / GroupGames / GroupScenePlaceholder
     ├── components/
     │   ├── ProtectedRoute.tsx

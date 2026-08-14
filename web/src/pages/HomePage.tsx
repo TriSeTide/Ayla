@@ -16,6 +16,7 @@ import type { ConversationHighlightsMap } from "../api/types";
 import { GroupCard } from "../components/home/GroupCard";
 import { GroupListItem } from "../components/home/GroupListItem";
 import { LayoutSwitch } from "../components/home/LayoutSwitch";
+import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useChatStore } from "../stores/chat";
@@ -47,6 +48,7 @@ export function HomePage() {
   const [highlights, setHighlights] = useState<ConversationHighlightsMap>({});
   const [listError, setListError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [creatingGroup, setCreatingGroup] = useState(false);
 
   const groups = useMemo(
     () => conversations.filter((c) => c.type === "group"),
@@ -139,7 +141,7 @@ export function HomePage() {
       <div className="home-wide-empty">
         <h2 className="placeholder-title">还没有加入群聊</h2>
         <p className="placeholder-desc">创建或加入一个群聊，这里是你的「家」</p>
-        <button type="button" className="btn btn-glow" onClick={() => navigate("/chat")}>
+        <button type="button" className="btn btn-glow" onClick={() => setCreatingGroup(true)}>
           创建你的第一个群
         </button>
       </div>
@@ -187,7 +189,7 @@ export function HomePage() {
         <div className="home-state">
           <h2 className="placeholder-title">创建你的第一个群</h2>
           <p className="placeholder-desc">和朋友们聚在一起，从这里开始</p>
-          <button type="button" className="btn btn-glow" onClick={() => navigate("/chat")}>
+          <button type="button" className="btn btn-glow" onClick={() => setCreatingGroup(true)}>
             创建群聊
           </button>
           <button type="button" className="btn btn-ghost" onClick={() => navigate("/search")}>
@@ -235,6 +237,7 @@ export function HomePage() {
           )}
         </div>
       )}
+      {creatingGroup && <GroupCreateDialog onClose={() => setCreatingGroup(false)} />}
     </div>
   );
 }

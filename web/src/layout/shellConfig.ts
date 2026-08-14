@@ -26,8 +26,8 @@ export const PRIMARY_MODULES: ModuleMeta[] = [
 ];
 
 const MODULE_RULES: Array<[ModuleKey, string[]]> = [
-  // /group/* 群聊场景与旧 /chat 兼容页都归"主页"模块（宽屏主页 = 三列群聊界面）
-  ["home", ["/home", "/group/*", "/chat", "/chat/*"]],
+  // /group/* 群聊场景归"主页"模块（宽屏主页 = 三列群聊界面）；私聊窗口 /chat/:id 无模块高亮
+  ["home", ["/home", "/group/*"]],
   ["voice", ["/voice", "/voice/*"]],
   ["live", ["/live", "/live/*"]],
   ["posts", ["/posts", "/posts/*"]],
