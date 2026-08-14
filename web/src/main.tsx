@@ -20,6 +20,7 @@ import "./styles/live.css";
 import "./styles/voice.css";
 import "./styles/posts.css";
 import "./styles/boardgame.css";
+import "./styles/messages.css";
 
 async function bootstrap() {
   // 恢复会话（无 refresh 则直接标记 initialized）

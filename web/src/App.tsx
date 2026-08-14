@@ -20,6 +20,7 @@ import { GamesHubPage } from "./pages/GamesHubPage";
 import { LiveHubPage } from "./pages/LiveHubPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MessagesPage } from "./pages/MessagesPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { PostDetailPage } from "./pages/PostDetailPage";
 import { PostsHubPage } from "./pages/PostsHubPage";
@@ -48,7 +49,7 @@ export default function App() {
         <Route path="/posts" element={<PostsHubPage />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />
         <Route path="/games" element={<GamesHubPage />} />
-        <Route path="/messages" element={<PlaceholderPage title="消息" step="F8" />} />
+        <Route path="/messages" element={<MessagesPage />} />
         <Route path="/search" element={<PlaceholderPage title="搜索" step="F9" />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/group/:id" element={<GroupPage />} />

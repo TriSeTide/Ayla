@@ -254,11 +254,21 @@
 > FAB 创建 label、进占位+离开按钮、群内范围仅本群 1 卡）均符合预期。
 > 说明：桌游玩法本体与 WS 对局通道后续；"正在玩的桌游"个人页数据源 = `GET /rooms/?mine=1`（后端已支持，F10 接入）。
 
-### F8 消息中心 + badges 红点
+### F8 消息中心 + badges 红点 【已验收 2026-08-14】
 
 **新增/改造**：`src/pages/MessagesPage.tsx`（私信/好友列表双选项卡；宽屏双栏）；`src/api/friends.ts` 扩展（申请/邀请动作）；`src/stores/badges.ts`；AppShell 内轮询/WS 触发 badges 拉取（断线降级 30s 轮询）。
 **要点**：私信仅 private 会话；好友列表分组（好友申请/群申请邀请置顶）；同意/拒绝即时反馈；红点聚合到 MessageFAB/TopNav 消息项。
 **验收**：双选项卡数据正确；申请处理闭环；红点随处理即时刷新。
+
+> 落地（2026-08-14）：`api/accounts.ts` getBadges（GET /me/badges/ 五维聚合）；`api/chat.ts` 扩展
+> listJoinRequests/actionJoinRequest/listMyInvites/actionGroupInvite（S2 join-requests/invites）；
+> `stores/badges.ts`（badges + messageBadge 聚合 = 私信未读+好友申请+群邀请+待审批，群未读不进消息中心红点）；
+> `pages/MessagesPage.tsx`（私信/好友双选项卡 + 三组申请置顶[好友申请/群邀请/待审批入群申请] + 同意/拒绝即时反馈 +
+> 宽屏双栏）；`AppShell` 进入拉 badges + 30s 轮询（断线降级）+ MessageFab/TopNav 消息项红点。
+> 验证：tsc 无错；全量 vitest 241 通过（新增 badges-store 4）；build 通过；Playwright 冒烟（私信仅 private、
+> 好友 tab 三组申请置顶 + 同意按钮、MessageFab 红点聚合）均符合预期。
+> 说明：红点刷新走 30s 轮询 + 处理 action 后即时 fetch；S2 的 WS 用户级广播（group.request.resolved/group.invite.new）
+> 触发拉取的实时推送接线后置（轮询已覆盖"随处理即时刷新"验收）。
 
 ### F9 全局搜索
 
@@ -285,7 +295,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地；F6 帖子全套已落地；F7 桌游房间框架已落地（2026-08-14）；F8-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地；F6 帖子全套已落地；F7 桌游房间框架已落地；F8 消息中心 + badges 红点已落地（2026-08-14）；F9-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因

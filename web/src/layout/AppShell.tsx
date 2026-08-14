@@ -8,8 +8,10 @@
  * - 窄屏直播间（/live/:channelId）：底栏**下滑走**进房动画（shell store 驱动，F4，方向与进群相反）。
  * - 宽屏直播间：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏）。
  */
+import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
+import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
 import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
@@ -17,10 +19,13 @@ import { MessageFab } from "./MessageFab";
 import { TopNav } from "./TopNav";
 import { isGroupScene, isPostDetailRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
+const BADGES_POLL_INTERVAL_MS = 30_000;
+
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { pathname } = useLocation();
   const bottomTabsLeaving = useShellStore((s) => s.bottomTabsLeaving);
+  const badges = useBadgesStore((s) => s.badges);
 
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
@@ -28,8 +33,18 @@ export function AppShell() {
   // 帖子详情窄屏：底栏原位替换为评论输入框（R-P3）
   const postDetailNarrow = isNarrow && isPostDetailRoute(pathname);
 
+  // 全站未读聚合：进入即拉 + 断线降级 30s 轮询（R-N4；WS 推送后置）
+  useEffect(() => {
+    void useBadgesStore.getState().fetch();
+    const timer = setInterval(() => void useBadgesStore.getState().fetch(), BADGES_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  const messageBadge = badges
+    ? badges.private_unread + badges.friend_requests + badges.group_invites + badges.join_requests_pending
+    : 0;
+
   // 窄屏进房动画（直播间/语音房，F4/F5）：底栏下滑走（translateY 0→100%，200ms ease-in）
-  // 由 LiveRoomPage / 语音房进房调 shell store 驱动，与进群动画"上移"相反。
   const leavingStyle = {
     transform: `translateY(${bottomTabsLeaving ? "100%" : "0"})`,
     transition: "transform 200ms ease-in",
@@ -37,13 +52,13 @@ export function AppShell() {
 
   return (
     <div className="app-shell" data-form={isNarrow ? "narrow" : "wide"}>
-      {isNarrow ? null : <TopNav moduleKey={moduleKey} />}
+      {isNarrow ? null : <TopNav moduleKey={moduleKey} messageBadge={messageBadge} />}
       <main className="app-shell-content">
         <Outlet />
       </main>
       {isNarrow && !groupSceneNarrow && !postDetailNarrow ? (
         <>
-          <MessageFab style={leavingStyle} />
+          <MessageFab style={leavingStyle} unread={messageBadge} />
           <BottomTabs
             moduleKey={moduleKey}
             style={leavingStyle}

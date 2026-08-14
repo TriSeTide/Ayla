@@ -15,6 +15,8 @@ import type {
   ConversationMessagesParams,
   ConversationSummary,
   CreateMessagePayload,
+  GroupInvite,
+  GroupJoinRequest,
 } from "./types";
 
 /** GET /chat/conversations/ —— 当前用户会话列表 */
@@ -128,4 +130,34 @@ export function fetchHighlights(convIds: string[]) {
   return apiRequest<ConversationHighlightsMap>(
     `/chat/conversations/highlights/?${qs.toString()}`,
   );
+}
+
+/* ---------- 群申请/邀请（S2，开发文档 §1.2） ---------- */
+
+/** GET /chat/conversations/<id>/join-requests/ —— 待审批入群申请列表（owner/admin） */
+export function listJoinRequests(convId: string) {
+  return apiRequest<GroupJoinRequest[]>(
+    `/chat/conversations/${convId}/join-requests/`,
+  );
+}
+
+/** POST /chat/join-requests/<id>/action/ —— 同意/拒绝入群申请 */
+export function actionJoinRequest(requestId: number, action: "accept" | "reject") {
+  return apiRequest<{ detail: string }>(`/chat/join-requests/${requestId}/action/`, {
+    method: "POST",
+    body: { action },
+  });
+}
+
+/** GET /chat/me/invites/ —— 我收到的入群邀请 */
+export function listMyInvites() {
+  return apiRequest<GroupInvite[]>("/chat/me/invites/");
+}
+
+/** POST /chat/invites/<id>/action/ —— 接受/拒绝入群邀请 */
+export function actionGroupInvite(inviteId: number, action: "accept" | "reject") {
+  return apiRequest<{ detail: string }>(`/chat/invites/${inviteId}/action/`, {
+    method: "POST",
+    body: { action },
+  });
 }

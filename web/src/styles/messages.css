@@ -1,0 +1,158 @@
+/**
+ * 消息中心样式（F8）：双选项卡（私信/好友列表）、申请条目（同意/拒绝）、
+ * 好友行、宽屏双栏。
+ * 事实源：布局文档 §2.6 消息界面（窄屏）/ §3.4（宽屏双栏）。
+ */
+
+/* ================= 消息中心 ================= */
+
+.messages-page {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 68px;
+}
+
+.messages-tabs {
+  flex: none;
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.messages-tab {
+  flex: 1;
+  height: 40px;
+  border-radius: var(--radius-input);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.messages-tab.is-active {
+  background: rgba(157, 191, 230, 0.35);
+  color: var(--text-primary);
+}
+
+.messages-private {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.messages-friends {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4) var(--sp-4);
+}
+
+.messages-group-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--sp-2);
+}
+
+.messages-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.request-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.request-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.request-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.request-btn {
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  font-size: 13px;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  text-align: left;
+}
+
+.friend-row-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.messages-empty {
+  padding: var(--sp-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* 宽屏双栏（布局文档 §3.4）：左 300px 列表 */
+@media (min-width: 769px) {
+  .messages-page {
+    padding-bottom: var(--sp-4);
+    flex-direction: row;
+  }
+
+  .messages-tabs {
+    flex-direction: column;
+    gap: var(--sp-2);
+    width: 260px;
+    padding: var(--sp-4);
+  }
+
+  .messages-tab {
+    flex: none;
+  }
+
+  .messages-private,
+  .messages-friends {
+    flex: 1;
+    padding: var(--sp-4);
+  }
+}

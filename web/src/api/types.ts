@@ -602,3 +602,39 @@ export interface GameRoom {
   is_member: boolean;
   created_at: string;
 }
+
+/* ================= S2 群申请/邀请 + badges（对齐 backend） ================= */
+
+/** GET /me/badges/ 聚合（accounts.BadgesView） */
+export interface Badges {
+  private_unread: number;
+  group_unread: number;
+  friend_requests: number;
+  group_invites: number;
+  join_requests_pending: number;
+}
+
+/** 入群申请（chat.GroupJoinRequestSerializer） */
+export interface GroupJoinRequest {
+  id: number;
+  conversation_id: string;
+  conversation_title: string;
+  applicant: UserPublic;
+  message: string;
+  status: "pending" | "accepted" | "rejected";
+  handled_by_id: string | null;
+  handled_at: string | null;
+  created_at: string;
+}
+
+/** 入群邀请（chat.GroupInviteSerializer） */
+export interface GroupInvite {
+  id: number;
+  conversation_id: string;
+  conversation_title: string;
+  inviter: UserPublic;
+  invitee: UserPublic;
+  status: "pending" | "accepted" | "rejected";
+  handled_at: string | null;
+  created_at: string;
+}

@@ -11,7 +11,8 @@ F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面�
 F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间；
 F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房；
 F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子；
-F7 为桌游：房间框架（列表/创建/进入占位界面）、join/leave 状态、群内桌游（范围仅该群）、FAB 建桌游室。
+F7 为桌游：房间框架（列表/创建/进入占位界面）、join/leave 状态、群内桌游（范围仅该群）、FAB 建桌游室；
+F8 为消息中心：私信/好友双选项卡、申请处理闭环（好友/群邀请/入群申请）、badges 红点聚合。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -262,6 +263,18 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **说明**：桌游玩法本体与 WS 对局通道后续；"正在玩的桌游"个人页数据源 = `GET /rooms/?mine=1`（F10 接入）。
 
+## F8 消息中心 + badges 红点（已完成）
+
+聚合主页增量第八步（见开发步骤文档 F8）：全站未读聚合与申请审批。
+
+- [x] `api/accounts.ts` `getBadges`（`GET /me/badges/` 五维聚合）；`api/chat.ts` 扩展 listJoinRequests/actionJoinRequest/listMyInvites/actionGroupInvite（S2）
+- [x] `stores/badges.ts`：`messageBadge` 聚合（私信未读 + 好友申请 + 群邀请 + 待审批入群申请，群未读不进消息中心红点）
+- [x] `MessagesPage`：私信/好友双选项卡 + 三组申请置顶（好友申请/群邀请/待审批入群申请）+ 同意/拒绝即时反馈 + 宽屏双栏
+- [x] `AppShell` 进入拉 badges + 30s 轮询（断线降级）+ MessageFab/TopNav 消息项红点
+- [x] 契约测试：badges-store 4；全量 vitest 241 通过 + build + 两形态冒烟通过
+
+**说明**：红点实时推送（S2 WS 用户级广播 group.request.resolved/group.invite.new）接线后置，30s 轮询 + 处理 action 后即时 fetch 已覆盖"随处理即时刷新"验收。
+
 ## 目录结构
 
 ```text
@@ -285,6 +298,7 @@ web/
     │   ├── live.ts         # 直播频道/状态/弹幕端点（M5-4）
     │   ├── posts.ts        # 帖子信息流/详情/评论端点（F6）
     │   ├── boardgame.ts    # 桌游室 CRUD + join/leave 端点（F7）
+    │   ├── accounts.ts     # badges 全站未读聚合端点（F8）
     │   ├── favorites.ts    # 收藏端点（F6/F10）
     │   ├── elysia.ts       # 爱莉 profile（M5-2，只读）
     │   ├── health.ts       # health/live 与 health
@@ -299,7 +313,8 @@ web/
     │   ├── home.ts         # F2：主页布局偏好 + 最近访问群持久化（localStorage）
     │   ├── group.ts        # F3：activeScene（群内子场景单一状态源）+ currentGroupId
     │   ├── shell.ts        # F4：bottomTabsLeaving（窄屏直播间底栏下滑走跨路由动画）
-    │   └── posts.ts        # F6：信息流游标分页 + 收藏集合
+    │   ├── posts.ts        # F6：信息流游标分页 + 收藏集合
+    │   └── badges.ts       # F8：全站未读聚合 + messageBadge 红点
     ├── ws/
     │   ├── presence.ts     # /ws/presence/ 单例 + 心跳 + 重连
     │   ├── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
@@ -330,6 +345,7 @@ web/
     │   ├── LiveHubPage.tsx     # F4 一级直播聚合（网格 + 来源标识）
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
     │   ├── GamesHubPage.tsx    # F7 一级桌游（列表 + 进入占位）
+    │   ├── MessagesPage.tsx    # F8 消息中心（私信/好友双选项卡 + 申请审批）
     │   ├── ProfilePage.tsx
     │   ├── HomePage.tsx     # F2 窄屏主页（群卡片/列表双布局 + 宽屏 /home 重定向最近群）
     │   ├── PostsHubPage.tsx     # F6 一级帖子信息流（游标分页 + FAB 发帖）
@@ -347,7 +363,7 @@ web/
     │   ├── group/          # F3：GroupTopTabs（窄屏上移导航条）
     │   ├── posts/          # F6：PostCard/PostEditor/CommentList
     │   └── boardgame/      # F7：GameRoomCard/GameRoomCreate/GameRoomPlaceholder
-    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）/ messages.css（F8）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 
