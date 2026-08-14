@@ -1,136 +1,83 @@
 /**
- * LiveRoomPage —— 直播间（路由 /live/:channelId，M5-4）。
+ * LiveRoomPage —— 直播间（路由 /live/:channelId，M5-4 基础上 F4 扩展）。
  *
- * 布局：左侧播放器（三态渲染）+ 主播面板（owner）；右侧弹幕区（列表 + 输入）。
- * 进房/退房编排、状态轮询、WS 生命周期全部由 useLiveRoom 收口；
- * 弹幕发送/滚动由 useDanmaku 收口。
+ * F4 增量：
+ * - 进房动画：底栏下滑走（shell store）+ 输入框滑入（useEnterRoomAnimation）；
+ * - 切换直播间：窄屏上下滑 / 宽屏按钮 + 键盘 ↑↓，范围 = **全部可见直播间**
+ *   （公开 + 好友 + 已加入群，与群内直播"仅该群"不同，R-L3）；
+ * - 切换时 HLS 重连（useLiveRoom 依赖 channelId 变化自动重进房）+ 弹幕输入框保持。
+ *
+ * 核心渲染复用 LiveRoomBody（播放器三态 + 弹幕 + 切换控件）。
  */
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { DanmakuInput } from "../components/live/DanmakuInput";
-import { DanmakuList } from "../components/live/DanmakuList";
-import { LiveOwnerPanel } from "../components/live/LiveOwnerPanel";
-import { LivePlayer } from "../components/live/LivePlayer";
-import { useDanmaku } from "../hooks/useDanmaku";
-import { useLiveRoom } from "../hooks/useLiveRoom";
+import * as liveApi from "../api/live";
+import type { LiveChannelDescriptor } from "../api/types";
+import { LiveRoomBody } from "../components/live/LiveRoomBody";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
+import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useLiveStore } from "../stores/live";
+import { useShellStore } from "../stores/shell";
 
 export function LiveRoomPage() {
   const navigate = useNavigate();
   const params = useParams<{ channelId: string }>();
   const channelId = Number(params.channelId);
   const validId = Number.isInteger(channelId) && channelId > 0;
+  const isNarrow = useMediaQuery(NARROW_QUERY);
+  const { inputEntered } = useEnterRoomAnimation();
 
   const channel = useLiveStore((s) => s.current.channel);
-  const srsStatus = useLiveStore((s) => s.current.srsStatus);
-  const wsConnection = useLiveStore((s) => s.wsConnection);
+  const [ordered, setOrdered] = useState<LiveChannelDescriptor[]>([]);
+  const loadedRef = useRef(false);
 
-  // 非法 id 直接回大厅（effect 中导航避免渲染期副作用）
+  // 非法 id 回大厅
   useEffect(() => {
     if (!validId) navigate("/live", { replace: true });
   }, [validId, navigate]);
 
+  // 进房动画：底栏下滑走（R-L2 方向纪律，与进群"上移"相反）；退房复位
+  useEffect(() => {
+    if (!validId) return;
+    useShellStore.getState().setBottomTabsLeaving(true);
+    return () => useShellStore.getState().setBottomTabsLeaving(false);
+  }, [validId]);
+
+  // 切换范围 = 全部可见直播间（一次性拉列表作为有序上下文；失败则无切换能力）
+  useEffect(() => {
+    if (!validId || loadedRef.current) return;
+    loadedRef.current = true;
+    liveApi
+      .listLiveChannels()
+      .then((list) => setOrdered(list))
+      .catch(() => setOrdered([]));
+  }, [validId]);
+
+  const index = useMemo(() => ordered.findIndex((c) => c.id === channelId), [ordered, channelId]);
+  const hasPrev = index > 0;
+  const hasNext = index >= 0 && index < ordered.length - 1;
+
+  const goPrev = () => {
+    if (index > 0) navigate(`/live/${ordered[index - 1].id}`, { replace: true });
+  };
+  const goNext = () => {
+    if (index >= 0 && index < ordered.length - 1) navigate(`/live/${ordered[index + 1].id}`, { replace: true });
+  };
+
   if (!validId) return null;
+
   return (
-    <LiveRoomInner
+    <LiveRoomBody
       channelId={channelId}
       channel={channel}
-      srsStatus={srsStatus}
-      wsConnection={wsConnection}
+      isNarrow={isNarrow}
+      hasPrev={hasPrev}
+      hasNext={hasNext}
+      onPrev={goPrev}
+      onNext={goNext}
       onBack={() => navigate("/live")}
       onDeleted={() => navigate("/live")}
+      inputEntered={inputEntered}
     />
-  );
-}
-
-function LiveRoomInner({
-  channelId,
-  channel,
-  srsStatus,
-  wsConnection,
-  onBack,
-  onDeleted,
-}: {
-  channelId: number;
-  channel: ReturnType<typeof useLiveStore.getState>["current"]["channel"];
-  srsStatus: ReturnType<typeof useLiveStore.getState>["current"]["srsStatus"];
-  wsConnection: ReturnType<typeof useLiveStore.getState>["wsConnection"];
-  onBack: () => void;
-  onDeleted: () => void;
-}) {
-  const { loading, error, playerError, retryPlayer, videoRef } =
-    useLiveRoom(channelId);
-  const {
-    sending,
-    sendError,
-    send,
-    listRef,
-    hasNewBelow,
-    scrollToBottom,
-  } = useDanmaku(channelId);
-  const danmaku = useLiveStore((s) => s.current.danmaku);
-
-  if (error) {
-    return (
-      <div className="live-room-error">
-        <p>{error}</p>
-        <button type="button" className="btn btn-glow" onClick={onBack}>
-          返回大厅
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="live-room">
-      <main className="live-room-main">
-        <div className="live-room-head">
-          <button
-            type="button"
-            className="msg-action-btn"
-            onClick={onBack}
-            aria-label="返回大厅"
-          >
-            ← 大厅
-          </button>
-          <span className="live-room-title">
-            {loading ? "加载中…" : (channel?.title ?? "直播间")}
-          </span>
-          <span className={`live-ws-state live-ws-${wsConnection}`}>
-            {wsConnection === "online"
-              ? "弹幕已连接"
-              : wsConnection === "connecting"
-                ? "弹幕连接中…"
-                : "弹幕已断开"}
-          </span>
-        </div>
-
-        <LivePlayer
-          srsStatus={srsStatus}
-          optimisticStatus={channel?.status ?? null}
-          playerError={playerError}
-          videoRef={videoRef}
-          onRetry={retryPlayer}
-        />
-
-        {channel?.is_owner && (
-          <LiveOwnerPanel
-            channel={channel}
-            srsStatus={srsStatus}
-            onDeleted={onDeleted}
-          />
-        )}
-      </main>
-
-      <aside className="live-room-side">
-        <DanmakuList
-          danmaku={danmaku}
-          listRef={listRef}
-          hasNewBelow={hasNewBelow}
-          onScrollToBottom={scrollToBottom}
-        />
-        <DanmakuInput sending={sending} error={sendError} onSend={send} />
-      </aside>
-    </div>
   );
 }

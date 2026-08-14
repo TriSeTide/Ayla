@@ -16,7 +16,7 @@ import { ChatConversationRoute } from "./pages/ChatConversationRoute";
 import { ChatPage } from "./pages/ChatPage";
 import { GroupPage } from "./pages/GroupPage";
 import { HomePage } from "./pages/HomePage";
-import { LiveHallPage } from "./pages/LiveHallPage";
+import { LiveHubPage } from "./pages/LiveHubPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
@@ -40,7 +40,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/home" element={<HomePage />} />
         <Route path="/voice" element={<VoicePage />} />
-        <Route path="/live" element={<LiveHallPage />} />
+        <Route path="/live" element={<LiveHubPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
         <Route path="/posts" element={<PlaceholderPage title="帖子" step="F6" />} />
         <Route path="/posts/:postId" element={<PlaceholderPage title="帖子详情" step="F6" />} />

@@ -415,6 +415,12 @@ export interface LiveChannelDescriptor {
   status: LiveChannelStatus;
   owner_id: string;
   is_owner: boolean;
+  /** S1：可见性 public/friends/group（来源标识） */
+  visibility: "public" | "friends" | "group";
+  /** S1：群归属（一级 tab 创建为 null；群内创建为该群 id 字符串） */
+  group: string | null;
+  /** S1：群归属名（group 非空时的群标题，否则 null） */
+  group_name: string | null;
   /** 仅 owner 非 null（推流指纹，禁止写日志/给观众组件） */
   stream_key: string | null;
   /** 仅 owner 非 null */

@@ -31,6 +31,15 @@
   border-top: 1px solid var(--glass-border);
 }
 
+/* 窄屏直播间进房动画（F4）：底栏脱离 flex 流（fixed），下滑走后内容区全高 */
+.bottom-tabs[data-fixed="true"] {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+}
+
 .bottom-tabs-list {
   display: flex;
   height: 64px;

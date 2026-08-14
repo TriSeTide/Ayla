@@ -10,7 +10,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../layout/AppShell";
 import {
-  isImmersiveRoute,
+  isLiveRoomRoute,
   resolveFabAction,
   resolveModule,
 } from "../layout/shellConfig";
@@ -129,11 +129,11 @@ describe("resolveFabAction", () => {
   });
 });
 
-describe("isImmersiveRoute", () => {
-  it("直播间沉浸，大厅与其它路由不沉浸", () => {
-    expect(isImmersiveRoute("/live/42")).toBe(true);
-    expect(isImmersiveRoute("/live")).toBe(false);
-    expect(isImmersiveRoute("/home")).toBe(false);
+describe("isLiveRoomRoute", () => {
+  it("直播间路由命中，大厅与其它路由不命中", () => {
+    expect(isLiveRoomRoute("/live/42")).toBe(true);
+    expect(isLiveRoomRoute("/live")).toBe(false);
+    expect(isLiveRoomRoute("/home")).toBe(false);
   });
 });
 
@@ -167,11 +167,11 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
   });
 
-  it("直播沉浸路由不渲染任何 chrome（窄屏）", () => {
+  it("窄屏直播间：底栏下滑走进房动画（BottomTabs 仍在，带 leaving transform），无 FAB", () => {
     renderShell("/live/42", true);
     expect(screen.getByText("直播间内容")).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+    // 进房动画前底栏仍在 DOM（下滑走后视口外，F4）；FAB 直播间隐藏
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建直播间" })).not.toBeInTheDocument();
   });
 
@@ -202,12 +202,10 @@ describe("CreateFab", () => {
     await waitFor(() => expect(screen.getByText("聊天内容")).toBeInTheDocument());
   });
 
-  it("群内开播动作归属该群（点击提示不可见群 id，但 label 区分一级/群内）", async () => {
+  it("群内开播（F4 已接线）面板渲染创建直播间表单", async () => {
     renderShell("/group/g1/live", true);
     fireEvent.click(screen.getByRole("button", { name: "群内开播" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /群内开播/ }));
-    await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("「群内开播」表单将随 F4 步骤落地"),
-    );
+    // F4 起 group-live 动作渲染 LiveCreate 真表单（非 hint 提示）
+    expect(screen.getByPlaceholderText("给直播间起个标题")).toBeInTheDocument();
   });
 });

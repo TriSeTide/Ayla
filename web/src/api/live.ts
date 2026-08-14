@@ -16,10 +16,10 @@ import type {
 } from "./types";
 
 /** POST /live/channels/ —— 创建频道（创建者即 owner；201 回显 stream_key/rtmp_url，仅本次） */
-export function createLiveChannel(title: string) {
+export function createLiveChannel(title: string, group?: string | null) {
   return apiRequest<LiveChannelDescriptor>("/live/channels/", {
     method: "POST",
-    body: { title },
+    body: group ? { title, group } : { title },
   });
 }
 

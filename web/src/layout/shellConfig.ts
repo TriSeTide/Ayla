@@ -3,8 +3,8 @@
  *
  * - resolveModule：当前路径归属的一级模块（TopNav 指示条 / BottomTabs 选中态）。
  * - resolveFabAction：CreateFAB 动作随场景切换的匹配表（需求文档 §3.5、R-F1/R-F2）。
- * - isImmersiveRoute：沉浸式路由（直播间整页）不渲染任何壳层 chrome；
- *   F4 进房动画（底栏下滑走）的终态即此形态，动画过程由 useEnterRoomAnimation 提供。
+ * - isLiveRoomRoute：直播间路由（窄屏进房动画=底栏下滑走，宽屏 TopNav 常驻）。
+ * - isGroupScene：群聊场景路由（窄屏 GroupPage 自渲染顶部导航条，壳层不出底栏）。
  */
 import { matchPath } from "react-router-dom";
 
@@ -42,8 +42,12 @@ export function resolveModule(pathname: string): ModuleKey | null {
   return null;
 }
 
-/** 沉浸式路由（直播间）：壳层 chrome 全隐 */
-export function isImmersiveRoute(pathname: string): boolean {
+/**
+ * 直播间路由（/live/:channelId）。
+ * 窄屏：进房动画 = 底栏下滑走（shell store 驱动），终态底栏在视口外；
+ * 宽屏：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏遮挡顶栏，布局文档 §3.4）。
+ */
+export function isLiveRoomRoute(pathname: string): boolean {
   return matchPath({ path: "/live/:channelId", end: true }, pathname) != null;
 }
 
@@ -67,6 +71,8 @@ export interface FabAction {
   groupId: string | null;
   /** 该创建表单预计落地的步骤标识（F1 阶段点击动作项仅提示，不打开表单） */
   plannedStep: string;
+  /** 已接线的真表单处理（F4 起：直播创建已落地）；undefined = 仍提示落步骤 */
+  handler?: "live";
 }
 
 /**
@@ -74,7 +80,7 @@ export interface FabAction {
  * 群聊场景内跟随子界面；聊天 / 群信息子界面与直播间、消息、搜索、个人页无 FAB。
  */
 export function resolveFabAction(pathname: string): FabAction | null {
-  if (isImmersiveRoute(pathname)) return null;
+  if (isLiveRoomRoute(pathname)) return null;
 
   const groupScene = matchPath({ path: "/group/:id/:scene", end: true }, pathname);
   if (groupScene?.params.id && groupScene.params.scene) {
@@ -83,7 +89,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
       case "voice":
         return { key: "group-voice", label: "创建群内语音房", groupId, plannedStep: "F5" };
       case "live":
-        return { key: "group-live", label: "群内开播", groupId, plannedStep: "F4" };
+        return { key: "group-live", label: "群内开播", groupId, plannedStep: "F4", handler: "live" };
       case "posts":
         return { key: "group-post", label: "群内发帖", groupId, plannedStep: "F6" };
       case "games":
@@ -102,7 +108,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
     return { key: "create-voice", label: "创建语音房", groupId: null, plannedStep: "F5" };
   }
   if (matchPath({ path: "/live", end: true }, pathname)) {
-    return { key: "create-live", label: "创建直播间", groupId: null, plannedStep: "F4" };
+    return { key: "create-live", label: "创建直播间", groupId: null, plannedStep: "F4", handler: "live" };
   }
   if (matchPath({ path: "/posts", end: true }, pathname)) {
     return { key: "create-post", label: "发帖", groupId: null, plannedStep: "F6" };

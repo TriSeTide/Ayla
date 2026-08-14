@@ -180,11 +180,24 @@
 > 五子界面滑动=手势触发 navigate + key 切换淡入（不强做跟手 translateX，开发文档 §2.2 明确"路由切换用 CSS transition"）；
 > 下拉回主页手势（顶部下滑阈值 80px）+ 输入框滑入延迟动画（R-G1）细节后置，待主链路 E2E 阶段统一补动画终点断言。
 
-### F4 直播：一级 tab + 群内直播
+### F4 直播：一级 tab + 群内直播 【已验收 2026-08-14】
 
 **改造**：`src/pages/LiveHubPage.tsx`（现有 LiveHall 改聚合网格 + 可见性来源标识）；`src/pages/LiveRoomPage.tsx`（**进房动画：底栏下滑走+输入框滑入**，新建 `src/hooks/useEnterRoomAnimation.ts` 独立封装；窄屏上下滑切换列表上下文 = 群内 or 全量可见；宽屏视频主区 + 弹幕侧列 360px + 两侧按钮/键盘 ↑↓）；`src/pages/group/GroupLive.tsx`（窄屏沉浸式，**切换范围=仅该群**）。
 **要点**：切换直播间 HLS 重连、弹幕输入框保持；无直播空态 + 发起引导；FAB 在直播 tab/群内直播子界面 = 创建直播间（群内则归属该群）。
 **验收**：进房动画方向正确（底栏滑出底部，非上移）；窄屏上下滑切换范围正确（群内=群内列表；tab=公开+好友+已加入群）；宽屏键盘切换 + 弹幕侧列。
+
+> 落地（2026-08-14）：`api/types.ts` LiveChannelDescriptor 加 visibility/group/group_name（S1）；
+> `api/live.ts` createLiveChannel 支持 group；`hooks/useEnterRoomAnimation.ts`（输入框滑入 100ms 延迟 +
+> reduced-motion 直入，与进群动画方向相反）；`stores/shell.ts`（bottomTabsLeaving，跨路由底栏动画）；
+> `components/live/LiveRoomBody.tsx`（播放器三态 + 弹幕 + 切换控件[窄屏上下滑 useSwipe/宽屏按钮 + 键盘↑↓] +
+> 输入框滑入，供一级与群内复用）；`pages/LiveRoomPage.tsx`（进房底栏下滑走 + 全量列表切换 navigate /live/:nextId，
+> HLS 靠 channelId 变化重进房）；`pages/group/GroupLive.tsx`（群内范围 filter group=groupId + 内部 state 切换 +
+> 无直播空态引导）；`pages/LiveHubPage.tsx`（聚合网格窄屏 2 列/宽屏 3-4 列 + 来源标识公开/好友/群名 + 空态）；
+> `GroupPage` live 子界面接 GroupLive；`CreateFab` handler=live 接 LiveCreate（group 归属）；`styles/live.css`。
+> 验证：tsc 无错；全量 vitest 220 通过（新增 use-enter-room-animation 2 + group-live 范围 2，更新 shell/group-page
+> 既有断言随 live 子界面落地）；`npm run build` 通过；Playwright 冒烟（375 大厅来源标识 + 进房底栏下滑走 + 弹幕输入框、
+> 1440 键盘 ↓ 切换 + 弹幕侧列）均符合预期。
+> 已知取舍（§7 登记）：窄屏直播间弹幕"浮层"沿用 M5-4 底部浮层（覆盖播放器下部）而非重构全屏沉浸视频层；弹幕输入框滑入动画终态断言留待主链路 E2E 统一补。
 
 ### F5 语音：一级 tab + 群内语音
 
@@ -235,7 +248,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地（2026-08-14）；F4-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地（2026-08-14）；F5-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因
@@ -259,3 +272,4 @@
 - 窄屏 FAB 弹底部面板 / 宽屏弹上方浮层（design.md §12.5）。
 - F2（2026-08-14）列表布局「最新消息摘要」：后端会话列表无 last_message 字段，本期成员数兜底；会话列表后端无分页，卡片布局「加载更多」为前端增量渲染；live/voice/game 状态角标数据源随 F4/F5/F7 接入。
 - F3（2026-08-14）退出群/转让群主/解散群：后端无对应端点（B1-B10 缺口清单与 S1-S6 均未覆盖），群信息界面占位标注，待后端补端点；五子界面滑动采用「手势触发 navigate + key 切换淡入」（开发文档 §2.2 明确用 CSS transition，不保持五页同时挂载）；下拉回主页手势与输入框滑入延迟动画的精确终点断言留待主链路 E2E 阶段统一补。
+- F4（2026-08-14）窄屏直播间弹幕"浮层"沿用 M5-4 底部浮层（覆盖播放器下部）而非重构全屏沉浸视频层；进房动画"底栏下滑走"终态断言留待主链路 E2E 统一补。

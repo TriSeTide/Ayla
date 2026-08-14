@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconClose, IconPlus, IconUsers } from "../components/icons";
+import { LiveCreate } from "../components/live/LiveCreate";
 import type { FabAction } from "./shellConfig";
 
 export function CreateFab({ action }: { action: FabAction }) {
@@ -37,6 +38,18 @@ export function CreateFab({ action }: { action: FabAction }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  // 直播创建（F4 已落地）：群内归属该群，一级 tab 公开
+  const handleLiveCreated = (channel: { id: number }) => {
+    setOpen(false);
+    if (action.groupId) {
+      navigate(`/group/${action.groupId}/live`);
+    } else {
+      navigate(`/live/${channel.id}`);
+    }
+  };
+
+  const isLiveCreate = action.handler === "live";
+
   return (
     <>
       {open && (
@@ -45,17 +58,21 @@ export function CreateFab({ action }: { action: FabAction }) {
       <div className="create-fab-wrap" ref={panelRef}>
         {open && (
           <div className="fab-panel" role="menu" aria-label="创建面板">
-            <button
-              type="button"
-              role="menuitem"
-              className="fab-panel-item"
-              onClick={() =>
-                setHint(`「${action.label}」表单将随 ${action.plannedStep} 步骤落地`)
-              }
-            >
-              <IconPlus width={18} height={18} />
-              <span>{action.label}</span>
-            </button>
+            {isLiveCreate ? (
+              <LiveCreate onCreated={handleLiveCreated} group={action.groupId} />
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                className="fab-panel-item"
+                onClick={() =>
+                  setHint(`「${action.label}」表单将随 ${action.plannedStep} 步骤落地`)
+                }
+              >
+                <IconPlus width={18} height={18} />
+                <span>{action.label}</span>
+              </button>
+            )}
             {action.key !== "create-group" && (
               <button
                 type="button"

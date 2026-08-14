@@ -21,6 +21,13 @@ function statusBadge(status: LiveChannelDescriptor["status"]): {
   }
 }
 
+/** 来源标识（R-L1）：公开 / 好友 / 群名（design.md §12.7 Micro Tag） */
+function sourceLabel(ch: LiveChannelDescriptor): string {
+  if (ch.visibility === "group" && ch.group_name) return ch.group_name;
+  if (ch.visibility === "friends") return "好友";
+  return "公开";
+}
+
 export function LiveHall({
   channels,
   elysiaUserId,
@@ -35,7 +42,12 @@ export function LiveHall({
   onEnter: (channelId: number) => void;
 }) {
   if (channels.length === 0) {
-    return <div className="live-hall-empty">暂时没有直播间，来开第一个吧</div>;
+    return (
+      <div className="live-hall-empty">
+        <h3 className="placeholder-title">还没有直播间</h3>
+        <p className="placeholder-desc">点右下角 + 发起第一场直播吧</p>
+      </div>
+    );
   }
   return (
     <div className="live-hall-grid">
@@ -51,6 +63,7 @@ export function LiveHall({
           >
             <div className="live-card-head">
               <span className={badge.className}>{badge.label}</span>
+              <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
               {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
             </div>
             <div className="live-card-title">{ch.title}</div>

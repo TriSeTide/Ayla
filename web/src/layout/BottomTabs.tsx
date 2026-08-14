@@ -7,7 +7,7 @@
  * badges prop 为 F8 全站未读聚合预留（F1 恒空）。
  */
 import { Link } from "react-router-dom";
-import type { SVGProps } from "react";
+import type { CSSProperties, SVGProps } from "react";
 import { IconGame, IconHome, IconMic, IconPost, IconVideo } from "../components/icons";
 import type { ModuleKey } from "./shellConfig";
 import { PRIMARY_MODULES } from "./shellConfig";
@@ -30,14 +30,25 @@ function formatBadge(count: number): string {
 export function BottomTabs({
   moduleKey,
   badges = {},
+  style,
+  dataFixed = false,
 }: {
   /** 当前一级模块（resolveModule 输出），决定选中态 */
   moduleKey: ModuleKey | null;
   /** 各 tab 未读数（F8 接线；F1 恒空） */
   badges?: Partial<Record<ModuleKey, number>>;
+  /** 进房动画（F4）：底栏下滑走 transform + transition 由 AppShell 注入 */
+  style?: CSSProperties;
+  /** 直播间窄屏：脱离 flex 流（fixed），下滑走后内容区全高（沉浸视频，F4） */
+  dataFixed?: boolean;
 }) {
   return (
-    <nav className="bottom-tabs" aria-label="主导航">
+    <nav
+      className="bottom-tabs"
+      aria-label="主导航"
+      style={style}
+      data-fixed={dataFixed ? "true" : undefined}
+    >
       <ul className="bottom-tabs-list">
         {TAB_ORDER.map((key) => {
           const meta = PRIMARY_MODULES.find((m) => m.key === key)!;

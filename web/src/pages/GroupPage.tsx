@@ -26,6 +26,7 @@ import type { GroupScene } from "../stores/group";
 import { useHomeStore } from "../stores/home";
 import { GroupChat } from "./group/GroupChat";
 import { GroupInfo } from "./group/GroupInfo";
+import { GroupLive } from "./group/GroupLive";
 import { GroupScenePlaceholder } from "./group/GroupScenePlaceholder";
 
 const VALID_SCENES = new Set<string>(GROUP_SCENE_ORDER);
@@ -103,6 +104,20 @@ export function GroupPage() {
     }
   }, [activeScene, openInfo, goScene]);
 
+  // 群内子场景渲染（live 已落地 F4；voice/posts/games 仍占位）
+  const renderScene = useCallback(() => {
+    switch (activeScene) {
+      case "info":
+        return <GroupInfo groupId={id ?? ""} />;
+      case "chat":
+        return <GroupChat groupId={id ?? ""} />;
+      case "live":
+        return <GroupLive groupId={id ?? ""} onExit={() => goScene("chat")} />;
+      default:
+        return <GroupScenePlaceholder scene={activeScene} />;
+    }
+  }, [activeScene, id, goScene]);
+
   // 五子界面左右滑动切换（窄屏；宽屏由 ChannelSidebar 点击）
   const baseIdx = effectiveScene === "info" ? GROUP_SCENE_ORDER.indexOf("chat") : GROUP_SCENE_ORDER.indexOf(effectiveScene);
   const swipe = useSwipe(
@@ -136,15 +151,7 @@ export function GroupPage() {
           onSelectScene={goScene}
           onOpenInfo={openInfo}
         />
-        <main className="group-content">
-          {activeScene === "info" ? (
-            <GroupInfo groupId={id ?? ""} />
-          ) : activeScene === "chat" ? (
-            <GroupChat groupId={id ?? ""} />
-          ) : (
-            <GroupScenePlaceholder scene={activeScene} />
-          )}
-        </main>
+        <main className="group-content">{renderScene()}</main>
       </div>
     );
   }
@@ -167,15 +174,7 @@ export function GroupPage() {
 
       {/* 五子界面滑动容器（横向手势；内容单页渲染 + key 切换淡入） */}
       <div className="group-scene" {...swipe.handlers}>
-        <div className="group-scene-inner" key={activeScene}>
-          {activeScene === "info" ? (
-            <GroupInfo groupId={id ?? ""} />
-          ) : activeScene === "chat" ? (
-            <GroupChat groupId={id ?? ""} />
-          ) : (
-            <GroupScenePlaceholder scene={activeScene} />
-          )}
-        </div>
+        <div className="group-scene-inner" key={activeScene}>{renderScene()}</div>
       </div>
     </div>
   );

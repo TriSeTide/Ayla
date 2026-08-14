@@ -17,8 +17,11 @@ export function obsServerFromRtmpUrl(rtmpUrl: string): string {
 
 export function LiveCreate({
   onCreated,
+  group,
 }: {
   onCreated: (channel: LiveChannelDescriptor) => void;
+  /** 群内创建时归属的群 id（一级 tab 创建为 null，R-F2） */
+  group?: string | null;
 }) {
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
@@ -36,7 +39,7 @@ export function LiveCreate({
     setCreating(true);
     setError(null);
     try {
-      const channel = await liveApi.createLiveChannel(trimmed);
+      const channel = await liveApi.createLiveChannel(trimmed, group);
       setCreated(channel);
       setTitle("");
       onCreated(channel);

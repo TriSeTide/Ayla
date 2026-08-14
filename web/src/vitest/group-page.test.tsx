@@ -19,6 +19,9 @@ vi.mock("../pages/group/GroupChat", () => ({
 vi.mock("../pages/group/GroupInfo", () => ({
   GroupInfo: () => <div>群信息界面</div>,
 }));
+vi.mock("../pages/group/GroupLive", () => ({
+  GroupLive: () => <div>群内直播内容</div>,
+}));
 vi.mock("../api/chat", () => ({
   getConversation: vi.fn(),
 }));
@@ -85,11 +88,15 @@ describe("GroupPage 窄屏", () => {
     expect(screen.getByText("群聊内容区")).toBeInTheDocument();
   });
 
-  it("非 chat 子界面渲染占位", () => {
+  it("非 chat 子界面：live 渲染群内直播（GroupLive），voice 渲染占位", () => {
     mockMatchMedia(true);
-    renderGroup("/group/1/live");
-    expect(screen.getByText("群内直播")).toBeInTheDocument();
-    expect(screen.queryByText("群聊内容区")).not.toBeInTheDocument();
+    useGroupStore.getState().reset();
+    const { unmount } = renderGroup("/group/1/live");
+    expect(screen.getByText("群内直播内容")).toBeInTheDocument();
+    unmount();
+
+    renderGroup("/group/1/voice");
+    expect(screen.getByText("群内语音")).toBeInTheDocument();
   });
 
   it("群头像两级点击：非 chat 场景点群头像 → 回聊天", async () => {
@@ -135,6 +142,6 @@ describe("GroupPage 宽屏", () => {
     mockMatchMedia(false);
     renderGroup("/group/1");
     screen.getByRole("button", { name: /直播/ }).click();
-    await waitFor(() => expect(screen.getByText("群内直播")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("群内直播内容")).toBeInTheDocument());
   });
 });
