@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { GameRoomCreate } from "../components/boardgame/GameRoomCreate";
 import { IconClose, IconPlus, IconUsers } from "../components/icons";
 import { LiveCreate } from "../components/live/LiveCreate";
 import { PostEditor } from "../components/posts/PostEditor";
@@ -53,6 +54,7 @@ export function CreateFab({ action }: { action: FabAction }) {
   const isLiveCreate = action.handler === "live";
   const isVoiceCreate = action.handler === "voice";
   const isPostCreate = action.handler === "post";
+  const isGameCreate = action.handler === "game";
 
   return (
     <>
@@ -72,6 +74,14 @@ export function CreateFab({ action }: { action: FabAction }) {
                 onCreated={(post) => {
                   setOpen(false);
                   navigate(action.groupId ? `/group/${action.groupId}/posts` : `/posts/${post.id}`);
+                }}
+              />
+            ) : isGameCreate ? (
+              <GameRoomCreate
+                group={action.groupId}
+                onCreated={() => {
+                  setOpen(false);
+                  navigate(action.groupId ? `/group/${action.groupId}/games` : "/games");
                 }}
               />
             ) : (

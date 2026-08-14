@@ -238,11 +238,21 @@
 > 已知取舍（§7 登记）：发帖带图（媒体三步上传前端链路）后置——本期 PostEditor 仅文本，图片九宫格展示在有图
 > 数据时正常渲染；个人页"我的发帖"归 F10。
 
-### F7 桌游房间框架
+### F7 桌游房间框架 【已验收 2026-08-14】
 
 **新增**：`src/pages/GamesHubPage.tsx`、`src/pages/group/GroupGames.tsx`、`src/components/boardgame/GameRoomCard.tsx`、`GameRoomCreate.tsx`、`GameRoomPlaceholder.tsx`；`src/api/boardgame.ts`。
 **要点**：房间列表/创建/进入占位界面；join/leave 状态显示。
 **验收**：创建→列表→进入占位界面闭环；join 后"正在玩的桌游"出现在个人页数据源。
+
+> 落地（2026-08-14）：`api/boardgame.ts`（listGameRooms ?mine=1 / createGameRoom / getGameRoom / deleteGameRoom /
+> joinGameRoom :join / leaveGameRoom :leave）；`components/boardgame/` GameRoomCard（封面占位+状态 tag 等待中/对局中 +
+> 人数 + 来源标识）、GameRoomCreate（房间名必填 + group）、GameRoomPlaceholder（进入占位 + join/leave 状态切换）；
+> `pages/GamesHubPage.tsx`（列表 + 空态 + 进入占位闭环）、`group/GroupGames.tsx`（群内范围 filter group=groupId）；
+> `GroupPage` games 子界面接 GroupGames；`App.tsx` /games 接真页；`CreateFab` handler=game 接 GameRoomCreate；
+> `styles/boardgame.css`。
+> 验证：tsc 无错；全量 vitest 237 通过（新增 boardgame-api 5）；build 通过；Playwright 冒烟（列表+对局中 tag+
+> FAB 创建 label、进占位+离开按钮、群内范围仅本群 1 卡）均符合预期。
+> 说明：桌游玩法本体与 WS 对局通道后续；"正在玩的桌游"个人页数据源 = `GET /rooms/?mine=1`（后端已支持，F10 接入）。
 
 ### F8 消息中心 + badges 红点
 
@@ -275,7 +285,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地；F6 帖子全套已落地（2026-08-14）；F7-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地；F6 帖子全套已落地；F7 桌游房间框架已落地（2026-08-14）；F8-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因

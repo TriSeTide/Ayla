@@ -29,6 +29,7 @@ import { GroupInfo } from "./group/GroupInfo";
 import { GroupLive } from "./group/GroupLive";
 import { GroupVoice } from "./group/GroupVoice";
 import { GroupPosts } from "./group/GroupPosts";
+import { GroupGames } from "./group/GroupGames";
 import { GroupScenePlaceholder } from "./group/GroupScenePlaceholder";
 
 const VALID_SCENES = new Set<string>(GROUP_SCENE_ORDER);
@@ -119,6 +120,8 @@ export function GroupPage() {
         return <GroupVoice groupId={id ?? ""} onExit={() => goScene("chat")} />;
       case "posts":
         return <GroupPosts groupId={id ?? ""} onExit={() => goScene("chat")} />;
+      case "games":
+        return <GroupGames groupId={id ?? ""} onExit={() => goScene("chat")} />;
       default:
         return <GroupScenePlaceholder scene={activeScene} />;
     }

@@ -16,6 +16,7 @@ import { ChatConversationRoute } from "./pages/ChatConversationRoute";
 import { ChatPage } from "./pages/ChatPage";
 import { GroupPage } from "./pages/GroupPage";
 import { HomePage } from "./pages/HomePage";
+import { GamesHubPage } from "./pages/GamesHubPage";
 import { LiveHubPage } from "./pages/LiveHubPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -46,7 +47,7 @@ export default function App() {
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
         <Route path="/posts" element={<PostsHubPage />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />
-        <Route path="/games" element={<PlaceholderPage title="桌游" step="F7" />} />
+        <Route path="/games" element={<GamesHubPage />} />
         <Route path="/messages" element={<PlaceholderPage title="消息" step="F8" />} />
         <Route path="/search" element={<PlaceholderPage title="搜索" step="F9" />} />
         <Route path="/profile" element={<ProfilePage />} />

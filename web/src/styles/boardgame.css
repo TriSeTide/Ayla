@@ -1,0 +1,187 @@
+/**
+ * 桌游增量样式（F7）：桌游室卡片（2 列网格 + 封面占位 + 状态 tag + 来源）、
+ * 创建表单、进入占位界面、一级桌游聚合页、群内桌游。
+ * 事实源：design.md §12.11 桌游室卡片；布局文档 §2.5/§3.1。
+ */
+
+/* ================= 桌游室卡片（design.md §12.11） ================= */
+
+.game-room-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+  text-align: left;
+  padding: 0;
+}
+
+.game-room-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  background: var(--ice-100);
+  color: var(--ice-500);
+  margin: 8px 8px 0;
+  border-radius: 12px;
+}
+
+.game-room-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+
+.game-room-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-room-status {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.8px;
+}
+
+.game-room-status.is-waiting {
+  background: var(--ice-300);
+  color: var(--indigo-700);
+}
+
+.game-room-status.is-playing {
+  background: var(--sakura-300);
+  color: var(--grape-700);
+}
+
+.game-room-meta {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.game-room-source {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--sakura-300);
+  color: var(--grape-700);
+  font-family: var(--font-display);
+  font-size: 11px;
+}
+
+/* ================= 创建表单 ================= */
+
+.game-room-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.game-room-create .btn {
+  align-self: flex-end;
+}
+
+/* ================= 进入占位界面 ================= */
+
+.game-room-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.game-room-placeholder-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.game-room-placeholder-name {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-room-placeholder-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  text-align: center;
+}
+
+.game-room-placeholder-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.game-room-placeholder-meta {
+  font-family: var(--font-utility);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* ================= 一级桌游聚合页 ================= */
+
+.games-hub {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 68px;
+}
+
+.games-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+@media (min-width: 769px) {
+  .games-hub {
+    padding-bottom: var(--sp-4);
+  }
+
+  .games-grid {
+    grid-template-columns: repeat(4, 1fr);
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: var(--sp-4) var(--sp-6);
+  }
+}
+
+/* 群内桌游（GroupGames） */
+.group-games {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  overflow-y: auto;
+}

@@ -10,7 +10,8 @@ F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动
 F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面滑动、群头像两级点击、群内聊天（复用）、群信息（角色化）、宽屏三列（ServerRail + ChannelSidebar）；
 F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间；
 F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房；
-F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子。
+F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子；
+F7 为桌游：房间框架（列表/创建/进入占位界面）、join/leave 状态、群内桌游（范围仅该群）、FAB 建桌游室。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -249,6 +250,18 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **F6 已知取舍**（步骤文档 §7 登记）：发帖带图（媒体三步上传前端链路）后置，本期 PostEditor 仅文本；个人页"我的发帖"归 F10。
 
+## F7 桌游房间框架（已完成）
+
+聚合主页增量第七步（见开发步骤文档 F7）：房间框架（玩法引擎与 WS 对局通道后续）。
+
+- [x] `api/boardgame.ts`：listGameRooms（`?mine=1` F10 数据源）、createGameRoom、getGameRoom、deleteGameRoom、joinGameRoom（`:join` 幂等）、leaveGameRoom（`:leave`）
+- [x] `GameRoomCard`（封面占位 + 状态 tag 等待中/对局中 + 人数 + 来源标识）、`GameRoomCreate`（房间名必填 + group）、`GameRoomPlaceholder`（进入占位 + join/leave 状态切换）
+- [x] `GamesHubPage`（列表 + 空态 + 进入占位闭环）、`GroupGames`（群内范围 filter group）
+- [x] `GroupPage` games 子界面接入；`CreateFab` `handler="game"` 接 GameRoomCreate
+- [x] 契约测试：boardgame-api 5；全量 vitest 237 通过 + build + 两形态冒烟通过
+
+**说明**：桌游玩法本体与 WS 对局通道后续；"正在玩的桌游"个人页数据源 = `GET /rooms/?mine=1`（F10 接入）。
+
 ## 目录结构
 
 ```text
@@ -271,6 +284,7 @@ web/
     │   ├── voice.ts        # 语音频道 REST + 爱莉 voice-calls 编排端点（M5-3）
     │   ├── live.ts         # 直播频道/状态/弹幕端点（M5-4）
     │   ├── posts.ts        # 帖子信息流/详情/评论端点（F6）
+    │   ├── boardgame.ts    # 桌游室 CRUD + join/leave 端点（F7）
     │   ├── favorites.ts    # 收藏端点（F6/F10）
     │   ├── elysia.ts       # 爱莉 profile（M5-2，只读）
     │   ├── health.ts       # health/live 与 health
@@ -312,11 +326,10 @@ web/
     │   ├── LoginPage.tsx
     │   ├── RegisterPage.tsx
     │   ├── ChatPage.tsx    # M5-2 主页面（会话列表 + 聊天窗口，侧栏含语音/直播入口）
-    │   ├── VoicePage.tsx   # M5-3 语音主页面 → F5 改名 VoiceHubPage（聚合 tab）
     │   ├── VoiceHubPage.tsx # F5 一级语音聚合（卡片 + 来源标识）
-    │   ├── LiveHallPage.tsx    # M5-4 直播大厅 → F4 改名 LiveHubPage（聚合 tab）
     │   ├── LiveHubPage.tsx     # F4 一级直播聚合（网格 + 来源标识）
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
+    │   ├── GamesHubPage.tsx    # F7 一级桌游（列表 + 进入占位）
     │   ├── ProfilePage.tsx
     │   ├── HomePage.tsx     # F2 窄屏主页（群卡片/列表双布局 + 宽屏 /home 重定向最近群）
     │   ├── PostsHubPage.tsx     # F6 一级帖子信息流（游标分页 + FAB 发帖）
@@ -324,7 +337,7 @@ web/
     │   ├── PlaceholderPage.tsx     # F1 未落地页面占位（标注 F 步骤）
     │   ├── GroupPage.tsx           # F3 群聊场景容器（窄屏进群动画/五子界面/两级点击；宽屏三列）
     │   ├── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
-    │   └── group/           # F3-F6：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupPosts / GroupScenePlaceholder
+    │   └── group/           # F3-F7：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupPosts / GroupGames / GroupScenePlaceholder
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
@@ -332,8 +345,9 @@ web/
     │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
     │   ├── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）
     │   ├── group/          # F3：GroupTopTabs（窄屏上移导航条）
-    │   └── posts/          # F6：PostCard/PostEditor/CommentList
-    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）
+    │   ├── posts/          # F6：PostCard/PostEditor/CommentList
+    │   └── boardgame/      # F7：GameRoomCard/GameRoomCreate/GameRoomPlaceholder
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 

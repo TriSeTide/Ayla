@@ -79,8 +79,8 @@ export interface FabAction {
   groupId: string | null;
   /** 该创建表单预计落地的步骤标识（F1 阶段点击动作项仅提示，不打开表单） */
   plannedStep: string;
-  /** 已接线的真表单处理（F4/F5/F6 起：直播/语音/发帖已落地）；undefined = 仍提示落步骤 */
-  handler?: "live" | "voice" | "post";
+  /** 已接线的真表单处理（F4-F7 起：直播/语音/发帖/桌游已落地）；undefined = 仍提示落步骤 */
+  handler?: "live" | "voice" | "post" | "game";
 }
 
 /**
@@ -101,7 +101,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
       case "posts":
         return null; // 群内帖子发帖走底部输入框（R-P2 关键差异），FAB 隐藏
       case "games":
-        return { key: "group-game", label: "创建群内桌游室", groupId, plannedStep: "F7" };
+        return { key: "group-game", label: "创建群内桌游室", groupId, plannedStep: "F7", handler: "game" };
       default:
         return null; // info 等无创建语义
     }
@@ -122,7 +122,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
     return { key: "create-post", label: "发帖", groupId: null, plannedStep: "F6", handler: "post" };
   }
   if (matchPath({ path: "/games", end: true }, pathname)) {
-    return { key: "create-game", label: "创建桌游室", groupId: null, plannedStep: "F7" };
+    return { key: "create-game", label: "创建桌游室", groupId: null, plannedStep: "F7", handler: "game" };
   }
   return null;
 }

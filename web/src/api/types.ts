@@ -571,3 +571,34 @@ export interface Favorite {
   target: Record<string, unknown> | null;
   created_at: string;
 }
+
+/* ================= S4 桌游域（对齐 backend/apps/boardgame/serializers.py） ================= */
+
+/** 桌游室成员（GameRoomMemberSerializer） */
+export interface GameRoomMember {
+  id: number;
+  user: UserPublic;
+  user_id: string;
+  seat: number;
+  joined_at: string;
+}
+
+/** 桌游室（GameRoomSerializer） */
+export interface GameRoom {
+  id: number;
+  name: string;
+  owner: UserPublic;
+  owner_id: string;
+  visibility: "public" | "friends" | "group";
+  group: string | null;
+  group_name: string | null;
+  /** 游戏类型（默认 boardgame，玩法后续） */
+  game_type: string;
+  /** waiting（等待中）/ playing（对局中）/ ended（已结束） */
+  status: "waiting" | "playing" | "ended";
+  members: GameRoomMember[];
+  member_count: number;
+  is_owner: boolean;
+  is_member: boolean;
+  created_at: string;
+}
