@@ -1,9 +1,12 @@
 """
 直播 REST 视图（挂 /api/v1/live/，M4-6 §5）。
 
-权限语义（复用 M4-2/M4-5 约定）：
+权限语义（复用 M4-2/M4-5 约定，S1 扩展可见性）：
 - 越权（非 owner :start/:stop/删除）→ 403；不存在的频道 → 404；
-- 弹幕发送/历史/状态查询：登录即可（观众可看直播与弹幕，但拿不到推流指纹）；
+- 列表/详情/弹幕/状态：按 `apps/common/visibility.py` 过滤与校验
+  （public 全登录用户 / friends 好友 / group 群员，非可见 → 403）；
+- 弹幕发送 = 进入互动，走 can_join（当前与 can_view 同语义）；
+- 观众可看直播与弹幕，但拿不到推流指纹（stream_key 仅 owner）；
 - 直播中（乐观标记 live）禁止删除，先 :stop（400）。
 
 状态真实性（AGENTS.md §8）：`:start`/`:stop` 只更新乐观标记；
@@ -16,6 +19,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.common.visibility import can_join, can_view, visible_queryset
 
 from . import services
 from .models import Danmaku, LiveChannel
@@ -30,6 +35,20 @@ def _get_channel_or_404(channel_id):
         return LiveChannel.objects.get(pk=channel_id)
     except (LiveChannel.DoesNotExist, ValueError, TypeError):
         return None
+
+
+def _get_group_or_400(group_id):
+    """解析创建参数里的群归属：必须是存在的群聊会话；非法值返回 (None, error) 或 (obj, None)。"""
+    from apps.chat.models import Conversation
+
+    if group_id in (None, "", "null"):
+        return None, None
+    conv = Conversation.objects.filter(pk=group_id).first()
+    if conv is None:
+        return None, "群不存在"
+    if conv.type != Conversation.TYPE_GROUP:
+        return None, "群归属必须是群聊会话"
+    return conv, None
 
 
 def _forbidden(msg="无权访问"):
@@ -54,7 +73,7 @@ class ChannelListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = LiveChannel.objects.all()
+        qs = visible_queryset(LiveChannel, request.user)
         if request.query_params.get("only_live") == "1":
             qs = qs.filter(status="live")
         payload = [_channel_serializer(ch, request) for ch in qs]
@@ -64,8 +83,14 @@ class ChannelListView(APIView):
         title = (request.data.get("title") or "").strip()
         if not title:
             return _bad_request("title 不能为空")
+        group, group_err = _get_group_or_400(request.data.get("group"))
+        if group_err:
+            return _bad_request(group_err)
+        visibility = request.data.get("visibility") or None
         try:
-            ch = services.create_channel(request.user, title)
+            ch = services.create_channel(
+                request.user, title, group=group, visibility=visibility
+            )
         except ValueError as exc:
             return _bad_request(str(exc))
         # 创建响应即回显 stream_key/推流地址（创建者即 owner，供复制进 OBS）
@@ -83,6 +108,8 @@ class ChannelDetailView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_view(request.user, ch):
+            return _forbidden("无权查看该直播间")
         return Response(_channel_serializer(ch, request))
 
     def delete(self, request, channel_id):
@@ -136,6 +163,8 @@ class ChannelStatusView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_view(request.user, ch):
+            return _forbidden("无权查看该直播间")
         # 实时判定在 services 内完成；SRS 查询失败 → degraded（不伪装"未在播"）
         return Response(services.resolve_live_status(ch))
 
@@ -149,6 +178,8 @@ class DanmakuListView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_view(request.user, ch):
+            return _forbidden("无权查看该直播间")
         raw_limit = request.query_params.get("limit")
         try:
             limit = int(raw_limit) if raw_limit else None
@@ -171,6 +202,8 @@ class DanmakuListView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_join(request.user, ch):
+            return _forbidden("无权进入该直播间")
         content = request.data.get("content")
         try:
             dm = services.create_danmaku(ch, request.user, content)

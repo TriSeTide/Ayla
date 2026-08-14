@@ -24,7 +24,13 @@
 
 ## 1. 后端增量设计
 
-### 1.1 可见性与群归属（B6/B7）——最优先，多模块依赖它
+### 1.1 可见性与群归属（B6/B7）——最优先，多模块依赖它 【S1 已落地 2026-08-14】
+
+> 落地记录：`apps/common/visibility.py`（Visibility 枚举 + `visible_queryset`/`can_view`/`can_join`），
+> live/voice 模型加 `visibility`+`group` 字段（迁移 0002，存量默认 public 零感知），
+> 创建接口支持 `group`/`visibility` 参数（group 非空默认 group 可见；visibility=group 必须带群），
+> 列表/详情/弹幕/join/成员列表接入过滤与 403 校验，序列化输出 visibility/group/group_name。
+> 契约测试：`apps/common/tests/test_visibility.py`（可见性矩阵）+ live/voice `test_visibility_api.py`，全量 335 通过。
 
 ```python
 # 新增枚举（建议放 apps/common 或各 app 内统一定义）

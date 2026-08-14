@@ -20,6 +20,10 @@ class LiveChannelSerializer(serializers.ModelSerializer):
     rtmp_url = serializers.SerializerMethodField()
     hls_url = serializers.SerializerMethodField()
     flv_url = serializers.SerializerMethodField()
+    # S1：可见性 + 群归属（group=群 id 字符串；group_name=群标题，无群为 null）
+    visibility = serializers.CharField(read_only=True)
+    group = serializers.CharField(source="group_id", read_only=True, default=None)
+    group_name = serializers.CharField(source="group.title", read_only=True, default=None)
 
     class Meta:
         model = LiveChannel
@@ -27,6 +31,9 @@ class LiveChannelSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "status",
+            "visibility",
+            "group",
+            "group_name",
             "owner_id",
             "is_owner",
             "stream_key",

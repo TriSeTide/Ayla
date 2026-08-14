@@ -21,6 +21,8 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.common.visibility import Visibility
+
 from .models import VoiceChannel, VoiceChannelMember
 
 logger = logging.getLogger(__name__)
@@ -33,9 +35,34 @@ def _gen_room_name() -> str:
     return f"room_{uuid.uuid4().hex}"
 
 
-def create_channel(user, name: str) -> VoiceChannel:
-    """建频道（自动生成唯一 room_name）。"""
-    return VoiceChannel.objects.create(name=name, room_name=_gen_room_name(), owner=user)
+def _resolve_visibility(group, visibility: str | None) -> str:
+    """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
+
+    约束（开发文档 §1.1）：visibility=group 必须带 group；group 非空时默认 group 可见。
+    """
+    if visibility is None or not visibility:
+        return Visibility.GROUP if group is not None else Visibility.PUBLIC
+    if visibility == Visibility.GROUP and group is None:
+        raise ValueError("群成员可见必须指定群")
+    return visibility
+
+
+def create_channel(user, name: str, group=None, visibility: str | None = None) -> VoiceChannel:
+    """建频道（自动生成唯一 room_name）。
+
+    S1 扩展：可选 `group`（FK chat.Conversation，须为群聊）与 `visibility`。
+    """
+    if group is not None:
+        if str(getattr(group, "type", "")) != "group":
+            raise ValueError("group 必须是群聊会话")
+    visibility = _resolve_visibility(group, visibility)
+    return VoiceChannel.objects.create(
+        name=name,
+        room_name=_gen_room_name(),
+        owner=user,
+        group=group,
+        visibility=visibility,
+    )
 
 
 def get_channel(channel_id) -> VoiceChannel | None:

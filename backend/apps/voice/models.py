@@ -16,6 +16,8 @@
 from django.conf import settings
 from django.db import models
 
+from apps.common.visibility import Visibility
+
 
 class VoiceChannel(models.Model):
     """语音频道。"""
@@ -29,6 +31,19 @@ class VoiceChannel(models.Model):
         settings.AUTH_USER_MODEL,
         related_name="owned_voice_channels",
         on_delete=models.CASCADE,
+    )
+    # S1（聚合主页）：可见性 + 群归属。约束：visibility=group 时 group 必填；
+    # group 非空时默认 visibility=group（services 层落值，见 apps/voice/services.py）。
+    visibility = models.CharField(
+        "可见性", max_length=16, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
+    group = models.ForeignKey(
+        "chat.Conversation",
+        related_name="voice_channels",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={"type": "group"},
     )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 

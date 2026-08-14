@@ -1,8 +1,10 @@
 """
 语音频道视图 —— 频道 REST（挂 /api/v1/voice/，M4-5 §6）。
 
-权限语义（复用 M4-2 约定）：
-- 越权（非成员操作 / 非 owner 改名称）→ 403；不存在的频道 → 404；
+权限语义（复用 M4-2 约定，S1 扩展可见性）：
+- 列表/详情/成员列表：按 `apps/common/visibility.py` 过滤与校验（非可见 → 403）；
+- 加入频道走 can_join（当前与 can_view 同语义）；非成员操作/非 owner 改名称 → 403；
+  不存在的频道 → 404；
 - 频道默认开放加入（类似 Discord 语音频道）；私有/邀请制留待后续。
 """
 import logging
@@ -14,6 +16,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.common.visibility import can_join, can_view, visible_queryset
 
 from . import livekit, services
 from .models import VoiceChannel, VoiceChannelMember
@@ -31,6 +35,20 @@ def _get_channel_or_404(channel_id):
         return None
 
 
+def _get_group_or_400(group_id):
+    """解析创建参数里的群归属：必须是存在的群聊会话；非法值返回 (None, error) 或 (obj, None)。"""
+    from apps.chat.models import Conversation
+
+    if group_id in (None, "", "null"):
+        return None, None
+    conv = Conversation.objects.filter(pk=group_id).first()
+    if conv is None:
+        return None, "群不存在"
+    if conv.type != Conversation.TYPE_GROUP:
+        return None, "群归属必须是群聊会话"
+    return conv, None
+
+
 def _forbidden(msg="无权访问"):
     return Response({"detail": msg}, status=status.HTTP_403_FORBIDDEN)
 
@@ -45,7 +63,7 @@ class ChannelListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        channels = list(VoiceChannel.objects.all())
+        channels = list(visible_queryset(VoiceChannel, request.user))
         # 附成员数
         counts = {
             c["channel_id"]: c["n"]
@@ -67,7 +85,16 @@ class ChannelListView(APIView):
             return Response(
                 {"detail": "name 不能为空"}, status=status.HTTP_400_BAD_REQUEST
             )
-        ch = services.create_channel(request.user, name)
+        group, group_err = _get_group_or_400(request.data.get("group"))
+        if group_err:
+            return Response({"detail": group_err}, status=status.HTTP_400_BAD_REQUEST)
+        visibility = request.data.get("visibility") or None
+        try:
+            ch = services.create_channel(
+                request.user, name, group=group, visibility=visibility
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             VoiceChannelSerializer(ch).data, status=status.HTTP_201_CREATED
         )
@@ -82,6 +109,8 @@ class ChannelDetailView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_view(request.user, ch):
+            return _forbidden("无权查看该语音频道")
         data = VoiceChannelSerializer(ch).data
         data["member_count"] = ch.members.count()
         data["mine"] = services.user_in_channel(ch, request.user)
@@ -112,6 +141,8 @@ class ChannelJoinView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_join(request.user, ch):
+            return _forbidden("无权加入该语音频道")
         member = services.join_channel(ch, request.user)
         try:
             token = livekit.issue_token(request.user, ch.room_name)
@@ -173,6 +204,8 @@ class ChannelMembersView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
+        if not can_view(request.user, ch):
+            return _forbidden("无权查看该语音频道")
         members = VoiceChannelMember.objects.filter(channel=ch).select_related("user")
         return Response(
             VoiceChannelMemberSerializer(members, many=True).data,

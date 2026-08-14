@@ -39,7 +39,13 @@
 
 > 每次改动后：`python manage.py makemigrations && migrate`；配 DRF 契约测试；全量 `pytest` 回归。
 
-### S1 可见性与群归属（最优先，多模块依赖）
+### S1 可见性与群归属（最优先，多模块依赖）【已验收 2026-08-14】
+
+> 落地：`apps/common/{__init__,visibility}.py`；live/voice 模型 `visibility`+`group` 字段与迁移 0002；
+> views 列表过滤 + 详情/弹幕/join/成员 403 校验；serializers 输出 visibility/group/group_name；
+> 创建接口支持 group/visibility（group 非空默认 group 可见，visibility=group 必须带群）。
+> 验证：可见性矩阵测试（`apps/common/tests/test_visibility.py`）+ live/voice API 契约测试全绿；
+> 全量 pytest 335 通过（存量接口回归零回退）；迁移后存量房间默认 public 行为不变。
 
 **改动文件**：
 - 新建 `backend/apps/common/__init__.py`、`apps/common/visibility.py`：`Visibility` 枚举 + `visible_to(user)` 查询 helper + `can_view/can_join(user, obj)`。
@@ -167,7 +173,7 @@
 
 ## 5. 交付物核对清单
 
-- [ ] 后端：S1-S6 全部落地，契约测试 + 迁移齐备，存量行为回归通过
+- [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2-S6 待执行
 - [ ] 前端：F1-F10 全部落地，`npm run build` / `npm run test` 通过
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [ ] `Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新；`Ayla/web/README.md` 补本期章节

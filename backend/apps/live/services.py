@@ -19,6 +19,8 @@ from channels.exceptions import ChannelFull
 from django.conf import settings
 from django.utils import timezone
 
+from apps.common.visibility import Visibility
+
 from .models import Danmaku, LiveChannel
 from .srs import SrsClient, SrsUnavailable, get_srs
 
@@ -35,16 +37,41 @@ def gen_stream_key() -> str:
     return secrets.token_hex(24)
 
 
-def create_channel(user, title: str) -> LiveChannel:
-    """创建直播频道：生成唯一 stream_key（DB 唯一索引兜底，碰撞重试）。"""
+def _resolve_visibility(group, visibility: str | None) -> str:
+    """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
+
+    约束（开发文档 §1.1）：visibility=group 必须带 group；group 非空时默认 group 可见。
+    """
+    if visibility is None or not visibility:
+        return Visibility.GROUP if group is not None else Visibility.PUBLIC
+    if visibility == Visibility.GROUP and group is None:
+        raise ValueError("群成员可见必须指定群")
+    return visibility
+
+
+def create_channel(
+    user, title: str, group=None, visibility: str | None = None
+) -> LiveChannel:
+    """创建直播频道：生成唯一 stream_key（DB 唯一索引兜底，碰撞重试）。
+
+    S1 扩展：可选 `group`（FK chat.Conversation，须为群聊）与 `visibility`。
+    """
     title = (title or "").strip()
     if not title:
         raise ValueError("title 不能为空")
+    if group is not None:
+        if str(getattr(group, "type", "")) != "group":
+            raise ValueError("group 必须是群聊会话")
+    visibility = _resolve_visibility(group, visibility)
     for _ in range(5):
         key = gen_stream_key()
         if not LiveChannel.objects.filter(stream_key=key).exists():
             return LiveChannel.objects.create(
-                title=title, owner=user, stream_key=key
+                title=title,
+                owner=user,
+                stream_key=key,
+                group=group,
+                visibility=visibility,
             )
     raise RuntimeError("stream_key 生成冲突（多次重试仍碰撞）")
 

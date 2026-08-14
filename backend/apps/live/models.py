@@ -14,6 +14,8 @@
 from django.conf import settings
 from django.db import models
 
+from apps.common.visibility import Visibility
+
 
 class LiveChannel(models.Model):
     """直播频道。"""
@@ -30,6 +32,19 @@ class LiveChannel(models.Model):
         settings.AUTH_USER_MODEL,
         related_name="live_channels",
         on_delete=models.CASCADE,
+    )
+    # S1（聚合主页）：可见性 + 群归属。约束：visibility=group 时 group 必填；
+    # group 非空时默认 visibility=group（services 层落值，见 apps/live/services.py）。
+    visibility = models.CharField(
+        "可见性", max_length=16, choices=Visibility.choices, default=Visibility.PUBLIC
+    )
+    group = models.ForeignKey(
+        "chat.Conversation",
+        related_name="live_channels",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={"type": "group"},
     )
     # 补充（安全）：secrets.token_hex(24) = 48 字符，唯一索引；推流握手指纹，仅 owner 可见
     stream_key = models.CharField("推流指纹", max_length=64, unique=True)
