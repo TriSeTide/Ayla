@@ -112,12 +112,25 @@
 > 每次改动后：`npx tsc --noEmit` 无错；`npm run test` 相关用例通过；两形态（375/1440）Playwright 冒烟。
 > **推荐总顺序：先 S1-S6 后 F1-F10**（前端各步骤依赖后端接口，见 §2.5 依赖表）；F2/F3 可等 S1/S6 就绪后开始，不要在前端步骤中 mock 尚未落地的后端契约。
 
-### F1 AppShell + 路由重构（基座）
+### F1 AppShell + 路由重构（基座）【已验收 2026-08-14】
 
 **新增**：`src/hooks/useMediaQuery.ts`；`src/layout/AppShell.tsx`（`useMediaQuery('(max-width: 768px)')` 二选一渲染 BottomTabs 系 / TopNav 系）；`src/layout/BottomTabs.tsx`、`src/layout/TopNav.tsx`、`src/layout/CreateFab.tsx`、`src/layout/MessageFab.tsx`（窄屏）；`src/hooks/useSwipe.ts` 手势 hook（方向锁/阈值/取消）。
 **改造**：`src/App.tsx` 路由表（/home /voice /live /posts /games /messages /search /profile /group/:id 及子路由；`/chat/:conversationId` 群聊会话重定向 `/group/:id`，旧 `/chat` 保留兼容）。
 **要点**：BottomTabs 中央主页 tab 凸起（design.md §12.1）；TopNav 常驻 + 当前模块指示条（§12.2）；CreateFab 路由匹配表（需求 §3.5 的 FAB 映射）本期先接线"弹面板"，创建动作随各步骤补齐。
 **验收**：两种形态导航切换正确；旧路由重定向不破坏现有聊天/语音/直播页（回归既有 playwright 用例）。
+
+> 落地（2026-08-14）：`src/hooks/useMediaQuery.ts`（matchMedia 订阅）、`src/hooks/useSwipe.ts`
+> （方向锁/阈值/取消，状态机抽 `createSwipeTracker` 纯函数）；`src/layout/` AppShell（`useMediaQuery('(max-width:768px)')`
+> 二选一渲染 BottomTabs 系 / TopNav 系，直播间沉浸路由无 chrome）、BottomTabs（五 tab 主页居中凸起 + 选中辉光）、
+> TopNav（头像/模块链 2px 指示条/消息/搜索/更多）、CreateFAB（路由匹配表 `shellConfig.resolveFabAction`，需求 §3.5；
+> 面板 = 场景动作 + 次级「创建群聊」跳 /chat，场景创建动作提示落步骤）、MessageFAB；
+> `src/pages/` PlaceholderPage（未落地页面占位）、GroupPage（F1 桥接版复用 ChatPage 渲染群会话）、
+> GroupScenePage（群内子场景占位 + scene 校验）、ChatConversationRoute（`/chat/:conversationId` 群聊重定向 /group/:id、
+> 私聊保留）；`App.tsx` 路由重构（新一级路由 + AppShell 布局路由 + 旧 /chat 兼容）；
+> `styles/shell.css`（全 token，≤768px 辉光降 30%）+ 既有页面 `100vh→100%`（chat/voice/live/profile/room 根类）。
+> 验证：`tsc` 无错；全量 vitest 174 通过（新增 use-media-query 3 / use-swipe 8 / shell 路由映射与双形态 /
+> chat-conversation-route 6）；`npm run build` 通过；Playwright 两形态冒烟（375 窄屏 BottomTabs 五 tab + MessageFAB、
+> 1440 宽屏 TopNav 一级模块、`/chat/g1 → /group/g1` 群聊重定向）均符合预期。
 
 ### F2 窄屏主页 + 宽屏 /home 重定向
 
@@ -190,10 +203,10 @@
 
 ## 5. 交付物核对清单
 
-- [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 待执行
-- [ ] 前端：F1-F10 全部落地，`npm run build` / `npm run test` 通过
+- [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
+- [x] 前端：F1 AppShell + 路由重构已落地（2026-08-14，vitest 174 通过 + build + 两形态冒烟）；F2-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
-- [ ] `Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新；`Ayla/web/README.md` 补本期章节
+- [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因
 
 ## 6. 每步 commit 纪律（用户明确节奏：每步一个对话实施完成后 commit）

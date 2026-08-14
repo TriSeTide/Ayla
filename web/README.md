@@ -1,10 +1,11 @@
-# Elysia Web 前端（阶段五 M5-1 基座 + M5-2 聊天界面 + M5-3 语音界面 + M5-4 直播界面）
+# Elysia Web 前端（阶段五 M5-1 基座 + M5-2 聊天 + M5-3 语音 + M5-4 直播 + 聚合主页 F1 基座）
 
 React 18 + Vite + TypeScript + Zustand 的 Elysia 多媒体独立应用前端。
 M5-1 为工程基座：认证闭环、路由守卫、全局状态、API 客户端、Presence WebSocket、健康检查；
 M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送、已读/撤回/引用、历史分页、Chat WebSocket、爱莉入口；
 M5-3 为语音界面：语音频道（加入/离开/心跳/成员同步）、LiveKit 媒体控制（静音/音量）、爱莉语音控制面闭环；
-M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性回显）+ HLS 播放器 + 实时弹幕（WS + 历史对账）+ 主播面板（:start/:stop）。
+M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性回显）+ HLS 播放器 + 实时弹幕（WS + 历史对账）+ 主播面板（:start/:stop）；
+F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、CreateFAB 随场景创建入口、手势 hook、路由重构（新一级路由 + 旧 /chat 兼容重定向）。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -154,6 +155,21 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - **爱莉直播 = 普通频道**：owner 是爱莉 user 的频道无特殊数据通道；阶段三 livestream 订阅预留不做（M4-6 §6.3）；FR-19 不验收。
 - **muted autoplay**：播放器默认静音起播（浏览器策略），用户点击取消静音；不绕过浏览器限制。
 
+## F1 AppShell + 路由重构（聚合主页基座，已完成）
+
+聚合主页与多端布局增量的第一个前端步骤（见 `../docs/plans/Ayla聚合主页与多端布局开发步骤.md` F1）：响应式外壳 + 导航 chrome + 路由重构，为 F2-F10 各页面提供统一架子。
+
+- [x] `useMediaQuery` hook：matchMedia 订阅 + change 触发重渲染；`NARROW_QUERY = "(max-width: 768px)"` 形态分界（design.md §9）
+- [x] `useSwipe` hook：方向锁 / 阈值 / 取消（状态机抽 `createSwipeTracker` 纯函数，单测直驱）；F3 下拉回主页、F4 上下滑、群内横滑复用
+- [x] `AppShell`：窄屏（≤768px）= 内容 + BottomTabs + MessageFAB + CreateFAB；宽屏（>768px）= TopNav + 内容 + CreateFAB；直播间沉浸路由（`/live/:channelId`）不渲染 chrome
+- [x] `BottomTabs`：五 tab（语音/直播/主页居中凸起/帖子/桌游），主页圆形背板 48px 上浮 8px 选中辉光；badges prop 预留（F8）
+- [x] `TopNav`：头像（→个人页）+ 一级模块链（当前模块 2px `--glow-500` 指示条）+ 消息（未读徽标预留）+ 搜索胶囊（回车进 `/search`）+ 更多菜单（个人主页/退出登录，F10 扩展）
+- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/posts/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；面板 = 场景动作 + 次级「创建群聊」（跳 `/chat`）
+- [x] 路由重构（`App.tsx`）：`/` → `/home`；新增 `/home /voice /live /live/:id /posts /games /messages /search /profile /group/:id[/:scene]`；受保护页统一挂 AppShell 布局路由；`/chat/:conversationId` 群聊重定向 `/group/:id`、私聊保留；未落地页面渲染 `PlaceholderPage`（标注 F 步骤）
+- [x] 契约测试：新增 use-media-query 3 / use-swipe 8 / shell（路由映射 + 双形态 + FAB 面板）/ chat-conversation-route 6；全量 vitest 174 通过 + `npm run build` 通过 + 两形态（375/1440）冒烟通过
+
+**F1 边界**：页面本体（主页群卡片、群聊容器、帖/桌游等）由 F2-F10 落地；F1 仅搭架 + 统一导航 chrome；`/home` 宽屏重定向最近群属 F2，群内进群动画属 F3，进房动画属 F4。
+
 ## 目录结构
 
 ```text
@@ -166,7 +182,8 @@ web/
 ├── .gitignore
 └── src/
     ├── main.tsx            # 入口：会话恢复 + Router 挂载 + chat WS 启动
-    ├── App.tsx             # 路由表（/chat、/chat/:conversationId）
+    ├── App.tsx             # 路由表（F1：/home /voice /live /posts /games /messages /search /profile /group/:id[/*] + 旧 /chat 兼容）
+    ├── layout/             # F1：AppShell / BottomTabs / TopNav / CreateFab / MessageFab / shellConfig（路由匹配表）
     ├── api/
     │   ├── client.ts       # fetch 封装：baseURL / Authorization / 错误归一 / 401 刷新重放
     │   ├── auth.ts         # register / login / refresh / me / profile
@@ -197,6 +214,8 @@ web/
     │   ├── useAuth.ts      # 登录/登出/回跳组合封装
     │   ├── useChat.ts      # 打开会话/加载历史/幂等发送/撤回/标已读（M5-2）
     │   ├── useTyping.ts    # typing 节流声明 + 对端 typing 显示（M5-2）
+    │   ├── useMediaQuery.ts    # 响应式断点（F1，matchMedia 订阅）
+    │   ├── useSwipe.ts     # 手势：方向锁/阈值/取消（F1）
     │   ├── useVoiceChannel.ts  # 加入/离开/心跳/成员同步/断线恢复编排（M5-3）
     │   ├── useElysiaVoice.ts   # 爱莉通话生命周期：创建复用/轮询/文本注入/poll/结束（M5-3）
     │   ├── useLiveRoom.ts  # 进房/退房编排：详情+状态轮询+WS+历史+销毁清单（M5-4）
@@ -208,13 +227,17 @@ web/
     │   ├── VoicePage.tsx   # M5-3 语音主页面（频道列表 + 当前频道面板 + 爱莉语音面板）
     │   ├── LiveHallPage.tsx    # M5-4 直播大厅（路由 /live）
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
-    │   └── ProfilePage.tsx
+    │   ├── ProfilePage.tsx
+    │   ├── PlaceholderPage.tsx     # F1 未落地页面占位（标注 F 步骤）
+    │   ├── GroupPage.tsx           # F1 群聊场景桥接（复用 ChatPage；F3 演进为真容器）
+    │   ├── GroupScenePage.tsx      # F1 群内子场景占位（voice/live/posts/games/info 校验）
+    │   └── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
     │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/ElysiaVoicePanel（M5-3）
     │   └── live/           # LiveHall/LiveCreate/LivePlayer/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4）
-    ├── styles/             # tokens.css / base.css / app.css（含 M5-3 语音、M5-4 直播组件样式）
+    ├── styles/             # tokens.css / base.css / app.css（含 M5-3 语音、M5-4 直播组件样式）/ shell.css（F1 AppShell/chrome）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 

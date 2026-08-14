@@ -235,7 +235,7 @@ src/
 ### 2.4 前端实施顺序
 
 ```
-F1 AppShell + TopNav/BottomTabs + useMediaQuery + 路由重构（旧路由重定向）
+F1 AppShell + TopNav/BottomTabs + useMediaQuery + 路由重构（旧路由重定向）【已落地 2026-08-14，见开发步骤文档 F1】
 F2 窄屏主页（群卡片/列表、布局开关、轮播、红点）+ 宽屏 /home → /group/<最近群> 重定向
 F3 GroupPage 容器（窄屏：底栏上移 + 五子界面滑动 + 群头像两级点击；宽屏：TopNav+ServerRail+ChannelSidebar）
    + 进群/退群动画（窄屏）+ 群内聊天（复用现有）+ 群信息界面

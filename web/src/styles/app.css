@@ -272,7 +272,7 @@
 
 .chat-page {
   display: flex;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -1120,7 +1120,7 @@
 /* ================= 个人页 / 设置页 ================= */
 
 .profile-page {
-  height: 100vh;
+  height: 100%;
   overflow-y: auto;
   padding: var(--sp-8) var(--sp-6);
 }
@@ -1266,7 +1266,7 @@
 
 .voice-page {
   display: flex;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -1601,7 +1601,7 @@
 
 .live-page {
   display: flex;
-  height: 100vh;
+  height: 100%;
   background: var(--bg-aurora);
 }
 
@@ -1797,7 +1797,7 @@
 
 .live-room {
   display: flex;
-  height: 100vh;
+  height: 100%;
   background: var(--bg-aurora);
 }
 
@@ -1889,7 +1889,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-4);
-  height: 100vh;
+  height: 100%;
   background: var(--bg-aurora);
   color: var(--text-primary);
 }

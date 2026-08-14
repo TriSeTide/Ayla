@@ -100,8 +100,11 @@ function demoMessages(convId: string): ChatMessage[] {
 
 /* ---------- 页面 ---------- */
 
-export function ChatPage() {
-  const { conversationId } = useParams();
+export function ChatPage({ conversationIdOverride }: { conversationIdOverride?: string } = {}) {
+  const params = useParams<{ conversationId: string }>();
+  // F1：/group/:id 桥接复用本页渲染群会话（GroupPage 传 override），
+  // 否则走 /chat/:conversationId 路由参数。
+  const conversationId = conversationIdOverride ?? params.conversationId;
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.currentUser);
   const conversations = useChatStore((s) => s.conversations);
