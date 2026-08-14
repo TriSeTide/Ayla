@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.emoji",
     "apps.voice",
     "apps.live",
+    "apps.posts",
 ]
 
 MIDDLEWARE = [

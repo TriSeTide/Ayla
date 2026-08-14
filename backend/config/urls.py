@@ -11,4 +11,5 @@ urlpatterns = [
     path("api/v1/emoji/", include("apps.emoji.urls")),
     path("api/v1/voice/", include("apps.voice.urls")),
     path("api/v1/live/", include("apps.live.urls")),
+    path("api/v1/posts/", include("apps.posts.urls")),
 ]

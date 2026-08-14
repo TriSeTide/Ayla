@@ -277,8 +277,9 @@ def can_access_media(user, media: MediaObject) -> bool:
 
     1. owner：上传者本人永远可访问；
     2. 消息引用：media 被某条 Message 引用，且 user 是该消息所在会话的成员；
-    3. 表情包：media 属于某 EmojiItem，且该包是系统包（全员）或用户自己的个人包；
-    4. 其他情况：拒绝（403/404）。
+    3. 帖子配图：media 被某 PostImage 引用，且 user 能查看该帖子（S3）；
+    4. 表情包：media 属于某 EmojiItem，且该包是系统包（全员）或用户自己的个人包；
+    5. 其他情况：拒绝（403/404）。
     """
     if media.owner_id == user.id:
         return True
@@ -292,6 +293,14 @@ def can_access_media(user, media: MediaObject) -> bool:
     for msg in msgs:
         if chat_user_can_access(user, msg.conversation):
             return True
+
+    # 帖子配图路径（S3）：media 被帖子配图引用，且 user 能查看该帖子
+    from apps.posts.models import PostImage
+    from apps.common.visibility import can_view as _post_can_view
+
+    post_img = PostImage.objects.filter(media=media).select_related("post").first()
+    if post_img is not None and _post_can_view(user, post_img.post):
+        return True
 
     # 表情包路径
     from apps.emoji.models import EmojiItem
