@@ -12,6 +12,17 @@ urlpatterns = [
         name="chat-conv-private",
     ),
     path("conversations/group/", views.GroupCreateView.as_view(), name="chat-conv-group"),
+    # 群动态 highlights（S6）：批量路由放前面，避免与 <int:conv_id> 歧义
+    path(
+        "conversations/highlights/",
+        views.ConversationHighlightsBatchView.as_view(),
+        name="chat-conv-highlights-batch",
+    ),
+    path(
+        "conversations/<int:conv_id>/highlights/",
+        views.ConversationHighlightsView.as_view(),
+        name="chat-conv-highlights",
+    ),
     path(
         "conversations/<int:conv_id>/",
         views.ConversationDetailView.as_view(),

@@ -387,6 +387,80 @@ def member_user_ids(conversation) -> list:
     )
 
 
+# ---------- 群动态 highlights（S6） ----------
+
+def conversation_highlights(conv, limit: int = 5) -> list:
+    """返回该群的最近动态封面列表（按 created_at 降序取前 limit 条，默认 5）。
+
+    聚合三类动态：
+    - live：LiveChannel(status=live)，无封面；
+    - post：有配图的帖子，取首图（order 最小）缩略图作封面；
+    - game：GameRoom(status=playing)，无封面。
+
+    元素结构：
+    {"type", "title", "cover_url", "target_url", "created_at"}
+
+    无动态返回 []。cover_url 为 None 表示该类型无封面字段；
+    post 无图被 exclude(images=None) 排除在外。
+    """
+    from apps.live.models import LiveChannel
+    from apps.posts.models import Post
+    from apps.boardgame.models import GameRoom
+
+    highlights = []
+
+    # live
+    for ch in LiveChannel.objects.filter(group=conv, status="live"):
+        highlights.append(
+            {
+                "type": "live",
+                "title": ch.title,
+                "cover_url": None,
+                "target_url": f"/live/{ch.id}",
+                "created_at": ch.created_at.isoformat(),
+            }
+        )
+
+    # post：只取有图的帖子，首图缩略图作封面
+    posts = (
+        Post.objects.filter(group=conv)
+        .exclude(images=None)
+        .prefetch_related("images__media")
+    )
+    for p in posts:
+        first_image = None
+        for img in p.images.all():
+            first_image = img
+            break
+        cover_url = None
+        if first_image is not None and first_image.media_id is not None:
+            cover_url = f"/api/v1/media/{first_image.media.media_id}/thumbnail"
+        highlights.append(
+            {
+                "type": "post",
+                "title": p.title or (p.body or "")[:30],
+                "cover_url": cover_url,
+                "target_url": f"/posts/{p.id}",
+                "created_at": p.created_at.isoformat(),
+            }
+        )
+
+    # game
+    for g in GameRoom.objects.filter(group=conv, status="playing"):
+        highlights.append(
+            {
+                "type": "game",
+                "title": g.name,
+                "cover_url": None,
+                "target_url": f"/games/{g.id}",
+                "created_at": g.created_at.isoformat(),
+            }
+        )
+
+    highlights.sort(key=lambda h: h["created_at"], reverse=True)
+    return highlights[:limit]
+
+
 # ---------- 群申请 / 邀请（S2，开发文档 §1.2） ----------
 #
 # 幂等语义：pending 查重由 services 做（DB 不设部分唯一索引，MySQL 不支持），

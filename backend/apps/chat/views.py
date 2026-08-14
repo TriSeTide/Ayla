@@ -12,6 +12,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -565,3 +566,60 @@ class GroupInviteActionView(APIView):
         return Response(
             GroupInviteSerializer(inv, context={"request": request}).data
         )
+
+
+# ---------- 群动态 highlights（S6） ----------
+
+class ConversationHighlightsView(APIView):
+    """GET /conversations/<conv_id>/highlights/ —— 单群最近动态封面列表。
+
+    校验：会话存在（404）、是群聊（非群 403）、当前用户是成员（否则 403）。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _forbidden("仅群聊支持动态 highlights")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        return Response(services.conversation_highlights(conv))
+
+
+class ConversationHighlightsBatchView(APIView):
+    """GET /conversations/highlights/?ids=1,2,3 —— 批量群动态封面。
+
+    ids 为逗号分隔整数列表（必填，缺失或空 → 400）。
+    只返回当前用户是成员的群；不存在的 id / 非成员群 / 非群聊不出现在结果里。
+    返回 dict：{str(conv.id): highlights}。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw_ids = request.query_params.get("ids")
+        if not raw_ids or not raw_ids.strip():
+            return Response(
+                {"detail": "缺少 ids 参数"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            conv_ids = [int(x) for x in raw_ids.split(",") if x.strip()]
+        except ValueError:
+            return Response(
+                {"detail": "ids 必须是逗号分隔的整数"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if not conv_ids:
+            return Response(
+                {"detail": "缺少 ids 参数"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        convs = Conversation.objects.filter(
+            pk__in=conv_ids, type=Conversation.TYPE_GROUP, members__user=request.user
+        ).distinct()
+        result = {
+            str(conv.id): services.conversation_highlights(conv) for conv in convs
+        }
+        return Response(result)

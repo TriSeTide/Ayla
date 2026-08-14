@@ -49,6 +49,8 @@ INSTALLED_APPS = [
     "apps.live",
     "apps.posts",
     "apps.boardgame",
+    "apps.search",
+    "apps.favorites",
 ]
 
 MIDDLEWARE = [
