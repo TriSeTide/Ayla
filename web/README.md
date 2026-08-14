@@ -9,7 +9,8 @@ F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、Cre
 F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动态轮播、布局开关、最近群重定向；
 F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面滑动、群头像两级点击、群内聊天（复用）、群信息（角色化）、宽屏三列（ServerRail + ChannelSidebar）；
 F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间；
-F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房。
+F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房；
+F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -234,6 +235,20 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **F5 已知取舍**（步骤文档 §7 登记）：进房动画与房内打字送达群消息的端到端验证依赖真实 LiveKit（冒烟未覆盖），UI 结构与发送路径由单测覆盖；公开语音房无独立文字流（B10 后置），打字框仅群语音房显示。
 
+## F6 帖子全套（已完成）
+
+聚合主页增量第六步（见开发步骤文档 F6）：信息流 + 详情 + 发帖两条路径。
+
+- [x] `api/posts.ts`（listPosts 游标分页 scope/cursor/limit、createPost/getPost/updatePost/deletePost、评论增删）+ `api/favorites.ts`（listFavorites/addFavorite/removeFavorite 幂等）
+- [x] `stores/posts.ts`：信息流游标分页（appendPage 去重）+ `favoriteByPostId` 收藏集合（列表/详情共享收藏态）
+- [x] `PostCard`（作者光环 + 正文 3 行折叠 + 九宫格 + 底排评论/IconHeart 收藏）、`PostEditor`（标题可选 + 正文必填 + compact 群内变体）、`CommentList`（评论 + 回复 + 评论作者删）
+- [x] `usePostDetailTransition`：帖子详情底栏原位替换输入框（交叉淡化无位移，区别于进群上移/进房下滑）
+- [x] `PostsHubPage`（信息流 + 滚到底加载更多 + 收藏即时反馈）、`PostDetailPage`（评论 + 收藏 + 删除二次确认）、`GroupPosts`（群内信息流 + 输入框发帖）
+- [x] `AppShell` 帖子详情窄屏让位评论输入框；`CreateFab` `handler="post"` 接 PostEditor；群内 posts 子界面 FAB 隐藏（发帖走输入框）
+- [x] 契约测试：posts-store 5 + posts-api 4；全量 vitest 232 通过 + build + 两形态冒烟通过
+
+**F6 已知取舍**（步骤文档 §7 登记）：发帖带图（媒体三步上传前端链路）后置，本期 PostEditor 仅文本；个人页"我的发帖"归 F10。
+
 ## 目录结构
 
 ```text
@@ -255,6 +270,8 @@ web/
     │   ├── chat.ts         # 会话/消息/已读/撤回/typing/群管理 端点（M5-2）
     │   ├── voice.ts        # 语音频道 REST + 爱莉 voice-calls 编排端点（M5-3）
     │   ├── live.ts         # 直播频道/状态/弹幕端点（M5-4）
+    │   ├── posts.ts        # 帖子信息流/详情/评论端点（F6）
+    │   ├── favorites.ts    # 收藏端点（F6/F10）
     │   ├── elysia.ts       # 爱莉 profile（M5-2，只读）
     │   ├── health.ts       # health/live 与 health
     │   └── types.ts        # 与 backend 序列化器对齐的 TS 类型（含 M5-2 聊天域、M5-3 语音域、M5-4 直播域）
@@ -267,7 +284,8 @@ web/
     │   ├── live.ts         # 频道列表 + 当前直播间（详情/SRS 状态/弹幕去重定长）+ WS 状态（M5-4）
     │   ├── home.ts         # F2：主页布局偏好 + 最近访问群持久化（localStorage）
     │   ├── group.ts        # F3：activeScene（群内子场景单一状态源）+ currentGroupId
-    │   └── shell.ts        # F4：bottomTabsLeaving（窄屏直播间底栏下滑走跨路由动画）
+    │   ├── shell.ts        # F4：bottomTabsLeaving（窄屏直播间底栏下滑走跨路由动画）
+    │   └── posts.ts        # F6：信息流游标分页 + 收藏集合
     ├── ws/
     │   ├── presence.ts     # /ws/presence/ 单例 + 心跳 + 重连
     │   ├── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
@@ -285,6 +303,7 @@ web/
     │   ├── useSwipe.ts     # 手势：方向锁/阈值/取消（F1）
     │   ├── useEnterGroupAnimation.ts # 进群动画：底栏上移到顶部（F3，独立封装）
     │   ├── useEnterRoomAnimation.ts  # 进房动画：输入框滑入（F4，与进群反方向）
+    │   ├── usePostDetailTransition.ts # 帖子详情：底栏原位替换输入框（F6，交叉淡化）
     │   ├── useVoiceChannel.ts  # 加入/离开/心跳/成员同步/断线恢复编排（M5-3）
     │   ├── useElysiaVoice.ts   # 爱莉通话生命周期：创建复用/轮询/文本注入/poll/结束（M5-3）
     │   ├── useLiveRoom.ts  # 进房/退房编排：详情+状态轮询+WS+历史+销毁清单（M5-4）
@@ -300,18 +319,21 @@ web/
     │   ├── LiveRoomPage.tsx    # M5-4 直播间（路由 /live/:channelId）
     │   ├── ProfilePage.tsx
     │   ├── HomePage.tsx     # F2 窄屏主页（群卡片/列表双布局 + 宽屏 /home 重定向最近群）
+    │   ├── PostsHubPage.tsx     # F6 一级帖子信息流（游标分页 + FAB 发帖）
+    │   ├── PostDetailPage.tsx   # F6 帖子详情（评论/收藏/删除）
     │   ├── PlaceholderPage.tsx     # F1 未落地页面占位（标注 F 步骤）
     │   ├── GroupPage.tsx           # F3 群聊场景容器（窄屏进群动画/五子界面/两级点击；宽屏三列）
     │   ├── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
-    │   └── group/           # F3/F4/F5：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupScenePlaceholder
+    │   └── group/           # F3-F6：GroupChat / GroupInfo / GroupLive / GroupVoice / GroupPosts / GroupScenePlaceholder
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
     │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/VoiceRoomBody/ElysiaVoicePanel（M5-3 + F5）
     │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
     │   ├── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）
-    │   └── group/          # F3：GroupTopTabs（窄屏上移导航条）
-    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）
+    │   ├── group/          # F3：GroupTopTabs（窄屏上移导航条）
+    │   └── posts/          # F6：PostCard/PostEditor/CommentList
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 

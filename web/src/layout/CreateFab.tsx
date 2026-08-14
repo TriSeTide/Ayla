@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconClose, IconPlus, IconUsers } from "../components/icons";
 import { LiveCreate } from "../components/live/LiveCreate";
+import { PostEditor } from "../components/posts/PostEditor";
 import { VoiceChannelCreate } from "../components/voice/VoiceChannelCreate";
 import type { FabAction } from "./shellConfig";
 
@@ -51,6 +52,7 @@ export function CreateFab({ action }: { action: FabAction }) {
 
   const isLiveCreate = action.handler === "live";
   const isVoiceCreate = action.handler === "voice";
+  const isPostCreate = action.handler === "post";
 
   return (
     <>
@@ -64,6 +66,14 @@ export function CreateFab({ action }: { action: FabAction }) {
               <LiveCreate onCreated={handleLiveCreated} group={action.groupId} />
             ) : isVoiceCreate ? (
               <VoiceChannelCreate group={action.groupId} />
+            ) : isPostCreate ? (
+              <PostEditor
+                group={action.groupId}
+                onCreated={(post) => {
+                  setOpen(false);
+                  navigate(action.groupId ? `/group/${action.groupId}/posts` : `/posts/${post.id}`);
+                }}
+              />
             ) : (
               <button
                 type="button"

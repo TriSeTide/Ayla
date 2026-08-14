@@ -28,6 +28,7 @@ import { GroupChat } from "./group/GroupChat";
 import { GroupInfo } from "./group/GroupInfo";
 import { GroupLive } from "./group/GroupLive";
 import { GroupVoice } from "./group/GroupVoice";
+import { GroupPosts } from "./group/GroupPosts";
 import { GroupScenePlaceholder } from "./group/GroupScenePlaceholder";
 
 const VALID_SCENES = new Set<string>(GROUP_SCENE_ORDER);
@@ -105,7 +106,7 @@ export function GroupPage() {
     }
   }, [activeScene, openInfo, goScene]);
 
-  // 群内子场景渲染（live F4 / voice F5 已落地；posts/games 仍占位）
+  // 群内子场景渲染（live F4 / voice F5 / posts F6 已落地；games 仍占位）
   const renderScene = useCallback(() => {
     switch (activeScene) {
       case "info":
@@ -116,6 +117,8 @@ export function GroupPage() {
         return <GroupLive groupId={id ?? ""} onExit={() => goScene("chat")} />;
       case "voice":
         return <GroupVoice groupId={id ?? ""} onExit={() => goScene("chat")} />;
+      case "posts":
+        return <GroupPosts groupId={id ?? ""} onExit={() => goScene("chat")} />;
       default:
         return <GroupScenePlaceholder scene={activeScene} />;
     }

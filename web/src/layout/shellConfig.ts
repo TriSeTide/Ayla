@@ -62,6 +62,14 @@ export function isGroupScene(pathname: string): boolean {
   );
 }
 
+/**
+ * 帖子详情路由（窄屏）：底栏原位替换为评论输入框（R-P3，交叉淡化无位移），
+ * 壳层不渲染 BottomTabs / MessageFAB（让位给 PostDetailPage 的评论输入框）。
+ */
+export function isPostDetailRoute(pathname: string): boolean {
+  return matchPath({ path: "/posts/:postId", end: true }, pathname) != null;
+}
+
 export interface FabAction {
   /** 动作标识（测试锚点） */
   key: string;
@@ -71,8 +79,8 @@ export interface FabAction {
   groupId: string | null;
   /** 该创建表单预计落地的步骤标识（F1 阶段点击动作项仅提示，不打开表单） */
   plannedStep: string;
-  /** 已接线的真表单处理（F4/F5 起：直播/语音创建已落地）；undefined = 仍提示落步骤 */
-  handler?: "live" | "voice";
+  /** 已接线的真表单处理（F4/F5/F6 起：直播/语音/发帖已落地）；undefined = 仍提示落步骤 */
+  handler?: "live" | "voice" | "post";
 }
 
 /**
@@ -91,7 +99,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
       case "live":
         return { key: "group-live", label: "群内开播", groupId, plannedStep: "F4", handler: "live" };
       case "posts":
-        return { key: "group-post", label: "群内发帖", groupId, plannedStep: "F6" };
+        return null; // 群内帖子发帖走底部输入框（R-P2 关键差异），FAB 隐藏
       case "games":
         return { key: "group-game", label: "创建群内桌游室", groupId, plannedStep: "F7" };
       default:
@@ -111,7 +119,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
     return { key: "create-live", label: "创建直播间", groupId: null, plannedStep: "F4", handler: "live" };
   }
   if (matchPath({ path: "/posts", end: true }, pathname)) {
-    return { key: "create-post", label: "发帖", groupId: null, plannedStep: "F6" };
+    return { key: "create-post", label: "发帖", groupId: null, plannedStep: "F6", handler: "post" };
   }
   if (matchPath({ path: "/games", end: true }, pathname)) {
     return { key: "create-game", label: "创建桌游室", groupId: null, plannedStep: "F7" };

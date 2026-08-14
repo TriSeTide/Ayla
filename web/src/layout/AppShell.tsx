@@ -15,7 +15,7 @@ import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { TopNav } from "./TopNav";
-import { isGroupScene, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isPostDetailRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
@@ -25,6 +25,8 @@ export function AppShell() {
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
   const groupSceneNarrow = isNarrow && isGroupScene(pathname);
+  // 帖子详情窄屏：底栏原位替换为评论输入框（R-P3）
+  const postDetailNarrow = isNarrow && isPostDetailRoute(pathname);
 
   // 窄屏进房动画（直播间/语音房，F4/F5）：底栏下滑走（translateY 0→100%，200ms ease-in）
   // 由 LiveRoomPage / 语音房进房调 shell store 驱动，与进群动画"上移"相反。
@@ -39,7 +41,7 @@ export function AppShell() {
       <main className="app-shell-content">
         <Outlet />
       </main>
-      {isNarrow && !groupSceneNarrow ? (
+      {isNarrow && !groupSceneNarrow && !postDetailNarrow ? (
         <>
           <MessageFab style={leavingStyle} />
           <BottomTabs

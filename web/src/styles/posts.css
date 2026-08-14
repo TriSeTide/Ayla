@@ -1,0 +1,375 @@
+/**
+ * 帖子增量样式（F6）：帖子卡（信息流 + 九宫格 + 折叠 + 收藏）、发帖编辑器、
+ * 评论列表、帖子详情、群内帖子。
+ * 事实源：design.md §12.8 帖子卡与信息流；布局文档 §2.5/§3.1。
+ */
+
+/* ================= 帖子卡（design.md §12.8） ================= */
+
+.post-card {
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.post-card-main {
+  display: block;
+  width: 100%;
+  padding: var(--sp-4);
+  text-align: left;
+}
+
+.post-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.post-card-nick {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post-card-time {
+  margin-left: auto;
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.post-card-title {
+  margin-top: var(--sp-2);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.post-card-body {
+  margin-top: var(--sp-2);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.post-card-body.is-expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+
+.post-card-fold {
+  margin-top: var(--sp-1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ice-500);
+}
+
+.post-card-images {
+  margin-top: var(--sp-3);
+  display: grid;
+  gap: 4px;
+}
+
+.post-card-images.count-1 {
+  grid-template-columns: 1fr;
+}
+
+.post-card-images:not(.count-1) {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.post-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  aspect-ratio: 1 / 1;
+}
+
+.post-card-images.count-1 .post-card-img {
+  aspect-ratio: auto;
+  max-height: 320px;
+}
+
+.post-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4) var(--sp-3);
+  border-top: 1px solid var(--glass-border);
+}
+
+.post-card-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.post-card-fav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.post-card-fav.is-favorited {
+  color: var(--pink-500);
+}
+
+/* ================= 发帖编辑器（R-F3） ================= */
+
+.post-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.post-editor-title {
+  min-height: 40px;
+}
+
+.post-editor-body {
+  resize: vertical;
+  min-height: 64px;
+}
+
+.post-editor-error {
+  font-size: 13px;
+  color: var(--destructive);
+}
+
+.post-editor-submit {
+  align-self: flex-end;
+}
+
+/* ================= 评论列表（R-P4） ================= */
+
+.comment-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.comment-list-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.comment-empty {
+  padding: var(--sp-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.comment-item {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.comment-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.comment-nick {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.comment-time {
+  font-family: var(--font-utility);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.comment-reply-hint {
+  font-size: 12px;
+  color: var(--slate-500);
+}
+
+.comment-text {
+  margin-top: var(--sp-1);
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.comment-actions {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+.comment-action {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-500);
+}
+
+.comment-del {
+  color: var(--destructive);
+}
+
+.comment-composer {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--glass-border);
+}
+
+.comment-reply-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ================= 一级帖子 tab（PostsHubPage） ================= */
+
+.posts-hub {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 68px;
+}
+
+.posts-feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.posts-skeleton {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 769px) {
+  .posts-hub {
+    padding-bottom: var(--sp-4);
+  }
+
+  .posts-feed {
+    max-width: 680px;
+    width: 100%;
+    margin: 0 auto;
+  }
+}
+
+/* ================= 帖子详情（PostDetailPage） ================= */
+
+.post-detail {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.post-detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.post-detail-title {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.post-detail-body {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.post-detail-author {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.post-detail-title-text {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.post-detail-text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.post-detail-actions {
+  display: flex;
+  align-items: center;
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--glass-border);
+}
+
+.post-detail-comments {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ================= 群内帖子（GroupPosts） ================= */
+
+.group-posts {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.group-posts-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.group-posts-input {
+  flex: none;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+}

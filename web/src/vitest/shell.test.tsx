@@ -114,7 +114,8 @@ describe("resolveFabAction", () => {
 
     expect(resolveFabAction("/group/g1/voice")).toMatchObject({ key: "group-voice", groupId: "g1" });
     expect(resolveFabAction("/group/g1/live")).toMatchObject({ key: "group-live", groupId: "g1" });
-    expect(resolveFabAction("/group/g1/posts")).toMatchObject({ key: "group-post", groupId: "g1" });
+    // 群内帖子发帖走底部输入框（R-P2 关键差异），FAB 隐藏
+    expect(resolveFabAction("/group/g1/posts")).toBeNull();
     expect(resolveFabAction("/group/g1/games")).toMatchObject({ key: "group-game", groupId: "g1" });
   });
 
@@ -185,14 +186,10 @@ describe("AppShell", () => {
 /* ---------- CreateFAB 交互 ---------- */
 
 describe("CreateFab", () => {
-  it("主页 FAB 弹面板：场景动作提示步骤", async () => {
+  it("发帖 FAB（F6 已接线）面板渲染 PostEditor 表单", async () => {
     renderShell("/posts", true);
     fireEvent.click(screen.getByRole("button", { name: "发帖" }));
-    const item = screen.getByRole("menuitem", { name: /发帖/ });
-    fireEvent.click(item);
-    await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent("「发帖」表单将随 F6 步骤落地"),
-    );
+    expect(screen.getByPlaceholderText("正文（必填）")).toBeInTheDocument();
   });
 
   it("面板含次级「创建群聊」，点击跳转 /chat", async () => {

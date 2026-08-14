@@ -509,3 +509,65 @@ export interface GroupHighlight {
 
 /** GET /chat/conversations/highlights/?ids= 返回：{群 id 字符串: 动态封面列表} */
 export type ConversationHighlightsMap = Record<string, GroupHighlight[]>;
+
+/* ================= S3 帖子域（对齐 backend/apps/posts/serializers.py） ================= */
+
+/** 帖子配图（PostImageSerializer：media 为完整 descriptor） */
+export interface PostImage {
+  id: number;
+  media: MediaDescriptor | null;
+  order: number;
+}
+
+/** 帖子（PostSerializer）：author 内联 UserPublic，含 images/comment_count/is_author */
+export interface Post {
+  id: number;
+  author: UserPublic;
+  author_id: string;
+  title: string;
+  body: string;
+  visibility: "public" | "friends" | "group";
+  group: string | null;
+  group_name: string | null;
+  images: PostImage[];
+  comment_count: number;
+  is_author: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 评论（CommentSerializer） */
+export interface PostComment {
+  id: number;
+  post_id: string;
+  author: UserPublic;
+  author_id: string;
+  body: string;
+  reply_to: string | null;
+  is_author: boolean;
+  created_at: string;
+}
+
+/** 信息流分页响应（PostListView.get） */
+export interface PostListPage {
+  results: Post[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+/** 帖子信息流 scope：feed（全可见）/ mine（我的）/ group:<id>（群内） */
+export type PostScope = "feed" | "mine" | `group:${string}`;
+
+/* ================= S6 收藏域（对齐 backend/apps/favorites/serializers.py） ================= */
+
+export type FavoriteTargetType = "post" | "live" | "voice" | "game" | "group";
+
+/** 收藏条目（FavoriteSerializer） */
+export interface Favorite {
+  id: number;
+  user_id: string;
+  target_type: FavoriteTargetType;
+  target_id: string;
+  target: Record<string, unknown> | null;
+  created_at: string;
+}

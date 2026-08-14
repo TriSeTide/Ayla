@@ -218,11 +218,25 @@
 > 已知取舍（§7 登记）：语音房进房动画（底栏下滑走）+ 房内打字送达群消息的端到端验证依赖真实 LiveKit 媒体连接，
 > 冒烟未覆盖（join 走媒体错误回滚路径），对应 UI 结构由单元测试覆盖。
 
-### F6 帖子全套
+### F6 帖子全套 【已验收 2026-08-14】
 
 **新增**：`src/pages/PostsHubPage.tsx`（信息流 + **FAB 发帖**）；`src/pages/PostDetailPage.tsx`（详情 + 评论输入框 + 收藏 + 删除；**底栏原位替换为输入框**，新建 `src/hooks/usePostDetailTransition.ts`）；`src/pages/group/GroupPosts.tsx`（群内帖子，**输入框发帖**——与一级 tab 的 FAB 发帖是两条路径）；`src/components/posts/PostCard.tsx`、`PostEditor.tsx`、`CommentList.tsx`；`src/api/posts.ts`；`src/stores/posts.ts`。
 **要点**：信息流游标分页；图片九宫格；正文折叠；评论回复；收藏即时反馈；删除二次确认。
 **验收**：发帖两条路径（FAB 与群内输入框）分别通过；评论、收藏、删除全链路；个人页"我的发帖"接入（F10 联动）。
+
+> 落地（2026-08-14）：`api/posts.ts`（listPosts 游标分页 scope/cursor/limit + createPost/getPost/update/delete +
+> listComments/createComment/deleteComment）+ `api/favorites.ts`（listFavorites/addFavorite/removeFavorite 幂等）；
+> `stores/posts.ts`（信息流游标分页 appendPage 去重 + favoriteByPostId 收藏集合）；`components/posts/` PostCard
+> （作者光环+正文 3 行折叠+九宫格+底排评论/IconHeart 收藏）、PostEditor（标题可选+正文必填，compact 群内变体）、
+> CommentList（评论+回复+评论作者删）；`hooks/usePostDetailTransition.ts`（帖子详情底栏原位替换，交叉淡化无位移）；
+> `pages/PostsHubPage.tsx`（信息流+滚到底加载更多+收藏即时反馈）、`PostDetailPage.tsx`（详情+评论+收藏+删除二次确认）、
+> `group/GroupPosts.tsx`（群内信息流+输入框发帖[R-P2 关键差异]）；`AppShell` 帖子详情窄屏原位让位评论输入框
+> （isPostDetailRoute）；`App.tsx` /posts、/posts/:postId 接真页；`GroupPage` posts 子界面接 GroupPosts；
+> `CreateFab` handler=post 接 PostEditor（一级 FAB / 群内走输入框，群内 posts 子界面 FAB 隐藏）；`styles/posts.css`。
+> 验证：tsc 无错；全量 vitest 232 通过（新增 posts-store 5 + posts-api 4）；build 通过；Playwright 冒烟
+> （信息流+折叠+FAB 发帖 label、详情评论/删除/收藏按钮、群内输入框发帖）均符合预期。
+> 已知取舍（§7 登记）：发帖带图（媒体三步上传前端链路）后置——本期 PostEditor 仅文本，图片九宫格展示在有图
+> 数据时正常渲染；个人页"我的发帖"归 F10。
 
 ### F7 桌游房间框架
 
@@ -261,7 +275,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地（2026-08-14）；F6-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地；F4 直播一级 tab + 群内直播已落地；F5 语音一级 tab + 群内语音已落地；F6 帖子全套已落地（2026-08-14）；F7-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因
@@ -287,3 +301,4 @@
 - F3（2026-08-14）退出群/转让群主/解散群：后端无对应端点（B1-B10 缺口清单与 S1-S6 均未覆盖），群信息界面占位标注，待后端补端点；五子界面滑动采用「手势触发 navigate + key 切换淡入」（开发文档 §2.2 明确用 CSS transition，不保持五页同时挂载）；下拉回主页手势与输入框滑入延迟动画的精确终点断言留待主链路 E2E 阶段统一补。
 - F4（2026-08-14）窄屏直播间弹幕"浮层"沿用 M5-4 底部浮层（覆盖播放器下部）而非重构全屏沉浸视频层；进房动画"底栏下滑走"终态断言留待主链路 E2E 统一补。
 - F5（2026-08-14）语音房进房动画与房内打字送达群消息的端到端验证依赖真实 LiveKit 媒体连接（冒烟未覆盖，join 走媒体错误回滚），UI 结构与房内打字发送路径由单元测试覆盖；公开语音房无独立文字流（B10 后置），打字框仅群语音房显示。
+- F6（2026-08-14）发帖带图（媒体三步上传前端链路）后置，本期 PostEditor 仅文本发帖、图片九宫格展示在有图数据时正常渲染；个人页"我的发帖"归 F10。

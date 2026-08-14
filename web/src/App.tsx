@@ -20,6 +20,8 @@ import { LiveHubPage } from "./pages/LiveHubPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { PostDetailPage } from "./pages/PostDetailPage";
+import { PostsHubPage } from "./pages/PostsHubPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { VoiceHubPage } from "./pages/VoiceHubPage";
@@ -42,8 +44,8 @@ export default function App() {
         <Route path="/voice" element={<VoiceHubPage />} />
         <Route path="/live" element={<LiveHubPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
-        <Route path="/posts" element={<PlaceholderPage title="帖子" step="F6" />} />
-        <Route path="/posts/:postId" element={<PlaceholderPage title="帖子详情" step="F6" />} />
+        <Route path="/posts" element={<PostsHubPage />} />
+        <Route path="/posts/:postId" element={<PostDetailPage />} />
         <Route path="/games" element={<PlaceholderPage title="桌游" step="F7" />} />
         <Route path="/messages" element={<PlaceholderPage title="消息" step="F8" />} />
         <Route path="/search" element={<PlaceholderPage title="搜索" step="F9" />} />
