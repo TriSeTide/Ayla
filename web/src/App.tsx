@@ -14,6 +14,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppShell } from "./layout/AppShell";
 import { ChatConversationRoute } from "./pages/ChatConversationRoute";
 import { ChatPage } from "./pages/ChatPage";
+import { FavoritesPage } from "./pages/FavoritesPage";
 import { GroupPage } from "./pages/GroupPage";
 import { HomePage } from "./pages/HomePage";
 import { GamesHubPage } from "./pages/GamesHubPage";
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
         <Route path="/chat" element={<ChatPage />} />

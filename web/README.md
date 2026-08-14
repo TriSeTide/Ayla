@@ -13,7 +13,8 @@ F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏�
 F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子；
 F7 为桌游：房间框架（列表/创建/进入占位界面）、join/leave 状态、群内桌游（范围仅该群）、FAB 建桌游室；
 F8 为消息中心：私信/好友双选项卡、申请处理闭环（好友/群邀请/入群申请）、badges 红点聚合；
-F9 为全局搜索：五类分组结果、用户资料卡（加好友/发消息）、历史 chips、宽屏顶栏内联下拉。
+F9 为全局搜索：五类分组结果、用户资料卡（加好友/发消息）、历史 chips、宽屏顶栏内联下拉；
+F10 为个人界面扩展：三分区（我的发帖/我的直播间/正在玩的桌游）、收藏页（帖子收藏 + 取消）、更多菜单加收藏。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -289,6 +290,15 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **F9 已知取舍**（步骤文档 §7 登记）：用户资料卡"好友关系状态展示"后置；桌游室搜索结果跳 /games 列表。
 
+## F10 个人界面扩展 + 收藏页 + 更多菜单（已完成）
+
+聚合主页增量第十步（见开发步骤文档 F10）：F1-F10 前端全部落地。
+
+- [x] `FavoritesPage`：帖子收藏列表（target 摘要直接展示）+ 取消收藏即时移除 + 同步 posts store 收藏集合
+- [x] `ProfilePage` 扩展三分区：我的发帖（scope=mine）/ 我的直播间（owner=我）/ 正在玩的桌游（?mine=1）
+- [x] `TopNav` / `NarrowTopBar` 更多菜单加「我的收藏」（三项：个人主页 / 我的收藏 / 退出登录）
+- [x] 契约测试：favorites-page 3；全量 vitest 251 通过 + build + 两形态冒烟通过
+
 ## 目录结构
 
 ```text
@@ -363,6 +373,7 @@ web/
     │   ├── GamesHubPage.tsx    # F7 一级桌游（列表 + 进入占位）
     │   ├── MessagesPage.tsx    # F8 消息中心（私信/好友双选项卡 + 申请审批）
     │   ├── SearchPage.tsx      # F9 全局搜索（五类分组 + 用户资料卡）
+    │   ├── FavoritesPage.tsx   # F10 收藏页（帖子收藏 + 取消）
     │   ├── ProfilePage.tsx
     │   ├── HomePage.tsx     # F2 窄屏主页（群卡片/列表双布局 + 宽屏 /home 重定向最近群）
     │   ├── PostsHubPage.tsx     # F6 一级帖子信息流（游标分页 + FAB 发帖）
@@ -380,7 +391,7 @@ web/
     │   ├── group/          # F3：GroupTopTabs（窄屏上移导航条）
     │   ├── posts/          # F6：PostCard/PostEditor/CommentList
     │   └── boardgame/      # F7：GameRoomCard/GameRoomCreate/GameRoomPlaceholder
-    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）/ messages.css（F8）/ search.css（F9）
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）/ live.css（F4）/ voice.css（F5）/ posts.css（F6）/ boardgame.css（F7）/ messages.css（F8）/ search.css（F9）/ profile.css（F10）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 

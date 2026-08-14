@@ -192,6 +192,16 @@ export function TopNav({
                 role="menuitem"
                 onClick={() => {
                   setMoreOpen(false);
+                  navigate("/favorites");
+                }}
+              >
+                我的收藏
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMoreOpen(false);
                   logout();
                   navigate("/login");
                 }}
