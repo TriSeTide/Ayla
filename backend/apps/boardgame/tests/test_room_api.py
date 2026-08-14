@@ -1,0 +1,241 @@
+"""桌游室 REST 契约测试（S4，开发文档 §1.4）。
+
+覆盖：房间 CRUD（创建默认公开/群归属默认群可见/可见性约束）、列表可见性过滤、
+详情 403、删除仅 owner、join 幂等（重复 join 不重复建成员）、join 可见性校验、
+leave 仅成员、seat 顺序分配、?mine=1 我在局。
+"""
+import pytest
+
+from apps.common.visibility import Visibility
+from apps.boardgame.models import GameRoom, GameRoomMember
+from apps.chat.models import Conversation, ConversationMember
+
+
+def _make_group(owner, users=None):
+    conv = Conversation.objects.create(type="group", title="测试群", owner=owner)
+    ConversationMember.objects.create(conversation=conv, user=owner, role="owner")
+    for u in users or []:
+        ConversationMember.objects.create(conversation=conv, user=u)
+    return conv
+
+
+def _make_friends(a, b):
+    from apps.accounts.models import Friendship
+
+    Friendship.objects.create(user=a, friend=b, status="accepted")
+    Friendship.objects.create(user=b, friend=a, status="accepted")
+
+
+def _make_room(owner, name="测试房", **kwargs):
+    return GameRoom.objects.create(owner=owner, name=name, **kwargs)
+
+
+# ---------- 创建 ----------
+
+@pytest.mark.django_db
+class TestCreateRoom:
+    def test_create_public_default(self, auth_client):
+        client, user = auth_client(username="b_author")
+        resp = client.post("/api/v1/boardgame/rooms/", {"name": "我的桌游室"}, format="json")
+        assert resp.status_code == 201, resp.content
+        data = resp.json()
+        assert data["name"] == "我的桌游室"
+        assert data["visibility"] == Visibility.PUBLIC
+        assert data["group"] is None
+        assert data["group_name"] is None
+        assert data["owner_id"] == user.id
+        assert data["is_owner"] is True
+        assert data["game_type"] == "boardgame"
+        assert data["status"] == "waiting"
+        assert data["member_count"] == 0
+        assert data["is_member"] is False
+
+    def test_create_requires_name(self, auth_client):
+        client, _ = auth_client(username="b_no_name")
+        resp = client.post("/api/v1/boardgame/rooms/", {"name": "  "}, format="json")
+        assert resp.status_code == 400
+
+    def test_create_group_defaults_to_group_visibility(self, auth_client):
+        client, user = auth_client(username="b_group_author")
+        group = _make_group(user)
+        resp = client.post(
+            "/api/v1/boardgame/rooms/",
+            {"name": "群内桌游室", "group": str(group.id)},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        data = resp.json()
+        assert data["visibility"] == Visibility.GROUP
+        assert data["group"] == str(group.id)
+        assert data["group_name"] == "测试群"
+
+    def test_create_group_visibility_requires_group(self, auth_client):
+        client, _ = auth_client(username="b_grp_vis")
+        resp = client.post(
+            "/api/v1/boardgame/rooms/",
+            {"name": "x", "visibility": Visibility.GROUP},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "群" in resp.json()["detail"]
+
+    def test_create_group_must_be_group_conversation(self, auth_client, user_factory):
+        client, user = auth_client(username="b_grp_conv")
+        peer = user_factory(username="b_grp_peer")
+        priv = Conversation.objects.create(type="private", owner=user)
+        ConversationMember.objects.create(conversation=priv, user=user)
+        ConversationMember.objects.create(conversation=priv, user=peer)
+        resp = client.post(
+            "/api/v1/boardgame/rooms/",
+            {"name": "x", "group": str(priv.id)},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "群" in resp.json()["detail"]
+
+
+# ---------- 列表可见性 ----------
+
+@pytest.mark.django_db
+class TestRoomList:
+    def test_list_filters_by_visibility(self, auth_client, user_factory):
+        client, viewer = auth_client(username="l_viewer")
+        owner = user_factory(username="l_owner")
+        friend = user_factory(username="l_friend")
+        member = user_factory(username="l_member")
+        _make_friends(owner, friend)
+        group = _make_group(owner, [member])
+
+        _make_room(owner, "pub", visibility=Visibility.PUBLIC)
+        _make_room(owner, "fri", visibility=Visibility.FRIENDS)
+        _make_room(owner, "grp", visibility=Visibility.GROUP, group=group)
+
+        resp = client.get("/api/v1/boardgame/rooms/")
+        assert resp.status_code == 200
+        names = {r["name"] for r in resp.json()}
+        assert names == {"pub"}
+
+        _make_friends(viewer, owner)
+        resp = client.get("/api/v1/boardgame/rooms/")
+        names = {r["name"] for r in resp.json()}
+        assert names == {"pub", "fri"}
+
+        ConversationMember.objects.create(conversation=group, user=viewer)
+        resp = client.get("/api/v1/boardgame/rooms/")
+        names = {r["name"] for r in resp.json()}
+        assert names == {"pub", "fri", "grp"}
+
+    def test_list_mine(self, auth_client, user_factory):
+        client, me = auth_client(username="l_me")
+        owner = user_factory(username="l_owner2")
+        mine = _make_room(owner, "我加入的")
+        GameRoomMember.objects.create(room=mine, user=me)
+        _make_room(owner, "没加入的")
+        resp = client.get("/api/v1/boardgame/rooms/?mine=1")
+        names = {r["name"] for r in resp.json()}
+        assert names == {"我加入的"}
+
+
+# ---------- 详情 / 删除 ----------
+
+@pytest.mark.django_db
+class TestRoomDetail:
+    def test_detail_forbidden_for_invisible(self, auth_client, user_factory):
+        client, _ = auth_client(username="d_viewer")
+        owner = user_factory(username="d_owner")
+        room = _make_room(owner, "私密房", visibility=Visibility.FRIENDS)
+        resp = client.get(f"/api/v1/boardgame/rooms/{room.id}/")
+        assert resp.status_code == 403
+        assert "无权" in resp.json()["detail"]
+
+    def test_detail_author_visible(self, auth_client):
+        client, user = auth_client(username="d_author")
+        room = _make_room(user, "自己的房", visibility=Visibility.FRIENDS)
+        resp = client.get(f"/api/v1/boardgame/rooms/{room.id}/")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "自己的房"
+
+    def test_delete_only_owner(self, auth_client, user_factory):
+        client, owner = auth_client(username="d_del_owner")
+        room = _make_room(owner, "要删的房")
+        stranger_client, _ = auth_client(username="d_del_stranger")
+        assert (
+            stranger_client.delete(f"/api/v1/boardgame/rooms/{room.id}/").status_code
+            == 403
+        )
+        resp = client.delete(f"/api/v1/boardgame/rooms/{room.id}/")
+        assert resp.status_code == 200
+        assert not GameRoom.objects.filter(pk=room.id).exists()
+
+
+# ---------- join / leave ----------
+
+@pytest.mark.django_db
+class TestRoomJoinLeave:
+    def test_join_creates_member(self, auth_client, user_factory):
+        client, joiner = auth_client(username="j_joiner")
+        owner = user_factory(username="j_owner")
+        room = _make_room(owner, "公开房")
+        resp = client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        assert resp.status_code == 201, resp.content
+        data = resp.json()
+        assert data["user_id"] == joiner.id
+        assert data["seat"] == 0
+        assert GameRoomMember.objects.filter(room=room, user=joiner).count() == 1
+
+    def test_join_idempotent(self, auth_client, user_factory):
+        client, joiner = auth_client(username="j_idem")
+        owner = user_factory(username="j_idem_owner")
+        room = _make_room(owner, "公开房")
+        first = client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        second = client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        assert first.status_code == 201
+        assert second.status_code == 200  # 幂等复用，不新建
+        assert second.json()["id"] == first.json()["id"]
+        assert GameRoomMember.objects.filter(room=room, user=joiner).count() == 1
+
+    def test_join_invisible_403(self, auth_client, user_factory):
+        client, _ = auth_client(username="j_out")
+        owner = user_factory(username="j_f_owner")
+        room = _make_room(owner, "好友房", visibility=Visibility.FRIENDS)
+        resp = client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        assert resp.status_code == 403
+
+    def test_seat_assigned_in_order(self, auth_client, user_factory):
+        owner = user_factory(username="s_owner")
+        room = _make_room(owner, "座位房")
+        for i in range(3):
+            u = user_factory(username=f"s_u{i}")
+            GameRoomMember.objects.create(room=room, user=u, seat=i)
+        client, joiner = auth_client(username="s_joiner")
+        resp = client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        assert resp.status_code == 201
+        assert resp.json()["seat"] == 3  # 已 3 人 → 下一个座位号 3
+
+    def test_leave_member(self, auth_client, user_factory):
+        client, joiner = auth_client(username="v_joiner")
+        owner = user_factory(username="v_owner")
+        room = _make_room(owner, "公开房")
+        client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        resp = client.post(f"/api/v1/boardgame/rooms/{room.id}:leave/", format="json")
+        assert resp.status_code == 200
+        assert not GameRoomMember.objects.filter(room=room, user=joiner).exists()
+
+    def test_leave_non_member_400(self, auth_client, user_factory):
+        client, outsider = auth_client(username="v_out")
+        owner = user_factory(username="v_owner2")
+        room = _make_room(owner, "公开房")
+        resp = client.post(f"/api/v1/boardgame/rooms/{room.id}:leave/", format="json")
+        assert resp.status_code == 400
+
+    def test_members_and_count_in_serializer(self, auth_client, user_factory):
+        client, joiner = auth_client(username="m_joiner")
+        owner = user_factory(username="m_owner")
+        room = _make_room(owner, "成员房")
+        client.post(f"/api/v1/boardgame/rooms/{room.id}:join/", format="json")
+        resp = client.get(f"/api/v1/boardgame/rooms/{room.id}/")
+        data = resp.json()
+        assert data["member_count"] == 1
+        assert data["is_member"] is True
+        assert len(data["members"]) == 1
+        assert data["members"][0]["user_id"] == joiner.id
