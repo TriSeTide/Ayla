@@ -16,6 +16,8 @@ urlpatterns = [
     # 资料
     path("me/", views.MeView.as_view(), name="me"),
     path("me/profile/", views.ProfileView.as_view(), name="profile"),
+    # 未读/待处理聚合（B9）
+    path("me/badges/", views.BadgesView.as_view(), name="me-badges"),
     # 用户
     path("users/search/", views.UserSearchView.as_view(), name="user-search"),
     # 好友

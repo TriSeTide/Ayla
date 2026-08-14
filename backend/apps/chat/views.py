@@ -16,11 +16,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services
-from .models import Conversation, ConversationMember, Message, MessageRead
+from .models import (
+    Conversation,
+    ConversationMember,
+    GroupInvite,
+    GroupJoinRequest,
+    Message,
+    MessageRead,
+)
 from .serializers import (
     ConversationListSerializer,
     ConversationSerializer,
     CreateMessageSerializer,
+    GroupActionSerializer,
+    GroupInviteSerializer,
+    GroupJoinRequestSerializer,
     MessageSerializer,
 )
 
@@ -391,3 +401,167 @@ class MemberMuteView(APIView):
         member.muted = muted
         member.save(update_fields=["muted"])
         return Response({"detail": "已禁言" if muted else "已解除禁言", "muted": muted})
+
+
+# ---------- 群申请 / 邀请（S2，开发文档 §1.2） ----------
+#
+# 权限矩阵：
+# - 申请入群：任何登录用户（当前群无可见性字段，"公开/好友"群区分后置，
+#   见开发步骤 §7 已知取舍）；已是成员 → 400；pending 幂等复用；
+# - 审批申请：仅 owner/admin；
+# - 邀请：仅群成员（可邀请任意登录用户，需求 R-G9 "搜索用户 → 邀请"）；
+# - 处理邀请：仅被邀请人本人。
+# WS 通知：审批后推申请人 group.request.resolved；新邀请推被邀请人 group.invite.new。
+
+class GroupJoinRequestView(APIView):
+    """GET /conversations/<id>/join-requests/ —— owner/admin 查看待审批申请。
+    POST /conversations/<id>/join-requests/ —— 申请入群 {message}（幂等）。"""
+
+    def get(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _forbidden("仅群聊支持入群申请")
+        if not services.can_manage_group(request.user, conv):
+            return _forbidden("仅群主/管理员可查看申请")
+        qs = GroupJoinRequest.objects.filter(
+            conversation=conv, status=GroupJoinRequest.STATUS_PENDING
+        ).select_related("applicant")
+        return Response(
+            GroupJoinRequestSerializer(qs, many=True, context={"request": request}).data
+        )
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _forbidden("仅群聊支持申请加入")
+        if services.user_can_access(request.user, conv):
+            return Response(
+                {"detail": "你已在群中"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        req, created = services.create_join_request(
+            request.user, conv, request.data.get("message") or ""
+        )
+        return Response(
+            GroupJoinRequestSerializer(req, context={"request": request}).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class GroupJoinRequestActionView(APIView):
+    """POST /join-requests/<id>/action/ —— owner/admin 审批 {action}（accept 事务内建成员）。"""
+
+    def post(self, request, request_id):
+        try:
+            req = GroupJoinRequest.objects.select_related(
+                "conversation", "applicant"
+            ).get(pk=request_id, status=GroupJoinRequest.STATUS_PENDING)
+        except GroupJoinRequest.DoesNotExist:
+            return _not_found("申请不存在或已处理")
+        if not services.can_manage_group(request.user, req.conversation):
+            return _forbidden("仅群主/管理员可审批")
+        ser = GroupActionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action = ser.validated_data["action"]
+        if action == "accept":
+            services.accept_join_request(req, request.user)
+        else:
+            services.reject_join_request(req, request.user)
+        # 审批成功后通知申请人（用户级广播，事务外）
+        services.broadcast_group_request_resolved(
+            req.applicant_id,
+            request_id=req.id,
+            conversation_id=req.conversation_id,
+            conversation_title=req.conversation.title,
+            status=req.status,
+            handled_by_id=request.user.id,
+            handled_at=req.handled_at,
+        )
+        return Response(
+            GroupJoinRequestSerializer(req, context={"request": request}).data
+        )
+
+
+class GroupInviteView(APIView):
+    """POST /conversations/<id>/invites/ —— 群成员邀请入群 {invitee_id}（幂等）。"""
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _forbidden("仅群聊支持邀请")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden("仅群成员可邀请")
+        invitee_id = request.data.get("invitee_id")
+        if not invitee_id:
+            return Response(
+                {"detail": "缺少 invitee_id"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            invitee = User.objects.get(pk=str(invitee_id))
+        except (User.DoesNotExist, ValueError):
+            return _not_found("目标用户不存在")
+        if invitee.id == request.user.id:
+            return Response(
+                {"detail": "不能邀请自己"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if services.user_can_access(invitee, conv):
+            return Response(
+                {"detail": "对方已在群中"}, status=status.HTTP_400_BAD_REQUEST
+            )
+        inv, created = services.create_group_invite(request.user, conv, invitee)
+        if created:
+            # 新邀请通知被邀请人（用户级广播）
+            services.broadcast_group_invite_new(
+                invitee.id,
+                invite_id=inv.id,
+                conversation_id=conv.id,
+                conversation_title=conv.title,
+                inviter_id=request.user.id,
+                inviter_name=request.user.nickname or request.user.username,
+                created_at=inv.created_at,
+            )
+        return Response(
+            GroupInviteSerializer(inv, context={"request": request}).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class MyInvitesView(APIView):
+    """GET /me/invites/ —— 我收到的待处理邀请。"""
+
+    def get(self, request):
+        qs = GroupInvite.objects.filter(
+            invitee=request.user, status=GroupInvite.STATUS_PENDING
+        ).select_related("conversation", "inviter")
+        return Response(
+            GroupInviteSerializer(qs, many=True, context={"request": request}).data
+        )
+
+
+class GroupInviteActionView(APIView):
+    """POST /invites/<id>/action/ —— 被邀请人处理 {action}（accept 事务内建成员）。"""
+
+    def post(self, request, invite_id):
+        try:
+            inv = GroupInvite.objects.select_related("conversation", "inviter").get(
+                pk=invite_id, status=GroupInvite.STATUS_PENDING
+            )
+        except GroupInvite.DoesNotExist:
+            return _not_found("邀请不存在或已处理")
+        if inv.invitee_id != request.user.id:
+            return _forbidden("仅被邀请人可处理")
+        ser = GroupActionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        action = ser.validated_data["action"]
+        if action == "accept":
+            services.accept_group_invite(inv, request.user)
+        else:
+            services.reject_group_invite(inv, request.user)
+        return Response(
+            GroupInviteSerializer(inv, context={"request": request}).data
+        )

@@ -54,4 +54,26 @@ urlpatterns = [
         views.MemberMuteView.as_view(),
         name="chat-member-mute",
     ),
+    # 群申请/邀请（S2，开发文档 §1.2）
+    path(
+        "conversations/<int:conv_id>/join-requests/",
+        views.GroupJoinRequestView.as_view(),
+        name="chat-join-requests",
+    ),
+    path(
+        "join-requests/<int:request_id>/action/",
+        views.GroupJoinRequestActionView.as_view(),
+        name="chat-join-request-action",
+    ),
+    path(
+        "conversations/<int:conv_id>/invites/",
+        views.GroupInviteView.as_view(),
+        name="chat-group-invite",
+    ),
+    path("me/invites/", views.MyInvitesView.as_view(), name="chat-my-invites"),
+    path(
+        "invites/<int:invite_id>/action/",
+        views.GroupInviteActionView.as_view(),
+        name="chat-group-invite-action",
+    ),
 ]

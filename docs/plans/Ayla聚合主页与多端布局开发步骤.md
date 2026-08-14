@@ -56,13 +56,30 @@
 
 **验证**：契约测试覆盖 public/friends/group × owner/好友/群员/路人 矩阵；存量接口回归全绿；迁移后存量房间 `visibility=public` 行为不变。
 
-### S2 群申请/邀请 + 全站未读聚合
+### S2 群申请/邀请 + 全站未读聚合 【已验收 2026-08-14】
+
+> 落地：`apps/chat/models.py` 新增 `GroupJoinRequest`/`GroupInvite`（迁移 0002，幂等由
+> services 层 pending 查重保证，不设 DB 部分唯一索引——MySQL 不支持）；
+> join-requests 增查/审批、invites 增/查/处理、`GET me/invites/`；
+> consumers 新增用户级组 `chat_user_<id>`（connect 加入/disconnect 退出）+ 两个
+> 新消息类型 `group.request.resolved`/`group.invite.new`；
+> `apps/accounts/views.py` 新增 `BadgesView`（`GET me/badges/` 五维聚合）。
+> 验证：`apps/chat/tests/test_group_requests.py`（申请状态机 pending→accepted/rejected、
+> 重复申请幂等、非 owner 审批 403、accept 事务内建成员、邀请权限矩阵）
+> + `apps/chat/tests/test_group_ws.py`（用户级广播组隔离）+ `tests/test_badges.py`，
+> 全量 pytest 363 通过（Windows 沙箱需 `PYTEST_DEBUG_TEM_ROOT=$TEMP/pytest_tmp_root`
+> 规避临时目录批量删除崩溃，见工作区记忆）。
+> 已知取舍（§7 同步登记）：Conversation 暂无可见性字段，"公开/好友"群区分后置，
+> 申请入群 = 任意登录用户（已是成员除外）。
 
 **改动文件**：
-- `apps/chat/models.py`：新增 `GroupJoinRequest`、`GroupInvite`（字段见开发文档 §1.2）。
-- `apps/chat/urls.py`/`views.py`：join-requests 增查/审批、invites 增/查/处理、`GET me/invites/`。
-- `apps/chat/consumers.py`：WS 消息类型 `group.request.resolved`、`group.invite.new`。
-- `apps/accounts/views.py` 或新 `apps/accounts/urls.py`：`GET me/badges/`（聚合 private_unread/group_unread/friend_requests/group_invites/join_requests_pending）。
+- `apps/chat/models.py`：新增 `GroupJoinRequest`（conversation, applicant, message, status, handled_by, handled_at）、`GroupInvite`（conversation, inviter, invitee, status, handled_at）。
+- `apps/chat/services.py`：`create_join_request`/`accept_join_request`（事务内建成员）/`reject_join_request`、`create_group_invite`/`accept_group_invite`/`reject_group_invite`、用户级广播（`broadcast_*`/`abroadcast_*`）。
+- `apps/chat/serializers.py`：`GroupJoinRequestSerializer`/`GroupInviteSerializer`/`GroupActionSerializer`。
+- `apps/chat/views.py`：`GroupJoinRequestView`（GET 审批列表/POST 申请）、`GroupJoinRequestActionView`、`GroupInviteView`、`MyInvitesView`、`GroupInviteActionView`。
+- `apps/chat/urls.py`：join-requests/invites/me/invites 五条路由。
+- `apps/chat/consumers.py`：用户级组订阅 + `group_request_resolved`/`group_invite_new` 处理器。
+- `apps/accounts/views.py` + `urls.py`：`BadgesView`（`GET /api/v1/me/badges/`，聚合 private_unread/group_unread/friend_requests/group_invites/join_requests_pending）。
 
 **验证**：申请状态机测试（pending→accepted/rejected、重复申请幂等、非 owner 审批 403、accept 事务内建成员）；badges 聚合与并发一致性（多写者游标场景参考既有经验）。
 
@@ -173,7 +190,7 @@
 
 ## 5. 交付物核对清单
 
-- [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2-S6 待执行
+- [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 待执行
 - [ ] 前端：F1-F10 全部落地，`npm run build` / `npm run test` 通过
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [ ] `Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新；`Ayla/web/README.md` 补本期章节
@@ -190,6 +207,7 @@
 ## 7. 已知取舍与待确认（遇到先记录，不阻塞）
 
 - 语音房文字消息复用群会话方案（开发文档 §1.9）；独立房间文字流后置。
+- 群申请权限：Conversation 暂无 visibility 字段，开发文档 §1.2 "公开群可申请/好友群仅好友可申请"暂按"任意登录用户可申请（已是成员除外）"落地（S2 已登记）；群可见性字段与搜索发现路径（§1.5 groups 可见性）随 S5 一并评估。
 - 搜索不做引擎（分发表查询 + 截断）；量级上来再评估 PostgreSQL FTS / Meilisearch。
 - 房间/帖子可见性细粒度编辑（公开/好友/群切换）本期默认公开，编辑后置。
 - 桌游玩法、扫一扫、个性化、直播间连麦均后续。

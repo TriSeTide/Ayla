@@ -5,7 +5,14 @@ from rest_framework.exceptions import PermissionDenied
 
 from apps.accounts.serializers import UserPublicSerializer
 
-from .models import Conversation, ConversationMember, Message, MessageRead
+from .models import (
+    Conversation,
+    ConversationMember,
+    GroupInvite,
+    GroupJoinRequest,
+    Message,
+    MessageRead,
+)
 
 User = get_user_model()
 
@@ -155,7 +162,6 @@ class ConversationListSerializer(ConversationSerializer):
 
 class CreateMessageSerializer(serializers.Serializer):
     """发消息入参。"""
-
     type = serializers.ChoiceField(
         choices=[c[0] for c in Message.TYPE_CHOICES], default=Message.TYPE_TEXT
     )
@@ -215,3 +221,64 @@ class CreateMessageSerializer(serializers.Serializer):
                     {"media_id": "media_access_denied"}
                 )
         return attrs
+
+
+class GroupJoinRequestSerializer(serializers.ModelSerializer):
+    """入群申请（对外）。"""
+
+    id = serializers.IntegerField(read_only=True)
+    conversation_id = serializers.CharField(read_only=True)
+    conversation_title = serializers.CharField(
+        read_only=True, source="conversation.title"
+    )
+    applicant = UserPublicSerializer(read_only=True)
+    handled_by_id = serializers.CharField(read_only=True, allow_null=True)
+    status = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = GroupJoinRequest
+        fields = [
+            "id",
+            "conversation_id",
+            "conversation_title",
+            "applicant",
+            "message",
+            "status",
+            "handled_by_id",
+            "handled_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class GroupInviteSerializer(serializers.ModelSerializer):
+    """入群邀请（对外）。"""
+
+    id = serializers.IntegerField(read_only=True)
+    conversation_id = serializers.CharField(read_only=True)
+    conversation_title = serializers.CharField(
+        read_only=True, source="conversation.title"
+    )
+    inviter = UserPublicSerializer(read_only=True)
+    invitee = UserPublicSerializer(read_only=True)
+    status = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = GroupInvite
+        fields = [
+            "id",
+            "conversation_id",
+            "conversation_title",
+            "inviter",
+            "invitee",
+            "status",
+            "handled_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class GroupActionSerializer(serializers.Serializer):
+    """同意/拒绝入群申请或邀请。"""
+
+    action = serializers.ChoiceField(choices=["accept", "reject"])

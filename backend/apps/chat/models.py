@@ -169,3 +169,99 @@ class MessageRead(models.Model):
 
     def __str__(self) -> str:
         return f"msg{self.message_id}:{self.user_id}"
+
+
+class GroupJoinRequest(models.Model):
+    """入群申请（B1，开发文档 §1.2）。
+
+    幂等语义与私聊会话一致（services 层做，不依赖 DB 部分唯一索引——
+    MySQL 不支持 partial unique index，`(conversation, applicant, pending)`
+    唯一性由 services 的 pending 查重保证，见 services.create_join_request）。
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "待处理"),
+        (STATUS_ACCEPTED, "已同意"),
+        (STATUS_REJECTED, "已拒绝"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    conversation = models.ForeignKey(
+        Conversation, related_name="join_requests", on_delete=models.CASCADE
+    )
+    applicant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="group_join_requests",
+        on_delete=models.CASCADE,
+    )
+    message = models.CharField("申请消息", max_length=256, blank=True, default="")
+    status = models.CharField(
+        "状态", max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    handled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="handled_group_join_requests",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    handled_at = models.DateTimeField("处理时间", null=True, blank=True)
+    created_at = models.DateTimeField("申请时间", auto_now_add=True)
+
+    class Meta:
+        db_table = "group_join_requests"
+        verbose_name = "入群申请"
+        verbose_name_plural = "入群申请"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"conv{self.conversation_id}:{self.applicant_id}:{self.status}"
+
+
+class GroupInvite(models.Model):
+    """入群邀请（B1，开发文档 §1.2）。
+
+    幂等：同 (conversation, inviter, invitee) 的 pending 邀请由 services 查重
+    （不设 DB 部分唯一索引，理由同 GroupJoinRequest）。
+    """
+
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "待处理"),
+        (STATUS_ACCEPTED, "已同意"),
+        (STATUS_REJECTED, "已拒绝"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    conversation = models.ForeignKey(
+        Conversation, related_name="invites", on_delete=models.CASCADE
+    )
+    inviter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="group_invites_sent",
+        on_delete=models.CASCADE,
+    )
+    invitee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="group_invites_received",
+        on_delete=models.CASCADE,
+    )
+    status = models.CharField(
+        "状态", max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    handled_at = models.DateTimeField("处理时间", null=True, blank=True)
+    created_at = models.DateTimeField("邀请时间", auto_now_add=True)
+
+    class Meta:
+        db_table = "group_invites"
+        verbose_name = "入群邀请"
+        verbose_name_plural = "入群邀请"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"conv{self.conversation_id}:{self.invitee_id}:{self.status}"

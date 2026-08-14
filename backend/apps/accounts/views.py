@@ -16,7 +16,6 @@ from .serializers import (
     RegisterSerializer,
     UserPublicSerializer,
 )
-
 User = get_user_model()
 
 
@@ -58,6 +57,62 @@ class MeView(APIView):
     def get(self, request):
         data = UserPublicSerializer(request.user, context={"request": request}).data
         return Response(data)
+
+
+class BadgesView(APIView):
+    """GET /me/badges/ —— 全站未读与待处理聚合（开发文档 §1.8，B9）。
+
+    返回 {private_unread, group_unread, friend_requests, group_invites, join_requests_pending}。
+    未读口径与 ConversationSerializer.get_unread_count 一致：非本人发送、非撤回、
+    且无我的 MessageRead 记录的消息。（conversation__members__user=user 的 join
+    不会产生重复行：ConversationMember 的 (conversation, user) 唯一。）
+    """
+
+    def get(self, request):
+        from apps.chat.models import (
+            Conversation,
+            ConversationMember,
+            GroupInvite,
+            GroupJoinRequest,
+            Message,
+        )
+
+        user = request.user
+        unread = (
+            Message.objects.filter(conversation__members__user=user)
+            .exclude(sender=user)
+            .exclude(status=Message.STATUS_RECALLED)
+            .exclude(reads__user=user)
+        )
+        friend_requests = FriendRequest.objects.filter(
+            to_user=user, status=FriendRequest.STATUS_PENDING
+        ).count()
+        group_invites = GroupInvite.objects.filter(
+            invitee=user, status=GroupInvite.STATUS_PENDING
+        ).count()
+        # 我作为 owner/admin 的群收到的待审批入群申请
+        managed_group_ids = ConversationMember.objects.filter(
+            user=user,
+            role__in=[ConversationMember.ROLE_ADMIN, ConversationMember.ROLE_OWNER],
+            conversation__type=Conversation.TYPE_GROUP,
+        ).values_list("conversation_id", flat=True)
+        join_requests_pending = GroupJoinRequest.objects.filter(
+            conversation_id__in=managed_group_ids,
+            status=GroupJoinRequest.STATUS_PENDING,
+        ).count()
+        return Response(
+            {
+                "private_unread": unread.filter(
+                    conversation__type=Conversation.TYPE_PRIVATE
+                ).count(),
+                "group_unread": unread.filter(
+                    conversation__type=Conversation.TYPE_GROUP
+                ).count(),
+                "friend_requests": friend_requests,
+                "group_invites": group_invites,
+                "join_requests_pending": join_requests_pending,
+            }
+        )
 
 
 # ---------- 用户搜索 ----------

@@ -78,12 +78,20 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4401)  # 未认证
             return
         self.subscribed = set()  # 已订阅的会话组
+        # 用户级组：接收与自己相关的推送（S2 群申请处理/新邀请等），
+        # 申请人/被邀请人未必是会话成员，订阅不到 chat_conv_* 组。
+        self.user_group = f"chat_user_{self.user.id}"
+        await self.channel_layer.group_add(self.user_group, self.channel_name)
         await self.accept()
 
     async def disconnect(self, code):
         for conv_id in getattr(self, "subscribed", set()):
             await self.channel_layer.group_discard(
                 f"chat_conv_{conv_id}", self.channel_name
+            )
+        if getattr(self, "user_group", None):
+            await self.channel_layer.group_discard(
+                self.user_group, self.channel_name
             )
 
     async def receive_json(self, content, **kwargs):
@@ -224,6 +232,40 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "event_id": event["event_id"],
                     "ts": event["ts"],
                     "source": event.get("source", "chat"),
+                },
+            }
+        )
+
+    # ---------- 用户级推送（S2：群申请处理 / 新邀请） ----------
+
+    async def group_request_resolved(self, event):
+        """申请被 owner/admin 处理后推给申请人。"""
+        await self.send_json(
+            {
+                "type": "group.request.resolved",
+                "data": {
+                    "request_id": event["request_id"],
+                    "conversation_id": event["conversation_id"],
+                    "conversation_title": event["conversation_title"],
+                    "status": event["status"],
+                    "handled_by_id": event["handled_by_id"],
+                    "handled_at": event["handled_at"],
+                },
+            }
+        )
+
+    async def group_invite_new(self, event):
+        """新入群邀请推给被邀请人。"""
+        await self.send_json(
+            {
+                "type": "group.invite.new",
+                "data": {
+                    "invite_id": event["invite_id"],
+                    "conversation_id": event["conversation_id"],
+                    "conversation_title": event["conversation_title"],
+                    "inviter_id": event["inviter_id"],
+                    "inviter_name": event["inviter_name"],
+                    "created_at": event["created_at"],
                 },
             }
         )

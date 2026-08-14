@@ -22,7 +22,14 @@ from django.db import IntegrityError, transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 
-from .models import Conversation, ConversationMember, Message, MessageRead
+from .models import (
+    Conversation,
+    ConversationMember,
+    GroupInvite,
+    GroupJoinRequest,
+    Message,
+    MessageRead,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -377,4 +384,234 @@ def member_user_ids(conversation) -> list:
         ConversationMember.objects.filter(conversation=conversation).values_list(
             "user_id", flat=True
         )
+    )
+
+
+# ---------- 群申请 / 邀请（S2，开发文档 §1.2） ----------
+#
+# 幂等语义：pending 查重由 services 做（DB 不设部分唯一索引，MySQL 不支持），
+# 与私聊会话幂等（services 层 get_or_create_conversation）同一模式。
+# 事务与广播分离：accept/reject 只做状态 + 成员写入，广播由视图层在成功后调用。
+
+def create_join_request(applicant, conversation, message="") -> tuple:
+    """申请入群（幂等）：存在 pending 申请则复用，否则创建。
+
+    返回 (GroupJoinRequest, created: bool)。
+    """
+    existing = GroupJoinRequest.objects.filter(
+        conversation=conversation,
+        applicant=applicant,
+        status=GroupJoinRequest.STATUS_PENDING,
+    ).first()
+    if existing is not None:
+        return existing, False
+    return (
+        GroupJoinRequest.objects.create(
+            conversation=conversation,
+            applicant=applicant,
+            message=(message or "")[:256],
+        ),
+        True,
+    )
+
+
+def accept_join_request(req: GroupJoinRequest, handled_by) -> GroupJoinRequest:
+    """审批通过：事务内更新状态并创建成员（get_or_create 幂等）。"""
+    with transaction.atomic():
+        req.status = GroupJoinRequest.STATUS_ACCEPTED
+        req.handled_by = handled_by
+        req.handled_at = timezone.now()
+        req.save(update_fields=["status", "handled_by", "handled_at"])
+        ConversationMember.objects.get_or_create(
+            conversation=req.conversation,
+            user=req.applicant,
+            defaults={"role": ConversationMember.ROLE_MEMBER},
+        )
+    return req
+
+
+def reject_join_request(req: GroupJoinRequest, handled_by) -> GroupJoinRequest:
+    """审批拒绝：仅更新状态，不建成员。"""
+    req.status = GroupJoinRequest.STATUS_REJECTED
+    req.handled_by = handled_by
+    req.handled_at = timezone.now()
+    req.save(update_fields=["status", "handled_by", "handled_at"])
+    return req
+
+
+def create_group_invite(inviter, conversation, invitee) -> tuple:
+    """群成员邀请入群（幂等）：同 (conversation, inviter, invitee) pending 复用。
+
+    返回 (GroupInvite, created: bool)。
+    """
+    existing = GroupInvite.objects.filter(
+        conversation=conversation,
+        inviter=inviter,
+        invitee=invitee,
+        status=GroupInvite.STATUS_PENDING,
+    ).first()
+    if existing is not None:
+        return existing, False
+    return (
+        GroupInvite.objects.create(
+            conversation=conversation, inviter=inviter, invitee=invitee
+        ),
+        True,
+    )
+
+
+def accept_group_invite(inv: GroupInvite, handled_by) -> GroupInvite:
+    """接受邀请：事务内更新状态并创建成员（get_or_create 幂等）。"""
+    with transaction.atomic():
+        inv.status = GroupInvite.STATUS_ACCEPTED
+        inv.handled_at = timezone.now()
+        inv.save(update_fields=["status", "handled_at"])
+        ConversationMember.objects.get_or_create(
+            conversation=inv.conversation,
+            user=inv.invitee,
+            defaults={"role": ConversationMember.ROLE_MEMBER},
+        )
+    return inv
+
+
+def reject_group_invite(inv: GroupInvite, handled_by) -> GroupInvite:
+    """拒绝邀请：仅更新状态，不建成员。"""
+    inv.status = GroupInvite.STATUS_REJECTED
+    inv.handled_at = timezone.now()
+    inv.save(update_fields=["status", "handled_at"])
+    return inv
+
+
+# ---------- 用户级广播（S2：申请处理 / 新邀请通知） ----------
+#
+# 申请人/被邀请人未必是会话成员（订阅不到 chat_conv_* 组），所以走
+# `chat_user_<user_id>` 用户级组。ChatConsumer connect 时加入该组（见 consumers.py）。
+
+def _user_group_send_sync(user_id, event: dict) -> None:
+    """同步向用户级组广播，捕获 ChannelFull 不抛断。"""
+    from channels.layers import get_channel_layer
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    try:
+        async_to_sync(layer.group_send)(f"chat_user_{user_id}", event)
+    except ChannelFull:
+        logger.warning("channel full, dropping user event for user %s", user_id)
+    except Exception:
+        logger.exception("user group_send failed for user %s", user_id)
+
+
+async def _user_group_send_async(user_id, event: dict) -> None:
+    """异步向用户级组广播，捕获 ChannelFull 不抛断。"""
+    from channels.layers import get_channel_layer
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    try:
+        await layer.group_send(f"chat_user_{user_id}", event)
+    except ChannelFull:
+        logger.warning("channel full, dropping user event for user %s", user_id)
+    except Exception:
+        logger.exception("user group_send failed for user %s", user_id)
+
+
+def broadcast_group_request_resolved(
+    user_id,
+    *,
+    request_id,
+    conversation_id,
+    conversation_title,
+    status,
+    handled_by_id,
+    handled_at,
+) -> None:
+    """申请被处理 → 推给申请人（同步版）。"""
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "group.request.resolved",
+            "request_id": str(request_id),
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "status": status,
+            "handled_by_id": str(handled_by_id),
+            "handled_at": handled_at.isoformat() if handled_at else None,
+        },
+    )
+
+
+async def abroadcast_group_request_resolved(
+    user_id,
+    *,
+    request_id,
+    conversation_id,
+    conversation_title,
+    status,
+    handled_by_id,
+    handled_at,
+) -> None:
+    """申请被处理 → 推给申请人（异步版，WS/测试用）。"""
+    await _user_group_send_async(
+        user_id,
+        {
+            "type": "group.request.resolved",
+            "request_id": str(request_id),
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "status": status,
+            "handled_by_id": str(handled_by_id),
+            "handled_at": handled_at.isoformat() if handled_at else None,
+        },
+    )
+
+
+def broadcast_group_invite_new(
+    user_id,
+    *,
+    invite_id,
+    conversation_id,
+    conversation_title,
+    inviter_id,
+    inviter_name,
+    created_at,
+) -> None:
+    """新邀请 → 推给被邀请人（同步版）。"""
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "group.invite.new",
+            "invite_id": str(invite_id),
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "inviter_id": str(inviter_id),
+            "inviter_name": inviter_name,
+            "created_at": created_at.isoformat() if created_at else None,
+        },
+    )
+
+
+async def abroadcast_group_invite_new(
+    user_id,
+    *,
+    invite_id,
+    conversation_id,
+    conversation_title,
+    inviter_id,
+    inviter_name,
+    created_at,
+) -> None:
+    """新邀请 → 推给被邀请人（异步版，WS/测试用）。"""
+    await _user_group_send_async(
+        user_id,
+        {
+            "type": "group.invite.new",
+            "invite_id": str(invite_id),
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "inviter_id": str(inviter_id),
+            "inviter_name": inviter_name,
+            "created_at": created_at.isoformat() if created_at else None,
+        },
     )

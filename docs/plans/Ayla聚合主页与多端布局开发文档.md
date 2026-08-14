@@ -52,7 +52,15 @@ class Visibility(models.TextChoices):
 - 列表接口统一加可见性过滤：`Q(visibility=public) | Q(owner=me) | Q(visibility=friends, owner__in=my_friends) | Q(group__in=my_groups)`。抽成共用 queryset helper（`apps/common/visibility.py`），live/voice/posts/boardgame 复用。
 - 迁移：存量房间默认 `public`，行为不变，零风险。
 
-### 1.2 群申请/邀请（B1）——chat app 扩展
+### 1.2 群申请/邀请（B1）——chat app 扩展 【S2 已落地 2026-08-14】
+
+> 落地记录：`GroupJoinRequest`/`GroupInvite` 模型（迁移 0002）；路由
+> `conversations/<id>/join-requests/`（GET owner/admin 审批列表 / POST 申请，幂等）、
+> `join-requests/<id>/action/`（accept 事务内建成员）、`conversations/<id>/invites/`（群成员邀请）、
+> `me/invites/`、`invites/<id>/action/`（仅被邀请人本人）。
+> WS：ChatConsumer 新增用户级组 `chat_user_<id>`，消息类型 `group.request.resolved`/`group.invite.new`。
+> 契约测试：`apps/chat/tests/test_group_requests.py`、`test_group_ws.py`。
+> 已知取舍：Conversation 无可见性字段，"公开/好友"群区分后置（见开发步骤 §7）。
 
 - 新模型 `GroupJoinRequest`（conversation, applicant, message, status pending/accepted/rejected, handled_by, handled_at）与 `GroupInvite`（conversation, inviter, invitee, status, handled_at）。
 - 路由（挂在 `/api/v1/chat/`）：
@@ -109,7 +117,11 @@ class Visibility(models.TextChoices):
 - 主页**卡片布局批量场景**再加 `GET conversations/highlights/?ids=...`（避免 N+1，前端进入主页一次性拉取）。
 - 群内动态变化（新直播/新帖/新桌游室）由对应 WS 事件触发前端重新拉取 highlights；拉取失败降级为群头像封面，不阻塞主页渲染。
 
-### 1.8 全站未读聚合（B9）——accounts 或独立 health 式端点
+### 1.8 全站未读聚合（B9）——accounts 或独立 health 式端点 【S2 已落地 2026-08-14】
+
+> 落地记录：`accounts/views.py` `BadgesView`，`GET /api/v1/me/badges/`；未读口径与
+> `ConversationSerializer.get_unread_count` 一致（非本人发送、非撤回、无 MessageRead）；
+> 契约测试 `tests/test_badges.py`。
 
 - `GET /api/v1/me/badges/`：返回 `{private_unread, group_unread, friend_requests, group_invites, join_requests_pending}`。
 - 数据来源：现有会话 unread_count 聚合 + FriendRequest pending + 1.2 的邀请/申请。
