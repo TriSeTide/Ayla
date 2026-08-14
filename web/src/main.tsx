@@ -15,6 +15,7 @@ import "./styles/base.css";
 import "./styles/app.css";
 import "./styles/shell.css";
 import "./styles/home.css";
+import "./styles/group.css";
 
 async function bootstrap() {
   // 恢复会话（无 refresh 则直接标记 initialized）

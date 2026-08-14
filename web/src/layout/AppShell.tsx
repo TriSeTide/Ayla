@@ -16,7 +16,12 @@ import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { TopNav } from "./TopNav";
-import { isImmersiveRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import {
+  isGroupScene,
+  isImmersiveRoute,
+  resolveFabAction,
+  resolveModule,
+} from "./shellConfig";
 
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
@@ -24,8 +29,11 @@ export function AppShell() {
 
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
+  const immersive = isImmersiveRoute(pathname);
+  // 窄屏群场景：GroupPage 自渲染顶部导航条（底栏上移），壳层不渲染 BottomTabs/MessageFAB
+  const groupSceneNarrow = isNarrow && isGroupScene(pathname);
 
-  if (isImmersiveRoute(pathname)) {
+  if (immersive) {
     return (
       <div className="app-shell" data-form={isNarrow ? "narrow" : "wide"} data-chrome="none">
         <main className="app-shell-content">
@@ -41,7 +49,7 @@ export function AppShell() {
       <main className="app-shell-content">
         <Outlet />
       </main>
-      {isNarrow ? (
+      {isNarrow && !groupSceneNarrow ? (
         <>
           <MessageFab />
           <BottomTabs moduleKey={moduleKey} />

@@ -223,6 +223,16 @@ export function IconMessage(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** 聊天气泡（含三点省略，聊天场景/子界面图标） */
+export function IconChat(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01" />
+    </svg>
+  );
+}
+
 export function IconDots(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

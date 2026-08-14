@@ -1,0 +1,489 @@
+/**
+ * 群聊场景样式（F3）：窄屏 GroupTopTabs/五子界面 + 宽屏三列（ServerRail/ChannelSidebar）
+ * + 群信息界面 + 群内聊天。
+ * 事实源：design.md §12.3 ServerRail / §12.4 ChannelSidebar；布局文档 §2.3 / §3.2。
+ * 全部引用 tokens.css 变量，禁止裸 hex。
+ */
+
+/* ================= 群场景容器 ================= */
+
+.group-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-page-narrow {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ================= 窄屏顶部导航条（GroupTopTabs，R-G1） ================= */
+
+.group-top-tabs {
+  flex: none;
+  position: relative;
+  z-index: 20;
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.group-top-nav {
+  display: flex;
+  align-items: center;
+  height: 64px;
+  padding: 0 var(--sp-2);
+}
+
+.group-top-list {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.group-top-item {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.group-top-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 48px;
+  padding: 0 var(--sp-2);
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.8px;
+}
+
+.group-top-btn.is-active {
+  color: var(--text-primary);
+}
+
+/* 中央群头像槽位（原"主页"位置形变为群头像，R-G1；宽 48→64px 弹性过渡） */
+.group-top-avatar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-top: -6px;
+  transition: width var(--dur-fast) var(--ease-out), height var(--dur-fast) var(--ease-out);
+}
+
+/* 5 圆点指示（非聊天子界面） */
+.group-top-dots {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  padding-bottom: 6px;
+}
+
+.group-top-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-300);
+}
+
+.group-top-dot.is-active {
+  background: var(--glow-500);
+}
+
+/* ================= 窄屏子界面滑动容器 ================= */
+
+.group-scene {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.group-scene-inner {
+  height: 100%;
+  overflow: hidden;
+  animation: group-scene-fade 200ms var(--ease-out);
+}
+
+@keyframes group-scene-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-scene-inner {
+    animation: none;
+  }
+}
+
+/* ================= 群内聊天（GroupChat） ================= */
+
+.group-chat {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ================= 子场景占位 ================= */
+
+.group-scene-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  text-align: center;
+}
+
+/* ================= 宽屏三列 ================= */
+
+.group-page-wide {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+/* ---- ServerRail（design.md §12.3） ---- */
+.server-rail {
+  flex: none;
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-4) 0;
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-right: 1px solid var(--glass-border);
+}
+
+.server-rail-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  overflow-y: auto;
+}
+
+.server-item {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.server-item-btn {
+  position: relative;
+  display: inline-flex;
+  padding: 0;
+}
+
+.server-item-avatar {
+  position: relative;
+  display: inline-flex;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.server-item.is-active .server-item-avatar {
+  transform: scale(52 / 48);
+}
+
+.server-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 32px;
+  border-radius: 2px;
+  background: var(--glow-500);
+}
+
+.server-item-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+  color: #fffafb;
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.server-rail-foot {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--glass-border);
+  margin-top: var(--sp-2);
+}
+
+.server-user {
+  position: relative;
+  display: inline-flex;
+}
+
+.server-user-dot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--success);
+  border: 2px solid var(--surface);
+}
+
+/* ---- ChannelSidebar（design.md §12.4） ---- */
+.channel-sidebar {
+  flex: none;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-right: 1px solid var(--glass-border);
+}
+
+.channel-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4);
+  text-align: left;
+}
+
+.channel-sidebar-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-sidebar-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+  overflow-y: auto;
+}
+
+.channel-scene {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 40px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-scene:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.channel-scene.is-active {
+  background: rgba(157, 191, 230, 0.35);
+  color: var(--text-primary);
+}
+
+.channel-sidebar-info {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 var(--sp-4);
+  margin: var(--sp-2);
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.channel-sidebar-info:hover {
+  background: rgba(157, 191, 230, 0.18);
+  text-decoration: none;
+}
+
+/* ---- 宽屏内容区 ---- */
+.group-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ================= 群信息界面（GroupInfo） ================= */
+
+.group-info {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+}
+
+.group-info-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.group-info-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.group-info-loading {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+
+.group-info-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  text-align: center;
+}
+
+.group-info-name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.group-info-announcement {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 420px;
+}
+
+.group-info-meta {
+  display: flex;
+  gap: var(--sp-4);
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.group-info-edit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  text-align: left;
+}
+
+.group-info-edit-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.group-info-error {
+  font-size: 13px;
+  color: var(--destructive);
+}
+
+.group-info-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--sp-2);
+}
+
+.group-info-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.group-info-member {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+
+.group-info-member-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-info-me {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.group-info-role {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-size: 11px;
+}
+
+.group-info-role-owner {
+  background: var(--sakura-300);
+  color: var(--grape-700);
+}
+
+.group-info-role-admin {
+  background: var(--ice-300);
+  color: var(--indigo-700);
+}
+
+.group-info-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.group-info-placeholder {
+  font-size: 13px;
+  color: var(--text-secondary);
+}

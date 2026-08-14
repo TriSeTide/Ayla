@@ -152,7 +152,7 @@
 > 会话列表后端无分页，卡片布局「加载更多」为前端增量渲染（每批 12，滚到底补一批）；
 > live/voice/game 状态角标数据源由 F4/F5/F7 接入（badges.ts 已定义契约 + 预留字段）。
 
-### F3 GroupPage 容器 + 群内聊天
+### F3 GroupPage 容器 + 群内聊天 【已验收 2026-08-14】
 
 **新增**：`src/pages/GroupPage.tsx`（窄屏：底栏上移 + 五子界面滑动容器；宽屏：ServerRail+ChannelSidebar+内容区三列）；`src/layout/ServerRail.tsx`、`src/layout/ChannelSidebar.tsx`；`src/hooks/useEnterGroupAnimation.ts`（底栏上移，独立封装）；`src/pages/group/GroupChat.tsx`（复用现有聊天组件）；`src/pages/group/GroupInfo.tsx`；`src/stores/group.ts`（维护 `activeScene`：chat/live/voice/posts/games，单一状态源）。
 **要点**：
@@ -162,6 +162,23 @@
 - 宽屏 ServerRail 切群、ChannelSidebar 切场景（点击，无手势）；群信息入口 = 频道侧栏顶部群名；
 - 群信息界面按角色显示管理项（R-G9）。
 **验收**：窄屏进群/退群动画方向正确（底栏终点=视口顶部）；群头像两级点击两种语义分别通过；宽屏三列切群切场景无跳转；群信息角色化。
+
+> 落地（2026-08-14）：`stores/group.ts`（activeScene 单一状态源 + currentGroupId + 五子界面顺序）；
+> `hooks/useEnterGroupAnimation.ts`（底栏上移到顶部独立封装，rAF 双帧进入 + reduced-motion 直入）；
+> `layout/ServerRail.tsx`（72px 群头像列 + 当前群左 3px 指示条 + 未读角标 + 底部用户卡）、
+> `layout/ChannelSidebar.tsx`（群名头点击进群信息 + 五场景项 + 选中胶囊底）；
+> `components/group/GroupTopTabs.tsx`（上移形态：语音|直播|群头像|帖子|桌游 + 5 圆点指示）；
+> `pages/group/GroupChat.tsx`（复用 MessageList/MessageInput + loadHistory/sendMessage 等 hooks）、
+> `GroupInfo.tsx`（群资料 + 成员角色标签 + owner/admin 编辑群资料[真功能] + 管理项[占位标注]）、
+> `GroupScenePlaceholder.tsx`（live/voice/posts/games 占位标 F4-F7）；
+> `pages/GroupPage.tsx` 重写（窄屏进群动画 + 五子界面滑动切换 + 群头像两级点击 + 宽屏三列 + 切群切场景）；
+> `AppShell` 窄屏群场景隐藏 BottomTabs/MessageFAB（GroupPage 自渲染顶部导航条）；`styles/group.css`。
+> 验证：`tsc` 无错；全量 vitest 216 通过（新增 group-store 4 / use-enter-group-animation 2 / group-page 7 / group-info 3）；
+> `npm run build` 通过；Playwright 冒烟（375 窄屏进群 GroupTopTabs 顶栏 + 群头像两级点击两语义 + 切子场景、
+> 1440 宽屏 ServerRail+ChannelSidebar 三列 + 频道侧栏切场景）均符合预期。
+> 已知取舍（§7 登记）：退出群/转让群主/解散群后端无端点（不在 B1-B10/S1-S6 范围），群信息占位标注；
+> 五子界面滑动=手势触发 navigate + key 切换淡入（不强做跟手 translateX，开发文档 §2.2 明确"路由切换用 CSS transition"）；
+> 下拉回主页手势（顶部下滑阈值 80px）+ 输入框滑入延迟动画（R-G1）细节后置，待主链路 E2E 阶段统一补动画终点断言。
 
 ### F4 直播：一级 tab + 群内直播
 
@@ -218,7 +235,7 @@
 ## 5. 交付物核对清单
 
 - [x] 后端：S1 已落地（可见性/群归属 + 契约测试 + 迁移 0002 + 全量回归 335 通过）；S2 已落地（群申请/邀请 + badges 聚合 + 契约测试 + 全量回归 363 通过）；S3-S6 已提交（见仓库提交历史，验收状态由对应步骤对话标注）
-- [x] 前端：F1 AppShell + 路由重构已落地（2026-08-14）；F2 窄屏主页 + 宽屏 /home 重定向已落地（2026-08-14）；F3-F10 待执行
+- [x] 前端：F1 AppShell + 路由重构已落地；F2 窄屏主页 + 宽屏 /home 重定向已落地；F3 GroupPage 容器 + 群内聊天已落地（2026-08-14）；F4-F10 待执行
 - [ ] 两形态主链路 E2E 通过（本文件 §4）
 - [x] `Ayla/web/README.md` 补 F1 AppShell 章节；`Ayla/docs/plans/Ayla聚合主页与多端布局开发文档.md` 状态更新（§2.4 F1 标落地）
 - [ ] 本文件勾选项如实标注；未完成项写明阻塞原因
@@ -241,3 +258,4 @@
 - 宽屏"最近访问群"存 localStorage（无历史取第一个群；无群显示空态）。
 - 窄屏 FAB 弹底部面板 / 宽屏弹上方浮层（design.md §12.5）。
 - F2（2026-08-14）列表布局「最新消息摘要」：后端会话列表无 last_message 字段，本期成员数兜底；会话列表后端无分页，卡片布局「加载更多」为前端增量渲染；live/voice/game 状态角标数据源随 F4/F5/F7 接入。
+- F3（2026-08-14）退出群/转让群主/解散群：后端无对应端点（B1-B10 缺口清单与 S1-S6 均未覆盖），群信息界面占位标注，待后端补端点；五子界面滑动采用「手势触发 navigate + key 切换淡入」（开发文档 §2.2 明确用 CSS transition，不保持五页同时挂载）；下拉回主页手势与输入框滑入延迟动画的精确终点断言留待主链路 E2E 阶段统一补。

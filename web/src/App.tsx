@@ -15,7 +15,6 @@ import { AppShell } from "./layout/AppShell";
 import { ChatConversationRoute } from "./pages/ChatConversationRoute";
 import { ChatPage } from "./pages/ChatPage";
 import { GroupPage } from "./pages/GroupPage";
-import { GroupScenePage } from "./pages/GroupScenePage";
 import { HomePage } from "./pages/HomePage";
 import { LiveHallPage } from "./pages/LiveHallPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
@@ -50,7 +49,7 @@ export default function App() {
         <Route path="/search" element={<PlaceholderPage title="搜索" step="F9" />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/group/:id" element={<GroupPage />} />
-        <Route path="/group/:id/:scene" element={<GroupScenePage />} />
+        <Route path="/group/:id/:scene" element={<GroupPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
       </Route>

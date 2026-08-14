@@ -47,6 +47,17 @@ export function isImmersiveRoute(pathname: string): boolean {
   return matchPath({ path: "/live/:channelId", end: true }, pathname) != null;
 }
 
+/**
+ * 群聊场景路由（窄屏）：GroupPage 自渲染顶部导航条（进群动画 = 底栏上移到顶部），
+ * 壳层不渲染 BottomTabs / MessageFAB（R-G1/R-G6）。宽屏仍走 AppShell TopNav + 左侧栏。
+ */
+export function isGroupScene(pathname: string): boolean {
+  return (
+    matchPath({ path: "/group/:id", end: true }, pathname) != null ||
+    matchPath({ path: "/group/:id/:scene", end: true }, pathname) != null
+  );
+}
+
 export interface FabAction {
   /** 动作标识（测试锚点） */
   key: string;

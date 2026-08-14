@@ -6,7 +6,8 @@ M5-2 为聊天界面：会话列表、聊天窗口、消息渲染、幂等发送
 M5-3 为语音界面：语音频道（加入/离开/心跳/成员同步）、LiveKit 媒体控制（静音/音量）、爱莉语音控制面闭环；
 M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性回显）+ HLS 播放器 + 实时弹幕（WS + 历史对账）+ 主播面板（:start/:stop）；
 F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、CreateFAB 随场景创建入口、手势 hook、路由重构（新一级路由 + 旧 /chat 兼容重定向）；
-F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动态轮播、布局开关、最近群重定向。
+F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动态轮播、布局开关、最近群重定向；
+F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面滑动、群头像两级点击、群内聊天（复用）、群信息（角色化）、宽屏三列（ServerRail + ChannelSidebar）。
 
 > 架构与里程碑见 `../docs/plans/阶段四-Elysia多媒体独立应用开发文档.md`；
 > 实施步骤见 `../docs/plans/阶段五-M5-1前端基座开发步骤.md`、`阶段五-M5-2聊天界面开发步骤.md`、`阶段五-M5-3语音界面开发步骤.md`、`阶段五-M5-4直播界面开发步骤.md`。
@@ -186,6 +187,21 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 **F2 已知取舍**（步骤文档 §7 登记）：列表布局「最新消息摘要」需后端会话列表补 `last_message` 字段，本期成员数兜底；会话列表后端无分页，「加载更多」为前端增量渲染（每批 12）。
 
+## F3 GroupPage 容器 + 群内聊天（已完成）
+
+聚合主页增量第三步（见开发步骤文档 F3）：把 `/group/:id` 从 F1 桥接版演进为真正的群聊场景容器。
+
+- [x] `stores/group.ts`：`activeScene`（chat/live/voice/posts/games/info）单一状态源 + 五子界面顺序（语音|直播|聊天|帖子|桌游，聊天居中）
+- [x] `useEnterGroupAnimation`：进群动画独立封装（底栏上移到顶部，rAF 双帧进入 + reduced-motion 直入）——与 F4 进房动画（底栏下滑走）方向相反，不共用
+- [x] `GroupTopTabs`：窄屏上移后的顶部导航条（四 tab + 中央群头像槽位 + 5 圆点指示），原"主页"槽位形变为群头像（R-G1）
+- [x] 群头像两级点击（R-G4）：单一 handler 读 `activeScene` 分支——非 chat → 切回聊天；chat → 进群信息；无第二份导航状态
+- [x] `ServerRail`（宽屏 72px 群头像列 + 当前群 3px 指示条 + 未读角标 + 底部用户卡）+ `ChannelSidebar`（群名头进群信息 + 五场景项），宽屏三列 = 主页本身
+- [x] `GroupChat`：复用 MessageList/MessageInput + loadHistory/sendMessage 等（无侧栏/演示数据/爱莉入口）；`GroupInfo`：群资料 + 成员角色标签 + owner/admin 编辑群资料（真功能）+ 管理项占位标注
+- [x] `AppShell` 窄屏群场景隐藏 BottomTabs/MessageFAB（GroupPage 自渲染顶部导航条）；`/group/:id/:scene` 由 GroupPage 统一处理（GroupScenePage 移除）
+- [x] 契约测试：group-store 4 + use-enter-group-animation 2 + group-page 7 + group-info 3；全量 vitest 216 通过 + build + 两形态冒烟通过
+
+**F3 已知取舍**（步骤文档 §7 登记）：退出群/转让群主/解散群后端无端点（群信息占位标注）；五子界面滑动 = 手势触发 navigate + key 切换淡入（开发文档 §2.2 明确用 CSS transition）；下拉回主页手势与输入框滑入延迟动画的精确终点断言留待主链路 E2E 统一补。
+
 ## 目录结构
 
 ```text
@@ -199,7 +215,7 @@ web/
 └── src/
     ├── main.tsx            # 入口：会话恢复 + Router 挂载 + chat WS 启动
     ├── App.tsx             # 路由表（F1：/home /voice /live /posts /games /messages /search /profile /group/:id[/*] + 旧 /chat 兼容）
-    ├── layout/             # F1/F2：AppShell / BottomTabs / TopNav / CreateFab / MessageFab / NarrowTopBar / shellConfig（路由匹配表）
+    ├── layout/             # F1/F2/F3：AppShell / BottomTabs / TopNav / CreateFab / MessageFab / NarrowTopBar / ServerRail / ChannelSidebar / shellConfig（路由匹配表）
     ├── api/
     │   ├── client.ts       # fetch 封装：baseURL / Authorization / 错误归一 / 401 刷新重放
     │   ├── auth.ts         # register / login / refresh / me / profile
@@ -217,7 +233,8 @@ web/
     │   ├── message.ts      # 消息分桶（按 conversation_id，seq 有序去重）（M5-2）
     │   ├── voice.ts        # 频道列表 + 当前频道 + 成员表 + LiveKit/WS 状态（M5-3）
     │   ├── live.ts         # 频道列表 + 当前直播间（详情/SRS 状态/弹幕去重定长）+ WS 状态（M5-4）
-    │   └── home.ts         # F2：主页布局偏好 + 最近访问群持久化（localStorage）
+    │   ├── home.ts         # F2：主页布局偏好 + 最近访问群持久化（localStorage）
+    │   └── group.ts        # F3：activeScene（群内子场景单一状态源）+ currentGroupId
     ├── ws/
     │   ├── presence.ts     # /ws/presence/ 单例 + 心跳 + 重连
     │   ├── chat.ts         # /ws/chat/ 单例 + 订阅/补发/重连/事件分发（M5-2）
@@ -233,6 +250,7 @@ web/
     │   ├── useTyping.ts    # typing 节流声明 + 对端 typing 显示（M5-2）
     │   ├── useMediaQuery.ts    # 响应式断点（F1，matchMedia 订阅）
     │   ├── useSwipe.ts     # 手势：方向锁/阈值/取消（F1）
+    │   ├── useEnterGroupAnimation.ts # 进群动画：底栏上移到顶部（F3，独立封装）
     │   ├── useVoiceChannel.ts  # 加入/离开/心跳/成员同步/断线恢复编排（M5-3）
     │   ├── useElysiaVoice.ts   # 爱莉通话生命周期：创建复用/轮询/文本注入/poll/结束（M5-3）
     │   ├── useLiveRoom.ts  # 进房/退房编排：详情+状态轮询+WS+历史+销毁清单（M5-4）
@@ -247,16 +265,17 @@ web/
     │   ├── ProfilePage.tsx
     │   ├── HomePage.tsx     # F2 窄屏主页（群卡片/列表双布局 + 宽屏 /home 重定向最近群）
     │   ├── PlaceholderPage.tsx     # F1 未落地页面占位（标注 F 步骤）
-    │   ├── GroupPage.tsx           # F1 群聊场景桥接（复用 ChatPage；F3 演进为真容器）
-    │   ├── GroupScenePage.tsx      # F1 群内子场景占位（voice/live/posts/games/info 校验）
-    │   └── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
+    │   ├── GroupPage.tsx           # F3 群聊场景容器（窄屏进群动画/五子界面/两级点击；宽屏三列）
+    │   ├── ChatConversationRoute.tsx # F1 /chat/:id 群聊重定向 /group/:id、私聊保留
+    │   └── group/           # F3：GroupChat（复用聊天）/ GroupInfo（角色化）/ GroupScenePlaceholder
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
     │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/ElysiaVoicePanel（M5-3）
     │   ├── live/           # LiveHall/LiveCreate/LivePlayer/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4）
-    │   └── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）
-    ├── styles/             # tokens.css / base.css / app.css（含 M5-3 语音、M5-4 直播）/ shell.css（F1）/ home.css（F2 主页）
+    │   ├── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）
+    │   └── group/          # F3：GroupTopTabs（窄屏上移导航条）
+    ├── styles/             # tokens.css / base.css / app.css（M5-2..M5-4）/ shell.css（F1）/ home.css（F2）/ group.css（F3）
     └── vitest/             # 单测 + 契约测试（M5-1..M5-4；直播：live-api/live-store/ws-live/hls-player）
 ```
 
