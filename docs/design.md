@@ -1,7 +1,7 @@
 # Ayla Web 前端设计方案 ——「千禧冰樱 / Y2K Frost」
 
-> 文档状态：设计规范 v1（供 M5-2 起所有前端界面统一执行）
-> 适用范围：`Ayla/web/`（React 18 + Vite + TS + Zustand），阶段五全部界面（聊天 / 语音 / 直播 / 桌游 / 爱莉集成）
+> 文档状态：设计规范 v2（阶段五全部界面 + 聚合主页与多端布局增量，见 §12）
+> 适用范围：`Ayla/web/`（React 18 + Vite + TS + Zustand），聊天 / 语音 / 直播 / 桌游 / 爱莉集成 / 主页 / 消息 / 搜索 / 个人界面
 > 参考来源：Y2K 美学参考图（冰蓝→樱花粉渐变 + 磨砂卡片 + hot pink 辉光）、Miro 设计系统结构、ui-ux-pro-max 规则库（Y2K Aesthetic / Vibrant & Block-based / Fredoka·Nunito 字配）
 > 结构约定：与 `miro_design.md` 同构，方便对照查阅与 agent 直接消费
 
@@ -210,4 +210,102 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ---
 
-> 本文件是 `Ayla/web/` 视觉唯一事实源。新增组件先看 §4 有没有配方；没有就按 §2/§3/§5 的 token 与刻度推导，推导不出来再改本文件——不要在组件里散落裸 hex。
+## 12. 聚合主页与多端布局组件配方（增量）
+
+> 适用范围：本次「聚合主页与多端布局」增量（窄屏五 tab + 宽屏 TopNav + Discord 式左侧栏）。所有配方从 §2/§3/§5 token 推导，遵守 §8 Do/Don't 与 §10 可访问性。
+
+### 12.1 底部五 tab 栏 BottomTabs（窄屏专属）
+
+- 容器：高 64px + `env(safe-area-inset-bottom)`，整面玻璃 `--glass-bg` + blur 18px，顶部 1px `--glass-border` 描边
+- tab 项：五等分；线性 SVG 图标 24px（2px 描边圆角端点）+ 11px Fredoka 文字（`--text-secondary`）；选中态图标+文字转 `--text-primary`
+- **主页 tab 居中凸起**：圆形背板 48px 上浮 8px，底 `--surface`，选中时附 `--glow-shadow`（全屏允许的主 CTA 级辉光之一）
+- 未读徽标：`--pink-500` 实底白字小圆点（11px Fredoka），右上角偏移
+- 进场/退场：`translateY` 200–250ms，ease-out 进 / ease-in 出
+
+### 12.2 顶部导航栏 TopNav（宽屏常驻）
+
+- 容器：高 64px，整面玻璃 `--glass-bg` + blur 18px，常驻不滚走，底部 1px `--glass-border`
+- 布局：左起 头像（40px 圆形带 `--ring-online` 光环，→个人界面）→ 一级模块文字链（主页/语音/直播/帖子/桌游，Nunito 700 15px `--text-primary`）→ 消息（带未读徽标）→ 搜索框（240px 胶囊，见 12.9）→ 更多（三，40px 图标按钮）
+- 当前模块：文字 `--text-primary` + 底部 2px `--glow-500` 指示条
+- hover：模块文字底 `rgba(157,191,230,0.18)` 胶囊（200ms 过渡）
+
+### 12.3 服务器栏 ServerRail（宽屏，主页/群场景最左）
+
+- 容器：宽 72px，整面玻璃 `--glass-bg` + blur 24px，纵向排列，间距 12px，顶部留 16px
+- 群头像：48px 圆形，带 `--ring-online` 光环；当前群左侧 3px `--glow-500` 指示条 + 头像微放大（48→52px，200ms）
+- 状态角标：头像右下角 16px 圆形底（`--pink-500` 未读 / `--glow-500` 直播 / `--ice-500` 语音 / `--sakura-300` 桌游），内嵌 10px 白色线性图标
+- 底部用户卡：40px 头像带光环 + 在线状态点；点击进个人界面
+
+### 12.4 频道侧栏 ChannelSidebar（宽屏，主页/群场景）
+
+- 容器：宽 240–280px，整面玻璃 `--glass-bg` + blur 24px
+- 群名头：Fredoka 500 20px `--text-primary`，padding 16px，点击进群信息；右侧 chevron 图标
+- 场景项（聊天/语音/直播/帖子/桌游）：行高 40px，圆角 12px 胶囊，左 20px 线性图标 + Nunito 600 15px 文字（`--text-secondary`）；选中态底 `rgba(157,191,230,0.35)` + 文字转 `--text-primary`；hover 底 `rgba(157,191,230,0.18)`
+- 状态标识：行右侧——语音在麦人数（Space Grotesk 12px `--text-secondary`）、直播 LIVE 徽标（`--pink-500` 底白字 11px Fredoka 胶囊）、帖子未读数（`--pink-500` 圆点）
+
+### 12.5 浮动按钮 FAB（两形态）
+
+- CreateFAB（右下，两形态都有）：56px 圆形，主 CTA 样式——`--indigo-700` 实底 + 白色加号线性图标（24px），常驻 `0 2px 12px rgba(70,91,146,0.18)` 浅投影；hover/按下附 `--glow-shadow`（200ms）。窄屏 `right:16px; bottom:底栏高+12px`；宽屏 `right:32px; bottom:32px`
+- MessageFAB（窄屏左下）：56px 圆形玻璃底 `--glass-bg` + blur 18px + 1px `--glass-border`，消息线性图标 `--text-primary`；未读聚合徽标 `--pink-500` 右上角
+- FAB 动作面板：窄屏底部上滑面板 / 宽屏 FAB 上方浮层——`--glass-bg-strong` + blur 18px + 圆角 24px（上沿）/16px（浮层），背景压暗 `rgba(70,91,146,0.25)`；面板项 = 图标 + 文字行（行高 48px）
+
+### 12.6 群卡片 GroupCard 与轮播（窄屏主页）
+
+- 卡片：实心卡片底 `--surface` + 圆角 16px + 极浅投影 `0 2px 12px rgba(70,91,146,0.08)`（design.md §4 实心卡片）
+- 封面区：4:3，内嵌 8px，轮播图圆角 12px；无动态时回退群头像（居中 64px 带光环）
+- 轮播：300ms 滑入切换，3s 间隔；**进视口才启动、离开暂停**（IntersectionObserver）；`prefers-reduced-motion` 降级为首帧静态。轮播指示点：底部居中 3 个 4px 圆点（当前 `--glow-500`，其余 `--ice-300`）
+- 状态角标列：封面右上角纵向叠放（未读 > 直播 > 语音 > 桌游），同 12.3 角标规格
+- 卡片底部行：群头像 24px 带光环 + 群名 Nunito 700 15px `--text-primary` 一行省略
+- 列表布局（GroupListItem）：行高 64px，玻璃底；左群头像 44px 带光环（右下角状态角标），中群名 Nunito 700 15px + 新消息预览 13px `--text-secondary` 一行省略，右未读徽标 `--pink-500`
+
+### 12.7 直播间（两形态）
+
+- 窄屏沉浸式：视频全屏；覆盖层顶部主播信息行（玻璃底 `--glass-bg`）、底部弹幕输入框（`--glass-bg-strong` 半透明，InputBar 变体）；左上角返回键 40px 圆形玻璃容器 + 箭头图标
+- 宽屏：视频主区 + 弹幕侧列 360px（整面玻璃，弹幕列表 + 底部弹幕输入框）；视频两侧「上一个/下一个」40px 圆形玻璃按钮 + 键盘 ↑↓
+- LIVE 徽标：`--pink-500` 实底白字 11px Fredoka 胶囊，左上角
+- 直播间卡片（聚合网格）：封面 16:9 圆角 12px + LIVE 徽标 + 标题 Nunito 700 15px + 主播 13px `--text-secondary` + 来源标识（公开/好友/群名，Micro Tag 11px Fredoka `--sakura-300` 底 `--grape-700` 字）
+
+### 12.8 帖子卡 PostCard 与信息流
+
+- 卡片：实心卡片 `--surface` + 圆角 16px + 极浅投影；padding 16px
+- 头部：作者头像 36px 带光环 + 昵称 Nunito 700 15px + 时间 Space Grotesk 12px `--text-secondary`
+- 正文：Nunito 400 15px `--text-primary`，超 3 行折叠 +「展开」（`--ice-500` 文字钮）
+- 图片：1 图大图圆角 12px；多图 3 列九宫格 gap 4px 圆角 8px
+- 底排：评论数 / 收藏（线性图标 18px + Space Grotesk 12px 数字，`--text-secondary`）；收藏激活态图标填 `--pink-500`
+- 评论输入框：InputBar 变体（底 `--surface` + 1px `--ice-300`，focus 转 `--glow-500` + 辉光）
+
+### 12.9 搜索框与结果
+
+- 顶栏搜索框（两形态）：胶囊，底 `--surface`、1px `--ice-300` 描边、圆角 999px，左搜索图标 `--text-secondary`；focus 边框转 `--glow-500` + `--glow-shadow`（200ms）
+- 宽屏内联下拉结果面板：`--glass-bg-strong` + blur 18px + 圆角 16px，宽 360px；分组（用户/群聊/直播间/帖子/桌游室）组头 Micro Tag 11px Fredoka `--text-secondary` 大写，每组 ≤3 条 + 「查看更多」
+- 窄屏独立搜索页：TopBar 变搜索输入态（自动聚焦）；历史搜索胶囊 chips（`--ice-100` 底 `--text-primary` 字，可清空）
+
+### 12.10 语音房卡片与语音房
+
+- 语音房卡片：实心卡片；房间名 Nunito 700 15px + 房主 13px `--text-secondary` + 在麦人数（麦克风图标 + Space Grotesk 12px）+ 成员头像堆叠（≤5 个 28px 圆形重叠 -8px，带光环）+ 来源标识 Micro Tag
+- 语音房（进入后）：成员网格（头像 64px 带光环 + 麦克风状态角标——开麦 `--glow-500` / 闭麦 `--ice-300`）；底部控制排（静音/扬声器/上麦/离开，48px 圆形玻璃钮，离开为 `--destructive`）+ 输入框（房内打字）
+- 上麦按钮：主 CTA 胶囊（`--indigo-700` 实底白字）
+
+### 12.11 桌游室卡片
+
+- 实心卡片 2 列网格；封面占位图（`--ice-100` 底 + 游戏线性图标 `--ice-500` 48px）圆角 12px + 房间名 Nunito 700 15px + 状态 tag（等待中 `--ice-300` 底 / 对局中 `--sakura-300` 底 `--grape-700` 字，Micro Tag 胶囊）+ 人数 Space Grotesk 12px
+
+### 12.12 手势与场景动画（窄屏）
+
+- 五 tab / 群内五子场景横向滑动：跟手 `translateX` + 松手吸附 200ms ease-out；方向锁（垂直位移占优让位滚动）
+- 进群动画：BottomTabs `translateY(0→100%)` 200ms ease-in → 群场景变体滑入；中央槽位「主页」文本交叉淡化为群头像（槽位宽 48→64px 弹性过渡，总时长 ≤300ms）；输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms
+- 下拉回主页：跟手位移 + 阈值 80px，回弹 200ms ease-out
+- 直播间上下滑切换：跟手 `translateY` + 上下一张 20% 预览露出，松手过半切换 250ms ease-out
+
+### 12.13 增量场景 Agent Prompt 速查
+
+- 「做底部五 tab：玻璃底 blur 18px 高 64px，语音/直播/帖子/桌游为 24px 线性图标 + 11px Fredoka，主页居中圆形背板 48px 上浮 8px 带 --glow-shadow，未读 --pink-500 徽标」
+- 「做宽屏 TopNav：玻璃底高 64px，左头像 40px 带 --ring-online，一级模块 Nunito 700 15px，当前模块底部 2px #F796FF 指示条，右 240px 胶囊搜索框 focus 转 #F796FF」
+- 「做服务器栏：72px 玻璃列，48px 群头像带光环，当前群左 3px #F796FF 指示条，角标 16px 圆底（未读 #F17EB3 / 直播 #F796FF / 语音 #9DBFE6 / 桌游 #F9B0FF）」
+- 「做频道侧栏场景项：行高 40px 圆角 12px，左 20px 线性图标 + Nunito 600 15px，选中底 rgba(157,191,230,0.35)，右侧在麦人数 Space Grotesk 12px 或 LIVE #F17EB3 徽标」
+- 「做直播间卡片：16:9 封面圆角 12px，左上 LIVE #F17EB3 白字胶囊，标题 Nunito 700 15px #465B92，来源 Micro Tag #F9B0FF 底 #722E88 字」
+- 「做帖子卡：实心 --surface 圆角 16px，头像 36px 带光环 + Nunito 700 昵称 + Space Grotesk 12px 时间，正文 15px 超 3 行折叠，底排评论/收藏 18px 线性图标」
+
+---
+
+> 本文件是 `Ayla/web/` 视觉唯一事实源。新增组件先看 §4 / §12 有没有配方；没有就按 §2/§3/§5 的 token 与刻度推导，推导不出来再改本文件——不要在组件里散落裸 hex。
