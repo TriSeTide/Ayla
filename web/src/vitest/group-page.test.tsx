@@ -182,4 +182,28 @@ describe("GroupPage 宽屏", () => {
     screen.getByRole("button", { name: /直播/ }).click();
     await waitFor(() => expect(screen.getByText("群内直播内容")).toBeInTheDocument());
   });
+
+  it("服务器栏底部加号 → 打开建群对话框（需求：左下角头像键改创建群聊加号）", async () => {
+    mockMatchMedia(false);
+    renderGroup("/group/1");
+    const createBtn = screen.getByRole("button", { name: "创建群聊" });
+    expect(createBtn).toBeInTheDocument();
+    // 无旧的用户头像卡（左下角不再渲染头像键）
+    expect(document.querySelector(".server-user")).toBeNull();
+    createBtn.click();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument());
+    // 建群对话框已打开（群名必填输入框）
+    expect(document.querySelector('input[placeholder*="群名"]')).not.toBeNull();
+  });
+
+  it("服务器栏底部加号打开的建群对话框可关闭", async () => {
+    mockMatchMedia(false);
+    renderGroup("/group/1");
+    screen.getByRole("button", { name: "创建群聊" }).click();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    await waitFor(() =>
+      expect(document.querySelector(".group-create-dialog")).not.toBeInTheDocument(),
+    );
+  });
 });

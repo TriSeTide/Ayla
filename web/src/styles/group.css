@@ -238,20 +238,25 @@
   margin-top: var(--sp-2);
 }
 
-.server-user {
-  position: relative;
+/* 创建群聊加号（需求：左下角头像键改加号；56px 圆形玻璃底同 FAB 视觉） */
+.server-create-btn {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  transition: box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 
-.server-user-dot {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-pill);
-  background: var(--success);
-  border: 2px solid var(--surface);
+.server-create-btn:hover {
+  box-shadow: var(--glow-shadow);
+  background: rgba(157, 191, 230, 0.18);
 }
 
 /* ---- ChannelSidebar（design.md §12.4） ---- */

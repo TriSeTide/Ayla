@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 import * as chatApi from "../api/chat";
+import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { GroupTopTabs } from "../components/group/GroupTopTabs";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterGroupAnimation } from "../hooks/useEnterGroupAnimation";
@@ -49,6 +50,9 @@ export function GroupPage() {
   const setCurrentGroup = useGroupStore((s) => s.setCurrentGroup);
 
   const { entered } = useEnterGroupAnimation();
+
+  // 宽屏 ServerRail 底部加号：创建群聊（需求：左下角头像键改加号）
+  const [showGroupCreate, setShowGroupCreate] = useState(false);
 
   // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/home) ----
   const [pullOffset, setPullOffset] = useState(0);
@@ -193,6 +197,7 @@ export function GroupPage() {
           groups={groups}
           currentGroupId={id ?? null}
           onSelectGroup={(gid) => navigate(`/group/${gid}`)}
+          onCreateGroup={() => setShowGroupCreate(true)}
         />
         <ChannelSidebar
           group={{ id: id ?? "" }}
@@ -202,6 +207,7 @@ export function GroupPage() {
           onOpenInfo={openInfo}
         />
         <main className="group-content">{renderScene()}</main>
+        {showGroupCreate && <GroupCreateDialog onClose={() => setShowGroupCreate(false)} />}
       </div>
     );
   }

@@ -45,13 +45,13 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
     };
   }, [groupId]);
 
-  const index = channels.findIndex((c) => c.id === currentId);
-  const goPrev = useCallback(() => {
-    if (index > 0) setCurrentId(channels[index - 1].id);
-  }, [index, channels]);
-  const goNext = useCallback(() => {
-    if (index >= 0 && index < channels.length - 1) setCurrentId(channels[index + 1].id);
-  }, [index, channels]);
+  const goTo = useCallback(
+    (id: number) => {
+      if (id === currentId) return;
+      setCurrentId(id);
+    },
+    [currentId],
+  );
 
   if (loading) {
     return (
@@ -78,10 +78,8 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
       channelId={currentId}
       channel={channel}
       isNarrow={isNarrow}
-      hasPrev={index > 0}
-      hasNext={index >= 0 && index < channels.length - 1}
-      onPrev={goPrev}
-      onNext={goNext}
+      channels={channels}
+      onSelect={goTo}
       onBack={onExit}
       onDeleted={onExit}
       inputEntered // 群内子界面无底栏下滑动画，输入框直接显示

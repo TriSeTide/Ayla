@@ -1,11 +1,14 @@
 /**
  * LiveHall —— 直播大厅频道列表（M5-4，文档 §1）。
  *
- * 频道卡片：标题 / 主播昵称 / 状态徽章（直播中 / 未开播 / 已结束）；
- * 徽章基于乐观 status（列表无 /status/ 实时判定）；owner 是爱莉 user 的频道加"爱莉"角标
- * （普通频道渲染，无特殊数据通道）。
+ * 频道卡片：封面占位（16:9 渐变 + 状态徽章覆盖）+ 标题 / 主播昵称 /
+ * 来源标识（公开/好友/群名）+ 爱莉角标。封面图资源未接入 → 渐变占位
+ * （需求：卡片显示直播间封面，暂未实现就只占位）。
+ * 徽章基于乐观 status（列表无 /status/ 实时判定）；owner 是爱莉 user 的频道
+ * 加"爱莉"角标（普通频道渲染，无特殊数据通道）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
+import { IconVideo } from "../icons";
 
 function statusBadge(status: LiveChannelDescriptor["status"]): {
   className: string;
@@ -61,14 +64,17 @@ export function LiveHall({
             className="live-card"
             onClick={() => onEnter(ch.id)}
           >
-            <div className="live-card-head">
-              <span className={badge.className}>{badge.label}</span>
-              <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
-              {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
+            <div className={`live-card-cover ${ch.status === "live" ? "is-live" : ""}`}>
+              <IconVideo width={28} height={28} aria-hidden="true" />
+              <span className="live-card-cover-badge">
+                <span className={badge.className}>{badge.label}</span>
+                {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
+              </span>
             </div>
             <div className="live-card-title">{ch.title}</div>
-            <div className="live-card-owner">
-              {ownerNames[ch.owner_id] ?? "未知主播"}
+            <div className="live-card-meta">
+              <span className="live-card-owner">{ownerNames[ch.owner_id] ?? "未知主播"}</span>
+              <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
             </div>
           </button>
         );

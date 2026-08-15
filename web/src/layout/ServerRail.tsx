@@ -2,26 +2,27 @@
  * ServerRail —— 宽屏服务器栏（design.md §12.3，布局文档 §3.2）。
  *
  * 72px 玻璃列：纵向我的群头像（48px 圆形带光环 + 状态角标），点击切换当前群；
- * 当前群左侧 3px --glow-500 指示条 + 头像微放大；底部用户卡（头像 + 在线点，进个人页）。
+ * 当前群左侧 3px --glow-500 指示条 + 头像微放大；底部「创建群聊」加号按钮
+ * （需求：原左下角头像键改加号，点击 onCreateGroup 打开建群对话框）。
  *
  * F3 只落地切换群 + 未读角标（数据已有）；直播/语音/桌游角标随 F4/F5/F7 接入。
  */
-import { Link } from "react-router-dom";
 import { Avatar } from "../components/Avatar";
-import { useAuthStore } from "../stores/auth";
+import { IconPlus } from "../components/icons";
 import type { ConversationSummary } from "../api/types";
 
 export function ServerRail({
   groups,
   currentGroupId,
   onSelectGroup,
+  onCreateGroup,
 }: {
   groups: ConversationSummary[];
   currentGroupId: string | null;
   onSelectGroup: (id: string) => void;
+  /** 底部加号：创建群聊（打开建群对话框） */
+  onCreateGroup: () => void;
 }) {
-  const currentUser = useAuthStore((s) => s.currentUser);
-
   return (
     <nav className="server-rail" aria-label="我的群">
       <ul className="server-rail-list">
@@ -45,17 +46,15 @@ export function ServerRail({
         ))}
       </ul>
       <div className="server-rail-foot">
-        {currentUser && (
-          <Link to="/profile" className="server-user" aria-label="打开个人页">
-            <Avatar
-              label={currentUser.nickname || currentUser.username}
-              size={40}
-              online={currentUser.online}
-              imageUrl={currentUser.avatar || null}
-            />
-            <span className="server-user-dot" aria-hidden="true" />
-          </Link>
-        )}
+        <button
+          type="button"
+          className="server-create-btn"
+          onClick={onCreateGroup}
+          aria-label="创建群聊"
+          title="创建群聊"
+        >
+          <IconPlus width={22} height={22} />
+        </button>
       </div>
     </nav>
   );

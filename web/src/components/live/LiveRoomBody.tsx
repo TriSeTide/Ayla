@@ -1,34 +1,34 @@
 /**
  * LiveRoomBody —— 直播间核心（F4，供一级直播 tab LiveRoomPage 与群内直播 GroupLive 复用）。
  *
- * 职责：播放器三态渲染 + 弹幕（列表/输入）+ 主播面板 + 切换控件（窄屏上下滑 /
- * 宽屏两侧按钮 + 键盘 ↑↓）+ 输入框滑入动画。
+ * 职责：播放器三态渲染 + 弹幕（列表/输入）+ 主播面板 + 频道侧栏（封面列切换）。
  *
- * 切换范围由**外层传入的有序频道列表**决定（一级 = 全部可见；群内 = 仅该群，
- * 需求 R-L3/R-G7）——本组件只负责"当前直播间 + 上一个/下一个" UI 与手势。
+ * 频道切换（需求）：取消宽屏上下键/窄屏上下滑的"上一/下一个"按钮——统一改为
+ * 左侧**频道封面列**（LiveChannelRail）点击切换：
+ * - 宽屏：侧栏默认展开（返回键在侧栏顶部 + 收起/展开按钮）；收起后窄条保留返回 + 展开。
+ * - 窄屏：默认无侧栏（左上角返回键），点右上「频道列表」按钮打开侧栏覆盖层；
+ *   侧栏内**不出现第二个返回键**（返回键只在左上角）。
  *
- * 布局：复用 M5-4 的 .live-room（主区播放器 + 弹幕侧列）；窄屏弹幕侧列改为
- * 底部浮层（沉浸式），宽屏侧列 360px（验收要求的弹幕侧列）。
+ * 切换范围由**外层传入的有序频道列表**决定（一级 = 全部可见；群内 = 仅该群）。
  */
-import { useEffect } from "react";
+import { useState } from "react";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { DanmakuInput } from "./DanmakuInput";
 import { DanmakuList } from "./DanmakuList";
+import { LiveChannelRail } from "./LiveChannelRail";
 import { LiveOwnerPanel } from "./LiveOwnerPanel";
 import { LivePlayer } from "./LivePlayer";
 import { useDanmaku } from "../../hooks/useDanmaku";
 import { useLiveRoom } from "../../hooks/useLiveRoom";
-import { useSwipe } from "../../hooks/useSwipe";
+import { IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
 
 export function LiveRoomBody({
   channelId,
   channel,
   isNarrow,
-  hasPrev,
-  hasNext,
-  onPrev,
-  onNext,
+  channels,
+  onSelect,
   onBack,
   onDeleted,
   inputEntered,
@@ -36,10 +36,10 @@ export function LiveRoomBody({
   channelId: number;
   channel: LiveChannelDescriptor | null;
   isNarrow: boolean;
-  hasPrev: boolean;
-  hasNext: boolean;
-  onPrev: () => void;
-  onNext: () => void;
+  /** 有序频道列表（切换范围；一级 = 全部可见，群内 = 仅该群） */
+  channels: LiveChannelDescriptor[];
+  /** 点击封面切换直播间 */
+  onSelect: (channelId: number) => void;
   onBack: () => void;
   onDeleted: () => void;
   inputEntered: boolean;
@@ -50,32 +50,9 @@ export function LiveRoomBody({
   const srsStatus = useLiveStore((s) => s.current.srsStatus);
   const wsConnection = useLiveStore((s) => s.wsConnection);
 
-  // 宽屏键盘切换（↑↓）
-  useEffect(() => {
-    if (isNarrow) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (hasPrev) onPrev();
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (hasNext) onNext();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isNarrow, hasPrev, hasNext, onPrev, onNext]);
-
-  // 窄屏上下滑切换（范围 = 外层传入列表；弹幕输入框保持）
-  const swipe = useSwipe(
-    {
-      onEnd: (e) => {
-        if (e.direction === "up" && hasNext) onNext();
-        else if (e.direction === "down" && hasPrev) onPrev();
-      },
-    },
-    { threshold: 60 },
-  );
+  // 宽屏侧栏：默认展开，可收起（窄条）；窄屏侧栏：默认关闭（覆盖层）
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [railOpen, setRailOpen] = useState(false);
 
   if (error) {
     return (
@@ -89,44 +66,62 @@ export function LiveRoomBody({
   }
 
   return (
-    <div
-      className={`live-room live-room-body ${isNarrow ? "is-narrow" : "is-wide"}`}
-      {...swipe.handlers}
-    >
+    <div className={`live-room live-room-body ${isNarrow ? "is-narrow" : "is-wide"}`}>
+      {/* 宽屏：频道封面侧栏（返回键在侧栏内 + 收起/展开） */}
+      {!isNarrow && (
+        <LiveChannelRail
+          channels={channels}
+          currentId={channelId}
+          onSelect={onSelect}
+          collapsed={railCollapsed}
+          onToggle={() => setRailCollapsed((v) => !v)}
+          onBack={onBack}
+          showBack
+        />
+      )}
+
       <main className="live-room-main">
         <div className="live-room-head">
-          <button
-            type="button"
-            className="msg-action-btn"
-            onClick={onBack}
-            aria-label="返回"
-          >
-            ← 返回
-          </button>
-          <span className="live-room-title">
-            {loading ? "加载中…" : (channel?.title ?? "直播间")}
-          </span>
-          <span className={`live-ws-state live-ws-${wsConnection}`}>
-            {wsConnection === "online"
-              ? "弹幕已连接"
-              : wsConnection === "connecting"
-                ? "弹幕连接中…"
-                : "弹幕已断开"}
-          </span>
+          {isNarrow ? (
+            <>
+              <button
+                type="button"
+                className="msg-action-btn"
+                onClick={onBack}
+                aria-label="返回"
+              >
+                ← 返回
+              </button>
+              <span className="live-room-title">
+                {loading ? "加载中…" : (channel?.title ?? "直播间")}
+              </span>
+              <button
+                type="button"
+                className="live-room-rail-toggle"
+                onClick={() => setRailOpen(true)}
+                aria-label="打开直播间列表"
+                aria-expanded={railOpen}
+              >
+                <IconList width={20} height={20} />
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="live-room-title">
+                {loading ? "加载中…" : (channel?.title ?? "直播间")}
+              </span>
+              <span className={`live-ws-state live-ws-${wsConnection}`}>
+                {wsConnection === "online"
+                  ? "弹幕已连接"
+                  : wsConnection === "connecting"
+                    ? "弹幕连接中…"
+                    : "弹幕已断开"}
+              </span>
+            </>
+          )}
         </div>
 
         <div className="live-room-stage">
-          {!isNarrow && (
-            <button
-              type="button"
-              className="live-switch-btn"
-              onClick={onPrev}
-              disabled={!hasPrev}
-              aria-label="上一个直播间"
-            >
-              ↑
-            </button>
-          )}
           <div className="live-room-player-wrap">
             <LivePlayer
               srsStatus={srsStatus}
@@ -136,17 +131,6 @@ export function LiveRoomBody({
               onRetry={retryPlayer}
             />
           </div>
-          {!isNarrow && (
-            <button
-              type="button"
-              className="live-switch-btn"
-              onClick={onNext}
-              disabled={!hasNext}
-              aria-label="下一个直播间"
-            >
-              ↓
-            </button>
-          )}
         </div>
 
         {channel?.is_owner && (
@@ -171,6 +155,25 @@ export function LiveRoomBody({
           <DanmakuInput sending={sending} error={sendError} onSend={send} />
         </div>
       </aside>
+
+      {/* 窄屏：频道侧栏覆盖层（默认关闭；点开无返回键，返回键只在左上角） */}
+      {isNarrow && railOpen && (
+        <div className="live-room-rail-overlay">
+          <div className="live-room-rail-mask" onClick={() => setRailOpen(false)} aria-hidden="true" />
+          <LiveChannelRail
+            channels={channels}
+            currentId={channelId}
+            onSelect={(id) => {
+              onSelect(id);
+              setRailOpen(false);
+            }}
+            collapsed={false}
+            onToggle={() => setRailOpen(false)}
+            onBack={() => setRailOpen(false)}
+            showBack={false}
+          />
+        </div>
+      )}
     </div>
   );
 }

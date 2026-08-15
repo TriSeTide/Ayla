@@ -161,7 +161,7 @@
 
 .wide-messages-sidebar {
   flex: none;
-  width: 260px; /* 与主页 ChannelSidebar 宽度一致（group.css .channel-sidebar） */
+  width: 332px; /* 与主页左侧栏总宽一致（ServerRail 72 + ChannelSidebar 260，需求） */
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);

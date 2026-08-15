@@ -8,7 +8,7 @@ M5-4 为直播界面：直播大厅 + 开播指引（OBS 推流地址一次性�
 F1 为聚合主页基座：AppShell（窄屏 BottomTabs / 宽屏 TopNav）、CreateFAB 随场景创建入口、手势 hook、路由重构（新一级路由 + 旧 /chat 兼容重定向，后随 F10 移除裸 /chat、私聊独立为 PrivateChatPage）；
 F2 为窄屏主页 + 宽屏 /home 重定向：群卡片/列表双布局、群动态轮播、布局开关、最近群重定向；
 F3 为群聊场景容器：窄屏进群动画（底栏上移）、五子界面滑动、群头像两级点击、群内聊天（复用）、群信息（角色化）、宽屏三列（ServerRail + ChannelSidebar）；
-F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、上下滑/键盘切换直播间、群内直播（范围仅该群）、FAB 创建直播间；
+F4 为直播：一级直播聚合 tab（来源标识）、进房动画（底栏下滑走）、直播间左侧封面列切换（宽屏侧栏/窄屏覆盖层）、群内直播（范围仅该群）、FAB 创建直播间；
 F5 为语音：一级语音聚合 tab（来源标识）、进房动画（底栏下滑走）、房内打字发群会话、群内语音（范围仅该群）、FAB 建语音房；
 F6 为帖子：信息流（游标分页）、帖子详情（评论/收藏/删除）、发帖两条路径（FAB / 群内输入框）、群内帖子；
 F7 为桌游：房间框架（列表/创建/进入占位界面）、join/leave 状态、群内桌游（范围仅该群）、FAB 建桌游室；
@@ -202,7 +202,7 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `useEnterGroupAnimation`：进群动画独立封装（底栏上移到顶部，rAF 双帧进入 + reduced-motion 直入）——与 F4 进房动画（底栏下滑走）方向相反，不共用
 - [x] `GroupTopTabs`：窄屏上移后的顶部导航条（四 tab + 中央群头像槽位 + 5 圆点指示），原"主页"槽位形变为群头像（R-G1）；F10.2 起接 `pullHandlers` 顶部下拉手势（R-G6）
 - [x] 群头像两级点击（R-G4）：单一 handler 读 `activeScene` 分支——非 chat → 切回聊天；chat → 进群信息；无第二份导航状态
-- [x] `ServerRail`（宽屏 72px 群头像列 + 当前群 3px 指示条 + 未读角标 + 底部用户卡）+ `ChannelSidebar`（群名头进群信息 + 五场景项），宽屏三列 = 主页本身
+- [x] `ServerRail`（宽屏 72px 群头像列 + 当前群 3px 指示条 + 未读角标 + 底部「创建群聊」加号按钮，点击打开建群对话框）+ `ChannelSidebar`（群名头进群信息 + 五场景项），宽屏三列 = 主页本身
 - [x] `GroupChat`：复用 MessageList/MessageInput + loadHistory/sendMessage 等（无侧栏/演示数据/爱莉入口）；`GroupInfo`：群资料 + 成员角色标签 + owner/admin 编辑群资料（真功能）+ 管理项占位标注
 - [x] `AppShell` 窄屏群场景隐藏 BottomTabs/MessageFAB（GroupPage 自渲染顶部导航条）；`/group/:id/:scene` 由 GroupPage 统一处理（GroupScenePage 移除）
 - [x] 契约测试：group-store 4 + use-enter-group-animation 2 + group-page 7 + group-info 3；全量 vitest 216 通过 + build + 两形态冒烟通过
@@ -216,7 +216,7 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `LiveChannelDescriptor` 加 `visibility`/`group`/`group_name`（S1 可见性/群归属，来源标识数据）；`createLiveChannel(title, group)` 支持群归属
 - [x] `useEnterRoomAnimation`：进房动画输入框滑入（100ms 延迟）——与 F3 进群动画方向相反，不共用
 - [x] `stores/shell.ts`：`bottomTabsLeaving` 跨路由状态，AppShell 据此驱动窄屏直播间底栏**下滑走**（translateY 0→100%，200ms ease-in，R-L2）；`BottomTabs` 直播间时 `data-fixed` 脱离 flex 流
-- [x] `LiveRoomBody`（抽核心复用）：播放器三态 + 弹幕列表/输入 + 切换控件（窄屏上下滑 useSwipe / 宽屏两侧按钮 + 键盘 ↑↓）+ 弹幕输入框滑入
+- [x] `LiveRoomBody`（抽核心复用）：播放器三态 + 弹幕列表/输入 + 频道封面侧栏切换（宽屏 `LiveChannelRail` 侧栏 = 返回键 + 一列封面 + 收起/展开；窄屏覆盖层 + 左上角返回键）+ 弹幕输入框滑入
 - [x] `LiveRoomPage`：进房底栏下滑走 + 全量列表切换 navigate `/live/:nextId`（HLS 靠 channelId 变化重进房）
 - [x] `GroupLive`：群内直播子界面，切换范围 = **仅该群**（filter group）；无直播空态 + 发起引导
 - [x] `LiveHubPage`（改造 LiveHallPage）：聚合网格（窄屏 2 列 / 宽屏 3-4 列）+ 来源标识（公开/好友/群名）+ 空态
@@ -271,7 +271,7 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 - [x] `api/accounts.ts` `getBadges`（`GET /me/badges/` 五维聚合）；`api/chat.ts` 扩展 listJoinRequests/actionJoinRequest/listMyInvites/actionGroupInvite（S2）
 - [x] `stores/badges.ts`：`messageBadge` 聚合（私信未读 + 好友申请 + 群邀请 + 待审批入群申请，群未读不进消息中心红点）
-- [x] `MessagesPage`：私信/好友双选项卡 + 三组申请置顶（好友申请/群邀请/待审批入群申请）+ 同意/拒绝即时反馈 + 宽屏两列（左 260px 会话列表侧栏 `WideMessagesSidebar`，宽度与主页 ChannelSidebar 一致 + 右聊天内容区 `PrivateChatPane` 内联，点会话不跳转 URL）
+- [x] `MessagesPage`：私信/好友双选项卡 + 三组申请置顶（好友申请/群邀请/待审批入群申请）+ 同意/拒绝即时反馈 + 宽屏两列（左 332px 会话列表侧栏 `WideMessagesSidebar`，宽度与主页左侧总宽一致 ServerRail 72 + ChannelSidebar 260 + 右聊天内容区 `PrivateChatPane` 内联，点会话不跳转 URL）
 - [x] `AppShell` 进入拉 badges + 30s 轮询（断线降级）+ MessageFab/TopNav 消息项红点；窄屏消息中心左下角 MessageFab 变「返回主页」；窄屏私聊窗口（/chat/:id）底部有输入框时不渲染 BottomTabs/MessageFab；宽屏 TopNav 消息项在 /messages、/chat/:id 选中态
 - [x] 契约测试：badges-store 4；全量 vitest 241 通过 + build + 两形态冒烟通过
 
@@ -318,9 +318,18 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] **语音/直播统一卡片布局**：直播已是卡片网格；`VoiceChannelList` 从横排列表改卡片网格（名称/来源徽章/人数/加入按钮），窄屏 2 列 / 宽屏 3-4 列（与 live/games 同构，群内 GroupVoice 同步）
 - [x] **宽屏 TopNav 消息选中态**：`isMessagesRoute`（/messages、/chat/:id）+ TopNav 消息项 `.is-active`（底部 2px glow 指示条，同模块高亮）
 - [x] **窄屏消息页左下角返回主页**：MessageFab 加 `backHome` 变体，/messages 窄屏渲染「返回主页」→ /home（原消息入口让位）
-- [x] **宽屏私信两列**：`PrivateChatPane`（私聊聊天内容面板：头部/消息/typing/输入框，复用 useChat 数据流）+ `WideMessagesSidebar`（260px 会话列表侧栏，宽度与主页 ChannelSidebar 一致，含私信/好友 tab 与申请审批）；宽屏 /messages = 左侧栏 + 右聊天（点会话内联，不跳 URL）；宽屏 /chat/:id = 侧栏（当前会话高亮）+ 聊天
+- [x] **宽屏私信两列**：`PrivateChatPane`（私聊聊天内容面板：头部/消息/typing/输入框，复用 useChat 数据流）+ `WideMessagesSidebar`（332px 会话列表侧栏，宽度与主页左侧总宽一致 ServerRail 72 + ChannelSidebar 260，含私信/好友 tab 与申请审批）；宽屏 /messages = 左侧栏 + 右聊天（点会话内联，不跳 URL）；宽屏 /chat/:id = 侧栏（当前会话高亮）+ 聊天
 - [x] **窄屏私聊去底部导航栏**：`isPrivateChatRoute`（/chat/:id）窄屏不渲染 BottomTabs/MessageFab（下方有输入框时不能有导航栏）
 - [x] 契约测试：shell 34（新增 FAB 直开、isMessagesRoute/isPrivateChatRoute、消息选中/返回主页/私聊无底栏 8 例）；全量 vitest 269 通过 + build + 两形态冒烟通过
+
+## 侧栏与直播间布局收束（增量）
+
+- [x] **宽屏主页 ServerRail 左下角改「创建群聊」加号**：底部用户卡（进个人页）删除，改为加号按钮 → 打开建群对话框（GroupPage 持有 showGroupCreate state）；删 `.server-user`/`.server-user-dot` 样式，加 `.server-create-btn`（48px 圆形玻璃底，hover 辉光同 FAB）
+- [x] **宽屏私信侧栏宽度对齐主页左侧总宽**：`WideMessagesSidebar` 260px → 332px（用户确认：不加 ServerRail，仅加宽到与主页左侧总宽一致 ServerRail 72 + ChannelSidebar 260）
+- [x] **窄屏直播大厅两列 + 封面占位**：`LiveHall` 卡片加封面区（16:9 渐变占位 + 状态徽章 + 爱莉角标覆盖，封面资源未接入 → 占位），窄屏 2 列（新增 `@media (max-width: 768px)` repeat(2)）/ 宽屏 3-4 列；卡片底部 meta 行（主播名 + 来源标识）
+- [x] **宽屏直播间改左侧封面侧栏**：`LiveChannelRail`（88px 一列封面，点击切换，当前项高亮 + 直播红点）——替代原上下键切换按钮（`live-switch-btn` 删除，键盘 ↑↓ 监听移除）；返回键进侧栏顶部；侧栏可收起（窄条 56px 保留返回 + 展开 + 当前封面）再展开
+- [x] **窄屏直播间侧栏覆盖层**：默认无侧栏 + 左上角返回键 + 右上「打开直播间列表」按钮；点开左侧滑入覆盖层（240px 封面列），**侧栏内无第二个返回键**（返回键只在左上角）；点封面切换并自动关闭覆盖层
+- [x] 契约测试：live-rail 8（宽屏展开/收起/窄屏覆盖层无返回键/LiveHall 封面）+ group-page 2（ServerRail 加号开建群 + 关闭）；全量 vitest 278 通过 + build + 两形态冒烟通过
 
 ## 目录结构
 
@@ -409,7 +418,7 @@ web/
     │   ├── UserProfileCard.tsx  # F9 用户资料卡（加好友/发消息）
     │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/PrivateChatPane/WideMessagesSidebar/...（M5-2）
     │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/VoiceRoomBody/ElysiaVoicePanel（M5-3 + F5）
-    │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
+    │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/LiveChannelRail/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
     │   ├── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）
     │   ├── group/          # F3：GroupTopTabs（窄屏上移导航条）
     │   ├── posts/          # F6：PostCard/PostEditor/CommentList

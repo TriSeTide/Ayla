@@ -20,8 +20,137 @@
   min-width: 0;
 }
 
-.live-switch-btn {
+/* ================= 直播间频道封面侧栏（需求） ================= */
+
+.live-rail {
   flex: none;
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-right: 1px solid var(--glass-border);
+  min-height: 0;
+}
+
+.live-rail-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.live-rail-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-rail-icon-btn:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.live-rail-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.live-rail-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-rail-item:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.live-rail-item.is-active {
+  background: rgba(157, 191, 230, 0.35);
+  color: var(--text-primary);
+}
+
+.live-rail-cover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-input);
+  background: linear-gradient(150deg, var(--ice-200), var(--sakura-200));
+  color: var(--ice-500);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+}
+
+.live-rail-cover.small {
+  aspect-ratio: 1;
+  width: 40px;
+  border-radius: var(--radius-input);
+}
+
+.live-rail-live-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+}
+
+.live-rail-item-title {
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+/* 收起态：窄条 */
+.live-rail-collapsed {
+  width: 56px;
+}
+
+.live-rail-collapsed .live-rail-actions {
+  padding: var(--sp-2);
+}
+
+.live-rail-collapsed-current {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding-top: var(--sp-2);
+}
+
+/* 窄屏：频道列表覆盖层（右上「频道列表」按钮打开；返回键在左上角，侧栏内无返回键） */
+.live-room-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 40px;
   height: 40px;
   border-radius: var(--radius-pill);
@@ -30,15 +159,44 @@
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
-  font-size: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 
-.live-switch-btn:hover:not(:disabled) {
-  background: rgba(157, 191, 230, 0.35);
+.live-room-rail-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+}
+
+.live-room-rail-mask {
+  flex: 1;
+  background: rgba(70, 91, 146, 0.25);
+}
+
+.live-room-rail-overlay .live-rail {
+  width: 240px;
+}
+
+.live-room-rail-overlay .live-rail-list {
+  align-items: stretch;
+}
+
+.live-room-rail-overlay .live-rail-item {
+  flex-direction: row;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+}
+
+.live-room-rail-overlay .live-rail-cover {
+  width: 72px;
+  aspect-ratio: 16 / 9;
+  flex: none;
+}
+
+.live-room-rail-overlay .live-rail-item-title {
+  font-size: 13px;
+  text-align: left;
+  white-space: normal;
 }
 
 /* 弹幕输入框滑入（R-L2：进房 250ms 延迟 100ms） */
@@ -83,12 +241,53 @@
 
 /* ================= 一级直播聚合页（F4） ================= */
 
+/* 直播间卡片封面占位（需求：卡片显示封面，封面资源未接入 → 渐变占位） */
+.live-card-cover {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-input);
+  background: linear-gradient(150deg, var(--ice-200), var(--sakura-200));
+  color: var(--ice-500);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+}
+
+.live-card-cover.is-live {
+  background: linear-gradient(150deg, var(--ice-300), var(--pink-300));
+  color: #fff;
+}
+
+.live-card-cover-badge {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* 来源徽章与封面徽章分行展示（卡片底部 meta 行） */
+.live-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
 .live-hub {
   height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding-bottom: 68px; /* 窄屏避让 FAB */
+}
+
+@media (max-width: 768px) {
+  .live-hub .live-hall-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (min-width: 769px) {

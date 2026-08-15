@@ -3,13 +3,13 @@
  *
  * F4 增量：
  * - 进房动画：底栏下滑走（shell store）+ 输入框滑入（useEnterRoomAnimation）；
- * - 切换直播间：窄屏上下滑 / 宽屏按钮 + 键盘 ↑↓，范围 = **全部可见直播间**
- *   （公开 + 好友 + 已加入群，与群内直播"仅该群"不同，R-L3）；
+ * - 切换直播间：左侧频道封面侧栏（LiveChannelRail）点击切换，范围 = **全部可见
+ *   直播间**（公开 + 好友 + 已加入群，与群内直播"仅该群"不同，R-L3）；
  * - 切换时 HLS 重连（useLiveRoom 依赖 channelId 变化自动重进房）+ 弹幕输入框保持。
  *
- * 核心渲染复用 LiveRoomBody（播放器三态 + 弹幕 + 切换控件）。
+ * 核心渲染复用 LiveRoomBody（播放器三态 + 弹幕 + 频道侧栏）。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as liveApi from "../api/live";
 import type { LiveChannelDescriptor } from "../api/types";
@@ -53,15 +53,9 @@ export function LiveRoomPage() {
       .catch(() => setOrdered([]));
   }, [validId]);
 
-  const index = useMemo(() => ordered.findIndex((c) => c.id === channelId), [ordered, channelId]);
-  const hasPrev = index > 0;
-  const hasNext = index >= 0 && index < ordered.length - 1;
-
-  const goPrev = () => {
-    if (index > 0) navigate(`/live/${ordered[index - 1].id}`, { replace: true });
-  };
-  const goNext = () => {
-    if (index >= 0 && index < ordered.length - 1) navigate(`/live/${ordered[index + 1].id}`, { replace: true });
+  const goTo = (id: number) => {
+    if (id === channelId) return;
+    navigate(`/live/${id}`, { replace: true });
   };
 
   if (!validId) return null;
@@ -71,10 +65,8 @@ export function LiveRoomPage() {
       channelId={channelId}
       channel={channel}
       isNarrow={isNarrow}
-      hasPrev={hasPrev}
-      hasNext={hasNext}
-      onPrev={goPrev}
-      onNext={goNext}
+      channels={ordered}
+      onSelect={goTo}
       onBack={() => navigate("/live")}
       onDeleted={() => navigate("/live")}
       inputEntered={inputEntered}
