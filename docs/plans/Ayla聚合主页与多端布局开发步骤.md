@@ -326,6 +326,20 @@
 
 **验证**：`tsc` 无错；vitest 253 通过（新增 shell 主页 FAB 建群对话框 1、group-page 下拉手势过阈值/未过阈值 2）；`npm run build` 通过；Playwright 冒烟：主页 FAB → 建群对话框（群名必填 + 成员可选，建群按钮空名禁用/填名可用）→ 建群 → 跳 `/group/g9`；群聊顶部导航条 touch 下拉 >80px → `/home`（`.bottom-tabs` 复位）。
 
+### F10.3 窄屏顶栏固定 + 搜索页复用顶栏 【已验收 2026-08-15】
+
+> 背景（用户 2026-08-15）：①窄屏顶部导航栏没有固定在顶部（随内容滚动走）；②搜索界面重复渲染了导航栏——SearchPage 无条件渲染 `NarrowTopBar`（宽屏下与 AppShell TopNav 重复），且顶栏已有搜索胶囊，页面又加独立 `.search-input-wrap`。
+
+**顶栏固定**：
+- `src/styles/home.css`：`.narrow-topbar` 加 `position: sticky; top: 0; z-index: 50`——窄屏各一级页顶栏（Home/Voice/Live/Posts/Games/Messages/Favorites/Search 共用）不再随 `.xxx-page` 滚动容器滚走（布局文档 §2.1 TopBar 常驻 / §3.1 TopNav「常驻不滚走」）。sticky 只影响视觉吸附，仍占流内高度，各页面布局不受影响。
+
+**搜索页复用顶栏**（布局文档 §2.7「搜索界面：TopBar 变搜索输入态（自动聚焦 + 左返回）」落地）：
+- `src/layout/NarrowTopBar.tsx`：加 `variant: "default" | "search"` prop。`search` 态 = 左返回（IconBack → `navigate(-1)`）+ 搜索输入框（自动聚焦 + 受控 + 回车提交 `/search?q=…`，词走 URL 与宽屏 TopNav 同通道）+ 右「三」更多。URL q 变化时同步输入框。
+- `src/pages/SearchPage.tsx`：删除独立 `.search-input-wrap` 表单；窄屏渲染 `<NarrowTopBar variant="search" />`、宽屏不渲染（AppShell TopNav 承载搜索框）；`useSearchParams` 读 `?q=` 自动搜索；历史 chips 点击 → `setSearchParams({q})` 触发搜索。
+- `src/styles/search.css`：删 `.search-input-wrap`/`.search-input` 样式；历史/结果区顶部补间距（顶栏下方留白）；`.narrow-topbar-search` 支持 input 子元素（透明底、focus-within 辉光，同 top-nav-search）。
+
+**验证**：`tsc` 无错；vitest 260 通过（新增 search-page 6：窄屏搜索输入态顶栏自动聚焦/无独立搜索框、宽屏不渲染 NarrowTopBar、顶栏回车 URL q 驱动搜索、URL 直入自动搜索、历史 chips 点击触发、清空历史）；`npm run build` 通过；Playwright 冒烟：窄屏主页/搜索页 `.narrow-topbar` `position: sticky; top: 0` 生效；搜索页无 `.search-input-wrap`、顶栏自动聚焦 + 返回按钮 + 结果分组；宽屏搜索页只渲染 TopNav（无 NarrowTopBar）；窄屏主页搜索胶囊 → `/search` 顶栏变输入态。
+
 ## 4. 联调与验证
 
 - 后端 dev：`python manage.py runserver 8100`；前端 dev：`npm run dev`（Vite proxy `/api`、`/ws` → 8100）。

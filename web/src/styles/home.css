@@ -32,6 +32,9 @@
 /* ================= 窄屏 TopBar（布局文档 §2.1） ================= */
 
 .narrow-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50; /* 顶栏层级：覆盖滚动内容，低于弹层/抽屉 80（布局文档 §1 z-index 分层） */
   flex: none;
   display: flex;
   align-items: center;
@@ -49,7 +52,7 @@
   display: inline-flex;
 }
 
-/* 搜索胶囊（design.md §12.9）：主页顶栏变体，点击进搜索页 */
+/* 搜索胶囊（design.md §12.9）：主页顶栏变体，点击进搜索页；搜索页变体为真实输入框（variant="search"） */
 .narrow-topbar-search {
   flex: 1;
   display: flex;
@@ -68,6 +71,25 @@
 .narrow-topbar-search:hover {
   text-decoration: none;
   border-color: var(--ice-500);
+}
+
+.narrow-topbar-search:focus-within {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+}
+
+.narrow-topbar-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none; /* focus 反馈由容器 focus-within 辉光承载（design.md §10 focus 可见） */
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.narrow-topbar-search input::placeholder {
+  color: var(--slate-500);
 }
 
 .narrow-topbar-more {

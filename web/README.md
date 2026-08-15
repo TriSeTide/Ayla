@@ -187,7 +187,7 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] 角标纯函数（`components/home/badges.ts`）：优先级 未读 > 直播 > 语音 > 桌游（R-H5），最多 3 个，未读 99+ 截断；live/voice/game 数据源由 F4/F5/F7 接入
 - [x] `GroupCarousel`：横向滑轨 translateX 300ms 滑入、3s 间隔；IntersectionObserver 进视口启停；`prefers-reduced-motion` 静态首帧；无动态回退群头像（64px 带光环）
 - [x] `GroupCard`（卡片：封面轮播 + 右上角标列 + 底部群头像群名，点封面开动态 / 点底部进群，避免 button 嵌套）+ `GroupListItem`（行高 64px 玻璃底）+ `LayoutSwitch`（卡片/列表切换）
-- [x] `NarrowTopBar`（窄屏一级页顶栏：头像→个人页 / 搜索胶囊→搜索页 / 更多菜单；补齐 F1 窄屏无个人页与搜索入口的缺口，F4-F7 一级 tab 复用）
+- [x] `NarrowTopBar`（窄屏一级页顶栏：头像→个人页 / 搜索胶囊→搜索页 / 更多菜单；补齐 F1 窄屏无个人页与搜索入口的缺口，F4-F7 一级 tab 复用；`position: sticky; top: 0` 常驻不随内容滚动，搜索页用 `variant="search"` 输入态）
 - [x] `HomePage`：窄屏双布局 + 空态引导（创建/搜索发现群）+ 骨架屏 + 失败重试 + 增量加载更多（R-H6/H9）；宽屏重定向 `/group/<最近群>`（localStorage，无历史取第一个群，无群空态引导）
 - [x] `stores/home.ts`：布局偏好 + 最近群持久化（localStorage）
 - [x] 契约测试：home-badges 8 + home-store 3 + highlights-api 3 + group-carousel 5 + home-page 7；全量 vitest 200 通过 + `npm run build` 通过 + 两形态冒烟通过
@@ -284,9 +284,9 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `api/search.ts`：`GET /search/?q=&types=&limit=` 五类分组（user/group/post/live/game，每组 items+total）
 - [x] `stores/search.ts`：搜索历史 chips（localStorage 去重栈 + 上限 10 + 清空）
 - [x] `UserProfileCard`：用户资料卡（加好友发起申请 + 发消息进私聊）
-- [x] `SearchPage`：搜索输入（自动聚焦）+ 历史 chips + 五类分组 + 点用户弹资料卡、其余跳对应界面
+- [x] `SearchPage`：顶栏复用（窄屏 `NarrowTopBar variant="search"` 搜索输入态：左返回 + 自动聚焦 + URL `?q=` 驱动；宽屏由 TopNav 承载搜索框）+ 历史 chips + 五类分组 + 点用户弹资料卡、其余跳对应界面
 - [x] `TopNav` 内联搜索下拉（去抖 300ms，分组前几条，点击跳转）；删除无引用的 PlaceholderPage
-- [x] 契约测试：search-store 4 + search-api 3；全量 vitest 248 通过 + build + 两形态冒烟通过
+- [x] 契约测试：search-store 4 + search-api 3 + search-page 6；全量 vitest 254 通过 + build + 两形态冒烟通过
 
 **F9 已知取舍**（步骤文档 §7 登记）：用户资料卡"好友关系状态展示"后置；桌游室搜索结果跳 /games 列表。
 
@@ -305,6 +305,12 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] **F10.2 建群表单**（R-F3 最小集）：`GroupCreateDialog` 直接建群表单（群名必填 + 成员搜索可选 + 点「私聊」发起会话）；`shellConfig.resolveFabAction("/home")` 补 `handler:"group"`；`CreateFab` 主页 FAB 打开建群对话框（不再提示落步骤）
 - [x] **F10.2 下拉返回主页**（R-G6）：`GroupTopTabs` 接 `pullHandlers`；`GroupPage` 顶部导航条下拉手势（跟手 translateY + 阈值 80px + 退场动画 250ms）+ `navigate("/home")`；`tokens.css` 补 `--ease-in`
 - [x] 契约测试：shell 3（新增主页 FAB 建群）+ group-page 2（下拉过/未过阈值）；全量 vitest 253 通过 + build + 两形态冒烟通过
+
+## 顶栏固定 + 搜索页复用顶栏（增量）
+
+- [x] **窄屏顶栏 sticky 固定**：`.narrow-topbar` 加 `position: sticky; top: 0; z-index: 50`，各窄屏一级页顶栏不再随内容滚动走（布局文档 §2.1 TopBar / §3.1 TopNav「常驻不滚走」）
+- [x] **搜索页复用顶栏**：`NarrowTopBar` 加 `variant="search"`（左返回 + 自动聚焦搜索框 + 更多菜单，词走 URL `?q=`，与宽屏 TopNav 同通道）；`SearchPage` 删除独立 `.search-input-wrap`，窄屏渲染搜索输入态顶栏、宽屏由 TopNav 承载；历史 chips 点击 → URL `?q=` 驱动搜索
+- [x] 契约测试：新增 search-page 6（顶栏复用/URL q 驱动/历史 chips/宽屏不渲染）；全量 vitest 260 通过 + build + 两形态冒烟通过
 
 ## 目录结构
 

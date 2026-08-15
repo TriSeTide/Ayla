@@ -1,69 +1,74 @@
 /**
  * SearchPage —— 全局搜索页（路由 /search，F9，R-S1~S4）。
  *
- * 搜索输入（自动聚焦）+ 历史 chips（可清空）+ 五类分组结果（用户/群/帖子/直播间/桌游室）+
+ * 顶栏复用窄屏 TopBar（variant="search"：自动聚焦 + 左返回 + 输入框，布局文档 §2.7），
+ * 搜索词走 URL ?q=（与宽屏 TopNav 同一通道）；宽屏由 AppShell TopNav 承载搜索框。
+ * 历史 chips（可清空）+ 五类分组结果（用户/群/帖子/直播间/桌游室）+
  * 每组截断 + "查看更多"；用户点击弹资料卡（加好友/发消息），其余跳对应界面。
  * 可见性过滤由后端完成，前端仅展示（R-S3）。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { search } from "../api/search";
 import type { SearchResults, UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { UserProfileCard } from "../components/UserProfileCard";
-import { IconSearch } from "../components/icons";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useSearchStore } from "../stores/search";
 
 export function SearchPage() {
   const navigate = useNavigate();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
   const { history, pushHistory, clearHistory } = useSearchStore();
-  const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserPublic | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
+  const doSearch = useCallback(
+    (query: string) => {
+      const trimmed = query.trim();
+      if (!trimmed) return;
+      setLoading(true);
+      setError(null);
+      pushHistory(trimmed);
+      search({ q: trimmed, limit: 3 })
+        .then(setResults)
+        .catch((e) => setError(e instanceof Error ? e.message : "搜索失败"))
+        .finally(() => setLoading(false));
+    },
+    [pushHistory],
+  );
+
+  // URL q 驱动：进入 /search?q=… 或顶栏/历史更新 q 时自动搜索
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!q) {
+      setResults(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    doSearch(q);
+  }, [q, doSearch]);
 
-  const doSearch = useCallback((query: string) => {
+  /** 历史 chips / 表单提交统一走 URL，与顶栏输入框同步 */
+  const submitQuery = (query: string) => {
     const trimmed = query.trim();
     if (!trimmed) return;
-    setLoading(true);
-    setError(null);
-    pushHistory(trimmed);
-    search({ q: trimmed, limit: 3 })
-      .then(setResults)
-      .catch((e) => setError(e instanceof Error ? e.message : "搜索失败"))
-      .finally(() => setLoading(false));
-  }, [pushHistory]);
-
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    doSearch(q);
+    setSearchParams({ q: trimmed });
   };
 
   return (
     <div className="search-page">
-      <NarrowTopBar />
-      <form className="search-input-wrap" onSubmit={onSubmit}>
-        <IconSearch width={16} height={16} />
-        <input
-          ref={inputRef}
-          className="search-input"
-          placeholder="搜索用户、群、帖子、直播间、桌游室"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-      </form>
+      {isNarrow && <NarrowTopBar variant="search" />}
 
-      {history.length > 0 && !results && (
+      {!q && history.length > 0 && (
         <div className="search-history">
           {history.map((h) => (
-            <button key={h} type="button" className="search-chip" onClick={() => { setQ(h); doSearch(h); }}>
+            <button key={h} type="button" className="search-chip" onClick={() => submitQuery(h)}>
               {h}
             </button>
           ))}
