@@ -173,7 +173,7 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] `AppShell`：窄屏（≤768px）= 内容 + BottomTabs + MessageFAB + CreateFAB；宽屏（>768px）= TopNav + 内容 + CreateFAB；直播间沉浸路由（`/live/:channelId`）不渲染 chrome
 - [x] `BottomTabs`：五 tab（语音/直播/主页居中凸起/帖子/桌游），主页圆形背板 48px 上浮 8px 选中辉光；badges prop 预留（F8）
 - [x] `TopNav`：头像（→个人页）+ 一级模块链（当前模块 2px `--glow-500` 指示条）+ 消息（未读徽标预留）+ 搜索胶囊（回车进 `/search`）+ 更多菜单（个人主页/退出登录，F10 扩展）
-- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/posts/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；面板 = 场景动作 + 次级「创建群聊」（打开 GroupCreateDialog 建群对话框：群名必填 + 成员可选，F10.2 后不跳 `/chat`）
+- [x] `CreateFAB`：路由匹配表（`shellConfig.resolveFabAction`，需求 §3.5 全表）——主页/语音/直播/帖子/桌游一级创建 + 群内 voice/live/games 创建；聊天/群信息/直播间/消息/搜索/个人页无 FAB；**点加号直接打开当前场景创建表单**（主页=GroupCreateDialog、语音/直播/帖子/桌游=CreateSheet 浮层），各界面只显示各自功能，无面板气泡/次级「创建群聊」
 - [x] 路由重构（`App.tsx`）：`/` → `/home`；新增 `/home /voice /live /live/:id /posts /games /messages /search /profile /group/:id[/:scene]`；受保护页统一挂 AppShell 布局路由；`/chat/:conversationId` 群聊重定向 `/group/:id`、私聊保留（F10 后私聊独立为 PrivateChatPage、裸 `/chat` 移除）；未落地页面渲染 `PlaceholderPage`（标注 F 步骤）
 - [x] 契约测试：新增 use-media-query 3 / use-swipe 8 / shell（路由映射 + 双形态 + FAB 面板）/ chat-conversation-route 6；全量 vitest 174 通过 + `npm run build` 通过 + 两形态（375/1440）冒烟通过
 
@@ -271,8 +271,8 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 
 - [x] `api/accounts.ts` `getBadges`（`GET /me/badges/` 五维聚合）；`api/chat.ts` 扩展 listJoinRequests/actionJoinRequest/listMyInvites/actionGroupInvite（S2）
 - [x] `stores/badges.ts`：`messageBadge` 聚合（私信未读 + 好友申请 + 群邀请 + 待审批入群申请，群未读不进消息中心红点）
-- [x] `MessagesPage`：私信/好友双选项卡 + 三组申请置顶（好友申请/群邀请/待审批入群申请）+ 同意/拒绝即时反馈 + 宽屏双栏
-- [x] `AppShell` 进入拉 badges + 30s 轮询（断线降级）+ MessageFab/TopNav 消息项红点
+- [x] `MessagesPage`：私信/好友双选项卡 + 三组申请置顶（好友申请/群邀请/待审批入群申请）+ 同意/拒绝即时反馈 + 宽屏两列（左 260px 会话列表侧栏 `WideMessagesSidebar`，宽度与主页 ChannelSidebar 一致 + 右聊天内容区 `PrivateChatPane` 内联，点会话不跳转 URL）
+- [x] `AppShell` 进入拉 badges + 30s 轮询（断线降级）+ MessageFab/TopNav 消息项红点；窄屏消息中心左下角 MessageFab 变「返回主页」；窄屏私聊窗口（/chat/:id）底部有输入框时不渲染 BottomTabs/MessageFab；宽屏 TopNav 消息项在 /messages、/chat/:id 选中态
 - [x] 契约测试：badges-store 4；全量 vitest 241 通过 + build + 两形态冒烟通过
 
 **说明**：红点实时推送（S2 WS 用户级广播 group.request.resolved/group.invite.new）接线后置，30s 轮询 + 处理 action 后即时 fetch 已覆盖"随处理即时刷新"验收。
@@ -312,6 +312,16 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] **搜索页复用顶栏**：`NarrowTopBar` 加 `variant="search"`（左返回 + 自动聚焦搜索框 + 更多菜单，词走 URL `?q=`，与宽屏 TopNav 同通道）；`SearchPage` 删除独立 `.search-input-wrap`，窄屏渲染搜索输入态顶栏、宽屏由 TopNav 承载；历史 chips 点击 → URL `?q=` 驱动搜索
 - [x] 契约测试：新增 search-page 6（顶栏复用/URL q 驱动/历史 chips/宽屏不渲染）；全量 vitest 260 通过 + build + 两形态冒烟通过
 
+## FAB 直开创建 + 语音卡片 + 消息导航收束（增量）
+
+- [x] **FAB 点加号直接创建**：`CreateFab` 去掉多动作面板气泡——点加号直接打开当前场景表单；主页=GroupCreateDialog（建群）、语音/直播/帖子/桌游=通用 `CreateSheet` 浮层（标题 + 关闭 + 对应表单）；各界面只显示各自功能，删除次级「创建群聊」项与 hint；删 `.fab-panel`/`.fab-mask` 样式
+- [x] **语音/直播统一卡片布局**：直播已是卡片网格；`VoiceChannelList` 从横排列表改卡片网格（名称/来源徽章/人数/加入按钮），窄屏 2 列 / 宽屏 3-4 列（与 live/games 同构，群内 GroupVoice 同步）
+- [x] **宽屏 TopNav 消息选中态**：`isMessagesRoute`（/messages、/chat/:id）+ TopNav 消息项 `.is-active`（底部 2px glow 指示条，同模块高亮）
+- [x] **窄屏消息页左下角返回主页**：MessageFab 加 `backHome` 变体，/messages 窄屏渲染「返回主页」→ /home（原消息入口让位）
+- [x] **宽屏私信两列**：`PrivateChatPane`（私聊聊天内容面板：头部/消息/typing/输入框，复用 useChat 数据流）+ `WideMessagesSidebar`（260px 会话列表侧栏，宽度与主页 ChannelSidebar 一致，含私信/好友 tab 与申请审批）；宽屏 /messages = 左侧栏 + 右聊天（点会话内联，不跳 URL）；宽屏 /chat/:id = 侧栏（当前会话高亮）+ 聊天
+- [x] **窄屏私聊去底部导航栏**：`isPrivateChatRoute`（/chat/:id）窄屏不渲染 BottomTabs/MessageFab（下方有输入框时不能有导航栏）
+- [x] 契约测试：shell 34（新增 FAB 直开、isMessagesRoute/isPrivateChatRoute、消息选中/返回主页/私聊无底栏 8 例）；全量 vitest 269 通过 + build + 两形态冒烟通过
+
 ## 目录结构
 
 ```text
@@ -325,7 +335,7 @@ web/
 └── src/
     ├── main.tsx            # 入口：会话恢复 + Router 挂载 + chat WS 启动
     ├── App.tsx             # 路由表（/home /voice /live /posts /games /messages /search /profile /group/:id[/*] + /chat/:conversationId 私聊/群聊分流；裸 /chat 已移除）
-    ├── layout/             # F1/F2/F3：AppShell / BottomTabs / TopNav / CreateFab / MessageFab / NarrowTopBar / ServerRail / ChannelSidebar / shellConfig（路由匹配表）
+    ├── layout/             # F1/F2/F3：AppShell / BottomTabs / TopNav / CreateFab / CreateSheet / MessageFab / NarrowTopBar / ServerRail / ChannelSidebar / shellConfig（路由匹配表）
     ├── api/
     │   ├── client.ts       # fetch 封装：baseURL / Authorization / 错误归一 / 401 刷新重放
     │   ├── auth.ts         # register / login / refresh / me / profile
@@ -397,7 +407,7 @@ web/
     ├── components/
     │   ├── ProtectedRoute.tsx
     │   ├── UserProfileCard.tsx  # F9 用户资料卡（加好友/发消息）
-    │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/...（M5-2）
+    │   ├── chat/           # ConversationList/MessageList/MessageBubble/MessageInput/PrivateChatPane/WideMessagesSidebar/...（M5-2）
     │   ├── voice/          # VoiceChannelList/Create/Panel/MemberRow/Controls/VoiceRoomBody/ElysiaVoicePanel（M5-3 + F5）
     │   ├── live/           # LiveHall/LiveCreate/LivePlayer/LiveRoomBody/DanmakuList/DanmakuInput/LiveOwnerPanel（M5-4 + F4）
     │   ├── home/           # F2：GroupCard/GroupListItem/GroupCarousel/LayoutSwitch/badges（角标纯函数）

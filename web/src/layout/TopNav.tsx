@@ -19,9 +19,12 @@ import { PRIMARY_MODULES } from "./shellConfig";
 
 export function TopNav({
   moduleKey,
+  messagesActive = false,
   messageBadge = 0,
 }: {
   moduleKey: ModuleKey | null;
+  /** 消息路由选中态（/messages、/chat/:id）：消息项底部指示条高亮 */
+  messagesActive?: boolean;
   /** 消息未读聚合（F8 接 me/badges；F1 恒 0） */
   messageBadge?: number;
 }) {
@@ -111,7 +114,12 @@ export function TopNav({
       </nav>
 
       <div className="top-nav-right">
-        <Link to="/messages" className="top-nav-icon-btn" aria-label="消息">
+        <Link
+          to="/messages"
+          className={`top-nav-icon-btn ${messagesActive ? "is-active" : ""}`}
+          aria-label="消息"
+          aria-current={messagesActive ? "true" : undefined}
+        >
           <IconMessage width={20} height={20} />
           {messageBadge > 0 && (
             <span className="tab-badge" aria-label={`${messageBadge} 条未读`}>

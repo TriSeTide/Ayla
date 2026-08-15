@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../layout/AppShell";
 import {
   isLiveRoomRoute,
+  isMessagesRoute,
+  isPrivateChatRoute,
   resolveFabAction,
   resolveModule,
 } from "../layout/shellConfig";
@@ -52,6 +54,7 @@ function renderShell(path: string, narrow: boolean) {
           <Route path="/group/:id" element={<div>群聊内容</div>} />
           <Route path="/group/:id/:scene" element={<div>群子场景</div>} />
           <Route path="/chat" element={<div>聊天内容</div>} />
+          <Route path="/chat/:conversationId" element={<div>私聊内容</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -185,37 +188,101 @@ describe("AppShell", () => {
 /* ---------- CreateFAB 交互 ---------- */
 
 describe("CreateFab", () => {
-  it("发帖 FAB（F6 已接线）面板渲染 PostEditor 表单", async () => {
+  it("发帖 FAB（F6 已接线）点加号直接打开 PostEditor 表单", async () => {
     renderShell("/posts", true);
     fireEvent.click(screen.getByRole("button", { name: "发帖" }));
     expect(screen.getByPlaceholderText("正文（必填）")).toBeInTheDocument();
   });
 
-  it("面板含次级「创建群聊」，点击打开建群对话框", async () => {
+  it("FAB 无面板气泡：各界面只渲染各自创建表单，无「创建群聊」次级项", async () => {
     renderShell("/posts", true);
     fireEvent.click(screen.getByRole("button", { name: "发帖" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "创建群聊" }));
-    // 打开 GroupCreateDialog（建群表单：群名必填 + 可选成员搜索）
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument());
-    expect(screen.getByPlaceholderText("群名（必填）")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("搜索成员（可选，可稍后在群内添加）")).toBeInTheDocument();
+    // 直接是 PostEditor 表单，无动作面板菜单
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "创建群聊" })).not.toBeInTheDocument();
   });
 
-  it("群内开播（F4 已接线）面板渲染创建直播间表单", async () => {
+  it("群内开播（F4 已接线）点加号直接打开创建直播间表单", async () => {
     renderShell("/group/g1/live", true);
     fireEvent.click(screen.getByRole("button", { name: "群内开播" }));
     // F4 起 group-live 动作渲染 LiveCreate 真表单（非 hint 提示）
     expect(screen.getByPlaceholderText("给直播间起个标题")).toBeInTheDocument();
   });
 
-  it("主页 FAB 主动作「创建群聊」打开建群对话框（R-F3 已接线）", async () => {
+  it("主页 FAB 点加号直接打开建群对话框（R-F3 已接线，无面板）", async () => {
     renderShell("/home", true);
     fireEvent.click(screen.getByRole("button", { name: "创建群聊" }));
-    // 面板显示「创建群聊」动作项，点击打开建群对话框（非 hint 提示）
-    fireEvent.click(screen.getByRole("menuitem", { name: "创建群聊" }));
+    // 点加号直接打开建群对话框（不再有动作面板/次级项）
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument(),
     );
     expect(screen.getByPlaceholderText("群名（必填）")).toBeInTheDocument();
+  });
+});
+
+/* ---------- 需求：宽屏消息选中 / 窄屏消息页返回主页 / 私聊无底栏 ---------- */
+
+describe("isMessagesRoute / isPrivateChatRoute", () => {
+  it("消息中心与私聊窗口命中消息路由，其它不命中", () => {
+    expect(isMessagesRoute("/messages")).toBe(true);
+    expect(isMessagesRoute("/chat/c1")).toBe(true);
+    expect(isMessagesRoute("/home")).toBe(false);
+    expect(isMessagesRoute("/group/g1")).toBe(false);
+    expect(isMessagesRoute("/search")).toBe(false);
+  });
+
+  it("私聊聊天路由仅命中 /chat/:id", () => {
+    expect(isPrivateChatRoute("/chat/c1")).toBe(true);
+    expect(isPrivateChatRoute("/messages")).toBe(false);
+    expect(isPrivateChatRoute("/home")).toBe(false);
+  });
+});
+
+describe("AppShell 消息导航（需求）", () => {
+  it("宽屏 TopNav 消息项在 /messages 选中（aria-current + is-active）", () => {
+    renderShell("/messages", false);
+    const msg = screen.getByRole("link", { name: "消息" });
+    expect(msg).toHaveAttribute("aria-current", "true");
+    expect(msg.className).toContain("is-active");
+  });
+
+  it("宽屏 TopNav 消息项在 /chat/:id 私聊窗口选中", () => {
+    renderShell("/chat/c1", false);
+    const msg = screen.getByRole("link", { name: "消息" });
+    expect(msg).toHaveAttribute("aria-current", "true");
+    expect(msg.className).toContain("is-active");
+  });
+
+  it("宽屏其它页消息项不选中", () => {
+    renderShell("/home", false);
+    const msg = screen.getByRole("link", { name: "消息" });
+    expect(msg).not.toHaveAttribute("aria-current");
+    expect(msg.className).not.toContain("is-active");
+  });
+
+  it("窄屏消息中心左下角按钮变为返回主页（无消息入口）", () => {
+    renderShell("/messages", true);
+    expect(screen.getByRole("button", { name: "返回主页" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+  });
+
+  it("窄屏非消息页左下角仍是消息入口", () => {
+    renderShell("/home", true);
+    expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "返回主页" })).not.toBeInTheDocument();
+  });
+
+  it("窄屏私聊窗口（/chat/:id）不渲染 BottomTabs 与 MessageFab（下方有输入框无导航栏）", () => {
+    renderShell("/chat/c1", true);
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "返回主页" })).not.toBeInTheDocument();
+  });
+
+  it("窄屏消息中心仍渲染 BottomTabs（五 tab 可导航）", () => {
+    renderShell("/messages", true);
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "主页" })).toBeInTheDocument();
   });
 });

@@ -179,3 +179,49 @@
   justify-content: center;
   margin-top: var(--sp-3);
 }
+
+/* ================= FAB 创建浮层（CreateSheet，需求：点加号直接创建） ================= */
+
+.create-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: rgba(70, 91, 146, 0.25);
+}
+
+.create-sheet-card {
+  width: min(480px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+
+.create-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-3);
+}
+
+.create-sheet-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 表单输入（语音/桌游）统一样式 */
+.create-sheet-card .voice-create-input,
+.create-sheet-card .game-room-create .field {
+  width: 100%;
+  margin-bottom: var(--sp-3);
+}
+
+.create-sheet-card .btn-primary {
+  width: 100%;
+  justify-content: center;
+}

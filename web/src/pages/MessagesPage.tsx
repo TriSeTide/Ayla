@@ -1,9 +1,10 @@
 /**
  * MessagesPage —— 消息中心（路由 /messages，F8，R-M1~M5）。
  *
- * 双选项卡：私信（private 会话列表）/ 好友列表（好友 + 待处理申请置顶）。
- * 申请条目：好友申请 + 群邀请 + 待审批入群申请（我作为 owner/admin），分组置顶，
- * 同意/拒绝即时反馈（处理后灰显）。宽屏双栏（左 300px 列表 + 右聊天/详情）。
+ * 窄屏（≤768px）：NarrowTopBar + 双选项卡（私信/好友列表），点会话跳 /chat/:id。
+ * 宽屏（>768px）：两列——左 260px 会话列表侧栏（WideMessagesSidebar，宽度与主页
+ *  ChannelSidebar 一致）+ 右侧聊天内容区（选中会话内联 PrivateChatPane，不跳转 URL）。
+ * 申请条目：好友申请 + 群邀请 + 待审批入群申请，同意/拒绝即时反馈。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -12,6 +13,8 @@ import { getElysiaProfile } from "../api/elysia";
 import * as usersApi from "../api/users";
 import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest } from "../api/types";
 import { Avatar } from "../components/Avatar";
+import { PrivateChatPane } from "../components/chat/PrivateChatPane";
+import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
 import { ConversationList } from "../components/chat/ConversationList";
 import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -25,6 +28,8 @@ export function MessagesPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("chat");
+  // 宽屏右侧选中的私聊会话 id（内联聊天）
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const conversations = useChatStore((s) => s.conversations);
   const [friendList, setFriendList] = useState<Awaited<ReturnType<typeof usersApi.listFriends>>>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -47,7 +52,7 @@ export function MessagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 好友 tab 数据
+  // 好友 tab 数据（窄屏用；宽屏由 WideMessagesSidebar 自理）
   const loadFriendsTab = useCallback(() => {
     usersApi.listFriends().then(setFriendList).catch(() => {});
     usersApi.listFriendRequests().then((l) => setFriendRequests(l.filter((r) => r.status === "pending"))).catch(() => {});
@@ -60,8 +65,8 @@ export function MessagesPage() {
   }, [conversations]);
 
   useEffect(() => {
-    if (tab === "friends") loadFriendsTab();
-  }, [tab, loadFriendsTab]);
+    if (tab === "friends" && isNarrow) loadFriendsTab();
+  }, [tab, isNarrow, loadFriendsTab]);
 
   const refreshBadges = () => void useBadgesStore.getState().fetch();
 
@@ -91,9 +96,33 @@ export function MessagesPage() {
 
   const privateConvs = useMemo(() => conversations.filter((c) => c.type === "private"), [conversations]);
 
+  // 宽屏两列：左会话列表侧栏 + 右聊天内容区
+  if (!isNarrow) {
+    return (
+      <div className="messages-page messages-page-wide">
+        <WideMessagesSidebar
+          conversations={conversations}
+          activeId={activeChatId}
+          onSelect={(id) => setActiveChatId(id)}
+        />
+        <div className="wide-messages-pane">
+          {activeChatId ? (
+            <PrivateChatPane key={activeChatId} conversationId={activeChatId} />
+          ) : (
+            <div className="wide-messages-empty">
+              <h3 className="placeholder-title">选择一个会话开始聊天</h3>
+              <p className="placeholder-desc">左侧会话列表，点击进入私聊</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 窄屏：双选项卡 + 列表，点会话跳 /chat/:id
   return (
     <div className="messages-page">
-      {isNarrow && <NarrowTopBar />}
+      <NarrowTopBar />
       <div className="messages-tabs" role="tablist" aria-label="消息中心">
         <button
           type="button"

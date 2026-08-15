@@ -66,8 +66,73 @@
   padding-bottom: 68px; /* 窄屏避让 FAB */
 }
 
+/* ---- 语音卡片网格（需求：宽屏窄屏统一卡片布局，与直播/桌游同构） ---- */
+
 .voice-hub .voice-channel-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
+}
+
+/* 覆盖 app.css 的横排 .voice-channel-card → 竖排卡片 */
+.voice-hub .voice-channel-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+}
+
+.voice-hub .voice-channel-card.active {
+  border-color: var(--indigo-700);
+}
+
+.voice-hub .voice-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 20px;
+}
+
+.voice-hub .voice-source-tag {
+  margin-left: 0;
+}
+
+.voice-hub .voice-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-hub .voice-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-top: auto;
+}
+
+.voice-hub .voice-card-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.voice-hub .voice-join-btn {
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  font-size: 13px;
 }
 
 @media (min-width: 769px) {
@@ -76,9 +141,17 @@
   }
 
   .voice-hub .voice-channel-list {
-    max-width: 720px;
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 1200px;
     width: 100%;
     margin: 0 auto;
+    padding: var(--sp-4) var(--sp-6);
+  }
+}
+
+@media (min-width: 1440px) {
+  .voice-hub .voice-channel-list {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -88,6 +161,72 @@
   overflow-y: auto;
   padding: var(--sp-3) var(--sp-4);
   padding-bottom: 68px;
+}
+
+/* 群内语音也用卡片网格（与一级页统一） */
+.group-voice .voice-channel-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
+}
+
+.group-voice .voice-channel-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+}
+
+.group-voice .voice-channel-card.active {
+  border-color: var(--indigo-700);
+}
+
+.group-voice .voice-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 20px;
+}
+
+.group-voice .voice-source-tag {
+  margin-left: 0;
+}
+
+.group-voice .voice-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group-voice .voice-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-top: auto;
+}
+
+.group-voice .voice-card-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.group-voice .voice-join-btn {
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  font-size: 13px;
 }
 
 .group-voice.is-wide {

@@ -9,7 +9,7 @@
  * - 宽屏直播间：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏）。
  */
 import { useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, matchPath, useLocation } from "react-router-dom";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
@@ -17,7 +17,7 @@ import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isPostDetailRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isMessagesRoute, isPostDetailRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
 const BADGES_POLL_INTERVAL_MS = 30_000;
 
@@ -32,6 +32,10 @@ export function AppShell() {
   const groupSceneNarrow = isNarrow && isGroupScene(pathname);
   // 帖子详情窄屏：底栏原位替换为评论输入框（R-P3）
   const postDetailNarrow = isNarrow && isPostDetailRoute(pathname);
+  // 私聊聊天窄屏：底部有输入框，不渲染底栏/消息入口（需求：下方有输入框时不能有导航栏）
+  const privateChatNarrow = isNarrow && isPrivateChatRoute(pathname);
+  // 消息中心窄屏：左下角消息入口变为返回主页
+  const messagesNarrow = isNarrow && matchPath({ path: "/messages", end: true }, pathname) != null;
 
   // 全站未读聚合：进入即拉 + 断线降级 30s 轮询（R-N4；WS 推送后置）
   useEffect(() => {
@@ -52,13 +56,13 @@ export function AppShell() {
 
   return (
     <div className="app-shell" data-form={isNarrow ? "narrow" : "wide"}>
-      {isNarrow ? null : <TopNav moduleKey={moduleKey} messageBadge={messageBadge} />}
+      {isNarrow ? null : <TopNav moduleKey={moduleKey} messagesActive={isMessagesRoute(pathname)} messageBadge={messageBadge} />}
       <main className="app-shell-content">
         <Outlet />
       </main>
-      {isNarrow && !groupSceneNarrow && !postDetailNarrow ? (
+      {isNarrow && !groupSceneNarrow && !postDetailNarrow && !privateChatNarrow ? (
         <>
-          <MessageFab style={leavingStyle} unread={messageBadge} />
+          <MessageFab style={leavingStyle} unread={messageBadge} backHome={messagesNarrow} />
           <BottomTabs
             moduleKey={moduleKey}
             style={leavingStyle}

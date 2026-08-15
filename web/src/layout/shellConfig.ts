@@ -43,6 +43,25 @@ export function resolveModule(pathname: string): ModuleKey | null {
 }
 
 /**
+ * 消息路由（宽屏 TopNav 消息项选中态）：消息中心 / 私聊窗口。
+ * 群聊 /group/:id 归"主页"模块（resolveModule 已覆盖），消息项不抢高亮。
+ */
+export function isMessagesRoute(pathname: string): boolean {
+  return (
+    matchPath({ path: "/messages", end: true }, pathname) != null ||
+    matchPath({ path: "/chat/:conversationId", end: true }, pathname) != null
+  );
+}
+
+/**
+ * 私聊聊天路由（窄屏 /chat/:conversationId）：底部有输入框，壳层不渲染
+ * BottomTabs / MessageFAB（需求：下方有输入框时不能有导航栏）。
+ */
+export function isPrivateChatRoute(pathname: string): boolean {
+  return matchPath({ path: "/chat/:conversationId", end: true }, pathname) != null;
+}
+
+/**
  * 直播间路由（/live/:channelId）。
  * 窄屏：进房动画 = 底栏下滑走（shell store 驱动），终态底栏在视口外；
  * 宽屏：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏遮挡顶栏，布局文档 §3.4）。

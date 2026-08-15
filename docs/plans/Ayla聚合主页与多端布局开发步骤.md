@@ -340,6 +340,36 @@
 
 **验证**：`tsc` 无错；vitest 260 通过（新增 search-page 6：窄屏搜索输入态顶栏自动聚焦/无独立搜索框、宽屏不渲染 NarrowTopBar、顶栏回车 URL q 驱动搜索、URL 直入自动搜索、历史 chips 点击触发、清空历史）；`npm run build` 通过；Playwright 冒烟：窄屏主页/搜索页 `.narrow-topbar` `position: sticky; top: 0` 生效；搜索页无 `.search-input-wrap`、顶栏自动聚焦 + 返回按钮 + 结果分组；宽屏搜索页只渲染 TopNav（无 NarrowTopBar）；窄屏主页搜索胶囊 → `/search` 顶栏变输入态。
 
+### F10.4 FAB 直开创建 + 语音卡片 + 消息导航收束 【已验收 2026-08-15】
+
+> 背景（用户 2026-08-15）：①右下角加号弹出面板气泡可去掉——每个界面只需各自创建功能，点加号直接开始创建（不弹「创建群聊」次级项）；②语音、直播导航界面宽窄屏统一卡片布局；③宽屏 TopNav 进入私信界面显示选中该 tab；④窄屏点按钮进私信后左下角改返回主页；⑤宽屏私信用与主页一致的侧栏（用户澄清：两列=会话列表 + 聊天内容区，侧栏宽度一致）；⑥私聊聊天窄屏去掉底部导航栏（下方有输入框时不能有导航栏）。
+
+**① FAB 直开创建**：
+- `src/layout/CreateSheet.tsx` 新增：通用创建浮层（`.create-sheet-overlay`/`.create-sheet-card`，复用 group-create-overlay 视觉，标题 + 关闭 + children 表单），窄屏居中浮层（非底部上滑）。
+- `src/layout/CreateFab.tsx` 重写：去掉 `fab-panel`/`fab-mask`/hint/次级「创建群聊」——点加号直接打开当前场景表单：主页 `handler="group"` → GroupCreateDialog（自带浮层）；语音/直播/帖子/桌游 → CreateSheet 包对应表单。
+- `src/styles/shell.css`：删 `.fab-panel*`/`.fab-mask`/`@keyframes fab-panel-rise` 与窄屏/reduced-motion 面板样式；`src/styles/private.css` 补 `.create-sheet-*`。
+
+**② 语音/直播统一卡片布局**：
+- 直播（LiveHall）已是卡片网格；`src/components/voice/VoiceChannelList.tsx` 从横排列表改卡片网格（`.voice-card-head` 来源徽章 + `.voice-card-title` 名称 + `.voice-card-foot` 人数/加入），窄屏 2 列 / 宽屏 3-4 列（`src/styles/voice.css` 覆盖 app.css 横排样式，一级页与群内 GroupVoice 同步）。
+
+**③ 宽屏 TopNav 消息选中态**：
+- `src/layout/shellConfig.ts` 加 `isMessagesRoute`（/messages、/chat/:conversationId）；`TopNav` 加 `messagesActive` prop → 消息 Link `.is-active`（shell.css 补底部 2px glow 指示条 + 底）；AppShell 传入。
+
+**④ 窄屏消息页左下角返回主页**：
+- `src/layout/MessageFab.tsx` 加 `backHome` 变体（IconHome → navigate("/home")）；AppShell 在窄屏 `/messages` 时传入 `backHome`。
+
+**⑤ 宽屏私信两列（会话列表 + 聊天内容区，侧栏宽度与主页一致 260px）**：
+- `src/components/chat/PrivateChatPane.tsx` 新增：私聊聊天内容面板（头部/消息/typing/输入框，复用 useChat 数据流），宽屏 /messages 右侧与 /chat/:id 共用。
+- `src/components/chat/WideMessagesSidebar.tsx` 新增：260px 会话列表侧栏（`.wide-messages-sidebar`，宽度与 group.css `.channel-sidebar` 一致；私信/好友双 tab + 三组申请审批 + 爱莉入口，从 MessagesPage 抽离）；点好友/爱莉 → openPrivateConversation 取会话 id 内联打开。
+- `src/pages/MessagesPage.tsx`：窄屏保持双 tab 列表跳 /chat/:id；宽屏 = WideMessagesSidebar + 右侧 PrivateChatPane（点会话内联，URL 不变）。
+- `src/pages/PrivateChatPage.tsx`：窄屏 = PrivateChatPane + 返回消息中心；宽屏 = WideMessagesSidebar（当前会话高亮）+ PrivateChatPane。
+- `src/styles/messages.css`：宽屏两列布局 + `.wide-messages-sidebar`/`.wide-messages-pane`/`.wide-messages-empty`。
+
+**⑥ 窄屏私聊去底部导航栏**：
+- `src/layout/shellConfig.ts` 加 `isPrivateChatRoute`（/chat/:conversationId）；AppShell 窄屏 `/chat/:id` 不渲染 BottomTabs/MessageFab（下方有输入框时无导航栏，同 groupScene/postDetail 沉浸规则）。
+
+**验证**：`tsc` 无错；vitest 269 通过（shell 34：新增 FAB 直开 2、isMessagesRoute/isPrivateChatRoute 2、消息选中/返回主页/私聊无底栏 6）；`npm run build` 通过；Playwright 冒烟：窄屏语音 2 列卡片网格 / 宽屏 4 列；窄屏消息中心有「返回主页」无消息入口且点击回 /home；宽屏 /messages 与 /chat/c1 均两列（左 260px 侧栏 + 右聊天，点会话内联 URL 不变）；窄屏 /chat/c1 无 BottomTabs/MessageFab 有返回按钮；主页 FAB 直开建群对话框（无 fab-panel）、语音页 FAB 直开 CreateSheet「创建语音房」（无 fab-panel）；宽屏 TopNav 消息项在 /messages、/chat/:id 选中、/home 不选中。
+
 ## 4. 联调与验证
 
 - 后端 dev：`python manage.py runserver 8100`；前端 dev：`npm run dev`（Vite proxy `/api`、`/ws` → 8100）。
