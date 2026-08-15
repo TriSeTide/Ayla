@@ -327,9 +327,9 @@ token TTL（默认 600s）到期前 SDK 不断线则无需续签；SDK 报 token
 - [x] **宽屏主页 ServerRail 左下角改「创建群聊」加号**：底部用户卡（进个人页）删除，改为加号按钮 → 打开建群对话框（GroupPage 持有 showGroupCreate state）；删 `.server-user`/`.server-user-dot` 样式，加 `.server-create-btn`（48px 圆形玻璃底，hover 辉光同 FAB）
 - [x] **宽屏私信侧栏宽度对齐主页左侧总宽**：`WideMessagesSidebar` 260px → 332px（用户确认：不加 ServerRail，仅加宽到与主页左侧总宽一致 ServerRail 72 + ChannelSidebar 260）
 - [x] **窄屏直播大厅两列 + 封面占位**：`LiveHall` 卡片加封面区（16:9 渐变占位 + 状态徽章 + 爱莉角标覆盖，封面资源未接入 → 占位），窄屏 2 列（新增 `@media (max-width: 768px)` repeat(2)）/ 宽屏 3-4 列；卡片底部 meta 行（主播名 + 来源标识）
-- [x] **宽屏直播间改左侧封面侧栏**：`LiveChannelRail`（88px 一列封面，点击切换，当前项高亮 + 直播红点）——替代原上下键切换按钮（`live-switch-btn` 删除，键盘 ↑↓ 监听移除）；返回键进侧栏顶部；侧栏可收起（窄条 56px 保留返回 + 展开 + 当前封面）再展开
+- [x] **宽屏直播间改左侧封面侧栏**：`LiveChannelRail`（240px 一列封面横排，封面 72px + 标题，点击切换，当前项高亮 + 直播红点）——替代原上下键切换按钮（`live-switch-btn` 删除，键盘 ↑↓ 监听移除）；返回键进侧栏顶部；侧栏收起时**整个收成一个浮动按钮**（`.live-rail-float` 悬浮左上角，含返回 + 展开键，不占布局、不在左边留侧栏）再展开
 - [x] **窄屏直播间侧栏覆盖层**：默认无侧栏 + 左上角返回键 + 右上「打开直播间列表」按钮；点开左侧滑入覆盖层（240px 封面列），**侧栏内无第二个返回键**（返回键只在左上角）；点封面切换并自动关闭覆盖层
-- [x] 契约测试：live-rail 8（宽屏展开/收起/窄屏覆盖层无返回键/LiveHall 封面）+ group-page 2（ServerRail 加号开建群 + 关闭）；全量 vitest 278 通过 + build + 两形态冒烟通过
+- [x] 契约测试：live-rail 9（宽屏展开/收起浮动按钮/窄屏覆盖层无返回键/LiveHall 封面）+ group-page 2（ServerRail 加号开建群 + 关闭）；全量 vitest 279 通过 + build + 两形态冒烟通过
 
 ## 目录结构
 

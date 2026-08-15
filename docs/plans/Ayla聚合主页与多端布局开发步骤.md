@@ -385,14 +385,14 @@
 - `src/styles/live.css`：新增 `@media (max-width: 768px)` `.live-hub .live-hall-grid { repeat(2, 1fr) }`（原本窄屏沿用 app.css auto-fill 单列）。
 
 **④ 宽屏直播间改左侧封面侧栏**：
-- `src/components/live/LiveChannelRail.tsx` 新增：一列封面（88px，点击切换，当前项 aria-current 高亮 + 直播红点）；顶部操作区 = 返回键 + 收起/展开；`collapsed` 窄条（56px，保留返回 + 展开 + 当前封面）。
+- `src/components/live/LiveChannelRail.tsx` 新增：一列封面横排（240px，封面 72px + 标题，点击切换，当前项 aria-current 高亮 + 直播红点）；顶部操作区 = 返回键 + 收起/展开；`collapsed` 时**整个收成一个浮动按钮** `.live-rail-float`（absolute 悬浮左上角，含返回 + 展开键，不占布局、不在左边留侧栏）。
 - `src/components/live/LiveRoomBody.tsx`：删宽屏上下键按钮（`live-switch-btn`）与键盘 ↑↓ 监听；宽屏渲染 `LiveChannelRail`（默认展开，`railCollapsed` state 控制收起）；`LiveRoomPage`/`GroupLive` 由 `hasPrev/hasNext/onPrev/onNext` 改为传 `channels` 有序列表 + `onSelect`。
 - `src/styles/live.css`：`.live-rail*` 系列样式；删 `.live-switch-btn`。
 
 **⑤ 窄屏直播间侧栏覆盖层**：
 - `LiveRoomBody` 窄屏：默认无侧栏；头部 = 左上角返回键 + 标题 + 右上「打开直播间列表」按钮（`.live-room-rail-toggle`）；点开渲染 `.live-room-rail-overlay`（遮罩 + `LiveChannelRail showBack=false`，**侧栏内无返回键**）；点封面 `onSelect` + 自动关闭覆盖层。
 
-**验证**：`tsc` 无错；vitest 278 通过（live-rail 8 + group-page 新增 2，全量 45 文件）；`npm run build` 通过；Playwright 冒烟：宽屏主页 ServerRail 有创建群聊加号、无旧头像键、点开建群对话框；宽屏私信侧栏 332px；窄屏直播大厅 2 列（179.6px×2）+ 3 个封面占位、宽屏 4 列；宽屏直播间左侧栏 3 封面项 + 返回键在侧栏 + 无上下键 + 收起窄条（返回/展开仍在）+ 展开点第三个 → /live/3 高亮；窄屏直播间默认无侧栏 + 左上角返回 + 右上打开按钮，点开覆盖层 3 项且无第二个返回键，点封面切换并自动关闭。
+**验证**：`tsc` 无错；vitest 279 通过（live-rail 9 + group-page 新增 2，全量 45 文件）；`npm run build` 通过；Playwright 冒烟：宽屏主页 ServerRail 有创建群聊加号、无旧头像键、点开建群对话框；宽屏私信侧栏 332px；窄屏直播大厅 2 列（179.6px×2）+ 3 个封面占位、宽屏 4 列；宽屏直播间左侧栏 240px 封面横排（封面 72px + 标题左对齐）+ 返回键在侧栏 + 无上下键，收起后整个收成一个浮动按钮（返回 + 展开键、无侧栏窄条、播放器正常）再展开恢复，点封面切换 → /live/:id 高亮；窄屏直播间默认无侧栏 + 左上角返回 + 右上打开按钮，点开覆盖层 3 项且无第二个返回键，点封面切换并自动关闭。
 
 ## 4. 联调与验证
 

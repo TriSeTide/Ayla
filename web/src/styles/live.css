@@ -22,9 +22,10 @@
 
 /* ================= 直播间频道封面侧栏（需求） ================= */
 
+/* 宽屏展开态：240px 侧栏（返回 + 收起操作行 + 封面横排列表） */
 .live-rail {
   flex: none;
-  width: 88px;
+  width: 240px;
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
@@ -37,7 +38,9 @@
 .live-rail-actions {
   flex: none;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--sp-2);
   padding: var(--sp-3);
   border-bottom: 1px solid var(--glass-border);
@@ -70,11 +73,11 @@
 
 .live-rail-item {
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  flex-direction: row;
   align-items: center;
+  gap: var(--sp-2);
   width: 100%;
-  padding: 0;
+  padding: var(--sp-2);
   border-radius: var(--radius-input);
   color: var(--text-secondary);
   transition: background var(--dur-fast) var(--ease-out);
@@ -94,19 +97,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
+  width: 72px;
+  flex: none;
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-input);
   background: linear-gradient(150deg, var(--ice-200), var(--sakura-200));
   color: var(--ice-500);
   border: 1px solid var(--glass-border);
   overflow: hidden;
-}
-
-.live-rail-cover.small {
-  aspect-ratio: 1;
-  width: 40px;
-  border-radius: var(--radius-input);
 }
 
 .live-rail-live-dot {
@@ -120,30 +118,40 @@
 }
 
 .live-rail-item-title {
-  font-size: 11px;
-  line-height: 1.3;
-  text-align: center;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
-}
-
-/* 收起态：窄条 */
-.live-rail-collapsed {
-  width: 56px;
-}
-
-.live-rail-collapsed .live-rail-actions {
-  padding: var(--sp-2);
-}
-
-.live-rail-collapsed-current {
   flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+  color: inherit;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+/* 收起态：整个收成一个浮动按钮（返回 + 展开），悬浮左上角，不占布局不留侧栏 */
+.live-rail-float {
+  position: absolute;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  z-index: 55;
   display: flex;
-  justify-content: center;
-  padding-top: var(--sp-2);
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+}
+
+/* 宽屏直播间容器给浮动按钮提供定位基准 */
+.live-room-body.is-wide {
+  position: relative;
 }
 
 /* 窄屏：频道列表覆盖层（右上「频道列表」按钮打开；返回键在左上角，侧栏内无返回键） */
@@ -173,31 +181,7 @@
   background: rgba(70, 91, 146, 0.25);
 }
 
-.live-room-rail-overlay .live-rail {
-  width: 240px;
-}
-
-.live-room-rail-overlay .live-rail-list {
-  align-items: stretch;
-}
-
-.live-room-rail-overlay .live-rail-item {
-  flex-direction: row;
-  gap: var(--sp-2);
-  padding: var(--sp-2);
-}
-
-.live-room-rail-overlay .live-rail-cover {
-  width: 72px;
-  aspect-ratio: 16 / 9;
-  flex: none;
-}
-
-.live-room-rail-overlay .live-rail-item-title {
-  font-size: 13px;
-  text-align: left;
-  white-space: normal;
-}
+/* 覆盖层侧栏复用宽屏展开态布局（240px 横排封面列表） */
 
 /* 弹幕输入框滑入（R-L2：进房 250ms 延迟 100ms） */
 .live-room-input {

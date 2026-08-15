@@ -1,9 +1,10 @@
 /**
  * LiveChannelRail —— 直播间频道封面侧栏（需求）。
  *
- * 一列直播间封面（16:9 渐变占位 + 标题），点击切换当前直播间，当前项高亮。
- * - 宽屏：完整侧栏含顶部操作区（返回 + 收起按钮）；collapsed 时折叠为窄条
- *   （保留返回 + 展开按钮 + 当前封面）。
+ * 一列直播间封面（16:9 渐变占位 + 标题横排），点击切换当前直播间，当前项高亮。
+ * - 宽屏：完整侧栏含顶部操作区（返回 + 收起按钮），宽度 240px；
+ *   collapsed 时**整个收成一个浮动按钮**（悬浮左上角，含返回 + 展开键，
+ *   不占布局、不在左边留侧栏）。
  * - 窄屏覆盖层：只渲染封面列表（showBack=false 时无返回键，返回键在左上角）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
@@ -21,46 +22,40 @@ export function LiveChannelRail({
   channels: LiveChannelDescriptor[];
   currentId: number;
   onSelect: (channelId: number) => void;
-  /** 宽屏收起态（窄条）；窄屏覆盖层恒 false */
+  /** 宽屏收起态（收成一个浮动按钮）；窄屏覆盖层恒 false */
   collapsed: boolean;
   /** 收起/展开切换（宽屏）；窄屏覆盖层点击关闭 */
   onToggle: () => void;
   onBack: () => void;
-  /** 是否在侧栏内渲染返回键（宽屏 true；窄屏 false，返回键在左上角） */
+  /** 是否渲染返回键（宽屏 true；窄屏 false，返回键在左上角） */
   showBack: boolean;
 }) {
-  // 收起态：窄条只显示当前封面 + 展开 + 返回
+  // 收起态：整个收成一个浮动按钮（返回 + 展开），不占布局、不留侧栏
   if (collapsed) {
     return (
-      <nav className="live-rail live-rail-collapsed" aria-label="直播间列表">
-        <div className="live-rail-actions">
-          {showBack && (
-            <button
-              type="button"
-              className="live-rail-icon-btn"
-              onClick={onBack}
-              aria-label="返回"
-              title="返回"
-            >
-              <IconBack width={18} height={18} />
-            </button>
-          )}
+      <div className="live-rail-float" role="group" aria-label="直播间列表控制">
+        {showBack && (
           <button
             type="button"
             className="live-rail-icon-btn"
-            onClick={onToggle}
-            aria-label="展开直播间列表"
-            aria-expanded={false}
+            onClick={onBack}
+            aria-label="返回"
+            title="返回"
           >
-            <IconVideo width={18} height={18} />
+            <IconBack width={18} height={18} />
           </button>
-        </div>
-        <div className="live-rail-collapsed-current">
-          <div className="live-rail-cover small">
-            <IconVideo width={16} height={16} aria-hidden="true" />
-          </div>
-        </div>
-      </nav>
+        )}
+        <button
+          type="button"
+          className="live-rail-icon-btn"
+          onClick={onToggle}
+          aria-label="展开直播间列表"
+          aria-expanded={false}
+          title="展开直播间列表"
+        >
+          <IconVideo width={18} height={18} />
+        </button>
+      </div>
     );
   }
 
