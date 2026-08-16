@@ -23,14 +23,16 @@ import { voiceLiveKit } from "../livekit/client";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
+import { useSessionActivityStore } from "../stores/sessionActivity";
+import { voiceSessionRuntime, VOICE_HEARTBEAT_INTERVAL_MS } from "../runtime/voiceSessionRuntime";
+
+export { VOICE_HEARTBEAT_INTERVAL_MS };
 
 /**
  * presence 心跳间隔（毫秒）。
  * 后端 VOICE_MEMBER_TIMEOUT_SECONDS 默认 120s，取其 1/3 量级 → 40s；
  * 读不到后端配置时用此前端常量（M5-3 §4.2）。
  */
-export const VOICE_HEARTBEAT_INTERVAL_MS = 40_000;
-
 export interface JoinOptions {
   /** 加入时静音（默认 true：进频道默认关麦，避免误入即广播环境音，M5-3 §9） */
   joinMuted?: boolean;
@@ -39,11 +41,11 @@ export interface JoinOptions {
 export function useVoiceChannel() {
   const currentChannelId = useVoiceStore((s) => s.currentChannelId);
   const livekit = useVoiceStore((s) => s.livekit);
+  const channels = useVoiceStore((s) => s.channels);
   const micEnabled = useVoiceStore((s) => s.micEnabled);
   const [joining, setJoining] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
 
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** 防止卸载后异步回写 */
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -54,10 +56,7 @@ export function useVoiceChannel() {
   }, []);
 
   const stopHeartbeat = useCallback(() => {
-    if (heartbeatRef.current) {
-      clearInterval(heartbeatRef.current);
-      heartbeatRef.current = null;
-    }
+    voiceSessionRuntime.stopHeartbeat();
   }, []);
 
   /** 本地重置到未加入态（心跳 403 / 离开后的统一收尾） */
@@ -66,23 +65,17 @@ export function useVoiceChannel() {
     const channelId = useVoiceStore.getState().currentChannelId;
     if (channelId) voiceWS.unsubscribe(channelId);
     useVoiceStore.getState().leaveChannelLocal();
+    useSessionActivityStore.getState().clear("voice");
   }, [stopHeartbeat]);
 
   const startHeartbeat = useCallback(
     (channelId: string) => {
-      stopHeartbeat(); // 重复加入不叠加定时器
-      heartbeatRef.current = setInterval(() => {
-        voiceApi.heartbeatVoiceChannel(channelId).catch((e) => {
-          if (e instanceof ApiError && e.status === 403) {
-            // 非成员（被超时清理）→ 视为已被移出，本地重置
-            resetLocal();
-            if (mountedRef.current) setErrorState("你已被移出语音频道（心跳超时）");
-          }
-          // 其他错误（网络抖动）下一轮再试，不打断
-        });
-      }, VOICE_HEARTBEAT_INTERVAL_MS);
+      voiceSessionRuntime.startHeartbeat(channelId, () => {
+        resetLocal();
+        if (mountedRef.current) setErrorState("你已被移出语音频道（心跳超时）");
+      });
     },
-    [resetLocal, stopHeartbeat],
+    [resetLocal],
   );
 
   /** 成员对账：GET members/ 全量替换（join 后铺底 / WS 重连后补偿） */
@@ -135,9 +128,8 @@ export function useVoiceChannel() {
     return off;
   }, [reconcile]);
 
-  // 组件卸载：停心跳（不主动 leave/——页面切换不等于离开频道由路由设计决定；
-  // 本页面是唯一语音入口，卸载即离开在 VoicePage 层显式处理）
-  useEffect(() => stopHeartbeat, [stopHeartbeat]);
+  // heartbeat 归 runtime owner；页面卸载不停止，明确 leave 才释放。
+
 
   /** 加入频道（重复 join 同频道幂等安全） */
   const join = useCallback(
@@ -160,6 +152,15 @@ export function useVoiceChannel() {
           useVoiceStore.getState().leaveChannelLocal();
         }
         // 3. LiveKit 连接
+        useSessionActivityStore.getState().upsert({
+          kind: "voice",
+          sessionId: channelId,
+          sourceRoute: typeof window !== "undefined" ? window.location.pathname : "/voice",
+          owner: useAuthStore.getState().currentUser?.id ?? null,
+          title: channels.find((c) => c.id === channelId)?.name ?? "语音房",
+          status: "connecting",
+          lastError: null,
+        });
         useVoiceStore.getState().setLivekit("connecting");
         try {
           await voiceLiveKit.connect(joinResult.ws_url, joinResult.token);
@@ -169,6 +170,7 @@ export function useVoiceChannel() {
           // join 成功但媒体连接失败 → 回滚成员状态
           await voiceApi.leaveVoiceChannel(channelId).catch(() => {});
           useVoiceStore.getState().setLivekit("failed");
+          useSessionActivityStore.getState().setStatus("voice", "failed", "媒体连接失败");
           throw mediaErr;
         }
         // 4. 默认关麦加入（用户勾选则开麦）
@@ -183,6 +185,7 @@ export function useVoiceChannel() {
             setErrorState("需要麦克风权限，已在静音状态加入");
           }
         }
+        useSessionActivityStore.getState().setStatus("voice", "connected");
         // 5. 成员铺底 + 心跳 + WS 订阅
         await reconcile(channelId);
         useVoiceStore.getState().enterChannel(
@@ -208,7 +211,7 @@ export function useVoiceChannel() {
         if (mountedRef.current) setJoining(false);
       }
     },
-    [reconcile, startHeartbeat, stopHeartbeat],
+    [channels, reconcile, startHeartbeat, stopHeartbeat],
   );
 
   /** 离开频道（幂等） */

@@ -6,6 +6,7 @@
  * - 离线：褪为 --ice-100 灰环；
  * - 色彩不作唯一信息载体：在线状态由调用方同时给文字标签（design.md §10）。
  */
+import { useState } from "react";
 import type { CSSProperties } from "react";
 
 export function Avatar({
@@ -17,7 +18,7 @@ export function Avatar({
   style,
 }: {
   /** 首字符/缩写（无头像图时展示） */
-  label: string;
+  label?: string;
   size?: number;
   online?: boolean;
   /** 爱莉专属光环（呼吸辉光），不可复用于普通用户（design.md §8 Don't） */
@@ -25,6 +26,8 @@ export function Avatar({
   imageUrl?: string | null;
   style?: CSSProperties;
 }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const safeLabel = label?.trim() || "?";
   const fontSize = Math.round(size * 0.42);
   return (
     <span
@@ -36,10 +39,17 @@ export function Avatar({
         className={`avatar-core ${isElysia ? "avatar-core-elysia" : "avatar-core-user"}`}
         style={{ fontSize }}
       >
-        {imageUrl ? (
-          <img src={imageUrl} alt="" width={size} height={size} style={{ objectFit: "cover" }} />
+        {imageUrl && !imageFailed ? (
+          <img
+            src={imageUrl}
+            alt=""
+            width={size}
+            height={size}
+            style={{ objectFit: "cover" }}
+            onError={() => setImageFailed(true)}
+          />
         ) : (
-          (label.slice(0, 1) || "?")
+          safeLabel.slice(0, 1)
         )}
       </span>
     </span>

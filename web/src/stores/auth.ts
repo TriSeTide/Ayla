@@ -9,6 +9,8 @@
 import { create } from "zustand";
 import * as authApi from "../api/auth";
 import type { UserPublic } from "../api/types";
+import { useSessionActivityStore } from "./sessionActivity";
+import { voiceSessionRuntime } from "../runtime/voiceSessionRuntime";
 
 const REFRESH_KEY = "elysia.refresh_token";
 
@@ -95,6 +97,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    // 登出先释放已迁移的语音 runtime 与活动态索引；其他媒体 owner 后续统一接入。
+    voiceSessionRuntime.stopHeartbeat();
+    useSessionActivityStore.getState().reset();
     writeStoredRefresh(null);
     set({ accessToken: null, refreshToken: null, currentUser: null, initialized: true });
   },

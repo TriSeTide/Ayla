@@ -12,6 +12,7 @@ import type { DanmakuFrame } from "../api/types";
 import { useLiveStore } from "../stores/live";
 import { liveWS } from "../ws/live";
 import { HlsPlayer } from "../player/hls";
+import { useSessionActivityStore } from "../stores/sessionActivity";
 
 export const LIVE_STATUS_POLL_INTERVAL_MS = 15_000;
 
@@ -79,6 +80,15 @@ export function useLiveRoom(channelId: number): UseLiveRoomResult {
         const channel = await liveApi.getLiveChannel(channelId);
         if (!aliveRef.current) return;
         useLiveStore.getState().setCurrentChannel(channel);
+        useSessionActivityStore.getState().upsert({
+          kind: "live",
+          sessionId: String(channel.id),
+          sourceRoute: `/live/${channel.id}`,
+          owner: channel.owner_id ?? null,
+          title: channel.title,
+          status: "connecting",
+          lastError: null,
+        });
 
         const status = await liveApi.getLiveChannelStatus(channelId);
         if (!aliveRef.current) return;
@@ -89,10 +99,12 @@ export function useLiveRoom(channelId: number): UseLiveRoomResult {
         useLiveStore.getState().mergeDanmakuHistory(history);
 
         liveWS.connect(channelId);
+        useSessionActivityStore.getState().setStatus("live", status.status === "live" ? "connected" : "ended");
         setLoading(false);
       } catch (e) {
         if (!aliveRef.current) return;
         setError(e instanceof Error ? e.message : "加载直播间失败");
+        useSessionActivityStore.getState().setStatus("live", "failed", e instanceof Error ? e.message : "加载直播间失败");
         setLoading(false);
       }
     })();
@@ -108,6 +120,7 @@ export function useLiveRoom(channelId: number): UseLiveRoomResult {
       liveWS.onReconnected = null;
       liveWS.disconnect();
       useLiveStore.getState().clearCurrent();
+      useSessionActivityStore.getState().clear("live", "idle");
     };
   }, [channelId]);
 

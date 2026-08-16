@@ -147,6 +147,27 @@ a:hover {
   animation: frost-pulse 1.6s ease-in-out infinite;
 }
 
+.async-state-loading,
+.async-state-error,
+.async-state-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  min-height: 96px;
+  padding: var(--sp-4);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.async-state-error {
+  flex-direction: column;
+  color: var(--destructive);
+}
+
+.async-state-error p { margin: 0; }
+.async-state-skeleton { width: 100%; min-height: 72px; }
+
 /* prefers-reduced-motion：关呼吸/浮入，保留透明度渐变（design.md §7） */
 @media (prefers-reduced-motion: reduce) {
   .skeleton {

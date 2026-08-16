@@ -13,6 +13,7 @@ import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { WS_BASE_URL } from "./presence";
 import type { ChatMessage, ChatServerFrame } from "../api/types";
+import { useRealtimeStore } from "../stores/realtime";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -39,6 +40,7 @@ export class ChatWSClient {
     if (!access) return;
     this.manualClosed = false;
     this.connection = "connecting";
+    useRealtimeStore.getState().setStatus("chat", "connecting");
     this.open(access);
   }
 
@@ -56,6 +58,7 @@ export class ChatWSClient {
     ws.onopen = () => {
       this.attempt = 0;
       this.connection = "online";
+      useRealtimeStore.getState().setStatus("chat", "online");
       this.startHeartbeat();
       // 重连成功：对已订阅会话逐条 resume 补发
       for (const convId of this.subscribed) {
@@ -76,6 +79,7 @@ export class ChatWSClient {
     ws.onclose = () => {
       this.stopHeartbeat();
       this.connection = "offline";
+      useRealtimeStore.getState().setStatus("chat", this.manualClosed ? "offline" : "connecting");
       if (!this.manualClosed) this.scheduleReconnect();
     };
 
@@ -91,6 +95,7 @@ export class ChatWSClient {
     );
     this.attempt += 1;
     this.connection = "connecting";
+    useRealtimeStore.getState().setStatus("chat", "connecting");
     this.reconnectTimer = setTimeout(() => {
       const access = useAuthStore.getState().accessToken;
       if (!access || this.manualClosed) return;
@@ -237,6 +242,7 @@ export class ChatWSClient {
       this.ws = null;
     }
     this.connection = "offline";
+    useRealtimeStore.getState().setStatus("chat", "offline");
   }
 }
 

@@ -16,6 +16,8 @@ import { useShellStore } from "../stores/shell";
 import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
+import { SessionActivityIndicator } from "./SessionActivityIndicator";
+import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
 import { isGroupScene, isMessagesRoute, isPostDetailRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
@@ -60,6 +62,8 @@ export function AppShell() {
       <main className="app-shell-content">
         <Outlet />
       </main>
+      <SessionActivityIndicator />
+      <RealtimeStatusBanner />
       {isNarrow && !groupSceneNarrow && !postDetailNarrow && !privateChatNarrow ? (
         <>
           <MessageFab style={leavingStyle} unread={messageBadge} backHome={messagesNarrow} />

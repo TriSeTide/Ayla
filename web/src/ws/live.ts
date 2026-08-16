@@ -11,6 +11,7 @@
 import { useAuthStore } from "../stores/auth";
 import { WS_BASE_URL } from "./presence";
 import type { LiveServerFrame } from "../api/types";
+import { useRealtimeStore } from "../stores/realtime";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -138,6 +139,7 @@ export class LiveWSClient {
 
   private setConnection(conn: "connecting" | "online" | "offline") {
     this.connection = conn;
+    useRealtimeStore.getState().setStatus("live", conn === "online" ? "online" : conn === "connecting" ? "connecting" : "offline");
     this.onConnectionChange?.(conn);
   }
 

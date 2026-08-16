@@ -9,6 +9,7 @@
  */
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
+import { useRealtimeStore } from "../stores/realtime";
 
 export const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL as string | undefined) ?? "";
 
@@ -32,6 +33,7 @@ export class PresenceClient {
     if (!access) return;
     this.manualClosed = false;
     usePresenceStore.getState().setConnection("connecting");
+    useRealtimeStore.getState().setStatus("presence", "connecting");
     this.open(access);
   }
 
@@ -49,6 +51,7 @@ export class PresenceClient {
     ws.onopen = () => {
       this.attempt = 0;
       usePresenceStore.getState().setConnection("online");
+      useRealtimeStore.getState().setStatus("presence", "online");
       this.startHeartbeat();
     };
 
@@ -65,6 +68,7 @@ export class PresenceClient {
     ws.onclose = () => {
       this.stopHeartbeat();
       usePresenceStore.getState().setConnection("offline");
+      useRealtimeStore.getState().setStatus("presence", this.manualClosed ? "offline" : "connecting");
       if (!this.manualClosed) this.scheduleReconnect();
     };
 
@@ -80,6 +84,7 @@ export class PresenceClient {
     );
     this.attempt += 1;
     usePresenceStore.getState().setConnection("connecting");
+    useRealtimeStore.getState().setStatus("presence", "connecting");
     this.reconnectTimer = setTimeout(() => {
       const access = useAuthStore.getState().accessToken;
       if (!access || this.manualClosed) return;
@@ -134,6 +139,7 @@ export class PresenceClient {
       this.ws = null;
     }
     usePresenceStore.getState().reset();
+    useRealtimeStore.getState().setStatus("presence", "offline");
   }
 }
 

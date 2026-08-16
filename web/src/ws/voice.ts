@@ -13,6 +13,7 @@ import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { WS_BASE_URL } from "./presence";
 import type { VoiceServerFrame } from "../api/types";
+import { useRealtimeStore } from "../stores/realtime";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -48,6 +49,7 @@ export class VoiceWSClient {
   private setConnection(s: "connecting" | "online" | "offline") {
     this.connection = s;
     useVoiceStore.getState().setWsConnection(s);
+    useRealtimeStore.getState().setStatus("voice", s === "online" ? "online" : s === "connecting" ? "connecting" : "offline");
   }
 
   private open(access: string) {
