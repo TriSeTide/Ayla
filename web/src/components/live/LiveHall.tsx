@@ -73,7 +73,9 @@ export function LiveHall({
             </div>
             <div className="live-card-title">{ch.title}</div>
             <div className="live-card-meta">
-              <span className="live-card-owner">{ownerNames[ch.owner_id] ?? "未知主播"}</span>
+              <span className="live-card-owner">
+                {ch.owner_nickname ?? ownerNames[ch.owner_id] ?? "未知主播"}
+              </span>
               <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
             </div>
           </button>

@@ -18,6 +18,7 @@ def test_create_channel_returns_stream_urls(auth_client):
     assert data["title"] == "爱莉的午后"
     assert data["status"] == "idle"
     assert data["owner_id"] == user.id
+    assert data["owner_nickname"] == user.nickname or user.username
     assert data["is_owner"] is True
     assert len(data["stream_key"]) == 48
     assert data["rtmp_url"] == f"rtmp://127.0.0.1:1935/live/{data['stream_key']}"
@@ -73,6 +74,25 @@ def test_channel_list_and_only_live_filter(auth_client, live_channel_factory):
     assert resp.status_code == 200
     assert len(resp.json()) == 1
     assert resp.json()[0]["title"] == "B"
+
+
+@pytest.mark.django_db
+def test_list_includes_owner_nickname(auth_client, live_channel_factory):
+    """列表直接带主播昵称；nickname 为空时回退 username（前端大厅卡片不再经懒拉）。"""
+    client, owner = auth_client()
+    owner.nickname = "爱莉"
+    owner.save(update_fields=["nickname"])
+    live_channel_factory(owner=owner, title="A")
+    # 无 nickname 的用户：回退 username
+    plain = live_channel_factory(title="B")
+    plain.owner.nickname = ""
+    plain.owner.save(update_fields=["nickname"])
+
+    resp = client.get("/api/v1/live/channels/")
+    assert resp.status_code == 200
+    by_title = {ch["title"]: ch for ch in resp.json()}
+    assert by_title["A"]["owner_nickname"] == "爱莉"
+    assert by_title["B"]["owner_nickname"] == plain.owner.username
 
 
 @pytest.mark.django_db

@@ -1,4 +1,6 @@
 """LiveKit token 签发契约测试（M4-5 §10.1：身份/房间/grants/TTL；无配置时显式失败）。"""
+from datetime import timedelta
+
 import pytest
 from django.conf import settings
 from django.test import override_settings
@@ -56,7 +58,7 @@ def test_issue_token_binds_identity_room_and_grants(auth_client, monkeypatch):
     assert grants.room == "room_home"
     assert grants.can_publish is True
     assert grants.can_subscribe is True
-    assert captured["ttl"] == 600
+    assert captured["ttl"] == timedelta(seconds=600)
 
 
 @pytest.mark.django_db
@@ -88,7 +90,7 @@ def test_issue_token_uses_custom_ttl(auth_client, monkeypatch):
 
     monkeypatch.setattr(livekit_api, "AccessToken", _FakeToken)
     issue_token(user, "room_x", ttl_seconds=300)
-    assert captured["ttl"] == 300
+    assert captured["ttl"] == timedelta(seconds=300)
 
 
 @pytest.mark.django_db

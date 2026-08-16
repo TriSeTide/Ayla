@@ -43,6 +43,14 @@ export function SearchPage() {
     [pushHistory],
   );
 
+  // 五类分组是否全空（决定无结果空态）
+  const hasAnyResult = useCallback((r: SearchResults | null): boolean => {
+    if (!r) return false;
+    return [r.users, r.groups, r.posts, r.lives, r.games].some(
+      (g) => (g?.total ?? 0) > 0,
+    );
+  }, []);
+
   // URL q 驱动：进入 /search?q=… 或顶栏/历史更新 q 时自动搜索
   useEffect(() => {
     if (!q) {
@@ -81,7 +89,7 @@ export function SearchPage() {
       {loading && <div className="search-loading">搜索中…</div>}
       {error && <p className="search-error">{error}</p>}
 
-      {results && (
+      {results && hasAnyResult(results) && (
         <div className="search-results">
           <ResultGroup
             title="用户"
@@ -128,6 +136,13 @@ export function SearchPage() {
               </button>
             ))}
           </ResultGroup>
+        </div>
+      )}
+
+      {results && !hasAnyResult(results) && !loading && !error && (
+        <div className="search-empty" role="status">
+          <h3 className="placeholder-title">未找到「{q}」相关结果</h3>
+          <p className="placeholder-desc">换个关键词试试，或检查是否有拼写错误</p>
         </div>
       )}
 

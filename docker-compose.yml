@@ -57,18 +57,26 @@ services:
 
   # M4-5 语音：LiveKit SFU（WebRTC 多人语音房间，真人用户之间走 LiveKit）。
   # key/secret 生成后写进 backend/.env（LIVEKIT_API_KEY / LIVEKIT_API_SECRET），不提交仓库。
-  # 7880 = WS 信令 + WebRTC；7881 = RTC 媒体（UDP）。
+  # 端口约定（与 livekit.yaml 的 rtc 段对应，含 UDP 媒体映射——缺 UDP 会导致
+  # 浏览器「could not establish pc connection」）：
+  #   7880/tcp  WS 信令 + HTTP
+  #   7881/tcp  RTC over TCP
+  #   7882-7886/udp  RTC 媒体（UDP）
   livekit:
-    image: livekit/livekit-server:v1.7
+    # v1.13 系列：兼容 livekit-client 2.x（/rtc/v1 信令路径 + 更高协议版本）。
+    # 旧 v1.7 与 livekit-client 2.21 协议不匹配（客户端降级连 /rtc 后立即断开）。
+    image: livekit/livekit-server:v1.13
     container_name: elysia-livekit
     restart: unless-stopped
-    command: --dev
+    command: --config /livekit.yaml
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_KEYS:-devkey: devsecret}"
     ports:
-      - "7880:7880"   # WS + WebRTC 信令
-      - "7881:7881"   # WebRTC 媒体（UDP）
+      - "7880:7880/tcp"   # WS 信令 + HTTP
+      - "7881:7881/tcp"   # RTC over TCP
+      - "7882-7886:7882-7886/udp"   # RTC 媒体（UDP）
     volumes:
+      - ./livekit.yaml:/livekit.yaml:ro
       - livekit_data:/livekit
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:7880/"]

@@ -31,22 +31,26 @@ export function VoiceChannelPanel({
   channelName,
   livekit,
   wsConnection,
-  micEnabled,
   elysiaProfile,
   onToggleMic,
   onLeave,
   onRejoin,
   onVolumeChange,
+  onLocalVolumeChange,
+  onToggleMemberMuted,
 }: {
   channelName: string;
   livekit: LiveKitConnectionState;
   wsConnection: VoiceWSConnectionState;
-  micEnabled: boolean;
   elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
   onLeave: () => void;
   onRejoin: () => void;
   onVolumeChange: (userId: string, volume: number) => void;
+  /** 本地麦克风音量 0~100 */
+  onLocalVolumeChange: (volume: number) => void;
+  /** 远端成员本地播放静音（喇叭按钮） */
+  onToggleMemberMuted: (userId: string) => void;
 }) {
   const members = useVoiceStore((s) => s.members);
   const currentUser = useAuthStore((s) => s.currentUser);
@@ -73,16 +77,17 @@ export function VoiceChannelPanel({
                 isElysia={isElysia}
                 elysiaLabel={isElysia ? elysiaStateLabel("connected") : null}
                 onVolumeChange={onVolumeChange}
+                onLocalVolumeChange={onLocalVolumeChange}
+                onToggleMic={onToggleMic}
+                onToggleMemberMuted={onToggleMemberMuted}
               />
             );
           })
         )}
       </div>
       <VoiceControls
-        micEnabled={micEnabled}
         livekit={livekit}
         wsConnection={wsConnection}
-        onToggleMic={onToggleMic}
         onLeave={onLeave}
         onRejoin={onRejoin}
       />

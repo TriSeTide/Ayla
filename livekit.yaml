@@ -1,0 +1,22 @@
+# LiveKit 自托管配置（本地开发，与 docker-compose.yml livekit 服务配套）
+#
+# 关键：RTC 媒体端口必须映射到宿主机，且 node_ip 必须广播浏览器可达的地址。
+# - 容器实际监听 0.0.0.0；node_ip 只是告诉客户端「媒体连这个 IP」。
+# - 本机/局域网开发：node_ip 用宿主机局域网 IP（浏览器与容器同机/同网，可直达）。
+# - 公网部署：改用 use_external_ip: true（STUN 广播公网 srflx）或 node_ip 填公网 IP。
+#
+# 与 docker-compose 端口映射保持对应：
+#   7880/tcp  HTTP + WS 信令
+#   7881/tcp  RTC over TCP
+#   7882-7886/udp  RTC 媒体（UDP）
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 7882
+  port_range_end: 7886
+  # 本机开发：宿主机 WLAN 局域网 IP（Get-NetIPAddress 查得 192.168.1.12）。
+  # 若换网络/换机，改这里为当前宿主机可达 IP。
+  node_ip: 192.168.1.12
+  use_external_ip: false
+keys:
+  devkey: devsecret

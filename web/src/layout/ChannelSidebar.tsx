@@ -4,8 +4,8 @@
  * 240–280px 玻璃：群名头（点击进群信息 R-G9 入口）+ 五场景项
  * （聊天/语音/直播/帖子/桌游，选中 rgba(157,191,230,0.35) 胶囊底）+ 返回主页（无，宽屏本就在主页）。
  * 状态标识（语音在麦人数/直播 LIVE/帖子未读）随 F4/F5/F6 接入，F3 不渲染。
+ * 群信息入口仅群名头一处（R-G9），侧栏底部不再放重复入口。
  */
-import { Link } from "react-router-dom";
 import { IconChat, IconGame, IconMic, IconPost, IconVideo } from "../components/icons";
 import type { GroupScene } from "../stores/group";
 
@@ -18,13 +18,11 @@ const SCENE_META: Array<{ key: GroupScene; label: string; icon: typeof IconMic }
 ];
 
 export function ChannelSidebar({
-  group,
   groupName,
   activeScene,
   onSelectScene,
   onOpenInfo,
 }: {
-  group: { id: string };
   groupName: string;
   activeScene: GroupScene;
   onSelectScene: (scene: GroupScene) => void;
@@ -55,10 +53,6 @@ export function ChannelSidebar({
           );
         })}
       </ul>
-      {/* 群信息入口固定于底部（等价窄屏群头像进入群信息的语义） */}
-      <Link className="channel-sidebar-info" to={`/group/${group.id}/info`}>
-        <span>群信息</span>
-      </Link>
     </aside>
   );
 }

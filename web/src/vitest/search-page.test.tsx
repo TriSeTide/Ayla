@@ -133,4 +133,28 @@ describe("SearchPage 顶栏复用（F9）", () => {
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(useSearchStore.getState().history).toEqual([]);
   });
+
+  it("五类分组全空时显示「未找到」空态（不空白）", async () => {
+    vi.mocked(search).mockResolvedValue({
+      users: { total: 0, items: [] },
+      groups: { total: 0, items: [] },
+      posts: { total: 0, items: [] },
+      lives: { total: 0, items: [] },
+      games: { total: 0, items: [] },
+    });
+    renderSearch("/search?q=不存在的词", true);
+    await waitFor(() => {
+      expect(screen.getByText(/未找到/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/不存在的词/)).toBeInTheDocument();
+  });
+
+  it("有部分结果时不显示无结果空态", async () => {
+    // 默认 resultFor 只带 users（其余 total=0），不应出现空态
+    renderSearch("/search?q=冰樱", true);
+    await waitFor(() => {
+      expect(screen.getByText("小樱")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/未找到/)).not.toBeInTheDocument();
+  });
 });

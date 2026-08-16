@@ -21,13 +21,14 @@ function renderBody(groupId: string | null) {
       channelName="语音房"
       livekit="connected"
       wsConnection="online"
-      micEnabled={false}
       elysiaProfile={null}
       groupId={groupId}
       onToggleMic={vi.fn()}
       onLeave={vi.fn()}
       onRejoin={vi.fn()}
       onVolumeChange={vi.fn()}
+      onLocalVolumeChange={vi.fn()}
+      onToggleMemberMuted={vi.fn()}
       onBack={vi.fn()}
       inputEntered
     />,

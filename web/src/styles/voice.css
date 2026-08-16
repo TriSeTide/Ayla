@@ -85,6 +85,24 @@
   background: var(--surface);
   border: 1px solid var(--glass-border);
   box-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.voice-hub .voice-channel-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(70, 91, 146, 0.14);
+  border-color: rgba(157, 191, 230, 0.65);
+}
+
+.voice-hub .voice-channel-card:focus-visible {
+  outline: 2px solid var(--ice-500);
+  outline-offset: 2px;
+}
+
+.voice-hub .voice-channel-card[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .voice-hub .voice-channel-card.active {
@@ -179,6 +197,24 @@
   background: var(--surface);
   border: 1px solid var(--glass-border);
   box-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.group-voice .voice-channel-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(70, 91, 146, 0.14);
+  border-color: rgba(157, 191, 230, 0.65);
+}
+
+.group-voice .voice-channel-card:focus-visible {
+  outline: 2px solid var(--ice-500);
+  outline-offset: 2px;
+}
+
+.group-voice .voice-channel-card[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .group-voice .voice-channel-card.active {

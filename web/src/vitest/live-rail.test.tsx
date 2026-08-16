@@ -20,6 +20,7 @@ function liveCh(id: number, title: string, status: LiveChannelDescriptor["status
     group: null,
     group_name: null,
     owner_id: `u${id}`,
+    owner_nickname: null,
     is_owner: false,
     stream_key: null,
     rtmp_url: null,
@@ -198,5 +199,21 @@ describe("LiveHall 大厅卡片封面占位", () => {
     // 点击卡片进入
     screen.getByText("爱莉电台").click();
     expect(onEnter).toHaveBeenCalledWith(1);
+  });
+
+  it("owner_nickname 优先于 ownerNames 懒拉兜底（后端列表直接带主播名）", () => {
+    const onEnter = vi.fn();
+    const ch = { ...liveCh(1, "电台", "live"), owner_nickname: "主播小樱" };
+    render(
+      <LiveHall
+        channels={[ch]}
+        elysiaUserId={null}
+        ownerNames={{ u1: "懒拉名字" }}
+        onEnter={onEnter}
+      />,
+    );
+    // 后端带的主播名优先；ownerNames 兜底不生效
+    expect(screen.getByText("主播小樱")).toBeInTheDocument();
+    expect(screen.queryByText("懒拉名字")).not.toBeInTheDocument();
   });
 });

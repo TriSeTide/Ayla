@@ -23,6 +23,7 @@ const CHANNEL: LiveChannelDescriptor = {
   title: "t",
   status: "idle",
   owner_id: "u1",
+  owner_nickname: "爱莉",
   is_owner: true,
   visibility: "public",
   group: null,

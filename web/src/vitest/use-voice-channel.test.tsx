@@ -37,7 +37,10 @@ function fakeRoom(overrides: Partial<LiveKitRoomLike> = {}): LiveKitRoomLike {
     disconnect: vi.fn().mockResolvedValue(undefined),
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
     isMicrophoneEnabled: vi.fn().mockReturnValue(false),
+    startAudio: vi.fn().mockResolvedValue(undefined),
     remoteParticipants: vi.fn().mockReturnValue([]),
+    setLocalVolume: vi.fn().mockResolvedValue(undefined),
+    getLocalVolume: vi.fn().mockReturnValue(1),
     ...overrides,
   };
 }

@@ -115,6 +115,14 @@ export function useVoiceChannel() {
           );
         }
       },
+      // 本地麦克风实时音量 → store（自己的成员卡片显示音量跳动；未开麦回调 0）
+      onLocalAudioLevel: (level) => {
+        useVoiceStore.getState().setLocalAudioLevel(level);
+      },
+      // 远端成员实时音量快照 → store（成员行显示"谁在说话"的音量跳动）
+      onRemoteAudioLevels: (levels) => {
+        useVoiceStore.getState().setRemoteAudioLevels(levels);
+      },
     });
   }, []);
 
@@ -155,6 +163,8 @@ export function useVoiceChannel() {
         useVoiceStore.getState().setLivekit("connecting");
         try {
           await voiceLiveKit.connect(joinResult.ws_url, joinResult.token);
+          // 在用户手势链内恢复远端音频播放（浏览器 autoplay 政策）
+          await voiceLiveKit.startAudio().catch(() => {});
         } catch (mediaErr) {
           // join 成功但媒体连接失败 → 回滚成员状态
           await voiceApi.leaveVoiceChannel(channelId).catch(() => {});
@@ -241,6 +251,21 @@ export function useVoiceChannel() {
     voiceLiveKit.setRemoteVolume(userId, volume / 100);
   }, []);
 
+  /** 远端成员本地播放静音（喇叭按钮：一键静音/一键恢复；不改变 volume 设定值） */
+  const setMemberLocallyMuted = useCallback((userId: string, muted: boolean) => {
+    useVoiceStore.getState().setMemberLocallyMuted(userId, muted);
+    const m = useVoiceStore.getState().members[userId];
+    if (m) voiceLiveKit.setRemoteVolume(userId, muted ? 0 : m.volume / 100);
+  }, []);
+
+  /** 本地麦克风音量（0~100，100 = 原始）：拖滑块实时改自己说话的响度（本地偏好，不落库） */
+  const setLocalVolume = useCallback((volume: number) => {
+    useVoiceStore.getState().setLocalVolume(volume);
+    void voiceLiveKit.setLocalVolume(volume / 50).catch(() => {
+      // 媒体层失败静默（未连接时只记录 store 值，开麦后由监测懒挂载）
+    });
+  }, []);
+
   /** 媒体最终断线后的"重新加入"（走 join 幂等路径） */
   const rejoin = useCallback(async () => {
     const channelId = useVoiceStore.getState().currentChannelId;
@@ -258,6 +283,8 @@ export function useVoiceChannel() {
     leave,
     toggleMic,
     setMemberVolume,
+    setMemberLocallyMuted,
+    setLocalVolume,
     rejoin,
     reconcile,
   };

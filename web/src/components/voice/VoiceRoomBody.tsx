@@ -18,20 +18,20 @@ export function VoiceRoomBody({
   channelName,
   livekit,
   wsConnection,
-  micEnabled,
   elysiaProfile,
   groupId,
   onToggleMic,
   onLeave,
   onRejoin,
   onVolumeChange,
+  onLocalVolumeChange,
+  onToggleMemberMuted,
   onBack,
   inputEntered,
 }: {
   channelName: string;
   livekit: LiveKitConnectionState;
   wsConnection: VoiceWSConnectionState;
-  micEnabled: boolean;
   elysiaProfile: ElysiaProfile | null;
   /** 群语音房的群 id：房内打字发到该群会话；公开语音房为 null（无打字框） */
   groupId: string | null;
@@ -39,6 +39,10 @@ export function VoiceRoomBody({
   onLeave: () => void;
   onRejoin: () => void;
   onVolumeChange: (userId: string, volume: number) => void;
+  /** 本地麦克风音量 0~100（自己说话别人听到的响度） */
+  onLocalVolumeChange: (volume: number) => void;
+  /** 远端成员本地播放静音（喇叭按钮） */
+  onToggleMemberMuted: (userId: string) => void;
   onBack: () => void;
   inputEntered: boolean;
 }) {
@@ -73,12 +77,13 @@ export function VoiceRoomBody({
         channelName={channelName}
         livekit={livekit}
         wsConnection={wsConnection}
-        micEnabled={micEnabled}
         elysiaProfile={elysiaProfile}
         onToggleMic={onToggleMic}
         onLeave={onLeave}
         onRejoin={onRejoin}
         onVolumeChange={onVolumeChange}
+        onLocalVolumeChange={onLocalVolumeChange}
+        onToggleMemberMuted={onToggleMemberMuted}
       />
 
       {groupId != null && (

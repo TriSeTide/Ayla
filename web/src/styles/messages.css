@@ -14,6 +14,19 @@
   padding-bottom: 68px;
 }
 
+/* 审批（同意/拒绝）失败提示条：点击关闭 */
+.messages-action-error {
+  flex: none;
+  margin: 0 var(--sp-4) var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(232, 163, 61, 0.12);
+  border: 1px solid rgba(232, 163, 61, 0.4);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .messages-tabs {
   flex: none;
   display: flex;

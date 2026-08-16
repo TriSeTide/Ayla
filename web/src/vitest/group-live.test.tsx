@@ -30,6 +30,7 @@ function ch(id: number, group: string | null): LiveChannelDescriptor {
     title: `直播${id}`,
     status: "live",
     owner_id: "o1",
+    owner_nickname: "主播",
     is_owner: false,
     visibility: group ? "group" : "public",
     group,

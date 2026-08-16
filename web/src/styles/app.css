@@ -1411,7 +1411,25 @@
   min-width: 0;
 }
 
+/* 名字行（只放名字；音量条在行尾操作区，所有成员行同一水平线） */
+.voice-member-topline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* 行尾操作区：开关按钮 + 音量条（自己麦克风/远端播放，垂直居中同一水平线） */
+.voice-member-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .voice-member-name {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   overflow: hidden;
@@ -1444,9 +1462,124 @@
   color: var(--grape-700);
 }
 
-.voice-volume-slider {
-  width: 90px;
-  accent-color: var(--indigo-700);
+/* ================= 覆盖式音量条（自己麦克风 + 远端成员共用） ================= */
+/* 三层结构（下→上）：底层轨道（双色填充）→ 中层跳动条（覆盖在轨道上方）→ 上层 slider（透明轨道 + 圆把手） */
+
+/* 行尾开关按钮（麦克风/喇叭：一键禁音或静音、再点恢复） */
+.voice-meter-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--indigo-700);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.voice-meter-toggle:hover {
+  background: rgba(189, 212, 233, 0.35);
+}
+
+/* 禁音/静音态：灰 + 斜线图标（视觉明确） */
+.voice-meter-toggle.is-off {
+  color: var(--text-secondary);
+  background: rgba(189, 212, 233, 0.25);
+}
+
+/* 覆盖式音量条容器 */
+.voice-meter {
+  display: block;
+  position: relative;
+  width: 90px; /* 与远端音量条一致，行内对齐 */
+  height: 20px;
+}
+
+/* 底层轨道：双色填充（滑块左边 indigo = 设定音量，右边 ice 浅色）——"滑块左边始终有颜色" */
+.voice-meter-track {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    var(--indigo-700) 0%,
+    var(--indigo-700) var(--fill, 50%),
+    rgba(189, 212, 233, 0.55) var(--fill, 50%),
+    rgba(189, 212, 233, 0.55) 100%
+  );
+  pointer-events: none;
+}
+
+/* 中层跳动条：覆盖在轨道上方（另一种颜色，宽度 = 实时说话音量 0~100%） */
+.voice-meter-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--glow-500), var(--ice-500));
+  transition: width 80ms ease-out;
+  pointer-events: none;
+}
+
+/* 正在说话：跳动条辉光增强（跳动效果的主体） */
+.voice-meter.is-speaking .voice-meter-fill {
+  box-shadow: 0 0 6px rgba(247, 150, 255, 0.55);
+}
+
+/* 最上层 slider：轨道透明（不遮跳动条），只显示圆把手 */
+.voice-meter-slider {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.voice-meter-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+}
+
+.voice-meter-slider::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+}
+
+.voice-meter-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--indigo-700);
+  border: 2px solid #fff;
+  margin-top: -5px; /* (thumb 14 - track 4) / 2，垂直居中 */
+  box-shadow: 0 1px 4px rgba(70, 91, 146, 0.35);
+}
+
+.voice-meter-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--indigo-700);
+  border: 2px solid #fff;
 }
 
 /* 控制条 */
@@ -1458,15 +1591,6 @@
   flex-wrap: wrap;
   padding-top: var(--sp-2);
   border-top: 1px solid var(--glass-border);
-}
-
-.voice-mic-btn {
-  min-height: 36px;
-}
-
-.voice-mic-off {
-  background: var(--ice-100);
-  color: var(--text-secondary);
 }
 
 .voice-leave-btn {

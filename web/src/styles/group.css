@@ -321,24 +321,6 @@
   color: var(--text-primary);
 }
 
-.channel-sidebar-info {
-  display: flex;
-  align-items: center;
-  height: 40px;
-  padding: 0 var(--sp-4);
-  margin: var(--sp-2);
-  border-radius: var(--radius-input);
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.channel-sidebar-info:hover {
-  background: rgba(157, 191, 230, 0.18);
-  text-decoration: none;
-}
-
 /* ---- 宽屏内容区 ---- */
 .group-content {
   flex: 1;

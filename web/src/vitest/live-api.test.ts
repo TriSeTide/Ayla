@@ -44,6 +44,7 @@ const OWNER_CHANNEL = {
   title: "爱莉的午后",
   status: "idle",
   owner_id: "u-owner",
+  owner_nickname: "爱莉",
   is_owner: true,
   stream_key: "abc123key",
   rtmp_url: "rtmp://127.0.0.1:1935/live/abc123key",

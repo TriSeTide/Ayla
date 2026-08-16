@@ -285,6 +285,13 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 语音房卡片：实心卡片；房间名 Nunito 700 15px + 房主 13px `--text-secondary` + 在麦人数（麦克风图标 + Space Grotesk 12px）+ 成员头像堆叠（≤5 个 28px 圆形重叠 -8px，带光环）+ 来源标识 Micro Tag
 - 语音房（进入后）：成员网格（头像 64px 带光环 + 麦克风状态角标——开麦 `--glow-500` / 闭麦 `--ice-300`）；底部控制排（静音/扬声器/上麦/离开，48px 圆形玻璃钮，离开为 `--destructive`）+ 输入框（房内打字）
 - 上麦按钮：主 CTA 胶囊（`--indigo-700` 实底白字）
+- 语音成员行的「行尾操作区」（`.voice-member-actions`，**所有成员行同一水平线、上下等距**）：开关按钮 + 音量条（自己麦克风与远端成员**同一样式** VoiceVolumeMeter，90px 行内对齐）。开关按钮 `.voice-meter-toggle`（28px 圆形无底，hover 浅冰底；`is-off` 禁音/静音态灰 + 斜线图标）——自己行 = 麦克风按钮（lucide mic/mic-off，一键禁音/一键恢复，媒体层 toggleMic）；远端行 = 喇叭按钮（lucide volume-2/volume-x，一键静音/一键恢复，本地播放 `locallyMuted`，不改变 volume 设定值）。
+- 音量条（VoiceVolumeMeter）：**三层结构**（下→上）——
+  1. 底层轨道 `.voice-meter-track`：**双色填充**（滑块左边 `--indigo-700` = 设定音量、右边 `rgba(ice-300,0.55)` 浅色；`--fill` 内联变量随设定值）→ "滑块左边始终有颜色"；
+  2. 中层跳动条 `.voice-meter-fill`：`--glow-500 → --ice-500` 渐变、高 4px、圆角，宽度随实时说话音量左右伸缩跳动（静音 0、说话伸长，说话态加微辉光），**覆盖在轨道上方**；
+  3. 上层 slider：轨道透明（不遮跳动条）+ `--indigo-700` 白边圆把手。
+  - 自己条目：设定 = 本地麦克风音量 0~100（100 = 原始，改变自己说话别人听到的响度），跳动随 `localAudioLevel`（本地 Web Audio 分析）；本地偏好不落库、刷新重置。
+  - 远端条目：设定 = 本地播放音量 0~100（本地偏好，不落库），跳动随**本地 Web Audio 分析远端轨道**（与本地同机制，100ms 轮询；不依赖 server speaker update，响应快）——说话即见跳动，可辨识"谁在说话"。
 
 ### 12.11 桌游室卡片
 

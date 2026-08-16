@@ -36,6 +36,8 @@ export function MessagesPage() {
   const [invites, setInvites] = useState<GroupInvite[]>([]);
   const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
+  /** 审批（同意/拒绝）失败提示（点击关闭） */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {
@@ -75,7 +77,9 @@ export function MessagesPage() {
     usersApi.actionFriendRequest(req.id, action).then(() => {
       setFriendRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch(() => {});
+    }).catch((e) => {
+      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
+    });
   }, []);
 
   // 群邀请处理
@@ -83,7 +87,9 @@ export function MessagesPage() {
     chatApi.actionGroupInvite(inv.id, action).then(() => {
       setInvites((prev) => prev.filter((i) => i.id !== inv.id));
       refreshBadges();
-    }).catch(() => {});
+    }).catch((e) => {
+      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
+    });
   }, []);
 
   // 入群申请审批
@@ -91,7 +97,9 @@ export function MessagesPage() {
     chatApi.actionJoinRequest(req.id, action).then(() => {
       setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch(() => {});
+    }).catch((e) => {
+      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
+    });
   }, []);
 
   const privateConvs = useMemo(() => conversations.filter((c) => c.type === "private"), [conversations]);
@@ -123,6 +131,11 @@ export function MessagesPage() {
   return (
     <div className="messages-page">
       <NarrowTopBar />
+      {actionError && (
+        <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
+          {actionError}（点击关闭）
+        </div>
+      )}
       <div className="messages-tabs" role="tablist" aria-label="消息中心">
         <button
           type="button"

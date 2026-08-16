@@ -40,6 +40,8 @@ def issue_token(user, room_name: str, *, ttl_seconds: int | None = None) -> str:
     if not room_name:
         raise ValueError("room_name 不能为空")
 
+    from datetime import timedelta
+
     from livekit import api
 
     ttl = ttl_seconds if ttl_seconds is not None else settings.LIVEKIT_TOKEN_TTL_SECONDS
@@ -54,7 +56,8 @@ def issue_token(user, room_name: str, *, ttl_seconds: int | None = None) -> str:
                 can_subscribe=True,
             )
         )
-        .with_ttl(ttl)
+        # livekit-api>=1.0 的 with_ttl 接受 timedelta（传 int 秒会 in to_jwt 崩溃）
+        .with_ttl(timedelta(seconds=ttl))
     )
     return token.to_jwt()
 

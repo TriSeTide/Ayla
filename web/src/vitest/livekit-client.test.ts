@@ -27,6 +27,7 @@ function fakeRoom(overrides: Partial<LiveKitRoomLike> = {}): LiveKitRoomLike & {
     disconnect: vi.fn().mockResolvedValue(undefined),
     setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
     isMicrophoneEnabled: vi.fn().mockReturnValue(false),
+    startAudio: vi.fn().mockResolvedValue(undefined),
     remoteParticipants: vi.fn().mockReturnValue([]),
   };
   return Object.assign(base, overrides) as unknown as ReturnType<typeof fakeRoom>;

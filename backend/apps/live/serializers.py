@@ -16,6 +16,8 @@ class LiveChannelSerializer(serializers.ModelSerializer):
 
     owner_id = serializers.CharField(source="owner.id", read_only=True)
     is_owner = serializers.SerializerMethodField()
+    # 列表/详情直接带主播昵称（大厅卡片显示；避免前端经 users/search 懒拉未命中 → "未知主播"）
+    owner_nickname = serializers.SerializerMethodField()
     stream_key = serializers.SerializerMethodField()
     rtmp_url = serializers.SerializerMethodField()
     hls_url = serializers.SerializerMethodField()
@@ -35,6 +37,7 @@ class LiveChannelSerializer(serializers.ModelSerializer):
             "group",
             "group_name",
             "owner_id",
+            "owner_nickname",
             "is_owner",
             "stream_key",
             "rtmp_url",
@@ -52,6 +55,10 @@ class LiveChannelSerializer(serializers.ModelSerializer):
     def get_is_owner(self, obj: LiveChannel) -> bool:
         user = self._requester()
         return bool(user and user.is_authenticated and user.id == obj.owner_id)
+
+    def get_owner_nickname(self, obj: LiveChannel) -> str:
+        """主播展示名（nickname 为空时回退 username），供大厅卡片直接展示。"""
+        return obj.owner.nickname or obj.owner.username
 
     def get_stream_key(self, obj: LiveChannel) -> str | None:
         # 仅 owner 可见；无 request 上下文（如系统侧序列化）一律 null（安全默认）

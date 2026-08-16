@@ -24,6 +24,10 @@ export interface VoiceMemberState {
   muted: boolean;
   /** 本地播放音量 0~100（本地偏好，不落库、刷新重置） */
   volume: number;
+  /** 本地播放静音（喇叭按钮：我听不到该成员；不改变 volume 设定值） */
+  locallyMuted: boolean;
+  /** 远端实时说话音量 0~1（server speaker update 轮询写入；未说话为 0） */
+  audioLevel: number;
 }
 
 export type LiveKitConnectionState =
@@ -47,6 +51,10 @@ interface VoiceState {
   wsConnection: VoiceWSConnectionState;
   /** 我自己是否开麦（本地媒体事实，来自 LiveKit 封装层回写） */
   micEnabled: boolean;
+  /** 本地麦克风实时音量 0~1（自己说话音量跳动；未开麦为 0） */
+  localAudioLevel: number;
+  /** 本地麦克风音量 0~100（自己说话别人听到的响度；本地偏好，不落库、刷新重置；100 = 原始） */
+  localVolume: number;
 
   setChannels: (list: VoiceChannelDescriptor[]) => void;
   setChannelsLoading: (loading: boolean) => void;
@@ -71,10 +79,16 @@ interface VoiceState {
     list: { user_id: string; joined_at: string; last_seen_at: string }[],
   ) => void;
   setMemberVolume: (userId: string, volume: number) => void;
+  /** 本地播放静音切换（喇叭按钮；不改变 volume 设定值） */
+  setMemberLocallyMuted: (userId: string, muted: boolean) => void;
+  /** 远端成员实时音量全量快照（user_id → 0~1，含 0；用于成员行说话跳动） */
+  setRemoteAudioLevels: (levels: Record<string, number>) => void;
 
   setLivekit: (s: LiveKitConnectionState) => void;
   setWsConnection: (s: VoiceWSConnectionState) => void;
   setMicEnabled: (enabled: boolean) => void;
+  setLocalAudioLevel: (level: number) => void;
+  setLocalVolume: (volume: number) => void;
 
   reset: () => void;
 }
@@ -88,6 +102,8 @@ const INITIAL = {
   livekit: "idle" as LiveKitConnectionState,
   wsConnection: "offline" as VoiceWSConnectionState,
   micEnabled: false,
+  localAudioLevel: 0,
+  localVolume: 100,
 };
 
 export const useVoiceStore = create<VoiceState>((set, get) => ({
@@ -108,7 +124,14 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     }),
 
   leaveChannelLocal: () =>
-    set({ currentChannelId: null, members: {}, livekit: "idle", micEnabled: false }),
+    set({
+      currentChannelId: null,
+      members: {},
+      livekit: "idle",
+      micEnabled: false,
+      localAudioLevel: 0,
+      localVolume: 100,
+    }),
 
   applyVoiceState: (channelId, userId, state, ts) => {
     const s = get();
@@ -122,6 +145,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
           last_seen_at: ts,
           muted: members[userId]?.muted ?? false,
           volume: members[userId]?.volume ?? 100,
+          locallyMuted: members[userId]?.locallyMuted ?? false,
+          audioLevel: members[userId]?.audioLevel ?? 0,
         };
         break;
       case "left":
@@ -158,6 +183,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
           last_seen_at: m.last_seen_at,
           muted: prev?.muted ?? false,
           volume: prev?.volume ?? 100,
+          locallyMuted: prev?.locallyMuted ?? false,
+          audioLevel: prev?.audioLevel ?? 0,
         };
       }
       return { members };
@@ -172,9 +199,39 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       };
     }),
 
+  setMemberLocallyMuted: (userId, muted) =>
+    set((state) => {
+      const existing = state.members[userId];
+      if (!existing || existing.locallyMuted === muted) return state;
+      return {
+        members: { ...state.members, [userId]: { ...existing, locallyMuted: muted } },
+      };
+    }),
+
+  setRemoteAudioLevels: (levels) =>
+    set((state) => {
+      // 全量快照：levels 里有的成员覆盖，没有的归 0（轮询每轮都传完整远端集合）
+      let changed = false;
+      const members: Record<string, VoiceMemberState> = {};
+      for (const [uid, m] of Object.entries(state.members)) {
+        const lvl = Math.max(0, Math.min(1, levels[uid] ?? 0));
+        if (m.audioLevel !== lvl) {
+          members[uid] = { ...m, audioLevel: lvl };
+          changed = true;
+        } else {
+          members[uid] = m;
+        }
+      }
+      return changed ? { members } : state;
+    }),
+
   setLivekit: (livekit) => set({ livekit }),
   setWsConnection: (wsConnection) => set({ wsConnection }),
   setMicEnabled: (micEnabled) => set({ micEnabled }),
+  setLocalAudioLevel: (localAudioLevel) =>
+    set({ localAudioLevel: Math.max(0, Math.min(1, localAudioLevel)) }),
+  setLocalVolume: (localVolume) =>
+    set({ localVolume: Math.max(0, Math.min(100, Math.round(localVolume))) }),
 
   reset: () => set({ ...INITIAL, members: {} }),
 }));

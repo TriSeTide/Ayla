@@ -32,7 +32,6 @@ export function VoiceHubPage() {
   const {
     currentChannelId,
     livekit,
-    micEnabled,
     joining,
     error: joinError,
     clearError,
@@ -40,6 +39,8 @@ export function VoiceHubPage() {
     leave,
     toggleMic,
     setMemberVolume,
+    setMemberLocallyMuted,
+    setLocalVolume,
     rejoin,
   } = useVoiceChannel();
 
@@ -97,13 +98,17 @@ export function VoiceHubPage() {
         channelName={currentChannel.name}
         livekit={livekit}
         wsConnection={wsConnection}
-        micEnabled={micEnabled}
         elysiaProfile={elysiaProfile}
         groupId={currentChannel.group}
         onToggleMic={() => void toggleMic()}
         onLeave={() => void leave()}
         onRejoin={() => void rejoin()}
         onVolumeChange={setMemberVolume}
+        onLocalVolumeChange={setLocalVolume}
+        onToggleMemberMuted={(userId) => {
+          const m = useVoiceStore.getState().members[userId];
+          if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
+        }}
         onBack={() => void leave()}
         inputEntered={inputEntered}
       />

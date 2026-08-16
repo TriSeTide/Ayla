@@ -92,6 +92,40 @@ export function IconMic(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** 麦克风禁音（lucide mic-off）：斜线 + 断开声波 */
+export function IconMicOff(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 2a3 3 0 0 0-3 3v4a3 3 0 0 0 5.12 2.12" />
+      <path d="M12 19v3" />
+      <path d="M19 10v2a7 7 0 0 1-5 6.66" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
+/** 喇叭（lucide volume-2）：喇叭 + 声波 */
+export function IconSpeaker(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </svg>
+  );
+}
+
+/** 喇叭静音（lucide volume-x）：喇叭 + 叉 */
+export function IconSpeakerOff(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+      <line x1="22" x2="16" y1="9" y2="15" />
+      <line x1="16" x2="22" y1="9" y2="15" />
+    </svg>
+  );
+}
+
 export function IconPlay(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

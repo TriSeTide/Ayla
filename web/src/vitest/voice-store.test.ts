@@ -52,7 +52,7 @@ describe("voice store voice.state 合并", () => {
   it("离开频道清空成员与当前频道（幂等）", () => {
     const s = useVoiceStore.getState();
     s.enterChannel("ch1", [
-      { user_id: "u1", joined_at: "t", last_seen_at: "t", muted: false, volume: 80 },
+      { user_id: "u1", joined_at: "t", last_seen_at: "t", muted: false, volume: 80, audioLevel: 0, locallyMuted: false },
     ]);
     useVoiceStore.getState().leaveChannelLocal();
     expect(useVoiceStore.getState().currentChannelId).toBeNull();
@@ -67,8 +67,8 @@ describe("voice store reconcileMembers 对账", () => {
   it("以服务端 members/ 为权威全量替换；保留本地音量偏好", () => {
     const s = useVoiceStore.getState();
     s.enterChannel("ch1", [
-      { user_id: "u1", joined_at: "t0", last_seen_at: "t0", muted: false, volume: 100 },
-      { user_id: "u2", joined_at: "t0", last_seen_at: "t0", muted: false, volume: 100 },
+      { user_id: "u1", joined_at: "t0", last_seen_at: "t0", muted: false, volume: 100, audioLevel: 0, locallyMuted: false },
+      { user_id: "u2", joined_at: "t0", last_seen_at: "t0", muted: false, volume: 100, audioLevel: 0, locallyMuted: false },
     ]);
     useVoiceStore.getState().setMemberVolume("u1", 55);
 
@@ -92,7 +92,7 @@ describe("voice store reconcileMembers 对账", () => {
     expect(m.user_id).toBe("elysia-user");
     // 无任何"爱莉发言内容"字段——主体性：store 不持有爱莉语义内容
     expect(Object.keys(m).sort()).toEqual(
-      ["joined_at", "last_seen_at", "muted", "user_id", "volume"].sort(),
+      ["audioLevel", "joined_at", "last_seen_at", "locallyMuted", "muted", "user_id", "volume"].sort(),
     );
   });
 });

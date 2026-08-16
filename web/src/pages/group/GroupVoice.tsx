@@ -25,12 +25,13 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
   const {
     currentChannelId,
     livekit,
-    micEnabled,
     joining,
     join,
     leave,
     toggleMic,
     setMemberVolume,
+    setMemberLocallyMuted,
+    setLocalVolume,
     rejoin,
   } = useVoiceChannel();
 
@@ -74,13 +75,17 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
         channelName={currentChannel.name}
         livekit={livekit}
         wsConnection={wsConnection}
-        micEnabled={micEnabled}
         elysiaProfile={elysiaProfile}
         groupId={currentChannel.group}
         onToggleMic={() => void toggleMic()}
         onLeave={() => void leave()}
         onRejoin={() => void rejoin()}
         onVolumeChange={setMemberVolume}
+        onLocalVolumeChange={setLocalVolume}
+        onToggleMemberMuted={(userId) => {
+          const m = useVoiceStore.getState().members[userId];
+          if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
+        }}
         onBack={() => void leave()}
         inputEntered // 群内子界面无底栏下滑动画
       />

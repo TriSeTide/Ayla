@@ -36,6 +36,8 @@ export function WideMessagesSidebar({
   const [invites, setInvites] = useState<GroupInvite[]>([]);
   const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
+  /** 审批（同意/拒绝）失败提示（点击关闭） */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // 会话列表为空时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
   useEffect(() => {
@@ -82,25 +84,36 @@ export function WideMessagesSidebar({
     usersApi.actionFriendRequest(req.id, action).then(() => {
       setFriendRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch(() => {});
+    }).catch((e) => {
+      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
+    });
   }, []);
 
   const handleInviteAction = useCallback((inv: GroupInvite, action: "accept" | "reject") => {
     chatApi.actionGroupInvite(inv.id, action).then(() => {
       setInvites((prev) => prev.filter((i) => i.id !== inv.id));
       refreshBadges();
-    }).catch(() => {});
+    }).catch((e) => {
+      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
+    });
   }, []);
 
   const handleJoinRequestAction = useCallback((req: GroupJoinRequest, action: "accept" | "reject") => {
     chatApi.actionJoinRequest(req.id, action).then(() => {
       setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch(() => {});
+    }).catch((e) => {
+      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
+    });
   }, []);
 
   return (
     <aside className="wide-messages-sidebar" aria-label="消息列表">
+      {actionError && (
+        <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
+          {actionError}（点击关闭）
+        </div>
+      )}
       <div className="messages-tabs">
         <button
           type="button"

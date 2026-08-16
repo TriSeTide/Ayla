@@ -200,7 +200,6 @@ export function GroupPage() {
           onCreateGroup={() => setShowGroupCreate(true)}
         />
         <ChannelSidebar
-          group={{ id: id ?? "" }}
           groupName={currentGroup?.title ?? "群聊"}
           activeScene={activeScene}
           onSelectScene={goScene}

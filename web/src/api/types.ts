@@ -420,6 +420,8 @@ export interface LiveChannelDescriptor {
   /** 乐观标记（应用侧）；真实在播判定以 GET /status/ 为准 */
   status: LiveChannelStatus;
   owner_id: string;
+  /** 主播展示名（后端列表直接带，nickname 为空回退 username；null=未知） */
+  owner_nickname: string | null;
   is_owner: boolean;
   /** S1：可见性 public/friends/group（来源标识） */
   visibility: "public" | "friends" | "group";
