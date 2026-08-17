@@ -29,6 +29,7 @@ export function VoiceHubPage() {
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [listRetry, setListRetry] = useState(0);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const {
     currentChannelId,
@@ -82,7 +83,9 @@ export function VoiceHubPage() {
       .then((p) => {
         if (!cancelled) setElysiaProfile(p.enabled ? p : null);
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败");
+      });
     return () => {
       cancelled = true;
     };
@@ -119,7 +122,8 @@ export function VoiceHubPage() {
   return (
     <div className="voice-hub">
       {isNarrow && <NarrowTopBar />}
-      {notice && (
+      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
+       {notice && (
         <div
           className="chat-notice"
           role="alert"
