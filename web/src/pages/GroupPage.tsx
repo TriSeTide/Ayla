@@ -112,6 +112,7 @@ export function GroupPage() {
     useHomeStore.getState().setRecentGroup(id);
     // 进入即打开群会话（GroupChat 内部也 openConversation，幂等）
     useChatStore.getState().openConversation(id);
+    useChatStore.getState().clearUnread(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, effectiveScene]);
 
