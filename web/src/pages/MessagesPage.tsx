@@ -38,6 +38,7 @@ export function MessagesPage() {
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   /** 审批（同意/拒绝）失败提示（点击关闭） */
   const [actionError, setActionError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {
@@ -49,7 +50,9 @@ export function MessagesPage() {
   // 加载会话列表（私信 tab 复用）
   useEffect(() => {
     if (conversations.length === 0) {
-      chatApi.listConversations().then((l) => useChatStore.getState().setConversations(l)).catch(() => {});
+      chatApi.listConversations()
+        .then((l) => useChatStore.getState().setConversations(l))
+        .catch((e) => setLoadError(e instanceof Error ? e.message : "加载会话失败"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -131,6 +134,7 @@ export function MessagesPage() {
   return (
     <div className="messages-page">
       <NarrowTopBar />
+      {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {actionError && (
         <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
           {actionError}（点击关闭）
