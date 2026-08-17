@@ -121,11 +121,11 @@ async function rawRequest(path: string, options: ApiRequestOptions): Promise<Res
     headers.Authorization = `Bearer ${accessToken}`;
   }
   let body: BodyInit | undefined;
-  if (options.body !== undefined && !(options.body instanceof FormData)) {
+  if (options.body instanceof FormData || options.body instanceof Blob) {
+    body = options.body;
+  } else if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
-  } else if (options.body instanceof FormData) {
-    body = options.body;
   }
   return fetch(`${API_BASE_URL}${API_PREFIX}${path}`, {
     method: options.method ?? "GET",
