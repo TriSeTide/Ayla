@@ -951,8 +951,32 @@
 }
 
 .composer-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
   font-size: 13px;
   color: var(--destructive);
+}
+
+.composer-tool-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--ice-300);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.composer-tool-btn:hover,
+.composer-tool-btn:focus-within {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
 }
 
 .composer-row {
