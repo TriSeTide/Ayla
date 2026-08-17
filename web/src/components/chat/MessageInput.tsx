@@ -1,8 +1,9 @@
 /**
  * MessageInput —— 输入区：回车发送、typing 节流、引用条、失败可见。
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../api/types";
+import { useChatDraftsStore } from "../../stores/chatDrafts";
 import { sendMessage } from "../../hooks/useChat";
 import { useTyping } from "../../hooks/useTyping";
 import { IconClose, IconSend } from "../icons";
@@ -16,12 +17,22 @@ export function MessageInput({
   quote: ChatMessage | null;
   onQuoteClear: () => void;
 }) {
-  const [text, setText] = useState("");
+  const draft = useChatDraftsStore((state) => state.drafts[convId] ?? "");
+  const setDraft = useChatDraftsStore((state) => state.setDraft);
+  const clearDraft = useChatDraftsStore((state) => state.clearDraft);
+  const [text, setText] = useState(draft);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string } | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
   const { onInput } = useTyping(convId || null);
+
+  useEffect(() => {
+    setText(draft);
+    setError(null);
+    setFailedPayload(null);
+    idempotencyKeyRef.current = null;
+  }, [convId, draft]);
 
   const submit = async (retryPayload?: { content: string; idempotencyKey: string }) => {
     const content = retryPayload?.content ?? text.trim();
@@ -36,6 +47,7 @@ export function MessageInput({
         idempotencyKey,
       });
       setText("");
+      clearDraft(convId);
       setFailedPayload(null);
       idempotencyKeyRef.current = null;
       if (quote) onQuoteClear();
@@ -92,7 +104,9 @@ export function MessageInput({
           className="field composer-input"
           value={text}
           onChange={(e) => {
-            setText(e.target.value);
+            const value = e.target.value;
+             setText(value);
+             setDraft(convId, value);
             onInput();
           }}
           onKeyDown={(e) => {
