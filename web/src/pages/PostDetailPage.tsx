@@ -102,7 +102,10 @@ export function PostDetailPage() {
     postsApi
       .deletePost(post.id)
       .then(() => navigate("/posts"))
-      .catch(() => setConfirmingDelete(false));
+      .catch((e) => {
+        setConfirmingDelete(false);
+        setActionError(e instanceof Error ? e.message : "删除帖子失败，请重试");
+      });
   }, [post, navigate]);
 
   if (loading) {
