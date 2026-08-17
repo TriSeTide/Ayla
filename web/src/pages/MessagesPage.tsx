@@ -67,9 +67,9 @@ export function MessagesPage() {
     chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载群邀请失败"));
     // 我管理的群 → 待审批入群申请
     const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
-    Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id).catch(() => [] as GroupJoinRequest[])))
+    Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
       .then((lists) => setJoinRequests(lists.flat().filter((r) => r.status === "pending")))
-      .catch(() => {});
+      .catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载入群申请失败"));
   }, [conversations]);
 
   useEffect(() => {
