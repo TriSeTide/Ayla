@@ -22,6 +22,7 @@ export function LiveHubPage() {
   const loading = useLiveStore((s) => s.channelsLoading);
   const [onlyLive, setOnlyLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
 
@@ -58,7 +59,9 @@ export function LiveHubPage() {
       .then((p) => {
         if (!cancelled) setElysiaUserId(p.enabled ? p.user.id : null);
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败");
+      });
     return () => {
       cancelled = true;
     };
@@ -84,7 +87,8 @@ export function LiveHubPage() {
           刷新
         </button>
       </div>
-      {error && <div className="live-form-error">{error}</div>}
+      {error && <div className="live-form-error" role="alert">{error}</div>}
+      {profileError && <div className="live-form-error" role="alert">爱莉入口暂不可用：{profileError}</div>}
       {loading && channels.length === 0 ? (
         <div className="conv-loading">
           <div className="skeleton" style={{ height: 96, marginBottom: 8 }} />
