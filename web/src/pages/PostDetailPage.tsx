@@ -76,12 +76,14 @@ export function PostDetailPage() {
   );
 
   const deleteComment = useCallback(
-    (comment: PostComment) => {
+    async (comment: PostComment) => {
       if (!comment.is_author) return;
-      postsApi
-        .deleteComment(comment.id)
-        .then(() => setComments((prev) => prev.filter((c) => c.id !== comment.id)))
-        .catch(() => {});
+      try {
+        await postsApi.deleteComment(comment.id);
+        setComments((prev) => prev.filter((c) => c.id !== comment.id));
+      } catch (e) {
+        setActionError(e instanceof Error ? e.message : "删除评论失败，请重试");
+      }
     },
     [],
   );
