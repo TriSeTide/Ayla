@@ -208,6 +208,12 @@
   gap: 2px;
 }
 
+.search-drop-error {
+  padding: var(--sp-3);
+  color: var(--destructive);
+  font-size: 13px;
+}
+
 .search-drop-row {
   display: flex;
   align-items: center;
