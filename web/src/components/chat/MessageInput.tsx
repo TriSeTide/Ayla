@@ -27,6 +27,7 @@ export function MessageInput({
   const [error, setError] = useState<string | null>(null);
   const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string; mediaId?: string } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [failedFile, setFailedFile] = useState<File | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
   const { onInput } = useTyping(convId || null);
 
@@ -103,6 +104,16 @@ export function MessageInput({
           )}
         </div>
       )}
+      {failedFile && <button type="button" className="msg-action-btn" onClick={() => {
+        const file = failedFile;
+        setFailedFile(null);
+        setError(null);
+        setUploading(true);
+        void uploadMediaFile(file, "image")
+          .then((uploaded) => submit({ content: "图片", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id }))
+          .catch((err) => { setFailedFile(file); setError(err instanceof Error ? err.message : "图片发送失败"); })
+          .finally(() => setUploading(false));
+      }} disabled={uploading}>重试图片</button>}
       <div className="composer-row">
         <label className="composer-tool-btn" aria-label="发送图片">
           <IconImage width={18} height={18} />
@@ -116,7 +127,8 @@ export function MessageInput({
               const uploaded = await uploadMediaFile(file, "image");
               await submit({ content: "图片", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id });
             } catch (err) {
-              setError(err instanceof Error ? err.message : "图片发送失败");
+              setFailedFile(file);
+               setError(err instanceof Error ? err.message : "图片发送失败");
             } finally {
               setUploading(false);
             }
