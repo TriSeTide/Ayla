@@ -22,6 +22,7 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const {
     currentChannelId,
@@ -64,7 +65,9 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
       .then((p) => {
         if (!cancelled) setElysiaProfile(p.enabled ? p : null);
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败");
+      });
     return () => {
       cancelled = true;
     };
@@ -116,6 +119,16 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
             .catch((e) => setError(e instanceof Error ? e.message : "加载群内语音房失败"))
             .finally(() => setLoaded(true));
         }}>重试</button>
+      </div>
+    );
+  }
+
+  if (profileError) {
+    return (
+      <div className="group-scene-placeholder" role="alert">
+        <h3 className="placeholder-title">爱莉入口暂不可用</h3>
+        <p className="placeholder-desc">{profileError}</p>
+        <button type="button" className="btn btn-ghost" onClick={onExit}>返回聊天</button>
       </div>
     );
   }
