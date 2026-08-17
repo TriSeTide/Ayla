@@ -39,6 +39,7 @@ export function MessagesPage() {
   /** 审批（同意/拒绝）失败提示（点击关闭） */
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [friendsLoadError, setFriendsLoadError] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {
@@ -59,9 +60,10 @@ export function MessagesPage() {
 
   // 好友 tab 数据（窄屏用；宽屏由 WideMessagesSidebar 自理）
   const loadFriendsTab = useCallback(() => {
-    usersApi.listFriends().then(setFriendList).catch(() => {});
-    usersApi.listFriendRequests().then((l) => setFriendRequests(l.filter((r) => r.status === "pending"))).catch(() => {});
-    chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch(() => {});
+    setFriendsLoadError(null);
+    usersApi.listFriends().then(setFriendList).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载好友失败"));
+    usersApi.listFriendRequests().then((l) => setFriendRequests(l.filter((r) => r.status === "pending"))).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载好友申请失败"));
+    chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载群邀请失败"));
     // 我管理的群 → 待审批入群申请
     const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
     Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id).catch(() => [] as GroupJoinRequest[])))
@@ -136,10 +138,11 @@ export function MessagesPage() {
       <NarrowTopBar />
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {actionError && (
-        <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
-          {actionError}（点击关闭）
+        <div className="messages-action-error" role="alert">
+          {actionError}
         </div>
       )}
+      {friendsLoadError && <div className="chat-notice" role="alert">{friendsLoadError}</div>}
       <div className="messages-tabs" role="tablist" aria-label="消息中心">
         <button
           type="button"
