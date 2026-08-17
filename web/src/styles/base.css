@@ -147,6 +147,17 @@ a:hover {
   animation: frost-pulse 1.6s ease-in-out infinite;
 }
 
+.resource-image-fallback {
+  min-width: 40px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .async-state-loading,
 .async-state-error,
 .async-state-empty {

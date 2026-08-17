@@ -1,7 +1,7 @@
 /**
  * MessageInput —— 输入区：回车发送、typing 节流、引用条、失败可见。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ChatMessage } from "../../api/types";
 import { sendMessage } from "../../hooks/useChat";
 import { useTyping } from "../../hooks/useTyping";
@@ -19,19 +19,29 @@ export function MessageInput({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string } | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
   const { onInput } = useTyping(convId || null);
 
-  const submit = async () => {
-    const content = text.trim();
+  const submit = async (retryPayload?: { content: string; idempotencyKey: string }) => {
+    const content = retryPayload?.content ?? text.trim();
     if (!content || sending || !convId) return;
     setSending(true);
     setError(null);
+    const idempotencyKey = retryPayload?.idempotencyKey ?? idempotencyKeyRef.current ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+    idempotencyKeyRef.current = idempotencyKey;
     try {
-      await sendMessage(convId, content, { replyTo: quote ? Number(quote.id) : null });
+      await sendMessage(convId, content, {
+        replyTo: quote ? Number(quote.id) : null,
+        idempotencyKey,
+      });
       setText("");
+      setFailedPayload(null);
+      idempotencyKeyRef.current = null;
       if (quote) onQuoteClear();
     } catch (e) {
-      // 409 幂等冲突等：用户可见提示，不静默丢弃
+      // 保留同一幂等键，用户重试不会创建重复消息。
+      setFailedPayload({ content, idempotencyKey });
       setError(e instanceof Error ? e.message : "发送失败");
     } finally {
       setSending(false);
@@ -62,7 +72,21 @@ export function MessageInput({
           </button>
         </div>
       )}
-      {error && <div className="composer-error">{error}</div>}
+      {error && (
+        <div className="composer-error" role="alert">
+          <span>{error}</span>
+          {failedPayload && (
+            <button
+              type="button"
+              className="msg-action-btn"
+              onClick={() => void submit(failedPayload)}
+              disabled={sending}
+            >
+              重试
+            </button>
+          )}
+        </div>
+      )}
       <div className="composer-row">
         <textarea
           className="field composer-input"

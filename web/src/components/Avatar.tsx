@@ -6,8 +6,8 @@
  * - 离线：褪为 --ice-100 灰环；
  * - 色彩不作唯一信息载体：在线状态由调用方同时给文字标签（design.md §10）。
  */
-import { useState } from "react";
 import type { CSSProperties } from "react";
+import { ResourceImage } from "./ResourceImage";
 
 export function Avatar({
   label,
@@ -26,7 +26,6 @@ export function Avatar({
   imageUrl?: string | null;
   style?: CSSProperties;
 }) {
-  const [imageFailed, setImageFailed] = useState(false);
   const safeLabel = label?.trim() || "?";
   const fontSize = Math.round(size * 0.42);
   return (
@@ -39,14 +38,14 @@ export function Avatar({
         className={`avatar-core ${isElysia ? "avatar-core-elysia" : "avatar-core-user"}`}
         style={{ fontSize }}
       >
-        {imageUrl && !imageFailed ? (
-          <img
+        {imageUrl ? (
+          <ResourceImage
             src={imageUrl}
             alt=""
             width={size}
             height={size}
             style={{ objectFit: "cover" }}
-            onError={() => setImageFailed(true)}
+            fallback={safeLabel.slice(0, 1)}
           />
         ) : (
           safeLabel.slice(0, 1)

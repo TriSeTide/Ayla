@@ -104,9 +104,9 @@ export async function loadMoreHistory(convId: string) {
 export async function sendMessage(
   convId: string,
   content: string,
-  options: { type?: MessageType; replyTo?: number | null } = {},
+  options: { type?: MessageType; replyTo?: number | null; idempotencyKey?: string } = {},
 ): Promise<ChatMessage> {
-  const idempotencyKey = newIdempotencyKey();
+  const idempotencyKey = options.idempotencyKey ?? newIdempotencyKey();
   const msg = await chatApi.sendMessage(convId, {
     type: options.type ?? "text",
     content,
