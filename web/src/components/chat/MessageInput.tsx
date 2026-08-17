@@ -66,6 +66,22 @@ export function MessageInput({
     }
   };
 
+  const sendImageFile = async (file: File) => {
+    if (sending || uploading || !convId) return;
+    setUploading(true);
+    setError(null);
+    setFailedFile(null);
+    try {
+      const uploaded = await uploadMediaFile(file, "image");
+      await submit({ content: "图片", type: "image", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id });
+    } catch (err) {
+      setFailedFile(file);
+      setError(err instanceof Error ? err.message : "图片发送失败");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const quotePreview = quote
     ? quote.type === "text"
       ? quote.content || "…"
@@ -110,11 +126,7 @@ export function MessageInput({
         const file = failedFile;
         setFailedFile(null);
         setError(null);
-        setUploading(true);
-        void uploadMediaFile(file, "image")
-          .then((uploaded) => submit({ content: "图片", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id }))
-          .catch((err) => { setFailedFile(file); setError(err instanceof Error ? err.message : "图片发送失败"); })
-          .finally(() => setUploading(false));
+        void sendImageFile(file);
       }} disabled={uploading}>重试图片</button>}
       <div className="composer-row">
         <label className="composer-tool-btn" aria-label="发送图片">
@@ -123,17 +135,9 @@ export function MessageInput({
             const file = e.target.files?.[0];
             e.target.value = "";
             if (!file || sending || uploading || !convId) return;
-            setUploading(true);
-            setError(null);
-            try {
-              const uploaded = await uploadMediaFile(file, "image");
-              await submit({ content: "图片", type: "image", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id });
-            } catch (err) {
-              setFailedFile(file);
-               setError(err instanceof Error ? err.message : "图片发送失败");
-            } finally {
-              setUploading(false);
-            }
+            await sendImageFile(file);
+            return;
+
           }} />
         </label>
         <textarea
