@@ -139,7 +139,7 @@ class GroupCreateView(APIView):
 
 class ConversationDetailView(APIView):
     """GET /conversations/<id>/ —— 会话详情（成员列表 + 我的角色）。
-    PATCH —— 改群标题/公告（群管理员）。"""
+    PATCH —— 改群标题/公告/头像（群管理员）。"""
 
     def get(self, request, conv_id):
         conv = _get_conv_or_404(conv_id)
@@ -159,11 +159,29 @@ class ConversationDetailView(APIView):
             return _forbidden("仅群主/管理员可修改")
         title = request.data.get("title")
         announcement = request.data.get("announcement")
+        avatar = request.data.get("avatar")
         if title is not None:
             conv.title = str(title).strip()
         if announcement is not None:
             conv.announcement = str(announcement)
-        conv.save(update_fields=["title", "announcement"])
+        if avatar is not None:
+            avatar = str(avatar).strip()
+            # 头像必须是媒体 content URL 且当前用户有访问权（图片）
+            from apps.media.services import validate_avatar_url
+
+            error = validate_avatar_url(request.user, avatar)
+            if error:
+                return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+            conv.avatar = avatar
+        update_fields = []
+        if title is not None:
+            update_fields.append("title")
+        if announcement is not None:
+            update_fields.append("announcement")
+        if avatar is not None:
+            update_fields.append("avatar")
+        if update_fields:
+            conv.save(update_fields=update_fields)
         return Response(ConversationSerializer(conv, context={"request": request}).data)
 
 

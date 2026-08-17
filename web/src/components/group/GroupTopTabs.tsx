@@ -30,6 +30,7 @@ export interface PullHandlers {
 
 export function GroupTopTabs({
   groupName,
+  avatar,
   activeScene,
   onSelectScene,
   onAvatarClick,
@@ -37,6 +38,8 @@ export function GroupTopTabs({
   pullHandlers,
 }: {
   groupName: string;
+  /** 群头像（媒体 content URL，可选） */
+  avatar?: string;
   activeScene: GroupScene;
   onSelectScene: (scene: GroupScene) => void;
   onAvatarClick: () => void;
@@ -77,7 +80,7 @@ export function GroupTopTabs({
               onClick={onAvatarClick}
               aria-label={`群头像：${groupName}`}
             >
-              <Avatar label={groupName} size={48} online />
+              <Avatar label={groupName} size={48} online imageUrl={avatar || null} />
             </button>
           </li>
 

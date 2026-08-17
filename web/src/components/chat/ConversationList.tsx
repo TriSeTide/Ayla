@@ -55,6 +55,7 @@ export function ConversationList({
                 size={40}
                 online={isPrivate ? peerOnline || isElysia : false}
                 isElysia={isElysia}
+                imageUrl={isPrivate ? (conv.peer?.avatar || null) : (conv.avatar || null)}
               />
               <span className="conv-item-body">
                 <span className="conv-item-title">{title}</span>

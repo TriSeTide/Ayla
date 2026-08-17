@@ -20,10 +20,13 @@ const SLIDE_MS = 300;
 export function GroupCarousel({
   highlights,
   groupName,
+  avatar,
   onOpen,
 }: {
   highlights: GroupHighlight[];
   groupName: string;
+  /** 群头像（媒体 content URL，可选；无动态空态回退显示） */
+  avatar?: string;
   onOpen?: (h: GroupHighlight) => void;
 }) {
   const hasItems = highlights.length > 0;
@@ -72,7 +75,7 @@ export function GroupCarousel({
     return (
       <div className="group-carousel">
         <div className="group-carousel-empty" aria-label={`${groupName} 暂无动态`}>
-          <Avatar label={groupName} size={64} online />
+          <Avatar label={groupName} size={64} online imageUrl={avatar || null} />
         </div>
       </div>
     );

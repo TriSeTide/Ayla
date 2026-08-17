@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as chatApi from "../../api/chat";
+import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
 import type { ConversationSummary } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
 import { IconBack } from "../../components/icons";
@@ -50,6 +51,52 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadRetry, setLoadRetry] = useState(0);
+
+  // 群头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
+  const [groupAvatarFile, setGroupAvatarFile] = useState<File | null>(null);
+  const [groupAvatarPreview, setGroupAvatarPreview] = useState<string | null>(null);
+  const [groupAvatarError, setGroupAvatarError] = useState<string | null>(null);
+  const [groupAvatarSaving, setGroupAvatarSaving] = useState(false);
+
+  // 释放头像 objectURL（卸载时）
+  useEffect(() => {
+    return () => {
+      if (groupAvatarPreview) URL.revokeObjectURL(groupAvatarPreview);
+    };
+  }, [groupAvatarPreview]);
+
+  const chooseGroupAvatar = (file: File | undefined) => {
+    if (!file) return;
+    const invalid = validateAvatarFile(file);
+    if (invalid) {
+      setGroupAvatarError(invalid);
+      return;
+    }
+    setGroupAvatarError(null);
+    if (groupAvatarPreview) URL.revokeObjectURL(groupAvatarPreview);
+    setGroupAvatarFile(file);
+    setGroupAvatarPreview(URL.createObjectURL(file));
+  };
+
+  const saveGroupAvatar = async () => {
+    if (!groupAvatarFile) return;
+    setGroupAvatarSaving(true);
+    setGroupAvatarError(null);
+    try {
+      const uploaded = await uploadMediaFile(groupAvatarFile, "image");
+      const c = await chatApi.patchConversation(groupId, {
+        avatar: mediaContentUrl(uploaded.media_id),
+      });
+      useChatStore.getState().upsertConversation(c);
+      if (groupAvatarPreview) URL.revokeObjectURL(groupAvatarPreview);
+      setGroupAvatarFile(null);
+      setGroupAvatarPreview(null);
+    } catch (e) {
+      setGroupAvatarError(e instanceof Error ? e.message : "头像保存失败");
+    } finally {
+      setGroupAvatarSaving(false);
+    }
+  };
 
   // store 未命中时拉详情（直接访问 /group/:id/info）
   useEffect(() => {
@@ -131,7 +178,45 @@ export function GroupInfo({ groupId }: { groupId: string }) {
       </header>
 
       <section className="group-info-profile glass-card">
-        <Avatar label={conv.title} size={72} online />
+        <div className="group-info-avatar-block">
+          <Avatar
+            label={conv.title}
+            size={72}
+            online
+            imageUrl={groupAvatarPreview ?? (conv.avatar || null)}
+          />
+          {canManage && (
+            <label className="btn btn-ghost group-info-avatar-btn">
+              {groupAvatarSaving ? "上传中…" : "更换群头像"}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                hidden
+                disabled={groupAvatarSaving}
+                onChange={(e) => {
+                  chooseGroupAvatar(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          )}
+          {groupAvatarPreview && (
+            <>
+              <span className="group-info-avatar-hint">新头像将在保存后生效</span>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void saveGroupAvatar()}
+                disabled={groupAvatarSaving}
+              >
+                {groupAvatarSaving ? "保存中…" : "保存群头像"}
+              </button>
+            </>
+          )}
+          {groupAvatarError && (
+            <p className="group-info-avatar-error" role="alert">{groupAvatarError}</p>
+          )}
+        </div>
         {editing ? (
           <div className="group-info-edit">
             <input

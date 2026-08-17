@@ -36,7 +36,7 @@ export function ServerRail({
               aria-current={g.id === currentGroupId ? "true" : undefined}
             >
               <span className="server-item-avatar">
-                <Avatar label={g.title} size={48} online />
+                <Avatar label={g.title} size={48} online imageUrl={g.avatar || null} />
                 {g.unread_count > 0 && (
                   <span className="server-item-badge">{g.unread_count > 99 ? "99+" : g.unread_count}</span>
                 )}

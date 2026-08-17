@@ -157,6 +157,8 @@ export interface ConversationSummary {
   type: ConversationType;
   title: string;
   announcement: string;
+  /** 群头像（媒体 content URL，仅群聊；私聊为空串） */
+  avatar: string;
   owner_id: string;
   members: ConversationMember[];
   my_role: "member" | "admin" | "owner" | null;
@@ -173,6 +175,8 @@ export interface ConversationDetail {
   type: ConversationType;
   title: string;
   announcement: string;
+  /** 群头像（媒体 content URL，仅群聊；私聊为空串） */
+  avatar: string;
   owner_id: string;
   members: ConversationMember[];
   my_role: "member" | "admin" | "owner" | null;

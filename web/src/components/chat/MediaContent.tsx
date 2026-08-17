@@ -11,7 +11,6 @@
  * - 全部 URL 经 api/media.ts 构造，禁止裸拼接。
  */
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import {
   fetchMediaDescriptor,
   formatBytes,
@@ -19,11 +18,11 @@ import {
   mediaContentUrl,
   resolveMediaPath,
 } from "../../api/media";
+import { apiRequestBlob, API_PREFIX } from "../../api/client";
 import type { ChatMessage, MediaDescriptor } from "../../api/types";
 import { useMessageStore } from "../../stores/message";
+import { ResourceImage } from "../ResourceImage";
 import { IconDownload, IconFile, IconImage, IconMic, IconPause, IconPlay, IconRetry } from "../icons";
-
-type LoadState = "loading" | "ready" | "error";
 
 /** 媒体消息内的文字说明（content 在媒体消息中是说明文字/文件名） */
 function caption(msg: ChatMessage): string {
@@ -77,44 +76,24 @@ function ImageMedia({
   // 优先缩略图；emoji 无缩略图时回退原图 content
   const thumb = resolveMediaPath(media.thumbnail);
   const src = thumb ?? mediaContentUrl(media.media_id);
-  const [state, setState] = useState<LoadState>("loading");
-  const [retryKey, setRetryKey] = useState(0);
 
-  if (state === "error") {
-    return (
-      <MediaPlaceholder
-        state="error"
-        label={label}
-        onRetry={() => {
-          setState("loading");
-          setRetryKey((k) => k + 1);
-        }}
-      />
-    );
-  }
-
-  const imgStyle: CSSProperties = state === "loading" ? { visibility: "hidden" } : {};
   return (
     <div className="media-frame">
-      {state === "loading" && (
-        <span
-          className="skeleton"
-          style={
-            isEmoji
-              ? { width: 96, height: 96 }
-              : { width: media.width ? Math.min(media.width, 320) : 240, height: 180 }
-          }
-        />
-      )}
-      <img
-        key={retryKey}
-        className={isEmoji ? "media-emoji" : "media-image"}
-        style={imgStyle}
+      <ResourceImage
         src={src}
         alt={caption(msg) || label}
+        className={isEmoji ? "media-emoji" : "media-image"}
         loading="lazy"
-        onLoad={() => setState("ready")}
-        onError={() => setState("error")}
+        fallback={
+          <span
+            className="skeleton"
+            style={
+              isEmoji
+                ? { width: 96, height: 96 }
+                : { width: media.width ? Math.min(media.width, 320) : 240, height: 180 }
+            }
+          />
+        }
       />
     </div>
   );
@@ -125,42 +104,83 @@ function ImageMedia({
 function VoiceMedia({ media }: { media: MediaDescriptor }) {
   const wave = resolveMediaPath(media.waveform);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [waveFailed, setWaveFailed] = useState(false);
+  const [loadingAudio, setLoadingAudio] = useState(false);
+  const [audioError, setAudioError] = useState(false);
   const duration = formatDuration(media.duration);
 
-  const toggle = () => {
-    if (!audioRef.current) {
-      const audio = new Audio(mediaContentUrl(media.media_id));
+  const ensureAudio = async (): Promise<HTMLAudioElement | null> => {
+    if (audioRef.current) return audioRef.current;
+    setLoadingAudio(true);
+    setAudioError(false);
+    try {
+      // 内部媒体须带 Bearer 鉴权读取（原生 Audio 不会携带 token → 403）
+      const blob = await apiRequestBlob(mediaContentUrl(media.media_id).slice(API_PREFIX.length));
+      const url = URL.createObjectURL(blob);
+      objectUrlRef.current = url;
+      const audio = new Audio(url);
       audio.addEventListener("ended", () => setPlaying(false));
-      audio.addEventListener("error", () => setPlaying(false));
+      audio.addEventListener("error", () => {
+        setPlaying(false);
+        setAudioError(true);
+      });
       audioRef.current = audio;
-    }
-    const audio = audioRef.current;
-    if (playing) {
-      audio.pause();
-      setPlaying(false);
-    } else {
-      void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      return audio;
+    } catch {
+      setAudioError(true);
+      return null;
+    } finally {
+      setLoadingAudio(false);
     }
   };
+
+  const toggle = async () => {
+    if (playing && audioRef.current) {
+      audioRef.current.pause();
+      setPlaying(false);
+      return;
+    }
+    const audio = audioRef.current ?? (await ensureAudio());
+    if (!audio) return;
+    void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  };
+
+  // 卸载释放 object URL
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
 
   return (
     <div className="voice-card">
       <button
         type="button"
         className="voice-play"
-        onClick={toggle}
-        aria-label={playing ? "暂停语音" : "播放语音"}
+        onClick={() => void toggle()}
+        disabled={loadingAudio}
+        aria-label={playing ? "暂停语音" : loadingAudio ? "语音加载中" : "播放语音"}
       >
-        {playing ? <IconPause width={16} height={16} /> : <IconPlay width={16} height={16} />}
+        {loadingAudio ? (
+          <span className="skeleton" style={{ width: 14, height: 14, borderRadius: 4 }} />
+        ) : playing ? (
+          <IconPause width={16} height={16} />
+        ) : (
+          <IconPlay width={16} height={16} />
+        )}
       </button>
-      {wave && !waveFailed ? (
-        <img
-          className="voice-wave"
+      {wave ? (
+        <ResourceImage
           src={wave}
           alt="语音波形"
-          onError={() => setWaveFailed(true)}
+          className="voice-wave"
+          loading="lazy"
+          fallback={
+            <span className="voice-wave" style={{ display: "grid", placeItems: "center" }}>
+              <IconMic width={18} height={18} />
+            </span>
+          }
         />
       ) : (
         <span className="voice-wave" style={{ display: "grid", placeItems: "center" }}>
@@ -168,6 +188,19 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
         </span>
       )}
       {duration && <span className="voice-duration">{duration}</span>}
+      {audioError && (
+        <button
+          type="button"
+          className="media-retry"
+          onClick={() => {
+            setAudioError(false);
+            audioRef.current = null;
+            void toggle();
+          }}
+        >
+          重试
+        </button>
+      )}
     </div>
   );
 }

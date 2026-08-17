@@ -73,6 +73,16 @@ class ProfileSerializer(serializers.ModelSerializer):
             "signature": {"max_length": 256, "required": False},
         }
 
+    def validate_avatar(self, value):
+        """头像必须是媒体 content URL 且当前用户有访问权（图片）；空串允许（清除）。"""
+        from apps.media.services import validate_avatar_url
+
+        user = getattr(self.context.get("request"), "user", None)
+        error = validate_avatar_url(user, value)
+        if error:
+            raise serializers.ValidationError(error)
+        return value
+
 
 class FriendRequestSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(read_only=True)

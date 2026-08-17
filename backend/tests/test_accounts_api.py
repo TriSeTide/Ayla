@@ -3,6 +3,8 @@ import pytest
 
 from django.contrib.auth import get_user_model
 
+from apps.media.models import MediaObject
+
 User = get_user_model()
 
 
@@ -100,6 +102,64 @@ class TestProfile:
         client, _ = auth_client(username="grace")
         resp = client.patch(
             "/api/v1/me/profile/", {"status": "fly"}, format="json"
+        )
+        assert resp.status_code == 400
+
+    def _mk_image_media(self, user):
+        return MediaObject.objects.create(
+            media_id=f"ava-media-{user.id[:8]}",
+            owner=user,
+            kind=MediaObject.KIND_IMAGE,
+            content_hash="h",
+            mime_type="image/png",
+            size=10,
+            storage_path="x",
+            status=MediaObject.STATUS_READY,
+        )
+
+    def test_update_avatar_with_media_content_url(self, auth_client):
+        client, user = auth_client(username="ava1")
+        media = self._mk_image_media(user)
+        url = f"/api/v1/media/{media.media_id}/content"
+        resp = client.patch("/api/v1/me/profile/", {"avatar": url}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["avatar"] == url
+        user.refresh_from_db()
+        assert user.avatar == url
+
+    def test_update_avatar_clear(self, auth_client):
+        client, user = auth_client(username="ava2")
+        media = self._mk_image_media(user)
+        user.avatar = f"/api/v1/media/{media.media_id}/content"
+        user.save()
+        resp = client.patch("/api/v1/me/profile/", {"avatar": ""}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["avatar"] == ""
+
+    def test_update_avatar_rejects_external_url(self, auth_client):
+        client, _ = auth_client(username="ava3")
+        resp = client.patch(
+            "/api/v1/me/profile/", {"avatar": "https://evil.example/a.png"}, format="json"
+        )
+        assert resp.status_code == 400
+
+    def test_update_avatar_rejects_unknown_media(self, auth_client):
+        client, _ = auth_client(username="ava4")
+        resp = client.patch(
+            "/api/v1/me/profile/",
+            {"avatar": "/api/v1/media/no-such-media/content"},
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_update_avatar_rejects_others_media(self, auth_client, user_factory):
+        other = user_factory(username="ava5_other")
+        client, _ = auth_client(username="ava5_me")
+        media = self._mk_image_media(other)
+        resp = client.patch(
+            "/api/v1/me/profile/",
+            {"avatar": f"/api/v1/media/{media.media_id}/content"},
+            format="json",
         )
         assert resp.status_code == 400
 

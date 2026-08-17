@@ -20,7 +20,7 @@ export function GroupCard({
   onOpen,
   onOpenHighlight,
 }: {
-  group: { id: string; title: string; memberCount?: number };
+  group: { id: string; title: string; avatar?: string; memberCount?: number };
   highlights: GroupHighlight[];
   status: GroupStatus;
   /** 进入群聊场景（点击底部行） */
@@ -36,6 +36,7 @@ export function GroupCard({
         <GroupCarousel
           highlights={highlights}
           groupName={group.title}
+          avatar={group.avatar}
           onOpen={onOpenHighlight}
         />
         {badges.length > 0 && (
@@ -63,7 +64,7 @@ export function GroupCard({
         )}
       </div>
       <button type="button" className="group-card-foot" onClick={onOpen} aria-label={`进入群聊 ${group.title}`}>
-        <Avatar label={group.title} size={24} online />
+        <Avatar label={group.title} size={24} online imageUrl={group.avatar || null} />
         <span className="group-card-title">{group.title}</span>
       </button>
     </article>

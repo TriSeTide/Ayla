@@ -272,6 +272,45 @@ def _generate_derivatives(media: MediaObject, data: bytes) -> None:
 
 # ---------- 访问控制（工程硬约束，步骤文件 5.3） ----------
 
+def parse_avatar_media_id(url: str) -> str | None:
+    """从头像 content URL（/api/v1/media/<media_id>/content）解析 media_id。
+
+    非该格式返回 None。头像只接受内部媒体地址（禁止把外部 URL 当头像引用）。
+    """
+    if not url:
+        return None
+    prefix = "/api/v1/media/"
+    if not url.startswith(prefix):
+        return None
+    rest = url[len(prefix):]
+    media_id, sep, suffix = rest.partition("/")
+    if not sep or not media_id or suffix != "content":
+        return None
+    return media_id
+
+
+def validate_avatar_url(user, url: str) -> str | None:
+    """校验头像 content URL（用户头像/群头像共用）。
+
+    空串允许（表示清除头像）；否则必须是 /api/v1/media/<id>/content 格式、
+    对应媒体存在且为图片、且请求者有访问权。返回错误文案，合法返回 None。
+    """
+    url = (url or "").strip()
+    if not url:
+        return None
+    media_id = parse_avatar_media_id(url)
+    if media_id is None:
+        return "头像必须是有效的媒体地址"
+    media = MediaObject.objects.filter(media_id=media_id).first()
+    if media is None:
+        return "头像媒体不存在"
+    if media.kind != MediaObject.KIND_IMAGE:
+        return "头像必须是图片"
+    if user is not None and not can_access_media(user, media):
+        return "无权使用该媒体作为头像"
+    return None
+
+
 def can_access_media(user, media: MediaObject) -> bool:
     """媒体访问权判定。
 
@@ -279,7 +318,9 @@ def can_access_media(user, media: MediaObject) -> bool:
     2. 消息引用：media 被某条 Message 引用，且 user 是该消息所在会话的成员；
     3. 帖子配图：media 被某 PostImage 引用，且 user 能查看该帖子（S3）；
     4. 表情包：media 属于某 EmojiItem，且该包是系统包（全员）或用户自己的个人包；
-    5. 其他情况：拒绝（403/404）。
+    5. 头像引用：media 被某用户设为头像 → 登录用户可见；
+       被某群设为头像 → 该群成员可见（M5-2.1 头像资源路径）；
+    6. 其他情况：拒绝（403/404）。
     """
     if media.owner_id == user.id:
         return True
@@ -310,6 +351,29 @@ def can_access_media(user, media: MediaObject) -> bool:
         if item.pack.is_system:
             return True
         if item.pack.owner_id == user.id:
+            return True
+
+    # 头像引用路径（M5-2.1）：
+    # - 用户头像：被任意 User.avatar 引用 → 登录用户可见（头像出现在公开卡片/成员列表/搜索等）；
+    # - 群头像：被某群 Conversation.avatar 引用 → 仅该群成员可见。
+    from apps.accounts.models import User
+
+    if User.objects.filter(avatar__contains=media.media_id).exists():
+        return True
+
+    from apps.chat.models import Conversation
+
+    if Conversation.objects.filter(
+        avatar__contains=media.media_id, members__user=user
+    ).exists():
+        return True
+
+    # 直播间封面：按直播间可见性复用 can_view，避免封面 URL 暴露后变成越权入口。
+    from apps.live.models import LiveChannel
+    from apps.common.visibility import can_view as _live_can_view
+
+    for channel in LiveChannel.objects.filter(cover__contains=media.media_id):
+        if _live_can_view(user, channel):
             return True
 
     return False

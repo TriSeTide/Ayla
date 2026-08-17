@@ -246,6 +246,7 @@ export function GroupPage() {
     <div className="group-page group-page-narrow">
       <GroupTopTabs
         groupName={currentGroup?.title ?? "群聊"}
+        avatar={currentGroup?.avatar}
         activeScene={activeScene}
         onSelectScene={goScene}
         onAvatarClick={handleAvatarClick}

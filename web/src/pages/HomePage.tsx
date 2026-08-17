@@ -202,7 +202,7 @@ export function HomePage() {
             {visibleGroups.map((g) => (
               <GroupCard
                 key={g.id}
-                group={{ id: g.id, title: g.title, memberCount: g.member_count }}
+                group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
                 highlights={highlights[g.id] ?? []}
                 status={{ unread: g.unread_count }}
                 onOpen={() => openGroup(g.id)}
@@ -223,7 +223,7 @@ export function HomePage() {
           {visibleGroups.map((g) => (
             <GroupListItem
               key={g.id}
-              group={{ id: g.id, title: g.title, memberCount: g.member_count }}
+              group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
               status={{ unread: g.unread_count }}
               onOpen={() => openGroup(g.id)}
             />

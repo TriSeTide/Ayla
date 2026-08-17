@@ -8,6 +8,7 @@ import { updateProfile } from "../api/auth";
 import * as boardgameApi from "../api/boardgame";
 import { ApiError } from "../api/client";
 import * as liveApi from "../api/live";
+import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../api/media";
 import * as postsApi from "../api/posts";
 import type { GameRoom, LiveChannelDescriptor, Post } from "../api/types";
 import { Avatar } from "../components/Avatar";
@@ -34,6 +35,32 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  // 头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+
+  // 释放 objectURL（卸载时）
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    };
+  }, [avatarPreview]);
+
+  const pickAvatar = (file: File | undefined) => {
+    if (!file) return;
+    const invalid = validateAvatarFile(file);
+    if (invalid) {
+      setAvatarError(invalid);
+      return;
+    }
+    setAvatarError(null);
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+    setSaved(false);
+  };
 
   // F10 三分区数据
   const [myPosts, setMyPosts] = useState<Post[]>([]);
@@ -66,19 +93,31 @@ export function ProfilePage() {
   const dirty =
     nickname !== (currentUser.nickname ?? "") ||
     signature !== (currentUser.signature ?? "") ||
-    status !== (currentUser.status ?? "online");
+    status !== (currentUser.status ?? "online") ||
+    avatarFile != null;
 
   async function onSave() {
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
+      // 有本地新头像：先完成三步上传，再用 content URL 保存（失败保留文件可重试）
+      let avatarUrl: string | undefined;
+      if (avatarFile) {
+        const uploaded = await uploadMediaFile(avatarFile, "image");
+        avatarUrl = mediaContentUrl(uploaded.media_id);
+      }
       const updated = await updateProfile({
         nickname: nickname.trim() || undefined,
         signature: signature.trim(),
         status,
+        avatar: avatarUrl,
       });
       setUser(updated);
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      setAvatarError(null);
       setSaved(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "保存失败，请稍后重试");
@@ -108,7 +147,34 @@ export function ProfilePage() {
         {contentError && <div className="chat-notice" role="alert">{contentError}</div>}
         <div className="solid-card profile-card">
           <div className="profile-identity">
-            <Avatar label={displayName} size={64} online={currentUser.online} />
+            <div className="profile-avatar-block">
+              <Avatar
+                label={displayName}
+                size={64}
+                online={currentUser.online}
+                imageUrl={avatarPreview ?? (currentUser.avatar || null)}
+              />
+              <label className="btn btn-ghost profile-avatar-btn">
+                更换头像
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  hidden
+                  onChange={(e) => {
+                    pickAvatar(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {avatarPreview && (
+                <span className="profile-avatar-hint">新头像将在保存后生效</span>
+              )}
+              {avatarError && (
+                <span className="profile-avatar-error" role="alert">
+                  {avatarError}
+                </span>
+              )}
+            </div>
             <div className="profile-names">
               <span className="profile-nickname">{displayName}</span>
               <span className="profile-username">@{currentUser.username}</span>

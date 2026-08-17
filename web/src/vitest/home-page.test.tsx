@@ -37,6 +37,7 @@ function groupConv(id: string, title: string, unread = 0): ConversationSummary {
     type: "group",
     title,
     announcement: "",
+    avatar: "",
     owner_id: "o1",
     members: [],
     my_role: "member",

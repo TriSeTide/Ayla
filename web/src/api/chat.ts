@@ -112,10 +112,10 @@ export function toggleMute(convId: string, userId: string, muted: boolean) {
   );
 }
 
-/** PATCH /chat/conversations/<id>/ —— 改群标题/公告（群管理员） */
+/** PATCH /chat/conversations/<id>/ —— 改群标题/公告/头像（群管理员） */
 export function patchConversation(
   convId: string,
-  payload: { title?: string; announcement?: string },
+  payload: { title?: string; announcement?: string; avatar?: string },
 ) {
   return apiRequest<ConversationDetail>(`/chat/conversations/${convId}/`, {
     method: "PATCH",

@@ -14,6 +14,7 @@ function conv(id: string, unread = 0): ConversationSummary {
     type: "private",
     title: `会话${id}`,
     announcement: "",
+    avatar: "",
     owner_id: "o",
     members: [],
     my_role: "member",

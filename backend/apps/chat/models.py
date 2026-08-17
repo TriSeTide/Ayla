@@ -38,6 +38,8 @@ class Conversation(models.Model):
     )
     # 补加字段（开发文档 Conversation 表无此字段，见步骤文件 3.1/10 节注明）
     announcement = models.TextField("群公告", blank=True, default="")
+    # 群头像：媒体 content URL（/api/v1/media/{id}/content），空串表示未设置（仅群聊使用）
+    avatar = models.CharField("群头像", max_length=512, blank=True, default="")
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:

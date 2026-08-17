@@ -15,7 +15,7 @@ export function GroupListItem({
   preview,
   onOpen,
 }: {
-  group: { id: string; title: string; memberCount?: number };
+  group: { id: string; title: string; avatar?: string; memberCount?: number };
   status: GroupStatus;
   /** 最新一条消息摘要；后端未提供时 undefined（显示成员数） */
   preview?: string;
@@ -26,7 +26,7 @@ export function GroupListItem({
   return (
     <button type="button" className="group-list-item" onClick={onOpen} aria-label={`进入群聊 ${group.title}`}>
       <span className="group-list-avatar">
-        <Avatar label={group.title} size={44} online />
+        <Avatar label={group.title} size={44} online imageUrl={group.avatar || null} />
         {badges.slice(0, 1).map((b) => {
           const Icon = badgeIcon(b.kind);
           if (b.kind === "unread" || !Icon) return null;

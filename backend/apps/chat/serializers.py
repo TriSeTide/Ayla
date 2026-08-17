@@ -93,6 +93,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "type",
             "title",
             "announcement",
+            "avatar",
             "owner_id",
             "members",
             "my_role",

@@ -7,7 +7,7 @@ import * as chatApi from "../api/chat";
 import { markReadLatest } from "../hooks/useChat";
 
 const conversation: ConversationSummary = {
-  id: "c1", type: "private", title: "会话", announcement: "", owner_id: "u1", members: [],
+  id: "c1", type: "private", title: "会话", announcement: "", avatar: "", owner_id: "u1", members: [],
   my_role: "member", member_count: 2, unread_count: 2, created_at: new Date().toISOString(), peer: null,
 };
 

@@ -132,6 +132,102 @@ class TestGroup:
         roles = {m["id"]: m["role"] for m in body["members"]}
         assert list(roles.values()).count("owner") == 1
         assert list(roles.values()).count("member") == 1
+        # 群头像字段：默认空串，序列化始终携带
+        assert "avatar" in body
+        assert body["avatar"] == ""
+
+
+@pytest.mark.django_db
+class TestGroupAvatar:
+    """群头像 PATCH 契约：owner/admin 可改（content URL），成员 403，非法地址 400。"""
+
+    def _avatar_url(self, media_id: str) -> str:
+        return f"/api/v1/media/{media_id}/content"
+
+    def test_owner_patch_group_avatar(self, auth_client, user_factory):
+        b = user_factory(username="gav_b")
+        ca, _ = auth_client(username="gav_owner")
+        conv = make_group(ca, [b])
+        from apps.media.tests.conftest import upload_image
+
+        media_id, _ = upload_image(ca)
+        url = self._avatar_url(media_id)
+        resp = ca.patch(
+            f"/api/v1/chat/conversations/{conv['id']}/",
+            {"avatar": url},
+            format="json",
+        )
+        assert resp.status_code == 200
+        assert resp.json()["avatar"] == url
+        # 会话列表/详情都带新头像
+        assert ca.get(f"/api/v1/chat/conversations/{conv['id']}/").json()["avatar"] == url
+        assert any(c["id"] == conv["id"] and c["avatar"] == url
+                   for c in ca.get("/api/v1/chat/conversations/").json())
+
+    def test_admin_can_patch_group_avatar(self, auth_client, user_factory):
+        b = user_factory(username="gav2_admin")
+        ca, _ = auth_client(username="gav2_owner")
+        conv = make_group(ca, [b])
+        from apps.chat.models import ConversationMember
+
+        ConversationMember.objects.filter(conversation_id=conv["id"], user=b).update(role="admin")
+        from apps.media.tests.conftest import upload_image
+
+        media_id, _ = upload_image(auth_as(b))
+        resp = auth_as(b).patch(
+            f"/api/v1/chat/conversations/{conv['id']}/",
+            {"avatar": self._avatar_url(media_id)},
+            format="json",
+        )
+        assert resp.status_code == 200
+
+    def test_member_cannot_patch_group_avatar(self, auth_client, user_factory):
+        b = user_factory(username="gav3_b")
+        ca, _ = auth_client(username="gav3_owner")
+        conv = make_group(ca, [b])
+        resp = auth_as(b).patch(
+            f"/api/v1/chat/conversations/{conv['id']}/",
+            {"avatar": "/api/v1/media/whatever/content"},
+            format="json",
+        )
+        assert resp.status_code == 403
+
+    def test_owner_patch_invalid_avatar_url_400(self, auth_client, user_factory):
+        b = user_factory(username="gav4_b")
+        ca, _ = auth_client(username="gav4_owner")
+        conv = make_group(ca, [b])
+        # 外部 URL 拒绝
+        resp = ca.patch(
+            f"/api/v1/chat/conversations/{conv['id']}/",
+            {"avatar": "https://evil.example/a.png"},
+            format="json",
+        )
+        assert resp.status_code == 400
+        # 不存在的 media id 拒绝
+        resp = ca.patch(
+            f"/api/v1/chat/conversations/{conv['id']}/",
+            {"avatar": self._avatar_url("no-such-media")},
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_owner_clear_group_avatar(self, auth_client, user_factory):
+        b = user_factory(username="gav5_b")
+        ca, _ = auth_client(username="gav5_owner")
+        conv = make_group(ca, [b])
+        from apps.media.tests.conftest import upload_image
+
+        media_id, _ = upload_image(ca)
+        url = self._avatar_url(media_id)
+        assert ca.patch(
+            f"/api/v1/chat/conversations/{conv['id']}/", {"avatar": url}, format="json"
+        ).status_code == 200
+        # 空串清除头像
+        resp = ca.patch(
+            f"/api/v1/chat/conversations/{conv['id']}/", {"avatar": ""}, format="json"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["avatar"] == ""
 
 
 @pytest.mark.django_db

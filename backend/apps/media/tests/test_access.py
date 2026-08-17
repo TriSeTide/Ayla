@@ -1,6 +1,7 @@
-"""媒体访问控制契约测试（8.1 清单：消息引用、表情包路径、越权）。"""
+"""媒体访问控制契约测试（8.1 清单：消息引用、表情包路径、头像引用路径、越权）。"""
 import pytest
 
+from apps.chat.models import Conversation, ConversationMember
 from apps.chat.services import get_or_create_conversation
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media
@@ -75,6 +76,64 @@ class TestAccessControl:
         media = self._mk_image_media(owner)
         # 未被消息/表情包引用 → 非 owner 403
         assert can_access_media(other, media) is False
+
+    def test_authenticated_user_avatar_content_download(self, user_factory):
+        """头像 content 对带 Bearer 的真实媒体请求返回内容。"""
+        owner = user_factory(username="acc_http_o")
+        viewer = user_factory(username="acc_http_v")
+        media = self._mk_image_media(owner)
+        owner.avatar = f"/api/v1/media/{media.media_id}/content"
+        owner.save(update_fields=["avatar"])
+
+        response = auth_as(viewer).get(f"/api/v1/media/{media.media_id}/content")
+
+        assert response.status_code == 200
+        assert response["Content-Type"] == "image/png"
+        assert response.content == make_png_bytes()
+
+    def test_user_avatar_reference_visible_to_any(self, user_factory):
+        """media 被某用户设为头像 → 任意登录用户可访问（头像公开展示）。"""
+        owner = user_factory(username="acc_ua_o")
+        other = user_factory(username="acc_ua_other")
+        media = self._mk_image_media(owner)
+        owner.avatar = f"/api/v1/media/{media.media_id}/content"
+        owner.save()
+        assert can_access_media(other, media) is True
+
+    def test_group_avatar_reference_member_only(self, user_factory):
+        """media 被某群设为头像 → 仅群成员可访问，非成员拒绝。"""
+        owner = user_factory(username="acc_ga_o")
+        member = user_factory(username="acc_ga_m")
+        outsider = user_factory(username="acc_ga_out")
+        media = self._mk_image_media(owner)
+        conv = Conversation.objects.create(
+            type=Conversation.TYPE_GROUP,
+            title="头像测试群",
+            owner=owner,
+            avatar=f"/api/v1/media/{media.media_id}/content",
+        )
+        ConversationMember.objects.create(conversation=conv, user=owner, role="owner")
+        ConversationMember.objects.create(conversation=conv, user=member)
+        assert can_access_media(member, media) is True
+        assert can_access_media(outsider, media) is False
+
+    def test_group_avatar_cleared_revokes_access(self, user_factory):
+        """清除群头像后，非 owner 不再可访问该媒体。"""
+        owner = user_factory(username="acc_gc_o")
+        member = user_factory(username="acc_gc_m")
+        media = self._mk_image_media(owner)
+        conv = Conversation.objects.create(
+            type=Conversation.TYPE_GROUP,
+            title="清理测试群",
+            owner=owner,
+            avatar=f"/api/v1/media/{media.media_id}/content",
+        )
+        ConversationMember.objects.create(conversation=conv, user=owner, role="owner")
+        ConversationMember.objects.create(conversation=conv, user=member)
+        assert can_access_media(member, media) is True
+        conv.avatar = ""
+        conv.save(update_fields=["avatar"])
+        assert can_access_media(member, media) is False
 
     def test_forward_message_member_access(self, user_factory):
         """转发：a 发给 b 的图片，a 再发给 c；b、c 均可访问（都是消息引用）。"""
