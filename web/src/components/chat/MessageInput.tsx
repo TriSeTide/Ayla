@@ -90,6 +90,7 @@ export function MessageInput({
           </button>
         </div>
       )}
+      {uploading && <div className="composer-uploading" role="status">图片上传中…</div>}
       {error && (
         <div className="composer-error" role="alert">
           <span>{error}</span>

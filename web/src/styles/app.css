@@ -950,6 +950,11 @@
   border-top: 1px solid var(--glass-border);
 }
 
+.composer-uploading {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .composer-error {
   display: flex;
   align-items: center;
