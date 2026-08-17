@@ -28,6 +28,7 @@ export function PostDetailPage() {
   const [replyTarget, setReplyTarget] = useState<PostComment | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   const id = Number(postId);
 
@@ -45,8 +46,15 @@ export function PostDetailPage() {
         setPost(p);
         return postsApi.listComments(id);
       })
-      .then((list) => setComments(list))
-      .catch((e) => setError(e instanceof Error ? e.message : "加载失败"))
+      .then((list) => {
+        setComments(list);
+        setCommentError(null);
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : "加载评论失败";
+        setCommentError(message);
+        setError(message);
+      })
       .finally(() => setLoading(false));
     favoritesApi
       .listFavorites("post")
@@ -186,6 +194,7 @@ export function PostDetailPage() {
         className="post-detail-comments"
         style={{ opacity: entered ? 1 : 0, transition: "opacity 200ms var(--ease-out)" }}
       >
+        {commentError && <div className="chat-notice" role="alert">{commentError}</div>}
         <CommentList
           comments={comments}
           onSend={sendComment}
