@@ -1065,6 +1065,9 @@ async def run_bridge_loop(
     stop = stop_event or asyncio.Event()
     last_cursor: str | None = None
     backoff = reconnect_seconds
+    # 状态变化降噪：Elysium 不可达时只打一次 degraded 提示，恢复时打一次
+    # 恢复日志，避免固定周期刷完整 traceback（AGENTS.md §8 日志聚合）。
+    degraded = False
 
     while not stop.is_set():
         try:
@@ -1078,7 +1081,20 @@ async def run_bridge_loop(
             logger.warning(
                 "elysia session invalid at startup; will retry after %ss", backoff
             )
+        except ElysiaTransportError as exc:
+            # Elysium 未运行/网络不可达：Ayla 独立运行，SSE 桥接后台有界退避
+            # 等待，不阻塞 server 启动，也不刷 traceback；Elysium 恢复后自动连上。
+            if not degraded:
+                logger.warning(
+                    "Elysium 上游不可达（%s）。Ayla 独立运行，SSE 桥接在后台"
+                    "退避等待，Elysium 恢复后自动连接。",
+                    exc,
+                )
+                degraded = True
         else:
+            if degraded:
+                logger.info("Elysium 上游已恢复，SSE 桥接重新建立连接")
+                degraded = False
             try:
                 async for envelope in client.stream_sse(
                     access_token=access_token,

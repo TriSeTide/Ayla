@@ -331,6 +331,24 @@ class ElysiaClient:
             headers["Authorization"] = f"Bearer {access_token}"
         return headers
 
+    def _send(
+        self, method: str, url: str, **kwargs: Any
+    ) -> httpx.Response:
+        """同步请求分发：把网络层错误统一封装为 ElysiaTransportError。
+
+        Elysium 不可达（连接被拒/超时/DNS）或连接中途断开时，httpx 抛
+        `httpx.HTTPError` 子类（如 ConnectError）。这里统一映射为
+        `ElysiaTransportError`，让调用方（run_bridge_loop 等）能按
+        "上游不可达、可重试"处理，而不是让裸传输异常冒泡刷完整 traceback
+        （Elysium 未运行时 Ayla 应能独立启动）。
+        """
+        try:
+            return self._client.request(method, url, **kwargs)
+        except httpx.HTTPError as exc:
+            raise ElysiaTransportError(
+                f"Elysium unreachable: {type(exc).__name__}: {exc}"
+            ) from exc
+
     def _handle(self, response: httpx.Response) -> Mapping[str, Any]:
         if response.is_success or response.status_code == 202:
             try:
@@ -359,7 +377,8 @@ class ElysiaClient:
         }
         if resource_grants:
             body["resource_grants"] = list(resource_grants)
-        response = self._client.post(
+        response = self._send(
+            "POST",
             "/api/v1/admin/credentials",
             json=body,
             headers=self._headers(access_token),
@@ -370,7 +389,8 @@ class ElysiaClient:
 
     def issue_session(self, *, service_credential: str, audience: str) -> SessionTokens:
         """POST /auth/sessions（grant_type=service_credential）。"""
-        response = self._client.post(
+        response = self._send(
+            "POST",
             "/api/v1/auth/sessions",
             json={
                 "grant_type": "service_credential",
@@ -383,7 +403,8 @@ class ElysiaClient:
 
     def refresh_session(self, *, refresh_token: str) -> SessionTokens:
         """POST /auth/sessions/current:refresh —— refresh 是轮换式。"""
-        response = self._client.post(
+        response = self._send(
+            "POST",
             "/api/v1/auth/sessions/current:refresh",
             json={"refresh_token": refresh_token},
             headers=self._headers(),
@@ -392,7 +413,8 @@ class ElysiaClient:
 
     def revoke_credential(self, *, access_token: str, credential_id: str) -> bool:
         """DELETE /admin/credentials/{id} —— 撤销凭据（旧 session 立即失效）。"""
-        response = self._client.delete(
+        response = self._send(
+            "DELETE",
             f"/api/v1/admin/credentials/{credential_id}",
             headers=self._headers(access_token),
         )
@@ -431,7 +453,8 @@ class ElysiaClient:
             body["sender_id"] = sender_id
         if sender_cardname:
             body["sender_cardname"] = sender_cardname
-        response = self._client.post(
+        response = self._send(
+            "POST",
             "/api/v1/chat/messages:inject",
             json=body,
             headers=self._headers(access_token),
@@ -456,7 +479,8 @@ class ElysiaClient:
         }
         if reply_to:
             body["reply_to"] = reply_to
-        response = self._client.post(
+        response = self._send(
+            "POST",
             "/api/v1/chat/messages:send",
             json=body,
             headers={
@@ -475,7 +499,8 @@ class ElysiaClient:
         idempotency_key: str,
     ) -> CommandAccepted:
         """POST /chat/messages/{id}:reply —— 必须带 Idempotency-Key，返回 202。"""
-        response = self._client.post(
+        response = self._send(
+            "POST",
             f"/api/v1/chat/messages/{message_id}:reply",
             json={"parts": list(parts)},
             headers={
@@ -498,7 +523,8 @@ class ElysiaClient:
         应用侧以 service credential 调用，应用本身就是该通话的参与者/拥有者
         （owner_actor_id = credential 的 actor_id）。
         """
-        response = self._client.post(
+        response = self._send(
+            "POST",
             "/api/v1/voice-calls",
             json={"mode": mode},
             headers=self._headers(access_token),
@@ -512,7 +538,8 @@ class ElysiaClient:
         call_id: str,
     ) -> VoiceCallStatus:
         """GET /voice-calls/{call_id} —— 通话状态与安全指标。"""
-        response = self._client.get(
+        response = self._send(
+            "GET",
             f"/api/v1/voice-calls/{call_id}",
             headers=self._headers(access_token),
         )
@@ -528,7 +555,8 @@ class ElysiaClient:
         body: Mapping[str, Any] | None = None,
     ) -> CommandAccepted:
         """POST /voice-calls/{call_id}:<action> —— 命令必须带 Idempotency-Key。"""
-        response = self._client.post(
+        response = self._send(
+            "POST",
             f"/api/v1/voice-calls/{call_id}:{action}",
             json=dict(body or {}),
             headers={
@@ -582,7 +610,8 @@ class ElysiaClient:
         """POST /voice-calls/{call_id}/text —— 向实时会话注入文本（1~8000 字符，拒绝纯空白）。"""
         if not text or not text.strip() or not (1 <= len(text) <= 8000):
             raise ValueError("voice call text must be 1~8000 chars and not blank")
-        response = self._client.post(
+        response = self._send(
+            "POST",
             f"/api/v1/voice-calls/{call_id}/text",
             json={"text": text},
             headers={
@@ -606,7 +635,8 @@ class ElysiaClient:
             params["cursor"] = cursor
         if limit is not None:
             params["limit"] = str(limit)
-        response = self._client.get(
+        response = self._send(
+            "GET",
             f"/api/v1/voice-calls/{call_id}/transcripts",
             params=params,
             headers=self._headers(access_token),
@@ -627,7 +657,8 @@ class ElysiaClient:
         """
         if role not in ("participant", "observer"):
             raise ValueError("voice call ticket role must be participant|observer")
-        response = self._client.post(
+        response = self._send(
+            "POST",
             f"/api/v1/voice-calls/{call_id}/tickets",
             json={"role": role, "origin": origin},
             headers=self._headers(access_token),
@@ -711,7 +742,10 @@ class ElysiaClient:
                                 ),
                             )
                         raise ElysiaClientError(
-                            f"SSE error frame: {code}: {error.get('message', '')}"
+                            (
+                                "SSE error frame: "
+                                f"{code}: {error.get('message', '')}"
+                            )
                         )
                     if event in ("life_event", None):
                         envelope = EventEnvelope.from_mapping(data)
@@ -719,6 +753,12 @@ class ElysiaClient:
                         if cursor:
                             object.__setattr__(envelope, "cursor", str(cursor))
                         yield envelope
+        except httpx.HTTPError as exc:
+            # 连接建立或读取中途断网（Elysium 不可达/重启窗口）：统一映射为
+            # ElysiaTransportError，交给 run_bridge_loop 的有界退避重连。
+            raise ElysiaTransportError(
+                f"Elysium SSE stream unreachable: {type(exc).__name__}: {exc}"
+            ) from exc
         finally:
             await stream_client.aclose()
 

@@ -150,6 +150,12 @@ Windows 可双击仓库根目录 `start_ayla.bat`（等价于 `python launcher.p
 占用（被占用则报告 PID 并拒绝，不启动第二实例）；`runserver` 默认
 `--noreload`，代码改动后重启 launcher 生效。
 
+**独立启动（Elysium 不在线）**：Ayla 后端不依赖 Elysium 主后端（默认
+`http://127.0.0.1:8000`）即可启动。Elysium 未配置（`ELYSIA_BASE_URL` 留空）
+时内嵌 bridge 直接跳过；Elysium 配置了但暂不可达时，bridge 在后台有界退避
+等待并只打一次 degraded 提示，Elysium 恢复后自动连上，不阻塞 REST API/WS，
+也不刷错误 traceback。
+
 等价拆分启动（调试/排障用）：
 
 ```bash

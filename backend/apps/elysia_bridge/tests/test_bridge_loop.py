@@ -535,3 +535,58 @@ async def test_loop_global_idempotency_key_conflict_skips_replay(user_factory):
     assert await _find(conv_b, key) is not None
     assert await _find(conv, key) is None
     assert await _count(conv) == 0
+
+
+class _FailingCredsThenOk:
+    """ensure_session 先抛 ElysiaTransportError（Elysium 未运行），随后成功。
+
+    模拟独立启动场景：Elysium 不在线 → bridge 启动握手失败 → 有界退避等待 →
+    Elysium 恢复后自动连上。
+    """
+
+    def __init__(self, fails: int = 2, token: str = "token-recovered"):
+        self.fails = fails
+        self.token = token
+        self.attempts = 0
+
+    def ensure_session(self, *, stream_id):
+        self.attempts += 1
+        if self.attempts <= self.fails:
+            raise ElysiaTransportError("connection refused")
+        return self.token
+
+    def refresh(self):
+        raise AssertionError("upstream-down 场景不应触发 refresh")
+
+    def reset_session(self):
+        raise AssertionError("upstream-down 场景不应触发 reset_session")
+
+
+async def test_loop_waits_when_upstream_down_then_reconnects(user_factory):
+    """Elysium 未运行（ensure_session 抛 ElysiaTransportError）→ 不冒泡刷屏，
+    后台退避等待，上游恢复后自动连上并投影。
+
+    回归真实缺陷：裸 httpx.ConnectError 曾冒泡出 run_bridge_loop，在
+    _bridge_thread_main 每 5s 打印完整 traceback；修复后 Elysium 未运行只是
+    Ayla 的降级状态（degraded），不是启动失败。
+    """
+    profile, user, conv = await _mk_profile(user_factory)
+    env = _envelope(
+        event_id="evt_loop_upstream",
+        stream_id="stream_loop_1",
+        content="恢复后回复",
+        cursor="cursor-up",
+        sender_id=str(user.id),
+    )
+    client = _FakeClient([("event", env)])
+    creds = _FailingCredsThenOk(fails=2)
+    stop = asyncio.Event()
+
+    await _run_until(
+        client, creds, stop, profile=profile, target_event_id="evt_loop_upstream"
+    )
+
+    # ensure_session 共尝试 3 次：2 次失败（Elysium 未运行）+ 1 次成功
+    assert creds.attempts == 3
+    # Elysium 恢复后自动连上并投影事件
+    assert await _find(conv, _event_key("evt_loop_upstream")) is not None

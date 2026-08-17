@@ -22,6 +22,7 @@ from apps.elysia_bridge.elysia_client import (
     EventEnvelope,
     ElysiaClient,
     ElysiaHistoryGap,
+    ElysiaTransportError,
     ElysiaUnauthenticated,
     SessionTokens,
 )
@@ -412,3 +413,55 @@ async def test_sse_non_chat_event_still_yielded_but_flag_false():
     frames = [f async for f in client.stream_sse(access_token="access-1")]
     assert len(frames) == 1
     assert frames[0].is_chat_message is False
+
+
+# ---------- Elysium 不可达（独立启动场景） ----------
+
+def test_issue_session_maps_connect_error_to_transport_error():
+    """Elysium 未运行（连接被拒）→ httpx.ConnectError 映射为 ElysiaTransportError。
+
+    保证 Ayla 在 Elysium 不在线时能独立启动：bridge 启动握手抛的是可重试的
+    ElysiaTransportError，由 run_bridge_loop 有界退避处理（不刷完整 traceback）。
+    """
+    connect_error = httpx.ConnectError(
+        "connection refused",
+        request=httpx.Request("POST", f"{BASE}/api/v1/auth/sessions"),
+    )
+    transport = MockTransport({("POST", "/api/v1/auth/sessions"): connect_error})
+    client = ElysiaClient(base_url=BASE, client=httpx.Client(transport=transport, base_url=BASE))
+    with pytest.raises(ElysiaTransportError):
+        client.issue_session(
+            service_credential="elysium_secret", audience="elysium-platform-service"
+        )
+
+
+def test_command_endpoint_maps_connect_error_to_transport_error():
+    """业务命令端点（inject）不可达同样映射为 ElysiaTransportError，不泄漏裸 httpx 错误。"""
+    connect_error = httpx.ConnectError(
+        "connection refused",
+        request=httpx.Request("POST", f"{BASE}/api/v1/chat/messages:inject"),
+    )
+    transport = MockTransport(
+        {("POST", "/api/v1/chat/messages:inject"): connect_error}
+    )
+    client = ElysiaClient(base_url=BASE, client=httpx.Client(transport=transport, base_url=BASE))
+    with pytest.raises(ElysiaTransportError):
+        client.inject_message(
+            access_token="access-1", stream_id="elysia-1", content="hello"
+        )
+
+
+async def test_sse_maps_network_error_to_transport_error():
+    """SSE 长连接建立时 Elysium 不可达 → ElysiaTransportError（由重连退避处理）。"""
+    def _raise_connect(request):
+        raise httpx.ConnectError("connection refused", request=request)
+
+    transport = httpx.MockTransport(_raise_connect)
+    client = ElysiaClient(
+        base_url=BASE,
+        client=httpx.Client(transport=httpx.MockTransport(_raise_connect), base_url=BASE),
+        async_client=httpx.AsyncClient(transport=transport, base_url=BASE),
+    )
+    with pytest.raises(ElysiaTransportError):
+        async for _ in client.stream_sse(access_token="access-1"):
+            pass
