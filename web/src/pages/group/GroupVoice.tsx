@@ -21,6 +21,7 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
   const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const {
     currentChannelId,
@@ -40,12 +41,15 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
     voiceApi
       .listVoiceChannels()
       .then((list) => {
         if (!cancelled) useVoiceStore.getState().setChannels(list);
       })
-      .catch(() => {})
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载群内语音房失败");
+      })
       .finally(() => {
         if (!cancelled) setLoaded(true);
       });
@@ -96,6 +100,22 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
     return (
       <div className="group-scene-placeholder">
         <div className="skeleton" style={{ height: 96, width: "80%" }} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="group-scene-placeholder" role="alert">
+        <h3 className="placeholder-title">群内语音房加载失败</h3>
+        <p className="placeholder-desc">{error}</p>
+        <button type="button" className="btn btn-ghost" onClick={() => {
+          setLoaded(false);
+          void voiceApi.listVoiceChannels()
+            .then((list) => useVoiceStore.getState().setChannels(list))
+            .catch((e) => setError(e instanceof Error ? e.message : "加载群内语音房失败"))
+            .finally(() => setLoaded(true));
+        }}>重试</button>
       </div>
     );
   }
