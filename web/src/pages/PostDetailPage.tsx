@@ -6,18 +6,22 @@
  * 交叉淡化无位移，与进群/进房动画不同）。
  */
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import type { Post, PostComment } from "../api/types";
 import { CommentList } from "../components/posts/CommentList";
+import { ResourceImage } from "../components/ResourceImage";
 import { IconBack, IconHeart } from "../components/icons";
 import { usePostDetailTransition } from "../hooks/usePostDetailTransition";
 import { usePostsStore } from "../stores/posts";
 
-export function PostDetailPage() {
+export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const fromGroup = groupId ?? searchParams.get("fromGroup");
+  const returnTo = fromGroup ? `/group/${encodeURIComponent(fromGroup)}/posts` : "/posts";
   const { entered } = usePostDetailTransition();
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
 
@@ -67,8 +71,8 @@ export function PostDetailPage() {
   }, [load]);
 
   const sendComment = useCallback(
-    async (body: string, replyTo: number | null) => {
-      const c = await postsApi.createComment(id, { body, reply_to: replyTo });
+    async (body: string, replyTo: number | null, mediaId?: string | null) => {
+      const c = await postsApi.createComment(id, { body, reply_to: replyTo, media_id: mediaId ?? null });
       setComments((prev) => [...prev, c]);
       if (post) setPost({ ...post, comment_count: post.comment_count + 1 });
     },
@@ -143,7 +147,7 @@ export function PostDetailPage() {
     <div className="post-detail">
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       <header className="post-detail-head">
-        <button type="button" className="icon-btn-40" onClick={() => navigate("/posts")} aria-label="返回">
+        <button type="button" className="icon-btn-40" onClick={() => navigate(returnTo)} aria-label="返回">
           <IconBack width={22} height={22} />
         </button>
         <span className="post-detail-title">帖子</span>
@@ -172,7 +176,12 @@ export function PostDetailPage() {
           <div className={`post-card-images count-${Math.min(post.images.length, 9)}`}>
             {post.images.slice(0, 9).map((img) =>
               img.media?.thumbnail ? (
-                <img key={img.id} src={img.media.thumbnail} alt="" className="post-card-img" />
+                <ResourceImage
+                  key={img.id}
+                  src={img.media.thumbnail}
+                  alt="帖子图片"
+                  className="post-card-img"
+                />
               ) : null,
             )}
           </div>

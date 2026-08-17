@@ -55,6 +55,7 @@ export default function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/group/:id" element={<GroupPage />} />
+        <Route path="/group/:id/posts/:postId" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
       </Route>

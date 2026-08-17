@@ -414,3 +414,61 @@ class TestComment:
         resp = client.delete(f"/api/v1/posts/comments/{comment.id}/")
         assert resp.status_code == 200
         assert not Comment.objects.filter(pk=comment.id).exists()
+
+    def test_comment_with_image(self, auth_client):
+        """图片评论：media_id 上传后创建评论，输出带 media descriptor。"""
+        from .conftest import make_image_media
+
+        client, author = auth_client(username="c_img")
+        post = _make_post(author, "带图评论的帖子")
+        media = make_image_media(author, "c-img-1")
+        resp = client.post(
+            f"/api/v1/posts/{post.id}/comments/",
+            {"body": "带图评论", "media_id": media.media_id},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        data = resp.json()
+        assert data["media_id"] == media.media_id
+        assert data["media"]["media_id"] == media.media_id
+        assert data["media"]["kind"] == "image"
+
+    def test_comment_image_type_mismatch_400(self, auth_client):
+        """media_id 存在但不是 image → 400（同 CreateMessageSerializer 语义）。"""
+        from apps.media.models import MediaObject
+        from apps.media import storage
+
+        client, author = auth_client(username="c_img_bad")
+        post = _make_post(author, "正文")
+        media = MediaObject.objects.create(
+            media_id="c-bad-voice",
+            owner=author,
+            kind=MediaObject.KIND_VOICE,
+            content_hash="h-bad",
+            mime_type="audio/wav",
+            size=1,
+            storage_path=storage.original_key("voice", "c-bad-voice"),
+            status=MediaObject.STATUS_READY,
+        )
+        resp = client.post(
+            f"/api/v1/posts/{post.id}/comments/",
+            {"body": "坏图", "media_id": media.media_id},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "media_type_mismatch" in str(resp.json())
+
+    def test_comment_image_access_denied_403(self, auth_client, user_factory):
+        """用他人无权访问的媒体发图片评论 → 403（越权是授权问题）。"""
+        from .conftest import make_image_media
+
+        client, author = auth_client(username="c_img_owner")
+        post = _make_post(author, "正文")
+        other = user_factory(username="c_img_other")
+        media = make_image_media(other, "c-img-other-1")
+        resp = client.post(
+            f"/api/v1/posts/{post.id}/comments/",
+            {"body": "别人的图", "media_id": media.media_id},
+            format="json",
+        )
+        assert resp.status_code == 403

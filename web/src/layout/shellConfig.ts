@@ -80,7 +80,8 @@ export function isLiveRoomRoute(pathname: string): boolean {
 export function isGroupScene(pathname: string): boolean {
   return (
     matchPath({ path: "/group/:id", end: true }, pathname) != null ||
-    matchPath({ path: "/group/:id/:scene", end: true }, pathname) != null
+    matchPath({ path: "/group/:id/:scene", end: true }, pathname) != null ||
+    matchPath({ path: "/group/:id/posts/:postId", end: true }, pathname) != null
   );
 }
 
@@ -107,7 +108,8 @@ export interface FabAction {
 
 /**
  * CreateFAB 路由匹配表（需求文档 §3.5）。
- * 群聊场景内跟随子界面；聊天 / 群信息子界面与直播间、消息、搜索、个人页无 FAB。
+ * 群聊场景内跟随子界面；群内语音不显示 FAB，群内直播入口在直播侧栏，群内帖子使用底部编辑器，
+ * 聊天 / 群信息子界面与直播间、消息、搜索、个人页无 FAB。
  */
 export function resolveFabAction(pathname: string): FabAction | null {
   if (isLiveRoomRoute(pathname)) return null;
@@ -117,9 +119,9 @@ export function resolveFabAction(pathname: string): FabAction | null {
     const groupId = groupScene.params.id;
     switch (groupScene.params.scene) {
       case "voice":
-        return { key: "group-voice", label: "创建群内语音房", groupId, plannedStep: "F5", handler: "voice" };
+        return null; // 群内语音房不显示右下角创建键
       case "live":
-        return { key: "group-live", label: "群内开播", groupId, plannedStep: "F4", handler: "live" };
+        return null; // 群内直播创建入口放在直播侧栏左下角
       case "posts":
         return null; // 群内帖子发帖走底部输入框（R-P2 关键差异），FAB 隐藏
       case "games":

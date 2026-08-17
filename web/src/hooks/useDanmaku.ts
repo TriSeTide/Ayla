@@ -17,7 +17,7 @@ export interface UseDanmakuResult {
   danmaku: ReturnType<typeof useLiveStore.getState>["current"]["danmaku"];
   sending: boolean;
   sendError: string | null;
-  send: (content: string) => Promise<boolean>;
+  send: (content: string, mediaId?: string | null) => Promise<boolean>;
   listRef: React.MutableRefObject<HTMLDivElement | null>;
   /** 有未读新弹幕（用户上翻时） */
   hasNewBelow: boolean;
@@ -65,9 +65,9 @@ export function useDanmaku(channelId: number): UseDanmakuResult {
   }, [danmaku.length]);
 
   const send = useCallback(
-    async (content: string): Promise<boolean> => {
+    async (content: string, mediaId?: string | null): Promise<boolean> => {
       const trimmed = content.trim();
-      if (!trimmed) {
+      if (!trimmed && !mediaId) {
         setSendError("弹幕不能为空");
         return false;
       }
@@ -79,7 +79,7 @@ export function useDanmaku(channelId: number): UseDanmakuResult {
       setSendError(null);
       try {
         // 成功不乐观插入：等服务端广播的 WS 回帧（单一数据流）
-        await liveApi.sendDanmaku(channelId, trimmed);
+        await liveApi.sendDanmaku(channelId, trimmed || "图片", mediaId);
         return true;
       } catch (e) {
         setSendError(e instanceof Error ? e.message : "发送失败");

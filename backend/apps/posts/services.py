@@ -60,12 +60,14 @@ def _resolve_media(media_id: str):
     return MediaObject.objects.filter(media_id=media_id).first()
 
 
-def create_comment(post: Post, author, body: str, reply_to=None) -> Comment:
-    """创建评论（body 非空已在 serializer 校验，此处兜底）。"""
+def create_comment(post: Post, author, body: str, reply_to=None, media_id: str | None = None) -> Comment:
+    """创建评论（body 非空已在 serializer 校验，此处兜底；media_id 已由 serializer 校验）。"""
     body = (body or "").strip()
     if not body:
         raise ValueError("评论内容不能为空")
-    return Comment.objects.create(post=post, author=author, body=body, reply_to=reply_to)
+    return Comment.objects.create(
+        post=post, author=author, body=body, reply_to=reply_to, media_id=media_id or None
+    )
 
 
 # ---------- 游标编解码 ----------

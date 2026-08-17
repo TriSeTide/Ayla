@@ -86,7 +86,7 @@ class PostSerializer(serializers.ModelSerializer):
 
 
 class CommentSerializer(serializers.ModelSerializer):
-    """评论对外序列化。"""
+    """评论对外序列化（media_id + media descriptor，同 chat.Message 约定）。"""
 
     id = serializers.IntegerField(read_only=True)
     post_id = serializers.CharField(read_only=True)
@@ -94,6 +94,7 @@ class CommentSerializer(serializers.ModelSerializer):
     author_id = serializers.CharField(read_only=True)
     reply_to = serializers.SerializerMethodField()
     is_author = serializers.SerializerMethodField()
+    media = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
@@ -103,6 +104,8 @@ class CommentSerializer(serializers.ModelSerializer):
             "author",
             "author_id",
             "body",
+            "media_id",
+            "media",
             "reply_to",
             "is_author",
             "created_at",
@@ -119,6 +122,17 @@ class CommentSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         return bool(user and user.is_authenticated and user.id == obj.author_id)
+
+    def get_media(self, obj):
+        """media descriptor：media_id 引用 MediaObject 则返回 descriptor，否则 None。"""
+        if not obj.media_id:
+            return None
+        from apps.media.models import MediaObject
+
+        media = MediaObject.objects.filter(media_id=obj.media_id).first()
+        if media is None:
+            return None
+        return MediaObjectSerializer(media, context=self.context).data
 
 
 class CreatePostSerializer(serializers.Serializer):
@@ -178,13 +192,40 @@ class UpdatePostSerializer(serializers.Serializer):
 
 
 class CreateCommentSerializer(serializers.Serializer):
-    """发评论入参：body 必填，reply_to 可选（须在本帖内）。"""
+    """发评论入参：body 必填，reply_to 可选（须在本帖内），media_id 可选（图片评论）。"""
 
     body = serializers.CharField(required=True, max_length=2000)
     reply_to = serializers.IntegerField(required=False, allow_null=True, default=None)
+    media_id = serializers.CharField(
+        max_length=64, required=False, allow_blank=True, default=None
+    )
 
     def validate_body(self, value):
         value = (value or "").strip()
         if not value:
             raise serializers.ValidationError("评论内容不能为空")
         return value
+
+    def validate_media_id(self, value):
+        return value or None
+
+    def validate(self, attrs):
+        media_id = attrs.get("media_id")
+        if not media_id:
+            return attrs
+        from apps.media.models import MediaObject
+        from apps.media.services import can_access_media
+
+        media = MediaObject.objects.filter(media_id=media_id).first()
+        if media is None:
+            raise serializers.ValidationError({"media_id": "media_not_found"})
+        if media.status != MediaObject.STATUS_READY:
+            raise serializers.ValidationError({"media_id": "media_not_ready"})
+        if media.kind != MediaObject.KIND_IMAGE:
+            raise serializers.ValidationError({"media_id": "media_type_mismatch"})
+        # 越权是授权问题 → 403，与 400 类校验错误区分（同 CreateMessageSerializer）
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is not None and not can_access_media(user, media):
+            raise PermissionDenied({"media_id": "media_access_denied"})
+        return attrs

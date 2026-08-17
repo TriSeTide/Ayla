@@ -87,6 +87,7 @@ class Danmaku(models.Model):
         on_delete=models.CASCADE,
     )
     content = models.CharField("弹幕文本", max_length=200)
+    media_id = models.CharField("媒体引用", max_length=64, null=True, blank=True)
     created_at = models.DateTimeField("发送时间", auto_now_add=True)
 
     class Meta:

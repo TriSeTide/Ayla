@@ -3,7 +3,7 @@ import pytest
 from django.test import override_settings
 
 from apps.voice import livekit
-from apps.voice.models import VoiceChannel, VoiceChannelMember
+from apps.voice.models import VoiceChannel, VoiceChannelMember, VoiceChatMessage
 
 
 @pytest.mark.django_db
@@ -125,6 +125,26 @@ def test_channel_not_found(auth_client):
     assert resp.status_code == 404
     resp = client.post("/api/v1/voice/channels/9999/join/")
     assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_voice_room_chat_is_independent_from_group_messages(auth_client):
+    client, user = auth_client(username="voice_chat_owner")
+    ch = VoiceChannel.objects.create(name="语音", room_name="room_chat_independent", owner=user)
+    VoiceChannelMember.objects.create(channel=ch, user=user)
+
+    sent = client.post(
+        f"/api/v1/voice/channels/{ch.id}/messages/",
+        {"content": "房内消息"},
+        format="json",
+    )
+    assert sent.status_code == 201, sent.content
+    assert sent.json()["content"] == "房内消息"
+    assert VoiceChatMessage.objects.filter(channel=ch, content="房内消息").exists()
+
+    history = client.get(f"/api/v1/voice/channels/{ch.id}/messages/")
+    assert history.status_code == 200
+    assert [item["content"] for item in history.json()] == ["房内消息"]
 
 
 @pytest.mark.django_db

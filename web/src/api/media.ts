@@ -68,15 +68,18 @@ export function validateAvatarFile(file: File): string | null {
 
 /** 三步受控上传；失败会抛出并由调用方保留原输入，不伪造消息发送成功。 */
 export async function uploadMediaFile(file: File, kind: MediaKind): Promise<UploadCompleteResult> {
+  // MIME 规范化：MediaRecorder 输出可能带 codec 参数（如 audio/webm;codecs=opus），
+  // 后端 allowlist 只匹配基础类型，上传取分号前主类型（audio/webm）。
+  const mime = (file.type || "application/octet-stream").split(";")[0].trim();
   const session = await apiRequest<UploadSession>("/media/uploads", {
     method: "POST",
-    body: { kind, expected_size: file.size, mime_type: file.type || "application/octet-stream" },
+    body: { kind, expected_size: file.size, mime_type: mime },
   });
   if (file.size > session.max_bytes) throw new Error("文件超过允许大小");
   await apiRequest<{ detail: string }>(`/media/uploads/${seg(session.upload_id)}`, {
     method: "PUT",
     body: file,
-    headers: { "Content-Type": file.type || "application/octet-stream" },
+    headers: { "Content-Type": mime },
   });
   return apiRequest<UploadCompleteResult>(`/media/uploads/${seg(session.upload_id)}:complete`, {
     method: "POST",

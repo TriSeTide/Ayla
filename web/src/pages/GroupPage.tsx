@@ -33,14 +33,14 @@ import { GroupPosts } from "./group/GroupPosts";
 import { GroupGames } from "./group/GroupGames";
 import { GroupScenePlaceholder } from "./group/GroupScenePlaceholder";
 
-const VALID_SCENES = new Set<string>(GROUP_SCENE_ORDER);
+const VALID_SCENES = new Set<string>([...GROUP_SCENE_ORDER, "info"]);
 
 /** 下拉返回主页手势阈值与退场时长（R-G6 / design.md §12.12：阈值 80px，回弹 200ms） */
 const PULL_DOWN_EXIT_THRESHOLD = 80;
 const EXIT_TRANSITION_MS = 250;
 
 export function GroupPage() {
-  const { id, scene } = useParams<{ id: string; scene?: string }>();
+  const { id, scene, postId } = useParams<{ id: string; scene?: string; postId?: string }>();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
@@ -103,7 +103,11 @@ export function GroupPage() {
   );
 
   // 单一状态源：route param → store（scene 无效回退 chat）
-  const effectiveScene: GroupScene = scene && VALID_SCENES.has(scene) ? (scene as GroupScene) : "chat";
+  const effectiveScene: GroupScene = postId
+    ? "posts"
+    : scene && VALID_SCENES.has(scene)
+      ? (scene as GroupScene)
+      : "chat";
 
   useEffect(() => {
     if (!id) return;
@@ -172,13 +176,13 @@ export function GroupPage() {
       case "voice":
         return <GroupVoice groupId={id ?? ""} onExit={() => goScene("chat")} />;
       case "posts":
-        return <GroupPosts groupId={id ?? ""} onExit={() => goScene("chat")} />;
+        return <GroupPosts groupId={id ?? ""} postId={postId} onExit={() => goScene("chat")} />;
       case "games":
         return <GroupGames groupId={id ?? ""} onExit={() => goScene("chat")} />;
       default:
         return <GroupScenePlaceholder scene={activeScene} />;
     }
-  }, [activeScene, id, goScene]);
+  }, [activeScene, id, postId, goScene]);
 
   // 五子界面左右滑动切换（窄屏；宽屏由 ChannelSidebar 点击）
   const baseIdx = effectiveScene === "info" ? GROUP_SCENE_ORDER.indexOf("chat") : GROUP_SCENE_ORDER.indexOf(effectiveScene);

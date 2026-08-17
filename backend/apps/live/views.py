@@ -255,6 +255,8 @@ class DanmakuListView(APIView):
                     "id": str(dm.id),
                     "sender": services._sender_descriptor(dm.sender),
                     "content": dm.content,
+                    "media_id": dm.media_id,
+                    "media": services._media_descriptor(dm.media_id),
                     "created_at": dm.created_at.isoformat(),
                 }
                 for dm in rows
@@ -268,8 +270,11 @@ class DanmakuListView(APIView):
         if not can_join(request.user, ch):
             return _forbidden("无权进入该直播间")
         content = request.data.get("content")
+        media_id = request.data.get("media_id")
         try:
-            dm = services.create_danmaku(ch, request.user, content)
+            dm = services.create_danmaku(ch, request.user, content, media_id)
+        except PermissionError as exc:
+            return _forbidden(str(exc))
         except ValueError as exc:
             return _bad_request(str(exc))
         # 落库与广播分离：落库已完成，广播走 channels group（同步包装版）
@@ -280,6 +285,8 @@ class DanmakuListView(APIView):
                 "channel_id": str(dm.channel_id),
                 "sender": services._sender_descriptor(dm.sender),
                 "content": dm.content,
+                "media_id": dm.media_id,
+                "media": services._media_descriptor(dm.media_id),
                 "created_at": dm.created_at.isoformat(),
             },
             status=status.HTTP_201_CREATED,

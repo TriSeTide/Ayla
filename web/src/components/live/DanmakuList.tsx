@@ -6,6 +6,8 @@
  * 用户上翻时新弹幕不强制滚动，显示"有新弹幕"浮动提示，点击跳底。
  */
 import type { DanmakuItem } from "../../api/types";
+import { mediaContentUrl, resolveMediaPath } from "../../api/media";
+import { ResourceImage } from "../ResourceImage";
 
 export function DanmakuList({
   danmaku,
@@ -27,7 +29,18 @@ export function DanmakuList({
           danmaku.map((item) => (
             <div key={item.id} className="danmaku-item">
               <span className="danmaku-sender">{item.sender.nickname}：</span>
-              <span className="danmaku-content">{item.content}</span>
+              <span className="danmaku-content">
+                {item.media_id && item.media ? (
+                  <ResourceImage
+                    src={resolveMediaPath(item.media.thumbnail) ?? mediaContentUrl(item.media_id)}
+                    alt={item.content || "弹幕图片"}
+                    className="danmaku-image"
+                    loading="lazy"
+                    fallback={<span className="skeleton" style={{ width: 96, height: 64, borderRadius: 8 }} />}
+                  />
+                ) : null}
+                {item.content && item.content !== "图片" ? item.content : null}
+              </span>
             </div>
           ))
         )}

@@ -89,7 +89,7 @@ export function LiveRoomBody({
             onBack={onBack}
             showBack
             onDeleteChannel={showOwnerPanel ? onDeleteChannel : undefined}
-            onCreateNewChannel={showOwnerPanel ? onCreateNewChannel : undefined}
+            onCreateNewChannel={onCreateNewChannel}
             deletingChannelId={deletingChannelId}
           />
         )}
@@ -126,7 +126,7 @@ export function LiveRoomBody({
           onBack={onBack}
           showBack
           onDeleteChannel={showOwnerPanel ? onDeleteChannel : undefined}
-          onCreateNewChannel={showOwnerPanel ? onCreateNewChannel : undefined}
+          onCreateNewChannel={onCreateNewChannel}
           deletingChannelId={deletingChannelId}
         />
       )}
@@ -236,7 +236,7 @@ export function LiveRoomBody({
             onBack={() => setRailOpen(false)}
             showBack={false}
             onDeleteChannel={showOwnerPanel ? onDeleteChannel : undefined}
-            onCreateNewChannel={showOwnerPanel ? onCreateNewChannel : undefined}
+            onCreateNewChannel={onCreateNewChannel}
             deletingChannelId={deletingChannelId}
           />
         </div>

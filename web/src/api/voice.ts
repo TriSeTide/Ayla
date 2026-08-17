@@ -20,6 +20,7 @@ import type {
   ElysiaVoicePollResult,
   VoiceChannelDescriptor,
   VoiceChannelMemberDescriptor,
+  VoiceChatMessage,
   VoiceJoinResult,
 } from "./types";
 
@@ -84,6 +85,24 @@ export function heartbeatVoiceChannel(channelId: string) {
 export function listVoiceChannelMembers(channelId: string) {
   return apiRequest<VoiceChannelMemberDescriptor[]>(
     `/voice/channels/${encodeURIComponent(channelId)}/members/`,
+  );
+}
+
+/** GET /voice/channels/<id>/messages/ —— 语音房独立聊天历史 */
+export function listVoiceChatMessages(channelId: string, limit = 100) {
+  return apiRequest<VoiceChatMessage[]>(
+    `/voice/channels/${encodeURIComponent(channelId)}/messages/?limit=${limit}`,
+  );
+}
+
+/** POST /voice/channels/<id>/messages/ —— 语音房独立聊天（可带图片） */
+export function sendVoiceChatMessage(
+  channelId: string,
+  payload: { content: string; media_id?: string | null },
+) {
+  return apiRequest<VoiceChatMessage>(
+    `/voice/channels/${encodeURIComponent(channelId)}/messages/`,
+    { method: "POST", body: payload },
   );
 }
 

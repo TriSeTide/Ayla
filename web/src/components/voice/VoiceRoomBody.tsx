@@ -1,25 +1,22 @@
 /**
- * VoiceRoomBody —— 语音房整页（进房态，F5）。
- *
- * 复用 M5-3 VoiceChannelPanel 的成员网格 + 控制排（上麦/静音/离开），新增：
- * - 返回头（回语音房卡片列表）；
- * - 房内打字输入框（开发文档 §1.9 复用群会话方案：群内语音房输入 = 群消息，
- *   仅群语音房 group 非空时显示；公开语音房无独立文字流）；
- * - 输入框滑入动画（useEnterRoomAnimation，进房 250ms 延迟 100ms，与直播同向）。
+ * VoiceRoomBody —— 语音房整页（进房态）。
+ * 房内聊天使用 voice-chat 独立接口，不写入群聊 Message；支持文字与图片。
  */
-import { useState } from "react";
-import * as chatApi from "../../api/chat";
-import type { ElysiaProfile } from "../../api/types";
-import { IconSend } from "../icons";
+import { useEffect, useState } from "react";
+import * as voiceApi from "../../api/voice";
+import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
+import type { ElysiaProfile, VoiceChatMessage } from "../../api/types";
+import { IconImage, IconSend } from "../icons";
+import { ResourceImage } from "../ResourceImage";
 import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
 
 export function VoiceRoomBody({
+  channelId,
   channelName,
   livekit,
   wsConnection,
   elysiaProfile,
-  groupId,
   onToggleMic,
   onLeave,
   onRejoin,
@@ -29,38 +26,72 @@ export function VoiceRoomBody({
   onBack,
   inputEntered,
 }: {
+  channelId?: string;
+  /** 旧调用方兼容字段；房内消息不再根据群归属路由。 */
+  groupId?: string | null;
   channelName: string;
   livekit: LiveKitConnectionState;
   wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
-  /** 群语音房的群 id：房内打字发到该群会话；公开语音房为 null（无打字框） */
-  groupId: string | null;
   onToggleMic: () => void;
   onLeave: () => void;
   onRejoin: () => void;
   onVolumeChange: (userId: string, volume: number) => void;
-  /** 本地麦克风音量 0~100（自己说话别人听到的响度） */
   onLocalVolumeChange: (volume: number) => void;
-  /** 远端成员本地播放静音（喇叭按钮） */
   onToggleMemberMuted: (userId: string) => void;
   onBack: () => void;
   inputEntered: boolean;
 }) {
   const [text, setText] = useState("");
+  const [messages, setMessages] = useState<VoiceChatMessage[]>([]);
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // 房内打字 = 群消息（复用群会话方案，开发文档 §1.9）
-  const sendText = async () => {
+  useEffect(() => {
+    if (!channelId) return;
+    let cancelled = false;
+    setMessages([]);
+    setError(null);
+    void voiceApi.listVoiceChatMessages(channelId).then((items) => {
+      if (!cancelled) setMessages(items);
+    }).catch((err) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : "加载房内聊天失败");
+    });
+    return () => { cancelled = true; };
+  }, [channelId]);
+
+  const sendMessage = async (mediaId?: string | null) => {
+    if (!channelId || sending) return;
     const content = text.trim();
-    if (!content || !groupId || sending) return;
+    if (!content && !mediaId) return;
     setSending(true);
+    setError(null);
     try {
-      await chatApi.sendMessage(groupId, { type: "text", content });
+      const message = await voiceApi.sendVoiceChatMessage(channelId, {
+        content: content || "图片",
+        media_id: mediaId ?? null,
+      });
+      setMessages((prev) => [...prev, message]);
       setText("");
-    } catch {
-      // 发送失败保留输入（可重试）；不伪造"已发送"
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "发送失败，请重试");
     } finally {
       setSending(false);
+    }
+  };
+
+  const sendImage = async (file: File) => {
+    if (!channelId || sending || uploading) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const uploaded = await uploadMediaFile(file, "image");
+      await sendMessage(uploaded.media_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片发送失败，请重试");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -86,7 +117,7 @@ export function VoiceRoomBody({
         onToggleMemberMuted={onToggleMemberMuted}
       />
 
-      {groupId != null && (
+      {channelId != null && (
         <div
           className="voice-room-input"
           style={{
@@ -94,19 +125,57 @@ export function VoiceRoomBody({
             transition: "transform 250ms var(--ease-out)",
           }}
         >
+          <div className="voice-room-chat-list" aria-live="polite">
+            {messages.map((message) => (
+              <div key={message.id} className="voice-room-chat-message">
+                <span className="voice-room-chat-sender">{message.sender.nickname}：</span>
+                {message.media_id && message.media && (
+                  <ResourceImage
+                    src={resolveMediaPath(message.media.thumbnail) ?? mediaContentUrl(message.media_id)}
+                    alt={message.content || "房内聊天图片"}
+                    className="voice-room-chat-image"
+                    loading="lazy"
+                    fallback={<span className="skeleton" style={{ width: 120, height: 80, borderRadius: 8 }} />}
+                  />
+                )}
+                {message.content !== "图片" && <span>{message.content}</span>}
+              </div>
+            ))}
+          </div>
+          {error && <div className="live-form-error" role="alert">{error}</div>}
           <div className="composer-row">
+            <label className="composer-tool-btn" aria-label="发送房内图片">
+              <IconImage width={18} height={18} />
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) await sendImage(file);
+                }}
+              />
+            </label>
             <textarea
               className="field composer-input"
               value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="在语音房内打字（发送到群消息）"
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  void sendMessage();
+                }
+              }}
+              placeholder="在语音房内聊天"
               rows={1}
+              disabled={sending || uploading}
             />
             <button
               type="button"
               className="btn btn-primary"
-              disabled={sending || !text.trim()}
-              onClick={() => void sendText()}
+              disabled={sending || uploading || !text.trim()}
+              onClick={() => void sendMessage()}
               aria-label="发送语音房消息"
             >
               <IconSend width={15} height={15} />

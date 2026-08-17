@@ -229,8 +229,8 @@ export interface MessageNewFrame {
     sender_id: string;
     content: string;
     type: MessageType;
-    /** WS 协议仍是字符串 media_id（backend consumers.py 直传 msg.media_id）；descriptor 由前端补拉 */
-    media: string | null;
+    /** WS 帧携带完整 descriptor 对象（backend consumers.py 直传 _media_descriptor）；历史兼容字符串 media_id */
+    media: MediaDescriptor | string | null;
     reply_to: string | null;
     seq: number;
     ts: string;
@@ -318,6 +318,21 @@ export interface VoiceChannelMemberDescriptor {
   user_id: string;
   joined_at: string;
   last_seen_at: string;
+}
+
+/** 语音房独立聊天消息（不进入群聊 Message）。 */
+export interface VoiceChatMessage {
+  id: string;
+  channel_id: string;
+  sender: {
+    user_id: string;
+    nickname: string;
+    avatar: string;
+  };
+  content: string;
+  media_id: string | null;
+  media: MediaDescriptor | null;
+  created_at: string;
 }
 
 /** POST /voice/channels/<id>/join/ 返回（LiveKit 媒体凭据，禁止打日志） */
@@ -475,6 +490,8 @@ export interface DanmakuItem {
     avatar: string;
   };
   content: string;
+  media_id?: string | null;
+  media?: MediaDescriptor | null;
   created_at: string;
 }
 
@@ -490,6 +507,8 @@ export interface DanmakuFrame {
     avatar?: string;
   };
   content: string;
+  media_id?: string | null;
+  media?: MediaDescriptor | null;
   created_at: string;
 }
 
@@ -545,13 +564,15 @@ export interface Post {
   updated_at: string;
 }
 
-/** 评论（CommentSerializer） */
+/** 评论（CommentSerializer，M5-2.1 起支持 media_id 图片评论） */
 export interface PostComment {
   id: number;
   post_id: string;
   author: UserPublic;
   author_id: string;
   body: string;
+  media_id: string | null;
+  media: MediaDescriptor | null;
   reply_to: string | null;
   is_author: boolean;
   created_at: string;

@@ -159,13 +159,17 @@ export class ChatWSClient {
     switch (frame.type) {
       case "message.new": {
         const d = frame.data;
+        // 后端 WS 帧 media 字段是 MediaDescriptor 对象（或 null）；历史兼容字符串 media_id
+        const wsMedia = d.media;
+        const wsMediaId = typeof wsMedia === "string" ? wsMedia : (wsMedia?.media_id ?? null);
         const msg: ChatMessage = {
           id: d.message_id,
           conversation_id: d.conversation_id,
           sender_id: d.sender_id,
           type: d.type,
           content: d.content,
-          media_id: d.media,
+          media_id: wsMediaId,
+          media: typeof wsMedia === "string" ? null : wsMedia,
           reply_to: d.reply_to,
           status: "sent",
           seq: d.seq,

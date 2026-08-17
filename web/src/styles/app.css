@@ -1001,6 +1001,59 @@
   flex-shrink: 0;
 }
 
+/* 语音录制（M5 语音消息） */
+.composer-voice-btn:active {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+  color: var(--grape-700);
+}
+
+.voice-recording-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--destructive);
+  white-space: nowrap;
+}
+
+.voice-rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--destructive);
+  animation: voice-rec-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-rec-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.composer-voice-stop {
+  border-color: var(--destructive);
+  color: #fff;
+  background: var(--destructive);
+}
+
+.composer-voice-stop:hover,
+.composer-voice-stop:focus-visible {
+  border-color: var(--destructive);
+  box-shadow: 0 0 12px rgba(214, 77, 110, 0.4);
+}
+
+.composer-voice-cancel {
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-rec-dot {
+    animation: none;
+  }
+}
+
 /* 引用条（正在引用） */
 .quote-bar {
   display: flex;
@@ -2088,6 +2141,15 @@
   color: var(--text-primary);
 }
 
+.danmaku-image {
+  display: block;
+  width: 96px;
+  max-height: 64px;
+  object-fit: cover;
+  margin-top: var(--sp-1);
+  border-radius: var(--radius-sm);
+}
+
 .danmaku-new-hint {
   position: absolute;
   bottom: var(--sp-3);
@@ -2111,6 +2173,34 @@
 .danmaku-input-row {
   display: flex;
   gap: var(--sp-2);
+}
+
+.danmaku-image-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.danmaku-image-btn:hover,
+.danmaku-image-btn:focus-within {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+}
+
+.danmaku-input-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .danmaku-input {

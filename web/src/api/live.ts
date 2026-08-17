@@ -76,10 +76,10 @@ export function getLiveChannelStatus(channelId: number) {
 }
 
 /** POST /live/channels/<id>/danmaku/ —— 发弹幕；空/超长（>200）→ 400 */
-export function sendDanmaku(channelId: number, content: string) {
+export function sendDanmaku(channelId: number, content: string, mediaId?: string | null) {
   return apiRequest<DanmakuItem>(`/live/channels/${channelId}/danmaku/`, {
     method: "POST",
-    body: { content },
+    body: { content, media_id: mediaId ?? null },
   });
 }
 

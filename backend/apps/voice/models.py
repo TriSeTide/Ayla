@@ -81,3 +81,27 @@ class VoiceChannelMember(models.Model):
 
     def __str__(self) -> str:
         return f"vc{self.channel_id}:{self.user_id}"
+
+
+class VoiceChatMessage(models.Model):
+    """语音房独立文字消息，不复用群聊 Message。"""
+
+    id = models.AutoField(primary_key=True)
+    channel = models.ForeignKey(
+        VoiceChannel, related_name="chat_messages", on_delete=models.CASCADE
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="voice_chat_messages",
+        on_delete=models.CASCADE,
+    )
+    content = models.CharField("消息内容", max_length=2000, blank=True, default="")
+    media_id = models.CharField("媒体引用", max_length=64, null=True, blank=True)
+    created_at = models.DateTimeField("发送时间", auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "voice_chat_messages"
+        ordering = ["created_at", "id"]
+
+    def __str__(self) -> str:
+        return f"voice{self.channel_id}:{self.id}"

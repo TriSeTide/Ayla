@@ -218,7 +218,9 @@ class CommentListView(APIView):
             reply_to = _get_comment_or_404(post, data["reply_to"])
             if reply_to is None:
                 return _not_found("回复的评论不存在")
-        comment = services.create_comment(post, request.user, data["body"], reply_to)
+        comment = services.create_comment(
+            post, request.user, data["body"], reply_to, data.get("media_id")
+        )
         return Response(
             CommentSerializer(comment, context={"request": request}).data,
             status=status.HTTP_201_CREATED,

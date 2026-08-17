@@ -8,19 +8,26 @@
  * 输入框直接显示）；宽屏同 ChannelSidebar 内容区。
  */
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import * as liveApi from "../../api/live";
 import type { LiveChannelDescriptor } from "../../api/types";
+import { CreateSheet } from "../../layout/CreateSheet";
+import { LiveStartSheet } from "../../components/live/LiveStartSheet";
 import { LiveRoomBody } from "../../components/live/LiveRoomBody";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useLiveStore } from "../../stores/live";
 
 export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => void }) {
   const isNarrow = useMediaQuery(NARROW_QUERY);
+  const navigate = useNavigate();
   const channel = useLiveStore((s) => s.current.channel);
   const [channels, setChannels] = useState<LiveChannelDescriptor[]>([]);
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [creatingNew, setCreatingNew] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -59,6 +66,28 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
     [currentId],
   );
 
+  const handleLiveStarted = useCallback(
+    (started: LiveChannelDescriptor) => {
+      setShowCreate(false);
+      navigate(`/live/start/${started.id}`);
+    },
+    [navigate],
+  );
+
+  const handleCreateNewLive = useCallback(async () => {
+    setCreatingNew(true);
+    setCreateError(null);
+    try {
+      const created = await liveApi.createLiveChannel("新直播间", groupId);
+      setShowCreate(false);
+      navigate(`/live/start/${created.id}`);
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "创建直播间失败");
+    } finally {
+      setCreatingNew(false);
+    }
+  }, [groupId, navigate]);
+
   if (loading) {
     return (
       <div className="group-scene-placeholder">
@@ -90,6 +119,7 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
   }
 
   return (
+    <>
     <LiveRoomBody
       channelId={currentId}
       channel={channel}
@@ -98,6 +128,21 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
       onSelect={goTo}
       onBack={onExit}
       inputEntered // 群内子界面无底栏下滑动画，输入框直接显示
+      onCreateNewChannel={() => {
+        setCreateError(null);
+        setShowCreate(true);
+      }}
     />
+  {showCreate && (
+    <CreateSheet title="群内开播" onClose={() => setShowCreate(false)}>
+      <LiveStartSheet
+        onStart={handleLiveStarted}
+        onCreateNew={() => void handleCreateNewLive()}
+        creatingNew={creatingNew}
+        createError={createError}
+      />
+    </CreateSheet>
+  )}
+    </>
   );
 }

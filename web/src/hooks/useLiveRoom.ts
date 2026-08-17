@@ -64,6 +64,8 @@ export function useLiveRoom(
             avatar: f.sender.avatar ?? "",
           },
           content: f.content,
+          media_id: f.media_id ?? null,
+          media: f.media ?? null,
           created_at: f.created_at,
         });
       }

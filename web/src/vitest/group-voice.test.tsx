@@ -3,7 +3,7 @@
  * mock voiceApi.listVoiceChannels + VoiceChannelPanel/useVoiceChannel 的媒体链不触发
  * （列表态 currentChannelId=null，join 才触发）。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as voiceApi from "../api/voice";
 import type { VoiceChannelDescriptor } from "../api/types";
@@ -67,5 +67,10 @@ describe("GroupVoice 范围（仅该群）", () => {
     vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([ch("v3", null, "公开语音")]);
     render(<GroupVoice groupId="g1" onExit={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("群内还没有语音房")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "创建群内语音房" }));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "创建群内语音房" })).toBeInTheDocument(),
+    );
+    expect(screen.getByPlaceholderText("新语音频道名称")).toBeInTheDocument();
   });
 });

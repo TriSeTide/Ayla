@@ -3,15 +3,22 @@
  * LiveRoomBody / liveApi mock，聚焦范围过滤 + 无直播空态。
  */
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as liveApi from "../api/live";
 import type { LiveChannelDescriptor } from "../api/types";
 import { useGroupStore } from "../stores/group";
 
 vi.mock("../components/live/LiveRoomBody", () => ({
-  LiveRoomBody: ({ channelId }: { channelId: number }) => (
+  LiveRoomBody: ({
+    channelId,
+    onCreateNewChannel,
+  }: { channelId: number; onCreateNewChannel?: () => void }) => (
     <div data-testid="room-body" data-channelid={channelId}>
       直播间 {channelId}
+      {onCreateNewChannel && (
+        <button type="button" onClick={onCreateNewChannel}>新建直播间</button>
+      )}
     </div>
   ),
 }));
@@ -76,15 +83,33 @@ describe("GroupLive 范围（仅该群）", () => {
       ch(3, null), // 公开
       ch(4, "g9"), // 其它群
     ]);
-    render(<GroupLive groupId="g1" onExit={vi.fn()} />);
+    render(
+      <MemoryRouter>
+        <GroupLive groupId="g1" onExit={vi.fn()} />
+      </MemoryRouter>,
+    );
     await waitFor(() =>
       expect(screen.getByTestId("room-body")).toHaveAttribute("data-channelid", "1"),
     );
   });
 
+  it("本群直播间把创建入口交给直播侧栏", async () => {
+    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([ch(1, "g1")]);
+    render(
+      <MemoryRouter>
+        <GroupLive groupId="g1" onExit={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "新建直播间" })).toBeInTheDocument());
+  });
+
   it("本群无直播 → 空态引导", async () => {
     vi.mocked(liveApi.listLiveChannels).mockResolvedValue([ch(3, null), ch(4, "g9")]);
-    render(<GroupLive groupId="g1" onExit={vi.fn()} />);
+    render(
+      <MemoryRouter>
+        <GroupLive groupId="g1" onExit={vi.fn()} />
+      </MemoryRouter>,
+    );
     await waitFor(() => expect(screen.getByText("群内还没有直播")).toBeInTheDocument());
   });
 });

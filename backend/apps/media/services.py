@@ -66,6 +66,8 @@ _SNIFFERS = [
     ("voice", b"\xff\xfb", "audio/mpeg"),  # MP3 无标签
     ("voice", b"OggS", "audio/ogg"),
     ("voice", b"fLaC", "audio/flac"),
+    ("voice", b"\x1a\x45\xdf\xa3", "audio/webm"),  # WebM/EBML（浏览器 MediaRecorder 默认输出）
+    ("voice", b"\x1a\x45\xdf\xa3\x93\x42\x82\x88matroska", "audio/webm"),  # MKV 容器（部分录制器）
     ("file", b"%PDF", "application/pdf"),
     ("file", b"PK\x03\x04", "application/zip"),
 ]
@@ -369,11 +371,24 @@ def can_access_media(user, media: MediaObject) -> bool:
         return True
 
     # 直播间封面：按直播间可见性复用 can_view，避免封面 URL 暴露后变成越权入口。
-    from apps.live.models import LiveChannel
+    from apps.live.models import Danmaku, LiveChannel
     from apps.common.visibility import can_view as _live_can_view
 
     for channel in LiveChannel.objects.filter(cover__contains=media.media_id):
         if _live_can_view(user, channel):
+            return True
+
+    # 弹幕图片：仅该弹幕所属直播间的可见观众可访问。
+    for danmaku in Danmaku.objects.filter(media_id=media.media_id).select_related("channel"):
+        if _live_can_view(user, danmaku.channel):
+            return True
+
+    # 语音房独立聊天图片：仅该语音房可见成员可访问。
+    from apps.voice.models import VoiceChatMessage
+    from apps.common.visibility import can_view as _voice_can_view
+
+    for message in VoiceChatMessage.objects.filter(media_id=media.media_id).select_related("channel"):
+        if _voice_can_view(user, message.channel):
             return True
 
     return False

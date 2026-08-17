@@ -99,6 +99,7 @@ export function VoiceHubPage() {
   if (currentChannel) {
     return (
       <VoiceRoomBody
+        channelId={currentChannel.id}
         channelName={currentChannel.name}
         livekit={livekit}
         wsConnection={wsConnection}

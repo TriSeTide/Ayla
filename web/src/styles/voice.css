@@ -42,6 +42,38 @@
   background: var(--glass-bg-strong);
 }
 
+.voice-room-chat-list {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.voice-room-chat-message {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.voice-room-chat-sender {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.voice-room-chat-image {
+  display: block;
+  width: 120px;
+  max-height: 80px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
 /* ================= 来源标识（R-V1，design.md §12.10 Micro Tag） ================= */
 
 .voice-source-tag {
@@ -181,6 +213,43 @@
   padding-bottom: 68px;
 }
 
+.group-voice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+}
+
+.group-voice-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.group-voice-desc {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.group-voice-create-btn {
+  flex: none;
+  min-height: 40px;
+}
+
+.group-voice-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
 /* 群内语音也用卡片网格（与一级页统一） */
 .group-voice .voice-channel-list {
   display: grid;
@@ -267,4 +336,15 @@
 
 .group-voice.is-wide {
   padding-bottom: var(--sp-4);
+}
+
+@media (max-width: 480px) {
+  .group-voice-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .group-voice-create-btn {
+    width: 100%;
+  }
 }

@@ -5,12 +5,24 @@
  * 两条路径不同，R-P2）。PostEditor compact 变体。无帖子 → 空态。
  */
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
 import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
 
-export function GroupPosts({ groupId, onExit }: { groupId: string; onExit: () => void }) {
+export function GroupPosts({
+  groupId,
+  onExit,
+  postId,
+}: {
+  groupId: string;
+  onExit: () => void;
+  /** 群内详情路由参数；存在时保留 GroupPage 外壳渲染详情 */
+  postId?: string;
+}) {
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +47,10 @@ export function GroupPosts({ groupId, onExit }: { groupId: string; onExit: () =>
     },
     [],
   );
+
+  if (postId) {
+    return <PostDetailPage groupId={groupId} />;
+  }
 
   if (loading) {
     return (
@@ -71,7 +87,7 @@ export function GroupPosts({ groupId, onExit }: { groupId: string; onExit: () =>
               <PostCard
                 post={p}
                 favorited={false}
-                onOpen={() => {}}
+                onOpen={() => navigate(`/group/${encodeURIComponent(groupId)}/posts/${p.id}`)}
                 onToggleFavorite={() => {}}
               />
             </div>

@@ -155,8 +155,67 @@
   color: var(--destructive);
 }
 
+.post-editor-images {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.post-editor-image {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+}
+
+.post-editor-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.post-editor-image-remove {
+  position: absolute;
+  top: var(--sp-1);
+  right: var(--sp-1);
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.post-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.post-editor-image-btn {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.post-editor-image-btn:hover,
+.post-editor-image-btn:focus-within {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+}
+
 .post-editor-submit {
-  align-self: flex-end;
+  align-self: auto;
 }
 
 /* ================= 评论列表（R-P4） ================= */
@@ -207,6 +266,16 @@
 .comment-reply-hint {
   font-size: 12px;
   color: var(--slate-500);
+}
+
+/* 评论图片（M5-2.1） */
+.comment-image {
+  margin-top: var(--sp-2);
+  max-width: 200px;
+  max-height: 150px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
 }
 
 .comment-text {

@@ -18,9 +18,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.visibility import can_join, can_view, visible_queryset
+from apps.media.models import MediaObject
+from apps.media.services import can_access_media
+from apps.media.serializers import MediaObjectSerializer
 
 from . import livekit, services
-from .models import VoiceChannel, VoiceChannelMember
+from .models import VoiceChannel, VoiceChannelMember, VoiceChatMessage
 from .serializers import VoiceChannelMemberSerializer, VoiceChannelSerializer
 
 logger = logging.getLogger(__name__)
@@ -193,6 +196,90 @@ class ChannelHeartbeatView(APIView):
         except PermissionError:
             return _forbidden("非频道成员不可心跳")
         return Response({"ok": True})
+
+
+class ChannelChatMessagesView(APIView):
+    """GET/POST /voice/channels/<id>/messages/ —— 语音房独立聊天。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def _channel(self, request, channel_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return None, _not_found()
+        if not can_view(request.user, ch):
+            return None, _forbidden("无权查看该语音频道")
+        return ch, None
+
+    @staticmethod
+    def _payload(message):
+        return {
+            "id": str(message.id),
+            "channel_id": str(message.channel_id),
+            "sender": {
+                "user_id": str(message.sender_id),
+                "nickname": message.sender.nickname or message.sender.username,
+                "avatar": message.sender.avatar or "",
+            },
+            "content": message.content,
+            "media_id": message.media_id,
+            "media": (
+                MediaObjectSerializer(
+                    MediaObject.objects.filter(media_id=message.media_id).first()
+                ).data
+                if message.media_id
+                and MediaObject.objects.filter(media_id=message.media_id).exists()
+                else None
+            ),
+            "created_at": message.created_at.isoformat(),
+        }
+
+    def get(self, request, channel_id):
+        ch, error = self._channel(request, channel_id)
+        if error:
+            return error
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", 100)), 200))
+        except (TypeError, ValueError):
+            limit = 100
+        rows = list(
+            VoiceChatMessage.objects.filter(channel=ch)
+            .select_related("sender")
+            .order_by("-created_at", "-id")[:limit]
+        )
+        rows.reverse()
+        return Response([self._payload(row) for row in rows])
+
+    def post(self, request, channel_id):
+        ch, error = self._channel(request, channel_id)
+        if error:
+            return error
+        if not services.user_in_channel(ch, request.user):
+            return _forbidden("加入语音房后才能发消息")
+        content = (request.data.get("content") or "").strip()
+        media_id = (request.data.get("media_id") or "").strip() or None
+        if not content and not media_id:
+            return Response({"detail": "消息内容不能为空"}, status=status.HTTP_400_BAD_REQUEST)
+        if len(content) > 2000:
+            return Response({"detail": "消息内容不能超过 2000 字"}, status=status.HTTP_400_BAD_REQUEST)
+        media = None
+        if media_id:
+            media = MediaObject.objects.filter(media_id=media_id).first()
+            if media is None:
+                return Response({"detail": "media_not_found"}, status=status.HTTP_400_BAD_REQUEST)
+            if media.status != MediaObject.STATUS_READY:
+                return Response({"detail": "media_not_ready"}, status=status.HTTP_400_BAD_REQUEST)
+            if media.kind != MediaObject.KIND_IMAGE:
+                return Response({"detail": "media_type_mismatch"}, status=status.HTTP_400_BAD_REQUEST)
+            if not can_access_media(request.user, media):
+                return _forbidden("media_access_denied")
+        message = VoiceChatMessage.objects.create(
+            channel=ch,
+            sender=request.user,
+            content=content or "图片",
+            media_id=media_id,
+        )
+        return Response(self._payload(message), status=status.HTTP_201_CREATED)
 
 
 class ChannelMembersView(APIView):

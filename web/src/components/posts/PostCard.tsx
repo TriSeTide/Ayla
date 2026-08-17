@@ -9,6 +9,7 @@ import { useState } from "react";
 import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { IconHeart, IconMessage } from "../icons";
+import { ResourceImage } from "../ResourceImage";
 
 function formatTime(iso: string): string {
   try {
@@ -69,10 +70,10 @@ export function PostCard({
         {images.length > 0 && (
           <div className={`post-card-images count-${Math.min(images.length, 9)}`}>
             {images.slice(0, 9).map((img) => (
-              <img
+              <ResourceImage
                 key={img.id}
                 src={img.media!.thumbnail!}
-                alt=""
+                alt="帖子图片"
                 loading="lazy"
                 className="post-card-img"
               />

@@ -173,14 +173,38 @@ def _sender_descriptor(user) -> dict:
     }
 
 
-def create_danmaku(channel: LiveChannel, user, content: str) -> Danmaku:
-    """发弹幕：内容校验（非空、≤200）+ 落库。广播由调用方负责（落库与广播分离）。"""
+def create_danmaku(
+    channel: LiveChannel,
+    user,
+    content: str,
+    media_id: str | None = None,
+) -> Danmaku:
+    """发弹幕：文本长度与图片引用校验后落库，广播由调用方负责。"""
     content = (content or "").strip()
-    if not content:
+    media_id = (media_id or "").strip() or None
+    if not content and not media_id:
         raise ValueError("content 不能为空")
     if len(content) > 200:
         raise ValueError("content 长度不能超过 200")
-    return Danmaku.objects.create(channel=channel, sender=user, content=content)
+    if media_id:
+        from apps.media.models import MediaObject
+        from apps.media.services import can_access_media
+
+        media = MediaObject.objects.filter(media_id=media_id).first()
+        if media is None:
+            raise ValueError("media_not_found")
+        if media.status != MediaObject.STATUS_READY:
+            raise ValueError("media_not_ready")
+        if media.kind != MediaObject.KIND_IMAGE:
+            raise ValueError("media_type_mismatch")
+        if not can_access_media(user, media):
+            raise PermissionError("media_access_denied")
+    return Danmaku.objects.create(
+        channel=channel,
+        sender=user,
+        content=content or "图片",
+        media_id=media_id,
+    )
 
 
 def danmaku_history(channel: LiveChannel, limit: int | None = None) -> list[Danmaku]:
@@ -195,6 +219,16 @@ def danmaku_history(channel: LiveChannel, limit: int | None = None) -> list[Danm
     return rows
 
 
+def _media_descriptor(media_id: str | None) -> dict | None:
+    if not media_id:
+        return None
+    from apps.media.models import MediaObject
+    from apps.media.serializers import MediaObjectSerializer
+
+    media = MediaObject.objects.filter(media_id=media_id).first()
+    return MediaObjectSerializer(media).data if media is not None else None
+
+
 def _danmaku_event(dm: Danmaku) -> dict:
     return {
         "type": "danmaku",
@@ -202,6 +236,8 @@ def _danmaku_event(dm: Danmaku) -> dict:
         "channel_id": str(dm.channel_id),
         "sender": _sender_descriptor(dm.sender),
         "content": dm.content,
+        "media_id": dm.media_id,
+        "media": _media_descriptor(dm.media_id),
         "created_at": dm.created_at.isoformat(),
     }
 

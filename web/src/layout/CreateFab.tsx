@@ -5,7 +5,7 @@
  * 动作随当前场景（shellConfig.resolveFabAction，需求文档 §3.5）：
  * - 主页 → GroupCreateDialog（建群，自带浮层）
  * - 语音/直播/帖子/桌游 → 对应表单包在通用 CreateSheet 浮层
- * - 群内 voice/live/games → 归属该群创建
+ * - 群内 games → 归属该群创建；群内 voice 隐藏 FAB，群内 live 使用直播侧栏入口
  * 每个界面只出现各自功能，不再有「创建群聊」次级项。
  */
 import { useEffect, useState } from "react";

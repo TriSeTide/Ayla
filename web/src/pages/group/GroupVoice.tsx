@@ -9,8 +9,10 @@ import { useCallback, useEffect, useState } from "react";
 import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
 import type { ElysiaProfile } from "../../api/types";
+import { VoiceChannelCreate } from "../../components/voice/VoiceChannelCreate";
 import { VoiceChannelList } from "../../components/voice/VoiceChannelList";
 import { VoiceRoomBody } from "../../components/voice/VoiceRoomBody";
+import { CreateSheet } from "../../layout/CreateSheet";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useVoiceStore } from "../../stores/voice";
@@ -23,6 +25,7 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   const {
     currentChannelId,
@@ -75,10 +78,25 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
 
   const handleJoin = useCallback((channelId: string) => void join(channelId, { joinMuted: true }), [join]);
   const currentChannel = channels.find((c) => c.id === currentChannelId) ?? null;
+  const createButton = (
+    <button
+      type="button"
+      className="btn btn-primary group-voice-create-btn"
+      onClick={() => setShowCreate(true)}
+    >
+      创建群内语音房
+    </button>
+  );
+  const createSheet = showCreate ? (
+    <CreateSheet title="创建群内语音房" onClose={() => setShowCreate(false)}>
+      <VoiceChannelCreate group={groupId} />
+    </CreateSheet>
+  ) : null;
 
   if (currentChannel) {
     return (
       <VoiceRoomBody
+        channelId={currentChannel.id}
         channelName={currentChannel.name}
         livekit={livekit}
         wsConnection={wsConnection}
@@ -125,25 +143,41 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
 
   if (groupChannels.length === 0) {
     return (
-      <div className="group-scene-placeholder">
-        <h3 className="placeholder-title">群内还没有语音房</h3>
-        <p className="placeholder-desc">建一个群内语音房，一起连麦</p>
-        <button type="button" className="btn btn-ghost" onClick={onExit}>
-          返回聊天
-        </button>
-      </div>
+      <>
+        <div className="group-scene-placeholder">
+          <h3 className="placeholder-title">群内还没有语音房</h3>
+          <p className="placeholder-desc">建一个群内语音房，一起连麦</p>
+          <div className="group-voice-empty-actions">
+            {createButton}
+            <button type="button" className="btn btn-ghost" onClick={onExit}>
+              返回聊天
+            </button>
+          </div>
+        </div>
+        {createSheet}
+      </>
     );
   }
 
   return (
-    <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
-      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
-      <VoiceChannelList
-        channels={groupChannels}
-        currentChannelId={currentChannelId}
-        joining={joining}
-        onJoin={handleJoin}
-      />
-    </div>
+    <>
+      <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
+        {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
+        <div className="group-voice-head">
+          <div>
+            <h3 className="group-voice-title">群内语音房</h3>
+            <p className="group-voice-desc">选择一个房间加入，或创建新的群内语音房</p>
+          </div>
+          {createButton}
+        </div>
+        <VoiceChannelList
+          channels={groupChannels}
+          currentChannelId={currentChannelId}
+          joining={joining}
+          onJoin={handleJoin}
+        />
+      </div>
+      {createSheet}
+    </>
   );
 }

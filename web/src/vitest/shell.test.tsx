@@ -8,7 +8,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as liveApi from "../api/live";
 import { AppShell } from "../layout/AppShell";
 import {
   isLiveRoomRoute,
@@ -117,8 +116,8 @@ describe("resolveFabAction", () => {
     expect(resolveFabAction("/posts")?.key).toBe("create-post");
     expect(resolveFabAction("/games")?.key).toBe("create-game");
 
-    expect(resolveFabAction("/group/g1/voice")).toMatchObject({ key: "group-voice", groupId: "g1" });
-    expect(resolveFabAction("/group/g1/live")).toMatchObject({ key: "group-live", groupId: "g1" });
+    expect(resolveFabAction("/group/g1/voice")).toBeNull();
+    expect(resolveFabAction("/group/g1/live")).toBeNull();
     // 群内帖子发帖走底部输入框（R-P2 关键差异），FAB 隐藏
     expect(resolveFabAction("/group/g1/posts")).toBeNull();
     expect(resolveFabAction("/group/g1/games")).toMatchObject({ key: "group-game", groupId: "g1" });
@@ -208,32 +207,12 @@ describe("CreateFab", () => {
     expect(screen.queryByRole("menuitem", { name: "创建群聊" })).not.toBeInTheDocument();
   });
 
-  it("群内开播点加号打开选择器，添加新直播间直接创建并进入开播控制台", async () => {
-    vi.spyOn(liveApi, "listLiveChannels").mockResolvedValue([]);
-    vi.spyOn(liveApi, "createLiveChannel").mockResolvedValue({
-      id: 9,
-      title: "新直播间",
-      status: "idle",
-      owner_id: "u1",
-      owner_nickname: "我",
-      is_owner: true,
-      visibility: "group",
-      group: "g1",
-      group_name: "测试群",
-      stream_key: null,
-      rtmp_url: null,
-      hls_url: "http://x/hls.m3u8",
-      flv_url: "http://x/live.flv",
-      started_at: null,
-      ended_at: null,
-      created_at: "2026-08-18T00:00:00Z",
-    });
+  it("群内语音和群内直播不显示右下角加号", () => {
+    renderShell("/group/g1/voice", true);
+    expect(screen.queryByRole("button", { name: /创建|开播|发帖/ })).not.toBeInTheDocument();
+
     renderShell("/group/g1/live", true);
-    fireEvent.click(screen.getByRole("button", { name: "群内开播" }));
-    await waitFor(() => expect(screen.getByText("选择一个直播间开始")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "+ 添加新的直播间" }));
-    await waitFor(() => expect(screen.getByText("开播控制台")).toBeInTheDocument());
-    expect(liveApi.createLiveChannel).toHaveBeenCalledWith("新直播间", "g1");
+    expect(screen.queryByRole("button", { name: /创建|开播|发帖/ })).not.toBeInTheDocument();
   });
 
   it("主页 FAB 点加号直接打开建群对话框（R-F3 已接线，无面板）", async () => {
