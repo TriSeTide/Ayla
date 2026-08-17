@@ -123,16 +123,6 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
     );
   }
 
-  if (profileError) {
-    return (
-      <div className="group-scene-placeholder" role="alert">
-        <h3 className="placeholder-title">爱莉入口暂不可用</h3>
-        <p className="placeholder-desc">{profileError}</p>
-        <button type="button" className="btn btn-ghost" onClick={onExit}>返回聊天</button>
-      </div>
-    );
-  }
-
   if (groupChannels.length === 0) {
     return (
       <div className="group-scene-placeholder">
@@ -147,6 +137,7 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
 
   return (
     <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
+      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
       <VoiceChannelList
         channels={groupChannels}
         currentChannelId={currentChannelId}
