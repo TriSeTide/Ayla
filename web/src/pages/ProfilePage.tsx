@@ -39,12 +39,16 @@ export function ProfilePage() {
   const [myPosts, setMyPosts] = useState<Post[]>([]);
   const [myLives, setMyLives] = useState<LiveChannelDescriptor[]>([]);
   const [myGames, setMyGames] = useState<GameRoom[]>([]);
+  const [contentError, setContentError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentUser) return;
-    postsApi.listPosts({ scope: "mine", limit: 5 }).then((p) => setMyPosts(p.results)).catch(() => {});
-    liveApi.listLiveChannels().then((l) => setMyLives(l.filter((c) => c.owner_id === currentUser.id))).catch(() => {});
-    boardgameApi.listGameRooms(true).then(setMyGames).catch(() => {});
+    setContentError(null);
+    Promise.all([
+      postsApi.listPosts({ scope: "mine", limit: 5 }).then((p) => setMyPosts(p.results)),
+      liveApi.listLiveChannels().then((l) => setMyLives(l.filter((c) => c.owner_id === currentUser.id))),
+      boardgameApi.listGameRooms(true).then(setMyGames),
+    ]).catch((e) => setContentError(e instanceof Error ? e.message : "加载我的内容失败"));
   }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!currentUser) {
@@ -101,6 +105,7 @@ export function ProfilePage() {
           <span className="profile-topbar-title">个人页</span>
         </div>
 
+        {contentError && <div className="chat-notice" role="alert">{contentError}</div>}
         <div className="solid-card profile-card">
           <div className="profile-identity">
             <Avatar label={displayName} size={64} online={currentUser.online} />
