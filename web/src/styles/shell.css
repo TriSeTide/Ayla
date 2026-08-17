@@ -330,16 +330,69 @@
   top: 72px;
   z-index: 44;
   transform: translateX(-50%);
-  max-width: min(560px, calc(100vw - 32px));
+  width: min(560px, calc(100vw - 32px));
   padding: 8px 14px;
   border: 1px solid rgba(232, 163, 61, 0.45);
-  border-radius: var(--radius-pill);
-  background: rgba(255, 250, 251, 0.86);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg-strong);
   color: var(--text-primary);
   font-size: 13px;
-  text-align: center;
   box-shadow: 0 2px 12px rgba(70, 91, 146, 0.1);
 }
+
+.realtime-status-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.realtime-status-hint {
+  flex: none;
+  color: var(--text-secondary);
+  font-family: var(--font-utility);
+  font-size: 11px;
+}
+
+.realtime-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.realtime-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 8px 2px 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(232, 163, 61, 0.1);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.realtime-status-item strong { font-size: 12px; }
+.realtime-status-item small {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.realtime-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.realtime-status-item.is-connecting .realtime-status-dot { background: var(--ice-500); }
+.realtime-status-item.is-failed .realtime-status-dot { background: var(--destructive); }
 
 /* ================= 跨页面活动态（规划 P0-1） ================= */
 .session-activity-indicator {
@@ -474,6 +527,17 @@
 @media (max-width: 768px) {
   .realtime-status-banner {
     top: calc(56px + env(safe-area-inset-top, 0px) + 8px);
+    padding-inline: 10px;
+  }
+
+  .realtime-status-summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .realtime-status-list {
+    gap: 6px;
   }
 
   .session-activity-indicator {

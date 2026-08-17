@@ -10,4 +10,12 @@ describe("RealtimeStore", () => {
     expect(useRealtimeStore.getState().statuses.chat.connection).toBe("connecting");
     expect(useRealtimeStore.getState().statuses.presence).toMatchObject({ connection: "failed", lastError: "403" });
   });
+
+  it("恢复在线后清除旧错误，离线不会伪装成失败", () => {
+    useRealtimeStore.getState().setStatus("live", "failed", "服务不可用");
+    useRealtimeStore.getState().setStatus("live", "online");
+    useRealtimeStore.getState().setStatus("voice", "offline");
+    expect(useRealtimeStore.getState().statuses.live).toMatchObject({ connection: "online", lastError: null });
+    expect(useRealtimeStore.getState().statuses.voice).toMatchObject({ connection: "offline", lastError: null });
+  });
 });
