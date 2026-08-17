@@ -18,6 +18,7 @@ export function FavoritesPage() {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -38,19 +39,21 @@ export function FavoritesPage() {
   }, [load]);
 
   const remove = useCallback((fav: Favorite) => {
+    setActionError(null);
     favoritesApi
       .removeFavorite(fav.id)
       .then(() => {
         setFavorites((prev) => prev.filter((f) => f.id !== fav.id));
         usePostsStore.getState().setFavorite(fav.target_id, null);
       })
-      .catch(() => {});
+      .catch((e) => setActionError(e instanceof Error ? e.message : "取消收藏失败，请重试"));
   }, []);
 
   return (
     <div className="favorites-page">
       {isNarrow && <NarrowTopBar />}
       <h2 className="favorites-title">我的收藏</h2>
+      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       {loading ? (
         <div className="favorites-skeleton">
           <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
