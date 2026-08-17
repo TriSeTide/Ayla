@@ -13,13 +13,15 @@ import { PostEditor } from "../../components/posts/PostEditor";
 export function GroupPosts({ groupId, onExit }: { groupId: string; onExit: () => void }) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
+    setError(null);
     postsApi
       .listPosts({ scope: `group:${groupId}`, limit: 20 })
       .then((page) => setPosts(page.results))
-      .catch(() => setPosts([]))
+      .catch((e) => setError(e instanceof Error ? e.message : "加载群内帖子失败"))
       .finally(() => setLoading(false));
   }, [groupId]);
 
@@ -38,6 +40,16 @@ export function GroupPosts({ groupId, onExit }: { groupId: string; onExit: () =>
     return (
       <div className="group-scene-placeholder">
         <div className="skeleton" style={{ height: 120, width: "90%" }} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="group-scene-placeholder" role="alert">
+        <h3 className="placeholder-title">群内帖子加载失败</h3>
+        <p className="placeholder-desc">{error}</p>
+        <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
       </div>
     );
   }
