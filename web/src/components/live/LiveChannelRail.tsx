@@ -6,9 +6,14 @@
  *   collapsed 时**整个收成一个浮动按钮**（悬浮左上角，含返回 + 展开键，
  *   不占布局、不在左边留侧栏）。
  * - 窄屏覆盖层：只渲染封面列表（showBack=false 时无返回键，返回键在左上角）。
+ *
+ * 开播控制台（showOwnerPanel）额外提供：
+ * - 每项右侧删除按钮（onDeleteChannel）；
+ * - 底部加号键新建直播间（onCreateNewChannel）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
-import { IconBack, IconClose, IconVideo } from "../icons";
+import { IconBack, IconClose, IconPlus, IconVideo } from "../icons";
+import { ResourceImage } from "../ResourceImage";
 
 export function LiveChannelRail({
   channels,
@@ -18,6 +23,9 @@ export function LiveChannelRail({
   onToggle,
   onBack,
   showBack,
+  onDeleteChannel,
+  onCreateNewChannel,
+  deletingChannelId = null,
 }: {
   channels: LiveChannelDescriptor[];
   currentId: number;
@@ -29,6 +37,12 @@ export function LiveChannelRail({
   onBack: () => void;
   /** 是否渲染返回键（宽屏 true；窄屏 false，返回键在左上角） */
   showBack: boolean;
+  /** 每项删除按钮（仅开播控制台提供） */
+  onDeleteChannel?: (channelId: number) => void;
+  /** 底部加号键新建直播间（仅开播控制台提供） */
+  onCreateNewChannel?: () => void;
+  /** 正在删除的频道 id（该项禁用） */
+  deletingChannelId?: number | null;
 }) {
   // 收起态：整个收成一个浮动按钮（返回 + 展开），不占布局、不留侧栏
   if (collapsed) {
@@ -87,8 +101,9 @@ export function LiveChannelRail({
       <ul className="live-rail-list">
         {channels.map((ch) => {
           const active = ch.id === currentId;
+          const deleting = ch.id === deletingChannelId;
           return (
-            <li key={ch.id}>
+            <li key={ch.id} className="live-rail-item-wrap">
               <button
                 type="button"
                 className={`live-rail-item ${active ? "is-active" : ""}`}
@@ -97,17 +112,41 @@ export function LiveChannelRail({
                 aria-label={`切换到直播间 ${ch.title}`}
               >
                 <div className="live-rail-cover">
-                  <IconVideo width={18} height={18} aria-hidden="true" />
+                  {ch.cover ? (
+                    <ResourceImage src={ch.cover} alt="" className="live-rail-cover-image" />
+                  ) : (
+                    <IconVideo width={18} height={18} aria-hidden="true" />
+                  )}
                   {ch.status === "live" && (
                     <span className="live-rail-live-dot" aria-label="直播中" />
                   )}
                 </div>
                 <span className="live-rail-item-title">{ch.title}</span>
               </button>
+              {onDeleteChannel && (
+                <button
+                  type="button"
+                  className="live-rail-del-btn"
+                  onClick={() => onDeleteChannel(ch.id)}
+                  disabled={deleting}
+                  aria-label={`删除直播间 ${ch.title}`}
+                  title="删除直播间"
+                >
+                  <IconClose width={14} height={14} />
+                </button>
+              )}
             </li>
           );
         })}
       </ul>
+      {onCreateNewChannel && (
+        <div className="live-rail-create">
+          <button type="button" className="live-rail-create-btn" onClick={onCreateNewChannel}>
+            <IconPlus width={16} height={16} />
+            新建直播间
+          </button>
+        </div>
+      )}
     </nav>
   );
 }

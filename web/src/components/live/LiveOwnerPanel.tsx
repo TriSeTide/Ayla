@@ -1,38 +1,29 @@
 /**
- * LiveOwnerPanel —— 主播面板（M5-4，文档 §4.5）。
+ * LiveOwnerPanel —— 开播控制台资料与开播区（M5-4，文档 §4.5）。
  *
- * 仅 owner 渲染：推流地址复制（rtmp 服务器 + 串流密钥 + flv 备用地址）、
- * :start 开播 / :stop 下播 / 删除频道（直播中删除被后端 400 拦截，提示"请先下播"）。
- * 状态语义：srsStatus=live 才显示下播；乐观已开播但 SRS 无流时提示"等待推流信号"。
+ * 仅 owner 渲染：顶部一条紧凑的资料栏（封面缩略图 + 标题/介绍 + 保存），
+ * 开播/下播按钮放在资料区右侧；推流地址与删除频道分别移到视频下方和侧栏。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as liveApi from "../../api/live";
-import type { LiveChannelDescriptor, LiveSrsStatus } from "../../api/types";
+import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
+import type { LiveChannelDescriptor } from "../../api/types";
 import { useLiveStore } from "../../stores/live";
-import { obsServerFromRtmpUrl } from "./LiveCreate";
+import { ResourceImage } from "../ResourceImage";
 
 export function LiveOwnerPanel({
   channel,
-  srsStatus,
-  onDeleted,
 }: {
   channel: LiveChannelDescriptor;
-  srsStatus: LiveSrsStatus | null;
-  onDeleted: () => void;
 }) {
+  const [savingSettings, setSavingSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-
-  const copy = async (text: string, which: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(which);
-      setTimeout(() => setCopied(null), 1500);
-    } catch {
-      setError("复制失败，请手动选择复制");
-    }
-  };
+  const [title, setTitle] = useState(channel.title);
+  const [description, setDescription] = useState(channel.description ?? "");
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(channel.cover || null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   const run = async (action: () => Promise<LiveChannelDescriptor>) => {
     setBusy(true);
@@ -48,100 +39,123 @@ export function LiveOwnerPanel({
     }
   };
 
-  const handleDelete = async () => {
-    setBusy(true);
+  const saveSettings = async () => {
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setError("标题不能为空");
+      return;
+    }
+    setSavingSettings(true);
     setError(null);
     try {
-      await liveApi.deleteLiveChannel(channel.id);
-      useLiveStore.getState().removeChannel(channel.id);
-      onDeleted();
+      let cover = channel.cover ?? "";
+      if (coverFile) {
+        const uploaded = await uploadMediaFile(coverFile, "image");
+        cover = mediaContentUrl(uploaded.media_id);
+      }
+      const updated = await liveApi.updateLiveChannel(channel.id, {
+        title: nextTitle,
+        description: description.trim(),
+        cover,
+      });
+      useLiveStore.getState().setCurrentChannel(updated);
+      useLiveStore.getState().upsertChannel(updated);
+      setCoverFile(null);
+      setCoverPreview(updated.cover || null);
     } catch (e) {
-      // 直播中删除 → 400「直播中禁止删除，请先 :stop」原样展示
-      setError(e instanceof Error ? e.message : "删除失败");
+      setError(e instanceof Error ? e.message : "保存直播间资料失败");
     } finally {
-      setBusy(false);
+      setSavingSettings(false);
     }
   };
 
-  const waitingSignal = channel.status === "live" && srsStatus !== "live";
-
   return (
     <div className="live-owner-panel">
-      <div className="live-owner-title">主播面板</div>
-
-      {channel.rtmp_url && channel.stream_key && (
-        <div className="live-owner-stream">
-          <div className="live-copy-row">
-            <span className="live-copy-label">服务器</span>
-            <code className="live-copy-value">
-              {obsServerFromRtmpUrl(channel.rtmp_url)}
-            </code>
-            <button
-              type="button"
-              className="msg-action-btn"
-              onClick={() => void copy(obsServerFromRtmpUrl(channel.rtmp_url!), "server")}
-            >
-              {copied === "server" ? "已复制" : "复制"}
-            </button>
-          </div>
-          <div className="live-copy-row">
-            <span className="live-copy-label">串流密钥</span>
-            <code className="live-copy-value">{channel.stream_key}</code>
-            <button
-              type="button"
-              className="msg-action-btn"
-              onClick={() => void copy(channel.stream_key!, "key")}
-            >
-              {copied === "key" ? "已复制" : "复制"}
-            </button>
-          </div>
-          <div className="live-copy-row">
-            <span className="live-copy-label">FLV 地址</span>
-            <code className="live-copy-value">{channel.flv_url}</code>
-            <button
-              type="button"
-              className="msg-action-btn"
-              onClick={() => void copy(channel.flv_url, "flv")}
-            >
-              {copied === "flv" ? "已复制" : "复制"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="live-owner-actions">
-        {channel.status !== "live" ? (
-          <button
-            type="button"
-            className="btn btn-glow"
-            disabled={busy}
-            onClick={() => void run(() => liveApi.startLiveChannel(channel.id))}
-          >
-            开播
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            onClick={() => void run(() => liveApi.stopLiveChannel(channel.id))}
-          >
-            下播
-          </button>
-        )}
+      <div className="live-owner-settings">
+        {/* 封面缩略图（点击更换） */}
         <button
           type="button"
-          className="msg-action-btn live-danger"
-          disabled={busy}
-          onClick={() => void handleDelete()}
+          className="live-cover-picker"
+          onClick={() => coverInputRef.current?.click()}
+          aria-label={coverPreview ? "更换直播间封面" : "设置直播间封面"}
         >
-          删除频道
+          {coverPreview ? (
+            <ResourceImage src={coverPreview} alt="当前直播间封面" className="live-cover-preview-img" />
+          ) : (
+            <span className="live-cover-empty">封面</span>
+          )}
         </button>
+        <input
+          ref={coverInputRef}
+          className="visually-hidden"
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const invalid = validateAvatarFile(file);
+            if (invalid) {
+              setError(invalid);
+              return;
+            }
+            setError(null);
+            setCoverFile(file);
+            setCoverPreview(URL.createObjectURL(file));
+          }}
+        />
+
+        {/* 标题 + 介绍（同一行） */}
+        <div className="live-owner-fields">
+          <input
+            className="field live-title-input"
+            value={title}
+            maxLength={128}
+            placeholder="直播间标题"
+            aria-label="直播间标题"
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <input
+            className="field live-desc-input"
+            value={description}
+            maxLength={2000}
+            placeholder="直播间介绍（可选）"
+            aria-label="直播间介绍"
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        {/* 按钮组：开播/下播 + 保存 */}
+        <div className="live-owner-start">
+          {channel.status !== "live" ? (
+            <button
+              type="button"
+              className="btn btn-glow live-owner-start-btn"
+              disabled={busy}
+              onClick={() => void run(() => liveApi.startLiveChannel(channel.id))}
+            >
+              开播
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn live-owner-start-btn"
+              disabled={busy}
+              onClick={() => void run(() => liveApi.stopLiveChannel(channel.id))}
+            >
+              下播
+            </button>
+          )}
+          <button
+            type="button"
+            className="msg-action-btn"
+            disabled={savingSettings || busy}
+            onClick={() => void saveSettings()}
+          >
+            {savingSettings ? "保存中…" : "保存"}
+          </button>
+        </div>
       </div>
 
-      {waitingSignal && (
-        <div className="live-owner-waiting">已标记开播，等待推流信号…</div>
-      )}
       {error && <div className="live-form-error">{error}</div>}
     </div>
   );

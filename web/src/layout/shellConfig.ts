@@ -67,7 +67,10 @@ export function isPrivateChatRoute(pathname: string): boolean {
  * 宽屏：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏遮挡顶栏，布局文档 §3.4）。
  */
 export function isLiveRoomRoute(pathname: string): boolean {
-  return matchPath({ path: "/live/:channelId", end: true }, pathname) != null;
+  return (
+    matchPath({ path: "/live/:channelId", end: true }, pathname) != null ||
+    matchPath({ path: "/live/start/:channelId", end: true }, pathname) != null
+  );
 }
 
 /**

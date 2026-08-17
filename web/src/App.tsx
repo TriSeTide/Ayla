@@ -18,6 +18,7 @@ import { HomePage } from "./pages/HomePage";
 import { GamesHubPage } from "./pages/GamesHubPage";
 import { LiveHubPage } from "./pages/LiveHubPage";
 import { LiveRoomPage } from "./pages/LiveRoomPage";
+import { LiveStudioPage } from "./pages/LiveStudioPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MessagesPage } from "./pages/MessagesPage";
 import { PostDetailPage } from "./pages/PostDetailPage";
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/home" element={<HomePage />} />
         <Route path="/voice" element={<VoiceHubPage />} />
         <Route path="/live" element={<LiveHubPage />} />
+        <Route path="/live/start/:channelId" element={<LiveStudioPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
         <Route path="/posts" element={<PostsHubPage />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />

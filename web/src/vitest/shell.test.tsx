@@ -8,6 +8,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as liveApi from "../api/live";
 import { AppShell } from "../layout/AppShell";
 import {
   isLiveRoomRoute,
@@ -46,6 +47,7 @@ function renderShell(path: string, narrow: boolean) {
           <Route path="/voice" element={<div>语音内容</div>} />
           <Route path="/live" element={<div>直播内容</div>} />
           <Route path="/live/:channelId" element={<div>直播间内容</div>} />
+          <Route path="/live/start/:channelId" element={<div>开播控制台</div>} />
           <Route path="/posts" element={<div>帖子内容</div>} />
           <Route path="/games" element={<div>桌游内容</div>} />
           <Route path="/messages" element={<div>消息内容</div>} />
@@ -79,6 +81,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /* ---------- 纯函数：模块归属 ---------- */
@@ -135,6 +138,9 @@ describe("resolveFabAction", () => {
 describe("isLiveRoomRoute", () => {
   it("直播间路由命中，大厅与其它路由不命中", () => {
     expect(isLiveRoomRoute("/live/42")).toBe(true);
+    expect(isLiveRoomRoute("/live/start/42")).toBe(true);
+    // /live/start 无独立新建界面，会被 /live/:channelId 兜底捕获（channelId="start"）
+    expect(isLiveRoomRoute("/live/start")).toBe(true);
     expect(isLiveRoomRoute("/live")).toBe(false);
     expect(isLiveRoomRoute("/home")).toBe(false);
   });
@@ -202,11 +208,32 @@ describe("CreateFab", () => {
     expect(screen.queryByRole("menuitem", { name: "创建群聊" })).not.toBeInTheDocument();
   });
 
-  it("群内开播（F4 已接线）点加号直接打开创建直播间表单", async () => {
+  it("群内开播点加号打开选择器，添加新直播间直接创建并进入开播控制台", async () => {
+    vi.spyOn(liveApi, "listLiveChannels").mockResolvedValue([]);
+    vi.spyOn(liveApi, "createLiveChannel").mockResolvedValue({
+      id: 9,
+      title: "新直播间",
+      status: "idle",
+      owner_id: "u1",
+      owner_nickname: "我",
+      is_owner: true,
+      visibility: "group",
+      group: "g1",
+      group_name: "测试群",
+      stream_key: null,
+      rtmp_url: null,
+      hls_url: "http://x/hls.m3u8",
+      flv_url: "http://x/live.flv",
+      started_at: null,
+      ended_at: null,
+      created_at: "2026-08-18T00:00:00Z",
+    });
     renderShell("/group/g1/live", true);
     fireEvent.click(screen.getByRole("button", { name: "群内开播" }));
-    // F4 起 group-live 动作渲染 LiveCreate 真表单（非 hint 提示）
-    expect(screen.getByPlaceholderText("给直播间起个标题")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("选择一个直播间开始")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加新的直播间" }));
+    await waitFor(() => expect(screen.getByText("开播控制台")).toBeInTheDocument());
+    expect(liveApi.createLiveChannel).toHaveBeenCalledWith("新直播间", "g1");
   });
 
   it("主页 FAB 点加号直接打开建群对话框（R-F3 已接线，无面板）", async () => {

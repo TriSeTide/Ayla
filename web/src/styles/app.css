@@ -2169,11 +2169,6 @@
   gap: var(--sp-2);
 }
 
-.live-owner-waiting {
-  color: var(--warning);
-  font-size: 13px;
-}
-
 .live-danger {
   color: var(--destructive);
 }

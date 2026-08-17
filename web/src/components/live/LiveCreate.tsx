@@ -5,8 +5,9 @@
  * 文案明确"此信息仅本次显示"（与后端契约一致：此后仅详情页 owner 可见）。
  * stream_key 是推流指纹：不打日志、不持久化、仅内存展示。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as liveApi from "../../api/live";
+import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
 import type { LiveChannelDescriptor } from "../../api/types";
 
 /** 从 rtmp_url 拆出 OBS 的"服务器"部分（去掉末尾 /<stream_key>） */
@@ -24,6 +25,10 @@ export function LiveCreate({
   group?: string | null;
 }) {
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** 创建成功的频道（一次性回显推流信息） */
@@ -39,7 +44,15 @@ export function LiveCreate({
     setCreating(true);
     setError(null);
     try {
-      const channel = await liveApi.createLiveChannel(trimmed, group);
+      let cover = "";
+      if (coverFile) {
+        const uploaded = await uploadMediaFile(coverFile, "image");
+        cover = mediaContentUrl(uploaded.media_id);
+      }
+      const channel = await liveApi.createLiveChannel(trimmed, group, {
+        description: description.trim(),
+        cover,
+      });
       setCreated(channel);
       setTitle("");
       onCreated(channel);
@@ -63,23 +76,57 @@ export function LiveCreate({
   return (
     <div className="live-create">
       <div className="live-create-form">
-        <input
-          className="live-create-input"
-          placeholder="给直播间起个标题"
-          value={title}
-          maxLength={128}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void submit();
-          }}
-        />
+        <label className="live-field-label">
+          标题
+          <input
+            className="live-create-input"
+            placeholder="给直播间起个标题"
+            value={title}
+            maxLength={128}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label className="live-field-label">
+          介绍
+          <textarea
+            className="live-create-input live-create-textarea"
+            placeholder="告诉观众这场直播聊什么（可选）"
+            value={description}
+            maxLength={2000}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </label>
+        <div className="live-cover-field">
+          <span className="live-field-label">封面</span>
+          <button type="button" className="live-cover-picker" onClick={() => coverInputRef.current?.click()}>
+            {coverPreview ? <img src={coverPreview} alt="直播间封面预览" /> : <span>选择 16:9 封面图片</span>}
+          </button>
+          <input
+            ref={coverInputRef}
+            className="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const invalid = validateAvatarFile(file);
+              if (invalid) {
+                setError(invalid);
+                return;
+              }
+              setError(null);
+              setCoverFile(file);
+              setCoverPreview(URL.createObjectURL(file));
+            }}
+          />
+        </div>
         <button
           type="button"
           className="btn btn-glow"
           disabled={creating}
           onClick={() => void submit()}
         >
-          {creating ? "创建中…" : "开播"}
+          {creating ? "准备中…" : "开播"}
         </button>
       </div>
       {error && <div className="live-form-error">{error}</div>}

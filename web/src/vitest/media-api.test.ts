@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { uploadMediaFile } from "../api/media";
+import { AVATAR_MAX_BYTES, uploadMediaFile, validateAvatarFile } from "../api/media";
 import * as client from "../api/client";
 
 describe("uploadMediaFile", () => {
@@ -27,5 +27,24 @@ describe("uploadMediaFile", () => {
     const file = new File(["hello"], "a.png", { type: "image/png" });
     await expect(uploadMediaFile(file, "image")).rejects.toThrow("文件超过允许大小");
     expect(request).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("validateAvatarFile", () => {
+  it("合法位图通过", () => {
+    expect(validateAvatarFile(new File(["x"], "a.png", { type: "image/png" }))).toBeNull();
+    expect(validateAvatarFile(new File(["x"], "a.jpg", { type: "image/jpeg" }))).toBeNull();
+    expect(validateAvatarFile(new File(["x"], "a.webp", { type: "image/webp" }))).toBeNull();
+  });
+
+  it("非位图类型拒绝", () => {
+    expect(validateAvatarFile(new File(["x"], "a.txt", { type: "text/plain" }))).toBe(
+      "仅支持 PNG/JPEG/GIF/WebP 图片",
+    );
+  });
+
+  it("超过 10MB 拒绝", () => {
+    const big = new File([new Uint8Array(AVATAR_MAX_BYTES + 1)], "big.png", { type: "image/png" });
+    expect(validateAvatarFile(big)).toBe("图片超过 10MB 大小限制");
   });
 });

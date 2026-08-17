@@ -5,11 +5,13 @@
  * - LiveChannelRail 窄屏覆盖层：showBack=false 无返回键（返回键在左上角）；
  * - LiveHall 卡片：封面占位 + 状态徽章 + 来源标识 + 点击进入。
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LiveChannelDescriptor } from "../api/types";
 import { LiveChannelRail } from "../components/live/LiveChannelRail";
 import { LiveHall } from "../components/live/LiveHall";
+import { LiveStartSheet } from "../components/live/LiveStartSheet";
+import * as liveApi from "../api/live";
 
 function liveCh(id: number, title: string, status: LiveChannelDescriptor["status"] = "live"): LiveChannelDescriptor {
   return {
@@ -175,6 +177,24 @@ describe("LiveChannelRail 窄屏覆盖层", () => {
   });
 });
 
+describe("LiveStartSheet 开播选择器", () => {
+  it("只展示自己的直播间，选择后进入开播控制台", async () => {
+    const mine = { ...liveCh(1, "我的直播间"), is_owner: true };
+    const other = { ...liveCh(2, "别人的直播间"), is_owner: false };
+    const request = vi.spyOn(liveApi, "listLiveChannels").mockResolvedValue([mine, other]);
+    const onStart = vi.fn();
+    const onCreateNew = vi.fn();
+    render(<LiveStartSheet onStart={onStart} onCreateNew={onCreateNew} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /我的直播间/ })).toBeInTheDocument());
+    screen.getByRole("button", { name: "+ 添加新的直播间" }).click();
+    expect(onCreateNew).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /别人的直播间/ })).not.toBeInTheDocument();
+    screen.getByRole("button", { name: /我的直播间/ }).click();
+    expect(onStart).toHaveBeenCalledWith(mine);
+    request.mockRestore();
+  });
+});
+
 describe("LiveHall 大厅卡片封面占位", () => {
   it("卡片渲染封面占位 + 状态徽章 + 来源标识 + 主播名", () => {
     const onEnter = vi.fn();
@@ -215,5 +235,62 @@ describe("LiveHall 大厅卡片封面占位", () => {
     // 后端带的主播名优先；ownerNames 兜底不生效
     expect(screen.getByText("主播小樱")).toBeInTheDocument();
     expect(screen.queryByText("懒拉名字")).not.toBeInTheDocument();
+  });
+});
+
+describe("LiveChannelRail 开播控制台扩展（删除 + 新建）", () => {
+  it("提供 onDeleteChannel 时每项渲染删除按钮，点击调回调且不影响切换", () => {
+    const onSelect = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <LiveChannelRail
+        channels={[liveCh(1, "第一场直播")]}
+        currentId={1}
+        onSelect={onSelect}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+        onDeleteChannel={onDelete}
+      />,
+    );
+    const del = screen.getByRole("button", { name: "删除直播间 第一场直播" });
+    del.click();
+    expect(onDelete).toHaveBeenCalledWith(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("提供 onCreateNewChannel 时底部渲染加号键，点击调回调", () => {
+    const onCreateNew = vi.fn();
+    render(
+      <LiveChannelRail
+        channels={channels}
+        currentId={1}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+        onCreateNewChannel={onCreateNew}
+      />,
+    );
+    screen.getByRole("button", { name: "新建直播间" }).click();
+    expect(onCreateNew).toHaveBeenCalledTimes(1);
+  });
+
+  it("未提供删除/新建回调时不渲染对应按钮（普通观看页侧栏）", () => {
+    render(
+      <LiveChannelRail
+        channels={channels}
+        currentId={1}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "新建直播间" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /删除直播间/ })).not.toBeInTheDocument();
   });
 });

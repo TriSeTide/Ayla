@@ -10,10 +10,11 @@
  */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import * as liveApi from "../api/live";
 import { GameRoomCreate } from "../components/boardgame/GameRoomCreate";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { IconPlus } from "../components/icons";
-import { LiveCreate } from "../components/live/LiveCreate";
+import { LiveStartSheet } from "../components/live/LiveStartSheet";
 import { PostEditor } from "../components/posts/PostEditor";
 import { VoiceChannelCreate } from "../components/voice/VoiceChannelCreate";
 import type { FabAction } from "./shellConfig";
@@ -21,6 +22,8 @@ import { CreateSheet } from "./CreateSheet";
 
 export function CreateFab({ action }: { action: FabAction }) {
   const [open, setOpen] = useState(false);
+  const [creatingLive, setCreatingLive] = useState(false);
+  const [liveCreateError, setLiveCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   // 场景切换（action 变化）时收起浮层
@@ -28,13 +31,24 @@ export function CreateFab({ action }: { action: FabAction }) {
     setOpen(false);
   }, [action.key]);
 
-  // 直播创建（F4 已落地）：群内归属该群，一级 tab 公开
-  const handleLiveCreated = (channel: { id: number }) => {
+  // 选择/创建直播间后统一进入主播控制台；群内入口也不丢失主播控制能力。
+  const handleLiveStarted = (channel: { id: number }) => {
     setOpen(false);
-    if (action.groupId) {
-      navigate(`/group/${action.groupId}/live`);
-    } else {
-      navigate(`/live/${channel.id}`);
+    navigate(`/live/start/${channel.id}`);
+  };
+
+  // “添加新的直播间”：直接创建默认直播间并进入开播控制台，不经过任何新建界面。
+  const handleCreateNewLive = async () => {
+    setCreatingLive(true);
+    setLiveCreateError(null);
+    try {
+      const created = await liveApi.createLiveChannel("新直播间", action.groupId);
+      setOpen(false);
+      navigate(`/live/start/${created.id}`);
+    } catch (e) {
+      setLiveCreateError(e instanceof Error ? e.message : "创建直播间失败");
+    } finally {
+      setCreatingLive(false);
     }
   };
 
@@ -66,8 +80,13 @@ export function CreateFab({ action }: { action: FabAction }) {
         </CreateSheet>
       )}
       {open && isLiveCreate && (
-        <CreateSheet title={action.label} onClose={() => setOpen(false)}>
-          <LiveCreate onCreated={handleLiveCreated} group={action.groupId} />
+        <CreateSheet title="开始直播" onClose={() => setOpen(false)}>
+          <LiveStartSheet
+            onStart={handleLiveStarted}
+            onCreateNew={() => void handleCreateNewLive()}
+            creatingNew={creatingLive}
+            createError={liveCreateError}
+          />
         </CreateSheet>
       )}
       {open && isPostCreate && (

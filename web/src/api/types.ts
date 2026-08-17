@@ -417,6 +417,9 @@ export type LiveChannelStatus = "idle" | "live" | "ended";
 export interface LiveChannelDescriptor {
   id: number;
   title: string;
+  description?: string;
+  /** 内部媒体 content URL；为空时使用默认封面占位 */
+  cover?: string;
   /** 乐观标记（应用侧）；真实在播判定以 GET /status/ 为准 */
   status: LiveChannelStatus;
   owner_id: string;

@@ -97,7 +97,6 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
       channels={channels}
       onSelect={goTo}
       onBack={onExit}
-      onDeleted={onExit}
       inputEntered // 群内子界面无底栏下滑动画，输入框直接显示
     />
   );

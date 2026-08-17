@@ -165,6 +165,31 @@ export async function apiRequest<T>(
   return (data ?? null) as T;
 }
 
+/**
+ * 读取需要 Bearer 鉴权的二进制资源（例如媒体 content）。
+ * 不使用 <img src> 直接加载：浏览器不会为该请求自动附加 Authorization。
+ */
+export async function apiRequestBlob(path: string): Promise<Blob> {
+  let response = await rawRequest(path, {});
+  if (response.status === 401) {
+    const ok = await doRefresh();
+    if (ok) response = await rawRequest(path, {});
+    else {
+      handleSessionExpired();
+      throw new ApiError(401, "登录已过期，请重新登录");
+    }
+  }
+  if (!response.ok) {
+    const body = await parseBody(response);
+    throw new ApiError(
+      response.status,
+      normalizeErrorBody(body, `请求失败（${response.status}）`),
+      body,
+    );
+  }
+  return response.blob();
+}
+
 /** 无鉴权裸请求（健康检查等，不做 JSON 归一） */
 export async function apiRequestRaw(path: string): Promise<Response> {
   return fetch(`${API_BASE_URL}${API_PREFIX}${path}`);

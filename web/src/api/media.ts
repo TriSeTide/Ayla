@@ -47,6 +47,25 @@ interface UploadCompleteResult {
   descriptor: MediaDescriptor;
 }
 
+/* ---------- 头像本地校验（M5-2.1） ---------- */
+
+/** 头像大小上限（与后端 MEDIA_MAX_IMAGE_BYTES=10MB 一致） */
+export const AVATAR_MAX_BYTES = 10 * 1024 * 1024;
+
+/** 允许的头像位图类型（与后端 media/services ALLOWED_MIME["image"] 对齐） */
+const AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/**
+ * 选择阶段本地校验：类型（位图）+ 大小（≤10MB）。
+ * 合法返回 null，否则返回可展示的错误文案；服务端三步上传仍会二次校验。
+ */
+export function validateAvatarFile(file: File): string | null {
+  if (!AVATAR_TYPES.has(file.type)) return "仅支持 PNG/JPEG/GIF/WebP 图片";
+  if (file.size <= 0) return "图片内容为空";
+  if (file.size > AVATAR_MAX_BYTES) return "图片超过 10MB 大小限制";
+  return null;
+}
+
 /** 三步受控上传；失败会抛出并由调用方保留原输入，不伪造消息发送成功。 */
 export async function uploadMediaFile(file: File, kind: MediaKind): Promise<UploadCompleteResult> {
   const session = await apiRequest<UploadSession>("/media/uploads", {

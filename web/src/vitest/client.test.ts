@@ -2,7 +2,7 @@
  * client.ts 测试：错误归一 + 401 刷新重放 + 并发互斥。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type ApiError, apiRequest, normalizeErrorBody } from "../api/client";
+import { type ApiError, apiRequest, apiRequestBlob, normalizeErrorBody } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
 type FetchCall = [string, RequestInit?];
@@ -55,6 +55,17 @@ describe("apiRequest", () => {
     expect(data).toEqual({ id: "1", username: "a" });
     const [url, init] = fetchMock.mock.calls[0] as FetchCall;
     expect(url).toBe("/api/v1/me/");
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer access-1");
+  });
+
+  it("二进制媒体请求携带 Authorization 并解析 Blob", async () => {
+    const payload = new Blob(["image-bytes"], { type: "image/png" });
+    fetchMock.mockResolvedValueOnce(new Response(payload, { status: 200 }));
+
+    const result = await apiRequestBlob("/media/m-1/content");
+    expect(result.type).toBe("text/plain;charset=utf-8");
+    expect(result.size).toBe(13);
+    const [, init] = fetchMock.mock.calls[0] as FetchCall;
     expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer access-1");
   });
 

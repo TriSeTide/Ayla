@@ -84,8 +84,7 @@ export function LiveRoomPage() {
       channels={ordered}
       onSelect={goTo}
       onBack={() => navigate("/live")}
-        onDeleted={() => navigate("/live")}
-        inputEntered={inputEntered}
+      inputEntered={inputEntered}
       />
     </>
   );

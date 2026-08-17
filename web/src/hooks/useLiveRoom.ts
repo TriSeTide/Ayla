@@ -26,7 +26,12 @@ export interface UseLiveRoomResult {
   videoRef: React.MutableRefObject<HTMLVideoElement | null>;
 }
 
-export function useLiveRoom(channelId: number): UseLiveRoomResult {
+export function useLiveRoom(
+  channelId: number,
+  options: { activityRoute?: string; keepLiveActivity?: boolean } = {},
+): UseLiveRoomResult {
+  const activityRoute = options.activityRoute ?? `/live/${channelId}`;
+  const keepLiveActivity = options.keepLiveActivity ?? false;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
@@ -83,7 +88,7 @@ export function useLiveRoom(channelId: number): UseLiveRoomResult {
         useSessionActivityStore.getState().upsert({
           kind: "live",
           sessionId: String(channel.id),
-          sourceRoute: `/live/${channel.id}`,
+          sourceRoute: activityRoute,
           owner: channel.owner_id ?? null,
           title: channel.title,
           status: "connecting",
@@ -99,7 +104,10 @@ export function useLiveRoom(channelId: number): UseLiveRoomResult {
         useLiveStore.getState().mergeDanmakuHistory(history);
 
         liveWS.connect(channelId);
-        useSessionActivityStore.getState().setStatus("live", status.status === "live" ? "connected" : "ended");
+        useSessionActivityStore.getState().setStatus(
+          "live",
+          keepLiveActivity || status.status === "live" ? "connected" : "ended",
+        );
         setLoading(false);
       } catch (e) {
         if (!aliveRef.current) return;
@@ -119,10 +127,11 @@ export function useLiveRoom(channelId: number): UseLiveRoomResult {
       liveWS.onClosedByServer = null;
       liveWS.onReconnected = null;
       liveWS.disconnect();
+      const shouldKeepActivity = keepLiveActivity && useLiveStore.getState().current.channel?.status === "live";
       useLiveStore.getState().clearCurrent();
-      useSessionActivityStore.getState().clear("live", "idle");
+      if (!shouldKeepActivity) useSessionActivityStore.getState().clear("live", "idle");
     };
-  }, [channelId]);
+  }, [activityRoute, channelId, keepLiveActivity]);
 
   // ---------- 状态轮询（15s，页面隐藏暂停） ----------
   useEffect(() => {

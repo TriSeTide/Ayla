@@ -9,6 +9,7 @@
  */
 import type { LiveChannelDescriptor } from "../../api/types";
 import { IconVideo } from "../icons";
+import { ResourceImage } from "../ResourceImage";
 
 function statusBadge(status: LiveChannelDescriptor["status"]): {
   className: string;
@@ -65,7 +66,11 @@ export function LiveHall({
             onClick={() => onEnter(ch.id)}
           >
             <div className={`live-card-cover ${ch.status === "live" ? "is-live" : ""}`}>
-              <IconVideo width={28} height={28} aria-hidden="true" />
+              {ch.cover ? (
+                <ResourceImage src={ch.cover} alt="" className="live-card-cover-image" />
+              ) : (
+                <IconVideo width={28} height={28} aria-hidden="true" />
+              )}
               <span className="live-card-cover-badge">
                 <span className={badge.className}>{badge.label}</span>
                 {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
