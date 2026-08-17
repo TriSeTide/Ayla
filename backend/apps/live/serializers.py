@@ -32,6 +32,8 @@ class LiveChannelSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "title",
+            "description",
+            "cover",
             "status",
             "visibility",
             "group",

@@ -421,6 +421,16 @@
   box-shadow: var(--glow-shadow);
 }
 
+/* 语音和直播同时存在时固定分层，永不互相覆盖。 */
+.session-activity-indicator.is-live {
+  top: 136px;
+}
+
+.session-activity-indicator.is-live .session-activity-icon {
+  background: var(--ice-300);
+  color: var(--indigo-700);
+}
+
 .session-activity-icon {
   width: 34px;
   height: 34px;
@@ -545,6 +555,10 @@
     right: 16px;
     min-width: 0;
     max-width: calc(100vw - 32px);
+  }
+
+  .session-activity-indicator.is-live {
+    top: calc(56px + env(safe-area-inset-top, 0px) + 112px);
   }
 
   .create-fab-wrap {

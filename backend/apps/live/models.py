@@ -28,6 +28,9 @@ class LiveChannel(models.Model):
 
     id = models.AutoField(primary_key=True)
     title = models.CharField("直播间标题", max_length=128)
+    description = models.TextField("直播间介绍", blank=True, default="")
+    # 内部媒体 content URL；空串表示使用默认占位封面。
+    cover = models.CharField("直播间封面", max_length=512, blank=True, default="")
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         related_name="live_channels",

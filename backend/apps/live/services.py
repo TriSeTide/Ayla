@@ -50,7 +50,12 @@ def _resolve_visibility(group, visibility: str | None) -> str:
 
 
 def create_channel(
-    user, title: str, group=None, visibility: str | None = None
+    user,
+    title: str,
+    group=None,
+    visibility: str | None = None,
+    description: str = "",
+    cover: str = "",
 ) -> LiveChannel:
     """创建直播频道：生成唯一 stream_key（DB 唯一索引兜底，碰撞重试）。
 
@@ -59,6 +64,10 @@ def create_channel(
     title = (title or "").strip()
     if not title:
         raise ValueError("title 不能为空")
+    description = (description or "").strip()
+    if len(description) > 2000:
+        raise ValueError("description 不能超过 2000 字")
+    cover = (cover or "").strip()
     if group is not None:
         if str(getattr(group, "type", "")) != "group":
             raise ValueError("group 必须是群聊会话")
@@ -68,6 +77,8 @@ def create_channel(
         if not LiveChannel.objects.filter(stream_key=key).exists():
             return LiveChannel.objects.create(
                 title=title,
+                description=description,
+                cover=cover,
                 owner=user,
                 stream_key=key,
                 group=group,

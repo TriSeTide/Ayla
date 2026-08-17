@@ -21,6 +21,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.visibility import can_join, can_view, visible_queryset
+from apps.media.models import MediaObject
+from apps.media.services import can_access_media, parse_avatar_media_id
 
 from . import services
 from .models import Danmaku, LiveChannel
@@ -63,6 +65,24 @@ def _bad_request(msg):
     return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def _validate_cover(user, value: str) -> str | None:
+    """封面只允许引用当前用户可访问的已完成图片媒体。"""
+    value = (value or "").strip()
+    if not value:
+        return None
+    media_id = parse_avatar_media_id(value)
+    if media_id is None:
+        return "cover 必须是有效的媒体地址"
+    media = MediaObject.objects.filter(media_id=media_id, status=MediaObject.STATUS_READY).first()
+    if media is None:
+        return "封面媒体不存在或尚未准备好"
+    if media.kind != MediaObject.KIND_IMAGE:
+        return "封面必须是图片"
+    if not can_access_media(user, media):
+        return "无权使用该媒体作为封面"
+    return None
+
+
 def _channel_serializer(ch, request):
     return LiveChannelSerializer(ch, context={"request": request}).data
 
@@ -87,9 +107,19 @@ class ChannelListView(APIView):
         if group_err:
             return _bad_request(group_err)
         visibility = request.data.get("visibility") or None
+        description = request.data.get("description") or ""
+        cover = request.data.get("cover") or ""
+        cover_error = _validate_cover(request.user, cover)
+        if cover_error:
+            return _bad_request(cover_error)
         try:
             ch = services.create_channel(
-                request.user, title, group=group, visibility=visibility
+                request.user,
+                title,
+                group=group,
+                visibility=visibility,
+                description=description,
+                cover=cover,
             )
         except ValueError as exc:
             return _bad_request(str(exc))
@@ -100,7 +130,7 @@ class ChannelListView(APIView):
 
 
 class ChannelDetailView(APIView):
-    """GET/DELETE /api/v1/live/channels/<id>/ —— 详情 / 删除（仅 owner；直播中禁止）。"""
+    """GET/PATCH/DELETE 频道详情；PATCH 仅 owner 可修改资料。"""
 
     permission_classes = [IsAuthenticated]
 
@@ -110,6 +140,39 @@ class ChannelDetailView(APIView):
             return _not_found()
         if not can_view(request.user, ch):
             return _forbidden("无权查看该直播间")
+        return Response(_channel_serializer(ch, request))
+
+    def patch(self, request, channel_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return _not_found()
+        if not services.can_manage_channel(ch, request.user):
+            return _forbidden("仅频道 owner 可修改资料")
+
+        update_fields = []
+        if "title" in request.data:
+            title = (request.data.get("title") or "").strip()
+            if not title:
+                return _bad_request("title 不能为空")
+            if len(title) > 128:
+                return _bad_request("title 不能超过 128 字")
+            ch.title = title
+            update_fields.append("title")
+        if "description" in request.data:
+            description = (request.data.get("description") or "").strip()
+            if len(description) > 2000:
+                return _bad_request("description 不能超过 2000 字")
+            ch.description = description
+            update_fields.append("description")
+        if "cover" in request.data:
+            cover = request.data.get("cover") or ""
+            cover_error = _validate_cover(request.user, cover)
+            if cover_error:
+                return _bad_request(cover_error)
+            ch.cover = cover.strip()
+            update_fields.append("cover")
+        if update_fields:
+            ch.save(update_fields=update_fields)
         return Response(_channel_serializer(ch, request))
 
     def delete(self, request, channel_id):
