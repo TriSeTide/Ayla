@@ -40,6 +40,7 @@ export function WideMessagesSidebar({
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [friendsError, setFriendsError] = useState<string | null>(null);
 
   // 会话列表为空时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
   useEffect(() => {
@@ -56,7 +57,7 @@ export function WideMessagesSidebar({
     import("../../api/elysia")
       .then(({ getElysiaProfile }) => getElysiaProfile())
       .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch(() => {});
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "加载爱莉资料失败"));
   }, []);
 
   // 打开与某用户的私聊会话（好友/爱莉点击 → 选中会话）
@@ -72,13 +73,14 @@ export function WideMessagesSidebar({
 
   // 好友 tab 数据
   const loadFriendsTab = useCallback(() => {
-    usersApi.listFriends().then(setFriendList).catch(() => {});
-    usersApi.listFriendRequests().then((l) => setFriendRequests(l.filter((r) => r.status === "pending"))).catch(() => {});
-    chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch(() => {});
+    setFriendsError(null);
+    usersApi.listFriends().then(setFriendList).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友失败"));
+    usersApi.listFriendRequests().then((l) => setFriendRequests(l.filter((r) => r.status === "pending"))).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友申请失败"));
+    chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载群邀请失败"));
     const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
-    Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id).catch(() => [] as GroupJoinRequest[])))
+    Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
       .then((lists) => setJoinRequests(lists.flat().filter((r) => r.status === "pending")))
-      .catch(() => {});
+      .catch((e) => setFriendsError(e instanceof Error ? e.message : "加载入群申请失败"));
   }, [conversations]);
 
   useEffect(() => {
@@ -118,6 +120,7 @@ export function WideMessagesSidebar({
     <aside className="wide-messages-sidebar" aria-label="消息列表">
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {openError && <div className="chat-notice" role="alert">{openError}</div>}
+      {friendsError && <div className="chat-notice" role="alert">{friendsError}</div>}
       {actionError && (
         <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
           {actionError}（点击关闭）
