@@ -62,13 +62,13 @@ describe("chat store", () => {
     expect(st.conversations.find((c) => c.id === "1")?.unread_count).toBe(0);
   });
 
-  it("openConversation 清当前会话未读并记录 activeId", () => {
+  it("openConversation 只记录 activeId，不提前清除未读", () => {
     const s = useChatStore.getState();
     s.setConversations([conv("1", 5), conv("2", 3)]);
     s.openConversation("1");
     const st = useChatStore.getState();
     expect(st.activeConversationId).toBe("1");
-    expect(st.conversations.find((c) => c.id === "1")?.unread_count).toBe(0);
+    expect(st.conversations.find((c) => c.id === "1")?.unread_count).toBe(5);
     expect(st.conversations.find((c) => c.id === "2")?.unread_count).toBe(3);
   });
 

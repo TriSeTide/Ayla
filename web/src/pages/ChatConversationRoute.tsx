@@ -12,6 +12,7 @@ import * as chatApi from "../api/chat";
 import type { ConversationType } from "../api/types";
 import { useChatStore } from "../stores/chat";
 import { PrivateChatPage } from "./PrivateChatPage";
+import { AsyncState } from "../components/AsyncState";
 
 export function ChatConversationRoute() {
   const { conversationId } = useParams<{ conversationId: string }>();
@@ -23,11 +24,12 @@ export function ChatConversationRoute() {
   );
 
   const [fetchedType, setFetchedType] = useState<ConversationType | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     setFetchedType(null);
-    setFailed(false);
+    setError(null);
     if (!conversationId || cachedType) return;
     let cancelled = false;
     chatApi
@@ -36,26 +38,31 @@ export function ChatConversationRoute() {
         if (!cancelled) setFetchedType(c.type);
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) setError("加载会话失败，请重试");
       });
     return () => {
       cancelled = true;
     };
-  }, [conversationId, cachedType]);
+  }, [conversationId, cachedType, retryToken]);
 
   const type = cachedType ?? fetchedType;
 
   if (type === "group" && conversationId) {
     return <Navigate to={`/group/${conversationId}`} replace />;
   }
-  if (type === "private" || failed) {
+  if (type === "private") {
     return <PrivateChatPage />;
   }
+  if (error) {
+    return <AsyncState status="error" error={error} onRetry={() => setRetryToken((value) => value + 1)} />;
+  }
   return (
-    <div className="route-loading" role="status" aria-label="加载会话中">
-      <div className="skeleton" style={{ height: 56, width: "60%" }} />
-      <div className="skeleton" style={{ height: 56, width: "80%" }} />
-      <div className="skeleton" style={{ height: 56, width: "70%" }} />
-    </div>
+    <AsyncState status="loading">
+      <div className="route-loading" aria-label="加载会话中">
+        <div className="skeleton" style={{ height: 56, width: "60%" }} />
+        <div className="skeleton" style={{ height: 56, width: "80%" }} />
+        <div className="skeleton" style={{ height: 56, width: "70%" }} />
+      </div>
+    </AsyncState>
   );
 }

@@ -79,7 +79,7 @@ export function MessageInput({
             <button
               type="button"
               className="msg-action-btn"
-              onClick={() => void submit(failedPayload)}
+              onClick={() => void submit(failedPayload ?? undefined)}
               disabled={sending}
             >
               重试

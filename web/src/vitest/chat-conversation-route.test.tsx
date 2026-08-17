@@ -101,10 +101,16 @@ describe("ChatConversationRoute", () => {
     await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
   });
 
-  it("详情查询失败回退 ChatPage 自理", async () => {
-    vi.mocked(chatApi.getConversation).mockRejectedValue(new Error("boom"));
+  it("详情查询失败显示错误并可重试", async () => {
+    vi.mocked(chatApi.getConversation)
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce(conv("private"));
     renderRoute("/chat/x");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    const retry = screen.getByRole("button", { name: "重试" });
+    retry.click();
     await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
+    expect(chatApi.getConversation).toHaveBeenCalledTimes(2);
   });
 
   it("详情查询中显示骨架屏", async () => {
@@ -113,7 +119,7 @@ describe("ChatConversationRoute", () => {
     );
     renderRoute("/chat/x");
     await waitFor(() =>
-      expect(screen.getByRole("status", { name: "加载会话中" })).toBeInTheDocument(),
+      expect(screen.getByRole("status", { name: "正在加载" })).toBeInTheDocument(),
     );
   });
 });

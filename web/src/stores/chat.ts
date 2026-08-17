@@ -52,13 +52,8 @@ export const useChatStore = create<ChatState>((set) => ({
   setError: (error) => set({ error }),
 
   openConversation: (id) => {
-    set((state) => ({
-      activeConversationId: id,
-      // 打开即清未读
-      conversations: state.conversations.map((c) =>
-        c.id === id ? { ...c, unread_count: 0 } : c,
-      ),
-    }));
+    // 仅记录当前会话；未读必须在服务端已读确认成功后由 clearUnread 清除。
+    set({ activeConversationId: id });
   },
   closeConversation: () => set({ activeConversationId: null }),
 

@@ -137,7 +137,8 @@ export async function markReadLatest(convId: string) {
   if (!target) return;
   try {
     await chatApi.markMessageRead(convId, target.id);
+    useChatStore.getState().clearUnread(convId);
   } catch {
-    // 标已读失败不阻塞会话
+    // 已读失败保留未读红点，调用方可在下一次打开时重试。
   }
 }
