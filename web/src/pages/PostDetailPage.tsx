@@ -27,6 +27,7 @@ export function PostDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<PostComment | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const id = Number(postId);
 
@@ -90,8 +91,9 @@ export function PostDetailPage() {
         const fav = await favoritesApi.addFavorite("post", key);
         store.setFavorite(key, fav.id);
       }
-    } catch {
-      // 保持原态
+    } catch (e) {
+      // 保持原态并显示失败事实，不伪造收藏成功。
+      setActionError(e instanceof Error ? e.message : "收藏操作失败，请重试");
     }
   }, [post]);
 
@@ -126,6 +128,7 @@ export function PostDetailPage() {
 
   return (
     <div className="post-detail">
+      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       <header className="post-detail-head">
         <button type="button" className="icon-btn-40" onClick={() => navigate("/posts")} aria-label="返回">
           <IconBack width={22} height={22} />
