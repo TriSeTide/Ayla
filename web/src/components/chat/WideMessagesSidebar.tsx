@@ -39,6 +39,7 @@ export function WideMessagesSidebar({
   /** 审批（同意/拒绝）失败提示（点击关闭） */
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   // 会话列表为空时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
   useEffect(() => {
@@ -61,7 +62,10 @@ export function WideMessagesSidebar({
   // 打开与某用户的私聊会话（好友/爱莉点击 → 选中会话）
   const openUserChat = useCallback(
     (userId: string) => {
-      chatApi.openPrivateConversation(userId).then((conv) => onSelect(conv.id)).catch(() => {});
+      setOpenError(null);
+      chatApi.openPrivateConversation(userId)
+        .then((conv) => onSelect(conv.id))
+        .catch((e) => setOpenError(e instanceof Error ? e.message : "打开私聊失败"));
     },
     [onSelect],
   );
@@ -113,6 +117,7 @@ export function WideMessagesSidebar({
   return (
     <aside className="wide-messages-sidebar" aria-label="消息列表">
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
+      {openError && <div className="chat-notice" role="alert">{openError}</div>}
       {actionError && (
         <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
           {actionError}（点击关闭）
