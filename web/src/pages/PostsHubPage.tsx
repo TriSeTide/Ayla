@@ -19,6 +19,7 @@ export function PostsHubPage() {
   const navigate = useNavigate();
   const { posts, nextCursor, hasMore, loading, error, favoriteByPostId } = usePostsStore();
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // 首屏：信息流 + 我的收藏集合
   const loadFirst = useCallback(() => {
@@ -71,8 +72,9 @@ export function PostsHubPage() {
           const fav = await favoritesApi.addFavorite("post", key);
           store.setFavorite(key, fav.id);
         }
-      } catch {
-        // 收藏失败静默保持原态（可重试）；不伪造成功
+      } catch (e) {
+        // 保持原态并明确告知失败；不伪造收藏成功。
+        setActionError(e instanceof Error ? e.message : "收藏操作失败，请重试");
       }
     },
     [],
@@ -81,6 +83,7 @@ export function PostsHubPage() {
   return (
     <div className="posts-hub" onScroll={(e) => handleScroll(e.currentTarget)}>
       {isNarrow && <NarrowTopBar />}
+      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       {loading && posts.length === 0 ? (
         <div className="posts-skeleton">
           <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
