@@ -38,11 +38,14 @@ export function WideMessagesSidebar({
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   /** 审批（同意/拒绝）失败提示（点击关闭） */
   const [actionError, setActionError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // 会话列表为空时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
   useEffect(() => {
     if (conversations.length === 0) {
-      chatApi.listConversations().then((l) => useChatStore.getState().setConversations(l)).catch(() => {});
+      chatApi.listConversations()
+        .then((l) => useChatStore.getState().setConversations(l))
+        .catch((e) => setLoadError(e instanceof Error ? e.message : "加载会话失败"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -109,6 +112,7 @@ export function WideMessagesSidebar({
 
   return (
     <aside className="wide-messages-sidebar" aria-label="消息列表">
+      {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {actionError && (
         <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
           {actionError}（点击关闭）
