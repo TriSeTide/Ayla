@@ -59,7 +59,7 @@ export function PostDetailPage() {
     favoritesApi
       .listFavorites("post")
       .then((list) => usePostsStore.getState().loadFavorites(list))
-      .catch(() => {});
+      .catch((e) => setActionError(e instanceof Error ? e.message : "加载收藏状态失败"));
   }, [id]);
 
   useEffect(() => {
