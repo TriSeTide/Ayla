@@ -35,6 +35,7 @@ export function PrivateChatPane({
   const [quote, setQuote] = useState<ChatMessage | null>(null);
   const [peerTyping, setPeerTyping] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const conv = useMemo(
     () => conversations.find((c) => c.id === conversationId) ?? null,
@@ -46,7 +47,9 @@ export function PrivateChatPane({
     useChatStore.getState().openConversation(conversationId);
     useMessageStore.getState().openBucket(conversationId);
     chatWS.subscribe([conversationId]);
-    loadHistory(conversationId, undefined, true).catch(() => {});
+    loadHistory(conversationId, undefined, true)
+      .then(() => setHistoryError(null))
+      .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
     markReadLatest(conversationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
@@ -95,6 +98,16 @@ export function PrivateChatPane({
         </div>
       </header>
 
+      {historyError && (
+        <div className="chat-notice" role="alert">
+          <span>{historyError}</span>
+          <button type="button" className="btn btn-ghost" onClick={() => {
+            setHistoryError(null);
+            loadHistory(conversationId, undefined, true)
+              .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
+          }}>重试</button>
+        </div>
+      )}
       {notice && (
         <div className="chat-notice" role="alert" onClick={() => setNotice(null)}>
           {notice}（点击关闭）
