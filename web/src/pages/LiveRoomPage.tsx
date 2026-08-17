@@ -29,6 +29,8 @@ export function LiveRoomPage() {
 
   const channel = useLiveStore((s) => s.current.channel);
   const [ordered, setOrdered] = useState<LiveChannelDescriptor[]>([]);
+  const [listError, setListError] = useState<string | null>(null);
+  const [listRetry, setListRetry] = useState(0);
   const loadedRef = useRef(false);
 
   // 非法 id 回大厅
@@ -49,9 +51,12 @@ export function LiveRoomPage() {
     loadedRef.current = true;
     liveApi
       .listLiveChannels()
-      .then((list) => setOrdered(list))
-      .catch(() => setOrdered([]));
-  }, [validId]);
+      .then((list) => {
+        setOrdered(list);
+        setListError(null);
+      })
+      .catch((e) => setListError(e instanceof Error ? e.message : "加载直播列表失败"));
+  }, [validId, listRetry]);
 
   const goTo = (id: number) => {
     if (id === channelId) return;
@@ -61,15 +66,27 @@ export function LiveRoomPage() {
   if (!validId) return null;
 
   return (
-    <LiveRoomBody
+    <>
+      {listError && (
+        <div className="chat-notice" role="alert">
+          <span>直播列表加载失败：{listError}</span>
+          <button type="button" className="btn btn-ghost" onClick={() => {
+            loadedRef.current = false;
+            setListError(null);
+            setListRetry((value) => value + 1);
+          }}>重试</button>
+        </div>
+      )}
+      <LiveRoomBody
       channelId={channelId}
       channel={channel}
       isNarrow={isNarrow}
       channels={ordered}
       onSelect={goTo}
       onBack={() => navigate("/live")}
-      onDeleted={() => navigate("/live")}
-      inputEntered={inputEntered}
-    />
+        onDeleted={() => navigate("/live")}
+        inputEntered={inputEntered}
+      />
+    </>
   );
 }
