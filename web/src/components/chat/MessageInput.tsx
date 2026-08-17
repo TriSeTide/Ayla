@@ -25,7 +25,7 @@ export function MessageInput({
   const [text, setText] = useState(draft);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string; mediaId?: string } | null>(null);
+  const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string; mediaId?: string; type?: "text" | "image" } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [failedFile, setFailedFile] = useState<File | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
@@ -38,7 +38,7 @@ export function MessageInput({
     idempotencyKeyRef.current = null;
   }, [convId, draft]);
 
-  const submit = async (retryPayload?: { content: string; idempotencyKey: string; mediaId?: string }) => {
+  const submit = async (retryPayload?: { content: string; idempotencyKey: string; mediaId?: string; type?: "text" | "image" }) => {
     const content = retryPayload?.content ?? text.trim();
     if (!content || sending || !convId) return;
     setSending(true);
@@ -50,6 +50,7 @@ export function MessageInput({
         replyTo: quote ? Number(quote.id) : null,
         idempotencyKey,
         mediaId: retryPayload?.mediaId,
+        type: retryPayload?.type,
       });
       setText("");
       clearDraft(convId);
@@ -58,7 +59,7 @@ export function MessageInput({
       if (quote) onQuoteClear();
     } catch (e) {
       // 保留同一幂等键，用户重试不会创建重复消息。
-      setFailedPayload({ content, idempotencyKey });
+      setFailedPayload({ content, idempotencyKey, mediaId: retryPayload?.mediaId, type: retryPayload?.type });
       setError(e instanceof Error ? e.message : "发送失败");
     } finally {
       setSending(false);
@@ -125,7 +126,7 @@ export function MessageInput({
             setError(null);
             try {
               const uploaded = await uploadMediaFile(file, "image");
-              await submit({ content: "图片", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id });
+              await submit({ content: "图片", type: "image", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id });
             } catch (err) {
               setFailedFile(file);
                setError(err instanceof Error ? err.message : "图片发送失败");
