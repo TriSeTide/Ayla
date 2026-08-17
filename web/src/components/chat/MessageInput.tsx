@@ -39,7 +39,7 @@ export function MessageInput({
 
   const submit = async (retryPayload?: { content: string; idempotencyKey: string; mediaId?: string }) => {
     const content = retryPayload?.content ?? text.trim();
-    if (!content || sending || uploading || !convId) return;
+    if (!content || sending || !convId) return;
     setSending(true);
     setError(null);
     const idempotencyKey = retryPayload?.idempotencyKey ?? idempotencyKeyRef.current ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
