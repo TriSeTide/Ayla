@@ -28,6 +28,7 @@ export function VoiceHubPage() {
   const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [listError, setListError] = useState<string | null>(null);
+  const [listRetry, setListRetry] = useState(0);
 
   const {
     currentChannelId,
@@ -68,7 +69,7 @@ export function VoiceHubPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [listRetry]);
 
   // Voice WS 单例
   useEffect(() => {
@@ -125,9 +126,10 @@ export function VoiceHubPage() {
           onClick={() => {
             clearError();
             setListError(null);
+            setListRetry((value) => value + 1);
           }}
         >
-          {notice}（点击关闭）
+          {notice}（点击重试）
         </div>
       )}
       {channelsLoading && channels.length === 0 ? (
