@@ -14,12 +14,14 @@ class Favorite(models.Model):
     """收藏记录。"""
 
     TARGET_POST = "post"
+    TARGET_MESSAGE = "message"
     TARGET_LIVE = "live"
     TARGET_VOICE = "voice"
     TARGET_GAME = "game"
     TARGET_GROUP = "group"
     TARGET_CHOICES = [
         (TARGET_POST, "帖子"),
+        (TARGET_MESSAGE, "消息"),
         (TARGET_LIVE, "直播间"),
         (TARGET_VOICE, "语音房"),
         (TARGET_GAME, "桌游室"),

@@ -9,6 +9,7 @@
  * - 撤回态弱化 + 「已撤回」标签。
  */
 import type { ChatMessage } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
 import { MediaContent } from "./MediaContent";
 import { IconQuote, IconUndo } from "../icons";
@@ -101,8 +102,9 @@ export function MessageBubble({
           )}
         </div>
       </div>
-      {!recalled && message.type !== "system" && (onQuote || onRecall) && (
+      {!recalled && message.type !== "system" && (
         <div className="msg-actions">
+          <FavoriteButton targetType="message" targetId={message.id} compact />
           {onQuote && (
             <button
               type="button"

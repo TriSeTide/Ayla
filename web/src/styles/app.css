@@ -1851,6 +1851,11 @@
   gap: var(--sp-4);
 }
 
+.live-card-wrap {
+  position: relative;
+  min-width: 0;
+}
+
 .live-card {
   display: flex;
   flex-direction: column;
@@ -1867,6 +1872,45 @@
 
 .live-card:hover {
   transform: translateY(-2px);
+}
+
+.live-card-wrap > .favorite-toggle {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+}
+
+.favorite-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-height: 36px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.favorite-toggle:hover,
+.favorite-toggle:focus-visible,
+.favorite-toggle.is-active {
+  color: var(--pink-500);
+  border-color: var(--pink-500);
+  box-shadow: var(--glow-shadow);
+}
+
+.favorite-toggle.is-compact {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 var(--sp-1);
+}
+
+.favorite-toggle:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .live-card-head {

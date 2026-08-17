@@ -14,6 +14,7 @@
  */
 import { useState } from "react";
 import type { LiveChannelDescriptor } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 import { DanmakuInput } from "./DanmakuInput";
 import { DanmakuList } from "./DanmakuList";
 import { LiveChannelRail } from "./LiveChannelRail";
@@ -150,6 +151,7 @@ export function LiveRoomBody({
                     {loading ? "加载中…" : (channel?.title ?? "直播间")}
                   </span>
                 )}
+                {!showOwnerPanel && channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
                 <button
                   type="button"
                   className="live-room-rail-toggle"
@@ -165,6 +167,7 @@ export function LiveRoomBody({
                 <span className="live-room-title">
                   {loading ? "加载中…" : (channel?.title ?? "直播间")}
                 </span>
+                {channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
                 <span className={`live-ws-state live-ws-${wsConnection}`}>
                   {wsConnection === "online"
                     ? "弹幕已连接"

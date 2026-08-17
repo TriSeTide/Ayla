@@ -290,12 +290,23 @@
   border-color: var(--indigo-700);
 }
 
-.group-voice .voice-card-head {
+.group-voice .voice-card-head,
+.voice-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   min-height: 20px;
+}
+
+.voice-card-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.voice-room-head .favorite-toggle {
+  margin-left: auto;
 }
 
 .group-voice .voice-source-tag {

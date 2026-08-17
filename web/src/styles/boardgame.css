@@ -6,8 +6,23 @@
 
 /* ================= 桌游室卡片（design.md §12.11） ================= */
 
+.game-room-card-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.game-room-card-wrap > .favorite-toggle {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+}
+
 .game-room-card {
   display: flex;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   flex-direction: column;
   background: var(--surface);
   border-radius: 16px;

@@ -9,7 +9,7 @@
 import pytest
 
 from apps.common.visibility import Visibility
-from apps.chat.models import Conversation, ConversationMember
+from apps.chat.models import Conversation, ConversationMember, Message
 from apps.favorites.models import Favorite
 from apps.posts.models import Post
 
@@ -52,6 +52,35 @@ class TestFavoriteCreate:
         )
         # 两次返回同一记录 id
         assert resp1.json()["id"] == resp2.json()["id"]
+
+    def test_favorite_message_requires_membership_and_returns_summary(self, auth_client, user_factory):
+        client, user = auth_client(username="fav_message")
+        stranger = user_factory(username="fav_message_stranger")
+        group = _make_group(user, [stranger])
+        message = Message.objects.create(
+            conversation=group,
+            sender=user,
+            type=Message.TYPE_TEXT,
+            content="要收藏的群消息",
+            idempotency_key="fav-message-key",
+            seq=1,
+        )
+
+        response = client.post(
+            "/api/v1/favorites/",
+            {"target_type": "message", "target_id": str(message.id)},
+            format="json",
+        )
+        assert response.status_code == 201, response.content
+        assert response.json()["target"]["content"] == "要收藏的群消息"
+
+        stranger_client, _ = auth_client(username="fav_message_outsider")
+        outsider_response = stranger_client.post(
+            "/api/v1/favorites/",
+            {"target_type": "message", "target_id": str(message.id)},
+            format="json",
+        )
+        assert outsider_response.status_code == 403
 
     def test_invalid_target_type_400(self, auth_client):
         client, user = auth_client(username="fav_badtype")

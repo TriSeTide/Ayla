@@ -1,5 +1,5 @@
 /**
- * FavoritesPage 测试（F10 R-U3）：帖子收藏列表 + 取消收藏即时移除。
+ * FavoritesPage 测试（F10 R-U3）：分类收藏列表 + 取消收藏即时移除。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -72,6 +72,6 @@ describe("FavoritesPage", () => {
         <FavoritesPage />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText("还没有收藏的帖子")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("这个分类还没有收藏")).toBeInTheDocument());
   });
 });

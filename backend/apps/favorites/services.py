@@ -29,6 +29,13 @@ def load_target(target_type: str, target_id: str):
             return Post.objects.filter(pk=int(target_id)).first()
         except (TypeError, ValueError):
             return None
+    if target_type == Favorite.TARGET_MESSAGE:
+        from apps.chat.models import Message
+
+        try:
+            return Message.objects.select_related("conversation").filter(pk=int(target_id)).first()
+        except (TypeError, ValueError):
+            return None
     if target_type == Favorite.TARGET_LIVE:
         from apps.live.models import LiveChannel
 
@@ -91,6 +98,15 @@ def validate_target(user, target_type: str, target_id: str):
     target = load_target(target_type, target_id)
     if target is None:
         raise ValueError("目标不存在")
+
+    if target_type == Favorite.TARGET_MESSAGE:
+        from apps.chat.models import ConversationMember
+
+        if not ConversationMember.objects.filter(
+            conversation_id=target.conversation_id, user=user
+        ).exists():
+            raise PermissionError("无权收藏该目标")
+        return target
 
     from apps.common.visibility import can_view
 

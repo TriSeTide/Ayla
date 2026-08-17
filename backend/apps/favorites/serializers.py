@@ -21,6 +21,14 @@ def _target_summary(target_type: str, target) -> dict | None:
             "title": target.title or (target.body or "")[:30],
             "body": (target.body or "")[:120],
         }
+    if target_type == Favorite.TARGET_MESSAGE:
+        return {
+            "id": str(target.id),
+            "conversation_id": str(target.conversation_id),
+            "type": target.type,
+            "content": (target.content or "")[:120],
+            "created_at": target.created_at.isoformat(),
+        }
     if target_type == Favorite.TARGET_LIVE:
         return {"id": str(target.id), "title": target.title}
     if target_type == Favorite.TARGET_VOICE:
@@ -54,4 +62,11 @@ class FavoriteSerializer(serializers.ModelSerializer):
         from .services import load_target
 
         target = load_target(obj.target_type, obj.target_id)
+        if obj.target_type == Favorite.TARGET_MESSAGE and target is not None:
+            from apps.chat.models import ConversationMember
+
+            if not ConversationMember.objects.filter(
+                conversation_id=target.conversation_id, user=user
+            ).exists():
+                return None
         return _target_summary(obj.target_type, target)

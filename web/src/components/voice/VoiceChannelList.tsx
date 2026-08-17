@@ -9,6 +9,7 @@
  */
 import type { KeyboardEvent } from "react";
 import type { VoiceChannelDescriptor } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 import { IconMic } from "../icons";
 
 /** 来源标识（R-V1）：公开 / 好友 / 群名（design.md §12.10 Micro Tag） */
@@ -66,7 +67,10 @@ export function VoiceChannelList({
           >
             <div className="voice-card-head">
               <span className="voice-source-tag">{sourceLabel(ch)}</span>
-              {ch.mine && <span className="voice-mine-tag">我在其中</span>}
+              <span className="voice-card-head-actions">
+                {ch.mine && <span className="voice-mine-tag">我在其中</span>}
+                <FavoriteButton targetType="voice" targetId={ch.id} compact />
+              </span>
             </div>
             <div className="voice-card-title">
               <IconMic width={14} height={14} /> {ch.name}

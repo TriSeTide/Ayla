@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
 import type { ElysiaProfile, VoiceChatMessage } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 import { IconImage, IconSend } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
@@ -102,6 +103,7 @@ export function VoiceRoomBody({
           ← 返回
         </button>
         <span className="voice-room-title">{channelName}</span>
+        {channelId != null && <FavoriteButton targetType="voice" targetId={channelId} compact />}
       </header>
 
       <VoiceChannelPanel

@@ -590,7 +590,7 @@ export type PostScope = "feed" | "mine" | `group:${string}`;
 
 /* ================= S6 收藏域（对齐 backend/apps/favorites/serializers.py） ================= */
 
-export type FavoriteTargetType = "post" | "live" | "voice" | "game" | "group";
+export type FavoriteTargetType = "post" | "message" | "live" | "voice" | "game" | "group";
 
 /** 收藏条目（FavoriteSerializer） */
 export interface Favorite {

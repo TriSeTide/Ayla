@@ -8,6 +8,7 @@
  * 加"爱莉"角标（普通频道渲染，无特殊数据通道）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 import { IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 
@@ -59,12 +60,12 @@ export function LiveHall({
         const badge = statusBadge(ch.status);
         const isElysia = elysiaUserId != null && ch.owner_id === elysiaUserId;
         return (
-          <button
-            key={ch.id}
-            type="button"
-            className="live-card"
-            onClick={() => onEnter(ch.id)}
-          >
+          <div key={ch.id} className="live-card-wrap">
+            <button
+              type="button"
+              className="live-card"
+              onClick={() => onEnter(ch.id)}
+            >
             <div className={`live-card-cover ${ch.status === "live" ? "is-live" : ""}`}>
               {ch.cover ? (
                 <ResourceImage src={ch.cover} alt="" className="live-card-cover-image" />
@@ -83,7 +84,9 @@ export function LiveHall({
               </span>
               <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
             </div>
-          </button>
+            </button>
+            <FavoriteButton targetType="live" targetId={ch.id} compact />
+          </div>
         );
       })}
     </div>

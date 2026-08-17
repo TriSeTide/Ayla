@@ -6,6 +6,7 @@
  * 点击进入房间（onEnter，父级 navigate 到占位界面）。
  */
 import type { GameRoom } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 import { IconGame } from "../icons";
 
 function sourceLabel(room: GameRoom): string {
@@ -17,20 +18,23 @@ function sourceLabel(room: GameRoom): string {
 export function GameRoomCard({ room, onEnter }: { room: GameRoom; onEnter: () => void }) {
   const playing = room.status === "playing";
   return (
-    <button type="button" className="game-room-card" onClick={onEnter}>
-      <div className="game-room-cover">
-        <IconGame width={48} height={48} />
-      </div>
-      <div className="game-room-info">
-        <span className="game-room-name">{room.name}</span>
-        <span className={`game-room-status ${playing ? "is-playing" : "is-waiting"}`}>
-          {room.status === "playing" ? "对局中" : room.status === "ended" ? "已结束" : "等待中"}
-        </span>
-        <span className="game-room-meta">
-          {room.member_count} 人
-          <span className="game-room-source">{sourceLabel(room)}</span>
-        </span>
-      </div>
-    </button>
+    <div className="game-room-card-wrap">
+      <button type="button" className="game-room-card" onClick={onEnter}>
+        <div className="game-room-cover">
+          <IconGame width={48} height={48} />
+        </div>
+        <div className="game-room-info">
+          <span className="game-room-name">{room.name}</span>
+          <span className={`game-room-status ${playing ? "is-playing" : "is-waiting"}`}>
+            {room.status === "playing" ? "对局中" : room.status === "ended" ? "已结束" : "等待中"}
+          </span>
+          <span className="game-room-meta">
+            {room.member_count} 人
+            <span className="game-room-source">{sourceLabel(room)}</span>
+          </span>
+        </div>
+      </button>
+      <FavoriteButton targetType="game" targetId={room.id} compact />
+    </div>
   );
 }

@@ -7,6 +7,7 @@
 import { useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
+import { FavoriteButton } from "../FavoriteButton";
 
 export function GameRoomPlaceholder({
   room,
@@ -55,6 +56,7 @@ export function GameRoomPlaceholder({
           ← 返回
         </button>
         <span className="game-room-placeholder-name">{room.name}</span>
+        <FavoriteButton targetType="game" targetId={room.id} compact />
       </header>
       <div className="game-room-placeholder-body">
         <p className="game-room-placeholder-desc">
