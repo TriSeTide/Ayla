@@ -24,6 +24,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
   const [quote, setQuote] = useState<ChatMessage | null>(null);
   const [peerTyping, setPeerTyping] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const activeConv = useMemo(
     () => conversations.find((c) => c.id === groupId) ?? null,
@@ -35,7 +36,9 @@ export function GroupChat({ groupId }: { groupId: string }) {
     useChatStore.getState().openConversation(groupId);
     useMessageStore.getState().openBucket(groupId);
     chatWS.subscribe([groupId]);
-    loadHistory(groupId, undefined, true).catch(() => {});
+    loadHistory(groupId, undefined, true)
+      .then(() => setHistoryError(null))
+      .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
     markReadLatest(groupId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
@@ -63,6 +66,16 @@ export function GroupChat({ groupId }: { groupId: string }) {
 
   return (
     <div className="group-chat">
+      {historyError && (
+        <div className="chat-notice" role="alert">
+          <span>{historyError}</span>
+          <button type="button" className="btn btn-ghost" onClick={() => {
+            setHistoryError(null);
+            loadHistory(groupId, undefined, true)
+              .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
+          }}>重试</button>
+        </div>
+      )}
       {notice && (
         <div className="chat-notice" role="alert" onClick={() => setNotice(null)}>
           {notice}（点击关闭）
