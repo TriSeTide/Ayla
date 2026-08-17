@@ -62,8 +62,11 @@ export function GamesHubPage() {
     <div className="games-hub">
       {isNarrow && <NarrowTopBar />}
       {error && (
-        <div className="chat-notice" role="alert" onClick={() => setError(null)}>
-          {error}（点击关闭）
+        <div className="chat-notice" role="alert">
+          <span>{error}</span>
+          <button type="button" className="btn btn-ghost" onClick={load} disabled={loading}>
+            {loading ? "重试中…" : "重试"}
+          </button>
         </div>
       )}
       {loading && rooms.length === 0 ? (
