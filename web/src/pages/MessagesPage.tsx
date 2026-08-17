@@ -40,12 +40,13 @@ export function MessagesPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [friendsLoadError, setFriendsLoadError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {
     getElysiaProfile()
       .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch(() => {});
+      .catch((e) => setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败"));
   }, []);
 
   // 加载会话列表（私信 tab 复用）
@@ -136,6 +137,7 @@ export function MessagesPage() {
   return (
     <div className="messages-page">
       <NarrowTopBar />
+      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {actionError && (
         <div className="messages-action-error" role="alert">
