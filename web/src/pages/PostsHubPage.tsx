@@ -20,6 +20,7 @@ export function PostsHubPage() {
   const { posts, nextCursor, hasMore, loading, error, favoriteByPostId } = usePostsStore();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [favoriteLoadError, setFavoriteLoadError] = useState<string | null>(null);
 
   // 首屏：信息流 + 我的收藏集合
   const loadFirst = useCallback(() => {
@@ -38,8 +39,11 @@ export function PostsHubPage() {
       });
     favoritesApi
       .listFavorites("post")
-      .then((list) => store.loadFavorites(list))
-      .catch(() => {});
+      .then((list) => {
+        store.loadFavorites(list);
+        setFavoriteLoadError(null);
+      })
+      .catch((e) => setFavoriteLoadError(e instanceof Error ? e.message : "加载收藏状态失败"));
   }, []);
 
   useEffect(() => {
@@ -83,6 +87,7 @@ export function PostsHubPage() {
   return (
     <div className="posts-hub" onScroll={(e) => handleScroll(e.currentTarget)}>
       {isNarrow && <NarrowTopBar />}
+      {favoriteLoadError && <div className="chat-notice" role="alert">收藏状态加载失败：{favoriteLoadError}</div>}
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       {loading && posts.length === 0 ? (
         <div className="posts-skeleton">
