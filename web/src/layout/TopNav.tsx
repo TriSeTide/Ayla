@@ -35,6 +35,7 @@ export function TopNav({
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
 
   // 更多菜单：点击外部 / ESC 关闭
@@ -66,15 +67,20 @@ export function TopNav({
     const trimmed = query.trim();
     if (!trimmed) {
       setSearchResults(null);
+      setSearchError(null);
       return;
     }
     const timer = window.setTimeout(() => {
+      setSearchError(null);
       searchApi({ q: trimmed, limit: 3 })
         .then((r) => {
           setSearchResults(r);
           setSearchOpen(true);
         })
-        .catch(() => {});
+        .catch((e) => {
+          setSearchError(e instanceof Error ? e.message : "搜索失败");
+          setSearchOpen(true);
+        });
     }, 300);
     return () => window.clearTimeout(timer);
   }, [query]);
@@ -140,8 +146,9 @@ export function TopNav({
               aria-label="全局搜索"
             />
           </form>
-          {searchOpen && hasDropResults && (
+          {searchOpen && (searchError || hasDropResults) && (
             <div className="top-nav-search-panel" role="listbox">
+              {searchError && <div className="search-drop-error" role="alert">{searchError}</div>}
               {(searchResults!.users?.items ?? []).map((u) => (
                 <button key={u.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/search?q=${encodeURIComponent(query)}`)}>
                   <Avatar label={u.nickname || u.username} size={28} online={u.online} imageUrl={u.avatar || null} />
