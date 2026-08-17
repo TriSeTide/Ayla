@@ -175,7 +175,7 @@ export function MessagesPage() {
                 chatApi
                   .openPrivateConversation(elysiaProfile.user.id)
                   .then((conv) => navigate(`/chat/${conv.id}`))
-                  .catch(() => {});
+                  .catch((e) => setActionError(e instanceof Error ? e.message : "打开爱莉私聊失败"));
               }}
             />
           )}
