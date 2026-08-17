@@ -53,6 +53,8 @@ export function GroupPage() {
 
   // 宽屏 ServerRail 底部加号：创建群聊（需求：左下角头像键改加号）
   const [showGroupCreate, setShowGroupCreate] = useState(false);
+  const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
+  const [conversationRetry, setConversationRetry] = useState(0);
 
   // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/home) ----
   const [pullOffset, setPullOffset] = useState(0);
@@ -120,14 +122,19 @@ export function GroupPage() {
     chatApi
       .listConversations()
       .then((list) => {
-        if (!cancelled) useChatStore.getState().setConversations(list);
+        if (!cancelled) {
+          useChatStore.getState().setConversations(list);
+          setConversationLoadError(null);
+        }
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) setConversationLoadError(e instanceof Error ? e.message : "加载群列表失败");
+      });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [conversationRetry]);
 
   // 切换场景：store（单一事实）+ URL 回显
   const goScene = useCallback(
@@ -193,6 +200,7 @@ export function GroupPage() {
   if (!isNarrow) {
     return (
       <div className="group-page group-page-wide">
+        {conversationLoadError && <div className="chat-notice" role="alert"><span>{conversationLoadError}</span><button type="button" className="btn btn-ghost" onClick={() => { setConversationLoadError(null); setConversationRetry((value) => value + 1); }}>重试</button></div>}
         <ServerRail
           groups={groups}
           currentGroupId={id ?? null}
