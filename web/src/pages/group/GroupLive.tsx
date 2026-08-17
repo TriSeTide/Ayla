@@ -20,10 +20,12 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
   const [channels, setChannels] = useState<LiveChannelDescriptor[]>([]);
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
+    setError(null);
     liveApi
       .listLiveChannels()
       .then((list) => {
@@ -33,10 +35,9 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
         setCurrentId(mine[0]?.id ?? null);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((e) => {
         if (!cancelled) {
-          setChannels([]);
-          setCurrentId(null);
+          setError(e instanceof Error ? e.message : "加载群内直播失败");
           setLoading(false);
         }
       });
@@ -44,6 +45,11 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
       cancelled = true;
     };
   }, [groupId]);
+
+  useEffect(() => {
+    const cleanup = load();
+    return cleanup;
+  }, [load]);
 
   const goTo = useCallback(
     (id: number) => {
@@ -57,6 +63,16 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
     return (
       <div className="group-scene-placeholder">
         <div className="skeleton" style={{ height: 160, width: "80%" }} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="group-scene-placeholder" role="alert">
+        <h3 className="placeholder-title">群内直播加载失败</h3>
+        <p className="placeholder-desc">{error}</p>
+        <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
       </div>
     );
   }
