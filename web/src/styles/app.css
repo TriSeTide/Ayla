@@ -1853,11 +1853,15 @@
 
 .live-card-wrap {
   position: relative;
+  width: 100%;
   min-width: 0;
 }
 
 .live-card {
   display: flex;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-4);

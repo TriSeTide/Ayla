@@ -15,6 +15,7 @@ import type { ChatMessage, MessageType } from "../api/types";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
+import { useBadgesStore } from "../stores/badges";
 import { chatWS } from "../ws/chat";
 
 /** 撤回时限（秒），与 backend settings MESSAGE_RECALL_SECONDS=120 对齐 */
@@ -127,6 +128,16 @@ export async function recallMessage(convId: string, messageId: string) {
 }
 
 /** 标已读：把当前会话中"对方发、我未读"的最新一条标已读（服务端 mark_read 幂等） */
+export async function markConversationRead(convId: string) {
+  try {
+    await chatApi.markConversationRead(convId);
+    useChatStore.getState().clearUnread(convId);
+    void useBadgesStore.getState().fetch();
+  } catch {
+    // 服务端失败保留红点，下一次进入会话时重试。
+  }
+}
+
 export async function markReadLatest(convId: string) {
   const msg = useMessageStore.getState();
   const bucket = msg.buckets[convId];
@@ -139,6 +150,8 @@ export async function markReadLatest(convId: string) {
   try {
     await chatApi.markMessageRead(convId, target.id);
     useChatStore.getState().clearUnread(convId);
+    // 服务端红点按 MessageRead 聚合，成功后立即同步全局消息入口。
+    void useBadgesStore.getState().fetch();
   } catch {
     // 已读失败保留未读红点，调用方可在下一次打开时重试。
   }

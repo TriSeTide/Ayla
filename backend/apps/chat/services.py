@@ -209,9 +209,41 @@ def recall_message(user, message) -> Message:
     return message
 
 
+def mark_conversation_read(user, conversation) -> None:
+    """将会话当前全部对方消息标为已读；无消息时保持幂等。"""
+    target = (
+        Message.objects.filter(conversation=conversation)
+        .exclude(sender=user)
+        .exclude(status=Message.STATUS_RECALLED)
+        .order_by("-seq")
+        .first()
+    )
+    if target is not None:
+        mark_read(user, target)
+
+
 def mark_read(user, message) -> None:
-    """幂等写入 MessageRead；若该消息 sender != user 且用户已读，广播 message.read。"""
-    _mark_read_record(user, message)
+    """将会话中截至目标消息的对方消息标为已读。
+
+    客户端打开会话时通常只加载最近一页；若只写入最新一条 MessageRead，
+    更早消息仍会持续贡献未读数，导致群聊/私信红点无法消失。因此以目标 seq
+    作为已读游标，批量写入当前用户的 MessageRead，重复调用保持幂等。
+    """
+    unread_messages = Message.objects.filter(
+        conversation=message.conversation,
+        seq__lte=message.seq,
+    ).exclude(sender=user).exclude(status=Message.STATUS_RECALLED)
+    existing = set(
+        MessageRead.objects.filter(
+            message__in=unread_messages, user=user
+        ).values_list("message_id", flat=True)
+    )
+    to_create = [
+        MessageRead(message_id=msg_id, user=user)
+        for msg_id in unread_messages.exclude(id__in=existing).values_list("id", flat=True)
+    ]
+    if to_create:
+        MessageRead.objects.bulk_create(to_create, ignore_conflicts=True)
     if message.sender_id != user.id:
         broadcast_read(message, user)
 

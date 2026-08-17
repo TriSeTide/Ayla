@@ -30,6 +30,11 @@ urlpatterns = [
     ),
     # 消息
     path(
+        "conversations/<int:conv_id>/read/",
+        views.ConversationReadView.as_view(),
+        name="chat-conv-read",
+    ),
+    path(
         "conversations/<int:conv_id>/messages/",
         views.MessageView.as_view(),
         name="chat-messages",

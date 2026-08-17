@@ -284,6 +284,19 @@ class MessageView(APIView):
         return Response(MessageSerializer(msg).data, status=status.HTTP_201_CREATED)
 
 
+class ConversationReadView(APIView):
+    """POST /conversations/<id>/read/ —— 将会话当前消息全部标已读。"""
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        services.mark_conversation_read(request.user, conv)
+        return Response({"detail": "已读"})
+
+
 class MessageReadView(APIView):
     """POST /conversations/<id>/messages/<mid>/read/ —— 标已读。"""
 

@@ -48,9 +48,11 @@ export function PrivateChatPane({
     useMessageStore.getState().openBucket(conversationId);
     chatWS.subscribe([conversationId]);
     loadHistory(conversationId, undefined, true)
-      .then(() => setHistoryError(null))
+      .then(async () => {
+        setHistoryError(null);
+        await markReadLatest(conversationId);
+      })
       .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
-    markReadLatest(conversationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 

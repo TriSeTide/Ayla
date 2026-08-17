@@ -293,11 +293,11 @@ class TestRead:
             {"content": "m1", "idempotency_key": new_key()},
             format="json",
         ).json()
-        ca.post(
+        m2 = ca.post(
             f"/api/v1/chat/conversations/{conv['id']}/messages/",
             {"content": "m2", "idempotency_key": new_key()},
             format="json",
-        )
+        ).json()
         # b 未读：a 发来的两条都未读
         resp = cb.get("/api/v1/chat/conversations/")
         conv_item = [x for x in resp.json() if x["id"] == conv["id"]][0]
@@ -312,6 +312,14 @@ class TestRead:
         conv_item = [x for x in resp.json() if x["id"] == conv["id"]][0]
         assert conv_item["unread_count"] == 1
         assert MessageRead.objects.filter(user=b).count() == 1
+
+        # 会话级已读用于进入群聊/场景页：一次清掉当前会话全部未读。
+        resp = cb.post(f"/api/v1/chat/conversations/{conv['id']}/read/")
+        assert resp.status_code == 200
+        resp = cb.get("/api/v1/chat/conversations/")
+        conv_item = [x for x in resp.json() if x["id"] == conv["id"]][0]
+        assert conv_item["unread_count"] == 0
+        assert MessageRead.objects.filter(user=b).count() == 2
 
     def test_mark_read_idempotent(self, auth_client, user_factory):
         b = user_factory(username="rd2_b")

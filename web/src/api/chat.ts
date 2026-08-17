@@ -65,6 +65,13 @@ export function sendMessage(convId: string, payload: CreateMessagePayload) {
   });
 }
 
+/** POST /chat/conversations/<id>/read/ —— 将会话当前消息全部标已读 */
+export function markConversationRead(convId: string) {
+  return apiRequest<{ detail: string }>(`/chat/conversations/${convId}/read/`, {
+    method: "POST",
+  });
+}
+
 /** POST /chat/conversations/<id>/messages/<mid>/read/ —— 标已读 */
 export function markMessageRead(convId: string, messageId: string) {
   return apiRequest<{ detail: string }>(

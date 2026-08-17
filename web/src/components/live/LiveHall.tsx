@@ -66,7 +66,7 @@ export function LiveHall({
               className="live-card"
               onClick={() => onEnter(ch.id)}
             >
-            <div className={`live-card-cover ${ch.status === "live" ? "is-live" : ""}`}>
+              <div className={`live-card-cover ${ch.status === "live" ? "is-live" : ""}`}>
               {ch.cover ? (
                 <ResourceImage src={ch.cover} alt="" className="live-card-cover-image" />
               ) : (
@@ -76,14 +76,14 @@ export function LiveHall({
                 <span className={badge.className}>{badge.label}</span>
                 {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
               </span>
-            </div>
-            <div className="live-card-title">{ch.title}</div>
-            <div className="live-card-meta">
+              </div>
+              <div className="live-card-title">{ch.title}</div>
+              <div className="live-card-meta">
               <span className="live-card-owner">
                 {ch.owner_nickname ?? ownerNames[ch.owner_id] ?? "未知主播"}
               </span>
               <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
-            </div>
+              </div>
             </button>
             <FavoriteButton targetType="live" targetId={ch.id} compact />
           </div>

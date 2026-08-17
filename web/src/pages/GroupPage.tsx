@@ -21,6 +21,7 @@ import { useEnterGroupAnimation } from "../hooks/useEnterGroupAnimation";
 import { useSwipe } from "../hooks/useSwipe";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
+import { markConversationRead } from "../hooks/useChat";
 import { useChatStore } from "../stores/chat";
 import { GROUP_SCENE_ORDER, useGroupStore } from "../stores/group";
 import type { GroupScene } from "../stores/group";
@@ -117,6 +118,7 @@ export function GroupPage() {
     // 进入即打开群会话（GroupChat 内部也 openConversation，幂等）
     useChatStore.getState().openConversation(id);
     useChatStore.getState().clearUnread(id);
+    void markConversationRead(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, effectiveScene]);
 

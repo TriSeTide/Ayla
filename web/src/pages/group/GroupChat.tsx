@@ -37,9 +37,11 @@ export function GroupChat({ groupId }: { groupId: string }) {
     useMessageStore.getState().openBucket(groupId);
     chatWS.subscribe([groupId]);
     loadHistory(groupId, undefined, true)
-      .then(() => setHistoryError(null))
+      .then(async () => {
+        setHistoryError(null);
+        await markReadLatest(groupId);
+      })
       .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
-    markReadLatest(groupId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
