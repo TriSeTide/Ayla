@@ -104,7 +104,7 @@ export async function loadMoreHistory(convId: string) {
 export async function sendMessage(
   convId: string,
   content: string,
-  options: { type?: MessageType; replyTo?: number | null; idempotencyKey?: string } = {},
+  options: { type?: MessageType; replyTo?: number | null; idempotencyKey?: string; mediaId?: string } = {},
 ): Promise<ChatMessage> {
   const idempotencyKey = options.idempotencyKey ?? newIdempotencyKey();
   const msg = await chatApi.sendMessage(convId, {
@@ -112,6 +112,7 @@ export async function sendMessage(
     content,
     reply_to: options.replyTo ?? null,
     idempotency_key: idempotencyKey,
+    media_id: options.mediaId,
   });
   // 本地乐观插入（WS message.new 到达时按 seq 去重，不会重复）
   useMessageStore.getState().upsertMessage(convId, msg);

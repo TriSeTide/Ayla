@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../api/types";
 import { useChatDraftsStore } from "../../stores/chatDrafts";
 import { sendMessage } from "../../hooks/useChat";
+import { uploadMediaFile } from "../../api/media";
+import { IconImage } from "../icons";
 import { useTyping } from "../../hooks/useTyping";
 import { IconClose, IconSend } from "../icons";
 
@@ -23,7 +25,8 @@ export function MessageInput({
   const [text, setText] = useState(draft);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string } | null>(null);
+  const [failedPayload, setFailedPayload] = useState<{ content: string; idempotencyKey: string; mediaId?: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
   const { onInput } = useTyping(convId || null);
 
@@ -34,9 +37,9 @@ export function MessageInput({
     idempotencyKeyRef.current = null;
   }, [convId, draft]);
 
-  const submit = async (retryPayload?: { content: string; idempotencyKey: string }) => {
+  const submit = async (retryPayload?: { content: string; idempotencyKey: string; mediaId?: string }) => {
     const content = retryPayload?.content ?? text.trim();
-    if (!content || sending || !convId) return;
+    if (!content || sending || uploading || !convId) return;
     setSending(true);
     setError(null);
     const idempotencyKey = retryPayload?.idempotencyKey ?? idempotencyKeyRef.current ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -45,6 +48,7 @@ export function MessageInput({
       await sendMessage(convId, content, {
         replyTo: quote ? Number(quote.id) : null,
         idempotencyKey,
+        mediaId: retryPayload?.mediaId,
       });
       setText("");
       clearDraft(convId);
@@ -100,6 +104,24 @@ export function MessageInput({
         </div>
       )}
       <div className="composer-row">
+        <label className="composer-tool-btn" aria-label="发送图片">
+          <IconImage width={18} height={18} />
+          <input type="file" accept="image/*" hidden onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file || sending || uploading || !convId) return;
+            setUploading(true);
+            setError(null);
+            try {
+              const uploaded = await uploadMediaFile(file, "image");
+              await submit({ content: "图片", idempotencyKey: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`, mediaId: uploaded.media_id });
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "图片发送失败");
+            } finally {
+              setUploading(false);
+            }
+          }} />
+        </label>
         <textarea
           className="field composer-input"
           value={text}
@@ -122,7 +144,7 @@ export function MessageInput({
           type="button"
           className="btn btn-primary composer-send"
           onClick={() => void submit()}
-          disabled={sending || !text.trim() || !convId}
+          disabled={sending || uploading || !text.trim() || !convId}
         >
           <IconSend width={15} height={15} />
           {sending ? "发送中…" : "发送"}
