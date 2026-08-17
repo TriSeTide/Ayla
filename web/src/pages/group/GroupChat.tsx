@@ -88,7 +88,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() => {
-          loadMoreHistory(groupId).catch(() => {});
+          loadMoreHistory(groupId).catch((e) => setHistoryError(e instanceof Error ? e.message : "加载更早消息失败"));
         }}
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}

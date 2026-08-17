@@ -121,7 +121,7 @@ export function PrivateChatPane({
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() => {
-          loadMoreHistory(conversationId).catch(() => {});
+          loadMoreHistory(conversationId).catch((e) => setHistoryError(e instanceof Error ? e.message : "加载更早消息失败"));
         }}
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}
