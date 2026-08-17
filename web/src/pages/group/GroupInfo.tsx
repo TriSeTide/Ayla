@@ -48,6 +48,8 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [announcement, setAnnouncement] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRetry, setLoadRetry] = useState(0);
 
   // store 未命中时拉详情（直接访问 /group/:id/info）
   useEffect(() => {
@@ -58,11 +60,13 @@ export function GroupInfo({ groupId }: { groupId: string }) {
       .then((c) => {
         if (!cancelled) setGroupDetail({ ...c, peer: null });
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "加载群信息失败");
+      });
     return () => {
       cancelled = true;
     };
-  }, [group, groupId]);
+  }, [group, groupId, loadRetry]);
 
   const conv = group ?? groupDetail;
   const isOwner = conv?.my_role === "owner";
@@ -102,11 +106,17 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   if (!conv) {
     return (
       <div className="group-info">
-        <div className="group-info-loading" role="status">
+        {loadError ? (
+          <div className="group-scene-placeholder" role="alert">
+            <h3 className="placeholder-title">群信息加载失败</h3>
+            <p className="placeholder-desc">{loadError}</p>
+            <button type="button" className="btn btn-ghost" onClick={() => { setLoadError(null); setLoadRetry((value) => value + 1); }}>重试</button>
+          </div>
+        ) : <div className="group-info-loading" role="status">
           <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
           <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
           <div className="skeleton" style={{ height: 64 }} />
-        </div>
+        </div>}
       </div>
     );
   }
