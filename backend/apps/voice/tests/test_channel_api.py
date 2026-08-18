@@ -69,12 +69,16 @@ def test_join_fails_without_livekit_config(auth_client, monkeypatch):
 
 @pytest.mark.django_db
 def test_owner_must_transfer_before_leave(auth_client):
+    """房主离开时若还有其他成员，必须先转让（403）；成员仍保留。"""
     client, user = auth_client()
+    _, other = auth_client(username="voice_leave_other")
     ch = VoiceChannel.objects.create(name="语音", room_name="room_leave", owner=user)
     VoiceChannelMember.objects.create(channel=ch, user=user)
+    VoiceChannelMember.objects.create(channel=ch, user=other)
     resp = client.post(f"/api/v1/voice/channels/{ch.id}/leave/")
     assert resp.status_code == 403
     assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
+    assert VoiceChannelMember.objects.filter(channel=ch, user=other).exists()
 
 
 @pytest.mark.django_db
@@ -180,3 +184,31 @@ def test_unauthenticated_rejected():
     client = APIClient()
     resp = client.get("/api/v1/voice/channels/")
     assert resp.status_code in (401, 403)
+
+
+@pytest.mark.django_db
+def test_owner_leave_when_alone(auth_client):
+    """房主是唯一成员时允许直接离开（修复死锁），频道保留为空。"""
+    client, owner = auth_client()
+    ch = VoiceChannel.objects.create(name="单人房", room_name="room_solo_leave", owner=owner)
+    VoiceChannelMember.objects.create(channel=ch, user=owner)
+
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/leave/")
+    assert resp.status_code == 200, resp.content
+    assert not VoiceChannelMember.objects.filter(channel=ch, user=owner).exists()
+    # 频道本身保留
+    assert VoiceChannel.objects.filter(pk=ch.id).exists()
+
+
+@pytest.mark.django_db
+def test_transfer_to_self_rejected(auth_client):
+    """转让给自己返回 400，与 kick 不能踢自己防护对称。"""
+    client, owner = auth_client()
+    ch = VoiceChannel.objects.create(name="自转房", room_name="room_self_transfer", owner=owner)
+    VoiceChannelMember.objects.create(channel=ch, user=owner)
+
+    url = f"/api/v1/voice/channels/{ch.id}/members/{owner.id}/action/"
+    resp = client.post(url, {"action": "transfer"}, format="json")
+    assert resp.status_code == 400, resp.content
+    ch.refresh_from_db()
+    assert ch.owner_id == owner.id

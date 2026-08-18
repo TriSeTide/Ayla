@@ -221,6 +221,15 @@ class TestRoomJoinLeave:
         assert resp.status_code == 200
         assert not GameRoomMember.objects.filter(room=room, user=joiner).exists()
 
+    def test_owner_leave_alone_400(self, auth_client):
+        """房主作为唯一成员时离开 → 400（无人可转让）。"""
+        client, owner = auth_client(username="g_leave_alone")
+        room = _make_room(owner, "仅房主房")
+        GameRoomMember.objects.create(room=room, user=owner)
+        resp = client.post(f"/api/v1/boardgame/rooms/{room.id}:leave/", format="json")
+        assert resp.status_code == 400
+        assert "先转让" in resp.json()["detail"]
+
     def test_leave_non_member_400(self, auth_client, user_factory):
         client, outsider = auth_client(username="v_out")
         owner = user_factory(username="v_owner2")
@@ -262,4 +271,31 @@ class TestRoomJoinLeave:
         assert transferred.status_code == 200, transferred.content
         room.refresh_from_db()
         assert room.owner_id == member.id
-        assert owner_client.post(f"/api/v1/boardgame/rooms/{room.id}:leave/").status_code == 200
+        # 转让后响应必须反映新房主（不因序列化复用 select_related "owner" 缓存返回旧房主）
+        tdata = transferred.json()
+        assert tdata["owner_id"] == member.id
+        assert tdata["is_owner"] is False  # 发起人不再是房主
+        # members 按 seat 排序（owner=0 / member=1），用集合断言不依赖顺序
+        member_ids = {m["user_id"] for m in tdata["members"]}
+        assert member_ids == {owner.id, member.id}
+        resp = owner_client.post(f"/api/v1/boardgame/rooms/{room.id}:leave/")
+        assert resp.status_code == 200, resp.content
+
+    def test_kick_response_reflects_removed_member(self, auth_client, user_factory):
+        """踢人后响应 members/成员数反映移除（不因 prefetch 缓存返回已被踢成员）。"""
+        owner_client, owner = auth_client(username="g_kick_owner")
+        member = user_factory(username="g_kick_member")
+        room = _make_room(owner, "踢人响应桌游房")
+        GameRoomMember.objects.create(room=room, user=owner)
+        GameRoomMember.objects.create(room=room, user=member, seat=1)
+
+        resp = owner_client.post(
+            f"/api/v1/boardgame/rooms/{room.id}/members/{member.id}/action/",
+            {"action": "kick"}, format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        data = resp.json()
+        assert data["member_count"] == 1
+        member_ids = {m["user_id"] for m in data["members"]}
+        assert member_ids == {owner.id}
+        assert member.id not in member_ids

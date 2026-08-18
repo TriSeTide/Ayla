@@ -89,10 +89,12 @@ def can_manage_channel(channel: VoiceChannel, user) -> bool:
 
 @transaction.atomic
 def transfer_channel_owner(channel: VoiceChannel, actor, target_user_id):
-    """将语音房房主转给当前成员。"""
+    """将语音房房主转给当前成员；不能转让给自己。"""
     locked_channel = VoiceChannel.objects.select_for_update().get(pk=channel.pk)
     if locked_channel.owner_id != actor.id:
         raise PermissionError("仅房主可转让")
+    if str(target_user_id) == str(actor.id):
+        raise ValueError("不能转让给自己")
     target = VoiceChannelMember.objects.select_related("user").select_for_update().get(
         channel=locked_channel, user_id=target_user_id
     )
@@ -157,10 +159,28 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
 
 
 def leave_channel(channel: VoiceChannel, user) -> None:
-    """离开频道；房主必须先转让房主。"""
-    if channel.owner_id == user.id and VoiceChannelMember.objects.filter(channel=channel, user=user).exists():
-        raise PermissionError("房主请先转让房主后再离开")
-    deleted, _ = VoiceChannelMember.objects.filter(channel=channel, user=user).delete()
+    """离开频道。
+
+    生命周期契约：
+    - 房主离开时若频道还有其他成员，必须先转让房主（否则 403）；
+    - 房主是唯一成员时允许直接离开（频道保留为空房，其余人可再加入）。
+    锁行后重读 owner，避免与并发转让/踢人竞态造成基于旧 owner 的误判。
+    """
+    with transaction.atomic():
+        locked = VoiceChannel.objects.select_for_update().get(pk=channel.pk)
+        if locked.owner_id == user.id:
+            has_others = (
+                VoiceChannelMember.objects.filter(channel=locked)
+                .exclude(user=user)
+                .exists()
+            )
+            if has_others:
+                raise PermissionError("房主请先转让房主后再离开")
+        deleted, _ = VoiceChannelMember.objects.filter(
+            channel=locked, user=user
+        ).delete()
+        # 保持调用方实例的 owner 与数据库一致，避免同链上后续判断用旧值。
+        channel.owner_id = locked.owner_id
     if deleted:
         if user.voice_room_id == channel.id:
             user.is_in_voice = False

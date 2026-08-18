@@ -140,7 +140,7 @@ class FriendListView(generics.ListAPIView):
     def get_queryset(self):
         return Friendship.objects.filter(
             user=self.request.user, status=Friendship.STATUS_ACCEPTED
-        ).select_related("user")
+        ).select_related("friend")
 
 
 class FriendRequestListView(generics.ListCreateAPIView):

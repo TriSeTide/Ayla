@@ -148,7 +148,7 @@ class FriendRequestActionSerializer(serializers.Serializer):
 
 
 class FriendshipSerializer(serializers.ModelSerializer):
-    user = UserPublicSerializer(read_only=True)
+    user = UserPublicSerializer(source="friend", read_only=True)
 
     class Meta:
         model = Friendship

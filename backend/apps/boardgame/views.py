@@ -159,6 +159,11 @@ class RoomMemberActionView(APIView):
             return _bad_request(str(exc))
         except LookupError as exc:
             return _not_found(str(exc))
+        # action 变更了 owner（转让）或成员集合（踢人）。序列化依赖 select_related
+        # "owner" 与 prefetch_related "members" 的缓存：转让只改 owner_id 不更新 owner
+        # 缓存、踢人删除成员后 prefetch 缓存仍是旧集合，直接复用 room 会返回旧房主 /
+        # 已被踢成员。这里重新拉取一次权威实例，确保响应反映变更后的真实状态。
+        room = _get_room_or_404(room_id)
         return Response(GameRoomSerializer(room, context={"request": request}).data)
 
 

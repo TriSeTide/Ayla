@@ -97,3 +97,117 @@ class TestGroupManagement:
             ).status_code
             == 403
         )
+@pytest.mark.django_db
+class TestRemovedMemberAccess:
+    """被移除成员在移除后访问群内容必须被拒绝（问题 16 验收）。"""
+
+    def _make_group_with_member(self, auth_client, user_factory):
+        """建群：owner(a) + member(b)。返回 (ca, cb, conv)。"""
+        b = user_factory(username="rm_b")
+        ca, _ = auth_client(username="rm_a")
+        conv = make_group(ca, [b])
+        cb = auth_as(b)
+        return ca, cb, conv
+
+    def test_removed_member_cannot_get_conversation(self, auth_client, user_factory):
+        ca, cb, conv = self._make_group_with_member(auth_client, user_factory)
+        # 移除前成员可访问
+        assert cb.get(f"/api/v1/chat/conversations/{conv['id']}/").status_code == 200
+        # owner 移除成员
+        assert (
+            ca.delete(
+                f"/api/v1/chat/conversations/{conv['id']}/members/{cb.user.id}/"
+            ).status_code
+            == 204
+        )
+        # 被移除后：群详情 403
+        assert (
+            cb.get(f"/api/v1/chat/conversations/{conv['id']}/").status_code == 403
+        )
+
+    def test_removed_member_cannot_list_messages(self, auth_client, user_factory):
+        ca, cb, conv = self._make_group_with_member(auth_client, user_factory)
+        # 移除前成员可读消息
+        assert (
+            cb.get(f"/api/v1/chat/conversations/{conv['id']}/messages/").status_code
+            == 200
+        )
+        assert (
+            ca.delete(
+                f"/api/v1/chat/conversations/{conv['id']}/members/{cb.user.id}/"
+            ).status_code
+            == 204
+        )
+        # 被移除后：读消息 403
+        assert (
+            cb.get(f"/api/v1/chat/conversations/{conv['id']}/messages/").status_code
+            == 403
+        )
+
+    def test_removed_member_cannot_send_message(self, auth_client, user_factory):
+        ca, cb, conv = self._make_group_with_member(auth_client, user_factory)
+        assert (
+            ca.delete(
+                f"/api/v1/chat/conversations/{conv['id']}/members/{cb.user.id}/"
+            ).status_code
+            == 204
+        )
+        resp = cb.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"content": "我还在这里"},
+            format="json",
+        )
+        assert resp.status_code == 403
+
+    def test_removed_member_not_in_conversation_list(self, auth_client, user_factory):
+        """被移除后，会话列表不再包含该群。"""
+        ca, cb, conv = self._make_group_with_member(auth_client, user_factory)
+        assert (
+            ca.delete(
+                f"/api/v1/chat/conversations/{conv['id']}/members/{cb.user.id}/"
+            ).status_code
+            == 204
+        )
+        items = cb.get("/api/v1/chat/conversations/").json()
+        assert all(str(item["id"]) != str(conv["id"]) for item in items)
+
+    def test_removed_member_cannot_read_or_typing(self, auth_client, user_factory):
+        """被移除后：标已读 / typing 均 403。"""
+        ca, cb, conv = self._make_group_with_member(auth_client, user_factory)
+        assert (
+            ca.delete(
+                f"/api/v1/chat/conversations/{conv['id']}/members/{cb.user.id}/"
+            ).status_code
+            == 204
+        )
+        assert (
+            cb.post(f"/api/v1/chat/conversations/{conv['id']}/read/").status_code == 403
+        )
+        assert (
+            cb.post(
+                f"/api/v1/chat/conversations/{conv['id']}/typing/",
+                {"is_typing": True},
+                format="json",
+            ).status_code
+            == 403
+        )
+
+    def test_removed_member_cannot_manage_group(self, auth_client, user_factory):
+        """被移除后不能加人/踢人等管理操作（403 而非 404，不泄露群存在）。"""
+        ca, cb, conv = self._make_group_with_member(auth_client, user_factory)
+        outsider = user_factory(username="rm_out")
+        assert (
+            ca.delete(
+                f"/api/v1/chat/conversations/{conv['id']}/members/{cb.user.id}/"
+            ).status_code
+            == 204
+        )
+        assert (
+            cb.post(
+                f"/api/v1/chat/conversations/{conv['id']}/members/",
+                {"user_ids": [str(outsider.id)]},
+                format="json",
+            ).status_code
+            == 403
+        )
+
