@@ -24,6 +24,7 @@ vi.mock("../components/chat/ElysiaEntry", () => ({
 vi.mock("../api/chat", () => ({
   listConversations: vi.fn().mockResolvedValue([]),
   listMyInvites: vi.fn().mockResolvedValue([]),
+  listLeaveNotices: vi.fn().mockResolvedValue([]),
   listJoinRequests: vi.fn().mockResolvedValue([]),
   actionGroupInvite: vi.fn().mockResolvedValue({}),
   actionJoinRequest: vi.fn().mockResolvedValue({}),

@@ -48,6 +48,7 @@ export function MessagesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [friendsLoadError, setFriendsLoadError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {
@@ -85,6 +86,21 @@ export function MessagesPage() {
   }, [tab, isNarrow, loadFriendsTab]);
 
   const refreshBadges = () => void useBadgesStore.getState().fetch();
+
+  const handleRemoveFriend = useCallback(async (userId: string) => {
+    if (removingFriendId) return;
+    setActionError(null);
+    setRemovingFriendId(userId);
+    try {
+      await usersApi.deleteFriend(userId);
+      setFriendList((prev) => prev.filter((item) => item.user.id !== userId));
+      refreshBadges();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "解除好友失败");
+    } finally {
+      setRemovingFriendId(null);
+    }
+  }, [removingFriendId]);
 
   // 好友申请处理
   const handleFriendAction = useCallback((req: FriendRequest, action: "accept" | "reject") => {
@@ -278,10 +294,14 @@ export function MessagesPage() {
                   <Avatar label={f.user.nickname || f.user.username} size={40} online={f.user.online} imageUrl={f.user.avatar || null} />
                   <span className="friend-row-name">{f.user.nickname || f.user.username}</span>
                 </button>
-                <button type="button" className="btn btn-ghost friend-remove-btn" onClick={() => {
-                  usersApi.deleteFriend(f.user.id).then(() => setFriendList((prev) => prev.filter((item) => item.user.id !== f.user.id)))
-                    .catch((e) => setActionError(e instanceof Error ? e.message : "解除好友失败"));
-                }}>解除好友</button>
+                <button
+                  type="button"
+                  className="btn btn-ghost friend-remove-btn"
+                  disabled={removingFriendId === f.user.id}
+                  onClick={() => void handleRemoveFriend(f.user.id)}
+                >
+                  {removingFriendId === f.user.id ? "解除中…" : "解除好友"}
+                </button>
               </div>
             ))}
             {friendList.length === 0 && friendRequests.length === 0 && invites.length === 0 && joinRequests.length === 0 && (

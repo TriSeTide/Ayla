@@ -48,6 +48,7 @@ export function WideMessagesSidebar({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [friendsError, setFriendsError] = useState<string | null>(null);
+  const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
   // 会话列表为空时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
   useEffect(() => {
@@ -96,6 +97,21 @@ export function WideMessagesSidebar({
   }, [tab, loadFriendsTab]);
 
   const refreshBadges = () => void useBadgesStore.getState().fetch();
+
+  const handleRemoveFriend = useCallback(async (userId: string) => {
+    if (removingFriendId) return;
+    setActionError(null);
+    setRemovingFriendId(userId);
+    try {
+      await usersApi.deleteFriend(userId);
+      setFriendList((prev) => prev.filter((item) => item.user.id !== userId));
+      refreshBadges();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "解除好友失败");
+    } finally {
+      setRemovingFriendId(null);
+    }
+  }, [removingFriendId]);
 
   const handleFriendAction = useCallback((req: FriendRequest, action: "accept" | "reject") => {
     usersApi.actionFriendRequest(req.id, action).then(() => {
@@ -251,7 +267,14 @@ export function WideMessagesSidebar({
                   <Avatar label={f.user.nickname || f.user.username} size={36} online={f.user.online} imageUrl={f.user.avatar || null} />
                   <span className="friend-row-name">{f.user.nickname || f.user.username}</span>
                 </button>
-                <button type="button" className="btn btn-ghost friend-remove-btn" onClick={() => usersApi.deleteFriend(f.user.id).then(() => setFriendList((items) => items.filter((item) => item.user.id !== f.user.id))).catch((e) => setActionError(e instanceof Error ? e.message : "解除好友失败"))}>解除好友</button>
+                <button
+                  type="button"
+                  className="btn btn-ghost friend-remove-btn"
+                  disabled={removingFriendId === f.user.id}
+                  onClick={() => void handleRemoveFriend(f.user.id)}
+                >
+                  {removingFriendId === f.user.id ? "解除中…" : "解除好友"}
+                </button>
               </div>
             ))
           ))}
