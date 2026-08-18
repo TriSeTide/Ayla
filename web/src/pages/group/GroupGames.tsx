@@ -22,7 +22,15 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
     setError(null);
     boardgameApi
       .listGameRooms()
-      .then((list) => setRooms(list.filter((r) => r.group === groupId)))
+      .then((list) =>
+        setRooms(
+          list.filter(
+            (r) =>
+              String(r.group) === String(groupId) ||
+              r.allowed_group_ids?.some((id) => String(id) === String(groupId)),
+          ),
+        ),
+      )
       .catch((e) => setError(e instanceof Error ? e.message : "加载桌游室失败"))
       .finally(() => setLoading(false));
   }, [groupId]);
@@ -30,6 +38,18 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const handleRoomCreated = (event: Event) => {
+      const room = (event as CustomEvent<GameRoom>).detail;
+      if (room && String(room.group) === String(groupId)) {
+        // 创建弹层与本页并存时，POST 响应先到；以 GET 投影为准重新读取。
+        load();
+      }
+    };
+    window.addEventListener("boardgame:room-created", handleRoomCreated);
+    return () => window.removeEventListener("boardgame:room-created", handleRoomCreated);
+  }, [groupId, load]);
 
   const enterRoom = (room: GameRoom) => {
     boardgameApi

@@ -15,14 +15,19 @@ export function listGameRooms(mine = false) {
 }
 
 /** POST /rooms/ —— 创建房间（group 归属群；game_type 默认 boardgame） */
-export function createGameRoom(payload: {
+export async function createGameRoom(payload: {
   name: string;
   group?: string | null;
   visibility?: "public" | "friends" | "group";
   game_type?: string;
   allowed_group_ids?: string[];
 }) {
-  return apiRequest<GameRoom>("/boardgame/rooms/", { method: "POST", body: payload });
+  const room = await apiRequest<GameRoom>("/boardgame/rooms/", { method: "POST", body: payload });
+  // 群桌游页可能仍挂载（创建弹层关闭后导航到同一路由），主动通知其刷新列表。
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("boardgame:room-created", { detail: room }));
+  }
+  return room;
 }
 
 /** GET /rooms/<id>/ —— 详情 */

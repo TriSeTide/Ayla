@@ -25,8 +25,10 @@ export function VisibilitySelector({
   }, [groups, query]);
 
   const selectVisibility = (next: VisibilityValue) => {
-    onChange(next);
-    if (next === "group" && initialGroupId && !selectedGroupIds.includes(initialGroupId)) {
+    // 群内创建的内容必须保持群可见，不能从选择器切回公开/好友。
+    const effective = initialGroupId ? "group" : next;
+    onChange(effective);
+    if (effective === "group" && initialGroupId && !selectedGroupIds.includes(initialGroupId)) {
       onSelectedGroupIdsChange([...selectedGroupIds, initialGroupId]);
     }
   };
@@ -35,9 +37,9 @@ export function VisibilitySelector({
     <fieldset className="visibility-selector">
       <legend>可见范围</legend>
       <div className="visibility-selector-options">
-        <label><input type="radio" name={groupName} checked={value === "public"} onChange={() => selectVisibility("public")} /> 公开</label>
-        <label><input type="radio" name="visibility" checked={value === "friends"} onChange={() => selectVisibility("friends")} /> 好友可见</label>
-        <label><input type="radio" name="visibility" checked={value === "group"} onChange={() => selectVisibility("group")} /> 指定群可见</label>
+        <label><input type="radio" name={groupName} checked={value === "public"} disabled={Boolean(initialGroupId)} onChange={() => selectVisibility("public")} /> 公开</label>
+        <label><input type="radio" name={groupName} checked={value === "friends"} disabled={Boolean(initialGroupId)} onChange={() => selectVisibility("friends")} /> 好友可见</label>
+        <label><input type="radio" name={groupName} checked={value === "group"} onChange={() => selectVisibility("group")} /> 指定群可见</label>
       </div>
       {value === "group" && (
         <div className="visibility-selector-groups">

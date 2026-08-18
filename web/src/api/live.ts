@@ -21,9 +21,20 @@ export function createLiveChannel(
   group?: string | null,
   payload: { description?: string; cover?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] } = {},
 ) {
+  const groupIds = group
+    ? [...new Set([...(payload.allowed_group_ids ?? []), group])]
+    : payload.allowed_group_ids;
+  const body = {
+    title,
+    ...(group ? { group, visibility: "group" as const } : {}),
+    ...payload,
+    ...(group
+      ? { visibility: "group" as const, allowed_group_ids: groupIds }
+      : {}),
+  };
   return apiRequest<LiveChannelDescriptor>("/live/channels/", {
     method: "POST",
-    body: { title, ...(group ? { group } : {}), ...payload },
+    body,
   });
 }
 
