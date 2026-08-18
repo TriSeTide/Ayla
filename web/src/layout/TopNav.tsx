@@ -156,7 +156,7 @@ export function TopNav({
                 </button>
               ))}
               {(searchResults!.groups?.items ?? []).map((g) => (
-                <button key={g.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/group/${g.id}`)}>
+                <button key={g.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/search?q=${encodeURIComponent(g.title)}`)}>
                   <span>群 · {g.title}</span>
                 </button>
               ))}

@@ -171,11 +171,11 @@ export function LiveStudioPage() {
         onSelect={(id) => navigate(`/live/start/${id}`, { replace: true })}
         onBack={() => navigate("/live")}
         inputEntered={inputEntered}
-        showOwnerPanel
+        showOwnerPanel={Boolean(channel?.is_owner)}
         activityRoute={`/live/start/${channelId}`}
         keepLiveActivity
-        onDeleteChannel={(id) => void handleDeleteChannel(id)}
-        onCreateNewChannel={() => void handleCreateNewChannel()}
+        onDeleteChannel={channel?.is_owner ? (id) => void handleDeleteChannel(id) : undefined}
+        onCreateNewChannel={channel?.is_owner ? () => void handleCreateNewChannel() : undefined}
         deletingChannelId={deletingId}
       />
     </>
