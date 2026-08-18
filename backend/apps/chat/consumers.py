@@ -254,6 +254,29 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def group_request_new(self, event):
+        await self.send_json({
+            "type": "group.request.new",
+            "data": {
+                "request_id": event["request_id"],
+                "conversation_id": event["conversation_id"],
+                "conversation_title": event["conversation_title"],
+                "applicant_id": event["applicant_id"],
+                "applicant_name": event["applicant_name"],
+            },
+        })
+
+    async def group_member_left(self, event):
+        await self.send_json({
+            "type": "group.member.left",
+            "data": {
+                "conversation_id": event["conversation_id"],
+                "conversation_title": event["conversation_title"],
+                "member_id": event["member_id"],
+                "member_name": event["member_name"],
+            },
+        })
+
     async def group_invite_new(self, event):
         """新入群邀请推给被邀请人。"""
         await self.send_json(

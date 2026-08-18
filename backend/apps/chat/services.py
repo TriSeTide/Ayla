@@ -493,6 +493,57 @@ def conversation_highlights(conv, limit: int = 5) -> list:
     return highlights[:limit]
 
 
+# ---------- 群管理 ----------
+
+def transfer_group_owner(conversation, actor, target_user_id):
+    """群主将群主身份转给现有成员，事务内交换角色。"""
+    with transaction.atomic():
+        owner = ConversationMember.objects.select_for_update().get(
+            conversation=conversation, user=actor, role=ConversationMember.ROLE_OWNER
+        )
+        target = ConversationMember.objects.select_for_update().get(
+            conversation=conversation, user_id=target_user_id
+        )
+        owner.role = ConversationMember.ROLE_ADMIN
+        target.role = ConversationMember.ROLE_OWNER
+        owner.save(update_fields=["role"])
+        target.save(update_fields=["role"])
+        conversation.owner_id = target.user_id
+        conversation.save(update_fields=["owner"])
+    return conversation
+
+
+def leave_group(conversation, user):
+    """离开群聊；群主必须先转让群主，管理员/成员可直接离开。"""
+    member = ConversationMember.objects.filter(conversation=conversation, user=user).first()
+    if member is None:
+        raise ValueError("你不在该群中")
+    if member.role == ConversationMember.ROLE_OWNER:
+        raise ValueError("群主请先转让群主后再退出")
+    recipients = list(
+        ConversationMember.objects.filter(
+            conversation=conversation,
+            role__in=[ConversationMember.ROLE_OWNER, ConversationMember.ROLE_ADMIN],
+        ).exclude(user=user).values_list("user_id", flat=True)
+    )
+    member.delete()
+    for recipient_id in recipients:
+        broadcast_group_member_left(
+            recipient_id,
+            conversation_id=conversation.id,
+            conversation_title=conversation.title,
+            member_id=user.id,
+            member_name=getattr(user, "nickname", "") or user.username,
+        )
+
+
+def dissolve_group(conversation, actor):
+    """解散群聊，仅群主可执行。"""
+    if user_role_in(actor, conversation) != ConversationMember.ROLE_OWNER:
+        raise PermissionError("仅群主可解散群聊")
+    conversation.delete()
+
+
 # ---------- 群申请 / 邀请（S2，开发文档 §1.2） ----------
 #
 # 幂等语义：pending 查重由 services 做（DB 不设部分唯一索引，MySQL 不支持），
@@ -586,6 +637,64 @@ def reject_group_invite(inv: GroupInvite, handled_by) -> GroupInvite:
     inv.handled_at = timezone.now()
     inv.save(update_fields=["status", "handled_at"])
     return inv
+
+
+def broadcast_group_request_new(user_id, *, request_id, conversation_id, conversation_title, applicant_id, applicant_name):
+    """新入群申请通知群主/管理员。"""
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "group.request.new",
+            "request_id": str(request_id),
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "applicant_id": str(applicant_id),
+            "applicant_name": applicant_name,
+        },
+    )
+
+
+async def abroadcast_group_request_new(user_id, *, request_id, conversation_id, conversation_title, applicant_id, applicant_name):
+    """新入群申请通知群主/管理员（异步测试/WS）。"""
+    await _user_group_send_async(
+        user_id,
+        {
+            "type": "group.request.new",
+            "request_id": str(request_id),
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "applicant_id": str(applicant_id),
+            "applicant_name": applicant_name,
+        },
+    )
+
+
+def broadcast_group_member_left(user_id, *, conversation_id, conversation_title, member_id, member_name):
+    """成员退出后通知群主/管理员。"""
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "group.member.left",
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "member_id": str(member_id),
+            "member_name": member_name,
+        },
+    )
+
+
+async def abroadcast_group_member_left(user_id, *, conversation_id, conversation_title, member_id, member_name):
+    """成员退出后通知群主/管理员（异步测试/WS）。"""
+    await _user_group_send_async(
+        user_id,
+        {
+            "type": "group.member.left",
+            "conversation_id": str(conversation_id),
+            "conversation_title": conversation_title,
+            "member_id": str(member_id),
+            "member_name": member_name,
+        },
+    )
 
 
 # ---------- 用户级广播（S2：申请处理 / 新邀请通知） ----------

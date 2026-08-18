@@ -10,11 +10,13 @@ import { FavoriteButton } from "../FavoriteButton";
 import { IconImage, IconSend } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
+import { useAuthStore } from "../../stores/auth";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
 
 export function VoiceRoomBody({
   channelId,
   channelName,
+  ownerId,
   livekit,
   wsConnection,
   elysiaProfile,
@@ -25,9 +27,11 @@ export function VoiceRoomBody({
   onLocalVolumeChange,
   onToggleMemberMuted,
   onBack,
+  onDeleteChannel,
   inputEntered,
 }: {
   channelId?: string;
+  ownerId?: string;
   /** 旧调用方兼容字段；房内消息不再根据群归属路由。 */
   groupId?: string | null;
   channelName: string;
@@ -41,8 +45,10 @@ export function VoiceRoomBody({
   onLocalVolumeChange: (volume: number) => void;
   onToggleMemberMuted: (userId: string) => void;
   onBack: () => void;
+  onDeleteChannel?: () => void;
   inputEntered: boolean;
 }) {
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<VoiceChatMessage[]>([]);
   const [sending, setSending] = useState(false);
@@ -104,10 +110,13 @@ export function VoiceRoomBody({
         </button>
         <span className="voice-room-title">{channelName}</span>
         {channelId != null && <FavoriteButton targetType="voice" targetId={channelId} compact />}
+        {ownerId === currentUser?.id && onDeleteChannel && <button type="button" className="btn btn-danger" onClick={onDeleteChannel}>删除房间</button>}
       </header>
 
       <VoiceChannelPanel
         channelName={channelName}
+        channelId={channelId}
+        ownerId={ownerId}
         livekit={livekit}
         wsConnection={wsConnection}
         elysiaProfile={elysiaProfile}

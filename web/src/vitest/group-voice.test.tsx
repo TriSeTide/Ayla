@@ -5,6 +5,7 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import * as voiceApi from "../api/voice";
 import type { VoiceChannelDescriptor } from "../api/types";
 import { useVoiceStore } from "../stores/voice";
@@ -56,7 +57,7 @@ describe("GroupVoice 范围（仅该群）", () => {
       ch("v3", null, "公开语音"),
       ch("v4", "g9", "其它群"),
     ]);
-    render(<GroupVoice groupId="g1" onExit={vi.fn()} />);
+    render(<MemoryRouter><GroupVoice groupId="g1" onExit={vi.fn()} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("本群语音")).toBeInTheDocument());
     expect(screen.getByText("本群语音2")).toBeInTheDocument();
     expect(screen.queryByText("公开语音")).not.toBeInTheDocument();
@@ -65,7 +66,7 @@ describe("GroupVoice 范围（仅该群）", () => {
 
   it("本群无语音房 → 空态引导", async () => {
     vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([ch("v3", null, "公开语音")]);
-    render(<GroupVoice groupId="g1" onExit={vi.fn()} />);
+    render(<MemoryRouter><GroupVoice groupId="g1" onExit={vi.fn()} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("群内还没有语音房")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "创建群内语音房" }));
     await waitFor(() =>

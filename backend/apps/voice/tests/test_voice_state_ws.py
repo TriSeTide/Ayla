@@ -137,6 +137,9 @@ def test_join_switches_user_to_single_voice_channel(auth_client):
     assert user.is_in_voice is True
     assert user.voice_room_id == second.id
 
+    other = auth_client(username="voice_state_transfer_target")[1]
+    VoiceChannelMember.objects.create(channel=second, user=other)
+    services.transfer_channel_owner(second, user, other.id)
     services.leave_channel(second, user)
     user.refresh_from_db()
     assert user.is_in_voice is False
@@ -149,6 +152,9 @@ def test_leave_broadcasts_state_and_removes(auth_client):
     client, user = auth_client()
     ch = VoiceChannel.objects.create(name="语音", room_name="room_leave_ws", owner=user)
     services.join_channel(ch, user)
+    other = auth_client(username="voice_leave_transfer_target")[1]
+    VoiceChannelMember.objects.create(channel=ch, user=other)
+    services.transfer_channel_owner(ch, user, other.id)
     services.leave_channel(ch, user)
     assert not VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
 

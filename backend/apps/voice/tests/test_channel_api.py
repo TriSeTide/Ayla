@@ -68,13 +68,13 @@ def test_join_fails_without_livekit_config(auth_client, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_leave_removes_member(auth_client):
+def test_owner_must_transfer_before_leave(auth_client):
     client, user = auth_client()
     ch = VoiceChannel.objects.create(name="语音", room_name="room_leave", owner=user)
     VoiceChannelMember.objects.create(channel=ch, user=user)
     resp = client.post(f"/api/v1/voice/channels/{ch.id}/leave/")
-    assert resp.status_code == 200
-    assert not VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
+    assert resp.status_code == 403
+    assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
 
 
 @pytest.mark.django_db
@@ -145,6 +145,32 @@ def test_voice_room_chat_is_independent_from_group_messages(auth_client):
     history = client.get(f"/api/v1/voice/channels/{ch.id}/messages/")
     assert history.status_code == 200
     assert [item["content"] for item in history.json()] == ["房内消息"]
+
+
+@pytest.mark.django_db
+def test_owner_member_actions_and_leave_contract(auth_client):
+    owner_client, owner = auth_client(username="voice_owner_actions")
+    member_client, member = auth_client(username="voice_member_actions")
+    ch = VoiceChannel.objects.create(name="管理房", room_name="room_owner_actions", owner=owner)
+    VoiceChannelMember.objects.create(channel=ch, user=owner)
+    VoiceChannelMember.objects.create(channel=ch, user=member)
+
+    kicked = owner_client.post(
+        f"/api/v1/voice/channels/{ch.id}/members/{member.id}/action/",
+        {"action": "kick"}, format="json",
+    )
+    assert kicked.status_code == 200, kicked.content
+    assert not VoiceChannelMember.objects.filter(channel=ch, user=member).exists()
+
+    VoiceChannelMember.objects.create(channel=ch, user=member)
+    transferred = owner_client.post(
+        f"/api/v1/voice/channels/{ch.id}/members/{member.id}/action/",
+        {"action": "transfer"}, format="json",
+    )
+    assert transferred.status_code == 200, transferred.content
+    ch.refresh_from_db()
+    assert ch.owner_id == member.id
+    assert owner_client.post(f"/api/v1/voice/channels/{ch.id}/leave/").status_code == 200
 
 
 @pytest.mark.django_db

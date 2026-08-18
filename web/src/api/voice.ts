@@ -32,10 +32,10 @@ export function listVoiceChannels() {
 }
 
 /** POST /voice/channels/ —— 建频道（name 空 → 400；group 可选，群内创建归属该群） */
-export function createVoiceChannel(name: string, group?: string | null) {
+export function createVoiceChannel(name: string, group?: string | null, payload: { visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] } = {}) {
   return apiRequest<VoiceChannelDescriptor>("/voice/channels/", {
     method: "POST",
-    body: group ? { name, group } : { name },
+    body: { name, ...(group ? { group } : {}), ...payload },
   });
 }
 
@@ -66,6 +66,14 @@ export function joinVoiceChannel(channelId: string) {
 }
 
 /** POST /voice/channels/<id>/leave/ —— 离开（幂等，重复离开返回同样结果） */
+export function actionVoiceMember(channelId: string, userId: string, action: "kick" | "transfer") {
+  return apiRequest<VoiceChannelDescriptor>(`/voice/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}/action/`, { method: "POST", body: { action } });
+}
+
+export function deleteVoiceChannel(channelId: string) {
+  return apiRequest<{ deleted: boolean }>(`/voice/channels/${encodeURIComponent(channelId)}/`, { method: "DELETE" });
+}
+
 export function leaveVoiceChannel(channelId: string) {
   return apiRequest<{ left: boolean }>(
     `/voice/channels/${encodeURIComponent(channelId)}/leave/`,

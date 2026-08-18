@@ -62,6 +62,10 @@ def _not_found(msg="不存在"):
     return Response({"detail": msg}, status=status.HTTP_404_NOT_FOUND)
 
 
+def _bad_request(msg):
+    return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+
 # ---------- 会话 ----------
 
 class ConversationListView(APIView):
@@ -159,11 +163,16 @@ class ConversationDetailView(APIView):
             return _forbidden("仅群主/管理员可修改")
         title = request.data.get("title")
         announcement = request.data.get("announcement")
+        join_policy = request.data.get("join_policy")
         avatar = request.data.get("avatar")
         if title is not None:
             conv.title = str(title).strip()
         if announcement is not None:
             conv.announcement = str(announcement)
+        if join_policy is not None:
+            if join_policy not in {Conversation.JOIN_PUBLIC, Conversation.JOIN_APPLICATION}:
+                return Response({"detail": "join_policy 无效"}, status=status.HTTP_400_BAD_REQUEST)
+            conv.join_policy = join_policy
         if avatar is not None:
             avatar = str(avatar).strip()
             # 头像必须是媒体 content URL 且当前用户有访问权（图片）
@@ -178,6 +187,8 @@ class ConversationDetailView(APIView):
             update_fields.append("title")
         if announcement is not None:
             update_fields.append("announcement")
+        if join_policy is not None:
+            update_fields.append("join_policy")
         if avatar is not None:
             update_fields.append("avatar")
         if update_fields:
@@ -412,6 +423,32 @@ class MemberRemoveView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class MemberRoleView(APIView):
+    """PATCH /conversations/<id>/members/<user_id>/role/ —— 任命/撤销管理员。"""
+
+    def patch(self, request, conv_id, user_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _forbidden("仅群聊支持角色管理")
+        if services.user_role_in(request.user, conv) != ConversationMember.ROLE_OWNER:
+            return _forbidden("仅群主可管理管理员")
+        try:
+            member = ConversationMember.objects.get(conversation=conv, user_id=user_id)
+        except ConversationMember.DoesNotExist:
+            return _not_found("成员不存在")
+        if member.role == ConversationMember.ROLE_OWNER:
+            return _forbidden("不能修改群主角色")
+        role = request.data.get("role")
+        if role not in {ConversationMember.ROLE_MEMBER, ConversationMember.ROLE_ADMIN}:
+            return Response({"detail": "role 无效"}, status=status.HTTP_400_BAD_REQUEST)
+        member.role = role
+        member.save(update_fields=["role"])
+        conv.refresh_from_db()
+        return Response(ConversationSerializer(conv, context={"request": request}).data)
+
+
 class MemberMuteView(APIView):
     """POST /conversations/<id>/members/<user_id>/mute/ —— 禁言/解除 {muted: bool}。"""
 
@@ -433,6 +470,53 @@ class MemberMuteView(APIView):
         member.muted = muted
         member.save(update_fields=["muted"])
         return Response({"detail": "已禁言" if muted else "已解除禁言", "muted": muted})
+
+
+class GroupOwnerTransferView(APIView):
+    """POST /conversations/<id>/transfer-owner/ —— 群主转让。"""
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _forbidden("仅群聊支持转让")
+        target_id = request.data.get("user_id")
+        try:
+            services.transfer_group_owner(conv, request.user, target_id)
+        except ConversationMember.DoesNotExist:
+            return _not_found("目标成员不存在")
+        except (PermissionError, ValueError) as exc:
+            return _forbidden(str(exc))
+        return Response(ConversationSerializer(conv, context={"request": request}).data)
+
+
+class GroupLeaveView(APIView):
+    """POST /conversations/<id>/leave/ —— 成员退出群聊。"""
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        try:
+            services.leave_group(conv, request.user)
+        except ValueError as exc:
+            return _bad_request(str(exc))
+        return Response({"left": True})
+
+
+class GroupDissolveView(APIView):
+    """DELETE /conversations/<id>/dissolve/ —— 群主解散群聊。"""
+
+    def delete(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        try:
+            services.dissolve_group(conv, request.user)
+        except PermissionError as exc:
+            return _forbidden(str(exc))
+        return Response({"deleted": True})
 
 
 # ---------- 群申请 / 邀请（S2，开发文档 §1.2） ----------
@@ -474,9 +558,31 @@ class GroupJoinRequestView(APIView):
             return Response(
                 {"detail": "你已在群中"}, status=status.HTTP_400_BAD_REQUEST
             )
+        if conv.join_policy == Conversation.JOIN_PUBLIC:
+            ConversationMember.objects.get_or_create(
+                conversation=conv,
+                user=request.user,
+                defaults={"role": ConversationMember.ROLE_MEMBER},
+            )
+            return Response({"status": "accepted", "conversation_id": str(conv.id)}, status=status.HTTP_201_CREATED)
         req, created = services.create_join_request(
             request.user, conv, request.data.get("message") or ""
         )
+        if created:
+            recipients = ConversationMember.objects.filter(
+                conversation=conv,
+                role__in=[ConversationMember.ROLE_OWNER, ConversationMember.ROLE_ADMIN],
+            ).values_list("user_id", flat=True)
+            applicant_name = getattr(request.user, "nickname", "") or request.user.username
+            for recipient_id in recipients:
+                services.broadcast_group_request_new(
+                    recipient_id,
+                    request_id=req.id,
+                    conversation_id=conv.id,
+                    conversation_title=conv.title,
+                    applicant_id=request.user.id,
+                    applicant_name=applicant_name,
+                )
         return Response(
             GroupJoinRequestSerializer(req, context={"request": request}).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,

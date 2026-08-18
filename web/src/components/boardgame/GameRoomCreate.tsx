@@ -4,6 +4,7 @@
 import { useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
+import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
 
 export function GameRoomCreate({
   group,
@@ -13,6 +14,8 @@ export function GameRoomCreate({
   onCreated: (room: GameRoom) => void;
 }) {
   const [name, setName] = useState("");
+  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +28,7 @@ export function GameRoomCreate({
     setBusy(true);
     setError(null);
     try {
-      const room = await boardgameApi.createGameRoom({ name: trimmed, group });
+      const room = await boardgameApi.createGameRoom({ name: trimmed, group, visibility, allowed_group_ids: selectedGroupIds });
       setName("");
       onCreated(room);
     } catch (e) {
@@ -37,6 +40,7 @@ export function GameRoomCreate({
 
   return (
     <div className="game-room-create">
+      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
       <input
         className="field"
         placeholder="桌游室名称"

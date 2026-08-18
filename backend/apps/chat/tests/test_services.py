@@ -201,11 +201,11 @@ class TestMarkRead:
         services.mark_read(b, msg)  # 幂等
         assert MessageRead.objects.filter(message=msg, user=b).count() == 1
 
-    def test_mark_own_message_no_broadcast(self, user_factory):
-        # 自己消息标已读不触发 message.read（sender == user）
+    def test_mark_own_message_no_broadcast_or_read_record(self, user_factory):
+        # 自己消息不进入对方未读游标，也不触发 message.read（sender == user）
         a = user_factory(username="mr_own")
         b = user_factory(username="mr_own2")
         conv = services.get_or_create_conversation(a, b)
         msg = services.create_message(a, conv, content="self")
         services.mark_read(a, msg)
-        assert MessageRead.objects.filter(message=msg, user=a).count() == 1
+        assert MessageRead.objects.filter(message=msg, user=a).count() == 0

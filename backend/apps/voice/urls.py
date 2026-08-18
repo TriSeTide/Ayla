@@ -31,6 +31,11 @@ urlpatterns = [
         name="voice-channel-members",
     ),
     path(
+        "channels/<int:channel_id>/members/<str:user_id>/action/",
+        views.ChannelMemberActionView.as_view(),
+        name="voice-channel-member-action",
+    ),
+    path(
         "channels/<int:channel_id>/messages/",
         views.ChannelChatMessagesView.as_view(),
         name="voice-channel-messages",

@@ -48,6 +48,10 @@ class PostSerializer(serializers.ModelSerializer):
     images = PostImageSerializer(many=True, read_only=True)
     comment_count = serializers.SerializerMethodField()
     is_author = serializers.SerializerMethodField()
+    allowed_group_ids = serializers.SerializerMethodField()
+
+    def get_allowed_group_ids(self, obj):
+        return [str(group_id) for group_id in obj.allowed_groups.values_list("id", flat=True)]
 
     class Meta:
         model = Post
@@ -60,6 +64,7 @@ class PostSerializer(serializers.ModelSerializer):
             "visibility",
             "group",
             "group_name",
+            "allowed_group_ids",
             "images",
             "comment_count",
             "is_author",
@@ -144,6 +149,9 @@ class CreatePostSerializer(serializers.Serializer):
     body = serializers.CharField(required=True, max_length=10000)
     visibility = serializers.ChoiceField(choices=Visibility.choices, required=False)
     group = serializers.CharField(required=False, allow_null=True, default=None)
+    allowed_group_ids = serializers.ListField(
+        child=serializers.CharField(max_length=32), required=False, default=list
+    )
     images = serializers.ListField(
         child=serializers.CharField(max_length=64), required=False, default=list
     )
@@ -178,10 +186,15 @@ class CreatePostSerializer(serializers.Serializer):
 
 
 class UpdatePostSerializer(serializers.Serializer):
-    """编辑帖子：title/body 均可选，但至少一项；body 非空。"""
+    """编辑帖子：内容与可见性均可变更。"""
 
     title = serializers.CharField(required=False, allow_blank=True, max_length=128)
     body = serializers.CharField(required=False, max_length=10000)
+    visibility = serializers.ChoiceField(choices=Visibility.choices, required=False)
+    group = serializers.CharField(required=False, allow_null=True)
+    allowed_group_ids = serializers.ListField(
+        child=serializers.CharField(max_length=32), required=False
+    )
 
     def validate(self, attrs):
         if not attrs:

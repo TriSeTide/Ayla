@@ -86,6 +86,7 @@ export interface FriendRequest {
   message: string;
   status: "pending" | "accepted" | "rejected";
   created_at: string;
+  handled_at?: string | null;
 }
 
 /** 发起好友申请入参 */
@@ -164,6 +165,7 @@ export interface ConversationSummary {
   announcement: string;
   /** 群头像（媒体 content URL，仅群聊；私聊为空串） */
   avatar: string;
+  join_policy?: "public" | "application";
   owner_id: string;
   members: ConversationMember[];
   my_role: "member" | "admin" | "owner" | null;
@@ -182,6 +184,7 @@ export interface ConversationDetail {
   announcement: string;
   /** 群头像（媒体 content URL，仅群聊；私聊为空串） */
   avatar: string;
+  join_policy?: "public" | "application";
   owner_id: string;
   members: ConversationMember[];
   my_role: "member" | "admin" | "owner" | null;
@@ -276,6 +279,51 @@ export interface ElysiaReplyFrame {
   };
 }
 
+export interface GroupRequestNewFrame {
+  type: "group.request.new";
+  data: {
+    request_id: string;
+    conversation_id: string;
+    conversation_title: string;
+    applicant_id: string;
+    applicant_name: string;
+  };
+}
+
+export interface GroupRequestResolvedFrame {
+  type: "group.request.resolved";
+  data: {
+    request_id: string;
+    conversation_id: string;
+    conversation_title: string;
+    status: string;
+    handled_by_id: string;
+    handled_at: string | null;
+  };
+}
+
+export interface GroupInviteNewFrame {
+  type: "group.invite.new";
+  data: {
+    invite_id: string;
+    conversation_id: string;
+    conversation_title: string;
+    inviter_id: string;
+    inviter_name: string;
+    created_at: string | null;
+  };
+}
+
+export interface GroupMemberLeftFrame {
+  type: "group.member.left";
+  data: {
+    conversation_id: string;
+    conversation_title: string;
+    member_id: string;
+    member_name: string;
+  };
+}
+
 export interface ChatErrorFrame {
   type: "error";
   detail: string;
@@ -294,6 +342,10 @@ export type ChatServerFrame =
   | TypingFrame
   | HistorySyncFrame
   | ElysiaReplyFrame
+  | GroupRequestNewFrame
+  | GroupRequestResolvedFrame
+  | GroupInviteNewFrame
+  | GroupMemberLeftFrame
   | ChatErrorFrame
   | PongFrame;
 
@@ -312,6 +364,7 @@ export interface VoiceChannelDescriptor {
   group: string | null;
   /** S1：群归属名（group 非空时的群标题，否则 null） */
   group_name: string | null;
+  allowed_group_ids?: string[];
   /** 我是否在该频道（列表/详情视图注入） */
   mine: boolean;
   created_at: string;
@@ -562,6 +615,7 @@ export interface Post {
   visibility: "public" | "friends" | "group";
   group: string | null;
   group_name: string | null;
+  allowed_group_ids?: string[];
   images: PostImage[];
   comment_count: number;
   is_author: boolean;
@@ -627,6 +681,7 @@ export interface GameRoom {
   visibility: "public" | "friends" | "group";
   group: string | null;
   group_name: string | null;
+  allowed_group_ids?: string[];
   /** 游戏类型（默认 boardgame，玩法后续） */
   game_type: string;
   /** waiting（等待中）/ playing（对局中）/ ended（已结束） */

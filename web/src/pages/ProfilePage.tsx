@@ -256,7 +256,7 @@ export function ProfilePage() {
 
           <section className="profile-section">
             <div className="profile-section-head">
-              <span className="profile-section-title">我的发帖</span>
+              <Link to="/posts/mine" className="profile-section-title">我的发帖</Link>
               <span className="profile-section-count">{myPosts.length}</span>
             </div>
             {myPosts.length === 0 ? (

@@ -49,6 +49,10 @@ class LiveChannel(models.Model):
         blank=True,
         limit_choices_to={"type": "group"},
     )
+    allowed_groups = models.ManyToManyField(
+        "chat.Conversation", related_name="visible_live_channels", blank=True,
+        limit_choices_to={"type": "group"},
+    )
     # 补充（安全）：secrets.token_hex(24) = 48 字符，唯一索引；推流握手指纹，仅 owner 可见
     stream_key = models.CharField("推流指纹", max_length=64, unique=True)
     # 乐观标记：真实在播以 SRS 查询为准（srs.is_streaming）

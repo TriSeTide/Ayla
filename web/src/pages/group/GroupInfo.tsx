@@ -51,6 +51,9 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadRetry, setLoadRetry] = useState(0);
+  const [joinRequests, setJoinRequests] = useState<import("../../api/types").GroupJoinRequest[]>([]);
+  const [managementError, setManagementError] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   // 群头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [groupAvatarFile, setGroupAvatarFile] = useState<File | null>(null);
@@ -120,6 +123,28 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const isAdmin = conv?.my_role === "admin";
   const canManage = isOwner || isAdmin;
   const members = conv?.members ?? [];
+
+  const reloadGroup = async () => {
+    const fresh = await chatApi.getConversation(groupId);
+    useChatStore.getState().upsertConversation(fresh);
+    setGroupDetail({ ...fresh, peer: null });
+    return fresh;
+  };
+
+  useEffect(() => {
+    if (!canManage || typeof chatApi.listJoinRequests !== "function") return;
+    chatApi.listJoinRequests(groupId)
+      .then((items) => setJoinRequests(items.filter((item) => item.status === "pending")))
+      .catch((e) => setManagementError(e instanceof Error ? e.message : "加载入群申请失败"));
+  }, [canManage, groupId]);
+
+  const runManagementAction = async (key: string, action: () => Promise<unknown>) => {
+    setBusyAction(key);
+    setManagementError(null);
+    try { await action(); await reloadGroup(); }
+    catch (e) { setManagementError(e instanceof Error ? e.message : "操作失败"); }
+    finally { setBusyAction(null); }
+  };
 
   const startEdit = () => {
     setTitle(conv?.title ?? "");
@@ -279,6 +304,18 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                   {ROLE_LABEL[m.role]}
                 </span>
               )}
+              {canManage && m.user.id !== currentUser?.id && m.role !== "owner" && (
+                <div className="group-info-member-actions">
+                  {isOwner && (
+                    <button type="button" className="btn btn-ghost" disabled={busyAction !== null} onClick={() => void runManagementAction(`role-${m.user.id}`, () => chatApi.setMemberRole(groupId, m.user.id, m.role === "admin" ? "member" : "admin"))}>
+                      {m.role === "admin" ? "撤销管理员" : "设为管理员"}
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-ghost" disabled={busyAction !== null} onClick={() => void runManagementAction(`remove-${m.user.id}`, () => chatApi.removeMember(groupId, m.user.id))}>
+                    {busyAction === `remove-${m.user.id}` ? "移除中…" : "移除"}
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -286,14 +323,31 @@ export function GroupInfo({ groupId }: { groupId: string }) {
 
       <section className="group-info-actions">
         <h3 className="group-info-section-title">管理</h3>
-        {canManage ? (
+        {managementError && <p className="group-info-error" role="alert">{managementError}</p>}
+        {canManage && (
           <>
-            <p className="group-info-placeholder">入群申请审批 — 随 F8 消息中心落地</p>
-            <p className="group-info-placeholder">移除成员 / 转让群主 / 解散群 — 后端暂未提供端点</p>
+            <div className="group-info-policy">
+              <span>加入方式：{conv.join_policy === "public" ? "公开加入" : "申请加入"}</span>
+              {isOwner && <select value={conv.join_policy ?? "application"} onChange={(e) => void runManagementAction("join-policy", () => chatApi.patchConversation(groupId, { join_policy: e.target.value as "public" | "application" }))}>
+                <option value="public">公开加入</option>
+                <option value="application">申请加入</option>
+              </select>}
+            </div>
+            {joinRequests.length > 0 ? <div className="group-info-requests">
+              <h4>入群申请审批 · 待处理（{joinRequests.length}）</h4>
+              {joinRequests.map((request) => <div key={request.id} className="group-info-request">
+                <span>{request.applicant.nickname || request.applicant.username}{request.message ? `：${request.message}` : ""}</span>
+                <button type="button" className="btn btn-primary" disabled={busyAction !== null} onClick={() => void runManagementAction(`join-${request.id}`, async () => { await chatApi.actionJoinRequest(request.id, "accept"); setJoinRequests((items) => items.filter((item) => item.id !== request.id)); })}>同意</button>
+                <button type="button" className="btn btn-ghost" disabled={busyAction !== null} onClick={() => void runManagementAction(`join-${request.id}`, async () => { await chatApi.actionJoinRequest(request.id, "reject"); setJoinRequests((items) => items.filter((item) => item.id !== request.id)); })}>拒绝</button>
+              </div>)}
+            </div> : <p className="group-info-placeholder">入群申请审批：暂无待处理申请</p>}
+            {isOwner && <>
+              <button type="button" className="btn btn-ghost" onClick={() => { const target = window.prompt("输入要转让给的成员 ID"); if (target) void runManagementAction("transfer", () => chatApi.transferGroupOwner(groupId, target)); }}>转让群主</button>
+              <button type="button" className="btn btn-danger" onClick={() => { if (window.confirm("确定解散群聊？此操作不可撤销")) void runManagementAction("dissolve", async () => { await chatApi.dissolveGroup(groupId); window.location.href = "/messages"; }); }}>解散群聊</button>
+            </>}
           </>
-        ) : (
-          <p className="group-info-placeholder">退出群 / 邀请好友 — 退出后端暂未提供，邀请随 F8 落地</p>
         )}
+        {!isOwner && <button type="button" className="btn btn-ghost" onClick={() => { if (window.confirm("确定退出群聊？")) void runManagementAction("leave", async () => { await chatApi.leaveGroup(groupId); window.location.href = "/home"; }); }}>退出群聊</button>}
       </section>
     </div>
   );

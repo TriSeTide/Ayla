@@ -5,7 +5,9 @@
  * - 爱莉条目识别：profile.user.id 命中成员 user_id → 中性技术标签（§4.6）；
  * - 控制条复用 VoiceControls。
  */
+import { Fragment, useState } from "react";
 import type { ElysiaProfile } from "../../api/types";
+import * as voiceApi from "../../api/voice";
 import { useAuthStore } from "../../stores/auth";
 import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
 import { useVoiceStore } from "../../stores/voice";
@@ -29,6 +31,8 @@ export function elysiaStateLabel(techState: string | null): string | null {
 
 export function VoiceChannelPanel({
   channelName,
+  channelId,
+  ownerId,
   livekit,
   wsConnection,
   elysiaProfile,
@@ -40,6 +44,8 @@ export function VoiceChannelPanel({
   onToggleMemberMuted,
 }: {
   channelName: string;
+  channelId?: string;
+  ownerId?: string;
   livekit: LiveKitConnectionState;
   wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
@@ -56,6 +62,22 @@ export function VoiceChannelPanel({
   const currentUser = useAuthStore((s) => s.currentUser);
   const list = Object.values(members);
   const elysiaUserId = elysiaProfile?.user.id ?? null;
+  const isOwner = ownerId != null && ownerId === currentUser?.id;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const memberAction = async (userId: string, action: "kick" | "transfer") => {
+    if (!channelId || busyUserId) return;
+    setBusyUserId(userId);
+    setActionError(null);
+    try {
+      await voiceApi.actionVoiceMember(channelId, userId, action);
+      if (action === "transfer") setActionError("房主已转让");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "房主操作失败");
+    } finally {
+      setBusyUserId(null);
+    }
+  };
 
   return (
     <section className="voice-panel">
@@ -70,6 +92,7 @@ export function VoiceChannelPanel({
           list.map((m) => {
             const isElysia = elysiaUserId != null && m.user_id === elysiaUserId;
             return (
+              <Fragment key={m.user_id}>
               <VoiceMemberRow
                 key={m.user_id}
                 member={m}
@@ -81,10 +104,18 @@ export function VoiceChannelPanel({
                 onToggleMic={onToggleMic}
                 onToggleMemberMuted={onToggleMemberMuted}
               />
+              {isOwner && m.user_id !== currentUser?.id && (
+                <div className="voice-owner-member-actions">
+                  <button type="button" className="btn btn-ghost" disabled={busyUserId !== null} onClick={() => void memberAction(m.user_id, "kick")}>{busyUserId === m.user_id ? "处理中…" : "踢出"}</button>
+                  <button type="button" className="btn btn-ghost" disabled={busyUserId !== null} onClick={() => void memberAction(m.user_id, "transfer")}>转让房主</button>
+                </div>
+              )}
+              </Fragment>
             );
           })
         )}
       </div>
+      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       <VoiceControls
         livekit={livekit}
         wsConnection={wsConnection}

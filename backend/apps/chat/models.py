@@ -40,6 +40,15 @@ class Conversation(models.Model):
     announcement = models.TextField("群公告", blank=True, default="")
     # 群头像：媒体 content URL（/api/v1/media/{id}/content），空串表示未设置（仅群聊使用）
     avatar = models.CharField("群头像", max_length=512, blank=True, default="")
+    JOIN_PUBLIC = "public"
+    JOIN_APPLICATION = "application"
+    JOIN_POLICY_CHOICES = [
+        (JOIN_PUBLIC, "公开加入"),
+        (JOIN_APPLICATION, "申请加入"),
+    ]
+    join_policy = models.CharField(
+        "加入方式", max_length=20, choices=JOIN_POLICY_CHOICES, default=JOIN_APPLICATION
+    )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:

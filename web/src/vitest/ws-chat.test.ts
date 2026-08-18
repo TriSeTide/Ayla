@@ -12,6 +12,7 @@ import { ChatWSClient } from "../ws/chat";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
+import { useNoticeStore } from "../stores/notices";
 
 type WSInstance = {
   readyState: number;
@@ -70,6 +71,7 @@ beforeEach(() => {
   useAuthStore.setState({ accessToken: "acc", refreshToken: "ref" });
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
+  useNoticeStore.getState().clear();
 });
 
 afterEach(() => {
@@ -78,9 +80,26 @@ afterEach(() => {
   useAuthStore.setState({ accessToken: null, refreshToken: null });
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
+  useNoticeStore.getState().clear();
 });
 
 describe("ChatWSClient", () => {
+  it("用户级群成员离开事件进入实时通知 store", () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], {
+      type: "group.member.left",
+      data: { conversation_id: "g1", conversation_title: "测试群", member_id: "u2", member_name: "小明" },
+    });
+    expect(useNoticeStore.getState().notices[0]).toMatchObject({
+      kind: "group.member.left",
+      title: "群成员已离开",
+      detail: "测试群：小明 已离开",
+    });
+    client.disconnect();
+  });
+
   it("connect → 建立连接；subscribe 发送 subscribe 帧", () => {
     const client = new ChatWSClient();
     client.connect();

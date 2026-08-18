@@ -108,6 +108,7 @@ class FriendRequestSerializer(serializers.ModelSerializer):
             "message",
             "status",
             "created_at",
+            "handled_at",
         ]
 
     def validate_to_user_id(self, value: str) -> str:

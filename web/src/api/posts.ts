@@ -31,6 +31,7 @@ export function createPost(payload: {
   group?: string | null;
   visibility?: "public" | "friends" | "group";
   images?: string[];
+  allowed_group_ids?: string[];
 }) {
   return apiRequest<Post>("/posts/", { method: "POST", body: payload });
 }
@@ -41,7 +42,7 @@ export function getPost(postId: number) {
 }
 
 /** PATCH /posts/<id>/ —— 编辑（仅作者） */
-export function updatePost(postId: number, payload: { title?: string; body?: string }) {
+export function updatePost(postId: number, payload: { title?: string; body?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] }) {
   return apiRequest<Post>(`/posts/${postId}/`, { method: "PATCH", body: payload });
 }
 

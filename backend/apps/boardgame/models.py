@@ -49,6 +49,10 @@ class GameRoom(models.Model):
     visibility = models.CharField(
         "可见性", max_length=16, choices=Visibility.choices, default=Visibility.PUBLIC
     )
+    allowed_groups = models.ManyToManyField(
+        "chat.Conversation", related_name="visible_game_rooms", blank=True,
+        limit_choices_to={"type": "group"},
+    )
     # 占位字段：玩法本体后续实现，本期固定默认值
     game_type = models.CharField("游戏类型", max_length=64, default="boardgame")
     status = models.CharField(

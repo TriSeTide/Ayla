@@ -18,6 +18,7 @@ import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
+import { RealtimeNoticeToast } from "../components/RealtimeNoticeToast";
 import { TopNav } from "./TopNav";
 import { isGroupScene, isMessagesRoute, isPostDetailRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
@@ -64,6 +65,7 @@ export function AppShell() {
       </main>
       <SessionActivityIndicator />
       <RealtimeStatusBanner />
+      <RealtimeNoticeToast />
       {isNarrow && !groupSceneNarrow && !postDetailNarrow && !privateChatNarrow ? (
         <>
           <MessageFab style={leavingStyle} unread={messageBadge} backHome={messagesNarrow} />

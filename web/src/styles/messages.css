@@ -131,12 +131,44 @@
   text-align: left;
 }
 
+.friend-row-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .friend-row-name {
   flex: 1;
+  min-width: 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
+
+.friend-remove-btn {
+  flex: none;
+  min-height: 40px;
+  padding: 0 var(--sp-2);
+  font-size: 12px;
+}
+
+.request-status {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.request-status-accepted { color: var(--success); }
+.request-status-rejected { color: var(--destructive); }
 
 .messages-empty {
   padding: var(--sp-4);

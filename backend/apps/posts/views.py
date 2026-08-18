@@ -139,6 +139,7 @@ class PostListView(APIView):
                 images=data.get("images") or [],
                 group=group,
                 visibility=data.get("visibility"),
+                allowed_group_ids=data.get("allowed_group_ids"),
             )
         except ValueError as exc:
             return _bad_request(str(exc))
@@ -174,7 +175,28 @@ class PostDetailView(APIView):
             post.title = (data["title"] or "").strip()
         if "body" in data:
             post.body = (data["body"] or "").strip()
-        post.save(update_fields=["title", "body"])
+        if "visibility" in request.data:
+            value = request.data.get("visibility")
+            if value not in {"public", "friends", "group"}:
+                return _bad_request("visibility 无效")
+            post.visibility = value
+        if "group" in request.data:
+            group, group_err = _get_group_or_400(request.data.get("group"))
+            if group_err:
+                return _bad_request(group_err)
+            post.group = group
+        if "allowed_group_ids" in request.data:
+            try:
+                from apps.common.visibility import set_allowed_groups
+                set_allowed_groups(post, request.data.get("allowed_group_ids"))
+            except ValueError as exc:
+                return _bad_request(str(exc))
+        update_fields = ["title", "body"]
+        if "visibility" in request.data:
+            update_fields.append("visibility")
+        if "group" in request.data:
+            update_fields.append("group")
+        post.save(update_fields=update_fields)
         return Response(PostSerializer(post, context={"request": request}).data)
 
     def delete(self, request, post_id):

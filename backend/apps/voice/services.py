@@ -47,7 +47,7 @@ def _resolve_visibility(group, visibility: str | None) -> str:
     return visibility
 
 
-def create_channel(user, name: str, group=None, visibility: str | None = None) -> VoiceChannel:
+def create_channel(user, name: str, group=None, visibility: str | None = None, allowed_group_ids=None) -> VoiceChannel:
     """建频道（自动生成唯一 room_name）。
 
     S1 扩展：可选 `group`（FK chat.Conversation，须为群聊）与 `visibility`。
@@ -56,13 +56,17 @@ def create_channel(user, name: str, group=None, visibility: str | None = None) -
         if str(getattr(group, "type", "")) != "group":
             raise ValueError("group 必须是群聊会话")
     visibility = _resolve_visibility(group, visibility)
-    return VoiceChannel.objects.create(
+    channel = VoiceChannel.objects.create(
         name=name,
         room_name=_gen_room_name(),
         owner=user,
         group=group,
         visibility=visibility,
     )
+    if allowed_group_ids is not None:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(channel, allowed_group_ids)
+    return channel
 
 
 def get_channel(channel_id) -> VoiceChannel | None:
@@ -79,8 +83,41 @@ def user_in_channel(channel: VoiceChannel, user) -> bool:
 
 
 def can_manage_channel(channel: VoiceChannel, user) -> bool:
-    """频道 owner/管理员可改名称。"""
+    """频道 owner 可管理频道。"""
     return channel.owner_id == user.id
+
+
+@transaction.atomic
+def transfer_channel_owner(channel: VoiceChannel, actor, target_user_id):
+    """将语音房房主转给当前成员。"""
+    locked_channel = VoiceChannel.objects.select_for_update().get(pk=channel.pk)
+    if locked_channel.owner_id != actor.id:
+        raise PermissionError("仅房主可转让")
+    target = VoiceChannelMember.objects.select_related("user").select_for_update().get(
+        channel=locked_channel, user_id=target_user_id
+    )
+    locked_channel.owner_id = target.user_id
+    locked_channel.save(update_fields=["owner"])
+    # 保持调用方持有的实例与数据库一致，避免同一请求链上的后续权限判断使用旧 owner_id。
+    channel.owner_id = target.user_id
+    return channel
+
+
+def kick_member(channel: VoiceChannel, actor, user_id):
+    """房主踢出成员，不能踢自己。"""
+    if not can_manage_channel(channel, actor):
+        raise PermissionError("仅房主可踢人")
+    if str(user_id) == str(actor.id):
+        raise ValueError("不能踢自己")
+    member = VoiceChannelMember.objects.filter(channel=channel, user_id=user_id).first()
+    if member is None:
+        raise LookupError("成员不存在")
+    member.delete()
+    if member.user.voice_room_id == channel.id:
+        member.user.is_in_voice = False
+        member.user.voice_room_id = None
+        member.user.save(update_fields=["is_in_voice", "voice_room_id"])
+    broadcast_voice_state(channel, member.user, "left")
 
 
 # ---------- 加入/离开/心跳 ----------
@@ -120,7 +157,9 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
 
 
 def leave_channel(channel: VoiceChannel, user) -> None:
-    """离开频道（删除成员记录）+ 广播 voice.state left。"""
+    """离开频道；房主必须先转让房主。"""
+    if channel.owner_id == user.id and VoiceChannelMember.objects.filter(channel=channel, user=user).exists():
+        raise PermissionError("房主请先转让房主后再离开")
     deleted, _ = VoiceChannelMember.objects.filter(channel=channel, user=user).delete()
     if deleted:
         if user.voice_room_id == channel.id:

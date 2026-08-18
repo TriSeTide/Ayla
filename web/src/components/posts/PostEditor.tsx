@@ -10,6 +10,7 @@ import { mediaContentUrl, resolveMediaPath, uploadMediaFile } from "../../api/me
 import type { MediaDescriptor, Post } from "../../api/types";
 import { IconImage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
 
 type PostImageDraft = {
   mediaId: string;
@@ -29,6 +30,8 @@ export function PostEditor({
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [images, setImages] = useState<PostImageDraft[]>([]);
   const [failedFiles, setFailedFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -79,6 +82,8 @@ export function PostEditor({
         title: title.trim(),
         body: trimmed,
         group,
+        visibility,
+        allowed_group_ids: selectedGroupIds,
         images: images.map((image) => image.mediaId),
       });
       setTitle("");
@@ -111,6 +116,7 @@ export function PostEditor({
         rows={compact ? 1 : 4}
         onChange={(e) => setBody(e.target.value)}
       />
+      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
       {images.length > 0 && (
         <div className="post-editor-images" aria-label={`已添加 ${images.length} 张图片`}>
           {images.map((image) => (

@@ -31,6 +31,11 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<PostComment | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editVisibility, setEditVisibility] = useState<Post["visibility"]>("public");
+  const [savingEdit, setSavingEdit] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
 
@@ -152,18 +157,51 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         </button>
         <span className="post-detail-title">帖子</span>
         {post.is_author && (
-          <button
-            type="button"
-            className="msg-action-btn"
-            onClick={() => {
-              if (confirmingDelete) confirmDelete();
-              else setConfirmingDelete(true);
-            }}
-          >
-            {confirmingDelete ? "确认删除？" : "删除"}
-          </button>
+          <div className="post-detail-owner-actions">
+            <button type="button" className="msg-action-btn" onClick={() => {
+              setEditTitle(post.title);
+              setEditBody(post.body);
+              setEditVisibility(post.visibility);
+              setEditing(true);
+            }}>编辑</button>
+            <button
+              type="button"
+              className="msg-action-btn"
+              onClick={() => {
+                if (confirmingDelete) confirmDelete();
+                else setConfirmingDelete(true);
+              }}
+            >
+              {confirmingDelete ? "确认删除？" : "删除"}
+            </button>
+          </div>
         )}
       </header>
+
+      {editing && (
+        <section className="post-editor post-detail-edit" aria-label="编辑帖子">
+          <input className="field post-editor-title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={128} aria-label="帖子标题" />
+          <textarea className="field post-editor-body" value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={5} aria-label="帖子正文" />
+          <label className="post-editor-visibility">
+            可见范围
+            <select value={editVisibility} onChange={(e) => setEditVisibility(e.target.value as Post["visibility"])}>
+              <option value="public">公开</option>
+              <option value="friends">好友可见</option>
+              <option value="group">群成员可见</option>
+            </select>
+          </label>
+          <div className="post-editor-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>取消</button>
+            <button type="button" className="btn btn-primary" disabled={savingEdit || !editBody.trim()} onClick={() => {
+              setSavingEdit(true);
+              postsApi.updatePost(post.id, { title: editTitle.trim(), body: editBody.trim(), visibility: editVisibility })
+                .then((updated) => { setPost(updated); setEditing(false); })
+                .catch((e) => setActionError(e instanceof Error ? e.message : "保存编辑失败"))
+                .finally(() => setSavingEdit(false));
+            }}>{savingEdit ? "保存中…" : "重新发布"}</button>
+          </div>
+        </section>
+      )}
 
       <article className="post-detail-body">
         <div className="post-detail-author">

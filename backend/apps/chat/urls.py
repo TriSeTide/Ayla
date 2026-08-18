@@ -70,6 +70,26 @@ urlpatterns = [
         views.MemberMuteView.as_view(),
         name="chat-member-mute",
     ),
+    path(
+        "conversations/<int:conv_id>/members/<str:user_id>/role/",
+        views.MemberRoleView.as_view(),
+        name="chat-member-role",
+    ),
+    path(
+        "conversations/<int:conv_id>/transfer-owner/",
+        views.GroupOwnerTransferView.as_view(),
+        name="chat-transfer-owner",
+    ),
+    path(
+        "conversations/<int:conv_id>/leave/",
+        views.GroupLeaveView.as_view(),
+        name="chat-group-leave",
+    ),
+    path(
+        "conversations/<int:conv_id>/dissolve/",
+        views.GroupDissolveView.as_view(),
+        name="chat-group-dissolve",
+    ),
     # 群申请/邀请（S2，开发文档 §1.2）
     path(
         "conversations/<int:conv_id>/join-requests/",

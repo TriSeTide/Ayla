@@ -20,6 +20,7 @@ export function createGameRoom(payload: {
   group?: string | null;
   visibility?: "public" | "friends" | "group";
   game_type?: string;
+  allowed_group_ids?: string[];
 }) {
   return apiRequest<GameRoom>("/boardgame/rooms/", { method: "POST", body: payload });
 }
@@ -41,6 +42,10 @@ export function joinGameRoom(roomId: number) {
   return apiRequest<GameRoomMember>(`/boardgame/rooms/${roomId}:join/`, {
     method: "POST",
   });
+}
+
+export function actionGameMember(roomId: number, userId: string, action: "kick" | "transfer") {
+  return apiRequest<GameRoom>(`/boardgame/rooms/${roomId}/members/${encodeURIComponent(userId)}/action/`, { method: "POST", body: { action } });
 }
 
 /** POST /rooms/<id>:leave/ —— 离开（仅成员，非成员 400） */

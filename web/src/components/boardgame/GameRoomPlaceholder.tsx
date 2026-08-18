@@ -8,6 +8,7 @@ import { useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
+import { useAuthStore } from "../../stores/auth";
 
 export function GameRoomPlaceholder({
   room,
@@ -21,6 +22,9 @@ export function GameRoomPlaceholder({
   const [isMember, setIsMember] = useState(room.is_member);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const currentUser = useAuthStore((state) => state.currentUser);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const isOwner = room.is_owner || room.owner_id === currentUser?.id;
 
   const join = async () => {
     setBusy(true);
@@ -66,6 +70,15 @@ export function GameRoomPlaceholder({
           {room.member_count} 人 · 房主 {room.owner.nickname || room.owner.username}
         </p>
         {error && <p className="post-editor-error">{error}</p>}
+        {isOwner && <div className="game-room-owner-controls">
+          <strong>房主控制</strong>
+          {room.members.filter((member) => member.user_id !== currentUser?.id).map((member) => <div key={member.user_id} className="game-room-member-action">
+            <span>{member.user.nickname || member.user.username}</span>
+            <button type="button" className="btn btn-ghost" disabled={actionBusy !== null} onClick={() => { setActionBusy(member.user_id); boardgameApi.actionGameMember(room.id, member.user_id, "kick").then(() => setError("成员已移出房间")).catch((e) => setError(e instanceof Error ? e.message : "移除失败")).finally(() => setActionBusy(null)); }}>移出</button>
+            <button type="button" className="btn btn-ghost" disabled={actionBusy !== null} onClick={() => { setActionBusy(member.user_id); boardgameApi.actionGameMember(room.id, member.user_id, "transfer").then(() => setError("房主已转让")).catch((e) => setError(e instanceof Error ? e.message : "转让失败")).finally(() => setActionBusy(null)); }}>转让房主</button>
+          </div>)}
+          <button type="button" className="btn btn-danger" disabled={busy} onClick={() => { if (window.confirm("确定删除桌游房间？")) boardgameApi.deleteGameRoom(room.id).then(onBack).catch((e) => setError(e instanceof Error ? e.message : "删除失败")); }}>删除房间</button>
+        </div>}
         {isMember ? (
           <button type="button" className="btn btn-ghost" onClick={() => void leave()} disabled={busy}>
             {busy ? "离开中…" : "离开房间"}

@@ -19,7 +19,7 @@ import type {
 export function createLiveChannel(
   title: string,
   group?: string | null,
-  payload: { description?: string; cover?: string } = {},
+  payload: { description?: string; cover?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] } = {},
 ) {
   return apiRequest<LiveChannelDescriptor>("/live/channels/", {
     method: "POST",
@@ -30,7 +30,7 @@ export function createLiveChannel(
 /** PATCH /live/channels/<id>/ —— owner 修改标题、介绍、封面 */
 export function updateLiveChannel(
   channelId: number,
-  payload: { title?: string; description?: string; cover?: string },
+  payload: { title?: string; description?: string; cover?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] },
 ) {
   return apiRequest<LiveChannelDescriptor>(`/live/channels/${channelId}/`, {
     method: "PATCH",

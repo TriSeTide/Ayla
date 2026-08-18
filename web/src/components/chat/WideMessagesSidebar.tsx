@@ -15,6 +15,7 @@ import { ConversationList } from "./ConversationList";
 import { ElysiaEntry } from "./ElysiaEntry";
 import { useBadgesStore } from "../../stores/badges";
 import { useChatStore } from "../../stores/chat";
+import { useAuthStore } from "../../stores/auth";
 import type { ConversationSummary } from "../../api/types";
 
 type Tab = "chat" | "friends";
@@ -31,6 +32,7 @@ export function WideMessagesSidebar({
   onSelect: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("chat");
+  const currentUser = useAuthStore((state) => state.currentUser);
   const [friendList, setFriendList] = useState<Awaited<ReturnType<typeof usersApi.listFriends>>>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [invites, setInvites] = useState<GroupInvite[]>([]);
@@ -75,7 +77,7 @@ export function WideMessagesSidebar({
   const loadFriendsTab = useCallback(() => {
     setFriendsError(null);
     usersApi.listFriends().then(setFriendList).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友失败"));
-    usersApi.listFriendRequests().then((l) => setFriendRequests(l.filter((r) => r.status === "pending"))).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友申请失败"));
+    usersApi.listFriendRequests().then(setFriendRequests).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友申请失败"));
     chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载群邀请失败"));
     const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
     Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
@@ -160,18 +162,19 @@ export function WideMessagesSidebar({
         </div>
       ) : (
         <div className="messages-friends">
-          {friendRequests.length > 0 && (
+          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
             <section>
-              <h4 className="messages-group-title">好友申请</h4>
-              {friendRequests.map((r) => (
-                <RequestRow
-                  key={r.id}
-                  avatar={r.from_user}
-                  name={r.from_user.nickname || r.from_user.username}
-                  message={r.message}
-                  onAccept={() => void handleFriendAction(r, "accept")}
-                  onReject={() => void handleFriendAction(r, "reject")}
-                />
+              <h4 className="messages-group-title">收到的好友申请</h4>
+              {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").map((r) => (
+                <RequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} onAccept={() => void handleFriendAction(r, "accept")} onReject={() => void handleFriendAction(r, "reject")} />
+              ))}
+            </section>
+          )}
+          {friendRequests.filter((r) => r.from_user.id === currentUser?.id).length > 0 && (
+            <section>
+              <h4 className="messages-group-title">我发出的好友申请</h4>
+              {friendRequests.filter((r) => r.from_user.id === currentUser?.id).map((r) => (
+                <StatusRequestRow key={r.id} avatar={r.to_user} name={r.to_user.nickname || r.to_user.username} message={r.message} status={r.status} />
               ))}
             </section>
           )}
@@ -209,20 +212,39 @@ export function WideMessagesSidebar({
             <div className="messages-empty">暂无好友</div>
           ) : (
             friendList.map((f) => (
-              <button
-                key={f.user.id}
-                type="button"
-                className="friend-row"
-                onClick={() => openUserChat(f.user.id)}
-              >
-                <Avatar label={f.user.nickname || f.user.username} size={36} online={f.user.online} imageUrl={f.user.avatar || null} />
-                <span className="friend-row-name">{f.user.nickname || f.user.username}</span>
-              </button>
+              <div key={f.user.id} className="friend-row">
+                <button type="button" className="friend-row-main" onClick={() => openUserChat(f.user.id)}>
+                  <Avatar label={f.user.nickname || f.user.username} size={36} online={f.user.online} imageUrl={f.user.avatar || null} />
+                  <span className="friend-row-name">{f.user.nickname || f.user.username}</span>
+                </button>
+                <button type="button" className="btn btn-ghost friend-remove-btn" onClick={() => usersApi.deleteFriend(f.user.id).then(() => setFriendList((items) => items.filter((item) => item.user.id !== f.user.id))).catch((e) => setActionError(e instanceof Error ? e.message : "解除好友失败"))}>解除好友</button>
+              </div>
             ))
           )}
         </div>
       )}
     </aside>
+  );
+}
+
+function StatusRequestRow({
+  avatar,
+  name,
+  message,
+  status,
+}: {
+  avatar: { nickname: string; username: string; avatar: string; online: boolean };
+  name: string;
+  message: string;
+  status: "pending" | "accepted" | "rejected";
+}) {
+  const label = status === "pending" ? "待处理" : status === "accepted" ? "已同意" : "已拒绝";
+  return (
+    <div className="request-row">
+      <Avatar label={avatar.nickname || avatar.username} size={36} online={avatar.online} imageUrl={avatar.avatar || null} />
+      <div className="request-body"><span className="request-name">{name}</span>{message && <span className="request-msg">{message}</span>}</div>
+      <span className={`request-status request-status-${status}`}>{label}</span>
+    </div>
   );
 }
 

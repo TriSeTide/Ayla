@@ -14,6 +14,7 @@ import { useMessageStore } from "../stores/message";
 import { WS_BASE_URL } from "./presence";
 import type { ChatMessage, ChatServerFrame } from "../api/types";
 import { useRealtimeStore } from "../stores/realtime";
+import { useNoticeStore } from "../stores/notices";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -155,6 +156,8 @@ export class ChatWSClient {
   private dispatch(frame: ChatServerFrame) {
     const chat = useChatStore.getState();
     const message = useMessageStore.getState();
+    const notices = useNoticeStore.getState();
+    const notificationFrame = frame as ChatServerFrame & { type: string; data?: Record<string, string | null> };
 
     switch (frame.type) {
       case "message.new": {
@@ -197,6 +200,27 @@ export class ChatWSClient {
       case "history.sync": {
         // 只作为补发完成信号
         message.setLastSeq(frame.data.conversation_id, frame.data.last_seq);
+        break;
+      }
+      case "group.request.new": {
+        const data = notificationFrame.data ?? {};
+        notices.push({ kind: "group.request.new", title: "收到新的入群申请", detail: `${data.applicant_name ?? "有人"} 申请加入 ${data.conversation_title ?? "群聊"}` });
+        break;
+      }
+      case "group.request.resolved": {
+        const data = notificationFrame.data ?? {};
+        const status = data.status === "accepted" ? "已通过" : "已拒绝";
+        notices.push({ kind: "group.request.resolved", title: "入群申请有结果", detail: `${data.conversation_title ?? "群聊"}：你的申请${status}` });
+        break;
+      }
+      case "group.invite.new": {
+        const data = notificationFrame.data ?? {};
+        notices.push({ kind: "group.invite.new", title: "收到新的群邀请", detail: `${data.inviter_name ?? "有人"} 邀请你加入 ${data.conversation_title ?? "群聊"}` });
+        break;
+      }
+      case "group.member.left": {
+        const data = notificationFrame.data ?? {};
+        notices.push({ kind: "group.member.left", title: "群成员已离开", detail: `${data.conversation_title ?? "群聊"}：${data.member_name ?? "一位成员"} 已离开` });
         break;
       }
       case "elysia.reply": {

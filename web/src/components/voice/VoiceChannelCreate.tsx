@@ -4,6 +4,7 @@
 import { useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { useVoiceStore } from "../../stores/voice";
+import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
 
 export function VoiceChannelCreate({
   group,
@@ -12,6 +13,8 @@ export function VoiceChannelCreate({
   group?: string | null;
 }) {
   const [name, setName] = useState("");
+  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +27,7 @@ export function VoiceChannelCreate({
     setBusy(true);
     setError(null);
     try {
-      const ch = await voiceApi.createVoiceChannel(trimmed, group);
+      const ch = await voiceApi.createVoiceChannel(trimmed, group, { visibility, allowed_group_ids: selectedGroupIds });
       const store = useVoiceStore.getState();
       store.setChannels([{ ...ch, mine: false }, ...store.channels]);
       setName("");
@@ -37,6 +40,7 @@ export function VoiceChannelCreate({
 
   return (
     <div className="voice-channel-create">
+      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
       <input
         className="voice-create-input"
         placeholder="新语音频道名称"

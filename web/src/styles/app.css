@@ -4,6 +4,63 @@
  * 所有颜色、字体、圆角、间距一律引用 tokens.css 变量。
  */
 
+/* ================= 全局实时通知 ================= */
+.realtime-notice-stack {
+  position: fixed;
+  top: calc(var(--topbar-h, 64px) + var(--sp-3));
+  right: var(--sp-4);
+  z-index: 120;
+  display: grid;
+  gap: var(--sp-3);
+  width: min(360px, calc(100vw - var(--sp-8)));
+  pointer-events: none;
+}
+
+.realtime-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 250, 251, 0.82);
+  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.14), 0 0 16px rgba(247, 150, 255, 0.24);
+  backdrop-filter: blur(18px) saturate(1.4);
+  pointer-events: auto;
+}
+
+.realtime-notice-copy {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  color: var(--grape-700);
+}
+
+.realtime-notice-copy strong { font-size: 14px; }
+.realtime-notice-copy span { color: var(--indigo-700); font-size: 13px; line-height: 1.45; }
+.realtime-notice-close {
+  flex: 0 0 40px;
+  width: 40px;
+  min-height: 40px;
+  margin: -8px -8px 0 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--indigo-700);
+  background: transparent;
+  font-size: 22px;
+  cursor: pointer;
+}
+.realtime-notice-close:focus-visible { outline: 3px solid var(--pink-500); outline-offset: 2px; }
+
+@media (max-width: 768px) {
+  .realtime-notice-stack { top: var(--sp-3); right: var(--sp-3); width: min(360px, calc(100vw - var(--sp-6))); }
+  .realtime-notice { box-shadow: 0 6px 18px rgba(70, 91, 146, 0.12), 0 0 11px rgba(247, 150, 255, 0.17); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .realtime-notice { transition: none; }
+}
+
 /* ================= 通用原语 ================= */
 
 /* Primary 按钮：indigo 实底胶囊，hover 加辉光（design.md §4 Buttons） */

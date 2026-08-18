@@ -45,6 +45,10 @@ class VoiceChannel(models.Model):
         blank=True,
         limit_choices_to={"type": "group"},
     )
+    allowed_groups = models.ManyToManyField(
+        "chat.Conversation", related_name="visible_voice_channels", blank=True,
+        limit_choices_to={"type": "group"},
+    )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:

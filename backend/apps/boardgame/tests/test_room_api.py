@@ -239,3 +239,27 @@ class TestRoomJoinLeave:
         assert data["is_member"] is True
         assert len(data["members"]) == 1
         assert data["members"][0]["user_id"] == joiner.id
+
+    def test_owner_member_actions_and_leave_contract(self, auth_client, user_factory):
+        owner_client, owner = auth_client(username="g_owner_actions")
+        member = user_factory(username="g_member_actions")
+        room = _make_room(owner, "管理桌游房")
+        GameRoomMember.objects.create(room=room, user=owner)
+        GameRoomMember.objects.create(room=room, user=member, seat=1)
+
+        kicked = owner_client.post(
+            f"/api/v1/boardgame/rooms/{room.id}/members/{member.id}/action/",
+            {"action": "kick"}, format="json",
+        )
+        assert kicked.status_code == 200, kicked.content
+        assert not GameRoomMember.objects.filter(room=room, user=member).exists()
+
+        GameRoomMember.objects.create(room=room, user=member, seat=1)
+        transferred = owner_client.post(
+            f"/api/v1/boardgame/rooms/{room.id}/members/{member.id}/action/",
+            {"action": "transfer"}, format="json",
+        )
+        assert transferred.status_code == 200, transferred.content
+        room.refresh_from_db()
+        assert room.owner_id == member.id
+        assert owner_client.post(f"/api/v1/boardgame/rooms/{room.id}:leave/").status_code == 200

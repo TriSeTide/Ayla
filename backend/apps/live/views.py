@@ -120,6 +120,7 @@ class ChannelListView(APIView):
                 visibility=visibility,
                 description=description,
                 cover=cover,
+                allowed_group_ids=request.data.get("allowed_group_ids"),
             )
         except ValueError as exc:
             return _bad_request(str(exc))
@@ -171,6 +172,20 @@ class ChannelDetailView(APIView):
                 return _bad_request(cover_error)
             ch.cover = cover.strip()
             update_fields.append("cover")
+        if "visibility" in request.data:
+            value = request.data.get("visibility")
+            if value not in {"public", "friends", "group"}:
+                return _bad_request("visibility 无效")
+            if value == "group" and not request.data.get("allowed_group_ids") and ch.group_id is None:
+                return _bad_request("群成员可见必须指定群")
+            ch.visibility = value
+            update_fields.append("visibility")
+        if "allowed_group_ids" in request.data:
+            try:
+                from apps.common.visibility import set_allowed_groups
+                set_allowed_groups(ch, request.data.get("allowed_group_ids"))
+            except ValueError as exc:
+                return _bad_request(str(exc))
         if update_fields:
             ch.save(update_fields=update_fields)
         return Response(_channel_serializer(ch, request))

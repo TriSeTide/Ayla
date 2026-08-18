@@ -57,6 +57,7 @@ def create_channel(
     visibility: str | None = None,
     description: str = "",
     cover: str = "",
+    allowed_group_ids=None,
 ) -> LiveChannel:
     """创建直播频道：生成唯一 stream_key（DB 唯一索引兜底，碰撞重试）。
 
@@ -76,7 +77,7 @@ def create_channel(
     for _ in range(5):
         key = gen_stream_key()
         if not LiveChannel.objects.filter(stream_key=key).exists():
-            return LiveChannel.objects.create(
+            channel = LiveChannel.objects.create(
                 title=title,
                 description=description,
                 cover=cover,
@@ -85,6 +86,10 @@ def create_channel(
                 group=group,
                 visibility=visibility,
             )
+            if allowed_group_ids is not None:
+                from apps.common.visibility import set_allowed_groups
+                set_allowed_groups(channel, allowed_group_ids)
+            return channel
     raise RuntimeError("stream_key 生成冲突（多次重试仍碰撞）")
 
 

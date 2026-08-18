@@ -150,6 +150,7 @@ export function VoiceHubPage() {
     return (
       <VoiceRoomBody
         channelId={currentChannel.id}
+        ownerId={currentChannel.owner_id}
         channelName={currentChannel.name}
         livekit={livekit}
         wsConnection={wsConnection}
@@ -165,6 +166,10 @@ export function VoiceHubPage() {
           if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
         }}
         onBack={handleBack}
+        onDeleteChannel={() => {
+          if (!window.confirm("确定删除语音房？")) return;
+          void voiceApi.deleteVoiceChannel(currentChannel.id).then(() => navigate("/voice")).catch((error) => setListError(error instanceof Error ? error.message : "删除语音房失败"));
+        }}
         inputEntered={inputEntered}
       />
     );

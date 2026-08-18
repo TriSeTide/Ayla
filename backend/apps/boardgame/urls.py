@@ -17,6 +17,11 @@ urlpatterns = [
         name="boardgame-room-leave",
     ),
     path(
+        "rooms/<int:room_id>/members/<str:user_id>/action/",
+        views.RoomMemberActionView.as_view(),
+        name="boardgame-room-member-action",
+    ),
+    path(
         "rooms/<int:room_id>/",
         views.RoomDetailView.as_view(),
         name="boardgame-room-detail",

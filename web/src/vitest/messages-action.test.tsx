@@ -12,6 +12,7 @@ import type { FriendRequest } from "../api/types";
 import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore } from "../stores/chat";
+import { useAuthStore } from "../stores/auth";
 
 vi.mock("../components/chat/ConversationList", () => ({
   ConversationList: () => <div data-testid="conversation-list" />,
@@ -78,6 +79,7 @@ function renderSidebar() {
 
 beforeEach(() => {
   useChatStore.setState({ conversations: [] });
+  useAuthStore.setState({ currentUser: req.to_user, accessToken: "acc" });
   useBadgesStore.setState({ fetch: vi.fn() } as never);
 });
 

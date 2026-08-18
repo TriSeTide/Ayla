@@ -26,6 +26,10 @@ class LiveChannelSerializer(serializers.ModelSerializer):
     visibility = serializers.CharField(read_only=True)
     group = serializers.CharField(source="group_id", read_only=True, default=None)
     group_name = serializers.CharField(source="group.title", read_only=True, default=None)
+    allowed_group_ids = serializers.SerializerMethodField()
+
+    def get_allowed_group_ids(self, obj):
+        return [str(group_id) for group_id in obj.allowed_groups.values_list("id", flat=True)]
 
     class Meta:
         model = LiveChannel
@@ -38,6 +42,7 @@ class LiveChannelSerializer(serializers.ModelSerializer):
             "visibility",
             "group",
             "group_name",
+            "allowed_group_ids",
             "owner_id",
             "owner_nickname",
             "is_owner",

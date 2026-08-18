@@ -9,6 +9,7 @@ import { useRef, useState } from "react";
 import * as liveApi from "../../api/live";
 import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
 import type { LiveChannelDescriptor } from "../../api/types";
+import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
 
 /** 从 rtmp_url 拆出 OBS 的"服务器"部分（去掉末尾 /<stream_key>） */
 export function obsServerFromRtmpUrl(rtmpUrl: string): string {
@@ -26,6 +27,8 @@ export function LiveCreate({
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -52,6 +55,8 @@ export function LiveCreate({
       const channel = await liveApi.createLiveChannel(trimmed, group, {
         description: description.trim(),
         cover,
+        visibility,
+        allowed_group_ids: selectedGroupIds,
       });
       setCreated(channel);
       setTitle("");
@@ -96,6 +101,7 @@ export function LiveCreate({
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
+        <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
         <div className="live-cover-field">
           <span className="live-field-label">封面</span>
           <button type="button" className="live-cover-picker" onClick={() => coverInputRef.current?.click()}>

@@ -94,6 +94,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "title",
             "announcement",
             "avatar",
+            "join_policy",
             "owner_id",
             "members",
             "my_role",

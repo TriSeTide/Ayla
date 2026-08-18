@@ -130,6 +130,7 @@ export function GroupVoice({
     return (
       <VoiceRoomBody
         channelId={currentChannel.id}
+        ownerId={currentChannel.owner_id}
         channelName={currentChannel.name}
         livekit={livekit}
         wsConnection={wsConnection}
@@ -145,6 +146,10 @@ export function GroupVoice({
           if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
         }}
         onBack={handleBack}
+        onDeleteChannel={() => {
+          if (!window.confirm("确定删除语音房？")) return;
+          void voiceApi.deleteVoiceChannel(currentChannel.id).then(() => navigate(`/group/${groupId}/voice`)).catch((e) => setError(e instanceof Error ? e.message : "删除语音房失败"));
+        }}
         inputEntered // 群内子界面无底栏下滑动画
       />
     );

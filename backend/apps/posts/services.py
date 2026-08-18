@@ -32,7 +32,7 @@ def _resolve_visibility(group, visibility) -> str:
 
 
 @transaction.atomic
-def create_post(author, title: str, body: str, images=None, group=None, visibility=None) -> Post:
+def create_post(author, title: str, body: str, images=None, group=None, visibility=None, allowed_group_ids=None) -> Post:
     """创建帖子 + 配图（images 为 media_id 字符串列表，已由 serializer 校验）。"""
     title = (title or "").strip()
     body = (body or "").strip()
@@ -45,6 +45,9 @@ def create_post(author, title: str, body: str, images=None, group=None, visibili
     post = Post.objects.create(
         owner=author, title=title, body=body, group=group, visibility=visibility
     )
+    if allowed_group_ids is not None:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(post, allowed_group_ids)
     for order, media_id in enumerate(images or []):
         media = _resolve_media(media_id)
         if media is None:

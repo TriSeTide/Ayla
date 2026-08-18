@@ -44,6 +44,10 @@ class GameRoomSerializer(serializers.ModelSerializer):
     member_count = serializers.SerializerMethodField()
     is_owner = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
+    allowed_group_ids = serializers.SerializerMethodField()
+
+    def get_allowed_group_ids(self, obj):
+        return [str(group_id) for group_id in obj.allowed_groups.values_list("id", flat=True)]
 
     class Meta:
         model = GameRoom
@@ -55,6 +59,7 @@ class GameRoomSerializer(serializers.ModelSerializer):
             "visibility",
             "group",
             "group_name",
+            "allowed_group_ids",
             "game_type",
             "status",
             "members",

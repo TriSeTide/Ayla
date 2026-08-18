@@ -38,6 +38,10 @@ class Post(models.Model):
         blank=True,
         limit_choices_to={"type": "group"},
     )
+    allowed_groups = models.ManyToManyField(
+        "chat.Conversation", related_name="visible_posts", blank=True,
+        limit_choices_to={"type": "group"},
+    )
     visibility = models.CharField(
         "可见性", max_length=16, choices=Visibility.choices, default=Visibility.PUBLIC
     )

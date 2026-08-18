@@ -112,6 +112,28 @@ export function removeMember(convId: string, userId: string) {
 }
 
 /** POST /chat/conversations/<id>/members/<user_id>/mute/ —— 禁言/解除 */
+export function setMemberRole(convId: string, userId: string, role: "member" | "admin") {
+  return apiRequest<ConversationDetail>(`/chat/conversations/${convId}/members/${encodeURIComponent(userId)}/role/`, {
+    method: "PATCH", body: { role },
+  });
+}
+
+export function transferGroupOwner(convId: string, userId: string) {
+  return apiRequest<ConversationDetail>(`/chat/conversations/${convId}/transfer-owner/`, { method: "POST", body: { user_id: userId } });
+}
+
+export function leaveGroup(convId: string) {
+  return apiRequest<{ left: boolean }>(`/chat/conversations/${convId}/leave/`, { method: "POST" });
+}
+
+export function dissolveGroup(convId: string) {
+  return apiRequest<{ deleted: boolean }>(`/chat/conversations/${convId}/dissolve/`, { method: "DELETE" });
+}
+
+export function applyToGroup(convId: string, message: string) {
+  return apiRequest<GroupJoinRequest>(`/chat/conversations/${convId}/join-requests/`, { method: "POST", body: { message } });
+}
+
 export function toggleMute(convId: string, userId: string, muted: boolean) {
   return apiRequest<{ detail: string; muted: boolean }>(
     `/chat/conversations/${convId}/members/${encodeURIComponent(userId)}/mute/`,
@@ -122,7 +144,7 @@ export function toggleMute(convId: string, userId: string, muted: boolean) {
 /** PATCH /chat/conversations/<id>/ —— 改群标题/公告/头像（群管理员） */
 export function patchConversation(
   convId: string,
-  payload: { title?: string; announcement?: string; avatar?: string },
+  payload: { title?: string; announcement?: string; avatar?: string; join_policy?: "public" | "application" },
 ) {
   return apiRequest<ConversationDetail>(`/chat/conversations/${convId}/`, {
     method: "PATCH",

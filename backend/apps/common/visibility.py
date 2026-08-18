@@ -59,8 +59,9 @@ def visible_queryset(model, user):
         Q(visibility=Visibility.PUBLIC)
         | Q(owner_id=user.id)
         | (Q(visibility=Visibility.FRIENDS) & Q(owner_id__in=friend_ids))
-        | (Q(group_id__in=group_ids))
-    )
+        | Q(group_id__in=group_ids)
+        | Q(allowed_groups__id__in=group_ids)
+    ).distinct()
 
 
 def can_view(user, obj) -> bool:
@@ -74,9 +75,31 @@ def can_view(user, obj) -> bool:
     if obj.visibility == Visibility.FRIENDS:
         return obj.owner_id in _my_friend_ids(user)
     if obj.visibility == Visibility.GROUP:
-        # 群归属房间：群成员可见（与列表过滤同语义，不看 visibility 分支）
-        return bool(obj.group_id) and obj.group_id in _my_group_ids(user)
+        # 兼容旧的单群归属，同时支持创建时选择多个群白名单。
+        group_ids = _my_group_ids(user)
+        if obj.group_id and obj.group_id in group_ids:
+            return True
+        allowed_groups = getattr(obj, "allowed_groups", None)
+        return bool(allowed_groups and allowed_groups.filter(id__in=group_ids).exists())
     return False
+
+
+def set_allowed_groups(obj, group_ids) -> None:
+    """将群白名单写入可见性对象，校验目标均为群聊会话。"""
+    from apps.chat.models import Conversation
+
+    if group_ids is None:
+        return
+    if not isinstance(group_ids, list):
+        raise ValueError("allowed_group_ids 必须是数组")
+    groups = list(
+        Conversation.objects.filter(
+            id__in=[str(item) for item in group_ids], type=Conversation.TYPE_GROUP
+        )
+    )
+    if len(groups) != len(set(str(item) for item in group_ids)):
+        raise ValueError("allowed_group_ids 包含不存在或非群聊会话")
+    obj.allowed_groups.set(groups)
 
 
 def can_join(user, obj) -> bool:

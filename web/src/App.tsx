@@ -21,6 +21,7 @@ import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LiveStudioPage } from "./pages/LiveStudioPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MessagesPage } from "./pages/MessagesPage";
+import { MyPostsPage } from "./pages/MyPostsPage";
 import { PostDetailPage } from "./pages/PostDetailPage";
 import { PostsHubPage } from "./pages/PostsHubPage";
 import { ProfilePage } from "./pages/ProfilePage";
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/live/start/:channelId" element={<LiveStudioPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
         <Route path="/posts" element={<PostsHubPage />} />
+        <Route path="/posts/mine" element={<MyPostsPage />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />
         <Route path="/games" element={<GamesHubPage />} />
         <Route path="/messages" element={<MessagesPage />} />

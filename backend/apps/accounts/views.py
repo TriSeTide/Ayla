@@ -150,8 +150,8 @@ class FriendRequestListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         return FriendRequest.objects.filter(
-            to_user=self.request.user, status=FriendRequest.STATUS_PENDING
-        ).select_related("from_user", "to_user")
+            Q(to_user=self.request.user) | Q(from_user=self.request.user)
+        ).select_related("from_user", "to_user").order_by("-created_at")
 
 
 class FriendRequestActionView(APIView):

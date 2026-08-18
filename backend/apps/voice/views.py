@@ -94,7 +94,8 @@ class ChannelListView(APIView):
         visibility = request.data.get("visibility") or None
         try:
             ch = services.create_channel(
-                request.user, name, group=group, visibility=visibility
+                request.user, name, group=group, visibility=visibility,
+                allowed_group_ids=request.data.get("allowed_group_ids"),
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -119,6 +120,15 @@ class ChannelDetailView(APIView):
         data["mine"] = services.user_in_channel(ch, request.user)
         return Response(data)
 
+    def delete(self, request, channel_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return _not_found()
+        if not services.can_manage_channel(ch, request.user):
+            return _forbidden("仅房主可删除")
+        ch.delete()
+        return Response({"deleted": True})
+
     def patch(self, request, channel_id):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
@@ -131,7 +141,20 @@ class ChannelDetailView(APIView):
                 {"detail": "name 不能为空"}, status=status.HTTP_400_BAD_REQUEST
             )
         ch.name = name
-        ch.save(update_fields=["name"])
+        update_fields = ["name"]
+        if "visibility" in request.data:
+            value = request.data.get("visibility")
+            if value not in {"public", "friends", "group"}:
+                return Response({"detail": "visibility 无效"}, status=status.HTTP_400_BAD_REQUEST)
+            ch.visibility = value
+            update_fields.append("visibility")
+        if "allowed_group_ids" in request.data:
+            try:
+                from apps.common.visibility import set_allowed_groups
+                set_allowed_groups(ch, request.data.get("allowed_group_ids"))
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        ch.save(update_fields=update_fields)
         return Response(VoiceChannelSerializer(ch).data)
 
 
@@ -178,7 +201,10 @@ class ChannelLeaveView(APIView):
         ch = _get_channel_or_404(channel_id)
         if ch is None:
             return _not_found()
-        services.leave_channel(ch, request.user)
+        try:
+            services.leave_channel(ch, request.user)
+        except PermissionError as exc:
+            return _forbidden(str(exc))
         return Response({"left": True})
 
 
@@ -280,6 +306,45 @@ class ChannelChatMessagesView(APIView):
             media_id=media_id,
         )
         return Response(self._payload(message), status=status.HTTP_201_CREATED)
+
+
+class ChannelMemberActionView(APIView):
+    """房主踢人/转让房主。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, channel_id, user_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return _not_found()
+        action = request.data.get("action")
+        try:
+            if action == "kick":
+                services.kick_member(ch, request.user, user_id)
+            elif action == "transfer":
+                services.transfer_channel_owner(ch, request.user, user_id)
+            else:
+                return Response({"detail": "action 无效"}, status=status.HTTP_400_BAD_REQUEST)
+        except PermissionError as exc:
+            return _forbidden(str(exc))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except (LookupError, VoiceChannelMember.DoesNotExist):
+            return _not_found("成员不存在")
+        return Response(VoiceChannelSerializer(ch).data)
+
+
+class ChannelDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, channel_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return _not_found()
+        if not services.can_manage_channel(ch, request.user):
+            return _forbidden("仅房主可删除")
+        ch.delete()
+        return Response({"deleted": True})
 
 
 class ChannelMembersView(APIView):

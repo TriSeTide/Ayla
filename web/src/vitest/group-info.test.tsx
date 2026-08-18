@@ -31,6 +31,13 @@ vi.mock("../api/chat", () => ({
     peer: null,
   }),
   patchConversation: vi.fn(),
+  listJoinRequests: vi.fn().mockResolvedValue([]),
+  actionJoinRequest: vi.fn().mockResolvedValue({ detail: "ok" }),
+  setMemberRole: vi.fn().mockResolvedValue({}),
+  removeMember: vi.fn().mockResolvedValue(undefined),
+  transferGroupOwner: vi.fn().mockResolvedValue({}),
+  dissolveGroup: vi.fn().mockResolvedValue({ deleted: true }),
+  leaveGroup: vi.fn().mockResolvedValue({ left: true }),
 }));
 
 vi.mock("../api/media", async (importOriginal) => {

@@ -88,6 +88,7 @@ class RoomListView(APIView):
                 group=group,
                 visibility=request.data.get("visibility"),
                 game_type=request.data.get("game_type"),
+                allowed_group_ids=request.data.get("allowed_group_ids"),
             )
         except ValueError as exc:
             return _bad_request(str(exc))
@@ -138,6 +139,29 @@ class RoomJoinView(APIView):
         )
 
 
+class RoomMemberActionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, room_id, user_id):
+        room = _get_room_or_404(room_id)
+        if room is None:
+            return _not_found("房间不存在")
+        try:
+            if request.data.get("action") == "kick":
+                services.kick_member(room, request.user, user_id)
+            elif request.data.get("action") == "transfer":
+                services.transfer_room_owner(room, request.user, user_id)
+            else:
+                return _bad_request("action 无效")
+        except PermissionError as exc:
+            return _forbidden(str(exc))
+        except ValueError as exc:
+            return _bad_request(str(exc))
+        except LookupError as exc:
+            return _not_found(str(exc))
+        return Response(GameRoomSerializer(room, context={"request": request}).data)
+
+
 class RoomLeaveView(APIView):
     """POST /rooms/<id>:leave/ —— 离开房间（仅成员；非成员 400）。"""
 
@@ -147,6 +171,10 @@ class RoomLeaveView(APIView):
         room = _get_room_or_404(room_id)
         if room is None:
             return _not_found("房间不存在")
-        if not services.leave_room(room, request.user):
+        try:
+            left = services.leave_room(room, request.user)
+        except ValueError as exc:
+            return _bad_request(str(exc))
+        if not left:
             return _bad_request("不在该房间中")
         return Response({"left": True})
