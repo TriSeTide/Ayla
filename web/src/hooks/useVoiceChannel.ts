@@ -65,6 +65,7 @@ export function useVoiceChannel() {
     const channelId = useVoiceStore.getState().currentChannelId;
     if (channelId) voiceWS.unsubscribe(channelId);
     useVoiceStore.getState().leaveChannelLocal();
+    useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
     useSessionActivityStore.getState().clear("voice");
   }, [stopHeartbeat]);
 
@@ -150,12 +151,17 @@ export function useVoiceChannel() {
           await voiceApi.leaveVoiceChannel(prevChannelId).catch(() => {});
           await voiceLiveKit.disconnect();
           useVoiceStore.getState().leaveChannelLocal();
+          useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
         }
         // 3. LiveKit 连接
+        useAuthStore.getState().setMediaActivity({ kind: "voice", active: true, roomId: Number(channelId) });
         useSessionActivityStore.getState().upsert({
           kind: "voice",
           sessionId: channelId,
-          sourceRoute: typeof window !== "undefined" ? window.location.pathname : "/voice",
+          sourceRoute:
+            typeof window !== "undefined" && window.location.pathname.startsWith("/group/")
+              ? window.location.pathname
+              : `/voice/${encodeURIComponent(channelId)}`,
           owner: useAuthStore.getState().currentUser?.id ?? null,
           title: channels.find((c) => c.id === channelId)?.name ?? "语音房",
           status: "connecting",
@@ -169,6 +175,7 @@ export function useVoiceChannel() {
         } catch (mediaErr) {
           // join 成功但媒体连接失败 → 回滚成员状态
           await voiceApi.leaveVoiceChannel(channelId).catch(() => {});
+          useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
           useVoiceStore.getState().setLivekit("failed");
           useSessionActivityStore.getState().setStatus("voice", "failed", "媒体连接失败");
           throw mediaErr;
@@ -222,6 +229,8 @@ export function useVoiceChannel() {
     voiceWS.unsubscribe(channelId);
     await voiceLiveKit.disconnect();
     useVoiceStore.getState().leaveChannelLocal();
+    useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
+    useSessionActivityStore.getState().clear("voice", "idle");
     try {
       await voiceApi.leaveVoiceChannel(channelId);
       useVoiceStore.getState().patchChannel(channelId, { mine: false });

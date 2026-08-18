@@ -86,8 +86,23 @@ def can_manage_channel(channel: VoiceChannel, user) -> bool:
 # ---------- 加入/离开/心跳 ----------
 
 def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
-    """加入频道（幂等：已在成员表则刷新 last_seen_at）+ 广播 voice.state joined。"""
+    """加入频道；同一用户始终只保留一个语音房成员关系。
+
+    切换房间时先删除旧成员关系并广播离开，再创建/刷新目标成员关系；
+    整个数据库变更在一个事务内完成，避免并发 join 留下多个房间状态。
+    """
     with transaction.atomic():
+        user.__class__.objects.select_for_update().get(pk=user.pk)
+        previous_ids = list(
+            VoiceChannelMember.objects.select_for_update()
+            .filter(user=user)
+            .exclude(channel=channel)
+            .values_list("channel_id", flat=True)
+        )
+        if previous_ids:
+            VoiceChannelMember.objects.filter(
+                user=user, channel_id__in=previous_ids
+            ).delete()
         member, created = VoiceChannelMember.objects.get_or_create(
             channel=channel, user=user,
             defaults={"last_seen_at": timezone.now()},
@@ -95,6 +110,11 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
         if not created:
             member.last_seen_at = timezone.now()
             member.save(update_fields=["last_seen_at"])
+        user.is_in_voice = True
+        user.voice_room_id = channel.id
+        user.save(update_fields=["is_in_voice", "voice_room_id"])
+    for previous_id in previous_ids:
+        broadcast_voice_state_by_channel_id(previous_id, user, "left")
     broadcast_voice_state(channel, user, "joined")
     return member
 
@@ -103,6 +123,10 @@ def leave_channel(channel: VoiceChannel, user) -> None:
     """离开频道（删除成员记录）+ 广播 voice.state left。"""
     deleted, _ = VoiceChannelMember.objects.filter(channel=channel, user=user).delete()
     if deleted:
+        if user.voice_room_id == channel.id:
+            user.is_in_voice = False
+            user.voice_room_id = None
+            user.save(update_fields=["is_in_voice", "voice_room_id"])
         broadcast_voice_state(channel, user, "left")
 
 
@@ -128,6 +152,10 @@ def mark_stale_members_left(channel: VoiceChannel, timeout_seconds: int | None =
     )
     for member in stale:
         member.delete()
+        if member.user.voice_room_id == channel.id:
+            member.user.is_in_voice = False
+            member.user.voice_room_id = None
+            member.user.save(update_fields=["is_in_voice", "voice_room_id"])
         broadcast_voice_state(channel, member.user, "left")
     return len(stale)
 
@@ -149,6 +177,12 @@ def _voice_state_event(channel: VoiceChannel, user, state: str) -> dict:
 def _voice_group_name(channel_id) -> str:
     """语音频道组名（独立命名空间，避免与会话组 `chat_conv_{id}` 语义混淆/撞车）。"""
     return f"voice_chan_{channel_id}"
+
+
+def broadcast_voice_state_by_channel_id(channel_id, user, state: str) -> None:
+    """按已删除成员关系的频道 id 广播离开事件。"""
+    channel = VoiceChannel(id=channel_id)
+    broadcast_voice_state(channel, user, state)
 
 
 def broadcast_voice_state(channel: VoiceChannel, user, state: str) -> None:

@@ -44,6 +44,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/home" element={<HomePage />} />
         <Route path="/voice" element={<VoiceHubPage />} />
+        <Route path="/voice/:channelId" element={<VoiceHubPage />} />
         <Route path="/live" element={<LiveHubPage />} />
         <Route path="/live/start/:channelId" element={<LiveStudioPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/posts/:postId" element={<GroupPage />} />
+        <Route path="/group/:id/voice/:voiceChannelId" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
       </Route>

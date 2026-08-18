@@ -107,12 +107,33 @@ def test_start_stop_transition(auth_client, live_channel_factory):
     assert ch.status == "live"
     assert ch.started_at is not None
     assert resp.json()["status"] == "live"
+    owner.refresh_from_db()
+    assert owner.is_live is True
+    assert owner.live_room_id == ch.id
 
     resp = client.post(f"/api/v1/live/channels/{ch.id}:stop/")
     assert resp.status_code == 200
     ch.refresh_from_db()
     assert ch.status == "ended"
     assert ch.ended_at is not None
+    owner.refresh_from_db()
+    assert owner.is_live is False
+    assert owner.live_room_id is None
+
+
+@pytest.mark.django_db
+def test_owner_can_only_have_one_live_channel(auth_client, live_channel_factory):
+    client, owner = auth_client()
+    first = live_channel_factory(owner=owner)
+    second = live_channel_factory(owner=owner)
+
+    assert client.post(f"/api/v1/live/channels/{first.id}:start/").status_code == 200
+    response = client.post(f"/api/v1/live/channels/{second.id}:start/")
+
+    assert response.status_code == 400
+    assert "已有一个直播间正在开播" in response.json()["detail"]
+    second.refresh_from_db()
+    assert second.status != "live"
 
 
 @pytest.mark.django_db

@@ -6,6 +6,7 @@
  * 群内子界面（底栏已在顶部，无独立进房动画，输入框直接显示）。
  */
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
 import type { ElysiaProfile } from "../../api/types";
@@ -17,7 +18,16 @@ import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useVoiceStore } from "../../stores/voice";
 
-export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () => void }) {
+export function GroupVoice({
+  groupId,
+  routeChannelId,
+  onExit,
+}: {
+  groupId: string;
+  routeChannelId?: string;
+  onExit: () => void;
+}) {
+  const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const channels = useVoiceStore((s) => s.channels);
   const wsConnection = useVoiceStore((s) => s.wsConnection);
@@ -76,8 +86,31 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
     };
   }, []);
 
-  const handleJoin = useCallback((channelId: string) => void join(channelId, { joinMuted: true }), [join]);
-  const currentChannel = channels.find((c) => c.id === currentChannelId) ?? null;
+  const handleJoin = useCallback(
+    (channelId: string) => {
+      navigate(`/group/${groupId}/voice/${encodeURIComponent(channelId)}`);
+    },
+    [groupId, navigate],
+  );
+
+  useEffect(() => {
+    if (routeChannelId && currentChannelId !== routeChannelId && !joining) {
+      void join(routeChannelId, { joinMuted: true });
+    }
+  }, [currentChannelId, join, joining, routeChannelId]);
+
+  // 只在当前群且 URL 指向当前频道时渲染房内界面；/group/:id/voice 是列表。
+  const currentChannel = routeChannelId
+    ? channels.find((c) => c.id === routeChannelId && c.group === groupId) ?? null
+    : null;
+  // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。
+  const handleBack = useCallback(() => {
+    navigate(`/group/${groupId}/voice`);
+  }, [groupId, navigate]);
+  const handleLeave = useCallback(async () => {
+    await leave();
+    navigate(`/group/${groupId}/voice`);
+  }, [groupId, leave, navigate]);
   const createButton = (
     <button
       type="button"
@@ -103,7 +136,7 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
         elysiaProfile={elysiaProfile}
         groupId={currentChannel.group}
         onToggleMic={() => void toggleMic()}
-        onLeave={() => void leave()}
+        onLeave={() => void handleLeave()}
         onRejoin={() => void rejoin()}
         onVolumeChange={setMemberVolume}
         onLocalVolumeChange={setLocalVolume}
@@ -111,7 +144,7 @@ export function GroupVoice({ groupId, onExit }: { groupId: string; onExit: () =>
           const m = useVoiceStore.getState().members[userId];
           if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
         }}
-        onBack={() => void leave()}
+        onBack={handleBack}
         inputEntered // 群内子界面无底栏下滑动画
       />
     );

@@ -198,7 +198,10 @@ class ChannelStartView(APIView):
             return _not_found()
         if not services.can_manage_channel(ch, request.user):
             return _forbidden("仅频道 owner 可开播")
-        services.start_channel(ch)
+        try:
+            services.start_channel(ch)
+        except ValueError as exc:
+            return _bad_request(str(exc))
         return Response(_channel_serializer(ch, request))
 
 

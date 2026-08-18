@@ -23,6 +23,11 @@ interface AuthState {
 
   setTokens: (access: string, refresh?: string) => void;
   setUser: (user: UserPublic) => void;
+  setMediaActivity: (activity: {
+    kind: "voice" | "live";
+    active: boolean;
+    roomId?: number | null;
+  }) => void;
   login: (username: string, password: string) => Promise<void>;
   register: (
     payload: { username: string; email: string; password: string; nickname?: string },
@@ -64,6 +69,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setUser: (user) => set({ currentUser: user }),
+
+  setMediaActivity: ({ kind, active, roomId = null }) =>
+    set((state) => {
+      if (!state.currentUser) return state;
+      return {
+        currentUser: {
+          ...state.currentUser,
+          ...(kind === "voice"
+            ? { is_in_voice: active, voice_room_id: active ? roomId : null }
+            : { is_live: active, live_room_id: active ? roomId : null }),
+        },
+      };
+    }),
 
   login: async (username, password) => {
     const result = await authApi.login({ username, password });

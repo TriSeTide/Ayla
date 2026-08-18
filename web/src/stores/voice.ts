@@ -57,6 +57,7 @@ interface VoiceState {
   localVolume: number;
 
   setChannels: (list: VoiceChannelDescriptor[]) => void;
+  upsertChannel: (channel: VoiceChannelDescriptor) => void;
   setChannelsLoading: (loading: boolean) => void;
   setError: (err: string | null) => void;
   /** 标记列表中某频道人数/我在其中（join/leave 后局部更新） */
@@ -106,15 +107,43 @@ const INITIAL = {
   localVolume: 100,
 };
 
+function normalizeChannel(channel: VoiceChannelDescriptor): VoiceChannelDescriptor {
+  return {
+    ...channel,
+    id: String(channel.id),
+    group: channel.group == null ? null : String(channel.group),
+    owner_id: String(channel.owner_id),
+  };
+}
+
 export const useVoiceStore = create<VoiceState>((set, get) => ({
   ...INITIAL,
 
-  setChannels: (channels) => set({ channels, channelsLoading: false, error: null }),
+  setChannels: (channels) =>
+    set({
+      channels: channels.map(normalizeChannel),
+      channelsLoading: false,
+      error: null,
+    }),
+  upsertChannel: (channel) =>
+    set((state) => {
+      const normalized = normalizeChannel(channel);
+      const exists = state.channels.some((item) => item.id === normalized.id);
+      return {
+        channels: exists
+          ? state.channels.map((item) => (item.id === normalized.id ? { ...item, ...normalized } : item))
+          : [...state.channels, normalized],
+      };
+    }),
   setChannelsLoading: (channelsLoading) => set({ channelsLoading }),
   setError: (error) => set({ error }),
   patchChannel: (channelId, patch) =>
     set((state) => ({
-      channels: state.channels.map((c) => (c.id === channelId ? { ...c, ...patch } : c)),
+      channels: state.channels.map((c) =>
+        c.id === String(channelId)
+          ? normalizeChannel({ ...c, ...patch })
+          : c,
+      ),
     })),
 
   enterChannel: (channelId, members) =>

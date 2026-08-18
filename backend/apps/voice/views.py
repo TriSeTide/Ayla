@@ -146,16 +146,16 @@ class ChannelJoinView(APIView):
             return _not_found()
         if not can_join(request.user, ch):
             return _forbidden("无权加入该语音频道")
-        member = services.join_channel(ch, request.user)
         try:
             token = livekit.issue_token(request.user, ch.room_name)
         except livekit.LiveKitNotConfigured:
-            # token 不可签（未配置）显式失败，不伪造媒体凭据
+            # token 不可签（未配置）显式失败，不伪造媒体凭据，也不落成员活动态
             logger.warning("join without LiveKit config, channel=%s", ch.id)
             return Response(
                 {"detail": "LiveKit 未配置，无法加入语音频道"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        services.join_channel(ch, request.user)
         return Response(
             {
                 "channel_id": str(ch.id),

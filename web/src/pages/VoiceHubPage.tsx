@@ -6,7 +6,8 @@
  * 群会话（仅群语音房，开发文档 §1.9）；返回键回卡片列表（底栏复位）。
  * 建语音房走右下 FAB（CreateFab handler=voice，F5 接线）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { getElysiaProfile } from "../api/elysia";
 import * as voiceApi from "../api/voice";
 import type { ElysiaProfile } from "../api/types";
@@ -21,6 +22,8 @@ import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
 
 export function VoiceHubPage() {
+  const navigate = useNavigate();
+  const { channelId: routeChannelId } = useParams<{ channelId?: string }>();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { inputEntered } = useEnterRoomAnimation();
   const channels = useVoiceStore((s) => s.channels);
@@ -30,6 +33,7 @@ export function VoiceHubPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [listRetry, setListRetry] = useState(0);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const joiningRouteRef = useRef<string | null>(null);
 
   const {
     currentChannelId,
@@ -48,7 +52,7 @@ export function VoiceHubPage() {
 
   // 进房/退房：底栏下滑走（R-V2，与直播同向）
   useEffect(() => {
-    useShellStore.getState().setBottomTabsLeaving(currentChannelId != null);
+    useShellStore.getState().setBottomTabsLeaving(routeChannelId != null && currentChannelId != null);
   }, [currentChannelId]);
 
   // 频道列表
@@ -91,8 +95,54 @@ export function VoiceHubPage() {
     };
   }, []);
 
-  const handleJoin = useCallback((channelId: string) => void join(channelId, { joinMuted: true }), [join]);
-  const currentChannel = channels.find((c) => c.id === currentChannelId) ?? null;
+  const handleJoin = useCallback(
+    async (channelId: string) => {
+      navigate(`/voice/${encodeURIComponent(channelId)}`);
+    },
+    [navigate],
+  );
+
+  // 直接进入 /voice/:id 时，即使大厅列表还没返回，也先拉详情，确保房内界面能渲染。
+  useEffect(() => {
+    if (!routeChannelId || channels.some((channel) => channel.id === routeChannelId)) return;
+    let cancelled = false;
+    void voiceApi.getVoiceChannel(routeChannelId)
+      .then((channel) => {
+        if (!cancelled) useVoiceStore.getState().upsertChannel(channel);
+      })
+      .catch(() => {
+        // 列表请求会继续负责错误展示；详情失败不覆盖已有状态。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [channels, routeChannelId]);
+
+  // /voice/:channelId 是真实的语音房路由：进入该 URL 就加入对应房间，
+  // 浮层点击因此不会只回列表，也支持刷新后按用户状态重新建立媒体连接。
+  useEffect(() => {
+    if (
+      routeChannelId &&
+      currentChannelId !== routeChannelId &&
+      !joining &&
+      joiningRouteRef.current !== routeChannelId
+    ) {
+      joiningRouteRef.current = routeChannelId;
+      void join(routeChannelId, { joinMuted: true });
+    }
+  }, [currentChannelId, joining, join, routeChannelId]);
+
+  const currentChannel = routeChannelId
+    ? channels.find((c) => c.id === routeChannelId) ?? null
+    : null;
+  // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。
+  const handleBack = useCallback(() => {
+    navigate("/voice");
+  }, [navigate]);
+  const handleLeave = useCallback(async () => {
+    await leave();
+    navigate("/voice");
+  }, [leave, navigate]);
   const notice = joinError ?? listError;
 
   // 进房态（两种形态都渲染语音房面板 + 房内打字）
@@ -106,7 +156,7 @@ export function VoiceHubPage() {
         elysiaProfile={elysiaProfile}
         groupId={currentChannel.group}
         onToggleMic={() => void toggleMic()}
-        onLeave={() => void leave()}
+        onLeave={() => void handleLeave()}
         onRejoin={() => void rejoin()}
         onVolumeChange={setMemberVolume}
         onLocalVolumeChange={setLocalVolume}
@@ -114,7 +164,7 @@ export function VoiceHubPage() {
           const m = useVoiceStore.getState().members[userId];
           if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
         }}
-        onBack={() => void leave()}
+        onBack={handleBack}
         inputEntered={inputEntered}
       />
     );

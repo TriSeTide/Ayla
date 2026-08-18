@@ -41,7 +41,12 @@ const PULL_DOWN_EXIT_THRESHOLD = 80;
 const EXIT_TRANSITION_MS = 250;
 
 export function GroupPage() {
-  const { id, scene, postId } = useParams<{ id: string; scene?: string; postId?: string }>();
+  const { id, scene, postId, voiceChannelId } = useParams<{
+    id: string;
+    scene?: string;
+    postId?: string;
+    voiceChannelId?: string;
+  }>();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
@@ -106,9 +111,11 @@ export function GroupPage() {
   // 单一状态源：route param → store（scene 无效回退 chat）
   const effectiveScene: GroupScene = postId
     ? "posts"
-    : scene && VALID_SCENES.has(scene)
-      ? (scene as GroupScene)
-      : "chat";
+    : voiceChannelId
+      ? "voice"
+      : scene && VALID_SCENES.has(scene)
+        ? (scene as GroupScene)
+        : "chat";
 
   useEffect(() => {
     if (!id) return;
@@ -176,7 +183,13 @@ export function GroupPage() {
       case "live":
         return <GroupLive groupId={id ?? ""} onExit={() => goScene("chat")} />;
       case "voice":
-        return <GroupVoice groupId={id ?? ""} onExit={() => goScene("chat")} />;
+        return (
+          <GroupVoice
+            groupId={id ?? ""}
+            routeChannelId={voiceChannelId}
+            onExit={() => goScene("chat")}
+          />
+        );
       case "posts":
         return <GroupPosts groupId={id ?? ""} postId={postId} onExit={() => goScene("chat")} />;
       case "games":

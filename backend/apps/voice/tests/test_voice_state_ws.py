@@ -122,6 +122,28 @@ def test_join_broadcasts_state_and_persists(auth_client):
 
 
 @pytest.mark.django_db
+def test_join_switches_user_to_single_voice_channel(auth_client):
+    client, user = auth_client()
+    first = VoiceChannel.objects.create(name="语音一", room_name="room_single_one", owner=user)
+    second = VoiceChannel.objects.create(name="语音二", room_name="room_single_two", owner=user)
+
+    services.join_channel(first, user)
+    services.join_channel(second, user)
+
+    assert not VoiceChannelMember.objects.filter(channel=first, user=user).exists()
+    assert VoiceChannelMember.objects.filter(channel=second, user=user).exists()
+    assert VoiceChannelMember.objects.filter(user=user).count() == 1
+    user.refresh_from_db()
+    assert user.is_in_voice is True
+    assert user.voice_room_id == second.id
+
+    services.leave_channel(second, user)
+    user.refresh_from_db()
+    assert user.is_in_voice is False
+    assert user.voice_room_id is None
+
+
+@pytest.mark.django_db
 def test_leave_broadcasts_state_and_removes(auth_client):
     """leave_channel 删成员 + 广播 left。"""
     client, user = auth_client()

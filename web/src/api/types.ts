@@ -17,6 +17,11 @@ export interface UserPublic {
   online: boolean;
   /** ISO 时间字符串 */
   date_joined: string;
+  /** 跨页面媒体活动事实，由后端生命周期维护。 */
+  is_in_voice?: boolean;
+  voice_room_id?: number | null;
+  is_live?: boolean;
+  live_room_id?: number | null;
 }
 
 /** 注册入参（RegisterSerializer） */

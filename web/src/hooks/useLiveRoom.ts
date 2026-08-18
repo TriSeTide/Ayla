@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import * as liveApi from "../api/live";
 import type { DanmakuFrame } from "../api/types";
 import { useLiveStore } from "../stores/live";
+import { useAuthStore } from "../stores/auth";
 import { liveWS } from "../ws/live";
 import { HlsPlayer } from "../player/hls";
 import { useSessionActivityStore } from "../stores/sessionActivity";
@@ -31,7 +32,9 @@ export function useLiveRoom(
   options: { activityRoute?: string; keepLiveActivity?: boolean } = {},
 ): UseLiveRoomResult {
   const activityRoute = options.activityRoute ?? `/live/${channelId}`;
-  const keepLiveActivity = options.keepLiveActivity ?? false;
+  const ownerConsoleRoute = activityRoute.startsWith("/live/start/")
+    ? activityRoute
+    : `/live/start/${channelId}`;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
@@ -82,15 +85,22 @@ export function useLiveRoom(
       void reconcileDanmaku(channelId);
     };
 
+    let tracksOwnerActivity = false;
     (async () => {
       try {
         const channel = await liveApi.getLiveChannel(channelId);
         if (!aliveRef.current) return;
         useLiveStore.getState().setCurrentChannel(channel);
-        useSessionActivityStore.getState().upsert({
+        tracksOwnerActivity = channel.owner_id === useAuthStore.getState().currentUser?.id;
+        const existingActivity = useSessionActivityStore.getState().liveSession;
+        const activityTarget =
+          existingActivity?.sessionId === String(channel.id)
+            ? existingActivity.sourceRoute
+            : ownerConsoleRoute;
+        if (tracksOwnerActivity) useSessionActivityStore.getState().upsert({
           kind: "live",
           sessionId: String(channel.id),
-          sourceRoute: activityRoute,
+          sourceRoute: activityTarget,
           owner: channel.owner_id ?? null,
           title: channel.title,
           status: "connecting",
@@ -106,15 +116,21 @@ export function useLiveRoom(
         useLiveStore.getState().mergeDanmakuHistory(history);
 
         liveWS.connect(channelId);
-        useSessionActivityStore.getState().setStatus(
-          "live",
-          keepLiveActivity || status.status === "live" ? "connected" : "ended",
-        );
+        if (tracksOwnerActivity) {
+          useSessionActivityStore.getState().setStatus(
+            "live",
+            status.status === "live" || useLiveStore.getState().current.channel?.status === "live"
+              ? "connected"
+              : "ended",
+          );
+        }
         setLoading(false);
       } catch (e) {
         if (!aliveRef.current) return;
         setError(e instanceof Error ? e.message : "加载直播间失败");
-        useSessionActivityStore.getState().setStatus("live", "failed", e instanceof Error ? e.message : "加载直播间失败");
+        if (tracksOwnerActivity) {
+          useSessionActivityStore.getState().setStatus("live", "failed", e instanceof Error ? e.message : "加载直播间失败");
+        }
         setLoading(false);
       }
     })();
@@ -129,11 +145,11 @@ export function useLiveRoom(
       liveWS.onClosedByServer = null;
       liveWS.onReconnected = null;
       liveWS.disconnect();
-      const shouldKeepActivity = keepLiveActivity && useLiveStore.getState().current.channel?.status === "live";
+      const shouldKeepActivity = tracksOwnerActivity && useLiveStore.getState().current.channel?.status === "live";
       useLiveStore.getState().clearCurrent();
-      if (!shouldKeepActivity) useSessionActivityStore.getState().clear("live", "idle");
+      if (tracksOwnerActivity && !shouldKeepActivity) useSessionActivityStore.getState().clear("live", "idle");
     };
-  }, [activityRoute, channelId, keepLiveActivity]);
+  }, [activityRoute, channelId, ownerConsoleRoute]);
 
   // ---------- 状态轮询（15s，页面隐藏暂停） ----------
   useEffect(() => {

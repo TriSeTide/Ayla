@@ -9,6 +9,8 @@ import * as liveApi from "../../api/live";
 import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { useLiveStore } from "../../stores/live";
+import { useAuthStore } from "../../stores/auth";
+import { useSessionActivityStore } from "../../stores/sessionActivity";
 import { ResourceImage } from "../ResourceImage";
 
 export function LiveOwnerPanel({
@@ -31,6 +33,26 @@ export function LiveOwnerPanel({
     try {
       const updated = await action();
       useLiveStore.getState().setCurrentChannel(updated);
+      const active = updated.status === "live";
+      useAuthStore.getState().setMediaActivity({
+        kind: "live",
+        active,
+        roomId: active ? updated.id : null,
+      });
+      if (active) {
+        const current = useSessionActivityStore.getState().liveSession;
+        useSessionActivityStore.getState().upsert({
+          kind: "live",
+          sessionId: String(updated.id),
+          sourceRoute: current?.sourceRoute ?? window.location.pathname,
+          owner: updated.owner_id ?? null,
+          title: updated.title,
+          status: "connected",
+          lastError: null,
+        });
+      } else {
+        useSessionActivityStore.getState().clear("live", "idle");
+      }
       useLiveStore.getState().upsertChannel(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");

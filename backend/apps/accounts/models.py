@@ -49,6 +49,12 @@ class User(AbstractUser):
 
     last_active_at = models.DateTimeField("最后活跃", null=True, blank=True)
 
+    # 媒体活动事实：用于跨页面恢复入口；由 voice/live 生命周期服务维护。
+    is_in_voice = models.BooleanField("正在语音房", default=False)
+    voice_room_id = models.PositiveIntegerField("语音房 ID", null=True, blank=True)
+    is_live = models.BooleanField("正在开播", default=False)
+    live_room_id = models.PositiveIntegerField("直播间 ID", null=True, blank=True)
+
     class Meta:
         db_table = "users"
         verbose_name = "用户"

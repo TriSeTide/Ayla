@@ -25,6 +25,10 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "status",
             "online",
             "date_joined",
+            "is_in_voice",
+            "voice_room_id",
+            "is_live",
+            "live_room_id",
         ]
         read_only_fields = ["id", "date_joined"]
 

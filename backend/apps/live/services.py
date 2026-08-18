@@ -17,6 +17,7 @@ import secrets
 from asgiref.sync import async_to_sync
 from channels.exceptions import ChannelFull
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from apps.common.visibility import Visibility
@@ -115,11 +116,22 @@ def build_flv_url(channel: LiveChannel) -> str:
 
 # ---------- 乐观标记 :start / :stop ----------
 
+@transaction.atomic
 def start_channel(channel: LiveChannel) -> LiveChannel:
-    """开播（乐观标记：status→live、started_at=now；不校验 SRS 真实流，由 /status 判定）。"""
+    """开播；同一 owner 同时只能有一个 live 频道。"""
+    owner_model = channel.owner.__class__
+    owner_model.objects.select_for_update().get(pk=channel.owner_id)
+    if LiveChannel.objects.filter(
+        owner=channel.owner, status="live"
+    ).exclude(pk=channel.pk).exists():
+        raise ValueError("你已有一个直播间正在开播，请先结束当前直播")
     channel.status = "live"
     channel.started_at = timezone.now()
     channel.save(update_fields=["status", "started_at"])
+    owner = channel.owner
+    owner.is_live = True
+    owner.live_room_id = channel.id
+    owner.save(update_fields=["is_live", "live_room_id"])
     return channel
 
 
@@ -128,6 +140,11 @@ def stop_channel(channel: LiveChannel) -> LiveChannel:
     channel.status = "ended"
     channel.ended_at = timezone.now()
     channel.save(update_fields=["status", "ended_at"])
+    owner = channel.owner
+    if owner.live_room_id == channel.id:
+        owner.is_live = False
+        owner.live_room_id = None
+        owner.save(update_fields=["is_live", "live_room_id"])
     return channel
 
 
