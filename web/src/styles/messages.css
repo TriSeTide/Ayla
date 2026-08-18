@@ -49,6 +49,37 @@
   color: var(--text-primary);
 }
 
+.messages-tab-requests {
+  position: relative;
+}
+
+.messages-tab-badge {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  margin-left: var(--sp-1);
+  padding: 0 5px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--surface);
+  background: var(--pink-500);
+  font-family: var(--font-utility);
+  font-size: 11px;
+  line-height: 1;
+  box-shadow: var(--glow-shadow);
+}
+
+.messages-requests {
+  gap: var(--sp-4);
+}
+
+.messages-section-hint {
+  margin: calc(var(--sp-2) * -1) 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .messages-private {
   flex: 1;
   min-height: 0;

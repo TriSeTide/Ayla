@@ -22,6 +22,7 @@ from .models import (
     ConversationMember,
     GroupInvite,
     GroupJoinRequest,
+    GroupMemberLeaveNotice,
     Message,
     MessageRead,
 )
@@ -32,6 +33,7 @@ from .serializers import (
     GroupActionSerializer,
     GroupInviteSerializer,
     GroupJoinRequestSerializer,
+    GroupMemberLeaveNoticeSerializer,
     MessageSerializer,
 )
 
@@ -503,6 +505,24 @@ class GroupLeaveView(APIView):
         except ValueError as exc:
             return _bad_request(str(exc))
         return Response({"left": True})
+
+
+class GroupMemberLeaveNoticeListView(APIView):
+    """GET /chat/leave-notices/；POST /chat/leave-notices/<id>/read/。"""
+
+    def get(self, request):
+        notices = GroupMemberLeaveNotice.objects.filter(recipient=request.user, read_at__isnull=True).select_related("conversation")[:50]
+        return Response(GroupMemberLeaveNoticeSerializer(notices, many=True).data)
+
+
+class GroupMemberLeaveNoticeReadView(APIView):
+    def post(self, request, notice_id):
+        notice = GroupMemberLeaveNotice.objects.filter(id=notice_id, recipient=request.user).first()
+        if notice is None:
+            return _not_found("退群通知不存在")
+        notice.read_at = timezone.now()
+        notice.save(update_fields=["read_at"])
+        return Response({"read": True})
 
 
 class GroupDissolveView(APIView):

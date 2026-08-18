@@ -10,12 +10,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { search } from "../api/search";
+import { applyToGroup } from "../api/chat";
 import type { SearchResults } from "../api/types";
 import { SearchPage } from "../pages/SearchPage";
 import { useAuthStore } from "../stores/auth";
 import { useSearchStore } from "../stores/search";
 
 vi.mock("../api/search", () => ({ search: vi.fn() }));
+vi.mock("../api/chat", () => ({ applyToGroup: vi.fn() }));
 
 const NARROW = "(max-width: 768px)";
 
@@ -49,7 +51,7 @@ function resultFor(q: string): SearchResults {
   void q;
   return {
     users: { total: 1, items: [{ id: "u2", username: "bob", nickname: "小樱", avatar: "", signature: "", status: "offline", online: false, date_joined: "2026-01-01T00:00:00Z" }] },
-    groups: { total: 0, items: [] },
+    groups: { total: 1, items: [{ id: "g1", type: "group", title: "冰樱研究所", created_at: "2026-01-01T00:00:00Z" }] },
     posts: { total: 0, items: [] },
     lives: { total: 0, items: [] },
     games: { total: 0, items: [] },
@@ -69,6 +71,7 @@ function renderSearch(initialEntry: string, narrow: boolean) {
 
 beforeEach(() => {
   vi.mocked(search).mockResolvedValue(resultFor("冰樱"));
+  vi.mocked(applyToGroup).mockResolvedValue({} as never);
   useAuthStore.setState({ currentUser });
   useSearchStore.setState({ history: [] });
   localStorage.clear();
@@ -147,6 +150,18 @@ describe("SearchPage 顶栏复用（F9）", () => {
       expect(screen.getByText(/未找到/)).toBeInTheDocument();
     });
     expect(screen.getByText(/不存在的词/)).toBeInTheDocument();
+  });
+
+
+  it("点击群搜索结果打开申请弹窗，发送留言后显示等待审核", async () => {
+    renderSearch("/search?q=冰樱", true);
+    await waitFor(() => expect(screen.getByText("冰樱研究所")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /冰樱研究所/ }));
+    expect(screen.getByRole("dialog", { name: "申请加入「冰樱研究所」" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "给群主留言" }), { target: { value: "想和大家一起交流" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送入群申请" }));
+    await waitFor(() => expect(screen.getByText("申请已发送")).toBeInTheDocument());
+    expect(applyToGroup).toHaveBeenCalledWith("g1", "想和大家一起交流");
   });
 
   it("有部分结果时不显示无结果空态", async () => {

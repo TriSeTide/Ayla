@@ -232,6 +232,19 @@ class GroupJoinRequest(models.Model):
         return f"conv{self.conversation_id}:{self.applicant_id}:{self.status}"
 
 
+class GroupMemberLeaveNotice(models.Model):
+    """持久化退群通知，避免接收者不在线时丢失。"""
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="group_leave_notices", on_delete=models.CASCADE)
+    conversation = models.ForeignKey(Conversation, related_name="member_leave_notices", on_delete=models.CASCADE)
+    member_name = models.CharField(max_length=150)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "group_member_leave_notices"
+        ordering = ["-created_at"]
+
+
 class GroupInvite(models.Model):
     """入群邀请（B1，开发文档 §1.2）。
 

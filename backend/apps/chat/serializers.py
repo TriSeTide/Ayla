@@ -10,6 +10,7 @@ from .models import (
     ConversationMember,
     GroupInvite,
     GroupJoinRequest,
+    GroupMemberLeaveNotice,
     Message,
     MessageRead,
 )
@@ -250,6 +251,15 @@ class GroupJoinRequestSerializer(serializers.ModelSerializer):
             "handled_at",
             "created_at",
         ]
+        read_only_fields = fields
+
+
+class GroupMemberLeaveNoticeSerializer(serializers.ModelSerializer):
+    conversation_title = serializers.CharField(read_only=True, source="conversation.title")
+
+    class Meta:
+        model = GroupMemberLeaveNotice
+        fields = ["id", "conversation_id", "conversation_title", "member_name", "read_at", "created_at"]
         read_only_fields = fields
 
 

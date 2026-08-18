@@ -183,6 +183,16 @@ export function listMyInvites() {
   return apiRequest<GroupInvite[]>("/chat/me/invites/");
 }
 
+/** GET /chat/leave-notices/ —— 当前用户未读退群通知 */
+export function listLeaveNotices() {
+  return apiRequest<import("./types").GroupMemberLeaveNotice[]>("/chat/leave-notices/");
+}
+
+/** POST /chat/leave-notices/<id>/read/ —— 标记退群通知已读 */
+export function readLeaveNotice(noticeId: number) {
+  return apiRequest<{ read: boolean }>(`/chat/leave-notices/${noticeId}/read/`, { method: "POST" });
+}
+
 /** POST /chat/invites/<id>/action/ —— 接受/拒绝入群邀请 */
 export function actionGroupInvite(inviteId: number, action: "accept" | "reject") {
   return apiRequest<{ detail: string }>(`/chat/invites/${inviteId}/action/`, {

@@ -729,6 +729,16 @@ export interface GroupInvite {
   created_at: string;
 }
 
+/** 持久化退群通知（chat.GroupMemberLeaveNoticeSerializer） */
+export interface GroupMemberLeaveNotice {
+  id: number;
+  conversation_id: string;
+  conversation_title: string;
+  member_name: string;
+  read_at: string | null;
+  created_at: string;
+}
+
 /* ================= S5 聚合搜索（对齐 backend/apps/search） ================= */
 
 /** 群搜索结果项（轻量 dict） */

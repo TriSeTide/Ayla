@@ -27,6 +27,7 @@ from .models import (
     ConversationMember,
     GroupInvite,
     GroupJoinRequest,
+    GroupMemberLeaveNotice,
     Message,
     MessageRead,
 )
@@ -526,6 +527,10 @@ def leave_group(conversation, user):
             role__in=[ConversationMember.ROLE_OWNER, ConversationMember.ROLE_ADMIN],
         ).exclude(user=user).values_list("user_id", flat=True)
     )
+    for recipient_id in recipients:
+        notice = GroupMemberLeaveNotice.objects.create(
+            recipient_id=recipient_id, conversation=conversation, member_name=getattr(user, "nickname", "") or user.username
+        )
     member.delete()
     for recipient_id in recipients:
         broadcast_group_member_left(

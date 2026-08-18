@@ -16,9 +16,10 @@ import { ElysiaEntry } from "./ElysiaEntry";
 import { useBadgesStore } from "../../stores/badges";
 import { useChatStore } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
+import { useNoticeStore } from "../../stores/notices";
 import type { ConversationSummary } from "../../api/types";
 
-type Tab = "chat" | "friends";
+type Tab = "chat" | "friends" | "requests";
 
 export function WideMessagesSidebar({
   conversations,
@@ -33,6 +34,10 @@ export function WideMessagesSidebar({
 }) {
   const [tab, setTab] = useState<Tab>("chat");
   const currentUser = useAuthStore((state) => state.currentUser);
+  const realtimeNotices = useNoticeStore((state) => state.notices);
+  const dismissNotice = useNoticeStore((state) => state.dismiss);
+  const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
+  const [leaveNotices, setLeaveNotices] = useState<import("../../api/types").GroupMemberLeaveNotice[]>([]);
   const [friendList, setFriendList] = useState<Awaited<ReturnType<typeof usersApi.listFriends>>>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [invites, setInvites] = useState<GroupInvite[]>([]);
@@ -79,6 +84,7 @@ export function WideMessagesSidebar({
     usersApi.listFriends().then(setFriendList).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友失败"));
     usersApi.listFriendRequests().then(setFriendRequests).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载好友申请失败"));
     chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载群邀请失败"));
+    chatApi.listLeaveNotices().then(setLeaveNotices).catch((e) => setFriendsError(e instanceof Error ? e.message : "加载退群通知失败"));
     const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
     Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
       .then((lists) => setJoinRequests(lists.flat().filter((r) => r.status === "pending")))
@@ -86,7 +92,7 @@ export function WideMessagesSidebar({
   }, [conversations]);
 
   useEffect(() => {
-    if (tab === "friends") loadFriendsTab();
+    if (tab === "friends" || tab === "requests") loadFriendsTab();
   }, [tab, loadFriendsTab]);
 
   const refreshBadges = () => void useBadgesStore.getState().fetch();
@@ -143,6 +149,16 @@ export function WideMessagesSidebar({
         >
           好友
         </button>
+        <button
+          type="button"
+          className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
+          onClick={() => setTab("requests")}
+        >
+          认证消息
+          {(friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length) > 0 && (
+            <span className="messages-tab-badge">{friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length}</span>
+          )}
+        </button>
       </div>
 
       {tab === "chat" ? (
@@ -161,7 +177,25 @@ export function WideMessagesSidebar({
           />
         </div>
       ) : (
-        <div className="messages-friends">
+        <div className={`messages-friends ${tab === "requests" ? "messages-requests" : ""}`}>
+          {tab === "requests" && <p className="messages-section-hint">好友申请、群邀请和入群申请</p>}
+          {tab === "requests" && (leaveNotices.length > 0 || realtimeLeaveNotices.length > 0) && (
+            <section className="messages-group">
+              <h4 className="messages-group-title">退群通知</h4>
+              {leaveNotices.map((notice) => (
+                <div key={`persisted-${notice.id}`} className="request-row notice-row">
+                  <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id); setLeaveNotices((items) => items.filter((item) => item.id !== notice.id)); }}>知道了</button>
+                </div>
+              ))}
+              {realtimeLeaveNotices.map((notice) => (
+                <div key={notice.id} className="request-row notice-row">
+                  <div className="request-body"><span className="request-name">{notice.title}</span><span className="request-msg">{notice.detail}</span></div>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => dismissNotice(notice.id)}>知道了</button>
+                </div>
+              ))}
+            </section>
+          )}
           {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
             <section>
               <h4 className="messages-group-title">收到的好友申请</h4>
@@ -208,7 +242,7 @@ export function WideMessagesSidebar({
               ))}
             </section>
           )}
-          {friendList.length === 0 ? (
+          {tab === "friends" && (friendList.length === 0 ? (
             <div className="messages-empty">暂无好友</div>
           ) : (
             friendList.map((f) => (
@@ -220,7 +254,7 @@ export function WideMessagesSidebar({
                 <button type="button" className="btn btn-ghost friend-remove-btn" onClick={() => usersApi.deleteFriend(f.user.id).then(() => setFriendList((items) => items.filter((item) => item.user.id !== f.user.id))).catch((e) => setActionError(e instanceof Error ? e.message : "解除好友失败"))}>解除好友</button>
               </div>
             ))
-          )}
+          ))}
         </div>
       )}
     </aside>

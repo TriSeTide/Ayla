@@ -54,6 +54,8 @@ urlpatterns = [
         views.TypingView.as_view(),
         name="chat-typing",
     ),
+    path("leave-notices/", views.GroupMemberLeaveNoticeListView.as_view(), name="chat-leave-notices"),
+    path("leave-notices/<int:notice_id>/read/", views.GroupMemberLeaveNoticeReadView.as_view(), name="chat-leave-notice-read"),
     # 群管理
     path(
         "conversations/<int:conv_id>/members/",

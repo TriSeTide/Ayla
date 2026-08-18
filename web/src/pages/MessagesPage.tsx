@@ -22,13 +22,18 @@ import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
+import { useNoticeStore } from "../stores/notices";
 
-type Tab = "chat" | "friends";
+type Tab = "chat" | "friends" | "requests";
 
 export function MessagesPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
+  const realtimeNotices = useNoticeStore((state) => state.notices);
+  const dismissNotice = useNoticeStore((state) => state.dismiss);
+  const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
+  const [leaveNotices, setLeaveNotices] = useState<import("../api/types").GroupMemberLeaveNotice[]>([]);
   const [tab, setTab] = useState<Tab>("chat");
   // 宽屏右侧选中的私聊会话 id（内联聊天）
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -67,6 +72,7 @@ export function MessagesPage() {
     usersApi.listFriends().then(setFriendList).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载好友失败"));
     usersApi.listFriendRequests().then(setFriendRequests).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载好友申请失败"));
     chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载群邀请失败"));
+    chatApi.listLeaveNotices().then(setLeaveNotices).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载退群通知失败"));
     // 我管理的群 → 待审批入群申请
     const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
     Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
@@ -75,7 +81,7 @@ export function MessagesPage() {
   }, [conversations]);
 
   useEffect(() => {
-    if (tab === "friends" && isNarrow) loadFriendsTab();
+    if ((tab === "friends" || tab === "requests") && isNarrow) loadFriendsTab();
   }, [tab, isNarrow, loadFriendsTab]);
 
   const refreshBadges = () => void useBadgesStore.getState().fetch();
@@ -166,6 +172,18 @@ export function MessagesPage() {
         >
           好友列表
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "requests"}
+          className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
+          onClick={() => setTab("requests")}
+        >
+          认证消息
+          {(friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length) > 0 && (
+            <span className="messages-tab-badge">{friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length}</span>
+          )}
+        </button>
       </div>
 
       {tab === "chat" ? (
@@ -188,7 +206,7 @@ export function MessagesPage() {
             onSelect={(id) => navigate(`/chat/${id}`)}
           />
         </div>
-      ) : (
+      ) : tab === "friends" ? (
         <div className="messages-friends">
           {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
             <section className="messages-group">
@@ -270,6 +288,51 @@ export function MessagesPage() {
               <p className="messages-empty">还没有好友，去搜索添加吧</p>
             )}
           </section>
+        </div>
+      ) : (
+        <div className="messages-friends messages-requests" aria-label="认证消息">
+          <section className="messages-group">
+            <h3 className="messages-group-title">认证消息</h3>
+            <p className="messages-section-hint">好友申请、群邀请和入群申请都会集中显示在这里。</p>
+          </section>
+          {(leaveNotices.length > 0 || realtimeLeaveNotices.length > 0) && (
+            <section className="messages-group">
+              <h3 className="messages-group-title">退群通知</h3>
+              {leaveNotices.map((notice) => (
+                <div key={`persisted-${notice.id}`} className="request-row notice-row">
+                  <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id); setLeaveNotices((items) => items.filter((item) => item.id !== notice.id)); }}>知道了</button>
+                </div>
+              ))}
+              {realtimeLeaveNotices.map((notice) => (
+                <div key={notice.id} className="request-row notice-row">
+                  <div className="request-body"><span className="request-name">{notice.title}</span><span className="request-msg">{notice.detail}</span></div>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => dismissNotice(notice.id)}>知道了</button>
+                </div>
+              ))}
+            </section>
+          )}
+          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
+            <section className="messages-group">
+              <h3 className="messages-group-title">好友申请</h3>
+              {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").map((r) => (
+                <RequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} onAccept={() => handleFriendAction(r, "accept")} onReject={() => handleFriendAction(r, "reject")} />
+              ))}
+            </section>
+          )}
+          {invites.length > 0 && (
+            <section className="messages-group">
+              <h3 className="messages-group-title">群邀请</h3>
+              {invites.map((i) => <RequestRow key={i.id} avatar={i.inviter} name={i.conversation_title} message="邀请你加入群聊" onAccept={() => handleInviteAction(i, "accept")} onReject={() => handleInviteAction(i, "reject")} />)}
+            </section>
+          )}
+          {joinRequests.length > 0 && (
+            <section className="messages-group">
+              <h3 className="messages-group-title">入群申请（群主/管理员）</h3>
+              {joinRequests.map((r) => <RequestRow key={r.id} avatar={r.applicant} name={r.applicant.nickname || r.applicant.username} message={r.message ? r.conversation_title + "：" + r.message : r.conversation_title} onAccept={() => handleJoinRequestAction(r, "accept")} onReject={() => handleJoinRequestAction(r, "reject")} />)}
+            </section>
+          )}
+          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length === 0 && invites.length === 0 && joinRequests.length === 0 && <p className="messages-empty">暂无待处理认证消息</p>}
         </div>
       )}
     </div>

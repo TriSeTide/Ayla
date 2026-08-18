@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { search } from "../api/search";
-import type { SearchResults, UserPublic } from "../api/types";
+import { applyToGroup } from "../api/chat";
+import type { SearchGroupItem, SearchResults, UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { UserProfileCard } from "../components/UserProfileCard";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -27,6 +28,38 @@ export function SearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserPublic | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<SearchGroupItem | null>(null);
+  const [joinMessage, setJoinMessage] = useState("");
+  const [joinBusy, setJoinBusy] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSent, setJoinSent] = useState(false);
+
+  const openGroupApply = (group: SearchGroupItem) => {
+    setSelectedGroup(group);
+    setJoinMessage("");
+    setJoinError(null);
+    setJoinSent(false);
+  };
+
+  const closeGroupApply = () => {
+    if (joinBusy) return;
+    setSelectedGroup(null);
+    setJoinError(null);
+  };
+
+  const submitGroupApply = async () => {
+    if (!selectedGroup || joinBusy || joinSent) return;
+    setJoinBusy(true);
+    setJoinError(null);
+    try {
+      await applyToGroup(selectedGroup.id, joinMessage.trim());
+      setJoinSent(true);
+    } catch (e) {
+      setJoinError(e instanceof Error ? e.message : "发送入群申请失败");
+    } finally {
+      setJoinBusy(false);
+    }
+  };
 
   const doSearch = useCallback(
     (query: string) => {
@@ -107,8 +140,10 @@ export function SearchPage() {
 
           <ResultGroup title="群聊" count={results.groups?.total ?? 0} onMore={() => doSearch(q)}>
             {(results.groups?.items ?? []).map((g) => (
-              <button key={g.id} type="button" className="search-row" onClick={() => navigate(`/group/${g.id}`)}>
+              <button key={g.id} type="button" className="search-row search-group-row" onClick={() => openGroupApply(g)}>
+                <span className="search-group-mark" aria-hidden="true">✦</span>
                 <span className="search-row-title">{g.title}</span>
+                <span className="search-row-action">申请入群</span>
               </button>
             ))}
           </ResultGroup>
@@ -150,6 +185,41 @@ export function SearchPage() {
         <div className="user-profile-overlay" onClick={() => setSelectedUser(null)}>
           <div onClick={(e) => e.stopPropagation()}>
             <UserProfileCard user={selectedUser} onClose={() => setSelectedUser(null)} />
+          </div>
+        </div>
+      )}
+
+      {selectedGroup && (
+        <div className="group-apply-overlay" onClick={closeGroupApply}>
+          <div className="group-apply-dialog glass-card" role="dialog" aria-modal="true" aria-labelledby="group-apply-title" onClick={(e) => e.stopPropagation()}>
+            <header className="group-apply-head">
+              <div>
+                <span className="group-apply-kicker">GROUP REQUEST</span>
+                <h2 id="group-apply-title">申请加入「{selectedGroup.title}」</h2>
+              </div>
+              <button type="button" className="icon-btn-40" onClick={closeGroupApply} aria-label="关闭">×</button>
+            </header>
+            {joinSent ? (
+              <div className="group-apply-success" role="status">
+                <span className="group-apply-success-icon" aria-hidden="true">✓</span>
+                <strong>申请已发送</strong>
+                <p>等待群主或管理员审核，同意后你就能进入群聊。</p>
+                <button type="button" className="btn btn-primary" onClick={closeGroupApply}>知道了</button>
+              </div>
+            ) : (
+              <>
+                <p className="group-apply-desc">这是一个申请制群聊，群主或管理员同意后才能入群。</p>
+                <label className="group-apply-label" htmlFor="group-apply-message">给群主留言 <span>（可选）</span></label>
+                <textarea id="group-apply-message" aria-label="给群主留言" className="field group-apply-message" value={joinMessage} maxLength={200} onChange={(e) => setJoinMessage(e.target.value)} placeholder="简单介绍一下自己吧…" />
+                {joinError && <p className="group-apply-error" role="alert">{joinError}</p>}
+                <div className="group-apply-actions">
+                  <button type="button" className="btn btn-ghost" onClick={closeGroupApply} disabled={joinBusy}>取消</button>
+                  <button type="button" className="btn btn-primary" onClick={() => void submitGroupApply()} disabled={joinBusy}>
+                    {joinBusy ? "发送中…" : "发送入群申请"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
