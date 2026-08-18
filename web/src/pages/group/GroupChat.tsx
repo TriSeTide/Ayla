@@ -61,7 +61,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
   const typingActive = Object.values(peerTyping).some(Boolean);
 
   const handleHistoryError = useCallback((error: unknown) => {
-    if (error instanceof ApiError && error.status === 403) {
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
       useChatStore.getState().closeConversation();
       useMessageStore.getState().reset();
       navigate("/home", { replace: true });

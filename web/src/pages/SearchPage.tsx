@@ -52,7 +52,12 @@ export function SearchPage() {
     setJoinBusy(true);
     setJoinError(null);
     try {
-      await applyToGroup(selectedGroup.id, joinMessage.trim());
+      const response = await applyToGroup(selectedGroup.id, joinMessage.trim());
+      if ("conversation_id" in response && response.status === "accepted") {
+        setSelectedGroup(null);
+        navigate("/group/" + response.conversation_id);
+        return;
+      }
       setJoinSent(true);
     } catch (e) {
       setJoinError(e instanceof Error ? e.message : "发送入群申请失败");

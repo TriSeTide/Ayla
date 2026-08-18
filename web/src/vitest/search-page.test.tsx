@@ -64,6 +64,7 @@ function renderSearch(initialEntry: string, narrow: boolean) {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/search" element={<SearchPage />} />
+        <Route path="/group/:id" element={<div>群聊</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -162,6 +163,16 @@ describe("SearchPage 顶栏复用（F9）", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送入群申请" }));
     await waitFor(() => expect(screen.getByText("申请已发送")).toBeInTheDocument());
     expect(applyToGroup).toHaveBeenCalledWith("g1", "想和大家一起交流");
+  });
+
+  it("公开加入申请成功后直接进入群聊", async () => {
+    vi.mocked(applyToGroup).mockResolvedValue({ status: "accepted", conversation_id: "25" } as never);
+    renderSearch("/search?q=冰樱", true);
+    await waitFor(() => expect(screen.getByText("冰樱研究所")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /冰樱研究所/ }));
+    fireEvent.click(screen.getByRole("button", { name: "发送入群申请" }));
+    await waitFor(() => expect(screen.getByText("群聊")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("有部分结果时不显示无结果空态", async () => {

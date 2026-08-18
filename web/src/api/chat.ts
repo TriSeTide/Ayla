@@ -130,8 +130,10 @@ export function dissolveGroup(convId: string) {
   return apiRequest<{ deleted: boolean }>(`/chat/conversations/${convId}/dissolve/`, { method: "DELETE" });
 }
 
+export type GroupJoinResponse = GroupJoinRequest | { status: "accepted"; conversation_id: string };
+
 export function applyToGroup(convId: string, message: string) {
-  return apiRequest<GroupJoinRequest>(`/chat/conversations/${convId}/join-requests/`, { method: "POST", body: { message } });
+  return apiRequest<GroupJoinResponse>(`/chat/conversations/${convId}/join-requests/`, { method: "POST", body: { message } });
 }
 
 export function toggleMute(convId: string, userId: string, muted: boolean) {
