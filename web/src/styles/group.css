@@ -150,6 +150,16 @@
   text-align: center;
 }
 
+/* 空态操作按钮行（如「创建群内直播」+「返回聊天」并排） */
+.group-scene-placeholder-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  flex-wrap: wrap;
+}
+
 /* ================= 宽屏三列 ================= */
 
 .group-page-wide {

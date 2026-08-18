@@ -108,13 +108,37 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
 
   if (channels.length === 0 || currentId == null) {
     return (
-      <div className="group-scene-placeholder">
-        <h3 className="placeholder-title">群内还没有直播</h3>
-        <p className="placeholder-desc">发起本群的第一场直播吧</p>
-        <button type="button" className="btn btn-ghost" onClick={onExit}>
-          返回聊天
-        </button>
-      </div>
+      <>
+        <div className="group-scene-placeholder">
+          <h3 className="placeholder-title">群内还没有直播</h3>
+          <p className="placeholder-desc">发起本群的第一场直播吧</p>
+          <div className="group-scene-placeholder-actions">
+            <button
+              type="button"
+              className="btn btn-glow"
+              onClick={() => {
+                setCreateError(null);
+                setShowCreate(true);
+              }}
+            >
+              创建群内直播
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={onExit}>
+              返回聊天
+            </button>
+          </div>
+        </div>
+        {showCreate && (
+          <CreateSheet title="群内开播" onClose={() => setShowCreate(false)}>
+            <LiveStartSheet
+              onStart={handleLiveStarted}
+              onCreateNew={() => void handleCreateNewLive()}
+              creatingNew={creatingNew}
+              createError={createError}
+            />
+          </CreateSheet>
+        )}
+      </>
     );
   }
 

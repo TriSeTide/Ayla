@@ -112,4 +112,28 @@ describe("GroupLive 范围（仅该群）", () => {
     );
     await waitFor(() => expect(screen.getByText("群内还没有直播")).toBeInTheDocument());
   });
+
+  it("本群无直播 → 空态提供「创建群内直播」入口并可按群创建", async () => {
+    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([ch(3, null), ch(4, "g9")]);
+    vi.mocked(liveApi.createLiveChannel).mockResolvedValue(ch(10, "g1"));
+    render(
+      <MemoryRouter>
+        <GroupLive groupId="g1" onExit={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("群内还没有直播")).toBeInTheDocument());
+    // 空态创建入口按钮存在
+    const createBtn = screen.getByRole("button", { name: "创建群内直播" });
+    expect(createBtn).toBeInTheDocument();
+    // 点击打开「群内开播」选择器弹窗
+    createBtn.click();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "群内开播" })).toBeInTheDocument());
+    // 空态下当前用户没有自己的直播间 → 选择器展示空引导
+    expect(screen.getByText("还没有自己的直播间，先创建一个吧。")).toBeInTheDocument();
+    // 走「+ 添加新的直播间」→ 创建归属本群的频道（group=g1）
+    screen.getByRole("button", { name: "+ 添加新的直播间" }).click();
+    await waitFor(() => {
+      expect(liveApi.createLiveChannel).toHaveBeenCalledWith("新直播间", "g1");
+    });
+  });
 });
