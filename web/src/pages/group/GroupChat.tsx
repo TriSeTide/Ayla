@@ -5,7 +5,9 @@
  * loadHistory/loadMoreHistory/recallMessage/打字 全复用 hooks/useChat 与 chat/message store。
  * 群 id 即会话 id（GroupPage 传入 groupId）。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ApiError } from "../../api/client";
 import type { ChatMessage } from "../../api/types";
 import { MessageInput } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
@@ -16,6 +18,7 @@ import { useMessageStore } from "../../stores/message";
 import { chatWS } from "../../ws/chat";
 
 export function GroupChat({ groupId }: { groupId: string }) {
+  const navigate = useNavigate();
   const conversations = useChatStore((s) => s.conversations);
   const buckets = useMessageStore((s) => s.buckets);
   const bucket = buckets[groupId];
@@ -41,7 +44,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
         setHistoryError(null);
         await markReadLatest(groupId);
       })
-      .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
+      .catch(handleHistoryError);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
@@ -56,6 +59,16 @@ export function GroupChat({ groupId }: { groupId: string }) {
   }, []);
 
   const typingActive = Object.values(peerTyping).some(Boolean);
+
+  const handleHistoryError = useCallback((error: unknown) => {
+    if (error instanceof ApiError && error.status === 403) {
+      useChatStore.getState().closeConversation();
+      useMessageStore.getState().reset();
+      navigate("/home", { replace: true });
+      return;
+    }
+    setHistoryError(error instanceof Error ? error.message : "加载聊天记录失败");
+  }, [groupId, navigate]);
 
   const handleRecall = async (msg: ChatMessage) => {
     if (msg.status === "recalled") return;
@@ -74,7 +87,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
           <button type="button" className="btn btn-ghost" onClick={() => {
             setHistoryError(null);
             loadHistory(groupId, undefined, true)
-              .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
+              .catch(handleHistoryError);
           }}>重试</button>
         </div>
       )}
@@ -90,7 +103,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() => {
-          loadMoreHistory(groupId).catch((e) => setHistoryError(e instanceof Error ? e.message : "加载更早消息失败"));
+          loadMoreHistory(groupId).catch(handleHistoryError);
         }}
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}
