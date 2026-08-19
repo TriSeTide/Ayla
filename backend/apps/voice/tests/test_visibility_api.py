@@ -29,6 +29,18 @@ def _make_channel(owner, room_name, **kwargs):
     return VoiceChannel.objects.create(owner=owner, room_name=room_name, **kwargs)
 
 
+def _client_for(user):
+    """为已存在用户签发 JWT 客户端（auth_client 会新建用户，不适合复用）。"""
+    from rest_framework.test import APIClient
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(user).access_token}"
+    )
+    return client
+
+
 # ---------- 列表过滤 ----------
 
 @pytest.mark.django_db
@@ -120,8 +132,8 @@ def test_create_with_group_defaults_to_group_visibility(auth_client, user_factor
 
 
 @pytest.mark.django_db
-def test_create_visibility_group_requires_group(auth_client):
-    """visibility=group 不带 group → 400。"""
+def test_create_visibility_group_without_group_or_whitelist_rejected(auth_client):
+    """visibility=group 且无 group 归属、无群白名单 → 400（避免建出对所有人不可见的房间）。"""
     client, _ = auth_client()
     resp = client.post(
         "/api/v1/voice/channels/",
@@ -129,7 +141,70 @@ def test_create_visibility_group_requires_group(auth_client):
         format="json",
     )
     assert resp.status_code == 400
-    assert "群" in resp.json()["detail"]
+    assert "至少选择一个群" in resp.json()["detail"]
+
+
+@pytest.mark.django_db
+def test_create_group_visible_room_from_global_with_allowed_groups(auth_client, user_factory):
+    """全局列表创建"指定群可见"语音房：visibility=group + allowed_group_ids（多群）→ 201。"""
+    client, owner = auth_client()
+    group1 = _make_group(owner)
+    group2 = _make_group(owner)
+
+    resp = client.post(
+        "/api/v1/voice/channels/",
+        {
+            "name": "多群可见语音房",
+            "visibility": Visibility.GROUP,
+            "allowed_group_ids": [str(group1.id), str(group2.id)],
+        },
+        format="json",
+    )
+    assert resp.status_code == 201, resp.content
+    data = resp.json()
+    assert data["visibility"] == Visibility.GROUP
+    assert data["group"] is None
+    assert set(data["allowed_group_ids"]) == {str(group1.id), str(group2.id)}
+
+
+@pytest.mark.django_db
+def test_group_visible_room_visibility_by_whitelist(auth_client, user_factory):
+    """白名单群成员可见（列表+详情），非成员不可见；owner 始终可见。"""
+    client, owner = auth_client()
+    group1 = _make_group(owner)
+    group2 = _make_group(owner)
+    member1 = user_factory(username="g1_member")
+    member2 = user_factory(username="g2_member")
+    stranger = user_factory(username="stranger")
+    ConversationMember.objects.create(conversation=group1, user=member1)
+    ConversationMember.objects.create(conversation=group2, user=member2)
+
+    resp = client.post(
+        "/api/v1/voice/channels/",
+        {
+            "name": "白名单语音房",
+            "visibility": Visibility.GROUP,
+            "allowed_group_ids": [str(group1.id), str(group2.id)],
+        },
+        format="json",
+    )
+    assert resp.status_code == 201, resp.content
+    channel_id = resp.json()["id"]
+
+    def _names_for(http_client):
+        return {c["name"] for c in http_client.get("/api/v1/voice/channels/").json()}
+
+    # owner 始终可见
+    assert "白名单语音房" in _names_for(client)
+    # 群1/群2 成员：列表可见 + 详情 200
+    for member in (member1, member2):
+        c = _client_for(member)
+        assert "白名单语音房" in _names_for(c)
+        assert c.get(f"/api/v1/voice/channels/{channel_id}/").status_code == 200
+    # 非成员：列表不可见 + 详情 403
+    c = _client_for(stranger)
+    assert "白名单语音房" not in _names_for(c)
+    assert c.get(f"/api/v1/voice/channels/{channel_id}/").status_code == 403
 
 
 @pytest.mark.django_db
@@ -154,3 +229,51 @@ def test_serializer_exposes_visibility_fields(auth_client):
     assert "visibility" in item and "group" in item and "group_name" in item
     resp = client.get(f"/api/v1/voice/channels/{ch.id}/")
     assert resp.json()["visibility"] == Visibility.PUBLIC
+
+
+# ---------- PATCH 可见性（与创建同约束：group 可见需有群归属或白名单） ----------
+
+@pytest.mark.django_db
+def test_patch_visibility_group_without_group_or_whitelist_rejected(auth_client, user_factory):
+    """无群归属的 public 房 patch 成 group 可见且无白名单 → 400（避免改出对所有人不可见的房间）。"""
+    client, owner = auth_client()
+    ch = _make_channel(owner, "room_patch_g")
+
+    resp = client.patch(
+        f"/api/v1/voice/channels/{ch.id}/",
+        {"name": ch.name, "visibility": Visibility.GROUP},
+        format="json",
+    )
+    assert resp.status_code == 400, resp.content
+    assert "至少选择一个群" in resp.json()["detail"]
+    # 未生效：仍是 public
+    assert VoiceChannel.objects.get(pk=ch.id).visibility == Visibility.PUBLIC
+
+
+@pytest.mark.django_db
+def test_patch_visibility_group_with_whitelist_ok(auth_client, user_factory):
+    """无群归属房 patch 成 group 可见 + 白名单 → 200，白名单落库且成员可见。"""
+    client, owner = auth_client()
+    group = _make_group(owner)
+    member = user_factory(username="patch_member")
+    ConversationMember.objects.create(conversation=group, user=member)
+    ch = _make_channel(owner, "room_patch_g2")
+
+    resp = client.patch(
+        f"/api/v1/voice/channels/{ch.id}/",
+        {
+            "name": ch.name,
+            "visibility": Visibility.GROUP,
+            "allowed_group_ids": [str(group.id)],
+        },
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    data = resp.json()
+    assert data["visibility"] == Visibility.GROUP
+    assert data["allowed_group_ids"] == [str(group.id)]
+
+    ch.refresh_from_db()
+    assert list(ch.allowed_groups.values_list("id", flat=True)) == [group.id]
+    c = _client_for(member)
+    assert c.get(f"/api/v1/voice/channels/{ch.id}/").status_code == 200

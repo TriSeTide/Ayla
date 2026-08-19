@@ -1,7 +1,12 @@
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useChatStore } from "../stores/chat";
 
-export type VisibilityValue = "public" | "friends" | "group";
+/** 可见性多选模式：public 互斥，friends 和 group 可以同时勾选 */
+export interface VisibilitySelection {
+  public: boolean;
+  friends: boolean;
+  group: boolean;
+}
 
 export function VisibilitySelector({
   value,
@@ -10,13 +15,12 @@ export function VisibilitySelector({
   onSelectedGroupIdsChange,
   initialGroupId,
 }: {
-  value: VisibilityValue;
-  onChange: (value: VisibilityValue) => void;
+  value: VisibilitySelection;
+  onChange: (value: VisibilitySelection) => void;
   selectedGroupIds: string[];
   onSelectedGroupIdsChange: (ids: string[]) => void;
   initialGroupId?: string | null;
 }) {
-  const groupName = `visibility-${useId()}`;
   const groups = useChatStore((state) => state.conversations.filter((item) => item.type === "group"));
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
@@ -24,12 +28,29 @@ export function VisibilitySelector({
     return groups.filter((group) => !needle || group.title.toLowerCase().includes(needle));
   }, [groups, query]);
 
-  const selectVisibility = (next: VisibilityValue) => {
-    // 群内创建的内容必须保持群可见，不能从选择器切回公开/好友。
-    const effective = initialGroupId ? "group" : next;
-    onChange(effective);
-    if (effective === "group" && initialGroupId && !selectedGroupIds.includes(initialGroupId)) {
+  const togglePublic = (checked: boolean) => {
+    // 公开互斥：勾选公开时取消其他选项
+    if (checked) {
+      onChange({ public: true, friends: false, group: false });
+      onSelectedGroupIdsChange([]);
+    } else {
+      onChange({ ...value, public: false });
+    }
+  };
+
+  const toggleFriends = (checked: boolean) => {
+    // 勾选好友时自动取消公开
+    onChange({ ...value, friends: checked, public: false });
+  };
+
+  const toggleGroup = (checked: boolean) => {
+    // 勾选群时自动取消公开；群内创建时默认勾选当前群
+    onChange({ ...value, group: checked, public: false });
+    if (checked && initialGroupId && !selectedGroupIds.includes(initialGroupId)) {
       onSelectedGroupIdsChange([...selectedGroupIds, initialGroupId]);
+    }
+    if (!checked) {
+      onSelectedGroupIdsChange([]);
     }
   };
 
@@ -37,11 +58,20 @@ export function VisibilitySelector({
     <fieldset className="visibility-selector">
       <legend>可见范围</legend>
       <div className="visibility-selector-options">
-        <label><input type="radio" name={groupName} checked={value === "public"} disabled={Boolean(initialGroupId)} onChange={() => selectVisibility("public")} /> 公开</label>
-        <label><input type="radio" name={groupName} checked={value === "friends"} disabled={Boolean(initialGroupId)} onChange={() => selectVisibility("friends")} /> 好友可见</label>
-        <label><input type="radio" name={groupName} checked={value === "group"} onChange={() => selectVisibility("group")} /> 指定群可见</label>
+        <label>
+          <input type="checkbox" checked={value.public} onChange={(e) => togglePublic(e.target.checked)} />
+          公开
+        </label>
+        <label>
+          <input type="checkbox" checked={value.friends} disabled={value.public} onChange={(e) => toggleFriends(e.target.checked)} />
+          好友可见
+        </label>
+        <label>
+          <input type="checkbox" checked={value.group} disabled={value.public} onChange={(e) => toggleGroup(e.target.checked)} />
+          指定群可见
+        </label>
       </div>
-      {value === "group" && (
+      {value.group && (
         <div className="visibility-selector-groups">
           <input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索群" aria-label="搜索群" />
           {filtered.length === 0 ? <span className="placeholder-desc">没有匹配的群</span> : filtered.map((group) => {

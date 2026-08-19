@@ -10,12 +10,11 @@ import { useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
 import type { ElysiaProfile } from "../../api/types";
-import { VoiceChannelCreate } from "../../components/voice/VoiceChannelCreate";
 import { VoiceChannelList } from "../../components/voice/VoiceChannelList";
 import { VoiceRoomBody } from "../../components/voice/VoiceRoomBody";
-import { CreateSheet } from "../../layout/CreateSheet";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
+import { useAuthStore } from "../../stores/auth";
 import { useVoiceStore } from "../../stores/voice";
 
 export function GroupVoice({
@@ -35,7 +34,6 @@ export function GroupVoice({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
 
   const {
     currentChannelId,
@@ -50,14 +48,14 @@ export function GroupVoice({
     rejoin,
   } = useVoiceChannel();
 
-  // 该群语音房
-  const groupChannels = channels.filter((c) => c.group === groupId);
+  // 后端已按 scope=group:xxx 过滤
+  const groupChannels = channels;
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     voiceApi
-      .listVoiceChannels()
+      .listVoiceChannels({ scope: `group:${groupId}` })
       .then((list) => {
         if (!cancelled) useVoiceStore.getState().setChannels(list);
       })
@@ -70,7 +68,7 @@ export function GroupVoice({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,28 +101,24 @@ export function GroupVoice({
   const currentChannel = routeChannelId
     ? channels.find((c) => c.id === routeChannelId && c.group === groupId) ?? null
     : null;
+  const currentUser = useAuthStore((s) => s.currentUser);
   // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。
   const handleBack = useCallback(() => {
     navigate(`/group/${groupId}/voice`);
   }, [groupId, navigate]);
   const handleLeave = useCallback(async () => {
-    await leave();
-    navigate(`/group/${groupId}/voice`);
-  }, [groupId, leave, navigate]);
-  const createButton = (
-    <button
-      type="button"
-      className="btn btn-primary group-voice-create-btn"
-      onClick={() => setShowCreate(true)}
-    >
-      创建群内语音房
-    </button>
-  );
-  const createSheet = showCreate ? (
-    <CreateSheet title="创建群内语音房" onClose={() => setShowCreate(false)}>
-      <VoiceChannelCreate group={groupId} />
-    </CreateSheet>
-  ) : null;
+    // 房主必须先转让房主才能离开（后端 403 强校验，前端先拦截避免状态混乱）
+    if (currentChannel && currentChannel.owner_id === currentUser?.id) {
+      window.confirm("你是房主，退出前应先转让房主");
+      return;
+    }
+    try {
+      await leave();
+      navigate(`/group/${groupId}/voice`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "离开语音房失败");
+    }
+  }, [currentChannel, currentUser, groupId, leave, navigate]);
 
   if (currentChannel) {
     return (
@@ -132,6 +126,7 @@ export function GroupVoice({
         channelId={currentChannel.id}
         ownerId={currentChannel.owner_id}
         channelName={currentChannel.name}
+        channel={currentChannel}
         livekit={livekit}
         wsConnection={wsConnection}
         elysiaProfile={elysiaProfile}
@@ -181,41 +176,33 @@ export function GroupVoice({
 
   if (groupChannels.length === 0) {
     return (
-      <>
-        <div className="group-scene-placeholder">
-          <h3 className="placeholder-title">群内还没有语音房</h3>
-          <p className="placeholder-desc">建一个群内语音房，一起连麦</p>
-          <div className="group-voice-empty-actions">
-            {createButton}
-            <button type="button" className="btn btn-ghost" onClick={onExit}>
-              返回聊天
-            </button>
-          </div>
+      <div className="group-scene-placeholder">
+        <h3 className="placeholder-title">群内还没有语音房</h3>
+        <p className="placeholder-desc">建一个群内语音房，一起连麦</p>
+        <div className="group-voice-empty-actions">
+          <button type="button" className="btn btn-ghost" onClick={onExit}>
+            返回聊天
+          </button>
         </div>
-        {createSheet}
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
-        {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
-        <div className="group-voice-head">
-          <div>
-            <h3 className="group-voice-title">群内语音房</h3>
-            <p className="group-voice-desc">选择一个房间加入，或创建新的群内语音房</p>
-          </div>
-          {createButton}
+    <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
+      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
+      <div className="group-voice-head">
+        <div>
+          <h3 className="group-voice-title">群内语音房</h3>
+          <p className="group-voice-desc">选择一个房间加入，或点击右下角创建新的群内语音房</p>
         </div>
-        <VoiceChannelList
-          channels={groupChannels}
-          currentChannelId={currentChannelId}
-          joining={joining}
-          onJoin={handleJoin}
-        />
       </div>
-      {createSheet}
-    </>
+      <VoiceChannelList
+        channels={groupChannels}
+        currentChannelId={currentChannelId}
+        joining={joining}
+        onJoin={handleJoin}
+      />
+    </div>
   );
 }

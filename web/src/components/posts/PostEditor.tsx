@@ -10,7 +10,7 @@ import { mediaContentUrl, resolveMediaPath, uploadMediaFile } from "../../api/me
 import type { MediaDescriptor, Post } from "../../api/types";
 import { IconImage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
-import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
+import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 type PostImageDraft = {
   mediaId: string;
@@ -30,7 +30,9 @@ export function PostEditor({
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [visibility, setVisibility] = useState<VisibilitySelection>(
+    group ? { public: false, friends: false, group: true } : { public: true, friends: false, group: false }
+  );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [images, setImages] = useState<PostImageDraft[]>([]);
   const [failedFiles, setFailedFiles] = useState<File[]>([]);
@@ -78,12 +80,18 @@ export function PostEditor({
     setSubmitting(true);
     setError(null);
     try {
+      // 多选转后端格式：public 单选；friends + group 可共存，优先 friends
+      const backendVisibility = visibility.public
+        ? "public"
+        : visibility.friends
+          ? "friends"
+          : "group";
       const post = await postsApi.createPost({
         title: title.trim(),
         body: trimmed,
         group,
-        visibility,
-        allowed_group_ids: selectedGroupIds,
+        visibility: backendVisibility,
+        allowed_group_ids: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
         images: images.map((image) => image.mediaId),
       });
       setTitle("");

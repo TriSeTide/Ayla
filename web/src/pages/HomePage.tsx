@@ -144,6 +144,7 @@ export function HomePage() {
         <button type="button" className="btn btn-glow" onClick={() => setCreatingGroup(true)}>
           创建你的第一个群
         </button>
+        {creatingGroup && <GroupCreateDialog onClose={() => setCreatingGroup(false)} />}
       </div>
     );
   }

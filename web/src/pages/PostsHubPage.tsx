@@ -6,7 +6,7 @@
  * 窄屏带 NarrowTopBar；宽屏内容 max-width 680px 居中（布局文档 §3.1）。
  */
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import { PostCard } from "../components/posts/PostCard";
@@ -87,6 +87,9 @@ export function PostsHubPage() {
   return (
     <div className="posts-hub" onScroll={(e) => handleScroll(e.currentTarget)}>
       {isNarrow && <NarrowTopBar />}
+      <div className="posts-hub-head">
+        <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
+      </div>
       {favoriteLoadError && <div className="chat-notice" role="alert">收藏状态加载失败：{favoriteLoadError}</div>}
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       {loading && posts.length === 0 ? (

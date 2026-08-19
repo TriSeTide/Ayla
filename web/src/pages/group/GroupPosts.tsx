@@ -5,7 +5,7 @@
  * 两条路径不同，R-P2）。PostEditor compact 变体。无帖子 → 空态。
  */
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
 import type { Post } from "../../api/types";
@@ -72,6 +72,9 @@ export function GroupPosts({
 
   return (
     <div className="group-posts">
+      <div className="group-posts-head">
+        <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
+      </div>
       <div className="group-posts-list">
         {posts.length === 0 ? (
           <div className="group-scene-placeholder">

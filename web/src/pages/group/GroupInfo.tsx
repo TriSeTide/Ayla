@@ -13,9 +13,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as chatApi from "../../api/chat";
 import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
-import type { ConversationSummary } from "../../api/types";
+import type { ConversationMember, ConversationSummary } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
-import { IconBack } from "../../components/icons";
+import { IconBack, IconClose, IconSearch } from "../../components/icons";
 import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
 
@@ -54,6 +54,8 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [joinRequests, setJoinRequests] = useState<import("../../api/types").GroupJoinRequest[]>([]);
   const [managementError, setManagementError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  // 转让群主对话框（Bug #5：不再用 window.prompt 手输成员 ID）
+  const [transferOpen, setTransferOpen] = useState(false);
 
   // 群头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [groupAvatarFile, setGroupAvatarFile] = useState<File | null>(null);
@@ -144,6 +146,21 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     try { await action(); await reloadGroup(); }
     catch (e) { setManagementError(e instanceof Error ? e.message : "操作失败"); }
     finally { setBusyAction(null); }
+  };
+
+  // 可转让候选：排除群主自己（m.role === "owner" 与 m.user.id === currentUser.id 双条件最稳）
+  const transferCandidates = useMemo(
+    () => members.filter((m) => m.user.id !== currentUser?.id && m.role !== "owner"),
+    [members, currentUser?.id],
+  );
+
+  const confirmTransfer = async (m: ConversationMember) => {
+    const name = m.user.nickname || m.user.username;
+    if (!window.confirm(`确定将群主转让给 ${name}？转让后你将成为普通成员`)) return;
+    await runManagementAction("transfer", async () => {
+      await chatApi.transferGroupOwner(groupId, m.user.id);
+      setTransferOpen(false);
+    });
   };
 
   const startEdit = () => {
@@ -342,13 +359,147 @@ export function GroupInfo({ groupId }: { groupId: string }) {
               </div>)}
             </div> : <p className="group-info-placeholder">入群申请审批：暂无待处理申请</p>}
             {isOwner && <>
-              <button type="button" className="btn btn-ghost" onClick={() => { const target = window.prompt("输入要转让给的成员 ID"); if (target) void runManagementAction("transfer", () => chatApi.transferGroupOwner(groupId, target)); }}>转让群主</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setTransferOpen(true)}>转让群主</button>
               <button type="button" className="btn btn-danger" onClick={() => { if (window.confirm("确定解散群聊？此操作不可撤销")) void runManagementAction("dissolve", async () => { await chatApi.dissolveGroup(groupId); window.location.href = "/messages"; }); }}>解散群聊</button>
             </>}
           </>
         )}
         {!isOwner && <button type="button" className="btn btn-ghost" onClick={() => { if (window.confirm("确定退出群聊？")) void runManagementAction("leave", async () => { await chatApi.leaveGroup(groupId); window.location.href = "/home"; }); }}>退出群聊</button>}
       </section>
+
+      {transferOpen && (
+        <TransferOwnerDialog
+          members={transferCandidates}
+          busy={busyAction === "transfer"}
+          error={managementError}
+          onConfirm={(m) => void confirmTransfer(m)}
+          onClose={() => setTransferOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * TransferOwnerDialog —— 转让群主选择对话框（Bug #5）。
+ *
+ * 弹层结构参照 GroupCreateDialog（overlay + glass-card），成员行沿用群成员列表
+ * （Avatar + 昵称 + 角色标签）。候选列表已由父组件过滤（排除群主自己）。
+ * - 搜索框按昵称/用户名过滤；
+ * - 单选：点成员行选中（aria-pressed），再点「确认转让」二次 confirm 后执行；
+ * - 无候选时显示空态并禁用确认（防止转让给自己/群主）。
+ * 无障碍：role="dialog" + aria-label；搜索框带 label；关闭按钮可聚焦。
+ */
+function TransferOwnerDialog({
+  members,
+  busy,
+  error,
+  onConfirm,
+  onClose,
+}: {
+  /** 可转让候选（已排除群主自己） */
+  members: ConversationMember[];
+  busy: boolean;
+  error: string | null;
+  onConfirm: (m: ConversationMember) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<ConversationMember | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) => {
+      const nickname = (m.user.nickname || m.user.username).toLowerCase();
+      const username = m.user.username.toLowerCase();
+      return nickname.includes(q) || username.includes(q);
+    });
+  }, [members, query]);
+
+  return (
+    <div className="group-transfer-overlay" onClick={busy ? undefined : onClose}>
+      <div
+        className="group-transfer-dialog glass-card"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="转让群主"
+      >
+        <header className="group-transfer-head">
+          <span className="group-transfer-title">转让群主</span>
+          <button type="button" className="icon-btn-40" onClick={onClose} aria-label="关闭" disabled={busy}>
+            <IconClose width={18} height={18} />
+          </button>
+        </header>
+
+        <p className="group-transfer-desc">
+          选择一位群成员接任群主。转让后你将成为普通成员。
+        </p>
+
+        {members.length === 0 ? (
+          <p className="group-transfer-empty">暂无其他成员可转让</p>
+        ) : (
+          <>
+            <div className="group-transfer-search">
+              <IconSearch width={15} height={15} className="group-transfer-search-icon" />
+              <input
+                className="field"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索成员昵称/用户名"
+                aria-label="搜索成员"
+              />
+            </div>
+            <ul className="group-transfer-list">
+              {filtered.map((m) => {
+                const name = m.user.nickname || m.user.username;
+                const isSelected = selected?.id === m.id;
+                return (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      className={`group-transfer-row${isSelected ? " is-selected" : ""}`}
+                      onClick={() => setSelected(m)}
+                      aria-pressed={isSelected}
+                      aria-label={`转让给 ${name}`}
+                    >
+                      <Avatar
+                        label={name}
+                        size={36}
+                        online={m.user.online}
+                        imageUrl={m.user.avatar || null}
+                      />
+                      <span className="group-transfer-name">{name}</span>
+                      {m.role !== "member" && (
+                        <span className={`group-info-role group-info-role-${m.role}`}>
+                          {ROLE_LABEL[m.role]}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+              {filtered.length === 0 && <li className="search-empty">没有匹配的成员</li>}
+            </ul>
+          </>
+        )}
+
+        {error && <p className="group-info-error" role="alert">{error}</p>}
+
+        <div className="group-transfer-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => selected && onConfirm(selected)}
+            disabled={!selected || busy || members.length === 0}
+          >
+            {busy ? "转让中…" : "确认转让"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

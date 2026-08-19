@@ -221,23 +221,23 @@ export function useVoiceChannel() {
     [channels, reconcile, startHeartbeat, stopHeartbeat],
   );
 
-  /** 离开频道（幂等） */
+  /** 离开频道（幂等）。
+   *
+   * 服务端先裁决：房主必须先转让（403）等拒绝在此抛出，本地状态
+   * （心跳/媒体/成员）保持原样，由调用方展示错误并留在房间；只有
+   * 服务端确认离开后才断开媒体并清理本地状态。
+   */
   const leave = useCallback(async () => {
     const channelId = useVoiceStore.getState().currentChannelId;
     if (!channelId) return;
+    await voiceApi.leaveVoiceChannel(channelId);
     stopHeartbeat();
     voiceWS.unsubscribe(channelId);
     await voiceLiveKit.disconnect();
     useVoiceStore.getState().leaveChannelLocal();
     useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
     useSessionActivityStore.getState().clear("voice", "idle");
-    try {
-      await voiceApi.leaveVoiceChannel(channelId);
-      useVoiceStore.getState().patchChannel(channelId, { mine: false });
-    } catch {
-      // leave 失败（如频道已不存在）不阻塞本地状态——成员身份以服务端正本为准，
-      // 心跳已停，超时后服务端自动清理
-    }
+    useVoiceStore.getState().patchChannel(channelId, { mine: false });
   }, [stopHeartbeat]);
 
   /** 静音切换：乐观 UI + SDK 失败回滚（M5-3 §4.3） */

@@ -36,7 +36,11 @@ class TestDownloadAuthz:
         b = user_factory(username="dl_mem_b")
         # 上传者为 a
         media_id, _ = upload_image(a_client)
-        # a-b 私聊；a 发图片消息
+        # a-b 私聊；a 发图片消息（Bug #2：发消息需双向好友，先建好友）
+        from apps.accounts.models import Friendship
+
+        Friendship.objects.get_or_create(user=a, friend=b)
+        Friendship.objects.get_or_create(user=b, friend=a)
         conv = get_or_create_conversation(a, b)
         r = a_client.post(
             f"/api/v1/chat/conversations/{conv.id}/messages/",
@@ -54,6 +58,11 @@ class TestDownloadAuthz:
         b = user_factory(username="dl_nm_b")
         c = user_factory(username="dl_nm_c")
         media_id, _ = upload_image(a_client)
+        # Bug #2：发消息需双向好友，先建好友
+        from apps.accounts.models import Friendship
+
+        Friendship.objects.get_or_create(user=a, friend=b)
+        Friendship.objects.get_or_create(user=b, friend=a)
         conv = get_or_create_conversation(a, b)
         a_client.post(
             f"/api/v1/chat/conversations/{conv.id}/messages/",

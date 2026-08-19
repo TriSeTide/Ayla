@@ -39,6 +39,9 @@
   --warning: #e8a33d;
   --destructive: #d64d6e;
   --focus-ring: 2px solid #f796ff;
+  /* 警告类提示条（半透明底/边框，见 .private-chat-blocked） */
+  --warning-soft-bg: rgba(232, 163, 61, 0.12);
+  --warning-soft-border: rgba(232, 163, 61, 0.4);
 
   /* ---- Typography ---- */
   --font-display: "Fredoka", "PingFang SC", "Noto Sans SC", sans-serif;

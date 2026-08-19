@@ -123,6 +123,7 @@ describe("useVoiceChannel", () => {
       "GET /voice/channels/ch1/members/": () =>
         jsonResponse([{ id: 1, user_id: "me", joined_at: "t", last_seen_at: "t" }]),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
+      "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
     });
     const { result } = renderHook(() => useVoiceChannel());
     await act(async () => {
@@ -209,11 +210,56 @@ describe("useVoiceChannel", () => {
     expect(calledWith("POST", "/heartbeat/")).toBe(0);
   });
 
+  it("leave/ 返回 403（房主必须先转让）→ leave() 抛错且本地状态保留", async () => {
+    stubFetch({
+      "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
+      "GET /voice/channels/ch1/members/": () => jsonResponse([]),
+      "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
+      "POST /voice/channels/ch1/leave/": () =>
+        jsonResponse({ detail: "房主请先转让房主后再离开" }, 403),
+    });
+    const room = fakeRoom();
+    voiceLiveKit.setRoomFactory(() => room);
+    const { result } = renderHook(() => useVoiceChannel());
+    await act(async () => {
+      await result.current.join("ch1");
+    });
+    expect(useVoiceStore.getState().currentChannelId).toBe("ch1");
+
+    // 服务端拒绝离开：错误透出，本地状态（成员/媒体/心跳）保持原样
+    await expect(result.current.leave()).rejects.toThrow("房主请先转让房主后再离开");
+    expect(useVoiceStore.getState().currentChannelId).toBe("ch1");
+    // 媒体未断开（fake room 无事件回调，livekit 停在 join 时的 connecting 态，但不是 idle）
+    expect(useVoiceStore.getState().livekit).not.toBe("idle");
+    expect(room.disconnect).not.toHaveBeenCalled();
+
+    // 心跳未被停止（仍在频道，403 后心跳仍会发）
+    await act(async () => {
+      vi.advanceTimersByTime(VOICE_HEARTBEAT_INTERVAL_MS);
+    });
+    expect(calledWith("POST", "/heartbeat/")).toBe(1);
+
+    // 清理：改成允许离开后正常退出
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const path = String(url).replace(/^.*\/api\/v1/, "");
+      const method = init?.method ?? "GET";
+      if (method === "POST" && path === "/voice/channels/ch1/leave/") {
+        return Promise.resolve(jsonResponse({ left: true }));
+      }
+      return Promise.reject(new Error(`unmocked: ${method} ${path}`));
+    });
+    await act(async () => {
+      await result.current.leave();
+    });
+    expect(useVoiceStore.getState().currentChannelId).toBeNull();
+  });
+
   it("toggleMic 乐观 UI + SDK 失败回滚", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
       "GET /voice/channels/ch1/members/": () => jsonResponse([]),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
+      "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
     });
     const room = fakeRoom();
     voiceLiveKit.setRoomFactory(() => room);

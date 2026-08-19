@@ -34,12 +34,11 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
     setLoading(true);
     setError(null);
     liveApi
-      .listLiveChannels()
+      .listLiveChannels({ scope: `group:${groupId}` })
       .then((list) => {
         if (cancelled) return;
-        const mine = list.filter((c) => c.group === groupId);
-        setChannels(mine);
-        setCurrentId(mine[0]?.id ?? null);
+        setChannels(list);
+        setCurrentId(list[0]?.id ?? null);
         setLoading(false);
       })
       .catch((e) => {

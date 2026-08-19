@@ -95,7 +95,12 @@ class TestEmojiAPI:
         resp = oc.get("/api/v1/emoji/packs/")
         assert any(p["is_system"] for p in resp.json())
         # 其它用户发 emoji 消息（须有访问权：系统包媒体全员可见）
+        # Bug #2：发消息需双向好友，先建好友
+        from apps.accounts.models import Friendship
         from apps.chat.services import get_or_create_conversation
+
+        Friendship.objects.get_or_create(user=other, friend=user)
+        Friendship.objects.get_or_create(user=user, friend=other)
         conv = get_or_create_conversation(other, user)
         resp = oc.post(
             f"/api/v1/chat/conversations/{conv.id}/messages/",

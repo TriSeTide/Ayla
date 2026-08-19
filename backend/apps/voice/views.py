@@ -17,7 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.visibility import can_join, can_view, visible_queryset
+from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media
 from apps.media.serializers import MediaObjectSerializer
@@ -61,12 +61,28 @@ def _not_found(msg="频道不存在"):
 
 
 class ChannelListView(APIView):
-    """GET /api/v1/voice/channels/ —— 频道列表（含人数）；POST —— 建频道。"""
+    """GET /api/v1/voice/channels/ —— 频道列表（含人数；?scope=group:<id> 群内过滤）；POST —— 建频道。"""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        channels = list(visible_queryset(VoiceChannel, request.user))
+        from django.db.models import Q
+
+        qs = visible_queryset(VoiceChannel, request.user)
+
+        # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
+        scope = request.query_params.get("scope", "").strip()
+        if scope.startswith("group:"):
+            raw_gid = scope.split(":", 1)[1]
+            try:
+                gid = int(raw_gid)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "group id 无效"}, status=status.HTTP_400_BAD_REQUEST
+                )
+            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+
+        channels = list(qs)
         # 附成员数
         counts = {
             c["channel_id"]: c["n"]
@@ -92,10 +108,22 @@ class ChannelListView(APIView):
         if group_err:
             return Response({"detail": group_err}, status=status.HTTP_400_BAD_REQUEST)
         visibility = request.data.get("visibility") or None
+        allowed_group_ids = request.data.get("allowed_group_ids")
+        # visibility=group 且无单群归属时，必须提供群白名单；否则房间对所有人不可见
+        # （owner 自己可见，但无任何成员可进入，属误建）。
+        if (
+            visibility == Visibility.GROUP
+            and group is None
+            and not allowed_group_ids
+        ):
+            return Response(
+                {"detail": "指定群可见必须至少选择一个群"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             ch = services.create_channel(
                 request.user, name, group=group, visibility=visibility,
-                allowed_group_ids=request.data.get("allowed_group_ids"),
+                allowed_group_ids=allowed_group_ids,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -146,6 +174,19 @@ class ChannelDetailView(APIView):
             value = request.data.get("visibility")
             if value not in {"public", "friends", "group"}:
                 return Response({"detail": "visibility 无效"}, status=status.HTTP_400_BAD_REQUEST)
+            if value == Visibility.GROUP:
+                # 与创建一致：group 可见但无单群归属时，必须有群白名单，
+                # 否则改完房间对所有人不可见（owner 自己可见，无人可进入）。
+                target_ids = (
+                    request.data.get("allowed_group_ids")
+                    if "allowed_group_ids" in request.data
+                    else list(ch.allowed_groups.values_list("id", flat=True))
+                )
+                if ch.group_id is None and not target_ids:
+                    return Response(
+                        {"detail": "指定群可见必须至少选择一个群"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
             ch.visibility = value
             update_fields.append("visibility")
         if "allowed_group_ids" in request.data:

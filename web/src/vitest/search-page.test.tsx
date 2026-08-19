@@ -51,7 +51,29 @@ function resultFor(q: string): SearchResults {
   void q;
   return {
     users: { total: 1, items: [{ id: "u2", username: "bob", nickname: "小樱", avatar: "", signature: "", status: "offline", online: false, date_joined: "2026-01-01T00:00:00Z" }] },
-    groups: { total: 1, items: [{ id: "g1", type: "group", title: "冰樱研究所", created_at: "2026-01-01T00:00:00Z" }] },
+    groups: { total: 1, items: [{ id: "g1", type: "group", title: "冰樱研究所", join_policy: "application", created_at: "2026-01-01T00:00:00Z" }] },
+    posts: { total: 0, items: [] },
+    lives: { total: 0, items: [] },
+    games: { total: 0, items: [] },
+  };
+}
+
+/** 只含一个群的搜索结果；joinPolicy 缺省=旧数据（无 join_policy 字段） */
+function groupResult(joinPolicy?: "public" | "application"): SearchResults {
+  return {
+    users: { total: 0, items: [] },
+    groups: {
+      total: 1,
+      items: [
+        {
+          id: "g1",
+          type: "group",
+          title: "冰樱研究所",
+          ...(joinPolicy ? { join_policy: joinPolicy } : {}),
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
     posts: { total: 0, items: [] },
     lives: { total: 0, items: [] },
     games: { total: 0, items: [] },
@@ -154,25 +176,42 @@ describe("SearchPage 顶栏复用（F9）", () => {
   });
 
 
-  it("点击群搜索结果打开申请弹窗，发送留言后显示等待审核", async () => {
+  it("点击群搜索结果打开申请弹窗（申请制）：显示申请制说明，发送留言后显示等待审核", async () => {
     renderSearch("/search?q=冰樱", true);
     await waitFor(() => expect(screen.getByText("冰樱研究所")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /冰樱研究所/ }));
     expect(screen.getByRole("dialog", { name: "申请加入「冰樱研究所」" })).toBeInTheDocument();
+    expect(screen.getByText("这是一个申请制群聊，群主或管理员同意后才能入群。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送入群申请" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "给群主留言" }), { target: { value: "想和大家一起交流" } });
     fireEvent.click(screen.getByRole("button", { name: "发送入群申请" }));
     await waitFor(() => expect(screen.getByText("申请已发送")).toBeInTheDocument());
     expect(applyToGroup).toHaveBeenCalledWith("g1", "想和大家一起交流");
   });
 
-  it("公开加入申请成功后直接进入群聊", async () => {
+  it("公开群（join_policy=public）：显示公开说明与「直接加入」，成功后直接进入群聊", async () => {
+    vi.mocked(search).mockResolvedValue(groupResult("public"));
     vi.mocked(applyToGroup).mockResolvedValue({ status: "accepted", conversation_id: "25" } as never);
     renderSearch("/search?q=冰樱", true);
     await waitFor(() => expect(screen.getByText("冰樱研究所")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /冰樱研究所/ }));
-    fireEvent.click(screen.getByRole("button", { name: "发送入群申请" }));
+    expect(screen.getByRole("dialog", { name: "加入「冰樱研究所」" })).toBeInTheDocument();
+    expect(screen.getByText("这是一个公开群聊，点击即可直接加入。")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "直接加入" }));
     await waitFor(() => expect(screen.getByText("群聊")).toBeInTheDocument());
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("申请已发送")).not.toBeInTheDocument();
+    expect(applyToGroup).toHaveBeenCalledWith("g1", "");
+  });
+
+  it("join_policy 缺失（旧数据）时按申请制兜底：申请制文案 + 发送入群申请", async () => {
+    vi.mocked(search).mockResolvedValue(groupResult());
+    renderSearch("/search?q=冰樱", true);
+    await waitFor(() => expect(screen.getByText("冰樱研究所")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /冰樱研究所/ }));
+    expect(screen.getByRole("dialog", { name: "申请加入「冰樱研究所」" })).toBeInTheDocument();
+    expect(screen.getByText("这是一个申请制群聊，群主或管理员同意后才能入群。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发送入群申请" })).toBeInTheDocument();
   });
 
   it("有部分结果时不显示无结果空态", async () => {

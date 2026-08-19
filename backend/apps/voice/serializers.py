@@ -14,9 +14,14 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
     group = serializers.CharField(source="group_id", read_only=True, default=None)
     group_name = serializers.CharField(source="group.title", read_only=True, default=None)
     allowed_group_ids = serializers.SerializerMethodField()
+    allowed_group_names = serializers.SerializerMethodField()
 
     def get_allowed_group_ids(self, obj):
         return [str(group_id) for group_id in obj.allowed_groups.values_list("id", flat=True)]
+
+    def get_allowed_group_names(self, obj):
+        """返回所有可见群的名称列表，用于显示多个群标签"""
+        return list(obj.allowed_groups.values_list("title", flat=True))
 
     class Meta:
         model = VoiceChannel
@@ -28,6 +33,7 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
             "group",
             "group_name",
             "allowed_group_ids",
+            "allowed_group_names",
             "owner_id",
             "member_count",
             "created_at",

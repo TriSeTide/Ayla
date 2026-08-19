@@ -49,9 +49,14 @@ class PostSerializer(serializers.ModelSerializer):
     comment_count = serializers.SerializerMethodField()
     is_author = serializers.SerializerMethodField()
     allowed_group_ids = serializers.SerializerMethodField()
+    allowed_group_names = serializers.SerializerMethodField()
 
     def get_allowed_group_ids(self, obj):
         return [str(group_id) for group_id in obj.allowed_groups.values_list("id", flat=True)]
+
+    def get_allowed_group_names(self, obj):
+        """返回所有可见群的名称列表，用于显示多个群标签"""
+        return list(obj.allowed_groups.values_list("title", flat=True))
 
     class Meta:
         model = Post
@@ -65,6 +70,7 @@ class PostSerializer(serializers.ModelSerializer):
             "group",
             "group_name",
             "allowed_group_ids",
+            "allowed_group_names",
             "images",
             "comment_count",
             "is_author",

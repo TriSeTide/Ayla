@@ -88,14 +88,27 @@ def _channel_serializer(ch, request):
 
 
 class ChannelListView(APIView):
-    """GET/POST /api/v1/live/channels/ —— 频道列表（含乐观 status；?only_live=1 过滤）/ 创建。"""
+    """GET/POST /api/v1/live/channels/ —— 频道列表（含乐观 status；?only_live=1 过滤；?scope=group:<id> 群内过滤）/ 创建。"""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from django.db.models import Q
+
         qs = visible_queryset(LiveChannel, request.user)
         if request.query_params.get("only_live") == "1":
             qs = qs.filter(status="live")
+
+        # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
+        scope = request.query_params.get("scope", "").strip()
+        if scope.startswith("group:"):
+            raw_gid = scope.split(":", 1)[1]
+            try:
+                gid = int(raw_gid)
+            except (TypeError, ValueError):
+                return _bad_request("group id 无效")
+            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+
         payload = [_channel_serializer(ch, request) for ch in qs]
         return Response(payload)
 

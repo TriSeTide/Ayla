@@ -49,9 +49,12 @@ export function updateLiveChannel(
   });
 }
 
-/** GET /live/channels/ —— 频道列表（裸数组）；onlyLive=true 时带 ?only_live=1 */
-export function listLiveChannels(onlyLive = false) {
-  const query = onlyLive ? "?only_live=1" : "";
+/** GET /live/channels/ —— 频道列表（裸数组）；onlyLive=true 时带 ?only_live=1；?scope=group:<id> 群内过滤 */
+export function listLiveChannels(params?: { onlyLive?: boolean; scope?: string }) {
+  const queryParts: string[] = [];
+  if (params?.onlyLive) queryParts.push("only_live=1");
+  if (params?.scope) queryParts.push(`scope=${encodeURIComponent(params.scope)}`);
+  const query = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
   return apiRequest<LiveChannelDescriptor[]>(`/live/channels/${query}`);
 }
 

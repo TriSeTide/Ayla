@@ -75,6 +75,122 @@
   box-shadow: var(--glow-shadow);
 }
 
+/* ================= 可见范围选择器（VisibilitySelector，直播/语音/桌游/帖子共用） ================= */
+/* 设计推导：design.md §4 Inputs/Tags 与 §5 圆角刻度；radio 胶囊 + 玻璃群列表 */
+.visibility-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.visibility-selector legend {
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+}
+
+.visibility-selector-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.visibility-selector-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.visibility-selector-options label:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+/* 选中态：粉辉光描边 + grape 文字（design.md §8 辉光只给 focus/主 CTA 的降级：仅描边不扩散） */
+.visibility-selector-options label:has(input[type="radio"]:checked) {
+  border-color: var(--glow-500);
+  background: rgba(249, 176, 255, 0.16);
+  color: var(--grape-700);
+}
+
+.visibility-selector-options label:has(input[type="radio"]:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.visibility-selector-options input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--glow-500);
+  flex: none;
+}
+
+/* 群选择区：玻璃小卡 + 群搜索 + checkbox 行 */
+.visibility-selector-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.visibility-selector-groups .field {
+  padding-block: var(--sp-2);
+  min-height: 40px;
+}
+
+.visibility-group-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.visibility-group-option:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.visibility-group-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--glow-500);
+  flex: none;
+}
+
+.visibility-selector-groups .placeholder-desc {
+  padding: var(--sp-1) 0;
+}
+
 /* 玻璃卡片（design.md §4 Cards） */
 .glass-card {
   background: var(--glass-bg);
@@ -2333,4 +2449,123 @@
     border-left: none;
     border-top: 1px solid var(--glass-border);
   }
+}
+
+/* ================= 转让群主对话框（GroupInfo 内嵌，Bug #5） =================
+ * 弹层结构参照 GroupCreateDialog（.group-create-overlay/.group-create-dialog），
+ * 成员行沿用群成员列表风格（.group-info-role 复用 group.css）。
+ */
+
+.group-transfer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: rgba(70, 91, 146, 0.25);
+}
+
+.group-transfer-dialog {
+  width: min(480px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--sp-4);
+}
+
+.group-transfer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-3);
+}
+
+.group-transfer-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.group-transfer-desc {
+  margin-bottom: var(--sp-3);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.group-transfer-empty {
+  padding: var(--sp-6) 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 成员搜索输入（带左搜索图标） */
+.group-transfer-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--sp-2);
+}
+
+.group-transfer-search-icon {
+  position: absolute;
+  left: var(--sp-3);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.group-transfer-search .field {
+  padding-left: 34px;
+}
+
+/* 成员选择列表 */
+.group-transfer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.group-transfer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.group-transfer-row:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.group-transfer-row.is-selected {
+  background: rgba(157, 191, 230, 0.35);
+}
+
+.group-transfer-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-transfer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
 }

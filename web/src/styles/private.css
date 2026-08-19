@@ -45,6 +45,19 @@
   color: var(--text-secondary);
 }
 
+/* 非好友私聊禁发提示（Bug #2：解除好友后不能再发消息） */
+.private-chat-blocked {
+  flex: none;
+  margin: var(--sp-3) var(--sp-6);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-input);
+  background: var(--warning-soft-bg);
+  border: 1px solid var(--warning-soft-border);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: center;
+}
+
 /* ================= 建群对话框（GroupCreateDialog） ================= */
 
 .group-create-overlay {

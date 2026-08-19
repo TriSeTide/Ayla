@@ -28,8 +28,9 @@
 
 > 落地记录：`apps/common/visibility.py`（Visibility 枚举 + `visible_queryset`/`can_view`/`can_join`），
 > live/voice 模型加 `visibility`+`group` 字段（迁移 0002，存量默认 public 零感知），
-> 创建接口支持 `group`/`visibility` 参数（group 非空默认 group 可见；visibility=group 必须带群），
-> 列表/详情/弹幕/join/成员列表接入过滤与 403 校验，序列化输出 visibility/group/group_name。
+> 创建接口支持 `group`/`visibility` 参数（group 非空默认 group 可见；visibility=group 的群归属
+> 来自单群 `group` 或多群 `allowed_groups` 白名单——全局列表创建"指定群可见"场景，两者皆空则 400），
+> 列表/详情/弹幕/join/成员列表接入过滤与 403 校验，序列化输出 visibility/group/group_name/allowed_group_ids。
 > 契约测试：`apps/common/tests/test_visibility.py`（可见性矩阵）+ live/voice `test_visibility_api.py`，全量 335 通过。
 
 ```python
@@ -43,7 +44,7 @@ class Visibility(models.TextChoices):
 - `live.LiveChannel` / `voice.VoiceChannel` 增加字段：
   - `visibility = CharField(choices=Visibility, default="public")`
   - `group = ForeignKey(chat.Conversation, null=True, blank=True, limit_choices_to={"type": "group"})`
-  - 约束：`visibility="group"` 时 `group` 必填；`group` 非空时默认 `visibility="group"`。
+  - 约束：`visibility="group"` 时群归属来自 `group` 或 `allowed_groups` 白名单（两者皆空则拒绝创建/修改）；`group` 非空时默认 `visibility="group"`。
 - **新建的 posts.Post / boardgame.GameRoom 模型直接内置** `visibility` + `group` 字段（同枚举、同约束），S3/S4 建表即带，无需二次迁移。
 - **准入校验层** `services.can_view(user, obj)` / `can_join(user, obj)`：
   - public → 任何登录用户；

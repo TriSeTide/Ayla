@@ -34,6 +34,9 @@ export function SearchPage() {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinSent, setJoinSent] = useState(false);
 
+  /** 公开群（join_policy=public）直接加入；缺失视为申请制（兼容旧数据），与后端默认一致 */
+  const isPublicGroup = selectedGroup?.join_policy === "public";
+
   const openGroupApply = (group: SearchGroupItem) => {
     setSelectedGroup(group);
     setJoinMessage("");
@@ -200,7 +203,7 @@ export function SearchPage() {
             <header className="group-apply-head">
               <div>
                 <span className="group-apply-kicker">GROUP REQUEST</span>
-                <h2 id="group-apply-title">申请加入「{selectedGroup.title}」</h2>
+                <h2 id="group-apply-title">{isPublicGroup ? "加入" : "申请加入"}「{selectedGroup.title}」</h2>
               </div>
               <button type="button" className="icon-btn-40" onClick={closeGroupApply} aria-label="关闭">×</button>
             </header>
@@ -213,14 +216,14 @@ export function SearchPage() {
               </div>
             ) : (
               <>
-                <p className="group-apply-desc">这是一个申请制群聊，群主或管理员同意后才能入群。</p>
+                <p className="group-apply-desc">{isPublicGroup ? "这是一个公开群聊，点击即可直接加入。" : "这是一个申请制群聊，群主或管理员同意后才能入群。"}</p>
                 <label className="group-apply-label" htmlFor="group-apply-message">给群主留言 <span>（可选）</span></label>
                 <textarea id="group-apply-message" aria-label="给群主留言" className="field group-apply-message" value={joinMessage} maxLength={200} onChange={(e) => setJoinMessage(e.target.value)} placeholder="简单介绍一下自己吧…" />
                 {joinError && <p className="group-apply-error" role="alert">{joinError}</p>}
                 <div className="group-apply-actions">
                   <button type="button" className="btn btn-ghost" onClick={closeGroupApply} disabled={joinBusy}>取消</button>
                   <button type="button" className="btn btn-primary" onClick={() => void submitGroupApply()} disabled={joinBusy}>
-                    {joinBusy ? "发送中…" : "发送入群申请"}
+                    {joinBusy ? (isPublicGroup ? "加入中…" : "发送中…") : (isPublicGroup ? "直接加入" : "发送入群申请")}
                   </button>
                 </div>
               </>

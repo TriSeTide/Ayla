@@ -15,8 +15,8 @@ from apps.posts.models import Post
 SEARCH_URL = "/api/v1/search/"
 
 
-def _make_group(owner, users=None, title="测试群"):
-    conv = Conversation.objects.create(type="group", title=title, owner=owner)
+def _make_group(owner, users=None, title="测试群", **kwargs):
+    conv = Conversation.objects.create(type="group", title=title, owner=owner, **kwargs)
     ConversationMember.objects.create(conversation=conv, user=owner, role="owner")
     for u in users or []:
         ConversationMember.objects.create(conversation=conv, user=u)
@@ -60,6 +60,8 @@ class TestAggregateSearch:
         assert data["users"]["items"][0]["nickname"] == "爱丽丝"
         assert data["groups"]["total"] == 1
         assert data["groups"]["items"][0]["title"] == "爱丽丝后援会"
+        # 默认 join_policy=application（申请制）
+        assert data["groups"]["items"][0]["join_policy"] == "application"
         assert data["posts"]["total"] == 1
         assert data["posts"]["items"][0]["body"] == "爱丽丝的帖子"
         assert data["lives"]["total"] == 1
@@ -139,3 +141,12 @@ class TestAggregateSearch:
         data = resp.json()
         # 去重 + 非法忽略 → 只剩 users
         assert set(data.keys()) == {"users"}
+
+    def test_group_search_join_policy_public(self, auth_client):
+        client, user = auth_client(username="s_gp")
+        _make_group(user, title="公开广场", join_policy=Conversation.JOIN_PUBLIC)
+        resp = client.get(SEARCH_URL, {"q": "公开广场"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["groups"]["total"] == 1
+        assert data["groups"]["items"][0]["join_policy"] == "public"

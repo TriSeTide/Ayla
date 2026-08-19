@@ -38,12 +38,16 @@ def _gen_room_name() -> str:
 def _resolve_visibility(group, visibility: str | None) -> str:
     """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
 
-    约束（开发文档 §1.1）：visibility=group 必须带 group；group 非空时默认 group 可见。
+    visibility=group 的群归属有两种来源：单群 `group` FK，或多群 `allowed_groups`
+    白名单（全局列表创建"指定群可见"场景，group 为 None）。services 层不持有白名单，
+    因此 group is None 时不再直接报错；"两者皆空 → 房间对所有人不可见"的校验由
+    视图层在拿到完整 payload 后执行（见 views.py ChannelListView.post）。
     """
     if visibility is None or not visibility:
         return Visibility.GROUP if group is not None else Visibility.PUBLIC
     if visibility == Visibility.GROUP and group is None:
-        raise ValueError("群成员可见必须指定群")
+        # 全局创建选择"指定群可见"：可见性依赖 allowed_groups 白名单（多群）。
+        return Visibility.GROUP
     return visibility
 
 

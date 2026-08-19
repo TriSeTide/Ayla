@@ -26,9 +26,10 @@ import type {
 
 /* ---------- 频道 REST ---------- */
 
-/** GET /voice/channels/ —— 频道列表（含 member_count/mine） */
-export function listVoiceChannels() {
-  return apiRequest<VoiceChannelDescriptor[]>("/voice/channels/");
+/** GET /voice/channels/ —— 频道列表（含 member_count/mine；?scope=group:<id> 群内过滤） */
+export function listVoiceChannels(params?: { scope?: string }) {
+  const query = params?.scope ? `?scope=${encodeURIComponent(params.scope)}` : "";
+  return apiRequest<VoiceChannelDescriptor[]>(`/voice/channels/${query}`);
 }
 
 /** POST /voice/channels/ —— 建频道（name 空 → 400；group 可选，群内创建归属该群） */

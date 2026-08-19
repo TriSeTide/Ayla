@@ -365,6 +365,7 @@ export interface VoiceChannelDescriptor {
   /** S1：群归属名（group 非空时的群标题，否则 null） */
   group_name: string | null;
   allowed_group_ids?: string[];
+  allowed_group_names?: string[];
   /** 我是否在该频道（列表/详情视图注入） */
   mine: boolean;
   created_at: string;
@@ -505,6 +506,9 @@ export interface LiveChannelDescriptor {
   is_owner: boolean;
   /** S1：可见性 public/friends/group（来源标识） */
   visibility: "public" | "friends" | "group";
+  /** S1：visibility=group 时的白名单群 id 列表（后端 serializers 恒返回 str 数组；可选字段兼容旧响应） */
+  allowed_group_ids?: string[];
+  allowed_group_names?: string[];
   /** S1：群归属（一级 tab 创建为 null；群内创建为该群 id 字符串） */
   group: string | null;
   /** S1：群归属名（group 非空时的群标题，否则 null） */
@@ -616,6 +620,7 @@ export interface Post {
   group: string | null;
   group_name: string | null;
   allowed_group_ids?: string[];
+  allowed_group_names?: string[];
   images: PostImage[];
   comment_count: number;
   is_author: boolean;
@@ -682,6 +687,7 @@ export interface GameRoom {
   group: string | null;
   group_name: string | null;
   allowed_group_ids?: string[];
+  allowed_group_names?: string[];
   /** 游戏类型（默认 boardgame，玩法后续） */
   game_type: string;
   /** waiting（等待中）/ playing（对局中）/ ended（已结束） */
@@ -746,6 +752,8 @@ export interface SearchGroupItem {
   id: string;
   type: "group";
   title: string;
+  /** 加入方式：public=直接加入 / application=申请制（旧数据缺失时按申请制兜底） */
+  join_policy?: "public" | "application";
   created_at: string;
 }
 

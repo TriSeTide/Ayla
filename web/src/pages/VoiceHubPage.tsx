@@ -17,6 +17,7 @@ import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useShellStore } from "../stores/shell";
+import { useAuthStore } from "../stores/auth";
 import { useVoiceChannel } from "../hooks/useVoiceChannel";
 import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
@@ -135,14 +136,24 @@ export function VoiceHubPage() {
   const currentChannel = routeChannelId
     ? channels.find((c) => c.id === routeChannelId) ?? null
     : null;
+  const currentUser = useAuthStore((s) => s.currentUser);
   // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。
   const handleBack = useCallback(() => {
     navigate("/voice");
   }, [navigate]);
   const handleLeave = useCallback(async () => {
-    await leave();
-    navigate("/voice");
-  }, [leave, navigate]);
+    // 房主必须先转让房主才能离开（后端 403 强校验，前端先拦截避免状态混乱）
+    if (currentChannel && currentChannel.owner_id === currentUser?.id) {
+      window.confirm("你是房主，退出前应先转让房主");
+      return;
+    }
+    try {
+      await leave();
+      navigate("/voice");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "离开语音房失败");
+    }
+  }, [currentChannel, currentUser, leave, navigate]);
   const notice = joinError ?? listError;
 
   // 进房态（两种形态都渲染语音房面板 + 房内打字）
@@ -152,6 +163,7 @@ export function VoiceHubPage() {
         channelId={currentChannel.id}
         ownerId={currentChannel.owner_id}
         channelName={currentChannel.name}
+        channel={currentChannel}
         livekit={livekit}
         wsConnection={wsConnection}
         elysiaProfile={elysiaProfile}

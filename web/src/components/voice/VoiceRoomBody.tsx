@@ -5,18 +5,20 @@
 import { useEffect, useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
-import type { ElysiaProfile, VoiceChatMessage } from "../../api/types";
+import type { ElysiaProfile, VoiceChatMessage, VoiceChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { IconImage, IconSend } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
 import { useAuthStore } from "../../stores/auth";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
+import { getVisibilityLabels } from "../../utils/visibility";
 
 export function VoiceRoomBody({
   channelId,
   channelName,
   ownerId,
+  channel,
   livekit,
   wsConnection,
   elysiaProfile,
@@ -35,6 +37,8 @@ export function VoiceRoomBody({
   /** 旧调用方兼容字段；房内消息不再根据群归属路由。 */
   groupId?: string | null;
   channelName: string;
+  /** 完整的频道对象，用于显示标签等信息 */
+  channel?: VoiceChannelDescriptor | null;
   livekit: LiveKitConnectionState;
   wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
@@ -109,6 +113,15 @@ export function VoiceRoomBody({
           ← 返回
         </button>
         <span className="voice-room-title">{channelName}</span>
+        {channel && (
+          <div className="post-card-tags">
+            {getVisibilityLabels(channel).map((label) => (
+              <span key={label} className="post-card-tag">
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
         {channelId != null && <FavoriteButton targetType="voice" targetId={channelId} compact />}
         {ownerId === currentUser?.id && onDeleteChannel && <button type="button" className="btn btn-danger" onClick={onDeleteChannel}>删除房间</button>}
       </header>

@@ -238,6 +238,15 @@ class MessageView(APIView):
             return _not_found("会话不存在")
         if not services.user_can_access(request.user, conv):
             return _forbidden()
+        # Bug #2：私聊发消息要求双方仍是好友（爱莉对端放行，见 services）
+        if conv.type == Conversation.TYPE_PRIVATE:
+            peer = (
+                conv.members.exclude(user=request.user).select_related("user").first()
+            )
+            if peer is None or not services.can_send_private_message(
+                request.user, peer.user
+            ):
+                return _forbidden("对方已不是你的好友，无法发送消息")
         if services.is_muted(request.user, conv):
             return _forbidden("你已被禁言")
 

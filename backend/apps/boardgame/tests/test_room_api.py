@@ -1,8 +1,8 @@
 """桌游室 REST 契约测试（S4，开发文档 §1.4）。
 
-覆盖：房间 CRUD（创建默认公开/群归属默认群可见/可见性约束）、列表可见性过滤、
-详情 403、删除仅 owner、join 幂等（重复 join 不重复建成员）、join 可见性校验、
-leave 仅成员、seat 顺序分配、?mine=1 我在局。
+覆盖：房间 CRUD（创建默认公开/群归属默认群可见/可见性约束/多群白名单可见）、
+列表可见性过滤、详情 403、删除仅 owner、join 幂等（重复 join 不重复建成员）、
+join 可见性校验、leave 仅成员、seat 顺序分配、?mine=1 我在局。
 """
 import pytest
 
@@ -69,7 +69,8 @@ class TestCreateRoom:
         assert data["group"] == str(group.id)
         assert data["group_name"] == "测试群"
 
-    def test_create_group_visibility_requires_group(self, auth_client):
+    def test_create_group_visibility_requires_group_or_whitelist(self, auth_client):
+        """Bug #10：group 可见但既无归属群也无白名单 → 400（校验后置到 create_room）。"""
         client, _ = auth_client(username="b_grp_vis")
         resp = client.post(
             "/api/v1/boardgame/rooms/",
@@ -77,7 +78,56 @@ class TestCreateRoom:
             format="json",
         )
         assert resp.status_code == 400
-        assert "群" in resp.json()["detail"]
+        assert "至少选择一个群" in resp.json()["detail"]
+
+    def test_create_group_visibility_empty_whitelist_400(self, auth_client):
+        """空白名单数组（[]）视为未选群 → 400。"""
+        client, _ = auth_client(username="b_grp_vis_empty")
+        resp = client.post(
+            "/api/v1/boardgame/rooms/",
+            {"name": "x", "visibility": Visibility.GROUP, "allowed_group_ids": []},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "至少选择一个群" in resp.json()["detail"]
+
+    def test_create_group_whitelist_without_group(self, auth_client):
+        """Bug #10：全局（不传 group）指定群可见 + 多群白名单 → 201，白名单落库。"""
+        client, owner = auth_client(username="b_wl_owner")
+        g1 = _make_group(owner)
+        g2 = _make_group(owner)
+        resp = client.post(
+            "/api/v1/boardgame/rooms/",
+            {
+                "name": "白名单桌游室",
+                "visibility": Visibility.GROUP,
+                "allowed_group_ids": [str(g1.id), str(g2.id)],
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        data = resp.json()
+        assert data["visibility"] == Visibility.GROUP
+        assert data["group"] is None
+        assert data["group_name"] is None
+        assert set(data["allowed_group_ids"]) == {str(g1.id), str(g2.id)}
+        room = GameRoom.objects.get(pk=data["id"])
+        assert set(room.allowed_groups.values_list("id", flat=True)) == {g1.id, g2.id}
+
+    def test_create_group_whitelist_with_invalid_group_400(self, auth_client):
+        """白名单含不存在/非群会话 → 400（set_allowed_groups 校验）。"""
+        client, owner = auth_client(username="b_wl_bad")
+        g1 = _make_group(owner)
+        resp = client.post(
+            "/api/v1/boardgame/rooms/",
+            {
+                "name": "x",
+                "visibility": Visibility.GROUP,
+                "allowed_group_ids": [str(g1.id), "999999"],
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
 
     def test_create_group_must_be_group_conversation(self, auth_client, user_factory):
         client, user = auth_client(username="b_grp_conv")
@@ -124,6 +174,27 @@ class TestRoomList:
         resp = client.get("/api/v1/boardgame/rooms/")
         names = {r["name"] for r in resp.json()}
         assert names == {"pub", "fri", "grp"}
+
+    def test_list_group_whitelist_visible_to_members_only(self, auth_client, user_factory):
+        """Bug #10 契约：无归属群、仅白名单的 group 房，白名单群成员可见、非成员不可见。"""
+        client, viewer = auth_client(username="lw_viewer")
+        owner = user_factory(username="lw_owner")
+        member = user_factory(username="lw_member")
+        g1 = _make_group(owner, [member])
+        g2 = _make_group(owner)
+        room = _make_room(owner, "白名单房", visibility=Visibility.GROUP)
+        room.allowed_groups.set([g1, g2])
+
+        # 非成员：不可见
+        resp = client.get("/api/v1/boardgame/rooms/")
+        names = {r["name"] for r in resp.json()}
+        assert "白名单房" not in names
+
+        # viewer 加入 g1（g2 成员为空）后可见
+        ConversationMember.objects.create(conversation=g1, user=viewer)
+        resp = client.get("/api/v1/boardgame/rooms/")
+        names = {r["name"] for r in resp.json()}
+        assert "白名单房" in names
 
     def test_list_mine(self, auth_client, user_factory):
         client, me = auth_client(username="l_me")

@@ -21,16 +21,8 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
     setLoading(true);
     setError(null);
     boardgameApi
-      .listGameRooms()
-      .then((list) =>
-        setRooms(
-          list.filter(
-            (r) =>
-              String(r.group) === String(groupId) ||
-              r.allowed_group_ids?.some((id) => String(id) === String(groupId)),
-          ),
-        ),
-      )
+      .listGameRooms({ scope: `group:${groupId}` })
+      .then((list) => setRooms(list))
       .catch((e) => setError(e instanceof Error ? e.message : "加载桌游室失败"))
       .finally(() => setLoading(false));
   }, [groupId]);

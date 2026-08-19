@@ -93,7 +93,8 @@ class PostListView(APIView):
                 gid = int(raw_gid)
             except (TypeError, ValueError):
                 return _bad_request("group id 无效")
-            qs = qs.filter(group_id=gid)
+            # 群内列表：group_id 匹配 或 allowed_groups 包含该群
+            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
         else:
             return _bad_request("scope 无效")
 

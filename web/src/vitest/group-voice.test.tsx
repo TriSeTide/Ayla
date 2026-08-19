@@ -2,12 +2,15 @@
  * GroupVoice 测试（F5 R-G8）：群内语音房范围 = 仅该群（filter group === groupId）。
  * mock voiceApi.listVoiceChannels + VoiceChannelPanel/useVoiceChannel 的媒体链不触发
  * （列表态 currentChannelId=null，join 才触发）。
+ * 房内态：mock VoiceRoomBody 为 onLeave 桩，聚焦 GroupVoice 的 handleLeave
+ * （房主离开被拦截 / 非房主正常离开）。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import * as voiceApi from "../api/voice";
-import type { VoiceChannelDescriptor } from "../api/types";
+import type { UserPublic, VoiceChannelDescriptor } from "../api/types";
+import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { GroupVoice } from "../pages/group/GroupVoice";
 
@@ -18,7 +21,35 @@ vi.mock("../api/voice", () => ({
   leaveVoiceChannel: vi.fn(),
   heartbeatVoiceChannel: vi.fn(),
   createVoiceChannel: vi.fn(),
+  listVoiceChatMessages: vi.fn().mockResolvedValue([]),
+  sendVoiceChatMessage: vi.fn(),
 }));
+
+vi.mock("../api/elysia", () => ({
+  getElysiaProfile: vi.fn().mockResolvedValue({ enabled: false, user: null }),
+}));
+
+vi.mock("../components/voice/VoiceRoomBody", () => ({
+  VoiceRoomBody: (props: { channelName: string; onLeave: () => void }) => (
+    <div>
+      <span>{props.channelName}</span>
+      <button type="button" onClick={props.onLeave}>
+        离开频道
+      </button>
+    </div>
+  ),
+}));
+
+const SELF: UserPublic = {
+  id: "o1",
+  username: "me",
+  nickname: "我",
+  avatar: "",
+  signature: "",
+  status: "online",
+  online: true,
+  date_joined: "2026-01-01T00:00:00Z",
+};
 
 function ch(id: string, group: string | null, name = id): VoiceChannelDescriptor {
   return {
@@ -41,12 +72,14 @@ beforeEach(() => {
     vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
   );
   useVoiceStore.getState().reset();
+  useAuthStore.setState({ currentUser: null });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   useVoiceStore.getState().reset();
+  useAuthStore.setState({ currentUser: null });
 });
 
 describe("GroupVoice 范围（仅该群）", () => {
@@ -73,5 +106,57 @@ describe("GroupVoice 范围（仅该群）", () => {
       expect(screen.getByRole("dialog", { name: "创建群内语音房" })).toBeInTheDocument(),
     );
     expect(screen.getByPlaceholderText("新语音频道名称")).toBeInTheDocument();
+  });
+
+  it("房主点离开频道 → 提示先转让房主，不调 leave/、不跳转", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([ch("v1", "g1", "本群语音")]);
+    useVoiceStore.setState({ currentChannelId: "v1" });
+    useAuthStore.setState({ currentUser: SELF });
+    render(
+      <MemoryRouter>
+        <GroupVoice groupId="g1" routeChannelId="v1" onExit={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("本群语音")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "离开频道" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith("你是房主，退出前应先转让房主");
+    expect(voiceApi.leaveVoiceChannel).not.toHaveBeenCalled();
+    // 仍在房内视图（未被导航走，离开按钮还在）
+    expect(screen.getByRole("button", { name: "离开频道" })).toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
+
+  it("非房主点离开频道 → 正常调 leave/ 并离开", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([ch("v1", "g1", "本群语音")]);
+    vi.mocked(voiceApi.leaveVoiceChannel).mockResolvedValue({ left: true });
+    useVoiceStore.setState({ currentChannelId: "v1" });
+    useAuthStore.setState({ currentUser: { ...SELF, id: "other" } });
+    // 用真实路由渲染：navigate 回列表（无 :voiceChannelId 段）后房内态消失
+    function RouteGroupVoice() {
+      const { id, voiceChannelId } = useParams<{ id: string; voiceChannelId?: string }>();
+      return <GroupVoice groupId={id ?? ""} routeChannelId={voiceChannelId} onExit={vi.fn()} />;
+    }
+    render(
+      <MemoryRouter initialEntries={["/group/g1/voice/v1"]}>
+        <Routes>
+          <Route path="/group/:id/voice/:voiceChannelId" element={<RouteGroupVoice />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("本群语音")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "离开频道" }));
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(voiceApi.leaveVoiceChannel).toHaveBeenCalledWith("v1");
+    // 已导航回群内语音列表（房内视图消失，离开按钮不再存在）
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "离开频道" })).not.toBeInTheDocument(),
+    );
+    confirmSpy.mockRestore();
   });
 });

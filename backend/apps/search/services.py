@@ -81,6 +81,7 @@ def search_groups(q: str, limit: int) -> dict:
     已知取舍：Conversation 没有 visibility 字段（S2 已登记），入群申请对任意登录用户
     开放，故群搜索 = 所有群聊（title 匹配），不做可见性过滤；也不复用
     ConversationListSerializer（避免未读数等重查询）。
+    join_policy（public/application）随条目输出，供前端区分"直接加入/申请制"弹窗。
     """
     base = Conversation.objects.filter(type="group").filter(title__icontains=q)
     total = base.count()
@@ -89,6 +90,7 @@ def search_groups(q: str, limit: int) -> dict:
             "id": str(c.id),
             "type": c.type,
             "title": c.title,
+            "join_policy": c.join_policy,
             "created_at": c.created_at.isoformat(),
         }
         for c in base.order_by("-created_at")[:limit]

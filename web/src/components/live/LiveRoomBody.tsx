@@ -25,6 +25,7 @@ import { useDanmaku } from "../../hooks/useDanmaku";
 import { useLiveRoom } from "../../hooks/useLiveRoom";
 import { IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
+import { getVisibilityLabels } from "../../utils/visibility";
 
 export function LiveRoomBody({
   channelId,
@@ -151,6 +152,13 @@ export function LiveRoomBody({
                     {loading ? "加载中…" : (channel?.title ?? "直播间")}
                   </span>
                 )}
+                {!showOwnerPanel && channel && getVisibilityLabels(channel).length > 0 && (
+                  <div className="post-card-tags">
+                    {getVisibilityLabels(channel).map((label, idx) => (
+                      <span key={idx} className="post-card-tag">{label}</span>
+                    ))}
+                  </div>
+                )}
                 {!showOwnerPanel && channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
                 <button
                   type="button"
@@ -167,6 +175,13 @@ export function LiveRoomBody({
                 <span className="live-room-title">
                   {loading ? "加载中…" : (channel?.title ?? "直播间")}
                 </span>
+                {channel && getVisibilityLabels(channel).length > 0 && (
+                  <div className="post-card-tags">
+                    {getVisibilityLabels(channel).map((label, idx) => (
+                      <span key={idx} className="post-card-tag">{label}</span>
+                    ))}
+                  </div>
+                )}
                 {channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
                 <span className={`live-ws-state live-ws-${wsConnection}`}>
                   {wsConnection === "online"

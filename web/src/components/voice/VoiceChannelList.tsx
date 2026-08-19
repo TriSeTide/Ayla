@@ -11,13 +11,7 @@ import type { KeyboardEvent } from "react";
 import type { VoiceChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { IconMic } from "../icons";
-
-/** 来源标识（R-V1）：公开 / 好友 / 群名（design.md §12.10 Micro Tag） */
-function sourceLabel(ch: VoiceChannelDescriptor): string {
-  if (ch.visibility === "group" && ch.group_name) return ch.group_name;
-  if (ch.visibility === "friends") return "好友";
-  return "公开";
-}
+import { getVisibilityLabels } from "../../utils/visibility";
 
 export function VoiceChannelList({
   channels,
@@ -45,6 +39,7 @@ export function VoiceChannelList({
         // 已在频道 → 「进入」；否则「加入」（join 幂等，重复进入安全）
         const label = ch.mine ? "进入" : "加入";
         const pendingLabel = ch.mine ? "进入中…" : "加入中…";
+        const labels = getVisibilityLabels(ch);
         const enter = () => {
           if (!joining) onJoin(ch.id);
         };
@@ -66,7 +61,11 @@ export function VoiceChannelList({
             onKeyDown={onKeyDown}
           >
             <div className="voice-card-head">
-              <span className="voice-source-tag">{sourceLabel(ch)}</span>
+              <div className="voice-source-tags">
+                {labels.map((tag, idx) => (
+                  <span key={idx} className="voice-source-tag">{tag}</span>
+                ))}
+              </div>
               <span className="voice-card-head-actions">
                 {ch.mine && <span className="voice-mine-tag">我在其中</span>}
                 <FavoriteButton targetType="voice" targetId={ch.id} compact />

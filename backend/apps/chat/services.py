@@ -101,6 +101,45 @@ def is_muted(user, conversation) -> bool:
     return member.muted
 
 
+# ---------- 私聊好友校验（Bug #2：解除好友后禁止继续私聊） ----------
+
+def are_friends(user_a, user_b) -> bool:
+    """双向已确认好友：A→B 与 B→A 均存在 status=accepted 的 Friendship。
+
+    好友列表（accounts.FriendListView）只查单向 accepted 记录，但建立/删除好友
+    都是双向写入（FriendRequestActionView.accept 建两条、FriendDeleteView 双向删），
+    因此「已确认好友」按双向 accepted 判定（防单向脏数据）。
+    """
+    if user_a.id == user_b.id:
+        return False
+    from apps.accounts.models import Friendship
+
+    return Friendship.objects.filter(
+        user=user_a, friend=user_b, status=Friendship.STATUS_ACCEPTED
+    ).exists() and Friendship.objects.filter(
+        user=user_b, friend=user_a, status=Friendship.STATUS_ACCEPTED
+    ).exists()
+
+
+def is_elysia_user(user) -> bool:
+    """该用户是否为爱莉（ElysiaProfile 绑定的应用内身份）。
+
+    爱莉不在好友系统内（无 Friendship 记录），但爱莉私聊是核心功能，
+    好友校验必须对爱莉放行（见 can_send_private_message）。
+    """
+    from apps.elysia_bridge.models import ElysiaProfile
+
+    return ElysiaProfile.objects.filter(user=user).exists()
+
+
+def can_send_private_message(user, peer) -> bool:
+    """私聊发消息权限：任一方是爱莉 → 放行（爱莉私聊不可被好友校验误伤）；
+    否则要求双方仍是好友（双向 accepted Friendship）。"""
+    if is_elysia_user(user) or is_elysia_user(peer):
+        return True
+    return are_friends(user, peer)
+
+
 # ---------- 消息 ----------
 
 def conversation_seq(conversation) -> int:

@@ -1,9 +1,9 @@
 /**
  * HomePage 测试（F2）：
  * - 窄屏：空态引导 / 卡片网格 / 列表切换 / 失败重试；
- * - 宽屏：重定向最近群（无历史第一个群）/ 无群空态引导。
+ * - 宽屏：重定向最近群（无历史第一个群）/ 无群空态引导 + 创建对话框弹出。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as chatApi from "../api/chat";
@@ -143,5 +143,17 @@ describe("HomePage 宽屏重定向", () => {
     vi.mocked(chatApi.listConversations).mockResolvedValue([]);
     renderHome("/home");
     await waitFor(() => expect(screen.getByText("还没有加入群聊")).toBeInTheDocument());
+  });
+
+  it("无群 → 点击「创建你的第一个群」弹出创建对话框，可关闭", async () => {
+    mockMatchMedia(false);
+    vi.mocked(chatApi.listConversations).mockResolvedValue([]);
+    renderHome("/home");
+    await waitFor(() => expect(screen.getByText("还没有加入群聊")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "创建你的第一个群" }));
+    expect(screen.getByRole("dialog", { name: "创建群聊" })).toBeInTheDocument();
+    // 关闭对话框 → 回到空态
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "创建群聊" })).not.toBeInTheDocument();
   });
 });

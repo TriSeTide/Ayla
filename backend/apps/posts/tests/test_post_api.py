@@ -472,3 +472,85 @@ class TestComment:
             format="json",
         )
         assert resp.status_code == 403
+
+
+# ---------- 多群可见性（allowed_group_ids） ----------
+
+@pytest.mark.django_db
+class TestAllowedGroupIds:
+    def test_create_post_with_allowed_group_ids(self, auth_client, user_factory):
+        """群外发帖时选择指定群可见，带 allowed_group_ids 应该成功。"""
+        client, author = auth_client(username="allowed_author")
+        other = user_factory(username="allowed_other")
+
+        # 创建两个群，author 是成员
+        group1 = _make_group(author, users=[other])
+        group2 = _make_group(author, users=[other])
+
+        # 群外发帖，选择指定群可见
+        resp = client.post(
+            "/api/v1/posts/",
+            {
+                "body": "指定群可见的帖子",
+                "visibility": Visibility.GROUP,
+                "allowed_group_ids": [str(group1.id), str(group2.id)],
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        data = resp.json()
+        assert data["visibility"] == Visibility.GROUP
+        assert data["group"] is None  # 群外发帖，group 为空
+        assert set(data["allowed_group_ids"]) == {str(group1.id), str(group2.id)}
+
+        # 验证数据库
+        post = Post.objects.get(id=data["id"])
+        assert post.allowed_groups.count() == 2
+        assert set(post.allowed_groups.values_list("id", flat=True)) == {group1.id, group2.id}
+
+    def test_group_member_can_view_allowed_group_post(self, auth_client, user_factory):
+        """群成员可以看到 allowed_group_ids 包含其群的帖子。"""
+        author_client, author = auth_client(username="allowed_vis_author")
+        viewer_client, viewer = auth_client(username="allowed_vis_viewer")
+        outsider_client, outsider = auth_client(username="allowed_vis_outsider")
+
+        # author 和 viewer 在群1，author 和 outsider 在群2
+        group1 = _make_group(author, users=[viewer])
+        group2 = _make_group(author, users=[outsider])
+
+        # author 发帖，只允许群1可见
+        resp = author_client.post(
+            "/api/v1/posts/",
+            {
+                "body": "只给群1看",
+                "visibility": Visibility.GROUP,
+                "allowed_group_ids": [str(group1.id)],
+            },
+            format="json",
+        )
+        assert resp.status_code == 201
+        post_id = resp.json()["id"]
+
+        # viewer（群1成员）可以看到
+        resp = viewer_client.get(f"/api/v1/posts/{post_id}/")
+        assert resp.status_code == 200
+
+        # outsider（不在群1）看不到
+        resp = outsider_client.get(f"/api/v1/posts/{post_id}/")
+        assert resp.status_code == 403
+
+    def test_allowed_group_ids_must_be_valid_groups(self, auth_client):
+        """allowed_group_ids 必须是有效的群聊会话。"""
+        client, author = auth_client(username="allowed_invalid")
+
+        resp = client.post(
+            "/api/v1/posts/",
+            {
+                "body": "测试",
+                "visibility": Visibility.GROUP,
+                "allowed_group_ids": ["invalid-group-id"],
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "allowed_group_ids" in resp.json()["detail"]

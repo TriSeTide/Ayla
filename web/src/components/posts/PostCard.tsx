@@ -10,6 +10,7 @@ import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { IconHeart, IconMessage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { getVisibilityLabels } from "../../utils/visibility";
 
 function formatTime(iso: string): string {
   try {
@@ -40,6 +41,8 @@ export function PostCard({
   const images = post.images.filter((i) => i.media?.thumbnail);
   const longBody = post.body.length > 120;
 
+  const visibilityLabels = getVisibilityLabels(post);
+
   return (
     <article className="post-card">
       <button type="button" className="post-card-main" onClick={onOpen} aria-label={`查看帖子`}>
@@ -52,6 +55,13 @@ export function PostCard({
           />
           <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
           <span className="post-card-time">{formatTime(post.created_at)}</span>
+          {visibilityLabels.length > 0 && (
+            <div className="post-card-tags">
+              {visibilityLabels.map((label, idx) => (
+                <span key={idx} className="post-card-tag">{label}</span>
+              ))}
+            </div>
+          )}
         </header>
         {post.title && <h3 className="post-card-title">{post.title}</h3>}
         <p className={`post-card-body ${expanded ? "is-expanded" : ""}`}>{post.body}</p>

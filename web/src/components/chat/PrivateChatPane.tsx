@@ -7,6 +7,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import type { ChatMessage } from "../../api/types";
+import { getElysiaProfile } from "../../api/elysia";
+import { listFriends } from "../../api/users";
 import { Avatar } from "../Avatar";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
@@ -37,10 +39,40 @@ export function PrivateChatPane({
   const [notice, setNotice] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  // Bug #2：私聊好友状态 —— 好友 id 集合 + 爱莉对端身份（爱莉私聊必须放行）。
+  // friendsLoaded=false（加载中/失败）→ 视为未知，不禁用输入（后端 403 权威拦截）。
+  const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
+  const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
+
   const conv = useMemo(
     () => conversations.find((c) => c.id === conversationId) ?? null,
     [conversations, conversationId],
   );
+
+  // 好友列表 + 爱莉身份（与 MessagesPage/WideMessagesSidebar 同一数据源模式）
+  useEffect(() => {
+    let cancelled = false;
+    listFriends()
+      .then((list) => {
+        if (cancelled) return;
+        setFriendIds(new Set(list.map((f) => f.user.id)));
+        setFriendsLoaded(true);
+      })
+      .catch(() => {
+        // 好友列表加载失败 → 保持未知（不误禁）；发消息仍由后端 403 兜底
+      });
+    getElysiaProfile()
+      .then((p) => {
+        if (!cancelled) setElysiaUserId(p.user?.id ?? null);
+      })
+      .catch(() => {
+        // profile 未初始化/加载失败 → elysiaUserId 保持 null（走好友判断即可）
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 打开私聊会话：拉历史 + 订阅 + 标已读
   useEffect(() => {
@@ -79,6 +111,13 @@ export function PrivateChatPane({
 
   const peer = conv?.peer ?? null;
   const title = peer?.nickname || peer?.username || "私聊";
+  // 非好友禁发：私聊 + 对端已知 + 好友列表已加载 + 对端不是爱莉 + 对端不在好友列表
+  const blocked =
+    conv?.type === "private" &&
+    peer != null &&
+    friendsLoaded &&
+    !(elysiaUserId != null && peer.id === elysiaUserId) &&
+    !friendIds.has(peer.id);
 
   return (
     <div className="private-chat">
@@ -128,8 +167,16 @@ export function PrivateChatPane({
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}
       />
-      <TypingIndicator typing={typingActive} />
-      <MessageInput convId={conversationId} quote={quote} onQuoteClear={() => setQuote(null)} />
+      {blocked ? (
+        <div className="private-chat-blocked" role="alert">
+          对方已不是你的好友，无法发送消息
+        </div>
+      ) : (
+        <>
+          <TypingIndicator typing={typingActive} />
+          <MessageInput convId={conversationId} quote={quote} onQuoteClear={() => setQuote(null)} />
+        </>
+      )}
     </div>
   );
 }

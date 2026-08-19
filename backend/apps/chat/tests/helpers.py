@@ -22,7 +22,23 @@ def new_key() -> str:
 
 
 def make_private(client_a, client_b):
-    """通过 API 建立 a-b 私聊，返回会话。"""
+    """通过 API 建立 a-b 私聊，返回会话。
+
+    同时建立双向 accepted 好友关系（模拟正常用户流程：先加好友再私聊；
+    Bug #2 之后私聊发消息契约要求双向好友，见 MessageView.post 好友校验）。
+    """
+    from apps.accounts.models import Friendship
+
+    Friendship.objects.get_or_create(
+        user=client_a.user,
+        friend=client_b.user,
+        defaults={"status": Friendship.STATUS_ACCEPTED},
+    )
+    Friendship.objects.get_or_create(
+        user=client_b.user,
+        friend=client_a.user,
+        defaults={"status": Friendship.STATUS_ACCEPTED},
+    )
     resp = client_a.post(
         "/api/v1/chat/conversations/private/",
         {"user_id": str(client_b.user.id)},

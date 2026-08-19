@@ -4,7 +4,7 @@
 import { useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { useVoiceStore } from "../../stores/voice";
-import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
+import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 export function VoiceChannelCreate({
   group,
@@ -13,7 +13,9 @@ export function VoiceChannelCreate({
   group?: string | null;
 }) {
   const [name, setName] = useState("");
-  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [visibility, setVisibility] = useState<VisibilitySelection>(
+    group ? { public: false, friends: false, group: true } : { public: true, friends: false, group: false }
+  );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +29,12 @@ export function VoiceChannelCreate({
     setBusy(true);
     setError(null);
     try {
-      const ch = await voiceApi.createVoiceChannel(trimmed, group, { visibility, allowed_group_ids: selectedGroupIds });
+      // 将多选转换为后端格式
+      const backendVisibility = visibility.public ? "public" : visibility.friends ? "friends" : "group";
+      const ch = await voiceApi.createVoiceChannel(trimmed, group, {
+        visibility: backendVisibility,
+        allowed_group_ids: selectedGroupIds
+      });
       const store = useVoiceStore.getState();
       store.setChannels([{ ...ch, mine: false }, ...store.channels]);
       setName("");

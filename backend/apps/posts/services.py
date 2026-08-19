@@ -22,12 +22,12 @@ from .models import Comment, Post, PostImage
 _CURSOR_SEP = "|"
 
 
-def _resolve_visibility(group, visibility) -> str:
+def _resolve_visibility(group, visibility, allowed_group_ids) -> str:
     """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。"""
     if visibility in (None, ""):
         return Visibility.GROUP if group is not None else Visibility.PUBLIC
-    if visibility == Visibility.GROUP and group is None:
-        raise ValueError("群成员可见必须指定群")
+    if visibility == Visibility.GROUP and group is None and not allowed_group_ids:
+        raise ValueError("群成员可见必须指定群或 allowed_group_ids")
     return visibility
 
 
@@ -40,7 +40,7 @@ def create_post(author, title: str, body: str, images=None, group=None, visibili
         raise ValueError("正文不能为空")
     if group is not None and str(getattr(group, "type", "")) != "group":
         raise ValueError("group 必须是群聊会话")
-    visibility = _resolve_visibility(group, visibility)
+    visibility = _resolve_visibility(group, visibility, allowed_group_ids)
 
     post = Post.objects.create(
         owner=author, title=title, body=body, group=group, visibility=visibility

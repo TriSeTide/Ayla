@@ -58,16 +58,29 @@ def _get_group_or_400(group_id):
 
 
 class RoomListView(APIView):
-    """GET /rooms/（可见性过滤 + 可选 ?mine=1）/ POST /rooms/（创建）。"""
+    """GET /rooms/（可见性过滤 + 可选 ?mine=1；?scope=group:<id> 群内过滤）/ POST /rooms/（创建）。"""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from django.db.models import Q
+
         qs = (
             visible_queryset(GameRoom, request.user)
             .select_related("owner", "group")
             .prefetch_related("members__user")
         )
+
+        # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
+        scope = request.query_params.get("scope", "").strip()
+        if scope.startswith("group:"):
+            raw_gid = scope.split(":", 1)[1]
+            try:
+                gid = int(raw_gid)
+            except (TypeError, ValueError):
+                return _bad_request("group id 无效")
+            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+
         # F10「正在玩的桌游」数据源：我在局的房间（成员视角，叠加可见性过滤）
         if request.query_params.get("mine") == "1":
             qs = qs.filter(members__user=request.user).distinct()

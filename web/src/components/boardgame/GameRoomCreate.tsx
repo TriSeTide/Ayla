@@ -4,7 +4,7 @@
 import { useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
-import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
+import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 export function GameRoomCreate({
   group,
@@ -14,7 +14,9 @@ export function GameRoomCreate({
   onCreated: (room: GameRoom) => void;
 }) {
   const [name, setName] = useState("");
-  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [visibility, setVisibility] = useState<VisibilitySelection>(
+    group ? { public: false, friends: false, group: true } : { public: true, friends: false, group: false }
+  );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +30,14 @@ export function GameRoomCreate({
     setBusy(true);
     setError(null);
     try {
-      const room = await boardgameApi.createGameRoom({ name: trimmed, group, visibility, allowed_group_ids: selectedGroupIds });
+      // 将多选转换为后端格式
+      const backendVisibility = visibility.public ? "public" : visibility.friends ? "friends" : "group";
+      const room = await boardgameApi.createGameRoom({
+        name: trimmed,
+        group,
+        visibility: backendVisibility,
+        allowed_group_ids: selectedGroupIds
+      });
       setName("");
       onCreated(room);
     } catch (e) {

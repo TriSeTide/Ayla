@@ -18,6 +18,7 @@ import {
   sendDanmaku,
   startLiveChannel,
   stopLiveChannel,
+  updateLiveChannel,
 } from "../api/live";
 import { ApiError } from "../api/client";
 import { useAuthStore } from "../stores/auth";
@@ -90,6 +91,34 @@ describe("live api", () => {
     expect(body).toEqual({ title: "爱莉的午后" });
     expect(ch.stream_key).toBe("abc123key");
     expect(ch.rtmp_url).toBe("rtmp://127.0.0.1:1935/live/abc123key");
+  });
+
+  it("updateLiveChannel：保存资料携带 visibility + allowed_group_ids（开播控制台可见范围）", async () => {
+    mockFetchOnce({
+      ...OWNER_CHANNEL,
+      title: "爱莉的深夜电台",
+      visibility: "group",
+      allowed_group_ids: ["g-1", "g-2"],
+    });
+    const ch = await updateLiveChannel(7, {
+      title: "爱莉的深夜电台",
+      description: "限定群聊",
+      cover: "",
+      visibility: "group",
+      allowed_group_ids: ["g-1", "g-2"],
+    });
+    expect(lastFetchUrl()).toBe("/api/v1/live/channels/7/");
+    const body = JSON.parse(
+      String((fetch as Mock).mock.calls[0][1]?.body),
+    ) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      title: "爱莉的深夜电台",
+      description: "限定群聊",
+      visibility: "group",
+      allowed_group_ids: ["g-1", "g-2"],
+    });
+    expect(ch.visibility).toBe("group");
+    expect(ch.allowed_group_ids).toEqual(["g-1", "g-2"]);
   });
 
   it("getLiveChannel：非 owner 详情 stream_key/rtmp_url 为 null 是正常契约", async () => {

@@ -4,7 +4,7 @@
  * - 成员列表角色标签（owner/admin/member）；
  * - 群头像上传（M5-2.1）：owner 可换、成员不可；选择→预览→保存上传+PATCH→store 更新；失败重试。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary, ConversationMember, UserPublic } from "../api/types";
@@ -203,5 +203,99 @@ describe("GroupInfo 群头像上传（M5-2.1）", () => {
     await waitFor(() =>
       expect(screen.queryByText("新头像将在保存后生效")).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）", () => {
+  beforeEach(() => {
+    // jsdom 未实现 confirm；默认确认（只 spy 这一个，勿用 restoreAllMocks——那会清空模块 mock 实现）
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(window.confirm).mockRestore();
+  });
+
+  function openTransferDialog() {
+    renderInfo("owner");
+    fireEvent.click(screen.getByRole("button", { name: "转让群主" }));
+    return screen.getByRole("dialog", { name: "转让群主" });
+  }
+
+  it("点转让群主弹出对话框：列出除自己与群主外的成员（含角色标签）", () => {
+    const dialog = openTransferDialog();
+    // 候选：a1（管理员）、m1（成员）；群主 o1 与自己 u1 被排除
+    expect(within(dialog).getByRole("button", { name: "转让给 用户a1" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "转让给 爱丽丝" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "转让给 用户a1" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    // 管理员角色标签（弹窗内）
+    expect(within(dialog).getByText("管理员")).toBeInTheDocument();
+    // 未选择时确认禁用
+    expect(within(dialog).getByRole("button", { name: "确认转让" })).toBeDisabled();
+  });
+
+  it("搜索框按昵称/用户名过滤成员", () => {
+    const dialog = openTransferDialog();
+    const search = within(dialog).getByLabelText("搜索成员");
+    fireEvent.change(search, { target: { value: "m1" } });
+    expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "转让给 用户a1" })).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "不存在的昵称" } });
+    expect(within(dialog).getByText("没有匹配的成员")).toBeInTheDocument();
+  });
+
+  it("选择成员 → 确认 → 二次 confirm → 调用 transferGroupOwner 并关闭对话框", async () => {
+    const dialog = openTransferDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "转让给 用户m1" }));
+    expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认转让" }));
+    await waitFor(() => expect(chatApi.transferGroupOwner).toHaveBeenCalledWith("1", "m1"));
+    expect(window.confirm).toHaveBeenCalledWith("确定将群主转让给 用户m1？转让后你将成为普通成员");
+    // 成功后对话框关闭
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "转让群主" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("二次 confirm 取消则不执行转让，对话框保留", () => {
+    vi.mocked(window.confirm).mockReturnValue(false);
+    const dialog = openTransferDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "转让给 用户m1" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认转让" }));
+
+    expect(chatApi.transferGroupOwner).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "转让群主" })).toBeInTheDocument();
+  });
+
+  it("仅群主一人的群：显示暂无其他成员可转让且确认禁用", () => {
+    // 群主 u1 即当前用户，群内只有自己（不能用 renderInfo，它会覆盖 store 为 4 人群）
+    useChatStore.setState({
+      conversations: [
+        {
+          ...conv("owner"),
+          owner_id: "u1",
+          members: [{ ...member("u1", "owner"), user: user("u1", "爱丽丝") }],
+          member_count: 1,
+        },
+      ],
+    });
+    render(
+      <MemoryRouter>
+        <GroupInfo groupId="1" />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "转让群主" }));
+    const dialog = screen.getByRole("dialog", { name: "转让群主" });
+    expect(within(dialog).getByText("暂无其他成员可转让")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "确认转让" })).toBeDisabled();
   });
 });

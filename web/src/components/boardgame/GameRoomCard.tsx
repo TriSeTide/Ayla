@@ -8,15 +8,11 @@
 import type { GameRoom } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { IconGame } from "../icons";
-
-function sourceLabel(room: GameRoom): string {
-  if (room.visibility === "group" && room.group_name) return room.group_name;
-  if (room.visibility === "friends") return "好友";
-  return "公开";
-}
+import { getVisibilityLabels } from "../../utils/visibility";
 
 export function GameRoomCard({ room, onEnter }: { room: GameRoom; onEnter: () => void }) {
   const playing = room.status === "playing";
+  const labels = getVisibilityLabels(room);
   return (
     <div className="game-room-card-wrap">
       <button type="button" className="game-room-card" onClick={onEnter}>
@@ -30,7 +26,11 @@ export function GameRoomCard({ room, onEnter }: { room: GameRoom; onEnter: () =>
           </span>
           <span className="game-room-meta">
             {room.member_count} 人
-            <span className="game-room-source">{sourceLabel(room)}</span>
+            <span className="game-room-source-tags">
+              {labels.map((label, idx) => (
+                <span key={idx} className="game-room-source">{label}</span>
+              ))}
+            </span>
           </span>
         </div>
       </button>

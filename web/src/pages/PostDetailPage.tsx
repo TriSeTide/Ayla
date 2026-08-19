@@ -12,9 +12,11 @@ import * as postsApi from "../api/posts";
 import type { Post, PostComment } from "../api/types";
 import { CommentList } from "../components/posts/CommentList";
 import { ResourceImage } from "../components/ResourceImage";
+import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconHeart } from "../components/icons";
 import { usePostDetailTransition } from "../hooks/usePostDetailTransition";
 import { usePostsStore } from "../stores/posts";
+import { getVisibilityLabels } from "../utils/visibility";
 
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
@@ -34,7 +36,8 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
-  const [editVisibility, setEditVisibility] = useState<Post["visibility"]>("public");
+  const [editVisibility, setEditVisibility] = useState<VisibilitySelection>({ public: true, friends: false, group: false });
+  const [editAllowedGroupIds, setEditAllowedGroupIds] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
@@ -161,7 +164,14 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             <button type="button" className="msg-action-btn" onClick={() => {
               setEditTitle(post.title);
               setEditBody(post.body);
-              setEditVisibility(post.visibility);
+              // 将后端字符串 visibility 转换为前端多选对象
+              const hasGroups = (post.allowed_group_ids ?? []).length > 0;
+              setEditVisibility({
+                public: post.visibility === "public",
+                friends: post.visibility === "friends",
+                group: post.visibility === "group" || hasGroups,
+              });
+              setEditAllowedGroupIds(post.allowed_group_ids ?? []);
               setEditing(true);
             }}>编辑</button>
             <button
@@ -182,19 +192,34 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         <section className="post-editor post-detail-edit" aria-label="编辑帖子">
           <input className="field post-editor-title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={128} aria-label="帖子标题" />
           <textarea className="field post-editor-body" value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={5} aria-label="帖子正文" />
-          <label className="post-editor-visibility">
-            可见范围
-            <select value={editVisibility} onChange={(e) => setEditVisibility(e.target.value as Post["visibility"])}>
-              <option value="public">公开</option>
-              <option value="friends">好友可见</option>
-              <option value="group">群成员可见</option>
-            </select>
-          </label>
+          <VisibilitySelector
+            value={editVisibility}
+            onChange={setEditVisibility}
+            selectedGroupIds={editAllowedGroupIds}
+            onSelectedGroupIdsChange={setEditAllowedGroupIds}
+            initialGroupId={post.group}
+          />
           <div className="post-editor-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>取消</button>
             <button type="button" className="btn btn-primary" disabled={savingEdit || !editBody.trim()} onClick={() => {
+              // 校验：选择了群可见但没有选择任何群
+              if (editVisibility.group && editAllowedGroupIds.length === 0) {
+                setActionError("请至少选择一个群");
+                return;
+              }
+              // 多选转后端格式：public 单选；friends + group 可共存，优先 friends
+              const backendVisibility = editVisibility.public
+                ? "public"
+                : editVisibility.friends
+                  ? "friends"
+                  : "group";
               setSavingEdit(true);
-              postsApi.updatePost(post.id, { title: editTitle.trim(), body: editBody.trim(), visibility: editVisibility })
+              postsApi.updatePost(post.id, {
+                title: editTitle.trim(),
+                body: editBody.trim(),
+                visibility: backendVisibility,
+                allowed_group_ids: editAllowedGroupIds.length > 0 ? editAllowedGroupIds : undefined,
+              })
                 .then((updated) => { setPost(updated); setEditing(false); })
                 .catch((e) => setActionError(e instanceof Error ? e.message : "保存编辑失败"))
                 .finally(() => setSavingEdit(false));
@@ -207,6 +232,13 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         <div className="post-detail-author">
           <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
           <span className="post-card-time">{new Date(post.created_at).toLocaleString("zh-CN")}</span>
+          {getVisibilityLabels(post).length > 0 && (
+            <div className="post-card-tags">
+              {getVisibilityLabels(post).map((label, idx) => (
+                <span key={idx} className="post-card-tag">{label}</span>
+              ))}
+            </div>
+          )}
         </div>
         {post.title && <h2 className="post-detail-title-text">{post.title}</h2>}
         <p className="post-detail-text">{post.body}</p>

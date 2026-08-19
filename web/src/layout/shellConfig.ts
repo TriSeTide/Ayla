@@ -108,7 +108,7 @@ export interface FabAction {
 
 /**
  * CreateFAB 路由匹配表（需求文档 §3.5）。
- * 群聊场景内跟随子界面；群内语音不显示 FAB，群内直播入口在直播侧栏，群内帖子使用底部编辑器，
+ * 群聊场景内跟随子界面；群内直播入口在直播侧栏，群内帖子使用底部编辑器，
  * 聊天 / 群信息子界面与直播间、消息、搜索、个人页无 FAB。
  */
 export function resolveFabAction(pathname: string): FabAction | null {
@@ -119,7 +119,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
     const groupId = groupScene.params.id;
     switch (groupScene.params.scene) {
       case "voice":
-        return null; // 群内语音房不显示右下角创建键
+        return { key: "group-voice", label: "创建群内语音房", groupId, plannedStep: "F5", handler: "voice" };
       case "live":
         return null; // 群内直播创建入口放在直播侧栏左下角
       case "posts":

@@ -12,6 +12,7 @@ import { useLiveStore } from "../../stores/live";
 import { useAuthStore } from "../../stores/auth";
 import { useSessionActivityStore } from "../../stores/sessionActivity";
 import { ResourceImage } from "../ResourceImage";
+import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 export function LiveOwnerPanel({
   channel,
@@ -25,6 +26,15 @@ export function LiveOwnerPanel({
   const [description, setDescription] = useState(channel.description ?? "");
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(channel.cover || null);
+  // 将后端单值转换为多选格式
+  const hasGroups = (channel.allowed_group_ids?.length ?? 0) > 0;
+  const initialVisibility: VisibilitySelection = {
+    public: channel.visibility === "public",
+    friends: channel.visibility === "friends",
+    group: channel.visibility === "group" || hasGroups,
+  };
+  const [visibility, setVisibility] = useState<VisibilitySelection>(initialVisibility);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(channel.allowed_group_ids ?? []);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
   const run = async (action: () => Promise<LiveChannelDescriptor>) => {
@@ -75,15 +85,27 @@ export function LiveOwnerPanel({
         const uploaded = await uploadMediaFile(coverFile, "image");
         cover = mediaContentUrl(uploaded.media_id);
       }
+      // 将多选转换为后端格式
+      const backendVisibility = visibility.public ? "public" : visibility.friends ? "friends" : "group";
       const updated = await liveApi.updateLiveChannel(channel.id, {
         title: nextTitle,
         description: description.trim(),
         cover,
+        visibility: backendVisibility,
+        allowed_group_ids: selectedGroupIds,
       });
       useLiveStore.getState().setCurrentChannel(updated);
       useLiveStore.getState().upsertChannel(updated);
       setCoverFile(null);
       setCoverPreview(updated.cover || null);
+      // 用后端回显刷新可见范围（后端可能规范化 allowed_group_ids）
+      const refreshedVisibility: VisibilitySelection = {
+        public: updated.visibility === "public",
+        friends: updated.visibility === "friends" || (updated.allowed_group_ids?.length ?? 0) > 0,
+        group: (updated.allowed_group_ids?.length ?? 0) > 0,
+      };
+      setVisibility(refreshedVisibility);
+      setSelectedGroupIds(updated.allowed_group_ids ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存直播间资料失败");
     } finally {
@@ -176,6 +198,17 @@ export function LiveOwnerPanel({
             {savingSettings ? "保存中…" : "保存"}
           </button>
         </div>
+      </div>
+
+      {/* 可见范围：公开 / 好友可见 / 指定群可见（群内创建的直播间锁定为群可见） */}
+      <div className="live-owner-visibility">
+        <VisibilitySelector
+          value={visibility}
+          onChange={setVisibility}
+          selectedGroupIds={selectedGroupIds}
+          onSelectedGroupIdsChange={setSelectedGroupIds}
+          initialGroupId={channel.group}
+        />
       </div>
 
       {error && <div className="live-form-error">{error}</div>}

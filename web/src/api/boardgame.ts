@@ -8,9 +8,12 @@
 import { apiRequest } from "./client";
 import type { GameRoom, GameRoomMember } from "./types";
 
-/** GET /rooms/ —— 房间列表（mine=1 仅我在局，F10 数据源） */
-export function listGameRooms(mine = false) {
-  const qs = mine ? "?mine=1" : "";
+/** GET /rooms/ —— 房间列表（mine=1 仅我在局；?scope=group:<id> 群内过滤） */
+export function listGameRooms(params?: { mine?: boolean; scope?: string }) {
+  const queryParts: string[] = [];
+  if (params?.mine) queryParts.push("mine=1");
+  if (params?.scope) queryParts.push(`scope=${encodeURIComponent(params.scope)}`);
+  const qs = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
   return apiRequest<GameRoom[]>(`/boardgame/rooms/${qs}`);
 }
 

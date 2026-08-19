@@ -42,6 +42,22 @@
   color: var(--text-secondary);
 }
 
+.post-card-tags {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.post-card-tag {
+  padding: 2px 8px;
+  font-family: var(--font-utility);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ice-600);
+  background: var(--ice-100);
+  border-radius: var(--radius-pill);
+}
+
 .post-card-title {
   margin-top: var(--sp-2);
   font-family: var(--font-display);
@@ -343,11 +359,33 @@
     padding-bottom: var(--sp-4);
   }
 
+  .posts-hub-head {
+    max-width: 680px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
   .posts-feed {
     max-width: 680px;
     width: 100%;
     margin: 0 auto;
   }
+}
+
+/* ================= 我的帖子入口（Bug #8） ================= */
+
+.posts-hub-head,
+.group-posts-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.group-posts-head {
+  border-bottom: 1px solid var(--glass-border);
 }
 
 /* ================= 帖子详情（PostDetailPage） ================= */

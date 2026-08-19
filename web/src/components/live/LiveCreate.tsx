@@ -9,7 +9,7 @@ import { useRef, useState } from "react";
 import * as liveApi from "../../api/live";
 import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
 import type { LiveChannelDescriptor } from "../../api/types";
-import { VisibilitySelector, type VisibilityValue } from "../VisibilitySelector";
+import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 /** 从 rtmp_url 拆出 OBS 的"服务器"部分（去掉末尾 /<stream_key>） */
 export function obsServerFromRtmpUrl(rtmpUrl: string): string {
@@ -27,7 +27,9 @@ export function LiveCreate({
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<VisibilityValue>(group ? "group" : "public");
+  const [visibility, setVisibility] = useState<VisibilitySelection>(
+    group ? { public: false, friends: false, group: true } : { public: true, friends: false, group: false }
+  );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
@@ -52,10 +54,12 @@ export function LiveCreate({
         const uploaded = await uploadMediaFile(coverFile, "image");
         cover = mediaContentUrl(uploaded.media_id);
       }
+      // 将多选转换为后端格式
+      const backendVisibility = visibility.public ? "public" : visibility.friends ? "friends" : "group";
       const channel = await liveApi.createLiveChannel(trimmed, group, {
         description: description.trim(),
         cover,
-        visibility,
+        visibility: backendVisibility,
         allowed_group_ids: selectedGroupIds,
       });
       setCreated(channel);

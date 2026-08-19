@@ -43,7 +43,8 @@
 
 > 落地：`apps/common/{__init__,visibility}.py`；live/voice 模型 `visibility`+`group` 字段与迁移 0002；
 > views 列表过滤 + 详情/弹幕/join/成员 403 校验；serializers 输出 visibility/group/group_name；
-> 创建接口支持 group/visibility（group 非空默认 group 可见，visibility=group 必须带群）。
+> 创建接口支持 group/visibility（group 非空默认 group 可见；visibility=group 的群归属
+> 来自单群 group 或多群 allowed_groups 白名单，两者皆空则 400，见 Bug #7 修复）。
 > 验证：可见性矩阵测试（`apps/common/tests/test_visibility.py`）+ live/voice API 契约测试全绿；
 > 全量 pytest 335 通过（存量接口回归零回退）；迁移后存量房间默认 public 行为不变。
 

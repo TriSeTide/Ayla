@@ -11,6 +11,7 @@ import type { LiveChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { getVisibilityLabels } from "../../utils/visibility";
 
 function statusBadge(status: LiveChannelDescriptor["status"]): {
   className: string;
@@ -24,13 +25,6 @@ function statusBadge(status: LiveChannelDescriptor["status"]): {
     default:
       return { className: "live-badge live-badge-idle", label: "未开播" };
   }
-}
-
-/** 来源标识（R-L1）：公开 / 好友 / 群名（design.md §12.7 Micro Tag） */
-function sourceLabel(ch: LiveChannelDescriptor): string {
-  if (ch.visibility === "group" && ch.group_name) return ch.group_name;
-  if (ch.visibility === "friends") return "好友";
-  return "公开";
 }
 
 export function LiveHall({
@@ -59,6 +53,7 @@ export function LiveHall({
       {channels.map((ch) => {
         const badge = statusBadge(ch.status);
         const isElysia = elysiaUserId != null && ch.owner_id === elysiaUserId;
+        const labels = getVisibilityLabels(ch);
         return (
           <div key={ch.id} className="live-card-wrap">
             <button
@@ -82,7 +77,11 @@ export function LiveHall({
               <span className="live-card-owner">
                 {ch.owner_nickname ?? ownerNames[ch.owner_id] ?? "未知主播"}
               </span>
-              <span className="live-badge live-badge-source">{sourceLabel(ch)}</span>
+              <div className="live-card-source-tags">
+                {labels.map((label, idx) => (
+                  <span key={idx} className="live-badge live-badge-source">{label}</span>
+                ))}
+              </div>
               </div>
             </button>
             <FavoriteButton targetType="live" targetId={ch.id} compact />
