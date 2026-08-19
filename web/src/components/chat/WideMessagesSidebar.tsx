@@ -22,16 +22,22 @@ import type { ConversationSummary } from "../../api/types";
 type Tab = "chat" | "friends" | "requests";
 
 export function WideMessagesSidebar({
-  conversations,
+  conversations: propConversations,
   activeId,
   onSelect,
 }: {
-  conversations: ConversationSummary[];
+  /** 可选兼容属性；实时真源始终来自 store */
+  conversations?: ConversationSummary[];
   /** 当前选中的私聊会话 id（高亮） */
   activeId: string | null;
   /** 点击会话 → 选中（/chat/:id 宽屏跳转；/messages 宽屏右侧内联） */
   onSelect: (id: string) => void;
 }) {
+  // 直接订阅 store；保留 prop 仅兼容旧调用方，不使用其作为实时真源
+  const storeConversations = useChatStore((s) => s.conversations);
+  const conversations = storeConversations.length > 0 ? storeConversations : (propConversations ?? []);
+  const lastFetched = useChatStore((s) => s.lastFetched);
+  
   const [tab, setTab] = useState<Tab>("chat");
   const currentUser = useAuthStore((state) => state.currentUser);
   const realtimeNotices = useNoticeStore((state) => state.notices);
@@ -50,15 +56,17 @@ export function WideMessagesSidebar({
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
-  // 会话列表为空时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
+  // ✅ 会话列表为空或过期时加载（宽屏 /chat/:id 直接进入时侧栏需有数据）
   useEffect(() => {
-    if (conversations.length === 0) {
+    const now = Date.now();
+    const stale = !lastFetched || now - lastFetched > 60_000; // 60s 过期
+    
+    if (conversations.length === 0 || stale) {
       chatApi.listConversations()
         .then((l) => useChatStore.getState().setConversations(l))
         .catch((e) => setLoadError(e instanceof Error ? e.message : "加载会话失败"));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [conversations.length, lastFetched]);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {

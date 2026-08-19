@@ -8,6 +8,9 @@
  */
 import { IconChat, IconGame, IconMic, IconPost, IconVideo } from "../components/icons";
 import type { GroupScene } from "../stores/group";
+import { useGroupStore } from "../stores/group";
+import { useVoiceStore } from "../stores/voice";
+import { useLiveStore } from "../stores/live";
 
 const SCENE_META: Array<{ key: GroupScene; label: string; icon: typeof IconMic }> = [
   { key: "chat", label: "聊天", icon: IconChat },
@@ -28,6 +31,13 @@ export function ChannelSidebar({
   onSelectScene: (scene: GroupScene) => void;
   onOpenInfo: () => void;
 }) {
+  const currentGroupId = useGroupStore((state) => state.currentGroupId);
+  const voiceCount = useVoiceStore((state) => state.channels
+    .filter((channel) => String(channel.group) === String(currentGroupId))
+    .reduce((sum, channel) => sum + (channel.member_count || 0), 0));
+  const hasLive = useLiveStore((state) => state.channels
+    .some((channel) => String(channel.group) === String(currentGroupId) && channel.status === "live"));
+
   return (
     <aside className="channel-sidebar" aria-label="群内场景">
       <button type="button" className="channel-sidebar-head" onClick={onOpenInfo}>
@@ -48,6 +58,8 @@ export function ChannelSidebar({
               >
                 <Icon width={20} height={20} />
                 <span>{s.label}</span>
+                {s.key === "voice" && voiceCount > 0 && <span className="channel-scene-status">{voiceCount}</span>}
+                {s.key === "live" && hasLive && <span className="channel-scene-status">LIVE</span>}
               </button>
             </li>
           );

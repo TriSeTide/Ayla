@@ -19,7 +19,7 @@ import { LayoutSwitch } from "../components/home/LayoutSwitch";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
-import { useChatStore } from "../stores/chat";
+import { useChatStore, isChatStale } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
 
 /** 卡片布局每批渲染数（增量加载更多，R-H6） */
@@ -59,7 +59,7 @@ export function HomePage() {
   useEffect(() => {
     let cancelled = false;
     const { setLoading, setConversations, setError } = useChatStore.getState();
-    if (conversations.length > 0) return; // 已有数据（如从聊天页切回）
+    if (conversations.length > 0 && !isChatStale()) return; // 已有数据且未过期
     setLoading(true);
     setError(null);
     chatApi

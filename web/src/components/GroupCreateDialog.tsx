@@ -14,11 +14,13 @@ import * as chatApi from "../api/chat";
 import { searchUsers } from "../api/users";
 import type { UserPublic } from "../api/types";
 import { useAuthStore } from "../stores/auth";
+import { useChatStore } from "../stores/chat";
 import { IconClose, IconPlus, IconSearch } from "./icons";
 
 export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.currentUser);
+  const upsertConversation = useChatStore((s) => s.upsertConversation);
 
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
@@ -61,6 +63,8 @@ export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
         title: title.trim(),
         member_ids: selected.map((m) => m.id),
       });
+      // 立即更新会话列表，让左侧栏 ServerRail 显示新群
+      upsertConversation(conv);
       onClose();
       navigate(`/group/${conv.id}`);
     } catch (e) {
@@ -75,6 +79,8 @@ export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       const conv = await chatApi.openPrivateConversation(u.id);
+      // 立即更新会话列表，让私聊也能在会话列表中显示
+      upsertConversation(conv);
       onClose();
       navigate(`/chat/${conv.id}`);
     } catch (e) {

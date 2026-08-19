@@ -131,6 +131,7 @@ export function GroupPage() {
 
   // 直接访问 /group/:id 时会话列表可能为空：补齐加载（复用 chat store）
   useEffect(() => {
+    // 只要已有会话就可渲染当前群；实时变化由 WebSocket upsert 驱动，避免首屏重复请求。
     if (conversations.length > 0) return;
     let cancelled = false;
     chatApi

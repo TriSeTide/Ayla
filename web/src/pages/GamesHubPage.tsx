@@ -11,26 +11,36 @@ import { GameRoomCard } from "../components/boardgame/GameRoomCard";
 import { GameRoomPlaceholder } from "../components/boardgame/GameRoomPlaceholder";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
+import { useBoardgameStore, isBoardgameStale } from "../stores/boardgame";
 
 export function GamesHubPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
-  const [rooms, setRooms] = useState<GameRoom[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const rooms = useBoardgameStore((s) => s.rooms);
+  const loading = useBoardgameStore((s) => s.roomsLoading);
+  const error = useBoardgameStore((s) => s.error);
+  const [loadError, setLoadError] = useState<string | null>(null);
   /** 进入的房间（占位界面） */
   const [current, setCurrent] = useState<GameRoom | null>(null);
 
   const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
+    const store = useBoardgameStore.getState();
+    store.setRoomsLoading(true);
+    store.setError(null);
+    setLoadError(null);
     boardgameApi
       .listGameRooms()
-      .then((list) => setRooms(list))
-      .catch((e) => setError(e instanceof Error ? e.message : "加载失败"))
-      .finally(() => setLoading(false));
+      .then((list) => store.setRooms(list))
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : "加载失败";
+        store.setRoomsLoading(false);
+        store.setError(message);
+        setLoadError(message);
+      });
   }, []);
 
   useEffect(() => {
+    const store = useBoardgameStore.getState();
+    if (store.rooms.length > 0 && !isBoardgameStale()) return;
     load();
   }, [load]);
 
@@ -61,12 +71,9 @@ export function GamesHubPage() {
   return (
     <div className="games-hub">
       {isNarrow && <NarrowTopBar />}
-      {error && (
+      {(error || loadError) && (
         <div className="chat-notice" role="alert">
-          <span>{error}</span>
-          <button type="button" className="btn btn-ghost" onClick={load} disabled={loading}>
-            {loading ? "重试中…" : "重试"}
-          </button>
+          <span>{error || loadError}</span>
         </div>
       )}
       {loading && rooms.length === 0 ? (

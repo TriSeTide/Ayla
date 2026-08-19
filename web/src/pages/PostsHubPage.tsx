@@ -12,7 +12,7 @@ import * as postsApi from "../api/posts";
 import { PostCard } from "../components/posts/PostCard";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
-import { usePostsStore } from "../stores/posts";
+import { usePostsStore, isPostsStale } from "../stores/posts";
 
 export function PostsHubPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
@@ -25,6 +25,7 @@ export function PostsHubPage() {
   // 首屏：信息流 + 我的收藏集合
   const loadFirst = useCallback(() => {
     const store = usePostsStore.getState();
+    if (store.posts.length > 0 && !isPostsStale() && !store.loading) return;
     store.setLoading(true);
     store.setError(null);
     setLoadError(null);

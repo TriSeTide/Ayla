@@ -20,7 +20,7 @@ import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useBadgesStore } from "../stores/badges";
-import { useChatStore } from "../stores/chat";
+import { useChatStore, isChatStale } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { useNoticeStore } from "../stores/notices";
 
@@ -59,7 +59,7 @@ export function MessagesPage() {
 
   // 加载会话列表（私信 tab 复用）
   useEffect(() => {
-    if (conversations.length === 0) {
+    if (conversations.length === 0 || isChatStale()) {
       chatApi.listConversations()
         .then((l) => useChatStore.getState().setConversations(l))
         .catch((e) => setLoadError(e instanceof Error ? e.message : "加载会话失败"));
@@ -139,7 +139,6 @@ export function MessagesPage() {
     return (
       <div className="messages-page messages-page-wide">
         <WideMessagesSidebar
-          conversations={conversations}
           activeId={activeChatId}
           onSelect={(id) => setActiveChatId(id)}
         />
@@ -169,37 +168,39 @@ export function MessagesPage() {
         </div>
       )}
       {friendsLoadError && <div className="chat-notice" role="alert">{friendsLoadError}</div>}
-      <div className="messages-tabs" role="tablist" aria-label="消息中心">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "chat"}
-          className={`messages-tab ${tab === "chat" ? "is-active" : ""}`}
-          onClick={() => setTab("chat")}
-        >
-          私信
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "friends"}
-          className={`messages-tab ${tab === "friends" ? "is-active" : ""}`}
-          onClick={() => setTab("friends")}
-        >
-          好友列表
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "requests"}
-          className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
-          onClick={() => setTab("requests")}
-        >
-          认证消息
-          {(friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length) > 0 && (
-            <span className="messages-tab-badge">{friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length}</span>
-          )}
-        </button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
+        <div className="messages-tabs" role="tablist" aria-label="消息中心" style={{ flex: 1 }}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "chat"}
+            className={`messages-tab ${tab === "chat" ? "is-active" : ""}`}
+            onClick={() => setTab("chat")}
+          >
+            私信
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "friends"}
+            className={`messages-tab ${tab === "friends" ? "is-active" : ""}`}
+            onClick={() => setTab("friends")}
+          >
+            好友列表
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "requests"}
+            className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
+            onClick={() => setTab("requests")}
+          >
+            认证消息
+            {(friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length) > 0 && (
+              <span className="messages-tab-badge">{friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length}</span>
+            )}
+          </button>
+        </div>
       </div>
 
       {tab === "chat" ? (

@@ -8,8 +8,14 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { useAuthStore } from "./stores/auth";
+import { useChatStore } from "./stores/chat";
+import { useVoiceStore } from "./stores/voice";
+import { useLiveStore } from "./stores/live";
 import { chatWS } from "./ws/chat";
 import { presenceClient } from "./ws/presence";
+import { listConversations } from "./api/chat";
+import { listVoiceChannels } from "./api/voice";
+import { listLiveChannels } from "./api/live";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
@@ -33,6 +39,23 @@ async function bootstrap() {
   if (accessToken) {
     presenceClient.connect();
     chatWS.connect();
+    // 并发预加载核心列表
+    const loadCoreData = async () => {
+      try {
+        const [convs, voices, lives] = await Promise.all([
+          listConversations(),
+          listVoiceChannels(),
+          listLiveChannels(),
+        ]);
+        useChatStore.getState().setConversations(convs);
+        useVoiceStore.getState().setChannels(voices);
+        useLiveStore.getState().setChannels(lives);
+      } catch (err) {
+        console.error("[预加载] 核心数据加载失败", err);
+        // 不阻断流程，用户访问页面时会重试
+      }
+    };
+    void loadCoreData();
   }
 }
 

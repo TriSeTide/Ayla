@@ -48,14 +48,19 @@ export function GroupVoice({
     rejoin,
   } = useVoiceChannel();
 
-  // 后端已按 scope=group:xxx 过滤
-  const groupChannels = channels;
+  // 全量可见频道写入全局 store（后端 visible_queryset 已含本用户所有群的
+  // group/allowed_groups 频道），再按 groupId 前端投影当前群；
+  // 不能用 scope=group:<id> 直接覆盖 store，否则跨群切换时全局列表被单群数据污染。
+  const groupChannels = channels.filter((c) =>
+    String(c.group) === String(groupId)
+    || (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+  );
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     voiceApi
-      .listVoiceChannels({ scope: `group:${groupId}` })
+      .listVoiceChannels()
       .then((list) => {
         if (!cancelled) useVoiceStore.getState().setChannels(list);
       })
@@ -98,8 +103,14 @@ export function GroupVoice({
   }, [currentChannelId, join, joining, routeChannelId]);
 
   // 只在当前群且 URL 指向当前频道时渲染房内界面；/group/:id/voice 是列表。
+  // 多群白名单频道（group=null + allowed_group_ids 含本群）同样视为本群频道。
   const currentChannel = routeChannelId
-    ? channels.find((c) => c.id === routeChannelId && c.group === groupId) ?? null
+    ? channels.find(
+        (c) =>
+          c.id === routeChannelId &&
+          (String(c.group) === String(groupId) ||
+            (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId))),
+      ) ?? null
     : null;
   const currentUser = useAuthStore((s) => s.currentUser);
   // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。

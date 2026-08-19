@@ -10,38 +10,50 @@ import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
 import { GameRoomCard } from "../../components/boardgame/GameRoomCard";
 import { GameRoomPlaceholder } from "../../components/boardgame/GameRoomPlaceholder";
+import { useBoardgameStore, isBoardgameStale } from "../../stores/boardgame";
 
 export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () => void }) {
-  const [rooms, setRooms] = useState<GameRoom[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const allRooms = useBoardgameStore((s) => s.rooms);
+  const rooms = allRooms.filter((room) =>
+    String(room.group) === String(groupId)
+    || (room.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+  );
+  const loading = useBoardgameStore((s) => s.roomsLoading);
+  const error = useBoardgameStore((s) => s.error);
   const [current, setCurrent] = useState<GameRoom | null>(null);
 
   const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
+    // 全量可见房间写入全局 store（后端 visible_queryset 已含本用户所有群的
+    // group/allowed_groups 房间），再按 groupId 前端投影当前群；
+    // 不能用 scope=group:<id> 直接覆盖 store，否则跨群切换时全局列表被单群数据污染。
+    const store = useBoardgameStore.getState();
+    store.setRoomsLoading(true);
+    store.setError(null);
     boardgameApi
-      .listGameRooms({ scope: `group:${groupId}` })
-      .then((list) => setRooms(list))
-      .catch((e) => setError(e instanceof Error ? e.message : "加载桌游室失败"))
-      .finally(() => setLoading(false));
+      .listGameRooms()
+      .then((list) => store.setRooms(list))
+      .catch((e) => {
+        store.setRoomsLoading(false);
+        store.setError(e instanceof Error ? e.message : "加载桌游室失败");
+      });
   }, [groupId]);
 
   useEffect(() => {
+    const store = useBoardgameStore.getState();
+    if (store.rooms.length > 0 && !isBoardgameStale()) return;
     load();
   }, [load]);
 
+  // 兼容同页创建后的本地事件；跨客户端变化由 ChatWS -> BoardgameStore 驱动。
   useEffect(() => {
-    const handleRoomCreated = (event: Event) => {
-      const room = (event as CustomEvent<GameRoom>).detail;
-      if (room && String(room.group) === String(groupId)) {
-        // 创建弹层与本页并存时，POST 响应先到；以 GET 投影为准重新读取。
-        load();
-      }
+    const reconcile = () => load();
+    window.addEventListener("boardgame:room-created", reconcile);
+    window.addEventListener("boardgame:room-deleted", reconcile);
+    return () => {
+      window.removeEventListener("boardgame:room-created", reconcile);
+      window.removeEventListener("boardgame:room-deleted", reconcile);
     };
-    window.addEventListener("boardgame:room-created", handleRoomCreated);
-    return () => window.removeEventListener("boardgame:room-created", handleRoomCreated);
-  }, [groupId, load]);
+  }, [load]);
 
   const enterRoom = (room: GameRoom) => {
     boardgameApi

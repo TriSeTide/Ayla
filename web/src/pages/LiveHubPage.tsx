@@ -13,7 +13,7 @@ import { ensureUser } from "../api/users";
 import { LiveHall } from "../components/live/LiveHall";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
-import { useLiveStore } from "../stores/live";
+import { useLiveStore, isLiveStale } from "../stores/live";
 
 export function LiveHubPage() {
   const navigate = useNavigate();
@@ -28,10 +28,11 @@ export function LiveHubPage() {
 
   const load = useCallback(async (only: boolean) => {
     const store = useLiveStore.getState();
+    if (store.channels.length > 0 && !isLiveStale() && !store.channelsLoading) return;
     store.setChannelsLoading(true);
     setError(null);
     try {
-      const list = await liveApi.listLiveChannels(only);
+      const list = await liveApi.listLiveChannels({ onlyLive: only });
       store.setChannels(list);
       store.setChannelsLoading(false);
       const ownerIds = [...new Set(list.map((c) => c.owner_id))];
@@ -79,13 +80,6 @@ export function LiveHubPage() {
           />
           只看在播
         </label>
-        <button
-          type="button"
-          className="msg-action-btn"
-          onClick={() => void load(onlyLive)}
-        >
-          刷新
-        </button>
       </div>
       {error && <div className="live-form-error" role="alert">{error}</div>}
       {profileError && <div className="live-form-error" role="alert">爱莉入口暂不可用：{profileError}</div>}

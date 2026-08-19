@@ -19,7 +19,7 @@ import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useShellStore } from "../stores/shell";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceChannel } from "../hooks/useVoiceChannel";
-import { useVoiceStore } from "../stores/voice";
+import { useVoiceStore, isVoiceStale } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
 
 export function VoiceHubPage() {
@@ -32,7 +32,6 @@ export function VoiceHubPage() {
   const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [listError, setListError] = useState<string | null>(null);
-  const [listRetry, setListRetry] = useState(0);
   const [profileError, setProfileError] = useState<string | null>(null);
   const joiningRouteRef = useRef<string | null>(null);
 
@@ -51,15 +50,30 @@ export function VoiceHubPage() {
     rejoin,
   } = useVoiceChannel();
 
+  // ✅ 统一的频道列表加载函数
+  const loadChannels = useCallback(() => {
+    const store = useVoiceStore.getState();
+    store.setChannelsLoading(true);
+    setListError(null);
+    voiceApi
+      .listVoiceChannels()
+      .then((list) => store.setChannels(list))
+      .catch((e) => {
+        store.setChannelsLoading(false);
+        setListError(e instanceof Error ? e.message : "加载频道失败");
+      });
+  }, []);
+
   // 进房/退房：底栏下滑走（R-V2，与直播同向）
   useEffect(() => {
     useShellStore.getState().setBottomTabsLeaving(routeChannelId != null && currentChannelId != null);
   }, [currentChannelId]);
 
-  // 频道列表
+  // 频道列表：空或过期时加载
   useEffect(() => {
     let cancelled = false;
     const store = useVoiceStore.getState();
+    if (store.channels.length > 0 && !isVoiceStale()) return;
     store.setChannelsLoading(true);
     voiceApi
       .listVoiceChannels()
@@ -75,7 +89,7 @@ export function VoiceHubPage() {
     return () => {
       cancelled = true;
     };
-  }, [listRetry]);
+  }, []);
 
   // Voice WS 单例
   useEffect(() => {
@@ -197,8 +211,7 @@ export function VoiceHubPage() {
           role="alert"
           onClick={() => {
             clearError();
-            setListError(null);
-            setListRetry((value) => value + 1);
+            loadChannels();
           }}
         >
           {notice}（点击重试）

@@ -21,41 +21,50 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const channel = useLiveStore((s) => s.current.channel);
-  const [channels, setChannels] = useState<LiveChannelDescriptor[]>([]);
+  const allChannels = useLiveStore((s) => s.channels);
+  const channels = allChannels.filter((item) =>
+    String(item.group) === String(groupId)
+    || (item.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+  );
   const [currentId, setCurrentId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const loading = useLiveStore((s) => s.channelsLoading);
+  const error = useLiveStore((s) => s.error);
   const [showCreate, setShowCreate] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
+    // 全量可见列表写入全局 store（后端 visible_queryset 已含本用户所有群的
+    // group/allowed_groups 频道），再在下方按 groupId 前端投影当前群；
+    // 不能用 scope=group:<id> 直接覆盖 store，否则跨群切换时全局列表被单群数据污染。
+    const store = useLiveStore.getState();
+    store.setChannelsLoading(true);
+    store.setError(null);
     liveApi
-      .listLiveChannels({ scope: `group:${groupId}` })
-      .then((list) => {
-        if (cancelled) return;
-        setChannels(list);
-        setCurrentId(list[0]?.id ?? null);
-        setLoading(false);
-      })
+      .listLiveChannels()
+      .then((list) => store.setChannels(list))
       .catch((e) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "加载群内直播失败");
-          setLoading(false);
-        }
+        store.setChannelsLoading(false);
+        store.setError(e instanceof Error ? e.message : "加载群内直播失败");
       });
-    return () => {
-      cancelled = true;
-    };
   }, [groupId]);
 
   useEffect(() => {
-    const cleanup = load();
-    return cleanup;
+    const store = useLiveStore.getState();
+    if (store.channels.length === 0 || store.lastFetched == null || Date.now() - store.lastFetched > 60_000) {
+      load();
+    }
   }, [load]);
+
+  useEffect(() => {
+    if (channels.length === 0) {
+      setCurrentId(null);
+      return;
+    }
+    if (currentId == null || !channels.some((item) => item.id === currentId)) {
+      setCurrentId(channels[0].id);
+    }
+  }, [channels, currentId]);
 
   const goTo = useCallback(
     (id: number) => {
