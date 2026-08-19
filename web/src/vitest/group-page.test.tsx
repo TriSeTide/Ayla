@@ -30,6 +30,7 @@ vi.mock("../pages/group/GroupGames", () => ({
 }));
 vi.mock("../api/chat", () => ({
   getConversation: vi.fn(),
+  listConversations: vi.fn().mockResolvedValue([]),
 }));
 
 function mockMatchMedia(narrow: boolean) {

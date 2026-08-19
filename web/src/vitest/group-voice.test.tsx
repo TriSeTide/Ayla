@@ -97,15 +97,54 @@ describe("GroupVoice 范围（仅该群）", () => {
     expect(screen.queryByText("其它群")).not.toBeInTheDocument();
   });
 
+  it("多群白名单语音房（group=null + 白名单 13/14/15）出现在每个被选群的群内页", async () => {
+    const multi = ch("mv1", null, "多群语音");
+    multi.allowed_group_ids = ["13", "14", "15"];
+    vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([multi]);
+    for (const gid of ["13", "14", "15"]) {
+      const { unmount } = render(
+        <MemoryRouter><GroupVoice groupId={gid} onExit={vi.fn()} /></MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getByText("多群语音")).toBeInTheDocument());
+      unmount();
+    }
+  });
+
+  it("多群白名单语音房不进其它群/公开房混入本群列表", async () => {
+    const multi = ch("mv1", null, "多群语音");
+    multi.allowed_group_ids = ["13", "14", "15"];
+    vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([
+      multi,
+      ch("vx", "9", "其它群语音"),
+      ch("vpub", null, "公开语音"),
+    ]);
+    render(<MemoryRouter><GroupVoice groupId="13" onExit={vi.fn()} /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText("多群语音")).toBeInTheDocument());
+    expect(screen.queryByText("其它群语音")).not.toBeInTheDocument();
+    expect(screen.queryByText("公开语音")).not.toBeInTheDocument();
+  });
+
+  it("多群白名单语音房在群内 URL 下可进入房内视图", async () => {
+    const multi = ch("mv1", null, "多群语音");
+    multi.allowed_group_ids = ["13", "14", "15"];
+    vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([multi]);
+    useVoiceStore.setState({ currentChannelId: "mv1" });
+    render(
+      <MemoryRouter>
+        <GroupVoice groupId="13" routeChannelId="mv1" onExit={vi.fn()} />
+      </MemoryRouter>,
+    );
+    // VoiceRoomBody mock 渲染 channelName + 离开频道按钮 → 房内视图
+    await waitFor(() => expect(screen.getByText("多群语音")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "离开频道" })).toBeInTheDocument();
+  });
+
   it("本群无语音房 → 空态引导", async () => {
     vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([ch("v3", null, "公开语音")]);
     render(<MemoryRouter><GroupVoice groupId="g1" onExit={vi.fn()} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("群内还没有语音房")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "创建群内语音房" }));
-    await waitFor(() =>
-      expect(screen.getByRole("dialog", { name: "创建群内语音房" })).toBeInTheDocument(),
-    );
-    expect(screen.getByPlaceholderText("新语音频道名称")).toBeInTheDocument();
+    // 群内建语音房入口在壳层 CreateFAB（shellConfig group-voice handler），空态仅提供返回聊天
+    expect(screen.getByRole("button", { name: "返回聊天" })).toBeInTheDocument();
   });
 
   it("房主点离开频道 → 提示先转让房主，不调 leave/、不跳转", async () => {
