@@ -62,7 +62,7 @@ export function GroupPage() {
   const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
   const [conversationRetry, setConversationRetry] = useState(0);
 
-  // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/home) ----
+  // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/group) ----
   const [pullOffset, setPullOffset] = useState(0);
   const [leaving, setLeaving] = useState(false);
   const leavingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,8 +71,8 @@ export function GroupPage() {
     setPullOffset(0);
     setLeaving(true);
     useGroupStore.getState().reset();
-    // 退场动画（顶栏下移回底部，250ms）结束回落 /home
-    leavingTimerRef.current = setTimeout(() => navigate("/home"), 250);
+    // 退场动画（顶栏下移回底部，250ms）结束回到 /group
+    leavingTimerRef.current = setTimeout(() => navigate("/group"), 250);
   }, [navigate]);
 
   useEffect(() => {

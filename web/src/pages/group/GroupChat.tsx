@@ -14,6 +14,7 @@ import { MessageList } from "../../components/chat/MessageList";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { loadHistory, loadMoreHistory, markReadLatest, recallMessage } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
+import { useHomeStore } from "../../stores/home";
 import { useMessageStore } from "../../stores/message";
 import { chatWS } from "../../ws/chat";
 
@@ -62,9 +63,12 @@ export function GroupChat({ groupId }: { groupId: string }) {
 
   const handleHistoryError = useCallback((error: unknown) => {
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
-      useChatStore.getState().closeConversation();
+      useChatStore.getState().removeConversation(groupId);
       useMessageStore.getState().reset();
-      navigate("/home", { replace: true });
+      if (useHomeStore.getState().recentGroupId === groupId) {
+        useHomeStore.getState().setRecentGroup(null);
+      }
+      navigate("/group", { replace: true });
       return;
     }
     setHistoryError(error instanceof Error ? error.message : "加载聊天记录失败");

@@ -20,7 +20,7 @@ export function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) navigate("/", { replace: true });
+    if (isAuthenticated) navigate("/group", { replace: true });
   }, [isAuthenticated, navigate]);
 
   async function onSubmit(e: React.FormEvent) {
@@ -39,7 +39,7 @@ export function RegisterPage() {
         password,
         nickname: nickname.trim() || undefined,
       });
-      navigate("/", { replace: true });
+      navigate("/group", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "注册失败，请稍后重试");
     } finally {

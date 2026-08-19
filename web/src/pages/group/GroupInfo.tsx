@@ -10,7 +10,7 @@
  * 主体性边界：本页只管理工程性群资料与成员结构，不生产任何第一人称/主体语义。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import * as chatApi from "../../api/chat";
 import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
 import type { ConversationMember, ConversationSummary } from "../../api/types";
@@ -18,6 +18,7 @@ import { Avatar } from "../../components/Avatar";
 import { IconBack, IconClose, IconSearch } from "../../components/icons";
 import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
+import { useHomeStore } from "../../stores/home";
 
 const ROLE_LABEL: Record<string, string> = {
   owner: "群主",
@@ -36,6 +37,7 @@ function formatDate(iso: string | undefined): string {
 
 export function GroupInfo({ groupId }: { groupId: string }) {
   const conversations = useChatStore((s) => s.conversations);
+  const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.currentUser);
 
   const group = useMemo(
@@ -146,6 +148,44 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     try { await action(); await reloadGroup(); }
     catch (e) { setManagementError(e instanceof Error ? e.message : "操作失败"); }
     finally { setBusyAction(null); }
+  };
+
+  // 解散群聊：成功后从会话列表移除并清掉最近群记录，再回主页；不触发 reloadGroup（群已删除）
+  const handleDissolve = async () => {
+    if (!window.confirm("确定解散群聊？此操作不可撤销")) return;
+    setBusyAction("dissolve");
+    setManagementError(null);
+    try {
+      await chatApi.dissolveGroup(groupId);
+      useChatStore.getState().removeConversation(groupId);
+      if (useHomeStore.getState().recentGroupId === groupId) {
+        useHomeStore.getState().setRecentGroup(null);
+      }
+      navigate("/group", { replace: true });
+    } catch (e) {
+      setManagementError(e instanceof Error ? e.message : "解散群聊失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  // 退出群聊：成功后从会话列表移除并清掉最近群记录，再回主页
+  const handleLeave = async () => {
+    if (!window.confirm("确定退出群聊？")) return;
+    setBusyAction("leave");
+    setManagementError(null);
+    try {
+      await chatApi.leaveGroup(groupId);
+      useChatStore.getState().removeConversation(groupId);
+      if (useHomeStore.getState().recentGroupId === groupId) {
+        useHomeStore.getState().setRecentGroup(null);
+      }
+      navigate("/group", { replace: true });
+    } catch (e) {
+      setManagementError(e instanceof Error ? e.message : "退出群聊失败");
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   // 可转让候选：排除群主自己（m.role === "owner" 与 m.user.id === currentUser.id 双条件最稳）
@@ -360,11 +400,11 @@ export function GroupInfo({ groupId }: { groupId: string }) {
             </div> : <p className="group-info-placeholder">入群申请审批：暂无待处理申请</p>}
             {isOwner && <>
               <button type="button" className="btn btn-ghost" onClick={() => setTransferOpen(true)}>转让群主</button>
-              <button type="button" className="btn btn-danger" onClick={() => { if (window.confirm("确定解散群聊？此操作不可撤销")) void runManagementAction("dissolve", async () => { await chatApi.dissolveGroup(groupId); window.location.href = "/messages"; }); }}>解散群聊</button>
+              <button type="button" className="btn btn-danger" onClick={() => void handleDissolve()}>{busyAction === "dissolve" ? "解散中…" : "解散群聊"}</button>
             </>}
           </>
         )}
-        {!isOwner && <button type="button" className="btn btn-ghost" onClick={() => { if (window.confirm("确定退出群聊？")) void runManagementAction("leave", async () => { await chatApi.leaveGroup(groupId); window.location.href = "/home"; }); }}>退出群聊</button>}
+        {!isOwner && <button type="button" className="btn btn-ghost" disabled={busyAction !== null} onClick={() => void handleLeave()}>{busyAction === "leave" ? "退出中…" : "退出群聊"}</button>}
       </section>
 
       {transferOpen && (

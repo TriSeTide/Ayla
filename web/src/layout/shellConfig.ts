@@ -18,7 +18,7 @@ export interface ModuleMeta {
 
 /** 一级模块表（文案 + 路由）；视觉顺序见 BottomTabs 的 TAB_ORDER（主页居中） */
 export const PRIMARY_MODULES: ModuleMeta[] = [
-  { key: "home", label: "主页", path: "/home" },
+  { key: "home", label: "主页", path: "/group" },
   { key: "voice", label: "语音", path: "/voice" },
   { key: "live", label: "直播", path: "/live" },
   { key: "posts", label: "帖子", path: "/posts" },
@@ -27,7 +27,7 @@ export const PRIMARY_MODULES: ModuleMeta[] = [
 
 const MODULE_RULES: Array<[ModuleKey, string[]]> = [
   // /group/* 群聊场景归"主页"模块（宽屏主页 = 三列群聊界面）；私聊窗口 /chat/:id 无模块高亮
-  ["home", ["/home", "/group/*"]],
+  ["home", ["/group", "/home", "/group/*"]],
   ["voice", ["/voice", "/voice/*"]],
   ["live", ["/live", "/live/*"]],
   ["posts", ["/posts", "/posts/*"]],
@@ -133,7 +133,7 @@ export function resolveFabAction(pathname: string): FabAction | null {
   // 群聊聊天子界面 FAB 隐藏（需求 §3.5）
   if (matchPath({ path: "/group/:id", end: true }, pathname)) return null;
 
-  if (matchPath({ path: "/home", end: true }, pathname)) {
+  if (matchPath({ path: "/group", end: true }, pathname) || matchPath({ path: "/home", end: true }, pathname)) {
     return { key: "create-group", label: "创建群聊", groupId: null, plannedStep: "F2", handler: "group" };
   }
   if (matchPath({ path: "/voice", end: true }, pathname)) {

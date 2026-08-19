@@ -169,7 +169,7 @@ export function LiveStudioPage() {
         isNarrow={isNarrow}
         channels={ordered}
         onSelect={(id) => navigate(`/live/start/${id}`, { replace: true })}
-        onBack={() => navigate("/live")}
+        onBack={() => navigate(-1)}
         inputEntered={inputEntered}
         showOwnerPanel={Boolean(channel?.is_owner)}
         activityRoute={`/live/start/${channelId}`}

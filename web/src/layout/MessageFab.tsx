@@ -29,7 +29,7 @@ export function MessageFab({
         className="message-fab"
         style={style}
         aria-label="返回主页"
-        onClick={() => navigate("/home")}
+        onClick={() => navigate("/group")}
       >
         <IconHome width={24} height={24} />
       </button>

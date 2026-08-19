@@ -1,6 +1,6 @@
 /**
  * 登录页：居中单卡悬浮极光之上。
- * 逻辑不变：登录成功回跳 next；错误原样展示（认证端点 noRetry401）。
+ * 逻辑不变：登录成功回跳 next；无 next 时进入 /group。
  */
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -16,7 +16,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const next = new URLSearchParams(location.search).get("next") ?? "/";
+  const next = new URLSearchParams(location.search).get("next") ?? "/group";
   useEffect(() => {
     if (isAuthenticated) navigate(next, { replace: true });
   }, [isAuthenticated, navigate, next]);

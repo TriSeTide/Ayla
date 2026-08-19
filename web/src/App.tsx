@@ -6,7 +6,7 @@
  * - 一级路由：/home /voice /live /posts /games /messages /search /profile /favorites
  *   /group/:id[/*]；私聊窗口 /chat/:conversationId（PrivateChatPage，
  *   群聊会话重定向 /group/:id），私聊入口在消息中心 /messages 私信 tab。
- * - / 重定向 /home（窄屏主页；宽屏 /home 重定向到最近群）。
+ * - / 重定向 /group；/home 作为兼容入口重定向 /group。
  */
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -42,8 +42,9 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route path="/home" element={<HomePage />} />
+        <Route path="/" element={<Navigate to="/group" replace />} />
+        <Route path="/group" element={<HomePage />} />
+        <Route path="/home" element={<Navigate to="/group" replace />} />
         <Route path="/voice" element={<VoiceHubPage />} />
         <Route path="/voice/:channelId" element={<VoiceHubPage />} />
         <Route path="/live" element={<LiveHubPage />} />
@@ -64,7 +65,7 @@ export default function App() {
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/group" replace />} />
     </Routes>
   );
 }

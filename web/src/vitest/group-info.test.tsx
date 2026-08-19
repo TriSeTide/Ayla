@@ -5,12 +5,13 @@
  * - 群头像上传（M5-2.1）：owner 可换、成员不可；选择→预览→保存上传+PATCH→store 更新；失败重试。
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary, ConversationMember, UserPublic } from "../api/types";
 import { GroupInfo } from "../pages/group/GroupInfo";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
+import { useHomeStore } from "../stores/home";
 import * as chatApi from "../api/chat";
 import * as mediaApi from "../api/media";
 
@@ -297,5 +298,48 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
     const dialog = screen.getByRole("dialog", { name: "转让群主" });
     expect(within(dialog).getByText("暂无其他成员可转让")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "确认转让" })).toBeDisabled();
+  });
+});
+
+describe("GroupInfo 解散群聊与退出群聊", () => {
+  beforeEach(() => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    useHomeStore.setState({ layout: "card", recentGroupId: "1" });
+    useChatStore.setState({ conversations: [conv("owner")] });
+  });
+  afterEach(() => {
+    vi.mocked(window.confirm).mockRestore();
+  });
+
+  function renderInfoRoutes() {
+    return render(
+      <MemoryRouter initialEntries={["/group/1/info"]}>
+        <Routes>
+          <Route path="/group/:id/info" element={<GroupInfo groupId="1" />} />
+          <Route path="/group" element={<div>主页</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("解散成功：从会话列表移除、清最近群并跳转 /group 主页", async () => {
+    renderInfoRoutes();
+    fireEvent.click(screen.getByRole("button", { name: "解散群聊" }));
+    await waitFor(() => expect(chatApi.dissolveGroup).toHaveBeenCalledWith("1"));
+    // 会话已从 store 移除
+    expect(useChatStore.getState().conversations.find((c) => c.id === "1")).toBeUndefined();
+    // 最近群被清空（避免宽屏 /group redirect 回已删群导致死循环）
+    expect(useHomeStore.getState().recentGroupId).toBeNull();
+    // 跳转到主页
+    expect(screen.getByText("主页")).toBeInTheDocument();
+  });
+
+  it("确认取消则不执行解散，也不跳转", () => {
+    vi.mocked(window.confirm).mockReturnValue(false);
+    renderInfoRoutes();
+    fireEvent.click(screen.getByRole("button", { name: "解散群聊" }));
+    expect(chatApi.dissolveGroup).not.toHaveBeenCalled();
+    expect(useChatStore.getState().conversations.some((c) => c.id === "1")).toBe(true);
+    expect(screen.queryByText("主页")).not.toBeInTheDocument();
   });
 });

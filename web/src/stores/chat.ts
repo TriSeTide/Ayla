@@ -27,6 +27,8 @@ interface ChatState {
   setError: (err: string | null) => void;
   openConversation: (id: string) => void;
   closeConversation: () => void;
+  /** 从会话列表中移除（解散群/退出群/被移除时），若为当前会话一并置空 */
+  removeConversation: (id: string) => void;
   /** 收到未打开会话的 message.new → 未读数 +1（打开则置 0） */
   bumpUnread: (convId: string) => void;
   clearUnread: (convId: string) => void;
@@ -75,6 +77,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ activeConversationId: id });
   },
   closeConversation: () => set({ activeConversationId: null }),
+  removeConversation: (id) =>
+    set((state) => ({
+      conversations: state.conversations.filter((c) => c.id !== id),
+      activeConversationId: state.activeConversationId === id ? null : state.activeConversationId,
+    })),
 
   bumpUnread: (convId) =>
     set((state) => {

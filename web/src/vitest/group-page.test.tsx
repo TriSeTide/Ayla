@@ -69,6 +69,7 @@ function renderGroup(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/home" element={<div>主页内容</div>} />
+        <Route path="/group" element={<div>主页内容</div>} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
       </Routes>

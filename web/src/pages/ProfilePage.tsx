@@ -135,7 +135,7 @@ export function ProfilePage() {
           <button
             type="button"
             className="msg-action-btn"
-            onClick={() => navigate("/home")}
+            onClick={() => navigate("/group")}
             aria-label="返回主页"
           >
             <IconBack width={14} height={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
