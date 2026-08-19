@@ -2,10 +2,10 @@
  * PostDetailPage 测试 —— 编辑帖子可见范围（Bug #9 回归）。
  *
  * 断言：
- * - 编辑面板用 VisibilitySelector（radio 三选 + 群搜索 + 群多选），不再是无群选择的 select；
+ * - 编辑面板用 VisibilitySelector（checkbox 三选 + 群搜索 + 群多选），不再是无群选择的 select；
  * - 保存时 updatePost 携带 allowed_group_ids；
  * - group 可见但未选任何群时阻止保存并提示"请至少选择一个群"；
- * - 群内帖子（post.group 有值）编辑时公开/好友单选被禁用，且自动勾选所属群。
+ * - 群内帖子（post.group 有值）编辑时默认指定群可见，且自动勾选所属群。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -103,14 +103,14 @@ describe("PostDetailPage 编辑可见范围", () => {
     renderDetail(makePost());
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
 
-    // VisibilitySelector 渲染：radio 三选（不再是无群选择的普通 select）
-    expect(screen.getByRole("radio", { name: /公开/ })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /好友可见/ })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /指定群可见/ })).toBeInTheDocument();
+    // VisibilitySelector 渲染：checkbox 三选（不再是无群选择的普通 select）
+    expect(screen.getByRole("checkbox", { name: "公开" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "好友可见" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "指定群可见" })).not.toBeChecked();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 
     // 切到"指定群可见" → 出现群搜索与群多选
-    fireEvent.click(screen.getByRole("radio", { name: /指定群可见/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "指定群可见" }));
     expect(screen.getByLabelText("搜索群")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "测试群" }));
 
@@ -127,22 +127,30 @@ describe("PostDetailPage 编辑可见范围", () => {
     renderDetail(makePost());
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
 
-    fireEvent.click(screen.getByRole("radio", { name: /指定群可见/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "指定群可见" }));
     fireEvent.click(screen.getByRole("button", { name: "重新发布" }));
 
     expect(await screen.findByText("请至少选择一个群")).toBeInTheDocument();
     expect(postsApi.updatePost).not.toHaveBeenCalled();
   });
 
-  it("群内帖子编辑时公开/好友单选禁用，所属群自动勾选", async () => {
+  it("群内帖子编辑时默认指定群可见，所属群自动勾选并随保存携带", async () => {
     renderDetail(
       makePost({ group: "g1", group_name: "测试群", visibility: "group", allowed_group_ids: ["g1"] }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
 
-    expect(screen.getByRole("radio", { name: /公开/ })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: /好友可见/ })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: /指定群可见/ })).toBeEnabled();
+    // 初始即勾选「指定群可见」并自动勾选所属群
+    expect(screen.getByRole("checkbox", { name: "指定群可见" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "测试群" })).toBeChecked();
+
+    // 直接重新发布：保持群可见 + 白名单
+    fireEvent.click(screen.getByRole("button", { name: "重新发布" }));
+    await waitFor(() => {
+      expect(postsApi.updatePost).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ visibility: "group", allowed_group_ids: ["g1"] }),
+      );
+    });
   });
 });

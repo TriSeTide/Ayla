@@ -116,7 +116,7 @@ describe("resolveFabAction", () => {
     expect(resolveFabAction("/posts")?.key).toBe("create-post");
     expect(resolveFabAction("/games")?.key).toBe("create-game");
 
-    expect(resolveFabAction("/group/g1/voice")).toBeNull();
+    expect(resolveFabAction("/group/g1/voice")).toMatchObject({ key: "group-voice", groupId: "g1" });
     expect(resolveFabAction("/group/g1/live")).toBeNull();
     // 群内帖子发帖走底部输入框（R-P2 关键差异），FAB 隐藏
     expect(resolveFabAction("/group/g1/posts")).toBeNull();
@@ -207,10 +207,12 @@ describe("CreateFab", () => {
     expect(screen.queryByRole("menuitem", { name: "创建群聊" })).not.toBeInTheDocument();
   });
 
-  it("群内语音和群内直播不显示右下角加号", () => {
+  it("群内语音有创建 FAB（eb8e5ff 恢复 group-voice handler）", () => {
     renderShell("/group/g1/voice", true);
-    expect(screen.queryByRole("button", { name: /创建|开播|发帖/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建群内语音房" })).toBeInTheDocument();
+  });
 
+  it("群内直播不显示右下角加号（创建入口在直播侧栏）", () => {
     renderShell("/group/g1/live", true);
     expect(screen.queryByRole("button", { name: /创建|开播|发帖/ })).not.toBeInTheDocument();
   });

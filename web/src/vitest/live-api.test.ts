@@ -77,7 +77,7 @@ describe("live api", () => {
     expect(list[0].id).toBe(7);
 
     mockFetchOnce([]);
-    await listLiveChannels(true);
+    await listLiveChannels({ onlyLive: true });
     expect(lastFetchUrl()).toBe("/api/v1/live/channels/?only_live=1");
   });
 

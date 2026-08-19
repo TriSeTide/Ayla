@@ -74,7 +74,7 @@ export function ProfilePage() {
     Promise.all([
       postsApi.listPosts({ scope: "mine", limit: 5 }).then((p) => setMyPosts(p.results)),
       liveApi.listLiveChannels().then((l) => setMyLives(l.filter((c) => c.owner_id === currentUser.id))),
-      boardgameApi.listGameRooms(true).then(setMyGames),
+      boardgameApi.listGameRooms({ mine: true }).then(setMyGames),
     ]).catch((e) => setContentError(e instanceof Error ? e.message : "加载我的内容失败"));
   }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

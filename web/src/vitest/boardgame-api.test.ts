@@ -26,7 +26,7 @@ function calledUrl(call = 0): string {
 
 describe("boardgame API", () => {
   it("listGameRooms mine → ?mine=1", async () => {
-    await boardgameApi.listGameRooms(true);
+    await boardgameApi.listGameRooms({ mine: true });
     expect(calledUrl()).toContain("/boardgame/rooms/?mine=1");
   });
 
