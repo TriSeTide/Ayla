@@ -157,11 +157,21 @@ class MediaContentView(APIView):
         key = media.storage_path
         size = store.head(key)
         etag = f'"{media.content_hash}"'
+        
+        # 304 Not Modified 支持：客户端提供 If-None-Match 且匹配 ETag
+        if_none_match = request.headers.get("If-None-Match")
+        if if_none_match and if_none_match == etag:
+            resp = HttpResponse(status=status.HTTP_304_NOT_MODIFIED)
+            resp["ETag"] = etag
+            resp["Cache-Control"] = "private, max-age=3600"
+            return resp
+        
         headers = {
             "Content-Type": media.mime_type or "application/octet-stream",
             "Accept-Ranges": "bytes",
             "ETag": etag,
-            "Cache-Control": "private, no-store",
+            # 优化：允许浏览器缓存 1 小时（private 确保不进入共享缓存）
+            "Cache-Control": "private, max-age=3600",
         }
 
         range_header = request.headers.get("Range")
@@ -210,7 +220,9 @@ def _derivative_response(media, key, content_type, request):
         return Response({"detail": "media_not_ready"}, status=status.HTTP_404_NOT_FOUND)
     data = store.get(key)
     resp = HttpResponse(data, content_type=content_type)
-    resp["Cache-Control"] = "private, no-store"
+    # 优化：缩略图/波形图缓存 2 小时（派生资源更稳定）
+    resp["Cache-Control"] = "private, max-age=7200"
+    resp["ETag"] = f'"{media.content_hash}-{key.split("/")[-1]}"'
     return resp
 
 
