@@ -139,6 +139,11 @@ class GroupCreateView(APIView):
         )
         for u in users:
             ConversationMember.objects.create(conversation=conv, user=u)
+        
+        # 推送群创建事件给所有成员（包括创建者）
+        all_member_ids = [request.user.id] + [u.id for u in users]
+        services.broadcast_group_created(conv, all_member_ids)
+        
         data = ConversationSerializer(conv, context={"request": request}).data
         return Response(data, status=status.HTTP_201_CREATED)
 
@@ -403,6 +408,8 @@ class MemberAddView(APIView):
             )
             if created:
                 added += 1
+                # 通知新成员群加入成功
+                services.broadcast_group_joined(conv, u.id)
         conv.refresh_from_db()
         return Response(ConversationSerializer(conv, context={"request": request}).data)
 
@@ -635,6 +642,8 @@ class GroupJoinRequestActionView(APIView):
         action = ser.validated_data["action"]
         if action == "accept":
             services.accept_join_request(req, request.user)
+            # 通知新成员群加入成功
+            services.broadcast_group_joined(req.conversation, req.applicant_id)
         else:
             services.reject_join_request(req, request.user)
         # 审批成功后通知申请人（用户级广播，事务外）
@@ -727,6 +736,8 @@ class GroupInviteActionView(APIView):
         action = ser.validated_data["action"]
         if action == "accept":
             services.accept_group_invite(inv, request.user)
+            # 通知新成员群加入成功
+            services.broadcast_group_joined(inv.conversation, request.user.id)
         else:
             services.reject_group_invite(inv, request.user)
         return Response(

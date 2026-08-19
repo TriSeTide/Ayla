@@ -25,6 +25,11 @@ from apps.media.serializers import MediaObjectSerializer
 from . import livekit, services
 from .models import VoiceChannel, VoiceChannelMember, VoiceChatMessage
 from .serializers import VoiceChannelMemberSerializer, VoiceChannelSerializer
+from .services import (
+    broadcast_channel_created_to_group,
+    broadcast_channel_created_to_user,
+    broadcast_channel_deleted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +132,14 @@ class ChannelListView(APIView):
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 推送给相关用户
+        if ch.visibility == "group" and ch.group:
+            broadcast_channel_created_to_group(ch, ch.group)
+        
+        # 推给创建者本人
+        broadcast_channel_created_to_user(ch, request.user)
+        
         return Response(
             VoiceChannelSerializer(ch).data, status=status.HTTP_201_CREATED
         )
@@ -384,7 +397,18 @@ class ChannelDeleteView(APIView):
             return _not_found()
         if not services.can_manage_channel(ch, request.user):
             return _forbidden("仅房主可删除")
+        
+        # 在删除前保存信息
+        saved_channel_id = ch.id
+        saved_visibility = ch.visibility
+        saved_group_id = ch.group_id
+        
+        # 删除
         ch.delete()
+        
+        # 推送删除事件
+        broadcast_channel_deleted(saved_channel_id, saved_visibility, saved_group_id)
+        
         return Response({"deleted": True})
 
 

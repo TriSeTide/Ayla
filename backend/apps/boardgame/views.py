@@ -105,6 +105,19 @@ class RoomListView(APIView):
             )
         except ValueError as exc:
             return _bad_request(str(exc))
+        
+        # 推送桌游房创建事件
+        if room.group:
+            services.broadcast_room_created_to_group(room, room.group)
+        
+        # 处理 allowed_groups：推送给所有白名单群
+        if room.allowed_groups.exists():
+            for allowed_group in room.allowed_groups.all():
+                services.broadcast_room_created_to_group(room, allowed_group)
+        
+        # 推送给创建者本人
+        services.broadcast_room_created_to_user(room, request.user)
+        
         return Response(
             GameRoomSerializer(room, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -130,7 +143,29 @@ class RoomDetailView(APIView):
             return _not_found("房间不存在")
         if room.owner_id != request.user.id:
             return _forbidden("仅房主可删除")
+        
+        # 删除前保存必要信息用于推送
+        saved_room_id = room.id
+        group_id = room.group_id
+        owner_id = room.owner_id
+        
+        # 收集 allowed_groups 的 id 列表
+        allowed_group_ids = list(room.allowed_groups.values_list("id", flat=True))
+        
+        # 删除房间
         room.delete()
+        
+        # 推送删除事件给群成员
+        if group_id:
+            services.broadcast_room_deleted(saved_room_id, group_id, owner_id)
+        else:
+            # 无归属群时仍推送给房主
+            services.broadcast_room_deleted(saved_room_id, None, owner_id)
+        
+        # 推送给所有白名单群
+        for gid in allowed_group_ids:
+            services.broadcast_room_deleted(saved_room_id, gid, None)
+        
         return Response({"deleted": True})
 
 

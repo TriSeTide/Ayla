@@ -16,6 +16,7 @@ import secrets
 
 from asgiref.sync import async_to_sync
 from channels.exceptions import ChannelFull
+from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -301,3 +302,87 @@ async def abroadcast_danmaku(dm: Danmaku) -> None:
         logger.warning("channel full, dropping danmaku for live %s", dm.channel_id)
     except Exception:
         logger.exception("danmaku group_send failed for live %s", dm.channel_id)
+
+
+# ---------- 直播间实时推送 ----------
+
+def broadcast_channel_created_to_group(channel, group):
+    """直播间创建推给群成员"""
+    try:
+        layer = get_channel_layer()
+        async_to_sync(layer.group_send)(
+            f"chat_conv_{group.id}",
+            {
+                "type": "live.channel.created",
+                "channel_id": channel.id,
+                "name": channel.title,
+                "owner_id": str(channel.owner_id),
+                "visibility": channel.visibility,
+                "group_id": str(channel.group_id) if channel.group_id else None,
+                "status": channel.status,
+                "created_at": channel.created_at.isoformat(),
+            },
+        )
+    except ChannelFull:
+        logger.warning("live.channel.created broadcast dropped")
+    except Exception:
+        logger.exception("live.channel.created broadcast failed")
+
+
+def broadcast_channel_created_to_user(channel, user):
+    """直播间创建推给创建者"""
+    try:
+        layer = get_channel_layer()
+        async_to_sync(layer.group_send)(
+            f"chat_user_{user.id}",
+            {
+                "type": "live.channel.created",
+                "channel_id": channel.id,
+                "name": channel.title,
+                "owner_id": str(channel.owner_id),
+                "visibility": channel.visibility,
+                "group_id": str(channel.group_id) if channel.group_id else None,
+                "status": channel.status,
+                "created_at": channel.created_at.isoformat(),
+            },
+        )
+    except ChannelFull:
+        logger.warning("live.channel.created user broadcast dropped")
+    except Exception:
+        logger.exception("live.channel.created user broadcast failed")
+
+
+def broadcast_channel_status_changed(channel, new_status):
+    """直播间状态变化推送"""
+    try:
+        layer = get_channel_layer()
+        event = {
+            "type": "live.channel.status.changed",
+            "channel_id": channel.id,
+            "status": new_status,
+            "changed_at": timezone.now().isoformat(),
+        }
+        if channel.visibility == "group" and channel.group_id:
+            async_to_sync(layer.group_send)(f"chat_conv_{channel.group_id}", event)
+        # 也推给创建者
+        async_to_sync(layer.group_send)(f"chat_user_{channel.owner_id}", event)
+    except ChannelFull:
+        logger.warning("live.channel.status.changed broadcast dropped")
+    except Exception:
+        logger.exception("live.channel.status.changed broadcast failed")
+
+
+def broadcast_channel_deleted(channel_id, visibility, group_id=None):
+    """直播间删除推送"""
+    try:
+        layer = get_channel_layer()
+        event = {
+            "type": "live.channel.deleted",
+            "channel_id": channel_id,
+        }
+        if visibility == "group" and group_id:
+            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
+    except ChannelFull:
+        logger.warning("live.channel.deleted broadcast dropped")
+    except Exception:
+        logger.exception("live.channel.deleted broadcast failed")

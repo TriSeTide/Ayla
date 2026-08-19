@@ -15,6 +15,10 @@ import { WS_BASE_URL } from "./presence";
 import type { ChatMessage, ChatServerFrame } from "../api/types";
 import { useRealtimeStore } from "../stores/realtime";
 import { useNoticeStore } from "../stores/notices";
+import { useVoiceStore } from "../stores/voice";
+import { useLiveStore } from "../stores/live";
+import { useBoardgameStore } from "../stores/boardgame";
+import { usePostsStore } from "../stores/posts";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -221,6 +225,161 @@ export class ChatWSClient {
       case "group.member.left": {
         const data = notificationFrame.data ?? {};
         notices.push({ kind: "group.member.left", title: "群成员已离开", detail: `${data.conversation_title ?? "群聊"}：${data.member_name ?? "一位成员"} 已离开` });
+        break;
+      }
+      case "group.created": {
+        const d = frame as import("../api/types").GroupCreatedFrame;
+        chat.upsertConversation({
+          id: d.conversation.id,
+          type: "group",
+          title: d.conversation.title,
+          announcement: d.conversation.announcement,
+          avatar: "",
+          owner_id: d.conversation.owner_id,
+          members: [],
+          my_role: null,
+          member_count: 0,
+          unread_count: 0,
+          created_at: d.conversation.created_at,
+          peer: null,
+        });
+        break;
+      }
+      case "group.joined": {
+        const d = frame as import("../api/types").GroupJoinedFrame;
+        // group.joined 已按用户组推送给新成员，只需加入会话列表。
+        chat.upsertConversation({
+          id: d.conversation.id,
+          type: "group",
+          title: d.conversation.title,
+          announcement: d.conversation.announcement,
+          avatar: "",
+          owner_id: d.conversation.owner_id,
+          members: [],
+          my_role: "member",
+          member_count: 0,
+          unread_count: 0,
+          created_at: d.conversation.created_at,
+          peer: null,
+        });
+        break;
+      }
+      case "voice.channel.created": {
+        const d = frame.data;
+        useVoiceStore.getState().upsertChannel({
+          id: d.channel_id,
+          name: d.name,
+          room_name: d.name,
+          owner_id: d.owner_id,
+          visibility: d.visibility,
+          group: d.group_id,
+          group_name: null,
+          member_count: 0,
+          mine: false,
+          created_at: d.created_at,
+        });
+        break;
+      }
+      case "voice.channel.deleted": {
+        const d = frame.data;
+        useVoiceStore.getState().removeChannel(d.channel_id);
+        break;
+      }
+      case "live.channel.created": {
+        const d = frame.data;
+        useLiveStore.getState().upsertChannel({
+          id: d.channel_id,
+          title: d.title,
+          owner_id: d.owner_id,
+          owner_nickname: null,
+          is_owner: false,
+          visibility: d.visibility,
+          group: d.group_id,
+          group_name: null,
+          status: d.status,
+          stream_key: null,
+          rtmp_url: null,
+          hls_url: "",
+          flv_url: "",
+          started_at: null,
+          ended_at: null,
+          created_at: d.created_at,
+        });
+        break;
+      }
+      case "live.channel.status.changed": {
+        const d = frame.data;
+        useLiveStore.getState().updateChannelStatus(d.channel_id, d.status);
+        break;
+      }
+      case "live.channel.deleted": {
+        const d = frame.data;
+        useLiveStore.getState().removeChannel(d.channel_id);
+        break;
+      }
+      case "post.created": {
+        const d = frame.post;
+        usePostsStore.getState().upsertPost({
+          id: Number(d.id),
+          author: {
+            id: d.owner_id,
+            username: "",
+            nickname: "",
+            avatar: "",
+            signature: "",
+            status: "online",
+            online: false,
+            date_joined: "",
+          },
+          author_id: d.owner_id,
+          title: d.title,
+          body: d.body,
+          visibility: d.visibility as "public" | "friends" | "group",
+          group: d.group_id,
+          group_name: null,
+          images: [],
+          comment_count: 0,
+          is_author: false,
+          created_at: d.created_at,
+          updated_at: d.created_at,
+        });
+        break;
+      }
+      case "post.deleted": {
+        usePostsStore.getState().removePost(Number(frame.post_id));
+        break;
+      }
+      case "boardgame.room.created": {
+        const d = frame.room;
+        useBoardgameStore.getState().upsertRoom({
+          id: Number(d.id),
+          name: d.name,
+          owner: {
+            id: d.owner_id,
+            username: "",
+            nickname: "",
+            avatar: "",
+            signature: "",
+            status: "online",
+            online: false,
+            date_joined: "",
+          },
+          owner_id: d.owner_id,
+          visibility: d.visibility as "public" | "friends" | "group",
+          group: d.group_id,
+          group_name: null,
+          game_type: d.game_type,
+          status: d.status as "waiting" | "playing" | "ended",
+          members: [],
+          member_count: 0,
+          is_owner: false,
+          is_member: false,
+          created_at: d.created_at,
+        });
+        break;
+      }
+      case "boardgame.room.deleted": {
+        useBoardgameStore.getState().removeRoom(Number(frame.room_id));
         break;
       }
       case "elysia.reply": {

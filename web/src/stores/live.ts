@@ -10,6 +10,7 @@ import { create } from "zustand";
 import type {
   DanmakuItem,
   LiveChannelDescriptor,
+  LiveChannelStatus,
   LiveSrsStatus,
 } from "../api/types";
 
@@ -27,13 +28,17 @@ export interface LiveRoomState {
 interface LiveState {
   channels: LiveChannelDescriptor[];
   channelsLoading: boolean;
+  error: string | null;
   current: LiveRoomState;
   /** 弹幕 WS 连接状态（供 UI 展示） */
   wsConnection: "connecting" | "online" | "offline";
+  lastFetched: number | null;
 
   setChannels: (list: LiveChannelDescriptor[]) => void;
   setChannelsLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
   upsertChannel: (channel: LiveChannelDescriptor) => void;
+  updateChannelStatus: (channelId: number, status: string) => void;
   removeChannel: (channelId: number) => void;
 
   setCurrentChannel: (channel: LiveChannelDescriptor | null) => void;
@@ -76,11 +81,14 @@ function normalizeDanmaku(list: DanmakuItem[]): DanmakuItem[] {
 export const useLiveStore = create<LiveState>((set) => ({
   channels: [],
   channelsLoading: false,
+  error: null,
   current: initialRoom,
   wsConnection: "offline",
+  lastFetched: null,
 
-  setChannels: (list) => set({ channels: list }),
+  setChannels: (list) => set({ channels: list, channelsLoading: false, error: null, lastFetched: Date.now() }),
   setChannelsLoading: (loading) => set({ channelsLoading: loading }),
+  setError: (error) => set({ error, channelsLoading: false }),
 
   upsertChannel: (channel) =>
     set((state) => {
@@ -91,6 +99,13 @@ export const useLiveStore = create<LiveState>((set) => ({
           : [...state.channels, channel];
       return { channels };
     }),
+
+  updateChannelStatus: (channelId, status) =>
+    set((state) => ({
+      channels: state.channels.map((c) =>
+        c.id === channelId ? { ...c, status: status as LiveChannelStatus } : c
+      ),
+    })),
 
   removeChannel: (channelId) =>
     set((state) => ({
@@ -130,7 +145,16 @@ export const useLiveStore = create<LiveState>((set) => ({
     set({
       channels: [],
       channelsLoading: false,
+      error: null,
       current: initialRoom,
       wsConnection: "offline",
+      lastFetched: null,
     }),
 }));
+
+/** 判断 live store 数据是否过期（默认 60 秒） */
+export function isLiveStale(maxAgeMs = 60_000): boolean {
+  const { lastFetched } = useLiveStore.getState();
+  if (!lastFetched) return true;
+  return Date.now() - lastFetched > maxAgeMs;
+}

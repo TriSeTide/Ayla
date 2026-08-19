@@ -874,3 +874,142 @@ async def abroadcast_group_invite_new(
             "created_at": created_at.isoformat() if created_at else None,
         },
     )
+
+
+# ---------- 群列表实时推送 ----------
+
+def broadcast_group_created(conversation, member_ids):
+    """群创建后通知所有成员（包括创建者）。
+    
+    Args:
+        conversation: 新创建的群会话对象
+        member_ids: 所有成员的用户 ID 列表
+    """
+    from channels.layers import get_channel_layer
+    
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    
+    # 简化的群信息（避免循环依赖和序列化问题）
+    event = {
+        "type": "group.created",
+        "conversation": {
+            "id": str(conversation.id),
+            "type": conversation.type,
+            "title": conversation.title,
+            "owner_id": str(conversation.owner_id),
+            "announcement": conversation.announcement or "",
+            "created_at": conversation.created_at.isoformat(),
+        },
+    }
+    
+    for user_id in member_ids:
+        try:
+            async_to_sync(layer.group_send)(f"chat_user_{user_id}", event)
+        except ChannelFull:
+            logger.warning(
+                "Channel layer full when broadcasting group.created to user %s", user_id
+            )
+        except Exception:
+            logger.exception(
+                "Failed to broadcast group.created to user %s", user_id
+            )
+
+
+async def abroadcast_group_created(conversation, member_ids):
+    """异步版本：群创建后通知所有成员。"""
+    from channels.layers import get_channel_layer
+    
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    
+    event = {
+        "type": "group.created",
+        "conversation": {
+            "id": str(conversation.id),
+            "type": conversation.type,
+            "title": conversation.title,
+            "owner_id": str(conversation.owner_id),
+            "announcement": conversation.announcement or "",
+            "created_at": conversation.created_at.isoformat(),
+        },
+    }
+    
+    for user_id in member_ids:
+        try:
+            await layer.group_send(f"chat_user_{user_id}", event)
+        except ChannelFull:
+            logger.warning(
+                "Channel layer full when broadcasting group.created to user %s", user_id
+            )
+        except Exception:
+            logger.exception(
+                "Failed to broadcast group.created to user %s", user_id
+            )
+
+
+def broadcast_group_joined(conversation, user_id):
+    """用户加入群后通知该用户更新群列表。
+    
+    Args:
+        conversation: 群会话对象
+        user_id: 新加入的用户 ID
+    """
+    from channels.layers import get_channel_layer
+    
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    
+    event = {
+        "type": "group.joined",
+        "conversation": {
+            "id": str(conversation.id),
+            "type": conversation.type,
+            "title": conversation.title,
+            "owner_id": str(conversation.owner_id),
+            "announcement": conversation.announcement or "",
+            "created_at": conversation.created_at.isoformat(),
+        },
+    }
+    
+    try:
+        async_to_sync(layer.group_send)(f"chat_user_{user_id}", event)
+    except ChannelFull:
+        logger.warning(
+            "Channel layer full when broadcasting group.joined to user %s", user_id
+        )
+    except Exception:
+        logger.exception("Failed to broadcast group.joined to user %s", user_id)
+
+
+async def abroadcast_group_joined(conversation, user_id):
+    """异步版本：用户加入群后通知该用户。"""
+    from channels.layers import get_channel_layer
+    
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    
+    event = {
+        "type": "group.joined",
+        "conversation": {
+            "id": str(conversation.id),
+            "type": conversation.type,
+            "title": conversation.title,
+            "owner_id": str(conversation.owner_id),
+            "announcement": conversation.announcement or "",
+            "created_at": conversation.created_at.isoformat(),
+        },
+    }
+    
+    try:
+        await layer.group_send(f"chat_user_{user_id}", event)
+    except ChannelFull:
+        logger.warning(
+            "Channel layer full when broadcasting group.joined to user %s", user_id
+        )
+    except Exception:
+        logger.exception("Failed to broadcast group.joined to user %s", user_id)

@@ -17,6 +17,7 @@ interface PostsState {
   scope: PostScope;
   /** postId(字符串) → favoriteId；收藏态判断 + 取消收藏定位 */
   favoriteByPostId: Record<string, number>;
+  lastFetched: number | null;
 
   /** 首屏（重置列表） */
   setPage: (posts: Post[], nextCursor: string | null, hasMore: boolean) => void;
@@ -30,6 +31,12 @@ interface PostsState {
   setFavorite: (postId: string, favoriteId: number | null) => void;
   /** 批量载入我的收藏（拉 GET /favorites/?type=post 后铺底） */
   loadFavorites: (favorites: Array<{ id: number; target_id: string }>) => void;
+  
+  /** WebSocket 实时更新：插入或更新帖子（已存在则更新，不存在则插入到列表头部） */
+  upsertPost: (post: Post) => void;
+  /** WebSocket 实时更新：从列表中移除帖子 */
+  removePost: (postId: number) => void;
+  
   reset: () => void;
 }
 
@@ -41,9 +48,10 @@ export const usePostsStore = create<PostsState>((set) => ({
   error: null,
   scope: "feed",
   favoriteByPostId: {},
+  lastFetched: null,
 
   setPage: (posts, nextCursor, hasMore) =>
-    set({ posts, nextCursor, hasMore, loading: false, error: null }),
+    set({ posts, nextCursor, hasMore, loading: false, error: null, lastFetched: Date.now() }),
 
   appendPage: (posts, nextCursor, hasMore) =>
     set((state) => {
@@ -71,6 +79,27 @@ export const usePostsStore = create<PostsState>((set) => ({
       return { favoriteByPostId: map };
     }),
 
+  upsertPost: (post) =>
+    set((state) => {
+      const seen = new Set(state.posts.map((p) => p.id));
+      if (seen.has(post.id)) {
+        // 已存在：更新
+        return {
+          posts: state.posts.map((p) => (p.id === post.id ? post : p)),
+        };
+      } else {
+        // 不存在：插入到列表头部（最新优先）
+        return {
+          posts: [post, ...state.posts],
+        };
+      }
+    }),
+
+  removePost: (postId) =>
+    set((state) => ({
+      posts: state.posts.filter((p) => p.id !== postId),
+    })),
+
   reset: () =>
     set({
       posts: [],
@@ -80,5 +109,13 @@ export const usePostsStore = create<PostsState>((set) => ({
       error: null,
       scope: "feed",
       favoriteByPostId: {},
+      lastFetched: null,
     }),
 }));
+
+/** 判断 posts store 数据是否过期（默认 60 秒） */
+export function isPostsStale(maxAgeMs = 60_000): boolean {
+  const { lastFetched } = usePostsStore.getState();
+  if (!lastFetched) return true;
+  return Date.now() - lastFetched > maxAgeMs;
+}

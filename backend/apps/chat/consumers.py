@@ -292,3 +292,105 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 },
             }
         )
+
+    # ---------- 语音房创建/删除推送 ----------
+
+    async def voice_channel_created(self, event):
+        """语音房创建推送"""
+        await self.send_json(
+            {
+                "type": "voice.channel.created",
+                "data": {
+                    "channel_id": event["channel_id"],
+                    "name": event["name"],
+                    "owner_id": event["owner_id"],
+                    "visibility": event["visibility"],
+                    "group_id": event.get("group_id"),
+                    "created_at": event["created_at"],
+                },
+            }
+        )
+
+    async def voice_channel_deleted(self, event):
+        """语音房删除推送"""
+        await self.send_json(
+            {
+                "type": "voice.channel.deleted",
+                "data": {
+                    "channel_id": event["channel_id"],
+                },
+            }
+        )
+
+    # ---------- 直播间实时推送 ----------
+
+    async def live_channel_created(self, event):
+        """直播间创建推送"""
+        await self.send_json(
+            {
+                "type": "live.channel.created",
+                "data": {
+                    "channel_id": event["channel_id"],
+                    "name": event["name"],
+                    "owner_id": event["owner_id"],
+                    "visibility": event["visibility"],
+                    "group_id": event.get("group_id"),
+                    "status": event["status"],
+                    "created_at": event["created_at"],
+                },
+            }
+        )
+
+    async def live_channel_status_changed(self, event):
+        """直播间状态变化推送"""
+        await self.send_json(
+            {
+                "type": "live.channel.status.changed",
+                "data": {
+                    "channel_id": event["channel_id"],
+                    "status": event["status"],
+                    "changed_at": event["changed_at"],
+                },
+            }
+        )
+
+    async def live_channel_deleted(self, event):
+        """直播间删除推送"""
+        await self.send_json(
+            {
+                "type": "live.channel.deleted",
+                "data": {
+                    "channel_id": event["channel_id"],
+                },
+            }
+        )
+
+    # ---------- 帖子实时推送 ----------
+
+    async def post_created(self, event):
+        """接收帖子创建推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    async def post_deleted(self, event):
+        """接收帖子删除推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    # ---------- 桌游房实时推送 ----------
+
+    async def boardgame_room_created(self, event):
+        """接收桌游房创建推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    async def boardgame_room_deleted(self, event):
+        """接收桌游房删除推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    # ---------- 群列表实时推送 ----------
+
+    async def group_created(self, event):
+        """接收群创建推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    async def group_joined(self, event):
+        """接收群加入推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)

@@ -280,3 +280,71 @@ async def abroadcast_voice_state(channel: VoiceChannel, user, state: str) -> Non
         logger.warning("channel full, dropping voice.state for vc %s", channel.id)
     except Exception:
         logger.exception("voice.state group_send failed for vc %s", channel.id)
+
+
+# ---------- 语音房创建/删除推送 ----------
+
+def broadcast_channel_created_to_group(channel, group):
+    """语音房创建推给群成员（通过会话组）"""
+    from channels.layers import get_channel_layer
+
+    try:
+        layer = get_channel_layer()
+        async_to_sync(layer.group_send)(
+            f"chat_conv_{group.id}",
+            {
+                "type": "voice.channel.created",
+                "channel_id": str(channel.id),
+                "name": channel.name,
+                "owner_id": str(channel.owner_id),
+                "visibility": channel.visibility,
+                "group_id": str(channel.group_id) if channel.group_id else None,
+                "created_at": channel.created_at.isoformat(),
+            },
+        )
+    except ChannelFull:
+        logger.warning("voice.channel.created broadcast dropped (ChannelFull)")
+    except Exception:
+        logger.exception("voice.channel.created broadcast failed for channel %s", channel.id)
+
+
+def broadcast_channel_created_to_user(channel, user):
+    """语音房创建推给创建者本人"""
+    from channels.layers import get_channel_layer
+
+    try:
+        layer = get_channel_layer()
+        async_to_sync(layer.group_send)(
+            f"chat_user_{user.id}",
+            {
+                "type": "voice.channel.created",
+                "channel_id": str(channel.id),
+                "name": channel.name,
+                "owner_id": str(channel.owner_id),
+                "visibility": channel.visibility,
+                "group_id": str(channel.group_id) if channel.group_id else None,
+                "created_at": channel.created_at.isoformat(),
+            },
+        )
+    except ChannelFull:
+        logger.warning("voice.channel.created user broadcast dropped")
+    except Exception:
+        logger.exception("voice.channel.created user broadcast failed")
+
+
+def broadcast_channel_deleted(channel_id, visibility, group_id=None):
+    """语音房删除推送"""
+    from channels.layers import get_channel_layer
+
+    try:
+        layer = get_channel_layer()
+        event = {
+            "type": "voice.channel.deleted",
+            "channel_id": str(channel_id),
+        }
+        if visibility == "group" and group_id:
+            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
+    except ChannelFull:
+        logger.warning("voice.channel.deleted broadcast dropped")
+    except Exception:
+        logger.exception("voice.channel.deleted broadcast failed")

@@ -96,3 +96,107 @@ def leave_room(room: GameRoom, user) -> bool:
         return False
     member.delete()
     return True
+
+
+# ---------- 桌游房创建/删除推送 ----------
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def broadcast_room_created_to_group(room, group):
+    """桌游房创建推送给群成员（通过会话组 chat_conv_{group_id}）。"""
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    try:
+        event = {
+            "type": "boardgame.room.created",
+            "room": {
+                "id": room.id,
+                "name": room.name,
+                "owner_id": str(room.owner_id),
+                "group_id": str(room.group_id) if room.group_id else None,
+                "visibility": room.visibility,
+                "game_type": room.game_type,
+                "status": room.status,
+                "created_at": room.created_at.isoformat(),
+            },
+        }
+        async_to_sync(layer.group_send)(f"chat_conv_{group.id}", event)
+    except ChannelFull:
+        logger.warning(
+            "Channel layer full when broadcasting boardgame.room.created to group %s", group.id
+        )
+    except Exception:
+        logger.exception("Failed to broadcast boardgame.room.created to group %s", group.id)
+
+
+def broadcast_room_created_to_user(room, user):
+    """桌游房创建推送给创建者本人（通过用户组 chat_user_{user_id}）。"""
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    try:
+        event = {
+            "type": "boardgame.room.created",
+            "room": {
+                "id": room.id,
+                "name": room.name,
+                "owner_id": str(room.owner_id),
+                "group_id": str(room.group_id) if room.group_id else None,
+                "visibility": room.visibility,
+                "game_type": room.game_type,
+                "status": room.status,
+                "created_at": room.created_at.isoformat(),
+            },
+        }
+        async_to_sync(layer.group_send)(f"chat_user_{user.id}", event)
+    except ChannelFull:
+        logger.warning(
+            "Channel layer full when broadcasting boardgame.room.created to user %s", user.id
+        )
+    except Exception:
+        logger.exception("Failed to broadcast boardgame.room.created to user %s", user.id)
+
+
+def broadcast_room_deleted(room_id, group_id=None, owner_id=None):
+    """桌游房删除推送。
+    
+    推送目标：
+    - 如果 group_id 非空，推送给该群成员（chat_conv_{group_id}）
+    - 如果 owner_id 非空，推送给房主（chat_user_{owner_id}）
+    """
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    event = {
+        "type": "boardgame.room.deleted",
+        "room_id": room_id,
+    }
+
+    try:
+        if group_id:
+            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
+        if owner_id:
+            async_to_sync(layer.group_send)(f"chat_user_{owner_id}", event)
+    except ChannelFull:
+        logger.warning("Channel layer full when broadcasting boardgame.room.deleted %s", room_id)
+    except Exception:
+        logger.exception("Failed to broadcast boardgame.room.deleted %s", room_id)

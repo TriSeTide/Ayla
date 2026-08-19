@@ -144,6 +144,19 @@ class PostListView(APIView):
             )
         except ValueError as exc:
             return _bad_request(str(exc))
+        
+        # 推送帖子创建事件
+        if post.group:
+            services.broadcast_post_created_to_group(post, post.group)
+        
+        # 处理 allowed_groups
+        if post.allowed_groups.exists():
+            for allowed_group in post.allowed_groups.all():
+                services.broadcast_post_created_to_group(post, allowed_group)
+        
+        # 推送给创建者本人
+        services.broadcast_post_created_to_user(post, request.user)
+        
         return Response(
             PostSerializer(post, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -206,7 +219,25 @@ class PostDetailView(APIView):
             return _not_found("帖子不存在")
         if post.owner_id != request.user.id:
             return _forbidden("仅作者可删除")
+        
+        # 删除前保存必要信息用于推送
+        group_id = post.group_id
+        owner_id = post.owner_id
+        saved_post_id = post.id
+        
+        # 收集 allowed_groups
+        allowed_group_ids = list(post.allowed_groups.values_list("id", flat=True))
+        
         post.delete()
+        
+        # 推送删除事件
+        services.broadcast_post_deleted(
+            saved_post_id, 
+            group_id=group_id, 
+            owner_id=owner_id,
+            allowed_group_ids=allowed_group_ids
+        )
+        
         return Response({"deleted": True})
 
 

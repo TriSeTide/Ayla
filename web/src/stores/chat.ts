@@ -19,6 +19,7 @@ interface ChatState {
   loading: boolean;
   error: string | null;
   activeConversationId: string | null;
+  lastFetched: number | null;
 
   setConversations: (list: ConversationSummary[]) => void;
   upsertConversation: (conv: ConversationSummary | ConversationDetail) => void;
@@ -32,13 +33,31 @@ interface ChatState {
   reset: () => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   loading: false,
   error: null,
   activeConversationId: null,
+  lastFetched: null,
 
-  setConversations: (conversations) => set({ conversations, loading: false, error: null }),
+  setConversations: (conversations) => {
+    const { conversations: current } = get();
+    // 并发预加载/页面加载拿到相同数据时不触发无意义重渲染；数据真的变化仍要替换，
+    // 否则侧栏会永久保留旧群列表、未读数和头像。
+    const same = current.length === conversations.length && current.every((item, index) => {
+      const next = conversations[index];
+      return item.id === next.id
+        && item.title === next.title
+        && item.avatar === next.avatar
+        && item.unread_count === next.unread_count
+        && item.member_count === next.member_count;
+    });
+    if (same && current.length > 0) {
+      set({ loading: false, error: null, lastFetched: Date.now() });
+      return;
+    }
+    set({ conversations, loading: false, error: null, lastFetched: Date.now() });
+  },
   upsertConversation: (conv) =>
     set((state) => {
       const normalized = toSummary(conv);
@@ -75,5 +94,12 @@ export const useChatStore = create<ChatState>((set) => ({
     })),
 
   reset: () =>
-    set({ conversations: [], loading: false, error: null, activeConversationId: null }),
+    set({ conversations: [], loading: false, error: null, activeConversationId: null, lastFetched: null }),
 }));
+
+/** 判断 chat store 数据是否过期（默认 60 秒） */
+export function isChatStale(maxAgeMs = 60_000): boolean {
+  const { lastFetched } = useChatStore.getState();
+  if (!lastFetched) return true;
+  return Date.now() - lastFetched > maxAgeMs;
+}

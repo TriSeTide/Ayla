@@ -55,9 +55,11 @@ interface VoiceState {
   localAudioLevel: number;
   /** 本地麦克风音量 0~100（自己说话别人听到的响度；本地偏好，不落库、刷新重置；100 = 原始） */
   localVolume: number;
+  lastFetched: number | null;
 
   setChannels: (list: VoiceChannelDescriptor[]) => void;
   upsertChannel: (channel: VoiceChannelDescriptor) => void;
+  removeChannel: (channelId: string) => void;
   setChannelsLoading: (loading: boolean) => void;
   setError: (err: string | null) => void;
   /** 标记列表中某频道人数/我在其中（join/leave 后局部更新） */
@@ -105,6 +107,7 @@ const INITIAL = {
   micEnabled: false,
   localAudioLevel: 0,
   localVolume: 100,
+  lastFetched: null as number | null,
 };
 
 function normalizeChannel(channel: VoiceChannelDescriptor): VoiceChannelDescriptor {
@@ -124,6 +127,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       channels: channels.map(normalizeChannel),
       channelsLoading: false,
       error: null,
+      lastFetched: Date.now(),
     }),
   upsertChannel: (channel) =>
     set((state) => {
@@ -135,6 +139,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
           : [...state.channels, normalized],
       };
     }),
+  removeChannel: (channelId) =>
+    set((state) => ({
+      channels: state.channels.filter((c) => c.id !== String(channelId)),
+    })),
   setChannelsLoading: (channelsLoading) => set({ channelsLoading }),
   setError: (error) => set({ error }),
   patchChannel: (channelId, patch) =>
@@ -264,3 +272,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   reset: () => set({ ...INITIAL, members: {} }),
 }));
+
+/** 判断 voice store 数据是否过期（默认 60 秒） */
+export function isVoiceStale(maxAgeMs = 60_000): boolean {
+  const { lastFetched } = useVoiceStore.getState();
+  if (!lastFetched) return true;
+  return Date.now() - lastFetched > maxAgeMs;
+}

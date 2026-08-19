@@ -324,6 +324,30 @@ export interface GroupMemberLeftFrame {
   };
 }
 
+export interface GroupCreatedFrame {
+  type: "group.created";
+  conversation: {
+    id: string;
+    type: "group";
+    title: string;
+    announcement: string;
+    owner_id: string;
+    created_at: string;
+  };
+}
+
+export interface GroupJoinedFrame {
+  type: "group.joined";
+  conversation: {
+    id: string;
+    type: "group";
+    title: string;
+    announcement: string;
+    owner_id: string;
+    created_at: string;
+  };
+}
+
 export interface ChatErrorFrame {
   type: "error";
   detail: string;
@@ -332,6 +356,71 @@ export interface ChatErrorFrame {
 export interface PongFrame {
   type: "pong";
   ts: number;
+}
+
+export interface VoiceChannelCreatedFrame {
+  type: "voice.channel.created";
+  data: {
+    channel_id: string;
+    name: string;
+    owner_id: string;
+    visibility: "public" | "friends" | "group";
+    group_id: string | null;
+    created_at: string;
+  };
+}
+
+export interface VoiceChannelDeletedFrame {
+  type: "voice.channel.deleted";
+  data: {
+    channel_id: string;
+  };
+}
+
+export interface LiveChannelCreatedFrame {
+  type: "live.channel.created";
+  data: {
+    channel_id: number;
+    title: string;
+    owner_id: string;
+    visibility: "public" | "friends" | "group";
+    group_id: string | null;
+    status: LiveChannelStatus;
+    created_at: string;
+  };
+}
+
+export interface LiveChannelStatusChangedFrame {
+  type: "live.channel.status.changed";
+  data: {
+    channel_id: number;
+    status: LiveChannelStatus;
+  };
+}
+
+export interface LiveChannelDeletedFrame {
+  type: "live.channel.deleted";
+  data: {
+    channel_id: number;
+  };
+}
+
+export interface PostCreatedFrame {
+  type: "post.created";
+  post: {
+    id: string;
+    title: string;
+    body: string;
+    owner_id: string;
+    group_id: string | null;
+    visibility: string;
+    created_at: string;
+  };
+}
+
+export interface PostDeletedFrame {
+  type: "post.deleted";
+  post_id: string;
 }
 
 export type ChatServerFrame =
@@ -346,6 +435,17 @@ export type ChatServerFrame =
   | GroupRequestResolvedFrame
   | GroupInviteNewFrame
   | GroupMemberLeftFrame
+  | GroupCreatedFrame
+  | GroupJoinedFrame
+  | VoiceChannelCreatedFrame
+  | VoiceChannelDeletedFrame
+  | LiveChannelCreatedFrame
+  | LiveChannelStatusChangedFrame
+  | LiveChannelDeletedFrame
+  | PostCreatedFrame
+  | PostDeletedFrame
+  | BoardgameRoomCreatedFrame
+  | BoardgameRoomDeletedFrame
   | ChatErrorFrame
   | PongFrame;
 
@@ -580,6 +680,27 @@ export interface LiveErrorFrame {
 }
 
 export type LiveServerFrame = DanmakuFrame | LiveErrorFrame | PongFrame;
+
+/* ================= S4 Boardgame WS 帧（对齐 backend/apps/boardgame/services.py） ================= */
+
+export interface BoardgameRoomCreatedFrame {
+  type: "boardgame.room.created";
+  room: {
+    id: string;
+    name: string;
+    owner_id: string;
+    group_id: string | null;
+    visibility: string;
+    game_type: string;
+    status: string;
+    created_at: string;
+  };
+}
+
+export interface BoardgameRoomDeletedFrame {
+  type: "boardgame.room.deleted";
+  room_id: string;
+}
 
 /* ================= S6 群动态 highlights（对齐 backend/apps/chat/services.py） ================= */
 

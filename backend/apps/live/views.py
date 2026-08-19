@@ -27,7 +27,13 @@ from apps.media.services import can_access_media, parse_avatar_media_id
 from . import services
 from .models import Danmaku, LiveChannel
 from .serializers import LiveChannelSerializer
-from .services import DANMAKU_HISTORY_MAX
+from .services import (
+    DANMAKU_HISTORY_MAX,
+    broadcast_channel_created_to_group,
+    broadcast_channel_created_to_user,
+    broadcast_channel_status_changed,
+    broadcast_channel_deleted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +143,12 @@ class ChannelListView(APIView):
             )
         except ValueError as exc:
             return _bad_request(str(exc))
+        
+        # 推送创建事件
+        if ch.visibility == "group" and ch.group:
+            broadcast_channel_created_to_group(ch, ch.group)
+        broadcast_channel_created_to_user(ch, request.user)
+        
         # 创建响应即回显 stream_key/推流地址（创建者即 owner，供复制进 OBS）
         return Response(
             _channel_serializer(ch, request), status=status.HTTP_201_CREATED
@@ -211,7 +223,21 @@ class ChannelDetailView(APIView):
             return _forbidden("仅频道 owner 可删除")
         if ch.status == "live":
             return _bad_request("直播中禁止删除，请先 :stop")
+        
+        # 保存删除前的信息用于推送
+        channel_id_for_broadcast = ch.id
+        visibility_for_broadcast = ch.visibility
+        group_id_for_broadcast = ch.group_id
+        
         ch.delete()
+        
+        # 推送删除事件
+        broadcast_channel_deleted(
+            channel_id_for_broadcast,
+            visibility_for_broadcast,
+            group_id_for_broadcast,
+        )
+        
         return Response({"deleted": True}, status=status.HTTP_200_OK)
 
 
@@ -230,6 +256,10 @@ class ChannelStartView(APIView):
             services.start_channel(ch)
         except ValueError as exc:
             return _bad_request(str(exc))
+        
+        # 推送状态变化
+        broadcast_channel_status_changed(ch, "live")
+        
         return Response(_channel_serializer(ch, request))
 
 
@@ -245,6 +275,10 @@ class ChannelStopView(APIView):
         if not services.can_manage_channel(ch, request.user):
             return _forbidden("仅频道 owner 可下播")
         services.stop_channel(ch)
+        
+        # 推送状态变化
+        broadcast_channel_status_changed(ch, "ended")
+        
         return Response(_channel_serializer(ch, request))
 
 

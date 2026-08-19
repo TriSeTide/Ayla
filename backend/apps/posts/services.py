@@ -101,3 +101,104 @@ def decode_cursor(cursor: str) -> tuple[datetime, int]:
     except (ValueError, TypeError):
         raise ValueError("cursor 无效")
     return dt, pid
+
+
+# ---------- 帖子实时推送 ----------
+
+def broadcast_post_created_to_group(post, group):
+    """帖子创建推送给群成员（通过会话组 chat_conv_{group.id}）。"""
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    try:
+        event = {
+            "type": "post.created",
+            "post": {
+                "id": str(post.id),
+                "title": post.title,
+                "body": post.body[:200],  # 截断避免过大
+                "owner_id": str(post.owner_id),
+                "group_id": str(post.group_id) if post.group_id else None,
+                "visibility": post.visibility,
+                "created_at": post.created_at.isoformat(),
+            },
+        }
+        async_to_sync(layer.group_send)(f"chat_conv_{group.id}", event)
+    except ChannelFull:
+        logger.warning(
+            "Channel layer full when broadcasting post.created to group %s", group.id
+        )
+    except Exception:
+        logger.exception("Failed to broadcast post.created to group %s", group.id)
+
+
+def broadcast_post_created_to_user(post, user):
+    """帖子创建推送给创建者本人。"""
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    try:
+        event = {
+            "type": "post.created",
+            "post": {
+                "id": str(post.id),
+                "title": post.title,
+                "body": post.body[:200],
+                "owner_id": str(post.owner_id),
+                "group_id": str(post.group_id) if post.group_id else None,
+                "visibility": post.visibility,
+                "created_at": post.created_at.isoformat(),
+            },
+        }
+        async_to_sync(layer.group_send)(f"chat_user_{user.id}", event)
+    except ChannelFull:
+        logger.warning(
+            "Channel layer full when broadcasting post.created to user %s", user.id
+        )
+    except Exception:
+        logger.exception("Failed to broadcast post.created to user %s", user.id)
+
+
+def broadcast_post_deleted(post_id, group_id=None, owner_id=None, allowed_group_ids=None):
+    """帖子删除推送（需要在删除前保存必要信息）。"""
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    event = {
+        "type": "post.deleted",
+        "post_id": str(post_id),
+    }
+
+    try:
+        if group_id:
+            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
+        if owner_id:
+            async_to_sync(layer.group_send)(f"chat_user_{owner_id}", event)
+        if allowed_group_ids:
+            for gid in allowed_group_ids:
+                async_to_sync(layer.group_send)(f"chat_conv_{gid}", event)
+    except ChannelFull:
+        logger.warning("Channel layer full when broadcasting post.deleted %s", post_id)
+    except Exception:
+        logger.exception("Failed to broadcast post.deleted %s", post_id)
