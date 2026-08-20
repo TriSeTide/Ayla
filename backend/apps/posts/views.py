@@ -154,6 +154,8 @@ class PostListView(APIView):
             for allowed_group in post.allowed_groups.all():
                 services.broadcast_post_created_to_group(post, allowed_group)
         
+        # 公开帖进入全局信息流；好友/群组帖不广播到全局，保持可见性边界。
+        services.broadcast_post_created_to_feed(post)
         # 推送给创建者本人
         services.broadcast_post_created_to_user(post, request.user)
         
@@ -224,6 +226,7 @@ class PostDetailView(APIView):
         group_id = post.group_id
         owner_id = post.owner_id
         saved_post_id = post.id
+        visibility = post.visibility
         
         # 收集 allowed_groups
         allowed_group_ids = list(post.allowed_groups.values_list("id", flat=True))
@@ -235,7 +238,8 @@ class PostDetailView(APIView):
             saved_post_id, 
             group_id=group_id, 
             owner_id=owner_id,
-            allowed_group_ids=allowed_group_ids
+            allowed_group_ids=allowed_group_ids,
+            visibility=visibility,
         )
         
         return Response({"deleted": True})

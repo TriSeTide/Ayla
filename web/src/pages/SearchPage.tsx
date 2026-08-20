@@ -7,7 +7,7 @@
  * 每组截断 + "查看更多"；用户点击弹资料卡（加好友/发消息），其余跳对应界面。
  * 可见性过滤由后端完成，前端仅展示（R-S3）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { search } from "../api/search";
 import { applyToGroup } from "../api/chat";
@@ -17,6 +17,9 @@ import { UserProfileCard } from "../components/UserProfileCard";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useSearchStore } from "../stores/search";
+import { useChatStore } from "../stores/chat";
+import { chatWS } from "../ws/chat";
+import type { ChatServerFrame } from "../api/types";
 
 export function SearchPage() {
   const navigate = useNavigate();
@@ -24,7 +27,15 @@ export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get("q") ?? "";
   const { history, pushHistory, clearHistory } = useSearchStore();
+  const conversations = useChatStore((state) => state.conversations);
+  const joinedConversationIds = useMemo(
+    () => new Set(conversations.filter((conversation) => conversation.type === "group").map((conversation) => conversation.id)),
+    [conversations],
+  );
   const [results, setResults] = useState<SearchResults | null>(null);
+  // 审批通过事件与 group.joined 之间可能存在极短窗口，先显示“已通过”，
+  // 随 group.joined 到达再由 chat store 确认“已加入”。
+  const [acceptedGroupIds, setAcceptedGroupIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserPublic | null>(null);
@@ -33,6 +44,7 @@ export function SearchPage() {
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinSent, setJoinSent] = useState(false);
+  const searchRequestRef = useRef(0);
 
   /** 公开群（join_policy=public）直接加入；缺失视为申请制（兼容旧数据），与后端默认一致 */
   const isPublicGroup = selectedGroup?.join_policy === "public";
@@ -52,6 +64,10 @@ export function SearchPage() {
 
   const submitGroupApply = async () => {
     if (!selectedGroup || joinBusy || joinSent) return;
+    if (acceptedGroupIds.has(selectedGroup.id) || joinedConversationIds.has(selectedGroup.id)) {
+      setSelectedGroup(null);
+      return;
+    }
     setJoinBusy(true);
     setJoinError(null);
     try {
@@ -69,20 +85,60 @@ export function SearchPage() {
     }
   };
 
+  const refreshSearch = useCallback((query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const requestId = ++searchRequestRef.current;
+    setLoading(true);
+    setError(null);
+    search({ q: trimmed, limit: 3 })
+      .then((nextResults) => {
+        if (requestId === searchRequestRef.current) setResults(nextResults);
+      })
+      .catch((e) => {
+        if (requestId === searchRequestRef.current) setError(e instanceof Error ? e.message : "搜索失败");
+      })
+      .finally(() => {
+        if (requestId === searchRequestRef.current) setLoading(false);
+      });
+  }, []);
+
   const doSearch = useCallback(
     (query: string) => {
       const trimmed = query.trim();
       if (!trimmed) return;
-      setLoading(true);
-      setError(null);
       pushHistory(trimmed);
-      search({ q: trimmed, limit: 3 })
-        .then(setResults)
-        .catch((e) => setError(e instanceof Error ? e.message : "搜索失败"))
-        .finally(() => setLoading(false));
+      refreshSearch(trimmed);
     },
-    [pushHistory],
+    [pushHistory, refreshSearch],
   );
+
+  // 入群审批是用户级实时事件；搜索结果本身不是成员关系的权威来源。
+  // 接到事件后立即重查，且由 chat store 的 group.joined 状态驱动按钮文案。
+  useEffect(() => {
+    const off = chatWS.onFrame((frame: ChatServerFrame) => {
+      if (frame.type === "group.request.resolved") {
+        if (frame.data.status === "accepted") {
+          setAcceptedGroupIds((current) => new Set(current).add(frame.data.conversation_id));
+        } else {
+          setAcceptedGroupIds((current) => {
+            const next = new Set(current);
+            next.delete(frame.data.conversation_id);
+            return next;
+          });
+        }
+        if (q) refreshSearch(q);
+      } else if (frame.type === "group.joined") {
+        setAcceptedGroupIds((current) => {
+          const next = new Set(current);
+          next.delete(frame.conversation.id);
+          return next;
+        });
+        if (q) refreshSearch(q);
+      }
+    });
+    return off;
+  }, [q, refreshSearch]);
 
   // 五类分组是否全空（决定无结果空态）
   const hasAnyResult = useCallback((r: SearchResults | null): boolean => {
@@ -147,13 +203,25 @@ export function SearchPage() {
           </ResultGroup>
 
           <ResultGroup title="群聊" count={results.groups?.total ?? 0} onMore={() => doSearch(q)}>
-            {(results.groups?.items ?? []).map((g) => (
-              <button key={g.id} type="button" className="search-row search-group-row" onClick={() => openGroupApply(g)}>
-                <span className="search-group-mark" aria-hidden="true">✦</span>
-                <span className="search-row-title">{g.title}</span>
-                <span className="search-row-action">申请入群</span>
-              </button>
-            ))}
+            {(results.groups?.items ?? []).map((g) => {
+              const joined = joinedConversationIds.has(g.id);
+              const accepted = acceptedGroupIds.has(g.id);
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  className="search-row search-group-row"
+                  onClick={() => {
+                    if (joined) navigate(`/group/${g.id}`);
+                    else if (!accepted) openGroupApply(g);
+                  }}
+                >
+                  <span className="search-group-mark" aria-hidden="true">✦</span>
+                  <span className="search-row-title">{g.title}</span>
+                  <span className="search-row-action">{joined ? "已加入" : accepted ? "已通过" : "申请入群"}</span>
+                </button>
+              );
+            })}
           </ResultGroup>
 
           <ResultGroup title="帖子" count={results.posts?.total ?? 0} onMore={() => doSearch(q)}>

@@ -13,6 +13,7 @@ import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { useNoticeStore } from "../stores/notices";
+import { usePostsStore } from "../stores/posts";
 
 type WSInstance = {
   readyState: number;
@@ -72,6 +73,7 @@ beforeEach(() => {
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
   useNoticeStore.getState().clear();
+  usePostsStore.getState().reset();
 });
 
 afterEach(() => {
@@ -81,9 +83,36 @@ afterEach(() => {
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
   useNoticeStore.getState().clear();
+  usePostsStore.getState().reset();
 });
 
 describe("ChatWSClient", () => {
+  it("post.created 仅通知监听器，不合成不完整帖子", () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    const seen: string[] = [];
+    const off = client.onFrame((frame) => {
+      if (frame.type === "post.created") seen.push(frame.post.id);
+    });
+    fire(instances[0], {
+      type: "post.created",
+      post: {
+        id: "42",
+        title: "新帖",
+        body: "正文",
+        owner_id: "u1",
+        group_id: null,
+        visibility: "public",
+        created_at: "2026-08-10T00:00:00Z",
+      },
+    });
+    expect(seen).toEqual(["42"]);
+    expect(usePostsStore.getState().posts).toEqual([]);
+    off();
+    client.disconnect();
+  });
+
   it("用户级群成员离开事件进入实时通知 store", () => {
     const client = new ChatWSClient();
     client.connect();
@@ -96,6 +125,50 @@ describe("ChatWSClient", () => {
       kind: "group.member.left",
       title: "群成员已离开",
       detail: "测试群：小明 已离开",
+    });
+    client.disconnect();
+  });
+
+  it("group.joined → 将审批通过的群加入会话列表", () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], {
+      type: "group.joined",
+      conversation: {
+        id: "g1",
+        type: "group",
+        title: "已通过的群",
+        announcement: "",
+        owner_id: "owner",
+        avatar: "",
+        created_at: "2026-08-10T00:00:00Z",
+      },
+    });
+    expect(useChatStore.getState().conversations).toEqual([
+      expect.objectContaining({ id: "g1", title: "已通过的群", type: "group", my_role: "member" }),
+    ]);
+    client.disconnect();
+  });
+
+  it("group.request.resolved accepted → 记录入群结果通知", () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], {
+      type: "group.request.resolved",
+      data: {
+        request_id: "r1",
+        conversation_id: "g1",
+        conversation_title: "测试群",
+        status: "accepted",
+        handled_by_id: "owner",
+        handled_at: "2026-08-10T00:00:00Z",
+      },
+    });
+    expect(useNoticeStore.getState().notices[0]).toMatchObject({
+      kind: "group.request.resolved",
+      detail: "测试群：你的申请已通过",
     });
     client.disconnect();
   });

@@ -11,6 +11,7 @@ import * as postsApi from "../../api/posts";
 import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
+import { chatWS } from "../../ws/chat";
 
 export function GroupPosts({
   groupId,
@@ -39,6 +40,9 @@ export function GroupPosts({
 
   useEffect(() => {
     load();
+    return chatWS.onFrame((frame) => {
+      if (frame.type === "post.created" || frame.type === "post.deleted") load();
+    });
   }, [load]);
 
   const handleCreated = useCallback(

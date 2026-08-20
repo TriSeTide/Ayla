@@ -33,8 +33,10 @@ interface LiveState {
   /** 弹幕 WS 连接状态（供 UI 展示） */
   wsConnection: "connecting" | "online" | "offline";
   lastFetched: number | null;
+  /** 最近一次列表请求是否携带 only_live=1；null 表示尚未按筛选条件请求。 */
+  channelsOnlyLive: boolean | null;
 
-  setChannels: (list: LiveChannelDescriptor[]) => void;
+  setChannels: (list: LiveChannelDescriptor[], onlyLive?: boolean) => void;
   setChannelsLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   upsertChannel: (channel: LiveChannelDescriptor) => void;
@@ -85,8 +87,16 @@ export const useLiveStore = create<LiveState>((set) => ({
   current: initialRoom,
   wsConnection: "offline",
   lastFetched: null,
+   channelsOnlyLive: null,
 
-  setChannels: (list) => set({ channels: list, channelsLoading: false, error: null, lastFetched: Date.now() }),
+  setChannels: (list, onlyLive = false) =>
+    set({
+      channels: list,
+      channelsLoading: false,
+      error: null,
+      lastFetched: Date.now(),
+      channelsOnlyLive: onlyLive,
+    }),
   setChannelsLoading: (loading) => set({ channelsLoading: loading }),
   setError: (error) => set({ error, channelsLoading: false }),
 
@@ -149,6 +159,8 @@ export const useLiveStore = create<LiveState>((set) => ({
       current: initialRoom,
       wsConnection: "offline",
       lastFetched: null,
+   channelsOnlyLive: null,
+
     }),
 }));
 

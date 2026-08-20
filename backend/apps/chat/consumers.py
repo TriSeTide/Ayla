@@ -82,6 +82,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         # 申请人/被邀请人未必是会话成员，订阅不到 chat_conv_* 组。
         self.user_group = f"chat_user_{self.user.id}"
         await self.channel_layer.group_add(self.user_group, self.channel_name)
+        # 公开帖子实时进入全局信息流；受限帖子仍只走定向群/用户组。
+        from apps.posts.services import POST_FEED_GROUP
+        self.post_feed_group = POST_FEED_GROUP
+        await self.channel_layer.group_add(self.post_feed_group, self.channel_name)
         await self.accept()
 
     async def disconnect(self, code):
@@ -92,6 +96,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if getattr(self, "user_group", None):
             await self.channel_layer.group_discard(
                 self.user_group, self.channel_name
+            )
+        if getattr(self, "post_feed_group", None):
+            await self.channel_layer.group_discard(
+                self.post_feed_group, self.channel_name
             )
 
     async def receive_json(self, content, **kwargs):

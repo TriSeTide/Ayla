@@ -110,6 +110,14 @@ describe("live store", () => {
     expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([2]);
   });
 
+  it("频道列表缓存记录 only_live 查询条件，避免过滤切换复用错误列表", () => {
+    const s = useLiveStore.getState();
+    s.setChannels([{ ...CHANNEL, status: "live" }], true);
+    expect(useLiveStore.getState().channelsOnlyLive).toBe(true);
+    s.setChannels([CHANNEL], false);
+    expect(useLiveStore.getState().channelsOnlyLive).toBe(false);
+  });
+
   it("clearCurrent：退房清当前直播间与 WS 状态，保留大厅列表", () => {
     const s = useLiveStore.getState();
     s.setChannels([CHANNEL]);

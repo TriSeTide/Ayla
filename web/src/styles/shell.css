@@ -14,10 +14,31 @@
 }
 
 .app-shell-content {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   position: relative;
   overflow: hidden;
+}
+
+/* 页面子滚动容器必须在 flex 布局中允许收缩，避免窄屏反复切换后把底栏/输入框推出视口。 */
+.app-shell-content > * {
+  min-height: 0;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .app-shell-content {
+    height: auto;
+    max-height: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }
 
 /* ================= BottomTabs（窄屏，design.md §12.1） ================= */

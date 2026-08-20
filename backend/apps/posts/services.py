@@ -20,6 +20,8 @@ from .models import Comment, Post, PostImage
 
 # 游标分隔符（created_at.isoformat() 不含此字符）
 _CURSOR_SEP = "|"
+# 仅公开帖加入全局信息流组；好友/群组帖子必须走定向组，避免泄漏。
+POST_FEED_GROUP = "chat_posts_feed"
 
 
 def _resolve_visibility(group, visibility, allowed_group_ids) -> str:
@@ -139,6 +141,39 @@ def broadcast_post_created_to_group(post, group):
         logger.exception("Failed to broadcast post.created to group %s", group.id)
 
 
+def broadcast_post_created_to_feed(post):
+    """仅将公开帖推送到全局信息流组。"""
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    if post.visibility != "public":
+        return
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    event = {
+        "type": "post.created",
+        "post": {
+            "id": str(post.id),
+            "title": post.title,
+            "body": post.body[:200],
+            "owner_id": str(post.owner_id),
+            "group_id": str(post.group_id) if post.group_id else None,
+            "visibility": post.visibility,
+            "created_at": post.created_at.isoformat(),
+        },
+    }
+    try:
+        async_to_sync(layer.group_send)(POST_FEED_GROUP, event)
+    except ChannelFull:
+        logger.warning("Channel layer full when broadcasting public post %s", post.id)
+    except Exception:
+        logger.exception("Failed to broadcast public post %s", post.id)
+
+
 def broadcast_post_created_to_user(post, user):
     """帖子创建推送给创建者本人。"""
     import logging
@@ -173,7 +208,7 @@ def broadcast_post_created_to_user(post, user):
         logger.exception("Failed to broadcast post.created to user %s", user.id)
 
 
-def broadcast_post_deleted(post_id, group_id=None, owner_id=None, allowed_group_ids=None):
+def broadcast_post_deleted(post_id, group_id=None, owner_id=None, allowed_group_ids=None, visibility=None):
     """帖子删除推送（需要在删除前保存必要信息）。"""
     import logging
     from asgiref.sync import async_to_sync
@@ -198,6 +233,8 @@ def broadcast_post_deleted(post_id, group_id=None, owner_id=None, allowed_group_
         if allowed_group_ids:
             for gid in allowed_group_ids:
                 async_to_sync(layer.group_send)(f"chat_conv_{gid}", event)
+        if visibility == "public":
+            async_to_sync(layer.group_send)(POST_FEED_GROUP, event)
     except ChannelFull:
         logger.warning("Channel layer full when broadcasting post.deleted %s", post_id)
     except Exception:

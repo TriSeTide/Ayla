@@ -14,6 +14,28 @@ beforeEach(() => {
 });
 
 describe("voice store voice.state 合并", () => {
+  it("setChannels/upsertChannel 按稳定频道 id 幂等去重，避免重复卡片和 duplicate key", () => {
+    const channel = {
+      id: "vc-1",
+      name: "重复验证房",
+      owner_id: "u1",
+      group: "g1",
+      allowed_group_ids: [],
+      visibility: "group" as const,
+      status: "idle" as const,
+      member_count: 0,
+      room_name: "重复验证房",
+      group_name: "群一",
+      created_at: "2026-08-20T00:00:00Z",
+      mine: false,
+    };
+    useVoiceStore.getState().setChannels([channel, { ...channel, name: "重复验证房（旧投影）" }]);
+    expect(useVoiceStore.getState().channels).toHaveLength(1);
+    useVoiceStore.getState().upsertChannel({ ...channel, name: "重复验证房（更新）" });
+    expect(useVoiceStore.getState().channels).toHaveLength(1);
+    expect(useVoiceStore.getState().channels[0].name).toBe("重复验证房（更新）");
+  });
+
   it("joined → 写入成员；left → 移除；muted/unmuted → 更新标记；heartbeat → 只刷新 last_seen", () => {
     const s = useVoiceStore.getState();
     s.enterChannel("ch1", []);

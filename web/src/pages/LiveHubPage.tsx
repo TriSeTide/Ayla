@@ -5,7 +5,7 @@
  * R-L1）+ 空态引导（F4）。建直播间走右下 FAB（CreateFab handler=live），本页不再
  * 内嵌 LiveCreate 侧栏。窄屏带 NarrowTopBar（五 tab 共用骨架）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../api/elysia";
 import * as liveApi from "../api/live";
@@ -25,15 +25,23 @@ export function LiveHubPage() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
+  const requestId = useRef(0);
 
   const load = useCallback(async (only: boolean) => {
     const store = useLiveStore.getState();
-    if (store.channels.length > 0 && !isLiveStale() && !store.channelsLoading) return;
+    if (
+      store.channelsOnlyLive === only
+      && store.channels.length > 0
+      && !isLiveStale()
+      && !store.channelsLoading
+    ) return;
+    const currentRequest = ++requestId.current;
     store.setChannelsLoading(true);
     setError(null);
     try {
       const list = await liveApi.listLiveChannels({ onlyLive: only });
-      store.setChannels(list);
+      if (currentRequest !== requestId.current) return;
+      store.setChannels(list, only);
       store.setChannelsLoading(false);
       const ownerIds = [...new Set(list.map((c) => c.owner_id))];
       if (ownerIds.length > 0) {
@@ -45,6 +53,7 @@ export function LiveHubPage() {
         setOwnerNames((prev) => ({ ...prev, ...names }));
       }
     } catch (e) {
+      if (currentRequest !== requestId.current) return;
       store.setChannelsLoading(false);
       setError(e instanceof Error ? e.message : "加载频道失败");
     }
@@ -53,6 +62,10 @@ export function LiveHubPage() {
   useEffect(() => {
     void load(onlyLive);
   }, [onlyLive, load]);
+
+  const visibleChannels = onlyLive
+    ? channels.filter((channel) => channel.status === "live")
+    : channels;
 
   useEffect(() => {
     let cancelled = false;
@@ -83,14 +96,14 @@ export function LiveHubPage() {
       </div>
       {error && <div className="live-form-error" role="alert">{error}</div>}
       {profileError && <div className="live-form-error" role="alert">爱莉入口暂不可用：{profileError}</div>}
-      {loading && channels.length === 0 ? (
+      {loading && visibleChannels.length === 0 ? (
         <div className="conv-loading">
           <div className="skeleton" style={{ height: 96, marginBottom: 8 }} />
           <div className="skeleton" style={{ height: 96 }} />
         </div>
       ) : (
         <LiveHall
-          channels={channels}
+          channels={visibleChannels}
           elysiaUserId={elysiaUserId}
           ownerNames={ownerNames}
           onEnter={(id) => navigate(`/live/${id}`)}

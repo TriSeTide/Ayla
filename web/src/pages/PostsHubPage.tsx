@@ -13,6 +13,7 @@ import { PostCard } from "../components/posts/PostCard";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { usePostsStore, isPostsStale } from "../stores/posts";
+import { chatWS } from "../ws/chat";
 
 export function PostsHubPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
@@ -49,6 +50,20 @@ export function PostsHubPage() {
 
   useEffect(() => {
     loadFirst();
+    return chatWS.onFrame((frame) => {
+      if (frame.type === "post.deleted") {
+        usePostsStore.getState().removePost(Number(frame.post_id));
+        return;
+      }
+      if (frame.type === "post.created") {
+        postsApi
+          .getPost(Number(frame.post.id))
+          .then((post) => usePostsStore.getState().upsertPost(post))
+          .catch(() => {
+            // 事件只作提示；REST 失败不伪造或插入不完整帖子。
+          });
+      }
+    });
   }, [loadFirst]);
 
   // 滚到底加载更多

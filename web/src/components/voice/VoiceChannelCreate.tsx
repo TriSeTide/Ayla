@@ -8,9 +8,12 @@ import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelec
 
 export function VoiceChannelCreate({
   group,
+  onCreated,
 }: {
   /** 群内创建时归属的群 id（一级 tab 创建为 null，R-F2） */
   group?: string | null;
+  /** 创建成功后通知外层关闭创建浮层。失败时不调用，保留表单。 */
+  onCreated?: () => void;
 }) {
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<VisibilitySelection>(
@@ -38,6 +41,7 @@ export function VoiceChannelCreate({
       const store = useVoiceStore.getState();
       store.setChannels([{ ...ch, mine: false }, ...store.channels]);
       setName("");
+      onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "创建失败");
     } finally {

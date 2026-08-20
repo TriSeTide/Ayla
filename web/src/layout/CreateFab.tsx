@@ -77,7 +77,7 @@ export function CreateFab({ action }: { action: FabAction }) {
       )}
       {open && isVoiceCreate && (
         <CreateSheet title={action.label} onClose={() => setOpen(false)}>
-          <VoiceChannelCreate group={action.groupId} />
+          <VoiceChannelCreate group={action.groupId} onCreated={() => setOpen(false)} />
         </CreateSheet>
       )}
       {open && isLiveCreate && (

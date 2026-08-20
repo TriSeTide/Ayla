@@ -128,6 +128,15 @@
   gap: var(--sp-2);
   padding: 0 var(--sp-4) var(--sp-2);
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glow-500) transparent;
+  scroll-padding-inline: var(--sp-4);
+}
+
+.favorites-filters::after {
+  content: "";
+  flex: 0 0 var(--sp-4);
 }
 
 .favorites-filter {

@@ -19,7 +19,6 @@ import { useNoticeStore } from "../stores/notices";
 import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
 import { useBoardgameStore } from "../stores/boardgame";
-import { usePostsStore } from "../stores/posts";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -321,38 +320,10 @@ export class ChatWSClient {
         useLiveStore.getState().removeChannel(d.channel_id);
         break;
       }
-      case "post.created": {
-        const d = frame.post;
-        usePostsStore.getState().upsertPost({
-          id: Number(d.id),
-          author: {
-            id: d.owner_id,
-            username: "",
-            nickname: "",
-            avatar: "",
-            signature: "",
-            status: "online",
-            online: false,
-            date_joined: "",
-          },
-          author_id: d.owner_id,
-          title: d.title,
-          body: d.body,
-          visibility: d.visibility as "public" | "friends" | "group",
-          group: d.group_id,
-          group_name: null,
-          images: [],
-          comment_count: 0,
-          is_author: false,
-          created_at: d.created_at,
-          updated_at: d.created_at,
-        });
+      case "post.created":
+      case "post.deleted":
+        // 帖子事件仅作实时失效通知；页面通过 REST 获取完整对象并负责 scope/可见性。
         break;
-      }
-      case "post.deleted": {
-        usePostsStore.getState().removePost(Number(frame.post_id));
-        break;
-      }
       case "boardgame.room.created": {
         const d = frame.room;
         useBoardgameStore.getState().upsertRoom({
