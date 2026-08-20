@@ -192,11 +192,41 @@
   }
 }
 
-/* 群内桌游（GroupGames） */
+/* 群内桌游（GroupGames）：保持 2 列 grid，卡片直接作为子项（不改原布局） */
 .group-games {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
   overflow-y: auto;
+}
+
+/* 群内桌游空态/错误占位：跨全宽 */
+.group-games-full {
+  grid-column: 1 / -1;
+}
+
+/* 桌游加载骨架（一级 games-grid 与群内共用） */
+.games-grid-loading {
+  align-content: start;
+}
+.games-skeleton-card {
+  display: block;
+  height: 120px;
+  margin-bottom: var(--sp-3);
+}
+.games-skel-card {
+  display: block;
+  height: 120px;
+}
+.games-skel-text {
+  grid-column: 1 / -1;
+}
+/* 群内加载：占满两列的骨架区 */
+.group-games-loading {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
 }

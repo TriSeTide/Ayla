@@ -507,6 +507,13 @@
   font-size: 18px;
 }
 
+/* 群内语音房列表加载区：框架先上（head 已呈现），列表区骨架 + 加载文字 */
+.group-voice-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
 .group-voice-desc {
   margin: var(--sp-1) 0 0;
   color: var(--text-secondary);

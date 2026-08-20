@@ -77,9 +77,14 @@ export function GamesHubPage() {
         </div>
       )}
       {loading && rooms.length === 0 ? (
-        <div className="conv-loading">
-          <div className="skeleton" style={{ height: 120, marginBottom: 8 }} />
-          <div className="skeleton" style={{ height: 120 }} />
+        <div className="games-grid games-grid-loading" aria-busy="true">
+          <div className="games-skeleton-card">
+            <div className="skeleton" style={{ height: 120, borderRadius: 12 }} />
+          </div>
+          <div className="games-skeleton-card">
+            <div className="skeleton" style={{ height: 120, borderRadius: 12 }} />
+          </div>
+          <span className="home-load-text games-skel-text">正在加载桌游室…</span>
         </div>
       ) : rooms.length === 0 ? (
         <div className="home-state">

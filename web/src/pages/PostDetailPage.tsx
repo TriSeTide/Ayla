@@ -39,9 +39,18 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     return () => useShellStore.getState().setBottomTabsLeaving(false);
   }, [usesRoomEntryAnimation]);
 
-  const [post, setPost] = useState<Post | null>(null);
+  const id = Number(postId);
+
+  // 秒开优化：posts store 里存的是全量可见列表（scope=feed 即 visible_queryset，登录预加载），
+  // 若当前帖已在其中，则初始化直接用缓存对象（正文立即渲染），再后台 load() 刷新最新 +
+  // 评论 + 收藏。命中时 loading 初始为 false，详情不再有"空白加载"。
+  const cachedPost = Number.isInteger(id) && id > 0
+    ? (usePostsStore.getState().posts.find((p) => p.id === id) ?? null)
+    : null;
+
+  const [post, setPost] = useState<Post | null>(cachedPost);
   const [comments, setComments] = useState<PostComment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedPost == null);
   const [error, setError] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<PostComment | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -54,8 +63,6 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
 
-  const id = Number(postId);
-
   // 输入框滑入 + 内容入场动画：内容就绪（loading 结束）后才浮入，
   // 避免异步加载完成前动画就提前跑完、看不到浮入效果（直播间同源节奏）。
   const { inputEntered } = useEnterRoomAnimation(usesRoomEntryAnimation);
@@ -67,26 +74,36 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // 后台刷新：不置 loading=true（避免缓存命中时又闪骨架）；只更新数据。
     setError(null);
-    // 并行加载（优化：串行 → 并发，正文与评论 + 收藏一键并发，减少一次网络往返）
-    Promise.all([
-      postsApi.getPost(id),
-      postsApi.listComments(id),
-      favoritesApi.listFavorites("post"),
-    ])
-      .then(([p, list, favs]) => {
+    // 正文是第一优先 —— getPost 一返回就立刻覆盖（缓存命中时也在后台静默刷新）。
+    // 评论与收藏并发后台填充（各 .then 独立落地，互不阻塞正文显示）。
+    postsApi
+      .getPost(id)
+      .then((p) => {
         setPost(p);
+        setLoading(false);
+      })
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : "加载帖子失败";
+        setCommentError(message);
+        setError(message);
+        setLoading(false);
+      });
+    postsApi
+      .listComments(id)
+      .then((list) => {
         setComments(list);
         setCommentError(null);
-        usePostsStore.getState().loadFavorites(favs);
       })
       .catch((e) => {
         const message = e instanceof Error ? e.message : "加载评论失败";
         setCommentError(message);
-        setError(message);
-      })
-      .finally(() => setLoading(false));
+      });
+    favoritesApi
+      .listFavorites("post")
+      .then((list) => usePostsStore.getState().loadFavorites(list))
+      .catch((e) => setActionError(e instanceof Error ? e.message : "加载收藏状态失败"));
   }, [id]);
 
   useEffect(() => {
@@ -182,8 +199,16 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   }, [post, navigate]);
 
   if (loading) {
+    // 顶栏框架先上（返回键 + 标题始终可见），仅正文/评论区显示结构化骨架，
+    // 避免整页被骨架替换造成的"空白加载"。
     return (
       <div className="post-detail">
+        <header className="post-detail-head">
+          <button type="button" className="icon-btn-40" onClick={() => navigate(returnTo)} aria-label="返回">
+            <IconBack width={22} height={22} />
+          </button>
+          <span className="post-detail-title">帖子</span>
+        </header>
         <div className="post-detail-skeleton" aria-label="正在加载帖子">
           <div className="post-detail-skeleton-head">
             <span className="skeleton post-detail-skeleton-avatar" style={{ width: 40, height: 40, borderRadius: 999 }} />
@@ -204,7 +229,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     );
   }
 
-  if (error || !post) {
+  if (!post) {
     return (
       <div className="post-detail">
         <p className="placeholder-desc">{error ?? "帖子不存在"}</p>
@@ -361,7 +386,9 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       </div>
       <CommentComposer
         className="post-detail-composer"
-        inputEntered={inputEntered}
+        // 一级详情：复用进直播间输入框滑入动画（inputEntered 由动画驱动）；
+        // 群内详情：无底栏下滑动画，输入框直接显示（不进隐藏态）。
+        inputEntered={usesRoomEntryAnimation ? inputEntered : true}
         onSend={sendComment}
         replyTarget={replyTarget}
         onReplyClear={() => setReplyTarget(null)}

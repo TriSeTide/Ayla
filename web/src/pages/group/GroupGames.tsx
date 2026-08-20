@@ -75,41 +75,34 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
     );
   }
 
-  if (loading) {
-    return (
-      <div className="group-scene-placeholder">
-        <div className="skeleton" style={{ height: 120, width: "80%" }} />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="group-scene-placeholder" role="alert">
-        <h3 className="placeholder-title">桌游室加载失败</h3>
-        <p className="placeholder-desc">{error}</p>
-        <button type="button" className="btn btn-ghost" onClick={load} disabled={loading}>重试</button>
-      </div>
-    );
-  }
-
-  if (rooms.length === 0) {
-    return (
-      <div className="group-scene-placeholder">
-        <h3 className="placeholder-title">群内还没有桌游室</h3>
-        <p className="placeholder-desc">建一个群内桌游室吧</p>
-        <button type="button" className="btn btn-ghost" onClick={onExit}>
-          返回聊天
-        </button>
-      </div>
-    );
-  }
-
+  // 渲染群内桌游框架：.group-games 保持 2 列 grid，卡片直接作为子项（不改原布局），
+  // 数据区按错误/加载/空/列表呈现——加载/空/错误子项跨全宽，不整页骨架替换。
   return (
     <div className="group-games">
-      {rooms.map((r) => (
-        <GameRoomCard key={r.id} room={r} onEnter={() => enterRoom(r)} />
-      ))}
+      {error ? (
+        <div className="group-scene-placeholder group-games-full" role="alert">
+          <p className="placeholder-desc">{error}</p>
+          <button type="button" className="btn btn-ghost" onClick={load} disabled={loading}>重试</button>
+        </div>
+      ) : loading ? (
+        <div className="group-games-loading" aria-busy="true">
+          <span className="skeleton games-skel-card" />
+          <span className="skeleton games-skel-card" />
+          <span className="home-load-text games-skel-text">正在加载桌游室…</span>
+        </div>
+      ) : rooms.length === 0 ? (
+        <div className="group-scene-placeholder group-games-full">
+          <h3 className="placeholder-title">群内还没有桌游室</h3>
+          <p className="placeholder-desc">建一个群内桌游室吧</p>
+          <button type="button" className="btn btn-ghost" onClick={onExit}>
+            返回聊天
+          </button>
+        </div>
+      ) : (
+        rooms.map((r) => (
+          <GameRoomCard key={r.id} room={r} onEnter={() => enterRoom(r)} />
+        ))
+      )}
     </div>
   );
 }

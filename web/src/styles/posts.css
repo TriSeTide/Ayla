@@ -560,6 +560,22 @@
   gap: var(--sp-3);
 }
 
+.group-posts-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.group-posts-skel {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--sp-3);
+}
+
 .group-posts-input {
   flex: none;
   border-top: 1px solid var(--glass-border);

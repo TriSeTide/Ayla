@@ -58,6 +58,16 @@ export function GroupVoice({
 
   useEffect(() => {
     let cancelled = false;
+    const store = useVoiceStore.getState();
+    // 复用全局 store 缓存（同 GroupLive 模式）：已有数据且未过期则不重拉，
+    // 避免每次切到群内语音都强制请求导致"空白加载"。仅在全量列表缺失/过期时拉取。
+    if (store.channels.length > 0 && store.lastFetched != null && Date.now() - store.lastFetched <= 60_000) {
+      setLoaded(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setLoaded(false);
     setError(null);
     voiceApi
       .listVoiceChannels()
@@ -161,59 +171,52 @@ export function GroupVoice({
     );
   }
 
-  if (!loaded) {
-    return (
-      <div className="group-scene-placeholder">
-        <div className="skeleton" style={{ height: 96, width: "80%" }} />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="group-scene-placeholder" role="alert">
-        <h3 className="placeholder-title">群内语音房加载失败</h3>
-        <p className="placeholder-desc">{error}</p>
-        <button type="button" className="btn btn-ghost" onClick={() => {
-          setLoaded(false);
-          void voiceApi.listVoiceChannels()
-            .then((list) => useVoiceStore.getState().setChannels(list))
-            .catch((e) => setError(e instanceof Error ? e.message : "加载群内语音房失败"))
-            .finally(() => setLoaded(true));
-        }}>重试</button>
-      </div>
-    );
-  }
-
-  if (groupChannels.length === 0) {
-    return (
-      <div className="group-scene-placeholder">
-        <h3 className="placeholder-title">群内还没有语音房</h3>
-        <p className="placeholder-desc">建一个群内语音房，一起连麦</p>
-        <div className="group-voice-empty-actions">
-          <button type="button" className="btn btn-ghost" onClick={onExit}>
-            返回聊天
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
-      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
       <div className="group-voice-head">
         <div>
           <h3 className="group-voice-title">群内语音房</h3>
           <p className="group-voice-desc">选择一个房间加入，或点击右下角创建新的群内语音房</p>
         </div>
       </div>
-      <VoiceChannelList
-        channels={groupChannels}
-        currentChannelId={currentChannelId}
-        joining={joining}
-        onJoin={handleJoin}
-      />
+      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
+      {error ? (
+        <div className="group-scene-placeholder" role="alert">
+          <p className="placeholder-desc">{error}</p>
+          <button type="button" className="btn btn-ghost" onClick={() => {
+            setError(null);
+            setLoaded(false);
+            void voiceApi.listVoiceChannels()
+              .then((list) => useVoiceStore.getState().setChannels(list))
+              .catch((e) => setError(e instanceof Error ? e.message : "加载群内语音房失败"))
+              .finally(() => setLoaded(true));
+          }}>重试</button>
+        </div>
+      ) : !loaded ? (
+        <div className="group-voice-loading" aria-busy="true">
+          <span className="skeleton" style={{ height: 64, width: "100%", borderRadius: 12 }} />
+          <span className="skeleton" style={{ height: 64, width: "100%", borderRadius: 12 }} />
+          <span className="skeleton" style={{ height: 64, width: "100%", borderRadius: 12 }} />
+          <span className="home-load-text">正在加载语音房…</span>
+        </div>
+      ) : groupChannels.length === 0 ? (
+        <div className="group-scene-placeholder">
+          <h3 className="placeholder-title">群内还没有语音房</h3>
+          <p className="placeholder-desc">建一个群内语音房，一起连麦</p>
+          <div className="group-voice-empty-actions">
+            <button type="button" className="btn btn-ghost" onClick={onExit}>
+              返回聊天
+            </button>
+          </div>
+        </div>
+      ) : (
+        <VoiceChannelList
+          channels={groupChannels}
+          currentChannelId={currentChannelId}
+          joining={joining}
+          onJoin={handleJoin}
+        />
+      )}
     </div>
   );
 }

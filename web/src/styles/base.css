@@ -196,6 +196,18 @@ a:hover {
   animation: frost-pulse 1.6s ease-in-out infinite;
 }
 
+/* 数据区加载期间的文字提示（骨架下方），让用户知道"正在加载"而非空白：
+   透出极光底的次要文字，安静、不抢焦点（design.md §7）。 */
+.home-load-text {
+  display: block;
+  margin-top: var(--sp-2);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font-body);
+  text-align: center;
+  opacity: 0.8;
+}
+
 .resource-image-fallback {
   min-width: 40px;
   min-height: 32px;
