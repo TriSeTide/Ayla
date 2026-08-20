@@ -1,5 +1,5 @@
 /**
- * 路由守卫测试：未登录重定向登录页、已登录放行、登录后回跳。
+ * 路由守卫测试：未登录重定向登录页、已登录放行。
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";

@@ -600,6 +600,8 @@ class GroupJoinRequestView(APIView):
                 user=request.user,
                 defaults={"role": ConversationMember.ROLE_MEMBER},
             )
+            # 公开群直接加入后，通知前端更新群列表
+            services.broadcast_group_joined(conv, request.user.id)
             return Response({"status": "accepted", "conversation_id": str(conv.id)}, status=status.HTTP_201_CREATED)
         req, created = services.create_join_request(
             request.user, conv, request.data.get("message") or ""

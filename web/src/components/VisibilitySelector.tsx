@@ -91,11 +91,11 @@ export function VisibilitySelector({
           公开
         </label>
         <label>
-          <input type="checkbox" checked={value.friends} disabled={value.public} onChange={(e) => toggleFriends(e.target.checked)} />
+          <input type="checkbox" checked={value.friends} onChange={(e) => toggleFriends(e.target.checked)} />
           好友可见
         </label>
         <label>
-          <input type="checkbox" checked={value.group} disabled={value.public} onChange={(e) => toggleGroup(e.target.checked)} />
+          <input type="checkbox" checked={value.group} onChange={(e) => toggleGroup(e.target.checked)} />
           指定群可见
         </label>
       </div>
@@ -103,7 +103,7 @@ export function VisibilitySelector({
         <div className="visibility-selector-groups">
           <input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索群" aria-label="搜索群" />
           {groupsLoading ? (
-            <div className="visibility-groups-skeleton" style={{ height: 40, background: "rgba(157, 191, 230, 0.15)", borderRadius: "12px", margin: "8px 0" }} />
+            <div className="visibility-groups-skeleton" style={{ height: 40, background: "rgba(249, 176, 255, 0.15)", borderRadius: "12px", margin: "8px 0" }} />
           ) : filtered.length === 0 ? (
             <span className="placeholder-desc">没有匹配的群</span>
           ) : (

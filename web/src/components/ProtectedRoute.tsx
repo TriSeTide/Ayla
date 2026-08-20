@@ -1,16 +1,14 @@
 /**
- * 受保护路由守卫：无 access → 重定向 /login?next=当前路径；登录后回跳。
+ * 受保护路由守卫：无 access → 重定向 /login；登录后统一进主页 /group。
  */
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useAuthStore } from "../stores/auth";
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const accessToken = useAuthStore((s) => s.accessToken);
-  const location = useLocation();
 
   if (!accessToken) {
-    const next = location.pathname + location.search;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+    return <Navigate to="/login" replace />;
   }
   return <>{children}</>;
 }

@@ -3,7 +3,7 @@
  * - 好友申请/群邀请/入群申请的「同意/拒绝」请求失败 → 显示错误提示条；
  * - 点击提示条关闭；
  * - 成功路径 → 条目移除 + 不显示错误。
- * 渲染 WideMessagesSidebar（宽屏好友 tab），mock 子组件与 API。
+ * 渲染 WideMessagesSidebar（宽屏认证消息 tab），mock 子组件与 API。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,8 +94,8 @@ describe("审批失败错误提示（#3）", () => {
     vi.mocked(usersApi.listFriendRequests).mockResolvedValue([req]);
     vi.mocked(usersApi.actionFriendRequest).mockRejectedValue(new Error("服务器错误"));
     renderSidebar();
-    // 切到好友 tab
-    fireEvent.click(screen.getByRole("button", { name: "好友" }));
+    // 切到认证消息 tab
+    fireEvent.click(screen.getByRole("button", { name: /认证消息/ }));
     await waitFor(() => expect(screen.getByText("加个好友")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "同意" }));
     await waitFor(() => {
@@ -111,7 +111,7 @@ describe("审批失败错误提示（#3）", () => {
     vi.mocked(usersApi.listFriendRequests).mockResolvedValue([req]);
     vi.mocked(usersApi.actionFriendRequest).mockRejectedValue(new Error("网络异常"));
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "好友" }));
+    fireEvent.click(screen.getByRole("button", { name: /认证消息/ }));
     await waitFor(() => expect(screen.getByText("加个好友")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
     await waitFor(() => {
@@ -123,7 +123,7 @@ describe("审批失败错误提示（#3）", () => {
     vi.mocked(usersApi.listFriendRequests).mockResolvedValue([req]);
     vi.mocked(usersApi.actionFriendRequest).mockResolvedValue({ detail: "ok", status: "accepted" });
     renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "好友" }));
+    fireEvent.click(screen.getByRole("button", { name: /认证消息/ }));
     await waitFor(() => expect(screen.getByText("加个好友")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "同意" }));
     await waitFor(() => {

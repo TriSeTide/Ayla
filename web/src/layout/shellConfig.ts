@@ -4,7 +4,7 @@
  * - resolveModule：当前路径归属的一级模块（TopNav 指示条 / BottomTabs 选中态）。
  * - resolveFabAction：CreateFAB 动作随场景切换的匹配表（需求文档 §3.5、R-F1/R-F2）。
  * - isLiveRoomRoute：直播间路由（窄屏进房动画=底栏下滑走，宽屏 TopNav 常驻）。
- * - isGroupScene：群聊场景路由（窄屏 GroupPage 自渲染顶部导航条，壳层不出底栏）。
+ * - isGroupScene：群聊场景路由（含群内语音房详情，窄屏 GroupPage 自渲染顶部导航条，壳层不出底栏）。
  */
 import { matchPath } from "react-router-dom";
 
@@ -81,7 +81,8 @@ export function isGroupScene(pathname: string): boolean {
   return (
     matchPath({ path: "/group/:id", end: true }, pathname) != null ||
     matchPath({ path: "/group/:id/:scene", end: true }, pathname) != null ||
-    matchPath({ path: "/group/:id/posts/:postId", end: true }, pathname) != null
+    matchPath({ path: "/group/:id/posts/:postId", end: true }, pathname) != null ||
+    matchPath({ path: "/group/:id/voice/:voiceChannelId", end: true }, pathname) != null
   );
 }
 

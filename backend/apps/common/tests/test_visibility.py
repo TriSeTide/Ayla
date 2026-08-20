@@ -189,3 +189,40 @@ def test_can_join_matches_can_view(user_factory):
         ch = _make_channel(owner, visibility=vis)
         assert can_join(owner, ch) == can_view(owner, ch)
         assert can_join(stranger, ch) == can_view(stranger, ch)
+
+
+# ---------- 好友+群 组合可见性 ----------
+
+@pytest.mark.django_db
+def test_friends_plus_allowed_groups_group_member_can_view(user_factory):
+    """visibility=friends + allowed_groups 非空：群成员（非好友）也能查看。
+
+    场景：创建时同时勾选"好友可见"和"指定群可见"，群员在列表能看到条目，
+    点进详情也应放行（之前只检查 friends 分支导致 403）。
+    """
+    owner = user_factory(username="owner")
+    friend = user_factory(username="friend")
+    member = user_factory(username="member")
+    stranger = user_factory(username="stranger")
+    _make_friends(owner, friend)
+    group = _make_group(owner, member)
+
+    ch = _make_channel(owner, visibility=Visibility.FRIENDS)
+    # 模拟前端同时传 allowed_group_ids
+    from apps.common.visibility import set_allowed_groups
+    set_allowed_groups(ch, [str(group.id)])
+
+    # owner 本人
+    assert can_view(owner, ch)
+    # 好友（非群员）→ 通过 friends 分支放行
+    assert can_view(friend, ch)
+    # 群成员（非好友）→ 通过 allowed_groups 分支放行
+    assert can_view(member, ch)
+    assert can_join(member, ch)
+    # 路人（非好友非群员）→ 不可见
+    assert not can_view(stranger, ch)
+    # 列表过滤也应一致
+    qs = visible_queryset(LiveChannel, member)
+    assert ch in qs
+    qs2 = visible_queryset(LiveChannel, stranger)
+    assert ch not in qs2

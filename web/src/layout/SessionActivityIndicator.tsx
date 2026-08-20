@@ -1,50 +1,25 @@
+import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { IconMic, IconVideo } from "../components/icons";
-import { useSessionActivityStore, type ActivitySession } from "../stores/sessionActivity";
+import { useSessionActivityStore } from "../stores/sessionActivity";
 import { useAuthStore } from "../stores/auth";
 
-function statusLabel(status: string) {
-  if (status === "connected") return "已连接";
-  if (status === "reconnecting") return "重连中…";
-  if (status === "connecting") return "连接中…";
-  if (status === "failed") return "连接失败";
-  return status;
-}
-
-function ActivityButton({ session }: { session: ActivitySession }) {
-  const navigate = useNavigate();
-  const isVoice = session.kind === "voice";
-  const target = session.sourceRoute || (isVoice ? "/voice" : `/live/start/${session.sessionId}`);
-  return (
-    <button
-      type="button"
-      className={`session-activity-indicator ${isVoice ? "is-voice" : "is-live"}`}
-      onClick={() => navigate(target)}
-      aria-label={`返回${isVoice ? "语音房" : "开播界面"}${session.title}`}
-    >
-      <span className="session-activity-icon">
-        {isVoice ? <IconMic width={18} height={18} /> : <IconVideo width={18} height={18} />}
-      </span>
-      <span className="session-activity-copy">
-        <strong>{session.title}</strong>
-        <small>{statusLabel(session.status)} · 返回</small>
-      </span>
-    </button>
-  );
-}
-
-/** 跨页面媒体会话的轻量回返入口；语音和直播各占独立浮层位置。 */
+/** 跨页面媒体会话的悬浮球控制组：语音 + 直播两个圆形按钮，可收起。 */
 export function SessionActivityIndicator() {
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   const storedVoice = useSessionActivityStore((s) => s.voiceSession);
   const storedLive = useSessionActivityStore((s) => s.liveSession);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const [collapsed, setCollapsed] = useState(false);
+
   const voiceId = currentUser?.is_in_voice && currentUser.voice_room_id != null
     ? String(currentUser.voice_room_id)
     : null;
   const liveId = currentUser?.is_live && currentUser.live_room_id != null
     ? String(currentUser.live_room_id)
     : null;
+
   const voice = voiceId
     ? storedVoice?.sessionId === voiceId
       ? storedVoice
@@ -84,10 +59,61 @@ export function SessionActivityIndicator() {
     live && currentUser?.is_live && String(currentUser.live_room_id) === live.sessionId &&
       pathname === `/live/start/${live.sessionId}`,
   );
+
+  const showVoice = currentUser?.is_in_voice && voice && !onVoiceRoom;
+  const showLive = currentUser?.is_live && live && !onLiveConsole;
+
+  // 没有任何活动态时不渲染
+  if (!showVoice && !showLive) return null;
+
+  // 收起态：只显示一个小展开按钮
+  if (collapsed) {
+    return (
+      <div className="session-activity-group is-collapsed">
+        <button
+          type="button"
+          className="session-activity-toggle"
+          onClick={() => setCollapsed(false)}
+          aria-label="展开媒体控制"
+        >
+          <span className="session-activity-toggle-icon">‹</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <>
-      {currentUser?.is_in_voice && voice && !onVoiceRoom && <ActivityButton session={voice} />}
-      {currentUser?.is_live && live && !onLiveConsole && <ActivityButton session={live} />}
-    </>
+    <div className="session-activity-group">
+      {showVoice && voice && (
+        <button
+          type="button"
+          className="session-activity-ball is-voice"
+          onClick={() => navigate(voice.sourceRoute || `/voice/${voice.sessionId}`)}
+          aria-label="返回语音房"
+          title={voice.title}
+        >
+          <IconMic width={20} height={20} />
+        </button>
+      )}
+      {showLive && live && (
+        <button
+          type="button"
+          className="session-activity-ball is-live"
+          onClick={() => navigate(live.sourceRoute || `/live/start/${live.sessionId}`)}
+          aria-label="返回直播间"
+          title={live.title}
+        >
+          <IconVideo width={20} height={20} />
+        </button>
+      )}
+      <button
+        type="button"
+        className="session-activity-toggle"
+        onClick={() => setCollapsed(true)}
+        aria-label="收起媒体控制"
+      >
+        <span className="session-activity-toggle-icon">›</span>
+      </button>
+    </div>
   );
 }

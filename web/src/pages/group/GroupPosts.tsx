@@ -98,7 +98,7 @@ export function GroupPosts({
         )}
       </div>
       <div className="group-posts-input">
-        <PostEditor group={groupId} onCreated={handleCreated} compact />
+        <PostEditor group={groupId} onCreated={handleCreated} compact collapsible />
       </div>
     </div>
   );

@@ -332,6 +332,7 @@ export interface GroupCreatedFrame {
     title: string;
     announcement: string;
     owner_id: string;
+    avatar: string;
     created_at: string;
   };
 }
@@ -344,6 +345,7 @@ export interface GroupJoinedFrame {
     title: string;
     announcement: string;
     owner_id: string;
+    avatar: string;
     created_at: string;
   };
 }

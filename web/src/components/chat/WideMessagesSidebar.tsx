@@ -200,73 +200,9 @@ export function WideMessagesSidebar({
             onSelect={onSelect}
           />
         </div>
-      ) : (
-        <div className={`messages-friends ${tab === "requests" ? "messages-requests" : ""}`}>
-          {tab === "requests" && <p className="messages-section-hint">好友申请、群邀请和入群申请</p>}
-          {tab === "requests" && (leaveNotices.length > 0 || realtimeLeaveNotices.length > 0) && (
-            <section className="messages-group">
-              <h4 className="messages-group-title">退群通知</h4>
-              {leaveNotices.map((notice) => (
-                <div key={`persisted-${notice.id}`} className="request-row notice-row">
-                  <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
-                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id); setLeaveNotices((items) => items.filter((item) => item.id !== notice.id)); }}>知道了</button>
-                </div>
-              ))}
-              {realtimeLeaveNotices.map((notice) => (
-                <div key={notice.id} className="request-row notice-row">
-                  <div className="request-body"><span className="request-name">{notice.title}</span><span className="request-msg">{notice.detail}</span></div>
-                  <button type="button" className="btn btn-ghost request-btn" onClick={() => dismissNotice(notice.id)}>知道了</button>
-                </div>
-              ))}
-            </section>
-          )}
-          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
-            <section>
-              <h4 className="messages-group-title">收到的好友申请</h4>
-              {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").map((r) => (
-                <RequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} onAccept={() => void handleFriendAction(r, "accept")} onReject={() => void handleFriendAction(r, "reject")} />
-              ))}
-            </section>
-          )}
-          {friendRequests.filter((r) => r.from_user.id === currentUser?.id).length > 0 && (
-            <section>
-              <h4 className="messages-group-title">我发出的好友申请</h4>
-              {friendRequests.filter((r) => r.from_user.id === currentUser?.id).map((r) => (
-                <StatusRequestRow key={r.id} avatar={r.to_user} name={r.to_user.nickname || r.to_user.username} message={r.message} status={r.status} />
-              ))}
-            </section>
-          )}
-          {invites.length > 0 && (
-            <section>
-              <h4 className="messages-group-title">群邀请</h4>
-              {invites.map((inv) => (
-                <RequestRow
-                  key={inv.id}
-                  avatar={inv.inviter}
-                  name={`${inv.conversation_title}（来自 ${inv.inviter.nickname || inv.inviter.username}）`}
-                  message="邀请你加入群聊"
-                  onAccept={() => void handleInviteAction(inv, "accept")}
-                  onReject={() => void handleInviteAction(inv, "reject")}
-                />
-              ))}
-            </section>
-          )}
-          {joinRequests.length > 0 && (
-            <section>
-              <h4 className="messages-group-title">入群申请</h4>
-              {joinRequests.map((r) => (
-                <RequestRow
-                  key={r.id}
-                  avatar={r.applicant}
-                  name={`${r.applicant.nickname || r.applicant.username} → ${r.conversation_title}`}
-                  message={r.message}
-                  onAccept={() => void handleJoinRequestAction(r, "accept")}
-                  onReject={() => void handleJoinRequestAction(r, "reject")}
-                />
-              ))}
-            </section>
-          )}
-          {tab === "friends" && (friendList.length === 0 ? (
+      ) : tab === "friends" ? (
+        <div className="messages-friends">
+          {friendList.length === 0 ? (
             <div className="messages-empty">暂无好友</div>
           ) : (
             friendList.map((f) => (
@@ -285,31 +221,72 @@ export function WideMessagesSidebar({
                 </button>
               </div>
             ))
-          ))}
+          )}
+        </div>
+      ) : (
+        <div className="messages-friends messages-requests">
+          <p className="messages-section-hint">好友申请、群邀请和入群申请</p>
+          {(leaveNotices.length > 0 || realtimeLeaveNotices.length > 0) && (
+            <section className="messages-group">
+              <h4 className="messages-group-title">退群通知</h4>
+              {leaveNotices.map((notice) => (
+                <div key={`persisted-${notice.id}`} className="request-row notice-row">
+                  <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id); setLeaveNotices((items) => items.filter((item) => item.id !== notice.id)); }}>知道了</button>
+                </div>
+              ))}
+              {realtimeLeaveNotices.map((notice) => (
+                <div key={notice.id} className="request-row notice-row">
+                  <div className="request-body"><span className="request-name">{notice.title}</span><span className="request-msg">{notice.detail}</span></div>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => dismissNotice(notice.id)}>知道了</button>
+                </div>
+              ))}
+            </section>
+          )}
+          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
+            <section className="messages-group">
+              <h4 className="messages-group-title">好友申请</h4>
+              {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").map((r) => (
+                <RequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} onAccept={() => void handleFriendAction(r, "accept")} onReject={() => void handleFriendAction(r, "reject")} />
+              ))}
+            </section>
+          )}
+          {invites.length > 0 && (
+            <section className="messages-group">
+              <h4 className="messages-group-title">群邀请</h4>
+              {invites.map((inv) => (
+                <RequestRow
+                  key={inv.id}
+                  avatar={inv.inviter}
+                  name={`${inv.conversation_title}（来自 ${inv.inviter.nickname || inv.inviter.username}）`}
+                  message="邀请你加入群聊"
+                  onAccept={() => void handleInviteAction(inv, "accept")}
+                  onReject={() => void handleInviteAction(inv, "reject")}
+                />
+              ))}
+            </section>
+          )}
+          {joinRequests.length > 0 && (
+            <section className="messages-group">
+              <h4 className="messages-group-title">入群申请</h4>
+              {joinRequests.map((r) => (
+                <RequestRow
+                  key={r.id}
+                  avatar={r.applicant}
+                  name={`${r.applicant.nickname || r.applicant.username} → ${r.conversation_title}`}
+                  message={r.message}
+                  onAccept={() => void handleJoinRequestAction(r, "accept")}
+                  onReject={() => void handleJoinRequestAction(r, "reject")}
+                />
+              ))}
+            </section>
+          )}
+          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length === 0 && invites.length === 0 && joinRequests.length === 0 && leaveNotices.length === 0 && realtimeLeaveNotices.length === 0 && (
+            <p className="messages-empty">暂无待处理认证消息</p>
+          )}
         </div>
       )}
     </aside>
-  );
-}
-
-function StatusRequestRow({
-  avatar,
-  name,
-  message,
-  status,
-}: {
-  avatar: { nickname: string; username: string; avatar: string; online: boolean };
-  name: string;
-  message: string;
-  status: "pending" | "accepted" | "rejected";
-}) {
-  const label = status === "pending" ? "待处理" : status === "accepted" ? "已同意" : "已拒绝";
-  return (
-    <div className="request-row">
-      <Avatar label={avatar.nickname || avatar.username} size={36} online={avatar.online} imageUrl={avatar.avatar || null} />
-      <div className="request-body"><span className="request-name">{name}</span>{message && <span className="request-msg">{message}</span>}</div>
-      <span className={`request-status request-status-${status}`}>{label}</span>
-    </div>
   );
 }
 

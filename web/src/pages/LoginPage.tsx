@@ -1,25 +1,23 @@
 /**
  * 登录页：居中单卡悬浮极光之上。
- * 逻辑不变：登录成功回跳 next；无 next 时进入 /group。
+ * 登录成功后统一进入主页 /group。
  */
 import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useAuth } from "../hooks/useAuth";
 
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const next = new URLSearchParams(location.search).get("next") ?? "/group";
   useEffect(() => {
-    if (isAuthenticated) navigate(next, { replace: true });
-  }, [isAuthenticated, navigate, next]);
+    if (isAuthenticated) navigate("/group", { replace: true });
+  }, [isAuthenticated, navigate]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,7 +25,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(username.trim(), password);
-      navigate(next, { replace: true });
+      navigate("/group", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "登录失败，请稍后重试");
     } finally {

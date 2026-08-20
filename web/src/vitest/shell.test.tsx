@@ -10,6 +10,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../layout/AppShell";
 import {
+  isGroupScene,
   isLiveRoomRoute,
   isMessagesRoute,
   isPrivateChatRoute,
@@ -187,6 +188,13 @@ describe("AppShell", () => {
     renderShell("/group/g1", true);
     expect(screen.getByText("群聊内容")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /创建|开播|发帖/ })).not.toBeInTheDocument();
+  });
+
+  it("群内语音房详情窄屏不渲染底部导航栏", () => {
+    expect(isGroupScene("/group/g1/voice/v1")).toBe(true);
+    renderShell("/group/g1/voice/v1", true);
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
   });
 });
 

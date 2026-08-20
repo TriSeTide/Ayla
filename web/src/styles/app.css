@@ -121,22 +121,22 @@
 }
 
 .visibility-selector-options label:hover {
-  background: rgba(157, 191, 230, 0.18);
+  background: rgba(249, 176, 255, 0.12);
 }
 
 /* 选中态：粉辉光描边 + grape 文字（design.md §8 辉光只给 focus/主 CTA 的降级：仅描边不扩散） */
-.visibility-selector-options label:has(input[type="radio"]:checked) {
+.visibility-selector-options label:has(input[type="checkbox"]:checked) {
   border-color: var(--glow-500);
   background: rgba(249, 176, 255, 0.16);
   color: var(--grape-700);
 }
 
-.visibility-selector-options label:has(input[type="radio"]:disabled) {
+.visibility-selector-options label:has(input[type="checkbox"]:disabled) {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.visibility-selector-options input[type="radio"] {
+.visibility-selector-options input[type="checkbox"] {
   width: 16px;
   height: 16px;
   margin: 0;
@@ -176,7 +176,7 @@
 }
 
 .visibility-group-option:hover {
-  background: rgba(157, 191, 230, 0.18);
+  background: rgba(249, 176, 255, 0.12);
 }
 
 .visibility-group-option input[type="checkbox"] {

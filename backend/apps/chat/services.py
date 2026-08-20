@@ -900,6 +900,7 @@ def broadcast_group_created(conversation, member_ids):
             "title": conversation.title,
             "owner_id": str(conversation.owner_id),
             "announcement": conversation.announcement or "",
+            "avatar": conversation.avatar or "",
             "created_at": conversation.created_at.isoformat(),
         },
     }
@@ -933,6 +934,7 @@ async def abroadcast_group_created(conversation, member_ids):
             "title": conversation.title,
             "owner_id": str(conversation.owner_id),
             "announcement": conversation.announcement or "",
+            "avatar": conversation.avatar or "",
             "created_at": conversation.created_at.isoformat(),
         },
     }
@@ -971,6 +973,7 @@ def broadcast_group_joined(conversation, user_id):
             "title": conversation.title,
             "owner_id": str(conversation.owner_id),
             "announcement": conversation.announcement or "",
+            "avatar": conversation.avatar or "",
             "created_at": conversation.created_at.isoformat(),
         },
     }
@@ -1001,6 +1004,7 @@ async def abroadcast_group_joined(conversation, user_id):
             "title": conversation.title,
             "owner_id": str(conversation.owner_id),
             "announcement": conversation.announcement or "",
+            "avatar": conversation.avatar or "",
             "created_at": conversation.created_at.isoformat(),
         },
     }

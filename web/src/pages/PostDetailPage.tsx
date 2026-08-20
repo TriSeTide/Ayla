@@ -10,7 +10,9 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import type { Post, PostComment } from "../api/types";
+import { Avatar } from "../components/Avatar";
 import { CommentList } from "../components/posts/CommentList";
+import { CommentComposer } from "../components/posts/CommentComposer";
 import { ResourceImage } from "../components/ResourceImage";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconHeart } from "../components/icons";
@@ -228,63 +230,79 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         </section>
       )}
 
-      <article className="post-detail-body">
-        <div className="post-detail-author">
-          <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
-          <span className="post-card-time">{new Date(post.created_at).toLocaleString("zh-CN")}</span>
-          {getVisibilityLabels(post).length > 0 && (
-            <div className="post-card-tags">
-              {getVisibilityLabels(post).map((label, idx) => (
-                <span key={idx} className="post-card-tag">{label}</span>
-              ))}
-            </div>
-          )}
-        </div>
-        {post.title && <h2 className="post-detail-title-text">{post.title}</h2>}
-        <p className="post-detail-text">{post.body}</p>
-        {post.images.length > 0 && (
-          <div className={`post-card-images count-${Math.min(post.images.length, 9)}`}>
-            {post.images.slice(0, 9).map((img) =>
-              img.media?.thumbnail ? (
-                <ResourceImage
-                  key={img.id}
-                  src={img.media.thumbnail}
-                  alt="帖子图片"
-                  className="post-card-img"
-                />
-              ) : null,
+      <div className="post-detail-scroll">
+        <article className="post-card post-detail-card">
+          <div className="post-card-main">
+            <header className="post-card-head">
+              <Avatar
+                label={post.author.nickname || post.author.username}
+                size={36}
+                online={post.author.online}
+                imageUrl={post.author.avatar || null}
+              />
+              <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
+              <span className="post-card-time">{new Date(post.created_at).toLocaleString("zh-CN")}</span>
+              {getVisibilityLabels(post).length > 0 && (
+                <div className="post-card-tags">
+                  {getVisibilityLabels(post).map((label, idx) => (
+                    <span key={idx} className="post-card-tag">{label}</span>
+                  ))}
+                </div>
+              )}
+            </header>
+            {post.title && <h3 className="post-card-title">{post.title}</h3>}
+            <p className="post-card-body is-expanded">{post.body}</p>
+            {post.images.length > 0 && (
+              <div className={`post-card-images count-${Math.min(post.images.length, 9)}`}>
+                {post.images.slice(0, 9).map((img) =>
+                  img.media?.thumbnail ? (
+                    <ResourceImage
+                      key={img.id}
+                      src={img.media.thumbnail}
+                      alt="帖子图片"
+                      className="post-card-img"
+                    />
+                  ) : null,
+                )}
+              </div>
             )}
           </div>
-        )}
-      </article>
+          <footer className="post-card-foot">
+            <button
+              type="button"
+              className={`post-card-fav ${favorited ? "is-favorited" : ""}`}
+              onClick={() => void toggleFavorite()}
+              aria-label={favorited ? "取消收藏" : "收藏"}
+              aria-pressed={favorited}
+            >
+              <IconHeart width={18} height={18} fill={favorited ? "currentColor" : "none"} />
+              收藏
+            </button>
+          </footer>
+        </article>
 
-      <footer className="post-detail-actions">
-        <button
-          type="button"
-          className={`post-card-fav ${favorited ? "is-favorited" : ""}`}
-          onClick={() => void toggleFavorite()}
-          aria-label={favorited ? "取消收藏" : "收藏"}
-          aria-pressed={favorited}
+        <div
+          className="post-detail-comments"
+          style={{ opacity: entered ? 1 : 0, transition: "opacity 200ms var(--ease-out)" }}
         >
-          <IconHeart width={18} height={18} fill={favorited ? "currentColor" : "none"} />
-          收藏
-        </button>
-      </footer>
-
-      <div
-        className="post-detail-comments"
-        style={{ opacity: entered ? 1 : 0, transition: "opacity 200ms var(--ease-out)" }}
-      >
-        {commentError && <div className="chat-notice" role="alert">{commentError}</div>}
-        <CommentList
-          comments={comments}
-          onSend={sendComment}
-          onDelete={deleteComment}
-          replyTarget={replyTarget}
-          onReply={setReplyTarget}
-          onReplyClear={() => setReplyTarget(null)}
-        />
+          {commentError && <div className="chat-notice" role="alert">{commentError}</div>}
+          <CommentList
+            comments={comments}
+            onSend={sendComment}
+            onDelete={deleteComment}
+            replyTarget={replyTarget}
+            onReply={setReplyTarget}
+            onReplyClear={() => setReplyTarget(null)}
+            hideComposer
+          />
+        </div>
       </div>
+      <CommentComposer
+        className="post-detail-composer"
+        onSend={sendComment}
+        replyTarget={replyTarget}
+        onReplyClear={() => setReplyTarget(null)}
+      />
     </div>
   );
 }

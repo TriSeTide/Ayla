@@ -216,7 +216,7 @@ class CreateCommentSerializer(serializers.Serializer):
     body = serializers.CharField(required=True, max_length=2000)
     reply_to = serializers.IntegerField(required=False, allow_null=True, default=None)
     media_id = serializers.CharField(
-        max_length=64, required=False, allow_blank=True, default=None
+        max_length=64, required=False, allow_blank=True, allow_null=True, default=None
     )
 
     def validate_body(self, value):

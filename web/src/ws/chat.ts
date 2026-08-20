@@ -9,6 +9,7 @@
  * - 事件分发：message.new/recall/read/typing/elysia.reply/history.sync → 对应 store/handler
  */
 import { useAuthStore } from "../stores/auth";
+import { useBadgesStore } from "../stores/badges";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { WS_BASE_URL } from "./presence";
@@ -209,17 +210,20 @@ export class ChatWSClient {
       case "group.request.new": {
         const data = notificationFrame.data ?? {};
         notices.push({ kind: "group.request.new", title: "收到新的入群申请", detail: `${data.applicant_name ?? "有人"} 申请加入 ${data.conversation_title ?? "群聊"}` });
+        void useBadgesStore.getState().fetch();
         break;
       }
       case "group.request.resolved": {
         const data = notificationFrame.data ?? {};
         const status = data.status === "accepted" ? "已通过" : "已拒绝";
         notices.push({ kind: "group.request.resolved", title: "入群申请有结果", detail: `${data.conversation_title ?? "群聊"}：你的申请${status}` });
+        void useBadgesStore.getState().fetch();
         break;
       }
       case "group.invite.new": {
         const data = notificationFrame.data ?? {};
         notices.push({ kind: "group.invite.new", title: "收到新的群邀请", detail: `${data.inviter_name ?? "有人"} 邀请你加入 ${data.conversation_title ?? "群聊"}` });
+        void useBadgesStore.getState().fetch();
         break;
       }
       case "group.member.left": {
@@ -234,7 +238,7 @@ export class ChatWSClient {
           type: "group",
           title: d.conversation.title,
           announcement: d.conversation.announcement,
-          avatar: "",
+          avatar: d.conversation.avatar || "",
           owner_id: d.conversation.owner_id,
           members: [],
           my_role: null,
@@ -253,7 +257,7 @@ export class ChatWSClient {
           type: "group",
           title: d.conversation.title,
           announcement: d.conversation.announcement,
-          avatar: "",
+          avatar: d.conversation.avatar || "",
           owner_id: d.conversation.owner_id,
           members: [],
           my_role: "member",

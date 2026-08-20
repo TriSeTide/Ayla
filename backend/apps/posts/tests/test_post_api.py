@@ -415,6 +415,19 @@ class TestComment:
         assert resp.status_code == 200
         assert not Comment.objects.filter(pk=comment.id).exists()
 
+    def test_comment_without_image_accepts_null_media_id(self, auth_client):
+        """纯文字评论显式携带 media_id=null 时也应被接受。"""
+        client, author = auth_client(username="c_text_only")
+        post = _make_post(author, "纯文字评论的帖子")
+        resp = client.post(
+            f"/api/v1/posts/{post.id}/comments/",
+            {"body": "只有文字", "media_id": None},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        assert resp.json()["body"] == "只有文字"
+        assert resp.json()["media_id"] is None
+
     def test_comment_with_image(self, auth_client):
         """图片评论：media_id 上传后创建评论，输出带 media descriptor。"""
         from .conftest import make_image_media

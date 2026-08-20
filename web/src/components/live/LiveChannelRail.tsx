@@ -12,7 +12,7 @@
  * - 底部加号键新建直播间（onCreateNewChannel）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
-import { IconBack, IconClose, IconPlus, IconVideo } from "../icons";
+import { IconBack, IconChevronLeft, IconChevronRight, IconClose, IconPlus, IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 
 export function LiveChannelRail({
@@ -67,7 +67,7 @@ export function LiveChannelRail({
           aria-expanded={false}
           title="展开直播间列表"
         >
-          <IconVideo width={18} height={18} />
+          <IconChevronRight width={18} height={18} />
         </button>
       </div>
     );
@@ -95,7 +95,7 @@ export function LiveChannelRail({
           aria-expanded={true}
           title="收起"
         >
-          <IconClose width={18} height={18} />
+          <IconChevronLeft width={18} height={18} />
         </button>
       </div>
       <ul className="live-rail-list">

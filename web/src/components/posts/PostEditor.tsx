@@ -3,12 +3,15 @@
  *
  * 标题（可选）+ 正文（必填）+ 图片（最多 9 张）。图片先走三步媒体上传，
  * 再把 media_id 列表随帖子提交；一级 tab 与群内路径共用本编辑器。
+ *
+ * 可展开/收起模式（collapsible）：默认收起只显示输入框+发布按钮+展开按钮，
+ * 点击输入框或展开按钮展开完整编辑器，展开后顶部有收起按钮。
  */
 import { useState } from "react";
 import * as postsApi from "../../api/posts";
 import { mediaContentUrl, resolveMediaPath, uploadMediaFile } from "../../api/media";
 import type { MediaDescriptor, Post } from "../../api/types";
-import { IconImage } from "../icons";
+import { IconImage, IconChevronUp, IconChevronDown } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
@@ -21,12 +24,15 @@ export function PostEditor({
   group,
   onCreated,
   compact = false,
+  collapsible = false,
 }: {
   /** 群内发帖归属的群 id；一级 tab 为 null（公开） */
   group?: string | null;
   onCreated: (post: Post) => void;
   /** 紧凑模式（群内底部输入框变体：单行正文，无标题） */
   compact?: boolean;
+  /** 可展开/收起模式（默认收起，点击输入框或展开按钮展开） */
+  collapsible?: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -39,6 +45,7 @@ export function PostEditor({
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(!collapsible);
 
   const uploadFiles = async (files: File[]) => {
     if (uploading || submitting || files.length === 0) return;
@@ -107,8 +114,21 @@ export function PostEditor({
   };
 
   return (
-    <div className="post-editor">
-      {!compact && (
+    <div className={`post-editor ${collapsible ? "is-collapsible" : ""} ${expanded ? "is-expanded" : ""}`}>
+      {collapsible && expanded && (
+        <div className="post-editor-collapse-bar">
+          <button
+            type="button"
+            className="post-editor-collapse-btn"
+            onClick={() => setExpanded(false)}
+            aria-label="收起发帖面板"
+            title="收起"
+          >
+            <IconChevronDown width={18} height={18} />
+          </button>
+        </div>
+      )}
+      {!compact && expanded && (
         <input
           className="field post-editor-title"
           placeholder="标题（可选）"
@@ -117,77 +137,95 @@ export function PostEditor({
           onChange={(e) => setTitle(e.target.value)}
         />
       )}
-      <textarea
-        className="field post-editor-body"
-        placeholder={compact ? "发一条帖子…" : "正文（必填）"}
-        value={body}
-        rows={compact ? 1 : 4}
-        onChange={(e) => setBody(e.target.value)}
-      />
-      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
-      {images.length > 0 && (
-        <div className="post-editor-images" aria-label={`已添加 ${images.length} 张图片`}>
-          {images.map((image) => (
-            <div className="post-editor-image" key={image.mediaId}>
-              <ResourceImage
-                src={resolveMediaPath(image.descriptor.thumbnail) ?? mediaContentUrl(image.mediaId)}
-                alt="已添加的帖子图片"
-                loading="lazy"
-              />
-              <button
-                type="button"
-                className="post-editor-image-remove"
-                aria-label="移除图片"
-                disabled={submitting || uploading}
-                onClick={() => setImages((prev) => prev.filter((item) => item.mediaId !== image.mediaId))}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {error && <p className="post-editor-error" role="alert">{error}</p>}
-      {failedFiles.length > 0 && (
-        <button
-          type="button"
-          className="msg-action-btn"
-          disabled={submitting || uploading}
-          onClick={() => {
-            const retry = failedFiles;
-            setFailedFiles([]);
-            void uploadFiles(retry);
-          }}
-        >
-          重试失败图片（{failedFiles.length}）
-        </button>
-      )}
-      <div className="post-editor-actions">
-        <label className="post-editor-image-btn" aria-label="添加帖子图片">
-          <IconImage width={18} height={18} />
-          <span>图片 {images.length}/9</span>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            hidden
-            disabled={submitting || uploading || images.length >= 9}
-            onChange={async (e) => {
-              const files = Array.from(e.target.files ?? []);
-              e.target.value = "";
-              await uploadFiles(files);
-            }}
-          />
-        </label>
+      <div className="post-editor-input-row">
+        <textarea
+          className="field post-editor-body"
+          placeholder={compact ? "发一条帖子…" : "正文（必填）"}
+          value={body}
+          rows={compact && !expanded ? 1 : expanded ? 4 : 1}
+          onFocus={() => collapsible && !expanded && setExpanded(true)}
+          onChange={(e) => setBody(e.target.value)}
+        />
         <button
           type="button"
           className="btn btn-primary post-editor-submit"
           disabled={submitting || uploading || !body.trim() || failedFiles.length > 0}
           onClick={() => void submit()}
         >
-          {uploading ? "图片上传中…" : submitting ? "发布中…" : "发布"}
+          {uploading ? "上传中…" : submitting ? "发布中…" : "发布"}
         </button>
+        {collapsible && !expanded && (
+          <button
+            type="button"
+            className="post-editor-expand-btn"
+            onClick={() => setExpanded(true)}
+            aria-label="展开发帖面板"
+            title="展开"
+          >
+            <IconChevronUp width={18} height={18} />
+          </button>
+        )}
       </div>
+      {expanded && (
+        <>
+          <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
+          {images.length > 0 && (
+            <div className="post-editor-images" aria-label={`已添加 ${images.length} 张图片`}>
+              {images.map((image) => (
+                <div className="post-editor-image" key={image.mediaId}>
+                  <ResourceImage
+                    src={resolveMediaPath(image.descriptor.thumbnail) ?? mediaContentUrl(image.mediaId)}
+                    alt="已添加的帖子图片"
+                    loading="lazy"
+                  />
+                  <button
+                    type="button"
+                    className="post-editor-image-remove"
+                    aria-label="移除图片"
+                    disabled={submitting || uploading}
+                    onClick={() => setImages((prev) => prev.filter((item) => item.mediaId !== image.mediaId))}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {error && <p className="post-editor-error" role="alert">{error}</p>}
+          {failedFiles.length > 0 && (
+            <button
+              type="button"
+              className="msg-action-btn"
+              disabled={submitting || uploading}
+              onClick={() => {
+                const retry = failedFiles;
+                setFailedFiles([]);
+                void uploadFiles(retry);
+              }}
+            >
+              重试失败图片（{failedFiles.length}）
+            </button>
+          )}
+          <div className="post-editor-actions">
+            <label className="post-editor-image-btn" aria-label="添加帖子图片">
+              <IconImage width={18} height={18} />
+              <span>图片 {images.length}/9</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                disabled={submitting || uploading || images.length >= 9}
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  await uploadFiles(files);
+                }}
+              />
+            </label>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -225,60 +225,6 @@ export function MessagesPage() {
         </div>
       ) : tab === "friends" ? (
         <div className="messages-friends">
-          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
-            <section className="messages-group">
-              <h3 className="messages-group-title">收到的好友申请（{friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length}）</h3>
-              {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").map((r) => (
-                <RequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} onAccept={() => handleFriendAction(r, "accept")} onReject={() => handleFriendAction(r, "reject")} />
-              ))}
-            </section>
-          )}
-          {friendRequests.filter((r) => r.from_user.id === currentUser?.id).length > 0 && (
-            <section className="messages-group">
-              <h3 className="messages-group-title">我发出的好友申请</h3>
-              {friendRequests.filter((r) => r.from_user.id === currentUser?.id).map((r) => (
-                <StatusRequestRow key={r.id} avatar={r.to_user} name={r.to_user.nickname || r.to_user.username} message={r.message} status={r.status} />
-              ))}
-            </section>
-          )}
-          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status !== "pending").length > 0 && (
-            <section className="messages-group">
-              <h3 className="messages-group-title">已处理的好友申请</h3>
-              {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status !== "pending").map((r) => (
-                <StatusRequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} status={r.status} />
-              ))}
-            </section>
-          )}
-          {invites.length > 0 && (
-            <section className="messages-group">
-              <h3 className="messages-group-title">群邀请（{invites.length}）</h3>
-              {invites.map((i) => (
-                <RequestRow
-                  key={i.id}
-                  avatar={i.inviter}
-                  name={`${i.conversation_title}（来自 ${i.inviter.nickname || i.inviter.username}）`}
-                  message="邀请你加入群聊"
-                  onAccept={() => handleInviteAction(i, "accept")}
-                  onReject={() => handleInviteAction(i, "reject")}
-                />
-              ))}
-            </section>
-          )}
-          {joinRequests.length > 0 && (
-            <section className="messages-group">
-              <h3 className="messages-group-title">入群申请（{joinRequests.length}）</h3>
-              {joinRequests.map((r) => (
-                <RequestRow
-                  key={r.id}
-                  avatar={r.applicant}
-                  name={`${r.applicant.nickname || r.applicant.username} → ${r.conversation_title}`}
-                  message={r.message}
-                  onAccept={() => handleJoinRequestAction(r, "accept")}
-                  onReject={() => handleJoinRequestAction(r, "reject")}
-                />
-              ))}
-            </section>
-          )}
           <section className="messages-group">
             <h3 className="messages-group-title">我的好友（{friendList.length}）</h3>
             {friendList.map((f) => (
@@ -305,7 +251,7 @@ export function MessagesPage() {
                 </button>
               </div>
             ))}
-            {friendList.length === 0 && friendRequests.length === 0 && invites.length === 0 && joinRequests.length === 0 && (
+            {friendList.length === 0 && (
               <p className="messages-empty">还没有好友，去搜索添加吧</p>
             )}
           </section>
@@ -356,27 +302,6 @@ export function MessagesPage() {
           {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length === 0 && invites.length === 0 && joinRequests.length === 0 && <p className="messages-empty">暂无待处理认证消息</p>}
         </div>
       )}
-    </div>
-  );
-}
-
-function StatusRequestRow({
-  avatar,
-  name,
-  message,
-  status,
-}: {
-  avatar: { nickname: string; username: string; avatar: string; online: boolean };
-  name: string;
-  message: string;
-  status: "pending" | "accepted" | "rejected";
-}) {
-  const label = status === "pending" ? "待处理" : status === "accepted" ? "已同意" : "已拒绝";
-  return (
-    <div className="request-row">
-      <Avatar label={avatar.nickname || avatar.username} size={36} online={avatar.online} imageUrl={avatar.avatar || null} />
-      <div className="request-body"><span className="request-name">{name}</span>{message && <span className="request-msg">{message}</span>}</div>
-      <span className={`request-status request-status-${status}`}>{label}</span>
     </div>
   );
 }

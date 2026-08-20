@@ -13,12 +13,80 @@
   overflow: hidden;
 }
 
+.voice-room-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-room-voice-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.voice-room-body .voice-panel {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+.voice-room-chat-card {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+}
+
+.voice-room-chat-card-head {
+  display: none;
+}
+
+.voice-room-chat-card > .voice-room-chat-list {
+  display: none;
+}
+
+.voice-room-chat-card.is-expanded > .voice-room-chat-list {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  display: flex;
+  width: 100%;
+  height: 300px;
+  max-height: 300px;
+  flex: none;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  box-shadow: 0 -4px 16px rgba(70, 91, 146, 0.12);
+}
+
+.voice-room-chat-card > .composer-row {
+  padding: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .voice-room-head {
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3);
   background: var(--glass-bg);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
@@ -37,15 +105,130 @@
 
 .voice-room-input {
   flex: none;
-  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
   border-top: 1px solid var(--glass-border);
   background: var(--glass-bg-strong);
+  position: relative;
+  margin-top: auto;
+  padding: 0;
+}
+
+.voice-room-input .composer-row {
+  padding: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.voice-room-chat-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  box-shadow: 0 -4px 16px rgba(70, 91, 146, 0.12);
+}
+
+.voice-room-chat-popup-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.voice-room-chat-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.voice-room-chat-toggle {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.voice-room-chat-toggle:hover {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
+}
+
+.voice-room-chat-toggle-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.voice-room-chat-toggle-btn:hover {
+  background: var(--glass-bg-hover);
+  color: var(--text-primary);
+}
+
+.voice-room-chat-expand-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.voice-room-chat-expand-btn:hover {
+  color: var(--text-primary);
+}
+
+.voice-room-chat-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .voice-room-chat-list {
-  max-height: 150px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  margin-bottom: var(--sp-2);
+  padding: var(--sp-3);
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
@@ -72,6 +255,92 @@
   max-height: 80px;
   object-fit: cover;
   border-radius: var(--radius-sm);
+}
+
+@media (min-width: 769px) {
+  .voice-room-body {
+    padding: var(--sp-4);
+    gap: var(--sp-4);
+  }
+
+  .voice-room-head {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+  }
+
+  .voice-room-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    gap: var(--sp-4);
+    overflow: hidden;
+  }
+
+  .voice-room-voice-card,
+  .voice-room-chat-card {
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    box-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+    overflow: hidden;
+  }
+
+  .voice-room-voice-card {
+    padding: var(--sp-4);
+  }
+
+  .voice-room-voice-card .voice-panel {
+    width: 100%;
+    max-width: none;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+  }
+
+  .voice-room-chat-card {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .voice-room-chat-card-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+  }
+
+  .voice-room-chat-count-label {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .voice-room-chat-card .voice-room-chat-list {
+    display: flex;
+    flex: 1;
+    max-height: none;
+  }
+
+  .voice-room-chat-card .composer-row {
+    flex: none;
+    padding: var(--sp-3);
+    border-top: 1px solid var(--glass-border);
+  }
+
+  .voice-room-chat-card .composer-input {
+    min-width: 0;
+  }
+
+  .voice-room-chat-card .voice-room-chat-toggle-btn {
+    display: none;
+  }
+
+  .voice-room-input {
+    display: none;
+  }
 }
 
 /* ================= 来源标识（R-V1，design.md §12.10 Micro Tag） ================= */
@@ -255,6 +524,7 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--sp-3);
+  padding: 0;
 }
 
 .group-voice .voice-channel-card {
