@@ -19,6 +19,7 @@ import { IconBack, IconClose, IconSearch } from "../../components/icons";
 import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
 import { useHomeStore } from "../../stores/home";
+import { goUserProfile } from "../../utils/navigation";
 
 const ROLE_LABEL: Record<string, string> = {
   owner: "群主",
@@ -353,6 +354,8 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                 size={36}
                 online={m.user.online}
                 imageUrl={m.user.avatar || null}
+                onClick={() => goUserProfile(currentUser?.id, m.user.id)}
+                ariaLabel={`查看 ${m.user.nickname || m.user.username} 的个人主页`}
               />
               <span className="group-info-member-name">{m.user.nickname || m.user.username}</span>
               {m.user.id === currentUser?.id && <span className="group-info-me">我</span>}

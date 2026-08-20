@@ -6,7 +6,9 @@
  * 在线状态双通道：光环 + 「在线/离线」文字（design.md §10）。
  */
 import type { ConversationSummary } from "../../api/types";
+import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
+import { goUserProfile } from "../../utils/navigation";
 import { Avatar } from "../Avatar";
 
 export function ConversationList({
@@ -21,6 +23,7 @@ export function ConversationList({
   onSelect: (id: string) => void;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
 
   if (conversations.length === 0) {
     return <div className="conv-empty">暂无会话，点击上方「新会话」发起</div>;
@@ -56,6 +59,15 @@ export function ConversationList({
                 online={isPrivate ? peerOnline || isElysia : false}
                 isElysia={isElysia}
                 imageUrl={isPrivate ? (conv.peer?.avatar || null) : (conv.avatar || null)}
+                onClick={
+                  isPrivate && conv.peer
+                    ? (e) => {
+                        e.stopPropagation();
+                        goUserProfile(currentUserId, conv.peer!.id);
+                      }
+                    : undefined
+                }
+                ariaLabel={isPrivate ? `查看 ${title} 的个人主页` : undefined}
               />
               <span className="conv-item-body">
                 <span className="conv-item-title">{title}</span>

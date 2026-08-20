@@ -23,6 +23,7 @@ import { useBadgesStore } from "../stores/badges";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { useNoticeStore } from "../stores/notices";
+import { goUserProfile } from "../utils/navigation";
 
 type Tab = "chat" | "friends" | "requests";
 
@@ -238,7 +239,17 @@ export function MessagesPage() {
                       .catch((e) => setActionError(e instanceof Error ? e.message : "打开私聊失败"));
                   }}
                 >
-                  <Avatar label={f.user.nickname || f.user.username} size={40} online={f.user.online} imageUrl={f.user.avatar || null} />
+                  <Avatar
+                    label={f.user.nickname || f.user.username}
+                    size={40}
+                    online={f.user.online}
+                    imageUrl={f.user.avatar || null}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goUserProfile(useAuthStore.getState().currentUser?.id, f.user.id);
+                    }}
+                    ariaLabel={`查看 ${f.user.nickname || f.user.username} 的个人主页`}
+                  />
                   <span className="friend-row-name">{f.user.nickname || f.user.username}</span>
                 </button>
                 <button

@@ -17,6 +17,7 @@ import { useBadgesStore } from "../../stores/badges";
 import { useChatStore } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
 import { useNoticeStore } from "../../stores/notices";
+import { goUserProfile } from "../../utils/navigation";
 import type { ConversationSummary } from "../../api/types";
 
 type Tab = "chat" | "friends" | "requests";
@@ -208,7 +209,17 @@ export function WideMessagesSidebar({
             friendList.map((f) => (
               <div key={f.user.id} className="friend-row">
                 <button type="button" className="friend-row-main" onClick={() => openUserChat(f.user.id)}>
-                  <Avatar label={f.user.nickname || f.user.username} size={36} online={f.user.online} imageUrl={f.user.avatar || null} />
+                  <Avatar
+                    label={f.user.nickname || f.user.username}
+                    size={36}
+                    online={f.user.online}
+                    imageUrl={f.user.avatar || null}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goUserProfile(currentUser?.id, f.user.id);
+                    }}
+                    ariaLabel={`查看 ${f.user.nickname || f.user.username} 的个人主页`}
+                  />
                   <span className="friend-row-name">{f.user.nickname || f.user.username}</span>
                 </button>
                 <button

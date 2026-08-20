@@ -22,6 +22,8 @@ export interface UserPublic {
   voice_room_id?: number | null;
   is_live?: boolean;
   live_room_id?: number | null;
+  /** GET /users/<id>/ 追加：与当前用户的好友关系 */
+  relation?: "self" | "friend" | "pending_sent" | "pending_received" | "none";
 }
 
 /** 注册入参（RegisterSerializer） */

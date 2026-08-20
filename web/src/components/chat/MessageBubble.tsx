@@ -9,6 +9,7 @@
  * - 撤回态弱化 + 「已撤回」标签。
  */
 import type { ChatMessage } from "../../api/types";
+import { Avatar } from "../Avatar";
 import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
 import { MediaContent } from "./MediaContent";
@@ -43,6 +44,9 @@ export function MessageBubble({
   isSelf,
   isElysia = false,
   senderName,
+  senderAvatar,
+  senderAvatarLabel,
+  onSenderClick,
   quoteText,
   onQuote,
   onRecall,
@@ -53,6 +57,12 @@ export function MessageBubble({
   isElysia?: boolean;
   /** 群聊显示发送者名 */
   senderName?: string | null;
+  /** 发送者头像 URL（气泡行左右显示，design.md §4 Chat Bubbles） */
+  senderAvatar?: string | null;
+  /** 无头像图时的首字符标签 */
+  senderAvatarLabel?: string | null;
+  /** 头像点击 → 个人主页 */
+  onSenderClick?: () => void;
   /** 被引用消息的预览文本（父级解析） */
   quoteText?: string | null;
   onQuote?: (msg: ChatMessage) => void;
@@ -69,8 +79,57 @@ export function MessageBubble({
         ? "bubble bubble-elysia"
         : "bubble bubble-other";
 
+  // 发送者头像：只要有发送者信息就显示（无头像图时 Avatar 回退首字符光环），
+  // 撤销/系统消息不显示；己方在气泡右侧、对方在气泡左侧（msg-row flex 布局）。
+  const showSenderHalo =
+    !recalled && message.type !== "system" && (senderAvatarLabel != null || senderAvatar != null);
+
+  const senderHalo = showSenderHalo ? (
+    <Avatar
+      label={senderAvatarLabel ?? undefined}
+      size={32}
+      online={!isSelf}
+      imageUrl={senderAvatar || null}
+      onClick={onSenderClick}
+      ariaLabel={senderName ?? "发送者个人主页"}
+    />
+  ) : null;
+
+  // 消息操作按钮（收藏/引用/撤回）：与气泡同一行 —— 别人的气泡右侧、自己的气泡左侧
+  const actions = !recalled && message.type !== "system" ? (
+    <div className="msg-actions">
+      <FavoriteButton targetType="message" targetId={message.id} compact />
+      {onQuote && (
+        <button
+          type="button"
+          className="msg-action-btn"
+          onClick={() => onQuote(message)}
+          aria-label="引用回复"
+        >
+          <IconQuote width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+          引用
+        </button>
+      )}
+      {onRecall && (
+        <button
+          type="button"
+          className="msg-action-btn"
+          onClick={() => onRecall(message)}
+          aria-label="撤回消息"
+        >
+          <IconUndo width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+          撤回
+        </button>
+      )}
+    </div>
+  ) : null;
+
+  // 单行布局（design.md §4）：统一 DOM = [头像][气泡][操作]；
+  // peer 行 row 直排 = [头像][气泡][操作]；self 行 row-reverse 翻转 = [操作][气泡][头像]，
+  // 自己的气泡整体居右、头像在最右。
   return (
     <div className={`msg-row ${isSelf ? "self" : "peer"}`}>
+      {senderHalo}
       <div className="msg-body">
         {!isSelf && senderName && <span className="msg-sender">{senderName}</span>}
         <div className={`${bubbleClass} ${isMedia && !recalled ? "bubble-media" : ""}`}>
@@ -102,33 +161,7 @@ export function MessageBubble({
           )}
         </div>
       </div>
-      {!recalled && message.type !== "system" && (
-        <div className="msg-actions">
-          <FavoriteButton targetType="message" targetId={message.id} compact />
-          {onQuote && (
-            <button
-              type="button"
-              className="msg-action-btn"
-              onClick={() => onQuote(message)}
-              aria-label="引用回复"
-            >
-              <IconQuote width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-              引用
-            </button>
-          )}
-          {onRecall && (
-            <button
-              type="button"
-              className="msg-action-btn"
-              onClick={() => onRecall(message)}
-              aria-label="撤回消息"
-            >
-              <IconUndo width={12} height={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-              撤回
-            </button>
-          )}
-        </div>
-      )}
+      {actions}
     </div>
   );
 }

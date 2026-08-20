@@ -18,6 +18,8 @@ import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useSearchStore } from "../stores/search";
 import { useChatStore } from "../stores/chat";
+import { useAuthStore } from "../stores/auth";
+import { goUserProfile } from "../utils/navigation";
 import { chatWS } from "../ws/chat";
 import type { ChatServerFrame } from "../api/types";
 
@@ -195,7 +197,17 @@ export function SearchPage() {
           >
             {(results.users?.items ?? []).map((u) => (
               <button key={u.id} type="button" className="search-row" onClick={() => setSelectedUser(u)}>
-                <Avatar label={u.nickname || u.username} size={36} online={u.online} imageUrl={u.avatar || null} />
+                <Avatar
+                  label={u.nickname || u.username}
+                  size={36}
+                  online={u.online}
+                  imageUrl={u.avatar || null}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goUserProfile(useAuthStore.getState().currentUser?.id, u.id);
+                  }}
+                  ariaLabel={`查看 ${u.nickname || u.username} 的个人主页`}
+                />
                 <span className="search-row-title">{u.nickname || u.username}</span>
                 {u.signature && <span className="search-row-sub">{u.signature}</span>}
               </button>

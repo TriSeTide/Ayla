@@ -35,10 +35,14 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { SearchPage } from "./pages/SearchPage";
 import { VoiceHubPage } from "./pages/VoiceHubPage";
+import { UserProfilePage } from "./pages/UserProfilePage";
+import { NavigateBridge } from "./components/NavigateBridge";
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <NavigateBridge />
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
@@ -64,6 +68,7 @@ export default function App() {
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/user/:userId" element={<UserProfilePage />} />
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/posts/:postId" element={<GroupPage />} />
@@ -73,6 +78,7 @@ export default function App() {
       </Route>
 
       <Route path="*" element={<Navigate to="/group" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }

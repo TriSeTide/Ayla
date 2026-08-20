@@ -228,3 +228,29 @@
     margin: 0 auto;
   }
 }
+
+/* ================= 他人主页（UserProfilePage，/user/:id） =================
+   与 ProfilePage 共用 .profile-column / .profile-card / .profile-identity 等类。 */
+
+/* 在线状态徽标（光环 + 文字双通道，design.md §10） */
+.profile-presence {
+  align-self: flex-start;
+  padding: 2px var(--sp-3);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--ice-100);
+  color: var(--text-secondary);
+}
+.profile-presence.is-online {
+  background: var(--sakura-300);
+  color: var(--grape-700);
+}
+
+/* 签名行（独立一段，次要文字） */
+.profile-signature-row {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}

@@ -134,14 +134,13 @@ export function ProfilePage() {
         <div className="glass-card profile-topbar">
           <button
             type="button"
-            className="msg-action-btn"
-            onClick={() => navigate("/group")}
-            aria-label="返回主页"
+            className="icon-btn-40"
+            onClick={() => navigate(-1)}
+            aria-label="返回"
           >
-            <IconBack width={14} height={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            返回
+            <IconBack width={20} height={20} />
           </button>
-          <span className="profile-topbar-title">个人页</span>
+          <span className="profile-topbar-title">个人主页</span>
         </div>
 
         {contentError && <div className="chat-notice" role="alert">{contentError}</div>}

@@ -20,12 +20,15 @@ import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
 import { usePostsStore } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
+import { useAuthStore } from "../stores/auth";
 import { chatWS } from "../ws/chat";
+import { goUserProfile } from "../utils/navigation";
 import { getVisibilityLabels } from "../utils/visibility";
 
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [searchParams] = useSearchParams();
   const fromGroup = groupId ?? searchParams.get("fromGroup");
   const returnTo = fromGroup ? `/group/${encodeURIComponent(fromGroup)}/posts` : "/posts";
@@ -328,6 +331,8 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
                 size={36}
                 online={post.author.online}
                 imageUrl={post.author.avatar || null}
+                onClick={() => goUserProfile(currentUserId, post.author.id)}
+                ariaLabel={`查看 ${post.author.nickname || post.author.username} 的个人主页`}
               />
               <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
               <span className="post-card-time">{new Date(post.created_at).toLocaleString("zh-CN")}</span>

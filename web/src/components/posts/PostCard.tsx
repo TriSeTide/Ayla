@@ -10,6 +10,8 @@ import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { IconHeart, IconMessage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { useAuthStore } from "../../stores/auth";
+import { goUserProfile } from "../../utils/navigation";
 import { getVisibilityLabels } from "../../utils/visibility";
 
 function formatTime(iso: string): string {
@@ -38,6 +40,7 @@ export function PostCard({
   onToggleFavorite: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const images = post.images.filter((i) => i.media?.thumbnail);
   const longBody = post.body.length > 120;
 
@@ -52,6 +55,11 @@ export function PostCard({
             size={36}
             online={post.author.online}
             imageUrl={post.author.avatar || null}
+            onClick={(e) => {
+              e.stopPropagation();
+              goUserProfile(currentUserId, post.author.id);
+            }}
+            ariaLabel={`查看 ${post.author.nickname || post.author.username} 的个人主页`}
           />
           <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
           <span className="post-card-time">{formatTime(post.created_at)}</span>

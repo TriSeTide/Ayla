@@ -20,6 +20,7 @@ urlpatterns = [
     path("me/badges/", views.BadgesView.as_view(), name="me-badges"),
     # 用户
     path("users/search/", views.UserSearchView.as_view(), name="user-search"),
+    path("users/<str:user_id>/", views.UserDetailView.as_view(), name="user-detail"),
     # 好友
     path("friends/", views.FriendListView.as_view(), name="friend-list"),
     path(

@@ -133,3 +133,57 @@ class TestFriends:
         items = ca.get("/api/v1/friends/").json()
         for item in items:
             assert item["user"]["id"] != a.id
+
+
+@pytest.mark.django_db
+class TestUserDetail:
+    """GET /users/<id>/ —— 他人主页公开资料 + 与我的好友关系。"""
+
+    def test_detail_none_relation(self, auth_client, user_factory):
+        """无好友关系时 relation=none，含公开资料字段。"""
+        b = user_factory(username="ud_b", nickname="贝贝", signature="你好呀")
+        ca, a = auth_client(username="ud_a")
+        resp = ca.get(f"/api/v1/users/{b.id}/")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == b.id
+        assert data["nickname"] == "贝贝"
+        assert data["signature"] == "你好呀"
+        assert data["relation"] == "none"
+
+    def test_detail_self(self, auth_client):
+        """查看自己 relation=self。"""
+        ca, a = auth_client(username="ud_self")
+        resp = ca.get(f"/api/v1/users/{a.id}/")
+        assert resp.status_code == 200
+        assert resp.json()["relation"] == "self"
+
+    def test_detail_friend(self, auth_client, user_factory):
+        """已是好友 relation=friend。"""
+        b = user_factory(username="ud_fb")
+        ca, a = auth_client(username="ud_fa")
+        req = ca.post(
+            "/api/v1/friends/requests/", {"to_user_id": str(b.id)}, format="json"
+        )
+        cb = auth_as(b)
+        cb.post(
+            f"/api/v1/friends/requests/{req.json()['id']}/action/",
+            {"action": "accept"},
+            format="json",
+        )
+        resp = ca.get(f"/api/v1/users/{b.id}/")
+        assert resp.json()["relation"] == "friend"
+
+    def test_detail_pending_sent(self, auth_client, user_factory):
+        """我发出的待处理申请 relation=pending_sent。"""
+        b = user_factory(username="ud_psb")
+        ca, _ = auth_client(username="ud_psa")
+        ca.post("/api/v1/friends/requests/", {"to_user_id": str(b.id)}, format="json")
+        resp = ca.get(f"/api/v1/users/{b.id}/")
+        assert resp.json()["relation"] == "pending_sent"
+
+    def test_detail_not_found(self, auth_client):
+        """不存在的用户返回 404。"""
+        ca, _ = auth_client(username="ud_nf")
+        resp = ca.get("/api/v1/users/no-such-user/")
+        assert resp.status_code == 404

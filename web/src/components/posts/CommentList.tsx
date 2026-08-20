@@ -10,6 +10,8 @@ import { Avatar } from "../Avatar";
 import { CommentComposer } from "./CommentComposer";
 import { ResourceImage } from "../ResourceImage";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
+import { useAuthStore } from "../../stores/auth";
+import { goUserProfile } from "../../utils/navigation";
 import type { CSSProperties } from "react";
 
 function formatTime(iso: string): string {
@@ -60,6 +62,7 @@ export function CommentList({
   revealItems?: boolean;
 }) {
   const byId = new Map(comments.map((c) => [c.id, c]));
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
 
   return (
     <div className="comment-list">
@@ -81,6 +84,8 @@ export function CommentList({
                   size={32}
                   online={c.author.online}
                   imageUrl={c.author.avatar || null}
+                  onClick={() => goUserProfile(currentUserId, c.author.id)}
+                  ariaLabel={`查看 ${c.author.nickname || c.author.username} 的个人主页`}
                 />
                 <div className="comment-body">
                   <span className="comment-nick">{c.author.nickname || c.author.username}</span>

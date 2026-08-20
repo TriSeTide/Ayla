@@ -18,6 +18,7 @@ import { loadHistory, loadMoreHistory, markReadLatest, recallMessage } from "../
 import { useChatStore } from "../../stores/chat";
 import { useMessageStore } from "../../stores/message";
 import { chatWS } from "../../ws/chat";
+import { goUserProfile } from "../../utils/navigation";
 
 export function PrivateChatPane({
   conversationId,
@@ -132,6 +133,12 @@ export function PrivateChatPane({
           size={36}
           online={peer?.online ?? false}
           imageUrl={peer?.avatar || null}
+          onClick={
+            peer && !(elysiaUserId != null && peer.id === elysiaUserId)
+              ? () => goUserProfile(null, peer.id)
+              : undefined
+          }
+          ariaLabel={peer ? `查看 ${title} 的个人主页` : undefined}
         />
         <div className="private-chat-title">
           <span className="private-chat-name">{title}</span>

@@ -19,8 +19,10 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { UserPublic } from "../../api/types";
 import { ensureUser, getCachedUser } from "../../api/users";
+import { useAuthStore } from "../../stores/auth";
 import { useVoiceStore } from "../../stores/voice";
 import type { VoiceMemberState } from "../../stores/voice";
+import { goUserProfile } from "../../utils/navigation";
 import { Avatar } from "../Avatar";
 import { IconMic, IconMicOff, IconSpeaker, IconSpeakerOff } from "../icons";
 
@@ -111,6 +113,7 @@ export function VoiceMemberRow({
   onToggleMemberMuted: (userId: string) => void;
 }) {
   const [user, setUser] = useState<UserPublic | null>(() => getCachedUser(member.user_id));
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   // 自己的麦克风实时音量（0~1，未开麦为 0）——跳动条伸缩
   const localAudioLevel = useVoiceStore((s) => (isSelf ? s.localAudioLevel : 0));
   // 自己的麦克风音量设定（0~100，100 = 原始）
@@ -141,6 +144,8 @@ export function VoiceMemberRow({
         online
         isElysia={isElysia}
         imageUrl={user?.avatar || null}
+        onClick={() => goUserProfile(currentUserId, member.user_id)}
+        ariaLabel={`查看 ${displayName} 的个人主页`}
       />
       <div className="voice-member-main">
         <div className="voice-member-topline">

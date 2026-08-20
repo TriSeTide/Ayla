@@ -10,6 +10,11 @@ export function searchUsers(q: string) {
   return apiRequest<UserPublic[]>(`/users/search/?q=${encodeURIComponent(q)}`);
 }
 
+/** GET /users/<id>/ —— 他人主页：公开资料 + 与我的好友关系（relation 字段） */
+export function getUserDetail(userId: string) {
+  return apiRequest<UserPublic>(`/users/${encodeURIComponent(userId)}/`);
+}
+
 /* ---------- 用户资料懒拉缓存（M5-3：语音成员昵称/头像不在 voice store 复制数据源） ----------
  * 后端无 GET /users/<id>/ 详情路由，只能经 users/search 按查询命中后缓存。
  * 搜索后端按 username/nickname 匹配；语音成员加载时以 user_id 作查询词命中精确项。 */

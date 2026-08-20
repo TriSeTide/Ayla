@@ -7,7 +7,9 @@
  */
 import type { DanmakuItem } from "../../api/types";
 import { mediaContentUrl, resolveMediaPath } from "../../api/media";
+import { Avatar } from "../Avatar";
 import { ResourceImage } from "../ResourceImage";
+import { goUserProfile } from "../../utils/navigation";
 
 export function DanmakuList({
   danmaku,
@@ -28,6 +30,13 @@ export function DanmakuList({
         ) : (
           danmaku.map((item) => (
             <div key={item.id} className="danmaku-item">
+              <Avatar
+                label={item.sender.nickname}
+                size={20}
+                imageUrl={item.sender.avatar || null}
+                onClick={() => goUserProfile(null, item.sender.user_id)}
+                ariaLabel={`查看 ${item.sender.nickname} 的个人主页`}
+              />
               <span className="danmaku-sender">{item.sender.nickname}：</span>
               <span className="danmaku-content">
                 {item.media_id && item.media ? (

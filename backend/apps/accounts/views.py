@@ -130,6 +130,47 @@ class UserSearchView(generics.ListAPIView):
         return qs.filter(Q(username__icontains=q) | Q(nickname__icontains=q))[:20]
 
 
+class UserDetailView(APIView):
+    """GET /users/<id>/ —— 他人主页：公开资料 + 与我（当前用户）的好友关系。
+
+    关系 relation 取值：
+    - self：目标就是当前用户；
+    - friend：已是好友；
+    - pending_sent：我向对方发出的待处理申请；
+    - pending_received：对方向我发出的待处理申请；
+    - none：无任何关系（可发起加好友）。
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, user_id):
+        try:
+            target = User.objects.get(pk=user_id)
+        except (User.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "用户不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+        if str(target.pk) == str(request.user.pk):
+            relation = "self"
+        elif Friendship.objects.filter(
+            user=request.user, friend=target, status=Friendship.STATUS_ACCEPTED
+        ).exists():
+            relation = "friend"
+        elif FriendRequest.objects.filter(
+            from_user=request.user, to_user=target, status=FriendRequest.STATUS_PENDING
+        ).exists():
+            relation = "pending_sent"
+        elif FriendRequest.objects.filter(
+            from_user=target, to_user=request.user, status=FriendRequest.STATUS_PENDING
+        ).exists():
+            relation = "pending_received"
+        else:
+            relation = "none"
+
+        data = UserPublicSerializer(target, context={"request": request}).data
+        data["relation"] = relation
+        return Response(data)
+
+
 # ---------- 好友 ----------
 
 class FriendListView(generics.ListAPIView):

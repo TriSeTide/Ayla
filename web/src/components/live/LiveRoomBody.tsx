@@ -19,6 +19,7 @@ import { DanmakuInput } from "./DanmakuInput";
 import { DanmakuList } from "./DanmakuList";
 import { LiveChannelRail } from "./LiveChannelRail";
 import { LiveOwnerPanel } from "./LiveOwnerPanel";
+import { LiveHostAvatar } from "./LiveHostAvatar";
 import { LivePlayer } from "./LivePlayer";
 import { LiveStreamAddresses } from "./LiveStreamAddresses";
 import { useDanmaku } from "../../hooks/useDanmaku";
@@ -147,10 +148,17 @@ export function LiveRoomBody({
                 >
                   ← 返回
                 </button>
-                {!showOwnerPanel && (
-                  <span className="live-room-title">
-                    {loading ? "加载中…" : (channel?.title ?? "直播间")}
-                  </span>
+                {!showOwnerPanel && channel && (
+                  <>
+                    <LiveHostAvatar
+                      ownerId={channel.owner_id}
+                      ownerNickname={channel.owner_nickname}
+                      size={32}
+                    />
+                    <span className="live-room-title">
+                      {loading ? "加载中…" : (channel?.title ?? "直播间")}
+                    </span>
+                  </>
                 )}
                 {!showOwnerPanel && channel && getVisibilityLabels(channel).length > 0 && (
                   <div className="post-card-tags">
@@ -172,6 +180,13 @@ export function LiveRoomBody({
               </>
             ) : (
               <>
+                {channel && (
+                  <LiveHostAvatar
+                    ownerId={channel.owner_id}
+                    ownerNickname={channel.owner_nickname}
+                    size={32}
+                  />
+                )}
                 <span className="live-room-title">
                   {loading ? "加载中…" : (channel?.title ?? "直播间")}
                 </span>

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ChatMessage, ConversationSummary } from "../../api/types";
 import { useAuthStore } from "../../stores/auth";
+import { goUserProfile } from "../../utils/navigation";
 import { canRecall, MessageBubble } from "./MessageBubble";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
@@ -48,11 +49,22 @@ export function MessageList({
   const atBottomRef = useRef(true);
   const isGroup = conversation?.type === "group";
 
-  // 发送者 id → 展示名（群聊发送者名 + 爱莉判定辅助）
+  // 发送者 id → 展示名 + 头像（群聊发送者名 + 头像显示，design.md §4 Chat Bubbles）
   const memberNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of conversation?.members ?? []) {
       map.set(m.user.id, m.user.nickname || m.user.username);
+    }
+    return map;
+  }, [conversation]);
+
+  const memberAvatars = useMemo(() => {
+    const map = new Map<string, { avatar: string | null; label: string }>();
+    for (const m of conversation?.members ?? []) {
+      map.set(m.user.id, {
+        avatar: m.user.avatar ?? null,
+        label: m.user.nickname || m.user.username,
+      });
     }
     return map;
   }, [conversation]);
@@ -113,6 +125,9 @@ export function MessageList({
                 isSelf={isSelf}
                 isElysia={elysiaUserId != null && m.sender_id === elysiaUserId}
                 senderName={isGroup && !isSelf ? (memberNames.get(m.sender_id) ?? null) : null}
+                senderAvatar={memberAvatars.get(m.sender_id)?.avatar ?? null}
+                senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
+                onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
                 quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}
                 onQuote={onQuote}
                 onRecall={onRecall && canRecall(m, currentUserId) ? onRecall : undefined}

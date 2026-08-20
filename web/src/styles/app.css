@@ -361,6 +361,28 @@
   background: var(--ice-100);
 }
 
+/* 可点击头像（跳转个人主页）：重置 button 默认样式，保留光环视觉 */
+.avatar-halo-btn {
+  border: 0;
+  padding: 2.5px;
+  cursor: pointer;
+  background: var(--ring-online);
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.avatar-halo-btn.is-offline {
+  background: var(--ice-100);
+}
+.avatar-halo-btn:hover {
+  filter: brightness(1.06);
+}
+.avatar-halo-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+.avatar-halo-btn.is-elysia {
+  animation: halo-breathe 3.2s ease-in-out infinite;
+}
+
 .avatar-halo.is-elysia {
   animation: halo-breathe 3.2s ease-in-out infinite;
 }
@@ -715,15 +737,21 @@
   display: flex;
   align-items: flex-end;
   gap: var(--sp-2);
+  padding: 0 var(--sp-1);
   animation: frost-rise var(--dur-fast) var(--ease-out);
 }
 
+/* 单行布局（design.md §4 Chat Bubbles）：
+   统一 DOM = [头像][气泡][操作]；self 行 row-reverse 翻转 →
+   视觉 = [操作][气泡][头像]，自己的气泡整体居右、头像在最右；
+   peer 行 row 直排 = [头像][气泡][操作]。 */
 .msg-row.self {
   flex-direction: row-reverse;
 }
 
 .msg-body {
-  max-width: 72%;
+  max-width: 70%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
@@ -823,10 +851,12 @@
   max-width: 100%;
 }
 
-/* 气泡操作（引用/撤回）：hover 浮现，键盘可达 */
+/* 气泡操作（收藏/引用/撤回）：与气泡同一行（别人右侧/自己左侧），hover 浮现 */
 .msg-actions {
   display: flex;
+  align-items: center;
   gap: var(--sp-1);
+  padding-bottom: 2px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
@@ -873,15 +903,16 @@
   overflow: hidden;
   border-radius: var(--radius-input);
   background: var(--surface);
+  max-width: 100%;
 }
 
 .media-image {
   display: block;
-  max-width: 320px;
+  max-width: min(320px, 100%);
   max-height: 320px;
   width: auto;
   height: auto;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .media-emoji {
@@ -891,9 +922,11 @@
   object-fit: contain;
 }
 
-/* 媒体气泡：媒体消息不需要文字气泡底色，内容自成卡片 */
+/* 媒体气泡：媒体消息不需要文字气泡底色，内容自成卡片；图片不撑破气泡 */
 .bubble-media {
   padding: var(--sp-1);
+  max-width: 100%;
+  overflow: hidden;
 }
 
 /* 语音：波形 + 时长胶囊 */
@@ -2301,6 +2334,9 @@
 }
 
 .danmaku-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-1);
   font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
@@ -2310,6 +2346,8 @@
   color: var(--text-secondary);
   font-family: var(--font-utility);
   font-size: 12px;
+  flex: none;
+  padding-top: 2px;
 }
 
 .danmaku-content {
