@@ -8,11 +8,14 @@ export function CommentComposer({
   replyTarget,
   onReplyClear,
   className = "",
+  inputEntered = true,
 }: {
   onSend: (body: string, replyTo: number | null, mediaId?: string | null) => Promise<void>;
   replyTarget: PostComment | null;
   onReplyClear: () => void;
   className?: string;
+  /** 窄屏详情页复用进直播间的底部输入框滑入状态。 */
+  inputEntered?: boolean;
 }) {
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -54,7 +57,13 @@ export function CommentComposer({
   };
 
   return (
-    <div className={`comment-composer ${className}`.trim()}>
+    <div
+      className={`comment-composer ${className}`.trim()}
+      style={{
+        transform: inputEntered ? "translateY(0)" : "translateY(100%)",
+        transition: "transform 250ms var(--ease-out)",
+      }}
+    >
       {replyTarget && (
         <div className="comment-reply-bar">
           回复 @{replyTarget.author.nickname || replyTarget.author.username}

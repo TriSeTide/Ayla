@@ -30,6 +30,7 @@ export function VoiceRoomBody({
   onToggleMemberMuted,
   onBack,
   onDeleteChannel,
+  inputEntered,
 }: {
   channelId?: string;
   ownerId?: string;
@@ -127,53 +128,61 @@ export function VoiceRoomBody({
   );
 
   const composer = (
-    <div className="composer-row">
-      <label className="composer-tool-btn" aria-label="发送房内图片">
-        <IconImage width={18} height={18} />
-        <input
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) await sendImage(file);
+    <div
+      className="voice-room-composer"
+      style={{
+        transform: inputEntered ? "translateY(0)" : "translateY(100%)",
+        transition: "transform 250ms var(--ease-out)",
+      }}
+    >
+      <div className="composer-row">
+        <label className="composer-tool-btn" aria-label="发送房内图片">
+          <IconImage width={18} height={18} />
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) await sendImage(file);
+            }}
+          />
+        </label>
+        <textarea
+          className="field composer-input"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void sendMessage();
+            }
           }}
+          placeholder="在语音房内聊天"
+          rows={1}
+          disabled={sending || uploading}
         />
-      </label>
-      <textarea
-        className="field composer-input"
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            void sendMessage();
-          }
-        }}
-        placeholder="在语音房内聊天"
-        rows={1}
-        disabled={sending || uploading}
-      />
-      <button
-        type="button"
-        className="btn btn-primary"
-        disabled={sending || uploading || !text.trim()}
-        onClick={() => void sendMessage()}
-        aria-label="发送语音房消息"
-      >
-        <IconSend width={15} height={15} />
-      </button>
-      <button
-        type="button"
-        className="voice-room-chat-toggle-btn"
-        onClick={() => setChatExpanded(!chatExpanded)}
-        aria-label={chatExpanded ? "收起聊天" : "展开聊天"}
-        aria-expanded={chatExpanded}
-      >
-        {chatExpanded ? "▼" : "▲"}
-        {messages.length > 0 && <span className="voice-room-chat-count">{messages.length}</span>}
-      </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={sending || uploading || !text.trim()}
+          onClick={() => void sendMessage()}
+          aria-label="发送语音房消息"
+        >
+          <IconSend width={15} height={15} />
+        </button>
+        <button
+          type="button"
+          className="voice-room-chat-toggle-btn"
+          onClick={() => setChatExpanded(!chatExpanded)}
+          aria-label={chatExpanded ? "收起聊天" : "展开聊天"}
+          aria-expanded={chatExpanded}
+        >
+          {chatExpanded ? "▼" : "▲"}
+          {messages.length > 0 && <span className="voice-room-chat-count">{messages.length}</span>}
+        </button>
+      </div>
     </div>
   );
 

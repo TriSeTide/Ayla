@@ -2,8 +2,8 @@
  * PostDetailPage —— 帖子详情（路由 /posts/:postId，F6，R-P3/R-P4）。
  *
  * 详情正文（图片九宫格 / 超 3 行折叠）+ 评论（列表 + 回复 + 发评论）+ 收藏（切换即时反馈）+
- * 删除（仅作者，二次确认）。窄屏：底栏原位替换为评论输入框（usePostDetailTransition，
- * 交叉淡化无位移，与进群/进房动画不同）。
+ * 删除（仅作者，二次确认）。窄屏：评论输入框与进入直播间一致，
+ * 底栏下滑离场后输入框延迟从底部滑入。
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -16,8 +16,9 @@ import { CommentComposer } from "../components/posts/CommentComposer";
 import { ResourceImage } from "../components/ResourceImage";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconHeart } from "../components/icons";
-import { usePostDetailTransition } from "../hooks/usePostDetailTransition";
+import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { usePostsStore } from "../stores/posts";
+import { useShellStore } from "../stores/shell";
 import { getVisibilityLabels } from "../utils/visibility";
 
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
@@ -26,8 +27,16 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const [searchParams] = useSearchParams();
   const fromGroup = groupId ?? searchParams.get("fromGroup");
   const returnTo = fromGroup ? `/group/${encodeURIComponent(fromGroup)}/posts` : "/posts";
-  const { entered } = usePostDetailTransition();
+  // 群内详情沿用群场景顶部导航；只有一级帖子详情才让底栏下滑并带动评论输入框滑入。
+  const usesRoomEntryAnimation = groupId == null;
+  const { inputEntered } = useEnterRoomAnimation(usesRoomEntryAnimation);
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
+
+  useEffect(() => {
+    if (!usesRoomEntryAnimation) return;
+    useShellStore.getState().setBottomTabsLeaving(true);
+    return () => useShellStore.getState().setBottomTabsLeaving(false);
+  }, [usesRoomEntryAnimation]);
 
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<PostComment[]>([]);
@@ -281,10 +290,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
           </footer>
         </article>
 
-        <div
-          className="post-detail-comments"
-          style={{ opacity: entered ? 1 : 0, transition: "opacity 200ms var(--ease-out)" }}
-        >
+        <div className="post-detail-comments">
           {commentError && <div className="chat-notice" role="alert">{commentError}</div>}
           <CommentList
             comments={comments}
@@ -299,6 +305,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       </div>
       <CommentComposer
         className="post-detail-composer"
+        inputEntered={inputEntered}
         onSend={sendComment}
         replyTarget={replyTarget}
         onReplyClear={() => setReplyTarget(null)}

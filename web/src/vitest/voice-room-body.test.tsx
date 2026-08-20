@@ -16,7 +16,7 @@ vi.mock("../api/voice", async () => {
   };
 });
 
-function renderBody(channelId?: string) {
+function renderBody(channelId?: string, inputEntered = true) {
   return render(
     <VoiceRoomBody
       channelId={channelId}
@@ -31,7 +31,7 @@ function renderBody(channelId?: string) {
       onLocalVolumeChange={vi.fn()}
       onToggleMemberMuted={vi.fn()}
       onBack={vi.fn()}
-      inputEntered
+      inputEntered={inputEntered}
     />,
   );
 }
@@ -66,5 +66,30 @@ describe("VoiceRoomBody 房内独立聊天", () => {
   it("尚未进入语音房时不显示独立聊天输入框", () => {
     renderBody();
     expect(screen.queryByPlaceholderText("在语音房内聊天")).not.toBeInTheDocument();
+  });
+
+  it("群外进入语音房时，输入框完整复用直播间的底部滑入动画", () => {
+    const { container, rerender } = renderBody("v1", false);
+    expect(container.querySelector(".voice-room-composer")).toHaveStyle({ transform: "translateY(100%)" });
+    expect(container.querySelector(".voice-room-composer")).toHaveStyle({ transition: "transform 250ms var(--ease-out)" });
+
+    rerender(
+      <VoiceRoomBody
+        channelId="v1"
+        channelName="语音房"
+        livekit="connected"
+        wsConnection="online"
+        elysiaProfile={null}
+        onToggleMic={vi.fn()}
+        onLeave={vi.fn()}
+        onRejoin={vi.fn()}
+        onVolumeChange={vi.fn()}
+        onLocalVolumeChange={vi.fn()}
+        onToggleMemberMuted={vi.fn()}
+        onBack={vi.fn()}
+        inputEntered
+      />,
+    );
+    expect(container.querySelector(".voice-room-composer")).toHaveStyle({ transform: "translateY(0)" });
   });
 });

@@ -5,7 +5,7 @@
  *   窄屏（≤768px）：内容 + BottomTabs（五 tab）+ MessageFAB + CreateFAB；
  *   宽屏（>768px）：TopNav 常驻 + 内容 + CreateFAB。
  * - 窄屏群场景（/group/:id[:/scene]）：GroupPage 自渲染顶部导航条（进群动画=底栏上移），壳层不出底栏（F3）。
- * - 窄屏直播间（/live/:channelId）：底栏**下滑走**进房动画（shell store 驱动，F4，方向与进群相反）。
+ * - 窄屏直播间与帖子详情：底栏**下滑走**，对应输入框延迟滑入（shell store 驱动，方向与进群相反）。
  * - 宽屏直播间：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏）。
  */
 import { useEffect } from "react";
@@ -19,7 +19,7 @@ import { MessageFab } from "./MessageFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isMessagesRoute, isPostDetailRoute, isPrivateChatRoute, isVoiceRoomRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isMessagesRoute, isPrivateChatRoute, isVoiceRoomRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
 const BADGES_POLL_INTERVAL_MS = 30_000;
 
@@ -32,8 +32,6 @@ export function AppShell() {
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
   const groupSceneNarrow = isNarrow && isGroupScene(pathname);
-  // 帖子详情窄屏：底栏原位替换为评论输入框（R-P3）
-  const postDetailNarrow = isNarrow && isPostDetailRoute(pathname);
   // 私聊聊天窄屏：底部有输入框，不渲染底栏/消息入口（需求：下方有输入框时不能有导航栏）
   const privateChatNarrow = isNarrow && isPrivateChatRoute(pathname);
   // 一级语音房与直播间一样由房内输入框替换主导航栏；离房时路由立即恢复底栏。
@@ -52,7 +50,7 @@ export function AppShell() {
     ? badges.private_unread + badges.friend_requests + badges.group_invites + badges.join_requests_pending
     : 0;
 
-  // 窄屏进房动画（直播间/语音房，F4/F5）：底栏下滑走（translateY 0→100%，200ms ease-in）
+  // 窄屏进入直播间、语音房或帖子详情：底栏下滑走（translateY 0→100%，200ms ease-in）。
   const leavingStyle = {
     transform: `translateY(${bottomTabsLeaving ? "100%" : "0"})`,
     transition: "transform 200ms ease-in",
@@ -66,7 +64,7 @@ export function AppShell() {
       </main>
       <SessionActivityIndicator />
       <RealtimeStatusBanner />
-      {isNarrow && !groupSceneNarrow && !postDetailNarrow && !privateChatNarrow && !voiceRoomNarrow ? (
+      {isNarrow && !groupSceneNarrow && !privateChatNarrow && !voiceRoomNarrow ? (
         <>
           <MessageFab style={leavingStyle} unread={messageBadge} backHome={messagesNarrow} />
           <BottomTabs

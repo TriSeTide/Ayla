@@ -92,8 +92,7 @@ export function isGroupScene(pathname: string): boolean {
 }
 
 /**
- * 帖子详情路由（窄屏）：底栏原位替换为评论输入框（R-P3，交叉淡化无位移），
- * 壳层不渲染 BottomTabs / MessageFAB（让位给 PostDetailPage 的评论输入框）。
+ * 帖子详情路由（窄屏）：底栏下滑离场，评论输入框复用直播间的延迟滑入动画。
  */
 export function isPostDetailRoute(pathname: string): boolean {
   return matchPath({ path: "/posts/:postId", end: true }, pathname) != null;
