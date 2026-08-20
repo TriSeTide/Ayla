@@ -55,6 +55,10 @@ class User(AbstractUser):
     is_live = models.BooleanField("正在开播", default=False)
     live_room_id = models.PositiveIntegerField("直播间 ID", null=True, blank=True)
 
+    # 内容可见性：是否向他人展示我的内容（发帖/直播间/桌游）。
+    # 默认关闭（隐私优先）；开启后他人个人页才会显示「他的内容」卡片，收藏永不对外。
+    show_content = models.BooleanField("向他人展示内容", default=False)
+
     class Meta:
         db_table = "users"
         verbose_name = "用户"

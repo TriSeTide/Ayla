@@ -32,9 +32,19 @@ export function ProfilePage() {
   const [nickname, setNickname] = useState(currentUser?.nickname ?? "");
   const [signature, setSignature] = useState(currentUser?.signature ?? "");
   const [status, setStatus] = useState(currentUser?.status ?? "online");
+  const [showContent, setShowContent] = useState(currentUser?.show_content ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  // 「我的内容」三分区展开收起（默认全部收起）
+  const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({
+    posts: false,
+    lives: false,
+    games: false,
+  });
+  const toggleSection = (key: string) =>
+    setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
 
   // 头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -94,6 +104,7 @@ export function ProfilePage() {
     nickname !== (currentUser.nickname ?? "") ||
     signature !== (currentUser.signature ?? "") ||
     status !== (currentUser.status ?? "online") ||
+    showContent !== (currentUser.show_content ?? false) ||
     avatarFile != null;
 
   async function onSave() {
@@ -111,6 +122,7 @@ export function ProfilePage() {
         nickname: nickname.trim() || undefined,
         signature: signature.trim(),
         status,
+        show_content: showContent,
         avatar: avatarUrl,
       });
       setUser(updated);
@@ -230,6 +242,25 @@ export function ProfilePage() {
               />
             </label>
 
+            <label className="profile-form-row profile-show-content-row">
+              <span className="profile-show-content-label">
+                向他人展示内容
+                <small>开启后，他人可在你的主页看到「他的内容」（发帖/直播间/桌游）</small>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showContent}
+                className={`profile-switch ${showContent ? "is-on" : ""}`}
+                onClick={() => {
+                  setShowContent((v) => !v);
+                  setSaved(false);
+                }}
+              >
+                <span className="profile-switch-knob" />
+              </button>
+            </label>
+
             {error && (
               <div className="auth-error" role="alert">
                 {error}
@@ -246,74 +277,86 @@ export function ProfilePage() {
               >
                 {saving ? "保存中…" : "保存修改"}
               </button>
+              <button
+                type="button"
+                className="btn btn-destructive profile-logout-btn"
+                onClick={logout}
+              >
+                <IconLogout width={15} height={15} />
+                退出登录
+              </button>
             </div>
           </div>
         </div>
 
         <div className="solid-card profile-mine">
-          <h4 className="profile-mine-title">我的内容</h4>
+          <div className="profile-mine-head">
+            <h4 className="profile-mine-title">我的内容</h4>
+            <Link to="/favorites" className="profile-favorites-link">我的收藏 →</Link>
+          </div>
 
           <section className="profile-section">
             <div className="profile-section-head">
-              <Link to="/posts/mine" className="profile-section-title">我的发帖</Link>
-              <span className="profile-section-count">{myPosts.length}</span>
+              <button type="button" className="profile-section-toggle" onClick={() => toggleSection("posts")} aria-expanded={sectionsOpen.posts}>
+                <span className="profile-section-title">我的发帖</span>
+                <span className="profile-section-count">{myPosts.length}</span>
+                <span className={`profile-section-chevron ${sectionsOpen.posts ? "is-open" : ""}`}>▸</span>
+              </button>
             </div>
-            {myPosts.length === 0 ? (
-              <p className="profile-section-empty">还没有发帖</p>
-            ) : (
-              myPosts.map((p) => (
-                <Link key={p.id} to={`/posts/${p.id}`} className="profile-section-row">
-                  {p.title || p.body.slice(0, 30)}
-                </Link>
-              ))
+            {sectionsOpen.posts && (
+              myPosts.length === 0 ? (
+                <p className="profile-section-empty">还没有发帖</p>
+              ) : (
+                myPosts.map((p) => (
+                  <Link key={p.id} to={`/posts/${p.id}`} className="profile-section-row">
+                    {p.title || p.body.slice(0, 30)}
+                  </Link>
+                ))
+              )
             )}
           </section>
 
           <section className="profile-section">
             <div className="profile-section-head">
-              <span className="profile-section-title">我的直播间</span>
-              <span className="profile-section-count">{myLives.length}</span>
+              <button type="button" className="profile-section-toggle" onClick={() => toggleSection("lives")} aria-expanded={sectionsOpen.lives}>
+                <span className="profile-section-title">我的直播间</span>
+                <span className="profile-section-count">{myLives.length}</span>
+                <span className={`profile-section-chevron ${sectionsOpen.lives ? "is-open" : ""}`}>▸</span>
+              </button>
             </div>
-            {myLives.length === 0 ? (
-              <p className="profile-section-empty">还没有直播间</p>
-            ) : (
-              myLives.map((l) => (
-                <Link key={l.id} to={`/live/${l.id}`} className="profile-section-row">
-                  {l.title}
-                </Link>
-              ))
+            {sectionsOpen.lives && (
+              myLives.length === 0 ? (
+                <p className="profile-section-empty">还没有直播间</p>
+              ) : (
+                myLives.map((l) => (
+                  <Link key={l.id} to={`/live/${l.id}`} className="profile-section-row">
+                    {l.title}
+                  </Link>
+                ))
+              )
             )}
           </section>
 
           <section className="profile-section">
             <div className="profile-section-head">
-              <span className="profile-section-title">正在玩的桌游</span>
-              <span className="profile-section-count">{myGames.length}</span>
+              <button type="button" className="profile-section-toggle" onClick={() => toggleSection("games")} aria-expanded={sectionsOpen.games}>
+                <span className="profile-section-title">正在玩的桌游</span>
+                <span className="profile-section-count">{myGames.length}</span>
+                <span className={`profile-section-chevron ${sectionsOpen.games ? "is-open" : ""}`}>▸</span>
+              </button>
             </div>
-            {myGames.length === 0 ? (
-              <p className="profile-section-empty">暂无在局桌游</p>
-            ) : (
-              myGames.map((g) => (
-                <Link key={g.id} to="/games" className="profile-section-row">
-                  {g.name}
-                </Link>
-              ))
+            {sectionsOpen.games && (
+              myGames.length === 0 ? (
+                <p className="profile-section-empty">暂无在局桌游</p>
+              ) : (
+                myGames.map((g) => (
+                  <Link key={g.id} to="/games" className="profile-section-row">
+                    {g.name}
+                  </Link>
+                ))
+              )
             )}
           </section>
-
-          <Link to="/favorites" className="profile-favorites-link">
-            我的收藏 →
-          </Link>
-        </div>
-
-        <div className="solid-card profile-danger">
-          <span className="profile-danger-text">
-            退出登录会断开当前连接，需要重新登录才能继续。
-          </span>
-          <button type="button" className="btn btn-destructive" onClick={logout}>
-            <IconLogout width={15} height={15} />
-            退出登录
-          </button>
         </div>
       </div>
     </div>

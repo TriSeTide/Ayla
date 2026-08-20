@@ -13,6 +13,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
 
     id = serializers.CharField(read_only=True)
     online = serializers.SerializerMethodField()
+    show_content = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
@@ -29,6 +30,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "voice_room_id",
             "is_live",
             "live_room_id",
+            "show_content",
         ]
         read_only_fields = ["id", "date_joined"]
 
@@ -70,11 +72,12 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["nickname", "avatar", "signature", "status"]
+        fields = ["nickname", "avatar", "signature", "status", "show_content"]
         extra_kwargs = {
             "nickname": {"max_length": 64, "required": False},
             "avatar": {"max_length": 512, "required": False},
             "signature": {"max_length": 256, "required": False},
+            "show_content": {"required": False},
         }
 
     def validate_avatar(self, value):

@@ -98,6 +98,11 @@ class PostListView(APIView):
         else:
             return _bad_request("scope 无效")
 
+        # 他人主页：owner=<user_id> 只看该用户的帖子（仍受可见性过滤）
+        owner_filter = request.query_params.get("owner", "").strip()
+        if owner_filter:
+            qs = qs.filter(owner_id=owner_filter)
+
         qs = qs.order_by("-created_at", "-id")
 
         cursor = request.query_params.get("cursor")

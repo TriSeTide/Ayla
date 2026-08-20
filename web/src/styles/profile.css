@@ -37,6 +37,100 @@
   gap: var(--sp-4);
 }
 
+.profile-mine-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+/* 「我的内容」分类展开/收起：整行可点，标题+计数+chevron 一行 */
+.profile-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.profile-section-chevron {
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.profile-section-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+/* 「向他人展示内容」开关行 */
+.profile-show-content-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.profile-show-content-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.profile-show-content-label small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+/* 开关（switch）：玻璃底胶囊 + 圆形滑钮，on 态粉底辉光 */
+.profile-switch {
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.profile-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--ice-300);
+  transition: transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.profile-switch.is-on {
+  background: var(--sakura-300);
+  box-shadow: var(--glow-shadow);
+}
+.profile-switch.is-on .profile-switch-knob {
+  transform: translateX(20px);
+  background: var(--grape-700);
+}
+.profile-switch:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 退出登录（移至资料卡内） */
+.profile-logout-btn {
+  min-height: 36px;
+  padding: 0 var(--sp-4);
+}
+
 .profile-mine-title {
   font-family: var(--font-display);
   font-size: 18px;
@@ -90,7 +184,7 @@
 
 .profile-favorites-link {
   display: inline-flex;
-  align-self: flex-start;
+  align-self: center;
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-pill);
   background: var(--sakura-300);

@@ -84,6 +84,10 @@ class RoomListView(APIView):
         # F10「正在玩的桌游」数据源：我在局的房间（成员视角，叠加可见性过滤）
         if request.query_params.get("mine") == "1":
             qs = qs.filter(members__user=request.user).distinct()
+        # 他人主页：owner=<user_id> 只看该用户创建的房间（仍受可见性过滤）
+        owner_filter = request.query_params.get("owner", "").strip()
+        if owner_filter:
+            qs = qs.filter(owner_id=owner_filter)
         data = GameRoomSerializer(qs, many=True, context={"request": request}).data
         return Response(data)
 

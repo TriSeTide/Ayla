@@ -10,16 +10,18 @@
 import { apiRequest } from "./client";
 import type { Post, PostComment, PostListPage, PostScope } from "./types";
 
-/** GET /posts/ —— 信息流游标分页 */
+/** GET /posts/ —— 信息流游标分页（?owner=<id> 他人主页） */
 export function listPosts(params: {
   scope?: PostScope;
   cursor?: string | null;
   limit?: number;
+  owner?: string;
 } = {}) {
   const qs = new URLSearchParams();
   if (params.scope && params.scope !== "feed") qs.set("scope", params.scope);
   if (params.cursor) qs.set("cursor", params.cursor);
   if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.owner) qs.set("owner", params.owner);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiRequest<PostListPage>(`/posts/${suffix}`);
 }

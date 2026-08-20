@@ -24,6 +24,8 @@ export interface UserPublic {
   live_room_id?: number | null;
   /** GET /users/<id>/ 追加：与当前用户的好友关系 */
   relation?: "self" | "friend" | "pending_sent" | "pending_received" | "none";
+  /** 是否向他人展示内容（发帖/直播间/桌游）；他人主页据此显示"他的内容"卡片 */
+  show_content?: boolean;
 }
 
 /** 注册入参（RegisterSerializer） */
@@ -71,6 +73,7 @@ export interface ProfileUpdatePayload {
   avatar?: string;
   signature?: string;
   status?: string;
+  show_content?: boolean;
 }
 
 /** 好友关系（FriendshipSerializer） */

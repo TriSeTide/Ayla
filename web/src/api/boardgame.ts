@@ -8,11 +8,12 @@
 import { apiRequest } from "./client";
 import type { GameRoom, GameRoomMember } from "./types";
 
-/** GET /rooms/ —— 房间列表（mine=1 仅我在局；?scope=group:<id> 群内过滤） */
-export function listGameRooms(params?: { mine?: boolean; scope?: string }) {
+/** GET /rooms/ —— 房间列表（mine=1 仅我在局；?scope=group:<id> 群内过滤；?owner=<id> 他人主页） */
+export function listGameRooms(params?: { mine?: boolean; scope?: string; owner?: string }) {
   const queryParts: string[] = [];
   if (params?.mine) queryParts.push("mine=1");
   if (params?.scope) queryParts.push(`scope=${encodeURIComponent(params.scope)}`);
+  if (params?.owner) queryParts.push(`owner=${encodeURIComponent(params.owner)}`);
   const qs = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
   return apiRequest<GameRoom[]>(`/boardgame/rooms/${qs}`);
 }

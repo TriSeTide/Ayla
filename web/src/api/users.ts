@@ -16,8 +16,8 @@ export function getUserDetail(userId: string) {
 }
 
 /* ---------- 用户资料懒拉缓存（M5-3：语音成员昵称/头像不在 voice store 复制数据源） ----------
- * 后端无 GET /users/<id>/ 详情路由，只能经 users/search 按查询命中后缓存。
- * 搜索后端按 username/nickname 匹配；语音成员加载时以 user_id 作查询词命中精确项。 */
+ * 优先走 GET /users/<id>/（精确 id，含头像/在线状态/好友关系）；
+ * 该接口不可用或 404 时回退 users/search 按 username/nickname 模糊匹配。 */
 
 const userCache = new Map<string, UserPublic>();
 const pending = new Map<string, Promise<UserPublic | null>>();
@@ -41,12 +41,19 @@ export function ensureUser(userId: string): Promise<UserPublic | null> {
   if (cached) return Promise.resolve(cached);
   const inFlight = pending.get(userId);
   if (inFlight) return inFlight;
-  const p = searchUsers(userId)
-    .then((list) => {
-      const hit = list.find((u) => u.id === userId) ?? null;
-      if (hit) userCache.set(userId, hit);
-      return hit;
+  // 精确 id 拉取（有头像/在线状态）；失败回退模糊搜索
+  const p = getUserDetail(userId)
+    .then((u) => {
+      userCache.set(userId, u);
+      return u;
     })
+    .catch(() =>
+      searchUsers(userId).then((list) => {
+        const hit = list.find((u) => u.id === userId) ?? null;
+        if (hit) userCache.set(userId, hit);
+        return hit;
+      }),
+    )
     .catch(() => null)
     .finally(() => {
       pending.delete(userId);

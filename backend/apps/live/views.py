@@ -105,6 +105,11 @@ class ChannelListView(APIView):
         if request.query_params.get("only_live") == "1":
             qs = qs.filter(status="live")
 
+        # 他人主页：owner=<user_id> 只看该用户的内容（仍受可见性过滤）
+        owner_filter = request.query_params.get("owner", "").strip()
+        if owner_filter:
+            qs = qs.filter(owner_id=owner_filter)
+
         # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
         scope = request.query_params.get("scope", "").strip()
         if scope.startswith("group:"):
