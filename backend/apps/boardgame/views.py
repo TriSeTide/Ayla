@@ -106,6 +106,8 @@ class RoomListView(APIView):
         except ValueError as exc:
             return _bad_request(str(exc))
         
+        # 公开房进入专用目录组；受限房继续按群组推送，避免泄露元数据。
+        services.broadcast_room_created_to_public(room)
         # 推送桌游房创建事件
         if room.group:
             services.broadcast_room_created_to_group(room, room.group)

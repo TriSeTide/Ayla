@@ -31,7 +31,7 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
     store.setError(null);
     boardgameApi
       .listGameRooms()
-      .then((list) => store.setRooms(list))
+      .then((list) => store.reconcileRooms(list))
       .catch((e) => {
         store.setRoomsLoading(false);
         store.setError(e instanceof Error ? e.message : "加载桌游室失败");

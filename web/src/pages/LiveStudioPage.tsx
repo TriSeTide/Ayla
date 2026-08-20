@@ -23,6 +23,7 @@ export function LiveStudioPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { inputEntered } = useEnterRoomAnimation();
   const channel = useLiveStore((s) => s.current.channel);
+  const liveChannels = useLiveStore((s) => s.channels);
   const [ordered, setOrdered] = useState<LiveChannelDescriptor[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -51,6 +52,12 @@ export function LiveStudioPage() {
       return next;
     });
   }, [channel]);
+
+  // 侧栏消费全局 live store，实时反映其他客户端创建、状态改变和删除。
+  useEffect(() => {
+    if (liveChannels.length === 0) return;
+    applyOrdered(liveChannels.filter((item) => item.is_owner));
+  }, [applyOrdered, liveChannels]);
 
   useEffect(() => {
     if (!validId) navigate("/live", { replace: true });

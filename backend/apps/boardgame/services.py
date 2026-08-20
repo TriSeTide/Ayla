@@ -105,8 +105,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _boardgame_event(room_id, event_type, room=None):
+    """构造不含成员详情的桌游列表失效事件。"""
+    event = {"type": event_type, "room_id": str(room_id)}
+    if room is not None:
+        event["room"] = {
+            "id": str(room.id),
+            "name": room.name,
+            "owner_id": str(room.owner_id),
+            "group_id": str(room.group_id) if room.group_id else None,
+            "visibility": room.visibility,
+            "game_type": room.game_type,
+            "status": room.status,
+            "created_at": room.created_at.isoformat(),
+        }
+    return event
+
+
 def broadcast_room_created_to_group(room, group):
-    """桌游房创建推送给群成员（通过会话组 chat_conv_{group_id}）。"""
+    """桌游房创建推送给群成员专用桌游组，避免依赖聊天页订阅。"""
     from asgiref.sync import async_to_sync
     from channels.layers import get_channel_layer
     from channels.exceptions import ChannelFull
@@ -116,26 +133,27 @@ def broadcast_room_created_to_group(room, group):
         return
 
     try:
-        event = {
-            "type": "boardgame.room.created",
-            "room": {
-                "id": room.id,
-                "name": room.name,
-                "owner_id": str(room.owner_id),
-                "group_id": str(room.group_id) if room.group_id else None,
-                "visibility": room.visibility,
-                "game_type": room.game_type,
-                "status": room.status,
-                "created_at": room.created_at.isoformat(),
-            },
-        }
-        async_to_sync(layer.group_send)(f"chat_conv_{group.id}", event)
+        event = _boardgame_event(room.id, "boardgame.room.created", room)
+        async_to_sync(layer.group_send)(f"boardgame_group_{group.id}", event)
     except ChannelFull:
         logger.warning(
             "Channel layer full when broadcasting boardgame.room.created to group %s", group.id
         )
     except Exception:
         logger.exception("Failed to broadcast boardgame.room.created to group %s", group.id)
+
+
+def broadcast_room_created_to_public(room):
+    """公开桌游房目录事件，ChatConsumer 已订阅 boardgame_public。"""
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    layer = get_channel_layer()
+    if layer is None or room.visibility != "public":
+        return
+    try:
+        async_to_sync(layer.group_send)("boardgame_public", _boardgame_event(room.id, "boardgame.room.created", room))
+    except Exception:
+        logger.exception("Failed to broadcast public boardgame.room.created %s", room.id)
 
 
 def broadcast_room_created_to_user(room, user):
@@ -149,19 +167,7 @@ def broadcast_room_created_to_user(room, user):
         return
 
     try:
-        event = {
-            "type": "boardgame.room.created",
-            "room": {
-                "id": room.id,
-                "name": room.name,
-                "owner_id": str(room.owner_id),
-                "group_id": str(room.group_id) if room.group_id else None,
-                "visibility": room.visibility,
-                "game_type": room.game_type,
-                "status": room.status,
-                "created_at": room.created_at.isoformat(),
-            },
-        }
+        event = _boardgame_event(room.id, "boardgame.room.created", room)
         async_to_sync(layer.group_send)(f"chat_user_{user.id}", event)
     except ChannelFull:
         logger.warning(
@@ -172,12 +178,7 @@ def broadcast_room_created_to_user(room, user):
 
 
 def broadcast_room_deleted(room_id, group_id=None, owner_id=None):
-    """桌游房删除推送。
-    
-    推送目标：
-    - 如果 group_id 非空，推送给该群成员（chat_conv_{group_id}）
-    - 如果 owner_id 非空，推送给房主（chat_user_{owner_id}）
-    """
+    """向可见范围对应的桌游专用组推送房间删除事件。"""
     from asgiref.sync import async_to_sync
     from channels.layers import get_channel_layer
     from channels.exceptions import ChannelFull
@@ -186,14 +187,13 @@ def broadcast_room_deleted(room_id, group_id=None, owner_id=None):
     if layer is None:
         return
 
-    event = {
-        "type": "boardgame.room.deleted",
-        "room_id": room_id,
-    }
+    event = _boardgame_event(room_id, "boardgame.room.deleted")
 
     try:
         if group_id:
-            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
+            async_to_sync(layer.group_send)(f"boardgame_group_{group_id}", event)
+        else:
+            async_to_sync(layer.group_send)("boardgame_public", event)
         if owner_id:
             async_to_sync(layer.group_send)(f"chat_user_{owner_id}", event)
     except ChannelFull:

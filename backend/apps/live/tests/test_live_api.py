@@ -1,6 +1,8 @@
 """直播 REST 契约测试（M4-6 §8.1）：创建/stream_key 权限/CRUD/start-stop/status 判定/越权。"""
 import pytest
 
+from unittest.mock import patch
+
 from apps.live.models import LiveChannel
 
 
@@ -24,6 +26,26 @@ def test_create_channel_returns_stream_urls(auth_client):
     assert data["rtmp_url"] == f"rtmp://127.0.0.1:1935/live/{data['stream_key']}"
     assert data["hls_url"] == f"http://127.0.0.1:8080/live/{data['stream_key']}.m3u8"
     assert data["flv_url"] == f"http://127.0.0.1:8080/live/{data['stream_key']}.flv"
+
+
+@pytest.mark.django_db
+def test_create_broadcasts_only_to_visible_users(auth_client, user_factory):
+    """公开直播创建通知覆盖在线的其他用户，且只发一次。"""
+    client, owner = auth_client()
+    viewer = user_factory(username="viewer")
+
+    with patch("apps.live.services.get_channel_layer") as get_layer:
+        layer = get_layer.return_value
+        response = _create_via_api(client)
+
+    assert response.status_code == 201, response.content
+    groups = [call.args[0] for call in layer.group_send.call_args_list]
+    assert groups.count(f"chat_user_{owner.id}") == 1
+    assert groups.count(f"chat_user_{viewer.id}") == 1
+    event = layer.group_send.call_args_list[0].args[1]
+    assert event["type"] == "live.channel.created"
+    assert "stream_key" not in event
+    assert "rtmp_url" not in event
 
 
 @pytest.mark.django_db
@@ -172,6 +194,27 @@ def test_status_live_idle_degraded(auth_client, live_channel_factory, fake_srs):
     assert resp.status_code == 200
     assert resp.json()["status"] == "degraded"
     assert resp.json()["detail"] == "srs_unavailable"
+
+
+@pytest.mark.django_db
+def test_private_channel_broadcast_excludes_strangers(auth_client, live_channel_factory, user_factory):
+    """好友可见频道的实时失效通知不能泄露给无关系用户。"""
+    owner_client, owner = auth_client()
+    friend = user_factory(username="friend")
+    stranger = user_factory(username="stranger")
+    from apps.accounts.models import Friendship
+    Friendship.objects.create(user=owner, friend=friend, status=Friendship.STATUS_ACCEPTED)
+    ch = live_channel_factory(owner=owner, visibility="friends")
+
+    with patch("apps.live.services.get_channel_layer") as get_layer:
+        layer = get_layer.return_value
+        response = owner_client.post(f"/api/v1/live/channels/{ch.id}:start/")
+
+    assert response.status_code == 200, response.content
+    groups = [call.args[0] for call in layer.group_send.call_args_list]
+    assert f"chat_user_{owner.id}" in groups
+    assert f"chat_user_{friend.id}" in groups
+    assert f"chat_user_{stranger.id}" not in groups
 
 
 @pytest.mark.django_db

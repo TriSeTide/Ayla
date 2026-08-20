@@ -29,7 +29,7 @@ export function GamesHubPage() {
     setLoadError(null);
     boardgameApi
       .listGameRooms()
-      .then((list) => store.setRooms(list))
+      .then((list) => store.reconcileRooms(list))
       .catch((e) => {
         const message = e instanceof Error ? e.message : "加载失败";
         store.setRoomsLoading(false);

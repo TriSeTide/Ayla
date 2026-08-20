@@ -110,6 +110,21 @@ describe("live store", () => {
     expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([2]);
   });
 
+  it("频道对账：upsert 更新当前房间；删除当前房间会清空投影", () => {
+    const s = useLiveStore.getState();
+    s.setChannels([CHANNEL]);
+    s.setCurrentChannel(CHANNEL);
+
+    s.upsertChannel({ ...CHANNEL, title: "REST 对账后的标题", status: "live" });
+    expect(useLiveStore.getState().current.channel).toMatchObject({
+      title: "REST 对账后的标题",
+      status: "live",
+    });
+
+    s.removeChannel(CHANNEL.id);
+    expect(useLiveStore.getState().current.channel).toBeNull();
+  });
+
   it("频道列表缓存记录 only_live 查询条件，避免过滤切换复用错误列表", () => {
     const s = useLiveStore.getState();
     s.setChannels([{ ...CHANNEL, status: "live" }], true);

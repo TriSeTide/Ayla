@@ -133,11 +133,7 @@ class ChannelListView(APIView):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 推送给相关用户
-        if ch.visibility == "group" and ch.group:
-            broadcast_channel_created_to_group(ch, ch.group)
-        
-        # 推给创建者本人
+        # 统一向在线目录订阅者发提示；详情仍由各客户端 REST 权限对账。
         broadcast_channel_created_to_user(ch, request.user)
         
         return Response(

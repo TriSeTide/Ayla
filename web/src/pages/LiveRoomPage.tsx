@@ -28,6 +28,7 @@ export function LiveRoomPage() {
   const { inputEntered } = useEnterRoomAnimation();
 
   const channel = useLiveStore((s) => s.current.channel);
+  const liveChannels = useLiveStore((s) => s.channels);
   const [ordered, setOrdered] = useState<LiveChannelDescriptor[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [listRetry, setListRetry] = useState(0);
@@ -57,6 +58,21 @@ export function LiveRoomPage() {
       })
       .catch((e) => setListError(e instanceof Error ? e.message : "加载直播列表失败"));
   }, [validId, listRetry]);
+
+  // 直播详情侧栏与大厅共用 live store；WS/REST 对账更新后立即反映创建、状态和删除。
+  useEffect(() => {
+    if (liveChannels.length === 0) return;
+    setOrdered((prev) => {
+      const byId = new Map(liveChannels.map((item) => [item.id, item]));
+      const next = prev
+        .filter((item) => byId.has(item.id))
+        .map((item) => byId.get(item.id) ?? item);
+      for (const item of liveChannels) {
+        if (!next.some((current) => current.id === item.id)) next.push(item);
+      }
+      return next;
+    });
+  }, [liveChannels]);
 
   const goTo = (id: number) => {
     if (id === channelId) return;

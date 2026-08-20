@@ -61,6 +61,11 @@ export function isPrivateChatRoute(pathname: string): boolean {
   return matchPath({ path: "/chat/:conversationId", end: true }, pathname) != null;
 }
 
+/** 窄屏语音房详情路由：房内输入框替换主导航栏。 */
+export function isVoiceRoomRoute(pathname: string): boolean {
+  return matchPath({ path: "/voice/:channelId", end: true }, pathname) != null;
+}
+
 /**
  * 直播间路由（/live/:channelId）。
  * 窄屏：进房动画 = 底栏下滑走（shell store 驱动），终态底栏在视口外；

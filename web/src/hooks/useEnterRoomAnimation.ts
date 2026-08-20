@@ -13,18 +13,27 @@
  */
 import { useEffect, useState } from "react";
 
-export function useEnterRoomAnimation() {
+/**
+ * 仅在房间路由真正激活后启动，避免语音大厅预挂载本 hook 时提前完成动画。
+ * `active` 可反复切换；每次离房都会复位，下一次进入仍从底部滑入。
+ */
+export function useEnterRoomAnimation(active = true) {
   const [inputEntered, setInputEntered] = useState(false);
 
   useEffect(() => {
+    if (!active) {
+      setInputEntered(false);
+      return;
+    }
     if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setInputEntered(true);
       return;
     }
-    // 输入框延迟 100ms 滑入
+    // 输入框延迟 100ms 滑入；每次重进房均重新开始。
+    setInputEntered(false);
     const timer = window.setTimeout(() => setInputEntered(true), 100);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [active]);
 
   return { inputEntered };
 }

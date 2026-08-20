@@ -39,10 +39,14 @@ export function getGameRoom(roomId: number) {
 }
 
 /** DELETE /rooms/<id>/ —— 删除（仅房主） */
-export function deleteGameRoom(roomId: number) {
-  return apiRequest<{ deleted: boolean }>(`/boardgame/rooms/${roomId}/`, {
+export async function deleteGameRoom(roomId: number) {
+  const result = await apiRequest<{ deleted: boolean }>(`/boardgame/rooms/${roomId}/`, {
     method: "DELETE",
   });
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("boardgame:room-deleted", { detail: { roomId } }));
+  }
+  return result;
 }
 
 /** POST /rooms/<id>:join/ —— 加入（幂等） */

@@ -306,83 +306,83 @@ async def abroadcast_danmaku(dm: Danmaku) -> None:
 
 # ---------- 直播间实时推送 ----------
 
+def _channel_event(channel, event_type: str, **extra) -> dict:
+    """Build a minimal event; recipients are selected server-side by visibility."""
+    return {
+        "type": event_type,
+        "channel_id": channel.id,
+        "name": channel.title,
+        "owner_id": str(channel.owner_id),
+        "visibility": channel.visibility,
+        "group_id": str(channel.group_id) if channel.group_id else None,
+        "status": channel.status,
+        "created_at": channel.created_at.isoformat(),
+        **extra,
+    }
+
+
+def _visible_recipient_ids(channel) -> set[str]:
+    """Return users allowed to receive a live-channel invalidation event.
+
+    Events contain no stream credentials.  The client still reconciles the
+    descriptor through REST, so this recipient set is the server-side
+    visibility boundary rather than a client-side filter.
+    """
+    from apps.accounts.models import Friendship
+    from apps.chat.models import ConversationMember
+
+    ids = {str(channel.owner_id)}
+    if channel.visibility == Visibility.PUBLIC:
+        ids.update(str(value) for value in channel.owner.__class__.objects.values_list("id", flat=True))
+    elif channel.visibility == Visibility.FRIENDS:
+        ids.update(str(value) for value in Friendship.objects.filter(
+            user_id=channel.owner_id, status=Friendship.STATUS_ACCEPTED
+        ).values_list("friend_id", flat=True))
+    if channel.group_id:
+        ids.update(str(value) for value in ConversationMember.objects.filter(
+            conversation_id=channel.group_id
+        ).values_list("user_id", flat=True))
+    allowed_ids = list(channel.allowed_groups.values_list("id", flat=True))
+    if allowed_ids:
+        ids.update(str(value) for value in ConversationMember.objects.filter(
+            conversation_id__in=allowed_ids
+        ).values_list("user_id", flat=True))
+    return ids
+
+
+def _broadcast_to_users(event: dict, user_ids: set[str]) -> None:
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    for user_id in user_ids:
+        try:
+            async_to_sync(layer.group_send)(f"chat_user_{user_id}", event)
+        except ChannelFull:
+            logger.warning("live event dropped for user %s", user_id)
+        except Exception:
+            logger.exception("live event broadcast failed for user %s", user_id)
+
+
 def broadcast_channel_created_to_group(channel, group):
-    """直播间创建推给群成员"""
-    try:
-        layer = get_channel_layer()
-        async_to_sync(layer.group_send)(
-            f"chat_conv_{group.id}",
-            {
-                "type": "live.channel.created",
-                "channel_id": channel.id,
-                "name": channel.title,
-                "owner_id": str(channel.owner_id),
-                "visibility": channel.visibility,
-                "group_id": str(channel.group_id) if channel.group_id else None,
-                "status": channel.status,
-                "created_at": channel.created_at.isoformat(),
-            },
-        )
-    except ChannelFull:
-        logger.warning("live.channel.created broadcast dropped")
-    except Exception:
-        logger.exception("live.channel.created broadcast failed")
+    """Backward-compatible entry point; visibility is always enforced centrally."""
+    _broadcast_to_users(_channel_event(channel, "live.channel.created"), _visible_recipient_ids(channel))
 
 
 def broadcast_channel_created_to_user(channel, user):
-    """直播间创建推给创建者"""
-    try:
-        layer = get_channel_layer()
-        async_to_sync(layer.group_send)(
-            f"chat_user_{user.id}",
-            {
-                "type": "live.channel.created",
-                "channel_id": channel.id,
-                "name": channel.title,
-                "owner_id": str(channel.owner_id),
-                "visibility": channel.visibility,
-                "group_id": str(channel.group_id) if channel.group_id else None,
-                "status": channel.status,
-                "created_at": channel.created_at.isoformat(),
-            },
-        )
-    except ChannelFull:
-        logger.warning("live.channel.created user broadcast dropped")
-    except Exception:
-        logger.exception("live.channel.created user broadcast failed")
+    """Backward-compatible entry point; visibility is always enforced centrally."""
+    _broadcast_to_users(_channel_event(channel, "live.channel.created"), _visible_recipient_ids(channel))
 
 
 def broadcast_channel_status_changed(channel, new_status):
-    """直播间状态变化推送"""
-    try:
-        layer = get_channel_layer()
-        event = {
-            "type": "live.channel.status.changed",
-            "channel_id": channel.id,
-            "status": new_status,
-            "changed_at": timezone.now().isoformat(),
-        }
-        if channel.visibility == "group" and channel.group_id:
-            async_to_sync(layer.group_send)(f"chat_conv_{channel.group_id}", event)
-        # 也推给创建者
-        async_to_sync(layer.group_send)(f"chat_user_{channel.owner_id}", event)
-    except ChannelFull:
-        logger.warning("live.channel.status.changed broadcast dropped")
-    except Exception:
-        logger.exception("live.channel.status.changed broadcast failed")
+    """Notify every currently authorized viewer, not only a subscribed group."""
+    event = _channel_event(
+        channel, "live.channel.status.changed", changed_at=timezone.now().isoformat(),
+        status=new_status,
+    )
+    _broadcast_to_users(event, _visible_recipient_ids(channel))
 
 
-def broadcast_channel_deleted(channel_id, visibility, group_id=None):
-    """直播间删除推送"""
-    try:
-        layer = get_channel_layer()
-        event = {
-            "type": "live.channel.deleted",
-            "channel_id": channel_id,
-        }
-        if visibility == "group" and group_id:
-            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
-    except ChannelFull:
-        logger.warning("live.channel.deleted broadcast dropped")
-    except Exception:
-        logger.exception("live.channel.deleted broadcast failed")
+def broadcast_channel_deleted(channel_id, recipient_ids=None):
+    """Notify the precomputed authorized viewers before the row is deleted."""
+    event = {"type": "live.channel.deleted", "channel_id": channel_id}
+    _broadcast_to_users(event, {str(value) for value in (recipient_ids or [])})

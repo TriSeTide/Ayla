@@ -364,11 +364,6 @@ export interface VoiceChannelCreatedFrame {
   type: "voice.channel.created";
   data: {
     channel_id: string;
-    name: string;
-    owner_id: string;
-    visibility: "public" | "friends" | "group";
-    group_id: string | null;
-    created_at: string;
   };
 }
 

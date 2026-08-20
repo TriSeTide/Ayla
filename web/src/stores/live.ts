@@ -107,7 +107,10 @@ export const useLiveStore = create<LiveState>((set) => ({
         idx >= 0
           ? state.channels.map((c) => (c.id === channel.id ? channel : c))
           : [...state.channels, channel];
-      return { channels };
+      const current = state.current.channel?.id === channel.id
+        ? { ...state.current, channel }
+        : state.current;
+      return { channels, current };
     }),
 
   updateChannelStatus: (channelId, status) =>
@@ -115,11 +118,16 @@ export const useLiveStore = create<LiveState>((set) => ({
       channels: state.channels.map((c) =>
         c.id === channelId ? { ...c, status: status as LiveChannelStatus } : c
       ),
+      current: state.current.channel?.id === channelId
+        ? { ...state.current, channel: { ...state.current.channel, status: status as LiveChannelStatus } }
+        : state.current,
     })),
+
 
   removeChannel: (channelId) =>
     set((state) => ({
       channels: state.channels.filter((c) => c.id !== channelId),
+      current: state.current.channel?.id === channelId ? initialRoom : state.current,
     })),
 
   setCurrentChannel: (channel) =>

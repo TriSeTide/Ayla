@@ -19,6 +19,8 @@ interface BoardgameState {
   setError: (err: string | null) => void;
   /** WS 推送：插入或更新房间（新房间在列表头部） */
   upsertRoom: (room: GameRoom) => void;
+  /** REST 对账：仅接受当前可见列表，避免 WS 越权插入。 */
+  reconcileRooms: (list: GameRoom[]) => void;
   /** WS 推送：从列表移除 */
   removeRoom: (roomId: number) => void;
 
@@ -53,6 +55,17 @@ export const useBoardgameStore = create<BoardgameState>((set) => ({
     }),
 
   setRoomsLoading: (roomsLoading) => set({ roomsLoading }),
+
+  reconcileRooms: (rooms) =>
+    set(() => {
+      const normalized = rooms.map(normalizeRoom);
+      return {
+        rooms: normalized,
+        roomsLoading: false,
+        error: null,
+        lastFetched: Date.now(),
+      };
+    }),
 
   setError: (error) => set({ error }),
 

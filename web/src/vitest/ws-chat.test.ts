@@ -14,6 +14,9 @@ import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { useNoticeStore } from "../stores/notices";
 import { usePostsStore } from "../stores/posts";
+import { useVoiceStore } from "../stores/voice";
+import { useLiveStore } from "../stores/live";
+import * as liveApi from "../api/live";
 
 type WSInstance = {
   readyState: number;
@@ -74,6 +77,8 @@ beforeEach(() => {
   useMessageStore.getState().reset();
   useNoticeStore.getState().clear();
   usePostsStore.getState().reset();
+  useVoiceStore.getState().reset();
+  useLiveStore.getState().reset();
 });
 
 afterEach(() => {
@@ -84,9 +89,46 @@ afterEach(() => {
   useMessageStore.getState().reset();
   useNoticeStore.getState().clear();
   usePostsStore.getState().reset();
+  useVoiceStore.getState().reset();
+  useLiveStore.getState().reset();
 });
 
 describe("ChatWSClient", () => {
+  it("live.channel.created：通过 REST 对账完整 descriptor，重复事件幂等", async () => {
+    const channel = {
+      id: 7, title: "完整直播", status: "live" as const, owner_id: "owner", owner_nickname: "主播",
+      is_owner: false, visibility: "public" as const, group: null, group_name: null,
+      stream_key: null, rtmp_url: null, hls_url: "http://h/7.m3u8", flv_url: "http://h/7.flv",
+      started_at: null, ended_at: null, created_at: "2026-08-20T00:00:00Z",
+    };
+    const getChannel = vi.spyOn(liveApi, "getLiveChannel").mockResolvedValue(channel);
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], { type: "live.channel.created", data: { channel_id: 7 } });
+    fire(instances[0], { type: "live.channel.created", data: { channel_id: 7 } });
+    await vi.waitFor(() => expect(useLiveStore.getState().channels).toHaveLength(1));
+    expect(useLiveStore.getState().channels[0]).toMatchObject(channel);
+    expect(getChannel).toHaveBeenCalledTimes(1);
+    client.disconnect();
+  });
+
+  it("live 事件 REST 403/404 对账会移除过期投影", async () => {
+    useLiveStore.getState().setChannels([{
+      id: 7, title: "旧频道", status: "idle", owner_id: "owner", owner_nickname: "主播",
+      is_owner: false, visibility: "public", group: null, group_name: null,
+      stream_key: null, rtmp_url: null, hls_url: "", flv_url: "", started_at: null, ended_at: null,
+      created_at: "2026-08-20T00:00:00Z",
+    }]);
+    vi.spyOn(liveApi, "getLiveChannel").mockRejectedValue(new Error("无权访问"));
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], { type: "live.channel.status.changed", data: { channel_id: 7 } });
+    await vi.waitFor(() => expect(useLiveStore.getState().channels).toHaveLength(0));
+    client.disconnect();
+  });
+
   it("post.created 仅通知监听器，不合成不完整帖子", () => {
     const client = new ChatWSClient();
     client.connect();
@@ -126,6 +168,25 @@ describe("ChatWSClient", () => {
       title: "群成员已离开",
       detail: "测试群：小明 已离开",
     });
+    client.disconnect();
+  });
+
+  it("voice.channel.created → 通过详情 REST 对账后写入频道，重复提示仍去重", async () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    const ws = instances[0];
+    const getChannel = vi.spyOn(await import("../api/voice"), "getVoiceChannel").mockResolvedValue({
+      id: "vc1", name: "新房", room_name: "room", owner_id: "u1", member_count: 0,
+      visibility: "public", group: null, group_name: null, mine: false,
+      created_at: "2026-08-10T00:00:00Z",
+    });
+    fire(ws, { type: "voice.channel.created", data: { channel_id: "vc1" } });
+    fire(ws, { type: "voice.channel.created", data: { channel_id: "vc1" } });
+    await Promise.resolve();
+    expect(getChannel).toHaveBeenCalledTimes(2);
+    expect(useVoiceStore.getState().channels).toHaveLength(1);
+    getChannel.mockRestore();
     client.disconnect();
   });
 

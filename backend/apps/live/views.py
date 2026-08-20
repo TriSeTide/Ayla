@@ -144,9 +144,7 @@ class ChannelListView(APIView):
         except ValueError as exc:
             return _bad_request(str(exc))
         
-        # 推送创建事件
-        if ch.visibility == "group" and ch.group:
-            broadcast_channel_created_to_group(ch, ch.group)
+        # 单次定向失效通知：服务层按当前可见性选择收件人，客户端再经 REST 对账。
         broadcast_channel_created_to_user(ch, request.user)
         
         # 创建响应即回显 stream_key/推流地址（创建者即 owner，供复制进 OBS）
@@ -224,18 +222,14 @@ class ChannelDetailView(APIView):
         if ch.status == "live":
             return _bad_request("直播中禁止删除，请先 :stop")
         
-        # 保存删除前的信息用于推送
+        # 删除前计算收件人；删除后无法再安全重建可见性集合。
+        recipient_ids = services._visible_recipient_ids(ch)
         channel_id_for_broadcast = ch.id
-        visibility_for_broadcast = ch.visibility
-        group_id_for_broadcast = ch.group_id
-        
         ch.delete()
-        
-        # 推送删除事件
+
         broadcast_channel_deleted(
             channel_id_for_broadcast,
-            visibility_for_broadcast,
-            group_id_for_broadcast,
+            recipient_ids=recipient_ids,
         )
         
         return Response({"deleted": True}, status=status.HTTP_200_OK)

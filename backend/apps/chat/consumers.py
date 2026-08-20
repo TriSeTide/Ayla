@@ -46,6 +46,16 @@ def _conv_seq(conv):
 
 
 @database_sync_to_async
+def _user_boardgame_groups(user_id):
+    from .models import ConversationMember
+    return list(
+        ConversationMember.objects.filter(
+            user_id=user_id, conversation__type=Conversation.TYPE_GROUP
+        ).values_list("conversation_id", flat=True)
+    )
+
+
+@database_sync_to_async
 def _messages_after(conv, last_seq, limit=200):
     """补发：seq > last_seq 的消息，按 seq 升序。"""
     return list(
@@ -82,10 +92,19 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         # 申请人/被邀请人未必是会话成员，订阅不到 chat_conv_* 组。
         self.user_group = f"chat_user_{self.user.id}"
         await self.channel_layer.group_add(self.user_group, self.channel_name)
+        # 语音目录事件只携带频道 id；客户端必须用受权限保护的详情 REST 对账，
+        # 避免向无权用户泄露好友/群白名单频道元数据。
+        self.voice_catalog_group = "voice_catalog"
+        await self.channel_layer.group_add(self.voice_catalog_group, self.channel_name)
         # 公开帖子实时进入全局信息流；受限帖子仍只走定向群/用户组。
         from apps.posts.services import POST_FEED_GROUP
         self.post_feed_group = POST_FEED_GROUP
         await self.channel_layer.group_add(self.post_feed_group, self.channel_name)
+        await self.channel_layer.group_add("boardgame_public", self.channel_name)
+        for group_id in await _user_boardgame_groups(self.user.id):
+            await self.channel_layer.group_add(
+                f"boardgame_group_{group_id}", self.channel_name
+            )
         await self.accept()
 
     async def disconnect(self, code):
@@ -97,9 +116,18 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self.channel_layer.group_discard(
                 self.user_group, self.channel_name
             )
+        if getattr(self, "voice_catalog_group", None):
+            await self.channel_layer.group_discard(
+                self.voice_catalog_group, self.channel_name
+            )
         if getattr(self, "post_feed_group", None):
             await self.channel_layer.group_discard(
                 self.post_feed_group, self.channel_name
+            )
+        await self.channel_layer.group_discard("boardgame_public", self.channel_name)
+        for group_id in await _user_boardgame_groups(self.user.id):
+            await self.channel_layer.group_discard(
+                f"boardgame_group_{group_id}", self.channel_name
             )
 
     async def receive_json(self, content, **kwargs):
@@ -304,31 +332,18 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     # ---------- 语音房创建/删除推送 ----------
 
     async def voice_channel_created(self, event):
-        """语音房创建推送"""
-        await self.send_json(
-            {
-                "type": "voice.channel.created",
-                "data": {
-                    "channel_id": event["channel_id"],
-                    "name": event["name"],
-                    "owner_id": event["owner_id"],
-                    "visibility": event["visibility"],
-                    "group_id": event.get("group_id"),
-                    "created_at": event["created_at"],
-                },
-            }
-        )
+        """语音目录变更提示；客户端必须通过 REST 获取完整且有权限的详情。"""
+        await self.send_json({
+            "type": "voice.channel.created",
+            "data": {"channel_id": str(event["channel_id"])},
+        })
 
     async def voice_channel_deleted(self, event):
-        """语音房删除推送"""
-        await self.send_json(
-            {
-                "type": "voice.channel.deleted",
-                "data": {
-                    "channel_id": event["channel_id"],
-                },
-            }
-        )
+        """语音目录删除提示。"""
+        await self.send_json({
+            "type": "voice.channel.deleted",
+            "data": {"channel_id": str(event["channel_id"])},
+        })
 
     # ---------- 直播间实时推送 ----------
 

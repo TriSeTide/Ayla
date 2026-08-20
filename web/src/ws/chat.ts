@@ -18,7 +18,10 @@ import { useRealtimeStore } from "../stores/realtime";
 import { useNoticeStore } from "../stores/notices";
 import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
+import * as liveApi from "../api/live";
 import { useBoardgameStore } from "../stores/boardgame";
+import * as voiceApi from "../api/voice";
+import * as boardgameApi from "../api/boardgame";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -157,6 +160,20 @@ export class ChatWSClient {
 
   // ---------- 事件分发 ----------
 
+  private liveReconciliations = new Map<number, Promise<void>>();
+
+  private reconcileLiveChannel(channelId: number) {
+    // WS frames are invalidations, not authority: REST applies the requesting
+    // user's current visibility and provides the complete descriptor. Coalesce
+    // duplicate frames while a reconciliation is still in flight.
+    if (this.liveReconciliations.has(channelId)) return;
+    const reconciliation = liveApi.getLiveChannel(channelId)
+      .then((channel) => useLiveStore.getState().upsertChannel(channel))
+      .catch(() => useLiveStore.getState().removeChannel(channelId))
+      .finally(() => this.liveReconciliations.delete(channelId));
+    this.liveReconciliations.set(channelId, reconciliation);
+  }
+
   private dispatch(frame: ChatServerFrame) {
     const chat = useChatStore.getState();
     const message = useMessageStore.getState();
@@ -268,19 +285,11 @@ export class ChatWSClient {
         break;
       }
       case "voice.channel.created": {
-        const d = frame.data;
-        useVoiceStore.getState().upsertChannel({
-          id: d.channel_id,
-          name: d.name,
-          room_name: d.name,
-          owner_id: d.owner_id,
-          visibility: d.visibility,
-          group: d.group_id,
-          group_name: null,
-          member_count: 0,
-          mine: false,
-          created_at: d.created_at,
-        });
+        const channelId = String(frame.data.channel_id);
+        // WS 只作目录提示；以权限 REST 详情为权威，避免泄露受限频道且与列表对账。
+        void voiceApi.getVoiceChannel(channelId)
+          .then((channel) => useVoiceStore.getState().upsertChannel(channel))
+          .catch(() => { /* 403/404：当前用户不可见或频道已删除，忽略提示 */ });
         break;
       }
       case "voice.channel.deleted": {
@@ -289,30 +298,11 @@ export class ChatWSClient {
         break;
       }
       case "live.channel.created": {
-        const d = frame.data;
-        useLiveStore.getState().upsertChannel({
-          id: d.channel_id,
-          title: d.title,
-          owner_id: d.owner_id,
-          owner_nickname: null,
-          is_owner: false,
-          visibility: d.visibility,
-          group: d.group_id,
-          group_name: null,
-          status: d.status,
-          stream_key: null,
-          rtmp_url: null,
-          hls_url: "",
-          flv_url: "",
-          started_at: null,
-          ended_at: null,
-          created_at: d.created_at,
-        });
+        this.reconcileLiveChannel(frame.data.channel_id);
         break;
       }
       case "live.channel.status.changed": {
-        const d = frame.data;
-        useLiveStore.getState().updateChannelStatus(d.channel_id, d.status);
+        this.reconcileLiveChannel(frame.data.channel_id);
         break;
       }
       case "live.channel.deleted": {
@@ -326,31 +316,10 @@ export class ChatWSClient {
         break;
       case "boardgame.room.created": {
         const d = frame.room;
-        useBoardgameStore.getState().upsertRoom({
-          id: Number(d.id),
-          name: d.name,
-          owner: {
-            id: d.owner_id,
-            username: "",
-            nickname: "",
-            avatar: "",
-            signature: "",
-            status: "online",
-            online: false,
-            date_joined: "",
-          },
-          owner_id: d.owner_id,
-          visibility: d.visibility as "public" | "friends" | "group",
-          group: d.group_id,
-          group_name: null,
-          game_type: d.game_type,
-          status: d.status as "waiting" | "playing" | "ended",
-          members: [],
-          member_count: 0,
-          is_owner: false,
-          is_member: false,
-          created_at: d.created_at,
-        });
+        if (!d || !d.id) break;
+        void boardgameApi.getGameRoom(Number(d.id))
+          .then((room) => useBoardgameStore.getState().upsertRoom(room))
+          .catch(() => { /* 当前用户不可见或房间已删除 */ });
         break;
       }
       case "boardgame.room.deleted": {

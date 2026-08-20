@@ -284,52 +284,32 @@ async def abroadcast_voice_state(channel: VoiceChannel, user, state: str) -> Non
 
 # ---------- 语音房创建/删除推送 ----------
 
-def broadcast_channel_created_to_group(channel, group):
-    """语音房创建推给群成员（通过会话组）"""
+def _broadcast_channel_catalog_event(channel_id: str, event_type: str) -> None:
+    """广播目录变更提示；元数据必须由客户端通过权限 REST 获取。"""
     from channels.layers import get_channel_layer
 
+    layer = get_channel_layer()
+    if layer is None:
+        return
     try:
-        layer = get_channel_layer()
         async_to_sync(layer.group_send)(
-            f"chat_conv_{group.id}",
-            {
-                "type": "voice.channel.created",
-                "channel_id": str(channel.id),
-                "name": channel.name,
-                "owner_id": str(channel.owner_id),
-                "visibility": channel.visibility,
-                "group_id": str(channel.group_id) if channel.group_id else None,
-                "created_at": channel.created_at.isoformat(),
-            },
+            "voice_catalog",
+            {"type": event_type, "channel_id": str(channel_id)},
         )
     except ChannelFull:
-        logger.warning("voice.channel.created broadcast dropped (ChannelFull)")
+        logger.warning("%s broadcast dropped (ChannelFull)", event_type)
     except Exception:
-        logger.exception("voice.channel.created broadcast failed for channel %s", channel.id)
+        logger.exception("%s broadcast failed for channel %s", event_type, channel_id)
+
+
+def broadcast_channel_created_to_group(channel, group):
+    """提示所有在线客户端对账新频道；详情仍由 REST 可见性控制。"""
+    _broadcast_channel_catalog_event(channel.id, "voice.channel.created")
 
 
 def broadcast_channel_created_to_user(channel, user):
-    """语音房创建推给创建者本人"""
-    from channels.layers import get_channel_layer
-
-    try:
-        layer = get_channel_layer()
-        async_to_sync(layer.group_send)(
-            f"chat_user_{user.id}",
-            {
-                "type": "voice.channel.created",
-                "channel_id": str(channel.id),
-                "name": channel.name,
-                "owner_id": str(channel.owner_id),
-                "visibility": channel.visibility,
-                "group_id": str(channel.group_id) if channel.group_id else None,
-                "created_at": channel.created_at.isoformat(),
-            },
-        )
-    except ChannelFull:
-        logger.warning("voice.channel.created user broadcast dropped")
-    except Exception:
-        logger.exception("voice.channel.created user broadcast failed")
+    """兼容旧调用点；目录事件已统一由全局目录组发送。"""
+    _broadcast_channel_catalog_event(channel.id, "voice.channel.created")
 
 
 def broadcast_channel_deleted(channel_id, visibility, group_id=None):
@@ -342,8 +322,7 @@ def broadcast_channel_deleted(channel_id, visibility, group_id=None):
             "type": "voice.channel.deleted",
             "channel_id": str(channel_id),
         }
-        if visibility == "group" and group_id:
-            async_to_sync(layer.group_send)(f"chat_conv_{group_id}", event)
+        async_to_sync(layer.group_send)("voice_catalog", event)
     except ChannelFull:
         logger.warning("voice.channel.deleted broadcast dropped")
     except Exception:

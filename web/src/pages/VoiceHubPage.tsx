@@ -26,7 +26,8 @@ export function VoiceHubPage() {
   const navigate = useNavigate();
   const { channelId: routeChannelId } = useParams<{ channelId?: string }>();
   const isNarrow = useMediaQuery(NARROW_QUERY);
-  const { inputEntered } = useEnterRoomAnimation();
+  // 仅在房内路由启动输入框滑入；离房复位，避免大厅预挂载使下次动画失效。
+  const { inputEntered } = useEnterRoomAnimation(routeChannelId != null);
   const channels = useVoiceStore((s) => s.channels);
   const channelsLoading = useVoiceStore((s) => s.channelsLoading);
   const wsConnection = useVoiceStore((s) => s.wsConnection);
@@ -66,8 +67,12 @@ export function VoiceHubPage() {
 
   // 进房/退房：底栏下滑走（R-V2，与直播同向）
   useEffect(() => {
+    // 路由是壳层底栏是否让位的唯一事实：即使连接保留在全局浮层，返回 /voice 或主页时也必须复位。
     useShellStore.getState().setBottomTabsLeaving(routeChannelId != null && currentChannelId != null);
-  }, [currentChannelId]);
+    return () => {
+      useShellStore.getState().setBottomTabsLeaving(false);
+    };
+  }, [currentChannelId, routeChannelId]);
 
   // 频道列表：空或过期时加载
   useEffect(() => {

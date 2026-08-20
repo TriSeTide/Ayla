@@ -19,7 +19,7 @@ import { MessageFab } from "./MessageFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isMessagesRoute, isPostDetailRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isMessagesRoute, isPostDetailRoute, isPrivateChatRoute, isVoiceRoomRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
 const BADGES_POLL_INTERVAL_MS = 30_000;
 
@@ -36,6 +36,8 @@ export function AppShell() {
   const postDetailNarrow = isNarrow && isPostDetailRoute(pathname);
   // 私聊聊天窄屏：底部有输入框，不渲染底栏/消息入口（需求：下方有输入框时不能有导航栏）
   const privateChatNarrow = isNarrow && isPrivateChatRoute(pathname);
+  // 一级语音房与直播间一样由房内输入框替换主导航栏；离房时路由立即恢复底栏。
+  const voiceRoomNarrow = isNarrow && isVoiceRoomRoute(pathname);
   // 消息中心窄屏：左下角消息入口变为返回主页
   const messagesNarrow = isNarrow && matchPath({ path: "/messages", end: true }, pathname) != null;
 
@@ -64,7 +66,7 @@ export function AppShell() {
       </main>
       <SessionActivityIndicator />
       <RealtimeStatusBanner />
-      {isNarrow && !groupSceneNarrow && !postDetailNarrow && !privateChatNarrow ? (
+      {isNarrow && !groupSceneNarrow && !postDetailNarrow && !privateChatNarrow && !voiceRoomNarrow ? (
         <>
           <MessageFab style={leavingStyle} unread={messageBadge} backHome={messagesNarrow} />
           <BottomTabs

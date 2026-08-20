@@ -196,6 +196,16 @@ describe("AppShell", () => {
     expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
   });
+
+  it("一级语音房窄屏由房内输入框替代主导航，返回大厅路由立即恢复导航", () => {
+    renderShell("/voice/v1", true);
+    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+
+    renderShell("/voice", true);
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();
+  });
 });
 
 /* ---------- CreateFAB 交互 ---------- */
