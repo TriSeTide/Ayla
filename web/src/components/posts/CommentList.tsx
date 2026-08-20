@@ -9,6 +9,8 @@ import type { PostComment } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { CommentComposer } from "./CommentComposer";
 import { ResourceImage } from "../ResourceImage";
+import { staggerDelay } from "../../hooks/useRevealOnEnter";
+import type { CSSProperties } from "react";
 
 function formatTime(iso: string): string {
   try {
@@ -43,6 +45,7 @@ export function CommentList({
   onReply,
   onReplyClear,
   hideComposer = false,
+  revealItems = false,
 }: {
   comments: PostComment[];
   onSend: (body: string, replyTo: number | null, mediaId?: string | null) => Promise<void>;
@@ -53,6 +56,8 @@ export function CommentList({
   onReplyClear: () => void;
   /** 是否隐藏评论输入框（用于详情页，输入框固定在底部） */
   hideComposer?: boolean;
+  /** 详情页入场：每条评论逐条浮入（stagger，直播间节奏） */
+  revealItems?: boolean;
 }) {
   const byId = new Map(comments.map((c) => [c.id, c]));
 
@@ -62,10 +67,15 @@ export function CommentList({
         {comments.length === 0 ? (
           <li className="comment-empty">还没有评论</li>
         ) : (
-          comments.map((c) => {
+          comments.map((c, idx) => {
             const replyTo = c.reply_to != null ? byId.get(Number(c.reply_to)) : undefined;
+            const delay = revealItems ? staggerDelay(idx) : 0;
             return (
-              <li key={c.id} className="comment-item">
+              <li
+                key={c.id}
+                className={`comment-item ${revealItems ? "reveal-item" : ""}`}
+                style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
+              >
                 <Avatar
                   label={c.author.nickname || c.author.username}
                   size={32}

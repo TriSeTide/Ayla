@@ -13,6 +13,7 @@ import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../store
 import { useAuthStore } from "../../stores/auth";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
 import { getVisibilityLabels } from "../../utils/visibility";
+import { useRevealOnEnter } from "../../hooks/useRevealOnEnter";
 
 export function VoiceRoomBody({
   channelId,
@@ -59,6 +60,8 @@ export function VoiceRoomBody({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatExpanded, setChatExpanded] = useState(false);
+  // 进房体统一入场动画（与直播间同源：成员面板先浮入，聊天卡随后）
+  const { step } = useRevealOnEnter(true);
 
   useEffect(() => {
     if (!channelId) return;
@@ -203,7 +206,7 @@ export function VoiceRoomBody({
       </header>
 
       <div className="voice-room-layout">
-        <section className="voice-room-voice-card" aria-label="语音成员">
+        <section className={`voice-room-voice-card reveal ${step === 1 ? "is-in" : ""}`} aria-label="语音成员">
           <VoiceChannelPanel
             channelName={channelName}
             channelId={channelId}
@@ -221,7 +224,7 @@ export function VoiceRoomBody({
         </section>
 
         {channelId != null && (
-          <section className={`voice-room-chat-card ${chatExpanded ? "is-expanded" : ""}`} aria-label="房内聊天">
+          <section className={`voice-room-chat-card reveal ${step === 1 ? "is-in" : ""} ${chatExpanded ? "is-expanded" : ""}`} aria-label="房内聊天">
             <header className="voice-room-chat-card-head">
               <span className="voice-room-chat-title">房内聊天</span>
               <span className="voice-room-chat-count-label">{messages.length} 条消息</span>

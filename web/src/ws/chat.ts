@@ -314,6 +314,10 @@ export class ChatWSClient {
       case "post.deleted":
         // 帖子事件仅作实时失效通知；页面通过 REST 获取完整对象并负责 scope/可见性。
         break;
+      case "comment.created":
+      case "comment.deleted":
+        // 评论事件由帖子详情页经 onFrame 订阅消费（乐观插入/移除 + 更新计数）。
+        break;
       case "boardgame.room.created": {
         const d = frame.room;
         if (!d || !d.id) break;

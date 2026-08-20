@@ -398,6 +398,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         """接收帖子删除推送并转发给 WebSocket 客户端。"""
         await self.send_json(event)
 
+    async def comment_created(self, event):
+        """接收评论创建推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    async def comment_deleted(self, event):
+        """接收评论删除推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
     # ---------- 桌游房实时推送 ----------
 
     async def boardgame_room_created(self, event):

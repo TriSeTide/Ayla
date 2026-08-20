@@ -6,6 +6,17 @@
 
 /* ================= 通用原语 ================= */
 
+/* 路由懒加载 fallback：几何占位保持高度，避免布局跳动（配合 App.tsx Suspense） */
+.route-fallback {
+  min-height: 100%;
+  padding: var(--sp-4);
+}
+.route-fallback-block {
+  height: 40vh;
+  width: 100%;
+  border-radius: var(--radius-card);
+}
+
 /* Primary 按钮：indigo 实底胶囊，hover 加辉光（design.md §4 Buttons） */
 .btn {
   display: inline-flex;

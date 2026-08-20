@@ -162,6 +162,15 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 骨架屏：所有 >300ms 的异步加载用 `animate-pulse` 风格骨架（玻璃质感骨架块），禁止白屏/冻结
 - `prefers-reduced-motion`：关闭呼吸、浮入，保留透明度渐变
 
+### 7.1 统一内容入场原语 `.reveal`
+
+直播间/语音房/帖子详情/列表等所有异步界面的**主体内容浮入**统一用一套原语（复用，勿到处发明一次性动画）：
+
+- **CSS**：`base.css` 新增 `.reveal`（初始 `opacity:0 + translateY(8px)`）与 `.reveal.is-in`（`opacity:1 + translateY(0)`，180ms `--ease-out` 过渡）；`prefers-reduced-motion` 下只保留透明度渐变。
+- **样式元素**：`.reveal-item` 用于**列表/评论逐条浮现**（`animation: reveal-item-in 180ms forwards`，`--reveal-delay` 变量控制 stagger，封顶 300ms）。
+- **Hook**：`useRevealOnEnter(active)` 返回 `{step, revealed}`，双 rAF 首帧隐藏→过渡显示。**内容由异步加载产生时，必须把 `active` 接到「内容就绪」信号（如 `!loading`），否则动画会在加载完成前就跑完、看不到浮入**。
+- 语义边界：`.reveal` 只管**内容块自身**的浮入淡入；**底栏/输入框的位移**由 `useEnterRoomAnimation` / `useEnterGroupAnimation` 负责，两者不混淆、可叠加。
+
 ## 8. Do's and Don'ts
 
 ### Do

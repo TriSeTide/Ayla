@@ -420,6 +420,24 @@ export interface PostDeletedFrame {
   post_id: string;
 }
 
+export interface CommentCreatedFrame {
+  type: "comment.created";
+  data: {
+    post_id: string;
+    comment: PostComment;
+    comment_count: number;
+  };
+}
+
+export interface CommentDeletedFrame {
+  type: "comment.deleted";
+  data: {
+    post_id: string;
+    comment_id: number;
+    comment_count: number;
+  };
+}
+
 export type ChatServerFrame =
   | ChatSubscribedFrame
   | MessageNewFrame
@@ -441,6 +459,8 @@ export type ChatServerFrame =
   | LiveChannelDeletedFrame
   | PostCreatedFrame
   | PostDeletedFrame
+  | CommentCreatedFrame
+  | CommentDeletedFrame
   | BoardgameRoomCreatedFrame
   | BoardgameRoomDeletedFrame
   | ChatErrorFrame

@@ -11,11 +11,14 @@ import { useAuthStore } from "./stores/auth";
 import { useChatStore } from "./stores/chat";
 import { useVoiceStore } from "./stores/voice";
 import { useLiveStore } from "./stores/live";
+import { usePostsStore } from "./stores/posts";
 import { chatWS } from "./ws/chat";
 import { presenceClient } from "./ws/presence";
 import { listConversations } from "./api/chat";
 import { listVoiceChannels } from "./api/voice";
 import { listLiveChannels } from "./api/live";
+import { listPosts } from "./api/posts";
+import { listFavorites } from "./api/favorites";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
@@ -39,17 +42,21 @@ async function bootstrap() {
   if (accessToken) {
     presenceClient.connect();
     chatWS.connect();
-    // 并发预加载核心列表
+    // 并发预加载核心列表（含帖子信息流与收藏，进帖子页秒开）
     const loadCoreData = async () => {
       try {
-        const [convs, voices, lives] = await Promise.all([
+        const [convs, voices, lives, posts, favs] = await Promise.all([
           listConversations(),
           listVoiceChannels(),
           listLiveChannels(),
+          listPosts({ scope: "feed", limit: 20 }),
+          listFavorites("post"),
         ]);
         useChatStore.getState().setConversations(convs);
         useVoiceStore.getState().setChannels(voices);
         useLiveStore.getState().setChannels(lives);
+        usePostsStore.getState().setPage(posts.results, posts.next_cursor, posts.has_more);
+        usePostsStore.getState().loadFavorites(favs);
       } catch (err) {
         console.error("[预加载] 核心数据加载失败", err);
         // 不阻断流程，用户访问页面时会重试

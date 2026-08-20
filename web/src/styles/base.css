@@ -140,6 +140,55 @@ a:hover {
   }
 }
 
+/* 统一内容入场原语（design.md §7 浮入：下方 8px + 淡入，180ms，不弹跳）。
+   直播间/语音房/帖子详情/列表等所有异步界面共用的进场动画；需配合
+   useRevealOnEnter（进入后 step=1 才套 is-in，否则保持隐藏避免闪跳）。
+   prefers-reduced-motion：只保留透明度渐变，关闭位移（§7）。 */
+.reveal {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal.is-in {
+    opacity: 1;
+    transform: none;
+    transition: opacity var(--dur-fast) ease-out;
+  }
+}
+
+/* 列表/评论逐条浮入（stagger）：配合 .reveal-item 元素上的 --reveal-delay 变量 */
+@keyframes reveal-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reveal-item {
+  opacity: 0;
+  animation: reveal-item-in var(--dur-fast) var(--ease-out) forwards;
+  animation-delay: var(--reveal-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-item {
+    opacity: 1;
+    animation: none;
+  }
+}
+
 .skeleton {
   border-radius: var(--radius-sm);
   background: var(--glass-bg);

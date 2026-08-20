@@ -17,8 +17,10 @@ import { ResourceImage } from "../components/ResourceImage";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconHeart } from "../components/icons";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
+import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
 import { usePostsStore } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
+import { chatWS } from "../ws/chat";
 import { getVisibilityLabels } from "../utils/visibility";
 
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
@@ -29,7 +31,6 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const returnTo = fromGroup ? `/group/${encodeURIComponent(fromGroup)}/posts` : "/posts";
   // 群内详情沿用群场景顶部导航；只有一级帖子详情才让底栏下滑并带动评论输入框滑入。
   const usesRoomEntryAnimation = groupId == null;
-  const { inputEntered } = useEnterRoomAnimation(usesRoomEntryAnimation);
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
 
   useEffect(() => {
@@ -55,6 +56,11 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
 
   const id = Number(postId);
 
+  // 输入框滑入 + 内容入场动画：内容就绪（loading 结束）后才浮入，
+  // 避免异步加载完成前动画就提前跑完、看不到浮入效果（直播间同源节奏）。
+  const { inputEntered } = useEnterRoomAnimation(usesRoomEntryAnimation);
+  const { step } = useRevealOnEnter(!loading && usesRoomEntryAnimation);
+
   const load = useCallback(() => {
     if (!Number.isInteger(id) || id <= 0) {
       setError("帖子不存在");
@@ -63,15 +69,17 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     }
     setLoading(true);
     setError(null);
-    postsApi
-      .getPost(id)
-      .then((p) => {
+    // 并行加载（优化：串行 → 并发，正文与评论 + 收藏一键并发，减少一次网络往返）
+    Promise.all([
+      postsApi.getPost(id),
+      postsApi.listComments(id),
+      favoritesApi.listFavorites("post"),
+    ])
+      .then(([p, list, favs]) => {
         setPost(p);
-        return postsApi.listComments(id);
-      })
-      .then((list) => {
         setComments(list);
         setCommentError(null);
+        usePostsStore.getState().loadFavorites(favs);
       })
       .catch((e) => {
         const message = e instanceof Error ? e.message : "加载评论失败";
@@ -79,23 +87,55 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         setError(message);
       })
       .finally(() => setLoading(false));
-    favoritesApi
-      .listFavorites("post")
-      .then((list) => usePostsStore.getState().loadFavorites(list))
-      .catch((e) => setActionError(e instanceof Error ? e.message : "加载收藏状态失败"));
   }, [id]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // 评论实时推送（善用 WebSocket）：评论创建/删除实时插入/移除 + 更新计数
+  useEffect(() => {
+    if (!Number.isInteger(id) || id <= 0) return;
+    const off = chatWS.onFrame((frame) => {
+      if (frame.type === "comment.created" && Number(frame.data.post_id) === id) {
+        const c = frame.data.comment;
+        setComments((prev) => {
+          if (prev.some((item) => item.id === c.id)) return prev; // 去重（自己发的也会回传）
+          // 评论按 created_at 升序（与列表接口一致），插入正确位置
+          const next = [...prev, c].sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          );
+          return next;
+        });
+        setPost((prev) =>
+          prev ? { ...prev, comment_count: frame.data.comment_count } : prev,
+        );
+        return;
+      }
+      if (frame.type === "comment.deleted" && Number(frame.data.post_id) === id) {
+        const cid = frame.data.comment_id;
+        setComments((prev) => prev.filter((item) => item.id !== cid));
+        setPost((prev) =>
+          prev ? { ...prev, comment_count: frame.data.comment_count } : prev,
+        );
+      }
+    });
+    return off;
+  }, [id]);
+
   const sendComment = useCallback(
     async (body: string, replyTo: number | null, mediaId?: string | null) => {
       const c = await postsApi.createComment(id, { body, reply_to: replyTo, media_id: mediaId ?? null });
-      setComments((prev) => [...prev, c]);
-      if (post) setPost({ ...post, comment_count: post.comment_count + 1 });
+      // 乐观本地插入（去重靠 WS comment.created 的 id 去重；计数以 WS 权威值为准，
+      // 不做本地 +1，避免与实时推送重复累加）。
+      setComments((prev) => {
+        if (prev.some((item) => item.id === c.id)) return prev;
+        return [...prev, c].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
+      });
     },
-    [id, post],
+    [id],
   );
 
   const deleteComment = useCallback(
@@ -144,7 +184,22 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   if (loading) {
     return (
       <div className="post-detail">
-        <div className="skeleton" style={{ height: 160, width: "100%" }} />
+        <div className="post-detail-skeleton" aria-label="正在加载帖子">
+          <div className="post-detail-skeleton-head">
+            <span className="skeleton post-detail-skeleton-avatar" style={{ width: 40, height: 40, borderRadius: 999 }} />
+            <span className="skeleton" style={{ width: 96, height: 16, borderRadius: 8 }} />
+            <span className="skeleton" style={{ width: 64, height: 12, borderRadius: 6 }} />
+          </div>
+          <span className="skeleton" style={{ height: 14, width: "100%", borderRadius: 8 }} />
+          <span className="skeleton" style={{ height: 14, width: "92%", borderRadius: 8 }} />
+          <span className="skeleton" style={{ height: 120, width: "100%", borderRadius: 12 }} />
+          <div className="post-detail-skeleton-comments">
+            <span className="skeleton" style={{ height: 12, width: 80, borderRadius: 6 }} />
+            <span className="skeleton" style={{ height: 13, width: "88%", borderRadius: 8 }} />
+            <span className="skeleton" style={{ height: 13, width: "76%", borderRadius: 8 }} />
+            <span className="skeleton" style={{ height: 13, width: "82%", borderRadius: 8 }} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -240,7 +295,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       )}
 
       <div className="post-detail-scroll">
-        <article className="post-card post-detail-card">
+        <article className={`post-card post-detail-card ${usesRoomEntryAnimation ? "reveal" : ""} ${usesRoomEntryAnimation && step === 1 ? "is-in" : ""}`}>
           <div className="post-card-main">
             <header className="post-card-head">
               <Avatar
@@ -290,7 +345,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
           </footer>
         </article>
 
-        <div className="post-detail-comments">
+        <div className={`post-detail-comments ${usesRoomEntryAnimation ? "reveal" : ""} ${usesRoomEntryAnimation && step === 1 ? "is-in" : ""}`}>
           {commentError && <div className="chat-notice" role="alert">{commentError}</div>}
           <CommentList
             comments={comments}
@@ -300,6 +355,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             onReply={setReplyTarget}
             onReplyClear={() => setReplyTarget(null)}
             hideComposer
+            revealItems={usesRoomEntryAnimation}
           />
         </div>
       </div>

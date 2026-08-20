@@ -279,10 +279,17 @@ class CommentListView(APIView):
         comment = services.create_comment(
             post, request.user, data["body"], reply_to, data.get("media_id")
         )
-        return Response(
+        response = Response(
             CommentSerializer(comment, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+        # 评论实时推送：向能看见该帖子的用户广播完整评论 + 更新计数
+        # （对齐帖子可见性分发，与 post.created 同纪律）。
+        serialized = CommentSerializer(comment, context={"request": request}).data
+        services.broadcast_comment_created(
+            post, serialized, post.comments.count()
+        )
+        return response
 
 
 class CommentDetailView(APIView):
@@ -297,7 +304,11 @@ class CommentDetailView(APIView):
             return _not_found("评论不存在")
         if comment.author_id != request.user.id:
             return _forbidden("仅评论作者可删除")
+        post = comment.post
+        comment_id = comment.id
         comment.delete()
+        # 评论实时推送：通知可看见该帖子的用户移除该评论并更新计数
+        services.broadcast_comment_deleted(post, comment_id, post.comments.count())
         return Response({"deleted": True})
 
 

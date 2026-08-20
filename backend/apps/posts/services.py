@@ -239,3 +239,88 @@ def broadcast_post_deleted(post_id, group_id=None, owner_id=None, allowed_group_
         logger.warning("Channel layer full when broadcasting post.deleted %s", post_id)
     except Exception:
         logger.exception("Failed to broadcast post.deleted %s", post_id)
+
+
+# ---------- 评论实时推送 ----------
+
+def _comment_audience(post) -> list[str]:
+    """评论事件的分发范围，对齐帖子可见性（避免向无权用户泄漏，与 post.created 同纪律）。
+
+    返回频道组名列表：
+    - public → 全局信息流组（所有在线用户）；
+    - group / allowed_groups → 对应会话组 chat_conv_{gid}；
+    - friends → 帖主本人的用户组（作者必然能看）。
+    """
+    from apps.common.visibility import Visibility
+
+    groups = []
+    if post.visibility == Visibility.PUBLIC:
+        groups.append(POST_FEED_GROUP)
+    if post.group_id:
+        groups.append(f"chat_conv_{post.group_id}")
+    # 多群可见（allowed_groups 与主 group 可能不同）
+    if post.pk:
+        groups.extend(
+            f"chat_conv_{gid}" for gid in post.allowed_groups.values_list("id", flat=True)
+        )
+    if post.owner_id:
+        groups.append(f"chat_user_{post.owner_id}")
+    return list(dict.fromkeys(groups))
+
+
+def broadcast_comment_created(post, serialized_comment, comment_count):
+    """评论创建推送：向能看见该帖子的用户广播完整评论，前端可乐观插入 + 更新计数。"""
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    event = {
+        "type": "comment.created",
+        "data": {
+            "post_id": str(post.id),
+            "comment": serialized_comment,
+            "comment_count": comment_count,
+        },
+    }
+    for group in _comment_audience(post):
+        try:
+            async_to_sync(layer.group_send)(group, event)
+        except ChannelFull:
+            logger.warning("Channel layer full when broadcasting comment.created to %s", group)
+        except Exception:
+            logger.exception("Failed to broadcast comment.created to %s", group)
+
+
+def broadcast_comment_deleted(post, comment_id, comment_count):
+    """评论删除推送：只携带 id，前端据此移除并更新计数。"""
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    event = {
+        "type": "comment.deleted",
+        "data": {
+            "post_id": str(post.id),
+            "comment_id": comment_id,
+            "comment_count": comment_count,
+        },
+    }
+    for group in _comment_audience(post):
+        try:
+            async_to_sync(layer.group_send)(group, event)
+        except ChannelFull:
+            logger.warning("Channel layer full when broadcasting comment.deleted to %s", group)
+        except Exception:
+            logger.exception("Failed to broadcast comment.deleted to %s", group)
