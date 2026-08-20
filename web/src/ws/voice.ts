@@ -28,6 +28,9 @@ export class VoiceWSClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private attempt = 0;
   private manualClosed = false;
+  private socketGeneration = 0;
+  lastError: string | null = null;
+  lastCloseCode: number | null = null;
   /** 已订阅的频道 id 集合（重连后据此重发 subscribe） */
   private subscribed = new Set<string>();
   private handlers = new Set<VoiceFrameHandler>();
@@ -40,7 +43,11 @@ export class VoiceWSClient {
   connect() {
     const access = useAuthStore.getState().accessToken;
     if (!access) return;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.manualClosed = false;
     this.setConnection("connecting");
     this.open(access);
@@ -54,16 +61,20 @@ export class VoiceWSClient {
 
   private open(access: string) {
     const url = `${WS_BASE_URL}/ws/voice/?token=${encodeURIComponent(access)}`;
+    const generation = ++this.socketGeneration;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
-    } catch {
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : "WebSocket 创建失败";
       this.scheduleReconnect();
       return;
     }
     this.ws = ws;
 
     ws.onopen = () => {
+      if (generation !== this.socketGeneration) return;
+      this.lastError = null;
       this.attempt = 0;
       this.setConnection("online");
       this.startHeartbeat();
@@ -84,18 +95,24 @@ export class VoiceWSClient {
       this.dispatch(frame);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event = { code: 1006 } as CloseEvent) => {
+      if (generation !== this.socketGeneration) return;
+      this.lastCloseCode = event.code;
       this.stopHeartbeat();
       this.setConnection("offline");
       if (!this.manualClosed) this.scheduleReconnect();
     };
 
     ws.onerror = () => {
+      if (generation === this.socketGeneration) {
+        this.lastError = "语音应用 WS 发生错误";
+      }
       // onclose 会随后触发，统一走重连逻辑
     };
   }
 
   private scheduleReconnect() {
+    if (this.manualClosed || this.reconnectTimer) return;
     const delay = Math.min(
       BASE_RECONNECT_DELAY_MS * 2 ** this.attempt,
       MAX_RECONNECT_DELAY_MS,
@@ -103,6 +120,7 @@ export class VoiceWSClient {
     this.attempt += 1;
     this.setConnection("connecting");
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       const access = useAuthStore.getState().accessToken;
       if (!access || this.manualClosed) return;
       this.open(access);
@@ -179,6 +197,9 @@ export class VoiceWSClient {
   /** 显式断开（登出时调用）：不自动重连 */
   disconnect() {
     this.manualClosed = true;
+    this.socketGeneration += 1;
+    this.lastError = null;
+    this.lastCloseCode = null;
     this.subscribed.clear();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

@@ -187,6 +187,30 @@ def test_unauthenticated_rejected():
 
 
 @pytest.mark.django_db
+def test_delete_clears_member_activity_state(auth_client):
+    owner_client, owner = auth_client(username="voice_delete_owner")
+    member_client, member = auth_client(username="voice_delete_member")
+    ch = VoiceChannel.objects.create(name="删除房", room_name="room_delete_cleanup", owner=owner)
+    VoiceChannelMember.objects.create(channel=ch, user=owner)
+    VoiceChannelMember.objects.create(channel=ch, user=member)
+    owner.is_in_voice = True
+    owner.voice_room_id = ch.id
+    owner.save(update_fields=["is_in_voice", "voice_room_id"])
+    member.is_in_voice = True
+    member.voice_room_id = ch.id
+    member.save(update_fields=["is_in_voice", "voice_room_id"])
+
+    response = owner_client.delete(f"/api/v1/voice/channels/{ch.id}/")
+
+    assert response.status_code == 200
+    assert not VoiceChannel.objects.filter(pk=ch.id).exists()
+    owner.refresh_from_db()
+    member.refresh_from_db()
+    assert owner.is_in_voice is False and owner.voice_room_id is None
+    assert member.is_in_voice is False and member.voice_room_id is None
+
+
+@pytest.mark.django_db
 def test_owner_leave_when_alone(auth_client):
     """房主是唯一成员时允许直接离开（修复死锁），频道保留为空。"""
     client, owner = auth_client()

@@ -29,6 +29,7 @@ export class LiveWSClient {
   private attempt = 0;
   private manualClosed = false;
   private channelId: number | null = null;
+  private generation = 0;
   private handlers = new Set<LiveFrameHandler>();
 
   /** 连接状态（供 UI 展示） */
@@ -51,22 +52,28 @@ export class LiveWSClient {
     if (this.ws || this.channelId !== null) this.disconnect();
     this.channelId = channelId;
     this.manualClosed = false;
+    this.attempt = 0;
+    const generation = ++this.generation;
     this.setConnection("connecting");
-    this.open(channelId, access);
+    this.open(channelId, access, generation);
   }
 
-  private open(channelId: number, access: string) {
+  private open(channelId: number, access: string, generation: number) {
     const url = `${WS_BASE_URL}/ws/live/${channelId}/?token=${encodeURIComponent(access)}`;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
     } catch {
-      this.scheduleReconnect();
+      if (generation === this.generation) this.scheduleReconnect(generation);
       return;
     }
     this.ws = ws;
 
     ws.onopen = () => {
+      if (generation !== this.generation || this.ws !== ws) {
+        ws.close();
+        return;
+      }
       const isReconnect = this.attempt > 0;
       this.attempt = 0;
       this.setConnection("online");
@@ -76,6 +83,7 @@ export class LiveWSClient {
     };
 
     ws.onmessage = (ev) => {
+      if (generation !== this.generation || this.ws !== ws) return;
       let frame: LiveServerFrame;
       try {
         frame = JSON.parse(ev.data as string) as LiveServerFrame;
@@ -86,6 +94,8 @@ export class LiveWSClient {
     };
 
     ws.onclose = (ev) => {
+      if (generation !== this.generation || this.ws !== ws) return;
+      this.ws = null;
       this.stopHeartbeat();
       this.setConnection("offline");
       // 4401 未认证 / 4404 频道不存在：语义性关闭，不重连
@@ -99,7 +109,7 @@ export class LiveWSClient {
         this.onClosedByServer?.("channel_not_found");
         return;
       }
-      if (!this.manualClosed) this.scheduleReconnect();
+      if (!this.manualClosed) this.scheduleReconnect(generation);
     };
 
     ws.onerror = () => {
@@ -107,7 +117,8 @@ export class LiveWSClient {
     };
   }
 
-  private scheduleReconnect() {
+  private scheduleReconnect(generation = this.generation) {
+    if (generation !== this.generation || this.reconnectTimer) return;
     const delay = Math.min(
       BASE_RECONNECT_DELAY_MS * 2 ** this.attempt,
       MAX_RECONNECT_DELAY_MS,
@@ -115,9 +126,10 @@ export class LiveWSClient {
     this.attempt += 1;
     this.setConnection("connecting");
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       const access = useAuthStore.getState().accessToken;
-      if (!access || this.manualClosed || this.channelId === null) return;
-      this.open(this.channelId, access);
+      if (!access || this.manualClosed || this.channelId === null || generation !== this.generation) return;
+      this.open(this.channelId, access, generation);
     }, delay);
   }
 
@@ -157,6 +169,7 @@ export class LiveWSClient {
   /** 显式断开（退房时调用）：不自动重连 */
   disconnect() {
     this.manualClosed = true;
+    this.generation += 1;
     this.channelId = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

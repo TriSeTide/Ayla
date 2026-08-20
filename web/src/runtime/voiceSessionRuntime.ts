@@ -7,7 +7,8 @@ import * as voiceApi from "../api/voice";
 
 export const VOICE_HEARTBEAT_INTERVAL_MS = 40_000;
 
-type ExpiredHandler = () => void;
+type ExpiredReason = "removed" | "deleted";
+type ExpiredHandler = (reason: ExpiredReason) => void;
 
 class VoiceSessionRuntime {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -21,10 +22,15 @@ class VoiceSessionRuntime {
     this.heartbeatTimer = setInterval(() => {
       if (this.channelId !== channelId) return;
       void voiceApi.heartbeatVoiceChannel(channelId).catch((error: unknown) => {
-        if (((error instanceof ApiError && error.status === 403) || (typeof error === "object" && error !== null && "status" in error && error.status === 403)) && this.channelId === channelId) {
+        const status = error instanceof ApiError
+          ? error.status
+          : typeof error === "object" && error !== null && "status" in error
+            ? error.status
+            : undefined;
+        if ((status === 403 || status === 404) && this.channelId === channelId) {
           const onExpired = this.expiredHandler;
           this.stopHeartbeat();
-          onExpired?.();
+          onExpired?.(status === 404 ? "deleted" : "removed");
         }
       });
     }, VOICE_HEARTBEAT_INTERVAL_MS);

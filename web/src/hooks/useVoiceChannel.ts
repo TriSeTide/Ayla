@@ -48,10 +48,13 @@ export function useVoiceChannel() {
 
   /** 防止卸载后异步回写 */
   const mountedRef = useRef(true);
+  // 每次 join 都拥有独立代次；路由卸载或再次 join 时，旧请求不得把媒体/成员状态带回来。
+  const joinGenerationRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      joinGenerationRef.current += 1;
     };
   }, []);
 
@@ -71,9 +74,11 @@ export function useVoiceChannel() {
 
   const startHeartbeat = useCallback(
     (channelId: string) => {
-      voiceSessionRuntime.startHeartbeat(channelId, () => {
+      voiceSessionRuntime.startHeartbeat(channelId, (reason) => {
         resetLocal();
-        if (mountedRef.current) setErrorState("你已被移出语音频道（心跳超时）");
+        if (mountedRef.current) {
+          setErrorState(reason === "deleted" ? "语音房已被删除" : "你已被移出语音频道（心跳超时）");
+        }
       });
     },
     [resetLocal],
@@ -136,12 +141,19 @@ export function useVoiceChannel() {
   const join = useCallback(
     async (channelId: string, options: JoinOptions = {}) => {
       const joinMuted = options.joinMuted ?? true;
+      const generation = ++joinGenerationRef.current;
+      const isCurrentJoin = () => mountedRef.current && joinGenerationRef.current === generation;
       setJoining(true);
       setErrorState(null);
       const store = useVoiceStore.getState();
       try {
         // 1. REST join（拿媒体凭据；503 = LiveKit 未配置，终止不进媒体连接）
         const joinResult = await voiceApi.joinVoiceChannel(channelId);
+        if (!isCurrentJoin()) {
+          // 页面卸载/旧路由竞态：服务端已记成员，必须回滚这次孤儿 join。
+          await voiceApi.leaveVoiceChannel(channelId).catch(() => {});
+          return;
+        }
         // 2. 切频道：若已在其他频道，先本地清掉（leave/ 由后端 join 广播驱动他人视图；
         //    自己旧频道的 leave 显式调一次保证幂等）
         const prevChannelId = store.currentChannelId;

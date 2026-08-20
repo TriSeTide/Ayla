@@ -18,6 +18,7 @@ import uuid
 from asgiref.sync import async_to_sync
 from channels.exceptions import ChannelFull
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -71,6 +72,23 @@ def create_channel(user, name: str, group=None, visibility: str | None = None, a
         from apps.common.visibility import set_allowed_groups
         set_allowed_groups(channel, allowed_group_ids)
     return channel
+
+
+@transaction.atomic
+def delete_channel(channel: VoiceChannel, actor) -> None:
+    """删除频道并清理所有成员的跨页活动标记。"""
+    locked = VoiceChannel.objects.select_for_update().get(pk=channel.pk)
+    if locked.owner_id != actor.id:
+        raise PermissionError("仅房主可删除")
+    member_ids = list(
+        VoiceChannelMember.objects.filter(channel=locked).values_list("user_id", flat=True)
+    )
+    VoiceChannelMember.objects.filter(channel=locked).delete()
+    User = get_user_model()
+    User.objects.filter(pk__in=member_ids, voice_room_id=locked.id).update(
+        is_in_voice=False, voice_room_id=None
+    )
+    locked.delete()
 
 
 def get_channel(channel_id) -> VoiceChannel | None:

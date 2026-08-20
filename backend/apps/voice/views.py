@@ -163,7 +163,10 @@ class ChannelDetailView(APIView):
             return _not_found()
         if not services.can_manage_channel(ch, request.user):
             return _forbidden("仅房主可删除")
-        ch.delete()
+        try:
+            services.delete_channel(ch, request.user)
+        except PermissionError as exc:
+            return _forbidden(str(exc))
         return Response({"deleted": True})
 
     def patch(self, request, channel_id):
@@ -394,15 +397,11 @@ class ChannelDeleteView(APIView):
         if not services.can_manage_channel(ch, request.user):
             return _forbidden("仅房主可删除")
         
-        # 在删除前保存信息
+        # 删除前保留目录事件所需身份；服务层负责成员与账号活动态的原子清理。
         saved_channel_id = ch.id
         saved_visibility = ch.visibility
         saved_group_id = ch.group_id
-        
-        # 删除
-        ch.delete()
-        
-        # 推送删除事件
+        services.delete_channel(ch, request.user)
         broadcast_channel_deleted(saved_channel_id, saved_visibility, saved_group_id)
         
         return Response({"deleted": True})

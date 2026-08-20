@@ -19,12 +19,22 @@ describe("voiceSessionRuntime", () => {
     expect(heartbeat).toHaveBeenCalledWith("v2");
   });
 
+  it("404 时停止 heartbeat 并明确通知房间已删除", async () => {
+    const expired = vi.fn();
+    vi.spyOn(voiceApi, "heartbeatVoiceChannel").mockRejectedValue({ status: 404 });
+    voiceSessionRuntime.startHeartbeat("v1", expired);
+    await vi.advanceTimersByTimeAsync(VOICE_HEARTBEAT_INTERVAL_MS);
+    expect(expired).toHaveBeenCalledWith("deleted");
+    expect(voiceSessionRuntime.isHeartbeating("v1")).toBe(false);
+  });
+
   it("403 时停止 heartbeat 并通知过期", async () => {
     const expired = vi.fn();
     vi.spyOn(voiceApi, "heartbeatVoiceChannel").mockRejectedValue({ status: 403 });
     voiceSessionRuntime.startHeartbeat("v1", expired);
     await vi.advanceTimersByTimeAsync(VOICE_HEARTBEAT_INTERVAL_MS);
     expect(expired).toHaveBeenCalledOnce();
+    expect(expired).toHaveBeenCalledWith("removed");
     expect(voiceSessionRuntime.isHeartbeating("v1")).toBe(false);
   });
 });

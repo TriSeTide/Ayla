@@ -9,6 +9,7 @@ Presence WebSocket Consumer。
 """
 import json
 import logging
+from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -24,10 +25,9 @@ User = get_user_model()
 
 def _jwt_user_from_scope(scope) -> "User | None":
     """从 query string 的 token 解析用户（同步工具函数）。"""
-    token = scope["query_string"].decode().removeprefix("token=")
-    # 支持 token=xxx 或 token=xxx&extra=yyy
-    if "&" in token:
-        token = token.split("&")[0]
+    query = parse_qs(scope.get("query_string", b"").decode("ascii", errors="ignore"))
+    token_values = query.get("token")
+    token = token_values[0] if token_values else ""
     if not token:
         return None
     try:
