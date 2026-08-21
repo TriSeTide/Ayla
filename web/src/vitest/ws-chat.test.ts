@@ -19,9 +19,14 @@ import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
 import * as liveApi from "../api/live";
 import * as accountsApi from "../api/accounts";
+import * as chatApi from "../api/chat";
 
 vi.mock("../api/accounts", () => ({
   getBadges: vi.fn(),
+}));
+
+vi.mock("../api/chat", () => ({
+  markMessageRead: vi.fn().mockResolvedValue({ detail: "ok" }),
 }));
 
 type WSInstance = {
@@ -308,6 +313,43 @@ describe("ChatWSClient", () => {
       },
     });
     await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
+    client.disconnect();
+  });
+
+  it("正在聊天时对方消息 → 立即标已读，markRead 后刷新 badges（不计红点）", async () => {
+    vi.mocked(chatApi.markMessageRead).mockClear();
+    vi.mocked(accountsApi.getBadges).mockClear();
+    useAuthStore.setState({
+      currentUser: {
+        id: "me", username: "me", nickname: "我", avatar: "", signature: "",
+        status: "online", online: true, date_joined: "2026-01-01T00:00:00Z",
+      },
+    });
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    useChatStore.getState().setConversations([
+      {
+        id: "c1", type: "private", title: "x", announcement: "", avatar: "",
+        owner_id: "o", members: [], my_role: "member", member_count: 2,
+        unread_count: 0, created_at: new Date().toISOString(), peer: null,
+      },
+    ]);
+    useChatStore.getState().openConversation("c1");
+    fire(instances[0], {
+      type: "message.new",
+      data: {
+        conversation_id: "c1", message_id: "m1", sender_id: "peer", content: "hi",
+        type: "text", media: null, reply_to: null, seq: 1, ts: "2026-08-10T00:00:00Z",
+      },
+    });
+    // 正在聊天：对方消息立即标已读
+    expect(chatApi.markMessageRead).toHaveBeenCalledWith("c1", "m1");
+    // 标已读确认后才刷新红点（服务端 private_unread 已减少）
+    await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
+    // 正在聊天不 bump 未读（会话 unread_count 保持 0）
+    expect(useChatStore.getState().conversations.find((c) => c.id === "c1")?.unread_count).toBe(0);
+    useAuthStore.setState({ currentUser: null });
     client.disconnect();
   });
 

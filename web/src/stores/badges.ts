@@ -27,13 +27,20 @@ const EMPTY: Badges = {
   join_requests_pending: 0,
 };
 
+/**
+ * fetch 序号：并发 fetch（打开会话 markRead / message.new 实时刷新）可能乱序返回，
+ * 旧响应覆盖新响应会让红点短暂消失或滞后。只应用最后一次发起的 fetch 结果。
+ */
+let fetchSeq = 0;
+
 export const useBadgesStore = create<BadgesState>((set, get) => ({
   badges: null,
 
   fetch: async () => {
+    const seq = ++fetchSeq;
     try {
       const badges = await accountsApi.getBadges();
-      set({ badges });
+      if (seq === fetchSeq) set({ badges });
     } catch {
       // 拉取失败保持上一版计数（下次再试），不伪造清零
     }

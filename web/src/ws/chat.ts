@@ -26,6 +26,7 @@ import { useLiveStore } from "../stores/live";
 import * as postsApi from "../api/posts";
 import * as liveApi from "../api/live";
 import { useBoardgameStore } from "../stores/boardgame";
+import * as chatApi from "../api/chat";
 import * as voiceApi from "../api/voice";
 import * as boardgameApi from "../api/boardgame";
 
@@ -228,9 +229,19 @@ export class ChatWSClient {
         // 若该会话被"删除"（隐藏）不在此列表，服务端已自动取消隐藏，
         // 下次 listConversations 刷新即重新出现。
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
-        // 私信新消息 → 全局消息入口红点（private_unread）实时刷新；
-        // 群未读不进消息中心红点（属群卡片/ServerRail 角标），故群消息不拉 badges。
-        if (!conv || conv.type === "private") {
+        const isActive = chat.activeConversationId === d.conversation_id;
+        if (isActive) {
+          // 正在聊天：对方消息立即标已读（不计入红点），确认后刷新红点。
+          const me = useAuthStore.getState().currentUser;
+          if (me && String(d.sender_id) !== String(me.id)) {
+            chatApi
+              .markMessageRead(d.conversation_id, d.message_id)
+              .then(() => useBadgesStore.getState().fetch())
+              .catch(() => { /* 已读失败下次打开重试 */ });
+          }
+        } else if (!conv || conv.type === "private") {
+          // 私信新消息（未打开）→ 全局消息入口红点（private_unread）实时刷新；
+          // 群未读不进消息中心红点（属群卡片/ServerRail 角标），故群消息不拉 badges。
           void useBadgesStore.getState().fetch();
         }
         if (conv) {
@@ -447,9 +458,18 @@ export class ChatWSClient {
         };
         message.upsertMessage(d.conversation_id, msg);
         chat.bumpUnread(d.conversation_id);
-        // 爱莉回复多为私信：私信未读 → 全局消息入口红点实时刷新
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
-        if (!conv || conv.type === "private") {
+        if (chat.activeConversationId === d.conversation_id) {
+          // 正在聊天：爱莉回复立即标已读（不计红点），确认后刷新红点
+          const me = useAuthStore.getState().currentUser;
+          if (me && String(d.sender_id) !== String(me.id)) {
+            chatApi
+              .markMessageRead(d.conversation_id, d.message_id)
+              .then(() => useBadgesStore.getState().fetch())
+              .catch(() => { /* 已读失败下次打开重试 */ });
+          }
+        } else if (!conv || conv.type === "private") {
+          // 爱莉回复多为私信：私信未读 → 全局消息入口红点实时刷新
           void useBadgesStore.getState().fetch();
         }
         break;

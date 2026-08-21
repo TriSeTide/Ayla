@@ -47,6 +47,10 @@ export function GroupChat({ groupId }: { groupId: string }) {
         await markReadLatest(groupId);
       })
       .catch(handleHistoryError);
+    return () => {
+      // 离开群聊时清 activeId，避免残留导致其他会话 message.new 被误判 markRead
+      useChatStore.getState().closeConversation();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 

@@ -87,6 +87,11 @@ export function PrivateChatPane({
         await markReadLatest(conversationId);
       })
       .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
+    return () => {
+      // 离开私聊（切换会话/返回消息中心）时清 activeId，避免残留导致
+      // 其他会话的 message.new 被误判为"正在聊天"而 markRead（串会话）。
+      useChatStore.getState().closeConversation();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 

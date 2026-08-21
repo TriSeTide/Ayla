@@ -211,7 +211,8 @@
 /* 宽屏双栏（布局文档 §3.4 / 需求：会话列表 + 聊天内容区，侧栏宽度与主页一致） */
 @media (min-width: 769px) {
   .messages-page {
-    padding-bottom: var(--sp-4);
+    /* 宽屏无 FAB 遮挡，padding-bottom 会让侧栏/输入框不铺满（底部露背景） */
+    padding-bottom: 0;
     flex-direction: row;
   }
 
@@ -234,6 +235,15 @@
 }
 
 /* ================= 宽屏两列（需求：会话列表 + 聊天内容区） ================= */
+
+/* 宽屏私聊页（/chat/:id）外层容器：与 /messages 宽屏 .messages-page 同构，
+   否则高度塌陷导致聊天输入框下方露出极光背景空白。 */
+.wide-messages {
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
 
 .wide-messages-sidebar {
   flex: none;
