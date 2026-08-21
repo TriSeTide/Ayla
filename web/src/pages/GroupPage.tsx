@@ -16,6 +16,7 @@ import type { CSSProperties } from "react";
 import * as chatApi from "../api/chat";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { GroupTopTabs } from "../components/group/GroupTopTabs";
+import { sortGroupsByActivity, useGroupActivityMap } from "../components/home/groupActivity";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterGroupAnimation } from "../hooks/useEnterGroupAnimation";
 import { useSwipe } from "../hooks/useSwipe";
@@ -61,6 +62,7 @@ export function GroupPage() {
   const [showGroupCreate, setShowGroupCreate] = useState(false);
   const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
   const [conversationRetry, setConversationRetry] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/group) ----
   const [pullOffset, setPullOffset] = useState(0);
@@ -102,6 +104,12 @@ export function GroupPage() {
   const groups = useMemo(
     () => conversations.filter((c) => c.type === "group"),
     [conversations],
+  );
+
+  // 群"新内容"活跃度：WS 实时维护 live/voice/boardgame/posts store → 排序即时刷新
+  const activityFor = useGroupActivityMap();
+  const sortedGroups = sortGroupsByActivity(groups, (g) =>
+    activityFor(g.id, g.last_message),
   );
   const currentGroup = useMemo(
     () => conversations.find((c) => c.id === id) ?? null,
@@ -221,12 +229,18 @@ export function GroupPage() {
   if (!isNarrow) {
     return (
       <div className="group-page group-page-wide">
+        {actionError && (
+          <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
+            {actionError}（点击关闭）
+          </div>
+        )}
         {conversationLoadError && <div className="chat-notice" role="alert"><span>{conversationLoadError}</span><button type="button" className="btn btn-ghost" onClick={() => { setConversationLoadError(null); setConversationRetry((value) => value + 1); }}>重试</button></div>}
         <ServerRail
-          groups={groups}
+          groups={sortedGroups}
           currentGroupId={id ?? null}
           onSelectGroup={(gid) => navigate(`/group/${gid}`)}
           onCreateGroup={() => setShowGroupCreate(true)}
+          onError={setActionError}
         />
         <ChannelSidebar
           groupName={currentGroup?.title ?? "群聊"}

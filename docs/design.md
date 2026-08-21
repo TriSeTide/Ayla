@@ -267,6 +267,16 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 卡片底部行：群头像 24px 带光环 + 群名 Nunito 700 15px `--text-primary` 一行省略
 - 列表布局（GroupListItem）：行高 64px，玻璃底；左群头像 44px 带光环（右下角状态角标），中群名 Nunito 700 15px + 新消息预览 13px `--text-secondary` 一行省略，右未读徽标 `--pink-500`
 
+### 12.6.1 群排序与"新内容"标识（M5 群活跃度）
+
+> 主页群卡片 / 群列表 / 宽屏 ServerRail 共用 `components/home/groupActivity.ts`。三状态 store（live/voice/boardgame）由 ChatWS 实时推送维护 + 登录预加载，排序/角标/标识全部实时刷新，无需轮询。
+> **排序按"新内容"（事件性），角标按"有内容"（存在性）——两者分开**（用户纠正：不是有直播 LIVE 就排前）。
+
+- 排序（`useGroupActivityMap` + `sortGroupsByActivity`）：**置顶 > 有新内容排前（组内按最近事件时间新→旧）> 无新内容保持稳定**
+- "新内容"判定（`NEW_CONTENT_WINDOW_MS` = 24h 窗口内事件）：新消息（未读 `unread>0`）、新开播（直播 `started_at` 在窗口内）、新语音房被创建（`created_at` 在窗口内）、新桌游房被创建（`created_at` 在窗口内）；超出窗口的"在播/在房"不算新、不排前
+- 群卡片角标（`useGroupPresenceMap`，存在性）：群内**当前有**直播在播 / 语音房 / 桌游房（同 12.3 角标规格：glow 直播 / ice 语音 / sakura 桌游），与排序无关
+- 列表布局"新内容"：`--pink-500` 字 + 前置 6px 圆点（`.group-list-new`），替代成员数预览显示；无新内容仍显示「N 人」
+
 ### 12.7 直播间（两形态）
 
 - 窄屏沉浸式：视频全屏；覆盖层顶部主播信息行（玻璃底 `--glass-bg`）、底部弹幕输入框（`--glass-bg-strong` 半透明，InputBar 变体）；左上角返回键 40px 圆形玻璃容器 + 箭头图标
@@ -321,6 +331,17 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 「做频道侧栏场景项：行高 40px 圆角 12px，左 20px 线性图标 + Nunito 600 15px，选中底 rgba(157,191,230,0.35)，右侧在麦人数 Space Grotesk 12px 或 LIVE #F17EB3 徽标」
 - 「做直播间卡片：16:9 封面圆角 12px，左上 LIVE #F17EB3 白字胶囊，标题 Nunito 700 15px #465B92，来源 Micro Tag #F9B0FF 底 #722E88 字」
 - 「做帖子卡：实心 --surface 圆角 16px，头像 36px 带光环 + Nunito 700 昵称 + Space Grotesk 12px 时间，正文 15px 超 3 行折叠，底排评论/收藏 18px 线性图标」
+
+### 12.14 会话列表项与会话管理菜单（M5 消息中心）
+
+> 用于 /messages 与 /chat/:id 的会话列表（ConversationList）。在线状态双通道原则（§10）保持：光环 + 名字行文字标签。
+
+- **名字行**：昵称 Nunito 700 15px `--text-primary`（一行省略）+ 紧随其后在线状态胶囊——`is-online` 时 `--success` 字 + 6px 圆点，离线 `--text-secondary`；底 `rgba(157,191,230,0.16)`，圆角 999px，11px/700，padding 1px 8px
+- **预览行**：最新一条消息摘要 Nunito 400 13px `--text-secondary` 一行省略（替代原「在线/离线」文字）；群聊预览带 `发送者名: 内容`，媒体消息占位 `[图片]/[语音]/[文件]/[表情]`，已撤回 `[已撤回]`，无消息 `暂无消息`
+- **⋯ 更多按钮**：行右侧绝对定位（`right:6px` 垂直居中），40×40px 圆形触达区（§10 ≥40px），三点线性 SVG 18px `#a9b8d4`；hover/展开态底 `rgba(157,191,230,0.25)`、图标转 `--text-primary`；行内 padding-right 52px 给按钮让位
+- **弹出菜单**（`.conv-menu`）：绝对定位**向上展开**（`bottom: calc(100% - 2px)`，避免被列表滚动容器 `overflow-y:auto` 裁剪），右对齐；层级 `z-index: 60`——高于底栏/顶栏/侧栏（20–50），低于弹层遮罩（70+），保证不被固定栏遮挡；`--glass-bg-strong` + blur 18px + 圆角 14px + 1px `--glass-border` + `0 8px 24px rgba(70,91,146,0.16)`；菜单项行高 40px 圆角 10px Nunito 600 14px，hover 底 `rgba(157,191,230,0.22)`，危险项（删除）`--destructive` 字 + hover 底 `rgba(224,100,100,0.12)`
+- **置顶会话视觉标识**（`.conv-item.is-pinned`）：左侧 3px `--glow-500` 圆角指示条（同 ServerRail 指示条语言，装饰不承载信息）+ 非选中态淡 sakura 粉底 `rgba(249,176,255,0.1)`（hover 0.16）+ 标题转 `--grape-700`（对比度 ≈6:1 达标）；选中态（active）背景保持 ice 蓝胶囊、标题仍 grape
+- 置顶会话排列表最前（置顶组/非置顶组内保持原顺序）；删除为软删除（仅隐藏本人列表，消息保留），confirm 确认后执行
 
 ---
 

@@ -28,6 +28,16 @@ urlpatterns = [
         views.ConversationDetailView.as_view(),
         name="chat-conv-detail",
     ),
+    path(
+        "conversations/<int:conv_id>/pin/",
+        views.ConversationPinView.as_view(),
+        name="chat-conv-pin",
+    ),
+    path(
+        "conversations/<int:conv_id>/hide/",
+        views.ConversationHideView.as_view(),
+        name="chat-conv-hide",
+    ),
     # 消息
     path(
         "conversations/<int:conv_id>/read/",

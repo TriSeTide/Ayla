@@ -72,6 +72,25 @@ export function markConversationRead(convId: string) {
   });
 }
 
+/** POST /chat/conversations/<id>/pin/ —— 置顶/取消置顶会话（本人视图） */
+export function togglePinConversation(
+  convId: string,
+  pinned: boolean,
+) {
+  return apiRequest<{ pinned: boolean; detail: string }>(
+    `/chat/conversations/${convId}/pin/`,
+    { method: "POST", body: { pinned } },
+  );
+}
+
+/** POST /chat/conversations/<id>/hide/ —— 从本人列表删除（隐藏）会话，不删消息 */
+export function hideConversation(convId: string) {
+  return apiRequest<{ detail: string; hidden: boolean }>(
+    `/chat/conversations/${convId}/hide/`,
+    { method: "POST" },
+  );
+}
+
 /** POST /chat/conversations/<id>/messages/<mid>/read/ —— 标已读 */
 export function markMessageRead(convId: string, messageId: string) {
   return apiRequest<{ detail: string }>(

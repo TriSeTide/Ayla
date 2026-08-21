@@ -225,6 +225,8 @@
   .auth-card,
   .chat-sidebar,
   .conv-item,
+  .conv-menu,
+  .server-pop,
   .bubble-other,
   .chat-header,
   .composer,
@@ -518,12 +520,19 @@
   padding: 0 var(--sp-2);
 }
 
+/* 会话列表项容器：相对定位承载 ⋯ 更多按钮与弹出菜单 */
+.conv-li {
+  position: relative;
+}
+
 .conv-item {
+  position: relative; /* 置顶指示条 ::before 定位基准 */
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   width: 100%;
   padding: var(--sp-3);
+  padding-right: 52px; /* 给右侧 ⋯ 更多按钮让位 */
   border-radius: 16px;
   text-align: left;
   transition: background var(--dur-fast) var(--ease-out);
@@ -538,6 +547,35 @@
   background: rgba(157, 191, 230, 0.35);
 }
 
+/* 置顶会话：粉紫色系区分（design.md §12.14）。
+   - 左侧 3px 辉光粉指示条（同 ServerRail 指示条语言，装饰性，不承载信息）
+   - 淡 sakura 粉底（非选中态）
+   - 标题转 grape（对比度达标：--grape-700 #722E88 ≈ 6:1）
+   选中态（active）背景保持 ice 蓝，标题仍 grape 保留置顶标识。 */
+.conv-item.is-pinned:not(.active) {
+  background: rgba(249, 176, 255, 0.1);
+}
+
+.conv-item.is-pinned:not(.active):hover {
+  background: rgba(249, 176, 255, 0.16);
+}
+
+.conv-item.is-pinned::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 999px;
+  background: var(--glow-500);
+}
+
+.conv-item.is-pinned .conv-item-title {
+  color: var(--grape-700);
+}
+
 .conv-item-body {
   flex: 1;
   min-width: 0;
@@ -546,7 +584,16 @@
   gap: 2px;
 }
 
+/* 名字行：昵称 + 在线/离线状态（M5：状态从预览行移到名字后） */
+.conv-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .conv-item-title {
+  flex: 0 1 auto;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
@@ -555,12 +602,121 @@
   text-overflow: ellipsis;
 }
 
+.conv-item-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(157, 191, 230, 0.16);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.conv-item-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b9c6dc;
+}
+
+.conv-item-status.is-online {
+  color: var(--success);
+  background: rgba(96, 178, 140, 0.14);
+}
+
+.conv-item-status.is-online::before {
+  background: var(--success);
+}
+
+/* 预览行：最新一条消息摘要（替代原「在线/离线」文字） */
 .conv-item-sub {
   font-size: 13px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ⋯ 更多按钮 + 弹出菜单（M5 会话管理：置顶/删除） */
+.conv-more {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}
+
+.conv-more-btn {
+  display: grid;
+  place-items: center;
+  width: 40px; /* 触达目标 ≥40px（design.md §10） */
+  height: 40px;
+  border-radius: 12px;
+  color: #a9b8d4;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.conv-more-btn:hover,
+.conv-more-btn[aria-expanded="true"] {
+  background: rgba(157, 191, 230, 0.25);
+  color: var(--text-primary);
+}
+
+.conv-menu {
+  position: absolute;
+  /* 向上展开：列表滚动容器 overflow-y:auto 会裁剪向下溢出的菜单，
+     向上展开保证底部行（最常操作区）的菜单完整可见可点 */
+  bottom: calc(100% - 2px);
+  right: 2px;
+  /* 层级 60：高于底栏/顶栏/侧栏（20–50），低于弹层遮罩（70+），
+     保证菜单展开时不被固定栏遮挡、可点击（Bug：z-index 30 时被底栏盖住） */
+  z-index: 60;
+  min-width: 152px;
+  padding: var(--sp-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 14px;
+  background: var(--glass-bg-strong, var(--glass-bg));
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
+}
+
+.conv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.conv-menu-item:hover {
+  background: rgba(157, 191, 230, 0.22);
+}
+
+.conv-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.conv-menu-item-danger {
+  color: var(--destructive);
+}
+
+.conv-menu-item-danger:hover {
+  background: rgba(224, 100, 100, 0.12);
 }
 
 /* 未读徽标：pink 实底白字小圆点（design.md §4 Tags/Badges） */

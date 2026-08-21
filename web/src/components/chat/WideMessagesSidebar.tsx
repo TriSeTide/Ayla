@@ -199,6 +199,7 @@ export function WideMessagesSidebar({
             activeId={activeId}
             elysiaUserId={elysiaProfile?.user?.id}
             onSelect={onSelect}
+            onError={setActionError}
           />
         </div>
       ) : tab === "friends" ? (

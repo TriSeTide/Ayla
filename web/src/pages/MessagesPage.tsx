@@ -222,6 +222,7 @@ export function MessagesPage() {
             activeId={null}
             elysiaUserId={elysiaProfile?.user.id ?? null}
             onSelect={(id) => navigate(`/chat/${id}`)}
+            onError={setActionError}
           />
         </div>
       ) : tab === "friends" ? (

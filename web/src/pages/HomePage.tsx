@@ -16,6 +16,7 @@ import type { ConversationHighlightsMap } from "../api/types";
 import { GroupCard } from "../components/home/GroupCard";
 import { GroupListItem } from "../components/home/GroupListItem";
 import { LayoutSwitch } from "../components/home/LayoutSwitch";
+import { sortGroupsByActivity, useGroupActivityMap, useGroupPresenceMap } from "../components/home/groupActivity";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
@@ -47,12 +48,24 @@ export function HomePage() {
 
   const [highlights, setHighlights] = useState<ConversationHighlightsMap>({});
   const [listError, setListError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [creatingGroup, setCreatingGroup] = useState(false);
 
   const groups = useMemo(
     () => conversations.filter((c) => c.type === "group"),
     [conversations],
+  );
+
+  // 群"新内容"（排序/事件描述）与"存在内容"（角标）分开：
+  // - 排序：近期新事件（新消息/新开播/新语音房/新桌游房/新帖），WS 实时刷新
+  // - 角标：当前有直播在播/语音房/桌游房（存在性）
+  const activityFor = useGroupActivityMap();
+  const presenceFor = useGroupPresenceMap();
+
+  // 排序：置顶 > 有新内容（按最近事件时间新→旧）> 其余，无新内容保持稳定
+  const sortedGroups = sortGroupsByActivity(groups, (g) =>
+    activityFor(g.id, g.last_message),
   );
 
   // 加载会话列表（直接访问 /home 时 chat store 可能为空）
@@ -150,7 +163,7 @@ export function HomePage() {
   }
 
   // ---- 窄屏主页 ----
-  const visibleGroups = groups.slice(0, visibleCount);
+  const visibleGroups = sortedGroups.slice(0, visibleCount);
   const loading = listLoading && groups.length === 0;
 
   return (
@@ -163,6 +176,15 @@ export function HomePage() {
         <h1 className="home-title">群聊</h1>
         <LayoutSwitch layout={layout} onChange={setLayout} />
       </div>
+      {actionError && (
+        <div
+          className="messages-action-error"
+          role="alert"
+          onClick={() => setActionError(null)}
+        >
+          {actionError}（点击关闭）
+        </div>
+      )}
 
       {loading ? (
         <SkeletonCards />
@@ -205,9 +227,11 @@ export function HomePage() {
                 key={g.id}
                 group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
                 highlights={highlights[g.id] ?? []}
-                status={{ unread: g.unread_count }}
+                status={{ unread: g.unread_count, ...presenceFor(g.id) }}
+                isPinned={g.is_pinned}
                 onOpen={() => openGroup(g.id)}
                 onOpenHighlight={openHighlight}
+                onError={setActionError}
               />
             ))}
           </div>
@@ -221,14 +245,20 @@ export function HomePage() {
         </>
       ) : (
         <div className="home-list">
-          {visibleGroups.map((g) => (
-            <GroupListItem
-              key={g.id}
-              group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
-              status={{ unread: g.unread_count }}
-              onOpen={() => openGroup(g.id)}
-            />
-          ))}
+          {visibleGroups.map((g) => {
+            const act = activityFor(g.id, g.last_message);
+            return (
+              <GroupListItem
+                key={g.id}
+                group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
+                status={{ unread: g.unread_count, ...presenceFor(g.id) }}
+                newEventText={act.lastEvent?.text}
+                isPinned={g.is_pinned}
+                onOpen={() => openGroup(g.id)}
+                onError={setActionError}
+              />
+            );
+          })}
           {visibleCount < groups.length && (
             <div className="home-load-more" aria-label="加载更多">
               <span className="home-load-dot" />

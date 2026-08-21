@@ -9,12 +9,20 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
 
     member_count = serializers.IntegerField(read_only=True, default=0)
     owner_id = serializers.CharField(source="owner.id", read_only=True)
+    # 创建者显示名（nickname 为空回退 username；null=未知）——群"新内容"事件描述用
+    owner_nickname = serializers.SerializerMethodField()
     # S1：可见性 + 群归属（group=群 id 字符串；group_name=群标题，无群为 null）
     visibility = serializers.CharField(read_only=True)
     group = serializers.CharField(source="group_id", read_only=True, default=None)
     group_name = serializers.CharField(source="group.title", read_only=True, default=None)
     allowed_group_ids = serializers.SerializerMethodField()
     allowed_group_names = serializers.SerializerMethodField()
+
+    def get_owner_nickname(self, obj):
+        owner = getattr(obj, "owner", None)
+        if owner is None:
+            return None
+        return getattr(owner, "nickname", "") or owner.username or ""
 
     def get_allowed_group_ids(self, obj):
         return [str(group_id) for group_id in obj.allowed_groups.values_list("id", flat=True)]
@@ -35,6 +43,7 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
             "allowed_group_ids",
             "allowed_group_names",
             "owner_id",
+            "owner_nickname",
             "member_count",
             "created_at",
         ]
@@ -46,6 +55,7 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
             "group_name",
             "allowed_group_ids",
             "owner_id",
+            "owner_nickname",
             "member_count",
             "created_at",
         ]

@@ -169,6 +169,7 @@
 
 /* ---- ServerRail（design.md §12.3） ---- */
 .server-rail {
+  position: relative; /* 置顶面板 .server-pop 定位基准 */
   flex: none;
   width: 72px;
   display: flex;
@@ -178,6 +179,10 @@
   backdrop-filter: blur(24px) saturate(1.4);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);
   border-right: 1px solid var(--glass-border);
+  /* 提升 rail 的 stacking context：hover 展开的置顶面板（.server-pop）向右溢出
+     到 ChannelSidebar 上方时不被盖住（rail 自身有 backdrop-filter 会创建 context，
+     不加 z-index 则按 DOM 顺序排在 ChannelSidebar 之下） */
+  z-index: 20;
 }
 
 .server-rail-list {
@@ -186,7 +191,11 @@
   flex-direction: column;
   align-items: center;
   gap: var(--sp-3);
+  /* 顶部 4px 让首个头像的置顶 pin 图标（越出头像 -3px）不被裁剪；
+     overflow-x:hidden 禁止头像/图标的横向溢出产生滚动条 */
+  padding: var(--sp-1) 0 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .server-item {
@@ -238,6 +247,74 @@
   font-size: 11px;
   line-height: 16px;
   text-align: center;
+}
+
+/* 置顶小图标：头像左上角，45° 左倾粉色 pin（无圆形底，M5 会话管理；与右下角未读徽标不冲突） */
+.server-item-pin {
+  position: absolute;
+  top: -3px;
+  left: -5px;
+  z-index: 5;
+  display: inline-flex;
+  color: var(--pink-500);
+  pointer-events: none; /* 装饰性，不拦截点击切换群 */
+  transform: rotate(-45deg);
+}
+
+/* 头像悬停自动展开的置顶面板（需求：悬停自动展开栏点置顶）。
+   absolute 且 top/left 由 JS 按 rail 相对坐标锚定到头像右侧（rail 有
+   backdrop-filter 会创建 fixed 包含块，故不用 fixed；脱离 .server-rail-list
+   的 overflow 边界，不被裁剪、不产生横向滚动条；
+   rail z-index:20 使面板盖住相邻 ChannelSidebar）。 */
+.server-pop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateY(-50%);
+  z-index: 60;
+  min-width: 136px;
+  max-width: 200px;
+  padding: var(--sp-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 12px;
+  background: var(--glass-bg-strong, var(--glass-bg));
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
+}
+
+.server-pop-name {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.server-pop-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.server-pop-action:hover {
+  background: rgba(157, 191, 230, 0.22);
+}
+
+.server-pop-action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .server-rail-foot {

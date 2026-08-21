@@ -4,11 +4,15 @@
  * 结构：4:3 封面轮播（右上状态角标列）+ 底部群头像（带光环）+ 群名。
  * 交互分层（避免 button 嵌套）：
  * - 点轮播封面 → 打开对应动态（直播/帖子/桌游，target_url；onOpenHighlight）；
- * - 点底部行（群头像 + 群名）→ 进入群聊场景容器（/group/:id；onOpen）。
+ * - 点底部行（群头像 + 群名）→ 进入群聊场景容器（/group/:id；onOpen）；
+ * - 右下角 ⋯ 更多菜单 → 置顶/取消置顶、删除会话（M5 会话管理，GroupCard 场景复用
+ *   ConversationMoreMenu；置顶后左上角显示置顶小图标，图标绝对定位在卡片外，不挤压卡片空间）。
  * 状态角标优先级 未读 > 直播 > 语音 > 桌游（home/badges.ts）。
  */
 import type { GroupHighlight } from "../../api/types";
 import { Avatar } from "../Avatar";
+import { ConversationMoreMenu } from "../chat/ConversationMoreMenu";
+import { IconPin } from "../icons";
 import type { GroupStatus } from "./badges";
 import { badgeIcon, resolveBadges } from "./badges";
 import { GroupCarousel } from "./GroupCarousel";
@@ -17,21 +21,32 @@ export function GroupCard({
   group,
   highlights,
   status,
+  isPinned,
   onOpen,
   onOpenHighlight,
+  onError,
 }: {
   group: { id: string; title: string; avatar?: string; memberCount?: number };
   highlights: GroupHighlight[];
   status: GroupStatus;
+  /** 置顶标识（M5 会话管理） */
+  isPinned?: boolean;
   /** 进入群聊场景（点击底部行） */
   onOpen: () => void;
   /** 打开动态（点击轮播封面，跳 target_url） */
   onOpenHighlight?: (h: GroupHighlight) => void;
+  /** 置顶/删除失败提示（父组件错误条）；缺省 alert 兜底 */
+  onError?: (message: string) => void;
 }) {
   const badges = resolveBadges(status);
 
   return (
-    <article className="group-card">
+    <article className={`group-card ${isPinned ? "is-pinned" : ""}`}>
+      {isPinned && (
+        <span className="group-card-pin" aria-label="已置顶" title="已置顶">
+          <IconPin width={10} height={10} />
+        </span>
+      )}
       <div className="group-card-main">
         <GroupCarousel
           highlights={highlights}
@@ -67,6 +82,11 @@ export function GroupCard({
         <Avatar label={group.title} size={24} online imageUrl={group.avatar || null} />
         <span className="group-card-title">{group.title}</span>
       </button>
+      <ConversationMoreMenu
+        conversation={{ id: group.id, title: group.title, is_pinned: isPinned }}
+        showDelete={false}
+        onError={onError}
+      />
     </article>
   );
 }

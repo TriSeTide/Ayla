@@ -1,0 +1,226 @@
+/**
+ * 群"新内容"工具 —— 主页群卡片 / 群列表 / 宽屏服务器栏共用。
+ *
+ * 语义（用户多轮纠正后定稿）：
+ * - 排序按"新内容"（事件性），不是"有内容"（存在性）：近期发生过新事件才排前；
+ * - "新消息"不依赖已读（unread）：窗口内最新消息（含自己发的）即算，读了不掉下去；
+ * - 事件种类：新消息、新开播、新语音房被创建、新桌游房被创建、新帖子。
+ * - 列表布局显示最近事件的**具体描述**（替代"新内容"三字）：
+ *   xx：消息内容 / xx 开播了 标题 / xx 创建了语音房 房名 /
+ *   xx 创建了桌游房 房名 / xx 发了新帖 标题。
+ *
+ * WS 实时：live/voice/boardgame/posts 四 store 由 ChatWS 事件维护 + 登录预加载，
+ * store 变化 → 订阅组件重渲染 → 排序/事件描述即时刷新。
+ */
+import { useBoardgameStore } from "../../stores/boardgame";
+import { useLiveStore } from "../../stores/live";
+import { usePostsStore } from "../../stores/posts";
+import { useVoiceStore } from "../../stores/voice";
+
+/** "新"的时间窗口：窗口内的事件才视为"新内容"（可调） */
+export const NEW_CONTENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 小时
+
+/** 事件种类 */
+export type NewEventKind = "message" | "live" | "voice" | "game" | "post";
+
+/** 一条"新内容"事件（列表预览展示用） */
+export interface NewEvent {
+  kind: NewEventKind;
+  /** 事件时间（毫秒） */
+  at: number;
+  /** 展示文本，如「小樱：今晚一起吃饭吗」「阿蓝 开播了 直播间1」 */
+  text: string;
+}
+
+/** 群内当前存在的直播/语音/桌游（角标语义，存在性，与排序无关） */
+export interface GroupPresence {
+  /** 群内有直播在播（status=live） */
+  live: boolean;
+  /** 群内有语音房 */
+  voice: boolean;
+  /** 群内有桌游房 */
+  game: boolean;
+}
+
+/** 群"新内容"聚合结果（排序 + 列表标识） */
+export interface GroupActivity {
+  /** 最近一次"新内容"事件时间（毫秒）；无则为 0 */
+  lastNewAt: number;
+  /** 最近一条事件（展示用）；无则为 null */
+  lastEvent: NewEvent | null;
+}
+
+const NO_ACTIVITY: GroupActivity = { lastNewAt: 0, lastEvent: null };
+
+/** 解析后端 ISO 时间戳为毫秒（无效返回 0） */
+function toMs(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** 是否在"新"窗口内（不早于 now-window 且不晚于 now+1min 时钟容差） */
+function isRecent(ms: number, now: number): boolean {
+  if (ms <= 0) return false;
+  return ms > now - NEW_CONTENT_WINDOW_MS && ms < now + 60_000;
+}
+
+/** 内容对本群可见：群归属等于本群，或白名单 allowed_group_ids 含本群 */
+function visibleInGroup(
+  groupKey: string | null,
+  groupId: string,
+  allowed: string[] | undefined,
+): boolean {
+  return (
+    String(groupKey) === String(groupId) ||
+    (allowed ?? []).some((id) => String(id) === String(groupId))
+  );
+}
+
+/** 取两个人名中可显示的一个 */
+function displayName(nickname?: string | null, username?: string | null): string {
+  return nickname || username || "";
+}
+
+/** 消息事件（最后一条消息，含自己的；不依赖已读） */
+function messageEvent(
+  lastMessage: { sender_name?: string; content?: string; created_at?: string | null } | null | undefined,
+  now: number,
+): NewEvent | null {
+  if (!lastMessage || !lastMessage.created_at) return null;
+  const at = toMs(lastMessage.created_at);
+  if (!isRecent(at, now)) return null;
+  const who = lastMessage.sender_name || "";
+  const content = lastMessage.content || "";
+  return { kind: "message", at, text: `${who}：${content}` };
+}
+
+/**
+ * 订阅 live/voice/boardgame store，返回 (groupId) => GroupPresence（角标/存在性）。
+ */
+export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
+  const liveChannels = useLiveStore((s) => s.channels);
+  const voiceChannels = useVoiceStore((s) => s.channels);
+  const gameRooms = useBoardgameStore((s) => s.rooms);
+
+  return (groupId) => {
+    let live = false;
+    let voice = false;
+    let game = false;
+    for (const c of liveChannels) {
+      if (c.status === "live" && visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+        live = true;
+        break;
+      }
+    }
+    for (const c of voiceChannels) {
+      if (visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+        voice = true;
+        break;
+      }
+    }
+    for (const r of gameRooms) {
+      if (visibleInGroup(r.group, groupId, r.allowed_group_ids)) {
+        game = true;
+        break;
+      }
+    }
+    return { live, voice, game };
+  };
+}
+
+/**
+ * 订阅 live/voice/boardgame/posts store，返回
+ * (groupId, lastMessage?) => GroupActivity（含消息事件合并）。
+ * 四 store 被 WS 实时更新，订阅保证调用方随变化重渲染。
+ */
+export function useGroupActivityMap(): (
+  groupId: string,
+  lastMessage?: { sender_name?: string; content?: string; created_at?: string | null } | null,
+) => GroupActivity {
+  const liveChannels = useLiveStore((s) => s.channels);
+  const voiceChannels = useVoiceStore((s) => s.channels);
+  const gameRooms = useBoardgameStore((s) => s.rooms);
+  const posts = usePostsStore((s) => s.posts);
+
+  return (groupId, lastMessage) => {
+    const now = Date.now();
+    let best: NewEvent | null = messageEvent(lastMessage, now);
+
+    // 新开播：直播 status=live 且 started_at 在窗口内
+    for (const c of liveChannels) {
+      if (c.status === "live" && visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+        const at = toMs(c.started_at);
+        if (isRecent(at, now) && (!best || at > best.at)) {
+          const host = c.owner_nickname || "";
+          best = { kind: "live", at, text: `${host} 开播了 ${c.title}` };
+        }
+      }
+    }
+    // 新语音房被创建：created_at 在窗口内
+    for (const c of voiceChannels) {
+      if (visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+        const at = toMs(c.created_at);
+        if (isRecent(at, now) && (!best || at > best.at)) {
+          const owner = c.owner_nickname || "";
+          best = { kind: "voice", at, text: `${owner} 创建了语音房 ${c.room_name || c.name}` };
+        }
+      }
+    }
+    // 新桌游房被创建：created_at 在窗口内
+    for (const r of gameRooms) {
+      if (visibleInGroup(r.group, groupId, r.allowed_group_ids)) {
+        const at = toMs(r.created_at);
+        if (isRecent(at, now) && (!best || at > best.at)) {
+          const owner = displayName(r.owner?.nickname, r.owner?.username);
+          best = { kind: "game", at, text: `${owner} 创建了桌游房 ${r.name}` };
+        }
+      }
+    }
+    // 新帖子：created_at 在窗口内且白名单含本群
+    for (const p of posts) {
+      if (visibleInGroup(p.group, groupId, p.allowed_group_ids)) {
+        const at = toMs(p.created_at);
+        if (isRecent(at, now) && (!best || at > best.at)) {
+          const author = displayName(p.author?.nickname, p.author?.username);
+          best = { kind: "post", at, text: `${author} 发了新帖 ${p.title}` };
+        }
+      }
+    }
+
+    if (!best) return NO_ACTIVITY;
+    return { lastNewAt: best.at, lastEvent: best };
+  };
+}
+
+/** 群是否有"新内容"（窗口内有任一事件） */
+export function hasGroupActivity(activity: GroupActivity): boolean {
+  return activity.lastNewAt > 0;
+}
+
+/**
+ * 群排序：置顶优先 → 有新内容排前（组内按最近事件时间新→旧）→
+ * 无新内容保持传入顺序（稳定）。
+ */
+export function sortGroupsByActivity<T extends { id: string; is_pinned?: boolean }>(
+  list: T[],
+  keyOf: (item: T) => GroupActivity,
+): T[] {
+  return list
+    .map((item, index) => {
+      const activity = keyOf(item);
+      return {
+        item,
+        index,
+        pinned: item.is_pinned ?? false,
+        ts: activity.lastNewAt,
+      };
+    })
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return Number(b.pinned) - Number(a.pinned);
+      // 置顶组内部也按新内容时间排（时间新→旧），无新内容保持稳定
+      if (a.ts !== b.ts) return b.ts - a.ts;
+      return a.index - b.index;
+    })
+    .map((x) => x.item);
+}

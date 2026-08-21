@@ -183,12 +183,14 @@
 }
 
 .group-card {
+  position: relative; /* 置顶图标 / ⋯ 菜单定位基准 */
+  min-width: 0; /* grid 项可收缩：长群名不撑大列宽，保证左右两列等分（grid 1fr） */
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-radius: 16px;
   box-shadow: var(--card-shadow);
-  overflow: hidden;
+  /* overflow 移到 .group-card-main：置顶图标需越出卡片左上角（不占空间），不能被裁剪 */
 }
 
 .group-card.is-skeleton {
@@ -202,13 +204,37 @@
   width: 100%;
   padding: 0;
   text-align: left;
+  overflow: hidden; /* 封面内容按卡片圆角裁剪（顶部 16px 圆角） */
+  border-radius: 16px 16px 0 0;
+}
+
+/* 置顶小图标：卡片外左上角绝对定位，45° 左倾粉色 pin（无圆形底，M5 会话管理） */
+.group-card-pin {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  z-index: 5;
+  display: inline-flex;
+  color: var(--pink-500);
+  pointer-events: none; /* 装饰性，不拦截交互 */
+  transform: rotate(-45deg);
+}
+
+/* 群卡片右下角 ⋯ 更多按钮/菜单（ConversationMoreMenu 定位覆盖） */
+.group-card .conv-more {
+  top: auto;
+  bottom: 10px;
+  right: 8px;
+  transform: none;
 }
 
 .group-card-foot {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  width: 100%;
+  min-width: 0; /* 按钮不按其内容最小宽度撑开，title 可收缩 ellipsis */
+  padding: var(--sp-2) 48px var(--sp-3) var(--sp-3); /* 右 48px 给 ⋯ 按钮让位，长群名收缩不挤走按钮 */
 }
 
 .group-card-title {
@@ -373,6 +399,10 @@
   gap: var(--sp-2);
 }
 
+.group-list-item-wrap {
+  position: relative; /* ⋯ 更多按钮/菜单定位基准 */
+}
+
 .group-list-item {
   display: flex;
   align-items: center;
@@ -380,12 +410,32 @@
   width: 100%;
   min-height: 64px;
   padding: var(--sp-2) var(--sp-3);
+  padding-right: 52px; /* 给右侧 ⋯ 更多按钮让位 */
   border-radius: var(--radius-input);
   background: var(--glass-bg);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid var(--glass-border);
   text-align: left;
+}
+
+/* 列表行 ⋯ 更多按钮/菜单（ConversationMoreMenu 定位覆盖） */
+.group-list-item-wrap .conv-more {
+  right: 6px;
+}
+
+/* 列表行标题内的小 pin 图标（置顶标识，45° 左倾粉色） */
+.group-list-pin-icon {
+  flex: none;
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 3px;
+  color: var(--pink-500);
+  transform: rotate(-45deg);
+}
+
+.group-list-item-wrap.is-pinned .group-list-title {
+  color: var(--grape-700);
 }
 
 .group-list-avatar {
@@ -428,6 +478,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 列表布局"新内容"事件描述（有新消息/新开播/新语音房/新桌游房/新帖的群，M5 群活跃度） */
+.group-list-sub.is-new {
+  font-weight: 600;
+  color: var(--pink-500);
 }
 
 /* ================= 状态 / 加载（R-H9） ================= */

@@ -86,6 +86,10 @@ class ConversationSerializer(serializers.ModelSerializer):
     my_role = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
     member_count = serializers.SerializerMethodField()
+    # M5：本人视野的置顶标记（每个成员各自独立）
+    is_pinned = serializers.SerializerMethodField()
+    # M5：最新一条消息摘要（列表预览用，无消息为 null）
+    last_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
@@ -101,6 +105,8 @@ class ConversationSerializer(serializers.ModelSerializer):
             "my_role",
             "member_count",
             "unread_count",
+            "is_pinned",
+            "last_message",
             "created_at",
         ]
         read_only_fields = fields
@@ -118,6 +124,36 @@ class ConversationSerializer(serializers.ModelSerializer):
 
     def get_member_count(self, obj) -> int:
         return obj.members.count()
+
+    def get_is_pinned(self, obj) -> bool:
+        request = self.context.get("request")
+        if not request or not hasattr(request, "user"):
+            return False
+        member = ConversationMember.objects.filter(
+            conversation=obj, user=request.user
+        ).values_list("is_pinned", flat=True).first()
+        return bool(member)
+
+    def get_last_message(self, obj):
+        """最新一条消息摘要（按 seq 倒序取首条），无消息返回 None。
+
+        结构：{seq, type, content, sender_id, sender_name, created_at}
+        - system 类型与已撤回消息保留在预览里（撤回由前端兜底显示占位）。
+        - sender_name 取发送者 nickname||username；系统消息无发送者可省略。
+        """
+        last = obj.messages.order_by("-seq").select_related("sender").first()
+        if last is None:
+            return None
+        sender = last.sender
+        return {
+            "seq": last.seq,
+            "type": last.type,
+            "content": last.content,
+            "sender_id": str(sender.id) if sender else None,
+            "sender_name": getattr(sender, "nickname", "") or (sender.username if sender else "") or "",
+            "status": last.status,
+            "created_at": last.created_at.isoformat() if last.created_at else None,
+        }
 
     def get_unread_count(self, obj) -> int:
         request = self.context.get("request")

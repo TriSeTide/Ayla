@@ -13,11 +13,17 @@ import { useBadgesStore } from "../stores/badges";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { WS_BASE_URL } from "./presence";
-import type { ChatMessage, ChatServerFrame } from "../api/types";
+import type {
+  ChatMessage,
+  ChatServerFrame,
+  ConversationSummary,
+} from "../api/types";
 import { useRealtimeStore } from "../stores/realtime";
 import { useNoticeStore } from "../stores/notices";
 import { useVoiceStore } from "../stores/voice";
+import { usePostsStore } from "../stores/posts";
 import { useLiveStore } from "../stores/live";
+import * as postsApi from "../api/posts";
 import * as liveApi from "../api/live";
 import { useBoardgameStore } from "../stores/boardgame";
 import * as voiceApi from "../api/voice";
@@ -26,6 +32,22 @@ import * as boardgameApi from "../api/boardgame";
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const BASE_RECONNECT_DELAY_MS = 1_000;
+
+/** 由会话信息推断消息发送者的显示名（会话列表预览用）。 */
+function previewSenderName(conv: ConversationSummary, senderId: string): string {
+  const me = useAuthStore.getState().currentUser;
+  if (me && String(senderId) === String(me.id)) {
+    return me.nickname || me.username || "";
+  }
+  if (conv.type === "private" && conv.peer) {
+    return conv.peer.nickname || conv.peer.username || "";
+  }
+  const member = conv.members.find((m) => String(m.user.id) === String(senderId));
+  if (member) {
+    return member.user.nickname || member.user.username || "";
+  }
+  return "";
+}
 
 /** 收到 WS 帧的通用处理器（供测试/扩展监听） */
 export type ChatFrameHandler = (frame: ChatServerFrame) => void;
@@ -202,6 +224,21 @@ export class ChatWSClient {
         message.upsertMessage(d.conversation_id, msg);
         // 未打开会话 → 未读数 +1
         chat.bumpUnread(d.conversation_id);
+        // 实时刷新会话列表的最新一条消息预览（会话仍在本地位列表时）。
+        // 若该会话被"删除"（隐藏）不在此列表，服务端已自动取消隐藏，
+        // 下次 listConversations 刷新即重新出现。
+        const conv = chat.conversations.find((c) => c.id === d.conversation_id);
+        if (conv) {
+          chat.setLastMessage(conv.id, {
+            seq: d.seq,
+            type: d.type,
+            content: d.content,
+            sender_id: d.sender_id,
+            sender_name: previewSenderName(conv, d.sender_id),
+            status: "sent",
+            created_at: d.ts,
+          });
+        }
         break;
       }
       case "message.recall": {
@@ -310,10 +347,23 @@ export class ChatWSClient {
         useLiveStore.getState().removeChannel(d.channel_id);
         break;
       }
-      case "post.created":
-      case "post.deleted":
-        // 帖子事件仅作实时失效通知；页面通过 REST 获取完整对象并负责 scope/可见性。
+      case "post.created": {
+        // WS 帧只带简化字段；以权限 REST 详情为权威（作者/可见群/`images`），
+        // 拉取完整帖子 upsert 到 posts store → 群"新内容"排序/列表事件描述实时刷新。
+        const d = frame as import("../api/types").PostCreatedFrame;
+        const postId = Number(d.post.id);
+        if (!postId) break;
+        void postsApi
+          .getPost(postId)
+          .then((post) => usePostsStore.getState().upsertPost(post))
+          .catch(() => { /* 当前用户不可见或帖子已删除，忽略提示 */ });
         break;
+      }
+      case "post.deleted": {
+        const d = frame as import("../api/types").PostDeletedFrame;
+        usePostsStore.getState().removePost(Number(d.post_id));
+        break;
+      }
       case "comment.created":
       case "comment.deleted":
         // 评论事件由帖子详情页经 onFrame 订阅消费（乐观插入/移除 + 更新计数）。

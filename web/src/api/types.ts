@@ -162,6 +162,17 @@ export interface ConversationMember {
 
 export type ConversationType = "private" | "group";
 
+/** 会话最新一条消息摘要（会话列表预览用，无消息为 null） */
+export interface LastMessagePreview {
+  seq: number;
+  type: MessageType;
+  content: string;
+  sender_id: string | null;
+  sender_name: string;
+  status: string;
+  created_at: string | null;
+}
+
 /** ConversationListSerializer 字段（会话列表用） */
 export interface ConversationSummary {
   id: string;
@@ -176,6 +187,10 @@ export interface ConversationSummary {
   my_role: "member" | "admin" | "owner" | null;
   member_count: number;
   unread_count: number;
+  /** 本人视图是否置顶（M5 会话管理；旧后端/旧数据可能缺失） */
+  is_pinned?: boolean;
+  /** 最新一条消息预览（无消息为 null；旧后端可能缺失） */
+  last_message?: LastMessagePreview | null;
   created_at: string;
   /** 私聊对端用户（ConversationListSerializer 补充） */
   peer: UserPublic | null;
@@ -195,6 +210,8 @@ export interface ConversationDetail {
   my_role: "member" | "admin" | "owner" | null;
   member_count: number;
   unread_count: number;
+  is_pinned?: boolean;
+  last_message?: LastMessagePreview | null;
   created_at: string;
 }
 
@@ -479,6 +496,8 @@ export interface VoiceChannelDescriptor {
   name: string;
   room_name: string;
   owner_id: string;
+  /** 创建者显示名（nickname||username；null=未知；群"新内容"事件描述用） */
+  owner_nickname?: string | null;
   member_count: number;
   /** S1：可见性 public/friends/group（来源标识） */
   visibility: "public" | "friends" | "group";

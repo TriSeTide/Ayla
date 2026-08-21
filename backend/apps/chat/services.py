@@ -140,6 +140,34 @@ def can_send_private_message(user, peer) -> bool:
     return are_friends(user, peer)
 
 
+# ---------- 会话视图偏好（置顶 / 隐藏 会话） ----------
+
+def get_member(user, conversation):
+    """当前用户在会话中的成员记录（不存在返回 None）。"""
+    return ConversationMember.objects.filter(
+        conversation=conversation, user=user
+    ).first()
+
+
+def toggle_pin(user, conversation, pinned: bool) -> bool:
+    """置顶/取消置顶会话（成员各自视图）。不在会话中抛 PermissionError。"""
+    member = get_member(user, conversation)
+    if member is None:
+        raise PermissionError("不在会话中")
+    member.is_pinned = bool(pinned)
+    member.save(update_fields=["is_pinned"])
+    return member.is_pinned
+
+
+def hide_conversation(user, conversation) -> None:
+    """隐藏会话（仅从本人列表移除，不删消息）。再次打开/收到新消息会自动取消。"""
+    member = get_member(user, conversation)
+    if member is None:
+        raise PermissionError("不在会话中")
+    member.hidden = True
+    member.save(update_fields=["hidden"])
+
+
 # ---------- 消息 ----------
 
 def conversation_seq(conversation) -> int:
@@ -204,6 +232,10 @@ def create_message(
                 idempotency_key=key,
                 seq=seq,
             )
+            # 新消息到达 → 会话对全体成员重新出现（取消用户"删除"后的隐藏状态）
+            ConversationMember.objects.filter(
+                conversation=conversation, hidden=True
+            ).update(hidden=False)
     except IntegrityError:
         # (conversation, seq) 并发冲突：重试一次；仍冲突则抛给调用方（记录 README 已知取舍）
         logger.warning("message seq conflict, retrying once", exc_info=True)
@@ -220,6 +252,9 @@ def create_message(
                     idempotency_key=key,
                     seq=seq,
                 )
+                ConversationMember.objects.filter(
+                    conversation=conversation, hidden=True
+                ).update(hidden=False)
         else:
             raise
     return msg

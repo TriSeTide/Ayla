@@ -71,11 +71,20 @@ def _bad_request(msg):
 # ---------- 会话 ----------
 
 class ConversationListView(APIView):
-    """GET /conversations/ —— 当前用户会话列表（含未读数、对方信息/群标题）。"""
+    """GET /conversations/ —— 当前用户会话列表（含未读数、对方信息/群标题）。
+
+    每个用户只看到自己"未隐藏"（hidden=False）的会话；被其"删除"（隐藏）的会话
+    不出现在本人列表，但收到新消息时由 services.create_message 自动取消隐藏。
+    """
 
     def get(self, request):
+        # 当前用户"已隐藏"的会话 id（每个用户各自视图）
+        hidden_ids = ConversationMember.objects.filter(
+            user=request.user, hidden=True
+        ).values_list("conversation_id", flat=True)
         qs = (
             Conversation.objects.filter(members__user=request.user)
+            .exclude(id__in=hidden_ids)
             .distinct()
             .prefetch_related("members__user")
         )
@@ -553,6 +562,43 @@ class GroupDissolveView(APIView):
         except PermissionError as exc:
             return _forbidden(str(exc))
         return Response({"deleted": True})
+
+
+class ConversationPinView(APIView):
+    """POST /conversations/<id>/pin/ —— 置顶/取消置顶会话（本人视图）body {pinned: bool}。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        pinned = bool(request.data.get("pinned", True))
+        try:
+            is_pinned = services.toggle_pin(request.user, conv, pinned)
+        except PermissionError as exc:
+            return _forbidden(str(exc))
+        return Response({"pinned": is_pinned, "detail": "已置顶" if is_pinned else "已取消置顶"})
+
+
+class ConversationHideView(APIView):
+    """POST /conversations/<id>/hide/ —— 从本人列表隐藏/删除会话（软删除，不删消息）。
+
+    被隐藏的会话不再出现在本人列表；对方再发消息或本人重新发起会话时自动取消隐藏。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        services.hide_conversation(request.user, conv)
+        return Response({"detail": "会话已隐藏", "hidden": True})
 
 
 # ---------- 群申请 / 邀请（S2，开发文档 §1.2） ----------

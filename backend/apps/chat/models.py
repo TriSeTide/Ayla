@@ -82,6 +82,11 @@ class ConversationMember(models.Model):
     )
     role = models.CharField("角色", max_length=16, choices=ROLE_CHOICES, default=ROLE_MEMBER)
     muted = models.BooleanField("禁言", default=False)
+    # 用户各自的会话视图偏好（每个成员独立，不共享）：
+    # - is_pinned：该成员在会话列表中置顶该会话；
+    # - hidden：该成员"删除"会话（仅从本人列表隐藏，不删消息；对方再发消息会自动取消隐藏）。
+    is_pinned = models.BooleanField("置顶", default=False)
+    hidden = models.BooleanField("隐藏", default=False)
     joined_at = models.DateTimeField("加入时间", auto_now_add=True)
 
     class Meta:
