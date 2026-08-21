@@ -45,6 +45,7 @@ function renderShell(path: string, narrow: boolean) {
         <Route element={<AppShell />}>
           <Route path="/home" element={<div>主页内容</div>} />
           <Route path="/voice" element={<div>语音内容</div>} />
+          <Route path="/voice/:channelId" element={<div>语音房内容</div>} />
           <Route path="/live" element={<div>直播内容</div>} />
           <Route path="/live/:channelId" element={<div>直播间内容</div>} />
           <Route path="/live/start/:channelId" element={<div>开播控制台</div>} />
@@ -197,11 +198,16 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
   });
 
-  it("一级语音房窄屏由房内输入框替代主导航，返回大厅路由立即恢复导航", () => {
+  it("一级语音房窄屏：进房动画前底栏仍在 DOM（下滑走后视口外，与直播间同序），无创建 FAB", () => {
     renderShell("/voice/v1", true);
-    expect(screen.queryByRole("navigation", { name: "主导航" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+    expect(screen.getByText("语音房内容")).toBeInTheDocument();
+    // 进房动画前底栏仍在 DOM（下滑走后视口外，与直播间/帖子详情同序）
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "创建语音房" })).not.toBeInTheDocument();
+  });
 
+  it("语音房返回大厅路由恢复底栏导航", () => {
     renderShell("/voice", true);
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();

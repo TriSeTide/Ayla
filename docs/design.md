@@ -330,7 +330,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ### 12.12 手势与场景动画（窄屏）
 
 - 五 tab / 群内五子场景横向滑动：跟手 `translateX` + 松手吸附 200ms ease-out；方向锁（垂直位移占优让位滚动）
-- 进群动画：BottomTabs `translateY(0→100%)` 200ms ease-in → 群场景变体滑入；中央槽位「主页」文本交叉淡化为群头像（槽位宽 48→64px 弹性过渡，总时长 ≤300ms）；输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms
+- 进群动画：底部导航条上移到视口顶部（`translateY(calc(100vh-64px)→0)` 250ms ease-out）→ 群场景变体滑入；中央槽位「主页」文本交叉淡化为群头像（槽位宽 48→64px 弹性过渡，总时长 ≤300ms）；输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms
+- 进直播间/语音房/帖子详情动画（与进群方向相反，R-L2/R-V2/R-P3）：底部导航条下滑走（`translateY(0→100%)` 200ms ease-in）→ 房内输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms（先底栏下滑、再输入框升起）
 - 下拉回主页：跟手位移 + 阈值 80px，回弹 200ms ease-out
 - 直播间上下滑切换：跟手 `translateY` + 上下一张 20% 预览露出，松手过半切换 250ms ease-out
 

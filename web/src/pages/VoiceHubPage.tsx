@@ -65,14 +65,15 @@ export function VoiceHubPage() {
       });
   }, []);
 
-  // 进房/退房：底栏下滑走（R-V2，与直播同向）
+  // 进房/退房：底栏下滑走（R-V2，与直播同向）。路由是壳层底栏是否让位的唯一事实：
+  // 进入 /voice/:id 立即让底栏下滑走（200ms ease-in），输入框随后延迟滑入（useEnterRoomAnimation），
+  // 与直播间/帖子详情同序；返回 /voice 或主页时复位。即使连接保留在全局浮层也必须复位。
   useEffect(() => {
-    // 路由是壳层底栏是否让位的唯一事实：即使连接保留在全局浮层，返回 /voice 或主页时也必须复位。
-    useShellStore.getState().setBottomTabsLeaving(routeChannelId != null && currentChannelId != null);
+    useShellStore.getState().setBottomTabsLeaving(routeChannelId != null);
     return () => {
       useShellStore.getState().setBottomTabsLeaving(false);
     };
-  }, [currentChannelId, routeChannelId]);
+  }, [routeChannelId]);
 
   // 频道列表：空或过期时加载
   useEffect(() => {
