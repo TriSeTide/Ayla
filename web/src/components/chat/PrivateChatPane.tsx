@@ -25,11 +25,14 @@ export function PrivateChatPane({
   conversationId,
   onBack,
   backLabel = "返回消息中心",
+  disableAvatarNav = false,
 }: {
   conversationId: string;
   /** 可选返回按钮（窄屏私聊窗口 → /messages；宽屏两列不渲染返回） */
   onBack?: () => void;
   backLabel?: string;
+  /** 快捷消息栏内：头像不可点（不跳个人主页，R-QM） */
+  disableAvatarNav?: boolean;
 }) {
   const conversations = useChatStore((s) => s.conversations);
   const buckets = useMessageStore((s) => s.buckets);
@@ -143,11 +146,11 @@ export function PrivateChatPane({
           online={peer?.online ?? false}
           imageUrl={peer?.avatar || null}
           onClick={
-            peer && !(elysiaUserId != null && peer.id === elysiaUserId)
+            !disableAvatarNav && peer && !(elysiaUserId != null && peer.id === elysiaUserId)
               ? () => goUserProfile(null, peer.id)
               : undefined
           }
-          ariaLabel={peer ? `查看 ${title} 的个人主页` : undefined}
+          ariaLabel={!disableAvatarNav && peer ? `查看 ${title} 的个人主页` : undefined}
         />
         <div className="private-chat-title">
           <span className="private-chat-name">{title}</span>

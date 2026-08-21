@@ -13,11 +13,13 @@ import {
   isGroupScene,
   isLiveRoomRoute,
   isMessagesRoute,
+  isPrimaryNavRoute,
   isPrivateChatRoute,
   resolveFabAction,
   resolveModule,
 } from "../layout/shellConfig";
 import { useAuthStore } from "../stores/auth";
+import { useBadgesStore } from "../stores/badges";
 
 const NARROW = "(max-width: 768px)";
 
@@ -78,6 +80,8 @@ beforeEach(() => {
       date_joined: new Date().toISOString(),
     },
   });
+  // 默认无红点（messageBadge=0）；红点场景测试单独 setState
+  useBadgesStore.setState({ badges: null });
 });
 
 afterEach(() => {
@@ -147,6 +151,28 @@ describe("isLiveRoomRoute", () => {
   });
 });
 
+describe("isPrimaryNavRoute", () => {
+  it("五个一级导航页命中，子路由/群聊/私聊/消息等不命中", () => {
+    expect(isPrimaryNavRoute("/group")).toBe(true);
+    expect(isPrimaryNavRoute("/home")).toBe(true);
+    expect(isPrimaryNavRoute("/voice")).toBe(true);
+    expect(isPrimaryNavRoute("/live")).toBe(true);
+    expect(isPrimaryNavRoute("/posts")).toBe(true);
+    expect(isPrimaryNavRoute("/games")).toBe(true);
+
+    // 子路由、群聊场景、私聊、消息中心、二级页均非「一级导航页」
+    expect(isPrimaryNavRoute("/voice/v1")).toBe(false);
+    expect(isPrimaryNavRoute("/live/42")).toBe(false);
+    expect(isPrimaryNavRoute("/posts/p1")).toBe(false);
+    expect(isPrimaryNavRoute("/posts/mine")).toBe(false);
+    expect(isPrimaryNavRoute("/group/g1")).toBe(false);
+    expect(isPrimaryNavRoute("/chat/c1")).toBe(false);
+    expect(isPrimaryNavRoute("/messages")).toBe(false);
+    expect(isPrimaryNavRoute("/search")).toBe(false);
+    expect(isPrimaryNavRoute("/profile")).toBe(false);
+  });
+});
+
 /* ---------- AppShell 两形态 ---------- */
 
 describe("AppShell", () => {
@@ -203,7 +229,8 @@ describe("AppShell", () => {
     expect(screen.getByText("语音房内容")).toBeInTheDocument();
     // 进房动画前底栏仍在 DOM（下滑走后视口外，与直播间/帖子详情同序）
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();
+    // 语音房属「其它页面」：无红点不显示左下角按钮（R-QM）
+    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建语音房" })).not.toBeInTheDocument();
   });
 
@@ -316,5 +343,60 @@ describe("AppShell 消息导航（需求）", () => {
     renderShell("/messages", true);
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "主页" })).toBeInTheDocument();
+  });
+});
+
+/* ---------- 左下角按钮显示策略（R-QM） ---------- */
+
+describe("AppShell 左下角按钮（R-QM）", () => {
+  it("五个一级导航页常态显示消息按钮（跳 /messages）", () => {
+    // /home 代表主页一级导航页（/group 重定向 /home 无独立测试路由）
+    for (const path of ["/home", "/voice", "/live", "/posts", "/games"]) {
+      const { unmount } = renderShell(path, true);
+      expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("/messages 页左下角为返回主页按钮，无消息入口", () => {
+    renderShell("/messages", true);
+    expect(screen.getByRole("button", { name: "返回主页" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "消息" })).not.toBeInTheDocument();
+  });
+
+  it("其它页面无红点不显示左下角按钮（搜索/个人/群聊）", () => {
+    for (const path of ["/search", "/profile", "/group/g1"]) {
+      const { unmount } = renderShell(path, true);
+      expect(screen.queryByRole("button", { name: /消息|返回主页/ })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("其它页面有红点显示快捷消息按钮（群聊场景也显示）", () => {
+    useBadgesStore.setState({
+      badges: {
+        private_unread: 2,
+        group_unread: 0,
+        friend_requests: 0,
+        group_invites: 0,
+        join_requests_pending: 0,
+      },
+    });
+    renderShell("/group/g1", true);
+    expect(screen.getByRole("button", { name: "消息，2 条未读" })).toBeInTheDocument();
+  });
+
+  it("私聊窗口不显示左下角按钮（即使有红点）", () => {
+    useBadgesStore.setState({
+      badges: {
+        private_unread: 2,
+        group_unread: 0,
+        friend_requests: 0,
+        group_invites: 0,
+        join_requests_pending: 0,
+      },
+    });
+    renderShell("/chat/c1", true);
+    expect(screen.queryByRole("button", { name: /消息|返回主页/ })).not.toBeInTheDocument();
   });
 });

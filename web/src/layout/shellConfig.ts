@@ -5,6 +5,8 @@
  * - resolveFabAction：CreateFAB 动作随场景切换的匹配表（需求文档 §3.5、R-F1/R-F2）。
  * - isLiveRoomRoute：直播间路由（窄屏进房动画=底栏下滑走，宽屏 TopNav 常驻）。
  * - isGroupScene：群聊场景路由（含群内语音房详情，窄屏 GroupPage 自渲染顶部导航条，壳层不出底栏）。
+ * - isPrimaryNavRoute：五个一级导航页（/group /voice /live /posts /games，含 /home 兼容），
+ *   窄屏左下角私信按钮「常态显示、点击跳 /messages」的唯一范围。
  */
 import { matchPath } from "react-router-dom";
 
@@ -59,6 +61,16 @@ export function isMessagesRoute(pathname: string): boolean {
  */
 export function isPrivateChatRoute(pathname: string): boolean {
   return matchPath({ path: "/chat/:conversationId", end: true }, pathname) != null;
+}
+
+/**
+ * 五个一级导航页（窄屏左下角私信按钮「常态显示、点击跳 /messages」的范围）。
+ * 精确匹配（end:true），不包含子路由：/live/:channelId、/posts/:postId 等
+ * 属于「其它页面」（红点快捷按钮范围），/group/:id 群聊场景由 isGroupScene 另判。
+ */
+export function isPrimaryNavRoute(pathname: string): boolean {
+  const paths = [...PRIMARY_MODULES.map((m) => m.path), "/home"];
+  return paths.some((p) => matchPath({ path: p, end: true }, pathname) != null);
 }
 
 /**

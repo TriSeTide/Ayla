@@ -345,6 +345,23 @@
   justify-content: center;
 }
 
+/* 红点快捷消息按钮（R-QM）：复用 .message-fab 外观，叠加半贴收起动画 */
+.quick-message-fab {
+  transform: translateX(0);
+  transition: transform 200ms var(--ease-out);
+}
+
+.quick-message-fab.is-collapsed {
+  /* 侧边半贴左侧屏幕：左移 44px，仅露 28px 右半（56px 按钮的一半） */
+  transform: translateX(-44px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-message-fab {
+    transition: none;
+  }
+}
+
 /* ================= 实时连接状态（规划 P0-2） ================= */
 .realtime-status-banner {
   position: fixed;

@@ -7,6 +7,8 @@
  * - 窄屏群场景（/group/:id[:/scene]）：GroupPage 自渲染顶部导航条（进群动画=底栏上移），壳层不出底栏（F3）。
  * - 窄屏直播间、语音房与帖子详情：底栏**下滑走**，对应输入框延迟滑入（shell store 驱动，方向与进群相反）。
  * - 宽屏直播间：TopNav 常驻 + 视频主区 + 弹幕侧列（非整屏）。
+ * - 窄屏左下角按钮（R-QM）：五个一级导航页常态显示 MessageFAB（跳 /messages）；
+ *   /messages 页显示「返回主页」；其余页面仅在有红点时显示 QuickMessageFAB（就地弹快捷消息栏）。
  */
 import { useEffect } from "react";
 import { Outlet, matchPath, useLocation } from "react-router-dom";
@@ -16,10 +18,11 @@ import { useShellStore } from "../stores/shell";
 import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
+import { QuickMessageFab } from "./QuickMessageFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isMessagesRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isMessagesRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
 const BADGES_POLL_INTERVAL_MS = 30_000;
 
@@ -36,6 +39,8 @@ export function AppShell() {
   const privateChatNarrow = isNarrow && isPrivateChatRoute(pathname);
   // 消息中心窄屏：左下角消息入口变为返回主页
   const messagesNarrow = isNarrow && matchPath({ path: "/messages", end: true }, pathname) != null;
+  // 五个一级导航页：左下角私信按钮常态显示、点击跳 /messages（R-QM）
+  const primaryNavNarrow = isNarrow && isPrimaryNavRoute(pathname);
 
   // 全站未读聚合：进入即拉 + 断线降级 30s 轮询（R-N4；WS 推送后置）
   useEffect(() => {
@@ -63,14 +68,18 @@ export function AppShell() {
       <SessionActivityIndicator />
       <RealtimeStatusBanner />
       {isNarrow && !groupSceneNarrow && !privateChatNarrow ? (
-        <>
-          <MessageFab style={leavingStyle} unread={messageBadge} backHome={messagesNarrow} />
-          <BottomTabs
-            moduleKey={moduleKey}
-            style={leavingStyle}
-            dataFixed={bottomTabsLeaving}
-          />
-        </>
+        <BottomTabs
+          moduleKey={moduleKey}
+          style={leavingStyle}
+          dataFixed={bottomTabsLeaving}
+        />
+      ) : null}
+      {isNarrow && primaryNavNarrow ? (
+        <MessageFab unread={messageBadge} />
+      ) : isNarrow && messagesNarrow ? (
+        <MessageFab backHome />
+      ) : isNarrow && !privateChatNarrow && messageBadge > 0 ? (
+        <QuickMessageFab unread={messageBadge} />
       ) : null}
       {fabAction ? <CreateFab action={fabAction} /> : null}
     </div>

@@ -362,6 +362,21 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 会话行内未读徽标（ConversationList `conv-unread`）= 该会话 `unread_count`，实时由 `message.new` → bumpUnread 增量，打开会话标已读后清零。
 - WS 事件 → 红点刷新：私信 `message.new` / `elysia.reply` → `private_unread`；`friend.request.new` / `friend.request.resolved` → `friend_requests`；`group.invite.new` → `group_invites`；`group.request.new` / `group.request.resolved` → `join_requests_pending`。好友申请事件（`friend.request.*`）由 accounts 视图经用户级组 `chat_user_<id>` 广播，ChatConsumer 转发；群未读不进消息中心红点（属群卡片/ServerRail 角标）。
 
+### 12.15 红点快捷消息栏（R-QM，窄屏非导航页）
+
+> 窄屏左下角「私信按钮」显示策略（需求 R-QM）：**打断式跳转 → 就地弹层**，减少对当前上下文（直播间/语音房/帖子详情/群聊等）的打断。
+
+- **三态显示规则**（`AppShell` 读 `isPrimaryNavRoute`）：
+  - 五个一级导航页（`/group` `/voice` `/live` `/posts` `/games`，含 `/home` 兼容）：常态显示 `MessageFAB`，点击跳 `/messages`；
+  - `/messages` 页：左下角为「返回主页」`MessageFAB`（`backHome` 变体，历史需求保留）；
+  - `/chat/:id` 私聊窗口：不渲染左下角按钮（底部有聊天输入框，壳层不出 chrome）；
+  - **其余页面**（群聊场景 `/group/:id`、直播间、语音房、帖子详情、搜索、个人、收藏、用户页等）：**仅当红点 > 0** 时显示 `QuickMessageFAB`（无红点不显示）。
+- **QuickMessageFAB**（复用 `.message-fab` 外观 + `.quick-message-fab` 修饰）：与 MessageFAB 同位置（`left:16px; bottom:底栏高+12px`，位置天然避让沉浸页底部输入框）；出现后 **4s 无点击 → 侧边半贴**（`translateX(-44px)`，仅露 28px 右半，200ms `--ease-out`），半贴态点击「点出来」展开，展开态点击**就地弹出快捷消息栏**（不跳路由）；`prefers-reduced-motion` 关闭位移过渡。
+- **快捷消息栏**（`.quick-messages-overlay`，`z-index:70`）：底部滑入 **70% 高度**面板（`translateY(100%→0)` 250ms `--ease-out`）+ 上方 **30% 遮罩**（`rgba(70,91,146,0.25)`，点击关闭）；面板 `--glass-bg-strong` + blur 18px + 上沿圆角 24px；ESC 关闭。
+- **两个选项卡**（复用 `.messages-tab`）：私信 / 认证消息。栏内**所有操作不跳转新页面、头像一律不可点**（`disableAvatarNav`）：
+  - 私信 tab：爱莉入口 + 会话列表（`ConversationList`），点会话**内联**打开 `PrivateChatPane`（不跳 `/chat/:id`），返回按钮回到列表；
+  - 认证消息 tab：与 `/messages` 认证消息 tab 同构（退群通知 / 好友申请 / 群邀请 / 入群申请 + 同意/拒绝），实时刷新同 §12.14。
+
 ---
 
 > 本文件是 `Ayla/web/` 视觉唯一事实源。新增组件先看 §4 / §12 有没有配方；没有就按 §2/§3/§5 的 token 与刻度推导，推导不出来再改本文件——不要在组件里散落裸 hex。

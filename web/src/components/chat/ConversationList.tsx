@@ -49,6 +49,7 @@ export function ConversationList({
   elysiaUserId,
   onSelect,
   onError,
+  disableAvatarNav = false,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
@@ -56,6 +57,8 @@ export function ConversationList({
   onSelect: (id: string) => void;
   /** 操作失败提示（父组件错误条）；缺省时用 alert 兜底 */
   onError?: (message: string) => void;
+  /** 快捷消息栏内：头像不可点（不跳个人主页，R-QM） */
+  disableAvatarNav?: boolean;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
@@ -89,14 +92,14 @@ export function ConversationList({
                 isElysia={isElysia}
                 imageUrl={isPrivate ? (conv.peer?.avatar || null) : (conv.avatar || null)}
                 onClick={
-                  isPrivate && conv.peer
+                  !disableAvatarNav && isPrivate && conv.peer
                     ? (e) => {
                         e.stopPropagation();
                         goUserProfile(currentUserId, conv.peer!.id);
                       }
                     : undefined
                 }
-                ariaLabel={isPrivate ? `查看 ${title} 的个人主页` : undefined}
+                ariaLabel={!disableAvatarNav && isPrivate ? `查看 ${title} 的个人主页` : undefined}
               />
               <span className="conv-item-body">
                 <span className="conv-item-title-row">
