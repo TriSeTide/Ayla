@@ -1,7 +1,7 @@
 /**
  * PostEditor —— 发帖表单（R-F3 / R-P2 / 群内 R-G5）。
  *
- * 标题（可选）+ 正文（必填）+ 图片（最多 9 张）。图片先走三步媒体上传，
+ * 标题（必填）+ 正文（必填）+ 图片（最多 9 张）。图片先走三步媒体上传，
  * 再把 media_id 列表随帖子提交；一级 tab 与群内路径共用本编辑器。
  *
  * 可展开/收起模式（collapsible）：默认收起只显示输入框+发布按钮+展开按钮，
@@ -29,7 +29,7 @@ export function PostEditor({
   /** 群内发帖归属的群 id；一级 tab 为 null（公开） */
   group?: string | null;
   onCreated: (post: Post) => void;
-  /** 紧凑模式（群内底部输入框变体：单行正文，无标题） */
+  /** 紧凑模式（群内底部输入框变体：收起时单行正文；展开后含标题/可见性/图片） */
   compact?: boolean;
   /** 可展开/收起模式（默认收起，点击输入框或展开按钮展开） */
   collapsible?: boolean;
@@ -75,7 +75,12 @@ export function PostEditor({
   };
 
   const submit = async () => {
+    const trimmedTitle = title.trim();
     const trimmed = body.trim();
+    if (!trimmedTitle) {
+      setError("标题不能为空");
+      return;
+    }
     if (!trimmed) {
       setError("正文不能为空");
       return;
@@ -94,7 +99,7 @@ export function PostEditor({
           ? "friends"
           : "group";
       const post = await postsApi.createPost({
-        title: title.trim(),
+        title: trimmedTitle,
         body: trimmed,
         group,
         visibility: backendVisibility,
@@ -128,10 +133,10 @@ export function PostEditor({
           </button>
         </div>
       )}
-      {!compact && expanded && (
+      {expanded && (
         <input
           className="field post-editor-title"
-          placeholder="标题（可选）"
+          placeholder="标题（必填）"
           value={title}
           maxLength={128}
           onChange={(e) => setTitle(e.target.value)}
@@ -149,7 +154,7 @@ export function PostEditor({
         <button
           type="button"
           className="btn btn-primary post-editor-submit"
-          disabled={submitting || uploading || !body.trim() || failedFiles.length > 0}
+          disabled={submitting || uploading || !body.trim() || !title.trim() || failedFiles.length > 0}
           onClick={() => void submit()}
         >
           {uploading ? "上传中…" : submitting ? "发布中…" : "发布"}

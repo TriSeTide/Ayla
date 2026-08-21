@@ -11,6 +11,7 @@
  * - 全部 URL 经 api/media.ts 构造，禁止裸拼接。
  */
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   fetchMediaDescriptor,
   formatBytes,
@@ -77,23 +78,31 @@ function ImageMedia({
   const thumb = resolveMediaPath(media.thumbnail);
   const src = thumb ?? mediaContentUrl(media.media_id);
 
+  // 发送即占最终大框：按原图宽高比计算最终显示尺寸（max 320 约束、不放大），
+  // 容器一开始就占满最终尺寸，图片加载后填充不改变高度——避免「小框被撑大向下挤」。
+  // 注意：不能用 `width: min(dw,100%)`——在无内容 shrink-to-fit 容器里 100% 解析为 0，
+  // aspect-ratio 失效（实测 w=0 h=0）；要用明确像素 width + max-width:100%（窄屏收缩）。
+  const frameStyle = (() => {
+    if (isEmoji) return { width: 96, height: 96 } as CSSProperties;
+    const w = media.width ?? 0;
+    const h = media.height ?? 0;
+    if (w > 0 && h > 0) {
+      const scale = Math.min(320 / w, 320 / h, 1); // 1 = 不放大（小图保持原尺寸）
+      const dw = Math.round(w * scale);
+      const dh = Math.round(h * scale);
+      return { width: `${dw}px`, maxWidth: "100%", aspectRatio: `${dw} / ${dh}` } as CSSProperties;
+    }
+    return { width: "320px", maxWidth: "100%", aspectRatio: "4 / 3" } as CSSProperties;
+  })();
+
   return (
-    <div className="media-frame">
+    <div className="media-frame media-frame-image" style={frameStyle}>
       <ResourceImage
         src={src}
         alt={caption(msg) || label}
         className={isEmoji ? "media-emoji" : "media-image"}
         loading="lazy"
-        fallback={
-          <span
-            className="skeleton"
-            style={
-              isEmoji
-                ? { width: 96, height: 96 }
-                : { width: media.width ? Math.min(media.width, 320) : 240, height: 180 }
-            }
-          />
-        }
+        fallback={<span className="media-frame-skeleton" />}
       />
     </div>
   );

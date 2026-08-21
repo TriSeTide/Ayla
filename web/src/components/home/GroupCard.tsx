@@ -11,7 +11,7 @@
  */
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "../chat/ConversationMoreMenu";
-import { IconPin } from "../icons";
+import { IconPinFilled } from "../icons";
 import type { GroupCarouselSlide } from "./groupActivity";
 import { GroupCarousel } from "./GroupCarousel";
 
@@ -39,7 +39,7 @@ export function GroupCard({
     <article className={`group-card ${isPinned ? "is-pinned" : ""}`}>
       {isPinned && (
         <span className="group-card-pin" aria-label="已置顶" title="已置顶">
-          <IconPin width={10} height={10} />
+          <IconPinFilled width={16} height={16} />
         </span>
       )}
       <div className="group-card-main" onClick={onOpen}>

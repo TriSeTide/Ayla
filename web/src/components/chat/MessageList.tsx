@@ -47,6 +47,7 @@ export function MessageList({
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const isGroup = conversation?.type === "group";
 
   // 发送者 id → 展示名 + 头像（群聊发送者名 + 头像显示，design.md §4 Chat Bubbles）
@@ -81,6 +82,17 @@ export function MessageList({
     return map;
   }, [messages]);
 
+  // 切换会话（宽屏侧栏点其他群/会话时组件复用不重挂载，scrollRef/atBottomRef 会
+  // 保留上一个会话的滚动位置）→ 重置滚动位置贴底，避免沿用上个会话的相对高度。
+  useEffect(() => {
+    atBottomRef.current = true;
+    lastScrollTopRef.current = 0;
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [conversation?.id]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (el && atBottomRef.current) {
@@ -88,11 +100,53 @@ export function MessageList({
     }
   }, [messages.length]);
 
+  // 图片等媒体异步加载会撑高内容，导致滚动条偏离底部；双保险跟随滚底：
+  // - ResizeObserver 监听内容高度变化（图片/语音/文件加载后的布局变化）；
+  // - img load 捕获监听（load 不冒泡）+ rAF，图片解码完成、布局稳定后滚底。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const stickToBottom = () => {
+      if (atBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    };
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      const column = el.querySelector(".message-column");
+      if (column) {
+        observer = new ResizeObserver(stickToBottom);
+        observer.observe(column);
+      }
+    }
+
+    const onLoad = (e: Event) => {
+      if (e.target instanceof HTMLImageElement) {
+        requestAnimationFrame(stickToBottom);
+      }
+    };
+    el.addEventListener("load", onLoad, true);
+
+    return () => {
+      observer?.disconnect();
+      el.removeEventListener("load", onLoad, true);
+    };
+  }, []);
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    atBottomRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-    if (el.scrollTop < 30 && hasMore && !loading) {
+    const scrollTop = el.scrollTop;
+    // 图片等媒体加载只改变 scrollHeight、不改变 scrollTop，会触发一次被动 scroll；
+    // 此时若按"是否到底"更新 atBottomRef 会被误判为离开底部。只有 scrollTop
+    // 真正变化（用户主动滚动）才更新 atBottomRef，保持"贴底跟随"语义。
+    if (scrollTop !== lastScrollTopRef.current) {
+      atBottomRef.current = scrollTop + el.clientHeight >= el.scrollHeight - 40;
+    }
+    lastScrollTopRef.current = scrollTop;
+    if (scrollTop < 30 && hasMore && !loading) {
       onLoadMore();
     }
   };

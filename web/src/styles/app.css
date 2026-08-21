@@ -1062,6 +1062,37 @@
   max-width: 100%;
 }
 
+/* 图片消息：容器发送即占最终尺寸（inline style 给 width + aspect-ratio），
+   图片加载后填充不改变高度——不向下挤（滚底保持） */
+.media-frame-image {
+  background: var(--glass-bg);
+}
+
+.media-frame-image img.media-image,
+.media-frame-image img.media-emoji {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 图片加载中的占位：撑满预留的 frame，尺寸稳定 */
+.media-frame-skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  animation: frost-pulse 1.6s ease-in-out infinite;
+}
+
+/* ResourceImage loading 态是 inline span：图片消息 frame 内让它撑满，占位才生效 */
+.media-frame-image .resource-image-loading {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .media-image {
   display: block;
   max-width: min(320px, 100%);

@@ -9,7 +9,7 @@
  */
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "../chat/ConversationMoreMenu";
-import { IconPin } from "../icons";
+import { IconPinFilled } from "../icons";
 import type { GroupStatus } from "./badges";
 import { AvatarStatusBadges } from "./AvatarStatusBadges";
 
@@ -43,7 +43,7 @@ export function GroupListItem({
         </span>
         <span className="group-list-body">
           <span className="group-list-title">
-            {isPinned && <IconPin width={12} height={12} className="group-list-pin-icon" />}
+            {isPinned && <IconPinFilled width={16} height={16} className="group-list-pin-icon" />}
             {group.title}
           </span>
           <span className={`group-list-sub ${newEventText ? "is-new" : ""}`}>

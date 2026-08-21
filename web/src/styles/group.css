@@ -249,11 +249,11 @@
   text-align: center;
 }
 
-/* 置顶小图标：头像左上角，45° 左倾粉色 pin（无圆形底，M5 会话管理；与右下角未读徽标不冲突） */
+/* 置顶小图标：头像左上角，45° 左倾实心粉色 pin（无圆形底，M5 会话管理；与右下角未读徽标不冲突） */
 .server-item-pin {
   position: absolute;
-  top: -3px;
-  left: -5px;
+  top: -4px;
+  left: -6px;
   z-index: 5;
   display: inline-flex;
   color: var(--pink-500);

@@ -168,7 +168,8 @@ export function useGroupActivityMap(): (
         const at = toMs(c.created_at);
         if (isRecent(at, now) && (!best || at > best.at)) {
           const owner = c.owner_nickname || "";
-          best = { kind: "voice", at, text: `${owner} 创建了语音房 ${c.room_name || c.name}` };
+          // 显示用户填的频道名 name（room_name 是 LiveKit 内部名，如 room_fd18...）
+          best = { kind: "voice", at, text: `${owner} 创建了语音房 ${c.name || c.room_name}` };
         }
       }
     }

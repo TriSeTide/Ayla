@@ -17,7 +17,7 @@ import { useChatStore } from "../stores/chat";
 import { Avatar } from "../components/Avatar";
 import { AvatarStatusBadges } from "../components/home/AvatarStatusBadges";
 import { useGroupPresenceMap } from "../components/home/groupActivity";
-import { IconPin, IconPlus } from "../components/icons";
+import { IconPin, IconPinFilled, IconPlus } from "../components/icons";
 
 /** 关闭置顶面板的延迟（鼠标从头像移动到面板的过渡时间，避免提前收起） */
 const POP_CLOSE_DELAY_MS = 180;
@@ -114,7 +114,7 @@ export function ServerRail({
                 <AvatarStatusBadges status={presenceFor(g.id)} />
                 {g.is_pinned && (
                   <span className="server-item-pin" aria-label="已置顶" title="已置顶">
-                    <IconPin width={11} height={11} />
+                    <IconPinFilled width={16} height={16} />
                   </span>
                 )}
                 {g.unread_count > 0 && (

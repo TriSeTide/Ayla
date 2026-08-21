@@ -147,11 +147,11 @@ class CommentSerializer(serializers.ModelSerializer):
 
 
 class CreatePostSerializer(serializers.Serializer):
-    """发帖入参：body 必填，images 为 media_id 列表（≤9）。"""
+    """发帖入参：title/body 必填，images 为 media_id 列表（≤9）。"""
 
     MAX_IMAGES = 9
 
-    title = serializers.CharField(required=False, allow_blank=True, max_length=128, default="")
+    title = serializers.CharField(required=True, allow_blank=False, max_length=128)
     body = serializers.CharField(required=True, max_length=10000)
     visibility = serializers.ChoiceField(choices=Visibility.choices, required=False)
     group = serializers.CharField(required=False, allow_null=True, default=None)

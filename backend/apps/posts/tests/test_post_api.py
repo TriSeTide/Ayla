@@ -39,7 +39,7 @@ class TestCreatePost:
     def test_create_public_default(self, auth_client):
         client, user = auth_client(username="p_author")
         resp = client.post(
-            "/api/v1/posts/", {"body": "第一篇帖子"}, format="json"
+            "/api/v1/posts/", {"title": "第一篇", "body": "第一篇帖子"}, format="json"
         )
         assert resp.status_code == 201, resp.content
         data = resp.json()
@@ -63,7 +63,7 @@ class TestCreatePost:
         m2 = make_image_media(user, "p-img-2")
         resp = client.post(
             "/api/v1/posts/",
-            {"body": "带图", "images": [m1.media_id, m2.media_id]},
+            {"title": "带图", "body": "带图", "images": [m1.media_id, m2.media_id]},
             format="json",
         )
         assert resp.status_code == 201, resp.content
@@ -79,7 +79,7 @@ class TestCreatePost:
         for i in range(10):
             ids.append(make_image_media(user, f"p9-img-{i}").media_id)
         resp = client.post(
-            "/api/v1/posts/", {"body": "超9张", "images": ids}, format="json"
+            "/api/v1/posts/", {"title": "超9张", "body": "超9张", "images": ids}, format="json"
         )
         assert resp.status_code == 400
 
@@ -87,7 +87,7 @@ class TestCreatePost:
         client, _ = auth_client(username="p_img_nf")
         resp = client.post(
             "/api/v1/posts/",
-            {"body": "坏图", "images": ["no-such-media"]},
+            {"title": "坏图", "body": "坏图", "images": ["no-such-media"]},
             format="json",
         )
         assert resp.status_code == 400
@@ -99,7 +99,7 @@ class TestCreatePost:
         media = make_image_media(other, "p-img-owned")
         resp = client.post(
             "/api/v1/posts/",
-            {"body": "别人的图", "images": [media.media_id]},
+            {"title": "别人的图", "body": "别人的图", "images": [media.media_id]},
             format="json",
         )
         assert resp.status_code == 403
@@ -109,7 +109,7 @@ class TestCreatePost:
         group = _make_group(user)
         resp = client.post(
             "/api/v1/posts/",
-            {"body": "群内帖子", "group": str(group.id)},
+            {"title": "群内帖子", "body": "群内帖子", "group": str(group.id)},
             format="json",
         )
         assert resp.status_code == 201, resp.content
@@ -122,7 +122,7 @@ class TestCreatePost:
         client, _ = auth_client(username="p_grp_vis")
         resp = client.post(
             "/api/v1/posts/",
-            {"body": "x", "visibility": Visibility.GROUP},
+            {"title": "x", "body": "x", "visibility": Visibility.GROUP},
             format="json",
         )
         assert resp.status_code == 400
@@ -136,7 +136,7 @@ class TestCreatePost:
         ConversationMember.objects.create(conversation=priv, user=peer)
         resp = client.post(
             "/api/v1/posts/",
-            {"body": "x", "group": str(priv.id)},
+            {"title": "x", "body": "x", "group": str(priv.id)},
             format="json",
         )
         assert resp.status_code == 400
@@ -257,7 +257,7 @@ class TestPostImageAccess:
         media = make_image_media(author, "mia-img-1")
         client.post(
             "/api/v1/posts/",
-            {"body": "公开带图", "images": [media.media_id]},
+            {"title": "公开带图", "body": "公开带图", "images": [media.media_id]},
             format="json",
         )
         viewer = user_factory(username="mia_viewer")
@@ -270,7 +270,7 @@ class TestPostImageAccess:
         media = make_image_media(author, "mia-img-2")
         client.post(
             "/api/v1/posts/",
-            {"body": "好友可见带图", "images": [media.media_id], "visibility": "friends"},
+            {"title": "好友可见带图", "body": "好友可见带图", "images": [media.media_id], "visibility": "friends"},
             format="json",
         )
         stranger = user_factory(username="mia_f_stranger")
@@ -504,6 +504,7 @@ class TestAllowedGroupIds:
         resp = client.post(
             "/api/v1/posts/",
             {
+                "title": "指定群可见的帖子",
                 "body": "指定群可见的帖子",
                 "visibility": Visibility.GROUP,
                 "allowed_group_ids": [str(group1.id), str(group2.id)],
@@ -535,6 +536,7 @@ class TestAllowedGroupIds:
         resp = author_client.post(
             "/api/v1/posts/",
             {
+                "title": "只给群1看",
                 "body": "只给群1看",
                 "visibility": Visibility.GROUP,
                 "allowed_group_ids": [str(group1.id)],
@@ -559,6 +561,7 @@ class TestAllowedGroupIds:
         resp = client.post(
             "/api/v1/posts/",
             {
+                "title": "测试",
                 "body": "测试",
                 "visibility": Visibility.GROUP,
                 "allowed_group_ids": ["invalid-group-id"],
