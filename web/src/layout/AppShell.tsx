@@ -19,6 +19,7 @@ import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { QuickMessageFab } from "./QuickMessageFab";
+import { QuickMessagesSheet } from "../components/chat/QuickMessagesSheet";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
@@ -30,6 +31,7 @@ export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { pathname } = useLocation();
   const bottomTabsLeaving = useShellStore((s) => s.bottomTabsLeaving);
+  const quickMessagesOpen = useShellStore((s) => s.quickMessagesOpen);
   const badges = useBadgesStore((s) => s.badges);
 
   const moduleKey = resolveModule(pathname);
@@ -82,6 +84,10 @@ export function AppShell() {
         <QuickMessageFab unread={messageBadge} />
       ) : null}
       {fabAction ? <CreateFab action={fabAction} /> : null}
+      {/* 红点快捷消息栏：由 shell store 独立控制，只随手动关闭卸载（红点归零不关闭） */}
+      {isNarrow && quickMessagesOpen ? (
+        <QuickMessagesSheet onClose={() => useShellStore.getState().setQuickMessagesOpen(false)} />
+      ) : null}
     </div>
   );
 }

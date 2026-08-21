@@ -5,7 +5,7 @@
  * - 直播沉浸路由不渲染 chrome；群聊聊天子界面无 FAB；
  * - CreateFAB 动作面板：场景动作提示步骤、次级「创建群聊」打开建群对话框。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../layout/AppShell";
@@ -20,6 +20,12 @@ import {
 } from "../layout/shellConfig";
 import { useAuthStore } from "../stores/auth";
 import { useBadgesStore } from "../stores/badges";
+import { useShellStore } from "../stores/shell";
+
+// 快捷消息栏由 AppShell 独立渲染；shell 测试用轻量替身验证开关/解耦，不触发其内部 API
+vi.mock("../components/chat/QuickMessagesSheet", () => ({
+  QuickMessagesSheet: () => <div data-testid="quick-messages-sheet" />,
+}));
 
 const NARROW = "(max-width: 768px)";
 
@@ -82,6 +88,8 @@ beforeEach(() => {
   });
   // 默认无红点（messageBadge=0）；红点场景测试单独 setState
   useBadgesStore.setState({ badges: null });
+  // 快捷消息栏默认关闭
+  useShellStore.setState({ quickMessagesOpen: false });
 });
 
 afterEach(() => {
@@ -398,5 +406,30 @@ describe("AppShell 左下角按钮（R-QM）", () => {
     });
     renderShell("/chat/c1", true);
     expect(screen.queryByRole("button", { name: /消息|返回主页/ })).not.toBeInTheDocument();
+  });
+
+  it("快捷栏打开后红点归零不自动关闭（只手动关闭）", () => {
+    useBadgesStore.setState({
+      badges: {
+        private_unread: 2,
+        group_unread: 0,
+        friend_requests: 0,
+        group_invites: 0,
+        join_requests_pending: 0,
+      },
+    });
+    renderShell("/group/g1", true);
+    // 点击快捷按钮 → 打开快捷消息栏
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "消息，2 条未读" }));
+    });
+    expect(screen.getByTestId("quick-messages-sheet")).toBeInTheDocument();
+
+    // 打开会话标已读 → 红点归零 → 快捷按钮消失，但快捷栏保持打开（只随手动关闭卸载）
+    act(() => {
+      useBadgesStore.setState({ badges: null });
+    });
+    expect(screen.queryByRole("button", { name: /消息/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("quick-messages-sheet")).toBeInTheDocument();
   });
 });
