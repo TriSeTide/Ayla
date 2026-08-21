@@ -10,6 +10,7 @@ from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 from django.urls import path
 
+from apps.accounts.models import FriendRequest
 from apps.chat import services
 from apps.chat.consumers import ChatConsumer
 from apps.chat.models import Conversation, ConversationMember
@@ -160,3 +161,62 @@ async def test_unrelated_user_receives_nothing(user_factory):
             await asyncio.wait_for(comm_unrelated.receive_json_from(), timeout=0.3)
     finally:
         await comm_unrelated.disconnect()
+
+
+@database_sync_to_async
+def _mk_friend_request(from_user, to_user, message="想加好友"):
+    return FriendRequest.objects.create(
+        from_user=from_user, to_user=to_user, message=message
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_friend_request_new_broadcast(user_factory):
+    """新好友申请 → 接收方收到 friend.request.new（认证消息红点实时）。"""
+    sender = await database_sync_to_async(user_factory)(
+        username="wfr_sender", nickname="发哥"
+    )
+    receiver = await database_sync_to_async(user_factory)(username="wfr_receiver")
+    req = await _mk_friend_request(sender, receiver)
+
+    comm = await _connect(receiver)
+    await services.abroadcast_friend_request_new(
+        receiver.id,
+        request_id=req.id,
+        from_user_id=sender.id,
+        from_user_name=sender.nickname or sender.username,
+        message=req.message,
+        created_at=req.created_at,
+    )
+    frame = await comm.receive_json_from()
+    assert frame["type"] == "friend.request.new"
+    data = frame["data"]
+    assert data["request_id"] == str(req.id)
+    assert data["from_user_id"] == str(sender.id)
+    assert data["from_user_name"] == "发哥"
+    assert data["message"] == "想加好友"
+    await comm.disconnect()
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_friend_request_resolved_broadcast(user_factory):
+    """好友申请被处理 → 发起方收到 friend.request.resolved。"""
+    sender = await database_sync_to_async(user_factory)(username="wfrr_sender")
+    receiver = await database_sync_to_async(user_factory)(username="wfrr_receiver")
+    req = await _mk_friend_request(sender, receiver)
+
+    comm = await _connect(sender)
+    await services.abroadcast_friend_request_resolved(
+        sender.id,
+        request_id=req.id,
+        status="accepted",
+        handled_at=req.created_at,
+    )
+    frame = await comm.receive_json_from()
+    assert frame["type"] == "friend.request.resolved"
+    data = frame["data"]
+    assert data["request_id"] == str(req.id)
+    assert data["status"] == "accepted"
+    await comm.disconnect()

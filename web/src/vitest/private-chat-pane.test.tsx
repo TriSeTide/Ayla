@@ -5,17 +5,24 @@
  * - 对端是爱莉（elysia profile 绑定用户）→ 放行，正常渲染输入区；
  * - 好友列表加载中/失败 → 视为未知，不禁用（后端 403 权威拦截）。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ConversationSummary, ElysiaProfile, Friendship, UserPublic } from "../api/types";
 import { PrivateChatPane } from "../components/chat/PrivateChatPane";
 import { useChatStore } from "../stores/chat";
+import { useAuthStore } from "../stores/auth";
+
+/** 捕获 chatWS.onFrame 注册的 handler（vi.mock hoisted，测试里 fire typing 帧用） */
+const ws = vi.hoisted(() => ({
+  frameHandler: null as ((frame: unknown) => void) | null,
+}));
 
 vi.mock("../components/chat/MessageList", () => ({
   MessageList: () => <div data-testid="message-list" />,
 }));
 vi.mock("../components/chat/TypingIndicator", () => ({
-  TypingIndicator: () => <div data-testid="typing" />,
+  TypingIndicator: ({ typing }: { typing: boolean }) =>
+    typing ? <div data-testid="typing-active">对方正在输入…</div> : null,
 }));
 vi.mock("../components/chat/MessageInput", () => ({
   MessageInput: () => <div data-testid="message-input" />,
@@ -29,7 +36,13 @@ vi.mock("../hooks/useChat", () => ({
 }));
 
 vi.mock("../ws/chat", () => ({
-  chatWS: { subscribe: vi.fn(), onFrame: vi.fn(() => vi.fn()) },
+  chatWS: {
+    subscribe: vi.fn(),
+    onFrame: vi.fn((handler: (frame: unknown) => void) => {
+      ws.frameHandler = handler;
+      return vi.fn();
+    }),
+  },
 }));
 
 vi.mock("../api/users", () => ({
@@ -129,5 +142,46 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
     // 等待加载 effect 跑完（渲染后立即有输入区）
     expect(screen.getByTestId("message-input")).toBeInTheDocument();
     expect(screen.queryByText("对方已不是你的好友，无法发送消息")).not.toBeInTheDocument();
+  });
+
+  it("自己输入不显示「对方正在输入」（忽略自己的 typing 帧）", async () => {
+    useAuthStore.setState({ currentUser: user("me") });
+    vi.mocked(usersApi.listFriends).mockResolvedValue([friendshipOf("peer1")]);
+    vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
+    renderPane();
+    await waitFor(() => expect(screen.getByTestId("message-input")).toBeInTheDocument());
+    act(() => {
+      ws.frameHandler!({
+        type: "typing",
+        data: { conversation_id: "c1", user_id: "me", is_typing: true },
+      });
+    });
+    expect(screen.queryByTestId("typing-active")).not.toBeInTheDocument();
+    useAuthStore.setState({ currentUser: null });
+  });
+
+  it("仅当前会话的他人 typing 帧显示「对方正在输入」", async () => {
+    useAuthStore.setState({ currentUser: user("me") });
+    vi.mocked(usersApi.listFriends).mockResolvedValue([friendshipOf("peer1")]);
+    vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
+    renderPane();
+    await waitFor(() => expect(screen.getByTestId("message-input")).toBeInTheDocument());
+    // 其他会话的他人 typing 帧 → 不显示
+    act(() => {
+      ws.frameHandler!({
+        type: "typing",
+        data: { conversation_id: "c2", user_id: "peer1", is_typing: true },
+      });
+    });
+    expect(screen.queryByTestId("typing-active")).not.toBeInTheDocument();
+    // 当前会话的他人 typing 帧 → 显示
+    act(() => {
+      ws.frameHandler!({
+        type: "typing",
+        data: { conversation_id: "c1", user_id: "peer1", is_typing: true },
+      });
+    });
+    expect(screen.getByTestId("typing-active")).toBeInTheDocument();
+    useAuthStore.setState({ currentUser: null });
   });
 });

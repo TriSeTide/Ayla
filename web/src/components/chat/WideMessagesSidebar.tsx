@@ -18,6 +18,7 @@ import { useChatStore } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
 import { useNoticeStore } from "../../stores/notices";
 import { goUserProfile } from "../../utils/navigation";
+import { chatWS } from "../../ws/chat";
 import type { ConversationSummary } from "../../api/types";
 
 type Tab = "chat" | "friends" | "requests";
@@ -105,6 +106,26 @@ export function WideMessagesSidebar({
     if (tab === "friends" || tab === "requests") loadFriendsTab();
   }, [tab, loadFriendsTab]);
 
+  // 认证消息红点：以 badges store 为权威（WS 事件驱动 fetch，实时刷新）
+  const badges = useBadgesStore((s) => s.badges);
+  const requestBadgeCount = badges ? useBadgesStore.getState().requestBadge() : 0;
+
+  // 收到认证相关 WS 事件 → 实时刷新认证消息列表
+  useEffect(() => {
+    const off = chatWS.onFrame((frame) => {
+      if (
+        frame.type === "friend.request.new" ||
+        frame.type === "friend.request.resolved" ||
+        frame.type === "group.invite.new" ||
+        frame.type === "group.request.new" ||
+        frame.type === "group.request.resolved"
+      ) {
+        loadFriendsTab();
+      }
+    });
+    return off;
+  }, [loadFriendsTab]);
+
   const refreshBadges = () => void useBadgesStore.getState().fetch();
 
   const handleRemoveFriend = useCallback(async (userId: string) => {
@@ -180,8 +201,8 @@ export function WideMessagesSidebar({
           onClick={() => setTab("requests")}
         >
           认证消息
-          {(friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length) > 0 && (
-            <span className="messages-tab-badge">{friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length + invites.length + joinRequests.length}</span>
+          {requestBadgeCount > 0 && (
+            <span className="messages-tab-badge">{requestBadgeCount}</span>
           )}
         </button>
       </div>

@@ -185,7 +185,11 @@ class FriendListView(generics.ListAPIView):
 
 
 class FriendRequestListView(generics.ListCreateAPIView):
-    """收到的待处理申请（GET）+ 发起好友申请（POST）。"""
+    """收到的待处理申请（GET）+ 发起好友申请（POST）。
+
+    POST 新建申请后向接收方推送 ``friend.request.new``（用户级 WS 广播），
+    驱动认证消息红点实时刷新；复用已有 pending 申请（幂等）时不重复推送。
+    """
 
     serializer_class = FriendRequestSerializer
 
@@ -193,6 +197,36 @@ class FriendRequestListView(generics.ListCreateAPIView):
         return FriendRequest.objects.filter(
             Q(to_user=self.request.user) | Q(from_user=self.request.user)
         ).select_related("from_user", "to_user").order_by("-created_at")
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        to_user_id = serializer.validated_data["to_user_id"]
+        # 幂等复用：已有 pending 申请直接返回，不重复推送
+        existing = FriendRequest.objects.filter(
+            from_user=request.user, to_user_id=to_user_id, status="pending"
+        ).first()
+        if existing:
+            return Response(
+                FriendRequestSerializer(existing, context={"request": request}).data,
+                status=status.HTTP_200_OK,
+            )
+        instance = serializer.save()
+        # 广播放事务外（serializer.create 自带事务，save 返回即已提交）
+        from apps.chat.services import broadcast_friend_request_new
+
+        broadcast_friend_request_new(
+            instance.to_user_id,
+            request_id=instance.id,
+            from_user_id=instance.from_user_id,
+            from_user_name=getattr(request.user, "nickname", "") or request.user.username,
+            message=instance.message,
+            created_at=instance.created_at,
+        )
+        return Response(
+            FriendRequestSerializer(instance, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class FriendRequestActionView(APIView):
@@ -221,12 +255,23 @@ class FriendRequestActionView(APIView):
             Friendship.objects.get_or_create(
                 user=req.from_user, friend=request.user, defaults={"status": "accepted"}
             )
-            return Response({"detail": "已同意", "status": "accepted"})
+            detail, resp_status = "已同意", "accepted"
         else:
             req.status = FriendRequest.STATUS_REJECTED
             req.handled_at = timezone.now()
             req.save(update_fields=["status", "handled_at"])
-            return Response({"detail": "已拒绝", "status": "rejected"})
+            detail, resp_status = "已拒绝", "rejected"
+
+        # 处理结果推给发起方（用户级广播，事务外；前端据此实时刷新）
+        from apps.chat.services import broadcast_friend_request_resolved
+
+        broadcast_friend_request_resolved(
+            req.from_user_id,
+            request_id=req.id,
+            status=req.status,
+            handled_at=req.handled_at,
+        )
+        return Response({"detail": detail, "status": resp_status})
 
 
 class FriendDeleteView(APIView):

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type RealtimeNoticeKind = "group.request.new" | "group.request.resolved" | "group.invite.new" | "group.member.left";
+export type RealtimeNoticeKind = "group.request.new" | "group.request.resolved" | "group.invite.new" | "group.member.left" | "friend.request.new" | "friend.request.resolved";
 
 export interface RealtimeNotice {
   id: string;

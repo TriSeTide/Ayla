@@ -329,6 +329,36 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    # ---------- 好友申请推送（认证消息红点） ----------
+
+    async def friend_request_new(self, event):
+        """新好友申请推给接收方。"""
+        await self.send_json(
+            {
+                "type": "friend.request.new",
+                "data": {
+                    "request_id": event["request_id"],
+                    "from_user_id": event["from_user_id"],
+                    "from_user_name": event["from_user_name"],
+                    "message": event["message"],
+                    "created_at": event["created_at"],
+                },
+            }
+        )
+
+    async def friend_request_resolved(self, event):
+        """好友申请被处理推给发起方。"""
+        await self.send_json(
+            {
+                "type": "friend.request.resolved",
+                "data": {
+                    "request_id": event["request_id"],
+                    "status": event["status"],
+                    "handled_at": event["handled_at"],
+                },
+            }
+        )
+
     # ---------- 语音房创建/删除推送 ----------
 
     async def voice_channel_created(self, event):

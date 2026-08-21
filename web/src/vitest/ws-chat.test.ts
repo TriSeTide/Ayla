@@ -13,10 +13,16 @@ import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { useNoticeStore } from "../stores/notices";
+import { useBadgesStore } from "../stores/badges";
 import { usePostsStore } from "../stores/posts";
 import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
 import * as liveApi from "../api/live";
+import * as accountsApi from "../api/accounts";
+
+vi.mock("../api/accounts", () => ({
+  getBadges: vi.fn(),
+}));
 
 type WSInstance = {
   readyState: number;
@@ -76,6 +82,14 @@ beforeEach(() => {
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
   useNoticeStore.getState().clear();
+  useBadgesStore.getState().reset();
+  vi.mocked(accountsApi.getBadges).mockResolvedValue({
+    private_unread: 0,
+    group_unread: 0,
+    friend_requests: 0,
+    group_invites: 0,
+    join_requests_pending: 0,
+  });
   usePostsStore.getState().reset();
   useVoiceStore.getState().reset();
   useLiveStore.getState().reset();
@@ -88,6 +102,7 @@ afterEach(() => {
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
   useNoticeStore.getState().clear();
+  useBadgesStore.getState().reset();
   usePostsStore.getState().reset();
   useVoiceStore.getState().reset();
   useLiveStore.getState().reset();
@@ -231,6 +246,68 @@ describe("ChatWSClient", () => {
       kind: "group.request.resolved",
       detail: "测试群：你的申请已通过",
     });
+    client.disconnect();
+  });
+
+  it("friend.request.new → 记录好友申请通知并刷新 badges", async () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], {
+      type: "friend.request.new",
+      data: {
+        request_id: "fr1",
+        from_user_id: "u2",
+        from_user_name: "小明",
+        message: "想加你",
+        created_at: "2026-08-10T00:00:00Z",
+      },
+    });
+    expect(useNoticeStore.getState().notices[0]).toMatchObject({
+      kind: "friend.request.new",
+      title: "收到新的好友申请",
+      detail: "小明 想加你为好友",
+    });
+    await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
+    client.disconnect();
+  });
+
+  it("friend.request.resolved → 记录好友申请结果通知并刷新 badges", async () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], {
+      type: "friend.request.resolved",
+      data: { request_id: "fr1", status: "accepted", handled_at: "2026-08-10T00:00:00Z" },
+    });
+    expect(useNoticeStore.getState().notices[0]).toMatchObject({
+      kind: "friend.request.resolved",
+      title: "好友申请有结果",
+      detail: "你的好友申请已通过",
+    });
+    await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
+    client.disconnect();
+  });
+
+  it("私信 message.new → 刷新 badges（private_unread 实时）", async () => {
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    useChatStore.getState().setConversations([
+      {
+        id: "c1", type: "private", title: "x", announcement: "", avatar: "",
+        owner_id: "o", members: [], my_role: "member", member_count: 2,
+        unread_count: 0, created_at: new Date().toISOString(), peer: null,
+      },
+    ]);
+    fire(instances[0], {
+      type: "message.new",
+      data: {
+        conversation_id: "c1", message_id: "m1", sender_id: "peer", content: "hi",
+        type: "text", media: null, reply_to: null, seq: 1, ts: "2026-08-10T00:00:00Z",
+      },
+    });
+    await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
     client.disconnect();
   });
 

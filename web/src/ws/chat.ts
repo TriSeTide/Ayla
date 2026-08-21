@@ -228,6 +228,11 @@ export class ChatWSClient {
         // 若该会话被"删除"（隐藏）不在此列表，服务端已自动取消隐藏，
         // 下次 listConversations 刷新即重新出现。
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
+        // 私信新消息 → 全局消息入口红点（private_unread）实时刷新；
+        // 群未读不进消息中心红点（属群卡片/ServerRail 角标），故群消息不拉 badges。
+        if (!conv || conv.type === "private") {
+          void useBadgesStore.getState().fetch();
+        }
         if (conv) {
           chat.setLastMessage(conv.id, {
             seq: d.seq,
@@ -276,6 +281,19 @@ export class ChatWSClient {
       case "group.invite.new": {
         const data = notificationFrame.data ?? {};
         notices.push({ kind: "group.invite.new", title: "收到新的群邀请", detail: `${data.inviter_name ?? "有人"} 邀请你加入 ${data.conversation_title ?? "群聊"}` });
+        void useBadgesStore.getState().fetch();
+        break;
+      }
+      case "friend.request.new": {
+        const data = notificationFrame.data ?? {};
+        notices.push({ kind: "friend.request.new", title: "收到新的好友申请", detail: `${data.from_user_name ?? "有人"} 想加你为好友` });
+        void useBadgesStore.getState().fetch();
+        break;
+      }
+      case "friend.request.resolved": {
+        const data = notificationFrame.data ?? {};
+        const status = data.status === "accepted" ? "已通过" : "已拒绝";
+        notices.push({ kind: "friend.request.resolved", title: "好友申请有结果", detail: `你的好友申请${status}` });
         void useBadgesStore.getState().fetch();
         break;
       }
@@ -429,6 +447,11 @@ export class ChatWSClient {
         };
         message.upsertMessage(d.conversation_id, msg);
         chat.bumpUnread(d.conversation_id);
+        // 爱莉回复多为私信：私信未读 → 全局消息入口红点实时刷新
+        const conv = chat.conversations.find((c) => c.id === d.conversation_id);
+        if (!conv || conv.type === "private") {
+          void useBadgesStore.getState().fetch();
+        }
         break;
       }
       case "chat.subscribed":

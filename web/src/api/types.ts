@@ -336,6 +336,26 @@ export interface GroupInviteNewFrame {
   };
 }
 
+export interface FriendRequestNewFrame {
+  type: "friend.request.new";
+  data: {
+    request_id: string;
+    from_user_id: string;
+    from_user_name: string;
+    message: string;
+    created_at: string | null;
+  };
+}
+
+export interface FriendRequestResolvedFrame {
+  type: "friend.request.resolved";
+  data: {
+    request_id: string;
+    status: "accepted" | "rejected";
+    handled_at: string | null;
+  };
+}
+
 export interface GroupMemberLeftFrame {
   type: "group.member.left";
   data: {
@@ -508,6 +528,8 @@ export type ChatServerFrame =
   | GroupMemberLeftFrame
   | GroupCreatedFrame
   | GroupJoinedFrame
+  | FriendRequestNewFrame
+  | FriendRequestResolvedFrame
   | VoiceChannelCreatedFrame
   | VoiceChannelDeletedFrame
   | VoiceChannelMemberCountChangedFrame

@@ -911,6 +911,92 @@ async def abroadcast_group_invite_new(
     )
 
 
+# ---------- 好友申请实时推送（认证消息红点） ----------
+
+def broadcast_friend_request_new(
+    to_user_id,
+    *,
+    request_id,
+    from_user_id,
+    from_user_name,
+    message,
+    created_at,
+) -> None:
+    """新好友申请 → 推给接收方（同步版），驱动认证消息红点实时刷新。"""
+    _user_group_send_sync(
+        to_user_id,
+        {
+            "type": "friend.request.new",
+            "request_id": str(request_id),
+            "from_user_id": str(from_user_id),
+            "from_user_name": from_user_name,
+            "message": message or "",
+            "created_at": created_at.isoformat() if created_at else None,
+        },
+    )
+
+
+async def abroadcast_friend_request_new(
+    to_user_id,
+    *,
+    request_id,
+    from_user_id,
+    from_user_name,
+    message,
+    created_at,
+) -> None:
+    """新好友申请 → 推给接收方（异步版，WS/测试用）。"""
+    await _user_group_send_async(
+        to_user_id,
+        {
+            "type": "friend.request.new",
+            "request_id": str(request_id),
+            "from_user_id": str(from_user_id),
+            "from_user_name": from_user_name,
+            "message": message or "",
+            "created_at": created_at.isoformat() if created_at else None,
+        },
+    )
+
+
+def broadcast_friend_request_resolved(
+    from_user_id,
+    *,
+    request_id,
+    status,
+    handled_at,
+) -> None:
+    """好友申请被处理 → 推给发起方（同步版）。"""
+    _user_group_send_sync(
+        from_user_id,
+        {
+            "type": "friend.request.resolved",
+            "request_id": str(request_id),
+            "status": status,
+            "handled_at": handled_at.isoformat() if handled_at else None,
+        },
+    )
+
+
+async def abroadcast_friend_request_resolved(
+    from_user_id,
+    *,
+    request_id,
+    status,
+    handled_at,
+) -> None:
+    """好友申请被处理 → 推给发起方（异步版，WS/测试用）。"""
+    await _user_group_send_async(
+        from_user_id,
+        {
+            "type": "friend.request.resolved",
+            "request_id": str(request_id),
+            "status": status,
+            "handled_at": handled_at.isoformat() if handled_at else None,
+        },
+    )
+
+
 # ---------- 群列表实时推送 ----------
 
 def broadcast_group_created(conversation, member_ids):

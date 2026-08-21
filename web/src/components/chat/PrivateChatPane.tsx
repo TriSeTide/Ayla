@@ -17,6 +17,7 @@ import { IconBack } from "../icons";
 import { loadHistory, loadMoreHistory, markReadLatest, recallMessage } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useMessageStore } from "../../stores/message";
+import { useAuthStore } from "../../stores/auth";
 import { chatWS } from "../../ws/chat";
 import { goUserProfile } from "../../utils/navigation";
 
@@ -89,15 +90,18 @@ export function PrivateChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // typing 帧
+  // typing 帧：只处理当前会话、忽略自己（自己输入不显示「对方正在输入」）
   useEffect(() => {
+    setPeerTyping({}); // 切换会话清空上一会话的输入状态
     const off = chatWS.onFrame((frame) => {
-      if (frame.type === "typing") {
-        setPeerTyping((prev) => ({ ...prev, [frame.data.user_id]: frame.data.is_typing }));
-      }
+      if (frame.type !== "typing") return;
+      if (frame.data.conversation_id !== conversationId) return;
+      const me = useAuthStore.getState().currentUser;
+      if (me && String(frame.data.user_id) === String(me.id)) return;
+      setPeerTyping((prev) => ({ ...prev, [frame.data.user_id]: frame.data.is_typing }));
     });
     return off;
-  }, []);
+  }, [conversationId]);
 
   const typingActive = Object.values(peerTyping).some(Boolean);
 

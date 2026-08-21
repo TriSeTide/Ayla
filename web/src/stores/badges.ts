@@ -14,6 +14,8 @@ interface BadgesState {
   fetch: () => Promise<void>;
   /** 消息中心入口聚合红点数（MessageFAB / TopNav 消息项） */
   messageBadge: () => number;
+  /** 认证消息红点数（好友申请 + 群邀请 + 待审批入群申请） */
+  requestBadge: () => number;
   reset: () => void;
 }
 
@@ -40,6 +42,11 @@ export const useBadgesStore = create<BadgesState>((set, get) => ({
   messageBadge: () => {
     const b = get().badges ?? EMPTY;
     return b.private_unread + b.friend_requests + b.group_invites + b.join_requests_pending;
+  },
+
+  requestBadge: () => {
+    const b = get().badges ?? EMPTY;
+    return b.friend_requests + b.group_invites + b.join_requests_pending;
   },
 
   reset: () => set({ badges: null }),
