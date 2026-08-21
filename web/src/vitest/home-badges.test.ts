@@ -2,7 +2,12 @@
  * 群状态角标纯函数测试（需求 R-H5：优先级 未读 > 直播 > 语音 > 桌游，最多 3 个）。
  */
 import { describe, expect, it } from "vitest";
-import { MAX_BADGES, resolveBadges } from "../components/home/badges";
+import {
+  MAX_BADGES,
+  resolveAvatarBadges,
+  resolveBadges,
+  SHOW_GAME_STATUS,
+} from "../components/home/badges";
 
 describe("resolveBadges", () => {
   it("空状态 → 无角标", () => {
@@ -48,5 +53,37 @@ describe("resolveBadges", () => {
   it("图标类角标带无障碍描述", () => {
     const badges = resolveBadges({ voice: true });
     expect(badges[0].ariaLabel).toBe("群内有语音房");
+  });
+});
+
+describe("resolveAvatarBadges（头像三位置状态角标）", () => {
+  it("空状态 → 无角标", () => {
+    expect(resolveAvatarBadges({})).toEqual([]);
+  });
+
+  it("只有直播 → 右下角", () => {
+    const badges = resolveAvatarBadges({ live: true });
+    expect(badges).toEqual([{ kind: "live", position: "bottom-right", ariaLabel: "群内有直播" }]);
+  });
+
+  it("只有语音 → 右下角", () => {
+    const badges = resolveAvatarBadges({ voice: true });
+    expect(badges).toEqual([{ kind: "voice", position: "bottom-right", ariaLabel: "群内有语音房" }]);
+  });
+
+  it("直播 + 语音 → 直播右下角、语音右边", () => {
+    const badges = resolveAvatarBadges({ live: true, voice: true });
+    expect(badges.map((b) => [b.kind, b.position])).toEqual([
+      ["live", "bottom-right"],
+      ["voice", "middle-right"],
+    ]);
+  });
+
+  it("桌游由 SHOW_GAME_STATUS 开关强制关闭（默认 false，不显示）", () => {
+    expect(SHOW_GAME_STATUS).toBe(false);
+    const badges = resolveAvatarBadges({ live: true, voice: true, game: true });
+    expect(badges.map((b) => b.kind)).toEqual(["live", "voice"]);
+    // 三位置从下往上填：直播右下、语音右边（桌游本应在右上角，但被开关关闭）
+    expect(badges.every((b) => b.kind !== "game")).toBe(true);
   });
 });

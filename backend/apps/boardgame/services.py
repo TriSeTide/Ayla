@@ -200,3 +200,39 @@ def broadcast_room_deleted(room_id, group_id=None, owner_id=None):
         logger.warning("Channel layer full when broadcasting boardgame.room.deleted %s", room_id)
     except Exception:
         logger.exception("Failed to broadcast boardgame.room.deleted %s", room_id)
+
+
+def broadcast_room_updated(room) -> None:
+    """桌游房变更（有人加入/离开/被踢/转让/编辑）后广播。
+
+    分发范围对齐 created：群归属组 + 白名单群组 + 公开目录 + 房主本人。
+    前端收到后以权限 REST 详情对账（不可见 403 → 忽略），列表/轮播据此实时刷新。
+    """
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    event = _boardgame_event(room.id, "boardgame.room.updated", room)
+    targets = []
+    if room.group_id:
+        targets.append(f"boardgame_group_{room.group_id}")
+    targets.extend(
+        f"boardgame_group_{gid}" for gid in room.allowed_groups.values_list("id", flat=True)
+    )
+    if room.visibility == "public":
+        targets.append("boardgame_public")
+    targets.append(f"chat_user_{room.owner_id}")
+
+    for target in targets:
+        try:
+            async_to_sync(layer.group_send)(target, event)
+        except ChannelFull:
+            logger.warning(
+                "Channel layer full when broadcasting boardgame.room.updated %s", room.id
+            )
+        except Exception:
+            logger.exception("Failed to broadcast boardgame.room.updated %s", room.id)

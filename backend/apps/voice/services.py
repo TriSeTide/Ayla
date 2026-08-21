@@ -136,7 +136,10 @@ def kick_member(channel: VoiceChannel, actor, user_id):
     member = VoiceChannelMember.objects.filter(channel=channel, user_id=user_id).first()
     if member is None:
         raise LookupError("成员不存在")
+    user = member.user
     member.delete()
+    broadcast_voice_state(channel, user, "left")
+    broadcast_channel_member_count(channel)
     if member.user.voice_room_id == channel.id:
         member.user.is_in_voice = False
         member.user.voice_room_id = None
@@ -177,6 +180,8 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
     for previous_id in previous_ids:
         broadcast_voice_state_by_channel_id(previous_id, user, "left")
     broadcast_voice_state(channel, user, "joined")
+    # 有人进入 → 目录人数实时刷新（轮播「N人在xx连麦」/「有人在语音房」）
+    broadcast_channel_member_count(channel)
     return member
 
 
@@ -209,6 +214,8 @@ def leave_channel(channel: VoiceChannel, user) -> None:
             user.voice_room_id = None
             user.save(update_fields=["is_in_voice", "voice_room_id"])
         broadcast_voice_state(channel, user, "left")
+        # 有人离开 → 目录人数实时刷新
+        broadcast_channel_member_count(channel)
 
 
 def heartbeat_channel(channel: VoiceChannel, user) -> None:
@@ -238,6 +245,9 @@ def mark_stale_members_left(channel: VoiceChannel, timeout_seconds: int | None =
             member.user.voice_room_id = None
             member.user.save(update_fields=["is_in_voice", "voice_room_id"])
         broadcast_voice_state(channel, member.user, "left")
+    if stale:
+        # 超时清理后目录人数实时刷新
+        broadcast_channel_member_count(channel)
     return len(stale)
 
 
@@ -345,3 +355,37 @@ def broadcast_channel_deleted(channel_id, visibility, group_id=None):
         logger.warning("voice.channel.deleted broadcast dropped")
     except Exception:
         logger.exception("voice.channel.deleted broadcast failed")
+
+
+def broadcast_channel_member_count(channel) -> None:
+    """语音房成员数变动后广播目录更新（有人加入/离开/被踢/超时清理）。
+
+    轮播「N人在xx连麦」与「有人在语音房」据此实时刷新；事件直接携带
+    member_count（人数不涉权限元数据），客户端 patch 即可，无需 REST 对账。
+    """
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    member_count = VoiceChannelMember.objects.filter(channel=channel).count()
+    try:
+        async_to_sync(layer.group_send)(
+            "voice_catalog",
+            {
+                "type": "voice.channel.member_count_changed",
+                "channel_id": str(channel.id),
+                "member_count": member_count,
+            },
+        )
+    except ChannelFull:
+        logger.warning(
+            "voice.channel.member_count_changed broadcast dropped (ChannelFull) for vc %s",
+            channel.id,
+        )
+    except Exception:
+        logger.exception(
+            "voice.channel.member_count_changed broadcast failed for vc %s",
+            channel.id,
+        )

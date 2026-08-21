@@ -248,14 +248,12 @@
   white-space: nowrap;
 }
 
-/* 状态角标列：封面右上纵向叠放（design.md §12.6） */
-.group-card-badges {
+/* 未读徽标：封面右上角（design.md §12.6；直播/语音/桌游小标签已移到列表/宽屏头像三位置角标） */
+.group-card-unread {
   position: absolute;
   top: var(--sp-3);
   right: var(--sp-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  z-index: 2;
 }
 
 .group-badge {
@@ -313,8 +311,33 @@
   aspect-ratio: 4 / 3;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--ice-100);
+  /* 非纯白背景：冰蓝→樱花粉极光渐变（Y2K Frost，禁用纯白底） */
+  background: linear-gradient(135deg, var(--ice-300), var(--sakura-100));
   padding: 0;
+}
+
+/* 消息+语音文本卡（第一张轮播）：渐变底，居中多行（各自独立显隐） */
+.group-carousel-slide-text {
+  background: linear-gradient(135deg, rgba(157, 191, 230, 0.55), rgba(249, 176, 255, 0.5));
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.group-carousel-text-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-3);
+}
+
+.group-carousel-text-line {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--grape-700);
+  text-align: center;
 }
 
 .group-carousel-img {
@@ -346,14 +369,19 @@
   color: var(--grape-700);
 }
 
+/* 帖子无图占位：渐变，标题由左下角 caption 展示（避免与 fallback 文字重复） */
+.group-carousel-fallback-post {
+  background: linear-gradient(135deg, var(--ice-500), var(--sakura-300));
+}
+
 .group-carousel-empty {
   display: flex;
   align-items: center;
   justify-content: center;
   aspect-ratio: 4 / 3;
   border-radius: 12px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: linear-gradient(135deg, var(--ice-300), var(--sakura-100));
+  border: 1px solid rgba(255, 255, 255, 0.6);
 }
 
 .group-carousel-badge {
@@ -367,6 +395,46 @@
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 0.8px;
+}
+
+/* 直播/帖子/桌游卡左下角字幕（主播 在直播 标题 / 帖子标题 / 人在玩桌游） */
+.group-carousel-caption {
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  padding: 3px 8px;
+  border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.78);
+  color: var(--grape-700);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 帖子正文：覆盖在图片上，白色文字 + 描边（text-stroke）+ 阴影，保证任意图片上可读。
+   最多 4 行，自上而下排列；word-break 让中英混排/长数字串也能正常换行。 */
+.group-carousel-post-body {
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  bottom: 34px;
+  color: #fffafb;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  -webkit-text-stroke: 1px rgba(70, 91, 146, 0.9);
+  paint-order: stroke fill;
+  text-shadow: 0 1px 4px rgba(70, 91, 146, 0.7);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow: hidden;
 }
 
 .group-carousel-dots {
@@ -444,16 +512,34 @@
   display: inline-flex;
 }
 
-.group-list-status {
+/* 头像状态角标（列表布局 + 宽屏侧栏头像共用）：竖向一列，从下往上填（右下 → 右 → 右上）。
+   颜色由 group-badge-live/voice/game 提供，尺寸/定位在此统一。 */
+.avatar-status-badge {
   position: absolute;
-  right: -2px;
-  bottom: -2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
   border-radius: var(--radius-pill);
+  pointer-events: none; /* 纯展示，不拦截头像点击 */
+  z-index: 3;
+}
+
+.avatar-status-bottom-right {
+  right: -3px;
+  bottom: -3px;
+}
+
+.avatar-status-middle-right {
+  right: -3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.avatar-status-top-right {
+  right: -3px;
+  top: -3px;
 }
 
 .group-list-body {

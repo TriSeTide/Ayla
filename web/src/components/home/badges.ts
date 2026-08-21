@@ -87,3 +87,55 @@ export function resolveBadges(status: GroupStatus): GroupBadge[] {
   badges.sort((a, b) => BADGE_ORDER.indexOf(a.kind) - BADGE_ORDER.indexOf(b.kind));
   return badges.slice(0, MAX_BADGES);
 }
+
+/* ================= 群头像状态角标（列表布局 + 宽屏侧栏，需求 R-H5 扩展） ================= */
+
+/**
+ * 桌游状态角标/轮播卡开关：桌游房「是否有人在玩」的判断尚未实现，先强制关闭显示
+ * （保留完整实现，实现后置 true 即恢复，勿删除桌游分支）。
+ */
+export const SHOW_GAME_STATUS = false;
+
+/** 头像角标槽位：竖向一列，从下往上填（右下 → 右 → 右上） */
+export type AvatarBadgePosition = "bottom-right" | "middle-right" | "top-right";
+
+/** 头像状态角标（直播 / 语音 / 桌游；桌游由 SHOW_GAME_STATUS 开关控制显示） */
+export interface AvatarStatusBadge {
+  kind: "live" | "voice" | "game";
+  position: AvatarBadgePosition;
+  ariaLabel: string;
+}
+
+/** 从下往上填的槽位顺序（1 个 → 右下角；2 个 → 右下 + 右；3 个 → 右上 + 右 + 右下） */
+const AVATAR_POSITIONS: AvatarBadgePosition[] = [
+  "bottom-right",
+  "middle-right",
+  "top-right",
+];
+
+const AVATAR_ARIA: Record<"live" | "voice" | "game", string> = {
+  live: "群内有直播",
+  voice: "群内有语音房",
+  game: "群内有桌游",
+};
+
+/**
+ * 解析头像状态角标：直播 > 语音 > 桌游（沿用 badges 优先级）。
+ * 位置从下往上填：直播占右下角，语音占右边，桌游占右上角（都有人时）。
+ * 桌游由 SHOW_GAME_STATUS 开关强制关闭显示（判断未实现，见常量注释）。
+ */
+export function resolveAvatarBadges(status: {
+  live?: boolean;
+  voice?: boolean;
+  game?: boolean;
+}): AvatarStatusBadge[] {
+  const kinds: ("live" | "voice" | "game")[] = [];
+  if (status.live) kinds.push("live");
+  if (status.voice) kinds.push("voice");
+  if (SHOW_GAME_STATUS && status.game) kinds.push("game");
+  return kinds.map((kind, i) => ({
+    kind,
+    position: AVATAR_POSITIONS[i],
+    ariaLabel: AVATAR_ARIA[kind],
+  }));
+}

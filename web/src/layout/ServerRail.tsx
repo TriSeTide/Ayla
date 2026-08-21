@@ -15,6 +15,8 @@ import * as chatApi from "../api/chat";
 import type { ConversationSummary } from "../api/types";
 import { useChatStore } from "../stores/chat";
 import { Avatar } from "../components/Avatar";
+import { AvatarStatusBadges } from "../components/home/AvatarStatusBadges";
+import { useGroupPresenceMap } from "../components/home/groupActivity";
 import { IconPin, IconPlus } from "../components/icons";
 
 /** 关闭置顶面板的延迟（鼠标从头像移动到面板的过渡时间，避免提前收起） */
@@ -47,6 +49,9 @@ export function ServerRail({
   const [busyId, setBusyId] = useState<string | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const railRef = useRef<HTMLElement | null>(null);
+
+  // 每个群的直播/语音/桌游存在状态（头像三位置角标；WS 实时维护 store）
+  const presenceFor = useGroupPresenceMap();
 
   const cancelClose = () => {
     if (closeTimer.current) {
@@ -106,6 +111,7 @@ export function ServerRail({
             >
               <span className="server-item-avatar">
                 <Avatar label={g.title} size={48} online imageUrl={g.avatar || null} />
+                <AvatarStatusBadges status={presenceFor(g.id)} />
                 {g.is_pinned && (
                   <span className="server-item-pin" aria-label="已置顶" title="已置顶">
                     <IconPin width={11} height={11} />

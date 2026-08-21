@@ -12,11 +12,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
-import type { ConversationHighlightsMap } from "../api/types";
 import { GroupCard } from "../components/home/GroupCard";
 import { GroupListItem } from "../components/home/GroupListItem";
 import { LayoutSwitch } from "../components/home/LayoutSwitch";
-import { sortGroupsByActivity, useGroupActivityMap, useGroupPresenceMap } from "../components/home/groupActivity";
+import {
+  sortGroupsByActivity,
+  useGroupActivityMap,
+  useGroupCarouselSlides,
+  useGroupPresenceMap,
+} from "../components/home/groupActivity";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
@@ -46,7 +50,6 @@ export function HomePage() {
   const listLoading = useChatStore((s) => s.loading);
   const { layout, setLayout, recentGroupId } = useHomeStore((s) => s);
 
-  const [highlights, setHighlights] = useState<ConversationHighlightsMap>({});
   const [listError, setListError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -60,8 +63,10 @@ export function HomePage() {
   // 群"新内容"（排序/事件描述）与"存在内容"（角标）分开：
   // - 排序：近期新事件（新消息/新开播/新语音房/新桌游房/新帖），WS 实时刷新
   // - 角标：当前有直播在播/语音房/桌游房（存在性）
+  // - 状态轮播：消息(未读)+语音(有人)/直播(在播)/帖子(窗口内最新)，WS 实时刷新
   const activityFor = useGroupActivityMap();
   const presenceFor = useGroupPresenceMap();
+  const carouselFor = useGroupCarouselSlides();
 
   // 排序：置顶 > 有新内容（按最近事件时间新→旧）> 其余，无新内容保持稳定
   const sortedGroups = sortGroupsByActivity(groups, (g) =>
@@ -95,27 +100,6 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 群动态 highlights 批量拉取（失败降级：无动态回退群头像）
-  useEffect(() => {
-    const ids = groups.map((g) => g.id);
-    if (ids.length === 0) {
-      setHighlights({});
-      return;
-    }
-    let cancelled = false;
-    chatApi
-      .fetchHighlights(ids)
-      .then((map) => {
-        if (!cancelled) setHighlights(map);
-      })
-      .catch(() => {
-        if (!cancelled) setHighlights({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [groups]);
-
   // 增量加载更多：滚到底补一批
   const handleScroll = useCallback(
     (el: HTMLElement) => {
@@ -131,14 +115,6 @@ export function HomePage() {
     (id: string) => {
       useHomeStore.getState().setRecentGroup(id);
       navigate(`/group/${id}`);
-    },
-    [navigate],
-  );
-
-  // 点击轮播封面 → 打开动态（后端给的相对 target_url）
-  const openHighlight = useCallback(
-    (h: { target_url: string }) => {
-      navigate(h.target_url);
     },
     [navigate],
   );
@@ -226,11 +202,10 @@ export function HomePage() {
               <GroupCard
                 key={g.id}
                 group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
-                highlights={highlights[g.id] ?? []}
-                status={{ unread: g.unread_count, ...presenceFor(g.id) }}
+                slides={carouselFor(g.id, g.unread_count)}
+                unread={g.unread_count}
                 isPinned={g.is_pinned}
                 onOpen={() => openGroup(g.id)}
-                onOpenHighlight={openHighlight}
                 onError={setActionError}
               />
             ))}

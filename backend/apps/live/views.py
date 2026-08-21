@@ -33,6 +33,7 @@ from .services import (
     broadcast_channel_created_to_user,
     broadcast_channel_status_changed,
     broadcast_channel_deleted,
+    broadcast_channel_updated,
 )
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,8 @@ class ChannelDetailView(APIView):
                 return _bad_request(str(exc))
         if update_fields:
             ch.save(update_fields=update_fields)
+            # 编辑后广播（标题/封面/可见性变更 → 轮播直播卡实时刷新）
+            broadcast_channel_updated(ch)
         return Response(_channel_serializer(ch, request))
 
     def delete(self, request, channel_id):

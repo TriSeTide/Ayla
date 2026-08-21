@@ -187,6 +187,9 @@ class RoomJoinView(APIView):
         if not can_join(request.user, room):
             return _forbidden("无权加入该房间")
         member, created = services.join_room(room, request.user)
+        if created:
+            # 有人加入 → 房间成员数/状态实时刷新
+            services.broadcast_room_updated(room)
         return Response(
             GameRoomMemberSerializer(member, context={"request": request}).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -218,6 +221,7 @@ class RoomMemberActionView(APIView):
         # 缓存、踢人删除成员后 prefetch 缓存仍是旧集合，直接复用 room 会返回旧房主 /
         # 已被踢成员。这里重新拉取一次权威实例，确保响应反映变更后的真实状态。
         room = _get_room_or_404(room_id)
+        services.broadcast_room_updated(room)
         return Response(GameRoomSerializer(room, context={"request": request}).data)
 
 
@@ -236,4 +240,5 @@ class RoomLeaveView(APIView):
             return _bad_request(str(exc))
         if not left:
             return _bad_request("不在该房间中")
+        services.broadcast_room_updated(room)
         return Response({"left": True})

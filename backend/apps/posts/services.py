@@ -241,6 +241,54 @@ def broadcast_post_deleted(post_id, group_id=None, owner_id=None, allowed_group_
         logger.exception("Failed to broadcast post.deleted %s", post_id)
 
 
+def broadcast_post_updated(post) -> None:
+    """帖子被编辑后广播（标题/正文/可见性变更）。
+
+    分发范围对齐 post.deleted：群归属 + 白名单群 + 公开信息流 + 作者本人。
+    前端收到后以权限 REST 详情对账（不可见 403 → 忽略），轮播「最新帖」据此实时刷新。
+    """
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    event = {
+        "type": "post.updated",
+        "post": {
+            "id": str(post.id),
+            "title": post.title,
+            "body": post.body[:200],
+            "owner_id": str(post.owner_id),
+            "group_id": str(post.group_id) if post.group_id else None,
+            "visibility": post.visibility,
+            "created_at": post.created_at.isoformat(),
+        },
+    }
+
+    targets = []
+    if post.group_id:
+        targets.append(f"chat_conv_{post.group_id}")
+    targets.extend(
+        f"chat_conv_{gid}" for gid in post.allowed_groups.values_list("id", flat=True)
+    )
+    if post.visibility == "public":
+        targets.append(POST_FEED_GROUP)
+    targets.append(f"chat_user_{post.owner_id}")
+
+    for target in targets:
+        try:
+            async_to_sync(layer.group_send)(target, event)
+        except ChannelFull:
+            logger.warning("Channel layer full when broadcasting post.updated %s", post.id)
+        except Exception:
+            logger.exception("Failed to broadcast post.updated %s", post.id)
+
+
 # ---------- 评论实时推送 ----------
 
 def _comment_audience(post) -> list[str]:

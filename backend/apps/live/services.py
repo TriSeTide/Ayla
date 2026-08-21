@@ -386,3 +386,12 @@ def broadcast_channel_deleted(channel_id, recipient_ids=None):
     """Notify the precomputed authorized viewers before the row is deleted."""
     event = {"type": "live.channel.deleted", "channel_id": channel_id}
     _broadcast_to_users(event, {str(value) for value in (recipient_ids or [])})
+
+
+def broadcast_channel_updated(channel) -> None:
+    """直播间资料被编辑（标题/封面/可见性）后广播：与 created 相同收件人范围。
+
+    前端收到后按权限 REST 对账完整 descriptor，轮播「直播卡」（封面/标题）据此实时刷新。
+    """
+    event = _channel_event(channel, "live.channel.updated")
+    _broadcast_to_users(event, _visible_recipient_ids(channel))

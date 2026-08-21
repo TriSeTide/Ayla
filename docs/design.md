@@ -261,11 +261,20 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ### 12.6 群卡片 GroupCard 与轮播（窄屏主页）
 
 - 卡片：实心卡片底 `--surface` + 圆角 16px + 极浅投影 `0 2px 12px rgba(70,91,146,0.08)`（design.md §4 实心卡片）
-- 封面区：4:3，内嵌 8px，轮播图圆角 12px；无动态时回退群头像（居中 64px 带光环）
-- 轮播：300ms 滑入切换，3s 间隔；**进视口才启动、离开暂停**（IntersectionObserver）；`prefers-reduced-motion` 降级为首帧静态。轮播指示点：底部居中 3 个 4px 圆点（当前 `--glow-500`，其余 `--ice-300`）
-- 状态角标列：封面右上角纵向叠放（未读 > 直播 > 语音 > 桌游），同 12.3 角标规格
+- 封面区：4:3，内嵌 8px，轮播图圆角 12px；无任何状态时回退群头像（居中 64px 带光环）
+- 轮播：300ms 滑入切换，3s 间隔；**进视口才启动、离开暂停**（IntersectionObserver）；`prefers-reduced-motion` 降级为首帧静态。轮播指示点：底部居中 4px 圆点（当前 `--glow-500`，其余 `--ice-300`）
+- 状态轮播卡（`useGroupCarouselSlides` 组装，实时 store）：
+  - 消息+语音合卡（第一张）：渐变底居中多行——「N条新消息」（未读数，>0 显示）/ 每个「有人」语音房一行「N人在{房间名}连麦」（人数降序，最多 3 个房间）；两者至少其一才生成整张
+  - 直播卡（每个在播直播间一张）：封面 + 左下角字幕「主播 在直播 标题」（重点「有人正在直播」）
+  - 帖子卡（窗口内最新一帖一张）：帖图 + 左上角「有新帖」粉胶囊 + 左下角帖子标题 + 正文（覆盖在图上，白字 + 描边 text-stroke 保证可读；重点「有新」）；无图时图片区渐变占位、标题/正文仅左下角
+  - 桌游卡：`SHOW_GAME_STATUS` 开关强制关闭（「是否有人在玩」判断未实现，保留实现勿删）
+- 轮播背景禁用纯白：消息+语音卡与空态用冰蓝→樱花粉渐变，媒体卡无图 fallback 用渐变（design.md §8 气质）
+- 轮播卡不再可点击跳动态；点卡片（轮播区或底部行）进入群聊主页（聊天页）
+- 未读徽标：封面右上角 16px 圆底 `--pink-500` 数字（未读 > 0 显示）
 - 卡片底部行：群头像 24px 带光环 + 群名 Nunito 700 15px `--text-primary` 一行省略
-- 列表布局（GroupListItem）：行高 64px，玻璃底；左群头像 44px 带光环（右下角状态角标），中群名 Nunito 700 15px + 新消息预览 13px `--text-secondary` 一行省略，右未读徽标 `--pink-500`
+- 列表布局（GroupListItem）：行高 64px，玻璃底；左群头像 44px 带光环（右上/右/右下三位置状态角标），中群名 Nunito 700 15px + 新内容事件描述 13px 一行省略，右未读徽标 `--pink-500`
+- 头像状态角标（`AvatarStatusBadges`，列表布局 + 宽屏 ServerRail 群头像）：直播/语音/桌游小标签在头像竖向一列，从下往上填——1 个右下角、2 个右下+右、3 个右上+右+右下；直播=「有人正在直播」、语音=「有人在语音房」（member_count>0）；桌游由开关关闭
+- 宽屏 ServerRail：未读徽标在头像**左下角**（直播/语音角标占右下+右），置顶 pin 在左上角
 
 ### 12.6.1 群排序与"新内容"标识（M5 群活跃度）
 
@@ -273,9 +282,11 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 > **排序按"新内容"（事件性），角标按"有内容"（存在性）——两者分开**（用户纠正：不是有直播 LIVE 就排前）。
 
 - 排序（`useGroupActivityMap` + `sortGroupsByActivity`）：**置顶 > 有新内容排前（组内按最近事件时间新→旧）> 无新内容保持稳定**
-- "新内容"判定（`NEW_CONTENT_WINDOW_MS` = 24h 窗口内事件）：新消息（未读 `unread>0`）、新开播（直播 `started_at` 在窗口内）、新语音房被创建（`created_at` 在窗口内）、新桌游房被创建（`created_at` 在窗口内）；超出窗口的"在播/在房"不算新、不排前
-- 群卡片角标（`useGroupPresenceMap`，存在性）：群内**当前有**直播在播 / 语音房 / 桌游房（同 12.3 角标规格：glow 直播 / ice 语音 / sakura 桌游），与排序无关
-- 列表布局"新内容"：`--pink-500` 字 + 前置 6px 圆点（`.group-list-new`），替代成员数预览显示；无新内容仍显示「N 人」
+- "新内容"判定（`NEW_CONTENT_WINDOW_MS` = 24h 窗口内事件）：新消息（最后一条消息 `last_message.created_at` 在窗口内，含自己的、不依赖已读）、新开播（直播 `started_at` 在窗口内）、新语音房被创建（`created_at` 在窗口内）、新桌游房被创建（`created_at` 在窗口内）、新帖子（`created_at` 在窗口内）；超出窗口的"在播/在房"不算新、不排前
+- 「新消息」是**两套语义**（用户定稿）：排序用「有新消息」（窗口内最后一条消息，读了不清零、含自己的）；轮播「N条新消息」用未读数 `unread_count`（读了清零、不含自己）。两者分开，勿混用
+- 头像状态角标（`useGroupPresenceMap`，存在性，与排序无关）：直播=群内当前有 status=live 直播；语音=群内有「有人」语音房（member_count>0）；桌游=有桌游房
+- 列表布局"新内容"事件描述（`.group-list-sub.is-new` 粉色）：显示具体事件文本——「xx：消息内容 / xx 开播了 标题 / xx 创建了语音房 房名 / xx 创建了桌游房 房名 / xx 发了新帖 标题」，替代成员数预览；无新内容显示「N 人」
+- 轮播实时刷新（后端 WS 事件 + 前端 store 订阅，无轮询）：新消息（`message.new` → unread）；有人进/出语音房与连麦人数变动（`voice.channel.member_count_changed` → patch voice store）；帖子编辑（`post.updated` → 拉详情 upsert）；直播间编辑封面/标题（`live.channel.updated` → 对账）；桌游房有人加入/离开/被踢/转让/编辑（`boardgame.room.updated` → 拉详情 upsert）
 
 ### 12.7 直播间（两形态）
 

@@ -345,6 +345,16 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             "data": {"channel_id": str(event["channel_id"])},
         })
 
+    async def voice_channel_member_count_changed(self, event):
+        """语音房成员数变动提示（有人加入/离开/被踢/超时清理）→ 目录列表实时刷新人数。"""
+        await self.send_json({
+            "type": "voice.channel.member_count_changed",
+            "data": {
+                "channel_id": str(event["channel_id"]),
+                "member_count": event["member_count"],
+            },
+        })
+
     # ---------- 直播间实时推送 ----------
 
     async def live_channel_created(self, event):
@@ -388,6 +398,23 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def live_channel_updated(self, event):
+        """直播间资料编辑推送（标题/封面/可见性）。"""
+        await self.send_json(
+            {
+                "type": "live.channel.updated",
+                "data": {
+                    "channel_id": event["channel_id"],
+                    "name": event["name"],
+                    "owner_id": event["owner_id"],
+                    "visibility": event["visibility"],
+                    "group_id": event.get("group_id"),
+                    "status": event["status"],
+                    "created_at": event["created_at"],
+                },
+            }
+        )
+
     # ---------- 帖子实时推送 ----------
 
     async def post_created(self, event):
@@ -396,6 +423,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def post_deleted(self, event):
         """接收帖子删除推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    async def post_updated(self, event):
+        """接收帖子编辑推送并转发给 WebSocket 客户端。"""
         await self.send_json(event)
 
     async def comment_created(self, event):
@@ -414,6 +445,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def boardgame_room_deleted(self, event):
         """接收桌游房删除推送并转发给 WebSocket 客户端。"""
+        await self.send_json(event)
+
+    async def boardgame_room_updated(self, event):
+        """接收桌游房变更推送并转发给 WebSocket 客户端。"""
         await self.send_json(event)
 
     # ---------- 群列表实时推送 ----------

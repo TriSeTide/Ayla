@@ -334,6 +334,14 @@ export class ChatWSClient {
         useVoiceStore.getState().removeChannel(d.channel_id);
         break;
       }
+      case "voice.channel.member_count_changed": {
+        // 有人加入/离开/被踢/超时清理 → 目录列表实时刷新人数（轮播「N人在xx连麦」）
+        const d = frame.data;
+        useVoiceStore.getState().patchChannel(d.channel_id, {
+          member_count: d.member_count,
+        });
+        break;
+      }
       case "live.channel.created": {
         this.reconcileLiveChannel(frame.data.channel_id);
         break;
@@ -345,6 +353,11 @@ export class ChatWSClient {
       case "live.channel.deleted": {
         const d = frame.data;
         useLiveStore.getState().removeChannel(d.channel_id);
+        break;
+      }
+      case "live.channel.updated": {
+        // 直播间资料编辑（标题/封面/可见性）→ 拉完整详情对账（轮播直播卡实时刷新）
+        this.reconcileLiveChannel(frame.data.channel_id);
         break;
       }
       case "post.created": {
@@ -364,6 +377,17 @@ export class ChatWSClient {
         usePostsStore.getState().removePost(Number(d.post_id));
         break;
       }
+      case "post.updated": {
+        // 帖子被编辑（标题/正文/可见性）→ 拉完整帖子 upsert（轮播「最新帖」实时刷新）
+        const d = frame as import("../api/types").PostUpdatedFrame;
+        const postId = Number(d.post.id);
+        if (!postId) break;
+        void postsApi
+          .getPost(postId)
+          .then((post) => usePostsStore.getState().upsertPost(post))
+          .catch(() => { /* 当前用户不可见或帖子已删除，忽略提示 */ });
+        break;
+      }
       case "comment.created":
       case "comment.deleted":
         // 评论事件由帖子详情页经 onFrame 订阅消费（乐观插入/移除 + 更新计数）。
@@ -378,6 +402,15 @@ export class ChatWSClient {
       }
       case "boardgame.room.deleted": {
         useBoardgameStore.getState().removeRoom(Number(frame.room_id));
+        break;
+      }
+      case "boardgame.room.updated": {
+        // 桌游房变更（有人加入/离开/被踢/转让/编辑）→ 拉完整房间对账
+        const d = frame.room;
+        if (!d || !d.id) break;
+        void boardgameApi.getGameRoom(Number(d.id))
+          .then((room) => useBoardgameStore.getState().upsertRoom(room))
+          .catch(() => { /* 当前用户不可见或房间已删除 */ });
         break;
       }
       case "elysia.reply": {

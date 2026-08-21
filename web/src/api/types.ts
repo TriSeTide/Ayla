@@ -396,6 +396,14 @@ export interface VoiceChannelDeletedFrame {
   };
 }
 
+export interface VoiceChannelMemberCountChangedFrame {
+  type: "voice.channel.member_count_changed";
+  data: {
+    channel_id: string;
+    member_count: number;
+  };
+}
+
 export interface LiveChannelCreatedFrame {
   type: "live.channel.created";
   data: {
@@ -424,6 +432,19 @@ export interface LiveChannelDeletedFrame {
   };
 }
 
+export interface LiveChannelUpdatedFrame {
+  type: "live.channel.updated";
+  data: {
+    channel_id: number;
+    title: string;
+    owner_id: string;
+    visibility: "public" | "friends" | "group";
+    group_id: string | null;
+    status: LiveChannelStatus;
+    created_at: string;
+  };
+}
+
 export interface PostCreatedFrame {
   type: "post.created";
   post: {
@@ -440,6 +461,19 @@ export interface PostCreatedFrame {
 export interface PostDeletedFrame {
   type: "post.deleted";
   post_id: string;
+}
+
+export interface PostUpdatedFrame {
+  type: "post.updated";
+  post: {
+    id: string;
+    title: string;
+    body: string;
+    owner_id: string;
+    group_id: string | null;
+    visibility: string;
+    created_at: string;
+  };
 }
 
 export interface CommentCreatedFrame {
@@ -476,15 +510,19 @@ export type ChatServerFrame =
   | GroupJoinedFrame
   | VoiceChannelCreatedFrame
   | VoiceChannelDeletedFrame
+  | VoiceChannelMemberCountChangedFrame
   | LiveChannelCreatedFrame
   | LiveChannelStatusChangedFrame
   | LiveChannelDeletedFrame
+  | LiveChannelUpdatedFrame
   | PostCreatedFrame
   | PostDeletedFrame
+  | PostUpdatedFrame
   | CommentCreatedFrame
   | CommentDeletedFrame
   | BoardgameRoomCreatedFrame
   | BoardgameRoomDeletedFrame
+  | BoardgameRoomUpdatedFrame
   | ChatErrorFrame
   | PongFrame;
 
@@ -741,6 +779,20 @@ export interface BoardgameRoomCreatedFrame {
 export interface BoardgameRoomDeletedFrame {
   type: "boardgame.room.deleted";
   room_id: string;
+}
+
+export interface BoardgameRoomUpdatedFrame {
+  type: "boardgame.room.updated";
+  room: {
+    id: string;
+    name: string;
+    owner_id: string;
+    group_id: string | null;
+    visibility: string;
+    game_type: string;
+    status: string;
+    created_at: string;
+  };
 }
 
 /* ================= S6 群动态 highlights（对齐 backend/apps/chat/services.py） ================= */

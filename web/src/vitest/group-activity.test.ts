@@ -4,13 +4,24 @@
  * - sortGroupsByActivity：置顶优先 → 有新内容按最近事件时间新→旧 → 无新内容保持稳定；
  * - 事件文本：消息=「发送者：内容」等。
  */
-import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import type {
+  LiveChannelDescriptor,
+  Post,
+  VoiceChannelDescriptor,
+} from "../api/types";
 import {
   hasGroupActivity,
   sortGroupsByActivity,
+  useGroupCarouselSlides,
   type GroupActivity,
   type NewEvent,
 } from "../components/home/groupActivity";
+import { useBoardgameStore } from "../stores/boardgame";
+import { useLiveStore } from "../stores/live";
+import { usePostsStore } from "../stores/posts";
+import { useVoiceStore } from "../stores/voice";
 
 function group(id: string, isPinned = false) {
   return { id, is_pinned: isPinned };
@@ -95,5 +106,166 @@ describe("sortGroupsByActivity", () => {
         : act();
     const sorted = sortGroupsByActivity(list, key);
     expect(sorted.map((g) => g.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("useGroupCarouselSlides（群卡片状态轮播数据）", () => {
+  afterEach(() => {
+    useLiveStore.getState().reset();
+    useVoiceStore.getState().reset();
+    usePostsStore.getState().reset();
+    useBoardgameStore.getState().reset();
+  });
+
+  function voiceChannel(
+    groupId: string,
+    memberCount: number,
+    id = "v1",
+  ): VoiceChannelDescriptor {
+    return {
+      id,
+      name: "语音房",
+      room_name: "room1",
+      owner_id: "o1",
+      owner_nickname: "小樱",
+      member_count: memberCount,
+      visibility: "group",
+      group: groupId,
+      group_name: null,
+      allowed_group_ids: [groupId],
+      allowed_group_names: [],
+      mine: false,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  function liveChannel(groupId: string, status: LiveChannelDescriptor["status"]): LiveChannelDescriptor {
+    return {
+      id: 1,
+      title: "直播标题",
+      status,
+      owner_id: "o2",
+      owner_nickname: "阿蓝",
+      is_owner: false,
+      visibility: "group",
+      group: groupId,
+      group_name: null,
+      allowed_group_ids: [groupId],
+      allowed_group_names: [],
+      stream_key: null,
+      rtmp_url: null,
+      hls_url: "",
+      flv_url: "",
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  function post(groupId: string, createdAt: string, title: string, withImage: boolean): Post {
+    return {
+      id: 100,
+      author: { id: "a", username: "a", nickname: "a", avatar: "", signature: "", status: "online", online: true, date_joined: "" },
+      author_id: "a",
+      title,
+      body: "",
+      visibility: "group",
+      group: groupId,
+      group_name: null,
+      allowed_group_ids: [groupId],
+      allowed_group_names: [],
+      images: withImage
+        ? [{ id: 1, media: { media_id: "m1", kind: "image", mime_type: "image/png", size: 1, status: "ready", width: null, height: null, duration: null, thumbnail: "/api/v1/media/m1/thumbnail", waveform: null, created_at: "" }, order: 0 }]
+        : [],
+      comment_count: 0,
+      is_author: false,
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+  }
+
+  it("无状态 → 空列表", () => {
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    expect(result.current("g1", 0)).toEqual([]);
+  });
+
+  it("有未读 + 有人在语音 → 第一张消息+语音合卡（含房间名）", () => {
+    useVoiceStore.getState().setChannels([voiceChannel("g1", 3)]);
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    const slides = result.current("g1", 5);
+    expect(slides[0]).toEqual({
+      kind: "message-voice",
+      newMessageCount: 5,
+      voiceRooms: [{ name: "语音房", memberCount: 3 }],
+    });
+  });
+
+  it("只有未读（无人语音）→ 无语音房间但仍生成合卡", () => {
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    const slides = result.current("g1", 2);
+    expect(slides).toEqual([{ kind: "message-voice", newMessageCount: 2, voiceRooms: [] }]);
+  });
+
+  it("语音房 member_count=0 → 不视为有人", () => {
+    useVoiceStore.getState().setChannels([voiceChannel("g1", 0)]);
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    expect(result.current("g1", 0)).toEqual([]);
+  });
+
+  it("多语音房按人数降序、最多 3 个", () => {
+    useVoiceStore.getState().setChannels([
+      voiceChannel("g1", 1, "v1"),
+      voiceChannel("g1", 5, "v2"),
+      voiceChannel("g1", 3, "v3"),
+      voiceChannel("g1", 2, "v4"),
+    ]);
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    const slide = result.current("g1", 0)[0];
+    expect(slide.kind).toBe("message-voice");
+    if (slide.kind === "message-voice") {
+      expect(slide.voiceRooms.map((r) => r.memberCount)).toEqual([5, 3, 2]);
+      expect(slide.voiceRooms).toHaveLength(3);
+    }
+  });
+
+  it("每个在播直播间生成一张直播卡", () => {
+    useLiveStore.getState().setChannels([
+      liveChannel("g1", "live"),
+      liveChannel("g1", "live"),
+    ]);
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    const liveSlides = result.current("g1", 0).filter((s) => s.kind === "live");
+    expect(liveSlides).toHaveLength(2);
+    expect(liveSlides[0]).toEqual({ kind: "live", host: "阿蓝", title: "直播标题", cover: null });
+  });
+
+  it("窗口内最新一帖生成帖子卡（有图取缩略图 + 含正文）", () => {
+    usePostsStore.getState().setPage(
+      [post("g1", new Date().toISOString(), "最新帖", true)],
+      null,
+      false,
+    );
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    const slides = result.current("g1", 0);
+    expect(slides).toHaveLength(1);
+    expect(slides[0]).toEqual({
+      kind: "post",
+      title: "最新帖",
+      body: "",
+      image: "/api/v1/media/m1/thumbnail",
+    });
+  });
+
+  it("轮播顺序：消息+语音 → 直播 → 帖子", () => {
+    useVoiceStore.getState().setChannels([voiceChannel("g1", 2)]);
+    useLiveStore.getState().setChannels([liveChannel("g1", "live")]);
+    usePostsStore.getState().setPage(
+      [post("g1", new Date().toISOString(), "帖", false)],
+      null,
+      false,
+    );
+    const { result } = renderHook(() => useGroupCarouselSlides());
+    const slides = result.current("g1", 4);
+    expect(slides.map((s) => s.kind)).toEqual(["message-voice", "live", "post"]);
   });
 });

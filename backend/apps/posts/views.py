@@ -218,6 +218,8 @@ class PostDetailView(APIView):
         if "group" in request.data:
             update_fields.append("group")
         post.save(update_fields=update_fields)
+        # 编辑后广播（标题/正文/可见性变更 → 轮播「最新帖」实时刷新）
+        services.broadcast_post_updated(post)
         return Response(PostSerializer(post, context={"request": request}).data)
 
     def delete(self, request, post_id):

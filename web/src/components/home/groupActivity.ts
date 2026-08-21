@@ -16,6 +16,7 @@ import { useBoardgameStore } from "../../stores/boardgame";
 import { useLiveStore } from "../../stores/live";
 import { usePostsStore } from "../../stores/posts";
 import { useVoiceStore } from "../../stores/voice";
+import { SHOW_GAME_STATUS } from "./badges";
 
 /** "新"的时间窗口：窗口内的事件才视为"新内容"（可调） */
 export const NEW_CONTENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 小时
@@ -113,8 +114,12 @@ export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
         break;
       }
     }
+    // 语音重点 =「有人」在语音房（member_count > 0），不是「有语音房」
     for (const c of voiceChannels) {
-      if (visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+      if (
+        visibleInGroup(c.group, groupId, c.allowed_group_ids) &&
+        Number(c.member_count) > 0
+      ) {
         voice = true;
         break;
       }
@@ -223,4 +228,131 @@ export function sortGroupsByActivity<T extends { id: string; is_pinned?: boolean
       return a.index - b.index;
     })
     .map((x) => x.item);
+}
+
+/* ================= 群卡片状态轮播（窄屏卡片布局，需求 R-H5 扩展） ================= */
+
+/** 语音房轮播条目：单个「有人」语音房（房间名 + 人数） */
+export interface CarouselVoiceRoom {
+  name: string;
+  memberCount: number;
+}
+
+/** 轮播卡片：消息+语音合卡 / 直播卡（每直播间一张）/ 帖子卡（最新一帖一张）/ 桌游卡（开关关闭） */
+export type GroupCarouselSlide =
+  | { kind: "message-voice"; newMessageCount: number; voiceRooms: CarouselVoiceRoom[] }
+  | { kind: "live"; host: string; title: string; cover: string | null }
+  | { kind: "post"; title: string; body: string; image: string | null }
+  | { kind: "game"; name: string; memberCount: number; cover: string | null };
+
+/** 语音房轮播最多展示的房间数（超出按人数降序截断） */
+export const MAX_VOICE_ROOMS = 3;
+
+/**
+ * 订阅 live/voice/boardgame/posts store，返回
+ * (groupId, unreadCount) => GroupCarouselSlide[]（群卡片状态轮播数据）。
+ *
+ * 语义：
+ * - 消息+语音合卡：新消息=未读数（读了清零，与排序的"有新内容"是两套逻辑）；
+ *   语音=该群每个「有人」语音房一行「N人在{房间名}连麦」（人数降序，最多 3 个）；
+ *   两者至少其一才生成该卡。
+ * - 直播卡：每个 status=live 且对本群可见的直播间一张（封面 + 主播 + 标题）。
+ * - 帖子卡：窗口内（24h）最新一帖一张（含正文，图片上描边显示；"没看"以窗口内新帖近似）。
+ * - 桌游卡：SHOW_GAME_STATUS 开关强制关闭（是否有人在玩判断未实现，保留实现）。
+ * 四 store 由 ChatWS 实时维护（voice member_count / live.updated / post.updated /
+ * boardgame.updated 均实时推送），订阅保证调用方随变化重渲染。
+ */
+export function useGroupCarouselSlides(): (
+  groupId: string,
+  unreadCount: number,
+) => GroupCarouselSlide[] {
+  const liveChannels = useLiveStore((s) => s.channels);
+  const voiceChannels = useVoiceStore((s) => s.channels);
+  const gameRooms = useBoardgameStore((s) => s.rooms);
+  const posts = usePostsStore((s) => s.posts);
+
+  return (groupId, unreadCount) => {
+    const slides: GroupCarouselSlide[] = [];
+
+    // 1. 消息 + 语音合卡：语音按「有人」房间逐行（每房间一行，最多 3 个，人数降序）
+    const voiceRooms: CarouselVoiceRoom[] = [];
+    for (const c of voiceChannels) {
+      if (
+        visibleInGroup(c.group, groupId, c.allowed_group_ids) &&
+        Number(c.member_count) > 0
+      ) {
+        voiceRooms.push({
+          name: c.name || c.room_name || "",
+          memberCount: Number(c.member_count),
+        });
+      }
+    }
+    voiceRooms.sort((a, b) => b.memberCount - a.memberCount);
+    const topRooms = voiceRooms.slice(0, MAX_VOICE_ROOMS);
+    const newCount = Math.max(0, unreadCount ?? 0);
+    if (newCount > 0 || topRooms.length > 0) {
+      slides.push({
+        kind: "message-voice",
+        newMessageCount: newCount,
+        voiceRooms: topRooms,
+      });
+    }
+
+    // 2. 直播卡：每个正在直播的直播间一张
+    for (const c of liveChannels) {
+      if (c.status === "live" && visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+        slides.push({
+          kind: "live",
+          host: c.owner_nickname || "",
+          title: c.title,
+          cover: c.cover || null,
+        });
+      }
+    }
+
+    // 3. 帖子卡：窗口内最新一帖一张（含正文，供图片上描边显示）
+    const now = Date.now();
+    let latest: { at: number; title: string; body: string; image: string | null } | null = null;
+    for (const p of posts) {
+      if (!visibleInGroup(p.group, groupId, p.allowed_group_ids)) continue;
+      const at = toMs(p.created_at);
+      if (!isRecent(at, now)) continue;
+      if (!latest || at > latest.at) {
+        const img = p.images.find((i) => i.media?.thumbnail);
+        latest = {
+          at,
+          title: p.title,
+          body: p.body,
+          image: img?.media?.thumbnail ?? null,
+        };
+      }
+    }
+    if (latest) {
+      slides.push({
+        kind: "post",
+        title: latest.title,
+        body: latest.body,
+        image: latest.image,
+      });
+    }
+
+    // 4. 桌游卡：开关强制关闭（保留实现，实现"是否有人在玩"判断后置 true）
+    if (SHOW_GAME_STATUS) {
+      for (const r of gameRooms) {
+        if (
+          visibleInGroup(r.group, groupId, r.allowed_group_ids) &&
+          r.status === "playing"
+        ) {
+          slides.push({
+            kind: "game",
+            name: r.name,
+            memberCount: Number(r.member_count),
+            cover: null,
+          });
+        }
+      }
+    }
+
+    return slides;
+  };
 }

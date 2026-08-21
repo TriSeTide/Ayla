@@ -11,7 +11,7 @@ import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "../chat/ConversationMoreMenu";
 import { IconPin } from "../icons";
 import type { GroupStatus } from "./badges";
-import { badgeIcon, resolveBadges } from "./badges";
+import { AvatarStatusBadges } from "./AvatarStatusBadges";
 
 export function GroupListItem({
   group,
@@ -34,22 +34,12 @@ export function GroupListItem({
   /** 置顶/删除失败提示（父组件错误条）；缺省 alert 兜底 */
   onError?: (message: string) => void;
 }) {
-  const badges = resolveBadges(status);
-
   return (
     <div className={`group-list-item-wrap ${isPinned ? "is-pinned" : ""}`}>
       <button type="button" className="group-list-item" onClick={onOpen} aria-label={`进入群聊 ${group.title}`}>
         <span className="group-list-avatar">
           <Avatar label={group.title} size={44} online imageUrl={group.avatar || null} />
-          {badges.slice(0, 1).map((b) => {
-            const Icon = badgeIcon(b.kind);
-            if (b.kind === "unread" || !Icon) return null;
-            return (
-              <span key={b.kind} className={`group-list-status group-badge-${b.kind}`}>
-                <Icon width={10} height={10} />
-              </span>
-            );
-          })}
+          <AvatarStatusBadges status={status} />
         </span>
         <span className="group-list-body">
           <span className="group-list-title">

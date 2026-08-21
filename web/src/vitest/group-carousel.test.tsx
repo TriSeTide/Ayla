@@ -1,20 +1,30 @@
 /**
- * GroupCarousel 轮播测试：无动态回退、IntersectionObserver 启停、reduced-motion 静态。
+ * GroupCarousel 轮播测试：无状态回退、三类卡渲染、IntersectionObserver 启停、reduced-motion 静态。
  */
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GroupHighlight } from "../api/types";
+import type { GroupCarouselSlide } from "../components/home/groupActivity";
 import { GroupCarousel } from "../components/home/GroupCarousel";
 
-function hl(over: Partial<GroupHighlight> = {}): GroupHighlight {
+function msgVoice(
+  over: Partial<Extract<GroupCarouselSlide, { kind: "message-voice" }>> = {},
+): GroupCarouselSlide {
   return {
-    type: "post",
-    title: "动态标题",
-    cover_url: null,
-    target_url: "/posts/1",
-    created_at: "2026-01-01T00:00:00Z",
+    kind: "message-voice",
+    newMessageCount: 5,
+    voiceRooms: [{ name: "夜聊", memberCount: 3 }],
     ...over,
   };
+}
+function live(
+  over: Partial<Extract<GroupCarouselSlide, { kind: "live" }>> = {},
+): GroupCarouselSlide {
+  return { kind: "live", host: "小樱", title: "直播标题", cover: null, ...over };
+}
+function post(
+  over: Partial<Extract<GroupCarouselSlide, { kind: "post" }>> = {},
+): GroupCarouselSlide {
+  return { kind: "post", title: "帖子标题", body: "帖子正文内容", image: null, ...over };
 }
 
 function mockMatchMedia(reduced: boolean) {
@@ -65,52 +75,83 @@ afterEach(() => {
 });
 
 describe("GroupCarousel", () => {
-  it("无动态 → 回退群头像", () => {
+  it("无状态 → 回退群头像", () => {
     mockMatchMedia(false);
-    render(<GroupCarousel highlights={[]} groupName="测试群" />);
+    render(<GroupCarousel slides={[]} groupName="测试群" />);
     expect(screen.getByLabelText("测试群 暂无动态")).toBeInTheDocument();
   });
 
-  it("有动态 → 渲染封面与指示点", () => {
+  it("消息+语音卡：两行文本均显示（含房间名）", () => {
+    mockMatchMedia(false);
+    render(<GroupCarousel slides={[msgVoice()]} groupName="测试群" />);
+    expect(screen.getByText("5条新消息")).toBeInTheDocument();
+    expect(screen.getByText("3人在夜聊连麦")).toBeInTheDocument();
+  });
+
+  it("消息+语音卡：多房间逐行显示", () => {
     mockMatchMedia(false);
     render(
-      <GroupCarousel highlights={[hl(), hl({ type: "live", title: "直播" })]} groupName="测试群" />,
+      <GroupCarousel
+        slides={[
+          msgVoice({
+            voiceRooms: [
+              { name: "夜聊", memberCount: 3 },
+              { name: "开黑", memberCount: 2 },
+            ],
+          }),
+        ]}
+        groupName="测试群"
+      />,
     );
-    expect(screen.getByText("动态标题")).toBeInTheDocument();
+    expect(screen.getByText("3人在夜聊连麦")).toBeInTheDocument();
+    expect(screen.getByText("2人在开黑连麦")).toBeInTheDocument();
   });
 
-  it("点击封面触发 onOpen（当前 slide）", () => {
+  it("消息+语音卡：只有新消息时，语音行不渲染", () => {
     mockMatchMedia(false);
-    const onOpen = vi.fn();
-    render(<GroupCarousel highlights={[hl()]} groupName="测试群" onOpen={onOpen} />);
-    screen.getByRole("button", { name: "打开动态：动态标题" }).click();
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ title: "动态标题" }));
+    render(
+      <GroupCarousel slides={[msgVoice({ voiceRooms: [] })]} groupName="测试群" />,
+    );
+    expect(screen.getByText("5条新消息")).toBeInTheDocument();
+    expect(screen.queryByText(/人在.*连麦/)).not.toBeInTheDocument();
   });
 
-  it("IntersectionObserver 进视口 + 计时器推进 → 切到下一 slide", async () => {
+  it("直播卡：显示主播 在直播 标题", () => {
+    mockMatchMedia(false);
+    render(<GroupCarousel slides={[live()]} groupName="测试群" />);
+    expect(screen.getByText("小樱 在直播 直播标题")).toBeInTheDocument();
+  });
+
+  it("帖子卡：显示有新帖 + 标题 + 正文", () => {
+    mockMatchMedia(false);
+    render(<GroupCarousel slides={[post()]} groupName="测试群" />);
+    expect(screen.getByText("有新帖")).toBeInTheDocument();
+    expect(screen.getByText("帖子标题")).toBeInTheDocument();
+    expect(screen.getByText("帖子正文内容")).toBeInTheDocument();
+  });
+
+  it("IntersectionObserver 进视口 + 计时器推进 → 切到下一 slide（指示点激活）", async () => {
     mockMatchMedia(false);
     const io = mockIntersectionObserver(true);
     render(
-      <GroupCarousel highlights={[hl({ title: "A" }), hl({ title: "B" })]} groupName="测试群" />,
+      <GroupCarousel slides={[msgVoice(), live()]} groupName="测试群" />,
     );
     await act(async () => {
-      io.fire(); // 进视口 → 可见 → 建立计时器
+      io.fire();
     });
     await act(async () => {
       vi.advanceTimersByTime(3000);
     });
-    // 切换后当前 slide 可聚焦（tabIndex=0），另一个 slide 退到 -1
-    expect(screen.getByRole("button", { name: "打开动态：B" })).toHaveAttribute("tabindex", "0");
-    const aSlide = document.querySelector('[aria-label="打开动态：A"]');
-    expect(aSlide).not.toBeNull();
-    expect(aSlide!.getAttribute("tabindex")).toBe("-1");
+    const dots = document.querySelectorAll(".group-carousel-dot");
+    expect(dots).toHaveLength(2);
+    expect(dots[1]).toHaveClass("is-active");
   });
 
   it("reduced-motion 时不自动轮播", async () => {
     mockMatchMedia(true);
     const io = mockIntersectionObserver(true);
     render(
-      <GroupCarousel highlights={[hl({ title: "A" }), hl({ title: "B" })]} groupName="测试群" />,
+      <GroupCarousel slides={[msgVoice(), live()]} groupName="测试群" />,
     );
     await act(async () => {
       io.fire();
@@ -118,6 +159,7 @@ describe("GroupCarousel", () => {
     await act(async () => {
       vi.advanceTimersByTime(9000);
     });
-    expect(screen.getByRole("button", { name: "打开动态：A" })).toHaveAttribute("tabindex", "0");
+    const dots = document.querySelectorAll(".group-carousel-dot");
+    expect(dots[0]).toHaveClass("is-active");
   });
 });
