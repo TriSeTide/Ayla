@@ -279,6 +279,242 @@ class TestMessageCreate:
 
 
 @pytest.mark.django_db
+class TestMixedSegments:
+    """图文混排消息（type=mixed + segments）：发送闭环/校验/预览/幂等。"""
+
+    def _upload_image(self, ca):
+        from apps.media.tests.conftest import upload_image
+
+        media_id, _ = upload_image(ca)
+        return media_id
+
+    def _upload_video(self, ca):
+        from apps.media.tests.conftest import make_mp4_bytes
+
+        data = make_mp4_bytes()
+        resp = ca.post(
+            "/api/v1/media/uploads",
+            {"kind": "video", "expected_size": len(data), "mime_type": "video/mp4"},
+            format="json",
+        )
+        upload_id = resp.json()["upload_id"]
+        ca.put(
+            f"/api/v1/media/uploads/{upload_id}",
+            data=data,
+            content_type="application/octet-stream",
+        )
+        resp = ca.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert resp.status_code == 201
+        return resp.json()["media_id"]
+
+    def test_send_mixed_message_with_segments(self, auth_client, user_factory):
+        """图文混排闭环：text+image+video+text 段 → 201，type=mixed，content=文本拼接，
+        segments 展开为带 media descriptor 的段列表。"""
+        b = user_factory(username="ms11_b")
+        ca, _ = auth_client(username="ms11_a")
+        conv = make_private(ca, auth_as(b))
+        img = self._upload_image(ca)
+        vid = self._upload_video(ca)
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [
+                    {"type": "text", "text": "看看这个"},
+                    {"type": "image", "media_id": img},
+                    {"type": "text", "text": "和视频"},
+                    {"type": "video", "media_id": vid},
+                    {"type": "text", "text": "不错吧"},
+                ],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["type"] == "mixed"
+        assert body["content"] == "看看这个和视频不错吧"
+        assert body["media_id"] is None
+        segs = body["segments"]
+        assert len(segs) == 5
+        assert segs[0] == {"type": "text", "text": "看看这个"}
+        assert segs[1]["type"] == "image"
+        assert segs[1]["media_id"] == img
+        assert segs[1]["media"]["kind"] == "image"
+        assert segs[1]["media"]["status"] == "ready"
+        assert segs[3]["type"] == "video"
+        assert segs[3]["media"]["kind"] == "video"
+
+    def test_segments_validation(self, auth_client, user_factory):
+        """混排校验：纯文本段拒绝；空文本段拒绝；未知段类型拒绝；segments+media_id 互斥。"""
+        b = user_factory(username="ms12_b")
+        ca, _ = auth_client(username="ms12_a")
+        conv = make_private(ca, auth_as(b))
+        img = self._upload_image(ca)
+
+        # 只有文本段（无媒体段）→ 拒绝
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"segments": [{"type": "text", "text": "纯文字"}], "idempotency_key": new_key()},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "至少需要一个媒体段" in str(resp.json())
+
+        # 空文本段 → 拒绝
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [{"type": "text", "text": "  "}, {"type": "image", "media_id": img}],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+
+        # 未知段类型 → 拒绝
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [{"type": "audio", "media_id": img}],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+
+        # segments 与 media_id 互斥 → 拒绝
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [{"type": "image", "media_id": img}],
+                "media_id": img,
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "不能同时使用" in str(resp.json())
+
+    def test_segment_media_kind_mismatch_and_access(self, auth_client, user_factory):
+        """混排段媒体校验：image 段放 video 媒体 → 400；他人媒体作段 → 403。"""
+        b = user_factory(username="ms13_b")
+        ca, _ = auth_client(username="ms13_a")
+        conv = make_private(ca, auth_as(b))
+        vid = self._upload_video(ca)
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [{"type": "image", "media_id": vid}],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "media_type_mismatch" in str(resp.json())
+
+        # 他人媒体作段 → 403（授权问题，非 400）
+        owner_client, _ = auth_client(username="ms13_owner")
+        owner_img = self._upload_image(owner_client)
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [{"type": "image", "media_id": owner_img}],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 403
+        assert "media_access_denied" in str(resp.json())
+
+    def test_mixed_idempotent_resend(self, auth_client, user_factory):
+        """同 key 重试混排消息 → 200 + 原消息（不重复落库）。"""
+        b = user_factory(username="ms14_b")
+        ca, _ = auth_client(username="ms14_a")
+        conv = make_private(ca, auth_as(b))
+        img = self._upload_image(ca)
+        payload = {
+            "segments": [
+                {"type": "text", "text": "重试"},
+                {"type": "image", "media_id": img},
+            ],
+            "idempotency_key": new_key(),
+        }
+        r1 = ca.post(f"/api/v1/chat/conversations/{conv['id']}/messages/", payload, format="json")
+        assert r1.status_code == 201
+        r2 = ca.post(f"/api/v1/chat/conversations/{conv['id']}/messages/", payload, format="json")
+        assert r2.status_code == 200
+        assert r2.json()["id"] == r1.json()["id"]
+        assert Message.objects.filter(idempotency_key=payload["idempotency_key"]).count() == 1
+
+    def test_last_message_preview_mixed(self, auth_client, user_factory):
+        """会话列表 last_message.preview：混排消息生成「文本文本[视频]文本[图片]」形态。"""
+        b = user_factory(username="ms15_b")
+        ca, _ = auth_client(username="ms15_a")
+        conv = make_private(ca, auth_as(b))
+        img = self._upload_image(ca)
+        vid = self._upload_video(ca)
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [
+                    {"type": "text", "text": "文本文本"},
+                    {"type": "video", "media_id": vid},
+                    {"type": "text", "text": "文本"},
+                    {"type": "image", "media_id": img},
+                    {"type": "text", "text": "文本文本"},
+                    {"type": "image", "media_id": img},
+                ],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 201
+        resp = ca.get("/api/v1/chat/conversations/")
+        assert resp.status_code == 200
+        conv_list = resp.json()
+        mine = next((c for c in conv_list if c["id"] == conv["id"]), None)
+        assert mine is not None
+        assert mine["last_message"]["preview"] == "文本文本[视频]文本[图片]文本文本[图片]"
+        assert mine["last_message"]["type"] == "mixed"
+
+    def test_last_message_preview_single_media(self, auth_client, user_factory):
+        """单媒体/文本消息 preview：文本取 content，图片取 [图片]，撤回取 [已撤回]。"""
+        b = user_factory(username="ms16_b")
+        ca, _ = auth_client(username="ms16_a")
+        conv = make_private(ca, auth_as(b))
+        ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"content": "最后一条文本", "idempotency_key": new_key()},
+            format="json",
+        )
+        resp = ca.get("/api/v1/chat/conversations/")
+        mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
+        assert mine["last_message"]["preview"] == "最后一条文本"
+
+        # 发单图消息覆盖预览
+        img = self._upload_image(ca)
+        ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"type": "image", "content": "", "media_id": img, "idempotency_key": new_key()},
+            format="json",
+        )
+        resp = ca.get("/api/v1/chat/conversations/")
+        mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
+        assert mine["last_message"]["preview"] == "[图片]"
+
+        # 撤回后 preview 显示 [已撤回]
+        hist = ca.get(f"/api/v1/chat/conversations/{conv['id']}/messages/")
+        last_msg = hist.json()[-1]
+        ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/{last_msg['id']}/recall/",
+            format="json",
+        )
+        resp = ca.get("/api/v1/chat/conversations/")
+        mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
+        assert mine["last_message"]["preview"] == "[已撤回]"
+
+
+@pytest.mark.django_db
 class TestMessageHistory:
     def test_history_latest_first_cursor(self, auth_client, user_factory):
         b = user_factory(username="hs_b")

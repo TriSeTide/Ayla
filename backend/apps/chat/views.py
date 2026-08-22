@@ -289,6 +289,7 @@ class MessageView(APIView):
                 if (
                     existing.content != (data.get("content") or "")
                     or existing.type != data.get("type")
+                    or existing.segments != (data.get("segments") or None)
                 ):
                     return Response(
                         {"detail": "idempotency_key 冲突：内容不一致"},
@@ -306,6 +307,7 @@ class MessageView(APIView):
             reply_to=reply_to,
             idempotency_key=key,
             media_id=data.get("media_id"),
+            segments=data.get("segments"),
         )
         # 只有真正落库后才广播
         services.broadcast_message_new(msg)

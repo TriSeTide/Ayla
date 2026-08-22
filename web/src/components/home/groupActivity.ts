@@ -95,15 +95,16 @@ const MEDIA_EVENT_PLACEHOLDER: Record<string, string> = {
 
 /** 消息事件（最后一条消息，含自己的；不依赖已读） */
 function messageEvent(
-  lastMessage: { sender_name?: string; content?: string; type?: string; created_at?: string | null } | null | undefined,
+  lastMessage: { sender_name?: string; content?: string; type?: string; preview?: string; created_at?: string | null } | null | undefined,
   now: number,
 ): NewEvent | null {
   if (!lastMessage || !lastMessage.created_at) return null;
   const at = toMs(lastMessage.created_at);
   if (!isRecent(at, now)) return null;
   const who = lastMessage.sender_name || "";
-  // 媒体消息 content 为空串（气泡不携带占位文案）→ 按类型显示占位
-  const content = lastMessage.content
+  // 混排消息用后端 preview（「文本[视频]文本[图片]」）；媒体消息 content 为空串 → 类型占位
+  const content = lastMessage.preview
+    || lastMessage.content
     || MEDIA_EVENT_PLACEHOLDER[lastMessage.type ?? ""] || "";
   return { kind: "message", at, text: `${who}：${content}` };
 }

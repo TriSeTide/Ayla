@@ -201,6 +201,7 @@ def create_message(
     reply_to=None,
     idempotency_key=None,
     media_id=None,
+    segments=None,
     seq=None,
 ) -> Message:
     """幂等创建消息。
@@ -228,6 +229,7 @@ def create_message(
                 type=msg_type,
                 content=content,
                 media_id=media_id,
+                segments=segments,
                 reply_to=reply_to,
                 idempotency_key=key,
                 seq=seq,
@@ -248,6 +250,7 @@ def create_message(
                     type=msg_type,
                     content=content,
                     media_id=media_id,
+                    segments=segments,
                     reply_to=reply_to,
                     idempotency_key=key,
                     seq=seq,
@@ -362,6 +365,8 @@ async def _group_send_async(conversation_id, event: dict) -> None:
 
 def _message_new_event(message: Message) -> dict:
     # M4-3：media 从字符串 media_id 升级为 descriptor 对象（无引用为 null）
+    from .serializers import expand_segments
+
     return {
         "type": "chat.message.new",
         "conversation_id": str(message.conversation_id),
@@ -370,6 +375,7 @@ def _message_new_event(message: Message) -> dict:
         "content": message.content,
         "msg_type": message.type,
         "media": _media_descriptor(message.media_id),
+        "segments": expand_segments(message),
         "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
         "seq": message.seq,
         "ts": message.created_at.isoformat(),

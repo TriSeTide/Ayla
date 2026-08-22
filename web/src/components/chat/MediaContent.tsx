@@ -134,14 +134,38 @@ function ImageMedia({
 
 /* ---------- 视频 ---------- */
 
-function VideoMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }) {
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+/**
+ * 视频首帧帧块：本地预览（乐观消息）或服务端 blob（Bearer 拉取），
+ * 渲染 <video preload=metadata> 首帧 + 播放键徽标；点击触发 onOpen（查看器）。
+ */
+function VideoFrame({
+  media,
+  localUrl,
+  onOpen,
+  style,
+  ariaLabel = "查看视频",
+}: {
+  media?: MediaDescriptor | null;
+  /** 乐观消息本地预览（未上传，直接使用） */
+  localUrl?: string;
+  onOpen: () => void;
+  style?: CSSProperties;
+  ariaLabel?: string;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(localUrl ?? null);
   const [failed, setFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // 首帧数据：内部媒体带 Bearer 拉 blob（<video src> 无法携带 Authorization）
+  // 本地预览直接可用；服务端媒体带 Bearer 拉 blob（<video src> 无法携带 Authorization）
   useEffect(() => {
+    if (localUrl) {
+      setBlobUrl(localUrl);
+      return;
+    }
+    if (!media) {
+      setFailed(true);
+      return;
+    }
     let cancelled = false;
     let url: string | null = null;
     apiRequestBlob(mediaContentUrl(media.media_id).slice(API_PREFIX.length))
@@ -157,7 +181,7 @@ function VideoMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [media.media_id]);
+  }, [media, localUrl]);
 
   // 部分浏览器 preload=metadata 不渲染首帧：微 seek 触发首帧解码
   const onLoadedData = () => {
@@ -172,42 +196,145 @@ function VideoMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }
   };
 
   return (
+    <div className="media-frame media-frame-video" style={style}>
+      {blobUrl ? (
+        <button
+          type="button"
+          className="media-frame-open"
+          onClick={onOpen}
+          aria-label={ariaLabel}
+          title="点击放大预览"
+        >
+          {/* 气泡内仅展示首帧+播放键（禁交互）；完整预览在查看器中 */}
+          <video
+            ref={videoRef}
+            src={blobUrl}
+            className="media-video"
+            preload="metadata"
+            muted
+            playsInline
+            tabIndex={-1}
+            onLoadedData={onLoadedData}
+          />
+          <span className="video-play-badge" aria-hidden="true">
+            <IconPlay width={22} height={22} />
+          </span>
+        </button>
+      ) : failed ? (
+        <span className="video-load-failed">视频加载失败</span>
+      ) : (
+        <span className="media-frame-skeleton" />
+      )}
+    </div>
+  );
+}
+
+function VideoMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }) {
+  const [viewerOpen, setViewerOpen] = useState(false);
+  return (
     <>
-      <div className="media-frame media-frame-video" style={mediaFrameStyle(media)}>
-        {blobUrl ? (
-          <button
-            type="button"
-            className="media-frame-open"
-            onClick={() => setViewerOpen(true)}
-            aria-label="查看视频"
-            title="点击放大预览"
-          >
-            {/* 气泡内仅展示首帧+播放键（禁交互）；完整预览在查看器中 */}
-            <video
-              ref={videoRef}
-              src={blobUrl}
-              className="media-video"
-              preload="metadata"
-              muted
-              playsInline
-              tabIndex={-1}
-              onLoadedData={onLoadedData}
-            />
-            <span className="video-play-badge" aria-hidden="true">
-              <IconPlay width={22} height={22} />
-            </span>
-          </button>
-        ) : failed ? (
-          <span className="video-load-failed">视频加载失败</span>
-        ) : (
-          <span className="media-frame-skeleton" />
-        )}
-      </div>
+      <VideoFrame media={media} onOpen={() => setViewerOpen(true)} style={mediaFrameStyle(media)} />
       {viewerOpen && (
         <ImageViewer
           media={media}
           alt={caption(msg) || "视频"}
           onClose={() => setViewerOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/* ---------- 图文混排（type=mixed + segments） ---------- */
+
+/**
+ * 混排消息渲染：text 段流式文本 + image/video 段媒体块（多图自动换行成网格）。
+ * 乐观消息（pending）的媒体段 media 缺失 → 用 localMedia 本地预览渲染；
+ * 点击任一媒体段打开共享查看器（同消息内 image/video 可左右切换）。
+ */
+function MixedMedia({ msg }: { msg: ChatMessage }) {
+  const segments = msg.segments ?? [];
+  const localMedia = msg.localMedia ?? [];
+  const mediaSegs = segments.filter((s) => s.type !== "text");
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+
+  // 第 i 个媒体段对应的本地预览（乐观消息；与 segments 媒体段按序对应）
+  let mediaCursor = 0;
+
+  const localFor = () => {
+    const l = mediaCursor < localMedia.length ? localMedia[mediaCursor] : undefined;
+    mediaCursor += 1;
+    return l;
+  };
+
+  if (segments.length === 0) {
+    return <MediaPlaceholder state="unknown" label="图文消息" />;
+  }
+
+  return (
+    <>
+      <div className="mixed-flow">
+        {segments.map((seg, i) => {
+          if (seg.type === "text") {
+            return (
+              <span key={i} className="mixed-text">
+                {seg.text}
+              </span>
+            );
+          }
+          if (seg.type === "image") {
+            const local = localFor();
+            const segIdx = mediaSegs.indexOf(seg);
+            return (
+              <button
+                key={i}
+                type="button"
+                className="media-frame-open mixed-img"
+                onClick={() => setOpenIdx(segIdx)}
+                aria-label="查看图片"
+                title="点击查看原图"
+              >
+                {seg.media ? (
+                  <ResourceImage
+                    src={mediaContentUrl(seg.media.media_id)}
+                    alt="图片"
+                    className="mixed-img-media"
+                    loading="lazy"
+                    fallback={<span className="media-frame-skeleton" />}
+                  />
+                ) : local ? (
+                  <img src={local.url} alt="图片" className="mixed-img-media" />
+                ) : (
+                  <span className="media-frame-skeleton" />
+                )}
+              </button>
+            );
+          }
+          // video 段
+          const local = localFor();
+          const segIdx = mediaSegs.indexOf(seg);
+          return (
+            <VideoFrame
+              key={i}
+              media={seg.media}
+              localUrl={local?.url}
+              onOpen={() => setOpenIdx(segIdx)}
+              ariaLabel="查看视频"
+              style={{ width: 240, maxWidth: "100%", aspectRatio: "4 / 3" }}
+            />
+          );
+        })}
+      </div>
+      {openIdx != null && (
+        <ImageViewer
+          items={mediaSegs.map((s, idx) => ({
+            media: s.media ?? null,
+            localUrl: idx < localMedia.length ? localMedia[idx].url : undefined,
+            isVideo: s.type === "video",
+            alt: s.type === "video" ? "视频" : "图片",
+          }))}
+          initialIndex={openIdx}
+          onClose={() => setOpenIdx(null)}
         />
       )}
     </>
@@ -463,7 +590,12 @@ export function MediaContent({ msg }: { msg: ChatMessage }) {
   }, [media, failed, retryKey, msg.media_id, msg.conversation_id, msg.id, mergeMedia]);
 
   const typeLabel =
-    kind === "image" ? "图片" : kind === "emoji" ? "表情" : kind === "voice" ? "语音" : kind === "video" ? "视频" : "文件";
+    kind === "image" ? "图片" : kind === "emoji" ? "表情" : kind === "voice" ? "语音" : kind === "video" ? "视频" : kind === "mixed" ? "图文消息" : "文件";
+
+  // 图文混排：按 segments 渲染（text/image/video 段），无需单媒体 descriptor
+  if (kind === "mixed") {
+    return <MixedMedia msg={msg} />;
+  }
 
   if (kind !== "image" && kind !== "emoji" && kind !== "voice" && kind !== "file" && kind !== "video") {
     return <MediaPlaceholder state="unknown" label="媒体" />;

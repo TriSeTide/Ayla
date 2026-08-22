@@ -12,7 +12,7 @@ import type { ChatMessage } from "../../api/types";
 import { MessageInput } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
-import { loadHistory, loadMoreHistory, markReadLatest, recallMessage } from "../../hooks/useChat";
+import { loadHistory, loadMoreHistory, markReadLatest, recallMessage, retryOptimistic, removeOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useHomeStore } from "../../stores/home";
 import { useMessageStore } from "../../stores/message";
@@ -119,6 +119,8 @@ export function GroupChat({ groupId }: { groupId: string }) {
         }}
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}
+        onRetry={(m) => retryOptimistic(groupId, m)}
+        onRemove={(m) => removeOptimistic(groupId, m)}
       />
       <TypingIndicator typing={typingActive} />
       <MessageInput convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} />

@@ -65,6 +65,8 @@ def _messages_after(conv, last_seq, limit=200):
 
 
 def _message_new_payload(msg: Message) -> dict:
+    from .serializers import expand_segments
+
     return {
         "type": "message.new",
         "data": {
@@ -74,6 +76,7 @@ def _message_new_payload(msg: Message) -> dict:
             "content": msg.content,
             "type": msg.type,
             "media": msg.media_id,
+            "segments": expand_segments(msg),
             "reply_to": str(msg.reply_to_id) if msg.reply_to_id else None,
             "seq": msg.seq,
             "ts": msg.created_at.isoformat(),
@@ -202,6 +205,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "content": event["content"],
                     "type": event["msg_type"],
                     "media": event["media"],
+                    "segments": event.get("segments"),
                     "reply_to": event["reply_to"],
                     "seq": event["seq"],
                     "ts": event["ts"],

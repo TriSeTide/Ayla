@@ -91,7 +91,7 @@ describe("ImageMedia 原图渲染", () => {
     const openBtn = await screen.findByRole("button", { name: "查看图片原图" });
     fireEvent.click(openBtn);
     expect(screen.getByRole("dialog", { name: /^图片查看/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /保存图片/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /保存/ })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -104,7 +104,7 @@ describe("ImageMedia 原图渲染", () => {
     blobByPath.set("/media/med-save/content", new Blob(["png"], { type: "image/png" }));
     render(<MediaContent msg={msg} />);
     fireEvent.click(await screen.findByRole("button", { name: "查看图片原图" }));
-    fireEvent.click(screen.getByRole("button", { name: /保存图片/ }));
+    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
     const { apiRequestBlob } = await import("../api/client");
     await waitFor(() => {
       expect(vi.mocked(apiRequestBlob)).toHaveBeenCalledTimes(2); // 气泡加载 + 保存
@@ -257,7 +257,7 @@ describe("VideoMedia 首帧气泡与查看器", () => {
     blobByPath.set("/media/vd-2/content", new Blob(["mp4"], { type: "video/mp4" }));
     render(<MediaContent msg={videoMessage("vd-2")} />);
     fireEvent.click(await screen.findByRole("button", { name: "查看视频" }));
-    fireEvent.click(await screen.findByRole("button", { name: /保存图片|保存视频/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /保存/ }));
     const { apiRequestBlob } = await import("../api/client");
     await waitFor(() => {
       expect(vi.mocked(apiRequestBlob)).toHaveBeenCalledWith("/media/vd-2/content");
@@ -292,5 +292,97 @@ describe("MessageBubble 媒体气泡不显示占位文案", () => {
     await screen.findByRole("button", { name: "播放语音" });
     expect(screen.queryByText("语音")).not.toBeInTheDocument();
     expect(screen.getByLabelText("语音播放进度")).toBeInTheDocument();
+  });
+
+  it("自己的乐观消息：发送中左上角 spinner；失败后显示重试/删除", async () => {
+    const base: ChatMessage = {
+      id: "t1", conversation_id: "c1", sender_id: "u1", type: "text", content: "你好",
+      media_id: null, reply_to: null, status: "sent", seq: 1, created_at: new Date().toISOString(),
+    };
+    const onRetry = vi.fn();
+    const onRemove = vi.fn();
+    const { rerender } = render(
+      <MessageBubble message={{ ...base, pending: true }} isSelf onRetry={onRetry} onRemove={onRemove} />,
+    );
+    expect(screen.getByRole("status", { name: "发送中" })).toBeInTheDocument();
+    rerender(
+      <MessageBubble message={{ ...base, pending: false, sendFailed: true }} isSelf onRetry={onRetry} onRemove={onRemove} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "重试发送" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "删除消息" }));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MixedMedia 图文混排（type=mixed + segments）", () => {
+  function mixedMessage(over: Partial<ChatMessage> = {}): ChatMessage {
+    return {
+      id: "mix-1",
+      conversation_id: "c1",
+      sender_id: "u1",
+      type: "mixed",
+      content: "看看这个和视频不错吧",
+      media_id: null,
+      segments: [
+        { type: "text", text: "看看这个" },
+        { type: "image", media_id: "med-1", media: mediaDescriptor() },
+        { type: "text", text: "和视频" },
+        {
+          type: "video",
+          media_id: "med-v",
+          media: mediaDescriptor({ media_id: "med-v", kind: "video", mime_type: "video/mp4" }),
+        },
+        { type: "text", text: "不错吧" },
+      ],
+      reply_to: null,
+      status: "sent",
+      seq: 1,
+      created_at: new Date().toISOString(),
+      ...over,
+    };
+  }
+
+  it("文本段与媒体段流式渲染，无占位文案", async () => {
+    blobByPath.set("/media/med-1/content", new Blob(["png"], { type: "image/png" }));
+    blobByPath.set("/media/med-v/content", new Blob(["mp4"], { type: "video/mp4" }));
+    render(<MediaContent msg={mixedMessage()} />);
+    expect(screen.getByText("看看这个")).toBeInTheDocument();
+    expect(screen.getByText("和视频")).toBeInTheDocument();
+    expect(screen.getByText("不错吧")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看图片" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "查看视频" })).toBeInTheDocument();
+  });
+
+  it("点击图片打开共享查看器，多图左右切换（计数 1/2 → 2/2）", async () => {
+    blobByPath.set("/media/med-1/content", new Blob(["png"], { type: "image/png" }));
+    blobByPath.set("/media/med-v/content", new Blob(["mp4"], { type: "video/mp4" }));
+    render(<MediaContent msg={mixedMessage()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看图片" }));
+    expect(screen.getByRole("dialog", { name: "图片查看：1/2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下一张" }));
+    expect(screen.getByRole("dialog", { name: "图片查看：2/2" })).toBeInTheDocument();
+    // 第二项是视频：查看器渲染 <video>
+    await waitFor(() => expect(document.querySelector("video.image-viewer-video")).not.toBeNull());
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("乐观消息（pending + localMedia）用本地预览渲染，媒体段无 descriptor 不报错", async () => {
+    const msg = mixedMessage({
+      pending: true,
+      localMedia: [
+        { id: "p0", kind: "image", mimeType: "image/png", url: "blob:local-0", file: new File(["a"], "a.png", { type: "image/png" }) },
+      ],
+    });
+    // 覆盖 segments 媒体段：media 为 null（未上传）
+    msg.segments = [
+      { type: "text", text: "看看" },
+      { type: "image", media_id: "", media: null },
+    ];
+    render(<MediaContent msg={msg} />);
+    const img = await screen.findByRole("img", { name: "图片" });
+    expect(img).toHaveAttribute("src", "blob:local-0");
+    expect(screen.getByText("看看")).toBeInTheDocument();
   });
 });

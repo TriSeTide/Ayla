@@ -105,7 +105,8 @@ export type ApiErrorBody = Record<string, unknown>;
 
 /* ================= M5-2 聊天域（对齐 backend/apps/chat/serializers.py） ================= */
 
-export type MessageType = "text" | "image" | "voice" | "file" | "emoji" | "video" | "system";
+export type MessageType =
+  | "text" | "image" | "voice" | "file" | "emoji" | "video" | "mixed" | "system";
 export type MessageStatus = "sent" | "delivered" | "read" | "recalled";
 
 /** 媒体种类（与 backend apps/media/models.py MediaObject.kind 对齐） */
@@ -130,6 +131,28 @@ export interface MediaDescriptor {
   created_at: string;
 }
 
+/** 图文混排段（type=mixed 消息；对齐 backend chat/serializers.expand_segments） */
+export type MediaSegment =
+  | { type: "text"; text: string }
+  | {
+      type: "image" | "video";
+      media_id: string;
+      /** 服务端展开的 descriptor；乐观发送中（未上传）为 null */
+      media?: MediaDescriptor | null;
+    };
+
+/** 乐观消息的本地媒体预览（未上传，仅本端可见；渲染与重试用） */
+export interface LocalMediaPreview {
+  /** 段内唯一 id（与 segments 中媒体段一一对应） */
+  id: string;
+  kind: "image" | "video";
+  mimeType: string;
+  /** objectURL（渲染）；组件卸载/消息删除时 revoke */
+  url: string;
+  /** 原始 File（重试重传用；仅乐观消息持有） */
+  file: File;
+}
+
 /** MessageSerializer 字段（id/conversation_id/sender_id 均为字符串） */
 export interface ChatMessage {
   id: string;
@@ -143,12 +166,23 @@ export interface ChatMessage {
    * 可选：WS 帧到达时只有字符串 media_id，descriptor 由前端异步补拉后合并。
    */
   media?: MediaDescriptor | null;
+  /** 图文混排段（type=mixed；媒体段带完整 descriptor；旧消息/单媒体为 null） */
+  segments?: MediaSegment[] | null;
   reply_to: string | null;
   status: MessageStatus;
   /** 会话内单调递增序号（补发/分页游标） */
   seq: number;
   /** ISO 时间 */
   created_at: string;
+  /* ---- 以下为应用侧乐观发送字段（非后端契约） ---- */
+  /** 乐观发送中（气泡左上角加载态；seq=0，排序置底） */
+  pending?: boolean;
+  /** 发送失败（气泡左上角失败态，可重试/删除） */
+  sendFailed?: boolean;
+  /** 乐观消息幂等键（重试复用，服务端去重） */
+  idempotencyKey?: string;
+  /** 乐观消息的本地媒体预览（未上传时渲染本地；与 segments 媒体段按序对应） */
+  localMedia?: LocalMediaPreview[];
 }
 
 /** ConversationMemberSerializer 字段 */
@@ -171,6 +205,9 @@ export interface LastMessagePreview {
   sender_name: string;
   status: string;
   created_at: string | null;
+  /** 混排摘要文案（后端生成：混排消息「文本文本[视频]文本[图片]」；
+   *  单媒体 [图片] 占位、文本取 content、撤回 [已撤回]；旧后端缺失时前端兜底） */
+  preview?: string;
 }
 
 /** ConversationListSerializer 字段（会话列表用） */
@@ -222,6 +259,8 @@ export interface CreateMessagePayload {
   reply_to?: number | null;
   idempotency_key?: string;
   media_id?: string;
+  /** 图文混排段（与 media_id 二选一；至少一个媒体段；服务端强制 type=mixed） */
+  segments?: ({ type: "text"; text: string } | { type: "image" | "video"; media_id: string })[];
 }
 
 /** 会话列表查询参数 */
@@ -261,6 +300,8 @@ export interface MessageNewFrame {
     type: MessageType;
     /** WS 帧携带完整 descriptor 对象（backend consumers.py 直传 _media_descriptor）；历史兼容字符串 media_id */
     media: MediaDescriptor | string | null;
+    /** 图文混排段（type=mixed；媒体段带 descriptor；旧后端缺失为 null） */
+    segments?: MediaSegment[] | null;
     reply_to: string | null;
     seq: number;
     ts: string;

@@ -35,7 +35,8 @@ function previewLabel(conv: ConversationSummary): string {
   if (lm.status === "recalled") {
     body = "[已撤回]";
   } else {
-    body = lm.content || TYPE_PLACEHOLDER[lm.type] || "[消息]";
+    // 后端统一生成混排摘要（preview）；旧后端/旧缓存无 preview 时前端兜底
+    body = lm.preview || lm.content || TYPE_PLACEHOLDER[lm.type] || "[消息]";
   }
   // 群聊：带发送者名；私聊对端名即会话标题，不再重复
   if (conv.type === "group" && lm.sender_id && lm.sender_name) {

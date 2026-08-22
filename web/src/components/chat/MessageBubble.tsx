@@ -13,7 +13,7 @@ import { Avatar } from "../Avatar";
 import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
 import { MediaContent } from "./MediaContent";
-import { IconQuote, IconUndo } from "../icons";
+import { IconQuote, IconUndo, IconClose } from "../icons";
 
 function timeAgo(iso: string): string {
   const d = new Date(iso);
@@ -37,7 +37,7 @@ export function canRecall(
   return (Date.now() - created) / 1000 <= RECALL_SECONDS;
 }
 
-const MEDIA_TYPES = new Set(["image", "voice", "file", "emoji", "video"]);
+const MEDIA_TYPES = new Set(["image", "voice", "file", "emoji", "video", "mixed"]);
 
 export function MessageBubble({
   message,
@@ -50,6 +50,8 @@ export function MessageBubble({
   quoteText,
   onQuote,
   onRecall,
+  onRetry,
+  onRemove,
 }: {
   message: ChatMessage;
   isSelf: boolean;
@@ -67,6 +69,10 @@ export function MessageBubble({
   quoteText?: string | null;
   onQuote?: (msg: ChatMessage) => void;
   onRecall?: (msg: ChatMessage) => void;
+  /** 乐观发送失败：重试（重新上传+发送，幂等键复用） */
+  onRetry?: (msg: ChatMessage) => void;
+  /** 乐观消息删除（本地丢弃） */
+  onRemove?: (msg: ChatMessage) => void;
 }) {
   const recalled = message.status === "recalled";
   const isMedia = MEDIA_TYPES.has(message.type);
@@ -127,12 +133,39 @@ export function MessageBubble({
   // 单行布局（design.md §4）：统一 DOM = [头像][气泡][操作]；
   // peer 行 row 直排 = [头像][气泡][操作]；self 行 row-reverse 翻转 = [操作][气泡][头像]，
   // 自己的气泡整体居右、头像在最右。
+  // 乐观发送状态（自己的气泡左上角：发送中 spinner / 失败可重试删除）
+  const sendState =
+    isSelf && !recalled && (message.pending || message.sendFailed) ? (
+      <div className="msg-send-state" data-state={message.sendFailed ? "failed" : "sending"}>
+        {message.pending ? (
+          <span className="msg-send-spinner" role="status" aria-label="发送中" />
+        ) : (
+          <>
+            <span className="msg-send-failed-text" aria-label="发送失败">发送失败</span>
+            {onRetry && (
+              <button type="button" className="msg-action-btn" onClick={() => onRetry(message)} aria-label="重试发送">
+                <IconUndo width={11} height={11} style={{ verticalAlign: "-2px", marginRight: 3 }} />
+                重试
+              </button>
+            )}
+            {onRemove && (
+              <button type="button" className="msg-action-btn" onClick={() => onRemove(message)} aria-label="删除消息">
+                <IconClose width={11} height={11} style={{ verticalAlign: "-2px", marginRight: 3 }} />
+                删除
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    ) : null;
+
   return (
     <div className={`msg-row ${isSelf ? "self" : "peer"}`}>
       {senderHalo}
       <div className="msg-body">
         {!isSelf && senderName && <span className="msg-sender">{senderName}</span>}
         <div className={`${bubbleClass} ${isMedia && !recalled ? "bubble-media" : ""}`}>
+          {sendState}
           {quoteText != null && !recalled && (
             <div className="quote-strip" title={quoteText}>
               {quoteText}

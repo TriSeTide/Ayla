@@ -924,6 +924,7 @@
 }
 
 .bubble {
+  position: relative;
   padding: 10px 14px;
   font-size: 15px;
   line-height: 1.55;
@@ -1031,6 +1032,46 @@
   border: 1px solid var(--glass-border);
   transition: color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
+}
+
+/* 乐观发送状态（自己的气泡左侧同行：发送中 spinner / 失败重试删除） */
+.msg-send-state {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.msg-send-spinner {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  border-radius: var(--radius-pill);
+  border: 2px solid rgba(70, 91, 146, 0.25);
+  border-top-color: var(--indigo-700);
+  animation: msg-send-spin 0.8s linear infinite;
+}
+
+@keyframes msg-send-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.msg-send-failed-text {
+  font-size: 12px;
+  color: var(--destructive);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-send-spinner {
+    animation: none;
+    border-top-color: var(--indigo-700);
+  }
 }
 
 .msg-action-btn:hover {
@@ -1406,6 +1447,63 @@
   color: var(--destructive);
 }
 
+/* 查看器多图：左右切换 + 计数 */
+.image-viewer-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(12px) saturate(1.4);
+  color: var(--indigo-700);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+
+.image-viewer-nav:hover:not(:disabled),
+.image-viewer-nav:focus-visible {
+  outline: none;
+  box-shadow: var(--glow-shadow);
+}
+
+.image-viewer-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.image-viewer-nav.prev {
+  left: var(--sp-4);
+}
+
+.image-viewer-nav.next {
+  right: var(--sp-4);
+}
+
+.image-viewer-counter {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  padding: 0 var(--sp-2);
+}
+
+.image-viewer-error {
+  position: absolute;
+  bottom: 76px;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-pill);
+  background: var(--overlay-dim-strong);
+  color: #fff;
+  font-size: 13px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .image-viewer {
     animation: none;
@@ -1507,6 +1605,53 @@
   background: rgba(157, 191, 230, 0.18);
 }
 
+/* 图文混排消息（type=mixed）：文本段与媒体段流式排列，媒体段自动换行成网格 */
+.mixed-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  max-width: 100%;
+}
+
+.mixed-text {
+  max-width: 100%;
+  font-size: 15px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 混排图片块：统一小方块，多图自动成网格；本地预览（乐观消息）与服务端同尺寸 */
+.mixed-img {
+  width: 180px;
+  height: 180px;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.mixed-img:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mixed-img-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 混排视频块：内联 VideoFrame 的统一尺寸（组件已给 inline width/aspectRatio） */
+.mixed-flow .media-frame-video {
+  flex: 0 0 auto;
+}
+
 /* ---- Typing ---- */
 
 .typing-indicator {
@@ -1555,6 +1700,76 @@
 .composer-uploading {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* 待发送媒体缩略图条（M7）：小尺寸（40-48px）不挤输入框，可移除 */
+.composer-picked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.picked-thumb {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+  background: var(--glass-bg);
+}
+
+.picked-thumb[data-kind="video"] {
+  width: 58px;
+}
+
+.picked-img,
+.picked-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.picked-play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  color: var(--indigo-700);
+  font-size: 9px;
+  pointer-events: none;
+}
+
+.picked-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.picked-remove:hover,
+.picked-remove:focus-visible {
+  background: var(--destructive);
+  border-color: var(--destructive);
+  color: #fff;
+  outline: none;
 }
 
 .composer-error {

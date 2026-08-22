@@ -2,18 +2,29 @@
  * ImageViewer —— 聊天图片/视频全屏查看器（QQ 式点击打开 + 可保存）。
  *
  * 视觉（design.md §6 模态层级）：indigo 压暗遮罩 + 玻璃质感关闭钮，
- * 原图/视频 object-fit contain 居中；底部玻璃胶囊操作条（保存）。
- * 行为：ESC / 点击遮罩空白关闭；打开即 focus 关闭按钮（键盘可达）。
+ * 原图/视频 object-fit contain 居中；底部玻璃胶囊操作条（保存 + 多图计数）。
+ * 行为：ESC / 点击遮罩空白关闭；打开即 focus 关闭按钮（键盘可达）；←/→ 切换多图。
  * 图片经 ResourceImage 加载（Bearer 鉴权 + blob 缓存，与气泡共享缓存秒开）；
  * 视频渲染 <video controls autoPlay>（气泡内仅首帧+播放键，此处完整预览）；
  * 保存走 apiRequestBlob → objectURL 触发下载（浏览器原生下载不带 token）。
+ * 乐观消息（未上传）的本地预览（localUrl）只展示，不可保存。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MediaDescriptor } from "../../api/types";
 import { apiRequestBlob } from "../../api/client";
 import { mediaContentUrl } from "../../api/media";
 import { ResourceImage } from "../ResourceImage";
 import { IconClose, IconDownload } from "../icons";
+
+/** 查看器条目：服务端媒体或乐观本地预览 */
+export interface ViewerItem {
+  media: MediaDescriptor | null;
+  /** 乐观消息本地预览（未上传；只展示不保存） */
+  localUrl?: string;
+  /** 本地预览为视频（服务端媒体按 media.kind 判断） */
+  isVideo?: boolean;
+  alt: string;
+}
 
 /** MIME → 下载扩展名 */
 function extFromMime(mime: string): string {
@@ -97,37 +108,64 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
   );
 }
 
+/** 本地预览（乐观消息，未上传）：图片或视频原样展示 */
+function LocalPreview({ item }: { item: ViewerItem }) {
+  if (item.isVideo) {
+    return (
+      <video src={item.localUrl} className="image-viewer-video" controls playsInline />
+    );
+  }
+  return <img src={item.localUrl} alt={item.alt} className="image-viewer-img" />;
+}
+
 export function ImageViewer({
   media,
   alt,
+  items,
+  initialIndex = 0,
   onClose,
 }: {
-  media: MediaDescriptor;
-  alt: string;
+  /** 单条目模式（兼容旧调用） */
+  media?: MediaDescriptor | null;
+  alt?: string;
+  /** 多条目模式：同消息的图片/视频列表（左上右切换） */
+  items?: ViewerItem[];
+  initialIndex?: number;
   onClose: () => void;
 }) {
-  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const list: ViewerItem[] =
+    items && items.length > 0
+      ? items
+      : [{ media: media ?? null, alt: alt ?? "图片" }];
+  const [index, setIndex] = useState(Math.min(Math.max(initialIndex, 0), list.length - 1));
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState(false);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
 
-  // ESC 关闭 + 打开时焦点落关闭按钮（键盘可达）
+  const current = list[index];
+  const isLocal = current.localUrl != null && current.media == null;
+
+  const close = useCallback(() => onClose(), [onClose]);
+
   useEffect(() => {
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
+      if (e.key === "ArrowRight") setIndex((i) => Math.min(list.length - 1, i + 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, list.length]);
 
   const save = async () => {
-    if (saving) return;
+    if (!current.media || saving) return;
     setSaving(true);
-    setSaveError(null);
+    setSaveError(false);
     try {
-      await downloadMedia(media);
+      await downloadMedia(current.media);
     } catch {
-      setSaveError("保存失败，请重试");
+      setSaveError(true);
     } finally {
       setSaving(false);
     }
@@ -138,47 +176,78 @@ export function ImageViewer({
       className="image-viewer"
       role="dialog"
       aria-modal="true"
-      aria-label={alt ? `图片查看：${alt}` : "图片查看"}
-      onClick={onClose}
+      aria-label={list.length > 1 ? `图片查看：${index + 1}/${list.length}` : alt ? `图片查看：${alt}` : "图片查看"}
+      onClick={close}
     >
       <button
-        ref={closeRef}
         type="button"
         className="image-viewer-close"
-        onClick={onClose}
-        aria-label="关闭图片查看"
+        onClick={close}
+        aria-label="关闭查看"
+        ref={closeRef}
       >
-        <IconClose width={20} height={20} />
+        <IconClose width={22} height={22} />
       </button>
       <div className="image-viewer-stage" onClick={(e) => e.stopPropagation()}>
-        {media.kind === "video" ? (
-          <VideoPlayer media={media} />
-        ) : (
+        {current.localUrl && current.media == null ? (
+          <LocalPreview item={current} />
+        ) : current.media?.kind === "video" ? (
+          <VideoPlayer media={current.media} />
+        ) : current.media ? (
           <ResourceImage
-            src={mediaContentUrl(media.media_id)}
-            alt={alt || "图片原图"}
+            src={mediaContentUrl(current.media.media_id)}
+            alt={current.alt || "图片原图"}
             className="image-viewer-img"
             loading="eager"
             fallback={<span className="image-viewer-fallback">图片加载失败</span>}
           />
+        ) : (
+          <span className="image-viewer-fallback">媒体不可用</span>
         )}
       </div>
+      {list.length > 1 && (
+        <>
+          <button
+            type="button"
+            className="image-viewer-nav prev"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIndex((i) => Math.max(0, i - 1));
+            }}
+            aria-label="上一张"
+            disabled={index === 0}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="image-viewer-nav next"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIndex((i) => Math.min(list.length - 1, i + 1));
+            }}
+            aria-label="下一张"
+            disabled={index === list.length - 1}
+          >
+            ›
+          </button>
+        </>
+      )}
       <div className="image-viewer-actions" onClick={(e) => e.stopPropagation()}>
-        {saveError && (
-          <span className="image-viewer-save-error" role="alert">
-            {saveError}
-          </span>
-        )}
+        {list.length > 1 && <span className="image-viewer-counter">{index + 1}/{list.length}</span>}
         <button
           type="button"
-          className="btn btn-glow image-viewer-save"
+          className="image-viewer-save"
           onClick={() => void save()}
-          disabled={saving}
+          disabled={saving || isLocal || !current.media}
         >
-          <IconDownload width={16} height={16} />
-          {saving ? "保存中…" : "保存图片"}
+          <IconDownload width={16} height={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+          {saving ? "保存中…" : isLocal ? "发送后可保存" : "保存"}
         </button>
       </div>
+      {saveError && (
+        <div className="image-viewer-error" role="alert">保存失败，请重试</div>
+      )}
     </div>
   );
 }

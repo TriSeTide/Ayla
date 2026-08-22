@@ -29,6 +29,7 @@ import { useBoardgameStore } from "../stores/boardgame";
 import * as chatApi from "../api/chat";
 import * as voiceApi from "../api/voice";
 import * as boardgameApi from "../api/boardgame";
+import { segmentPreview } from "../utils/segment";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -217,6 +218,7 @@ export class ChatWSClient {
           content: d.content,
           media_id: wsMediaId,
           media: typeof wsMedia === "string" ? null : wsMedia,
+          segments: d.segments ?? null,
           reply_to: d.reply_to,
           status: "sent",
           seq: d.seq,
@@ -245,6 +247,8 @@ export class ChatWSClient {
           void useBadgesStore.getState().fetch();
         }
         if (conv) {
+          // 混排消息用段生成摘要（后端 WS 帧带展开 segments）；单媒体/文本走 content/占位
+          const segmentsPreview = segmentPreview(d.segments ?? null);
           chat.setLastMessage(conv.id, {
             seq: d.seq,
             type: d.type,
@@ -253,6 +257,10 @@ export class ChatWSClient {
             sender_name: previewSenderName(conv, d.sender_id),
             status: "sent",
             created_at: d.ts,
+            preview:
+              segmentsPreview ??
+              (d.content ||
+                (d.type === "image" ? "[图片]" : d.type === "video" ? "[视频]" : d.type === "voice" ? "[语音]" : undefined)),
           });
         }
         break;

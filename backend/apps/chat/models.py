@@ -108,6 +108,7 @@ class Message(models.Model):
     TYPE_FILE = "file"
     TYPE_EMOJI = "emoji"
     TYPE_VIDEO = "video"
+    TYPE_MIXED = "mixed"
     TYPE_SYSTEM = "system"
     TYPE_CHOICES = [
         (TYPE_TEXT, "文本"),
@@ -116,6 +117,7 @@ class Message(models.Model):
         (TYPE_FILE, "文件"),
         (TYPE_EMOJI, "表情"),
         (TYPE_VIDEO, "视频"),
+        (TYPE_MIXED, "图文混排"),
         (TYPE_SYSTEM, "系统"),
     ]
 
@@ -140,6 +142,11 @@ class Message(models.Model):
     type = models.CharField("类型", max_length=16, choices=TYPE_CHOICES, default=TYPE_TEXT)
     content = models.TextField("内容", blank=True, default="")
     media_id = models.CharField("媒体引用", max_length=64, null=True, blank=True)
+    # 图文混排段（type=mixed）：有序数组，每段
+    #   {"type": "text", "text": "..."} 或 {"type": "image"|"video", "media_id": "..."}
+    # content 冗余保存全部 text 段拼接（旧逻辑/搜索/预览兼容）；单媒体消息（image/voice/
+    # video/file/emoji）不使用 segments（保持旧格式 media_id + type）。
+    segments = models.JSONField("图文段", null=True, blank=True, default=None)
     reply_to = models.ForeignKey(
         "self",
         related_name="replies",

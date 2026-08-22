@@ -6,6 +6,7 @@ import type { ChatMessage, ConversationSummary } from "../../api/types";
 import { useAuthStore } from "../../stores/auth";
 import { goUserProfile } from "../../utils/navigation";
 import { canRecall, MessageBubble } from "./MessageBubble";
+import { segmentPreview } from "../../utils/segment";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
@@ -33,6 +34,8 @@ export function MessageList({
   onLoadMore,
   onQuote,
   onRecall,
+  onRetry,
+  onRemove,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -43,6 +46,9 @@ export function MessageList({
   onLoadMore: () => void;
   onQuote?: (msg: ChatMessage) => void;
   onRecall?: (msg: ChatMessage) => void;
+  /** 乐观发送失败：重试/删除 */
+  onRetry?: (msg: ChatMessage) => void;
+  onRemove?: (msg: ChatMessage) => void;
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -70,7 +76,7 @@ export function MessageList({
     return map;
   }, [conversation]);
 
-  // 消息 id → 引用预览文本
+  // 消息 id → 引用预览文本（混排消息按段生成「文本[视频]文本[图片]」）
   const MEDIA_TYPE_LABEL: Record<string, string> = {
     image: "图片",
     voice: "语音",
@@ -81,9 +87,12 @@ export function MessageList({
   const quotePreview = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of messages) {
+      const fromSegments = segmentPreview(m.segments);
       map.set(
         m.id,
-        m.type === "text" ? m.content || "…" : `[${MEDIA_TYPE_LABEL[m.type] ?? "消息"}]`,
+        m.type === "text"
+          ? m.content || "…"
+          : fromSegments ?? `[${MEDIA_TYPE_LABEL[m.type] ?? "消息"}]`,
       );
     }
     return map;
@@ -192,6 +201,8 @@ export function MessageList({
                 quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}
                 onQuote={onQuote}
                 onRecall={onRecall && canRecall(m, currentUserId) ? onRecall : undefined}
+                onRetry={onRetry && m.sendFailed ? onRetry : undefined}
+                onRemove={onRemove && m.sendFailed ? onRemove : undefined}
               />
             </div>
           );
