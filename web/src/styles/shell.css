@@ -136,7 +136,10 @@
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border-bottom: 1px solid var(--glass-border);
-  z-index: 20;
+  /* 与窄屏 narrow-topbar 同为顶栏常驻层（50）：盖过悬浮球 45 / FAB 40，
+     自身 backdrop-filter 形成 stacking context，内部菜单随层提升；
+     仍低于弹窗/抽屉 70-80（布局文档 §1 z-index 分层） */
+  z-index: 50;
 }
 
 .top-nav-avatar {
@@ -442,10 +445,14 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  transform: translateX(0);
+  transition: transform 200ms var(--ease-out);
 }
 
+/* 收起态：整组右移贴边（位移 = right 偏移 24px，把手完整贴住屏幕右缘），
+   语音/直播球由下方规则滑出淡隐；点击贴边把手恢复展开 */
 .session-activity-group.is-collapsed {
-  /* 收起态只显示一个小按钮 */
+  transform: translateX(24px);
 }
 
 .session-activity-ball {
@@ -461,7 +468,17 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
+  transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out),
+    opacity 200ms var(--ease-out), visibility 0s linear 0s;
+}
+
+/* 收起：球向右滑过把手位置淡出，动画结束后再隐藏（不可聚焦/误触） */
+.session-activity-group.is-collapsed .session-activity-ball {
+  transform: translateX(64px);
+  opacity: 0;
+  visibility: hidden;
+  transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out),
+    visibility 0s linear 200ms;
 }
 
 .session-activity-ball:hover,
@@ -504,9 +521,24 @@
 }
 
 .session-activity-toggle-icon {
+  display: inline-flex;
   font-size: 16px;
   font-weight: 500;
   line-height: 1;
+  transition: transform 200ms var(--ease-out);
+}
+
+/* 收起后把手图标转向左，提示恢复方向 */
+.session-activity-group.is-collapsed .session-activity-toggle-icon {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-activity-group,
+  .session-activity-toggle-icon,
+  .session-activity-ball {
+    transition: none;
+  }
 }
 
 /* ================= 徽标（§12.1 未读 / §2.1 顶栏消息） ================= */
@@ -602,6 +634,11 @@
   .session-activity-group {
     top: calc(56px + env(safe-area-inset-top, 0px) + 48px);
     right: 16px;
+  }
+
+  /* 窄屏 right 16px：贴边位移同步为 16px，把手完整贴住屏幕右缘 */
+  .session-activity-group.is-collapsed {
+    transform: translateX(16px);
   }
 
   .create-fab-wrap {

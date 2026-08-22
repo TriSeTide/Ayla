@@ -4,7 +4,8 @@ import { IconMic, IconVideo } from "../components/icons";
 import { useSessionActivityStore } from "../stores/sessionActivity";
 import { useAuthStore } from "../stores/auth";
 
-/** 跨页面媒体会话的悬浮球控制组：语音 + 直播两个圆形按钮，可收起。 */
+/** 跨页面媒体会话的悬浮球控制组：语音 + 直播 + 收起把手三个按钮。点击收起：
+ *  把手完整贴住屏幕右缘、语音/直播球滑出淡隐（CSS 动画）；再点把手恢复展开。 */
 export function SessionActivityIndicator() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -66,24 +67,9 @@ export function SessionActivityIndicator() {
   // 没有任何活动态时不渲染
   if (!showVoice && !showLive) return null;
 
-  // 收起态：只显示一个小展开按钮
-  if (collapsed) {
-    return (
-      <div className="session-activity-group is-collapsed">
-        <button
-          type="button"
-          className="session-activity-toggle"
-          onClick={() => setCollapsed(false)}
-          aria-label="展开媒体控制"
-        >
-          <span className="session-activity-toggle-icon">‹</span>
-        </button>
-      </div>
-    );
-  }
-
+  // 收起/展开共用同一结构：is-collapsed 驱动 CSS 向右半贴边滑出动画（shell.css）
   return (
-    <div className="session-activity-group">
+    <div className={`session-activity-group${collapsed ? " is-collapsed" : ""}`}>
       {showVoice && voice && (
         <button
           type="button"
@@ -109,8 +95,9 @@ export function SessionActivityIndicator() {
       <button
         type="button"
         className="session-activity-toggle"
-        onClick={() => setCollapsed(true)}
-        aria-label="收起媒体控制"
+        onClick={() => setCollapsed((v) => !v)}
+        aria-label={collapsed ? "展开媒体控制" : "收起媒体控制"}
+        aria-expanded={!collapsed}
       >
         <span className="session-activity-toggle-icon">›</span>
       </button>
