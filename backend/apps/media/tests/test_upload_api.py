@@ -1,9 +1,25 @@
-"""三步上传契约测试（8.1 清单：闭环、幂等、MIME/大小/hash 校验、越权、过期）。"""
+"""三步上传契约测试（8.1 清单：闭环、幂等、MIME/大小/hash 校验、越权、过期）。
+
+大小上限策略（产品要求）：图片/语音默认不设上限（MEDIA_MAX_*_BYTES=0 → None），
+file/emoji 仍保留配置上限；新图片格式（AVIF/HEIC/BMP/TIFF/SVG 等）走扩充后的
+allowlist 与魔数嗅探。
+"""
 import pytest
 
 from apps.media.models import MediaObject
+from django.conf import settings
 
-from .conftest import make_png_bytes, make_wav_bytes, upload_image
+from .conftest import (
+    make_avif_bytes,
+    make_bmp_bytes,
+    make_mp4_bytes,
+    make_png_bytes,
+    make_svg_bytes,
+    make_tiff_bytes,
+    make_wav_bytes,
+    make_webm_video_bytes,
+    upload_image,
+)
 
 
 @pytest.mark.django_db
@@ -77,6 +93,7 @@ class TestUploadValidation:
         assert resp.status_code == 400
 
     def test_upload_exceeds_max_bytes(self, auth_client):
+        # emoji 未放开上限，超限仍 413（保护未变更类别的契约）
         client, _ = auth_client(username="up_v2")
         resp = client.post(
             "/api/v1/media/uploads",
@@ -84,6 +101,140 @@ class TestUploadValidation:
             format="json",
         )
         assert resp.status_code == 413
+
+    def test_file_kind_still_capped(self, auth_client):
+        # file 类别保留 50MB 上限：图片/语音放开不影响其他类别
+        client, _ = auth_client(username="up_v2b")
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": "file", "expected_size": 51 * 1024 * 1024, "mime_type": "application/pdf"},
+            format="json",
+        )
+        assert resp.status_code == 413
+
+    @pytest.mark.parametrize(
+        "kind,size_mb",
+        [("image", 64), ("image", 512), ("voice", 256), ("video", 512)],
+    )
+    def test_image_voice_video_have_no_size_cap(self, auth_client, kind, size_mb):
+        """图片/语音/视频默认不设上限：远超旧上限的会话声明也应创建成功。"""
+        assert settings.MEDIA_MAX_IMAGE_BYTES == 0
+        assert settings.MEDIA_MAX_VOICE_BYTES == 0
+        assert settings.MEDIA_MAX_VIDEO_BYTES == 0
+        client, _ = auth_client(username=f"up_nocap_{kind}_{size_mb}")
+        mime = {
+            "image": "image/png",
+            "voice": "audio/wav",
+            "video": "video/mp4",
+        }[kind]
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": kind, "expected_size": size_mb * 1024 * 1024, "mime_type": mime},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["max_bytes"] is None
+
+    @pytest.mark.parametrize(
+        "make_bytes,mime",
+        [
+            (lambda: make_mp4_bytes(b"isom"), "video/mp4"),
+            (lambda: make_mp4_bytes(b"mp42"), "video/mp4"),
+            (make_webm_video_bytes, "video/webm"),
+        ],
+    )
+    def test_complete_sniff_accepts_video(self, auth_client, make_bytes, mime):
+        """视频上传闭环：MP4（isom/mp42 brand）与 WebM（EBML）文件头嗅探通过。"""
+        client, _ = auth_client(username=f"up_video_{mime.replace('/', '_')}")
+        data = make_bytes()
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": "video", "expected_size": len(data), "mime_type": mime},
+            format="json",
+        )
+        upload_id = resp.json()["upload_id"]
+        client.put(
+            f"/api/v1/media/uploads/{upload_id}", data=data, content_type="application/octet-stream"
+        )
+        resp = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert resp.status_code == 201, resp.content
+        desc = resp.json()["descriptor"]
+        assert desc["status"] == "ready"
+        obj = MediaObject.objects.get(media_id=resp.json()["media_id"])
+        assert obj.kind == "video"
+        assert obj.mime_type == mime
+
+    def test_video_declared_as_image_rejected(self, auth_client):
+        """MP4 字节声明 kind=image → 文件头嗅探失败（kind 级隔离）。"""
+        client, _ = auth_client(username="up_video_mismatch")
+        data = make_mp4_bytes()
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": "image", "expected_size": len(data), "mime_type": "image/png"},
+            format="json",
+        )
+        upload_id = resp.json()["upload_id"]
+        client.put(
+            f"/api/v1/media/uploads/{upload_id}", data=data, content_type="application/octet-stream"
+        )
+        resp = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert resp.status_code == 400
+
+    def test_zero_and_negative_size_still_rejected(self, auth_client):
+        client, _ = auth_client(username="up_v5")
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": "image", "expected_size": 0, "mime_type": "image/png"},
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize(
+        "mime",
+        [
+            "image/avif", "image/heic", "image/heif",
+            "image/bmp", "image/tiff", "image/x-icon", "image/svg+xml",
+        ],
+    )
+    def test_extended_image_mimes_allowed(self, auth_client, mime):
+        client, _ = auth_client(username=f"up_ext_{mime.replace('/', '_').replace('+', '_')}")
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": "image", "expected_size": 100, "mime_type": mime},
+            format="json",
+        )
+        assert resp.status_code == 201
+
+    @pytest.mark.parametrize(
+        "make_bytes,mime",
+        [
+            (make_bmp_bytes, "image/bmp"),
+            (make_tiff_bytes, "image/tiff"),
+            (lambda: make_avif_bytes(b"avif"), "image/avif"),
+            (lambda: make_avif_bytes(b"heic"), "image/heic"),
+            (make_svg_bytes, "image/svg+xml"),
+        ],
+    )
+    def test_complete_sniff_accepts_new_formats(self, auth_client, make_bytes, mime):
+        """新格式文件头嗅探通过：BMP/TIFF 真图 + AVIF/HEIC ftyp 头 + SVG 文本。"""
+        client, _ = auth_client(username=f"up_sniff_{mime.replace('/', '_').replace('+', '_')}")
+        data = make_bytes()
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": "image", "expected_size": len(data), "mime_type": mime},
+            format="json",
+        )
+        upload_id = resp.json()["upload_id"]
+        client.put(
+            f"/api/v1/media/uploads/{upload_id}", data=data, content_type="application/octet-stream"
+        )
+        resp = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert resp.status_code == 201, resp.content
+        desc = resp.json()["descriptor"]
+        assert desc["status"] == "ready"
+        obj = MediaObject.objects.get(media_id=resp.json()["media_id"])
+        assert obj.mime_type == mime
 
     def test_complete_size_mismatch(self, auth_client):
         client, _ = auth_client(username="up_v3")

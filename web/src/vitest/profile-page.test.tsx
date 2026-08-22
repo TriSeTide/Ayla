@@ -83,7 +83,7 @@ describe("ProfilePage 头像上传", () => {
     renderPage();
     const input = screen.getByLabelText("更换头像") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["x"], "a.txt", { type: "text/plain" })] } });
-    await screen.findByText("仅支持 PNG/JPEG/GIF/WebP 图片");
+    await screen.findByText("仅支持图片文件（PNG/JPEG/GIF/WebP/AVIF/HEIC/BMP/TIFF/ICO/SVG）");
     expect(screen.queryByText("新头像将在保存后生效")).not.toBeInTheDocument();
   });
 

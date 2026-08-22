@@ -61,6 +61,7 @@ class UploadSessionView(APIView):
             {
                 "upload_id": session.upload_id,
                 "kind": session.kind,
+                # None = 该 kind 不设大小上限（图片/语音默认放开）
                 "max_bytes": services._max_bytes(session.kind),
                 "expires_at": session.expires_at.isoformat(),
             },
@@ -88,7 +89,7 @@ class UploadBinaryView(APIView):
                 {"detail": "上传会话已过期"}, status=status.HTTP_410_GONE
             )
         data = request.body
-        if len(data) > services._max_bytes(session.kind):
+        if services._exceeds_max(session.kind, len(data)):
             return Response(
                 {"detail": "payload_too_large"},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -172,7 +173,14 @@ class MediaContentView(APIView):
             "ETag": etag,
             # 优化：允许浏览器缓存 1 小时（private 确保不进入共享缓存）
             "Cache-Control": "private, max-age=3600",
+            # 防 MIME 嗅探；SVG 属可执行文档，必须禁脚本/沙箱防存储型 XSS
+            "X-Content-Type-Options": "nosniff",
         }
+        if (media.mime_type or "") == "image/svg+xml":
+            headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+            )
+            headers["Content-Disposition"] = "inline"
 
         range_header = request.headers.get("Range")
         if range_header:

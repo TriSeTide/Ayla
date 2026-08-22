@@ -107,6 +107,7 @@ class Message(models.Model):
     TYPE_VOICE = "voice"
     TYPE_FILE = "file"
     TYPE_EMOJI = "emoji"
+    TYPE_VIDEO = "video"
     TYPE_SYSTEM = "system"
     TYPE_CHOICES = [
         (TYPE_TEXT, "文本"),
@@ -114,6 +115,7 @@ class Message(models.Model):
         (TYPE_VOICE, "语音"),
         (TYPE_FILE, "文件"),
         (TYPE_EMOJI, "表情"),
+        (TYPE_VIDEO, "视频"),
         (TYPE_SYSTEM, "系统"),
     ]
 

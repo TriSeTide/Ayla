@@ -71,12 +71,19 @@ export function MessageList({
   }, [conversation]);
 
   // 消息 id → 引用预览文本
+  const MEDIA_TYPE_LABEL: Record<string, string> = {
+    image: "图片",
+    voice: "语音",
+    file: "文件",
+    emoji: "表情",
+    video: "视频",
+  };
   const quotePreview = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of messages) {
       map.set(
         m.id,
-        m.type === "text" ? m.content || "…" : `[${m.type === "image" ? "图片" : m.type === "voice" ? "语音" : m.type === "file" ? "文件" : m.type === "emoji" ? "表情" : "消息"}]`,
+        m.type === "text" ? m.content || "…" : `[${MEDIA_TYPE_LABEL[m.type] ?? "消息"}]`,
       );
     }
     return map;

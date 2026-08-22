@@ -105,11 +105,11 @@ export type ApiErrorBody = Record<string, unknown>;
 
 /* ================= M5-2 聊天域（对齐 backend/apps/chat/serializers.py） ================= */
 
-export type MessageType = "text" | "image" | "voice" | "file" | "emoji" | "system";
+export type MessageType = "text" | "image" | "voice" | "file" | "emoji" | "video" | "system";
 export type MessageStatus = "sent" | "delivered" | "read" | "recalled";
 
 /** 媒体种类（与 backend apps/media/models.py MediaObject.kind 对齐） */
-export type MediaKind = "image" | "voice" | "file" | "emoji";
+export type MediaKind = "image" | "voice" | "file" | "emoji" | "video";
 
 /** MediaObjectSerializer 字段（M4-3：media 是 descriptor 对象，非裸 media_id） */
 export interface MediaDescriptor {

@@ -28,10 +28,20 @@ from .models import MediaObject, MediaUploadSession
 
 logger = logging.getLogger(__name__)
 
-# 允许的 MIME 类型（allowlist）；文件头嗅探与声明 MIME 同时检查
+# 允许的 MIME 类型（allowlist）；文件头嗅探与声明 MIME 同时检查。
+# image 除常见位图外，覆盖现代格式（AVIF/HEIC/HEIF）与传统格式（BMP/TIFF/ICO），
+# 以及浏览器/系统可能上报的别名（image/jpg、image/pjpeg）；SVG 见下方安全说明。
 ALLOWED_MIME = {
     "image": {
-        "image/png", "image/jpeg", "image/gif", "image/webp",
+        "image/png", "image/jpeg", "image/jpg", "image/pjpeg",
+        "image/gif", "image/webp",
+        "image/avif", "image/heic", "image/heif", "image/heix",
+        "image/bmp", "image/x-ms-bmp",
+        "image/tiff",
+        "image/x-icon", "image/vnd.microsoft.icon", "image/x-win-bitmap",
+        # SVG 属于 XML 文档：仅配合 content 端点的 CSP sandbox + nosniff 头放行，
+        # 直接内嵌/打开时脚本不执行（见 views.MediaContentView）。
+        "image/svg+xml",
     },
     "emoji": {
         "image/png", "image/jpeg", "image/gif", "image/webp",
@@ -39,6 +49,11 @@ ALLOWED_MIME = {
     "voice": {
         "audio/wav", "audio/x-wav", "audio/wave", "audio/mpeg",
         "audio/mp4", "audio/ogg", "audio/x-m4a", "audio/webm", "application/octet-stream",
+    },
+    # 视频常见容器：MP4/MOV/M4V（ISOBMFF）、WebM/MKV（EBML）；浏览器可内联播放优先
+    "video": {
+        "video/mp4", "video/webm", "video/quicktime", "video/x-m4v",
+        "video/x-matroska", "video/3gpp", "video/3gpp2",
     },
     "file": {
         "application/pdf", "application/zip", "application/x-zip-compressed",
@@ -61,6 +76,10 @@ _SNIFFERS = [
     ("image", b"GIF87a", "image/gif"),
     ("image", b"GIF89a", "image/gif"),
     ("image", b"RIFF", "image/webp"),  # WebP 头 RIFF....WEBP
+    ("image", b"BM", "image/bmp"),  # BMP（BITMAPINFOHEADER 等均以 BM 开头）
+    ("image", b"II*\x00", "image/tiff"),  # TIFF 小端
+    ("image", b"MM\x00*", "image/tiff"),  # TIFF 大端
+    ("image", b"\x00\x00\x01\x00", "image/x-icon"),  # ICO/CUR
     ("voice", b"RIFF", "audio/x-wav"),  # WAV
     ("voice", b"ID3", "audio/mpeg"),  # MP3 带 ID3
     ("voice", b"\xff\xfb", "audio/mpeg"),  # MP3 无标签
@@ -68,19 +87,31 @@ _SNIFFERS = [
     ("voice", b"fLaC", "audio/flac"),
     ("voice", b"\x1a\x45\xdf\xa3", "audio/webm"),  # WebM/EBML（浏览器 MediaRecorder 默认输出）
     ("voice", b"\x1a\x45\xdf\xa3\x93\x42\x82\x88matroska", "audio/webm"),  # MKV 容器（部分录制器）
+    ("video", b"\x1a\x45\xdf\xa3", "video/webm"),  # WebM/MKV（EBML 容器，音视频同魔数）
     ("file", b"%PDF", "application/pdf"),
     ("file", b"PK\x03\x04", "application/zip"),
 ]
 
 
-def _max_bytes(kind: str) -> int:
+def _max_bytes(kind: str) -> int | None:
+    """该 kind 的大小上限（字节）；配置为 <=0 时返回 None 表示不设上限。"""
     mapping = {
-        MediaObject.KIND_IMAGE: getattr(settings, "MEDIA_MAX_IMAGE_BYTES", 10 * 1024 * 1024),
-        MediaObject.KIND_VOICE: getattr(settings, "MEDIA_MAX_VOICE_BYTES", 30 * 1024 * 1024),
+        MediaObject.KIND_IMAGE: getattr(settings, "MEDIA_MAX_IMAGE_BYTES", 0),
+        MediaObject.KIND_VOICE: getattr(settings, "MEDIA_MAX_VOICE_BYTES", 0),
+        MediaObject.KIND_VIDEO: getattr(settings, "MEDIA_MAX_VIDEO_BYTES", 0),
         MediaObject.KIND_FILE: getattr(settings, "MEDIA_MAX_FILE_BYTES", 50 * 1024 * 1024),
         MediaObject.KIND_EMOJI: getattr(settings, "MEDIA_MAX_EMOJI_BYTES", 5 * 1024 * 1024),
     }
-    return mapping.get(kind, 50 * 1024 * 1024)
+    value = mapping.get(kind, 0)
+    if value is None or int(value) <= 0:
+        return None
+    return int(value)
+
+
+def _exceeds_max(kind: str, size: int) -> bool:
+    """size 是否超过该 kind 上限；无上限（None）时恒为 False。"""
+    max_bytes = _max_bytes(kind)
+    return max_bytes is not None and size > max_bytes
 
 
 def _ttl_seconds() -> int:
@@ -91,14 +122,62 @@ def _mime_allowed(kind: str, mime_type: str) -> bool:
     return mime_type in ALLOWED_MIME.get(kind, set())
 
 
+def _sniff_isobmff_still_image(data: bytes) -> bool:
+    """识别 ISOBMFF 容器静态图（AVIF / HEIC / HEIF）。
+
+    头部为 4 字节 box size + b"ftyp" + 4 字节 major brand：
+    avif/avis=AVIF；heic/heix/hevc/hevx/mif1/msf1/heim/heis/micl=HEIF/HEIC 家族。
+    """
+    if len(data) < 12 or data[4:8] != b"ftyp":
+        return False
+    brand = data[8:12]
+    return brand in {
+        b"avif", b"avis",
+        b"heic", b"heix", b"hevc", b"hevx",
+        b"mif1", b"msf1", b"heim", b"heis", b"micl",
+    }
+
+
+def _sniff_isobmff_video(data: bytes) -> bool:
+    """识别 ISOBMFF 容器视频（MP4/MOV/M4V/3GP）。
+
+    与静态图共用 ftyp 结构但 brand 集合不同：isom/mp42/mp41/avc1/dash 等。
+    """
+    if len(data) < 12 or data[4:8] != b"ftyp":
+        return False
+    brand = data[8:12]
+    return brand in {
+        b"isom", b"iso2", b"mp41", b"mp42", b"avc1",
+        b"dash", b"mmdb", b"mp71", b"msnv", b"xavc",
+        b"jvt", b"hev1", b"hvc1", b"3gp4", b"3gp5", b"3gp6", b"3ge6",
+    }
+
+
+def _sniff_svg(data: bytes) -> bool:
+    """识别 SVG（XML 文本）：BOM/空白后以 <?xml 或 <svg 开头，或前缀含 <svg 元素。"""
+    text = data.lstrip(b"\xef\xbb\xbf \t\r\n")[:512]
+    lowered = text.lower()
+    return lowered.startswith(b"<?xml") or b"<svg" in lowered
+
+
 def _sniff_kind(data: bytes, declared_kind: str) -> bool:
     """文件头嗅探：数据开头的魔数是否与声明的 kind 匹配。
 
-    emoji 与 image 一样是位图（PNG/JPEG/GIF/WebP），复用同一魔数集校验。
+    emoji 与 image 一样是位图（PNG/JPEG/GIF/WebP 等），复用同一魔数集校验；
+    AVIF/HEIC/HEIF（ISOBMFF）与 SVG 的头部形态特殊，走专用分支。
     """
     if declared_kind == MediaObject.KIND_FILE:
         # 文件类型不做强魔数约束（任意合法 MIME 均可），但至少要有内容
         return len(data) > 0
+
+    is_image_like = declared_kind in (MediaObject.KIND_IMAGE, MediaObject.KIND_EMOJI)
+    if is_image_like and (_sniff_isobmff_still_image(data) or _sniff_svg(data)):
+        return True
+    if declared_kind == MediaObject.KIND_VIDEO and (
+        _sniff_isobmff_video(data) or data.startswith(b"\x1a\x45\xdf\xa3")
+    ):
+        # 视频：ISOBMFF（MP4/MOV/M4V/3GP）或 EBML（WebM/MKV）
+        return True
     for _kind, magic, _mime in _SNIFFERS:
         if _kind == declared_kind and data.startswith(magic):
             return True
@@ -120,7 +199,8 @@ def _content_hash(data: bytes) -> str:
 def create_upload_session(user, *, kind: str, expected_size: int, mime_type: str) -> MediaUploadSession:
     """创建受控上传会话（步骤文件 5.1 POST /uploads）。
 
-    - 服务端策略校验（不信任客户端最终声明）：kind 合法、MIME 在 allowlist、大小不超过该 kind 上限；
+    - 服务端策略校验（不信任客户端最终声明）：kind 合法、MIME 在 allowlist、
+      大小不超过该 kind 上限（图片/语音默认 0=不设上限）；
     - 返回会话，owner 仅上传者本人。
     """
     if kind not in dict(MediaObject.KIND_CHOICES):
@@ -129,7 +209,7 @@ def create_upload_session(user, *, kind: str, expected_size: int, mime_type: str
         raise ValueError("unsupported_media_type")
     if expected_size <= 0:
         raise ValueError("invalid_expected_size")
-    if expected_size > _max_bytes(kind):
+    if _exceeds_max(kind, expected_size):
         raise ValueError("payload_too_large")
 
     session = MediaUploadSession.objects.create(

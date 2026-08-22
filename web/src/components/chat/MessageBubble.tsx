@@ -4,7 +4,7 @@
  * 视觉（design.md §4 Chat Bubbles）：
  * - 自己：冰蓝渐变，右下 6px 小角；爱莉：樱粉渐变 + grape 字（专属，不可复用）；
  *   其他用户：玻璃底；
- * - 媒体消息（image/emoji/voice/file）走 MediaContent 真实渲染（M5-2.1）；
+ * - 媒体消息（image/emoji/voice/file/video）走 MediaContent 真实渲染（M5-2.1）；
  * - 引用回复：左 3px ice 竖条 + 弱化一层；
  * - 撤回态弱化 + 「已撤回」标签。
  */
@@ -37,7 +37,7 @@ export function canRecall(
   return (Date.now() - created) / 1000 <= RECALL_SECONDS;
 }
 
-const MEDIA_TYPES = new Set(["image", "voice", "file", "emoji"]);
+const MEDIA_TYPES = new Set(["image", "voice", "file", "emoji", "video"]);
 
 export function MessageBubble({
   message,
@@ -147,10 +147,8 @@ export function MessageBubble({
           ) : (
             message.content || " "
           )}
-          {/* 媒体消息附带的说明文字（image/voice 的 content 为补充说明） */}
-          {isMedia && !recalled && message.type !== "file" && message.content?.trim() && (
-            <div style={{ padding: "4px 6px 2px", fontSize: 14 }}>{message.content}</div>
-          )}
+          {/* 媒体消息气泡只渲染媒体本体：不显示 content 占位文案
+             （「图片/语音」二字保留在会话列表预览与引用预览里） */}
         </div>
         <div className="bubble-meta">
           <span className="bubble-time">{timeAgo(message.created_at)}</span>

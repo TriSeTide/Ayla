@@ -33,6 +33,10 @@
   --ring-online: conic-gradient(from 210deg, #9dbfe6, #f9b0ff, #f796ff, #9dbfe6);
   --card-shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  /* 浮层背景压暗：普通弹窗 rgba(...,0.25)（design.md §6）；
+     图片查看器等沉浸 lightbox 加深至 0.45 保证图片对比度 */
+  --overlay-dim: rgba(70, 91, 146, 0.25);
+  --overlay-dim-strong: rgba(70, 91, 146, 0.45);
 
   /* ---- Semantic ---- */
   --success: #3fa97c;

@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as chatApi from "../../api/chat";
-import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
+import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../../api/media";
 import type { ConversationMember, ConversationSummary } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
 import { IconBack, IconClose, IconSearch } from "../../components/icons";
@@ -75,7 +75,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
 
   const chooseGroupAvatar = (file: File | undefined) => {
     if (!file) return;
-    const invalid = validateAvatarFile(file);
+    const invalid = validateImageFile(file);
     if (invalid) {
       setGroupAvatarError(invalid);
       return;
@@ -273,7 +273,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
               {groupAvatarSaving ? "上传中…" : "更换群头像"}
               <input
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
+                accept="image/*"
                 hidden
                 disabled={groupAvatarSaving}
                 onChange={(e) => {

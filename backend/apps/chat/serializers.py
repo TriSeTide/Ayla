@@ -213,12 +213,13 @@ class CreateMessageSerializer(serializers.Serializer):
         max_length=64, required=False, allow_blank=True, default=None
     )
 
-    # M4-3：媒体消息类型（type=image/voice/file/emoji 时 media_id 必填并校验）
+    # M4-3：媒体消息类型（type=image/voice/file/emoji/video 时 media_id 必填并校验）
     MEDIA_TYPES = {
         Message.TYPE_IMAGE,
         Message.TYPE_VOICE,
         Message.TYPE_FILE,
         Message.TYPE_EMOJI,
+        Message.TYPE_VIDEO,
     }
 
     def validate_media_id(self, value):

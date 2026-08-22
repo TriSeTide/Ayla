@@ -243,6 +243,40 @@ class TestMessageCreate:
         assert resp.status_code == 400
         assert "media_type_mismatch" in str(resp.json())
 
+    def test_send_video_message_with_real_media(self, auth_client, user_factory):
+        """视频消息：type=video 引用 kind=video 媒体（三步上传后引用，闭环）。"""
+        b = user_factory(username="ms10_b")
+        ca, _ = auth_client(username="ms10_a")
+        conv = make_private(ca, auth_as(b))
+        from apps.media.tests.conftest import make_mp4_bytes
+
+        data = make_mp4_bytes()
+        resp = ca.post(
+            "/api/v1/media/uploads",
+            {"kind": "video", "expected_size": len(data), "mime_type": "video/mp4"},
+            format="json",
+        )
+        upload_id = resp.json()["upload_id"]
+        ca.put(
+            f"/api/v1/media/uploads/{upload_id}",
+            data=data,
+            content_type="application/octet-stream",
+        )
+        resp = ca.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert resp.status_code == 201
+        media_id = resp.json()["media_id"]
+
+        resp = ca.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"type": "video", "content": "", "media_id": media_id, "idempotency_key": new_key()},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["type"] == "video"
+        assert body["media"]["kind"] == "video"
+        assert body["media"]["status"] == "ready"
+
 
 @pytest.mark.django_db
 class TestMessageHistory:

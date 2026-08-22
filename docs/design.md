@@ -151,7 +151,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 | 背景 | 固定极光渐变（z 最低，不动） |
 | 内容 | 实心卡片浮于背景 |
 | 浮层 | 玻璃面板 + blur |
-| 模态 | `--glass-bg-strong` + 背景压暗 `rgba(70,91,146,0.25)` |
+| 模态 | `--glass-bg-strong` + 背景压暗 `rgba(70,91,146,0.25)`（`--overlay-dim`） |
+| 沉浸查看器 | 图片查看器等 lightbox：压暗加深至 0.45（`--overlay-dim-strong`）+ blur(8px)，z 在弹窗层之上 |
 | 辉光 | 只服务光环、主 CTA、focus |
 
 ## 7. Motion

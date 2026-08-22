@@ -23,6 +23,7 @@ const TYPE_PLACEHOLDER: Record<string, string> = {
   voice: "[语音]",
   file: "[文件]",
   emoji: "[表情]",
+  video: "[视频]",
   system: "[系统消息]",
 };
 

@@ -2,15 +2,16 @@
  * MediaContent —— M5-2.1 媒体真实渲染。
  *
  * 渲染规则（契约：backend/apps/media/serializers.py MediaObjectSerializer）：
- * - image/emoji：缩略图 descriptor.thumbnail（/api/v1/media/{id}/thumbnail）；
- *   无缩略图回退原图 content 端点；emoji 无缩略图时同样回退 content；
- * - voice：波形 descriptor.waveform（/api/v1/media/{id}/waveform）+ 时长 + 播放（content）；
+ * - image/emoji：直接渲染原图 content（缩略图是 320px JPEG 静帧，会压画质且
+ *   让 GIF 动图变静图；ResourceImage 按 media_id 全局缓存，不产生重复请求）；
+ * - video：首帧（<video preload=metadata> blob）+ 播放键覆盖层，点击进查看器预览/保存；
+ * - voice：波形 + 进度条（可拖）+ 时长 + 播放（content）；全局同时只播一条；
  * - file：文件名 + 大小 + 下载（content）；
  * - descriptor 未就绪（WS 帧只带 media_id）→ 骨架占位并异步补拉；
  * - 加载失败 / 未知类型 → 占位 + 重试；
  * - 全部 URL 经 api/media.ts 构造，禁止裸拼接。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   fetchMediaDescriptor,
@@ -22,7 +23,12 @@ import {
 import { apiRequestBlob, API_PREFIX } from "../../api/client";
 import type { ChatMessage, MediaDescriptor } from "../../api/types";
 import { useMessageStore } from "../../stores/message";
+import {
+  claimAudioPlayback,
+  releaseAudioPlayback,
+} from "../../utils/mediaPlayback";
 import { ResourceImage } from "../ResourceImage";
+import { ImageViewer } from "./ImageViewer";
 import { IconDownload, IconFile, IconImage, IconMic, IconPause, IconPlay, IconRetry } from "../icons";
 
 /** 媒体消息内的文字说明（content 在媒体消息中是说明文字/文件名） */
@@ -62,7 +68,24 @@ function MediaPlaceholder({
   );
 }
 
-/* ---------- 图片 / 表情 ---------- */
+/* ---------- 图片 / 表情 / 视频 ---------- */
+
+/** 发送即占最终大框：按媒体宽高比计算最终显示尺寸（max 320 约束、不放大），
+ * 容器一开始就占满最终尺寸，媒体加载后填充不改变高度——避免「小框被撑大向下挤」。
+ * 注意：不能用 `width: min(dw,100%)`——在无内容 shrink-to-fit 容器里 100% 解析为 0，
+ * aspect-ratio 失效（实测 w=0 h=0）；要用明确像素 width + max-width:100%（窄屏收缩）。 */
+function mediaFrameStyle(media: MediaDescriptor, fixed?: { width: number; height: number }): CSSProperties {
+  if (fixed) return { width: fixed.width, height: fixed.height } as CSSProperties;
+  const w = media.width ?? 0;
+  const h = media.height ?? 0;
+  if (w > 0 && h > 0) {
+    const scale = Math.min(320 / w, 320 / h, 1); // 1 = 不放大（小图保持原尺寸）
+    const dw = Math.round(w * scale);
+    const dh = Math.round(h * scale);
+    return { width: `${dw}px`, maxWidth: "100%", aspectRatio: `${dw} / ${dh}` } as CSSProperties;
+  }
+  return { width: "320px", maxWidth: "100%", aspectRatio: "4 / 3" } as CSSProperties;
+}
 
 function ImageMedia({
   msg,
@@ -74,37 +97,120 @@ function ImageMedia({
   isEmoji: boolean;
 }) {
   const label = isEmoji ? "表情" : "图片";
-  // 优先缩略图；emoji 无缩略图时回退原图 content
-  const thumb = resolveMediaPath(media.thumbnail);
-  const src = thumb ?? mediaContentUrl(media.media_id);
-
-  // 发送即占最终大框：按原图宽高比计算最终显示尺寸（max 320 约束、不放大），
-  // 容器一开始就占满最终尺寸，图片加载后填充不改变高度——避免「小框被撑大向下挤」。
-  // 注意：不能用 `width: min(dw,100%)`——在无内容 shrink-to-fit 容器里 100% 解析为 0，
-  // aspect-ratio 失效（实测 w=0 h=0）；要用明确像素 width + max-width:100%（窄屏收缩）。
-  const frameStyle = (() => {
-    if (isEmoji) return { width: 96, height: 96 } as CSSProperties;
-    const w = media.width ?? 0;
-    const h = media.height ?? 0;
-    if (w > 0 && h > 0) {
-      const scale = Math.min(320 / w, 320 / h, 1); // 1 = 不放大（小图保持原尺寸）
-      const dw = Math.round(w * scale);
-      const dh = Math.round(h * scale);
-      return { width: `${dw}px`, maxWidth: "100%", aspectRatio: `${dw} / ${dh}` } as CSSProperties;
-    }
-    return { width: "320px", maxWidth: "100%", aspectRatio: "4 / 3" } as CSSProperties;
-  })();
+  // 直接渲染原图 content：缩略图是 320px JPEG 静帧（压画质 + GIF 变静图），
+  // 原图经 ResourceImage 的 media_id 级 blob 缓存加载，气泡与查看器共享缓存。
+  const src = mediaContentUrl(media.media_id);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   return (
-    <div className="media-frame media-frame-image" style={frameStyle}>
-      <ResourceImage
-        src={src}
-        alt={caption(msg) || label}
-        className={isEmoji ? "media-emoji" : "media-image"}
-        loading="lazy"
-        fallback={<span className="media-frame-skeleton" />}
-      />
-    </div>
+    <>
+      <div className="media-frame media-frame-image" style={mediaFrameStyle(media, isEmoji ? { width: 96, height: 96 } : undefined)}>
+        <button
+          type="button"
+          className="media-frame-open"
+          onClick={() => setViewerOpen(true)}
+          aria-label={`查看${label}原图`}
+          title="点击查看原图"
+        >
+          <ResourceImage
+            src={src}
+            alt={caption(msg) || label}
+            className={isEmoji ? "media-emoji" : "media-image"}
+            loading="lazy"
+            fallback={<span className="media-frame-skeleton" />}
+          />
+        </button>
+      </div>
+      {viewerOpen && (
+        <ImageViewer
+          media={media}
+          alt={caption(msg) || label}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/* ---------- 视频 ---------- */
+
+function VideoMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }) {
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // 首帧数据：内部媒体带 Bearer 拉 blob（<video src> 无法携带 Authorization）
+  useEffect(() => {
+    let cancelled = false;
+    let url: string | null = null;
+    apiRequestBlob(mediaContentUrl(media.media_id).slice(API_PREFIX.length))
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setBlobUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [media.media_id]);
+
+  // 部分浏览器 preload=metadata 不渲染首帧：微 seek 触发首帧解码
+  const onLoadedData = () => {
+    const v = videoRef.current;
+    if (v && v.currentTime < 0.01) {
+      try {
+        v.currentTime = 0.001;
+      } catch {
+        // 未就绪时 seek 抛错可忽略（首帧由浏览器自行渲染）
+      }
+    }
+  };
+
+  return (
+    <>
+      <div className="media-frame media-frame-video" style={mediaFrameStyle(media)}>
+        {blobUrl ? (
+          <button
+            type="button"
+            className="media-frame-open"
+            onClick={() => setViewerOpen(true)}
+            aria-label="查看视频"
+            title="点击放大预览"
+          >
+            {/* 气泡内仅展示首帧+播放键（禁交互）；完整预览在查看器中 */}
+            <video
+              ref={videoRef}
+              src={blobUrl}
+              className="media-video"
+              preload="metadata"
+              muted
+              playsInline
+              tabIndex={-1}
+              onLoadedData={onLoadedData}
+            />
+            <span className="video-play-badge" aria-hidden="true">
+              <IconPlay width={22} height={22} />
+            </span>
+          </button>
+        ) : failed ? (
+          <span className="video-load-failed">视频加载失败</span>
+        ) : (
+          <span className="media-frame-skeleton" />
+        )}
+      </div>
+      {viewerOpen && (
+        <ImageViewer
+          media={media}
+          alt={caption(msg) || "视频"}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -117,7 +223,28 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
   const [playing, setPlaying] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [audioError, setAudioError] = useState(false);
-  const duration = formatDuration(media.duration);
+  /** 总时长：descriptor 为准；波形派生失败（null）时由音频 metadata 兜底 */
+  const [duration, setDuration] = useState<number | null>(media.duration ?? null);
+  const [current, setCurrent] = useState(0);
+
+  /**
+   * 全局停止回调（稳定引用，供互斥注册表 claim/release）：
+   * 暂停 + 进度归零 + UI 复位。被其他语音抢占或自身结束时都会走到这里。
+   */
+  const stopPlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // 未加载完成时 seek 可能抛错，忽略即可
+      }
+    }
+    setPlaying(false);
+    setCurrent(0);
+    releaseAudioPlayback(stopPlayback);
+  }, []);
 
   const ensureAudio = async (): Promise<HTMLAudioElement | null> => {
     if (audioRef.current) return audioRef.current;
@@ -129,7 +256,13 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
       const url = URL.createObjectURL(blob);
       objectUrlRef.current = url;
       const audio = new Audio(url);
-      audio.addEventListener("ended", () => setPlaying(false));
+      audio.addEventListener("loadedmetadata", () => {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          setDuration(audio.duration);
+        }
+      });
+      audio.addEventListener("timeupdate", () => setCurrent(audio.currentTime));
+      audio.addEventListener("ended", stopPlayback);
       audio.addEventListener("error", () => {
         setPlaying(false);
         setAudioError(true);
@@ -148,68 +281,106 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
     if (playing && audioRef.current) {
       audioRef.current.pause();
       setPlaying(false);
+      releaseAudioPlayback(stopPlayback);
       return;
     }
     const audio = audioRef.current ?? (await ensureAudio());
     if (!audio) return;
-    void audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    // 先抢占全局播放位：其他正在播放的语音会被 stopPlayback 停止并复位
+    claimAudioPlayback(stopPlayback);
+    void audio.play().then(() => setPlaying(true)).catch(() => {
+      setPlaying(false);
+      releaseAudioPlayback(stopPlayback);
+    });
   };
 
-  // 卸载释放 object URL
+  /** 拖动进度条 seek */
+  const onSeek = (value: number) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(value)) return;
+    try {
+      audio.currentTime = value;
+    } catch {
+      return;
+    }
+    setCurrent(value);
+  };
+
+  // 卸载释放 object URL 并注销播放位
   useEffect(() => {
     return () => {
+      stopPlayback();
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     };
-  }, []);
+  }, [stopPlayback]);
+
+  const total = duration != null && duration > 0 ? duration : null;
+  const seekable = audioRef.current != null && total != null;
 
   return (
     <div className="voice-card">
-      <button
-        type="button"
-        className="voice-play"
-        onClick={() => void toggle()}
-        disabled={loadingAudio}
-        aria-label={playing ? "暂停语音" : loadingAudio ? "语音加载中" : "播放语音"}
-      >
-        {loadingAudio ? (
-          <span className="skeleton" style={{ width: 14, height: 14, borderRadius: 4 }} />
-        ) : playing ? (
-          <IconPause width={16} height={16} />
-        ) : (
-          <IconPlay width={16} height={16} />
-        )}
-      </button>
-      {wave ? (
-        <ResourceImage
-          src={wave}
-          alt="语音波形"
-          className="voice-wave"
-          loading="lazy"
-          fallback={
-            <span className="voice-wave" style={{ display: "grid", placeItems: "center" }}>
-              <IconMic width={18} height={18} />
-            </span>
-          }
-        />
-      ) : (
-        <span className="voice-wave" style={{ display: "grid", placeItems: "center" }}>
-          <IconMic width={18} height={18} />
-        </span>
-      )}
-      {duration && <span className="voice-duration">{duration}</span>}
-      {audioError && (
+      <div className="voice-card-main">
         <button
           type="button"
-          className="media-retry"
-          onClick={() => {
-            setAudioError(false);
-            audioRef.current = null;
-            void toggle();
-          }}
+          className="voice-play"
+          onClick={() => void toggle()}
+          disabled={loadingAudio}
+          aria-label={playing ? "暂停语音" : loadingAudio ? "语音加载中" : "播放语音"}
         >
-          重试
+          {loadingAudio ? (
+            <span className="skeleton" style={{ width: 14, height: 14, borderRadius: 4 }} />
+          ) : playing ? (
+            <IconPause width={16} height={16} />
+          ) : (
+            <IconPlay width={16} height={16} />
+          )}
         </button>
-      )}
+        {wave ? (
+          <ResourceImage
+            src={wave}
+            alt="语音波形"
+            className="voice-wave"
+            loading="lazy"
+            fallback={
+              <span className="voice-wave" style={{ display: "grid", placeItems: "center" }}>
+                <IconMic width={18} height={18} />
+              </span>
+            }
+          />
+        ) : (
+          <span className="voice-wave" style={{ display: "grid", placeItems: "center" }}>
+            <IconMic width={18} height={18} />
+          </span>
+        )}
+        <span className="voice-duration">{formatDuration(total ?? 0)}</span>
+        {audioError && (
+          <button
+            type="button"
+            className="media-retry"
+            onClick={() => {
+              setAudioError(false);
+              audioRef.current = null;
+              void toggle();
+            }}
+          >
+            重试
+          </button>
+        )}
+      </div>
+      <div className="voice-seek-row">
+        <input
+          type="range"
+          className="voice-seek"
+          min={0}
+          max={total ?? 0}
+          step={0.1}
+          value={Math.min(current, total ?? current)}
+          disabled={!seekable}
+          onChange={(e) => onSeek(Number(e.target.value))}
+          aria-label="语音播放进度"
+        />
+        <span className="voice-cur">{formatDuration(current)}</span>
+      </div>
     </div>
   );
 }
@@ -292,9 +463,9 @@ export function MediaContent({ msg }: { msg: ChatMessage }) {
   }, [media, failed, retryKey, msg.media_id, msg.conversation_id, msg.id, mergeMedia]);
 
   const typeLabel =
-    kind === "image" ? "图片" : kind === "emoji" ? "表情" : kind === "voice" ? "语音" : "文件";
+    kind === "image" ? "图片" : kind === "emoji" ? "表情" : kind === "voice" ? "语音" : kind === "video" ? "视频" : "文件";
 
-  if (kind !== "image" && kind !== "emoji" && kind !== "voice" && kind !== "file") {
+  if (kind !== "image" && kind !== "emoji" && kind !== "voice" && kind !== "file" && kind !== "video") {
     return <MediaPlaceholder state="unknown" label="媒体" />;
   }
 
@@ -320,6 +491,8 @@ export function MediaContent({ msg }: { msg: ChatMessage }) {
       return <ImageMedia msg={msg} media={media} isEmoji={false} />;
     case "emoji":
       return <ImageMedia msg={msg} media={media} isEmoji={true} />;
+    case "video":
+      return <VideoMedia msg={msg} media={media} />;
     case "voice":
       return <VoiceMedia media={media} />;
     case "file":

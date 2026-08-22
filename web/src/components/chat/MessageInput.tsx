@@ -5,14 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, MessageType } from "../../api/types";
 import { useChatDraftsStore } from "../../stores/chatDrafts";
 import { sendMessage } from "../../hooks/useChat";
-import { uploadMediaFile } from "../../api/media";
+import { uploadMediaFile, validateMediaFile } from "../../api/media";
 import { IconImage } from "../icons";
 import { useTyping } from "../../hooks/useTyping";
 import { useVoiceRecorder, isVoiceRecordingSupported, formatDuration as formatRecDuration, type VoiceRecording } from "../../hooks/useVoiceRecorder";
 import { IconClose, IconMic, IconSend } from "../icons";
 
-/** 媒体消息类型（图片/语音/文件等，发消息 type 与媒体 kind 对齐） */
-type MediaMsgType = Extract<MessageType, "image" | "voice">;
+/** 媒体消息类型（本输入区可发送的媒体：图片/语音/视频） */
+type MediaMsgType = Extract<MessageType, "image" | "voice" | "video">;
 
 interface FailedMediaPayload {
   content: string;
@@ -64,7 +64,8 @@ export function MessageInput({
 
   const submit = async (retryPayload?: FailedMediaPayload) => {
     const content = retryPayload?.content ?? text.trim();
-    if (!content || sending || uploading || !convId) return;
+    // 媒体消息（带 type 重发载荷）允许空文案（气泡只渲染媒体本体）；纯文本仍需非空
+    if ((!content && !retryPayload?.type) || sending || uploading || !convId) return;
     setSending(true);
     setError(null);
     const idempotencyKey = retryPayload?.idempotencyKey ?? idempotencyKeyRef.current ?? newKey();
@@ -90,17 +91,25 @@ export function MessageInput({
     }
   };
 
-  const sendImageFile = async (file: File) => {
+  /** 发送图片/视频：按 MIME 分流媒体 kind（同一入口，accept=image/*,video/*） */
+  const sendMediaFile = async (file: File) => {
     if (sending || uploading || voice.recording || !convId) return;
+    const { error, kind } = validateMediaFile(file);
+    if (error) {
+      setError(error);
+      return;
+    }
     setUploading(true);
     setError(null);
     setFailedFile(null);
     try {
-      const uploaded = await uploadMediaFile(file, "image");
-      await submit({ content: "图片", type: "image", idempotencyKey: newKey(), mediaId: uploaded.media_id });
+      const uploaded = await uploadMediaFile(file, kind);
+      // 媒体消息不携带占位文案（气泡只渲染媒体本体；「图片/视频」二字由
+      // 会话列表/引用预览按 type 兜底显示），content 保持空串。
+      await submit({ content: "", type: kind, idempotencyKey: newKey(), mediaId: uploaded.media_id });
     } catch (err) {
       setFailedFile(file);
-      setError(err instanceof Error ? err.message : "图片发送失败");
+      setError(err instanceof Error ? err.message : "媒体发送失败");
     } finally {
       setUploading(false);
     }
@@ -114,7 +123,8 @@ export function MessageInput({
     try {
       const file = new File([rec.blob], "voice.webm", { type: rec.mimeType || "audio/webm" });
       const uploaded = await uploadMediaFile(file, "voice");
-      await submit({ content: "语音", type: "voice", idempotencyKey: newKey(), mediaId: uploaded.media_id });
+      // 同图片：语音消息 content 空串，「语音」二字由列表预览兜底。
+      await submit({ content: "", type: "voice", idempotencyKey: newKey(), mediaId: uploaded.media_id });
     } catch (err) {
       setFailedVoice({ blob: rec.blob, mimeType: rec.mimeType, duration: rec.duration });
       setError(err instanceof Error ? err.message : "语音发送失败");
@@ -137,10 +147,19 @@ export function MessageInput({
     await sendVoice({ blob: fv.blob, mimeType: fv.mimeType, duration: fv.duration });
   };
 
+  const MEDIA_TYPE_LABEL: Record<string, string> = {
+    image: "图片",
+    voice: "语音",
+    file: "文件",
+    emoji: "表情",
+    video: "视频",
+    system: "系统消息",
+  };
+
   const quotePreview = quote
     ? quote.type === "text"
       ? quote.content || "…"
-      : `[${quote.type} 消息]`
+      : `[${MEDIA_TYPE_LABEL[quote.type] ?? "消息"}]`
     : null;
 
   return (
@@ -181,8 +200,8 @@ export function MessageInput({
         const file = failedFile;
         setFailedFile(null);
         setError(null);
-        void sendImageFile(file);
-      }} disabled={uploading}>重试图片</button>}
+        void sendMediaFile(file);
+      }} disabled={uploading}>重试媒体</button>}
       {failedVoice && <button type="button" className="msg-action-btn" onClick={() => void retryVoice()} disabled={uploading}>重试语音</button>}
       {voice.error && !error && (
         <div className="composer-error" role="alert">
@@ -218,13 +237,13 @@ export function MessageInput({
           </>
         ) : (
           <>
-            <label className="composer-tool-btn" aria-label="发送图片">
+            <label className="composer-tool-btn" aria-label="发送图片或视频">
               <IconImage width={18} height={18} />
-              <input type="file" accept="image/*" hidden onChange={async (e) => {
+              <input type="file" accept="image/*,video/*" hidden onChange={async (e) => {
                 const file = e.target.files?.[0];
                 e.target.value = "";
                 if (!file || sending || uploading || !convId) return;
-                await sendImageFile(file);
+                await sendMediaFile(file);
               }} />
             </label>
             {isVoiceRecordingSupported() && (

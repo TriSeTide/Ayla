@@ -40,6 +40,50 @@ def make_jpeg_bytes(width=32, height=32):
     return buf.getvalue()
 
 
+def make_bmp_bytes(width=32, height=32):
+    """生成一张真实 BMP 图片字节（Pillow 原生支持读写）。"""
+    img = Image.new("RGB", (width, height), (30, 160, 90))
+    buf = io.BytesIO()
+    img.save(buf, format="BMP")
+    return buf.getvalue()
+
+
+def make_tiff_bytes(width=32, height=32):
+    """生成一张真实 TIFF 图片字节（Pillow 原生支持读写）。"""
+    img = Image.new("RGB", (width, height), (120, 30, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="TIFF")
+    return buf.getvalue()
+
+
+def make_avif_bytes(brand=b"avif"):
+    """构造最小 ISOBMFF 静态图字节（ftyp box + mdat 占位），模拟 AVIF/HEIC 文件头。"""
+    ftyp = b"\x00\x00\x00\x18ftyp" + brand + b"\x00\x00\x00\x00"
+    mdat = b"\x00\x00\x00\x10mdat" + b"\x00" * 8
+    return ftyp + mdat
+
+
+def make_mp4_bytes(brand=b"isom"):
+    """构造最小 MP4/ISOBMFF 视频字节（ftyp box + mdat 占位）。"""
+    ftyp = b"\x00\x00\x00\x18ftyp" + brand + b"\x00\x00\x02\x00"
+    mdat = b"\x00\x00\x00\x10mdat" + b"\x00" * 8
+    return ftyp + mdat
+
+
+def make_webm_video_bytes():
+    """构造最小 WebM/EBML 视频字节（EBML 头占位）。"""
+    return b"\x1a\x45\xdf\xa3" + b"\x01\x00\x00\x80" + b"\x42\x82\x88webm" + b"\x00" * 16
+
+
+def make_svg_bytes():
+    """生成最小 SVG 文本字节。"""
+    return (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">'
+        b'<rect width="32" height="32" fill="#9dbfe6"/></svg>'
+    )
+
+
 def make_wav_bytes(duration=1.0, rate=8000):
     """生成 PCM16 WAV 字节（用于波形测试）。"""
     n_frames = int(rate * duration)

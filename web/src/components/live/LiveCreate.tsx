@@ -7,7 +7,7 @@
  */
 import { useRef, useState } from "react";
 import * as liveApi from "../../api/live";
-import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../../api/media";
+import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../../api/media";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
@@ -115,11 +115,11 @@ export function LiveCreate({
             ref={coverInputRef}
             className="visually-hidden"
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
+            accept="image/*"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (!file) return;
-              const invalid = validateAvatarFile(file);
+              const invalid = validateImageFile(file);
               if (invalid) {
                 setError(invalid);
                 return;

@@ -83,16 +83,28 @@ function displayName(nickname?: string | null, username?: string | null): string
   return nickname || username || "";
 }
 
+/** 非文本消息类型 → 活跃度摘要占位（与会话列表 TYPE_PLACEHOLDER 一致） */
+const MEDIA_EVENT_PLACEHOLDER: Record<string, string> = {
+  image: "[图片]",
+  voice: "[语音]",
+  file: "[文件]",
+  emoji: "[表情]",
+  video: "[视频]",
+  system: "[系统消息]",
+};
+
 /** 消息事件（最后一条消息，含自己的；不依赖已读） */
 function messageEvent(
-  lastMessage: { sender_name?: string; content?: string; created_at?: string | null } | null | undefined,
+  lastMessage: { sender_name?: string; content?: string; type?: string; created_at?: string | null } | null | undefined,
   now: number,
 ): NewEvent | null {
   if (!lastMessage || !lastMessage.created_at) return null;
   const at = toMs(lastMessage.created_at);
   if (!isRecent(at, now)) return null;
   const who = lastMessage.sender_name || "";
-  const content = lastMessage.content || "";
+  // 媒体消息 content 为空串（气泡不携带占位文案）→ 按类型显示占位
+  const content = lastMessage.content
+    || MEDIA_EVENT_PLACEHOLDER[lastMessage.type ?? ""] || "";
   return { kind: "message", at, text: `${who}：${content}` };
 }
 
@@ -141,7 +153,7 @@ export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
  */
 export function useGroupActivityMap(): (
   groupId: string,
-  lastMessage?: { sender_name?: string; content?: string; created_at?: string | null } | null,
+  lastMessage?: { sender_name?: string; content?: string; type?: string; created_at?: string | null } | null,
 ) => GroupActivity {
   const liveChannels = useLiveStore((s) => s.channels);
   const voiceChannels = useVoiceStore((s) => s.channels);

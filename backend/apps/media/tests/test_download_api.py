@@ -16,7 +16,9 @@ class TestDownloadAuthz:
         resp = client.get(f"/api/v1/media/{media_id}/content")
         assert resp.status_code == 200
         assert resp["Content-Type"] == "image/png"
-        assert resp["Cache-Control"] == "private, no-store"
+        # fa55964 缓存优化后的契约：私密媒体 1 小时私有缓存 + nosniff（不进共享缓存）
+        assert resp["Cache-Control"] == "private, max-age=3600"
+        assert resp["X-Content-Type-Options"] == "nosniff"
 
     def test_non_member_gets_403(self, auth_client, user_factory):
         owner, owner_user = auth_client(username="dl_o")

@@ -1068,6 +1068,64 @@
   background: var(--glass-bg);
 }
 
+/* 图片/表情点击打开原图查看器（QQ 式）：按钮 reset，zoom-in 光标提示可点 */
+.media-frame-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
+.media-frame-open:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-input);
+}
+
+/* 视频消息：首帧铺满预留框 + 居中播放键徽标 */
+.media-frame-video .media-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none; /* 气泡内禁交互，完整播放进查看器 */
+}
+
+.video-play-badge {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(8px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  color: var(--indigo-700);
+  box-shadow: var(--card-shadow);
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.media-frame-open:hover .video-play-badge {
+  transform: scale(1.06);
+  box-shadow: var(--glow-shadow);
+}
+
+.video-load-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: var(--sp-3);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .media-frame-image img.media-image,
 .media-frame-image img.media-emoji {
   display: block;
@@ -1116,13 +1174,19 @@
   overflow: hidden;
 }
 
-/* 语音：波形 + 时长胶囊 */
+/* 语音：波形 + 时长胶囊 + 可拖进度条（QQ 式，全局同时只播一条） */
 .voice-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 240px;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.voice-card-main {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  min-width: 220px;
-  padding: var(--sp-2) var(--sp-3);
 }
 
 .voice-play {
@@ -1155,6 +1219,197 @@
   font-size: 12px;
   letter-spacing: 0.3px;
   color: var(--text-secondary);
+}
+
+/* 进度行：range 轨道 + 当前时间（Space Grotesk 数字） */
+.voice-seek-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.voice-seek {
+  flex: 1;
+  min-width: 0;
+  height: 14px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.voice-seek::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(157, 191, 230, 0.45);
+}
+
+.voice-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: var(--radius-pill);
+  background: var(--indigo-700);
+  border: none;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.voice-seek:hover::-webkit-slider-thumb,
+.voice-seek:focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--glow-shadow);
+}
+
+.voice-seek::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(157, 191, 230, 0.45);
+}
+
+.voice-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--indigo-700);
+  border: none;
+}
+
+.voice-seek:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-pill);
+}
+
+.voice-seek:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.voice-cur {
+  flex-shrink: 0;
+  min-width: 34px;
+  text-align: right;
+  font-family: var(--font-utility);
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary);
+}
+
+/* 图片查看器（QQ 式点击打开原图）：压暗遮罩 + 居中原图 + 玻璃操作条 */
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90; /* 弹窗/抽屉(70-80)之上，顶栏常驻层(50)之上 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  background: var(--overlay-dim-strong);
+  backdrop-filter: blur(8px);
+  animation: viewer-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes viewer-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-viewer-stage {
+  max-width: min(92vw, 1200px);
+  max-height: 82vh;
+  display: grid;
+  place-items: center;
+}
+
+.image-viewer-img {
+  max-width: min(92vw, 1200px);
+  max-height: 82vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.image-viewer-fallback {
+  padding: var(--sp-6) var(--sp-8);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+/* 查看器内视频：完整 controls 播放 */
+.image-viewer-video {
+  max-width: min(92vw, 1200px);
+  max-height: 82vh;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.image-viewer-video-skeleton {
+  display: block;
+  width: min(80vw, 640px);
+  height: min(45vw, 360px);
+}
+
+.image-viewer-close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  color: var(--indigo-700);
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.image-viewer-close:hover,
+.image-viewer-close:focus-visible {
+  outline: none;
+  box-shadow: var(--glow-shadow);
+}
+
+.image-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+
+.image-viewer-save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.image-viewer-save-error {
+  font-size: 12px;
+  color: var(--destructive);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-viewer {
+    animation: none;
+  }
 }
 
 /* 文件：图标 + 文件名 + 大小 + 下载 */

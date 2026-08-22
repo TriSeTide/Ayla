@@ -28,11 +28,13 @@ class MediaObject(models.Model):
     KIND_VOICE = "voice"
     KIND_FILE = "file"
     KIND_EMOJI = "emoji"
+    KIND_VIDEO = "video"
     KIND_CHOICES = [
         (KIND_IMAGE, "图片"),
         (KIND_VOICE, "语音"),
         (KIND_FILE, "文件"),
         (KIND_EMOJI, "表情"),
+        (KIND_VIDEO, "视频"),
     ]
 
     STATUS_PROCESSING = "processing"

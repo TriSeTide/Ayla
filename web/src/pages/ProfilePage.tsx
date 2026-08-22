@@ -8,7 +8,7 @@ import { updateProfile } from "../api/auth";
 import * as boardgameApi from "../api/boardgame";
 import { ApiError } from "../api/client";
 import * as liveApi from "../api/live";
-import { mediaContentUrl, uploadMediaFile, validateAvatarFile } from "../api/media";
+import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../api/media";
 import * as postsApi from "../api/posts";
 import type { GameRoom, LiveChannelDescriptor, Post } from "../api/types";
 import { Avatar } from "../components/Avatar";
@@ -60,7 +60,7 @@ export function ProfilePage() {
 
   const pickAvatar = (file: File | undefined) => {
     if (!file) return;
-    const invalid = validateAvatarFile(file);
+    const invalid = validateImageFile(file);
     if (invalid) {
       setAvatarError(invalid);
       return;
@@ -169,7 +169,7 @@ export function ProfilePage() {
                 更换头像
                 <input
                   type="file"
-                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  accept="image/*"
                   hidden
                   onChange={(e) => {
                     pickAvatar(e.target.files?.[0]);

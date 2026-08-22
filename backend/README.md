@@ -257,8 +257,9 @@ python -m pytest
 | `S3_BUCKET` | `elysia-media` | 媒体桶（首传时 create_bucket 幂等） |
 | `S3_REGION` | `us-east-1` | 区域 |
 | `S3_PUBLIC` | false | 对对象加 public-read ACL（默认 false：私密媒体禁止进共享缓存） |
-| `MEDIA_MAX_IMAGE_BYTES` | 10485760 | 图片大小上限（10MB） |
-| `MEDIA_MAX_VOICE_BYTES` | 31457280 | 语音上限（30MB） |
+| `MEDIA_MAX_IMAGE_BYTES` | 0 | 图片大小上限（字节）；0 = 不设上限，可按需配置收紧 |
+| `MEDIA_MAX_VOICE_BYTES` | 0 | 语音上限（字节）；0 = 不设上限，可按需配置收紧 |
+| `MEDIA_MAX_VIDEO_BYTES` | 0 | 视频上限（字节）；0 = 不设上限，可按需配置收紧 |
 | `MEDIA_MAX_FILE_BYTES` | 52428800 | 文件上限（50MB） |
 | `MEDIA_MAX_EMOJI_BYTES` | 5242880 | 表情上限（5MB） |
 | `MEDIA_TMP_TTL_SECONDS` | 600 | 上传临时会话 TTL（秒） |
@@ -518,7 +519,18 @@ ffmpeg -re -i <源> -c copy -f flv rtmp://127.0.0.1:1935/live/{stream_key}
 - **派生尽力而为**：缩略图/波形在 `:complete` 同一请求内生成，失败只记 warning、媒体仍 ready；
   波形仅支持 WAV（PCM16）；其他语音格式可上传但无波形。
 - **文件类型不做魔数强校验**：`kind=file` 任意 allowlist 内 MIME 均可（至少要有内容）；
-  image/emoji 必须有位图魔数（PNG/JPEG/GIF/WebP）；voice 除 WAV/MP3/Ogg 外交由 MIME 判断。
+  image/emoji 必须有位图魔数（PNG/JPEG/GIF/WebP/BMP/TIFF/ICO、AVIF/HEIC/HEIF 的
+  ISOBMFF `ftyp` 头、SVG XML 文本）；video 必须有 MP4/MOV/M4V/3GP 的 `ftyp` 视频品牌头
+  或 WebM/MKV 的 EBML 头（与 voice 的 EBML 同魔数，按 kind 各自放行）；
+  voice 除 WAV/MP3/Ogg 外交由 MIME 判断。视频不做首帧派生（无 ffmpeg），前端以
+  `<video preload=metadata>` 展示首帧。
+- **大小上限策略**：图片/语音/视频默认 `MEDIA_MAX_*_BYTES=0` 即不设上限（产品要求）；
+  `file/emoji` 仍保留上限。同时设置 `DATA_UPLOAD_MAX_MEMORY_SIZE=None` 解除 Django
+  对 `request.body` 的默认 2.5MB 限制，否则大文件 PUT 会直接 400。若部署在 Nginx 等
+  反代之后，还需同步调大其 `client_max_body_size`。
+- **SVG 安全**：SVG 是可执行文档，content 端点对其追加
+  `Content-Security-Policy: default-src 'none'; sandbox` + `X-Content-Type-Options: nosniff`
+  （全部媒体响应均带 nosniff），防止存储型 XSS；Pillow 不支持 SVG 缩略图（派生失败仅 warning）。
 - **去重复用 media_id**：同 `content_hash` 复用既有 media_id（不改变 owner 语义），首次上传方持原对象；
 - **`media_id:save` 为预留通道**：爱莉媒体投影（应用只渲染/投影，不生成爱莉第一人称内容，AGENTS.md §4.1）本期 501；
 - **清理为手动命令**：`manage.py cleanup_media` 清理过期会话与孤儿临时对象，未接入定时任务；
