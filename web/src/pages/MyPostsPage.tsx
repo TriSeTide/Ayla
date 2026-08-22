@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
+import { IconBack } from "../components/icons";
 import { PostCard } from "../components/posts/PostCard";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { NarrowTopBar } from "../layout/NarrowTopBar";
@@ -65,7 +66,9 @@ export function MyPostsPage() {
     }}>
       {isNarrow && <NarrowTopBar />}
       <header className="my-posts-head">
-        <button type="button" className="btn btn-ghost" onClick={() => navigate("/profile")}>返回个人页</button>
+        <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回">
+          <IconBack width={20} height={20} />
+        </button>
         <h1 className="placeholder-title">我的帖子</h1>
       </header>
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}

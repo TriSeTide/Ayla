@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MyPostsPage } from "../pages/MyPostsPage";
 import * as postsApi from "../api/posts";
@@ -40,5 +40,20 @@ describe("MyPostsPage", () => {
     vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
     render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
     expect(await screen.findByText("还没有帖子")).toBeInTheDocument();
+  });
+
+  it("顶部返回键点击回到上一页（navigate(-1)）", async () => {
+    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
+    render(
+      <MemoryRouter initialEntries={["/posts", "/posts/mine"]}>
+        <Routes>
+          <Route path="/posts" element={<div>帖子主页占位</div>} />
+          <Route path="/posts/mine" element={<MyPostsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("还没有帖子");
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(await screen.findByText("帖子主页占位")).toBeInTheDocument();
   });
 });

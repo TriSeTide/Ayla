@@ -410,6 +410,15 @@
   border-bottom: 1px solid var(--glass-border);
 }
 
+.my-posts-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
 .posts-feed {
   display: flex;
   flex-direction: column;
@@ -424,7 +433,8 @@
 }
 
 @media (min-width: 769px) {
-  .posts-hub-head {
+  .posts-hub-head,
+  .my-posts-head {
     max-width: 680px;
     width: 100%;
     margin: 0 auto;
