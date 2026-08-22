@@ -1,0 +1,17 @@
+# 环境与密钥（本地部署专用，勿入库）
+.env
+.env.*
+*.bak-*
+elysia_credential.json
+
+# 部署临时产物
+deploy_build*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+node_modules/
+dist/
