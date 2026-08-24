@@ -384,9 +384,31 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - **输入区缩略图条**（`.composer-picked`，`role=group aria-label=待发送媒体`）：输入框上方横向 flex wrap，`gap 8px`；缩略 44×44px（视频 58px 宽）`--radius-sm` 圆角 + 1px `--glass-border` + `--glass-bg` 底，`object-fit: cover` 预览本地 objectURL（**未上传**）；视频叠加 18px 玻璃播放徽标；右上 `-5px` 处 18px 圆形移除钮（hover 转 `--destructive` 白字）。**小尺寸不挤压输入框**；移除即 revoke objectURL。
 - **混排气泡**（`.mixed-flow`）：flex wrap + `gap 8px`；文本段 `.mixed-text` 流式排列（`max-width:100%`，`white-space:pre-wrap`）；媒体段 `.mixed-img` 180×180px 方块（`--radius-input` 圆角、`cover` 裁剪、`cursor:zoom-in`）多图自动换行成网格；视频段复用 `.media-frame-video` 首帧+播放徽标（240px 宽 4:3）。乐观消息（未上传）媒体段用本地 objectURL 渲染，无 descriptor 不报错。
-- **乐观发送状态**（`.msg-send-state`，仅自己的气泡）：气泡左上角上方（`position:absolute; bottom:calc(100%+6px)`）——发送中为 14px indigo 旋转 spinner（`prefers-reduced-motion` 停止旋转）；失败态 `--destructive`「发送失败」+ 玻璃小按钮「重试/删除」（复用 `.msg-action-btn`，11px 图标+文字，hover `--glow-shadow`）。重试复用同一幂等键重新上传发送。
+- **乐观发送状态**（`.msg-send-state`，仅自己的气泡）：与气泡同一行、位于气泡左侧垂直居中（`position:absolute; right:calc(100%+8px); top:50%` 反向偏移）——上传中显示 `.msg-send-progress`「上传中 n%」（`--text-secondary` 12px）+ 玻璃小按钮「取消」；纯文本发送中为 14px indigo 旋转 spinner（`prefers-reduced-motion` 停止旋转）；失败态 `--destructive`「发送失败」+ 玻璃小按钮「重试/删除」（复用 `.msg-action-btn`，11px 图标+文字，hover `--glow-shadow`）。重试复用同一幂等键重新上传发送。
 - **查看器多图切换**（`ImageViewer`）：同消息的 image/video 段合成条目列表，`←/→` 键或左右玻璃圆形 nav 钮（44px，`--glass-bg-strong` blur 12px，`top:50%` 垂直居中，disabled 时 opacity 0.35）切换；底部玻璃胶囊加计数 `1/2`（`--font-utility` 12px `--text-secondary`）；对话框 `aria-label="图片查看：n/总数"`（单图为 `图片查看：<alt>`）。本地乐观预览（未上传）只展示、保存钮显示「发送后可保存」。
 - **会话列表/引用/活跃度摘要**：混排消息按段生成占位（text 拼原文、image→`[图片]`、video→`[视频]`），与单媒体 `[图片]` 占位及撤回 `[已撤回]` 共用同一预览语义；后端 `last_message.preview` 为权威，WS `message.new` 后前端按 segments 兜底生成。
+
+### 12.17 大文件流式上传与取消（M7.1）
+
+> 上传链路对齐 QQ/微信语义「临时存储 + 进度条 + 可取消」：文件先传服务端临时存储（三步上传会话），传完才真正发消息；全程有进度、可中止；大文件不整块驻留内存。
+
+- **流式写入（防 OOM 卡死）**：后端 `PUT /media/uploads/{id}` 改为 `request.stream` 按 1 MiB 分块读入临时文件（边读边校验累计大小，超限立即 413 中断），再经 `ObjectStorage.put_stream`（S3 `upload_fileobj` 分块上传）落对象存储——1GB+ 文件不再整体读入内存（旧实现 `request.body` 整块 bytes 曾导致进程 OOM、页面报错）。
+- **进度与取消**：前端二进制段改 XHR（`upload.onprogress` 实时字节进度；fetch 无上传进度）；`AbortSignal` 中断 → `xhr.abort()` 并 fire-and-forget 调幂等 `DELETE /media/uploads/{id}` 清理临时对象与会话（非本人 403，重复调用 204）。多文件并发上传时按真实字节数聚合为单一百分比（封顶 99%，保留 100 给发送阶段）写入 store，气泡左侧显示进度与取消钮。
+- **本地预览生命周期**：乐观气泡的 objectURL 由渲染组件在卸载时统一 revoke（`useEffect` 空 deps cleanup）；发送/重试成功路径**不提前 revoke**（避免替换渲染前的竞态空白图）；重试因旧气泡卸载 revoke 而重新 `createObjectURL`。
+- **取消语义**：取消 = 放弃该次发送（abort 上传 + 删除乐观气泡 + 服务端清理），与失败态（保留气泡可重试/删除）区分。
+
+### 12.18 预签名直传与播放直连（M7.2，数据面旁路应用服务器）
+
+> 大文件上传/播放的字节流**完全不再经过 Django 数据面**。背景：runserver 被 daphne 接管后走 ASGI，`ASGIHandler.read_body()` 会把整个请求体先读进内存才开始执行视图——3GB 视频经 Django 上传时进程内存暴涨 3GB+，Windows 动态建 C 盘临时页文件承接（表现为 C 盘两段式掉空间又恢复）；且 Channels 同步视图 thread_sensitive 串行执行，complete 占线程期间所有请求（含首帧加载）排队。根治 = QQ/微信同款架构：应用服务器只做信令与鉴权决策，字节流浏览器与对象存储点对点。
+
+- **预签名直传上传**：`POST /media/uploads`（建会话）响应新增 `presigned_url`——`generate_presigned_url("put_object")` 签发的临时对象 PUT 地址（TTL ≥ 600s）。前端 XHR 直打该 URL（进度/取消语义不变），`:complete` 改轻校验：`stat` 对齐 expected_size → Range 读头部 64B 魔数嗅探（保留安全校验）→ ETag(MD5) 作 content_hash → `copy_object` 服务端复制落正式 key → 删 tmp。旧 `PUT /media/uploads/{id}` 端点保留兼容（流式写 MEDIA_TMP_DIR 临时文件再 put_stream），前端默认不走。
+  - 坑：`generate_presigned_url` 的 Params 混入 ACL 等 extra args 会把对应头纳入签名，直传请求必须原样携带否则 S3 报 "headers not signed"；直连请求也绝不可附加 Authorization 头（同理 400）。content_hash 契约由 sha256 更新为 ETag MD5 内容指纹（用途=内容寻址去重；完整性强校验由客户端负责）。
+- **播放直连**：`POST /media/{id}:sign` 返回对象存储 `presign_get` URL（TTL 600s，签发前完成 can_access_media 鉴权）。`<img>/<video>` 直连拉流，Range 请求（preload=metadata 的 `bytes=0-`、拖动 seek、moov 尾部探测的 `-suffix`）由对象存储原生处理——播放流量不占用 Django/Channels 的同步视图串行队列。
+  - content 端点保留双通道鉴权（Bearer 登录 or 签名票据）与流式 Range 转发（`open_range_stream` 支持 start-end/start-/-suffix 三形态分块转发，任意大文件任意区间不整体进内存），作为兼容通道。
+  - dev 环境 presigned URL 经 Vite `/minio` 同源代理（rewrite 剥前缀 + changeOrigin），规避跨源与 Private Network Access 策略差异；生产经反代同理（host 可用 MINIO_PUBLIC_ENDPOINT 覆盖，待实现）。
+- **查看器 Portal**：ImageViewer 以 `createPortal(document.body)` 挂载——消息气泡的 backdrop-filter（毛玻璃）会创建 containing block，把 position:fixed 的查看器困在气泡内。
+- **临时文件位置**：兼容通道的服务端中转临时文件走 `MEDIA_TMP_DIR`（默认 `backend/runtime/media_tmp`，数据盘），禁止回落系统 Temp。
+- **已知限制**：mp4 moov 尾置时首帧需几次 Range 往返（每次 ~0.15s）；极致优化可后续加 ffmpeg faststart 转封装或服务端海报帧派生（未做）。
 
 ---
 

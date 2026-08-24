@@ -10,6 +10,7 @@
   - `media/{kind}/{media_id}/waveform`：波形派生产物。
   只存对象存储 key，绝对路径/宿主机路径永不入库、永不外发。
 """
+import io
 import logging
 
 from django.conf import settings
@@ -35,6 +36,24 @@ class ObjectStorage:
     """MinIO/S3 兼容对象存储的同步薄封装接口。"""
 
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        raise NotImplementedError
+
+    def put_stream(self, key: str, fileobj, content_type: str = "application/octet-stream") -> None:
+        """流式写入：从 fileobj（支持 read() 的二进制对象）分块上传，避免整体进内存。"""
+        raise NotImplementedError
+
+    def download_to(self, key, fileobj) -> int:
+        """把对象流式下载写入 fileobj（支持 write() 的二进制对象），返回字节数。
+
+        大文件不整体读入内存；调用方基于本地临时文件做哈希/嗅探/再上传。
+        """
+        raise NotImplementedError
+
+    def open_stream(self, key):
+        """打开对象的只读流（支持 read(n) 的 file-like）；不存在抛 KeyError。
+
+        供 HTTP 响应分块转发（StreamingHttpResponse），下载不整体进内存。
+        """
         raise NotImplementedError
 
     def get(self, key: str) -> bytes:
@@ -90,6 +109,44 @@ class S3Storage(ObjectStorage):
             ContentType=content_type, **self._extra_args,
         )
 
+    def put_stream(self, key, fileobj, content_type="application/octet-stream"):
+        # upload_fileobj 分块流式上传（不整体读入内存）；fileobj 需支持 read()，
+        # 超大文件不会把整个对象驻留在 boto3 内存中
+        self._client.upload_fileobj(
+            fileobj, self._bucket, key,
+            ExtraArgs={"ContentType": content_type, **self._extra_args},
+        )
+
+    def download_to(self, key, fileobj) -> int:
+        resp = self._client.get_object(Bucket=self._bucket, Key=key)
+        total = 0
+        try:
+            for chunk in resp["Body"].iter_chunks(chunk_size=1024 * 1024):
+                fileobj.write(chunk)
+                total += len(chunk)
+        finally:
+            resp["Body"].close()
+        return total
+
+    def open_stream(self, key):
+        # S3 StreamingBody：支持 read(n) 分块读取；调用方负责 close
+        resp = self._client.get_object(Bucket=self._bucket, Key=key)
+        return resp["Body"]
+
+    def open_range_stream(self, key, range_header):
+        """按 HTTP Range 头打开对象的分块流（原样透传给对象存储）。
+
+        支持 bytes=start-end / bytes=start- / bytes=-suffix 全部形态；
+        返回 (streaming_body, content_length, content_range)。非法区间由
+        对象存储返回错误，调用方映射为 416。
+        """
+        resp = self._client.get_object(Bucket=self._bucket, Key=key, Range=range_header)
+        return (
+            resp["Body"],
+            int(resp["ContentLength"]),
+            resp.get("ContentRange", ""),
+        )
+
     def get(self, key):
         resp = self._client.get_object(Bucket=self._bucket, Key=key)
         return resp["Body"].read()
@@ -103,6 +160,53 @@ class S3Storage(ObjectStorage):
     def head(self, key):
         resp = self._client.head_object(Bucket=self._bucket, Key=key)
         return resp["ContentLength"]
+
+    def stat(self, key):
+        """返回对象元信息 {"size", "etag", "content_type"}；不存在抛 ClientError。"""
+        resp = self._client.head_object(Bucket=self._bucket, Key=key)
+        etag = (resp.get("ETag") or "").strip('"')
+        return {
+            "size": resp["ContentLength"],
+            "etag": etag,
+            "content_type": resp.get("ContentType", ""),
+        }
+
+    def copy(self, src_key, dst_key, content_type="application/octet-stream"):
+        """服务端对象复制（数据不经过应用服务器）。"""
+        self._client.copy_object(
+            Bucket=self._bucket, Key=dst_key,
+            CopySource={"Bucket": self._bucket, "Key": src_key},
+            ContentType=content_type, **self._extra_args,
+        )
+
+    def presign_put(self, key, content_type, expires_seconds):
+        """生成直传用的预签名 PUT URL（浏览器绕过应用服务器直传对象存储）。
+
+        注意：签名参数只含 Bucket/Key/ContentType——任何进入签名的额外头
+        （如 ACL→x-amz-acl）都要求直传请求原样携带该头，浏览器侧容易遗漏，
+        触发 S3 "headers present in the request which were not signed" 400。
+        """
+        return self._client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": self._bucket, "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=expires_seconds,
+        )
+
+    def presign_get(self, key, expires_seconds):
+        """生成播放/下载用的预签名 GET URL。
+
+        <img>/<video> 直连对象存储后，Range 请求（preload=metadata、拖动 seek）
+        由对象存储原生处理——播放流量完全不经过应用服务器（与直传对称，
+        应用服务器只承担信令与鉴权决策）。
+        """
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._bucket, "Key": key},
+            ExpiresIn=expires_seconds,
+        )
 
     def exists(self, key):
         try:
@@ -129,6 +233,41 @@ class FakeStorage(ObjectStorage):
         self._data[key] = data
         self._meta[key] = {"content_type": content_type}
 
+    def put_stream(self, key, fileobj, content_type="application/octet-stream"):
+        fileobj.seek(0)
+        self._data[key] = fileobj.read()
+        self._meta[key] = {"content_type": content_type}
+
+    def download_to(self, key, fileobj) -> int:
+        data = self.get(key)
+        fileobj.write(data)
+        return len(data)
+
+    def open_stream(self, key):
+        return io.BytesIO(self.get(key))
+
+    def open_range_stream(self, key, range_header):
+        data = self.get(key)
+        spec = range_header.removeprefix("bytes=").strip()
+        if "-" not in spec:
+            raise ValueError(f"invalid range: {range_header!r}")
+        start_s, end_s = spec.split("-", 1)
+        if start_s:
+            start = int(start_s)
+            end = int(end_s) if end_s else len(data) - 1
+            if start < 0 or start > end or end >= len(data):
+                raise ValueError(f"range out of bounds: {range_header!r}")
+            chunk = data[start : end + 1]
+            content_range = f"bytes {start}-{end}/{len(data)}"
+        else:
+            n = int(end_s) if end_s else 0
+            if n <= 0 or n > len(data):
+                raise ValueError(f"invalid suffix range: {range_header!r}")
+            chunk = data[-n:]
+            content_range = f"bytes {len(data)-n}-{len(data)-1}/{len(data)}"
+        body = io.BytesIO(chunk)
+        return body, len(chunk), content_range
+
     def get(self, key):
         if key not in self._data:
             raise KeyError(key)
@@ -140,6 +279,31 @@ class FakeStorage(ObjectStorage):
 
     def head(self, key):
         return len(self.get(key))
+
+    def stat(self, key):
+        data = self.get(key)
+        return {
+            "size": len(data),
+            "etag": __import__("hashlib").md5(data).hexdigest(),
+            "content_type": self._meta.get(key, {}).get("content_type", ""),
+        }
+
+    def copy(self, src_key, dst_key, content_type="application/octet-stream"):
+        data = self.get(src_key)
+        meta = self._meta.get(src_key, {}).get("content_type", content_type)
+        self._data[dst_key] = data
+        self._meta[dst_key] = {"content_type": meta}
+
+    def presign_put(self, key, content_type, expires_seconds):
+        # 测试环境无真实对象存储：返回可识别的伪 URL（契约测试只断言形态）
+        from urllib.parse import quote
+
+        return f"http://fake-storage/{quote(key)}?X-Amz-Expires={expires_seconds}&ct={quote(content_type)}"
+
+    def presign_get(self, key, expires_seconds):
+        from urllib.parse import quote
+
+        return f"http://fake-storage/{quote(key)}?X-Amz-Expires={expires_seconds}&mode=get"
 
     def exists(self, key):
         return key in self._data

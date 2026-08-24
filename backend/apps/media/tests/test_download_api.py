@@ -88,7 +88,31 @@ class TestRangeSupport:
         )
         assert resp.status_code == 206
         assert resp["Content-Range"].startswith("bytes 0-99/")
-        assert len(resp.content) == 100
+        # Range 响应为流式：拼接分块断言长度（大文件任意区间不整体进内存）
+        assert sum(len(c) for c in resp.streaming_content) == 100
+
+    def test_open_range_returns_206(self, auth_client):
+        """bytes=start-（浏览器 preload=metadata 常用形态）→ 流式 206。"""
+        client, _ = auth_client(username="dl_rng3")
+        media_id, _ = upload_image(client)
+        resp = client.get(
+            f"/api/v1/media/{media_id}/content",
+            HTTP_RANGE="bytes=0-",
+        )
+        assert resp.status_code == 206
+        assert resp["Content-Range"].startswith("bytes 0-")
+
+    def test_suffix_range_returns_206(self, auth_client):
+        """bytes=-N（尾部 N 字节，moov 探测形态）→ 流式 206。"""
+        client, _ = auth_client(username="dl_rng4")
+        media_id, desc = upload_image(client)
+        total = desc["size"]
+        resp = client.get(
+            f"/api/v1/media/{media_id}/content",
+            HTTP_RANGE=f"bytes=-16",
+        )
+        assert resp.status_code == 206
+        assert resp["Content-Range"] == f"bytes {total-16}-{total-1}/{total}"
 
     def test_invalid_range_returns_416(self, auth_client):
         client, _ = auth_client(username="dl_rng2")

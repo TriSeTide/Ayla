@@ -34,11 +34,12 @@ class TestUploadClosedLoop:
         assert desc["mime_type"] == "image/png"
         # 缩略图派生存在
         assert desc["thumbnail"].startswith("/api/v1/media/")
-        # 原对象已入库，content_hash 为 sha256（M4-3 完整性契约）
+        # 原对象已入库，content_hash 为内容指纹（直传架构：单 PUT 对象 ETag = MD5；
+        # 用途是内容寻址去重，完整性强校验由客户端负责）
         obj = MediaObject.objects.get(media_id=media_id)
         assert obj.owner_id == user.id
         import hashlib
-        assert obj.content_hash == hashlib.sha256(make_png_bytes()).hexdigest()
+        assert obj.content_hash == hashlib.md5(make_png_bytes()).hexdigest()
 
     def test_complete_idempotent_same_media(self, auth_client):
         client, _ = auth_client(username="up_b")
@@ -319,3 +320,79 @@ class TestUploadAuthz:
             format="json",
         )
         assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+class TestUploadCancelAndStreaming:
+    """取消上传（DELETE /uploads/{id}）与流式写入契约。"""
+
+    def _make_session(self, client, kind="image", size=None, mime="image/png"):
+        data = make_png_bytes()
+        resp = client.post(
+            "/api/v1/media/uploads",
+            {"kind": kind, "expected_size": size or len(data), "mime_type": mime},
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        return resp.json()["upload_id"]
+
+    def test_cancel_removes_session_and_tmp(self, auth_client):
+        from apps.media.models import MediaUploadSession
+
+        client, _ = auth_client(username="up_cancel")
+        upload_id = self._make_session(client)
+        # 先传一部分二进制
+        data = make_png_bytes()
+        r = client.put(
+            f"/api/v1/media/uploads/{upload_id}", data=data, content_type="application/octet-stream"
+        )
+        assert r.status_code == 200
+        assert MediaUploadSession.objects.filter(upload_id=upload_id).exists()
+        # 取消：204 幂等，会话删除
+        r = client.delete(f"/api/v1/media/uploads/{upload_id}")
+        assert r.status_code == 204
+        assert not MediaUploadSession.objects.filter(upload_id=upload_id).exists()
+        # 取消后再 complete → 404（upload_id 已失效）
+        r = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert r.status_code == 404
+        # 重复取消幂等 204
+        assert client.delete(f"/api/v1/media/uploads/{upload_id}").status_code == 204
+
+    def test_cancel_non_owner_forbidden(self, auth_client):
+        owner, _ = auth_client(username="up_cancel_owner")
+        other, _ = auth_client(username="up_cancel_other")
+        upload_id = self._make_session(owner)
+        r = other.delete(f"/api/v1/media/uploads/{upload_id}")
+        assert r.status_code == 403
+
+    def test_streaming_put_writes_tmp_object(self, auth_client):
+        """流式 PUT 后临时对象存在且可 complete（等价旧整块行为）。"""
+        client, _ = auth_client(username="up_stream")
+        data = make_png_bytes()
+        upload_id = self._make_session(client, size=len(data))
+        r = client.put(
+            f"/api/v1/media/uploads/{upload_id}", data=data, content_type="application/octet-stream"
+        )
+        assert r.status_code == 200
+        r = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+        assert r.status_code == 201
+        assert r.json()["descriptor"]["size"] == len(data)
+
+    def test_streaming_exceeds_max_aborts_with_413(self, auth_client, settings):
+        """流式读取中实际传输超限 → 立即 413 中断，不落对象存储。
+
+        注意：创建会话时 expected_size 已校验（超限直接 413），所以这里声明
+        expected_size=上限值（恰好不超限），PUT 实际传输更大 → 流式中途超限。
+        """
+        settings.MEDIA_MAX_FILE_BYTES = 64  # file 类上限调小
+        from apps.media import services, storage
+
+        client, _ = auth_client(username="up_stream_big")
+        upload_id = self._make_session(client, kind="file", size=64, mime="application/zip")
+        big = b"x" * 128
+        r = client.put(
+            f"/api/v1/media/uploads/{upload_id}", data=big, content_type="application/octet-stream"
+        )
+        assert r.status_code == 413
+        # 会话仍在（未 complete 未取消），但未落临时对象
+        assert not storage.get_storage().exists(storage.tmp_key(upload_id))

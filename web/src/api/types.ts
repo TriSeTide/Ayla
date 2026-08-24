@@ -179,6 +179,8 @@ export interface ChatMessage {
   pending?: boolean;
   /** 发送失败（气泡左上角失败态，可重试/删除） */
   sendFailed?: boolean;
+  /** 上传进度百分比 0-100（有本地媒体且上传未完成；null/undefined = 无媒体或已上传完成） */
+  uploadProgress?: number | null;
   /** 乐观消息幂等键（重试复用，服务端去重） */
   idempotencyKey?: string;
   /** 乐观消息的本地媒体预览（未上传时渲染本地；与 segments 媒体段按序对应） */

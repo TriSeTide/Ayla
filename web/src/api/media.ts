@@ -1,5 +1,5 @@
 /**
- * 媒体 URL、descriptor 与受控上传 API（M5-2.1）。
+ * 媒体 URL、descriptor 与受控上传 API（M5-2.1 / M7）。
  */
 import { API_PREFIX, ApiError, apiRequest } from "./client";
 import type { MediaDescriptor, MediaKind } from "./types";
@@ -10,6 +10,53 @@ function seg(mediaId: string): string {
 
 export function mediaContentUrl(mediaId: string): string {
   return `${API_PREFIX}/media/${seg(mediaId)}/content`;
+}
+
+/* ---------- 签名直连 URL（流式播放，替代全量 blob 下载） ---------- */
+
+interface SignedUrlEntry {
+  url: string;
+  /** 过期时间戳（秒）；到期前 60s 主动重签 */
+  expiresAt: number;
+  inflight?: Promise<string>;
+}
+
+// media_id → 签名 URL 缓存（模块级，页面生命周期内复用）
+const signedUrlCache = new Map<string, SignedUrlEntry>();
+
+/**
+ * 获取媒体内容的短时签名 URL（<img>/<video> 直接 src 引用）。
+ * 浏览器原生 Range 流式加载/播放：视频首帧秒出、拖动即点即播、
+ * 图片渐进解码——不再 apiRequestBlob 全量下载进内存。
+ * 缓存至到期前 60s，同一媒体并发请求只签发一次。
+ */
+export async function getSignedMediaUrl(mediaId: string): Promise<string> {
+  const cached = signedUrlCache.get(mediaId);
+  const now = Date.now() / 1000;
+  if (cached && cached.expiresAt - 60 > now) return cached.url;
+  if (cached?.inflight) return cached.inflight;
+
+  const inflight = apiRequest<{ url: string; expires_at: number }>(
+    `/media/${seg(mediaId)}:sign`,
+    { method: "POST" },
+  )
+    .then((r) => {
+      const url = toSameOriginMinio(r.url);
+      signedUrlCache.set(mediaId, { url, expiresAt: r.expires_at });
+      return url;
+    })
+    .catch((err) => {
+      // 失败清缓存允许下次重试
+      signedUrlCache.delete(mediaId);
+      throw err;
+    });
+  signedUrlCache.set(mediaId, { url: "", expiresAt: now, inflight });
+  return inflight;
+}
+
+/** 失效缓存（401/加载失败时调用，下次重签） */
+export function invalidateSignedMediaUrl(mediaId: string): void {
+  signedUrlCache.delete(mediaId);
 }
 
 export function resolveMediaPath(path: string | null | undefined): string | null {
@@ -41,9 +88,11 @@ interface UploadSession {
   /** 该 kind 大小上限（字节）；null = 不设上限（图片/语音默认放开） */
   max_bytes: number | null;
   expires_at: string;
+  /** 预签名直传 URL：浏览器 PUT 直打对象存储，数据面旁路应用服务器 */
+  presigned_url: string;
 }
 
-interface UploadCompleteResult {
+export interface UploadCompleteResult {
   media_id: string;
   descriptor: MediaDescriptor;
 }
@@ -120,8 +169,78 @@ export function validateImageFile(file: File): string | null {
   return null;
 }
 
-/** 三步受控上传；失败会抛出并由调用方保留原输入，不伪造消息发送成功。 */
-export async function uploadMediaFile(file: File, kind: MediaKind): Promise<UploadCompleteResult> {
+/** 上传进度回调数据（字节；total 可能为 0/不精确） */
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+}
+
+/**
+ * 预签名绝对 URL → 同源代理路径（/minio → MinIO，Vite/反代统一转发）：
+ * 数据面统一同源，规避浏览器跨源与专用网络访问策略差异。
+ * 签名基于对象存储 host 计算，代理 changeOrigin 保持 Host 一致，校验不受影响。
+ */
+function toSameOriginMinio(presignedUrl: string): string {
+  return presignedUrl.replace(/^https?:\/\/[^/]+/i, "/minio");
+}
+
+export interface UploadMediaOptions {
+  /** 上传进度回调（XHR upload.onprogress，按字节） */
+  onProgress?: (p: UploadProgress) => void;
+  /** 取消信号：abort 时中断 XHR 并通知后端删除临时存储（「取消」按钮） */
+  signal?: AbortSignal;
+}
+
+/**
+ * XHR 直传对象存储（PUT 预签名 URL）：数据面完全旁路应用服务器——
+ * 大文件不再被 ASGI 全量吞进内存、也不占用同步执行线程。
+ * 预签名 URL 自带鉴权，不可再附加 Authorization（会破坏签名）；
+ * signal 中断 → abort XHR，并 fire-and-forget 调 DELETE 清理临时对象与会话（幂等）。
+ */
+function putBinary(presignedUrl: string, uploadId: string, file: File, mime: string, opts: UploadMediaOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", toSameOriginMinio(presignedUrl));
+    xhr.setRequestHeader("Content-Type", mime);
+    const onAbort = () => xhr.abort();
+    const clean = () => opts.signal?.removeEventListener("abort", onAbort);
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && opts.onProgress) {
+        opts.onProgress({ loaded: e.loaded, total: e.total });
+      }
+    };
+    xhr.onload = () => {
+      clean();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new ApiError(xhr.status, `上传失败（${xhr.status}）`));
+      }
+    };
+    xhr.onerror = () => {
+      clean();
+      reject(new Error("网络错误，上传中断"));
+    };
+    xhr.onabort = () => {
+      clean();
+      // 用户取消：清理服务端临时存储（不阻塞本错误抛出）
+      if (opts.signal?.aborted) {
+        void apiRequest(`/media/uploads/${seg(uploadId)}`, { method: "DELETE" }).catch(() => {});
+      }
+      reject(new DOMException("上传已取消", "AbortError"));
+    };
+    xhr.send(file);
+  });
+}
+
+/** 三步受控上传；失败会抛出并由调用方保留原输入，不伪造消息发送成功。
+ *  建会话与 complete 走 apiRequest；二进制经预签名 URL 直传对象存储。 */
+export async function uploadMediaFile(
+  file: File,
+  kind: MediaKind,
+  opts: UploadMediaOptions = {},
+): Promise<UploadCompleteResult> {
   // MIME 规范化：MediaRecorder 输出可能带 codec 参数（如 audio/webm;codecs=opus），
   // 后端 allowlist 只匹配基础类型，上传取分号前主类型（audio/webm）。
   const mime = (file.type || "application/octet-stream").split(";")[0].trim();
@@ -141,11 +260,10 @@ export async function uploadMediaFile(file: File, kind: MediaKind): Promise<Uplo
   if (session.max_bytes != null && file.size > session.max_bytes) {
     throw new Error(`文件超过大小上限（${formatBytes(session.max_bytes)}）`);
   }
-  await apiRequest<{ detail: string }>(`/media/uploads/${seg(session.upload_id)}`, {
-    method: "PUT",
-    body: file,
-    headers: { "Content-Type": mime },
-  });
+  if (!session.presigned_url) {
+    throw new Error("后端未返回直传地址");
+  }
+  await putBinary(session.presigned_url, session.upload_id, file, mime, opts);
   return apiRequest<UploadCompleteResult>(`/media/uploads/${seg(session.upload_id)}:complete`, {
     method: "POST",
   });

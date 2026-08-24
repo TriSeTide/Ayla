@@ -2,6 +2,9 @@
 媒体 REST 视图（M4-3，挂 /api/v1/media/）。
 
 - 三步上传：POST /uploads 创建会话 → PUT /uploads/{id} 传二进制 → POST /uploads/{id}:complete；
+- 上传二进制为流式分块写入（request.stream → 临时文件 → 对象存储 put_stream），
+  大文件不整体读入内存（避免 1GB+ 上传导致进程 OOM）；
+- DELETE /uploads/{id} 取消上传（放弃临时存储 + 删除会话，前端「取消」按钮用）；
 - GET /media/{id} 获取 descriptor + 处理状态；
 - GET /media/{id}/content 流式下载（Range/ETag/Cache-Control: private）；
 - GET /media/{id}/thumbnail|waveform 下载派生资源（无 → 404）；
@@ -13,7 +16,10 @@
 - 事件/序列化只带 descriptor，不暴露 storage_path。
 """
 import logging
+import tempfile
+from urllib.parse import urlencode
 
+from django.conf import settings
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from rest_framework import status
@@ -25,6 +31,11 @@ from .models import MediaObject, MediaUploadSession
 from .serializers import MediaObjectSerializer
 
 logger = logging.getLogger(__name__)
+
+# 流式上传分块大小（1 MiB）；逐块写入临时文件，不整体读入内存
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+# 媒体内容 URL 前缀（:sign 签发的相对路径用）
+API_MEDIA_PREFIX = "/api/v1/media"
 
 
 def _media_or_404(media_id: str):
@@ -57,6 +68,13 @@ class UploadSessionView(APIView):
             code = str(exc)
             http_status = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if code == "payload_too_large" else status.HTTP_400_BAD_REQUEST
             return Response({"detail": code}, status=http_status)
+        # 预签名直传：浏览器 PUT 直打对象存储，数据面完全旁路应用服务器——
+        # 大文件不再被 ASGI 全量吞进内存，也不占用同步执行线程（根治卡 99% / C 盘页文件波动）
+        presigned_url = storage.get_storage().presign_put(
+            storage.tmp_key(session.upload_id),
+            content_type=str(mime_type),
+            expires_seconds=max(600, int((session.expires_at - timezone.now()).total_seconds())),
+        )
         return Response(
             {
                 "upload_id": session.upload_id,
@@ -64,13 +82,14 @@ class UploadSessionView(APIView):
                 # None = 该 kind 不设大小上限（图片/语音默认放开）
                 "max_bytes": services._max_bytes(session.kind),
                 "expires_at": session.expires_at.isoformat(),
+                "presigned_url": presigned_url,
             },
             status=status.HTTP_201_CREATED,
         )
 
 
 class UploadBinaryView(APIView):
-    """PUT /media/uploads/{upload_id} —— 上传二进制（body 原始字节）。"""
+    """PUT /media/uploads/{upload_id} —— 上传二进制（body 原始字节，流式分块写入）。"""
 
     def put(self, request, upload_id):
         session = MediaUploadSession.objects.filter(upload_id=upload_id).first()
@@ -88,14 +107,42 @@ class UploadBinaryView(APIView):
             return Response(
                 {"detail": "上传会话已过期"}, status=status.HTTP_410_GONE
             )
-        data = request.body
-        if services._exceeds_max(session.kind, len(data)):
-            return Response(
-                {"detail": "payload_too_large"},
-                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        # 流式：分块读入临时文件（边读边校验累计大小，超限即中断），
+        # 再以 put_stream 分块上传对象存储 —— 大文件不整体驻留内存。
+        # 临时目录走 MEDIA_TMP_DIR（数据盘）：系统 Temp 默认在 C 盘，大文件会临时挤占
+        tmp = tempfile.TemporaryFile(dir=str(settings.MEDIA_TMP_DIR))
+        try:
+            total = 0
+            while True:
+                chunk = request.stream.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if services._exceeds_max(session.kind, total):
+                    return Response(
+                        {"detail": "payload_too_large"},
+                        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    )
+                tmp.write(chunk)
+            tmp.seek(0)
+            storage.get_storage().put_stream(
+                storage.tmp_key(session.upload_id), tmp, content_type=session.mime_type
             )
-        storage.get_storage().put(storage.tmp_key(session.upload_id), data)
+        finally:
+            tmp.close()
         return Response({"detail": "ok"}, status=status.HTTP_200_OK)
+
+    def delete(self, request, upload_id):
+        """DELETE /media/uploads/{upload_id} —— 取消上传（幂等）。
+
+        前端「取消」按钮：abort 传输后调用；会话不存在/非本人/已完成均安全返回 204。
+        """
+        session = MediaUploadSession.objects.filter(upload_id=upload_id).first()
+        if session is not None:
+            if session.owner_id != request.user.id:
+                return Response({"detail": "无权访问"}, status=status.HTTP_403_FORBIDDEN)
+            services.cancel_upload_session(session)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UploadCompleteView(APIView):
@@ -144,14 +191,68 @@ class MediaDetailView(APIView):
         return Response(MediaObjectSerializer(media, context={"request": request}).data)
 
 
-class MediaContentView(APIView):
-    """GET /media/{media_id}/content —— 流式下载原对象（Range/ETag/Cache-Control: private）。"""
+class MediaSignView(APIView):
+    """POST /media/{media_id}:sign —— 为已授权用户签发内容短时访问 URL。
 
-    def get(self, request, media_id):
+    返回对象存储的预签名 GET URL：<img>/<video> 直连拉流，
+    Range 请求（preload=metadata、拖动 seek）由对象存储原生处理——
+    播放流量完全不经过应用服务器（ASGI 同步视图串行队列对媒体播放零影响）。
+    鉴权决策在本端点完成（can_access_media），票据短时有效自动过期；
+    Django content 端点保留作为 Bearer 通道兼容。
+    """
+
+    def post(self, request, media_id):
         media = _media_or_404(media_id)
         if media is None:
             return Response({"detail": "媒体不存在"}, status=status.HTTP_404_NOT_FOUND)
         if not services.can_access_media(request.user, media):
+            return Response({"detail": "无权访问"}, status=status.HTTP_403_FORBIDDEN)
+        expires = services.MEDIA_VIEW_URL_TTL_SECONDS
+        url = storage.get_storage().presign_get(media.storage_path, expires)
+        return Response(
+            {
+                "url": url,
+                "expires_at": int(timezone.now().timestamp()) + expires,
+            }
+        )
+
+
+def _resolve_content_user(request, media_id):
+    """content 访问者解析：登录用户直接用；否则校验签名票据映射回授权用户。"""
+    user = getattr(request, "user", None)
+    if user is not None and user.is_authenticated:
+        return user
+    uid = request.query_params.get("uid")
+    exp = request.query_params.get("exp")
+    sig = request.query_params.get("sig")
+    if not services.verify_media_access(uid, media_id, exp or 0, sig or ""):
+        return None
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().objects.filter(pk=uid).first()
+
+
+class MediaContentView(APIView):
+    """GET /media/{media_id}/content —— 流式下载原对象（Range/ETag/Cache-Control: private）。
+
+    鉴权双通道：Bearer 登录，或 :sign 签发的短时票据（<img>/<video> 无法携带
+    Authorization header；票据绑定 user+media+exp，泄露影响面有限且自动过期）。
+    全局默认 IsAuthenticated 会在视图前拦截匿名票据请求，因此这里显式 AllowAny、
+    鉴权在视图内完成（登录 or 有效票据 → can_access_media），未授权绝不放行。
+    响应体分块流式转发（含无 Range 的整档下载），不把整个对象读入内存。
+    """
+
+    permission_classes: list = []  # 视图内自鉴权（登录 / 签名票据）
+
+    def get(self, request, media_id):
+        # 先鉴权后查存在性：未授权一律 401，不向匿名请求泄露媒体是否存在
+        user = _resolve_content_user(request, media_id)
+        if user is None:
+            return Response({"detail": "认证失败"}, status=status.HTTP_401_UNAUTHORIZED)
+        media = _media_or_404(media_id)
+        if media is None:
+            return Response({"detail": "媒体不存在"}, status=status.HTTP_404_NOT_FOUND)
+        if not services.can_access_media(user, media):
             return Response({"detail": "无权访问"}, status=status.HTTP_403_FORBIDDEN)
 
         store = storage.get_storage()
@@ -184,35 +285,35 @@ class MediaContentView(APIView):
 
         range_header = request.headers.get("Range")
         if range_header:
+            # 流式 Range 转发：区间原样透传给对象存储（支持 start-end / start- / -suffix），
+            # 响应体分块流回客户端 —— 浏览器 preload=metadata / 拖动 seek 只拉所需字节，
+            # 任何大文件的任意区间都不再整体读入内存
             try:
-                start_s, _, end_s = range_header.replace("bytes=", "").partition("-")
-                start = int(start_s) if start_s else 0
-                end = int(end_s) if end_s else size - 1
-                if start < 0 or end >= size or start > end:
-                    raise ValueError
-            except ValueError:
+                body, length, content_range = store.open_range_stream(key, range_header)
+            except Exception:
                 resp = HttpResponse(status=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE)
                 resp["Content-Range"] = f"bytes */{size}"
                 return resp
-            data = store.get_range(key, start, end)
-            resp = HttpResponse(
-                data,
+            resp = StreamingHttpResponse(
+                iter(lambda: body.read(_UPLOAD_CHUNK_SIZE), b""),
                 status=status.HTTP_206_PARTIAL_CONTENT,
                 content_type=media.mime_type or "application/octet-stream",
             )
-            resp["Content-Range"] = f"bytes {start}-{end}/{size}"
-            resp["Content-Length"] = str(len(data))
+            resp["Content-Range"] = content_range
+            resp["Content-Length"] = str(length)
         else:
             try:
-                data = store.get(key)
+                body = store.open_stream(key)
             except Exception:
                 return Response(
                     {"detail": "媒体内容不可用"}, status=status.HTTP_404_NOT_FOUND
                 )
-            resp = HttpResponse(
-                data, content_type=media.mime_type or "application/octet-stream"
+            # 分块流式转发：大文件下载不整体读入内存（与上传链路对等的恒定内存占用）
+            resp = StreamingHttpResponse(
+                iter(lambda: body.read(_UPLOAD_CHUNK_SIZE), b""),
+                content_type=media.mime_type or "application/octet-stream",
             )
-            resp["Content-Length"] = str(len(data))
+            resp["Content-Length"] = str(size)
         for k, v in headers.items():
             resp[k] = v
         return resp

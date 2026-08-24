@@ -51,6 +51,50 @@ class TestAccessControl:
         # c 不是成员 → 不可访问
         assert can_access_media(c, media) is False
 
+    def test_segments_reference_member_access(self, user_factory):
+        """图文混排（segments JSON）消息引用的媒体：会话成员可访问，外人拒绝。
+
+        第四轮重构后 mixed 消息的 media 引用存在 segments JSON 里而非
+        media_id 列——权限判定必须覆盖该形态（回归：B 看不到 A 发的视频）。
+        """
+        import json
+
+        a = user_factory(username="acc_seg_a")
+        b = user_factory(username="acc_seg_b")
+        cc = user_factory(username="acc_seg_c")
+        media = self._mk_image_media(a)
+        conv = get_or_create_conversation(a, b)
+        from apps.chat.models import Message
+        Message.objects.create(
+            conversation=conv, sender=a, type="mixed",
+            segments=[
+                {"type": "text", "text": "看看这个"},
+                {"type": "image", "media_id": media.media_id},
+            ],
+            content="看看这个",
+            idempotency_key="acc-seg-k1", seq=1,
+        )
+        from apps.media.tests.test_access import _dbg_segments_query
+        from apps.chat.services import user_can_access as _cua
+
+        print("DBG:", _dbg_segments_query(media.media_id))
+        for _m in Message.objects.filter(segments__icontains=media.media_id).select_related("conversation"):
+            print("DBG msg", _m.id, "conv", _m.conversation_id,
+                  "segments_type:", type(_m.segments).__name__,
+                  "ref:", any(isinstance(_s, dict) and _s.get("media_id") == media.media_id for _s in (_m.segments or [])),
+                  "cua:", _cua(b, _m.conversation))
+        assert can_access_media(b, media) is True
+        assert can_access_media(cc, media) is False
+
+
+def _dbg_segments_query(media_id):
+    from apps.chat.models import Message as M
+
+    return {
+        "icontains": M.objects.filter(segments__icontains=media_id).count(),
+        "raw_rows": [str(m.segments)[:120] for m in M.objects.filter(segments__icontains=media_id)],
+    }
+
     def test_system_emoji_pack_visible_to_all(self, user_factory):
         owner = user_factory(username="acc_eo")
         other = user_factory(username="acc_eo2")
@@ -89,7 +133,8 @@ class TestAccessControl:
 
         assert response.status_code == 200
         assert response["Content-Type"] == "image/png"
-        assert response.content == make_png_bytes()
+        # content 端点是 StreamingHttpResponse：拼接分块流断言完整字节
+        assert b"".join(response.streaming_content) == make_png_bytes()
 
     def test_user_avatar_reference_visible_to_any(self, user_factory):
         """media 被某用户设为头像 → 任意登录用户可访问（头像公开展示）。"""
@@ -154,3 +199,63 @@ class TestAccessControl:
         )
         assert can_access_media(b, media) is True
         assert can_access_media(c, media) is True
+
+
+@pytest.mark.django_db
+class TestSignedContentAccess:
+    """签名票据直连 content（<img>/<video> 无法带 Authorization 的流式播放通道）。"""
+
+    def _mk_media(self, user):
+        return TestAccessControl()._mk_image_media(user)
+
+    def test_sign_returns_presigned_get_url(self, auth_client):
+        """直传架构对称设计：:sign 返回对象存储预签名 GET URL（播放流量旁路应用服务器）。"""
+        client, user = auth_client(username="sign_owner")
+        media = self._mk_media(user)
+        r = client.post(f"/api/v1/media/{media.media_id}:sign", format="json")
+        assert r.status_code == 200
+        body = r.json()
+        url = body["url"]
+        # 伪存储实现下 URL 形态可断言；指向 media.storage_path 且带过期语义
+        assert url.startswith("http://fake-storage/")
+        assert "X-Amz-Expires" in url or "mode=get" in url
+        assert body["expires_at"] > 0
+        # Django content 端点（Bearer 通道）仍可用且内容完整
+        resp = client.get(f"/api/v1/media/{media.media_id}/content")
+        assert resp.status_code == 200
+        assert b"".join(resp.streaming_content) == make_png_bytes()
+
+    def test_forged_or_missing_ticket_rejected(self, auth_client):
+        from rest_framework.test import APIClient
+
+        from apps.media import services
+
+        client, user = auth_client(username="sign_owner2")
+        media = self._mk_media(user)
+        client.post(f"/api/v1/media/{media.media_id}:sign", format="json")
+        anon = APIClient()
+        # 无票据匿名访问 Django content 端点 → 401
+        assert anon.get(f"/api/v1/media/{media.media_id}/content").status_code == 401
+        # 过期票据：verify 直接判 False（票据通道保留兼容）
+        t = services.sign_media_access(user.id, media.media_id)
+        assert services.verify_media_access(t["uid"], media.media_id, int(t["exp"]) - 3600, t["sig"]) is False
+
+    def test_sign_requires_access(self, auth_client):
+        """无访问权者不能签发（越权 403）。"""
+        from apps.media import storage as st
+
+        from apps.media.models import MediaObject
+
+        stranger, _ = auth_client(username="sign_stranger")
+        _, owner_user = auth_client(username="sign_owner3")
+        media = MediaObject.objects.create(
+            media_id="sign-denied",
+            owner=owner_user,
+            kind="image",
+            content_hash="h-sign",
+            mime_type="image/png",
+            size=len(make_png_bytes()),
+            storage_path=st.original_key("image", "sign-denied"),
+            status=MediaObject.STATUS_READY,
+        )
+        assert stranger.post(f"/api/v1/media/{media.media_id}:sign", format="json").status_code == 403

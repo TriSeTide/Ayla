@@ -923,6 +923,15 @@
   }
 }
 
+/* 气泡外层 wrapper：承载 absolute 定位的发送状态（.msg-send-state）。
+   不能把状态放进 .bubble——媒体气泡 .bubble-media 的 overflow:hidden 会把
+   定位到气泡外侧的状态元素整体裁掉（上传进度/取消/失败按钮不可见）。 */
+.msg-bubble-wrap {
+  position: relative;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .bubble {
   position: relative;
   padding: 10px 14px;
@@ -1034,7 +1043,7 @@
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
-/* 乐观发送状态（自己的气泡左侧同行：发送中 spinner / 失败重试删除） */
+/* 乐观发送状态（自己的气泡左侧同行：上传进度可取消 / 发送中 spinner / 失败重试删除） */
 .msg-send-state {
   position: absolute;
   right: calc(100% + 8px);
@@ -1044,6 +1053,12 @@
   align-items: center;
   gap: var(--sp-1);
   white-space: nowrap;
+}
+
+/* 上传中百分比文案（design token：次级文字色） */
+.msg-send-progress {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .msg-send-spinner {

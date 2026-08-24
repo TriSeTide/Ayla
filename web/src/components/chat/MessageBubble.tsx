@@ -52,6 +52,7 @@ export function MessageBubble({
   onRecall,
   onRetry,
   onRemove,
+  onCancel,
 }: {
   message: ChatMessage;
   isSelf: boolean;
@@ -73,6 +74,8 @@ export function MessageBubble({
   onRetry?: (msg: ChatMessage) => void;
   /** 乐观消息删除（本地丢弃） */
   onRemove?: (msg: ChatMessage) => void;
+  /** 乐观发送中：取消上传（abort + 删除气泡） */
+  onCancel?: (msg: ChatMessage) => void;
 }) {
   const recalled = message.status === "recalled";
   const isMedia = MEDIA_TYPES.has(message.type);
@@ -133,12 +136,35 @@ export function MessageBubble({
   // 单行布局（design.md §4）：统一 DOM = [头像][气泡][操作]；
   // peer 行 row 直排 = [头像][气泡][操作]；self 行 row-reverse 翻转 = [操作][气泡][头像]，
   // 自己的气泡整体居右、头像在最右。
-  // 乐观发送状态（自己的气泡左上角：发送中 spinner / 失败可重试删除）
+  // 乐观发送状态（自己的气泡左侧同行）：上传中进度+可取消 / 纯文本 spinner / 失败重试删除
+  const uploadProgress = message.pending ? (message.uploadProgress ?? null) : null;
+  const uploading = uploadProgress != null;
   const sendState =
     isSelf && !recalled && (message.pending || message.sendFailed) ? (
-      <div className="msg-send-state" data-state={message.sendFailed ? "failed" : "sending"}>
+      <div
+        className="msg-send-state"
+        data-state={message.sendFailed ? "failed" : uploading ? "uploading" : "sending"}
+      >
         {message.pending ? (
-          <span className="msg-send-spinner" role="status" aria-label="发送中" />
+          uploading ? (
+            <>
+              <span className="msg-send-progress" role="status">
+                上传中 {Math.round(uploadProgress)}%
+              </span>
+              {onCancel && (
+                <button
+                  type="button"
+                  className="msg-action-btn"
+                  onClick={() => onCancel(message)}
+                  aria-label="取消发送"
+                >
+                  取消
+                </button>
+              )}
+            </>
+          ) : (
+            <span className="msg-send-spinner" role="status" aria-label="发送中" />
+          )
         ) : (
           <>
             <span className="msg-send-failed-text" aria-label="发送失败">发送失败</span>
@@ -164,24 +190,28 @@ export function MessageBubble({
       {senderHalo}
       <div className="msg-body">
         {!isSelf && senderName && <span className="msg-sender">{senderName}</span>}
-        <div className={`${bubbleClass} ${isMedia && !recalled ? "bubble-media" : ""}`}>
+        {/* 发送状态放在 bubble 外层 wrapper：媒体气泡 .bubble-media 有 overflow:hidden，
+            状态元素留在气泡内会被裁剪（上传进度/取消/失败按钮全部不可见） */}
+        <div className="msg-bubble-wrap">
           {sendState}
-          {quoteText != null && !recalled && (
-            <div className="quote-strip" title={quoteText}>
-              {quoteText}
-            </div>
-          )}
-          {recalled ? (
-            <span>{isSelf ? "你撤回了一条消息" : "对方撤回了一条消息"}</span>
-          ) : message.type === "system" ? (
-            <span>{message.content}</span>
-          ) : isMedia ? (
-            <MediaContent msg={message} />
-          ) : (
-            message.content || " "
-          )}
-          {/* 媒体消息气泡只渲染媒体本体：不显示 content 占位文案
-             （「图片/语音」二字保留在会话列表预览与引用预览里） */}
+          <div className={`${bubbleClass} ${isMedia && !recalled ? "bubble-media" : ""}`}>
+            {quoteText != null && !recalled && (
+              <div className="quote-strip" title={quoteText}>
+                {quoteText}
+              </div>
+            )}
+            {recalled ? (
+              <span>{isSelf ? "你撤回了一条消息" : "对方撤回了一条消息"}</span>
+            ) : message.type === "system" ? (
+              <span>{message.content}</span>
+            ) : isMedia ? (
+              <MediaContent msg={message} />
+            ) : (
+              message.content || " "
+            )}
+            {/* 媒体消息气泡只渲染媒体本体：不显示 content 占位文案
+               （「图片/语音」二字保留在会话列表预览与引用预览里） */}
+          </div>
         </div>
         <div className="bubble-meta">
           <span className="bubble-time">{timeAgo(message.created_at)}</span>

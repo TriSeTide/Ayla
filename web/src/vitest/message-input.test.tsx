@@ -99,7 +99,7 @@ describe("MessageInput 乐观发送（M7）", () => {
     fireEvent.change(input, { target: { files: [new File(["mp4"], "a.mp4", { type: "video/mp4" })] } });
     await waitFor(() => expect(screen.getByRole("group", { name: "待发送媒体" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    await waitFor(() => expect(upload).toHaveBeenCalledWith(expect.any(File), "video"));
+    await waitFor(() => expect(upload).toHaveBeenCalledWith(expect.any(File), "video", expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(send.mock.calls[0][1]?.segments).toEqual([{ type: "video", media_id: "media-v" }]);
   });
 

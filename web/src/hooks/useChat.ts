@@ -143,10 +143,42 @@ function newLocalId(key: string) {
   return `local-${key}`;
 }
 
+/** 上传中 AbortController 注册表（按本地消息 id），供「取消」按钮中止传输 */
+const uploadControllers = new Map<string, AbortController>();
+
 /**
- * 乐观发送图文混排消息：立即插入本地 pending 气泡（左上角加载态），
+ * 并发上传媒体文件，聚合进度上报 store（0-99，保留 100 给发送阶段）。
+ * 若 signal 已 abort，Promise.all 会因 AbortError 立即 reject。
+ */
+function uploadPickedWithProgress(
+  convId: string,
+  localId: string,
+  picked: PickedMediaItem[],
+  signal: AbortSignal,
+): Promise<import("../api/media").UploadCompleteResult[]> {
+  if (picked.length === 0) return Promise.resolve([]);
+  const totals = picked.map((p) => p.file.size);
+  const loadedBy = new Array(picked.length).fill(0);
+  return Promise.all(
+    picked.map((p, i) =>
+      uploadMediaFile(p.file, p.kind, {
+        signal,
+        onProgress: (e) => {
+          loadedBy[i] = e.loaded;
+          const sumLoaded = loadedBy.reduce((a, b) => a + b, 0);
+          const sumTotal = totals.reduce((a, b) => a + b, 0);
+          const pct = sumTotal > 0 ? Math.min(99, Math.round((sumLoaded / sumTotal) * 100)) : 0;
+          useMessageStore.getState().setMessageUploadProgress(convId, localId, pct);
+        },
+      }),
+    ),
+  );
+}
+
+/**
+ * 乐观发送图文混排消息：立即插入本地 pending 气泡（左侧加载态/进度/可取消），
  * 后台并发上传全部媒体 → 调发送 API → 原地替换为服务端消息；
- * 失败标记 sendFailed（气泡左上角可重试/删除），不阻塞继续输入。
+ * 失败标记 sendFailed（气泡左侧可重试/删除），不阻塞继续输入。
  */
 export function sendOptimistic(convId: string, opts: OptimisticSendOptions): void {
   const idempotencyKey = newIdempotencyKey();
@@ -189,42 +221,51 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
   };
   useMessageStore.getState().addPendingMessage(convId, optimistic);
 
-  // 后台发送（不阻塞调用方；失败在气泡左上角呈现）
-  void (async () => {
-    try {
-      let serverMsg: ChatMessage;
-      if (opts.picked.length === 0) {
-        serverMsg = await chatApi.sendMessage(convId, {
+  // 无媒体 → 纯文本直接发送
+  if (opts.picked.length === 0) {
+    void (async () => {
+      try {
+        const serverMsg = await chatApi.sendMessage(convId, {
           type: "text",
           content: text,
           reply_to: opts.replyTo ?? null,
           idempotency_key: idempotencyKey,
         });
-      } else {
-        // 先并发上传全部媒体，再组装 segments 发消息
-        const uploaded = await Promise.all(
-          opts.picked.map((p) => uploadMediaFile(p.file, p.kind)),
-        );
-        const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [
-          ...(text ? [{ type: "text" as const, text }] : []),
-          ...opts.picked.map((p, i) => ({ type: p.kind, media_id: uploaded[i].media_id })),
-        ];
-        serverMsg = await chatApi.sendMessage(convId, {
-          type: "mixed",
-          content: text,
-          reply_to: opts.replyTo ?? null,
-          idempotency_key: idempotencyKey,
-          segments: segs,
-        });
+        useMessageStore.getState().resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
+      } catch {
+        useMessageStore.getState().markMessageFailed(convId, localId);
       }
-      // 替换完成后本地预览不再需要
-      for (const p of opts.picked) URL.revokeObjectURL(p.url);
-      useMessageStore
-        .getState()
-        .resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
+    })();
+    return;
+  }
+
+  // 有媒体 → 注册 AbortController + 后台上传+发送
+  const controller = new AbortController();
+  uploadControllers.set(localId, controller);
+
+  void (async () => {
+    try {
+      const uploaded = await uploadPickedWithProgress(convId, localId, opts.picked, controller.signal);
+      const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [
+        ...(text ? [{ type: "text" as const, text }] : []),
+        ...opts.picked.map((p, i) => ({ type: p.kind, media_id: uploaded[i].media_id })),
+      ];
+      const serverMsg = await chatApi.sendMessage(convId, {
+        type: "mixed",
+        content: text,
+        reply_to: opts.replyTo ?? null,
+        idempotency_key: idempotencyKey,
+        segments: segs,
+      });
+      // 本地预览 URL 由气泡组件在替换卸载时统一 revoke
+      useMessageStore.getState().resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
     } catch {
-      // 上传/发送失败：保留气泡与本地预览，左上角显示失败态（可重试/删除）
-      useMessageStore.getState().markMessageFailed(convId, localId);
+      // 用户主动取消时不标记失败（消息已由 cancelOptimistic 删除）
+      if (!controller.signal.aborted) {
+        useMessageStore.getState().markMessageFailed(convId, localId);
+      }
+    } finally {
+      uploadControllers.delete(localId);
     }
   })();
 }
@@ -235,13 +276,17 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
  */
 export function retryOptimistic(convId: string, msg: ChatMessage): void {
   const key = msg.idempotencyKey;
-  const localMedia = msg.localMedia ?? [];
   if (!key) {
     useMessageStore.getState().removeMessage(convId, msg.id);
     return;
   }
   const store = useMessageStore.getState();
   store.removeMessage(convId, msg.id);
+  // 旧消息卸载时其 localMedia URL 会被组件 revoke：重试必须重新生成本地预览 URL
+  const refreshedLocal = msg.localMedia?.map((m) => ({
+    ...m,
+    url: URL.createObjectURL(m.file),
+  }));
 
   const newLocalIdStr = newLocalId(key);
   const optimistic: ChatMessage = {
@@ -251,19 +296,46 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
     sendFailed: false,
     idempotencyKey: key,
     seq: 0,
+    localMedia: refreshedLocal,
   };
   store.addPendingMessage(convId, optimistic);
 
+  const picked: PickedMediaItem[] = (refreshedLocal ?? []).map((m) => ({
+    id: m.id,
+    kind: m.kind,
+    mimeType: m.mimeType,
+    url: m.url,
+    file: m.file,
+  }));
+  if (picked.length === 0) {
+    // 纯文本重试（无媒体）：走旧 text 契约，不构造混排段
+    void (async () => {
+      try {
+        const serverMsg = await chatApi.sendMessage(convId, {
+          type: "text",
+          content: msg.content,
+          reply_to: msg.reply_to != null ? Number(msg.reply_to) : null,
+          idempotency_key: key,
+        });
+        store.resolvePendingMessage(convId, newLocalIdStr, key, serverMsg);
+      } catch {
+        store.markMessageFailed(convId, newLocalIdStr);
+      }
+    })();
+    return;
+  }
+
+  const controller = new AbortController();
+  uploadControllers.set(newLocalIdStr, controller);
+
   void (async () => {
     try {
-      const uploaded = await Promise.all(
-        localMedia.map((m) => uploadMediaFile(m.file, m.kind)),
-      );
+      const uploaded = await uploadPickedWithProgress(convId, newLocalIdStr, picked, controller.signal);
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [];
       for (const seg of msg.segments ?? []) {
         if (seg.type === "text") segs.push({ type: "text", text: seg.text });
       }
-      localMedia.forEach((m, i) => segs.push({ type: m.kind, media_id: uploaded[i].media_id }));
+      picked.forEach((m, i) => segs.push({ type: m.kind, media_id: uploaded[i].media_id }));
       const serverMsg = await chatApi.sendMessage(convId, {
         type: "mixed",
         content: msg.content,
@@ -271,12 +343,25 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
         idempotency_key: key,
         segments: segs,
       });
-      for (const m of localMedia) URL.revokeObjectURL(m.url);
       store.resolvePendingMessage(convId, newLocalIdStr, key, serverMsg);
     } catch {
-      store.markMessageFailed(convId, newLocalIdStr);
+      if (!controller.signal.aborted) {
+        store.markMessageFailed(convId, newLocalIdStr);
+      }
+    } finally {
+      uploadControllers.delete(newLocalIdStr);
     }
   })();
+}
+
+/** 取消乐观发送中的消息（abort 上传 + 删除消息 + 释放本地预览 URL） */
+export function cancelOptimistic(convId: string, msg: ChatMessage): void {
+  const ctrl = uploadControllers.get(msg.id);
+  if (ctrl) {
+    uploadControllers.delete(msg.id);
+    ctrl.abort();
+  }
+  removeOptimistic(convId, msg);
 }
 
 /** 删除本地消息（乐观失败丢弃；同时释放本地预览 URL） */

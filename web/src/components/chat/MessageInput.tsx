@@ -55,13 +55,6 @@ export function MessageInput({
     setError(null);
   }, [convId, draft]);
 
-  const clearPicked = () => {
-    setPicked((prev) => {
-      for (const p of prev) URL.revokeObjectURL(p.url);
-      return [];
-    });
-  };
-
   /** 校验并加入待发送队列（选文件/粘贴共用） */
   const enqueueFiles = (files: File[]) => {
     const added: PickedMediaItem[] = [];
@@ -102,10 +95,12 @@ export function MessageInput({
       picked,
       replyTo: quote ? Number(quote.id) : null,
     });
-    // 发送即清空（消息已进列表），可立即输入下一条
+    // 发送即清空（消息已进列表），可立即输入下一条。
+    // 注意：picked 的 objectURL 所有权已转移给乐观气泡（由气泡组件在替换/删除卸载时
+    // 统一 revoke），这里只能清空引用、绝不能 revoke —— 否则气泡立即变破图。
     setText("");
     clearDraft(convId);
-    clearPicked();
+    setPicked([]);
     setError(null);
     if (quote) onQuoteClear();
   };

@@ -36,6 +36,7 @@ export function MessageList({
   onRecall,
   onRetry,
   onRemove,
+  onCancel,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -49,6 +50,8 @@ export function MessageList({
   /** 乐观发送失败：重试/删除 */
   onRetry?: (msg: ChatMessage) => void;
   onRemove?: (msg: ChatMessage) => void;
+  /** 乐观发送中：取消上传 */
+  onCancel?: (msg: ChatMessage) => void;
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -203,6 +206,7 @@ export function MessageList({
                 onRecall={onRecall && canRecall(m, currentUserId) ? onRecall : undefined}
                 onRetry={onRetry && m.sendFailed ? onRetry : undefined}
                 onRemove={onRemove && m.sendFailed ? onRemove : undefined}
+                onCancel={onCancel && m.pending && m.uploadProgress != null ? onCancel : undefined}
               />
             </div>
           );

@@ -14,8 +14,10 @@
 - 派生失败不伪装成媒体失败或空结果。
 """
 import hashlib
+import hmac
 import io
 import logging
+import time
 import uuid
 from datetime import timedelta
 
@@ -27,6 +29,47 @@ from . import derivatives, storage
 from .models import MediaObject, MediaUploadSession
 
 logger = logging.getLogger(__name__)
+
+# 媒体内容签名 URL 默认有效期（秒）：覆盖一次完整播放/浏览窗口即可，
+# 过期由前端在到期前 60s 重新签发（getSignedMediaUrl 缓存）
+MEDIA_VIEW_URL_TTL_SECONDS = 600
+
+
+def _media_view_signing_key() -> bytes:
+    """媒体内容签名密钥：由 Django SECRET_KEY 派生（独立域，不与密码哈希混用）。"""
+    return hashlib.sha256(f"media-view-url:{settings.SECRET_KEY}".encode()).digest()
+
+
+def sign_media_access(user_id, media_id: str, ttl_seconds: int = MEDIA_VIEW_URL_TTL_SECONDS) -> dict:
+    """为已授权用户签发媒体内容的短时访问票据（HMAC-SHA256）。
+
+    返回 {"uid", "exp", "sig"}；票据绑定 user+media+过期时间，泄露后影响范围
+    限于单个媒体、且 exp 后自动失效。供 <img>/<video> 直接 src 引用——
+    浏览器原生 Range 流式播放/渐进加载，前端不再全量下载 blob（内存恒定）。
+    user_id 为用户主键原样值（UUID hex 字符串），签名串不做数值规范化。
+    """
+    exp = int(time.time()) + max(60, int(ttl_seconds))
+    msg = f"{user_id}:{media_id}:{exp}".encode()
+    sig = hmac.new(_media_view_signing_key(), msg, hashlib.sha256).hexdigest()
+    return {"uid": user_id, "exp": exp, "sig": sig}
+
+
+def verify_media_access(uid, media_id, exp, sig) -> bool:
+    """校验签名票据：参数齐全、未过期、HMAC 匹配（常数时间比较）。
+
+    uid 为用户主键原样字符串；exp 十进制秒级时间戳。msg 构造与 sign 完全一致
+    （原样嵌入、不做数值规范化，杜绝等价形式绕签）。
+    """
+    try:
+        if not uid or not media_id or not exp or not sig:
+            return False
+        if int(exp) < time.time():
+            return False
+        msg = f"{uid}:{media_id}:{exp}".encode()
+        expect = hmac.new(_media_view_signing_key(), msg, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expect, str(sig))
+    except (TypeError, ValueError):
+        return False
 
 # 允许的 MIME 类型（allowlist）；文件头嗅探与声明 MIME 同时检查。
 # image 除常见位图外，覆盖现代格式（AVIF/HEIC/HEIF）与传统格式（BMP/TIFF/ICO），
@@ -196,6 +239,24 @@ def _content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# 分块哈希/嗅探的块大小（1 MiB）
+_HASH_CHUNK_SIZE = 1024 * 1024
+# 嗅探只需头部几十字节（ftyp/SVG/magic），取 64 字节足够
+_SNIFF_HEAD_BYTES = 64
+
+
+def _content_hash_stream(fileobj) -> str:
+    """分块计算 sha256（fileobj 需支持 read/seek）；大文件不整体进内存。"""
+    h = hashlib.sha256()
+    fileobj.seek(0)
+    while True:
+        chunk = fileobj.read(_HASH_CHUNK_SIZE)
+        if not chunk:
+            break
+        h.update(chunk)
+    return h.hexdigest()
+
+
 def create_upload_session(user, *, kind: str, expected_size: int, mime_type: str) -> MediaUploadSession:
     """创建受控上传会话（步骤文件 5.1 POST /uploads）。
 
@@ -224,6 +285,17 @@ def create_upload_session(user, *, kind: str, expected_size: int, mime_type: str
     return session
 
 
+def cancel_upload_session(session: MediaUploadSession) -> None:
+    """取消上传：删除临时对象并删除会话记录（幂等；前端「取消」按钮）。
+
+    取消后 upload_id 立即失效（后续 PUT/complete 均 404），临时存储即刻释放；
+    不会影响已 complete 生成的 MediaObject（它们走正式 storage_path）。
+    """
+    store = storage.get_storage()
+    store.delete(storage.tmp_key(session.upload_id))
+    MediaUploadSession.objects.filter(pk=session.pk).delete()
+
+
 def _session_expired(session: MediaUploadSession) -> bool:
     if session.status == MediaUploadSession.STATUS_EXPIRED:
         return True
@@ -246,9 +318,12 @@ def put_session_binary(user, session, data: bytes) -> None:
 
 
 def complete_upload(user, session) -> MediaObject:
-    """:complete 权威动作：校验 → 去重 → 建 MediaObject → 派生（尽力而为）。
+    """:complete 权威动作：轻校验 → 去重 → 建 MediaObject → 派生（尽力而为）。
 
     幂等：同 upload 重复 complete 返回同一 media_id。
+    预签名直传架构下数据面不经过应用服务器：此处只做 head 元信息校验
+    （size 对齐 expected_size）+ 服务端对象复制（copy），大文件字节流
+    不再流入 Django 进程（内存吞噬 / 同步线程阻塞的根治）。
     """
     if session.owner_id != user.id:
         raise PermissionError("仅上传者可完成")
@@ -268,21 +343,30 @@ def complete_upload(user, session) -> MediaObject:
     if not store.exists(tmp_key):
         raise ValueError("media_data_missing")
 
-    data = store.get(tmp_key)
-    # 完整性：sha256 + size + MIME
-    digest = _content_hash(data)
-    if len(data) != session.expected_size:
+    try:
+        stat = store.stat(tmp_key)
+    except Exception as exc:
+        logger.warning("stat tmp %s failed: %s", tmp_key, exc)
+        raise ValueError("media_data_missing")
+    total = int(stat["size"])
+    if total != session.expected_size:
         raise ValueError("media_size_mismatch")
     if not _mime_allowed(session.kind, session.mime_type):
         raise ValueError("unsupported_media_type")
-    if not _sniff_kind(data, session.kind):
+    # 魔数嗅探只需头部：Range 读头部 64 字节（直传架构下代替全量流嗅探）
+    head = store.get_range(tmp_key, 0, min(_SNIFF_HEAD_BYTES - 1, max(total - 1, 0)))
+    if not _sniff_kind(head, session.kind):
         raise ValueError("media_integrity_failed")
+    # 直传（单次 PUT）对象的 ETag 即内容 MD5，可作 content_hash；
+    # 异常形态（空 etag 等）兜底随机值——去重退化为不命中，不影响正确性
+    digest = stat.get("etag") or uuid.uuid4().hex
 
     with transaction.atomic():
         # 去重：同 content_hash 已存在则复用既有 media_id（不改变 owner 语义）
         dup = MediaObject.objects.filter(content_hash=digest).first()
         if dup is not None:
             media = dup
+            # 复用去重对象时不移动 tmp（tmp 由 cleanup 兜底过期清理）
         else:
             media_id = uuid.uuid4().hex
             media = MediaObject.objects.create(
@@ -291,12 +375,13 @@ def complete_upload(user, session) -> MediaObject:
                 kind=session.kind,
                 content_hash=digest,
                 mime_type=session.mime_type,
-                size=len(data),
+                size=total,
                 storage_path=storage.original_key(session.kind, media_id),
                 status=MediaObject.STATUS_PROCESSING,
             )
-            store.put(
-                media.storage_path, data,
+            # 服务端复制 tmp → 正式 key（数据面在对象存储内部完成）
+            store.copy(
+                tmp_key, media.storage_path,
                 content_type=session.mime_type or "application/octet-stream",
             )
             # 清除临时对象（owner 已确认，cleanup 兜底）
@@ -304,8 +389,8 @@ def complete_upload(user, session) -> MediaObject:
                 store.delete(tmp_key)
             except Exception as exc:
                 logger.warning("delete tmp %s failed: %s", tmp_key, exc)
-        # 派生（尽力而为，失败不阻塞/不置 failed）
-        _generate_derivatives(media, data)
+        # 派生（尽力而为，失败不阻塞/不置 failed；大文件跳过派生）
+        _generate_derivatives(media, total)
         if media.status == MediaObject.STATUS_PROCESSING:
             media.status = MediaObject.STATUS_READY
             media.save(update_fields=["status"])
@@ -318,9 +403,25 @@ def complete_upload(user, session) -> MediaObject:
     return media
 
 
-def _generate_derivatives(media: MediaObject, data: bytes) -> None:
-    """派生资源生成（尽力而为，失败只留 warning，不把媒体置 failed）。"""
+# 派生输入上限：超过该大小的媒体跳过派生（缩略图/波形是"尽力而为"的增强资源，
+# 大图/长音频读入内存派生的 OOM 风险远大于收益；前端直接回退原图/原音频）
+_DERIVATIVE_MAX_INPUT_BYTES = 64 * 1024 * 1024
+
+
+def _generate_derivatives(media: MediaObject, size: int) -> None:
+    """派生资源生成（尽力而为，失败只留 warning，不把媒体置 failed）。
+
+    仅小文件读入内存处理（按 media.storage_path 从对象存储读取），
+    超过 _DERIVATIVE_MAX_INPUT_BYTES 的媒体跳过派生（防 OOM）。
+    """
+    if size > _DERIVATIVE_MAX_INPUT_BYTES:
+        logger.info(
+            "skip derivatives for large media %s (%d bytes > %d)",
+            media.media_id, size, _DERIVATIVE_MAX_INPUT_BYTES,
+        )
+        return
     store = storage.get_storage()
+    data = store.get(media.storage_path)
     if media.kind in (MediaObject.KIND_IMAGE, MediaObject.KIND_EMOJI):
         try:
             thumb_bytes, width, height = derivatives.generate_thumbnail(
@@ -408,13 +509,42 @@ def can_access_media(user, media: MediaObject) -> bool:
         return True
 
     # 消息引用路径（核心："在聊天里收到图片/文件，就能打开它"）
-    # 同一媒体可能被转发进多个会话，任一会话成员均可访问，故查全部引用消息
+    # 同一媒体可能被转发进多个会话，任一会话成员均可访问，故查全部引用消息。
+    # 两种引用形态：
+    #   a) 单媒体消息：Message.media_id 列；
+    #   b) 图文混排消息（第四轮重构）：segments JSON 内的 {"type": ..., "media_id": ...}
+    #      —— DB 层用 JSON contains 粗筛（引号包裹精确匹配 media_id 文本），
+    #      Python 层再精确校验 segments 结构，避免文本误命中放权。
     from apps.chat.models import Message
     from apps.chat.services import user_can_access as chat_user_can_access
 
     msgs = Message.objects.filter(media_id=media.media_id).select_related("conversation")
     for msg in msgs:
         if chat_user_can_access(user, msg.conversation):
+            return True
+
+    seg_msgs = (
+        # SQLite JSONField 无 contains 支持；icontains 对序列化文本做 LIKE 粗筛，
+        # Python 层再精确校验 segments 结构，避免文本误命中放权。
+        Message.objects.filter(segments__icontains=media.media_id)
+        .select_related("conversation")
+    )
+    for msg in seg_msgs:
+        segs = msg.segments
+        if isinstance(segs, str):  # 防御：历史/异常数据可能存为 JSON 文本
+            try:
+                import json as _json
+
+                segs = _json.loads(segs)
+            except Exception:
+                continue
+        if not isinstance(segs, list):
+            continue
+        referenced = any(
+            isinstance(seg, dict) and seg.get("media_id") == media.media_id
+            for seg in segs
+        )
+        if referenced and chat_user_can_access(user, msg.conversation):
             return True
 
     # 帖子配图路径（S3）：media 被帖子配图引用，且 user 能查看该帖子

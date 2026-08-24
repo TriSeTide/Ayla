@@ -20,6 +20,14 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // 媒体数据面：预签名直传/播放走 MinIO（同源代理，规避浏览器跨源与
+      // Private Network Access 策略差异；node 流式 pipe 不缓冲不落盘）。
+      // rewrite 剥掉 /minio 前缀，还原对象存储真实 key 路径。
+      "/minio": {
+        target: process.env.VITE_MINIO_PROXY_TARGET ?? "http://127.0.0.1:9000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/minio/, ""),
+      },
     },
   },
   test: {

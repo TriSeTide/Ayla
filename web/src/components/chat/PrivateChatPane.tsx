@@ -14,7 +14,7 @@ import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { TypingIndicator } from "./TypingIndicator";
 import { IconBack } from "../icons";
-import { loadHistory, loadMoreHistory, markReadLatest, recallMessage, retryOptimistic, removeOptimistic } from "../../hooks/useChat";
+import { loadHistory, loadMoreHistory, markReadLatest, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useMessageStore } from "../../stores/message";
 import { useAuthStore } from "../../stores/auth";
@@ -187,6 +187,7 @@ export function PrivateChatPane({
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(conversationId, m)}
         onRemove={(m) => removeOptimistic(conversationId, m)}
+        onCancel={(m) => cancelOptimistic(conversationId, m)}
       />
       {blocked ? (
         <div className="private-chat-blocked" role="alert">

@@ -1,6 +1,11 @@
 """清理过期上传会话/孤儿临时对象（可选运维命令，步骤文件 2 目录）。
 
 继承 Elysium 手动启动纪律：不引入后台调度，运维手动/计划任务执行即可。
+
+--include-active：连同未过期的 pending 会话一起清理。用于 complete 中途
+崩溃（如旧版整块读内存 OOM）留下的残留——这类会话未过期、永远不会被
+默认策略覆盖，会随重试持续堆积（2026-08-23 曾堆积 23GiB）。执行前提：
+确认当前没有进行中的上传。
 """
 import logging
 
@@ -18,15 +23,23 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--no-delete", action="store_true", help="仅列出，不删除")
+        parser.add_argument(
+            "--include-active",
+            action="store_true",
+            help="连同未过期的 pending 会话一起清理（确认无进行中上传时使用）",
+        )
 
     def handle(self, *args, **options):
         now = timezone.now()
-        expired = MediaUploadSession.objects.filter(
-            status=MediaUploadSession.STATUS_PENDING, expires_at__lt=now
+        pending = MediaUploadSession.objects.filter(
+            status=MediaUploadSession.STATUS_PENDING
+        )
+        expired = pending if options["include_active"] else pending.filter(
+            expires_at__lt=now
         )
         store = storage.get_storage()
         count = 0
-        for session in expired[:500]:
+        for session in expired[:2000]:
             count += 1
             key = storage.tmp_key(session.upload_id)
             if store.exists(key):
@@ -36,4 +49,4 @@ class Command(BaseCommand):
             if not options["no_delete"]:
                 session.status = MediaUploadSession.STATUS_EXPIRED
                 session.save(update_fields=["status"])
-        self.stdout.write(f"[media] 已处理 {count} 个过期上传会话")
+        self.stdout.write(f"[media] 已处理 {count} 个上传会话")

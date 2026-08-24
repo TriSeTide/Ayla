@@ -179,6 +179,14 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = None
 MEDIA_TMP_TTL_SECONDS = env.int("MEDIA_TMP_TTL_SECONDS", default=600)
 MEDIA_THUMB_MAX = env.int("MEDIA_THUMB_MAX", default=320)
 
+# 大文件上传的本地中转临时目录（PUT 接收 / complete 校验的过路文件，传完即删）。
+# 必须指向空间充足的数据盘：默认系统 Temp 在 C 盘，2.9G 视频上传峰值会在
+# C 盘临时占用 3~6GB。backend/runtime 已 gitignore，不进仓库。
+MEDIA_TMP_DIR = Path(
+    env.str("MEDIA_TMP_DIR", default=str(BASE_DIR / "runtime" / "media_tmp"))
+)
+MEDIA_TMP_DIR.mkdir(parents=True, exist_ok=True)
+
 # ---------- 爱莉桥接（M4-4） ----------
 # ELYSIA_BASE_URL：阶段三 Elysium API 根地址（不含 /api/v1 前缀，客户端拼接）。
 # ELYSIA_CREDENTIAL_FILE：service credential 一次性 secret 落盘路径（本机配置，

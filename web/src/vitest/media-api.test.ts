@@ -2,36 +2,130 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IMAGE_TYPES, uploadMediaFile, validateImageFile } from "../api/media";
 import * as client from "../api/client";
 
-describe("uploadMediaFile", () => {
-  beforeEach(() => vi.restoreAllMocks());
+/** XHR 替身：记录请求并允许测试手动触发进度/成功/中止 */
+class FakeXHR {
+  static instances: FakeXHR[] = [];
+  status = 200;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  upload: {
+    onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
+  } = { onprogress: null };
+  method = "";
+  url = "";
+  headers: Record<string, string> = {};
+  body: unknown = null;
 
-  it("按创建会话、上传二进制、完成顺序提交", async () => {
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+  setRequestHeader(k: string, v: string) {
+    this.headers[k] = v;
+  }
+  send(body: unknown) {
+    this.body = body;
+    FakeXHR.instances.push(this);
+  }
+  abort() {
+    this.onabort?.();
+  }
+  succeed(status = 200) {
+    this.status = status;
+    this.onload?.();
+  }
+}
+
+async function waitXhr(): Promise<FakeXHR> {
+  // POST 会话（apiRequest mock）→ PUT XHR 需要几个微任务推进
+  await vi.waitFor(() => {
+    if (FakeXHR.instances.length === 0) throw new Error("XHR not sent yet");
+  });
+  return FakeXHR.instances[0];
+}
+
+describe("uploadMediaFile", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    FakeXHR.instances = [];
+    vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
+  });
+
+  it("按创建会话、上传二进制（XHR）、完成顺序提交", async () => {
     const request = vi.spyOn(client, "apiRequest")
-      .mockResolvedValueOnce({ upload_id: "u1", kind: "image", max_bytes: null, expires_at: "later" })
-      .mockResolvedValueOnce({ detail: "ok" })
+      .mockResolvedValueOnce({ upload_id: "u1", kind: "image", max_bytes: null, expires_at: "later", presigned_url: "http://minio.local/elysia-media/tmp/u1?sig=1" })
       .mockResolvedValueOnce({ media_id: "m1", descriptor: { media_id: "m1" } });
     const file = new File(["hello"], "a.png", { type: "image/png" });
-    const result = await uploadMediaFile(file, "image");
+    const pending = uploadMediaFile(file, "image");
+    const xhr = await waitXhr();
+    expect(xhr.method).toBe("PUT");
+    expect(xhr.url).toBe("/minio/elysia-media/tmp/u1?sig=1"); // 预签名 URL 改写为同源代理路径
+    expect(xhr.headers["Content-Type"]).toBe("image/png");
+    // 预签名 URL 自带鉴权，绝不可再附加 Authorization（破坏签名）
+    expect(xhr.headers["Authorization"]).toBeUndefined();
+    expect(xhr.body).toBe(file);
+    xhr.succeed();
+    const result = await pending;
     expect(result.media_id).toBe("m1");
     expect(request.mock.calls.map(([path]) => path)).toEqual([
       "/media/uploads",
-      "/media/uploads/u1",
       "/media/uploads/u1:complete",
     ]);
-    expect(request.mock.calls[1][1]).toMatchObject({ method: "PUT", body: file });
+  });
+
+  it("上传进度经 onprogress 回调上报", async () => {
+    vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ upload_id: "up", kind: "image", max_bytes: null, expires_at: "later", presigned_url: "http://minio.local/elysia-media/tmp/up?sig=2" })
+      .mockResolvedValueOnce({ media_id: "m3", descriptor: { media_id: "m3" } });
+    const file = new File(["hello"], "a.png", { type: "image/png" });
+    const events: Array<{ loaded: number; total: number }> = [];
+    const pending = uploadMediaFile(file, "image", {
+      onProgress: (p) => events.push(p),
+    });
+    const xhr = await waitXhr();
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 2, total: 5 });
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 5 });
+    xhr.succeed();
+    await pending;
+    expect(events).toEqual([
+      { loaded: 2, total: 5 },
+      { loaded: 5, total: 5 },
+    ]);
+  });
+
+  it("signal 中止时 abort XHR 并 DELETE 清理临时存储", async () => {
+    const request = vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ upload_id: "uc", kind: "image", max_bytes: null, expires_at: "later", presigned_url: "http://minio.local/elysia-media/tmp/uc?sig=3" })
+      .mockResolvedValueOnce(undefined); // DELETE 清理
+    const controller = new AbortController();
+    const file = new File(["hello"], "a.png", { type: "image/png" });
+    const pending = uploadMediaFile(file, "image", { signal: controller.signal });
+    const xhr = await waitXhr();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    // 取消后 fire-and-forget DELETE /media/uploads/{id}
+    await vi.waitFor(() => {
+      if (!request.mock.calls.some(([path, opts]) => path === "/media/uploads/uc" && (opts as { method?: string })?.method === "DELETE")) {
+        throw new Error("DELETE not called yet");
+      }
+    });
+    expect(xhr.body).toBe(file);
   });
 
   it("max_bytes=null（不设上限）时直接继续上传二进制", async () => {
-    const request = vi.spyOn(client, "apiRequest")
-      .mockResolvedValueOnce({ upload_id: "u2", kind: "voice", max_bytes: null, expires_at: "later" })
-      .mockResolvedValueOnce({ detail: "ok" })
+    vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ upload_id: "u2", kind: "voice", max_bytes: null, expires_at: "later", presigned_url: "http://minio.local/elysia-media/tmp/u2?sig=4" })
       .mockResolvedValueOnce({ media_id: "m2", descriptor: { media_id: "m2" } });
     // 远超旧 30MB 上限的声明体积也照常走三步
     const file = new File([new Uint8Array(1024)], "long.webm", { type: "audio/webm" });
     Object.defineProperty(file, "size", { value: 512 * 1024 * 1024 });
-    const result = await uploadMediaFile(file, "voice");
+    const pending = uploadMediaFile(file, "voice");
+    const xhr = await waitXhr();
+    expect(xhr.method).toBe("PUT");
+    xhr.succeed();
+    const result = await pending;
     expect(result.media_id).toBe("m2");
-    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("超过服务端声明大小时不上传二进制，并展示具体上限", async () => {

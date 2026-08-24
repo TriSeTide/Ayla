@@ -4,15 +4,16 @@
  * 视觉（design.md §6 模态层级）：indigo 压暗遮罩 + 玻璃质感关闭钮，
  * 原图/视频 object-fit contain 居中；底部玻璃胶囊操作条（保存 + 多图计数）。
  * 行为：ESC / 点击遮罩空白关闭；打开即 focus 关闭按钮（键盘可达）；←/→ 切换多图。
- * 图片经 ResourceImage 加载（Bearer 鉴权 + blob 缓存，与气泡共享缓存秒开）；
- * 视频渲染 <video controls autoPlay>（气泡内仅首帧+播放键，此处完整预览）；
- * 保存走 apiRequestBlob → objectURL 触发下载（浏览器原生下载不带 token）。
+ * 图片经 ResourceImage 加载（短时签名 URL 直连，渐进解码秒开）；
+ * 视频渲染 <video controls autoPlay>（签名 URL 原生 Range 流式播放，
+ * 即点即播不再全量下载）；保存用签名 URL + a[download]（同源生效，
+ * 浏览器原生下载流式写盘）。
  * 乐观消息（未上传）的本地预览（localUrl）只展示，不可保存。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MediaDescriptor } from "../../api/types";
-import { apiRequestBlob } from "../../api/client";
-import { mediaContentUrl } from "../../api/media";
+import { getSignedMediaUrl, mediaContentUrl } from "../../api/media";
 import { ResourceImage } from "../ResourceImage";
 import { IconClose, IconDownload } from "../icons";
 
@@ -55,12 +56,9 @@ function extFromMime(mime: string): string {
   return table[mime] ?? (mime.startsWith("video/") ? "mp4" : "png");
 }
 
-/** 触发浏览器保存二进制（内部媒体需带 Bearer 拉取） */
+/** 触发浏览器保存（签名 URL + a[download]，同源生效；原生下载流式写盘零内存） */
 async function downloadMedia(media: MediaDescriptor): Promise<void> {
-  const blob = await apiRequestBlob(
-    mediaContentUrl(media.media_id).replace(/^\/api\/v1/, ""),
-  );
-  const url = URL.createObjectURL(blob);
+  const url = await getSignedMediaUrl(media.media_id);
   const a = document.createElement("a");
   a.href = url;
   const prefix = media.kind === "video" ? "ayla-video" : "ayla-image";
@@ -68,30 +66,24 @@ async function downloadMedia(media: MediaDescriptor): Promise<void> {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // 给浏览器一点时间启动下载再回收 objectURL
-  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/** 查看器内视频播放器：带 Bearer 拉 blob，完整 controls + 自动播放 */
+/** 查看器内视频播放器：签名 URL 直连，原生 Range 流式播放（即点即播） */
 function VideoPlayer({ media }: { media: MediaDescriptor }) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    let url: string | null = null;
-    apiRequestBlob(mediaContentUrl(media.media_id).replace(/^\/api\/v1/, ""))
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setSrc(url);
+    getSignedMediaUrl(media.media_id)
+      .then((url) => {
+        if (!cancelled) setSrc(url);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
     };
   }, [media.media_id]);
 
@@ -171,7 +163,9 @@ export function ImageViewer({
     }
   };
 
-  return (
+  // Portal 挂载到 body：脱离消息气泡的层叠上下文——祖先的 backdrop-filter/
+  // transform 会把 position:fixed 的包含块降级为该祖先，导致查看器被困在气泡内。
+  return createPortal(
     <div
       className="image-viewer"
       role="dialog"
@@ -248,6 +242,7 @@ export function ImageViewer({
       {saveError && (
         <div className="image-viewer-error" role="alert">保存失败，请重试</div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

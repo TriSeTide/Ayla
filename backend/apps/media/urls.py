@@ -20,6 +20,11 @@ urlpatterns = [
         views.MediaSaveView.as_view(),
         name="media-save",
     ),
+    path(
+        "<str:media_id>:sign",
+        views.MediaSignView.as_view(),
+        name="media-sign",
+    ),
     path("<str:media_id>/", views.MediaDetailView.as_view(), name="media-detail"),
     path(
         "<str:media_id>/content",

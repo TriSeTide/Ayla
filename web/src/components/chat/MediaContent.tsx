@@ -17,6 +17,7 @@ import {
   fetchMediaDescriptor,
   formatBytes,
   formatDuration,
+  getSignedMediaUrl,
   mediaContentUrl,
   resolveMediaPath,
 } from "../../api/media";
@@ -135,7 +136,7 @@ function ImageMedia({
 /* ---------- 视频 ---------- */
 
 /**
- * 视频首帧帧块：本地预览（乐观消息）或服务端 blob（Bearer 拉取），
+ * 视频首帧帧块：本地预览（乐观消息）或服务端签名 URL 直连，
  * 渲染 <video preload=metadata> 首帧 + 播放键徽标；点击触发 onOpen（查看器）。
  */
 function VideoFrame({
@@ -152,14 +153,15 @@ function VideoFrame({
   style?: CSSProperties;
   ariaLabel?: string;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(localUrl ?? null);
+  const [videoSrc, setVideoSrc] = useState<string | null>(localUrl ?? null);
   const [failed, setFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // 本地预览直接可用；服务端媒体带 Bearer 拉 blob（<video src> 无法携带 Authorization）
+  // 本地预览直接可用；服务端媒体用短时签名 URL 直连——
+  // <video src> 原生 Range 流式加载，首帧秒出，不再 fetch 全量 blob 占内存
   useEffect(() => {
     if (localUrl) {
-      setBlobUrl(localUrl);
+      setVideoSrc(localUrl);
       return;
     }
     if (!media) {
@@ -167,19 +169,16 @@ function VideoFrame({
       return;
     }
     let cancelled = false;
-    let url: string | null = null;
-    apiRequestBlob(mediaContentUrl(media.media_id).slice(API_PREFIX.length))
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setBlobUrl(url);
+    setFailed(false);
+    getSignedMediaUrl(media.media_id)
+      .then((url) => {
+        if (!cancelled) setVideoSrc(url);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
     };
   }, [media, localUrl]);
 
@@ -197,7 +196,7 @@ function VideoFrame({
 
   return (
     <div className="media-frame media-frame-video" style={style}>
-      {blobUrl ? (
+      {videoSrc ? (
         <button
           type="button"
           className="media-frame-open"
@@ -208,7 +207,7 @@ function VideoFrame({
           {/* 气泡内仅展示首帧+播放键（禁交互）；完整预览在查看器中 */}
           <video
             ref={videoRef}
-            src={blobUrl}
+            src={videoSrc}
             className="media-video"
             preload="metadata"
             muted
@@ -270,6 +269,16 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
   if (segments.length === 0) {
     return <MediaPlaceholder state="unknown" label="图文消息" />;
   }
+
+  // 乐观消息本地预览 URL 由组件生命周期管理：仅组件卸载时 revoke（空 deps），
+  // 避免 sendOptimistic 在替换渲染前 revoke 造成「上传中空白图」竞态。
+  const localUrls = useRef<string[]>([]);
+  localUrls.current = (msg.localMedia ?? []).map((m) => m.url);
+  useEffect(() => {
+    return () => {
+      for (const u of localUrls.current) URL.revokeObjectURL(u);
+    };
+  }, []);
 
   return (
     <>
@@ -517,6 +526,22 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
 function FileMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }) {
   // 契约：file 消息的文件名在 content 字段（后端 CreateMessageSerializer 约定）
   const name = caption(msg) || "附件";
+  // 原生 <a> 下载不带 Authorization：挂载即签短时 URL（同源 download 属性生效）
+  const [href, setHref] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getSignedMediaUrl(media.media_id)
+      .then((url) => {
+        if (!cancelled) setHref(url);
+      })
+      .catch(() => {
+        // 签名失败保持 null：点击时提示
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [media.media_id]);
+
   return (
     <div className="file-card">
       <span className="file-icon">
@@ -530,9 +555,15 @@ function FileMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor })
       </span>
       <a
         className="file-download"
-        href={mediaContentUrl(media.media_id)}
+        href={href ?? undefined}
         download={name}
         aria-label={`下载 ${name}`}
+        onClick={(e) => {
+          if (!href) {
+            e.preventDefault();
+            window.setTimeout(() => window.alert("附件准备中，请稍后再试"), 0);
+          }
+        }}
       >
         <IconDownload width={16} height={16} />
       </a>

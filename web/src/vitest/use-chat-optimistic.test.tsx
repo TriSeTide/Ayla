@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as chatApi from "../api/chat";
 import * as mediaApi from "../api/media";
-import { sendOptimistic, retryOptimistic, removeOptimistic, type PickedMediaItem } from "../hooks/useChat";
+import { sendOptimistic, retryOptimistic, removeOptimistic, cancelOptimistic, type PickedMediaItem } from "../hooks/useChat";
 import { useMessageStore } from "../stores/message";
 import { segmentPreview, segmentText } from "../utils/segment";
 
@@ -152,6 +152,38 @@ describe("useChat 乐观发送（M7 store 级）", () => {
     removeOptimistic("c1", p);
     expect(useMessageStore.getState().buckets["c1"].messages).toHaveLength(0);
     expect(revoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("上传进度经 onProgress 聚合写入 store（uploadProgress 百分比）", async () => {
+    let capture: ((p: { loaded: number; total: number }) => void) | undefined;
+    vi.spyOn(mediaApi, "uploadMediaFile").mockImplementation((_f, _k, opts) => {
+      capture = opts?.onProgress;
+      return new Promise(() => {}); // 挂起，保持 pending
+    });
+    send.mockReturnValue(new Promise(() => {}));
+    sendOptimistic("c1", { text: "", picked: picked(2) });
+    await vi.waitFor(() => expect(capture).toBeTruthy());
+    // 每个 File 真实大小 1 字节；第一个文件完成 → 聚合 1/2 = 50%
+    capture!({ loaded: 1, total: 1 });
+    const msgs = useMessageStore.getState().buckets["c1"].messages;
+    expect(msgs[0].pending).toBe(true);
+    expect(msgs[0].uploadProgress).toBe(50);
+  });
+
+  it("cancelOptimistic 中止上传（signal aborted）并删除气泡", async () => {
+    const signalRef: { current?: AbortSignal } = {};
+    vi.spyOn(mediaApi, "uploadMediaFile").mockImplementation((_f, _k, opts) => {
+      signalRef.current = opts?.signal;
+      return new Promise(() => {}); // 模拟传输中永不完成
+    });
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:stub", revokeObjectURL: revoke });
+    sendOptimistic("c1", { text: "", picked: picked(1) });
+    const p = useMessageStore.getState().buckets["c1"].messages[0];
+    cancelOptimistic("c1", p);
+    expect(signalRef.current?.aborted).toBe(true);
+    expect(useMessageStore.getState().buckets["c1"].messages).toHaveLength(0);
+    expect(revoke).toHaveBeenCalledWith("blob:fake-0");
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * MediaContent 契约测试（图片原图渲染 / 查看器 / 语音互斥 / 气泡无占位文案）：
- * - 图片/表情直接渲染原图 content（缩略图是 JPEG 静帧：压画质 + GIF 变静图）；
- * - 点击图片打开全屏查看器（dialog），可关闭、可保存；
+ * - 图片/表情经短时签名 URL 直连原图 content（缩略图是 JPEG 静帧：压画质 + GIF 变静图）；
+ * - 点击图片打开全屏查看器（dialog），可关闭、可保存（签名 URL 原生下载）；
  * - 语音气泡带进度条，全局同时只播放一条（新播放抢占旧播放）；
  * - MessageBubble 不再显示媒体消息的「图片/语音」占位文案。
  */
@@ -12,7 +12,10 @@ import { MediaContent } from "../components/chat/MediaContent";
 import { MessageBubble } from "../components/chat/MessageBubble";
 import { resetAudioPlayback } from "../utils/mediaPlayback";
 
+/** 语音等小媒体仍走 Bearer blob 通道 */
 const blobByPath = new Map<string, Blob>();
+/** 图片/视频签名 URL 直连通道：media_id → 签名 URL */
+const signedById = new Map<string, string>();
 
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
@@ -21,6 +24,18 @@ vi.mock("../api/client", async (importOriginal) => {
     apiRequestBlob: vi.fn(async (path: string) => {
       const hit = blobByPath.get(path);
       if (!hit) throw new Error(`no blob stub for ${path}`);
+      return hit;
+    }),
+  };
+});
+
+vi.mock("../api/media", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/media")>();
+  return {
+    ...actual,
+    getSignedMediaUrl: vi.fn(async (mediaId: string) => {
+      const hit = signedById.get(mediaId);
+      if (!hit) throw new Error(`no signed url stub for ${mediaId}`);
       return hit;
     }),
   };
@@ -63,6 +78,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetAudioPlayback();
   blobByPath.clear();
+  signedById.clear();
   Object.defineProperty(URL, "createObjectURL", {
     value: vi.fn(() => `blob:mock-${Math.random()}`),
     configurable: true,
@@ -71,22 +87,24 @@ beforeEach(() => {
 });
 
 describe("ImageMedia 原图渲染", () => {
-  it("加载原图 content（不走缩略图），保画质且 GIF 保持动图", async () => {
-    const png = new Blob(["png"], { type: "image/png" });
-    blobByPath.set("/media/med-1/content", png);
+  it("经签名 URL 直连原图 content（不走缩略图），保画质且 GIF 保持动图", async () => {
+    signedById.set("med-1", "/signed/med-1");
     render(<MediaContent msg={imageMessage(mediaDescriptor())} />);
     await waitFor(() => {
       const img = document.querySelector("img.media-image") as HTMLImageElement | null;
       expect(img).not.toBeNull();
     });
-    // apiRequestBlob 只应请求 content（原图），绝不请求 thumbnail
-    const { apiRequestBlob } = await import("../api/client");
-    expect(apiRequestBlob).toHaveBeenCalledTimes(1);
-    expect(apiRequestBlob).toHaveBeenCalledWith("/media/med-1/content");
+    // getSignedMediaUrl 只应请求该媒体；<img src> 用签名 URL（原生流式加载）
+    const { getSignedMediaUrl } = await import("../api/media");
+    expect(getSignedMediaUrl).toHaveBeenCalledTimes(1);
+    expect(getSignedMediaUrl).toHaveBeenCalledWith("med-1");
+    expect((document.querySelector("img.media-image") as HTMLImageElement).getAttribute("src")).toBe(
+      "/signed/med-1",
+    );
   });
 
   it("点击图片打开查看器（dialog + 保存按钮），ESC 关闭", async () => {
-    blobByPath.set("/media/med-1/content", new Blob(["png"], { type: "image/png" }));
+    signedById.set("med-1", "/signed/med-1");
     render(<MediaContent msg={imageMessage(mediaDescriptor())} />);
     const openBtn = await screen.findByRole("button", { name: "查看图片原图" });
     fireEvent.click(openBtn);
@@ -96,19 +114,18 @@ describe("ImageMedia 原图渲染", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
-  it("保存图片经鉴权通道拉取二进制", async () => {
-    // 独立 media_id：避开 ResourceImage 模块级 blob 缓存对调用计数的污染
+  it("保存图片走签名 URL 原生下载通道（a[download] 同源生效）", async () => {
+    // 独立 media_id：避开签名缓存对调用计数的污染
     const desc = mediaDescriptor({ media_id: "med-save" });
     const msg = imageMessage(desc);
     msg.media_id = "med-save";
-    blobByPath.set("/media/med-save/content", new Blob(["png"], { type: "image/png" }));
+    signedById.set("med-save", "/signed/med-save");
     render(<MediaContent msg={msg} />);
     fireEvent.click(await screen.findByRole("button", { name: "查看图片原图" }));
     fireEvent.click(screen.getByRole("button", { name: /保存/ }));
-    const { apiRequestBlob } = await import("../api/client");
+    const { getSignedMediaUrl } = await import("../api/media");
     await waitFor(() => {
-      expect(vi.mocked(apiRequestBlob)).toHaveBeenCalledTimes(2); // 气泡加载 + 保存
-      expect(vi.mocked(apiRequestBlob)).toHaveBeenLastCalledWith("/media/med-save/content");
+      expect(getSignedMediaUrl).toHaveBeenCalledWith("med-save");
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -237,13 +254,14 @@ describe("VideoMedia 首帧气泡与查看器", () => {
     };
   }
 
-  it("气泡渲染首帧 video（禁交互）+ 播放键，点击打开查看器", async () => {
-    blobByPath.set("/media/vd-1/content", new Blob(["mp4"], { type: "video/mp4" }));
+  it("气泡渲染首帧 video（签名 URL 直连、禁交互）+ 播放键，点击打开查看器", async () => {
+    signedById.set("vd-1", "/signed/vd-1");
     render(<MediaContent msg={videoMessage()} />);
-    // 气泡内 video 元素存在且不带 controls（仅首帧展示）
+    // 气泡内 video 元素存在且不带 controls（仅首帧展示），src 为签名 URL
     await waitFor(() => expect(document.querySelector("video.media-video")).not.toBeNull());
     const bubbleVideo = document.querySelector("video.media-video") as HTMLVideoElement;
     expect(bubbleVideo.hasAttribute("controls")).toBe(false);
+    expect(bubbleVideo.getAttribute("src")).toBe("/signed/vd-1");
     expect(screen.getByRole("button", { name: "查看视频" })).toBeInTheDocument();
     // 点击进入查看器：dialog 内是带 controls 的完整播放器
     fireEvent.click(screen.getByRole("button", { name: "查看视频" }));
@@ -253,14 +271,14 @@ describe("VideoMedia 首帧气泡与查看器", () => {
     expect((viewerVideo as HTMLVideoElement).hasAttribute("controls")).toBe(true);
   });
 
-  it("查看器保存视频经鉴权通道拉取二进制", async () => {
-    blobByPath.set("/media/vd-2/content", new Blob(["mp4"], { type: "video/mp4" }));
+  it("查看器保存视频走签名 URL 原生下载通道", async () => {
+    signedById.set("vd-2", "/signed/vd-2");
     render(<MediaContent msg={videoMessage("vd-2")} />);
     fireEvent.click(await screen.findByRole("button", { name: "查看视频" }));
     fireEvent.click(await screen.findByRole("button", { name: /保存/ }));
-    const { apiRequestBlob } = await import("../api/client");
+    const { getSignedMediaUrl } = await import("../api/media");
     await waitFor(() => {
-      expect(vi.mocked(apiRequestBlob)).toHaveBeenCalledWith("/media/vd-2/content");
+      expect(getSignedMediaUrl).toHaveBeenCalledWith("vd-2");
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -268,7 +286,7 @@ describe("VideoMedia 首帧气泡与查看器", () => {
 
 describe("MessageBubble 媒体气泡不显示占位文案", () => {
   it("图片消息即使 content=「图片」也不在气泡里渲染文字", async () => {
-    blobByPath.set("/media/med-1/content", new Blob(["png"], { type: "image/png" }));
+    signedById.set("med-1", "/signed/med-1");
     render(
       <MessageBubble
         message={imageMessage(mediaDescriptor())}
@@ -344,8 +362,8 @@ describe("MixedMedia 图文混排（type=mixed + segments）", () => {
   }
 
   it("文本段与媒体段流式渲染，无占位文案", async () => {
-    blobByPath.set("/media/med-1/content", new Blob(["png"], { type: "image/png" }));
-    blobByPath.set("/media/med-v/content", new Blob(["mp4"], { type: "video/mp4" }));
+    signedById.set("med-1", "/signed/med-1");
+    signedById.set("med-v", "/signed/med-v");
     render(<MediaContent msg={mixedMessage()} />);
     expect(screen.getByText("看看这个")).toBeInTheDocument();
     expect(screen.getByText("和视频")).toBeInTheDocument();
@@ -355,8 +373,8 @@ describe("MixedMedia 图文混排（type=mixed + segments）", () => {
   });
 
   it("点击图片打开共享查看器，多图左右切换（计数 1/2 → 2/2）", async () => {
-    blobByPath.set("/media/med-1/content", new Blob(["png"], { type: "image/png" }));
-    blobByPath.set("/media/med-v/content", new Blob(["mp4"], { type: "video/mp4" }));
+    signedById.set("med-1", "/signed/med-1");
+    signedById.set("med-v", "/signed/med-v");
     render(<MediaContent msg={mixedMessage()} />);
     fireEvent.click(await screen.findByRole("button", { name: "查看图片" }));
     expect(screen.getByRole("dialog", { name: "图片查看：1/2" })).toBeInTheDocument();
