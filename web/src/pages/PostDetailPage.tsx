@@ -349,7 +349,17 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             {post.images.length > 0 && (
               <div className={`post-card-images count-${Math.min(post.images.length, 9)}`}>
                 {post.images.slice(0, 9).map((img) =>
-                  img.media?.thumbnail ? (
+                  img.media?.kind === "video" ? (
+                    // 视频内联播放（详情页 controls 完整可用）
+                    <video
+                      key={img.id}
+                      src={img.media.thumbnail || undefined}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="post-card-img post-card-video-el"
+                    />
+                  ) : img.media?.thumbnail ? (
                     <ResourceImage
                       key={img.id}
                       src={img.media.thumbnail}

@@ -41,7 +41,8 @@ export function PostCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
-  const images = post.images.filter((i) => i.media?.thumbnail);
+  // 媒体列表（图片用缩略图；视频无派生缩略图，用 video 元素首帧）
+  const mediaList = post.images.filter((i) => i.media);
   const longBody = post.body.length > 120;
 
   const visibilityLabels = getVisibilityLabels(post);
@@ -85,17 +86,31 @@ export function PostCard({
             {expanded ? "收起" : "展开"}
           </button>
         )}
-        {images.length > 0 && (
-          <div className={`post-card-images count-${Math.min(images.length, 9)}`}>
-            {images.slice(0, 9).map((img) => (
-              <ResourceImage
-                key={img.id}
-                src={img.media!.thumbnail!}
-                alt="帖子图片"
-                loading="lazy"
-                className="post-card-img"
-              />
-            ))}
+        {mediaList.length > 0 && (
+          <div className={`post-card-images count-${Math.min(mediaList.length, 9)}`}>
+            {mediaList.slice(0, 9).map((img) =>
+              img.media?.kind === "video" ? (
+                // 视频卡片：首帧 + 播放角标（点击进详情播放）
+                <div key={img.id} className="post-card-img post-card-video">
+                  <video
+                    src={img.media.thumbnail || undefined}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="post-card-video-el"
+                  />
+                  <span className="post-card-video-badge" aria-hidden="true">▶</span>
+                </div>
+              ) : (
+                <ResourceImage
+                  key={img.id}
+                  src={img.media?.thumbnail || ""}
+                  alt="帖子图片"
+                  loading="lazy"
+                  className="post-card-img"
+                />
+              ),
+            )}
           </div>
         )}
       </button>

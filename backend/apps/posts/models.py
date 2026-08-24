@@ -66,7 +66,10 @@ class Post(models.Model):
 
 
 class PostImage(models.Model):
-    """帖子配图（media 三步上传产物的引用，order 定序）。"""
+    """帖子媒体（media 预签名直传产物的引用，order 定序）。
+
+    表名/关系名沿用历史（images），语义已扩展为图片+视频混合媒体列表。
+    """
 
     id = models.AutoField(primary_key=True)
     post = models.ForeignKey(Post, related_name="images", on_delete=models.CASCADE)

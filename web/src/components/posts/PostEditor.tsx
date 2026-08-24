@@ -9,13 +9,18 @@
  */
 import { useState } from "react";
 import * as postsApi from "../../api/posts";
-import { mediaContentUrl, resolveMediaPath, uploadMediaFile } from "../../api/media";
+import {
+  mediaContentUrl,
+  resolveMediaPath,
+  uploadMediaFile,
+  validateMediaFile,
+} from "../../api/media";
 import type { MediaDescriptor, Post } from "../../api/types";
 import { IconImage, IconChevronUp, IconChevronDown } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
-type PostImageDraft = {
+type PostMediaDraft = {
   mediaId: string;
   descriptor: MediaDescriptor;
 };
@@ -40,7 +45,7 @@ export function PostEditor({
     group ? { public: false, friends: false, group: true } : { public: true, friends: false, group: false }
   );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
-  const [images, setImages] = useState<PostImageDraft[]>([]);
+  const [images, setImages] = useState<PostMediaDraft[]>([]);
   const [failedFiles, setFailedFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -51,18 +56,25 @@ export function PostEditor({
     if (uploading || submitting || files.length === 0) return;
     const remaining = Math.max(0, 9 - images.length);
     if (files.length > remaining) {
-      setError(`最多添加 9 张图片，还可添加 ${remaining} 张`);
+      setError(`最多添加 9 个媒体，还可添加 ${remaining} 个`);
       files = files.slice(0, remaining);
     }
     if (files.length === 0) return;
 
     setUploading(true);
     setError(null);
-    const uploaded: PostImageDraft[] = [];
+    const uploaded: PostMediaDraft[] = [];
     const failed: File[] = [];
     for (const file of files) {
+      // 类型白名单校验（图片/视频），kind 随文件类型自动分流
+      const check = validateMediaFile(file);
+      if (check.error) {
+        setError(check.error);
+        failed.push(file);
+        continue;
+      }
       try {
-        const result = await uploadMediaFile(file, "image");
+        const result = await uploadMediaFile(file, check.kind);
         uploaded.push({ mediaId: result.media_id, descriptor: result.descriptor });
       } catch {
         failed.push(file);
@@ -70,7 +82,7 @@ export function PostEditor({
     }
     setImages((prev) => [...prev, ...uploaded]);
     setFailedFiles((prev) => [...prev, ...failed]);
-    if (failed.length > 0) setError(`${failed.length} 张图片上传失败，可点击重试`);
+    if (failed.length > 0) setError(`${failed.length} 个媒体上传失败，可点击重试`);
     setUploading(false);
   };
 
@@ -175,18 +187,28 @@ export function PostEditor({
         <>
           <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
           {images.length > 0 && (
-            <div className="post-editor-images" aria-label={`已添加 ${images.length} 张图片`}>
+            <div className="post-editor-images" aria-label={`已添加 ${images.length} 个媒体`}>
               {images.map((image) => (
                 <div className="post-editor-image" key={image.mediaId}>
-                  <ResourceImage
-                    src={resolveMediaPath(image.descriptor.thumbnail) ?? mediaContentUrl(image.mediaId)}
-                    alt="已添加的帖子图片"
-                    loading="lazy"
-                  />
+                  {image.descriptor.kind === "video" ? (
+                    <video
+                      src={resolveMediaPath(image.descriptor.thumbnail ?? "") ?? mediaContentUrl(image.mediaId)}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="post-editor-video-preview"
+                    />
+                  ) : (
+                    <ResourceImage
+                      src={resolveMediaPath(image.descriptor.thumbnail) ?? mediaContentUrl(image.mediaId)}
+                      alt="已添加的帖子媒体"
+                      loading="lazy"
+                    />
+                  )}
                   <button
                     type="button"
                     className="post-editor-image-remove"
-                    aria-label="移除图片"
+                    aria-label="移除媒体"
                     disabled={submitting || uploading}
                     onClick={() => setImages((prev) => prev.filter((item) => item.mediaId !== image.mediaId))}
                   >
@@ -208,16 +230,16 @@ export function PostEditor({
                 void uploadFiles(retry);
               }}
             >
-              重试失败图片（{failedFiles.length}）
+              重试失败媒体（{failedFiles.length}）
             </button>
           )}
           <div className="post-editor-actions">
-            <label className="post-editor-image-btn" aria-label="添加帖子图片">
+            <label className="post-editor-image-btn" aria-label="添加图片或视频">
               <IconImage width={18} height={18} />
-              <span>图片 {images.length}/9</span>
+              <span>图片/视频 {images.length}/9</span>
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,video/*"
                 multiple
                 hidden
                 disabled={submitting || uploading || images.length >= 9}

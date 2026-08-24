@@ -147,9 +147,10 @@ class CommentSerializer(serializers.ModelSerializer):
 
 
 class CreatePostSerializer(serializers.Serializer):
-    """发帖入参：title/body 必填，images 为 media_id 列表（≤9）。"""
+    """发帖入参：title/body 必填，images 为 media_id 列表（≤9；图片或视频）。"""
 
     MAX_IMAGES = 9
+    ALLOWED_KINDS = ("image", "video")
 
     title = serializers.CharField(required=True, allow_blank=False, max_length=128)
     body = serializers.CharField(required=True, max_length=10000)
@@ -158,6 +159,7 @@ class CreatePostSerializer(serializers.Serializer):
     allowed_group_ids = serializers.ListField(
         child=serializers.CharField(max_length=32), required=False, default=list
     )
+    # 字段名沿用 images（历史契约）；语义已扩展为帖子媒体列表（图片/视频）
     images = serializers.ListField(
         child=serializers.CharField(max_length=64), required=False, default=list
     )
@@ -169,7 +171,7 @@ class CreatePostSerializer(serializers.Serializer):
 
     def validate_images(self, value):
         if len(value) > self.MAX_IMAGES:
-            raise serializers.ValidationError(f"最多 {self.MAX_IMAGES} 张图片")
+            raise serializers.ValidationError(f"最多 {self.MAX_IMAGES} 个媒体")
         return value
 
     def validate(self, attrs):
@@ -184,7 +186,7 @@ class CreatePostSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"images": "media_not_found"})
             if media.status != MediaObject.STATUS_READY:
                 raise serializers.ValidationError({"images": "media_not_ready"})
-            if media.kind != MediaObject.KIND_IMAGE:
+            if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_VIDEO):
                 raise serializers.ValidationError({"images": "media_type_mismatch"})
             if user is not None and not can_access_media(user, media):
                 raise PermissionDenied({"images": "media_access_denied"})
@@ -211,7 +213,7 @@ class UpdatePostSerializer(serializers.Serializer):
 
 
 class CreateCommentSerializer(serializers.Serializer):
-    """发评论入参：body 必填，reply_to 可选（须在本帖内），media_id 可选（图片评论）。"""
+    """发评论入参：body 必填，reply_to 可选（须在本帖内），media_id 可选（图片/视频评论）。"""
 
     body = serializers.CharField(required=True, max_length=2000)
     reply_to = serializers.IntegerField(required=False, allow_null=True, default=None)
@@ -240,7 +242,7 @@ class CreateCommentSerializer(serializers.Serializer):
             raise serializers.ValidationError({"media_id": "media_not_found"})
         if media.status != MediaObject.STATUS_READY:
             raise serializers.ValidationError({"media_id": "media_not_ready"})
-        if media.kind != MediaObject.KIND_IMAGE:
+        if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_VIDEO):
             raise serializers.ValidationError({"media_id": "media_type_mismatch"})
         # 越权是授权问题 → 403，与 400 类校验错误区分（同 CreateMessageSerializer）
         request = self.context.get("request")
