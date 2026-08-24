@@ -98,9 +98,13 @@ function ImageMedia({
   isEmoji: boolean;
 }) {
   const label = isEmoji ? "表情" : "图片";
-  // 直接渲染原图 content：缩略图是 320px JPEG 静帧（压画质 + GIF 变静图），
-  // 原图经 ResourceImage 的 media_id 级 blob 缓存加载，气泡与查看器共享缓存。
-  const src = mediaContentUrl(media.media_id);
+  // 气泡内用缩略图（320px JPEG，几 KB~百 KB 级）——QQ 同款策略，多图/大图不再卡顿；
+  // 点击进查看器才加载原图。GIF 例外：缩略图是静帧会丢动图，气泡仍走原图。
+  const isGif = media.mime_type === "image/gif";
+  const src =
+    !isEmoji && !isGif && media.thumbnail
+      ? media.thumbnail
+      : mediaContentUrl(media.media_id);
   const [viewerOpen, setViewerOpen] = useState(false);
 
   return (

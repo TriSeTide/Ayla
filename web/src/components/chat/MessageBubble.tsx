@@ -215,11 +215,7 @@ export function MessageBubble({
         </div>
         <div className="bubble-meta">
           <span className="bubble-time">{timeAgo(message.created_at)}</span>
-          {isSelf && !recalled && (
-            <span className={`read-mark ${message.status === "read" ? "read" : ""}`}>
-              {message.status === "read" ? "已读" : "未读"}
-            </span>
-          )}
+          {/* 已读/未读回执标记不实现（产品决策）：消息状态仅内部流转，不在气泡展示 */}
         </div>
       </div>
       {actions}
