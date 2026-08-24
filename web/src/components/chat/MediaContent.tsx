@@ -123,6 +123,7 @@ function ImageMedia({
             className={isEmoji ? "media-emoji" : "media-image"}
             loading="lazy"
             fallback={<span className="media-frame-skeleton" />}
+            variant={src.includes("/thumbnail") ? "thumb" : undefined}
           />
         </button>
       </div>
@@ -298,6 +299,10 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
           if (seg.type === "image") {
             const local = localFor();
             const segIdx = mediaSegs.indexOf(seg);
+            // 气泡内用缩略图（GIF 例外保动图），点击进查看器看原图；
+            // 乐观阶段 seg.media 为 null → 走本地预览分支，此处不可解引用
+            const isSegGif = seg.media?.mime_type === "image/gif";
+            const hasThumb = !!seg.media && !isSegGif && !!seg.media.thumbnail;
             return (
               <button
                 key={i}
@@ -309,11 +314,12 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
               >
                 {seg.media ? (
                   <ResourceImage
-                    src={mediaContentUrl(seg.media.media_id)}
+                    src={hasThumb && seg.media.thumbnail ? seg.media.thumbnail : mediaContentUrl(seg.media.media_id)}
                     alt="图片"
                     className="mixed-img-media"
                     loading="lazy"
                     fallback={<span className="media-frame-skeleton" />}
+                    variant={hasThumb ? "thumb" : undefined}
                   />
                 ) : local ? (
                   <img src={local.url} alt="图片" className="mixed-img-media" />

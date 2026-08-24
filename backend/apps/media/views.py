@@ -208,7 +208,16 @@ class MediaSignView(APIView):
         if not services.can_access_media(request.user, media):
             return Response({"detail": "无权访问"}, status=status.HTTP_403_FORBIDDEN)
         expires = services.MEDIA_VIEW_URL_TTL_SECONDS
-        url = storage.get_storage().presign_get(media.storage_path, expires)
+        # variant=thumb → 缩略图派生（气泡用，几 KB~百 KB）；默认 original（查看器/保存）
+        variant = (request.data.get("variant") or request.query_params.get("variant") or "").strip()
+        if variant == "thumb":
+            if not media.thumbnail_path:
+                return Response(
+                    {"detail": "thumbnail_not_ready"}, status=status.HTTP_404_NOT_FOUND
+                )
+            url = storage.get_storage().presign_get(media.thumbnail_path, expires)
+        else:
+            url = storage.get_storage().presign_get(media.storage_path, expires)
         return Response(
             {
                 "url": url,

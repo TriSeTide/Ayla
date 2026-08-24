@@ -28,35 +28,42 @@ const signedUrlCache = new Map<string, SignedUrlEntry>();
  * 获取媒体内容的短时签名 URL（<img>/<video> 直接 src 引用）。
  * 浏览器原生 Range 流式加载/播放：视频首帧秒出、拖动即点即播、
  * 图片渐进解码——不再 apiRequestBlob 全量下载进内存。
- * 缓存至到期前 60s，同一媒体并发请求只签发一次。
+ * 缓存至到期前 60s，同一媒体+变体并发请求只签发一次。
+ * @param variant "thumb" = 气泡缩略图（几 KB~百 KB）；缺省 = original（查看器/保存）
  */
-export async function getSignedMediaUrl(mediaId: string): Promise<string> {
-  const cached = signedUrlCache.get(mediaId);
+export async function getSignedMediaUrl(
+  mediaId: string,
+  variant?: "thumb",
+): Promise<string> {
+  const cacheKey = variant ? `${mediaId}|${variant}` : mediaId;
+  const cached = signedUrlCache.get(cacheKey);
   const now = Date.now() / 1000;
   if (cached && cached.expiresAt - 60 > now) return cached.url;
   if (cached?.inflight) return cached.inflight;
 
   const inflight = apiRequest<{ url: string; expires_at: number }>(
     `/media/${seg(mediaId)}:sign`,
-    { method: "POST" },
+    { method: "POST", body: variant ? { variant } : undefined },
   )
     .then((r) => {
       const url = toSameOriginMinio(r.url);
-      signedUrlCache.set(mediaId, { url, expiresAt: r.expires_at });
+      signedUrlCache.set(cacheKey, { url, expiresAt: r.expires_at });
       return url;
     })
     .catch((err) => {
       // 失败清缓存允许下次重试
-      signedUrlCache.delete(mediaId);
+      signedUrlCache.delete(cacheKey);
       throw err;
     });
-  signedUrlCache.set(mediaId, { url: "", expiresAt: now, inflight });
+  signedUrlCache.set(cacheKey, { url: "", expiresAt: now, inflight });
   return inflight;
 }
 
 /** 失效缓存（401/加载失败时调用，下次重签） */
 export function invalidateSignedMediaUrl(mediaId: string): void {
-  signedUrlCache.delete(mediaId);
+  for (const k of [...signedUrlCache.keys()]) {
+    if (k === mediaId || k.startsWith(`${mediaId}|`)) signedUrlCache.delete(k);
+  }
 }
 
 export function resolveMediaPath(path: string | null | undefined): string | null {

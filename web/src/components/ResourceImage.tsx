@@ -31,6 +31,7 @@ export function ResourceImage({
   loading = "lazy",
   onReady,
   fallback,
+  variant,
 }: {
   src: string;
   alt: string;
@@ -41,6 +42,8 @@ export function ResourceImage({
   loading?: "eager" | "lazy";
   onReady?: () => void;
   fallback?: ReactNode;
+  /** 签发变体："thumb" = 缩略图（气泡用）；缺省 = 原图（查看器/保存） */
+  variant?: "thumb";
 }) {
   const mediaId = extractMediaId(src);
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(mediaId ? null : src);
@@ -60,7 +63,7 @@ export function ResourceImage({
     }
 
     setResolvedSrc(null);
-    void getSignedMediaUrl(mediaId)
+    void getSignedMediaUrl(mediaId, variant)
       .then((url) => {
         if (!cancelled) setResolvedSrc(url);
       })

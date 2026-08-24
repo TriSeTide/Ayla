@@ -32,7 +32,7 @@ describe("ResourceImage", () => {
         "/api/v1/media/m-1/content?uid=u&exp=9&sig=s",
       ),
     );
-    expect(mockedSign).toHaveBeenCalledWith("m-1");
+    expect(mockedSign).toHaveBeenCalledWith("m-1", undefined);
   });
 
   it("外部资源保持浏览器原生加载路径，不请求签名", () => {

@@ -84,6 +84,14 @@ def _message_new_payload(msg: Message) -> dict:
     }
 
 
+@database_sync_to_async
+def _message_new_payload_async(msg: Message) -> dict:
+    """resume 补发运行于 async 上下文：expand_segments 内含同步 DB 查询，
+    必须经 database_sync_to_async 进线程池执行，否则抛 SynchronousOnlyOperation
+    导致 WS 连接反复崩溃断开（连接风暴）。"""
+    return _message_new_payload(msg)
+
+
 class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.user = await database_sync_to_async(_jwt_user_from_scope)(self.scope)
@@ -183,7 +191,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             last_seq = 0
         msgs = await _messages_after(conv, last_seq)
         for msg in msgs:
-            await self.send_json(_message_new_payload(msg))
+            await self.send_json(await _message_new_payload_async(msg))
         current = await _conv_seq(conv)
         await self.send_json(
             {

@@ -33,10 +33,9 @@ vi.mock("../api/media", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/media")>();
   return {
     ...actual,
-    getSignedMediaUrl: vi.fn(async (mediaId: string) => {
-      const hit = signedById.get(mediaId);
-      if (!hit) throw new Error(`no signed url stub for ${mediaId}`);
-      return hit;
+    getSignedMediaUrl: vi.fn(async (mediaId: string, variant?: string) => {
+      const key = variant ? `${mediaId}|${variant}` : mediaId;
+      return signedById.get(key) ?? `/signed/${key}`;
     }),
   };
 });
@@ -87,19 +86,18 @@ beforeEach(() => {
 });
 
 describe("ImageMedia 原图渲染", () => {
-  it("经签名 URL 直连原图 content（不走缩略图），保画质且 GIF 保持动图", async () => {
-    signedById.set("med-1", "/signed/med-1");
+  it("气泡用缩略图变体签名（QQ 同款），查看器才加载原图", async () => {
+    signedById.set("med-1|thumb", "/signed/med-1/thumb");
     render(<MediaContent msg={imageMessage(mediaDescriptor())} />);
     await waitFor(() => {
       const img = document.querySelector("img.media-image") as HTMLImageElement | null;
       expect(img).not.toBeNull();
     });
-    // getSignedMediaUrl 只应请求该媒体；<img src> 用签名 URL（原生流式加载）
+    // getSignedMediaUrl 以 thumb 变体签发；<img src> 用缩略图签名 URL
     const { getSignedMediaUrl } = await import("../api/media");
-    expect(getSignedMediaUrl).toHaveBeenCalledTimes(1);
-    expect(getSignedMediaUrl).toHaveBeenCalledWith("med-1");
+    expect(getSignedMediaUrl).toHaveBeenCalledWith("med-1", "thumb");
     expect((document.querySelector("img.media-image") as HTMLImageElement).getAttribute("src")).toBe(
-      "/signed/med-1",
+      "/signed/med-1/thumb",
     );
   });
 

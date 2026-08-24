@@ -403,24 +403,54 @@ def complete_upload(user, session) -> MediaObject:
     return media
 
 
-# 派生输入上限：超过该大小的媒体跳过派生（缩略图/波形是"尽力而为"的增强资源，
-# 大图/长音频读入内存派生的 OOM 风险远大于收益；前端直接回退原图/原音频）
+# 派生输入上限：超过该大小的媒体读入内存处理前需走临时文件路径（防 OOM）。
+# 图片缩略图对气泡性能是刚需（无缩略图 = 气泡拉原图 = 卡顿），大图也必须生成；
+# 音频 waveform 需全量解码，大文件仍跳过（前端回退原音频播放）。
 _DERIVATIVE_MAX_INPUT_BYTES = 64 * 1024 * 1024
+# 解码后像素保护：超过该像素数的图片跳过缩略图（极端大图解码内存不可控）
+_DERIVATIVE_MAX_PIXELS = 150_000_000
 
 
 def _generate_derivatives(media: MediaObject, size: int) -> None:
     """派生资源生成（尽力而为，失败只留 warning，不把媒体置 failed）。
 
-    仅小文件读入内存处理（按 media.storage_path 从对象存储读取），
-    超过 _DERIVATIVE_MAX_INPUT_BYTES 的媒体跳过派生（防 OOM）。
+    小文件（≤ _DERIVATIVE_MAX_INPUT_BYTES）直接从对象存储读取处理；
+    大文件分两种：
+      - 图片/表情：流式下载到 MEDIA_TMP_DIR 临时文件后用 PIL 打开生成
+        缩略图（带解码像素保护），避免「大图无缩略图 → 气泡拉原图卡顿」；
+      - 音频：跳过波形派生（全量解码内存风险，前端回退原音频）。
     """
-    if size > _DERIVATIVE_MAX_INPUT_BYTES:
-        logger.info(
-            "skip derivatives for large media %s (%d bytes > %d)",
-            media.media_id, size, _DERIVATIVE_MAX_INPUT_BYTES,
-        )
-        return
     store = storage.get_storage()
+    if size > _DERIVATIVE_MAX_INPUT_BYTES:
+        if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_EMOJI):
+            logger.info(
+                "skip derivatives for large media %s (%d bytes > %d)",
+                media.media_id, size, _DERIVATIVE_MAX_INPUT_BYTES,
+            )
+            return
+        # 大图：下载到数据盘临时文件再派生（不整块进内存）
+        import tempfile
+
+        tmp = tempfile.TemporaryFile(dir=str(settings.MEDIA_TMP_DIR))
+        try:
+            total = store.download_to(media.storage_path, tmp)
+            if total != size:
+                logger.warning(
+                    "derivative download size mismatch for %s (%d != %d), skip",
+                    media.media_id, total, size,
+                )
+                return
+            tmp.seek(0)
+            self_generate_thumbnail_from_file(media, tmp, store)
+        except Exception:
+            logger.warning(
+                "large-image thumbnail derivation failed for media %s (media stays ready)",
+                media.media_id,
+                exc_info=True,
+            )
+        finally:
+            tmp.close()
+        return
     data = store.get(media.storage_path)
     if media.kind in (MediaObject.KIND_IMAGE, MediaObject.KIND_EMOJI):
         try:
@@ -451,6 +481,41 @@ def _generate_derivatives(media: MediaObject, size: int) -> None:
                 "waveform derivation failed for media %s (media stays ready)", media.media_id,
                 exc_info=True,
             )
+
+
+def self_generate_thumbnail_from_file(media: MediaObject, fileobj, store) -> None:
+    """从本地临时文件生成 320px JPEG 缩略图并上传（大图专用路径）。
+
+    带解码像素保护：Image.open 只读头部拿尺寸，超大图跳过（防解码 OOM）。
+    """
+    from io import BytesIO
+
+    from PIL import Image
+    from . import derivatives
+
+    fileobj.seek(0)
+    with Image.open(fileobj) as im:
+        width, height = im.size
+        if width * height > _DERIVATIVE_MAX_PIXELS:
+            logger.info(
+                "skip thumbnail for %s: %dx%d exceeds pixel guard",
+                media.media_id, width, height,
+            )
+            return
+        # JPEG 支持 draft 降采样解码：解码器直接输出接近目标尺寸的图像，
+        # 巨图（如 74MP 相机原图）内存峰值从 ~220MB 降到几 MB
+        if im.format == "JPEG":
+            im.draft("RGB", (320, 320))
+        im.thumbnail((320, 320))
+        buf = BytesIO()
+        im.convert("RGB").save(buf, format="JPEG", quality=82)
+    thumb_bytes = buf.getvalue()
+    thumb_key = storage.thumbnail_key(media.kind, media.media_id)
+    store.put(thumb_key, thumb_bytes, content_type="image/jpeg")
+    media.thumbnail_path = thumb_key
+    media.width = width
+    media.height = height
+    media.save(update_fields=["thumbnail_path", "width", "height"])
 
 
 # ---------- 访问控制（工程硬约束，步骤文件 5.3） ----------
