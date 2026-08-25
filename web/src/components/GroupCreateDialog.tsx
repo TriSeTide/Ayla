@@ -93,7 +93,7 @@ export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="group-create-overlay" onClick={onClose}>
       <div
-        className="group-create-dialog glass-card"
+        className="group-create-dialog"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="创建群聊"

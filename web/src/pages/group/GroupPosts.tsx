@@ -46,6 +46,8 @@ export function GroupPosts({
   const [groupPosts, setGroupPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
+  const [editorExpanded, setEditorExpanded] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -134,8 +136,22 @@ export function GroupPosts({
           </>
         )}
       </div>
-      <div className="group-posts-input">
-        <PostEditor group={groupId} onCreated={handleCreated} compact collapsible />
+      {editorExpanded && (
+        <div
+          className="group-posts-scrim"
+          onClick={() => setEditorExpanded(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div className={`group-posts-input ${editorExpanded ? "is-expanded" : ""}`}>
+        <PostEditor
+          group={groupId}
+          onCreated={handleCreated}
+          compact
+          collapsible
+          expanded={editorExpanded}
+          onExpandedChange={setEditorExpanded}
+        />
       </div>
     </div>
   );

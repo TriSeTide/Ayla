@@ -4,17 +4,24 @@
  * 标题（必填）+ 正文（必填）+ 图片（最多 9 张）。图片先走三步媒体上传，
  * 再把 media_id 列表随帖子提交；一级 tab 与群内路径共用本编辑器。
  *
- * 可展开/收起模式（collapsible）：默认收起只显示输入框+发布按钮+展开按钮，
- * 点击输入框或展开按钮展开完整编辑器，展开后顶部有收起按钮。
+ * 可展开/收起模式（collapsible）：默认收起只显示单行输入框+发布按钮，
+ * 点击输入框直接展开完整编辑器（无独立展开按钮），展开后顶部有收起按钮。
+ * 上方遮罩由使用方渲染（onExpandedChange 通知展开状态），遮罩层级必须
+ * 与面板容器平级才能夹在内容与面板之间（面板后代 fixed 无法跨堆叠上下文）。
+ *
+ * 整个编辑器是手势孤岛：touch 事件不向外冒泡，避免图片预览条
+ * 横滑、正文横移光标等操作触发外层左右滑动切屏（群内五子界面手势，
+ * 以及未来一级页面的切屏手势）。
  */
 import { useState } from "react";
+import type { TouchEvent as ReactTouchEvent } from "react";
 import * as postsApi from "../../api/posts";
 import {
   uploadMediaFile,
   validateMediaFile,
 } from "../../api/media";
 import type { MediaDescriptor, Post } from "../../api/types";
-import { IconImage, IconChevronUp, IconChevronDown } from "../icons";
+import { IconImage, IconChevronDown } from "../icons";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 type PostMediaDraft = {
@@ -26,19 +33,28 @@ type PostMediaDraft = {
   localUrl: string;
 };
 
+/** 面板内 touch 一律不冒泡：断开外层横滑切屏手势链，不影响默认滚动 */
+const stopTouchPropagation = (e: ReactTouchEvent) => e.stopPropagation();
+
 export function PostEditor({
   group,
   onCreated,
   compact = false,
   collapsible = false,
+  expanded: expandedProp,
+  onExpandedChange,
 }: {
   /** 群内发帖归属的群 id；一级 tab 为 null（公开） */
   group?: string | null;
   onCreated: (post: Post) => void;
   /** 紧凑模式（群内底部输入框变体：收起时单行正文；展开后含标题/可见性/图片） */
   compact?: boolean;
-  /** 可展开/收起模式（默认收起，点击输入框或展开按钮展开） */
+  /** 可展开/收起模式（默认收起，点击输入框展开） */
   collapsible?: boolean;
+  /** 受控展开态：传入后展开/收起完全由外部驱动（点遮罩收起等） */
+  expanded?: boolean;
+  /** 展开/收起状态变化通知（使用方据此渲染上方遮罩并更新受控状态） */
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -51,7 +67,13 @@ export function PostEditor({
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(!collapsible);
+  const [internalExpanded, setInternalExpanded] = useState(!collapsible);
+  // 半受控：传入 expanded 时以外部为准（点遮罩收起由使用方驱动）
+  const expanded = expandedProp ?? internalExpanded;
+  const updateExpanded = (value: boolean) => {
+    setInternalExpanded(value);
+    onExpandedChange?.(value);
+  };
   const [progress, setProgress] = useState<number | null>(null);
 
   const removeMedia = (draft: PostMediaDraft) => {
@@ -150,6 +172,8 @@ export function PostEditor({
       setBody("");
       setImages([]);
       setFailedFiles([]);
+      // 发布完成收起编辑器（collapsible 模式回到单行输入）
+      updateExpanded(false);
       onCreated(post);
     } catch (e) {
       setError(e instanceof Error ? e.message : "发布失败");
@@ -159,13 +183,19 @@ export function PostEditor({
   };
 
   return (
-    <div className={`post-editor ${collapsible ? "is-collapsible" : ""} ${expanded ? "is-expanded" : ""}`}>
+    <div
+      className={`post-editor ${collapsible ? "is-collapsible" : ""} ${expanded ? "is-expanded" : ""}`}
+      onTouchStart={stopTouchPropagation}
+      onTouchMove={stopTouchPropagation}
+      onTouchEnd={stopTouchPropagation}
+      onTouchCancel={stopTouchPropagation}
+    >
       {collapsible && expanded && (
         <div className="post-editor-collapse-bar">
           <button
             type="button"
             className="post-editor-collapse-btn"
-            onClick={() => setExpanded(false)}
+            onClick={() => updateExpanded(false)}
             aria-label="收起发帖面板"
             title="收起"
           >
@@ -188,7 +218,9 @@ export function PostEditor({
           placeholder={compact ? "发一条帖子…" : "正文（必填）"}
           value={body}
           rows={compact && !expanded ? 1 : expanded ? 4 : 1}
-          onFocus={() => collapsible && !expanded && setExpanded(true)}
+          onFocus={() => {
+            if (collapsible && !expanded) updateExpanded(true);
+          }}
           onChange={(e) => setBody(e.target.value)}
         />
         <button
@@ -199,17 +231,6 @@ export function PostEditor({
         >
           {uploading ? "上传中…" : submitting ? "发布中…" : "发布"}
         </button>
-        {collapsible && !expanded && (
-          <button
-            type="button"
-            className="post-editor-expand-btn"
-            onClick={() => setExpanded(true)}
-            aria-label="展开发帖面板"
-            title="展开"
-          >
-            <IconChevronUp width={18} height={18} />
-          </button>
-        )}
       </div>
       {expanded && (
         /* 低频配置区（可见性/群列表）内部滚动；媒体预览与进度固定在其下方始终可见 */

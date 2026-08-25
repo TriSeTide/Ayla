@@ -230,7 +230,9 @@
   .bubble-other,
   .chat-header,
   .composer,
-  .profile-topbar {
+  .profile-topbar,
+  .create-sheet-card,
+  .group-create-dialog {
     background: rgba(255, 250, 251, 0.92);
   }
 }

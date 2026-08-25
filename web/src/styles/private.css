@@ -60,23 +60,7 @@
 
 /* ================= 建群对话框（GroupCreateDialog） ================= */
 
-.group-create-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--sp-4);
-  background: rgba(70, 91, 146, 0.25);
-}
-
-.group-create-dialog {
-  width: min(480px, 100%);
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: var(--sp-4);
-}
+/* 弹层容器与卡片规格统一在下方「通用弹层」段（与 CreateSheet 同规格） */
 
 .group-create-dialog-head {
   display: flex;
@@ -193,9 +177,10 @@
   margin-top: var(--sp-3);
 }
 
-/* ================= FAB 创建浮层（CreateSheet，需求：点加号直接创建） ================= */
+/* ================= 通用弹层（CreateSheet + GroupCreateDialog，design.md §12.5） ================= */
 
-.create-sheet-overlay {
+.create-sheet-overlay,
+.group-create-overlay {
   position: fixed;
   inset: 0;
   z-index: 70;
@@ -206,11 +191,19 @@
   background: rgba(70, 91, 146, 0.25);
 }
 
-.create-sheet-card {
+.create-sheet-card,
+.group-create-dialog {
   width: min(480px, 100%);
   max-height: 80vh;
   overflow-y: auto;
   padding: var(--sp-4);
+  /* 弹层磨砂底（design.md §12.5：--glass-bg-strong + blur 18px，浮层圆角 16px） */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
 }
 
 .create-sheet-head {
@@ -237,4 +230,41 @@
 .create-sheet-card .btn-primary:not(.post-editor-submit) {
   width: 100%;
   justify-content: center;
+}
+
+/* 窄屏：底部上滑面板（design.md §12.5，与快捷消息栏同构） */
+@media (max-width: 768px) {
+  .create-sheet-overlay,
+  .group-create-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .create-sheet-card,
+  .group-create-dialog {
+    width: 100%;
+    max-height: 80vh;
+    border-radius: 24px 24px 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom, 0px));
+    animation: create-sheet-slide-in 250ms var(--ease-out);
+  }
+}
+
+@keyframes create-sheet-slide-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .create-sheet-card,
+  .group-create-dialog {
+    animation: none;
+  }
 }

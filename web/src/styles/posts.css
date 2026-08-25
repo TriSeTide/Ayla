@@ -214,9 +214,10 @@
 }
 
 /* 群内 compact 展开态整体限高：底部输入面板（flex:none）不再把消息流挤走，
-   上限同时约束矮视口与高视口；内部选项区滚动，媒体预览不再被压扁 */
+   上限同时约束矮视口与高视口；内部选项区滚动，媒体预览不再被压扁。
+   展开时面板上方出现遮罩（.post-editor-scrim），面板可以放心用更高的限高 */
 .post-editor.is-collapsible.is-expanded {
-  max-height: min(62vh, 620px);
+  max-height: min(90vh, 1000px);
 }
 
 .post-editor-input-row {
@@ -239,7 +240,7 @@
 }
 
 /* 媒体预览横排（固定在输入框下方，始终可见不进滚动区）：
-   块 128px、区高随内容、超宽横向滚动。
+   块 128px、区高随内容、超宽横向滚动。 */
 .post-editor-images {
   display: flex;
   overflow-x: auto;
@@ -298,8 +299,7 @@
   padding-bottom: var(--sp-1);
 }
 
-.post-editor-collapse-btn,
-.post-editor-expand-btn {
+.post-editor-collapse-btn {
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -313,8 +313,7 @@
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
-.post-editor-collapse-btn:hover,
-.post-editor-expand-btn:hover {
+.post-editor-collapse-btn:hover {
   background: var(--glass-bg-hover);
   color: var(--text-primary);
 }
@@ -728,6 +727,32 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+/* 展开编辑时的上方遮罩：与输入面板（z50）平级、盖住列表与标题栏（z auto），
+   点击收起。层级夹在 45：面板内容不受遮罩影响 */
+.group-posts-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  background: rgba(70, 91, 146, 0.25);
+  animation: group-posts-scrim-in 200ms var(--ease-out);
+}
+
+@keyframes group-posts-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-posts-scrim {
+    animation: none;
+  }
 }
 
 .group-posts-list {
@@ -758,8 +783,22 @@
 
 .group-posts-input {
   flex: none;
+  position: relative;
+  /* 展开编辑时面板盖住上方遮罩（40），遮罩再压暗列表与顶栏（20） */
+  z-index: 50;
   border-top: 1px solid var(--glass-border);
   background: var(--glass-bg-strong);
+}
+
+/* 展开态：面板脱离文档流贴底，覆盖标题栏与列表（均已被遮罩压暗），
+   可用高度 = 整个 group-posts 容器，不再与标题栏分空间导致底部被裁 */
+.group-posts-input.is-expanded {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 100%;
+  overflow-y: auto;
 }
 
 /* ================= 帖子详情结构化骨架 ================= */
