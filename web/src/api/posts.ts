@@ -58,10 +58,15 @@ export function listComments(postId: number) {
   return apiRequest<PostComment[]>(`/posts/${postId}/comments/`);
 }
 
-/** POST /posts/<id>/comments/ —— 发评论（reply_to 可选须在本帖；media_id 可选图片评论） */
+/** POST /posts/<id>/comments/ —— 发评论（reply_to 可选；images 图文同发 ≤4；media_id 旧单图兼容） */
 export function createComment(
   postId: number,
-  payload: { body: string; reply_to?: number | null; media_id?: string | null },
+  payload: {
+    body: string;
+    reply_to?: number | null;
+    media_id?: string | null;
+    images?: string[];
+  },
 ) {
   return apiRequest<PostComment>(`/posts/${postId}/comments/`, {
     method: "POST",

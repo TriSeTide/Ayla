@@ -907,7 +907,7 @@ export interface Post {
   updated_at: string;
 }
 
-/** 评论（CommentSerializer，M5-2.1 起支持 media_id 图片评论） */
+/** 评论（CommentSerializer：支持图文同发 images[]，media_id/media 为旧单图兼容） */
 export interface PostComment {
   id: number;
   post_id: string;
@@ -916,6 +916,8 @@ export interface PostComment {
   body: string;
   media_id: string | null;
   media: MediaDescriptor | null;
+  /** 图文同发的全部媒体 descriptor（含旧 media_id 单图） */
+  images: MediaDescriptor[];
   reply_to: string | null;
   is_author: boolean;
   created_at: string;

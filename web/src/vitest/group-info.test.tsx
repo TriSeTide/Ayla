@@ -162,7 +162,7 @@ describe("GroupInfo 群头像上传（M5-2.1）", () => {
   });
 
   it("保存群头像：三步上传 + PATCH avatar + store 更新", async () => {
-    vi.mocked(mediaApi.uploadMediaFile).mockResolvedValue({ media_id: "m-1", descriptor: {} as never });
+    vi.mocked(mediaApi.uploadMediaFile).mockResolvedValue({ media_id: "m-1", descriptor: {} as never, upload_id: "u-x" });
     const url = "/api/v1/media/m-1/content";
     vi.mocked(chatApi.patchConversation).mockResolvedValue({ ...conv("owner"), avatar: url });
     renderInfo("owner");
@@ -186,7 +186,7 @@ describe("GroupInfo 群头像上传（M5-2.1）", () => {
   it("上传失败保留文件，可再次保存重试", async () => {
     vi.mocked(mediaApi.uploadMediaFile)
       .mockRejectedValueOnce(new Error("网络失败"))
-      .mockResolvedValueOnce({ media_id: "m-2", descriptor: {} as never });
+      .mockResolvedValueOnce({ media_id: "m-2", descriptor: {} as never, upload_id: "u-x" });
     const url = "/api/v1/media/m-2/content";
     vi.mocked(chatApi.patchConversation).mockResolvedValue({ ...conv("owner"), avatar: url });
     renderInfo("owner");

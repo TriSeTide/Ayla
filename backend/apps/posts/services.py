@@ -65,13 +65,28 @@ def _resolve_media(media_id: str):
     return MediaObject.objects.filter(media_id=media_id).first()
 
 
-def create_comment(post: Post, author, body: str, reply_to=None, media_id: str | None = None) -> Comment:
-    """创建评论（body 非空已在 serializer 校验，此处兜底；media_id 已由 serializer 校验）。"""
+def create_comment(
+    post: Post,
+    author,
+    body: str,
+    reply_to=None,
+    media_id: str | None = None,
+    images: list[str] | None = None,
+) -> Comment:
+    """创建评论（图文同发：images 为 media_id 列表；body 与图片至少其一）。
+
+    兼容旧签名：仅传 media_id 时等价 images=[media_id]。有图片时允许 body 为空。
+    """
     body = (body or "").strip()
-    if not body:
+    ids = list(dict.fromkeys(images or []))
+    if not ids and media_id:
+        ids = [media_id]
+    if not body and not ids:
         raise ValueError("评论内容不能为空")
     return Comment.objects.create(
-        post=post, author=author, body=body, reply_to=reply_to, media_id=media_id or None
+        post=post, author=author, body=body, reply_to=reply_to,
+        media_id=(ids[0] if ids else None),
+        images=ids,
     )
 
 

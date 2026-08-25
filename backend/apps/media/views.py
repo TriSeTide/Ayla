@@ -191,6 +191,58 @@ class MediaDetailView(APIView):
         return Response(MediaObjectSerializer(media, context={"request": request}).data)
 
 
+class MediaDeleteView(APIView):
+    """DELETE /media/{media_id} —— 上传者删除自己的媒体（对象存储 + 记录）。
+
+    用途：预签名直传完成后、发布前的「移除」操作——孤儿媒体即时回收，
+    不等过期清理。仅 owner 可删；同时清理 original 与 thumbnail 对象。
+    """
+
+    def delete(self, request, media_id):
+        media = _media_or_404(media_id)
+        if media is None:
+            return Response({"detail": "媒体不存在"}, status=status.HTTP_404_NOT_FOUND)
+        if media.owner_id != request.user.id:
+            return Response({"detail": "仅上传者可删除"}, status=status.HTTP_403_FORBIDDEN)
+        store = storage.get_storage()
+        store.delete(media.storage_path)
+        if media.thumbnail_path:
+            store.delete(media.thumbnail_path)
+        media.delete()
+        return Response({"deleted": True}, status=status.HTTP_200_OK)
+
+
+class MediaPosterView(APIView):
+    """POST /media/{media_id}:poster —— 上传视频海报帧（body=JPEG 字节，≤2MB）。
+
+    浏览器端上传视频后用 canvas 截首帧回传，服务端存为 thumbnail 并更新
+    thumbnail_path——帖子/聊天的视频卡片即可显示真实画面封面（QQ 同款），
+    不依赖 <video> 元素加载解码。仅上传者本人可调用；重复调用覆盖。
+    """
+
+    def post(self, request, media_id):
+        media = _media_or_404(media_id)
+        if media is None:
+            return Response({"detail": "媒体不存在"}, status=status.HTTP_404_NOT_FOUND)
+        if media.owner_id != request.user.id:
+            return Response({"detail": "仅上传者可设置海报"}, status=status.HTTP_403_FORBIDDEN)
+        if media.kind != media.KIND_VIDEO:
+            return _bad_request("仅视频媒体可设置海报")
+        body = request.body or b""
+        if not body:
+            return _bad_request("海报内容为空")
+        if len(body) > 2 * 1024 * 1024:
+            return _bad_request("海报过大（≤2MB）")
+        if not body.startswith(b"\xff\xd8"):
+            return _bad_request("海报必须为 JPEG")
+        store = storage.get_storage()
+        thumb_key = storage.thumbnail_key(media.kind, media.media_id)
+        store.put(thumb_key, body, content_type="image/jpeg")
+        media.thumbnail_path = thumb_key
+        media.save(update_fields=["thumbnail_path"])
+        return Response({"thumbnail": f"/api/v1/media/{media_id}/thumbnail"}, status=status.HTTP_201_CREATED)
+
+
 class MediaSignView(APIView):
     """POST /media/{media_id}:sign —— 为已授权用户签发内容短时访问 URL。
 
@@ -345,10 +397,23 @@ def _derivative_response(media, key, content_type, request):
 
 
 class MediaThumbnailView(APIView):
-    """GET /media/{media_id}/thumbnail —— 下载缩略图（无 → 404）。"""
+    """GET /media/{media_id}/thumbnail —— 下载缩略图（无 → 404）。
+
+    content-type 按存储字节探测（动图缩略为 GIF、静图为 JPEG）。
+    """
 
     def get(self, request, media_id):
         media = _media_or_404(media_id)
+        if media is not None and media.thumbnail_path:
+            store = storage.get_storage()
+            try:
+                head = store.get_range(media.thumbnail_path, 0, 15)
+            except Exception:
+                head = b""
+            if head.startswith(b"GIF8"):
+                return _derivative_response(
+                    media, media.thumbnail_path, "image/gif", request
+                )
         return _derivative_response(media, media.thumbnail_path, "image/jpeg", request)
 
 

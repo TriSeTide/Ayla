@@ -91,7 +91,7 @@ class PostImage(models.Model):
 
 
 class Comment(models.Model):
-    """评论（支持 reply_to 回复、media_id 图片引用，同 chat.Message 约定）。"""
+    """评论（支持 reply_to 回复；media_id 为历史单图引用，images 为图文同发的媒体列表）。"""
 
     id = models.AutoField(primary_key=True)
     post = models.ForeignKey(Post, related_name="comments", on_delete=models.CASCADE)
@@ -102,6 +102,8 @@ class Comment(models.Model):
     )
     body = models.TextField("评论内容")
     media_id = models.CharField("媒体引用", max_length=64, null=True, blank=True)
+    # 图文同发：media_id 列表（预签名直传产物），与 media_id 列并存（旧数据兼容）
+    images = models.JSONField("评论图片", default=list, blank=True)
     reply_to = models.ForeignKey(
         "self",
         related_name="replies",

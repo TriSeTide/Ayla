@@ -13,7 +13,10 @@ import type { Post, PostComment } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { CommentList } from "../components/posts/CommentList";
 import { CommentComposer } from "../components/posts/CommentComposer";
+import { ImageViewer } from "../components/chat/ImageViewer";
 import { ResourceImage } from "../components/ResourceImage";
+import { SignedVideo } from "../components/SignedVideo";
+import { mediaContentUrl } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconHeart } from "../components/icons";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
@@ -65,6 +68,8 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
+  // 图片查看器（Portal 全屏弹窗，原图 + 保存）
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   // 输入框滑入 + 内容入场动画：内容就绪（loading 结束）后才浮入，
   // 避免异步加载完成前动画就提前跑完、看不到浮入效果（直播间同源节奏）。
@@ -144,8 +149,13 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   }, [id]);
 
   const sendComment = useCallback(
-    async (body: string, replyTo: number | null, mediaId?: string | null) => {
-      const c = await postsApi.createComment(id, { body, reply_to: replyTo, media_id: mediaId ?? null });
+    async (body: string, replyTo: number | null, imageIds: string[] = []) => {
+      const c = await postsApi.createComment(id, {
+        body,
+        reply_to: replyTo,
+        images: imageIds,
+        media_id: imageIds[0] ?? null, // 旧契约兼容字段
+      });
       // 乐观本地插入（去重靠 WS comment.created 的 id 去重；计数以 WS 权威值为准，
       // 不做本地 +1，避免与实时推送重复累加）。
       setComments((prev) => {
@@ -348,26 +358,39 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             <p className="post-card-body is-expanded">{post.body}</p>
             {post.images.length > 0 && (
               <div className={`post-card-images count-${Math.min(post.images.length, 9)}`}>
-                {post.images.slice(0, 9).map((img) =>
-                  img.media?.kind === "video" ? (
-                    // 视频内联播放（详情页 controls 完整可用）
-                    <video
+                {post.images.slice(0, 9).map((img) => {
+                  const media = img.media;
+                  if (!media) return null;
+                  const idx = post.images.findIndex((x) => x.id === img.id);
+                  // 图片/视频统一点击弹窗：ImageViewer 内图片看原图、视频全屏播放（均带保存）
+                  return (
+                    <button
                       key={img.id}
-                      src={img.media.thumbnail || undefined}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="post-card-img post-card-video-el"
-                    />
-                  ) : img.media?.thumbnail ? (
-                    <ResourceImage
-                      key={img.id}
-                      src={img.media.thumbnail}
-                      alt="帖子图片"
-                      className="post-card-img"
-                    />
-                  ) : null,
-                )}
+                      type="button"
+                      className={`post-card-img ${media.kind === "video" ? "post-card-video" : "post-card-img-btn"}`}
+                      onClick={() => setViewerIndex(idx)}
+                      aria-label={media.kind === "video" ? "播放视频" : "查看图片原图"}
+                    >
+                      {media.kind === "video" ? (
+                        <>
+                          <SignedVideo
+                            mediaId={media.media_id}
+                            className="post-card-video-el"
+                            ariaLabel="帖子视频"
+                          />
+                          <span className="post-card-video-badge" aria-hidden="true">▶</span>
+                        </>
+                      ) : (
+                        <ResourceImage
+                          src={media.thumbnail || mediaContentUrl(media.media_id)}
+                          variant={media.thumbnail ? "thumb" : undefined}
+                          alt="帖子图片"
+                          className="post-card-img-inner"
+                        />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -408,6 +431,14 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         replyTarget={replyTarget}
         onReplyClear={() => setReplyTarget(null)}
       />
+      {/* 图片原图查看器（Portal 全屏弹窗 + 保存） */}
+      {viewerIndex != null && post.images[viewerIndex]?.media && (
+        <ImageViewer
+          media={post.images[viewerIndex].media}
+          alt={post.title || "帖子图片"}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
     </div>
   );
 }

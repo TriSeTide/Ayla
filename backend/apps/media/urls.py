@@ -25,6 +25,13 @@ urlpatterns = [
         views.MediaSignView.as_view(),
         name="media-sign",
     ),
+    path(
+        "<str:media_id>:poster",
+        views.MediaPosterView.as_view(),
+        name="media-poster",
+    ),
+    # 上传者删除自己的媒体（直传后发布前的移除，孤儿即时回收）
+    path("<str:media_id>", views.MediaDeleteView.as_view(), name="media-delete"),
     path("<str:media_id>/", views.MediaDetailView.as_view(), name="media-detail"),
     path(
         "<str:media_id>/content",

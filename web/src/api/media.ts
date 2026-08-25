@@ -2,6 +2,7 @@
  * 媒体 URL、descriptor 与受控上传 API（M5-2.1 / M7）。
  */
 import { API_PREFIX, ApiError, apiRequest } from "./client";
+import { useAuthStore } from "../stores/auth";
 import type { MediaDescriptor, MediaKind } from "./types";
 
 function seg(mediaId: string): string {
@@ -66,6 +67,11 @@ export function invalidateSignedMediaUrl(mediaId: string): void {
   }
 }
 
+/** 删除自己上传的媒体（对象存储 original/thumbnail + 记录），孤儿即时回收 */
+export function deleteMedia(mediaId: string): Promise<void> {
+  return apiRequest<void>(`/media/${seg(mediaId)}`, { method: "DELETE" });
+}
+
 export function resolveMediaPath(path: string | null | undefined): string | null {
   if (!path) return null;
   if (path.startsWith(`${API_PREFIX}/media/`)) return path;
@@ -102,6 +108,8 @@ interface UploadSession {
 export interface UploadCompleteResult {
   media_id: string;
   descriptor: MediaDescriptor;
+  /** 上传会话 id：移除媒体时可调 DELETE 清理对象存储 */
+  upload_id: string;
 }
 
 /* ---------- 图片本地校验 ---------- */
@@ -271,7 +279,80 @@ export async function uploadMediaFile(
     throw new Error("后端未返回直传地址");
   }
   await putBinary(session.presigned_url, session.upload_id, file, mime, opts);
-  return apiRequest<UploadCompleteResult>(`/media/uploads/${seg(session.upload_id)}:complete`, {
+  const result = await apiRequest<UploadCompleteResult>(`/media/uploads/${seg(session.upload_id)}:complete`, {
     method: "POST",
   });
+  // 视频自动捕获首帧海报回传（QQ 同款封面图）：卡片/列表直接显示画面，
+  // 不依赖 <video> 元素加载解码（moov 尾置视频首帧黑块问题的根治）。
+  // 失败不阻塞上传结果（海报缺失仅影响封面展示）。
+  if (kind === "video") {
+    try {
+      const poster = await captureVideoPoster(file);
+      await uploadPoster(result.media_id, poster);
+      result.descriptor = { ...result.descriptor, thumbnail: `/api/v1/media/${result.media_id}/thumbnail` };
+    } catch {
+      // 海报失败静默：封面缺失不影响视频本体
+    }
+  }
+  // 附带 upload_id：调用方移除媒体时可调 DELETE 清理对象存储（孤儿回收）
+  return { ...result, upload_id: session.upload_id };
+}
+
+/** 从视频文件捕获 0.1s 处首帧，输出 JPEG Blob（宽边压到 640px）。 */
+async function captureVideoPoster(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.src = url;
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error("poster timeout")), 15000);
+      video.onloadeddata = () => {
+        window.clearTimeout(timer);
+        resolve();
+      };
+      video.onerror = () => {
+        window.clearTimeout(timer);
+        reject(new Error("video load error"));
+      };
+    });
+    // seek 到 0.1s 确保解码出真实首帧
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      video.onseeked = done;
+      try {
+        video.currentTime = 0.1;
+      } catch {
+        done();
+      }
+    });
+    const scale = Math.min(1, 640 / Math.max(video.videoWidth || 640, 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round((video.videoWidth || 640) * scale));
+    canvas.height = Math.max(1, Math.round((video.videoHeight || 360) * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 85));
+    if (!blob) throw new Error("canvas toBlob failed");
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** 上传视频海报帧到 :poster 端点（JPEG ≤2MB，仅上传者本人）。 */
+async function uploadPoster(mediaId: string, blob: Blob): Promise<void> {
+  const { accessToken } = useAuthStore.getState();
+  const r = await fetch(`${API_PREFIX}/media/${seg(mediaId)}:poster`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "image/jpeg",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: blob,
+  });
+  if (!r.ok) throw new Error(`poster upload failed (${r.status})`);
 }

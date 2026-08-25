@@ -10,19 +10,20 @@
 import { useState } from "react";
 import * as postsApi from "../../api/posts";
 import {
-  mediaContentUrl,
-  resolveMediaPath,
   uploadMediaFile,
   validateMediaFile,
 } from "../../api/media";
 import type { MediaDescriptor, Post } from "../../api/types";
 import { IconImage, IconChevronUp, IconChevronDown } from "../icons";
-import { ResourceImage } from "../ResourceImage";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 type PostMediaDraft = {
   mediaId: string;
   descriptor: MediaDescriptor;
+  /** 上传会话 id：移除时调 DELETE 清理对象存储 */
+  uploadId: string;
+  /** 本地预览 objectURL（视频/图片通用，页面生命周期内有效） */
+  localUrl: string;
 };
 
 export function PostEditor({
@@ -51,6 +52,21 @@ export function PostEditor({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(!collapsible);
+  const [progress, setProgress] = useState<number | null>(null);
+
+  const removeMedia = (draft: PostMediaDraft) => {
+    // 从待发列表移除；已直传到 MinIO 的对象即时回收（owner 删除端点）
+    setImages((prev) => prev.filter((item) => item.mediaId !== draft.mediaId));
+    if (draft.uploadId) {
+      void import("../../api/client").then(({ apiRequest }) =>
+        apiRequest(`/media/uploads/${draft.uploadId}`, { method: "DELETE" }).catch(() => {}),
+      );
+    } else {
+      void import("../../api/media").then(({ deleteMedia }) =>
+        deleteMedia(draft.mediaId).catch(() => {}),
+      );
+    }
+  };
 
   const uploadFiles = async (files: File[]) => {
     if (uploading || submitting || files.length === 0) return;
@@ -74,12 +90,24 @@ export function PostEditor({
         continue;
       }
       try {
-        const result = await uploadMediaFile(file, check.kind);
-        uploaded.push({ mediaId: result.media_id, descriptor: result.descriptor });
+        const result = await uploadMediaFile(file, check.kind, {
+          onProgress: (p) => {
+            const pct = p.total > 0 ? Math.round((p.loaded / p.total) * 100) : 0;
+            setProgress(pct);
+          },
+        });
+        uploaded.push({
+          mediaId: result.media_id,
+          descriptor: result.descriptor,
+          uploadId: result.upload_id,
+          localUrl: URL.createObjectURL(file),
+        });
+        setProgress(100);
       } catch {
         failed.push(file);
       }
     }
+    setProgress(null);
     setImages((prev) => [...prev, ...uploaded]);
     setFailedFiles((prev) => [...prev, ...failed]);
     if (failed.length > 0) setError(`${failed.length} 个媒体上传失败，可点击重试`);
@@ -184,40 +212,9 @@ export function PostEditor({
         )}
       </div>
       {expanded && (
-        <>
+        /* 低频配置区（可见性/群列表）内部滚动；媒体预览与进度固定在其下方始终可见 */
+        <div className="post-editor-extra">
           <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
-          {images.length > 0 && (
-            <div className="post-editor-images" aria-label={`已添加 ${images.length} 个媒体`}>
-              {images.map((image) => (
-                <div className="post-editor-image" key={image.mediaId}>
-                  {image.descriptor.kind === "video" ? (
-                    <video
-                      src={resolveMediaPath(image.descriptor.thumbnail ?? "") ?? mediaContentUrl(image.mediaId)}
-                      muted
-                      playsInline
-                      preload="metadata"
-                      className="post-editor-video-preview"
-                    />
-                  ) : (
-                    <ResourceImage
-                      src={resolveMediaPath(image.descriptor.thumbnail) ?? mediaContentUrl(image.mediaId)}
-                      alt="已添加的帖子媒体"
-                      loading="lazy"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    className="post-editor-image-remove"
-                    aria-label="移除媒体"
-                    disabled={submitting || uploading}
-                    onClick={() => setImages((prev) => prev.filter((item) => item.mediaId !== image.mediaId))}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
           {error && <p className="post-editor-error" role="alert">{error}</p>}
           {failedFiles.length > 0 && (
             <button
@@ -233,7 +230,43 @@ export function PostEditor({
               重试失败媒体（{failedFiles.length}）
             </button>
           )}
-          <div className="post-editor-actions">
+        </div>
+      )}
+      {images.length > 0 && (
+        /* 媒体预览横排固定可见（不进滚动区）——发图时缩略块始终在输入框下方 */
+        <div className="post-editor-images" aria-label={`已添加 ${images.length} 个媒体`}>
+          {images.map((image) => (
+            <div className="post-editor-image" key={image.mediaId}>
+              {image.descriptor.kind === "video" ? (
+                // #t=0.1 强制 seek 首帧：moov 尾置 mp4 在 preload=metadata 下
+                // 只显示黑帧，media fragment 让浏览器定位到 0.1s 渲染真实首帧
+                <video src={`${image.localUrl}#t=0.1`} muted playsInline preload="metadata" />
+              ) : (
+                <img src={image.localUrl} alt="待发布媒体" />
+              )}
+              <button
+                type="button"
+                className="post-editor-image-remove"
+                aria-label="移除媒体"
+                disabled={submitting || uploading}
+                onClick={() => removeMedia(image)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {progress != null && (
+        <div className="post-editor-progress" role="status">
+          上传中 {progress}%
+          <div className="post-editor-progress-bar">
+            <div className="post-editor-progress-fill" style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      )}
+      {expanded && (
+        <div className="post-editor-actions">
             <label className="post-editor-image-btn" aria-label="添加图片或视频">
               <IconImage width={18} height={18} />
               <span>图片/视频 {images.length}/9</span>
@@ -250,8 +283,7 @@ export function PostEditor({
                 }}
               />
             </label>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

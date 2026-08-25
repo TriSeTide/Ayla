@@ -10,6 +10,8 @@ import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { IconHeart, IconMessage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { SignedVideo } from "../SignedVideo";
+import { mediaContentUrl } from "../../api/media";
 import { useAuthStore } from "../../stores/auth";
 import { goUserProfile } from "../../utils/navigation";
 import { getVisibilityLabels } from "../../utils/visibility";
@@ -88,29 +90,29 @@ export function PostCard({
         )}
         {mediaList.length > 0 && (
           <div className={`post-card-images count-${Math.min(mediaList.length, 9)}`}>
-            {mediaList.slice(0, 9).map((img) =>
-              img.media?.kind === "video" ? (
-                // 视频卡片：首帧 + 播放角标（点击进详情播放）
+            {mediaList.slice(0, 9).map((img) => {
+              const media = img.media;
+              if (!media) return null;
+              return media.kind === "video" ? (
+                // 视频卡片：签名 URL 首帧 + 播放角标（点击进详情播放）。
+                // thumbnail 是图片专用派生（视频恒为 null），不可当 video src
                 <div key={img.id} className="post-card-img post-card-video">
-                  <video
-                    src={img.media.thumbnail || undefined}
-                    muted
-                    playsInline
-                    preload="metadata"
-                    className="post-card-video-el"
-                  />
+                  <SignedVideo mediaId={media.media_id} className="post-card-video-el" ariaLabel="帖子视频" />
                   <span className="post-card-video-badge" aria-hidden="true">▶</span>
                 </div>
               ) : (
+                // 图片卡片：缩略图变体（320px JPEG）优先，无缩略图回退原图；
+                // variant=thumb 让 :sign 签发 thumbnail 对象而非 original
                 <ResourceImage
                   key={img.id}
-                  src={img.media?.thumbnail || ""}
+                  src={media.thumbnail || mediaContentUrl(media.media_id)}
+                  variant={media.thumbnail ? "thumb" : undefined}
                   alt="帖子图片"
                   loading="lazy"
                   className="post-card-img"
                 />
-              ),
-            )}
+              );
+            })}
           </div>
         )}
       </button>

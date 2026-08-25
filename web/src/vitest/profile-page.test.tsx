@@ -88,7 +88,7 @@ describe("ProfilePage 头像上传", () => {
   });
 
   it("保存时三步上传并用 content URL PATCH，成功后清除预览", async () => {
-    vi.mocked(mediaApi.uploadMediaFile).mockResolvedValue({ media_id: "m-1", descriptor: {} as never });
+    vi.mocked(mediaApi.uploadMediaFile).mockResolvedValue({ media_id: "m-1", descriptor: {} as never, upload_id: "u-1" });
     vi.mocked(authApi.updateProfile).mockResolvedValue(user({ avatar: "/api/v1/media/m-1/content" }));
     renderPage();
     const input = screen.getByLabelText("更换头像") as HTMLInputElement;
@@ -108,7 +108,7 @@ describe("ProfilePage 头像上传", () => {
   it("上传失败保留文件，可再次保存重试", async () => {
     vi.mocked(mediaApi.uploadMediaFile)
       .mockRejectedValueOnce(new Error("网络失败"))
-      .mockResolvedValueOnce({ media_id: "m-2", descriptor: {} as never });
+      .mockResolvedValueOnce({ media_id: "m-2", descriptor: {} as never, upload_id: "u-2" });
     vi.mocked(authApi.updateProfile).mockResolvedValue(user({ avatar: "/api/v1/media/m-2/content" }));
     renderPage();
     const input = screen.getByLabelText("更换头像") as HTMLInputElement;

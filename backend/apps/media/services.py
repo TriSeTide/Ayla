@@ -454,11 +454,15 @@ def _generate_derivatives(media: MediaObject, size: int) -> None:
     data = store.get(media.storage_path)
     if media.kind in (MediaObject.KIND_IMAGE, MediaObject.KIND_EMOJI):
         try:
-            thumb_bytes, width, height = derivatives.generate_thumbnail(
-                data, media.mime_type
-            )
+            from io import BytesIO
+
+            from PIL import Image
+
+            with Image.open(BytesIO(data)) as im:
+                width, height = im.size
+                thumb_bytes, content_type = _encode_thumbnail(im)
             thumb_key = storage.thumbnail_key(media.kind, media.media_id)
-            store.put(thumb_key, thumb_bytes, content_type="image/jpeg")
+            store.put(thumb_key, thumb_bytes, content_type=content_type)
             media.thumbnail_path = thumb_key
             media.width = width
             media.height = height
@@ -483,15 +487,59 @@ def _generate_derivatives(media: MediaObject, size: int) -> None:
             )
 
 
+# 缩略图规格：720px / q88（用户反馈 320px/q82 过糊）；动图保留动画输出 GIF
+_THUMB_MAX_SIDE = 720
+_THUMB_JPEG_QUALITY = 88
+_THUMB_MAX_FRAMES = 64
+
+
+def _encode_thumbnail(im, max_side: int = _THUMB_MAX_SIDE) -> tuple[bytes, str]:
+    """从 PIL Image 编码缩略图字节。
+
+    动图（GIF/动 WebP）→ 动画 GIF（保动画；帧数上限 _THUMB_MAX_FRAMES）；
+    静图 → JPEG。返回 (bytes, content_type)。JPEG 走 draft 降采样解码
+    （巨图内存峰值几 MB）。调用方需先做像素保护。
+    """
+    import io as _io
+
+    from PIL import Image
+
+    animated = getattr(im, "is_animated", False)
+    if not animated:
+        if im.format == "JPEG":
+            im.draft("RGB", (max_side, max_side))
+        im.thumbnail((max_side, max_side))
+        buf = _io.BytesIO()
+        im.convert("RGB").save(buf, format="JPEG", quality=_THUMB_JPEG_QUALITY)
+        return buf.getvalue(), "image/jpeg"
+
+    # 动图：逐帧缩放后合成动画 GIF
+    try:
+        frame_count = min(im.n_frames, _THUMB_MAX_FRAMES)
+    except AttributeError:
+        frame_count = 1
+    frames = []
+    durations = []
+    for i in range(frame_count):
+        im.seek(i)
+        frame = im.convert("RGB").copy()
+        frame.thumbnail((max_side, max_side))
+        frames.append(frame)
+        durations.append(int(im.info.get("duration", 80)) or 80)
+    buf = _io.BytesIO()
+    frames[0].save(
+        buf, format="GIF", save_all=True, append_images=frames[1:],
+        duration=durations[: len(frames)], loop=0,
+    )
+    return buf.getvalue(), "image/gif"
+
+
 def self_generate_thumbnail_from_file(media: MediaObject, fileobj, store) -> None:
-    """从本地临时文件生成 320px JPEG 缩略图并上传（大图专用路径）。
+    """从本地临时文件生成缩略图并上传（大图专用路径，动图保动画）。
 
     带解码像素保护：Image.open 只读头部拿尺寸，超大图跳过（防解码 OOM）。
     """
-    from io import BytesIO
-
     from PIL import Image
-    from . import derivatives
 
     fileobj.seek(0)
     with Image.open(fileobj) as im:
@@ -502,16 +550,9 @@ def self_generate_thumbnail_from_file(media: MediaObject, fileobj, store) -> Non
                 media.media_id, width, height,
             )
             return
-        # JPEG 支持 draft 降采样解码：解码器直接输出接近目标尺寸的图像，
-        # 巨图（如 74MP 相机原图）内存峰值从 ~220MB 降到几 MB
-        if im.format == "JPEG":
-            im.draft("RGB", (320, 320))
-        im.thumbnail((320, 320))
-        buf = BytesIO()
-        im.convert("RGB").save(buf, format="JPEG", quality=82)
-    thumb_bytes = buf.getvalue()
+        thumb_bytes, content_type = _encode_thumbnail(im)
     thumb_key = storage.thumbnail_key(media.kind, media.media_id)
-    store.put(thumb_key, thumb_bytes, content_type="image/jpeg")
+    store.put(thumb_key, thumb_bytes, content_type=content_type)
     media.thumbnail_path = thumb_key
     media.width = width
     media.height = height

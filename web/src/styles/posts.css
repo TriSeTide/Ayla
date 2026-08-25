@@ -120,6 +120,54 @@
   object-fit: contain;
 }
 
+/* 视频媒体卡片：首帧铺满 + 播放角标（点击进详情播放） */
+.post-card-video {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.post-card-video-el {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.post-card-images.count-1 .post-card-video-el {
+  aspect-ratio: auto;
+  max-height: 240px;
+  object-fit: contain;
+}
+
+.post-card-video-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+/* 详情页图片点击按钮化（弹窗看原图） */
+.post-card-img-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  display: block;
+  width: 100%;
+}
+
+.post-card-img-btn .post-card-img-inner {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .post-card-foot {
   display: flex;
   align-items: center;
@@ -163,6 +211,81 @@
 .post-editor.is-collapsible {
   padding: var(--sp-2) var(--sp-3);
   gap: var(--sp-1);
+}
+
+/* 群内 compact 展开态整体限高：底部输入面板（flex:none）不再把消息流挤走，
+   上限同时约束矮视口与高视口；内部选项区滚动，媒体预览不再被压扁 */
+.post-editor.is-collapsible.is-expanded {
+  max-height: min(62vh, 620px);
+}
+
+.post-editor-input-row {
+  flex: none;
+}
+
+/* 展开态中部选项区（可见性/媒体预览/进度）：内部滚动，
+   发布按钮与媒体按钮分别固定在上下两端始终可见 */
+.post-editor-extra {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.post-editor.is-collapsible.is-expanded .post-editor-extra {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 媒体预览横排（固定在输入框下方，始终可见不进滚动区）：
+   块 128px、区高随内容、超宽横向滚动。
+.post-editor-images {
+  display: flex;
+  overflow-x: auto;
+  gap: var(--sp-2);
+  padding-bottom: 2px;
+}
+
+.post-editor-image {
+  position: relative;
+  flex: none;
+  width: 128px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+}
+
+.post-editor-image img,
+.post-editor-image video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.post-editor-progress {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.post-editor-progress-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-border);
+  overflow: hidden;
+}
+
+.post-editor-progress-fill {
+  height: 100%;
+  background: var(--pink-500, var(--ice-500));
+  border-radius: var(--radius-pill);
+  transition: width 200ms var(--ease-out);
 }
 
 .post-editor.is-collapsible:not(.is-expanded) {
@@ -229,27 +352,6 @@
 .post-editor-error {
   font-size: 13px;
   color: var(--destructive);
-}
-
-.post-editor-images {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-2);
-}
-
-.post-editor-image {
-  position: relative;
-  aspect-ratio: 1;
-  overflow: hidden;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: var(--glass-bg);
-}
-
-.post-editor-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .post-editor-image-remove {
@@ -344,7 +446,7 @@
   color: var(--slate-500);
 }
 
-/* 评论图片（M5-2.1） */
+/* 评论图片（M5-2.1；图文同发后为缩略图网格，点击弹窗看原图） */
 .comment-image {
   margin-top: var(--sp-2);
   max-width: 200px;
@@ -352,6 +454,74 @@
   object-fit: cover;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
+}
+
+.comment-images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+  max-width: 280px;
+}
+
+.comment-images.count-1 {
+  grid-template-columns: minmax(0, 200px);
+}
+
+.comment-image-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.comment-image-btn .comment-image {
+  margin-top: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 4 / 3;
+  max-width: none;
+  max-height: none;
+  display: block;
+}
+
+.composer-pending-images {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+
+.composer-pending-image {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+}
+
+.composer-pending-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer-pending-image button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .comment-text {

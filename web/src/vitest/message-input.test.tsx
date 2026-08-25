@@ -35,7 +35,7 @@ function serverMessage(over: Partial<import("../api/types").ChatMessage> = {}) {
 describe("MessageInput 乐观发送（M7）", () => {
   beforeEach(() => {
     send.mockReset();
-    vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-1", descriptor: {} as never });
+    vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-1", descriptor: {} as never, upload_id: "u-x" });
     // jsdom 无 URL.createObjectURL/revokeObjectURL：stub 供缩略图条与乐观消息使用
     vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:stub", revokeObjectURL: vi.fn() });
   });
@@ -92,7 +92,7 @@ describe("MessageInput 乐观发送（M7）", () => {
 
   it("选择视频进队列（data-kind=video + 播放标记），发送按 kind=video 上传", async () => {
     send.mockResolvedValue(serverMessage({ type: "mixed" }));
-    const upload = vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-v", descriptor: {} as never });
+    const upload = vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-v", descriptor: {} as never, upload_id: "u-x" });
     render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
     const input = screen.getByLabelText("发送图片或视频").querySelector("input") as HTMLInputElement;
     expect(input.accept).toContain("video/*");

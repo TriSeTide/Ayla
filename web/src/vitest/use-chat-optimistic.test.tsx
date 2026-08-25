@@ -46,7 +46,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
   beforeEach(() => {
     useMessageStore.getState().reset();
     send.mockReset();
-    vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-1", descriptor: {} as never });
+    vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-1", descriptor: {} as never, upload_id: "u-1" });
     vi.stubGlobal("URL", { ...URL, revokeObjectURL: vi.fn(), createObjectURL: () => "blob:stub" });
   });
 
