@@ -14,6 +14,7 @@ import { sendMessage, sendOptimistic, type PickedMediaItem } from "../../hooks/u
 import { uploadMediaFile, validateMediaFile } from "../../api/media";
 import { IconImage, IconClose, IconMic, IconSend } from "../icons";
 import { useTyping } from "../../hooks/useTyping";
+import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceRecorder, isVoiceRecordingSupported, formatDuration as formatRecDuration, type VoiceRecording } from "../../hooks/useVoiceRecorder";
 import { segmentPreview } from "../../utils/segment";
 
@@ -49,6 +50,7 @@ export function MessageInput({
   const [failedVoice, setFailedVoice] = useState<FailedVoice | null>(null);
   const voice = useVoiceRecorder();
   const { onInput } = useTyping(convId || null);
+  const isNarrow = useMediaQuery(NARROW_QUERY);
 
   useEffect(() => {
     setText(draft);
@@ -278,7 +280,7 @@ export function MessageInput({
             );
             if (mediaFiles.length > 0) enqueueFiles(mediaFiles);
           }}
-          placeholder="输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"
+          placeholder={isNarrow ? "输入消息" : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"}
           rows={2}
         />
         <button

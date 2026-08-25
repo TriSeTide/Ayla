@@ -249,6 +249,54 @@ describe("AppShell", () => {
   });
 });
 
+/* ---------- AppShell 窄屏顶栏（NarrowTopBar，抽取自各页面） ---------- */
+
+describe("AppShell 窄屏顶栏（NarrowTopBar）", () => {
+  it("窄屏 /search 渲染搜索态顶栏（输入框 + 返回键）", () => {
+    renderShell("/search", true);
+    expect(screen.getByRole("textbox", { name: "全局搜索" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+  });
+
+  it("窄屏 /search 清除键：有文本时显示，点击清空", () => {
+    renderShell("/search?q=冰樱", true);
+    const input = screen.getByRole("textbox", { name: "全局搜索" }) as HTMLInputElement;
+    expect(input.value).toBe("冰樱");
+    const clearBtn = screen.getByRole("button", { name: "清除搜索" });
+    expect(clearBtn).toBeInTheDocument();
+    fireEvent.click(clearBtn);
+    expect(input.value).toBe("");
+    expect(screen.queryByRole("button", { name: "清除搜索" })).not.toBeInTheDocument();
+  });
+
+  it("窄屏 /search 确认键存在（提交搜索，与回车同通道）", () => {
+    renderShell("/search", true);
+    const input = screen.getByRole("textbox", { name: "全局搜索" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "冰樱" } });
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
+  });
+
+  it("窄屏一级列表页（/voice）渲染默认态顶栏（头像 + 搜索胶囊）", () => {
+    renderShell("/voice", true);
+    expect(screen.getByRole("link", { name: "个人主页" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "全局搜索" })).toBeInTheDocument();
+  });
+
+  it("窄屏群场景/私聊/沉浸路由不渲染 NarrowTopBar", () => {
+    for (const path of ["/group/g1", "/chat/c1", "/live/42"]) {
+      const { unmount } = renderShell(path, true);
+      expect(screen.queryByRole("button", { name: "返回" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "全局搜索" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("宽屏不渲染 NarrowTopBar（顶栏为 TopNav，无返回键）", () => {
+    renderShell("/search", false);
+    expect(screen.queryByRole("button", { name: "返回" })).not.toBeInTheDocument();
+  });
+});
+
 /* ---------- CreateFAB 交互 ---------- */
 
 describe("CreateFab", () => {

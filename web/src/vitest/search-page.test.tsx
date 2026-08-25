@@ -1,10 +1,10 @@
 /**
- * SearchPage 测试（F9 + 顶栏复用）：
- * - 窄屏渲染搜索输入态顶栏（左返回 + 搜索框自动聚焦），无独立 search-input-wrap；
- * - 顶栏输入词回车 → URL ?q= 驱动搜索 → 结果分组显示；
- * - URL ?q= 直接进入自动搜索；
+ * SearchPage 测试（F9）：
+ * - URL ?q= 直接进入自动搜索 → 结果分组显示；
  * - 历史 chips 点击 → URL 更新；
- * - 宽屏不渲染 NarrowTopBar（由 AppShell TopNav 承载搜索框）。
+ * - 五类分组空态 / 群结果申请弹窗（申请制/公开/旧数据）；
+ * - 窄屏顶栏（NarrowTopBar search variant）已抽取到 AppShell，本页不再渲染
+ *   （其交互测试见 shell.test.tsx）。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -106,33 +106,10 @@ afterEach(() => {
 });
 
 describe("SearchPage 顶栏复用（F9）", () => {
-  it("窄屏渲染搜索输入态顶栏：左返回 + 搜索框自动聚焦，无独立 search-input-wrap", () => {
+  it("SearchPage 内不渲染 NarrowTopBar（顶栏已抽取到 AppShell，含搜索输入态）", () => {
     renderSearch("/search", true);
-    // 顶栏搜索输入框（自动聚焦）
-    const input = screen.getByRole("textbox", { name: "全局搜索" }) as HTMLInputElement;
-    expect(input).toBeInTheDocument();
-    expect(document.activeElement).toBe(input);
-    // 左返回
-    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
-    // 不再有独立搜索框
-    expect(document.querySelector(".search-input-wrap")).toBeNull();
-  });
-
-  it("宽屏不渲染 NarrowTopBar（搜索框由 AppShell TopNav 承载）", () => {
-    renderSearch("/search", false);
     expect(screen.queryByRole("textbox", { name: "全局搜索" })).toBeNull();
     expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
-  });
-
-  it("顶栏输入词回车 → URL ?q= 驱动搜索 → 显示结果分组", async () => {
-    renderSearch("/search", true);
-    const input = screen.getByRole("textbox", { name: "全局搜索" });
-    fireEvent.change(input, { target: { value: "冰樱" } });
-    fireEvent.submit(input.closest("form")!);
-    await waitFor(() => {
-      expect(screen.getByText("小樱")).toBeInTheDocument();
-    });
-    expect(search).toHaveBeenCalledWith(expect.objectContaining({ q: "冰樱" }));
   });
 
   it("URL ?q= 直接进入 → 自动搜索并显示结果", async () => {

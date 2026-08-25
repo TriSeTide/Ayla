@@ -105,6 +105,27 @@ export function isPostDetailRoute(pathname: string): boolean {
   return matchPath({ path: "/posts/:postId", end: true }, pathname) != null;
 }
 
+/**
+ * 窄屏顶栏（NarrowTopBar）渲染路由：一级/二级列表页窄屏顶部有常驻顶栏
+ * （头像/搜索/更多，或搜索态）。群场景（GroupTopTabs）、私聊、语音房/直播间/帖子
+ * 详情等沉浸路由与个人页不渲染。NarrowTopBar 由 AppShell 统一渲染（AnimatePresence
+ * 之外，固定不动），各页面不再自带。
+ */
+export function isNarrowTopBarRoute(pathname: string): boolean {
+  return (
+    matchPath({ path: "/group", end: true }, pathname) != null ||
+    matchPath({ path: "/home", end: true }, pathname) != null ||
+    matchPath({ path: "/voice", end: true }, pathname) != null ||
+    matchPath({ path: "/live", end: true }, pathname) != null ||
+    matchPath({ path: "/posts", end: true }, pathname) != null ||
+    matchPath({ path: "/posts/mine", end: true }, pathname) != null ||
+    matchPath({ path: "/games", end: true }, pathname) != null ||
+    matchPath({ path: "/search", end: true }, pathname) != null ||
+    matchPath({ path: "/favorites", end: true }, pathname) != null ||
+    matchPath({ path: "/messages", end: true }, pathname) != null
+  );
+}
+
 export interface FabAction {
   /** 动作标识（测试锚点） */
   key: string;

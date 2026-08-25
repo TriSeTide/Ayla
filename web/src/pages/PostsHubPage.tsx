@@ -10,13 +10,10 @@ import { Link, useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import { PostCard } from "../components/posts/PostCard";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { usePostsStore, isPostsStale } from "../stores/posts";
 import { chatWS } from "../ws/chat";
 
 export function PostsHubPage() {
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const { posts, nextCursor, hasMore, loading, error, favoriteByPostId } = usePostsStore();
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -102,7 +99,6 @@ export function PostsHubPage() {
 
   return (
     <div className="posts-hub" onScroll={(e) => handleScroll(e.currentTarget)}>
-      {isNarrow && <NarrowTopBar />}
       <div className="posts-hub-head">
         <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
       </div>

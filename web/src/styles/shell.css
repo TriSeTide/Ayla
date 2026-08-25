@@ -27,6 +27,21 @@
   min-width: 0;
 }
 
+/* 全局路由转场容器（PageTransition，方案 §2.1）：absolute 撑满内容区，新旧页重叠转场。
+   用 sync + absolute（手动 popLayout）而非 AnimatePresence popLayout——popLayout 的
+   layout projection 会接管 transform，吞掉进入位移（y）动画。absolute 脱离文档流后
+   由 framer-motion 自由驱动 transform 位移。 */
+.page-transition {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  min-width: 0;
+}
+.page-transition > * {
+  min-height: 0;
+  min-width: 0;
+}
+
 @media (max-width: 768px) {
   .app-shell {
     height: 100dvh;
@@ -82,6 +97,8 @@
   min-height: 48px; /* 触达目标 ≥40px（design.md §10） */
   color: var(--text-secondary);
   text-decoration: none;
+  /* A5：选中态图标/文字颜色过渡 150ms（design.md §7 时长范围；图标 stroke=currentColor 同步过渡） */
+  transition: color 150ms var(--ease-out);
 }
 
 .bottom-tab-link:hover {
@@ -116,7 +133,8 @@
   background: var(--surface);
   border: 1px solid var(--glass-border);
   box-shadow: var(--card-shadow);
-  transition: box-shadow var(--dur-fast) var(--ease-out);
+  /* A5：主页凸起背板辉光淡入 200ms（原 --dur-fast 180ms → 200ms） */
+  transition: box-shadow 200ms var(--ease-out);
 }
 
 .bottom-tab-home .bottom-tab-link.is-active .bottom-tab-home-disc {
@@ -453,6 +471,9 @@
    语音/直播球由下方规则滑出淡隐；点击贴边把手恢复展开 */
 .session-activity-group.is-collapsed {
   transform: translateX(24px);
+  /* 收起态：整组不拦截指针——球的占位区域与透明容器穿透到下层元素，
+     仅展开把手可点（见下方 .session-activity-toggle 恢复规则） */
+  pointer-events: none;
 }
 
 .session-activity-ball {
@@ -479,6 +500,11 @@
   visibility: hidden;
   transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out),
     visibility 0s linear 200ms;
+}
+
+/* 收起态唯一可点区域：展开把手（其余穿透到下层元素） */
+.session-activity-group.is-collapsed .session-activity-toggle {
+  pointer-events: auto;
 }
 
 .session-activity-ball:hover,

@@ -165,31 +165,33 @@ export function ProfilePage() {
                 online={currentUser.online}
                 imageUrl={avatarPreview ?? (currentUser.avatar || null)}
               />
-              <label className="btn btn-ghost profile-avatar-btn">
-                更换头像
-                <input
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={(e) => {
-                    pickAvatar(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              {avatarPreview && (
-                <span className="profile-avatar-hint">新头像将在保存后生效</span>
-              )}
-              {avatarError && (
-                <span className="profile-avatar-error" role="alert">
-                  {avatarError}
-                </span>
-              )}
             </div>
             <div className="profile-names">
               <span className="profile-nickname">{displayName}</span>
               <span className="profile-username">@{currentUser.username}</span>
             </div>
+          </div>
+          <div className="profile-avatar-actions">
+            <label className="btn btn-ghost profile-avatar-btn">
+              更换头像
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => {
+                  pickAvatar(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {avatarPreview && (
+              <span className="profile-avatar-hint">新头像将在保存后生效</span>
+            )}
+            {avatarError && (
+              <span className="profile-avatar-error" role="alert">
+                {avatarError}
+              </span>
+            )}
           </div>
 
           <div className="profile-form">
@@ -238,7 +240,6 @@ export function ProfilePage() {
                 }}
                 rows={3}
                 placeholder="写点什么…"
-                style={{ resize: "vertical" }}
               />
             </label>
 

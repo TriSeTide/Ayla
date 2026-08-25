@@ -14,8 +14,6 @@ import { applyToGroup } from "../api/chat";
 import type { SearchGroupItem, SearchResults, UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { UserProfileCard } from "../components/UserProfileCard";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useSearchStore } from "../stores/search";
 import { useChatStore } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
@@ -25,7 +23,6 @@ import type { ChatServerFrame } from "../api/types";
 
 export function SearchPage() {
   const navigate = useNavigate();
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get("q") ?? "";
   const { history, pushHistory, clearHistory } = useSearchStore();
@@ -165,13 +162,12 @@ export function SearchPage() {
   const submitQuery = (query: string) => {
     const trimmed = query.trim();
     if (!trimmed) return;
-    setSearchParams({ q: trimmed });
+    // replace：搜索词变更不进历史栈，返回键直接回上一个界面
+    setSearchParams({ q: trimmed }, { replace: true });
   };
 
   return (
     <div className="search-page">
-      {isNarrow && <NarrowTopBar variant="search" />}
-
       {!q && history.length > 0 && (
         <div className="search-history">
           {history.map((h) => (

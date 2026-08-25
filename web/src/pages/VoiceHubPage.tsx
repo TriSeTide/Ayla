@@ -13,9 +13,7 @@ import * as voiceApi from "../api/voice";
 import type { ElysiaProfile } from "../api/types";
 import { VoiceRoomBody } from "../components/voice/VoiceRoomBody";
 import { VoiceChannelList } from "../components/voice/VoiceChannelList";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useShellStore } from "../stores/shell";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceChannel } from "../hooks/useVoiceChannel";
@@ -25,7 +23,6 @@ import { voiceWS } from "../ws/voice";
 export function VoiceHubPage() {
   const navigate = useNavigate();
   const { channelId: routeChannelId } = useParams<{ channelId?: string }>();
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   // 仅在房内路由启动输入框滑入；离房复位，避免大厅预挂载使下次动画失效。
   const { inputEntered } = useEnterRoomAnimation(routeChannelId != null);
   const channels = useVoiceStore((s) => s.channels);
@@ -209,7 +206,6 @@ export function VoiceHubPage() {
 
   return (
     <div className="voice-hub">
-      {isNarrow && <NarrowTopBar />}
       {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
        {notice && (
         <div

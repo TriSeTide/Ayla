@@ -346,6 +346,11 @@
 .post-editor.is-collapsible:not(.is-expanded) .post-editor-body {
   min-height: 40px;
   resize: none;
+  /* 收起态单行输入：隐藏竖向滚动条。textarea 默认 overflow:auto，收起态可视
+     高度受 .field 的 padding(12px)+border 与 min-height 共同约束，placeholder/文字
+     可能溢出冒出竖向滚动条；单行场景无需滚动，显式隐藏（仅收起态生效，
+     展开态 rows=4 仍保留 resize:vertical + 竖向滚动，不受影响） */
+  overflow-y: hidden;
 }
 
 .post-editor-error {

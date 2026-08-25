@@ -348,3 +348,40 @@
   line-height: 1.55;
   color: var(--text-secondary);
 }
+
+/* ================= U8 个人页布局修复 ================= */
+
+/* ④ 头像区：更换头像按钮独立一行（与预览提示/校验错误同行），头像+名字仍并排 */
+.profile-avatar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ① 个性签名 textarea：禁用原生 resize 手柄 */
+.profile-form textarea {
+  resize: none;
+}
+
+/* ③ 在线状态胶囊：未选中 ice 蓝系（底 --ice-300 16% + indigo 字），选中保持粉系；
+   遵守「单区 ≤2 pastel 强调」——只有选中的 1 个粉 pastel */
+.status-chip {
+  background: rgba(189, 212, 233, 0.16); /* --ice-300 @ 16% */
+  color: var(--indigo-700);
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out);
+}
+.status-chip.active {
+  background: var(--sakura-300);
+  color: var(--grape-700);
+}
+
+/* ② 滚动容器底部补足：底栏高(64px，同 shell.css .bottom-tabs) + safe-area + 呼吸间距，
+   确保滚动到底时「我的内容」最后一行与退出登录不被窄屏底栏裁切 */
+@media (max-width: 768px) {
+  .profile-page {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px) + var(--sp-6));
+  }
+}

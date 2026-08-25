@@ -130,4 +130,35 @@ describe("MessageInput 乐观发送（M7）", () => {
     fireEvent.click(screen.getByRole("button", { name: "移除媒体" }));
     await waitFor(() => expect(screen.queryByRole("group", { name: "待发送媒体" })).not.toBeInTheDocument());
   });
+
+  it("placeholder 响应式（U7）：宽屏保留完整快捷键说明、窄屏短文案", () => {
+    // 宽屏（jsdom 无 matchMedia → useMediaQuery 回退 false）：完整文案
+    const { unmount } = render(
+      <MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    expect(
+      screen.getByPlaceholderText("输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"),
+    ).toBeInTheDocument();
+    unmount();
+
+    // 窄屏（matchMedia matches=true）：短文案，不含快捷键说明
+    const listeners = new Set<(e: { matches: boolean }) => void>();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        get matches() {
+          return true;
+        },
+        media: "(max-width: 768px)",
+        addEventListener: (_type: string, cb: (e: { matches: boolean }) => void) => listeners.add(cb),
+        removeEventListener: (_type: string, cb: (e: { matches: boolean }) => void) => listeners.delete(cb),
+      })),
+    );
+    render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByPlaceholderText("输入消息")).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"),
+    ).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });

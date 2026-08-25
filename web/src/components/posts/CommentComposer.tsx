@@ -4,6 +4,7 @@ import { apiRequest } from "../../api/client";
 import type { MediaDescriptor, PostComment } from "../../api/types";
 import { IconImage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 
 type PendingImage = {
   mediaId: string;
@@ -35,6 +36,7 @@ export function CommentComposer({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedFiles, setFailedFiles] = useState<File[]>([]);
+  const isNarrow = useMediaQuery(NARROW_QUERY);
 
   const MAX_IMAGES = 4;
 
@@ -172,7 +174,7 @@ export function CommentComposer({
         </label>
         <textarea
           className="field composer-input"
-          placeholder="写评论…（可与图片一起发）"
+          placeholder={isNarrow ? "写评论…" : "写评论…（可与图片一起发）"}
           rows={1}
           value={body}
           onChange={(event) => setBody(event.target.value)}

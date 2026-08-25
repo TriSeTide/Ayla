@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { usePostsStore } from "../stores/posts";
 
 const FILTERS: Array<{ key: FavoriteTargetType | "all"; label: string }> = [
@@ -63,7 +61,6 @@ function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite
 }
 
 export function FavoritesPage() {
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const [filter, setFilter] = useState<FavoriteTargetType | "all">("all");
   const [favorites, setFavorites] = useState<Favorite[]>([]);
@@ -101,7 +98,6 @@ export function FavoritesPage() {
 
   return (
     <div className="favorites-page">
-      {isNarrow && <NarrowTopBar />}
       <h2 className="favorites-title">我的收藏</h2>
       <div className="favorites-filters" role="tablist" aria-label="收藏分类">
         {FILTERS.map((item) => (

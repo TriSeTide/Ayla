@@ -9,12 +9,9 @@ import * as boardgameApi from "../api/boardgame";
 import type { GameRoom } from "../api/types";
 import { GameRoomCard } from "../components/boardgame/GameRoomCard";
 import { GameRoomPlaceholder } from "../components/boardgame/GameRoomPlaceholder";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useBoardgameStore, isBoardgameStale } from "../stores/boardgame";
 
 export function GamesHubPage() {
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const rooms = useBoardgameStore((s) => s.rooms);
   const loading = useBoardgameStore((s) => s.roomsLoading);
   const error = useBoardgameStore((s) => s.error);
@@ -70,7 +67,6 @@ export function GamesHubPage() {
 
   return (
     <div className="games-hub">
-      {isNarrow && <NarrowTopBar />}
       {(error || loadError) && (
         <div className="chat-notice" role="alert">
           <span>{error || loadError}</span>

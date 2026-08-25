@@ -378,3 +378,13 @@ export function IconChevronRight(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** 向右箭头（lucide arrow-right）：搜索确认键等「前往/确认」语义 */
+export function IconArrowRight(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
+  );
+}

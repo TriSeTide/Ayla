@@ -11,13 +11,10 @@ import { getElysiaProfile } from "../api/elysia";
 import * as liveApi from "../api/live";
 import { ensureUser } from "../api/users";
 import { LiveHall } from "../components/live/LiveHall";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useLiveStore, isLiveStale } from "../stores/live";
 
 export function LiveHubPage() {
   const navigate = useNavigate();
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const channels = useLiveStore((s) => s.channels);
   const loading = useLiveStore((s) => s.channelsLoading);
   const [onlyLive, setOnlyLive] = useState(false);
@@ -83,7 +80,6 @@ export function LiveHubPage() {
 
   return (
     <div className="live-hub">
-      {isNarrow && <NarrowTopBar />}
       <div className="live-hub-toolbar">
         <label className="live-hall-filter">
           <input

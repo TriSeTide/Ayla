@@ -23,7 +23,6 @@ import {
 } from "../components/home/groupActivity";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
 
@@ -147,7 +146,6 @@ export function HomePage() {
       className="home-page"
       onScroll={(e) => handleScroll(e.currentTarget)}
     >
-      <NarrowTopBar />
       <div className="home-toolbar">
         <h1 className="home-title">群聊</h1>
         <LayoutSwitch layout={layout} onChange={setLayout} />

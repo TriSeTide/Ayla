@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Avatar } from "../components/Avatar";
-import { IconBack, IconDots, IconSearch } from "../components/icons";
+import { IconBack, IconClose, IconDots, IconSearch } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
 
 export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "search" }) {
@@ -23,7 +23,7 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
   const navigate = useNavigate();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -56,7 +56,15 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search");
+    // replace：搜索词变更不进历史栈，返回键 navigate(-1) 直接回上一个界面
+    navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search", { replace: true });
+  };
+
+  const clearQuery = () => {
+    setQuery("");
+    // 清空 URL q 让 SearchPage 同步清空结果区；replace 避免清除操作产生历史记录
+    setSearchParams({}, { replace: true });
+    inputRef.current?.focus();
   };
 
   const moreMenu = (
@@ -121,15 +129,31 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
           >
             <IconBack width={20} height={20} />
           </button>
-          <form className="narrow-topbar-search" role="search" onSubmit={submitSearch}>
-            <IconSearch width={16} height={16} />
+          <form className="narrow-topbar-search narrow-topbar-search-input" role="search" onSubmit={submitSearch}>
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索用户、群、帖子、直播间、桌游室"
+              placeholder="搜索用户、群、帖子…"
               aria-label="全局搜索"
             />
+            {query && (
+              <button
+                type="button"
+                className="search-box-clear"
+                aria-label="清除搜索"
+                onClick={clearQuery}
+              >
+                <IconClose width={14} height={14} />
+              </button>
+            )}
+            <button
+              type="submit"
+              className="search-box-submit"
+              aria-label="搜索"
+            >
+              <IconSearch width={18} height={18} />
+            </button>
           </form>
           {moreMenu}
         </>

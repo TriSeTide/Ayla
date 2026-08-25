@@ -5,11 +5,8 @@ import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
 import { IconBack } from "../components/icons";
 import { PostCard } from "../components/posts/PostCard";
-import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 
 export function MyPostsPage() {
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -64,7 +61,6 @@ export function MyPostsPage() {
       const el = event.currentTarget;
       if (hasMore && !loadingMore && el.scrollHeight - el.scrollTop - el.clientHeight < 240) void load(cursor);
     }}>
-      {isNarrow && <NarrowTopBar />}
       <header className="my-posts-head">
         <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回">
           <IconBack width={20} height={20} />

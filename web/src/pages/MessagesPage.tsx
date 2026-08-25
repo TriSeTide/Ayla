@@ -18,7 +18,6 @@ import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
 import { ConversationList } from "../components/chat/ConversationList";
 import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { NarrowTopBar } from "../layout/NarrowTopBar";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
@@ -181,7 +180,6 @@ export function MessagesPage() {
   // 窄屏：双选项卡 + 列表，点会话跳 /chat/:id
   return (
     <div className="messages-page">
-      <NarrowTopBar />
       {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {actionError && (

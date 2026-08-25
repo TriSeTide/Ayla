@@ -11,25 +11,29 @@
  *   /messages 页显示「返回主页」；其余页面仅在有红点时显示 QuickMessageFAB（就地弹快捷消息栏）。
  */
 import { useEffect } from "react";
-import { Outlet, matchPath, useLocation } from "react-router-dom";
+import { matchPath, useLocation, useOutlet } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
+import { PageTransition, resolvePageKey } from "../components/motion/PageTransition";
 import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
 import { BottomTabs } from "./BottomTabs";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
+import { NarrowTopBar } from "./NarrowTopBar";
 import { QuickMessageFab } from "./QuickMessageFab";
 import { QuickMessagesSheet } from "../components/chat/QuickMessagesSheet";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isMessagesRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isMessagesRoute, isNarrowTopBarRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
 
 const BADGES_POLL_INTERVAL_MS = 30_000;
 
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { pathname } = useLocation();
+  const outlet = useOutlet();
   const bottomTabsLeaving = useShellStore((s) => s.bottomTabsLeaving);
   const quickMessagesOpen = useShellStore((s) => s.quickMessagesOpen);
   const badges = useBadgesStore((s) => s.badges);
@@ -43,6 +47,12 @@ export function AppShell() {
   const messagesNarrow = isNarrow && matchPath({ path: "/messages", end: true }, pathname) != null;
   // 五个一级导航页：左下角私信按钮常态显示、点击跳 /messages（R-QM）
   const primaryNavNarrow = isNarrow && isPrimaryNavRoute(pathname);
+  // 窄屏顶栏（NarrowTopBar）：/search 为搜索态，其余列表页 default；沉浸/群/私聊路由不渲染
+  const narrowTopBarVariant = isNarrowTopBarRoute(pathname)
+    ? matchPath({ path: "/search", end: true }, pathname)
+      ? "search"
+      : "default"
+    : null;
 
   // 全站未读聚合：进入即拉 + 断线降级 30s 轮询（R-N4；WS 推送后置）
   useEffect(() => {
@@ -63,9 +73,19 @@ export function AppShell() {
 
   return (
     <div className="app-shell" data-form={isNarrow ? "narrow" : "wide"}>
-      {isNarrow ? null : <TopNav moduleKey={moduleKey} messagesActive={isMessagesRoute(pathname)} messageBadge={messageBadge} />}
+      {isNarrow ? (
+        narrowTopBarVariant ? <NarrowTopBar variant={narrowTopBarVariant} /> : null
+      ) : (
+        <TopNav moduleKey={moduleKey} messagesActive={isMessagesRoute(pathname)} messageBadge={messageBadge} />
+      )}
       <main className="app-shell-content">
-        <Outlet />
+        {/* sync + .page-transition absolute（CSS 手动 popLayout）：绕开 popLayout 的
+            layout projection，否则 projection 接管 transform 会吞掉 y 位移动画 */}
+        <AnimatePresence mode="sync" initial={false}>
+          <PageTransition key={resolvePageKey(pathname)} pathname={pathname}>
+            {outlet}
+          </PageTransition>
+        </AnimatePresence>
       </main>
       <SessionActivityIndicator />
       <RealtimeStatusBanner />
