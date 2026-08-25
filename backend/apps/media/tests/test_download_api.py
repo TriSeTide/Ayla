@@ -181,11 +181,11 @@ class TestAuthzErrors:
         client.put(
             f"/api/v1/media/uploads/{upload_id}", data=data, content_type="application/octet-stream"
         )
-        # 让缩略图派生抛异常
+        # 让缩略图派生抛异常（小文件图片路径经 services._encode_thumbnail 编码缩略图）
         def boom(*a, **k):
             raise RuntimeError("derivation boom")
 
-        monkeypatch.setattr(services.derivatives, "generate_thumbnail", boom)
+        monkeypatch.setattr(services, "_encode_thumbnail", boom)
         resp = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
         assert resp.status_code == 201
         desc = resp.json()["descriptor"]

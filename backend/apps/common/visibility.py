@@ -107,11 +107,15 @@ def set_allowed_groups(obj, group_ids) -> None:
         return
     if not isinstance(group_ids, list):
         raise ValueError("allowed_group_ids 必须是数组")
-    groups = list(
-        Conversation.objects.filter(
-            id__in=[str(item) for item in group_ids], type=Conversation.TYPE_GROUP
+    try:
+        groups = list(
+            Conversation.objects.filter(
+                id__in=[str(item) for item in group_ids], type=Conversation.TYPE_GROUP
+            )
         )
-    )
+    except ValueError as exc:
+        # 无效 id（如非 UUID 字符串）在查询期即抛 ValueError，统一归属到字段名
+        raise ValueError(f"allowed_group_ids 包含无效的群 id（{exc}）") from exc
     if len(groups) != len(set(str(item) for item in group_ids)):
         raise ValueError("allowed_group_ids 包含不存在或非群聊会话")
     obj.allowed_groups.set(groups)
