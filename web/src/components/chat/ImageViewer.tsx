@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MediaDescriptor } from "../../api/types";
-import { getSignedMediaUrl, mediaContentUrl } from "../../api/media";
+import { getSignedMediaUrl, mediaContentUrl, takeWarmVideoElement } from "../../api/media";
 import { ResourceImage } from "../ResourceImage";
 import { IconClose, IconDownload } from "../icons";
 
@@ -68,35 +68,101 @@ async function downloadMedia(media: MediaDescriptor): Promise<void> {
   a.remove();
 }
 
-/** 查看器内视频播放器：签名 URL 直连，原生 Range 流式播放（即点即播） */
+/**
+ * 查看器内视频播放器：签名 URL 直连，原生 Range 流式播放（即点即播）。
+ *
+ * 秒开链路（三层）：
+ * 1. 预热接管：hover/tap 或详情页挂载时已创建 detached <video> 开始缓冲
+ *    （warmVideoPool），本组件挂载时优先接管该元素——缓冲与点击决策时间窗
+ *    重叠，点开即播；
+ * 2. 无预热兜底：签名后自建 <video preload=auto>；
+ * 3. 画面全程无黑块：有海报帧时等待期显示海报 <img>，<video poster> 挂同一
+ *    张海报（缓冲中与起播前画面同帧无跳变）；autoPlay 被浏览器策略拦截时
+ *    停在海报帧而非黑屏。
+ * video 元素为命令式管理（React 外挂载），卸载时显式释放资源。
+ */
 function VideoPlayer({ media }: { media: MediaDescriptor }) {
-  const [src, setSrc] = useState<string | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [elementReady, setElementReady] = useState(false);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const hasPoster = Boolean(media.thumbnail);
+  const thumbUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getSignedMediaUrl(media.media_id)
+    getSignedMediaUrl(media.media_id, "thumb")
       .then((url) => {
-        if (!cancelled) setSrc(url);
+        if (cancelled) return;
+        thumbUrlRef.current = url;
+        setThumbUrl(url);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
+  }, [hasPoster, media.media_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let el: HTMLVideoElement | null = null;
+    const mount = async () => {
+      try {
+        const url = await getSignedMediaUrl(media.media_id);
+        if (cancelled) return;
+        // 优先接管预热元素（已在缓冲）；无则新建并开始加载
+        const warm = takeWarmVideoElement(media.media_id);
+        el = warm ?? document.createElement("video");
+        if (!warm) el.src = url;
+        el.className = "image-viewer-video";
+        el.controls = true;
+        el.autoplay = true;
+        el.playsInline = true;
+        el.preload = "auto";
+        if (thumbUrlRef.current) el.poster = thumbUrlRef.current;
+        hostRef.current?.appendChild(el);
+        setElementReady(true);
+        try {
+          const p = el.play();
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        } catch {
+          /* jsdom/受限环境 play 不可用时静默（用户可手点播放） */
+        }
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    };
+    void mount();
+    return () => {
+      cancelled = true;
+      if (el) {
+        try {
+          el.pause();
+          el.removeAttribute("src");
+          el.load();
+          el.remove();
+        } catch {
+          /* 清理失败可忽略（元素即将丢弃） */
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [media.media_id]);
 
   if (failed) return <span className="image-viewer-fallback">视频加载失败</span>;
-  if (!src) return <span className="media-frame-skeleton image-viewer-video-skeleton" />;
   return (
-    <video
-      src={src}
-      className="image-viewer-video"
-      controls
-      autoPlay
-      playsInline
-    />
+    <div ref={hostRef} className="image-viewer-video-host">
+      {!elementReady &&
+        (thumbUrl ? (
+          <img
+            src={thumbUrl}
+            alt=""
+            className="image-viewer-video image-viewer-video-poster"
+          />
+        ) : (
+          <span className="media-frame-skeleton image-viewer-video-skeleton" />
+        ))}
+    </div>
   );
 }
 

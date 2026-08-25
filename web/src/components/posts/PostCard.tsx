@@ -10,7 +10,7 @@ import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { IconHeart, IconMessage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
-import { SignedVideo } from "../SignedVideo";
+import { PostVideoCover } from "./PostVideoCover";
 import { mediaContentUrl } from "../../api/media";
 import { useAuthStore } from "../../stores/auth";
 import { goUserProfile } from "../../utils/navigation";
@@ -43,7 +43,7 @@ export function PostCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
-  // 媒体列表（图片用缩略图；视频无派生缩略图，用 video 元素首帧）
+  // 媒体列表（图片/视频封面统一走 thumbnail 缩略图；视频无海报帧才降级首帧预览）
   const mediaList = post.images.filter((i) => i.media);
   const longBody = post.body.length > 120;
 
@@ -94,10 +94,11 @@ export function PostCard({
               const media = img.media;
               if (!media) return null;
               return media.kind === "video" ? (
-                // 视频卡片：签名 URL 首帧 + 播放角标（点击进详情播放）。
-                // thumbnail 是图片专用派生（视频恒为 null），不可当 video src
+                // 视频卡片：海报帧封面秒出（有 thumbnail 渲染签名缩略图，
+                // 不挂 <video> 拉流；无 thumbnail 降级首帧预览）+ 播放角标。
+                // thumbnail 是图片/视频共用的派生对象路径，绝不可当 video src
                 <div key={img.id} className="post-card-img post-card-video">
-                  <SignedVideo mediaId={media.media_id} className="post-card-video-el" ariaLabel="帖子视频" />
+                  <PostVideoCover media={media} className="post-card-video-el" ariaLabel="帖子视频" />
                   <span className="post-card-video-badge" aria-hidden="true">▶</span>
                 </div>
               ) : (

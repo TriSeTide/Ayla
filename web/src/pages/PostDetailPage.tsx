@@ -15,7 +15,7 @@ import { CommentList } from "../components/posts/CommentList";
 import { CommentComposer } from "../components/posts/CommentComposer";
 import { ImageViewer } from "../components/chat/ImageViewer";
 import { ResourceImage } from "../components/ResourceImage";
-import { SignedVideo } from "../components/SignedVideo";
+import { PostVideoCover } from "../components/posts/PostVideoCover";
 import { mediaContentUrl } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconHeart } from "../components/icons";
@@ -373,10 +373,11 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
                     >
                       {media.kind === "video" ? (
                         <>
-                          <SignedVideo
-                            mediaId={media.media_id}
+                          <PostVideoCover
+                            media={media}
                             className="post-card-video-el"
                             ariaLabel="帖子视频"
+                            warmUp
                           />
                           <span className="post-card-video-badge" aria-hidden="true">▶</span>
                         </>

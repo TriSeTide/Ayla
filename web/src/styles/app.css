@@ -1420,6 +1420,17 @@
   height: min(45vw, 360px);
 }
 
+/* 查看器视频海报帧（original 就绪前的先行画面）：尺寸/圆角/投影复用
+   .image-viewer-video；display:block 消除 img 基线空隙 */
+.image-viewer-video-poster {
+  display: block;
+}
+
+/* 命令式 <video> 的挂载宿主：不参与布局，video 直接作为 stage 的 flex 子项 */
+.image-viewer-video-host {
+  display: contents;
+}
+
 .image-viewer-close {
   position: absolute;
   top: var(--sp-4);

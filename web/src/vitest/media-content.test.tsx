@@ -244,6 +244,7 @@ describe("VideoMedia 首帧气泡与查看器", () => {
         mime_type: "video/mp4",
         width: 1280,
         height: 720,
+        thumbnail: `/api/v1/media/${id}/thumbnail`,
       }),
       reply_to: null,
       status: "sent",
@@ -252,14 +253,15 @@ describe("VideoMedia 首帧气泡与查看器", () => {
     };
   }
 
-  it("气泡渲染首帧 video（签名 URL 直连、禁交互）+ 播放键，点击打开查看器", async () => {
-    signedById.set("vd-1", "/signed/vd-1");
+  it("有海报帧时气泡渲染封面 img（签名缩略图直连），不挂 video 拉流；点击打开查看器", async () => {
+    signedById.set("vd-1|thumb", "/signed/vd-1/thumb");
     render(<MediaContent msg={videoMessage()} />);
-    // 气泡内 video 元素存在且不带 controls（仅首帧展示），src 为签名 URL
-    await waitFor(() => expect(document.querySelector("video.media-video")).not.toBeNull());
-    const bubbleVideo = document.querySelector("video.media-video") as HTMLVideoElement;
-    expect(bubbleVideo.hasAttribute("controls")).toBe(false);
-    expect(bubbleVideo.getAttribute("src")).toBe("/signed/vd-1");
+    // 封面 img 直连签名缩略图（零视频元数据拉流，秒出）
+    await waitFor(() => expect(document.querySelector("img.media-video")).not.toBeNull());
+    expect((document.querySelector("img.media-video") as HTMLImageElement).getAttribute("src")).toBe(
+      "/signed/vd-1/thumb",
+    );
+    expect(document.querySelector("video.media-video")).toBeNull();
     expect(screen.getByRole("button", { name: "查看视频" })).toBeInTheDocument();
     // 点击进入查看器：dialog 内是带 controls 的完整播放器
     fireEvent.click(screen.getByRole("button", { name: "查看视频" }));
@@ -267,6 +269,41 @@ describe("VideoMedia 首帧气泡与查看器", () => {
       .then(() => document.querySelector("dialog video, [role=dialog] video"));
     expect(viewerVideo).not.toBeNull();
     expect((viewerVideo as HTMLVideoElement).hasAttribute("controls")).toBe(true);
+  });
+
+  it("无海报帧降级首帧 video（签名 original 直连、禁交互）+ 播放键", async () => {
+    const msg = videoMessage("vd-0");
+    msg.media = mediaDescriptor({
+      media_id: "vd-0",
+      kind: "video",
+      mime_type: "video/mp4",
+      width: 1280,
+      height: 720,
+      thumbnail: null,
+    });
+    signedById.set("vd-0", "/signed/vd-0");
+    render(<MediaContent msg={msg} />);
+    await waitFor(() => expect(document.querySelector("video.media-video")).not.toBeNull());
+    const bubbleVideo = document.querySelector("video.media-video") as HTMLVideoElement;
+    expect(bubbleVideo.hasAttribute("controls")).toBe(false);
+    expect(bubbleVideo.getAttribute("src")).toBe("/signed/vd-0");
+  });
+
+  it("hover 预热的 detached video 被查看器直接接管（缓冲延续，不重建 src）", async () => {
+    signedById.set("vd-warm", "/signed/vd-warm");
+    const mediaApi = await import("../api/media");
+    mediaApi.warmUpVideoElement("vd-warm");
+    render(<MediaContent msg={videoMessage("vd-warm")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "查看视频" }));
+    await waitFor(() =>
+      expect(document.querySelector("video.image-viewer-video")).not.toBeNull(),
+    );
+    const viewerVideo = document.querySelector("video.image-viewer-video") as HTMLVideoElement;
+    // 接管预热元素：src 沿用预热时签发的 URL（缓冲不中断）
+    expect(viewerVideo.getAttribute("src")).toBe("/signed/vd-warm");
+    expect(viewerVideo.getAttribute("preload")).toBe("auto");
+    // 元素已移出预热池（移交查看器，不重复驻留）
+    expect(mediaApi.takeWarmVideoElement("vd-warm")).toBeNull();
   });
 
   it("查看器保存视频走签名 URL 原生下载通道", async () => {
@@ -400,5 +437,37 @@ describe("MixedMedia 图文混排（type=mixed + segments）", () => {
     const img = await screen.findByRole("img", { name: "图片" });
     expect(img).toHaveAttribute("src", "blob:local-0");
     expect(screen.getByText("看看")).toBeInTheDocument();
+  });
+
+  it("查看器视频秒开：海报帧先行显示，<video> 挂同帧 poster + preload=auto", async () => {
+    // original 签名延迟、thumb（海报）即时返回：模拟真实网络时序——
+    // 等待期画面必须是海报 <img> 而非骨架屏；video 出现后 poster 同帧衔接
+    const { getSignedMediaUrl } = await import("../api/media");
+    const impl = vi.mocked(getSignedMediaUrl).getMockImplementation();
+    vi.mocked(getSignedMediaUrl).mockImplementation(async (mediaId, variant) => {
+      if (variant === "thumb") return `/signed/${mediaId}-poster`;
+      await new Promise((r) => setTimeout(r, 20));
+      return `/signed/${mediaId}-original`;
+    });
+    try {
+      render(<MediaContent msg={mixedMessage()} />);
+      fireEvent.click(await screen.findByRole("button", { name: "查看视频" }));
+      await waitFor(() =>
+        expect(document.querySelector("img.image-viewer-video-poster")).not.toBeNull(),
+      );
+      expect(document.querySelector("img.image-viewer-video-poster")).toHaveAttribute(
+        "src",
+        "/signed/med-v-poster",
+      );
+      // original 就绪后：<video> 接管，poster 与等待期同一张海报（无跳变）
+      await waitFor(() =>
+        expect(document.querySelector("video.image-viewer-video")).not.toBeNull(),
+      );
+      const video = document.querySelector("video.image-viewer-video") as HTMLVideoElement;
+      expect(video.getAttribute("poster")).toBe("/signed/med-v-poster");
+      expect(video.getAttribute("preload")).toBe("auto");
+    } finally {
+      vi.mocked(getSignedMediaUrl).mockImplementation(impl!);
+    }
   });
 });

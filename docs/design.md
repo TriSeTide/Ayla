@@ -304,6 +304,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 图片：1 图大图圆角 12px；多图 3 列九宫格 gap 4px 圆角 8px
 - 底排：评论数 / 收藏（线性图标 18px + Space Grotesk 12px 数字，`--text-secondary`）；收藏激活态图标填 `--pink-500`
 - 评论输入框：InputBar 变体（底 `--surface` + 1px `--ice-300`，focus 转 `--glow-500` + 辉光）
+- **视频媒体封面（秒开策略）**：上传时前端抽首帧经 `POST /media/{id}:poster` 回传（JPEG ≤2MB 存为 thumbnail 派生，QQ 同款）；卡片/详情页封面一律渲染 thumbnail 签名缩略图（320px JPEG `<img>` 直连，秒出、零视频拉流，不挂 `<video>` 元素）+ ▶ 角标；查看器播放时 original 签名就绪前显示同一海报帧 `<img>`，`<video poster>` 同帧衔接 + `preload="auto"`——点开即见画面无跳变；无海报帧（存量/抽帧失败）降级 SignedVideo 首帧预览。服务端在 poster 回传后异步做 mp4 faststart 重排（moov 前置，`manage.py ensure_video_faststart` 补存量），起播 Range 往返从 2~3 次降到一次顺序读——详见《媒体预签名直传与播放架构》
 
 ### 12.8.1 发帖编辑器 PostEditor 与创建浮层 CreateSheet
 
@@ -394,7 +395,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 > 聊天消息发送重构：发送不阻塞输入（乐观气泡 + 左上角状态）；图片/视频多选进输入区缩略图条，点发送统一上传；支持粘贴；混排气泡文本与媒体段流式排列；查看器支持同消息多图/视频切换。会话列表/引用/群活跃度的混排摘要由后端 `preview` 统一生成（「文本文本[视频]文本[图片]」形态）。
 
 - **输入区缩略图条**（`.composer-picked`，`role=group aria-label=待发送媒体`）：输入框上方横向 flex wrap，`gap 8px`；缩略 44×44px（视频 58px 宽）`--radius-sm` 圆角 + 1px `--glass-border` + `--glass-bg` 底，`object-fit: cover` 预览本地 objectURL（**未上传**）；视频叠加 18px 玻璃播放徽标；右上 `-5px` 处 18px 圆形移除钮（hover 转 `--destructive` 白字）。**小尺寸不挤压输入框**；移除即 revoke objectURL。
-- **混排气泡**（`.mixed-flow`）：flex wrap + `gap 8px`；文本段 `.mixed-text` 流式排列（`max-width:100%`，`white-space:pre-wrap`）；媒体段 `.mixed-img` 180×180px 方块（`--radius-input` 圆角、`cover` 裁剪、`cursor:zoom-in`）多图自动换行成网格；视频段复用 `.media-frame-video` 首帧+播放徽标（240px 宽 4:3）。乐观消息（未上传）媒体段用本地 objectURL 渲染，无 descriptor 不报错。
+- **混排气泡**（`.mixed-flow`）：flex wrap + `gap 8px`；文本段 `.mixed-text` 流式排列（`max-width:100%`，`white-space:pre-wrap`）；媒体段 `.mixed-img` 180×180px 方块（`--radius-input` 圆角、`cover` 裁剪、`cursor:zoom-in`）多图自动换行成网格；视频段复用 `.media-frame-video` 海报帧封面+播放徽标（有 thumbnail 渲染签名缩略图 `<img>`，无海报降级首帧预览；与 §12.8 秒开策略同一事实）（240px 宽 4:3）。乐观消息（未上传）媒体段用本地 objectURL 渲染，无 descriptor 不报错。
 - **乐观发送状态**（`.msg-send-state`，仅自己的气泡）：与气泡同一行、位于气泡左侧垂直居中（`position:absolute; right:calc(100%+8px); top:50%` 反向偏移）——上传中显示 `.msg-send-progress`「上传中 n%」（`--text-secondary` 12px）+ 玻璃小按钮「取消」；纯文本发送中为 14px indigo 旋转 spinner（`prefers-reduced-motion` 停止旋转）；失败态 `--destructive`「发送失败」+ 玻璃小按钮「重试/删除」（复用 `.msg-action-btn`，11px 图标+文字，hover `--glow-shadow`）。重试复用同一幂等键重新上传发送。
 - **查看器多图切换**（`ImageViewer`）：同消息的 image/video 段合成条目列表，`←/→` 键或左右玻璃圆形 nav 钮（44px，`--glass-bg-strong` blur 12px，`top:50%` 垂直居中，disabled 时 opacity 0.35）切换；底部玻璃胶囊加计数 `1/2`（`--font-utility` 12px `--text-secondary`）；对话框 `aria-label="图片查看：n/总数"`（单图为 `图片查看：<alt>`）。本地乐观预览（未上传）只展示、保存钮显示「发送后可保存」。
 - **会话列表/引用/活跃度摘要**：混排消息按段生成占位（text 拼原文、image→`[图片]`、video→`[视频]`），与单媒体 `[图片]` 占位及撤回 `[已撤回]` 共用同一预览语义；后端 `last_message.preview` 为权威，WS `message.new` 后前端按 segments 兜底生成。

@@ -4,7 +4,8 @@
  * 渲染规则（契约：backend/apps/media/serializers.py MediaObjectSerializer）：
  * - image/emoji：直接渲染原图 content（缩略图是 320px JPEG 静帧，会压画质且
  *   让 GIF 动图变静图；ResourceImage 按 media_id 全局缓存，不产生重复请求）；
- * - video：首帧（<video preload=metadata> blob）+ 播放键覆盖层，点击进查看器预览/保存；
+ * - video：海报帧封面（thumbnail 签名缩略图直连秒出；无海报降级 <video>
+ *   首帧预览）+ 播放键覆盖层，点击进查看器预览/保存；
  * - voice：波形 + 进度条（可拖）+ 时长 + 播放（content）；全局同时只播一条；
  * - file：文件名 + 大小 + 下载（content）；
  * - descriptor 未就绪（WS 帧只带 media_id）→ 骨架占位并异步补拉；
@@ -20,6 +21,7 @@ import {
   getSignedMediaUrl,
   mediaContentUrl,
   resolveMediaPath,
+  warmUpVideoElement,
 } from "../../api/media";
 import { apiRequestBlob, API_PREFIX } from "../../api/client";
 import type { ChatMessage, MediaDescriptor } from "../../api/types";
@@ -141,8 +143,13 @@ function ImageMedia({
 /* ---------- 视频 ---------- */
 
 /**
- * 视频首帧帧块：本地预览（乐观消息）或服务端签名 URL 直连，
- * 渲染 <video preload=metadata> 首帧 + 播放键徽标；点击触发 onOpen（查看器）。
+ * 视频帧块（群聊/私信气泡）：本地预览（乐观消息）或服务端媒体封面。
+ *
+ * 秒开策略（与帖子侧 PostVideoCover 同一事实）：
+ * - 服务端视频有海报帧（thumbnail，上传时前端抽首帧回传）→ 渲染签名缩略图
+ *   <img> 封面，零视频元数据拉流，封面秒出；点击进查看器播放；
+ * - 无海报帧（存量/抽帧失败）→ 降级 <video preload=metadata> 首帧预览；
+ * - hover/tap 预热 original 签名 URL（模块缓存），点击打开查看器时零往返。
  */
 function VideoFrame({
   media,
@@ -161,18 +168,27 @@ function VideoFrame({
   const [videoSrc, setVideoSrc] = useState<string | null>(localUrl ?? null);
   const [failed, setFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hasPoster = Boolean(media?.thumbnail);
 
-  // 本地预览直接可用；服务端媒体用短时签名 URL 直连——
-  // <video src> 原生 Range 流式加载，首帧秒出，不再 fetch 全量 blob 占内存
+  // hover/tap 预热：签 URL 并创建 detached <video> 开始缓冲——点击打开查看器
+  // 时直接接管已缓冲元素，起播缓冲与点击决策时间窗重叠（点开即播）
+  const warmUpOriginal = () => {
+    if (media && !localUrl) warmUpVideoElement(media.media_id);
+  };
+
+  // 本地预览直接可用；服务端无海报帧的降级路径才签 original 拉首帧
   useEffect(() => {
     if (localUrl) {
+      setFailed(false);
       setVideoSrc(localUrl);
       return;
     }
+    setVideoSrc(null);
     if (!media) {
       setFailed(true);
       return;
     }
+    if (hasPoster) return;
     let cancelled = false;
     setFailed(false);
     getSignedMediaUrl(media.media_id)
@@ -199,9 +215,52 @@ function VideoFrame({
     }
   };
 
+  const playBadge = (
+    <span className="video-play-badge" aria-hidden="true">
+      <IconPlay width={22} height={22} />
+    </span>
+  );
+
   return (
-    <div className="media-frame media-frame-video" style={style}>
-      {videoSrc ? (
+    <div className="media-frame media-frame-video" style={style} onPointerEnter={warmUpOriginal}>
+      {localUrl ? (
+        <button
+          type="button"
+          className="media-frame-open"
+          onClick={onOpen}
+          aria-label={ariaLabel}
+          title="点击放大预览"
+        >
+          <video
+            src={localUrl}
+            className="media-video"
+            preload="metadata"
+            muted
+            playsInline
+            tabIndex={-1}
+          />
+          {playBadge}
+        </button>
+      ) : media && hasPoster ? (
+        <button
+          type="button"
+          className="media-frame-open"
+          onClick={onOpen}
+          aria-label={ariaLabel}
+          title="点击放大预览"
+        >
+          {/* 海报帧封面直连秒出（object-fit cover 由 .media-video 提供） */}
+          <ResourceImage
+            src={media.thumbnail!}
+            variant="thumb"
+            alt=""
+            className="media-video"
+            loading="lazy"
+            fallback={<span className="media-frame-skeleton" />}
+          />
+          {playBadge}
+        </button>
+      ) : videoSrc ? (
         <button
           type="button"
           className="media-frame-open"
@@ -220,9 +279,7 @@ function VideoFrame({
             tabIndex={-1}
             onLoadedData={onLoadedData}
           />
-          <span className="video-play-badge" aria-hidden="true">
-            <IconPlay width={22} height={22} />
-          </span>
+          {playBadge}
         </button>
       ) : failed ? (
         <span className="video-load-failed">视频加载失败</span>

@@ -240,6 +240,10 @@ class MediaPosterView(APIView):
         store.put(thumb_key, body, content_type="image/jpeg")
         media.thumbnail_path = thumb_key
         media.save(update_fields=["thumbnail_path"])
+        # 海报就绪后异步做 faststart 重排（moov 前置）：起播从 2~3 次 Range
+        # 往返降到一次顺序读——点开即播的根治。后台 daemon 线程不阻塞响应，
+        # 失败只留日志保留原对象（services.ensure_video_faststart）。
+        services.schedule_video_faststart(media)
         return Response({"thumbnail": f"/api/v1/media/{media_id}/thumbnail"}, status=status.HTTP_201_CREATED)
 
 

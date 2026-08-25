@@ -712,3 +712,102 @@ def can_access_media(user, media: MediaObject) -> bool:
 
 def get_media_or_none(media_id: str) -> MediaObject | None:
     return MediaObject.objects.filter(media_id=media_id).first()
+
+
+# faststart 重排适用容器（ISO-BMFF mp4 家族；WebM/MKV 是 EBML 结构绝不能进）
+FASTSTART_MIMES = ("video/mp4", "video/x-m4v")
+
+
+def _is_faststart_candidate(media: MediaObject) -> bool:
+    return (
+        media.kind == MediaObject.KIND_VIDEO
+        and (media.mime_type or "").split(";")[0].strip().lower() in FASTSTART_MIMES
+        and bool(media.storage_path)
+    )
+
+
+def ensure_video_faststart(media_id: str) -> bool:
+    """对 mp4 视频做 faststart 重排（moov 前置），替换 original 对象。
+
+    起播性能根治：moov 尾置的视频浏览器起播前需 2~3 次 Range 往返（读头→
+    读尾拿元数据→回头缓冲）；重排后一次顺序读即可边下边播。纯容器级平移，
+    总字节数与编码不变（apps/media/faststart.py）。
+
+    幂等：已是 faststart 的对象直接跳过（False）。失败语义：任何异常只留
+    warning 并保留原对象——播放可用性永远不受影响，绝不抛出到调用链上层。
+    替换采用「写 tmp key → stat 校验 → 服务端 copy → 删 tmp」与 complete
+    相同的原子模式，content_hash 同步更新为替换后的 etag。
+    """
+    from .faststart import remux_file_faststart
+
+    try:
+        media = MediaObject.objects.filter(media_id=media_id).first()
+        if media is None or not _is_faststart_candidate(media):
+            return False
+        store = storage.get_storage()
+        original_key = media.storage_path
+        if not store.exists(original_key):
+            return False
+        old_size = store.head(original_key)
+
+        import tempfile
+
+        with tempfile.TemporaryFile(dir=str(settings.MEDIA_TMP_DIR)) as src:
+            store.download_to(original_key, src)
+            src.seek(0)
+            with tempfile.TemporaryFile(dir=str(settings.MEDIA_TMP_DIR)) as dst:
+                if not remux_file_faststart(src, dst):
+                    return False  # 已是 faststart / 无 moov，无需处理
+                dst.seek(0, 2)
+                new_size = dst.tell()
+                if new_size != old_size:
+                    logger.warning(
+                        "faststart: size mismatch for %s (%d != %d), keep original",
+                        media_id, new_size, old_size,
+                    )
+                    return False
+                dst.seek(0)
+                tmp_key = storage.tmp_key(f"faststart-{media_id}")
+                try:
+                    content_type = media.mime_type or "video/mp4"
+                    store.put_stream(tmp_key, dst, content_type=content_type)
+                    stat = store.stat(tmp_key)
+                    if stat["size"] != old_size:
+                        logger.warning(
+                            "faststart: stored size mismatch for %s, keep original", media_id
+                        )
+                        return False
+                    store.copy(tmp_key, original_key, content_type=content_type)
+                    media.content_hash = stat["etag"] or media.content_hash
+                    media.save(update_fields=["content_hash"])
+                    logger.info(
+                        "faststart remux done for %s (%d bytes)", media_id, new_size
+                    )
+                    return True
+                finally:
+                    store.delete(tmp_key)
+    except Exception:
+        logger.warning(
+            "faststart remux failed for %s (original kept)", media_id, exc_info=True
+        )
+        return False
+
+
+def schedule_video_faststart(media: MediaObject) -> None:
+    """后台线程触发 faststart 重排（poster 上传后调用）。
+
+    重排涉及全量下载/上传对象（大视频秒级~十秒级），绝不占用同步请求线程
+    （channels thread_sensitive 串行队列）；daemon 线程失败只留日志。
+    非 mp4 视频直接跳过。
+    """
+    import threading
+
+    if not _is_faststart_candidate(media):
+        return
+
+    def _run():
+        ensure_video_faststart(media.media_id)
+
+    threading.Thread(
+        target=_run, daemon=True, name=f"faststart-{media.media_id[:12]}"
+    ).start()

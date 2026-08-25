@@ -67,6 +67,60 @@ export function invalidateSignedMediaUrl(mediaId: string): void {
   }
 }
 
+/* ---------- 视频预热元素池（hover/挂载预载，点击即播） ---------- */
+
+/**
+ * detached <video> 预热池：hover/tap 或详情页挂载时创建离屏 video 元素
+ * （不插入 DOM 也会按 preload=auto 开始拉流缓冲），用户点击打开查看器时
+ * 直接接管该元素——起播缓冲与「用户决定点击的时间窗」重叠，点开即播
+ * （视频平台 hover 预载同款思路）。上限防抖：只保留最近几个预热元素。
+ */
+const warmVideoPool = new Map<string, HTMLVideoElement>();
+const WARM_VIDEO_POOL_MAX = 4;
+
+export function warmUpVideoElement(mediaId: string): void {
+  if (warmVideoPool.has(mediaId)) return;
+  void getSignedMediaUrl(mediaId)
+    .then((url) => {
+      if (warmVideoPool.has(mediaId)) return;
+      // 池满先淘汰最旧（Map 迭代序 = 插入序）
+      while (warmVideoPool.size >= WARM_VIDEO_POOL_MAX) {
+        const [oldest] = warmVideoPool.keys();
+        const stale = warmVideoPool.get(oldest);
+        warmVideoPool.delete(oldest);
+        if (stale) {
+          try {
+            stale.pause();
+            stale.removeAttribute("src");
+            stale.load();
+          } catch {
+            /* 淘汰清理失败可忽略（元素即将被 GC） */
+          }
+        }
+      }
+      const el = document.createElement("video");
+      el.preload = "auto";
+      el.playsInline = true;
+      el.src = url;
+      try {
+        el.load();
+      } catch {
+        /* 个别环境 detached load 抛错时静默（查看器会自行兜底加载） */
+      }
+      warmVideoPool.set(mediaId, el);
+    })
+    .catch(() => {
+      /* 预热失败静默：查看器打开时走正常加载路径 */
+    });
+}
+
+/** 接管预热元素（存在则移出池返回，调用方负责挂载与销毁）；无则 null。 */
+export function takeWarmVideoElement(mediaId: string): HTMLVideoElement | null {
+  const el = warmVideoPool.get(mediaId) ?? null;
+  if (el) warmVideoPool.delete(mediaId);
+  return el;
+}
+
 /** 删除自己上传的媒体（对象存储 original/thumbnail + 记录），孤儿即时回收 */
 export function deleteMedia(mediaId: string): Promise<void> {
   return apiRequest<void>(`/media/${seg(mediaId)}`, { method: "DELETE" });

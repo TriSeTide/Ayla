@@ -1,13 +1,16 @@
 /**
- * SignedVideo —— 帖子/详情页视频播放块（签名 URL 直连流式播放）。
+ * SignedVideo —— 帖子视频首帧预览块（签名 URL 直连流式播放）。
  *
  * 与 chat 侧 VideoFrame 同一事实：<video src> 用短时签名 URL 直连对象存储，
  * 原生 Range 流式加载（preload=metadata 秒出首帧、拖动即点即播）。
  *
- * 关键契约：MediaDescriptor.thumbnail 是图片缩略图路径（/api/v1/media/{id}/thumbnail，
- * JPEG 静帧），视频没有缩略图派生（恒为 null）——绝不能作为 <video src>。
- * 此前帖子卡把该路径塞给 video 导致视频无源可播（黑块），本组件即根治点：
- * 一律按 media_id 签发 original 视频 URL。
+ * 关键契约：MediaDescriptor.thumbnail 是派生封面对象路径（/api/v1/media/{id}/thumbnail，
+ * JPEG 静帧）——图片缩略图与视频海报帧共用；绝不能作为 <video src>。
+ * 此前帖子卡把该路径塞给 video 导致视频无源可播（黑块），本组件按 media_id
+ * 签发 original 视频 URL。
+ *
+ * 定位：无海报帧视频（存量 / 浏览器抽帧失败）的首帧预览降级路径。
+ * 有海报帧的封面渲染走 PostVideoCover（<img> 秒出，不挂 video 元素）。
  */
 import { useEffect, useState } from "react";
 import { getSignedMediaUrl, invalidateSignedMediaUrl } from "../api/media";
