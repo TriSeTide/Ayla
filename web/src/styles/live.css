@@ -497,6 +497,8 @@
 @media (max-width: 768px) {
   .live-hub .live-hall-grid {
     grid-template-columns: repeat(2, 1fr);
+    /* 窄屏左右留白与语音/桌游/帖子列表统一 */
+    padding: var(--sp-3) var(--sp-4);
   }
 }
 
@@ -526,4 +528,56 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--sp-3) var(--sp-4);
+}
+
+/* ================= 直播间上下滑切换（方案 §2.5：视频+弹幕区整体滑动） ================= */
+
+/* 滑动容器：沉浸式窄屏占满 head 与 input 之间，overflow 裁剪滑入滑出 */
+.live-room-body.is-narrow .live-room-swipe {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 滑动单元：视频（上，占满剩余）+ 弹幕列表（下，固定 240px）；
+   AnimatePresence sync 下新旧单元 absolute 重叠转场（同 .group-scene-inner，避免 popLayout 接管 transform） */
+.live-room-swipe-item {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.live-room-swipe-item .live-room-stage {
+  flex: 1;
+  min-height: 0;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.live-room-swipe-item .live-player {
+  width: 100%;
+  max-height: 100%;
+}
+
+/* 弹幕列表在滑动单元内固定 240px（对齐旧窄屏 side 高度），随视频+弹幕整体滑动 */
+.live-room-swipe-item .danmaku-wrap {
+  flex: none;
+  height: 240px;
+  min-height: 240px;
+  max-height: 240px;
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* 沉浸式窄屏输入框：从 side 独立后补回玻璃底（原 side 的 --glass-bg-strong），
+   避免输入框直接透出极光背景显得割裂 */
+.live-room-body.is-narrow .live-room-input {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
 }

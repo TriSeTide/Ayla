@@ -43,13 +43,22 @@ function matchGroupId(pathname: string): string | null {
 }
 
 /**
- * 路由转场 key：群页所有变体归一为 `/group/:id`，避免群内场景切换
- * （/group/:id → /group/:id/posts 等）触发整页重挂载 + 进群编排重跑；
- * 其余路由用原始 pathname。
+ * 路由转场 key：
+ * - 群页所有变体归一为 `/group/:id`，避免群内场景切换
+ *   （/group/:id → /group/:id/posts 等）触发整页重挂载 + 进群编排重跑；
+ * - 直播间详情归一为 `/live/room`，避免直播间上下滑切换（/live/:id → /live/:id）
+ *   触发整页重挂载（底栏滑出动画复位）；进入/退出直播间（/live ↔ /live/:id）
+ *   仍走整页转场；
+ * - 其余路由用原始 pathname。
  */
+const LIVE_ROOM_PATTERN = "/live/:id";
+
 export function resolvePageKey(pathname: string): string {
   const groupId = matchGroupId(pathname);
-  return groupId ? `/group/${groupId}` : pathname;
+  if (groupId) return `/group/${groupId}`;
+  const live = matchPath({ path: LIVE_ROOM_PATTERN, end: true }, pathname);
+  if (live?.params.id && live.params.id !== "start") return "/live/room";
+  return pathname;
 }
 
 function prefersReducedMotion(): boolean {
