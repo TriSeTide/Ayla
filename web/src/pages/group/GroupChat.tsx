@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
+import { getElysiaProfile } from "../../api/elysia";
 import type { ChatMessage } from "../../api/types";
 import { MessageInput } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
@@ -30,6 +31,22 @@ export function GroupChat({ groupId }: { groupId: string }) {
   const [peerTyping, setPeerTyping] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
+
+  // 爱莉身份（U1：群聊爱莉消息专属气泡判定，与 PrivateChatPane/MessagesPage 同数据源）
+  useEffect(() => {
+    let cancelled = false;
+    getElysiaProfile()
+      .then((p) => {
+        if (!cancelled) setElysiaUserId(p.user?.id ?? null);
+      })
+      .catch(() => {
+        // profile 未初始化/加载失败 → elysiaUserId 保持 null（无爱莉气泡判定）
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activeConv = useMemo(
     () => conversations.find((c) => c.id === groupId) ?? null,
@@ -111,7 +128,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
       <MessageList
         messages={messages}
         conversation={activeConv}
-        elysiaUserId={null}
+        elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() => {

@@ -43,6 +43,7 @@ export function MessageBubble({
   message,
   isSelf,
   isElysia = false,
+  justArrived = false,
   senderName,
   senderAvatar,
   senderAvatarLabel,
@@ -58,6 +59,8 @@ export function MessageBubble({
   isSelf: boolean;
   /** 爱莉消息（专属气泡样式），由父级按 sender 判定 */
   isElysia?: boolean;
+  /** 新到达消息（乐观发送 / WS 实时）挂到达动画；初始历史加载为 false */
+  justArrived?: boolean;
   /** 群聊显示发送者名 */
   senderName?: string | null;
   /** 发送者头像 URL（气泡行左右显示，design.md §4 Chat Bubbles） */
@@ -186,7 +189,7 @@ export function MessageBubble({
     ) : null;
 
   return (
-    <div className={`msg-row ${isSelf ? "self" : "peer"}`}>
+    <div className={`msg-row ${isSelf ? "self" : "peer"}${justArrived ? " msg-arrive" : ""}`}>
       {senderHalo}
       <div className="msg-body">
         {!isSelf && senderName && <span className="msg-sender">{senderName}</span>}

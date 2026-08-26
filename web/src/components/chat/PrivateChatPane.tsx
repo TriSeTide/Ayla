@@ -177,7 +177,7 @@ export function PrivateChatPane({
       <MessageList
         messages={messages}
         conversation={conv}
-        elysiaUserId={null}
+        elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
         onLoadMore={() => {

@@ -59,6 +59,54 @@ export function MessageList({
   const lastScrollTopRef = useRef(0);
   const isGroup = conversation?.type === "group";
 
+  // A1：消息到达动画——区分「初始历史加载」与「新到达」（乐观发送 / WS 实时）。
+  // prevIdsRef 记录上一帧消息 id 序列；首次历史加载完成（loading true→false 翻转）
+  // 建立基线（当前全部消息视为初始，不动画）；之后仅「数组尾部新增的 id」挂到达动画——
+  // 尾部追加 = 新到达（乐观追加 / WS 追加）；头部前插 = 向上翻页历史（不动画）；
+  // 同长度替换 = 乐观消息 resolve（local id → 服务端 id，不动画）。
+  const prevIdsRef = useRef<string[]>([]);
+  const baselinedRef = useRef(false);
+  const convIdRef = useRef<string | null>(null);
+  const prevLoadingRef = useRef<boolean | null>(null);
+
+  const justArrivedIds = useMemo(() => {
+    if (convIdRef.current !== conversation?.id || !baselinedRef.current) {
+      return new Set<string>();
+    }
+    const prev = prevIdsRef.current;
+    const prevLen = prev.length;
+    const prevSet = new Set(prev);
+    const curIds = messages.map((m) => m.id);
+    const arrived = new Set<string>();
+    for (let i = prevLen; i < curIds.length; i++) {
+      const id = curIds[i];
+      if (!prevSet.has(id)) arrived.add(id);
+    }
+    return arrived;
+  }, [messages, conversation?.id]);
+
+  useEffect(() => {
+    const convId = conversation?.id ?? "__none__";
+    if (convIdRef.current !== convId) {
+      convIdRef.current = convId;
+      baselinedRef.current = false;
+      prevIdsRef.current = [];
+      prevLoadingRef.current = null;
+    }
+    const prevLoading = prevLoadingRef.current;
+    prevLoadingRef.current = loading;
+    // 首次历史加载完成（loading true→false）→ 建立基线，当前全部消息不动画
+    if (!baselinedRef.current) {
+      if (prevLoading === true && loading === false) {
+        baselinedRef.current = true;
+        prevIdsRef.current = messages.map((m) => m.id);
+      }
+      return;
+    }
+    // 已基线：记录当前 id 序列快照（供下一轮 diff）
+    prevIdsRef.current = messages.map((m) => m.id);
+  }, [messages, conversation?.id, loading]);
+
   // 发送者 id → 展示名 + 头像（群聊发送者名 + 头像显示，design.md §4 Chat Bubbles）
   const memberNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -197,6 +245,7 @@ export function MessageList({
                 message={m}
                 isSelf={isSelf}
                 isElysia={elysiaUserId != null && m.sender_id === elysiaUserId}
+                justArrived={justArrivedIds.has(m.id)}
                 senderName={isGroup && !isSelf ? (memberNames.get(m.sender_id) ?? null) : null}
                 senderAvatar={memberAvatars.get(m.sender_id)?.avatar ?? null}
                 senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
