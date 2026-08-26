@@ -3,15 +3,19 @@
  *
  * 视觉（design.md §6 模态层级）：indigo 压暗遮罩 + 玻璃质感关闭钮，
  * 原图/视频 object-fit contain 居中；底部玻璃胶囊操作条（保存 + 多图计数）。
- * 行为：ESC / 点击遮罩空白关闭；打开即 focus 关闭按钮（键盘可达）；←/→ 切换多图。
+ * 行为：ESC / 点击遮罩空白关闭；打开即 focus 关闭按钮（键盘可达）；←/→ 或
+ * 多条目内容区横滑（跟手 + 边缘阻尼 + 过 1/3 或速度达标切换吸附，方案 §3.2）切换多图；
+ * 单条目横滑不切图（保留既有关闭交互）。
  * 图片经 ResourceImage 加载（短时签名 URL 直连，渐进解码秒开）；
  * 视频渲染 <video controls autoPlay>（签名 URL 原生 Range 流式播放，
  * 即点即播不再全量下载）；保存用签名 URL + a[download]（同源生效，
  * 浏览器原生下载流式写盘）。
  * 乐观消息（未上传）的本地预览（localUrl）只展示，不可保存。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import type { PanInfo } from "framer-motion";
 import type { MediaDescriptor } from "../../api/types";
 import { getSignedMediaUrl, mediaContentUrl, takeWarmVideoElement } from "../../api/media";
 import { ResourceImage } from "../ResourceImage";
@@ -25,6 +29,26 @@ export interface ViewerItem {
   /** 本地预览为视频（服务端媒体按 media.kind 判断） */
   isVideo?: boolean;
   alt: string;
+}
+
+/** 横滑切图（方案 §3.2）：等价 tokens.css --ease-out / --ease-in（framer-motion ease 需 cubic-bezier 元组） */
+const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
+const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
+/** 切换滑入/滑出时长 250ms（design.md §7：150–300ms） */
+const SWIPE_SLIDE_DURATION = 0.25;
+/** 快速滑动速度阈值 px/ms（≈300px/s）：位移不足 1/3 时速度达标也可切换 */
+const SWIPE_FLICK_VELOCITY = 0.3;
+/** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
+const DRAG_CONSTRAINTS = { left: 0, right: 0 };
+/** 跟手弹性：0.8 = 80% 跟手 + 20% 边缘阻尼（接近 1:1，避免拖过头） */
+const DRAG_ELASTIC = 0.8;
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
 }
 
 /** MIME → 下载扩展名 */
@@ -203,7 +227,61 @@ export function ImageViewer({
   const current = list[index];
   const isLocal = current.localUrl != null && current.media == null;
 
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [reducedMotion] = useState(prefersReducedMotion);
+
+  // 横滑方向追踪（render 阶段）：index 变化时计算本次切换方向（1=下一张左滑 / -1=上一张右滑）
+  const prevIndexRef = useRef(index);
+  const directionRef = useRef<1 | -1 | 0>(0);
+  if (prevIndexRef.current !== index) {
+    directionRef.current = index > prevIndexRef.current ? 1 : -1;
+    prevIndexRef.current = index;
+  }
+  const direction = directionRef.current;
+
   const close = useCallback(() => onClose(), [onClose]);
+
+  // 横滑松手判定（方案 §3.2）：位移超 1/3 宽或速度达标切换，否则回弹（dragConstraints 自动）
+  const handleDragEnd = useCallback(
+    (_event: unknown, info: PanInfo) => {
+      const width = stageRef.current?.clientWidth ?? window.innerWidth;
+      const threshold = width / 3;
+      if (info.offset.x < -threshold || info.velocity.x < -SWIPE_FLICK_VELOCITY) {
+        setIndex((i) => Math.min(list.length - 1, i + 1));
+      } else if (info.offset.x > threshold || info.velocity.x > SWIPE_FLICK_VELOCITY) {
+        setIndex((i) => Math.max(0, i - 1));
+      }
+    },
+    [list.length],
+  );
+
+  // 条目切换变体：direction 由 index 变化方向决定；reduced-motion 直切（仅透明度）
+  const itemVariants = useMemo(
+    () =>
+      reducedMotion
+        ? {
+            enter: { opacity: 1 },
+            center: { opacity: 1 },
+            exit: { opacity: 0 },
+          }
+        : {
+            enter: (dir: number) => ({
+              x: dir === 0 ? 0 : `${dir * 40}%`,
+              opacity: 1,
+              transition: { duration: SWIPE_SLIDE_DURATION, ease: EASE_OUT },
+            }),
+            center: { x: 0, opacity: 1 },
+            exit: (dir: number) => ({
+              x: dir === 0 ? 0 : `${dir * -30}%`,
+              opacity: 0,
+              transition: { duration: SWIPE_SLIDE_DURATION, ease: EASE_IN },
+            }),
+          },
+    [reducedMotion],
+  );
+
+  // 仅多条目且非 reduced-motion 才启用横滑 drag（单条目保留既有关闭交互，不误触发切图）
+  const canSwipe = list.length > 1 && !reducedMotion;
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -248,22 +326,39 @@ export function ImageViewer({
       >
         <IconClose width={22} height={22} />
       </button>
-      <div className="image-viewer-stage" onClick={(e) => e.stopPropagation()}>
-        {current.localUrl && current.media == null ? (
-          <LocalPreview item={current} />
-        ) : current.media?.kind === "video" ? (
-          <VideoPlayer media={current.media} />
-        ) : current.media ? (
-          <ResourceImage
-            src={mediaContentUrl(current.media.media_id)}
-            alt={current.alt || "图片原图"}
-            className="image-viewer-img"
-            loading="eager"
-            fallback={<span className="image-viewer-fallback">图片加载失败</span>}
-          />
-        ) : (
-          <span className="image-viewer-fallback">媒体不可用</span>
-        )}
+      <div className="image-viewer-stage" ref={stageRef} onClick={(e) => e.stopPropagation()}>
+        <AnimatePresence custom={direction} mode="sync" initial={false}>
+          <motion.div
+            key={index}
+            className="image-viewer-stage-item"
+            custom={direction}
+            variants={itemVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            drag={canSwipe ? "x" : false}
+            dragConstraints={DRAG_CONSTRAINTS}
+            dragElastic={DRAG_ELASTIC}
+            dragMomentum={false}
+            onDragEnd={handleDragEnd}
+          >
+            {current.localUrl && current.media == null ? (
+              <LocalPreview item={current} />
+            ) : current.media?.kind === "video" ? (
+              <VideoPlayer media={current.media} />
+            ) : current.media ? (
+              <ResourceImage
+                src={mediaContentUrl(current.media.media_id)}
+                alt={current.alt || "图片原图"}
+                className="image-viewer-img"
+                loading="eager"
+                fallback={<span className="image-viewer-fallback">图片加载失败</span>}
+              />
+            ) : (
+              <span className="image-viewer-fallback">媒体不可用</span>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
       {list.length > 1 && (
         <>
