@@ -27,6 +27,15 @@ export const PRIMARY_MODULES: ModuleMeta[] = [
   { key: "games", label: "桌游", path: "/games" },
 ];
 
+/** 一级 tab 视觉顺序（主页居中，与 BottomTabs TAB_ORDER 同源）：语音 | 直播 | 主页 | 帖子 | 桌游。
+ *  供窄屏一级五页横滑（方案 §3.1）的方向计算使用。 */
+export const PRIMARY_TAB_ORDER: ModuleKey[] = ["voice", "live", "home", "posts", "games"];
+
+/** 一级 tab 视觉顺序对应的路由路径（/home 为 /group 兼容别名，见 App.tsx 重定向）。 */
+export const PRIMARY_TAB_PATHS: string[] = PRIMARY_TAB_ORDER.map(
+  (key) => PRIMARY_MODULES.find((m) => m.key === key)!.path,
+);
+
 const MODULE_RULES: Array<[ModuleKey, string[]]> = [
   // /group/* 群聊场景归"主页"模块（宽屏主页 = 三列群聊界面）；私聊窗口 /chat/:id 无模块高亮
   ["home", ["/group", "/home", "/group/*"]],

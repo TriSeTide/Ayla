@@ -11,10 +11,12 @@
  *   /messages 页显示「返回主页」；其余页面仅在有红点时显示 QuickMessageFAB（就地弹快捷消息栏）。
  */
 import { useEffect } from "react";
-import { matchPath, useLocation, useOutlet } from "react-router-dom";
+import { matchPath, useLocation, useNavigate, useOutlet } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { PageTransition, resolvePageKey } from "../components/motion/PageTransition";
+import { PrimaryNavPage } from "../components/motion/PrimaryNavPage";
+import { isPrimaryTabPath, usePrimaryNavSwipeDirection } from "../hooks/usePrimaryNavSwipeDirection";
 import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
 import { BottomTabs } from "./BottomTabs";
@@ -33,6 +35,7 @@ const BADGES_POLL_INTERVAL_MS = 30_000;
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const outlet = useOutlet();
   const bottomTabsLeaving = useShellStore((s) => s.bottomTabsLeaving);
   const quickMessagesOpen = useShellStore((s) => s.quickMessagesOpen);
@@ -47,6 +50,10 @@ export function AppShell() {
   const messagesNarrow = isNarrow && matchPath({ path: "/messages", end: true }, pathname) != null;
   // 五个一级导航页：左下角私信按钮常态显示、点击跳 /messages（R-QM）
   const primaryNavNarrow = isNarrow && isPrimaryNavRoute(pathname);
+  // 窄屏一级五页横滑（方案 §3.1）：一级 tab 路由走 PrimaryNavPage（跟手 + 方向变体），
+  // 其余路由走 PageTransition（§2.1 浮入）；两者共用一个 AnimatePresence，custom 供横滑方向
+  const primaryTabNarrow = isNarrow && isPrimaryTabPath(pathname);
+  const navDirection = usePrimaryNavSwipeDirection(pathname);
   // 窄屏顶栏（NarrowTopBar）：/search 为搜索态，其余列表页 default；沉浸/群/私聊路由不渲染
   const narrowTopBarVariant = isNarrowTopBarRoute(pathname)
     ? matchPath({ path: "/search", end: true }, pathname)
@@ -81,10 +88,21 @@ export function AppShell() {
       <main className="app-shell-content">
         {/* sync + .page-transition absolute（CSS 手动 popLayout）：绕开 popLayout 的
             layout projection，否则 projection 接管 transform 会吞掉 y 位移动画 */}
-        <AnimatePresence mode="sync" initial={false}>
-          <PageTransition key={resolvePageKey(pathname)} pathname={pathname}>
-            {outlet}
-          </PageTransition>
+        <AnimatePresence mode="sync" custom={navDirection} initial={false}>
+          {primaryTabNarrow ? (
+            <PrimaryNavPage
+              key={pathname}
+              pathname={pathname}
+              direction={navDirection}
+              onNavigate={navigate}
+            >
+              {outlet}
+            </PrimaryNavPage>
+          ) : (
+            <PageTransition key={resolvePageKey(pathname)} pathname={pathname}>
+              {outlet}
+            </PageTransition>
+          )}
         </AnimatePresence>
       </main>
       <SessionActivityIndicator />
