@@ -10,13 +10,14 @@
  * - 同时后台 `load()` 拉完整 `scope=group:<id>` 补齐 store 投影可能缺失的条目，
  *   用**并集按 id 去重**的方式合并展示，既秒开又完整。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
 import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
+import { saveScrollPosition, useScrollRestore } from "../../hooks/useScrollRestore";
 import { usePostsStore } from "../../stores/posts";
 import { chatWS } from "../../ws/chat";
 
@@ -48,6 +49,7 @@ export function GroupPosts({
   const [error, setError] = useState<string | null>(null);
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -87,6 +89,14 @@ export function GroupPosts({
     );
   }, [groupedFromStore, groupPosts]);
 
+  // U14：群内详情不会卸载 GroupPosts，只会用 postId 条件切换列表/详情 DOM。
+  // active 显式描述列表容器生命周期；ready 等帖子形成可滚高度后再恢复。
+  const scrollRestoreKey = `group-posts:${groupId}`;
+  useScrollRestore(scrollRestoreKey, listRef, {
+    active: postId == null,
+    ready: displayPosts.length > 0,
+  });
+
   if (postId) {
     return <PostDetailPage groupId={groupId} />;
   }
@@ -100,7 +110,7 @@ export function GroupPosts({
         <span className="group-voice-title">群内帖子</span>
         <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
       </div>
-      <div className="group-posts-list">
+      <div className="group-posts-list" ref={listRef}>
         {error && groupPosts.length === 0 && groupedFromStore.length === 0 ? (
           <div className="group-scene-placeholder" role="alert">
             <p className="placeholder-desc">{error}</p>
@@ -127,7 +137,11 @@ export function GroupPosts({
                 <PostCard
                   post={p}
                   favorited={false}
-                  onOpen={() => navigate(`/group/${encodeURIComponent(groupId)}/posts/${p.id}`)}
+                  onOpen={() => {
+                    // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
+                    saveScrollPosition(scrollRestoreKey, listRef.current);
+                    navigate(`/group/${encodeURIComponent(groupId)}/posts/${p.id}`);
+                  }}
                   onToggleFavorite={() => {}}
                 />
               </div>

@@ -2,18 +2,18 @@
  * useScrollRestore —— 列表返回滚动位置恢复（方案 §4-U14，同模式封装）。
  *
  * 语义：
- * - 离开列表（组件卸载）时，把滚动容器当前 scrollTop 存入模块级内存（key 隔离）；
- * - 再次挂载时，若存在记录（scrollTop > 0），`useLayoutEffect` 在首次绘制前恢复位置；
- * - 返回 `restoring` 供调用方判断「本次是恢复进入而非首次进入」，用于跳过入场
- *   stagger（§7：滚动恢复与入场动画互斥，动画只在真正首次进入播）。
+ * - 滚动时把 scrollTop 实时写入模块级 Map（key 隔离）；
+ * - 页面卸载或 active 变 false 时，保存「最后一次真实滚动事件值」，绝不重新读取
+ *   退出动画中的 DOM scrollTop——AnimatePresence 延迟卸载阶段 DOM 可能已归零，读取它会
+ *   把正确记忆覆盖成 0；
+ * - 再挂载或 active 重新变 true 后，在内容 ready 时用 useLayoutEffect 恢复，并在下一帧
+ *   再补一次（防列表/瀑布流同一提交里的尺寸落定晚于首次赋值）；
+ * - restoring 表示本次列表激活是否命中历史位置，调用方据此禁 reveal stagger。
  *
- * 注意：
- * - scrollTop 是「瞬态恢复数据」，用模块级 Map 存储即可（不驱动 UI 重渲染，无需
- *   zustand store；游标/列表数据仍由各功能 store 权威缓存——本 hook 只负责滚动位置）。
- * - `restoring` 在本次挂载生命周期内保持稳定（useState 惰性初始化），保证恢复路径
- *   全程禁用 stagger，避免「恢复后重挂 reveal-item 再播动画」。
+ * active 用于「组件不卸载、只切换列表/详情 DOM」的场景（如 GroupPosts）；ready 表示
+ * 列表内容已经渲染到滚动容器，避免空骨架阶段把 scrollTop clamp 回 0。
  */
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const scrollMemory = new Map<string, number>();
 
@@ -23,39 +23,87 @@ export function clearScrollMemory(): void {
 }
 
 /**
- * @param key  列表唯一键（如 "live-hub"、"posts-feed"），跨路由保持稳定。
+ * 在路由/详情切换前同步保存当前位置。
+ *
+ * AnimatePresence 的退出 cleanup 发生时间不由列表组件掌控；详情入口在滚动容器仍存在时
+ * 显式调用本函数，保证群内/群外都以用户点击瞬间的位置为权威记录。
+ */
+export function saveScrollPosition(key: string, el: HTMLElement | null): void {
+  if (!el) return;
+  scrollMemory.set(key, el.scrollTop);
+}
+
+export interface ScrollRestoreOptions {
+  /** 当前是否渲染列表滚动容器；详情分支时传 false。 */
+  active?: boolean;
+  /** 列表内容是否已就绪并形成可恢复高度。 */
+  ready?: boolean;
+}
+
+/**
+ * @param key  列表唯一键（如 "live-hub"、"posts-feed"、"group-posts:54"）。
  * @param ref  滚动容器的 ref（scrollTop 的宿主元素）。
- * @returns { restoring } 本次挂载是否执行了滚动恢复。
+ * @param options active/ready 生命周期控制；缺省均为 true。
  */
 export function useScrollRestore(
   key: string,
   ref: { current: HTMLElement | null },
+  options: ScrollRestoreOptions = {},
 ): { restoring: boolean } {
-  const [restoring] = useState<boolean>(() => (scrollMemory.get(key) ?? 0) > 0);
+  const active = options.active ?? true;
+  const ready = options.ready ?? true;
+  const [restoring, setRestoring] = useState<boolean>(
+    () => active && (scrollMemory.get(key) ?? 0) > 0,
+  );
+  // 只由真实 scroll 事件更新；退出 cleanup 保存此值，不读可能已归零的退出 DOM。
+  const latestTopRef = useRef(scrollMemory.get(key) ?? 0);
+  const restoreRafRef = useRef<number | null>(null);
 
-  // 首次绘制前恢复（避免恢复前内容闪到顶部）；restoring 路径下调用方已禁 stagger。
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const saved = scrollMemory.get(key);
-    if (saved && saved > 0) {
-      el.scrollTop = saved;
+    if (!active) {
+      setRestoring(false);
+      return;
     }
-  }, [key, ref]);
+    const saved = scrollMemory.get(key) ?? 0;
+    latestTopRef.current = saved;
+    setRestoring(saved > 0);
+    if (!ready || saved <= 0) return;
 
-  // 实时记录 scrollTop：离开（卸载）时内存已是最新，cleanup 再兜底一次。
-  useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    el.scrollTop = saved;
+    // 下一帧再补一次：同一提交中的瀑布流/列表列高可能在 layout effect 后才最终落定。
+    restoreRafRef.current = requestAnimationFrame(() => {
+      const current = ref.current;
+      if (current && active) current.scrollTop = saved;
+      restoreRafRef.current = null;
+    });
+    return () => {
+      if (restoreRafRef.current != null) {
+        cancelAnimationFrame(restoreRafRef.current);
+        restoreRafRef.current = null;
+      }
+    };
+  }, [active, key, ready, ref]);
+
+  useEffect(() => {
+    if (!active) return;
+    const el = ref.current;
+    if (!el) return;
+
+    // 首次无历史时从当前 DOM 起步；有历史时保留已恢复值，避免 effect 初始化覆盖。
+    if (!scrollMemory.has(key)) latestTopRef.current = el.scrollTop;
     const onScroll = () => {
-      scrollMemory.set(key, el.scrollTop);
+      latestTopRef.current = el.scrollTop;
+      scrollMemory.set(key, latestTopRef.current);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      scrollMemory.set(key, el.scrollTop);
+      // scroll 事件和详情入口的 saveScrollPosition 已即时写入 memory；cleanup 仅卸监听。
+      // 不要在这里写回 latestTopRef：路由/退出阶段可能比显式保存更晚，反而覆盖最新位置。
       el.removeEventListener("scroll", onScroll);
     };
-  }, [key, ref]);
+  }, [active, key, ref]);
 
   return { restoring };
 }

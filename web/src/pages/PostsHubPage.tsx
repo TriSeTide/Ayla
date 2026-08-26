@@ -22,7 +22,7 @@ import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useMasonryColumns } from "../hooks/useMasonryColumns";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
-import { useScrollRestore } from "../hooks/useScrollRestore";
+import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { usePostsStore, isPostsStale } from "../stores/posts";
 import { chatWS } from "../ws/chat";
 
@@ -38,7 +38,8 @@ export function PostsHubPage() {
 
   const hubRef = useRef<HTMLDivElement>(null);
   // U14：返回保留滚动位置（restoring 时禁 reveal stagger）
-  const { restoring } = useScrollRestore("posts-feed", hubRef);
+  const scrollRestoreKey = "posts-feed";
+  const { restoring } = useScrollRestore(scrollRestoreKey, hubRef);
   const isMasonry = useMediaQuery(MASONRY_QUERY);
   const columnCount = isMasonry ? 2 : 1;
   const { columns, columnRefs } = useMasonryColumns(posts, columnCount, (p) => p.id, "posts-feed");
@@ -190,7 +191,11 @@ export function PostsHubPage() {
                       <PostCard
                         post={p}
                         favorited={favoriteByPostId[String(p.id)] != null}
-                        onOpen={() => navigate(`/posts/${p.id}`)}
+                        onOpen={() => {
+                          // 详情入口同步保存，避免 AnimatePresence 退出阶段覆盖记录。
+                          saveScrollPosition(scrollRestoreKey, hubRef.current);
+                          navigate(`/posts/${p.id}`);
+                        }}
                         onToggleFavorite={() => void toggleFavorite(p.id)}
                       />
                     </div>

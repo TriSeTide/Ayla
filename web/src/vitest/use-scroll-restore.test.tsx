@@ -49,6 +49,48 @@ describe("useScrollRestore", () => {
     expect(el2.scrollTop).toBe(240);
   });
 
+  it("退出动画把 DOM 归零但未发 scroll 时，不覆盖最后真实滚动值", () => {
+    const el1 = document.createElement("div");
+    const first = renderHook(() => useScrollRestore("feed", { current: el1 }));
+    act(() => {
+      el1.scrollTop = 360;
+      el1.dispatchEvent(new Event("scroll"));
+    });
+    // AnimatePresence 退出阶段可能把已退出 DOM 归零，但不会产生用户 scroll 事件。
+    el1.scrollTop = 0;
+    first.unmount();
+
+    const el2 = document.createElement("div");
+    const second = renderHook(() => useScrollRestore("feed", { current: el2 }));
+    expect(second.result.current.restoring).toBe(true);
+    expect(el2.scrollTop).toBe(360);
+  });
+
+  it("active 列表→详情→列表：条件卸载/重建后恢复（GroupPosts 形态）", () => {
+    const ref: { current: HTMLElement | null } = { current: document.createElement("div") };
+    const hook = renderHook(
+      ({ active, ready }) => useScrollRestore("group-posts:54", ref, { active, ready }),
+      { initialProps: { active: true, ready: true } },
+    );
+    act(() => {
+      if (!ref.current) throw new Error("missing list element");
+      ref.current.scrollTop = 480;
+      ref.current.dispatchEvent(new Event("scroll"));
+    });
+
+    act(() => {
+      ref.current = null;
+      hook.rerender({ active: false, ready: true });
+    });
+    const restored = document.createElement("div");
+    act(() => {
+      ref.current = restored;
+      hook.rerender({ active: true, ready: true });
+    });
+    expect(hook.result.current.restoring).toBe(true);
+    expect(restored.scrollTop).toBe(480);
+  });
+
   it("不同 key 隔离记忆", () => {
     const el1 = document.createElement("div");
     const first = renderHook(() => useScrollRestore("live", { current: el1 }));
