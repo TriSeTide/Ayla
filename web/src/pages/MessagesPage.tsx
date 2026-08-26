@@ -6,7 +6,7 @@
  *  ChannelSidebar 一致）+ 右侧聊天内容区（选中会话内联 PrivateChatPane，不跳转 URL）。
  * 申请条目：好友申请 + 群邀请 + 待审批入群申请，同意/拒绝即时反馈。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
 import { getElysiaProfile } from "../api/elysia";
@@ -17,6 +17,7 @@ import { PrivateChatPane } from "../components/chat/PrivateChatPane";
 import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
 import { ConversationList } from "../components/chat/ConversationList";
 import { ElysiaEntry } from "../components/chat/ElysiaEntry";
+import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore, isChatStale } from "../stores/chat";
@@ -39,6 +40,8 @@ export function MessagesPage() {
   // 宽屏右侧选中的私聊会话 id（内联聊天）
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const conversations = useChatStore((s) => s.conversations);
+  const conversationsLoading = useChatStore((s) => s.loading);
+  const privateRef = useRef<HTMLDivElement>(null);
   const [friendList, setFriendList] = useState<Awaited<ReturnType<typeof usersApi.listFriends>>>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [invites, setInvites] = useState<GroupInvite[]>([]);
@@ -155,6 +158,19 @@ export function MessagesPage() {
 
   const privateConvs = useMemo(() => conversations.filter((c) => c.type === "private"), [conversations]);
 
+  // 下拉刷新：强制重拉会话列表（绕过 isChatStale 缓存）。
+  const refreshConversations = useCallback(async () => {
+    try {
+      const list = await chatApi.listConversations();
+      useChatStore.getState().setConversations(list);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "加载会话失败");
+    }
+  }, []);
+
+  // 下拉刷新仅当私信列表滚动容器（.messages-private）已在顶部时响应
+  const isPrivateAtTop = useCallback(() => (privateRef.current?.scrollTop ?? 0) <= 0, []);
+
   // 宽屏两列：左会话列表侧栏 + 右聊天内容区
   if (!isNarrow) {
     return (
@@ -224,25 +240,28 @@ export function MessagesPage() {
       </div>
 
       {tab === "chat" ? (
-        <div className="messages-private">
-          {elysiaProfile && (
-            <ElysiaEntry
-              profile={elysiaProfile}
-              onEnter={() => {
-                chatApi
-                  .openPrivateConversation(elysiaProfile.user.id)
-                  .then((conv) => navigate(`/chat/${conv.id}`))
-                  .catch((e) => setActionError(e instanceof Error ? e.message : "打开爱莉私聊失败"));
-              }}
+        <div className="messages-private" ref={privateRef}>
+          <PullToRefresh isAtTop={isPrivateAtTop} onRefresh={refreshConversations}>
+            {elysiaProfile && (
+              <ElysiaEntry
+                profile={elysiaProfile}
+                onEnter={() => {
+                  chatApi
+                    .openPrivateConversation(elysiaProfile.user.id)
+                    .then((conv) => navigate(`/chat/${conv.id}`))
+                    .catch((e) => setActionError(e instanceof Error ? e.message : "打开爱莉私聊失败"));
+                }}
+              />
+            )}
+            <ConversationList
+              conversations={privateConvs}
+              activeId={null}
+              elysiaUserId={elysiaProfile?.user.id ?? null}
+              onSelect={(id) => navigate(`/chat/${id}`)}
+              onError={setActionError}
+              revealItems={!conversationsLoading}
             />
-          )}
-          <ConversationList
-            conversations={privateConvs}
-            activeId={null}
-            elysiaUserId={elysiaProfile?.user.id ?? null}
-            onSelect={(id) => navigate(`/chat/${id}`)}
-            onError={setActionError}
-          />
+          </PullToRefresh>
         </div>
       ) : tab === "friends" ? (
         <div className="messages-friends">

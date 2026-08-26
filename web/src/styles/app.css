@@ -896,6 +896,11 @@
   align-items: flex-end;
   gap: var(--sp-2);
   padding: 0 var(--sp-1);
+}
+
+/* A1：消息到达动画——仅新到达消息（乐观发送 / WS 实时）挂 .msg-arrive 播放；
+   初始历史加载不挂，刷新页面历史无动画（复用 base.css frost-rise 原语，design.md §7） */
+.msg-row.msg-arrive {
   animation: frost-rise var(--dur-fast) var(--ease-out);
 }
 
@@ -920,7 +925,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .msg-row {
+  .msg-row.msg-arrive {
     animation: none;
   }
 }
@@ -3302,4 +3307,90 @@
   justify-content: flex-end;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
+}
+
+/* ================= 下拉刷新 PullToRefresh（方案 §3.3） ================= */
+
+.pull-to-refresh {
+  position: relative;
+  min-height: 0;
+}
+
+.pull-refresh-content {
+  position: relative;
+}
+
+/* 指示器：绝对定位在内容顶部上方，随下拉位移滑入视口（y 由 framer-motion 驱动）。
+   可见性由状态类 + opacity 控制（不依赖滚动容器 overflow 裁剪）——列表前有 toolbar 时
+   translateY 上移会落到 toolbar 区域，靠裁剪会「常驻显示」，故 idle 态 opacity:0 隐藏。 */
+.pull-refresh-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 150ms var(--ease-out);
+}
+
+.pull-to-refresh.is-pulling .pull-refresh-indicator,
+.pull-to-refresh.is-refreshing .pull-refresh-indicator,
+.pull-to-refresh.is-done .pull-refresh-indicator {
+  opacity: 1;
+}
+
+/* 玻璃圆点：磨砂 + 高光描边（frost-pulse 同族语言，design.md §7 骨架/指示器质感） */
+.pull-refresh-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--card-shadow);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--indigo-700);
+}
+
+.pull-refresh-arrow {
+  display: block;
+}
+
+.pull-refresh-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--ice-300);
+  border-top-color: var(--indigo-700);
+  animation: pull-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes pull-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pull-refresh-check {
+  display: block;
+  color: var(--success);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pull-refresh-spinner {
+    animation: none;
+    opacity: 0.8;
+  }
+
+  .pull-refresh-indicator {
+    transition: none;
+  }
 }

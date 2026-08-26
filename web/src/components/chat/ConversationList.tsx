@@ -14,8 +14,10 @@ import type { ConversationSummary } from "../../api/types";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
 import { goUserProfile } from "../../utils/navigation";
+import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "./ConversationMoreMenu";
+import type { CSSProperties } from "react";
 
 /** 非文本消息类型 → 预览占位 */
 const TYPE_PLACEHOLDER: Record<string, string> = {
@@ -52,6 +54,7 @@ export function ConversationList({
   onSelect,
   onError,
   disableAvatarNav = false,
+  revealItems = false,
 }: {
   conversations: ConversationSummary[];
   activeId: string | null;
@@ -61,6 +64,8 @@ export function ConversationList({
   onError?: (message: string) => void;
   /** 快捷消息栏内：头像不可点（不跳个人主页，R-QM） */
   disableAvatarNav?: boolean;
+  /** 列表逐条浮入（stagger，active 接 !loading，方案 §5-A2） */
+  revealItems?: boolean;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
@@ -71,7 +76,7 @@ export function ConversationList({
 
   return (
     <ul>
-      {conversations.map((conv) => {
+      {conversations.map((conv, idx) => {
         const isPrivate = conv.type === "private";
         const peerOnline = conv.peer ? onlineUsers[conv.peer.id] != null : false;
         const isElysia = elysiaUserId != null && conv.peer?.id === elysiaUserId;
@@ -79,8 +84,13 @@ export function ConversationList({
           ? conv.peer?.nickname || conv.peer?.username || conv.title || "未命名会话"
           : conv.title || "未命名群聊";
         const isOnline = isPrivate && (peerOnline || isElysia);
+        const delay = revealItems ? staggerDelay(idx) : 0;
         return (
-          <li key={conv.id} className="conv-li">
+          <li
+            key={conv.id}
+            className={`conv-li${revealItems ? " reveal-item" : ""}`}
+            style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
+          >
             <button
               type="button"
               className={`conv-item ${conv.id === activeId ? "active" : ""} ${conv.is_pinned ? "is-pinned" : ""}`}

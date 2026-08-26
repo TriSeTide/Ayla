@@ -39,6 +39,7 @@ export function WideMessagesSidebar({
   const storeConversations = useChatStore((s) => s.conversations);
   const conversations = storeConversations.length > 0 ? storeConversations : (propConversations ?? []);
   const lastFetched = useChatStore((s) => s.lastFetched);
+  const loading = useChatStore((s) => s.loading);
   
   const [tab, setTab] = useState<Tab>("chat");
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -221,6 +222,7 @@ export function WideMessagesSidebar({
             elysiaUserId={elysiaProfile?.user?.id}
             onSelect={onSelect}
             onError={setActionError}
+            revealItems={!loading}
           />
         </div>
       ) : tab === "friends" ? (

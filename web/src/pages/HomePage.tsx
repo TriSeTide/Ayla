@@ -9,7 +9,7 @@
  * 数据：群会话列表（chat store）+ 群动态 highlights（S6 批量接口）。
  * 状态角标 live/voice/game 数据源由 F4/F5/F7 接入（badges.ts 已定义契约）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
 import { GroupCard } from "../components/home/GroupCard";
@@ -22,7 +22,9 @@ import {
   useGroupPresenceMap,
 } from "../components/home/groupActivity";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
+import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
+import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
 
@@ -53,6 +55,7 @@ export function HomePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const homeRef = useRef<HTMLDivElement>(null);
 
   const groups = useMemo(
     () => conversations.filter((c) => c.type === "group"),
@@ -118,6 +121,19 @@ export function HomePage() {
     [navigate],
   );
 
+  // 下拉刷新：强制重拉群会话列表（绕过 isChatStale 缓存）；群动态由 WS 实时维护。
+  const refreshGroups = useCallback(async () => {
+    try {
+      const list = await chatApi.listConversations();
+      useChatStore.getState().setConversations(list);
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : "加载失败");
+    }
+  }, []);
+
+  // 下拉刷新仅当滚动容器（.home-page）已在顶部时响应
+  const isAtTop = useCallback(() => (homeRef.current?.scrollTop ?? 0) <= 0, []);
+
   // ---- 宽屏：重定向到最近群（无群空态引导） ----
   if (!isNarrow) {
     const recentValid = recentGroupId != null && groups.some((g) => g.id === recentGroupId);
@@ -144,6 +160,7 @@ export function HomePage() {
   return (
     <div
       className="home-page"
+      ref={homeRef}
       onScroll={(e) => handleScroll(e.currentTarget)}
     >
       <div className="home-toolbar">
@@ -193,53 +210,59 @@ export function HomePage() {
             搜索发现群
           </button>
         </div>
-      ) : layout === "card" ? (
-        <>
-          <div className="home-grid">
-            {visibleGroups.map((g) => (
-              <GroupCard
-                key={g.id}
-                group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
-                slides={carouselFor(g.id, g.unread_count)}
-                unread={g.unread_count}
-                isPinned={g.is_pinned}
-                onOpen={() => openGroup(g.id)}
-                onError={setActionError}
-              />
-            ))}
-          </div>
-          {visibleCount < groups.length && (
-            <div className="home-load-more" aria-label="加载更多">
-              <span className="home-load-dot" />
-              <span className="home-load-dot" />
-              <span className="home-load-dot" />
-            </div>
-          )}
-        </>
       ) : (
-        <div className="home-list">
-          {visibleGroups.map((g) => {
-            const act = activityFor(g.id, g.last_message);
-            return (
-              <GroupListItem
-                key={g.id}
-                group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
-                status={{ unread: g.unread_count, ...presenceFor(g.id) }}
-                newEventText={act.lastEvent?.text}
-                isPinned={g.is_pinned}
-                onOpen={() => openGroup(g.id)}
-                onError={setActionError}
-              />
-            );
-          })}
-          {visibleCount < groups.length && (
-            <div className="home-load-more" aria-label="加载更多">
-              <span className="home-load-dot" />
-              <span className="home-load-dot" />
-              <span className="home-load-dot" />
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refreshGroups}>
+          {layout === "card" ? (
+            <>
+              <div className="home-grid">
+                {visibleGroups.map((g, idx) => (
+                  <GroupCard
+                    key={g.id}
+                    group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
+                    slides={carouselFor(g.id, g.unread_count)}
+                    unread={g.unread_count}
+                    isPinned={g.is_pinned}
+                    onOpen={() => openGroup(g.id)}
+                    onError={setActionError}
+                    revealDelay={staggerDelay(idx)}
+                  />
+                ))}
+              </div>
+              {visibleCount < groups.length && (
+                <div className="home-load-more" aria-label="加载更多">
+                  <span className="home-load-dot" />
+                  <span className="home-load-dot" />
+                  <span className="home-load-dot" />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="home-list">
+              {visibleGroups.map((g, idx) => {
+                const act = activityFor(g.id, g.last_message);
+                return (
+                  <GroupListItem
+                    key={g.id}
+                    group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
+                    status={{ unread: g.unread_count, ...presenceFor(g.id) }}
+                    newEventText={act.lastEvent?.text}
+                    isPinned={g.is_pinned}
+                    onOpen={() => openGroup(g.id)}
+                    onError={setActionError}
+                    revealDelay={staggerDelay(idx)}
+                  />
+                );
+              })}
+              {visibleCount < groups.length && (
+                <div className="home-load-more" aria-label="加载更多">
+                  <span className="home-load-dot" />
+                  <span className="home-load-dot" />
+                  <span className="home-load-dot" />
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </PullToRefresh>
       )}
       {creatingGroup && <GroupCreateDialog onClose={() => setCreatingGroup(false)} />}
     </div>

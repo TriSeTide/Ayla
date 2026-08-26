@@ -12,6 +12,7 @@ import { ConversationMoreMenu } from "../chat/ConversationMoreMenu";
 import { IconPinFilled } from "../icons";
 import type { GroupStatus } from "./badges";
 import { AvatarStatusBadges } from "./AvatarStatusBadges";
+import type { CSSProperties } from "react";
 
 export function GroupListItem({
   group,
@@ -21,6 +22,7 @@ export function GroupListItem({
   newEventText,
   onOpen,
   onError,
+  revealDelay,
 }: {
   group: { id: string; title: string; avatar?: string; memberCount?: number };
   status: GroupStatus;
@@ -33,9 +35,14 @@ export function GroupListItem({
   onOpen: () => void;
   /** 置顶/删除失败提示（父组件错误条）；缺省 alert 兜底 */
   onError?: (message: string) => void;
+  /** 逐条浮入延迟（ms）；undefined 则不挂 reveal-item（方案 §5-A2） */
+  revealDelay?: number;
 }) {
   return (
-    <div className={`group-list-item-wrap ${isPinned ? "is-pinned" : ""}`}>
+    <div
+      className={`group-list-item-wrap ${isPinned ? "is-pinned" : ""}${revealDelay != null ? " reveal-item" : ""}`}
+      style={revealDelay != null ? ({ ["--reveal-delay" as string]: `${revealDelay}ms` } as CSSProperties) : undefined}
+    >
       <button type="button" className="group-list-item" onClick={onOpen} aria-label={`进入群聊 ${group.title}`}>
         <span className="group-list-avatar">
           <Avatar label={group.title} size={44} online imageUrl={group.avatar || null} />

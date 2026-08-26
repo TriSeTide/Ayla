@@ -11,6 +11,8 @@ import { getElysiaProfile } from "../api/elysia";
 import * as liveApi from "../api/live";
 import { ensureUser } from "../api/users";
 import { LiveHall } from "../components/live/LiveHall";
+import { PullToRefresh } from "../components/motion/PullToRefresh";
+import { useScrollRestore } from "../hooks/useScrollRestore";
 import { useLiveStore, isLiveStale } from "../stores/live";
 
 export function LiveHubPage() {
@@ -23,6 +25,8 @@ export function LiveHubPage() {
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
   const requestId = useRef(0);
+  const hubRef = useRef<HTMLDivElement>(null);
+  const { restoring } = useScrollRestore("live-hub", hubRef);
 
   const load = useCallback(async (only: boolean) => {
     const store = useLiveStore.getState();
@@ -60,6 +64,32 @@ export function LiveHubPage() {
     void load(onlyLive);
   }, [onlyLive, load]);
 
+  // 下拉刷新：强制重拉直播列表（绕过 isLiveStale 缓存，不设 channelsLoading 以免骨架闪现）
+  const refresh = useCallback(async () => {
+    const currentRequest = ++requestId.current;
+    setError(null);
+    try {
+      const list = await liveApi.listLiveChannels({ onlyLive: onlyLive });
+      if (currentRequest !== requestId.current) return;
+      useLiveStore.getState().setChannels(list, onlyLive);
+      const ownerIds = [...new Set(list.map((c) => c.owner_id))];
+      if (ownerIds.length > 0) {
+        const users = await Promise.all(ownerIds.map((id) => ensureUser(id)));
+        const names: Record<string, string> = {};
+        for (const u of users) {
+          if (u) names[u.id] = u.nickname || u.username;
+        }
+        setOwnerNames((prev) => ({ ...prev, ...names }));
+      }
+    } catch (e) {
+      if (currentRequest !== requestId.current) return;
+      setError(e instanceof Error ? e.message : "加载频道失败");
+    }
+  }, [onlyLive]);
+
+  // 下拉刷新仅当滚动容器（.live-hub）已在顶部时响应
+  const isHubAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
+
   const visibleChannels = onlyLive
     ? channels.filter((channel) => channel.status === "live")
     : channels;
@@ -79,7 +109,7 @@ export function LiveHubPage() {
   }, []);
 
   return (
-    <div className="live-hub">
+    <div className="live-hub" ref={hubRef}>
       <div className="live-hub-toolbar">
         <label className="live-hall-filter">
           <input
@@ -98,12 +128,15 @@ export function LiveHubPage() {
           <div className="skeleton" style={{ height: 96 }} />
         </div>
       ) : (
-        <LiveHall
-          channels={visibleChannels}
-          elysiaUserId={elysiaUserId}
-          ownerNames={ownerNames}
-          onEnter={(id) => navigate(`/live/${id}`)}
-        />
+        <PullToRefresh isAtTop={isHubAtTop} onRefresh={refresh}>
+          <LiveHall
+            channels={visibleChannels}
+            elysiaUserId={elysiaUserId}
+            ownerNames={ownerNames}
+            onEnter={(id) => navigate(`/live/${id}`)}
+            revealItems={!loading && !restoring}
+          />
+        </PullToRefresh>
       )}
     </div>
   );

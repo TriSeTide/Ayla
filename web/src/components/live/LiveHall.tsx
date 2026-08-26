@@ -12,6 +12,8 @@ import { FavoriteButton } from "../FavoriteButton";
 import { IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { getVisibilityLabels } from "../../utils/visibility";
+import { staggerDelay } from "../../hooks/useRevealOnEnter";
+import type { CSSProperties } from "react";
 
 function statusBadge(status: LiveChannelDescriptor["status"]): {
   className: string;
@@ -32,6 +34,7 @@ export function LiveHall({
   elysiaUserId,
   ownerNames,
   onEnter,
+  revealItems = false,
 }: {
   channels: LiveChannelDescriptor[];
   /** 爱莉 profile 的 user id（用于"爱莉"角标）；null 则不标注 */
@@ -39,6 +42,8 @@ export function LiveHall({
   /** owner_id → 展示昵称（大厅列表不带主播信息，由页面层补齐） */
   ownerNames: Record<string, string>;
   onEnter: (channelId: number) => void;
+  /** 列表逐条浮入（stagger，active 接 !loading，方案 §5-A2） */
+  revealItems?: boolean;
 }) {
   if (channels.length === 0) {
     return (
@@ -50,12 +55,17 @@ export function LiveHall({
   }
   return (
     <div className="live-hall-grid">
-      {channels.map((ch) => {
+      {channels.map((ch, idx) => {
         const badge = statusBadge(ch.status);
         const isElysia = elysiaUserId != null && ch.owner_id === elysiaUserId;
         const labels = getVisibilityLabels(ch);
+        const delay = revealItems ? staggerDelay(idx) : 0;
         return (
-          <div key={ch.id} className="live-card-wrap">
+          <div
+            key={ch.id}
+            className={`live-card-wrap${revealItems ? " reveal-item" : ""}`}
+            style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
+          >
             <button
               type="button"
               className="live-card"

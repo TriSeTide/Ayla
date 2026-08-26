@@ -14,6 +14,7 @@ import { ConversationMoreMenu } from "../chat/ConversationMoreMenu";
 import { IconPinFilled } from "../icons";
 import type { GroupCarouselSlide } from "./groupActivity";
 import { GroupCarousel } from "./GroupCarousel";
+import type { CSSProperties } from "react";
 
 export function GroupCard({
   group,
@@ -22,6 +23,7 @@ export function GroupCard({
   isPinned,
   onOpen,
   onError,
+  revealDelay,
 }: {
   group: { id: string; title: string; avatar?: string; memberCount?: number };
   /** 状态轮播卡片列表（消息+语音/直播/帖子/桌游） */
@@ -34,9 +36,14 @@ export function GroupCard({
   onOpen: () => void;
   /** 置顶失败提示（父组件错误条）；缺省 alert 兜底 */
   onError?: (message: string) => void;
+  /** 逐条浮入延迟（ms）；undefined 则不挂 reveal-item（方案 §5-A2） */
+  revealDelay?: number;
 }) {
   return (
-    <article className={`group-card ${isPinned ? "is-pinned" : ""}`}>
+    <article
+      className={`group-card ${isPinned ? "is-pinned" : ""}${revealDelay != null ? " reveal-item" : ""}`}
+      style={revealDelay != null ? ({ ["--reveal-delay" as string]: `${revealDelay}ms` } as CSSProperties) : undefined}
+    >
       {isPinned && (
         <span className="group-card-pin" aria-label="已置顶" title="已置顶">
           <IconPinFilled width={16} height={16} />
