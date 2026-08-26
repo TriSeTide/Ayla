@@ -600,6 +600,20 @@
   padding: var(--sp-3) var(--sp-4);
 }
 
+/* 帖子卡包裹项（reveal-item 挂载点），单列/双列共用 */
+.posts-feed-item {
+  flex: none;
+  min-width: 0;
+}
+
+/* 瀑布流列容器：列内纵向排布、等宽错排（方案 §4-U2） */
+.posts-masonry-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
 .posts-skeleton {
   padding: var(--sp-4);
   display: flex;
@@ -618,6 +632,36 @@
     max-width: 680px;
     width: 100%;
     margin: 0 auto;
+  }
+}
+
+/* 宽屏双列瀑布流（>1024px，方案 §4-U2）：两列等宽错排，较矮列优先由 JS 分配。
+   左右留白与语音/桌游/直播列表统一（1200px 容器 + padding var(--sp-4) var(--sp-6)） */
+@media (min-width: 1025px) {
+  .posts-hub-head {
+    max-width: 1200px;
+    padding-left: var(--sp-6);
+    padding-right: var(--sp-6);
+  }
+
+  .posts-feed {
+    max-width: 1200px;
+    padding: var(--sp-4) var(--sp-6);
+  }
+
+  .posts-feed.is-masonry {
+    flex-direction: row;
+    flex-wrap: wrap; /* load-more（flex-basis:100%）换行横跨两列，否则挤在第一行顶部 */
+    align-items: flex-start;
+  }
+
+  .posts-feed.is-masonry .posts-masonry-col {
+    flex: 1 1 0;
+  }
+
+  /* 加载更多提示横跨两列底部 */
+  .posts-feed.is-masonry .home-load-more {
+    flex-basis: 100%;
   }
 }
 

@@ -4,14 +4,30 @@
  * 单列信息流（R-P1）+ 游标分页（滚到底加载更多）；发帖走右下 FAB（CreateFab，
  * 区别于群内帖子界面的输入框发帖，R-P2）；收藏即时反馈（R-P4）。
  * 窄屏带 NarrowTopBar；宽屏内容 max-width 680px 居中（布局文档 §3.1）。
+ *
+ * 本轮（方案 §4-U2 + §5-A2 + §4-U14 + §3.3）：
+ * - U2：>1024px 双列等宽错排瀑布流（useMasonryColumns，ResizeObserver 量高插较矮列），
+ *   窄屏单列；
+ * - A2：帖子逐条浮入（.reveal-item + staggerDelay）；
+ * - U14：返回保留滚动位置（useScrollRestore，恢复路径禁 stagger）；
+ * - 3.3：下拉刷新（PullToRefresh）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import { PostCard } from "../components/posts/PostCard";
+import { PullToRefresh } from "../components/motion/PullToRefresh";
+import { useMasonryColumns } from "../hooks/useMasonryColumns";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { staggerDelay } from "../hooks/useRevealOnEnter";
+import { useScrollRestore } from "../hooks/useScrollRestore";
 import { usePostsStore, isPostsStale } from "../stores/posts";
 import { chatWS } from "../ws/chat";
+
+/** 瀑布流断点：>1024px 双列（方案 §4-U2；design.md §9 断点 1024）。 */
+const MASONRY_QUERY = "(min-width: 1025px)";
 
 export function PostsHubPage() {
   const navigate = useNavigate();
@@ -19,6 +35,20 @@ export function PostsHubPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [favoriteLoadError, setFavoriteLoadError] = useState<string | null>(null);
+
+  const hubRef = useRef<HTMLDivElement>(null);
+  // U14：返回保留滚动位置（restoring 时禁 reveal stagger）
+  const { restoring } = useScrollRestore("posts-feed", hubRef);
+  const isMasonry = useMediaQuery(MASONRY_QUERY);
+  const columnCount = isMasonry ? 2 : 1;
+  const { columns, columnRefs } = useMasonryColumns(posts, columnCount, (p) => p.id, "posts-feed");
+
+  // stagger 用全局顺序（跨列逐条浮现）；映射 postId → 原始 index
+  const indexByKey = useMemo(() => {
+    const m = new Map<number, number>();
+    posts.forEach((p, i) => m.set(p.id, i));
+    return m;
+  }, [posts]);
 
   // 首屏：信息流 + 我的收藏集合
   const loadFirst = useCallback(() => {
@@ -76,6 +106,24 @@ export function PostsHubPage() {
     }
   };
 
+  // 下拉刷新：强制重拉信息流（绕过 isPostsStale 缓存，不设 loading 以免骨架闪现）
+  const refresh = useCallback(async () => {
+    const store = usePostsStore.getState();
+    setLoadError(null);
+    try {
+      const page = await postsApi.listPosts({ scope: "feed", limit: 20 });
+      store.setPage(page.results, page.next_cursor, page.has_more);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "加载失败");
+    }
+  }, []);
+
+  // 下拉刷新仅当滚动容器（.posts-hub）已在顶部时响应
+  const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
+
+  // A2：逐条浮入；恢复路径（restoring）禁 stagger（§7：滚动恢复与入场动画互斥）
+  const revealItems = !loading && !restoring;
+
   const toggleFavorite = useCallback(
     async (postId: number) => {
       const store = usePostsStore.getState();
@@ -98,7 +146,7 @@ export function PostsHubPage() {
   );
 
   return (
-    <div className="posts-hub" onScroll={(e) => handleScroll(e.currentTarget)}>
+    <div className="posts-hub" ref={hubRef} onScroll={(e) => handleScroll(e.currentTarget)}>
       <div className="posts-hub-head">
         <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
       </div>
@@ -123,18 +171,36 @@ export function PostsHubPage() {
           <p className="placeholder-desc">点右下角 + 发布第一条帖子</p>
         </div>
       ) : (
-        <div className="posts-feed">
-          {posts.map((p) => (
-            <PostCard
-              key={p.id}
-              post={p}
-              favorited={favoriteByPostId[String(p.id)] != null}
-              onOpen={() => navigate(`/posts/${p.id}`)}
-              onToggleFavorite={() => void toggleFavorite(p.id)}
-            />
-          ))}
-          {hasMore && <div className="home-load-more" aria-label="加载更多"><span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" /></div>}
-        </div>
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+          <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`}>
+            {columns.map((colItems, colIdx) => (
+              <div key={colIdx} className="posts-masonry-col" ref={columnRefs[colIdx]}>
+                {colItems.map((p) => {
+                  const delay = revealItems ? staggerDelay(indexByKey.get(p.id) ?? 0) : 0;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
+                      style={
+                        revealItems
+                          ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties)
+                          : undefined
+                      }
+                    >
+                      <PostCard
+                        post={p}
+                        favorited={favoriteByPostId[String(p.id)] != null}
+                        onOpen={() => navigate(`/posts/${p.id}`)}
+                        onToggleFavorite={() => void toggleFavorite(p.id)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            {hasMore && <div className="home-load-more" aria-label="加载更多"><span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" /></div>}
+          </div>
+        </PullToRefresh>
       )}
     </div>
   );
