@@ -12,7 +12,8 @@
  *
  * 方案 §2.2/§2.3/§2.4（M1 动画基座与转场）：
  * - 横滑跟手（§2.2）：当前场景 motion.div `drag="x"` + dragConstraints={0} + dragElastic
- *   （跟手 + 边缘阻尼 + 松手回弹），onDragEnd 按位移(>1/3 宽)+速度判定切换；切换用
+ *   （跟手 + 边缘阻尼 + 松手回弹），onDragEnd 松手判定统一走 useSwipeCommit
+ *   （净位移 >1/3 宽优先 + 同向甩动补充 + 方向锁让位，pointercancel 不判定）；切换用
  *   AnimatePresence(custom=direction) + variants（enter ±40%→0 / exit ∓30%→透明），
  *   direction 由 GROUP_SCENE_ORDER 索引差计算（useSceneSwipeDirection）；单场景挂载
  *   （AnimatePresence 保管退出中的旧实例，动画完即卸载，重组件不并排常挂）。
@@ -25,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { CSSProperties } from "react";
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "framer-motion";
-import type { PanInfo } from "framer-motion";
+import type { PanHandler, PanInfo } from "framer-motion";
 import * as chatApi from "../api/chat";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { GroupTopTabs } from "../components/group/GroupTopTabs";
@@ -33,7 +34,9 @@ import { sortGroupsByActivity, useGroupActivityMap } from "../components/home/gr
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterGroupAnimation } from "../hooks/useEnterGroupAnimation";
 import { useSceneSwipeDirection } from "../hooks/useSceneSwipeDirection";
+import { resolveSwipeCommit } from "../hooks/useSwipeCommit";
 import { useSwipe } from "../hooks/useSwipe";
+import { useTouchAxisGuard } from "../hooks/useTouchAxisGuard";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
 import { markConversationRead } from "../hooks/useChat";
@@ -63,9 +66,8 @@ const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
 const ENTER_CONTENT_DURATION = 0.18;
 const ENTER_CONTENT_DELAY = 0.08;
 
-/** 场景横滑切换（方案 §2.2）：滑入/滑出 250ms；快速滑速度阈值 px/ms（≈300px/s） */
+/** 场景横滑切换（方案 §2.2）：滑入/滑出 250ms；松手判定统一走 useSwipeCommit */
 const SCENE_SLIDE_DURATION = 0.25;
-const SCENE_FLICK_VELOCITY = 0.3;
 
 /** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
 const SCENE_DRAG_CONSTRAINTS = { left: 0, right: 0 };
@@ -113,6 +115,9 @@ export function GroupPage() {
   const leavingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 内容区（中层）下拉/退场位移：跟手 set、回弹 animate、退场 animate
   const sceneRef = useRef<HTMLDivElement>(null);
+  // 横滑轴守卫：起步 slop 内横轴占优时压制浏览器垂直滚动接管（否则 pointercancel
+  // 会让 drag 提前死亡——touch-action: pan-y 下真机斜向起手必触发，见 useTouchAxisGuard）
+  useTouchAxisGuard(sceneRef, "x");
   const pullY = useMotionValue(0);
   const pullScale = useTransform(pullY, [0, PULL_DOWN_EXIT_THRESHOLD], [1, 0.98]);
   const pullOpacity = useMotionValue(1);
@@ -285,21 +290,24 @@ export function GroupPage() {
     }
   }, [activeScene, id, postId, voiceChannelId, goScene]);
 
-  // ---- 场景横滑（§2.2）：位移(>1/3 宽) + 速度判定切换/回弹 ----
-  const handleSceneDragEnd = useCallback(
-    (_event: unknown, info: PanInfo) => {
+  // ---- 场景横滑（§2.2）：松手判定——净位移(>1/3 宽)优先 + 同向甩动补充 + 方向锁让位。
+  // pointercancel（浏览器滚动接管等系统取消，手指未松开）不算松手决策，回弹不判定；
+  // framer-motion velocity 单位是 px/s（详见 useSwipeCommit docstring）。
+  const handleSceneDragEnd: PanHandler = useCallback(
+    (event, info: PanInfo) => {
+      if (event.type === "pointercancel") return;
       const width = sceneRef.current?.clientWidth ?? 375;
-      const threshold = width / 3;
       const baseIdx = GROUP_SCENE_ORDER.indexOf(activeScene === "info" ? "chat" : activeScene);
       if (baseIdx < 0) return;
-      const nextScene = GROUP_SCENE_ORDER[(baseIdx + 1) % GROUP_SCENE_ORDER.length];
-      const prevScene = GROUP_SCENE_ORDER[(baseIdx - 1 + GROUP_SCENE_ORDER.length) % GROUP_SCENE_ORDER.length];
-      if (info.offset.x < -threshold || info.velocity.x < -SCENE_FLICK_VELOCITY) {
-        goScene(nextScene);
-      } else if (info.offset.x > threshold || info.velocity.x > SCENE_FLICK_VELOCITY) {
-        goScene(prevScene);
-      }
+      const commit = resolveSwipeCommit({
+        net: info.offset.x,
+        cross: info.offset.y,
+        velocity: info.velocity.x,
+        size: width,
+      });
       // 否则：dragConstraints={0} 的 elastic 自动回弹到 0
+      if (commit === 0) return;
+      goScene(GROUP_SCENE_ORDER[(baseIdx + commit + GROUP_SCENE_ORDER.length) % GROUP_SCENE_ORDER.length]);
     },
     [activeScene, goScene],
   );

@@ -14,6 +14,15 @@ body,
   margin: 0;
 }
 
+/* 浏览器手势过卷（overscroll）治理：根元素禁用 viewport 过卷效果——
+   跟手拉动露白、橡皮筋回弹、原生下拉刷新（与 §12 自研 PullToRefresh 冲突，禁用为正收益）、滚动链。
+   html 兜底同款极光底，任何露底都透出渐变而非白色画布（design.md §1）。
+   注：浏览器边缘滑动的历史导航手势（← 指示器 + 页面平移动画）属浏览器/系统层，CSS 无法禁用。 */
+html {
+  background: var(--bg-aurora) fixed;
+  overscroll-behavior: none;
+}
+
 body {
   font-family: var(--font-body);
   font-size: 15px;

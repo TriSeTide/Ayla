@@ -16,15 +16,18 @@ export function DanmakuList({
   listRef,
   hasNewBelow,
   onScrollToBottom,
+  onUserScroll,
 }: {
   danmaku: DanmakuItem[];
   listRef: React.MutableRefObject<HTMLDivElement | null>;
   hasNewBelow: boolean;
   onScrollToBottom: () => void;
+  /** 列表滚动上报（useDanmaku.handleListScroll）：stick 底部跟随/新弹幕提示的判定源 */
+  onUserScroll?: () => void;
 }) {
   return (
     <div className="danmaku-wrap">
-      <div className="danmaku-list" ref={listRef}>
+      <div className="danmaku-list" ref={listRef} onScroll={onUserScroll}>
         {danmaku.length === 0 ? (
           <div className="danmaku-empty">还没有弹幕，来说点什么吧</div>
         ) : (

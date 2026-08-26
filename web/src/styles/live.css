@@ -532,15 +532,25 @@
 
 /* ================= 直播间上下滑切换（方案 §2.5：视频+弹幕区整体滑动） ================= */
 
-/* 滑动容器：沉浸式窄屏占满 head 与 input 之间，overflow 裁剪滑入滑出 */
+/* 顶栏：不贴顶、不贴左右（沉浸式四周留白；与下方卡片间的空隙由 swipe 的 margin-top 提供） */
+.live-room-body.is-narrow .live-room-head {
+  margin: var(--sp-2) var(--sp-2) 0;
+}
+
+/* 滑动容器：沉浸式窄屏占满 head 与 input 之间，overflow 裁剪滑入滑出。
+   margin 让直播+弹幕整体与顶栏/输入框留隙、左右不贴边；
+   小圆角由 overflow:hidden 统一裁剪——视频（上）与弹幕（下）无缝相贴组成一张
+   圆角卡片（弹幕贴直播、底部不再直接压输入框）。 */
 .live-room-body.is-narrow .live-room-swipe {
   flex: 1;
   min-height: 0;
   position: relative;
   overflow: hidden;
+  margin: var(--sp-2);
+  border-radius: var(--radius-input);
 }
 
-/* 滑动单元：视频（上，占满剩余）+ 弹幕列表（下，固定 240px）；
+/* 滑动单元：视频（上，16:9 固定大小）+ 弹幕（下，弹性吃剩余）组成一张圆角卡片；
    AnimatePresence sync 下新旧单元 absolute 重叠转场（同 .group-scene-inner，避免 popLayout 接管 transform） */
 .live-room-swipe-item {
   position: absolute;
@@ -550,28 +560,36 @@
   overflow: hidden;
 }
 
-.live-room-swipe-item .live-room-stage {
-  flex: 1;
-  min-height: 0;
-  align-items: flex-start;
-  justify-content: center;
+/* 视频区：高度跟随 16:9 视频块（flex:none 不抢剩余空间），固定直播大小；
+   卡片上半：上两角圆、下方与弹幕区直角相接。
+   （specificity 需压过上方媒体查询里 .live-room-body.is-narrow .live-room-stage 的 flex:1，
+   否则 stage 与弹幕平分高度——视频被拉大、弹幕区比例失控） */
+.live-room-body.is-narrow .live-room-swipe-item .live-room-stage {
+  flex: none;
+  display: block;
+  border-radius: var(--radius-input) var(--radius-input) 0 0;
+  overflow: hidden;
 }
 
+/* 沉浸式内播放器：圆角/边框交给 stage 统一裁剪（自带 --radius-card 大圆角在此禁用），
+   aspect-ratio 16:9 决定 stage 高度，视频贴满即贴住弹幕区 */
 .live-room-swipe-item .live-player {
   width: 100%;
-  max-height: 100%;
+  border-radius: 0;
+  border: none;
 }
 
-/* 弹幕列表在滑动单元内固定 240px（对齐旧窄屏 side 高度），随视频+弹幕整体滑动 */
+/* 弹幕列表在滑动单元内吃掉视频以外的全部剩余高度：
+   群内（可用高度小）被压缩保直播完整，群外（高度富余）贴满视频下方不再悬空；
+   卡片下半：上方与视频区直角相接、下两角收圆（与 stage 统一的小圆角形态） */
 .live-room-swipe-item .danmaku-wrap {
-  flex: none;
-  height: 240px;
-  min-height: 240px;
-  max-height: 240px;
+  flex: 1;
+  min-height: 96px;
   border-top: 1px solid var(--glass-border);
   background: var(--glass-bg-strong);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-radius: 0 0 var(--radius-input) var(--radius-input);
 }
 
 /* 沉浸式窄屏输入框：从 side 独立后补回玻璃底（原 side 的 --glass-bg-strong），

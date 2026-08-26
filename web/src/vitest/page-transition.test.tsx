@@ -22,10 +22,18 @@ describe("resolvePageKey", () => {
   it("非群页路由用原始 pathname", () => {
     expect(resolvePageKey("/group")).toBe("/group");
     expect(resolvePageKey("/voice")).toBe("/voice");
-    expect(resolvePageKey("/live/42")).toBe("/live/42");
     expect(resolvePageKey("/posts/p1")).toBe("/posts/p1");
     expect(resolvePageKey("/messages")).toBe("/messages");
     expect(resolvePageKey("/chat/c1")).toBe("/chat/c1");
+  });
+
+  it("直播间详情归一为 /live/room（上下滑切换不触发整页转场）", () => {
+    expect(resolvePageKey("/live/42")).toBe("/live/room");
+    expect(resolvePageKey("/live/100")).toBe("/live/room");
+    // 列表页与详情页区分：进入/退出直播间仍走整页转场
+    expect(resolvePageKey("/live")).toBe("/live");
+    // 开播控制台详情不归一（三段路径不匹配 /live/:id）
+    expect(resolvePageKey("/live/start/5")).toBe("/live/start/5");
   });
 });
 

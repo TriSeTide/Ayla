@@ -15,8 +15,8 @@
  * 重进房，播放组件始终单实例（滑动单元内仅当前槽一个真实播放器）。
  */
 import { useCallback, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import type { PanInfo } from "framer-motion";
+import { AnimatePresence, motion, useDragControls } from "framer-motion";
+import type { PanHandler, PanInfo } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { DanmakuInput } from "./DanmakuInput";
@@ -28,6 +28,8 @@ import { LivePlayer } from "./LivePlayer";
 import { LiveStreamAddresses } from "./LiveStreamAddresses";
 import { useDanmaku } from "../../hooks/useDanmaku";
 import { useLiveRoom } from "../../hooks/useLiveRoom";
+import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
+import { usePagerTouchRouter } from "../../hooks/usePagerTouchRouter";
 import { IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
 import { getVisibilityLabels } from "../../utils/visibility";
@@ -35,10 +37,8 @@ import { getVisibilityLabels } from "../../utils/visibility";
 /** 直播间上下滑切换（方案 §2.5）：等价 tokens.css --ease-out / --ease-in（framer-motion ease 需 cubic-bezier 元组） */
 const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
 const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
-/** 切换滑入/滑出 250ms（design.md §7：150–300ms） */
+/** 切换滑入/滑出 250ms（design.md §7：150–300ms）；松手判定统一走 useSwipeCommit */
 const LIVE_SLIDE_DURATION = 0.25;
-/** 快速滑动速度阈值 px/ms（≈300px/s，与群内横滑同款） */
-const LIVE_FLICK_VELOCITY = 0.3;
 /** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
 const LIVE_DRAG_CONSTRAINTS = { top: 0, bottom: 0 };
 /** 跟手弹性：0.8 = 80% 跟手 + 20% 边缘阻尼 */
@@ -93,7 +93,8 @@ export function LiveRoomBody({
     activityRoute,
     keepLiveActivity,
   });
-  const { sending, sendError, send, listRef, hasNewBelow, scrollToBottom } = useDanmaku(channelId);
+  const { sending, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll } =
+    useDanmaku(channelId);
   const danmaku = useLiveStore((s) => s.current.danmaku);
   const srsStatus = useLiveStore((s) => s.current.srsStatus);
   const wsConnection = useLiveStore((s) => s.wsConnection);
@@ -105,6 +106,14 @@ export function LiveRoomBody({
   // ---- 直播间上下滑切换（§2.5，窄屏普通观看；宽屏走侧栏点击） ----
   const swipeRef = useRef<HTMLDivElement | null>(null);
   const [reducedMotion] = useState(prefersReducedMotion);
+  // 手动 drag：触摸路由器（视频区直切 / 弹幕区滚动优先+边界接力）按需启动
+  const dragControls = useDragControls();
+  usePagerTouchRouter({
+    containerRef: swipeRef,
+    getListEl: () => listRef.current,
+    controls: dragControls,
+    enabled: isNarrow && !showOwnerPanel && !reducedMotion,
+  });
 
   // 相邻直播间（切换范围 = 外层传入的有序 channels；端头无相邻项 → 边缘阻尼 + 不切换）
   const currentIdx = channels.findIndex((c) => c.id === channelId);
@@ -145,16 +154,20 @@ export function LiveRoomBody({
     [reducedMotion],
   );
 
-  // 松手判定（§2.5）：位移过半（>1/3 高）或速度达标切换相邻直播间；否则回弹（dragConstraints 自动）
-  const handleSwipeDragEnd = useCallback(
-    (_event: unknown, info: PanInfo) => {
+  // 松手判定（§2.5，useSwipeCommit 公共层）：净位移(>1/3 高)优先 + 同向甩动补充 +
+  // 方向锁让位；pointercancel（系统取消，手指未松开）不算松手决策，否则回弹
+  const handleSwipeDragEnd: PanHandler = useCallback(
+    (event, info: PanInfo) => {
+      if (event.type === "pointercancel") return;
       const height = swipeRef.current?.clientHeight ?? 600;
-      const threshold = height / 3;
-      if (info.offset.y < -threshold || info.velocity.y < -LIVE_FLICK_VELOCITY) {
-        if (nextChannel) onSelect(nextChannel.id);
-      } else if (info.offset.y > threshold || info.velocity.y > LIVE_FLICK_VELOCITY) {
-        if (prevChannel) onSelect(prevChannel.id);
-      }
+      const commit = resolveSwipeCommit({
+        net: info.offset.y,
+        cross: info.offset.x,
+        velocity: info.velocity.y,
+        size: height,
+      });
+      if (commit === 1 && nextChannel) onSelect(nextChannel.id);
+      else if (commit === -1 && prevChannel) onSelect(prevChannel.id);
     },
     [nextChannel, prevChannel, onSelect],
   );
@@ -236,12 +249,28 @@ export function LiveRoomBody({
     </>
   );
 
+  // 粘性 listRef 代理：沉浸式 AnimatePresence(mode="sync") 切直播间时 exit 实例仍
+  // 渲染 DanmakuList，其卸载会 detach 共享 ref（React 把 current 置 null），此后
+  // 自动滚底/跳底全部静默失效。代理忽略 detach（null 写入），只接受元素挂载。
+  const stickyListRef = useMemo(
+    () => ({
+      get current(): HTMLDivElement | null {
+        return listRef.current;
+      },
+      set current(v: HTMLDivElement | null) {
+        if (v !== null) listRef.current = v;
+      },
+    }),
+    [listRef],
+  );
+
   const danmakuList = (
     <DanmakuList
       danmaku={danmaku}
-      listRef={listRef}
+      listRef={stickyListRef}
       hasNewBelow={hasNewBelow}
       onScrollToBottom={scrollToBottom}
+      onUserScroll={handleListScroll}
     />
   );
 
@@ -309,7 +338,10 @@ export function LiveRoomBody({
     );
   }
 
-  // 沉浸式观看（窄屏 + 非控制台）：顶栏/输入框固定，视频 + 弹幕区整体上下滑切换
+  // 沉浸式观看（窄屏 + 非控制台）：顶栏/输入框固定，视频 + 弹幕区整体上下滑切换。
+  // 触摸路由（usePagerTouchRouter）：视频区直切；弹幕区列表滚动优先、到底/顶后接力切台；
+  // dragListener={false} + 显式 touch-action:pan-y——framer-motion 只在自身监听时才写
+  // touch-action（会写成 pan-x 禁掉弹幕列表滚动），手动模式下交由本组件声明语义。
   if (isNarrow && !showOwnerPanel) {
     return (
       <div className="live-room live-room-body is-narrow">
@@ -318,6 +350,9 @@ export function LiveRoomBody({
           className="live-room-swipe"
           ref={swipeRef}
           drag={reducedMotion ? false : "y"}
+          dragListener={false}
+          dragControls={dragControls}
+          style={{ touchAction: "pan-y" }}
           dragConstraints={LIVE_DRAG_CONSTRAINTS}
           dragElastic={LIVE_DRAG_ELASTIC}
           dragMomentum={false}

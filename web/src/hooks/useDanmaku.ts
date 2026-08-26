@@ -22,6 +22,8 @@ export interface UseDanmakuResult {
   /** 有未读新弹幕（用户上翻时） */
   hasNewBelow: boolean;
   scrollToBottom: () => void;
+  /** 列表滚动上报（由 DanmakuList 的 onScroll 调用；勿在 hook 内自挂 DOM 监听） */
+  handleListScroll: () => void;
 }
 
 export function useDanmaku(channelId: number): UseDanmakuResult {
@@ -40,17 +42,17 @@ export function useDanmaku(channelId: number): UseDanmakuResult {
     setHasNewBelow(false);
   }, []);
 
-  // 监听用户滚动：离开底部则不再自动跟随
-  useEffect(() => {
+  // 用户滚动上报：离开底部则不再自动跟随。
+  // （2026-08-26 修复：此前在本 hook 用空依赖 effect 自挂 listener，而窄屏沉浸式
+  // AnimatePresence sync 下切直播间会重建 .danmaku-list 且 exit 实例卸载时把共享
+  // listRef.current 置 null，listener 挂死元素 + ref 失效 → 自动滚底静默失效。
+  // 现改为由 DanmakuList 元素自身 onScroll 上报，listRef 由 present 实例独占绑定。）
+  const handleListScroll = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
-    const onScroll = () => {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      stickToBottomRef.current = nearBottom;
-      if (nearBottom) setHasNewBelow(false);
-    };
-    el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    stickToBottomRef.current = nearBottom;
+    if (nearBottom) setHasNewBelow(false);
   }, []);
 
   // 新弹幕到达：底部跟随或显示"有新弹幕"
@@ -91,5 +93,5 @@ export function useDanmaku(channelId: number): UseDanmakuResult {
     [channelId],
   );
 
-  return { danmaku, sending, sendError, send, listRef, hasNewBelow, scrollToBottom };
+  return { danmaku, sending, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll };
 }
