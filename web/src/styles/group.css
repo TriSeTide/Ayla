@@ -97,8 +97,17 @@
   background: var(--glow-500);
 }
 
-/* ================= 窄屏子界面滑动容器 ================= */
+/* ================= 窄屏子界面滑动容器（§2.2/§2.3/§2.4） ================= */
 
+/* 进群入场层（§2.4）：内容自下 24px 浮入 + 淡化，由 framer-motion variants 驱动 */
+.group-scene-enter {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 下拉协同层（§2.3）：translateY 1:1 + scale/opacity 视差，由 framer-motion 驱动 */
 .group-scene {
   flex: 1;
   min-height: 0;
@@ -106,27 +115,15 @@
   overflow: hidden;
 }
 
+/* 场景横滑层（§2.2）：absolute 撑满，AnimatePresence sync 下新旧场景重叠转场。
+   手动 popLayout：absolute 脱离文档流，由 framer-motion 自由驱动 x 位移，
+   与 PageTransition 同款——避免 AnimatePresence popLayout 的 layout projection
+   接管 transform 吞掉 x 位移动画。场景切换动画由 framer-motion variants 接管，
+   reduced-motion 由 JS 直切（无位移），不再需要 group-scene-fade keyframes。 */
 .group-scene-inner {
-  height: 100%;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  animation: group-scene-fade 200ms var(--ease-out);
-}
-
-@keyframes group-scene-fade {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .group-scene-inner {
-    animation: none;
-  }
 }
 
 /* ================= 群内聊天（GroupChat） ================= */

@@ -9,16 +9,30 @@
  * 单一状态源：activeScene 存 stores/group，route param 变化时同步（单 effect）；
  * 切换场景 = setActiveScene + navigate（URL 回显）。
  * 输入框显隐（R-G5）由子界面自带：chat 子界面含 MessageInput；voice/games 占位无输入框。
+ *
+ * 方案 §2.2/§2.3/§2.4（M1 动画基座与转场）：
+ * - 横滑跟手（§2.2）：当前场景 motion.div `drag="x"` + dragConstraints={0} + dragElastic
+ *   （跟手 + 边缘阻尼 + 松手回弹），onDragEnd 按位移(>1/3 宽)+速度判定切换；切换用
+ *   AnimatePresence(custom=direction) + variants（enter ±40%→0 / exit ∓30%→透明），
+ *   direction 由 GROUP_SCENE_ORDER 索引差计算（useSceneSwipeDirection）；单场景挂载
+ *   （AnimatePresence 保管退出中的旧实例，动画完即卸载，重组件不并排常挂）。
+ * - 下拉协同（§2.3）：pullOffset 同时驱动顶栏与内容区（translateY 1:1 + scale 1→0.98 +
+ *   opacity 1→0.6 视差），过阈值松手内容下滑出屏 + 顶栏落回底部（250ms ease-in）后 navigate。
+ * - 进群编排（§2.4）：底栏上移 250ms（useEnterGroupAnimation）→ 内容自下 24px 浮入 + 淡化
+ *   （180ms，延迟 80ms）→ 输入框滑入（250ms，延迟 100ms，子界面自处理）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { CSSProperties } from "react";
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "framer-motion";
+import type { PanInfo } from "framer-motion";
 import * as chatApi from "../api/chat";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { GroupTopTabs } from "../components/group/GroupTopTabs";
 import { sortGroupsByActivity, useGroupActivityMap } from "../components/home/groupActivity";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterGroupAnimation } from "../hooks/useEnterGroupAnimation";
+import { useSceneSwipeDirection } from "../hooks/useSceneSwipeDirection";
 import { useSwipe } from "../hooks/useSwipe";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
@@ -41,6 +55,31 @@ const VALID_SCENES = new Set<string>([...GROUP_SCENE_ORDER, "info"]);
 const PULL_DOWN_EXIT_THRESHOLD = 80;
 const EXIT_TRANSITION_MS = 250;
 
+/** 等价 tokens.css --ease-out / --ease-in（framer-motion ease 需 cubic-bezier 元组） */
+const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
+const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
+
+/** 进群内容入场（方案 §2.4）：180ms 延迟 80ms */
+const ENTER_CONTENT_DURATION = 0.18;
+const ENTER_CONTENT_DELAY = 0.08;
+
+/** 场景横滑切换（方案 §2.2）：滑入/滑出 250ms；快速滑速度阈值 px/ms（≈300px/s） */
+const SCENE_SLIDE_DURATION = 0.25;
+const SCENE_FLICK_VELOCITY = 0.3;
+
+/** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
+const SCENE_DRAG_CONSTRAINTS = { left: 0, right: 0 };
+/** 跟手弹性：0.8 = 80% 跟手 + 20% 边缘阻尼（接近 1:1，避免拖过头） */
+const SCENE_DRAG_ELASTIC = 0.8;
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 export function GroupPage() {
   const { id, scene, postId, voiceChannelId } = useParams<{
     id: string;
@@ -57,6 +96,10 @@ export function GroupPage() {
   const setCurrentGroup = useGroupStore((s) => s.setCurrentGroup);
 
   const { entered } = useEnterGroupAnimation();
+  const sceneDirection = useSceneSwipeDirection(activeScene);
+
+  // 惰性同步读取 reduced-motion（非 effect）：用户首帧即无位移动画，避免闪跳
+  const [reducedMotion] = useState(prefersReducedMotion);
 
   // 宽屏 ServerRail 底部加号：创建群聊（需求：左下角头像键改加号）
   const [showGroupCreate, setShowGroupCreate] = useState(false);
@@ -64,18 +107,32 @@ export function GroupPage() {
   const [conversationRetry, setConversationRetry] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // ---- 下拉回主页（R-G6）：跟手位移 + 阈值 80px + 退场后 navigate(/group) ----
+  // ---- 下拉回主页（R-G6 / §2.3）：顶栏跟手 + 内容区协同（translateY/scale/opacity 视差） ----
   const [pullOffset, setPullOffset] = useState(0);
   const [leaving, setLeaving] = useState(false);
   const leavingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 内容区（中层）下拉/退场位移：跟手 set、回弹 animate、退场 animate
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const pullY = useMotionValue(0);
+  const pullScale = useTransform(pullY, [0, PULL_DOWN_EXIT_THRESHOLD], [1, 0.98]);
+  const pullOpacity = useMotionValue(1);
 
   const pullToHome = useCallback(() => {
     setPullOffset(0);
     setLeaving(true);
     useGroupStore.getState().reset();
-    // 退场动画（顶栏下移回底部，250ms）结束回到 /group
-    leavingTimerRef.current = setTimeout(() => navigate("/group"), 250);
-  }, [navigate]);
+    const sceneHeight = sceneRef.current?.clientHeight ?? 0;
+    if (!reducedMotion && sceneHeight > 0) {
+      // 内容下滑出屏 + 整体淡出（250ms ease-in，与顶栏落底同步）
+      animate(pullY, sceneHeight, { duration: EXIT_TRANSITION_MS / 1000, ease: EASE_IN });
+      animate(pullOpacity, 0, { duration: EXIT_TRANSITION_MS / 1000, ease: EASE_IN });
+    } else {
+      pullY.set(sceneHeight);
+      pullOpacity.set(0);
+    }
+    // 退场动画结束回到 /group（reduced-motion 下无动画，仍等固定时长保证顶栏直切完成）
+    leavingTimerRef.current = setTimeout(() => navigate("/group"), EXIT_TRANSITION_MS);
+  }, [navigate, pullY, pullOpacity, reducedMotion]);
 
   useEffect(() => {
     return () => {
@@ -86,17 +143,37 @@ export function GroupPage() {
   const pullSwipe = useSwipe(
     {
       onMove: (e) => {
-        // 只在垂直方向锁定时跟手；下拉（dy > 0）才位移，上推回弹
-        if (e.axis === "y" && e.dy > 0 && !leaving) setPullOffset(e.dy);
+        // 只在垂直方向锁定时跟手；下拉（dy > 0）才位移，上推回弹；reduced-motion 不跟手
+        if (e.axis !== "y" || e.dy <= 0 || leaving || reducedMotion) return;
+        setPullOffset(e.dy);
+        pullY.set(e.dy);
+        const progress = Math.min(e.dy / PULL_DOWN_EXIT_THRESHOLD, 1);
+        pullOpacity.set(1 - 0.4 * progress);
       },
       onEnd: (e) => {
         if (e.direction === "down" && e.dy >= PULL_DOWN_EXIT_THRESHOLD) {
           pullToHome();
         } else {
-          setPullOffset(0); // 回弹
+          setPullOffset(0);
+          if (!reducedMotion) {
+            animate(pullY, 0, { duration: 0.2, ease: EASE_OUT });
+            animate(pullOpacity, 1, { duration: 0.2, ease: EASE_OUT });
+          } else {
+            pullY.set(0);
+            pullOpacity.set(1);
+          }
         }
       },
-      onCancel: () => setPullOffset(0),
+      onCancel: () => {
+        setPullOffset(0);
+        if (!reducedMotion) {
+          animate(pullY, 0, { duration: 0.2, ease: EASE_OUT });
+          animate(pullOpacity, 1, { duration: 0.2, ease: EASE_OUT });
+        } else {
+          pullY.set(0);
+          pullOpacity.set(1);
+        }
+      },
     },
     { threshold: PULL_DOWN_EXIT_THRESHOLD, lockSlop: 12 },
   );
@@ -206,23 +283,69 @@ export function GroupPage() {
       default:
         return <GroupScenePlaceholder scene={activeScene} />;
     }
-  }, [activeScene, id, postId, goScene]);
+  }, [activeScene, id, postId, voiceChannelId, goScene]);
 
-  // 五子界面左右滑动切换（窄屏；宽屏由 ChannelSidebar 点击）
-  const baseIdx = effectiveScene === "info" ? GROUP_SCENE_ORDER.indexOf("chat") : GROUP_SCENE_ORDER.indexOf(effectiveScene);
-  const swipe = useSwipe(
-    {
-      onEnd: (e) => {
-        if (e.direction === "left") {
-          goScene(GROUP_SCENE_ORDER[(baseIdx + 1) % GROUP_SCENE_ORDER.length]);
-        } else if (e.direction === "right") {
-          goScene(
-            GROUP_SCENE_ORDER[(baseIdx - 1 + GROUP_SCENE_ORDER.length) % GROUP_SCENE_ORDER.length],
-          );
-        }
-      },
+  // ---- 场景横滑（§2.2）：位移(>1/3 宽) + 速度判定切换/回弹 ----
+  const handleSceneDragEnd = useCallback(
+    (_event: unknown, info: PanInfo) => {
+      const width = sceneRef.current?.clientWidth ?? 375;
+      const threshold = width / 3;
+      const baseIdx = GROUP_SCENE_ORDER.indexOf(activeScene === "info" ? "chat" : activeScene);
+      if (baseIdx < 0) return;
+      const nextScene = GROUP_SCENE_ORDER[(baseIdx + 1) % GROUP_SCENE_ORDER.length];
+      const prevScene = GROUP_SCENE_ORDER[(baseIdx - 1 + GROUP_SCENE_ORDER.length) % GROUP_SCENE_ORDER.length];
+      if (info.offset.x < -threshold || info.velocity.x < -SCENE_FLICK_VELOCITY) {
+        goScene(nextScene);
+      } else if (info.offset.x > threshold || info.velocity.x > SCENE_FLICK_VELOCITY) {
+        goScene(prevScene);
+      }
+      // 否则：dragConstraints={0} 的 elastic 自动回弹到 0
     },
-    { threshold: 48 },
+    [activeScene, goScene],
+  );
+
+  // 场景切换变体（§2.2）：direction 由索引差决定；reduced-motion 直切（仅透明度）
+  const sceneVariants = useMemo(
+    () =>
+      reducedMotion
+        ? {
+            enter: { opacity: 1 },
+            center: { opacity: 1 },
+            exit: { opacity: 0 },
+          }
+        : {
+            enter: (dir: number) => ({
+              x: dir === 0 ? 0 : `${dir * 40}%`,
+              opacity: 1,
+              transition: { duration: SCENE_SLIDE_DURATION, ease: EASE_OUT },
+            }),
+            center: { x: 0, opacity: 1 },
+            exit: (dir: number) => ({
+              x: dir === 0 ? 0 : `${dir * -30}%`,
+              opacity: 0,
+              transition: { duration: SCENE_SLIDE_DURATION, ease: EASE_IN },
+            }),
+          },
+    [reducedMotion],
+  );
+
+  // 进群内容入场变体（§2.4）：自下 24px 浮入 + 淡化（180ms，延迟 80ms）；reduced-motion 直切
+  const enterVariants = useMemo(
+    () =>
+      reducedMotion
+        ? {
+            out: { opacity: 0 },
+            in: { opacity: 1 },
+          }
+        : {
+            out: { y: 24, opacity: 0 },
+            in: {
+              y: 0,
+              opacity: 1,
+              transition: { duration: ENTER_CONTENT_DURATION, delay: ENTER_CONTENT_DELAY, ease: EASE_OUT },
+            },
+          },
+    [reducedMotion],
   );
 
   // ---- 宽屏：三列（ServerRail + ChannelSidebar + 内容区） ----
@@ -260,21 +383,23 @@ export function GroupPage() {
   let tabsTransition: string;
   if (leaving) {
     tabsTransform = "translateY(calc(100vh - 64px))";
-    tabsTransition = `transform ${EXIT_TRANSITION_MS}ms var(--ease-in)`;
+    tabsTransition = reducedMotion ? "none" : `transform ${EXIT_TRANSITION_MS}ms var(--ease-in)`;
   } else if (!entered) {
     tabsTransform = "translateY(calc(100vh - 64px))";
-    tabsTransition = "transform 250ms var(--ease-out)";
+    tabsTransition = reducedMotion ? "none" : "transform 250ms var(--ease-out)";
   } else if (pullOffset > 0) {
     tabsTransform = `translateY(${pullOffset}px)`;
     tabsTransition = "none";
   } else {
     tabsTransform = "translateY(0)";
-    tabsTransition = "transform 200ms var(--ease-out)";
+    tabsTransition = reducedMotion ? "none" : "transform 200ms var(--ease-out)";
   }
   const tabsStyle: CSSProperties = {
     transform: tabsTransform,
     transition: tabsTransition,
   };
+
+  const canSceneDrag = !reducedMotion && !leaving;
 
   return (
     <div className="group-page group-page-narrow">
@@ -288,10 +413,40 @@ export function GroupPage() {
         pullHandlers={pullSwipe.handlers}
       />
 
-      {/* 五子界面滑动容器（横向手势；内容单页渲染 + key 切换淡入） */}
-      <div className="group-scene" {...swipe.handlers}>
-        <div className="group-scene-inner" key={activeScene}>{renderScene()}</div>
-      </div>
+      {/* 进群入场层（§2.4）：内容自下 24px 浮入 + 淡化（延迟 80ms） */}
+      <motion.div
+        className="group-scene-enter"
+        initial={false}
+        animate={entered ? "in" : "out"}
+        variants={enterVariants}
+      >
+        {/* 下拉协同层（§2.3）：translateY 1:1 + scale/opacity 视差 */}
+        <motion.div
+          className="group-scene"
+          ref={sceneRef}
+          style={{ y: pullY, scale: pullScale, opacity: pullOpacity }}
+        >
+          {/* 五子场景横滑层（§2.2）：单场景挂载 + drag 跟手 + 方向变体切换 */}
+          <AnimatePresence custom={sceneDirection} mode="sync" initial={false}>
+            <motion.div
+              key={activeScene}
+              className="group-scene-inner"
+              custom={sceneDirection}
+              variants={sceneVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              drag={canSceneDrag ? "x" : false}
+              dragConstraints={SCENE_DRAG_CONSTRAINTS}
+              dragElastic={SCENE_DRAG_ELASTIC}
+              dragMomentum={false}
+              onDragEnd={handleSceneDragEnd}
+            >
+              {renderScene()}
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }

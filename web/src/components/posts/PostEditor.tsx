@@ -9,12 +9,15 @@
  * 上方遮罩由使用方渲染（onExpandedChange 通知展开状态），遮罩层级必须
  * 与面板容器平级才能夹在内容与面板之间（面板后代 fixed 无法跨堆叠上下文）。
  *
- * 整个编辑器是手势孤岛：touch 事件不向外冒泡，避免图片预览条
+ * 整个编辑器是手势孤岛：touch + pointerdown 事件不向外冒泡，避免图片预览条
  * 横滑、正文横移光标等操作触发外层左右滑动切屏（群内五子界面手势，
- * 以及未来一级页面的切屏手势）。
+ * 以及未来一级页面的切屏手势）。pointer 隔离是横滑改由 framer-motion
+ * `drag="x"`（Pointer 事件）驱动后的必要补充：drag 用 pointerdown，touch 的
+ * stopPropagation 拦不住（二者是不同原生事件流，且 framer-motion 直接
+ * addEventListener 在场景容器上、先于 React 委托触发）。
  */
 import { useState } from "react";
-import type { TouchEvent as ReactTouchEvent } from "react";
+import type { TouchEvent as ReactTouchEvent, PointerEvent as ReactPointerEvent } from "react";
 import * as postsApi from "../../api/posts";
 import {
   uploadMediaFile,
@@ -35,6 +38,12 @@ type PostMediaDraft = {
 
 /** 面板内 touch 一律不冒泡：断开外层横滑切屏手势链，不影响默认滚动 */
 const stopTouchPropagation = (e: ReactTouchEvent) => e.stopPropagation();
+
+/**
+ * 面板内 pointerdown 捕获阶段拦截：framer-motion drag（Pointer 事件）直接监听在场景容器上，
+ * 先于 React 委托触发，故必须在 capture 阶段 stopPropagation，事件才不会冒泡到场景容器。
+ */
+const stopPointerPropagation = (e: ReactPointerEvent) => e.stopPropagation();
 
 export function PostEditor({
   group,
@@ -189,6 +198,7 @@ export function PostEditor({
       onTouchMove={stopTouchPropagation}
       onTouchEnd={stopTouchPropagation}
       onTouchCancel={stopTouchPropagation}
+      onPointerDownCapture={stopPointerPropagation}
     >
       {collapsible && expanded && (
         <div className="post-editor-collapse-bar">
