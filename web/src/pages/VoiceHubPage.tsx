@@ -65,8 +65,12 @@ export function VoiceHubPage() {
   // 进房/退房：底栏下滑走（R-V2，与直播同向）。路由是壳层底栏是否让位的唯一事实：
   // 进入 /voice/:id 立即让底栏下滑走（200ms ease-in），输入框随后延迟滑入（useEnterRoomAnimation），
   // 与直播间/帖子详情同序；返回 /voice 或主页时复位。即使连接保留在全局浮层也必须复位。
+  // 仅房内注册 effect（对齐 LiveRoomPage/PostDetailPage「房间页才驱动」）：大厅与房间共用
+  // 本组件，页面转场期间新旧两实例并存约 150ms（AnimatePresence 退出窗口），若大厅实例
+  // 也注册 cleanup，会在新房间实例置 true 后被其卸载 cleanup 覆盖回 false，底栏滑出又被拉回。
   useEffect(() => {
-    useShellStore.getState().setBottomTabsLeaving(routeChannelId != null);
+    if (routeChannelId == null) return;
+    useShellStore.getState().setBottomTabsLeaving(true);
     return () => {
       useShellStore.getState().setBottomTabsLeaving(false);
     };
