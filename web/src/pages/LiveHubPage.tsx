@@ -127,10 +127,14 @@ export function LiveHubPage() {
       <div className="live-hub-toolbar">
         <label className="live-hall-filter">
           <input
+            className="live-hall-filter-input"
             type="checkbox"
             checked={onlyLive}
             onChange={(e) => setOnlyLive(e.target.checked)}
           />
+          <span className="live-hall-switch" aria-hidden="true">
+            <span className="live-hall-switch-thumb" />
+          </span>
           只看在播
         </label>
       </div>

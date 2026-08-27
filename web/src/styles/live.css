@@ -599,3 +599,144 @@
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
 }
+
+/* ================= 直播域布局收尾（方案 §4-U3/U4/U5/U6/U9） ================= */
+
+/* U3：输入框负责收缩，发送按钮永不被挤成竖排。 */
+.danmaku-input-row { min-width: 0; }
+.danmaku-input { min-width: 0; }
+.danmaku-send-btn {
+  flex: 0 0 auto;
+  min-width: 72px;
+  white-space: nowrap;
+}
+
+/* U4：标题至少保留四个字符；来源标签不在 flex 收缩中变形。
+   空间紧张时收纳为首枚截断胶囊，完整来源保留在 title 提示。 */
+.live-room-head .live-room-title {
+  flex: 1 1 auto;
+  min-width: 4ch;
+}
+.live-room-source-tags {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 16ch;
+  overflow: hidden;
+}
+.live-room-source-tags .post-card-tag {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* U6：大厅「只看在播」从原生 checkbox 升级为可键盘操作的玻璃胶囊开关。 */
+.live-hall-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.live-hall-filter-input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.live-hall-switch {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  inline-size: 44px;
+  block-size: 24px;
+  padding: 2px;
+  box-sizing: border-box;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--ice-300);
+  box-shadow: var(--glass-inset);
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.live-hall-switch-thumb {
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.live-hall-filter-input:checked + .live-hall-switch { background: var(--pink-500); }
+.live-hall-filter-input:checked + .live-hall-switch .live-hall-switch-thumb {
+  transform: translateX(20px);
+}
+.live-hall-filter-input:focus-visible + .live-hall-switch {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* U9：直播状态徽章使用规范规定的 pink-500 实底白字（design.md §12.7）。 */
+.live-badge-live {
+  background: var(--pink-500);
+  color: var(--surface);
+}
+
+/* U5（用户定稿）：撤销浮层/抽屉方案，恢复原弹幕布局（视频上 + 弹幕弹性吃剩余），
+   仅去掉弹幕区玻璃背景、播放器/stage 四角收圆。以下为对原 M2d 样式的覆盖修正。 */
+@media (max-width: 768px) {
+  /* 滑动容器不再统一收 12px 外圆角（不再是一张弹幕卡片）。 */
+  .live-room-body.is-narrow .live-room-swipe {
+    border-radius: 0;
+  }
+
+  /* 视频区四角收圆（下角也圆角，用户拍板）。 */
+  .live-room-body.is-narrow .live-room-swipe-item .live-room-stage {
+    border-radius: var(--radius-input);
+  }
+
+  /* 弹幕区保持弹性吃剩余（布局不动），去掉玻璃底/描边/圆角，透出极光底。 */
+  .live-room-body.is-narrow .live-room-swipe-item .danmaku-wrap {
+    flex: 1;
+    min-height: 96px;
+    border-top: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-radius: 0;
+  }
+}
+
+/* U4（窄屏紧凑头部）：多来源折为首枚截断胶囊，完整来源保留在 title 提示。 */
+@media (max-width: 768px) {
+  .live-room-source-tags { max-width: 8ch; }
+  .live-room-source-tags .post-card-tag:not(:first-child) { display: none; }
+}
+
+/* U4 顶栏优化（用户实测 375 返回键被挤两行）：
+   返回键不折行、不被 flex 压缩；紧凑头部来源胶囊整体收纳（title 提示保留），
+   标题弹性截断仍以 4ch 保底。 */
+@media (max-width: 480px) {
+  .live-room-head .msg-action-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding-inline: var(--sp-2);
+  }
+  .live-room-head .live-room-source-tags {
+    display: none;
+  }
+}

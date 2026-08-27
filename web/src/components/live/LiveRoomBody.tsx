@@ -181,6 +181,7 @@ export function LiveRoomBody({
       onRetry={retryPlayer}
     />
   );
+  const visibilityLabels = channel ? getVisibilityLabels(channel) : [];
 
   const narrowHead = (
     <>
@@ -194,14 +195,14 @@ export function LiveRoomBody({
             ownerNickname={channel.owner_nickname}
             size={32}
           />
-          <span className="live-room-title">
-            {loading ? "加载中…" : (channel?.title ?? "直播间")}
+          <span className="live-room-title" title={channel.title}>
+            {loading ? "加载中…" : (channel.title || "直播间")}
           </span>
         </>
       )}
-      {!showOwnerPanel && channel && getVisibilityLabels(channel).length > 0 && (
-        <div className="post-card-tags">
-          {getVisibilityLabels(channel).map((label, idx) => (
+      {!showOwnerPanel && visibilityLabels.length > 0 && (
+        <div className="post-card-tags live-room-source-tags" title={visibilityLabels.join("、")}>
+          {visibilityLabels.map((label, idx) => (
             <span key={idx} className="post-card-tag">{label}</span>
           ))}
         </div>
@@ -228,12 +229,12 @@ export function LiveRoomBody({
           size={32}
         />
       )}
-      <span className="live-room-title">
+      <span className="live-room-title" title={channel?.title ?? "直播间"}>
         {loading ? "加载中…" : (channel?.title ?? "直播间")}
       </span>
-      {channel && getVisibilityLabels(channel).length > 0 && (
-        <div className="post-card-tags">
-          {getVisibilityLabels(channel).map((label, idx) => (
+      {visibilityLabels.length > 0 && (
+        <div className="post-card-tags live-room-source-tags" title={visibilityLabels.join("、")}>
+          {visibilityLabels.map((label, idx) => (
             <span key={idx} className="post-card-tag">{label}</span>
           ))}
         </div>

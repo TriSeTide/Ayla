@@ -91,7 +91,7 @@ export function DanmakuInput({
         />
         <button
           type="button"
-          className="btn btn-glow"
+          className="btn btn-glow danmaku-send-btn"
           disabled={sending || uploading || !text.trim()}
           onClick={() => void submit()}
         >
