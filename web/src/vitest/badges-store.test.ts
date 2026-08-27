@@ -38,6 +38,19 @@ describe("badges store", () => {
     expect(useBadgesStore.getState().messageBadge()).toBe(3 + 2 + 1 + 4);
   });
 
+  it("messageBadge 聚合含 @我 未读（mention_unread）", async () => {
+    vi.mocked(accountsApi.getBadges).mockResolvedValue({
+      private_unread: 3,
+      group_unread: 5,
+      mention_unread: 2,
+      friend_requests: 2,
+      group_invites: 1,
+      join_requests_pending: 4,
+    });
+    await useBadgesStore.getState().fetch();
+    expect(useBadgesStore.getState().messageBadge()).toBe(3 + 2 + 2 + 1 + 4);
+  });
+
   it("无 badges 时 messageBadge 为 0", () => {
     expect(useBadgesStore.getState().messageBadge()).toBe(0);
   });

@@ -13,7 +13,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChatMessage, ConversationSummary } from "../api/types";
+import type { ChatMessage, ConversationSummary, UserPublic } from "../api/types";
 import { MessageList } from "../components/chat/MessageList";
 import { useAuthStore } from "../stores/auth";
 
@@ -117,6 +117,7 @@ function seqsOf(container: HTMLElement): number[] {
 
 afterEach(() => {
   useAuthStore.setState({ currentUser: null });
+  vi.restoreAllMocks();
 });
 
 describe("MessageList U16 窗口化", () => {
@@ -313,5 +314,81 @@ describe("MessageList U16 窗口化", () => {
     expect(jumpButton?.getAttribute("aria-hidden")).toBe("true");
     const seqs = seqsOf(container);
     expect(seqs[seqs.length - 1]).toBe(500);
+  });
+});
+
+describe("MessageList @ 我跳转（F9）", () => {
+  function mentionMessage(seq: number): ChatMessage {
+    return {
+      ...serverMessage(seq),
+      sender_id: "other",
+      segments: [
+        { type: "text", text: `消息${seq}` },
+        { type: "mention", user_id: "me", name: "我" },
+      ],
+    };
+  }
+
+  /** mock 容器与目标消息的 getBoundingClientRect：目标消息 bottom < 容器 top（被刷到视口上方） */
+  function mockRectAbove(container: HTMLElement, targetId: string) {
+    const scrollEl = container.querySelector(".message-scroll") as HTMLElement;
+    vi.spyOn(scrollEl, "getBoundingClientRect").mockReturnValue({
+      top: 0, bottom: 600, left: 0, right: 400, width: 400, height: 600, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    const target = Array.from(container.querySelectorAll("[data-message-id]")).find(
+      (n) => n.getAttribute("data-message-id") === targetId,
+    ) as HTMLElement;
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      top: -100, bottom: -50, left: 0, right: 400, width: 400, height: 50, x: 0, y: -100, toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  it("@ 我的消息被刷到视口上方时显示「@我」按钮，点击定位并高亮", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const messages = Array.from({ length: 30 }, (_, i) => mentionMessage(i + 1));
+    const { container } = render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+      />,
+    );
+    const scroller = makeScroller(container, 2000);
+    mockRectAbove(container, "m30");
+
+    await act(async () => {
+      scroller.element.scrollTop = 100;
+      fireEvent.scroll(scroller.element);
+    });
+
+    const mentionButton = document.querySelector<HTMLElement>(".message-jump-mention");
+    expect(mentionButton).not.toBeNull();
+
+    await act(async () => {
+      mentionButton?.click();
+    });
+    const targetNode = Array.from(container.querySelectorAll("[data-message-id]")).find(
+      (n) => n.getAttribute("data-message-id") === "m30",
+    ) as HTMLElement;
+    expect(targetNode.className).toContain("mention-jump-highlight");
+  });
+
+  it("无 @ 我的消息时不显示「@我」按钮", () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const messages = Array.from({ length: 20 }, (_, i) => serverMessage(i + 1));
+    render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+      />,
+    );
+    expect(document.querySelector(".message-jump-mention")).toBeNull();
   });
 });

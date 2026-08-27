@@ -32,6 +32,18 @@ function serverMessage(over: Partial<import("../api/types").ChatMessage> = {}) {
   } as import("../api/types").ChatMessage;
 }
 
+/** contentEditable 编辑器定位（M8 后 textarea 改为 contenteditable div） */
+function editor() {
+  return screen.getByRole("textbox", { name: "消息输入框" }) as HTMLDivElement;
+}
+
+/** 模拟向 contentEditable 输入纯文本并触发 onInput */
+function enterText(text: string) {
+  const el = editor();
+  el.textContent = text;
+  fireEvent.input(el);
+}
+
 describe("MessageInput 乐观发送（M7）", () => {
   beforeEach(() => {
     send.mockReset();
@@ -60,8 +72,7 @@ describe("MessageInput 乐观发送（M7）", () => {
     expect(send).not.toHaveBeenCalled();
 
     // 输入文本 → 点发送 → 立即清空队列（乐观进气泡），后台上传+发送
-    const textarea = screen.getByPlaceholderText(/输入消息/);
-    fireEvent.change(textarea, { target: { value: "看看这俩" } });
+    enterText("看看这俩");
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect(mediaApi.uploadMediaFile).toHaveBeenCalledTimes(2);
@@ -79,14 +90,13 @@ describe("MessageInput 乐观发送（M7）", () => {
   it("纯文本走 text 契约（不构造混排段），且发送后输入框清空", async () => {
     send.mockResolvedValue(serverMessage({ type: "text", content: "你好" }));
     render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
-    const textarea = screen.getByPlaceholderText(/输入消息/);
-    fireEvent.change(textarea, { target: { value: "你好" } });
+    enterText("你好");
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     const payload = send.mock.calls[0][1] as import("../api/types").CreateMessagePayload;
     expect(payload.type).toBe("text");
     expect(payload.segments).toBeUndefined();
-    await waitFor(() => expect(textarea).toHaveValue(""));
+    await waitFor(() => expect(editor().textContent).toBe(""));
     expect(mediaApi.uploadMediaFile).not.toHaveBeenCalled();
   });
 
@@ -115,8 +125,7 @@ describe("MessageInput 乐观发送（M7）", () => {
   it("粘贴剪贴板图片进队列（不自动发送），可移除", async () => {
     send.mockResolvedValue(serverMessage());
     render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
-    const textarea = screen.getByPlaceholderText(/输入消息/);
-    fireEvent.paste(textarea, {
+    fireEvent.paste(editor(), {
       clipboardData: {
         items: [
           { kind: "file", type: "image/png", getAsFile: () => new File(["p"], "p.png", { type: "image/png" }) },
@@ -131,14 +140,12 @@ describe("MessageInput 乐观发送（M7）", () => {
     await waitFor(() => expect(screen.queryByRole("group", { name: "待发送媒体" })).not.toBeInTheDocument());
   });
 
-  it("placeholder 响应式（U7）：宽屏保留完整快捷键说明、窄屏短文案", () => {
+  it("placeholder 响应式（U7）：宽屏含 @ 提示、窄屏短文案（data-placeholder）", () => {
     // 宽屏（jsdom 无 matchMedia → useMediaQuery 回退 false）：完整文案
     const { unmount } = render(
       <MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
     );
-    expect(
-      screen.getByPlaceholderText("输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"),
-    ).toBeInTheDocument();
+    expect(editor().getAttribute("data-placeholder")).toContain("回车发送");
     unmount();
 
     // 窄屏（matchMedia matches=true）：短文案，不含快捷键说明
@@ -155,10 +162,7 @@ describe("MessageInput 乐观发送（M7）", () => {
       })),
     );
     render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
-    expect(screen.getByPlaceholderText("输入消息")).toBeInTheDocument();
-    expect(
-      screen.queryByPlaceholderText("输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"),
-    ).not.toBeInTheDocument();
+    expect(editor().getAttribute("data-placeholder")).toBe("输入消息");
     vi.unstubAllGlobals();
   });
 });

@@ -84,6 +84,10 @@ class BadgesView(APIView):
             .exclude(status=Message.STATUS_RECALLED)
             .exclude(reads__user=user)
         )
+        # M8 @ 能力：@ 我且未读的消息数（跨全部会话；mention 段结构化判定）
+        mention_unread = unread.filter(
+            segments__contains=[{"type": "mention", "user_id": str(user.id)}]
+        ).count()
         friend_requests = FriendRequest.objects.filter(
             to_user=user, status=FriendRequest.STATUS_PENDING
         ).count()
@@ -108,6 +112,7 @@ class BadgesView(APIView):
                 "group_unread": unread.filter(
                     conversation__type=Conversation.TYPE_GROUP
                 ).count(),
+                "mention_unread": mention_unread,
                 "friend_requests": friend_requests,
                 "group_invites": group_invites,
                 "join_requests_pending": join_requests_pending,

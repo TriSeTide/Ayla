@@ -13,13 +13,22 @@ export const SEGMENT_PLACEHOLDER: Record<string, string> = {
   video: "[视频]",
 };
 
-/** 混排段 → 预览摘要（无 segments 返回 null） */
+/** mention 段显示名（不含 @ 前缀）：优先服务端 user 昵称，回退乐观 name / 未知用户 */
+export function mentionLabel(
+  seg: { type: "mention"; user_id: string; user?: { nickname?: string; username?: string } | null; name?: string },
+): string {
+  return seg.user?.nickname || seg.user?.username || seg.name || "未知用户";
+}
+
+/** 混排段 → 预览摘要（无 segments 返回 null；mention 段显示 @昵称） */
 export function segmentPreview(segments?: MediaSegment[] | null): string | null {
   if (!segments || segments.length === 0) return null;
   let out = "";
   for (const seg of segments) {
     if (seg.type === "text") {
       out += seg.text;
+    } else if (seg.type === "mention") {
+      out += `@${mentionLabel(seg)}`;
     } else {
       out += SEGMENT_PLACEHOLDER[seg.type] ?? "[媒体]";
     }

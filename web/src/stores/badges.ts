@@ -22,6 +22,7 @@ interface BadgesState {
 const EMPTY: Badges = {
   private_unread: 0,
   group_unread: 0,
+  mention_unread: 0,
   friend_requests: 0,
   group_invites: 0,
   join_requests_pending: 0,
@@ -48,7 +49,14 @@ export const useBadgesStore = create<BadgesState>((set, get) => ({
 
   messageBadge: () => {
     const b = get().badges ?? EMPTY;
-    return b.private_unread + b.friend_requests + b.group_invites + b.join_requests_pending;
+    // @我 未读（mention_unread）并入消息入口红点：@ 是「点名找我」，比普通群消息更紧急
+    return (
+      b.private_unread +
+      (b.mention_unread ?? 0) +
+      b.friend_requests +
+      b.group_invites +
+      b.join_requests_pending
+    );
   },
 
   requestBadge: () => {

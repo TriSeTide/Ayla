@@ -144,7 +144,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
         onCancel={(m) => cancelOptimistic(groupId, m)}
       />
       <TypingIndicator typing={typingActive} />
-      <MessageInput convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} />
+      <MessageInput convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} members={activeConv?.members} />
     </div>
   );
 }

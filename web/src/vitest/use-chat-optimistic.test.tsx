@@ -22,6 +22,11 @@ function picked(n: number): PickedMediaItem[] {
   }));
 }
 
+/** 纯文本 → blocks（M8 后 sendOptimistic 改收 blocks） */
+function blocksOf(text: string): { type: "text"; text: string }[] {
+  return text ? [{ type: "text", text }] : [];
+}
+
 function serverMessage(over: Partial<import("../api/types").ChatMessage> = {}) {
   return {
     id: "m-server",
@@ -52,7 +57,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
 
   it("sendOptimistic 立即插入 pending 消息（seq=0 恒置底，本地预览保留）", async () => {
     send.mockResolvedValue(serverMessage());
-    sendOptimistic("c1", { text: "看看", picked: picked(2) });
+    sendOptimistic("c1", { blocks: blocksOf("看看"), picked: picked(2) });
     const bucket = useMessageStore.getState().buckets["c1"];
     expect(bucket).toBeDefined();
     const msgs = bucket.messages;
@@ -70,14 +75,14 @@ describe("useChat 乐观发送（M7 store 级）", () => {
     expect(p.localMedia).toHaveLength(2);
     // 与已有历史消息共存时 pending 置底
     useMessageStore.getState().upsertMessage("c1", serverMessage({ id: "old", seq: 1 }));
-    sendOptimistic("c1", { text: "第二", picked: [] });
+    sendOptimistic("c1", { blocks: blocksOf("第二"), picked: [] });
     const order = useMessageStore.getState().buckets["c1"].messages.map((m) => (m.pending ? "pending" : m.seq));
     expect(order).toEqual([1, "pending", "pending"]);
   });
 
   it("上传+发送成功后原地替换为服务端消息（pending 消失、seq 生效）", async () => {
     send.mockResolvedValue(serverMessage());
-    sendOptimistic("c1", { text: "看看", picked: picked(1) });
+    sendOptimistic("c1", { blocks: blocksOf("看看"), picked: picked(1) });
     await vi.waitFor(() => {
       const msgs = useMessageStore.getState().buckets["c1"].messages;
       expect(msgs).toHaveLength(1);
@@ -96,7 +101,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
 
   it("发送失败 → 消息保留并标记 sendFailed（可重试）", async () => {
     send.mockRejectedValueOnce(new Error("网络失败"));
-    sendOptimistic("c1", { text: "失败消息", picked: picked(1) });
+    sendOptimistic("c1", { blocks: blocksOf("失败消息"), picked: picked(1) });
     await vi.waitFor(() => {
       const msgs = useMessageStore.getState().buckets["c1"].messages;
       expect(msgs).toHaveLength(1);
@@ -108,7 +113,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
 
   it("retryOptimistic 复用同一幂等键重新上传发送", async () => {
     send.mockRejectedValueOnce(new Error("网络失败")).mockResolvedValueOnce(serverMessage());
-    sendOptimistic("c1", { text: "重试", picked: picked(1) });
+    sendOptimistic("c1", { blocks: blocksOf("重试"), picked: picked(1) });
     await vi.waitFor(() => {
       expect(useMessageStore.getState().buckets["c1"].messages[0].sendFailed).toBe(true);
     });
@@ -127,7 +132,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
 
   it("WS 帧先到时（服务端消息已在列表）resolvePending 收敛为一条，不重复", async () => {
     send.mockResolvedValue(serverMessage());
-    sendOptimistic("c1", { text: "并发", picked: picked(1) });
+    sendOptimistic("c1", { blocks: blocksOf("并发"), picked: picked(1) });
     const pendingMsg = useMessageStore.getState().buckets["c1"].messages.find((m) => m.pending) as import("../api/types").ChatMessage;
     const key = pendingMsg.idempotencyKey as string;
     // 模拟 WS 先插入服务端消息（本地 pending 还在，seq=5 与 pending seq=0 并存）
@@ -147,7 +152,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
   it("removeOptimistic 删除消息并释放本地预览 URL", async () => {
     const revoke = vi.fn();
     vi.stubGlobal("URL", { ...URL, revokeObjectURL: revoke });
-    sendOptimistic("c1", { text: "删除我", picked: picked(2) });
+    sendOptimistic("c1", { blocks: blocksOf("删除我"), picked: picked(2) });
     const p = useMessageStore.getState().buckets["c1"].messages[0];
     removeOptimistic("c1", p);
     expect(useMessageStore.getState().buckets["c1"].messages).toHaveLength(0);
@@ -161,7 +166,7 @@ describe("useChat 乐观发送（M7 store 级）", () => {
       return new Promise(() => {}); // 挂起，保持 pending
     });
     send.mockReturnValue(new Promise(() => {}));
-    sendOptimistic("c1", { text: "", picked: picked(2) });
+    sendOptimistic("c1", { blocks: [], picked: picked(2) });
     await vi.waitFor(() => expect(capture).toBeTruthy());
     // 每个 File 真实大小 1 字节；第一个文件完成 → 聚合 1/2 = 50%
     capture!({ loaded: 1, total: 1 });
@@ -178,12 +183,82 @@ describe("useChat 乐观发送（M7 store 级）", () => {
     });
     const revoke = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:stub", revokeObjectURL: revoke });
-    sendOptimistic("c1", { text: "", picked: picked(1) });
+    sendOptimistic("c1", { blocks: [], picked: picked(1) });
     const p = useMessageStore.getState().buckets["c1"].messages[0];
     cancelOptimistic("c1", p);
     expect(signalRef.current?.aborted).toBe(true);
     expect(useMessageStore.getState().buckets["c1"].messages).toHaveLength(0);
     expect(revoke).toHaveBeenCalledWith("blob:fake-0");
+  });
+
+  it("纯文本 + @（无媒体）→ mixed 契约：mention 段不进 content，payload 只带 user_id", async () => {
+    send.mockResolvedValue(serverMessage({ type: "mixed" }));
+    sendOptimistic("c1", {
+      blocks: [
+        { type: "text", text: "hi " },
+        { type: "mention", user_id: "u2", name: "张三" },
+        { type: "text", text: "看这个" },
+      ],
+      picked: [],
+    });
+    const p = useMessageStore.getState().buckets["c1"].messages[0];
+    expect(p.type).toBe("mixed");
+    expect(p.content).toBe("hi 看这个"); // mention 不进 content
+    expect(p.segments).toEqual([
+      { type: "text", text: "hi " },
+      { type: "mention", user_id: "u2", name: "张三" }, // 乐观本地带 name 供渲染
+      { type: "text", text: "看这个" },
+    ]);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const payload = send.mock.calls[0][1] as import("../api/types").CreateMessagePayload;
+    expect(payload.type).toBe("mixed");
+    expect(payload.segments).toEqual([
+      { type: "text", text: "hi " },
+      { type: "mention", user_id: "u2" }, // 发送 payload 只带 user_id（后端展开 user）
+      { type: "text", text: "看这个" },
+    ]);
+  });
+
+  it("@ + 媒体 → mixed：text/mention 段在前、媒体段追加尾部", async () => {
+    send.mockResolvedValue(serverMessage());
+    sendOptimistic("c1", {
+      blocks: [
+        { type: "text", text: "hi " },
+        { type: "mention", user_id: "u2", name: "张三" },
+      ],
+      picked: picked(1),
+    });
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const payload = send.mock.calls[0][1] as import("../api/types").CreateMessagePayload;
+    expect(payload.segments).toEqual([
+      { type: "text", text: "hi " },
+      { type: "mention", user_id: "u2" },
+      { type: "image", media_id: "media-1" },
+    ]);
+  });
+
+  it("重试含 @ 的失败消息保留 mention 段", async () => {
+    send.mockRejectedValueOnce(new Error("网络失败")).mockResolvedValueOnce(serverMessage());
+    sendOptimistic("c1", {
+      blocks: [
+        { type: "text", text: "hi " },
+        { type: "mention", user_id: "u2", name: "张三" },
+      ],
+      picked: [],
+    });
+    await vi.waitFor(() => {
+      expect(useMessageStore.getState().buckets["c1"].messages[0].sendFailed).toBe(true);
+    });
+    const failed = useMessageStore.getState().buckets["c1"].messages[0];
+    retryOptimistic("c1", failed);
+    await vi.waitFor(() => {
+      expect(useMessageStore.getState().buckets["c1"].messages[0].id).toBe("m-server");
+    });
+    const payload = send.mock.calls[1][1] as import("../api/types").CreateMessagePayload;
+    expect(payload.segments).toEqual([
+      { type: "text", text: "hi " },
+      { type: "mention", user_id: "u2" },
+    ]);
   });
 });
 
@@ -211,5 +286,20 @@ describe("segment 预览工具", () => {
         { type: "text", text: "B" },
       ]),
     ).toBe("AB");
+  });
+
+  it("segmentPreview 对 mention 段生成 @昵称 摘要（无 user 回退 name/未知用户）", () => {
+    expect(
+      segmentPreview([
+        { type: "text", text: "hi " },
+        { type: "mention", user_id: "u2", user: { nickname: "张三" } as never },
+      ]),
+    ).toBe("hi @张三");
+    expect(
+      segmentPreview([{ type: "mention", user_id: "u2", name: "李四" }]),
+    ).toBe("@李四");
+    expect(
+      segmentPreview([{ type: "mention", user_id: "u2" }]),
+    ).toBe("@未知用户");
   });
 });

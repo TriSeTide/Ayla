@@ -7,10 +7,11 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatMessage, MediaDescriptor } from "../api/types";
+import type { ChatMessage, MediaDescriptor, UserPublic } from "../api/types";
 import { MediaContent } from "../components/chat/MediaContent";
 import { MessageBubble } from "../components/chat/MessageBubble";
 import { resetAudioPlayback } from "../utils/mediaPlayback";
+import { useAuthStore } from "../stores/auth";
 
 /** 语音等小媒体仍走 Bearer blob 通道 */
 const blobByPath = new Map<string, Blob>();
@@ -437,6 +438,35 @@ describe("MixedMedia 图文混排（type=mixed + segments）", () => {
     const img = await screen.findByRole("img", { name: "图片" });
     expect(img).toHaveAttribute("src", "blob:local-0");
     expect(screen.getByText("看看")).toBeInTheDocument();
+  });
+
+  it("mention 段渲染 @Token 高亮胶囊，「@我」加 is-me 强调、点击跳个人页", async () => {
+    useAuthStore.setState({
+      currentUser: { id: "u2", username: "zs", nickname: "张三" } as UserPublic,
+    });
+    try {
+      const msg = mixedMessage({
+        segments: [
+          { type: "text", text: "hi " },
+          { type: "mention", user_id: "u2", user: { id: "u2", nickname: "张三", username: "zs" } as UserPublic },
+          { type: "text", text: " 看这个 " },
+          { type: "mention", user_id: "u3", user: { id: "u3", nickname: "李四", username: "ls" } as UserPublic },
+        ],
+      });
+      render(<MediaContent msg={msg} />);
+      // @我（u2）加 is-me 强调
+      const meToken = screen.getByRole("button", { name: "@张三" });
+      expect(meToken).toHaveClass("mention-token", "is-me");
+      expect(meToken.textContent).toBe("@张三");
+      // @他人（u3）无 is-me
+      const otherToken = screen.getByRole("button", { name: "@李四" });
+      expect(otherToken).toHaveClass("mention-token");
+      expect(otherToken).not.toHaveClass("is-me");
+      // 点击跳个人主页：navigateTo 未注册时 no-op，不抛错
+      expect(() => fireEvent.click(otherToken)).not.toThrow();
+    } finally {
+      useAuthStore.setState({ currentUser: null });
+    }
   });
 
   it("查看器视频秒开：海报帧先行显示，<video> 挂同帧 poster + preload=auto", async () => {

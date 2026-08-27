@@ -138,8 +138,11 @@ export function MessageList({
   const pendingAnchorRef = useRef<PendingPrependAnchor | null>(null);
   const loadMoreInFlightRef = useRef(false);
   const jumpToBottomRef = useRef(false);
+  const jumpToMentionRef = useRef<string | null>(null);
   const [windowRange, setWindowRange] = useState<RenderWindow | null>(null);
   const [farFromBottom, setFarFromBottom] = useState(false);
+  const [mentionAbove, setMentionAbove] = useState(false);
+  const [mentionHighlightId, setMentionHighlightId] = useState<string | null>(null);
   const isGroup = conversation?.type === "group";
 
   // pending / 发送失败的本地消息不计入 200 条服务端窗口，始终留在尾部让用户可取消、重试或删除。
@@ -171,6 +174,18 @@ export function MessageList({
     () => visibleMessages.map((m) => m.id).join("\u0001"),
     [visibleMessages],
   );
+  // @ 我的消息（非自己发送）里 seq 最大的一条，作为「跳转到 @ 我」的定位目标
+  const mentionTargetId = useMemo(() => {
+    let target: ChatMessage | null = null;
+    for (const m of confirmedMessages) {
+      if (m.sender_id === currentUserId) continue;
+      const hit = (m.segments ?? []).some(
+        (s) => s.type === "mention" && s.user_id === currentUserId,
+      );
+      if (hit && (!target || m.seq > target.seq)) target = m;
+    }
+    return target?.id ?? null;
+  }, [confirmedMessages, currentUserId]);
   const hasCachedEarlier = bounds.start > 0;
   const hasHiddenTail = bounds.end < confirmedMessages.length;
   const canLoadEarlier = hasCachedEarlier || hasMore;
@@ -497,6 +512,77 @@ export function MessageList({
       });
   }, [bounds.end, bounds.start, confirmedMessages, hasMore, loading, onLoadMore, visibleConfirmed]);
 
+  // 检测 @ 我的消息是否在视口上方（被刷上去）→ 显示「@我」跳转按钮
+  const refreshMentionAbove = useCallback(() => {
+    if (!mentionTargetId) {
+      setMentionAbove(false);
+      return;
+    }
+    const element = scrollRef.current;
+    if (!element) return;
+    const node = findMessageNode(element, mentionTargetId);
+    if (!node) {
+      setMentionAbove(false);
+      return;
+    }
+    const nodeRect = node.getBoundingClientRect();
+    const elRect = element.getBoundingClientRect();
+    setMentionAbove(nodeRect.bottom < elRect.top);
+  }, [mentionTargetId]);
+
+  // 窗口/消息变化时重算 @我 按钮可见性（新消息、扩窗、定位后）
+  useLayoutEffect(() => {
+    refreshMentionAbove();
+  }, [refreshMentionAbove, visibleSignature]);
+
+  // 滚动定位到目标消息（居中）+ 短暂辉光高亮（design.md §7/F10 玻璃辉光一闪）
+  const scrollToMentionAndHighlight = useCallback((id: string) => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const node = findMessageNode(element, id);
+    if (!node) return;
+    const elRect = element.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    element.scrollTop += nodeRect.top - elRect.top - element.clientHeight / 2;
+    lastScrollTopRef.current = element.scrollTop;
+    setMentionHighlightId(id);
+    window.setTimeout(() => {
+      setMentionHighlightId((cur) => (cur === id ? null : cur));
+    }, 2000);
+  }, []);
+
+  const handleJumpToMention = () => {
+    if (!mentionTargetId) return;
+    const idx = confirmedMessages.findIndex((m) => m.id === mentionTargetId);
+    if (idx < 0) return;
+    // 目标已在窗口内 → 直接定位 + 高亮
+    if (visibleConfirmed.some((m) => m.id === mentionTargetId)) {
+      scrollToMentionAndHighlight(mentionTargetId);
+      return;
+    }
+    // 目标在缓存但不在窗口（被窗口裁掉）→ 扩窗到包含目标，下一帧定位
+    const half = Math.floor(MESSAGE_RENDER_WINDOW_LIMIT / 2);
+    let start = Math.max(0, idx - half);
+    let end = Math.min(confirmedMessages.length, start + MESSAGE_RENDER_WINDOW_LIMIT);
+    if (end - start < MESSAGE_RENDER_WINDOW_LIMIT) {
+      start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+    }
+    const nextWindow = windowForBounds(confirmedMessages, start, end);
+    if (nextWindow) {
+      jumpToMentionRef.current = mentionTargetId;
+      setWindowRange((prev) => (sameWindow(prev, nextWindow) ? prev : nextWindow));
+    }
+  };
+
+  // 扩窗提交后定位到 @ 我消息
+  useLayoutEffect(() => {
+    if (jumpToMentionRef.current) {
+      const id = jumpToMentionRef.current;
+      jumpToMentionRef.current = null;
+      scrollToMentionAndHighlight(id);
+    }
+  }, [visibleSignature, scrollToMentionAndHighlight]);
+
   const handleScroll = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -508,6 +594,7 @@ export function MessageList({
     atBottomRef.current = physicallyAtBottom && !hasHiddenTail;
     lastScrollTopRef.current = scrollTop;
     setFarFromBottom(distanceToBottom > element.clientHeight);
+    refreshMentionAbove();
 
     if (scrollTop < HISTORY_PRELOAD_THRESHOLD) requestOlder();
   };
@@ -558,7 +645,12 @@ export function MessageList({
             const grouped = shouldGroup(visibleMessages[index - 1], m);
             const isSelf = m.sender_id === currentUserId;
             return (
-              <div key={m.id ?? `${m.conversation_id}-${m.seq}`} data-message-id={m.id} data-message-seq={m.seq}>
+              <div
+                key={m.id ?? `${m.conversation_id}-${m.seq}`}
+                data-message-id={m.id}
+                data-message-seq={m.seq}
+                className={m.id === mentionHighlightId ? "mention-jump-highlight" : undefined}
+              >
                 {grouped && (
                   <div className="time-divider">
                     <span>{formatTime(m.created_at)}</span>
@@ -588,6 +680,17 @@ export function MessageList({
           )}
         </div>
       </div>
+      {mentionTargetId && mentionAbove && (
+        <button
+          type="button"
+          className="message-jump-mention"
+          onClick={handleJumpToMention}
+          aria-label="跳转到 @ 我的消息"
+          title="有人 @ 我"
+        >
+          @我
+        </button>
+      )}
       <button
         type="button"
         className={`message-jump-bottom${showBackToBottom ? " is-visible" : ""}`}

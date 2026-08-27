@@ -24,8 +24,11 @@ import {
   warmUpVideoElement,
 } from "../../api/media";
 import { apiRequestBlob, API_PREFIX } from "../../api/client";
-import type { ChatMessage, MediaDescriptor } from "../../api/types";
+import type { ChatMessage, MediaDescriptor, MediaSegment } from "../../api/types";
 import { useMessageStore } from "../../stores/message";
+import { useAuthStore } from "../../stores/auth";
+import { goUserProfile } from "../../utils/navigation";
+import { mentionLabel } from "../../utils/segment";
 import {
   claimAudioPlayback,
   releaseAudioPlayback,
@@ -314,9 +317,14 @@ function VideoMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor }
  * 点击任一媒体段打开共享查看器（同消息内 image/video 可左右切换）。
  */
 function MixedMedia({ msg }: { msg: ChatMessage }) {
+  const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const segments = msg.segments ?? [];
   const localMedia = msg.localMedia ?? [];
-  const mediaSegs = segments.filter((s) => s.type !== "text");
+  // 媒体段（image/video）用于查看器多图切换；mention 段单独渲染，不参与媒体序列
+  const mediaSegs = segments.filter(
+    (s): s is Extract<MediaSegment, { type: "image" | "video" }> =>
+      s.type === "image" || s.type === "video",
+  );
   const [openIdx, setOpenIdx] = useState<number | null>(null);
 
   // 第 i 个媒体段对应的本地预览（乐观消息；与 segments 媒体段按序对应）
@@ -351,6 +359,23 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
               <span key={i} className="mixed-text">
                 {seg.text}
               </span>
+            );
+          }
+          if (seg.type === "mention") {
+            // @Token（M8）：高亮胶囊；「@我」加 glow 描边；点击进个人主页
+            const isMe = currentUserId != null && seg.user_id === currentUserId;
+            const label = mentionLabel(seg);
+            return (
+              <button
+                key={i}
+                type="button"
+                className={`mention-token${isMe ? " is-me" : ""}`}
+                onClick={() => goUserProfile(currentUserId, seg.user_id)}
+                aria-label={`@${label}`}
+                title={`@${label}`}
+              >
+                @{label}
+              </button>
             );
           }
           if (seg.type === "image") {

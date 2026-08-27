@@ -1,14 +1,13 @@
 /**
- * MessageInput —— 输入区：乐观发送（不阻塞输入）、多选媒体缩略图队列、剪贴板粘贴、引用条。
+ * MessageInput —— 输入区：乐观发送、媒体缩略图队列、剪贴板粘贴、引用条、@ 能力（M8，仅群聊）。
  *
- * M7 语义：
- * - 发送不再等待网络：点击发送即插入乐观气泡（左上角加载态），可继续输入下一条；
- * - 图片/视频多选后先进入输入框上方的缩略图条（本地预览，未上传），点发送时统一上传并发送；
- * - 支持直接粘贴剪贴板图片/视频（自动进队列，不自动发送）；
- * - 纯文本走旧 text 契约；带媒体走混排 segments（type=mixed）。
+ * M7 语义：发送不阻塞输入；图片/视频多选先入队，点发送统一上传；粘贴媒体进队列。
+ * M8 @：contentEditable 编辑器，输入 @ 弹出群成员选择器（MentionPicker），选中生成
+ * 不可拆分 @Token（contenteditable=false span，浏览器原生整体删除），发送时转为
+ * 结构化 segments（text + mention 交错，媒体段追加尾部）。
  */
-import { useEffect, useState } from "react";
-import type { ChatMessage } from "../../api/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ChatMessage, ConversationMember, DraftBlock } from "../../api/types";
 import { useChatDraftsStore } from "../../stores/chatDrafts";
 import { sendMessage, sendOptimistic, type PickedMediaItem } from "../../hooks/useChat";
 import { uploadMediaFile, validateMediaFile } from "../../api/media";
@@ -17,6 +16,16 @@ import { useTyping } from "../../hooks/useTyping";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceRecorder, isVoiceRecordingSupported, formatDuration as formatRecDuration, type VoiceRecording } from "../../hooks/useVoiceRecorder";
 import { segmentPreview } from "../../utils/segment";
+import {
+  blocksText,
+  detectMentionAtCaret,
+  extractBlocks,
+  insertMentionAtCaret,
+  parseBlocks,
+  renderBlocksToDOM,
+  serializeBlocks,
+} from "../../utils/mention";
+import { MentionPicker } from "./MentionPicker";
 
 interface FailedVoice {
   blob: Blob;
@@ -34,28 +43,54 @@ export function MessageInput({
   convId,
   quote,
   onQuoteClear,
+  members,
 }: {
   convId: string;
   quote: ChatMessage | null;
   onQuoteClear: () => void;
+  /** 群成员（仅群聊启用 @）；私聊不传 */
+  members?: ConversationMember[];
 }) {
-  const draft = useChatDraftsStore((state) => state.drafts[convId] ?? "");
   const setDraft = useChatDraftsStore((state) => state.setDraft);
   const clearDraft = useChatDraftsStore((state) => state.clearDraft);
-  const [text, setText] = useState(draft);
+  const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   /** 待发送媒体队列（本地预览，未上传；发送时统一上传） */
   const [picked, setPicked] = useState<PickedMediaItem[]>([]);
   const [voiceUploading, setVoiceUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedVoice, setFailedVoice] = useState<FailedVoice | null>(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const editorRef = useRef<HTMLDivElement>(null);
   const voice = useVoiceRecorder();
   const { onInput } = useTyping(convId || null);
   const isNarrow = useMediaQuery(NARROW_QUERY);
+  const enableMention = !!members && members.length > 0;
 
+  // user_id → 显示名（草稿恢复 + @Token 用）
+  const nameOf = useCallback(
+    (id: string) => {
+      const m = members?.find((x) => x.user.id === id);
+      return m ? m.user.nickname || m.user.username : undefined;
+    },
+    [members],
+  );
+  const nameOfRef = useRef(nameOf);
+  nameOfRef.current = nameOf;
+
+  // 切换会话 → 恢复草稿（渲染到 DOM + 重置状态）；不随 draft 实时变化（避免光标跳）
   useEffect(() => {
-    setText(draft);
+    const el = editorRef.current;
+    if (!el) return;
+    const d = useChatDraftsStore.getState().getDraft(convId);
+    const parsed = parseBlocks(d, nameOfRef.current);
+    renderBlocksToDOM(el, parsed);
+    setBlocks(parsed);
+    setMentionOpen(false);
+    setMentionQuery("");
     setError(null);
-  }, [convId, draft]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId]);
 
   /** 校验并加入待发送队列（选文件/粘贴共用） */
   const enqueueFiles = (files: File[]) => {
@@ -88,19 +123,52 @@ export function MessageInput({
     });
   };
 
+  /** 编辑器输入 → 提取 blocks + 存草稿 + typing + @ 检测 */
+  const handleEditorInput = () => {
+    const el = editorRef.current;
+    if (!el) return;
+    const nextBlocks = extractBlocks(el);
+    setBlocks(nextBlocks);
+    setDraft(convId, serializeBlocks(nextBlocks));
+    onInput();
+    if (enableMention) {
+      const detected = detectMentionAtCaret(el);
+      if (detected) {
+        setMentionQuery(detected.query);
+        setMentionOpen(true);
+      } else {
+        setMentionOpen(false);
+      }
+    }
+  };
+
+  /** 选中成员 → 插入不可拆分 @Token */
+  const handleSelectMention = (member: ConversationMember) => {
+    const el = editorRef.current;
+    if (!el) return;
+    const name = member.user.nickname || member.user.username;
+    insertMentionAtCaret(el, member.user.id, name);
+    const nextBlocks = extractBlocks(el);
+    setBlocks(nextBlocks);
+    setDraft(convId, serializeBlocks(nextBlocks));
+    setMentionOpen(false);
+    setMentionQuery("");
+    el.focus();
+  };
+
   /** 乐观发送：立即插入气泡，后台上传+发送；不阻塞继续输入 */
   const submit = () => {
-    const textVal = text.trim();
-    if ((!textVal && picked.length === 0) || !convId || voice.recording) return;
+    const text = blocksText(blocks).trim();
+    if ((!text && picked.length === 0) || !convId || voice.recording) return;
     sendOptimistic(convId, {
-      text: textVal,
+      blocks,
       picked,
       replyTo: quote ? Number(quote.id) : null,
     });
     // 发送即清空（消息已进列表），可立即输入下一条。
-    // 注意：picked 的 objectURL 所有权已转移给乐观气泡（由气泡组件在替换/删除卸载时
-    // 统一 revoke），这里只能清空引用、绝不能 revoke —— 否则气泡立即变破图。
-    setText("");
+    const el = editorRef.current;
+    if (el) el.innerHTML = "";
+    setBlocks([]);
     clearDraft(convId);
     setPicked([]);
     setError(null);
@@ -145,7 +213,10 @@ export function MessageInput({
   };
 
   const quotePreview = quote ? (segmentPreview(quote.segments) ?? (quote.content || "…")) : null;
-  const canSend = (text.trim().length > 0 || picked.length > 0) && !voice.recording;
+  const canSend = (blocksText(blocks).trim().length > 0 || picked.length > 0) && !voice.recording;
+  const placeholder = isNarrow
+    ? "输入消息"
+    : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频，群聊输入 @ 可提及成员";
 
   return (
     <div className="composer">
@@ -202,6 +273,9 @@ export function MessageInput({
           <button type="button" className="msg-action-btn" onClick={voice.clearError}>关闭</button>
         </div>
       )}
+      {mentionOpen && enableMention && (
+        <MentionPicker members={members!} query={mentionQuery} onSelect={handleSelectMention} />
+      )}
       <div className="composer-row">
         {voice.recording ? (
           <>
@@ -253,23 +327,29 @@ export function MessageInput({
             )}
           </>
         )}
-        <textarea
-          className="field composer-input"
-          value={text}
-          onChange={(e) => {
-            const value = e.target.value;
-            setText(value);
-            setDraft(convId, value);
-            onInput();
-          }}
+        <div
+          ref={editorRef}
+          className="field composer-input composer-editor"
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-label="消息输入框"
+          data-placeholder={placeholder}
+          onInput={handleEditorInput}
           onKeyDown={(e) => {
+            if (mentionOpen && e.key === "Escape") {
+              e.preventDefault();
+              setMentionOpen(false);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
             }
           }}
           onPaste={(e) => {
-            // 粘贴图片/视频文件 → 进待发送队列（不自动发送）；文本走默认粘贴
+            // 粘贴图片/视频文件 → 进待发送队列（阻止默认，避免 contentEditable 混入 HTML）
             const items = Array.from(e.clipboardData?.items ?? []);
             const files = items
               .filter((it) => it.kind === "file")
@@ -278,10 +358,11 @@ export function MessageInput({
             const mediaFiles = files.filter(
               (f) => f.type.startsWith("image/") || f.type.startsWith("video/"),
             );
-            if (mediaFiles.length > 0) enqueueFiles(mediaFiles);
+            if (mediaFiles.length > 0) {
+              e.preventDefault();
+              enqueueFiles(mediaFiles);
+            }
           }}
-          placeholder={isNarrow ? "输入消息" : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频"}
-          rows={2}
         />
         <button
           type="button"

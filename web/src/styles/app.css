@@ -647,6 +647,13 @@
   text-overflow: ellipsis;
 }
 
+/* @我 标识（M8）：会话列表 @我 未读时，预览行前置粉色 @我 */
+.conv-mention {
+  color: var(--pink-500);
+  font-weight: 700;
+  margin-right: 4px;
+}
+
 /* ⋯ 更多按钮 + 弹出菜单（M5 会话管理：置顶/删除） */
 .conv-more {
   position: absolute;
@@ -965,6 +972,45 @@
   box-shadow: var(--glow-shadow);
 }
 
+/* @我 跳转按钮（M8 F9）：@ 我的消息被刷上去时，顶部居中胶囊提示，点击定位 */
+.message-jump-mention {
+  position: absolute;
+  top: var(--sp-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-4);
+  border: 1px solid var(--glow-500);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: var(--glow-shadow);
+  color: var(--grape-700);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  animation: mention-jump-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes mention-jump-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* @ 我消息定位后的辉光闪烁（design.md §7/F10 玻璃辉光一闪） */
+.mention-jump-highlight {
+  animation: mention-jump-flash 1.6s var(--ease-out);
+  border-radius: var(--radius-input);
+}
+
+@keyframes mention-jump-flash {
+  0% { box-shadow: 0 0 0 2px var(--glow-500), var(--glow-shadow); }
+  100% { box-shadow: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .message-history-spinner-glyph {
     animation: none;
@@ -976,6 +1022,11 @@
     transform: none;
     transition: opacity var(--dur-fast) var(--ease-out), visibility 0s linear 0s,
       background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
+
+  .message-jump-mention,
+  .mention-jump-highlight {
+    animation: none;
   }
 }
 
@@ -1841,6 +1892,7 @@
 /* ---- 输入区 ---- */
 
 .composer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -1968,8 +2020,123 @@
   line-height: 1.55;
 }
 
+/* contentEditable 编辑器（M8 @）：替代 textarea，承载文本 + @Token 原子节点 */
+.composer-editor {
+  min-height: 40px;
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  line-height: 1.55;
+}
+
+/* contentEditable 空态 placeholder（空文本节点/无内容时显示） */
+.composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--slate-500);
+  pointer-events: none;
+}
+
 .composer-send {
   flex-shrink: 0;
+}
+
+/* ================= @ 能力（M8）：@Token 高亮 + 成员选择器浮层 ================= */
+
+/* @Token 高亮胶囊（design.md §F8：--ice-500 底胶囊）；「@我」加 glow 描边 */
+.mention-token {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  margin: 0 2px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--ice-500);
+  color: var(--indigo-700);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  line-height: 1.45;
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+
+.mention-token:hover,
+.mention-token:focus-visible {
+  filter: brightness(1.05);
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.mention-token.is-me {
+  box-shadow: inset 0 0 0 1.5px var(--glow-500);
+}
+
+/* 输入框内 @Token（contenteditable=false，不可点击、不可拆分） */
+.mention-token-input {
+  cursor: default;
+  pointer-events: none;
+  margin: 0 1px;
+}
+
+/* @ 成员选择器浮层（design.md §12.8.1 弹层规格：玻璃 + blur + 圆角） */
+.mention-picker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + var(--sp-2));
+  z-index: 50;
+  max-height: 280px;
+  overflow: hidden;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
+}
+
+.mention-picker-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--sp-1);
+}
+
+.mention-picker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.mention-picker-item:hover,
+.mention-picker-item:focus-visible {
+  background: rgba(157, 191, 230, 0.35);
+  outline: none;
+}
+
+.mention-picker-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-picker-empty {
+  padding: var(--sp-4);
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 /* 语音录制（M5 语音消息） */

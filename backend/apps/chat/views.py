@@ -264,7 +264,9 @@ class MessageView(APIView):
         if services.is_muted(request.user, conv):
             return _forbidden("你已被禁言")
 
-        ser = CreateMessageSerializer(data=request.data, context={"request": request})
+        ser = CreateMessageSerializer(
+            data=request.data, context={"request": request, "conversation": conv}
+        )
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 

@@ -11,8 +11,9 @@ import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { v4 as uuid } from "uuid";
 import * as chatApi from "../api/chat";
-import type { ChatMessage, MessageType } from "../api/types";
+import type { ChatMessage, DraftBlock, MessageType } from "../api/types";
 import { uploadMediaFile } from "../api/media";
+import { blocksText, blocksToSegments } from "../utils/mention";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
@@ -147,7 +148,8 @@ export interface PickedMediaItem {
 }
 
 export interface OptimisticSendOptions {
-  text: string;
+  /** 文本与 @ 交错的有序块（contentEditable 产出）；纯文本消息 = 单个 text 块 */
+  blocks: DraftBlock[];
   picked: PickedMediaItem[];
   replyTo?: number | null;
 }
@@ -198,16 +200,22 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
   const localId = newLocalId(idempotencyKey);
   const currentUser = useAuthStore.getState().currentUser;
   const nowIso = new Date().toISOString();
-  const text = opts.text.trim();
+  const blocks = opts.blocks ?? [];
+  const text = blocksText(blocks).trim();
+  const hasMention = blocks.some((b) => b.type === "mention");
+  // 无媒体且无 @ = 纯文本（旧 text 契约）；有媒体或有 @ = mixed + segments
+  const isMixed = opts.picked.length > 0 || hasMention;
 
-  // 无媒体 = 纯文本乐观消息（旧 text 契约，不构造混排段）；有媒体 = type=mixed + segments
-  const segments: NonNullable<import("../api/types").ChatMessage["segments"]> | null =
-    opts.picked.length === 0
-      ? null
-      : [
-          ...(text ? [{ type: "text" as const, text }] : []),
-          ...opts.picked.map((p) => ({ type: p.kind, media_id: "", media: null })),
-        ];
+  const segments: NonNullable<import("../api/types").ChatMessage["segments"]> | null = isMixed
+    ? [
+        ...blocks.map((b) =>
+          b.type === "text"
+            ? ({ type: "text" as const, text: b.text })
+            : ({ type: "mention" as const, user_id: b.user_id, name: b.name }),
+        ),
+        ...opts.picked.map((p) => ({ type: p.kind, media_id: "", media: null })),
+      ]
+    : null;
   const localMedia = opts.picked.map((p) => ({
     id: p.id,
     kind: p.kind,
@@ -220,7 +228,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
     id: localId,
     conversation_id: convId,
     sender_id: currentUser?.id ?? "me",
-    type: opts.picked.length === 0 ? "text" : "mixed",
+    type: isMixed ? "mixed" : "text",
     content: text,
     media_id: null,
     segments,
@@ -234,8 +242,8 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
   };
   useMessageStore.getState().addPendingMessage(convId, optimistic);
 
-  // 无媒体 → 纯文本直接发送
-  if (opts.picked.length === 0) {
+  // 纯文本 → 直接发送
+  if (!isMixed) {
     void (async () => {
       try {
         const serverMsg = await chatApi.sendMessage(convId, {
@@ -252,7 +260,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
     return;
   }
 
-  // 有媒体 → 注册 AbortController + 后台上传+发送
+  // mixed（有媒体 或 有 @）→ 注册 AbortController + 后台上传+发送
   const controller = new AbortController();
   uploadControllers.set(localId, controller);
 
@@ -260,7 +268,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
     try {
       const uploaded = await uploadPickedWithProgress(convId, localId, opts.picked, controller.signal);
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [
-        ...(text ? [{ type: "text" as const, text }] : []),
+        ...blocksToSegments(blocks),
         ...opts.picked.map((p, i) => ({ type: p.kind, media_id: uploaded[i].media_id })),
       ];
       const serverMsg = await chatApi.sendMessage(convId, {
@@ -320,8 +328,10 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
     url: m.url,
     file: m.file,
   }));
-  if (picked.length === 0) {
-    // 纯文本重试（无媒体）：走旧 text 契约，不构造混排段
+  const hasMention = (msg.segments ?? []).some((s) => s.type === "mention");
+  const isMixed = picked.length > 0 || hasMention;
+  if (!isMixed) {
+    // 纯文本重试（无媒体且无 @）：走旧 text 契约，不构造混排段
     void (async () => {
       try {
         const serverMsg = await chatApi.sendMessage(convId, {
@@ -347,6 +357,7 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [];
       for (const seg of msg.segments ?? []) {
         if (seg.type === "text") segs.push({ type: "text", text: seg.text });
+        else if (seg.type === "mention") segs.push({ type: "mention", user_id: seg.user_id });
       }
       picked.forEach((m, i) => segs.push({ type: m.kind, media_id: uploaded[i].media_id }));
       const serverMsg = await chatApi.sendMessage(convId, {

@@ -514,6 +514,125 @@ class TestMixedSegments:
         assert mine["last_message"]["preview"] == "[已撤回]"
 
 
+class TestMentionSegments:
+    """@ 提及消息（type=mixed + mention 段，仅群聊）：发送闭环/校验/预览/@我未读。"""
+
+    def test_send_mention_message(self, auth_client, user_factory):
+        """群聊 text+mention+text 段 → 201，type=mixed，mention 段展开带 user descriptor，
+        content 只拼 text 段（mention 不进 content）。"""
+        owner_client, _ = auth_client(username="mn_owner")
+        b = user_factory(username="mn_b", nickname="张三")
+        c = user_factory(username="mn_c")
+        conv = make_group(owner_client, [b, c])
+        resp = owner_client.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [
+                    {"type": "text", "text": "hi"},
+                    {"type": "mention", "user_id": str(b.id)},
+                    {"type": "text", "text": "看这个"},
+                ],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 201, resp.content
+        body = resp.json()
+        assert body["type"] == "mixed"
+        assert body["content"] == "hi看这个"  # mention 不进 content
+        segs = body["segments"]
+        assert len(segs) == 3
+        assert segs[1]["type"] == "mention"
+        assert segs[1]["user_id"] == str(b.id)
+        assert segs[1]["user"]["id"] == str(b.id)
+        assert segs[1]["user"]["nickname"] == "张三"
+
+    def test_mention_validation(self, auth_client, user_factory):
+        """@ 非群成员 → 400 mention_user_not_member；缺 user_id → 400。"""
+        owner_client, _ = auth_client(username="mn2_owner")
+        b = user_factory(username="mn2_b")
+        outsider = user_factory(username="mn2_out")
+        conv = make_group(owner_client, [b])
+        resp = owner_client.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [{"type": "mention", "user_id": str(outsider.id)}],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "mention_user_not_member" in str(resp.json())
+
+        resp = owner_client.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"segments": [{"type": "mention"}], "idempotency_key": new_key()},
+            format="json",
+        )
+        assert resp.status_code == 400
+
+    def test_mention_preview(self, auth_client, user_factory):
+        """会话列表 last_message.preview：mention 段生成 @昵称。"""
+        owner_client, _ = auth_client(username="mn3_owner")
+        b = user_factory(username="mn3_b", nickname="张三")
+        conv = make_group(owner_client, [b])
+        owner_client.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {
+                "segments": [
+                    {"type": "text", "text": "hi "},
+                    {"type": "mention", "user_id": str(b.id)},
+                ],
+                "idempotency_key": new_key(),
+            },
+            format="json",
+        )
+        resp = owner_client.get("/api/v1/chat/conversations/")
+        mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
+        assert mine["last_message"]["preview"] == "hi @张三"
+
+    def test_mention_unread_count(self, auth_client, user_factory):
+        """@我 未读：被 @ 方会话列表 mention_unread_count=1，标已读后清零。"""
+        owner_client, _ = auth_client(username="mn4_owner")
+        b = user_factory(username="mn4_b", nickname="李四")
+        cb = auth_as(b)
+        conv = make_group(owner_client, [b])
+        owner_client.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"segments": [{"type": "mention", "user_id": str(b.id)}], "idempotency_key": new_key()},
+            format="json",
+        )
+        resp = cb.get("/api/v1/chat/conversations/")
+        mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
+        assert mine["mention_unread_count"] == 1
+
+        # 标已读 → 清零
+        hist = cb.get(f"/api/v1/chat/conversations/{conv['id']}/messages/")
+        last_msg = hist.json()[-1]
+        cb.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/{last_msg['id']}/read/",
+            format="json",
+        )
+        resp = cb.get("/api/v1/chat/conversations/")
+        mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
+        assert mine["mention_unread_count"] == 0
+
+    def test_badges_mention_unread(self, auth_client, user_factory):
+        """GET /me/badges/ 聚合 @我 未读（mention_unread，L3）。"""
+        owner_client, _ = auth_client(username="mn5_owner")
+        b = user_factory(username="mn5_b")
+        cb = auth_as(b)
+        conv = make_group(owner_client, [b])
+        owner_client.post(
+            f"/api/v1/chat/conversations/{conv['id']}/messages/",
+            {"segments": [{"type": "mention", "user_id": str(b.id)}], "idempotency_key": new_key()},
+            format="json",
+        )
+        resp = cb.get("/api/v1/me/badges/")
+        assert resp.status_code == 200
+        assert resp.json()["mention_unread"] == 1
+
+
 @pytest.mark.django_db
 class TestMessageHistory:
     def test_history_latest_first_cursor(self, auth_client, user_factory):

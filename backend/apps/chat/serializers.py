@@ -31,10 +31,13 @@ _PREVIEW_MAX = 60
 
 
 def expand_segments(msg) -> list | None:
-    """把 DB 里 segments（媒体段只存 media_id）展开为带完整 media descriptor 的段列表。
+    """把 DB 里 segments（媒体段只存 media_id、@ 段只存 user_id）展开为带完整
+    descriptor 的段列表。
 
     返回 None（无 segments）或段数组：
-    [{"type": "text", "text": "..."}, {"type": "image"|"video", "media_id": "...", "media": descriptor|null}]
+    [{"type": "text", "text": "..."},
+     {"type": "image"|"video", "media_id": "...", "media": descriptor|null},
+     {"type": "mention", "user_id": "...", "user": UserPublic|null}]
     REST 序列化与 WS 广播共用，保证两端契约一致。
     """
     raw = msg.segments
@@ -62,7 +65,27 @@ def expand_segments(msg) -> list | None:
                     "media": MediaObjectSerializer(media).data if media else None,
                 }
             )
+        elif seg_type == "mention":
+            user_id = seg.get("user_id")
+            user = User.objects.filter(id=user_id).first() if user_id else None
+            out.append(
+                {
+                    "type": "mention",
+                    "user_id": user_id,
+                    "user": UserPublicSerializer(user).data if user else None,
+                }
+            )
     return out
+
+
+def _mention_name(user_id) -> str:
+    """@ 目标显示名（预览用）；用户注销/缺失回退「未知用户」。"""
+    if not user_id:
+        return "未知用户"
+    user = User.objects.filter(id=user_id).first()
+    if user is None:
+        return "未知用户"
+    return user.nickname or user.username or "未知用户"
 
 
 def message_preview(msg) -> str:
@@ -74,12 +97,15 @@ def message_preview(msg) -> str:
     if msg.status == Message.STATUS_RECALLED:
         return "[已撤回]"
     if msg.type == Message.TYPE_MIXED and msg.segments:
-        parts = [
-            seg.get("text", "")
-            if seg.get("type") == "text"
-            else _SEGMENT_PLACEHOLDER.get(seg.get("type"), "[媒体]")
-            for seg in msg.segments
-        ]
+        parts = []
+        for seg in msg.segments:
+            seg_type = seg.get("type")
+            if seg_type == "text":
+                parts.append(seg.get("text", ""))
+            elif seg_type == "mention":
+                parts.append(f"@{_mention_name(seg.get('user_id'))}")
+            else:
+                parts.append(_SEGMENT_PLACEHOLDER.get(seg_type, "[媒体]"))
         preview = "".join(parts)
     elif msg.type in _MEDIA_TYPE_PLACEHOLDER:
         preview = _MEDIA_TYPE_PLACEHOLDER[msg.type]
@@ -168,6 +194,8 @@ class ConversationSerializer(serializers.ModelSerializer):
     is_pinned = serializers.SerializerMethodField()
     # M5：最新一条消息摘要（列表预览用，无消息为 null）
     last_message = serializers.SerializerMethodField()
+    # M8 @ 能力：本会话 @ 我且未读的消息数（L2 会话列表 @我 标识）
+    mention_unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
@@ -185,6 +213,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "unread_count",
             "is_pinned",
             "last_message",
+            "mention_unread_count",
             "created_at",
         ]
         read_only_fields = fields
@@ -247,6 +276,22 @@ class ConversationSerializer(serializers.ModelSerializer):
         return obj.messages.exclude(sender=request.user).exclude(
             id__in=list(read_msg_ids)
         ).exclude(status=Message.STATUS_RECALLED).count()
+
+    def get_mention_unread_count(self, obj) -> int:
+        """本会话 @ 我且未读的消息数（L2：会话列表 @我 标识）。"""
+        request = self.context.get("request")
+        if not request or not hasattr(request, "user"):
+            return 0
+        read_msg_ids = MessageRead.objects.filter(
+            message__conversation=obj, user=request.user
+        ).values_list("message_id", flat=True)
+        return (
+            obj.messages.exclude(sender=request.user)
+            .exclude(id__in=list(read_msg_ids))
+            .exclude(status=Message.STATUS_RECALLED)
+            .filter(segments__contains=[{"type": "mention", "user_id": str(request.user.id)}])
+            .count()
+        )
 
 
 class ConversationListSerializer(ConversationSerializer):
@@ -332,12 +377,20 @@ class CreateMessageSerializer(serializers.Serializer):
             raise PermissionDenied({"segments": "media_access_denied"})
         return media
 
+    def _validate_mention(self, user_id):
+        """校验 @ 目标为本群成员（防 @ 无关/已退群用户）。"""
+        conversation = self.context.get("conversation")
+        if conversation is None:
+            return  # 无会话上下文（理论不出现）时不做成员校验
+        if not conversation.members.filter(user_id=user_id).exists():
+            raise serializers.ValidationError({"segments": "mention_user_not_member"})
+
     def validate(self, attrs):
         msg_type = attrs.get("type") or Message.TYPE_TEXT
         media_id = attrs.get("media_id")
         segments = attrs.get("segments")
 
-        # 图文混排模式：segments 与 media_id 互斥；type 强制 mixed（忽略传入 type）
+        # 结构化消息段模式：segments 与 media_id 互斥；type 强制 mixed（忽略传入 type）
         if segments is not None:
             if media_id:
                 raise serializers.ValidationError(
@@ -345,7 +398,7 @@ class CreateMessageSerializer(serializers.Serializer):
                 )
             if not segments:
                 raise serializers.ValidationError({"segments": "至少需要一个段"})
-            has_media_segment = False
+            has_non_text_segment = False
             text_parts = []
             for i, seg in enumerate(segments):
                 seg_type = seg.get("type")
@@ -357,20 +410,28 @@ class CreateMessageSerializer(serializers.Serializer):
                         )
                     text_parts.append(text)
                 elif seg_type in self.SEGMENT_MEDIA_TYPES:
-                    has_media_segment = True
+                    has_non_text_segment = True
                     seg_media_id = seg.get("media_id")
                     if not seg_media_id:
                         raise serializers.ValidationError(
                             {"segments": f"第 {i + 1} 段缺少 media_id"}
                         )
                     self._validate_segment_media(seg_media_id, seg_type)
+                elif seg_type == "mention":
+                    has_non_text_segment = True
+                    mention_user_id = seg.get("user_id")
+                    if not mention_user_id:
+                        raise serializers.ValidationError(
+                            {"segments": f"第 {i + 1} 段缺少 user_id"}
+                        )
+                    self._validate_mention(mention_user_id)
                 else:
                     raise serializers.ValidationError(
                         {"segments": f"第 {i + 1} 段类型不支持"}
                     )
-            if not has_media_segment:
+            if not has_non_text_segment:
                 raise serializers.ValidationError(
-                    {"segments": "混排消息至少需要一个媒体段"}
+                    {"segments": "混排消息至少需要一个媒体段或 @ 段"}
                 )
             attrs["type"] = Message.TYPE_MIXED
             attrs["content"] = "".join(text_parts)

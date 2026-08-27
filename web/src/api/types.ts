@@ -131,7 +131,8 @@ export interface MediaDescriptor {
   created_at: string;
 }
 
-/** 图文混排段（type=mixed 消息；对齐 backend chat/serializers.expand_segments） */
+/** 结构化消息段（type=mixed 消息；对齐 backend chat/serializers.expand_segments）。
+ *  M8 @ 能力：新增 mention 段（@某人），与 text/image/video 并列。 */
 export type MediaSegment =
   | { type: "text"; text: string }
   | {
@@ -139,7 +140,22 @@ export type MediaSegment =
       media_id: string;
       /** 服务端展开的 descriptor；乐观发送中（未上传）为 null */
       media?: MediaDescriptor | null;
+    }
+  | {
+      type: "mention";
+      /** 被 @ 用户 id（字符串 UUID） */
+      user_id: string;
+      /** 服务端展开的被 @ 用户（REST/WS 返回）；历史消息用户已注销/缺失为 null */
+      user?: UserPublic | null;
+      /** 乐观消息本地显示名（服务端不返回此字段；发送前 descriptor 未就绪） */
+      name?: string;
     };
+
+/** 输入框 @ 草稿块（应用侧，非后端契约；发送时转为 segments）。
+ *  文本与 @Token 交错的有序序列，contentEditable 编辑器直接产出。 */
+export type DraftBlock =
+  | { type: "text"; text: string }
+  | { type: "mention"; user_id: string; name: string };
 
 /** 乐观消息的本地媒体预览（未上传，仅本端可见；渲染与重试用） */
 export interface LocalMediaPreview {
@@ -230,6 +246,8 @@ export interface ConversationSummary {
   is_pinned?: boolean;
   /** 最新一条消息预览（无消息为 null；旧后端可能缺失） */
   last_message?: LastMessagePreview | null;
+  /** 本会话 @ 我且未读的消息数（M8；旧后端可能缺失） */
+  mention_unread_count?: number;
   created_at: string;
   /** 私聊对端用户（ConversationListSerializer 补充） */
   peer: UserPublic | null;
@@ -261,8 +279,12 @@ export interface CreateMessagePayload {
   reply_to?: number | null;
   idempotency_key?: string;
   media_id?: string;
-  /** 图文混排段（与 media_id 二选一；至少一个媒体段；服务端强制 type=mixed） */
-  segments?: ({ type: "text"; text: string } | { type: "image" | "video"; media_id: string })[];
+  /** 结构化消息段（与 media_id 二选一；至少一个非纯文本段；服务端强制 type=mixed） */
+  segments?: (
+    | { type: "text"; text: string }
+    | { type: "image" | "video"; media_id: string }
+    | { type: "mention"; user_id: string }
+  )[];
 }
 
 /** 会话列表查询参数 */
@@ -986,6 +1008,8 @@ export interface GameRoom {
 export interface Badges {
   private_unread: number;
   group_unread: number;
+  /** @ 我且未读的消息数（M8；旧后端可能缺失） */
+  mention_unread?: number;
   friend_requests: number;
   group_invites: number;
   join_requests_pending: number;

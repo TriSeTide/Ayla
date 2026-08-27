@@ -122,7 +122,17 @@ export function ConversationList({
                     </span>
                   )}
                 </span>
-                <span className="conv-item-sub">{previewLabel(conv)}</span>
+                <span className="conv-item-sub">
+                  {conv.mention_unread_count != null && conv.mention_unread_count > 0 && (
+                    <span
+                      className="conv-mention"
+                      aria-label={`${conv.mention_unread_count} 条消息@了我`}
+                    >
+                      @我
+                    </span>
+                  )}
+                  {previewLabel(conv)}
+                </span>
               </span>
               {conv.unread_count > 0 && (
                 <span className="conv-unread" aria-label={`${conv.unread_count} 条未读`}>
