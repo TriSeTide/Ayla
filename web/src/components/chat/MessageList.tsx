@@ -1,14 +1,47 @@
 /**
- * MessageList —— 消息滚动区：时间分组、上拉加载、新消息自动滚底。
+ * MessageList —— 消息滚动区：时间分组、窗口化历史、滚动锚定与实时跟随。
+ *
+ * U16 边界：message store 始终保留会话全量缓存；本组件仅将缓存投影为
+ * 至多 200 条已确认消息的 DOM 窗口。向上阅读时以 50 条分页边界扩展/滑动，
+ * 避免长会话的气泡、媒体与操作控件常驻在 DOM。
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, ConversationSummary } from "../../api/types";
+import {
+  HISTORY_PAGE_LIMIT,
+  INITIAL_HISTORY_LIMIT,
+  MESSAGE_RENDER_WINDOW_LIMIT,
+} from "../../hooks/useChat";
 import { useAuthStore } from "../../stores/auth";
 import { goUserProfile } from "../../utils/navigation";
+import { IconChevronDown } from "../icons";
 import { canRecall, MessageBubble } from "./MessageBubble";
 import { segmentPreview } from "../../utils/segment";
 
 const GROUP_GAP_MS = 5 * 60 * 1000;
+const HISTORY_PRELOAD_THRESHOLD = 400;
+const BOTTOM_TOLERANCE = 40;
+
+type RenderWindow = {
+  /** 已确认消息窗口的首/尾身份；id 比索引能穿过 before_seq 前插保持稳定。 */
+  startId: string;
+  endId: string;
+};
+
+type RenderBounds = { start: number; end: number };
+
+type PendingPrependAnchor = {
+  /** 插入前仍在视口/窗口中的稳定消息身份。 */
+  anchorId: string | null;
+  previousVisibleFirstId: string | null;
+  previousVisibleLastId: string | null;
+  scrollTop: number;
+  scrollHeight: number;
+  relativeTop: number | null;
+  /** 等待 API 前插，或等待窗口范围 state 提交。 */
+  phase: "awaiting-history" | "awaiting-window";
+  targetStartId?: string;
+};
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -23,6 +56,48 @@ function shouldGroup(prev: ChatMessage | undefined, curr: ChatMessage): boolean 
   const b = new Date(curr.created_at).getTime();
   if (Number.isNaN(a) || Number.isNaN(b)) return false;
   return b - a > GROUP_GAP_MS;
+}
+
+/** 未设置显式窗口时，首屏只投影末尾 20 条确认消息。 */
+function resolveBounds(messages: ChatMessage[], window: RenderWindow | null): RenderBounds {
+  const fallbackEnd = messages.length;
+  const fallbackStart = Math.max(0, fallbackEnd - INITIAL_HISTORY_LIMIT);
+  if (!window) return { start: fallbackStart, end: fallbackEnd };
+
+  const start = messages.findIndex((m) => m.id === window.startId);
+  const endInclusive = messages.findIndex((m) => m.id === window.endId);
+  if (start < 0 || endInclusive < start) {
+    return { start: fallbackStart, end: fallbackEnd };
+  }
+  return { start, end: endInclusive + 1 };
+}
+
+function windowForBounds(messages: ChatMessage[], start: number, end: number): RenderWindow | null {
+  if (start < 0 || end <= start || end > messages.length) return null;
+  return { startId: messages[start].id, endId: messages[end - 1].id };
+}
+
+function sameWindow(a: RenderWindow | null, b: RenderWindow | null): boolean {
+  return a?.startId === b?.startId && a?.endId === b?.endId;
+}
+
+function findMessageNode(container: HTMLElement, messageId: string | null): HTMLElement | null {
+  if (!messageId) return null;
+  return (
+    Array.from(container.querySelectorAll<HTMLElement>("[data-message-id]")).find(
+      (node) => node.dataset.messageId === messageId,
+    ) ?? null
+  );
+}
+
+function relativeTop(container: HTMLElement, node: HTMLElement | null): number | null {
+  if (!node) return null;
+  return node.getBoundingClientRect().top - container.getBoundingClientRect().top;
+}
+
+function scrollToBottom(element: HTMLElement) {
+  // 聊天回底是实时跟随动作，不做长距离平滑动画；避免数百条窗口切换时占用主线程。
+  element.scrollTop = element.scrollHeight;
 }
 
 export function MessageList({
@@ -44,7 +119,8 @@ export function MessageList({
   elysiaUserId?: string | null;
   hasMore: boolean;
   loading: boolean;
-  onLoadMore: () => void;
+  /** 可返回 Promise；调用方仍拥有 API 错误展示职责。 */
+  onLoadMore: () => void | Promise<void>;
   onQuote?: (msg: ChatMessage) => void;
   onRecall?: (msg: ChatMessage) => void;
   /** 乐观发送失败：重试/删除 */
@@ -57,7 +133,50 @@ export function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const previousConfirmedIdsRef = useRef<string[]>([]);
+  const conversationIdRef = useRef<string | null>(null);
+  const pendingAnchorRef = useRef<PendingPrependAnchor | null>(null);
+  const loadMoreInFlightRef = useRef(false);
+  const jumpToBottomRef = useRef(false);
+  const [windowRange, setWindowRange] = useState<RenderWindow | null>(null);
+  const [farFromBottom, setFarFromBottom] = useState(false);
   const isGroup = conversation?.type === "group";
+
+  // pending / 发送失败的本地消息不计入 200 条服务端窗口，始终留在尾部让用户可取消、重试或删除。
+  const confirmedMessages = useMemo(
+    () => messages.filter((m) => !m.pending && !m.sendFailed && m.seq > 0),
+    [messages],
+  );
+  const localMessages = useMemo(
+    () => messages.filter((m) => m.pending || m.sendFailed || m.seq <= 0),
+    [messages],
+  );
+  const confirmedSignature = useMemo(
+    () => confirmedMessages.map((m) => m.id).join("\u0001"),
+    [confirmedMessages],
+  );
+  const bounds = useMemo(
+    () => resolveBounds(confirmedMessages, windowRange),
+    [confirmedMessages, windowRange],
+  );
+  const visibleConfirmed = useMemo(
+    () => confirmedMessages.slice(bounds.start, bounds.end),
+    [bounds.end, bounds.start, confirmedMessages],
+  );
+  const visibleMessages = useMemo(
+    () => [...visibleConfirmed, ...localMessages],
+    [localMessages, visibleConfirmed],
+  );
+  const visibleSignature = useMemo(
+    () => visibleMessages.map((m) => m.id).join("\u0001"),
+    [visibleMessages],
+  );
+  const hasCachedEarlier = bounds.start > 0;
+  const hasHiddenTail = bounds.end < confirmedMessages.length;
+  const canLoadEarlier = hasCachedEarlier || hasMore;
+  // 首次加载（消息尚未进入）不显示顶部历史控制；只有会话已有内容后才提供上拉入口。
+  const showHistoryControl = (canLoadEarlier || loading) && confirmedMessages.length > 0;
+  const showBackToBottom = farFromBottom || hasHiddenTail;
 
   // A1：消息到达动画——区分「初始历史加载」与「新到达」（乐观发送 / WS 实时）。
   // prevIdsRef 记录上一帧消息 id 序列；首次历史加载完成（loading true→false 翻转）
@@ -66,11 +185,11 @@ export function MessageList({
   // 同长度替换 = 乐观消息 resolve（local id → 服务端 id，不动画）。
   const prevIdsRef = useRef<string[]>([]);
   const baselinedRef = useRef(false);
-  const convIdRef = useRef<string | null>(null);
+  const animationConversationRef = useRef<string | null>(null);
   const prevLoadingRef = useRef<boolean | null>(null);
 
   const justArrivedIds = useMemo(() => {
-    if (convIdRef.current !== conversation?.id || !baselinedRef.current) {
+    if (animationConversationRef.current !== conversation?.id || !baselinedRef.current) {
       return new Set<string>();
     }
     const prev = prevIdsRef.current;
@@ -87,23 +206,26 @@ export function MessageList({
 
   useEffect(() => {
     const convId = conversation?.id ?? "__none__";
-    if (convIdRef.current !== convId) {
-      convIdRef.current = convId;
+    if (animationConversationRef.current !== convId) {
+      animationConversationRef.current = convId;
       baselinedRef.current = false;
       prevIdsRef.current = [];
       prevLoadingRef.current = null;
     }
     const prevLoading = prevLoadingRef.current;
     prevLoadingRef.current = loading;
-    // 首次历史加载完成（loading true→false）→ 建立基线，当前全部消息不动画
+    // 预热缓存（如宽屏侧栏）可能没有经历 loading=true；首次可见的缓存同样属于历史，
+    // 但空桶首帧不能提前建基线，否则随后首批历史会被误判为实时到达。
     if (!baselinedRef.current) {
-      if (prevLoading === true && loading === false) {
+      if (
+        (prevLoading === true && loading === false) ||
+        (prevLoading === null && loading === false && messages.length > 0)
+      ) {
         baselinedRef.current = true;
         prevIdsRef.current = messages.map((m) => m.id);
       }
       return;
     }
-    // 已基线：记录当前 id 序列快照（供下一轮 diff）
     prevIdsRef.current = messages.map((m) => m.id);
   }, [messages, conversation?.id, loading]);
 
@@ -149,121 +271,334 @@ export function MessageList({
     return map;
   }, [messages]);
 
-  // 切换会话（宽屏侧栏点其他群/会话时组件复用不重挂载，scrollRef/atBottomRef 会
-  // 保留上一个会话的滚动位置）→ 重置滚动位置贴底，避免沿用上个会话的相对高度。
-  useEffect(() => {
+  // 切换会话（宽屏侧栏点其他群/会话时组件复用不重挂载）→ 每个会话拥有独立的瞬态 DOM 窗口。
+  useLayoutEffect(() => {
+    const conversationId = conversation?.id ?? "__none__";
+    if (conversationIdRef.current === conversationId) return;
+    conversationIdRef.current = conversationId;
     atBottomRef.current = true;
     lastScrollTopRef.current = 0;
-    const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
+    previousConfirmedIdsRef.current = [];
+    pendingAnchorRef.current = null;
+    loadMoreInFlightRef.current = false;
+    jumpToBottomRef.current = false;
+    setFarFromBottom(false);
+    setWindowRange(null);
+    const element = scrollRef.current;
+    if (element) scrollToBottom(element);
   }, [conversation?.id]);
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && atBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages.length]);
+  // 消息进入后，将首屏固定为最近 20 条；之后显式范围负责在实时尾部增长到 200 条。
+  useLayoutEffect(() => {
+    if (windowRange || confirmedMessages.length === 0) return;
+    const end = confirmedMessages.length;
+    const start = Math.max(0, end - INITIAL_HISTORY_LIMIT);
+    const nextWindow = windowForBounds(confirmedMessages, start, end);
+    if (nextWindow) setWindowRange(nextWindow);
+  }, [confirmedMessages, confirmedSignature, windowRange]);
 
-  // 图片等媒体异步加载会撑高内容，导致滚动条偏离底部；双保险跟随滚底：
-  // - ResizeObserver 监听内容高度变化（图片/语音/文件加载后的布局变化）；
-  // - img load 捕获监听（load 不冒泡）+ rAF，图片解码完成、布局稳定后滚底。
+  // 历史前插与实时尾部追加分别处理：
+  // - before_seq 前插：等待新批次进入 store 后，按完整分页边界扩大/滑动 DOM 窗口；
+  // - 尾部追加：仅用户本来就在底部时，窗口才随实时消息增长/从顶部收缩。
+  useLayoutEffect(() => {
+    const pendingAnchor = pendingAnchorRef.current;
+    if (pendingAnchor?.phase === "awaiting-history") {
+      const firstVisibleIndex = pendingAnchor.previousVisibleFirstId
+        ? confirmedMessages.findIndex((m) => m.id === pendingAnchor.previousVisibleFirstId)
+        : -1;
+      const lastVisibleIndex = pendingAnchor.previousVisibleLastId
+        ? confirmedMessages.findIndex((m) => m.id === pendingAnchor.previousVisibleLastId)
+        : -1;
+      if (firstVisibleIndex > 0 && lastVisibleIndex >= firstVisibleIndex) {
+        // 网络前插后：previousLast 是用户视口底部锚点，窗口以它为尾（尽量满 200，
+        // 但绝不裁掉视口内容）；头部在缓存变长后自然露出新加载的批次。
+        const end = Math.min(confirmedMessages.length, lastVisibleIndex + 1);
+        const start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+        const nextWindow = windowForBounds(confirmedMessages, start, end);
+        if (nextWindow) {
+          pendingAnchor.phase = "awaiting-window";
+          pendingAnchor.targetStartId = nextWindow.startId;
+          setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
+        }
+      }
+    } else {
+      const previousIds = previousConfirmedIdsRef.current;
+      const previousLastId = previousIds[previousIds.length - 1] ?? null;
+      const currentLastId = confirmedMessages[confirmedMessages.length - 1]?.id ?? null;
+      const appendedAtTail =
+        previousLastId != null &&
+        currentLastId != null &&
+        previousLastId !== currentLastId &&
+        confirmedMessages.some((m) => m.id === previousLastId);
+
+      if (appendedAtTail && atBottomRef.current) {
+        // 贴底中的新消息：窗口保持尾部 200 条（最新永远可见）；超限从顶部裁，
+        // 200 是 50 的倍数，头部起点自然对齐分页批次。
+        const nextEnd = confirmedMessages.length;
+        const nextStart = Math.max(0, nextEnd - MESSAGE_RENDER_WINDOW_LIMIT);
+        const nextWindow = windowForBounds(confirmedMessages, nextStart, nextEnd);
+        if (nextWindow) {
+          setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
+        }
+      }
+    }
+
+    previousConfirmedIdsRef.current = confirmedMessages.map((m) => m.id);
+  }, [bounds.start, confirmedMessages, confirmedSignature, conversation?.id]);
+
+  // 到达历史起点时后端可合法返回空页；这时没有 DOM 提交可触发锚定补偿，
+  // 在 loading 完成后释放本次请求状态，避免顶部入口永久失效。
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+    const pendingAnchor = pendingAnchorRef.current;
+    if (pendingAnchor?.phase === "awaiting-history" && !loading) {
+      pendingAnchorRef.current = null;
+    }
+  }, [loading]);
+
+  // 窗口范围提交后，在绘制前恢复「插入前同一条消息」的相对位置。
+  // 正常浏览器优先 identity 锚点；JSDOM/罕见不可量布局退回 scrollHeight 差，严格遵循方案 §4.1。
+  useLayoutEffect(() => {
+    const pendingAnchor = pendingAnchorRef.current;
+    if (
+      !pendingAnchor ||
+      pendingAnchor.phase !== "awaiting-window" ||
+      pendingAnchor.targetStartId !== visibleConfirmed[0]?.id
+    ) {
+      return;
+    }
+
+    const element = scrollRef.current;
+    if (!element) return;
+    const anchorNode = findMessageNode(element, pendingAnchor.anchorId);
+    const nextRelativeTop = relativeTop(element, anchorNode);
+    const heightDelta = element.scrollHeight - pendingAnchor.scrollHeight;
+    const identityDelta =
+      pendingAnchor.relativeTop != null && nextRelativeTop != null
+        ? nextRelativeTop - pendingAnchor.relativeTop
+        : null;
+    const delta = identityDelta != null && Math.abs(identityDelta) > 0.5 ? identityDelta : heightDelta;
+    // 基于当前 scrollTop 补偿：加载期间用户可能仍在滚动，用绝对差值叠加更稳。
+    element.scrollTop = element.scrollTop + delta;
+    lastScrollTopRef.current = element.scrollTop;
+    pendingAnchorRef.current = null;
+  }, [visibleConfirmed, visibleSignature]);
+
+  // 新消息、乐观消息、窗口回底后的统一贴底路径。历史前插由上方锚定 effect 独占，不能竞争。
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    if (jumpToBottomRef.current) {
+      if (!hasHiddenTail) {
+        scrollToBottom(element);
+        atBottomRef.current = true;
+        lastScrollTopRef.current = element.scrollTop;
+        jumpToBottomRef.current = false;
+        setFarFromBottom(false);
+      }
+      return;
+    }
+
+    if (!pendingAnchorRef.current && atBottomRef.current && !hasHiddenTail) {
+      scrollToBottom(element);
+      lastScrollTopRef.current = element.scrollTop;
+      setFarFromBottom(false);
+      return;
+    }
+
+    const distanceToBottom = element.scrollHeight - element.clientHeight - element.scrollTop;
+    setFarFromBottom(distanceToBottom > element.clientHeight);
+  }, [hasHiddenTail, visibleSignature]);
+
+  // 图片等媒体异步加载会撑高内容，导致滚动条偏离底部；仅逻辑贴底时持续跟随。
+  const hasHiddenTailRef = useRef(hasHiddenTail);
+  hasHiddenTailRef.current = hasHiddenTail;
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
 
     const stickToBottom = () => {
-      if (atBottomRef.current) {
-        el.scrollTop = el.scrollHeight;
+      if (atBottomRef.current && !hasHiddenTailRef.current) {
+        scrollToBottom(element);
+        lastScrollTopRef.current = element.scrollTop;
       }
     };
 
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
-      const column = el.querySelector(".message-column");
+      const column = element.querySelector(".message-column");
       if (column) {
         observer = new ResizeObserver(stickToBottom);
         observer.observe(column);
       }
     }
 
-    const onLoad = (e: Event) => {
-      if (e.target instanceof HTMLImageElement) {
+    const onLoad = (event: Event) => {
+      if (event.target instanceof HTMLImageElement) {
         requestAnimationFrame(stickToBottom);
       }
     };
-    el.addEventListener("load", onLoad, true);
+    element.addEventListener("load", onLoad, true);
 
     return () => {
       observer?.disconnect();
-      el.removeEventListener("load", onLoad, true);
+      element.removeEventListener("load", onLoad, true);
     };
   }, []);
 
+  const requestOlder = useCallback(() => {
+    // 缓存窗口状态是单个聊天容器的瞬态投影；同一次上拉只允许一个扩展/请求在途。
+    if (loading || loadMoreInFlightRef.current) return;
+    if (pendingAnchorRef.current) return;
+    if (bounds.start <= 0 && !hasMore) return;
+
+    const element = scrollRef.current;
+    if (!element) return;
+    const previousFirst = visibleConfirmed[0]?.id ?? null;
+    const previousLast = visibleConfirmed[visibleConfirmed.length - 1]?.id ?? null;
+    const anchorNode = findMessageNode(element, previousFirst);
+    pendingAnchorRef.current = {
+      anchorId: previousFirst,
+      previousVisibleFirstId: previousFirst,
+      previousVisibleLastId: previousLast,
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      relativeTop: relativeTop(element, anchorNode),
+      phase: "awaiting-window",
+    };
+    atBottomRef.current = false;
+
+    if (bounds.start > 0) {
+      // 优先从权威缓存暴露更早的一整页。窗口尽量满 200 条：头部每次前移 50，
+      // 尾部相应后移（200 是 50 的倍数，两端自然对齐分页批次），用户正在向上阅读，
+      // 最新消息在窗口外由「回到底部」浮钮承接，不在上滑阅读路径中被卸载。
+      const nextStart = Math.max(0, bounds.start - HISTORY_PAGE_LIMIT);
+      const nextEnd = Math.min(confirmedMessages.length, nextStart + MESSAGE_RENDER_WINDOW_LIMIT);
+      const nextWindow = windowForBounds(confirmedMessages, nextStart, nextEnd);
+      if (nextWindow) {
+        pendingAnchorRef.current.targetStartId = nextWindow.startId;
+        setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
+      }
+      return;
+    }
+
+    // 已触及缓存最早端，才走既有 before_seq API；store 仍负责全量前插与 hasMore。
+    pendingAnchorRef.current.phase = "awaiting-history";
+    loadMoreInFlightRef.current = true;
+    void Promise.resolve()
+      .then(onLoadMore)
+      // 页面父级负责把 API 错误显示为 chat-notice；这里仅避免滚动事件产生未处理 rejection。
+      .catch(() => {
+        // API 失败没有新的 store 提交可触发锚定 effect，必须释放本次锚点，允许用户重试。
+        pendingAnchorRef.current = null;
+      })
+      .finally(() => {
+        loadMoreInFlightRef.current = false;
+      });
+  }, [bounds.end, bounds.start, confirmedMessages, hasMore, loading, onLoadMore, visibleConfirmed]);
+
   const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const scrollTop = el.scrollTop;
-    // 图片等媒体加载只改变 scrollHeight、不改变 scrollTop，会触发一次被动 scroll；
-    // 此时若按"是否到底"更新 atBottomRef 会被误判为离开底部。只有 scrollTop
-    // 真正变化（用户主动滚动）才更新 atBottomRef，保持"贴底跟随"语义。
-    if (scrollTop !== lastScrollTopRef.current) {
-      atBottomRef.current = scrollTop + el.clientHeight >= el.scrollHeight - 40;
-    }
+    const element = scrollRef.current;
+    if (!element) return;
+    const scrollTop = element.scrollTop;
+    const distanceToBottom = element.scrollHeight - element.clientHeight - scrollTop;
+    const physicallyAtBottom = distanceToBottom <= BOTTOM_TOLERANCE;
+
+    // 若窗口当前不含缓存尾部，物理滚到该窗口底部不等于回到实时消息底部。
+    atBottomRef.current = physicallyAtBottom && !hasHiddenTail;
     lastScrollTopRef.current = scrollTop;
-    if (scrollTop < 30 && hasMore && !loading) {
-      onLoadMore();
+    setFarFromBottom(distanceToBottom > element.clientHeight);
+
+    if (scrollTop < HISTORY_PRELOAD_THRESHOLD) requestOlder();
+  };
+
+  const handleJumpToBottom = () => {
+    const end = confirmedMessages.length;
+    const start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+    const nextWindow = windowForBounds(confirmedMessages, start, end);
+    pendingAnchorRef.current = null;
+    atBottomRef.current = true;
+    setFarFromBottom(false);
+
+    // 当前窗口本已覆盖尾部时不会产生 React state 变更，故直接滚回底部；
+    // 窗口在旧历史时则先切换投影，下一次 layout commit 再贴底。
+    if (sameWindow(windowRange, nextWindow)) {
+      const element = scrollRef.current;
+      if (element) {
+        scrollToBottom(element);
+        lastScrollTopRef.current = element.scrollTop;
+      }
+      jumpToBottomRef.current = false;
+      return;
     }
+
+    jumpToBottomRef.current = true;
+    setWindowRange(nextWindow);
   };
 
   return (
-    <div className="message-scroll" ref={scrollRef} onScroll={handleScroll}>
-      <div className="message-column">
-        {hasMore && (
-          <button
-            type="button"
-            className="load-more-btn"
-            onClick={onLoadMore}
-            disabled={loading}
-          >
-            {loading ? "加载中…" : "加载更早消息"}
-          </button>
-        )}
-        {messages.map((m, i) => {
-          const grouped = shouldGroup(messages[i - 1], m);
-          const isSelf = m.sender_id === currentUserId;
-          return (
-            <div key={m.id ?? `${m.conversation_id}-${m.seq}`}>
-              {grouped && (
-                <div className="time-divider">
-                  <span>{formatTime(m.created_at)}</span>
+    <div className="message-list">
+      <div className="message-scroll" ref={scrollRef} onScroll={handleScroll}>
+        <div className="message-column">
+          {showHistoryControl && (
+            <div className="message-history-control" aria-live="polite">
+              {loading ? (
+                <div className="message-history-spinner" role="status">
+                  <span className="message-history-spinner-glyph" aria-hidden="true" />
+                  <span>正在加载更早消息</span>
                 </div>
+              ) : (
+                <button type="button" className="load-more-btn" onClick={requestOlder}>
+                  加载更早消息
+                </button>
               )}
-              <MessageBubble
-                message={m}
-                isSelf={isSelf}
-                isElysia={elysiaUserId != null && m.sender_id === elysiaUserId}
-                justArrived={justArrivedIds.has(m.id)}
-                senderName={isGroup && !isSelf ? (memberNames.get(m.sender_id) ?? null) : null}
-                senderAvatar={memberAvatars.get(m.sender_id)?.avatar ?? null}
-                senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
-                onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
-                quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}
-                onQuote={onQuote}
-                onRecall={onRecall && canRecall(m, currentUserId) ? onRecall : undefined}
-                onRetry={onRetry && m.sendFailed ? onRetry : undefined}
-                onRemove={onRemove && m.sendFailed ? onRemove : undefined}
-                onCancel={onCancel && m.pending && m.uploadProgress != null ? onCancel : undefined}
-              />
             </div>
-          );
-        })}
-        {messages.length === 0 && !loading && (
-          <div className="empty-chat">还没有消息，说点什么吧</div>
-        )}
+          )}
+          {visibleMessages.map((m, index) => {
+            const grouped = shouldGroup(visibleMessages[index - 1], m);
+            const isSelf = m.sender_id === currentUserId;
+            return (
+              <div key={m.id ?? `${m.conversation_id}-${m.seq}`} data-message-id={m.id} data-message-seq={m.seq}>
+                {grouped && (
+                  <div className="time-divider">
+                    <span>{formatTime(m.created_at)}</span>
+                  </div>
+                )}
+                <MessageBubble
+                  message={m}
+                  isSelf={isSelf}
+                  isElysia={elysiaUserId != null && m.sender_id === elysiaUserId}
+                  justArrived={justArrivedIds.has(m.id)}
+                  senderName={isGroup && !isSelf ? (memberNames.get(m.sender_id) ?? null) : null}
+                  senderAvatar={memberAvatars.get(m.sender_id)?.avatar ?? null}
+                  senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
+                  onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
+                  quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}
+                  onQuote={onQuote}
+                  onRecall={onRecall && canRecall(m, currentUserId) ? onRecall : undefined}
+                  onRetry={onRetry && m.sendFailed ? onRetry : undefined}
+                  onRemove={onRemove && m.sendFailed ? onRemove : undefined}
+                  onCancel={onCancel && m.pending && m.uploadProgress != null ? onCancel : undefined}
+                />
+              </div>
+            );
+          })}
+          {messages.length === 0 && !loading && (
+            <div className="empty-chat">还没有消息，说点什么吧</div>
+          )}
+        </div>
       </div>
+      <button
+        type="button"
+        className={`message-jump-bottom${showBackToBottom ? " is-visible" : ""}`}
+        onClick={handleJumpToBottom}
+        aria-label="回到底部并恢复实时消息跟随"
+        title="回到底部"
+        aria-hidden={!showBackToBottom}
+        tabIndex={showBackToBottom ? 0 : -1}
+      >
+        <IconChevronDown width={20} height={20} />
+      </button>
     </div>
   );
 }

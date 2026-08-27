@@ -180,9 +180,12 @@ export function PrivateChatPane({
         elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
-        onLoadMore={() => {
-          loadMoreHistory(conversationId).catch((e) => setHistoryError(e instanceof Error ? e.message : "加载更早消息失败"));
-        }}
+        onLoadMore={() =>
+          loadMoreHistory(conversationId).catch((e) => {
+            setHistoryError(e instanceof Error ? e.message : "加载更早消息失败");
+            throw e;
+          })
+        }
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(conversationId, m)}

@@ -232,7 +232,9 @@
   .composer,
   .profile-topbar,
   .create-sheet-card,
-  .group-create-dialog {
+  .group-create-dialog,
+  .message-history-spinner,
+  .message-jump-bottom {
     background: rgba(255, 250, 251, 0.92);
   }
 }
@@ -837,10 +839,23 @@
   cursor: pointer;
 }
 
-/* 消息滚动区：实心卡片浮于极光（design.md §6 层级） */
+/* U16 聊天列表壳：滚动区与容器内回底浮钮共享定位上下文。 */
+.message-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 消息滚动区：实心卡片浮于极光（design.md §6 层级）。
+   overflow-anchor:none 必须：历史前插时由 JS 在 layout 阶段精确补偿 scrollTop，
+   若保留浏览器原生 scroll anchoring 会对同一位移双重补偿 → 上滑加载时跳动。 */
 .message-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   padding: var(--sp-6);
 }
 
@@ -853,17 +868,115 @@
   gap: var(--sp-3);
 }
 
+/* U16 顶部历史控制：固定最小高度，按钮切换为 spinner 时不制造额外滚动跳变。 */
+.message-history-control {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .load-more-btn {
+  min-height: 40px;
   align-self: center;
   font-size: 13px;
   color: var(--text-secondary);
   padding: var(--sp-2) var(--sp-4);
   border-radius: var(--radius-pill);
-  transition: background var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .load-more-btn:hover:not(:disabled) {
-  background: rgba(157, 191, 230, 0.18);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+}
+
+.message-history-spinner {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: var(--glass-inset);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.message-history-spinner-glyph {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ice-300);
+  border-top-color: var(--indigo-700);
+  border-radius: var(--radius-pill);
+  animation: message-history-spin 0.8s linear infinite;
+}
+
+@keyframes message-history-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 容器内回到底部：44px 纯图标玻璃圆钮，与 CornerFabStack 同族但不抢全局 FAB 层级。 */
+.message-jump-bottom {
+  position: absolute;
+  right: var(--sp-6);
+  bottom: var(--sp-6);
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: var(--card-shadow);
+  color: var(--text-primary);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+    visibility 0s linear var(--dur-fast), background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.message-jump-bottom.is-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+    visibility 0s linear 0s, background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.message-jump-bottom:hover {
+  background: var(--glass-bg-strong);
+  box-shadow: var(--glow-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-history-spinner-glyph {
+    animation: none;
+    opacity: 0.8;
+  }
+
+  .message-jump-bottom,
+  .message-jump-bottom.is-visible {
+    transform: none;
+    transition: opacity var(--dur-fast) var(--ease-out), visibility 0s linear 0s,
+      background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  }
 }
 
 /* 时间分隔条 */

@@ -131,9 +131,12 @@ export function GroupChat({ groupId }: { groupId: string }) {
         elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
-        onLoadMore={() => {
-          loadMoreHistory(groupId).catch(handleHistoryError);
-        }}
+        onLoadMore={() =>
+          loadMoreHistory(groupId).catch((error) => {
+            handleHistoryError(error);
+            throw error;
+          })
+        }
         onQuote={setQuote}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(groupId, m)}

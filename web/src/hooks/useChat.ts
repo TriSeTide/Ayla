@@ -22,6 +22,16 @@ import { chatWS } from "../ws/chat";
 /** 撤回时限（秒），与 backend settings MESSAGE_RECALL_SECONDS=120 对齐 */
 export const RECALL_SECONDS = 120;
 
+/**
+ * U16 聊天历史分页与 DOM 投影边界：
+ * - 首屏只请求最近 20 条，避免一进会话就把长历史全部挂进 DOM；
+ * - 向上翻页仍按 50 条，和后端 before_seq 游标契约一致；
+ * - MessageList 只投影至多 200 条已确认消息，store 始终保留全量缓存。
+ */
+export const INITIAL_HISTORY_LIMIT = 20;
+export const HISTORY_PAGE_LIMIT = 50;
+export const MESSAGE_RENDER_WINDOW_LIMIT = 200;
+
 function newIdempotencyKey() {
   // 浏览器原生 crypto.randomUUID；测试环境可用 uuid 兜底
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -41,7 +51,7 @@ export function useChat() {
       useMessageStore.getState().openBucket(convId);
       // 订阅 WS（增量）
       chatWS.subscribe([convId]);
-      // 拉历史（无 before_seq → 最新 50 条）
+      // 拉历史（无 before_seq → 最近 20 条；向上翻页仍按 50 条）
       await loadHistory(convId, undefined, true);
       // 打开即标已读（对方发且我未读的最新一条）
       markReadLatest(convId);
@@ -65,14 +75,16 @@ export async function loadHistory(convId: string, beforeSeq?: number, firstLoad 
   try {
     const list = await chatApi.listMessages(convId, {
       before_seq: seq,
-      limit: 50,
+      limit: INITIAL_HISTORY_LIMIT,
     });
-    const hasMore = list.length >= 50;
+    const hasMore = list.length >= INITIAL_HISTORY_LIMIT;
     if (firstLoad) {
-      msg.setLoading(convId, false);
+      // 先合并权威缓存、再结束 loading：避免 UI 在「已不加载但消息尚未提交」的中间帧
+      // 建立错误的初始窗口或到达动画基线。
       msg.prependHistory(convId, list, hasMore);
-      // 第一条加载时若没消息，保持 hasMore=true 以便继续
+      // 第一条加载时若没消息，明确没有更早历史。
       if (list.length === 0) msg.prependHistory(convId, [], false);
+      msg.setLoading(convId, false);
     } else {
       msg.prependHistory(convId, list, hasMore);
     }
@@ -92,10 +104,11 @@ export async function loadMoreHistory(convId: string) {
   try {
     const list = await chatApi.listMessages(convId, {
       before_seq: minSeq,
-      limit: 50,
+      limit: HISTORY_PAGE_LIMIT,
     });
+    // 同一原则：先前插缓存，再结束 loading，保证滚动锚定看到的是完整 DOM 提交。
+    msg.prependHistory(convId, list, list.length >= HISTORY_PAGE_LIMIT);
     msg.setLoading(convId, false);
-    msg.prependHistory(convId, list, list.length >= 50);
   } catch (e) {
     msg.setLoading(convId, false);
     throw e;
