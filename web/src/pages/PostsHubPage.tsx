@@ -24,6 +24,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { usePostsStore, isPostsStale } from "../stores/posts";
+import { useShellStore } from "../stores/shell";
 import { chatWS } from "../ws/chat";
 
 /** 瀑布流断点：>1024px 双列（方案 §4-U2；design.md §9 断点 1024）。 */
@@ -35,6 +36,8 @@ export function PostsHubPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [favoriteLoadError, setFavoriteLoadError] = useState<string | null>(null);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制帖子流重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
 
   const hubRef = useRef<HTMLDivElement>(null);
   // U14：返回保留滚动位置（restoring 时禁 reveal stagger）
@@ -107,17 +110,28 @@ export function PostsHubPage() {
     }
   };
 
-  // 下拉刷新：强制重拉信息流（绕过 isPostsStale 缓存，不设 loading 以免骨架闪现）
+  // 下拉刷新/刷新键共用：强制重拉信息流（绕过 isPostsStale 缓存，不设 loading 以免骨架闪现）
   const refresh = useCallback(async () => {
     const store = usePostsStore.getState();
     setLoadError(null);
     try {
       const page = await postsApi.listPosts({ scope: "feed", limit: 20 });
       store.setPage(page.results, page.next_cursor, page.has_more);
+      setRevealNonce((n) => n + 1);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "加载失败");
     }
   }, []);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refresh);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refresh) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refresh]);
 
   // 下拉刷新仅当滚动容器（.posts-hub）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
@@ -173,7 +187,7 @@ export function PostsHubPage() {
         </div>
       ) : (
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`}>
+          <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`} key={revealNonce}>
             {columns.map((colItems, colIdx) => (
               <div key={colIdx} className="posts-masonry-col" ref={columnRefs[colIdx]}>
                 {colItems.map((p) => {

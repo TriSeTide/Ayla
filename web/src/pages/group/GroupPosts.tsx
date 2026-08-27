@@ -17,8 +17,10 @@ import * as postsApi from "../../api/posts";
 import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
+import { PullToRefresh } from "../../components/motion/PullToRefresh";
 import { saveScrollPosition, useScrollRestore } from "../../hooks/useScrollRestore";
 import { usePostsStore } from "../../stores/posts";
+import { useShellStore } from "../../stores/shell";
 import { chatWS } from "../../ws/chat";
 
 export function GroupPosts({
@@ -50,6 +52,8 @@ export function GroupPosts({
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制帖子列表重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
 
   const load = useCallback(() => {
     setError(null);
@@ -64,6 +68,31 @@ export function GroupPosts({
         setError(e instanceof Error ? e.message : "加载群内帖子失败");
       });
   }, [groupId]);
+
+  // 上拉刷新/刷新键共用：强制重拉群内帖子（group scope）
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const page = await postsApi.listPosts({ scope: `group:${groupId}`, limit: 20 });
+      setGroupPosts(page.results);
+      setRevealNonce((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载群内帖子失败");
+    }
+  }, [groupId]);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refresh);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refresh) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refresh]);
+
+  // 上拉刷新仅当滚动容器（.group-posts-list）已在顶部时响应
+  const isAtTop = useCallback(() => (listRef.current?.scrollTop ?? 0) <= 0, []);
 
   useEffect(() => {
     load();
@@ -111,44 +140,46 @@ export function GroupPosts({
         <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
       </div>
       <div className="group-posts-list" ref={listRef}>
-        {error && groupPosts.length === 0 && groupedFromStore.length === 0 ? (
-          <div className="group-scene-placeholder" role="alert">
-            <p className="placeholder-desc">{error}</p>
-            <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
-          </div>
-        ) : showLoadingSkeleton && loading ? (
-          <div aria-busy="true">
-            <span className="skeleton group-posts-skel" style={{ height: 120 }} />
-            <span className="skeleton group-posts-skel" style={{ height: 120 }} />
-            <span className="home-load-text">正在加载帖子…</span>
-          </div>
-        ) : displayPosts.length === 0 ? (
-          <div className="group-scene-placeholder">
-            <h3 className="placeholder-title">群内还没有帖子</h3>
-            <p className="placeholder-desc">在下方输入框发第一条帖子</p>
-            <button type="button" className="btn btn-ghost" onClick={onExit}>
-              返回聊天
-            </button>
-          </div>
-        ) : (
-          <>
-            {displayPosts.map((p) => (
-              <div key={p.id} className="group-posts-item">
-                <PostCard
-                  post={p}
-                  favorited={false}
-                  onOpen={() => {
-                    // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
-                    saveScrollPosition(scrollRestoreKey, listRef.current);
-                    navigate(`/group/${encodeURIComponent(groupId)}/posts/${p.id}`);
-                  }}
-                  onToggleFavorite={() => {}}
-                />
-              </div>
-            ))}
-            {loading && <span className="home-load-text">正在刷新…</span>}
-          </>
-        )}
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+          {error && groupPosts.length === 0 && groupedFromStore.length === 0 ? (
+            <div className="group-scene-placeholder" role="alert">
+              <p className="placeholder-desc">{error}</p>
+              <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
+            </div>
+          ) : showLoadingSkeleton && loading ? (
+            <div aria-busy="true">
+              <span className="skeleton group-posts-skel" style={{ height: 120 }} />
+              <span className="skeleton group-posts-skel" style={{ height: 120 }} />
+              <span className="home-load-text">正在加载帖子…</span>
+            </div>
+          ) : displayPosts.length === 0 ? (
+            <div className="group-scene-placeholder">
+              <h3 className="placeholder-title">群内还没有帖子</h3>
+              <p className="placeholder-desc">在下方输入框发第一条帖子</p>
+              <button type="button" className="btn btn-ghost" onClick={onExit}>
+                返回聊天
+              </button>
+            </div>
+          ) : (
+            <div key={revealNonce}>
+              {displayPosts.map((p) => (
+                <div key={p.id} className="group-posts-item">
+                  <PostCard
+                    post={p}
+                    favorited={false}
+                    onOpen={() => {
+                      // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
+                      saveScrollPosition(scrollRestoreKey, listRef.current);
+                      navigate(`/group/${encodeURIComponent(groupId)}/posts/${p.id}`);
+                    }}
+                    onToggleFavorite={() => {}}
+                  />
+                </div>
+              ))}
+              {loading && <span className="home-load-text">正在刷新…</span>}
+            </div>
+          )}
+        </PullToRefresh>
       </div>
       {editorExpanded && (
         <div

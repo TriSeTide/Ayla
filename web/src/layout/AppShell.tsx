@@ -20,15 +20,18 @@ import { isPrimaryTabPath, usePrimaryNavSwipeDirection } from "../hooks/usePrima
 import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
 import { BottomTabs } from "./BottomTabs";
+import { CornerFabStack } from "./CornerFabStack";
 import { CreateFab } from "./CreateFab";
 import { MessageFab } from "./MessageFab";
 import { NarrowTopBar } from "./NarrowTopBar";
 import { QuickMessageFab } from "./QuickMessageFab";
 import { QuickMessagesSheet } from "../components/chat/QuickMessagesSheet";
+import { RefreshFab } from "./RefreshFab";
+import { ScrollTopFab } from "./ScrollTopFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
-import { isGroupScene, isMessagesRoute, isNarrowTopBarRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveFabAction, resolveModule } from "./shellConfig";
+import { isGroupScene, isMessagesRoute, isNarrowTopBarRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveCornerFabs, resolveFabAction, resolveModule } from "./shellConfig";
 
 const BADGES_POLL_INTERVAL_MS = 30_000;
 
@@ -43,6 +46,7 @@ export function AppShell() {
 
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
+  const cornerFabs = resolveCornerFabs(pathname, isNarrow);
   const groupSceneNarrow = isNarrow && isGroupScene(pathname);
   // 私聊聊天窄屏：底部有输入框，不渲染底栏/消息入口（需求：下方有输入框时不能有导航栏）
   const privateChatNarrow = isNarrow && isPrivateChatRoute(pathname);
@@ -122,6 +126,16 @@ export function AppShell() {
         <QuickMessageFab unread={messageBadge} />
       ) : null}
       {fabAction ? <CreateFab action={fabAction} /> : null}
+      {/* §3.4 浮层按钮组：按场景渲染（宽屏右下堆叠 / 宽屏私信左下 / 窄屏右下回顶） */}
+      {cornerFabs.refresh && cornerFabs.refreshPosition === "corner" ? (
+        <CornerFabStack refresh scrollTop={cornerFabs.scrollTop} />
+      ) : null}
+      {cornerFabs.refresh && cornerFabs.refreshPosition === "bottom-left" ? (
+        <RefreshFab position="bottom-left" />
+      ) : null}
+      {isNarrow && cornerFabs.scrollTop ? (
+        <ScrollTopFab position="narrow" stacked={fabAction != null} />
+      ) : null}
       {/* 红点快捷消息栏：由 shell store 独立控制，只随手动关闭卸载（红点归零不关闭） */}
       {isNarrow && quickMessagesOpen ? (
         <QuickMessagesSheet onClose={() => useShellStore.getState().setQuickMessagesOpen(false)} />

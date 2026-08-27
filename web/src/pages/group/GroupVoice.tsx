@@ -5,16 +5,18 @@
  * 房内打字发到该群会话（复用群会话方案，开发文档 §1.9）。无语音房 → 空态 + 发起引导。
  * 群内子界面（底栏已在顶部，无独立进房动画，输入框直接显示）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
 import type { ElysiaProfile } from "../../api/types";
 import { VoiceChannelList } from "../../components/voice/VoiceChannelList";
 import { VoiceRoomBody } from "../../components/voice/VoiceRoomBody";
+import { PullToRefresh } from "../../components/motion/PullToRefresh";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAuthStore } from "../../stores/auth";
+import { useShellStore } from "../../stores/shell";
 import { useVoiceStore } from "../../stores/voice";
 
 export function GroupVoice({
@@ -34,6 +36,9 @@ export function GroupVoice({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制语音列表重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
+  const hubRef = useRef<HTMLDivElement>(null);
 
   const {
     currentChannelId,
@@ -55,6 +60,31 @@ export function GroupVoice({
     String(c.group) === String(groupId)
     || (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
   );
+
+  // 上拉刷新/刷新键共用：强制重拉语音房列表
+  const refresh = useCallback(async () => {
+    setError(null);
+    try {
+      const list = await voiceApi.listVoiceChannels();
+      useVoiceStore.getState().setChannels(list);
+      setRevealNonce((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载群内语音房失败");
+    }
+  }, []);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refresh);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refresh) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refresh]);
+
+  // 上拉刷新仅当滚动容器（.group-voice）已在顶部时响应
+  const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,7 +202,7 @@ export function GroupVoice({
   }
 
   return (
-    <div className={`group-voice ${isNarrow ? "" : "is-wide"}`}>
+    <div className={`group-voice ${isNarrow ? "" : "is-wide"}`} ref={hubRef}>
       <div className="group-voice-head">
         <div>
           <h3 className="group-voice-title">群内语音房</h3>
@@ -210,12 +240,16 @@ export function GroupVoice({
           </div>
         </div>
       ) : (
-        <VoiceChannelList
-          channels={groupChannels}
-          currentChannelId={currentChannelId}
-          joining={joining}
-          onJoin={handleJoin}
-        />
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+          <VoiceChannelList
+            key={revealNonce}
+            channels={groupChannels}
+            currentChannelId={currentChannelId}
+            joining={joining}
+            onJoin={handleJoin}
+            revealItems={loaded}
+          />
+        </PullToRefresh>
       )}
     </div>
   );

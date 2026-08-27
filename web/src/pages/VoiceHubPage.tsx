@@ -13,6 +13,7 @@ import * as voiceApi from "../api/voice";
 import type { ElysiaProfile } from "../api/types";
 import { VoiceRoomBody } from "../components/voice/VoiceRoomBody";
 import { VoiceChannelList } from "../components/voice/VoiceChannelList";
+import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useShellStore } from "../stores/shell";
 import { useAuthStore } from "../stores/auth";
@@ -32,6 +33,9 @@ export function VoiceHubPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const joiningRouteRef = useRef<string | null>(null);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制语音列表重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
+  const hubRef = useRef<HTMLDivElement>(null);
 
   const {
     currentChannelId,
@@ -61,6 +65,31 @@ export function VoiceHubPage() {
         setListError(e instanceof Error ? e.message : "加载频道失败");
       });
   }, []);
+
+  // 上拉刷新/刷新键共用：强制重拉语音房列表（不设 loading 以免骨架闪现）
+  const refresh = useCallback(async () => {
+    setListError(null);
+    try {
+      const list = await voiceApi.listVoiceChannels();
+      useVoiceStore.getState().setChannels(list);
+      setRevealNonce((n) => n + 1);
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : "加载频道失败");
+    }
+  }, []);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refresh);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refresh) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refresh]);
+
+  // 上拉刷新仅当滚动容器（.voice-hub）已在顶部时响应
+  const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
   // 进房/退房：底栏下滑走（R-V2，与直播同向）。路由是壳层底栏是否让位的唯一事实：
   // 进入 /voice/:id 立即让底栏下滑走（200ms ease-in），输入框随后延迟滑入（useEnterRoomAnimation），
@@ -209,7 +238,7 @@ export function VoiceHubPage() {
   }
 
   return (
-    <div className="voice-hub">
+    <div className="voice-hub" ref={hubRef}>
       {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
        {notice && (
         <div
@@ -229,12 +258,16 @@ export function VoiceHubPage() {
           <div className="skeleton" style={{ height: 64 }} />
         </div>
       ) : (
-        <VoiceChannelList
-          channels={channels}
-          currentChannelId={currentChannelId}
-          joining={joining}
-          onJoin={handleJoin}
-        />
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+          <VoiceChannelList
+            key={revealNonce}
+            channels={channels}
+            currentChannelId={currentChannelId}
+            joining={joining}
+            onJoin={handleJoin}
+            revealItems={!channelsLoading}
+          />
+        </PullToRefresh>
       )}
     </div>
   );

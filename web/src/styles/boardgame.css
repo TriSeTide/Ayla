@@ -192,18 +192,24 @@
   }
 }
 
-/* 群内桌游（GroupGames）：保持 2 列 grid，卡片直接作为子项（不改原布局） */
+/* 群内桌游（GroupGames）：滚动容器 + 列表分支内 .group-games-grid 保持 2 列 grid
+   （PullToRefresh 包裹后 grid 移到内层，避免包裹层破坏 grid 子项关系） */
 .group-games {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.group-games-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  overflow-y: auto;
 }
 
-/* 群内桌游空态/错误占位：跨全宽 */
+/* 群内桌游空态/错误占位：跨全宽（flex 子项） */
 .group-games-full {
-  grid-column: 1 / -1;
+  flex: 1 1 auto;
 }
 
 /* 桌游加载骨架（一级 games-grid 与群内共用） */
@@ -222,9 +228,9 @@
 .games-skel-text {
   grid-column: 1 / -1;
 }
-/* 群内加载：占满两列的骨架区 */
+/* 群内加载：占满两列的骨架区（flex 子项内自建 2 列 grid） */
 .group-games-loading {
-  grid-column: 1 / -1;
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--sp-3);

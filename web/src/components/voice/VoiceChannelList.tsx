@@ -7,8 +7,9 @@
  *   - 不在频道 →「加入」
  * 窄屏 2 列 / 宽屏 3-4 列（voice.css 网格）。
  */
-import type { KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import type { VoiceChannelDescriptor } from "../../api/types";
+import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { FavoriteButton } from "../FavoriteButton";
 import { IconMic } from "../icons";
 import { getVisibilityLabels } from "../../utils/visibility";
@@ -18,11 +19,14 @@ export function VoiceChannelList({
   currentChannelId,
   joining,
   onJoin,
+  revealItems = false,
 }: {
   channels: VoiceChannelDescriptor[];
   currentChannelId: string | null;
   joining: boolean;
   onJoin: (channelId: string) => void;
+  /** 列表逐条浮入（A2 扩展至群内/群外语音列表；active 接 !loading） */
+  revealItems?: boolean;
 }) {
   if (channels.length === 0) {
     return (
@@ -34,8 +38,9 @@ export function VoiceChannelList({
   }
   return (
     <div className="voice-channel-list">
-      {channels.map((ch) => {
+      {channels.map((ch, idx) => {
         const active = ch.id === currentChannelId;
+        const delay = revealItems ? staggerDelay(idx) : 0;
         // 已在频道 → 「进入」；否则「加入」（join 幂等，重复进入安全）
         const label = ch.mine ? "进入" : "加入";
         const pendingLabel = ch.mine ? "进入中…" : "加入中…";
@@ -50,45 +55,51 @@ export function VoiceChannelList({
           }
         };
         return (
+          /* 动画挂在 grid item 外层，避免 .reveal-item 的 transform 动画压过卡片 hover 位移。 */
           <div
             key={ch.id}
-            className={`voice-channel-card ${active ? "active" : ""}`}
-            role="button"
-            tabIndex={0}
-            aria-disabled={joining}
-            aria-label={`${label}语音频道 ${ch.name}`}
-            onClick={enter}
-            onKeyDown={onKeyDown}
+            className={`voice-channel-card-wrap${revealItems ? " reveal-item" : ""}`}
+            style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
           >
-            <div className="voice-card-head">
-              <div className="voice-source-tags">
-                {labels.map((tag, idx) => (
-                  <span key={idx} className="voice-source-tag">{tag}</span>
-                ))}
+            <div
+              className={`voice-channel-card ${active ? "active" : ""}`}
+              role="button"
+              tabIndex={0}
+              aria-disabled={joining}
+              aria-label={`${label}语音频道 ${ch.name}`}
+              onClick={enter}
+              onKeyDown={onKeyDown}
+            >
+              <div className="voice-card-head">
+                <div className="voice-source-tags">
+                  {labels.map((tag, idx) => (
+                    <span key={idx} className="voice-source-tag">{tag}</span>
+                  ))}
+                </div>
+                <span className="voice-card-head-actions">
+                  {ch.mine && <span className="voice-mine-tag">我在其中</span>}
+                  <FavoriteButton targetType="voice" targetId={ch.id} compact />
+                </span>
               </div>
-              <span className="voice-card-head-actions">
-                {ch.mine && <span className="voice-mine-tag">我在其中</span>}
-                <FavoriteButton targetType="voice" targetId={ch.id} compact />
-              </span>
-            </div>
-            <div className="voice-card-title">
-              <IconMic width={14} height={14} /> {ch.name}
-            </div>
-            <div className="voice-card-foot">
-              <span className="voice-card-meta">{ch.member_count} 人在频道</span>
-              {!active && (
-                <button
-                  type="button"
-                  className="btn btn-primary voice-join-btn"
-                  disabled={joining}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    enter();
-                  }}
-                >
-                  {joining ? pendingLabel : label}
-                </button>
-              )}
+              <div className="voice-card-title">
+                <IconMic width={14} height={14} /> {ch.name}
+              </div>
+              <div className="voice-card-foot">
+                <span className="voice-card-meta">{ch.member_count} 人在频道</span>
+                {!active && (
+                  <button
+                    type="button"
+                    className="btn btn-primary voice-join-btn"
+                    disabled={joining}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      enter();
+                    }}
+                  >
+                    {joining ? pendingLabel : label}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );

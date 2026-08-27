@@ -93,6 +93,12 @@ describe("GroupVoice 范围（仅该群）", () => {
     render(<MemoryRouter><GroupVoice groupId="g1" onExit={vi.fn()} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("本群语音")).toBeInTheDocument());
     expect(screen.getByText("本群语音2")).toBeInTheDocument();
+    // A2 扩展：内容就绪后由 VoiceChannelList 为群内语音卡片挂 40ms stagger。
+    const cards = document.querySelectorAll(".voice-channel-card-wrap");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toHaveClass("reveal-item");
+    expect(cards[0]).toHaveStyle({ "--reveal-delay": "0ms" });
+    expect(cards[1]).toHaveStyle({ "--reveal-delay": "40ms" });
     expect(screen.queryByText("公开语音")).not.toBeInTheDocument();
     expect(screen.queryByText("其它群")).not.toBeInTheDocument();
   });

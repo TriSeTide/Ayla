@@ -27,6 +27,7 @@ export function WideMessagesSidebar({
   conversations: propConversations,
   activeId,
   onSelect,
+  revealNonce = 0,
 }: {
   /** 可选兼容属性；实时真源始终来自 store */
   conversations?: ConversationSummary[];
@@ -34,6 +35,8 @@ export function WideMessagesSidebar({
   activeId: string | null;
   /** 点击会话 → 选中（/chat/:id 宽屏跳转；/messages 宽屏右侧内联） */
   onSelect: (id: string) => void;
+  /** §3.4 刷新动画：刷新完成后的重挂载计数，key 变化触发会话列表 reveal 重播 */
+  revealNonce?: number;
 }) {
   // 直接订阅 store；保留 prop 仅兼容旧调用方，不使用其作为实时真源
   const storeConversations = useChatStore((s) => s.conversations);
@@ -217,6 +220,7 @@ export function WideMessagesSidebar({
             />
           )}
           <ConversationList
+            key={revealNonce}
             conversations={conversations.filter((c) => c.type === "private")}
             activeId={activeId}
             elysiaUserId={elysiaProfile?.user?.id}

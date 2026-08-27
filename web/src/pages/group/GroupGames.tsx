@@ -5,12 +5,15 @@
  * join 后"正在玩的桌游"成为个人页数据源（F10，后端点 ?mine=1 已支持）。
  * 无房间 → 空态。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
 import { GameRoomCard } from "../../components/boardgame/GameRoomCard";
 import { GameRoomPlaceholder } from "../../components/boardgame/GameRoomPlaceholder";
+import { PullToRefresh } from "../../components/motion/PullToRefresh";
+import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { useBoardgameStore, isBoardgameStale } from "../../stores/boardgame";
+import { useShellStore } from "../../stores/shell";
 
 export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () => void }) {
   const allRooms = useBoardgameStore((s) => s.rooms);
@@ -21,6 +24,9 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
   const loading = useBoardgameStore((s) => s.roomsLoading);
   const error = useBoardgameStore((s) => s.error);
   const [current, setCurrent] = useState<GameRoom | null>(null);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制桌游列表重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
+  const hubRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => {
     // 全量可见房间写入全局 store（后端 visible_queryset 已含本用户所有群的
@@ -43,6 +49,32 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
     if (store.rooms.length > 0 && !isBoardgameStale()) return;
     load();
   }, [load]);
+
+  // 上拉刷新/刷新键共用：强制重拉桌游室列表
+  const refresh = useCallback(async () => {
+    const store = useBoardgameStore.getState();
+    store.setError(null);
+    try {
+      const list = await boardgameApi.listGameRooms();
+      store.reconcileRooms(list);
+      setRevealNonce((n) => n + 1);
+    } catch (e) {
+      store.setError(e instanceof Error ? e.message : "加载桌游室失败");
+    }
+  }, []);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refresh);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refresh) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refresh]);
+
+  // 上拉刷新仅当滚动容器（.group-games）已在顶部时响应
+  const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
   // 兼容同页创建后的本地事件；跨客户端变化由 ChatWS -> BoardgameStore 驱动。
   useEffect(() => {
@@ -75,10 +107,11 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
     );
   }
 
-  // 渲染群内桌游框架：.group-games 保持 2 列 grid，卡片直接作为子项（不改原布局），
+  // 渲染群内桌游框架：.group-games 为滚动容器，列表分支内 .group-games-grid 保持
+  // 2 列 grid（PullToRefresh 包裹后 grid 移到内层，避免包裹层破坏 grid 子项关系），
   // 数据区按错误/加载/空/列表呈现——加载/空/错误子项跨全宽，不整页骨架替换。
   return (
-    <div className="group-games">
+    <div className="group-games" ref={hubRef}>
       {error ? (
         <div className="group-scene-placeholder group-games-full" role="alert">
           <p className="placeholder-desc">{error}</p>
@@ -99,9 +132,19 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
           </button>
         </div>
       ) : (
-        rooms.map((r) => (
-          <GameRoomCard key={r.id} room={r} onEnter={() => enterRoom(r)} />
-        ))
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+          <div className="group-games-grid" key={revealNonce}>
+            {rooms.map((r, idx) => (
+              <GameRoomCard
+                key={r.id}
+                room={r}
+                onEnter={() => enterRoom(r)}
+                /* 异步内容就绪后才启用 A2 stagger，避免加载前动画跑完（design.md §7.1） */
+                revealDelay={!loading ? staggerDelay(idx) : undefined}
+              />
+            ))}
+          </div>
+        </PullToRefresh>
       )}
     </div>
   );

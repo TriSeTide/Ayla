@@ -18,6 +18,14 @@ interface ShellState {
   setBottomTabsLeaving: (leaving: boolean) => void;
   quickMessagesOpen: boolean;
   setQuickMessagesOpen: (open: boolean) => void;
+  /**
+   * 当前页「刷新」回调（方案 §3.4 RefreshFAB 复用 PullToRefresh 刷新通道）。
+   * 有刷新能力的页面在 mount 时 registerRefresh(refreshXxx) 注册，cleanup 用
+   * 引用守卫注销（仅当 store 里仍是自己时才清空，避免 AnimatePresence sync
+   * 转场期间旧页 cleanup 覆盖掉后注册的新页回调）。RefreshFAB 点击时读取并调用。
+   */
+  refreshCallback: (() => void | Promise<void>) | null;
+  registerRefresh: (fn: (() => void | Promise<void>) | null) => void;
 }
 
 export const useShellStore = create<ShellState>((set) => ({
@@ -25,4 +33,6 @@ export const useShellStore = create<ShellState>((set) => ({
   setBottomTabsLeaving: (bottomTabsLeaving) => set({ bottomTabsLeaving }),
   quickMessagesOpen: false,
   setQuickMessagesOpen: (quickMessagesOpen) => set({ quickMessagesOpen }),
+  refreshCallback: null,
+  registerRefresh: (refreshCallback) => set({ refreshCallback }),
 }));

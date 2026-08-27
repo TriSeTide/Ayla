@@ -23,6 +23,7 @@ import { useBadgesStore } from "../stores/badges";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { useNoticeStore } from "../stores/notices";
+import { useShellStore } from "../stores/shell";
 import { goUserProfile } from "../utils/navigation";
 import { chatWS } from "../ws/chat";
 
@@ -42,6 +43,8 @@ export function MessagesPage() {
   const conversations = useChatStore((s) => s.conversations);
   const conversationsLoading = useChatStore((s) => s.loading);
   const privateRef = useRef<HTMLDivElement>(null);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制会话列表重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
   const [friendList, setFriendList] = useState<Awaited<ReturnType<typeof usersApi.listFriends>>>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [invites, setInvites] = useState<GroupInvite[]>([]);
@@ -158,15 +161,26 @@ export function MessagesPage() {
 
   const privateConvs = useMemo(() => conversations.filter((c) => c.type === "private"), [conversations]);
 
-  // 下拉刷新：强制重拉会话列表（绕过 isChatStale 缓存）。
+  // 下拉刷新/刷新键共用：强制重拉会话列表（绕过 isChatStale 缓存）。
   const refreshConversations = useCallback(async () => {
     try {
       const list = await chatApi.listConversations();
       useChatStore.getState().setConversations(list);
+      setRevealNonce((n) => n + 1);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "加载会话失败");
     }
   }, []);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refreshConversations);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refreshConversations) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refreshConversations]);
 
   // 下拉刷新仅当私信列表滚动容器（.messages-private）已在顶部时响应
   const isPrivateAtTop = useCallback(() => (privateRef.current?.scrollTop ?? 0) <= 0, []);
@@ -178,6 +192,7 @@ export function MessagesPage() {
         <WideMessagesSidebar
           activeId={activeChatId}
           onSelect={(id) => setActiveChatId(id)}
+          revealNonce={revealNonce}
         />
         <div className="wide-messages-pane">
           {activeChatId ? (
@@ -254,6 +269,7 @@ export function MessagesPage() {
               />
             )}
             <ConversationList
+              key={revealNonce}
               conversations={privateConvs}
               activeId={null}
               elysiaUserId={elysiaProfile?.user.id ?? null}

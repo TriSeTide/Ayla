@@ -383,9 +383,16 @@
   padding: var(--sp-3) var(--sp-4);
 }
 
+/* reveal-item 挂在 grid item 外层，避免入场 transform 压过卡片 hover 位移。 */
+.voice-channel-card-wrap {
+  min-width: 0;
+}
+
 /* 覆盖 app.css 的横排 .voice-channel-card → 竖排卡片 */
 .voice-hub .voice-channel-card {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-3);
@@ -543,6 +550,8 @@
 
 .group-voice .voice-channel-card {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-3);

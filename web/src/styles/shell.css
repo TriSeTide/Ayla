@@ -683,3 +683,119 @@
     padding-bottom: var(--sp-6);
   }
 }
+
+/* ================= 右下角浮层按钮组（方案 §3.4） ================= */
+
+/* 堆叠容器：固定在 CreateFAB 之上（CreateFAB bottom 32px + 高 56px + 间距 12px），
+   内部 ScrollTopFab（上）/ RefreshFab（下）gap 12px 垂直堆叠；z-index 与 FAB 同层。
+   right 38px = 32px + (56-44)/2：44px 圆钮水平居中对齐 56px 的 CreateFAB。 */
+.corner-fab-stack {
+  position: fixed;
+  right: calc(32px + (56px - 44px) / 2);
+  bottom: calc(32px + 56px + var(--sp-3));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  pointer-events: none;
+}
+
+/* 44px 玻璃圆钮基础（design.md §12.5 MessageFAB 玻璃底同族，次级 FAB 不给辉光） */
+.corner-fab {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: var(--card-shadow);
+  pointer-events: auto;
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.corner-fab:hover {
+  background: var(--glass-bg-strong);
+  box-shadow: 0 2px 12px rgba(70, 91, 146, 0.18);
+}
+
+/* 回到顶部：滚动超过一屏才浮入，出现/消失 200ms 浮入淡出（opacity + translateY） */
+.corner-fab-scroll-top {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out),
+    visibility 0s linear 200ms, background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.corner-fab-scroll-top.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out),
+    visibility 0s linear 0s, background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+/* 刷新：刷新期间图标旋转（§3.3 spinner 同族语言） */
+.corner-fab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.corner-fab-refresh.is-spinning .corner-fab-icon {
+  animation: corner-fab-spin 0.8s linear infinite;
+}
+
+@keyframes corner-fab-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 宽屏私信列表：刷新键独立放左下角（与右下 CreateFAB 的 right/bottom 32px 对称） */
+.corner-fab-refresh.is-bottom-left {
+  position: fixed;
+  left: 32px;
+  bottom: 32px;
+  z-index: 40;
+}
+
+/* 窄屏回顶键：独立定位在右下角，避让底栏（64px + safe-area + 12px）；
+   有 CreateFAB 时再抬高 56px + 12px（堆叠在加号键之上） */
+.corner-fab-scroll-top.is-narrow {
+  position: fixed;
+  right: 16px;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px) + var(--sp-3));
+  z-index: 40;
+}
+
+.corner-fab-scroll-top.is-narrow.is-stacked {
+  /* 16px + (56px - 44px) / 2：与下方 56px CreateFAB 水平居中，而非右边缘对齐 */
+  right: calc(16px + (56px - 44px) / 2);
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px) + var(--sp-3) + 56px + var(--sp-3));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .corner-fab-scroll-top,
+  .corner-fab-scroll-top.is-visible {
+    /* 只保留透明度渐变，关闭位移（design.md §7） */
+    transition: opacity 200ms var(--ease-out), visibility 0s linear 0s,
+      background var(--dur-fast) var(--ease-out);
+    transform: none;
+  }
+
+  .corner-fab-refresh.is-spinning .corner-fab-icon {
+    animation: none;
+  }
+}

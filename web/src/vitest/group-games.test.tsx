@@ -55,6 +55,11 @@ describe("GroupGames 创建后刷新", () => {
 
     await waitFor(() => expect(boardgameApi.listGameRooms).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("新房间")).toBeInTheDocument();
+    // A2 扩展：群内桌游列表在内容就绪后按统一 stagger 浮入。
+    const cards = document.querySelectorAll(".game-room-card-wrap");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveClass("reveal-item");
+    expect(cards[0]).toHaveStyle({ "--reveal-delay": "0ms" });
   });
 });
 

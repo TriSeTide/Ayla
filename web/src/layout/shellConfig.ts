@@ -135,6 +135,74 @@ export function isNarrowTopBarRoute(pathname: string): boolean {
   );
 }
 
+/**
+ * 右下角/左下角浮层按钮组（方案 §3.4）的显示配置，纯函数，组件与测试共用同一事实源。
+ * 用户拍板（2026-08-26）细化：刷新键/回顶键按场景显示，位置随场景（右下堆叠 / 左下）。
+ */
+export interface CornerFabConfig {
+  /** 是否显示刷新键（RefreshFAB） */
+  refresh: boolean;
+  /** 刷新键位置：右下堆叠（corner）或左下（bottom-left，仅宽屏私信列表） */
+  refreshPosition: "corner" | "bottom-left";
+  /** 是否显示回顶键（ScrollTopFAB） */
+  scrollTop: boolean;
+}
+
+const NO_CORNER_FAB: CornerFabConfig = {
+  refresh: false,
+  refreshPosition: "corner",
+  scrollTop: false,
+};
+
+/** 宽屏（>768px）需要「刷新 + 回顶」右下堆叠的列表页 */
+const WIDE_CORNER_LIST_PATHS = [
+  "/live",
+  "/posts",
+  "/voice",
+  "/games",
+  "/group/:id/posts",
+  "/group/:id/voice",
+  "/group/:id/games",
+];
+
+function resolveWideCornerFabs(pathname: string): CornerFabConfig {
+  // 私信列表：刷新键放左下（无回顶）
+  if (matchPath({ path: "/messages", end: true }, pathname)) {
+    return { refresh: true, refreshPosition: "bottom-left", scrollTop: false };
+  }
+  // 明确需要刷新 + 回顶的列表页（群内直播、群聊聊天、详情/搜索/个人等均不显示）
+  for (const p of WIDE_CORNER_LIST_PATHS) {
+    if (matchPath({ path: p, end: true }, pathname)) {
+      return { refresh: true, refreshPosition: "corner", scrollTop: true };
+    }
+  }
+  return NO_CORNER_FAB;
+}
+
+/** 窄屏（≤768px）需要回顶键的列表页（刷新由各页 PullToRefresh 上拉提供，不显示刷新键） */
+const NARROW_SCROLL_TOP_PATHS = [
+  "/live",
+  "/posts",
+  "/voice",
+  "/games",
+  "/group/:id/posts",
+  "/group/:id/voice",
+  "/group/:id/games",
+];
+
+function resolveNarrowCornerFabs(pathname: string): CornerFabConfig {
+  for (const p of NARROW_SCROLL_TOP_PATHS) {
+    if (matchPath({ path: p, end: true }, pathname)) {
+      return { refresh: false, refreshPosition: "corner", scrollTop: true };
+    }
+  }
+  return NO_CORNER_FAB;
+}
+
+export function resolveCornerFabs(pathname: string, isNarrow: boolean): CornerFabConfig {
+  return isNarrow ? resolveNarrowCornerFabs(pathname) : resolveWideCornerFabs(pathname);
+}
+
 export interface FabAction {
   /** 动作标识（测试锚点） */
   key: string;

@@ -14,6 +14,7 @@ import { LiveHall } from "../components/live/LiveHall";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useScrollRestore } from "../hooks/useScrollRestore";
 import { useLiveStore, isLiveStale } from "../stores/live";
+import { useShellStore } from "../stores/shell";
 
 export function LiveHubPage() {
   const navigate = useNavigate();
@@ -27,6 +28,8 @@ export function LiveHubPage() {
   const requestId = useRef(0);
   const hubRef = useRef<HTMLDivElement>(null);
   const { restoring } = useScrollRestore("live-hub", hubRef);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制 LiveHall 重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
 
   const load = useCallback(async (only: boolean) => {
     const store = useLiveStore.getState();
@@ -64,7 +67,7 @@ export function LiveHubPage() {
     void load(onlyLive);
   }, [onlyLive, load]);
 
-  // 下拉刷新：强制重拉直播列表（绕过 isLiveStale 缓存，不设 channelsLoading 以免骨架闪现）
+  // 下拉刷新/刷新键共用：强制重拉直播列表（绕过 isLiveStale 缓存，不设 channelsLoading 以免骨架闪现）
   const refresh = useCallback(async () => {
     const currentRequest = ++requestId.current;
     setError(null);
@@ -72,6 +75,7 @@ export function LiveHubPage() {
       const list = await liveApi.listLiveChannels({ onlyLive: onlyLive });
       if (currentRequest !== requestId.current) return;
       useLiveStore.getState().setChannels(list, onlyLive);
+      setRevealNonce((n) => n + 1);
       const ownerIds = [...new Set(list.map((c) => c.owner_id))];
       if (ownerIds.length > 0) {
         const users = await Promise.all(ownerIds.map((id) => ensureUser(id)));
@@ -86,6 +90,16 @@ export function LiveHubPage() {
       setError(e instanceof Error ? e.message : "加载频道失败");
     }
   }, [onlyLive]);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；引用守卫见 HomePage）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refresh);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refresh) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refresh]);
 
   // 下拉刷新仅当滚动容器（.live-hub）已在顶部时响应
   const isHubAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
@@ -130,6 +144,7 @@ export function LiveHubPage() {
       ) : (
         <PullToRefresh isAtTop={isHubAtTop} onRefresh={refresh}>
           <LiveHall
+            key={revealNonce}
             channels={visibleChannels}
             elysiaUserId={elysiaUserId}
             ownerNames={ownerNames}

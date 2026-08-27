@@ -27,6 +27,7 @@ import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
+import { useShellStore } from "../stores/shell";
 
 /** 卡片布局每批渲染数（增量加载更多，R-H6） */
 const PAGE_SIZE = 12;
@@ -55,6 +56,8 @@ export function HomePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  // §3.4 刷新动画：刷新完成后递增，key 变化强制群列表重挂载 → reveal 重播
+  const [revealNonce, setRevealNonce] = useState(0);
   const homeRef = useRef<HTMLDivElement>(null);
 
   const groups = useMemo(
@@ -121,15 +124,27 @@ export function HomePage() {
     [navigate],
   );
 
-  // 下拉刷新：强制重拉群会话列表（绕过 isChatStale 缓存）；群动态由 WS 实时维护。
+  // 下拉刷新/刷新键共用：强制重拉群会话列表（绕过 isChatStale 缓存）；群动态由 WS 实时维护。
   const refreshGroups = useCallback(async () => {
     try {
       const list = await chatApi.listConversations();
       useChatStore.getState().setConversations(list);
+      setRevealNonce((n) => n + 1);
     } catch (e) {
       setListError(e instanceof Error ? e.message : "加载失败");
     }
   }, []);
+
+  // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；cleanup 引用守卫，
+  // 避免 AnimatePresence sync 转场期间旧页 cleanup 覆盖后注册的新页回调）
+  useEffect(() => {
+    useShellStore.getState().registerRefresh(refreshGroups);
+    return () => {
+      if (useShellStore.getState().refreshCallback === refreshGroups) {
+        useShellStore.getState().registerRefresh(null);
+      }
+    };
+  }, [refreshGroups]);
 
   // 下拉刷新仅当滚动容器（.home-page）已在顶部时响应
   const isAtTop = useCallback(() => (homeRef.current?.scrollTop ?? 0) <= 0, []);
@@ -214,7 +229,7 @@ export function HomePage() {
         <PullToRefresh isAtTop={isAtTop} onRefresh={refreshGroups}>
           {layout === "card" ? (
             <>
-              <div className="home-grid">
+              <div className="home-grid" key={revealNonce}>
                 {visibleGroups.map((g, idx) => (
                   <GroupCard
                     key={g.id}
@@ -237,7 +252,7 @@ export function HomePage() {
               )}
             </>
           ) : (
-            <div className="home-list">
+            <div className="home-list" key={revealNonce}>
               {visibleGroups.map((g, idx) => {
                 const act = activityFor(g.id, g.last_message);
                 return (

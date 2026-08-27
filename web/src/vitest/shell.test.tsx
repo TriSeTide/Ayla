@@ -5,7 +5,7 @@
  * - 直播沉浸路由不渲染 chrome；群聊聊天子界面无 FAB；
  * - CreateFAB 动作面板：场景动作提示步骤、次级「创建群聊」打开建群对话框。
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "../layout/AppShell";
@@ -15,6 +15,7 @@ import {
   isMessagesRoute,
   isPrimaryNavRoute,
   isPrivateChatRoute,
+  resolveCornerFabs,
   resolveFabAction,
   resolveModule,
 } from "../layout/shellConfig";
@@ -148,6 +149,57 @@ describe("resolveFabAction", () => {
   });
 });
 
+describe("resolveCornerFabs", () => {
+  it("宽屏：群外列表渲染刷新 + 回顶（右下堆叠）", () => {
+    for (const path of ["/live", "/posts", "/voice", "/games"]) {
+      expect(resolveCornerFabs(path, false)).toEqual({
+        refresh: true,
+        refreshPosition: "corner",
+        scrollTop: true,
+      });
+    }
+  });
+
+  it("宽屏：群内帖子/语音/桌游渲染刷新 + 回顶；群聊聊天与群内直播不渲染", () => {
+    for (const path of ["/group/g1/posts", "/group/g1/voice", "/group/g1/games"]) {
+      expect(resolveCornerFabs(path, false)).toEqual({
+        refresh: true,
+        refreshPosition: "corner",
+        scrollTop: true,
+      });
+    }
+    for (const path of ["/group/g1", "/group/g1/live"]) {
+      expect(resolveCornerFabs(path, false)).toEqual({
+        refresh: false,
+        refreshPosition: "corner",
+        scrollTop: false,
+      });
+    }
+  });
+
+  it("宽屏：私信列表刷新键放左下、无回顶", () => {
+    expect(resolveCornerFabs("/messages", false)).toEqual({
+      refresh: true,
+      refreshPosition: "bottom-left",
+      scrollTop: false,
+    });
+  });
+
+  it("窄屏：列表页渲染回顶键、不渲染刷新键（刷新由上拉手势提供）", () => {
+    for (const path of ["/live", "/posts", "/voice", "/games", "/group/g1/posts", "/group/g1/voice", "/group/g1/games"]) {
+      expect(resolveCornerFabs(path, true)).toEqual({
+        refresh: false,
+        refreshPosition: "corner",
+        scrollTop: true,
+      });
+    }
+    // 主页/消息/群聊聊天窄屏不渲染回顶键
+    for (const path of ["/home", "/messages", "/group/g1"]) {
+      expect(resolveCornerFabs(path, true).scrollTop).toBe(false);
+    }
+  });
+});
+
 describe("isLiveRoomRoute", () => {
   it("直播间路由命中，大厅与其它路由不命中", () => {
     expect(isLiveRoomRoute("/live/42")).toBe(true);
@@ -246,6 +298,34 @@ describe("AppShell", () => {
     renderShell("/voice", true);
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "消息" })).toBeInTheDocument();
+  });
+
+  it("宽屏列表渲染右下角浮层按钮组（ScrollTopFab + RefreshFab），窄屏列表只渲染回顶键", () => {
+    renderShell("/live", false);
+    // ScrollTopFab 初始隐藏（aria-hidden=true，accessible name 被清空），用 class 选择器验证存在
+    expect(document.querySelector(".corner-fab-scroll-top")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "刷新当前页" })).toBeInTheDocument();
+    cleanup();
+
+    renderShell("/live", true);
+    expect(document.querySelector(".corner-fab-scroll-top")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "刷新当前页" })).not.toBeInTheDocument();
+  });
+
+  it("宽屏群聊聊天页与群内直播不渲染浮层按钮组", () => {
+    for (const path of ["/group/g1", "/group/g1/live"]) {
+      renderShell(path, false);
+      expect(document.querySelector(".corner-fab-scroll-top")).toBeNull();
+      expect(document.querySelector(".corner-fab-refresh")).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("宽屏私信列表刷新键放左下（无回顶键）", () => {
+    renderShell("/messages", false);
+    expect(document.querySelector(".corner-fab-refresh.is-bottom-left")).not.toBeNull();
+    expect(document.querySelector(".corner-fab-scroll-top")).toBeNull();
+    cleanup();
   });
 });
 

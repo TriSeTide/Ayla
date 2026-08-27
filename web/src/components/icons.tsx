@@ -388,3 +388,13 @@ export function IconArrowRight(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** 向上箭头（lucide arrow-up）：回到顶部 FAB 等「上移/回顶」语义 */
+export function IconArrowUp(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 19V5" />
+      <path d="m5 12 7-7 7 7" />
+    </svg>
+  );
+}

@@ -5,16 +5,29 @@
  * （等待中 --ice-300 底 / 对局中 --sakura-300 底）+ 人数 + 来源标识。
  * 点击进入房间（onEnter，父级 navigate 到占位界面）。
  */
+import type { CSSProperties } from "react";
 import type { GameRoom } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { IconGame } from "../icons";
 import { getVisibilityLabels } from "../../utils/visibility";
 
-export function GameRoomCard({ room, onEnter }: { room: GameRoom; onEnter: () => void }) {
+export function GameRoomCard({
+  room,
+  onEnter,
+  revealDelay,
+}: {
+  room: GameRoom;
+  onEnter: () => void;
+  /** 逐条浮入延迟（ms）；undefined 则不挂 reveal-item（A2 扩展至桌游列表） */
+  revealDelay?: number;
+}) {
   const playing = room.status === "playing";
   const labels = getVisibilityLabels(room);
   return (
-    <div className="game-room-card-wrap">
+    <div
+      className={`game-room-card-wrap${revealDelay != null ? " reveal-item" : ""}`}
+      style={revealDelay != null ? ({ ["--reveal-delay" as string]: `${revealDelay}ms` } as CSSProperties) : undefined}
+    >
       <button type="button" className="game-room-card" onClick={onEnter}>
         <div className="game-room-cover">
           <IconGame width={48} height={48} />
