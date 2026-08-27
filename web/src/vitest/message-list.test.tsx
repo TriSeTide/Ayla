@@ -18,8 +18,14 @@ import { MessageList } from "../components/chat/MessageList";
 import { useAuthStore } from "../stores/auth";
 
 vi.mock("../components/chat/MessageBubble", () => ({
-  MessageBubble: ({ message }: { message: ChatMessage }) => (
-    <div data-testid="bubble">{message.content}</div>
+  MessageBubble: ({
+    message,
+    onQuoteJump,
+  }: { message: ChatMessage; onQuoteJump?: (message: ChatMessage) => void }) => (
+    <div data-testid="bubble">
+      {message.content}
+      {onQuoteJump && <button type="button" aria-label="跳转到被引用消息" onClick={() => onQuoteJump(message)} />}
+    </div>
   ),
   canRecall: () => false,
 }));
@@ -390,5 +396,59 @@ describe("MessageList @ 我跳转（F9）", () => {
       />,
     );
     expect(document.querySelector(".message-jump-mention")).toBeNull();
+  });
+
+  it("普通未读标签显示数量，点击后批量已读并保留特殊未读序号", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const onMarkConversationRead = vi.fn().mockResolvedValue(undefined);
+    const conv = {
+      ...conversation(),
+      unread_count: 3,
+      unread_seqs: [8, 9, 10],
+      mention_unread_seqs: [9],
+      reply_unread_seqs: [],
+    };
+    const messages = Array.from({ length: 10 }, (_, i) => serverMessage(i + 1));
+    render(
+      <MessageList
+        messages={messages}
+        conversation={conv}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onMarkConversationRead={onMarkConversationRead}
+      />,
+    );
+    const unreadButton = screen.getByRole("button", { name: "跳转到 3 条未读消息" });
+    expect(unreadButton).toHaveTextContent("3 条新消息");
+    await act(async () => unreadButton.click());
+    expect(onMarkConversationRead).toHaveBeenCalledWith(10, []);
+  });
+
+  it("点击引用块定位原消息并精确标记该回复目标", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const target = serverMessage(1);
+    const reply: ChatMessage = {
+      ...serverMessage(2),
+      sender_id: "other",
+      reply_to: target.id,
+      reply_to_seq: target.seq,
+      content: "回复",
+    };
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MessageList
+        messages={[target, reply]}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onMarkRead={onMarkRead}
+      />,
+    );
+    await act(async () => screen.getByRole("button", { name: "跳转到被引用消息" }).click());
+    expect(onMarkRead).toHaveBeenCalledWith(target, true);
   });
 });

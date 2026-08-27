@@ -54,8 +54,7 @@ export function useChat() {
       chatWS.subscribe([convId]);
       // 拉历史（无 before_seq → 最近 20 条；向上翻页仍按 50 条）
       await loadHistory(convId, undefined, true);
-      // 打开即标已读（对方发且我未读的最新一条）
-      markReadLatest(convId);
+      // 打开会话保持滚底；未读/特殊消息由 MessageList 的定位标签承接。
       navigate(`/chat/${convId}`);
     },
     [navigate],
@@ -95,25 +94,114 @@ export async function loadHistory(convId: string, beforeSeq?: number, firstLoad 
   }
 }
 
-/** 上拉加载更早历史 */
-export async function loadMoreHistory(convId: string) {
+/**
+ * 上拉加载更早历史。
+ *
+ * 同一会话的定位跳转与用户上拉可能同时发生，复用同一个请求 Promise，避免
+ * 两个 before_seq 请求交错后产生重复页或错误的窗口边界。
+ */
+const historyLoads = new Map<string, Promise<ChatMessage[]>>();
+
+export function loadMoreHistory(convId: string): Promise<ChatMessage[]> {
+  const inFlight = historyLoads.get(convId);
+  if (inFlight) return inFlight;
+
   const msg = useMessageStore.getState();
   const bucket = msg.buckets[convId];
-  if (!bucket || bucket.loading || !bucket.hasMore) return;
+  if (!bucket || bucket.loading || !bucket.hasMore) return Promise.resolve([]);
+
   msg.setLoading(convId, true);
-  const minSeq = bucket.messages[0]?.seq;
-  try {
-    const list = await chatApi.listMessages(convId, {
+  const minSeq = bucket.messages.find((item) => item.seq > 0)?.seq;
+  if (minSeq == null) {
+    msg.setLoading(convId, false);
+    return Promise.resolve([]);
+  }
+
+  const request = chatApi
+    .listMessages(convId, {
       before_seq: minSeq,
       limit: HISTORY_PAGE_LIMIT,
+    })
+    .then((list) => {
+      // 同一原则：先前插缓存，再结束 loading，保证滚动锚定看到的是完整 DOM 提交。
+      msg.prependHistory(convId, list, list.length >= HISTORY_PAGE_LIMIT);
+      return list;
+    })
+    .finally(() => {
+      msg.setLoading(convId, false);
     });
-    // 同一原则：先前插缓存，再结束 loading，保证滚动锚定看到的是完整 DOM 提交。
-    msg.prependHistory(convId, list, list.length >= HISTORY_PAGE_LIMIT);
-    msg.setLoading(convId, false);
-  } catch (e) {
-    msg.setLoading(convId, false);
-    throw e;
+
+  let tracked: Promise<ChatMessage[]>;
+  tracked = request.then(
+    (list) => {
+      if (historyLoads.get(convId) === tracked) historyLoads.delete(convId);
+      return list;
+    },
+    (error) => {
+      if (historyLoads.get(convId) === tracked) historyLoads.delete(convId);
+      throw error;
+    },
+  );
+  historyLoads.set(convId, tracked);
+  return tracked;
+}
+
+/**
+ * 按会话 seq 加载到目标消息。
+ *
+ * 目标定位只沿现有 before_seq 游标向前翻页，store 仍保留全量权威缓存；达到
+ * 有界页数仍未找到时显式返回 false，由 UI 展示不可定位，而不是伪造成功。
+ */
+export const TARGET_HISTORY_MAX_PAGES = 200;
+
+export async function loadHistoryUntilSeq(
+  convId: string,
+  targetSeq: number,
+  maxPages = TARGET_HISTORY_MAX_PAGES,
+): Promise<boolean> {
+  if (!Number.isInteger(targetSeq) || targetSeq <= 0) return false;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const bucket = useMessageStore.getState().buckets[convId];
+    if (!bucket) return false;
+    if (bucket.messages.some((item) => item.seq === targetSeq)) return true;
+
+    const confirmed = bucket.messages.filter((item) => !item.pending && item.seq > 0);
+    const minSeq = confirmed[0]?.seq;
+    if (minSeq == null || minSeq <= targetSeq || !bucket.hasMore) return false;
+
+    const beforeMin = minSeq;
+    const list = await loadMoreHistory(convId);
+    const nextBucket = useMessageStore.getState().buckets[convId];
+    const nextMin = nextBucket?.messages.find((item) => !item.pending && item.seq > 0)?.seq;
+    if (list.length === 0 || nextMin == null || nextMin >= beforeMin) return false;
   }
+  return false;
+}
+
+/** 按 before_seq 翻页，直到缓存覆盖给定已读边界；F7 用它找第一条未读。 */
+export async function loadHistoryThroughSeq(
+  convId: string,
+  boundarySeq: number,
+  maxPages = TARGET_HISTORY_MAX_PAGES,
+): Promise<boolean> {
+  if (!Number.isInteger(boundarySeq) || boundarySeq < 0) return false;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const bucket = useMessageStore.getState().buckets[convId];
+    if (!bucket) return false;
+    const confirmed = bucket.messages.filter((item) => !item.pending && item.seq > 0);
+    const minSeq = confirmed[0]?.seq;
+    if (minSeq != null && minSeq <= boundarySeq) return true;
+    if (!bucket.hasMore) return minSeq == null || minSeq <= boundarySeq;
+
+    const beforeMin = minSeq;
+    const list = await loadMoreHistory(convId);
+    const nextBucket = useMessageStore.getState().buckets[convId];
+    const nextMin = nextBucket?.messages.find((item) => !item.pending && item.seq > 0)?.seq;
+    if (list.length === 0 || nextMin == null || (beforeMin != null && nextMin >= beforeMin)) return false;
+  }
+  return false;
 }
 
 /** 发消息：生成 idempotency_key；失败抛错（调用方重试复用同一 key 由服务端幂等） */
@@ -402,14 +490,75 @@ export async function recallMessage(convId: string, messageId: string) {
 }
 
 /** 标已读：把当前会话中"对方发、我未读"的最新一条标已读（服务端 mark_read 幂等） */
-export async function markConversationRead(convId: string) {
-  try {
-    await chatApi.markConversationRead(convId);
-    useChatStore.getState().clearUnread(convId);
-    void useBadgesStore.getState().fetch();
-  } catch {
-    // 服务端失败保留红点，下一次进入会话时重试。
+export async function markConversationRead(
+  convId: string,
+  payload: { through_seq?: number; exclude_message_ids?: string[]; preserve_special?: boolean } = {},
+) {
+  await chatApi.markConversationRead(convId, payload);
+  useChatStore.getState().clearUnread(convId);
+  void useBadgesStore.getState().fetch();
+}
+
+/** 普通未读跳转后的批量已读；服务端保留 @我/回复消息。 */
+export async function markConversationReadThrough(
+  convId: string,
+  throughSeq: number,
+  excludeMessageIds: string[] = [],
+) {
+  await chatApi.markConversationRead(convId, {
+    through_seq: throughSeq,
+    exclude_message_ids: excludeMessageIds,
+    preserve_special: true,
+  });
+  const currentUserId = useAuthStore.getState().currentUser?.id;
+  const conversation = useChatStore.getState().conversations.find((item) => item.id === convId);
+  const specialSeqs = new Set([
+    ...(conversation?.mention_unread_seqs ?? []),
+    ...(conversation?.reply_unread_seqs ?? []),
+  ]);
+  const readSeqs: number[] = (conversation?.unread_seqs ?? [])
+    .filter((seq) => seq <= throughSeq && !specialSeqs.has(seq));
+  for (const message of useMessageStore.getState().buckets[convId]?.messages ?? []) {
+    if (
+      message.seq > 0 &&
+      message.seq <= throughSeq &&
+      message.sender_id !== currentUserId &&
+      !excludeMessageIds.includes(message.id)
+    ) {
+      readSeqs.push(message.seq);
+      useMessageStore.getState().markReadByMe(convId, message.id);
+    }
   }
+  useChatStore.getState().markReadSeqs(convId, readSeqs);
+  void useBadgesStore.getState().fetch();
+}
+
+/** 回到底部时：会话全部未读（含 @我/回复）标已读，用户已看到最新消息。 */
+export async function markConversationAllRead(convId: string) {
+  await chatApi.markConversationRead(convId);
+  const currentUserId = useAuthStore.getState().currentUser?.id;
+  const conversation = useChatStore.getState().conversations.find((item) => item.id === convId);
+  const readSeqs = [
+    ...(conversation?.unread_seqs ?? []),
+    ...(conversation?.mention_unread_seqs ?? []),
+    ...(conversation?.reply_unread_seqs ?? []),
+  ];
+  for (const message of useMessageStore.getState().buckets[convId]?.messages ?? []) {
+    if (message.sender_id !== currentUserId && !message.read_by_me && message.seq > 0) {
+      useMessageStore.getState().markReadByMe(convId, message.id);
+    }
+  }
+  useChatStore.getState().markReadSeqs(convId, readSeqs);
+  void useBadgesStore.getState().fetch();
+}
+
+/** 精确标记一条 @我/回复消息已读；不会推进其他消息。 */
+export async function markMessageReadExact(convId: string, messageId: string) {
+  await chatApi.markMessageRead(convId, messageId, true);
+  useMessageStore.getState().markReadByMe(convId, messageId);
+  const message = useMessageStore.getState().buckets[convId]?.messages.find((item) => item.id === messageId);
+  if (message) useChatStore.getState().markReadSeqs(convId, [message.seq]);
+  void useBadgesStore.getState().fetch();
 }
 
 export async function markReadLatest(convId: string) {

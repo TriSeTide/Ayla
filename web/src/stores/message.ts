@@ -28,6 +28,8 @@ interface MessageState {
   buckets: Record<string, MessageBucket>;
   /** 已读标记：conversation_id -> 已读到的 message_id（对端已读状态用） */
   readMarks: Record<string, Record<string, string[]>>;
+  /** 各会话当前是否滚动在底部（WS 用它判断新消息应即时已读还是进标签）。 */
+  viewerAtBottom: Record<string, boolean>;
 
   upsertMessage: (convId: string, msg: ChatMessage) => void;
   /** M5-2.1：WS 消息只带 media_id 时，异步补拉 descriptor 后合并进消息 */
@@ -41,6 +43,8 @@ interface MessageState {
     idempotencyKey: string,
     serverMsg: ChatMessage,
   ) => void;
+  /** WS 广播带幂等键到达自己发送的消息：用服务端消息替换匹配的本地 pending，避免双气泡。 */
+  resolvePendingByKey: (convId: string, idempotencyKey: string, serverMsg: ChatMessage) => void;
   /** 乐观发送失败：消息保留，标记失败态（气泡左上角可重试/删除） */
   markMessageFailed: (convId: string, messageId: string) => void;
   /** 乐观发送中：更新上传进度百分比（0-100；气泡左侧显示进度与取消） */
@@ -49,10 +53,13 @@ interface MessageState {
   removeMessage: (convId: string, messageId: string) => void;
   setRecalled: (convId: string, messageId: string) => void;
   markReadByMessage: (convId: string, messageId: string, userId: string) => void;
+  /** 当前用户精确看过消息后的本地已读投影（服务端确认后调用）。 */
+  markReadByMe: (convId: string, messageId: string) => void;
   prependHistory: (convId: string, msgs: ChatMessage[], hasMore: boolean) => void;
   openBucket: (convId: string) => void;
   setLoading: (convId: string, loading: boolean) => void;
   setLastSeq: (convId: string, lastSeq: number) => void;
+  setViewerAtBottom: (convId: string, atBottom: boolean) => void;
   reset: () => void;
 }
 
@@ -77,6 +84,7 @@ function insertBySeq(list: ChatMessage[], msg: ChatMessage): ChatMessage[] {
 export const useMessageStore = create<MessageState>((set) => ({
   buckets: {},
   readMarks: {},
+  viewerAtBottom: {},
 
   upsertMessage: (convId, msg) =>
     set((state) => {
@@ -119,13 +127,25 @@ export const useMessageStore = create<MessageState>((set) => ({
       const bucket = state.buckets[convId];
       if (!bucket) return state;
       const local = bucket.messages.find((m) => m.pending && m.id === localId);
-      // 收敛到一条服务端消息：
-      // - 同 seq 的 WS 版（message.new 广播已插入）删除；
-      // - 同幂等键的本地 pending 删除（含本次乐观消息）；
-      // 之后 local 存在则补入服务端回包（原地替换），否则 WS 版已代表该消息。
+      if (!local) {
+        // pending 已被 WS 广播替换（resolvePendingByKey）或不存在：
+        // 同 seq 服务端消息已在，幂等返回；否则补入。
+        if (bucket.messages.some((m) => !m.pending && m.seq === serverMsg.seq)) return state;
+        return {
+          buckets: {
+            ...state.buckets,
+            [convId]: {
+              ...bucket,
+              messages: sortMessages([...bucket.messages, serverMsg]),
+              lastSeq: Math.max(bucket.lastSeq, serverMsg.seq),
+            },
+          },
+        };
+      }
+      // pending 还在：删本地 pending + 删同 seq 的 WS 版，补服务端回包。
       const filtered = bucket.messages.filter((m) => {
-        if (!m.pending && m.seq === serverMsg.seq) return false;
         if (m.pending && m.idempotencyKey === idempotencyKey) return false;
+        if (!m.pending && m.seq === serverMsg.seq) return false;
         return true;
       });
       return {
@@ -133,9 +153,42 @@ export const useMessageStore = create<MessageState>((set) => ({
           ...state.buckets,
           [convId]: {
             ...bucket,
-            messages: local
-              ? sortMessages([...filtered, serverMsg])
-              : sortMessages(filtered),
+            messages: sortMessages([...filtered, serverMsg]),
+            lastSeq: Math.max(bucket.lastSeq, serverMsg.seq),
+          },
+        },
+      };
+    }),
+
+  resolvePendingByKey: (convId, idempotencyKey, serverMsg) =>
+    set((state) => {
+      const bucket = state.buckets[convId];
+      if (!bucket) return state;
+      const pending = bucket.messages.find(
+        (m) => m.pending && m.idempotencyKey === idempotencyKey,
+      );
+      if (!pending) {
+        // 无匹配 pending（REST 已先 resolve）：按 seq 去重插入。
+        return {
+          buckets: {
+            ...state.buckets,
+            [convId]: {
+              ...bucket,
+              messages: insertBySeq(bucket.messages, serverMsg),
+              lastSeq: Math.max(bucket.lastSeq, serverMsg.seq),
+            },
+          },
+        };
+      }
+      // 用 WS 服务端消息原地替换 pending，消除「pending + 服务端」双气泡窗口。
+      return {
+        buckets: {
+          ...state.buckets,
+          [convId]: {
+            ...bucket,
+            messages: sortMessages(
+              bucket.messages.map((m) => (m.id === pending.id ? serverMsg : m)),
+            ),
             lastSeq: Math.max(bucket.lastSeq, serverMsg.seq),
           },
         },
@@ -222,6 +275,23 @@ export const useMessageStore = create<MessageState>((set) => ({
       };
     }),
 
+  markReadByMe: (convId, messageId) =>
+    set((state) => {
+      const bucket = state.buckets[convId];
+      if (!bucket) return state;
+      return {
+        buckets: {
+          ...state.buckets,
+          [convId]: {
+            ...bucket,
+            messages: bucket.messages.map((m) =>
+              m.id === messageId ? { ...m, read_by_me: true } : m,
+            ),
+          },
+        },
+      };
+    }),
+
   markReadByMessage: (convId, messageId, userId) =>
     set((state) => {
       const convMarks = state.readMarks[convId] ?? {};
@@ -298,5 +368,13 @@ export const useMessageStore = create<MessageState>((set) => ({
       };
     }),
 
-  reset: () => set({ buckets: {}, readMarks: {} }),
+  setViewerAtBottom: (convId, atBottom) =>
+    set((state) => {
+      if (state.viewerAtBottom[convId] === atBottom) return state;
+      return {
+        viewerAtBottom: { ...state.viewerAtBottom, [convId]: atBottom },
+      };
+    }),
+
+  reset: () => set({ buckets: {}, readMarks: {}, viewerAtBottom: {} }),
 }));

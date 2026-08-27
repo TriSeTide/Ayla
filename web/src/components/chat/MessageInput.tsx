@@ -17,6 +17,7 @@ import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceRecorder, isVoiceRecordingSupported, formatDuration as formatRecDuration, type VoiceRecording } from "../../hooks/useVoiceRecorder";
 import { segmentPreview } from "../../utils/segment";
 import {
+  blocksHasMention,
   blocksText,
   detectMentionAtCaret,
   extractBlocks,
@@ -159,7 +160,8 @@ export function MessageInput({
   /** 乐观发送：立即插入气泡，后台上传+发送；不阻塞继续输入 */
   const submit = () => {
     const text = blocksText(blocks).trim();
-    if ((!text && picked.length === 0) || !convId || voice.recording) return;
+    const hasMention = blocksHasMention(blocks);
+    if ((!text && picked.length === 0 && !hasMention) || !convId || voice.recording) return;
     sendOptimistic(convId, {
       blocks,
       picked,
@@ -213,7 +215,9 @@ export function MessageInput({
   };
 
   const quotePreview = quote ? (segmentPreview(quote.segments) ?? (quote.content || "…")) : null;
-  const canSend = (blocksText(blocks).trim().length > 0 || picked.length > 0) && !voice.recording;
+  const canSend =
+    (blocksText(blocks).trim().length > 0 || blocksHasMention(blocks) || picked.length > 0) &&
+    !voice.recording;
   const placeholder = isNarrow
     ? "输入消息"
     : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频，群聊输入 @ 可提及成员";

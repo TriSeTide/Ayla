@@ -1,5 +1,6 @@
 """chat DRF 序列化器。"""
 from django.contrib.auth import get_user_model
+from django.db.models import Max
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
@@ -134,6 +135,8 @@ class MessageSerializer(serializers.ModelSerializer):
     conversation_id = serializers.CharField(read_only=True)
     sender_id = serializers.CharField(read_only=True)
     reply_to = serializers.SerializerMethodField()
+    reply_to_seq = serializers.SerializerMethodField()
+    read_by_me = serializers.SerializerMethodField()
     type = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
     seq = serializers.IntegerField(read_only=True)
@@ -155,6 +158,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "media",
             "segments",
             "reply_to",
+            "reply_to_seq",
+            "read_by_me",
             "status",
             "seq",
             "created_at",
@@ -163,6 +168,17 @@ class MessageSerializer(serializers.ModelSerializer):
 
     def get_reply_to(self, obj):
         return str(obj.reply_to_id) if obj.reply_to_id else None
+
+    def get_reply_to_seq(self, obj):
+        """被引用消息的会话序号，供窗口化消息按 before_seq 定位。"""
+        return obj.reply_to.seq if obj.reply_to_id and obj.reply_to else None
+
+    def get_read_by_me(self, obj):
+        """当前用户是否已对该消息留下已读回执。"""
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+            return False
+        return MessageRead.objects.filter(message=obj, user=request.user).exists()
 
     def get_media(self, obj):
         """media descriptor：media_id 引用的 MediaObjectSerializer（无引用为 null）。"""
@@ -189,6 +205,10 @@ class ConversationSerializer(serializers.ModelSerializer):
     members = ConversationMemberSerializer(many=True, read_only=True)
     my_role = serializers.SerializerMethodField()
     unread_count = serializers.SerializerMethodField()
+    last_read_seq = serializers.SerializerMethodField()
+    unread_seqs = serializers.SerializerMethodField()
+    mention_unread_seqs = serializers.SerializerMethodField()
+    reply_unread_seqs = serializers.SerializerMethodField()
     member_count = serializers.SerializerMethodField()
     # M5：本人视野的置顶标记（每个成员各自独立）
     is_pinned = serializers.SerializerMethodField()
@@ -211,9 +231,13 @@ class ConversationSerializer(serializers.ModelSerializer):
             "my_role",
             "member_count",
             "unread_count",
+            "last_read_seq",
             "is_pinned",
             "last_message",
             "mention_unread_count",
+            "unread_seqs",
+            "mention_unread_seqs",
+            "reply_unread_seqs",
             "created_at",
         ]
         read_only_fields = fields
@@ -265,17 +289,57 @@ class ConversationSerializer(serializers.ModelSerializer):
             "preview": message_preview(last),
         }
 
-    def get_unread_count(self, obj) -> int:
+    def get_last_read_seq(self, obj) -> int:
+        """当前用户连续读到的会话序号；精确读特殊消息不会越过更早未读。"""
         request = self.context.get("request")
         if not request or not hasattr(request, "user"):
             return 0
-        # 未读数 = 非本人发送、状态未 read、且我未读过 的消息数
-        read_msg_ids = MessageRead.objects.filter(
-            message__conversation=obj, user=request.user
-        ).values_list("message_id", flat=True)
-        return obj.messages.exclude(sender=request.user).exclude(
-            id__in=list(read_msg_ids)
-        ).exclude(status=Message.STATUS_RECALLED).count()
+        first_unread = self._unread_queryset(obj).order_by("seq").values_list("seq", flat=True).first()
+        if first_unread is not None:
+            return max(0, int(first_unread) - 1)
+        return int(obj.messages.order_by("-seq").values_list("seq", flat=True).first() or 0)
+
+    def _unread_queryset(self, obj):
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return obj.messages.none()
+        return (
+            obj.messages.exclude(sender=request.user)
+            .exclude(status=Message.STATUS_RECALLED)
+            .exclude(reads__user=request.user)
+        )
+
+    def get_unread_count(self, obj) -> int:
+        # 未读数 = 非本人发送、非撤回、且当前用户没有已读回执的消息数。
+        return self._unread_queryset(obj).count()
+
+    def get_unread_seqs(self, obj) -> list[int]:
+        """F7：当前用户未读消息的会话序号，供窗口外标签定位。"""
+        return list(self._unread_queryset(obj).order_by("seq").values_list("seq", flat=True))
+
+    def get_mention_unread_seqs(self, obj) -> list[int]:
+        """F9/F10：未读且 @ 当前用户的消息序号。"""
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return []
+        return list(
+            self._unread_queryset(obj)
+            .filter(segments__contains=[{"type": "mention", "user_id": str(request.user.id)}])
+            .order_by("seq")
+            .values_list("seq", flat=True)
+        )
+
+    def get_reply_unread_seqs(self, obj) -> list[int]:
+        """F10：未读且回复当前用户消息的消息序号。"""
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return []
+        return list(
+            self._unread_queryset(obj)
+            .filter(reply_to__sender=request.user)
+            .order_by("seq")
+            .values_list("seq", flat=True)
+        )
 
     def get_mention_unread_count(self, obj) -> int:
         """本会话 @ 我且未读的消息数（L2：会话列表 @我 标识）。"""

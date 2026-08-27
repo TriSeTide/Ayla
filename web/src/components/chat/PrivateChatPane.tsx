@@ -14,7 +14,7 @@ import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { TypingIndicator } from "./TypingIndicator";
 import { IconBack } from "../icons";
-import { loadHistory, loadMoreHistory, markReadLatest, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
+import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationAllRead, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useMessageStore } from "../../stores/message";
 import { useAuthStore } from "../../stores/auth";
@@ -87,7 +87,6 @@ export function PrivateChatPane({
     loadHistory(conversationId, undefined, true)
       .then(async () => {
         setHistoryError(null);
-        await markReadLatest(conversationId);
       })
       .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
     return () => {
@@ -187,6 +186,10 @@ export function PrivateChatPane({
           })
         }
         onQuote={setQuote}
+        onMarkRead={(m, exact) => exact ? markMessageReadExact(conversationId, m.id) : undefined}
+        onMarkConversationRead={(throughSeq, excluded) => markConversationReadThrough(conversationId, throughSeq, excluded)}
+        onMarkAllRead={() => markConversationAllRead(conversationId)}
+        onLoadUntilSeq={(targetSeq) => loadHistoryUntilSeq(conversationId, targetSeq).catch(() => false)}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(conversationId, m)}
         onRemove={(m) => removeOptimistic(conversationId, m)}

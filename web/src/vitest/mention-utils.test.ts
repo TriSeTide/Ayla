@@ -1,13 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   blocksHasMention,
   blocksText,
   blocksToSegments,
+  detectMentionAtCaret,
   extractBlocks,
   parseBlocks,
   renderBlocksToDOM,
   serializeBlocks,
 } from "../utils/mention";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("mention 工具（M8 @ 能力）", () => {
   it("blocksText 仅拼接 text 块（mention 不进 content）", () => {
@@ -98,5 +103,39 @@ describe("mention 工具（M8 @ 能力）", () => {
     const el = document.createElement("div");
     renderBlocksToDOM(el, blocks);
     expect(extractBlocks(el)).toEqual(blocks);
+  });
+});
+
+describe("detectMentionAtCaret（任意位置 / 多次 @）", () => {
+  function mockCaret(editor: HTMLElement, textNode: Text, offset: number) {
+    vi.stubGlobal("getSelection", () => ({
+      rangeCount: 1,
+      getRangeAt: () => ({ startContainer: textNode, startOffset: offset }),
+    }));
+    return editor;
+  }
+
+  it("文本中间输入 @ 也能触发（任意位置，不要求 @ 前为空白）", () => {
+    const editor = document.createElement("div");
+    const textNode = document.createTextNode("你好@");
+    editor.appendChild(textNode);
+    mockCaret(editor, textNode, 3); // 光标在「你好@」之后
+    expect(detectMentionAtCaret(editor)).toEqual({ query: "" });
+  });
+
+  it("连续 @：@Token 后的零宽空格不影响再次触发", () => {
+    const editor = document.createElement("div");
+    const textNode = document.createTextNode("\u200B@李四");
+    editor.appendChild(textNode);
+    mockCaret(editor, textNode, 4); // 光标在「@李四」之后
+    expect(detectMentionAtCaret(editor)).toEqual({ query: "李四" });
+  });
+
+  it("@ 后到光标间有空白则视为输入中，不触发", () => {
+    const editor = document.createElement("div");
+    const textNode = document.createTextNode("a@b c");
+    editor.appendChild(textNode);
+    mockCaret(editor, textNode, 5); // 光标在末尾，「@b c」含空白
+    expect(detectMentionAtCaret(editor)).toBeNull();
   });
 });

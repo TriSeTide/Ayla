@@ -287,41 +287,83 @@ def recall_message(user, message) -> Message:
     return message
 
 
-def mark_conversation_read(user, conversation) -> None:
-    """将会话当前全部对方消息标为已读；无消息时保持幂等。"""
-    target = (
-        Message.objects.filter(conversation=conversation)
+def mark_conversation_read(
+    user,
+    conversation,
+    *,
+    through_seq=None,
+    exclude_message_ids=(),
+    preserve_special=False,
+) -> None:
+    """按会话序号批量标已读，可排除仍需单独查看的消息。"""
+    qs = Message.objects.filter(conversation=conversation)
+    if through_seq is None:
+        target = (
+            qs.exclude(sender=user)
+            .exclude(status=Message.STATUS_RECALLED)
+            .order_by("-seq")
+            .first()
+        )
+        if target is None:
+            return
+        through_seq = target.seq
+    messages = (
+        qs.filter(seq__lte=through_seq)
         .exclude(sender=user)
         .exclude(status=Message.STATUS_RECALLED)
-        .order_by("-seq")
-        .first()
     )
-    if target is not None:
-        mark_read(user, target)
+    if exclude_message_ids:
+        messages = messages.exclude(id__in=list(exclude_message_ids))
+    if preserve_special:
+        special_ids = {
+            message_id
+            for message_id, reply_to_id, reply_sender_id, segments in messages.values_list(
+                "id", "reply_to_id", "reply_to__sender_id", "segments"
+            )
+            if (reply_to_id and str(reply_sender_id) == str(user.id))
+            or any(
+                segment.get("type") == "mention"
+                and str(segment.get("user_id")) == str(user.id)
+                for segment in (segments or [])
+                if isinstance(segment, dict)
+            )
+        }
+        if special_ids:
+            messages = messages.exclude(id__in=special_ids)
+    _mark_messages_read(user, messages)
 
 
-def mark_read(user, message) -> None:
+def _mark_messages_read(user, messages) -> None:
+    """对明确给定的消息集合写入幂等已读回执。"""
+    existing = set(
+        MessageRead.objects.filter(message__in=messages, user=user)
+        .values_list("message_id", flat=True)
+    )
+    to_create = [
+        MessageRead(message_id=message_id, user=user)
+        for message_id in messages.exclude(id__in=existing).values_list("id", flat=True)
+    ]
+    if to_create:
+        MessageRead.objects.bulk_create(to_create, ignore_conflicts=True)
+
+
+def mark_read(user, message, *, through=True) -> None:
     """将会话中截至目标消息的对方消息标为已读。
 
     客户端打开会话时通常只加载最近一页；若只写入最新一条 MessageRead，
     更早消息仍会持续贡献未读数，导致群聊/私信红点无法消失。因此以目标 seq
     作为已读游标，批量写入当前用户的 MessageRead，重复调用保持幂等。
     """
-    unread_messages = Message.objects.filter(
-        conversation=message.conversation,
-        seq__lte=message.seq,
-    ).exclude(sender=user).exclude(status=Message.STATUS_RECALLED)
-    existing = set(
-        MessageRead.objects.filter(
-            message__in=unread_messages, user=user
-        ).values_list("message_id", flat=True)
-    )
-    to_create = [
-        MessageRead(message_id=msg_id, user=user)
-        for msg_id in unread_messages.exclude(id__in=existing).values_list("id", flat=True)
-    ]
-    if to_create:
-        MessageRead.objects.bulk_create(to_create, ignore_conflicts=True)
+    if through:
+        messages = Message.objects.filter(
+            conversation=message.conversation,
+            seq__lte=message.seq,
+        ).exclude(sender=user).exclude(status=Message.STATUS_RECALLED)
+    else:
+        messages = Message.objects.filter(pk=message.pk).exclude(
+            sender=user,
+        ).exclude(status=Message.STATUS_RECALLED)
+    _mark_messages_read(user, messages)
     if message.sender_id != user.id:
         broadcast_read(message, user)
 
@@ -377,6 +419,8 @@ def _message_new_event(message: Message) -> dict:
         "media": _media_descriptor(message.media_id),
         "segments": expand_segments(message),
         "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
+        "reply_to_seq": message.reply_to.seq if message.reply_to_id and message.reply_to else None,
+        "idempotency_key": message.idempotency_key,
         "seq": message.seq,
         "ts": message.created_at.isoformat(),
     }

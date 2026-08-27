@@ -210,6 +210,7 @@ export class ChatWSClient {
         // 后端 WS 帧 media 字段是 MediaDescriptor 对象（或 null）；历史兼容字符串 media_id
         const wsMedia = d.media;
         const wsMediaId = typeof wsMedia === "string" ? wsMedia : (wsMedia?.media_id ?? null);
+        const currentUserId = useAuthStore.getState().currentUser?.id;
         const msg: ChatMessage = {
           id: d.message_id,
           conversation_id: d.conversation_id,
@@ -220,31 +221,50 @@ export class ChatWSClient {
           media: typeof wsMedia === "string" ? null : wsMedia,
           segments: d.segments ?? null,
           reply_to: d.reply_to,
+          reply_to_seq: d.reply_to_seq ?? null,
+          read_by_me: false,
           status: "sent",
           seq: d.seq,
           created_at: d.ts,
+          idempotencyKey: d.idempotency_key ?? undefined,
         };
-        message.upsertMessage(d.conversation_id, msg);
-        // 未打开会话 → 未读数 +1
-        chat.bumpUnread(d.conversation_id);
-        // 实时刷新会话列表的最新一条消息预览（会话仍在本地位列表时）。
-        // 若该会话被"删除"（隐藏）不在此列表，服务端已自动取消隐藏，
-        // 下次 listConversations 刷新即重新出现。
+        const isSelf = currentUserId != null && String(d.sender_id) === String(currentUserId);
+        if (isSelf && d.idempotency_key) {
+          // 自己发送的消息：用幂等键收敛本地 pending，避免 pending + 服务端双气泡。
+          message.resolvePendingByKey(d.conversation_id, d.idempotency_key, msg);
+        } else {
+          message.upsertMessage(d.conversation_id, msg);
+        }
+        const isFromOther = !isSelf;
+        const isMention = isFromOther && (d.segments ?? []).some(
+          (segment) => segment.type === "mention" && segment.user_id === currentUserId,
+        );
+        const isReply = isFromOther && d.reply_to != null;
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
         const isActive = chat.activeConversationId === d.conversation_id;
-        if (isActive) {
-          // 正在聊天：对方消息立即标已读（不计入红点），确认后刷新红点。
-          const me = useAuthStore.getState().currentUser;
-          if (me && String(d.sender_id) !== String(me.id)) {
-            chatApi
-              .markMessageRead(d.conversation_id, d.message_id)
-              .then(() => useBadgesStore.getState().fetch())
-              .catch(() => { /* 已读失败下次打开重试 */ });
+        // 活跃会话还需用户在底部才视为「正在看」；翻聊天记录（不在底部）时新消息进标签。
+        const atBottom = isActive && (message.viewerAtBottom[d.conversation_id] ?? true);
+
+        if (isFromOther && atBottom) {
+          // 正在底部看最新消息：直接已读（含 @/回复），不弹标签；
+          // 被 @/回复的由 MessageList 直接泛光圈并滚底。
+          message.markReadByMe(d.conversation_id, d.message_id);
+          chatApi
+            .markMessageRead(d.conversation_id, d.message_id, true)
+            .then(() => useBadgesStore.getState().fetch())
+            .catch(() => { /* 已读失败，下次进入会话重试 */ });
+        } else if (isFromOther) {
+          // 非活跃会话，或活跃但翻历史（不在底部）：进入未读投影，驱动标签。
+          chat.bumpUnread(d.conversation_id, {
+            seq: d.seq,
+            mention: isMention,
+            reply: isReply,
+          });
+          if (!conv || conv.type === "private") {
+            // 私信新消息（未打开）→ 全局消息入口红点（private_unread）实时刷新；
+            // 群未读不进消息中心红点（属群卡片/ServerRail 角标），故群消息不拉 badges。
+            void useBadgesStore.getState().fetch();
           }
-        } else if (!conv || conv.type === "private") {
-          // 私信新消息（未打开）→ 全局消息入口红点（private_unread）实时刷新；
-          // 群未读不进消息中心红点（属群卡片/ServerRail 角标），故群消息不拉 badges。
-          void useBadgesStore.getState().fetch();
         }
         if (conv) {
           // 混排消息用段生成摘要（后端 WS 帧带展开 segments）；单媒体/文本走 content/占位
@@ -460,25 +480,29 @@ export class ChatWSClient {
           content: d.content,
           media_id: null,
           reply_to: null,
+          read_by_me: false,
           status: "sent",
           seq: d.seq,
           created_at: d.ts,
         };
         message.upsertMessage(d.conversation_id, msg);
-        chat.bumpUnread(d.conversation_id);
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
-        if (chat.activeConversationId === d.conversation_id) {
-          // 正在聊天：爱莉回复立即标已读（不计红点），确认后刷新红点
-          const me = useAuthStore.getState().currentUser;
-          if (me && String(d.sender_id) !== String(me.id)) {
-            chatApi
-              .markMessageRead(d.conversation_id, d.message_id)
-              .then(() => useBadgesStore.getState().fetch())
-              .catch(() => { /* 已读失败下次打开重试 */ });
+        const atBottom =
+          chat.activeConversationId === d.conversation_id &&
+          (message.viewerAtBottom[d.conversation_id] ?? true);
+        if (atBottom) {
+          // 正在底部看最新消息：爱莉回复直接已读，不弹标签。
+          message.markReadByMe(d.conversation_id, d.message_id);
+          chatApi
+            .markMessageRead(d.conversation_id, d.message_id, true)
+            .then(() => useBadgesStore.getState().fetch())
+            .catch(() => { /* 已读失败，下次进入会话重试 */ });
+        } else {
+          chat.bumpUnread(d.conversation_id, { seq: d.seq });
+          if (!conv || conv.type === "private") {
+            // 爱莉回复多为私信：私信未读 → 全局消息入口红点实时刷新
+            void useBadgesStore.getState().fetch();
           }
-        } else if (!conv || conv.type === "private") {
-          // 爱莉回复多为私信：私信未读 → 全局消息入口红点实时刷新
-          void useBadgesStore.getState().fetch();
         }
         break;
       }

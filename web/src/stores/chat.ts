@@ -50,9 +50,11 @@ interface ChatState {
   setPin: (convId: string, pinned: boolean) => void;
   /** 更新会话最新一条消息预览（WS message.new 到达时）表达式 */
   setLastMessage: (convId: string, preview: LastMessagePreview) => void;
-  /** 收到未打开会话的 message.new → 未读数 +1（打开则置 0） */
-  bumpUnread: (convId: string) => void;
+  /** 收到 message.new → 追加未读序号；无 seq 时保留旧的计数兼容行为。 */
+  bumpUnread: (convId: string, details?: { seq?: number; mention?: boolean; reply?: boolean }) => void;
   clearUnread: (convId: string) => void;
+  /** 从会话未读序号投影中移除已确认阅读的消息，保留其他特殊未读。 */
+  markReadSeqs: (convId: string, seqs: number[]) => void;
   reset: () => void;
 }
 
@@ -124,13 +126,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     })),
 
-  bumpUnread: (convId) =>
+  bumpUnread: (convId, details) =>
     set((state) => {
-      if (state.activeConversationId === convId) return state;
+      // 旧事件只携带会话 id，保留“当前会话不累加”的历史兼容语义；
+      // 新消息事件带 seq 时才进入 F7/F10 的可追踪未读序号投影。
+      if (!details && state.activeConversationId === convId) return state;
       return {
-        conversations: state.conversations.map((c) =>
-          c.id === convId ? { ...c, unread_count: c.unread_count + 1 } : c,
-        ),
+        conversations: state.conversations.map((c) => {
+          if (c.id !== convId) return c;
+        const seq = details?.seq;
+        const unreadSeqs = c.unread_seqs ?? [];
+        const nextUnread = seq != null && !unreadSeqs.includes(seq)
+          ? [...unreadSeqs, seq].sort((a, b) => a - b)
+          : unreadSeqs;
+        const mentionSeqs = c.mention_unread_seqs ?? [];
+        const nextMention = details?.mention && seq != null && !mentionSeqs.includes(seq)
+          ? [...mentionSeqs, seq].sort((a, b) => a - b)
+          : mentionSeqs;
+        const replySeqs = c.reply_unread_seqs ?? [];
+        const nextReply = details?.reply && seq != null && !replySeqs.includes(seq)
+          ? [...replySeqs, seq].sort((a, b) => a - b)
+          : replySeqs;
+        return {
+          ...c,
+          unread_count: seq != null ? nextUnread.length : c.unread_count + 1,
+          unread_seqs: seq != null ? nextUnread : c.unread_seqs,
+          mention_unread_seqs: seq != null ? nextMention : c.mention_unread_seqs,
+          mention_unread_count: seq != null ? nextMention.length : c.mention_unread_count,
+          reply_unread_seqs: seq != null ? nextReply : c.reply_unread_seqs,
+        };
+        }),
       };
     }),
 
@@ -139,6 +164,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: state.conversations.map((c) =>
         c.id === convId ? { ...c, unread_count: 0 } : c,
       ),
+    })),
+
+  markReadSeqs: (convId, seqs) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== convId) return c;
+        const read = new Set(seqs);
+        const unread = (c.unread_seqs ?? []).filter((seq) => !read.has(seq));
+        const mention = (c.mention_unread_seqs ?? []).filter((seq) => !read.has(seq));
+        const reply = (c.reply_unread_seqs ?? []).filter((seq) => !read.has(seq));
+        return {
+          ...c,
+          unread_count: unread.length,
+          unread_seqs: unread,
+          mention_unread_count: mention.length,
+          mention_unread_seqs: mention,
+          reply_unread_seqs: reply,
+        };
+      }),
     })),
 
   reset: () =>

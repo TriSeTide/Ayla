@@ -66,9 +66,13 @@ export function sendMessage(convId: string, payload: CreateMessagePayload) {
 }
 
 /** POST /chat/conversations/<id>/read/ —— 将会话当前消息全部标已读 */
-export function markConversationRead(convId: string) {
+export function markConversationRead(
+  convId: string,
+  payload: { through_seq?: number; exclude_message_ids?: string[]; preserve_special?: boolean } = {},
+) {
   return apiRequest<{ detail: string }>(`/chat/conversations/${convId}/read/`, {
     method: "POST",
+    body: payload,
   });
 }
 
@@ -92,10 +96,10 @@ export function hideConversation(convId: string) {
 }
 
 /** POST /chat/conversations/<id>/messages/<mid>/read/ —— 标已读 */
-export function markMessageRead(convId: string, messageId: string) {
+export function markMessageRead(convId: string, messageId: string, exact = false) {
   return apiRequest<{ detail: string }>(
     `/chat/conversations/${convId}/messages/${messageId}/read/`,
-    { method: "POST" },
+    { method: "POST", body: exact ? { exact: true } : undefined },
   );
 }
 

@@ -316,7 +316,7 @@ describe("ChatWSClient", () => {
     client.disconnect();
   });
 
-  it("正在聊天时对方消息 → 立即标已读，markRead 后刷新 badges（不计红点）", async () => {
+  it("正在聊天时对方消息 → 直接标已读，不弹标签", async () => {
     vi.mocked(chatApi.markMessageRead).mockClear();
     vi.mocked(accountsApi.getBadges).mockClear();
     useAuthStore.setState({
@@ -343,11 +343,8 @@ describe("ChatWSClient", () => {
         type: "text", media: null, reply_to: null, seq: 1, ts: "2026-08-10T00:00:00Z",
       },
     });
-    // 正在聊天：对方消息立即标已读
-    expect(chatApi.markMessageRead).toHaveBeenCalledWith("c1", "m1");
-    // 标已读确认后才刷新红点（服务端 private_unread 已减少）
-    await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
-    // 正在聊天不 bump 未读（会话 unread_count 保持 0）
+    // 正在聊天：新消息直接精确标已读，不进入未读标签投影。
+    expect(chatApi.markMessageRead).toHaveBeenCalledWith("c1", "m1", true);
     expect(useChatStore.getState().conversations.find((c) => c.id === "c1")?.unread_count).toBe(0);
     useAuthStore.setState({ currentUser: null });
     client.disconnect();

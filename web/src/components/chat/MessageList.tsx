@@ -6,6 +6,7 @@
  * 避免长会话的气泡、媒体与操作控件常驻在 DOM。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { ChatMessage, ConversationSummary } from "../../api/types";
 import {
   HISTORY_PAGE_LIMIT,
@@ -13,6 +14,7 @@ import {
   MESSAGE_RENDER_WINDOW_LIMIT,
 } from "../../hooks/useChat";
 import { useAuthStore } from "../../stores/auth";
+import { useMessageStore } from "../../stores/message";
 import { goUserProfile } from "../../utils/navigation";
 import { IconChevronDown } from "../icons";
 import { canRecall, MessageBubble } from "./MessageBubble";
@@ -112,6 +114,10 @@ export function MessageList({
   onRetry,
   onRemove,
   onCancel,
+  onMarkRead,
+  onMarkConversationRead,
+  onMarkAllRead,
+  onLoadUntilSeq,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -120,8 +126,16 @@ export function MessageList({
   hasMore: boolean;
   loading: boolean;
   /** 可返回 Promise；调用方仍拥有 API 错误展示职责。 */
-  onLoadMore: () => void | Promise<void>;
+  onLoadMore: () => void | Promise<unknown>;
   onQuote?: (msg: ChatMessage) => void;
+  /** 点击引用块后，将目标消息精确标记为已读。 */
+  onMarkRead?: (msg: ChatMessage, exact?: boolean) => void | Promise<void>;
+  /** 普通未读标签点击：批量标记到指定序号，排除特殊未读消息。 */
+  onMarkConversationRead?: (throughSeq: number, excludeMessageIds: string[]) => void | Promise<void>;
+  /** 回到底部时：把会话全部未读标已读（用户已看到最新消息）。 */
+  onMarkAllRead?: () => void | Promise<void>;
+  /** 目标不在缓存时按 seq 加载到缓存。 */
+  onLoadUntilSeq?: (targetSeq: number) => Promise<boolean>;
   onRecall?: (msg: ChatMessage) => void;
   /** 乐观发送失败：重试/删除 */
   onRetry?: (msg: ChatMessage) => void;
@@ -138,11 +152,20 @@ export function MessageList({
   const pendingAnchorRef = useRef<PendingPrependAnchor | null>(null);
   const loadMoreInFlightRef = useRef(false);
   const jumpToBottomRef = useRef(false);
-  const jumpToMentionRef = useRef<string | null>(null);
+  const jumpTargetRef = useRef<{
+    id: string;
+    kind: "unread" | "mention" | "reply";
+  } | null>(null);
+  const jumpSeqRef = useRef<{ seq: number; kind: "unread" | "mention" | "reply" } | null>(null);
+  const pendingReadIdsRef = useRef(new Set<string>());
+  const unreadClearedAtBottomRef = useRef(false);
   const [windowRange, setWindowRange] = useState<RenderWindow | null>(null);
   const [farFromBottom, setFarFromBottom] = useState(false);
-  const [mentionAbove, setMentionAbove] = useState(false);
-  const [mentionHighlightId, setMentionHighlightId] = useState<string | null>(null);
+  const [scrollTick, setScrollTick] = useState(0);
+  const [jumpHighlightId, setJumpHighlightId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const jumpLoadRef = useRef<Promise<boolean> | null>(null);
+  const reducedMotion = useReducedMotion();
   const isGroup = conversation?.type === "group";
 
   // pending / 发送失败的本地消息不计入 200 条服务端窗口，始终留在尾部让用户可取消、重试或删除。
@@ -174,18 +197,39 @@ export function MessageList({
     () => visibleMessages.map((m) => m.id).join("\u0001"),
     [visibleMessages],
   );
-  // @ 我的消息（非自己发送）里 seq 最大的一条，作为「跳转到 @ 我」的定位目标
-  const mentionTargetId = useMemo(() => {
-    let target: ChatMessage | null = null;
-    for (const m of confirmedMessages) {
-      if (m.sender_id === currentUserId) continue;
-      const hit = (m.segments ?? []).some(
-        (s) => s.type === "mention" && s.user_id === currentUserId,
-      );
-      if (hit && (!target || m.seq > target.seq)) target = m;
-    }
-    return target?.id ?? null;
-  }, [confirmedMessages, currentUserId]);
+  const unreadMessages = useMemo(
+    () => confirmedMessages.filter((m) => m.sender_id !== currentUserId && !m.read_by_me),
+    [confirmedMessages, currentUserId],
+  );
+  const specialUnread = useMemo(() => {
+    const mention = unreadMessages.filter((m) =>
+      (m.segments ?? []).some((s) => s.type === "mention" && s.user_id === currentUserId),
+    );
+    const reply = unreadMessages.filter((m) => {
+      if (m.reply_to == null) return false;
+      const target = confirmedMessages.find((item) => item.id === m.reply_to);
+      return target?.sender_id === currentUserId;
+    });
+    return { mention, reply };
+  }, [confirmedMessages, currentUserId, unreadMessages]);
+  const ordinaryUnreadSeqsFromMessages = useMemo(
+    () => unreadMessages.filter(
+      (m) => !m.reply_to && !(m.segments ?? []).some((s) => s.type === "mention" && s.user_id === currentUserId),
+    ).map((message) => message.seq),
+    [currentUserId, unreadMessages],
+  );
+  // 普通未读以会话接口的 unread_count/unread_seqs 为权威；旧响应没有字段时，
+  // 不从当前历史窗口臆测普通未读（否则刷新后的历史会被误当成新消息）。
+  const unreadSeqs = conversation?.unread_seqs ?? (
+    (conversation?.unread_count ?? 0) > 0 ? ordinaryUnreadSeqsFromMessages : []
+  );
+  const mentionSeqs = conversation?.mention_unread_seqs ?? specialUnread.mention.map((message) => message.seq);
+  const replySeqs = conversation?.reply_unread_seqs ?? specialUnread.reply.map((message) => message.seq);
+  const specialSeqs = useMemo(() => new Set([...mentionSeqs, ...replySeqs]), [mentionSeqs, replySeqs]);
+  const ordinaryUnreadSeqs = useMemo(
+    () => (conversation?.unread_seqs ? unreadSeqs.filter((seq) => !specialSeqs.has(seq)) : ordinaryUnreadSeqsFromMessages),
+    [conversation?.unread_seqs, ordinaryUnreadSeqsFromMessages, specialSeqs, unreadSeqs],
+  );
   const hasCachedEarlier = bounds.start > 0;
   const hasHiddenTail = bounds.end < confirmedMessages.length;
   const canLoadEarlier = hasCachedEarlier || hasMore;
@@ -292,6 +336,9 @@ export function MessageList({
     if (conversationIdRef.current === conversationId) return;
     conversationIdRef.current = conversationId;
     atBottomRef.current = true;
+    if (conversation?.id) {
+      useMessageStore.getState().setViewerAtBottom(conversation.id, true);
+    }
     lastScrollTopRef.current = 0;
     previousConfirmedIdsRef.current = [];
     pendingAnchorRef.current = null;
@@ -441,11 +488,10 @@ export function MessageList({
 
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined") {
-      const column = element.querySelector(".message-column");
-      if (column) {
-        observer = new ResizeObserver(stickToBottom);
-        observer.observe(column);
-      }
+      // 监听滚动容器本身：发送消息清空输入框会改变可视高度，贴底时同步补偿
+      // scrollTop，避免聊天记录在发送瞬间上下跳变。
+      observer = new ResizeObserver(stickToBottom);
+      observer.observe(element);
     }
 
     const onLoad = (event: Event) => {
@@ -512,76 +558,307 @@ export function MessageList({
       });
   }, [bounds.end, bounds.start, confirmedMessages, hasMore, loading, onLoadMore, visibleConfirmed]);
 
-  // 检测 @ 我的消息是否在视口上方（被刷上去）→ 显示「@我」跳转按钮
-  const refreshMentionAbove = useCallback(() => {
-    if (!mentionTargetId) {
-      setMentionAbove(false);
-      return;
-    }
+  // 向下扩展窗口：翻历史（窗口不含尾部）且滚到窗口底部时，尾部后移一页（50 条），
+  // 让更新的消息逐步可见，而不是回底才突然刷出一大批。锚定底部消息保持视口不跳。
+  const requestNewer = useCallback(() => {
+    if (loading || loadMoreInFlightRef.current || pendingAnchorRef.current) return;
+    if (!hasHiddenTail) return;
+
     const element = scrollRef.current;
     if (!element) return;
-    const node = findMessageNode(element, mentionTargetId);
-    if (!node) {
-      setMentionAbove(false);
-      return;
+    const previousFirst = visibleConfirmed[0]?.id ?? null;
+    const previousLast = visibleConfirmed[visibleConfirmed.length - 1]?.id ?? null;
+    const anchorNode = findMessageNode(element, previousLast);
+    pendingAnchorRef.current = {
+      anchorId: previousLast,
+      previousVisibleFirstId: previousFirst,
+      previousVisibleLastId: previousLast,
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      relativeTop: relativeTop(element, anchorNode),
+      phase: "awaiting-window",
+    };
+
+    const nextEnd = Math.min(confirmedMessages.length, bounds.end + HISTORY_PAGE_LIMIT);
+    const nextStart = Math.max(0, nextEnd - MESSAGE_RENDER_WINDOW_LIMIT);
+    const nextWindow = windowForBounds(confirmedMessages, nextStart, nextEnd);
+    if (nextWindow) {
+      pendingAnchorRef.current.targetStartId = nextWindow.startId;
+      setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
     }
-    const nodeRect = node.getBoundingClientRect();
-    const elRect = element.getBoundingClientRect();
-    setMentionAbove(nodeRect.bottom < elRect.top);
-  }, [mentionTargetId]);
+  }, [bounds.end, confirmedMessages, hasHiddenTail, loading, visibleConfirmed]);
 
-  // 窗口/消息变化时重算 @我 按钮可见性（新消息、扩窗、定位后）
-  useLayoutEffect(() => {
-    refreshMentionAbove();
-  }, [refreshMentionAbove, visibleSignature]);
+  const isSpecial = useCallback(
+    (message: ChatMessage) =>
+      specialSeqs.has(message.seq) ||
+      (message.segments ?? []).some((s) => s.type === "mention" && s.user_id === currentUserId),
+    [currentUserId, specialSeqs],
+  );
 
-  // 滚动定位到目标消息（居中）+ 短暂辉光高亮（design.md §7/F10 玻璃辉光一闪）
-  const scrollToMentionAndHighlight = useCallback((id: string) => {
+  const tagTarget = useMemo(() => {
+    const candidates: Array<{ kind: "unread" | "mention" | "reply"; seq: number; count: number }> = [];
+    // 标签计数覆盖全部未读；批量已读动作仍只处理普通消息，特殊消息由各自标签承接。
+    if (ordinaryUnreadSeqs.length > 0 && unreadSeqs[0] != null) {
+      candidates.push({ kind: "unread", seq: unreadSeqs[0], count: unreadSeqs.length });
+    }
+    if (mentionSeqs[mentionSeqs.length - 1] != null) {
+      candidates.push({ kind: "mention", seq: mentionSeqs[mentionSeqs.length - 1], count: mentionSeqs.length });
+    }
+    if (replySeqs[replySeqs.length - 1] != null) {
+      candidates.push({ kind: "reply", seq: replySeqs[replySeqs.length - 1], count: replySeqs.length });
+    }
+    return candidates;
+  }, [mentionSeqs, ordinaryUnreadSeqs, replySeqs]);
+
+  const clearHighlight = useCallback(() => {
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = null;
+    setJumpHighlightId(null);
+  }, []);
+
+  useEffect(() => clearHighlight, [clearHighlight]);
+
+  const scrollToMessageAndHighlight = useCallback((id: string) => {
     const element = scrollRef.current;
-    if (!element) return;
-    const node = findMessageNode(element, id);
-    if (!node) return;
+    const node = element ? findMessageNode(element, id) : null;
+    if (!element || !node) return false;
     const elRect = element.getBoundingClientRect();
     const nodeRect = node.getBoundingClientRect();
     element.scrollTop += nodeRect.top - elRect.top - element.clientHeight / 2;
     lastScrollTopRef.current = element.scrollTop;
-    setMentionHighlightId(id);
-    window.setTimeout(() => {
-      setMentionHighlightId((cur) => (cur === id ? null : cur));
-    }, 2000);
+    setJumpHighlightId(id);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => {
+      setJumpHighlightId((current) => (current === id ? null : current));
+      highlightTimerRef.current = null;
+    }, 1600);
+    return true;
   }, []);
 
-  const handleJumpToMention = () => {
-    if (!mentionTargetId) return;
-    const idx = confirmedMessages.findIndex((m) => m.id === mentionTargetId);
-    if (idx < 0) return;
-    // 目标已在窗口内 → 直接定位 + 高亮
-    if (visibleConfirmed.some((m) => m.id === mentionTargetId)) {
-      scrollToMentionAndHighlight(mentionTargetId);
+  // 正常聊天（活跃会话）中被 @/回复的新消息：WS 已直接标已读，这里只补泛光圈，
+  // 不弹未读/@/回复标签。滚底由下方统一贴底 effect 承接。
+  useLayoutEffect(() => {
+    if (!baselinedRef.current) return;
+    for (const m of confirmedMessages) {
+      if (!justArrivedIds.has(m.id)) continue;
+      if (m.sender_id === currentUserId) continue;
+      if (!m.read_by_me) continue;
+      const isSpecialArrival =
+        (m.segments ?? []).some((s) => s.type === "mention" && s.user_id === currentUserId) ||
+        m.reply_to != null;
+      if (!isSpecialArrival) continue;
+      setJumpHighlightId(m.id);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        setJumpHighlightId((current) => (current === m.id ? null : current));
+        highlightTimerRef.current = null;
+      }, 1600);
+      break;
+    }
+  }, [confirmedMessages, currentUserId, justArrivedIds]);
+
+  // 自己发送消息（乐观 pending 插入）→ 回底，即使此前向上翻阅过历史。
+  // 只标记回底意图，滚底统一交给下方贴底 effect，避免双路径 scrollTop 竞争造成跳变。
+  const prevSelfPendingIdsRef = useRef<string[]>([]);
+  useLayoutEffect(() => {
+    const selfPendingIds = localMessages
+      .filter((m) => m.pending && m.sender_id === currentUserId)
+      .map((m) => m.id);
+    const prev = prevSelfPendingIdsRef.current;
+    const hasNew = selfPendingIds.some((id) => !prev.includes(id));
+    prevSelfPendingIdsRef.current = selfPendingIds;
+    if (!hasNew) return;
+
+    atBottomRef.current = true;
+    setFarFromBottom(false);
+    if (hasHiddenTail) {
+      const end = confirmedMessages.length;
+      const start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+      const nextWindow = windowForBounds(confirmedMessages, start, end);
+      if (nextWindow) {
+        jumpToBottomRef.current = true;
+        setWindowRange((prevWindow) => (sameWindow(prevWindow, nextWindow) ? prevWindow : nextWindow));
+      }
+    } else {
+      jumpToBottomRef.current = true;
+    }
+  }, [localMessages, currentUserId, confirmedMessages, hasHiddenTail]);
+
+  const setWindowAround = useCallback((id: string, kind: "unread" | "mention" | "reply") => {
+    const index = confirmedMessages.findIndex((message) => message.id === id);
+    if (index < 0) return false;
+    const half = Math.floor(MESSAGE_RENDER_WINDOW_LIMIT / 2);
+    let start = Math.max(0, index - half);
+    let end = Math.min(confirmedMessages.length, start + MESSAGE_RENDER_WINDOW_LIMIT);
+    if (end - start < MESSAGE_RENDER_WINDOW_LIMIT) start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+    const nextWindow = windowForBounds(confirmedMessages, start, end);
+    if (!nextWindow) return false;
+    jumpTargetRef.current = { id, kind };
+    setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
+    return true;
+  }, [confirmedMessages]);
+
+  const findBySeq = useCallback(
+    (seq: number) => {
+      const liveMessages = conversation?.id
+        ? useMessageStore.getState().buckets[conversation.id]?.messages ?? []
+        : [];
+      const source = liveMessages.length > 0 ? liveMessages : confirmedMessages;
+      return source.find((item) => item.seq === seq && item.seq > 0) ?? null;
+    },
+    [conversation?.id, confirmedMessages],
+  );
+
+  const jumpToMessage = useCallback(async (message: ChatMessage, kind: "unread" | "mention" | "reply") => {
+    const targetId = message.id;
+    jumpSeqRef.current = { seq: message.seq, kind };
+    jumpTargetRef.current = { id: targetId, kind };
+    if (!visibleConfirmed.some((item) => item.id === targetId)) {
+      if (confirmedMessages.some((item) => item.id === targetId)) {
+        setWindowAround(targetId, kind);
+      } else if (findBySeq(message.seq)) {
+        // 历史页已经写入 store，但父组件尚未把新数组传入本轮闭包；
+        // 保留 seq 意图，由后续 layout effect 在新窗口提交后完成定位。
+        return;
+      } else if (message.seq > 0 && onLoadUntilSeq) {
+        const loaded = jumpLoadRef.current ?? onLoadUntilSeq(message.seq);
+        jumpLoadRef.current = loaded;
+        try {
+          if (!(await loaded)) return;
+        } finally {
+          if (jumpLoadRef.current === loaded) jumpLoadRef.current = null;
+        }
+        // store 已经写入，但本轮闭包可能尚未拿到新 props；交给下一次
+        // confirmedMessages 提交后的 layout effect 按 seq 完成窗口化与定位。
+        jumpSeqRef.current = { seq: message.seq, kind };
+      }
       return;
     }
-    // 目标在缓存但不在窗口（被窗口裁掉）→ 扩窗到包含目标，下一帧定位
-    const half = Math.floor(MESSAGE_RENDER_WINDOW_LIMIT / 2);
-    let start = Math.max(0, idx - half);
-    let end = Math.min(confirmedMessages.length, start + MESSAGE_RENDER_WINDOW_LIMIT);
-    if (end - start < MESSAGE_RENDER_WINDOW_LIMIT) {
-      start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+    if (scrollToMessageAndHighlight(targetId) && onMarkRead && kind !== "unread") {
+      await onMarkRead(message, true);
     }
-    const nextWindow = windowForBounds(confirmedMessages, start, end);
-    if (nextWindow) {
-      jumpToMentionRef.current = mentionTargetId;
-      setWindowRange((prev) => (sameWindow(prev, nextWindow) ? prev : nextWindow));
-    }
-  };
+  }, [confirmedMessages, findBySeq, onLoadUntilSeq, onMarkRead, scrollToMessageAndHighlight, setWindowAround, visibleConfirmed]);
 
-  // 扩窗提交后定位到 @ 我消息
-  useLayoutEffect(() => {
-    if (jumpToMentionRef.current) {
-      const id = jumpToMentionRef.current;
-      jumpToMentionRef.current = null;
-      scrollToMentionAndHighlight(id);
+  const handleQuoteJump = useCallback((reply: ChatMessage) => {
+    const target = reply.reply_to ? messages.find((item) => item.id === reply.reply_to) : null;
+    if (target) {
+      void jumpToMessage(target, "reply");
+      return;
     }
-  }, [visibleSignature, scrollToMentionAndHighlight]);
+    if (reply.reply_to_seq != null) {
+      const targetBySeq = findBySeq(reply.reply_to_seq);
+      if (targetBySeq) void jumpToMessage(targetBySeq, "reply");
+      else if (onLoadUntilSeq) {
+        void onLoadUntilSeq(reply.reply_to_seq).then((loaded) => {
+          const loadedTarget = findBySeq(reply.reply_to_seq!);
+          if (loaded && loadedTarget) void jumpToMessage(loadedTarget, "reply");
+        });
+      }
+    }
+  }, [findBySeq, jumpToMessage, messages, onLoadUntilSeq]);
+
+  const tagDirection = useCallback((seq: number): "above" | "below" | null => {
+    const element = scrollRef.current;
+    if (!element) return null; // 滚动容器未挂载，暂不渲染标签
+    const target = findBySeq(seq);
+    if (!target) return null; // 目标不在缓存，暂不渲染
+    const node = findMessageNode(element, target.id);
+    if (node) {
+      const nodeRect = node.getBoundingClientRect();
+      const elRect = element.getBoundingClientRect();
+      if (nodeRect.bottom < elRect.top) return "above";
+      if (nodeRect.top > elRect.bottom) return "below";
+      // 目标仍在可视区：标签位置取目标中心相对视口中心。
+      const targetCenter = (nodeRect.top + nodeRect.bottom) / 2;
+      const viewportCenter = (elRect.top + elRect.bottom) / 2;
+      return targetCenter <= viewportCenter ? "above" : "below";
+    }
+    // 目标在缓存但不在窗口：按 seq 相对当前窗口判断上下。
+    const firstSeq = visibleConfirmed[0]?.seq;
+    const lastSeq = visibleConfirmed[visibleConfirmed.length - 1]?.seq;
+    if (firstSeq != null && seq < firstSeq) return "above";
+    if (lastSeq != null && seq > lastSeq) return "below";
+    return null;
+  }, [findBySeq, scrollTick, visibleConfirmed]);
+
+  const handleJumpTag = useCallback(async (tag: { kind: "unread" | "mention" | "reply"; seq: number }) => {
+    const target = findBySeq(tag.seq);
+    if (!target) {
+      if (onLoadUntilSeq) await onLoadUntilSeq(tag.seq);
+      const loaded = findBySeq(tag.seq);
+      if (!loaded) return;
+      await jumpToMessage(loaded, tag.kind);
+    } else {
+      await jumpToMessage(target, tag.kind);
+    }
+    if (tag.kind === "unread" && onMarkConversationRead && ordinaryUnreadSeqs.length > 0) {
+      const throughSeq = ordinaryUnreadSeqs[ordinaryUnreadSeqs.length - 1];
+      const excluded = unreadMessages.filter(isSpecial).map((message) => message.id);
+      await onMarkConversationRead(throughSeq, excluded);
+    }
+  }, [findBySeq, isSpecial, onLoadUntilSeq, onMarkConversationRead, ordinaryUnreadSeqs, unreadMessages, jumpToMessage]);
+
+  useLayoutEffect(() => {
+    const pendingSeq = jumpSeqRef.current;
+    if (pendingSeq) {
+      const target = confirmedMessages.find((item) => item.seq === pendingSeq.seq);
+      if (target && !visibleConfirmed.some((item) => item.id === target.id)) {
+        const index = confirmedMessages.findIndex((item) => item.id === target.id);
+        const half = Math.floor(MESSAGE_RENDER_WINDOW_LIMIT / 2);
+        let start = Math.max(0, index - half);
+        let end = Math.min(confirmedMessages.length, start + MESSAGE_RENDER_WINDOW_LIMIT);
+        if (end - start < MESSAGE_RENDER_WINDOW_LIMIT) start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
+        const nextWindow = windowForBounds(confirmedMessages, start, end);
+        if (nextWindow) {
+          setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
+          return;
+        }
+      }
+      if (target && visibleConfirmed.some((item) => item.id === target.id)) {
+        jumpSeqRef.current = null;
+        jumpTargetRef.current = null;
+        if (scrollToMessageAndHighlight(target.id) && onMarkRead && pendingSeq.kind !== "unread") {
+          void Promise.resolve(onMarkRead(target, true)).catch(() => undefined);
+        }
+        return;
+      }
+    }
+    const pending = jumpTargetRef.current;
+    if (!pending || !visibleConfirmed.some((item) => item.id === pending.id)) return;
+    jumpTargetRef.current = null;
+    const target = confirmedMessages.find((item) => item.id === pending.id);
+    if (!target) return;
+    if (scrollToMessageAndHighlight(target.id) && onMarkRead && pending.kind !== "unread") {
+      void Promise.resolve(onMarkRead(target, true)).catch(() => undefined);
+    }
+  }, [confirmedMessages, onMarkRead, scrollToMessageAndHighlight, visibleConfirmed]);
+
+  // 特殊消息只有真正进入视口才自动标已读；跳转按钮也走同一精确路径。
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !onMarkRead) return;
+    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
+          const id = (entry.target as HTMLElement).dataset.messageId;
+          const target = id ? confirmedMessages.find((item) => item.id === id) : null;
+          if (!target || target.read_by_me || !isSpecial(target) || pendingReadIdsRef.current.has(target.id)) continue;
+          pendingReadIdsRef.current.add(target.id);
+          void Promise.resolve(onMarkRead(target, true)).finally(() => pendingReadIdsRef.current.delete(target.id));
+        }
+      },
+      { root: element, threshold: 0.6 },
+    );
+    if (!observer) return;
+    for (const message of visibleConfirmed) {
+      if (isSpecial(message) && !message.read_by_me) {
+        const node = findMessageNode(element, message.id);
+        if (node) observer.observe(node);
+      }
+    }
+    return () => observer.disconnect();
+  }, [confirmedMessages, isSpecial, onMarkRead, visibleConfirmed]);
 
   const handleScroll = () => {
     const element = scrollRef.current;
@@ -592,9 +869,35 @@ export function MessageList({
 
     // 若窗口当前不含缓存尾部，物理滚到该窗口底部不等于回到实时消息底部。
     atBottomRef.current = physicallyAtBottom && !hasHiddenTail;
+    if (conversation?.id) {
+      useMessageStore.getState().setViewerAtBottom(conversation.id, atBottomRef.current);
+    }
     lastScrollTopRef.current = scrollTop;
     setFarFromBottom(distanceToBottom > element.clientHeight);
-    refreshMentionAbove();
+    setScrollTick((value) => value + 1);
+
+    // 翻历史（窗口不含尾部）且滚到窗口底部 → 窗口向下扩展一页，正常滚动看到新消息。
+    if (physicallyAtBottom && hasHiddenTail) {
+      requestNewer();
+    }
+
+    // 真正回到底部（窗口含尾部）→ 清除未读标签：用户已看到最新消息。
+    if (physicallyAtBottom && !hasHiddenTail) {
+      if (!unreadClearedAtBottomRef.current && conversation?.id && onMarkAllRead) {
+        const hasUnread =
+          (conversation.unread_seqs?.length ?? 0) > 0 ||
+          (conversation.mention_unread_seqs?.length ?? 0) > 0 ||
+          (conversation.reply_unread_seqs?.length ?? 0) > 0;
+        if (hasUnread) {
+          unreadClearedAtBottomRef.current = true;
+          void Promise.resolve(onMarkAllRead()).catch(() => {
+            unreadClearedAtBottomRef.current = false;
+          });
+        }
+      }
+    } else {
+      unreadClearedAtBottomRef.current = false;
+    }
 
     if (scrollTop < HISTORY_PRELOAD_THRESHOLD) requestOlder();
   };
@@ -623,6 +926,39 @@ export function MessageList({
     setWindowRange(nextWindow);
   };
 
+  type JumpTag = { kind: "unread" | "mention" | "reply"; seq: number; count: number };
+
+  const tagLabel = (tag: JumpTag) =>
+    tag.kind === "unread"
+      ? `${tag.count} 条新消息`
+      : tag.kind === "mention"
+        ? `@我${tag.count > 1 ? ` ${tag.count}` : ""}`
+        : `回复${tag.count > 1 ? ` ${tag.count}` : ""}`;
+
+  const tagAriaLabel = (tag: JumpTag) =>
+    tag.kind === "unread"
+      ? `跳转到 ${tag.count} 条未读消息`
+      : tag.kind === "mention"
+        ? `跳转到 ${tag.count} 条 @我的消息`
+        : `跳转到 ${tag.count} 条回复消息`;
+
+  const renderJumpTag = (tag: JumpTag, direction: "above" | "below") => (
+    <motion.button
+      key={tag.kind}
+      type="button"
+      className="message-jump-mention"
+      initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: direction === "above" ? -8 : 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: direction === "above" ? -8 : 8 }}
+      transition={reducedMotion ? { duration: 0.1 } : { duration: 0.18, ease: "easeOut" }}
+      onClick={() => void handleJumpTag(tag)}
+      aria-label={tagAriaLabel(tag)}
+      title={tag.kind === "unread" ? "未读消息" : tag.kind === "mention" ? "有人 @ 我" : "有人回复了你"}
+    >
+      {tagLabel(tag)}
+    </motion.button>
+  );
+
   return (
     <div className="message-list">
       <div className="message-scroll" ref={scrollRef} onScroll={handleScroll}>
@@ -649,7 +985,7 @@ export function MessageList({
                 key={m.id ?? `${m.conversation_id}-${m.seq}`}
                 data-message-id={m.id}
                 data-message-seq={m.seq}
-                className={m.id === mentionHighlightId ? "mention-jump-highlight" : undefined}
+                className={m.id === jumpHighlightId ? "mention-jump-highlight" : undefined}
               >
                 {grouped && (
                   <div className="time-divider">
@@ -667,6 +1003,8 @@ export function MessageList({
                   onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
                   quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}
                   onQuote={onQuote}
+                  onQuoteJump={m.reply_to ? handleQuoteJump : undefined}
+                  jumpedRecalled={m.id === jumpHighlightId && m.status === "recalled"}
                   onRecall={onRecall && canRecall(m, currentUserId) ? onRecall : undefined}
                   onRetry={onRetry && m.sendFailed ? onRetry : undefined}
                   onRemove={onRemove && m.sendFailed ? onRemove : undefined}
@@ -680,17 +1018,20 @@ export function MessageList({
           )}
         </div>
       </div>
-      {mentionTargetId && mentionAbove && (
-        <button
-          type="button"
-          className="message-jump-mention"
-          onClick={handleJumpToMention}
-          aria-label="跳转到 @ 我的消息"
-          title="有人 @ 我"
-        >
-          @我
-        </button>
-      )}
+      <div className="message-jump-tags message-jump-tags-above" aria-live="polite">
+        <AnimatePresence>
+          {tagTarget
+            .filter((tag) => tagDirection(tag.seq) === "above")
+            .map((tag) => renderJumpTag(tag, "above"))}
+        </AnimatePresence>
+      </div>
+      <div className="message-jump-tags message-jump-tags-below" aria-live="polite">
+        <AnimatePresence>
+          {tagTarget
+            .filter((tag) => tagDirection(tag.seq) === "below")
+            .map((tag) => renderJumpTag(tag, "below"))}
+        </AnimatePresence>
+      </div>
       <button
         type="button"
         className={`message-jump-bottom${showBackToBottom ? " is-visible" : ""}`}

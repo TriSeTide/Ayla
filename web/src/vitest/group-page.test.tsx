@@ -174,9 +174,9 @@ describe("GroupPage 宽屏", () => {
     });
     renderGroup("/group/1");
     expect(screen.getByRole("button", { name: "切换到群聊 测试群" })).toBeInTheDocument();
-    // 进入群 1 即 openConversation 清其未读（语义正确）；另个群未读徽标保留
-    const badge = document.querySelector(".server-item-badge");
-    expect(badge?.textContent).toBe("5");
+    // 进入群 1 仍保持未读状态，由聊天消息区的定位标签承接；另个群未读徽标保留
+    const badges = Array.from(document.querySelectorAll(".server-item-badge"));
+    expect(badges.map((badge) => badge.textContent)).toEqual(["3", "5"]);
   });
 
   it("频道侧栏切场景 → 内容区切换", async () => {

@@ -972,10 +972,38 @@
   box-shadow: var(--glow-shadow);
 }
 
-/* @我 跳转按钮（M8 F9）：@ 我的消息被刷上去时，顶部居中胶囊提示，点击定位 */
+/* 聊天定位标签（F7/F10）：目标在上方贴顶部，下方贴底部，统一胶囊语言。 */
+.message-jump-tags {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.message-jump-tags-above {
+  top: var(--sp-3);
+}
+
+.message-jump-tags-below {
+  bottom: var(--sp-3);
+}
+
+.message-jump-tags .message-jump-mention {
+  position: relative;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+  pointer-events: auto;
+}
+
 .message-jump-mention {
   position: absolute;
-  top: var(--sp-3);
   left: 50%;
   transform: translateX(-50%);
   z-index: 2;
@@ -992,12 +1020,10 @@
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  animation: mention-jump-in var(--dur-fast) var(--ease-out);
 }
 
-@keyframes mention-jump-in {
-  from { opacity: 0; transform: translate(-50%, -8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+.message-jump-mention:hover {
+  filter: brightness(1.04);
 }
 
 /* @ 我消息定位后的辉光闪烁（design.md §7/F10 玻璃辉光一闪） */
@@ -1175,6 +1201,9 @@
 
 /* 引用竖条：左 3px ice + 弱化一层（design.md §4 Chat Bubbles） */
 .quote-strip {
+  display: block;
+  width: 100%;
+  border: 0;
   border-left: 3px solid var(--ice-500);
   padding: var(--sp-1) var(--sp-2);
   margin-bottom: var(--sp-1);
@@ -1186,6 +1215,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quote-strip:hover,
+.quote-strip:focus-visible {
+  background: rgba(255, 250, 251, 0.65);
 }
 
 /* 气泡操作（收藏/引用/撤回）：与气泡同一行（别人右侧/自己左侧），hover 浮现 */

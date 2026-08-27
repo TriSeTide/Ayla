@@ -39,7 +39,6 @@ import { useSwipe } from "../hooks/useSwipe";
 import { useTouchAxisGuard } from "../hooks/useTouchAxisGuard";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
-import { markConversationRead } from "../hooks/useChat";
 import { useChatStore } from "../stores/chat";
 import { GROUP_SCENE_ORDER, useGroupStore } from "../stores/group";
 import type { GroupScene } from "../stores/group";
@@ -213,9 +212,8 @@ export function GroupPage() {
     setActiveScene(effectiveScene);
     useHomeStore.getState().setRecentGroup(id);
     // 进入即打开群会话（GroupChat 内部也 openConversation，幂等）
+    // 进入群聊仍保持滚底；未读由 MessageList 的定位标签承接，不在打开时清除。
     useChatStore.getState().openConversation(id);
-    useChatStore.getState().clearUnread(id);
-    void markConversationRead(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, effectiveScene]);
 

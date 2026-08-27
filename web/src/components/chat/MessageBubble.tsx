@@ -50,6 +50,8 @@ export function MessageBubble({
   onSenderClick,
   quoteText,
   onQuote,
+  onQuoteJump,
+  jumpedRecalled = false,
   onRecall,
   onRetry,
   onRemove,
@@ -72,6 +74,10 @@ export function MessageBubble({
   /** 被引用消息的预览文本（父级解析） */
   quoteText?: string | null;
   onQuote?: (msg: ChatMessage) => void;
+  /** 点击引用块 → 定位被引用的原消息。 */
+  onQuoteJump?: (message: ChatMessage) => void;
+  /** F10 定位到已撤回原消息时显示明确的定位态文案。 */
+  jumpedRecalled?: boolean;
   onRecall?: (msg: ChatMessage) => void;
   /** 乐观发送失败：重试（重新上传+发送，幂等键复用） */
   onRetry?: (msg: ChatMessage) => void;
@@ -199,12 +205,24 @@ export function MessageBubble({
           {sendState}
           <div className={`${bubbleClass} ${isMedia && !recalled ? "bubble-media" : ""}`}>
             {quoteText != null && !recalled && (
-              <div className="quote-strip" title={quoteText}>
-                {quoteText}
-              </div>
+              onQuoteJump ? (
+                <button
+                  type="button"
+                  className="quote-strip"
+                  onClick={() => onQuoteJump(message)}
+                  title="跳转到被引用消息"
+                  aria-label={`跳转到被引用消息：${quoteText}`}
+                >
+                  {quoteText}
+                </button>
+              ) : (
+                <div className="quote-strip" title={quoteText}>
+                  {quoteText}
+                </div>
+              )
             )}
             {recalled ? (
-              <span>{isSelf ? "你撤回了一条消息" : "对方撤回了一条消息"}</span>
+              <span>{jumpedRecalled ? "该消息已撤回" : isSelf ? "你撤回了一条消息" : "对方撤回了一条消息"}</span>
             ) : message.type === "system" ? (
               <span>{message.content}</span>
             ) : isMedia ? (

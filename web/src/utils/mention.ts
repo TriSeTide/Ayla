@@ -113,17 +113,18 @@ export function detectMentionAtCaret(editor: HTMLElement): { query: string } | n
   if (!sel || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
   const node = range.startContainer;
-  if (node.nodeType !== Node.TEXT_NODE) return null;
   if (!editor.contains(node)) return null; // 光标须在本编辑器内
+  // @Token 是 contenteditable=false 的 span，光标不会落在其内部，故只需处理文本节点。
+  if (node.nodeType !== Node.TEXT_NODE) return null;
   const offset = range.startOffset;
   const text = node.textContent ?? "";
   const before = text.slice(0, offset);
   const atIdx = before.lastIndexOf("@");
   if (atIdx < 0) return null;
-  const beforeAt = before[atIdx - 1];
-  if (beforeAt !== undefined && !/[\s\n]/.test(beforeAt)) return null; // @ 前须为边界（行首/空格）
   const query = before.slice(atIdx + 1);
-  if (/[\s\n]/.test(query)) return null; // @ 名不含空白
+  // @ 后到光标之间不允许空白（正在输入 @xxx 的过程中）。
+  if (/[\s\n]/.test(query)) return null;
+  // 任意位置：@ 前不强制空白边界，QQ 式「输入 @ 即弹成员选择器」，支持文本中/多次 @。
   return { query };
 }
 

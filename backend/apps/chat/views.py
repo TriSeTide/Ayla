@@ -244,7 +244,7 @@ class MessageView(APIView):
             limit = 50
         limit = max(1, min(limit, 200))
         msgs = list(qs.order_by("-seq")[:limit][::-1])
-        return Response(MessageSerializer(msgs, many=True).data)
+        return Response(MessageSerializer(msgs, many=True, context={"request": request}).data)
 
     def post(self, request, conv_id):
         conv = _get_conv_or_404(conv_id)
@@ -298,7 +298,8 @@ class MessageView(APIView):
                         status=status.HTTP_409_CONFLICT,
                     )
                 return Response(
-                    MessageSerializer(existing).data, status=status.HTTP_200_OK
+                    MessageSerializer(existing, context={"request": request}).data,
+                    status=status.HTTP_200_OK,
                 )
 
         msg = services.create_message(
@@ -321,7 +322,10 @@ class MessageView(APIView):
             on_user_message_to_elysia(message=msg, conversation=conv)
         except Exception:
             logger.exception("elysia bridge inject failed for message %s", msg.id)
-        return Response(MessageSerializer(msg).data, status=status.HTTP_201_CREATED)
+        return Response(
+            MessageSerializer(msg, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ConversationReadView(APIView):
@@ -333,7 +337,23 @@ class ConversationReadView(APIView):
             return _not_found("会话不存在")
         if not services.user_can_access(request.user, conv):
             return _forbidden()
-        services.mark_conversation_read(request.user, conv)
+        through_seq = request.data.get("through_seq")
+        exclude_message_ids = request.data.get("exclude_message_ids") or []
+        preserve_special = bool(request.data.get("preserve_special", False))
+        if through_seq is not None:
+            try:
+                through_seq = int(through_seq)
+            except (TypeError, ValueError):
+                return _bad_request("through_seq 必须是整数")
+        if not isinstance(exclude_message_ids, list):
+            return _bad_request("exclude_message_ids 必须是数组")
+        services.mark_conversation_read(
+            request.user,
+            conv,
+            through_seq=through_seq,
+            exclude_message_ids=exclude_message_ids,
+            preserve_special=preserve_special,
+        )
         return Response({"detail": "已读"})
 
 
@@ -349,7 +369,8 @@ class MessageReadView(APIView):
         msg = _get_msg_or_404(conv, mid)
         if msg is None:
             return _not_found("消息不存在")
-        services.mark_read(request.user, msg)
+        exact = bool(request.data.get("exact", False))
+        services.mark_read(request.user, msg, through=not exact)
         return Response({"detail": "已读"})
 
 
@@ -374,7 +395,7 @@ class MessageRecallView(APIView):
                 {"detail": "超过撤回时限"}, status=status.HTTP_400_BAD_REQUEST
             )
         services.broadcast_recall(conv.id, msg.id, msg.seq)
-        return Response(MessageSerializer(msg).data)
+        return Response(MessageSerializer(msg, context={"request": request}).data)
 
 
 class TypingView(APIView):

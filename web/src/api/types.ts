@@ -185,6 +185,10 @@ export interface ChatMessage {
   /** 图文混排段（type=mixed；媒体段带完整 descriptor；旧消息/单媒体为 null） */
   segments?: MediaSegment[] | null;
   reply_to: string | null;
+  /** 被引用消息的会话序号，供窗口化聊天按 before_seq 定位；旧服务端可缺省。 */
+  reply_to_seq?: number | null;
+  /** 当前登录用户的已读回执状态；旧服务端可缺省。 */
+  read_by_me?: boolean;
   status: MessageStatus;
   /** 会话内单调递增序号（补发/分页游标） */
   seq: number;
@@ -242,12 +246,20 @@ export interface ConversationSummary {
   my_role: "member" | "admin" | "owner" | null;
   member_count: number;
   unread_count: number;
+  /** 本人已读游标（会话内 seq）；旧后端/旧数据可能缺失。 */
+  last_read_seq?: number;
   /** 本人视图是否置顶（M5 会话管理；旧后端/旧数据可能缺失） */
   is_pinned?: boolean;
   /** 最新一条消息预览（无消息为 null；旧后端可能缺失） */
   last_message?: LastMessagePreview | null;
   /** 本会话 @ 我且未读的消息数（M8；旧后端可能缺失） */
   mention_unread_count?: number;
+  /** 未读消息的会话序号集合（F7/F10；旧后端可能缺失） */
+  unread_seqs?: number[];
+  /** @ 我未读消息的会话序号集合（F9/F10；旧后端可能缺失） */
+  mention_unread_seqs?: number[];
+  /** 回复未读消息的会话序号集合（F10；旧后端可能缺失） */
+  reply_unread_seqs?: number[];
   created_at: string;
   /** 私聊对端用户（ConversationListSerializer 补充） */
   peer: UserPublic | null;
@@ -267,8 +279,16 @@ export interface ConversationDetail {
   my_role: "member" | "admin" | "owner" | null;
   member_count: number;
   unread_count: number;
+  /** 本人已读游标（会话内 seq）；旧后端/旧数据可能缺失。 */
+  last_read_seq?: number;
   is_pinned?: boolean;
   last_message?: LastMessagePreview | null;
+  /** 未读消息的会话序号集合（F7/F10；旧后端可能缺失） */
+  unread_seqs?: number[];
+  /** @ 我未读消息的会话序号集合（F9/F10；旧后端可能缺失） */
+  mention_unread_seqs?: number[];
+  /** 回复未读消息的会话序号集合（F10；旧后端可能缺失） */
+  reply_unread_seqs?: number[];
   created_at: string;
 }
 
@@ -327,6 +347,10 @@ export interface MessageNewFrame {
     /** 图文混排段（type=mixed；媒体段带 descriptor；旧后端缺失为 null） */
     segments?: MediaSegment[] | null;
     reply_to: string | null;
+    /** 被引用消息的会话序号，供跨窗口定位；旧 WS 服务端可缺省。 */
+    reply_to_seq?: number | null;
+    /** 发送方幂等键：自己发送的消息用它精确收敛本地乐观气泡，避免双气泡。 */
+    idempotency_key?: string | null;
     seq: number;
     ts: string;
   };
