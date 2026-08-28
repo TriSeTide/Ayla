@@ -14,7 +14,14 @@ from apps.live.services import gen_stream_key
 def _make_channel(owner, **kwargs) -> LiveChannel:
     kwargs.setdefault("title", "可见性测试直播间")
     kwargs.setdefault("stream_key", gen_stream_key())
-    return LiveChannel.objects.create(owner=owner, **kwargs)
+    group = kwargs.get("group")
+    ch = LiveChannel.objects.create(owner=owner, **kwargs)
+    # 群可见性由 allowed_groups 白名单提供（group FK 不承载可见性）；
+    # 测试直接 ORM 建 group 房间时，把归属群落为白名单，模拟 services 层的兜底。
+    if group is not None and kwargs.get("visibility") == Visibility.GROUP:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(ch, [str(group.id)])
+    return ch
 
 
 def _make_group(group_owner, user):
@@ -56,7 +63,7 @@ def test_public_visible_to_all_logged_in(user_factory):
         assert can_join(user, ch), f"{user.username} 应可进入 public 房间"
         assert ch in visible_queryset(LiveChannel, user), f"{user.username} 列表应含 public 房间"
 
-    # 群归属房间对群员也可见（Q(group__in=my_groups) 分支，开发文档 §1.1 公式）
+    # public 房间对任何登录用户可见（与群归属无关；group FK 不承载可见性）
     ch2 = _make_channel(owner, visibility=Visibility.PUBLIC, group=group)
     assert ch2 in visible_queryset(LiveChannel, member)
 

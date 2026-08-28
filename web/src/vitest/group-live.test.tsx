@@ -183,7 +183,7 @@ describe("GroupLive 多群可见性（allowed_group_ids）", () => {
         const gid = scope.split(":")[1];
         return Promise.resolve(
           [g16, multi].filter(
-            (c) => String(c.group) === gid || (c.allowed_group_ids ?? []).includes(gid),
+            (c) => (c.allowed_group_ids ?? []).includes(gid),
           ),
         );
       }

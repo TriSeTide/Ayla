@@ -27,7 +27,13 @@ def _make_friends(a, b):
 
 
 def _make_room(owner, name="测试房", **kwargs):
-    return GameRoom.objects.create(owner=owner, name=name, **kwargs)
+    group = kwargs.get("group")
+    room = GameRoom.objects.create(owner=owner, name=name, **kwargs)
+    # 群可见性由 allowed_groups 白名单提供（group FK 不承载可见性），模拟 services 兜底。
+    if group is not None and kwargs.get("visibility") == Visibility.GROUP:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(room, [str(group.id)])
+    return room
 
 
 # ---------- 创建 ----------

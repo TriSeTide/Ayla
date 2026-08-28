@@ -18,8 +18,7 @@ import { useShellStore } from "../../stores/shell";
 export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () => void }) {
   const allRooms = useBoardgameStore((s) => s.rooms);
   const rooms = allRooms.filter((room) =>
-    String(room.group) === String(groupId)
-    || (room.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+    (room.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
   );
   const loading = useBoardgameStore((s) => s.roomsLoading);
   const error = useBoardgameStore((s) => s.error);

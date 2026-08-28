@@ -51,7 +51,7 @@ export function VoiceChannelCreate({
 
   return (
     <div className="voice-channel-create">
-      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
+      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} lockGroup={!!group} />
       <input
         className="voice-create-input"
         placeholder="新语音频道名称"

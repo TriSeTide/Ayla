@@ -18,8 +18,8 @@ DEFAULT_GAME_TYPE = "boardgame"
 def _resolve_visibility(group, visibility) -> str:
     """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
 
-    visibility=group 且无归属群时不再拒绝（Bug #10）：可见性可由 allowed_group_ids
-    白名单提供，是否真的选了群由 create_room 在 allowed_group_ids 为空时校验。
+    visibility=group 的群可见性由 allowed_group_ids 白名单提供（group FK 不承载可见性）。
+    "两者皆空"（group 为空且无白名单）由 create_room 校验（Bug #10 校验后置）。
     """
     if visibility in (None, ""):
         return Visibility.GROUP if group is not None else Visibility.PUBLIC
@@ -51,6 +51,11 @@ def create_room(user, name: str, group=None, visibility=None, game_type=None, al
     if allowed_group_ids is not None:
         from apps.common.visibility import set_allowed_groups
         set_allowed_groups(room, allowed_group_ids)
+    elif visibility == Visibility.GROUP and group is not None:
+        # 兜底：群内创建未显式传白名单时，把归属群落为白名单，
+        # 使群可见性完全由 allowed_groups 表达（group FK 不承载可见性）。
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(room, [str(group.id)])
     return room
 
 

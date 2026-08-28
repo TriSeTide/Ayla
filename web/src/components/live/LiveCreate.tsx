@@ -27,6 +27,8 @@ export function LiveCreate({
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  // 直播群内外统一可见性 UI：公开/好友互斥 + 群可见独立；群内默认自动勾选本群
+  // 但**不锁定**（本群可取消），群外默认公开不勾群。
   const [visibility, setVisibility] = useState<VisibilitySelection>(
     group ? { public: false, friends: false, group: true } : { public: true, friends: false, group: false }
   );

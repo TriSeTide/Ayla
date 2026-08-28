@@ -42,12 +42,11 @@ def gen_stream_key() -> str:
 def _resolve_visibility(group, visibility: str | None) -> str:
     """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
 
-    约束（开发文档 §1.1）：visibility=group 必须带 group；group 非空时默认 group 可见。
+    约束：visibility=group 的群可见性由 allowed_group_ids 白名单提供（group FK 不承载
+    可见性）；group 为空时仍允许返回 GROUP（多群白名单场景），"两者皆空"由视图层校验。
     """
     if visibility is None or not visibility:
         return Visibility.GROUP if group is not None else Visibility.PUBLIC
-    if visibility == Visibility.GROUP and group is None:
-        raise ValueError("群成员可见必须指定群")
     return visibility
 
 
@@ -90,6 +89,11 @@ def create_channel(
             if allowed_group_ids is not None:
                 from apps.common.visibility import set_allowed_groups
                 set_allowed_groups(channel, allowed_group_ids)
+            elif visibility == Visibility.GROUP and group is not None:
+                # 兜底：群内创建未显式传白名单时，把归属群落为白名单，
+                # 使群可见性完全由 allowed_groups 表达（group FK 不承载可见性）。
+                from apps.common.visibility import set_allowed_groups
+                set_allowed_groups(channel, [str(group.id)])
             return channel
     raise RuntimeError("stream_key 生成冲突（多次重试仍碰撞）")
 
@@ -338,10 +342,7 @@ def _visible_recipient_ids(channel) -> set[str]:
         ids.update(str(value) for value in Friendship.objects.filter(
             user_id=channel.owner_id, status=Friendship.STATUS_ACCEPTED
         ).values_list("friend_id", flat=True))
-    if channel.group_id:
-        ids.update(str(value) for value in ConversationMember.objects.filter(
-            conversation_id=channel.group_id
-        ).values_list("user_id", flat=True))
+    # 群可见性仅由白名单提供（归属群 group FK 不承载可见性）
     allowed_ids = list(channel.allowed_groups.values_list("id", flat=True))
     if allowed_ids:
         ids.update(str(value) for value in ConversationMember.objects.filter(

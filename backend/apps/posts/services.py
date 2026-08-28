@@ -25,7 +25,11 @@ POST_FEED_GROUP = "chat_posts_feed"
 
 
 def _resolve_visibility(group, visibility, allowed_group_ids) -> str:
-    """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。"""
+    """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
+
+    visibility=group 的群可见性由 allowed_group_ids 白名单提供（group FK 不承载可见性）；
+    group 为空且无白名单时拒绝（对所有人不可见，误建）。
+    """
     if visibility in (None, ""):
         return Visibility.GROUP if group is not None else Visibility.PUBLIC
     if visibility == Visibility.GROUP and group is None and not allowed_group_ids:
@@ -50,6 +54,11 @@ def create_post(author, title: str, body: str, images=None, group=None, visibili
     if allowed_group_ids is not None:
         from apps.common.visibility import set_allowed_groups
         set_allowed_groups(post, allowed_group_ids)
+    elif visibility == Visibility.GROUP and group is not None:
+        # 兜底：群内发帖未显式传白名单时，把归属群落为白名单，
+        # 使群可见性完全由 allowed_groups 表达（group FK 不承载可见性）。
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(post, [str(group.id)])
     for order, media_id in enumerate(images or []):
         media = _resolve_media(media_id)
         if media is None:

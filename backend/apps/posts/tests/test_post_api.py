@@ -29,7 +29,13 @@ def _make_friends(a, b):
 
 
 def _make_post(author, body="正文", **kwargs):
-    return Post.objects.create(owner=author, body=body, **kwargs)
+    group = kwargs.get("group")
+    post = Post.objects.create(owner=author, body=body, **kwargs)
+    # 群可见性由 allowed_groups 白名单提供（group FK 不承载可见性），模拟 services 兜底。
+    if group is not None and kwargs.get("visibility") == Visibility.GROUP:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(post, [str(group.id)])
+    return post
 
 
 # ---------- 发帖 ----------

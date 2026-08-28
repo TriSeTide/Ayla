@@ -66,16 +66,12 @@ function isRecent(ms: number, now: number): boolean {
   return ms > now - NEW_CONTENT_WINDOW_MS && ms < now + 60_000;
 }
 
-/** 内容对本群可见：群归属等于本群，或白名单 allowed_group_ids 含本群 */
+/** 内容对本群可见：白名单 allowed_group_ids 含本群（归属群 group FK 不承载可见性） */
 function visibleInGroup(
-  groupKey: string | null,
   groupId: string,
   allowed: string[] | undefined,
 ): boolean {
-  return (
-    String(groupKey) === String(groupId) ||
-    (allowed ?? []).some((id) => String(id) === String(groupId))
-  );
+  return (allowed ?? []).some((id) => String(id) === String(groupId));
 }
 
 /** 取两个人名中可显示的一个 */
@@ -122,7 +118,7 @@ export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
     let voice = false;
     let game = false;
     for (const c of liveChannels) {
-      if (c.status === "live" && visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+      if (c.status === "live" && visibleInGroup(groupId, c.allowed_group_ids)) {
         live = true;
         break;
       }
@@ -130,7 +126,7 @@ export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
     // 语音重点 =「有人」在语音房（member_count > 0），不是「有语音房」
     for (const c of voiceChannels) {
       if (
-        visibleInGroup(c.group, groupId, c.allowed_group_ids) &&
+        visibleInGroup(groupId, c.allowed_group_ids) &&
         Number(c.member_count) > 0
       ) {
         voice = true;
@@ -138,7 +134,7 @@ export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
       }
     }
     for (const r of gameRooms) {
-      if (visibleInGroup(r.group, groupId, r.allowed_group_ids)) {
+      if (visibleInGroup(groupId, r.allowed_group_ids)) {
         game = true;
         break;
       }
@@ -167,7 +163,7 @@ export function useGroupActivityMap(): (
 
     // 新开播：直播 status=live 且 started_at 在窗口内
     for (const c of liveChannels) {
-      if (c.status === "live" && visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+      if (c.status === "live" && visibleInGroup(groupId, c.allowed_group_ids)) {
         const at = toMs(c.started_at);
         if (isRecent(at, now) && (!best || at > best.at)) {
           const host = c.owner_nickname || "";
@@ -177,7 +173,7 @@ export function useGroupActivityMap(): (
     }
     // 新语音房被创建：created_at 在窗口内
     for (const c of voiceChannels) {
-      if (visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+      if (visibleInGroup(groupId, c.allowed_group_ids)) {
         const at = toMs(c.created_at);
         if (isRecent(at, now) && (!best || at > best.at)) {
           const owner = c.owner_nickname || "";
@@ -188,7 +184,7 @@ export function useGroupActivityMap(): (
     }
     // 新桌游房被创建：created_at 在窗口内
     for (const r of gameRooms) {
-      if (visibleInGroup(r.group, groupId, r.allowed_group_ids)) {
+      if (visibleInGroup(groupId, r.allowed_group_ids)) {
         const at = toMs(r.created_at);
         if (isRecent(at, now) && (!best || at > best.at)) {
           const owner = displayName(r.owner?.nickname, r.owner?.username);
@@ -198,7 +194,7 @@ export function useGroupActivityMap(): (
     }
     // 新帖子：created_at 在窗口内且白名单含本群
     for (const p of posts) {
-      if (visibleInGroup(p.group, groupId, p.allowed_group_ids)) {
+      if (visibleInGroup(groupId, p.allowed_group_ids)) {
         const at = toMs(p.created_at);
         if (isRecent(at, now) && (!best || at > best.at)) {
           const author = displayName(p.author?.nickname, p.author?.username);
@@ -292,7 +288,7 @@ export function useGroupCarouselSlides(): (
     const voiceRooms: CarouselVoiceRoom[] = [];
     for (const c of voiceChannels) {
       if (
-        visibleInGroup(c.group, groupId, c.allowed_group_ids) &&
+        visibleInGroup(groupId, c.allowed_group_ids) &&
         Number(c.member_count) > 0
       ) {
         voiceRooms.push({
@@ -314,7 +310,7 @@ export function useGroupCarouselSlides(): (
 
     // 2. 直播卡：每个正在直播的直播间一张
     for (const c of liveChannels) {
-      if (c.status === "live" && visibleInGroup(c.group, groupId, c.allowed_group_ids)) {
+      if (c.status === "live" && visibleInGroup(groupId, c.allowed_group_ids)) {
         slides.push({
           kind: "live",
           host: c.owner_nickname || "",
@@ -328,7 +324,7 @@ export function useGroupCarouselSlides(): (
     const now = Date.now();
     let latest: { at: number; title: string; body: string; image: string | null } | null = null;
     for (const p of posts) {
-      if (!visibleInGroup(p.group, groupId, p.allowed_group_ids)) continue;
+      if (!visibleInGroup(groupId, p.allowed_group_ids)) continue;
       const at = toMs(p.created_at);
       if (!isRecent(at, now)) continue;
       if (!latest || at > latest.at) {
@@ -354,7 +350,7 @@ export function useGroupCarouselSlides(): (
     if (SHOW_GAME_STATUS) {
       for (const r of gameRooms) {
         if (
-          visibleInGroup(r.group, groupId, r.allowed_group_ids) &&
+          visibleInGroup(groupId, r.allowed_group_ids) &&
           r.status === "playing"
         ) {
           slides.push({

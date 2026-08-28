@@ -71,7 +71,8 @@ class RoomListView(APIView):
             .prefetch_related("members__user")
         )
 
-        # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
+        # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
+        # （归属群 group FK 不提供可见性）
         scope = request.query_params.get("scope", "").strip()
         if scope.startswith("group:"):
             raw_gid = scope.split(":", 1)[1]
@@ -79,7 +80,7 @@ class RoomListView(APIView):
                 gid = int(raw_gid)
             except (TypeError, ValueError):
                 return _bad_request("group id 无效")
-            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+            qs = qs.filter(Q(allowed_groups__id=gid)).distinct()
 
         # F10「正在玩的桌游」数据源：我在局的房间（成员视角，叠加可见性过滤）
         if request.query_params.get("mine") == "1":

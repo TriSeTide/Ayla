@@ -23,8 +23,7 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
   const channel = useLiveStore((s) => s.current.channel);
   const allChannels = useLiveStore((s) => s.channels);
   const channels = allChannels.filter((item) =>
-    String(item.group) === String(groupId)
-    || (item.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+    (item.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
   );
   const [currentId, setCurrentId] = useState<number | null>(null);
   const loading = useLiveStore((s) => s.channelsLoading);
@@ -86,6 +85,7 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
     setCreatingNew(true);
     setCreateError(null);
     try {
+      // 群内开播：本群自动勾选（后端兜底落白名单），但不锁定——用户可在开播控制台取消本群。
       const created = await liveApi.createLiveChannel("新直播间", groupId);
       setShowCreate(false);
       navigate(`/live/start/${created.id}`);

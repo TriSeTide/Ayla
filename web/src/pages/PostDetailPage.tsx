@@ -290,7 +290,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
               setEditVisibility({
                 public: post.visibility === "public",
                 friends: post.visibility === "friends",
-                group: post.visibility === "group" || hasGroups,
+                group: hasGroups,
               });
               setEditAllowedGroupIds(post.allowed_group_ids ?? []);
               setEditing(true);
@@ -319,6 +319,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             selectedGroupIds={editAllowedGroupIds}
             onSelectedGroupIdsChange={setEditAllowedGroupIds}
             initialGroupId={post.group}
+            lockGroup={!!post.group}
           />
           <div className="post-editor-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>取消</button>

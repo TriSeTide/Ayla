@@ -880,6 +880,25 @@
   bottom: 0;
   max-height: 100%;
   overflow-y: auto;
+  /* 弹出动画：从下方浮起 + 淡入（design.md §12.8.1 底部面板入场） */
+  animation: group-posts-editor-rise 250ms var(--ease-out);
+}
+
+@keyframes group-posts-editor-rise {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-posts-input.is-expanded {
+    animation: none;
+  }
 }
 
 /* ================= 帖子详情结构化骨架 ================= */

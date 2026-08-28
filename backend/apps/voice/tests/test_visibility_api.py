@@ -26,7 +26,13 @@ def _make_friends(a, b):
 
 def _make_channel(owner, room_name, **kwargs):
     kwargs.setdefault("name", "可见性语音房")
-    return VoiceChannel.objects.create(owner=owner, room_name=room_name, **kwargs)
+    group = kwargs.get("group")
+    ch = VoiceChannel.objects.create(owner=owner, room_name=room_name, **kwargs)
+    # 群可见性由 allowed_groups 白名单提供（group FK 不承载可见性），模拟 services 兜底。
+    if group is not None and kwargs.get("visibility") == Visibility.GROUP:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(ch, [str(group.id)])
+    return ch
 
 
 def _client_for(user):

@@ -147,6 +147,16 @@
   cursor: not-allowed;
 }
 
+/* 锁定可见性项（群内创建「本群可见」）：保持选中态视觉、仅禁点——
+   避免 disabled 默认 opacity 0.55 把「已锁定生效」误读成「不可用」 */
+.visibility-selector-options label.is-locked:has(input[type="checkbox"]:checked) {
+  opacity: 1;
+  cursor: not-allowed;
+  border-color: var(--glow-500);
+  background: rgba(249, 176, 255, 0.16);
+  color: var(--grape-700);
+}
+
 .visibility-selector-options input[type="checkbox"] {
   width: 16px;
   height: 16px;
@@ -196,6 +206,15 @@
   margin: 0;
   accent-color: var(--glow-500);
   flex: none;
+}
+
+/* 群内创建锁定本群：群条目禁点但保持可读（disabled 只灰化勾选框，群名文字不降透明） */
+.visibility-group-option.is-locked {
+  cursor: not-allowed;
+}
+
+.visibility-group-option.is-locked:hover {
+  background: transparent;
 }
 
 .visibility-selector-groups .placeholder-desc {

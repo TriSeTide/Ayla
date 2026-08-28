@@ -363,6 +363,10 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   - 展开态：面板容器**脱离文档流贴底**（absolute 覆盖标题栏与列表，二者已被遮罩压暗），可用高度 = 整个群内内容区，`max-height: 100%` + 编辑器兜底 `min(90vh, 1000px)`；可见性/群列表选项区内部滚动，媒体预览横排（128px 方块、超宽横滚）与图片/视频按钮固定在下方始终可见；发布成功自动收起
   - 上方遮罩：展开时压暗帖子列表与标题栏（`rgba(70,91,146,0.25)`），点击收起。**层级实现约束：遮罩必须与输入面板容器平级（z-index 夹在列表与面板之间，如 45/50），不能作为面板后代用 fixed + 正 z-index——面板容器的堆叠上下文会把遮罩限制在面板内部，反而盖住输入框**
   - 手势隔离：编辑器根元素 touch 事件一律 stopPropagation——图片预览横滑、正文横移光标不触发群内五子界面左右切屏手势；组件级处理，未来一级页面切屏手势同样被隔离（弹层形态天然在路由容器之外，双保险）
+  - 展开弹出动画：收起态单行 → 展开态贴底面板的切换用 `group-posts-editor-rise`（`opacity 0→1` + `translateY(20px→0)`，250ms `--ease-out`）入场；上方遮罩同步 200ms 淡入（`group-posts-scrim-in`）；`prefers-reduced-motion` 关闭位移（`animation: none`）
+  - 群内发帖可见性锁定（VisibilitySelector `lockGroup`，仅群内发帖路径）：「指定群可见」大类强制勾选且不可取消——复选框 disabled + 保持选中态视觉（`label.is-locked`，不灰化，避免把「已锁定生效」误读成「不可用」）；群搜索/多选列表保留，其中**本群那条**恒勾选、不可取消（`visibility-group-option.is-locked`），其他群仍可多选。公开/好友可与「指定群可见」共存：允许「公开+群可见」或「好友+群可见」，但公开与好友二者之间仍互斥（单选）。提交时后端单值 visibility 映射 public 优先 → friends → group，本群恒在 `allowed_group_ids`（后端 `allowed_groups` 是独立准入维度，与 visibility 组合判定，见 §12.8 与 common/visibility.py）
+  - 可见性多选语义（全站 live/voice/post/boardgame 统一）：`public` 与 `friends` **互斥**（单选），`group`（指定群可见）是**独立维度**、可与公开或好友叠加——「公开+群」「好友+群」均合法。归属群 `group` FK 仅作来源标记、**不承载可见性**，群可见性完全由白名单 `allowed_groups` 决定（后端 `visible_queryset`/`can_view`/`scope=group:` 只认 allowed_groups；创建时 services 把归属群兜底落白名单）。
+  - 群内锁定规则（`lockGroup`）：帖子/语音/桌游群内创建**强制锁定本群**（大类 disabled + 本群条目 disabled，不可取消）；**直播群内不锁定**——本群自动勾选、但可取消（群内开播跳转到独立开播控制台，是否在本群显示由用户在开播控制台自行决定）。标签显示据此支持「公开/好友」与群名共存（getVisibilityLabels）。
 
 ### 12.9 搜索框与结果
 

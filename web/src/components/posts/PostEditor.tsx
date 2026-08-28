@@ -163,7 +163,9 @@ export function PostEditor({
     setSubmitting(true);
     setError(null);
     try {
-      // 多选转后端格式：public 单选；friends + group 可共存，优先 friends
+      // 多选转后端单值 visibility：后端字段单选，准入由 visibility + allowed_group_ids 共同决定。
+      // public 优先；friends 次之（可携 allowed_group_ids 表示"好友+群"）；否则 group。
+      // 群内发帖 lockGroup 下 public/friends 均可与本群共存，本群恒在 selectedGroupIds。
       const backendVisibility = visibility.public
         ? "public"
         : visibility.friends
@@ -245,7 +247,7 @@ export function PostEditor({
       {expanded && (
         /* 低频配置区（可见性/群列表）内部滚动；媒体预览与进度固定在其下方始终可见 */
         <div className="post-editor-extra">
-          <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
+          <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} lockGroup={!!group} />
           {error && <p className="post-editor-error" role="alert">{error}</p>}
           {failedFiles.length > 0 && (
             <button

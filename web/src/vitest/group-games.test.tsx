@@ -98,7 +98,7 @@ describe("GroupGames 多群可见性（allowed_group_ids）", () => {
         const gid = scope.split(":")[1];
         return Promise.resolve(
           [g16, multi].filter(
-            (r) => String(r.group) === gid || (r.allowed_group_ids ?? []).includes(gid),
+            (r) => (r.allowed_group_ids ?? []).includes(gid),
           ),
         );
       }

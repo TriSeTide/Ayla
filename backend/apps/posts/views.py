@@ -93,8 +93,8 @@ class PostListView(APIView):
                 gid = int(raw_gid)
             except (TypeError, ValueError):
                 return _bad_request("group id 无效")
-            # 群内列表：group_id 匹配 或 allowed_groups 包含该群
-            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+            # 群内列表：仅 allowed_groups 白名单包含该群（归属群 group FK 不提供可见性）
+            qs = qs.filter(Q(allowed_groups__id=gid)).distinct()
         else:
             return _bad_request("scope 无效")
 
@@ -200,6 +200,16 @@ class PostDetailView(APIView):
             value = request.data.get("visibility")
             if value not in {"public", "friends", "group"}:
                 return _bad_request("visibility 无效")
+            if value == "group":
+                # 群可见性由 allowed_groups 提供（group FK 不承载可见性）；
+                # 改成 group 可见但无任何白名单 → 对所有人不可见，拦截。
+                target_ids = (
+                    request.data.get("allowed_group_ids")
+                    if "allowed_group_ids" in request.data
+                    else list(post.allowed_groups.values_list("id", flat=True))
+                )
+                if not target_ids:
+                    return _bad_request("指定群可见必须至少选择一个群")
             post.visibility = value
         if "group" in request.data:
             group, group_err = _get_group_or_400(request.data.get("group"))

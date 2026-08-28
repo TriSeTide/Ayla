@@ -26,12 +26,12 @@ export function LiveOwnerPanel({
   const [description, setDescription] = useState(channel.description ?? "");
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(channel.cover || null);
-  // 将后端单值转换为多选格式
+  // 将后端单值转换为多选格式：group 由白名单决定（公开/好友可与群白名单叠加）
   const hasGroups = (channel.allowed_group_ids?.length ?? 0) > 0;
   const initialVisibility: VisibilitySelection = {
     public: channel.visibility === "public",
     friends: channel.visibility === "friends",
-    group: channel.visibility === "group" || hasGroups,
+    group: hasGroups,
   };
   const [visibility, setVisibility] = useState<VisibilitySelection>(initialVisibility);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(channel.allowed_group_ids ?? []);
@@ -101,7 +101,7 @@ export function LiveOwnerPanel({
       // 用后端回显刷新可见范围（后端可能规范化 allowed_group_ids）
       const refreshedVisibility: VisibilitySelection = {
         public: updated.visibility === "public",
-        friends: updated.visibility === "friends" || (updated.allowed_group_ids?.length ?? 0) > 0,
+        friends: updated.visibility === "friends",
         group: (updated.allowed_group_ids?.length ?? 0) > 0,
       };
       setVisibility(refreshedVisibility);

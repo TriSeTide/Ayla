@@ -15,22 +15,20 @@ import type {
   LiveStatusResult,
 } from "./types";
 
-/** POST /live/channels/ —— 创建频道（创建者即 owner；201 回显 stream_key/rtmp_url，仅本次） */
+/** POST /live/channels/ —— 创建频道（创建者即 owner；201 回显 stream_key/rtmp_url，仅本次）
+ *
+ * `group` 仅作来源归属标记（group FK），不承载可见性：可见性完全由 payload 的
+ * `visibility` + `allowed_group_ids` 决定（群可见性由白名单表达，见 common/visibility.py）。
+ */
 export function createLiveChannel(
   title: string,
   group?: string | null,
   payload: { description?: string; cover?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] } = {},
 ) {
-  const groupIds = group
-    ? [...new Set([...(payload.allowed_group_ids ?? []), group])]
-    : payload.allowed_group_ids;
   const body = {
     title,
-    ...(group ? { group, visibility: "group" as const } : {}),
+    ...(group ? { group } : {}),
     ...payload,
-    ...(group
-      ? { visibility: "group" as const, allowed_group_ids: groupIds }
-      : {}),
   };
   return apiRequest<LiveChannelDescriptor>("/live/channels/", {
     method: "POST",

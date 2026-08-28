@@ -45,10 +45,8 @@ export function GroupPosts({
   const feedPosts = usePostsStore((s) => s.posts);
   const groupedFromStore = useMemo(
     () =>
-      feedPosts.filter(
-        (p) =>
-          String(p.group) === String(groupId) ||
-          (p.allowed_group_ids ?? []).some((g) => String(g) === String(groupId)),
+      feedPosts.filter((p) =>
+        (p.allowed_group_ids ?? []).some((g) => String(g) === String(groupId)),
       ),
     [feedPosts, groupId],
   );

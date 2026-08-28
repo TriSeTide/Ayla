@@ -49,7 +49,7 @@ export function GameRoomCreate({
 
   return (
     <div className="game-room-create">
-      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} />
+      <VisibilitySelector value={visibility} onChange={setVisibility} selectedGroupIds={selectedGroupIds} onSelectedGroupIdsChange={setSelectedGroupIds} initialGroupId={group} lockGroup={!!group} />
       <input
         className="field"
         placeholder="桌游室名称"

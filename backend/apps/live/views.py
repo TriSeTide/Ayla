@@ -20,7 +20,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.visibility import can_join, can_view, visible_queryset
+from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media, parse_avatar_media_id
 
@@ -111,7 +111,8 @@ class ChannelListView(APIView):
         if owner_filter:
             qs = qs.filter(owner_id=owner_filter)
 
-        # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
+        # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
+        # （归属群 group FK 不提供可见性，可见性完全由 allowed_groups 决定）
         scope = request.query_params.get("scope", "").strip()
         if scope.startswith("group:"):
             raw_gid = scope.split(":", 1)[1]
@@ -119,7 +120,7 @@ class ChannelListView(APIView):
                 gid = int(raw_gid)
             except (TypeError, ValueError):
                 return _bad_request("group id 无效")
-            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+            qs = qs.filter(Q(allowed_groups__id=gid)).distinct()
 
         payload = [_channel_serializer(ch, request) for ch in qs]
         return Response(payload)
@@ -132,6 +133,11 @@ class ChannelListView(APIView):
         if group_err:
             return _bad_request(group_err)
         visibility = request.data.get("visibility") or None
+        allowed_group_ids = request.data.get("allowed_group_ids")
+        # visibility=group 且无单群归属、无群白名单 → 直播间对所有人不可见（误建），
+        # 群可见性完全由 allowed_group_ids 提供（group FK 不承载可见性）。
+        if visibility == Visibility.GROUP and group is None and not allowed_group_ids:
+            return _bad_request("指定群可见必须至少选择一个群")
         description = request.data.get("description") or ""
         cover = request.data.get("cover") or ""
         cover_error = _validate_cover(request.user, cover)
@@ -205,8 +211,16 @@ class ChannelDetailView(APIView):
             value = request.data.get("visibility")
             if value not in {"public", "friends", "group"}:
                 return _bad_request("visibility 无效")
-            if value == "group" and not request.data.get("allowed_group_ids") and ch.group_id is None:
-                return _bad_request("群成员可见必须指定群")
+            if value == "group":
+                # 群可见性由 allowed_groups 提供（group FK 不承载可见性）；
+                # 改成 group 可见但无任何白名单 → 对所有人不可见，拦截。
+                target_ids = (
+                    request.data.get("allowed_group_ids")
+                    if "allowed_group_ids" in request.data
+                    else list(ch.allowed_groups.values_list("id", flat=True))
+                )
+                if not target_ids:
+                    return _bad_request("指定群可见必须至少选择一个群")
             ch.visibility = value
             update_fields.append("visibility")
         if "allowed_group_ids" in request.data:

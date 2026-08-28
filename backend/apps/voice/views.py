@@ -75,7 +75,8 @@ class ChannelListView(APIView):
 
         qs = visible_queryset(VoiceChannel, request.user)
 
-        # 群内过滤：scope=group:<id> 匹配 group_id 或 allowed_groups 包含该群
+        # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
+        # （归属群 group FK 不提供可见性）
         scope = request.query_params.get("scope", "").strip()
         if scope.startswith("group:"):
             raw_gid = scope.split(":", 1)[1]
@@ -85,7 +86,7 @@ class ChannelListView(APIView):
                 return Response(
                     {"detail": "group id 无效"}, status=status.HTTP_400_BAD_REQUEST
                 )
-            qs = qs.filter(Q(group_id=gid) | Q(allowed_groups__id=gid)).distinct()
+            qs = qs.filter(Q(allowed_groups__id=gid)).distinct()
 
         channels = list(qs)
         # 附成员数
@@ -187,14 +188,14 @@ class ChannelDetailView(APIView):
             if value not in {"public", "friends", "group"}:
                 return Response({"detail": "visibility 无效"}, status=status.HTTP_400_BAD_REQUEST)
             if value == Visibility.GROUP:
-                # 与创建一致：group 可见但无单群归属时，必须有群白名单，
-                # 否则改完房间对所有人不可见（owner 自己可见，无人可进入）。
+                # 与创建一致：群可见性由白名单提供（group FK 不承载可见性），
+                # 改成 group 可见但无任何白名单 → 对所有人不可见，拦截。
                 target_ids = (
                     request.data.get("allowed_group_ids")
                     if "allowed_group_ids" in request.data
                     else list(ch.allowed_groups.values_list("id", flat=True))
                 )
-                if ch.group_id is None and not target_ids:
+                if not target_ids:
                     return Response(
                         {"detail": "指定群可见必须至少选择一个群"},
                         status=status.HTTP_400_BAD_REQUEST,
@@ -208,6 +209,8 @@ class ChannelDetailView(APIView):
             except ValueError as exc:
                 return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         ch.save(update_fields=update_fields)
+        # 改名/可见性变更 → 目录与房内实时对账（频道名 / 来源标识热更新）。
+        services.broadcast_channel_updated(ch)
         return Response(VoiceChannelSerializer(ch).data)
 
 
@@ -358,7 +361,10 @@ class ChannelChatMessagesView(APIView):
             content=content or "图片",
             media_id=media_id,
         )
-        return Response(self._payload(message), status=status.HTTP_201_CREATED)
+        payload = self._payload(message)
+        # 房内聊天消息 → 广播到频道组，房内成员实时收到（不写群聊 Message）。
+        services.broadcast_voice_chat_message(ch, payload)
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class ChannelMemberActionView(APIView):

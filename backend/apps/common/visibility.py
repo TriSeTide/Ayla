@@ -8,14 +8,15 @@
 语义（工程约束，AGENTS.md §2.2：权限判断属于工程硬约束，必须实现）：
 - `public`  → 任何登录用户可见/可进入；
 - `friends` → owner 本人或其 accepted 好友；
-- `group`   → 群成员可见；`group` 非空时默认 `group` 可见（创建时由 services 层落值）。
-- `allowed_groups` 是独立的准入维度：白名单群成员始终可看，与 visibility 值无关
-  （支持"好友+群"组合可见性场景：满足好友或群成员任一条件即可）。
+- `group`   → 仅白名单群成员可见（`allowed_groups` 非空）。
+- `allowed_groups` 是**唯一**的群可见性维度：群成员是否可见完全由白名单决定，
+  与 `group`（归属群 FK）无关；`group` 仅是来源/归属标记，不再承载可见性。
+  支持"公开+群""好友+群"组合场景（满足公开/好友或白名单群成员任一条件即可）。
 
 注意：
 - 好友/群成员集合用延迟导入（common 被 live/voice 引用，chat/accounts 不依赖 common，避免环）；
-- `Q(group__in=my_groups)` 不带 visibility 条件：房间挂到某群后，群成员对该房间始终可见
-  （与"group 非空时默认 group 可见"一致；显式覆盖为 friends/public 时群员仍可见，是放宽而非泄漏）。
+- `group` FK 不再进入可见性判定：群可见性必须由 `allowed_groups` 显式表达
+  （创建时 services 层把归属群落进白名单，见各 app services 的兜底）。
 """
 from django.db import models
 from django.db.models import Q
@@ -61,7 +62,6 @@ def visible_queryset(model, user):
         Q(visibility=Visibility.PUBLIC)
         | Q(owner_id=user.id)
         | (Q(visibility=Visibility.FRIENDS) & Q(owner_id__in=friend_ids))
-        | Q(group_id__in=group_ids)
         | Q(allowed_groups__id__in=group_ids)
     ).distinct()
 
@@ -72,9 +72,10 @@ def can_view(user, obj) -> bool:
     准入维度独立叠加：满足任一即可查看。
     - owner / public → 直接放行
     - visibility=friends → 好友可看
-    - visibility=group → 群成员可看（group FK 或 allowed_groups 白名单）
-    - allowed_groups 非空且包含用户所在群 → 无论 visibility 值，群成员可看
-      （支持"好友+群"组合可见性场景）
+    - allowed_groups 非空且包含用户所在群 → 群成员可看（无论 visibility 值，
+      支持"公开+群""好友+群"组合场景）
+    - visibility=group → 仅白名单群成员可看（allowed_groups 为空则无人可见，
+      归属群 `group` FK 不提供可见性）
     """
     if user is None or not user.is_authenticated:
         return False
@@ -82,20 +83,16 @@ def can_view(user, obj) -> bool:
         return True
     if obj.visibility == Visibility.PUBLIC:
         return True
-    # allowed_groups 是独立的准入维度：白名单群成员始终可看（覆盖 friends+group 组合场景）
+    # allowed_groups 是唯一的群可见性维度：白名单群成员可看（覆盖任意 visibility
+    # 与群白名单的组合场景）
     allowed_groups = getattr(obj, "allowed_groups", None)
-    group_ids = None  # 延迟查询，按需获取
-    if allowed_groups is not None:
-        group_ids = _my_group_ids(user)
-        if allowed_groups.filter(id__in=group_ids).exists():
-            return True
+    if allowed_groups is not None and allowed_groups.filter(
+        id__in=_my_group_ids(user)
+    ).exists():
+        return True
     if obj.visibility == Visibility.FRIENDS:
         return obj.owner_id in _my_friend_ids(user)
-    if obj.visibility == Visibility.GROUP:
-        # 兼容旧的单群归属
-        if group_ids is None:
-            group_ids = _my_group_ids(user)
-        return bool(obj.group_id and obj.group_id in group_ids)
+    # visibility=group：可见性仅由 allowed_groups 提供（已在上面判断），无额外放行。
     return False
 
 

@@ -33,10 +33,10 @@ export function ChannelSidebar({
 }) {
   const currentGroupId = useGroupStore((state) => state.currentGroupId);
   const voiceCount = useVoiceStore((state) => state.channels
-    .filter((channel) => String(channel.group) === String(currentGroupId))
+    .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId)))
     .reduce((sum, channel) => sum + (channel.member_count || 0), 0));
   const hasLive = useLiveStore((state) => state.channels
-    .some((channel) => String(channel.group) === String(currentGroupId) && channel.status === "live"));
+    .some((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId)) && channel.status === "live"));
 
   return (
     <aside className="channel-sidebar" aria-label="群内场景">

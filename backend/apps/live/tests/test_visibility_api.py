@@ -29,7 +29,13 @@ def _make_channel(owner, **kwargs):
 
     kwargs.setdefault("title", "可见性直播间")
     kwargs.setdefault("stream_key", gen_stream_key())
-    return LiveChannel.objects.create(owner=owner, **kwargs)
+    group = kwargs.get("group")
+    ch = LiveChannel.objects.create(owner=owner, **kwargs)
+    # 群可见性由 allowed_groups 白名单提供（group FK 不承载可见性），模拟 services 兜底。
+    if group is not None and kwargs.get("visibility") == Visibility.GROUP:
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(ch, [str(group.id)])
+    return ch
 
 
 # ---------- 列表过滤 ----------
