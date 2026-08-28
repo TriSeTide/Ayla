@@ -146,7 +146,7 @@ describe("MessageList U16 窗口化", () => {
     expect(screen.queryByText("消息480")).not.toBeInTheDocument();
   });
 
-  it("向上滚动优先扩展缓存，窗口到 200 条后按 50 条批次滑动且不请求网络", () => {
+  it("向上滚动扩展缓存窗口，尾部始终锚定最新消息且不请求网络", () => {
     const onLoadMore = vi.fn();
     const messages = Array.from({ length: 500 }, (_, i) => serverMessage(i + 1));
     const { container } = render(
@@ -161,7 +161,7 @@ describe("MessageList U16 窗口化", () => {
     );
     const scroller = makeScroller(container, 2000);
 
-    // 连续向上触顶 6 次：20 → 70 → 120 → 170 → 200 → 200（批次滑动）
+    // 连续向上触顶 6 次：窗口头部每次前移 50，尾部始终锚定最新（20 → 70 → … → 320）
     for (let i = 0; i < 6; i += 1) {
       act(() => {
         scroller.element.scrollTop = 0;
@@ -169,12 +169,12 @@ describe("MessageList U16 窗口化", () => {
       });
     }
 
-    expect(messageCount(container)).toBe(200);
+    expect(messageCount(container)).toBe(320);
     const seqs = seqsOf(container);
-    // 从尾部 20 扩散满 200 后，继续上翻会从头部/尾部各按 50 滑动：最终范围 [181, 380)
-    expect(seqs).toHaveLength(200);
+    // 头部前移 6 页后范围 [181, 500]，尾部锚定最新（新消息直接留在窗口内）
+    expect(seqs).toHaveLength(320);
     expect(seqs[0]).toBe(181);
-    expect(seqs[seqs.length - 1]).toBe(380);
+    expect(seqs[seqs.length - 1]).toBe(500);
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
@@ -207,7 +207,7 @@ describe("MessageList U16 窗口化", () => {
     expect(onLoadMore).toHaveBeenCalledTimes(1);
   });
 
-  it("pending 本地消息不计入 200 条窗口、永不裁切", () => {
+  it("pending 本地消息恒在尾部渲染、不被窗口裁剪", () => {
     const messages = [
       ...Array.from({ length: 500 }, (_, i) => serverMessage(i + 1)),
       pendingMessage("local-a"),
@@ -227,7 +227,7 @@ describe("MessageList U16 窗口化", () => {
     expect(screen.getByText("本地local-a")).toBeInTheDocument();
     expect(screen.getByText("本地local-b")).toBeInTheDocument();
 
-    // 反复向上翻页把确认窗口扩到 200，pending 仍在
+    // 反复向上翻页：窗口头部前移、尾部锚定最新，pending 仍恒在尾部
     const scroller = makeScroller(container, 2000);
     for (let i = 0; i < 10; i += 1) {
       act(() => {
@@ -235,7 +235,7 @@ describe("MessageList U16 窗口化", () => {
         fireEvent.scroll(scroller.element);
       });
     }
-    expect(messageCount(container)).toBe(202); // 200 确认 + 2 pending
+    expect(messageCount(container)).toBe(502); // 500 确认 + 2 pending
     expect(screen.getByText("本地local-a")).toBeInTheDocument();
     expect(screen.getByText("本地local-b")).toBeInTheDocument();
   });

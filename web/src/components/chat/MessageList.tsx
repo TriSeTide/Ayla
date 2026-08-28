@@ -393,11 +393,11 @@ export function MessageList({
         previousLastId !== currentLastId &&
         confirmedMessages.some((m) => m.id === previousLastId);
 
-      if (appendedAtTail && atBottomRef.current) {
-        // 贴底中的新消息：窗口保持尾部 200 条（最新永远可见）；超限从顶部裁，
-        // 200 是 50 的倍数，头部起点自然对齐分页批次。
+      if (appendedAtTail) {
+        // 新消息直接送进窗口：end 锚定尾部，start 保持用户阅读位置，
+        // DOM 高度与滚动条实时变化，向下滚即可看到，不靠回底才刷出。
         const nextEnd = confirmedMessages.length;
-        const nextStart = Math.max(0, nextEnd - MESSAGE_RENDER_WINDOW_LIMIT);
+        const nextStart = bounds.start;
         const nextWindow = windowForBounds(confirmedMessages, nextStart, nextEnd);
         if (nextWindow) {
           setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
@@ -530,11 +530,10 @@ export function MessageList({
     atBottomRef.current = false;
 
     if (bounds.start > 0) {
-      // 优先从权威缓存暴露更早的一整页。窗口尽量满 200 条：头部每次前移 50，
-      // 尾部相应后移（200 是 50 的倍数，两端自然对齐分页批次），用户正在向上阅读，
-      // 最新消息在窗口外由「回到底部」浮钮承接，不在上滑阅读路径中被卸载。
+      // 向上扩展：start 前移一页（50 条）露出更早消息；end 锚定尾部不动，
+      // 新消息永远留在窗口内，向下滚即可看到。
       const nextStart = Math.max(0, bounds.start - HISTORY_PAGE_LIMIT);
-      const nextEnd = Math.min(confirmedMessages.length, nextStart + MESSAGE_RENDER_WINDOW_LIMIT);
+      const nextEnd = confirmedMessages.length;
       const nextWindow = windowForBounds(confirmedMessages, nextStart, nextEnd);
       if (nextWindow) {
         pendingAnchorRef.current.targetStartId = nextWindow.startId;
@@ -557,36 +556,6 @@ export function MessageList({
         loadMoreInFlightRef.current = false;
       });
   }, [bounds.end, bounds.start, confirmedMessages, hasMore, loading, onLoadMore, visibleConfirmed]);
-
-  // 向下扩展窗口：翻历史（窗口不含尾部）且滚到窗口底部时，尾部后移一页（50 条），
-  // 让更新的消息逐步可见，而不是回底才突然刷出一大批。锚定底部消息保持视口不跳。
-  const requestNewer = useCallback(() => {
-    if (loading || loadMoreInFlightRef.current || pendingAnchorRef.current) return;
-    if (!hasHiddenTail) return;
-
-    const element = scrollRef.current;
-    if (!element) return;
-    const previousFirst = visibleConfirmed[0]?.id ?? null;
-    const previousLast = visibleConfirmed[visibleConfirmed.length - 1]?.id ?? null;
-    const anchorNode = findMessageNode(element, previousLast);
-    pendingAnchorRef.current = {
-      anchorId: previousLast,
-      previousVisibleFirstId: previousFirst,
-      previousVisibleLastId: previousLast,
-      scrollTop: element.scrollTop,
-      scrollHeight: element.scrollHeight,
-      relativeTop: relativeTop(element, anchorNode),
-      phase: "awaiting-window",
-    };
-
-    const nextEnd = Math.min(confirmedMessages.length, bounds.end + HISTORY_PAGE_LIMIT);
-    const nextStart = Math.max(0, nextEnd - MESSAGE_RENDER_WINDOW_LIMIT);
-    const nextWindow = windowForBounds(confirmedMessages, nextStart, nextEnd);
-    if (nextWindow) {
-      pendingAnchorRef.current.targetStartId = nextWindow.startId;
-      setWindowRange((previous) => (sameWindow(previous, nextWindow) ? previous : nextWindow));
-    }
-  }, [bounds.end, confirmedMessages, hasHiddenTail, loading, visibleConfirmed]);
 
   const isSpecial = useCallback(
     (message: ChatMessage) =>
@@ -669,20 +638,11 @@ export function MessageList({
     prevSelfPendingIdsRef.current = selfPendingIds;
     if (!hasNew) return;
 
+    // 窗口尾部已锚定最新消息，只需标记回底意图，滚底统一交给贴底 effect。
     atBottomRef.current = true;
     setFarFromBottom(false);
-    if (hasHiddenTail) {
-      const end = confirmedMessages.length;
-      const start = Math.max(0, end - MESSAGE_RENDER_WINDOW_LIMIT);
-      const nextWindow = windowForBounds(confirmedMessages, start, end);
-      if (nextWindow) {
-        jumpToBottomRef.current = true;
-        setWindowRange((prevWindow) => (sameWindow(prevWindow, nextWindow) ? prevWindow : nextWindow));
-      }
-    } else {
-      jumpToBottomRef.current = true;
-    }
-  }, [localMessages, currentUserId, confirmedMessages, hasHiddenTail]);
+    jumpToBottomRef.current = true;
+  }, [localMessages, currentUserId]);
 
   const setWindowAround = useCallback((id: string, kind: "unread" | "mention" | "reply") => {
     const index = confirmedMessages.findIndex((message) => message.id === id);
@@ -876,13 +836,14 @@ export function MessageList({
     setFarFromBottom(distanceToBottom > element.clientHeight);
     setScrollTick((value) => value + 1);
 
-    // 翻历史（窗口不含尾部）且滚到窗口底部 → 窗口向下扩展一页，正常滚动看到新消息。
+    // 跳转定位把窗口移向历史段（不含尾部）后，滚到窗口底部 → 自动回实时尾部。
     if (physicallyAtBottom && hasHiddenTail) {
-      requestNewer();
+      handleJumpToBottom();
+      return;
     }
 
-    // 真正回到底部（窗口含尾部）→ 清除未读标签：用户已看到最新消息。
-    if (physicallyAtBottom && !hasHiddenTail) {
+    // 回到底部（窗口尾部锚定最新）→ 清除未读标签：用户已看到最新消息。
+    if (physicallyAtBottom) {
       if (!unreadClearedAtBottomRef.current && conversation?.id && onMarkAllRead) {
         const hasUnread =
           (conversation.unread_seqs?.length ?? 0) > 0 ||
