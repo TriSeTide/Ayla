@@ -510,6 +510,18 @@ describe("ChatWSClient", () => {
     client.disconnect();
   });
 
+  it("首次连接前 subscribe → onopen 补发 subscribe（不 resume 补发历史）", () => {
+    const client = new ChatWSClient();
+    client.connect();
+    // WS 尚未 OPEN：subscribe 帧被 sendJson 静默丢弃，仅记录到 subscribed 集合。
+    client.subscribe(["c1"]);
+    vi.runOnlyPendingTimers();
+    const ws = instances[0];
+    // 首次连接成功：应重发 subscribe（仅订阅），而不是 resume 补发全部历史。
+    expect(lastSend(ws)).toEqual({ type: "subscribe", conversation_ids: ["c1"] });
+    client.disconnect();
+  });
+
   it("断线重连后：对已订阅会话发 resume（last_message_seq=该会话 lastSeq）", () => {
     const client = new ChatWSClient();
     client.connect();

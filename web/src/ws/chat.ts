@@ -60,6 +60,8 @@ export class ChatWSClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private attempt = 0;
   private manualClosed = false;
+  /** 是否曾成功建立过连接：区分首次连接（补发 subscribe）与断线重连（resume 补发）。 */
+  private hasConnectedOnce = false;
   /** 已订阅的会话 id 集合（重连后据此发 resume） */
   private subscribed = new Set<string>();
   private handlers = new Set<ChatFrameHandler>();
@@ -71,6 +73,8 @@ export class ChatWSClient {
     const access = useAuthStore.getState().accessToken;
     if (!access) return;
     this.manualClosed = false;
+    // 新连接会话（登录/刷新）：重置首连标记，让 onopen 走「补发 subscribe」而非 resume。
+    this.hasConnectedOnce = false;
     this.connection = "connecting";
     useRealtimeStore.getState().setStatus("chat", "connecting");
     this.open(access);
@@ -92,9 +96,20 @@ export class ChatWSClient {
       this.connection = "online";
       useRealtimeStore.getState().setStatus("chat", "online");
       this.startHeartbeat();
-      // 重连成功：对已订阅会话逐条 resume 补发
-      for (const convId of this.subscribed) {
-        this.sendResume(convId);
+      if (this.hasConnectedOnce) {
+        // 断线重连：对已订阅会话逐条 resume，补发断线期间漏掉的消息。
+        for (const convId of this.subscribed) {
+          this.sendResume(convId);
+        }
+      } else {
+        // 首次连接：连接建立前 subscribe 的帧因 WS 尚未 OPEN 被 sendJson 静默丢弃，
+        // 这里批量补发 subscribe（仅订阅，不补发历史）。若改用 resume，此时各会话
+        // bucket 尚未加载历史（lastSeq=0），后端会补发 seq>0 的全部消息——
+        // 正是「刷新群聊时一口气加载所有历史消息」的根因。
+        this.hasConnectedOnce = true;
+        if (this.subscribed.size > 0) {
+          this.sendJson({ type: "subscribe", conversation_ids: [...this.subscribed] });
+        }
       }
     };
 
