@@ -6,7 +6,7 @@
  * 底栏下滑离场后输入框延迟从底部滑入。
  */
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useNavigationType, useParams, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import type { Post, PostComment } from "../api/types";
@@ -31,6 +31,7 @@ import { getVisibilityLabels } from "../utils/visibility";
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
+  const navigationType = useNavigationType();
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [searchParams] = useSearchParams();
   const fromGroup = groupId ?? searchParams.get("fromGroup");
@@ -40,6 +41,17 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     : fromMine
       ? "/posts/mine"
       : "/posts";
+  // 详情返回走历史栈回退（navigate(-1)），回到进入详情前的列表页，避免 navigate(returnTo)
+  // 再 push 一个列表页 → 列表页的 navigate(-1) 退回详情（Bug：我的帖子返回到刚才的详情）。
+  // 站内点击进入详情是 PUSH，返回时回退原有历史栈，避免再 push 列表页；
+  // 直接打开或通过 POP/REPLACE 到达详情时没有可靠的站内来源，替换到显式 returnTo。
+  const goBack = useCallback(() => {
+    if (navigationType === "PUSH") {
+      navigate(-1);
+    } else {
+      navigate(returnTo, { replace: true });
+    }
+  }, [navigationType, navigate, returnTo]);
   // 群内详情沿用群场景顶部导航；只有一级帖子详情才让底栏下滑并带动评论输入框滑入。
   const usesRoomEntryAnimation = groupId == null;
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
@@ -209,12 +221,12 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     if (!post) return;
     postsApi
       .deletePost(post.id)
-      .then(() => navigate(returnTo))
+      .then(() => goBack())
       .catch((e) => {
         setConfirmingDelete(false);
         setActionError(e instanceof Error ? e.message : "删除帖子失败，请重试");
       });
-  }, [post, navigate, returnTo]);
+  }, [post, goBack]);
 
   if (loading) {
     // 顶栏框架先上（返回键 + 标题始终可见），仅正文/评论区显示结构化骨架，
@@ -222,7 +234,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     return (
       <div className="post-detail">
         <header className="post-detail-head">
-          <button type="button" className="icon-btn-40" onClick={() => navigate(returnTo)} aria-label="返回">
+          <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
             <IconBack width={22} height={22} />
           </button>
           <span className="post-detail-title">帖子</span>
@@ -251,7 +263,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     return (
       <div className="post-detail">
         <p className="placeholder-desc">{error ?? "帖子不存在"}</p>
-        <button type="button" className="btn btn-ghost" onClick={() => navigate(returnTo)}>
+        <button type="button" className="btn btn-ghost" onClick={goBack}>
           返回
         </button>
       </div>
@@ -264,7 +276,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     <div className="post-detail">
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       <header className="post-detail-head">
-        <button type="button" className="icon-btn-40" onClick={() => navigate(returnTo)} aria-label="返回">
+        <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
           <IconBack width={22} height={22} />
         </button>
         <span className="post-detail-title">帖子</span>

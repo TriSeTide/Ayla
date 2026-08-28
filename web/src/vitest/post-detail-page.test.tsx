@@ -159,7 +159,7 @@ describe("PostDetailPage 编辑可见范围", () => {
     vi.mocked(postsApi.getPost).mockResolvedValue(detail);
     vi.mocked(postsApi.listComments).mockResolvedValue([]);
     render(
-      <MemoryRouter initialEntries={["/posts/1?from=mine"]}>
+      <MemoryRouter initialEntries={["/posts/mine", "/posts/1?from=mine"]}>
         <Routes>
           <Route path="/posts/:postId" element={<PostDetailPage />} />
           <Route path="/posts/mine" element={<div>我的帖子页占位</div>} />
@@ -167,7 +167,8 @@ describe("PostDetailPage 编辑可见范围", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "返回" }));
+    expect(await screen.findByText("评论列表 mock")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByText("我的帖子页占位")).toBeInTheDocument();
   });
 });
