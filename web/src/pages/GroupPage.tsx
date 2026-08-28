@@ -40,6 +40,7 @@ import { useTouchAxisGuard } from "../hooks/useTouchAxisGuard";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
 import { useChatStore } from "../stores/chat";
+import { subscribeGroupConversations } from "../ws/chat";
 import { GROUP_SCENE_ORDER, useGroupStore } from "../stores/group";
 import type { GroupScene } from "../stores/group";
 import { useHomeStore } from "../stores/home";
@@ -227,6 +228,7 @@ export function GroupPage() {
       .then((list) => {
         if (!cancelled) {
           useChatStore.getState().setConversations(list);
+          subscribeGroupConversations(list);
           setConversationLoadError(null);
         }
       })

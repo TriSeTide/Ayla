@@ -13,6 +13,7 @@
  * store 变化 → 订阅组件重渲染 → 排序/事件描述即时刷新。
  */
 import { useBoardgameStore } from "../../stores/boardgame";
+import { useChatStore } from "../../stores/chat";
 import { useLiveStore } from "../../stores/live";
 import { usePostsStore } from "../../stores/posts";
 import { useVoiceStore } from "../../stores/voice";
@@ -156,6 +157,9 @@ export function useGroupActivityMap(): (
   const voiceChannels = useVoiceStore((s) => s.channels);
   const gameRooms = useBoardgameStore((s) => s.rooms);
   const posts = usePostsStore((s) => s.posts);
+  // 群「最近收到新内容」的单调时间戳：只在收到新内容时 bump（删除/下播/离开不回退），
+  // 与「从当前存在内容推导的创建时间」取 max 作为排序 key —— 内容消失不往回排。
+  const groupActivityAt = useChatStore((s) => s.groupActivityAt);
 
   return (groupId, lastMessage) => {
     const now = Date.now();
@@ -203,8 +207,15 @@ export function useGroupActivityMap(): (
       }
     }
 
-    if (!best) return NO_ACTIVITY;
-    return { lastNewAt: best.at, lastEvent: best };
+    if (!best) {
+      const bumped = groupActivityAt[groupId] ?? 0;
+      if (bumped <= 0) return NO_ACTIVITY;
+      // 无「当前存在内容」推导出的新事件，但曾收到过新内容（如帖子编辑 / 有人进语音房）：
+      // 保留单调时间戳驱动排序，事件描述暂缺（列表 sub 退化为成员数兜底）。
+      return { lastNewAt: bumped, lastEvent: null };
+    }
+    const bumped = groupActivityAt[groupId] ?? 0;
+    return { lastNewAt: Math.max(best.at, bumped), lastEvent: best };
   };
 }
 

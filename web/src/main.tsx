@@ -13,7 +13,7 @@ import { useVoiceStore } from "./stores/voice";
 import { useLiveStore } from "./stores/live";
 import { usePostsStore } from "./stores/posts";
 import { useBoardgameStore } from "./stores/boardgame";
-import { chatWS } from "./ws/chat";
+import { chatWS, subscribeGroupConversations } from "./ws/chat";
 import { presenceClient } from "./ws/presence";
 import { listConversations } from "./api/chat";
 import { listVoiceChannels } from "./api/voice";
@@ -56,6 +56,9 @@ async function bootstrap() {
           listGameRooms(),
         ]);
         useChatStore.getState().setConversations(convs);
+        // 订阅所有群：主页/宽屏 ServerRail 不打开群聊天也能收到群消息 message.new，
+        // 红点/轮播消息卡/排序实时刷新。
+        subscribeGroupConversations(convs);
         useVoiceStore.getState().setChannels(voices);
         useLiveStore.getState().setChannels(lives);
         usePostsStore.getState().setPage(posts.results, posts.next_cursor, posts.has_more);

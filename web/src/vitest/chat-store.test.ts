@@ -146,4 +146,21 @@ describe("chat store", () => {
     expect(st.conversations.map((c) => c.id)).toEqual(["2"]);
     expect(st.activeConversationId).toBeNull();
   });
+
+  it("bumpGroupActivity：单调递增，更早时间戳不回退", () => {
+    const s = useChatStore.getState();
+    s.bumpGroupActivity("g1", 100);
+    expect(useChatStore.getState().groupActivityAt["g1"]).toBe(100);
+    s.bumpGroupActivity("g1", 200);
+    expect(useChatStore.getState().groupActivityAt["g1"]).toBe(200);
+    // 更早时间戳不回退（删除/下播不调用 bump；即便误传旧值也只取 max）
+    s.bumpGroupActivity("g1", 50);
+    expect(useChatStore.getState().groupActivityAt["g1"]).toBe(200);
+  });
+
+  it("reset 清空 groupActivityAt", () => {
+    useChatStore.getState().bumpGroupActivity("g1", 100);
+    useChatStore.getState().reset();
+    expect(useChatStore.getState().groupActivityAt).toEqual({});
+  });
 });

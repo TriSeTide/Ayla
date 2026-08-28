@@ -28,6 +28,7 @@ import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { useChatStore, isChatStale } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
 import { useShellStore } from "../stores/shell";
+import { subscribeGroupConversations } from "../ws/chat";
 
 /** 卡片布局每批渲染数（增量加载更多，R-H6） */
 const PAGE_SIZE = 12;
@@ -88,7 +89,10 @@ export function HomePage() {
     chatApi
       .listConversations()
       .then((list) => {
-        if (!cancelled) setConversations(list);
+        if (!cancelled) {
+          setConversations(list);
+          subscribeGroupConversations(list);
+        }
       })
       .catch((e) => {
         if (!cancelled) {
@@ -129,6 +133,7 @@ export function HomePage() {
     try {
       const list = await chatApi.listConversations();
       useChatStore.getState().setConversations(list);
+      subscribeGroupConversations(list);
       setRevealNonce((n) => n + 1);
     } catch (e) {
       setListError(e instanceof Error ? e.message : "加载失败");
@@ -205,7 +210,10 @@ export function HomePage() {
               useChatStore.getState().setLoading(true);
               chatApi
                 .listConversations()
-                .then((l) => useChatStore.getState().setConversations(l))
+                .then((l) => {
+                  useChatStore.getState().setConversations(l);
+                  subscribeGroupConversations(l);
+                })
                 .catch((e) =>
                   setListError(e instanceof Error ? e.message : "加载失败"),
                 );

@@ -14,11 +14,13 @@ import type {
 import {
   hasGroupActivity,
   sortGroupsByActivity,
+  useGroupActivityMap,
   useGroupCarouselSlides,
   type GroupActivity,
   type NewEvent,
 } from "../components/home/groupActivity";
 import { useBoardgameStore } from "../stores/boardgame";
+import { useChatStore } from "../stores/chat";
 import { useLiveStore } from "../stores/live";
 import { usePostsStore } from "../stores/posts";
 import { useVoiceStore } from "../stores/voice";
@@ -267,5 +269,63 @@ describe("useGroupCarouselSlides（群卡片状态轮播数据）", () => {
     const { result } = renderHook(() => useGroupCarouselSlides());
     const slides = result.current("g1", 4);
     expect(slides.map((s) => s.kind)).toEqual(["message-voice", "live", "post"]);
+  });
+});
+
+describe("useGroupActivityMap（单调排序时间戳合并）", () => {
+  afterEach(() => {
+    useLiveStore.getState().reset();
+    useVoiceStore.getState().reset();
+    usePostsStore.getState().reset();
+    useBoardgameStore.getState().reset();
+    useChatStore.getState().reset();
+  });
+
+  function liveChannel(groupId: string, status: LiveChannelDescriptor["status"]): LiveChannelDescriptor {
+    return {
+      id: 1,
+      title: "直播标题",
+      status,
+      owner_id: "o2",
+      owner_nickname: "阿蓝",
+      is_owner: false,
+      visibility: "group",
+      group: groupId,
+      group_name: null,
+      allowed_group_ids: [groupId],
+      allowed_group_names: [],
+      stream_key: null,
+      rtmp_url: null,
+      hls_url: "",
+      flv_url: "",
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  it("无任何推导内容时，bump 时间戳仍驱动排序时间", () => {
+    useChatStore.getState().bumpGroupActivity("g1", 5_000_000);
+    const { result } = renderHook(() => useGroupActivityMap());
+    const activity = result.current("g1", null);
+    expect(activity.lastNewAt).toBe(5_000_000);
+    expect(activity.lastEvent).toBeNull();
+  });
+
+  it("bump 时间戳与推导时间取 max：下播后推导回退但 bump 保留，不往回排", () => {
+    // 开播中 → 推导出 started_at 新内容
+    useLiveStore.getState().setChannels([liveChannel("g1", "live")]);
+    const { result } = renderHook(() => useGroupActivityMap());
+    const liveAt = result.current("g1", null).lastNewAt;
+    expect(liveAt).toBeGreaterThan(0);
+
+    // 开播时收到新内容 → bump（比 started_at 更大）
+    const bumped = liveAt + 60_000;
+    useChatStore.getState().bumpGroupActivity("g1", bumped);
+
+    // 下播（status=ended）→ live 不再计入推导，但 bump 保留
+    useLiveStore.getState().setChannels([liveChannel("g1", "ended")]);
+    const { result: r2 } = renderHook(() => useGroupActivityMap());
+    expect(r2.current("g1", null).lastNewAt).toBe(bumped);
   });
 });

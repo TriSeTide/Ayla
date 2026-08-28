@@ -37,8 +37,12 @@ interface ChatState {
   error: string | null;
   activeConversationId: string | null;
   lastFetched: number | null;
+  /** 群「最近收到新内容」的单调时间戳（ms）。只在收到新内容时 bump，删除/下播/离开不回退。 */
+  groupActivityAt: Record<string, number>;
 
   setConversations: (list: ConversationSummary[]) => void;
+  /** 收到新内容 → 单调 bump（取 max，避免事件乱序/时钟回退导致卡片往回排）。 */
+  bumpGroupActivity: (groupId: string, at?: number) => void;
   upsertConversation: (conv: ConversationSummary | ConversationDetail) => void;
   setLoading: (loading: boolean) => void;
   setError: (err: string | null) => void;
@@ -64,6 +68,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   activeConversationId: null,
   lastFetched: null,
+  groupActivityAt: {},
+
+  bumpGroupActivity: (groupId, at = Date.now()) =>
+    set((state) => {
+      const prev = state.groupActivityAt[groupId] ?? 0;
+      // 单调：只前进不回退；删除/下播/离开不调用本方法，因此不影响排序。
+      if (at <= prev) return state;
+      return { groupActivityAt: { ...state.groupActivityAt, [groupId]: at } };
+    }),
 
   setConversations: (conversations) => {
     const { conversations: current } = get();
@@ -186,7 +199,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })),
 
   reset: () =>
-    set({ conversations: [], loading: false, error: null, activeConversationId: null, lastFetched: null }),
+    set({ conversations: [], loading: false, error: null, activeConversationId: null, lastFetched: null, groupActivityAt: {} }),
 }));
 
 /** 判断 chat store 数据是否过期（默认 60 秒） */

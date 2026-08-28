@@ -51,6 +51,25 @@ function previewSenderName(conv: ConversationSummary, senderId: string): string 
   return "";
 }
 
+/** 从「归属群 + 白名单群」提取该内容可见的群 id 集合（bump 排序用；去重、过滤空值）。 */
+function visibleGroupIds(descriptor: {
+  group?: string | null;
+  allowed_group_ids?: string[] | null;
+}): string[] {
+  const ids = new Set<string>();
+  if (descriptor.group) ids.add(String(descriptor.group));
+  for (const id of descriptor.allowed_group_ids ?? []) {
+    if (id != null) ids.add(String(id));
+  }
+  return [...ids];
+}
+
+/** bump 一段可见群 id 的「最近收到新内容」时间戳（单调，往前排）。 */
+function bumpGroups(ids: string[]) {
+  const chat = useChatStore.getState();
+  for (const id of ids) chat.bumpGroupActivity(id);
+}
+
 /** 收到 WS 帧的通用处理器（供测试/扩展监听） */
 export type ChatFrameHandler = (frame: ChatServerFrame) => void;
 
@@ -297,6 +316,10 @@ export class ChatWSClient {
               (d.content ||
                 (d.type === "image" ? "[图片]" : d.type === "video" ? "[视频]" : d.type === "voice" ? "[语音]" : undefined)),
           });
+          // 群收到新消息（含自己发的）→ 卡片单调往前排；私聊不影响群排序。
+          if (conv.type === "group") {
+            chat.bumpGroupActivity(conv.id);
+          }
         }
         break;
       }
@@ -397,21 +420,34 @@ export class ChatWSClient {
         const channelId = String(frame.data.channel_id);
         // WS 只作目录提示；以权限 REST 详情为权威，避免泄露受限频道且与列表对账。
         void voiceApi.getVoiceChannel(channelId)
-          .then((channel) => useVoiceStore.getState().upsertChannel(channel))
+          .then((channel) => {
+            useVoiceStore.getState().upsertChannel(channel);
+            // 新语音房创建 → 其可见群卡片往前排（单调）。
+            bumpGroups(visibleGroupIds(channel));
+          })
           .catch(() => { /* 403/404：当前用户不可见或频道已删除，忽略提示 */ });
         break;
       }
       case "voice.channel.deleted": {
         const d = frame.data;
+        // 删除不回退排序（卡片保持在原位置）。
         useVoiceStore.getState().removeChannel(d.channel_id);
         break;
       }
       case "voice.channel.member_count_changed": {
         // 有人加入/离开/被踢/超时清理 → 目录列表实时刷新人数（轮播「N人在xx连麦」）
         const d = frame.data;
+        const prev = useVoiceStore.getState().channels.find(
+          (c) => c.id === String(d.channel_id),
+        );
+        const prevCount = prev ? Number(prev.member_count) : 0;
         useVoiceStore.getState().patchChannel(d.channel_id, {
           member_count: d.member_count,
         });
+        // 有人进入（人数增加）→ 群卡片往前排；离开/被踢（人数减少）不回退。
+        if (Number(d.member_count) > prevCount && prev) {
+          bumpGroups(visibleGroupIds(prev));
+        }
         break;
       }
       case "voice.channel.updated": {
@@ -428,10 +464,19 @@ export class ChatWSClient {
       }
       case "live.channel.status.changed": {
         this.reconcileLiveChannel(frame.data.channel_id);
+        if (frame.data.status === "live") {
+          // 开播 → 拉详情确认可见群后 bump（单调往前排）；下播/结束不回退。
+          void liveApi.getLiveChannel(frame.data.channel_id)
+            .then((channel) => {
+              if (channel.status === "live") bumpGroups(visibleGroupIds(channel));
+            })
+            .catch(() => { /* 拉详情失败忽略，排序以 reconcile 结果为准 */ });
+        }
         break;
       }
       case "live.channel.deleted": {
         const d = frame.data;
+        // 删除直播间不回退排序。
         useLiveStore.getState().removeChannel(d.channel_id);
         break;
       }
@@ -448,23 +493,31 @@ export class ChatWSClient {
         if (!postId) break;
         void postsApi
           .getPost(postId)
-          .then((post) => usePostsStore.getState().upsertPost(post))
+          .then((post) => {
+            usePostsStore.getState().upsertPost(post);
+            bumpGroups(visibleGroupIds(post));
+          })
           .catch(() => { /* 当前用户不可见或帖子已删除，忽略提示 */ });
         break;
       }
       case "post.deleted": {
         const d = frame as import("../api/types").PostDeletedFrame;
+        // 删除不回退排序（卡片保持在原位置）。
         usePostsStore.getState().removePost(Number(d.post_id));
         break;
       }
       case "post.updated": {
-        // 帖子被编辑（标题/正文/可见性）→ 拉完整帖子 upsert（轮播「最新帖」实时刷新）
+        // 帖子被编辑（标题/正文/可见性）→ 拉完整帖子 upsert（轮播「最新帖」实时刷新）；
+        // created_at 不变，编辑算「新内容」→ 单调 bump 使可见群卡片往前排。
         const d = frame as import("../api/types").PostUpdatedFrame;
         const postId = Number(d.post.id);
         if (!postId) break;
         void postsApi
           .getPost(postId)
-          .then((post) => usePostsStore.getState().upsertPost(post))
+          .then((post) => {
+            usePostsStore.getState().upsertPost(post);
+            bumpGroups(visibleGroupIds(post));
+          })
           .catch(() => { /* 当前用户不可见或帖子已删除，忽略提示 */ });
         break;
       }
@@ -510,6 +563,22 @@ export class ChatWSClient {
         };
         message.upsertMessage(d.conversation_id, msg);
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
+        if (conv) {
+          // 爱莉回复也要更新会话列表预览 + 群排序（与 message.new 对齐）。
+          chat.setLastMessage(conv.id, {
+            seq: d.seq,
+            type: d.type,
+            content: d.content,
+            sender_id: d.sender_id,
+            sender_name: previewSenderName(conv, d.sender_id),
+            status: "sent",
+            created_at: d.ts,
+            preview:
+              d.content ||
+              (d.type === "image" ? "[图片]" : d.type === "video" ? "[视频]" : d.type === "voice" ? "[语音]" : undefined),
+          });
+          if (conv.type === "group") chat.bumpGroupActivity(conv.id);
+        }
         const atBottom =
           chat.activeConversationId === d.conversation_id &&
           (message.viewerAtBottom[d.conversation_id] ?? true);
@@ -564,3 +633,17 @@ export class ChatWSClient {
 
 /** 单例（避免多组件各连一条） */
 export const chatWS = new ChatWSClient();
+
+/**
+ * 订阅一组会话里的所有群（幂等）。
+ *
+ * 群消息的 message.new 只广播到 `chat_conv_{id}` 组，而主页/宽屏 ServerRail 常驻
+ * 群聊列表却不打开任何群聊天，若不主动订阅就收不到群消息 → 红点/轮播消息卡/排序
+ * 都不会实时刷新。这里在会话列表加载完成后统一订阅所有群。
+ */
+export function subscribeGroupConversations(conversations: ConversationSummary[]) {
+  const groupIds = conversations
+    .filter((c) => c.type === "group")
+    .map((c) => c.id);
+  if (groupIds.length > 0) chatWS.subscribe(groupIds);
+}
