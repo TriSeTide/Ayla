@@ -401,6 +401,13 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             },
         })
 
+    async def voice_channel_updated(self, event):
+        """语音房元数据变更提示（改名/可见性/转让房主）→ 客户端经权限 REST 详情对账。"""
+        await self.send_json({
+            "type": "voice.channel.updated",
+            "data": {"channel_id": str(event["channel_id"])},
+        })
+
     # ---------- 直播间实时推送 ----------
 
     async def live_channel_created(self, event):

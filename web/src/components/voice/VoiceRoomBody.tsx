@@ -14,6 +14,7 @@ import { useAuthStore } from "../../stores/auth";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
 import { getVisibilityLabels } from "../../utils/visibility";
 import { useRevealOnEnter } from "../../hooks/useRevealOnEnter";
+import { voiceWS } from "../../ws/voice";
 
 export function VoiceRoomBody({
   channelId,
@@ -74,6 +75,19 @@ export function VoiceRoomBody({
       if (!cancelled) setError(err instanceof Error ? err.message : "加载房内聊天失败");
     });
     return () => { cancelled = true; };
+  }, [channelId]);
+
+  // 房内聊天 WS 热更新：订阅 voice.chat.message 帧，按 message.id 幂等去重 append。
+  // 自己发送的消息已在 sendMessage 乐观 append，WS 回播同一 id 时去重，不产生双气泡。
+  useEffect(() => {
+    if (!channelId) return;
+    const off = voiceWS.onFrame((frame) => {
+      if (frame.type !== "voice.chat.message") return;
+      const msg = frame.data;
+      if (String(msg.channel_id) !== String(channelId)) return;
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+    });
+    return off;
   }, [channelId]);
 
   const sendMessage = async (mediaId?: string | null) => {

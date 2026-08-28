@@ -16,7 +16,6 @@ import { VoiceChannelList } from "../components/voice/VoiceChannelList";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useShellStore } from "../stores/shell";
-import { useAuthStore } from "../stores/auth";
 import { useVoiceChannel } from "../hooks/useVoiceChannel";
 import { useVoiceStore, isVoiceStale } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
@@ -32,10 +31,13 @@ export function VoiceHubPage() {
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const joiningRouteRef = useRef<string | null>(null);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制语音列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
   const hubRef = useRef<HTMLDivElement>(null);
+  // 记录上次已触发 join 的路由频道 id：仅当 routeChannelId 变化时才 join，
+  // 避免 leave 清空 currentChannelId 后、navigate 尚未更新路由的窗口里被 effect 误判
+  // 为"需要重新加入"而把用户拉回房间（"离开不了"）；离房时清空以支持再次进入。
+  const lastJoinRouteRef = useRef<string | null>(null);
 
   const {
     currentChannelId,
@@ -171,39 +173,33 @@ export function VoiceHubPage() {
 
   // /voice/:channelId 是真实的语音房路由：进入该 URL 就加入对应房间，
   // 浮层点击因此不会只回列表，也支持刷新后按用户状态重新建立媒体连接。
+  // 仅当 routeChannelId 变化时才 join（离房时清空标记以支持再次进入），避免 leave 后误判重进。
   useEffect(() => {
-    if (
-      routeChannelId &&
-      currentChannelId !== routeChannelId &&
-      !joining &&
-      joiningRouteRef.current !== routeChannelId
-    ) {
-      joiningRouteRef.current = routeChannelId;
-      void join(routeChannelId, { joinMuted: true });
+    if (!routeChannelId) {
+      lastJoinRouteRef.current = null;
+      return;
     }
-  }, [currentChannelId, joining, join, routeChannelId]);
+    if (lastJoinRouteRef.current === routeChannelId) return;
+    lastJoinRouteRef.current = routeChannelId;
+    void join(routeChannelId, { joinMuted: true });
+  }, [join, routeChannelId]);
 
   const currentChannel = routeChannelId
     ? channels.find((c) => c.id === routeChannelId) ?? null
     : null;
-  const currentUser = useAuthStore((s) => s.currentUser);
   // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。
   const handleBack = useCallback(() => {
     navigate("/voice");
   }, [navigate]);
+  // 房主可直接退出（不再要求先转让房主）。
   const handleLeave = useCallback(async () => {
-    // 房主必须先转让房主才能离开（后端 403 强校验，前端先拦截避免状态混乱）
-    if (currentChannel && currentChannel.owner_id === currentUser?.id) {
-      window.confirm("你是房主，退出前应先转让房主");
-      return;
-    }
     try {
       await leave();
       navigate("/voice");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "离开语音房失败");
     }
-  }, [currentChannel, currentUser, leave, navigate]);
+  }, [leave, navigate]);
   const notice = joinError ?? listError;
 
   // 进房态（两种形态都渲染语音房面板 + 房内打字）

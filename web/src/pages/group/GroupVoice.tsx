@@ -15,7 +15,6 @@ import { VoiceRoomBody } from "../../components/voice/VoiceRoomBody";
 import { PullToRefresh } from "../../components/motion/PullToRefresh";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
-import { useAuthStore } from "../../stores/auth";
 import { useShellStore } from "../../stores/shell";
 import { useVoiceStore } from "../../stores/voice";
 
@@ -39,6 +38,10 @@ export function GroupVoice({
   // §3.4 刷新动画：刷新完成后递增，key 变化强制语音列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
   const hubRef = useRef<HTMLDivElement>(null);
+  // 记录上次已触发 join 的路由频道 id：仅当 routeChannelId 变化时才 join，
+  // 避免 leave 清空 currentChannelId 后、navigate 尚未更新路由的窗口里被 effect 误判
+  // 为"需要重新加入"而把用户拉回房间（"离开不了"）。
+  const lastJoinRouteRef = useRef<string | null>(null);
 
   const {
     currentChannelId,
@@ -57,8 +60,7 @@ export function GroupVoice({
   // group/allowed_groups 频道），再按 groupId 前端投影当前群；
   // 不能用 scope=group:<id> 直接覆盖 store，否则跨群切换时全局列表被单群数据污染。
   const groupChannels = channels.filter((c) =>
-    String(c.group) === String(groupId)
-    || (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+    (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
   );
 
   // 上拉刷新/刷新键共用：强制重拉语音房列表
@@ -137,39 +139,37 @@ export function GroupVoice({
   );
 
   useEffect(() => {
-    if (routeChannelId && currentChannelId !== routeChannelId && !joining) {
-      void join(routeChannelId, { joinMuted: true });
+    if (!routeChannelId) {
+      lastJoinRouteRef.current = null;
+      return;
     }
-  }, [currentChannelId, join, joining, routeChannelId]);
+    if (lastJoinRouteRef.current === routeChannelId) return;
+    lastJoinRouteRef.current = routeChannelId;
+    void join(routeChannelId, { joinMuted: true });
+  }, [join, routeChannelId]);
 
   // 只在当前群且 URL 指向当前频道时渲染房内界面；/group/:id/voice 是列表。
-  // 多群白名单频道（group=null + allowed_group_ids 含本群）同样视为本群频道。
+  // 群可见性由 allowed_groups 白名单决定（含本群即属本群频道）。
   const currentChannel = routeChannelId
     ? channels.find(
         (c) =>
           c.id === routeChannelId &&
-          (String(c.group) === String(groupId) ||
-            (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId))),
+          (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
       ) ?? null
     : null;
-  const currentUser = useAuthStore((s) => s.currentUser);
   // 顶部返回只离开房间界面，保留语音连接与全局浮层；面板里的“离开频道”才真正退出。
   const handleBack = useCallback(() => {
     navigate(`/group/${groupId}/voice`);
   }, [groupId, navigate]);
+  // 房主可直接退出（不再要求先转让房主）。
   const handleLeave = useCallback(async () => {
-    // 房主必须先转让房主才能离开（后端 403 强校验，前端先拦截避免状态混乱）
-    if (currentChannel && currentChannel.owner_id === currentUser?.id) {
-      window.confirm("你是房主，退出前应先转让房主");
-      return;
-    }
     try {
       await leave();
       navigate(`/group/${groupId}/voice`);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "离开语音房失败");
     }
-  }, [currentChannel, currentUser, groupId, leave, navigate]);
+  }, [groupId, leave, navigate]);
 
   if (currentChannel) {
     return (

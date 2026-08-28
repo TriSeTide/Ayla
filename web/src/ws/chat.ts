@@ -414,6 +414,14 @@ export class ChatWSClient {
         });
         break;
       }
+      case "voice.channel.updated": {
+        // 语音房改名/可见性/转让房主 → 以权限 REST 详情为权威对账（对齐 created 模式）。
+        const channelId = String(frame.data.channel_id);
+        void voiceApi.getVoiceChannel(channelId)
+          .then((channel) => useVoiceStore.getState().upsertChannel(channel))
+          .catch(() => { /* 403/404：当前用户不可见或已删除，忽略提示 */ });
+        break;
+      }
       case "live.channel.created": {
         this.reconcileLiveChannel(frame.data.channel_id);
         break;

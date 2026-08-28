@@ -513,6 +513,13 @@ export interface VoiceChannelMemberCountChangedFrame {
   };
 }
 
+export interface VoiceChannelUpdatedFrame {
+  type: "voice.channel.updated";
+  data: {
+    channel_id: string;
+  };
+}
+
 export interface LiveChannelCreatedFrame {
   type: "live.channel.created";
   data: {
@@ -622,6 +629,7 @@ export type ChatServerFrame =
   | VoiceChannelCreatedFrame
   | VoiceChannelDeletedFrame
   | VoiceChannelMemberCountChangedFrame
+  | VoiceChannelUpdatedFrame
   | LiveChannelCreatedFrame
   | LiveChannelStatusChangedFrame
   | LiveChannelDeletedFrame
@@ -762,6 +770,12 @@ export interface VoiceStateFrame {
   };
 }
 
+/** 房内聊天新消息广播（后端 POST messages/ 后广播到 voice_chan_{id}） */
+export interface VoiceChatMessageFrame {
+  type: "voice.chat.message";
+  data: VoiceChatMessage;
+}
+
 export interface VoiceErrorFrame {
   type: "error";
   detail: string;
@@ -770,6 +784,7 @@ export interface VoiceErrorFrame {
 export type VoiceServerFrame =
   | VoiceSubscribedFrame
   | VoiceStateFrame
+  | VoiceChatMessageFrame
   | VoiceErrorFrame
   | PongFrame;
 

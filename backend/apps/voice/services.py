@@ -39,16 +39,12 @@ def _gen_room_name() -> str:
 def _resolve_visibility(group, visibility: str | None) -> str:
     """S1 可见性默认：group 非空且未显式指定 → group 可见；否则 public。
 
-    visibility=group 的群归属有两种来源：单群 `group` FK，或多群 `allowed_groups`
-    白名单（全局列表创建"指定群可见"场景，group 为 None）。services 层不持有白名单，
-    因此 group is None 时不再直接报错；"两者皆空 → 房间对所有人不可见"的校验由
+    visibility=group 的群可见性由 `allowed_groups` 白名单提供（group FK 不承载可见性）。
+    group 为空时仍允许返回 GROUP（全局"指定群可见"多群场景），"两者皆空"的校验由
     视图层在拿到完整 payload 后执行（见 views.py ChannelListView.post）。
     """
     if visibility is None or not visibility:
         return Visibility.GROUP if group is not None else Visibility.PUBLIC
-    if visibility == Visibility.GROUP and group is None:
-        # 全局创建选择"指定群可见"：可见性依赖 allowed_groups 白名单（多群）。
-        return Visibility.GROUP
     return visibility
 
 
@@ -71,6 +67,11 @@ def create_channel(user, name: str, group=None, visibility: str | None = None, a
     if allowed_group_ids is not None:
         from apps.common.visibility import set_allowed_groups
         set_allowed_groups(channel, allowed_group_ids)
+    elif visibility == Visibility.GROUP and group is not None:
+        # 兜底：群内创建未显式传白名单时，把归属群落为白名单，
+        # 使群可见性完全由 allowed_groups 表达（group FK 不承载可见性）。
+        from apps.common.visibility import set_allowed_groups
+        set_allowed_groups(channel, [str(group.id)])
     return channel
 
 
@@ -124,6 +125,8 @@ def transfer_channel_owner(channel: VoiceChannel, actor, target_user_id):
     locked_channel.save(update_fields=["owner"])
     # 保持调用方持有的实例与数据库一致，避免同一请求链上的后续权限判断使用旧 owner_id。
     channel.owner_id = target.user_id
+    # 房主变更 → 目录与房内实时对账（owner 标识 / 踢人转让按钮 / 删除按钮刷新）。
+    broadcast_channel_updated(channel)
     return channel
 
 
@@ -179,6 +182,8 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
         user.save(update_fields=["is_in_voice", "voice_room_id"])
     for previous_id in previous_ids:
         broadcast_voice_state_by_channel_id(previous_id, user, "left")
+        # 旧频道有人离开 → 目录人数实时刷新（否则旧房间卡片人数不减，像"没退掉"）
+        broadcast_channel_member_count_by_id(previous_id)
     broadcast_voice_state(channel, user, "joined")
     # 有人进入 → 目录人数实时刷新（轮播「N人在xx连麦」/「有人在语音房」）
     broadcast_channel_member_count(channel)
@@ -189,20 +194,12 @@ def leave_channel(channel: VoiceChannel, user) -> None:
     """离开频道。
 
     生命周期契约：
-    - 房主离开时若频道还有其他成员，必须先转让房主（否则 403）；
-    - 房主是唯一成员时允许直接离开（频道保留为空房，其余人可再加入）。
+    - 房主可直接离开（不再要求先转让）；频道 owner 归属保持不变，
+      房主离开后若仍有其他成员在场，频道继续存在，owner 仍是原房主。
     锁行后重读 owner，避免与并发转让/踢人竞态造成基于旧 owner 的误判。
     """
     with transaction.atomic():
         locked = VoiceChannel.objects.select_for_update().get(pk=channel.pk)
-        if locked.owner_id == user.id:
-            has_others = (
-                VoiceChannelMember.objects.filter(channel=locked)
-                .exclude(user=user)
-                .exists()
-            )
-            if has_others:
-                raise PermissionError("房主请先转让房主后再离开")
         deleted, _ = VoiceChannelMember.objects.filter(
             channel=locked, user=user
         ).delete()
@@ -357,6 +354,41 @@ def broadcast_channel_deleted(channel_id, visibility, group_id=None):
         logger.exception("voice.channel.deleted broadcast failed")
 
 
+def broadcast_channel_updated(channel) -> None:
+    """语音房元数据变更（改名/可见性/转让房主）→ 目录实时对账。
+
+    只携带 channel_id，元数据由各客户端经权限 REST 详情获取（与 created/deleted
+    同模式），避免向无权用户泄露好友/群白名单频道的改名内容。
+    """
+    _broadcast_channel_catalog_event(channel.id, "voice.channel.updated")
+
+
+def broadcast_voice_chat_message(channel, message_payload: dict) -> None:
+    """房内聊天消息广播到频道组 `voice_chan_{id}`（房内成员实时收到新消息）。
+
+    message_payload 为 views._payload(message) 的序列化结果（含 sender/media），
+    与 POST messages/ 返回结构一致，客户端按 message.id 幂等去重。
+    """
+    from channels.layers import get_channel_layer
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    try:
+        async_to_sync(layer.group_send)(
+            _voice_group_name(channel.id),
+            {"type": "voice.chat.message", "data": message_payload},
+        )
+    except ChannelFull:
+        logger.warning(
+            "voice.chat.message broadcast dropped (ChannelFull) for vc %s", channel.id
+        )
+    except Exception:
+        logger.exception(
+            "voice.chat.message broadcast failed for vc %s", channel.id
+        )
+
+
 def broadcast_channel_member_count(channel) -> None:
     """语音房成员数变动后广播目录更新（有人加入/离开/被踢/超时清理）。
 
@@ -388,4 +420,38 @@ def broadcast_channel_member_count(channel) -> None:
         logger.exception(
             "voice.channel.member_count_changed broadcast failed for vc %s",
             channel.id,
+        )
+
+
+def broadcast_channel_member_count_by_id(channel_id) -> None:
+    """按频道 id 广播成员数（切换房间时旧频道成员关系已删除，仅有 id）。
+
+    与 broadcast_channel_member_count 同语义，但接受裸 id，避免为已删成员关系的
+    旧频道重建 ORM 对象。
+    """
+    from channels.layers import get_channel_layer
+    from channels.exceptions import ChannelFull
+
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    member_count = VoiceChannelMember.objects.filter(channel_id=channel_id).count()
+    try:
+        async_to_sync(layer.group_send)(
+            "voice_catalog",
+            {
+                "type": "voice.channel.member_count_changed",
+                "channel_id": str(channel_id),
+                "member_count": member_count,
+            },
+        )
+    except ChannelFull:
+        logger.warning(
+            "voice.channel.member_count_changed broadcast dropped (ChannelFull) for vc %s",
+            channel_id,
+        )
+    except Exception:
+        logger.exception(
+            "voice.channel.member_count_changed broadcast failed for vc %s",
+            channel_id,
         )

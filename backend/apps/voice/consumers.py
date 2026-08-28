@@ -87,3 +87,7 @@ class VoiceConsumer(AsyncJsonWebsocketConsumer):
     # 频道组广播回调：voice.state（channels 把 event["type"] 里的 . 转成 _ 调用）
     async def voice_state(self, event):
         await self.send_json(event)
+
+    # 频道组广播回调：voice.chat.message（房内聊天，直接转发完整 event）
+    async def voice_chat_message(self, event):
+        await self.send_json(event)

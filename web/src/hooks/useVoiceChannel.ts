@@ -23,6 +23,7 @@ import { voiceLiveKit } from "../livekit/client";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
+import { chatWS } from "../ws/chat";
 import { useSessionActivityStore } from "../stores/sessionActivity";
 import { voiceSessionRuntime, VOICE_HEARTBEAT_INTERVAL_MS } from "../runtime/voiceSessionRuntime";
 
@@ -48,13 +49,19 @@ export function useVoiceChannel() {
 
   /** 防止卸载后异步回写 */
   const mountedRef = useRef(true);
-  // 每次 join 都拥有独立代次；路由卸载或再次 join 时，旧请求不得把媒体/成员状态带回来。
+  // 每次 join 都拥有独立代次；再次 join 时，旧请求不得把媒体/成员状态带回来。
+  // 注意：代次只在 join 开头递增，不在 cleanup 里递增——React StrictMode 的
+  // 模拟卸载/重挂载会触发 cleanup，若在此递增会导致首次 join 恢复执行时被误判
+  // 为"孤儿 join"回滚（群外 VoiceHubPage 因此进房即断）；组件卸载由 mountedRef 判断。
   const joinGenerationRef = useRef(0);
+  // 同步的 join 进行中标记：StrictMode 会在同一次 commit 里重复跑 mount effect，
+  // 此时 `joining` state 尚未 flush，闭包仍是旧值 false，仅靠 state 无法防重入；
+  // 用 ref 同步置位，阻断重复的 joinVoiceChannel HTTP 请求。
+  const joiningRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      joinGenerationRef.current += 1;
     };
   }, []);
 
@@ -62,11 +69,13 @@ export function useVoiceChannel() {
     voiceSessionRuntime.stopHeartbeat();
   }, []);
 
-  /** 本地重置到未加入态（心跳 403 / 离开后的统一收尾） */
+  /** 本地重置到未加入态（心跳 403 / 被踢 / 房间删除后的统一收尾） */
   const resetLocal = useCallback(() => {
     stopHeartbeat();
     const channelId = useVoiceStore.getState().currentChannelId;
     if (channelId) voiceWS.unsubscribe(channelId);
+    // 断开媒体（被踢/超时清理/房间删除时后端已删成员，这里只收本地媒体资源）
+    void voiceLiveKit.disconnect();
     useVoiceStore.getState().leaveChannelLocal();
     useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
     useSessionActivityStore.getState().clear("voice");
@@ -134,12 +143,44 @@ export function useVoiceChannel() {
     return off;
   }, [reconcile]);
 
+  // 被移出（踢出/超时清理）或房间删除 → 强制本地退出（后端已删成员，这里只收本地资源）。
+  // 被踢：kick_member 广播 voice.state left（被踢者自己），自己仍订阅着该频道故能收到；
+  // 删除：broadcast_channel_deleted 走 chat WS 目录组，房内成员据此退出。
+  useEffect(() => {
+    const offVoiceState = voiceWS.onFrame((frame) => {
+      if (frame.type !== "voice.state") return;
+      const d = frame.data;
+      const me = useAuthStore.getState().currentUser?.id;
+      const channelId = useVoiceStore.getState().currentChannelId;
+      if (d.state === "left" && me && channelId === d.channel_id && String(d.user_id) === String(me)) {
+        resetLocal();
+        if (mountedRef.current) setErrorState("你已被移出语音频道");
+      }
+    });
+    const offChat = chatWS.onFrame((frame) => {
+      if (frame.type !== "voice.channel.deleted") return;
+      const channelId = useVoiceStore.getState().currentChannelId;
+      if (channelId === String(frame.data.channel_id)) {
+        resetLocal();
+        if (mountedRef.current) setErrorState("语音房已被删除");
+      }
+    });
+    return () => {
+      offVoiceState();
+      offChat();
+    };
+  }, [resetLocal]);
+
   // heartbeat 归 runtime owner；页面卸载不停止，明确 leave 才释放。
 
 
   /** 加入频道（重复 join 同频道幂等安全） */
   const join = useCallback(
     async (channelId: string, options: JoinOptions = {}) => {
+      // 同步防重入：StrictMode 会在同一 commit 里重复跑 mount effect，state 尚未
+      // flush 时闭包 `joining` 仍为 false，必须用 ref 阻断重复的 join HTTP 请求。
+      if (joiningRef.current) return;
+      joiningRef.current = true;
       const joinMuted = options.joinMuted ?? true;
       const generation = ++joinGenerationRef.current;
       const isCurrentJoin = () => mountedRef.current && joinGenerationRef.current === generation;
@@ -155,7 +196,8 @@ export function useVoiceChannel() {
           return;
         }
         // 2. 切频道：若已在其他频道，先本地清掉（leave/ 由后端 join 广播驱动他人视图；
-        //    自己旧频道的 leave 显式调一次保证幂等）
+        //    自己旧频道的 leave 显式调一次保证幂等）。同时把旧频道的"我在其中"标记清掉，
+        //    否则 UI 上两个频道同时显示"我在其中"（进一个没退另一个）。
         const prevChannelId = store.currentChannelId;
         if (prevChannelId && prevChannelId !== channelId) {
           stopHeartbeat();
@@ -163,6 +205,7 @@ export function useVoiceChannel() {
           await voiceApi.leaveVoiceChannel(prevChannelId).catch(() => {});
           await voiceLiveKit.disconnect();
           useVoiceStore.getState().leaveChannelLocal();
+          useVoiceStore.getState().patchChannel(prevChannelId, { mine: false });
           useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
         }
         // 3. LiveKit 连接
@@ -227,6 +270,7 @@ export function useVoiceChannel() {
           setErrorState(e instanceof Error ? e.message : "加入频道失败");
         }
       } finally {
+        joiningRef.current = false;
         if (mountedRef.current) setJoining(false);
       }
     },
