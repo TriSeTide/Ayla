@@ -41,6 +41,8 @@ describe("GroupPosts 我的帖子入口", () => {
     vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
     renderGroupPosts();
     const link = await screen.findByRole("link", { name: "我的帖子" });
+    expect(screen.getByRole("heading", { name: "群内帖子" })).toBeInTheDocument();
+    expect(link.closest(".group-scene-head")).not.toBeNull();
     link.click();
     expect(await screen.findByText("我的帖子页占位")).toBeInTheDocument();
     expect(postsApi.listPosts).toHaveBeenCalledWith({ scope: "group:1", limit: 20 });

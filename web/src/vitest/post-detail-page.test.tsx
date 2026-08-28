@@ -153,4 +153,21 @@ describe("PostDetailPage 编辑可见范围", () => {
       );
     });
   });
+
+  it("从我的帖子进入详情时，返回保留在我的帖子列表", async () => {
+    const detail = makePost();
+    vi.mocked(postsApi.getPost).mockResolvedValue(detail);
+    vi.mocked(postsApi.listComments).mockResolvedValue([]);
+    render(
+      <MemoryRouter initialEntries={["/posts/1?from=mine"]}>
+        <Routes>
+          <Route path="/posts/:postId" element={<PostDetailPage />} />
+          <Route path="/posts/mine" element={<div>我的帖子页占位</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "返回" }));
+    expect(await screen.findByText("我的帖子页占位")).toBeInTheDocument();
+  });
 });

@@ -134,6 +134,108 @@
   flex-direction: column;
 }
 
+/* ================= 群内场景统一标题栏（方案 §4-U15） ================= */
+
+/*
+ * 语音 / 帖子 / 桌游共用的滚动场景头部：独立玻璃卡片，与下方场景卡片保持同一内容轨道，
+ * 不用负 margin 拉伸到滚动容器边缘。各场景滚动容器统一使用 sp-4 四向留白，
+ * sticky 后保留相同顶部间距与圆角，列表内容不会被遮住。
+ */
+.group-scene-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 72px;
+  margin: 0;
+  padding: var(--sp-4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  /* 与下方实心帖子/桌游卡保持同一 16px 圆角节奏。 */
+  border-radius: 16px;
+  box-shadow: var(--glass-inset);
+}
+
+.group-scene-head-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-scene-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.group-scene-desc {
+  margin: var(--sp-1) 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-scene-head > .btn {
+  flex: none;
+}
+
+/* 三个场景统一四向 16px 外间距；父容器 gap 明确保证头部与首个内容块留白，
+   不让 PullToRefresh 的包裹层改变头部与首张卡的几何关系。 */
+.group-page .group-voice,
+.group-page .group-games,
+.group-page .group-posts-list {
+  padding: var(--sp-4);
+  gap: var(--sp-4);
+  scroll-padding-top: calc(72px + var(--sp-4));
+}
+
+/* 语音页底部仍需避让右下角 FAB；其余场景使用统一四向留白。 */
+.group-page .group-voice {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 68px;
+}
+
+/* GroupGames 原先仅由内容撑高；统一标题吸顶后显式占满群场景滚动区。 */
+.group-games {
+  height: 100%;
+  min-height: 0;
+}
+
+/* 空/错态只占标题以下的剩余区域，避免 `height: 100%` 与 sticky 头部叠加溢出。 */
+.group-games > .group-games-full {
+  height: auto;
+  min-height: 0;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .group-scene-head {
+    background: var(--glass-bg-strong);
+  }
+}
+
+@media (max-width: 480px) {
+  .group-scene-head {
+    align-items: flex-start;
+  }
+
+  .group-scene-head > .btn {
+    min-height: 40px;
+  }
+}
+
 /* ================= 子场景占位 ================= */
 
 .group-scene-placeholder {

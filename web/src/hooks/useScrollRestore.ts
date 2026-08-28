@@ -3,12 +3,12 @@
  *
  * 语义：
  * - 滚动时把 scrollTop 实时写入模块级 Map（key 隔离）；
- * - 页面卸载或 active 变 false 时，保存「最后一次真实滚动事件值」，绝不重新读取
- *   退出动画中的 DOM scrollTop——AnimatePresence 延迟卸载阶段 DOM 可能已归零，读取它会
- *   把正确记忆覆盖成 0；
+ * - 页面卸载或 active 变 false 时，绝不重新读取退出动画中的 DOM scrollTop；
+ *   滚动记忆只来自真实 scroll 事件或详情入口的显式保存，避免 AnimatePresence 延迟卸载
+ *   阶段已归零的 DOM 把正确位置覆盖成 0；
  * - 再挂载或 active 重新变 true 后，在内容 ready 时用 useLayoutEffect 恢复，并在下一帧
  *   再补一次（防列表/瀑布流同一提交里的尺寸落定晚于首次赋值）；
- * - restoring 表示本次列表激活是否命中历史位置，调用方据此禁 reveal stagger。
+ * - restoring 表示本次列表激活是否命中历史记录（含 scrollTop=0），调用方据此禁 reveal stagger。
  *
  * active 用于「组件不卸载、只切换列表/详情 DOM」的场景（如 GroupPosts）；ready 表示
  * 列表内容已经渲染到滚动容器，避免空骨架阶段把 scrollTop clamp 回 0。
@@ -53,10 +53,8 @@ export function useScrollRestore(
   const active = options.active ?? true;
   const ready = options.ready ?? true;
   const [restoring, setRestoring] = useState<boolean>(
-    () => active && (scrollMemory.get(key) ?? 0) > 0,
+    () => active && scrollMemory.has(key),
   );
-  // 只由真实 scroll 事件更新；退出 cleanup 保存此值，不读可能已归零的退出 DOM。
-  const latestTopRef = useRef(scrollMemory.get(key) ?? 0);
   const restoreRafRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
@@ -64,10 +62,11 @@ export function useScrollRestore(
       setRestoring(false);
       return;
     }
+    const hasSavedPosition = scrollMemory.has(key);
     const saved = scrollMemory.get(key) ?? 0;
-    latestTopRef.current = saved;
-    setRestoring(saved > 0);
-    if (!ready || saved <= 0) return;
+    // scrollTop=0 也代表一次真实的详情返回，调用方仍须跳过 reveal stagger。
+    setRestoring(hasSavedPosition);
+    if (!ready || !hasSavedPosition || saved <= 0) return;
 
     const el = ref.current;
     if (!el) return;
@@ -91,11 +90,8 @@ export function useScrollRestore(
     const el = ref.current;
     if (!el) return;
 
-    // 首次无历史时从当前 DOM 起步；有历史时保留已恢复值，避免 effect 初始化覆盖。
-    if (!scrollMemory.has(key)) latestTopRef.current = el.scrollTop;
     const onScroll = () => {
-      latestTopRef.current = el.scrollTop;
-      scrollMemory.set(key, latestTopRef.current);
+      scrollMemory.set(key, el.scrollTop);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {

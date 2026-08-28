@@ -33,6 +33,21 @@ describe("useScrollRestore", () => {
     expect(el2.scrollTop).toBe(300);
   });
 
+  it("显式记录顶部位置后返回也标记 restoring，调用方可跳过 stagger", () => {
+    const el1 = document.createElement("div");
+    const first = renderHook(() => useScrollRestore("feed", { current: el1 }));
+    act(() => {
+      el1.scrollTop = 0;
+      el1.dispatchEvent(new Event("scroll"));
+    });
+    first.unmount();
+
+    const el2 = document.createElement("div");
+    const second = renderHook(() => useScrollRestore("feed", { current: el2 }));
+    expect(second.result.current.restoring).toBe(true);
+    expect(el2.scrollTop).toBe(0);
+  });
+
   it("滚动实时记录，卸载后最新值持久", () => {
     const el = document.createElement("div");
     const { unmount } = renderHook(() => useScrollRestore("feed", { current: el }));

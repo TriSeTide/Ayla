@@ -1,8 +1,9 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MyPostsPage } from "../pages/MyPostsPage";
 import * as postsApi from "../api/posts";
+import { useAuthStore } from "../stores/auth";
 
 vi.mock("../api/posts", () => ({
   listPosts: vi.fn(),
@@ -24,15 +25,34 @@ const post = {
   images: [], comment_count: 0, is_author: true, created_at: "2026-01-01", updated_at: "2026-01-01",
 };
 
-afterEach(() => vi.clearAllMocks());
+function DetailLocation() {
+  const location = useLocation();
+  return <div>详情地址：{location.pathname}{location.search}</div>;
+}
+
+beforeEach(() => {
+  useAuthStore.setState({ currentUser: null });
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+  useAuthStore.setState({ currentUser: null });
+});
 
 describe("MyPostsPage", () => {
-  it("加载我的帖子并支持点击进入详情", async () => {
+  it("加载我的帖子并支持携带来源进入详情", async () => {
     vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post], next_cursor: null, has_more: false });
-    render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={["/posts/mine"]}>
+        <Routes>
+          <Route path="/posts/mine" element={<MyPostsPage />} />
+          <Route path="/posts/:postId" element={<DetailLocation />} />
+        </Routes>
+      </MemoryRouter>,
+    );
     expect(await screen.findByText("我的第一帖")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "我的第一帖" }));
-    expect(screen.getByRole("button", { name: "我的第一帖" })).toBeInTheDocument();
+    expect(await screen.findByText("详情地址：/posts/1?from=mine")).toBeInTheDocument();
     expect(postsApi.listPosts).toHaveBeenCalledWith({ scope: "mine", cursor: null, limit: 20 });
   });
 

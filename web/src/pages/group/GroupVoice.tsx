@@ -203,10 +203,10 @@ export function GroupVoice({
 
   return (
     <div className={`group-voice ${isNarrow ? "" : "is-wide"}`} ref={hubRef}>
-      <div className="group-voice-head">
-        <div>
-          <h3 className="group-voice-title">群内语音房</h3>
-          <p className="group-voice-desc">选择一个房间加入，或点击右下角创建新的群内语音房</p>
+      <div className="group-scene-head">
+        <div className="group-scene-head-copy">
+          <h3 className="group-scene-title">群内语音房</h3>
+          <p className="group-scene-desc">选择一个房间加入，或点击右下角创建新的群内语音房</p>
         </div>
       </div>
       {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}

@@ -11,6 +11,26 @@
   border-radius: 16px;
   box-shadow: var(--card-shadow);
   overflow: hidden;
+  transition: transform var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out);
+}
+
+/* 浮入动画挂在 posts-feed-item，卡片自身只处理悬停反馈，避免两个动画竞争 transform。 */
+@media (hover: hover) {
+  .posts-feed-item:hover .post-card {
+    transform: translateY(-2px);
+    filter: brightness(1.01);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-card {
+    transition: none;
+  }
+
+  .posts-feed-item:hover .post-card {
+    transform: none;
+  }
 }
 
 .post-card-main {
@@ -638,7 +658,8 @@
 /* 宽屏双列瀑布流（>1024px，方案 §4-U2）：两列等宽错排，较矮列优先由 JS 分配。
    左右留白与语音/桌游/直播列表统一（1200px 容器 + padding var(--sp-4) var(--sp-6)） */
 @media (min-width: 1025px) {
-  .posts-hub-head {
+  .posts-hub-head,
+  .my-posts-head {
     max-width: 1200px;
     padding-left: var(--sp-6);
     padding-right: var(--sp-6);
@@ -811,23 +832,34 @@
   padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: 0;
 }
 
-.group-posts-head {
-  flex: none;
+.group-posts-list > .pull-to-refresh {
+  min-width: 0;
+}
+
+/* 群内流复用全站帖子列与响应式瀑布流，仅由外层滚动区提供 gutter，避免双重 padding。 */
+.group-posts-feed {
+  padding: 0;
+}
+
+.group-posts-loading {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--glass-border);
 }
 
 .group-posts-skel {
   display: block;
   width: 100%;
-  margin-bottom: var(--sp-3);
+  margin: 0;
+}
+
+.group-posts-loading-more {
+  flex: none;
+  flex-basis: 100%;
+  width: 100%;
 }
 
 .group-posts-input {

@@ -112,6 +112,12 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
   // 数据区按错误/加载/空/列表呈现——加载/空/错误子项跨全宽，不整页骨架替换。
   return (
     <div className="group-games" ref={hubRef}>
+      <div className="group-scene-head">
+        <div className="group-scene-head-copy">
+          <h3 className="group-scene-title">群内桌游</h3>
+          <p className="group-scene-desc">选择一个房间加入，或创建新的群内桌游室</p>
+        </div>
+      </div>
       {error ? (
         <div className="group-scene-placeholder group-games-full" role="alert">
           <p className="placeholder-desc">{error}</p>

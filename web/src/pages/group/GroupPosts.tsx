@@ -11,6 +11,7 @@
  *   用**并集按 id 去重**的方式合并展示，既秒开又完整。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
@@ -18,10 +19,16 @@ import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
 import { PullToRefresh } from "../../components/motion/PullToRefresh";
+import { useMasonryColumns } from "../../hooks/useMasonryColumns";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { saveScrollPosition, useScrollRestore } from "../../hooks/useScrollRestore";
 import { usePostsStore } from "../../stores/posts";
 import { useShellStore } from "../../stores/shell";
 import { chatWS } from "../../ws/chat";
+
+/** 瀑布流断点与一级帖子流保持一致：>1024px 双列。 */
+const MASONRY_QUERY = "(min-width: 1025px)";
 
 export function GroupPosts({
   groupId,
@@ -52,6 +59,12 @@ export function GroupPosts({
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const scrollRestoreKey = `group-posts:${groupId}`;
+  // 同组件详情往返会先渲染列表、再由恢复 hook 的 layout effect 标记 restoring；
+  // 单独记住本次详情返回，确保该首帧也不挂 stagger。
+  const [skipRevealRestoreKey, setSkipRevealRestoreKey] = useState<string | null>(null);
+  // 历史位置恢复后仍可由用户主动刷新重新触发浮入。
+  const [revealAfterRefresh, setRevealAfterRefresh] = useState(false);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制帖子列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
 
@@ -75,6 +88,8 @@ export function GroupPosts({
     try {
       const page = await postsApi.listPosts({ scope: `group:${groupId}`, limit: 20 });
       setGroupPosts(page.results);
+      setSkipRevealRestoreKey(null);
+      setRevealAfterRefresh(true);
       setRevealNonce((n) => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载群内帖子失败");
@@ -120,11 +135,34 @@ export function GroupPosts({
 
   // U14：群内详情不会卸载 GroupPosts，只会用 postId 条件切换列表/详情 DOM。
   // active 显式描述列表容器生命周期；ready 等帖子形成可滚高度后再恢复。
-  const scrollRestoreKey = `group-posts:${groupId}`;
-  useScrollRestore(scrollRestoreKey, listRef, {
+  useEffect(() => {
+    if (postId != null) {
+      setSkipRevealRestoreKey(scrollRestoreKey);
+      setRevealAfterRefresh(false);
+    }
+  }, [postId, scrollRestoreKey]);
+  const { restoring } = useScrollRestore(scrollRestoreKey, listRef, {
     active: postId == null,
     ready: displayPosts.length > 0,
   });
+  const isMasonry = useMediaQuery(MASONRY_QUERY);
+  const columnCount = isMasonry ? 2 : 1;
+  const { columns, columnRefs } = useMasonryColumns(
+    displayPosts,
+    columnCount,
+    (post) => post.id,
+    scrollRestoreKey,
+  );
+  const indexByKey = useMemo(() => {
+    const index = new Map<number, number>();
+    displayPosts.forEach((post, position) => index.set(post.id, position));
+    return index;
+  }, [displayPosts]);
+  // 内容加载完成后才允许首次/刷新浮入；恢复路径不播 stagger，避免卡片高度变化导致位置错位。
+  const revealItems = !loading
+    && displayPosts.length > 0
+    && (!restoring || revealAfterRefresh)
+    && skipRevealRestoreKey !== scrollRestoreKey;
 
   if (postId) {
     return <PostDetailPage groupId={groupId} />;
@@ -135,11 +173,14 @@ export function GroupPosts({
 
   return (
     <div className="group-posts">
-      <div className="group-posts-head">
-        <span className="group-voice-title">群内帖子</span>
-        <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
-      </div>
       <div className="group-posts-list" ref={listRef}>
+        <div className="group-scene-head">
+          <div className="group-scene-head-copy">
+            <h3 className="group-scene-title">群内帖子</h3>
+            <p className="group-scene-desc">浏览本群的最新动态</p>
+          </div>
+          <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
+        </div>
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
           {error && groupPosts.length === 0 && groupedFromStore.length === 0 ? (
             <div className="group-scene-placeholder" role="alert">
@@ -147,7 +188,7 @@ export function GroupPosts({
               <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
             </div>
           ) : showLoadingSkeleton && loading ? (
-            <div aria-busy="true">
+            <div className="group-posts-loading" aria-busy="true">
               <span className="skeleton group-posts-skel" style={{ height: 120 }} />
               <span className="skeleton group-posts-skel" style={{ height: 120 }} />
               <span className="home-load-text">正在加载帖子…</span>
@@ -161,22 +202,39 @@ export function GroupPosts({
               </button>
             </div>
           ) : (
-            <div key={revealNonce}>
-              {displayPosts.map((p) => (
-                <div key={p.id} className="group-posts-item">
-                  <PostCard
-                    post={p}
-                    favorited={false}
-                    onOpen={() => {
-                      // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
-                      saveScrollPosition(scrollRestoreKey, listRef.current);
-                      navigate(`/group/${encodeURIComponent(groupId)}/posts/${p.id}`);
-                    }}
-                    onToggleFavorite={() => {}}
-                  />
+            <div className={`posts-feed group-posts-feed${isMasonry ? " is-masonry" : ""}`} key={revealNonce}>
+              {columns.map((columnPosts, columnIndex) => (
+                <div key={columnIndex} className="posts-masonry-col" ref={columnRefs[columnIndex]}>
+                  {columnPosts.map((post) => {
+                    const delay = revealItems ? staggerDelay(indexByKey.get(post.id) ?? 0) : 0;
+                    return (
+                      <div
+                        key={post.id}
+                        className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
+                        style={
+                          revealItems
+                            ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties)
+                            : undefined
+                        }
+                      >
+                        <PostCard
+                          post={post}
+                          favorited={false}
+                          onOpen={() => {
+                            // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
+                            setSkipRevealRestoreKey(scrollRestoreKey);
+                            setRevealAfterRefresh(false);
+                            saveScrollPosition(scrollRestoreKey, listRef.current);
+                            navigate(`/group/${encodeURIComponent(groupId)}/posts/${post.id}`);
+                          }}
+                          onToggleFavorite={() => {}}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
-              {loading && <span className="home-load-text">正在刷新…</span>}
+              {loading && <span className="home-load-text group-posts-loading-more">正在刷新…</span>}
             </div>
           )}
         </PullToRefresh>

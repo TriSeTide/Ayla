@@ -496,35 +496,11 @@
   padding-bottom: 68px;
 }
 
-.group-voice-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
-  padding: var(--sp-3);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-card);
-  background: var(--glass-bg);
-}
-
-.group-voice-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 18px;
-}
-
 /* 群内语音房列表加载区：框架先上（head 已呈现），列表区骨架 + 加载文字 */
 .group-voice-loading {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-}
-
-.group-voice-desc {
-  margin: var(--sp-1) 0 0;
-  color: var(--text-secondary);
-  font-size: 13px;
 }
 
 .group-voice-create-btn {
@@ -643,11 +619,6 @@
 }
 
 @media (max-width: 480px) {
-  .group-voice-head {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .group-voice-create-btn {
     width: 100%;
   }

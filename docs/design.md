@@ -170,6 +170,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **CSS**：`base.css` 新增 `.reveal`（初始 `opacity:0 + translateY(8px)`）与 `.reveal.is-in`（`opacity:1 + translateY(0)`，180ms `--ease-out` 过渡）；`prefers-reduced-motion` 下只保留透明度渐变。
 - **样式元素**：`.reveal-item` 用于**列表/评论逐条浮现**（`animation: reveal-item-in 180ms forwards`，`--reveal-delay` 变量控制 stagger，封顶 300ms）。
 - **Hook**：`useRevealOnEnter(active)` 返回 `{step, revealed}`，双 rAF 首帧隐藏→过渡显示。**内容由异步加载产生时，必须把 `active` 接到「内容就绪」信号（如 `!loading`），否则动画会在加载完成前就跑完、看不到浮入**。
+- **滚动恢复互斥**：列表通过 `useScrollRestore` 命中历史 `scrollTop` 后，恢复路径不得挂 `.reveal-item` / stagger；先稳定恢复内容高度与位置，首次进入和用户主动刷新才播放逐条浮入。
 - 语义边界：`.reveal` 只管**内容块自身**的浮入淡入；**底栏/输入框的位移**由 `useEnterRoomAnimation` / `useEnterGroupAnimation` 负责，两者不混淆、可叠加。
 
 ## 8. Do's and Don'ts
@@ -253,6 +254,12 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 场景项（聊天/语音/直播/帖子/桌游）：行高 40px，圆角 12px 胶囊，左 20px 线性图标 + Nunito 600 15px 文字（`--text-secondary`）；选中态底 `rgba(157,191,230,0.35)` + 文字转 `--text-primary`；hover 底 `rgba(157,191,230,0.18)`
 - 状态标识：行右侧——语音在麦人数（Space Grotesk 12px `--text-secondary`）、直播 LIVE 徽标（`--pink-500` 底白字 11px Fredoka 胶囊）、帖子未读数（`--pink-500` 圆点）
 
+### 12.4.1 群内场景统一标题栏 GroupSceneHead
+
+- 适用语音、帖子、桌游三个**可滚动**的群内子场景；标题栏必须是各自滚动容器的直接子元素，以 `position: sticky; top: 0; z-index: 10` 吸顶；顶部留白由滚动容器 gutter 提供，不能再用 sticky 偏移重复叠加，亦不能被下拉刷新或场景切换动画的位移层包住。
+- 规格：最小高 72px、padding 16px、标题区与尾部动作间 gap 12px；滚动容器统一四向 16px gutter，并由父容器 `gap: 16px` 保证头部与下方内容分隔，与卡片内容轨道对齐；`--glass-bg` + `blur(18px) saturate(1.4)` + 完整 `1px --glass-border` + 16px 圆角（与下方实心内容卡对齐），不用负 margin 拉伸成整面横条；不支持 backdrop-filter 时切换 `--glass-bg-strong`。
+- 文案：标题 Fredoka 500 / 18px `--text-primary`；可选说明 Nunito 14px / 1.45 `--text-secondary`，为保持三场景同高，说明一行省略而标题仍可自然收缩；尾部按钮保持自身 ≥40px 触达目标。滚动容器设置与标题高度匹配的 `scroll-padding-top`，确保键盘焦点/程序定位不被吸顶栏遮住；窄屏不能由玻璃头部制造横向滚动。
+
 ### 12.5 浮动按钮 FAB（两形态）
 
 - CreateFAB（右下，两形态都有）：56px 圆形，主 CTA 样式——`--indigo-700` 实底 + 白色加号线性图标（24px），常驻 `0 2px 12px rgba(70,91,146,0.18)` 浅投影；hover/按下附 `--glow-shadow`（200ms）。窄屏 `right:16px; bottom:底栏高+12px`；宽屏 `right:32px; bottom:32px`
@@ -304,6 +311,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 图片：1 图大图圆角 12px；多图 3 列九宫格 gap 4px 圆角 8px
 - 底排：评论数 / 收藏（线性图标 18px + Space Grotesk 12px 数字，`--text-secondary`）；收藏激活态图标填 `--pink-500`
 - 评论输入框：InputBar 变体（底 `--surface` + 1px `--ice-300`，focus 转 `--glow-500` + 辉光）
+- **列表布局与返回连续性**：窄屏单列；>1024px 为两列等宽错排瀑布流（列 gap 与卡片纵向 gap 均为 12px，最大内容宽 1200px），群外信息流、群内帖子、我的帖子共用。`.reveal-item` 只挂卡片外层，卡片本体 hover 可上浮 2px；reduced-motion 下不位移。进入详情前保存滚动位置；返回时连同已加载分页恢复，且按 §7.1 跳过 stagger。
 - **视频媒体封面（秒开策略）**：上传时前端抽首帧经 `POST /media/{id}:poster` 回传（JPEG ≤2MB 存为 thumbnail 派生，QQ 同款）；卡片/详情页封面一律渲染 thumbnail 签名缩略图（320px JPEG `<img>` 直连，秒出、零视频拉流，不挂 `<video>` 元素）+ ▶ 角标；查看器播放时 original 签名就绪前显示同一海报帧 `<img>`，`<video poster>` 同帧衔接 + `preload="auto"`——点开即见画面无跳变；无海报帧（存量/抽帧失败）降级 SignedVideo 首帧预览。服务端在 poster 回传后异步做 mp4 faststart 重排（moov 前置，`manage.py ensure_video_faststart` 补存量），起播 Range 往返从 2~3 次降到一次顺序读——详见《媒体预签名直传与播放架构》
 
 ### 12.8.1 发帖编辑器 PostEditor 与创建浮层 CreateSheet

@@ -92,6 +92,8 @@ describe("GroupVoice 范围（仅该群）", () => {
     ]);
     render(<MemoryRouter><GroupVoice groupId="g1" onExit={vi.fn()} /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText("本群语音")).toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "群内语音房" })).toBeInTheDocument();
+    expect(document.querySelector(".group-scene-head")).not.toBeNull();
     expect(screen.getByText("本群语音2")).toBeInTheDocument();
     // A2 扩展：内容就绪后由 VoiceChannelList 为群内语音卡片挂 40ms stagger。
     const cards = document.querySelectorAll(".voice-channel-card-wrap");

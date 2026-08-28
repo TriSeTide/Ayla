@@ -48,6 +48,8 @@ describe("GroupGames 创建后刷新", () => {
   it("收到 room-created 事件后重新加载并显示新房间", async () => {
     render(<MemoryRouter><GroupGames groupId="group-1" onExit={vi.fn()} /></MemoryRouter>);
     await waitFor(() => expect(boardgameApi.listGameRooms).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("heading", { name: "群内桌游" })).toBeInTheDocument();
+    expect(document.querySelector(".group-scene-head")).not.toBeNull();
     expect(screen.getByText("群内还没有桌游室")).toBeInTheDocument();
 
     vi.mocked(boardgameApi.listGameRooms).mockResolvedValue([room("新房间", "group-1")]);

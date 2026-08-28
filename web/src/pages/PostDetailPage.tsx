@@ -34,7 +34,12 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const [searchParams] = useSearchParams();
   const fromGroup = groupId ?? searchParams.get("fromGroup");
-  const returnTo = fromGroup ? `/group/${encodeURIComponent(fromGroup)}/posts` : "/posts";
+  const fromMine = searchParams.get("from") === "mine";
+  const returnTo = fromGroup
+    ? `/group/${encodeURIComponent(fromGroup)}/posts`
+    : fromMine
+      ? "/posts/mine"
+      : "/posts";
   // 群内详情沿用群场景顶部导航；只有一级帖子详情才让底栏下滑并带动评论输入框滑入。
   const usesRoomEntryAnimation = groupId == null;
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
@@ -204,12 +209,12 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     if (!post) return;
     postsApi
       .deletePost(post.id)
-      .then(() => navigate("/posts"))
+      .then(() => navigate(returnTo))
       .catch((e) => {
         setConfirmingDelete(false);
         setActionError(e instanceof Error ? e.message : "删除帖子失败，请重试");
       });
-  }, [post, navigate]);
+  }, [post, navigate, returnTo]);
 
   if (loading) {
     // 顶栏框架先上（返回键 + 标题始终可见），仅正文/评论区显示结构化骨架，
@@ -246,7 +251,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     return (
       <div className="post-detail">
         <p className="placeholder-desc">{error ?? "帖子不存在"}</p>
-        <button type="button" className="btn btn-ghost" onClick={() => navigate("/posts")}>
+        <button type="button" className="btn btn-ghost" onClick={() => navigate(returnTo)}>
           返回
         </button>
       </div>
