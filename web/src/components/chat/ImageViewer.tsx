@@ -5,7 +5,8 @@
  * 原图/视频 object-fit contain 居中；底部玻璃胶囊操作条（保存 + 多图计数）。
  * 行为：ESC / 点击遮罩空白关闭；打开即 focus 关闭按钮（键盘可达）；←/→ 或
  * 多条目内容区横滑（跟手 + 边缘阻尼 + 过 1/3 或速度达标切换吸附，方案 §3.2）切换多图；
- * 单条目横滑不切图（保留既有关闭交互）。
+ * 单条目横滑不切图（保留既有关闭交互）；多条目松手判定统一走 useSwipeCommit：
+ * 净位移 ≥ 容器 1/3，或同向甩动 ≥300px/s 且净位移 ≥40px，交叉轴占优让位，pointercancel 只回弹。
  * 图片经 ResourceImage 加载（短时签名 URL 直连，渐进解码秒开）；
  * 视频渲染 <video controls autoPlay>（签名 URL 原生 Range 流式播放，
  * 即点即播不再全量下载）；保存用签名 URL + a[download]（同源生效，
@@ -15,9 +16,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import type { PanInfo } from "framer-motion";
+import type { PanHandler, PanInfo } from "framer-motion";
 import type { MediaDescriptor } from "../../api/types";
 import { getSignedMediaUrl, mediaContentUrl, takeWarmVideoElement } from "../../api/media";
+import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
+import { useTouchAxisGuard } from "../../hooks/useTouchAxisGuard";
 import { ResourceImage } from "../ResourceImage";
 import { IconClose, IconDownload } from "../icons";
 
@@ -36,8 +39,6 @@ const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
 const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
 /** 切换滑入/滑出时长 250ms（design.md §7：150–300ms） */
 const SWIPE_SLIDE_DURATION = 0.25;
-/** 快速滑动速度阈值 px/ms（≈300px/s）：位移不足 1/3 时速度达标也可切换 */
-const SWIPE_FLICK_VELOCITY = 0.3;
 /** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
 const DRAG_CONSTRAINTS = { left: 0, right: 0 };
 /** 跟手弹性：0.8 = 80% 跟手 + 20% 边缘阻尼（接近 1:1，避免拖过头） */
@@ -229,6 +230,8 @@ export function ImageViewer({
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [reducedMotion] = useState(prefersReducedMotion);
+  // 横向查看器也要在起步阶段阻止浏览器垂直滚动抢走 pointer 流；交叉轴手势让位。
+  useTouchAxisGuard(stageRef, "x");
 
   // 横滑方向追踪（render 阶段）：index 变化时计算本次切换方向（1=下一张左滑 / -1=上一张右滑）
   const prevIndexRef = useRef(index);
@@ -241,14 +244,21 @@ export function ImageViewer({
 
   const close = useCallback(() => onClose(), [onClose]);
 
-  // 横滑松手判定（方案 §3.2）：位移超 1/3 宽或速度达标切换，否则回弹（dragConstraints 自动）
-  const handleDragEnd = useCallback(
-    (_event: unknown, info: PanInfo) => {
+  // 横滑松手判定（方案 §3.2）：统一走 useSwipeCommit；系统 pointercancel
+  // 只回弹不切图，交叉轴位移占优时让位给页面/系统滚动。
+  const handleDragEnd: PanHandler = useCallback(
+    (event, info: PanInfo) => {
+      if (event.type === "pointercancel") return;
       const width = stageRef.current?.clientWidth ?? window.innerWidth;
-      const threshold = width / 3;
-      if (info.offset.x < -threshold || info.velocity.x < -SWIPE_FLICK_VELOCITY) {
+      const commit = resolveSwipeCommit({
+        net: info.offset.x,
+        cross: info.offset.y,
+        velocity: info.velocity.x,
+        size: width,
+      });
+      if (commit === 1) {
         setIndex((i) => Math.min(list.length - 1, i + 1));
-      } else if (info.offset.x > threshold || info.velocity.x > SWIPE_FLICK_VELOCITY) {
+      } else if (commit === -1) {
         setIndex((i) => Math.max(0, i - 1));
       }
     },
@@ -337,6 +347,7 @@ export function ImageViewer({
             animate="center"
             exit="exit"
             drag={canSwipe ? "x" : false}
+            dragDirectionLock
             dragConstraints={DRAG_CONSTRAINTS}
             dragElastic={DRAG_ELASTIC}
             dragMomentum={false}

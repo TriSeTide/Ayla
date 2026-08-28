@@ -132,6 +132,26 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 胶囊形，`--sakura-300` 底 + `--grape-700` 字（如参考图里的 hot pink 标签），11px Fredoka
 - 未读徽标：`--pink-500` 实底白字小圆点
 
+### Switch / Toggle 胶囊开关
+- 结构优先使用原生 checkbox 或 `button[role="switch"]`；外层保留 ≥44px 触达高度，视觉轨道为 44×24px 胶囊，滑块为 18px 圆形。
+- 未选中轨道使用 `--ice-300`，选中轨道使用 `--pink-500`，滑块使用 `--surface`；轨道可叠加 `--glass-border` 与 `--glass-inset`，状态切换使用 `--dur-fast` + `--ease-out`。
+- 必须同步暴露 `aria-checked`/原生 checked 状态；键盘 focus 使用 `--focus-ring`，不能只靠颜色表达开关状态。
+
+### CornerFabStack 右下浮层按钮组
+- 仅桌面宽屏（`>768px`）启用，位于 CreateFAB 上方；自下而上为 CreateFAB（56px）→ RefreshFAB（44px）→ ScrollTopFab（44px），次级按钮间距 `--sp-3`，三个按钮水平中心对齐。
+- RefreshFAB 与 ScrollTopFab 使用 44px 玻璃圆钮：`--glass-bg` + blur(18px) + `--glass-border` + `--card-shadow`，次级按钮不追加辉光；回顶按钮仅在主滚动容器超过一屏后出现，刷新按钮复用当前页面刷新回调。
+- 按场景白名单渲染：列表页可同时显示刷新与回顶，消息中心刷新按钮可放左下；群聊正文、群内直播与非列表详情不渲染。出现/消失遵循 §7 的 200ms 浮入淡出，`prefers-reduced-motion` 关闭位移。
+
+### 群内场景标题栏 `.group-scene-head`
+- 语音、帖子、桌游三个可滚动群内子场景共用；标题栏是滚动容器的直接子元素，`position: sticky; top: 0; z-index: 10`，最小高 72px，padding `--sp-4`，标题与尾部动作 gap `--sp-3`。
+- 标题栏是独立玻璃卡片而非拉伸横条：`--glass-bg` + blur(18px) saturate(1.4) + `--glass-border` + 16px 圆角 + `--glass-inset`；滚动容器提供四向 gutter 与 `--sp-4` 内容间距，禁止负 margin 破坏圆角和焦点可见性。
+- 标题使用 `--font-display` 18px/500、说明使用 14px/`--text-secondary` 单行省略；尾部控件保持 ≥40px 触达，滚动容器设置对应 `scroll-padding-top`。
+
+### 聊天「回到底部」按钮
+- `.message-jump-bottom` 挂在聊天滚动容器内，不与全局 FAB 竞争层级；44px 玻璃圆钮、纯线性 SVG 图标，右下保留 `--sp-6` 间距。
+- 仅当用户离开实时底部跟随位置时显示；点击回到底部并恢复实时跟随。按钮必须有 `aria-label`/`title`，隐藏态不可聚焦且不拦截底层点击。
+- 出现/消失使用 opacity + translateY 的 200ms ease-out；`prefers-reduced-motion` 只保留透明度过渡。
+
 ## 5. Layout Principles
 
 - 间距刻度：4 / 8 / 12 / 16 / 24 / 32 / 48（聊天密度场景以 8/12/16 为主）
@@ -158,10 +178,20 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ## 7. Motion
 
 - 时长：hover/焦点 150–200ms；面板进出 200–300ms；`ease-out` 进、`ease-in` 出（退出快于进入）
-- 消息到达：气泡从下方 8px 浮入 + 淡入，180ms；不弹跳
+- **framer-motion 使用纪律**：只接管 CSS 难以可靠完成的三类能力——① 跟手（motion value 逐帧驱动拖拽/下拉/侧滑）；② 进出协同（`AnimatePresence` 管理旧内容退出与新内容进入）；③ 编排（多层导航、场景内容、输入框的时间线）。既有 CSS keyframes（如 `frost-rise`、`halo-breathe`、`reveal-item-in`）全部保留，不为同一语义建立第二套动画；其余简单状态过渡优先使用 tokens.css 的 CSS transition/keyframes。
+- **PageTransition 时长表**：
+
+  | 路由形态 | 进入 | 退出 | 说明 |
+  |---|---|---|---|
+  | 普通路由 | `opacity: 0→1` + `translateY(20px→0)` | `opacity: 1→0` | 进入 200ms `--ease-out`；退出 150ms `--ease-in`，退出快于进入 |
+  | 搜索页内容 | `opacity: 0→1` + `translateY(-20px→0)` | `opacity: 1→0` | 顶栏固定，内容从顶栏下方展开；同样为 200ms / 150ms |
+  | 群内场景 / 直播间同类切换 | 由场景自身的跟手或编排负责 | 全局仅淡出 | 群页进入不叠加 PageTransition 的 y 浮入；直播间详情 key 归一，切台不重跑整页转场 |
+
+- **消息到达**：仅新到达的乐观消息或 WS 实时消息挂 `.msg-arrive`，复用 `frost-rise` 从下方 8px 浮入 + 淡入，180ms；初始历史加载、滚动恢复和重新挂载的历史消息不播放到达动画，不弹跳。
+- **滚动恢复与 stagger 互斥**：命中 `useScrollRestore` 的历史位置（包括显式保存的 `scrollTop=0`）时，先恢复内容高度与位置，禁止 `.reveal-item`/stagger；只有真正首次进入或用户主动刷新才播放逐条浮入。
 - 光环呼吸是唯一常驻动画；其余装饰性循环动画禁止
 - 骨架屏：所有 >300ms 的异步加载用 `animate-pulse` 风格骨架（玻璃质感骨架块），禁止白屏/冻结
-- `prefers-reduced-motion`：关闭呼吸、浮入，保留透明度渐变
+- `prefers-reduced-motion`：关闭呼吸、浮入与跟手位移，保留透明度渐变；拖拽/切换必须退化为可用的直接控件路径
 
 ### 7.1 统一内容入场原语 `.reveal`
 
@@ -298,10 +328,19 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.7 直播间（两形态）
 
-- 窄屏沉浸式：视频全屏；覆盖层顶部主播信息行（玻璃底 `--glass-bg`）、底部弹幕输入框（`--glass-bg-strong` 半透明，InputBar 变体）；左上角返回键 40px 圆形玻璃容器 + 箭头图标
-- 宽屏：视频主区 + 弹幕侧列 360px（整面玻璃，弹幕列表 + 底部弹幕输入框）；视频两侧「上一个/下一个」40px 圆形玻璃按钮 + 键盘 ↑↓
-- LIVE 徽标：`--pink-500` 实底白字 11px Fredoka 胶囊，左上角
-- 直播间卡片（聚合网格）：封面 16:9 圆角 12px + LIVE 徽标 + 标题 Nunito 700 15px + 主播 13px `--text-secondary` + 来源标识（公开/好友/群名，Micro Tag 11px Fredoka `--sakura-300` 底 `--grape-700` 字）
+- 窄屏沉浸式：视频观看区优先；顶部主播信息行（玻璃底 `--glass-bg`）、底部弹幕输入框（`--glass-bg-strong` 半透明，InputBar 变体）；左上角返回键保持 ≥40px 圆形玻璃触达区 + 箭头图标。
+- **竖屏弹幕浮层化配方（U5 方案留档）**：弹幕不再以独立实心/玻璃卡片铺满视频下方，最近 3–5 条以无独立背景的轻量浮层覆盖视频下沿，自下而上以 180ms `.reveal-item`/透明度浮入；浮层点击展开完整弹幕底部抽屉，抽屉约占视口 70% 高度，使用 `--glass-bg-strong` + blur(18px) + 上沿 `--radius-panel`，并提供遮罩、关闭按钮与 ESC 退出。弹幕文本、头像和「有新弹幕」操作仍须保持可读对比与 ≥40px 触达。
+- **当前实现边界**：上述浮层/抽屉是本轮走查提出并记录的方案变体；2026-08-26 用户最终拍板撤销该变体，当前窄屏实现恢复为视频上方、透明背景的弹幕滚动区（不覆盖视频、不展开抽屉），输入框仍独立使用 `--glass-bg-strong`。后续若重新启用浮层，必须同步实现与验收，不得仅按历史配方改文档或局部样式。
+- 宽屏：视频主区 + 弹幕侧列 360px（整面玻璃，弹幕列表 + 底部弹幕输入框）；视频两侧「上一个/下一个」40px 圆形玻璃按钮 + 键盘 ↑↓。
+- LIVE 徽标：`--pink-500` 实底白字 11px Fredoka 胶囊，左上角。
+- 直播间卡片（聚合网格）：封面 16:9 圆角 12px + LIVE 徽标 + 标题 Nunito 700 15px + 主播 13px `--text-secondary` + 来源标识（公开/好友/群名，Micro Tag 11px Fredoka `--sakura-300` 底 `--grape-700` 字）。
+
+### 12.7.1 相邻直播间预览卡 LivePeerPreview（方案留档）
+
+- 这是直播上下滑三槽 pager 的轻量预览配方：封面铺满并 `object-fit: cover`；没有封面时使用 `--bg-aurora` 占位并配线性视频图标。
+- 左上使用 `--pink-500` 实底 + `--surface` 白字的 LIVE 胶囊；底部使用玻璃 meta 区（`--glass-bg` + blur(18px) + `--glass-border`），展示标题与主播，文字遵循正文/次要文字层级。
+- 预览卡**纯展示、无播放组件、无 `useLiveRoom`、无 WS/轮询副作用**，不能为了切换动画常挂多个真实直播播放器。
+- **当前实现边界**：该配方曾作为 G3 的三槽预览卡落地，后续用户返工将现行切换改为“视频 + 弹幕区”整体滑动，删除 `LivePeerPreview`；本条保留为可复用的轻量预览配方，不能据此声称当前直播间正在渲染预览卡。
 
 ### 12.8 帖子卡 PostCard 与信息流
 
@@ -350,11 +389,23 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.12 手势与场景动画（窄屏）
 
-- 五 tab / 群内五子场景横向滑动：跟手 `translateX` + 松手吸附 200ms ease-out；方向锁（垂直位移占优让位滚动）
+> 实现状态表（M1–M6c 收尾）：以下已落地项均保留可见按钮/键盘等等效路径；手势不是唯一操作方式。三个可切页 pager 的松手判定统一使用 `useSwipeCommit`，而私信边缘返回与下拉刷新保留各自更符合语义的边界状态机。
+
+| 交互 | 实现与范围 | 状态 | 松手 / 让位语义 |
+|---|---|---|---|
+| 一级五页横滑 | `PrimaryNavPage`；窄屏 `/voice → /live → /group → /posts → /games` | ✓ 已落地 | `resolveSwipeCommit`：净位移 ≥ 容器 1/3，或同向甩动速度 ≥300px/s 且净位移 ≥40px；交叉轴 ≥ 主轴时让位 |
+| 群内五场景横滑 | `GroupPage`；窄屏群内 chat/voice/live/posts/games | ✓ 已落地 | 同上；`dragElastic=0.8` 跟手与边缘阻尼；横轴守卫抢在浏览器接管前保护横拖，垂直滚动让位 |
+| 直播间上下滑切换 | `LiveRoomBody`；群内外窄屏普通观看 | ✓ 已落地 | 同上，主轴改为 y；视频 + 弹幕区整体滑动，顶栏与输入框固定；端头只回弹不切换，保持单真实播放器 |
+| 图片查看器横滑 | `ImageViewer`；多媒体条目 | ✓ 已落地 | 同样使用 `useSwipeCommit`：净位移 ≥容器 1/3，或同向甩动 ≥300px/s 且 ≥40px；交叉轴让位、`pointercancel` 只回弹；左右按钮与键盘为等效路径，单条目不切图并保留关闭语义 |
+| 私信左边缘右滑返回 | `/chat/:id` 窄屏，起手边界 24px | ✓ 已落地 | `resolveEdgeSwipe`：净位移 ≥120px 或速度 ≥0.3px/ms；否则 200ms 回弹；非边缘与垂直手势让位 |
+| 下拉返回主页 | 群场景窄屏 | ✓ 已落地 | `useSwipe` 方向锁 + 80px 阈值；顶部导航与内容协同跟手，未达阈值回弹 |
+| 下拉刷新 | 列表顶部（主页/消息/帖子/直播/语音/桌游及群内已接入页） | ✓ 已落地 | `PullToRefresh` 独立状态机；原始下拉 ≥64px 触发，视觉位移阻尼，刷新停留 52px |
+
+- **统一 pager 松手契约**：`resolveSwipeCommit({ net, cross, velocity, size })` 使用 framer-motion `PanInfo.velocity` 的 **px/s** 单位；主判定为净位移 ≥ `size / 3`，补充判定为同向甩动（速度 ≥300px/s、净位移 ≥40px、速度与位移同向），交叉轴净位移 ≥ 主轴时方向锁让位；划回原位不切换。调用处过滤 `pointercancel`（系统取消不等于用户松手），横向 pager 另用 `useTouchAxisGuard` 避免浏览器提前接管。
 - 进群动画：底部导航条上移到视口顶部（`translateY(calc(100vh-64px)→0)` 250ms ease-out）→ 群场景变体滑入；中央槽位「主页」文本交叉淡化为群头像（槽位宽 48→64px 弹性过渡，总时长 ≤300ms）；输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms
 - 进直播间/语音房/帖子详情动画（与进群方向相反，R-L2/R-V2/R-P3）：底部导航条下滑走（`translateY(0→100%)` 200ms ease-in）→ 房内输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms（先底栏下滑、再输入框升起）
-- 下拉回主页：跟手位移 + 阈值 80px，回弹 200ms ease-out
-- 直播间上下滑切换：跟手 `translateY` + 上下一张 20% 预览露出，松手过半切换 250ms ease-out
+- 下拉回主页：跟手位移 + 阈值 80px，回弹 200ms ease-out；群页内容与顶栏共同移动，退出时内容滑出后再回主页
+- 直播间上下滑现行配方：视频与弹幕区作为唯一滑动单元，`translateY` 跟手 + 250ms 方向转场；顶栏与输入框固定，切换后再更新标题/主播；不常挂多个真实播放器
 
 ### 12.13 增量场景 Agent Prompt 速查
 
@@ -417,6 +468,26 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **本地预览生命周期**：乐观气泡的 objectURL 由渲染组件在卸载时统一 revoke（`useEffect` 空 deps cleanup）；发送/重试成功路径**不提前 revoke**（避免替换渲染前的竞态空白图）；重试因旧气泡卸载 revoke 而重新 `createObjectURL`。
 - **取消语义**：取消 = 放弃该次发送（abort 上传 + 删除乐观气泡 + 服务端清理），与失败态（保留气泡可重试/删除）区分。
 - 气泡图片用 320px 缩略图（GIF 例外走原图保动图），点击进查看器才加载原图；查看器以 createPortal 挂 body（防祖先毛玻璃困住 fixed 弹窗）。上传直传/播放直连/权限等非视觉实现见 `docs/媒体预签名直传与播放架构-2026-08-24.md`。
+
+### 12.18 帖子流双列瀑布流（>1024px）
+
+- 群外帖子流、群内帖子、我的帖子共用同一布局契约：`>1024px`（即最小 1025px）启用两列等宽瀑布流，内容轨道最大宽度 1200px，列间距与卡片纵向间距使用 `--sp-3`；≤1024px 回到单列，窄屏内容不产生横向滚动。
+- 新卡片优先插入当前较矮列；列高由 `ResizeObserver` 观测，无法立即测量时使用有限的预估增量保证同批卡片交错。一次分配完成后锁定 item→列关系，且记忆键必须包含列表身份与列数，避免断点切换/HMR 把所有卡片留在同一列。
+- `.reveal-item` 只挂在卡片外层，卡片本体保留 hover/focus 的轻微上浮；滚动恢复命中时按 §7.1 禁止 stagger。列表加载提示跨两列排列。
+
+### 12.19 下拉刷新 PullToRefresh
+
+- 适用于列表顶部且滚动容器已在顶端的窄屏场景；状态机为 `idle → pulling → refreshing → done → idle`，不足阈值回弹，刷新完成短暂停留后收起。
+- 指示器是玻璃圆点：`--glass-bg-strong` + blur(18px) + `--glass-border` + `--glass-inset`，跟随内容顶部以 `--ease-out` 位移；`pulling` 显示下拉箭头，`refreshing` 显示 spinner，`done` 显示勾号，三态均须有可观察的非颜色语义。
+- 手指原始下拉达到 64px 才触发刷新；视觉位移使用递增阻尼 `96 × (1 − e^(-dy / 90))`，刷新停留位移 52px，指示器/内容位移不能改变列表的文档流高度。`prefers-reduced-motion` 下跳过位移，只保留状态反馈。
+- 刷新与桌面 RefreshFAB 共用页面回调；主动刷新后通过列表容器重挂载重播 `.reveal-item`，不依赖数据是否变化。下拉刷新不覆盖浏览器原生边缘返回/系统手势。
+
+### 12.20 滚动恢复 `useScrollRestore`
+
+- 接入范围：全站帖子流、群内帖子、直播列表、我的帖子；每个列表以稳定 key 隔离滚动位置、用户身份与必要的分页/列分配投影，不能跨列表或跨账号复用。
+- 详情入口在列表 DOM 仍存在时先保存真实 `scrollTop`；返回时在内容已就绪后由 `useLayoutEffect` 恢复，并在下一帧补写一次，以覆盖瀑布流/异步图片造成的高度晚落定。退出 cleanup 只卸载监听，不重新读取可能已被转场归零的 DOM。
+- `restoring` 是可观察的恢复状态（包括显式保存的 0 位）；命中恢复时先稳定内容高度与位置，按 §7.1 禁止 `.reveal-item`/stagger。用户主动刷新清除本次恢复抑制并重新播放列表入场反馈。
+- 返回必须保留已加载分页与列分配连续性；加载失败不得伪装成空列表或把滚动记忆跳到当前尾部。
 
 ---
 
