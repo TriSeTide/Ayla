@@ -58,19 +58,6 @@ export function PrivateChatPage() {
             onBack={() => navigate("/messages")}
           />
         </motion.div>
-
-        {/* 上层聊天面板（1:1 跟手，绑边缘起手手势） */}
-        <motion.div
-          className="private-chat-overlay"
-          style={{ x: edgeBack.x }}
-          {...edgeBack.handlers}
-        >
-          <PrivateChatPane
-            key={conversationId}
-            conversationId={conversationId ?? ""}
-            onBack={() => navigate("/messages")}
-          />
-        </motion.div>
       </div>
     );
   }
