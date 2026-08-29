@@ -124,6 +124,7 @@ function seqsOf(container: HTMLElement): number[] {
 afterEach(() => {
   useAuthStore.setState({ currentUser: null });
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("MessageList U16 窗口化", () => {
@@ -450,5 +451,95 @@ describe("MessageList @ 我跳转（F9）", () => {
     );
     await act(async () => screen.getByRole("button", { name: "跳转到被引用消息" }).click());
     expect(onMarkRead).toHaveBeenCalledWith(target, true);
+  });
+});
+
+describe("MessageList 未读消息视口已读", () => {
+  function mockIO() {
+    let callback: IntersectionObserverCallback | null = null;
+    class IO {
+      constructor(cb: IntersectionObserverCallback) {
+        callback = cb;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", IO);
+    return {
+      fire(target: Element) {
+        callback?.(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 0.8,
+              target,
+            } as unknown as IntersectionObserverEntry,
+          ],
+          {} as IntersectionObserver,
+        );
+      },
+    };
+  }
+
+  it("普通未读消息真实进入视口才精确标已读", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    const io = mockIO();
+    const messages = [
+      serverMessage(1),
+      { ...serverMessage(2), sender_id: "other" },
+      { ...serverMessage(3), sender_id: "other" },
+    ];
+    const conv = { ...conversation(), unread_count: 2, unread_seqs: [2, 3] };
+    const { container } = render(
+      <MessageList
+        messages={messages}
+        conversation={conv}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onMarkRead={onMarkRead}
+      />,
+    );
+
+    // 目标消息 m3 进入视口 → 精确标已读（exact=true），不连带 m2。
+    const node = container.querySelector('[data-message-id="m3"]') as HTMLElement;
+    expect(node).not.toBeNull();
+    await act(async () => {
+      io.fire(node);
+    });
+    expect(onMarkRead).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "m3", sender_id: "other" }),
+      true,
+    );
+  });
+
+  it("自己发送的消息进入视口不标已读", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    const io = mockIO();
+    const messages = [serverMessage(1), serverMessage(2)];
+    const { container } = render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onMarkRead={onMarkRead}
+      />,
+    );
+
+    const node = container.querySelector('[data-message-id="m2"]') as HTMLElement;
+    await act(async () => {
+      io.fire(node);
+    });
+    expect(onMarkRead).not.toHaveBeenCalled();
   });
 });

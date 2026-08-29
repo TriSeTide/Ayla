@@ -14,7 +14,7 @@ import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { TypingIndicator } from "./TypingIndicator";
 import { IconBack } from "../icons";
-import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationAllRead, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
+import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useMessageStore } from "../../stores/message";
 import { useAuthStore } from "../../stores/auth";
@@ -188,7 +188,6 @@ export function PrivateChatPane({
         onQuote={setQuote}
         onMarkRead={(m, exact) => exact ? markMessageReadExact(conversationId, m.id) : undefined}
         onMarkConversationRead={(throughSeq, excluded) => markConversationReadThrough(conversationId, throughSeq, excluded)}
-        onMarkAllRead={() => markConversationAllRead(conversationId)}
         onLoadUntilSeq={(targetSeq) => loadHistoryUntilSeq(conversationId, targetSeq).catch(() => false)}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(conversationId, m)}

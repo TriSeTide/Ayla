@@ -116,7 +116,6 @@ export function MessageList({
   onCancel,
   onMarkRead,
   onMarkConversationRead,
-  onMarkAllRead,
   onLoadUntilSeq,
 }: {
   messages: ChatMessage[];
@@ -132,8 +131,6 @@ export function MessageList({
   onMarkRead?: (msg: ChatMessage, exact?: boolean) => void | Promise<void>;
   /** 普通未读标签点击：批量标记到指定序号，排除特殊未读消息。 */
   onMarkConversationRead?: (throughSeq: number, excludeMessageIds: string[]) => void | Promise<void>;
-  /** 回到底部时：把会话全部未读标已读（用户已看到最新消息）。 */
-  onMarkAllRead?: () => void | Promise<void>;
   /** 目标不在缓存时按 seq 加载到缓存。 */
   onLoadUntilSeq?: (targetSeq: number) => Promise<boolean>;
   onRecall?: (msg: ChatMessage) => void;
@@ -158,7 +155,6 @@ export function MessageList({
   } | null>(null);
   const jumpSeqRef = useRef<{ seq: number; kind: "unread" | "mention" | "reply" } | null>(null);
   const pendingReadIdsRef = useRef(new Set<string>());
-  const unreadClearedAtBottomRef = useRef(false);
   const [windowRange, setWindowRange] = useState<RenderWindow | null>(null);
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [scrollTick, setScrollTick] = useState(0);
@@ -793,7 +789,8 @@ export function MessageList({
     }
   }, [confirmedMessages, onMarkRead, scrollToMessageAndHighlight, visibleConfirmed]);
 
-  // 特殊消息只有真正进入视口才自动标已读；跳转按钮也走同一精确路径。
+  // 未读消息（普通 + @我 + 回复）只有真正进入视口才自动标已读；跳转按钮也走同一精确路径。
+  // 进入会话滚底只标视口内可见的未读，视口外的保留标签，供用户跳转后逐条已读。
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || !onMarkRead) return;
@@ -803,7 +800,7 @@ export function MessageList({
           if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
           const id = (entry.target as HTMLElement).dataset.messageId;
           const target = id ? confirmedMessages.find((item) => item.id === id) : null;
-          if (!target || target.read_by_me || !isSpecial(target) || pendingReadIdsRef.current.has(target.id)) continue;
+          if (!target || target.read_by_me || target.sender_id === currentUserId || pendingReadIdsRef.current.has(target.id)) continue;
           pendingReadIdsRef.current.add(target.id);
           void Promise.resolve(onMarkRead(target, true)).finally(() => pendingReadIdsRef.current.delete(target.id));
         }
@@ -812,13 +809,13 @@ export function MessageList({
     );
     if (!observer) return;
     for (const message of visibleConfirmed) {
-      if (isSpecial(message) && !message.read_by_me) {
+      if (!message.read_by_me && message.sender_id !== currentUserId) {
         const node = findMessageNode(element, message.id);
         if (node) observer.observe(node);
       }
     }
     return () => observer.disconnect();
-  }, [confirmedMessages, isSpecial, onMarkRead, visibleConfirmed]);
+  }, [confirmedMessages, currentUserId, onMarkRead, visibleConfirmed]);
 
   const handleScroll = () => {
     const element = scrollRef.current;
@@ -840,24 +837,6 @@ export function MessageList({
     if (physicallyAtBottom && hasHiddenTail) {
       handleJumpToBottom();
       return;
-    }
-
-    // 回到底部（窗口尾部锚定最新）→ 清除未读标签：用户已看到最新消息。
-    if (physicallyAtBottom) {
-      if (!unreadClearedAtBottomRef.current && conversation?.id && onMarkAllRead) {
-        const hasUnread =
-          (conversation.unread_seqs?.length ?? 0) > 0 ||
-          (conversation.mention_unread_seqs?.length ?? 0) > 0 ||
-          (conversation.reply_unread_seqs?.length ?? 0) > 0;
-        if (hasUnread) {
-          unreadClearedAtBottomRef.current = true;
-          void Promise.resolve(onMarkAllRead()).catch(() => {
-            unreadClearedAtBottomRef.current = false;
-          });
-        }
-      }
-    } else {
-      unreadClearedAtBottomRef.current = false;
     }
 
     if (scrollTop < HISTORY_PRELOAD_THRESHOLD) requestOlder();

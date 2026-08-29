@@ -533,26 +533,7 @@ export async function markConversationReadThrough(
   void useBadgesStore.getState().fetch();
 }
 
-/** 回到底部时：会话全部未读（含 @我/回复）标已读，用户已看到最新消息。 */
-export async function markConversationAllRead(convId: string) {
-  await chatApi.markConversationRead(convId);
-  const currentUserId = useAuthStore.getState().currentUser?.id;
-  const conversation = useChatStore.getState().conversations.find((item) => item.id === convId);
-  const readSeqs = [
-    ...(conversation?.unread_seqs ?? []),
-    ...(conversation?.mention_unread_seqs ?? []),
-    ...(conversation?.reply_unread_seqs ?? []),
-  ];
-  for (const message of useMessageStore.getState().buckets[convId]?.messages ?? []) {
-    if (message.sender_id !== currentUserId && !message.read_by_me && message.seq > 0) {
-      useMessageStore.getState().markReadByMe(convId, message.id);
-    }
-  }
-  useChatStore.getState().markReadSeqs(convId, readSeqs);
-  void useBadgesStore.getState().fetch();
-}
-
-/** 精确标记一条 @我/回复消息已读；不会推进其他消息。 */
+/** 精确标记一条消息已读（普通未读/@我/回复共用）；不会推进其他消息。 */
 export async function markMessageReadExact(convId: string, messageId: string) {
   await chatApi.markMessageRead(convId, messageId, true);
   useMessageStore.getState().markReadByMe(convId, messageId);

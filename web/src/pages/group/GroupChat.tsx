@@ -13,7 +13,7 @@ import type { ChatMessage } from "../../api/types";
 import { MessageInput } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
-import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationAllRead, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
+import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useHomeStore } from "../../stores/home";
 import { useMessageStore } from "../../stores/message";
@@ -139,7 +139,6 @@ export function GroupChat({ groupId }: { groupId: string }) {
         onQuote={setQuote}
         onMarkRead={(m, exact) => exact ? markMessageReadExact(groupId, m.id) : undefined}
         onMarkConversationRead={(throughSeq, excluded) => markConversationReadThrough(groupId, throughSeq, excluded)}
-        onMarkAllRead={() => markConversationAllRead(groupId)}
         onLoadUntilSeq={(targetSeq) => loadHistoryUntilSeq(groupId, targetSeq).catch(() => false)}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(groupId, m)}
