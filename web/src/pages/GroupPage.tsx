@@ -212,9 +212,16 @@ export function GroupPage() {
     setCurrentGroup(id);
     setActiveScene(effectiveScene);
     useHomeStore.getState().setRecentGroup(id);
-    // 进入即打开群会话（GroupChat 内部也 openConversation，幂等）
+    // 只在聊天场景持有 activeConversationId：进入群（任意子场景）不自动打开会话。
+    // 非 chat 子场景（posts/live/voice/games/info）显式关闭，否则 GroupChat 卸载后
+    // activeId 仍残留为当前群 → WS 新消息被误判为「正在看」而自动已读（F7 语义：
+    // 只有真的在聊天窗口里才自动已读）。
     // 进入群聊仍保持滚底；未读由 MessageList 的定位标签承接，不在打开时清除。
-    useChatStore.getState().openConversation(id);
+    if (effectiveScene === "chat") {
+      useChatStore.getState().openConversation(id);
+    } else {
+      useChatStore.getState().closeConversation();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, effectiveScene]);
 

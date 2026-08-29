@@ -28,6 +28,9 @@ vi.mock("../pages/group/GroupVoice", () => ({
 vi.mock("../pages/group/GroupGames", () => ({
   GroupGames: () => <div>群内桌游内容</div>,
 }));
+vi.mock("../pages/group/GroupPosts", () => ({
+  GroupPosts: () => <div>群内帖子内容</div>,
+}));
 vi.mock("../api/chat", () => ({
   getConversation: vi.fn(),
   listConversations: vi.fn().mockResolvedValue([]),
@@ -208,5 +211,22 @@ describe("GroupPage 宽屏", () => {
     await waitFor(() =>
       expect(document.querySelector(".group-create-dialog")).not.toBeInTheDocument(),
     );
+  });
+
+  it("非 chat 子场景不持有 activeConversationId（群内其他界面不自动已读）", async () => {
+    mockMatchMedia(false);
+    useChatStore.setState({ conversations: [groupConv("1", "测试群")] });
+    renderGroup("/group/1");
+    // 聊天场景持有 activeId
+    expect(useChatStore.getState().activeConversationId).toBe("1");
+    // 切到帖子场景 → activeId 清空，新消息进未读而不是自动已读
+    await waitFor(() => expect(screen.getByRole("button", { name: "帖子" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "帖子" }));
+    await waitFor(() => expect(useGroupStore.getState().activeScene).toBe("posts"));
+    expect(useChatStore.getState().activeConversationId).toBeNull();
+    // 切回聊天场景 → activeId 恢复
+    fireEvent.click(screen.getByRole("button", { name: "聊天" }));
+    await waitFor(() => expect(useGroupStore.getState().activeScene).toBe("chat"));
+    expect(useChatStore.getState().activeConversationId).toBe("1");
   });
 });

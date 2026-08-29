@@ -1126,6 +1126,10 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* 子项（气泡容器/发送者名/时间 meta）按自身内容宽度排列，禁止 stretch：
+     否则对方消息的气泡会被 .bubble-meta 时间文本（"X 分钟前"比"HH:mm"宽）
+     撑到整行宽度，导致短消息气泡长短不一、偏宽。 */
+  align-items: flex-start;
   gap: var(--sp-1);
 }
 
