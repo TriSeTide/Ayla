@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
 import type { ElysiaProfile } from "../../api/types";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { VoiceChannelList } from "../../components/voice/VoiceChannelList";
 import { VoiceRoomBody } from "../../components/voice/VoiceRoomBody";
 import { PullToRefresh } from "../../components/motion/PullToRefresh";
@@ -35,6 +36,8 @@ export function GroupVoice({
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  // 删除语音房确认弹窗
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制语音列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
   const hubRef = useRef<HTMLDivElement>(null);
@@ -54,6 +57,7 @@ export function GroupVoice({
     setMemberLocallyMuted,
     setLocalVolume,
     rejoin,
+    resetLocal,
   } = useVoiceChannel();
 
   // 全量可见频道写入全局 store（后端 visible_queryset 已含本用户所有群的
@@ -173,31 +177,50 @@ export function GroupVoice({
 
   if (currentChannel) {
     return (
-      <VoiceRoomBody
-        channelId={currentChannel.id}
-        ownerId={currentChannel.owner_id}
-        channelName={currentChannel.name}
-        channel={currentChannel}
-        livekit={livekit}
-        wsConnection={wsConnection}
-        elysiaProfile={elysiaProfile}
-        groupId={currentChannel.group}
-        onToggleMic={() => void toggleMic()}
-        onLeave={() => void handleLeave()}
-        onRejoin={() => void rejoin()}
-        onVolumeChange={setMemberVolume}
-        onLocalVolumeChange={setLocalVolume}
-        onToggleMemberMuted={(userId) => {
-          const m = useVoiceStore.getState().members[userId];
-          if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
-        }}
-        onBack={handleBack}
-        onDeleteChannel={() => {
-          if (!window.confirm("确定删除语音房？")) return;
-          void voiceApi.deleteVoiceChannel(currentChannel.id).then(() => navigate(`/group/${groupId}/voice`)).catch((e) => setError(e instanceof Error ? e.message : "删除语音房失败"));
-        }}
-        inputEntered // 群内子界面无底栏下滑动画
-      />
+      <>
+        <VoiceRoomBody
+          channelId={currentChannel.id}
+          ownerId={currentChannel.owner_id}
+          channelName={currentChannel.name}
+          channel={currentChannel}
+          livekit={livekit}
+          wsConnection={wsConnection}
+          elysiaProfile={elysiaProfile}
+          groupId={currentChannel.group}
+          onToggleMic={() => void toggleMic()}
+          onLeave={() => void handleLeave()}
+          onRejoin={() => void rejoin()}
+          onVolumeChange={setMemberVolume}
+          onLocalVolumeChange={setLocalVolume}
+          onToggleMemberMuted={(userId) => {
+            const m = useVoiceStore.getState().members[userId];
+            if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
+          }}
+          onBack={handleBack}
+          onDeleteChannel={() => setConfirmDeleteOpen(true)}
+          inputEntered // 群内子界面无底栏下滑动画
+        />
+        {confirmDeleteOpen && (
+          <ConfirmDialog
+            title="删除语音房"
+            message={`确定删除语音房「${currentChannel.name}」？此操作不可撤销，房间内所有人都会被移出。`}
+            onConfirm={() => {
+              setConfirmDeleteOpen(false);
+              // 删除成功后本地即时收尾（断媒体/清活动态/移除列表项），不依赖 WS 广播时序；
+              // 广播到达时 removeChannel/resetLocal 均幂等，其他在线客户端靠广播热更新。
+              void voiceApi
+                .deleteVoiceChannel(currentChannel.id)
+                .then(() => {
+                  resetLocal();
+                  useVoiceStore.getState().removeChannel(currentChannel.id);
+                  navigate(`/group/${groupId}/voice`);
+                })
+                .catch((e) => setError(e instanceof Error ? e.message : "删除语音房失败"));
+            }}
+            onClose={() => setConfirmDeleteOpen(false)}
+          />
+        )}
+      </>
     );
   }
 

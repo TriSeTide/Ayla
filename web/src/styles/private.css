@@ -269,6 +269,22 @@
   }
 }
 
+/* ================= ConfirmDialog（通用确认弹窗，容器复用上方通用弹层） ================= */
+
+.confirm-dialog-message {
+  margin: 0 0 var(--sp-4);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-line;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+}
+
 /* ================= 私聊左边缘右滑返回（方案 §2.6） ================= */
 
 /* 私聊页两层容器：上层聊天面板盖住底层 /messages 本体；右滑时上层 1:1 右移滑出，

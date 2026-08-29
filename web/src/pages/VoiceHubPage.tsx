@@ -11,6 +11,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { getElysiaProfile } from "../api/elysia";
 import * as voiceApi from "../api/voice";
 import type { ElysiaProfile } from "../api/types";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { VoiceRoomBody } from "../components/voice/VoiceRoomBody";
 import { VoiceChannelList } from "../components/voice/VoiceChannelList";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
@@ -31,6 +32,8 @@ export function VoiceHubPage() {
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  // 删除语音房确认弹窗
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制语音列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
   const hubRef = useRef<HTMLDivElement>(null);
@@ -52,6 +55,7 @@ export function VoiceHubPage() {
     setMemberLocallyMuted,
     setLocalVolume,
     rejoin,
+    resetLocal,
   } = useVoiceChannel();
 
   // ✅ 统一的频道列表加载函数
@@ -205,31 +209,52 @@ export function VoiceHubPage() {
   // 进房态（两种形态都渲染语音房面板 + 房内打字）
   if (currentChannel) {
     return (
-      <VoiceRoomBody
-        channelId={currentChannel.id}
-        ownerId={currentChannel.owner_id}
-        channelName={currentChannel.name}
-        channel={currentChannel}
-        livekit={livekit}
-        wsConnection={wsConnection}
-        elysiaProfile={elysiaProfile}
-        groupId={currentChannel.group}
-        onToggleMic={() => void toggleMic()}
-        onLeave={() => void handleLeave()}
-        onRejoin={() => void rejoin()}
-        onVolumeChange={setMemberVolume}
-        onLocalVolumeChange={setLocalVolume}
-        onToggleMemberMuted={(userId) => {
-          const m = useVoiceStore.getState().members[userId];
-          if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
-        }}
-        onBack={handleBack}
-        onDeleteChannel={() => {
-          if (!window.confirm("确定删除语音房？")) return;
-          void voiceApi.deleteVoiceChannel(currentChannel.id).then(() => navigate("/voice")).catch((error) => setListError(error instanceof Error ? error.message : "删除语音房失败"));
-        }}
-        inputEntered={inputEntered}
-      />
+      <>
+        <VoiceRoomBody
+          channelId={currentChannel.id}
+          ownerId={currentChannel.owner_id}
+          channelName={currentChannel.name}
+          channel={currentChannel}
+          livekit={livekit}
+          wsConnection={wsConnection}
+          elysiaProfile={elysiaProfile}
+          groupId={currentChannel.group}
+          onToggleMic={() => void toggleMic()}
+          onLeave={() => void handleLeave()}
+          onRejoin={() => void rejoin()}
+          onVolumeChange={setMemberVolume}
+          onLocalVolumeChange={setLocalVolume}
+          onToggleMemberMuted={(userId) => {
+            const m = useVoiceStore.getState().members[userId];
+            if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
+          }}
+          onBack={handleBack}
+          onDeleteChannel={() => setConfirmDeleteOpen(true)}
+          inputEntered={inputEntered}
+        />
+        {confirmDeleteOpen && (
+          <ConfirmDialog
+            title="删除语音房"
+            message={`确定删除语音房「${currentChannel.name}」？此操作不可撤销，房间内所有人都会被移出。`}
+            onConfirm={() => {
+              setConfirmDeleteOpen(false);
+              // 删除成功后本地即时收尾（断媒体/清活动态/移除列表项），不依赖 WS 广播时序；
+              // 广播到达时 removeChannel/resetLocal 均幂等，其他在线客户端靠广播热更新。
+              void voiceApi
+                .deleteVoiceChannel(currentChannel.id)
+                .then(() => {
+                  resetLocal();
+                  useVoiceStore.getState().removeChannel(currentChannel.id);
+                  navigate("/voice");
+                })
+                .catch((error) =>
+                  setListError(error instanceof Error ? error.message : "删除语音房失败"),
+                );
+            }}
+            onClose={() => setConfirmDeleteOpen(false)}
+          />
+        )}
+      </>
     );
   }
 

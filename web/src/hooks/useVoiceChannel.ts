@@ -355,5 +355,7 @@ export function useVoiceChannel() {
     setLocalVolume,
     rejoin,
     reconcile,
+    /** 本地重置到未加入态（被踢/心跳超时/房间删除后的统一收尾；幂等） */
+    resetLocal,
   };
 }

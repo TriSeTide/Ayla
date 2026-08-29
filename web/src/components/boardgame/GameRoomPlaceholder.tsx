@@ -7,6 +7,7 @@
 import { useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { FavoriteButton } from "../FavoriteButton";
 import { useAuthStore } from "../../stores/auth";
 
@@ -25,6 +26,7 @@ export function GameRoomPlaceholder({
   const currentUser = useAuthStore((state) => state.currentUser);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const isOwner = room.is_owner || room.owner_id === currentUser?.id;
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const join = async () => {
     setBusy(true);
@@ -77,8 +79,22 @@ export function GameRoomPlaceholder({
             <button type="button" className="btn btn-ghost" disabled={actionBusy !== null} onClick={() => { setActionBusy(member.user_id); boardgameApi.actionGameMember(room.id, member.user_id, "kick").then(() => setError("成员已移出房间")).catch((e) => setError(e instanceof Error ? e.message : "移除失败")).finally(() => setActionBusy(null)); }}>移出</button>
             <button type="button" className="btn btn-ghost" disabled={actionBusy !== null} onClick={() => { setActionBusy(member.user_id); boardgameApi.actionGameMember(room.id, member.user_id, "transfer").then(() => setError("房主已转让")).catch((e) => setError(e instanceof Error ? e.message : "转让失败")).finally(() => setActionBusy(null)); }}>转让房主</button>
           </div>)}
-          <button type="button" className="btn btn-danger" disabled={busy} onClick={() => { if (window.confirm("确定删除桌游房间？")) boardgameApi.deleteGameRoom(room.id).then(onBack).catch((e) => setError(e instanceof Error ? e.message : "删除失败")); }}>删除房间</button>
+          <button type="button" className="btn btn-destructive" disabled={busy} onClick={() => setConfirmDeleteOpen(true)}>删除房间</button>
         </div>}
+        {confirmDeleteOpen && (
+          <ConfirmDialog
+            title="删除桌游房间"
+            message={`确定删除桌游房间「${room.name}」？此操作不可撤销。`}
+            onConfirm={() => {
+              setConfirmDeleteOpen(false);
+              boardgameApi
+                .deleteGameRoom(room.id)
+                .then(onBack)
+                .catch((e) => setError(e instanceof Error ? e.message : "删除失败"));
+            }}
+            onClose={() => setConfirmDeleteOpen(false)}
+          />
+        )}
         {isMember ? (
           <button type="button" className="btn btn-ghost" onClick={() => void leave()} disabled={busy}>
             {busy ? "离开中…" : "离开房间"}

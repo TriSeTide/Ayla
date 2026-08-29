@@ -210,6 +210,27 @@ describe("ChatWSClient", () => {
     client.disconnect();
   });
 
+  it("voice.channel.deleted → 直接从列表移除（列表/轮播/角标/浮层热更新依赖）", () => {
+    useVoiceStore.getState().setChannels([
+      {
+        id: "vc1", name: "删房", room_name: "room1", owner_id: "u1", member_count: 2,
+        visibility: "public", group: null, group_name: null, mine: false,
+        created_at: "2026-08-10T00:00:00Z",
+      },
+      {
+        id: "vc2", name: "留房", room_name: "room2", owner_id: "u2", member_count: 1,
+        visibility: "public", group: null, group_name: null, mine: false,
+        created_at: "2026-08-10T00:00:00Z",
+      },
+    ]);
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    fire(instances[0], { type: "voice.channel.deleted", data: { channel_id: "vc1" } });
+    expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual(["vc2"]);
+    client.disconnect();
+  });
+
   it("group.joined → 将审批通过的群加入会话列表", () => {
     const client = new ChatWSClient();
     client.connect();

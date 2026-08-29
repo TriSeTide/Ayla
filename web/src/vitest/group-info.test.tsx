@@ -208,15 +208,6 @@ describe("GroupInfo 群头像上传（M5-2.1）", () => {
 });
 
 describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）", () => {
-  beforeEach(() => {
-    // jsdom 未实现 confirm；默认确认（只 spy 这一个，勿用 restoreAllMocks——那会清空模块 mock 实现）
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-  });
-
-  afterEach(() => {
-    vi.mocked(window.confirm).mockRestore();
-  });
-
   function openTransferDialog() {
     renderInfo("owner");
     fireEvent.click(screen.getByRole("button", { name: "转让群主" }));
@@ -250,7 +241,7 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
     expect(within(dialog).getByText("没有匹配的成员")).toBeInTheDocument();
   });
 
-  it("选择成员 → 确认 → 二次 confirm → 调用 transferGroupOwner 并关闭对话框", async () => {
+  it("选择成员 → 确认 → 二次确认弹窗 → 调用 transferGroupOwner 并关闭对话框", async () => {
     const dialog = openTransferDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "转让给 用户m1" }));
     expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toHaveAttribute(
@@ -259,20 +250,24 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
     );
 
     fireEvent.click(within(dialog).getByRole("button", { name: "确认转让" }));
+    // 二次确认：自研 ConfirmDialog（确认按钮 label = 转让）
+    const confirm = await screen.findByTestId("confirm-dialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "转让" }));
     await waitFor(() => expect(chatApi.transferGroupOwner).toHaveBeenCalledWith("1", "m1"));
-    expect(window.confirm).toHaveBeenCalledWith("确定将群主转让给 用户m1？转让后你将成为普通成员");
-    // 成功后对话框关闭
+    // 成功后对话框关闭（含 ConfirmDialog 与选择对话框）
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "转让群主" })).not.toBeInTheDocument(),
     );
   });
 
-  it("二次 confirm 取消则不执行转让，对话框保留", () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
+  it("二次确认取消则不执行转让，选择对话框保留", async () => {
     const dialog = openTransferDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "转让给 用户m1" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "确认转让" }));
 
+    // 取消二次确认（ConfirmDialog 内取消按钮；与选择对话框的取消区分）
+    const confirm = await screen.findByTestId("confirm-dialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "取消" }));
     expect(chatApi.transferGroupOwner).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "转让群主" })).toBeInTheDocument();
   });
@@ -303,12 +298,8 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
 
 describe("GroupInfo 解散群聊与退出群聊", () => {
   beforeEach(() => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     useHomeStore.setState({ layout: "card", recentGroupId: "1" });
     useChatStore.setState({ conversations: [conv("owner")] });
-  });
-  afterEach(() => {
-    vi.mocked(window.confirm).mockRestore();
   });
 
   function renderInfoRoutes() {
@@ -325,6 +316,8 @@ describe("GroupInfo 解散群聊与退出群聊", () => {
   it("解散成功：从会话列表移除、清最近群并跳转 /group 主页", async () => {
     renderInfoRoutes();
     fireEvent.click(screen.getByRole("button", { name: "解散群聊" }));
+    // 自研确认弹窗：确认按钮 label = 解散
+    fireEvent.click(await screen.findByRole("button", { name: "解散" }));
     await waitFor(() => expect(chatApi.dissolveGroup).toHaveBeenCalledWith("1"));
     // 会话已从 store 移除
     expect(useChatStore.getState().conversations.find((c) => c.id === "1")).toBeUndefined();
@@ -334,10 +327,10 @@ describe("GroupInfo 解散群聊与退出群聊", () => {
     expect(screen.getByText("主页")).toBeInTheDocument();
   });
 
-  it("确认取消则不执行解散，也不跳转", () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
+  it("确认取消则不执行解散，也不跳转", async () => {
     renderInfoRoutes();
     fireEvent.click(screen.getByRole("button", { name: "解散群聊" }));
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }));
     expect(chatApi.dissolveGroup).not.toHaveBeenCalled();
     expect(useChatStore.getState().conversations.some((c) => c.id === "1")).toBe(true);
     expect(screen.queryByText("主页")).not.toBeInTheDocument();

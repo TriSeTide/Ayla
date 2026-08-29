@@ -15,6 +15,7 @@ import * as chatApi from "../../api/chat";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../../api/media";
 import type { ConversationMember, ConversationSummary } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { IconBack, IconClose, IconSearch } from "../../components/icons";
 import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
@@ -59,6 +60,10 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   // 转让群主对话框（Bug #5：不再用 window.prompt 手输成员 ID）
   const [transferOpen, setTransferOpen] = useState(false);
+  // 危险操作确认（解散/退群/转让）——用自研 ConfirmDialog 替代 window.confirm
+  const [confirmAction, setConfirmAction] = useState<
+    { kind: "dissolve" } | { kind: "leave" } | { kind: "transfer"; member: ConversationMember } | null
+  >(null);
 
   // 群头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [groupAvatarFile, setGroupAvatarFile] = useState<File | null>(null);
@@ -153,7 +158,6 @@ export function GroupInfo({ groupId }: { groupId: string }) {
 
   // 解散群聊：成功后从会话列表移除并清掉最近群记录，再回主页；不触发 reloadGroup（群已删除）
   const handleDissolve = async () => {
-    if (!window.confirm("确定解散群聊？此操作不可撤销")) return;
     setBusyAction("dissolve");
     setManagementError(null);
     try {
@@ -172,7 +176,6 @@ export function GroupInfo({ groupId }: { groupId: string }) {
 
   // 退出群聊：成功后从会话列表移除并清掉最近群记录，再回主页
   const handleLeave = async () => {
-    if (!window.confirm("确定退出群聊？")) return;
     setBusyAction("leave");
     setManagementError(null);
     try {
@@ -196,8 +199,6 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   );
 
   const confirmTransfer = async (m: ConversationMember) => {
-    const name = m.user.nickname || m.user.username;
-    if (!window.confirm(`确定将群主转让给 ${name}？转让后你将成为普通成员`)) return;
     await runManagementAction("transfer", async () => {
       await chatApi.transferGroupOwner(groupId, m.user.id);
       setTransferOpen(false);
@@ -403,11 +404,11 @@ export function GroupInfo({ groupId }: { groupId: string }) {
             </div> : <p className="group-info-placeholder">入群申请审批：暂无待处理申请</p>}
             {isOwner && <>
               <button type="button" className="btn btn-ghost" onClick={() => setTransferOpen(true)}>转让群主</button>
-              <button type="button" className="btn btn-danger" onClick={() => void handleDissolve()}>{busyAction === "dissolve" ? "解散中…" : "解散群聊"}</button>
+              <button type="button" className="btn btn-destructive" onClick={() => setConfirmAction({ kind: "dissolve" })}>{busyAction === "dissolve" ? "解散中…" : "解散群聊"}</button>
             </>}
           </>
         )}
-        {!isOwner && <button type="button" className="btn btn-ghost" disabled={busyAction !== null} onClick={() => void handleLeave()}>{busyAction === "leave" ? "退出中…" : "退出群聊"}</button>}
+        {!isOwner && <button type="button" className="btn btn-ghost" disabled={busyAction !== null} onClick={() => setConfirmAction({ kind: "leave" })}>{busyAction === "leave" ? "退出中…" : "退出群聊"}</button>}
       </section>
 
       {transferOpen && (
@@ -415,8 +416,48 @@ export function GroupInfo({ groupId }: { groupId: string }) {
           members={transferCandidates}
           busy={busyAction === "transfer"}
           error={managementError}
-          onConfirm={(m) => void confirmTransfer(m)}
+          onConfirm={(m) => setConfirmAction({ kind: "transfer", member: m })}
           onClose={() => setTransferOpen(false)}
+        />
+      )}
+
+      {confirmAction?.kind === "dissolve" && (
+        <ConfirmDialog
+          title="解散群聊"
+          message={`确定解散群聊「${conv?.title ?? ""}」？此操作不可撤销，所有成员都会被移出。`}
+          confirmLabel="解散"
+          onConfirm={() => {
+            setConfirmAction(null);
+            void handleDissolve();
+          }}
+          onClose={() => setConfirmAction(null)}
+        />
+      )}
+      {confirmAction?.kind === "leave" && (
+        <ConfirmDialog
+          title="退出群聊"
+          message={`确定退出群聊「${conv?.title ?? ""}」？`}
+          confirmLabel="退出"
+          onConfirm={() => {
+            setConfirmAction(null);
+            void handleLeave();
+          }}
+          onClose={() => setConfirmAction(null)}
+        />
+      )}
+      {confirmAction?.kind === "transfer" && (
+        <ConfirmDialog
+          title="转让群主"
+          message={`确定将群主转让给 ${
+            confirmAction.member.user.nickname || confirmAction.member.user.username
+          }？转让后你将成为普通成员`}
+          confirmLabel="转让"
+          onConfirm={() => {
+            const m = confirmAction.member;
+            setConfirmAction(null);
+            void confirmTransfer(m);
+          }}
+          onClose={() => setConfirmAction(null)}
         />
       )}
     </div>

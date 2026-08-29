@@ -165,9 +165,17 @@ class ChannelDetailView(APIView):
         if not services.can_manage_channel(ch, request.user):
             return _forbidden("仅房主可删除")
         try:
+            # 删除前保留目录事件所需身份；服务层负责成员与账号活动态的原子清理。
+            saved_channel_id = ch.id
+            saved_visibility = ch.visibility
+            saved_group_id = ch.group_id
             services.delete_channel(ch, request.user)
         except PermissionError as exc:
             return _forbidden(str(exc))
+        # 目录删除提示 → voice_catalog 组：所有在线客户端实时移除语音房列表项/
+        # 群轮播「N人在xx连麦」/宽屏角标/返回浮层；房内成员由前端按
+        # currentChannelId 匹配 voice.channel.deleted 后本地退出。
+        broadcast_channel_deleted(saved_channel_id, saved_visibility, saved_group_id)
         return Response({"deleted": True})
 
     def patch(self, request, channel_id):
@@ -391,26 +399,6 @@ class ChannelMemberActionView(APIView):
         except (LookupError, VoiceChannelMember.DoesNotExist):
             return _not_found("成员不存在")
         return Response(VoiceChannelSerializer(ch).data)
-
-
-class ChannelDeleteView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def delete(self, request, channel_id):
-        ch = _get_channel_or_404(channel_id)
-        if ch is None:
-            return _not_found()
-        if not services.can_manage_channel(ch, request.user):
-            return _forbidden("仅房主可删除")
-        
-        # 删除前保留目录事件所需身份；服务层负责成员与账号活动态的原子清理。
-        saved_channel_id = ch.id
-        saved_visibility = ch.visibility
-        saved_group_id = ch.group_id
-        services.delete_channel(ch, request.user)
-        broadcast_channel_deleted(saved_channel_id, saved_visibility, saved_group_id)
-        
-        return Response({"deleted": True})
 
 
 class ChannelMembersView(APIView):

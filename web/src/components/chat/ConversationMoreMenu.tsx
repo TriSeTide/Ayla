@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as chatApi from "../../api/chat";
 import { useChatStore } from "../../stores/chat";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { IconPin, IconDots } from "../icons";
 
 export function ConversationMoreMenu({
@@ -27,6 +28,7 @@ export function ConversationMoreMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
   // 点击菜单外部 → 关闭
@@ -58,12 +60,13 @@ export function ConversationMoreMenu({
   };
 
   const handleDelete = () => {
-    const ok = window.confirm(
-      `删除会话「${conversation.title}」？消息记录会保留，对方再发消息时会话将重新出现。`,
-    );
-    if (!ok) return;
-    setBusy(true);
     setOpen(false);
+    setConfirmDeleteOpen(true);
+  };
+
+  const doDelete = () => {
+    setConfirmDeleteOpen(false);
+    setBusy(true);
     chatApi
       .hideConversation(conversation.id)
       .then(() => useChatStore.getState().removeConversation(conversation.id))
@@ -112,6 +115,14 @@ export function ConversationMoreMenu({
             </button>
           )}
         </div>
+      )}
+      {confirmDeleteOpen && (
+        <ConfirmDialog
+          title="删除会话"
+          message={`删除会话「${conversation.title}」？\n消息记录会保留，对方再发消息时会话将重新出现。`}
+          onConfirm={doDelete}
+          onClose={() => setConfirmDeleteOpen(false)}
+        />
       )}
     </div>
   );

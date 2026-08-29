@@ -211,6 +211,33 @@ def test_delete_clears_member_activity_state(auth_client):
 
 
 @pytest.mark.django_db
+def test_delete_broadcasts_catalog_deleted(auth_client, monkeypatch):
+    """删除语音房必须向 voice_catalog 组广播删除提示（列表/轮播/角标/浮层热更新依赖）。"""
+    from types import SimpleNamespace
+
+    class _Layer:
+        def __init__(self):
+            self.calls = []
+
+        async def group_send(self, group, event):
+            self.calls.append((group, event))
+
+    layer = _Layer()
+    monkeypatch.setattr("channels.layers.get_channel_layer", lambda: layer)
+    client, owner = auth_client(username="voice_delete_broadcast")
+    ch = VoiceChannel.objects.create(
+        name="广播删除房", room_name="room_delete_broadcast", owner=owner
+    )
+
+    response = client.delete(f"/api/v1/voice/channels/{ch.id}/")
+
+    assert response.status_code == 200, response.content
+    assert layer.calls == [
+        ("voice_catalog", {"type": "voice.channel.deleted", "channel_id": str(ch.id)})
+    ]
+
+
+@pytest.mark.django_db
 def test_owner_leave_when_alone(auth_client):
     """房主是唯一成员时允许直接离开（修复死锁），频道保留为空。"""
     client, owner = auth_client()
