@@ -14,7 +14,7 @@
  * 切换 = 变更 channelId（onSelect）；useLiveRoom 依赖 channelId 自动销毁旧 HLS/断 WS
  * 重进房，播放组件始终单实例（滑动单元内仅当前槽一个真实播放器）。
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
@@ -57,7 +57,7 @@ function prefersReducedMotion(): boolean {
 export function LiveRoomBody({
   channelId,
   channel,
-  isNarrow,
+  isNarrow: isNarrowProp,
   channels,
   onSelect,
   onBack,
@@ -91,7 +91,24 @@ export function LiveRoomBody({
   /** 正在删除的频道 id（侧栏该项禁用）。 */
   deletingChannelId?: number | null;
 }) {
-  const { loading, error, playerError, retryPlayer, videoRef } = useLiveRoom(channelId, {
+  // 全屏期间冻结 isNarrow：手机点全屏会锁横屏 → viewport 变宽 → isNarrow 翻转 →
+  // 窄↔宽布局切换 → 播放器(video)重建 → 黑屏。冻结让全屏时布局保持进入全屏前的形态，
+  // 播放器不重建，从根源减少「点全屏就黑屏」。fullscreenchange 在方向变化前触发，
+  // 此刻冻结的是进入全屏前的 isNarrow。
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const frozenNarrowRef = useRef(isNarrowProp);
+  useEffect(() => {
+    const onFs = () => {
+      const fs = !!document.fullscreenElement;
+      if (fs) frozenNarrowRef.current = isNarrowProp;
+      setIsFullscreen(fs);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, [isNarrowProp]);
+  const isNarrow = isFullscreen ? frozenNarrowRef.current : isNarrowProp;
+
+  const { loading, error, playerError, retryPlayer, refreshPlayer, videoRef } = useLiveRoom(channelId, {
     activityRoute,
     keepLiveActivity,
   });
@@ -181,6 +198,7 @@ export function LiveRoomBody({
       playerError={playerError}
       videoRef={videoRef}
       onRetry={retryPlayer}
+      onRefresh={refreshPlayer}
     />
   );
   const visibilityLabels = channel ? getVisibilityLabels(channel) : [];

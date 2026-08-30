@@ -1,11 +1,12 @@
 /**
- * player/hls.ts 单测（M5-4 文档 §7.1，mock hls.js）：
- * - Hls.isSupported() true → hls.js 分支：loadSource + attachMedia
+ * player/hls.ts 单测（M5-4 文档 §7.1，mock hls.js；直播体验增量补测）：
+ * - Hls.isSupported() true → hls.js 分支：loadSource + attachMedia + startLoad(-1)（从直播边缘起播）
  * - false → 原生 HLS 分支：video.src 直挂
  * - fatal networkError → startLoad() 重试；fatal mediaError → recoverMediaError()
  * - 其他 fatal → onFatalError 回调（UI 重试按钮）
  * - 非 fatal 错误不触发恢复动作
  * - destroy 幂等：重复调用不抛错
+ * - refreshToLiveEdge：hls.js 跳到 liveSyncPosition；无实例/已销毁 no-op；原生分支不抛错
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +17,7 @@ interface FakeHlsInstance {
   startLoad: ReturnType<typeof vi.fn>;
   recoverMediaError: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
+  liveSyncPosition: number | null;
   handlers: Record<string, (event: string, data: unknown) => void>;
   on: (event: string, cb: (event: string, data: unknown) => void) => void;
 }
@@ -39,6 +41,7 @@ vi.mock("hls.js", () => {
     startLoad = vi.fn();
     recoverMediaError = vi.fn();
     destroy = vi.fn();
+    liveSyncPosition: number | null = null;
     handlers: Record<string, (event: string, data: unknown) => void> = {};
     on(event: string, cb: (event: string, data: unknown) => void) {
       this.handlers[event] = cb;
@@ -66,7 +69,7 @@ afterEach(() => {
 });
 
 describe("HlsPlayer", () => {
-  it("hls.js 分支：loadSource + attachMedia，返回 hls.js 模式", () => {
+  it("hls.js 分支：loadSource + attachMedia + 从直播边缘起播 startLoad(-1)", () => {
     const player = new HlsPlayer();
     const video = makeVideo();
     const mode = player.attach(video, "http://h/live/k.m3u8");
@@ -75,6 +78,7 @@ describe("HlsPlayer", () => {
     const fake = fakeInstances[0];
     expect(fake.loadSource).toHaveBeenCalledWith("http://h/live/k.m3u8");
     expect(fake.attachMedia).toHaveBeenCalledWith(video);
+    expect(fake.startLoad).toHaveBeenCalledWith(-1);
     player.destroy();
   });
 
@@ -99,7 +103,7 @@ describe("HlsPlayer", () => {
       type: "networkError",
       details: "manifestLoadError",
     });
-    expect(fake.startLoad).toHaveBeenCalledTimes(1);
+    expect(fake.startLoad).toHaveBeenCalledTimes(2); // 首次 startLoad(-1) + 重试一次
     expect(onFatal).not.toHaveBeenCalled();
     player.destroy();
   });
@@ -142,7 +146,7 @@ describe("HlsPlayer", () => {
       type: "networkError",
       details: "fragLoadError",
     });
-    expect(fake.startLoad).not.toHaveBeenCalled();
+    expect(fake.startLoad).toHaveBeenCalledTimes(1); // 仅首次 startLoad(-1)
     expect(fake.recoverMediaError).not.toHaveBeenCalled();
     expect(onFatal).not.toHaveBeenCalled();
     player.destroy();
@@ -173,6 +177,40 @@ describe("HlsPlayer", () => {
     expect(fakeInstances).toHaveLength(2);
     expect(fakeInstances[0].destroy).toHaveBeenCalledTimes(1);
     expect(fakeInstances[1].loadSource).toHaveBeenCalledWith("u2");
+    player.destroy();
+  });
+
+  it("refreshToLiveEdge：hls.js 分支跳到 liveSyncPosition", () => {
+    const player = new HlsPlayer();
+    const video = makeVideo();
+    const play = vi.spyOn(video, "play").mockResolvedValue(undefined);
+    player.attach(video, "u");
+    fakeInstances[0].liveSyncPosition = 200;
+    player.refreshToLiveEdge();
+    expect(video.currentTime).toBe(200);
+    expect(play).toHaveBeenCalledTimes(1);
+    player.destroy();
+  });
+
+  it("refreshToLiveEdge：未挂载 / 已销毁时静默 no-op，不抛错", () => {
+    const player = new HlsPlayer();
+    expect(() => player.refreshToLiveEdge()).not.toThrow();
+    player.attach(makeVideo(), "u");
+    player.destroy();
+    expect(() => player.refreshToLiveEdge()).not.toThrow();
+  });
+
+  it("refreshToLiveEdge：原生分支（无 seekable）走 reload 兜底不抛错", () => {
+    mockIsSupported = false;
+    const player = new HlsPlayer();
+    const video = makeVideo();
+    const play = vi.spyOn(video, "play").mockResolvedValue(undefined);
+    const load = vi.spyOn(video, "load").mockImplementation(() => {});
+    player.attach(video, "u");
+    // jsdom 的 video.seekable 为空 TimeRanges，length=0 → 落到 reload + play 兜底
+    expect(() => player.refreshToLiveEdge()).not.toThrow();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(1);
     player.destroy();
   });
 });

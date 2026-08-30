@@ -885,9 +885,10 @@
   padding: var(--sp-6);
 }
 
-/* 气泡列最大 720px 居中偏左（design.md §5） */
+/* 气泡列最大 960px 居中（design.md §5）：宽屏下加宽，减少两侧留白；
+   窄屏由 .message-scroll 内容区自然收缩，不受此上限影响。 */
 .message-column {
-  max-width: 720px;
+  max-width: 960px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1107,6 +1108,17 @@
   padding: 0 var(--sp-1);
 }
 
+/* 发送者头像的指针事件包裹层（长按 @ 检测挂在这里，不改变头像布局）；
+   长按需阻止触屏的系统菜单/选中，避免「保存图片/长按选中」抢走 @ 手势 */
+.msg-sender-halo {
+  display: inline-flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* A1：消息到达动画——仅新到达消息（乐观发送 / WS 实时）挂 .msg-arrive 播放；
    初始历史加载不挂，刷新页面历史无动画（复用 base.css frost-rise 原语，design.md §7） */
 .msg-row.msg-arrive {
@@ -1122,7 +1134,7 @@
 }
 
 .msg-body {
-  max-width: 70%;
+  max-width: 75%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1248,19 +1260,41 @@
   background: rgba(255, 250, 251, 0.65);
 }
 
-/* 气泡操作（收藏/引用/撤回）：与气泡同一行（别人右侧/自己左侧），hover 浮现 */
+/* 气泡操作（收藏/引用/撤回）：与气泡同一行（别人右侧/自己左侧），hover 浮现。
+   pointer-events:none 必须：隐藏态不可点（否则触屏上看不见却能被误触）。
+   桌面用 hover / 触屏用点击行切 .is-actions-open（单选由 JS 管理）。 */
 .msg-actions {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
   padding-bottom: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.msg-row:hover .msg-actions,
+/* 键盘聚焦可达性：无论桌面/触屏，聚焦到操作按钮都显示 */
 .msg-row:focus-within .msg-actions {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* 桌面（支持 hover）：悬停显示，移开消失 */
+@media (hover: hover) {
+  .msg-row:hover .msg-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* 触屏（无 hover）：点气泡行切 .is-actions-open 才显示（单选由 JS 管理）。
+   必须包在 @media (hover:none) 内：否则触屏 tap 的 sticky hover 会把按钮
+   pointer-events 顶成 auto，出现「看不见却能点」。 */
+@media (hover: none) {
+  .msg-row.is-actions-open .msg-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .msg-action-btn {
@@ -3327,6 +3361,99 @@
 
 .live-player-error {
   color: var(--destructive);
+}
+
+/* ---- 直播播放器悬浮控件（去原生控制条，B 站式纯观看） ---- */
+
+/* 深色媒体上的悬浮小按钮：左下「跳到最新」、右下「画中画 + 全屏」。
+   视频为黑底 object-fit:contain，玻璃白底会刺眼，故用 indigo 半透明底 + 白图标
+   （对齐原生 / B 站直播悬浮控件的低调观感），底色 rgba 与 tokens.css --overlay-dim 同源。
+   非常态显示：桌面悬停 / 触屏点击视频后才淡入，隐藏时整层 pointer-events 穿透。 */
+.live-player-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.live-player-controls.is-visible {
+  opacity: 1;
+}
+
+.live-player-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  background: rgba(70, 91, 146, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  pointer-events: none; /* 默认穿透；可见时才可点 */
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-player-controls.is-visible .live-player-btn {
+  pointer-events: auto;
+}
+
+.live-player-btn:hover {
+  background: rgba(70, 91, 146, 0.52);
+}
+
+.live-player-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.live-player-refresh {
+  position: absolute;
+  left: var(--sp-2);
+  bottom: var(--sp-2);
+}
+
+/* 右下角两个按钮（画中画 + 全屏）横排 */
+.live-player-corner {
+  position: absolute;
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* 刷新键旋转动画（点击跳到最新时转一圈） */
+.live-player-refresh.is-spinning svg {
+  animation: live-refresh-spin 0.6s var(--ease-out);
+}
+
+@keyframes live-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-player-refresh.is-spinning svg {
+    animation: none;
+  }
+}
+
+/* 全屏：对整个播放器容器全屏（黑底铺满、圆角/边框去除），悬浮按钮仍在画面内 */
+.live-player:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  border-radius: 0;
+  border: none;
+  background: #000;
 }
 
 .live-room-side {

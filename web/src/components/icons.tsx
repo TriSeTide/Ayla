@@ -398,3 +398,35 @@ export function IconArrowUp(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** 刷新（lucide rotate-cw）：直播「跳到最新画面」 */
+export function IconRefresh(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+    </svg>
+  );
+}
+
+/** 画中画（lucide picture-in-picture-2）：直播小窗播放 */
+export function IconPip(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4" />
+      <rect width="10" height="7" x="12" y="13" rx="2" />
+    </svg>
+  );
+}
+
+/** 全屏（lucide maximize）：直播全屏 */
+export function IconFullscreen(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+      <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  );
+}

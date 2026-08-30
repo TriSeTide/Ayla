@@ -157,7 +157,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 间距刻度：4 / 8 / 12 / 16 / 24 / 32 / 48（聊天密度场景以 8/12/16 为主）
 - 圆角刻度：8（小件）/ 12（输入）/ 16–20（卡片）/ 24–28（面板）/ 999（胶囊、头像）
 - 主布局：左侧栏（玻璃，280–320px）+ 主内容区（透明，透出极光背景）+ 按需右栏
-- 内容最大宽度 1200px；聊天页不设限宽，气泡列最大 720px 居中偏左
+- 内容最大宽度 1200px；聊天页不设限宽，气泡列最大 960px 居中（宽屏加宽，减少两侧留白；窄屏由滚动区内边距自然收缩）
 - 网格：12 列，24px gutter；卡片间距 ≥16px
 
 ## 6. Depth & Elevation —— 签名元素
@@ -341,6 +341,22 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 左上使用 `--pink-500` 实底 + `--surface` 白字的 LIVE 胶囊；底部使用玻璃 meta 区（`--glass-bg` + blur(18px) + `--glass-border`），展示标题与主播，文字遵循正文/次要文字层级。
 - 预览卡**纯展示、无播放组件、无 `useLiveRoom`、无 WS/轮询副作用**，不能为了切换动画常挂多个真实直播播放器。
 - **当前实现边界**：该配方曾作为 G3 的三槽预览卡落地，后续用户返工将现行切换改为“视频 + 弹幕区”整体滑动，删除 `LivePeerPreview`；本条保留为可复用的轻量预览配方，不能据此声称当前直播间正在渲染预览卡。
+
+### 12.7.2 直播播放器控件（低延迟 + 跳到最新）
+
+- **无原生控制条**：`<video>` 不带 `controls`——去掉进度条、手动倍速与原生全屏，纯直播观看（对齐 B 站直播体验）；画中画小窗能力保留。
+- **低延迟起播**：hls.js 分支开 `lowLatencyMode` + `liveSyncDurationCount=2`，`startLoad(-1)` 从直播边缘起播（连上推流即显示最新画面，不从头回放历史）；**不做追帧倍速**（保持 `liveSyncPlaybackRate` 默认 1.0，画面不自动加速）；延迟延后由用户手动刷新跳边。Safari 原生 HLS 分支维持原生贴边行为。
+- **悬浮小按钮（非常态显示 + 无操作自动隐藏）**：三个 32px 圆形悬浮钮，indigo 半透明底（`rgba(70,91,146,0.32)`，与 tokens `--overlay-dim` 同源）+ 白线性图标 + `blur(8px)`；**默认隐藏**，桌面悬停/移动播放器显示、移出隐藏，触屏点击视频显示；**显示后 3 秒无操作（鼠标静止/无点击）自动隐藏**，鼠标移动或点按钮重置计时、不常驻；淡入淡出 `opacity` 180ms。
+  - 左下「跳到最新」刷新键（`IconRefresh`）：**健康播放**（视频已有当前帧 `readyState ≥ HAVE_CURRENT_DATA`）→ `refreshToLiveEdge()` 跳边秒跳（hls.js 用 `liveSyncPosition`、兜底 seek 到 `seekable` 末尾、再兜底 reload+play）；**黑屏/实例缺失/未就绪** → 重建播放器（销毁 + 重新 attach，`startLoad(-1)` 从边缘起播 = 跳到最新）；图标旋转 0.6s 反馈（`prefers-reduced-motion` 下禁用旋转）。
+  - 右下「画中画」（`IconPip`）：仅浏览器支持时渲染（`document.pictureInPictureEnabled` 或 Safari `webkitSetPresentationMode`）。
+  - 右下「全屏」（`IconFullscreen`）：对整个 `.live-player` 容器 `requestFullscreen`（全屏黑底铺满、圆角/边框去除），悬浮按钮仍在全屏画面内；**窄屏（手机）全屏后锁横屏**（`screen.orientation.lock("landscape")`），**iOS Safari 走 `webkitEnterFullscreen()` 原生视频全屏（自动横屏）**；退出全屏（含 ESC/系统返回）经 `fullscreenchange` 解锁方向。
+- **黑屏自动恢复**（切台/切界面后画面不加载的根治，学 B 站「减少黑屏 + 真黑屏立马刷新」）：
+  - `videoRef` 用**粘性 ref 代理 + videoVersion 重建信号**：沉浸式上下滑切台（`AnimatePresence mode="sync"`）与宽窄屏切换时，旧 video 卸载（React 把共享 ref 置 null，忽略）、新 video 挂载即 `setVideoVersion` 触发播放器 effect **重新 attach 到新 video**——根治「video 重建但 effect 依赖 srsStatus/hlsUrl 不变 → 不重 attach → 永久黑屏」，video 挂载即接上、不靠轮询；
+  - **全屏冻结 isNarrow**：手机点全屏锁横屏会改变 viewport 宽度 → `isNarrow` 翻转 → 窄↔宽布局切换 → 播放器(video)重建 → 黑屏；`LiveRoomBody` 在 `fullscreenchange`（方向变化前触发）冻结进入全屏前的 `isNarrow`，全屏期间布局不切换、播放器不重建，从根源减少「点全屏就黑屏」；
+  - **fatal 错误自动重建**：hls.js 不可恢复 fatal 后（冷却期外）自动重建播放器；
+  - **事件驱动黑屏/卡死检测（替代轮询）**：监听 video 的 `waiting/stalled/error`（卡顿/黑屏信号），卡顿持续 2s 未恢复（仍无帧/暂停）且冷却期（4s）已过 → 自动重建，`playing/canplay` 恢复即取消——正常播放零开销，黑屏发生的瞬间（事件）就启动重载，不用轮询去猜；
+  - 刷新键主功能 = 跳边跟上直播进度，黑屏时顺便重建兜底（平时由事件驱动接管）。
+- **触达口径例外**：媒体悬浮钮为 32px（用户明确拍板「改小一点」——视频上辅助操作、非常态显示）；非媒体/常驻交互仍遵守 §10 ≥40px。focus ring 可见、`prefers-reduced-motion` 下无位移/旋转。
 
 ### 12.8 帖子卡 PostCard 与信息流
 
