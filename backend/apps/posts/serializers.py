@@ -212,7 +212,15 @@ class CreatePostSerializer(serializers.Serializer):
 
 
 class UpdatePostSerializer(serializers.Serializer):
-    """编辑帖子：内容与可见性均可变更。"""
+    """编辑帖子：内容、可见性与媒体（images）均可变更。
+
+    images 为完整媒体列表（media_id，≤9，图片或视频）——全量替换语义：
+    前端把「保留 + 新增」的媒体统一提交，后端按此顺序重建 PostImage 关联。
+    仅当显式携带 images 字段时才替换（区分「未改图片」与「清空图片」）。
+    """
+
+    MAX_IMAGES = 9
+    ALLOWED_KINDS = ("image", "video")
 
     title = serializers.CharField(required=False, allow_blank=True, max_length=128)
     body = serializers.CharField(required=False, max_length=10000)
@@ -221,13 +229,41 @@ class UpdatePostSerializer(serializers.Serializer):
     allowed_group_ids = serializers.ListField(
         child=serializers.CharField(max_length=32), required=False
     )
+    images = serializers.ListField(
+        child=serializers.CharField(max_length=64), required=False
+    )
+
+    def validate_images(self, value):
+        if len(value) > self.MAX_IMAGES:
+            raise serializers.ValidationError(f"最多 {self.MAX_IMAGES} 个媒体")
+        return list(dict.fromkeys(value))
 
     def validate(self, attrs):
         if not attrs:
-            raise serializers.ValidationError("至少提供 title 或 body")
+            raise serializers.ValidationError("没有可更新的字段")
         if "body" in attrs and not (attrs["body"] or "").strip():
             raise serializers.ValidationError({"body": "正文不能为空"})
+        self._validate_images_access(attrs)
         return attrs
+
+    def _validate_images_access(self, attrs):
+        """媒体合法性校验（与 CreatePostSerializer 同语义）：存在 + READY +
+        图片/视频 + 调用方有访问权；越权走 PermissionDenied（403）。"""
+        from apps.media.models import MediaObject
+        from apps.media.services import can_access_media
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        for media_id in attrs.get("images") or []:
+            media = MediaObject.objects.filter(media_id=media_id).first()
+            if media is None:
+                raise serializers.ValidationError({"images": "media_not_found"})
+            if media.status != MediaObject.STATUS_READY:
+                raise serializers.ValidationError({"images": "media_not_ready"})
+            if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_VIDEO):
+                raise serializers.ValidationError({"images": "media_type_mismatch"})
+            if user is not None and not can_access_media(user, media):
+                raise PermissionDenied({"images": "media_access_denied"})
 
 
 class CreateCommentSerializer(serializers.Serializer):

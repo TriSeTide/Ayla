@@ -342,6 +342,85 @@ class TestPostDetail:
         assert not Post.objects.filter(pk=post.id).exists()
 
 
+# ---------- 编辑媒体（images 全量替换） ----------
+
+@pytest.mark.django_db
+class TestUpdatePostImages:
+    def test_patch_replace_images(self, auth_client):
+        """编辑时全量替换媒体：旧图删、按新顺序重建 PostImage。"""
+        client, user = auth_client(username="u_p_img")
+        m1 = make_image_media(user, "u-p-1")
+        m2 = make_image_media(user, "u-p-2")
+        resp = client.post(
+            "/api/v1/posts/",
+            {"title": "t", "body": "b", "images": [m1.media_id, m2.media_id]},
+            format="json",
+        )
+        post_id = resp.json()["id"]
+        m3 = make_image_media(user, "u-p-3")
+        resp = client.patch(
+            f"/api/v1/posts/{post_id}/",
+            {"images": [m2.media_id, m3.media_id]},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        data = resp.json()
+        assert [img["media"]["media_id"] for img in data["images"]] == [m2.media_id, m3.media_id]
+        assert [img["order"] for img in data["images"]] == [0, 1]
+        assert PostImage.objects.filter(post_id=post_id).count() == 2
+
+    def test_patch_clear_images(self, auth_client):
+        """显式传 images=[] 清空帖子媒体。"""
+        client, user = auth_client(username="u_p_clear")
+        m1 = make_image_media(user, "u-p-c1")
+        resp = client.post(
+            "/api/v1/posts/",
+            {"title": "t", "body": "b", "images": [m1.media_id]},
+            format="json",
+        )
+        post_id = resp.json()["id"]
+        resp = client.patch(f"/api/v1/posts/{post_id}/", {"images": []}, format="json")
+        assert resp.status_code == 200
+        assert resp.json()["images"] == []
+        assert PostImage.objects.filter(post_id=post_id).count() == 0
+
+    def test_patch_without_images_keeps_them(self, auth_client):
+        """不携带 images 字段时（未改图片）保持原媒体不动。"""
+        client, user = auth_client(username="u_p_keep")
+        m1 = make_image_media(user, "u-p-k1")
+        resp = client.post(
+            "/api/v1/posts/",
+            {"title": "t", "body": "b", "images": [m1.media_id]},
+            format="json",
+        )
+        post_id = resp.json()["id"]
+        resp = client.patch(f"/api/v1/posts/{post_id}/", {"body": "改正文"}, format="json")
+        assert resp.status_code == 200
+        assert [img["media"]["media_id"] for img in resp.json()["images"]] == [m1.media_id]
+        assert PostImage.objects.filter(post_id=post_id).count() == 1
+
+    def test_patch_images_not_found_400(self, auth_client):
+        client, user = auth_client(username="u_p_nf")
+        resp = client.post("/api/v1/posts/", {"title": "t", "body": "b"}, format="json")
+        post_id = resp.json()["id"]
+        resp = client.patch(
+            f"/api/v1/posts/{post_id}/", {"images": ["no-such-media"]}, format="json"
+        )
+        assert resp.status_code == 400
+        assert "media_not_found" in str(resp.json())
+
+    def test_patch_images_access_denied_403(self, auth_client, user_factory):
+        client, user = auth_client(username="u_p_deny")
+        resp = client.post("/api/v1/posts/", {"title": "t", "body": "b"}, format="json")
+        post_id = resp.json()["id"]
+        other = user_factory(username="u_p_other")
+        media = make_image_media(other, "u-p-other")
+        resp = client.patch(
+            f"/api/v1/posts/{post_id}/", {"images": [media.media_id]}, format="json"
+        )
+        assert resp.status_code == 403
+
+
 # ---------- 评论 ----------
 
 @pytest.mark.django_db

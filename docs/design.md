@@ -367,6 +367,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   - 群内发帖可见性锁定（VisibilitySelector `lockGroup`，仅群内发帖路径）：「指定群可见」大类强制勾选且不可取消——复选框 disabled + 保持选中态视觉（`label.is-locked`，不灰化，避免把「已锁定生效」误读成「不可用」）；群搜索/多选列表保留，其中**本群那条**恒勾选、不可取消（`visibility-group-option.is-locked`），其他群仍可多选。公开/好友可与「指定群可见」共存：允许「公开+群可见」或「好友+群可见」，但公开与好友二者之间仍互斥（单选）。提交时后端单值 visibility 映射 public 优先 → friends → group，本群恒在 `allowed_group_ids`（后端 `allowed_groups` 是独立准入维度，与 visibility 组合判定，见 §12.8 与 common/visibility.py）
   - 可见性多选语义（全站 live/voice/post/boardgame 统一）：`public` 与 `friends` **互斥**（单选），`group`（指定群可见）是**独立维度**、可与公开或好友叠加——「公开+群」「好友+群」均合法。归属群 `group` FK 仅作来源标记、**不承载可见性**，群可见性完全由白名单 `allowed_groups` 决定（后端 `visible_queryset`/`can_view`/`scope=group:` 只认 allowed_groups；创建时 services 把归属群兜底落白名单）。
   - 群内锁定规则（`lockGroup`）：帖子/语音/桌游群内创建**强制锁定本群**（大类 disabled + 本群条目 disabled，不可取消）；**直播群内不锁定**——本群自动勾选、但可取消（群内开播跳转到独立开播控制台，是否在本群显示由用户在开播控制台自行决定）。标签显示据此支持「公开/好友」与群名共存（getVisibilityLabels）。
+  - **帖子详情编辑面板（PostDetailPage 编辑已有帖子）**：点「编辑」在**帖子页面内**（`.post-detail` 内 `position:absolute; inset:0`，保留顶部导航与底栏，不超出帖子界面）覆盖弹出；顶栏 = 取消（返回箭头）+「编辑帖子」标题 +「重新发布」保存钮，内容列居中（max-width 680px）内部滚动；字段顺序：标题 → 正文 → **图片/视频预览区**（紧贴正文，网格可换行、128px 方块 + 移除钮，`prefers-reduced-motion` 关闭入场）→ 可见性选择器 → 错误提示。媒体**全量替换**：前端维护「已有 + 新增」媒体列表，图片有增删才携带 `images` 字段提交，后端 PATCH 按新顺序重建 `PostImage`（media 校验与发帖同语义：存在/READY/image|video/访问权），被移除的媒体在提交成功后由前端回收（`deleteMedia`）；取消编辑回收未提交的新上传媒体。
 
 ### 12.9 搜索框与结果
 

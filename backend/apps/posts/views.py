@@ -189,7 +189,7 @@ class PostDetailView(APIView):
             return _not_found("帖子不存在")
         if post.owner_id != request.user.id:
             return _forbidden("仅作者可修改")
-        ser = UpdatePostSerializer(data=request.data)
+        ser = UpdatePostSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         if "title" in data:
@@ -228,7 +228,10 @@ class PostDetailView(APIView):
         if "group" in request.data:
             update_fields.append("group")
         post.save(update_fields=update_fields)
-        # 编辑后广播（标题/正文/可见性变更 → 轮播「最新帖」实时刷新）
+        # 媒体全量替换：仅当显式携带 images 字段时执行（区分「未改图片」与「清空图片」）
+        if "images" in request.data:
+            services.replace_post_images(post, data.get("images") or [])
+        # 编辑后广播（标题/正文/可见性/媒体变更 → 轮播「最新帖」实时刷新）
         services.broadcast_post_updated(post)
         return Response(PostSerializer(post, context={"request": request}).data)
 

@@ -5,20 +5,20 @@
  * 删除（仅作者，二次确认）。窄屏：评论输入框与进入直播间一致，
  * 底栏下滑离场后输入框延迟从底部滑入。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useNavigationType, useParams, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
-import type { Post, PostComment } from "../api/types";
+import type { MediaDescriptor, Post, PostComment } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { CommentList } from "../components/posts/CommentList";
 import { CommentComposer } from "../components/posts/CommentComposer";
 import { ImageViewer } from "../components/chat/ImageViewer";
 import { ResourceImage } from "../components/ResourceImage";
 import { PostVideoCover } from "../components/posts/PostVideoCover";
-import { mediaContentUrl } from "../api/media";
+import { deleteMedia, mediaContentUrl, uploadMediaFile, validateMediaFile } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
-import { IconBack, IconHeart } from "../components/icons";
+import { IconBack, IconHeart, IconImage } from "../components/icons";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
 import { usePostsStore } from "../stores/posts";
@@ -27,6 +27,16 @@ import { useAuthStore } from "../stores/auth";
 import { chatWS } from "../ws/chat";
 import { goUserProfile } from "../utils/navigation";
 import { getVisibilityLabels } from "../utils/visibility";
+
+/** 编辑面板中的媒体项：已有图片（isNew=false，用 descriptor 渲染）或新上传（isNew=true，用 localUrl 预览）。 */
+type EditImageItem = {
+  key: string;
+  mediaId: string;
+  kind: "image" | "video";
+  descriptor?: MediaDescriptor;
+  localUrl?: string;
+  isNew: boolean;
+};
 
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
@@ -83,6 +93,11 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const [editVisibility, setEditVisibility] = useState<VisibilitySelection>({ public: true, friends: false, group: false });
   const [editAllowedGroupIds, setEditAllowedGroupIds] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [editImages, setEditImages] = useState<EditImageItem[]>([]);
+  const [editUploading, setEditUploading] = useState(false);
+  const [editMediaError, setEditMediaError] = useState<string | null>(null);
+  // 打开编辑时的已有图片 media_id 快照：提交时判断图片是否有增删，并在成功后回收被移除的媒体
+  const initialExistingMediaIdsRef = useRef<string[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
   // 图片查看器（Portal 全屏弹窗，原图 + 保存）
@@ -228,6 +243,111 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       });
   }, [post, goBack]);
 
+  // ---- 编辑帖子媒体（图片/视频）----
+
+  /** 上传新媒体到编辑面板（复用三步上传；失败保留原输入，不伪造成功） */
+  const uploadEditImages = async (files: File[]) => {
+    if (editUploading || savingEdit || files.length === 0) return;
+    const remaining = Math.max(0, 9 - editImages.length);
+    if (files.length > remaining) {
+      setEditMediaError(`最多添加 9 个媒体，还可添加 ${remaining} 个`);
+      files = files.slice(0, remaining);
+    }
+    if (files.length === 0) return;
+    setEditUploading(true);
+    setEditMediaError(null);
+    const uploaded: EditImageItem[] = [];
+    for (const file of files) {
+      const check = validateMediaFile(file);
+      if (check.error) {
+        setEditMediaError(check.error);
+        continue;
+      }
+      try {
+        const result = await uploadMediaFile(file, check.kind);
+        uploaded.push({
+          key: result.media_id,
+          mediaId: result.media_id,
+          kind: result.descriptor.kind === "video" ? "video" : "image",
+          descriptor: result.descriptor,
+          localUrl: URL.createObjectURL(file),
+          isNew: true,
+        });
+      } catch {
+        setEditMediaError("媒体上传失败，请重试");
+      }
+    }
+    setEditImages((prev) => [...prev, ...uploaded]);
+    setEditUploading(false);
+  };
+
+  /** 从编辑面板移除媒体：新上传的立即回收；已有图片仅从列表移除，提交成功后统一回收 */
+  const removeEditImage = (item: EditImageItem) => {
+    setEditImages((prev) => prev.filter((i) => i.key !== item.key));
+    if (item.isNew) {
+      void deleteMedia(item.mediaId).catch(() => {});
+    }
+  };
+
+  /** 回收尚未提交的新上传媒体（取消编辑时调用，避免孤儿对象） */
+  const cleanupNewEditImages = (images: EditImageItem[]) => {
+    for (const item of images) {
+      if (item.isNew) void deleteMedia(item.mediaId).catch(() => {});
+    }
+  };
+
+  /** 关闭编辑：回收未提交的新媒体，已有图片保持不动 */
+  const cancelEdit = () => {
+    cleanupNewEditImages(editImages);
+    setActionError(null);
+    setEditMediaError(null);
+    setEditing(false);
+  };
+
+  /** 保存编辑：标题/正文/可见性/媒体（媒体有变化才全量替换） */
+  const saveEdit = () => {
+    if (!post) return;
+    if (editVisibility.group && editAllowedGroupIds.length === 0) {
+      setActionError("请至少选择一个群");
+      return;
+    }
+    const backendVisibility = editVisibility.public
+      ? "public"
+      : editVisibility.friends
+        ? "friends"
+        : "group";
+    const currentIds = editImages.map((i) => i.mediaId);
+    const initialIds = initialExistingMediaIdsRef.current;
+    const imagesChanged =
+      currentIds.length !== initialIds.length ||
+      currentIds.some((id, idx) => id !== initialIds[idx]);
+    const payload: Parameters<typeof postsApi.updatePost>[1] = {
+      title: editTitle.trim(),
+      body: editBody.trim(),
+      visibility: backendVisibility,
+      allowed_group_ids: editAllowedGroupIds.length > 0 ? editAllowedGroupIds : undefined,
+    };
+    if (imagesChanged) payload.images = currentIds;
+    setSavingEdit(true);
+    setActionError(null);
+    postsApi
+      .updatePost(post.id, payload)
+      .then((updated) => {
+        setPost(updated);
+        setEditing(false);
+        // 提交成功：回收被移除的已有图片（后端已清除其 PostImage 关联）
+        if (imagesChanged) {
+          for (const removedId of initialIds) {
+            if (!currentIds.includes(removedId)) {
+              void deleteMedia(removedId).catch(() => {});
+            }
+          }
+        }
+      })
+      .catch((e) => setActionError(e instanceof Error ? e.message : "保存编辑失败"))
+      .finally(() => setSavingEdit(false));
+  };
+
   if (loading) {
     // 顶栏框架先上（返回键 + 标题始终可见），仅正文/评论区显示结构化骨架，
     // 避免整页被骨架替换造成的"空白加载"。
@@ -274,7 +394,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
 
   return (
     <div className="post-detail">
-      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
+      {actionError && !editing && <div className="chat-notice" role="alert">{actionError}</div>}
       <header className="post-detail-head">
         <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
           <IconBack width={22} height={22} />
@@ -293,6 +413,17 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
                 group: hasGroups,
               });
               setEditAllowedGroupIds(post.allowed_group_ids ?? []);
+              // 初始化编辑媒体：已有图片（media 非空）进列表，新上传从空开始
+              const existing = (post.images ?? []).filter((img) => img.media != null);
+              setEditImages(existing.map((img) => ({
+                key: img.media!.media_id,
+                mediaId: img.media!.media_id,
+                kind: img.media!.kind === "video" ? "video" : "image",
+                descriptor: img.media!,
+                isNew: false,
+              })));
+              initialExistingMediaIdsRef.current = existing.map((img) => img.media!.media_id);
+              setEditMediaError(null);
               setEditing(true);
             }}>编辑</button>
             <button
@@ -310,44 +441,104 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       </header>
 
       {editing && (
-        <section className="post-editor post-detail-edit" aria-label="编辑帖子">
-          <input className="field post-editor-title" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={128} aria-label="帖子标题" />
-          <textarea className="field post-editor-body" value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={5} aria-label="帖子正文" />
-          <VisibilitySelector
-            value={editVisibility}
-            onChange={setEditVisibility}
-            selectedGroupIds={editAllowedGroupIds}
-            onSelectedGroupIdsChange={setEditAllowedGroupIds}
-            initialGroupId={post.group}
-            lockGroup={!!post.group}
-          />
-          <div className="post-editor-actions">
-            <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>取消</button>
-            <button type="button" className="btn btn-primary" disabled={savingEdit || !editBody.trim()} onClick={() => {
-              // 校验：选择了群可见但没有选择任何群
-              if (editVisibility.group && editAllowedGroupIds.length === 0) {
-                setActionError("请至少选择一个群");
-                return;
-              }
-              // 多选转后端格式：public 单选；friends + group 可共存，优先 friends
-              const backendVisibility = editVisibility.public
-                ? "public"
-                : editVisibility.friends
-                  ? "friends"
-                  : "group";
-              setSavingEdit(true);
-              postsApi.updatePost(post.id, {
-                title: editTitle.trim(),
-                body: editBody.trim(),
-                visibility: backendVisibility,
-                allowed_group_ids: editAllowedGroupIds.length > 0 ? editAllowedGroupIds : undefined,
-              })
-                .then((updated) => { setPost(updated); setEditing(false); })
-                .catch((e) => setActionError(e instanceof Error ? e.message : "保存编辑失败"))
-                .finally(() => setSavingEdit(false));
-            }}>{savingEdit ? "保存中…" : "重新发布"}</button>
+        <div className="post-edit-fullscreen" role="dialog" aria-modal="true" aria-label="编辑帖子">
+          <header className="post-edit-head">
+            <button type="button" className="icon-btn-40" onClick={cancelEdit} aria-label="取消编辑" title="取消" disabled={savingEdit}>
+              <IconBack width={22} height={22} />
+            </button>
+            <span className="post-edit-title">编辑帖子</span>
+            <button
+              type="button"
+              className="btn btn-primary post-edit-save"
+              disabled={savingEdit || editUploading || !editBody.trim()}
+              onClick={saveEdit}
+            >
+              {savingEdit ? "保存中…" : "重新发布"}
+            </button>
+          </header>
+          <div className="post-edit-body">
+            <input
+              className="field"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              maxLength={128}
+              placeholder="标题（必填）"
+              aria-label="帖子标题"
+            />
+            <textarea
+              className="field post-edit-body-input"
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+              rows={6}
+              placeholder="正文（必填）"
+              aria-label="帖子正文"
+            />
+
+            <div className="post-edit-media">
+              <div className="post-edit-media-head">
+                <span className="post-edit-media-label">图片/视频 {editImages.length}/9</span>
+                <label className="post-editor-image-btn" aria-label="添加图片或视频">
+                  <IconImage width={18} height={18} />
+                  <span>添加</span>
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    hidden
+                    disabled={savingEdit || editUploading || editImages.length >= 9}
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      e.target.value = "";
+                      await uploadEditImages(files);
+                    }}
+                  />
+                </label>
+              </div>
+              {editImages.length > 0 && (
+                <div className="post-edit-media-grid" aria-label={`已添加 ${editImages.length} 个媒体`}>
+                  {editImages.map((item) => (
+                    <div className="post-editor-image" key={item.key}>
+                      {item.isNew && item.kind === "video" ? (
+                        <video className="post-edit-media-el" src={`${item.localUrl}#t=0.1`} muted playsInline preload="metadata" />
+                      ) : item.isNew ? (
+                        <img className="post-edit-media-el" src={item.localUrl} alt="待发布媒体" />
+                      ) : item.kind === "video" ? (
+                        <PostVideoCover media={item.descriptor!} className="post-edit-media-el" ariaLabel="已选视频" />
+                      ) : (
+                        <ResourceImage
+                          src={item.descriptor!.thumbnail || mediaContentUrl(item.mediaId)}
+                          variant={item.descriptor!.thumbnail ? "thumb" : undefined}
+                          alt="帖子图片"
+                          className="post-edit-media-el"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className="post-editor-image-remove"
+                        aria-label="移除媒体"
+                        disabled={savingEdit || editUploading}
+                        onClick={() => removeEditImage(item)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <VisibilitySelector
+              value={editVisibility}
+              onChange={setEditVisibility}
+              selectedGroupIds={editAllowedGroupIds}
+              onSelectedGroupIdsChange={setEditAllowedGroupIds}
+              initialGroupId={post.group}
+              lockGroup={!!post.group}
+            />
+            {editMediaError && <p className="post-editor-error" role="alert">{editMediaError}</p>}
+            {actionError && <p className="post-editor-error" role="alert">{actionError}</p>}
           </div>
-        </section>
+        </div>
       )}
 
       <div className="post-detail-scroll">

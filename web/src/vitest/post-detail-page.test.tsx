@@ -59,6 +59,24 @@ const makePost = (overrides: Partial<Post> = {}): Post => ({
   ...overrides,
 });
 
+const existingImage: Post["images"][number] = {
+  id: 1,
+  media: {
+    media_id: "m1",
+    kind: "image",
+    mime_type: "image/png",
+    size: 100,
+    status: "ready",
+    width: null,
+    height: null,
+    duration: null,
+    thumbnail: "/api/v1/media/m1/thumbnail",
+    waveform: null,
+    created_at: "2026-01-01T00:00:00Z",
+  },
+  order: 0,
+};
+
 const groupConversation = {
   id: "g1",
   type: "group" as const,
@@ -118,7 +136,9 @@ describe("PostDetailPage 编辑可见范围", () => {
     await waitFor(() => {
       expect(postsApi.updatePost).toHaveBeenCalledWith(
         1,
-        expect.objectContaining({ visibility: "group", allowed_group_ids: ["g1"] }),
+        // public 与「指定群可见」是独立维度、可共存，后端映射 public 优先（design.md §12.8.1）；
+        // 公开帖点「指定群可见」后公开仍勾选 → visibility 保持 public，群白名单作为附加维度随行
+        expect.objectContaining({ visibility: "public", allowed_group_ids: ["g1"] }),
       );
     });
   });
@@ -170,5 +190,30 @@ describe("PostDetailPage 编辑可见范围", () => {
     expect(await screen.findByText("评论列表 mock")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(await screen.findByText("我的帖子页占位")).toBeInTheDocument();
+  });
+});
+
+describe("PostDetailPage 编辑媒体", () => {
+  it("编辑面板提供媒体上传入口", async () => {
+    renderDetail(makePost());
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+
+    expect(screen.getByText("图片/视频 0/9")).toBeInTheDocument();
+    expect(screen.getByLabelText("添加图片或视频")).toBeInTheDocument();
+  });
+
+  it("编辑带图帖子且不改动图片时，不携带 images 字段", async () => {
+    renderDetail(makePost({ images: [existingImage] }));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+
+    expect(screen.getByLabelText("已添加 1 个媒体")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新发布" }));
+
+    await waitFor(() => {
+      expect(postsApi.updatePost).toHaveBeenCalledWith(
+        1,
+        expect.not.objectContaining({ images: expect.anything() }),
+      );
+    });
   });
 });

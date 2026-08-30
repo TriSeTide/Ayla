@@ -43,8 +43,8 @@ export function getPost(postId: number) {
   return apiRequest<Post>(`/posts/${postId}/`);
 }
 
-/** PATCH /posts/<id>/ —— 编辑（仅作者） */
-export function updatePost(postId: number, payload: { title?: string; body?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[] }) {
+/** PATCH /posts/<id>/ —— 编辑（仅作者）。images 为完整媒体列表（media_id），全量替换语义 */
+export function updatePost(postId: number, payload: { title?: string; body?: string; visibility?: "public" | "friends" | "group"; allowed_group_ids?: string[]; images?: string[] }) {
   return apiRequest<Post>(`/posts/${postId}/`, { method: "PATCH", body: payload });
 }
 

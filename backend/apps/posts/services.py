@@ -74,6 +74,28 @@ def _resolve_media(media_id: str):
     return MediaObject.objects.filter(media_id=media_id).first()
 
 
+@transaction.atomic
+def replace_post_images(post: Post, images) -> None:
+    """全量替换帖子媒体（images 为 media_id 列表，已由 serializer 校验）。
+
+    编辑帖子的图片语义：前端提交「保留 + 新增」的完整媒体列表，这里
+    删除旧 PostImage 关联后按新顺序重建。media 引用兜底防御（未命中跳过，
+    serializer 已校验，此处不静默伪造）。删除 PostImage 不级联删除 MediaObject
+    （FK 方向为 media → PostImage），被移除的媒体由前端在提交成功后显式回收。
+    """
+    post.images.all().delete()
+    for order, media_id in enumerate(images or []):
+        media = _resolve_media(media_id)
+        if media is None:
+            continue
+        PostImage.objects.create(post=post, media=media, order=order)
+    # 失效 images 的 prefetch 缓存：_get_post_or_404 曾 prefetch_related("images__media")，
+    # 重建后缓存里仍是旧 PostImage，序列化会返回过时数据。清掉后让 PostSerializer
+    # 重新查询最新媒体（patch 场景图片 ≤9，N+1 查询可接受）。
+    if hasattr(post, "_prefetched_objects_cache"):
+        post._prefetched_objects_cache.pop("images", None)
+
+
 def create_comment(
     post: Post,
     author,
