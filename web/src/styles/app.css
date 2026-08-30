@@ -2605,12 +2605,6 @@
   color: var(--text-secondary);
 }
 
-.voice-mine-tag {
-  font-size: 11px;
-  color: var(--indigo-700);
-  margin-left: var(--sp-1);
-}
-
 /* 建频道 */
 
 .voice-channel-create {
@@ -3124,11 +3118,15 @@
   font-family: var(--font-display);
   color: var(--text-primary);
   font-size: 16px;
+  line-height: 1.35; /* 固定行高：消除中英文字体 fallback 行高差异导致卡片高低不一 */
 }
 
 .live-card-owner {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-secondary);
   font-size: 13px;
+  line-height: 1.4;
 }
 
 .live-hall-empty {
@@ -3263,19 +3261,25 @@
 }
 
 .live-room-head {
+  flex: none;
+  position: relative;
+  z-index: 20; /* 顶栏层级高于上下滑切换动画（swipe 的 transform 层），滑动不遮挡顶栏 */
   display: flex;
   align-items: center;
   gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .live-room-title {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-display);
   font-size: 18px;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .live-ws-state {

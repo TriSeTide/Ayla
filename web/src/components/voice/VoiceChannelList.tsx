@@ -11,6 +11,8 @@ import type { CSSProperties, KeyboardEvent } from "react";
 import type { VoiceChannelDescriptor } from "../../api/types";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { FavoriteButton } from "../FavoriteButton";
+import { ScrollingText } from "../ScrollingText";
+import { ScrollingTags } from "../ScrollingTags";
 import { IconMic } from "../icons";
 import { getVisibilityLabels } from "../../utils/visibility";
 
@@ -41,9 +43,10 @@ export function VoiceChannelList({
       {channels.map((ch, idx) => {
         const active = ch.id === currentChannelId;
         const delay = revealItems ? staggerDelay(idx) : 0;
-        // 已在频道 → 「进入」；否则「加入」（join 幂等，重复进入安全）
+        // 已在频道（mine）：卡片整体点击「进入」（回到频道，aria-label），
+        // foot 右侧用「我在其中」按钮标识占位（与非成员「加入」按钮等高对齐）。
+        // 非成员：显示「加入」按钮。join 幂等，重复进入安全。
         const label = ch.mine ? "进入" : "加入";
-        const pendingLabel = ch.mine ? "进入中…" : "加入中…";
         const labels = getVisibilityLabels(ch);
         const enter = () => {
           if (!joining) onJoin(ch.id);
@@ -71,22 +74,18 @@ export function VoiceChannelList({
               onKeyDown={onKeyDown}
             >
               <div className="voice-card-head">
-                <div className="voice-source-tags">
-                  {labels.map((tag, idx) => (
-                    <span key={idx} className="voice-source-tag">{tag}</span>
-                  ))}
-                </div>
-                <span className="voice-card-head-actions">
-                  {ch.mine && <span className="voice-mine-tag">我在其中</span>}
-                  <FavoriteButton targetType="voice" targetId={ch.id} compact />
-                </span>
+                <ScrollingTags labels={labels} tagClassName="voice-source-tag" className="voice-source-tags" />
+                <FavoriteButton targetType="voice" targetId={ch.id} compact />
               </div>
               <div className="voice-card-title">
-                <IconMic width={14} height={14} /> {ch.name}
+                <IconMic width={14} height={14} className="voice-card-title-icon" />
+                <ScrollingText text={ch.name} className="voice-card-title-text" />
               </div>
               <div className="voice-card-foot">
-                <span className="voice-card-meta">{ch.member_count} 人在频道</span>
-                {!active && (
+                <span className="voice-card-meta">{ch.member_count} 人</span>
+                {ch.mine ? (
+                  <span className="voice-mine-btn">我在其中</span>
+                ) : (
                   <button
                     type="button"
                     className="btn btn-primary voice-join-btn"
@@ -96,7 +95,7 @@ export function VoiceChannelList({
                       enter();
                     }}
                   >
-                    {joining ? pendingLabel : label}
+                    {joining ? "加入中…" : "加入"}
                   </button>
                 )}
               </div>

@@ -51,12 +51,11 @@
 }
 
 .game-room-name {
+  min-width: 0;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35; /* 固定行高：消除中英文字体行高差异 */
 }
 
 .game-room-status {
@@ -66,6 +65,7 @@
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 0.8px;
+  line-height: 1.4;
 }
 
 .game-room-status.is-waiting {
@@ -78,21 +78,40 @@
   color: var(--grape-700);
 }
 
+/* 人数 + 来源标签同行；来源标签横向滚动，不挤压人数 */
 .game-room-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
   font-family: var(--font-utility);
   font-size: 12px;
   color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.game-room-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.game-room-source-tags {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .game-room-source {
   display: inline-block;
-  margin-left: var(--sp-2);
   padding: 0 8px;
   border-radius: var(--radius-pill);
   background: var(--sakura-300);
   color: var(--grape-700);
   font-family: var(--font-display);
   font-size: 11px;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ================= 创建表单 ================= */

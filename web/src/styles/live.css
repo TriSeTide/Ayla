@@ -353,6 +353,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
+  margin-left: auto; /* 更多键固定右侧：标题/头像未渲染时也不偏左 */
   width: 40px;
   height: 40px;
   border-radius: var(--radius-pill);
@@ -387,6 +389,10 @@
 .live-badge-source {
   background: var(--sakura-300);
   color: var(--grape-700);
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ================= 窄屏弹幕浮层（布局文档 §2.4 沉浸式） ================= */
@@ -478,12 +484,19 @@
   gap: var(--sp-1);
 }
 
-/* 来源徽章与封面徽章分行展示（卡片底部 meta 行） */
+/* 来源徽章与封面徽章分行展示（卡片底部 meta 行）：
+   主播名 flex:1 收缩滚动（不换行），来源标签横向滚动、不被主播名挤压 */
 .live-card-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--sp-2);
+  min-width: 0;
+}
+
+.live-card-source-tags {
+  flex: 0 0 auto; /* shrink=0：不被长主播名挤压，标签保持完整宽度、超出横向滚动 */
+  max-width: 55%;
+  min-width: 0;
 }
 
 .live-hub {
@@ -532,9 +545,15 @@
 
 /* ================= 直播间上下滑切换（方案 §2.5：视频+弹幕区整体滑动） ================= */
 
-/* 顶栏：不贴顶、不贴左右（沉浸式四周留白；与下方卡片间的空隙由 swipe 的 margin-top 提供） */
+/* 顶栏：贴顶铺满（与其他界面语音房/桌游房顶栏一致），玻璃底 + 底边分隔 */
 .live-room-body.is-narrow .live-room-head {
-  margin: var(--sp-2) var(--sp-2) 0;
+  margin: 0;
+  gap: var(--sp-2);
+}
+
+/* 头像往左挪（贴返回键），给标题腾宽 */
+.live-room-body.is-narrow .live-room-head .avatar-halo {
+  margin-left: -4px;
 }
 
 /* 滑动容器：沉浸式窄屏占满 head 与 input 之间，overflow 裁剪滑入滑出。
@@ -611,22 +630,25 @@
   white-space: nowrap;
 }
 
-/* U4：标题至少保留四个字符；来源标签不在 flex 收缩中变形。
-   空间紧张时收纳为首枚截断胶囊，完整来源保留在 title 提示。 */
+/* U4：标题至少保留四个字符；来源标签过多时横向滚动（scroll-tags），
+   单个群名过长省略号截断，完整来源保留在 title 提示。 */
 .live-room-head .live-room-title {
   flex: 1 1 auto;
   min-width: 4ch;
 }
-.live-room-source-tags {
-  flex-shrink: 0;
-  flex-wrap: nowrap;
-  min-width: 0;
+/* 收藏键固定右侧：不被长标题挤压、不参与 flex 收缩 */
+.live-room-head .favorite-toggle {
+  flex: 0 0 auto;
+}
+/* 来源标签横向滚动（ScrollingTags marquee），单个群名过长省略号 */
+.live-room-head .live-room-source-tags {
+  flex: 0 0 auto;
   max-width: 16ch;
-  overflow: hidden;
+  min-width: 0;
 }
 .live-room-source-tags .post-card-tag {
   min-width: 0;
-  max-width: 100%;
+  max-width: 12ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -721,15 +743,14 @@
   }
 }
 
-/* U4（窄屏紧凑头部）：多来源折为首枚截断胶囊，完整来源保留在 title 提示。 */
+/* U4（窄屏紧凑头部）：来源标签横向滚动（不收纳、不换行），窄屏标签区更窄。
+   完整来源保留在 title 提示。 */
 @media (max-width: 768px) {
-  .live-room-source-tags { max-width: 8ch; }
-  .live-room-source-tags .post-card-tag:not(:first-child) { display: none; }
+  .live-room-head .live-room-source-tags { max-width: 10ch; }
 }
 
 /* U4 顶栏优化（用户实测 375 返回键被挤两行）：
-   返回键不折行、不被 flex 压缩；紧凑头部来源胶囊整体收纳（title 提示保留），
-   标题弹性截断仍以 4ch 保底。 */
+   返回键不折行、不被 flex 压缩；标题弹性截断仍以 4ch 保底。 */
 @media (max-width: 480px) {
   .live-room-head .msg-action-btn {
     flex: 0 0 auto;
@@ -737,6 +758,6 @@
     padding-inline: var(--sp-2);
   }
   .live-room-head .live-room-source-tags {
-    display: none;
+    max-width: 8ch;
   }
 }

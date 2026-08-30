@@ -1,6 +1,6 @@
 /**
  * VoiceChannelList 测试（测试报告 #1 修复）：
- * - "我在其中"（mine）频道按钮文案「进入」，其余「加入」；
+ * - "我在其中"（mine）频道 foot 显示标识按钮，其余「加入」按钮；
  * - 卡片整体可点击进房（点击/键盘 Enter/Space）；
  * - 按钮点击不冒泡触发卡片点击（只触发一次 onJoin）；
  * - joining 中禁用（按钮 disabled + 卡片 aria-disabled）。
@@ -27,7 +27,7 @@ function ch(id: string, overrides: Partial<VoiceChannelDescriptor> = {}): VoiceC
 }
 
 describe("VoiceChannelList 进房语义（#1）", () => {
-  it("mine 频道按钮文案「进入」，非 mine 为「加入」", () => {
+  it("mine 频道 foot 显示「我在其中」标识，非 mine 为「加入」按钮", () => {
     render(
       <VoiceChannelList
         channels={[ch("v1", { mine: true }), ch("v2")]}
@@ -36,11 +36,11 @@ describe("VoiceChannelList 进房语义（#1）", () => {
         onJoin={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "进入" })).toBeInTheDocument();
+    expect(screen.getByText("我在其中")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加入" })).toBeInTheDocument();
   });
 
-  it("mine 频道显示「我在其中」标签，卡片 aria-label 为「进入语音频道」", () => {
+  it("mine 频道显示「我在其中」标识，卡片 aria-label 为「进入语音频道」", () => {
     render(
       <VoiceChannelList
         channels={[ch("v1", { mine: true })]}

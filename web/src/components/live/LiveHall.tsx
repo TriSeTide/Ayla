@@ -9,6 +9,8 @@
  */
 import type { LiveChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
+import { ScrollingText } from "../ScrollingText";
+import { ScrollingTags } from "../ScrollingTags";
 import { IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { getVisibilityLabels } from "../../utils/visibility";
@@ -82,16 +84,15 @@ export function LiveHall({
                 {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
               </span>
               </div>
-              <div className="live-card-title">{ch.title}</div>
-              <div className="live-card-meta">
-              <span className="live-card-owner">
-                {ch.owner_nickname ?? ownerNames[ch.owner_id] ?? "未知主播"}
-              </span>
-              <div className="live-card-source-tags">
-                {labels.map((label, idx) => (
-                  <span key={idx} className="live-badge live-badge-source">{label}</span>
-                ))}
+              <div className="live-card-title">
+                <ScrollingText text={ch.title} />
               </div>
+              <div className="live-card-meta">
+                <ScrollingText
+                  text={ch.owner_nickname ?? ownerNames[ch.owner_id] ?? "未知主播"}
+                  className="live-card-owner"
+                />
+                <ScrollingTags labels={labels} tagClassName="live-badge live-badge-source" className="live-card-source-tags" />
               </div>
             </button>
             <FavoriteButton targetType="live" targetId={ch.id} compact />

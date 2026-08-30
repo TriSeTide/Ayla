@@ -19,6 +19,8 @@ import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
+import { ScrollingText } from "../ScrollingText";
+import { ScrollingTags } from "../ScrollingTags";
 import { DanmakuInput } from "./DanmakuInput";
 import { DanmakuList } from "./DanmakuList";
 import { LiveChannelRail } from "./LiveChannelRail";
@@ -30,7 +32,7 @@ import { useDanmaku } from "../../hooks/useDanmaku";
 import { useLiveRoom } from "../../hooks/useLiveRoom";
 import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
 import { usePagerTouchRouter } from "../../hooks/usePagerTouchRouter";
-import { IconList } from "../icons";
+import { IconBack, IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
 import { getVisibilityLabels } from "../../utils/visibility";
 
@@ -185,27 +187,29 @@ export function LiveRoomBody({
 
   const narrowHead = (
     <>
-      <button type="button" className="msg-action-btn" onClick={onBack} aria-label="返回">
-        ← 返回
+      <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回">
+        <IconBack width={20} height={20} />
       </button>
       {!showOwnerPanel && channel && (
-        <>
-          <LiveHostAvatar
-            ownerId={channel.owner_id}
-            ownerNickname={channel.owner_nickname}
-            size={32}
-          />
-          <span className="live-room-title" title={channel.title}>
-            {loading ? "加载中…" : (channel.title || "直播间")}
-          </span>
-        </>
+        <LiveHostAvatar
+          ownerId={channel.owner_id}
+          ownerNickname={channel.owner_nickname}
+          size={32}
+        />
+      )}
+      {!showOwnerPanel && (
+        <ScrollingText
+          text={loading ? "加载中…" : (channel?.title || "直播间")}
+          className="live-room-title"
+        />
       )}
       {!showOwnerPanel && visibilityLabels.length > 0 && (
-        <div className="post-card-tags live-room-source-tags" title={visibilityLabels.join("、")}>
-          {visibilityLabels.map((label, idx) => (
-            <span key={idx} className="post-card-tag">{label}</span>
-          ))}
-        </div>
+        <ScrollingTags
+          labels={visibilityLabels}
+          tagClassName="post-card-tag"
+          className="live-room-source-tags"
+          title={visibilityLabels.join("、")}
+        />
       )}
       {!showOwnerPanel && channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
       <button
@@ -229,15 +233,17 @@ export function LiveRoomBody({
           size={32}
         />
       )}
-      <span className="live-room-title" title={channel?.title ?? "直播间"}>
-        {loading ? "加载中…" : (channel?.title ?? "直播间")}
-      </span>
+      <ScrollingText
+        text={loading ? "加载中…" : (channel?.title ?? "直播间")}
+        className="live-room-title"
+      />
       {visibilityLabels.length > 0 && (
-        <div className="post-card-tags live-room-source-tags" title={visibilityLabels.join("、")}>
-          {visibilityLabels.map((label, idx) => (
-            <span key={idx} className="post-card-tag">{label}</span>
-          ))}
-        </div>
+        <ScrollingTags
+          labels={visibilityLabels}
+          tagClassName="post-card-tag"
+          className="live-room-source-tags"
+          title={visibilityLabels.join("、")}
+        />
       )}
       {channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
       <span className={`live-ws-state live-ws-${wsConnection}`}>

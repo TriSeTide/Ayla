@@ -8,6 +8,8 @@
 import type { CSSProperties } from "react";
 import type { GameRoom } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
+import { ScrollingText } from "../ScrollingText";
+import { ScrollingTags } from "../ScrollingTags";
 import { IconGame } from "../icons";
 import { getVisibilityLabels } from "../../utils/visibility";
 
@@ -33,17 +35,13 @@ export function GameRoomCard({
           <IconGame width={48} height={48} />
         </div>
         <div className="game-room-info">
-          <span className="game-room-name">{room.name}</span>
+          <ScrollingText text={room.name} className="game-room-name" />
           <span className={`game-room-status ${playing ? "is-playing" : "is-waiting"}`}>
             {room.status === "playing" ? "对局中" : room.status === "ended" ? "已结束" : "等待中"}
           </span>
           <span className="game-room-meta">
-            {room.member_count} 人
-            <span className="game-room-source-tags">
-              {labels.map((label, idx) => (
-                <span key={idx} className="game-room-source">{label}</span>
-              ))}
-            </span>
+            <span className="game-room-count">{room.member_count} 人</span>
+            <ScrollingTags labels={labels} tagClassName="game-room-source" className="game-room-source-tags" />
           </span>
         </div>
       </button>

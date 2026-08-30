@@ -2,12 +2,14 @@
  * VoiceRoomBody —— 语音房整页（进房态）。
  * 房内聊天使用 voice-chat 独立接口，不写入群聊 Message；支持文字与图片。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
 import type { ElysiaProfile, VoiceChatMessage, VoiceChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
-import { IconImage, IconSend } from "../icons";
+import { ScrollingText } from "../ScrollingText";
+import { ScrollingTags } from "../ScrollingTags";
+import { IconBack, IconImage, IconSend } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
 import { useAuthStore } from "../../stores/auth";
@@ -61,16 +63,28 @@ export function VoiceRoomBody({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatExpanded, setChatExpanded] = useState(false);
+  // 房内聊天未读数（红点）：只在聊天栏收起且收到他人新消息时累加，展开即清零
+  const [unreadCount, setUnreadCount] = useState(0);
+  // 聊天栏展开态 ref：WS 回调内判断是否累加未读，避免把 chatExpanded 加入依赖导致重复订阅
+  const chatExpandedRef = useRef(false);
+  // 已见消息 id：WS 回播 / 乐观发送去重，未读只在"真正新消息"时累加
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  // 聊天列表滚动容器：展开时滚动到底部显示最新消息
+  const chatListRef = useRef<HTMLDivElement>(null);
   // 进房体统一入场动画（与直播间同源：成员面板先浮入，聊天卡随后）
   const { step } = useRevealOnEnter(true);
 
   useEffect(() => {
     if (!channelId) return;
     let cancelled = false;
+    seenIdsRef.current = new Set();
     setMessages([]);
+    setUnreadCount(0);
     setError(null);
     void voiceApi.listVoiceChatMessages(channelId).then((items) => {
-      if (!cancelled) setMessages(items);
+      if (cancelled) return;
+      items.forEach((m) => seenIdsRef.current.add(m.id));
+      setMessages(items);
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : "加载房内聊天失败");
     });
@@ -78,17 +92,38 @@ export function VoiceRoomBody({
   }, [channelId]);
 
   // 房内聊天 WS 热更新：订阅 voice.chat.message 帧，按 message.id 幂等去重 append。
-  // 自己发送的消息已在 sendMessage 乐观 append，WS 回播同一 id 时去重，不产生双气泡。
+  // 后端先 group_send 广播、后返回 POST 响应，WS 回播可能先于 sendMessage 的乐观 append 到达，
+  // 因此显示去重必须双向（prev.some 按 id 去重），seenIdsRef 只用于"真正新消息"的未读计数。
   useEffect(() => {
     if (!channelId) return;
     const off = voiceWS.onFrame((frame) => {
       if (frame.type !== "voice.chat.message") return;
       const msg = frame.data;
       if (String(msg.channel_id) !== String(channelId)) return;
+      const isNew = !seenIdsRef.current.has(msg.id);
+      seenIdsRef.current.add(msg.id);
+      // 显示去重：无论乐观 append 与 WS 回播谁先到，同一 id 只渲染一条
       setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      if (!isNew) return;
+      // 未读仅在聊天栏收起、且非自己发送时累加
+      const selfId = useAuthStore.getState().currentUser?.id;
+      const isSelf = selfId != null && String(msg.sender.user_id) === String(selfId);
+      if (!chatExpandedRef.current && !isSelf) {
+        setUnreadCount((n) => n + 1);
+      }
     });
     return off;
   }, [channelId]);
+
+  // 展开聊天栏即清空未读红点，并把列表滚动到底部显示最新消息；同步维护 ref 供 WS 回调读取
+  useEffect(() => {
+    chatExpandedRef.current = chatExpanded;
+    if (chatExpanded) {
+      setUnreadCount(0);
+      const el = chatListRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }, [chatExpanded]);
 
   const sendMessage = async (mediaId?: string | null) => {
     if (!channelId || sending) return;
@@ -101,7 +136,9 @@ export function VoiceRoomBody({
         content: content || "图片",
         media_id: mediaId ?? null,
       });
-      setMessages((prev) => [...prev, message]);
+      seenIdsRef.current.add(message.id);
+      // 乐观 append 同样按 id 去重：若 WS 回播已先到并渲染过，这里跳过，避免双气泡
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
       setText("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "发送失败，请重试");
@@ -125,7 +162,7 @@ export function VoiceRoomBody({
   };
 
   const chatList = (
-    <div className="voice-room-chat-list" aria-live="polite">
+    <div className="voice-room-chat-list" aria-live="polite" ref={chatListRef}>
       {messages.map((message) => (
         <div key={message.id} className="voice-room-chat-message">
           <span className="voice-room-chat-sender">{message.sender.nickname}：</span>
@@ -197,7 +234,9 @@ export function VoiceRoomBody({
           aria-expanded={chatExpanded}
         >
           {chatExpanded ? "▼" : "▲"}
-          {messages.length > 0 && <span className="voice-room-chat-count">{messages.length}</span>}
+          {unreadCount > 0 && (
+            <span className="voice-room-chat-count">{unreadCount > 99 ? "99+" : unreadCount}</span>
+          )}
         </button>
       </div>
     </div>
@@ -206,12 +245,12 @@ export function VoiceRoomBody({
   return (
     <div className="voice-room-body">
       <header className="voice-room-head">
-        <button type="button" className="msg-action-btn" onClick={onBack} aria-label="返回">← 返回</button>
-        <span className="voice-room-title">{channelName}</span>
+        <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回">
+          <IconBack width={20} height={20} />
+        </button>
+        <ScrollingText text={channelName} className="voice-room-title" />
         {channel && (
-          <div className="post-card-tags">
-            {getVisibilityLabels(channel).map((label) => <span key={label} className="post-card-tag">{label}</span>)}
-          </div>
+          <ScrollingTags labels={getVisibilityLabels(channel)} tagClassName="post-card-tag" className="voice-room-tags" />
         )}
         {channelId != null && <FavoriteButton targetType="voice" targetId={channelId} compact />}
         {ownerId === currentUser?.id && onDeleteChannel && (
