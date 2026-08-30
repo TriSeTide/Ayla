@@ -9,6 +9,7 @@ import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { FavoriteButton } from "../FavoriteButton";
+import { IconBack } from "../icons";
 import { useAuthStore } from "../../stores/auth";
 
 export function GameRoomPlaceholder({
@@ -58,8 +59,8 @@ export function GameRoomPlaceholder({
   return (
     <div className="game-room-placeholder">
       <header className="game-room-placeholder-head">
-        <button type="button" className="msg-action-btn" onClick={onBack} aria-label="返回">
-          ← 返回
+        <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回">
+          <IconBack width={20} height={20} />
         </button>
         <span className="game-room-placeholder-name">{room.name}</span>
         <FavoriteButton targetType="game" targetId={room.id} compact />

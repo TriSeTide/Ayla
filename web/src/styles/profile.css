@@ -209,8 +209,15 @@
   padding-bottom: 68px;
 }
 
+.favorites-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4) var(--sp-2);
+}
+
 .favorites-title {
-  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  padding: 0;
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 600;

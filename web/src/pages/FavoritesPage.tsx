@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
+import { IconBack } from "../components/icons";
 import { usePostsStore } from "../stores/posts";
 
 const FILTERS: Array<{ key: FavoriteTargetType | "all"; label: string }> = [
@@ -98,7 +99,12 @@ export function FavoritesPage() {
 
   return (
     <div className="favorites-page">
-      <h2 className="favorites-title">我的收藏</h2>
+      <div className="favorites-topbar">
+        <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回">
+          <IconBack width={20} height={20} />
+        </button>
+        <h2 className="favorites-title">我的收藏</h2>
+      </div>
       <div className="favorites-filters" role="tablist" aria-label="收藏分类">
         {FILTERS.map((item) => (
           <button
