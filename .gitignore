@@ -3,6 +3,8 @@
 .env.*
 *.bak-*
 elysia_credential.json
+# LiveKit 真实配置（含本机 node_ip，用 livekit.yaml.example 作模板）
+livekit.yaml
 
 # 部署临时产物
 deploy_build*.log
@@ -15,3 +17,6 @@ __pycache__/
 # Node
 node_modules/
 dist/
+
+# 本地 HTTPS 证书（mkcert 生成，含私钥，勿入库）
+certs/

@@ -77,6 +77,7 @@ services:
       - "7882-7886:7882-7886/udp"   # RTC 媒体（UDP）
     volumes:
       - ./livekit.yaml:/livekit.yaml:ro
+      - ./certs:/livekit/certs:ro
       - livekit_data:/livekit
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:7880/"]
@@ -85,8 +86,8 @@ services:
       retries: 12
 
   # M4-6 直播：SRS 流媒体服务器（RTMP 推流 + HTTP-FLV/HLS 播放 + HTTP API 状态）。
-  # 1935 RTMP；8080 HTTP-FLV/HLS；1985 HTTP API + WebRTC 信令；8000/udp WebRTC 媒体。
-  # SRS 5 默认配置 conf/srs.conf 已同时启用 RTMP + HTTP-FLV + HLS + WebRTC，无需自定义配置。
+  # 1935 RTMP；8080 HTTP-FLV/HLS；8088 HTTPS-FLV/HLS；1985 HTTP API + WebRTC 信令；8000/udp WebRTC 媒体。
+  # 自定义配置 ./srs.conf（含 HTTPS，挂载覆盖镜像默认 conf/docker.conf），证书 mkcert 挂载自 ./certs。
   srs:
     image: ossrs/srs:5
     container_name: elysia-srs
@@ -94,8 +95,12 @@ services:
     ports:
       - "1935:1935"
       - "8080:8080"
+      - "8088:8088"
       - "1985:1985"
       - "8000:8000/udp"
+    volumes:
+      - ./srs.conf:/usr/local/srs/conf/docker.conf:ro
+      - ./certs:/usr/local/srs/conf/cert:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:1985/api/v1/versions"]
       interval: 10s
