@@ -100,9 +100,9 @@ describe("LiveChannelRail 宽屏展开态", () => {
   });
 });
 
-describe("LiveChannelRail 收起态（浮动按钮，不留侧栏）", () => {
-  it("收起后整体收成一个浮动按钮（返回 + 展开），无封面列表", () => {
-    render(
+describe("LiveChannelRail 收起态（返回 null，返回/展开键移到顶栏）", () => {
+  it("收起后侧栏不渲染任何内容（返回/展开键由 LiveRoomBody 顶栏承载）", () => {
+    const { container } = render(
       <LiveChannelRail
         channels={channels}
         currentId={1}
@@ -113,32 +113,12 @@ describe("LiveChannelRail 收起态（浮动按钮，不留侧栏）", () => {
         showBack
       />,
     );
-    // 浮动按钮组存在（不再是 .live-rail 侧栏 / .live-rail-collapsed 窄条）
-    expect(document.querySelector(".live-rail-float")).not.toBeNull();
+    // 收起态返回 null：无侧栏、无浮动按钮、无封面列表
     expect(document.querySelector(".live-rail")).toBeNull();
+    expect(document.querySelector(".live-rail-float")).toBeNull();
     expect(document.querySelector(".live-rail-collapsed")).toBeNull();
-    // 返回键 + 展开键正常显示
-    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "展开直播间列表" })).toBeInTheDocument();
-    // 封面列表项被收起隐藏
     expect(screen.queryByRole("button", { name: "切换到直播间 第一场直播" })).not.toBeInTheDocument();
-  });
-
-  it("收起态浮动按钮展开键 → onToggle", () => {
-    const onToggle = vi.fn();
-    render(
-      <LiveChannelRail
-        channels={channels}
-        currentId={1}
-        onSelect={vi.fn()}
-        collapsed
-        onToggle={onToggle}
-        onBack={vi.fn()}
-        showBack
-      />,
-    );
-    screen.getByRole("button", { name: "展开直播间列表" }).click();
-    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(container.innerHTML).toBe("");
   });
 });
 

@@ -32,7 +32,7 @@ import { useDanmaku } from "../../hooks/useDanmaku";
 import { useLiveRoom } from "../../hooks/useLiveRoom";
 import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
 import { usePagerTouchRouter } from "../../hooks/usePagerTouchRouter";
-import { IconBack, IconList } from "../icons";
+import { IconBack, IconChevronRight, IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
 import { getVisibilityLabels } from "../../utils/visibility";
 
@@ -226,6 +226,23 @@ export function LiveRoomBody({
 
   const wideHead = (
     <>
+      {railCollapsed && (
+        <>
+          <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回" title="返回">
+            <IconBack width={20} height={20} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn-40"
+            onClick={() => setRailCollapsed(false)}
+            aria-label="展开直播间列表"
+            aria-expanded={false}
+            title="展开直播间列表"
+          >
+            <IconChevronRight width={20} height={20} />
+          </button>
+        </>
+      )}
       {channel && (
         <LiveHostAvatar
           ownerId={channel.owner_id}

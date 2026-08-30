@@ -12,7 +12,7 @@
  * - 底部加号键新建直播间（onCreateNewChannel）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
-import { IconBack, IconChevronLeft, IconChevronRight, IconClose, IconPlus, IconVideo } from "../icons";
+import { IconBack, IconChevronLeft, IconClose, IconPlus, IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 
 export function LiveChannelRail({
@@ -44,33 +44,9 @@ export function LiveChannelRail({
   /** 正在删除的频道 id（该项禁用） */
   deletingChannelId?: number | null;
 }) {
-  // 收起态：整个收成一个浮动按钮（返回 + 展开），不占布局、不留侧栏
+  // 收起态：返回/展开键移到顶栏（由 LiveRoomBody wideHead 渲染），侧栏不占布局、不渲染浮动按钮
   if (collapsed) {
-    return (
-      <div className="live-rail-float" role="group" aria-label="直播间列表控制">
-        {showBack && (
-          <button
-            type="button"
-            className="live-rail-icon-btn"
-            onClick={onBack}
-            aria-label="返回"
-            title="返回"
-          >
-            <IconBack width={18} height={18} />
-          </button>
-        )}
-        <button
-          type="button"
-          className="live-rail-icon-btn"
-          onClick={onToggle}
-          aria-label="展开直播间列表"
-          aria-expanded={false}
-          title="展开直播间列表"
-        >
-          <IconChevronRight width={18} height={18} />
-        </button>
-      </div>
-    );
+    return null;
   }
 
   return (

@@ -236,7 +236,9 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  padding: var(--sp-3);
+  min-height: 54px; /* 与直播顶栏 .live-room-head 等高对齐 */
+  padding: var(--sp-2) var(--sp-3);
+  box-sizing: border-box;
   border-bottom: 1px solid var(--glass-border);
 }
 
@@ -551,9 +553,40 @@
   gap: var(--sp-2);
 }
 
+/* 窄屏开播控制台：head 在 live-room-main（padding 12px）内，负 margin 突破 padding 贴顶铺满 + sticky 固定不随滚动 */
+.live-room-body.is-studio.is-narrow .live-room-head {
+  margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)) 0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
 /* 头像往左挪（贴返回键），给标题腾宽 */
 .live-room-body.is-narrow .live-room-head .avatar-halo {
   margin-left: -4px;
+}
+
+/* 宽屏顶栏：贴顶铺满主区（突破 live-room-main 的 padding 16px），与窄屏铺满一致 */
+.live-room-body.is-wide .live-room-head {
+  margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) 0;
+}
+
+/* 宽屏播放器自适应宽高：收起侧栏主区变宽时，player 保持 16:9 完整显示（不留黑边、不截断）。
+   container query：player 宽度 = min(容器宽, 容器高 * 16/9)，高度由 aspect-ratio 决定。
+   排除 is-studio（开播控制台 stage flex:none、player-wrap 固定宽，container query 会循环依赖导致 player 消失） */
+.live-room-body.is-wide:not(.is-studio) .live-room-player-wrap {
+  align-self: stretch;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: size;
+}
+.live-room-body.is-wide:not(.is-studio) .live-player {
+  aspect-ratio: 16 / 9;
+  width: min(100%, 100cqh * 1.7778);
+  max-width: 100%;
+  max-height: 100%;
 }
 
 /* 滑动容器：沉浸式窄屏占满 head 与 input 之间，overflow 裁剪滑入滑出。
