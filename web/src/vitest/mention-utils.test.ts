@@ -5,6 +5,7 @@ import {
   blocksToSegments,
   detectMentionAtCaret,
   extractBlocks,
+  insertMentionToken,
   parseBlocks,
   renderBlocksToDOM,
   serializeBlocks,
@@ -137,5 +138,52 @@ describe("detectMentionAtCaret（任意位置 / 多次 @）", () => {
     editor.appendChild(textNode);
     mockCaret(editor, textNode, 5); // 光标在末尾，「@b c」含空白
     expect(detectMentionAtCaret(editor)).toBeNull();
+  });
+});
+
+describe("insertMentionToken（长按头像 @：无 @ 前缀直接插入）", () => {
+  /** 模拟 getSelection：getRangeAt 返回当前 range，addRange 更新当前 range（供「光标移入编辑器」路径用） */
+  function mockSelection(initialRange: Range) {
+    let current = initialRange;
+    const sel = {
+      rangeCount: 1,
+      getRangeAt: () => current,
+      removeAllRanges: vi.fn(),
+      addRange: vi.fn((r: Range) => {
+        current = r;
+      }),
+    };
+    vi.stubGlobal("getSelection", () => sel);
+  }
+
+  it("在光标处直接插入 @Token，不依赖光标前的 @ 前缀", () => {
+    const editor = document.createElement("div");
+    editor.appendChild(document.createTextNode("hello"));
+    const textNode = editor.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, textNode.length);
+    range.collapse(true);
+    mockSelection(range);
+
+    insertMentionToken(editor, "u1", "张三");
+
+    expect(extractBlocks(editor)).toEqual([
+      { type: "text", text: "hello" },
+      { type: "mention", user_id: "u1", name: "张三" },
+    ]);
+  });
+
+  it("光标不在编辑器内（空编辑器）时放到末尾插入", () => {
+    const editor = document.createElement("div");
+    const outside = document.createElement("div");
+    const initialRange = document.createRange();
+    initialRange.selectNodeContents(outside);
+    mockSelection(initialRange);
+
+    insertMentionToken(editor, "u2", "李四");
+
+    expect(extractBlocks(editor)).toEqual([
+      { type: "mention", user_id: "u2", name: "李四" },
+    ]);
   });
 });

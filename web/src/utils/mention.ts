@@ -166,3 +166,45 @@ export function insertMentionAtCaret(editor: HTMLElement, user_id: string, name:
   sel.removeAllRanges();
   sel.addRange(newRange);
 }
+
+/**
+ * 在光标处直接插入一个 @Token（不依赖光标前的 @ 前缀）。
+ *
+ * 与 insertMentionAtCaret 的区别：后者替换「@query」为 mention span（MentionPicker 选中路径）；
+ * 本函数用于长按头像 @ 等「无 @ 前缀、直接 @ 某用户」的路径——光标落在哪就在哪插入，
+ * 光标不在编辑器内时聚焦并放到末尾；插入后光标移到 token 之后（零宽占位防文本节点塌缩）。
+ */
+export function insertMentionToken(editor: HTMLElement, user_id: string, name: string): void {
+  editor.focus();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+
+  const range = sel.getRangeAt(0);
+  // 光标不在本编辑器内（首次聚焦/焦点丢失）→ 放到编辑器末尾
+  if (!editor.contains(range.startContainer)) {
+    const endRange = document.createRange();
+    endRange.selectNodeContents(editor);
+    endRange.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(endRange);
+  }
+
+  const current = sel.getRangeAt(0);
+  const span = document.createElement("span");
+  span.setAttribute("contenteditable", "false");
+  span.className = "mention-token mention-token-input";
+  span.dataset.mentionId = user_id;
+  span.dataset.mentionName = name;
+  span.textContent = `@${name}`;
+
+  const trailing = document.createTextNode("\u200B");
+  current.deleteContents();
+  current.insertNode(trailing);
+  trailing.before(span);
+
+  const newRange = document.createRange();
+  newRange.setStart(trailing, trailing.length);
+  newRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(newRange);
+}

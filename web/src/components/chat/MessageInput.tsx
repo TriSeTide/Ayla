@@ -6,7 +6,7 @@
  * 不可拆分 @Token（contenteditable=false span，浏览器原生整体删除），发送时转为
  * 结构化 segments（text + mention 交错，媒体段追加尾部）。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ChatMessage, ConversationMember, DraftBlock } from "../../api/types";
 import { useChatDraftsStore } from "../../stores/chatDrafts";
 import { sendMessage, sendOptimistic, type PickedMediaItem } from "../../hooks/useChat";
@@ -22,6 +22,7 @@ import {
   detectMentionAtCaret,
   extractBlocks,
   insertMentionAtCaret,
+  insertMentionToken,
   parseBlocks,
   renderBlocksToDOM,
   serializeBlocks,
@@ -40,344 +41,366 @@ function newPickId() {
     : `${Date.now()}-${Math.random()}`;
 }
 
-export function MessageInput({
-  convId,
-  quote,
-  onQuoteClear,
-  members,
-}: {
+export interface MessageInputHandle {
+  /** 在编辑器光标处插入 @某用户（长按头像 @ 触发，M8） */
+  insertMention: (userId: string, name: string) => void;
+}
+
+export interface MessageInputProps {
   convId: string;
   quote: ChatMessage | null;
   onQuoteClear: () => void;
   /** 群成员（仅群聊启用 @）；私聊不传 */
   members?: ConversationMember[];
-}) {
-  const setDraft = useChatDraftsStore((state) => state.setDraft);
-  const clearDraft = useChatDraftsStore((state) => state.clearDraft);
-  const [blocks, setBlocks] = useState<DraftBlock[]>([]);
-  /** 待发送媒体队列（本地预览，未上传；发送时统一上传） */
-  const [picked, setPicked] = useState<PickedMediaItem[]>([]);
-  const [voiceUploading, setVoiceUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [failedVoice, setFailedVoice] = useState<FailedVoice | null>(null);
-  const [mentionOpen, setMentionOpen] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState("");
-  const editorRef = useRef<HTMLDivElement>(null);
-  const voice = useVoiceRecorder();
-  const { onInput } = useTyping(convId || null);
-  const isNarrow = useMediaQuery(NARROW_QUERY);
-  const enableMention = !!members && members.length > 0;
+}
 
-  // user_id → 显示名（草稿恢复 + @Token 用）
-  const nameOf = useCallback(
-    (id: string) => {
-      const m = members?.find((x) => x.user.id === id);
-      return m ? m.user.nickname || m.user.username : undefined;
-    },
-    [members],
-  );
-  const nameOfRef = useRef(nameOf);
-  nameOfRef.current = nameOf;
+export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
+  function MessageInput({ convId, quote, onQuoteClear, members }, ref) {
+    const setDraft = useChatDraftsStore((state) => state.setDraft);
+    const clearDraft = useChatDraftsStore((state) => state.clearDraft);
+    const [blocks, setBlocks] = useState<DraftBlock[]>([]);
+    /** 待发送媒体队列（本地预览，未上传；发送时统一上传） */
+    const [picked, setPicked] = useState<PickedMediaItem[]>([]);
+    const [voiceUploading, setVoiceUploading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [failedVoice, setFailedVoice] = useState<FailedVoice | null>(null);
+    const [mentionOpen, setMentionOpen] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState("");
+    const editorRef = useRef<HTMLDivElement>(null);
+    const voice = useVoiceRecorder();
+    const { onInput } = useTyping(convId || null);
+    const isNarrow = useMediaQuery(NARROW_QUERY);
+    const enableMention = !!members && members.length > 0;
 
-  // 切换会话 → 恢复草稿（渲染到 DOM + 重置状态）；不随 draft 实时变化（避免光标跳）
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    const d = useChatDraftsStore.getState().getDraft(convId);
-    const parsed = parseBlocks(d, nameOfRef.current);
-    renderBlocksToDOM(el, parsed);
-    setBlocks(parsed);
-    setMentionOpen(false);
-    setMentionQuery("");
-    setError(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convId]);
+    // user_id → 显示名（草稿恢复 + @Token 用）
+    const nameOf = useCallback(
+      (id: string) => {
+        const m = members?.find((x) => x.user.id === id);
+        return m ? m.user.nickname || m.user.username : undefined;
+      },
+      [members],
+    );
+    const nameOfRef = useRef(nameOf);
+    nameOfRef.current = nameOf;
 
-  /** 校验并加入待发送队列（选文件/粘贴共用） */
-  const enqueueFiles = (files: File[]) => {
-    const added: PickedMediaItem[] = [];
-    for (const file of files) {
-      const { error, kind } = validateMediaFile(file);
-      if (error) {
-        setError(error);
-        continue;
-      }
-      added.push({
-        id: newPickId(),
-        kind,
-        mimeType: file.type,
-        url: URL.createObjectURL(file),
-        file,
-      });
-    }
-    if (added.length > 0) {
-      setPicked((prev) => [...prev, ...added]);
+    // 切换会话 → 恢复草稿（渲染到 DOM + 重置状态）；不随 draft 实时变化（避免光标跳）
+    useEffect(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      const d = useChatDraftsStore.getState().getDraft(convId);
+      const parsed = parseBlocks(d, nameOfRef.current);
+      renderBlocksToDOM(el, parsed);
+      setBlocks(parsed);
+      setMentionOpen(false);
+      setMentionQuery("");
       setError(null);
-    }
-  };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [convId]);
 
-  const removePicked = (id: string) => {
-    setPicked((prev) => {
-      const item = prev.find((p) => p.id === id);
-      if (item) URL.revokeObjectURL(item.url);
-      return prev.filter((p) => p.id !== id);
-    });
-  };
-
-  /** 编辑器输入 → 提取 blocks + 存草稿 + typing + @ 检测 */
-  const handleEditorInput = () => {
-    const el = editorRef.current;
-    if (!el) return;
-    const nextBlocks = extractBlocks(el);
-    setBlocks(nextBlocks);
-    setDraft(convId, serializeBlocks(nextBlocks));
-    onInput();
-    if (enableMention) {
-      const detected = detectMentionAtCaret(el);
-      if (detected) {
-        setMentionQuery(detected.query);
-        setMentionOpen(true);
-      } else {
-        setMentionOpen(false);
+    /** 校验并加入待发送队列（选文件/粘贴共用） */
+    const enqueueFiles = (files: File[]) => {
+      const added: PickedMediaItem[] = [];
+      for (const file of files) {
+        const { error, kind } = validateMediaFile(file);
+        if (error) {
+          setError(error);
+          continue;
+        }
+        added.push({
+          id: newPickId(),
+          kind,
+          mimeType: file.type,
+          url: URL.createObjectURL(file),
+          file,
+        });
       }
-    }
-  };
+      if (added.length > 0) {
+        setPicked((prev) => [...prev, ...added]);
+        setError(null);
+      }
+    };
 
-  /** 选中成员 → 插入不可拆分 @Token */
-  const handleSelectMention = (member: ConversationMember) => {
-    const el = editorRef.current;
-    if (!el) return;
-    const name = member.user.nickname || member.user.username;
-    insertMentionAtCaret(el, member.user.id, name);
-    const nextBlocks = extractBlocks(el);
-    setBlocks(nextBlocks);
-    setDraft(convId, serializeBlocks(nextBlocks));
-    setMentionOpen(false);
-    setMentionQuery("");
-    el.focus();
-  };
-
-  /** 乐观发送：立即插入气泡，后台上传+发送；不阻塞继续输入 */
-  const submit = () => {
-    const text = blocksText(blocks).trim();
-    const hasMention = blocksHasMention(blocks);
-    if ((!text && picked.length === 0 && !hasMention) || !convId || voice.recording) return;
-    sendOptimistic(convId, {
-      blocks,
-      picked,
-      replyTo: quote ? Number(quote.id) : null,
-    });
-    // 发送即清空（消息已进列表），可立即输入下一条。
-    const el = editorRef.current;
-    if (el) el.innerHTML = "";
-    setBlocks([]);
-    clearDraft(convId);
-    setPicked([]);
-    setError(null);
-    if (quote) onQuoteClear();
-  };
-
-  /** 语音（旧路径：录音完成 → 上传 → 发送；composer 显示上传中） */
-  const sendVoice = async (rec: VoiceRecording) => {
-    if (voiceUploading || !convId) return;
-    setVoiceUploading(true);
-    setError(null);
-    setFailedVoice(null);
-    try {
-      const file = new File([rec.blob], "voice.webm", { type: rec.mimeType || "audio/webm" });
-      const uploaded = await uploadMediaFile(file, "voice");
-      await sendMessage(convId, "", {
-        type: "voice",
-        replyTo: quote ? Number(quote.id) : null,
-        idempotencyKey: newPickId(),
-        mediaId: uploaded.media_id,
+    const removePicked = (id: string) => {
+      setPicked((prev) => {
+        const item = prev.find((p) => p.id === id);
+        if (item) URL.revokeObjectURL(item.url);
+        return prev.filter((p) => p.id !== id);
       });
-    } catch (err) {
-      setFailedVoice({ blob: rec.blob, mimeType: rec.mimeType, duration: rec.duration });
-      setError(err instanceof Error ? err.message : "语音发送失败");
-    } finally {
-      setVoiceUploading(false);
-    }
-  };
+    };
 
-  // 录音停止 → 直接上传发送；过短（<0.8s）视为无效丢弃
-  const stopAndSend = async () => {
-    const rec = await voice.stop();
-    if (rec && rec.duration >= 0.8) await sendVoice(rec);
-  };
+    /** 编辑器输入 → 提取 blocks + 存草稿 + typing + @ 检测 */
+    const handleEditorInput = () => {
+      const el = editorRef.current;
+      if (!el) return;
+      const nextBlocks = extractBlocks(el);
+      setBlocks(nextBlocks);
+      setDraft(convId, serializeBlocks(nextBlocks));
+      onInput();
+      if (enableMention) {
+        const detected = detectMentionAtCaret(el);
+        if (detected) {
+          setMentionQuery(detected.query);
+          setMentionOpen(true);
+        } else {
+          setMentionOpen(false);
+        }
+      }
+    };
 
-  const retryVoice = async () => {
-    const fv = failedVoice;
-    if (!fv) return;
-    setFailedVoice(null);
-    setError(null);
-    await sendVoice({ blob: fv.blob, mimeType: fv.mimeType, duration: fv.duration });
-  };
+    /** 选中成员 → 插入不可拆分 @Token */
+    const handleSelectMention = (member: ConversationMember) => {
+      const el = editorRef.current;
+      if (!el) return;
+      const name = member.user.nickname || member.user.username;
+      insertMentionAtCaret(el, member.user.id, name);
+      const nextBlocks = extractBlocks(el);
+      setBlocks(nextBlocks);
+      setDraft(convId, serializeBlocks(nextBlocks));
+      setMentionOpen(false);
+      setMentionQuery("");
+      el.focus();
+    };
 
-  const quotePreview = quote ? (segmentPreview(quote.segments) ?? (quote.content || "…")) : null;
-  const canSend =
-    (blocksText(blocks).trim().length > 0 || blocksHasMention(blocks) || picked.length > 0) &&
-    !voice.recording;
-  const placeholder = isNarrow
-    ? "输入消息"
-    : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频，群聊输入 @ 可提及成员";
+    /** 长按头像 @：在光标处直接插入 @Token（不依赖 @ 前缀），并同步草稿 */
+    const insertMention = useCallback(
+      (userId: string, name: string) => {
+        const el = editorRef.current;
+        if (!el) return;
+        insertMentionToken(el, userId, name);
+        const nextBlocks = extractBlocks(el);
+        setBlocks(nextBlocks);
+        setDraft(convId, serializeBlocks(nextBlocks));
+        setMentionOpen(false);
+        setMentionQuery("");
+        el.focus();
+      },
+      [convId, setDraft],
+    );
 
-  return (
-    <div className="composer">
-      {quote && quotePreview != null && (
-        <div className="quote-bar">
-          <div className="quote-bar-body">
-            <span className="quote-bar-label">引用回复</span>
-            <span className="quote-bar-text">{quotePreview}</span>
+    useImperativeHandle(ref, () => ({ insertMention }), [insertMention]);
+
+    /** 乐观发送：立即插入气泡，后台上传+发送；不阻塞继续输入 */
+    const submit = () => {
+      const text = blocksText(blocks).trim();
+      const hasMention = blocksHasMention(blocks);
+      if ((!text && picked.length === 0 && !hasMention) || !convId || voice.recording) return;
+      sendOptimistic(convId, {
+        blocks,
+        picked,
+        replyTo: quote ? Number(quote.id) : null,
+      });
+      // 发送即清空（消息已进列表），可立即输入下一条。
+      const el = editorRef.current;
+      if (el) el.innerHTML = "";
+      setBlocks([]);
+      clearDraft(convId);
+      setPicked([]);
+      setError(null);
+      if (quote) onQuoteClear();
+    };
+
+    /** 语音（旧路径：录音完成 → 上传 → 发送；composer 显示上传中） */
+    const sendVoice = async (rec: VoiceRecording) => {
+      if (voiceUploading || !convId) return;
+      setVoiceUploading(true);
+      setError(null);
+      setFailedVoice(null);
+      try {
+        const file = new File([rec.blob], "voice.webm", { type: rec.mimeType || "audio/webm" });
+        const uploaded = await uploadMediaFile(file, "voice");
+        await sendMessage(convId, "", {
+          type: "voice",
+          replyTo: quote ? Number(quote.id) : null,
+          idempotencyKey: newPickId(),
+          mediaId: uploaded.media_id,
+        });
+      } catch (err) {
+        setFailedVoice({ blob: rec.blob, mimeType: rec.mimeType, duration: rec.duration });
+        setError(err instanceof Error ? err.message : "语音发送失败");
+      } finally {
+        setVoiceUploading(false);
+      }
+    };
+
+    // 录音停止 → 直接上传发送；过短（<0.8s）视为无效丢弃
+    const stopAndSend = async () => {
+      const rec = await voice.stop();
+      if (rec && rec.duration >= 0.8) await sendVoice(rec);
+    };
+
+    const retryVoice = async () => {
+      const fv = failedVoice;
+      if (!fv) return;
+      setFailedVoice(null);
+      setError(null);
+      await sendVoice({ blob: fv.blob, mimeType: fv.mimeType, duration: fv.duration });
+    };
+
+    const quotePreview = quote ? (segmentPreview(quote.segments) ?? (quote.content || "…")) : null;
+    const canSend =
+      (blocksText(blocks).trim().length > 0 || blocksHasMention(blocks) || picked.length > 0) &&
+      !voice.recording;
+    const placeholder = isNarrow
+      ? "输入消息"
+      : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频，群聊输入 @ 可提及成员";
+
+    return (
+      <div className="composer">
+        {quote && quotePreview != null && (
+          <div className="quote-bar">
+            <div className="quote-bar-body">
+              <span className="quote-bar-label">引用回复</span>
+              <span className="quote-bar-text">{quotePreview}</span>
+            </div>
+            <button
+              type="button"
+              className="quote-bar-cancel"
+              onClick={onQuoteClear}
+              aria-label="取消引用"
+            >
+              <IconClose width={14} height={14} />
+            </button>
           </div>
+        )}
+        {picked.length > 0 && (
+          <div className="composer-picked" role="group" aria-label="待发送媒体">
+            {picked.map((p) => (
+              <div key={p.id} className="picked-thumb" data-kind={p.kind}>
+                {p.kind === "video" ? (
+                  <video src={p.url} className="picked-video" preload="metadata" muted playsInline tabIndex={-1} />
+                ) : (
+                  <img src={p.url} alt="待发送图片" className="picked-img" />
+                )}
+                {p.kind === "video" && <span className="picked-play" aria-hidden="true">▶</span>}
+                <button
+                  type="button"
+                  className="picked-remove"
+                  onClick={() => removePicked(p.id)}
+                  aria-label="移除媒体"
+                >
+                  <IconClose width={12} height={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {voiceUploading && <div className="composer-uploading" role="status">语音上传中…</div>}
+        {error && (
+          <div className="composer-error" role="alert">
+            <span>{error}</span>
+            {failedVoice && (
+              <button type="button" className="msg-action-btn" onClick={() => void retryVoice()} disabled={voiceUploading}>重试语音</button>
+            )}
+          </div>
+        )}
+        {voice.error && !error && (
+          <div className="composer-error" role="alert">
+            <span>{voice.error}</span>
+            <button type="button" className="msg-action-btn" onClick={voice.clearError}>关闭</button>
+          </div>
+        )}
+        {mentionOpen && enableMention && (
+          <MentionPicker members={members!} query={mentionQuery} onSelect={handleSelectMention} />
+        )}
+        <div className="composer-row">
+          {voice.recording ? (
+            <>
+              <span className="voice-recording-hint" role="status">
+                <span className="voice-rec-dot" />
+                正在录音 {formatRecDuration(voice.elapsed)}
+              </span>
+              <button
+                type="button"
+                className="composer-tool-btn composer-voice-stop"
+                onClick={() => void stopAndSend()}
+                aria-label="停止并发送语音"
+                disabled={voiceUploading}
+              >
+                <IconSend width={18} height={18} />
+              </button>
+              <button
+                type="button"
+                className="composer-tool-btn composer-voice-cancel"
+                onClick={() => voice.cancel()}
+                aria-label="取消录音"
+                disabled={voiceUploading}
+              >
+                <IconClose width={16} height={16} />
+              </button>
+            </>
+          ) : (
+            <>
+              <label className="composer-tool-btn" aria-label="发送图片或视频">
+                <IconImage width={18} height={18} />
+                <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  if (files.length === 0) return;
+                  enqueueFiles(files);
+                }} />
+              </label>
+              {isVoiceRecordingSupported() && (
+                <button
+                  type="button"
+                  className="composer-tool-btn composer-voice-btn"
+                  onClick={() => void voice.start()}
+                  aria-label="发送语音"
+                  title="录制语音消息"
+                  disabled={voice.recording}
+                >
+                  <IconMic width={18} height={18} />
+                </button>
+              )}
+            </>
+          )}
+          <div
+            ref={editorRef}
+            className="field composer-input composer-editor"
+            contentEditable
+            suppressContentEditableWarning
+            role="textbox"
+            aria-multiline="true"
+            aria-label="消息输入框"
+            data-placeholder={placeholder}
+            onInput={handleEditorInput}
+            onKeyDown={(e) => {
+              if (mentionOpen && e.key === "Escape") {
+                e.preventDefault();
+                setMentionOpen(false);
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            onPaste={(e) => {
+              // 粘贴图片/视频文件 → 进待发送队列（阻止默认，避免 contentEditable 混入 HTML）
+              const items = Array.from(e.clipboardData?.items ?? []);
+              const files = items
+                .filter((it) => it.kind === "file")
+                .map((it) => it.getAsFile())
+                .filter((f): f is File => f != null);
+              const mediaFiles = files.filter(
+                (f) => f.type.startsWith("image/") || f.type.startsWith("video/"),
+              );
+              if (mediaFiles.length > 0) {
+                e.preventDefault();
+                enqueueFiles(mediaFiles);
+              }
+            }}
+          />
           <button
             type="button"
-            className="quote-bar-cancel"
-            onClick={onQuoteClear}
-            aria-label="取消引用"
+            className="btn btn-primary composer-send"
+            onClick={submit}
+            disabled={!canSend || !convId}
           >
-            <IconClose width={14} height={14} />
+            <IconSend width={15} height={15} />
+            发送
           </button>
         </div>
-      )}
-      {picked.length > 0 && (
-        <div className="composer-picked" role="group" aria-label="待发送媒体">
-          {picked.map((p) => (
-            <div key={p.id} className="picked-thumb" data-kind={p.kind}>
-              {p.kind === "video" ? (
-                <video src={p.url} className="picked-video" preload="metadata" muted playsInline tabIndex={-1} />
-              ) : (
-                <img src={p.url} alt="待发送图片" className="picked-img" />
-              )}
-              {p.kind === "video" && <span className="picked-play" aria-hidden="true">▶</span>}
-              <button
-                type="button"
-                className="picked-remove"
-                onClick={() => removePicked(p.id)}
-                aria-label="移除媒体"
-              >
-                <IconClose width={12} height={12} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      {voiceUploading && <div className="composer-uploading" role="status">语音上传中…</div>}
-      {error && (
-        <div className="composer-error" role="alert">
-          <span>{error}</span>
-          {failedVoice && (
-            <button type="button" className="msg-action-btn" onClick={() => void retryVoice()} disabled={voiceUploading}>重试语音</button>
-          )}
-        </div>
-      )}
-      {voice.error && !error && (
-        <div className="composer-error" role="alert">
-          <span>{voice.error}</span>
-          <button type="button" className="msg-action-btn" onClick={voice.clearError}>关闭</button>
-        </div>
-      )}
-      {mentionOpen && enableMention && (
-        <MentionPicker members={members!} query={mentionQuery} onSelect={handleSelectMention} />
-      )}
-      <div className="composer-row">
-        {voice.recording ? (
-          <>
-            <span className="voice-recording-hint" role="status">
-              <span className="voice-rec-dot" />
-              正在录音 {formatRecDuration(voice.elapsed)}
-            </span>
-            <button
-              type="button"
-              className="composer-tool-btn composer-voice-stop"
-              onClick={() => void stopAndSend()}
-              aria-label="停止并发送语音"
-              disabled={voiceUploading}
-            >
-              <IconSend width={18} height={18} />
-            </button>
-            <button
-              type="button"
-              className="composer-tool-btn composer-voice-cancel"
-              onClick={() => voice.cancel()}
-              aria-label="取消录音"
-              disabled={voiceUploading}
-            >
-              <IconClose width={16} height={16} />
-            </button>
-          </>
-        ) : (
-          <>
-            <label className="composer-tool-btn" aria-label="发送图片或视频">
-              <IconImage width={18} height={18} />
-              <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                e.target.value = "";
-                if (files.length === 0) return;
-                enqueueFiles(files);
-              }} />
-            </label>
-            {isVoiceRecordingSupported() && (
-              <button
-                type="button"
-                className="composer-tool-btn composer-voice-btn"
-                onClick={() => void voice.start()}
-                aria-label="发送语音"
-                title="录制语音消息"
-                disabled={voice.recording}
-              >
-                <IconMic width={18} height={18} />
-              </button>
-            )}
-          </>
-        )}
-        <div
-          ref={editorRef}
-          className="field composer-input composer-editor"
-          contentEditable
-          suppressContentEditableWarning
-          role="textbox"
-          aria-multiline="true"
-          aria-label="消息输入框"
-          data-placeholder={placeholder}
-          onInput={handleEditorInput}
-          onKeyDown={(e) => {
-            if (mentionOpen && e.key === "Escape") {
-              e.preventDefault();
-              setMentionOpen(false);
-              return;
-            }
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          onPaste={(e) => {
-            // 粘贴图片/视频文件 → 进待发送队列（阻止默认，避免 contentEditable 混入 HTML）
-            const items = Array.from(e.clipboardData?.items ?? []);
-            const files = items
-              .filter((it) => it.kind === "file")
-              .map((it) => it.getAsFile())
-              .filter((f): f is File => f != null);
-            const mediaFiles = files.filter(
-              (f) => f.type.startsWith("image/") || f.type.startsWith("video/"),
-            );
-            if (mediaFiles.length > 0) {
-              e.preventDefault();
-              enqueueFiles(mediaFiles);
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="btn btn-primary composer-send"
-          onClick={submit}
-          disabled={!canSend || !convId}
-        >
-          <IconSend width={15} height={15} />
-          发送
-        </button>
       </div>
-    </div>
-  );
-}
+    );
+  },
+);

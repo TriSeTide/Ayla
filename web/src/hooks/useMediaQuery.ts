@@ -12,6 +12,9 @@ import { useCallback, useSyncExternalStore } from "react";
 /** 形态分界：≤768px 窄屏（design.md §9） */
 export const NARROW_QUERY = "(max-width: 768px)";
 
+/** 触屏判定：设备无 hover 能力（手机/平板），用于「点击行展开工具栏」等触屏专属交互。 */
+export const HOVER_NONE_QUERY = "(hover: none)";
+
 export function useMediaQuery(query: string): boolean {
   const subscribe = useCallback(
     (onChange: () => void) => {

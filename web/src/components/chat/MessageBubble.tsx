@@ -8,10 +8,12 @@
  * - 引用回复：左 3px ice 竖条 + 弱化一层；
  * - 撤回态弱化 + 「已撤回」标签。
  */
+import { useRef } from "react";
 import type { ChatMessage } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
+import { HOVER_NONE_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { MediaContent } from "./MediaContent";
 import { IconQuote, IconUndo, IconClose } from "../icons";
 
@@ -48,6 +50,9 @@ export function MessageBubble({
   senderAvatar,
   senderAvatarLabel,
   onSenderClick,
+  onMentionSender,
+  actionsOpen,
+  onToggleActions,
   quoteText,
   onQuote,
   onQuoteJump,
@@ -71,6 +76,12 @@ export function MessageBubble({
   senderAvatarLabel?: string | null;
   /** 头像点击 → 个人主页 */
   onSenderClick?: () => void;
+  /** 长按发送者头像 → 在输入框内插入 @该用户（群聊成员 @，M8） */
+  onMentionSender?: (userId: string, name: string) => void;
+  /** 触屏下该行工具栏是否展开（由 MessageList 单选管理） */
+  actionsOpen?: boolean;
+  /** 触屏下点击行切换工具栏展开（MessageList 传入，负责单选） */
+  onToggleActions?: () => void;
   /** 被引用消息的预览文本（父级解析） */
   quoteText?: string | null;
   onQuote?: (msg: ChatMessage) => void;
@@ -88,6 +99,58 @@ export function MessageBubble({
 }) {
   const recalled = message.status === "recalled";
   const isMedia = MEDIA_TYPES.has(message.type);
+  // 触屏判定用 hover 能力（与 app.css 的 @media (hover:none) 对齐），
+  // 不用宽度：iPad 等宽屏触屏也应走「点击行展开工具栏」路径。
+  const isTouch = useMediaQuery(HOVER_NONE_QUERY);
+
+  // 触屏无 hover：点气泡行（非交互区域）切换工具栏展开。
+  // 单选由 MessageList 的 activeActionsId 管理（点其他行收起上一行）。
+  const handleRowClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isTouch) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, [role='button']")) return;
+    onToggleActions?.();
+  };
+
+  // 长按发送者头像 → 输入框 @ 该用户（仅群聊非自己消息、有发送者名、父级接入回调）。
+  // 长按 500ms 触发；触发后抑制紧随的 click，避免又跳个人主页。
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const canMention =
+    !isSelf &&
+    !recalled &&
+    message.type !== "system" &&
+    senderName != null &&
+    onMentionSender != null;
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current != null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const onSenderPointerDown = () => {
+    if (!canMention) return;
+    longPressTriggeredRef.current = false;
+    clearLongPress();
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      onMentionSender?.(message.sender_id, senderName as string);
+    }, 500);
+  };
+
+  const onSenderPointerEnd = () => {
+    clearLongPress();
+  };
+
+  const handleSenderClick = () => {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
+    onSenderClick?.();
+  };
 
   const bubbleClass = recalled
     ? "bubble bubble-other recalled"
@@ -103,14 +166,23 @@ export function MessageBubble({
     !recalled && message.type !== "system" && (senderAvatarLabel != null || senderAvatar != null);
 
   const senderHalo = showSenderHalo ? (
-    <Avatar
-      label={senderAvatarLabel ?? undefined}
-      size={32}
-      online={!isSelf}
-      imageUrl={senderAvatar || null}
-      onClick={onSenderClick}
-      ariaLabel={senderName ?? "发送者个人主页"}
-    />
+    <span
+      className="msg-sender-halo"
+      onPointerDown={onSenderPointerDown}
+      onPointerUp={onSenderPointerEnd}
+      onPointerLeave={onSenderPointerEnd}
+      onPointerCancel={onSenderPointerEnd}
+      onContextMenu={isTouch && canMention ? (event) => event.preventDefault() : undefined}
+    >
+      <Avatar
+        label={senderAvatarLabel ?? undefined}
+        size={32}
+        online={!isSelf}
+        imageUrl={senderAvatar || null}
+        onClick={handleSenderClick}
+        ariaLabel={senderName ?? "发送者个人主页"}
+      />
+    </span>
   ) : null;
 
   // 消息操作按钮（收藏/引用/撤回）：与气泡同一行 —— 别人的气泡右侧、自己的气泡左侧
@@ -195,7 +267,10 @@ export function MessageBubble({
     ) : null;
 
   return (
-    <div className={`msg-row ${isSelf ? "self" : "peer"}${justArrived ? " msg-arrive" : ""}`}>
+    <div
+      className={`msg-row ${isSelf ? "self" : "peer"}${justArrived ? " msg-arrive" : ""}${actionsOpen ? " is-actions-open" : ""}`}
+      onClick={handleRowClick}
+    >
       {senderHalo}
       <div className="msg-body">
         {!isSelf && senderName && <span className="msg-sender">{senderName}</span>}

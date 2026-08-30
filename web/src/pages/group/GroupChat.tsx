@@ -5,12 +5,12 @@
  * loadHistory/loadMoreHistory/recallMessage/打字 全复用 hooks/useChat 与 chat/message store。
  * 群 id 即会话 id（GroupPage 传入 groupId）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { getElysiaProfile } from "../../api/elysia";
 import type { ChatMessage } from "../../api/types";
-import { MessageInput } from "../../components/chat/MessageInput";
+import { MessageInput, type MessageInputHandle } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
 import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
@@ -32,6 +32,8 @@ export function GroupChat({ groupId }: { groupId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
+  // 长按消息头像 @ 成员 → 通过 ref 调输入框插入 @Token
+  const inputRef = useRef<MessageInputHandle>(null);
 
   // 爱莉身份（U1：群聊爱莉消息专属气泡判定，与 PrivateChatPane/MessagesPage 同数据源）
   useEffect(() => {
@@ -107,6 +109,11 @@ export function GroupChat({ groupId }: { groupId: string }) {
     }
   };
 
+  // 长按消息头像 → 输入框 @ 该成员
+  const handleMentionUser = useCallback((userId: string, name: string) => {
+    inputRef.current?.insertMention(userId, name || "群成员");
+  }, []);
+
   return (
     <div className="group-chat">
       {historyError && (
@@ -144,9 +151,10 @@ export function GroupChat({ groupId }: { groupId: string }) {
         onRetry={(m) => retryOptimistic(groupId, m)}
         onRemove={(m) => removeOptimistic(groupId, m)}
         onCancel={(m) => cancelOptimistic(groupId, m)}
+        onMentionSender={handleMentionUser}
       />
       <TypingIndicator typing={typingActive} />
-      <MessageInput convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} members={activeConv?.members} />
+      <MessageInput ref={inputRef} convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} members={activeConv?.members} />
     </div>
   );
 }

@@ -117,6 +117,7 @@ export function MessageList({
   onMarkRead,
   onMarkConversationRead,
   onLoadUntilSeq,
+  onMentionSender,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -139,6 +140,8 @@ export function MessageList({
   onRemove?: (msg: ChatMessage) => void;
   /** 乐观发送中：取消上传 */
   onCancel?: (msg: ChatMessage) => void;
+  /** 长按发送者头像 → 在输入框 @ 该用户（群聊成员 @，由调用方插入到输入框） */
+  onMentionSender?: (userId: string, name: string) => void;
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -159,6 +162,11 @@ export function MessageList({
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [scrollTick, setScrollTick] = useState(0);
   const [jumpHighlightId, setJumpHighlightId] = useState<string | null>(null);
+  // 触屏点行展开工具栏：单选（同时只展开一行；点同一行收起、点其他行切换）。
+  const [activeActionsId, setActiveActionsId] = useState<string | null>(null);
+  const toggleActions = useCallback((id: string) => {
+    setActiveActionsId((prev) => (prev === id ? null : id));
+  }, []);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const jumpLoadRef = useRef<Promise<boolean> | null>(null);
   const reducedMotion = useReducedMotion();
@@ -342,6 +350,7 @@ export function MessageList({
     jumpToBottomRef.current = false;
     setFarFromBottom(false);
     setWindowRange(null);
+    setActiveActionsId(null);
     const element = scrollRef.current;
     if (element) scrollToBottom(element);
   }, [conversation?.id]);
@@ -941,6 +950,9 @@ export function MessageList({
                   senderAvatar={memberAvatars.get(m.sender_id)?.avatar ?? null}
                   senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
                   onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
+                  onMentionSender={onMentionSender}
+                  actionsOpen={activeActionsId === m.id}
+                  onToggleActions={() => toggleActions(m.id)}
                   quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}
                   onQuote={onQuote}
                   onQuoteJump={m.reply_to ? handleQuoteJump : undefined}
