@@ -256,3 +256,97 @@ a:hover {
     opacity: 0.8;
   }
 }
+
+/* ================= 长文本单行滚动原语（不换行、不挤压） =================
+   .scroll-text 容器单行裁剪；溢出时（is-overflow）内层 marquee 来回滚动，
+   距离/时长由 ScrollingText 组件以内联变量 --marquee-distance/--marquee-duration 提供。
+   未溢出时静态单行显示。容器可叠加布局类（flex: 1 / min-width: 0）在行内收缩。 */
+.scroll-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.scroll-text-inner {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* 完整来回一个周期：停开头 → 滚到尾 → 停结尾 → 滚回开头（linear 匀速可读全貌） */
+@keyframes scroll-text-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(var(--marquee-distance, -100%));
+  }
+  70% {
+    transform: translateX(var(--marquee-distance, -100%));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.scroll-text.is-overflow .scroll-text-inner {
+  animation: scroll-text-marquee var(--marquee-duration, 8s) linear infinite;
+}
+
+/* 标签横向滚动容器（可见性标签太多时自动 marquee 来回滚动，不换行）。
+   外层 overflow:hidden 裁剪，内层 inline-flex 承载标签并 marquee 滚动；
+   距离/时长由 ScrollingTags 组件以内联变量 --marquee-distance/--marquee-duration 提供。 */
+.scroll-tags {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.scroll-tags-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.scroll-tags-inner > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.scroll-tags.is-overflow .scroll-tags-inner {
+  animation: scroll-text-marquee var(--marquee-duration, 8s) linear infinite;
+}
+
+/* 溢出滚动时左右边缘渐隐（mask），替代硬裁剪的生硬截断 */
+.scroll-tags.is-overflow {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-text.is-overflow .scroll-text-inner {
+    animation: none;
+  }
+  .scroll-tags.is-overflow .scroll-tags-inner {
+    animation: none;
+  }
+}
