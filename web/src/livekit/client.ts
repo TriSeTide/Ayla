@@ -59,17 +59,27 @@ export interface LiveKitRoomLike {
 
 /* ================= 真实实现（livekit-client 动态导入） ================= */
 
+/**
+ * livekit-client RoomEvent 枚举的**实际字符串值**（camelCase）。
+ *
+ * 事故（2026-08-26 语音连麦「先入房者听不到后入房开麦者」）：这里曾误写成
+ * PascalCase（"TrackSubscribed" 等），而 RoomEvent 是 camelCase（"trackSubscribed"），
+ * 导致所有 room.on() 监听器静默失效——尤其 TrackSubscribed 不触发，后进房者开麦的
+ * 音频轨不会被 attach，先入房者听不见；重进时靠 attachExistingRemoteAudio 补齐才听见。
+ * 测试没拦住是因为 mock 也用了同样的 PascalCase（已同步修正）。
+ * 事件名必须与 livekit-client `RoomEvent` 枚举值逐字一致，改前先核对 events.ts。
+ */
 type RoomEventName =
-  | "Disconnected"
-  | "Reconnecting"
-  | "Reconnected"
-  | "ParticipantConnected"
-  | "ParticipantDisconnected"
-  | "TrackSubscribed"
-  | "TrackUnsubscribed"
-  | "TrackMuted"
-  | "TrackUnmuted"
-  | "ActiveSpeakersChanged";
+  | "disconnected"
+  | "reconnecting"
+  | "reconnected"
+  | "participantConnected"
+  | "participantDisconnected"
+  | "trackSubscribed"
+  | "trackUnsubscribed"
+  | "trackMuted"
+  | "trackUnmuted"
+  | "activeSpeakersChanged";
 
 interface LiveKitRoomInternal {
   on(event: RoomEventName, cb: (...args: unknown[]) => void): void;
@@ -427,34 +437,36 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
     }, 100);
   };
 
-  room.on("Reconnecting", () => events.onStateChange?.("reconnecting"));
-  room.on("Reconnected", () => events.onStateChange?.("connected"));
-  room.on("Disconnected", () => events.onStateChange?.("failed"));
-  room.on("ParticipantConnected", (p) => {
+  // 注意：事件名必须是 livekit-client RoomEvent 的 camelCase 字面值（见 RoomEventName
+  // 类型注释的事故记录）——PascalCase 会导致监听器静默失效。
+  room.on("reconnecting", () => events.onStateChange?.("reconnecting"));
+  room.on("reconnected", () => events.onStateChange?.("connected"));
+  room.on("disconnected", () => events.onStateChange?.("failed"));
+  room.on("participantConnected", (p) => {
     events.onParticipantJoined?.(toAppUserId((p as LiveKitRemoteParticipantInternal).identity));
   });
-  room.on("ParticipantDisconnected", (p) => {
+  room.on("participantDisconnected", (p) => {
     events.onParticipantLeft?.(toAppUserId((p as LiveKitRemoteParticipantInternal).identity));
   });
-  room.on("TrackMuted", (_pub, participant) => {
+  room.on("trackMuted", (_pub, participant) => {
     events.onTrackMuted?.(toAppUserId((participant as LiveKitRemoteParticipantInternal).identity), true);
   });
-  room.on("TrackUnmuted", (_pub, participant) => {
+  room.on("trackUnmuted", (_pub, participant) => {
     events.onTrackMuted?.(toAppUserId((participant as LiveKitRemoteParticipantInternal).identity), false);
   });
-  room.on("ActiveSpeakersChanged", (speakers) => {
+  room.on("activeSpeakersChanged", (speakers) => {
     events.onActiveSpeakers?.(
       (speakers as LiveKitRemoteParticipantInternal[]).map((s) => toAppUserId(s.identity)),
     );
   });
   // 远端音频订阅后必须 attach 才会出声（livekit-client 不自动 attach）
-  room.on("TrackSubscribed", (track) => {
+  room.on("trackSubscribed", (track) => {
     const t = track as LiveKitRemoteTrackInternal;
     if (t.kind !== "audio") return;
     ensureAudioContainer().appendChild(t.attach());
   });
   // 退订/移除时 detach，避免残留播放
-  room.on("TrackUnsubscribed", (track) => {
+  room.on("trackUnsubscribed", (track) => {
     const t = track as LiveKitRemoteTrackInternal;
     if (t.kind !== "audio") return;
     try {

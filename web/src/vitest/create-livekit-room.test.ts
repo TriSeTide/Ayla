@@ -149,7 +149,7 @@ describe("createLiveKitRoom", () => {
     const { client } = await makeClient();
     await client.connect("ws://lk", "token");
 
-    h.emit("TrackSubscribed", track);
+    h.emit("trackSubscribed", track);
     const container = audioContainer();
     expect(container).not.toBeNull();
     expect(container.contains(el)).toBe(true);
@@ -177,7 +177,7 @@ describe("createLiveKitRoom", () => {
     const { client } = await makeClient();
     await client.connect("ws://lk", "token");
 
-    h.emit("TrackUnsubscribed", track);
+    h.emit("trackUnsubscribed", track);
     expect(track.detach).toHaveBeenCalledTimes(1);
   });
 
@@ -211,7 +211,7 @@ describe("createLiveKitRoom", () => {
     await client.connect("ws://lk", "token");
 
     const p = { identity: "user_abc123" };
-    h.emit("TrackMuted", {}, p);
+    h.emit("trackMuted", {}, p);
     expect(onTrackMuted).toHaveBeenCalledWith("abc123", true);
   });
 
