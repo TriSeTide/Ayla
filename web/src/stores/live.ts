@@ -91,7 +91,7 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   setChannels: (list, onlyLive = false) =>
     set({
-      channels: list,
+      channels: [...list].sort((a, b) => b.created_at.localeCompare(a.created_at)),
       channelsLoading: false,
       error: null,
       lastFetched: Date.now(),
@@ -107,6 +107,8 @@ export const useLiveStore = create<LiveState>((set) => ({
         idx >= 0
           ? state.channels.map((c) => (c.id === channel.id ? channel : c))
           : [...state.channels, channel];
+      // 新建/更新后按 created_at 降序重排，保证新建直播间排最前
+      channels.sort((a, b) => b.created_at.localeCompare(a.created_at));
       const current = state.current.channel?.id === channel.id
         ? { ...state.current, channel }
         : state.current;

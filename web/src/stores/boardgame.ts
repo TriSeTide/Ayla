@@ -48,7 +48,7 @@ export const useBoardgameStore = create<BoardgameState>((set) => ({
 
   setRooms: (rooms) =>
     set({
-      rooms: rooms.map(normalizeRoom),
+      rooms: rooms.map(normalizeRoom).sort((a, b) => b.created_at.localeCompare(a.created_at)),
       roomsLoading: false,
       error: null,
       lastFetched: Date.now(),
@@ -58,7 +58,9 @@ export const useBoardgameStore = create<BoardgameState>((set) => ({
 
   reconcileRooms: (rooms) =>
     set(() => {
-      const normalized = rooms.map(normalizeRoom);
+      const normalized = rooms
+        .map(normalizeRoom)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at));
       return {
         rooms: normalized,
         roomsLoading: false,

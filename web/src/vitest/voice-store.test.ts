@@ -36,6 +36,29 @@ describe("voice store voice.state 合并", () => {
     expect(useVoiceStore.getState().channels[0].name).toBe("重复验证房（更新）");
   });
 
+  it("setChannels 按 created_at 降序排序（新的在前）", () => {
+    const mk = (id: string, created_at: string) => ({
+      id,
+      name: id,
+      owner_id: "u1",
+      group: null,
+      allowed_group_ids: [],
+      visibility: "public" as const,
+      status: "idle" as const,
+      member_count: 0,
+      room_name: id,
+      group_name: null,
+      created_at,
+      mine: false,
+    });
+    useVoiceStore.getState().setChannels([
+      mk("old", "2026-08-01T00:00:00Z"),
+      mk("new", "2026-08-20T00:00:00Z"),
+      mk("mid", "2026-08-10T00:00:00Z"),
+    ]);
+    expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual(["new", "mid", "old"]);
+  });
+
   it("joined → 写入成员；left → 移除；muted/unmuted → 更新标记；heartbeat → 只刷新 last_seen", () => {
     const s = useVoiceStore.getState();
     s.enterChannel("ch1", []);

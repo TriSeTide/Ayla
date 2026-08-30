@@ -130,7 +130,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
           unique.set(normalized.id, normalized);
           return unique;
         }, new Map<string, VoiceChannelDescriptor>()),
-      ).map(([, channel]) => channel),
+      )
+        .map(([, channel]) => channel)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
       channelsLoading: false,
       error: null,
       lastFetched: Date.now(),
@@ -140,7 +142,11 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       const normalized = normalizeChannel(channel);
       const merged = new Map(state.channels.map((item) => [item.id, item]));
       merged.set(normalized.id, { ...merged.get(normalized.id), ...normalized });
-      return { channels: Array.from(merged.values()) };
+      return {
+        channels: Array.from(merged.values()).sort((a, b) =>
+          b.created_at.localeCompare(a.created_at),
+        ),
+      };
     }),
   removeChannel: (channelId) =>
     set((state) => ({
