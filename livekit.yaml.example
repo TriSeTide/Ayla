@@ -6,9 +6,13 @@
 # - 公网部署：改用 use_external_ip: true（STUN 广播公网 srflx）或 node_ip 填公网 IP。
 #
 # 与 docker-compose 端口映射保持对应：
-#   7880/tcp  HTTP + WS/WSS 信令
+#   7880/tcp  HTTP + WS 信令（明文；WSS 由 Vite 同源代理终结 TLS，见 web/vite.config.ts）
 #   7881/tcp  RTC over TCP
 #   7882-7886/udp  RTC 媒体（UDP）
+#
+# 注意：LiveKit 7880 端口不支持内置 TLS（其配置里只有 TURN/Redis 的 TLS 字段），
+# 手机 https 页面连 wss 须走 Vite 同源代理（后端 LIVEKIT_WS_URL 指向
+# wss://<host>:5173/livekit，Vite 转发到 ws://127.0.0.1:7880）。
 port: 7880
 rtc:
   tcp_port: 7881
@@ -18,10 +22,6 @@ rtc:
   # 若换网络/换机，改这里为当前宿主机可达 IP。
   node_ip: <局域网IP>
   use_external_ip: false
-# HTTPS/WSS：手机走 wss 连接必须启用 TLS（证书 mkcert 生成，挂载自 ./certs，见 docker-compose.yml）
-tls:
-  cert_file: /livekit/certs/cert.pem
-  key_file: /livekit/certs/key.pem
 # 本地开发默认 key（与 docker-compose 的 LIVEKIT_KEYS 默认一致）；生产必须换强密钥
 keys:
   devkey: devsecret

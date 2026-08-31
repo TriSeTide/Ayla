@@ -40,6 +40,16 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/minio/, ""),
       },
+      // LiveKit 信令（wss → ws 转发）：LiveKit 7880 端口不支持内置 TLS（其配置仅有
+      // TURN/Redis 的 TLS 字段），故走 Vite 同源 wss 代理。livekit-client 会把 wsUrl
+      // 的路径作为前缀拼 /rtc/v1（含 /rtc/v1/validate 的 HTTP 请求），rewrite 剥掉
+      // /livekit 前缀，还原 LiveKit 真实路径。
+      "/livekit": {
+        target: "http://127.0.0.1:7880",
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/livekit/, ""),
+      },
     },
   },
   test: {

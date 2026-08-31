@@ -77,7 +77,6 @@ services:
       - "7882-7886:7882-7886/udp"   # RTC 媒体（UDP）
     volumes:
       - ./livekit.yaml:/livekit.yaml:ro
-      - ./certs:/livekit/certs:ro
       - livekit_data:/livekit
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:7880/"]
