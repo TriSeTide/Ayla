@@ -538,6 +538,10 @@
   cursor: pointer;
   color: var(--text-secondary);
   transition: background 150ms var(--ease-out);
+  /* 把手支持上下拖动：禁止触摸拖动时触发页面滚动，禁止拖拽选中「›」字符 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .session-activity-toggle:hover,
