@@ -72,6 +72,7 @@ export function LivePlayer({
   videoRef,
   onRetry,
   onRefresh,
+  children,
 }: {
   srsStatus: LiveSrsStatus | null;
   /** 频道乐观标记（idle 占位文案区分"等待推流信号"用） */
@@ -81,6 +82,8 @@ export function LivePlayer({
   onRetry: () => void;
   /** 跳到直播最新画面（左下角刷新键） */
   onRefresh: () => void;
+  /** 视频画面叠加层（飘弹幕层等；渲染时机由调用方控制） */
+  children?: React.ReactNode;
 }) {
   const [pipSupported, setPipSupported] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
@@ -260,6 +263,8 @@ export function LivePlayer({
         playsInline
         onClick={showControls}
       />
+      {/* 视频画面叠加层（如飘弹幕层）：位于视频之上、悬浮控件(z5)之下 */}
+      {children}
       {showVideo && (
         <div className={`live-player-controls${controlsVisible ? " is-visible" : ""}`}>
           <button

@@ -23,6 +23,7 @@ import { ScrollingText } from "../ScrollingText";
 import { ScrollingTags } from "../ScrollingTags";
 import { DanmakuInput } from "./DanmakuInput";
 import { DanmakuList } from "./DanmakuList";
+import { DanmakuOverlay } from "./DanmakuOverlay";
 import { LiveChannelRail } from "./LiveChannelRail";
 import { LiveOwnerPanel } from "./LiveOwnerPanel";
 import { LiveHostAvatar } from "./LiveHostAvatar";
@@ -199,7 +200,11 @@ export function LiveRoomBody({
       videoRef={videoRef}
       onRetry={retryPlayer}
       onRefresh={refreshPlayer}
-    />
+    >
+      {/* 飘弹幕层：进房完成（历史已 merge，基线可靠）且画面 live 才渲染；
+          loading 期间不挂载，避免把进房历史误当"新弹幕"重放 */}
+      {!loading && srsStatus === "live" && <DanmakuOverlay channelId={channelId} />}
+    </LivePlayer>
   );
   const visibilityLabels = channel ? getVisibilityLabels(channel) : [];
 

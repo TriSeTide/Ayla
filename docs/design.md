@@ -335,14 +335,26 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - LIVE 徽标：`--pink-500` 实底白字 11px Fredoka 胶囊，左上角。
 - 直播间卡片（聚合网格）：封面 16:9 圆角 12px + LIVE 徽标 + 标题 Nunito 700 15px + 主播 13px `--text-secondary` + 来源标识（公开/好友/群名，Micro Tag 11px Fredoka `--sakura-300` 底 `--grape-700` 字）。
 
-### 12.7.1 相邻直播间预览卡 LivePeerPreview（方案留档）
+### 12.7.1 直播画面飘弹幕层 DanmakuOverlay（任务 04 增量）
+
+> 在视频画面上叠加从右向左飘过的弹幕（B 站式），与弹幕侧列/列表是同一数据的**另一种展示形态**，不替代列表、不改数据链路；直播间与开播控制台（`LiveRoomBody`）统一生效。
+
+- **挂载与层级**：`DanmakuOverlay` 作为 `LivePlayer` 的 children 渲染在 `.live-player` 容器内——`position: absolute; inset: 0; overflow: hidden`；`z-index: 4`（视频之上、悬浮控件 z5 之下，不遮控制条）；`pointer-events: none`（不挡播放器交互、控制条可点）；容器随宽窄屏 / 全屏 / 切台自适应（ResizeObserver 维护宽度）。
+- **数据接入**：订阅 live store 的 `current.danmaku`，**只飘新弹幕**（WS 实时 append）；进房历史与重连对账（merge）以挂载基线快照排除，不重放；`channelId` 变化重建基线并清空画面（切台无残留）。渲染条件 `!loading && srsStatus === "live"`——进房完成（历史已 merge）才挂载，避免把历史误当新弹幕。
+- **轨道管理**：轨道数按容器高度动态算（行高刻度 36px，2~10 条）；分配选最空闲轨道；同轨道同速 → 开始时间差 ≥ 最小间距（60px / 速度），从数学上避免重叠与堆积（纯函数 `danmakuTracks.ts`）。
+- **动画**：CSS transform 动画（GPU 合成），`--fly-from`（容器宽）→ `-100% - 24px`（完全出屏，不依赖逐条测宽）；时长 = (容器宽 + 文本估算) / 速度（150px/s），宽窄屏视觉速度一致；`animationend` 移除 DOM，画面同时飘 ≤80 条防长直播堆积。
+- **样式**：16px Nunito 700 白字 + 深色多重描边/投影（视频上可读性，媒体叠加场景不适用界面正文对比度规则）；媒体弹幕飘缩略图（36px 高、限宽 96px 小图），纯图占位文案「图片」不飘文字。
+- **可达性**：`aria-hidden`（纯装饰层）；`prefers-reduced-motion` 下整层不渲染（飘弹幕本质是动效，无静态降级需求）。
+- **不做**：不改弹幕数据链路、不删除/不替代弹幕列表、不做弹幕开关与密度设置（需求未强制，保持最小实现）。
+
+### 12.7.2 相邻直播间预览卡 LivePeerPreview（方案留档）
 
 - 这是直播上下滑三槽 pager 的轻量预览配方：封面铺满并 `object-fit: cover`；没有封面时使用 `--bg-aurora` 占位并配线性视频图标。
 - 左上使用 `--pink-500` 实底 + `--surface` 白字的 LIVE 胶囊；底部使用玻璃 meta 区（`--glass-bg` + blur(18px) + `--glass-border`），展示标题与主播，文字遵循正文/次要文字层级。
 - 预览卡**纯展示、无播放组件、无 `useLiveRoom`、无 WS/轮询副作用**，不能为了切换动画常挂多个真实直播播放器。
 - **当前实现边界**：该配方曾作为 G3 的三槽预览卡落地，后续用户返工将现行切换改为“视频 + 弹幕区”整体滑动，删除 `LivePeerPreview`；本条保留为可复用的轻量预览配方，不能据此声称当前直播间正在渲染预览卡。
 
-### 12.7.2 直播播放器控件（低延迟 + 跳到最新）
+### 12.7.3 直播播放器控件（低延迟 + 跳到最新）
 
 - **无原生控制条**：`<video>` 不带 `controls`——去掉进度条、手动倍速与原生全屏，纯直播观看（对齐 B 站直播体验）；画中画小窗能力保留。
 - **低延迟起播**：hls.js 分支开 `lowLatencyMode` + `liveSyncDurationCount=2`，`startLoad(-1)` 从直播边缘起播（连上推流即显示最新画面，不从头回放历史）；**不做追帧倍速**（保持 `liveSyncPlaybackRate` 默认 1.0，画面不自动加速）；延迟延后由用户手动刷新跳边。Safari 原生 HLS 分支维持原生贴边行为。
