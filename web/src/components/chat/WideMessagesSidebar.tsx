@@ -6,7 +6,7 @@
  * - 好友 tab：好友列表 + 待处理申请置顶（复用 MessagesPage 的好友数据处理）
  * 用于宽屏 /messages（两列：本侧栏 + 右侧聊天内容区）与 /chat/:id（两列同构）。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as chatApi from "../../api/chat";
 import * as usersApi from "../../api/users";
 import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest } from "../../api/types";
@@ -14,7 +14,7 @@ import { Avatar } from "../Avatar";
 import { ConversationList } from "./ConversationList";
 import { ElysiaEntry } from "./ElysiaEntry";
 import { useBadgesStore } from "../../stores/badges";
-import { useChatStore } from "../../stores/chat";
+import { useChatStore, sortPrivateByActivity } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
 import { useNoticeStore } from "../../stores/notices";
 import { goUserProfile } from "../../utils/navigation";
@@ -41,6 +41,15 @@ export function WideMessagesSidebar({
   // 直接订阅 store；保留 prop 仅兼容旧调用方，不使用其作为实时真源
   const storeConversations = useChatStore((s) => s.conversations);
   const conversations = storeConversations.length > 0 ? storeConversations : (propConversations ?? []);
+  // 私信列表按「最近活跃」排序（戳一戳/新消息 bump 后往前排；置顶优先）
+  const conversationActivityAt = useChatStore((s) => s.conversationActivityAt);
+  const privateConversations = useMemo(
+    () => sortPrivateByActivity(
+      conversations.filter((c) => c.type === "private"),
+      conversationActivityAt,
+    ),
+    [conversations, conversationActivityAt],
+  );
   const lastFetched = useChatStore((s) => s.lastFetched);
   const loading = useChatStore((s) => s.loading);
   
@@ -221,7 +230,7 @@ export function WideMessagesSidebar({
           )}
           <ConversationList
             key={revealNonce}
-            conversations={conversations.filter((c) => c.type === "private")}
+            conversations={privateConversations}
             activeId={activeId}
             elysiaUserId={elysiaProfile?.user?.id}
             onSelect={onSelect}

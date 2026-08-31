@@ -60,6 +60,20 @@ function shouldGroup(prev: ChatMessage | undefined, curr: ChatMessage): boolean 
   return b - a > GROUP_GAP_MS;
 }
 
+/** 戳一戳居中提示文案：「A戳了戳B」（自己归一为「我」；content 存目标用户 id）。 */
+function pokeLabel(
+  message: ChatMessage,
+  memberNames: Map<string, string>,
+  currentUserId: string | null,
+  peerName: string,
+): string {
+  const senderSelf = currentUserId != null && String(message.sender_id) === String(currentUserId);
+  const senderName = senderSelf ? "我" : memberNames.get(message.sender_id) ?? "";
+  const targetSelf = currentUserId != null && String(message.content) === String(currentUserId);
+  const targetName = targetSelf ? "我" : memberNames.get(message.content) ?? peerName;
+  return `${senderName || "有人"}戳了戳${targetName || "对方"}`;
+}
+
 /** 未设置显式窗口时，首屏只投影末尾 20 条确认消息。 */
 function resolveBounds(messages: ChatMessage[], window: RenderWindow | null): RenderBounds {
   const fallbackEnd = messages.length;
@@ -118,6 +132,7 @@ export function MessageList({
   onMarkConversationRead,
   onLoadUntilSeq,
   onMentionSender,
+  onPoke,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -142,6 +157,8 @@ export function MessageList({
   onCancel?: (msg: ChatMessage) => void;
   /** 长按发送者头像 → 在输入框 @ 该用户（群聊成员 @，由调用方插入到输入框） */
   onMentionSender?: (userId: string, name: string) => void;
+  /** 双击头像 → 戳一戳：传目标用户 id（群聊=被双击成员；私聊=对端） */
+  onPoke?: (targetUserId: string) => void;
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -171,6 +188,8 @@ export function MessageList({
   const jumpLoadRef = useRef<Promise<boolean> | null>(null);
   const reducedMotion = useReducedMotion();
   const isGroup = conversation?.type === "group";
+  // 私聊对端显示名（poke 文案 target 兜底；群聊用成员 map）
+  const peerName = conversation?.peer?.nickname || conversation?.peer?.username || "";
 
   // pending / 发送失败的本地消息不计入 200 条服务端窗口，始终留在尾部让用户可取消、重试或删除。
   const confirmedMessages = useMemo(
@@ -202,7 +221,9 @@ export function MessageList({
     [visibleMessages],
   );
   const unreadMessages = useMemo(
-    () => confirmedMessages.filter((m) => m.sender_id !== currentUserId && !m.read_by_me),
+    () => confirmedMessages.filter(
+      (m) => m.sender_id !== currentUserId && !m.read_by_me && m.type !== "poke",
+    ),
     [confirmedMessages, currentUserId],
   );
   const specialUnread = useMemo(() => {
@@ -818,7 +839,7 @@ export function MessageList({
     );
     if (!observer) return;
     for (const message of visibleConfirmed) {
-      if (!message.read_by_me && message.sender_id !== currentUserId) {
+      if (!message.read_by_me && message.sender_id !== currentUserId && message.type !== "poke") {
         const node = findMessageNode(element, message.id);
         if (node) observer.observe(node);
       }
@@ -929,6 +950,26 @@ export function MessageList({
           {visibleMessages.map((m, index) => {
             const grouped = shouldGroup(visibleMessages[index - 1], m);
             const isSelf = m.sender_id === currentUserId;
+            // 戳一戳：居中提示（非气泡），历史与实时同一渲染路径。
+            if (m.type === "poke") {
+              return (
+                <div
+                  key={m.id ?? `${m.conversation_id}-${m.seq}`}
+                  data-message-id={m.id}
+                  data-message-seq={m.seq}
+                  className={m.id === jumpHighlightId ? "mention-jump-highlight" : undefined}
+                >
+                  {grouped && (
+                    <div className="time-divider">
+                      <span>{formatTime(m.created_at)}</span>
+                    </div>
+                  )}
+                  <div className={`msg-poke${justArrivedIds.has(m.id) ? " msg-poke-arrive" : ""}`} role="status">
+                    <span className="msg-poke-pill">{pokeLabel(m, memberNames, currentUserId, peerName)}</span>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={m.id ?? `${m.conversation_id}-${m.seq}`}
@@ -951,6 +992,15 @@ export function MessageList({
                   senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
                   onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
                   onMentionSender={onMentionSender}
+                  onPokeSender={
+                    onPoke
+                      ? (senderId) => {
+                          // 群聊：戳被双击的成员；私聊：双击任意头像都戳向对端
+                          if (isGroup) onPoke(senderId);
+                          else if (conversation?.peer) onPoke(conversation.peer.id);
+                        }
+                      : undefined
+                  }
                   actionsOpen={activeActionsId === m.id}
                   onToggleActions={() => toggleActions(m.id)}
                   quoteText={m.reply_to ? (quotePreview.get(m.reply_to) ?? "引用的消息") : null}

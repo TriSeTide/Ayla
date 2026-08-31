@@ -5,10 +5,11 @@
  * 输入框。复用 useChat 数据流（openConversation/loadHistory/recallMessage 等）。
  * conversationId 变化时切换会话（open bucket / 订阅 / 标已读）。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import type { ChatMessage } from "../../api/types";
 import { getElysiaProfile } from "../../api/elysia";
 import { listFriends } from "../../api/users";
+import * as chatApi from "../../api/chat";
 import { Avatar } from "../Avatar";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
@@ -121,6 +122,15 @@ export function PrivateChatPane({
     }
   };
 
+  // 双击头像 → 戳一戳（私聊里双击任意头像都戳向对端；WS 回帧渲染与置顶排序）
+  const handlePoke = useCallback(async (targetUserId: string) => {
+    try {
+      await chatApi.sendPoke(conversationId, targetUserId);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "戳一戳发送失败");
+    }
+  }, [conversationId]);
+
   const peer = conv?.peer ?? null;
   const title = peer?.nickname || peer?.username || "私聊";
   // 非好友禁发：私聊 + 对端已知 + 好友列表已加载 + 对端不是爱莉 + 对端不在好友列表
@@ -193,6 +203,7 @@ export function PrivateChatPane({
         onRetry={(m) => retryOptimistic(conversationId, m)}
         onRemove={(m) => removeOptimistic(conversationId, m)}
         onCancel={(m) => cancelOptimistic(conversationId, m)}
+        onPoke={handlePoke}
       />
       {blocked ? (
         <div className="private-chat-blocked" role="alert">

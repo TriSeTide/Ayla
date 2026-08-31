@@ -39,10 +39,15 @@ interface ChatState {
   lastFetched: number | null;
   /** 群「最近收到新内容」的单调时间戳（ms）。只在收到新内容时 bump，删除/下播/离开不回退。 */
   groupActivityAt: Record<string, number>;
+  /** 私信「最近收到新内容」的单调时间戳（ms）。与群 groupActivityAt 平行：
+   *  戳一戳/新消息 bump 后私信列表往前排，删除/离开不回退。 */
+  conversationActivityAt: Record<string, number>;
 
   setConversations: (list: ConversationSummary[]) => void;
   /** 收到新内容 → 单调 bump（取 max，避免事件乱序/时钟回退导致卡片往回排）。 */
   bumpGroupActivity: (groupId: string, at?: number) => void;
+  /** 私信活跃 bump（单调，语义同 bumpGroupActivity）。 */
+  bumpConversationActivity: (convId: string, at?: number) => void;
   upsertConversation: (conv: ConversationSummary | ConversationDetail) => void;
   setLoading: (loading: boolean) => void;
   setError: (err: string | null) => void;
@@ -69,6 +74,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConversationId: null,
   lastFetched: null,
   groupActivityAt: {},
+  conversationActivityAt: {},
 
   bumpGroupActivity: (groupId, at = Date.now()) =>
     set((state) => {
@@ -76,6 +82,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 单调：只前进不回退；删除/下播/离开不调用本方法，因此不影响排序。
       if (at <= prev) return state;
       return { groupActivityAt: { ...state.groupActivityAt, [groupId]: at } };
+    }),
+
+  bumpConversationActivity: (convId, at = Date.now()) =>
+    set((state) => {
+      const prev = state.conversationActivityAt[convId] ?? 0;
+      // 单调：只前进不回退（与 bumpGroupActivity 同语义）。
+      if (at <= prev) return state;
+      return { conversationActivityAt: { ...state.conversationActivityAt, [convId]: at } };
     }),
 
   setConversations: (conversations) => {
@@ -199,8 +213,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })),
 
   reset: () =>
-    set({ conversations: [], loading: false, error: null, activeConversationId: null, lastFetched: null, groupActivityAt: {} }),
+    set({ conversations: [], loading: false, error: null, activeConversationId: null, lastFetched: null, groupActivityAt: {}, conversationActivityAt: {} }),
 }));
+
+/** 私信列表按「最近活跃」排序：置顶优先 → 活跃时间新→旧 → 保持原顺序（稳定）。
+ *  活跃时间戳由 bumpConversationActivity 单调维护（戳一戳/新消息 bump）。 */
+export function sortPrivateByActivity<T extends { id: string; is_pinned?: boolean }>(
+  list: T[],
+  activityAt: Record<string, number>,
+): T[] {
+  return [...list].sort((a, b) => {
+    const pinnedA = a.is_pinned ?? false;
+    const pinnedB = b.is_pinned ?? false;
+    if (pinnedA !== pinnedB) return Number(pinnedB) - Number(pinnedA);
+    const tsA = activityAt[a.id] ?? 0;
+    const tsB = activityAt[b.id] ?? 0;
+    if (tsA !== tsB) return tsB - tsA;
+    return 0; // 稳定排序：同活跃度保持传入顺序
+  });
+}
 
 /** 判断 chat store 数据是否过期（默认 60 秒） */
 export function isChatStale(maxAgeMs = 60_000): boolean {

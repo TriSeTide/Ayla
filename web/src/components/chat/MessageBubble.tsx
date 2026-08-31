@@ -8,7 +8,7 @@
  * - 引用回复：左 3px ice 竖条 + 弱化一层；
  * - 撤回态弱化 + 「已撤回」标签。
  */
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { ChatMessage } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { FavoriteButton } from "../FavoriteButton";
@@ -41,6 +41,9 @@ export function canRecall(
 
 const MEDIA_TYPES = new Set(["image", "voice", "file", "emoji", "video", "mixed"]);
 
+/** 双击头像判定窗口（第二次 click 在此窗口内视为双击）。 */
+const DOUBLE_CLICK_MS = 250;
+
 export function MessageBubble({
   message,
   isSelf,
@@ -51,6 +54,7 @@ export function MessageBubble({
   senderAvatarLabel,
   onSenderClick,
   onMentionSender,
+  onPokeSender,
   actionsOpen,
   onToggleActions,
   quoteText,
@@ -78,6 +82,8 @@ export function MessageBubble({
   onSenderClick?: () => void;
   /** 长按发送者头像 → 在输入框内插入 @该用户（群聊成员 @，M8） */
   onMentionSender?: (userId: string, name: string) => void;
+  /** 双击头像 → 戳一戳（自己的头像也可触发；由父级解析目标用户） */
+  onPokeSender?: (senderUserId: string) => void;
   /** 触屏下该行工具栏是否展开（由 MessageList 单选管理） */
   actionsOpen?: boolean;
   /** 触屏下点击行切换工具栏展开（MessageList 传入，负责单选） */
@@ -144,12 +150,36 @@ export function MessageBubble({
     clearLongPress();
   };
 
+  // 双击头像 → 戳一戳（自己的头像也可，由父级解析目标用户）。
+  // 与单击/长按不冲突：单击延迟 DOUBLE_CLICK_MS 执行（进主页），窗口内第二次
+  // click 取消挂起的单击并触发 poke；长按走 pointer 通道互不影响。
+  const canPoke = !recalled && message.type !== "system" && onPokeSender != null;
+  const singleClickTimerRef = useRef<number | null>(null);
+
+  const clearSingleClick = () => {
+    if (singleClickTimerRef.current != null) {
+      window.clearTimeout(singleClickTimerRef.current);
+      singleClickTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => clearSingleClick, []);
+
   const handleSenderClick = () => {
     if (longPressTriggeredRef.current) {
       longPressTriggeredRef.current = false;
       return;
     }
-    onSenderClick?.();
+    if (canPoke && singleClickTimerRef.current != null) {
+      // 双击：取消挂起的单击（不进个人主页），触发戳一戳
+      clearSingleClick();
+      onPokeSender?.(message.sender_id);
+      return;
+    }
+    singleClickTimerRef.current = window.setTimeout(() => {
+      singleClickTimerRef.current = null;
+      onSenderClick?.();
+    }, DOUBLE_CLICK_MS);
   };
 
   const bubbleClass = recalled

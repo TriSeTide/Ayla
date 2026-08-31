@@ -1099,6 +1099,33 @@
   color: var(--text-secondary);
 }
 
+/* 戳一戳居中提示（任务 01）：非气泡，居中玻璃胶囊（类似系统消息式样）；
+   实时到达挂到达动画，历史/补发渲染同一样式。 */
+.msg-poke {
+  display: flex;
+  justify-content: center;
+  margin: var(--sp-2) 0;
+}
+
+.msg-poke-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: 999px;
+  background: rgba(126, 149, 189, 0.14);
+  border: 1px solid rgba(126, 149, 189, 0.22);
+  color: var(--text-secondary);
+  font-family: var(--font-utility);
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.msg-poke-arrive .msg-poke-pill {
+  animation: frost-rise var(--dur-fast) var(--ease-out);
+}
+
 /* ---- 消息气泡（design.md §4 Chat Bubbles） ---- */
 
 .msg-row {

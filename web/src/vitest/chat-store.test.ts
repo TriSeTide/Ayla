@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ConversationSummary } from "../api/types";
-import { useChatStore } from "../stores/chat";
+import { useChatStore, sortPrivateByActivity } from "../stores/chat";
 
 function conv(id: string, unread = 0): ConversationSummary {
   return {
@@ -162,5 +162,33 @@ describe("chat store", () => {
     useChatStore.getState().bumpGroupActivity("g1", 100);
     useChatStore.getState().reset();
     expect(useChatStore.getState().groupActivityAt).toEqual({});
+  });
+
+  it("bumpConversationActivity：私信活跃单调递增（戳一戳置顶排序用），reset 清空", () => {
+    const s = useChatStore.getState();
+    s.bumpConversationActivity("c1", 100);
+    expect(useChatStore.getState().conversationActivityAt["c1"]).toBe(100);
+    s.bumpConversationActivity("c1", 300);
+    expect(useChatStore.getState().conversationActivityAt["c1"]).toBe(300);
+    // 更早时间戳不回退
+    s.bumpConversationActivity("c1", 50);
+    expect(useChatStore.getState().conversationActivityAt["c1"]).toBe(300);
+    useChatStore.getState().reset();
+    expect(useChatStore.getState().conversationActivityAt).toEqual({});
+  });
+
+  it("sortPrivateByActivity：置顶优先 → 活跃新→旧 → 保持原顺序", () => {
+    const list = [conv("a"), conv("b"), conv("c"), conv("d")];
+    const active = {
+      a: 100, // 最早
+      c: 300, // 最新
+    };
+    const sorted = sortPrivateByActivity(list, active);
+    expect(sorted.map((c) => c.id)).toEqual(["c", "a", "b", "d"]);
+
+    // 置顶永远优先（置顶组内也按活跃排序）
+    const pinned = list.map((c) => (c.id === "d" ? { ...c, is_pinned: true } : c));
+    const sortedPinned = sortPrivateByActivity(pinned, active);
+    expect(sortedPinned[0].id).toBe("d");
   });
 });

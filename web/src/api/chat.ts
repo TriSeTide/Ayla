@@ -65,6 +65,19 @@ export function sendMessage(convId: string, payload: CreateMessagePayload) {
   });
 }
 
+/** POST /chat/conversations/<id>/messages/ —— 戳一戳（type=poke，content=目标用户 id）。
+ *  免打扰轻互动：落库进历史，但不产生未读/红点/已读回执。 */
+export function sendPoke(convId: string, targetUserId: string) {
+  return apiRequest<ChatMessage>(`/chat/conversations/${convId}/messages/`, {
+    method: "POST",
+    body: {
+      type: "poke" as const,
+      content: targetUserId,
+      idempotency_key: crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+    },
+  });
+}
+
 /** POST /chat/conversations/<id>/read/ —— 将会话当前消息全部标已读 */
 export function markConversationRead(
   convId: string,

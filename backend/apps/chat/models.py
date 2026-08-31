@@ -110,6 +110,7 @@ class Message(models.Model):
     TYPE_VIDEO = "video"
     TYPE_MIXED = "mixed"
     TYPE_SYSTEM = "system"
+    TYPE_POKE = "poke"
     TYPE_CHOICES = [
         (TYPE_TEXT, "文本"),
         (TYPE_IMAGE, "图片"),
@@ -119,6 +120,7 @@ class Message(models.Model):
         (TYPE_VIDEO, "视频"),
         (TYPE_MIXED, "图文混排"),
         (TYPE_SYSTEM, "系统"),
+        (TYPE_POKE, "戳一戳"),
     ]
 
     STATUS_SENT = "sent"

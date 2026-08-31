@@ -94,6 +94,32 @@ def _message_new_payload_async(msg: Message) -> dict:
     return _message_new_payload(msg)
 
 
+def _message_poke_payload(msg: Message) -> dict:
+    """poke 消息帧：独立事件（不进未读/已读/红点），带发送者/目标显示名。"""
+    from .services import _poke_names
+
+    sender_name, target_name = _poke_names(msg)
+    return {
+        "type": "message.poke",
+        "data": {
+            "conversation_id": str(msg.conversation_id),
+            "message_id": str(msg.id),
+            "sender_id": msg.sender_id,
+            "sender_name": sender_name,
+            "target_user_id": (msg.content or "").strip(),
+            "target_name": target_name,
+            "seq": msg.seq,
+            "ts": msg.created_at.isoformat(),
+        },
+    }
+
+
+@database_sync_to_async
+def _message_poke_payload_async(msg: Message) -> dict:
+    """resume 补发 poke 消息（_poke_names 内含同步 DB 查询，同上须进线程池）。"""
+    return _message_poke_payload(msg)
+
+
 class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.user = await database_sync_to_async(_jwt_user_from_scope)(self.scope)
@@ -193,7 +219,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             last_seq = 0
         msgs = await _messages_after(conv, last_seq)
         for msg in msgs:
-            await self.send_json(await _message_new_payload_async(msg))
+            if msg.type == Message.TYPE_POKE:
+                # poke 独立帧补发：绝不能走 message.new（否则前端走未读/红点路径）
+                await self.send_json(await _message_poke_payload_async(msg))
+            else:
+                await self.send_json(await _message_new_payload_async(msg))
         current = await _conv_seq(conv)
         await self.send_json(
             {
@@ -246,6 +276,24 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "message_id": event["message_id"],
                     "user_id": event["user_id"],
                     "seq": event["seq"],
+                },
+            }
+        )
+
+    async def chat_message_poke(self, event):
+        """戳一戳广播：独立帧，前端只做置顶排序 + 预览 + 居中提示，不碰未读。"""
+        await self.send_json(
+            {
+                "type": "message.poke",
+                "data": {
+                    "conversation_id": event["conversation_id"],
+                    "message_id": event["message_id"],
+                    "sender_id": event["sender_id"],
+                    "sender_name": event["sender_name"],
+                    "target_user_id": event["target_user_id"],
+                    "target_name": event["target_name"],
+                    "seq": event["seq"],
+                    "ts": event["ts"],
                 },
             }
         )

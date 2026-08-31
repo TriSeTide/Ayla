@@ -312,6 +312,14 @@ class MessageView(APIView):
             media_id=data.get("media_id"),
             segments=data.get("segments"),
         )
+        # 戳一戳：独立广播帧（不进未读/已读/红点链路），也不 inject 爱莉主链
+        # （轻互动不是聊天内容，不进入 Elysium 意识通道）。
+        if data.get("type") == Message.TYPE_POKE:
+            services.broadcast_message_poke(msg)
+            return Response(
+                MessageSerializer(msg, context={"request": request}).data,
+                status=status.HTTP_201_CREATED,
+            )
         # 只有真正落库后才广播
         services.broadcast_message_new(msg)
         # 爱莉桥接：若该会话对端是爱莉，把用户消息 inject 到 Elysium 主链

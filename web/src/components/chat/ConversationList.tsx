@@ -40,8 +40,9 @@ function previewLabel(conv: ConversationSummary): string {
     // 后端统一生成混排摘要（preview）；旧后端/旧缓存无 preview 时前端兜底
     body = lm.preview || lm.content || TYPE_PLACEHOLDER[lm.type] || "[消息]";
   }
-  // 群聊：带发送者名；私聊对端名即会话标题，不再重复
-  if (conv.type === "group" && lm.sender_id && lm.sender_name) {
+  // 群聊：带发送者名；私聊对端名即会话标题，不再重复。
+  // 戳一戳（type=poke）的 preview 已是「A戳了戳B」完整文案，不再加发送者前缀。
+  if (conv.type === "group" && lm.sender_id && lm.sender_name && lm.type !== "poke") {
     body = `${lm.sender_name}: ${body}`;
   }
   return body;

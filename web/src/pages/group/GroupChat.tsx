@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { getElysiaProfile } from "../../api/elysia";
+import * as chatApi from "../../api/chat";
 import type { ChatMessage } from "../../api/types";
 import { MessageInput, type MessageInputHandle } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
@@ -114,6 +115,15 @@ export function GroupChat({ groupId }: { groupId: string }) {
     inputRef.current?.insertMention(userId, name || "群成员");
   }, []);
 
+  // 双击头像 → 戳一戳（轻互动；WS message.poke 回帧负责渲染与置顶排序）
+  const handlePoke = useCallback(async (targetUserId: string) => {
+    try {
+      await chatApi.sendPoke(groupId, targetUserId);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "戳一戳发送失败");
+    }
+  }, [groupId]);
+
   return (
     <div className="group-chat">
       {historyError && (
@@ -152,6 +162,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
         onRemove={(m) => removeOptimistic(groupId, m)}
         onCancel={(m) => cancelOptimistic(groupId, m)}
         onMentionSender={handleMentionUser}
+        onPoke={handlePoke}
       />
       <TypingIndicator typing={typingActive} />
       <MessageInput ref={inputRef} convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} members={activeConv?.members} />

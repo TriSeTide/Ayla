@@ -20,7 +20,7 @@ import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useBadgesStore } from "../stores/badges";
-import { useChatStore, isChatStale } from "../stores/chat";
+import { useChatStore, isChatStale, sortPrivateByActivity } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { useNoticeStore } from "../stores/notices";
 import { useShellStore } from "../stores/shell";
@@ -42,6 +42,8 @@ export function MessagesPage() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const conversations = useChatStore((s) => s.conversations);
   const conversationsLoading = useChatStore((s) => s.loading);
+  // 私信列表按「最近活跃」排序（戳一戳/新消息 bump 后往前排；置顶优先）
+  const conversationActivityAt = useChatStore((s) => s.conversationActivityAt);
   const privateRef = useRef<HTMLDivElement>(null);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制会话列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
@@ -159,7 +161,13 @@ export function MessagesPage() {
     });
   }, []);
 
-  const privateConvs = useMemo(() => conversations.filter((c) => c.type === "private"), [conversations]);
+  const privateConvs = useMemo(
+    () => sortPrivateByActivity(
+      conversations.filter((c) => c.type === "private"),
+      conversationActivityAt,
+    ),
+    [conversations, conversationActivityAt],
+  );
 
   // 下拉刷新/刷新键共用：强制重拉会话列表（绕过 isChatStale 缓存）。
   const refreshConversations = useCallback(async () => {

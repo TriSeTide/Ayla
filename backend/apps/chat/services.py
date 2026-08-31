@@ -449,6 +449,58 @@ async def abroadcast_message_new(message: Message) -> None:
     await _group_send_async(message.conversation_id, _message_new_event(message))
 
 
+# ---------- 戳一戳广播（独立事件帧，刻意不进未读/已读/红点链路） ----------
+
+def _poke_names(message: Message) -> tuple[str, str]:
+    """poke 帧需要的发送者/目标显示名（content 存目标 user id）。"""
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    sender = message.sender
+    sender_name = (
+        getattr(sender, "nickname", "") or (sender.username if sender else "") or ""
+    )
+    target_id = (message.content or "").strip()
+    target = User.objects.filter(id=target_id).first() if target_id else None
+    target_name = (
+        getattr(target, "nickname", "") or (target.username if target else "") or ""
+    )
+    return sender_name, target_name
+
+
+def _message_poke_event(message: Message) -> dict:
+    """chat.message.poke 事件（group_send 载荷）。"""
+    sender_name, target_name = _poke_names(message)
+    return {
+        "type": "chat.message.poke",
+        "conversation_id": str(message.conversation_id),
+        "message_id": str(message.id),
+        "sender_id": message.sender_id,
+        "sender_name": sender_name,
+        "target_user_id": (message.content or "").strip(),
+        "target_name": target_name,
+        "seq": message.seq,
+        "ts": message.created_at.isoformat(),
+    }
+
+
+def broadcast_message_poke(message: Message) -> None:
+    """message.poke（同步版，REST 视图用）：戳一戳广播，不产生未读/红点。"""
+    _group_send_sync(message.conversation_id, _message_poke_event(message))
+
+
+async def abroadcast_message_poke(message: Message) -> None:
+    """message.poke（异步版，WS/测试用）。
+
+    event 构造内含同步 DB 查询（发送者/目标昵称），必须经 sync_to_async
+    进线程池，否则 async 上下文抛 SynchronousOnlyOperation。
+    """
+    from asgiref.sync import sync_to_async
+
+    event = await sync_to_async(_message_poke_event)(message)
+    await _group_send_async(message.conversation_id, event)
+
+
 def broadcast_recall(conversation_id, message_id: int, seq: int) -> None:
     """message.recall（同步版）。"""
     _group_send_sync(

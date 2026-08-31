@@ -89,14 +89,35 @@ def _mention_name(user_id) -> str:
     return user.nickname or user.username or "未知用户"
 
 
+def _poke_preview(msg) -> str:
+    """戳一戳列表预览：`发送者戳了戳目标`（content 存目标 user id）。
+
+    昵称缺失回退「有人/对方」；前端渲染时对「自己」归一为「我」。
+    """
+    sender = msg.sender
+    sender_name = (
+        getattr(sender, "nickname", "") or (sender.username if sender else "") or "有人"
+    )
+    target = None
+    target_id = (msg.content or "").strip()
+    if target_id:
+        target = User.objects.filter(id=target_id).first()
+    target_name = (
+        getattr(target, "nickname", "") or (target.username if target else "") or "对方"
+    )
+    return f"{sender_name}戳了戳{target_name}"
+
+
 def message_preview(msg) -> str:
     """会话列表/群活跃度的最新消息预览文本。
 
     混排消息按段生成「文本文本[视频]文本[图片]」；文本消息取 content；
-    单媒体消息取 [图片]/[语音] 等占位；撤回显示 [已撤回]。
+    单媒体消息取 [图片]/[语音] 等占位；撤回显示 [已撤回]；戳一戳显示「A戳了戳B」。
     """
     if msg.status == Message.STATUS_RECALLED:
         return "[已撤回]"
+    if msg.type == Message.TYPE_POKE:
+        return _poke_preview(msg)
     if msg.type == Message.TYPE_MIXED and msg.segments:
         parts = []
         for seg in msg.segments:
@@ -306,6 +327,8 @@ class ConversationSerializer(serializers.ModelSerializer):
         return (
             obj.messages.exclude(sender=request.user)
             .exclude(status=Message.STATUS_RECALLED)
+            # 戳一戳刻意无未读/已读属性：不参与未读计数、未读序号与红点
+            .exclude(type=Message.TYPE_POKE)
             .exclude(reads__user=request.user)
         )
 
@@ -499,6 +522,32 @@ class CreateMessageSerializer(serializers.Serializer):
                 )
             attrs["type"] = Message.TYPE_MIXED
             attrs["content"] = "".join(text_parts)
+            return attrs
+
+        # 戳一戳：content 存目标用户 id；不得携带媒体/引用；目标必须是会话成员。
+        if msg_type == Message.TYPE_POKE:
+            if media_id:
+                raise serializers.ValidationError(
+                    {"media_id": "戳一戳消息不能携带媒体"}
+                )
+            if attrs.get("reply_to"):
+                raise serializers.ValidationError(
+                    {"reply_to": "戳一戳消息不支持引用"}
+                )
+            target_id = (attrs.get("content") or "").strip()
+            if not target_id:
+                raise serializers.ValidationError(
+                    {"content": "戳一戳必须指定目标用户"}
+                )
+            conversation = self.context.get("conversation")
+            if (
+                conversation is not None
+                and not conversation.members.filter(user_id=target_id).exists()
+            ):
+                raise serializers.ValidationError(
+                    {"content": "目标用户不在会话中"}
+                )
+            attrs["content"] = target_id
             return attrs
 
         # 旧模式：单媒体消息 type=image/voice/file/emoji/video 时 media_id 必填并校验

@@ -328,6 +328,46 @@ export class ChatWSClient {
         message.setRecalled(d.conversation_id, d.message_id);
         break;
       }
+      case "message.poke": {
+        // 戳一戳：独立帧，刻意不走 message.new 的未读/已读/红点链路。
+        // 只做：消息进会话流、列表预览「A戳了戳B」、按「最近活跃」往前排。
+        const d = frame.data;
+        const msg: ChatMessage = {
+          id: d.message_id,
+          conversation_id: d.conversation_id,
+          sender_id: d.sender_id,
+          type: "poke",
+          content: d.target_user_id,
+          media_id: null,
+          segments: null,
+          reply_to: null,
+          read_by_me: false,
+          status: "sent",
+          seq: d.seq,
+          created_at: d.ts,
+        };
+        message.upsertMessage(d.conversation_id, msg);
+        const conv = chat.conversations.find((c) => c.id === d.conversation_id);
+        if (conv) {
+          chat.setLastMessage(conv.id, {
+            seq: d.seq,
+            type: "poke",
+            content: d.target_user_id,
+            sender_id: d.sender_id,
+            sender_name: d.sender_name,
+            status: "sent",
+            created_at: d.ts,
+            preview: `${d.sender_name}戳了戳${d.target_name}`,
+          });
+          // 置顶但不打扰：复用「最近活跃」排序，不 bumpUnread、不拉 badges、不弹红点。
+          if (conv.type === "group") {
+            chat.bumpGroupActivity(conv.id);
+          } else {
+            chat.bumpConversationActivity(conv.id);
+          }
+        }
+        break;
+      }
       case "message.read": {
         const d = frame.data;
         message.markReadByMessage(d.conversation_id, d.message_id, d.user_id);

@@ -22,7 +22,7 @@ import { Avatar } from "../Avatar";
 import { IconClose } from "../icons";
 import { useAuthStore } from "../../stores/auth";
 import { useBadgesStore } from "../../stores/badges";
-import { useChatStore, isChatStale } from "../../stores/chat";
+import { useChatStore, isChatStale, sortPrivateByActivity } from "../../stores/chat";
 import { useNoticeStore } from "../../stores/notices";
 import { chatWS } from "../../ws/chat";
 import { ConversationList } from "./ConversationList";
@@ -168,7 +168,15 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
       .catch((e) => setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试"));
   }, []);
 
-  const privateConvs = useMemo(() => conversations.filter((c) => c.type === "private"), [conversations]);
+  const conversationActivityAt = useChatStore((s) => s.conversationActivityAt);
+  const privateConvs = useMemo(
+    () =>
+      sortPrivateByActivity(
+        conversations.filter((c) => c.type === "private"),
+        conversationActivityAt,
+      ),
+    [conversations, conversationActivityAt],
+  );
   const pendingFriendRequests = useMemo(
     () => friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending"),
     [friendRequests, currentUser?.id],

@@ -103,6 +103,10 @@ function messageEvent(
   const content = lastMessage.preview
     || lastMessage.content
     || MEDIA_EVENT_PLACEHOLDER[lastMessage.type ?? ""] || "";
+  // 戳一戳 preview 已是「A戳了戳B」完整文案，不加「发送者：」前缀（避免 A：A戳了戳B）
+  if (lastMessage.type === "poke") {
+    return { kind: "message", at, text: content };
+  }
   return { kind: "message", at, text: `${who}：${content}` };
 }
 

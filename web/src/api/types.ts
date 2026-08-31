@@ -106,7 +106,7 @@ export type ApiErrorBody = Record<string, unknown>;
 /* ================= M5-2 聊天域（对齐 backend/apps/chat/serializers.py） ================= */
 
 export type MessageType =
-  | "text" | "image" | "voice" | "file" | "emoji" | "video" | "mixed" | "system";
+  | "text" | "image" | "voice" | "file" | "emoji" | "video" | "mixed" | "system" | "poke";
 export type MessageStatus = "sent" | "delivered" | "read" | "recalled";
 
 /** 媒体种类（与 backend apps/media/models.py MediaObject.kind 对齐） */
@@ -366,6 +366,24 @@ export interface MessageReadFrame {
   data: { conversation_id: string; message_id: string; user_id: string; seq: number };
 }
 
+/** 戳一戳广播帧：独立事件，前端只做置顶排序 + 预览 + 居中提示，不碰未读/红点。 */
+export interface MessagePokeFrame {
+  type: "message.poke";
+  data: {
+    conversation_id: string;
+    message_id: string;
+    sender_id: string;
+    /** 发送者显示名（后端算好；历史 REST 消息需前端自行解析） */
+    sender_name: string;
+    /** 被戳目标用户 id（消息 content 亦存此值，两者一致） */
+    target_user_id: string;
+    /** 目标显示名 */
+    target_name: string;
+    seq: number;
+    ts: string;
+  };
+}
+
 export interface TypingFrame {
   type: "typing";
   data: { conversation_id: string; user_id: string; is_typing: boolean };
@@ -615,6 +633,7 @@ export type ChatServerFrame =
   | MessageNewFrame
   | MessageRecallFrame
   | MessageReadFrame
+  | MessagePokeFrame
   | TypingFrame
   | HistorySyncFrame
   | ElysiaReplyFrame
