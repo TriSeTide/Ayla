@@ -20,3 +20,6 @@ dist/
 
 # 本地 HTTPS 证书（mkcert 生成，含私钥，勿入库）
 certs/
+
+# workbuddy 本地工作区（证据截图/临时文件，与父仓库 .workbuddy/ 忽略规则一致）
+.workbuddy/
