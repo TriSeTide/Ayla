@@ -14,6 +14,7 @@ import type { ConversationSummary } from "../../api/types";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
 import { goUserProfile } from "../../utils/navigation";
+import { displayStatusOf } from "../../utils/displayStatus";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "./ConversationMoreMenu";
@@ -79,7 +80,13 @@ export function ConversationList({
     <ul>
       {conversations.map((conv, idx) => {
         const isPrivate = conv.type === "private";
-        const peerOnline = conv.peer ? onlineUsers[conv.peer.id] != null : false;
+        // 实时在线：presence store 已知状态优先（online/offline 都记录），
+        // 无记录（登录前就在线/WS 未连接）回退 REST 快照 conv.peer.online
+        const peerOnline = conv.peer
+          ? onlineUsers[conv.peer.id] != null
+            ? onlineUsers[conv.peer.id] === "online"
+            : conv.peer.online
+          : false;
         const isElysia = elysiaUserId != null && conv.peer?.id === elysiaUserId;
         const title = isPrivate
           ? conv.peer?.nickname || conv.peer?.username || conv.title || "未命名会话"
@@ -119,7 +126,7 @@ export function ConversationList({
                   <span className="conv-item-title">{title}</span>
                   {isPrivate && (
                     <span className={`conv-item-status ${isOnline ? "is-online" : ""}`}>
-                      {isOnline ? "在线" : "离线"}
+                      {displayStatusOf(conv.peer, isOnline)}
                     </span>
                   )}
                 </span>

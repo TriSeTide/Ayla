@@ -10,6 +10,7 @@ import * as chatApi from "../api/chat";
 import type { ConversationSummary } from "../api/types";
 import { ConversationList } from "../components/chat/ConversationList";
 import { useChatStore } from "../stores/chat";
+import { usePresenceStore } from "../stores/presence";
 
 vi.mock("../api/chat", () => ({
   togglePinConversation: vi.fn(),
@@ -40,7 +41,7 @@ function privateConv(overrides: Partial<ConversationSummary> = {}): Conversation
       nickname: "小樱",
       avatar: "",
       signature: "",
-      status: "offline",
+      status: "auto",
       online: false,
       date_joined: "2026-01-01T00:00:00Z",
     },
@@ -61,6 +62,7 @@ function renderList(convs: ConversationSummary[], onSelect = vi.fn(), onError = 
 
 beforeEach(() => {
   useChatStore.getState().reset();
+  usePresenceStore.getState().reset();
   vi.clearAllMocks();
   togglePinMock.mockResolvedValue({ pinned: true, detail: "已置顶" });
   hideMock.mockResolvedValue({ detail: "会话已隐藏", hidden: true });
@@ -68,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useChatStore.getState().reset();
+  usePresenceStore.getState().reset();
   vi.restoreAllMocks();
 });
 
@@ -97,6 +100,47 @@ describe("会话列表预览与在线状态", () => {
     const status = screen.getByText("离线");
     expect(status).toBeInTheDocument();
     expect(screen.getByText("小樱")).toBeInTheDocument();
+  });
+
+  it("auto + presence 实时在线 → 显示「在线」", () => {
+    usePresenceStore.getState().setUser("u2", "online");
+    renderList([privateConv()]);
+    expect(screen.getByText("在线")).toBeInTheDocument();
+  });
+
+  it("auto + presence 已离线（记录保留）→ 显示「离线」", () => {
+    usePresenceStore.getState().setUser("u2", "offline");
+    renderList([privateConv({ peer: { ...privateConv().peer!, online: true } })]);
+    // presence 已知状态优先于 REST 快照：即使快照 online=true 也显示离线
+    expect(screen.getByText("离线")).toBeInTheDocument();
+  });
+
+  it("dnd → 显示「勿扰」（即使实时在线）", () => {
+    renderList([
+      privateConv({
+        peer: { ...privateConv().peer!, status: "dnd", online: true },
+      }),
+    ]);
+    expect(screen.getByText("勿扰")).toBeInTheDocument();
+  });
+
+  it("away → 显示「离开」", () => {
+    renderList([
+      privateConv({
+        peer: { ...privateConv().peer!, status: "away", online: true },
+      }),
+    ]);
+    expect(screen.getByText("离开")).toBeInTheDocument();
+  });
+
+  it("invisible → 显示「离线」（不暴露在线痕迹）", () => {
+    usePresenceStore.getState().setUser("u2", "online");
+    renderList([
+      privateConv({
+        peer: { ...privateConv().peer!, status: "invisible", online: false },
+      }),
+    ]);
+    expect(screen.getByText("离线")).toBeInTheDocument();
   });
 
   it("无消息时显示「暂无消息」", () => {
@@ -208,24 +252,25 @@ describe("会话管理菜单", () => {
     expect(btns[1].className).not.toContain("is-pinned");
   });
 
-  it("删除：confirm 确认后调用 hide 并从列表移除", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("删除：确认框确认后调用 hide 并从列表移除", async () => {
     useChatStore.getState().setConversations([privateConv()]);
     renderList(useChatStore.getState().conversations);
     fireEvent.click(screen.getByRole("button", { name: /更多操作/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "删除会话" }));
+    // 自定义确认框（非 window.confirm）：点「删除」确认
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
     await waitFor(() => expect(hideMock).toHaveBeenCalledWith("c1"));
     await waitFor(() => {
       expect(useChatStore.getState().conversations).toHaveLength(0);
     });
   });
 
-  it("删除：confirm 取消则不调用 API", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("删除：确认框取消则不调用 API", () => {
     useChatStore.getState().setConversations([privateConv()]);
     renderList(useChatStore.getState().conversations);
     fireEvent.click(screen.getByRole("button", { name: /更多操作/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "删除会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(hideMock).not.toHaveBeenCalled();
     expect(useChatStore.getState().conversations).toHaveLength(1);
   });

@@ -14,6 +14,8 @@ import { ResourceImage } from "../ResourceImage";
 import { mediaContentUrl } from "../../api/media";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { useAuthStore } from "../../stores/auth";
+import { usePresenceStore } from "../../stores/presence";
+import { presenceOnline } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 import type { CSSProperties } from "react";
 
@@ -65,6 +67,7 @@ export function CommentList({
 }) {
   const byId = new Map(comments.map((c) => [c.id, c]));
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  const onlineUsers = usePresenceStore((s) => s.users);
   // 查看器状态：某条评论的图片原图画廊
   const [viewer, setViewer] = useState<{ commentId: number; index: number } | null>(null);
 
@@ -93,7 +96,7 @@ export function CommentList({
                 <Avatar
                   label={c.author.nickname || c.author.username}
                   size={32}
-                  online={c.author.online}
+                  online={presenceOnline(onlineUsers, c.author)}
                   imageUrl={c.author.avatar || null}
                   onClick={() => goUserProfile(currentUserId, c.author.id)}
                   ariaLabel={`查看 ${c.author.nickname || c.author.username} 的个人主页`}

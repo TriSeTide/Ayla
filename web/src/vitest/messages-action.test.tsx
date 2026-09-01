@@ -49,7 +49,7 @@ const req: FriendRequest = {
     nickname: "小樱",
     avatar: "",
     signature: "",
-    status: "offline",
+    status: "auto",
     online: false,
     date_joined: "2026-01-01T00:00:00Z",
   },

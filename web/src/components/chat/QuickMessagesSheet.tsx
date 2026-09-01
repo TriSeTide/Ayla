@@ -24,6 +24,8 @@ import { useAuthStore } from "../../stores/auth";
 import { useBadgesStore } from "../../stores/badges";
 import { useChatStore, isChatStale, sortPrivateByActivity } from "../../stores/chat";
 import { useNoticeStore } from "../../stores/notices";
+import { usePresenceStore } from "../../stores/presence";
+import { presenceOnline } from "../../utils/displayStatus";
 import { chatWS } from "../../ws/chat";
 import { ConversationList } from "./ConversationList";
 import { ElysiaEntry } from "./ElysiaEntry";
@@ -358,15 +360,16 @@ function RequestRow({
   onAccept,
   onReject,
 }: {
-  avatar: { nickname: string; username: string; avatar: string; online: boolean };
+  avatar: Pick<import("../../api/types").UserPublic, "id" | "status" | "nickname" | "username" | "avatar" | "online">;
   name: string;
   message: string;
   onAccept: () => void;
   onReject: () => void;
 }) {
+  const onlineUsers = usePresenceStore((s) => s.users);
   return (
     <div className="request-row">
-      <Avatar label={avatar.nickname || avatar.username} size={36} online={avatar.online} imageUrl={avatar.avatar || null} />
+      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, avatar)} imageUrl={avatar.avatar || null} />
       <div className="request-body">
         <span className="request-name">{name}</span>
         {message && <span className="request-msg">{message}</span>}

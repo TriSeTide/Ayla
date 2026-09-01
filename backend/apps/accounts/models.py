@@ -6,8 +6,9 @@
 - Friendship：好友关系，status 区分 pending/accepted/blocked；
 - FriendRequest：好友申请流，带申请消息与处理状态。
 
-在线状态（online/away/dnd/invisible）是运行事实而非关系信念，
+在线状态（auto/away/dnd/invisible）是运行事实而非关系信念，
 Redis 中维护实时值，数据库 status 字段仅作为离线后的持久化期望（见 presence.py）。
+auto（自动）表示对外显示跟随实时在线状态；presence 实时值仍只区分 online/invisible。
 """
 import uuid
 
@@ -33,18 +34,19 @@ class User(AbstractUser):
     signature = models.CharField("个性签名", max_length=256, blank=True, default="")
 
     # 离线时的持久化期望状态；实时在线状态以 Redis 为准
-    STATUS_ONLINE = "online"
+    # auto（自动）：对外显示跟随实时在线；旧 online 值已并入 auto（数据迁移见 0004）
+    STATUS_AUTO = "auto"
     STATUS_AWAY = "away"
     STATUS_DND = "dnd"
     STATUS_INVISIBLE = "invisible"
     STATUS_CHOICES = [
-        (STATUS_ONLINE, "在线"),
+        (STATUS_AUTO, "自动"),
         (STATUS_AWAY, "离开"),
         (STATUS_DND, "勿扰"),
         (STATUS_INVISIBLE, "隐身"),
     ]
     status = models.CharField(
-        "状态", max_length=16, choices=STATUS_CHOICES, default=STATUS_ONLINE
+        "状态", max_length=16, choices=STATUS_CHOICES, default=STATUS_AUTO
     )
 
     last_active_at = models.DateTimeField("最后活跃", null=True, blank=True)

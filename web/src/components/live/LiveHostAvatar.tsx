@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import type { UserPublic } from "../../api/types";
 import { ensureUser, getCachedUser } from "../../api/users";
 import { Avatar } from "../Avatar";
+import { usePresenceOnline } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 
 export function LiveHostAvatar({
@@ -37,12 +38,13 @@ export function LiveHostAvatar({
   }, [ownerId]);
 
   const label = host?.nickname || host?.username || ownerNickname || "主播";
+  const hostOnline = usePresenceOnline(host);
 
   return (
     <Avatar
       label={label}
       size={size}
-      online={host?.online ?? false}
+      online={hostOnline}
       imageUrl={host?.avatar || null}
       onClick={() => ownerId && goUserProfile(null, ownerId)}
       ariaLabel={`查看主播 ${label} 的个人主页`}

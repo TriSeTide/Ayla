@@ -11,6 +11,8 @@
 import { useMemo } from "react";
 import type { ConversationMember } from "../../api/types";
 import { useAuthStore } from "../../stores/auth";
+import { usePresenceStore } from "../../stores/presence";
+import { presenceOnline } from "../../utils/displayStatus";
 import { Avatar } from "../Avatar";
 
 export function MentionPicker({
@@ -24,6 +26,7 @@ export function MentionPicker({
   onSelect: (member: ConversationMember) => void;
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
+  const onlineUsers = usePresenceStore((s) => s.users);
   const q = query.trim().toLowerCase();
 
   const filtered = useMemo(() => {
@@ -53,7 +56,7 @@ export function MentionPicker({
               <Avatar
                 label={name}
                 size={32}
-                online={m.user.online}
+                online={presenceOnline(onlineUsers, m.user)}
                 imageUrl={m.user.avatar || null}
               />
               <span className="mention-picker-name">{name}</span>

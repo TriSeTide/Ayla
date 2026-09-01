@@ -15,9 +15,10 @@ import { Avatar } from "../components/Avatar";
 import { IconBack, IconLogout } from "../components/icons";
 import { useAuth } from "../hooks/useAuth";
 import { useAuthStore } from "../stores/auth";
+import { usePresenceOnline } from "../utils/displayStatus";
 
 const STATUS_OPTIONS = [
-  { value: "online", label: "在线" },
+  { value: "auto", label: "自动" },
   { value: "away", label: "离开" },
   { value: "dnd", label: "勿扰" },
   { value: "invisible", label: "隐身" },
@@ -28,10 +29,12 @@ export function ProfilePage() {
   const { logout } = useAuth();
   const currentUser = useAuthStore((s) => s.currentUser);
   const setUser = useAuthStore((s) => s.setUser);
+  // 自身光环跟随 WS 实时在线（presence 增量）
+  const currentUserOnline = usePresenceOnline(currentUser);
 
   const [nickname, setNickname] = useState(currentUser?.nickname ?? "");
   const [signature, setSignature] = useState(currentUser?.signature ?? "");
-  const [status, setStatus] = useState(currentUser?.status ?? "online");
+  const [status, setStatus] = useState(currentUser?.status ?? "auto");
   const [showContent, setShowContent] = useState(currentUser?.show_content ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +106,7 @@ export function ProfilePage() {
   const dirty =
     nickname !== (currentUser.nickname ?? "") ||
     signature !== (currentUser.signature ?? "") ||
-    status !== (currentUser.status ?? "online") ||
+    status !== (currentUser.status ?? "auto") ||
     showContent !== (currentUser.show_content ?? false) ||
     avatarFile != null;
 
@@ -162,7 +165,7 @@ export function ProfilePage() {
               <Avatar
                 label={displayName}
                 size={64}
-                online={currentUser.online}
+                online={currentUserOnline}
                 imageUrl={avatarPreview ?? (currentUser.avatar || null)}
               />
             </div>

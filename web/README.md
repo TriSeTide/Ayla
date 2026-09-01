@@ -461,9 +461,9 @@ npm run test:m52    # 仅 M5-2 四个测试文件
 
 ## 与后端契约对齐要点
 
-- 用户 `id` 为字符串（UUID），`UserPublic` 字段：`id/username/nickname/avatar/signature/status/online/date_joined`
+- 用户 `id` 为字符串（UUID），`UserPublic` 字段：`id/username/nickname/avatar/signature/status/online/display_status/date_joined`（`display_status` 为后端权威显示文案：auto→在线/离线、dnd→勿扰、away→离开、invisible→离线）
 - JWT：`ROTATE_REFRESH_TOKENS=True` → **每次 refresh 都返回新 refresh，前端必须用返回值覆盖旧值**（已实现）
-- Presence WS：`/ws/presence/?token=<jwt>`；服务端推 `presence.update` 增量；`ping`→`pong` 心跳
+- Presence WS：`/ws/presence/?token=<jwt>`；服务端推 `presence.update` 增量（online/offline）；`ping`→`pong` 心跳
 
 ## 已知取舍（M5-1 决策）
 
@@ -471,7 +471,7 @@ npm run test:m52    # 仅 M5-2 四个测试文件
 2. **样式方案**：本期只做全局 CSS + 最小 CSS 变量，无组件库/设计 token；视觉系统留待 M5-2 或后续统一。
 3. **CORS**：本地 dev 走 Vite proxy 同源；若未来前端直连后端域名，需评估在 backend 加 `django-cors-headers`（公共契约变更，先说明再动）。
 4. **登录/注册 401**：认证端点标记 `noRetry401`，401 原样归一给页面展示后端错误，不触发刷新重放（避免登录失败误报"登录已过期"）。
-5. **Presence 增量**：后端推 `presence.update` 增量帧，前端按 `user_id` 合并/移除（与 backend `consumers.py` 对齐）。
+5. **Presence 增量**：后端推 `presence.update` 增量帧，前端按 `user_id` 记录已知状态（online/offline 都保留，显示层区分「未收到」与「已离线」，REST 快照兜底；与 backend `consumers.py` 对齐）。
 6. **会话恢复**：页面启动时若 `sessionStorage` 有 refresh，先续期拿 access 再拉 `me`，恢复完成前不渲染路由，避免已登录用户闪跳登录页。
 
 ### M5-2 决策

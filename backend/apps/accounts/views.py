@@ -43,12 +43,33 @@ class RegisterView(generics.CreateAPIView):
 # ---------- 资料 ----------
 
 class ProfileView(generics.RetrieveUpdateAPIView):
-    """读取/修改本人资料。"""
+    """读取/修改本人资料。
+
+    校验与写入走 ProfileSerializer（头像 URL 权限等）；
+    响应统一返回 UserPublicSerializer（含 online/display_status），
+    与前端 UserPublic 类型契约一致（修复保存后 currentUser 缺字段）。
+    """
 
     serializer_class = ProfileSerializer
 
     def get_object(self):
         return self.request.user
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        return Response(
+            UserPublicSerializer(instance, context={"request": request}).data
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(
+            UserPublicSerializer(instance, context={"request": request}).data
+        )
 
 
 class MeView(APIView):

@@ -20,6 +20,7 @@ import * as boardgameApi from "../api/boardgame";
 import type { GameRoom, LiveChannelDescriptor, Post, UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { IconBack } from "../components/icons";
+import { useDisplayStatus, usePresenceOnline } from "../utils/displayStatus";
 
 export function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
@@ -29,6 +30,9 @@ export function UserProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"friend" | "chat" | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  // 在线状态：presence 实时增量优先，REST 快照兜底；文案按 display_status 规则
+  const online = usePresenceOnline(user);
+  const displayStatus = useDisplayStatus(user);
 
   // 「他的内容」（对方开启向他人展示内容时才拉取；收藏永不展示）
   const [theirPosts, setTheirPosts] = useState<Post[]>([]);
@@ -164,7 +168,7 @@ export function UserProfilePage() {
                   <Avatar
                     label={user.nickname || user.username}
                     size={64}
-                    online={user.online}
+                    online={online}
                     imageUrl={user.avatar || null}
                   />
                 </div>
@@ -172,8 +176,8 @@ export function UserProfilePage() {
                   <span className="profile-nickname">{user.nickname || user.username}</span>
                   <span className="profile-username">@{user.username}</span>
                 </div>
-                <span className={`profile-presence ${user.online ? "is-online" : ""}`}>
-                  {user.online ? "在线" : "离线"}
+                <span className={`profile-presence ${online ? "is-online" : ""}`}>
+                  {displayStatus}
                 </span>
               </div>
 

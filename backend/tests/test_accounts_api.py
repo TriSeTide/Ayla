@@ -105,6 +105,22 @@ class TestProfile:
         )
         assert resp.status_code == 400
 
+    def test_update_profile_accepts_auto(self, auth_client):
+        """任务 06：auto（自动）为合法选项；响应含 display_status 权威文案。"""
+        client, user = auth_client(username="auto_user")
+        resp = client.patch(
+            "/api/v1/me/profile/", {"status": "auto"}, format="json"
+        )
+        assert resp.status_code == 200
+        user.refresh_from_db()
+        assert user.status == "auto"
+        body = resp.json()
+        assert body["status"] == "auto"
+        assert "display_status" in body
+        # 响应为 UserPublicSerializer 契约（含 id/online），修复保存后 currentUser 缺字段
+        assert body["id"] == str(user.id)
+        assert "online" in body
+
     def _mk_image_media(self, user):
         return MediaObject.objects.create(
             media_id=f"ava-media-{user.id[:8]}",

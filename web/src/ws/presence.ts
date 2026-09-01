@@ -113,8 +113,8 @@ export class PresenceClient {
     if (msg.type === "presence.update") {
       const data = msg.data as { user_id: string; status: string } | undefined;
       if (data?.user_id) {
-        if (data.status === "offline") store.removeUser(data.user_id);
-        else store.setUser(data.user_id, data.status);
+        // 记录已知状态（online/offline 都保留），供显示层区分「未收到」与「已离线」
+        store.setUser(data.user_id, data.status === "offline" ? "offline" : "online");
       }
     }
     for (const h of this.handlers) h(msg);

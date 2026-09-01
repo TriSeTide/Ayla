@@ -25,6 +25,8 @@ import { usePostsStore } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
 import { useAuthStore } from "../stores/auth";
 import { chatWS } from "../ws/chat";
+import { usePresenceStore } from "../stores/presence";
+import { presenceOnline } from "../utils/displayStatus";
 import { goUserProfile } from "../utils/navigation";
 import { getVisibilityLabels } from "../utils/visibility";
 
@@ -43,6 +45,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const navigate = useNavigate();
   const navigationType = useNavigationType();
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  const onlineUsers = usePresenceStore((s) => s.users);
   const [searchParams] = useSearchParams();
   const fromGroup = groupId ?? searchParams.get("fromGroup");
   const fromMine = searchParams.get("from") === "mine";
@@ -548,7 +551,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
               <Avatar
                 label={post.author.nickname || post.author.username}
                 size={36}
-                online={post.author.online}
+                online={presenceOnline(onlineUsers, post.author)}
                 imageUrl={post.author.avatar || null}
                 onClick={() => goUserProfile(currentUserId, post.author.id)}
                 ariaLabel={`查看 ${post.author.nickname || post.author.username} 的个人主页`}

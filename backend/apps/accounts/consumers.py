@@ -40,32 +40,41 @@ def _jwt_user_from_scope(scope) -> "User | None":
 
 
 class PresenceConsumer(AsyncJsonWebsocketConsumer):
+    # Presence 只表达「连接存在」：Redis 值恒为 online。
+    # 隐身（invisible）是对外可见性语义，由 User.status（DB，实时）承载——
+    # 运行中从隐身切回 auto 无需重连即可对外在线（get_online/display_status 查询 DB）。
+    _PRESENCE_VALUE = "online"
+
     async def connect(self):
         self.user = await database_sync_to_async(_jwt_user_from_scope)(self.scope)
         if self.user is None:
             await self.close(code=4401)  # 未认证
             return
 
+        # 加入全局 presence 组（接收全站在线/离线广播）与个人定向组
         self.group_name = f"presence_{self.user.id}"
+        await self.channel_layer.group_add("presence", self.channel_name)
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
-        # 标记在线并广播
-        set_presence(self.user.id, self.user.status or "online")
-        await self.channel_layer.group_send(
-            "presence",
-            {
-                "type": "presence.update",
-                "user_id": self.user.id,
-                "status": "online",
-            },
-        )
+        # 标记在线并广播；隐身用户记录 presence 但对外不广播在线（对外完全离线）
+        set_presence(self.user.id, self._PRESENCE_VALUE)
+        if self.user.status != User.STATUS_INVISIBLE:
+            await self.channel_layer.group_send(
+                "presence",
+                {
+                    "type": "presence.update",
+                    "user_id": self.user.id,
+                    "status": "online",
+                },
+            )
         # 推送自己的实时状态
         await self.send_json({"type": "presence.self", "data": {"user_id": self.user.id}})
 
     async def disconnect(self, code):
         if hasattr(self, "group_name"):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
+            await self.channel_layer.group_discard("presence", self.channel_name)
             clear_presence(self.user.id)
             await self.channel_layer.group_send(
                 "presence",
@@ -81,7 +90,7 @@ class PresenceConsumer(AsyncJsonWebsocketConsumer):
         if msg_type == "ping":
             await self.send_json({"type": "pong", "ts": content.get("ts")})
             # 心跳续期
-            set_presence(self.user.id, self.user.status or "online")
+            set_presence(self.user.id, self._PRESENCE_VALUE)
 
     async def presence_update(self, event):
         """组广播处理器（避免广播给自己造成回环）。"""

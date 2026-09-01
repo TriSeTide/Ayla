@@ -13,7 +13,7 @@ function member(id: string, nickname: string, username: string): ConversationMem
       username,
       avatar: "",
       signature: "",
-      status: "offline",
+      status: "auto",
       online: false,
       date_joined: "",
     } as UserPublic,

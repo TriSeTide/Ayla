@@ -21,6 +21,7 @@ import { useMessageStore } from "../../stores/message";
 import { useAuthStore } from "../../stores/auth";
 import { chatWS } from "../../ws/chat";
 import { goUserProfile } from "../../utils/navigation";
+import { displayStatusOf, usePresenceOnline } from "../../utils/displayStatus";
 
 export function PrivateChatPane({
   conversationId,
@@ -132,6 +133,7 @@ export function PrivateChatPane({
   }, [conversationId]);
 
   const peer = conv?.peer ?? null;
+  const peerOnline = usePresenceOnline(peer);
   const title = peer?.nickname || peer?.username || "私聊";
   // 非好友禁发：私聊 + 对端已知 + 好友列表已加载 + 对端不是爱莉 + 对端不在好友列表
   const blocked =
@@ -152,7 +154,7 @@ export function PrivateChatPane({
         <Avatar
           label={title}
           size={36}
-          online={peer?.online ?? false}
+          online={peerOnline}
           imageUrl={peer?.avatar || null}
           onClick={
             !disableAvatarNav && peer && !(elysiaUserId != null && peer.id === elysiaUserId)
@@ -163,7 +165,7 @@ export function PrivateChatPane({
         />
         <div className="private-chat-title">
           <span className="private-chat-name">{title}</span>
-          <span className="private-chat-status">{peer?.online ? "在线" : "离线"}</span>
+          <span className="private-chat-status">{displayStatusOf(peer, peerOnline)}</span>
         </div>
       </header>
 

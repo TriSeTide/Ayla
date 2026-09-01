@@ -16,9 +16,12 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Avatar } from "../components/Avatar";
 import { IconBack, IconClose, IconDots, IconSearch } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
+import { usePresenceStore } from "../stores/presence";
+import { presenceOnline } from "../utils/displayStatus";
 
 export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "search" }) {
   const currentUser = useAuthStore((s) => s.currentUser);
+  const onlineUsers = usePresenceStore((s) => s.users);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -164,7 +167,7 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
               <Avatar
                 label={currentUser.nickname || currentUser.username}
                 size={36}
-                online={currentUser.online}
+                online={presenceOnline(onlineUsers, currentUser)}
                 imageUrl={currentUser.avatar || null}
               />
             )}

@@ -168,7 +168,7 @@ Elysia/
 ```text
 # 用户域
 users                 id, username, email, password_hash, nickname, avatar,
-                      signature, status(online/away/dnd/invisible), created_at
+                      signature, status(auto/away/dnd/invisible), created_at
 friendships           id, user_id, friend_id, status(pending/accepted/blocked)
 friend_requests       id, from_user, to_user, message, status, created_at
 

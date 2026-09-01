@@ -21,6 +21,12 @@ describe("presence store", () => {
     expect(usePresenceStore.getState().users).toEqual({});
   });
 
+  it("offline 已知状态保留记录（显示层区分「未收到」与「已离线」）", () => {
+    usePresenceStore.getState().setUser("u1", "online");
+    usePresenceStore.getState().setUser("u1", "offline");
+    expect(usePresenceStore.getState().users).toEqual({ u1: "offline" });
+  });
+
   it("replaceAll → 全量替换", () => {
     usePresenceStore.getState().setUser("u1", "online");
     usePresenceStore.getState().replaceAll({ u3: "dnd" });

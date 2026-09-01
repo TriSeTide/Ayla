@@ -80,10 +80,12 @@ describe("PresenceClient", () => {
 
     fire(ws, { type: "presence.update", data: { user_id: "u1", status: "online" } });
     fire(ws, { type: "presence.update", data: { user_id: "u2", status: "away" } });
-    expect(usePresenceStore.getState().users).toEqual({ u1: "online", u2: "away" });
+    // 非 offline 统一归一为 online（presence 只区分在线/离线）
+    expect(usePresenceStore.getState().users).toEqual({ u1: "online", u2: "online" });
 
     fire(ws, { type: "presence.update", data: { user_id: "u1", status: "offline" } });
-    expect(usePresenceStore.getState().users).toEqual({ u2: "away" });
+    // offline 保留记录（已知状态），供显示层区分「未收到」与「已离线」
+    expect(usePresenceStore.getState().users).toEqual({ u1: "offline", u2: "online" });
 
     client.disconnect();
   });

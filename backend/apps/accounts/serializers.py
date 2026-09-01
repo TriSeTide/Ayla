@@ -13,6 +13,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
 
     id = serializers.CharField(read_only=True)
     online = serializers.SerializerMethodField()
+    display_status = serializers.SerializerMethodField()
     show_content = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -25,6 +26,7 @@ class UserPublicSerializer(serializers.ModelSerializer):
             "signature",
             "status",
             "online",
+            "display_status",
             "date_joined",
             "is_in_voice",
             "voice_room_id",
@@ -37,7 +39,23 @@ class UserPublicSerializer(serializers.ModelSerializer):
     def get_online(self, obj) -> bool:
         from .presence import get_presence
 
+        # 隐身：对外完全离线（即使有活跃连接）
+        if obj.status == User.STATUS_INVISIBLE:
+            return False
         return get_presence(obj.id) is not None
+
+    def get_display_status(self, obj) -> str:
+        """对外显示文案（任务 06）：auto 跟随实时在线，dnd/away/invisible 固定文案。"""
+        from .presence import get_presence
+
+        if obj.status == User.STATUS_DND:
+            return "勿扰"
+        if obj.status == User.STATUS_AWAY:
+            return "离开"
+        if obj.status == User.STATUS_INVISIBLE:
+            return "离线"
+        # auto（含未知旧值兜底）：按实时 presence 显示
+        return "在线" if get_presence(obj.id) is not None else "离线"
 
 
 class RegisterSerializer(serializers.ModelSerializer):

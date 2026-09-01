@@ -50,7 +50,7 @@ const currentUser = {
 function resultFor(q: string): SearchResults {
   void q;
   return {
-    users: { total: 1, items: [{ id: "u2", username: "bob", nickname: "小樱", avatar: "", signature: "", status: "offline", online: false, date_joined: "2026-01-01T00:00:00Z" }] },
+    users: { total: 1, items: [{ id: "u2", username: "bob", nickname: "小樱", avatar: "", signature: "", status: "auto", online: false, date_joined: "2026-01-01T00:00:00Z" }] },
     groups: { total: 1, items: [{ id: "g1", type: "group", title: "冰樱研究所", join_policy: "application", created_at: "2026-01-01T00:00:00Z" }] },
     posts: { total: 0, items: [] },
     lives: { total: 0, items: [] },
