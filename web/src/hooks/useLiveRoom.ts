@@ -1,7 +1,7 @@
 /**
  * useLiveRoom：进房/退房编排的 React 视图绑定（M5-4 §4.2；任务 05 小窗改造）。
  *
- * 会话资源（HLS/轮询/WS/video 元素）已提升到 liveSessionRuntime 全局单例：
+ * 会话资源（HLS/SRS 状态/WS/video 元素）已提升到 liveSessionRuntime 全局单例：
  * - 挂载 → runtime.enter(channelId)（同频道幂等；从小窗点回时自动退出小窗模式）；
  * - 卸载 → runtime.detachView({ isNarrow, isOwnerConsole })：窄屏普通观看且直播中
  *   → 进入手机端小窗（video 元素迁移到 AppShell 小窗容器，HLS 不断流）；否则完整销毁；
@@ -12,8 +12,6 @@
 import { useEffect, useMemo } from "react";
 import { useLiveStore } from "../stores/live";
 import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
-
-export { LIVE_STATUS_POLL_INTERVAL_MS } from "../runtime/liveSessionRuntime";
 
 export interface UseLiveRoomResult {
   loading: boolean;

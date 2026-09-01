@@ -1,8 +1,8 @@
 /**
  * liveSessionRuntime —— 直播会话全局 owner（任务 05：直播适配手机端小窗）。
  *
- * 会话生命周期与页面解耦：进房/退房编排、HLS 播放器、video 元素、状态轮询、
- * 弹幕 WS 回调全部归本单例持有；页面（LiveRoomBody）只是视图。
+ * 会话生命周期与页面解耦：进房/退房编排、HLS 播放器、video 元素、SRS 状态
+ * 事件驱动补拉、弹幕 WS 回调全部归本单例持有；页面（LiveRoomBody）只是视图。
  *
  * 小窗模式：窄屏离开直播间页面且直播中 → 不销毁会话，video 元素从大窗容器
  * 迁移到 AppShell 下的小窗容器（同一元素，HLS 不断流不黑屏）；进入直播间
@@ -15,10 +15,13 @@ import type { DanmakuFrame } from "../api/types";
 import { useLiveStore } from "../stores/live";
 import { useAuthStore } from "../stores/auth";
 import { liveWS } from "../ws/live";
+import { chatWS } from "../ws/chat";
 import { HlsPlayer } from "../player/hls";
 import { useSessionActivityStore } from "../stores/sessionActivity";
 
-export const LIVE_STATUS_POLL_INTERVAL_MS = 15_000;
+/** 事件驱动 SRS 状态补拉：开播事件后推流建立有延迟，有界退避重试确认（非周期轮询） */
+const SRS_RETRY_BASE_MS = 2_000;
+const SRS_RETRY_MAX = 3;
 
 /** 事件驱动黑屏/卡死检测：卡顿（waiting/stalled/error）持续多久未恢复则重建 */
 const STALL_TIMEOUT_MS = 2_000;
@@ -37,8 +40,11 @@ class LiveSessionRuntime {
   private options: LiveSessionOptions = {};
   private player: HlsPlayer | null = null;
   private videoEl: HTMLVideoElement | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private pollCleanup: (() => void) | null = null;
+  /** 开播事件后 SRS 状态有界退避重试（推流建立延迟；非周期轮询） */
+  private srsRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private srsRetryCount = 0;
+  /** chat WS 状态帧订阅（live.channel.status.changed → 补拉 SRS 实时判定） */
+  private offStatusFrame: (() => void) | null = null;
   private offFrame: (() => void) | null = null;
   private alive = false;
   private lastRebuildAt = 0;
@@ -176,13 +182,14 @@ class LiveSessionRuntime {
       if (reason === "unauthorized") useLiveStore.getState().setCurrentError("登录已过期，请重新登录");
       else if (reason === "channel_not_found") useLiveStore.getState().setCurrentError("直播间不存在");
     };
-    // 重连成功 → 拉历史对账（WS 无补发语义，断线窗口弹幕补偿）
+    // 重连成功 → 拉历史对账（WS 无补发语义，断线窗口弹幕补偿）+ 补拉 SRS 状态
     liveWS.onReconnected = () => {
       void this.reconcileDanmaku(channelId);
+      void this.refreshSrsStatus(channelId);
     };
 
     void this.enterAsync(channelId);
-    this.startPoll(channelId);
+    this.subscribeStatusEvents(channelId);
   }
 
   private async enterAsync(channelId: number): Promise<void> {
@@ -284,7 +291,9 @@ class LiveSessionRuntime {
     liveWS.onClosedByServer = null;
     liveWS.onReconnected = null;
     liveWS.disconnect();
-    this.stopPoll();
+    this.offStatusFrame?.();
+    this.offStatusFrame = null;
+    this.clearSrsRetry();
     this.clearStallTimer();
     const shouldKeepActivity =
       this.tracksOwnerActivity && useLiveStore.getState().current.channel?.status === "live";
@@ -400,16 +409,25 @@ class LiveSessionRuntime {
         }, STALL_TIMEOUT_MS);
       }
     };
-    const onResume = () => this.clearStallTimer();
+    const onResume = () => {
+      this.clearStallTimer();
+      // 播放恢复（SRS 恢复/开播）→ 补拉一次 SRS 实时判定
+      if (this.channelId !== null) void this.refreshSrsStatus(this.channelId);
+    };
+    const onError = () => {
+      onStall(); // 保留黑屏自动重建语义
+      // 播放错误（SRS 异常/未开播）→ 补拉一次 SRS 实时判定（可能 degraded/idle）
+      if (this.channelId !== null) void this.refreshSrsStatus(this.channelId);
+    };
     video.addEventListener("waiting", onStall);
     video.addEventListener("stalled", onStall);
-    video.addEventListener("error", onStall);
+    video.addEventListener("error", onError);
     video.addEventListener("playing", onResume);
     video.addEventListener("canplay", onResume);
     this.watchdogCleanup = () => {
       video.removeEventListener("waiting", onStall);
       video.removeEventListener("stalled", onStall);
-      video.removeEventListener("error", onStall);
+      video.removeEventListener("error", onError);
       video.removeEventListener("playing", onResume);
       video.removeEventListener("canplay", onResume);
     };
@@ -424,49 +442,73 @@ class LiveSessionRuntime {
     this.watchdogCleanup = null;
   }
 
-  // ---------- 状态轮询（15s，页面隐藏暂停） ----------
-  private startPoll(channelId: number): void {
-    this.stopPoll();
-    const poll = async () => {
-      try {
-        const status = await liveApi.getLiveChannelStatus(channelId);
-        if (!this.alive || this.channelId !== channelId) return;
-        useLiveStore.getState().setSrsStatus(status.status);
-        // 小窗模式下直播结束 → 自动关闭小窗（完整销毁，避免小窗挂着已结束的流）
-        if (useLiveStore.getState().miniPlayer && status.status !== "live") {
-          this.leave();
-        }
-      } catch {
-        // 轮询失败不打断（下次再试）；SRS 不可用时后端自身返回 degraded
+  // ---------- SRS 状态：事件驱动补拉（替代 15s 轮询） ----------
+  // SRS 实时判定（live/idle/degraded）是查询时事实、无事件源；改为在以下事件
+  // 触发时补拉一次 GET /status/（无周期请求）：
+  // - 进房（enterAsync 已拉一次）；
+  // - chat WS live.channel.status.changed（开播/下播）；
+  // - HLS 播放器 error（SRS 异常/未开播）与 playing/canplay（SRS 恢复/开播）；
+  // - live WS 重连成功（对账）。
+  // 开播事件后推流建立有延迟（SRS 检测需数秒），补拉非 live 时有界退避重试
+  // （2s→4s→8s，最多 3 次），不是周期轮询。
+
+  /** 订阅状态事件：chat WS 开播/下播帧 → 补拉 SRS 实时判定 */
+  private subscribeStatusEvents(channelId: number): void {
+    this.offStatusFrame?.();
+    this.offStatusFrame = chatWS.onFrame((frame) => {
+      if (frame.type !== "live.channel.status.changed") return;
+      const d = frame.data;
+      if (String(d.channel_id) !== String(channelId)) return;
+      if (d.status === "live") {
+        // 开播：推流建立有延迟，补拉非 live 时有界重试确认
+        void this.refreshSrsStatus(channelId, { retryUntilLive: true });
+      } else {
+        void this.refreshSrsStatus(channelId);
       }
-    };
-    const start = () => {
-      if (this.pollTimer) return;
-      this.pollTimer = setInterval(() => void poll(), LIVE_STATUS_POLL_INTERVAL_MS);
-    };
-    const stop = () => this.stopPoll();
-    const onVisibility = () => {
-      if (document.hidden) stop();
-      else {
-        void poll();
-        start();
-      }
-    };
-    start();
-    document.addEventListener("visibilitychange", onVisibility);
-    // 注意：cleanup 只移除监听，不调 stop()（stopPoll 已清 timer，避免递归）
-    this.pollCleanup = () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
+    });
   }
 
-  private stopPoll(): void {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
+  /** 补拉一次 SRS 实时判定（事件触发；非周期） */
+  private async refreshSrsStatus(
+    channelId: number,
+    opts: { retryUntilLive?: boolean } = {},
+  ): Promise<void> {
+    try {
+      const status = await liveApi.getLiveChannelStatus(channelId);
+      if (!this.alive || this.channelId !== channelId) return;
+      useLiveStore.getState().setSrsStatus(status.status);
+      // 小窗模式下直播结束 → 自动关闭小窗（完整销毁，避免小窗挂着已结束的流）
+      if (useLiveStore.getState().miniPlayer && status.status !== "live") {
+        this.leave();
+        return;
+      }
+      if (status.status === "live") {
+        this.clearSrsRetry();
+      } else if (opts.retryUntilLive) {
+        this.scheduleSrsRetry(channelId);
+      }
+    } catch {
+      // 补拉失败不打断（下次事件再试）；SRS 不可用时后端自身返回 degraded
     }
-    this.pollCleanup?.();
-    this.pollCleanup = null;
+  }
+
+  /** 开播事件后 SRS 未就绪：有界退避重试（2s→4s→8s，最多 3 次） */
+  private scheduleSrsRetry(channelId: number): void {
+    if (this.srsRetryTimer !== null || this.srsRetryCount >= SRS_RETRY_MAX) return;
+    const delay = SRS_RETRY_BASE_MS * 2 ** this.srsRetryCount;
+    this.srsRetryCount += 1;
+    this.srsRetryTimer = setTimeout(() => {
+      this.srsRetryTimer = null;
+      void this.refreshSrsStatus(channelId, { retryUntilLive: true });
+    }, delay);
+  }
+
+  private clearSrsRetry(): void {
+    if (this.srsRetryTimer !== null) {
+      clearTimeout(this.srsRetryTimer);
+      this.srsRetryTimer = null;
+    }
+    this.srsRetryCount = 0;
   }
 
   // ---------- 弹幕对账 ----------

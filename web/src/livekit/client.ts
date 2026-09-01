@@ -79,7 +79,9 @@ type RoomEventName =
   | "trackUnsubscribed"
   | "trackMuted"
   | "trackUnmuted"
-  | "activeSpeakersChanged";
+  | "activeSpeakersChanged"
+  | "localTrackPublished"
+  | "localTrackUnpublished";
 
 interface LiveKitRoomInternal {
   on(event: RoomEventName, cb: (...args: unknown[]) => void): void;
@@ -235,11 +237,14 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
 
   // ---- 本地麦克风音量监测（自己说话音量跳动） ----
   // 用 livekit 官方 createAudioAnalyser 对本地音频轨道做 Web Audio 分析，
-  // 轮询 calculateVolume()（0~1）回调给上层。无轨道/未开麦时回调 0。
+  // 帧驱动 calculateVolume()（0~1）回调给上层。无轨道/未开麦时回调 0。
   // 注：createAudioAnalyser 返回的是 calculateVolume/cleanup（2.21 API），
   // 不是 getLevel/destroy——用错会导致开麦后 TypeError，跳动永远不生效。
-  let levelTimer: ReturnType<typeof setInterval> | null = null;
+  let levelTimer: number | null = null;
   let localAnalyser: AudioAnalyserLike | null = null;
+  /** 帧驱动节流：保持原 100ms 计算节奏（行为不变，仅换引擎；rAF 后台自动暂停） */
+  const LEVEL_TICK_MS = 100;
+  let lastLevelAt = 0;
   /** 防止 analyser 创建中时每轮轮询重复 new AudioContext（泄漏） */
   let analyserCreating = false;
   /** 本地麦克风音量 0~2（1 = 原始）；≠1 时经 Web Audio 增益链（懒挂载） */
@@ -297,8 +302,8 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
   };
 
   const stopLevelMonitor = () => {
-    if (levelTimer) {
-      clearInterval(levelTimer);
+    if (levelTimer !== null) {
+      cancelAnimationFrame(levelTimer);
       levelTimer = null;
     }
     stopAnalyser();
@@ -345,96 +350,153 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
     stopAnalyser();
   };
 
+  /** 是否有需要计算的音量工作：本地开麦或存在远端音频轨道；无则帧循环完全停止（零开销） */
+  const hasLevelWork = () => {
+    if (findLocalAudioTrack()) return true;
+    for (const p of room.remoteParticipants.values()) {
+      // audioTrackPublications 只含音频发布：有 track 就是可分析的音频轨道
+      for (const pub of p.audioTrackPublications.values()) {
+        if (pub.track) return true;
+      }
+    }
+    return false;
+  };
+
+  /** 单轮音量计算（原 100ms 轮询体；帧驱动 + 100ms 节流保持原节奏，行为不变） */
+  const computeLevels = () => {
+    if (!events.onLocalAudioLevel && !events.onRemoteAudioLevels) return;
+    // 远端成员实时音量：**本地 Web Audio 分析远端音频轨道**（100ms 即算即报，
+    // 响应快、灵敏）——不依赖服务器低频 speaker update；分析器创建失败时回退
+    // server 快照 participant.audioLevel。levels 全量快照含 0，调用方直接覆盖。
+    if (events.onRemoteAudioLevels) {
+      const levels: Record<string, number> = {};
+      const alive = new Set<string>();
+      for (const p of room.remoteParticipants.values()) {
+        const appId = toAppUserId(p.identity);
+        alive.add(appId);
+        // audioTrackPublications 只含音频发布：有 track 就是可分析的音频轨道
+        const audioTrack = [...p.audioTrackPublications.values()]
+          .map((pub) => pub.track)
+          .find((t) => t != null);
+        if (!audioTrack) continue; // 未开麦/无轨道：不上报（store 归 0）
+        let ana: AudioAnalyserLike | null = remoteAnalysers.get(appId) ?? null;
+        if (!ana) {
+          ana = createRemoteAnalyser(audioTrack);
+          if (ana) remoteAnalysers.set(appId, ana);
+        }
+        if (ana) {
+          levels[appId] = Math.max(0, Math.min(1, ana.calculateVolume()));
+        } else {
+          // 分析器创建失败 → 回退 server speaker update 快照（不伪造跳动）
+          const lvl = p.audioLevel ?? 0;
+          if (lvl > 0.005) levels[appId] = Math.max(0, Math.min(1, lvl));
+        }
+      }
+      // 清理已离开参与者的分析器（不再被遍历到，防泄漏）
+      for (const [appId, ana] of remoteAnalysers) {
+        if (!alive.has(appId)) {
+          try {
+            void ana.cleanup();
+          } catch {
+            // 忽略清理失败
+          }
+          remoteAnalysers.delete(appId);
+        }
+      }
+      events.onRemoteAudioLevels(levels);
+    }
+    const track = findLocalAudioTrack();
+    if (!track) {
+      events.onLocalAudioLevel?.(0);
+      return;
+    }
+    // 开麦后若需调节音量且增益链未挂 → 懒挂载（异步，本轮先返回 0）
+    if (localVolume !== 1 && !gainProc) {
+      void applyLocalVolume();
+      return;
+    }
+    if (!localAnalyser && !analyserCreating) {
+      analyserCreating = true;
+      try {
+        // 注意：livekit 的 createAudioAnalyser 是**同步**返回对象（不是 Promise），
+        // 当异步 .then 调用会 TypeError → analyser 永远建不起来 → 跳动永不生效。
+        const a = mod.createAudioAnalyser(track);
+        // 关键：createAudioAnalyser 内部 new 的 AudioContext 在浏览器 autoplay
+        // 策略下默认 suspended（我们不在用户手势同步上下文里创建）→ 音频图不
+        // 处理，getByteFrequencyData 恒 0 → calculateVolume 恒 0，跳动永不生效。
+        // 必须主动 resume，否则音量跳动效果"静默失效"。
+        // livekit 默认 smoothingTimeConstant 0.8：声音停止后音量衰减滞后 ~1s，
+        // 跳动条"没声了还亮着"——调小让跳动实时起落（0.15：2~3 轮内归零）。
+        if (a.analyser.smoothingTimeConstant !== undefined) {
+          a.analyser.smoothingTimeConstant = 0.15;
+        }
+        const ctx = a.analyser.context as AudioContext | undefined;
+        if (ctx && ctx.state === "suspended") {
+          void ctx.resume().catch(() => {
+            // resume 失败（如仍被策略拦截）→ 保持 0，下一轮不重试（不伪造）
+          });
+        }
+        localAnalyser = a;
+      } catch {
+        localAnalyser = null;
+      } finally {
+        analyserCreating = false;
+      }
+      return; // 本次先返回 0，下一轮有 analyser 再上报
+    }
+    if (localAnalyser) {
+      events.onLocalAudioLevel?.(localAnalyser.calculateVolume());
+    } else {
+      events.onLocalAudioLevel?.(0);
+    }
+  };
+
+  const scheduleNextLevelFrame = () => {
+    levelTimer = requestAnimationFrame(tick);
+  };
+
+  const tick = () => {
+    // 无本地开麦且无远端音频轨道 → 停止帧循环（完全零开销）；
+    // 轨道出现由 trackSubscribed / localTrackPublished 等事件重启。
+    if (!hasLevelWork()) {
+      levelTimer = null;
+      stopAnalyser();
+      stopRemoteAnalysers();
+      return;
+    }
+    // 帧驱动 + 100ms 节流：保持原计算节奏（灵敏度不下降、CPU 不空转）
+    const now = performance.now();
+    if (now - lastLevelAt < LEVEL_TICK_MS) {
+      scheduleNextLevelFrame();
+      return;
+    }
+    lastLevelAt = now;
+    computeLevels();
+    scheduleNextLevelFrame();
+  };
+
+  /** 轨道出现/消失时校正帧循环状态（有工作则运行，无工作则停止） */
+  const ensureLevelMonitorRunning = () => {
+    if (!events.onLocalAudioLevel && !events.onRemoteAudioLevels) return;
+    if (hasLevelWork()) {
+      if (levelTimer === null) {
+        lastLevelAt = -LEVEL_TICK_MS; // 首帧立即计算（保持原"第一轮即算"节奏）
+        scheduleNextLevelFrame();
+      }
+    } else if (levelTimer !== null) {
+      cancelAnimationFrame(levelTimer);
+      levelTimer = null;
+      stopAnalyser();
+      stopRemoteAnalysers();
+    }
+  };
+
   const startLevelMonitor = () => {
     stopLevelMonitor();
     if (!events.onLocalAudioLevel && !events.onRemoteAudioLevels) return;
-    levelTimer = setInterval(() => {
-      if (!events.onLocalAudioLevel && !events.onRemoteAudioLevels) return;
-      // 远端成员实时音量：**本地 Web Audio 分析远端音频轨道**（100ms 即算即报，
-      // 响应快、灵敏）——不依赖服务器低频 speaker update；分析器创建失败时回退
-      // server 快照 participant.audioLevel。levels 全量快照含 0，调用方直接覆盖。
-      if (events.onRemoteAudioLevels) {
-        const levels: Record<string, number> = {};
-        const alive = new Set<string>();
-        for (const p of room.remoteParticipants.values()) {
-          const appId = toAppUserId(p.identity);
-          alive.add(appId);
-          // audioTrackPublications 只含音频发布：有 track 就是可分析的音频轨道
-          const audioTrack = [...p.audioTrackPublications.values()]
-            .map((pub) => pub.track)
-            .find((t) => t != null);
-          if (!audioTrack) continue; // 未开麦/无轨道：不上报（store 归 0）
-          let ana: AudioAnalyserLike | null = remoteAnalysers.get(appId) ?? null;
-          if (!ana) {
-            ana = createRemoteAnalyser(audioTrack);
-            if (ana) remoteAnalysers.set(appId, ana);
-          }
-          if (ana) {
-            levels[appId] = Math.max(0, Math.min(1, ana.calculateVolume()));
-          } else {
-            // 分析器创建失败 → 回退 server speaker update 快照（不伪造跳动）
-            const lvl = p.audioLevel ?? 0;
-            if (lvl > 0.005) levels[appId] = Math.max(0, Math.min(1, lvl));
-          }
-        }
-        // 清理已离开参与者的分析器（不再被遍历到，防泄漏）
-        for (const [appId, ana] of remoteAnalysers) {
-          if (!alive.has(appId)) {
-            try {
-              void ana.cleanup();
-            } catch {
-              // 忽略清理失败
-            }
-            remoteAnalysers.delete(appId);
-          }
-        }
-        events.onRemoteAudioLevels(levels);
-      }
-      const track = findLocalAudioTrack();
-      if (!track) {
-        events.onLocalAudioLevel?.(0);
-        return;
-      }
-      // 开麦后若需调节音量且增益链未挂 → 懒挂载（异步，本轮先返回 0）
-      if (localVolume !== 1 && !gainProc) {
-        void applyLocalVolume();
-        return;
-      }
-      if (!localAnalyser && !analyserCreating) {
-        analyserCreating = true;
-        try {
-          // 注意：livekit 的 createAudioAnalyser 是**同步**返回对象（不是 Promise），
-          // 当异步 .then 调用会 TypeError → analyser 永远建不起来 → 跳动永不生效。
-          const a = mod.createAudioAnalyser(track);
-          // 关键：createAudioAnalyser 内部 new 的 AudioContext 在浏览器 autoplay
-          // 策略下默认 suspended（我们不在用户手势同步上下文里创建）→ 音频图不
-          // 处理，getByteFrequencyData 恒 0 → calculateVolume 恒 0，跳动永不生效。
-          // 必须主动 resume，否则音量跳动效果"静默失效"。
-          // livekit 默认 smoothingTimeConstant 0.8：声音停止后音量衰减滞后 ~1s，
-          // 跳动条"没声了还亮着"——调小让跳动实时起落（0.15：2~3 轮内归零）。
-          if (a.analyser.smoothingTimeConstant !== undefined) {
-            a.analyser.smoothingTimeConstant = 0.15;
-          }
-          const ctx = a.analyser.context as AudioContext | undefined;
-          if (ctx && ctx.state === "suspended") {
-            void ctx.resume().catch(() => {
-              // resume 失败（如仍被策略拦截）→ 保持 0，下一轮不重试（不伪造）
-            });
-          }
-          localAnalyser = a;
-        } catch {
-          localAnalyser = null;
-        } finally {
-          analyserCreating = false;
-        }
-        return; // 本次先返回 0，下一轮有 analyser 再上报
-      }
-      if (localAnalyser) {
-        events.onLocalAudioLevel?.(localAnalyser.calculateVolume());
-      } else {
-        events.onLocalAudioLevel?.(0);
-      }
-    }, 100);
+    if (!hasLevelWork()) return; // 无轨道：零开销，等轨道事件启动
+    lastLevelAt = -LEVEL_TICK_MS; // 首帧立即计算（保持原"第一轮即算"节奏）
+    scheduleNextLevelFrame();
   };
 
   // 注意：事件名必须是 livekit-client RoomEvent 的 camelCase 字面值（见 RoomEventName
@@ -464,6 +526,8 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
     const t = track as LiveKitRemoteTrackInternal;
     if (t.kind !== "audio") return;
     ensureAudioContainer().appendChild(t.attach());
+    // 新音频轨道出现 → 帧循环有工作可算（若未在跑则启动）
+    ensureLevelMonitorRunning();
   });
   // 退订/移除时 detach，避免残留播放
   room.on("trackUnsubscribed", (track) => {
@@ -474,7 +538,12 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
     } catch {
       // 元素已移除等竞态，忽略
     }
+    // 轨道消失 → 校正帧循环（无任何轨道时停止，零开销）
+    ensureLevelMonitorRunning();
   });
+  // 本地开麦/关麦（发布/取消本地音频轨道）→ 校正帧循环启停
+  room.on("localTrackPublished", () => ensureLevelMonitorRunning());
+  room.on("localTrackUnpublished", () => ensureLevelMonitorRunning());
   /**
    * attach 所有已存在的远端音频轨道。
    *

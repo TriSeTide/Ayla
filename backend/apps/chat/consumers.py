@@ -135,6 +135,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         # 避免向无权用户泄露好友/群白名单频道元数据。
         self.voice_catalog_group = "voice_catalog"
         await self.channel_layer.group_add(self.voice_catalog_group, self.channel_name)
+        # 爱莉语音通话事件（observer 事件驱动）：elysia.voice.call.status /
+        # elysia.voice.projected。通话是应用级单例（所有用户共享同一爱莉通话），
+        # 帧只含中性技术状态与计数，不含通话内容；前端仅面板打开时消费。
+        await self.channel_layer.group_add("elysia_voice", self.channel_name)
         # 公开帖子实时进入全局信息流；受限帖子仍只走定向群/用户组。
         from apps.posts.services import POST_FEED_GROUP
         self.post_feed_group = POST_FEED_GROUP
@@ -159,6 +163,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self.channel_layer.group_discard(
                 self.voice_catalog_group, self.channel_name
             )
+        await self.channel_layer.group_discard("elysia_voice", self.channel_name)
         if getattr(self, "post_feed_group", None):
             await self.channel_layer.group_discard(
                 self.post_feed_group, self.channel_name
@@ -496,6 +501,18 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "changed_at": event["changed_at"],
                 },
             }
+        )
+
+    async def elysia_voice_call_status(self, event):
+        """爱莉语音通话状态事件（observer 事件驱动，替代前端状态轮询）"""
+        await self.send_json(
+            {"type": "elysia.voice.call.status", "data": event["data"]}
+        )
+
+    async def elysia_voice_projected(self, event):
+        """爱莉语音转写投影计数事件（observer 事件驱动，替代前端投影轮询）"""
+        await self.send_json(
+            {"type": "elysia.voice.projected", "data": event["data"]}
         )
 
     async def live_channel_deleted(self, event):

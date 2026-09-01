@@ -26,7 +26,7 @@ export interface LiveRoomState {
 }
 
 /** 手机端 App 内浮动小窗（任务 05）：离开直播间页面后继续播放的迷你播放器状态。
- *  会话资源（HLS/video/轮询/WS）由 liveSessionRuntime 持有，这里只放 UI 投影。 */
+ *  会话资源（HLS/video/SRS 状态/WS）由 liveSessionRuntime 持有，这里只放 UI 投影。 */
 export interface MiniPlayerState {
   channelId: number;
   channel: LiveChannelDescriptor | null;

@@ -688,6 +688,8 @@ export type ChatServerFrame =
   | BoardgameRoomDeletedFrame
   | BoardgameRoomUpdatedFrame
   | FavoriteChangedFrame
+  | ElysiaVoiceCallStatusFrame
+  | ElysiaVoiceProjectedFrame
   | ChatErrorFrame
   | PongFrame;
 
@@ -790,10 +792,34 @@ export interface ElysiaVoiceCommandResult {
   accepted: boolean;
 }
 
-/** POST .../poll/ 返回（增量转写投影计数，中性展示） */
+/** POST .../poll/ 返回（一次性对账兜底；projected_total = 该通话已投影消息数） */
 export interface ElysiaVoicePollResult {
   projected: unknown[];
   total: number;
+  projected_total: number;
+}
+
+/**
+ * elysia.voice.call.status —— 爱莉语音通话状态事件（后端 observer WS 事件驱动，
+ * 替代前端 5s 状态轮询；通话是应用级单例，帧只含中性技术状态）。
+ */
+export interface ElysiaVoiceCallStatusFrame {
+  type: "elysia.voice.call.status";
+  data: {
+    call: ElysiaVoiceCallStatus;
+  };
+}
+
+/**
+ * elysia.voice.projected —— 爱莉语音转写投影计数事件（后端 observer WS 事件驱动，
+ * 替代前端 10s 投影轮询；projected_total = 累计投影消息数，幂等覆盖）。
+ */
+export interface ElysiaVoiceProjectedFrame {
+  type: "elysia.voice.projected";
+  data: {
+    call_id: string;
+    projected_total: number;
+  };
 }
 
 /* ---------- Voice WS 帧（对齐 backend/apps/voice/consumers.py） ---------- */

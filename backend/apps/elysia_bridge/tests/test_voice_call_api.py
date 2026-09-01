@@ -189,10 +189,15 @@ class TestVoiceCallAPI:
         with mock.patch.object(
             bridge_services,
             "poll_voice_transcripts",
-            return_value={"projected": ["1"], "total": 2},
+            return_value={
+                "projected": ["1"],
+                "total": 2,
+                "projected_total": 1,
+            },
         ) as poll:
             resp = client.post(f"{CREATE_URL}call_api_1/poll/", {}, format="json")
         poll.assert_called_once()
         assert resp.status_code == 200
         assert resp.data["projected"] == ["1"]
         assert resp.data["total"] == 2
+        assert resp.data["projected_total"] == 1

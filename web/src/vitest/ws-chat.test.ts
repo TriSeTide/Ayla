@@ -337,6 +337,43 @@ describe("ChatWSClient", () => {
     client.disconnect();
   });
 
+  it("群 message.new @我 → 刷新 badges（mention_unread 计入消息入口红点）", async () => {
+    vi.mocked(accountsApi.getBadges).mockClear();
+    useAuthStore.setState({
+      currentUser: {
+        id: "me", username: "me", nickname: "我", avatar: "", signature: "",
+        status: "online", online: true, date_joined: "2026-01-01T00:00:00Z",
+      },
+    });
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    useChatStore.getState().setConversations([
+      {
+        id: "g1", type: "group", title: "群", announcement: "", avatar: "",
+        owner_id: "o", members: [], my_role: "member", member_count: 3,
+        unread_count: 0, created_at: new Date().toISOString(), peer: null,
+      },
+    ]);
+    fire(instances[0], {
+      type: "message.new",
+      data: {
+        conversation_id: "g1", message_id: "m1", sender_id: "peer", content: "hi看这个",
+        type: "mixed", media: null,
+        segments: [
+          { type: "text", text: "hi" },
+          { type: "mention", user_id: "me" },
+          { type: "text", text: "看这个" },
+        ],
+        reply_to: null, seq: 1, ts: "2026-08-10T00:00:00Z",
+      },
+    });
+    // 群 @我 → mention_unread 变化 → 消息入口红点实时刷新（事件驱动，无周期轮询）
+    await vi.waitFor(() => expect(accountsApi.getBadges).toHaveBeenCalled());
+    useAuthStore.setState({ currentUser: null });
+    client.disconnect();
+  });
+
   it("正在聊天时对方消息 → 直接标已读，不弹标签", async () => {
     vi.mocked(chatApi.markMessageRead).mockClear();
     vi.mocked(accountsApi.getBadges).mockClear();
@@ -574,6 +611,8 @@ describe("ChatWSClient", () => {
       conversation_id: "c1",
       last_message_seq: 5,
     });
+    // 重连后补拉 badges 对账（事件驱动兜底；原 30s 全站轮询已删除）
+    expect(accountsApi.getBadges).toHaveBeenCalled();
     client.disconnect();
   });
 

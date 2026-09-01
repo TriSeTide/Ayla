@@ -205,6 +205,10 @@ ELYSIA_SSE_EVENT_TYPES = env.list(
 # （文件锁保证单实例）。关闭时需独立进程 `manage.py run_bridge`。
 ELYSIA_BRIDGE_INLINE = env.bool("ELYSIA_BRIDGE_INLINE", default=True)
 
+# 爱莉 Voice Live observer WS 订阅（事件驱动替代前端 5s/10s 轮询）：
+# 创建/复用通话时启动后台观察线程；测试/禁用时关闭。
+VOICE_OBSERVER_ENABLED = env.bool("VOICE_OBSERVER_ENABLED", default=True)
+
 # 静态/媒体
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

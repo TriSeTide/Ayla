@@ -7,7 +7,7 @@
  * - detachView 小窗判定：窄屏 + 普通观看 + 直播中 → 小窗；宽屏/控制台/非直播 → 销毁；
  * - 小窗点回（enter 同频道）→ 退出小窗模式；
  * - leave 完整销毁（hls → WS → store → miniPlayer → video 元素）；
- * - 小窗模式下直播结束（轮询）→ 自动关闭小窗；
+ * - 小窗模式下直播结束（live.channel.status.changed 事件补拉）→ 自动关闭小窗；
  * - video 元素跨容器迁移（attachVideoTo 同一元素）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,7 @@ import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
 import { useLiveStore } from "../stores/live";
 import { useSessionActivityStore } from "../stores/sessionActivity";
 import { liveWS } from "../ws/live";
+import { chatWS } from "../ws/chat";
 import { HlsPlayer } from "../player/hls";
 
 vi.mock("../api/live", () => ({
@@ -32,6 +33,12 @@ vi.mock("../ws/live", () => ({
     onReconnected: null,
     connect: vi.fn(),
     disconnect: vi.fn(),
+  },
+}));
+
+vi.mock("../ws/chat", () => ({
+  chatWS: {
+    onFrame: vi.fn(() => () => {}),
   },
 }));
 
@@ -195,21 +202,24 @@ describe("liveSessionRuntime 销毁与资源", () => {
     expect(video?.isConnected).toBe(false);
   });
 
-  it("小窗模式下直播结束（轮询）→ 自动关闭小窗", async () => {
-    vi.useFakeTimers();
-    try {
-      liveSessionRuntime.enter(7, {});
-      await flush();
-      liveSessionRuntime.detachView({ isNarrow: true, isOwnerConsole: false });
-      expect(useLiveStore.getState().miniPlayer).not.toBeNull();
-      // 下一次轮询返回非 live → 自动 leave
-      vi.mocked(liveApi.getLiveChannelStatus).mockResolvedValue({ status: "idle" } as never);
-      await vi.advanceTimersByTimeAsync(15_000);
-      expect(useLiveStore.getState().miniPlayer).toBeNull();
-      expect(useLiveStore.getState().current.channel).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("小窗模式下直播结束（live.channel.status.changed 事件）→ 自动关闭小窗", async () => {
+    liveSessionRuntime.enter(7, {});
+    await flush();
+    liveSessionRuntime.detachView({ isNarrow: true, isOwnerConsole: false });
+    expect(useLiveStore.getState().miniPlayer).not.toBeNull();
+    // 下播事件 → 补拉 SRS 实时判定非 live → 自动 leave
+    vi.mocked(liveApi.getLiveChannelStatus).mockResolvedValue({ status: "idle" } as never);
+    const onFrame = vi.mocked(chatWS.onFrame).mock.calls[0][0] as (frame: {
+      type: string;
+      data: { channel_id: number; status: string; changed_at: string };
+    }) => void;
+    onFrame({
+      type: "live.channel.status.changed",
+      data: { channel_id: 7, status: "ended", changed_at: "t" },
+    });
+    await flush();
+    expect(useLiveStore.getState().miniPlayer).toBeNull();
+    expect(useLiveStore.getState().current.channel).toBeNull();
   });
 
   it("video 原子移动：attachVideoTo 移入容器、stashVideo 移回暂存，全程不脱离文档", async () => {

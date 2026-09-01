@@ -424,7 +424,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   2. 中层跳动条 `.voice-meter-fill`：`--glow-500 → --ice-500` 渐变、高 4px、圆角，宽度随实时说话音量左右伸缩跳动（静音 0、说话伸长，说话态加微辉光），**覆盖在轨道上方**；
   3. 上层 slider：轨道透明（不遮跳动条）+ `--indigo-700` 白边圆把手。
   - 自己条目：设定 = 本地麦克风音量 0~100（100 = 原始，改变自己说话别人听到的响度），跳动随 `localAudioLevel`（本地 Web Audio 分析）；本地偏好不落库、刷新重置。
-  - 远端条目：设定 = 本地播放音量 0~100（本地偏好，不落库），跳动随**本地 Web Audio 分析远端轨道**（与本地同机制，100ms 轮询；不依赖 server speaker update，响应快）——说话即见跳动，可辨识"谁在说话"。
+  - 远端条目：设定 = 本地播放音量 0~100（本地偏好，不落库），跳动随**本地 Web Audio 分析远端轨道**（与本地同机制，rAF 帧驱动 + 100ms 节流；不依赖 server speaker update，响应快）——说话即见跳动，可辨识"谁在说话"；无本地开麦且无远端音频轨道时帧循环完全停止（零开销，任务 08）。
 
 ### 12.11 桌游室卡片
 
@@ -470,12 +470,12 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **置顶会话视觉标识**（`.conv-item.is-pinned`）：左侧 3px `--glow-500` 圆角指示条（同 ServerRail 指示条语言，装饰不承载信息）+ 非选中态淡 sakura 粉底 `rgba(249,176,255,0.1)`（hover 0.16）+ 标题转 `--grape-700`（对比度 ≈6:1 达标）；选中态（active）背景保持 ice 蓝胶囊、标题仍 grape
 - 置顶会话排列表最前（置顶组/非置顶组内保持原顺序）；删除为软删除（仅隐藏本人列表，消息保留），confirm 确认后执行
 
-**消息中心红点实时刷新**（M5）：红点以 `GET /me/badges/` 聚合为权威，由 ChatWS 事件驱动 `fetch` 实时刷新（无轮询；AppShell 的 30s 轮询仅作断线降级）。三处红点统一：
+**消息中心红点实时刷新**（M5）：红点以 `GET /me/badges/` 聚合为权威，由 ChatWS 事件驱动 `fetch` 实时刷新（任务 08 后**无周期轮询**：AppShell 原 30s 降级轮询已删除，WS 重连成功后补拉一次对账）。三处红点统一：
 
 - 消息入口聚合红点（宽屏 TopNav 消息项 / 窄屏左下 MessageFAB）= 私信未读 + 好友申请 + 群邀请 + 待审批入群申请，`--pink-500` 徽标，>99 显示 99+；
 - 认证消息 tab 红点（窄屏 MessagesPage / 宽屏 WideMessagesSidebar）= 好友申请 + 群邀请 + 待审批入群申请（不含私信未读；私信未读属会话列表行内 `conv-unread` 徽标）；
 - 会话行内未读徽标（ConversationList `conv-unread`）= 该会话 `unread_count`，实时由 `message.new` → bumpUnread 增量，打开会话标已读后清零。
-- WS 事件 → 红点刷新：私信 `message.new` / `elysia.reply` → `private_unread`；`friend.request.new` / `friend.request.resolved` → `friend_requests`；`group.invite.new` → `group_invites`；`group.request.new` / `group.request.resolved` → `join_requests_pending`。好友申请事件（`friend.request.*`）由 accounts 视图经用户级组 `chat_user_<id>` 广播，ChatConsumer 转发；群未读不进消息中心红点（属群卡片/ServerRail 角标）。
+- WS 事件 → 红点刷新：私信 `message.new` / `elysia.reply` → `private_unread`；`friend.request.new` / `friend.request.resolved` → `friend_requests`；`group.invite.new` → `group_invites`；`group.request.new` / `group.request.resolved` → `join_requests_pending`；群消息 `@我`（message.new 带 mention 段）→ `mention_unread`。好友申请事件（`friend.request.*`）由 accounts 视图经用户级组 `chat_user_<id>` 广播，ChatConsumer 转发；普通群未读不进消息中心红点（属群卡片/ServerRail 角标）。
 
 ### 12.15 红点快捷消息栏（R-QM，窄屏非导航页）
 

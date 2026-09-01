@@ -121,6 +121,9 @@ export class ChatWSClient {
         for (const convId of this.subscribed) {
           this.sendResume(convId);
         }
+        // 全局未读徽标对账：断线期间的私信/申请/邀请事件可能丢失，重连补拉一次
+        // （事件驱动主路径的兜底；30s 全站轮询已删除）
+        void useBadgesStore.getState().fetch();
       } else {
         // 首次连接：连接建立前 subscribe 的帧因 WS 尚未 OPEN 被 sendJson 静默丢弃，
         // 这里批量补发 subscribe（仅订阅，不补发历史）。若改用 resume，此时各会话
@@ -295,9 +298,11 @@ export class ChatWSClient {
             mention: isMention,
             reply: isReply,
           });
-          if (!conv || conv.type === "private") {
+          if (!conv || conv.type === "private" || isMention) {
             // 私信新消息（未打开）→ 全局消息入口红点（private_unread）实时刷新；
-            // 群未读不进消息中心红点（属群卡片/ServerRail 角标），故群消息不拉 badges。
+            // 群 @我 计入 mention_unread（消息入口红点聚合）也要实时刷新——
+            // 事件驱动替代原 30s 全站轮询；普通群消息不进消息中心红点（属群卡片角标），
+            // 故不拉 badges。
             void useBadgesStore.getState().fetch();
           }
         }

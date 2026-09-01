@@ -6,7 +6,8 @@
  * - 非音频轨道（video）不 attach；
  * - TrackUnsubscribed 时 detach；
  * - remoteParticipants / 事件 identity 剥离 `user_` 前缀（音量匹配关键）；
- * - 本地麦克风音量监测：有本地轨道时轮询 getLevel 回调，无轨道回调 0。
+ * - 本地麦克风音量监测：帧驱动（rAF + 100ms 节流），有本地轨道时回调
+ *   calculateVolume；无轨道时帧循环不启动（零开销），轨道事件触发启停。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -110,6 +111,36 @@ async function makeClient(events: LiveKitEvents = {}) {
   return { client, room };
 }
 
+/**
+ * 手动驱动 rAF 的测试时钟（rAF 帧驱动语义）：
+ * - stub requestAnimationFrame/cancelAnimationFrame（id → 回调映射，cancel 真实取消）；
+ * - stub performance.now 每次调用递增 17ms（模拟帧间隔，驱动 100ms 节流）；
+ * - flush(n) 执行 n 帧排队回调（回调里新排队的帧进入下一轮 flush）。
+ */
+function stubRafClock() {
+  const rafMap = new Map<number, () => void>();
+  let rafId = 0;
+  let nowValue = 0;
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+    rafMap.set(++rafId, cb);
+    return rafId;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+    rafMap.delete(id);
+  });
+  vi.stubGlobal("performance", { now: () => (nowValue += 17) });
+  return {
+    /** 逐帧执行（默认 20 帧 ≈ 340ms，至少覆盖 2~3 个节流周期） */
+    flush: (n = 20) => {
+      for (let i = 0; i < n; i += 1) {
+        const pending = [...rafMap.entries()];
+        rafMap.clear();
+        for (const [, cb] of pending) cb();
+      }
+    },
+  };
+}
+
 beforeEach(() => {
   h.clearAll();
 });
@@ -118,6 +149,7 @@ afterEach(() => {
   vi.clearAllMocks();
   audioContainer()?.remove();
   h.clearAll();
+  vi.unstubAllGlobals();
 });
 
 describe("createLiveKitRoom", () => {
@@ -215,15 +247,29 @@ describe("createLiveKitRoom", () => {
     expect(onTrackMuted).toHaveBeenCalledWith("abc123", true);
   });
 
-  it("远端音量轮询：本地 Web Audio 分析远端音频轨道（剥离前缀；无轨道不上报）", async () => {
-    vi.useFakeTimers();
+  it("无本地开麦且无远端音频轨道：帧循环不启动（完全零开销）", async () => {
+    const rafSpy = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", rafSpy);
+    try {
+      const levelCb = vi.fn();
+      const { client } = await makeClient({ onLocalAudioLevel: levelCb });
+      await client.connect("ws://lk", "token");
+      expect(rafSpy).not.toHaveBeenCalled();
+      expect(levelCb).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("远端音量帧驱动：本地 Web Audio 分析远端音频轨道（剥离前缀；无轨道不上报）", async () => {
+    const raf = stubRafClock();
     try {
       const levelsCb = vi.fn();
       const { client, room } = await makeClient({ onRemoteAudioLevels: levelsCb });
 
-      await client.connect("ws://lk", "token");
       const a = makeRemoteTrack();
       // a1 有音频轨道 → 本地 analyser 分析；b2 无轨道 → 不上报（store 归 0）
+      // 房间成员在连接前已存在（attachExistingRemoteAudio 场景：先进房者已开麦）
       room.remoteParticipants.set("user_a1", {
         identity: "user_a1",
         audioLevel: 0.9, // 即使 server 值大，也应走本地 analyser（不依赖 server）
@@ -235,21 +281,22 @@ describe("createLiveKitRoom", () => {
         audioTrackPublications: new Map(),
       });
 
+      await client.connect("ws://lk", "token");
+
       h.analyserMock.calculateVolume.mockReturnValue(0.42);
-      await vi.advanceTimersByTimeAsync(110);
+      raf.flush();
       expect(levelsCb).toHaveBeenCalledWith({ a1: 0.42 });
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 
   it("远端参与者离开：清理其 analyser（防泄漏）", async () => {
-    vi.useFakeTimers();
+    const raf = stubRafClock();
     try {
       const levelsCb = vi.fn();
       const { client, room } = await makeClient({ onRemoteAudioLevels: levelsCb });
 
-      await client.connect("ws://lk", "token");
       const a = makeRemoteTrack();
       room.remoteParticipants.set("user_a1", {
         identity: "user_a1",
@@ -257,20 +304,23 @@ describe("createLiveKitRoom", () => {
         audioTrackPublications: new Map([["0", { track: a.track }]]),
       });
 
-      await vi.advanceTimersByTimeAsync(110); // 创建 analyser
+      await client.connect("ws://lk", "token");
+      raf.flush(); // 首帧创建 analyser
       expect(h.analyserMock.cleanup).not.toHaveBeenCalled();
 
       room.remoteParticipants.delete("user_a1"); // 离开
-      await vi.advanceTimersByTimeAsync(110); // 轮询清理
+      const callsAfterDelete = levelsCb.mock.calls.length;
+      raf.flush(); // 帧循环发现无轨道 → 停止 + 清理 analyser
       expect(h.analyserMock.cleanup).toHaveBeenCalled();
-      expect(levelsCb).toHaveBeenLastCalledWith({});
+      // 无任何轨道后帧循环完全停止（零开销），不再回调
+      expect(levelsCb.mock.calls.length).toBe(callsAfterDelete);
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 
   it("远端 analyser 创建失败：回退 server speaker update 快照（不伪造跳动）", async () => {
-    vi.useFakeTimers();
+    const raf = stubRafClock();
     try {
       // 模拟 createAudioAnalyser 对远端轨道抛错（如 track 无 mediaStreamTrack）
       const mod = await import("livekit-client");
@@ -281,7 +331,6 @@ describe("createLiveKitRoom", () => {
       const levelsCb = vi.fn();
       const { client, room } = await makeClient({ onRemoteAudioLevels: levelsCb });
 
-      await client.connect("ws://lk", "token");
       const a = makeRemoteTrack();
       room.remoteParticipants.set("user_a1", {
         identity: "user_a1",
@@ -289,43 +338,45 @@ describe("createLiveKitRoom", () => {
         audioTrackPublications: new Map([["0", { track: a.track }]]),
       });
 
-      await vi.advanceTimersByTimeAsync(110);
+      await client.connect("ws://lk", "token");
+      raf.flush();
       expect(levelsCb).toHaveBeenCalledWith({ a1: 0.33 }); // 回退 server 值
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 
-  it("本地麦克风音量监测：无本地轨道回调 0，有轨道时回调 calculateVolume", async () => {
-    vi.useFakeTimers();
+  it("本地麦克风音量监测：无轨道帧循环不启动（零开销），开麦事件后回调 calculateVolume", async () => {
+    const raf = stubRafClock();
     try {
       const levelCb = vi.fn();
       const { client, room } = await makeClient({ onLocalAudioLevel: levelCb });
 
       await client.connect("ws://lk", "token");
-      // 未开麦（无本地轨道）→ 连续回调 0
-      await vi.advanceTimersByTimeAsync(210);
-      expect(levelCb).toHaveBeenCalledWith(0);
+      // 未开麦且无远端轨道 → 帧循环不启动（零开销），不回调
+      raf.flush();
+      expect(levelCb).not.toHaveBeenCalled();
 
-      // 开麦（发布本地音频轨道）→ 创建 analyser（同步）并回调 calculateVolume
+      // 开麦（发布本地音频轨道）→ localTrackPublished 事件启动帧循环
       h.analyserMock.calculateVolume.mockReturnValue(0.55);
       room.localParticipant.audioTrackPublications.set("mic", {
         track: makeLocalTrack(),
       });
-      // 第一轮创建 analyser 并 return，第二轮才上报 level
-      await vi.advanceTimersByTimeAsync(110);
-      await vi.advanceTimersByTimeAsync(110);
+      h.emit("localTrackPublished");
+      // 首帧立即计算：创建 analyser 并 return，下一轮才上报 level
+      raf.flush();
+      raf.flush();
       expect(levelCb).toHaveBeenCalledWith(0.55);
       // analyser 创建时把 smoothingTimeConstant 调小（0.8 → 0.15）：
       // 声音停止后音量快速归零，跳动条不会"没声了还亮着"
       expect(h.analyserMock.analyser.smoothingTimeConstant).toBe(0.15);
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 
   it("analyser 的 AudioContext 为 suspended 时主动 resume（autoplay 策略修复）", async () => {
-    vi.useFakeTimers();
+    const raf = stubRafClock();
     try {
       // 模拟浏览器 autoplay 拦截：createAudioAnalyser 的 AudioContext 默认 suspended
       h.analyserMock.analyser.context.state = "suspended";
@@ -336,18 +387,19 @@ describe("createLiveKitRoom", () => {
       room.localParticipant.audioTrackPublications.set("mic", {
         track: makeLocalTrack(),
       });
-      // 第一轮创建 analyser（同步），第二轮才上报
-      await vi.advanceTimersByTimeAsync(110);
-      await vi.advanceTimersByTimeAsync(110);
+      h.emit("localTrackPublished");
+      // 首帧创建 analyser（同步），下一轮才上报
+      raf.flush();
+      raf.flush();
       expect(h.analyserMock.analyser.context.resume).toHaveBeenCalledTimes(1);
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
       h.analyserMock.analyser.context.state = "running";
     }
   });
 
-  it("断开连接时停止音量监测（清理定时器与分析器）", async () => {
-    vi.useFakeTimers();
+  it("断开连接时停止音量监测（清理帧循环与分析器）", async () => {
+    const raf = stubRafClock();
     try {
       const levelCb = vi.fn();
       const { client, room } = await makeClient({ onLocalAudioLevel: levelCb });
@@ -355,17 +407,18 @@ describe("createLiveKitRoom", () => {
       room.localParticipant.audioTrackPublications.set("mic", {
         track: makeLocalTrack(),
       });
-      await vi.advanceTimersByTimeAsync(110);
-      await vi.advanceTimersByTimeAsync(110);
+      h.emit("localTrackPublished");
+      raf.flush();
+      raf.flush();
       expect(h.analyserMock.calculateVolume).toHaveBeenCalled();
 
       await client.disconnect();
       const callsBefore = levelCb.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(300);
-      expect(levelCb.mock.calls.length).toBe(callsBefore); // 定时器已清
+      raf.flush(); // 帧循环已停：不再回调
+      expect(levelCb.mock.calls.length).toBe(callsBefore);
       expect(h.analyserMock.cleanup).toHaveBeenCalled();
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 
@@ -409,7 +462,7 @@ describe("createLiveKitRoom", () => {
   });
 
   it("未开麦时 setLocalVolume 只记录目标值，开麦后由监测懒挂载", async () => {
-    vi.useFakeTimers();
+    const raf = stubRafClock();
     try {
       const { client, room } = await makeClient({ onLocalAudioLevel: vi.fn() });
       await client.connect("ws://lk", "token");
@@ -418,11 +471,16 @@ describe("createLiveKitRoom", () => {
       expect(client.getLocalVolume()).toBe(0.5);
       const track = makeLocalTrack();
       room.localParticipant.audioTrackPublications.set("mic", { track });
-      // 下一轮监测发现 volume≠1 且未挂 → 懒挂载
-      await vi.advanceTimersByTimeAsync(110);
+      h.emit("localTrackPublished");
+      // 帧循环首帧发现 volume≠1 且未挂 → 懒挂载（异步，让 microtask 落地）
+      raf.flush(1);
+      await Promise.resolve();
+      expect(track.setProcessor).toHaveBeenCalledTimes(1);
+      // 已挂载后不再重复 setProcessor（后续帧只调 setGain）
+      raf.flush(10);
       expect(track.setProcessor).toHaveBeenCalledTimes(1);
     } finally {
-      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 });

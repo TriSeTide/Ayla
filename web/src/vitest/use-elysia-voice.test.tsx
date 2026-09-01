@@ -1,14 +1,23 @@
 /**
- * useElysiaVoice 编排测试（mock fetch，M5-3 §7.1 / §4.5）：
- * - ensureCall：reused=true 正常接入不报错；终态不启动轮询
- * - 状态轮询 5s / 投影轮询 10s；面板关闭停轮询
+ * useElysiaVoice 编排测试（mock fetch + chat WS，M5-3 §7.1 / §4.5）：
+ * - ensureCall：reused=true 正常接入不报错；创建后注册事件订阅 + 一次性 poll 对账
+ * - 事件驱动：elysia.voice.call.status 帧更新通话状态；终态帧停止订阅；
+ *   elysia.voice.projected 帧更新「已投影 N 条」
+ * - 无周期请求：面板打开期间没有 5s/10s 状态/投影轮询
  * - 文本注入空文本前端拦截（不发请求）；502 → "爱莉侧不可用"
- * - end 幂等（重复点击安全）；ended 后停止轮询
+ * - end 幂等（重复点击安全）；面板关闭停订阅
  */
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useElysiaVoice } from "../hooks/useElysiaVoice";
 import { useAuthStore } from "../stores/auth";
+import { chatWS } from "../ws/chat";
+
+vi.mock("../ws/chat", () => ({
+  chatWS: {
+    onFrame: vi.fn(() => () => {}),
+  },
+}));
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -36,6 +45,7 @@ function callStatus(state: string, connected = true) {
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let offMock: ReturnType<typeof vi.fn>;
 
 function stubFetch(routes: Record<string, () => Response>) {
   fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -55,7 +65,18 @@ function callsTo(method: string, pathPart: string): number {
   ).length;
 }
 
+/** 模拟后端推送一帧 chat WS 事件 */
+function emitFrame(frame: unknown) {
+  const handler = vi.mocked(chatWS.onFrame).mock.calls.at(-1)?.[0] as
+    | ((f: unknown) => void)
+    | undefined;
+  act(() => handler?.(frame));
+}
+
 beforeEach(() => {
+  vi.mocked(chatWS.onFrame).mockClear();
+  offMock = vi.fn();
+  vi.mocked(chatWS.onFrame).mockImplementation(() => offMock);
   vi.useFakeTimers();
   useAuthStore.setState({ accessToken: "acc", refreshToken: "ref" });
 });
@@ -67,13 +88,12 @@ afterEach(() => {
 });
 
 describe("useElysiaVoice", () => {
-  it("ensureCall → reused=true 正常接入（不报错）；启动状态/投影轮询", async () => {
+  it("ensureCall → reused=true 正常接入；注册事件订阅 + 一次性 poll 对账", async () => {
     stubFetch({
       "POST /elysia/voice-calls/": () =>
         jsonResponse({ call: callStatus("active"), connection: null, reused: true }),
-      "GET /elysia/voice-calls/call-1/": () => jsonResponse({ call: callStatus("active") }),
       "POST /elysia/voice-calls/call-1/poll/": () =>
-        jsonResponse({ projected: [], total: 2 }),
+        jsonResponse({ projected: [], total: 2, projected_total: 1 }),
     });
     const { result } = renderHook(() => useElysiaVoice(true));
     await act(async () => {
@@ -82,25 +102,92 @@ describe("useElysiaVoice", () => {
     expect(result.current.call?.call_id).toBe("call-1");
     expect(result.current.reused).toBe(true);
     expect(result.current.error).toBeNull();
+    // 事件订阅已注册
+    expect(vi.mocked(chatWS.onFrame)).toHaveBeenCalled();
+    // 一次性 poll 对账：投影计数初始化
+    expect(callsTo("POST", "/poll/")).toBe(1);
+    expect(result.current.projectedTotal).toBe(1);
+  });
 
-    await act(async () => {
-      vi.advanceTimersByTime(5_000);
-      await Promise.resolve();
+  it("事件驱动：call.status 帧更新状态；projected 帧更新计数", async () => {
+    stubFetch({
+      "POST /elysia/voice-calls/": () =>
+        jsonResponse({ call: callStatus("active"), connection: null, reused: false }),
+      "POST /elysia/voice-calls/call-1/poll/": () =>
+        jsonResponse({ projected: [], total: 0, projected_total: 0 }),
     });
-    expect(callsTo("GET", "/elysia/voice-calls/call-1/")).toBeGreaterThanOrEqual(1);
+    const { result } = renderHook(() => useElysiaVoice(true));
+    await act(async () => {
+      await result.current.ensureCall();
+    });
 
-    await act(async () => {
-      vi.advanceTimersByTime(10_000);
-      await Promise.resolve();
+    emitFrame({
+      type: "elysia.voice.call.status",
+      data: { call: callStatus("active", false) },
     });
-    expect(callsTo("POST", "/poll/")).toBeGreaterThanOrEqual(1);
-    expect(result.current.projectedTotal).toBe(2);
+    expect(result.current.call?.connected).toBe(false);
+    expect(result.current.isTerminal).toBe(false);
+
+    emitFrame({
+      type: "elysia.voice.projected",
+      data: { call_id: "call-1", projected_total: 3 },
+    });
+    expect(result.current.projectedTotal).toBe(3);
+    // 非本通话的帧忽略
+    emitFrame({
+      type: "elysia.voice.projected",
+      data: { call_id: "call-other", projected_total: 99 },
+    });
+    expect(result.current.projectedTotal).toBe(3);
+  });
+
+  it("事件驱动：终态帧（failed/ended）→ 停止订阅", async () => {
+    stubFetch({
+      "POST /elysia/voice-calls/": () =>
+        jsonResponse({ call: callStatus("active"), connection: null, reused: false }),
+      "POST /elysia/voice-calls/call-1/poll/": () =>
+        jsonResponse({ projected: [], total: 0, projected_total: 0 }),
+    });
+    const { result } = renderHook(() => useElysiaVoice(true));
+    await act(async () => {
+      await result.current.ensureCall();
+    });
+
+    emitFrame({
+      type: "elysia.voice.call.status",
+      data: { call: callStatus("failed", false) },
+    });
+    expect(result.current.isTerminal).toBe(true);
+    expect(offMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("无周期请求：面板打开 60s 内仅有创建 + 一次性对账，无 5s/10s 轮询", async () => {
+    stubFetch({
+      "POST /elysia/voice-calls/": () =>
+        jsonResponse({ call: callStatus("active"), connection: null, reused: false }),
+      "POST /elysia/voice-calls/call-1/poll/": () =>
+        jsonResponse({ projected: [], total: 2, projected_total: 2 }),
+    });
+    const { result } = renderHook(() => useElysiaVoice(true));
+    await act(async () => {
+      await result.current.ensureCall();
+    });
+    const statusCalls = callsTo("GET", "/elysia/voice-calls/call-1/");
+    const pollCalls = callsTo("POST", "/poll/");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(callsTo("GET", "/elysia/voice-calls/call-1/")).toBe(statusCalls);
+    expect(callsTo("POST", "/poll/")).toBe(pollCalls);
+    expect(result.current.call?.state).toBe("active");
   });
 
   it("文本注入：空文本前端拦截（不发请求）；成功清空由调用方处理", async () => {
     stubFetch({
       "POST /elysia/voice-calls/": () =>
         jsonResponse({ call: callStatus("active"), connection: null, reused: false }),
+      "POST /elysia/voice-calls/call-1/poll/": () =>
+        jsonResponse({ projected: [], total: 0, projected_total: 0 }),
       "POST /elysia/voice-calls/call-1/text/": () =>
         jsonResponse({ command_id: "cmd-1", status: "accepted", accepted: true }),
     });
@@ -137,12 +224,12 @@ describe("useElysiaVoice", () => {
     expect(result.current.call).toBeNull();
   });
 
-  it("end 幂等：重复点击安全；结束后停止轮询", async () => {
+  it("end 幂等：重复点击安全；结束后停止事件订阅", async () => {
     stubFetch({
       "POST /elysia/voice-calls/": () =>
         jsonResponse({ call: callStatus("active"), connection: null, reused: false }),
-      "GET /elysia/voice-calls/call-1/": () => jsonResponse({ call: callStatus("active") }),
-      "POST /elysia/voice-calls/call-1/poll/": () => jsonResponse({ projected: [], total: 0 }),
+      "POST /elysia/voice-calls/call-1/poll/": () =>
+        jsonResponse({ projected: [], total: 0, projected_total: 0 }),
       "POST /elysia/voice-calls/call-1/end/": () =>
         jsonResponse({ command_id: "cmd-2", status: "ended", accepted: true }),
     });
@@ -157,22 +244,15 @@ describe("useElysiaVoice", () => {
     expect(callsTo("POST", "/end/")).toBe(2);
     expect(result.current.call?.state).toBe("ended");
     expect(result.current.isTerminal).toBe(true);
-
-    // 结束后轮询停止
-    const statusCallsBefore = callsTo("GET", "/elysia/voice-calls/call-1/");
-    await act(async () => {
-      vi.advanceTimersByTime(15_000);
-      await Promise.resolve();
-    });
-    expect(callsTo("GET", "/elysia/voice-calls/call-1/")).toBe(statusCallsBefore);
+    expect(offMock).toHaveBeenCalled();
   });
 
-  it("面板关闭（active=false）→ 停止轮询", async () => {
+  it("面板关闭（active=false）→ 停止事件订阅（不结束通话）", async () => {
     stubFetch({
       "POST /elysia/voice-calls/": () =>
         jsonResponse({ call: callStatus("active"), connection: null, reused: false }),
-      "GET /elysia/voice-calls/call-1/": () => jsonResponse({ call: callStatus("active") }),
-      "POST /elysia/voice-calls/call-1/poll/": () => jsonResponse({ projected: [], total: 0 }),
+      "POST /elysia/voice-calls/call-1/poll/": () =>
+        jsonResponse({ projected: [], total: 0, projected_total: 0 }),
     });
     const { result, rerender } = renderHook(({ active }) => useElysiaVoice(active), {
       initialProps: { active: true },
@@ -181,11 +261,6 @@ describe("useElysiaVoice", () => {
       await result.current.ensureCall();
     });
     rerender({ active: false });
-    const before = callsTo("GET", "/elysia/voice-calls/call-1/");
-    await act(async () => {
-      vi.advanceTimersByTime(20_000);
-      await Promise.resolve();
-    });
-    expect(callsTo("GET", "/elysia/voice-calls/call-1/")).toBe(before);
+    expect(offMock).toHaveBeenCalledTimes(1);
   });
 });

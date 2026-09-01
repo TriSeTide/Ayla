@@ -640,10 +640,11 @@ def voice_call_transcripts(profile: ElysiaProfile, call_id: str) -> VoiceTranscr
 # - 应用侧以 service credential 创建通话 → 应用本身就是该通话的 participant/拥有者
 #   （owner_actor_id = credential 的 actor_id）；爱莉是对话对象，其发言事实由
 #   Elysium 侧 final transcript 的 `role="assistant"` 表达，应用侧只投影不生成。
-# - 事件源取舍：阶段三 `voice_call.*` SSE 事件流尚未进入 Life Event 账本（events/stream
-#   收不到 voice_call 事件，公共契约缺口，见 README）；本期转写投影走
-#   `GET /voice-calls/{call_id}/transcripts` **增量轮询**（cursor 分页，幂等键去重），
-#   不依赖 SSE 事件流，也不改动 Elysium 侧代码。
+# - 事件源取舍（任务 08 更新）：阶段三 `voice_call.*` SSE 事件流尚未进入 Life Event 账本
+#   （events/stream 收不到 voice_call 事件，公共契约缺口）；实时事件走 Elysium per-call
+#   observer WS（`/api/v1/voice-calls/{call_id}/observe`，见 voice_observer.py），转写增量
+#   由 observer 投影 + 广播 `elysia.voice.projected`；本函数的 `GET /voice-calls/{call_id}/transcripts`
+#   拉取仅保留为断线/重启的一次性对账兜底（cursor 分页，幂等键去重）。
 
 _ACTIVE_VOICE_CALLS: dict[str, str] = {}
 """进程内活跃 Voice Live 通话注册（call_id -> profile.stream_id）。
@@ -690,6 +691,10 @@ def ensure_elysia_voice_call(
                 "reusing active voice call %s (state=%s) for stream %s",
                 call_id, status.state, profile.stream_id,
             )
+            # observer WS 订阅：状态/转写事件驱动（幂等；未在观察则启动）
+            from .voice_observer import ensure_observing
+
+            ensure_observing(profile, call_id)
             return {
                 "call": status,
                 "connection": None,
@@ -703,6 +708,11 @@ def ensure_elysia_voice_call(
         "created voice call %s (state=%s) for stream %s",
         created.call.call_id, created.call.state, profile.stream_id,
     )
+    # observer WS 订阅：状态/转写事件驱动（非终态通话才需要观察）
+    if created.call.state not in ("ended", "failed", "suspended"):
+        from .voice_observer import ensure_observing
+
+        ensure_observing(profile, created.call.call_id)
     return {
         "call": created.call,
         "connection": created.connection,
@@ -714,6 +724,10 @@ def end_elysia_voice_call(profile: ElysiaProfile, call_id: str) -> CommandAccept
     """结束爱莉 Voice Live 通话（幂等，M4-5 §5.2 第 5 步）+ 从活跃表移除。"""
     result = end_voice_call(profile, call_id)
     _unregister_active_voice_call(call_id)
+    # 停止 observer WS 订阅（通话已终态）
+    from .voice_observer import stop_observing
+
+    stop_observing(call_id)
     return result
 
 
@@ -723,11 +737,12 @@ def poll_voice_transcripts(
     """增量投影转写：拉取授权转写历史 → 把 `role="assistant"` 的 final transcript
     投影为语音频道会话里的爱莉消息（幂等 `elysia-voice-<event_id 哈希>`，M4-5 §5.2 第 3 步）。
 
-    事件源取舍（见本段 docstring）：阶段三 `voice_call.*` SSE 事件流未进 Life Event
-    账本，本函数以 `GET /voice-calls/{call_id}/transcripts` 轮询为投影主路径；
-    从头拉取（cursor=None），投影幂等键去重保证重复调用不重复落库。
+    事件源取舍（见本段 docstring）：实时转写走 observer WS（voice_observer.py），
+    本函数仅作断线/重启的一次性对账兜底——从头拉取（cursor=None），投影幂等键
+    去重保证重复调用不重复落库。
 
-    返回：`{"projected": [message_id, ...], "total": 转写条数}`；无会话可路由/
+    返回：`{"projected": [message_id, ...], "total": 转写条数,
+    "projected_total": 该通话已投影消息数}`；无会话可路由/
     非 assistant 条目不投影（返回 None 不计数）。
     """
     page = voice_call_transcripts(profile, call_id)
@@ -739,7 +754,28 @@ def poll_voice_transcripts(
         )
         if message is not None:
             projected.append(str(message.id))
-    return {"projected": projected, "total": len(page.transcripts)}
+    return {
+        "projected": projected,
+        "total": len(page.transcripts),
+        "projected_total": voice_projected_total(profile),
+    }
+
+
+def voice_projected_total(profile: ElysiaProfile) -> int:
+    """该语音会话中已投影的爱莉语音消息数（幂等键前缀 `elysia-voice-` 统计）。
+
+    供 observer 事件广播与 poll 对账共用：前端「已投影 N 条」以此为准。
+    """
+    conversation = _voice_conversation(profile)
+    if conversation is None:
+        return 0
+    from apps.chat.models import Message
+
+    return Message.objects.filter(
+        conversation=conversation,
+        sender_id=profile.user_id,
+        idempotency_key__startswith="elysia-voice-",
+    ).count()
 
 
 def _voice_conversation(profile: ElysiaProfile) -> Conversation | None:

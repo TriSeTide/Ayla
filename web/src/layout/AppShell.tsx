@@ -35,8 +35,6 @@ import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
 import { isGroupScene, isMessagesRoute, isNarrowTopBarRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveCornerFabs, resolveFabAction, resolveModule } from "./shellConfig";
 
-const BADGES_POLL_INTERVAL_MS = 30_000;
-
 export function AppShell() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { pathname } = useLocation();
@@ -69,11 +67,11 @@ export function AppShell() {
       : "default"
     : null;
 
-  // 全站未读聚合：进入即拉 + 断线降级 30s 轮询（R-N4；WS 推送后置）
+  // 全站未读聚合：进入即拉 + **纯 WS 事件驱动**（R-N4）——
+  // 私信/申请/邀请/群@我 等事件在 ws/chat.ts 触发 fetch；WS 重连后补拉一次对账。
+  // 无周期轮询（原 30s 降级轮询已删除）。
   useEffect(() => {
     void useBadgesStore.getState().fetch();
-    const timer = setInterval(() => void useBadgesStore.getState().fetch(), BADGES_POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
   }, []);
 
   const messageBadge = badges

@@ -257,7 +257,7 @@
 
 ### F8 消息中心 + badges 红点 【已验收 2026-08-14】
 
-**新增/改造**：`src/pages/MessagesPage.tsx`（私信/好友列表双选项卡；宽屏双栏）；`src/api/friends.ts` 扩展（申请/邀请动作）；`src/stores/badges.ts`；AppShell 内轮询/WS 触发 badges 拉取（断线降级 30s 轮询）。
+**新增/改造**：`src/pages/MessagesPage.tsx`（私信/好友列表双选项卡；宽屏双栏）；`src/api/friends.ts` 扩展（申请/邀请动作）；`src/stores/badges.ts`；AppShell 进入即拉 + ChatWS 事件驱动 badges 拉取（任务 08 后：30s 降级轮询已删除，WS 重连成功后补拉一次对账）。
 **要点**：私信仅 private 会话；好友列表分组（好友申请/群申请邀请置顶）；同意/拒绝即时反馈；红点聚合到 MessageFAB/TopNav 消息项。
 **验收**：双选项卡数据正确；申请处理闭环；红点随处理即时刷新。
 
@@ -268,8 +268,8 @@
 > 宽屏双栏）；`AppShell` 进入拉 badges + 30s 轮询（断线降级）+ MessageFab/TopNav 消息项红点。
 > 验证：tsc 无错；全量 vitest 241 通过（新增 badges-store 4）；build 通过；Playwright 冒烟（私信仅 private、
 > 好友 tab 三组申请置顶 + 同意按钮、MessageFab 红点聚合）均符合预期。
-> 说明：红点刷新走 30s 轮询 + 处理 action 后即时 fetch；S2 的 WS 用户级广播（group.request.resolved/group.invite.new）
-> 触发拉取的实时推送接线后置（轮询已覆盖"随处理即时刷新"验收）。
+> 说明：红线以上为任务 08 改造后的当前行为（事件驱动、无周期轮询）；红线以下为 2026-08-14 落地快照
+> （30s 轮询已于任务 08 删除，改为事件驱动 + WS 重连一次性对账；群 @我 亦触发 badges 拉取）。
 
 ### F9 全局搜索 【已验收 2026-08-14】
 

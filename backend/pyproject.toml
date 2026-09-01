@@ -15,6 +15,8 @@ dependencies = [
     "django-environ>=0.11,<1.0",
     "cryptography>=42.0",
     "httpx>=0.27",
+    # 爱莉 Voice Live observer WS 订阅（事件驱动替代前端轮询；与 Elysium 侧同版本）
+    "websockets>=14.2",
     "pymysql>=1.1",
     "boto3>=1.34",  # M4-3 对象存储（MinIO/S3 兼容）
     "Pillow>=10.0",  # M4-3 缩略图/波形派生

@@ -95,12 +95,17 @@ Django 5 + Channels 4 + Redis 的独立应用后端，作为 Elysia Web 前端�
   - voice-call 客户端（`elysia_client.py`）：create/get/resume/interrupt/end/text/transcripts/tickets，
     命令带 `Idempotency-Key`；
   - 编排端点（`/api/v1/elysia/voice-calls/`）：创建/复用（单并发，进程内活跃表 + Elysium 状态复核）、
-    详情/文本注入/结束/poll 增量转写投影；
+    详情/文本注入/结束/poll 一次性对账（幂等投影 + `projected_total` 累计投影数）；
   - 事件分派：`run_bridge_loop` 收到 `voice_call.transcript.final` → 投影爱莉发言
     （仅 `role=assistant`，幂等 `elysia-voice-<event_id>`，不伪造）；其余 `voice_call.*` 只记录；
-  - 转写投影主路径为 `GET /voice-calls/{id}/transcripts` 增量轮询（幂等去重）。
+  - **事件驱动（任务 08）**：`voice_observer.py` 订阅 per-call observer WS
+    （`/api/v1/voice-calls/{id}/observe`，ticket role=observer）→ 通话状态/转写增量
+    广播 `elysia.voice.call.status` / `elysia.voice.projected` 帧（channels 组 `elysia_voice`），
+    前端面板不再 5s/10s 轮询；
     **已知缺口（公共契约）**：阶段三 `voice_call.*` SSE 事件流未进入 Elysium Life Event 账本
-    （`events/stream` 收不到 voice_call 事件），SSE 事件分派为前瞻兼容；真实闭环走 transcripts 轮询。
+    （`events/stream` 收不到 voice_call 事件），SSE 事件分派为前瞻兼容；
+    真实事件通道走 observer WS（Elysium 现成，未改 Elysium 侧代码），
+    transcripts REST 轮询保留为断线/重启的一次性对账兜底。
 - [ ] 端到端验收：真人语音频道 P95<500ms / 爱莉入会闭环 —— **未验收**
       （需 LiveKit 运行 + Elysium 运行 + 真实 credential + 阶段三 voice-calls 挂载）
 
