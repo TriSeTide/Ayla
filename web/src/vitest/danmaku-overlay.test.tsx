@@ -11,7 +11,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DanmakuItem, MediaDescriptor } from "../api/types";
 import { useLiveStore } from "../stores/live";
 import { DanmakuOverlay } from "../components/live/DanmakuOverlay";
+import { getSignedMediaUrl } from "../api/media";
 import { DANMAKU_MIN_GAP_PX, DANMAKU_SPEED_PX_PER_SEC } from "../components/live/danmakuTracks";
+
+// ResourceImage 内部用 getSignedMediaUrl 签名加载：mock 返回固定签名 URL（保留 resolveMediaPath 等真实实现）
+vi.mock("../api/media", async () => {
+  const actual = await vi.importActual<typeof import("../api/media")>("../api/media");
+  return { ...actual, getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() };
+});
+
+const mockedSign = vi.mocked(getSignedMediaUrl);
 
 class FakeResizeObserver {
   observe = vi.fn();
@@ -30,10 +39,10 @@ function matchMediaMock(reduced = false) {
   );
 }
 
-function makeItem(id: string, content: string, media?: MediaDescriptor | null): DanmakuItem {
+function makeItem(id: string, content: string, media?: MediaDescriptor | null, avatar = ""): DanmakuItem {
   return {
     id,
-    sender: { user_id: "u1", nickname: "观众", avatar: "" },
+    sender: { user_id: "u1", nickname: "观众", avatar },
     content,
     media_id: media ? "m1" : null,
     media: media ?? null,
@@ -50,7 +59,7 @@ const thumbMedia: MediaDescriptor = {
   width: 100,
   height: 100,
   duration: null,
-  thumbnail: "/api/media/m1/thumb",
+  thumbnail: "/api/v1/media/m1/thumb",
   waveform: null,
   created_at: "2026-01-01T00:00:00Z",
 };
@@ -58,6 +67,8 @@ const thumbMedia: MediaDescriptor = {
 beforeEach(() => {
   matchMediaMock(false);
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  mockedSign.mockReset();
+  mockedSign.mockResolvedValue("/api/v1/media/m1/thumb?uid=u&exp=9&sig=s");
   useLiveStore.getState().reset();
 });
 
@@ -85,10 +96,37 @@ describe("DanmakuOverlay", () => {
     expect(document.querySelectorAll(".danmaku-fly")).toHaveLength(1);
   });
 
-  it("媒体弹幕飘缩略图，纯图占位文案不飘文字", async () => {
+  it("弹幕左侧渲染发送者头像（有头像才渲染）", async () => {
     render(<DanmakuOverlay channelId={1} />);
     act(() => {
-      useLiveStore.getState().appendDanmaku(makeItem("m1", "图片", thumbMedia));
+      useLiveStore.getState().appendDanmaku(
+        makeItem("a1", "带头像", undefined, "/api/v1/users/u1/avatar.png"),
+      );
+    });
+    await waitFor(() => expect(screen.getByText("带头像")).toBeTruthy());
+    const avatar = document.querySelector(".danmaku-fly-avatar");
+    expect(avatar).toBeTruthy();
+    expect(avatar?.getAttribute("src")).toBe("/api/v1/users/u1/avatar.png");
+    // 头像在文本左侧（DOM 顺序：头像 → 文字）
+    const fly = document.querySelector(".danmaku-fly");
+    expect(fly?.firstElementChild?.classList.contains("danmaku-fly-avatar")).toBe(true);
+  });
+
+  it("无头像的弹幕不渲染头像元素", async () => {
+    render(<DanmakuOverlay channelId={1} />);
+    act(() => {
+      useLiveStore.getState().appendDanmaku(makeItem("n2", "无头像"));
+    });
+    await waitFor(() => expect(screen.getByText("无头像")).toBeTruthy());
+    expect(document.querySelector(".danmaku-fly-avatar")).toBeNull();
+  });
+
+  it("媒体弹幕飘缩略图（限定小图），纯图占位文案不飘文字，头像在左侧", async () => {
+    render(<DanmakuOverlay channelId={1} />);
+    act(() => {
+      useLiveStore.getState().appendDanmaku(
+        makeItem("m1", "图片", thumbMedia, "/api/v1/users/u1/avatar.png"),
+      );
     });
     await waitFor(() => {
       const img = document.querySelector(".danmaku-fly-img");
@@ -96,6 +134,48 @@ describe("DanmakuOverlay", () => {
     });
     // 占位文案 "图片" 不飘（内容为空串时不渲染文字节点）
     expect(screen.queryByText("图片")).toBeNull();
+    // 图片经 ResourceImage 签名加载（不破图），src 为签名 URL
+    expect(document.querySelector(".danmaku-fly-img")?.getAttribute("src")).toBe(
+      "/api/v1/media/m1/thumb?uid=u&exp=9&sig=s",
+    );
+    expect(mockedSign).toHaveBeenCalledWith("m1", "thumb");
+    // 头像在图片左侧
+    const fly = document.querySelector(".danmaku-fly");
+    expect(fly?.firstElementChild?.classList.contains("danmaku-fly-avatar")).toBe(true);
+  });
+
+  it("点击弹幕图片打开 ImageViewer 放大（与聊天界面一致）", async () => {
+    render(<DanmakuOverlay channelId={1} />);
+    act(() => {
+      useLiveStore.getState().appendDanmaku(makeItem("m3", "图片", thumbMedia));
+    });
+    await waitFor(() => {
+      expect(document.querySelector(".danmaku-fly-img")).toBeTruthy();
+    });
+    // 点击图片按钮 → 打开查看器
+    fireEvent.click(document.querySelector(".danmaku-fly-img-open") as Element);
+    await waitFor(() => {
+      expect(document.querySelector(".image-viewer")).toBeTruthy();
+    });
+    // 关闭
+    fireEvent.click(document.querySelector(".image-viewer-close") as Element);
+    await waitFor(() => {
+      expect(document.querySelector(".image-viewer")).toBeNull();
+    });
+  });
+
+  it("纯图弹幕无缩略图：不飘（空弹幕跳过，不渲染无意义条目）", async () => {
+    const noThumb: MediaDescriptor = {
+      ...thumbMedia,
+      thumbnail: null,
+    };
+    render(<DanmakuOverlay channelId={1} />);
+    act(() => {
+      useLiveStore.getState().appendDanmaku(makeItem("m2", "图片", noThumb));
+    });
+    // 无内容可飘：不产生 fly 条目（动画窗口内应保持 0）
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelectorAll(".danmaku-fly")).toHaveLength(0);
   });
 
   it("飘完（animationend）后从画面移除", async () => {

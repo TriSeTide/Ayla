@@ -203,6 +203,7 @@ export function LiveRoomBody({
       videoRef={videoRef}
       onRetry={retryPlayer}
       onRefresh={refreshPlayer}
+      onSendDanmaku={send}
       hidePipButton={isNarrow}
       onVideoHostMount={(host) => liveSessionRuntime.attachVideoTo(host, { big: true })}
       onVideoHostUnmount={() => liveSessionRuntime.stashVideo({ big: true })}

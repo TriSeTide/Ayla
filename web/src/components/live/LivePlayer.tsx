@@ -18,7 +18,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LiveSrsStatus } from "../../api/types";
-import { IconFullscreen, IconPip, IconRefresh } from "../icons";
+import { IconFullscreen, IconPip, IconRefresh, IconSend } from "../icons";
 
 /** 悬浮按钮无操作自动隐藏时长 */
 const AUTO_HIDE_MS = 3000;
@@ -80,6 +80,7 @@ export function LivePlayer({
   hidePipButton = false,
   onVideoHostMount,
   onVideoHostUnmount,
+  onSendDanmaku,
   children,
 }: {
   srsStatus: LiveSrsStatus | null;
@@ -96,13 +97,19 @@ export function LivePlayer({
   onVideoHostMount?: (host: HTMLElement) => void;
   /** 宿主容器卸载（React DOM 移除前）：把 video 移回暂存容器 */
   onVideoHostUnmount?: () => void;
+  /** 全屏发弹幕（标准容器全屏时屏幕下方中间显示输入框；iOS 原生全屏无法自定义 UI 不显示） */
+  onSendDanmaku?: (content: string) => Promise<boolean>;
   /** 视频画面叠加层（飘弹幕层等；渲染时机由调用方控制） */
   children?: React.ReactNode;
 }) {
   const [pipSupported, setPipSupported] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const [spinning, setSpinning] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fsDraft, setFsDraft] = useState("");
+  const [fsSending, setFsSending] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const fsInputRef = useRef<HTMLInputElement | null>(null);
   const spinTimer = useRef<number | null>(null);
   const hideTimer = useRef<number | null>(null);
 
@@ -146,10 +153,30 @@ export function LivePlayer({
   useEffect(() => {
     const onFsChange = () => {
       if (!document.fullscreenElement) unlockOrientation();
+      // 标准容器全屏（本容器进入 top layer）→ 显示全屏弹幕输入框；
+      // iOS 原生视频全屏（webkitEnterFullscreen）无自定义 UI，不显示。
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
     };
     document.addEventListener("fullscreenchange", onFsChange);
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
+
+  // 全屏输入框发送：Enter / 发送按钮 → onSendDanmaku → 成功清空并保持焦点
+  const handleFsSend = async () => {
+    const content = fsDraft.trim();
+    if (!content || !onSendDanmaku || fsSending) return;
+    setFsSending(true);
+    try {
+      const ok = await onSendDanmaku(content);
+      if (ok) {
+        setFsDraft("");
+        // 点发送按钮时焦点在按钮上，还回输入框（连续发弹幕不打断）
+        fsInputRef.current?.focus();
+      }
+    } finally {
+      setFsSending(false);
+    }
+  };
 
   // 卸载时清理刷新动画计时器 + 自动隐藏计时器
   useEffect(
@@ -326,6 +353,34 @@ export function LivePlayer({
               <IconFullscreen width={16} height={16} />
             </button>
           </div>
+          {/* 全屏弹幕输入框：屏幕下方中间，与悬浮按钮同高同底、同显隐（自动隐藏/唤醒） */}
+          {isFullscreen && onSendDanmaku && (
+            <div className="live-player-fs-input">
+              <input
+                ref={fsInputRef}
+                value={fsDraft}
+                onChange={(e) => setFsDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleFsSend();
+                }}
+                onFocus={clearHideTimer}
+                onBlur={armHideTimer}
+                placeholder="发条弹幕吧"
+                aria-label="全屏发弹幕"
+                maxLength={200}
+              />
+              <button
+                type="button"
+                className="live-player-fs-send"
+                onClick={() => void handleFsSend()}
+                aria-label="发送弹幕"
+                title="发送弹幕"
+                disabled={fsSending || !fsDraft.trim()}
+              >
+                <IconSend width={16} height={16} />
+              </button>
+            </div>
+          )}
         </div>
       )}
       {!showVideo && renderOverlay()}

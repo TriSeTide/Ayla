@@ -831,14 +831,106 @@
   animation: danmaku-fly var(--dur) linear forwards;
 }
 
-/* 媒体弹幕缩略图：小图随弹幕飘，限高限宽不撑爆轨道 */
+/* 弹幕发送者头像：左侧 20px 小圆，视频上 1px 白描边保证可读 */
+.danmaku-fly-avatar {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+/* 媒体弹幕固定小图框（限定大小）：72×36 统一尺寸随弹幕飘，不撑爆轨道、
+   不因原图比例撑大画面；无缩略图时整条不飘媒体（组件侧保证）。
+   外层按钮：飘弹幕层 pointer-events:none，仅图片按钮恢复 auto 可点（点击放大），
+   其余区域仍穿透不挡播放器控制条。 */
+.danmaku-fly-img-open {
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  pointer-events: auto;
+  border-radius: var(--radius-sm);
+}
+.danmaku-fly-img-open:hover .danmaku-fly-img {
+  filter: brightness(1.08);
+}
+
 .danmaku-fly-img {
+  width: 72px;
   height: 36px;
-  max-width: 96px;
+  flex: none;
   object-fit: cover;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.35);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* 全屏播放弹幕输入框：屏幕下方中间，与悬浮按钮同高（32px）同底（bottom 8px）、
+   同显隐（在 .live-player-controls 容器内，随容器 opacity 淡入淡出 + 自动隐藏/唤醒）；
+   风格与 .live-player-btn 一致（indigo 半透明底 + blur(8px) + 白字/白图标）。
+   仅标准容器全屏时显示（iOS 原生视频全屏无自定义 UI）。 */
+.live-player-fs-input {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sp-2);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 4px 0 14px;
+  box-sizing: border-box;
+  border-radius: var(--radius-pill);
+  background: rgba(70, 91, 146, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  pointer-events: none; /* 默认穿透；容器可见时才可交互（与悬浮按钮同规则） */
+}
+.live-player-controls.is-visible .live-player-fs-input {
+  pointer-events: auto;
+}
+.live-player-fs-input input {
+  width: 200px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+.live-player-fs-input input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+.live-player-fs-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: rgba(70, 91, 146, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.live-player-fs-send:hover:not(:disabled) {
+  background: rgba(70, 91, 146, 0.52);
+}
+.live-player-fs-send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.live-player-fs-send:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 
 @keyframes danmaku-fly {

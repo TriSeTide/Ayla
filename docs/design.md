@@ -343,7 +343,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **数据接入**：订阅 live store 的 `current.danmaku`，**只飘新弹幕**（WS 实时 append）；进房历史与重连对账（merge）以挂载基线快照排除，不重放；`channelId` 变化重建基线并清空画面（切台无残留）。渲染条件 `!loading && srsStatus === "live"`——进房完成（历史已 merge）才挂载，避免把历史误当新弹幕。
 - **轨道管理**：轨道数按容器高度动态算（行高刻度 36px，2~10 条）；分配选最空闲轨道；同轨道同速 → 开始时间差 ≥ 最小间距（60px / 速度），从数学上避免重叠与堆积（纯函数 `danmakuTracks.ts`）。
 - **动画**：CSS transform 动画（GPU 合成），`--fly-from`（容器宽）→ `-100% - 24px`（完全出屏，不依赖逐条测宽）；时长 = (容器宽 + 文本估算) / 速度（150px/s），宽窄屏视觉速度一致；`animationend` 移除 DOM，画面同时飘 ≤80 条防长直播堆积。
-- **样式**：16px Nunito 700 白字 + 深色多重描边/投影（视频上可读性，媒体叠加场景不适用界面正文对比度规则）；媒体弹幕飘缩略图（36px 高、限宽 96px 小图），纯图占位文案「图片」不飘文字。
+- **样式**：16px Nunito 700 白字 + 深色多重描边/投影（视频上可读性，媒体叠加场景不适用界面正文对比度规则）；弹幕左侧飘发送者头像（20px 圆 + 1px 白描边）；媒体弹幕只飘**缩略图**（固定 72×36 小图框，不飘原图），纯图占位文案「图片」不飘文字。
+- **图片与头像加载**：一律走 `ResourceImage` 签名加载（`<img>` 裸引用媒体路径会 401 破图）；图片弹幕点击打开 `ImageViewer` 放大（与聊天界面一致，仅图片按钮 `pointer-events: auto`，其余区域仍穿透不挡控制条）。
 - **可达性**：`aria-hidden`（纯装饰层）；`prefers-reduced-motion` 下整层不渲染（飘弹幕本质是动效，无静态降级需求）。
 - **不做**：不改弹幕数据链路、不删除/不替代弹幕列表、不做弹幕开关与密度设置（需求未强制，保持最小实现）。
 
@@ -362,6 +363,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   - 左下「跳到最新」刷新键（`IconRefresh`）：**健康播放**（视频已有当前帧 `readyState ≥ HAVE_CURRENT_DATA`）→ `refreshToLiveEdge()` 跳边秒跳（hls.js 用 `liveSyncPosition`、兜底 seek 到 `seekable` 末尾、再兜底 reload+play）；**黑屏/实例缺失/未就绪** → 重建播放器（销毁 + 重新 attach，`startLoad(-1)` 从边缘起播 = 跳到最新）；图标旋转 0.6s 反馈（`prefers-reduced-motion` 下禁用旋转）。
   - 右下「画中画」（`IconPip`）：仅浏览器支持时渲染（`document.pictureInPictureEnabled` 或 Safari `webkitSetPresentationMode`）。
   - 右下「全屏」（`IconFullscreen`）：对整个 `.live-player` 容器 `requestFullscreen`（全屏黑底铺满、圆角/边框去除），悬浮按钮仍在全屏画面内；**窄屏（手机）全屏后锁横屏**（`screen.orientation.lock("landscape")`），**iOS Safari 走 `webkitEnterFullscreen()` 原生视频全屏（自动横屏）**；退出全屏（含 ESC/系统返回）经 `fullscreenchange` 解锁方向。
+  - **全屏弹幕输入框**（标准容器全屏时，屏幕下方中间）：与悬浮按钮同高（32px）同底（bottom 8px）、同显隐（在 `.live-player-controls` 容器内随其淡入淡出 + 3s 无操作自动隐藏/鼠标移动唤醒，聚焦时暂停隐藏）；风格同悬浮按钮（indigo 半透明底 `rgba(70,91,146,0.32)` + `blur(8px)` + 白字/白图标）；Enter 或发送按钮发弹幕，发送成功清空并保持焦点（连续发不打断）；iOS 原生视频全屏无自定义 UI 不显示。
 - **黑屏自动恢复**（切台/切界面后画面不加载的根治，学 B 站「减少黑屏 + 真黑屏立马刷新」）：
   - `videoRef` 用**粘性 ref 代理 + videoVersion 重建信号**：沉浸式上下滑切台（`AnimatePresence mode="sync"`）与宽窄屏切换时，旧 video 卸载（React 把共享 ref 置 null，忽略）、新 video 挂载即 `setVideoVersion` 触发播放器 effect **重新 attach 到新 video**——根治「video 重建但 effect 依赖 srsStatus/hlsUrl 不变 → 不重 attach → 永久黑屏」，video 挂载即接上、不靠轮询；
   - **全屏冻结 isNarrow**：手机点全屏锁横屏会改变 viewport 宽度 → `isNarrow` 翻转 → 窄↔宽布局切换 → 播放器(video)重建 → 黑屏；`LiveRoomBody` 在 `fullscreenchange`（方向变化前触发）冻结进入全屏前的 `isNarrow`，全屏期间布局不切换、播放器不重建，从根源减少「点全屏就黑屏」；

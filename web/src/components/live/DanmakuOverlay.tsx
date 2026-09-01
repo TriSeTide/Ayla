@@ -8,14 +8,19 @@
  *   进房历史 / 重连对账（merge）以挂载基线快照排除，不重放；
  * - 轨道管理：按容器高度算轨道数（2~10），选最空闲轨道，同轨道保证最小间距
  *   （同速 → 时间差 = 间距，见 danmakuTracks.ts），不重叠、不堆积；
+ * - 内容：弹幕左侧飘发送者头像（20px 圆，加载失败自动隐藏）；图片弹幕只飘
+ *   **缩略图**（限定大小：画面固定 72×36 小图框，不飘原图；无缩略图不飘媒体）；
+ *   图片用 ResourceImage 签名加载（不破图），点击打开 ImageViewer 放大（与聊天一致）；
  * - 动画：CSS transform 动画（GPU 合成），`--fly-from` 起点随容器宽度变化
  *   （宽窄屏 / 全屏自适应），animationend 移除 DOM，数量有上限防堆积；
  * - 层级：absolute 覆盖在 .live-player 内（pointer-events: none 不挡播放器控制条，
  *   z-index 在视频之上、悬浮控件之下）；reduced-motion 下整层不渲染。
  */
 import { useEffect, useRef, useState } from "react";
-import type { DanmakuItem } from "../../api/types";
-import { mediaContentUrl, resolveMediaPath } from "../../api/media";
+import type { DanmakuItem, MediaDescriptor } from "../../api/types";
+import { resolveMediaPath } from "../../api/media";
+import { ResourceImage } from "../ResourceImage";
+import { ImageViewer } from "../chat/ImageViewer";
 import { useLiveStore } from "../../stores/live";
 import {
   DANMAKU_TRACK_HEIGHT,
@@ -36,8 +41,12 @@ interface FlyingEntry {
   key: string;
   /** 纯文本内容（媒体弹幕的占位文案 "图片" 不飘文字，只飘图） */
   text: string;
-  /** 媒体缩略图 URL；null = 纯文字弹幕 */
+  /** 媒体缩略图路径（ResourceImage 内部签名加载）；null = 无图（文字弹幕） */
   mediaUrl: string | null;
+  /** 媒体描述（点击放大 ImageViewer 用）；null = 无媒体 */
+  media: MediaDescriptor | null;
+  /** 发送者头像 URL；空串 = 无头像（不渲染） */
+  avatar: string;
   track: number;
   durMs: number;
   fromX: number;
@@ -52,11 +61,13 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** 媒体弹幕缩略图（对齐 DanmakuList 的取图口径：thumbnail 优先，缺省回退原图） */
+/**
+ * 媒体弹幕只飘缩略图（限定大小：画面固定小图框，不飘原图——原图大、加载慢）。
+ * 无缩略图（thumbnail 为 null / 路径格式不符）返回 null，由调用方跳过该条媒体。
+ */
 function mediaThumb(item: DanmakuItem): string | null {
   if (!item.media) return null;
-  const thumb = resolveMediaPath(item.media.thumbnail);
-  return thumb ?? (item.media_id ? mediaContentUrl(item.media_id) : null);
+  return resolveMediaPath(item.media.thumbnail);
 }
 
 export function DanmakuOverlay({ channelId }: { channelId: number }) {
@@ -69,6 +80,8 @@ export function DanmakuOverlay({ channelId }: { channelId: number }) {
   /** 容器当前宽度（ResizeObserver 维护；全屏 / 宽窄屏切换自适应） */
   const widthRef = useRef(0);
   const [reduced] = useState(prefersReducedMotion);
+  /** 点击弹幕图片放大的查看器（与聊天界面一致） */
+  const [viewer, setViewer] = useState<{ media: MediaDescriptor; alt: string } | null>(null);
 
   // 容器尺寸：决定轨道数（高度）/ 动画起点（宽度）/ 时长（宽度）
   useEffect(() => {
@@ -105,6 +118,10 @@ export function DanmakuOverlay({ channelId }: { channelId: number }) {
       for (const item of state.current.danmaku) {
         if (seenRef.current.has(item.id)) continue;
         seenRef.current.add(item.id);
+        const text = item.content && item.content !== "图片" ? item.content : "";
+        const mediaUrl = mediaThumb(item);
+        // 空弹幕不飘：纯图弹幕且无缩略图（或文字为空且无图）
+        if (!text && !mediaUrl) continue;
         const idx = pickTrack(tracksRef.current);
         const track = tracksRef.current[idx];
         // 同轨道最小间距：若上一条开始未满 gap，从 gap 之后开始（同速 → 水平间距恒 ≥ 最小间距）
@@ -112,8 +129,10 @@ export function DanmakuOverlay({ channelId }: { channelId: number }) {
         track.lastStartAt = startAt;
         newEntries.push({
           key: item.id,
-          text: item.content && item.content !== "图片" ? item.content : "",
-          mediaUrl: mediaThumb(item),
+          text,
+          mediaUrl,
+          media: item.media ?? null,
+          avatar: item.sender.avatar || "",
           track: idx,
           durMs: flyDurationMs(fromX),
           fromX,
@@ -151,12 +170,44 @@ export function DanmakuOverlay({ channelId }: { channelId: number }) {
           }
           onAnimationEnd={() => handleEnd(e.key)}
         >
-          {e.mediaUrl ? (
-            <img src={e.mediaUrl} alt="" className="danmaku-fly-img" />
+          {e.avatar ? (
+            <ResourceImage
+              src={e.avatar}
+              alt=""
+              className="danmaku-fly-avatar"
+              // 头像加载失败（空头像 / 路径失效）不显示，不出现破图
+              fallback={null}
+            />
+          ) : null}
+          {e.mediaUrl && e.media ? (
+            <button
+              type="button"
+              className="danmaku-fly-img-open"
+              onClick={() =>
+                setViewer({ media: e.media as MediaDescriptor, alt: e.text || "弹幕图片" })
+              }
+              aria-label="查看弹幕图片"
+              title="点击查看大图"
+            >
+              <ResourceImage
+                src={e.mediaUrl}
+                alt=""
+                className="danmaku-fly-img"
+                variant="thumb"
+                fallback={null}
+              />
+            </button>
           ) : null}
           {e.text ? <span className="danmaku-fly-text">{e.text}</span> : null}
         </span>
       ))}
+      {viewer && (
+        <ImageViewer
+          media={viewer.media}
+          alt={viewer.alt}
+          onClose={() => setViewer(null)}
+        />
+      )}
     </div>
   );
 }

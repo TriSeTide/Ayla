@@ -2,7 +2,7 @@
  * DanmakuInput —— 文本/图片弹幕输入（M5-4）。
  * 图片先走受控媒体上传，再发送 media_id；失败保留文件可重试。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { uploadMediaFile } from "../../api/media";
 import { IconImage } from "../icons";
 import { DANMAKU_MAX_LENGTH } from "../../hooks/useDanmaku";
@@ -19,12 +19,15 @@ export function DanmakuInput({
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [failedFile, setFailedFile] = useState<File | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const submit = async (mediaId?: string | null) => {
     const ok = await onSend(text, mediaId);
     if (ok) {
       setText("");
       setFailedFile(null);
+      // 发送成功保持输入焦点（连续发弹幕不打断；点发送按钮时焦点在按钮上，需还回输入框）
+      inputRef.current?.focus();
     }
   };
 
@@ -79,11 +82,13 @@ export function DanmakuInput({
           />
         </label>
         <input
+          ref={inputRef}
           className="danmaku-input"
           placeholder="发条弹幕吧"
           value={text}
           maxLength={DANMAKU_MAX_LENGTH * 2}
-          disabled={sending || uploading}
+          // 发送中不禁用输入框：disabled 会强制失焦，破坏连续发弹幕；
+          // 防重复发送由发送按钮 disabled 承担
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.nativeEvent.isComposing) void submit();
