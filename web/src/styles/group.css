@@ -684,3 +684,25 @@
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+/* 群主设置开关（任务 03：允许普通群成员上传表情包） */
+.group-info-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.group-info-switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--glow-500);
+  cursor: pointer;
+}
+
+.group-info-switch input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
