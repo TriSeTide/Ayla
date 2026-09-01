@@ -162,3 +162,45 @@ async def test_invisible_user_not_broadcast(user_factory):
 
     await comm_b.disconnect()
     await comm_a.disconnect()
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_status_change_broadcast(user_factory, auth_client):
+    """PATCH /me/profile/ 改状态模式 → 全局 presence 组收到 presence.status（实时更新所有显示点）。"""
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    client, user = await database_sync_to_async(auth_client)(username="ws_status_a")
+    user_b = await database_sync_to_async(user_factory)(username="ws_status_b")
+    token_b = str(RefreshToken.for_user(user_b).access_token)
+    comm = WebsocketCommunicator(_make_app(), f"/ws/presence/?token={token_b}")
+    connected, _ = await comm.connect()
+    assert connected is True
+    await _receive_until(comm, _is_type("presence.self"))
+
+    # A 保存「勿扰」→ B 收到 presence.status（user_id=A, status=dnd）
+    resp = await database_sync_to_async(client.patch)(
+        "/api/v1/me/profile/", {"status": "dnd"}, format="json"
+    )
+    assert resp.status_code == 200
+    frame = await _receive_until(
+        comm,
+        lambda f: f["type"] == "presence.status"
+        and f.get("data", {}).get("user_id") == str(user.id),
+    )
+    assert frame["data"]["status"] == "dnd"
+
+    # 未变化的状态保存不广播（幂等）
+    resp2 = await database_sync_to_async(client.patch)(
+        "/api/v1/me/profile/", {"status": "dnd"}, format="json"
+    )
+    assert resp2.status_code == 200
+    with pytest.raises(asyncio.TimeoutError):
+        await _receive_until(
+            comm,
+            lambda f: f["type"] == "presence.status"
+            and f.get("data", {}).get("user_id") == str(user.id),
+            timeout=0.5,
+        )
+
+    await comm.disconnect()

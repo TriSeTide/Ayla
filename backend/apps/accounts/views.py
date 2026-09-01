@@ -1,4 +1,6 @@
 """accounts 视图。"""
+import logging
+
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.utils import timezone
@@ -17,6 +19,30 @@ from .serializers import (
     UserPublicSerializer,
 )
 User = get_user_model()
+logger = logging.getLogger(__name__)
+
+
+def _broadcast_presence_status(user) -> None:
+    """向全局 presence 组广播用户状态模式变化（presence.status 帧）。
+
+    前端据此实时更新所有显示点的状态文案（勿扰/离开/隐身/自动），
+    无需重新拉取 REST。广播失败不阻断保存（尽力而为）。
+    """
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            "presence",
+            {
+                "type": "presence.status",
+                "user_id": str(user.id),
+                "status": user.status,
+            },
+        )
+    except Exception:
+        logger.exception("presence.status broadcast failed for user=%s", user.id)
 
 
 # ---------- 注册 / 令牌 ----------
@@ -64,9 +90,13 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
+        old_status = instance.status
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        # 状态模式变化 → 向全局 presence 组广播 presence.status（前端实时更新所有显示点）
+        if "status" in serializer.validated_data and instance.status != old_status:
+            _broadcast_presence_status(instance)
         return Response(
             UserPublicSerializer(instance, context={"request": request}).data
         )

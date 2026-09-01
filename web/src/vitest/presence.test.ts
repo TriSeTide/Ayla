@@ -41,4 +41,19 @@ describe("presence store", () => {
     usePresenceStore.getState().reset();
     expect(usePresenceStore.getState().connection).toBe("offline");
   });
+
+  it("presence.status 增量 → 状态模式映射（勿扰/离开/隐身/自动）", () => {
+    usePresenceStore.getState().setUserStatus("u1", "dnd");
+    usePresenceStore.getState().setUserStatus("u2", "invisible");
+    expect(usePresenceStore.getState().statuses).toEqual({
+      u1: "dnd",
+      u2: "invisible",
+    });
+  });
+
+  it("reset 清空 statuses", () => {
+    usePresenceStore.getState().setUserStatus("u1", "away");
+    usePresenceStore.getState().reset();
+    expect(usePresenceStore.getState().statuses).toEqual({});
+  });
 });

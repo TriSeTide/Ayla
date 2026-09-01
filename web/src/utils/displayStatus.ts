@@ -1,13 +1,14 @@
 /**
  * 在线状态显示规则（任务 06：在线 → 自动）。
  *
- * 两层数据源：
+ * 三层数据源：
  * - User.status（用户选择的模式：auto/dnd/away/invisible，REST 快照）；
- * - 实时在线（Redis presence：WS presence.update 增量 + REST online 快照）。
+ * - 实时在线（Redis presence：WS presence.update 增量 + REST online 快照）；
+ * - 实时模式（WS presence.status 增量：保存勿扰/离开/隐身/自动时后端广播）。
  *
- * 显示 = f(status, 实时在线)：auto 跟随实时，dnd/away/invisible 固定文案。
+ * 显示 = f(实时模式, 实时在线)：auto 跟随实时，dnd/away/invisible 固定文案。
  * 后端 UserPublicSerializer.display_status 是权威快照；本工具用于
- * presence 实时事件到达时合并两层，避免各组件复制规则。
+ * presence 实时事件到达时合并各层，避免各组件复制规则。
  */
 import type { UserPublic } from "../api/types";
 import { usePresenceStore } from "../stores/presence";
@@ -47,18 +48,54 @@ export function presenceOnline(
 }
 
 /**
+ * 实时模式判定（纯函数）：presence.status 增量优先（WS 权威），
+ * 无记录时回退 REST 快照 user.status。
+ */
+export function presenceStatus(
+  statuses: Record<string, string>,
+  user: Pick<UserPublic, "id" | "status"> | null | undefined,
+): string {
+  if (!user) return "auto";
+  return statuses[user.id] ?? user.status;
+}
+
+/** 用实时模式覆盖 user.status（供 presenceOnline/displayStatusOf 消费）。 */
+export function withLiveStatus<T extends Pick<UserPublic, "id" | "status">>(
+  statuses: Record<string, string>,
+  user: T | null | undefined,
+): T | null | undefined {
+  if (!user) return user;
+  return { ...user, status: presenceStatus(statuses, user) };
+}
+
+/**
  * 实时在线判定（hook 形式）：订阅 presence store，WS 事件到达时组件自动重渲染。
+ * 模式（status）同样取实时值——运行中切隐身立即熄灭光环，不泄漏。
  */
 export function usePresenceOnline(
   user: Pick<UserPublic, "id" | "status" | "online"> | null | undefined,
 ): boolean {
   const users = usePresenceStore((s) => s.users);
-  return presenceOnline(users, user);
+  const statuses = usePresenceStore((s) => s.statuses);
+  return presenceOnline(users, withLiveStatus(statuses, user));
 }
 
-/** 组合：对外显示文案（实时）。 */
+/** 实时模式（hook 形式）：presence.status 增量优先，REST 快照兜底。 */
+export function usePresenceStatus(
+  user: Pick<UserPublic, "id" | "status"> | null | undefined,
+): string {
+  const statuses = usePresenceStore((s) => s.statuses);
+  return presenceStatus(statuses, user);
+}
+
+/** 组合：对外显示文案（实时模式 + 实时在线）。 */
 export function useDisplayStatus(
   user: Pick<UserPublic, "id" | "status" | "online"> | null | undefined,
 ): string {
-  return displayStatusOf(user, usePresenceOnline(user));
+  const statuses = usePresenceStore((s) => s.statuses);
+  const users = usePresenceStore((s) => s.users);
+  return displayStatusOf(
+    { ...user, status: presenceStatus(statuses, user) },
+    presenceOnline(users, user),
+  );
 }

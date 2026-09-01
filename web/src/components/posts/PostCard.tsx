@@ -14,7 +14,7 @@ import { PostVideoCover } from "./PostVideoCover";
 import { mediaContentUrl } from "../../api/media";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
-import { presenceOnline } from "../../utils/displayStatus";
+import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 import { getVisibilityLabels } from "../../utils/visibility";
 
@@ -46,6 +46,7 @@ export function PostCard({
   const [expanded, setExpanded] = useState(false);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
   // 媒体列表（图片/视频封面统一走 thumbnail 缩略图；视频无海报帧才降级首帧预览）
   const mediaList = post.images.filter((i) => i.media);
   const longBody = post.body.length > 120;
@@ -59,7 +60,7 @@ export function PostCard({
           <Avatar
             label={post.author.nickname || post.author.username}
             size={36}
-            online={presenceOnline(onlineUsers, post.author)}
+            online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, post.author))}
             imageUrl={post.author.avatar || null}
             onClick={(e) => {
               e.stopPropagation();

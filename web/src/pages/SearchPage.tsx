@@ -18,7 +18,7 @@ import { useSearchStore } from "../stores/search";
 import { useChatStore } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
-import { presenceOnline } from "../utils/displayStatus";
+import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
 import { goUserProfile } from "../utils/navigation";
 import { chatWS } from "../ws/chat";
 import type { ChatServerFrame } from "../api/types";
@@ -30,6 +30,7 @@ export function SearchPage() {
   const { history, pushHistory, clearHistory } = useSearchStore();
   const conversations = useChatStore((state) => state.conversations);
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
   const joinedConversationIds = useMemo(
     () => new Set(conversations.filter((conversation) => conversation.type === "group").map((conversation) => conversation.id)),
     [conversations],
@@ -199,7 +200,7 @@ export function SearchPage() {
                 <Avatar
                   label={u.nickname || u.username}
                   size={36}
-                  online={presenceOnline(onlineUsers, u)}
+                  online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))}
                   imageUrl={u.avatar || null}
                   onClick={(e) => {
                     e.stopPropagation();

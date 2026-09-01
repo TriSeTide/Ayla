@@ -116,6 +116,10 @@ export class PresenceClient {
         // 记录已知状态（online/offline 都保留），供显示层区分「未收到」与「已离线」
         store.setUser(data.user_id, data.status === "offline" ? "offline" : "online");
       }
+    } else if (msg.type === "presence.status") {
+      // 状态模式变化（保存勿扰/离开/隐身/自动时后端广播）→ 实时更新所有显示点
+      const data = msg.data as { user_id: string; status: string } | undefined;
+      if (data?.user_id) store.setUserStatus(data.user_id, data.status);
     }
     for (const h of this.handlers) h(msg);
   }

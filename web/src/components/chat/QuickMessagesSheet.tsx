@@ -25,7 +25,7 @@ import { useBadgesStore } from "../../stores/badges";
 import { useChatStore, isChatStale, sortPrivateByActivity } from "../../stores/chat";
 import { useNoticeStore } from "../../stores/notices";
 import { usePresenceStore } from "../../stores/presence";
-import { presenceOnline } from "../../utils/displayStatus";
+import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { chatWS } from "../../ws/chat";
 import { ConversationList } from "./ConversationList";
 import { ElysiaEntry } from "./ElysiaEntry";
@@ -367,9 +367,10 @@ function RequestRow({
   onReject: () => void;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
   return (
     <div className="request-row">
-      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, avatar)} imageUrl={avatar.avatar || null} />
+      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, avatar))} imageUrl={avatar.avatar || null} />
       <div className="request-body">
         <span className="request-name">{name}</span>
         {message && <span className="request-msg">{message}</span>}

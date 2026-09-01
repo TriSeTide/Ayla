@@ -15,7 +15,7 @@ import { Avatar } from "../components/Avatar";
 import { IconClose, IconDots, IconMessage, IconSearch } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
-import { presenceOnline } from "../utils/displayStatus";
+import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
 import type { ModuleKey } from "./shellConfig";
 import { PRIMARY_MODULES } from "./shellConfig";
 
@@ -32,6 +32,7 @@ export function TopNav({
 }) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -115,7 +116,7 @@ export function TopNav({
           <Avatar
             label={currentUser.nickname || currentUser.username}
             size={40}
-            online={presenceOnline(onlineUsers, currentUser)}
+            online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, currentUser))}
             imageUrl={currentUser.avatar || null}
           />
         )}
@@ -178,7 +179,7 @@ export function TopNav({
               <SearchDropGroup title="用户" count={searchResults?.users?.total ?? 0} onMore={goFullSearch}>
                 {(searchResults?.users?.items ?? []).map((u) => (
                   <button key={u.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/search?q=${encodeURIComponent(query)}`)}>
-                    <Avatar label={u.nickname || u.username} size={28} online={presenceOnline(onlineUsers, u)} imageUrl={u.avatar || null} />
+                    <Avatar label={u.nickname || u.username} size={28} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))} imageUrl={u.avatar || null} />
                     <span>{u.nickname || u.username}</span>
                   </button>
                 ))}

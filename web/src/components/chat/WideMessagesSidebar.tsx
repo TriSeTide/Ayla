@@ -18,7 +18,7 @@ import { useChatStore, sortPrivateByActivity } from "../../stores/chat";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
 import { useNoticeStore } from "../../stores/notices";
-import { presenceOnline } from "../../utils/displayStatus";
+import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 import { chatWS } from "../../ws/chat";
 import type { ConversationSummary } from "../../api/types";
@@ -58,6 +58,7 @@ export function WideMessagesSidebar({
   const [tab, setTab] = useState<Tab>("chat");
   const currentUser = useAuthStore((state) => state.currentUser);
   const onlineUsers = usePresenceStore((state) => state.users);
+  const onlineStatuses = usePresenceStore((state) => state.statuses);
   const realtimeNotices = useNoticeStore((state) => state.notices);
   const dismissNotice = useNoticeStore((state) => state.dismiss);
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
@@ -252,7 +253,7 @@ export function WideMessagesSidebar({
                   <Avatar
                     label={f.user.nickname || f.user.username}
                     size={36}
-                    online={presenceOnline(onlineUsers, f.user)}
+                    online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, f.user))}
                     imageUrl={f.user.avatar || null}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -355,9 +356,10 @@ function RequestRow({
   onReject: () => void;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
   return (
     <div className="request-row">
-      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, avatar)} imageUrl={avatar.avatar || null} />
+      <Avatar label={avatar.nickname || avatar.username} size={36} online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, avatar))} imageUrl={avatar.avatar || null} />
       <div className="request-body">
         <span className="request-name">{name}</span>
         {message && <span className="request-msg">{message}</span>}

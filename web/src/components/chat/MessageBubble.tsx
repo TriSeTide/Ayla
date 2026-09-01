@@ -8,8 +8,11 @@
  * - 引用回复：左 3px ice 竖条 + 弱化一层；
  * - 撤回态弱化 + 「已撤回」标签。
  */
-import { useEffect, useRef } from "react";
-import type { ChatMessage } from "../../api/types";
+import { useEffect, useRef, useState } from "react";
+import type { ChatMessage, UserPublic } from "../../api/types";
+import { ensureUser, getCachedUser } from "../../api/users";
+import { usePresenceStore } from "../../stores/presence";
+import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { Avatar } from "../Avatar";
 import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
@@ -105,6 +108,24 @@ export function MessageBubble({
 }) {
   const recalled = message.status === "recalled";
   const isMedia = MEDIA_TYPES.has(message.type);
+  // 发送者实时在线（光环）：懒加载发送者资料（缓存），presence store 实时判定
+  const [senderUser, setSenderUser] = useState<UserPublic | null>(() =>
+    message.sender_id ? getCachedUser(message.sender_id) : null,
+  );
+  useEffect(() => {
+    if (!message.sender_id || senderUser) return;
+    let cancelled = false;
+    void ensureUser(message.sender_id).then((u) => {
+      if (!cancelled && u) setSenderUser(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.sender_id]);
+  const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
+  const senderOnline = presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, senderUser));
   // 触屏判定用 hover 能力（与 app.css 的 @media (hover:none) 对齐），
   // 不用宽度：iPad 等宽屏触屏也应走「点击行展开工具栏」路径。
   const isTouch = useMediaQuery(HOVER_NONE_QUERY);
@@ -207,7 +228,7 @@ export function MessageBubble({
       <Avatar
         label={senderAvatarLabel ?? undefined}
         size={32}
-        online={!isSelf}
+        online={senderOnline}
         imageUrl={senderAvatar || null}
         onClick={handleSenderClick}
         ariaLabel={senderName ?? "发送者个人主页"}

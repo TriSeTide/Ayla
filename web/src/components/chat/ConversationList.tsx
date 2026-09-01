@@ -70,6 +70,7 @@ export function ConversationList({
   revealItems?: boolean;
 }) {
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
 
   if (conversations.length === 0) {
@@ -126,7 +127,12 @@ export function ConversationList({
                   <span className="conv-item-title">{title}</span>
                   {isPrivate && (
                     <span className={`conv-item-status ${isOnline ? "is-online" : ""}`}>
-                      {displayStatusOf(conv.peer, isOnline)}
+                      {displayStatusOf(
+                        conv.peer
+                          ? { ...conv.peer, status: onlineStatuses[conv.peer.id] ?? conv.peer.status }
+                          : null,
+                        isOnline,
+                      )}
                     </span>
                   )}
                 </span>

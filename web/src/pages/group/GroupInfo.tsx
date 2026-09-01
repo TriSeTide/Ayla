@@ -22,7 +22,7 @@ import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
 import { usePresenceStore } from "../../stores/presence";
 import { useHomeStore } from "../../stores/home";
-import { presenceOnline } from "../../utils/displayStatus";
+import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -45,6 +45,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.currentUser);
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
 
   const group = useMemo(
     () => conversations.find((c) => c.id === groupId) ?? null,
@@ -388,7 +389,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
               <Avatar
                 label={m.user.nickname || m.user.username}
                 size={36}
-                online={presenceOnline(onlineUsers, m.user)}
+                online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, m.user))}
                 imageUrl={m.user.avatar || null}
                 onClick={() => goUserProfile(currentUser?.id, m.user.id)}
                 ariaLabel={`查看 ${m.user.nickname || m.user.username} 的个人主页`}
@@ -537,6 +538,7 @@ function TransferOwnerDialog({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<ConversationMember | null>(null);
   const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -597,7 +599,7 @@ function TransferOwnerDialog({
                       <Avatar
                         label={name}
                         size={36}
-                        online={presenceOnline(onlineUsers, m.user)}
+                        online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, m.user))}
                         imageUrl={m.user.avatar || null}
                       />
                       <span className="group-transfer-name">{name}</span>

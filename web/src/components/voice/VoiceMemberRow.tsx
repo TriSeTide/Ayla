@@ -20,8 +20,10 @@ import type { CSSProperties } from "react";
 import type { UserPublic } from "../../api/types";
 import { ensureUser, getCachedUser } from "../../api/users";
 import { useAuthStore } from "../../stores/auth";
+import { usePresenceStore } from "../../stores/presence";
 import { useVoiceStore } from "../../stores/voice";
 import type { VoiceMemberState } from "../../stores/voice";
+import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 import { Avatar } from "../Avatar";
 import { IconMic, IconMicOff, IconSpeaker, IconSpeakerOff } from "../icons";
@@ -135,13 +137,17 @@ export function VoiceMemberRow({
   const displayName = user?.nickname || user?.username || member.user_id.slice(0, 6);
   const localSpeaking = localAudioLevel > 0.02;
   const remoteSpeaking = member.audioLevel > 0.02;
+  // 成员在线光环：presence store 实时（隐身用户强制离线）
+  const onlineUsers = usePresenceStore((s) => s.users);
+  const onlineStatuses = usePresenceStore((s) => s.statuses);
+  const memberOnline = presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, user));
 
   return (
     <div className="voice-member-row">
       <Avatar
         label={displayName}
         size={32}
-        online
+        online={memberOnline}
         isElysia={isElysia}
         imageUrl={user?.avatar || null}
         onClick={() => goUserProfile(currentUserId, member.user_id)}

@@ -100,3 +100,12 @@ class PresenceConsumer(AsyncJsonWebsocketConsumer):
                 "data": {"user_id": event["user_id"], "status": event["status"]},
             }
         )
+
+    async def presence_status(self, event):
+        """状态模式变化广播（PATCH /me/profile/ 保存 status 时发出）。"""
+        await self.send_json(
+            {
+                "type": "presence.status",
+                "data": {"user_id": event["user_id"], "status": event["status"]},
+            }
+        )

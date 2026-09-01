@@ -88,6 +88,14 @@ describe("usePresenceOnline", () => {
     const { result } = renderHook(() => usePresenceOnline(null));
     expect(result.current).toBe(false);
   });
+
+  it("运行中切隐身（presence.status 实时）→ 光环立即熄灭", () => {
+    // REST 快照 status=auto + 在线记录，但实时 statuses 已是 invisible
+    usePresenceStore.getState().setUser("u1", "online");
+    usePresenceStore.getState().setUserStatus("u1", "invisible");
+    const { result } = renderHook(() => usePresenceOnline(user({ status: "auto", online: true })));
+    expect(result.current).toBe(false);
+  });
 });
 
 describe("useDisplayStatus（组合）", () => {
@@ -107,5 +115,13 @@ describe("useDisplayStatus（组合）", () => {
     usePresenceStore.getState().setUser("u1", "online");
     const { result } = renderHook(() => useDisplayStatus(user({ status: "invisible" })));
     expect(result.current).toBe("离线");
+  });
+
+  it("presence.status 实时模式优先于 REST 快照（勿扰实时生效）", () => {
+    usePresenceStore.getState().setUser("u1", "online");
+    usePresenceStore.getState().setUserStatus("u1", "dnd");
+    // REST 快照还是 auto，但实时模式已是 dnd
+    const { result } = renderHook(() => useDisplayStatus(user({ status: "auto", online: true })));
+    expect(result.current).toBe("勿扰");
   });
 });

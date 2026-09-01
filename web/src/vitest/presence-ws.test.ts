@@ -90,6 +90,22 @@ describe("PresenceClient", () => {
     client.disconnect();
   });
 
+  it("收到 presence.status → store 状态模式映射更新", () => {
+    const client = new PresenceClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    const ws = instances[0];
+
+    fire(ws, { type: "presence.status", data: { user_id: "u1", status: "dnd" } });
+    fire(ws, { type: "presence.status", data: { user_id: "u2", status: "invisible" } });
+    expect(usePresenceStore.getState().statuses).toEqual({
+      u1: "dnd",
+      u2: "invisible",
+    });
+
+    client.disconnect();
+  });
+
   it("断开 → 指数退避重连（1s→2s→4s），重连成功重置退避", () => {
     const client = new PresenceClient();
     client.connect();
