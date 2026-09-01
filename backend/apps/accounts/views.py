@@ -103,6 +103,8 @@ class BadgesView(APIView):
             Message.objects.filter(conversation__members__user=user)
             .exclude(sender=user)
             .exclude(status=Message.STATUS_RECALLED)
+            # 戳一戳刻意无未读/已读属性：不占私信/群红点（与 chat 未读口径一致）
+            .exclude(type=Message.TYPE_POKE)
             .exclude(reads__user=user)
         )
         # M8 @ 能力：@ 我且未读的消息数（跨全部会话；mention 段结构化判定）

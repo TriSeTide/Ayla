@@ -308,3 +308,36 @@ async def test_ws_group_poke_broadcast(user_factory):
     assert frame["data"]["target_name"] == "群友"
 
     await comm_b.disconnect()
+
+
+@pytest.mark.django_db
+class TestPokeBadgesUnread:
+    """poke 不占私信/群红点（BadgesView 未读口径与 chat 一致，均排除 poke）。
+
+    直接调 /me/badges/ 会触发 mention_unread 的 segments__contains（SQLite 基线
+    不支持 contains），故用 DB 级断言验证 BadgesView 的 unread 查询语义。
+    """
+
+    def test_poke_not_in_private_unread(self, auth_client, user_factory):
+        b = user_factory(username="pkb_b")
+        ca, a = auth_client(username="pkb_a")
+        conv = _mk_private_friends_sync(a, b)
+        # a 发 poke 给 b
+        ca.post(
+            f"/api/v1/chat/conversations/{conv.id}/messages/",
+            {"type": "poke", "content": str(b.id), "idempotency_key": new_key()},
+            format="json",
+        )
+        # b 视角：BadgesView 的 unread 查询（含 exclude poke）不应包含 poke
+        unread = (
+            Message.objects.filter(conversation__members__user=b)
+            .exclude(sender=b)
+            .exclude(status=Message.STATUS_RECALLED)
+            .exclude(type=Message.TYPE_POKE)
+            .exclude(reads__user=b)
+        )
+        assert unread.count() == 0
+        # 若未排除 poke，则会被算进私信红点
+        assert Message.objects.filter(
+            conversation__members__user=b, sender=a, type=Message.TYPE_POKE
+        ).exists()
