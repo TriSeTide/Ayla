@@ -454,7 +454,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 > 用于 /messages 与 /chat/:id 的会话列表（ConversationList）。在线状态双通道原则（§10）保持：光环 + 名字行文字标签。
 
 - **名字行**：昵称 Nunito 700 15px `--text-primary`（一行省略）+ 紧随其后在线状态胶囊——`is-online` 时 `--success` 字 + 6px 圆点，离线 `--text-secondary`；底 `rgba(157,191,230,0.16)`，圆角 999px，11px/700，padding 1px 8px
-- **预览行**：最新一条消息摘要 Nunito 400 13px `--text-secondary` 一行省略（替代原「在线/离线」文字）；群聊预览带 `发送者名: 内容`，媒体消息占位 `[图片]/[语音]/[文件]/[表情]`，已撤回 `[已撤回]`，无消息 `暂无消息`
+- **预览行**：最新一条消息摘要 Nunito 400 13px `--text-secondary` 一行省略（替代原「在线/离线」文字）；群聊预览带 `发送者名: 内容`，媒体消息占位 `[图片]/[语音]/[表情]`，**文件消息显示文件名**（`content` 即文件名，非 `[文件]` 占位），已撤回 `[已撤回]`，无消息 `暂无消息`
 - **⋯ 更多按钮**：行右侧绝对定位（`right:6px` 垂直居中），40×40px 圆形触达区（§10 ≥40px），三点线性 SVG 18px `#a9b8d4`；hover/展开态底 `rgba(157,191,230,0.25)`、图标转 `--text-primary`；行内 padding-right 52px 给按钮让位
 - **弹出菜单**（`.conv-menu`）：绝对定位**向上展开**（`bottom: calc(100% - 2px)`，避免被列表滚动容器 `overflow-y:auto` 裁剪），右对齐；层级 `z-index: 60`——高于底栏/顶栏/侧栏（20–50），低于弹层遮罩（70+），保证不被固定栏遮挡；`--glass-bg-strong` + blur 18px + 圆角 14px + 1px `--glass-border` + `0 8px 24px rgba(70,91,146,0.16)`；菜单项行高 40px 圆角 10px Nunito 600 14px，hover 底 `rgba(157,191,230,0.22)`，危险项（删除）`--destructive` 字 + hover 底 `rgba(224,100,100,0.12)`
 - **置顶会话视觉标识**（`.conv-item.is-pinned`）：左侧 3px `--glow-500` 圆角指示条（同 ServerRail 指示条语言，装饰不承载信息）+ 非选中态淡 sakura 粉底 `rgba(249,176,255,0.1)`（hover 0.16）+ 标题转 `--grape-700`（对比度 ≈6:1 达标）；选中态（active）背景保持 ice 蓝胶囊、标题仍 grape
@@ -521,6 +521,17 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 详情入口在列表 DOM 仍存在时先保存真实 `scrollTop`；返回时在内容已就绪后由 `useLayoutEffect` 恢复，并在下一帧补写一次，以覆盖瀑布流/异步图片造成的高度晚落定。退出 cleanup 只卸载监听，不重新读取可能已被转场归零的 DOM。
 - `restoring` 是可观察的恢复状态（包括显式保存的 0 位）；命中恢复时先稳定内容高度与位置，按 §7.1 禁止 `.reveal-item`/stagger。用户主动刷新清除本次恢复抑制并重新播放列表入场反馈。
 - 返回必须保留已加载分页与列分配连续性；加载失败不得伪装成空列表或把滚动记忆跳到当前尾部。
+
+### 12.21 文件消息（聊天传文件）
+
+> 群聊/私信新增 `type=file` 单文件消息：任意格式、单个文件，气泡显示文件名+大小+下载，列表预览显示文件名。上传入口是与图片/语音并列的「文件」按钮。
+
+- **上传入口**（`.composer-tool-btn`，`aria-label=发送文件`）：composer 工具区、图片按钮右侧；40×40px 圆钮（§12.16 同款），`IconFile` 18px；内嵌 `<input type="file">` **不设 `accept`（任意格式）、不设 `multiple`（单文件）**。
+- **单文件互斥**：文件与图片/视频不能混排（`file` 是单媒体消息契约，不走 mixed 段）。选择文件会清空已选图片/视频，反之亦然；一次只能一个文件。
+- **待发送队列文件项**（`.picked-thumb[data-kind=file]` → `.picked-file`）：宽条形态（`min-width:120px; max-width:180px`），`IconFile` 16px + 文件名 12px/600 一行省略；无缩略图、不建 objectURL。右上移除钮与其他媒体项一致。
+- **文件气泡**（`.file-card`，§4 已有）：`IconFile` 40px 圆角底（`--ice-100` / `--indigo-700`）+ 文件名 14px/600 一行省略（`title` 全文）+ 大小 12px `--text-secondary` + 右侧 36px 下载圆钮（`<a download>` 签名 URL 原生下载，`aria-label=下载 <文件名>`）。
+- **乐观文件消息**（descriptor 未就绪、上传中/失败）：复用 `.file-card` 显示本地文件名+大小（无下载钮）；上传进度/取消/失败重试/删除由 `MessageBubble` 外层 `.msg-send-state` 承接（§12.16）。服务端确认后原地替换为带 descriptor 的文件气泡。
+- **列表预览**：`file` 消息 preview = 文件名（后端 `message_preview` 对 `TYPE_FILE` 取 `content`，非 `[文件]` 占位）；群聊带 `发送者名: 文件名`。WS `message.new` 与 REST 会话列表同契约。
 
 ---
 

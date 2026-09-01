@@ -126,6 +126,25 @@ describe("会话列表预览与在线状态", () => {
     expect(screen.getByText("阿蓝: [图片]")).toBeInTheDocument();
   });
 
+  it("文件消息预览显示文件名（后端 preview 透传，非 [文件] 占位）", () => {
+    renderList([
+      privateConv({
+        last_message: {
+          seq: 8,
+          type: "file",
+          content: "合同扫描件.pdf",
+          preview: "合同扫描件.pdf",
+          sender_id: "u2",
+          sender_name: "小樱",
+          status: "sent",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      }),
+    ]);
+    expect(screen.getByText("合同扫描件.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("[文件]")).not.toBeInTheDocument();
+  });
+
   it("已撤回消息显示占位", () => {
     renderList([
       privateConv({

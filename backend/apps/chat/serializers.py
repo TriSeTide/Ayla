@@ -112,7 +112,8 @@ def message_preview(msg) -> str:
     """会话列表/群活跃度的最新消息预览文本。
 
     混排消息按段生成「文本文本[视频]文本[图片]」；文本消息取 content；
-    单媒体消息取 [图片]/[语音] 等占位；撤回显示 [已撤回]；戳一戳显示「A戳了戳B」。
+    单媒体消息取 [图片]/[语音] 等占位（文件消息例外：content 存文件名，直接显示文件名）；
+    撤回显示 [已撤回]；戳一戳显示「A戳了戳B」。
     """
     if msg.status == Message.STATUS_RECALLED:
         return "[已撤回]"
@@ -129,6 +130,9 @@ def message_preview(msg) -> str:
             else:
                 parts.append(_SEGMENT_PLACEHOLDER.get(seg_type, "[媒体]"))
         preview = "".join(parts)
+    elif msg.type == Message.TYPE_FILE:
+        # 文件消息契约：content 即文件名（前端发送时写入）；显示文件名而非 [文件] 占位
+        preview = msg.content or _MEDIA_TYPE_PLACEHOLDER[msg.type]
     elif msg.type in _MEDIA_TYPE_PLACEHOLDER:
         preview = _MEDIA_TYPE_PLACEHOLDER[msg.type]
     else:

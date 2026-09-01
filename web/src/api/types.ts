@@ -161,9 +161,10 @@ export type DraftBlock =
 export interface LocalMediaPreview {
   /** 段内唯一 id（与 segments 中媒体段一一对应） */
   id: string;
-  kind: "image" | "video";
+  /** file 为单文件消息（不走 mixed 段，仅乐观渲染/重试用） */
+  kind: "image" | "video" | "file";
   mimeType: string;
-  /** objectURL（渲染）；组件卸载/消息删除时 revoke */
+  /** objectURL（渲染）；组件卸载/消息删除时 revoke（file 项无预览图，可为空串） */
   url: string;
   /** 原始 File（重试重传用；仅乐观消息持有） */
   file: File;

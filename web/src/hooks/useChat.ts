@@ -228,9 +228,10 @@ export async function sendMessage(
 /** 待发送媒体（本地选择/粘贴，尚未上传） */
 export interface PickedMediaItem {
   id: string;
-  kind: "image" | "video";
+  /** file 为单文件消息：不与图片/视频混排（UI 互斥，最多一个） */
+  kind: "image" | "video" | "file";
   mimeType: string;
-  /** objectURL（缩略图条与乐观气泡预览用） */
+  /** objectURL（缩略图条与乐观气泡预览用；file 项无预览图，可为空串） */
   url: string;
   file: File;
 }
@@ -291,8 +292,66 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
   const blocks = opts.blocks ?? [];
   const text = blocksText(blocks).trim();
   const hasMention = blocks.some((b) => b.type === "mention");
+
+  // 文件消息（type=file 单媒体，不走 mixed 段）：content 存文件名。
+  // UI 已保证 picked 只含一个 file 项且与图片/视频互斥；此处防御多 file 只取第一个。
+  const fileItem = opts.picked.find((p) => p.kind === "file");
+  if (fileItem) {
+    const optimistic: ChatMessage = {
+      id: localId,
+      conversation_id: convId,
+      sender_id: currentUser?.id ?? "me",
+      type: "file",
+      content: fileItem.file.name,
+      media_id: null,
+      segments: null,
+      localMedia: [
+        {
+          id: fileItem.id,
+          kind: "file",
+          mimeType: fileItem.mimeType,
+          url: fileItem.url,
+          file: fileItem.file,
+        },
+      ],
+      reply_to: opts.replyTo != null ? String(opts.replyTo) : null,
+      status: "sent",
+      seq: 0,
+      created_at: nowIso,
+      pending: true,
+      idempotencyKey,
+    };
+    useMessageStore.getState().addPendingMessage(convId, optimistic);
+
+    const controller = new AbortController();
+    uploadControllers.set(localId, controller);
+    void (async () => {
+      try {
+        const [uploaded] = await uploadPickedWithProgress(convId, localId, opts.picked, controller.signal);
+        const serverMsg = await chatApi.sendMessage(convId, {
+          type: "file",
+          content: fileItem.file.name,
+          reply_to: opts.replyTo ?? null,
+          idempotency_key: idempotencyKey,
+          media_id: uploaded.media_id,
+        });
+        useMessageStore.getState().resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
+      } catch {
+        // 用户主动取消时不标记失败（消息已由 cancelOptimistic 删除）
+        if (!controller.signal.aborted) {
+          useMessageStore.getState().markMessageFailed(convId, localId);
+        }
+      } finally {
+        uploadControllers.delete(localId);
+      }
+    })();
+    return;
+  }
+
   // 无媒体且无 @ = 纯文本（旧 text 契约）；有媒体或有 @ = mixed + segments
   const isMixed = opts.picked.length > 0 || hasMention;
+  // 走到这里的 picked 只含 image/video（file 已在上方分支返回）
+  const mediaPicked = opts.picked as Array<PickedMediaItem & { kind: "image" | "video" }>;
 
   const segments: NonNullable<import("../api/types").ChatMessage["segments"]> | null = isMixed
     ? [
@@ -301,10 +360,10 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
             ? ({ type: "text" as const, text: b.text })
             : ({ type: "mention" as const, user_id: b.user_id, name: b.name }),
         ),
-        ...opts.picked.map((p) => ({ type: p.kind, media_id: "", media: null })),
+        ...mediaPicked.map((p) => ({ type: p.kind, media_id: "", media: null })),
       ]
     : null;
-  const localMedia = opts.picked.map((p) => ({
+  const localMedia = mediaPicked.map((p) => ({
     id: p.id,
     kind: p.kind,
     mimeType: p.mimeType,
@@ -354,10 +413,10 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
 
   void (async () => {
     try {
-      const uploaded = await uploadPickedWithProgress(convId, localId, opts.picked, controller.signal);
+      const uploaded = await uploadPickedWithProgress(convId, localId, mediaPicked, controller.signal);
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [
         ...blocksToSegments(blocks),
-        ...opts.picked.map((p, i) => ({ type: p.kind, media_id: uploaded[i].media_id })),
+        ...mediaPicked.map((p, i) => ({ type: p.kind, media_id: uploaded[i].media_id })),
       ];
       const serverMsg = await chatApi.sendMessage(convId, {
         type: "mixed",
@@ -436,18 +495,47 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
     return;
   }
 
+  // 文件消息重试（type=file 单媒体，不走 mixed 段）：重传 → 发 type=file + content=文件名 + media_id
+  const fileItem = picked.find((m) => m.kind === "file");
+  if (fileItem) {
+    const controller = new AbortController();
+    uploadControllers.set(newLocalIdStr, controller);
+    void (async () => {
+      try {
+        const [uploaded] = await uploadPickedWithProgress(convId, newLocalIdStr, picked, controller.signal);
+        const serverMsg = await chatApi.sendMessage(convId, {
+          type: "file",
+          content: msg.content,
+          reply_to: msg.reply_to != null ? Number(msg.reply_to) : null,
+          idempotency_key: key,
+          media_id: uploaded.media_id,
+        });
+        store.resolvePendingMessage(convId, newLocalIdStr, key, serverMsg);
+      } catch {
+        if (!controller.signal.aborted) {
+          store.markMessageFailed(convId, newLocalIdStr);
+        }
+      } finally {
+        uploadControllers.delete(newLocalIdStr);
+      }
+    })();
+    return;
+  }
+
+  // 走到这里的 picked 只含 image/video（file 已在上方分支返回）
+  const mediaPicked = picked as Array<PickedMediaItem & { kind: "image" | "video" }>;
   const controller = new AbortController();
   uploadControllers.set(newLocalIdStr, controller);
 
   void (async () => {
     try {
-      const uploaded = await uploadPickedWithProgress(convId, newLocalIdStr, picked, controller.signal);
+      const uploaded = await uploadPickedWithProgress(convId, newLocalIdStr, mediaPicked, controller.signal);
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [];
       for (const seg of msg.segments ?? []) {
         if (seg.type === "text") segs.push({ type: "text", text: seg.text });
         else if (seg.type === "mention") segs.push({ type: "mention", user_id: seg.user_id });
       }
-      picked.forEach((m, i) => segs.push({ type: m.kind, media_id: uploaded[i].media_id }));
+      mediaPicked.forEach((m, i) => segs.push({ type: m.kind, media_id: uploaded[i].media_id }));
       const serverMsg = await chatApi.sendMessage(convId, {
         type: "mixed",
         content: msg.content,

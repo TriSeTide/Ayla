@@ -11,7 +11,7 @@ import type { ChatMessage, ConversationMember, DraftBlock } from "../../api/type
 import { useChatDraftsStore } from "../../stores/chatDrafts";
 import { sendMessage, sendOptimistic, type PickedMediaItem } from "../../hooks/useChat";
 import { uploadMediaFile, validateMediaFile } from "../../api/media";
-import { IconImage, IconClose, IconMic, IconSend } from "../icons";
+import { IconImage, IconClose, IconMic, IconSend, IconFile } from "../icons";
 import { useTyping } from "../../hooks/useTyping";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceRecorder, isVoiceRecordingSupported, formatDuration as formatRecDuration, type VoiceRecording } from "../../hooks/useVoiceRecorder";
@@ -100,22 +100,36 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     /** 校验并加入待发送队列（选文件/粘贴共用） */
     const enqueueFiles = (files: File[]) => {
       const added: PickedMediaItem[] = [];
+      let hasFile = false;
       for (const file of files) {
         const { error, kind } = validateMediaFile(file);
         if (error) {
           setError(error);
           continue;
         }
+        if (kind === "file") hasFile = true;
         added.push({
           id: newPickId(),
           kind,
           mimeType: file.type,
-          url: URL.createObjectURL(file),
+          // file 无缩略图预览：不建 objectURL（渲染走文件名，省内存）
+          url: kind === "file" ? "" : URL.createObjectURL(file),
           file,
         });
       }
       if (added.length > 0) {
-        setPicked((prev) => [...prev, ...added]);
+        setPicked((prev) => {
+          // 单文件互斥：file 与图片/视频不能混排（file 是单媒体消息契约）。
+          // 新选含 file → 丢弃旧的图片/视频；旧队列已有 file 且新增图片/视频 → 丢弃旧 file。
+          const prevHasFile = prev.some((p) => p.kind === "file");
+          if (hasFile || prevHasFile) {
+            for (const p of prev) {
+              if (p.url) URL.revokeObjectURL(p.url);
+            }
+            return added;
+          }
+          return [...prev, ...added];
+        });
         setError(null);
       }
     };
@@ -268,6 +282,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
               <div key={p.id} className="picked-thumb" data-kind={p.kind}>
                 {p.kind === "video" ? (
                   <video src={p.url} className="picked-video" preload="metadata" muted playsInline tabIndex={-1} />
+                ) : p.kind === "file" ? (
+                  <span className="picked-file" title={p.file.name}>
+                    <IconFile width={16} height={16} />
+                    <span className="picked-file-name">{p.file.name}</span>
+                  </span>
                 ) : (
                   <img src={p.url} alt="待发送图片" className="picked-img" />
                 )}
@@ -338,6 +357,19 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                   if (files.length === 0) return;
                   enqueueFiles(files);
                 }} />
+              </label>
+              <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
+                <IconFile width={18} height={18} />
+                <input
+                  type="file"
+                  hidden
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    e.target.value = "";
+                    if (files.length === 0) return;
+                    enqueueFiles(files);
+                  }}
+                />
               </label>
               {isVoiceRecordingSupported() && (
                 <button

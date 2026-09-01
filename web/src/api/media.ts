@@ -212,12 +212,30 @@ export const VIDEO_TYPES = new Set([
 
 export const VIDEO_UNSUPPORTED_MESSAGE = "仅支持视频文件（MP4/WebM/MOV/M4V/MKV/3GP）";
 
+/** 文件类型大小上限（字节）：与后端 MEDIA_MAX_FILE_BYTES=50MB 对齐。 */
+export const FILE_MAX_BYTES = 50 * 1024 * 1024;
+export const FILE_TOO_LARGE_MESSAGE = `文件超过大小上限（${formatBytes(FILE_MAX_BYTES)}）`;
+
+/** 文件类型禁用的可执行文档 MIME（与后端 _FILE_BLOCKED_MIMES 对齐）：防止上传后浏览器直接打开执行脚本 */
+export const FILE_BLOCKED_MIMES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+  "application/javascript",
+  "text/javascript",
+  "application/x-javascript",
+  "application/xml",
+  "text/xml",
+]);
+export const FILE_UNSAFE_MESSAGE = "不支持发送网页/脚本类文件（HTML/SVG/XML/JS）";
+
 /**
- * 选择阶段本地校验：类型（图片或视频白名单）+ 非空；不限制大小。
- * 合法返回 null；kind 给出可上传的媒体种类，供聊天发送分流
- * （本入口只会产生 image/video 两种消息）。
+ * 选择阶段本地校验：类型（图片或视频白名单，其余任意格式归为 file）+ 非空。
+ * 合法返回 null；kind 给出可上传的媒体种类，供聊天发送分流。
+ * - image/video：白名单 + 非空；
+ * - file：任意格式（除可执行文档），大小上限 50MB（与后端契约对齐）。
  */
-export function validateMediaFile(file: File): { error: string | null; kind: "image" | "video" } {
+export function validateMediaFile(file: File): { error: string | null; kind: "image" | "video" | "file" } {
   const mime = (file.type || "").split(";")[0].trim();
   if (IMAGE_TYPES.has(mime)) {
     return { error: file.size <= 0 ? "文件内容为空" : null, kind: "image" };
@@ -225,7 +243,11 @@ export function validateMediaFile(file: File): { error: string | null; kind: "im
   if (VIDEO_TYPES.has(mime)) {
     return { error: file.size <= 0 ? "文件内容为空" : null, kind: "video" };
   }
-  return { error: "仅支持图片（PNG/JPEG/GIF/WebP/AVIF/HEIC/BMP/TIFF/ICO/SVG）或视频（MP4/WebM/MOV 等）", kind: "image" };
+  // 其余格式 → 文件消息（任意格式，除可执行文档；大小上限 50MB）
+  if (file.size <= 0) return { error: "文件内容为空", kind: "file" };
+  if (file.size > FILE_MAX_BYTES) return { error: FILE_TOO_LARGE_MESSAGE, kind: "file" };
+  if (FILE_BLOCKED_MIMES.has(mime)) return { error: FILE_UNSAFE_MESSAGE, kind: "file" };
+  return { error: null, kind: "file" };
 }
 
 /**

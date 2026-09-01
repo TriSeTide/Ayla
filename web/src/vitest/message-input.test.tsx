@@ -113,13 +113,52 @@ describe("MessageInput 乐观发送（M7）", () => {
     expect(send.mock.calls[0][1]?.segments).toEqual([{ type: "video", media_id: "media-v" }]);
   });
 
-  it("不支持的类型被本地校验拦截，不上传不发送", async () => {
+  it("可执行文档（HTML/SVG/JS）被本地校验拦截，不上传不发送", async () => {
     render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
     const input = screen.getByLabelText("发送图片或视频").querySelector("input") as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File(["x"], "a.exe", { type: "application/x-msdownload" })] } });
+    fireEvent.change(input, { target: { files: [new File(["<html>"], "a.html", { type: "text/html" })] } });
     await screen.findByRole("alert");
     expect(mediaApi.uploadMediaFile).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("文件按钮选单个任意格式文件进队列（data-kind=file + 文件名），发送按 type=file 上传", async () => {
+    send.mockResolvedValue(serverMessage({ type: "file", content: "报告.pdf" }));
+    const upload = vi.spyOn(mediaApi, "uploadMediaFile").mockResolvedValue({ media_id: "media-f", descriptor: {} as never, upload_id: "u-x" });
+    render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
+    const input = screen.getByLabelText("发送文件").querySelector("input") as HTMLInputElement;
+    // 文件按钮不限制扩展名、不允许多选
+    expect(input.accept).toBe("");
+    expect(input.multiple).toBe(false);
+    fireEvent.change(input, { target: { files: [new File(["pdf-body"], "报告.pdf", { type: "application/pdf" })] } });
+    await waitFor(() => expect(screen.getByRole("group", { name: "待发送媒体" })).toBeInTheDocument());
+    // 队列展示文件名（file 无缩略图）
+    expect(screen.getByText("报告.pdf")).toBeInTheDocument();
+    expect(mediaApi.uploadMediaFile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(upload).toHaveBeenCalledWith(expect.any(File), "file", expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    const payload = send.mock.calls[0][1] as import("../api/types").CreateMessagePayload;
+    expect(payload.type).toBe("file");
+    expect(payload.content).toBe("报告.pdf");
+    expect(payload.media_id).toBe("media-f");
+    expect(payload.segments).toBeUndefined();
+  });
+
+  it("单文件互斥：先选图片再选文件，队列清空图片只保留文件", async () => {
+    render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
+    const imgInput = screen.getByLabelText("发送图片或视频").querySelector("input") as HTMLInputElement;
+    fireEvent.change(imgInput, { target: { files: [new File(["a"], "a.png", { type: "image/png" })] } });
+    await waitFor(() => expect(screen.getByRole("group", { name: "待发送媒体" })).toBeInTheDocument());
+    expect(screen.getAllByRole("img", { name: "待发送图片" })).toHaveLength(1);
+
+    const fileInput = screen.getByLabelText("发送文件").querySelector("input") as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(["z"], "a.zip", { type: "application/zip" })] } });
+    await waitFor(() => {
+      expect(screen.getByText("a.zip")).toBeInTheDocument();
+    });
+    // 图片被清空，只剩文件
+    expect(screen.queryAllByRole("img", { name: "待发送图片" })).toHaveLength(0);
   });
 
   it("粘贴剪贴板图片进队列（不自动发送），可移除", async () => {

@@ -113,6 +113,48 @@ class TestUploadValidation:
         )
         assert resp.status_code == 413
 
+    def test_file_kind_accepts_arbitrary_mime(self, auth_client):
+        # 「任意格式」：非白名单 MIME（rar/可执行等）作为 file 也放行，并走完上传闭环
+        # （内容需不同：后端按 content_hash 去重，相同字节会复用第一个媒体对象）
+        client, _ = auth_client(username="up_v2c")
+        for i, mime in enumerate(("application/vnd.rar", "application/x-msdownload")):
+            data = f"\x52\x61\x72\x21\x1a\x07\x01\x00fake-rar-body-{i}".encode()
+            resp = client.post(
+                "/api/v1/media/uploads",
+                {"kind": "file", "expected_size": len(data), "mime_type": mime},
+                format="json",
+            )
+            assert resp.status_code == 201, mime
+            upload_id = resp.json()["upload_id"]
+            client.put(
+                f"/api/v1/media/uploads/{upload_id}",
+                data=data,
+                content_type="application/octet-stream",
+            )
+            done = client.post(f"/api/v1/media/uploads/{upload_id}:complete", format="json")
+            assert done.status_code == 201, mime
+            desc = done.json()["descriptor"]
+            assert desc["kind"] == "file"
+            assert desc["status"] == "ready"
+            assert desc["mime_type"] == mime
+
+    def test_file_kind_rejects_executable_documents(self, auth_client):
+        # 安全边界：可执行文档类型（HTML/SVG/JS/XML）不作 file 放行
+        client, _ = auth_client(username="up_v2d")
+        for mime in (
+            "text/html",
+            "application/xhtml+xml",
+            "image/svg+xml",
+            "application/javascript",
+            "text/xml",
+        ):
+            resp = client.post(
+                "/api/v1/media/uploads",
+                {"kind": "file", "expected_size": 100, "mime_type": mime},
+                format="json",
+            )
+            assert resp.status_code == 400, mime
+
     @pytest.mark.parametrize(
         "kind,size_mb",
         [("image", 64), ("image", 512), ("voice", 256), ("video", 512)],

@@ -513,6 +513,36 @@ class TestMixedSegments:
         mine = next((c for c in resp.json() if c["id"] == conv["id"]), None)
         assert mine["last_message"]["preview"] == "[已撤回]"
 
+    def test_message_preview_file_shows_filename(self, auth_client, user_factory):
+        """文件消息的 message_preview 显示文件名（content 即文件名），而不是 [文件] 占位。
+
+        函数级单测：会话列表序列化（ConversationListSerializer）在本环境触发
+        SQLite 无 JSON contains 的既有基线失败（test_poke.py 头部注释已说明），
+        故不经 HTTP 会话列表路径，直接断言 message_preview。
+        """
+        from apps.accounts.models import Friendship
+        from apps.chat import services as chat_services
+        from apps.chat.serializers import message_preview
+
+        b = user_factory(username="ms17_b")
+        ca, a = auth_client(username="ms17_a")
+        Friendship.objects.get_or_create(
+            user=a, friend=b, defaults={"status": Friendship.STATUS_ACCEPTED}
+        )
+        Friendship.objects.get_or_create(
+            user=b, friend=a, defaults={"status": Friendship.STATUS_ACCEPTED}
+        )
+        conv = chat_services.get_or_create_conversation(a, b)
+        msg = chat_services.create_message(
+            a, conv, content="合同扫描件.pdf", msg_type=Message.TYPE_FILE, media_id="m-1"
+        )
+        assert message_preview(msg) == "合同扫描件.pdf"
+        # 文件名缺失（理论上不会发生）回退 [文件] 占位
+        msg2 = chat_services.create_message(
+            a, conv, content="", msg_type=Message.TYPE_FILE, media_id="m-2"
+        )
+        assert message_preview(msg2) == "[文件]"
+
 
 class TestMentionSegments:
     """@ 提及消息（type=mixed + mention 段，仅群聊）：发送闭环/校验/预览/@我未读。"""

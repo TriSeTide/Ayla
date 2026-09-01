@@ -724,6 +724,29 @@ export function MediaContent({ msg }: { msg: ChatMessage }) {
     return <MediaPlaceholder state="unknown" label="媒体" />;
   }
 
+  // 乐观文件消息（上传中/发送失败，服务端 descriptor 未就绪）：
+  // 显示本地文件名 + 大小；上传进度/失败重试由 MessageBubble 外层 sendState 承接。
+  // 必须在 failed 分支之前：乐观消息 media_id=null，补拉 descriptor 会置 failed，
+  // 但有 localMedia 时应直接渲染本地卡片，不走补拉/失败路径。
+  if (kind === "file" && !media) {
+    const local = msg.localMedia?.find((m) => m.kind === "file");
+    if (local) {
+      return (
+        <div className="file-card">
+          <span className="file-icon">
+            <IconFile width={20} height={20} />
+          </span>
+          <span className="file-info">
+            <span className="file-name" title={local.file.name}>
+              {local.file.name}
+            </span>
+            <span className="file-size">{formatBytes(local.file.size)}</span>
+          </span>
+        </div>
+      );
+    }
+  }
+
   if (failed) {
     return (
       <MediaPlaceholder

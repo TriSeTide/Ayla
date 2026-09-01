@@ -260,6 +260,59 @@ describe("useChat 乐观发送（M7 store 级）", () => {
       { type: "mention", user_id: "u2" },
     ]);
   });
+
+  it("文件消息走 type=file 契约：content=文件名、上传后带 media_id、不构造 segments", async () => {
+    send.mockResolvedValue(serverMessage({ type: "file", content: "报告.pdf" }));
+    const fileItem: PickedMediaItem = {
+      id: "f0",
+      kind: "file",
+      mimeType: "application/pdf",
+      url: "",
+      file: new File(["pdf"], "报告.pdf", { type: "application/pdf" }),
+    };
+    sendOptimistic("c1", { blocks: blocksOf(""), picked: [fileItem] });
+    const p = useMessageStore.getState().buckets["c1"].messages[0];
+    expect(p.type).toBe("file");
+    expect(p.content).toBe("报告.pdf");
+    expect(p.segments).toBeNull();
+    expect(p.localMedia).toHaveLength(1);
+    expect(p.localMedia![0].kind).toBe("file");
+
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const payload = send.mock.calls[0][1] as import("../api/types").CreateMessagePayload;
+    expect(payload.type).toBe("file");
+    expect(payload.content).toBe("报告.pdf");
+    expect(payload.media_id).toBe("media-1");
+    expect(payload.segments).toBeUndefined();
+  });
+
+  it("文件消息发送失败后 retryOptimistic 复用幂等键走 file 契约", async () => {
+    send.mockRejectedValueOnce(new Error("fail")).mockResolvedValueOnce(serverMessage({ type: "file", content: "报告.pdf" }));
+    const fileItem: PickedMediaItem = {
+      id: "f0",
+      kind: "file",
+      mimeType: "application/pdf",
+      url: "",
+      file: new File(["pdf"], "报告.pdf", { type: "application/pdf" }),
+    };
+    sendOptimistic("c1", { blocks: blocksOf(""), picked: [fileItem] });
+    await vi.waitFor(() => {
+      expect(useMessageStore.getState().buckets["c1"].messages[0].sendFailed).toBe(true);
+    });
+    const failed = useMessageStore.getState().buckets["c1"].messages[0];
+    retryOptimistic("c1", failed);
+    await vi.waitFor(() => {
+      expect(useMessageStore.getState().buckets["c1"].messages[0].id).toBe("m-server");
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    const payload = send.mock.calls[1][1] as import("../api/types").CreateMessagePayload;
+    expect(payload.type).toBe("file");
+    expect(payload.content).toBe("报告.pdf");
+    expect(payload.media_id).toBe("media-1");
+    const k1 = (send.mock.calls[0][1] as { idempotency_key: string }).idempotency_key;
+    const k2 = (send.mock.calls[1][1] as { idempotency_key: string }).idempotency_key;
+    expect(k1).toBe(k2);
+  });
 });
 
 describe("segment 预览工具", () => {

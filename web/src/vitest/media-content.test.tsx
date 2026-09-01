@@ -367,6 +367,22 @@ describe("MessageBubble 媒体气泡不显示占位文案", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除消息" }));
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
+
+  it("乐观文件消息（descriptor 未就绪）显示本地文件名+大小，不显示加载占位", () => {
+    const msg: ChatMessage = {
+      id: "tf1", conversation_id: "c1", sender_id: "u1", type: "file",
+      content: "报告.pdf", media_id: null, media: null, segments: null,
+      reply_to: null, status: "sent", seq: 0, created_at: new Date().toISOString(),
+      pending: true,
+      localMedia: [
+        { id: "lf0", kind: "file", mimeType: "application/pdf", url: "", file: new File(["pdf-body"], "报告.pdf", { type: "application/pdf" }) },
+      ],
+    };
+    render(<MessageBubble message={msg} isSelf />);
+    // 本地文件名渲染（不是「文件加载中…」占位）
+    expect(screen.getByText("报告.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("文件加载中…")).not.toBeInTheDocument();
+  });
 });
 
 describe("MixedMedia 图文混排（type=mixed + segments）", () => {

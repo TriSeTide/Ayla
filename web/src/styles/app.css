@@ -2075,6 +2075,32 @@
   pointer-events: none;
 }
 
+/* 待发送文件项（单文件）：宽条显示文件名（无缩略图） */
+.picked-thumb[data-kind="file"] {
+  width: auto;
+  min-width: 120px;
+  max-width: 180px;
+  padding: 0 var(--sp-2);
+}
+
+.picked-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  height: 100%;
+  color: var(--indigo-700);
+  overflow: hidden;
+}
+
+.picked-file-name {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .picked-remove {
   position: absolute;
   top: -5px;

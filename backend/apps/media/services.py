@@ -98,6 +98,9 @@ ALLOWED_MIME = {
         "video/mp4", "video/webm", "video/quicktime", "video/x-m4v",
         "video/x-matroska", "video/3gpp", "video/3gpp2",
     },
+    # 文件类型的常见格式白名单（用于记录/文档）；实际校验走黑名单模式
+    # （_mime_allowed 对 KIND_FILE 除可执行文档外一律放行，见 _FILE_BLOCKED_MIMES），
+    # 满足「任意格式」传输需求；浏览器对未知扩展名通常上报 octet-stream 兜底。
     "file": {
         "application/pdf", "application/zip", "application/x-zip-compressed",
         "text/plain", "text/csv", "text/markdown", "application/json",
@@ -109,6 +112,16 @@ ALLOWED_MIME = {
         "application/x-tar", "application/gzip", "application/x-7z-compressed",
         "application/octet-stream",
     },
+}
+
+# 文件类型禁用的可执行文档 MIME：上传后可能被浏览器直接打开执行脚本的
+# 文档类型（HTML/SVG/XML/JS）。「任意格式」的工程安全边界——下载/预览
+# 场景（<a download> + nosniff + CSP）已有防护，此处再排除可执行文档双保险。
+_FILE_BLOCKED_MIMES = {
+    "text/html", "application/xhtml+xml",
+    "image/svg+xml",
+    "application/javascript", "text/javascript", "application/x-javascript",
+    "application/xml", "text/xml",
 }
 
 # 文件头嗅探（魔数）——按 MIME 分类
@@ -162,6 +175,10 @@ def _ttl_seconds() -> int:
 
 
 def _mime_allowed(kind: str, mime_type: str) -> bool:
+    if kind == MediaObject.KIND_FILE:
+        # 文件类型不做 MIME 白名单约束（魔数仅要求非空），只排除可执行文档；
+        # 其余任意 MIME（含 octet-stream 兜底）放行，满足「任意格式」需求。
+        return mime_type not in _FILE_BLOCKED_MIMES
     return mime_type in ALLOWED_MIME.get(kind, set())
 
 

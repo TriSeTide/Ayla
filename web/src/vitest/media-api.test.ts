@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { IMAGE_TYPES, uploadMediaFile, validateImageFile } from "../api/media";
+import { IMAGE_TYPES, FILE_MAX_BYTES, uploadMediaFile, validateImageFile, validateMediaFile } from "../api/media";
 import * as client from "../api/client";
 
 /** XHR 替身：记录请求并允许测试手动触发进度/成功/中止 */
@@ -142,6 +142,40 @@ describe("uploadMediaFile", () => {
     );
     const file = new File(["x"], "a.png", { type: "image/png" });
     await expect(uploadMediaFile(file, "image")).rejects.toThrow("文件超过允许的大小上限");
+  });
+});
+
+describe("validateMediaFile（图片/视频/文件三分类）", () => {
+  it("图片/视频 MIME 走各自 kind", () => {
+    expect(validateMediaFile(new File(["a"], "a.png", { type: "image/png" }))).toEqual({ error: null, kind: "image" });
+    expect(validateMediaFile(new File(["a"], "a.mp4", { type: "video/mp4" }))).toEqual({ error: null, kind: "video" });
+  });
+
+  it("任意非图片/视频格式归为 file（任意格式，含 octet-stream 兜底）", () => {
+    for (const type of ["application/pdf", "application/zip", "text/plain", "application/vnd.rar", "application/octet-stream"]) {
+      const r = validateMediaFile(new File(["x"], "a", { type }));
+      expect(r).toEqual({ error: null, kind: "file" });
+    }
+    // 空 MIME（浏览器对未知扩展名）也归为 file（上传时兜底 octet-stream）
+    expect(validateMediaFile(new File(["x"], "a.unknownext")).kind).toBe("file");
+  });
+
+  it("file 超过 50MB 上限报错（与后端 MEDIA_MAX_FILE_BYTES 对齐）", () => {
+    const big = new File([new Uint8Array(64)], "big.zip", { type: "application/zip" });
+    Object.defineProperty(big, "size", { value: FILE_MAX_BYTES + 1 });
+    expect(validateMediaFile(big).error).toContain("文件超过大小上限");
+    expect(validateMediaFile(big).kind).toBe("file");
+  });
+
+  it("file 拒绝可执行文档类型（HTML/JS/XML；svg 属图片白名单不走 file 分支）", () => {
+    for (const type of ["text/html", "application/javascript", "text/javascript", "application/xml", "text/xml"]) {
+      const r = validateMediaFile(new File(["x"], "a", { type }));
+      expect(r.error).toBe("不支持发送网页/脚本类文件（HTML/SVG/XML/JS）");
+    }
+  });
+
+  it("空内容文件报错", () => {
+    expect(validateMediaFile(new File([], "a.pdf", { type: "application/pdf" })).error).toBe("文件内容为空");
   });
 });
 
