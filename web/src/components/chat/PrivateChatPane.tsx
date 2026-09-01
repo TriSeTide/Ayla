@@ -21,7 +21,7 @@ import { useMessageStore } from "../../stores/message";
 import { useAuthStore } from "../../stores/auth";
 import { chatWS } from "../../ws/chat";
 import { goUserProfile } from "../../utils/navigation";
-import { displayStatusOf, usePresenceOnline } from "../../utils/displayStatus";
+import { useDisplayStatus, usePresenceOnline } from "../../utils/displayStatus";
 
 export function PrivateChatPane({
   conversationId,
@@ -134,6 +134,7 @@ export function PrivateChatPane({
 
   const peer = conv?.peer ?? null;
   const peerOnline = usePresenceOnline(peer);
+  const peerDisplayStatus = useDisplayStatus(peer);
   const title = peer?.nickname || peer?.username || "私聊";
   // 非好友禁发：私聊 + 对端已知 + 好友列表已加载 + 对端不是爱莉 + 对端不在好友列表
   const blocked =
@@ -165,7 +166,7 @@ export function PrivateChatPane({
         />
         <div className="private-chat-title">
           <span className="private-chat-name">{title}</span>
-          <span className="private-chat-status">{displayStatusOf(peer, peerOnline)}</span>
+          <span className="private-chat-status">{peerDisplayStatus}</span>
         </div>
       </header>
 

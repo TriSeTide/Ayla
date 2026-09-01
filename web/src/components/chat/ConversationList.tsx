@@ -14,7 +14,7 @@ import type { ConversationSummary } from "../../api/types";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
 import { goUserProfile } from "../../utils/navigation";
-import { displayStatusOf } from "../../utils/displayStatus";
+import { displayStatusOf, presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "./ConversationMoreMenu";
@@ -82,12 +82,12 @@ export function ConversationList({
       {conversations.map((conv, idx) => {
         const isPrivate = conv.type === "private";
         // 实时在线：presence store 已知状态优先（online/offline 都记录），
-        // 无记录（登录前就在线/WS 未连接）回退 REST 快照 conv.peer.online
-        const peerOnline = conv.peer
-          ? onlineUsers[conv.peer.id] != null
-            ? onlineUsers[conv.peer.id] === "online"
-            : conv.peer.online
-          : false;
+        // 无记录（登录前就在线/WS 未连接）回退 REST 快照 conv.peer.online；
+        // 走 presenceOnline 统一规则：隐身用户强制离线（光环/绿色样式零泄漏）
+        const peerOnline = presenceOnline(
+          onlineUsers,
+          withLiveStatus(onlineStatuses, conv.peer),
+        );
         const isElysia = elysiaUserId != null && conv.peer?.id === elysiaUserId;
         const title = isPrivate
           ? conv.peer?.nickname || conv.peer?.username || conv.title || "未命名会话"

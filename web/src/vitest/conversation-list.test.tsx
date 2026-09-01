@@ -143,6 +143,28 @@ describe("会话列表预览与在线状态", () => {
     expect(screen.getByText("离线")).toBeInTheDocument();
   });
 
+  it("隐身：即使 store 有 online 记录，状态胶囊也是灰色（无 is-online）", () => {
+    usePresenceStore.getState().setUser("u2", "online");
+    renderList([
+      privateConv({
+        peer: { ...privateConv().peer!, status: "invisible", online: true },
+      }),
+    ]);
+    const status = screen.getByText("离线");
+    expect(status.className).not.toContain("is-online");
+  });
+
+  it("presence.status 实时模式优先：REST 快照 auto + 实时 dnd → 显示「勿扰」", () => {
+    usePresenceStore.getState().setUser("u2", "online");
+    usePresenceStore.getState().setUserStatus("u2", "dnd");
+    renderList([
+      privateConv({
+        peer: { ...privateConv().peer!, status: "auto", online: true },
+      }),
+    ]);
+    expect(screen.getByText("勿扰")).toBeInTheDocument();
+  });
+
   it("无消息时显示「暂无消息」", () => {
     renderList([privateConv()]);
     expect(screen.getByText("暂无消息")).toBeInTheDocument();

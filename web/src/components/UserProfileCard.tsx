@@ -11,13 +11,14 @@ import { openPrivateConversation } from "../api/chat";
 import { createFriendRequest } from "../api/users";
 import type { UserPublic } from "../api/types";
 import { Avatar } from "./Avatar";
-import { displayStatusOf, usePresenceOnline } from "../utils/displayStatus";
+import { useDisplayStatus, usePresenceOnline } from "../utils/displayStatus";
 
 export function UserProfileCard({ user, onClose }: { user: UserPublic; onClose?: () => void }) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState<"friend" | "chat" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const online = usePresenceOnline(user);
+  const displayStatus = useDisplayStatus(user);
 
   const addFriend = async () => {
     setBusy("friend");
@@ -50,7 +51,7 @@ export function UserProfileCard({ user, onClose }: { user: UserPublic; onClose?:
       <div className="user-profile-body">
         <Avatar label={user.nickname || user.username} size={56} online={online} imageUrl={user.avatar || null} />
         <span className="user-profile-nick">{user.nickname || user.username}</span>
-        <span className="user-profile-status">{displayStatusOf(user, online)}</span>
+        <span className="user-profile-status">{displayStatus}</span>
         {user.signature && <span className="user-profile-signature">{user.signature}</span>}
         {error && <span className="user-profile-error">{error}</span>}
       </div>
