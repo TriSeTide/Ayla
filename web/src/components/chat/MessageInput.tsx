@@ -74,7 +74,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const voice = useVoiceRecorder();
     const { onInput } = useTyping(convId || null);
     const isNarrow = useMediaQuery(NARROW_QUERY);
-    const enableMention = !!members && members.length > 0;
+    // 群聊才有 members：@ 与群表情包按钮均仅群聊展示（私信不显示表情包按钮）
+    const isGroup = !!members && members.length > 0;
+    const enableMention = isGroup;
     // 当前用户在群中的角色（表情面板加号兜底显示用）
     const currentUser = useAuthStore((s) => s.currentUser);
     const myRole = useMemo(
@@ -397,16 +399,18 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                       <IconMic width={18} height={18} />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="composer-tool-btn"
-                    onClick={() => setEmojiOpen((v) => !v)}
-                    aria-label="群表情包"
-                    aria-expanded={emojiOpen}
-                    title="群表情包"
-                  >
-                    <IconEmoji width={18} height={18} />
-                  </button>
+                  {isGroup && (
+                    <button
+                      type="button"
+                      className="composer-tool-btn"
+                      onClick={() => setEmojiOpen((v) => !v)}
+                      aria-label="群表情包"
+                      aria-expanded={emojiOpen}
+                      title="群表情包"
+                    >
+                      <IconEmoji width={18} height={18} />
+                    </button>
+                  )}
                 </div>
               )}
               <div
@@ -487,16 +491,18 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 <IconMic width={18} height={18} />
               </button>
             )}
-            <button
-              type="button"
-              className="composer-tool-btn"
-              onClick={() => setEmojiOpen((v) => !v)}
-              aria-label="群表情包"
-              aria-expanded={emojiOpen}
-              title="群表情包"
-            >
-              <IconEmoji width={18} height={18} />
-            </button>
+            {isGroup && (
+              <button
+                type="button"
+                className="composer-tool-btn"
+                onClick={() => setEmojiOpen((v) => !v)}
+                aria-label="群表情包"
+                aria-expanded={emojiOpen}
+                title="群表情包"
+              >
+                <IconEmoji width={18} height={18} />
+              </button>
+            )}
             <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
               <IconFile width={18} height={18} />
               <input

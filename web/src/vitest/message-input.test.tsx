@@ -205,3 +205,29 @@ describe("MessageInput 乐观发送（M7）", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("MessageInput 群表情包按钮（任务 03）", () => {
+  beforeEach(() => {
+    send.mockReset();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("私信（无 members）不显示群表情包按钮", () => {
+    render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>);
+    expect(screen.queryByLabelText("群表情包")).not.toBeInTheDocument();
+  });
+
+  it("群聊（有 members）显示群表情包按钮", () => {
+    const member = {
+      id: "m1",
+      conversation_id: "c1",
+      role: "owner",
+      user: { id: "u1", username: "a", nickname: "甲", online: true, avatar: null },
+    } as import("../api/types").ConversationMember;
+    render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} members={[member]} /></MemoryRouter>);
+    expect(screen.getByLabelText("群表情包")).toBeInTheDocument();
+    // 点击展开面板（面板挂载后请求群包；mock 404 走空态）
+    fireEvent.click(screen.getByLabelText("群表情包"));
+    expect(screen.getByRole("dialog", { name: "群表情包" })).toBeInTheDocument();
+  });
+});
