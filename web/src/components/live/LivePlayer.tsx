@@ -1,17 +1,22 @@
 /**
- * LivePlayer —— 播放器区域三态渲染（M5-4，文档 §4.3；直播体验增量）。
+ * LivePlayer —— 播放器区域三态渲染（M5-4，文档 §4.3；任务 05 小窗改造）。
  *
- * - live → video 播放器（muted autoplay 起播，用户手势后取消静音）；**无原生控制条**
+ * - live → video 播放器（muted autoplay 起播）；**无原生控制条**
  *   （去进度条/倍速，B 站式纯直播观看），悬浮小按钮**非常态显示 + 无操作自动隐藏**：
  *   - 桌面：悬停/移动播放器显示、移出隐藏；触屏：点击视频显示；
  *   - 显示后 3s 无操作（鼠标静止/无点击）自动隐藏，鼠标移动或点按钮重置计时、不常驻；
  *   - 左下「刷新」：跳到直播最新画面（点击带旋转动画）；
- *   - 右下「画中画」+「全屏」：画中画保留小窗（支持才显示）；全屏对容器全屏，
+ *   - 右下「画中画」+「全屏」：画中画保留小窗（支持才显示；**窄屏隐藏**——手机端
+ *     小窗由 App 内浮动小窗承担，不强行调浏览器原生 PiP）；全屏对容器全屏，
  *     窄屏（手机）锁横屏、iOS 走原生视频全屏（webkitEnterFullscreen 自动横屏）。
  * - idle → "未开播"占位；degraded → "直播服务状态未知"；null → 加载中；
  * - 播放 fatal 错误与"未开播"严格区分：live 但播放失败 → "播放失败 + 重试"。
+ *
+ * video 元素由外部（liveSessionRuntime）持有：本组件挂载时把它迁移进容器，
+ * 卸载时**不移除**（元素继续存活，供小窗容器接管）——大窗↔小窗迁移同一元素，
+ * HLS 不断流不黑屏。video 非 React 渲染，事件（点击显示控件）手动绑定。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LiveSrsStatus } from "../../api/types";
 import { IconFullscreen, IconPip, IconRefresh } from "../icons";
 
@@ -72,6 +77,9 @@ export function LivePlayer({
   videoRef,
   onRetry,
   onRefresh,
+  hidePipButton = false,
+  onVideoHostMount,
+  onVideoHostUnmount,
   children,
 }: {
   srsStatus: LiveSrsStatus | null;
@@ -82,6 +90,12 @@ export function LivePlayer({
   onRetry: () => void;
   /** 跳到直播最新画面（左下角刷新键） */
   onRefresh: () => void;
+  /** 窄屏（手机端）隐藏浏览器原生画中画按钮：小窗由 App 内浮动小窗承担 */
+  hidePipButton?: boolean;
+  /** 宿主容器挂载：把 video 原子移入本容器（源容器在文档中 → 不脱离不暂停） */
+  onVideoHostMount?: (host: HTMLElement) => void;
+  /** 宿主容器卸载（React DOM 移除前）：把 video 移回暂存容器 */
+  onVideoHostUnmount?: () => void;
   /** 视频画面叠加层（飘弹幕层等；渲染时机由调用方控制） */
   children?: React.ReactNode;
 }) {
@@ -92,8 +106,10 @@ export function LivePlayer({
   const spinTimer = useRef<number | null>(null);
   const hideTimer = useRef<number | null>(null);
 
-  // 画中画支持检测（标准 API + Safari webkit 私有）：video 元素始终渲染（display 切换），
-  // 挂载时即可读到；仅需检测一次。
+  const showVideo = srsStatus === "live" && !playerError;
+
+  // 画中画支持检测（标准 API + Safari webkit 私有）：video 元素由 runtime 持有，
+  // 挂载时已存在（enter 时创建）；仅需检测一次。
   useEffect(() => {
     const video = videoRef.current as SafariVideoElement | null;
     if (!video) return;
@@ -104,7 +120,29 @@ export function LivePlayer({
     setPipSupported(supported);
   }, [videoRef]);
 
-  // 退出全屏（无论 ESC / 系统返回 / 点按钮）时解锁横屏
+  // video 元素由 runtime 持有：挂载时原子移入本容器（显示自然、全屏天然正确）；
+  // 卸载时用 useLayoutEffect cleanup（React 在 DOM 移除**前**跑 layout cleanup，
+  // 源容器仍在文档中）把 video 移回暂存——全程不脱离文档、不暂停、无缝切换。
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (container) {
+      if (onVideoHostMount) {
+        onVideoHostMount(container);
+      } else if (video && video.parentElement !== container) {
+        // 兜底（无 runtime 注入的场景，如隔离测试）：直接把 video 移入容器
+        container.appendChild(video);
+      }
+    }
+    if (video) video.style.display = showVideo ? "block" : "none";
+    return () => {
+      onVideoHostUnmount?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoRef, showVideo]);
+
+  // 退出全屏（无论 ESC / 系统返回 / 点按钮）时解锁横屏。
+  // video 在本容器内，全屏时随容器进入 top layer，无需额外处理。
   useEffect(() => {
     const onFsChange = () => {
       if (!document.fullscreenElement) unlockOrientation();
@@ -244,26 +282,16 @@ export function LivePlayer({
     return null;
   };
 
-  const showVideo = srsStatus === "live" && !playerError;
-
   return (
     <div
-      className="live-player"
+      className={`live-player${showVideo ? " is-live" : ""}`}
       ref={containerRef}
       onMouseEnter={showControls}
       onMouseMove={showControls}
       onMouseLeave={hideControls}
+      onClick={showControls}
     >
-      <video
-        ref={videoRef}
-        className="live-player-video"
-        style={{ display: showVideo ? "block" : "none" }}
-        muted
-        autoPlay
-        playsInline
-        onClick={showControls}
-      />
-      {/* 视频画面叠加层（如飘弹幕层）：位于视频之上、悬浮控件(z5)之下 */}
+      {/* video 元素由 runtime 常驻暂存容器持有，fixed 跟随本容器（不进入本容器 DOM） */}
       {children}
       {showVideo && (
         <div className={`live-player-controls${controlsVisible ? " is-visible" : ""}`}>
@@ -277,7 +305,7 @@ export function LivePlayer({
             <IconRefresh width={16} height={16} />
           </button>
           <div className="live-player-corner">
-            {pipSupported && (
+            {pipSupported && !hidePipButton && (
               <button
                 type="button"
                 className="live-player-btn"

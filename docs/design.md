@@ -370,6 +370,16 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   - 刷新键主功能 = 跳边跟上直播进度，黑屏时顺便重建兜底（平时由事件驱动接管）。
 - **触达口径例外**：媒体悬浮钮为 32px（用户明确拍板「改小一点」——视频上辅助操作、非常态显示）；非媒体/常驻交互仍遵守 §10 ≥40px。focus ring 可见、`prefers-reduced-motion` 下无位移/旋转。
 
+### 12.7.4 手机端浮动小窗（任务 05）
+
+> 手机端（iOS/Android）浏览器原生画中画不可用或受限，改为 **App 内浮动小窗**：离开直播间页面后迷你播放器浮在页面角落继续播放。桌面端保持原生 PiP 按钮与行为（不回归）。
+
+- **触发条件**（全部满足）：窄屏（≤768px）+ 普通观看（非主播开播控制台）+ 直播中（`srsStatus=live` 且无播放错误）+ 离开直播间页面（返回列表/切到其他页）。主播控制台离开后仍走活动态悬浮球入口。
+- **播放连续性（核心）**：video 元素由 `liveSessionRuntime` 全局单例唯一持有，HLS 实例**不重建**；大窗↔小窗/宽屏↔窄屏切换时 video 在容器间**原子移动**（`useLayoutEffect` cleanup 在 DOM 移除前把 video 移入暂存容器，再从暂存原子移入目标容器——全程不脱离文档、浏览器不暂停、时间连续）。`attachPlayer` 幂等（相同流不重建），小窗期间播放器不销毁，`attachPlayer`/轮询只在直播结束时兜底释放。
+- **交互**：点击小窗主体 → 回到直播间大窗（`sourceRoute`：一级直播 `/live/:id`，群内直播 `/group/:id/live`）；右上关闭按钮 → 完整销毁会话（hls → WS → 轮询 → store → 活动态）；单指拖动（pointer 位移超阈值，clamp 视口内）；双指缩放（120–320px 宽，保持 16:9，右下角锚定）。
+- **样式**：fixed 右下角 16px，默认 168×94（16:9），`z-index: 60`（活动态悬浮球 45 之上、弹层遮罩 70 之下）；外层无 `overflow:hidden`（关闭按钮突出在小窗**右上角外侧**，不遮挡画面），内层 `.live-mini-player-video-wrap` 负责圆角/边框/投影/裁剪（`--glass-bg-strong` + blur(18px) + `--glass-border` + `--radius-input`）。
+- **唯一 owner**：同一时间至多一个小窗（store `miniPlayer` 唯一）；小窗激活时隐藏 SessionActivityIndicator 的直播悬浮球（避免重复入口）；退出登录/切直播间完整清理。
+
 ### 12.8 帖子卡 PostCard 与信息流
 
 - 卡片：实心卡片 `--surface` + 圆角 16px + 极浅投影；padding 16px

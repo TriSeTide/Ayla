@@ -851,3 +851,81 @@
     transform: translateX(calc(-100% - 24px));
   }
 }
+
+/* ================= 手机端浮动小窗（任务 05，design.md §12.7.4） =================
+   窄屏离开直播间页面且直播中时出现：fixed 右下角迷你播放器，复用同一 video 元素
+   （HLS 不断流）。层级 z-index 60：高于活动态悬浮球（45）与常规浮层，低于弹层
+   遮罩（70+）。 */
+.live-mini-player {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  width: 168px;
+  height: 94px; /* 16:9 */
+  cursor: pointer;
+  /* 拖动/缩放：禁止触摸拖动时触发页面滚动，禁止拖拽选中 */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.live-mini-player:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 视频容器：圆角/边框/投影由内层负责（外层不 overflow:hidden，
+   关闭按钮才能突出在小窗右上角外侧、不遮挡直播画面） */
+.live-mini-player-video-wrap {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-input);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
+  overflow: hidden;
+}
+
+/* video 元素由 liveSessionRuntime 持有并迁移进容器：铺满小窗 */
+.live-mini-player-video-wrap video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* 右上关闭按钮：位于小窗**外侧**（右上角外偏），不遮挡直播画面；
+   玻璃圆钮，独立点击目标（不触发拖动/缩放/返回） */
+.live-mini-player-close {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  background: rgba(70, 91, 146, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  box-shadow: 0 2px 8px rgba(70, 91, 146, 0.2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-mini-player-close:hover {
+  background: rgba(70, 91, 146, 0.52);
+}
+
+.live-mini-player-close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}

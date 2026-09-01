@@ -35,6 +35,7 @@ import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
 import { usePagerTouchRouter } from "../../hooks/usePagerTouchRouter";
 import { IconBack, IconChevronRight, IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
+import { liveSessionRuntime } from "../../runtime/liveSessionRuntime";
 import { getVisibilityLabels } from "../../utils/visibility";
 
 /** 直播间上下滑切换（方案 §2.5）：等价 tokens.css --ease-out / --ease-in（framer-motion ease 需 cubic-bezier 元组） */
@@ -112,6 +113,8 @@ export function LiveRoomBody({
   const { loading, error, playerError, retryPlayer, refreshPlayer, videoRef } = useLiveRoom(channelId, {
     activityRoute,
     keepLiveActivity,
+    isNarrow,
+    isOwnerConsole: showOwnerPanel,
   });
   const { sending, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll } =
     useDanmaku(channelId);
@@ -200,6 +203,9 @@ export function LiveRoomBody({
       videoRef={videoRef}
       onRetry={retryPlayer}
       onRefresh={refreshPlayer}
+      hidePipButton={isNarrow}
+      onVideoHostMount={(host) => liveSessionRuntime.attachVideoTo(host, { big: true })}
+      onVideoHostUnmount={() => liveSessionRuntime.stashVideo({ big: true })}
     >
       {/* 飘弹幕层：进房完成（历史已 merge，基线可靠）且画面 live 才渲染；
           loading 期间不挂载，避免把进房历史误当"新弹幕"重放 */}

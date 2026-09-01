@@ -160,6 +160,7 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
       onSelect={goTo}
       onBack={onExit}
       inputEntered // 群内子界面无底栏下滑动画，输入框直接显示
+      activityRoute={`/group/${groupId}/live`}
       onCreateNewChannel={() => {
         setCreateError(null);
         setShowCreate(true);

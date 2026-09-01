@@ -2189,6 +2189,161 @@
   flex-shrink: 0;
 }
 
+/* 工具按钮组（任务 03）：宽屏与输入框横排；窄屏独立一行（输入框下方四按钮） */
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+.composer-tools-narrow {
+  justify-content: space-between;
+  padding: 0 var(--sp-1);
+}
+
+/* ================= 群表情包面板（任务 03） ================= */
+
+/* 宽屏：向上展开的 anchored 弹窗（贴在 composer 上方）；窄屏：正常流向下展开 */
+.emoji-pack-panel {
+  position: absolute;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-height: 280px;
+  padding: var(--sp-3);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 12px 32px rgba(70, 91, 146, 0.22);
+  overflow-y: auto;
+}
+
+.emoji-pack-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.emoji-pack-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.emoji-pack-error {
+  font-size: 12px;
+  color: var(--destructive);
+}
+
+.emoji-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: var(--sp-2);
+}
+
+.emoji-pack-cell {
+  position: relative;
+}
+
+.emoji-pack-item,
+.emoji-pack-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.emoji-pack-item:hover,
+.emoji-pack-item:focus-visible,
+.emoji-pack-add:hover,
+.emoji-pack-add:focus-visible {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+  outline: none;
+}
+
+.emoji-pack-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+
+/* 加载失败占位（56px 小格内不显示重试按钮） */
+.emoji-pack-img-fallback {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--glass-bg);
+}
+
+/* 加号框：虚线边框（有权限时显示） */
+.emoji-pack-add {
+  border-style: dashed;
+  color: var(--text-secondary);
+}
+
+.emoji-pack-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.emoji-pack-uploading {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* 删除按钮：悬停表情时显示（群主/管理员） */
+.emoji-pack-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.emoji-pack-cell:hover .emoji-pack-remove,
+.emoji-pack-remove:focus-visible {
+  opacity: 1;
+}
+
+.emoji-pack-remove:hover {
+  background: var(--destructive);
+  border-color: var(--destructive);
+  color: #fff;
+}
+
+.emoji-pack-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: var(--sp-3) 0;
+}
+
 /* ================= @ 能力（M8）：@Token 高亮 + 成员选择器浮层 ================= */
 
 /* @Token 高亮胶囊（design.md §F8：--ice-500 底胶囊）；「@我」加 glow 描边 */
@@ -3071,6 +3226,13 @@
     padding: var(--sp-2) var(--sp-3) var(--sp-3);
   }
 
+  /* 窄屏：表情面板向下展开（正常流，输入框自然上移），不遮挡输入 */
+  .emoji-pack-panel {
+    position: static;
+    max-height: 40vh;
+    box-shadow: none;
+  }
+
   .msg-body {
     max-width: 84%;
   }
@@ -3388,6 +3550,7 @@
   overflow: hidden;
   border: 1px solid var(--glass-border);
 }
+
 
 .live-player-video {
   width: 100%;

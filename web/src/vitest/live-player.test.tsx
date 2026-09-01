@@ -15,7 +15,8 @@ type VideoRef = { current: HTMLVideoElement | null };
 function renderPlayer(
   overrides: Partial<Parameters<typeof LivePlayer>[0]> = {},
 ) {
-  const videoRef: VideoRef = { current: null };
+  // LivePlayer 改造后 video 元素由外部（runtime）持有：测试提供真实元素供迁移进容器
+  const videoRef: VideoRef = { current: document.createElement("video") };
   const props = {
     srsStatus: "live" as const,
     optimisticStatus: "live" as const,
@@ -23,6 +24,11 @@ function renderPlayer(
     videoRef,
     onRetry: vi.fn(),
     onRefresh: vi.fn(),
+    // 模拟 runtime.attachVideoTo：把 video 原子移入宿主容器
+    onVideoHostMount: vi.fn((host: HTMLElement) => {
+      if (videoRef.current) host.appendChild(videoRef.current);
+    }),
+    onVideoHostUnmount: vi.fn(),
     ...overrides,
   };
   const utils = render(<LivePlayer {...props} />);
@@ -40,10 +46,12 @@ afterEach(() => {
 
 describe("LivePlayer", () => {
   it("live 状态渲染 video 且无原生控制条，并渲染刷新键与全屏键", () => {
-    const { container } = renderPlayer();
+    const { container, props } = renderPlayer();
+    // video 由外部持有并原子移入容器（useLayoutEffect 挂载时）
     const video = container.querySelector("video");
     expect(video).toBeTruthy();
     expect(video?.hasAttribute("controls")).toBe(false);
+    expect(props.onVideoHostMount).toHaveBeenCalled();
     expect(screen.getByLabelText("跳到最新画面")).toBeTruthy();
     expect(screen.getByLabelText("全屏")).toBeTruthy();
   });
@@ -114,17 +122,17 @@ describe("LivePlayer", () => {
     expect(props.onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it("触屏点视频显示控制层，3 秒无操作自动隐藏", () => {
+  it("触屏点播放器显示控制层，3 秒无操作自动隐藏", () => {
     vi.useFakeTimers();
     const { container } = renderPlayer();
-    const video = container.querySelector("video");
+    const player = container.querySelector(".live-player");
     const controls = container.querySelector(".live-player-controls");
-    expect(video).toBeTruthy();
+    expect(player).toBeTruthy();
     expect(controls).toBeTruthy();
 
-    // 点击视频唤醒显示控制层（触屏 tap 语义）
+    // 点击播放器唤醒显示控制层（触屏 tap 语义；video 由 runtime 持有不可点击）
     expect(controls?.classList.contains("is-visible")).toBe(false);
-    fireEvent.click(video!);
+    fireEvent.click(player!);
     expect(controls?.classList.contains("is-visible")).toBe(true);
 
     // 3 秒无操作 → 自动隐藏

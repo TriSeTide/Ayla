@@ -16,7 +16,9 @@ vi.mock("../hooks/useLiveRoom", () => ({
     error: null,
     playerError: null,
     retryPlayer: vi.fn(),
-    videoRef: { current: null },
+    refreshPlayer: vi.fn(),
+    // LivePlayer 改造后 video 元素由外部持有：mock 提供真实元素供迁移进容器
+    videoRef: { current: document.createElement("video") },
   }),
 }));
 
@@ -119,7 +121,9 @@ describe("LiveRoomBody 窄屏上下滑切换（§2.5）", () => {
         inputEntered
       />,
     );
-    expect(document.querySelectorAll("video").length).toBe(1);
+    // video 元素由 liveSessionRuntime 唯一持有；本测试环境无 runtime，
+    // 断言播放组件单实例（仅当前槽一个 .live-player）
+    expect(document.querySelectorAll(".live-player").length).toBe(1);
   });
 
   it("宽屏不渲染滑动单元，保持固定播放器", () => {

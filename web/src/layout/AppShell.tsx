@@ -19,6 +19,7 @@ import { PrimaryNavPage } from "../components/motion/PrimaryNavPage";
 import { isPrimaryTabPath, usePrimaryNavSwipeDirection } from "../hooks/usePrimaryNavSwipeDirection";
 import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
+import { useLiveStore } from "../stores/live";
 import { BottomTabs } from "./BottomTabs";
 import { CornerFabStack } from "./CornerFabStack";
 import { CreateFab } from "./CreateFab";
@@ -29,6 +30,7 @@ import { QuickMessagesSheet } from "../components/chat/QuickMessagesSheet";
 import { RefreshFab } from "./RefreshFab";
 import { ScrollTopFab } from "./ScrollTopFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
+import { LiveMiniPlayer } from "../components/live/LiveMiniPlayer";
 import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
 import { isGroupScene, isMessagesRoute, isNarrowTopBarRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveCornerFabs, resolveFabAction, resolveModule } from "./shellConfig";
@@ -43,6 +45,8 @@ export function AppShell() {
   const bottomTabsLeaving = useShellStore((s) => s.bottomTabsLeaving);
   const quickMessagesOpen = useShellStore((s) => s.quickMessagesOpen);
   const badges = useBadgesStore((s) => s.badges);
+  // 手机端浮动小窗（任务 05）：窄屏离开直播间后继续播放的迷你播放器
+  const liveMiniPlayer = useLiveStore((s) => s.miniPlayer);
 
   const moduleKey = resolveModule(pathname);
   const fabAction = resolveFabAction(pathname);
@@ -111,6 +115,8 @@ export function AppShell() {
       </main>
       <SessionActivityIndicator />
       <RealtimeStatusBanner />
+      {/* 手机端浮动小窗（任务 05）：窄屏离开直播间后继续播放；唯一 owner */}
+      {isNarrow && liveMiniPlayer ? <LiveMiniPlayer /> : null}
       {isNarrow && !groupSceneNarrow && !privateChatNarrow ? (
         <BottomTabs
           moduleKey={moduleKey}
