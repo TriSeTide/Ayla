@@ -4,6 +4,7 @@ import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
 import { IconBack } from "../components/icons";
 import { usePostsStore } from "../stores/posts";
+import { chatWS } from "../ws/chat";
 
 const FILTERS: Array<{ key: FavoriteTargetType | "all"; label: string }> = [
   { key: "all", label: "全部" },
@@ -47,10 +48,12 @@ function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite
       navigate(`/live/${favorite.target_id}`);
       break;
     case "voice":
-      navigate("/voice");
+      // 直达具体语音房（/voice/:channelId 路由已存在，VoiceHubPage 支持直达进房）
+      navigate(`/voice/${favorite.target_id}`);
       break;
     case "game":
-      navigate("/games");
+      // 直达具体桌游房（/games/:roomId 路由，GamesHubPage 自动 join 进房）
+      navigate(`/games/${favorite.target_id}`);
       break;
     case "message":
       if (target?.conversation_id) navigate(`/chat/${target.conversation_id}`);
@@ -84,6 +87,21 @@ export function FavoritesPage() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // WS 热更新（任务 07）：收藏/取消收藏后收藏页实时同步。
+  // removed → 本地移除该条（favorite_id 即被删收藏 id）；added → 重新拉权威列表
+  // （含 target 摘要；帖子收藏态由 chatWS dispatch 统一更新 posts store）。
+  useEffect(() => {
+    return chatWS.onFrame((frame) => {
+      if (frame.type !== "favorite.changed") return;
+      const d = frame.data;
+      if (d.action === "removed") {
+        setFavorites((prev) => prev.filter((item) => item.id !== d.favorite_id));
+      } else {
+        load();
+      }
+    });
   }, [load]);
 
   const remove = useCallback((favorite: Favorite) => {

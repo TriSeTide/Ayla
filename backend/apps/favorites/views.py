@@ -56,6 +56,10 @@ class FavoriteListView(APIView):
 
         target_id = str(target_id).strip()
         favorite, created = services.add_favorite(request.user, target_type, target_id)
+        # 收藏成功 → 用户级 WS 广播（同账号各界面实时同步收藏态）
+        services.broadcast_favorite_changed(
+            request.user.id, target_type, target_id, favorite.id, "added"
+        )
         serializer = FavoriteSerializer(favorite, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
@@ -70,8 +74,14 @@ class FavoriteDetailView(APIView):
             favorite = Favorite.objects.get(pk=favorite_id)
         except (Favorite.DoesNotExist, ValueError, TypeError):
             return _not_found()
+        # delete() 后 Django 会把对象 pk 置 None，广播载荷必须在删除前取值
+        deleted_info = (favorite.target_type, favorite.target_id, favorite.id)
         try:
             services.remove_favorite(request.user, favorite)
         except PermissionError as exc:
             return _forbidden(str(exc))
+        # 取消收藏成功 → 用户级 WS 广播（同账号各界面实时移除收藏态）
+        services.broadcast_favorite_changed(
+            request.user.id, deleted_info[0], deleted_info[1], deleted_info[2], "removed"
+        )
         return Response({"detail": "已取消收藏"})

@@ -29,6 +29,7 @@ import { useBoardgameStore } from "../stores/boardgame";
 import * as chatApi from "../api/chat";
 import * as voiceApi from "../api/voice";
 import * as boardgameApi from "../api/boardgame";
+import { applyFavoriteChanged } from "../components/FavoriteButton";
 import { segmentPreview } from "../utils/segment";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -584,6 +585,25 @@ export class ChatWSClient {
         void boardgameApi.getGameRoom(Number(d.id))
           .then((room) => useBoardgameStore.getState().upsertRoom(room))
           .catch(() => { /* 当前用户不可见或房间已删除 */ });
+        break;
+      }
+      case "favorite.changed": {
+        // 收藏/取消收藏（用户级广播，仅推给收藏者本人）：同账号各界面实时同步。
+        // 帖子走 posts store（favoriteByPostId）；其余类型（live/voice/game/message）
+        // 走 FavoriteButton 模块缓存订阅（applyFavoriteChanged 更新缓存并通知挂载按钮）。
+        const d = frame.data;
+        if (d.target_type === "post") {
+          usePostsStore.getState().setFavorite(
+            d.target_id,
+            d.action === "added" ? d.favorite_id : null,
+          );
+        } else {
+          applyFavoriteChanged(
+            d.target_type,
+            d.target_id,
+            d.action === "added" ? d.favorite_id : null,
+          );
+        }
         break;
       }
       case "elysia.reply": {

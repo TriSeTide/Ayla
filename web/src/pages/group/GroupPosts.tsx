@@ -15,6 +15,7 @@ import type { CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
+import * as favoritesApi from "../../api/favorites";
 import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
@@ -43,6 +44,8 @@ export function GroupPosts({
   const navigate = useNavigate();
   // store 全量可见列表 → 当前群前端投影（登录预加载后通常已就绪，秒开关键）
   const feedPosts = usePostsStore((s) => s.posts);
+  // 帖子收藏态（postId → favoriteId），与一级帖子流/详情页共享同一 store
+  const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
   const groupedFromStore = useMemo(
     () =>
       feedPosts.filter((p) =>
@@ -54,6 +57,8 @@ export function GroupPosts({
   const [groupPosts, setGroupPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 收藏操作失败提示（与列表加载 error 分离，列表有数据时也能看到）
+  const [actionError, setActionError] = useState<string | null>(null);
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -113,6 +118,43 @@ export function GroupPosts({
       if (frame.type === "post.created" || frame.type === "post.deleted") load();
     });
   }, [load]);
+
+  // 收藏态铺底：群内帖子流可能不经 PostsHubPage 直接进入，需自行加载我的帖子收藏
+  // （幂等：重复加载只是覆盖同一份 favoriteByPostId 映射）。
+  useEffect(() => {
+    let cancelled = false;
+    favoritesApi
+      .listFavorites("post")
+      .then((list) => {
+        if (!cancelled) usePostsStore.getState().loadFavorites(list);
+      })
+      .catch(() => {
+        // 收藏状态加载失败不阻塞列表；收藏键保持未收藏态，点击时再报错。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 收藏/取消收藏：与 PostsHubPage/PostDetailPage 同一模式（REST + posts store 即时反馈）
+  const toggleFavorite = useCallback(async (postId: number) => {
+    const store = usePostsStore.getState();
+    const key = String(postId);
+    const favId = store.favoriteByPostId[key];
+    setActionError(null);
+    try {
+      if (favId != null) {
+        await favoritesApi.removeFavorite(favId);
+        store.setFavorite(key, null);
+      } else {
+        const fav = await favoritesApi.addFavorite("post", key);
+        store.setFavorite(key, fav.id);
+      }
+    } catch (e) {
+      // 保持原态并明确告知失败；不伪造收藏成功。
+      setActionError(e instanceof Error ? e.message : "收藏操作失败，请重试");
+    }
+  }, []);
 
   const handleCreated = useCallback(
     (post: Post) => {
@@ -179,6 +221,7 @@ export function GroupPosts({
           </div>
           <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
         </div>
+        {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
           {error && groupPosts.length === 0 && groupedFromStore.length === 0 ? (
             <div className="group-scene-placeholder" role="alert">
@@ -217,7 +260,7 @@ export function GroupPosts({
                       >
                         <PostCard
                           post={post}
-                          favorited={false}
+                          favorited={favoriteByPostId[String(post.id)] != null}
                           onOpen={() => {
                             // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
                             setSkipRevealRestoreKey(scrollRestoreKey);
@@ -225,7 +268,7 @@ export function GroupPosts({
                             saveScrollPosition(scrollRestoreKey, listRef.current);
                             navigate(`/group/${encodeURIComponent(groupId)}/posts/${post.id}`);
                           }}
-                          onToggleFavorite={() => {}}
+                          onToggleFavorite={() => void toggleFavorite(post.id)}
                         />
                       </div>
                     );

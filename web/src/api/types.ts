@@ -11,10 +11,12 @@ export interface UserPublic {
   nickname: string;
   avatar: string;
   signature: string;
-  /** User.status：online / away / dnd / invisible */
+  /** User.status：auto / away / dnd / invisible（auto=自动，对外显示跟随实时在线） */
   status: string;
   /** 实时在线（Redis presence，隐身对外视为离线） */
   online: boolean;
+  /** 对外显示文案（后端权威）：auto→在线/离线、dnd→勿扰、away→离开、invisible→离线 */
+  display_status?: string;
   /** ISO 时间字符串 */
   date_joined: string;
   /** 跨页面媒体活动事实，由后端生命周期维护。 */
@@ -108,6 +110,29 @@ export type ApiErrorBody = Record<string, unknown>;
 export type MessageType =
   | "text" | "image" | "voice" | "file" | "emoji" | "video" | "mixed" | "system" | "poke";
 export type MessageStatus = "sent" | "delivered" | "read" | "recalled";
+
+/* ================= M4-3 表情包（对齐 backend/apps/emoji/serializers.py） ================= */
+
+/** 表情项：media 为媒体 descriptor */
+export interface EmojiItem {
+  id: string;
+  media: MediaDescriptor | null;
+  tag: string;
+  created_at: string;
+}
+
+/** 表情包（个人包/系统包/群表情包；群包含 allow_member_upload 开关） */
+export interface EmojiPack {
+  id: string;
+  owner_id: string | null;
+  name: string;
+  is_system: boolean;
+  item_count: number;
+  items: EmojiItem[];
+  created_at: string;
+  /** 群表情包：是否允许普通群成员上传（仅群包有语义） */
+  allow_member_upload?: boolean;
+}
 
 /** 媒体种类（与 backend apps/media/models.py MediaObject.kind 对齐） */
 export type MediaKind = "image" | "voice" | "file" | "emoji" | "video";
@@ -662,6 +687,7 @@ export type ChatServerFrame =
   | BoardgameRoomCreatedFrame
   | BoardgameRoomDeletedFrame
   | BoardgameRoomUpdatedFrame
+  | FavoriteChangedFrame
   | ChatErrorFrame
   | PongFrame;
 
@@ -1026,6 +1052,18 @@ export interface Favorite {
   target_id: string;
   target: Record<string, unknown> | null;
   created_at: string;
+}
+
+/** 收藏/取消收藏 WS 广播（任务 07：用户级组 chat_user_<id>，仅推给收藏者本人） */
+export interface FavoriteChangedFrame {
+  type: "favorite.changed";
+  data: {
+    target_type: FavoriteTargetType;
+    target_id: string;
+    /** added=新收藏 id；removed=被删除的收藏 id */
+    favorite_id: number;
+    action: "added" | "removed";
+  };
 }
 
 /* ================= S4 桌游域（对齐 backend/apps/boardgame/serializers.py） ================= */

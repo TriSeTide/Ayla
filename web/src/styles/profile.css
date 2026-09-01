@@ -207,6 +207,8 @@
   display: flex;
   flex-direction: column;
   padding-bottom: 68px;
+  /* 防 flex 子项被内容撑开导致页面横向溢出（任务 07：导航条截断修复） */
+  min-width: 0;
 }
 
 .favorites-topbar {
@@ -214,6 +216,7 @@
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-4) var(--sp-2);
+  min-width: 0;
 }
 
 .favorites-title {
@@ -222,6 +225,12 @@
   font-size: 24px;
   font-weight: 600;
   color: var(--text-primary);
+  /* 窄屏标题过长时省略而非撑破顶栏 */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .favorites-filters {
@@ -233,6 +242,10 @@
   scrollbar-width: thin;
   scrollbar-color: var(--glow-500) transparent;
   scroll-padding-inline: var(--sp-4);
+  /* 关键：flex column 子项默认 min-width:auto 会被七个 tab 撑开父容器，
+     导致整页横向溢出/导航条截断；置 0 后宽度收敛为容器宽，tab 走横向滚动 */
+  min-width: 0;
+  width: 100%;
 }
 
 .favorites-filters::after {

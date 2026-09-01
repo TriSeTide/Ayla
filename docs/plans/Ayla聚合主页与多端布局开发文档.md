@@ -109,6 +109,25 @@ class Visibility(models.TextChoices):
 - 路由：`GET /api/v1/favorites/?type=`、`POST favorites/`（幂等）、`DELETE favorites/<id>/`。
 - 前端"更多 → 收藏"页本期展示帖子收藏即可，其余类型留扩展。
 
+> 落地记录（任务 07，2026-08-26）：
+> - **收藏跳转全类型直达**：`FavoritesPage.openTarget`——voice → `/voice/{target_id}`
+>   （VoiceHubPage 已有直达进房逻辑）、game → `/games/{room_id}`（**新增路由**，GamesHubPage
+>   按 room id 自动 join 进房，返回回大厅）、live → `/live/{id}`、post → `/posts/{id}`、
+>   group → `/group/{id}`、message → `/chat/{conversation_id}`（target 摘要带 conversation_id）。
+> - **收藏 WS 热更新**：收藏/取消收藏后向用户级组 `chat_user_<user_id>` 广播
+>   `favorite.changed` `{target_type, target_id, favorite_id, action: added|removed}`
+>   （`apps/favorites/services.py::broadcast_favorite_changed` 复用 chat 用户级广播；
+>   ChatConsumer 新增 `favorite_changed` 处理器）。收藏是用户私有数据，只推给收藏者本人，
+>   同账号各界面（帖子卡片/详情、直播/语音/桌游/群卡片、收藏页）实时同步。
+>   前端 `ws/chat.ts` 分发：post → posts store `favoriteByPostId`；其余类型 →
+>   `FavoriteButton` 模块缓存订阅（`applyFavoriteChanged` 更新缓存并通知挂载按钮）；
+>   收藏页订阅后 removed 本地移除 / added 重新拉取权威列表。
+> - **群内帖子收藏键**：`GroupPosts` 接入真实收藏（favorited 取 posts store，挂载时
+>   `listFavorites("post")` 铺底，toggle 走 favoritesApi + store 即时反馈）。
+> - **收藏页导航条**：`.favorites-filters` 加 `min-width:0; width:100%`（flex column 子项
+>   被七个 tab 撑开导致整页横向溢出的经典问题），顶栏标题加 ellipsis；宽/窄屏
+>   Playwright 实测数据见验收记录。
+
 ### 1.7 群动态轮播（B8）——chat app 聚合端点
 
 - `GET /api/v1/chat/conversations/<id>/highlights/`：返回该群最近动态封面列表 `[{type: live|post|game, title, cover_url, target_url, created_at}]`，按时间 desc 取前 5：
@@ -199,6 +218,7 @@ src/
 /posts                  PostsHubPage
 /posts/:postId          PostDetailPage
 /games                  GamesHubPage
+/games/:roomId          GamesHubPage（任务 07：直达进房——自动 join 并渲染房内占位，返回回大厅）
 /messages               MessagesPage         （宽屏双栏）
 /search                 SearchPage
 /profile                ProfilePage（扩展我的帖子/直播间/桌游）

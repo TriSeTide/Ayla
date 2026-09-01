@@ -129,3 +129,38 @@ def remove_favorite(user, favorite: Favorite) -> None:
     if favorite.user_id != user.id:
         raise PermissionError("仅本人可取消收藏")
     favorite.delete()
+
+
+# ---------- 收藏 WS 广播（任务 07：收藏/取消后各界面实时同步） ----------
+#
+# 收藏是用户私有数据（favorites 表按 user 过滤），因此只推给收藏者本人：
+# 走 `chat_user_<user_id>` 用户级组（ChatConsumer connect 时已加入），
+# 同账号所有界面（帖子卡片/详情、直播/语音/桌游/群卡片、收藏页）实时同步；
+# 其他用户不感知他人收藏，符合收藏私有语义。
+
+def _favorite_changed_event(target_type: str, target_id: str, favorite_id: int, action: str) -> dict:
+    """favorite.changed 事件载荷（group_send 用）。"""
+    return {
+        "type": "favorite.changed",
+        "data": {
+            "target_type": target_type,
+            "target_id": str(target_id),
+            "favorite_id": favorite_id,
+            "action": action,
+        },
+    }
+
+
+def broadcast_favorite_changed(user_id, target_type: str, target_id: str, favorite_id: int, action: str) -> None:
+    """收藏/取消收藏 → 推给收藏者本人（同步版，REST 视图线程上下文）。
+
+    - action="added"：收藏成功（favorite_id 为新收藏 id）；
+    - action="removed"：取消收藏（favorite_id 为被删除的收藏 id）。
+    复用 chat 的用户级广播（捕获 ChannelFull 记 warning，不阻塞收藏请求）。
+    """
+    from apps.chat.services import _user_group_send_sync
+
+    _user_group_send_sync(
+        user_id,
+        _favorite_changed_event(target_type, target_id, favorite_id, action),
+    )

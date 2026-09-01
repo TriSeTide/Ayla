@@ -65,6 +65,7 @@ export default function App() {
         <Route path="/posts/mine" element={<MyPostsPage />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />
         <Route path="/games" element={<GamesHubPage />} />
+        <Route path="/games/:roomId" element={<GamesHubPage />} />
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/profile" element={<ProfilePage />} />

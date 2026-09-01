@@ -310,6 +310,16 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def favorite_changed(self, event):
+        """收藏/取消收藏广播（S6 任务 07）：用户级组 chat_user_<id> 推送，
+        同账号各界面（帖子卡片/详情、直播/语音/桌游/群卡片、收藏页）实时同步。"""
+        await self.send_json(
+            {
+                "type": "favorite.changed",
+                "data": event["data"],
+            }
+        )
+
     async def elysia_reply(self, event):
         """爱莉回复投影（M4-4 桥接 + M4-5 语音转写投影，来源见 ``source``）。
 
