@@ -6,16 +6,18 @@
  * 不可拆分 @Token（contenteditable=false span，浏览器原生整体删除），发送时转为
  * 结构化 segments（text + mention 交错，媒体段追加尾部）。
  */
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ChatMessage, ConversationMember, DraftBlock } from "../../api/types";
 import { useChatDraftsStore } from "../../stores/chatDrafts";
+import { useAuthStore } from "../../stores/auth";
 import { sendMessage, sendOptimistic, type PickedMediaItem } from "../../hooks/useChat";
 import { uploadMediaFile, validateMediaFile } from "../../api/media";
-import { IconImage, IconClose, IconMic, IconSend, IconFile } from "../icons";
+import { IconImage, IconClose, IconMic, IconSend, IconFile, IconEmoji } from "../icons";
 import { useTyping } from "../../hooks/useTyping";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useVoiceRecorder, isVoiceRecordingSupported, formatDuration as formatRecDuration, type VoiceRecording } from "../../hooks/useVoiceRecorder";
 import { segmentPreview } from "../../utils/segment";
+import { EmojiPackPanel } from "./EmojiPackPanel";
 import {
   blocksHasMention,
   blocksText,
@@ -66,11 +68,19 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const [failedVoice, setFailedVoice] = useState<FailedVoice | null>(null);
     const [mentionOpen, setMentionOpen] = useState(false);
     const [mentionQuery, setMentionQuery] = useState("");
+    /** 群表情包面板（任务 03）：宽屏向上弹窗、窄屏向下展开 */
+    const [emojiOpen, setEmojiOpen] = useState(false);
     const editorRef = useRef<HTMLDivElement>(null);
     const voice = useVoiceRecorder();
     const { onInput } = useTyping(convId || null);
     const isNarrow = useMediaQuery(NARROW_QUERY);
     const enableMention = !!members && members.length > 0;
+    // 当前用户在群中的角色（表情面板加号兜底显示用）
+    const currentUser = useAuthStore((s) => s.currentUser);
+    const myRole = useMemo(
+      () => members?.find((m) => m.user.id === currentUser?.id)?.role,
+      [members, currentUser?.id],
+    );
 
     // user_id → 显示名（草稿恢复 + @Token 用）
     const nameOf = useCallback(
@@ -93,6 +103,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       setBlocks(parsed);
       setMentionOpen(false);
       setMentionQuery("");
+      setEmojiOpen(false);
       setError(null);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [convId]);
@@ -349,89 +360,161 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
             </>
           ) : (
             <>
-              <label className="composer-tool-btn" aria-label="发送图片或视频">
-                <IconImage width={18} height={18} />
-                <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
+              {/* 宽屏：工具按钮与输入框横排（图片/文件/语音/表情包） */}
+              {!isNarrow && (
+                <div className="composer-tools">
+                  <label className="composer-tool-btn" aria-label="发送图片或视频">
+                    <IconImage width={18} height={18} />
+                    <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      e.target.value = "";
+                      if (files.length === 0) return;
+                      enqueueFiles(files);
+                    }} />
+                  </label>
+                  <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
+                    <IconFile width={18} height={18} />
+                    <input
+                      type="file"
+                      hidden
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []);
+                        e.target.value = "";
+                        if (files.length === 0) return;
+                        enqueueFiles(files);
+                      }}
+                    />
+                  </label>
+                  {isVoiceRecordingSupported() && (
+                    <button
+                      type="button"
+                      className="composer-tool-btn composer-voice-btn"
+                      onClick={() => void voice.start()}
+                      aria-label="发送语音"
+                      title="录制语音消息"
+                      disabled={voice.recording}
+                    >
+                      <IconMic width={18} height={18} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="composer-tool-btn"
+                    onClick={() => setEmojiOpen((v) => !v)}
+                    aria-label="群表情包"
+                    aria-expanded={emojiOpen}
+                    title="群表情包"
+                  >
+                    <IconEmoji width={18} height={18} />
+                  </button>
+                </div>
+              )}
+              <div
+                ref={editorRef}
+                className="field composer-input composer-editor"
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                aria-multiline="true"
+                aria-label="消息输入框"
+                data-placeholder={placeholder}
+                onInput={handleEditorInput}
+                onKeyDown={(e) => {
+                  if (mentionOpen && e.key === "Escape") {
+                    e.preventDefault();
+                    setMentionOpen(false);
+                    return;
+                  }
+                  if (emojiOpen && e.key === "Escape") {
+                    e.preventDefault();
+                    setEmojiOpen(false);
+                    return;
+                  }
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                onPaste={(e) => {
+                  // 粘贴图片/视频文件 → 进待发送队列（阻止默认，避免 contentEditable 混入 HTML）
+                  const items = Array.from(e.clipboardData?.items ?? []);
+                  const files = items
+                    .filter((it) => it.kind === "file")
+                    .map((it) => it.getAsFile())
+                    .filter((f): f is File => f != null);
+                  const mediaFiles = files.filter(
+                    (f) => f.type.startsWith("image/") || f.type.startsWith("video/"),
+                  );
+                  if (mediaFiles.length > 0) {
+                    e.preventDefault();
+                    enqueueFiles(mediaFiles);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary composer-send"
+                onClick={submit}
+                disabled={!canSend || !convId}
+              >
+                <IconSend width={15} height={15} />
+                发送
+              </button>
+            </>
+          )}
+        </div>
+        {/* 窄屏：输入框下方四个工具按钮（图片/语音/表情包/文件），面板向下展开 */}
+        {isNarrow && !voice.recording && (
+          <div className="composer-tools composer-tools-narrow" role="toolbar" aria-label="消息工具">
+            <label className="composer-tool-btn" aria-label="发送图片或视频">
+              <IconImage width={18} height={18} />
+              <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (files.length === 0) return;
+                enqueueFiles(files);
+              }} />
+            </label>
+            {isVoiceRecordingSupported() && (
+              <button
+                type="button"
+                className="composer-tool-btn composer-voice-btn"
+                onClick={() => void voice.start()}
+                aria-label="发送语音"
+                title="录制语音消息"
+                disabled={voice.recording}
+              >
+                <IconMic width={18} height={18} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="composer-tool-btn"
+              onClick={() => setEmojiOpen((v) => !v)}
+              aria-label="群表情包"
+              aria-expanded={emojiOpen}
+              title="群表情包"
+            >
+              <IconEmoji width={18} height={18} />
+            </button>
+            <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
+              <IconFile width={18} height={18} />
+              <input
+                type="file"
+                hidden
+                onChange={(e) => {
                   const files = Array.from(e.target.files ?? []);
                   e.target.value = "";
                   if (files.length === 0) return;
                   enqueueFiles(files);
-                }} />
-              </label>
-              <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
-                <IconFile width={18} height={18} />
-                <input
-                  type="file"
-                  hidden
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files ?? []);
-                    e.target.value = "";
-                    if (files.length === 0) return;
-                    enqueueFiles(files);
-                  }}
-                />
-              </label>
-              {isVoiceRecordingSupported() && (
-                <button
-                  type="button"
-                  className="composer-tool-btn composer-voice-btn"
-                  onClick={() => void voice.start()}
-                  aria-label="发送语音"
-                  title="录制语音消息"
-                  disabled={voice.recording}
-                >
-                  <IconMic width={18} height={18} />
-                </button>
-              )}
-            </>
-          )}
-          <div
-            ref={editorRef}
-            className="field composer-input composer-editor"
-            contentEditable
-            suppressContentEditableWarning
-            role="textbox"
-            aria-multiline="true"
-            aria-label="消息输入框"
-            data-placeholder={placeholder}
-            onInput={handleEditorInput}
-            onKeyDown={(e) => {
-              if (mentionOpen && e.key === "Escape") {
-                e.preventDefault();
-                setMentionOpen(false);
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            onPaste={(e) => {
-              // 粘贴图片/视频文件 → 进待发送队列（阻止默认，避免 contentEditable 混入 HTML）
-              const items = Array.from(e.clipboardData?.items ?? []);
-              const files = items
-                .filter((it) => it.kind === "file")
-                .map((it) => it.getAsFile())
-                .filter((f): f is File => f != null);
-              const mediaFiles = files.filter(
-                (f) => f.type.startsWith("image/") || f.type.startsWith("video/"),
-              );
-              if (mediaFiles.length > 0) {
-                e.preventDefault();
-                enqueueFiles(mediaFiles);
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="btn btn-primary composer-send"
-            onClick={submit}
-            disabled={!canSend || !convId}
-          >
-            <IconSend width={15} height={15} />
-            发送
-          </button>
-        </div>
+                }}
+              />
+            </label>
+          </div>
+        )}
+        {emojiOpen && (
+          <EmojiPackPanel convId={convId} myRole={myRole} onClose={() => setEmojiOpen(false)} />
+        )}
       </div>
     );
   },

@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as chatApi from "../../api/chat";
+import { getGroupEmojiPack, setGroupEmojiUploadPolicy } from "../../api/emoji";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../../api/media";
 import type { ConversationMember, ConversationSummary } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
@@ -19,7 +20,9 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { IconBack, IconClose, IconSearch } from "../../components/icons";
 import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
+import { usePresenceStore } from "../../stores/presence";
 import { useHomeStore } from "../../stores/home";
+import { presenceOnline } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -41,6 +44,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const conversations = useChatStore((s) => s.conversations);
   const navigate = useNavigate();
   const currentUser = useAuthStore((s) => s.currentUser);
+  const onlineUsers = usePresenceStore((s) => s.users);
 
   const group = useMemo(
     () => conversations.find((c) => c.id === groupId) ?? null,
@@ -64,6 +68,10 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [confirmAction, setConfirmAction] = useState<
     { kind: "dissolve" } | { kind: "leave" } | { kind: "transfer"; member: ConversationMember } | null
   >(null);
+
+  // 群表情包上传权限（任务 03）：仅群主可见可改；包未创建（404）时按默认 false
+  const [allowMemberUpload, setAllowMemberUpload] = useState(false);
+  const [emojiPolicyLoaded, setEmojiPolicyLoaded] = useState(false);
 
   // 群头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [groupAvatarFile, setGroupAvatarFile] = useState<File | null>(null);
@@ -142,6 +150,20 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   };
 
   useEffect(() => {
+    if (!isOwner) return;
+    getGroupEmojiPack(groupId)
+      .then((d) => {
+        setAllowMemberUpload(d.allow_member_upload);
+        setEmojiPolicyLoaded(true);
+      })
+      .catch(() => {
+        // 包未创建（404）→ 默认关闭
+        setAllowMemberUpload(false);
+        setEmojiPolicyLoaded(true);
+      });
+  }, [isOwner, groupId]);
+
+  useEffect(() => {
     if (!canManage || typeof chatApi.listJoinRequests !== "function") return;
     chatApi.listJoinRequests(groupId)
       .then((items) => setJoinRequests(items.filter((item) => item.status === "pending")))
@@ -154,6 +176,19 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     try { await action(); await reloadGroup(); }
     catch (e) { setManagementError(e instanceof Error ? e.message : "操作失败"); }
     finally { setBusyAction(null); }
+  };
+
+  const toggleEmojiUploadPolicy = async (value: boolean) => {
+    setBusyAction("emoji-policy");
+    setManagementError(null);
+    try {
+      const d = await setGroupEmojiUploadPolicy(groupId, value);
+      setAllowMemberUpload(d.allow_member_upload);
+    } catch (e) {
+      setManagementError(e instanceof Error ? e.message : "设置失败");
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   // 解散群聊：成功后从会话列表移除并清掉最近群记录，再回主页；不触发 reloadGroup（群已删除）
@@ -353,7 +388,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
               <Avatar
                 label={m.user.nickname || m.user.username}
                 size={36}
-                online={m.user.online}
+                online={presenceOnline(onlineUsers, m.user)}
                 imageUrl={m.user.avatar || null}
                 onClick={() => goUserProfile(currentUser?.id, m.user.id)}
                 ariaLabel={`查看 ${m.user.nickname || m.user.username} 的个人主页`}
@@ -394,6 +429,17 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                 <option value="application">申请加入</option>
               </select>}
             </div>
+            {isOwner && emojiPolicyLoaded && (
+              <label className="group-info-policy group-info-switch">
+                <input
+                  type="checkbox"
+                  checked={allowMemberUpload}
+                  disabled={busyAction !== null}
+                  onChange={(e) => void toggleEmojiUploadPolicy(e.target.checked)}
+                />
+                <span>允许普通群成员上传表情包</span>
+              </label>
+            )}
             {joinRequests.length > 0 ? <div className="group-info-requests">
               <h4>入群申请审批 · 待处理（{joinRequests.length}）</h4>
               {joinRequests.map((request) => <div key={request.id} className="group-info-request">
@@ -490,6 +536,7 @@ function TransferOwnerDialog({
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<ConversationMember | null>(null);
+  const onlineUsers = usePresenceStore((s) => s.users);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -550,7 +597,7 @@ function TransferOwnerDialog({
                       <Avatar
                         label={name}
                         size={36}
-                        online={m.user.online}
+                        online={presenceOnline(onlineUsers, m.user)}
                         imageUrl={m.user.avatar || null}
                       />
                       <span className="group-transfer-name">{name}</span>

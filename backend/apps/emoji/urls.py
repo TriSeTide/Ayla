@@ -26,4 +26,20 @@ urlpatterns = [
         name="emoji-set-system",
     ),
     path("search/", views.EmojiSearchView.as_view(), name="emoji-search"),
+    # 任务 03：群内表情包
+    path(
+        "groups/<str:conv_id>/pack/",
+        views.GroupEmojiPackView.as_view(),
+        name="emoji-group-pack",
+    ),
+    path(
+        "groups/<str:conv_id>/pack/items/",
+        views.GroupEmojiItemCreateView.as_view(),
+        name="emoji-group-item-add",
+    ),
+    path(
+        "groups/<str:conv_id>/pack/items/<str:item_id>/",
+        views.GroupEmojiItemDeleteView.as_view(),
+        name="emoji-group-item-delete",
+    ),
 ]

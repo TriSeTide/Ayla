@@ -8,13 +8,24 @@
 - EmojiPack.unique(owner, name)：系统包 owner 为 NULL，NULL 唯一语义在 SQLite/MySQL 不同，
   因此在 services 做幂等（get_or_create_system_pack / get_or_create 个人包），DB 层不加会误导的约束；
 - EmojiItem.unique(pack, media)：硬约束（DB 层），同一包内重复收藏必须被 DB 拒绝。
+
+任务 03（群内表情包）：EmojiPack 增加 group FK 与 allow_member_upload 开关——
+群表情包 = group 非空、owner 为空、is_system=False 的包，对群内所有成员可见；
+上传权限默认仅群主/管理员，群主可在群详情页开启 allow_member_upload 允许普通成员上传。
 """
 from django.conf import settings
 from django.db import models
 
 
 class EmojiPack(models.Model):
-    """表情包。"""
+    """表情包。
+
+    三种形态（互斥，由 services 保证）：
+    - 个人包：owner 非空，group 为空；
+    - 系统包：owner 为空，group 为空，is_system=True；
+    - 群表情包：group 非空（任务 03），owner 为空，is_system=False；
+      `allow_member_upload` 为群主设置的"是否允许普通群成员上传"开关（默认 False）。
+    """
 
     id = models.AutoField(primary_key=True)
     owner = models.ForeignKey(
@@ -24,8 +35,18 @@ class EmojiPack(models.Model):
         null=True,
         blank=True,
     )
+    # 群表情包关联的群（任务 03）；个人包/系统包为空
+    group = models.ForeignKey(
+        "chat.Conversation",
+        related_name="emoji_packs",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
     name = models.CharField("名称", max_length=64)
     is_system = models.BooleanField("系统包", default=False)
+    # 群表情包：是否允许普通群成员上传（仅群主可改，默认 False）
+    allow_member_upload = models.BooleanField("允许普通成员上传", default=False)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:

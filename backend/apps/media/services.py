@@ -86,8 +86,16 @@ ALLOWED_MIME = {
         # 直接内嵌/打开时脚本不执行（见 views.MediaContentView）。
         "image/svg+xml",
     },
+    # emoji 与 image 同为位图（魔数嗅探共用同一套），白名单对齐 image：
+    # 群表情包应支持用户上传的所有图片格式（含 HEIC/AVIF/BMP/TIFF/ICO/SVG）。
     "emoji": {
-        "image/png", "image/jpeg", "image/gif", "image/webp",
+        "image/png", "image/jpeg", "image/jpg", "image/pjpeg",
+        "image/gif", "image/webp",
+        "image/avif", "image/heic", "image/heif", "image/heix",
+        "image/bmp", "image/x-ms-bmp",
+        "image/tiff",
+        "image/x-icon", "image/vnd.microsoft.icon", "image/x-win-bitmap",
+        "image/svg+xml",
     },
     "voice": {
         "audio/wav", "audio/x-wav", "audio/wave", "audio/mpeg",
@@ -379,8 +387,13 @@ def complete_upload(user, session) -> MediaObject:
     digest = stat.get("etag") or uuid.uuid4().hex
 
     with transaction.atomic():
-        # 去重：同 content_hash 已存在则复用既有 media_id（不改变 owner 语义）
-        dup = MediaObject.objects.filter(content_hash=digest).first()
+        # 去重：同 content_hash 且同 kind 已存在则复用既有 media_id（不改变 owner 语义）。
+        # 必须带 kind 条件：同一张图先以 image 发过、再以 emoji 传群表情包时，
+        # 若跨 kind 复用会得到 kind=image 的 media，群表情包 add_item 校验
+        # media.kind != KIND_EMOJI 会报 media_type_mismatch（任务 03 实测）。
+        dup = MediaObject.objects.filter(
+            content_hash=digest, kind=session.kind
+        ).first()
         if dup is not None:
             media = dup
             # 复用去重对象时不移动 tmp（tmp 由 cleanup 兜底过期清理）
@@ -623,7 +636,8 @@ def can_access_media(user, media: MediaObject) -> bool:
     1. owner：上传者本人永远可访问；
     2. 消息引用：media 被某条 Message 引用，且 user 是该消息所在会话的成员；
     3. 帖子配图：media 被某 PostImage 引用，且 user 能查看该帖子（S3）；
-    4. 表情包：media 属于某 EmojiItem，且该包是系统包（全员）或用户自己的个人包；
+    4. 表情包：media 属于某 EmojiItem，且该包是系统包（全员）、用户自己的个人包，
+       或用户所在的群表情包（任务 03）；
     5. 头像引用：media 被某用户设为头像 → 登录用户可见；
        被某群设为头像 → 该群成员可见（M5-2.1 头像资源路径）；
     6. 其他情况：拒绝（403/404）。
@@ -687,6 +701,12 @@ def can_access_media(user, media: MediaObject) -> bool:
             return True
         if item.pack.owner_id == user.id:
             return True
+        # 群表情包（任务 03）：media 属于某群表情包 → 该群成员可见
+        if item.pack.group_id is not None:
+            from apps.chat.services import user_can_access as chat_user_can_access
+
+            if chat_user_can_access(user, item.pack.group):
+                return True
 
     # 头像引用路径（M5-2.1）：
     # - 用户头像：被任意 User.avatar 引用 → 登录用户可见（头像出现在公开卡片/成员列表/搜索等）；
