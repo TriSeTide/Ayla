@@ -246,6 +246,10 @@
      导致整页横向溢出/导航条截断；置 0 后宽度收敛为容器宽，tab 走横向滚动 */
   min-width: 0;
   width: 100%;
+  /* 关键：overflow-x:auto 会使 min-height:auto 失效（CSS 规范），
+     flex 容器高度不足时筛选条会被压缩到只剩 padding、tab 内容垂直裁切
+     （宽屏收藏选项卡截断的根因）；禁止参与 flex 压缩 */
+  flex-shrink: 0;
 }
 
 .favorites-filters::after {
