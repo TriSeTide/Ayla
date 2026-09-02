@@ -13,7 +13,6 @@ import * as chatApi from "../../api/chat";
 import { Avatar } from "../Avatar";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
-import { TypingIndicator } from "./TypingIndicator";
 import { IconBack } from "../icons";
 import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
@@ -166,7 +165,13 @@ export function PrivateChatPane({
         />
         <div className="private-chat-title">
           <span className="private-chat-name">{title}</span>
-          <span className="private-chat-status">{peerDisplayStatus}</span>
+          {/* 「对方正在输入」字样显示在顶栏好友名字下方（替换在线状态行，不加高栏） */}
+          <span
+            className={`private-chat-status${typingActive ? " is-typing" : ""}`}
+            role={typingActive ? "status" : undefined}
+          >
+            {typingActive ? "对方正在输入…" : peerDisplayStatus}
+          </span>
         </div>
       </header>
 
@@ -214,7 +219,6 @@ export function PrivateChatPane({
         </div>
       ) : (
         <>
-          <TypingIndicator typing={typingActive} />
           <MessageInput convId={conversationId} quote={quote} onQuoteClear={() => setQuote(null)} />
         </>
       )}

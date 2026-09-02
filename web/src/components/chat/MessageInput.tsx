@@ -72,10 +72,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const [emojiOpen, setEmojiOpen] = useState(false);
     const editorRef = useRef<HTMLDivElement>(null);
     const voice = useVoiceRecorder();
-    const { onInput } = useTyping(convId || null);
     const isNarrow = useMediaQuery(NARROW_QUERY);
     // 群聊才有 members：@ 与群表情包按钮均仅群聊展示（私信不显示表情包按钮）
     const isGroup = !!members && members.length > 0;
+    // 群聊已删除「对方正在输入」功能：不声明 typing（私聊保留）
+    const { onInput } = useTyping(isGroup ? null : convId);
     const enableMention = isGroup;
     // 当前用户在群中的角色（表情面板加号兜底显示用）
     const currentUser = useAuthStore((s) => s.currentUser);

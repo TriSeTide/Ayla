@@ -3,7 +3,7 @@
  *
  * - 输入时以节流（2s 一次）POST /typing/ {is_typing:true}；
  * - 停止输入 3s 后 {is_typing:false}；
- * - 对端 typing 帧由调用方监听 chatWS.onFrame 更新 TypingIndicator。
+ * - 对端 typing 帧由调用方监听 chatWS.onFrame 更新（私聊顶栏字样；群聊已删除该功能）。
  */
 import { useEffect, useRef, useState } from "react";
 import { declareTyping } from "../api/chat";
@@ -18,6 +18,8 @@ export function useTyping(convId: string | null) {
 
   const notifyTyping = (isTyping: boolean) => {
     if (!convId) return;
+    // 从未声明过「正在输入」（如群聊禁用场景）→ 停止声明也无需发送
+    if (!isTyping && lastSentRef.current === 0) return;
     const now = Date.now();
     if (isTyping && now - lastSentRef.current < DECLARE_INTERVAL_MS) return;
     lastSentRef.current = now;

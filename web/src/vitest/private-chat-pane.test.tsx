@@ -4,6 +4,10 @@
  * - 对端是好友 → 正常渲染输入区，无提示；
  * - 对端是爱莉（elysia profile 绑定用户）→ 放行，正常渲染输入区；
  * - 好友列表加载中/失败 → 视为未知，不禁用（后端 403 权威拦截）。
+ *
+ * 「对方正在输入」顶栏字样（群聊已删除该功能，私聊保留）：
+ * - 自己的 typing 帧 → 顶栏不显示「对方正在输入…」；
+ * - 仅当前会话的他人 typing 帧 → 顶栏好友名字下方显示「对方正在输入…」。
  */
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -19,10 +23,6 @@ const ws = vi.hoisted(() => ({
 
 vi.mock("../components/chat/MessageList", () => ({
   MessageList: () => <div data-testid="message-list" />,
-}));
-vi.mock("../components/chat/TypingIndicator", () => ({
-  TypingIndicator: ({ typing }: { typing: boolean }) =>
-    typing ? <div data-testid="typing-active">对方正在输入…</div> : null,
 }));
 vi.mock("../components/chat/MessageInput", () => ({
   MessageInput: () => <div data-testid="message-input" />,
@@ -156,11 +156,11 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
         data: { conversation_id: "c1", user_id: "me", is_typing: true },
       });
     });
-    expect(screen.queryByTestId("typing-active")).not.toBeInTheDocument();
+    expect(screen.queryByText("对方正在输入…")).not.toBeInTheDocument();
     useAuthStore.setState({ currentUser: null });
   });
 
-  it("仅当前会话的他人 typing 帧显示「对方正在输入」", async () => {
+  it("仅当前会话的他人 typing 帧在顶栏显示「对方正在输入」", async () => {
     useAuthStore.setState({ currentUser: user("me") });
     vi.mocked(usersApi.listFriends).mockResolvedValue([friendshipOf("peer1")]);
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
@@ -173,15 +173,15 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
         data: { conversation_id: "c2", user_id: "peer1", is_typing: true },
       });
     });
-    expect(screen.queryByTestId("typing-active")).not.toBeInTheDocument();
-    // 当前会话的他人 typing 帧 → 显示
+    expect(screen.queryByText("对方正在输入…")).not.toBeInTheDocument();
+    // 当前会话的他人 typing 帧 → 顶栏显示
     act(() => {
       ws.frameHandler!({
         type: "typing",
         data: { conversation_id: "c1", user_id: "peer1", is_typing: true },
       });
     });
-    expect(screen.getByTestId("typing-active")).toBeInTheDocument();
+    expect(screen.getByText("对方正在输入…")).toBeInTheDocument();
     useAuthStore.setState({ currentUser: null });
   });
 });

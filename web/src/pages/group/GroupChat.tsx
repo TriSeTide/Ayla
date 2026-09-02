@@ -2,8 +2,9 @@
  * GroupChat —— 群内聊天子界面（F3，R-G2）。
  *
  * 复用现有聊天能力（不做侧栏/演示数据/爱莉入口）：MessageList + MessageInput +
- * loadHistory/loadMoreHistory/recallMessage/打字 全复用 hooks/useChat 与 chat/message store。
+ * loadHistory/loadMoreHistory/recallMessage 全复用 hooks/useChat 与 chat/message store。
  * 群 id 即会话 id（GroupPage 传入 groupId）。
+ * 群聊已删除「对方正在输入」功能：不订阅 typing 帧、不显示指示、不声明 typing（产品要求）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -13,12 +14,10 @@ import * as chatApi from "../../api/chat";
 import type { ChatMessage } from "../../api/types";
 import { MessageInput, type MessageInputHandle } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
-import { TypingIndicator } from "../../components/chat/TypingIndicator";
 import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationReadThrough, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic } from "../../hooks/useChat";
 import { useChatStore } from "../../stores/chat";
 import { useHomeStore } from "../../stores/home";
 import { useMessageStore } from "../../stores/message";
-import { useAuthStore } from "../../stores/auth";
 import { chatWS } from "../../ws/chat";
 
 export function GroupChat({ groupId }: { groupId: string }) {
@@ -29,7 +28,6 @@ export function GroupChat({ groupId }: { groupId: string }) {
   const messages = bucket?.messages ?? [];
 
   const [quote, setQuote] = useState<ChatMessage | null>(null);
-  const [peerTyping, setPeerTyping] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
@@ -72,21 +70,6 @@ export function GroupChat({ groupId }: { groupId: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
-
-  // typing 帧：只处理当前群、忽略自己（自己输入不显示「对方正在输入」）
-  useEffect(() => {
-    setPeerTyping({}); // 切换会话清空上一会话的输入状态
-    const off = chatWS.onFrame((frame) => {
-      if (frame.type !== "typing") return;
-      if (frame.data.conversation_id !== groupId) return;
-      const me = useAuthStore.getState().currentUser;
-      if (me && String(frame.data.user_id) === String(me.id)) return;
-      setPeerTyping((prev) => ({ ...prev, [frame.data.user_id]: frame.data.is_typing }));
-    });
-    return off;
-  }, [groupId]);
-
-  const typingActive = Object.values(peerTyping).some(Boolean);
 
   const handleHistoryError = useCallback((error: unknown) => {
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
@@ -164,7 +147,6 @@ export function GroupChat({ groupId }: { groupId: string }) {
         onMentionSender={handleMentionUser}
         onPoke={handlePoke}
       />
-      <TypingIndicator typing={typingActive} />
       <MessageInput ref={inputRef} convId={groupId} quote={quote} onQuoteClear={() => setQuote(null)} members={activeConv?.members} />
     </div>
   );

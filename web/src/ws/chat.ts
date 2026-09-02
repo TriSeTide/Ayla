@@ -380,7 +380,7 @@ export class ChatWSClient {
         break;
       }
       case "typing": {
-        // 由 UI 层监听 handlers 更新 TypingIndicator
+        // 由 UI 层监听 handlers 更新私聊顶栏「对方正在输入」字样（群聊已删除该功能）
         break;
       }
       case "history.sync": {

@@ -45,6 +45,11 @@
   color: var(--text-secondary);
 }
 
+/* 「对方正在输入」顶栏字样：好友名字下方状态行，强调色，不加高顶栏 */
+.private-chat-status.is-typing {
+  color: var(--glow-500);
+}
+
 /* 非好友私聊禁发提示（Bug #2：解除好友后不能再发消息） */
 .private-chat-blocked {
   flex: none;

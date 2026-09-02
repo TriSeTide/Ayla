@@ -1984,38 +1984,6 @@
   flex: 0 0 auto;
 }
 
-/* ---- Typing ---- */
-
-.typing-indicator {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-6);
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.typing-dots {
-  display: inline-flex;
-  gap: 3px;
-}
-
-.typing-dots > i {
-  width: 5px;
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--slate-500);
-  animation: frost-pulse 1.2s ease-in-out infinite;
-}
-
-.typing-dots > i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.typing-dots > i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
 /* ---- 输入区 ---- */
 
 .composer {
