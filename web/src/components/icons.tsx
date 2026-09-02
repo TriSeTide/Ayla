@@ -376,6 +376,15 @@ export function IconChevronUp(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** 对勾（lucide check）：选项选中态等 */
+export function IconCheck(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 export function IconChevronDown(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

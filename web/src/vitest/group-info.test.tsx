@@ -7,11 +7,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationSummary, ConversationMember, UserPublic } from "../api/types";
+import type { ConversationSummary, ConversationMember, SubGroup, UserPublic } from "../api/types";
 import { GroupInfo } from "../pages/group/GroupInfo";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
+import { useSubGroupStore } from "../stores/subgroup";
 import * as chatApi from "../api/chat";
 import * as mediaApi from "../api/media";
 
@@ -334,5 +335,84 @@ describe("GroupInfo 解散群聊与退出群聊", () => {
     expect(chatApi.dissolveGroup).not.toHaveBeenCalled();
     expect(useChatStore.getState().conversations.some((c) => c.id === "1")).toBe(true);
     expect(screen.queryByText("主页")).not.toBeInTheDocument();
+  });
+});
+
+describe("GroupInfo 子群预览与「查看更多」（默认只展示前 3 个）", () => {
+  function sg(id: string, name: string, isDefault = false): SubGroup {
+    return {
+      id,
+      conversation_id: "1",
+      name,
+      is_default: isDefault,
+      unread_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+  }
+
+  beforeEach(() => {
+    useChatStore.setState({ conversations: [conv("owner")] });
+    useSubGroupStore.setState({
+      byGroup: { 1: [sg("a", "群聊"), sg("b", "学习"), sg("c", "摸鱼"), sg("d", "工作")] },
+      unreadByKey: {},
+      activeByGroup: {},
+    });
+  });
+
+  afterEach(() => {
+    useSubGroupStore.setState({ byGroup: {}, unreadByKey: {}, activeByGroup: {} });
+  });
+
+  it("超过 3 个子群时默认只展示前 3 个，点「查看更多」展开全部，可再收起", () => {
+    render(<MemoryRouter><GroupInfo groupId="1" /></MemoryRouter>);
+    expect(screen.getByText("群聊")).toBeInTheDocument();
+    expect(screen.getByText("学习")).toBeInTheDocument();
+    expect(screen.getByText("摸鱼")).toBeInTheDocument();
+    expect(screen.queryByText("工作")).not.toBeInTheDocument();
+
+    const more = screen.getByRole("button", { name: /查看更多/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    expect(screen.getByText("工作")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /收起/ })).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: /收起/ }));
+    expect(screen.queryByText("工作")).not.toBeInTheDocument();
+  });
+
+  it("子群不超过 3 个时不显示「查看更多」", () => {
+    useSubGroupStore.setState({ byGroup: { 1: [sg("a", "群聊"), sg("b", "学习")] } });
+    render(<MemoryRouter><GroupInfo groupId="1" /></MemoryRouter>);
+    expect(screen.getByText("群聊")).toBeInTheDocument();
+    expect(screen.getByText("学习")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看更多/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("GroupInfo 加入方式自定义下拉（用户反馈：不用原始 select）", () => {
+  it("点按钮展开玻璃选项浮层；选择「公开加入」调用 patchConversation 并关闭", async () => {
+    renderInfo("owner");
+    // conv() 未设 join_policy → 默认「申请加入」
+    const toggle = screen.getByRole("button", { name: /申请加入/ });
+    expect(toggle).toHaveAttribute("aria-haspopup", "listbox");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    const listbox = screen.getByRole("listbox", { name: "加入方式" });
+    expect(within(listbox).getByRole("option", { name: "公开加入" })).toBeInTheDocument();
+    expect(within(listbox).getByRole("option", { name: "申请加入" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(within(listbox).getByRole("option", { name: "公开加入" }));
+    await waitFor(() => expect(chatApi.patchConversation).toHaveBeenCalledWith("1", { join_policy: "public" }));
+    expect(screen.queryByRole("listbox", { name: "加入方式" })).not.toBeInTheDocument();
+  });
+
+  it("点击外部关闭下拉", () => {
+    renderInfo("owner");
+    fireEvent.click(screen.getByRole("button", { name: /申请加入/ }));
+    expect(screen.getByRole("listbox", { name: "加入方式" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("listbox", { name: "加入方式" })).not.toBeInTheDocument();
   });
 });
