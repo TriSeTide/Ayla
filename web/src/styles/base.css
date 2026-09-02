@@ -110,6 +110,42 @@ a:hover {
   height: 0;
 }
 
+/* ---- 覆盖层滚动条（OverlayScrollbar 组件）：滚动/悬停时显示，零占位 ----
+   尺寸与位置由组件按比例实时写入内联样式；这里只负责质感与显隐动效。
+   视觉条 = content-box（THICKNESS 4px），四边 padding 为透明拖拽命中区。 */
+.ov-scrollbar-thumb {
+  position: fixed;
+  z-index: 2147483000;
+  display: none;
+  padding: 3px;
+  background-color: rgba(126, 149, 189, 0.38);
+  background-clip: content-box;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+  touch-action: none;
+}
+
+.ov-scrollbar-thumb.is-visible {
+  opacity: 1;
+}
+
+.ov-scrollbar-thumb:hover {
+  background-color: rgba(126, 149, 189, 0.55);
+}
+
+/* 手机窄屏：完全不显示覆盖层滚动条（组件在窄屏也退出计算与拖拽） */
+@media (max-width: 768px) {
+  .ov-scrollbar-thumb {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-scrollbar-thumb {
+    transition: none;
+  }
+}
+
 /* ---- 动效原语 ---- */
 
 /* 消息到达：下方 8px 浮入 + 淡入，180ms，不弹跳（design.md §7） */

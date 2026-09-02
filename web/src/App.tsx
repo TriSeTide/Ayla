@@ -37,11 +37,13 @@ import { SearchPage } from "./pages/SearchPage";
 import { VoiceHubPage } from "./pages/VoiceHubPage";
 import { UserProfilePage } from "./pages/UserProfilePage";
 import { NavigateBridge } from "./components/NavigateBridge";
+import OverlayScrollbar from "./components/overlay/OverlayScrollbar";
 
 export default function App() {
   return (
     <>
       <NavigateBridge />
+      <OverlayScrollbar />
       <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
