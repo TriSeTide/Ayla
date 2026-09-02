@@ -12,6 +12,7 @@ from .models import (
     GroupInvite,
     GroupJoinRequest,
     GroupMemberLeaveNotice,
+    GroupSubGroup,
     Message,
     MessageRead,
 )
@@ -159,6 +160,7 @@ class MessageSerializer(serializers.ModelSerializer):
     id = serializers.CharField(read_only=True)
     conversation_id = serializers.CharField(read_only=True)
     sender_id = serializers.CharField(read_only=True)
+    subgroup_id = serializers.CharField(read_only=True, allow_null=True)
     reply_to = serializers.SerializerMethodField()
     reply_to_seq = serializers.SerializerMethodField()
     read_by_me = serializers.SerializerMethodField()
@@ -177,6 +179,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "id",
             "conversation_id",
             "sender_id",
+            "subgroup_id",
             "type",
             "content",
             "media_id",
@@ -220,6 +223,49 @@ class MessageSerializer(serializers.ModelSerializer):
 
     def get_segments(self, obj):
         return expand_segments(obj)
+
+
+class SubGroupSerializer(serializers.ModelSerializer):
+    """群聊子群序列化：id/conversation_id 转字符串，含本人视角未读计数与未读序号。"""
+
+    id = serializers.CharField(read_only=True)
+    conversation_id = serializers.CharField(read_only=True)
+    unread_count = serializers.SerializerMethodField()
+    unread_seqs = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GroupSubGroup
+        fields = [
+            "id",
+            "conversation_id",
+            "name",
+            "is_default",
+            "muted",
+            "unread_count",
+            "unread_seqs",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_unread_count(self, obj) -> int:
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return 0
+        from .services import subgroup_unread_queryset
+
+        return subgroup_unread_queryset(obj, request.user).count()
+
+    def get_unread_seqs(self, obj) -> list[int]:
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return []
+        from .services import subgroup_unread_queryset
+
+        return list(
+            subgroup_unread_queryset(obj, request.user)
+            .order_by("seq")
+            .values_list("seq", flat=True)
+        )
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -443,6 +489,8 @@ class CreateMessageSerializer(serializers.Serializer):
     media_id = serializers.CharField(
         max_length=64, required=False, allow_blank=True, default=None
     )
+    # 群聊子群归属（可选）：不传时群聊消息归默认组；私聊忽略。
+    subgroup_id = serializers.IntegerField(required=False, allow_null=True, default=None)
     # 图文混排段（type=mixed）：与 media_id 二选一；至少一个媒体段
     segments = serializers.ListField(
         required=False, allow_empty=False, child=serializers.DictField()
@@ -494,6 +542,19 @@ class CreateMessageSerializer(serializers.Serializer):
         msg_type = attrs.get("type") or Message.TYPE_TEXT
         media_id = attrs.get("media_id")
         segments = attrs.get("segments")
+
+        # 子群归属校验：仅群聊可指定，且必须属于本会话
+        subgroup_id = attrs.get("subgroup_id")
+        if subgroup_id is not None:
+            conversation = self.context.get("conversation")
+            if conversation is None or conversation.type != Conversation.TYPE_GROUP:
+                raise serializers.ValidationError(
+                    {"subgroup_id": "仅群聊消息可指定子群"}
+                )
+            if not conversation.subgroups.filter(id=subgroup_id).exists():
+                raise serializers.ValidationError(
+                    {"subgroup_id": "子群不存在或不属于该群"}
+                )
 
         # 结构化消息段模式：segments 与 media_id 互斥；type 强制 mixed（忽略传入 type）
         if segments is not None:

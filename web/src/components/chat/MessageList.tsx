@@ -12,6 +12,7 @@ import {
   HISTORY_PAGE_LIMIT,
   INITIAL_HISTORY_LIMIT,
   MESSAGE_RENDER_WINDOW_LIMIT,
+  messageInSubgroup,
 } from "../../hooks/useChat";
 import { useAuthStore } from "../../stores/auth";
 import { useMessageStore } from "../../stores/message";
@@ -133,6 +134,11 @@ export function MessageList({
   onLoadUntilSeq,
   onMentionSender,
   onPoke,
+  subgroupId,
+  isDefaultSubgroup,
+  unreadSeqsOverride,
+  mentionUnreadSeqsOverride,
+  replyUnreadSeqsOverride,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -159,6 +165,16 @@ export function MessageList({
   onMentionSender?: (userId: string, name: string) => void;
   /** 双击头像 → 戳一戳：传目标用户 id（群聊=被双击成员；私聊=对端） */
   onPoke?: (targetUserId: string) => void;
+  /** 群聊子群视图：只显示该子群消息（null = 不过滤，全部消息） */
+  subgroupId?: string | null;
+  /** 当前子群是否为默认组（默认组视图含 subgroup_id 为 null 的旧消息） */
+  isDefaultSubgroup?: boolean;
+  /** 子群视图未读序号覆盖（会话级 unread_seqs 是全局的，子群视图用子群自己的） */
+  unreadSeqsOverride?: number[];
+  /** 子群视图 @ 未读序号覆盖（子群视图不显示跨子群特殊未读标签，传空数组） */
+  mentionUnreadSeqsOverride?: number[];
+  /** 子群视图回复未读序号覆盖（同上） */
+  replyUnreadSeqsOverride?: number[];
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -191,14 +207,23 @@ export function MessageList({
   // 私聊对端显示名（poke 文案 target 兜底；群聊用成员 map）
   const peerName = conversation?.peer?.nickname || conversation?.peer?.username || "";
 
+  // 子群视图：先按子群过滤（默认组视图含 subgroup_id 为 null 的旧消息）
+  const filteredMessages = useMemo(
+    () =>
+      subgroupId == null
+        ? messages
+        : messages.filter((m) => messageInSubgroup(m, subgroupId, isDefaultSubgroup)),
+    [isDefaultSubgroup, messages, subgroupId],
+  );
+
   // pending / 发送失败的本地消息不计入 200 条服务端窗口，始终留在尾部让用户可取消、重试或删除。
   const confirmedMessages = useMemo(
-    () => messages.filter((m) => !m.pending && !m.sendFailed && m.seq > 0),
-    [messages],
+    () => filteredMessages.filter((m) => !m.pending && !m.sendFailed && m.seq > 0),
+    [filteredMessages],
   );
   const localMessages = useMemo(
-    () => messages.filter((m) => m.pending || m.sendFailed || m.seq <= 0),
-    [messages],
+    () => filteredMessages.filter((m) => m.pending || m.sendFailed || m.seq <= 0),
+    [filteredMessages],
   );
   const confirmedSignature = useMemo(
     () => confirmedMessages.map((m) => m.id).join("\u0001"),
@@ -245,11 +270,12 @@ export function MessageList({
   );
   // 普通未读以会话接口的 unread_count/unread_seqs 为权威；旧响应没有字段时，
   // 不从当前历史窗口臆测普通未读（否则刷新后的历史会被误当成新消息）。
-  const unreadSeqs = conversation?.unread_seqs ?? (
+  // 子群视图用子群自己的未读序号覆盖（会话级 unread_seqs 是全局的）。
+  const unreadSeqs = unreadSeqsOverride ?? conversation?.unread_seqs ?? (
     (conversation?.unread_count ?? 0) > 0 ? ordinaryUnreadSeqsFromMessages : []
   );
-  const mentionSeqs = conversation?.mention_unread_seqs ?? specialUnread.mention.map((message) => message.seq);
-  const replySeqs = conversation?.reply_unread_seqs ?? specialUnread.reply.map((message) => message.seq);
+  const mentionSeqs = mentionUnreadSeqsOverride ?? conversation?.mention_unread_seqs ?? specialUnread.mention.map((message) => message.seq);
+  const replySeqs = replyUnreadSeqsOverride ?? conversation?.reply_unread_seqs ?? specialUnread.reply.map((message) => message.seq);
   const specialSeqs = useMemo(() => new Set([...mentionSeqs, ...replySeqs]), [mentionSeqs, replySeqs]);
   const ordinaryUnreadSeqs = useMemo(
     () => (conversation?.unread_seqs ? unreadSeqs.filter((seq) => !specialSeqs.has(seq)) : ordinaryUnreadSeqsFromMessages),
@@ -279,14 +305,14 @@ export function MessageList({
     const prev = prevIdsRef.current;
     const prevLen = prev.length;
     const prevSet = new Set(prev);
-    const curIds = messages.map((m) => m.id);
+    const curIds = filteredMessages.map((m) => m.id);
     const arrived = new Set<string>();
     for (let i = prevLen; i < curIds.length; i++) {
       const id = curIds[i];
       if (!prevSet.has(id)) arrived.add(id);
     }
     return arrived;
-  }, [messages, conversation?.id]);
+  }, [filteredMessages, conversation?.id]);
 
   useEffect(() => {
     const convId = conversation?.id ?? "__none__";

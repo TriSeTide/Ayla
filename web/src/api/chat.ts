@@ -17,6 +17,7 @@ import type {
   CreateMessagePayload,
   GroupInvite,
   GroupJoinRequest,
+  SubGroup,
 } from "./types";
 
 /** GET /chat/conversations/ —— 当前用户会话列表 */
@@ -53,8 +54,57 @@ export function listMessages(convId: string, params: ConversationMessagesParams 
   const qs = new URLSearchParams();
   if (params.before_seq != null) qs.set("before_seq", String(params.before_seq));
   if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.subgroup_id != null) qs.set("subgroup_id", String(params.subgroup_id));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiRequest<ChatMessage[]>(`/chat/conversations/${convId}/messages/${suffix}`);
+}
+
+/* ---------- 群聊子群 ---------- */
+
+/** GET /chat/conversations/<id>/subgroups/ —— 子群列表（含本人未读） */
+export function listSubgroups(convId: string) {
+  return apiRequest<SubGroup[]>(`/chat/conversations/${convId}/subgroups/`);
+}
+
+/** POST /chat/conversations/<id>/subgroups/ —— 创建子群（仅群主/管理员） */
+export function createSubgroup(convId: string, name: string) {
+  return apiRequest<SubGroup>(`/chat/conversations/${convId}/subgroups/`, {
+    method: "POST",
+    body: { name },
+  });
+}
+
+/** PATCH /chat/conversations/<id>/subgroups/<sid>/ —— 子群改名/禁言开关（仅群主/管理员） */
+export function updateSubgroup(
+  convId: string,
+  subgroupId: string,
+  patch: { name?: string; muted?: boolean },
+) {
+  return apiRequest<SubGroup>(
+    `/chat/conversations/${convId}/subgroups/${subgroupId}/`,
+    { method: "PATCH", body: patch },
+  );
+}
+
+/** PATCH /chat/conversations/<id>/subgroups/<sid>/ —— 子群改名（仅群主/管理员） */
+export function renameSubgroup(convId: string, subgroupId: string, name: string) {
+  return updateSubgroup(convId, subgroupId, { name });
+}
+
+/** DELETE /chat/conversations/<id>/subgroups/<sid>/ —— 删除子群（消息归默认组；默认组不可删） */
+export function deleteSubgroup(convId: string, subgroupId: string) {
+  return apiRequest<{ detail: string }>(
+    `/chat/conversations/${convId}/subgroups/${subgroupId}/`,
+    { method: "DELETE" },
+  );
+}
+
+/** POST /chat/conversations/<id>/subgroups/<sid>/read/ —— 把该子群标已读（本人） */
+export function markSubgroupRead(convId: string, subgroupId: string) {
+  return apiRequest<{ marked: number }>(
+    `/chat/conversations/${convId}/subgroups/${subgroupId}/read/`,
+    { method: "POST" },
+  );
 }
 
 /** POST /chat/conversations/<id>/messages/ —— 发消息（幂等） */

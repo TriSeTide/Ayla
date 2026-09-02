@@ -12,6 +12,7 @@ import { useAuthStore } from "../stores/auth";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
+import { useSubGroupStore } from "../stores/subgroup";
 import { WS_BASE_URL } from "./presence";
 import type {
   ChatMessage,
@@ -293,6 +294,7 @@ export class ChatWSClient {
         const wsMedia = d.media;
         const wsMediaId = typeof wsMedia === "string" ? wsMedia : (wsMedia?.media_id ?? null);
         const currentUserId = useAuthStore.getState().currentUser?.id;
+        const subgroupId = d.subgroup_id ?? null;
         const msg: ChatMessage = {
           id: d.message_id,
           conversation_id: d.conversation_id,
@@ -309,6 +311,7 @@ export class ChatWSClient {
           seq: d.seq,
           created_at: d.ts,
           idempotencyKey: d.idempotency_key ?? undefined,
+          subgroup_id: subgroupId,
         };
         const isSelf = currentUserId != null && String(d.sender_id) === String(currentUserId);
         if (isSelf && d.idempotency_key) {
@@ -326,8 +329,12 @@ export class ChatWSClient {
         const isActive = chat.activeConversationId === d.conversation_id;
         // 活跃会话还需用户在底部才视为「正在看」；翻聊天记录（不在底部）时新消息进标签。
         const atBottom = isActive && (message.viewerAtBottom[d.conversation_id] ?? true);
+        // 子群视图：只有消息属于当前选中子群才视为「正在看」；否则计入该子群未读。
+        const activeSubgroupId = useSubGroupStore.getState().activeByGroup[d.conversation_id];
+        const isActiveSubgroup =
+          subgroupId == null || activeSubgroupId == null || activeSubgroupId === subgroupId;
 
-        if (isFromOther && atBottom) {
+        if (isFromOther && atBottom && isActiveSubgroup) {
           // 正在底部看最新消息：直接已读（含 @/回复），不弹标签；
           // 被 @/回复的由 MessageList 直接泛光圈并滚底。
           message.markReadByMe(d.conversation_id, d.message_id);
@@ -336,7 +343,10 @@ export class ChatWSClient {
             .then(() => useBadgesStore.getState().fetch())
             .catch(() => { /* 已读失败，下次进入会话重试 */ });
         } else if (isFromOther) {
-          // 非活跃会话，或活跃但翻历史（不在底部）：进入未读投影，驱动标签。
+          // 非活跃会话/子群，或活跃但翻历史（不在底部）：进入未读投影，驱动标签。
+          if (subgroupId != null) {
+            useSubGroupStore.getState().bumpSubgroupUnread(d.conversation_id, subgroupId, d.seq);
+          }
           chat.bumpUnread(d.conversation_id, {
             seq: d.seq,
             mention: isMention,
@@ -378,6 +388,46 @@ export class ChatWSClient {
         message.setRecalled(d.conversation_id, d.message_id);
         break;
       }
+      case "subgroup.created":
+      case "subgroup.updated": {
+        const d = frame.data;
+        const existing = useSubGroupStore
+          .getState()
+          .byGroup[d.conversation_id]?.find((sg) => sg.id === d.subgroup_id);
+        useSubGroupStore.getState().upsertSubgroup(d.conversation_id, {
+          id: d.subgroup_id,
+          conversation_id: d.conversation_id,
+          name: d.name,
+          is_default: d.is_default,
+          unread_count: existing?.unread_count ?? 0,
+          unread_seqs: existing?.unread_seqs ?? [],
+          created_at: existing?.created_at ?? new Date().toISOString(),
+        });
+        break;
+      }
+      case "subgroup.deleted": {
+        const d = frame.data;
+        useSubGroupStore.getState().removeSubgroup(d.conversation_id, d.subgroup_id);
+        // 当前选中子群被删 → 切回默认组
+        const active = useSubGroupStore.getState().activeByGroup[d.conversation_id];
+        if (active === d.subgroup_id) {
+          const list = useSubGroupStore.getState().byGroup[d.conversation_id] ?? [];
+          const defaultSg = list.find((sg) => sg.is_default);
+          useSubGroupStore
+            .getState()
+            .setActiveSubgroup(d.conversation_id, defaultSg?.id ?? null);
+        }
+        break;
+      }
+      case "subgroup.read": {
+        const d = frame.data;
+        const currentUserId = useAuthStore.getState().currentUser?.id;
+        if (currentUserId != null && String(d.user_id) === String(currentUserId)) {
+          useSubGroupStore.getState().clearSubgroupUnread(d.conversation_id, d.subgroup_id);
+          useChatStore.getState().decrementUnread(d.conversation_id, d.marked);
+        }
+        break;
+      }
       case "message.poke": {
         // 戳一戳：独立帧，刻意不走 message.new 的未读/已读/红点链路。
         // 只做：消息进会话流、列表预览「A戳了戳B」、按「最近活跃」往前排。
@@ -395,6 +445,7 @@ export class ChatWSClient {
           status: "sent",
           seq: d.seq,
           created_at: d.ts,
+          subgroup_id: d.subgroup_id ?? null,
         };
         message.upsertMessage(d.conversation_id, msg);
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);

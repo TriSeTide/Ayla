@@ -30,10 +30,12 @@ interface EmojiPackPanelProps {
   convId: string;
   /** 当前用户在群中的角色（owner/admin/member）；包未创建时用于兜底加号显示 */
   myRole?: string;
+  /** 群聊子群归属（可选；不传时消息归默认组） */
+  subgroupId?: string | null;
   onClose: () => void;
 }
 
-export function EmojiPackPanel({ convId, myRole, onClose }: EmojiPackPanelProps) {
+export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPackPanelProps) {
   const [payload, setPayload] = useState<GroupEmojiPackPayload | null>(null);
   const [uploading, setUploading] = useState(false);
   /** 多选上传进度（"2/3"）；单张上传时为空 */
@@ -104,7 +106,7 @@ export function EmojiPackPanel({ convId, myRole, onClose }: EmojiPackPanelProps)
     void sendMessage(convId, "", {
       type: "emoji",
       mediaId: item.media.media_id,
-    });
+    }, subgroupId);
   };
 
   const handleDelete = async (item: EmojiItem) => {

@@ -14,14 +14,16 @@ import { Link, useNavigate } from "react-router-dom";
 import * as chatApi from "../../api/chat";
 import { getGroupEmojiPack, setGroupEmojiUploadPolicy } from "../../api/emoji";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../../api/media";
-import type { ConversationMember, ConversationSummary } from "../../api/types";
+import type { ConversationMember, ConversationSummary, SubGroup } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { IconBack, IconClose, IconSearch } from "../../components/icons";
+import { SubGroupDialog, type SubGroupDialogState } from "../../components/group/SubGroupDialog";
+import { IconBack, IconClose, IconPlus, IconSearch } from "../../components/icons";
 import { useAuthStore } from "../../stores/auth";
 import { useChatStore } from "../../stores/chat";
 import { usePresenceStore } from "../../stores/presence";
 import { useHomeStore } from "../../stores/home";
+import { subgroupKey, useSubGroupStore } from "../../stores/subgroup";
 import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
 
@@ -69,6 +71,15 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [confirmAction, setConfirmAction] = useState<
     { kind: "dissolve" } | { kind: "leave" } | { kind: "transfer"; member: ConversationMember } | null
   >(null);
+
+  // ---- 子群管理（窄屏编辑入口；宽屏在 ChannelSidebar） ----
+  const subgroups = useSubGroupStore((s) => s.byGroup[groupId] ?? []);
+  const unreadByKey = useSubGroupStore((s) => s.unreadByKey);
+  const [subgroupEditing, setSubgroupEditing] = useState(false);
+  const [subgroupDialog, setSubgroupDialog] = useState<SubGroupDialogState>(null);
+  const [subgroupBusy, setSubgroupBusy] = useState(false);
+  const [subgroupError, setSubgroupError] = useState<string | null>(null);
+  const [subgroupDelete, setSubgroupDelete] = useState<SubGroup | null>(null);
 
   // 群表情包上传权限（任务 03）：仅群主可见可改；包未创建（404）时按默认 false
   const [allowMemberUpload, setAllowMemberUpload] = useState(false);
@@ -233,6 +244,50 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     () => members.filter((m) => m.user.id !== currentUser?.id && m.role !== "owner"),
     [members, currentUser?.id],
   );
+
+  // ---- 子群管理操作（窄屏群信息内编辑；与宽屏侧栏同交互） ----
+  const runSubgroupAction = async (action: () => Promise<unknown>) => {
+    setSubgroupBusy(true);
+    setSubgroupError(null);
+    try {
+      await action();
+      setSubgroupDialog(null);
+    } catch (e) {
+      setSubgroupError(e instanceof Error ? e.message : "操作失败");
+    } finally {
+      setSubgroupBusy(false);
+    }
+  };
+
+  const handleSubgroupCreated = (sg: SubGroup) => {
+    useSubGroupStore.getState().upsertSubgroup(sg.conversation_id, sg);
+  };
+
+  const handleSubgroupDeleted = (convId: string, subgroupId: string) => {
+    useSubGroupStore.getState().removeSubgroup(convId, subgroupId);
+    const active = useSubGroupStore.getState().activeByGroup[convId];
+    if (active === subgroupId) {
+      const list = useSubGroupStore.getState().byGroup[convId] ?? [];
+      const defaultSg = list.find((sg) => sg.is_default);
+      useSubGroupStore.getState().setActiveSubgroup(convId, defaultSg?.id ?? null);
+    }
+  };
+
+  const confirmDeleteSubgroup = async () => {
+    if (!subgroupDelete) return;
+    setSubgroupBusy(true);
+    setSubgroupError(null);
+    try {
+      await chatApi.deleteSubgroup(groupId, subgroupDelete.id);
+      handleSubgroupDeleted(groupId, subgroupDelete.id);
+      setSubgroupDelete(null);
+      setSubgroupDialog(null);
+    } catch (e) {
+      setSubgroupError(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setSubgroupBusy(false);
+    }
+  };
 
   const confirmTransfer = async (m: ConversationMember) => {
     await runManagementAction("transfer", async () => {
@@ -418,6 +473,75 @@ export function GroupInfo({ groupId }: { groupId: string }) {
         </ul>
       </section>
 
+      <section className="group-info-subgroups">
+        <h3 className="group-info-section-title">子群（{subgroups.length}）</h3>
+        {subgroupError && <p className="group-info-error" role="alert">{subgroupError}</p>}
+        <ul className="group-info-subgroup-list">
+          {subgroups.map((sg) => {
+            const unread = unreadByKey[subgroupKey(groupId, sg.id)] ?? 0;
+            return (
+              <li key={sg.id} className="group-info-subgroup">
+                <span className="group-info-subgroup-name">{sg.name}</span>
+                {sg.is_default && <span className="group-info-role group-info-role-owner">默认组</span>}
+                {sg.muted === true && (
+                  <span className="group-info-subgroup-muted" title="已禁言（仅群主/管理员可发言）">
+                    禁言
+                  </span>
+                )}
+                {unread > 0 && (
+                  <span className="group-info-subgroup-badge" aria-label={`${unread} 条未读`}>
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                )}
+                {subgroupEditing && canManage && (
+                  <button
+                    type="button"
+                    className="group-info-subgroup-edit-btn"
+                    onClick={() => {
+                      setSubgroupError(null);
+                      setSubgroupDialog({ kind: "edit", sg });
+                    }}
+                    aria-label={`编辑子群 ${sg.name}`}
+                    title="编辑子群"
+                  >
+                    <PencilIcon />
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {canManage && (
+          subgroupEditing ? (
+            <div className="group-info-subgroup-edit-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setSubgroupError(null);
+                  setSubgroupDialog({ kind: "add" });
+                }}
+                aria-label="添加子群"
+              >
+                <IconPlus width={16} height={16} /> 添加
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setSubgroupEditing(false)}
+                aria-label="退出编辑"
+              >
+                <IconClose width={16} height={16} /> 退出
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-ghost" onClick={() => setSubgroupEditing(true)}>
+              编辑子群
+            </button>
+          )
+        )}
+      </section>
+
       <section className="group-info-actions">
         <h3 className="group-info-section-title">管理</h3>
         {managementError && <p className="group-info-error" role="alert">{managementError}</p>}
@@ -465,6 +589,49 @@ export function GroupInfo({ groupId }: { groupId: string }) {
           error={managementError}
           onConfirm={(m) => setConfirmAction({ kind: "transfer", member: m })}
           onClose={() => setTransferOpen(false)}
+        />
+      )}
+
+      {subgroupDialog && (
+        <SubGroupDialog
+          state={subgroupDialog}
+          busy={subgroupBusy}
+          error={subgroupError}
+          onClose={() => {
+            if (subgroupBusy) return;
+            setSubgroupDialog(null);
+            setSubgroupError(null);
+          }}
+          onConfirm={async (name, muted) => {
+            if (subgroupDialog.kind === "add") {
+              await runSubgroupAction(async () => {
+                const sg = await chatApi.createSubgroup(groupId, name);
+                handleSubgroupCreated(sg);
+              });
+            } else {
+              await runSubgroupAction(async () => {
+                const sg = await chatApi.updateSubgroup(groupId, subgroupDialog.sg.id, { name, muted });
+                handleSubgroupCreated(sg);
+              });
+            }
+          }}
+          onDelete={() => {
+            if (subgroupDialog.kind === "edit") setSubgroupDelete(subgroupDialog.sg);
+          }}
+        />
+      )}
+
+      {subgroupDelete && (
+        <ConfirmDialog
+          title="删除子群"
+          message={`确定删除子群「${subgroupDelete.name}」？该子群的历史消息将归入默认组，不会丢失。`}
+          confirmLabel="删除"
+          onConfirm={() => void confirmDeleteSubgroup()}
+          onClose={() => {
+            if (subgroupBusy) return;
+            setSubgroupDelete(null);
+            setSubgroupError(null);
+          }}
         />
       )}
 
@@ -634,5 +801,13 @@ function TransferOwnerDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    </svg>
   );
 }

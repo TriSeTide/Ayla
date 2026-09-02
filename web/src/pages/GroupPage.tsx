@@ -40,6 +40,7 @@ import { useTouchAxisGuard } from "../hooks/useTouchAxisGuard";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
 import { useChatStore } from "../stores/chat";
+import { useSubGroupStore } from "../stores/subgroup";
 import { subscribeGroupConversations } from "../ws/chat";
 import { GROUP_SCENE_ORDER, useGroupStore } from "../stores/group";
 import type { GroupScene } from "../stores/group";
@@ -248,6 +249,29 @@ export function GroupPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationRetry]);
 
+  // 进入群：拉子群列表（宽屏侧栏/窄屏选项卡共用），未选中时默认「默认组」
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    chatApi
+      .listSubgroups(id)
+      .then((list) => {
+        if (cancelled) return;
+        useSubGroupStore.getState().setSubgroups(id, list);
+        const active = useSubGroupStore.getState().activeByGroup[id];
+        if (active == null) {
+          const defaultSg = list.find((sg) => sg.is_default) ?? list[0];
+          useSubGroupStore.getState().setActiveSubgroup(id, defaultSg?.id ?? null);
+        }
+      })
+      .catch(() => {
+        // 子群列表加载失败：保持无子群视图（聊天仍按全部消息加载）
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
   // 切换场景：store（单一事实）+ URL 回显
   const goScene = useCallback(
     (next: GroupScene) => {
@@ -385,6 +409,7 @@ export function GroupPage() {
           activeScene={activeScene}
           onSelectScene={goScene}
           onOpenInfo={openInfo}
+          onSelectSubgroup={(sgId) => useSubGroupStore.getState().setActiveSubgroup(id ?? "", sgId)}
         />
         <main className="group-content">{renderScene()}</main>
         {showGroupCreate && <GroupCreateDialog onClose={() => setShowGroupCreate(false)} />}

@@ -200,6 +200,8 @@ export interface ChatMessage {
   id: string;
   conversation_id: string;
   sender_id: string;
+  /** 群聊子群归属（子群功能；null = 旧消息/默认组语义，旧服务端可缺省） */
+  subgroup_id?: string | null;
   type: MessageType;
   content: string;
   media_id: string | null;
@@ -329,6 +331,8 @@ export interface CreateMessagePayload {
   reply_to?: number | null;
   idempotency_key?: string;
   media_id?: string;
+  /** 群聊子群归属（可选；不传时群聊消息归默认组，私聊忽略） */
+  subgroup_id?: number | null;
   /** 结构化消息段（与 media_id 二选一；至少一个非纯文本段；服务端强制 type=mixed） */
   segments?: (
     | { type: "text"; text: string }
@@ -341,6 +345,23 @@ export interface CreateMessagePayload {
 export interface ConversationMessagesParams {
   before_seq?: number;
   limit?: number;
+  /** 群聊子群过滤（缺省 = 全部消息；默认组含旧消息） */
+  subgroup_id?: number | string;
+}
+
+/** SubGroupSerializer 字段（群聊子群） */
+export interface SubGroup {
+  id: string;
+  conversation_id: string;
+  name: string;
+  is_default: boolean;
+  /** 子群禁言开关：开启后仅群主/管理员可发言（旧后端可缺省） */
+  muted?: boolean;
+  /** 当前用户在该子群的未读消息数（本人视角） */
+  unread_count: number;
+  /** 当前用户在该子群的未读消息序号（本人视角；旧后端可缺省） */
+  unread_seqs?: number[];
+  created_at: string;
 }
 
 /* ================= M5-2 爱莉 profile（对齐 backend/apps/elysia_bridge/serializers.py） ================= */
@@ -383,6 +404,36 @@ export interface MessageNewFrame {
     idempotency_key?: string | null;
     seq: number;
     ts: string;
+    /** 群聊子群归属（null = 默认组/旧消息；旧服务端可缺省） */
+    subgroup_id?: string | null;
+  };
+}
+
+/** 子群创建/改名广播帧（前端按 conversation 更新列表） */
+export interface SubGroupChangedFrame {
+  type: "subgroup.created" | "subgroup.updated";
+  data: {
+    conversation_id: string;
+    subgroup_id: string;
+    name: string;
+    is_default: boolean;
+  };
+}
+
+/** 子群删除广播帧（消息已归入默认组） */
+export interface SubGroupDeletedFrame {
+  type: "subgroup.deleted";
+  data: { conversation_id: string; subgroup_id: string };
+}
+
+/** 子群标已读广播帧（本人：本地清零未读 + 会话未读递减） */
+export interface SubGroupReadFrame {
+  type: "subgroup.read";
+  data: {
+    conversation_id: string;
+    subgroup_id: string;
+    user_id: string;
+    marked: number;
   };
 }
 
@@ -411,6 +462,8 @@ export interface MessagePokeFrame {
     target_name: string;
     seq: number;
     ts: string;
+    /** 群聊子群归属（null = 默认组/旧消息；旧服务端可缺省） */
+    subgroup_id?: string | null;
   };
 }
 
@@ -681,6 +734,9 @@ export type ChatServerFrame =
   | TypingFrame
   | HistorySyncFrame
   | ElysiaReplyFrame
+  | SubGroupChangedFrame
+  | SubGroupDeletedFrame
+  | SubGroupReadFrame
   | GroupRequestNewFrame
   | GroupRequestResolvedFrame
   | GroupInviteNewFrame

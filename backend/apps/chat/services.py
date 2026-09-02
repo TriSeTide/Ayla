@@ -28,6 +28,7 @@ from .models import (
     GroupInvite,
     GroupJoinRequest,
     GroupMemberLeaveNotice,
+    GroupSubGroup,
     Message,
     MessageRead,
 )
@@ -203,12 +204,14 @@ def create_message(
     media_id=None,
     segments=None,
     seq=None,
+    subgroup=None,
 ) -> Message:
     """幂等创建消息。
 
     - 同 idempotency_key 已存在则返回既有消息（不重复落库）；
     - 否则在事务内算 seq 并落库；
     - 调用方负责广播（本函数不做广播，保证 REST 与 WS 落库后再各自广播）。
+    - subgroup：群聊子群归属（None = 默认组语义，旧消息兼容）。
     """
     key = idempotency_key
     if key is None:
@@ -233,6 +236,7 @@ def create_message(
                 reply_to=reply_to,
                 idempotency_key=key,
                 seq=seq,
+                subgroup=subgroup,
             )
             # 新消息到达 → 会话对全体成员重新出现（取消用户"删除"后的隐藏状态）
             ConversationMember.objects.filter(
@@ -254,6 +258,7 @@ def create_message(
                     reply_to=reply_to,
                     idempotency_key=key,
                     seq=seq,
+                    subgroup=subgroup,
                 )
                 ConversationMember.objects.filter(
                     conversation=conversation, hidden=True
@@ -267,6 +272,55 @@ def _new_key() -> str:
     import uuid
 
     return uuid.uuid4().hex
+
+
+# ---------- 群聊子群 ----------
+
+def subgroup_unread_queryset(subgroup: GroupSubGroup, user):
+    """当前用户在该子群的未读消息查询集（默认组含 subgroup 为 null 的旧消息）。"""
+    qs = Message.objects.filter(conversation=subgroup.conversation)
+    if subgroup.is_default:
+        qs = qs.filter(Q(subgroup=subgroup) | Q(subgroup__isnull=True))
+    else:
+        qs = qs.filter(subgroup=subgroup)
+    return (
+        qs.exclude(sender=user)
+        .exclude(status=Message.STATUS_RECALLED)
+        .exclude(type=Message.TYPE_POKE)
+        .exclude(reads__user=user)
+    )
+
+
+def create_subgroup(conversation, name: str) -> GroupSubGroup:
+    """创建子群（调用方已校验权限与重名）。"""
+    return GroupSubGroup.objects.create(conversation=conversation, name=name)
+
+
+def delete_subgroup(subgroup: GroupSubGroup) -> None:
+    """删除子群：其消息归入默认组（事务内），再删子群。
+
+    默认组不可删除（调用方校验）；群缺少默认组时显式失败，不静默丢消息。
+    """
+    with transaction.atomic():
+        default = subgroup.conversation.subgroups.filter(is_default=True).first()
+        if default is None:
+            raise ValueError("群缺少默认组，无法归并消息")
+        Message.objects.filter(subgroup=subgroup).update(subgroup=default)
+        subgroup.delete()
+
+
+def mark_subgroup_read(user, subgroup: GroupSubGroup) -> int:
+    """为该子群内当前用户未读消息创建已读回执；返回本次标记条数（幂等）。"""
+    msgs = list(
+        subgroup_unread_queryset(subgroup, user).values_list("id", flat=True)
+    )
+    if not msgs:
+        return 0
+    MessageRead.objects.bulk_create(
+        [MessageRead(message_id=mid, user=user) for mid in msgs],
+        ignore_conflicts=True,
+    )
+    return len(msgs)
 
 
 def recall_message(user, message) -> Message:
@@ -423,6 +477,7 @@ def _message_new_event(message: Message) -> dict:
         "idempotency_key": message.idempotency_key,
         "seq": message.seq,
         "ts": message.created_at.isoformat(),
+        "subgroup_id": str(message.subgroup_id) if message.subgroup_id else None,
     }
 
 
@@ -442,6 +497,54 @@ def _media_descriptor(media_id: str | None):
 def broadcast_message_new(message: Message) -> None:
     """message.new（同步版，REST 视图用）。"""
     _group_send_sync(message.conversation_id, _message_new_event(message))
+
+
+# ---------- 子群广播（subgroup.created/updated/deleted/read） ----------
+
+def _subgroup_event(subgroup: GroupSubGroup, event_type: str) -> dict:
+    return {
+        "type": f"chat.subgroup.{event_type}",
+        "conversation_id": str(subgroup.conversation_id),
+        "subgroup_id": str(subgroup.id),
+        "name": subgroup.name,
+        "is_default": subgroup.is_default,
+    }
+
+
+def broadcast_subgroup_created(subgroup: GroupSubGroup) -> None:
+    """subgroup.created：新子群（含未读信息由前端拉列表补齐）。"""
+    _group_send_sync(subgroup.conversation_id, _subgroup_event(subgroup, "created"))
+
+
+def broadcast_subgroup_updated(subgroup: GroupSubGroup) -> None:
+    """subgroup.updated：子群改名。"""
+    _group_send_sync(subgroup.conversation_id, _subgroup_event(subgroup, "updated"))
+
+
+def broadcast_subgroup_deleted(conversation_id, subgroup_id) -> None:
+    """subgroup.deleted：子群删除（消息已归入默认组）。"""
+    _group_send_sync(
+        conversation_id,
+        {
+            "type": "chat.subgroup.deleted",
+            "conversation_id": str(conversation_id),
+            "subgroup_id": str(subgroup_id),
+        },
+    )
+
+
+def broadcast_subgroup_read(subgroup: GroupSubGroup, user, marked: int) -> None:
+    """subgroup.read：某成员把该子群标已读（前端本地清零未读 + 会话未读减 marked）。"""
+    _group_send_sync(
+        subgroup.conversation_id,
+        {
+            "type": "chat.subgroup.read",
+            "conversation_id": str(subgroup.conversation_id),
+            "subgroup_id": str(subgroup.id),
+            "user_id": user.id,
+            "marked": marked,
+        },
+    )
 
 
 async def abroadcast_message_new(message: Message) -> None:
@@ -481,6 +584,7 @@ def _message_poke_event(message: Message) -> dict:
         "target_name": target_name,
         "seq": message.seq,
         "ts": message.created_at.isoformat(),
+        "subgroup_id": str(message.subgroup_id) if message.subgroup_id else None,
     }
 
 

@@ -99,6 +99,45 @@ class ConversationMember(models.Model):
         return f"conv{self.conversation_id}:{self.user_id}:{self.role}"
 
 
+class GroupSubGroup(models.Model):
+    """群聊子群（频道）：群内消息按子群分组展示。
+
+    - 每个群至少有一个「默认组」（is_default=True，创建群时自动生成，不可删除），
+      即子群功能上线前的群聊本体；旧消息（subgroup 为 null）视为默认组消息；
+    - 子群增删改仅群主/管理员可操作；删除子群时其消息归入默认组（不丢数据）；
+    - 未读按子群独立统计（MessageRead 是消息级回执，天然支持按子群聚合）。
+    """
+
+    id = models.AutoField(primary_key=True)
+    # db_constraint=False：本机 MySQL 服务器默认引擎为 MyISAM（不支持 FK 约束），
+    # 建表时直接声明 FK 会 1215 失败；约束由迁移 0011 在表转为 InnoDB 后手动添加。
+    conversation = models.ForeignKey(
+        Conversation,
+        related_name="subgroups",
+        on_delete=models.CASCADE,
+        db_constraint=False,
+    )
+    name = models.CharField("子群名", max_length=64)
+    is_default = models.BooleanField("默认组", default=False)
+    # 子群禁言开关：开启后仅群主/管理员可在该子群发言（普通成员 403）
+    muted = models.BooleanField("禁言", default=False)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+
+    class Meta:
+        db_table = "group_subgroups"
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "name"], name="uniq_conv_subgroup_name"
+            )
+        ]
+        verbose_name = "群聊子群"
+        verbose_name_plural = "群聊子群"
+
+    def __str__(self) -> str:
+        return f"conv{self.conversation_id}:{self.name}"
+
+
 class Message(models.Model):
     """消息。"""
 
@@ -137,6 +176,16 @@ class Message(models.Model):
     id = models.AutoField(primary_key=True)
     conversation = models.ForeignKey(
         Conversation, related_name="messages", on_delete=models.CASCADE, db_index=True
+    )
+    # 群聊子群归属：null = 旧消息（子群功能上线前），语义上归默认组；
+    # 删除子群时消息由 services.delete_subgroup 归入默认组（不置 null）。
+    subgroup = models.ForeignKey(
+        GroupSubGroup,
+        related_name="messages",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
     )
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="chat_messages", on_delete=models.CASCADE

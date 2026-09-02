@@ -109,7 +109,7 @@ describe("EmojiPackPanel 群表情包（任务 03）", () => {
     render(<EmojiPackPanel convId="c1" myRole="owner" onClose={onClose} />);
     await waitFor(() => expect(screen.getByLabelText("发送表情")).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText("发送表情"));
-    await waitFor(() => expect(send).toHaveBeenCalledWith("c1", "", { type: "emoji", mediaId: "m1" }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("c1", "", { type: "emoji", mediaId: "m1" }, undefined));
     // 发送后面板保持打开：表情仍在、onClose 未被调用
     expect(screen.getByLabelText("发送表情")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();

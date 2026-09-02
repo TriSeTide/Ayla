@@ -82,6 +82,7 @@ def _message_new_payload(msg: Message) -> dict:
             "idempotency_key": msg.idempotency_key,
             "seq": msg.seq,
             "ts": msg.created_at.isoformat(),
+            "subgroup_id": str(msg.subgroup_id) if msg.subgroup_id else None,
         },
     }
 
@@ -110,6 +111,7 @@ def _message_poke_payload(msg: Message) -> dict:
             "target_name": target_name,
             "seq": msg.seq,
             "ts": msg.created_at.isoformat(),
+            "subgroup_id": str(msg.subgroup_id) if msg.subgroup_id else None,
         },
     }
 
@@ -256,6 +258,57 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "idempotency_key": event.get("idempotency_key"),
                     "seq": event["seq"],
                     "ts": event["ts"],
+                    "subgroup_id": event.get("subgroup_id"),
+                },
+            }
+        )
+
+    async def chat_subgroup_created(self, event):
+        await self.send_json(
+            {
+                "type": "subgroup.created",
+                "data": {
+                    "conversation_id": event["conversation_id"],
+                    "subgroup_id": event["subgroup_id"],
+                    "name": event["name"],
+                    "is_default": event["is_default"],
+                },
+            }
+        )
+
+    async def chat_subgroup_updated(self, event):
+        await self.send_json(
+            {
+                "type": "subgroup.updated",
+                "data": {
+                    "conversation_id": event["conversation_id"],
+                    "subgroup_id": event["subgroup_id"],
+                    "name": event["name"],
+                    "is_default": event["is_default"],
+                },
+            }
+        )
+
+    async def chat_subgroup_deleted(self, event):
+        await self.send_json(
+            {
+                "type": "subgroup.deleted",
+                "data": {
+                    "conversation_id": event["conversation_id"],
+                    "subgroup_id": event["subgroup_id"],
+                },
+            }
+        )
+
+    async def chat_subgroup_read(self, event):
+        await self.send_json(
+            {
+                "type": "subgroup.read",
+                "data": {
+                    "conversation_id": event["conversation_id"],
+                    "subgroup_id": event["subgroup_id"],
+                    "user_id": str(event["user_id"]),
+                    "marked": event["marked"],
                 },
             }
         )
@@ -299,6 +352,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "target_name": event["target_name"],
                     "seq": event["seq"],
                     "ts": event["ts"],
+                    "subgroup_id": event.get("subgroup_id"),
                 },
             }
         )

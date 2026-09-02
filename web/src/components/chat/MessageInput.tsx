@@ -54,10 +54,16 @@ export interface MessageInputProps {
   onQuoteClear: () => void;
   /** 群成员（仅群聊启用 @）；私聊不传 */
   members?: ConversationMember[];
+  /** 群聊子群归属（可选；群聊不传时消息归默认组） */
+  subgroupId?: string | null;
+  /** 子群禁言：禁用输入与发送（普通成员视角） */
+  disabled?: boolean;
+  /** 禁言提示文案（disabled 时显示在输入区上方） */
+  disabledHint?: string;
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
-  function MessageInput({ convId, quote, onQuoteClear, members }, ref) {
+  function MessageInput({ convId, quote, onQuoteClear, members, subgroupId, disabled = false, disabledHint }, ref) {
     const setDraft = useChatDraftsStore((state) => state.setDraft);
     const clearDraft = useChatDraftsStore((state) => state.clearDraft);
     const [blocks, setBlocks] = useState<DraftBlock[]>([]);
@@ -216,7 +222,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
         blocks,
         picked,
         replyTo: quote ? Number(quote.id) : null,
-      });
+      }, subgroupId);
       // 发送即清空（消息已进列表），可立即输入下一条。
       const el = editorRef.current;
       if (el) el.innerHTML = "";
@@ -241,7 +247,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           replyTo: quote ? Number(quote.id) : null,
           idempotencyKey: newPickId(),
           mediaId: uploaded.media_id,
-        });
+        }, subgroupId);
       } catch (err) {
         setFailedVoice({ blob: rec.blob, mimeType: rec.mimeType, duration: rec.duration });
         setError(err instanceof Error ? err.message : "语音发送失败");
@@ -267,13 +273,19 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const quotePreview = quote ? (segmentPreview(quote.segments) ?? (quote.content || "…")) : null;
     const canSend =
       (blocksText(blocks).trim().length > 0 || blocksHasMention(blocks) || picked.length > 0) &&
-      !voice.recording;
+      !voice.recording &&
+      !disabled;
     const placeholder = isNarrow
       ? "输入消息"
       : "输入消息，回车发送（Shift+Enter 换行）；可粘贴图片/视频，群聊输入 @ 可提及成员";
 
     return (
-      <div className="composer">
+      <div className={`composer${disabled ? " is-disabled" : ""}`}>
+        {disabled && disabledHint && (
+          <div className="composer-muted-hint" role="status">
+            {disabledHint}
+          </div>
+        )}
         {quote && quotePreview != null && (
           <div className="quote-bar">
             <div className="quote-bar-body">
@@ -366,20 +378,21 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
               {/* 宽屏：工具按钮与输入框横排（图片/文件/语音/表情包） */}
               {!isNarrow && (
                 <div className="composer-tools">
-                  <label className="composer-tool-btn" aria-label="发送图片或视频">
+                  <label className="composer-tool-btn" aria-label="发送图片或视频" aria-disabled={disabled || undefined}>
                     <IconImage width={18} height={18} />
-                    <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
+                    <input type="file" accept="image/*,video/*" multiple hidden disabled={disabled} onChange={(e) => {
                       const files = Array.from(e.target.files ?? []);
                       e.target.value = "";
                       if (files.length === 0) return;
                       enqueueFiles(files);
                     }} />
                   </label>
-                  <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
+                  <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）" aria-disabled={disabled || undefined}>
                     <IconFile width={18} height={18} />
                     <input
                       type="file"
                       hidden
+                      disabled={disabled}
                       onChange={(e) => {
                         const files = Array.from(e.target.files ?? []);
                         e.target.value = "";
@@ -395,7 +408,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                       onClick={() => void voice.start()}
                       aria-label="发送语音"
                       title="录制语音消息"
-                      disabled={voice.recording}
+                      disabled={voice.recording || disabled}
                     >
                       <IconMic width={18} height={18} />
                     </button>
@@ -408,6 +421,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                       aria-label="群表情包"
                       aria-expanded={emojiOpen}
                       title="群表情包"
+                      disabled={disabled}
                     >
                       <IconEmoji width={18} height={18} />
                     </button>
@@ -417,11 +431,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
               <div
                 ref={editorRef}
                 className="field composer-input composer-editor"
-                contentEditable
+                contentEditable={!disabled}
                 suppressContentEditableWarning
                 role="textbox"
                 aria-multiline="true"
                 aria-label="消息输入框"
+                aria-disabled={disabled || undefined}
                 data-placeholder={placeholder}
                 onInput={handleEditorInput}
                 onKeyDown={(e) => {
@@ -473,7 +488,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           <div className="composer-tools composer-tools-narrow" role="toolbar" aria-label="消息工具">
             <label className="composer-tool-btn" aria-label="发送图片或视频">
               <IconImage width={18} height={18} />
-              <input type="file" accept="image/*,video/*" multiple hidden onChange={(e) => {
+              <input type="file" accept="image/*,video/*" multiple hidden disabled={disabled} onChange={(e) => {
                 const files = Array.from(e.target.files ?? []);
                 e.target.value = "";
                 if (files.length === 0) return;
@@ -487,7 +502,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 onClick={() => void voice.start()}
                 aria-label="发送语音"
                 title="录制语音消息"
-                disabled={voice.recording}
+                disabled={voice.recording || disabled}
               >
                 <IconMic width={18} height={18} />
               </button>
@@ -500,15 +515,17 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 aria-label="群表情包"
                 aria-expanded={emojiOpen}
                 title="群表情包"
+                disabled={disabled}
               >
                 <IconEmoji width={18} height={18} />
               </button>
             )}
-            <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）">
+            <label className="composer-tool-btn" aria-label="发送文件" title="发送文件（任意格式，单个）" aria-disabled={disabled || undefined}>
               <IconFile width={18} height={18} />
               <input
                 type="file"
                 hidden
+                disabled={disabled}
                 onChange={(e) => {
                   const files = Array.from(e.target.files ?? []);
                   e.target.value = "";
@@ -520,7 +537,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           </div>
         )}
         {emojiOpen && (
-          <EmojiPackPanel convId={convId} myRole={myRole} onClose={() => setEmojiOpen(false)} />
+          <EmojiPackPanel convId={convId} myRole={myRole} subgroupId={subgroupId} onClose={() => setEmojiOpen(false)} />
         )}
       </div>
     );

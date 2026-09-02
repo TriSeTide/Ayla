@@ -17,6 +17,7 @@ import { blocksText, blocksToSegments } from "../utils/mention";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
+import { useSubGroupStore } from "../stores/subgroup";
 import { useBadgesStore } from "../stores/badges";
 import { chatWS } from "../ws/chat";
 
@@ -63,19 +64,38 @@ export function useChat() {
   return { conversations, activeConversationId, openConversation };
 }
 
+/** 消息是否属于某子群视图（默认组视图含 subgroup_id 为 null 的旧消息）。 */
+export function messageInSubgroup(
+  msg: ChatMessage,
+  subgroupId: string | null | undefined,
+  isDefault = false,
+): boolean {
+  if (subgroupId == null) return true;
+  if (isDefault) return msg.subgroup_id == null || msg.subgroup_id === subgroupId;
+  return msg.subgroup_id === subgroupId;
+}
+
 /** 拉历史：before_seq 缺省取缓存最小 seq；firstLoad 置 loading */
-export async function loadHistory(convId: string, beforeSeq?: number, firstLoad = false) {
+export async function loadHistory(
+  convId: string,
+  beforeSeq?: number,
+  firstLoad = false,
+  subgroupId?: string | null,
+  isDefault = false,
+) {
   const msg = useMessageStore.getState();
   const bucket = msg.buckets[convId];
   if (firstLoad) msg.setLoading(convId, true);
   let seq = beforeSeq;
   if (seq === undefined && bucket && bucket.messages.length > 0) {
-    seq = bucket.messages[0].seq; // 最小 seq
+    const subgroupMsgs = bucket.messages.filter((m) => messageInSubgroup(m, subgroupId, isDefault));
+    seq = subgroupMsgs[0]?.seq; // 当前子群最小 seq
   }
   try {
     const list = await chatApi.listMessages(convId, {
       before_seq: seq,
       limit: INITIAL_HISTORY_LIMIT,
+      subgroup_id: subgroupId ?? undefined,
     });
     const hasMore = list.length >= INITIAL_HISTORY_LIMIT;
     if (firstLoad) {
@@ -102,7 +122,11 @@ export async function loadHistory(convId: string, beforeSeq?: number, firstLoad 
  */
 const historyLoads = new Map<string, Promise<ChatMessage[]>>();
 
-export function loadMoreHistory(convId: string): Promise<ChatMessage[]> {
+export function loadMoreHistory(
+  convId: string,
+  subgroupId?: string | null,
+  isDefault = false,
+): Promise<ChatMessage[]> {
   const inFlight = historyLoads.get(convId);
   if (inFlight) return inFlight;
 
@@ -111,7 +135,9 @@ export function loadMoreHistory(convId: string): Promise<ChatMessage[]> {
   if (!bucket || bucket.loading || !bucket.hasMore) return Promise.resolve([]);
 
   msg.setLoading(convId, true);
-  const minSeq = bucket.messages.find((item) => item.seq > 0)?.seq;
+  const minSeq = bucket.messages
+    .filter((item) => item.seq > 0 && messageInSubgroup(item, subgroupId, isDefault))
+    .find((item) => item.seq > 0)?.seq;
   if (minSeq == null) {
     msg.setLoading(convId, false);
     return Promise.resolve([]);
@@ -121,6 +147,7 @@ export function loadMoreHistory(convId: string): Promise<ChatMessage[]> {
     .listMessages(convId, {
       before_seq: minSeq,
       limit: HISTORY_PAGE_LIMIT,
+      subgroup_id: subgroupId ?? undefined,
     })
     .then((list) => {
       // 同一原则：先前插缓存，再结束 loading，保证滚动锚定看到的是完整 DOM 提交。
@@ -158,6 +185,8 @@ export async function loadHistoryUntilSeq(
   convId: string,
   targetSeq: number,
   maxPages = TARGET_HISTORY_MAX_PAGES,
+  subgroupId?: string | null,
+  isDefault = false,
 ): Promise<boolean> {
   if (!Number.isInteger(targetSeq) || targetSeq <= 0) return false;
 
@@ -166,14 +195,18 @@ export async function loadHistoryUntilSeq(
     if (!bucket) return false;
     if (bucket.messages.some((item) => item.seq === targetSeq)) return true;
 
-    const confirmed = bucket.messages.filter((item) => !item.pending && item.seq > 0);
+    const confirmed = bucket.messages.filter(
+      (item) => !item.pending && item.seq > 0 && messageInSubgroup(item, subgroupId, isDefault),
+    );
     const minSeq = confirmed[0]?.seq;
     if (minSeq == null || minSeq <= targetSeq || !bucket.hasMore) return false;
 
     const beforeMin = minSeq;
-    const list = await loadMoreHistory(convId);
+    const list = await loadMoreHistory(convId, subgroupId, isDefault);
     const nextBucket = useMessageStore.getState().buckets[convId];
-    const nextMin = nextBucket?.messages.find((item) => !item.pending && item.seq > 0)?.seq;
+    const nextMin = nextBucket?.messages
+      .filter((item) => !item.pending && item.seq > 0 && messageInSubgroup(item, subgroupId, isDefault))
+      .find((item) => item.seq > 0)?.seq;
     if (list.length === 0 || nextMin == null || nextMin >= beforeMin) return false;
   }
   return false;
@@ -209,6 +242,7 @@ export async function sendMessage(
   convId: string,
   content: string,
   options: { type?: MessageType; replyTo?: number | null; idempotencyKey?: string; mediaId?: string } = {},
+  subgroupId?: string | null,
 ): Promise<ChatMessage> {
   const idempotencyKey = options.idempotencyKey ?? newIdempotencyKey();
   const msg = await chatApi.sendMessage(convId, {
@@ -217,6 +251,7 @@ export async function sendMessage(
     reply_to: options.replyTo ?? null,
     idempotency_key: idempotencyKey,
     media_id: options.mediaId,
+    subgroup_id: subgroupId != null ? Number(subgroupId) : undefined,
   });
   // 本地乐观插入（WS message.new 到达时按 seq 去重，不会重复）
   useMessageStore.getState().upsertMessage(convId, msg);
@@ -284,7 +319,11 @@ function uploadPickedWithProgress(
  * 后台并发上传全部媒体 → 调发送 API → 原地替换为服务端消息；
  * 失败标记 sendFailed（气泡左侧可重试/删除），不阻塞继续输入。
  */
-export function sendOptimistic(convId: string, opts: OptimisticSendOptions): void {
+export function sendOptimistic(
+  convId: string,
+  opts: OptimisticSendOptions,
+  subgroupId?: string | null,
+): void {
   const idempotencyKey = newIdempotencyKey();
   const localId = newLocalId(idempotencyKey);
   const currentUser = useAuthStore.getState().currentUser;
@@ -305,6 +344,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
       content: fileItem.file.name,
       media_id: null,
       segments: null,
+      subgroup_id: subgroupId,
       localMedia: [
         {
           id: fileItem.id,
@@ -334,6 +374,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
           reply_to: opts.replyTo ?? null,
           idempotency_key: idempotencyKey,
           media_id: uploaded.media_id,
+          subgroup_id: subgroupId != null ? Number(subgroupId) : undefined,
         });
         useMessageStore.getState().resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
       } catch {
@@ -379,6 +420,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
     content: text,
     media_id: null,
     segments,
+    subgroup_id: subgroupId,
     localMedia,
     reply_to: opts.replyTo != null ? String(opts.replyTo) : null,
     status: "sent",
@@ -398,6 +440,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
           content: text,
           reply_to: opts.replyTo ?? null,
           idempotency_key: idempotencyKey,
+          subgroup_id: subgroupId != null ? Number(subgroupId) : undefined,
         });
         useMessageStore.getState().resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
       } catch {
@@ -424,6 +467,7 @@ export function sendOptimistic(convId: string, opts: OptimisticSendOptions): voi
         reply_to: opts.replyTo ?? null,
         idempotency_key: idempotencyKey,
         segments: segs,
+        subgroup_id: subgroupId != null ? Number(subgroupId) : undefined,
       });
       // 本地预览 URL 由气泡组件在替换卸载时统一 revoke
       useMessageStore.getState().resolvePendingMessage(convId, localId, idempotencyKey, serverMsg);
@@ -486,6 +530,7 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
           content: msg.content,
           reply_to: msg.reply_to != null ? Number(msg.reply_to) : null,
           idempotency_key: key,
+          subgroup_id: msg.subgroup_id != null ? Number(msg.subgroup_id) : undefined,
         });
         store.resolvePendingMessage(convId, newLocalIdStr, key, serverMsg);
       } catch {
@@ -509,6 +554,7 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
           reply_to: msg.reply_to != null ? Number(msg.reply_to) : null,
           idempotency_key: key,
           media_id: uploaded.media_id,
+          subgroup_id: msg.subgroup_id != null ? Number(msg.subgroup_id) : undefined,
         });
         store.resolvePendingMessage(convId, newLocalIdStr, key, serverMsg);
       } catch {
@@ -542,6 +588,7 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
         reply_to: msg.reply_to != null ? Number(msg.reply_to) : null,
         idempotency_key: key,
         segments: segs,
+        subgroup_id: msg.subgroup_id != null ? Number(msg.subgroup_id) : undefined,
       });
       store.resolvePendingMessage(convId, newLocalIdStr, key, serverMsg);
     } catch {
@@ -627,6 +674,18 @@ export async function markMessageReadExact(convId: string, messageId: string) {
   useMessageStore.getState().markReadByMe(convId, messageId);
   const message = useMessageStore.getState().buckets[convId]?.messages.find((item) => item.id === messageId);
   if (message) useChatStore.getState().markReadSeqs(convId, [message.seq]);
+  void useBadgesStore.getState().fetch();
+}
+
+/** 子群标已读：服务端创建该子群全部未读回执 → 本地清零子群未读 + 会话未读递减。 */
+export async function markSubgroupRead(convId: string, subgroupId: string) {
+  const { marked } = await chatApi.markSubgroupRead(convId, subgroupId);
+  const sg = useSubGroupStore
+    .getState()
+    .byGroup[convId]?.find((item) => item.id === subgroupId);
+  const seqs = sg?.unread_seqs ?? [];
+  useSubGroupStore.getState().clearSubgroupUnread(convId, subgroupId);
+  useChatStore.getState().decrementUnread(convId, marked, seqs);
   void useBadgesStore.getState().fetch();
 }
 

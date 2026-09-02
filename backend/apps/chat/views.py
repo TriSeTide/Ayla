@@ -23,6 +23,7 @@ from .models import (
     GroupInvite,
     GroupJoinRequest,
     GroupMemberLeaveNotice,
+    GroupSubGroup,
     Message,
     MessageRead,
 )
@@ -35,6 +36,7 @@ from .serializers import (
     GroupJoinRequestSerializer,
     GroupMemberLeaveNoticeSerializer,
     MessageSerializer,
+    SubGroupSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,10 @@ class GroupCreateView(APIView):
             owner=request.user,
             announcement=request.data.get("announcement", ""),
         )
+        # 新群初创默认一个子群「默认组」（即群聊本体，不可删除）
+        GroupSubGroup.objects.create(
+            conversation=conv, name="默认组", is_default=True
+        )
         ConversationMember.objects.create(
             conversation=conv, user=request.user, role=ConversationMember.ROLE_OWNER
         )
@@ -155,6 +161,131 @@ class GroupCreateView(APIView):
         
         data = ConversationSerializer(conv, context={"request": request}).data
         return Response(data, status=status.HTTP_201_CREATED)
+
+
+# ---------- 群聊子群 ----------
+
+class SubGroupListView(APIView):
+    """GET/POST /conversations/<id>/subgroups/ —— 子群列表 / 创建（仅群主/管理员）。"""
+
+    def get(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        if conv.type != Conversation.TYPE_GROUP:
+            return _bad_request("仅群聊有子群")
+        return Response(
+            SubGroupSerializer(
+                conv.subgroups.all(), many=True, context={"request": request}
+            ).data
+        )
+
+    def post(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        if conv.type != Conversation.TYPE_GROUP:
+            return _bad_request("仅群聊有子群")
+        if not services.can_manage_group(request.user, conv):
+            return _forbidden("仅群主/管理员可管理子群")
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return _bad_request("子群名必填")
+        if len(name) > 64:
+            return _bad_request("子群名不能超过 64 字")
+        if conv.subgroups.filter(name=name).exists():
+            return _bad_request("已存在同名子群")
+        sg = services.create_subgroup(conv, name)
+        services.broadcast_subgroup_created(sg)
+        return Response(
+            SubGroupSerializer(sg, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SubGroupDetailView(APIView):
+    """PATCH/DELETE /conversations/<id>/subgroups/<sid>/ —— 改名 / 删除（仅群主/管理员）。"""
+
+    def _get_subgroup(self, request, conv_id, sid):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return None, _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return None, _forbidden()
+        if conv.type != Conversation.TYPE_GROUP:
+            return None, _bad_request("仅群聊有子群")
+        try:
+            sg = conv.subgroups.get(pk=sid)
+        except (GroupSubGroup.DoesNotExist, ValueError):
+            return None, _not_found("子群不存在")
+        return sg, None
+
+    def patch(self, request, conv_id, sid):
+        sg, err = self._get_subgroup(request, conv_id, sid)
+        if err is not None:
+            return err
+        if not services.can_manage_group(request.user, sg.conversation):
+            return _forbidden("仅群主/管理员可管理子群")
+        name = request.data.get("name")
+        muted = request.data.get("muted")
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                return _bad_request("子群名必填")
+            if len(name) > 64:
+                return _bad_request("子群名不能超过 64 字")
+            if sg.conversation.subgroups.filter(name=name).exclude(pk=sg.pk).exists():
+                return _bad_request("已存在同名子群")
+            sg.name = name
+        if muted is not None:
+            if not isinstance(muted, bool):
+                return _bad_request("muted 必须是布尔值")
+            sg.muted = muted
+        update_fields = []
+        if name is not None:
+            update_fields.append("name")
+        if muted is not None:
+            update_fields.append("muted")
+        if update_fields:
+            sg.save(update_fields=update_fields)
+        services.broadcast_subgroup_updated(sg)
+        return Response(SubGroupSerializer(sg, context={"request": request}).data)
+
+    def delete(self, request, conv_id, sid):
+        sg, err = self._get_subgroup(request, conv_id, sid)
+        if err is not None:
+            return err
+        if not services.can_manage_group(request.user, sg.conversation):
+            return _forbidden("仅群主/管理员可管理子群")
+        if sg.is_default:
+            return _bad_request("默认组不可删除")
+        conversation_id = sg.conversation_id
+        subgroup_id = sg.id
+        services.delete_subgroup(sg)
+        services.broadcast_subgroup_deleted(conversation_id, subgroup_id)
+        return Response({"detail": "子群已删除"})
+
+
+class SubGroupReadView(APIView):
+    """POST /conversations/<id>/subgroups/<sid>/read/ —— 把该子群标已读（本人）。"""
+
+    def post(self, request, conv_id, sid):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        try:
+            sg = conv.subgroups.get(pk=sid)
+        except (GroupSubGroup.DoesNotExist, ValueError):
+            return _not_found("子群不存在")
+        marked = services.mark_subgroup_read(request.user, sg)
+        services.broadcast_subgroup_read(sg, request.user, marked)
+        return Response({"marked": marked})
 
 
 class ConversationDetailView(APIView):
@@ -229,6 +360,24 @@ class MessageView(APIView):
         if not services.user_can_access(request.user, conv):
             return _forbidden()
         qs = conv.messages.all()
+        # 子群过滤：subgroup_id 缺省 = 全部消息（旧客户端兼容）；
+        # 默认组额外包含 subgroup 为 null 的旧消息（子群功能上线前的群聊本体）。
+        subgroup_id = request.query_params.get("subgroup_id")
+        if subgroup_id:
+            try:
+                subgroup_id = int(subgroup_id)
+            except ValueError:
+                return Response(
+                    {"detail": "subgroup_id 必须是整数"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            subgroup = conv.subgroups.filter(id=subgroup_id).first()
+            if subgroup is None:
+                return _not_found("子群不存在")
+            if subgroup.is_default:
+                qs = qs.filter(Q(subgroup=subgroup) | Q(subgroup__isnull=True))
+            else:
+                qs = qs.filter(subgroup=subgroup)
         before_seq = request.query_params.get("before_seq")
         if before_seq:
             try:
@@ -263,6 +412,18 @@ class MessageView(APIView):
                 return _forbidden("对方已不是你的好友，无法发送消息")
         if services.is_muted(request.user, conv):
             return _forbidden("你已被禁言")
+
+        # 子群禁言：开启时仅群主/管理员可发言（普通成员 403）；
+        # 不传 subgroup_id 时按默认组判定（旧客户端语义）。
+        if conv.type == Conversation.TYPE_GROUP:
+            subgroup_id = request.data.get("subgroup_id")
+            sg = None
+            if subgroup_id is not None:
+                sg = conv.subgroups.filter(id=subgroup_id).first()
+            else:
+                sg = conv.subgroups.filter(is_default=True).first()
+            if sg is not None and sg.muted and not services.can_manage_group(request.user, conv):
+                return _forbidden("该子群已禁言，仅群主/管理员可发言")
 
         ser = CreateMessageSerializer(
             data=request.data, context={"request": request, "conversation": conv}
@@ -302,6 +463,13 @@ class MessageView(APIView):
                     status=status.HTTP_200_OK,
                 )
 
+        # 子群归属：serializer 已校验存在性；群聊不传时归默认组（None = 旧消息语义）
+        subgroup = None
+        if data.get("subgroup_id") is not None:
+            subgroup = conv.subgroups.filter(id=data["subgroup_id"]).first()
+            if subgroup is None:
+                return _not_found("子群不存在")
+
         msg = services.create_message(
             request.user,
             conv,
@@ -311,6 +479,7 @@ class MessageView(APIView):
             idempotency_key=key,
             media_id=data.get("media_id"),
             segments=data.get("segments"),
+            subgroup=subgroup,
         )
         # 戳一戳：独立广播帧（不进未读/已读/红点链路），也不 inject 爱莉主链
         # （轻互动不是聊天内容，不进入 Elysium 意识通道）。

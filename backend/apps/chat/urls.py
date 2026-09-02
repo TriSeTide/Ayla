@@ -28,6 +28,22 @@ urlpatterns = [
         views.ConversationDetailView.as_view(),
         name="chat-conv-detail",
     ),
+    # 群聊子群
+    path(
+        "conversations/<int:conv_id>/subgroups/",
+        views.SubGroupListView.as_view(),
+        name="chat-subgroups",
+    ),
+    path(
+        "conversations/<int:conv_id>/subgroups/<int:sid>/",
+        views.SubGroupDetailView.as_view(),
+        name="chat-subgroup-detail",
+    ),
+    path(
+        "conversations/<int:conv_id>/subgroups/<int:sid>/read/",
+        views.SubGroupReadView.as_view(),
+        name="chat-subgroup-read",
+    ),
     path(
         "conversations/<int:conv_id>/pin/",
         views.ConversationPinView.as_view(),

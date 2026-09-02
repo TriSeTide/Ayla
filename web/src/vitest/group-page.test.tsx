@@ -34,6 +34,7 @@ vi.mock("../pages/group/GroupPosts", () => ({
 vi.mock("../api/chat", () => ({
   getConversation: vi.fn(),
   listConversations: vi.fn().mockResolvedValue([]),
+  listSubgroups: vi.fn().mockResolvedValue([]),
 }));
 
 function mockMatchMedia(narrow: boolean) {

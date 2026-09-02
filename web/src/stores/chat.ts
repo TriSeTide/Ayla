@@ -62,6 +62,8 @@ interface ChatState {
   /** 收到 message.new → 追加未读序号；无 seq 时保留旧的计数兼容行为。 */
   bumpUnread: (convId: string, details?: { seq?: number; mention?: boolean; reply?: boolean }) => void;
   clearUnread: (convId: string) => void;
+  /** 子群标已读后：会话未读按已读条数递减（下限 0），并移除对应未读序号。 */
+  decrementUnread: (convId: string, marked: number, seqs?: number[]) => void;
   /** 从会话未读序号投影中移除已确认阅读的消息，保留其他特殊未读。 */
   markReadSeqs: (convId: string, seqs: number[]) => void;
   /** 调整群内未读帖子数（浏览已读 -1 / 新帖 +1；下限 0，私聊忽略） */
@@ -194,6 +196,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: state.conversations.map((c) =>
         c.id === convId ? { ...c, unread_count: 0 } : c,
       ),
+    })),
+
+  decrementUnread: (convId, marked, seqs) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== convId) return c;
+        const read = new Set(seqs ?? []);
+        const unread = (c.unread_seqs ?? []).filter((seq) => !read.has(seq));
+        return {
+          ...c,
+          unread_count: Math.max(0, (c.unread_count ?? 0) - marked),
+          unread_seqs: unread,
+        };
+      }),
     })),
 
   markReadSeqs: (convId, seqs) =>
