@@ -36,7 +36,12 @@ interface PostsState {
   upsertPost: (post: Post) => void;
   /** WebSocket 实时更新：从列表中移除帖子 */
   removePost: (postId: number) => void;
-  
+
+  /** 浏览上报成功后批量落地：{post_id → 最新 view_count}，标记已读（is_viewed） */
+  markViewedBatch: (updated: Record<string, number>) => void;
+  /** WS post.viewed（他人浏览）：只刷新 view_count，不标记本人已读 */
+  updatePostViewCount: (postId: number, viewCount: number) => void;
+
   reset: () => void;
 }
 
@@ -98,6 +103,26 @@ export const usePostsStore = create<PostsState>((set) => ({
   removePost: (postId) =>
     set((state) => ({
       posts: state.posts.filter((p) => p.id !== postId),
+    })),
+
+  markViewedBatch: (updated) =>
+    set((state) => {
+      const ids = new Set(Object.keys(updated).map(Number));
+      if (ids.size === 0) return state;
+      return {
+        posts: state.posts.map((p) =>
+          ids.has(p.id)
+            ? { ...p, is_viewed: true, view_count: updated[String(p.id)] ?? p.view_count }
+            : p,
+        ),
+      };
+    }),
+
+  updatePostViewCount: (postId, viewCount) =>
+    set((state) => ({
+      posts: state.posts.map((p) =>
+        p.id === postId ? { ...p, view_count: viewCount } : p,
+      ),
     })),
 
   reset: () =>

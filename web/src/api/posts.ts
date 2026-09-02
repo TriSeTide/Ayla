@@ -80,3 +80,16 @@ export function deleteComment(commentId: number) {
     method: "DELETE",
   });
 }
+
+/**
+ * POST /posts/views/ —— 批量记录浏览（幂等，浏览与已读同源）。
+ *
+ * 每人每帖最多 1 次（后端 unique 约束），作者自己不计；
+ * 返回 {updated: {post_id: 最新 view_count}}，仅含本次实际新增浏览的帖子。
+ */
+export function reportPostViews(postIds: number[]) {
+  return apiRequest<{ updated: Record<string, number> }>("/posts/views/", {
+    method: "POST",
+    body: { post_ids: postIds.map(String) },
+  });
+}

@@ -25,6 +25,7 @@ import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { usePostsStore, isPostsStale } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
+import { usePostViewTracking } from "../hooks/usePostViewTracking";
 import { chatWS } from "../ws/chat";
 
 /** 瀑布流断点：>1024px 双列（方案 §4-U2；design.md §9 断点 1024）。 */
@@ -40,6 +41,8 @@ export function PostsHubPage() {
   const [revealNonce, setRevealNonce] = useState(0);
 
   const hubRef = useRef<HTMLDivElement>(null);
+  // 视口浏览上报（浏览与已读同源）：进入视口即加浏览，无需点击
+  usePostViewTracking(hubRef);
   // U14：返回保留滚动位置（restoring 时禁 reveal stagger）
   const scrollRestoreKey = "posts-feed";
   const { restoring } = useScrollRestore(scrollRestoreKey, hubRef);
@@ -195,6 +198,7 @@ export function PostsHubPage() {
                   return (
                     <div
                       key={p.id}
+                      data-post-id={p.id}
                       className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
                       style={
                         revealItems

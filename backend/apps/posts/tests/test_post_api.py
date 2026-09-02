@@ -655,3 +655,133 @@ class TestAllowedGroupIds:
         )
         assert resp.status_code == 400
         assert "allowed_group_ids" in resp.json()["detail"]
+
+
+# ---------- 浏览量 / 已读（同源，去重） ----------
+
+@pytest.mark.django_db
+class TestPostViews:
+    def test_bulk_view_increments_and_marks_viewed(self, auth_client, user_factory):
+        client, viewer = auth_client(username="v_viewer")
+        owner = user_factory(username="v_owner")
+        p1 = _make_post(owner, "v-1")
+        p2 = _make_post(owner, "v-2")
+
+        resp = client.post(
+            "/api/v1/posts/views/", {"post_ids": [str(p1.id), str(p2.id)]}, format="json"
+        )
+        assert resp.status_code == 200, resp.content
+        updated = resp.json()["updated"]
+        assert updated == {str(p1.id): 1, str(p2.id): 1}
+
+        # 列表/详情输出 view_count + is_viewed
+        resp = client.get("/api/v1/posts/")
+        by_id = {p["id"]: p for p in resp.json()["results"]}
+        assert by_id[p1.id]["view_count"] == 1
+        assert by_id[p1.id]["is_viewed"] is True
+        assert by_id[p2.id]["is_viewed"] is True
+
+        resp = client.get(f"/api/v1/posts/{p1.id}/")
+        assert resp.json()["view_count"] == 1
+        assert resp.json()["is_viewed"] is True
+
+    def test_view_dedup_per_user(self, auth_client, user_factory):
+        client, viewer = auth_client(username="v_dedup")
+        owner = user_factory(username="v_dedup_owner")
+        post = _make_post(owner, "v-dedup")
+
+        for _ in range(3):
+            resp = client.post(
+                "/api/v1/posts/views/", {"post_ids": [str(post.id)]}, format="json"
+            )
+            assert resp.status_code == 200
+        # 重复上报只计 1 次；第二次起 updated 为空
+        assert resp.json()["updated"] == {}
+        post.refresh_from_db()
+        assert post.view_count == 1
+        assert post.views.count() == 1
+
+    def test_author_own_post_not_counted(self, auth_client):
+        client, author = auth_client(username="v_author")
+        post = _make_post(author, "v-mine")
+        resp = client.post(
+            "/api/v1/posts/views/", {"post_ids": [str(post.id)]}, format="json"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == {}
+        post.refresh_from_db()
+        assert post.view_count == 0
+        # 作者自己的帖子天然已读（is_viewed=True，不产生未读红点）
+        resp = client.get(f"/api/v1/posts/{post.id}/")
+        assert resp.json()["is_viewed"] is True
+
+    def test_view_requires_auth(self, client):
+        resp = client.post("/api/v1/posts/views/", {"post_ids": ["1"]}, format="json")
+        assert resp.status_code in (401, 403)
+
+    def test_view_batch_validation(self, auth_client):
+        client, user = auth_client(username="v_bad")
+        resp = client.post("/api/v1/posts/views/", {"post_ids": "1"}, format="json")
+        assert resp.status_code == 400
+        resp = client.post(
+            "/api/v1/posts/views/", {"post_ids": list(range(200))}, format="json"
+        )
+        assert resp.status_code == 400
+
+    def test_group_unread_count(self, auth_client, user_factory):
+        """群内未读帖子数：别人发的未浏览 = 未读；浏览后已读；自己发的不算。"""
+        from apps.posts.services import get_group_post_unread_count
+
+        client, member = auth_client(username="v_gm")
+        owner = user_factory(username="v_go")
+        group = _make_group(owner, [member])
+        p1 = _make_post(owner, "g-unread-1", visibility=Visibility.GROUP, group=group)
+        _make_post(owner, "g-unread-2", visibility=Visibility.GROUP, group=group)
+        _make_post(member, "g-mine", visibility=Visibility.GROUP, group=group)
+
+        assert get_group_post_unread_count(group.id, member) == 2  # 自己发的排除
+
+        resp = client.post(
+            "/api/v1/posts/views/", {"post_ids": [str(p1.id)]}, format="json"
+        )
+        assert resp.status_code == 200
+        assert get_group_post_unread_count(group.id, member) == 1
+
+    def test_view_broadcasts_post_viewed(self, auth_client, user_factory, monkeypatch):
+        """浏览上报成功后广播 post.viewed：可见群组频道 + 浏览者本人频道。
+
+        可见范围（群组频道）用于所有人实时刷新 view_count；
+        本人频道用于多端同步已读态（is_viewed + 群未读红点递减）。
+        """
+        client, viewer = auth_client(username="v_bcast")
+        owner = user_factory(username="v_bcast_owner")
+        group = _make_group(owner, [viewer])
+        post = _make_post(owner, "v-bcast", visibility=Visibility.GROUP, group=group)
+
+        sent: list[tuple[str, dict]] = []
+
+        class FakeLayer:
+            async def group_send(self, group, event):
+                sent.append((group, event))
+
+        def fake_get_layer():
+            return FakeLayer()
+
+        monkeypatch.setattr("channels.layers.get_channel_layer", fake_get_layer)
+
+        resp = client.post(
+            "/api/v1/posts/views/", {"post_ids": [str(post.id)]}, format="json"
+        )
+        assert resp.status_code == 200
+
+        groups = [g for g, _ in sent]
+        assert f"chat_conv_{group.id}" in groups
+        assert f"chat_user_{viewer.id}" in groups
+
+        event = sent[0][1]
+        assert event["type"] == "post.viewed"
+        data = event["data"]
+        assert data["post_id"] == str(post.id)
+        assert data["view_count"] == 1
+        assert data["viewer_id"] == str(viewer.id)
+        assert set(data["allowed_group_ids"]) == {str(group.id)}

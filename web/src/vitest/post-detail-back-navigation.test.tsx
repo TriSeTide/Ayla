@@ -32,6 +32,7 @@ vi.mock("../api/posts", () => ({
   deleteComment: vi.fn(),
   updatePost: vi.fn(),
   deletePost: vi.fn(),
+  reportPostViews: vi.fn().mockResolvedValue({ updated: {} }),
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn().mockResolvedValue([]),
@@ -62,6 +63,8 @@ const post: Post = {
   images: [],
   comment_count: 0,
   is_author: true,
+  view_count: 0,
+  is_viewed: false,
   created_at: "2026-01-01",
   updated_at: "2026-01-01",
 };

@@ -13,10 +13,11 @@ import base64
 from datetime import datetime
 
 from django.db import transaction
+from django.db.models import F
 
 from apps.common.visibility import Visibility
 
-from .models import Comment, Post, PostImage
+from .models import Comment, Post, PostImage, PostView
 
 # 游标分隔符（created_at.isoformat() 不含此字符）
 _CURSOR_SEP = "|"
@@ -59,6 +60,10 @@ def create_post(author, title: str, body: str, images=None, group=None, visibili
         # 使群可见性完全由 allowed_groups 表达（group FK 不承载可见性）。
         from apps.common.visibility import set_allowed_groups
         set_allowed_groups(post, [str(group.id)])
+    # 工程约束：group 可见必须至少一个白名单群（空白名单 = 对所有人不可见，误建；
+    # 事务内 raise 自动回滚本次创建）。
+    if visibility == Visibility.GROUP and not post.allowed_groups.exists():
+        raise ValueError("群成员可见必须指定至少一个群")
     for order, media_id in enumerate(images or []):
         media = _resolve_media(media_id)
         if media is None:
@@ -121,8 +126,122 @@ def create_comment(
     )
 
 
-# ---------- 游标编解码 ----------
+# ---------- 浏览 / 已读（同源） ----------
 
+# 单次批量上报的帖子数上限（防滥用；前端一屏最多约 20 张卡）
+MAX_VIEW_BATCH = 100
+
+
+@transaction.atomic
+def record_post_views(post_ids, user) -> dict[int, int]:
+    """批量记录浏览（幂等，浏览与已读同源）。
+
+    - 每人每帖最多 1 次：unique(post, user) 约束 + get_or_create 兜底；
+    - 作者自己发的帖子不计浏览（天然已读，不产生未读红点）；
+    - 返回 {post_id: 更新后的 view_count}，仅含本次实际新增浏览的帖子。
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return {}
+    seen: set[int] = set()
+    for raw in post_ids or []:
+        try:
+            pid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if pid > 0:
+            seen.add(pid)
+    if not seen:
+        return {}
+
+    posts = list(
+        Post.objects.filter(id__in=seen).select_for_update().only("id", "owner_id", "view_count")
+    )
+    updated: dict[int, int] = {}
+    for post in posts:
+        if post.owner_id == user.id:
+            continue  # 作者自己不计浏览
+        _, created = PostView.objects.get_or_create(post=post, user=user)
+        if created:
+            Post.objects.filter(pk=post.pk).update(view_count=F("view_count") + 1)
+            updated[post.id] = post.view_count + 1
+    return updated
+
+
+def get_group_post_unread_count(group_id, user) -> int:
+    """群内未读帖子数：该群可见（allowed_groups 白名单）且我未浏览过的帖子。
+
+    - 浏览与已读同源：无 PostView 记录 = 未读；
+    - 排除自己发的帖子（作者天然已读，不给自己产生红点）；
+    - 仅群内场景使用（已读未读不显示在群外）。
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return 0
+    return (
+        Post.objects.filter(allowed_groups__id=group_id)
+        .exclude(owner=user)
+        .exclude(views__user=user)
+        .distinct()
+        .count()
+    )
+
+
+def broadcast_post_viewed(updated: dict[int, int], viewer) -> None:
+    """浏览/已读事件实时广播（浏览与已读同源，跨端/跨界面热更新）。
+
+    分发范围：
+    - 帖子可见范围（allowed_groups 群组频道 + public 全局信息流组）：
+      所有看到该帖的用户刷新 view_count（浏览量数字实时更新）；
+    - 浏览者本人频道 chat_user_{viewer.id}：多端同步已读态
+      （is_viewed + 群未读红点递减——已读是私有状态，只推给本人）。
+
+    事件 `post.viewed`：{post_id, view_count, viewer_id, allowed_group_ids}。
+    """
+    if not updated or viewer is None or not getattr(viewer, "is_authenticated", False):
+        return
+    import logging
+    from asgiref.sync import async_to_sync
+    from channels.exceptions import ChannelFull
+    from channels.layers import get_channel_layer
+
+    logger = logging.getLogger(__name__)
+    layer = get_channel_layer()
+    if layer is None:
+        return
+
+    posts = Post.objects.filter(id__in=updated.keys()).prefetch_related("allowed_groups")
+    for post in posts:
+        allowed = [str(g.id) for g in post.allowed_groups.all()]
+        event = {
+            "type": "post.viewed",
+            "data": {
+                "post_id": str(post.id),
+                "view_count": updated[post.id],
+                "viewer_id": str(viewer.id),
+                "allowed_group_ids": allowed,
+            },
+        }
+        targets: list[str] = []
+        if post.visibility == Visibility.PUBLIC:
+            targets.append(POST_FEED_GROUP)
+        targets.extend(f"chat_conv_{gid}" for gid in allowed)
+        # 本人的用户组：多端同步已读红点（已读不广播给他人，避免泄漏浏览隐私）
+        targets.append(f"chat_user_{viewer.id}")
+        for target in dict.fromkeys(targets):
+            try:
+                async_to_sync(layer.group_send)(target, event)
+            except ChannelFull:
+                logger.warning(
+                    "Channel layer full when broadcasting post.viewed %s to %s",
+                    post.id,
+                    target,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to broadcast post.viewed %s to %s", post.id, target
+                )
+
+
+# ---------- 游标编解码 ----------
 def _b64encode(raw: str) -> str:
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
 

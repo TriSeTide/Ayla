@@ -7,6 +7,7 @@ import { useAuthStore } from "../stores/auth";
 
 vi.mock("../api/posts", () => ({
   listPosts: vi.fn(),
+  reportPostViews: vi.fn().mockResolvedValue({ updated: {} }),
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn().mockResolvedValue([]),
@@ -22,7 +23,7 @@ vi.mock("../components/posts/PostCard", () => ({
 const post = {
   id: 1, author: { id: "u1", username: "alice", nickname: "爱丽丝", avatar: "", signature: "", status: "online", online: true, date_joined: "2026-01-01" },
   author_id: "u1", title: "我的第一帖", body: "内容", visibility: "public" as const, group: null, group_name: null,
-  images: [], comment_count: 0, is_author: true, created_at: "2026-01-01", updated_at: "2026-01-01",
+  images: [], comment_count: 0, is_author: true, view_count: 0, is_viewed: false, created_at: "2026-01-01", updated_at: "2026-01-01",
 };
 
 function DetailLocation() {

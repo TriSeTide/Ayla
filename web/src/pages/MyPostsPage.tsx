@@ -8,6 +8,7 @@ import { IconBack } from "../components/icons";
 import { PostCard } from "../components/posts/PostCard";
 import { useMasonryColumns } from "../hooks/useMasonryColumns";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { usePostViewTracking } from "../hooks/usePostViewTracking";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { useAuthStore } from "../stores/auth";
@@ -42,6 +43,8 @@ export function MyPostsPage() {
   const initializedForUserRef = useRef(currentUserId);
   const hadInitialSnapshotRef = useRef(initialSnapshot != null);
   const hubRef = useRef<HTMLDivElement>(null);
+  // 视口浏览上报（浏览与已读同源）：自己的帖子后端不计浏览，上报幂等无害
+  usePostViewTracking(hubRef);
   // 身份刚切换而本地分页状态尚未换好时，不渲染/恢复上一用户的投影；
   // 但瀑布流可读取目标用户既有快照，避免过渡帧清空其列分配记忆。
   const userStateReady = initializedForUserRef.current === currentUserId;
@@ -174,6 +177,7 @@ export function MyPostsPage() {
                 return (
                   <div
                     key={post.id}
+                    data-post-id={post.id}
                     className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
                     style={
                       revealItems

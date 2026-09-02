@@ -22,14 +22,19 @@ import { PostEditor } from "../../components/posts/PostEditor";
 import { PullToRefresh } from "../../components/motion/PullToRefresh";
 import { useMasonryColumns } from "../../hooks/useMasonryColumns";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { usePostViewTracking } from "../../hooks/usePostViewTracking";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { saveScrollPosition, useScrollRestore } from "../../hooks/useScrollRestore";
 import { usePostsStore } from "../../stores/posts";
+import { useChatStore } from "../../stores/chat";
+import { useAuthStore } from "../../stores/auth";
 import { useShellStore } from "../../stores/shell";
 import { chatWS } from "../../ws/chat";
 
 /** 瀑布流断点与一级帖子流保持一致：>1024px 双列。 */
 const MASONRY_QUERY = "(min-width: 1025px)";
+/** 进入群内帖子时，为覆盖全部未读最多连续拉取的页数（防极端数据拖垮首屏） */
+const MAX_UNREAD_LOAD_PAGES = 10;
 
 export function GroupPosts({
   groupId,
@@ -71,26 +76,57 @@ export function GroupPosts({
   // §3.4 刷新动画：刷新完成后递增，key 变化强制帖子列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     setError(null);
-    postsApi
-      .listPosts({ scope: `group:${groupId}`, limit: 20 })
-      .then((page) => {
-        setGroupPosts(page.results);
-        setLoading(false);
-      })
-      .catch((e) => {
-        setLoading(false);
-        setError(e instanceof Error ? e.message : "加载群内帖子失败");
+    // 目标未读数：会话列表权威值；进入列表时连续拉页直到覆盖全部未读
+    // （未读帖子都是最新帖，按时间倒序集中在列表头部，通常 1 页即覆盖）。
+    const targetUnread =
+      useChatStore
+        .getState()
+        .conversations.find((c) => c.id === groupId)?.post_unread_count ?? 0;
+    let cursor: string | null = null;
+    let acc: Post[] = [];
+    let hasMore = true;
+    let pages = 0;
+    while (hasMore && pages < MAX_UNREAD_LOAD_PAGES) {
+      const page = await postsApi.listPosts({
+        scope: `group:${groupId}`,
+        limit: 20,
+        cursor,
       });
+      acc = [...acc, ...page.results];
+      hasMore = page.has_more;
+      cursor = page.next_cursor;
+      pages += 1;
+      const loadedUnread = acc.filter((p) => !p.is_viewed).length;
+      if (loadedUnread >= targetUnread) break;
+    }
+    setGroupPosts(acc);
+    setLoading(false);
   }, [groupId]);
 
-  // 上拉刷新/刷新键共用：强制重拉群内帖子（group scope）
+  // 上拉刷新/刷新键共用：强制重拉群内帖子（group scope，同样覆盖未读）
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const page = await postsApi.listPosts({ scope: `group:${groupId}`, limit: 20 });
-      setGroupPosts(page.results);
+      let cursor: string | null = null;
+      let acc: Post[] = [];
+      let hasMore = true;
+      let pages = 0;
+      while (hasMore && pages < MAX_UNREAD_LOAD_PAGES) {
+        const page = await postsApi.listPosts({
+          scope: `group:${groupId}`,
+          limit: 20,
+          cursor,
+        });
+        acc = [...acc, ...page.results];
+        hasMore = page.has_more;
+        cursor = page.next_cursor;
+        pages += 1;
+        const loadedUnread = acc.filter((p) => !p.is_viewed).length;
+        if (loadedUnread >= (useChatStore.getState().conversations.find((c) => c.id === groupId)?.post_unread_count ?? 0)) break;
+      }
+      setGroupPosts(acc);
       setSkipRevealRestoreKey(null);
       setRevealAfterRefresh(true);
       setRevealNonce((n) => n + 1);
@@ -115,7 +151,23 @@ export function GroupPosts({
   useEffect(() => {
     load();
     return chatWS.onFrame((frame) => {
-      if (frame.type === "post.created" || frame.type === "post.deleted") load();
+      if (frame.type === "post.created" || frame.type === "post.deleted") {
+        load();
+        return;
+      }
+      if (frame.type === "post.viewed") {
+        // 跨端已读热更新：本账号其他端浏览后，同步本地 groupPosts（标签实时减少）
+        const d = frame.data;
+        const me = useAuthStore.getState().currentUser;
+        if (!me || String(d.viewer_id) !== String(me.id)) return;
+        setGroupPosts((prev) =>
+          prev.map((p) =>
+            String(p.id) === d.post_id
+              ? { ...p, is_viewed: true, view_count: d.view_count }
+              : p,
+          ),
+        );
+      }
     });
   }, [load]);
 
@@ -163,15 +215,106 @@ export function GroupPosts({
     [],
   );
 
-  // 展示 = store 投影 ∪ 完整 group 数据（按 id 去重、时间倒序）
+  // 展示 = store 投影 ∪ 完整 group 数据（按 id 去重、时间倒序）。
+  // is_viewed/view_count 单调（浏览后不回退）：合并时取「或 / max」，
+  // 让浏览上报（更新 posts store）能实时反映到本地 groupPosts 的已读态与浏览量。
   const displayPosts = useMemo(() => {
     const byId = new Map<number, Post>();
     for (const p of groupedFromStore) byId.set(p.id, p);
-    for (const p of groupPosts) byId.set(p.id, p);
+    for (const p of groupPosts) {
+      const existing = byId.get(p.id);
+      if (existing) {
+        byId.set(p.id, {
+          ...p,
+          is_viewed: p.is_viewed || existing.is_viewed,
+          view_count: Math.max(p.view_count ?? 0, existing.view_count ?? 0),
+        });
+      } else {
+        byId.set(p.id, p);
+      }
+    }
     return Array.from(byId.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   }, [groupedFromStore, groupPosts]);
+
+  // 视口浏览上报（浏览与已读同源）：进入视口即加浏览/已读；
+  // onViewed 同步本地 groupPosts 的已读态（store 可能不含全部群帖，标签据此实时减少）。
+  // 群未读红点递减由后端 post.viewed WS 事件统一负责（避免同一条浏览被多条路径重复减）。
+  const handleViewed = useCallback((updated: Record<string, number>) => {
+    setGroupPosts((prev) =>
+      prev.map((p) =>
+        updated[String(p.id)] != null
+          ? { ...p, is_viewed: true, view_count: updated[String(p.id)] }
+          : p,
+      ),
+    );
+  }, []);
+  usePostViewTracking(listRef, handleViewed);
+
+  // 未读帖子 = 我未浏览过的（is_viewed=false；作者自己的帖子后端恒 true）
+  const unreadPosts = useMemo(
+    () => displayPosts.filter((p) => !p.is_viewed),
+    [displayPosts],
+  );
+
+  // 滚动位置 → 上方/下方未读数（实时更新：每看到一条即已读，标签随之减少）
+  const [scrollTick, setScrollTick] = useState(0);
+  const handleListScroll = useCallback(() => {
+    setScrollTick((t) => t + 1);
+  }, []);
+  const { aboveUnread, belowUnread } = useMemo(() => {
+    const root = listRef.current;
+    if (!root) return { aboveUnread: 0, belowUnread: 0 };
+    const elRect = root.getBoundingClientRect();
+    let above = 0;
+    let below = 0;
+    for (const p of unreadPosts) {
+      const node = root.querySelector<HTMLElement>(`[data-post-id="${p.id}"]`);
+      if (!node) continue;
+      const r = node.getBoundingClientRect();
+      if (r.bottom < elRect.top) {
+        above += 1;
+      } else if (r.top > elRect.bottom) {
+        below += 1;
+      } else {
+        // 视口内：按中心相对视口中心归入上/下（上报去抖期间仍可跳转）
+        const center = (r.top + r.bottom) / 2;
+        const viewportCenter = (elRect.top + elRect.bottom) / 2;
+        if (center <= viewportCenter) above += 1;
+        else below += 1;
+      }
+    }
+    return { aboveUnread: above, belowUnread: below };
+  }, [unreadPosts, scrollTick, displayPosts]);
+
+  // 跳转到最近的未读帖子（上方 → 列表顺序中第一个在视口上方的；下方同理）
+  const jumpToUnread = useCallback(
+    (direction: "above" | "below") => {
+      const root = listRef.current;
+      if (!root) return;
+      const elRect = root.getBoundingClientRect();
+      let target: HTMLElement | null = null;
+      for (const p of unreadPosts) {
+        const node = root.querySelector<HTMLElement>(`[data-post-id="${p.id}"]`);
+        if (!node) continue;
+        const r = node.getBoundingClientRect();
+        if (direction === "above" && r.bottom < elRect.top) {
+          target = node;
+          break;
+        }
+        if (direction === "below" && r.top > elRect.bottom) {
+          target = node;
+          break;
+        }
+      }
+      if (!target) return;
+      const targetRect = target.getBoundingClientRect();
+      root.scrollTop += targetRect.top - elRect.top - root.clientHeight / 2;
+      setScrollTick((t) => t + 1);
+    },
+    [unreadPosts],
+  );
 
   // U14：群内详情不会卸载 GroupPosts，只会用 postId 条件切换列表/详情 DOM。
   // active 显式描述列表容器生命周期；ready 等帖子形成可滚高度后再恢复。
@@ -213,7 +356,7 @@ export function GroupPosts({
 
   return (
     <div className="group-posts">
-      <div className="group-posts-list" ref={listRef}>
+      <div className="group-posts-list" ref={listRef} onScroll={handleListScroll}>
         <div className="group-scene-head">
           <div className="group-scene-head-copy">
             <h3 className="group-scene-title">群内帖子</h3>
@@ -251,6 +394,7 @@ export function GroupPosts({
                     return (
                       <div
                         key={post.id}
+                        data-post-id={post.id}
                         className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
                         style={
                           revealItems
@@ -280,6 +424,33 @@ export function GroupPosts({
           )}
         </PullToRefresh>
       </div>
+      {/* 未读帖子跳转标签（与聊天界面同语言）：上方/下方有未读时显示数量，点击跳转 */}
+      {aboveUnread > 0 && (
+        <div className="message-jump-tags message-jump-tags-above" aria-live="polite">
+          <button
+            type="button"
+            className="message-jump-mention"
+            onClick={() => jumpToUnread("above")}
+            aria-label={`跳转到上方 ${aboveUnread} 条未读帖子`}
+            title="上方有未读帖子"
+          >
+            ↑ {aboveUnread} 条未读帖子
+          </button>
+        </div>
+      )}
+      {belowUnread > 0 && (
+        <div className="message-jump-tags message-jump-tags-below" aria-live="polite">
+          <button
+            type="button"
+            className="message-jump-mention"
+            onClick={() => jumpToUnread("below")}
+            aria-label={`跳转到下方 ${belowUnread} 条未读帖子`}
+            title="下方有未读帖子"
+          >
+            ↓ {belowUnread} 条未读帖子
+          </button>
+        </div>
+      )}
       {editorExpanded && (
         <div
           className="group-posts-scrim"

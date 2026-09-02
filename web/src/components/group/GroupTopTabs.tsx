@@ -13,6 +13,8 @@ import type { CSSProperties, TouchEvent as ReactTouchEvent } from "react";
 import { Avatar } from "../Avatar";
 import { IconGame, IconPost, IconVideo, IconMic } from "../icons";
 import type { GroupScene } from "../../stores/group";
+import { useGroupStore } from "../../stores/group";
+import { useChatStore } from "../../stores/chat";
 
 const TABS: Array<{ scene: GroupScene; label: string; icon: typeof IconMic }> = [
   { scene: "voice", label: "语音", icon: IconMic },
@@ -49,6 +51,10 @@ export function GroupTopTabs({
   pullHandlers?: PullHandlers;
 }) {
   const showDots = activeScene !== "chat" && activeScene !== "info";
+  // 群内未读帖子数（浏览与已读同源）：>0 时帖子 tab 显示红点
+  const currentGroupId = useGroupStore((s) => s.currentGroupId);
+  const postUnread = useChatStore((s) => s.conversations
+    .find((c) => c.id === currentGroupId)?.post_unread_count ?? 0);
 
   return (
     <div className="group-top-tabs" style={style} {...pullHandlers}>
@@ -97,6 +103,13 @@ export function GroupTopTabs({
                 >
                   <Icon width={22} height={22} />
                   <span>{t.label}</span>
+                  {t.scene === "posts" && postUnread > 0 && (
+                    <span
+                      className="group-top-dot-badge"
+                      aria-label={`${postUnread} 条未读帖子`}
+                      title="有未读帖子"
+                    />
+                  )}
                 </button>
               </li>
             );

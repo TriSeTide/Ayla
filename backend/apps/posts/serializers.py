@@ -48,6 +48,9 @@ class PostSerializer(serializers.ModelSerializer):
     images = PostImageSerializer(many=True, read_only=True)
     comment_count = serializers.SerializerMethodField()
     is_author = serializers.SerializerMethodField()
+    # 浏览量（冗余计数）+ 我是否已浏览/已读（浏览与已读同源；列表已 annotate _viewed）
+    view_count = serializers.IntegerField(read_only=True)
+    is_viewed = serializers.SerializerMethodField()
     allowed_group_ids = serializers.SerializerMethodField()
     allowed_group_names = serializers.SerializerMethodField()
 
@@ -74,6 +77,8 @@ class PostSerializer(serializers.ModelSerializer):
             "images",
             "comment_count",
             "is_author",
+            "view_count",
+            "is_viewed",
             "created_at",
             "updated_at",
         ]
@@ -81,6 +86,24 @@ class PostSerializer(serializers.ModelSerializer):
 
     def get_author(self, obj):
         return UserPublicSerializer(obj.owner, context=self.context).data
+
+    def get_is_viewed(self, obj) -> bool:
+        """我是否已浏览过该帖（浏览与已读同源；列表已 annotate _viewed 避免 N+1）。
+
+        作者自己的帖子天然已读（不给自己产生未读红点，也不计浏览）。
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        if obj.owner_id == user.id:
+            return True
+        viewed = getattr(obj, "_viewed", None)
+        if viewed is not None:
+            return bool(viewed)
+        from .models import PostView
+
+        return PostView.objects.filter(post=obj, user=user).exists()
 
     def get_comment_count(self, obj) -> int:
         if (
@@ -174,8 +197,11 @@ class CreatePostSerializer(serializers.Serializer):
     body = serializers.CharField(required=True, max_length=10000)
     visibility = serializers.ChoiceField(choices=Visibility.choices, required=False)
     group = serializers.CharField(required=False, allow_null=True, default=None)
+    # 注意：不能设 default=list —— 未传时应保持「未提供」（None），
+    # 让 services.create_post 走归属群兜底（group 归属 → 白名单=[group.id]）。
+    # 若 default=list，未传会变成空列表覆盖兜底 → 群帖白名单为空、对群员不可见（Bug）。
     allowed_group_ids = serializers.ListField(
-        child=serializers.CharField(max_length=32), required=False, default=list
+        child=serializers.CharField(max_length=32), required=False
     )
     # 字段名沿用 images（历史契约）；语义已扩展为帖子媒体列表（图片/视频）
     images = serializers.ListField(

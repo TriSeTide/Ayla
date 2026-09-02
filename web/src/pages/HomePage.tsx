@@ -243,7 +243,7 @@ export function HomePage() {
                     key={g.id}
                     group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
                     slides={carouselFor(g.id, g.unread_count)}
-                    unread={g.unread_count}
+                    unread={g.unread_count + (g.post_unread_count ?? 0)}
                     isPinned={g.is_pinned}
                     onOpen={() => openGroup(g.id)}
                     onError={setActionError}
@@ -267,7 +267,7 @@ export function HomePage() {
                   <GroupListItem
                     key={g.id}
                     group={{ id: g.id, title: g.title, avatar: g.avatar, memberCount: g.member_count }}
-                    status={{ unread: g.unread_count, ...presenceFor(g.id) }}
+                    status={{ unread: g.unread_count + (g.post_unread_count ?? 0), ...presenceFor(g.id) }}
                     newEventText={act.lastEvent?.text}
                     isPinned={g.is_pinned}
                     onOpen={() => openGroup(g.id)}

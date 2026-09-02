@@ -557,6 +557,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         """接收帖子编辑推送并转发给 WebSocket 客户端。"""
         await self.send_json(event)
 
+    async def post_viewed(self, event):
+        """接收浏览/已读推送并转发给 WebSocket 客户端。
+
+        缺少本 handler 时 Channels 会抛 "No handler for message type post.viewed"
+        使整个消费者崩溃 → WS 断连 → 前端重连补发历史消息 → 红点风暴（Bug）。
+        """
+        await self.send_json(event)
+
     async def comment_created(self, event):
         """接收评论创建推送并转发给 WebSocket 客户端。"""
         await self.send_json(event)

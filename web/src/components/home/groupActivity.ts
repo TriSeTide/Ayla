@@ -267,7 +267,14 @@ export interface CarouselVoiceRoom {
 export type GroupCarouselSlide =
   | { kind: "message-voice"; newMessageCount: number; voiceRooms: CarouselVoiceRoom[] }
   | { kind: "live"; host: string; title: string; cover: string | null }
-  | { kind: "post"; title: string; body: string; image: string | null }
+  | {
+      kind: "post";
+      title: string;
+      body: string;
+      image: string | null;
+      /** 该群是否有未读帖子（浏览与已读同源）：仅未读时轮播卡显示「有新帖」 */
+      hasUnread: boolean;
+    }
   | { kind: "game"; name: string; memberCount: number; cover: string | null };
 
 /** 语音房轮播最多展示的房间数（超出按人数降序截断） */
@@ -295,9 +302,14 @@ export function useGroupCarouselSlides(): (
   const voiceChannels = useVoiceStore((s) => s.channels);
   const gameRooms = useBoardgameStore((s) => s.rooms);
   const posts = usePostsStore((s) => s.posts);
+  // 群未读帖子数（浏览与已读同源）：订阅保证浏览上报/新帖事件后轮播「有新帖」实时刷新
+  const conversations = useChatStore((s) => s.conversations);
 
   return (groupId, unreadCount) => {
     const slides: GroupCarouselSlide[] = [];
+    // 该群未读帖子数（会话列表权威值；旧后端缺失按 0）
+    const postUnread =
+      conversations.find((c) => c.id === groupId)?.post_unread_count ?? 0;
 
     // 1. 消息 + 语音合卡：语音按「有人」房间逐行（每房间一行，最多 3 个，人数降序）
     const voiceRooms: CarouselVoiceRoom[] = [];
@@ -358,6 +370,7 @@ export function useGroupCarouselSlides(): (
         title: latest.title,
         body: latest.body,
         image: latest.image,
+        hasUnread: postUnread > 0,
       });
     }
 

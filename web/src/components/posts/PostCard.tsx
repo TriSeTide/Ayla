@@ -8,7 +8,7 @@
 import { useState } from "react";
 import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
-import { IconHeart, IconMessage } from "../icons";
+import { IconEye, IconHeart, IconMessage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { PostVideoCover } from "./PostVideoCover";
 import { mediaContentUrl } from "../../api/media";
@@ -125,6 +125,10 @@ export function PostCard({
         <span className="post-card-stat">
           <IconMessage width={16} height={16} />
           {post.comment_count}
+        </span>
+        <span className="post-card-stat">
+          <IconEye width={16} height={16} />
+          {post.view_count ?? 0}
         </span>
         <button
           type="button"

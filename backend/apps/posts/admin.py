@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Comment, Post, PostImage
+from .models import Comment, Post, PostImage, PostView
 
 
 @admin.register(Post)
@@ -21,3 +21,10 @@ class CommentAdmin(admin.ModelAdmin):
     list_display = ("id", "post", "author", "created_at")
     search_fields = ("body", "author__username")
     list_filter = ("post", "created_at")
+
+
+@admin.register(PostView)
+class PostViewAdmin(admin.ModelAdmin):
+    list_display = ("id", "post", "user", "viewed_at")
+    list_filter = ("viewed_at",)
+    search_fields = ("post__title", "user__username")

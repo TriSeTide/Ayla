@@ -92,6 +92,49 @@ class TestConversationList:
         resp = cc.get("/api/v1/chat/conversations/")
         assert resp.json() == []
 
+    def test_group_post_unread_count(self, auth_client, user_factory):
+        """会话列表 post_unread_count：群内未读帖子数（浏览后清零；私聊恒 0）。"""
+        from apps.common.visibility import Visibility, set_allowed_groups
+        from apps.posts.models import Post
+
+        b = user_factory(username="cl3_b")
+        ca, a = auth_client(username="cl3_a")
+        conv = make_group(ca, [b], title="帖子群")
+        cb = auth_as(b)
+
+        # a 发群帖（白名单含该群）→ b 未读 1
+        post = Post.objects.create(owner=a, body="群内新帖", visibility=Visibility.GROUP)
+        set_allowed_groups(post, [str(conv["id"])])
+
+        items = cb.get("/api/v1/chat/conversations/").json()
+        group_item = next(c for c in items if c["id"] == conv["id"])
+        assert group_item["post_unread_count"] == 1
+
+        # b 浏览后 → 未读 0
+        resp = cb.post(
+            "/api/v1/posts/views/", {"post_ids": [str(post.id)]}, format="json"
+        )
+        assert resp.status_code == 200
+        items = cb.get("/api/v1/chat/conversations/").json()
+        group_item = next(c for c in items if c["id"] == conv["id"])
+        assert group_item["post_unread_count"] == 0
+
+        # 私聊恒 0
+        make_private(ca, cb)
+        items = ca.get("/api/v1/chat/conversations/").json()
+        priv_item = next(c for c in items if c["type"] == "private")
+        assert priv_item["post_unread_count"] == 0
+
+    def test_consumer_registers_post_viewed_handler(self):
+        """契约：post.viewed 广播事件必须注册 consumer handler。
+
+        缺失时 Channels 抛 "No handler for message type post.viewed" → 消费者崩溃 →
+        WS 断连重连补发历史 → 红点风暴（2026-09-02 线上 Bug，防复发）。
+        """
+        from apps.chat.consumers import ChatConsumer
+
+        assert hasattr(ChatConsumer, "post_viewed")
+
 
 @pytest.mark.django_db
 class TestGroup:

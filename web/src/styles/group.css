@@ -51,6 +51,7 @@
 }
 
 .group-top-btn {
+  position: relative;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -65,6 +66,17 @@
 
 .group-top-btn.is-active {
   color: var(--text-primary);
+}
+
+/* 帖子 tab 未读红点（浏览与已读同源；有未读帖子时显示，色与未读徽标一致） */
+.group-top-dot-badge {
+  position: absolute;
+  top: 6px;
+  right: calc(50% - 18px);
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
 }
 
 /* 中央群头像槽位（原"主页"位置形变为群头像，R-G1；宽 48→64px 弹性过渡） */
@@ -505,6 +517,22 @@
 .channel-scene.is-active {
   background: rgba(157, 191, 230, 0.35);
   color: var(--text-primary);
+}
+
+/* 帖子场景项未读红点数（浏览与已读同源；显示数量，色与未读徽标一致） */
+.channel-scene-posts-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+  color: #fffafb;
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  flex: none;
 }
 
 /* ---- 宽屏内容区 ---- */

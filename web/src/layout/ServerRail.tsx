@@ -117,9 +117,13 @@ export function ServerRail({
                     <IconPinFilled width={16} height={16} />
                   </span>
                 )}
-                {g.unread_count > 0 && (
-                  <span className="server-item-badge">{g.unread_count > 99 ? "99+" : g.unread_count}</span>
-                )}
+                {(() => {
+                  // 群头像红点数 = 消息未读 + 群内未读帖子数（浏览与已读同源）
+                  const totalUnread = g.unread_count + (g.post_unread_count ?? 0);
+                  return totalUnread > 0 ? (
+                    <span className="server-item-badge">{totalUnread > 99 ? "99+" : totalUnread}</span>
+                  ) : null;
+                })()}
               </span>
             </button>
           </li>

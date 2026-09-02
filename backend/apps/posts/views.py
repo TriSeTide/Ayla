@@ -10,7 +10,7 @@
 - 列表/详情/评论按 apps/common/visibility.py 过滤与校验（不可见 → 403）；
 - 仅 author 可改删帖子；仅评论作者可删评论。
 """
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -19,7 +19,7 @@ from rest_framework.views import APIView
 from apps.common.visibility import can_view, visible_queryset
 
 from . import services
-from .models import Comment, Post
+from .models import Comment, Post, PostView
 from .serializers import (
     CommentSerializer,
     CreateCommentSerializer,
@@ -70,6 +70,29 @@ def _parse_limit(request) -> int:
     return max(1, min(limit, FEED_MAX_LIMIT))
 
 
+class PostViewBulkView(APIView):
+    """POST /posts/views/ —— 批量记录浏览（幂等，浏览与已读同源）。
+
+    入参 {post_ids: [..]}；每人每帖最多 1 次（unique 约束），作者自己不计。
+    返回 {updated: {post_id: 最新 view_count}}，仅含本次实际新增浏览的帖子；
+    前端据此本地更新 view_count 与已读态（is_viewed），无需整页重拉。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        raw = request.data.get("post_ids")
+        if not isinstance(raw, list):
+            return _bad_request("post_ids 必须是数组")
+        if len(raw) > services.MAX_VIEW_BATCH:
+            return _bad_request(f"单次最多上报 {services.MAX_VIEW_BATCH} 个帖子")
+        updated = services.record_post_views(raw, request.user)
+        if updated:
+            # 实时广播：可见范围刷新 view_count；本人频道同步已读态/群未读红点
+            services.broadcast_post_viewed(updated, request.user)
+        return Response({"updated": {str(pid): count for pid, count in updated.items()}})
+
+
 class PostListView(APIView):
     """GET /posts/（信息流游标分页）/ POST /posts/（发帖）。"""
 
@@ -81,6 +104,11 @@ class PostListView(APIView):
             visible_queryset(Post, request.user)
             .select_related("owner", "group")
             .prefetch_related("images__media")
+            .annotate(
+                _viewed=Exists(
+                    PostView.objects.filter(post=OuterRef("pk"), user=request.user)
+                )
+            )
         )
 
         if scope == "mine":
@@ -150,14 +178,16 @@ class PostListView(APIView):
         except ValueError as exc:
             return _bad_request(str(exc))
         
-        # 推送帖子创建事件
+        # 推送帖子创建事件：归属群 + 白名单群合并去重后各广播一次
+        # （create_post 会把归属群也落入 allowed_groups 白名单，若分开广播同一群会收到两次，
+        #   前端未读计数会重复 +1 —— Bug：发 1 帖出现 2 个红点）。
+        broadcast_groups = set()
         if post.group:
-            services.broadcast_post_created_to_group(post, post.group)
-        
-        # 处理 allowed_groups
-        if post.allowed_groups.exists():
-            for allowed_group in post.allowed_groups.all():
-                services.broadcast_post_created_to_group(post, allowed_group)
+            broadcast_groups.add(post.group)
+        for allowed_group in post.allowed_groups.all():
+            broadcast_groups.add(allowed_group)
+        for target_group in broadcast_groups:
+            services.broadcast_post_created_to_group(post, target_group)
         
         # 公开帖进入全局信息流；好友/群组帖不广播到全局，保持可见性边界。
         services.broadcast_post_created_to_feed(post)

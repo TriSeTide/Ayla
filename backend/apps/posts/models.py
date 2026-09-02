@@ -47,6 +47,8 @@ class Post(models.Model):
     )
     title = models.CharField("标题", max_length=128, blank=True, default="")
     body = models.TextField("正文", blank=True, default="")
+    # 浏览量：冗余计数（PostView 每人最多一条，浏览与已读同源；作者自己不计）
+    view_count = models.PositiveIntegerField("浏览量", default=0)
     created_at = models.DateTimeField("创建时间", auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 
@@ -88,6 +90,38 @@ class PostImage(models.Model):
 
     def __str__(self) -> str:
         return f"post{self.post_id}:img{self.order}"
+
+
+class PostView(models.Model):
+    """帖子浏览/已读记录（浏览与已读同源，需求：每人每帖最多 1 次）。
+
+    - 存在记录 = 该用户浏览过该帖（已读）；不存在 = 未读（仅群内场景展示）；
+    - 作者自己发的帖子不计浏览、天然已读（services 层跳过 owner=user）；
+    - unique(post, user) 保证去重；view_count 冗余计数由 services 事务维护。
+    """
+
+    id = models.AutoField(primary_key=True)
+    post = models.ForeignKey(Post, related_name="views", on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="post_views",
+        on_delete=models.CASCADE,
+    )
+    viewed_at = models.DateTimeField("浏览时间", auto_now_add=True)
+
+    class Meta:
+        db_table = "post_views"
+        verbose_name = "帖子浏览"
+        verbose_name_plural = "帖子浏览"
+        constraints = [
+            models.UniqueConstraint(fields=["post", "user"], name="post_views_unique"),
+        ]
+        indexes = [
+            models.Index(fields=["user"], name="post_views_user_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"post{self.post_id}:user{self.user_id}"
 
 
 class Comment(models.Model):

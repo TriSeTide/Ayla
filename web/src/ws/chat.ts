@@ -36,6 +36,50 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const BASE_RECONNECT_DELAY_MS = 1_000;
 
+/** post.created 幂等去重窗口：同一 postId 的重复事件（后端重复广播/WS 重放）30s 内只计一次未读 */
+const POST_CREATED_DEDUP_MS = 30_000;
+const postCreatedHandledAt = new Map<number, number>();
+
+/** 返回 true 表示本次是重复事件（已处理过，不再计未读） */
+function markPostCreatedHandled(postId: number): boolean {
+  const now = Date.now();
+  const last = postCreatedHandledAt.get(postId);
+  if (last != null && now - last < POST_CREATED_DEDUP_MS) {
+    postCreatedHandledAt.set(postId, now);
+    return true;
+  }
+  postCreatedHandledAt.set(postId, now);
+  // 惰性清理：超过 2 倍窗口的旧条目删除，防止 Map 无限增长
+  if (postCreatedHandledAt.size > 200) {
+    for (const [id, at] of postCreatedHandledAt) {
+      if (now - at > POST_CREATED_DEDUP_MS * 2) postCreatedHandledAt.delete(id);
+    }
+  }
+  return false;
+}
+
+/** post.viewed 本人已读去重窗口：同一浏览会广播到群组频道 + 本人频道各一次，
+ *  红点递减只需执行一次（view_count 更新幂等覆盖，不受去重影响）。 */
+const POST_VIEWED_DEDUP_MS = 30_000;
+const postViewedHandledAt = new Map<number, number>();
+
+/** 返回 true 表示该 postId 的本人已读（红点递减）已处理过 */
+function markPostViewedHandled(postId: number): boolean {
+  const now = Date.now();
+  const last = postViewedHandledAt.get(postId);
+  if (last != null && now - last < POST_VIEWED_DEDUP_MS) {
+    postViewedHandledAt.set(postId, now);
+    return true;
+  }
+  postViewedHandledAt.set(postId, now);
+  if (postViewedHandledAt.size > 200) {
+    for (const [id, at] of postViewedHandledAt) {
+      if (now - at > POST_VIEWED_DEDUP_MS * 2) postViewedHandledAt.delete(id);
+    }
+  }
+  return false;
+}
+
 /** 由会话信息推断消息发送者的显示名（会话列表预览用）。 */
 function previewSenderName(conv: ConversationSummary, senderId: string): string {
   const me = useAuthStore.getState().currentUser;
@@ -542,6 +586,18 @@ export class ChatWSClient {
           .then((post) => {
             usePostsStore.getState().upsertPost(post);
             bumpGroups(visibleGroupIds(post));
+            // 群未读帖子数 +1（浏览与已读同源）：作者自己发的帖子天然已读，不计。
+            // 幂等：同一 postId 的重复事件（后端归属群+白名单重复广播/WS 重放）只计一次。
+            const me = useAuthStore.getState().currentUser;
+            if (me && String(post.author_id) !== String(me.id)) {
+              const chat = useChatStore.getState();
+              const bumped = markPostCreatedHandled(postId);
+              if (!bumped) {
+                for (const gid of post.allowed_group_ids ?? []) {
+                  chat.adjustPostUnread(gid, 1);
+                }
+              }
+            }
           })
           .catch(() => { /* 当前用户不可见或帖子已删除，忽略提示 */ });
         break;
@@ -565,6 +621,33 @@ export class ChatWSClient {
             bumpGroups(visibleGroupIds(post));
           })
           .catch(() => { /* 当前用户不可见或帖子已删除，忽略提示 */ });
+        break;
+      }
+      case "post.viewed": {
+        // 浏览/已读事件（浏览与已读同源）：
+        // - 可见范围收到（他人浏览）→ 只刷新 view_count（浏览量实时更新）；
+        // - 本人频道收到（本账号多端浏览）→ 同步已读态 + 递减对应群未读红点。
+        // 同一浏览会同时广播到群组频道与本人频道，本人会收到 2 次：
+        // 红点递减按 postId 去重（只减一次），view_count 更新不去重（幂等覆盖）。
+        const d = (frame as import("../api/types").PostViewedFrame).data;
+        const postId = Number(d.post_id);
+        if (!postId) break;
+        const me = useAuthStore.getState().currentUser;
+        if (me && String(d.viewer_id) === String(me.id)) {
+          usePostsStore.getState().markViewedBatch({ [String(postId)]: d.view_count });
+          if (!markPostViewedHandled(postId)) {
+            const chat = useChatStore.getState();
+            const touched = new Set<string>();
+            for (const gid of d.allowed_group_ids ?? []) {
+              if (!touched.has(gid)) {
+                touched.add(gid);
+                chat.adjustPostUnread(gid, -1);
+              }
+            }
+          }
+        } else {
+          usePostsStore.getState().updatePostViewCount(postId, d.view_count);
+        }
         break;
       }
       case "comment.created":

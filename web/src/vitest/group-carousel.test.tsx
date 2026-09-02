@@ -24,7 +24,14 @@ function live(
 function post(
   over: Partial<Extract<GroupCarouselSlide, { kind: "post" }>> = {},
 ): GroupCarouselSlide {
-  return { kind: "post", title: "帖子标题", body: "帖子正文内容", image: null, ...over };
+  return {
+    kind: "post",
+    title: "帖子标题",
+    body: "帖子正文内容",
+    image: null,
+    hasUnread: true,
+    ...over,
+  };
 }
 
 function mockMatchMedia(reduced: boolean) {

@@ -286,6 +286,8 @@ export interface ConversationSummary {
   mention_unread_seqs?: number[];
   /** 回复未读消息的会话序号集合（F10；旧后端可能缺失） */
   reply_unread_seqs?: number[];
+  /** 群内未读帖子数（浏览与已读同源；仅群聊非 0，私聊恒 0；旧后端可能缺失） */
+  post_unread_count?: number;
   created_at: string;
   /** 私聊对端用户（ConversationListSerializer 补充） */
   peer: UserPublic | null;
@@ -315,6 +317,8 @@ export interface ConversationDetail {
   mention_unread_seqs?: number[];
   /** 回复未读消息的会话序号集合（F10；旧后端可能缺失） */
   reply_unread_seqs?: number[];
+  /** 群内未读帖子数（浏览与已读同源；仅群聊非 0，私聊恒 0；旧后端可能缺失） */
+  post_unread_count?: number;
   created_at: string;
 }
 
@@ -636,6 +640,20 @@ export interface PostUpdatedFrame {
   };
 }
 
+/** 浏览/已读事件（浏览与已读同源）：可见范围刷新 view_count；本人频道同步已读态 */
+export interface PostViewedFrame {
+  type: "post.viewed";
+  data: {
+    post_id: string;
+    /** 更新后的浏览量（幂等去重后的最新值，直接覆盖而非累加） */
+    view_count: number;
+    /** 浏览者 id：等于当前用户时同步已读态（is_viewed + 群未读红点递减） */
+    viewer_id: string;
+    /** 该帖可见群白名单（前端据此递减对应群未读红点） */
+    allowed_group_ids: string[];
+  };
+}
+
 export interface CommentCreatedFrame {
   type: "comment.created";
   data: {
@@ -682,6 +700,7 @@ export type ChatServerFrame =
   | PostCreatedFrame
   | PostDeletedFrame
   | PostUpdatedFrame
+  | PostViewedFrame
   | CommentCreatedFrame
   | CommentDeletedFrame
   | BoardgameRoomCreatedFrame
@@ -1036,6 +1055,10 @@ export interface Post {
   images: PostImage[];
   comment_count: number;
   is_author: boolean;
+  /** 浏览量（冗余计数；每人每帖最多 +1，作者自己不计） */
+  view_count: number;
+  /** 我是否已浏览/已读（浏览与已读同源；作者自己的帖子恒 true） */
+  is_viewed: boolean;
   created_at: string;
   updated_at: string;
 }

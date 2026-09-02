@@ -64,6 +64,8 @@ interface ChatState {
   clearUnread: (convId: string) => void;
   /** 从会话未读序号投影中移除已确认阅读的消息，保留其他特殊未读。 */
   markReadSeqs: (convId: string, seqs: number[]) => void;
+  /** 调整群内未读帖子数（浏览已读 -1 / 新帖 +1；下限 0，私聊忽略） */
+  adjustPostUnread: (convId: string, delta: number) => void;
   reset: () => void;
 }
 
@@ -103,6 +105,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         && item.title === next.title
         && item.avatar === next.avatar
         && item.unread_count === next.unread_count
+        && (item.post_unread_count ?? 0) === (next.post_unread_count ?? 0)
         && item.member_count === next.member_count
         && item.is_pinned === next.is_pinned
         && (item.last_message?.seq ?? null) === (next.last_message?.seq ?? null)
@@ -209,6 +212,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           mention_unread_seqs: mention,
           reply_unread_seqs: reply,
         };
+      }),
+    })),
+
+  adjustPostUnread: (convId, delta) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) => {
+        if (c.id !== convId || c.type !== "group") return c;
+        const next = Math.max(0, (c.post_unread_count ?? 0) + delta);
+        return { ...c, post_unread_count: next };
       }),
     })),
 

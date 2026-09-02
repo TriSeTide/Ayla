@@ -18,7 +18,7 @@ import { ResourceImage } from "../components/ResourceImage";
 import { PostVideoCover } from "../components/posts/PostVideoCover";
 import { deleteMedia, mediaContentUrl, uploadMediaFile, validateMediaFile } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
-import { IconBack, IconHeart, IconImage } from "../components/icons";
+import { IconBack, IconEye, IconHeart, IconImage } from "../components/icons";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
 import { usePostsStore } from "../stores/posts";
@@ -153,6 +153,31 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     load();
   }, [load]);
 
+  // 打开详情即浏览（浏览与已读同源）：上报成功后标记已读 + 更新浏览量 + 群未读递减
+  useEffect(() => {
+    if (!Number.isInteger(id) || id <= 0) return;
+    let cancelled = false;
+    postsApi
+      .reportPostViews([id])
+      .then(({ updated }) => {
+        if (cancelled || Object.keys(updated).length === 0) return;
+        usePostsStore.getState().markViewedBatch(updated);
+        // 详情本地 state 同步最新浏览量/已读态（load 与上报并发，避免显示旧值）
+        setPost((prev) =>
+          prev && updated[String(prev.id)] != null
+            ? { ...prev, is_viewed: true, view_count: updated[String(prev.id)] }
+            : prev,
+        );
+        // 群未读红点递减由后端 post.viewed WS 事件统一负责（避免重复减）
+      })
+      .catch(() => {
+        // 上报失败不阻塞详情；下次打开再试
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
   // 评论实时推送（善用 WebSocket）：评论创建/删除实时插入/移除 + 更新计数
   useEffect(() => {
     if (!Number.isInteger(id) || id <= 0) return;
@@ -178,6 +203,23 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         setPost((prev) =>
           prev ? { ...prev, comment_count: frame.data.comment_count } : prev,
         );
+        return;
+      }
+      if (frame.type === "post.viewed" && Number(frame.data.post_id) === id) {
+        // 浏览/已读热更新：他人浏览刷新 view_count；本人（多端）浏览再同步已读态
+        const d = frame.data;
+        const me = useAuthStore.getState().currentUser;
+        const isMe = me && String(d.viewer_id) === String(me.id);
+        setPost((prev) =>
+          prev
+            ? {
+                ...prev,
+                view_count: d.view_count,
+                ...(isMe ? { is_viewed: true } : {}),
+              }
+            : prev,
+        );
+        return;
       }
     });
     return off;
@@ -608,6 +650,10 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             )}
           </div>
           <footer className="post-card-foot">
+            <span className="post-card-stat">
+              <IconEye width={16} height={16} />
+              {post.view_count ?? 0}
+            </span>
             <button
               type="button"
               className={`post-card-fav ${favorited ? "is-favorited" : ""}`}

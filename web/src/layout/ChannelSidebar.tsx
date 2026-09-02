@@ -11,6 +11,7 @@ import type { GroupScene } from "../stores/group";
 import { useGroupStore } from "../stores/group";
 import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
+import { useChatStore } from "../stores/chat";
 
 const SCENE_META: Array<{ key: GroupScene; label: string; icon: typeof IconMic }> = [
   { key: "chat", label: "聊天", icon: IconChat },
@@ -37,6 +38,9 @@ export function ChannelSidebar({
     .reduce((sum, channel) => sum + (channel.member_count || 0), 0));
   const hasLive = useLiveStore((state) => state.channels
     .some((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId)) && channel.status === "live"));
+  // 群内未读帖子数（浏览与已读同源）：>0 时帖子场景项显示红点
+  const postUnread = useChatStore((state) => state.conversations
+    .find((c) => c.id === currentGroupId)?.post_unread_count ?? 0);
 
   return (
     <aside className="channel-sidebar" aria-label="群内场景">
@@ -60,6 +64,15 @@ export function ChannelSidebar({
                 <span>{s.label}</span>
                 {s.key === "voice" && voiceCount > 0 && <span className="channel-scene-status">{voiceCount}</span>}
                 {s.key === "live" && hasLive && <span className="channel-scene-status">LIVE</span>}
+                {s.key === "posts" && postUnread > 0 && (
+                  <span
+                    className="channel-scene-status channel-scene-posts-badge"
+                    aria-label={`${postUnread} 条未读帖子`}
+                    title="有未读帖子"
+                  >
+                    {postUnread > 99 ? "99+" : postUnread}
+                  </span>
+                )}
               </button>
             </li>
           );

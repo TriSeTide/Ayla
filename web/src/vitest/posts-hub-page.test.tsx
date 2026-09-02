@@ -12,6 +12,7 @@ import { usePostsStore } from "../stores/posts";
 
 vi.mock("../api/posts", () => ({
   listPosts: vi.fn(),
+  reportPostViews: vi.fn().mockResolvedValue({ updated: {} }),
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn().mockResolvedValue([]),

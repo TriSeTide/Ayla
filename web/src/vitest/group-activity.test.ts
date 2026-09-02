@@ -181,6 +181,8 @@ describe("useGroupCarouselSlides（群卡片状态轮播数据）", () => {
         : [],
       comment_count: 0,
       is_author: false,
+      view_count: 0,
+      is_viewed: false,
       created_at: createdAt,
       updated_at: createdAt,
     };
@@ -255,6 +257,7 @@ describe("useGroupCarouselSlides（群卡片状态轮播数据）", () => {
       title: "最新帖",
       body: "",
       image: "/api/v1/media/m1/thumbnail",
+      hasUnread: false,
     });
   });
 

@@ -268,6 +268,16 @@ export function IconMessage(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** 眼睛（浏览量） */
+export function IconEye(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 /** 聊天气泡（含三点省略，聊天场景/子界面图标） */
 export function IconChat(props: SVGProps<SVGSVGElement>) {
   return (

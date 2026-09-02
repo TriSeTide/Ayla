@@ -993,6 +993,16 @@
   background: var(--glass-bg-strong);
 }
 
+/* 群内帖子未读跳转标签：层级高于发帖输入栏（50）与遮罩（45）；
+   下方标签定位在输入栏上方（输入栏 compact 高度约 64px），避免被遮挡 */
+.group-posts .message-jump-tags {
+  z-index: 60;
+}
+
+.group-posts .message-jump-tags-below {
+  bottom: calc(var(--sp-3) + 64px);
+}
+
 /* 展开态：面板脱离文档流贴底，覆盖标题栏与列表（均已被遮罩压暗），
    可用高度 = 整个 group-posts 容器，不再与标题栏分空间导致底部被裁 */
 .group-posts-input.is-expanded {

@@ -241,6 +241,8 @@ class ConversationSerializer(serializers.ModelSerializer):
     last_message = serializers.SerializerMethodField()
     # M8 @ 能力：本会话 @ 我且未读的消息数（L2 会话列表 @我 标识）
     mention_unread_count = serializers.SerializerMethodField()
+    # 群内未读帖子数（浏览与已读同源；仅群聊非 0，私聊恒 0；已读未读不显示在群外）
+    post_unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
@@ -260,6 +262,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "is_pinned",
             "last_message",
             "mention_unread_count",
+            "post_unread_count",
             "unread_seqs",
             "mention_unread_seqs",
             "reply_unread_seqs",
@@ -383,6 +386,17 @@ class ConversationSerializer(serializers.ModelSerializer):
             .filter(segments__contains=[{"type": "mention", "user_id": str(request.user.id)}])
             .count()
         )
+
+    def get_post_unread_count(self, obj) -> int:
+        """群内未读帖子数（浏览与已读同源；私聊恒 0，已读未读不显示在群外）。"""
+        request = self.context.get("request")
+        if not request or not getattr(request, "user", None):
+            return 0
+        if obj.type != Conversation.TYPE_GROUP:
+            return 0
+        from apps.posts.services import get_group_post_unread_count
+
+        return get_group_post_unread_count(obj.id, request.user)
 
 
 class ConversationListSerializer(ConversationSerializer):

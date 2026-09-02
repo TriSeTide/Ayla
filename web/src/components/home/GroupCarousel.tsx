@@ -54,9 +54,12 @@ function SlideContent({ slide }: { slide: GroupCarouselSlide }) {
           ) : (
             <span className="group-carousel-fallback group-carousel-fallback-post" />
           )}
-          <span className="group-carousel-badge" aria-hidden="true">
-            有新帖
-          </span>
+          {/* 「有新帖」仅在该群存在未读帖子时显示（浏览与已读同源） */}
+          {slide.hasUnread && (
+            <span className="group-carousel-badge" aria-hidden="true">
+              有新帖
+            </span>
+          )}
           {slide.body && <span className="group-carousel-post-body">{slide.body}</span>}
           <span className="group-carousel-caption">{slide.title}</span>
         </>
