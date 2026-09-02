@@ -239,8 +239,6 @@
   padding: 0 var(--sp-4) var(--sp-2);
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--glow-500) transparent;
   scroll-padding-inline: var(--sp-4);
   /* 关键：flex column 子项默认 min-width:auto 会被七个 tab 撑开父容器，
      导致整页横向溢出/导航条截断；置 0 后宽度收敛为容器宽，tab 走横向滚动 */
