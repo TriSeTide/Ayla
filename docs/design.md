@@ -14,12 +14,12 @@ Ayla 是爱莉在 Web 端的「具身家园」。视觉主题定为 **「千禧�
 **一句话气质**：像 2003 年想象里的未来聊天软件，被 2026 年的工艺重新做了一遍。
 
 **Key Characteristics:**
-- 全局极光渐变背景（冰蓝 `#BDD4E9` → 樱粉 `#FCD8FF`），固定不动，内容在其上滚动
+- 全局流体极光渐变背景（冰蓝 `#BDD4E9` ↔ 樱粉 `#FCD8FF`），缓慢流动，内容在其上滚动（见 §7.2）
 - 磨砂玻璃卡片：`backdrop-filter: blur()` + 半透暖白底 + 1px 高光描边
 - Hot pink 辉光（`#F796FF`）只给三类东西：爱莉身份、主 CTA、在线状态
 - 圆润几何：大圆角（12–28px）、气泡形、胶囊形，无尖锐直角
 - 深靛蓝（`#465B92`）承担全部正文与主要交互，保证可读性不被粉色系拖垮
-- 动效轻快短促（150–300ms），辉光呼吸是唯一允许的环境动画
+- 动效轻快短促（150–300ms）；常驻环境动画仅两个：辉光呼吸 + 流体极光背景（§7.2）
 
 **与通用 Y2K 的差异**：不用铬金属质感、不用 CRT 扫描线、不用 glitch——那些是复古噱头。本方案只取 Y2K 的「冰蓝×泡泡粉×辉光×乐观」，其余让给现代可用性。
 
@@ -47,7 +47,7 @@ Ayla 是爱莉在 Web 端的「具身家园」。视觉主题定为 **「千禧�
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--bg-aurora` | `linear-gradient(160deg, #BDD4E9 0%, #ECF0F2 38%, #FCD8FF 100%)` | 全局背景，fixed |
+| `--bg-aurora` | `linear-gradient(var(--fluid-gradient-angle), #BDD4E9 0%, #ECF0F2 50%, #FCD8FF 100%)` | 全局背景（流体渐变，见 §7.2），fixed |
 | `--glass-bg` | `rgba(255, 250, 251, 0.55)` | 磨砂卡片底 |
 | `--glass-bg-strong` | `rgba(255, 250, 251, 0.78)` | 弹层/模态磨砂底（需更高遮挡） |
 | `--glass-border` | `rgba(255, 255, 255, 0.65)` | 玻璃 1px 高光描边 |
@@ -189,7 +189,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - **消息到达**：仅新到达的乐观消息或 WS 实时消息挂 `.msg-arrive`，复用 `frost-rise` 从下方 8px 浮入 + 淡入，180ms；初始历史加载、滚动恢复和重新挂载的历史消息不播放到达动画，不弹跳。
 - **滚动恢复与 stagger 互斥**：命中 `useScrollRestore` 的历史位置（包括显式保存的 `scrollTop=0`）时，先恢复内容高度与位置，禁止 `.reveal-item`/stagger；只有真正首次进入或用户主动刷新才播放逐条浮入。
-- 光环呼吸是唯一常驻动画；其余装饰性循环动画禁止
+- 常驻环境动画仅两个：光环呼吸 + 流体极光背景（§7.2）；其余装饰性循环动画禁止
 - 骨架屏：所有 >300ms 的异步加载用 `animate-pulse` 风格骨架（玻璃质感骨架块），禁止白屏/冻结
 - `prefers-reduced-motion`：关闭呼吸、浮入与跟手位移，保留透明度渐变；拖拽/切换必须退化为可用的直接控件路径
 
@@ -202,6 +202,20 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **Hook**：`useRevealOnEnter(active)` 返回 `{step, revealed}`，双 rAF 首帧隐藏→过渡显示。**内容由异步加载产生时，必须把 `active` 接到「内容就绪」信号（如 `!loading`），否则动画会在加载完成前就跑完、看不到浮入**。
 - **滚动恢复互斥**：列表通过 `useScrollRestore` 命中历史 `scrollTop` 后，恢复路径不得挂 `.reveal-item` / stagger；先稳定恢复内容高度与位置，首次进入和用户主动刷新才播放逐条浮入。
 - 语义边界：`.reveal` 只管**内容块自身**的浮入淡入；**底栏/输入框的位移**由 `useEnterRoomAnimation` / `useEnterGroupAnimation` 负责，两者不混淆、可叠加。
+
+### 7.2 流体极光背景（Fluid Aurora）
+
+全局背景为**四色漩涡渐变 + SVG 湍流置换纹理 + 双色丝滑螺旋光斑 + 极淡网格**（纯 CSS 驱动：静态 SVG 纹理 + CSS transform 动画，无 JS/Canvas/Web Animations/SVG 动画）：
+
+- **渐变**：**四角四色螺旋**——四角各一个柔和 radial 弥散色光（左上冰蓝 `#BDD4E9` / 右上冰蓝深 `#9DBFE6` / 右下亮樱粉 `#F9B0FF` / 左下淡樱粉 `#FCD8FF`，全部 design.md Core 浅色同族，无深色/紫/深蓝），边缘中点白色光斑隔离蓝粉（避免混合出紫），中心 35% 暖白光晕（非线性过渡：0-18% 快降被卡片盖住/白对白不可见，18-35% 缓降边缘等值线疏——避免"年轮"同心圆纹理）；150vmax 正方形 fixed 层（`left: 50%; top: 50%` + 负 margin 半尺寸，层中心恒等于视口中心——层超视口时 `inset+margin:auto` 会失效导致中心偏右露边）**变速旋转 400° 超圈**（先快后慢）+ 不规则漂移 + **明显缩放呼吸（0.8↔1.2，四角色光随层变大变小）**（GPU transform 合成，禁止 `background-position` 动画重绘；150vmax 在 scale 0.8 + 漂移 5% 极端组合下内切圆 52.5vmax ≥ 视口边缘 50vmax，旋转任意角度不露边），四角色光绕中心丝滑螺旋流动（无 conic 扇形放射感）
+- **网格**：极淡 ice-500 网格纹理（`--bg-aurora-grid`，柔和 3px 渐隐线 + 96px 周期 + 0.015 透明度——仅保留微妙层次感，肉眼几乎不可见，避免摩尔纹/可见网格线）叠加在渐变层，增加层次不抢主视觉
+- **湍流置换**：SVG `feTurbulence`（fractalNoise，baseFrequency 0.018，冰蓝调 alpha 0.2）静态纹理（`--bg-aurora-turbulence`）叠加在渐变层之上，**不规则路径漂移（±6%）+ 大角度旋转（±14°）**模拟湍流随机有机流动；层透明度 `--fluid-turbulence-opacity`（0.2，有效 ≈0.04）+ `filter: blur(24px)`（噪声更柔和，仅保留有机流动感，肉眼不可见纹理）
+- **光斑**：2 个 radial-gradient 圆（冰蓝深 `--ice-500 #9DBFE6` / 亮樱粉 `--sakura-300 #F9B0FF`），`filter: blur(40px)` 柔化轮廓 + 单段 radial 70% 截止（无多 stop 等值线）+ opacity 0.5（窄屏 0.7 提亮）；**定位**：宽屏左右半区（A `left: 25%` / B `right: 25%`，垂直贴顶/底 -10%），窄屏上下半区（A `top: 25%` / B `bottom: 25%`，水平 `left/right: 50%` + 负 margin 半尺寸居中，尺寸加大 80vw/70vw 与宽屏视觉占比相当）；**动画**（10s，`infinite alternate`）：漂移蓄势（0-30%）→ 30-50%（2s）匀速置换去对向（宽屏左右互换 / 窄屏上下互换，`translate` 帧值固定）→ 对向驻留（50-100%）；**活动范围缩小**（宽屏 ±80%/-90%、窄屏 50%/-60%）不贴边 + **呼吸 0.65↔1.35**（A/B 错相）——是"漂移 + 匀速置换 + 驻留"的有机交叉流动；**全站统一**：直播大厅/直播间/私聊浮层/帖子编辑等 5 处容器不再覆盖 `--bg-aurora`，全局流体背景全站生效
+- **层级**：html 静态兜底 < `html::before` 渐变+网格层（`filter: blur(40px)` 模糊 radial 等值线消除"年轮"纹理，整体水彩晕染）< `html::after` 湍流层（`blur(60px)`）< `body::before/::after` 光斑（`blur(40px)`）< `#root` 内容（z-index:1）；光斑在玻璃卡片之下，被 `backdrop-filter: blur(18px)` 模糊后透出，保持通透
+- **随机感**：四层动画周期互质（渐变 22s / 湍流 17s / 光斑 10s）+ 负延迟错开初始相位（-8s/-5s）+ 光斑双侧同周期同相（A/B 同步置换交叉），各层永不同步，产生有机湍流流动感
+- **可调参数**（tokens.css，禁止硬编码）：`--fluid-gradient-angle` / `--fluid-gradient-speed`（11s，渐变层单圈 = ×2 = 22s）/ `--fluid-turbulence-speed`（17s）/ `--fluid-turbulence-opacity`；光斑尺寸/周期/位移当前直接写在 base.css（宽屏 40vw·40vw @ 10s、窄屏 80vw·70vw @ 10s，`--fluid-blob-*` 为遗留备存变量）
+- **降级**：`prefers-reduced-motion` 停止全部流动动画，回退 html 静态 `--bg-aurora`；不支持 `backdrop-filter` 时光斑回退为降低透明度的实色圆；≤768px 双光斑保留并改为上下半区（A 上 80vw / B 下 70vw，alpha 0.7 提亮）且渐变/湍流放慢（省电）
+- **纪律**：光斑不是辉光（`--glow-shadow` 仍限 3 处）；背景保持明亮浅色通透，禁止深色/紫色/深蓝混入
 
 ## 8. Do's and Don'ts
 

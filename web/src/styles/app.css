@@ -3224,7 +3224,6 @@
 .live-page {
   display: flex;
   height: 100%;
-  background: var(--bg-aurora);
 }
 
 .live-sidebar {
@@ -3473,7 +3472,6 @@
 .live-room {
   display: flex;
   height: 100%;
-  background: var(--bg-aurora);
 }
 
 .live-room-main {
@@ -3666,7 +3664,6 @@
   justify-content: center;
   gap: var(--sp-4);
   height: 100%;
-  background: var(--bg-aurora);
   color: var(--text-primary);
 }
 

@@ -802,7 +802,6 @@
   z-index: 50;
   display: flex;
   flex-direction: column;
-  background: var(--bg-aurora);
   animation: post-edit-in var(--dur-fast) var(--ease-out);
 }
 
