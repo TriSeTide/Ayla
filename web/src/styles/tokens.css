@@ -19,7 +19,48 @@
   --surface: #fffafb;
 
   /* ---- Functional ---- */
-  --bg-aurora: linear-gradient(160deg, #bdd4e9 0%, #ecf0f2 38%, #fcd8ff 100%);
+  /* 四角四色螺旋渐变：四角各一个柔和 radial 弥散色光（左上冰蓝/右上冰蓝深/右下樱花粉/左下淡樱粉），
+     光斑 50% 半径（视口内颜色明显，旋转/缩放时流动可见；蓝粉混合区在视口外，无紫），
+     边缘中点白色光斑 45% 隔离蓝粉，中心 55% 暖白光晕（白色占比充足，
+     用白色均衡光斑在异色区的深色混合，旋转时粉色流到蓝色区域、蓝色流到粉色区域清晰可见）；
+     层 blur(40px) 模糊等值线（无"年轮"纹理）；层持续旋转产生丝滑螺旋流动；
+     全部来自 design.md Core 浅色同族，无深色/紫/深蓝 */
+  --bg-aurora: radial-gradient(circle at 0% 0%, #bdd4e9 0%, rgba(189, 212, 233, 0) 50%),
+    radial-gradient(circle at 100% 0%, #9dbfe6 0%, rgba(157, 191, 230, 0) 50%),
+    radial-gradient(circle at 100% 100%, rgba(241, 126, 179, 0.65) 0%, rgba(241, 126, 179, 0) 50%),
+    radial-gradient(circle at 0% 100%, #fcd8ff 0%, rgba(252, 216, 255, 0) 50%),
+    radial-gradient(circle at 50% 0%, #fffafb 0%, rgba(255, 250, 251, 0) 45%),
+    radial-gradient(circle at 100% 50%, #fffafb 0%, rgba(255, 250, 251, 0) 45%),
+    radial-gradient(circle at 50% 100%, #fffafb 0%, rgba(255, 250, 251, 0) 45%),
+    radial-gradient(circle at 0% 50%, #fffafb 0%, rgba(255, 250, 251, 0) 45%),
+    radial-gradient(circle at 50% 50%, #fffafb 0%, rgba(255, 250, 251, 0.5) 33%, rgba(255, 250, 251, 0.15) 52%, rgba(255, 250, 251, 0) 63%);
+  /* 极淡网格纹理（ice-500，柔和 3px 渐隐线 + 96px 周期 + 0.015 透明度）：
+     仅保留微妙层次感，肉眼几乎不可见，避免摩尔纹/可见网格线 */
+  --bg-aurora-grid: repeating-linear-gradient(0deg, rgba(157, 191, 230, 0.015) 0 1px, rgba(157, 191, 230, 0.008) 3px, transparent 4px 96px),
+    repeating-linear-gradient(90deg, rgba(157, 191, 230, 0.015) 0 1px, rgba(157, 191, 230, 0.008) 3px, transparent 4px 96px);
+  /* SVG feTurbulence 粉蓝双色湍流噪声纹理：噪声暗部→冰蓝、亮部→亮粉（feComponentTransfer table 映射），
+     流动时粉蓝斑块互相渗透（"粉色流到蓝色、蓝色流到粉色"）；静态纹理 + CSS transform 动画驱动（纯 CSS） */
+  --bg-aurora-turbulence: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'480'%20height%3D'480'%3E%3Cfilter%20id%3D't'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.012'%20numOctaves%3D'3'%20seed%3D'11'%2F%3E%3CfeComponentTransfer%3E%3CfeFuncR%20type%3D'table'%20tableValues%3D'0.741%200.988%200.976'%2F%3E%3CfeFuncG%20type%3D'table'%20tableValues%3D'0.831%200.98%200.69'%2F%3E%3CfeFuncB%20type%3D'table'%20tableValues%3D'0.914%200.99%201'%2F%3E%3C%2FfeComponentTransfer%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type%3D'table'%20tableValues%3D'0.35%200%200.35'%2F%3E%3C%2FfeComponentTransfer%3E%3C%2Ffilter%3E%3Crect%20width%3D'480'%20height%3D'480'%20filter%3D'url(%23t)'%2F%3E%3C%2Fsvg%3E");
+
+  /* ---- Fluid Aurora（流体极光背景，design.md §7.2） ---- */
+  --fluid-gradient-angle: 160deg; /* 渐变起始角度 */
+  --fluid-gradient-speed: 10s; /* 渐变漩涡流动速度（渐变层单圈 = speed × 2 = 20s） */
+  --fluid-blob-speed: 15s; /* 光斑螺旋漂移速度 */
+  --fluid-blob-blur: 180px; /* 光斑模糊半径（光斑层已移除，保留变量备用） */
+  --fluid-blob-opacity: 0.25; /* 光斑不透明度 */
+  --fluid-blob-ice: #9dbfe6; /* 冰蓝光斑（--ice-500） */
+  --fluid-blob-sakura: #f9b0ff; /* 樱粉光斑（--sakura-300 亮粉，异色区混合不深） */
+  /* box-shadow 光晕参数：高斯模糊阴影无同心圆等值线（无"年轮"），无 SVG 光栅化伪影 */
+  --fluid-blob-ice-rgb: 157, 191, 230; /* 冰蓝光斑 RGB */
+  --fluid-blob-sakura-rgb: 249, 176, 255; /* 亮粉光斑 RGB */
+  --fluid-blob-glow-opacity: 0.3; /* 光晕阴影不透明度 */
+  /* SVG feDisplacementMap 置换光斑：1200×1200 高分辨率（filter 光栅化无带状/圈状伪影），
+     radial 同心圆被湍流噪声轻微扭曲（scale 60/1200 = 5%，形状接近圆），
+     缩放/旋转时无"年轮"等值线；纯彩色（无白核，白色由中心光晕提供） */
+  --fluid-blob-ice-svg: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'1200'%20height%3D'1200'%3E%3Cdefs%3E%3CradialGradient%20id%3D'g'%20cx%3D'50%25'%20cy%3D'50%25'%20r%3D'50%25'%3E%3Cstop%20offset%3D'0'%20stop-color%3D'%239dbfe6'%20stop-opacity%3D'0.55'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%239dbfe6'%20stop-opacity%3D'0'%2F%3E%3C%2FradialGradient%3E%3Cfilter%20id%3D'd'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.006'%20numOctaves%3D'2'%20seed%3D'3'%2F%3E%3CfeDisplacementMap%20in%3D'SourceGraphic'%20scale%3D'60'%2F%3E%3C%2Ffilter%3E%3C%2Fdefs%3E%3Crect%20width%3D'1200'%20height%3D'1200'%20fill%3D'url(%23g)'%20filter%3D'url(%23d)'%2F%3E%3C%2Fsvg%3E");
+  --fluid-blob-sakura-svg: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'1200'%20height%3D'1200'%3E%3Cdefs%3E%3CradialGradient%20id%3D'g'%20cx%3D'50%25'%20cy%3D'50%25'%20r%3D'50%25'%3E%3Cstop%20offset%3D'0'%20stop-color%3D'%23f9b0ff'%20stop-opacity%3D'0.55'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%23f9b0ff'%20stop-opacity%3D'0'%2F%3E%3C%2FradialGradient%3E%3Cfilter%20id%3D'd'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'0.006'%20numOctaves%3D'2'%20seed%3D'7'%2F%3E%3CfeDisplacementMap%20in%3D'SourceGraphic'%20scale%3D'60'%2F%3E%3C%2Ffilter%3E%3C%2Fdefs%3E%3Crect%20width%3D'1200'%20height%3D'1200'%20fill%3D'url(%23g)'%20filter%3D'url(%23d)'%2F%3E%3C%2Fsvg%3E");
+  --fluid-turbulence-speed: 15s; /* 湍流纹理流动速度 */
+  --fluid-turbulence-opacity: 0.08; /* 湍流纹理层不透明度（极淡，粉蓝斑块混合紫调不可感知） */
   --glass-bg: rgba(255, 250, 251, 0.55);
   --glass-bg-strong: rgba(255, 250, 251, 0.78);
   --glass-border: rgba(255, 255, 255, 0.65);
