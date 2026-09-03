@@ -297,15 +297,13 @@ def create_subgroup(conversation, name: str) -> GroupSubGroup:
 
 
 def delete_subgroup(subgroup: GroupSubGroup) -> None:
-    """删除子群：其消息归入默认组（事务内），再删子群。
+    """删除子群：其聊天记录一并永久删除（不可恢复）。
 
-    默认组不可删除（调用方校验）；群缺少默认组时显式失败，不静默丢消息。
+    默认组不可删除（调用方校验）；删除子群时先删该子群全部消息（已读回执随消息级联），
+    再删子群本身。
     """
     with transaction.atomic():
-        default = subgroup.conversation.subgroups.filter(is_default=True).first()
-        if default is None:
-            raise ValueError("群缺少默认组，无法归并消息")
-        Message.objects.filter(subgroup=subgroup).update(subgroup=default)
+        Message.objects.filter(subgroup=subgroup).delete()
         subgroup.delete()
 
 

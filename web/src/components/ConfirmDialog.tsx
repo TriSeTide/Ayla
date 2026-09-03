@@ -7,6 +7,7 @@
  * busy 由调用方管理：确认执行期间禁用按钮与关闭路径。
  */
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { IconClose } from "./icons";
 
 export interface ConfirmDialogProps {
@@ -46,7 +47,9 @@ export function ConfirmDialog({
     cancelRef.current?.focus();
   }, []);
 
-  return (
+  // portal 到 body：脱离侧栏/群信息容器的 stacking context（backdrop-filter 会
+  // 成为 fixed 后代的 containing block，导致弹窗被容器裁剪/限制）
+  return createPortal(
     <div
       className="create-sheet-overlay"
       onClick={(e) => {
@@ -95,6 +98,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

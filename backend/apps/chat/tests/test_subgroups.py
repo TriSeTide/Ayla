@@ -248,7 +248,7 @@ class TestSubGroupMessageOwnership:
         )
         assert resp.status_code == 400
 
-    def test_delete_subgroup_moves_messages_to_default(self, auth_client, user_factory):
+    def test_delete_subgroup_removes_messages(self, auth_client, user_factory):
         b = user_factory(username="sgm3_b")
         ca, _ = auth_client(username="sgm3_a")
         conv = make_group(ca, [b])
@@ -265,13 +265,13 @@ class TestSubGroupMessageOwnership:
             ).status_code
             == 200
         )
-        msg = Message.objects.get(content="临时消息")
-        assert msg.subgroup_id == int(default["id"])
-        # 默认组历史现在包含归并消息
+        # 子群删除后其聊天记录一并永久删除
+        assert not Message.objects.filter(content="临时消息").exists()
+        # 默认组历史不含被删子群的消息
         resp = ca.get(
             f"/api/v1/chat/conversations/{conv['id']}/messages/?subgroup_id={default['id']}"
         )
-        assert [m["content"] for m in resp.json()] == ["临时消息"]
+        assert resp.json() == []
 
 
 @pytest.mark.django_db

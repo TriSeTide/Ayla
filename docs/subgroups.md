@@ -17,7 +17,7 @@
   - 宽屏：子群列表下方「编辑」按钮 → 编辑态变【+】【x】；编辑态每个子群行出现编辑按钮，
     点击弹窗可改名/删除（删除需二次确认）；
   - 窄屏：编辑入口在**群信息界面**（GroupInfo）的「子群」区块，交互与宽屏一致；
-- 删除子群时，其历史消息**归入默认组**（不丢数据）；
+- 删除子群时，其**聊天记录一并永久删除**（不可恢复，删除前二次确认提示）；
 - 未读按**子群独立统计**：子群列表/选项卡各自显示未读数；切换子群即标该子群已读；
 - **子群禁言开关**（`muted`）：开启后仅群主/管理员可在该子群发言，普通成员发消息 403；
   开关由群主/管理员在子群编辑弹窗中设置；禁言子群在列表/选项卡显示「禁言」标记，
@@ -39,8 +39,8 @@ Message.subgroup  FK → GroupSubGroup (related_name="messages", null=True, SET_
 
 - `Message.subgroup = NULL` 表示子群功能上线前的旧消息，语义上归默认组
   （查询/未读统计时默认组视图包含 `subgroup IS NULL` 的消息）；
-- 删除子群由 `services.delete_subgroup` 在事务内先把消息 `update` 到默认组再删子群，
-  `SET_NULL` 仅作兜底（正常路径不会置空）。
+- 删除子群由 `services.delete_subgroup` 在事务内先删该子群全部消息（已读回执随消息级联），
+  再删子群本身；`Message.subgroup` 的 `SET_NULL` 仅作兜底（正常删除路径不会置空）。
 
 ## 3. 迁移
 
@@ -59,7 +59,7 @@ Message.subgroup  FK → GroupSubGroup (related_name="messages", null=True, SET_
 | GET | `/conversations/<id>/subgroups/` | 子群列表（含本人 `unread_count`/`unread_seqs`） | 群成员 |
 | POST | `/conversations/<id>/subgroups/` | 创建子群 `{name}` | 群主/管理员 |
 | PATCH | `/conversations/<id>/subgroups/<sid>/` | 改名 `{name}` / 禁言开关 `{muted}` | 群主/管理员 |
-| DELETE | `/conversations/<id>/subgroups/<sid>/` | 删除（消息归默认组；默认组 400） | 群主/管理员 |
+| DELETE | `/conversations/<id>/subgroups/<sid>/` | 删除（聊天记录一并永久删除；默认组 400） | 群主/管理员 |
 | POST | `/conversations/<id>/subgroups/<sid>/read/` | 标该子群已读（本人） | 群成员 |
 
 消息接口扩展：
@@ -101,6 +101,6 @@ Message.subgroup  FK → GroupSubGroup (related_name="messages", null=True, SET_
 
 ## 8. 测试
 
-- 后端：`apps/chat/tests/test_subgroups.py`（默认组、CRUD 权限、删除归并、消息归属、
+- 后端：`apps/chat/tests/test_subgroups.py`（默认组、CRUD 权限、删除清空聊天记录、消息归属、
   历史过滤、独立未读与标已读幂等）；
 - 前端：`web/src/vitest/subgroup.test.tsx`（store 投影、侧栏展开/编辑、选项卡显隐与切换）。

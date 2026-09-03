@@ -85,21 +85,45 @@ describe("subgroup store", () => {
 });
 
 describe("ChannelSidebar 子群", () => {
-  it("默认收起；点三角形展开子群列表，再点收起", () => {
+  it("默认展开子群列表；点三角形收起，再展开", () => {
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
-    // 默认收起：子群不可见
-    expect(screen.queryByRole("button", { name: /默认组/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "展开子群" }));
+    // 默认展开：子群可见
     expect(screen.getByRole("button", { name: /默认组/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /闲聊/ })).toBeInTheDocument();
     expect(screen.getByLabelText("3 条未读")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "收起子群" }));
     expect(screen.queryByRole("button", { name: /默认组/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开子群" }));
+    expect(screen.getByRole("button", { name: /默认组/ })).toBeInTheDocument();
+  });
+
+  it("子群超过 3 个时默认只显示 3 个，点「展开更多」显示全部", () => {
+    useSubGroupStore.setState({
+      byGroup: {
+        g1: [
+          sg("1", "默认组", true),
+          sg("2", "闲聊"),
+          sg("3", "公告"),
+          sg("4", "水群"),
+          sg("5", "游戏"),
+        ],
+      },
+    });
+    render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
+    // 默认只显示前 3 个
+    expect(screen.getByRole("button", { name: /默认组/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /闲聊/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /公告/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /水群/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /游戏/ })).not.toBeInTheDocument();
+    // 点展开更多 → 显示全部
+    fireEvent.click(screen.getByRole("button", { name: /展开更多/ }));
+    expect(screen.getByRole("button", { name: /水群/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /游戏/ })).toBeInTheDocument();
   });
 
   it("群主/管理员显示编辑按钮；编辑态变 +/x；点击 + 打开添加弹窗", () => {
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "展开子群" }));
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     expect(screen.getByRole("button", { name: "添加子群" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "退出编辑" })).toBeInTheDocument();
@@ -113,14 +137,12 @@ describe("ChannelSidebar 子群", () => {
   it("普通成员不显示编辑按钮", () => {
     useChatStore.setState({ conversations: [groupConv("g1", "member")] });
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "展开子群" }));
     expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   });
 
   it("点击子群行触发 onSelectSubgroup", () => {
     const onSelect = vi.fn();
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={onSelect} />);
-    fireEvent.click(screen.getByRole("button", { name: "展开子群" }));
     fireEvent.click(screen.getByRole("button", { name: /闲聊/ }));
     expect(onSelect).toHaveBeenCalledWith("2");
   });

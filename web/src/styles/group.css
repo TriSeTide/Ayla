@@ -852,6 +852,27 @@
   color: var(--text-primary);
 }
 
+/* 展开更多按钮：与子群行同宽（右移对齐聊天文字） */
+.channel-subgroup-more {
+  display: block;
+  width: calc(100% - 36px);
+  margin: var(--sp-1) 0 0 36px;
+  padding: 5px var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.5);
+  border: 1px dashed var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-subgroup-more:hover {
+  background: rgba(157, 191, 230, 0.18);
+  color: var(--text-primary);
+}
+
 /* 编辑按钮：与子群行同宽（右移对齐，加宽） */
 .channel-subgroup-edit-toggle {
   display: block;

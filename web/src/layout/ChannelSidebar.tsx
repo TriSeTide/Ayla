@@ -65,7 +65,9 @@ export function ChannelSidebar({
     .find((c) => c.id === currentGroupId)?.my_role ?? null);
   const canManage = myRole === "owner" || myRole === "admin";
 
-  const [subgroupsOpen, setSubgroupsOpen] = useState(false);
+  const [subgroupsOpen, setSubgroupsOpen] = useState(true);
+  // 子群列表默认最多显示 3 个；超过时显示「展开更多」按钮
+  const [subgroupsExpanded, setSubgroupsExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dialog, setDialog] = useState<SubGroupDialogState>(null);
   const [busy, setBusy] = useState(false);
@@ -115,6 +117,14 @@ export function ChannelSidebar({
     }
   }, [confirmDelete, currentGroupId, handleDeleted]);
 
+  // 子群列表：默认最多显示 3 个；编辑态显示全部（需编辑所有子群）
+  const visibleSubgroups = editing
+    ? subgroups
+    : subgroupsExpanded
+      ? subgroups
+      : subgroups.slice(0, 3);
+  const showMore = !editing && subgroups.length > 3;
+
   return (
     <aside className="channel-sidebar" aria-label="群内场景">
       <button type="button" className="channel-sidebar-head" onClick={onOpenInfo}>
@@ -156,7 +166,7 @@ export function ChannelSidebar({
                 {subgroupsOpen && (
                   <div className="channel-subgroups">
                     <ul className="channel-subgroup-list">
-                      {subgroups.map((sg) => {
+                      {visibleSubgroups.map((sg) => {
                         const unread = unreadByKey[subgroupKey(currentGroupId ?? "", sg.id)] ?? 0;
                         // 宽屏切到聊天以外的场景时不高亮子群
                         const isActive = activeScene === "chat" && sg.id === activeSubgroupId;
@@ -206,6 +216,16 @@ export function ChannelSidebar({
                         );
                       })}
                     </ul>
+                    {showMore && (
+                      <button
+                        type="button"
+                        className="channel-subgroup-more"
+                        onClick={() => setSubgroupsExpanded((v) => !v)}
+                        aria-expanded={subgroupsExpanded}
+                      >
+                        {subgroupsExpanded ? "收起" : `展开更多（${subgroups.length - 3}）`}
+                      </button>
+                    )}
                     {canManage && (
                       editing ? (
                         <div className="channel-subgroup-edit-actions">
@@ -306,7 +326,7 @@ export function ChannelSidebar({
       {confirmDelete && (
         <ConfirmDialog
           title="删除子群"
-          message={`确定删除子群「${confirmDelete.name}」？该子群的历史消息将归入默认组，不会丢失。`}
+          message={`确定删除子群「${confirmDelete.name}」？该子群的所有聊天记录将永久删除，无法恢复。`}
           confirmLabel="删除"
           onConfirm={() => void confirmDeleteSubgroup()}
           onClose={() => {

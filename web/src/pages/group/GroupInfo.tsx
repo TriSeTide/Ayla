@@ -814,7 +814,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
       {subgroupDelete && (
         <ConfirmDialog
           title="删除子群"
-          message={`确定删除子群「${subgroupDelete.name}」？该子群的历史消息将归入默认组，不会丢失。`}
+          message={`确定删除子群「${subgroupDelete.name}」？该子群的所有聊天记录将永久删除，无法恢复。`}
           confirmLabel="删除"
           onConfirm={() => void confirmDeleteSubgroup()}
           onClose={() => {
