@@ -94,8 +94,8 @@ html::after {
   will-change: transform;
 }
 
-/* 光斑层：40vw/35vw 中等尺寸 + 宽屏左右半区居中（A 中心 25% / B 中心 75%）+ 单层 radial 70% 截止
-   + blur(40px) 柔和混合；5s 周期：半区漂移 → 匀速置换去对向（2s）→ 保持对向 */
+/* 光斑层：40vw/40vw 中等尺寸 + 宽屏左右半区（A left 25% / B right 25%）+ 单层 radial 70% 截止
+   + blur(40px) 柔和混合；10s 周期：半区漂移 → 匀速置换去对向（30-50% = 2s）→ 保持对向 */
 body::before,
 body::after {
   content: "";
@@ -107,23 +107,23 @@ body::after {
   will-change: transform;
 }
 
-/* 冰蓝光斑（--ice-500）：40vw + 左半区（left 25%），周期 5s alternate */
+/* 冰蓝光斑（--ice-500）：40vw + 左半区（left 25%），周期 10s alternate */
 body::before {
   width: 40vw;
   height: 40vw;
   top: -10%;
   left: 25%;
-  background: radial-gradient(circle, rgba(var(--fluid-blob-ice-rgb), 0.5) 0%, rgba(var(--fluid-blob-ice-rgb), 0) 70%);
+  background: radial-gradient(circle, rgba(var(--fluid-blob-ice-rgb), 0.65) 0%, rgba(var(--fluid-blob-ice-rgb), 0) 70%);
   animation: fluid-blob-drift-a 10s ease-in-out infinite alternate;
 }
 
-/* 亮粉光斑（--sakura-300）：35vw + 右半区（right 25%），与 A 同步 */
+/* 亮粉光斑（--sakura-300）：40vw + 右半区（right 25%），与 A 同步 */
 body::after {
   width: 40vw;
   height: 40vw;
   bottom: -10%;
   right: 25%;
-  background: radial-gradient(circle, rgba(var(--fluid-blob-sakura-rgb), 0.5) 0%, rgba(var(--fluid-blob-sakura-rgb), 0) 70%);
+  background: radial-gradient(circle, rgba(var(--fluid-blob-sakura-rgb), 0.65) 0%, rgba(var(--fluid-blob-sakura-rgb), 0) 70%);
   animation: fluid-blob-drift-b 10s ease-in-out infinite alternate;
 }
 
