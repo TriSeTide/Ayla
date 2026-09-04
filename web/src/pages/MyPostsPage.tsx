@@ -6,8 +6,9 @@ import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
 import { IconBack } from "../components/icons";
 import { PostCard } from "../components/posts/PostCard";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useMasonryColumns } from "../hooks/useMasonryColumns";
-import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePostViewTracking } from "../hooks/usePostViewTracking";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
@@ -56,6 +57,7 @@ export function MyPostsPage() {
     ready: userStateReady && visiblePosts.length > 0,
   });
   const isMasonry = useMediaQuery(MASONRY_QUERY);
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const columnCount = isMasonry ? 2 : 1;
   const { columns, columnRefs } = useMasonryColumns(visiblePosts, columnCount, (post) => post.id, scrollRestoreKey);
   const indexByKey = useMemo(() => {
@@ -149,16 +151,17 @@ export function MyPostsPage() {
   };
 
   return (
-    <div
-      className="posts-hub my-posts-page"
-      ref={hubRef}
-      onScroll={(event) => {
-        const el = event.currentTarget;
-        if (userStateReady && hasMore && !loadingMore && el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
-          void load(cursor);
-        }
-      }}
-    >
+    <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
+      <div
+        className="posts-hub my-posts-page"
+        ref={hubRef}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          if (userStateReady && hasMore && !loadingMore && el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+            void load(cursor);
+          }
+        }}
+      >
       <header className="my-posts-head">
         <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回">
           <IconBack width={20} height={20} />
@@ -202,7 +205,8 @@ export function MyPostsPage() {
           {loadingMore && <div className="home-load-more" role="status">加载更多…</div>}
         </div>
       )}
-    </div>
+      </div>
+    </FullScreenSwipeBack>
   );
 }
 

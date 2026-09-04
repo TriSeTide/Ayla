@@ -42,6 +42,14 @@
   min-width: 0;
 }
 
+/* 全屏右滑返回包装（FullScreenSwipeBack）：撑满 .page-transition 内容区，
+   内部页面自带滚动；x 由 framer-motion 驱动（transform 不影响布局）。 */
+.fullscreen-swipe-back {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
 @media (max-width: 768px) {
   .app-shell {
     height: 100dvh;

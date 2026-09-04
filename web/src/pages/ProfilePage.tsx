@@ -13,6 +13,8 @@ import * as postsApi from "../api/posts";
 import type { GameRoom, LiveChannelDescriptor, Post } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { IconBack, IconLogout } from "../components/icons";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useAuth } from "../hooks/useAuth";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceOnline } from "../utils/displayStatus";
@@ -26,6 +28,7 @@ const STATUS_OPTIONS = [
 
 export function ProfilePage() {
   const navigate = useNavigate();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const { logout } = useAuth();
   const currentUser = useAuthStore((s) => s.currentUser);
   const setUser = useAuthStore((s) => s.setUser);
@@ -144,7 +147,8 @@ export function ProfilePage() {
   const displayName = currentUser.nickname || currentUser.username;
 
   return (
-    <div className="profile-page">
+    <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
+      <div className="profile-page">
       <div className="profile-column">
         <div className="glass-card profile-topbar">
           <button
@@ -363,6 +367,7 @@ export function ProfilePage() {
           </section>
         </div>
       </div>
-    </div>
+      </div>
+    </FullScreenSwipeBack>
   );
 }

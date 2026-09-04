@@ -1,18 +1,18 @@
 /**
- * useEdgeSwipeBack —— 私聊页左边缘右滑返回手势（方案 §2.6，视差按用户拍板废弃）。
+ * useEdgeSwipeBack —— 私聊页右滑返回手势（方案 §2.6，视差按用户拍板废弃）。
  *
  * 语义：
- * - 起手判定：仅当 touchstart 落在屏幕左边缘 edgeWidth（默认 24px）内才进入跟踪；
- *   非边缘起手（聊天区垂直滚动 / 输入框等）完全不接管触摸，滚动与点击照常。
+ * - 起手模式：'edge' 仅左边缘带起手（iOS 式，历史默认）；'full' 全屏任意位置右滑返回。
  * - 跟手：水平定轴（axis=x，方向锁保证垂直滚动优先）后右滑 dx 1:1 驱动上层位移；
  *   底层（/messages 本体）**静止不动**（iOS 导航栈 pop 式，用户拍板 2026-08-26，
  *   原方案「0.3 倍速视差」实测观感奇怪废弃）。
  * - 退出/回弹：松手时 dx ≥ exitThreshold（默认 120px）或速度 ≥ flickVelocity（默认
  *   0.3px/ms ≈ 300px/s）→ 上层滑出右屏（200ms ease-out）后 onBack；否则回弹（200ms）。
+ * - 垂直滚动让位：方向锁判定 axis="y" 时完全不跟手，原生滚动照常，不 preventDefault。
  * - prefers-reduced-motion：关闭跟手与位移，松手直切返回（仅保留语义，无动画）。
  *
  * 与 useSwipe 关系：复用其 createSwipeTracker（方向锁 / 阈值 / 取消状态机），
- * 在其上封装「边缘起手判定」与「velocity 估算」（useSwipe 的 onEnd 无速度字段）。
+ * 在其上封装「起手判定（edge 边缘 / full 全屏）」与「velocity 估算」（useSwipe 的 onEnd 无速度字段）。
  * 时长/曲线对齐 tokens.css --ease-out（framer-motion 用等价 4 元组），遵守 design.md §7。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -32,7 +32,10 @@ const SPRING_BACK_DURATION = 0.2;
 export interface EdgeSwipeBackOptions {
   /** 滑出返回回调（一般 navigate 回消息中心） */
   onBack: () => void;
-  /** 起手边缘带宽度（px），默认 24 */
+  /** 起手模式：'edge' 仅左边缘带起手（iOS 式，默认）；'full' 全屏任意位置右滑返回。
+      两种模式都靠方向锁（垂直滚动优先）与位移阈值判定，点击/滚动照常不误触。 */
+  from?: "edge" | "full";
+  /** 边缘起手带宽度（px），仅 'edge' 模式生效，默认 24 */
   edgeWidth?: number;
   /** 退出阈值（px），默认 120 */
   exitThreshold?: number;
@@ -80,6 +83,7 @@ function prefersReducedMotion(): boolean {
 export function useEdgeSwipeBack(options: EdgeSwipeBackOptions): EdgeSwipeBackResult {
   const {
     onBack,
+    from = "edge",
     edgeWidth = 24,
     exitThreshold = 120,
     flickVelocity = 0.3,
@@ -96,8 +100,8 @@ export function useEdgeSwipeBack(options: EdgeSwipeBackOptions): EdgeSwipeBackRe
   onBackRef.current = onBack;
   const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 边缘起手标记 + 最近一次 move 采样（velocity 估算）
-  const startedFromEdgeRef = useRef(false);
+  // 是否已进入跟踪（起手判定通过）：edge 起手判定或 full 全屏起手都置位。
+  const startedRef = useRef(false);
   const lastSampleRef = useRef<{ dx: number; t: number } | null>(null);
 
   const exitToBack = useMemo(
@@ -142,7 +146,7 @@ export function useEdgeSwipeBack(options: EdgeSwipeBackOptions): EdgeSwipeBackRe
           return dt > 0 ? (e.dx - sample.dx) / dt : 0;
         })();
         lastSampleRef.current = null;
-        startedFromEdgeRef.current = false;
+        startedRef.current = false;
         const shouldExit =
           e.axis === "x" && resolveEdgeSwipe(e.dx, velocity, exitThreshold, flickVelocity);
         if (shouldExit) {
@@ -153,7 +157,7 @@ export function useEdgeSwipeBack(options: EdgeSwipeBackOptions): EdgeSwipeBackRe
       },
       onCancel: () => {
         lastSampleRef.current = null;
-        startedFromEdgeRef.current = false;
+        startedRef.current = false;
         springBack();
       },
     },
@@ -167,7 +171,9 @@ export function useEdgeSwipeBack(options: EdgeSwipeBackOptions): EdgeSwipeBackRe
     };
   }, []);
 
-  // 自定义 handlers：边缘起手判定后委托 tracker；非边缘起手完全不 start（滚动/点击照常）
+  // 自定义 handlers：'edge' 限定左边缘起手；'full' 全屏任意位置起手。
+  // 非起手区直接不 start（滚动/点击照常）；full 模式靠方向锁 + 阈值判定，
+  // 垂直滚动（axis=y）不跟手，点击无位移不误触。都遵循 useSwipe「不 preventDefault」。
   const handlers = useMemo<SwipeHandlers>(() => {
     const { tracker } = swipe;
     return {
@@ -175,30 +181,30 @@ export function useEdgeSwipeBack(options: EdgeSwipeBackOptions): EdgeSwipeBackRe
         if (!enabled) return;
         const p = firstPoint(e);
         if (!p) return;
-        if (!isEdgeStart(p.x, edgeWidth)) {
-          startedFromEdgeRef.current = false;
+        if (from === "edge" && !isEdgeStart(p.x, edgeWidth)) {
+          startedRef.current = false;
           return;
         }
-        startedFromEdgeRef.current = true;
+        startedRef.current = true;
         lastSampleRef.current = null;
         tracker.start(p.x, p.y);
       },
       onTouchMove: (e) => {
-        if (!startedFromEdgeRef.current) return;
+        if (!startedRef.current) return;
         const p = firstPoint(e);
         if (p) tracker.move(p.x, p.y);
       },
       onTouchEnd: (e) => {
-        if (!startedFromEdgeRef.current) return;
+        if (!startedRef.current) return;
         const p = firstPoint(e);
         if (p) tracker.end(p.x, p.y);
       },
       onTouchCancel: () => {
-        if (!startedFromEdgeRef.current) return;
+        if (!startedRef.current) return;
         tracker.cancel();
       },
     };
-  }, [swipe, enabled, edgeWidth]);
+  }, [swipe, enabled, edgeWidth, from]);
 
   return { handlers, x };
 }

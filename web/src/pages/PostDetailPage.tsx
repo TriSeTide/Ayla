@@ -5,7 +5,7 @@
  * 删除（仅作者，二次确认）。窄屏：评论输入框与进入直播间一致，
  * 底栏下滑离场后输入框延迟从底部滑入。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useNavigationType, useParams, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
@@ -19,6 +19,8 @@ import { PostVideoCover } from "../components/posts/PostVideoCover";
 import { deleteMedia, mediaContentUrl, uploadMediaFile, validateMediaFile } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconEye, IconHeart, IconImage } from "../components/icons";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
 import { usePostsStore } from "../stores/posts";
@@ -43,6 +45,7 @@ type EditImageItem = {
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigationType = useNavigationType();
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const onlineUsers = usePresenceStore((s) => s.users);
@@ -65,6 +68,15 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       navigate(returnTo, { replace: true });
     }
   }, [navigationType, navigate, returnTo]);
+  // 群外详情启用全屏右滑返回（用户拍板 2026-09-04 全站统一）；群内沿用群场景顶部导航，不启用。
+  const wrapSwipe = (node: ReactNode) =>
+    groupId == null ? (
+      <FullScreenSwipeBack onBack={goBack} enabled={isNarrow}>
+        {node}
+      </FullScreenSwipeBack>
+    ) : (
+      node
+    );
   // 群内详情沿用群场景顶部导航；只有一级帖子详情才让底栏下滑并带动评论输入框滑入。
   const usesRoomEntryAnimation = groupId == null;
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
@@ -396,7 +408,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   if (loading) {
     // 顶栏框架先上（返回键 + 标题始终可见），仅正文/评论区显示结构化骨架，
     // 避免整页被骨架替换造成的"空白加载"。
-    return (
+    return wrapSwipe(
       <div className="post-detail">
         <header className="post-detail-head">
           <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
@@ -420,24 +432,24 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             <span className="skeleton" style={{ height: 13, width: "82%", borderRadius: 8 }} />
           </div>
         </div>
-      </div>
+      </div>,
     );
   }
 
   if (!post) {
-    return (
+    return wrapSwipe(
       <div className="post-detail">
         <p className="placeholder-desc">{error ?? "帖子不存在"}</p>
         <button type="button" className="btn btn-ghost" onClick={goBack}>
           返回
         </button>
-      </div>
+      </div>,
     );
   }
 
   const favorited = favoriteByPostId[String(post.id)] != null;
 
-  return (
+  return wrapSwipe(
     <div className="post-detail">
       {actionError && !editing && <div className="chat-notice" role="alert">{actionError}</div>}
       <header className="post-detail-head">
@@ -698,6 +710,6 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
           onClose={() => setViewerIndex(null)}
         />
       )}
-    </div>
+    </div>,
   );
 }

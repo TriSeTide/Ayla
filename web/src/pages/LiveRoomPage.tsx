@@ -14,6 +14,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import * as liveApi from "../api/live";
 import type { LiveChannelDescriptor } from "../api/types";
 import { LiveRoomBody } from "../components/live/LiveRoomBody";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useLiveStore } from "../stores/live";
@@ -93,15 +94,17 @@ export function LiveRoomPage() {
           }}>重试</button>
         </div>
       )}
-      <LiveRoomBody
-      channelId={channelId}
-      channel={channel}
-      isNarrow={isNarrow}
-      channels={ordered}
-      onSelect={goTo}
-      onBack={() => navigate("/live")}
-      inputEntered={inputEntered}
-      />
+      <FullScreenSwipeBack onBack={() => navigate("/live")} enabled={isNarrow}>
+        <LiveRoomBody
+        channelId={channelId}
+        channel={channel}
+        isNarrow={isNarrow}
+        channels={ordered}
+        onSelect={goTo}
+        onBack={() => navigate("/live")}
+        inputEntered={inputEntered}
+        />
+      </FullScreenSwipeBack>
     </>
   );
 }

@@ -15,6 +15,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { VoiceRoomBody } from "../components/voice/VoiceRoomBody";
 import { VoiceChannelList } from "../components/voice/VoiceChannelList";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useShellStore } from "../stores/shell";
 import { useVoiceChannel } from "../hooks/useVoiceChannel";
@@ -23,6 +25,7 @@ import { voiceWS } from "../ws/voice";
 
 export function VoiceHubPage() {
   const navigate = useNavigate();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const { channelId: routeChannelId } = useParams<{ channelId?: string }>();
   // 仅在房内路由启动输入框滑入；离房复位，避免大厅预挂载使下次动画失效。
   const { inputEntered } = useEnterRoomAnimation(routeChannelId != null);
@@ -210,28 +213,30 @@ export function VoiceHubPage() {
   if (currentChannel) {
     return (
       <>
-        <VoiceRoomBody
-          channelId={currentChannel.id}
-          ownerId={currentChannel.owner_id}
-          channelName={currentChannel.name}
-          channel={currentChannel}
-          livekit={livekit}
-          wsConnection={wsConnection}
-          elysiaProfile={elysiaProfile}
-          groupId={currentChannel.group}
-          onToggleMic={() => void toggleMic()}
-          onLeave={() => void handleLeave()}
-          onRejoin={() => void rejoin()}
-          onVolumeChange={setMemberVolume}
-          onLocalVolumeChange={setLocalVolume}
-          onToggleMemberMuted={(userId) => {
-            const m = useVoiceStore.getState().members[userId];
-            if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
-          }}
-          onBack={handleBack}
-          onDeleteChannel={() => setConfirmDeleteOpen(true)}
-          inputEntered={inputEntered}
-        />
+        <FullScreenSwipeBack onBack={handleBack} enabled={isNarrow}>
+          <VoiceRoomBody
+            channelId={currentChannel.id}
+            ownerId={currentChannel.owner_id}
+            channelName={currentChannel.name}
+            channel={currentChannel}
+            livekit={livekit}
+            wsConnection={wsConnection}
+            elysiaProfile={elysiaProfile}
+            groupId={currentChannel.group}
+            onToggleMic={() => void toggleMic()}
+            onLeave={() => void handleLeave()}
+            onRejoin={() => void rejoin()}
+            onVolumeChange={setMemberVolume}
+            onLocalVolumeChange={setLocalVolume}
+            onToggleMemberMuted={(userId) => {
+              const m = useVoiceStore.getState().members[userId];
+              if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
+            }}
+            onBack={handleBack}
+            onDeleteChannel={() => setConfirmDeleteOpen(true)}
+            inputEntered={inputEntered}
+          />
+        </FullScreenSwipeBack>
         {confirmDeleteOpen && (
           <ConfirmDialog
             title="删除语音房"

@@ -123,4 +123,53 @@ describe("useEdgeSwipeBack（reduced-motion）", () => {
     act(() => result.current.handlers.onTouchEnd(touchEnd(130, 0)));
     expect(onBack).not.toHaveBeenCalled();
   });
+
+  describe("from:'full'（全屏任意位置右滑返回）", () => {
+    it("非边缘（屏幕中部）起手 + 右滑过阈值 → 调用 onBack", () => {
+      mockReduced(true);
+      const onBack = vi.fn();
+      const { result } = renderHook(() =>
+        useEdgeSwipeBack({ onBack, from: "full" }),
+      );
+      act(() => result.current.handlers.onTouchStart(touchStart(187, 400)));
+      act(() => result.current.handlers.onTouchMove(touchMove(260, 400)));
+      act(() => result.current.handlers.onTouchEnd(touchEnd(330, 400)));
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("全屏起手 + 右滑不足阈值 → 不调用 onBack（回弹）", () => {
+      mockReduced(true);
+      const onBack = vi.fn();
+      const { result } = renderHook(() =>
+        useEdgeSwipeBack({ onBack, from: "full" }),
+      );
+      act(() => result.current.handlers.onTouchStart(touchStart(187, 400)));
+      act(() => result.current.handlers.onTouchMove(touchMove(220, 400)));
+      act(() => result.current.handlers.onTouchEnd(touchEnd(240, 400)));
+      expect(onBack).not.toHaveBeenCalled();
+    });
+
+    it("全屏起手 + 垂直滑动 → 不触发（方向锁，垂直滚动优先）", () => {
+      mockReduced(true);
+      const onBack = vi.fn();
+      const { result } = renderHook(() =>
+        useEdgeSwipeBack({ onBack, from: "full" }),
+      );
+      act(() => result.current.handlers.onTouchStart(touchStart(187, 400)));
+      act(() => result.current.handlers.onTouchMove(touchMove(190, 500)));
+      act(() => result.current.handlers.onTouchEnd(touchEnd(192, 560)));
+      expect(onBack).not.toHaveBeenCalled();
+    });
+
+    it("全屏起手 + 原地点按（无位移）→ 不触发", () => {
+      mockReduced(true);
+      const onBack = vi.fn();
+      const { result } = renderHook(() =>
+        useEdgeSwipeBack({ onBack, from: "full" }),
+      );
+      act(() => result.current.handlers.onTouchStart(touchStart(187, 400)));
+      act(() => result.current.handlers.onTouchEnd(touchEnd(187, 400)));
+      expect(onBack).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
 import { IconBack } from "../components/icons";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { usePostsStore } from "../stores/posts";
 import { chatWS } from "../ws/chat";
 
@@ -66,6 +68,7 @@ function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite
 
 export function FavoritesPage() {
   const navigate = useNavigate();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const [filter, setFilter] = useState<FavoriteTargetType | "all">("all");
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +119,8 @@ export function FavoritesPage() {
   }, []);
 
   return (
-    <div className="favorites-page">
+    <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
+      <div className="favorites-page">
       <div className="favorites-topbar">
         <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回">
           <IconBack width={20} height={20} />
@@ -169,6 +173,7 @@ export function FavoritesPage() {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </FullScreenSwipeBack>
   );
 }

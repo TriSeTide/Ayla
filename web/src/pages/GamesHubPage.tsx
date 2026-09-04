@@ -11,12 +11,15 @@ import type { GameRoom } from "../api/types";
 import { GameRoomCard } from "../components/boardgame/GameRoomCard";
 import { GameRoomPlaceholder } from "../components/boardgame/GameRoomPlaceholder";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
+import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
 import { useBoardgameStore, isBoardgameStale } from "../stores/boardgame";
 import { useShellStore } from "../stores/shell";
 
 export function GamesHubPage() {
   const navigate = useNavigate();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const { roomId } = useParams<{ roomId?: string }>();
   const rooms = useBoardgameStore((s) => s.rooms);
   const loading = useBoardgameStore((s) => s.roomsLoading);
@@ -133,14 +136,16 @@ export function GamesHubPage() {
 
   if (current) {
     return (
-      <GameRoomPlaceholder
-        room={current}
-        onLeave={() => {
-          exitRoom();
-          load();
-        }}
-        onBack={exitRoom}
-      />
+      <FullScreenSwipeBack onBack={exitRoom} enabled={isNarrow}>
+        <GameRoomPlaceholder
+          room={current}
+          onLeave={() => {
+            exitRoom();
+            load();
+          }}
+          onBack={exitRoom}
+        />
+      </FullScreenSwipeBack>
     );
   }
 
