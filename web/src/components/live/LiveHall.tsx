@@ -73,7 +73,7 @@ export function LiveHall({
               className="live-card"
               onClick={() => onEnter(ch.id)}
             >
-              <div className={`live-card-cover ${ch.status === "live" ? "is-live" : ""}`}>
+              <div className="live-card-cover">
               {ch.cover ? (
                 <ResourceImage src={ch.cover} alt="" className="live-card-cover-image" />
               ) : (

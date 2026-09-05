@@ -652,6 +652,13 @@
   position: relative;
 }
 
+/* 滚动区内容不被 flex 压缩：子群/语音房/直播间下拉（framer-motion 高度动画 + overflow: hidden）
+   内容多时必须保持内容全高、由本容器滚动——否则 flex-shrink 会把下拉容器压矮，
+   溢出内容被 overflow: hidden 裁掉，滚动条消失（2026-09-05 修复） */
+.channel-sidebar-list > * {
+  flex-shrink: 0;
+}
+
 /* 帖子/桌游锁定置底：不随上方列表滚动，顶部加分隔线；选项卡同白色卡片 */
 .channel-sidebar-list-bottom {
   flex: none;
@@ -920,6 +927,8 @@
   flex-direction: column;
   gap: 2px;
   padding: 2px 0 4px;
+  /* 展开/收起高度动画：height 0→auto 期间裁剪内容（framer-motion 动画） */
+  overflow: hidden;
 }
 
 /* 子群行整体右移（与聊天文字对齐），行宽 = 侧栏宽 - 缩进，右缘与聊天按钮对齐 */
@@ -1061,6 +1070,8 @@
   flex-direction: column;
   gap: 2px;
   padding: 2px 0 4px;
+  /* 展开/收起高度动画：height 0→auto 期间裁剪内容（framer-motion 动画） */
+  overflow: hidden;
 }
 
 .channel-voice-room-list {
@@ -1154,6 +1165,8 @@
   flex-direction: column;
   gap: 4px;
   padding: 4px 0 6px;
+  /* 展开/收起高度动画：height 0→auto 期间裁剪内容（framer-motion 动画） */
+  overflow: hidden;
 }
 
 .channel-live-room-list {
@@ -1218,6 +1231,17 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 有 cover 但签名加载中/失效时，ResourceImage 的 loading/failed span 是裸 inline span
+   （line-height 撑高致图标偏上）；占满容器 flex 居中，与无 cover 的纯图标对齐一致 */
+.channel-live-cover .resource-image-loading,
+.channel-live-cover .resource-image-failed-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 .channel-live-dot {

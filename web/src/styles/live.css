@@ -92,10 +92,6 @@
   font-weight: 600;
 }
 
-.live-start-channel-cover.is-live {
-  background: linear-gradient(145deg, var(--ice-300), var(--pink-300));
-}
-
 .live-start-channel-copy {
   min-width: 0;
   display: flex;
@@ -167,6 +163,19 @@
 }
 .live-card-cover-image,
 .live-rail-cover-image { width: 100%; height: 100%; object-fit: cover; }
+
+/* 有 cover 但签名加载中/失效时，ResourceImage 的 loading/failed span 是裸 inline span
+   （line-height 撑高致图标偏上）；占满容器 flex 居中，与无 cover 的纯图标对齐一致 */
+.live-card-cover .resource-image-loading,
+.live-card-cover .resource-image-failed-wrap,
+.live-rail-cover .resource-image-loading,
+.live-rail-cover .resource-image-failed-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
 
 /* 推流地址区：放在直播视频下方（开播控制台） */
 .live-studio-stream { display: flex; flex-direction: column; gap: var(--sp-2); width: min(100%, 960px); padding: var(--sp-3); background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: var(--radius-card); }
@@ -459,7 +468,8 @@
 
 /* ================= 一级直播聚合页（F4） ================= */
 
-/* 直播间卡片封面占位（需求：卡片显示封面，封面资源未接入 → 渐变占位） */
+/* 直播间卡片封面占位（需求：卡片显示封面，封面资源未接入 → 渐变占位；
+   已开播/未开播统一同一样式（2026-09-05），LIVE 状态由徽章标识） */
 .live-card-cover {
   position: relative;
   display: flex;
@@ -471,11 +481,6 @@
   color: var(--ice-500);
   border: 1px solid var(--glass-border);
   overflow: hidden;
-}
-
-.live-card-cover.is-live {
-  background: linear-gradient(150deg, var(--ice-300), var(--pink-300));
-  color: #fff;
 }
 
 .live-card-cover-badge {
