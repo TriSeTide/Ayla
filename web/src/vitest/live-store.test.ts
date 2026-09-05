@@ -92,6 +92,59 @@ describe("live store", () => {
     expect(useLiveStore.getState().current.srsStatus).toBe("idle");
   });
 
+  it("频道列表排序：在播（status=live）置顶按 started_at 新→旧；曾播按 ended_at 新→旧；从未按 created_at 降序", () => {
+    const mk = (
+      id: number,
+      status: LiveChannelDescriptor["status"],
+      started_at: string | null,
+      ended_at: string | null,
+      created_at: string,
+    ): LiveChannelDescriptor => ({ ...CHANNEL, id, title: `t${id}`, status, started_at, ended_at, created_at });
+    useLiveStore.getState().setChannels([
+      mk(1, "idle", null, null, "2026-08-01T00:00:00Z"), // 从未
+      mk(2, "ended", "2026-08-15T00:00:00Z", "2026-08-15T01:00:00Z", "2026-08-01T00:00:00Z"), // 曾播
+      mk(3, "live", "2026-09-05T10:00:00+08:00", null, "2026-08-02T00:00:00Z"), // 在播
+    ]);
+    expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([3, 2, 1]);
+  });
+
+  it("频道列表排序：在播内部按最近开播（started_at）新→旧", () => {
+    const mk = (id: number, started_at: string): LiveChannelDescriptor => ({
+      ...CHANNEL,
+      id,
+      title: `t${id}`,
+      status: "live",
+      started_at,
+      ended_at: null,
+      created_at: "2026-08-01T00:00:00Z",
+    });
+    useLiveStore.getState().setChannels([
+      mk(1, "2026-09-05T09:00:00+08:00"),
+      mk(2, "2026-09-05T10:00:00+08:00"),
+    ]);
+    expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([2, 1]);
+  });
+
+  it("REST 对账（upsertChannel）触发重排：开播带 started_at → 置顶；下播带 ended_at → 曾播区（不回落初始位）", () => {
+    const mk = (id: number): LiveChannelDescriptor => ({
+      ...CHANNEL,
+      id,
+      title: `t${id}`,
+      status: "idle",
+      started_at: null,
+      ended_at: null,
+      created_at: `2026-08-0${4 - id}T00:00:00Z`, // 1 最新 → 初始 [1,2,3]
+    });
+    useLiveStore.getState().setChannels([mk(1), mk(2), mk(3)]);
+    expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([1, 2, 3]);
+    // 3 开播：WS 帧只作失效提示，REST 详情对账 upsert 带回 started_at → 在播置顶
+    useLiveStore.getState().upsertChannel({ ...mk(3), status: "live", started_at: "2026-09-05T10:00:00+08:00" });
+    expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([3, 1, 2]);
+    // 3 下播：对账带回 ended_at → 曾播区最前（压住从未开播的 1/2——不回落初始 3 号位）
+    useLiveStore.getState().upsertChannel({ ...mk(3), status: "ended", started_at: "2026-09-05T10:00:00+08:00", ended_at: "2026-09-05T10:30:00+08:00" });
+    expect(useLiveStore.getState().channels.map((c) => c.id)).toEqual([3, 1, 2]);
+  });
+
   it("频道列表：setChannels / upsertChannel / removeChannel", () => {
     const s = useLiveStore.getState();
     s.setChannels([CHANNEL]);

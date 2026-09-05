@@ -36,7 +36,7 @@ describe("voice store voice.state 合并", () => {
     expect(useVoiceStore.getState().channels[0].name).toBe("重复验证房（更新）");
   });
 
-  it("setChannels 按 created_at 降序排序（新的在前）", () => {
+  it("setChannels 排序：全空房（无 last_* 投影）回落 created_at 降序（新的在前）", () => {
     const mk = (id: string, created_at: string) => ({
       id,
       name: id,
@@ -57,6 +57,92 @@ describe("voice store voice.state 合并", () => {
       mk("mid", "2026-08-10T00:00:00Z"),
     ]);
     expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("setChannels 排序：有人区（member_count>0）整体置顶按 last_occupied_at 新→旧；无人区曾进入压住从未进入", () => {
+    const mk = (
+      id: string,
+      member_count: number,
+      last_occupied_at: string | null,
+      last_vacant_at: string | null,
+    ) => ({
+      id,
+      name: id,
+      owner_id: "u1",
+      group: null,
+      allowed_group_ids: [],
+      visibility: "public" as const,
+      status: "idle" as const,
+      member_count,
+      room_name: id,
+      group_name: null,
+      created_at: `2026-08-0${4 - Number(id) === 1 ? 1 : 4 - Number(id)}T00:00:00Z`,
+      mine: false,
+      last_occupied_at,
+      last_vacant_at,
+    });
+    useVoiceStore.getState().setChannels([
+      mk("never", 0, null, null),
+      mk("vacant", 0, "2026-09-02T08:00:00+08:00", "2026-09-03T08:00:00+08:00"),
+      mk("occ-old", 1, "2026-09-05T09:00:00+08:00", null),
+      mk("occ-new", 2, "2026-09-05T10:00:00+08:00", null),
+    ]);
+    expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual([
+      "occ-new", "occ-old", "vacant", "never",
+    ]);
+  });
+
+  it("patchChannel 触发重排：有人进入 → 实时置顶；变空回落无人区最前（不回落初始位）", () => {
+    const mk = (id: string) => ({
+      id,
+      name: id,
+      owner_id: "u1",
+      group: null,
+      allowed_group_ids: [],
+      visibility: "public" as const,
+      status: "idle" as const,
+      member_count: 0,
+      room_name: id,
+      group_name: null,
+      created_at: `2026-08-0${4 - Number(id)}T00:00:00Z`, // 1 最新 → 初始 [1,2,3]
+      mine: false,
+    });
+    useVoiceStore.getState().setChannels([mk("1"), mk("2"), mk("3")]);
+    expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual(["1", "2", "3"]);
+    // 3 有人（WS 帧带 last_occupied_at）→ 有人区置顶
+    useVoiceStore.getState().patchChannel("3", { member_count: 1, last_occupied_at: "2026-09-05T10:00:00+08:00" });
+    expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual(["3", "1", "2"]);
+    // 3 变空（帧带 last_vacant_at）→ 无人区曾进入最前，压住从未进入的 1/2——不回落初始 3 号位
+    useVoiceStore.getState().patchChannel("3", { member_count: 0, last_vacant_at: "2026-09-05T10:05:00+08:00" });
+    expect(useVoiceStore.getState().channels.map((c) => c.id)).toEqual(["3", "1", "2"]);
+  });
+
+  it("排序投影字段：patchChannel 更新 member_count 与 last_occupied_at/last_vacant_at（后端 WS 帧携带）", () => {
+    useVoiceStore.getState().setChannels([{
+      id: "vc-1",
+      name: "排序投影房",
+      owner_id: "u1",
+      group: null,
+      allowed_group_ids: [],
+      visibility: "public" as const,
+      member_count: 0,
+      room_name: "排序投影房",
+      group_name: null,
+      created_at: "2026-08-20T00:00:00Z",
+      mine: false,
+    }]);
+    // 有人进入（WS 帧带 last_occupied_at）→ 频道字段被 patch
+    useVoiceStore.getState().patchChannel("vc-1", { member_count: 1, last_occupied_at: "2026-09-05T10:00:00+08:00", last_vacant_at: null });
+    let ch = useVoiceStore.getState().channels.find((c) => c.id === "vc-1");
+    expect(ch?.member_count).toBe(1);
+    expect(ch?.last_occupied_at).toBe("2026-09-05T10:00:00+08:00");
+    // 最后一人离开（帧带 last_vacant_at，member_count=0）
+    useVoiceStore.getState().patchChannel("vc-1", { member_count: 0, last_vacant_at: "2026-09-05T10:05:00+08:00" });
+    ch = useVoiceStore.getState().channels.find((c) => c.id === "vc-1");
+    expect(ch?.member_count).toBe(0);
+    expect(ch?.last_vacant_at).toBe("2026-09-05T10:05:00+08:00");
+    // last_occupied_at 保留（曾有人进入的事实不因变空而清空——排序不回落）
+    expect(ch?.last_occupied_at).toBe("2026-09-05T10:00:00+08:00");
   });
 
   it("joined → 写入成员；left → 移除；muted/unmuted → 更新标记；heartbeat → 只刷新 last_seen", () => {
