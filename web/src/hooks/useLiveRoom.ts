@@ -9,7 +9,7 @@
  *   因此不再需要 videoVersion 重建信号）；
  * - loading/error/playerError 从 live store 读取（runtime 写入）。
  */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useLiveStore } from "../stores/live";
 import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
 
@@ -44,6 +44,20 @@ export function useLiveRoom(
   const isNarrow = options.isNarrow ?? false;
   const isOwnerConsole = options.isOwnerConsole ?? false;
 
+  // 以下 UI 态只影响退房时「进小窗 or 完整销毁」的决策，不参与 effect 依赖：
+  // isOwnerConsole（= 开播控制台 showOwnerPanel = Boolean(channel?.is_owner)）随 store
+  // 的 current.channel 在进房瞬间被 clearCurrent() 清空而翻转；若放进 deps，每次翻转
+  // 都会 cleanup(leave→清 channel) + setup(enter→再清 channel)，造成 enter/leave 死循环
+  // （owner 进开播控制台时每轮 3 个 API + WS connect/close，最终 ERR_INSUFFICIENT_RESOURCES
+  // 页面 Failed to fetch。回归：c78c27f 将 isOwnerConsole 加入 deps）。
+  // 用 ref 取最新值，effect 只在 channelId/activityRoute 变化（真实进房/切房）时重跑。
+  const isNarrowRef = useRef(isNarrow);
+  isNarrowRef.current = isNarrow;
+  const isOwnerConsoleRef = useRef(isOwnerConsole);
+  isOwnerConsoleRef.current = isOwnerConsole;
+  const keepLiveActivityRef = useRef(options.keepLiveActivity);
+  keepLiveActivityRef.current = options.keepLiveActivity;
+
   const loading = useLiveStore((s) => s.currentLoading);
   const error = useLiveStore((s) => s.currentError);
   const playerError = useLiveStore((s) => s.currentPlayerError);
@@ -51,12 +65,23 @@ export function useLiveRoom(
   const hlsUrl = useLiveStore((s) => s.current.channel?.hls_url ?? null);
 
   // 挂载进房 / 卸载分离视图（小窗或销毁）；channelId 变化 = 切台，先销毁旧会话再进新房
+  // epoch：enter 返回的会话代际，cleanup 回传——页面间切换（群内/浮层返回/直播间→控制台）
+  // 时 AnimatePresence 新旧页并存，旧页 cleanup 的 detachView 携带旧 epoch 会被 runtime
+  // 拒绝，避免清掉新页刚建立的会话（2026-09-06 事故第三层：跨页进入复现）。
   useEffect(() => {
-    liveSessionRuntime.enter(channelId, { activityRoute, keepLiveActivity: options.keepLiveActivity, ownerConsoleRoute });
+    const epoch = liveSessionRuntime.enter(channelId, {
+      activityRoute,
+      keepLiveActivity: keepLiveActivityRef.current,
+      ownerConsoleRoute,
+    });
     return () => {
-      liveSessionRuntime.detachView({ isNarrow, isOwnerConsole });
+      liveSessionRuntime.detachView({
+        epoch,
+        isNarrow: isNarrowRef.current,
+        isOwnerConsole: isOwnerConsoleRef.current,
+      });
     };
-  }, [channelId, activityRoute, ownerConsoleRoute, isNarrow, isOwnerConsole, options.keepLiveActivity]);
+  }, [channelId, activityRoute, ownerConsoleRoute]);
 
   // 播放器：srsStatus=live 才 attach；idle/degraded 销毁。
   // **小窗模式（页面卸载但会话保留）下不销毁播放器**——video/src/HLS 全部保留，

@@ -32,8 +32,12 @@ describe("resolvePageKey", () => {
     expect(resolvePageKey("/live/100")).toBe("/live/room");
     // 列表页与详情页区分：进入/退出直播间仍走整页转场
     expect(resolvePageKey("/live")).toBe("/live");
-    // 开播控制台详情不归一（三段路径不匹配 /live/:id）
-    expect(resolvePageKey("/live/start/5")).toBe("/live/start/5");
+    // 开播控制台归一为 /live/start：侧栏切频道不触发整页重挂载，避免新旧页
+    // 并存竞争 liveSessionRuntime 单例（旧页 cleanup 的 leave 清掉新页会话，
+    // channel 永不设置 → 控制台退化 + 弹幕断开，2026-09-06 事故）
+    expect(resolvePageKey("/live/start/5")).toBe("/live/start");
+    expect(resolvePageKey("/live/start/42")).toBe("/live/start");
+    expect(resolvePageKey("/live/start")).toBe("/live/start");
   });
 });
 

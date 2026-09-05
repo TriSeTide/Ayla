@@ -50,15 +50,23 @@ function matchGroupId(pathname: string): string | null {
  * - 直播间详情归一为 `/live/room`，避免直播间上下滑切换（/live/:id → /live/:id）
  *   触发整页重挂载（底栏滑出动画复位）；进入/退出直播间（/live ↔ /live/:id）
  *   仍走整页转场；
+ * - 开播控制台归一为 `/live/start`：侧栏切频道（/live/start/:id → /live/start/:id'）
+ *   不触发整页重挂载——否则 AnimatePresence(mode="sync") 新旧两页并存，
+ *   旧页卸载 cleanup 的 liveSessionRuntime.leave() 会清掉新页刚建立的会话
+ *   （alive/channelId/clearCurrent/断 WS），新页 enterAsync 的 alive 检查提前
+ *   return，channel 永不设置，控制台退化成普通直播间且弹幕断开（2026-09-06 事故）；
  * - 其余路由用原始 pathname。
  */
 const LIVE_ROOM_PATTERN = "/live/:id";
+const LIVE_STUDIO_PATTERN = "/live/start/:channelId";
 
 export function resolvePageKey(pathname: string): string {
   const groupId = matchGroupId(pathname);
   if (groupId) return `/group/${groupId}`;
   const live = matchPath({ path: LIVE_ROOM_PATTERN, end: true }, pathname);
   if (live?.params.id && live.params.id !== "start") return "/live/room";
+  const studio = matchPath({ path: LIVE_STUDIO_PATTERN, end: true }, pathname);
+  if (studio) return "/live/start";
   return pathname;
 }
 

@@ -38,6 +38,15 @@ class LiveSessionRuntime {
   // ---- 会话资源 ----
   private channelId: number | null = null;
   private options: LiveSessionOptions = {};
+  /**
+   * 会话代际（epoch）：每次「完整进房」递增，enter 返回给调用方（useLiveRoom effect）。
+   * detachView/leave 携带调用方持有的 epoch，仅当与当前 epoch 一致才真正销毁——
+   * 页面间路由切换（群内→开播控制台、浮层返回控制台、直播间→控制台）时，
+   * AnimatePresence(mode="sync") 新旧页并存，旧页卸载 cleanup 的 leave 若无条件执行，
+   * 会清掉新页刚建立的会话（alive/channelId/clearCurrent/断 WS），新页 enterAsync 的
+   * alive 检查提前 return，channel 永不设置 → 控制台退化 + 弹幕断开（2026-09-06 事故第三层）。
+   */
+  private epoch = 0;
   private player: HlsPlayer | null = null;
   private videoEl: HTMLVideoElement | null = null;
   /** 开播事件后 SRS 状态有界退避重试（推流建立延迟；非周期轮询） */
@@ -134,19 +143,22 @@ class LiveSessionRuntime {
   /**
    * 进房（幂等：同频道不重复进；StrictMode 模拟重挂载安全）。
    * 同频道重挂载 = 从小窗点回直播间：退出小窗模式，video 由 LivePlayer 挂载时迁回。
+   *
+   * @returns 本次进房的会话代际（当前活跃 epoch）；调用方须持有并在 detachView 时回传。
    */
-  enter(channelId: number, options: LiveSessionOptions = {}): void {
+  enter(channelId: number, options: LiveSessionOptions = {}): number {
     if (this.channelId === channelId && this.alive) {
       this.options = options;
       if (useLiveStore.getState().miniPlayer) {
         useLiveStore.getState().setMiniPlayer(null);
       }
-      return;
+      return this.epoch;
     }
     // 切频道：先完整销毁旧会话（含旧小窗）；首次进房无旧会话，跳过（leave 会无条件断 WS）
     if (this.channelId !== null) {
       this.leave();
     }
+    const epoch = ++this.epoch;
     this.channelId = channelId;
     this.options = options;
     this.alive = true;
@@ -190,6 +202,7 @@ class LiveSessionRuntime {
 
     void this.enterAsync(channelId);
     this.subscribeStatusEvents(channelId);
+    return epoch;
   }
 
   private async enterAsync(channelId: number): Promise<void> {
@@ -251,8 +264,16 @@ class LiveSessionRuntime {
   /**
    * 视图分离（页面卸载）：窄屏 + 普通观看 + 直播中 → 进入小窗；否则完整销毁。
    * StrictMode 模拟卸载也会走到这里，随后重挂载由 enter 同频道分支接管（退出小窗）。
+   * @param opts.epoch 调用方持有的会话代际（enter 返回值）；与当前 epoch 不一致
+   *   （会话已被更新页面接管）时不销毁也不进小窗，避免旧页 cleanup 清掉新页会话。
    */
-  detachView(opts: { isNarrow: boolean; isOwnerConsole: boolean }): void {
+  detachView(opts: { isNarrow: boolean; isOwnerConsole: boolean; epoch?: number }): void {
+    if (
+      opts.epoch !== undefined &&
+      opts.epoch !== this.epoch
+    ) {
+      return;
+    }
     if (
       opts.isNarrow &&
       !opts.isOwnerConsole &&
@@ -280,8 +301,11 @@ class LiveSessionRuntime {
   /**
    * 完整销毁（关闭小窗/退出登录/切频道）：hls → WS → 轮询 → 清 store → 活动态。
    * 幂等：无会话时静默返回。
+   * @param epoch 调用方持有的会话代际；非 undefined 且与当前 epoch 不一致时不销毁
+   *   （该调用方已不是当前会话 owner，会话已被更新的 enter 接管）。
    */
-  leave(): void {
+  leave(epoch?: number): void {
+    if (epoch !== undefined && epoch !== this.epoch) return;
     this.alive = false;
     this.player?.destroy();
     this.player = null;
