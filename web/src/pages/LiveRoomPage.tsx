@@ -19,6 +19,7 @@ import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useLiveStore } from "../stores/live";
 import { useShellStore } from "../stores/shell";
+import { sortLiveChannels } from "../utils/sortChannels";
 
 export function LiveRoomPage() {
   const navigate = useNavigate();
@@ -47,20 +48,22 @@ export function LiveRoomPage() {
     return () => useShellStore.getState().setBottomTabsLeaving(false);
   }, [validId]);
 
-  // 切换范围 = 全部可见直播间（一次性拉列表作为有序上下文；失败则无切换能力）
+  // 切换范围 = 全部可见直播间（一次性拉列表作为有序上下文；失败则无切换能力）。
+  // 初始列表也套新排序（在播 > 曾播 > 从未），与 live store 维护顺序一致。
   useEffect(() => {
     if (!validId || loadedRef.current) return;
     loadedRef.current = true;
     liveApi
       .listLiveChannels()
       .then((list) => {
-        setOrdered(list);
+        setOrdered(sortLiveChannels(list));
         setListError(null);
       })
       .catch((e) => setListError(e instanceof Error ? e.message : "加载直播列表失败"));
   }, [validId, listRetry]);
 
   // 直播详情侧栏与大厅共用 live store；WS/REST 对账更新后立即反映创建、状态和删除。
+  // merge 保留已有相对位置，随后统一按新排序重排（开播/下播实时归位）。
   useEffect(() => {
     if (liveChannels.length === 0) return;
     setOrdered((prev) => {
@@ -71,7 +74,7 @@ export function LiveRoomPage() {
       for (const item of liveChannels) {
         if (!next.some((current) => current.id === item.id)) next.push(item);
       }
-      return next;
+      return sortLiveChannels(next);
     });
   }, [liveChannels]);
 

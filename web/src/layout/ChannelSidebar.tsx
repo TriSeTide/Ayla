@@ -13,6 +13,7 @@
  *   编辑态显示【+】添加按钮，每个子群行内出现编辑笔 → 弹窗改名/删除（默认组不可删）。
  */
 import { Fragment, useCallback, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import * as chatApi from "../api/chat";
 import * as liveApi from "../api/live";
 import type { SubGroup } from "../api/types";
@@ -37,6 +38,10 @@ const SCENE_META: Array<{ key: GroupScene; label: string; icon: typeof IconMic }
   { key: "posts", label: "帖子", icon: IconPost },
   { key: "games", label: "桌游", icon: IconGame },
 ];
+
+/** 展开/收起缓动（与 tokens.css --ease-out / --ease-in 一致，design.md §7） */
+const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
+const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
 
 export function ChannelSidebar({
   groupName,
@@ -66,9 +71,16 @@ export function ChannelSidebar({
 }) {
   const currentGroupId = useGroupStore((state) => state.currentGroupId);
   const currentVoiceChannelId = useVoiceStore((state) => state.currentChannelId);
+  // 语音房列表：排序在 voice store 统一维护（2026-09-05 定：有人区/无人区，
+  // 事实源 = 后端持久字段 last_occupied_at/last_vacant_at，随 WS 帧广播、无前端
+  // 计数器；有人进入/变空时 store patchChannel 重排，全界面同序、刷新不丢）。
+  // 这里只做当前群投影，顺序直接来自 store。
   const voiceChannels = useVoiceStore((state) => state.channels
     .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId))));
   const voiceCount = voiceChannels.reduce((sum, channel) => sum + (channel.member_count || 0), 0);
+  // 直播间列表：排序在 live store 统一维护（2026-09-05 定，与语音同模型：
+  // 在播按最近开播 started_at 降序、曾播按最近下播 ended_at 降序压住从未开播、
+  // 从未按 created_at 降序；无计数器，只有开播下播，下播不回初始位）。
   const liveChannels = useLiveStore((state) => state.channels
     .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId))));
   const hasLive = liveChannels.some((channel) => channel.status === "live");
@@ -124,6 +136,33 @@ export function ChannelSidebar({
   const [showLiveCreate, setShowLiveCreate] = useState(false);
   const [creatingLive, setCreatingLive] = useState(false);
   const [liveCreateError, setLiveCreateError] = useState<string | null>(null);
+
+  // 子群/语音房/直播间下拉展开收起动画（design.md §7：进 240ms ease-out、出 180ms
+  // ease-in，退出快于进入；prefers-reduced-motion 直接切换，无动画）
+  const reduceMotion = useReducedMotion();
+  const collapseVariants = reduceMotion
+    ? {
+        open: { height: "auto", opacity: 1, transition: { duration: 0 } },
+        closed: { height: 0, opacity: 0, transition: { duration: 0 } },
+      }
+    : {
+        open: {
+          height: "auto",
+          opacity: 1,
+          transition: {
+            height: { duration: 0.24, ease: EASE_OUT },
+            opacity: { duration: 0.2, ease: EASE_OUT },
+          },
+        },
+        closed: {
+          height: 0,
+          opacity: 0,
+          transition: {
+            height: { duration: 0.18, ease: EASE_IN },
+            opacity: { duration: 0.15, ease: EASE_IN },
+          },
+        },
+      };
 
   const handleCreated = useCallback((sg: SubGroup) => {
     useSubGroupStore.getState().upsertSubgroup(sg.conversation_id, sg);
@@ -188,21 +227,13 @@ export function ChannelSidebar({
     }
   }, [currentGroupId, onNavigateLiveStart]);
 
-  // 子群列表：默认最多显示 3 个；编辑态显示全部（需编辑所有子群）
-  const visibleSubgroups = editing
-    ? subgroups
-    : subgroupsExpanded
-      ? subgroups
-      : subgroups.slice(0, 3);
+  // 展开更多按钮：基础 3 条 + 追加部分（追加部分复用 collapseVariants 展开收起动画）
   const showMore = !editing && subgroups.length > 3;
-  const visibleVoiceChannels = voiceExpanded ? voiceChannels : voiceChannels.slice(0, 3);
   const showVoiceMore = voiceChannels.length > 3;
-  const visibleLiveChannels = liveExpanded ? liveChannels : liveChannels.slice(0, 3);
   const showLiveMore = liveChannels.length > 3;
 
-  // 顶部三个选项卡：header 固定，下拉内容统一滚动
-  // 顶部三个选项卡：每个 header sticky 置顶，内部下拉随整列滚动
-  // 顶部三个选项卡：header 固定在上方，下拉内容统一在下方单一滚动区里滚
+  // 三个可展开选项卡（聊天/语音/直播）的行是滚动容器的直接子元素，sticky 依次吸顶，
+  // 下拉内容（子群/语音房/直播间）随整列滚动，展开收起带高度动画（collapseVariants）。
   const renderSceneItem = (scene: (typeof SCENE_META)[number]) => {
     const Icon = scene.icon;
     const active = activeScene === scene.key;
@@ -224,10 +255,18 @@ export function ChannelSidebar({
               <IconChevronDown width={14} height={14} />
             </button>
           </div>
-          {voiceOpen && (
-            <div className="channel-voice-rooms">
+          <AnimatePresence initial={false}>
+            {voiceOpen && (
+              <motion.div
+                key="voice-rooms"
+                className="channel-voice-rooms"
+                variants={collapseVariants}
+                initial="closed"
+                animate="open"
+                exit="closed"
+              >
               <ul className="channel-voice-room-list">
-                {visibleVoiceChannels.map((ch) => {
+                {voiceChannels.slice(0, 3).map((ch) => {
                   const isActive = activeScene === "voice" && String(ch.id) === String(currentVoiceChannelId);
                   return (
                     <li key={ch.id} className={`channel-voice-room-item${isActive ? " is-active" : ""}`}>
@@ -239,13 +278,40 @@ export function ChannelSidebar({
                   );
                 })}
               </ul>
+              {/* 「展开更多」追加的语音房：复用选项卡展开收起动画（collapseVariants） */}
+              <AnimatePresence initial={false}>
+                {voiceExpanded && (
+                  <motion.div
+                    key="voice-rooms-more"
+                    variants={collapseVariants}
+                    initial="closed"
+                    animate="open"
+                    exit="closed"
+                  >
+                    <ul className="channel-voice-room-list">
+                      {voiceChannels.slice(3).map((ch) => {
+                        const isActive = activeScene === "voice" && String(ch.id) === String(currentVoiceChannelId);
+                        return (
+                          <li key={ch.id} className={`channel-voice-room-item${isActive ? " is-active" : ""}`}>
+                            <button type="button" className="channel-voice-room" onClick={() => { onSelectScene("voice"); onSelectVoiceChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                              <span className="channel-voice-room-name">{ch.name}</span>
+                              {ch.member_count > 0 && <span className="channel-voice-room-count">{ch.member_count}</span>}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {showVoiceMore && (
                 <button type="button" className="channel-voice-more" onClick={() => setVoiceExpanded((v) => !v)} aria-expanded={voiceExpanded}>
                   {voiceExpanded ? "收起" : `展开更多（${voiceChannels.length - 3}）`}
                 </button>
               )}
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </Fragment>
       );
     }
@@ -267,10 +333,18 @@ export function ChannelSidebar({
               <IconChevronDown width={14} height={14} />
             </button>
           </div>
-          {liveOpen && (
-            <div className="channel-live-rooms">
+          <AnimatePresence initial={false}>
+            {liveOpen && (
+              <motion.div
+                key="live-rooms"
+                className="channel-live-rooms"
+                variants={collapseVariants}
+                initial="closed"
+                animate="open"
+                exit="closed"
+              >
               <ul className="channel-live-room-list">
-                {visibleLiveChannels.map((ch) => {
+                {liveChannels.slice(0, 3).map((ch) => {
                   const isActive = activeScene === "live" && String(ch.id) === String(activeLiveChannelId);
                   return (
                     <li key={ch.id} className={`channel-live-room-item${isActive ? " is-active" : ""}`}>
@@ -285,18 +359,67 @@ export function ChannelSidebar({
                   );
                 })}
               </ul>
+              {/* 「展开更多」追加的直播间：复用选项卡展开收起动画（collapseVariants） */}
+              <AnimatePresence initial={false}>
+                {liveExpanded && (
+                  <motion.div
+                    key="live-rooms-more"
+                    variants={collapseVariants}
+                    initial="closed"
+                    animate="open"
+                    exit="closed"
+                  >
+                    <ul className="channel-live-room-list">
+                      {liveChannels.slice(3).map((ch) => {
+                        const isActive = activeScene === "live" && String(ch.id) === String(activeLiveChannelId);
+                        return (
+                          <li key={ch.id} className={`channel-live-room-item${isActive ? " is-active" : ""}`}>
+                            <button type="button" className="channel-live-room" onClick={() => { onSelectLiveChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                              <span className="channel-live-cover">
+                                {ch.cover ? <ResourceImage src={ch.cover} alt="" className="channel-live-cover-image" fallback={<IconVideo width={16} height={16} aria-hidden="true" />} /> : <IconVideo width={16} height={16} aria-hidden="true" />}
+                                {ch.status === "live" && <span className="channel-live-dot" aria-label="直播中" />}
+                              </span>
+                              <span className="channel-live-room-title">{ch.title}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {showLiveMore && (
                 <button type="button" className="channel-live-more" onClick={() => setLiveExpanded((v) => !v)} aria-expanded={liveExpanded}>
                   {liveExpanded ? "收起" : `展开更多（${liveChannels.length - 3}）`}
                 </button>
               )}
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </Fragment>
       );
     }
     if (scene.key === "chat") {
       const defaultSg = subgroups.find((sg) => sg.is_default) ?? subgroups[0];
+      // 子群行渲染（基础 3 条与「展开更多」追加部分共用，编辑态行内编辑笔）
+      const renderSubgroupLi = (sg: SubGroup) => {
+        const unread = unreadByKey[subgroupKey(currentGroupId ?? "", sg.id)] ?? 0;
+        const isActive = activeScene === "chat" && sg.id === activeSubgroupId;
+        return (
+          <li key={sg.id} className={`channel-subgroup-item${isActive ? " is-active" : ""}`}>
+            <button type="button" className={`channel-subgroup${isActive ? " is-active" : ""}`} onClick={() => { onSelectSubgroup(sg.id); onSelectScene("chat"); }} aria-current={isActive ? "true" : undefined}>
+              <span className="channel-subgroup-name">{sg.name}</span>
+              {sg.muted === true && <span className="channel-subgroup-muted" title="已禁言（仅群主/管理员可发言）">禁言</span>}
+              {unread > 0 && <span className="channel-subgroup-badge" aria-label={`${unread} 条未读`} title="有未读消息">{unread > 99 ? "99+" : unread}</span>}
+            </button>
+            {editing && (
+              <button type="button" className="channel-subgroup-edit-btn" onClick={() => { setDialogError(null); setDialog({ kind: "edit", sg }); }} aria-label={`编辑子群 ${sg.name}`} title="编辑子群">
+                <PencilIcon />
+              </button>
+            )}
+          </li>
+        );
+      };
       return (
         <Fragment key={scene.key}>
           <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
@@ -313,28 +436,35 @@ export function ChannelSidebar({
               <IconChevronDown width={14} height={14} />
             </button>
           </div>
-          {subgroupsOpen && (
-            <div className="channel-subgroups">
+          <AnimatePresence initial={false}>
+            {subgroupsOpen && (
+              <motion.div
+                key="subgroups"
+                className="channel-subgroups"
+                variants={collapseVariants}
+                initial="closed"
+                animate="open"
+                exit="closed"
+              >
               <ul className="channel-subgroup-list">
-                {visibleSubgroups.map((sg) => {
-                  const unread = unreadByKey[subgroupKey(currentGroupId ?? "", sg.id)] ?? 0;
-                  const isActive = activeScene === "chat" && sg.id === activeSubgroupId;
-                  return (
-                    <li key={sg.id} className={`channel-subgroup-item${isActive ? " is-active" : ""}`}>
-                      <button type="button" className={`channel-subgroup${isActive ? " is-active" : ""}`} onClick={() => { onSelectSubgroup(sg.id); onSelectScene("chat"); }} aria-current={isActive ? "true" : undefined}>
-                        <span className="channel-subgroup-name">{sg.name}</span>
-                        {sg.muted === true && <span className="channel-subgroup-muted" title="已禁言（仅群主/管理员可发言）">禁言</span>}
-                        {unread > 0 && <span className="channel-subgroup-badge" aria-label={`${unread} 条未读`} title="有未读消息">{unread > 99 ? "99+" : unread}</span>}
-                      </button>
-                      {editing && (
-                        <button type="button" className="channel-subgroup-edit-btn" onClick={() => { setDialogError(null); setDialog({ kind: "edit", sg }); }} aria-label={`编辑子群 ${sg.name}`} title="编辑子群">
-                          <PencilIcon />
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
+                {subgroups.slice(0, 3).map((sg) => renderSubgroupLi(sg))}
               </ul>
+              {/* 「展开更多」追加的子群（编辑态直接全显）：复用选项卡展开收起动画（collapseVariants） */}
+              <AnimatePresence initial={false}>
+                {(editing || subgroupsExpanded) && (
+                  <motion.div
+                    key="subgroups-more"
+                    variants={collapseVariants}
+                    initial="closed"
+                    animate="open"
+                    exit="closed"
+                  >
+                    <ul className="channel-subgroup-list">
+                      {subgroups.slice(3).map((sg) => renderSubgroupLi(sg))}
+                    </ul>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {showMore && (
                 <button type="button" className="channel-subgroup-more" onClick={() => setSubgroupsExpanded((v) => !v)} aria-expanded={subgroupsExpanded}>
                   {subgroupsExpanded ? "收起" : `展开更多（${subgroups.length - 3}）`}
@@ -345,8 +475,9 @@ export function ChannelSidebar({
                   <IconPlus width={16} height={16} />
                 </button>
               )}
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </Fragment>
       );
     }

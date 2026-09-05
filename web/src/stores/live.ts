@@ -13,6 +13,7 @@ import type {
   LiveChannelStatus,
   LiveSrsStatus,
 } from "../api/types";
+import { sortLiveChannels } from "../utils/sortChannels";
 
 /** 弹幕内存保留上限（超出丢弃最旧；权威历史在后端，?limit=200 可再拉） */
 export const DANMAKU_MAX_ITEMS = 500;
@@ -120,7 +121,7 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   setChannels: (list, onlyLive = false) =>
     set({
-      channels: [...list].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      channels: sortLiveChannels(list),
       channelsLoading: false,
       error: null,
       lastFetched: Date.now(),
@@ -132,12 +133,11 @@ export const useLiveStore = create<LiveState>((set) => ({
   upsertChannel: (channel) =>
     set((state) => {
       const idx = state.channels.findIndex((c) => c.id === channel.id);
-      const channels =
+      const merged =
         idx >= 0
           ? state.channels.map((c) => (c.id === channel.id ? channel : c))
           : [...state.channels, channel];
-      // 新建/更新后按 created_at 降序重排，保证新建直播间排最前
-      channels.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      const channels = sortLiveChannels(merged);
       const current = state.current.channel?.id === channel.id
         ? { ...state.current, channel }
         : state.current;
@@ -146,8 +146,10 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   updateChannelStatus: (channelId, status) =>
     set((state) => ({
-      channels: state.channels.map((c) =>
-        c.id === channelId ? { ...c, status: status as LiveChannelStatus } : c
+      channels: sortLiveChannels(
+        state.channels.map((c) =>
+          c.id === channelId ? { ...c, status: status as LiveChannelStatus } : c
+        ),
       ),
       current: state.current.channel?.id === channelId
         ? { ...state.current, channel: { ...state.current.channel, status: status as LiveChannelStatus } }

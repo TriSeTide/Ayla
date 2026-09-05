@@ -14,6 +14,7 @@
  */
 import { create } from "zustand";
 import type { VoiceChannelDescriptor, VoiceMemberEventState } from "../api/types";
+import { sortVoiceChannels } from "../utils/sortChannels";
 
 /** 单个成员的视图状态 */
 export interface VoiceMemberState {
@@ -124,15 +125,15 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   setChannels: (channels) =>
     set({
-      channels: Array.from(
-        channels.reduce((unique, channel) => {
-          const normalized = normalizeChannel(channel);
-          unique.set(normalized.id, normalized);
-          return unique;
-        }, new Map<string, VoiceChannelDescriptor>()),
-      )
-        .map(([, channel]) => channel)
-        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+      channels: sortVoiceChannels(
+        Array.from(
+          channels.reduce((unique, channel) => {
+            const normalized = normalizeChannel(channel);
+            unique.set(normalized.id, normalized);
+            return unique;
+          }, new Map<string, VoiceChannelDescriptor>()),
+        ).map(([, channel]) => channel),
+      ),
       channelsLoading: false,
       error: null,
       lastFetched: Date.now(),
@@ -143,9 +144,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       const merged = new Map(state.channels.map((item) => [item.id, item]));
       merged.set(normalized.id, { ...merged.get(normalized.id), ...normalized });
       return {
-        channels: Array.from(merged.values()).sort((a, b) =>
-          b.created_at.localeCompare(a.created_at),
-        ),
+        channels: sortVoiceChannels(Array.from(merged.values())),
       };
     }),
   removeChannel: (channelId) =>
@@ -156,10 +155,12 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   setError: (error) => set({ error }),
   patchChannel: (channelId, patch) =>
     set((state) => ({
-      channels: state.channels.map((c) =>
-        c.id === String(channelId)
-          ? normalizeChannel({ ...c, ...patch })
-          : c,
+      channels: sortVoiceChannels(
+        state.channels.map((c) =>
+          c.id === String(channelId)
+            ? normalizeChannel({ ...c, ...patch })
+            : c,
+        ),
       ),
     })),
 

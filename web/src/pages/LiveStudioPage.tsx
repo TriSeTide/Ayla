@@ -14,6 +14,7 @@ import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useLiveStore } from "../stores/live";
 import { useShellStore } from "../stores/shell";
+import { sortLiveChannels } from "../utils/sortChannels";
 
 export function LiveStudioPage() {
   const navigate = useNavigate();
@@ -32,9 +33,12 @@ export function LiveStudioPage() {
   const [retry, setRetry] = useState(0);
   // ref 始终持有最新 ordered，供删除/新建事件回调使用（避免连续操作读到旧闭包）
   const orderedRef = useRef<LiveChannelDescriptor[]>([]);
+  // 统一入口：所有来源（store 同步 / 重拉 / 删除重算 / 新建）都经此写入，
+  // 并统一套直播新排序（在播 > 曾播 > 从未，事实源 = 后端 started_at/ended_at）。
   const applyOrdered = useCallback((next: LiveChannelDescriptor[]) => {
-    orderedRef.current = next;
-    setOrdered(next);
+    const sorted = sortLiveChannels(next);
+    orderedRef.current = sorted;
+    setOrdered(sorted);
   }, []);
   // ref 始终持有最新当前频道 id（渲染后同步），避免连续删除回调读到旧 channelId 闭包
   const channelIdRef = useRef(channelId);
@@ -42,12 +46,13 @@ export function LiveStudioPage() {
     channelIdRef.current = channelId;
   }, [channelId]);
 
-  // 当前频道详情更新（保存资料/封面、开播状态等）→ 同步到侧栏列表项，保证封面实时刷新
+  // 当前频道详情更新（保存资料/封面、开播状态等）→ 同步到侧栏列表项，保证封面实时刷新；
+  // 状态/时间戳变化（开播/下播）后同样按新排序归位。
   useEffect(() => {
     if (!channel) return;
     setOrdered((prev) => {
       if (!prev.some((c) => c.id === channel.id)) return prev;
-      const next = prev.map((c) => (c.id === channel.id ? channel : c));
+      const next = sortLiveChannels(prev.map((c) => (c.id === channel.id ? channel : c)));
       orderedRef.current = next;
       return next;
     });
