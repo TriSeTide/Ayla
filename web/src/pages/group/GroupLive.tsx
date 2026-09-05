@@ -7,7 +7,7 @@
  * 群内直播是 GroupPage 的 live 子界面（底栏已在顶部，无"底栏下滑走"进房动画，
  * 输入框直接显示）；宽屏同 ChannelSidebar 内容区。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as liveApi from "../../api/live";
 import type { LiveChannelDescriptor } from "../../api/types";
@@ -17,7 +17,7 @@ import { LiveRoomBody } from "../../components/live/LiveRoomBody";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useLiveStore } from "../../stores/live";
 
-export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => void }) {
+export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string; routeChannelId?: string; onExit: () => void }) {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const channel = useLiveStore((s) => s.current.channel);
@@ -25,7 +25,11 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
   const channels = allChannels.filter((item) =>
     (item.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
   );
-  const [currentId, setCurrentId] = useState<number | null>(null);
+  const [currentId, setCurrentId] = useState<number | null>(() => {
+    if (routeChannelId == null) return null;
+    const parsed = Number(routeChannelId);
+    return Number.isFinite(parsed) ? parsed : null;
+  });
   const loading = useLiveStore((s) => s.channelsLoading);
   const error = useLiveStore((s) => s.error);
   const [showCreate, setShowCreate] = useState(false);
@@ -64,6 +68,19 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
       setCurrentId(channels[0].id);
     }
   }, [channels, currentId]);
+
+  // 侧栏点击直播间 → URL 带 liveChannelId：仅在路由参数变化时同步一次，
+  // 不覆盖后续上下滑/侧栏切换产生的 currentId。ref 初始为当前 routeChannelId，
+  // 首屏由 useState 初始值直接命中，无需再同步。
+  const lastRouteChannelIdRef = useRef(routeChannelId);
+  useEffect(() => {
+    if (routeChannelId == null || lastRouteChannelIdRef.current === routeChannelId) return;
+    const target = channels.find((item) => String(item.id) === String(routeChannelId));
+    if (target) {
+      lastRouteChannelIdRef.current = routeChannelId;
+      setCurrentId(target.id);
+    }
+  }, [routeChannelId, channels]);
 
   const goTo = useCallback(
     (id: number) => {
@@ -165,6 +182,7 @@ export function GroupLive({ groupId, onExit }: { groupId: string; onExit: () => 
         setCreateError(null);
         setShowCreate(true);
       }}
+      hideRail
     />
   {showCreate && (
     <CreateSheet title="群内开播" onClose={() => setShowCreate(false)}>

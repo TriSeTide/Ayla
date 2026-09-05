@@ -89,7 +89,7 @@ export function LiveChannelRail({
               >
                 <div className="live-rail-cover">
                   {ch.cover ? (
-                    <ResourceImage src={ch.cover} alt="" className="live-rail-cover-image" />
+                    <ResourceImage src={ch.cover} alt="" className="live-rail-cover-image" fallback={<IconVideo width={18} height={18} aria-hidden="true" />} />
                   ) : (
                     <IconVideo width={18} height={18} aria-hidden="true" />
                   )}

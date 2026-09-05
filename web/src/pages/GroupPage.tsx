@@ -84,11 +84,12 @@ function prefersReducedMotion(): boolean {
 }
 
 export function GroupPage() {
-  const { id, scene, postId, voiceChannelId } = useParams<{
+  const { id, scene, postId, voiceChannelId, liveChannelId } = useParams<{
     id: string;
     scene?: string;
     postId?: string;
     voiceChannelId?: string;
+    liveChannelId?: string;
   }>();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
@@ -204,9 +205,11 @@ export function GroupPage() {
     ? "posts"
     : voiceChannelId
       ? "voice"
-      : scene && VALID_SCENES.has(scene)
-        ? (scene as GroupScene)
-        : "chat";
+      : liveChannelId
+        ? "live"
+        : scene && VALID_SCENES.has(scene)
+          ? (scene as GroupScene)
+          : "chat";
 
   useEffect(() => {
     if (!id) return;
@@ -286,6 +289,24 @@ export function GroupPage() {
     navigate(`/group/${id}/info`);
   }, [id, navigate, setActiveScene]);
 
+  // 宽屏侧栏点击语音房行：进入指定语音房（URL 带 voiceChannelId）
+  const openVoiceChannel = useCallback(
+    (channelId: string) => {
+      setActiveScene("voice");
+      navigate(`/group/${id}/voice/${channelId}`);
+    },
+    [id, navigate, setActiveScene],
+  );
+
+  // 宽屏侧栏点击直播间行：进入指定直播间（URL 带 liveChannelId）
+  const openLiveChannel = useCallback(
+    (channelId: number) => {
+      setActiveScene("live");
+      navigate(`/group/${id}/live/${channelId}`);
+    },
+    [id, navigate, setActiveScene],
+  );
+
   // 群头像两级点击（R-G4，单一 handler 分支，读 activeScene 单一状态）
   const handleAvatarClick = useCallback(() => {
     if (activeScene === "chat") {
@@ -303,7 +324,7 @@ export function GroupPage() {
       case "chat":
         return <GroupChat groupId={id ?? ""} />;
       case "live":
-        return <GroupLive groupId={id ?? ""} onExit={() => goScene("chat")} />;
+        return <GroupLive groupId={id ?? ""} routeChannelId={liveChannelId} onExit={() => goScene("chat")} />;
       case "voice":
         return (
           <GroupVoice
@@ -319,7 +340,7 @@ export function GroupPage() {
       default:
         return <GroupScenePlaceholder scene={activeScene} />;
     }
-  }, [activeScene, id, postId, voiceChannelId, goScene]);
+  }, [activeScene, id, postId, voiceChannelId, liveChannelId, goScene]);
 
   // ---- 场景横滑（§2.2）：松手判定——净位移(>1/3 宽)优先 + 同向甩动补充 + 方向锁让位。
   // pointercancel（浏览器滚动接管等系统取消，手指未松开）不算松手决策，回弹不判定；
@@ -410,6 +431,10 @@ export function GroupPage() {
           onSelectScene={goScene}
           onOpenInfo={openInfo}
           onSelectSubgroup={(sgId) => useSubGroupStore.getState().setActiveSubgroup(id ?? "", sgId)}
+          onSelectVoiceChannel={openVoiceChannel}
+          onSelectLiveChannel={openLiveChannel}
+          activeLiveChannelId={liveChannelId}
+          onNavigateLiveStart={(channelId) => navigate(`/live/start/${channelId}`)}
         />
         <main className="group-content">{renderScene()}</main>
         {showGroupCreate && <GroupCreateDialog onClose={() => setShowGroupCreate(false)} />}

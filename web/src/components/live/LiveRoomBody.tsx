@@ -70,6 +70,7 @@ export function LiveRoomBody({
   onDeleteChannel,
   onCreateNewChannel,
   deletingChannelId = null,
+  hideRail = false,
 }: {
   channelId: number;
   channel: LiveChannelDescriptor | null;
@@ -92,6 +93,8 @@ export function LiveRoomBody({
   onCreateNewChannel?: () => void;
   /** 正在删除的频道 id（侧栏该项禁用）。 */
   deletingChannelId?: number | null;
+  /** 隐藏宽屏频道封面侧栏（群内直播：侧栏已移到左侧 ChannelSidebar）。 */
+  hideRail?: boolean;
 }) {
   // 全屏期间冻结 isNarrow：手机点全屏会锁横屏 → viewport 变宽 → isNarrow 翻转 →
   // 窄↔宽布局切换 → 播放器(video)重建 → 黑屏。冻结让全屏时布局保持进入全屏前的形态，
@@ -256,7 +259,12 @@ export function LiveRoomBody({
 
   const wideHead = (
     <>
-      {railCollapsed && (
+      {hideRail && (
+        <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回" title="返回">
+          <IconBack width={20} height={20} />
+        </button>
+      )}
+      {!hideRail && railCollapsed && (
         <>
           <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回" title="返回">
             <IconBack width={20} height={20} />
@@ -365,7 +373,7 @@ export function LiveRoomBody({
     return (
       <div className={`live-room live-room-body ${showOwnerPanel ? "is-studio" : ""} ${isNarrow ? "is-narrow" : "is-wide"}`}>
         {/* 出错时仍保留侧栏与弹幕区，主区显示错误，避免用户卡在"只有返回键"的死页面 */}
-        {!isNarrow && (
+        {!isNarrow && !hideRail && (
           <LiveChannelRail
             channels={channels}
             currentId={channelId}
@@ -436,8 +444,8 @@ export function LiveRoomBody({
   // 宽屏观看 + 开播控制台（窄屏整页滚动）：保持三栏 / 纵向分区结构，不上下滑
   return (
     <div className={`live-room live-room-body ${showOwnerPanel ? "is-studio" : ""} ${isNarrow ? "is-narrow" : "is-wide"}`}>
-      {/* 宽屏：频道封面侧栏（返回键在侧栏内 + 收起/展开） */}
-      {!isNarrow && (
+      {/* 宽屏：频道封面侧栏（返回键在侧栏内 + 收起/展开）；群内直播 hideRail 时不渲染 */}
+      {!isNarrow && !hideRail && (
         <LiveChannelRail
           channels={channels}
           currentId={channelId}

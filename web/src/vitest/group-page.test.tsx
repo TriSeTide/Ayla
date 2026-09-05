@@ -186,7 +186,7 @@ describe("GroupPage 宽屏", () => {
   it("频道侧栏切场景 → 内容区切换", async () => {
     mockMatchMedia(false);
     renderGroup("/group/1");
-    screen.getByRole("button", { name: /直播/ }).click();
+    screen.getByRole("button", { name: "直播" }).click();
     await waitFor(() => expect(screen.getByText("群内直播内容")).toBeInTheDocument());
   });
 

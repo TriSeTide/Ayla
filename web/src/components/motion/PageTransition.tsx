@@ -32,6 +32,7 @@ const GROUP_PATTERNS = [
   "/group/:id/:scene",
   "/group/:id/posts/:postId",
   "/group/:id/voice/:voiceChannelId",
+  "/group/:id/live/:liveChannelId",
 ];
 
 function matchGroupId(pathname: string): string | null {

@@ -76,6 +76,7 @@ export default function App() {
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/posts/:postId" element={<GroupPage />} />
         <Route path="/group/:id/voice/:voiceChannelId" element={<GroupPage />} />
+        <Route path="/group/:id/live/:liveChannelId" element={<GroupPage />} />
         <Route path="/group/:id/:scene" element={<GroupPage />} />
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
       </Route>
