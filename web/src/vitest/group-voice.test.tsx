@@ -61,6 +61,7 @@ function ch(id: string, group: string | null, name = id): VoiceChannelDescriptor
     visibility: group ? "group" : "public",
     group,
     group_name: group ? "目标群" : null,
+    allowed_group_ids: group ? [group] : [],
     mine: false,
     created_at: "2026-01-01T00:00:00Z",
   };
@@ -155,25 +156,33 @@ describe("GroupVoice 范围（仅该群）", () => {
     expect(screen.getByRole("button", { name: "返回聊天" })).toBeInTheDocument();
   });
 
-  it("房主点离开频道 → 提示先转让房主，不调 leave/、不跳转", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("房主点离开频道 → 直接 leave 并离开", async () => {
     vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([ch("v1", "g1", "本群语音")]);
+    vi.mocked(voiceApi.leaveVoiceChannel).mockResolvedValue({ left: true });
     useVoiceStore.setState({ currentChannelId: "v1" });
     useAuthStore.setState({ currentUser: SELF });
+    // SELF.id === "o1" === 频道 owner_id → 房主；当前行为房主与非房主一样直接 leave，
+    // 不弹确认框。用真实路由渲染：navigate 回列表（无 :voiceChannelId 段）后房内态消失
+    function RouteGroupVoice() {
+      const { id, voiceChannelId } = useParams<{ id: string; voiceChannelId?: string }>();
+      return <GroupVoice groupId={id ?? ""} routeChannelId={voiceChannelId} onExit={vi.fn()} />;
+    }
     render(
-      <MemoryRouter>
-        <GroupVoice groupId="g1" routeChannelId="v1" onExit={vi.fn()} />
+      <MemoryRouter initialEntries={["/group/g1/voice/v1"]}>
+        <Routes>
+          <Route path="/group/:id/voice/:voiceChannelId" element={<RouteGroupVoice />} />
+        </Routes>
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByText("本群语音")).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "离开频道" }));
 
-    expect(confirmSpy).toHaveBeenCalledWith("你是房主，退出前应先转让房主");
-    expect(voiceApi.leaveVoiceChannel).not.toHaveBeenCalled();
-    // 仍在房内视图（未被导航走，离开按钮还在）
-    expect(screen.getByRole("button", { name: "离开频道" })).toBeInTheDocument();
-    confirmSpy.mockRestore();
+    expect(voiceApi.leaveVoiceChannel).toHaveBeenCalledWith("v1");
+    // 已导航回群内语音列表（房内视图消失，离开按钮不再存在）
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "离开频道" })).not.toBeInTheDocument(),
+    );
   });
 
   it("非房主点离开频道 → 正常调 leave/ 并离开", async () => {

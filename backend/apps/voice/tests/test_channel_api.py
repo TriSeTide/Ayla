@@ -68,17 +68,33 @@ def test_join_fails_without_livekit_config(auth_client, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_owner_must_transfer_before_leave(auth_client):
-    """房主离开时若还有其他成员，必须先转让（403）；成员仍保留。"""
+def test_owner_can_leave_without_transfer(auth_client):
+    """房主可直接离开（不再要求先转让）：200 + {"left": True}。
+
+    当前契约（services.leave_channel / views.ChannelLeaveView）：房主离开不要求先转让，
+    不转移 owner、不解散频道；owner 归属保持不变，其他在场成员继续保留在同一频道。
+    """
     client, user = auth_client()
     _, other = auth_client(username="voice_leave_other")
     ch = VoiceChannel.objects.create(name="语音", room_name="room_leave", owner=user)
     VoiceChannelMember.objects.create(channel=ch, user=user)
     VoiceChannelMember.objects.create(channel=ch, user=other)
+    user.is_in_voice = True
+    user.voice_room_id = ch.id
+    user.save(update_fields=["is_in_voice", "voice_room_id"])
+
     resp = client.post(f"/api/v1/voice/channels/{ch.id}/leave/")
-    assert resp.status_code == 403
-    assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
+    assert resp.status_code == 200, resp.content
+    assert resp.json() == {"left": True}
+    # 房主不再是成员；其他成员保留
+    assert not VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
     assert VoiceChannelMember.objects.filter(channel=ch, user=other).exists()
+    # 频道不解散，owner 不变（仍为离开的房主）
+    ch.refresh_from_db()
+    assert ch.owner_id == user.id
+    # 房主的语音活动状态被清理
+    user.refresh_from_db()
+    assert user.is_in_voice is False and user.voice_room_id is None
 
 
 @pytest.mark.django_db

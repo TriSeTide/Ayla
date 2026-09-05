@@ -43,6 +43,7 @@ function ch(id: number, group: string | null): LiveChannelDescriptor {
     visibility: group ? "group" : "public",
     group,
     group_name: group ? "目标群" : null,
+    allowed_group_ids: group ? [group] : [],
     stream_key: null,
     rtmp_url: null,
     hls_url: `http://h/${id}.m3u8`,
