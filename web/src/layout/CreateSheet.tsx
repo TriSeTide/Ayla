@@ -4,9 +4,14 @@
  * 窄屏底部弹出 / 宽屏居中浮层（与建群对话框同构，design.md §12.5 + 弹层规格）。
  * 标题 + 关闭按钮 + 内容（对应场景创建表单：语音/直播/发帖/桌游）。
  * 建群（handler=group）走 GroupCreateDialog 自带浮层，不经过本组件。
+ *
+ * portal 到 body：弹层容器（.create-sheet-overlay）是 fixed inset:0 全屏遮罩，
+ * 但调用处（如 ChannelSidebar 的 backdrop-filter 玻璃侧栏）会创建 stacking context，
+ * 成为 fixed 后代的 containing block → 弹层被裁剪/束缚在容器内（与 ConfirmDialog 同款处理）。
  */
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { IconClose } from "../components/icons";
 
 export function CreateSheet({
@@ -27,7 +32,7 @@ export function CreateSheet({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
       className="create-sheet-overlay"
       onClick={(e) => {
@@ -43,6 +48,7 @@ export function CreateSheet({
         </header>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

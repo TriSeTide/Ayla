@@ -32,3 +32,10 @@ Object.defineProperty(window, "sessionStorage", {
 
 // 全局 fetch mock 辅助：测试各自注册
 vi.stubGlobal("fetch", vi.fn());
+
+// jsdom 未实现 Element.scrollTo（smooth 滚动在无布局引擎下无意义）：
+// 点击触发 scrollTo 的组件（如 ChannelSidebar 点击场景行的吸顶定位）会抛
+// Uncaught TypeError 污染测试输出。补 no-op，对齐 corner-fab-stack 的局部 stub 语义。
+if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
+}
