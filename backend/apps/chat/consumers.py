@@ -509,12 +509,18 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         })
 
     async def voice_channel_member_count_changed(self, event):
-        """语音房成员数变动提示（有人加入/离开/被踢/超时清理）→ 目录列表实时刷新人数。"""
+        """语音房成员数变动提示（有人加入/离开/被踢/超时清理）→ 目录列表实时刷新人数。
+
+        转发 services 广播的排序投影（last_occupied_at/last_vacant_at）：侧栏「有人区/无人区」
+        排序的实时事实源，帧缺失时前端会退化为 REST 对账（有排序跳变），这里必须原样带上。
+        """
         await self.send_json({
             "type": "voice.channel.member_count_changed",
             "data": {
                 "channel_id": str(event["channel_id"]),
                 "member_count": event["member_count"],
+                "last_occupied_at": event.get("last_occupied_at"),
+                "last_vacant_at": event.get("last_vacant_at"),
             },
         })
 

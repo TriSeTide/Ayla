@@ -142,12 +142,35 @@ def kick_member(channel: VoiceChannel, actor, user_id):
     user = member.user
     member.delete()
     broadcast_voice_state(channel, user, "left")
+    # 踢出的可能是最后一人 → 先落库「最近变空」排序投影，再广播（帧携带最新值）
+    _mark_vacant_if_empty(channel)
     broadcast_channel_member_count(channel)
     if member.user.voice_room_id == channel.id:
         member.user.is_in_voice = False
         member.user.voice_room_id = None
         member.user.save(update_fields=["is_in_voice", "voice_room_id"])
     broadcast_voice_state(channel, member.user, "left")
+
+
+def _dt_iso(value) -> str | None:
+    """datetime → ISO 字符串（前端 Date.parse 可直接解析）；None 保持 None。"""
+    return value.isoformat() if value is not None else None
+
+
+def _mark_vacant_if_empty(channel: VoiceChannel) -> None:
+    """成员离开后，若频道已无人 → 刷新 last_vacant_at（侧栏排序投影：「变空 → 无人区最前」）。
+
+    注意必须发生在成员删除之后调用（调用方保证）；不无人则不写。
+    """
+    if not VoiceChannelMember.objects.filter(channel=channel).exists():
+        channel.last_vacant_at = timezone.now()
+        channel.save(update_fields=["last_vacant_at"])
+
+
+def _mark_vacant_if_empty_by_id(channel_id) -> None:
+    """同 _mark_vacant_if_empty，接受裸 id（频道已删成员关系后重取，避免对已失效对象判空）。"""
+    if not VoiceChannelMember.objects.filter(channel_id=channel_id).exists():
+        VoiceChannel.objects.filter(pk=channel_id).update(last_vacant_at=timezone.now())
 
 
 # ---------- 加入/离开/心跳 ----------
@@ -180,8 +203,15 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
         user.is_in_voice = True
         user.voice_room_id = channel.id
         user.save(update_fields=["is_in_voice", "voice_room_id"])
+        # 侧栏排序投影：有人进入 → 刷新「最近有人进入」（有人区 move-to-front）
+        locked_channel = VoiceChannel.objects.select_for_update().get(pk=channel.pk)
+        locked_channel.last_occupied_at = timezone.now()
+        locked_channel.save(update_fields=["last_occupied_at"])
+        channel.last_occupied_at = locked_channel.last_occupied_at
     for previous_id in previous_ids:
         broadcast_voice_state_by_channel_id(previous_id, user, "left")
+        # 旧频道可能因用户离开而变空 → 先落库 last_vacant_at，再广播（帧携带排序投影）
+        _mark_vacant_if_empty_by_id(previous_id)
         # 旧频道有人离开 → 目录人数实时刷新（否则旧房间卡片人数不减，像"没退掉"）
         broadcast_channel_member_count_by_id(previous_id)
     broadcast_voice_state(channel, user, "joined")
@@ -211,6 +241,8 @@ def leave_channel(channel: VoiceChannel, user) -> None:
             user.voice_room_id = None
             user.save(update_fields=["is_in_voice", "voice_room_id"])
         broadcast_voice_state(channel, user, "left")
+        # 离开的是最后一人 → 频道变空，先落库「最近变空」排序投影，再广播（帧携带最新值）
+        _mark_vacant_if_empty(channel)
         # 有人离开 → 目录人数实时刷新
         broadcast_channel_member_count(channel)
 
@@ -243,6 +275,8 @@ def mark_stale_members_left(channel: VoiceChannel, timeout_seconds: int | None =
             member.user.save(update_fields=["is_in_voice", "voice_room_id"])
         broadcast_voice_state(channel, member.user, "left")
     if stale:
+        # 清理的是最后一批 → 频道变空，先落库「最近变空」排序投影，再广播（帧携带最新值）
+        _mark_vacant_if_empty(channel)
         # 超时清理后目录人数实时刷新
         broadcast_channel_member_count(channel)
     return len(stale)
@@ -394,6 +428,8 @@ def broadcast_channel_member_count(channel) -> None:
 
     轮播「N人在xx连麦」与「有人在语音房」据此实时刷新；事件直接携带
     member_count（人数不涉权限元数据），客户端 patch 即可，无需 REST 对账。
+    同时携带 last_occupied_at/last_vacant_at（侧栏排序投影，join/leave 已更新
+    到 channel 对象），前端直接 patch 到频道字段、读字段排序——不维护本地计数器。
     """
     from channels.layers import get_channel_layer
     from channels.exceptions import ChannelFull
@@ -409,6 +445,8 @@ def broadcast_channel_member_count(channel) -> None:
                 "type": "voice.channel.member_count_changed",
                 "channel_id": str(channel.id),
                 "member_count": member_count,
+                "last_occupied_at": _dt_iso(channel.last_occupied_at),
+                "last_vacant_at": _dt_iso(channel.last_vacant_at),
             },
         )
     except ChannelFull:
@@ -427,7 +465,7 @@ def broadcast_channel_member_count_by_id(channel_id) -> None:
     """按频道 id 广播成员数（切换房间时旧频道成员关系已删除，仅有 id）。
 
     与 broadcast_channel_member_count 同语义，但接受裸 id，避免为已删成员关系的
-    旧频道重建 ORM 对象。
+    旧频道重建 ORM 对象；排序投影从库中重读（_mark_vacant_if_empty_by_id 已先落库）。
     """
     from channels.layers import get_channel_layer
     from channels.exceptions import ChannelFull
@@ -436,6 +474,12 @@ def broadcast_channel_member_count_by_id(channel_id) -> None:
     if layer is None:
         return
     member_count = VoiceChannelMember.objects.filter(channel_id=channel_id).count()
+    proj = (
+        VoiceChannel.objects.filter(pk=channel_id)
+        .values("last_occupied_at", "last_vacant_at")
+        .first()
+        or {}
+    )
     try:
         async_to_sync(layer.group_send)(
             "voice_catalog",
@@ -443,6 +487,8 @@ def broadcast_channel_member_count_by_id(channel_id) -> None:
                 "type": "voice.channel.member_count_changed",
                 "channel_id": str(channel_id),
                 "member_count": member_count,
+                "last_occupied_at": _dt_iso(proj.get("last_occupied_at")),
+                "last_vacant_at": _dt_iso(proj.get("last_vacant_at")),
             },
         )
     except ChannelFull:

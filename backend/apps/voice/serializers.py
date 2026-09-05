@@ -46,6 +46,8 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
             "owner_nickname",
             "member_count",
             "created_at",
+            "last_occupied_at",
+            "last_vacant_at",
         ]
         read_only_fields = [
             "id",
@@ -58,6 +60,8 @@ class VoiceChannelSerializer(serializers.ModelSerializer):
             "owner_nickname",
             "member_count",
             "created_at",
+            "last_occupied_at",
+            "last_vacant_at",
         ]
 
 

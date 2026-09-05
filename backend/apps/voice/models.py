@@ -50,6 +50,10 @@ class VoiceChannel(models.Model):
         limit_choices_to={"type": "group"},
     )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    # 侧栏排序投影（2026-09-05）：有人进入时刷新 last_occupied_at；最后一人离开（变空）
+    # 时刷新 last_vacant_at。前端刷新后据此恢复「有人区/无人区」排序（曾进入的空房不回落）。
+    last_occupied_at = models.DateTimeField("最近有人进入", null=True, blank=True)
+    last_vacant_at = models.DateTimeField("最近变空", null=True, blank=True)
 
     class Meta:
         db_table = "voice_channels"

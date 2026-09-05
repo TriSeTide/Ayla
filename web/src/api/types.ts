@@ -611,6 +611,9 @@ export interface VoiceChannelMemberCountChangedFrame {
   data: {
     channel_id: string;
     member_count: number;
+    /** 侧栏排序投影（后端 join/leave 落库后随帧广播，前端 patch 到频道字段） */
+    last_occupied_at?: string | null;
+    last_vacant_at?: string | null;
   };
 }
 
@@ -790,6 +793,9 @@ export interface VoiceChannelDescriptor {
   /** 我是否在该频道（列表/详情视图注入） */
   mine: boolean;
   created_at: string;
+  /** 侧栏排序投影：最近有人进入/最近变空（后端持久化，刷新后恢复「有人区/无人区」排序） */
+  last_occupied_at?: string | null;
+  last_vacant_at?: string | null;
 }
 
 /** VoiceChannelMemberSerializer 字段 */

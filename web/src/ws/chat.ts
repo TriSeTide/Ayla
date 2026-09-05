@@ -576,15 +576,34 @@ export class ChatWSClient {
         break;
       }
       case "voice.channel.member_count_changed": {
-        // 有人加入/离开/被踢/超时清理 → 目录列表实时刷新人数（轮播「N人在xx连麦」）
+        // 有人加入/离开/被踢/超时清理 → 目录列表实时刷新人数（轮播「N人在xx连麦」）。
+        // 排序投影（last_occupied_at/last_vacant_at）以 REST 详情为权威对账：帧可能来自
+        // 旧版后端未带这两个字段，或带上但值为 null——无论哪种，拉一次详情 upsert，
+        // 由 serializer 返回的持久字段恢复「有人区/无人区」排序（多端一致、不依赖帧内容）。
         const d = frame.data;
         const prev = useVoiceStore.getState().channels.find(
           (c) => c.id === String(d.channel_id),
         );
         const prevCount = prev ? Number(prev.member_count) : 0;
-        useVoiceStore.getState().patchChannel(d.channel_id, {
-          member_count: d.member_count,
-        });
+        // 排序投影（last_occupied_at/last_vacant_at）：帧携带时直接 patch（新后端，
+        // 一次到位，patchChannel 重排一次）；缺失/为 null 时用 REST 详情对账，
+        // 由 serializer 返回的持久字段恢复「有人区/无人区」排序（多端一致、不依赖帧内容）。
+        const frameHasSort = d.last_occupied_at != null || d.last_vacant_at != null;
+        useVoiceStore.getState().patchChannel(
+          d.channel_id,
+          frameHasSort
+            ? {
+                member_count: d.member_count,
+                last_occupied_at: d.last_occupied_at ?? prev?.last_occupied_at ?? null,
+                last_vacant_at: d.last_vacant_at ?? prev?.last_vacant_at ?? null,
+              }
+            : { member_count: d.member_count },
+        );
+        if (!frameHasSort) {
+          void voiceApi.getVoiceChannel(d.channel_id)
+            .then((channel) => useVoiceStore.getState().upsertChannel(channel))
+            .catch(() => { /* 403/404：当前用户不可见或已删除，忽略 */ });
+        }
         // 有人进入（人数增加）→ 群卡片往前排；离开/被踢（人数减少）不回退。
         if (Number(d.member_count) > prevCount && prev) {
           bumpGroups(visibleGroupIds(prev));
@@ -607,6 +626,7 @@ export class ChatWSClient {
         this.reconcileLiveChannel(frame.data.channel_id);
         if (frame.data.status === "live") {
           // 开播 → 拉详情确认可见群后 bump（单调往前排）；下播/结束不回退。
+          // 侧栏直播间排序读 started_at/ended_at 字段（reconcile 对账后自动生效），无需额外 bump。
           void liveApi.getLiveChannel(frame.data.channel_id)
             .then((channel) => {
               if (channel.status === "live") bumpGroups(visibleGroupIds(channel));
