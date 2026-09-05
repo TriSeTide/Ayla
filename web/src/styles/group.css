@@ -648,6 +648,16 @@
   gap: var(--sp-1);
   padding: 0 var(--sp-2);
   overflow-y: auto;
+  /* 作为 sticky 场景行的定位祖先：点击选项卡跳吸顶位时，行的 offsetTop 稳定相对本滚动容器内容坐标 */
+  position: relative;
+}
+
+/* 帖子/桌游锁定置底：不随上方列表滚动，顶部加分隔线；选项卡同白色卡片 */
+.channel-sidebar-list-bottom {
+  flex: none;
+  overflow: visible;
+  padding: var(--sp-2) var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--glass-border);
 }
 
 .channel-scene {
@@ -657,6 +667,8 @@
   height: 40px;
   padding: 0 var(--sp-4);
   border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.4);
+  border: 1px solid var(--glass-border);
   color: var(--text-secondary);
   font-size: 15px;
   font-weight: 600;
@@ -695,18 +707,179 @@
   flex-direction: column;
 }
 
-/* 聊天按钮 + 三角形收起键：点击区域分开，但高亮连成一片（三角形浮在按钮内，无独立背景） */
+/* 聊天按钮 + 三角形收起键：点击区域分开，但高亮连成一片（三角形浮在按钮内，无独立背景）。
+   选项卡行 sticky 置顶：侧栏滚动时聊天/语音/直播选项卡不滚出，仅其下拉内容滚动。
+   视觉统一：行自身透明（不铺玻璃条），行内 .channel-scene 胶囊即为唯一可见卡面，
+   与下方帖子/桌游两卡同款（0.4 白底 + 1px 亮边），hover/选中胶囊规则直接复用。 */
 .channel-scene-row {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: transparent;
   display: flex;
   align-items: center;
 }
+
+/* 聊天/语音/直播三个选项卡是滚动容器的直接子元素，滚动时依次叠在顶部；
+   吸附位按 40px 高 + 4px 间隔（与底部两卡一致）：顶部 0 / 44 / 88。
+   语音/直播同时吸附底部：任一分组展开内容再长，后面的选项卡也不会被挤出可视区，
+   始终贴在滚动区底部可见，滚到自然位置后转顶部吸附。
+   底部吸附留 8px 呼吸间距：live 贴底 8px、voice 在其上方（40 + 4 + 8 = 52px），不贴死容器底缘。 */
+.channel-sidebar-list:not(.channel-sidebar-list-bottom) > .channel-scene-row--chat { top: 0; }
+.channel-sidebar-list:not(.channel-sidebar-list-bottom) > .channel-scene-row--voice { top: 44px; bottom: 52px; }
+.channel-sidebar-list:not(.channel-sidebar-list-bottom) > .channel-scene-row--live { top: 88px; bottom: 8px; }
 
 .channel-scene-row .channel-scene {
   flex: 1;
   min-width: 0;
   /* 给右侧三角形留出空间 */
   padding-right: 40px;
+}
+
+/* 有编辑笔时给右侧两个浮层按钮留出空间 */
+.channel-scene-row:has(.channel-scene-subgroup-edit) .channel-scene {
+  padding-right: 76px;
+}
+
+/* 语音房 + 与展开键：与聊天行编辑笔/展开键同款浮层按钮 */
+.channel-scene-row:has(.channel-scene-voice-add) .channel-scene {
+  padding-right: 76px;
+}
+
+.channel-scene-voice-add {
+  position: absolute;
+  right: 38px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-scene-voice-add:hover {
+  background: rgba(157, 191, 230, 0.3);
+  color: var(--text-primary);
+}
+
+.channel-scene-voice-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-scene-voice-toggle.is-open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.channel-scene-row:has(.channel-scene-voice-toggle:hover) .channel-scene,
+.channel-scene-row:has(.channel-scene-voice-add:hover) .channel-scene {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.channel-scene-voice-toggle:hover {
+  background: rgba(157, 191, 230, 0.3);
+  color: var(--text-primary);
+}
+
+/* 直播 + 与展开键：与语音行同款浮层按钮 */
+.channel-scene-row:has(.channel-scene-live-add) .channel-scene {
+  padding-right: 76px;
+}
+
+.channel-scene-live-add {
+  position: absolute;
+  right: 38px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-scene-live-add:hover {
+  background: rgba(157, 191, 230, 0.3);
+  color: var(--text-primary);
+}
+
+/* 直播展开键：与语音展开键同款 */
+.channel-scene-live-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-scene-live-toggle.is-open {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.channel-scene-row:has(.channel-scene-live-toggle:hover) .channel-scene,
+.channel-scene-row:has(.channel-scene-live-add:hover) .channel-scene {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.channel-scene-live-toggle:hover {
+  background: rgba(157, 191, 230, 0.3);
+  color: var(--text-primary);
+}
+
+/* 编辑笔：透明浮层，位于展开键左侧；点击独立；高亮跟随聊天按钮整行 */
+.channel-scene-subgroup-edit {
+  position: absolute;
+  right: 38px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-scene-subgroup-edit:hover,
+.channel-scene-subgroup-edit.is-active {
+  background: rgba(157, 191, 230, 0.3);
+  color: var(--text-primary);
 }
 
 /* 三角形收起键：透明浮层，点击独立；高亮跟随聊天按钮整行 */
@@ -731,8 +904,9 @@
   transform: translateY(-50%) rotate(180deg);
 }
 
-/* hover 三角形 → 整行一起高亮 + 三角形自身小高亮 */
-.channel-scene-row:has(.channel-scene-subgroup-toggle:hover) .channel-scene {
+/* hover 三角形/编辑笔 → 整行一起高亮 + 自身小高亮 */
+.channel-scene-row:has(.channel-scene-subgroup-toggle:hover) .channel-scene,
+.channel-scene-row:has(.channel-scene-subgroup-edit:hover) .channel-scene {
   background: rgba(157, 191, 230, 0.18);
 }
 
@@ -744,23 +918,39 @@
 .channel-subgroups {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  padding: var(--sp-1) 0 var(--sp-2);
+  gap: 2px;
+  padding: 2px 0 4px;
 }
 
 /* 子群行整体右移（与聊天文字对齐），行宽 = 侧栏宽 - 缩进，右缘与聊天按钮对齐 */
 .channel-subgroup-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  /* 36px：与"聊天"文字起点精确对齐（实测 44px 时偏右 8px） */
-  padding-left: 36px;
+  gap: 1px;
+  /* 40px：与"聊天"文字起点精确对齐（实测 36px 时偏左 4px） */
+  padding-left: 40px;
 }
 
 .channel-subgroup-item {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: 2px;
+  height: 30px;
+  padding-right: 2px;
+  border-radius: var(--radius-input);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.channel-subgroup-item:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.channel-subgroup-item.is-active {
+  background: rgba(157, 191, 230, 0.35);
+}
+
+.channel-subgroup-item.is-active .channel-subgroup {
+  color: var(--text-primary);
 }
 
 .channel-subgroup {
@@ -769,23 +959,16 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 36px;
-  padding: 0 var(--sp-3);
+  height: 30px;
+  padding: 0 var(--sp-2);
   border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
   color: var(--text-secondary);
   font-size: 14px;
   font-weight: 600;
   text-align: left;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-
-.channel-subgroup:hover {
-  background: rgba(157, 191, 230, 0.18);
-}
-
-.channel-subgroup.is-active {
-  background: rgba(157, 191, 230, 0.35);
-  color: var(--text-primary);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .channel-subgroup-name {
@@ -815,8 +998,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-input);
   color: var(--text-secondary);
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -827,37 +1010,36 @@
   color: var(--text-primary);
 }
 
-.channel-subgroup-edit-actions {
+/* 添加子群 +：与下方「展开更多」按钮同款，位于子群列表下方、与子群行左缘对齐 */
+.channel-subgroup-add {
   display: flex;
-  gap: var(--sp-2);
-  /* 与子群行同宽：右移对齐聊天文字 */
-  padding: var(--sp-1) 0 0 36px;
-}
-
-.channel-subgroup-edit-action {
-  flex: 1;
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 34px;
+  width: calc(100% - 40px);
+  height: 28px;
+  margin: var(--sp-1) 0 0 40px;
+  padding: 0 var(--sp-3);
   border-radius: var(--radius-input);
-  background: rgba(255, 250, 251, 0.6);
-  border: 1px solid var(--glass-border);
+  background: rgba(255, 250, 251, 0.5);
+  border: 1px dashed var(--glass-border);
   color: var(--text-secondary);
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
-.channel-subgroup-edit-action:hover {
+.channel-subgroup-add:hover {
   background: rgba(157, 191, 230, 0.18);
   color: var(--text-primary);
 }
 
 /* 展开更多按钮：与子群行同宽（右移对齐聊天文字） */
 .channel-subgroup-more {
-  display: block;
-  width: calc(100% - 36px);
-  margin: var(--sp-1) 0 0 36px;
-  padding: 5px var(--sp-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 40px);
+  height: 28px;
+  margin: var(--sp-1) 0 0 40px;
+  padding: 0 var(--sp-3);
   border-radius: var(--radius-input);
   background: rgba(255, 250, 251, 0.5);
   border: 1px dashed var(--glass-border);
@@ -873,23 +1055,213 @@
   color: var(--text-primary);
 }
 
-/* 编辑按钮：与子群行同宽（右移对齐，加宽） */
-.channel-subgroup-edit-toggle {
-  display: block;
-  width: calc(100% - 36px);
-  margin: var(--sp-1) 0 0 36px;
-  padding: 6px var(--sp-3);
+/* ---- 语音房下拉（宽屏侧栏，与子群下拉同构） ---- */
+.channel-voice-rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px;
+}
+
+.channel-voice-room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 40px;
+}
+
+.channel-voice-room-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding-right: 2px;
   border-radius: var(--radius-input);
-  background: rgba(255, 250, 251, 0.6);
-  border: 1px solid var(--glass-border);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.channel-voice-room-item:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.channel-voice-room-item.is-active {
+  background: rgba(157, 191, 230, 0.35);
+}
+
+.channel-voice-room-item.is-active .channel-voice-room {
+  color: var(--text-primary);
+}
+
+.channel-voice-room {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.channel-voice-room-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-voice-room-count {
+  flex: none;
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.channel-voice-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 40px);
+  height: 28px;
+  margin: var(--sp-1) 0 0 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.5);
+  border: 1px dashed var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: 700;
   text-align: center;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
-.channel-subgroup-edit-toggle:hover {
+.channel-voice-more:hover {
+  background: rgba(157, 191, 230, 0.18);
+  color: var(--text-primary);
+}
+
+/* ---- 直播下拉（宽屏侧栏）：带封面，行高更高、不紧凑 ---- */
+.channel-live-rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 6px;
+}
+
+.channel-live-room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 40px;
+}
+
+.channel-live-room-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px;
+  border-radius: var(--radius-input);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.channel-live-room-item:hover {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.channel-live-room-item.is-active {
+  background: rgba(157, 191, 230, 0.35);
+}
+
+.channel-live-room-item.is-active .channel-live-room {
+  color: var(--text-primary);
+}
+
+.channel-live-room {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px var(--sp-2);
+  border-radius: var(--radius-input);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  text-align: left;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.channel-live-cover {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: linear-gradient(150deg, var(--ice-300), var(--sakura-100));
+  color: var(--ice-500);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+}
+
+.channel-live-cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.channel-live-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+}
+
+.channel-live-room-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: inherit;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.channel-live-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 40px);
+  height: 28px;
+  margin: var(--sp-1) 0 0 40px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.5);
+  border: 1px dashed var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.channel-live-more:hover {
   background: rgba(157, 191, 230, 0.18);
   color: var(--text-primary);
 }

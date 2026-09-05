@@ -1,7 +1,7 @@
 /**
  * 群聊子群功能测试：
  * - subgroup store：列表/未读投影/upsert 保留未读；
- * - ChannelSidebar：子群展开/收起、编辑按钮、编辑态 +/x、添加弹窗；
+ * - ChannelSidebar：子群展开/收起、编辑笔、编辑态 +、添加弹窗；
  * - GroupChat：子群数 > 1 显示选项卡、仅默认组不显示、切换子群标已读。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -122,7 +122,7 @@ describe("ChannelSidebar 子群", () => {
     expect(screen.getByRole("button", { name: /游戏/ })).toBeInTheDocument();
   });
 
-  it("群主/管理员显示编辑按钮；编辑态变 +/x；点击 + 打开添加弹窗", () => {
+  it("群主/管理员显示编辑笔；编辑态变 +；再点笔退出编辑；点 + 打开添加弹窗", () => {
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     expect(screen.getByRole("button", { name: "添加子群" })).toBeInTheDocument();
@@ -130,6 +130,12 @@ describe("ChannelSidebar 子群", () => {
     // 编辑态每个子群行出现编辑按钮
     expect(screen.getByRole("button", { name: "编辑子群 默认组" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑子群 闲聊" })).toBeInTheDocument();
+    // 再点笔退出编辑：+ 与行内编辑按钮消失
+    fireEvent.click(screen.getByRole("button", { name: "退出编辑" }));
+    expect(screen.queryByRole("button", { name: "添加子群" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑子群 默认组" })).not.toBeInTheDocument();
+    // 再次进入编辑并打开添加弹窗
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
     fireEvent.click(screen.getByRole("button", { name: "添加子群" }));
     expect(screen.getByRole("dialog", { name: "添加子群" })).toBeInTheDocument();
   });
@@ -138,6 +144,19 @@ describe("ChannelSidebar 子群", () => {
     useChatStore.setState({ conversations: [groupConv("g1", "member")] });
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
     expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+  });
+
+  it("子群收起时编辑笔隐藏；展开后可见并可进入编辑态", () => {
+    render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "收起子群" }));
+    expect(screen.queryByRole("button", { name: /默认组/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开子群" }));
+    const pen = screen.getByRole("button", { name: "编辑" });
+    expect(pen).toBeInTheDocument();
+    fireEvent.click(pen);
+    expect(screen.getByRole("button", { name: "默认组" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加子群" })).toBeInTheDocument();
   });
 
   it("点击子群行触发 onSelectSubgroup", () => {

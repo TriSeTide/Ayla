@@ -9,15 +9,20 @@
  * 子群（群聊子群功能）：
  * - 「聊天」场景项下展开子群列表（默认展开，可收起）；
  * - 子群行显示未读红点（子群独立未读）与当前选中态，点击切换子群；
- * - 群主/管理员：子群列表下方「编辑」按钮 → 编辑态变【+】【x】；
- *   编辑态每个子群行出现编辑按钮 → 弹窗改名/删除（默认组不可删）。
+ * - 群主/管理员：聊天行展开键左侧有编辑笔，点击进入/退出编辑态；
+ *   编辑态显示【+】添加按钮，每个子群行内出现编辑笔 → 弹窗改名/删除（默认组不可删）。
  */
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import * as chatApi from "../api/chat";
+import * as liveApi from "../api/live";
 import type { SubGroup } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ResourceImage } from "../components/ResourceImage";
+import { CreateSheet } from "./CreateSheet";
 import { SubGroupDialog, type SubGroupDialogState } from "../components/group/SubGroupDialog";
-import { IconChat, IconClose, IconGame, IconMic, IconPlus, IconPost, IconVideo } from "../components/icons";
+import { VoiceChannelCreate } from "../components/voice/VoiceChannelCreate";
+import { LiveStartSheet } from "../components/live/LiveStartSheet";
+import { IconChat, IconGame, IconMic, IconPlus, IconPost, IconVideo } from "../components/icons";
 import type { GroupScene } from "../stores/group";
 import { useGroupStore } from "../stores/group";
 import { useVoiceStore } from "../stores/voice";
@@ -39,6 +44,10 @@ export function ChannelSidebar({
   onSelectScene,
   onOpenInfo,
   onSelectSubgroup,
+  onSelectVoiceChannel,
+  onSelectLiveChannel,
+  activeLiveChannelId,
+  onNavigateLiveStart,
 }: {
   groupName: string;
   activeScene: GroupScene;
@@ -46,13 +55,23 @@ export function ChannelSidebar({
   onOpenInfo: () => void;
   /** 切换当前子群（宽屏侧栏点击子群行） */
   onSelectSubgroup: (subgroupId: string) => void;
+  /** 点击侧栏语音房行：进入该语音房（宽屏） */
+  onSelectVoiceChannel?: (channelId: string) => void;
+  /** 点击侧栏直播间行：进入该直播间（宽屏） */
+  onSelectLiveChannel?: (channelId: number) => void;
+  /** 当前直播间 id（路由 liveChannelId，用于高亮） */
+  activeLiveChannelId?: string | null;
+  /** 开播：进入开播控制台（由 GroupPage 提供 navigate） */
+  onNavigateLiveStart?: (channelId: number) => void;
 }) {
   const currentGroupId = useGroupStore((state) => state.currentGroupId);
-  const voiceCount = useVoiceStore((state) => state.channels
-    .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId)))
-    .reduce((sum, channel) => sum + (channel.member_count || 0), 0));
-  const hasLive = useLiveStore((state) => state.channels
-    .some((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId)) && channel.status === "live"));
+  const currentVoiceChannelId = useVoiceStore((state) => state.currentChannelId);
+  const voiceChannels = useVoiceStore((state) => state.channels
+    .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId))));
+  const voiceCount = voiceChannels.reduce((sum, channel) => sum + (channel.member_count || 0), 0);
+  const liveChannels = useLiveStore((state) => state.channels
+    .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId))));
+  const hasLive = liveChannels.some((channel) => channel.status === "live");
   // 群内未读帖子数（浏览与已读同源）：>0 时帖子场景项显示红点
   const postUnread = useChatStore((state) => state.conversations
     .find((c) => c.id === currentGroupId)?.post_unread_count ?? 0);
@@ -73,6 +92,38 @@ export function ChannelSidebar({
   const [busy, setBusy] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SubGroup | null>(null);
+
+  // 中部滚动列表 ref：点击场景选项卡时把列表滚到该行自身的吸顶位
+  const sceneListRef = useRef<HTMLDivElement>(null);
+
+  // 点击聊天/语音/直播：滚到该行自己的 sticky 吸顶位（chat 0 / voice 44 / live 88，与 group.css 吸附位一致）。
+  // sticky 元素吸附/吸底期间 offsetTop 会随滚动漂移（返回含吸附位移的盒位置），
+  // 因此先瞬时取消 sticky 量取真实文档流位置，再算目标 scrollTop = 流位置 - 吸顶偏移。
+  // 内容不足以滚到吸顶位（数据不多）时，scrollTo 会被容器自然 clamp，只滚动到能到的尽头。
+  const scrollSceneRowToPin = useCallback((scene: GroupScene) => {
+    const container = sceneListRef.current;
+    if (!container) return;
+    const row = container.querySelector<HTMLElement>(`.channel-scene-row--${scene}`);
+    if (!row) return;
+    const pinTop = scene === "chat" ? 0 : scene === "voice" ? 44 : 88;
+    const prevPosition = row.style.position;
+    row.style.position = "static"; // 临时取消 sticky（同步回流一次，不触发绘制）
+    const flowTop = row.offsetTop;
+    row.style.position = prevPosition;
+    container.scrollTo({ top: Math.max(0, flowTop - pinTop), behavior: "smooth" });
+  }, []);
+
+  // ---- 语音房下拉状态 ----
+  const [voiceOpen, setVoiceOpen] = useState(true);
+  const [voiceExpanded, setVoiceExpanded] = useState(false);
+  const [showVoiceCreate, setShowVoiceCreate] = useState(false);
+
+  // ---- 直播下拉状态 ----
+  const [liveOpen, setLiveOpen] = useState(true);
+  const [liveExpanded, setLiveExpanded] = useState(false);
+  const [showLiveCreate, setShowLiveCreate] = useState(false);
+  const [creatingLive, setCreatingLive] = useState(false);
+  const [liveCreateError, setLiveCreateError] = useState<string | null>(null);
 
   const handleCreated = useCallback((sg: SubGroup) => {
     useSubGroupStore.getState().upsertSubgroup(sg.conversation_id, sg);
@@ -117,6 +168,26 @@ export function ChannelSidebar({
     }
   }, [confirmDelete, currentGroupId, handleDeleted]);
 
+  // 侧栏 + 开播：选择已有直播间进入控制台，或新建直播间
+  const handleLiveStarted = useCallback((channel: { id: number }) => {
+    setShowLiveCreate(false);
+    onNavigateLiveStart?.(channel.id);
+  }, [onNavigateLiveStart]);
+
+  const handleCreateNewLive = useCallback(async () => {
+    setCreatingLive(true);
+    setLiveCreateError(null);
+    try {
+      const created = await liveApi.createLiveChannel("新直播间", currentGroupId);
+      setShowLiveCreate(false);
+      onNavigateLiveStart?.(created.id);
+    } catch (e) {
+      setLiveCreateError(e instanceof Error ? e.message : "创建直播间失败");
+    } finally {
+      setCreatingLive(false);
+    }
+  }, [currentGroupId, onNavigateLiveStart]);
+
   // 子群列表：默认最多显示 3 个；编辑态显示全部（需编辑所有子群）
   const visibleSubgroups = editing
     ? subgroups
@@ -124,6 +195,173 @@ export function ChannelSidebar({
       ? subgroups
       : subgroups.slice(0, 3);
   const showMore = !editing && subgroups.length > 3;
+  const visibleVoiceChannels = voiceExpanded ? voiceChannels : voiceChannels.slice(0, 3);
+  const showVoiceMore = voiceChannels.length > 3;
+  const visibleLiveChannels = liveExpanded ? liveChannels : liveChannels.slice(0, 3);
+  const showLiveMore = liveChannels.length > 3;
+
+  // 顶部三个选项卡：header 固定，下拉内容统一滚动
+  // 顶部三个选项卡：每个 header sticky 置顶，内部下拉随整列滚动
+  // 顶部三个选项卡：header 固定在上方，下拉内容统一在下方单一滚动区里滚
+  const renderSceneItem = (scene: (typeof SCENE_META)[number]) => {
+    const Icon = scene.icon;
+    const active = activeScene === scene.key;
+    if (scene.key === "voice") {
+      return (
+        <Fragment key={scene.key}>
+          <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
+            <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("voice"); scrollSceneRowToPin("voice"); }} aria-current={active ? "true" : undefined}>
+              <Icon width={20} height={20} />
+              <span>{scene.label}</span>
+              {voiceCount > 0 && <span className="channel-scene-status">{voiceCount}</span>}
+            </button>
+            {voiceOpen && (
+              <button type="button" className="channel-scene-voice-add" onClick={() => setShowVoiceCreate(true)} aria-label="创建语音房" title="创建语音房">
+                <IconPlus width={14} height={14} />
+              </button>
+            )}
+            <button type="button" className={`channel-scene-voice-toggle${voiceOpen ? " is-open" : ""}`} onClick={() => setVoiceOpen((o) => !o)} aria-label={voiceOpen ? "收起语音房" : "展开语音房"} aria-expanded={voiceOpen}>
+              <IconChevronDown width={14} height={14} />
+            </button>
+          </div>
+          {voiceOpen && (
+            <div className="channel-voice-rooms">
+              <ul className="channel-voice-room-list">
+                {visibleVoiceChannels.map((ch) => {
+                  const isActive = activeScene === "voice" && String(ch.id) === String(currentVoiceChannelId);
+                  return (
+                    <li key={ch.id} className={`channel-voice-room-item${isActive ? " is-active" : ""}`}>
+                      <button type="button" className="channel-voice-room" onClick={() => { onSelectScene("voice"); onSelectVoiceChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                        <span className="channel-voice-room-name">{ch.name}</span>
+                        {ch.member_count > 0 && <span className="channel-voice-room-count">{ch.member_count}</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {showVoiceMore && (
+                <button type="button" className="channel-voice-more" onClick={() => setVoiceExpanded((v) => !v)} aria-expanded={voiceExpanded}>
+                  {voiceExpanded ? "收起" : `展开更多（${voiceChannels.length - 3}）`}
+                </button>
+              )}
+            </div>
+          )}
+        </Fragment>
+      );
+    }
+    if (scene.key === "live") {
+      return (
+        <Fragment key={scene.key}>
+          <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
+            <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("live"); scrollSceneRowToPin("live"); }} aria-current={active ? "true" : undefined}>
+              <Icon width={20} height={20} />
+              <span>{scene.label}</span>
+              {hasLive && <span className="channel-scene-status">LIVE</span>}
+            </button>
+            {liveOpen && (
+              <button type="button" className="channel-scene-live-add" onClick={() => { setLiveCreateError(null); setShowLiveCreate(true); }} aria-label="创建直播" title="创建直播">
+                <IconPlus width={14} height={14} />
+              </button>
+            )}
+            <button type="button" className={`channel-scene-live-toggle${liveOpen ? " is-open" : ""}`} onClick={() => setLiveOpen((o) => !o)} aria-label={liveOpen ? "收起直播" : "展开直播"} aria-expanded={liveOpen}>
+              <IconChevronDown width={14} height={14} />
+            </button>
+          </div>
+          {liveOpen && (
+            <div className="channel-live-rooms">
+              <ul className="channel-live-room-list">
+                {visibleLiveChannels.map((ch) => {
+                  const isActive = activeScene === "live" && String(ch.id) === String(activeLiveChannelId);
+                  return (
+                    <li key={ch.id} className={`channel-live-room-item${isActive ? " is-active" : ""}`}>
+                      <button type="button" className="channel-live-room" onClick={() => { onSelectLiveChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                        <span className="channel-live-cover">
+                          {ch.cover ? <ResourceImage src={ch.cover} alt="" className="channel-live-cover-image" fallback={<IconVideo width={16} height={16} aria-hidden="true" />} /> : <IconVideo width={16} height={16} aria-hidden="true" />}
+                          {ch.status === "live" && <span className="channel-live-dot" aria-label="直播中" />}
+                        </span>
+                        <span className="channel-live-room-title">{ch.title}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {showLiveMore && (
+                <button type="button" className="channel-live-more" onClick={() => setLiveExpanded((v) => !v)} aria-expanded={liveExpanded}>
+                  {liveExpanded ? "收起" : `展开更多（${liveChannels.length - 3}）`}
+                </button>
+              )}
+            </div>
+          )}
+        </Fragment>
+      );
+    }
+    if (scene.key === "chat") {
+      const defaultSg = subgroups.find((sg) => sg.is_default) ?? subgroups[0];
+      return (
+        <Fragment key={scene.key}>
+          <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
+            <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("chat"); scrollSceneRowToPin("chat"); if (defaultSg) onSelectSubgroup(defaultSg.id); }} aria-current={active ? "true" : undefined}>
+              <Icon width={20} height={20} />
+              <span>{scene.label}</span>
+            </button>
+            {subgroupsOpen && canManage && (
+              <button type="button" className={`channel-scene-subgroup-edit${editing ? " is-active" : ""}`} onClick={() => setEditing((v) => !v)} aria-label={editing ? "退出编辑" : "编辑"} title={editing ? "退出编辑" : "编辑"} aria-pressed={editing}>
+                <PencilIcon />
+              </button>
+            )}
+            <button type="button" className={`channel-scene-subgroup-toggle${subgroupsOpen ? " is-open" : ""}`} onClick={() => setSubgroupsOpen((o) => !o)} aria-label={subgroupsOpen ? "收起子群" : "展开子群"} aria-expanded={subgroupsOpen}>
+              <IconChevronDown width={14} height={14} />
+            </button>
+          </div>
+          {subgroupsOpen && (
+            <div className="channel-subgroups">
+              <ul className="channel-subgroup-list">
+                {visibleSubgroups.map((sg) => {
+                  const unread = unreadByKey[subgroupKey(currentGroupId ?? "", sg.id)] ?? 0;
+                  const isActive = activeScene === "chat" && sg.id === activeSubgroupId;
+                  return (
+                    <li key={sg.id} className={`channel-subgroup-item${isActive ? " is-active" : ""}`}>
+                      <button type="button" className={`channel-subgroup${isActive ? " is-active" : ""}`} onClick={() => { onSelectSubgroup(sg.id); onSelectScene("chat"); }} aria-current={isActive ? "true" : undefined}>
+                        <span className="channel-subgroup-name">{sg.name}</span>
+                        {sg.muted === true && <span className="channel-subgroup-muted" title="已禁言（仅群主/管理员可发言）">禁言</span>}
+                        {unread > 0 && <span className="channel-subgroup-badge" aria-label={`${unread} 条未读`} title="有未读消息">{unread > 99 ? "99+" : unread}</span>}
+                      </button>
+                      {editing && (
+                        <button type="button" className="channel-subgroup-edit-btn" onClick={() => { setDialogError(null); setDialog({ kind: "edit", sg }); }} aria-label={`编辑子群 ${sg.name}`} title="编辑子群">
+                          <PencilIcon />
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {showMore && (
+                <button type="button" className="channel-subgroup-more" onClick={() => setSubgroupsExpanded((v) => !v)} aria-expanded={subgroupsExpanded}>
+                  {subgroupsExpanded ? "收起" : `展开更多（${subgroups.length - 3}）`}
+                </button>
+              )}
+              {canManage && editing && (
+                <button type="button" className="channel-subgroup-add" onClick={() => { setDialogError(null); setDialog({ kind: "add" }); }} aria-label="添加子群" title="添加子群">
+                  <IconPlus width={16} height={16} />
+                </button>
+              )}
+            </div>
+          )}
+        </Fragment>
+      );
+    }
+    return (
+      <li key={scene.key} className="channel-scene-item">
+        <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => onSelectScene(scene.key)} aria-current={active ? "true" : undefined}>
+          <Icon width={20} height={20} />
+          <span>{scene.label}</span>
+          {scene.key === "posts" && postUnread > 0 && (
+            <span className="channel-scene-status channel-scene-posts-badge" aria-label={`${postUnread} 条未读帖子`} title="有未读帖子">{postUnread > 99 ? "99+" : postUnread}</span>
+          )}
+        </button>
+      </li>
+    );
+  };
 
   return (
     <aside className="channel-sidebar" aria-label="群内场景">
@@ -131,167 +369,29 @@ export function ChannelSidebar({
         <span className="channel-sidebar-title">{groupName}</span>
         <Chevron />
       </button>
-      <ul className="channel-sidebar-list">
-        {SCENE_META.map((s) => {
-          const Icon = s.icon;
-          const active = activeScene === s.key;
-          if (s.key === "chat") {
-            const defaultSg = subgroups.find((sg) => sg.is_default) ?? subgroups[0];
-            return (
-              <li key={s.key} className="channel-scene-item">
-                <div className="channel-scene-row">
-                  <button
-                    type="button"
-                    className={`channel-scene ${active ? "is-active" : ""}`}
-                    onClick={() => {
-                      // 点聊天按钮：进入聊天场景 + 默认选中第一个子群（不控制展开/收起）
-                      onSelectScene("chat");
-                      if (defaultSg) onSelectSubgroup(defaultSg.id);
-                    }}
-                    aria-current={active ? "true" : undefined}
-                  >
-                    <Icon width={20} height={20} />
-                    <span>{s.label}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`channel-scene-subgroup-toggle${subgroupsOpen ? " is-open" : ""}`}
-                    onClick={() => setSubgroupsOpen((open) => !open)}
-                    aria-label={subgroupsOpen ? "收起子群" : "展开子群"}
-                    aria-expanded={subgroupsOpen}
-                  >
-                    <IconChevronDown width={14} height={14} />
-                  </button>
-                </div>
-                {subgroupsOpen && (
-                  <div className="channel-subgroups">
-                    <ul className="channel-subgroup-list">
-                      {visibleSubgroups.map((sg) => {
-                        const unread = unreadByKey[subgroupKey(currentGroupId ?? "", sg.id)] ?? 0;
-                        // 宽屏切到聊天以外的场景时不高亮子群
-                        const isActive = activeScene === "chat" && sg.id === activeSubgroupId;
-                        return (
-                          <li key={sg.id} className="channel-subgroup-item">
-                            <button
-                              type="button"
-                              className={`channel-subgroup${isActive ? " is-active" : ""}`}
-                              onClick={() => {
-                                // 从任意场景点子群行：选中该子群并切回聊天场景
-                                onSelectSubgroup(sg.id);
-                                onSelectScene("chat");
-                              }}
-                              aria-current={isActive ? "true" : undefined}
-                            >
-                              <span className="channel-subgroup-name">{sg.name}</span>
-                              {sg.muted === true && (
-                                <span className="channel-subgroup-muted" title="已禁言（仅群主/管理员可发言）">
-                                  禁言
-                                </span>
-                              )}
-                              {unread > 0 && (
-                                <span
-                                  className="channel-subgroup-badge"
-                                  aria-label={`${unread} 条未读`}
-                                  title="有未读消息"
-                                >
-                                  {unread > 99 ? "99+" : unread}
-                                </span>
-                              )}
-                            </button>
-                            {editing && (
-                              <button
-                                type="button"
-                                className="channel-subgroup-edit-btn"
-                                onClick={() => {
-                                  setDialogError(null);
-                                  setDialog({ kind: "edit", sg });
-                                }}
-                                aria-label={`编辑子群 ${sg.name}`}
-                                title="编辑子群"
-                              >
-                                <PencilIcon />
-                              </button>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    {showMore && (
-                      <button
-                        type="button"
-                        className="channel-subgroup-more"
-                        onClick={() => setSubgroupsExpanded((v) => !v)}
-                        aria-expanded={subgroupsExpanded}
-                      >
-                        {subgroupsExpanded ? "收起" : `展开更多（${subgroups.length - 3}）`}
-                      </button>
-                    )}
-                    {canManage && (
-                      editing ? (
-                        <div className="channel-subgroup-edit-actions">
-                          <button
-                            type="button"
-                            className="channel-subgroup-edit-action"
-                            onClick={() => {
-                              setDialogError(null);
-                              setDialog({ kind: "add" });
-                            }}
-                            aria-label="添加子群"
-                            title="添加子群"
-                          >
-                            <IconPlus width={16} height={16} />
-                          </button>
-                          <button
-                            type="button"
-                            className="channel-subgroup-edit-action"
-                            onClick={() => setEditing(false)}
-                            aria-label="退出编辑"
-                            title="退出编辑"
-                          >
-                            <IconClose width={16} height={16} />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="channel-subgroup-edit-toggle"
-                          onClick={() => setEditing(true)}
-                        >
-                          编辑
-                        </button>
-                      )
-                    )}
-                  </div>
-                )}
-              </li>
-            );
-          }
-          return (
-            <li key={s.key}>
-              <button
-                type="button"
-                className={`channel-scene ${active ? "is-active" : ""}`}
-                onClick={() => onSelectScene(s.key)}
-                aria-current={active ? "true" : undefined}
-              >
-                <Icon width={20} height={20} />
-                <span>{s.label}</span>
-                {s.key === "voice" && voiceCount > 0 && <span className="channel-scene-status">{voiceCount}</span>}
-                {s.key === "live" && hasLive && <span className="channel-scene-status">LIVE</span>}
-                {s.key === "posts" && postUnread > 0 && (
-                  <span
-                    className="channel-scene-status channel-scene-posts-badge"
-                    aria-label={`${postUnread} 条未读帖子`}
-                    title="有未读帖子"
-                  >
-                    {postUnread > 99 ? "99+" : postUnread}
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
+      <div className="channel-sidebar-list" ref={sceneListRef}>
+        {SCENE_META.filter((scene) => scene.key !== "posts" && scene.key !== "games").map(renderSceneItem)}
+      </div>
+      <ul className="channel-sidebar-list channel-sidebar-list-bottom">
+        {SCENE_META.filter((scene) => scene.key === "posts" || scene.key === "games").map(renderSceneItem)}
       </ul>
+
+      {showVoiceCreate && (
+        <CreateSheet title="创建语音房" onClose={() => setShowVoiceCreate(false)}>
+          <VoiceChannelCreate group={currentGroupId} onCreated={() => setShowVoiceCreate(false)} />
+        </CreateSheet>
+      )}
+
+      {showLiveCreate && (
+        <CreateSheet title="群内开播" onClose={() => setShowLiveCreate(false)}>
+          <LiveStartSheet
+            onStart={handleLiveStarted}
+            onCreateNew={() => void handleCreateNewLive()}
+            creatingNew={creatingLive}
+            createError={liveCreateError}
+          />
+        </CreateSheet>
+      )}
 
       {dialog && (
         <SubGroupDialog
