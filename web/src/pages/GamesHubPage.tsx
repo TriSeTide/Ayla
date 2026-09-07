@@ -13,17 +13,18 @@ import { GameRoomPlaceholder } from "../components/boardgame/GameRoomPlaceholder
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { staggerDelay } from "../hooks/useRevealOnEnter";
-import { useBoardgameStore, isBoardgameStale } from "../stores/boardgame";
+import { useBoardgameStore } from "../stores/boardgame";
+import { useDirectoryPage } from "../hooks/useDirectoryPage";
+import { useListEntryMotion } from "../hooks/useListEntryMotion";
+import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { useShellStore } from "../stores/shell";
 
 export function GamesHubPage() {
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { roomId } = useParams<{ roomId?: string }>();
-  const rooms = useBoardgameStore((s) => s.rooms);
-  const loading = useBoardgameStore((s) => s.roomsLoading);
-  const error = useBoardgameStore((s) => s.error);
+  const directory = useDirectoryPage("game", {}, !roomId);
+  const { items: rooms, loading, error, refresh } = directory;
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 进入的房间（占位界面） */
   const [current, setCurrent] = useState<GameRoom | null>(null);
@@ -31,47 +32,9 @@ export function GamesHubPage() {
   // 避免离开清空 current 后、navigate 尚未更新路由的窗口里被 effect 误判为
   // "需要重新加入"而把用户拉回房间（对齐 VoiceHubPage 的 lastJoinRouteRef 模式）。
   const lastJoinRouteRef = useRef<string | null>(null);
-  // §3.4 刷新动画：刷新完成后递增，key 变化强制桌游列表重挂载 → reveal 重播
-  const [revealNonce, setRevealNonce] = useState(0);
   const hubRef = useRef<HTMLDivElement>(null);
-
-  const load = useCallback(() => {
-    const store = useBoardgameStore.getState();
-    store.setRoomsLoading(true);
-    store.setError(null);
-    setLoadError(null);
-    boardgameApi
-      .listGameRooms()
-      .then((list) => store.reconcileRooms(list))
-      .catch((e) => {
-        const message = e instanceof Error ? e.message : "加载失败";
-        store.setRoomsLoading(false);
-        store.setError(message);
-        setLoadError(message);
-      });
-  }, []);
-
-  useEffect(() => {
-    const store = useBoardgameStore.getState();
-    if (store.rooms.length > 0 && !isBoardgameStale()) return;
-    load();
-  }, [load]);
-
-  // 上拉刷新/刷新键共用：强制重拉桌游室列表（绕过 isBoardgameStale 缓存）
-  const refresh = useCallback(async () => {
-    const store = useBoardgameStore.getState();
-    store.setError(null);
-    setLoadError(null);
-    try {
-      const list = await boardgameApi.listGameRooms();
-      store.reconcileRooms(list);
-      setRevealNonce((n) => n + 1);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "加载失败";
-      store.setError(message);
-      setLoadError(message);
-    }
-  }, []);
+  useListEntryMotion(hubRef, ".game-room-card-wrap");
+  const load = refresh;
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
@@ -150,10 +113,10 @@ export function GamesHubPage() {
   }
 
   return (
-    <div className="games-hub" ref={hubRef}>
-      {(error || loadError) && (
+    <div className="games-hub" ref={hubRef} onScroll={(event) => directory.onScroll(event.currentTarget)}>
+      {loadError && (
         <div className="chat-notice" role="alert">
-          <span>{error || loadError}</span>
+          <span>{loadError}</span>
         </div>
       )}
       {loading && rooms.length === 0 ? (
@@ -166,24 +129,23 @@ export function GamesHubPage() {
           </div>
           <span className="home-load-text games-skel-text">正在加载桌游室…</span>
         </div>
-      ) : rooms.length === 0 ? (
+      ) : error && rooms.length === 0 ? <DirectoryLoadMore {...directory} /> : rooms.length === 0 ? (
         <div className="home-state">
           <h2 className="placeholder-title">还没有桌游室</h2>
           <p className="placeholder-desc">点右下角 + 建一个房间</p>
         </div>
       ) : (
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          <div className="games-grid" key={revealNonce}>
-            {rooms.map((r, idx) => (
+          <div className="games-grid">
+            {rooms.map((r) => (
               <GameRoomCard
                 key={r.id}
                 room={r}
                 onEnter={() => enterRoom(r)}
-                /* 异步内容就绪后才启用 A2 stagger，避免加载前动画跑完（design.md §7.1） */
-                revealDelay={!loading ? staggerDelay(idx) : undefined}
               />
             ))}
           </div>
+          <DirectoryLoadMore {...directory} />
         </PullToRefresh>
       )}
     </div>

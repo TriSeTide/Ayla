@@ -24,12 +24,16 @@
   min-width: 0;
   box-sizing: border-box;
   flex-direction: column;
-  background: var(--surface);
-  border-radius: 16px;
-  box-shadow: var(--card-shadow);
+  background: var(--glass-bg);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-shadow);
   overflow: hidden;
   text-align: left;
   padding: 0;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 .game-room-cover {
