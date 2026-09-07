@@ -113,9 +113,8 @@ export function LiveRoomBody({
     isNarrow,
     isOwnerConsole: showOwnerPanel,
   });
-  const { sending, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll } =
+  const { danmaku, sending, sendOwner, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll, history } =
     useDanmaku(channelId);
-  const danmaku = useLiveStore((s) => s.current.danmaku);
   const srsStatus = useLiveStore((s) => s.current.srsStatus);
   const wsConnection = useLiveStore((s) => s.wsConnection);
 
@@ -199,12 +198,14 @@ export function LiveRoomBody({
       onRetry={retryPlayer}
       onRefresh={refreshPlayer}
       onSendDanmaku={send}
+      danmakuOwner={sendOwner}
+      danmakuError={sendError}
       hidePipButton={isNarrow}
       onVideoHostMount={(host) => liveSessionRuntime.attachVideoTo(host, { big: true })}
       onVideoHostUnmount={() => liveSessionRuntime.stashVideo({ big: true })}
     >
-      {/* 飘弹幕层：进房完成（历史已 merge，基线可靠）且画面 live 才渲染；
-          loading 期间不挂载，避免把进房历史误当"新弹幕"重放 */}
+      {/* 飘弹幕层只消费 runtime 实时队列；分页历史归消息列表所有。
+          进房完成且画面 live 时渲染，避免未就绪时挂载播放器投影。 */}
       {!loading && srsStatus === "live" && <DanmakuOverlay channelId={channelId} />}
     </LivePlayer>
   );
@@ -325,6 +326,7 @@ export function LiveRoomBody({
       hasNewBelow={hasNewBelow}
       onScrollToBottom={scrollToBottom}
       onUserScroll={handleListScroll}
+      history={history}
     />
   );
 
@@ -336,7 +338,7 @@ export function LiveRoomBody({
         transition: "none",
       }}
     >
-      <DanmakuInput sending={sending} error={sendError} onSend={send} />
+      <DanmakuInput channelId={channelId} sending={sending} error={sendError} onSend={send} />
     </div>
   );
 

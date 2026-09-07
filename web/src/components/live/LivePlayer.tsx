@@ -70,6 +70,74 @@ function unlockOrientation() {
   }
 }
 
+/** A keyed input owner can change without remounting the video host. */
+function FullscreenDanmakuInput({
+  visible, onSend, error, onFocus, onBlur,
+}: {
+  visible: boolean;
+  onSend: (content: string) => Promise<boolean>;
+  error?: string | null;
+  onFocus: () => void;
+  onBlur: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const revision = useRef(0);
+  const busy = useRef(false);
+  const mounted = useRef(true);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const submit = async () => {
+    const content = draft.trim();
+    if (!content || busy.current || !mounted.current) return;
+    busy.current = true;
+    const submittedRevision = revision.current;
+    setSending(true);
+    setFailed(null);
+    try {
+      const ok = await onSend(content);
+      if (!mounted.current) return;
+      if (ok) {
+        if (revision.current === submittedRevision) {
+          revision.current += 1;
+          setDraft("");
+        }
+        inputRef.current?.focus();
+      } else {
+        setFailed("发送失败，请重试");
+      }
+    } catch (e) {
+      if (mounted.current) setFailed(e instanceof Error ? e.message : "发送失败，请重试");
+    } finally {
+      if (mounted.current) { busy.current = false; setSending(false); }
+    }
+  };
+  return (
+    <div className="live-player-fs-input" style={visible ? undefined : { display: "none" }}>
+      {failed && <span className="live-form-error live-player-fs-error" role="alert">{error || failed}</span>}
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => { revision.current += 1; setDraft(e.target.value); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void submit(); }}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder="发条弹幕吧"
+        aria-label="全屏发弹幕"
+        maxLength={200}
+      />
+      <button type="button" className="live-player-fs-send" onClick={() => void submit()}
+        aria-label="发送弹幕" title="发送弹幕" disabled={sending || !draft.trim()}>
+        <IconSend width={16} height={16} />
+      </button>
+    </div>
+  );
+}
+
 export function LivePlayer({
   srsStatus,
   optimisticStatus,
@@ -81,6 +149,8 @@ export function LivePlayer({
   onVideoHostMount,
   onVideoHostUnmount,
   onSendDanmaku,
+  danmakuOwner,
+  danmakuError,
   children,
 }: {
   srsStatus: LiveSrsStatus | null;
@@ -99,6 +169,9 @@ export function LivePlayer({
   onVideoHostUnmount?: () => void;
   /** 全屏发弹幕（标准容器全屏时屏幕下方中间显示输入框；iOS 原生全屏无法自定义 UI 不显示） */
   onSendDanmaku?: (content: string) => Promise<boolean>;
+  /** Account/channel owner of the full-screen draft; does not key the video. */
+  danmakuOwner?: string;
+  danmakuError?: string | null;
   /** 视频画面叠加层（飘弹幕层等；渲染时机由调用方控制） */
   children?: React.ReactNode;
 }) {
@@ -106,26 +179,23 @@ export function LivePlayer({
   const [controlsVisible, setControlsVisible] = useState(false);
   const [spinning, setSpinning] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [fsDraft, setFsDraft] = useState("");
-  const [fsSending, setFsSending] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const fsInputRef = useRef<HTMLInputElement | null>(null);
   const spinTimer = useRef<number | null>(null);
   const hideTimer = useRef<number | null>(null);
 
   const showVideo = srsStatus === "live" && !playerError;
 
-  // 画中画支持检测（标准 API + Safari webkit 私有）：video 元素由 runtime 持有，
-  // 挂载时已存在（enter 时创建）；仅需检测一次。
+  // runtime 可在子组件挂载之后创建 video；跟随实际元素复核能力，
+  // 不把首次 ref 为 null 固化成“不支持画中画”。
+  const pipVideo = videoRef.current as SafariVideoElement | null;
   useEffect(() => {
-    const video = videoRef.current as SafariVideoElement | null;
-    if (!video) return;
     const supported =
+      pipVideo !== null &&
       typeof document !== "undefined" &&
       (document.pictureInPictureEnabled === true ||
-        typeof video.webkitSetPresentationMode === "function");
+        typeof pipVideo.webkitSetPresentationMode === "function");
     setPipSupported(supported);
-  }, [videoRef]);
+  }, [pipVideo]);
 
   // video 元素由 runtime 持有：挂载时原子移入本容器（显示自然、全屏天然正确）；
   // 卸载时用 useLayoutEffect cleanup（React 在 DOM 移除**前**跑 layout cleanup，
@@ -160,23 +230,6 @@ export function LivePlayer({
     document.addEventListener("fullscreenchange", onFsChange);
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
-
-  // 全屏输入框发送：Enter / 发送按钮 → onSendDanmaku → 成功清空并保持焦点
-  const handleFsSend = async () => {
-    const content = fsDraft.trim();
-    if (!content || !onSendDanmaku || fsSending) return;
-    setFsSending(true);
-    try {
-      const ok = await onSendDanmaku(content);
-      if (ok) {
-        setFsDraft("");
-        // 点发送按钮时焦点在按钮上，还回输入框（连续发弹幕不打断）
-        fsInputRef.current?.focus();
-      }
-    } finally {
-      setFsSending(false);
-    }
-  };
 
   // 卸载时清理刷新动画计时器 + 自动隐藏计时器
   useEffect(
@@ -354,32 +407,10 @@ export function LivePlayer({
             </button>
           </div>
           {/* 全屏弹幕输入框：屏幕下方中间，与悬浮按钮同高同底、同显隐（自动隐藏/唤醒） */}
-          {isFullscreen && onSendDanmaku && (
-            <div className="live-player-fs-input">
-              <input
-                ref={fsInputRef}
-                value={fsDraft}
-                onChange={(e) => setFsDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleFsSend();
-                }}
-                onFocus={clearHideTimer}
-                onBlur={armHideTimer}
-                placeholder="发条弹幕吧"
-                aria-label="全屏发弹幕"
-                maxLength={200}
-              />
-              <button
-                type="button"
-                className="live-player-fs-send"
-                onClick={() => void handleFsSend()}
-                aria-label="发送弹幕"
-                title="发送弹幕"
-                disabled={fsSending || !fsDraft.trim()}
-              >
-                <IconSend width={16} height={16} />
-              </button>
-            </div>
+          {onSendDanmaku && (
+            <FullscreenDanmakuInput key={danmakuOwner} visible={isFullscreen}
+              onSend={onSendDanmaku} error={danmakuError}
+              onFocus={clearHideTimer} onBlur={armHideTimer} />
           )}
         </div>
       )}

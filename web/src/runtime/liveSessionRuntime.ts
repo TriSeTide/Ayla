@@ -66,6 +66,13 @@ class LiveSessionRuntime {
   private currentHlsUrl: string | null = null;
   /** 大窗宿主容器（LivePlayer 挂载登记）：小窗卸载（点回直播间）时移交目标 */
   private bigHost: HTMLElement | null = null;
+  /** Views own these subscriptions; the runtime reports gaps without replaying history. */
+  private historyListeners = new Set<(channelId: number) => void>();
+
+  onHistoryInvalidated(listener: (channelId: number) => void): () => void {
+    this.historyListeners.add(listener);
+    return () => { this.historyListeners.delete(listener); };
+  }
 
   get currentChannelId(): number | null {
     return this.channelId;
@@ -194,9 +201,10 @@ class LiveSessionRuntime {
       if (reason === "unauthorized") useLiveStore.getState().setCurrentError("登录已过期，请重新登录");
       else if (reason === "channel_not_found") useLiveStore.getState().setCurrentError("直播间不存在");
     };
-    // 重连成功 → 拉历史对账（WS 无补发语义，断线窗口弹幕补偿）+ 补拉 SRS 状态
+    // WS 无补发语义：提醒可见历史补读，禁止把旧历史注入实时 overlay。
     liveWS.onReconnected = () => {
-      void this.reconcileDanmaku(channelId);
+      if (!this.alive || this.channelId !== channelId) return;
+      this.historyListeners.forEach((listener) => listener(channelId));
       void this.refreshSrsStatus(channelId);
     };
 
@@ -233,10 +241,7 @@ class LiveSessionRuntime {
       if (!this.alive || this.channelId !== channelId) return;
       store.setSrsStatus(status.status);
 
-      const history = await liveApi.listDanmaku(channelId, 50);
-      if (!this.alive || this.channelId !== channelId) return;
-      store.mergeDanmakuHistory(history);
-
+      // Historical pages belong to the visible reading window, never the flying overlay.
       liveWS.connect(channelId);
       if (this.tracksOwnerActivity) {
         useSessionActivityStore.getState().setStatus(
@@ -535,15 +540,6 @@ class LiveSessionRuntime {
     this.srsRetryCount = 0;
   }
 
-  // ---------- 弹幕对账 ----------
-  private async reconcileDanmaku(channelId: number): Promise<void> {
-    try {
-      const history = await liveApi.listDanmaku(channelId, 50);
-      useLiveStore.getState().mergeDanmakuHistory(history);
-    } catch {
-      // 对账失败下次重连再试，不阻断实时流
-    }
-  }
 }
 
 /** 单例：直播间同时只需一个会话/小窗（唯一 owner） */

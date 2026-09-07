@@ -36,11 +36,12 @@ vi.mock("../runtime/liveSessionRuntime", () => ({
   },
 }));
 
-vi.mock("../api/chat", () => ({ listConversations: vi.fn().mockResolvedValue([]) }));
+vi.mock("../api/chat", () => ({ listConversationsPage: vi.fn().mockResolvedValue({ results: [], total: 0, has_more: false, next_cursor: null }) }));
 
 vi.mock("../hooks/useDanmaku", () => ({
   DANMAKU_MAX_LENGTH: 200,
   useDanmaku: () => ({
+    danmaku: [],
     sending: false,
     sendError: null,
     send: vi.fn(),

@@ -1,7 +1,7 @@
 /**
  * DanmakuList —— 弹幕列表（M5-4，文档 §4.4）。
  *
- * 实时 + 历史合并渲染（store 保证按 id 去重、升序、定长）；
+ * 渲染 useDanmaku 提供的有界历史窗口，实时 store 独立持有 overlay 队列；
  * 纯文本原样渲染（React 默认转义，禁止 dangerouslySetInnerHTML）；
  * 用户上翻时新弹幕不强制滚动，显示"有新弹幕"浮动提示，点击跳底；
  * 图片弹幕：ResourceImage 签名加载（不破图），点击打开 ImageViewer 放大
@@ -20,6 +20,7 @@ import { Avatar } from "../Avatar";
 import { ResourceImage } from "../ResourceImage";
 import { ImageViewer } from "../chat/ImageViewer";
 import { goUserProfile } from "../../utils/navigation";
+import { HistoryControls, type HistoryControlsProps } from "../HistoryControls";
 
 function DanmakuItem({
   item,
@@ -47,7 +48,7 @@ function DanmakuItem({
   const senderOnline = presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, senderUser));
 
   return (
-    <div className="danmaku-item">
+    <div className="danmaku-item" data-history-id={item.id}>
       <Avatar
         label={item.sender.nickname}
         size={20}
@@ -89,6 +90,7 @@ export function DanmakuList({
   hasNewBelow,
   onScrollToBottom,
   onUserScroll,
+  history,
 }: {
   danmaku: DanmakuItem[];
   listRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -96,12 +98,14 @@ export function DanmakuList({
   onScrollToBottom: () => void;
   /** 列表滚动上报（useDanmaku.handleListScroll）：stick 底部跟随/新弹幕提示的判定源 */
   onUserScroll?: () => void;
+  history?: HistoryControlsProps;
 }) {
   const [viewer, setViewer] = useState<{ media: MediaDescriptor; alt: string } | null>(null);
 
   return (
     <div className="danmaku-wrap">
       <div className="danmaku-list" ref={listRef} onScroll={onUserScroll}>
+        {history && <HistoryControls {...history} />}
         {danmaku.length === 0 ? (
           <div className="danmaku-empty">还没有弹幕，来说点什么吧</div>
         ) : (

@@ -6,9 +6,10 @@
  * - 频道 id 为 int；GET 列表返回裸数组；`?only_live=1` 过滤乐观 status=live；
  * - stream_key / rtmp_url 仅 owner 可见（他人为 null），属正常契约；
  * - /status/ 是 SRS 实时判定（live/idle/degraded），degraded ≠ 未在播；
- * - 弹幕发送走 REST（落库后服务端广播 WS），GET 历史返回裸数组、升序、无分页游标。
+ * - 弹幕发送走 REST（落库后服务端广播 WS）；当前历史使用 cursor 页，旧数组函数保留兼容。
  */
 import { apiRequest } from "./client";
+import { mediaPageQuery, type MediaPage, type MediaPageParams } from "./mediaPagination";
 import { directoryQuery, type DirectoryPage, type DirectoryParams } from "./directory";
 import type {
   DanmakuItem,
@@ -58,9 +59,10 @@ export function listLiveChannels(params?: { onlyLive?: boolean; scope?: string; 
   return apiRequest<LiveChannelDescriptor[]>(`/live/channels/${query}`);
 }
 
-export function listLiveChannelsPage(params: DirectoryParams & { onlyLive?: boolean } = {}) {
+export function listLiveChannelsPage(params: DirectoryParams & { onlyLive?: boolean; owner?: string } = {}) {
   const query = directoryQuery(params);
   if (params.onlyLive) query.set("only_live", "1");
+  if (params.owner) query.set("owner", params.owner);
   return apiRequest<DirectoryPage<LiveChannelDescriptor>>(`/live/channels/?${query}`);
 }
 
@@ -110,5 +112,11 @@ export function sendDanmaku(channelId: number, content: string, mediaId?: string
 export function listDanmaku(channelId: number, limit = 50) {
   return apiRequest<DanmakuItem[]>(
     `/live/channels/${channelId}/danmaku/?limit=${limit}`,
+  );
+}
+
+export function listDanmakuPage(channelId: number, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<DanmakuItem>>(
+    `/live/channels/${channelId}/danmaku/?${mediaPageQuery(params)}`,
   );
 }

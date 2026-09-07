@@ -9,6 +9,7 @@ import * as liveApi from "../api/live";
 import type { LiveChannelDescriptor } from "../api/types";
 import { useGroupStore } from "../stores/group";
 import { useLiveStore } from "../stores/live";
+import { useAuthStore } from "../stores/auth";
 import { disposeDirectoryTracking } from "../stores/directory";
 
 vi.mock("../components/live/LiveRoomBody", () => ({
@@ -57,10 +58,11 @@ function ch(id: number, group: string | null): LiveChannelDescriptor {
 }
 
 function mockChannels(channels: LiveChannelDescriptor[]) {
-  // 旧无分页入口仍供开播选择器使用；群目录必须单独提交 groupId。
+  // 群目录和本人目录必须分别在服务端按 groupId/owner 过滤后分页。
   vi.mocked(liveApi.listLiveChannels).mockResolvedValue(channels);
   vi.mocked(liveApi.listLiveChannelsPage).mockImplementation(async (params) => {
-    const results = channels.filter((item) => !params?.groupId || (item.allowed_group_ids ?? []).includes(params.groupId));
+    const results = channels.filter((item) => (!params?.groupId || (item.allowed_group_ids ?? []).includes(params.groupId))
+      && (!params?.owner || item.owner_id === params.owner));
     return { results, next_cursor: null, has_more: false, total: results.length };
   });
 }
@@ -82,6 +84,7 @@ beforeEach(() => {
   disposeDirectoryTracking();
   matchMediaMock();
   useGroupStore.getState().reset();
+  useAuthStore.setState({ currentUser: { id: "me" } as never });
   // store 是全局单例：不 reset 会让上一用例的 channels 残留，
   // 导致本用例 load() 不触发（stale 检查）而显示旧数据。
   useLiveStore.getState().reset();
@@ -149,7 +152,7 @@ describe("GroupLive 范围（仅该群）", () => {
     createBtn.click();
     await waitFor(() => expect(screen.getByRole("dialog", { name: "群内开播" })).toBeInTheDocument());
     // 空态下当前用户没有自己的直播间 → 选择器展示空引导
-    expect(screen.getByText("还没有自己的直播间，先创建一个吧。")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("还没有自己的直播间，先创建一个吧。")).toBeInTheDocument());
     // 走「+ 添加新的直播间」→ 创建归属本群的频道（group=g1）
     screen.getByRole("button", { name: "+ 添加新的直播间" }).click();
     await waitFor(() => {

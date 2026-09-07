@@ -24,6 +24,7 @@ from apps.common.catalog_pagination import (
     catalog_scope, paginate_catalog, with_activity_order,
 )
 from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
+from apps.common.media_pagination import paginate_media
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media, parse_avatar_media_id
 
@@ -351,9 +352,11 @@ class DanmakuListView(APIView):
             limit = int(raw_limit) if raw_limit else None
         except (TypeError, ValueError):
             limit = None
-        rows = services.danmaku_history(ch, limit)
-        return Response(
-            [
+        page = paginate_media(ch.danmaku.select_related("sender"), request,
+                              resource="live-danmaku", scope=str(ch.pk), reverse_results=True,
+                              allow_history_anchor=True)
+        rows = page.rows if page is not None else services.danmaku_history(ch, limit)
+        data = [
                 {
                     "id": str(dm.id),
                     "sender": services._sender_descriptor(dm.sender),
@@ -364,7 +367,7 @@ class DanmakuListView(APIView):
                 }
                 for dm in rows
             ]
-        )
+        return Response(page.response_data(data) if page is not None else data)
 
     def post(self, request, channel_id):
         ch = _get_channel_or_404(channel_id)

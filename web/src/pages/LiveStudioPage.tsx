@@ -15,6 +15,8 @@ import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useLiveStore } from "../stores/live";
 import { useShellStore } from "../stores/shell";
 import { sortLiveChannels } from "../utils/sortChannels";
+import { useOwnedLiveDirectory } from "../hooks/useOwnedLiveDirectory";
+import { useAuthStore } from "../stores/auth";
 
 export function LiveStudioPage() {
   const navigate = useNavigate();
@@ -24,45 +26,41 @@ export function LiveStudioPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { inputEntered } = useEnterRoomAnimation();
   const channel = useLiveStore((s) => s.current.channel);
-  const liveChannels = useLiveStore((s) => s.channels);
-  const [ordered, setOrdered] = useState<LiveChannelDescriptor[]>([]);
-  const [listError, setListError] = useState<string | null>(null);
+  const directory = useOwnedLiveDirectory();
+  const owner = useAuthStore((state) => state.currentUser?.id ?? "");
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const ordered = directory.items;
+  const [actionError, setListError] = useState<string | null>(null);
+  const listError = actionError ?? directory.error;
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const loadedRef = useRef(false);
-  const [listLoaded, setListLoaded] = useState(false);
-  const [retry, setRetry] = useState(0);
+  const listLoaded = directory.loaded;
   // ref 始终持有最新 ordered，供删除/新建事件回调使用（避免连续操作读到旧闭包）
   const orderedRef = useRef<LiveChannelDescriptor[]>([]);
+  orderedRef.current = ordered;
   // 统一入口：所有来源（store 同步 / 重拉 / 删除重算 / 新建）都经此写入，
   // 并统一套直播新排序（在播 > 曾播 > 从未，事实源 = 后端 started_at/ended_at）。
   const applyOrdered = useCallback((next: LiveChannelDescriptor[]) => {
     const sorted = sortLiveChannels(next);
     orderedRef.current = sorted;
-    setOrdered(sorted);
-  }, []);
+    directory.updateItems(() => sorted);
+  }, [directory.updateItems]);
   // ref 始终持有最新当前频道 id（渲染后同步），避免连续删除回调读到旧 channelId 闭包
   const channelIdRef = useRef(channelId);
-  useEffect(() => {
-    channelIdRef.current = channelId;
-  }, [channelId]);
+  channelIdRef.current = channelId;
+  useEffect(() => { setListError(null); setDeletingId(null); }, [owner]);
 
   // 当前频道详情更新（保存资料/封面、开播状态等）→ 同步到侧栏列表项，保证封面实时刷新；
   // 状态/时间戳变化（开播/下播）后同样按新排序归位。
   useEffect(() => {
     if (!channel) return;
-    setOrdered((prev) => {
+    directory.updateItems((prev) => {
       if (!prev.some((c) => c.id === channel.id)) return prev;
       const next = sortLiveChannels(prev.map((c) => (c.id === channel.id ? channel : c)));
       orderedRef.current = next;
       return next;
     });
-  }, [channel]);
-
-  // 侧栏消费全局 live store，实时反映其他客户端创建、状态改变和删除。
-  useEffect(() => {
-    if (liveChannels.length === 0) return;
-    applyOrdered(liveChannels.filter((item) => item.is_owner));
-  }, [applyOrdered, liveChannels]);
+  }, [channel, directory.updateItems]);
 
   useEffect(() => {
     if (!validId) navigate("/live", { replace: true });
@@ -75,42 +73,27 @@ export function LiveStudioPage() {
   }, [validId]);
 
   const reloadList = useCallback(() => {
-    loadedRef.current = false;
     setListError(null);
-    setRetry((value) => value + 1);
-  }, []);
-
-  useEffect(() => {
-    if (!validId || loadedRef.current) return;
-    loadedRef.current = true;
-    setListLoaded(false);
-    liveApi.listLiveChannels()
-      .then((list) => {
-        applyOrdered(list.filter((item) => item.is_owner));
-        setListError(null);
-      })
-      .catch((e) => setListError(e instanceof Error ? e.message : "加载直播列表失败"))
-      .finally(() => setListLoaded(true));
-  }, [validId, retry, applyOrdered]);
+    void directory.refresh();
+  }, [directory.refresh]);
 
   const handleDeleteChannel = async (targetId: number) => {
     setDeletingId(targetId);
     try {
       await liveApi.deleteLiveChannel(targetId);
+      if (currentOwner.current !== owner) return;
+      directory.invalidate();
       useLiveStore.getState().removeChannel(targetId);
-      // 以服务器最新列表为准计算跳转目标（并发删除后最可靠，避免本地状态竞态算出已删频道）
+      // Refresh one bounded owner page; a missing unloaded item never means it was deleted.
       let mine: LiveChannelDescriptor[] = orderedRef.current.filter((item) => item.id !== targetId);
-      try {
-        const list = await liveApi.listLiveChannels();
-        mine = list.filter((item) => item.is_owner);
-      } catch {
-        // 重拉失败则沿用本地已删除目标的列表
-      }
       applyOrdered(mine);
+      const firstPage = await directory.refreshPage();
+      if (currentOwner.current !== owner) return;
+      if (firstPage) mine = firstPage.results;
       // 当前频道已被删除（不在最新列表）：跳到列表里相邻的下一个（保持相对位置），
       // 继续留在开播界面；删空则留在原地由空态接管（暂无直播间 + 创建按钮），不回直播列表
       const currentId = channelIdRef.current;
-      if (!mine.some((c) => c.id === currentId)) {
+      if (currentId === targetId) {
         if (mine.length > 0) {
           const idx = orderedRef.current.findIndex((c) => c.id === targetId);
           const next = mine[Math.min(idx < 0 ? 0 : idx, mine.length - 1)];
@@ -119,27 +102,29 @@ export function LiveStudioPage() {
       }
     } catch (e) {
       // 直播中删除 → 400「直播中禁止删除，请先 :stop」；错误文案在顶部 notice 展示
-      setListError(e instanceof Error ? e.message : "删除直播间失败");
+      if (currentOwner.current === owner) setListError(e instanceof Error ? e.message : "删除直播间失败");
     } finally {
-      setDeletingId(null);
+      if (currentOwner.current === owner) setDeletingId(null);
     }
   };
 
   const handleCreateNewChannel = async () => {
     try {
       const created = await liveApi.createLiveChannel("新直播间");
+      if (currentOwner.current !== owner) return;
+      directory.invalidate();
       // 新建后立即加入侧栏列表（同组件不重挂载，loadedRef 不会重置），并进入新频道控制台
       applyOrdered([created, ...orderedRef.current.filter((item) => item.id !== created.id)]);
       navigate(`/live/start/${created.id}`, { replace: true });
     } catch (e) {
-      setListError(e instanceof Error ? e.message : "创建直播间失败");
+      if (currentOwner.current === owner) setListError(e instanceof Error ? e.message : "创建直播间失败");
     }
   };
 
   if (!validId) return null;
 
   // 列表已加载且没有任何直播间：留在开播界面显示空态（创建入口），不渲染 LiveRoomBody
-  if (listLoaded && ordered.length === 0) {
+  if (listLoaded && !directory.loading && !directory.error && !directory.hasMore && ordered.length === 0) {
     return (
       <>
         {listError && (
@@ -189,6 +174,10 @@ export function LiveStudioPage() {
         onDeleteChannel={channel?.is_owner ? (id) => void handleDeleteChannel(id) : undefined}
         onCreateNewChannel={channel?.is_owner ? () => void handleCreateNewChannel() : undefined}
         deletingChannelId={deletingId}
+        directory={{ ...directory, onScroll: (element) => {
+          if (!directory.loading && !directory.error && !directory.invalidated && directory.hasMore
+            && element.scrollHeight - element.scrollTop - element.clientHeight < 240) void directory.loadMore();
+        } }}
       />
     </>
   );

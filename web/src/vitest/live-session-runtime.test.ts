@@ -2,7 +2,7 @@
  * liveSessionRuntime 契约测试（任务 05：直播适配手机端小窗）。
  *
  * 覆盖：
- * - enter 进房序列（详情 → 状态 → 历史 → WS 连接 → loading 收敛）；
+ * - enter 进房序列（详情 → 状态 → WS 连接 → loading 收敛）；历史页由 useDanmaku 独立读取；
  * - enter 幂等（同频道不重复进房；StrictMode 模拟重挂载安全）；
  * - detachView 小窗判定：窄屏 + 普通观看 + 直播中 → 小窗；宽屏/控制台/非直播 → 销毁；
  * - 小窗点回（enter 同频道）→ 退出小窗模式；
@@ -101,7 +101,7 @@ afterEach(() => {
 });
 
 describe("liveSessionRuntime 进房", () => {
-  it("enter 完成进房序列：详情 → 状态 → 历史 → WS 连接 → loading 收敛", async () => {
+  it("enter 完成详情/状态/WS连接，不把历史写入实时overlay队列", async () => {
     liveSessionRuntime.enter(7, {});
     expect(useLiveStore.getState().currentLoading).toBe(true);
     await flush();
@@ -110,6 +110,8 @@ describe("liveSessionRuntime 进房", () => {
     expect(useLiveStore.getState().current.srsStatus).toBe("live");
     expect(liveWS.connect).toHaveBeenCalledWith(7);
     expect(liveWS.onFrame).toHaveBeenCalled();
+    expect(liveApi.listDanmaku).not.toHaveBeenCalled();
+    expect(useLiveStore.getState().current.danmaku).toEqual([]);
   });
 
   it("enter 幂等：同频道重复 enter 不重复进房（StrictMode 安全）", async () => {
@@ -119,6 +121,21 @@ describe("liveSessionRuntime 进房", () => {
     liveSessionRuntime.enter(7, {});
     await flush();
     expect(vi.mocked(liveApi.getLiveChannel).mock.calls.length).toBe(calls);
+  });
+
+  it("WS重连只通知当前视图补读历史，不向overlay队列回放旧消息", async () => {
+    const invalidated = vi.fn();
+    const off = liveSessionRuntime.onHistoryInvalidated(invalidated);
+    liveSessionRuntime.enter(7, {});
+    await flush();
+    (liveWS.onReconnected as unknown as () => void)();
+    await flush();
+    expect(invalidated).toHaveBeenCalledWith(7);
+    expect(liveApi.listDanmaku).not.toHaveBeenCalled();
+    expect(useLiveStore.getState().current.danmaku).toEqual([]);
+    off();
+    (liveWS.onReconnected as unknown as () => void)();
+    expect(invalidated).toHaveBeenCalledTimes(1);
   });
 
   it("enter 切频道：先销毁旧会话再进新房（无残留）", async () => {

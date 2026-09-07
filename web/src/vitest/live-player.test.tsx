@@ -7,7 +7,7 @@
  * - playerError：渲染「播放失败 + 重试」，点重试 → onRetry。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { LivePlayer } from "../components/live/LivePlayer";
 
 type VideoRef = { current: HTMLVideoElement | null };
@@ -42,6 +42,7 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLDivElement.prototype, "requestFullscreen");
   Reflect.deleteProperty(document, "pictureInPictureEnabled");
   Reflect.deleteProperty(document, "pictureInPictureElement");
+  Reflect.deleteProperty(document, "fullscreenElement");
 });
 
 describe("LivePlayer", () => {
@@ -104,6 +105,19 @@ describe("LivePlayer", () => {
     expect(pip).toHaveBeenCalledTimes(1);
   });
 
+  it("runtime 在首次挂载后创建 video 时重新检测画中画能力", () => {
+    Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+    const videoRef: VideoRef = { current: null };
+    const { rerender, props } = renderPlayer({ videoRef, srsStatus: null });
+    expect(screen.queryByLabelText("画中画")).toBeNull();
+    const pip = vi.fn().mockResolvedValue(undefined);
+    videoRef.current = document.createElement("video");
+    Object.defineProperty(videoRef.current, "requestPictureInPicture", { configurable: true, value: pip });
+    rerender(<LivePlayer {...props} srsStatus="live" />);
+    fireEvent.click(screen.getByLabelText("画中画"));
+    expect(pip).toHaveBeenCalledTimes(1);
+  });
+
   it("idle 状态渲染「主播未开播」占位", () => {
     renderPlayer({ srsStatus: "idle", optimisticStatus: null });
     expect(screen.getByText("主播未开播")).toBeTruthy();
@@ -152,5 +166,71 @@ describe("LivePlayer", () => {
     renderPlayer();
     fireEvent.click(screen.getByLabelText("全屏"));
     expect(enter).toHaveBeenCalledTimes(1);
+  });
+
+  it("全屏发送保留pending期间新草稿，失败在全屏内可见并可重试", async () => {
+    let complete!: (ok: boolean) => void;
+    const onSendDanmaku = vi.fn().mockReturnValueOnce(new Promise<boolean>((resolve) => { complete = resolve; }))
+      .mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const { container } = renderPlayer({ onSendDanmaku });
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: container.querySelector(".live-player") });
+    fireEvent(document, new Event("fullscreenchange"));
+    const input = screen.getByRole("textbox", { name: "全屏发弹幕" });
+    fireEvent.change(input, { target: { value: "已发送全屏文字" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "全屏等待中新草稿" } });
+    await act(async () => complete(true));
+    expect(input).toHaveValue("全屏等待中新草稿");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("发送失败");
+    expect(input).toHaveValue("全屏等待中新草稿");
+    fireEvent.click(screen.getByRole("button", { name: "发送弹幕" }));
+    await waitFor(() => expect(input).toHaveValue(""));
+  });
+
+  it("全屏输入切owner隔离旧回包但保留video，并阻止同tick Enter重入及输入法确认发送", async () => {
+    let complete!: (ok: boolean) => void;
+    const oldSend = vi.fn().mockReturnValue(new Promise<boolean>((resolve) => { complete = resolve; }));
+    const { container, props, rerender } = renderPlayer({ danmakuOwner: "account:a", onSendDanmaku: oldSend });
+    const video = container.querySelector("video");
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: container.querySelector(".live-player") });
+    fireEvent(document, new Event("fullscreenchange"));
+    const oldInput = screen.getByRole("textbox", { name: "全屏发弹幕" });
+    fireEvent.change(oldInput, { target: { value: "旧房文字" } });
+    act(() => {
+      oldInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      oldInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(oldSend).toHaveBeenCalledTimes(1);
+    const nextSend = vi.fn().mockResolvedValue(true);
+    rerender(<LivePlayer {...props} danmakuOwner="account:b" onSendDanmaku={nextSend} />);
+    const nextInput = screen.getByRole("textbox", { name: "全屏发弹幕" });
+    expect(nextInput).not.toBe(oldInput);
+    expect(nextInput).toHaveValue("");
+    expect(container.querySelector("video")).toBe(video);
+    fireEvent.change(nextInput, { target: { value: "新房全屏草稿" } });
+    await act(async () => complete(true));
+    expect(nextInput).toHaveValue("新房全屏草稿");
+    fireEvent.keyDown(nextInput, { key: "Enter", isComposing: true });
+    expect(nextSend).not.toHaveBeenCalled();
+  });
+
+  it("同owner退出再进全屏保留草稿，调用失败有可见反馈", async () => {
+    const onSendDanmaku = vi.fn().mockRejectedValue(new Error("合成发送限制"));
+    const { container } = renderPlayer({ danmakuOwner: "account:a", onSendDanmaku });
+    const player = container.querySelector(".live-player");
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: player });
+    fireEvent(document, new Event("fullscreenchange"));
+    fireEvent.change(screen.getByRole("textbox", { name: "全屏发弹幕" }), { target: { value: "全屏未发草稿" } });
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: null });
+    fireEvent(document, new Event("fullscreenchange"));
+    expect(screen.queryByRole("textbox", { name: "全屏发弹幕" })).toBeNull();
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: player });
+    fireEvent(document, new Event("fullscreenchange"));
+    const input = screen.getByRole("textbox", { name: "全屏发弹幕" });
+    expect(input).toHaveValue("全屏未发草稿");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("合成发送限制");
+    expect(input).toHaveValue("全屏未发草稿");
   });
 });

@@ -15,7 +15,7 @@ import type {
 } from "../api/types";
 import { sortLiveChannels } from "../utils/sortChannels";
 
-/** 弹幕内存保留上限（超出丢弃最旧；权威历史在后端，?limit=200 可再拉） */
+/** 实时弹幕队列上限；完整历史由 useCursorHistory 通过 cursor/before_id 独立续读。 */
 export const DANMAKU_MAX_ITEMS = 500;
 
 export interface LiveRoomState {
@@ -71,7 +71,7 @@ interface LiveState {
 
   /** 追加单条弹幕（WS 回帧 / POST 之外的来源），按 id 去重、定长截断 */
   appendDanmaku: (item: DanmakuItem) => void;
-  /** 合并历史弹幕（进房拉取 / 重连对账），按 id 去重后按 created_at 升序 */
+  /** 旧消费者兼容；当前可见历史页不写回此实时队列，避免重播 overlay。 */
   mergeDanmakuHistory: (items: DanmakuItem[]) => void;
   clearDanmaku: () => void;
 

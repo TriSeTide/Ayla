@@ -1002,6 +1002,29 @@
 .live-player-controls.is-visible .live-player-fs-input {
   pointer-events: auto;
 }
+.live-player-fs-error {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + var(--sp-2));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: min(8rem, 30vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
 .live-player-fs-input input {
   width: 200px;
   background: transparent;
