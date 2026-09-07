@@ -13,6 +13,10 @@ import { useSessionActivityStore } from "./sessionActivity";
 import { useSubGroupStore } from "./subgroup";
 import { voiceSessionRuntime } from "../runtime/voiceSessionRuntime";
 import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
+import { voiceLiveKit } from "../livekit/client";
+import { voiceWS } from "../ws/voice";
+import { useVoiceStore } from "./voice";
+import { leaveVoiceChannel } from "../api/voice";
 
 const REFRESH_KEY = "elysia.refresh_token";
 
@@ -122,7 +126,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     // 登出先释放已迁移的语音 runtime 与活动态索引；直播会话（含手机端小窗）一并销毁
+    voiceSessionRuntime.cancelSelection();
     voiceSessionRuntime.stopHeartbeat();
+    voiceSessionRuntime.setMediaChannel(null);
+    const voiceChannelId = useVoiceStore.getState().currentChannelId;
+    const accessToken = get().accessToken;
+    if (voiceChannelId && accessToken) {
+      void voiceSessionRuntime.runExclusive(() => leaveVoiceChannel(voiceChannelId, accessToken)).catch(() => {});
+    }
+    voiceWS.disconnect();
+    void voiceLiveKit.disconnect();
+    useVoiceStore.getState().reset();
     liveSessionRuntime.leave();
     useSessionActivityStore.getState().reset();
     useSubGroupStore.getState().reset();

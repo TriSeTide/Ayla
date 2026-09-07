@@ -80,10 +80,14 @@ export function deleteVoiceChannel(channelId: string) {
   return apiRequest<{ deleted: boolean }>(`/voice/channels/${encodeURIComponent(channelId)}/`, { method: "DELETE" });
 }
 
-export function leaveVoiceChannel(channelId: string) {
+export function leaveVoiceChannel(channelId: string, accessToken?: string) {
   return apiRequest<{ left: boolean }>(
     `/voice/channels/${encodeURIComponent(channelId)}/leave/`,
-    { method: "POST" },
+    { method: "POST", ...(accessToken == null ? {} : {
+      // A cancelled join may finish after logout. Compensation belongs to the
+      // original account and must never refresh/retry with a later account.
+      auth: false, noRetry401: true, headers: { Authorization: `Bearer ${accessToken}` },
+    }) },
   );
 }
 

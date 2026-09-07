@@ -15,7 +15,7 @@
  *   - LiveKit 媒体：SDK 自连；Reconnecting → "媒体重连中"（成员面板不清空）；
  *     Disconnected → livekit="failed"，UI 给"重新加入"（不自动 leave/）
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import * as voiceApi from "../api/voice";
 import { ensureUsers } from "../api/users";
@@ -37,27 +37,35 @@ export { VOICE_HEARTBEAT_INTERVAL_MS };
 export interface JoinOptions {
   /** 加入时静音（默认 true：进频道默认关麦，避免误入即广播环境音，M5-3 §9） */
   joinMuted?: boolean;
+  /** Explicit media recovery; ordinary navigation reuses an established session. */
+  force?: boolean;
 }
 
-export function useVoiceChannel() {
+export function useVoiceChannel(selectedChannelId?: string | null) {
   const currentChannelId = useVoiceStore((s) => s.currentChannelId);
   const livekit = useVoiceStore((s) => s.livekit);
-  const channels = useVoiceStore((s) => s.channels);
   const micEnabled = useVoiceStore((s) => s.micEnabled);
   const [joining, setJoining] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
 
   /** 防止卸载后异步回写 */
   const mountedRef = useRef(true);
-  // 每次 join 都拥有独立代次；再次 join 时，旧请求不得把媒体/成员状态带回来。
-  // 注意：代次只在 join 开头递增，不在 cleanup 里递增——React StrictMode 的
-  // 模拟卸载/重挂载会触发 cleanup，若在此递增会导致首次 join 恢复执行时被误判
-  // 为"孤儿 join"回滚（群外 VoiceHubPage 因此进房即断）；组件卸载由 mountedRef 判断。
+  const selectionOwnerRef = useRef<object>({});
+  // Local UI updates follow the newest call; session ownership lives in the shared runtime.
   const joinGenerationRef = useRef(0);
-  // 同步的 join 进行中标记：StrictMode 会在同一次 commit 里重复跑 mount effect，
-  // 此时 `joining` state 尚未 flush，闭包仍是旧值 false，仅靠 state 无法防重入；
-  // 用 ref 同步置位，阻断重复的 joinVoiceChannel HTTP 请求。
-  const joiningRef = useRef(false);
+  const selectChannel = useCallback((channelId: string | null) => {
+    voiceSessionRuntime.selectChannel(selectionOwnerRef.current, channelId);
+    const mediaChannel = voiceSessionRuntime.mediaChannel();
+    // Cancel a provisional media connection immediately. Established sessions remain
+    // available until the next authorized join succeeds or the user explicitly leaves.
+    if (mediaChannel && mediaChannel !== channelId && useVoiceStore.getState().currentChannelId !== mediaChannel) {
+      voiceSessionRuntime.setMediaChannel(null);
+      void voiceLiveKit.disconnect();
+    }
+  }, []);
+  useLayoutEffect(() => {
+    if (selectedChannelId !== undefined) selectChannel(selectedChannelId);
+  }, [selectedChannelId, selectChannel]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -70,22 +78,33 @@ export function useVoiceChannel() {
   }, []);
 
   /** 本地重置到未加入态（心跳 403 / 被踢 / 房间删除后的统一收尾） */
-  const resetLocal = useCallback(() => {
-    stopHeartbeat();
-    const channelId = useVoiceStore.getState().currentChannelId;
+  const resetLocal = useCallback((expectedChannelId?: string, preserveSelection = false) => {
+    const channelId = expectedChannelId ?? useVoiceStore.getState().currentChannelId ?? voiceSessionRuntime.mediaChannel();
+    if (!preserveSelection) {
+      voiceSessionRuntime.cancelSelection();
+      joinGenerationRef.current += 1;
+      if (mountedRef.current) setJoining(false);
+    }
+    if (channelId && voiceSessionRuntime.isHeartbeating(channelId)) stopHeartbeat();
     if (channelId) voiceWS.unsubscribe(channelId);
-    // 断开媒体（被踢/超时清理/房间删除时后端已删成员，这里只收本地媒体资源）
-    void voiceLiveKit.disconnect();
-    useVoiceStore.getState().leaveChannelLocal();
-    useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
-    useSessionActivityStore.getState().clear("voice");
+    if (channelId && voiceSessionRuntime.ownsMedia(channelId)) {
+      voiceSessionRuntime.setMediaChannel(null);
+      void voiceLiveKit.disconnect();
+    }
+    if (channelId === useVoiceStore.getState().currentChannelId) useVoiceStore.getState().leaveChannelLocal();
+    if (channelId === useSessionActivityStore.getState().voiceSession?.sessionId) {
+      useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
+      useSessionActivityStore.getState().clear("voice");
+    }
   }, [stopHeartbeat]);
 
   const startHeartbeat = useCallback(
     (channelId: string) => {
       voiceSessionRuntime.startHeartbeat(channelId, (reason) => {
-        resetLocal();
-        if (mountedRef.current) {
+        const nextChannel = voiceSessionRuntime.selectedChannelId();
+        const switchingAway = nextChannel != null && nextChannel !== channelId;
+        resetLocal(channelId, switchingAway);
+        if (!switchingAway && mountedRef.current) {
           setErrorState(reason === "deleted" ? "语音房已被删除" : "你已被移出语音频道（心跳超时）");
         }
       });
@@ -95,7 +114,9 @@ export function useVoiceChannel() {
 
   /** 成员对账：GET members/ 全量替换（join 后铺底 / WS 重连后补偿） */
   const reconcile = useCallback(async (channelId: string) => {
+    const revision = voiceSessionRuntime.currentRevision();
     const list = await voiceApi.listVoiceChannelMembers(channelId);
+    if (useVoiceStore.getState().currentChannelId !== channelId || !voiceSessionRuntime.isRevisionCurrent(revision)) return;
     useVoiceStore.getState().reconcileMembers(list);
     ensureUsers(list.map((m) => m.user_id));
   }, []);
@@ -153,15 +174,20 @@ export function useVoiceChannel() {
       const me = useAuthStore.getState().currentUser?.id;
       const channelId = useVoiceStore.getState().currentChannelId;
       if (d.state === "left" && me && channelId === d.channel_id && String(d.user_id) === String(me)) {
-        resetLocal();
-        if (mountedRef.current) setErrorState("你已被移出语音频道");
+        const nextChannel = voiceSessionRuntime.selectedChannelId();
+        const switchingAway = nextChannel != null && nextChannel !== channelId;
+        resetLocal(channelId, switchingAway);
+        if (!switchingAway && mountedRef.current) setErrorState("你已被移出语音频道");
       }
     });
     const offChat = chatWS.onFrame((frame) => {
       if (frame.type !== "voice.channel.deleted") return;
+      const deletedId = String(frame.data.channel_id);
+      const selected = voiceSessionRuntime.selectedChannelId();
+      if (selected === deletedId) voiceSessionRuntime.cancelSelection();
       const channelId = useVoiceStore.getState().currentChannelId;
-      if (channelId === String(frame.data.channel_id)) {
-        resetLocal();
+      if (channelId === deletedId) {
+        resetLocal(channelId, selected != null && selected !== channelId);
         if (mountedRef.current) setErrorState("语音房已被删除");
       }
     });
@@ -177,104 +203,119 @@ export function useVoiceChannel() {
   /** 加入频道（重复 join 同频道幂等安全） */
   const join = useCallback(
     async (channelId: string, options: JoinOptions = {}) => {
-      // 同步防重入：StrictMode 会在同一 commit 里重复跑 mount effect，state 尚未
-      // flush 时闭包 `joining` 仍为 false，必须用 ref 阻断重复的 join HTTP 请求。
-      if (joiningRef.current) return;
-      joiningRef.current = true;
-      const joinMuted = options.joinMuted ?? true;
+      selectChannel(channelId);
       const generation = ++joinGenerationRef.current;
-      const isCurrentJoin = () => mountedRef.current && joinGenerationRef.current === generation;
       setJoining(true);
       setErrorState(null);
-      const store = useVoiceStore.getState();
       try {
-        // 1. REST join（拿媒体凭据；503 = LiveKit 未配置，终止不进媒体连接）
-        const joinResult = await voiceApi.joinVoiceChannel(channelId);
-        if (!isCurrentJoin()) {
-          // 页面卸载/旧路由竞态：服务端已记成员，必须回滚这次孤儿 join。
-          await voiceApi.leaveVoiceChannel(channelId).catch(() => {});
-          return;
-        }
-        // 2. 切频道：若已在其他频道，先本地清掉（leave/ 由后端 join 广播驱动他人视图；
-        //    自己旧频道的 leave 显式调一次保证幂等）。同时把旧频道的"我在其中"标记清掉，
-        //    否则 UI 上两个频道同时显示"我在其中"（进一个没退另一个）。
-        const prevChannelId = store.currentChannelId;
-        if (prevChannelId && prevChannelId !== channelId) {
-          stopHeartbeat();
-          voiceWS.unsubscribe(prevChannelId);
-          await voiceApi.leaveVoiceChannel(prevChannelId).catch(() => {});
-          await voiceLiveKit.disconnect();
-          useVoiceStore.getState().leaveChannelLocal();
-          useVoiceStore.getState().patchChannel(prevChannelId, { mine: false });
-          useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
-        }
-        // 3. LiveKit 连接
-        useAuthStore.getState().setMediaActivity({ kind: "voice", active: true, roomId: Number(channelId) });
-        useSessionActivityStore.getState().upsert({
-          kind: "voice",
-          sessionId: channelId,
-          sourceRoute:
-            typeof window !== "undefined" && window.location.pathname.startsWith("/group/")
-              ? window.location.pathname
-              : `/voice/${encodeURIComponent(channelId)}`,
-          owner: useAuthStore.getState().currentUser?.id ?? null,
-          title: channels.find((c) => c.id === channelId)?.name ?? "语音房",
-          status: "connecting",
-          lastError: null,
-        });
-        useVoiceStore.getState().setLivekit("connecting");
-        try {
-          await voiceLiveKit.connect(joinResult.ws_url, joinResult.token);
-          // 在用户手势链内恢复远端音频播放（浏览器 autoplay 政策）
-          await voiceLiveKit.startAudio().catch(() => {});
-        } catch (mediaErr) {
-          // join 成功但媒体连接失败 → 回滚成员状态
-          await voiceApi.leaveVoiceChannel(channelId).catch(() => {});
-          useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
-          useVoiceStore.getState().setLivekit("failed");
-          useSessionActivityStore.getState().setStatus("voice", "failed", "媒体连接失败");
-          throw mediaErr;
-        }
-        // 4. 默认关麦加入（用户勾选则开麦）
-        const wantMic = !joinMuted;
-        try {
-          await voiceLiveKit.setMicrophoneEnabled(wantMic);
-          useVoiceStore.getState().setMicEnabled(wantMic);
-        } catch {
-          // 麦克风权限被拒：保持关麦，不阻断加入
-          useVoiceStore.getState().setMicEnabled(false);
-          if (wantMic && mountedRef.current) {
-            setErrorState("需要麦克风权限，已在静音状态加入");
+        await voiceSessionRuntime.runJoin(selectionOwnerRef.current, channelId, async (ownsSelection) => {
+          const auth = useAuthStore.getState();
+          const accountId = auth.currentUser?.id ?? null;
+          const accessToken = auth.accessToken;
+          const sameAccount = () => (useAuthStore.getState().currentUser?.id ?? null) === accountId
+            && useAuthStore.getState().accessToken != null;
+          const isCurrent = () => mountedRef.current && ownsSelection() && sameAccount();
+          if (!isCurrent()) return;
+          const initial = useVoiceStore.getState();
+          if (!options.force && initial.currentChannelId === channelId && initial.livekit !== "failed") return;
+          const previousChannelId = initial.currentChannelId;
+          let joined = false;
+          let committed = false;
+          let failure: unknown;
+          const clearProjection = (id: string) => {
+            if (!sameAccount()) return;
+            if (useVoiceStore.getState().currentChannelId === id) useVoiceStore.getState().leaveChannelLocal();
+            useVoiceStore.getState().patchChannel(id, { mine: false });
+            if (sameAccount() && useSessionActivityStore.getState().voiceSession?.sessionId === id) {
+              useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
+              useSessionActivityStore.getState().clear("voice", "idle");
+            }
+          };
+          const releaseMedia = async (id: string) => {
+            if (!voiceSessionRuntime.ownsMedia(id)) return;
+            voiceSessionRuntime.setMediaChannel(null);
+            await voiceLiveKit.disconnect();
+          };
+          try {
+            // REST changes membership. Wait for its receipt even if superseded, then
+            // compensate that exact channel before the next queued selection can join.
+            const joinResult = await voiceApi.joinVoiceChannel(channelId);
+            joined = true;
+            if (!isCurrent()) return;
+            if (previousChannelId && previousChannelId !== channelId) {
+              if (voiceSessionRuntime.isHeartbeating(previousChannelId)) stopHeartbeat();
+              voiceWS.unsubscribe(previousChannelId);
+              await voiceApi.leaveVoiceChannel(previousChannelId, accessToken ?? undefined);
+              await releaseMedia(previousChannelId);
+              clearProjection(previousChannelId);
+              if (!isCurrent()) return;
+            }
+            useAuthStore.getState().setMediaActivity({ kind: "voice", active: true, roomId: Number(channelId) });
+            useSessionActivityStore.getState().upsert({
+              kind: "voice", sessionId: channelId,
+              sourceRoute: typeof window !== "undefined" && window.location.pathname.startsWith("/group/")
+                ? window.location.pathname : `/voice/${encodeURIComponent(channelId)}`,
+              owner: accountId,
+              title: useVoiceStore.getState().channels.find((channel) => channel.id === channelId)?.name ?? "语音房",
+              status: "connecting", lastError: null,
+            });
+            useVoiceStore.getState().setLivekit("connecting");
+            voiceSessionRuntime.setMediaChannel(channelId);
+            await voiceLiveKit.connect(joinResult.ws_url, joinResult.token);
+            if (!isCurrent()) return;
+            await voiceLiveKit.startAudio().catch(() => {});
+            if (!isCurrent()) return;
+            const wantMic = !(options.joinMuted ?? true);
+            try {
+              await voiceLiveKit.setMicrophoneEnabled(wantMic);
+              if (!isCurrent()) return;
+              useVoiceStore.getState().setMicEnabled(wantMic);
+            } catch (error) {
+              if (!isCurrent()) return;
+              if (error instanceof Error && error.name === "AbortError") throw error;
+              useVoiceStore.getState().setMicEnabled(false);
+              if (wantMic) setErrorState("需要麦克风权限，已在静音状态加入");
+            }
+            const members = await voiceApi.listVoiceChannelMembers(channelId);
+            if (!isCurrent()) return;
+            const retained = useVoiceStore.getState().currentChannelId === channelId ? useVoiceStore.getState().members : {};
+            useVoiceStore.getState().enterChannel(channelId, members.map((member) => ({
+              ...member, muted: retained[member.user_id]?.muted ?? false,
+              volume: retained[member.user_id]?.volume ?? 100,
+              locallyMuted: retained[member.user_id]?.locallyMuted ?? false,
+              audioLevel: retained[member.user_id]?.audioLevel ?? 0,
+            })));
+            useVoiceStore.getState().patchChannel(channelId, { mine: true });
+            useSessionActivityStore.getState().setStatus("voice", "connected");
+            startHeartbeat(channelId);
+            voiceWS.subscribe([channelId]);
+            ensureUsers(members.map((member) => member.user_id));
+            const me = useAuthStore.getState().currentUser;
+            if (me) ensureUsers([me.id]);
+            committed = true;
+          } catch (error) {
+            failure = error;
+          } finally {
+            if (joined && !committed) {
+              try { await voiceApi.leaveVoiceChannel(channelId, accessToken ?? undefined); }
+              catch (error) { failure ??= error; }
+              try { await releaseMedia(channelId); }
+              catch (error) { failure ??= error; }
+              clearProjection(channelId);
+            }
+            if (failure && isCurrent()) {
+              useVoiceStore.getState().setLivekit(joined ? "failed" : initial.livekit);
+              setErrorState(failure instanceof ApiError && failure.status === 503 ? "语音服务未配置，暂不可用"
+                : failure instanceof ApiError && failure.status === 404 ? "频道不存在"
+                  : failure instanceof Error ? failure.message : "加入频道失败");
+            }
           }
-        }
-        useSessionActivityStore.getState().setStatus("voice", "connected");
-        // 5. 成员铺底 + 心跳 + WS 订阅
-        await reconcile(channelId);
-        useVoiceStore.getState().enterChannel(
-          channelId,
-          Object.values(useVoiceStore.getState().members),
-        );
-        useVoiceStore.getState().patchChannel(channelId, { mine: true });
-        startHeartbeat(channelId);
-        voiceWS.subscribe([channelId]);
-        // 自己的资料预热
-        const me = useAuthStore.getState().currentUser;
-        if (me) ensureUsers([me.id]);
-      } catch (e) {
-        if (!mountedRef.current) return;
-        if (e instanceof ApiError && e.status === 503) {
-          setErrorState("语音服务未配置，暂不可用");
-        } else if (e instanceof ApiError && e.status === 404) {
-          setErrorState("频道不存在");
-        } else {
-          setErrorState(e instanceof Error ? e.message : "加入频道失败");
-        }
+        });
       } finally {
-        joiningRef.current = false;
-        if (mountedRef.current) setJoining(false);
+        if (mountedRef.current && generation === joinGenerationRef.current) setJoining(false);
       }
     },
-    [channels, reconcile, startHeartbeat, stopHeartbeat],
+    [selectChannel, startHeartbeat, stopHeartbeat],
   );
 
   /** 离开频道（幂等）。
@@ -285,25 +326,41 @@ export function useVoiceChannel() {
    */
   const leave = useCallback(async () => {
     const channelId = useVoiceStore.getState().currentChannelId;
-    if (!channelId) return;
-    await voiceApi.leaveVoiceChannel(channelId);
-    stopHeartbeat();
-    voiceWS.unsubscribe(channelId);
-    await voiceLiveKit.disconnect();
-    useVoiceStore.getState().leaveChannelLocal();
-    useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
-    useSessionActivityStore.getState().clear("voice", "idle");
-    useVoiceStore.getState().patchChannel(channelId, { mine: false });
+    const auth = useAuthStore.getState();
+    voiceSessionRuntime.cancelSelection();
+    joinGenerationRef.current += 1;
+    if (mountedRef.current) setJoining(false);
+    await voiceSessionRuntime.runExclusive(async () => {
+      if (!channelId) return;
+      await voiceApi.leaveVoiceChannel(channelId, auth.accessToken ?? undefined);
+      if (voiceSessionRuntime.isHeartbeating(channelId)) stopHeartbeat();
+      voiceWS.unsubscribe(channelId);
+      if (voiceSessionRuntime.ownsMedia(channelId)) {
+        voiceSessionRuntime.setMediaChannel(null);
+        await voiceLiveKit.disconnect();
+      }
+      if (useVoiceStore.getState().currentChannelId === channelId) useVoiceStore.getState().leaveChannelLocal();
+      if ((useAuthStore.getState().currentUser?.id ?? null) !== (auth.currentUser?.id ?? null)) return;
+      if (useSessionActivityStore.getState().voiceSession?.sessionId === channelId) {
+        useAuthStore.getState().setMediaActivity({ kind: "voice", active: false });
+        useSessionActivityStore.getState().clear("voice", "idle");
+      }
+      useVoiceStore.getState().patchChannel(channelId, { mine: false });
+    });
   }, [stopHeartbeat]);
 
   /** 静音切换：乐观 UI + SDK 失败回滚（M5-3 §4.3） */
   const toggleMic = useCallback(async () => {
     const store = useVoiceStore.getState();
+    const channelId = store.currentChannelId;
+    const revision = voiceSessionRuntime.currentRevision();
+    if (!channelId || (voiceSessionRuntime.selectedChannelId() != null && voiceSessionRuntime.selectedChannelId() !== channelId)) return;
     const next = !store.micEnabled;
     store.setMicEnabled(next); // 乐观
     try {
       await voiceLiveKit.setMicrophoneEnabled(next);
     } catch (e) {
+      if (useVoiceStore.getState().currentChannelId !== channelId || !voiceSessionRuntime.isRevisionCurrent(revision)) return;
       store.setMicEnabled(!next); // 回滚
       if (mountedRef.current) {
         setErrorState(
@@ -337,7 +394,7 @@ export function useVoiceChannel() {
   /** 媒体最终断线后的"重新加入"（走 join 幂等路径） */
   const rejoin = useCallback(async () => {
     const channelId = useVoiceStore.getState().currentChannelId;
-    if (channelId) await join(channelId, { joinMuted: !useVoiceStore.getState().micEnabled });
+    if (channelId) await join(channelId, { joinMuted: !useVoiceStore.getState().micEnabled, force: true });
   }, [join]);
 
   return {

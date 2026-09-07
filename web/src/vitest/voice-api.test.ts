@@ -105,6 +105,34 @@ describe("api/voice 频道 REST", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("旧账号leave补偿只用原凭据，401不刷新或换新账号重试", async () => {
+    const originalToken = "fixture-original-access";
+    const currentToken = "fixture-current-access";
+    const currentRefresh = "fixture-current-refresh";
+    useAuthStore.setState({ accessToken: currentToken, refreshToken: currentRefresh });
+    const requests: Array<{ path: string; method: string | undefined; usesOriginal: boolean; usesCurrent: boolean }> = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const credential = new Headers(init?.headers).get("Authorization");
+      requests.push({
+        path: String(input), method: init?.method,
+        usesOriginal: credential === `Bearer ${originalToken}`,
+        usesCurrent: credential === `Bearer ${currentToken}`,
+      });
+      return Promise.resolve(jsonResponse({ detail: "旧会话已过期" }, 401));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await voiceApi.leaveVoiceChannel("old-room", originalToken).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(401);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ method: "POST", usesOriginal: true, usesCurrent: false });
+    expect(requests[0]!.path).toContain("/api/v1/voice/channels/old-room/leave/");
+    expect(requests.some((request) => request.path.includes("/auth/refresh/"))).toBe(false);
+    expect(useAuthStore.getState().accessToken === currentToken).toBe(true);
+    expect(useAuthStore.getState().refreshToken === currentRefresh).toBe(true);
+  });
+
   it("heartbeatVoiceChannel 非成员 → 403", async () => {
     const fetchMock = vi
       .fn()

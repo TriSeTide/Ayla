@@ -619,8 +619,20 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
 
 type RoomFactory = (events: LiveKitEvents) => Promise<LiveKitRoomLike> | LiveKitRoomLike;
 
+interface RoomOwner {
+  generation: number;
+  room: LiveKitRoomLike | null;
+  closing: Promise<void> | null;
+  cancel: () => void;
+}
+
+function cancelledConnection(): DOMException {
+  return new DOMException("LiveKit 连接已取消", "AbortError");
+}
+
 export class VoiceLiveKitClient {
-  private room: LiveKitRoomLike | null = null;
+  private owner: RoomOwner | null = null;
+  private generation = 0;
   private events: LiveKitEvents = {};
   private roomFactory: RoomFactory | null = null;
 
@@ -633,67 +645,152 @@ export class VoiceLiveKitClient {
     this.events = events;
   }
 
-  /** 连接房间（token 不打日志）；失败抛错由调用方回滚 */
+  /** 新连接取代旧 owner；被取代或断开的请求以 AbortError 结束。 */
   async connect(wsUrl: string, token: string): Promise<void> {
-    await this.disconnect();
+    const previous = this.owner;
+    let cancel!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(cancelledConnection());
+    });
+    const owner: RoomOwner = {
+      generation: ++this.generation,
+      room: null,
+      closing: null,
+      cancel,
+    };
+    this.owner = owner;
+    previous?.cancel();
     const factory = this.roomFactory ?? createLiveKitRoom;
-    this.room = await factory(this.events);
-    await this.room.connect(wsUrl, token);
+    const events = this.guardedEvents(owner, this.events);
+    const connectOwned = async () => {
+      try {
+        if (previous) await this.closeOwner(previous);
+        this.assertCurrent(owner);
+        const room = await factory(events);
+        owner.room = room;
+        this.assertCurrent(owner);
+        await room.connect(wsUrl, token);
+        this.assertCurrent(owner);
+      } catch (error) {
+        const stale = !this.isCurrent(owner);
+        if (!stale) this.owner = null;
+        // A non-cooperative connect may finish after the first disconnect.
+        // Close that captured room again; never look up the current room here.
+        await this.closeOwner(owner);
+        owner.room = null;
+        throw stale ? cancelledConnection() : error;
+      }
+    };
+    // Cancellation must not wait for a pending factory or an SDK that ignores abort.
+    await Promise.race([connectOwned(), cancelled]);
+  }
+
+  private isCurrent(owner: RoomOwner): boolean {
+    return this.owner === owner && this.generation === owner.generation;
+  }
+
+  private assertCurrent(owner: RoomOwner): void {
+    if (!this.isCurrent(owner)) throw cancelledConnection();
+  }
+
+  private guardedEvents(owner: RoomOwner, events: LiveKitEvents): LiveKitEvents {
+    const guard = <T extends unknown[]>(callback: ((...args: T) => void) | undefined) =>
+      callback ? (...args: T) => { if (this.isCurrent(owner)) callback(...args); } : undefined;
+    return {
+      onStateChange: guard(events.onStateChange),
+      onParticipantJoined: guard(events.onParticipantJoined),
+      onParticipantLeft: guard(events.onParticipantLeft),
+      onTrackMuted: guard(events.onTrackMuted),
+      onActiveSpeakers: guard(events.onActiveSpeakers),
+      onLocalAudioLevel: guard(events.onLocalAudioLevel),
+      onRemoteAudioLevels: guard(events.onRemoteAudioLevels),
+    };
+  }
+
+  /** Deduplicate concurrent closes, but allow cleanup after a late connect settles. */
+  private async closeOwner(owner: RoomOwner): Promise<void> {
+    const room = owner.room;
+    if (!room) return;
+    if (owner.closing) return owner.closing;
+    const closing = Promise.resolve().then(() => room.disconnect()).catch(() => {
+      // Preserve the existing disconnect contract: local ownership is already revoked.
+    });
+    owner.closing = closing;
+    await closing;
+    if (owner.closing === closing) owner.closing = null;
+  }
+
+  private async onOwnedRoom(owner: RoomOwner, action: (room: LiveKitRoomLike) => Promise<void>): Promise<void> {
+    const room = owner.room;
+    if (!room) throw new Error("LiveKit 未连接");
+    try {
+      this.assertCurrent(owner);
+      await action(room);
+      this.assertCurrent(owner);
+    } catch (error) {
+      this.assertCurrent(owner);
+      throw error;
+    }
   }
 
   /** 静音切换（媒体层）；SDK 抛错向上抛，调用方回滚 UI */
   async setMicrophoneEnabled(enabled: boolean): Promise<void> {
-    if (!this.room) throw new Error("LiveKit 未连接");
-    await this.room.setMicrophoneEnabled(enabled);
+    const owner = this.owner;
+    if (!owner?.room) throw new Error("LiveKit 未连接");
+    await this.onOwnedRoom(owner, (room) => room.setMicrophoneEnabled(enabled));
   }
 
   isMicrophoneEnabled(): boolean {
-    return this.room?.isMicrophoneEnabled() ?? false;
+    return this.owner?.room?.isMicrophoneEnabled() ?? false;
   }
 
   /** 恢复远端音频播放（autoplay 被浏览器阻断时，在用户手势中调用） */
   async startAudio(): Promise<void> {
-    if (!this.room) return;
-    await this.room.startAudio();
+    const owner = this.owner;
+    if (!owner?.room) return;
+    await this.onOwnedRoom(owner, (room) => room.startAudio());
   }
 
   /** 设置远端成员本地播放音量（0~1）；只影响本地，不落库 */
   setRemoteVolume(identity: string, volume: number): void {
-    if (!this.room) return;
+    const owner = this.owner;
+    const room = owner?.room;
+    if (!owner || !room) return;
     const clamped = Math.max(0, Math.min(1, volume));
-    for (const p of this.room.remoteParticipants()) {
+    for (const p of room.remoteParticipants()) {
       if (p.identity !== identity) continue;
-      for (const track of p.audioTracks) track.setVolume(clamped);
+      for (const track of p.audioTracks) {
+        if (!this.isCurrent(owner)) return;
+        track.setVolume(clamped);
+      }
     }
   }
 
   /** 设置本地麦克风音量（0~2，1 = 原始）；改变自己说话别人听到的响度；未开麦时记录目标值 */
   async setLocalVolume(volume: number): Promise<void> {
-    if (!this.room) return;
-    await this.room.setLocalVolume(volume);
+    const owner = this.owner;
+    if (!owner?.room) return;
+    await this.onOwnedRoom(owner, (room) => room.setLocalVolume(volume));
   }
 
   /** 当前本地麦克风音量（0~2，1 = 原始） */
   getLocalVolume(): number {
-    return this.room?.getLocalVolume() ?? 1;
+    return this.owner?.room?.getLocalVolume() ?? 1;
   }
 
   /** 远端参与者 identity 列表 */
   remoteIdentities(): string[] {
-    return this.room?.remoteParticipants().map((p) => p.identity) ?? [];
+    return this.owner?.room?.remoteParticipants().map((p) => p.identity) ?? [];
   }
 
   /** 断开（离开频道/组件卸载；幂等） */
   async disconnect(): Promise<void> {
-    const room = this.room;
-    this.room = null;
-    if (room) {
-      try {
-        await room.disconnect();
-      } catch {
-        // 断开失败不阻塞本地状态重置
-      }
-    }
+    const owner = this.owner;
+    this.owner = null;
+    ++this.generation;
+    if (!owner) return;
+    owner.cancel();
+    await this.closeOwner(owner);
   }
 }
 
