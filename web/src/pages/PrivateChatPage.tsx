@@ -16,6 +16,7 @@ import { useChatStore } from "../stores/chat";
 import { PrivateChatPane } from "../components/chat/PrivateChatPane";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
+import { ConversationTransition } from "../components/motion/ConversationTransition";
 
 export function PrivateChatPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
@@ -29,11 +30,13 @@ export function PrivateChatPage() {
         onBack={() => navigate("/messages")}
         enabled={isNarrow}
       >
-        <PrivateChatPane
-          key={conversationId}
-          conversationId={conversationId ?? ""}
-          onBack={() => navigate("/messages")}
-        />
+        <ConversationTransition identity={`private:${conversationId ?? ""}`}>
+          <PrivateChatPane
+            conversationId={conversationId ?? ""}
+            onBack={() => navigate("/messages")}
+            panelMotion
+          />
+        </ConversationTransition>
       </FullScreenSwipeBack>
     );
   }
@@ -47,7 +50,9 @@ export function PrivateChatPage() {
         onSelect={(id) => navigate(`/chat/${id}`)}
       />
       <div className="wide-messages-pane">
-        <PrivateChatPane key={conversationId} conversationId={conversationId ?? ""} />
+        <ConversationTransition identity={`private:${conversationId ?? ""}`}>
+          <PrivateChatPane conversationId={conversationId ?? ""} panelMotion />
+        </ConversationTransition>
       </div>
     </div>
   );

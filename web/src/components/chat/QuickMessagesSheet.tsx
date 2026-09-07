@@ -7,7 +7,9 @@
  * - 认证消息：与 /messages 认证消息 tab 同构（退群通知/好友申请/群邀请/入群申请 + 同意/拒绝）。
  * 栏内所有操作不跳转新页面：头像一律不可点（disableAvatarNav）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTabPanelMotion } from "../../hooks/useTabPanelMotion";
+import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import * as chatApi from "../../api/chat";
 import { getElysiaProfile } from "../../api/elysia";
 import * as usersApi from "../../api/users";
@@ -34,9 +36,11 @@ import { PrivateChatPane } from "./PrivateChatPane";
 type Tab = "chat" | "requests";
 
 export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
+  const selectionId = useId();
   const [tab, setTab] = useState<Tab>("chat");
   /** 私信 tab 内联打开的会话 id；null = 列表态 */
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const tabPanelRef = useTabPanelMotion<HTMLDivElement>(activeChatId ?? tab, ":scope > .quick-messages-chat, :scope > .messages-private, :scope > .messages-friends");
 
   const currentUser = useAuthStore((s) => s.currentUser);
   const conversations = useChatStore((s) => s.conversations);
@@ -195,26 +199,28 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
     <div className="quick-messages-overlay">
       {/* 上方 30% 遮罩：点击关闭 */}
       <div className="quick-messages-scrim" onClick={onClose} aria-hidden="true" />
-      <div className="quick-messages-panel" role="dialog" aria-label="快捷消息">
+      <div className="quick-messages-panel" role="dialog" aria-label="快捷消息" ref={tabPanelRef}>
         <header className="quick-messages-head">
           <div className="messages-tabs quick-messages-tabs" role="tablist" aria-label="快捷消息">
             <button
               type="button"
               role="tab"
               aria-selected={tab === "chat"}
-              className={`messages-tab ${tab === "chat" ? "is-active" : ""}`}
+              className={`messages-tab has-auroraqua-highlight ${tab === "chat" ? "is-active" : ""}`}
               onClick={() => setTab("chat")}
             >
-              私信
+              {tab === "chat" && <AuroraquaNavHighlight id={selectionId} />}
+              <span className="auroraqua-nav-label">私信</span>
             </button>
             <button
               type="button"
               role="tab"
               aria-selected={tab === "requests"}
-              className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
+              className={`messages-tab has-auroraqua-highlight messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
               onClick={() => setTab("requests")}
             >
-              认证消息
+              {tab === "requests" && <AuroraquaNavHighlight id={selectionId} />}
+              <span className="auroraqua-nav-label">认证消息</span>
               {requestBadgeCount > 0 && (
                 <span className="messages-tab-badge">{requestBadgeCount}</span>
               )}

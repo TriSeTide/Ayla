@@ -5,16 +5,32 @@
  * GroupChat / GroupInfo mock 成轻量组件（避免聊天 WS/API 链路），
  * 聚焦容器/导航/两级点击语义。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
+import { motion, useIsPresent } from "framer-motion";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary } from "../api/types";
 import { GroupPage } from "../pages/GroupPage";
+import { PageTransition, resolvePageKey } from "../components/motion/PageTransition";
+import { panelVariants } from "../components/motion/auroraquaMotion";
 import { useChatStore } from "../stores/chat";
 import { useGroupStore } from "../stores/group";
+import { disposeDirectoryTracking } from "../stores/directory";
 
 vi.mock("../pages/group/GroupChat", () => ({
-  GroupChat: () => <div>群聊内容区</div>,
+  GroupChat: function MockGroupChat({ groupId, panelMotion = false }: { groupId: string; panelMotion?: boolean }) {
+    const present = useIsPresent();
+    const active = !panelMotion || present;
+    useEffect(() => {
+      if (!active) return;
+      useChatStore.getState().openConversation(groupId);
+      return () => {
+        if (useChatStore.getState().activeConversationId === groupId) useChatStore.getState().closeConversation();
+      };
+    }, [groupId, active]);
+    return <motion.div data-group-id={groupId} inherit={panelMotion} variants={panelMotion ? panelVariants(false, "right", "left") : undefined}>群聊内容区<input aria-label="群聊草稿" defaultValue="" disabled={!active} /></motion.div>;
+  },
 }));
 vi.mock("../pages/group/GroupInfo", () => ({
   GroupInfo: () => <div>群信息界面</div>,
@@ -35,6 +51,14 @@ vi.mock("../api/chat", () => ({
   getConversation: vi.fn(),
   listConversations: vi.fn().mockResolvedValue([]),
   listSubgroups: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../api/voice", async () => ({
+  ...(await vi.importActual<typeof import("../api/voice")>("../api/voice")),
+  listVoiceChannelsPage: vi.fn(async () => ({ results: [], next_cursor: null, has_more: false, total: 0, total_member_count: 0 })),
+}));
+vi.mock("../api/live", async () => ({
+  ...(await vi.importActual<typeof import("../api/live")>("../api/live")),
+  listLiveChannelsPage: vi.fn(async () => ({ results: [], next_cursor: null, has_more: false, total: 0 })),
 }));
 
 function mockMatchMedia(narrow: boolean) {
@@ -68,20 +92,27 @@ function groupConv(id: string, title: string): ConversationSummary {
   };
 }
 
-function renderGroup(path: string) {
+function WideGroupFrame() {
+  const { pathname } = useLocation();
+  return <PageTransition key={resolvePageKey(pathname, true)} pathname={pathname} panelOwned><GroupPage /></PageTransition>;
+}
+
+function renderGroup(path: string, sharedWideShell = false) {
+  const page = sharedWideShell ? <WideGroupFrame /> : <GroupPage />;
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/home" element={<div>主页内容</div>} />
         <Route path="/group" element={<div>主页内容</div>} />
-        <Route path="/group/:id" element={<GroupPage />} />
-        <Route path="/group/:id/:scene" element={<GroupPage />} />
+        <Route path="/group/:id" element={page} />
+        <Route path="/group/:id/:scene" element={page} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 beforeEach(() => {
+  disposeDirectoryTracking();
   useChatStore.setState({
     conversations: [groupConv("1", "测试群"), groupConv("2", "另个群")],
   });
@@ -89,13 +120,45 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
+  disposeDirectoryTracking();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   vi.clearAllMocks();
   useChatStore.setState({ conversations: [] });
   useGroupStore.getState().reset();
 });
 
 describe("GroupPage 窄屏", () => {
+  it("导航条在原底栏位置可见并升至顶部，内容外壳中性且保留独立手势层", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query === "(max-width: 768px)", addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    renderGroup("/group/1");
+    const tabs = document.querySelector<HTMLElement>(".group-top-tabs")!;
+    expect(tabs.style.translate).toBe("0 calc(100dvh - 64px - env(safe-area-inset-bottom, 0px))");
+    expect(tabs.style.transform).toBe("translateY(0)");
+    expect(tabs.style.opacity).toBe("1");
+    expect(tabs.style.transition).toContain("translate 300ms var(--auroraqua-ease-out)");
+    expect(document.querySelector<HTMLElement>(".group-scene-enter")!.style.transform).toBe("");
+    expect(document.querySelector<HTMLElement>(".group-scene-inner")!.style.transform).not.toContain("translate");
+    expect(document.querySelector(".group-scene-drag")).not.toBeNull();
+    await waitFor(() => expect(tabs.style.translate).toBe("0 0"));
+    expect(tabs.style.opacity).toBe("1");
+    expect(document.querySelector(".group-top-tabs")).toBe(tabs);
+    fireEvent.click(screen.getByRole("button", { name: "直播" }));
+    await waitFor(() => expect(screen.getByText("群内直播内容")).toBeInTheDocument());
+    expect(document.querySelector(".group-top-tabs")).toBe(tabs);
+    expect(tabs.style.translate).toBe("0 0");
+  });
+
+  it("减少动态时导航条首帧直接位于顶部且可见", () => {
+    mockMatchMedia(true);
+    renderGroup("/group/1");
+    const tabs = document.querySelector<HTMLElement>(".group-top-tabs")!;
+    expect(tabs.style.translate).toBe("none");
+    expect(tabs.style.transform).toBe("translateY(0)");
+    expect(tabs.style.opacity).toBe("1");
+    expect(tabs.style.transition).toBe("none");
+  });
   it("默认 chat 子界面渲染群聊内容区", () => {
     mockMatchMedia(true);
     renderGroup("/group/1");
@@ -157,9 +220,72 @@ describe("GroupPage 窄屏", () => {
     expect(screen.getByText("群聊内容区")).toBeInTheDocument();
     expect(screen.queryByText("主页内容")).not.toBeInTheDocument();
   });
+
+  it("偏好切换取消旧下拉；reduced-motion 下新下拉仍可无位移动画返回主页", () => {
+    vi.useFakeTimers();
+    let reduced = false;
+    const listeners = new Set<() => void>();
+    const motionQuery = {
+      get matches() { return reduced; },
+      addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+    };
+    const narrowQuery = { matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    vi.stubGlobal("matchMedia", vi.fn((query: string) =>
+      query.includes("prefers-reduced-motion") ? motionQuery : narrowQuery,
+    ));
+    renderGroup("/group/1");
+    const tabs = document.querySelector(".group-top-tabs")!;
+    fireEvent.touchStart(tabs, { touches: [{ clientX: 100, clientY: 0 }] });
+    fireEvent.touchMove(tabs, { touches: [{ clientX: 100, clientY: 90 }] });
+    act(() => { reduced = true; listeners.forEach((listener) => listener()); });
+    fireEvent.touchEnd(tabs, { changedTouches: [{ clientX: 100, clientY: 90 }] });
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByText("群聊内容区")).toBeInTheDocument();
+    expect(screen.queryByText("主页内容")).not.toBeInTheDocument();
+
+    fireEvent.touchStart(tabs, { touches: [{ clientX: 100, clientY: 0 }] });
+    fireEvent.touchMove(tabs, { touches: [{ clientX: 100, clientY: 90 }] });
+    fireEvent.touchEnd(tabs, { changedTouches: [{ clientX: 100, clientY: 90 }] });
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByText("主页内容")).toBeInTheDocument();
+  });
 });
 
 describe("GroupPage 宽屏", () => {
+  it("切群保持服务器栏和频道占位，旧面板先退出再挂新群并重置草稿及弹窗", async () => {
+    mockMatchMedia(false);
+    renderGroup("/group/1", true);
+    const rail = screen.getByRole("navigation", { name: "我的群" });
+    const sidebar = screen.getByRole("complementary", { name: "群内场景" });
+    const sidebarSlot = sidebar.parentElement;
+    const firstGroupButton = screen.getByRole("button", { name: "切换到群聊 测试群" });
+    const secondGroupButton = screen.getByRole("button", { name: "切换到群聊 另个群" });
+    const firstDraft = screen.getByRole("textbox", { name: "群聊草稿" });
+    fireEvent.change(firstDraft, { target: { value: "只属于第一个群的草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加子群" }));
+    expect(screen.getByRole("dialog", { name: "添加子群" })).toBeInTheDocument();
+    fireEvent.click(secondGroupButton);
+    expect(sidebar).toHaveAttribute("inert");
+    expect(firstDraft).toBeDisabled();
+    expect(useChatStore.getState().activeConversationId).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "添加子群" })).not.toBeInTheDocument();
+    await waitFor(() => expect(useGroupStore.getState().currentGroupId).toBe("2"));
+    expect(screen.getByRole("navigation", { name: "我的群" })).toBe(rail);
+    await waitFor(() => expect(screen.getByRole("complementary", { name: "群内场景" })).toHaveAttribute("data-group-owner", "2"));
+    expect(screen.getByRole("complementary", { name: "群内场景" })).not.toBe(sidebar);
+    expect(screen.getByRole("complementary", { name: "群内场景" }).parentElement).toBe(sidebarSlot);
+    expect(screen.getByRole("button", { name: "切换到群聊 测试群" })).toBe(firstGroupButton);
+    expect(screen.getByRole("button", { name: "切换到群聊 另个群" })).toHaveAttribute("aria-current", "true");
+    const secondDraft = await screen.findByRole("textbox", { name: "群聊草稿" });
+    expect(secondDraft).not.toBe(firstDraft);
+    expect(secondDraft).toHaveValue("");
+    expect(screen.queryByRole("dialog", { name: "添加子群" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "退出编辑" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
+  });
+
   it("渲染服务器栏 + 频道侧栏 + 内容区", () => {
     mockMatchMedia(false);
     renderGroup("/group/1");

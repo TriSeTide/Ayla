@@ -6,7 +6,9 @@
  *  ChannelSidebar 一致）+ 右侧聊天内容区（选中会话内联 PrivateChatPane，不跳转 URL）。
  * 申请条目：好友申请 + 群邀请 + 待审批入群申请，同意/拒绝即时反馈。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTabPanelMotion } from "../hooks/useTabPanelMotion";
+import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
 import { getElysiaProfile } from "../api/elysia";
@@ -18,6 +20,7 @@ import { WideMessagesSidebar } from "../components/chat/WideMessagesSidebar";
 import { ConversationList } from "../components/chat/ConversationList";
 import { ElysiaEntry } from "../components/chat/ElysiaEntry";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
+import { ConversationTransition } from "../components/motion/ConversationTransition";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore, isChatStale, sortPrivateByActivity } from "../stores/chat";
@@ -32,6 +35,7 @@ import { chatWS } from "../ws/chat";
 type Tab = "chat" | "friends" | "requests";
 
 export function MessagesPage() {
+  const selectionId = useId();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.currentUser);
@@ -42,6 +46,7 @@ export function MessagesPage() {
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
   const [leaveNotices, setLeaveNotices] = useState<import("../api/types").GroupMemberLeaveNotice[]>([]);
   const [tab, setTab] = useState<Tab>("chat");
+  const tabPanelRef = useTabPanelMotion<HTMLDivElement>(tab, ":scope > .messages-private, :scope > .messages-friends");
   // 宽屏右侧选中的私聊会话 id（内联聊天）
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const conversations = useChatStore((s) => s.conversations);
@@ -207,14 +212,16 @@ export function MessagesPage() {
           revealNonce={revealNonce}
         />
         <div className="wide-messages-pane">
+          <ConversationTransition identity={`private:${activeChatId ?? "empty"}`} panels={activeChatId != null}>
           {activeChatId ? (
-            <PrivateChatPane key={activeChatId} conversationId={activeChatId} />
+            <PrivateChatPane conversationId={activeChatId} panelMotion />
           ) : (
             <div className="wide-messages-empty">
               <h3 className="placeholder-title">选择一个会话开始聊天</h3>
               <p className="placeholder-desc">左侧会话列表，点击进入私聊</p>
             </div>
           )}
+          </ConversationTransition>
         </div>
       </div>
     );
@@ -222,7 +229,7 @@ export function MessagesPage() {
 
   // 窄屏：双选项卡 + 列表，点会话跳 /chat/:id
   return (
-    <div className="messages-page">
+    <div className="messages-page" ref={tabPanelRef}>
       {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {actionError && (
@@ -237,28 +244,31 @@ export function MessagesPage() {
             type="button"
             role="tab"
             aria-selected={tab === "chat"}
-            className={`messages-tab ${tab === "chat" ? "is-active" : ""}`}
+            className={`messages-tab has-auroraqua-highlight ${tab === "chat" ? "is-active" : ""}`}
             onClick={() => setTab("chat")}
           >
-            私信
+            {tab === "chat" && <AuroraquaNavHighlight id={selectionId} />}
+            <span className="auroraqua-nav-label">私信</span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === "friends"}
-            className={`messages-tab ${tab === "friends" ? "is-active" : ""}`}
+            className={`messages-tab has-auroraqua-highlight ${tab === "friends" ? "is-active" : ""}`}
             onClick={() => setTab("friends")}
           >
-            好友列表
+            {tab === "friends" && <AuroraquaNavHighlight id={selectionId} />}
+            <span className="auroraqua-nav-label">好友列表</span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === "requests"}
-            className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
+            className={`messages-tab has-auroraqua-highlight messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
             onClick={() => setTab("requests")}
           >
-            认证消息
+            {tab === "requests" && <AuroraquaNavHighlight id={selectionId} />}
+            <span className="auroraqua-nav-label">认证消息</span>
             {requestBadgeCount > 0 && (
               <span className="messages-tab-badge">{requestBadgeCount}</span>
             )}

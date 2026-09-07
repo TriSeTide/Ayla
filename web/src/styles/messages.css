@@ -114,6 +114,10 @@
   border-radius: var(--radius-input);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 .request-body {
@@ -160,6 +164,10 @@
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   text-align: left;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 .friend-row-main {
@@ -251,10 +259,14 @@
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  border-right: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   min-height: 0;
+  box-shadow: var(--glass-shadow);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  margin: var(--sidebar-gutter);
+  animation: auroraqua-sidebar-in var(--auroraqua-duration-enter) var(--auroraqua-ease-out);
 }
 
 .wide-messages-sidebar .messages-tabs {
@@ -289,6 +301,44 @@
 .wide-messages-pane > .private-chat {
   flex: 1;
   min-width: 0;
+}
+
+/* 动画层仅承载布局与位移；真实列表/输入各自持有滚动与状态。 */
+.conversation-transition,
+.chat-messages-motion {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+}
+
+.conversation-transition {
+  width: 100%;
+  height: 100%;
+}
+
+.conversation-transition > .private-chat {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-composer-motion {
+  flex: none;
+  min-width: 0;
+  overflow: visible;
+}
+
+/* 宽窄屏输入均由自己的motion分区持有，禁止旧CSS入场与之叠加。 */
+.chat-motion-panels .composer { animation: none; }
+
+@media (min-width: 769px) {
+  .group-chat-compose-area.chat-composer-motion { display: block; }
+  /* 消息滚动由.message-scroll持有；聊天外壳不裁贴左边的悬浮输入/标题阴影。
+     保持侧栏提供的12px间隔，避免用加padding改变输入宽度或重复间隔。 */
+  .wide-messages-pane .private-chat { overflow: visible; }
 }
 
 .wide-messages-empty {
@@ -327,12 +377,14 @@
   display: flex;
   flex-direction: column;
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border-top: 1px solid var(--glass-border);
   border-radius: 24px 24px 0 0;
   overflow: hidden;
   animation: quick-messages-slide-in 250ms var(--ease-out);
+  box-shadow: var(--glass-shadow-modal);
+  border: 1px solid var(--glass-border);
 }
 
 @keyframes quick-messages-slide-in {

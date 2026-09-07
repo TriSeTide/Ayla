@@ -4,7 +4,7 @@
  * - ChannelSidebar：子群展开/收起、编辑笔、编辑态 +、添加弹窗；
  * - GroupChat：子群数 > 1 显示选项卡、切换不整组已读，可见消息精确确认。
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ConversationSummary, SubGroup } from "../api/types";
@@ -17,16 +17,36 @@ import { useGroupStore } from "../stores/group";
 import { useMessageStore } from "../stores/message";
 import { sortSubgroupsByActivity, useSubGroupStore } from "../stores/subgroup";
 import { useVoiceStore } from "../stores/voice";
+import { disposeDirectoryTracking } from "../stores/directory";
+import type { DirectoryParams } from "../api/directory";
+
+vi.mock("../api/voice", async () => ({
+  ...(await vi.importActual<typeof import("../api/voice")>("../api/voice")),
+  listVoiceChannelsPage: vi.fn(async (params: DirectoryParams) => {
+    const results = useVoiceStore.getState().channels.filter((item) => !params.groupId || (item.allowed_group_ids ?? []).includes(params.groupId));
+    return { results, next_cursor: null, has_more: false, total: results.length, total_member_count: results.reduce((sum, item) => sum + item.member_count, 0) };
+  }),
+}));
+vi.mock("../api/live", async () => ({
+  ...(await vi.importActual<typeof import("../api/live")>("../api/live")),
+  listLiveChannelsPage: vi.fn(async () => ({ results: [], next_cursor: null, has_more: false, total: 0 })),
+}));
 
 // ChannelSidebar 展开/收起下拉用 framer-motion（AnimatePresence + motion.div + useReducedMotion）：
 // mock 成直通组件，收起即卸载、无退出滞留动画（与 image-viewer-swipe.test.tsx 先例一致），
 // 保住「收起后子群行立即不在文档」的同步断言语义。
-vi.mock("framer-motion", () => {
-  const MotionDiv = ({ children }: { children?: unknown }) => children;
+vi.mock("framer-motion", async () => {
+  const { createElement, forwardRef } = await import("react");
+  const { isValidMotionProp } = await vi.importActual<typeof import("framer-motion")>("framer-motion");
+  const surface = (tag: "div" | "span" | "aside" | "ul" | "li") => forwardRef<HTMLElement, Record<string, unknown>>(({ children, ...props }, ref) => {
+    const domProps = Object.fromEntries(Object.entries(props).filter(([key]) => !isValidMotionProp(key)));
+    return createElement(tag, { ...domProps, ref }, children as import("react").ReactNode);
+  });
   return {
     AnimatePresence: ({ children }: { children?: unknown }) => children,
-    motion: { div: MotionDiv },
+    motion: { div: surface("div"), span: surface("span"), aside: surface("aside"), ul: surface("ul"), li: surface("li") },
     useReducedMotion: () => false,
+    useIsPresent: () => true,
   };
 });
 
@@ -68,6 +88,7 @@ function groupConv(id: string, myRole: "owner" | "admin" | "member" = "owner"): 
 }
 
 beforeEach(() => {
+  disposeDirectoryTracking();
   useMessageStore.getState().reset();
   useSubGroupStore.getState().reset();
   useChatStore.setState({ conversations: [groupConv("g1")] });
@@ -82,6 +103,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
+  disposeDirectoryTracking();
   vi.clearAllMocks();
   useChatStore.setState({ conversations: [] });
   useGroupStore.getState().reset();
@@ -271,7 +294,30 @@ describe("ChannelSidebar 子群", () => {
     expect(onSelect).toHaveBeenCalledWith("2");
   });
 
-  it("语音房排序（有人区/无人区，事实源=后端持久字段）：3 一直有人 + 我在 1/2 来回 → 我在 1 时 [1,3,2]、我在 2 时 [2,3,1]", () => {
+  it("语音高亮立即跟随当前群路由，在旧房仍连接或新join挂起时不等待媒体状态", async () => {
+    const room = (id: string) => ({ id, name: id, owner_id: "u1", group: "g1", allowed_group_ids: ["g1"],
+      visibility: "group" as const, member_count: 0, room_name: id, group_name: "测试群",
+      created_at: "2026-09-08T00:00:00Z", mine: false });
+    useVoiceStore.setState({ channels: [room("A"), room("C")], currentChannelId: "A", livekit: "connected" });
+    const props = { groupName: "测试群", activeScene: "voice" as const, onSelectScene: vi.fn(), onOpenInfo: vi.fn(), onSelectSubgroup: vi.fn() };
+    const { rerender } = render(<ChannelSidebar {...props} activeVoiceChannelId="A" />);
+    const a = await screen.findByRole("button", { name: "A" });
+    const c = screen.getByRole("button", { name: "C" });
+    expect(a).toHaveAttribute("aria-current", "true");
+    rerender(<ChannelSidebar {...props} activeVoiceChannelId="C" />);
+    expect(useVoiceStore.getState().currentChannelId).toBe("A");
+    expect(c).toHaveAttribute("aria-current", "true");
+    expect(a).not.toHaveAttribute("aria-current");
+    act(() => useVoiceStore.getState().setLivekit("connecting"));
+    expect(c).toHaveAttribute("aria-current", "true");
+    act(() => useVoiceStore.getState().enterChannel("C", []));
+    expect(c).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "C" })).toBe(c);
+    rerender(<ChannelSidebar {...props} activeScene="chat" activeVoiceChannelId="C" />);
+    expect(c).not.toHaveAttribute("aria-current");
+  });
+
+  it("语音房排序（有人区/无人区，事实源=后端持久字段）：3 一直有人 + 我在 1/2 来回 → 我在 1 时 [1,3,2]、我在 2 时 [2,3,1]", async () => {
     // 房 id 对应「1/2/3」；created_at 反序让初始 created_at 降序 = [1,2,3]
     const mk = (id: string) => ({
       id,
@@ -295,7 +341,7 @@ describe("ChannelSidebar 子群", () => {
 
     useVoiceStore.setState({ channels: [mk("1"), mk("2"), mk("3")] });
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
-    expect(rooms()).toEqual(["1", "2", "3"]);
+    await waitFor(() => expect(rooms()).toEqual(["1", "2", "3"]));
     // 3 一直有人（别人进 3，10:00）→ 有人区置顶 → [3,1,2]
     frame("3", { member_count: 1, last_occupied_at: "2026-09-05T10:00:00+08:00" });
     expect(rooms()).toEqual(["3", "1", "2"]);
@@ -314,7 +360,7 @@ describe("ChannelSidebar 子群", () => {
     expect(rooms()).toEqual(["1", "3", "2"]);
   });
 
-  it("语音房排序：1234 完整验收序列（进4→4123，进2→2413，进1(2空)→1423，离4→1423，进4→4123，离4→1423，4永不回4号位）", () => {
+  it("语音房排序：1234 完整验收序列（进4→4123，进2→2413，进1(2空)→1423，离4→1423，进4→4123，离4→1423，4永不回4号位）", async () => {
     const mk = (id: string) => ({
       id,
       name: id,
@@ -337,11 +383,19 @@ describe("ChannelSidebar 子群", () => {
     useVoiceStore.setState({ channels: [mk("1"), mk("2"), mk("3"), mk("4")] });
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
     // 侧栏默认收起只显示前 3 个：先展开更多让 4 个房全部可见，再做完整排序断言
-    fireEvent.click(screen.getByRole("button", { name: /展开更多/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /展开更多/ }));
     expect(rooms()).toEqual(["1", "2", "3", "4"]);
+    const originalRows = new Map([...document.querySelectorAll(".channel-voice-room-item")]
+      .map((row) => [row.querySelector(".channel-voice-room-name")?.textContent, row]));
+    const originalButtons = new Map([...originalRows].map(([id, row]) => [id, row.querySelector("button")]));
+    expect(document.querySelectorAll(".channel-voice-room-list")).toHaveLength(1);
     // 你进入 4 → [4,1,2,3]
     frame("4", { member_count: 1, last_occupied_at: "2026-09-05T10:01:00+08:00" });
     expect(rooms()).toEqual(["4", "1", "2", "3"]);
+    for (const [id, row] of originalRows) {
+      expect([...document.querySelectorAll(".channel-voice-room-item")].find((node) => node.querySelector(".channel-voice-room-name")?.textContent === id)).toBe(row);
+      expect(row.querySelector("button")).toBe(originalButtons.get(id));
+    }
     // 我进入 2 → [2,4,1,3]
     frame("2", { member_count: 1, last_occupied_at: "2026-09-05T10:02:00+08:00" });
     expect(rooms()).toEqual(["2", "4", "1", "3"]);
@@ -358,6 +412,18 @@ describe("ChannelSidebar 子群", () => {
     // 你又离开 4 → 仍 [1,4,2,3]（4 永不在 4 号位）
     frame("4", { member_count: 0, last_vacant_at: "2026-09-05T10:07:00+08:00" });
     expect(rooms()).toEqual(["1", "4", "2", "3"]);
+    const fourth = originalRows.get("3")!;
+    fireEvent.click(screen.getByRole("button", { name: /^收起$/ }));
+    expect(fourth).toBeInTheDocument();
+    expect(fourth).toHaveAttribute("aria-hidden", "true");
+    expect(fourth).toHaveAttribute("inert");
+    expect(fourth.querySelector("button")).toBeDisabled();
+    expect(fourth.querySelector("button")).toHaveAttribute("tabindex", "-1");
+    fireEvent.click(screen.getByRole("button", { name: /展开更多/ }));
+    expect(fourth).not.toHaveAttribute("aria-hidden");
+    expect(fourth).not.toHaveAttribute("inert");
+    expect(fourth.querySelector("button")).toBe(originalButtons.get("3"));
+    expect(fourth.querySelector("button")).toBeEnabled();
   });
 });
 
@@ -401,11 +467,12 @@ describe("GroupChat 子群选项卡", () => {
   vi.mock("../components/chat/MessageList", () => ({
     MessageList: vi.fn(() => <div>消息列表</div>),
   }));
-  vi.mock("../components/chat/MessageInput", () => ({
-    MessageInput: ({ disabled, disabledHint }: { disabled?: boolean; disabledHint?: string }) => (
-      <div data-disabled={String(disabled)} data-hint={disabledHint ?? ""}>输入框</div>
-    ),
-  }));
+  vi.mock("../components/chat/MessageInput", async () => {
+    const { forwardRef } = await import("react");
+    return { MessageInput: forwardRef<HTMLDivElement, { disabled?: boolean; disabledHint?: string }>(
+      ({ disabled, disabledHint }, ref) => <div ref={ref} data-disabled={String(disabled)} data-hint={disabledHint ?? ""}>输入框</div>,
+    ) };
+  });
   vi.mock("../api/chat", () => ({
     listSubgroups: vi.fn().mockResolvedValue([
       sg("1", "默认组", true),
@@ -416,7 +483,8 @@ describe("GroupChat 子群选项卡", () => {
   vi.mock("../api/elysia", () => ({
     getElysiaProfile: vi.fn().mockResolvedValue({ user: { id: "me" } }),
   }));
-  vi.mock("../hooks/useChat", () => ({
+  vi.mock("../hooks/useChat", async () => ({
+    messageInSubgroup: (await vi.importActual<typeof import("../hooks/useChat")>("../hooks/useChat")).messageInSubgroup,
     loadHistory: vi.fn().mockResolvedValue([]),
     loadMoreHistory: vi.fn().mockResolvedValue([]),
     loadHistoryUntilSeq: vi.fn().mockResolvedValue(true),
@@ -430,7 +498,7 @@ describe("GroupChat 子群选项卡", () => {
     TARGET_HISTORY_MAX_PAGES: 200,
   }));
   vi.mock("../ws/chat", () => ({
-    chatWS: { subscribe: vi.fn() },
+    chatWS: { subscribe: vi.fn(), onFrame: vi.fn(() => vi.fn()) },
   }));
 
   // 选项卡仅窄屏显示：stub matchMedia 为窄屏
@@ -452,7 +520,7 @@ describe("GroupChat 子群选项卡", () => {
     vi.unstubAllGlobals();
   });
 
-  // 渲染 GroupChat 并展开选项卡（默认收起，需先点半圆展开按钮）
+  // 渲染 GroupChat 并展开选项卡（默认收起）。
   async function renderGroupChatExpanded() {
     render(<MemoryRouter><GroupChat groupId="g1" /></MemoryRouter>);
     await waitFor(() =>
@@ -469,6 +537,63 @@ describe("GroupChat 子群选项卡", () => {
     expect(screen.getByRole("tab", { name: /默认组/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /闲聊/ })).toBeInTheDocument();
     expect(screen.getByLabelText("3 条未读")).toBeInTheDocument();
+  });
+
+  it("展开收起保留同一按钮焦点和输入框，隐藏tab不可聚焦且手势不冒泡到场景", async () => {
+    const pointer = vi.fn();
+    const touch = vi.fn();
+    render(<div onPointerDown={pointer} onTouchStart={touch}><MemoryRouter><GroupChat groupId="g1" /></MemoryRouter></div>);
+    const toggle = await screen.findByRole("button", { name: "展开子群选项卡" });
+    const input = screen.getByText("输入框");
+    const composeArea = input.closest(".group-chat-compose-area");
+    expect(composeArea).not.toBeNull();
+    expect(toggle.closest(".group-chat-compose-area")).toBe(composeArea);
+    expect(composeArea).not.toContainElement(screen.getByText("消息列表"));
+    expect(screen.queryByRole("tablist", { name: "子群切换" })).not.toBeInTheDocument();
+    toggle.focus();
+    fireEvent.pointerDown(toggle);
+    fireEvent.touchStart(toggle);
+    expect(pointer).not.toHaveBeenCalled();
+    expect(touch).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "收起子群选项卡" })).toBe(toggle);
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("tablist", { name: "子群切换" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /闲聊/ })).toBeEnabled();
+    expect(screen.getByText("输入框")).toBe(input);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("tablist", { name: "子群切换" })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.group-chat-subgroup-tab[disabled][tabindex="-1"]')).toHaveLength(2);
+    expect(screen.getByText("输入框")).toBe(input);
+  });
+
+  it("跨窄屏宽屏断点保持输入区和消息列表DOM，仅移除或恢复子群浮层", async () => {
+    let narrow = true;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      get matches() { return query === "(max-width: 768px)" ? narrow : false; },
+      addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+    })));
+    render(<MemoryRouter><GroupChat groupId="g1" /></MemoryRouter>);
+    const toggle = await screen.findByRole("button", { name: "展开子群选项卡" });
+    const input = screen.getByText("输入框");
+    const list = screen.getByText("消息列表");
+    const composeArea = input.closest(".group-chat-compose-area");
+    fireEvent.click(toggle);
+    act(() => { narrow = false; listeners.forEach((listener) => listener()); });
+    expect(screen.queryByRole("button", { name: "收起子群选项卡" })).not.toBeInTheDocument();
+    expect(screen.getByText("输入框")).toBe(input);
+    expect(screen.getByText("消息列表")).toBe(list);
+    expect(input.closest(".group-chat-compose-area")).toBe(composeArea);
+    act(() => { narrow = true; listeners.forEach((listener) => listener()); });
+    expect(screen.getByRole("button", { name: "收起子群选项卡" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("输入框")).toBe(input);
+    expect(screen.getByText("消息列表")).toBe(list);
+    expect(input.closest(".group-chat-compose-area")).toBe(composeArea);
   });
 
   it("进入/切换只加载历史，标签不整段标读；只有可见消息回调精确确认", async () => {

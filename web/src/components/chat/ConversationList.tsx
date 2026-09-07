@@ -19,6 +19,8 @@ import { staggerDelay } from "../../hooks/useRevealOnEnter";
 import { Avatar } from "../Avatar";
 import { ConversationMoreMenu } from "./ConversationMoreMenu";
 import type { CSSProperties } from "react";
+import { useId } from "react";
+import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
 
 /** 非文本消息类型 → 预览占位 */
 const TYPE_PLACEHOLDER: Record<string, string> = {
@@ -69,6 +71,7 @@ export function ConversationList({
   /** 列表逐条浮入（stagger，active 接 !loading，方案 §5-A2） */
   revealItems?: boolean;
 }) {
+  const selectionId = useId();
   const onlineUsers = usePresenceStore((s) => s.users);
   const onlineStatuses = usePresenceStore((s) => s.statuses);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
@@ -102,10 +105,11 @@ export function ConversationList({
           >
             <button
               type="button"
-              className={`conv-item ${conv.id === activeId ? "active" : ""} ${conv.is_pinned ? "is-pinned" : ""}`}
+              className={`conv-item has-auroraqua-highlight ${conv.id === activeId ? "active" : ""} ${conv.is_pinned ? "is-pinned" : ""}`}
               onClick={() => onSelect(conv.id)}
               aria-current={conv.id === activeId ? "true" : undefined}
             >
+              {conv.id === activeId && <AuroraquaNavHighlight id={selectionId} />}
               <Avatar
                 label={title}
                 size={40}

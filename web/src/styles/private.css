@@ -202,13 +202,13 @@
   max-height: 80vh;
   overflow-y: auto;
   padding: var(--sp-4);
-  /* 弹层磨砂底（design.md §12.5：--glass-bg-strong + blur 18px，浮层圆角 16px） */
+  /* Auroraqua 弹层：原强玻璃底 + 统一 filter / 20px 圆角 / modal 阴影。 */
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-card);
-  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--glass-shadow-modal);
 }
 
 .create-sheet-head {
@@ -289,4 +289,3 @@
   justify-content: flex-end;
   gap: var(--sp-3);
 }
-

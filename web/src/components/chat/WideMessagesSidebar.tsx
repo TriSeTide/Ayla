@@ -6,7 +6,12 @@
  * - 好友 tab：好友列表 + 待处理申请置顶（复用 MessagesPage 的好友数据处理）
  * 用于宽屏 /messages（两列：本侧栏 + 右侧聊天内容区）与 /chat/:id（两列同构）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTabPanelMotion } from "../../hooks/useTabPanelMotion";
+import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { panelVariants } from "../motion/auroraquaMotion";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import * as chatApi from "../../api/chat";
 import * as usersApi from "../../api/users";
 import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest } from "../../api/types";
@@ -41,6 +46,8 @@ export function WideMessagesSidebar({
   revealNonce?: number;
 }) {
   // 直接订阅 store；保留 prop 仅兼容旧调用方，不使用其作为实时真源
+  const selectionId = useId();
+  const reduced = usePrefersReducedMotion();
   const storeConversations = useChatStore((s) => s.conversations);
   const conversations = storeConversations.length > 0 ? storeConversations : (propConversations ?? []);
   // 私信列表按「最近活跃」排序（戳一戳/新消息 bump 后往前排；置顶优先）
@@ -56,6 +63,7 @@ export function WideMessagesSidebar({
   const loading = useChatStore((s) => s.loading);
   
   const [tab, setTab] = useState<Tab>("chat");
+  const tabPanelRef = useTabPanelMotion<HTMLElement>(tab, ":scope > .messages-private, :scope > .messages-friends");
   const currentUser = useAuthStore((state) => state.currentUser);
   const onlineUsers = usePresenceStore((state) => state.users);
   const onlineStatuses = usePresenceStore((state) => state.statuses);
@@ -188,7 +196,16 @@ export function WideMessagesSidebar({
   }, []);
 
   return (
-    <aside className="wide-messages-sidebar" aria-label="消息列表">
+    <motion.aside
+      className="wide-messages-sidebar"
+      aria-label="消息列表"
+      ref={tabPanelRef}
+      data-motion-panel="private-list"
+      inherit={false}
+      initial={reduced ? false : "enter"}
+      animate="center"
+      variants={panelVariants(reduced, "left")}
+    >
       {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
       {openError && <div className="chat-notice" role="alert">{openError}</div>}
       {friendsError && <div className="chat-notice" role="alert">{friendsError}</div>}
@@ -200,24 +217,27 @@ export function WideMessagesSidebar({
       <div className="messages-tabs">
         <button
           type="button"
-          className={`messages-tab ${tab === "chat" ? "is-active" : ""}`}
+          className={`messages-tab has-auroraqua-highlight ${tab === "chat" ? "is-active" : ""}`}
           onClick={() => setTab("chat")}
         >
-          私信
+          {tab === "chat" && <AuroraquaNavHighlight id={selectionId} />}
+          <span className="auroraqua-nav-label">私信</span>
         </button>
         <button
           type="button"
-          className={`messages-tab ${tab === "friends" ? "is-active" : ""}`}
+          className={`messages-tab has-auroraqua-highlight ${tab === "friends" ? "is-active" : ""}`}
           onClick={() => setTab("friends")}
         >
-          好友
+          {tab === "friends" && <AuroraquaNavHighlight id={selectionId} />}
+          <span className="auroraqua-nav-label">好友</span>
         </button>
         <button
           type="button"
-          className={`messages-tab messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
+          className={`messages-tab has-auroraqua-highlight messages-tab-requests ${tab === "requests" ? "is-active" : ""}`}
           onClick={() => setTab("requests")}
         >
-          认证消息
+          {tab === "requests" && <AuroraquaNavHighlight id={selectionId} />}
+          <span className="auroraqua-nav-label">认证消息</span>
           {requestBadgeCount > 0 && (
             <span className="messages-tab-badge">{requestBadgeCount}</span>
           )}
@@ -338,7 +358,7 @@ export function WideMessagesSidebar({
           )}
         </div>
       )}
-    </aside>
+    </motion.aside>
   );
 }
 

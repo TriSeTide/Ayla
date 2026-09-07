@@ -12,8 +12,12 @@
  * - 群主/管理员：聊天行展开键左侧有编辑笔，点击进入/退出编辑态；
  *   编辑态显示【+】添加按钮，每个子群行内出现编辑笔 → 弹窗改名/删除（默认组不可删）。
  */
-import { Fragment, useCallback, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { auroraquaIndicatorTransition, disclosureVariants, panelVariants } from "../components/motion/auroraquaMotion";
+import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { useSidebarContentClip } from "../hooks/useSidebarContentClip";
+import { Fragment, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useIsPresent } from "framer-motion";
 import * as chatApi from "../api/chat";
 import * as liveApi from "../api/live";
 import type { SubGroup } from "../api/types";
@@ -26,8 +30,8 @@ import { LiveStartSheet } from "../components/live/LiveStartSheet";
 import { IconChat, IconGame, IconMic, IconPlus, IconPost, IconVideo } from "../components/icons";
 import type { GroupScene } from "../stores/group";
 import { useGroupStore } from "../stores/group";
-import { useVoiceStore } from "../stores/voice";
-import { useLiveStore } from "../stores/live";
+import { useDirectoryPage } from "../hooks/useDirectoryPage";
+import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { useChatStore } from "../stores/chat";
 import { sortSubgroupsByActivity, subgroupKey, useSubGroupStore } from "../stores/subgroup";
 
@@ -39,21 +43,9 @@ const SCENE_META: Array<{ key: GroupScene; label: string; icon: typeof IconMic }
   { key: "games", label: "桌游", icon: IconGame },
 ];
 
-/** 展开/收起缓动（与 tokens.css --ease-out / --ease-in 一致，design.md §7） */
-const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
-const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
-
-export function ChannelSidebar({
-  groupName,
-  activeScene,
-  onSelectScene,
-  onOpenInfo,
-  onSelectSubgroup,
-  onSelectVoiceChannel,
-  onSelectLiveChannel,
-  activeLiveChannelId,
-  onNavigateLiveStart,
-}: {
+interface ChannelSidebarProps {
+  /** Current route group, supplied by a persistent workspace shell. */
+  groupId?: string | null;
   groupName: string;
   activeScene: GroupScene;
   onSelectScene: (scene: GroupScene) => void;
@@ -62,27 +54,77 @@ export function ChannelSidebar({
   onSelectSubgroup: (subgroupId: string) => void;
   /** 点击侧栏语音房行：进入该语音房（宽屏） */
   onSelectVoiceChannel?: (channelId: string) => void;
+  /** 当前群内页面的语音房路由；高亮不等待成员加入或媒体连接。 */
+  activeVoiceChannelId?: string | null;
   /** 点击侧栏直播间行：进入该直播间（宽屏） */
   onSelectLiveChannel?: (channelId: number) => void;
   /** 当前直播间 id（路由 liveChannelId，用于高亮） */
   activeLiveChannelId?: string | null;
   /** 开播：进入开播控制台（由 GroupPage 提供 navigate） */
   onNavigateLiveStart?: (channelId: number) => void;
-}) {
-  const currentGroupId = useGroupStore((state) => state.currentGroupId);
-  const currentVoiceChannelId = useVoiceStore((state) => state.currentChannelId);
-  // 语音房列表：排序在 voice store 统一维护（2026-09-05 定：有人区/无人区，
-  // 事实源 = 后端持久字段 last_occupied_at/last_vacant_at，随 WS 帧广播、无前端
-  // 计数器；有人进入/变空时 store patchChannel 重排，全界面同序、刷新不丢）。
-  // 这里只做当前群投影，顺序直接来自 store。
-  const voiceChannels = useVoiceStore((state) => state.channels
-    .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId))));
-  const voiceCount = voiceChannels.reduce((sum, channel) => sum + (channel.member_count || 0), 0);
-  // 直播间列表：排序在 live store 统一维护（2026-09-05 定，与语音同模型：
-  // 在播按最近开播 started_at 降序、曾播按最近下播 ended_at 降序压住从未开播、
-  // 从未按 created_at 降序；无计数器，只有开播下播，下播不回初始位）。
-  const liveChannels = useLiveStore((state) => state.channels
-    .filter((channel) => (channel.allowed_group_ids ?? []).some((id) => String(id) === String(currentGroupId))));
+}
+
+/** Keep the column's space stable while the old group panel exits before the next enters. */
+export function ChannelSidebar(props: ChannelSidebarProps) {
+  const storedGroupId = useGroupStore((state) => state.currentGroupId);
+  const groupId = props.groupId === undefined ? storedGroupId : props.groupId;
+  return (
+    <div className="channel-sidebar-slot">
+      <AnimatePresence mode="wait" propagate>
+        <ChannelSidebarPanel key={groupId} {...props} groupId={groupId} />
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ChannelSidebarPanel(props: ChannelSidebarProps & { groupId: string | null }) {
+  const reduced = usePrefersReducedMotion();
+  const present = useIsPresent();
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    ref.current?.toggleAttribute("inert", !present);
+  }, [present]);
+  return (
+    <motion.aside
+      ref={ref}
+      className="channel-sidebar"
+      aria-label="群内场景"
+      aria-hidden={!present || undefined}
+      data-motion-panel="group-channels"
+      data-group-owner={props.groupId}
+      data-motion-state={present ? "active" : "exiting"}
+      style={{ pointerEvents: present ? undefined : "none" }}
+      inherit={false}
+      initial={reduced ? false : "enter"}
+      animate="center"
+      exit="exit"
+      variants={panelVariants(reduced, "left")}
+    >
+      <ChannelSidebarContent {...props} />
+    </motion.aside>
+  );
+}
+
+function ChannelSidebarContent({
+  groupId: currentGroupId,
+  groupName,
+  activeScene,
+  onSelectScene,
+  onOpenInfo,
+  onSelectSubgroup,
+  onSelectVoiceChannel,
+  activeVoiceChannelId,
+  onSelectLiveChannel,
+  activeLiveChannelId,
+  onNavigateLiveStart,
+}: ChannelSidebarProps & { groupId: string | null }) {
+  const present = useIsPresent();
+  const selectionId = useId();
+  const voiceDirectory = useDirectoryPage("voice", { groupId: currentGroupId ?? undefined }, present && currentGroupId != null);
+  const liveDirectory = useDirectoryPage("live", { groupId: currentGroupId ?? undefined }, present && currentGroupId != null);
+  const voiceChannels = voiceDirectory.items;
+  const voiceCount = voiceDirectory.totalMemberCount ?? 0;
+  const liveChannels = liveDirectory.items;
   const hasLive = liveChannels.some((channel) => channel.status === "live");
   // 群内未读帖子数（浏览与已读同源）：>0 时帖子场景项显示红点
   const postUnread = useChatStore((state) => state.conversations
@@ -108,6 +150,7 @@ export function ChannelSidebar({
 
   // 中部滚动列表 ref：点击场景选项卡时把列表滚到该行自身的吸顶位
   const sceneListRef = useRef<HTMLDivElement>(null);
+  useSidebarContentClip(sceneListRef);
 
   // 点击聊天/语音/直播：滚到该行自己的 sticky 吸顶位（chat 0 / voice 44 / live 88，与 group.css 吸附位一致）。
   // sticky 元素吸附/吸底期间 offsetTop 会随滚动漂移（返回含吸附位移的盒位置），
@@ -138,32 +181,9 @@ export function ChannelSidebar({
   const [creatingLive, setCreatingLive] = useState(false);
   const [liveCreateError, setLiveCreateError] = useState<string | null>(null);
 
-  // 子群/语音房/直播间下拉展开收起动画（design.md §7：进 240ms ease-out、出 180ms
-  // ease-in，退出快于进入；prefers-reduced-motion 直接切换，无动画）
-  const reduceMotion = useReducedMotion();
-  const collapseVariants = reduceMotion
-    ? {
-        open: { height: "auto", opacity: 1, transition: { duration: 0 } },
-        closed: { height: 0, opacity: 0, transition: { duration: 0 } },
-      }
-    : {
-        open: {
-          height: "auto",
-          opacity: 1,
-          transition: {
-            height: { duration: 0.24, ease: EASE_OUT },
-            opacity: { duration: 0.2, ease: EASE_OUT },
-          },
-        },
-        closed: {
-          height: 0,
-          opacity: 0,
-          transition: {
-            height: { duration: 0.18, ease: EASE_IN },
-            opacity: { duration: 0.15, ease: EASE_IN },
-          },
-        },
-      };
+  // Existing disclosure ownership with Auroraqua's 300ms ease-out cadence.
+  const reduceMotion = usePrefersReducedMotion();
+  const collapseVariants = disclosureVariants(reduceMotion);
 
   const handleCreated = useCallback((sg: SubGroup) => {
     useSubGroupStore.getState().upsertSubgroup(sg.conversation_id, sg);
@@ -230,8 +250,8 @@ export function ChannelSidebar({
 
   // 展开更多按钮：基础 3 条 + 追加部分（追加部分复用 collapseVariants 展开收起动画）
   const showMore = !editing && subgroups.length > 3;
-  const showVoiceMore = voiceChannels.length > 3;
-  const showLiveMore = liveChannels.length > 3;
+  const showVoiceMore = voiceDirectory.total > 3 || voiceChannels.length > 3;
+  const showLiveMore = liveDirectory.total > 3 || liveChannels.length > 3;
 
   // 三个可展开选项卡（聊天/语音/直播）的行是滚动容器的直接子元素，sticky 依次吸顶，
   // 下拉内容（子群/语音房/直播间）随整列滚动，展开收起带高度动画（collapseVariants）。
@@ -242,7 +262,8 @@ export function ChannelSidebar({
       return (
         <Fragment key={scene.key}>
           <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
-            <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("voice"); scrollSceneRowToPin("voice"); }} aria-current={active ? "true" : undefined}>
+            <button type="button" className={`channel-scene has-auroraqua-highlight ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("voice"); scrollSceneRowToPin("voice"); }} aria-current={active ? "true" : undefined}>
+              {active && <AuroraquaNavHighlight id={`${selectionId}-scene`} />}
               <Icon width={20} height={20} />
               <span>{scene.label}</span>
               {voiceCount > 0 && <span className="channel-scene-status">{voiceCount}</span>}
@@ -266,50 +287,46 @@ export function ChannelSidebar({
                 animate="open"
                 exit="closed"
               >
-              <ul className="channel-voice-room-list">
-                {voiceChannels.slice(0, 3).map((ch) => {
-                  const isActive = activeScene === "voice" && String(ch.id) === String(currentVoiceChannelId);
+              {/* One stable parent preserves each row when immediate activity sorting
+                  moves it across the first-three / expanded boundary. */}
+              <motion.ul
+                className="channel-voice-room-list"
+                initial={false}
+                animate={{ height: voiceExpanded ? "auto" : Math.max(0, Math.min(3, voiceChannels.length) * 31 - 1) }}
+                transition={reduceMotion ? { duration: 0 } : auroraquaIndicatorTransition}
+                style={{ overflow: "hidden", flexShrink: 0 }}
+              >
+                {voiceChannels.map((ch, index) => {
+                  const isActive = activeScene === "voice" && String(ch.id) === String(activeVoiceChannelId);
+                  const hidden = !voiceExpanded && index >= 3;
                   return (
-                    <li key={ch.id} className={`channel-voice-room-item${isActive ? " is-active" : ""}`}>
-                      <button type="button" className="channel-voice-room" onClick={() => { onSelectScene("voice"); onSelectVoiceChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                    <motion.li
+                      key={ch.id}
+                      className={`channel-voice-room-item${isActive ? " is-active" : ""}`}
+                      layout={reduceMotion ? false : "position"}
+                      initial={false}
+                      transition={{ layout: reduceMotion ? { duration: 0 } : auroraquaIndicatorTransition }}
+                      style={{ flexShrink: 0 }}
+                      aria-hidden={hidden || undefined}
+                      {...(hidden ? { inert: "" } : {})}
+                    >
+                      <button type="button" className="channel-voice-room has-auroraqua-highlight" disabled={hidden} tabIndex={hidden ? -1 : undefined} onClick={() => { onSelectScene("voice"); onSelectVoiceChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                        {/* The row owns its reorder transform; a second shared projection
+                            would cancel that movement and detach the active background. */}
+                        {isActive && <AuroraquaNavHighlight id={`${selectionId}-voice`} sharedLayout={false} />}
                         <span className="channel-voice-room-name">{ch.name}</span>
                         {ch.member_count > 0 && <span className="channel-voice-room-count">{ch.member_count}</span>}
                       </button>
-                    </li>
+                    </motion.li>
                   );
                 })}
-              </ul>
-              {/* 「展开更多」追加的语音房：复用选项卡展开收起动画（collapseVariants） */}
-              <AnimatePresence initial={false}>
-                {voiceExpanded && (
-                  <motion.div
-                    key="voice-rooms-more"
-                    variants={collapseVariants}
-                    initial="closed"
-                    animate="open"
-                    exit="closed"
-                  >
-                    <ul className="channel-voice-room-list">
-                      {voiceChannels.slice(3).map((ch) => {
-                        const isActive = activeScene === "voice" && String(ch.id) === String(currentVoiceChannelId);
-                        return (
-                          <li key={ch.id} className={`channel-voice-room-item${isActive ? " is-active" : ""}`}>
-                            <button type="button" className="channel-voice-room" onClick={() => { onSelectScene("voice"); onSelectVoiceChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
-                              <span className="channel-voice-room-name">{ch.name}</span>
-                              {ch.member_count > 0 && <span className="channel-voice-room-count">{ch.member_count}</span>}
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              </motion.ul>
               {showVoiceMore && (
                 <button type="button" className="channel-voice-more" onClick={() => setVoiceExpanded((v) => !v)} aria-expanded={voiceExpanded}>
-                  {voiceExpanded ? "收起" : `展开更多（${voiceChannels.length - 3}）`}
+                  {voiceExpanded ? "收起" : `展开更多（${Math.max(voiceDirectory.total, voiceChannels.length) - 3}）`}
                 </button>
               )}
+              {voiceExpanded && <DirectoryLoadMore {...voiceDirectory} retainCompletedSpace={false} />}
               </motion.div>
             )}
           </AnimatePresence>
@@ -320,7 +337,8 @@ export function ChannelSidebar({
       return (
         <Fragment key={scene.key}>
           <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
-            <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("live"); scrollSceneRowToPin("live"); }} aria-current={active ? "true" : undefined}>
+            <button type="button" className={`channel-scene has-auroraqua-highlight ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("live"); scrollSceneRowToPin("live"); }} aria-current={active ? "true" : undefined}>
+              {active && <AuroraquaNavHighlight id={`${selectionId}-scene`} />}
               <Icon width={20} height={20} />
               <span>{scene.label}</span>
               {hasLive && <span className="channel-scene-status">LIVE</span>}
@@ -349,7 +367,8 @@ export function ChannelSidebar({
                   const isActive = activeScene === "live" && String(ch.id) === String(activeLiveChannelId);
                   return (
                     <li key={ch.id} className={`channel-live-room-item${isActive ? " is-active" : ""}`}>
-                      <button type="button" className="channel-live-room" onClick={() => { onSelectLiveChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                      <button type="button" className="channel-live-room has-auroraqua-highlight" onClick={() => { onSelectLiveChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                        {isActive && <AuroraquaNavHighlight id={`${selectionId}-live`} />}
                         <span className="channel-live-cover">
                           {ch.cover ? <ResourceImage src={ch.cover} alt="" className="channel-live-cover-image" fallback={<IconVideo width={16} height={16} aria-hidden="true" />} /> : <IconVideo width={16} height={16} aria-hidden="true" />}
                           {ch.status === "live" && <span className="channel-live-dot" aria-label="直播中" />}
@@ -375,7 +394,8 @@ export function ChannelSidebar({
                         const isActive = activeScene === "live" && String(ch.id) === String(activeLiveChannelId);
                         return (
                           <li key={ch.id} className={`channel-live-room-item${isActive ? " is-active" : ""}`}>
-                            <button type="button" className="channel-live-room" onClick={() => { onSelectLiveChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                            <button type="button" className="channel-live-room has-auroraqua-highlight" onClick={() => { onSelectLiveChannel?.(ch.id); }} aria-current={isActive ? "true" : undefined}>
+                              {isActive && <AuroraquaNavHighlight id={`${selectionId}-live`} />}
                               <span className="channel-live-cover">
                                 {ch.cover ? <ResourceImage src={ch.cover} alt="" className="channel-live-cover-image" fallback={<IconVideo width={16} height={16} aria-hidden="true" />} /> : <IconVideo width={16} height={16} aria-hidden="true" />}
                                 {ch.status === "live" && <span className="channel-live-dot" aria-label="直播中" />}
@@ -391,9 +411,10 @@ export function ChannelSidebar({
               </AnimatePresence>
               {showLiveMore && (
                 <button type="button" className="channel-live-more" onClick={() => setLiveExpanded((v) => !v)} aria-expanded={liveExpanded}>
-                  {liveExpanded ? "收起" : `展开更多（${liveChannels.length - 3}）`}
+                  {liveExpanded ? "收起" : `展开更多（${Math.max(liveDirectory.total, liveChannels.length) - 3}）`}
                 </button>
               )}
+              {liveExpanded && <DirectoryLoadMore {...liveDirectory} retainCompletedSpace={false} />}
               </motion.div>
             )}
           </AnimatePresence>
@@ -408,7 +429,8 @@ export function ChannelSidebar({
         const isActive = activeScene === "chat" && sg.id === activeSubgroupId;
         return (
           <li key={sg.id} className={`channel-subgroup-item${isActive ? " is-active" : ""}`}>
-            <button type="button" className={`channel-subgroup${isActive ? " is-active" : ""}`} onClick={() => { onSelectSubgroup(sg.id); onSelectScene("chat"); }} aria-current={isActive ? "true" : undefined}>
+            <button type="button" className={`channel-subgroup has-auroraqua-highlight${isActive ? " is-active" : ""}`} onClick={() => { onSelectSubgroup(sg.id); onSelectScene("chat"); }} aria-current={isActive ? "true" : undefined}>
+              {isActive && <AuroraquaNavHighlight id={`${selectionId}-subgroup`} />}
               <span className="channel-subgroup-name">{sg.name}</span>
               {sg.muted === true && <span className="channel-subgroup-muted" title="已禁言（仅群主/管理员可发言）">禁言</span>}
               {unread > 0 && <span className="channel-subgroup-badge" aria-label={`${unread} 条未读`} title="有未读消息">{unread > 99 ? "99+" : unread}</span>}
@@ -424,7 +446,8 @@ export function ChannelSidebar({
       return (
         <Fragment key={scene.key}>
           <div className={`channel-scene-row channel-scene-row--${scene.key}`}>
-            <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("chat"); scrollSceneRowToPin("chat"); if (defaultSg) onSelectSubgroup(defaultSg.id); }} aria-current={active ? "true" : undefined}>
+            <button type="button" className={`channel-scene has-auroraqua-highlight ${active ? "is-active" : ""}`} onClick={() => { onSelectScene("chat"); scrollSceneRowToPin("chat"); if (defaultSg) onSelectSubgroup(defaultSg.id); }} aria-current={active ? "true" : undefined}>
+              {active && <AuroraquaNavHighlight id={`${selectionId}-scene`} />}
               <Icon width={20} height={20} />
               <span>{scene.label}</span>
             </button>
@@ -484,7 +507,8 @@ export function ChannelSidebar({
     }
     return (
       <li key={scene.key} className="channel-scene-item">
-        <button type="button" className={`channel-scene ${active ? "is-active" : ""}`} onClick={() => onSelectScene(scene.key)} aria-current={active ? "true" : undefined}>
+        <button type="button" className={`channel-scene has-auroraqua-highlight ${active ? "is-active" : ""}`} onClick={() => onSelectScene(scene.key)} aria-current={active ? "true" : undefined}>
+          {active && <AuroraquaNavHighlight id={`${selectionId}-scene`} />}
           <Icon width={20} height={20} />
           <span>{scene.label}</span>
           {scene.key === "posts" && postUnread > 0 && (
@@ -496,25 +520,28 @@ export function ChannelSidebar({
   };
 
   return (
-    <aside className="channel-sidebar" aria-label="群内场景">
+    <>
       <button type="button" className="channel-sidebar-head" onClick={onOpenInfo}>
         <span className="channel-sidebar-title">{groupName}</span>
         <Chevron />
       </button>
-      <div className="channel-sidebar-list" ref={sceneListRef}>
+      <motion.div layoutScroll className="channel-sidebar-list" style={{ overflowAnchor: "none" }} ref={sceneListRef} onScroll={(event) => {
+        if (voiceOpen && voiceExpanded) voiceDirectory.onScroll(event.currentTarget);
+        if (liveOpen && liveExpanded) liveDirectory.onScroll(event.currentTarget);
+      }}>
         {SCENE_META.filter((scene) => scene.key !== "posts" && scene.key !== "games").map(renderSceneItem)}
-      </div>
+      </motion.div>
       <ul className="channel-sidebar-list channel-sidebar-list-bottom">
         {SCENE_META.filter((scene) => scene.key === "posts" || scene.key === "games").map(renderSceneItem)}
       </ul>
 
-      {showVoiceCreate && (
+      {present && showVoiceCreate && (
         <CreateSheet title="创建语音房" onClose={() => setShowVoiceCreate(false)}>
           <VoiceChannelCreate group={currentGroupId} onCreated={() => setShowVoiceCreate(false)} />
         </CreateSheet>
       )}
 
-      {showLiveCreate && (
+      {present && showLiveCreate && (
         <CreateSheet title="群内开播" onClose={() => setShowLiveCreate(false)}>
           <LiveStartSheet
             onStart={handleLiveStarted}
@@ -525,7 +552,7 @@ export function ChannelSidebar({
         </CreateSheet>
       )}
 
-      {dialog && (
+      {present && dialog && (
         <SubGroupDialog
           state={dialog}
           busy={busy}
@@ -555,7 +582,7 @@ export function ChannelSidebar({
         />
       )}
 
-      {confirmDelete && (
+      {present && confirmDelete && (
         <ConfirmDialog
           title="删除子群"
           message={`确定删除子群「${confirmDelete.name}」？该子群的所有聊天记录将永久删除，无法恢复。`}
@@ -568,7 +595,7 @@ export function ChannelSidebar({
           }}
         />
       )}
-    </aside>
+    </>
   );
 }
 

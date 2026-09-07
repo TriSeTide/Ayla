@@ -5,7 +5,8 @@
  * 输入框。复用 useChat 数据流（openConversation/loadHistory/recallMessage 等）。
  * conversationId 变化时切换会话（open bucket / 订阅 / 标已读）。
  */
-import { useEffect, useCallback, useMemo, useState } from "react";
+import { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion, useIsPresent } from "framer-motion";
 import type { ChatMessage } from "../../api/types";
 import { getElysiaProfile } from "../../api/elysia";
 import { listFriends } from "../../api/users";
@@ -21,12 +22,15 @@ import { useAuthStore } from "../../stores/auth";
 import { chatWS } from "../../ws/chat";
 import { goUserProfile } from "../../utils/navigation";
 import { useDisplayStatus, usePresenceOnline } from "../../utils/displayStatus";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
+import { auroraquaPanelOrchestration, panelVariants } from "../motion/auroraquaMotion";
 
 export function PrivateChatPane({
   conversationId,
   onBack,
   backLabel = "返回消息中心",
   disableAvatarNav = false,
+  panelMotion = false,
 }: {
   conversationId: string;
   /** 可选返回按钮（窄屏私聊窗口 → /messages；宽屏两列不渲染返回） */
@@ -34,7 +38,14 @@ export function PrivateChatPane({
   backLabel?: string;
   /** 快捷消息栏内：头像不可点（不跳个人主页，R-QM） */
   disableAvatarNav?: boolean;
+  /** Conversation panels own their entry; surrounding swipe wrappers only own the gesture. */
+  panelMotion?: boolean;
 }) {
+  const present = useIsPresent();
+  const active = !panelMotion || present;
+  const reduced = usePrefersReducedMotion();
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { rootRef.current?.toggleAttribute("inert", !active); }, [active]);
   const conversations = useChatStore((s) => s.conversations);
   const buckets = useMessageStore((s) => s.buckets);
   const bucket = buckets[conversationId];
@@ -82,25 +93,32 @@ export function PrivateChatPane({
 
   // 打开私聊会话：拉历史 + 订阅 + 标已读
   useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
     useChatStore.getState().openConversation(conversationId);
     useMessageStore.getState().openBucket(conversationId);
     chatWS.subscribe([conversationId]);
     loadHistory(conversationId, undefined, true)
       .then(async () => {
-        setHistoryError(null);
+        if (!cancelled) setHistoryError(null);
       })
-      .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
+      .catch((e) => {
+        if (!cancelled) setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败");
+      });
     return () => {
+      cancelled = true;
       // 离开私聊（切换会话/返回消息中心）时清 activeId，避免残留导致
       // 其他会话的 message.new 被误判为"正在聊天"而 markRead（串会话）。
-      useChatStore.getState().closeConversation();
+      const store = useChatStore.getState();
+      if (store.activeConversationId === conversationId) store.closeConversation();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [conversationId, active]);
 
   // typing 帧：只处理当前会话、忽略自己（自己输入不显示「对方正在输入」）
   useEffect(() => {
     setPeerTyping({}); // 切换会话清空上一会话的输入状态
+    if (!active) return;
     const off = chatWS.onFrame((frame) => {
       if (frame.type !== "typing") return;
       if (frame.data.conversation_id !== conversationId) return;
@@ -109,7 +127,7 @@ export function PrivateChatPane({
       setPeerTyping((prev) => ({ ...prev, [frame.data.user_id]: frame.data.is_typing }));
     });
     return off;
-  }, [conversationId]);
+  }, [conversationId, active]);
 
   const typingActive = Object.values(peerTyping).some(Boolean);
 
@@ -144,8 +162,23 @@ export function PrivateChatPane({
     !friendIds.has(peer.id);
 
   return (
-    <div className="private-chat">
-      <header className="private-chat-head">
+    <motion.div
+      ref={rootRef}
+      className={`private-chat${panelMotion ? " chat-motion-panels" : ""}`}
+      data-chat-identity={conversationId}
+      aria-hidden={!active || undefined}
+      inherit={false}
+      initial={panelMotion && !reduced ? "enter" : false}
+      animate={panelMotion ? "center" : undefined}
+      exit={panelMotion ? "exit" : undefined}
+      variants={panelMotion ? auroraquaPanelOrchestration : undefined}
+    >
+      <motion.header
+        className="private-chat-head"
+        data-motion-panel="chat-header"
+        inherit={panelMotion}
+        variants={panelMotion ? panelVariants(reduced, "top") : undefined}
+      >
         {onBack && (
           <button type="button" className="icon-btn-40" onClick={onBack} aria-label={backLabel}>
             <IconBack width={20} height={20} />
@@ -173,7 +206,7 @@ export function PrivateChatPane({
             {typingActive ? "对方正在输入…" : peerDisplayStatus}
           </span>
         </div>
-      </header>
+      </motion.header>
 
       {historyError && (
         <div className="chat-notice" role="alert">
@@ -191,6 +224,12 @@ export function PrivateChatPane({
         </div>
       )}
 
+      <motion.div
+        className="chat-messages-motion"
+        data-motion-panel="chat-messages"
+        inherit={panelMotion}
+        variants={panelMotion ? panelVariants(reduced, "right", "left") : undefined}
+      >
       <MessageList
         messages={messages}
         conversation={conv}
@@ -204,8 +243,8 @@ export function PrivateChatPane({
           })
         }
         onQuote={setQuote}
-        onMarkRead={(m, exact) => exact ? markMessageReadExact(conversationId, m.id) : undefined}
-        onMarkConversationRead={(throughSeq, excluded) => markConversationReadThrough(conversationId, throughSeq, excluded)}
+        onMarkRead={(m, exact) => active && exact ? markMessageReadExact(conversationId, m.id) : undefined}
+        onMarkConversationRead={(throughSeq, excluded) => active ? markConversationReadThrough(conversationId, throughSeq, excluded) : undefined}
         onLoadUntilSeq={(targetSeq) => loadHistoryUntilSeq(conversationId, targetSeq).catch(() => false)}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(conversationId, m)}
@@ -213,15 +252,23 @@ export function PrivateChatPane({
         onCancel={(m) => cancelOptimistic(conversationId, m)}
         onPoke={handlePoke}
       />
+      </motion.div>
+      <motion.div
+        className="chat-composer-motion"
+        data-motion-panel="chat-composer"
+        inherit={panelMotion}
+        variants={panelMotion ? panelVariants(reduced, "bottom") : undefined}
+      >
       {blocked ? (
         <div className="private-chat-blocked" role="alert">
           对方已不是你的好友，无法发送消息
         </div>
       ) : (
         <>
-          <MessageInput convId={conversationId} quote={quote} onQuoteClear={() => setQuote(null)} />
+          <MessageInput convId={conversationId} quote={quote} onQuoteClear={() => setQuote(null)} disabled={!active} />
         </>
       )}
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

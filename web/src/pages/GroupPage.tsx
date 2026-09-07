@@ -1,30 +1,30 @@
 /**
  * GroupPage —— 群聊场景容器（F3）。
  *
- * 窄屏（≤768px）：GroupTopTabs（底栏上移到顶部，R-G1）+ 五子界面（聊天居中，滑动切换）+
+ * 窄屏（≤768px）：GroupTopTabs（从底栏位置连续升至顶部）+ 五子界面（聊天居中，滑动切换）+
  * 群头像两级点击（R-G4，单一 handler 分支）+ 下拉回主页（R-G6 手势）。
  * 宽屏（>768px）：TopNav（AppShell 提供）+ ServerRail + ChannelSidebar + 内容区 三列
- * （主页即三列群聊界面，宽屏无群卡片网格/进群动画/两级点击/下拉回主页，布局文档 §3.2/§3.3）。
+ * （主页即三列群聊界面；侧栏与内容分别进入，切群保留服务器栏，频道面板依次退出/进入）。
  *
- * 单一状态源：activeScene 存 stores/group，route param 变化时同步（单 effect）；
- * 切换场景 = setActiveScene + navigate（URL 回显）。
- * 输入框显隐（R-G5）由子界面自带：chat 子界面含 MessageInput；voice/games 占位无输入框。
+ * 场景选择统一经 setActiveScene + navigate；route param 变化时同步 stores/group。
+ * 宽屏新群首帧按当前路由渲染，避免 effect 同步前把旧群场景挂到新群。
+ * 输入框显隐（R-G5）由聊天、语音、直播和帖子各自的子界面拥有。
  *
  * 方案 §2.2/§2.3/§2.4（M1 动画基座与转场）：
  * - 横滑跟手（§2.2）：当前场景 motion.div `drag="x"` + dragConstraints={0} + dragElastic
  *   （跟手 + 边缘阻尼 + 松手回弹），onDragEnd 松手判定统一走 useSwipeCommit
  *   （净位移 >1/3 宽优先 + 同向甩动补充 + 方向锁让位，pointercancel 不判定）；切换用
- *   AnimatePresence(custom=direction) + variants（enter ±40%→0 / exit ∓30%→透明），
- *   direction 由 GROUP_SCENE_ORDER 索引差计算（useSceneSwipeDirection）；单场景挂载
+ *   AnimatePresence 保留退出中的旧场景和当帧拖动位移，外壳原位淡出、各新分区独立进入；
+ *   场景路由顺序仍由 GROUP_SCENE_ORDER 决定；单场景挂载
  *   （AnimatePresence 保管退出中的旧实例，动画完即卸载，重组件不并排常挂）。
  * - 下拉协同（§2.3）：pullOffset 同时驱动顶栏与内容区（translateY 1:1 + scale 1→0.98 +
  *   opacity 1→0.6 视差），过阈值松手内容下滑出屏 + 顶栏落回底部（250ms ease-in）后 navigate。
- * - 进群编排（§2.4）：底栏上移 250ms（useEnterGroupAnimation）→ 内容自下 24px 浮入 + 淡化
- *   （180ms，延迟 80ms）→ 输入框滑入（250ms，延迟 100ms，子界面自处理）。
+ * - 自动进入由分区拥有：导航条从原底栏位置升至顶部，输入框从下方 20px 进入；
+ *   内容外壳不叠加整体缩放/位移，真实下拉和横滑仍由各自手势层拥有。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import * as chatApi from "../api/chat";
@@ -37,6 +37,10 @@ import { useSceneSwipeDirection } from "../hooks/useSceneSwipeDirection";
 import { resolveSwipeCommit } from "../hooks/useSwipeCommit";
 import { useSwipe } from "../hooks/useSwipe";
 import { useTouchAxisGuard } from "../hooks/useTouchAxisGuard";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { useMotionDrag } from "../hooks/useMotionDrag";
+import { auroraquaRouteTransition } from "../components/motion/auroraquaMotion";
+import { ConversationTransition } from "../components/motion/ConversationTransition";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
 import { useChatStore } from "../stores/chat";
@@ -63,25 +67,10 @@ const EXIT_TRANSITION_MS = 250;
 const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
 const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
 
-/** 进群内容入场（方案 §2.4）：180ms 延迟 80ms */
-const ENTER_CONTENT_DURATION = 0.18;
-const ENTER_CONTENT_DELAY = 0.08;
-
-/** 场景横滑切换（方案 §2.2）：滑入/滑出 250ms；松手判定统一走 useSwipeCommit */
-const SCENE_SLIDE_DURATION = 0.25;
-
 /** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
 const SCENE_DRAG_CONSTRAINTS = { left: 0, right: 0 };
 /** 跟手弹性：0.8 = 80% 跟手 + 20% 边缘阻尼（接近 1:1，避免拖过头） */
 const SCENE_DRAG_ELASTIC = 0.8;
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
 
 export function GroupPage() {
   const { id, scene, postId, voiceChannelId, liveChannelId } = useParams<{
@@ -102,8 +91,7 @@ export function GroupPage() {
   const { entered } = useEnterGroupAnimation();
   const sceneDirection = useSceneSwipeDirection(activeScene);
 
-  // 惰性同步读取 reduced-motion（非 effect）：用户首帧即无位移动画，避免闪跳
-  const [reducedMotion] = useState(prefersReducedMotion);
+  const reducedMotion = usePrefersReducedMotion();
 
   // 宽屏 ServerRail 底部加号：创建群聊（需求：左下角头像键改加号）
   const [showGroupCreate, setShowGroupCreate] = useState(false);
@@ -158,6 +146,9 @@ export function GroupPage() {
         pullOpacity.set(1 - 0.4 * progress);
       },
       onEnd: (e) => {
+        // Reduced motion removes visual movement, not the user's new navigation gesture.
+        // A preference change cancels the old tracker below, so its later touchend is ignored.
+        if (leaving) return;
         if (e.direction === "down" && e.dy >= PULL_DOWN_EXIT_THRESHOLD) {
           pullToHome();
         } else {
@@ -185,6 +176,18 @@ export function GroupPage() {
     { threshold: PULL_DOWN_EXIT_THRESHOLD, lockSlop: 12 },
   );
 
+  useLayoutEffect(() => {
+    if (!reducedMotion) return;
+    pullSwipe.tracker.cancel();
+    pullY.stop();
+    pullY.set(0);
+    setPullOffset(0);
+    if (!leaving) {
+      pullOpacity.stop();
+      pullOpacity.set(1);
+    }
+  }, [reducedMotion, pullSwipe.tracker, pullY, pullOpacity, leaving]);
+
   const groups = useMemo(
     () => conversations.filter((c) => c.type === "group"),
     [conversations],
@@ -210,6 +213,9 @@ export function GroupPage() {
         : scene && VALID_SCENES.has(scene)
           ? (scene as GroupScene)
           : "chat";
+  // The persistent wide shell renders the new route immediately; it must not
+  // briefly mount the previous group's scene before the store effect catches up.
+  const contentScene = isNarrow ? activeScene : effectiveScene;
 
   useEffect(() => {
     if (!id) return;
@@ -221,9 +227,9 @@ export function GroupPage() {
     // activeId 仍残留为当前群 → WS 新消息被误判为「正在看」而自动已读（F7 语义：
     // 只有真的在聊天窗口里才自动已读）。
     // 进入群聊仍保持滚底；未读由 MessageList 的定位标签承接，不在打开时清除。
-    if (effectiveScene === "chat") {
-      useChatStore.getState().openConversation(id);
-    } else {
+    // 只有实际挂载且仍在场的 GroupChat 可以打开会话；
+    // 路由先行不能把仍在等待入场的目标群标成正在阅读。
+    if (effectiveScene !== "chat" && useChatStore.getState().activeConversationId === id) {
       useChatStore.getState().closeConversation();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -318,11 +324,11 @@ export function GroupPage() {
 
   // 群内子场景渲染（live F4 / voice F5 / posts F6 已落地；games 仍占位）
   const renderScene = useCallback(() => {
-    switch (activeScene) {
+    switch (contentScene) {
       case "info":
         return <GroupInfo groupId={id ?? ""} />;
       case "chat":
-        return <GroupChat groupId={id ?? ""} />;
+        return <GroupChat groupId={id ?? ""} panelMotion />;
       case "live":
         return <GroupLive groupId={id ?? ""} routeChannelId={liveChannelId} onExit={() => goScene("chat")} />;
       case "voice":
@@ -338,9 +344,9 @@ export function GroupPage() {
       case "games":
         return <GroupGames groupId={id ?? ""} onExit={() => goScene("chat")} />;
       default:
-        return <GroupScenePlaceholder scene={activeScene} />;
+        return <GroupScenePlaceholder scene={contentScene} />;
     }
-  }, [activeScene, id, postId, voiceChannelId, liveChannelId, goScene]);
+  }, [contentScene, id, postId, voiceChannelId, liveChannelId, goScene, isNarrow]);
 
   // ---- 场景横滑（§2.2）：松手判定——净位移(>1/3 宽)优先 + 同向甩动补充 + 方向锁让位。
   // pointercancel（浏览器滚动接管等系统取消，手指未松开）不算松手决策，回弹不判定；
@@ -364,50 +370,6 @@ export function GroupPage() {
     [activeScene, goScene],
   );
 
-  // 场景切换变体（§2.2）：direction 由索引差决定；reduced-motion 直切（仅透明度）
-  const sceneVariants = useMemo(
-    () =>
-      reducedMotion
-        ? {
-            enter: { opacity: 1 },
-            center: { opacity: 1 },
-            exit: { opacity: 0 },
-          }
-        : {
-            enter: (dir: number) => ({
-              x: dir === 0 ? 0 : `${dir * 40}%`,
-              opacity: 1,
-              transition: { duration: SCENE_SLIDE_DURATION, ease: EASE_OUT },
-            }),
-            center: { x: 0, opacity: 1 },
-            exit: (dir: number) => ({
-              x: dir === 0 ? 0 : `${dir * -30}%`,
-              opacity: 0,
-              transition: { duration: SCENE_SLIDE_DURATION, ease: EASE_IN },
-            }),
-          },
-    [reducedMotion],
-  );
-
-  // 进群内容入场变体（§2.4）：自下 24px 浮入 + 淡化（180ms，延迟 80ms）；reduced-motion 直切
-  const enterVariants = useMemo(
-    () =>
-      reducedMotion
-        ? {
-            out: { opacity: 0 },
-            in: { opacity: 1 },
-          }
-        : {
-            out: { y: 24, opacity: 0 },
-            in: {
-              y: 0,
-              opacity: 1,
-              transition: { duration: ENTER_CONTENT_DURATION, delay: ENTER_CONTENT_DELAY, ease: EASE_OUT },
-            },
-          },
-    [reducedMotion],
-  );
-
   // ---- 宽屏：三列（ServerRail + ChannelSidebar + 内容区） ----
   if (!isNarrow) {
     return (
@@ -426,32 +388,36 @@ export function GroupPage() {
           onError={setActionError}
         />
         <ChannelSidebar
+          groupId={id ?? null}
           groupName={currentGroup?.title ?? "群聊"}
-          activeScene={activeScene}
+          activeScene={contentScene}
           onSelectScene={goScene}
           onOpenInfo={openInfo}
           onSelectSubgroup={(sgId) => useSubGroupStore.getState().setActiveSubgroup(id ?? "", sgId)}
           onSelectVoiceChannel={openVoiceChannel}
+          activeVoiceChannelId={voiceChannelId}
           onSelectLiveChannel={openLiveChannel}
           activeLiveChannelId={liveChannelId}
           onNavigateLiveStart={(channelId) => navigate(`/live/start/${channelId}`)}
         />
-        <main className="group-content">{renderScene()}</main>
+        <main className="group-content">
+          <ConversationTransition identity={`group:${id ?? ""}`}>
+            {renderScene()}
+          </ConversationTransition>
+        </main>
         {showGroupCreate && <GroupCreateDialog onClose={() => setShowGroupCreate(false)} />}
       </div>
     );
   }
 
   // ---- 窄屏 ----
-  // 顶栏 transform 四态：退场（移回底部 ease-in）> 进群（未 entered 停底部）> 跟手（下拉即时）> 就位（回弹复位）
+  // transform 仅拥有手势跟手/退场；独立 translate 将原底栏位置连续移至顶部。
+  // shell 高度为 100dvh，底栏本体为 64px + 底部安全区；首帧保持可见。
   let tabsTransform: string;
   let tabsTransition: string;
   if (leaving) {
     tabsTransform = "translateY(calc(100vh - 64px))";
     tabsTransition = reducedMotion ? "none" : `transform ${EXIT_TRANSITION_MS}ms var(--ease-in)`;
-  } else if (!entered) {
-    tabsTransform = "translateY(calc(100vh - 64px))";
-    tabsTransition = reducedMotion ? "none" : "transform 250ms var(--ease-out)";
   } else if (pullOffset > 0) {
     tabsTransform = `translateY(${pullOffset}px)`;
     tabsTransition = "none";
@@ -461,7 +427,9 @@ export function GroupPage() {
   }
   const tabsStyle: CSSProperties = {
     transform: tabsTransform,
-    transition: tabsTransition,
+    translate: reducedMotion ? "none" : entered ? "0 0" : "0 calc(100dvh - 64px - env(safe-area-inset-bottom, 0px))",
+    opacity: 1,
+    transition: reducedMotion ? "none" : `${tabsTransition}, translate 300ms var(--auroraqua-ease-out)`,
   };
 
   const canSceneDrag = !reducedMotion && !leaving;
@@ -478,40 +446,69 @@ export function GroupPage() {
         pullHandlers={pullSwipe.handlers}
       />
 
-      {/* 进群入场层（§2.4）：内容自下 24px 浮入 + 淡化（延迟 80ms） */}
-      <motion.div
-        className="group-scene-enter"
-        initial={false}
-        animate={entered ? "in" : "out"}
-        variants={enterVariants}
-      >
+      {/* 内容分区各自入场；此层只保留布局，不向顶栏或输入框叠加位移。 */}
+      <div className="group-scene-enter">
         {/* 下拉协同层（§2.3）：translateY 1:1 + scale/opacity 视差 */}
         <motion.div
           className="group-scene"
           ref={sceneRef}
-          style={{ y: pullY, scale: pullScale, opacity: pullOpacity }}
+          style={{ y: reducedMotion ? 0 : pullY, scale: reducedMotion ? 1 : pullScale, opacity: pullOpacity }}
         >
           {/* 五子场景横滑层（§2.2）：单场景挂载 + drag 跟手 + 方向变体切换 */}
-          <AnimatePresence custom={sceneDirection} mode="sync" initial={false}>
-            <motion.div
+          <AnimatePresence custom={sceneDirection} mode="sync" propagate>
+            <GroupSceneSurface
               key={activeScene}
-              className="group-scene-inner"
-              custom={sceneDirection}
-              variants={sceneVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              drag={canSceneDrag ? "x" : false}
-              dragConstraints={SCENE_DRAG_CONSTRAINTS}
-              dragElastic={SCENE_DRAG_ELASTIC}
-              dragMomentum={false}
+              direction={sceneDirection}
+              enabled={canSceneDrag}
               onDragEnd={handleSceneDragEnd}
             >
               {renderScene()}
-            </motion.div>
+            </GroupSceneSurface>
           </AnimatePresence>
         </motion.div>
-      </motion.div>
+      </div>
     </div>
+  );
+}
+
+/** Panels enter from their own edges; the drag layer retains the held offset throughout exit. */
+function GroupSceneSurface({ direction, enabled, onDragEnd, children }: {
+  direction: 1 | -1 | 0;
+  enabled: boolean;
+  onDragEnd: PanHandler;
+  children: ReactNode;
+}) {
+  const drag = useMotionDrag(enabled, onDragEnd);
+  const variants = useMemo(() => ({
+    enter: { x: 0, opacity: 1 },
+    center: { x: 0, opacity: 1 },
+    exit: { x: 0, opacity: 0, transition: drag.reduced ? { duration: 0 } : auroraquaRouteTransition },
+  }), [drag.reduced]);
+  return (
+    <motion.div
+      className="group-scene-inner"
+      custom={direction}
+      variants={variants}
+      initial="enter"
+      animate="center"
+      exit="exit"
+      style={{ pointerEvents: drag.present ? undefined : "none" }}
+    >
+      <motion.div
+        className="group-scene-drag"
+        inherit={false}
+        drag={drag.allowed ? "x" : false}
+        dragControls={drag.controls}
+        style={{ x: drag.offset }}
+        dragConstraints={SCENE_DRAG_CONSTRAINTS}
+        dragSnapToOrigin
+        dragElastic={SCENE_DRAG_ELASTIC}
+        dragMomentum={false}
+        onDragStart={drag.onDragStart}
+        onDragEnd={drag.onDragEnd}
+      >
+        {children}
+      </motion.div>
+    </motion.div>
   );
 }
