@@ -19,12 +19,28 @@ describe("resolvePageKey", () => {
     expect(resolvePageKey("/group/g1/voice/v3")).toBe("/group/g1");
   });
 
+  it("仅宽屏跨群共享外壳key，窄屏仍按群重挂进群编排", () => {
+    expect(resolvePageKey("/group/g1", true)).toBe("wide-group-shell");
+    expect(resolvePageKey("/group/g2/posts/p9", true)).toBe("wide-group-shell");
+    expect(resolvePageKey("/group/g2/live/3", true)).toBe("wide-group-shell");
+    expect(resolvePageKey("/group/g1", false)).not.toBe(resolvePageKey("/group/g2", false));
+    expect(resolvePageKey("/group", true)).toBe("/group");
+    expect(resolvePageKey("/voice", true)).toBe("/voice");
+  });
+
   it("非群页路由用原始 pathname", () => {
     expect(resolvePageKey("/group")).toBe("/group");
     expect(resolvePageKey("/voice")).toBe("/voice");
     expect(resolvePageKey("/posts/p1")).toBe("/posts/p1");
     expect(resolvePageKey("/messages")).toBe("/messages");
     expect(resolvePageKey("/chat/c1")).toBe("/chat/c1");
+  });
+
+  it("宽屏私聊换对象保留会话列表外壳，窄屏仍有独立页面身份", () => {
+    expect(resolvePageKey("/chat/a", true)).toBe("wide-private-chat-shell");
+    expect(resolvePageKey("/chat/b", true)).toBe("wide-private-chat-shell");
+    expect(resolvePageKey("/chat/a", false)).not.toBe(resolvePageKey("/chat/b", false));
+    expect(resolvePageKey("/messages", true)).toBe("/messages");
   });
 
   it("直播间详情归一为 /live/room（上下滑切换不触发整页转场）", () => {
@@ -42,6 +58,12 @@ describe("resolvePageKey", () => {
 });
 
 describe("PageTransition", () => {
+  it.each(["/live/42", "/live/start/42"])("直播与开播页 %s 分面板编排时外层立即归位，不叠加缩放或位移", (pathname) => {
+    const { container } = render(<PageTransition pathname={pathname} panelOwned>固定播放器</PageTransition>);
+    const page = container.querySelector<HTMLElement>(".page-transition")!;
+    expect(page.style.opacity).toBe("1");
+    expect(page.style.transform).toBe("none");
+  });
   it("渲染 children（普通路由）", () => {
     render(<PageTransition pathname="/voice">语音内容</PageTransition>);
     expect(screen.getByText("语音内容")).toBeInTheDocument();

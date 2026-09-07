@@ -107,7 +107,7 @@ export function VisibilitySelector({
         <div className="visibility-selector-groups">
           <input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索群" aria-label="搜索群" />
           {groupsLoading ? (
-            <div className="visibility-groups-skeleton" style={{ height: 40, background: "rgba(249, 176, 255, 0.15)", borderRadius: "12px", margin: "8px 0" }} />
+            <div className="skeleton visibility-groups-skeleton" style={{ height: 40, background: "rgba(249, 176, 255, 0.15)", borderRadius: "12px", margin: "8px 0" }} />
           ) : filtered.length === 0 ? (
             <span className="placeholder-desc">没有匹配的群</span>
           ) : (

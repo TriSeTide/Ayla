@@ -1,7 +1,7 @@
 /**
  * PrimaryNavPage 测试（方案 §3.1）：
  * - 渲染 children（复用 .primary-nav-page 布局，absolute 重叠转场）；
- * - direction 决定 enter 初始横滑位移（1 → 右 40% / -1 → 左 40% / 0 → 无位移）；
+ * - direction 决定 Auroraqua 的 enter 初始横滑位移（1 → 右 20px / -1 → 左 20px / 0 → 无位移）；
  * - prefers-reduced-motion 降级为纯透明度（无 translateX）。
  *   跟手位移与松手切换由 Playwright TouchEvent 真实验收，单测只覆盖可同步断言的静态分支。
  */
@@ -28,16 +28,20 @@ describe("PrimaryNavPage", () => {
     expect(document.querySelector(".primary-nav-page")).toBeInTheDocument();
   });
 
-  it("direction=1：enter 初始自右侧 40% 滑入（translateX(40%)）", () => {
+  it("direction=1：沿原导航方向从右侧 20px 滑入", () => {
     renderPage("/voice", 1);
     const el = document.querySelector(".primary-nav-page") as HTMLElement;
-    expect(el.style.transform).toContain("translateX(40%)");
+    expect(el.style.transform).toContain("translateX(20px)");
+    // 用户可以在入场尚未结束时起手；drag 的原点始终独立于 route 的 20px。
+    const drag = el.querySelector(".primary-nav-drag") as HTMLElement;
+    expect(drag).toBeInTheDocument();
+    expect(drag.style.transform).not.toContain("translateX");
   });
 
-  it("direction=-1：enter 初始自左侧 40% 滑入（translateX(-40%)）", () => {
+  it("direction=-1：沿原导航方向从左侧 20px 滑入", () => {
     renderPage("/voice", -1);
     const el = document.querySelector(".primary-nav-page") as HTMLElement;
-    expect(el.style.transform).toContain("translateX(-40%)");
+    expect(el.style.transform).toContain("translateX(-20px)");
   });
 
   it("direction=0：enter 无横向位移（transform 不含 translateX）", () => {

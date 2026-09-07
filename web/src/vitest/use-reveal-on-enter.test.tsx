@@ -78,7 +78,7 @@ describe("useRevealOnEnter", () => {
 describe("staggerDelay", () => {
   it("逐项递增且封顶", () => {
     expect(staggerDelay(0)).toBe(0);
-    expect(staggerDelay(1)).toBe(40);
+    expect(staggerDelay(1)).toBe(50);
     expect(staggerDelay(10)).toBe(300); // 封顶
   });
 });

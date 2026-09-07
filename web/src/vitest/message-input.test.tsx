@@ -218,12 +218,16 @@ describe("MessageInput 群表情包按钮（任务 03）", () => {
   });
 
   it("群聊（有 members）显示群表情包按钮", () => {
-    const member = {
+    const member: import("../api/types").ConversationMember = {
       id: "m1",
-      conversation_id: "c1",
       role: "owner",
-      user: { id: "u1", username: "a", nickname: "甲", online: true, avatar: null },
-    } as import("../api/types").ConversationMember;
+      muted: false,
+      joined_at: "2026-01-01T00:00:00Z",
+      user: {
+        id: "u1", username: "a", nickname: "甲", online: true, avatar: "",
+        signature: "", status: "auto", date_joined: "2026-01-01T00:00:00Z",
+      },
+    };
     render(<MemoryRouter><MessageInput convId="c1" quote={null} onQuoteClear={vi.fn()} members={[member]} /></MemoryRouter>);
     expect(screen.getByLabelText("群表情包")).toBeInTheDocument();
     // 点击展开面板（面板挂载后请求群包；mock 404 走空态）

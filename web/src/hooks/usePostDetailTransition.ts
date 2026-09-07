@@ -9,21 +9,20 @@
  * 原位让位（不渲染 BottomTabs，交叉淡化由 CSS opacity 过渡承载）。
  */
 import { useEffect, useState } from "react";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 export function usePostDetailTransition() {
-  const [entered, setEntered] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [entered, setEntered] = useState(reduced);
 
   useEffect(() => {
-    if (
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
+    if (reduced) {
       setEntered(true);
       return;
     }
     const raf = requestAnimationFrame(() => setEntered(true));
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [reduced]);
 
   return { entered };
 }

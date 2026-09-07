@@ -72,6 +72,27 @@ function scrollRoot(target: EventTarget | null): Element | null {
   return target instanceof Element ? target : null;
 }
 
+/** 只回收该owner持有的投影和计时器，不影响其他仍挂载的滚动容器。 */
+function removeOwner(el: Element, thumb: HTMLDivElement): void {
+  const timer = timers.get(el);
+  if (timer) clearTimeout(timer);
+  timers.delete(el);
+  hovered.delete(el);
+  active.delete(el);
+  if (drag?.el === el) drag = null;
+  thumbs.delete(el);
+  owners.delete(thumb);
+  el.removeAttribute(HOST_ATTR);
+  thumb.remove();
+}
+
+/** 路由卸载后body上的fixed thumb也必须失效；同批移位后仍连接的owner保留。 */
+function pruneDetachedOwners(): void {
+  for (const [thumb, el] of owners) {
+    if (!el.isConnected) removeOwner(el, thumb);
+  }
+}
+
 function ensureThumb(el: Element): HTMLDivElement | null {
   let thumb = thumbs.get(el);
   if (thumb) return thumb;
@@ -267,24 +288,23 @@ function onResize(): void {
  */
 export default function OverlayScrollbar() {
   useEffect(() => {
+    // 只响应DOM移除，不监听thumb自己的class/style变化。回收thumb产生的后续
+    // removedNodes批次最多再做一次无变更检查，不会循环写DOM。
+    const observer = new MutationObserver((records) => {
+      if (records.some((record) => record.removedNodes.length > 0)) pruneDetachedOwners();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("scroll", onScroll, true);
     document.addEventListener("mouseover", onEnter);
     document.addEventListener("mouseout", onLeave);
     window.addEventListener("resize", onResize);
     return () => {
+      observer.disconnect();
       document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("mouseover", onEnter);
       document.removeEventListener("mouseout", onLeave);
       window.removeEventListener("resize", onResize);
-      document
-        .querySelectorAll(`.${THUMB_CLASS}`)
-        .forEach((n) => n.remove());
-      document
-        .querySelectorAll(`[${HOST_ATTR}]`)
-        .forEach((n) => n.removeAttribute(HOST_ATTR));
-      hovered.clear();
-      active.clear();
-      owners.clear();
+      for (const [thumb, el] of owners) removeOwner(el, thumb);
     };
   }, []);
   return null;

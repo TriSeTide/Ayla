@@ -295,7 +295,7 @@ export function MessageBubble({
               )}
             </>
           ) : (
-            <span className="msg-send-spinner" role="status" aria-label="发送中" />
+            <span className="loading-spinner loading-spinner--sm msg-send-spinner" role="status" aria-label="发送中" />
           )
         ) : (
           <>

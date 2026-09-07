@@ -127,7 +127,7 @@ function ImageMedia({
             alt={caption(msg) || label}
             className={isEmoji ? "media-emoji" : "media-image"}
             loading="lazy"
-            fallback={<span className="media-frame-skeleton" />}
+            fallback={<span className="skeleton media-frame-skeleton" />}
             variant={src.includes("/thumbnail") ? "thumb" : undefined}
           />
         </button>
@@ -259,7 +259,7 @@ function VideoFrame({
             alt=""
             className="media-video"
             loading="lazy"
-            fallback={<span className="media-frame-skeleton" />}
+            fallback={<span className="skeleton media-frame-skeleton" />}
           />
           {playBadge}
         </button>
@@ -287,7 +287,7 @@ function VideoFrame({
       ) : failed ? (
         <span className="video-load-failed">视频加载失败</span>
       ) : (
-        <span className="media-frame-skeleton" />
+        <span className="skeleton media-frame-skeleton" />
       )}
     </div>
   );
@@ -400,13 +400,13 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
                     alt="图片"
                     className="mixed-img-media"
                     loading="lazy"
-                    fallback={<span className="media-frame-skeleton" />}
+                    fallback={<span className="skeleton media-frame-skeleton" />}
                     variant={hasThumb ? "thumb" : undefined}
                   />
                 ) : local ? (
                   <img src={local.url} alt="图片" className="mixed-img-media" />
                 ) : (
-                  <span className="media-frame-skeleton" />
+                  <span className="skeleton media-frame-skeleton" />
                 )}
               </button>
             );

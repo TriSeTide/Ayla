@@ -104,8 +104,8 @@
 
   --radius-sm: 8px;
   --radius-input: 12px;
-  --radius-card: 20px;
-  --radius-panel: 24px;
+  --radius-card: 16px;
+  --radius-panel: 20px;
   --radius-bubble: 18px;
   --radius-pill: 999px;
 
@@ -114,4 +114,27 @@
   --dur-panel: 240ms;
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --loading-spin-duration: 800ms;
+  --loading-pulse-duration: 1600ms;
+
+  /* Auroraqua 材质几何，保留上方 Ayla 所有颜色与透明度 token。
+     来源：Auroraqua-UI src/index.css .liquid-glass/.glass-hover/.modal-panel；
+     阴影 RGB 映射为 Ayla 原有 indigo，顶沿直接复用既有白色高光。 */
+  --glass-filter: blur(24px) saturate(1.4);
+  --glass-shadow: 0 8px 32px rgba(70, 91, 146, 0.2), var(--glass-inset);
+  --glass-shadow-hover: 0 12px 40px rgba(70, 91, 146, 0.2), var(--glass-inset);
+  --glass-shadow-compact: 0 4px 16px rgba(70, 91, 146, 0.1), var(--glass-inset);
+  --glass-shadow-button: 0 2px 8px rgba(70, 91, 146, 0.1), var(--glass-inset);
+  --glass-shadow-button-hover: 0 4px 16px rgba(70, 91, 146, 0.15), var(--glass-inset);
+  --glass-shadow-modal: 0 20px 60px rgba(70, 91, 146, 0.3), var(--glass-inset);
+  --glass-shadow-nav: 0 0 8px rgba(157, 191, 230, 0.3), var(--glass-inset);
+  --nav-active-bg: linear-gradient(135deg, rgba(157, 191, 230, 0.35), rgba(157, 191, 230, 0.18));
+  --sidebar-gutter: 12px;
+
+  /* 与 src/components/motion/auroraquaMotion.ts 的上游参数保持一致。 */
+  --auroraqua-duration: 300ms;
+  --auroraqua-duration-enter: 500ms;
+  --auroraqua-ease: ease;
+  --auroraqua-ease-out: cubic-bezier(0, 0, 0.58, 1);
+  --auroraqua-ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
 }

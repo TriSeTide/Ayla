@@ -261,7 +261,7 @@ export function PullToRefresh({
       <motion.div className="pull-refresh-indicator" style={{ y: indicatorY }} aria-hidden="true">
         <span className="pull-refresh-dot">
           {status === "refreshing" ? (
-            <span className="pull-refresh-spinner" />
+            <span className="loading-spinner loading-spinner--md pull-refresh-spinner" />
           ) : status === "done" ? (
             <svg className="pull-refresh-check" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
               <path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

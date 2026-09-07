@@ -963,7 +963,7 @@ export function MessageList({
             <div className="message-history-control" aria-live="polite">
               {loading ? (
                 <div className="message-history-spinner" role="status">
-                  <span className="message-history-spinner-glyph" aria-hidden="true" />
+                  <span className="loading-spinner loading-spinner--sm message-history-spinner-glyph" aria-hidden="true" />
                   <span>正在加载更早消息</span>
                 </div>
               ) : (

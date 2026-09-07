@@ -393,12 +393,14 @@ a:hover {
   background-color: rgba(126, 149, 189, 0.38);
   background-clip: content-box;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.18s ease-out;
   touch-action: none;
 }
 
 .ov-scrollbar-thumb.is-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .ov-scrollbar-thumb:hover {
@@ -454,19 +456,19 @@ a:hover {
   }
 }
 
-/* 统一内容入场原语（design.md §7 浮入：下方 8px + 淡入，180ms，不弹跳）。
-   直播间/语音房/帖子详情/列表等所有异步界面共用的进场动画；需配合
+/* Auroraqua StaggerItem 配方：下方 20px + 淡入，300ms；消息到达仍用 frost-rise。
+   未指定分区owner的帖子正文/列表等异步内容共用的进场动画；需配合
    useRevealOnEnter（进入后 step=1 才套 is-in，否则保持隐藏避免闪跳）。
    prefers-reduced-motion：只保留透明度渐变，关闭位移（§7）。 */
 .reveal {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(20px);
 }
 .reveal.is-in {
   opacity: 1;
   transform: translateY(0);
-  transition: opacity var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+  transition: opacity var(--auroraqua-duration) var(--auroraqua-ease-out),
+    transform var(--auroraqua-duration) var(--auroraqua-ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -482,7 +484,7 @@ a:hover {
 @keyframes reveal-item-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(20px);
   }
   to {
     opacity: 1;
@@ -492,7 +494,7 @@ a:hover {
 
 .reveal-item {
   opacity: 0;
-  animation: reveal-item-in var(--dur-fast) var(--ease-out) forwards;
+  animation: reveal-item-in var(--auroraqua-duration) var(--auroraqua-ease-out) forwards;
   animation-delay: var(--reveal-delay, 0ms);
 }
 
@@ -503,11 +505,44 @@ a:hover {
   }
 }
 
+/* 加载只共用指示器样式，不参与页面入场或异步状态的生命周期。 */
+@keyframes ayla-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--loading-spinner-track, var(--ice-300));
+  border-top-color: var(--indigo-700);
+  border-radius: var(--radius-pill);
+  animation: ayla-loading-spin var(--loading-spin-duration) linear infinite;
+}
+
+.loading-spinner--sm {
+  width: 14px;
+  height: 14px;
+}
+
+.loading-spinner--md {
+  width: 18px;
+  height: 18px;
+}
+
 .skeleton {
   border-radius: var(--radius-sm);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  animation: frost-pulse 1.6s ease-in-out infinite;
+  animation: frost-pulse var(--loading-pulse-duration) ease-in-out infinite;
+}
+
+/* span 占位尊重显式宽高；div 仍保留块级布局，媒体可再声明 block 撑满 frame。 */
+.skeleton:where(span) {
+  display: inline-block;
 }
 
 /* 数据区加载期间的文字提示（骨架下方），让用户知道"正在加载"而非空白：
@@ -556,6 +591,7 @@ a:hover {
 
 /* prefers-reduced-motion：关呼吸/浮入，保留透明度渐变（design.md §7） */
 @media (prefers-reduced-motion: reduce) {
+  .loading-spinner,
   .skeleton {
     animation: none;
     opacity: 0.8;

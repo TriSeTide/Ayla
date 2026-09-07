@@ -8,7 +8,7 @@
  * - 断点切换（columnCount 变化）越界重分配；
  * - ResizeObserver 量高后新 item 插较矮列。
  */
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearMasonryMemory, useMasonryColumns } from "../hooks/useMasonryColumns";
 
@@ -25,6 +25,36 @@ function renderMasonry(items: Item[], columnCount: number, memoryKey = "feed") {
       useMasonryColumns<Item>(items, columnCount, (p) => p, memoryKey),
     { initialProps: { items, columnCount } },
   );
+}
+
+class ObservedColumns {
+  static instances: ObservedColumns[] = [];
+  readonly targets = new Set<Element>();
+  readonly observe = vi.fn((element: Element) => this.targets.add(element));
+  readonly unobserve = vi.fn((element: Element) => this.targets.delete(element));
+  readonly disconnect = vi.fn(() => this.targets.clear());
+
+  constructor(private callback: ResizeObserverCallback) {
+    ObservedColumns.instances.push(this);
+  }
+
+  resize() {
+    // 浏览器只会通知已登记的节点；不允许手动通知空 observer 掩盖 ref 漏绑。
+    if (this.targets.size > 0) this.callback([], this);
+  }
+}
+
+function MasonryDOM({ items, columnCount, ready }: { items: Item[]; columnCount: number; ready: boolean }) {
+  const { columns, columnRefs } = useMasonryColumns(items, columnCount, (item) => item, "async-columns");
+  return ready ? (
+    <div>
+      {columns.map((column, index) => (
+        <div key={index} data-column={index} ref={columnRefs[index]}>
+          {column.map((item) => <span key={item} data-item={item}>{item}</span>)}
+        </div>
+      ))}
+    </div>
+  ) : null;
 }
 
 describe("useMasonryColumns", () => {
@@ -126,5 +156,60 @@ describe("useMasonryColumns", () => {
     // 追加新 item 3 → 应插较矮列 col1
     rerender({ items: [1, 2, 3], columnCount: 2 });
     expect(result.current.columns[1]).toContain(3);
+  });
+
+  it("异步列 DOM 后挂载仍被观察，追加按真实列高分配，重挂载释放旧观察", () => {
+    ObservedColumns.instances = [];
+    vi.stubGlobal("ResizeObserver", ObservedColumns);
+    const { container, rerender, unmount } = render(<MasonryDOM items={[]} columnCount={2} ready={false} />);
+    const observer = ObservedColumns.instances[0];
+    expect(observer.targets.size).toBe(0);
+
+    rerender(<MasonryDOM items={[1, 2]} columnCount={2} ready />);
+    const initialColumns = Array.from(container.querySelectorAll<HTMLElement>("[data-column]"));
+    expect(observer.targets).toEqual(new Set(initialColumns));
+    Object.defineProperty(initialColumns[0], "offsetHeight", { configurable: true, value: 940 });
+    Object.defineProperty(initialColumns[1], "offsetHeight", { configurable: true, value: 180 });
+    act(() => observer.resize());
+    rerender(<MasonryDOM items={[1, 2, 3]} columnCount={2} ready />);
+    expect(initialColumns[0].querySelectorAll("[data-item]")).toHaveLength(1);
+    expect(initialColumns[1].querySelector('[data-item="3"]')).not.toBeNull();
+
+    rerender(<MasonryDOM items={[1, 2, 3]} columnCount={2} ready={false} />);
+    expect(observer.targets.size).toBe(0);
+    for (const column of initialColumns) expect(observer.unobserve).toHaveBeenCalledWith(column);
+    rerender(<MasonryDOM items={[1, 2, 3]} columnCount={2} ready />);
+    const nextColumns = Array.from(container.querySelectorAll<HTMLElement>("[data-column]"));
+    expect(observer.targets).toEqual(new Set(nextColumns));
+    expect(nextColumns[0]).not.toBe(initialColumns[0]);
+    Object.defineProperty(nextColumns[0], "offsetHeight", { configurable: true, value: 90 });
+    Object.defineProperty(nextColumns[1], "offsetHeight", { configurable: true, value: 800 });
+    act(() => observer.resize());
+    rerender(<MasonryDOM items={[1, 2, 3, 4]} columnCount={2} ready />);
+    expect(nextColumns[0].querySelector('[data-item="4"]')).not.toBeNull();
+    expect(nextColumns[1].querySelector('[data-item="3"]')).not.toBeNull();
+    unmount();
+    expect(observer.disconnect).toHaveBeenCalledOnce();
+    expect(observer.targets.size).toBe(0);
+  });
+
+  it("单双列断点切换清理原观察器，恢复双列后绑定当前 DOM", () => {
+    ObservedColumns.instances = [];
+    vi.stubGlobal("ResizeObserver", ObservedColumns);
+    const { container, rerender, unmount } = render(<MasonryDOM items={[1, 2, 3]} columnCount={2} ready />);
+    const originalObserver = ObservedColumns.instances[0];
+    expect(originalObserver.targets.size).toBe(2);
+    rerender(<MasonryDOM items={[1, 2, 3]} columnCount={1} ready />);
+    expect(originalObserver.disconnect).toHaveBeenCalledOnce();
+    expect(originalObserver.targets.size).toBe(0);
+    expect(container.querySelectorAll("[data-column]")).toHaveLength(1);
+    expect(Array.from(container.querySelectorAll("[data-item]")).map((el) => el.textContent)).toEqual(["1", "2", "3"]);
+
+    rerender(<MasonryDOM items={[1, 2, 3]} columnCount={2} ready />);
+    const currentObserver = ObservedColumns.instances[1];
+    expect(currentObserver.targets).toEqual(new Set(container.querySelectorAll("[data-column]")));
+    unmount();
+    expect(currentObserver.disconnect).toHaveBeenCalledOnce();
+    expect(currentObserver.targets.size).toBe(0);
   });
 });

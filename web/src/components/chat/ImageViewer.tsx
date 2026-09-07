@@ -185,7 +185,7 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
             className="image-viewer-video image-viewer-video-poster"
           />
         ) : (
-          <span className="media-frame-skeleton image-viewer-video-skeleton" />
+          <span className="skeleton media-frame-skeleton image-viewer-video-skeleton" />
         ))}
     </div>
   );

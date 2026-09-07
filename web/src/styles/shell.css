@@ -42,6 +42,14 @@
   min-width: 0;
 }
 
+/* Route motion and drag offsets have separate owners; both layers share one origin. */
+.primary-nav-drag {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  min-width: 0;
+}
+
 /* 全屏右滑返回包装（FullScreenSwipeBack）：撑满 .page-transition 内容区，
    内部页面自带滚动；x 由 framer-motion 驱动（transform 不影响布局）。 */
 .fullscreen-swipe-back {
@@ -262,9 +270,9 @@
   width: 240px;
   height: 40px;
   padding: 0 var(--sp-4);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  border: 1px solid var(--ice-300);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   color: var(--text-secondary);
   transition: border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
@@ -299,15 +307,21 @@
   right: 0;
   min-width: 160px;
   padding: var(--sp-2);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
-  box-shadow: var(--card-shadow);
+  box-shadow: var(--glass-shadow);
   display: flex;
   flex-direction: column;
   z-index: 30;
+  transform-origin: top right;
+  animation: auroraqua-menu-in var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .top-nav-more-menu { animation: none; }
 }
 
 .top-nav-more-menu button {
@@ -766,13 +780,7 @@
 }
 
 .corner-fab-refresh.is-spinning .corner-fab-icon {
-  animation: corner-fab-spin 0.8s linear infinite;
-}
-
-@keyframes corner-fab-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: ayla-loading-spin var(--loading-spin-duration) linear infinite;
 }
 
 /* 宽屏私信列表：刷新键独立放左下角（与右下 CreateFAB 的 right/bottom 32px 对称） */

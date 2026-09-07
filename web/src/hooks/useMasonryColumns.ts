@@ -14,7 +14,7 @@
  * 预估增量：同批新 item（如翻页一页）尚无实测高度，分配后给该列加一个
  * ESTIMATED_ITEM_HEIGHT 预估，使同批交错分配；渲染后 RO 用真实列高覆盖修正。
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 /** 新帖无实测高度时的预估卡高（px），仅用于同批分配的临时决策。 */
 const ESTIMATED_ITEM_HEIGHT = 320;
@@ -61,6 +61,13 @@ export function useMasonryColumns<T>(
 
   // 列容器 DOM（RO 观察目标）
   const colEls = useRef<(HTMLDivElement | null)[]>([]);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const measureColumns = useCallback(() => {
+    colHeights.current = Array.from(
+      { length: columnCount },
+      (_, index) => colEls.current[index]?.offsetHeight ?? 0,
+    );
+  }, [columnCount]);
 
   // getKey 经 ref 转发，避免调用方内联函数引用变化触发无谓重算
   const getKeyRef = useRef(getKey);
@@ -105,22 +112,34 @@ export function useMasonryColumns<T>(
   useEffect(() => {
     if (columnCount <= 1 || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      colHeights.current = colEls.current.map((el) => el?.offsetHeight ?? 0);
+      if (observerRef.current === ro) measureColumns();
     });
+    observerRef.current = ro;
     for (let i = 0; i < columnCount; i++) {
       const el = colEls.current[i];
       if (el) ro.observe(el);
     }
-    return () => ro.disconnect();
-  }, [columnCount]);
+    if (colEls.current.some((el) => el !== null)) measureColumns();
+    return () => {
+      if (observerRef.current === ro) observerRef.current = null;
+      ro.disconnect();
+    };
+  }, [columnCount, measureColumns]);
 
   // 每列 ref 回调（稳定引用，避免每 render 重建）
   const columnRefs = useMemo(
     () =>
       Array.from({ length: columnCount }, (_, i) => (el: HTMLDivElement | null) => {
+        const previous = colEls.current[i];
+        if (previous === el) return;
+        if (previous) observerRef.current?.unobserve(previous);
         colEls.current[i] = el;
+        // 首屏 loading / 列表重挂载时，节点可能晚于 effect 出现。
+        // ref 自己登记 observer，不能只依赖 columnCount 变化后的 effect。
+        if (el) observerRef.current?.observe(el);
+        if (columnCount > 1) measureColumns();
       }),
-    [columnCount],
+    [columnCount, measureColumns],
   );
 
   return { columns, columnRefs };

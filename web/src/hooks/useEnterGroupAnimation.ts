@@ -1,30 +1,32 @@
 /**
  * useEnterGroupAnimation —— 进群动画（窄屏，R-G1）独立封装。
  *
- * 语义（开发文档 §2.2 动画方向纪律）：底栏**整体上移到视口顶部**（不是滑出底部）；
- * 本 hook 只提供"上移"的进入态标志，导航条样式据此从底部 translateY 到顶部
- * （250ms ease-out），与进直播间/语音房动画（F4 底栏下滑走）方向相反，不得共用。
+ * 导航条从原底栏位置连续升至顶部，输入区由自身的底部面板动画负责。
+ * 本 hook 保留双 rAF 的进入态，导航用独立 translate 300ms ease-out，始终可见；
+ * 手势跟手与手势退场仍由 GroupPage 的 transform 单独拥有。
  *
  * 返回：
- * - entered：是否已进入（false = 还停在底部位置，触发过渡到顶部）；
- * - inputEntered：输入框滑入标志（250ms 延迟 100ms，R-G1 时序）。
+ * - entered：是否已触发导航从底栏位置上移；
+ * - inputEntered：兼容旧调用者的输入就绪标志；当前 GroupChat 自己持有面板动画。
  *
- * `prefers-reduced-motion` 下直接置 entered（跳过位移，保留透明度渐变）。
+ * `prefers-reduced-motion` 下直接置 entered，在顶部呈现最终状态。
  */
 import { useEffect, useState } from "react";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 export function useEnterGroupAnimation() {
-  const [entered, setEntered] = useState(false);
-  const [inputEntered, setInputEntered] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [entered, setEntered] = useState(reduced);
+  const [inputEntered, setInputEntered] = useState(reduced);
 
   useEffect(() => {
     // reduced-motion：跳过位移动画
-    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (reduced) {
       setEntered(true);
       setInputEntered(true);
       return;
     }
-    // 双 rAF 确保首帧以"底部位置"渲染后再触发过渡
+    // 双 rAF 确保首帧在原底栏位置可见后，再触发上移过渡。
     let raf2 = 0;
     const raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => setEntered(true));
@@ -36,7 +38,7 @@ export function useEnterGroupAnimation() {
       cancelAnimationFrame(raf2);
       window.clearTimeout(inputTimer);
     };
-  }, []);
+  }, [reduced]);
 
   return { entered, inputEntered };
 }

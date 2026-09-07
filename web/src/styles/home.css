@@ -64,8 +64,8 @@
   height: 40px;
   padding: 0 var(--sp-4);
   border-radius: var(--radius-pill);
-  background: var(--surface);
-  border: 1px solid var(--ice-300);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
@@ -126,15 +126,26 @@
   right: 0;
   min-width: 160px;
   padding: var(--sp-2);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
-  box-shadow: var(--card-shadow);
+  box-shadow: var(--glass-shadow);
   display: flex;
   flex-direction: column;
   z-index: 30;
+  transform-origin: top right;
+  animation: auroraqua-menu-in var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+@keyframes auroraqua-menu-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .narrow-topbar-menu { animation: none; }
 }
 
 .narrow-topbar-menu button {
@@ -190,15 +201,29 @@
   padding: 0 var(--sp-3) var(--sp-3);
 }
 
+/* 宽屏主页在会话GET完成前短暂展示骨架，沿用列表页内容轨道而不贴满视口。 */
+@media (min-width: 769px) {
+  .home-page > .home-grid[aria-hidden="true"] {
+    width: 100%;
+    max-width: 1200px;
+    margin-inline: auto;
+    padding: var(--sp-4) var(--sp-6);
+  }
+}
+
 .group-card {
   position: relative; /* 置顶图标 / ⋯ 菜单定位基准 */
   min-width: 0; /* grid 项可收缩：长群名不撑大列宽，保证左右两列等分（grid 1fr） */
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border-radius: 16px;
-  box-shadow: var(--card-shadow);
+  background: var(--glass-bg);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-shadow);
   /* overflow 移到 .group-card-main：置顶图标需越出卡片左上角（不占空间），不能被裁剪 */
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 .group-card.is-skeleton {
@@ -489,10 +514,12 @@
   padding-right: 52px; /* 给右侧 ⋯ 更多按钮让位 */
   border-radius: var(--radius-input);
   background: var(--glass-bg);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
   text-align: left;
+  box-shadow: var(--glass-shadow-compact);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 /* 列表行 ⋯ 更多按钮/菜单（ConversationMoreMenu 定位覆盖） */
@@ -596,6 +623,34 @@
   justify-content: center;
   gap: 6px;
   padding: var(--sp-3);
+}
+
+/* Retry, progress and exhausted states retain one footer box below existing cards. */
+.stable-pagination-footer {
+  display: flex;
+  flex: none;
+  width: 100%;
+  min-height: 80px;
+  padding: var(--sp-3);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  overflow-anchor: none;
+}
+
+.stable-pagination-footer > :is([role="alert"], .chat-notice) {
+  max-width: 100%;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pagination-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
 }
 
 .home-load-dot {

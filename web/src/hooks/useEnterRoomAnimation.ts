@@ -12,20 +12,22 @@
  * `prefers-reduced-motion` 下直接置 inputEntered。
  */
 import { useEffect, useState } from "react";
+import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 
 /**
  * 仅在房间路由真正激活后启动，避免语音大厅预挂载本 hook 时提前完成动画。
  * `active` 可反复切换；每次离房都会复位，下一次进入仍从底部滑入。
  */
 export function useEnterRoomAnimation(active = true) {
-  const [inputEntered, setInputEntered] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [inputEntered, setInputEntered] = useState(active && reduced);
 
   useEffect(() => {
     if (!active) {
       setInputEntered(false);
       return;
     }
-    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (reduced || inputEntered) {
       setInputEntered(true);
       return;
     }
@@ -33,7 +35,7 @@ export function useEnterRoomAnimation(active = true) {
     setInputEntered(false);
     const timer = window.setTimeout(() => setInputEntered(true), 100);
     return () => window.clearTimeout(timer);
-  }, [active]);
+  }, [active, reduced, inputEntered]);
 
   return { inputEntered };
 }

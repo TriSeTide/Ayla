@@ -1,0 +1,690 @@
+/**
+ * Auroraqua interaction recipes, adapted to Ayla's unchanged palette.
+ * Geometry: Auroraqua-UI src/index.css, GlassButton, GlassCard and SidebarNavItem.
+ * Source revision and adaptation boundaries: docs/report/auroraqua-style-migration.md.
+ * Materials live in the owning page CSS; this file shares interaction behavior.
+ */
+
+@keyframes auroraqua-sidebar-in {
+  from { opacity: 0; translate: -20px 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes auroraqua-panel-from-right {
+  from { opacity: 0; translate: 20px 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes auroraqua-panel-from-top {
+  from { opacity: 0; translate: 0 -20px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes auroraqua-panel-from-bottom {
+  from { opacity: 0; translate: 0 20px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+/* Individual translate/scale avoid competing with route and gesture transforms. */
+:is(.group-card, .group-list-item, .game-room-card, .live-card,
+    .voice-channel-card, .post-card, .profile-section-row, .favorite-item) {
+  transform-origin: center;
+  transition: translate var(--auroraqua-duration) var(--auroraqua-ease),
+    scale 200ms var(--auroraqua-ease),
+    box-shadow var(--auroraqua-duration) var(--auroraqua-ease),
+    border-color var(--auroraqua-duration) var(--auroraqua-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :is(.group-card, .group-list-item, .game-room-card, .live-card,
+      .voice-channel-card, .profile-section-row, .favorite-item):not([aria-disabled="true"]):hover,
+  .posts-feed-item:hover .post-card {
+    translate: 0 -2px;
+    box-shadow: var(--glass-shadow-hover);
+  }
+}
+
+:is(.group-card, .group-list-item, .game-room-card, .live-card,
+    .voice-channel-card, .profile-section-row, .favorite-item):not([aria-disabled="true"]):active,
+.posts-feed-item .post-card:has(.post-card-main:active) {
+  translate: 0 0;
+  scale: 0.99;
+}
+
+/* GlassButton: 200ms, hover 1.02, press .98; media surfaces are not buttons. */
+:is(.btn, .icon-btn-40, .top-nav-icon-btn, .live-player-btn, .live-player-fs-send, .live-mini-player-close,
+    .composer-send, .composer-tool-btn, .msg-action-btn, .favorite-toggle,
+    .server-create-btn, .live-rail-icon-btn, .live-room-rail-toggle, .live-cover-picker,
+    .group-info-select-btn, .post-editor-collapse-btn, .post-editor-image-btn,
+    .voice-play, .file-download, .voice-room-chat-toggle-btn, .voice-room-chat-expand-btn, .voice-meter-toggle, .layout-switch-btn, .favorites-filter, .search-chip,
+    .group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed, .channel-scene-subgroup-toggle, .channel-scene-voice-toggle, .channel-scene-live-toggle,
+    .conv-more-btn, .image-viewer-nav, .image-viewer-close,
+    .create-fab, .message-fab, .corner-fab, .session-activity-toggle, .narrow-topbar-menu > button, .top-nav-more-menu > button) {
+  transition: scale 200ms var(--auroraqua-ease),
+    box-shadow 200ms var(--auroraqua-ease),
+    background 200ms var(--auroraqua-ease),
+    color 200ms var(--auroraqua-ease),
+    filter 200ms var(--auroraqua-ease),
+    opacity 200ms var(--auroraqua-ease),
+    transform 200ms var(--auroraqua-ease), visibility 200ms var(--auroraqua-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :is(.btn, .icon-btn-40, .top-nav-icon-btn, .live-player-btn, .live-player-fs-send, .live-mini-player-close,
+      .composer-send, .composer-tool-btn, .msg-action-btn, .favorite-toggle,
+      .server-create-btn, .live-rail-icon-btn, .live-room-rail-toggle, .live-cover-picker,
+      .group-info-select-btn, .post-editor-collapse-btn, .post-editor-image-btn,
+      .voice-play, .file-download, .voice-room-chat-toggle-btn, .voice-room-chat-expand-btn, .voice-meter-toggle, .layout-switch-btn, .favorites-filter, .search-chip,
+      .group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed, .channel-scene-subgroup-toggle, .channel-scene-voice-toggle, .channel-scene-live-toggle,
+      .conv-more-btn, .image-viewer-nav, .image-viewer-close,
+      .create-fab, .message-fab, .corner-fab, .session-activity-toggle, .narrow-topbar-menu > button, .top-nav-more-menu > button):not(:disabled):not([aria-disabled="true"]):hover {
+    scale: 1.02;
+  }
+}
+
+:is(.btn, .icon-btn-40, .top-nav-icon-btn, .live-player-btn, .live-player-fs-send, .live-mini-player-close,
+    .composer-send, .composer-tool-btn, .msg-action-btn, .favorite-toggle,
+    .server-create-btn, .live-rail-icon-btn, .live-room-rail-toggle, .live-cover-picker,
+    .group-info-select-btn, .post-editor-collapse-btn, .post-editor-image-btn,
+    .voice-play, .file-download, .voice-room-chat-toggle-btn, .voice-room-chat-expand-btn, .voice-meter-toggle, .layout-switch-btn, .favorites-filter, .search-chip,
+    .group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed, .channel-scene-subgroup-toggle, .channel-scene-voice-toggle, .channel-scene-live-toggle,
+    .conv-more-btn, .image-viewer-nav, .image-viewer-close,
+    .create-fab, .message-fab, .corner-fab, .session-activity-toggle, .narrow-topbar-menu > button, .top-nav-more-menu > button):not(:disabled):not([aria-disabled="true"]):active {
+  scale: 0.98;
+}
+
+.btn-ghost {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-shadow-button);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Composer tools use one material at every breakpoint, including expanded rows. */
+.composer-tool-btn {
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-shadow-compact);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.composer-tool-btn.composer-voice-stop {
+  border-color: var(--destructive);
+  background: var(--destructive);
+}
+
+.narrow-topbar-more > .icon-btn-40,
+.top-nav-more > .top-nav-icon-btn {
+  border-radius: var(--radius-input);
+}
+
+/* Surface buttons use the reference's compact 2/8 → 4/16 elevation. */
+:is(.icon-btn-40, .top-nav-icon-btn, .live-rail-icon-btn,
+    .server-create-btn, .post-editor-collapse-btn, .msg-action-btn) {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-button);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :is(.btn-ghost, .icon-btn-40, .top-nav-icon-btn, .live-rail-icon-btn,
+      .server-create-btn, .post-editor-collapse-btn, .msg-action-btn):not(:disabled):hover {
+    box-shadow: var(--glass-shadow-button-hover);
+  }
+}
+
+/* Only self-contained buttons clip the sweep; badges and avatar halos may overflow. */
+:is(.btn, .msg-action-btn, .narrow-topbar-more > .icon-btn-40, .top-nav-more > .top-nav-icon-btn) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+:is(.btn, .msg-action-btn, .narrow-topbar-more > .icon-btn-40, .top-nav-more > .top-nav-icon-btn)::after,
+.auroraqua-nav-highlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--glass-border), transparent);
+  opacity: 0.5;
+  transform: translateX(-120%);
+  transition: transform 600ms var(--auroraqua-ease);
+  pointer-events: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :is(.btn, .msg-action-btn, .narrow-topbar-more > .icon-btn-40, .top-nav-more > .top-nav-icon-btn):not(:disabled):hover::after,
+  .has-auroraqua-highlight:hover > .auroraqua-nav-highlight::after {
+    transform: translateX(120%);
+  }
+}
+
+/* Shared-layout highlight is behind content, without repositioning badge children. */
+.has-auroraqua-highlight {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--radius-input);
+}
+
+.auroraqua-nav-highlight {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--nav-active-bg);
+  box-shadow: var(--glass-shadow-nav);
+  border: 1px solid var(--glass-border);
+}
+
+.auroraqua-nav-highlight::after { transition-duration: 700ms; }
+:is(.btn, .msg-action-btn, .narrow-topbar-more > .icon-btn-40, .top-nav-more > .top-nav-icon-btn)::after { z-index: -1; }
+
+:is(.favorites-filter, .layout-switch-btn, .group-chat-subgroup-tab).has-auroraqua-highlight {
+  border-radius: var(--radius-pill);
+}
+
+.has-auroraqua-highlight:is(.is-active, .active) {
+  background: transparent;
+  box-shadow: none;
+}
+
+.group-chat-subgroup-tab > .auroraqua-nav-highlight { border: 0; }
+
+/* 窄屏直播覆盖栏由Framer从右进入；常驻宽屏栏继续使用原左入配方。 */
+.live-rail.is-panel-motion {
+  animation: none;
+  translate: none;
+}
+
+/* 真实媒体宿主的切房动效由WAAPI持有，禁止叠加CSS挂载入场。 */
+.live-room-body.has-media-panel-motion.is-wide > .live-room-side {
+  animation: none;
+  translate: none;
+}
+
+.top-nav-module.has-auroraqua-highlight.is-active::after,
+.top-nav-icon-btn.has-auroraqua-highlight.is-active::after { content: none; }
+
+.server-item.has-auroraqua-highlight.is-active::before { content: none; }
+.auroraqua-nav-highlight--rail {
+  inset: auto;
+  left: 0;
+  top: 50%;
+  margin-top: -16px;
+  width: 3px;
+  height: 32px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--glow-500);
+  box-shadow: none;
+}
+.auroraqua-nav-highlight--rail::after { display: none; }
+
+:is(.conv-item.active, .live-rail-item.is-active,
+    .layout-switch-btn.is-active, .group-chat-subgroup-tab.is-active):not(.has-auroraqua-highlight) {
+  box-shadow: var(--glass-shadow-nav);
+}
+
+:is(.channel-scene, .channel-subgroup-item, .channel-voice-room-item,
+    .channel-live-room-item, .messages-tab, .group-top-btn,
+    .group-chat-subgroup-tab, .top-nav-module, .bottom-tab-link) {
+  transition: background var(--auroraqua-duration) var(--auroraqua-ease),
+    color var(--auroraqua-duration) var(--auroraqua-ease),
+    box-shadow var(--auroraqua-duration) var(--auroraqua-ease),
+    scale 200ms var(--auroraqua-ease);
+}
+
+:is(.channel-scene, .channel-subgroup-item, .channel-voice-room-item,
+    .channel-live-room-item, .messages-tab, .group-top-btn,
+    .group-chat-subgroup-tab, .top-nav-module, .bottom-tab-link):not(:disabled):active {
+  scale: 0.98;
+}
+
+/* Bottom/top bars keep their safe-area and gesture geometry, with a rounded rim. */
+.bottom-tabs { border-radius: var(--radius-panel) var(--radius-panel) 0 0; box-shadow: var(--glass-shadow); }
+.group-top-tabs { border-radius: 0 0 var(--radius-panel) var(--radius-panel); box-shadow: var(--glass-shadow-compact); }
+.bottom-tab-link { margin: 4px 2px; border-radius: var(--radius-input); }
+.group-top-btn { padding: 6px 12px; border-radius: var(--radius-input); }
+.top-nav-modules { align-items: center; }
+.top-nav-module {
+  min-height: 44px;
+  min-width: max-content;
+  white-space: nowrap;
+}
+.top-nav {
+  margin: var(--sidebar-gutter) var(--sidebar-gutter) 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+.server-rail { margin-right: 0; }
+
+/* Standalone tab groups share the inset-pill material without changing their colors. */
+:is(.messages-tabs, .layout-switch) {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-inset);
+}
+.messages-tabs { margin: var(--sp-2); padding: var(--sp-1); }
+.wide-messages-sidebar .messages-tabs { padding: var(--sp-1); }
+.wide-messages-sidebar .messages-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 4px;
+  white-space: nowrap;
+}
+
+/* Sub-list state sits on li; its shared indicator is inside the child button. */
+:is(.channel-subgroup-item, .channel-voice-room-item, .channel-live-room-item).is-active:has(.has-auroraqua-highlight) {
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (min-width: 769px) {
+  /* 群内列表保留原16px内容轨道，滚动裁剪边界额外左移32px以容纳卡片阴影。
+     新增的透明绘制带不接收指针；真实内容仍接收点击，wheel向原滚动owner冒泡。 */
+  .group-content :is(.group-voice, .group-games, .group-posts-list, .post-detail-scroll) {
+    min-width: 0;
+    margin-left: calc(-1 * var(--sp-8));
+    padding-left: calc(var(--sp-4) + var(--sp-8));
+    pointer-events: none;
+  }
+
+  .group-content :is(.group-voice, .group-games, .group-posts-list, .post-detail-scroll) > * {
+    pointer-events: auto;
+  }
+
+  /* 标题与输入不持有滚动；群内详情外壳允许上述留影空间越过自身左边界。 */
+  .group-content .post-detail { overflow: visible; }
+
+  /* 宽屏进入/切群由React motion按各自owner编排，避免叠加CSS整列入场。 */
+  .server-rail,
+  .channel-sidebar,
+  .wide-messages-sidebar { animation: none; }
+
+  /* 同一媒体分区切房由明确JS owner重播，关闭仅挂载时的CSS入场。 */
+  .live-room-body.is-wide > .live-room-main > .live-room-head.is-panel-motion,
+  .voice-room-body.is-panel-motion > .voice-room-head,
+  .voice-room-body.is-panel-motion > .voice-room-layout > .voice-room-voice-card,
+  .voice-room-body.is-panel-motion > .voice-room-layout > .voice-room-chat-card {
+    animation: none;
+  }
+
+  /* 固定分区直接沿各自方向进入；外层路由不再重复移动这些面板。 */
+  .group-info-layout > .group-info-side,
+  .profile-page-split > .profile-column > .profile-side {
+    animation: auroraqua-sidebar-in var(--auroraqua-duration) var(--auroraqua-ease-out);
+  }
+
+  .group-info-layout > .group-info-main,
+  .profile-page-split > .profile-column > .profile-main {
+    animation: auroraqua-panel-from-right var(--auroraqua-duration) var(--auroraqua-ease-out);
+  }
+
+  .profile-page-split > .profile-column > .profile-topbar,
+  .game-room-placeholder > .game-room-placeholder-head,
+  .group-scene-head,
+  .favorites-page > .favorites-topbar,
+  .post-detail > .post-detail-head {
+    animation: auroraqua-panel-from-top var(--auroraqua-duration) var(--auroraqua-ease-out);
+  }
+
+  .post-detail > .post-detail-composer {
+    animation: auroraqua-panel-from-bottom var(--auroraqua-duration) var(--auroraqua-ease-out);
+  }
+
+  /* Desktop input belongs to the same floating surface as the sidebar, not a full-width footer. */
+  :is(.composer, .group-posts-input, .post-detail-composer, .voice-room-composer, .danmaku-input-area) {
+    flex: none;
+    width: auto;
+    min-width: 0;
+    margin: var(--sidebar-gutter);
+    padding: var(--sp-2);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: var(--glass-filter);
+    -webkit-backdrop-filter: var(--glass-filter);
+  }
+
+  /* The sidebar already owns this 12px gap; the adjacent chat panel adds none. */
+  .group-content > .group-chat > .composer,
+  .group-content .group-chat > .group-chat-compose-area > .composer,
+  .group-content .group-posts > .group-posts-input,
+  .wide-messages-pane .composer,
+  .wide-messages-pane .private-chat-head {
+    margin-left: 0;
+  }
+
+  :is(.composer, .post-detail-composer, .voice-room-composer) .composer-input,
+  .danmaku-input {
+    min-width: 0;
+    background: var(--glass-bg);
+    border-color: var(--glass-border);
+    box-shadow: var(--glass-inset);
+  }
+
+  .danmaku-image-btn {
+    border-radius: var(--radius-input);
+    background: var(--glass-bg);
+    border-color: var(--glass-border);
+    box-shadow: var(--glass-shadow-compact);
+  }
+
+  .voice-room-chat-card .voice-room-composer > .composer-row {
+    border-top: 0;
+    padding: 0;
+  }
+
+  :is(.voice-room-composer, .danmaku-input-area) { box-shadow: var(--glass-shadow-compact); }
+
+  .live-room-side {
+    min-height: 0;
+    margin: var(--sidebar-gutter);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: var(--glass-filter);
+    -webkit-backdrop-filter: var(--glass-filter);
+  }
+
+  :is(.chat-header, .private-chat-head, .post-detail-head, .game-room-placeholder-head, .live-room-head) {
+    margin: var(--sidebar-gutter);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--glass-shadow-compact);
+    backdrop-filter: var(--glass-filter);
+    -webkit-backdrop-filter: var(--glass-filter);
+  }
+}
+
+@media (max-width: 768px) {
+  /* 窄屏按实际纵向结构进入：顶栏自上，堆叠内容自下；手势轨道单独持有拖拽。 */
+  .narrow-topbar,
+  .messages-page .messages-tabs,
+  .profile-page-split > .profile-column > .profile-topbar,
+  .favorites-page > .favorites-topbar,
+  .game-room-placeholder > .game-room-placeholder-head,
+  .group-scene-head,
+  .post-detail > .post-detail-head,
+  .voice-room-body > .voice-room-head,
+  .live-room-body.is-narrow > .live-room-head,
+  .live-room-body.is-narrow > .live-room-main > .live-room-head {
+    animation: auroraqua-panel-from-top var(--auroraqua-duration) var(--auroraqua-ease-out);
+  }
+
+  .profile-page-split > .profile-column > .profile-side > .solid-card,
+  .profile-page-split > .profile-column > .profile-main > .solid-card,
+  .group-info-layout > .group-info-side,
+  .group-info-layout > .group-info-main,
+  .post-detail > .post-detail-composer,
+  .live-room-body.is-narrow > .live-room-input,
+  .live-room-body.is-narrow > .live-room-side > .live-room-input {
+    animation: auroraqua-panel-from-bottom var(--auroraqua-duration) var(--auroraqua-ease-out);
+  }
+
+  .live-room-body.is-narrow > .live-room-head.is-panel-motion,
+  .live-room-body.is-narrow > .live-room-main > .live-room-head.is-panel-motion,
+  .voice-room-body.is-panel-motion > .voice-room-head,
+  .voice-room-body.is-panel-motion > .voice-room-layout > .voice-room-voice-card,
+  .voice-room-body.is-panel-motion > .voice-room-layout > .voice-room-chat-card {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .bottom-tabs,
+  .group-top-tabs { border-radius: 0; }
+  .chat-sidebar { inset: var(--sidebar-gutter) auto var(--sidebar-gutter) 0; margin: 0 var(--sidebar-gutter); transform: translateX(-110%); }
+  .chat-sidebar.open { transform: translateX(0); }
+  .live-rail { width: min(240px, calc(100vw - 48px)); }
+  .group-card-foot { gap: 4px; padding-left: 8px; padding-right: 40px; }
+  .group-card .conv-more { right: 2px; }
+}
+
+/* One column per actual tool: four in groups, three in private chat. */
+@media (max-width: 900px) {
+  .composer-tools-narrow,
+  .composer-row > .composer-tools {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: var(--sp-2);
+    padding: 0;
+  }
+
+  .composer-tools-narrow > .composer-tool-btn,
+  .composer-row > .composer-tools > .composer-tool-btn {
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+  }
+}
+
+/* Near the desktop breakpoint, four tools need their own row to keep typing usable. */
+@media (min-width: 769px) and (max-width: 900px) {
+  .top-nav {
+    gap: var(--sp-3);
+    padding-inline: var(--sp-3);
+  }
+
+  .top-nav-modules { gap: var(--sp-1); }
+  .top-nav-module { padding-inline: var(--sp-2); }
+  .top-nav-right { gap: var(--sp-2); }
+  .top-nav-search { width: clamp(160px, 22vw, 200px); }
+  .top-nav-icon-btn { flex: none; }
+
+  .composer > .composer-row {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  .composer-row > .composer-tools {
+    order: 2;
+    flex-basis: 100%;
+  }
+}
+
+/* All material families share the same readable unsupported-browser fallback. */
+/* A text field has one material owner. Search/video compound inputs own it on
+   their outer frame; their native input remains transparent inside that frame. */
+:is(.field, .voice-create-input, .live-create-input, .danmaku-input,
+    .top-nav-search, .narrow-topbar-search, .live-player-fs-input) {
+  background: var(--glass-bg);
+  background-image: none;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  box-shadow: var(--glass-inset);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+
+:is(.field, .voice-create-input, .live-create-input, .danmaku-input):focus,
+:is(.top-nav-search, .narrow-topbar-search, .live-player-fs-input):focus-within {
+  outline: none;
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+}
+
+:is(.field, .voice-create-input, .live-create-input, .danmaku-input)::placeholder,
+.live-player-fs-input input::placeholder {
+  color: var(--slate-500);
+}
+
+.live-player-fs-input input { color: var(--text-primary); }
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :is(.field, .voice-create-input, .live-create-input, .danmaku-input,
+      .top-nav-search, .narrow-topbar-search, .live-player-fs-input) {
+    background: var(--surface);
+  }
+  :is(.glass-card, .solid-card, .group-card, .game-room-card, .post-card,
+      .voice-channel-card, .voice-panel, .elysia-voice-panel, .live-card,
+      .live-owner-panel, .group-list-item, .request-row, .friend-row,
+      .profile-section-row, .favorite-item, .server-rail, .channel-sidebar,
+      .wide-messages-sidebar, .live-rail, .chat-sidebar, .voice-sidebar,
+      .live-sidebar, .top-nav, .auth-card, .subgroup-dialog, .create-sheet-card,
+      .group-create-dialog, .quick-messages-panel, .voice-room-voice-card,
+      .voice-room-chat-card, .top-nav-search-panel, .composer,
+      .post-detail-composer, .voice-room-composer, .danmaku-input-area,
+      .live-room-side, .chat-header, .private-chat-head, .post-detail-head,
+      .game-room-placeholder-head, .live-room-head, .search-row,
+      .live-start-channel, .voice-room-chat-popup, .favorites-topbar) {
+    background: var(--surface);
+  }
+  .voice-hub .voice-channel-card,
+  .group-voice .voice-channel-card,
+  .live-room-body.is-narrow .live-room-side {
+    background: var(--surface);
+  }
+}
+
+/* Confirmed nested cards: retain each outer card's material, make its layout
+   children transparent. Borders used as separators remain visible. */
+.live-room-body .live-room-side > .live-room-input,
+.live-room-body .live-room-side > .live-room-input > .danmaku-input-area {
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.live-room-body .live-room-side > .live-room-input > .danmaku-input-area {
+  border-color: transparent;
+  border-top-color: var(--glass-border);
+  border-radius: 0;
+}
+
+/* The narrow broadcasting console has a transparent danmaku region, unlike
+   its standalone control/address cards and the wide viewing side card. */
+.live-room-body.is-studio.is-narrow > .live-room-side,
+.live-room-body.is-studio.is-narrow > .live-room-side > .danmaku-wrap {
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.live-room-body.is-studio.is-narrow > .live-room-side {
+  border-color: transparent;
+}
+
+.profile-mine.solid-card .profile-section-row {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.profile-mine.solid-card .profile-section-row:hover {
+  background: rgba(157, 191, 230, 0.18);
+  box-shadow: none;
+}
+
+@media (max-width: 768px) {
+  /* Narrow member content owns its material on .voice-panel, including fallback. */
+  .voice-room-body .voice-room-voice-card {
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (min-width: 769px) {
+  .voice-room-voice-card > .voice-panel,
+  .voice-room-chat-card > .voice-room-chat-card-head,
+  .voice-room-chat-card > .voice-room-composer {
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .voice-room-voice-card > .voice-panel,
+  .voice-room-chat-card > .voice-room-composer {
+    border-color: transparent;
+  }
+
+  .voice-room-chat-card > .voice-room-composer {
+    border-top-color: var(--glass-border);
+    border-radius: 0;
+  }
+}
+
+@media (min-width: 769px) and (prefers-reduced-motion: reduce) {
+  .group-info-layout > .group-info-side,
+  .profile-page-split > .profile-column > .profile-side,
+  .group-info-layout > .group-info-main,
+  .profile-page-split > .profile-column > .profile-main,
+  .profile-page-split > .profile-column > .profile-topbar,
+  .game-room-placeholder > .game-room-placeholder-head,
+  .group-scene-head,
+  .favorites-page > .favorites-topbar,
+  .post-detail > .post-detail-head,
+  .post-detail > .post-detail-composer {
+    animation: none;
+    translate: none;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .narrow-topbar,
+  .messages-page .messages-tabs,
+  .profile-page-split > .profile-column > .profile-topbar,
+  .favorites-page > .favorites-topbar,
+  .game-room-placeholder > .game-room-placeholder-head,
+  .group-scene-head,
+  .post-detail > .post-detail-head,
+  .voice-room-body > .voice-room-head,
+  .live-room-body.is-narrow > .live-room-head,
+  .live-room-body.is-narrow > .live-room-main > .live-room-head,
+  .profile-page-split > .profile-column > .profile-side > .solid-card,
+  .profile-page-split > .profile-column > .profile-main > .solid-card,
+  .group-info-layout > .group-info-side,
+  .group-info-layout > .group-info-main,
+  .post-detail > .post-detail-composer,
+  .live-room-body.is-narrow > .live-room-input,
+  .live-room-body.is-narrow > .live-room-side > .live-room-input {
+    animation: none;
+    translate: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.chat-sidebar, .voice-sidebar, .live-sidebar, .server-rail,
+      .channel-sidebar, .wide-messages-sidebar, .live-rail) { animation: none; }
+  :is(.group-card, .group-list-item, .game-room-card, .live-card,
+      .voice-channel-card, .post-card, .profile-section-row, .favorite-item,
+      .btn, .icon-btn-40, .top-nav-icon-btn, .live-player-btn, .live-player-fs-send, .live-mini-player-close,
+      .composer-send, .composer-tool-btn, .msg-action-btn, .favorite-toggle,
+      .server-create-btn, .live-rail-icon-btn, .live-room-rail-toggle, .live-cover-picker,
+      .group-info-select-btn, .post-editor-collapse-btn, .post-editor-image-btn,
+      .voice-play, .file-download, .voice-room-chat-toggle-btn, .voice-room-chat-expand-btn, .voice-meter-toggle, .layout-switch-btn, .favorites-filter, .search-chip,
+      .group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed, .channel-scene-subgroup-toggle, .channel-scene-voice-toggle, .channel-scene-live-toggle,
+      .conv-more-btn, .image-viewer-nav, .image-viewer-close,
+      .create-fab, .message-fab, .corner-fab, .session-activity-toggle, .narrow-topbar-menu > button, .top-nav-more-menu > button,
+      .channel-scene, .channel-subgroup-item, .channel-voice-room-item,
+      .channel-live-room-item, .messages-tab, .group-top-btn,
+      .group-chat-subgroup-tab, .top-nav-module, .bottom-tab-link):not(:disabled):not([aria-disabled="true"]):is(:hover, :active),
+  .posts-feed-item:hover .post-card {
+    translate: none;
+    scale: none;
+  }
+  :is(.btn, .msg-action-btn, .narrow-topbar-more > .icon-btn-40, .top-nav-more > .top-nav-icon-btn)::after,
+  .auroraqua-nav-highlight::after { display: none; }
+}

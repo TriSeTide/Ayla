@@ -3,28 +3,19 @@
  *
  * - AppShell 内容区用 AnimatePresence(mode="sync") + 本组件作 keyed 子元素，
  *   配合 .page-transition 的 absolute 定位（CSS 手动 popLayout，新旧页重叠转场）：
- *   路由切换时新页浮入（opacity 0→1 + y 20px→0，200ms ease-out）、旧页淡出
- *   （opacity→0，150ms ease-in，退出快于进入，design.md §7）。
+ *   新页沿用上下文方向，并采用 Auroraqua FadeInCard 的 .95→1 缩放与 500ms easeOut；
+ *   旧页淡出采用 Auroraqua route 的 300ms easeInOut。
  *   （不用 AnimatePresence popLayout：其 layout projection 会接管 transform，吞掉 y 位移）
- * - 群页（/group/:id 及子场景）进入用「无位移淡入」：GroupPage 自带进群编排
- *   （useEnterGroupAnimation 顶栏上移），全局再浮入会双重位移——群页进入用现有编排、
- *   退出仍走全局淡出（方案 §2.1 注意）。
- * - prefers-reduced-motion：只留透明度渐变（进入淡入 / 退出淡出），关闭位移（§7）。
- * - 时长/曲线对齐 tokens.css：--ease-out = cubic-bezier(.22,.61,.36,1)、
- *   --ease-in = cubic-bezier(.4,0,1,1)；framer-motion 用等价 4 元组。
+ * - 群页及其他 panelOwned 界面在窄宽屏均由各面板编排，外层立即归位；
+ *   退出保留 300ms 淡出。未指定分区 owner 的群页调用方保留无位移淡入。
+ * - prefers-reduced-motion：关闭位移，并立即切换最终透明度（§7）。
+ * - 参数与来源集中在 auroraquaMotion.ts，保持 Ayla 原色与路由身份。
  */
 import { motion } from "framer-motion";
 import { matchPath } from "react-router-dom";
-import { useState } from "react";
 import type { ReactNode } from "react";
-
-/** 等价 tokens.css --ease-out / --ease-in（framer-motion ease 需 cubic-bezier 元组） */
-const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
-const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
-
-const ENTER_DURATION = 0.2; // 200ms ease-out（design.md §7 面板进出 200-300ms）
-const EXIT_DURATION = 0.15; // 150ms ease-in（退出快于进入）
-const RISE_DISTANCE = 20; // 进入位移（px）：默认浮入 +20 从下往上 / 搜索展开 -20 从上往下
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
+import { AURORAQUA_MOTION, auroraquaRouteTransition } from "./auroraquaMotion";
 
 /** 群页路由模式（与 shellConfig.isGroupScene 同源；此处需返回 groupId 供 key 归一化） */
 const GROUP_PATTERNS = [
@@ -47,9 +38,11 @@ function matchGroupId(pathname: string): string | null {
  * 路由转场 key：
  * - 群页所有变体归一为 `/group/:id`，避免群内场景切换
  *   （/group/:id → /group/:id/posts 等）触发整页重挂载 + 进群编排重跑；
+ *   宽屏进一步共享群工作区外壳，群服务器栏保持同一 owner，频道面板及内容依次退出/进入；
+ * - 宽屏私聊详情共享外壳，会话列表保持挂载，右侧由 ConversationTransition 独占切换；
  * - 直播间详情归一为 `/live/room`，避免直播间上下滑切换（/live/:id → /live/:id）
  *   触发整页重挂载（底栏滑出动画复位）；进入/退出直播间（/live ↔ /live/:id）
- *   仍走整页转场；
+ *   仍保留页面生命周期，进入由独立面板编排，手势层保持原位移所有权；
  * - 开播控制台归一为 `/live/start`：侧栏切频道（/live/start/:id → /live/start/:id'）
  *   不触发整页重挂载——否则 AnimatePresence(mode="sync") 新旧两页并存，
  *   旧页卸载 cleanup 的 liveSessionRuntime.leave() 会清掉新页刚建立的会话
@@ -60,9 +53,12 @@ function matchGroupId(pathname: string): string | null {
 const LIVE_ROOM_PATTERN = "/live/:id";
 const LIVE_STUDIO_PATTERN = "/live/start/:channelId";
 
-export function resolvePageKey(pathname: string): string {
+export function resolvePageKey(pathname: string, wideGroupShell = false): string {
   const groupId = matchGroupId(pathname);
-  if (groupId) return `/group/${groupId}`;
+  if (groupId) return wideGroupShell ? "wide-group-shell" : `/group/${groupId}`;
+  if (wideGroupShell && matchPath({ path: "/chat/:conversationId", end: true }, pathname)) {
+    return "wide-private-chat-shell";
+  }
   const live = matchPath({ path: LIVE_ROOM_PATTERN, end: true }, pathname);
   if (live?.params.id && live.params.id !== "start") return "/live/room";
   const studio = matchPath({ path: LIVE_STUDIO_PATTERN, end: true }, pathname);
@@ -70,43 +66,42 @@ export function resolvePageKey(pathname: string): string {
   return pathname;
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
-const variants = {
-  enter: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: ENTER_DURATION, ease: EASE_OUT },
-  },
-  exit: {
-    opacity: 0,
-    transition: { duration: EXIT_DURATION, ease: EASE_IN },
-  },
-};
-
 export function PageTransition({
   pathname,
   children,
+  panelOwned = false,
 }: {
   pathname: string;
   children: ReactNode;
+  /** Panels animate independently; this page must not move the same content again. */
+  panelOwned?: boolean;
 }) {
-  // 惰性同步读取（非 effect）：reduced-motion 用户在首帧即无位移，避免一帧浮入闪跳
-  const [reduced] = useState(prefersReducedMotion);
+  const reduced = usePrefersReducedMotion();
   const isGroup = matchGroupId(pathname) != null;
   const isSearch = matchPath({ path: "/search", end: true }, pathname) != null;
   // 进入：普通路由浮入（y +20px→0，从下往上）；搜索页从上往下展开（y -20px→0，
   // 顶栏固定不动、内容自顶栏下方滑出）；群页 / reduced-motion 仅淡入（无位移）
-  const initial: { opacity: number; y?: number } =
-    reduced || isGroup
+  const initial =
+    panelOwned
+      ? { opacity: 1, x: 0, y: 0, scale: 1 }
+      : reduced || isGroup
       ? { opacity: 0 }
-      : { opacity: 0, y: isSearch ? -RISE_DISTANCE : RISE_DISTANCE };
+      : {
+          opacity: 0,
+          y: isSearch ? -AURORAQUA_MOTION.distance : AURORAQUA_MOTION.distance,
+          scale: AURORAQUA_MOTION.fadeScale,
+        };
+  const variants = {
+    enter: {
+      opacity: 1,
+      y: 0,
+      scale: 1,
+      transition: reduced || panelOwned
+        ? { duration: 0 }
+        : { duration: AURORAQUA_MOTION.fadeDuration, ease: AURORAQUA_MOTION.easeOut },
+    },
+    exit: { opacity: 0, transition: reduced ? { duration: 0 } : auroraquaRouteTransition },
+  };
 
   return (
     <motion.div
