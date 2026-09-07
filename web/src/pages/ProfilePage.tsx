@@ -3,15 +3,12 @@
  * 收藏入口、账号区（登出）。契约：PATCH /me/profile/（nickname/avatar/signature/status）。
  */
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { updateProfile } from "../api/auth";
-import * as boardgameApi from "../api/boardgame";
 import { ApiError } from "../api/client";
-import * as liveApi from "../api/live";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../api/media";
-import * as postsApi from "../api/posts";
-import type { GameRoom, LiveChannelDescriptor, Post } from "../api/types";
 import { Avatar } from "../components/Avatar";
+import { ProfileContentSections } from "../components/ProfileContentSections";
 import { IconBack, IconLogout } from "../components/icons";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -43,19 +40,24 @@ export function ProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  // 「我的内容」三分区展开收起（默认全部收起）
-  const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({
-    posts: false,
-    lives: false,
-    games: false,
-  });
-  const toggleSection = (key: string) =>
-    setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
-
   // 头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const account = useAuthStore.getState().currentUser;
+    setNickname(account?.nickname ?? "");
+    setSignature(account?.signature ?? "");
+    setStatus(account?.status ?? "auto");
+    setShowContent(account?.show_content ?? false);
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    setAvatarError(null);
+    setError(null);
+    setSaved(false);
+    setSaving(false);
+  }, [currentUser?.id]);
 
   // 释放 objectURL（卸载时）
   useEffect(() => {
@@ -78,22 +80,6 @@ export function ProfilePage() {
     setSaved(false);
   };
 
-  // F10 三分区数据
-  const [myPosts, setMyPosts] = useState<Post[]>([]);
-  const [myLives, setMyLives] = useState<LiveChannelDescriptor[]>([]);
-  const [myGames, setMyGames] = useState<GameRoom[]>([]);
-  const [contentError, setContentError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    setContentError(null);
-    Promise.all([
-      postsApi.listPosts({ scope: "mine", limit: 5 }).then((p) => setMyPosts(p.results)),
-      liveApi.listLiveChannels().then((l) => setMyLives(l.filter((c) => c.owner_id === currentUser.id))),
-      boardgameApi.listGameRooms({ mine: true }).then(setMyGames),
-    ]).catch((e) => setContentError(e instanceof Error ? e.message : "加载我的内容失败"));
-  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
   if (!currentUser) {
     return (
       <div className="profile-page profile-page-split">
@@ -114,6 +100,8 @@ export function ProfilePage() {
     avatarFile != null;
 
   async function onSave() {
+    if (saving || !currentUser) return;
+    const submitted = { nickname, signature, status, showContent, avatarFile, avatarPreview, userId: currentUser.id };
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -131,16 +119,23 @@ export function ProfilePage() {
         show_content: showContent,
         avatar: avatarUrl,
       });
+      if (useAuthStore.getState().currentUser?.id !== submitted.userId) return;
       setUser(updated);
-      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
-      setAvatarFile(null);
-      setAvatarPreview(null);
+      // A successful save normalizes only the submitted draft; newer edits stay local.
+      setNickname((value) => value === submitted.nickname ? updated.nickname ?? "" : value);
+      setSignature((value) => value === submitted.signature ? updated.signature ?? "" : value);
+      setStatus((value) => value === submitted.status ? updated.status ?? "auto" : value);
+      setShowContent((value) => value === submitted.showContent ? updated.show_content ?? false : value);
+      setAvatarFile((value) => value === submitted.avatarFile ? null : value);
+      setAvatarPreview((value) => value === submitted.avatarPreview ? null : value);
       setAvatarError(null);
       setSaved(true);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "保存失败，请稍后重试");
+      if (useAuthStore.getState().currentUser?.id === submitted.userId) {
+        setError(e instanceof ApiError ? e.message : "保存失败，请稍后重试");
+      }
     } finally {
-      setSaving(false);
+      if (useAuthStore.getState().currentUser?.id === submitted.userId) setSaving(false);
     }
   }
 
@@ -163,7 +158,6 @@ export function ProfilePage() {
         </div>
 
         <div className="profile-side">
-        {contentError && <div className="chat-notice" role="alert">{contentError}</div>}
         <div className="solid-card profile-card">
           <div className="profile-identity">
             <div className="profile-avatar-block">
@@ -277,7 +271,7 @@ export function ProfilePage() {
             )}
 
             <div className="profile-actions">
-              {saved && <span className="profile-saved">已保存</span>}
+              {saved && !dirty && <span className="profile-saved">已保存</span>}
               <button
                 type="button"
                 className="btn btn-primary"
@@ -300,75 +294,7 @@ export function ProfilePage() {
 
         </div>
         <div className="profile-main">
-        <div className="solid-card profile-mine">
-          <div className="profile-mine-head">
-            <h4 className="profile-mine-title">我的内容</h4>
-            <Link to="/favorites" className="profile-favorites-link">我的收藏 →</Link>
-          </div>
-
-          <section className="profile-section">
-            <div className="profile-section-head">
-              <button type="button" className="profile-section-toggle" onClick={() => toggleSection("posts")} aria-expanded={sectionsOpen.posts}>
-                <span className="profile-section-title">我的发帖</span>
-                <span className="profile-section-count">{myPosts.length}</span>
-                <span className={`profile-section-chevron ${sectionsOpen.posts ? "is-open" : ""}`}>▸</span>
-              </button>
-            </div>
-            {sectionsOpen.posts && (
-              myPosts.length === 0 ? (
-                <p className="profile-section-empty">还没有发帖</p>
-              ) : (
-                myPosts.map((p) => (
-                  <Link key={p.id} to={`/posts/${p.id}`} className="profile-section-row">
-                    {p.title || p.body.slice(0, 30)}
-                  </Link>
-                ))
-              )
-            )}
-          </section>
-
-          <section className="profile-section">
-            <div className="profile-section-head">
-              <button type="button" className="profile-section-toggle" onClick={() => toggleSection("lives")} aria-expanded={sectionsOpen.lives}>
-                <span className="profile-section-title">我的直播间</span>
-                <span className="profile-section-count">{myLives.length}</span>
-                <span className={`profile-section-chevron ${sectionsOpen.lives ? "is-open" : ""}`}>▸</span>
-              </button>
-            </div>
-            {sectionsOpen.lives && (
-              myLives.length === 0 ? (
-                <p className="profile-section-empty">还没有直播间</p>
-              ) : (
-                myLives.map((l) => (
-                  <Link key={l.id} to={`/live/${l.id}`} className="profile-section-row">
-                    {l.title}
-                  </Link>
-                ))
-              )
-            )}
-          </section>
-
-          <section className="profile-section">
-            <div className="profile-section-head">
-              <button type="button" className="profile-section-toggle" onClick={() => toggleSection("games")} aria-expanded={sectionsOpen.games}>
-                <span className="profile-section-title">正在玩的桌游</span>
-                <span className="profile-section-count">{myGames.length}</span>
-                <span className={`profile-section-chevron ${sectionsOpen.games ? "is-open" : ""}`}>▸</span>
-              </button>
-            </div>
-            {sectionsOpen.games && (
-              myGames.length === 0 ? (
-                <p className="profile-section-empty">暂无在局桌游</p>
-              ) : (
-                myGames.map((g) => (
-                  <Link key={g.id} to="/games" className="profile-section-row">
-                    {g.name}
-                  </Link>
-                ))
-              )
-            )}
-          </section>
-        </div>
+          <ProfileContentSections key={currentUser.id} ownerId={currentUser.id} mine />
       </div>
       </div>
       </div>

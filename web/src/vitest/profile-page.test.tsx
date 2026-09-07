@@ -4,7 +4,7 @@
  * - 保存时三步上传 + PATCH avatar=content URL，成功后清除预览并更新 store；
  * - 上传失败保留文件，可再次保存重试。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as authApi from "../api/auth";
@@ -14,9 +14,9 @@ import { useAuthStore } from "../stores/auth";
 import * as mediaApi from "../api/media";
 
 vi.mock("../api/auth", () => ({ updateProfile: vi.fn() }));
-vi.mock("../api/boardgame", () => ({ listGameRooms: vi.fn().mockResolvedValue([]) }));
-vi.mock("../api/live", () => ({ listLiveChannels: vi.fn().mockResolvedValue([]) }));
-vi.mock("../api/posts", () => ({ listPosts: vi.fn().mockResolvedValue({ results: [] }) }));
+vi.mock("../api/boardgame", () => ({ listGameRoomsPage: vi.fn().mockResolvedValue({ results: [], total: 0, has_more: false, next_cursor: null }) }));
+vi.mock("../api/live", () => ({ listLiveChannelsPage: vi.fn().mockResolvedValue({ results: [], total: 0, has_more: false, next_cursor: null }) }));
+vi.mock("../api/posts", () => ({ listPosts: vi.fn().mockResolvedValue({ results: [], total: 0, has_more: false, next_cursor: null }) }));
 vi.mock("../hooks/useAuth", () => ({ useAuth: () => ({ logout: vi.fn() }) }));
 vi.mock("../api/media", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/media")>();
@@ -72,6 +72,49 @@ beforeEach(() => {
 });
 
 describe("ProfilePage 头像上传", () => {
+  it("trim 保存成功回填本次提交内容并解除 dirty", async () => {
+    vi.mocked(authApi.updateProfile).mockResolvedValue(user({ nickname: "新昵称", signature: "新签名" }));
+    renderPage();
+    fireEvent.change(screen.getByLabelText("昵称"), { target: { value: "  新昵称  " } });
+    fireEvent.change(screen.getByLabelText("个性签名"), { target: { value: " 新签名 " } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await screen.findByText("已保存");
+    expect(authApi.updateProfile).toHaveBeenCalledWith(expect.objectContaining({ nickname: "新昵称", signature: "新签名" }));
+    expect(screen.getByLabelText("昵称")).toHaveValue("新昵称");
+    expect(screen.getByLabelText("个性签名")).toHaveValue("新签名");
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
+  });
+
+  it("保存回包保留等待期间新编辑的草稿，只同步未再编辑的字段", async () => {
+    let finish!: (value: UserPublic) => void;
+    vi.mocked(authApi.updateProfile).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    renderPage();
+    fireEvent.change(screen.getByLabelText("昵称"), { target: { value: "  已提交 " } });
+    fireEvent.change(screen.getByLabelText("个性签名"), { target: { value: " 已提交签名 " } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    fireEvent.change(screen.getByLabelText("昵称"), { target: { value: "  下一版草稿  " } });
+    await act(async () => { finish(user({ nickname: "已提交", signature: "已提交签名" })); });
+    expect(screen.getByLabelText("昵称")).toHaveValue("  下一版草稿  ");
+    expect(screen.getByLabelText("个性签名")).toHaveValue("已提交签名");
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeEnabled();
+    expect(screen.queryByText("已保存")).not.toBeInTheDocument();
+  });
+
+  it("保存头像期间另选图片，旧回包不清除新头像草稿", async () => {
+    let finish!: (value: UserPublic) => void;
+    vi.mocked(mediaApi.uploadMediaFile).mockResolvedValue({ media_id: "old", descriptor: {} as never, upload_id: "old" });
+    vi.mocked(authApi.updateProfile).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    vi.mocked(URL.createObjectURL).mockReturnValueOnce("blob:old").mockReturnValueOnce("blob:new");
+    renderPage();
+    fireEvent.change(screen.getByLabelText("更换头像"), { target: { files: [pngFile()] } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(authApi.updateProfile).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("更换头像"), { target: { files: [new File(["new"], "new.png", { type: "image/png" })] } });
+    await act(async () => { finish(user({ avatar: "/old-avatar" })); });
+    expect(screen.getByText("新头像将在保存后生效")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeEnabled();
+  });
+
   it("选择合法图片显示本地预览提示", async () => {
     renderPage();
     const input = screen.getByLabelText("更换头像") as HTMLInputElement;

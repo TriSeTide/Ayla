@@ -10,15 +10,13 @@
  * - self：不应出现（路由层重定向 /profile）
  * 风格与 ProfilePage 统一（glass 顶部栏 + solid 资料卡），返回用返回键。
  */
-import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { openPrivateConversation } from "../api/chat";
 import { createFriendRequest, getUserDetail } from "../api/users";
-import * as postsApi from "../api/posts";
-import * as liveApi from "../api/live";
-import * as boardgameApi from "../api/boardgame";
-import type { GameRoom, LiveChannelDescriptor, Post, UserPublic } from "../api/types";
+import type { UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
+import { ProfileContentSections } from "../components/ProfileContentSections";
 import { IconBack } from "../components/icons";
 import { useDisplayStatus, usePresenceOnline } from "../utils/displayStatus";
 
@@ -30,33 +28,30 @@ export function UserProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"friend" | "chat" | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   // 在线状态：presence 实时增量优先，REST 快照兜底；文案按 display_status 规则
   const online = usePresenceOnline(user);
   const displayStatus = useDisplayStatus(user);
 
-  // 「他的内容」（对方开启向他人展示内容时才拉取；收藏永不展示）
-  const [theirPosts, setTheirPosts] = useState<Post[]>([]);
-  const [theirLives, setTheirLives] = useState<LiveChannelDescriptor[]>([]);
-  const [theirGames, setTheirGames] = useState<GameRoom[]>([]);
-  const [theirContentError, setTheirContentError] = useState<string | null>(null);
-  const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({
-    posts: false,
-    lives: false,
-    games: false,
-  });
-  const toggleSection = (key: string) =>
-    setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+  const loadRevision = useRef(0);
 
   const load = useCallback(() => {
     if (!userId) return;
+    const revision = ++loadRevision.current;
     setLoading(true);
+    setUser(null);
     setError(null);
+    setActionMsg(null);
+    setActionError(null);
+    setBusy(null);
     getUserDetail(userId)
       .then((u) => {
+        if (revision !== loadRevision.current) return;
         setUser(u);
         setLoading(false);
       })
       .catch((e) => {
+        if (revision !== loadRevision.current) return;
         setError(e instanceof Error ? e.message : "加载用户资料失败");
         setLoading(false);
       });
@@ -64,36 +59,8 @@ export function UserProfilePage() {
 
   useEffect(() => {
     load();
+    return () => { loadRevision.current += 1; };
   }, [load]);
-
-  // 对方开启「向他人展示内容」时，并行拉取其内容（可见性由后端过滤）
-  useEffect(() => {
-    if (!userId || !user?.show_content) {
-      setTheirPosts([]);
-      setTheirLives([]);
-      setTheirGames([]);
-      return;
-    }
-    let cancelled = false;
-    setTheirContentError(null);
-    Promise.all([
-      postsApi.listPosts({ owner: userId, limit: 20 }).then((p) => p.results),
-      liveApi.listLiveChannels({ owner: userId }),
-      boardgameApi.listGameRooms({ owner: userId }),
-    ])
-      .then(([posts, lives, games]) => {
-        if (cancelled) return;
-        setTheirPosts(posts);
-        setTheirLives(lives);
-        setTheirGames(games);
-      })
-      .catch((e) => {
-        if (!cancelled) setTheirContentError(e instanceof Error ? e.message : "加载对方内容失败");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, user?.show_content]);
 
   // 路由层保护：自己 -> /profile（避免出现"加自己好友"）
   useEffect(() => {
@@ -103,31 +70,37 @@ export function UserProfilePage() {
   }, [user, navigate]);
 
   const addFriend = async () => {
-    if (!user) return;
+    if (!user || busy) return;
+    const revision = loadRevision.current;
     setBusy("friend");
     setActionMsg(null);
+    setActionError(null);
     try {
       await createFriendRequest({ to_user_id: user.id });
+      if (revision !== loadRevision.current) return;
       setUser({ ...user, relation: "pending_sent" });
       setActionMsg("好友申请已发送");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "发起申请失败");
+      if (revision === loadRevision.current) setActionError(e instanceof Error ? e.message : "发起申请失败");
     } finally {
-      setBusy(null);
+      if (revision === loadRevision.current) setBusy(null);
     }
   };
 
   const sendMessage = async () => {
-    if (!user) return;
+    if (!user || busy) return;
+    const revision = loadRevision.current;
     setBusy("chat");
     setActionMsg(null);
+    setActionError(null);
     try {
       const conv = await openPrivateConversation(user.id);
+      if (revision !== loadRevision.current) return;
       navigate(`/chat/${conv.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "进入私聊失败");
+      if (revision === loadRevision.current) setActionError(e instanceof Error ? e.message : "进入私聊失败");
     } finally {
-      setBusy(null);
+      if (revision === loadRevision.current) setBusy(null);
     }
   };
 
@@ -154,6 +127,7 @@ export function UserProfilePage() {
         ) : error || !user ? (
           <div className="solid-card profile-card">
             <p className="profile-signature">{error ?? "用户不存在"}</p>
+            <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
             <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)}>
               返回
             </button>
@@ -162,7 +136,7 @@ export function UserProfilePage() {
           <>
             <div className="profile-side">
             {actionMsg && <div className="chat-notice" role="status">{actionMsg}</div>}
-            {error && <div className="chat-notice" role="alert">{error}</div>}
+            {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
             <div className="solid-card profile-card">
               <div className="profile-identity">
                 <div className="profile-avatar-block">
@@ -238,77 +212,7 @@ export function UserProfilePage() {
             {/* 他的内容：对方开启「向他人展示内容」才显示；收藏永不对外展示 */}
             {user.show_content && (
               <div className="profile-main">
-              <div className="solid-card profile-mine">
-                <div className="profile-mine-head">
-                  <h4 className="profile-mine-title">他的内容</h4>
-                </div>
-                {theirContentError && (
-                  <div className="chat-notice" role="alert">{theirContentError}</div>
-                )}
-
-                <section className="profile-section">
-                  <div className="profile-section-head">
-                    <button type="button" className="profile-section-toggle" onClick={() => toggleSection("posts")} aria-expanded={sectionsOpen.posts}>
-                      <span className="profile-section-title">他的发帖</span>
-                      <span className="profile-section-count">{theirPosts.length}</span>
-                      <span className={`profile-section-chevron ${sectionsOpen.posts ? "is-open" : ""}`}>▸</span>
-                    </button>
-                  </div>
-                  {sectionsOpen.posts && (
-                    theirPosts.length === 0 ? (
-                      <p className="profile-section-empty">暂无发帖</p>
-                    ) : (
-                      theirPosts.map((p) => (
-                        <Link key={p.id} to={`/posts/${p.id}`} className="profile-section-row">
-                          {p.title || p.body.slice(0, 30)}
-                        </Link>
-                      ))
-                    )
-                  )}
-                </section>
-
-                <section className="profile-section">
-                  <div className="profile-section-head">
-                    <button type="button" className="profile-section-toggle" onClick={() => toggleSection("lives")} aria-expanded={sectionsOpen.lives}>
-                      <span className="profile-section-title">他的直播间</span>
-                      <span className="profile-section-count">{theirLives.length}</span>
-                      <span className={`profile-section-chevron ${sectionsOpen.lives ? "is-open" : ""}`}>▸</span>
-                    </button>
-                  </div>
-                  {sectionsOpen.lives && (
-                    theirLives.length === 0 ? (
-                      <p className="profile-section-empty">暂无直播间</p>
-                    ) : (
-                      theirLives.map((l) => (
-                        <Link key={l.id} to={`/live/${l.id}`} className="profile-section-row">
-                          {l.title}
-                        </Link>
-                      ))
-                    )
-                  )}
-                </section>
-
-                <section className="profile-section">
-                  <div className="profile-section-head">
-                    <button type="button" className="profile-section-toggle" onClick={() => toggleSection("games")} aria-expanded={sectionsOpen.games}>
-                      <span className="profile-section-title">他的桌游</span>
-                      <span className="profile-section-count">{theirGames.length}</span>
-                      <span className={`profile-section-chevron ${sectionsOpen.games ? "is-open" : ""}`}>▸</span>
-                    </button>
-                  </div>
-                  {sectionsOpen.games && (
-                    theirGames.length === 0 ? (
-                      <p className="profile-section-empty">暂无桌游</p>
-                    ) : (
-                      theirGames.map((g) => (
-                        <Link key={g.id} to="/games" className="profile-section-row">
-                          {g.name}
-                        </Link>
-                      ))
-                    )
-                  )}
-                </section>
-              </div>
+                <ProfileContentSections key={user.id} ownerId={user.id} />
               </div>
             )}
           </>
