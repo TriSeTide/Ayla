@@ -179,7 +179,7 @@ export function VoiceHubPage() {
             channelName={currentChannel.name}
             channel={currentChannel}
             livekit={joining ? "connecting" : joinError ? "failed" : currentChannelId === currentChannel.id ? livekit : "idle"}
-            connectionError={joinError}
+            connectionError={joinError ?? listError}
             wsConnection={wsConnection}
             elysiaProfile={elysiaProfile}
             groupId={currentChannel.group}
@@ -193,7 +193,7 @@ export function VoiceHubPage() {
               if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
             }}
             onBack={handleBack}
-            onDeleteChannel={() => setConfirmDeleteOpen(true)}
+            onDeleteChannel={() => { setListError(null); setConfirmDeleteOpen(true); }}
             inputEntered={inputEntered}
           />
         </FullScreenSwipeBack>

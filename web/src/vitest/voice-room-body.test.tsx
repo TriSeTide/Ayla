@@ -14,7 +14,7 @@ vi.mock("../api/voice", async () => {
   const actual = await vi.importActual<typeof import("../api/voice")>("../api/voice");
   return {
     ...actual,
-    listVoiceChatMessages: vi.fn().mockResolvedValue([]),
+    listVoiceChatMessagesPage: vi.fn().mockResolvedValue({ results: [], next_cursor: null, has_more: false, total: 0 }),
     sendVoiceChatMessage: vi.fn(),
   };
 });
@@ -61,7 +61,7 @@ function renderBody(channelId?: string, inputEntered = true) {
 }
 
 beforeEach(() => {
-  vi.mocked(voiceApi.listVoiceChatMessages).mockResolvedValue([]);
+  vi.mocked(voiceApi.listVoiceChatMessagesPage).mockResolvedValue({ results: [], next_cursor: null, has_more: false, total: 0 });
 });
 
 afterEach(() => {
@@ -90,14 +90,14 @@ describe("VoiceRoomBody 房内独立聊天", () => {
     const onFrame = vi.spyOn(voiceWS, "onFrame");
     const props = { channelName: "语音房", livekit: "connected" as const, wsConnection: "online" as const, elysiaProfile: null, onToggleMic: vi.fn(), onLeave: vi.fn(), onRejoin: vi.fn(), onVolumeChange: vi.fn(), onLocalVolumeChange: vi.fn(), onToggleMemberMuted: vi.fn(), onBack: vi.fn(), inputEntered: true };
     const { container, rerender, unmount } = render(<VoiceRoomBody {...props} channelId="v1" />);
-    await waitFor(() => expect(voiceApi.listVoiceChatMessages).toHaveBeenCalledWith("v1"));
+    await waitFor(() => expect(voiceApi.listVoiceChatMessagesPage).toHaveBeenCalledWith("v1", { cursor: null, beforeId: undefined }));
     expect(played).toHaveLength(3);
     expect(played.every(({ options }) => options.duration === 300 && options.easing === "cubic-bezier(0,0,0.58,1)")).toBe(true);
     expect(played.map(({ frames }) => frames[0].transform)).toEqual(["translate(0px, -20px)", narrow ? "translate(0px, 20px)" : "translate(20px, 0px)", "translate(0px, 20px)"]);
     const oldNodes = played.map(({ node }) => node);
     const input = container.querySelector("textarea");
     rerender(<VoiceRoomBody {...props} channelId="v2" />);
-    await waitFor(() => expect(voiceApi.listVoiceChatMessages).toHaveBeenCalledWith("v2"));
+    await waitFor(() => expect(voiceApi.listVoiceChatMessagesPage).toHaveBeenCalledWith("v2", { cursor: null, beforeId: undefined }));
     expect(played).toHaveLength(6);
     expect(played.slice(3).map(({ node }) => node)).toEqual(oldNodes);
     expect(played.slice(0, 3).every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
@@ -106,7 +106,7 @@ describe("VoiceRoomBody 房内独立聊天", () => {
     act(() => { reduced = true; Array.from(listeners).forEach((listener) => listener()); });
     expect(played.slice(3).every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
     rerender(<VoiceRoomBody {...props} channelId="v3" />);
-    await waitFor(() => expect(voiceApi.listVoiceChatMessages).toHaveBeenCalledWith("v3"));
+    await waitFor(() => expect(voiceApi.listVoiceChatMessagesPage).toHaveBeenCalledWith("v3", { cursor: null, beforeId: undefined }));
     expect(played).toHaveLength(6);
     expect(onFrame).toHaveBeenCalledTimes(3);
     unmount();
@@ -189,5 +189,27 @@ describe("VoiceRoomBody 房内独立聊天", () => {
     await waitFor(() =>
       expect(document.querySelectorAll(".voice-room-chat-message")).toHaveLength(1),
     );
+  });
+
+  it("旧房发送迟到不清空新房草稿，同房发送期间继续编辑也保留新文字", async () => {
+    let resolveSend!: (value: Awaited<ReturnType<typeof voiceApi.sendVoiceChatMessage>>) => void;
+    vi.mocked(voiceApi.sendVoiceChatMessage).mockImplementationOnce(() => new Promise((resolve) => { resolveSend = resolve; }));
+    const props = { channelName: "语音房", livekit: "connected" as const, wsConnection: "online" as const, elysiaProfile: null,
+      onToggleMic: vi.fn(), onLeave: vi.fn(), onRejoin: vi.fn(), onVolumeChange: vi.fn(), onLocalVolumeChange: vi.fn(),
+      onToggleMemberMuted: vi.fn(), onBack: vi.fn(), inputEntered: true };
+    const { rerender } = render(<VoiceRoomBody {...props} channelId="old" />);
+    fireEvent.change(screen.getByPlaceholderText("在语音房内聊天"), { target: { value: "旧房发送" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送语音房消息" }));
+    rerender(<VoiceRoomBody {...props} channelId="new" />);
+    fireEvent.change(screen.getByPlaceholderText("在语音房内聊天"), { target: { value: "新房草稿" } });
+    const reply = { id: "77", channel_id: "old", sender: { user_id: "me", nickname: "me", avatar: "" }, content: "旧房发送", media_id: null, media: null, created_at: "2026-09-08T00:00:00Z" };
+    await act(async () => resolveSend(reply));
+    expect(screen.getByPlaceholderText("在语音房内聊天")).toHaveValue("新房草稿");
+    expect(screen.queryByText("旧房发送")).not.toBeInTheDocument();
+    vi.mocked(voiceApi.sendVoiceChatMessage).mockImplementationOnce(() => new Promise((resolve) => { resolveSend = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "发送语音房消息" }));
+    fireEvent.change(screen.getByPlaceholderText("在语音房内聊天"), { target: { value: "继续编辑" } });
+    await act(async () => resolveSend({ ...reply, id: "78", channel_id: "new", content: "新房草稿" }));
+    expect(screen.getByPlaceholderText("在语音房内聊天")).toHaveValue("继续编辑");
   });
 });

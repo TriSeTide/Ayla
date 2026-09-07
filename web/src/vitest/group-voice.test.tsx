@@ -24,7 +24,7 @@ vi.mock("../api/voice", () => ({
   leaveVoiceChannel: vi.fn(),
   heartbeatVoiceChannel: vi.fn(),
   createVoiceChannel: vi.fn(),
-  listVoiceChatMessages: vi.fn().mockResolvedValue([]),
+  listVoiceChatMessagesPage: vi.fn().mockResolvedValue({ results: [], next_cursor: null, has_more: false, total: 0 }),
   sendVoiceChatMessage: vi.fn(),
 }));
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");

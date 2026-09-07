@@ -160,7 +160,7 @@ export function GroupVoice({
           channelName={currentChannel.name}
           channel={currentChannel}
           livekit={joining ? "connecting" : joinError ? "failed" : currentChannelId === currentChannel.id ? livekit : "idle"}
-          connectionError={joinError}
+          connectionError={joinError ?? error}
           wsConnection={wsConnection}
           elysiaProfile={elysiaProfile}
           groupId={currentChannel.group}
@@ -174,7 +174,7 @@ export function GroupVoice({
             if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
           }}
           onBack={handleBack}
-          onDeleteChannel={() => setConfirmDeleteOpen(true)}
+          onDeleteChannel={() => { setError(null); setConfirmDeleteOpen(true); }}
           inputEntered // 群内子界面无底栏下滑动画
         />
         {confirmDeleteOpen && (

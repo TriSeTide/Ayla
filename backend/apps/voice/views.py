@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.catalog_pagination import catalog_scope, paginate_catalog, with_activity_order
+from apps.common.media_pagination import paginate_media
 from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media
@@ -352,13 +353,17 @@ class ChannelChatMessagesView(APIView):
         ch, error = self._channel(request, channel_id)
         if error:
             return error
+        queryset = VoiceChatMessage.objects.filter(channel=ch).select_related("sender")
+        page = paginate_media(queryset, request, resource="voice-chat", scope=str(ch.pk),
+                              reverse_results=True, allow_history_anchor=True)
+        if page is not None:
+            return Response(page.response_data([self._payload(row) for row in page.rows]))
         try:
             limit = max(1, min(int(request.query_params.get("limit", 100)), 200))
         except (TypeError, ValueError):
             limit = 100
         rows = list(
-            VoiceChatMessage.objects.filter(channel=ch)
-            .select_related("sender")
+            queryset
             .order_by("-created_at", "-id")[:limit]
         )
         rows.reverse()
@@ -437,7 +442,7 @@ class ChannelMembersView(APIView):
         if not can_view(request.user, ch):
             return _forbidden("无权查看该语音频道")
         members = VoiceChannelMember.objects.filter(channel=ch).select_related("user")
-        return Response(
-            VoiceChannelMemberSerializer(members, many=True).data,
-            status=status.HTTP_200_OK,
-        )
+        page = paginate_media(members, request, resource="voice-members", scope=str(ch.pk),
+                              field="joined_at", descending=False, default_limit=20)
+        data = VoiceChannelMemberSerializer(page.rows if page else members, many=True).data
+        return Response(page.response_data(data) if page else data)

@@ -2,10 +2,10 @@
  * VoiceRoomBody —— 语音房整页（进房态）。
  * 房内聊天使用 voice-chat 独立接口，不写入群聊 Message；支持文字与图片。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
-import type { ElysiaProfile, VoiceChatMessage, VoiceChannelDescriptor } from "../../api/types";
+import type { ElysiaProfile, VoiceChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
 import { ScrollingText } from "../ScrollingText";
 import { ScrollingTags } from "../ScrollingTags";
@@ -19,6 +19,8 @@ import { useRevealOnEnter } from "../../hooks/useRevealOnEnter";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePanelReplayMotion, type PanelReplayTarget } from "../../hooks/usePanelReplayMotion";
 import { voiceWS } from "../../ws/voice";
+import { useCursorHistory } from "../../hooks/useCursorHistory";
+import { HistoryControls } from "../HistoryControls";
 
 const VOICE_PANELS: readonly PanelReplayTarget[] = [
   { selector: ":scope > .voice-room-head", edge: "top" },
@@ -72,8 +74,17 @@ export function VoiceRoomBody({
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const panelsRef = usePanelReplayMotion<HTMLDivElement>(channelId ?? "", isNarrow ? VOICE_NARROW_PANELS : VOICE_PANELS);
   const currentUser = useAuthStore((state) => state.currentUser);
-  const [text, setText] = useState("");
-  const [messages, setMessages] = useState<VoiceChatMessage[]>([]);
+  const chatOwner = `voice-chat:${currentUser?.id ?? ""}:${channelId ?? ""}`;
+  const ownerRef = useRef(chatOwner);
+  ownerRef.current = chatOwner;
+  const [draft, setDraft] = useState({ owner: chatOwner, text: "" });
+  const text = draft.owner === chatOwner ? draft.text : "";
+  const draftRevision = useRef(0);
+  const setText = (value: string) => { draftRevision.current += 1; setDraft({ owner: chatOwner, text: value }); };
+  const fetchHistory = useCallback((cursor: string | null, beforeId?: string) =>
+    voiceApi.listVoiceChatMessagesPage(channelId!, { cursor, beforeId }), [channelId]);
+  const history = useCursorHistory(chatOwner, fetchHistory, Boolean(channelId));
+  const messages = history.items;
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,26 +96,21 @@ export function VoiceRoomBody({
   // 已见消息 id：WS 回播 / 乐观发送去重，未读只在"真正新消息"时累加
   const seenIdsRef = useRef<Set<string>>(new Set());
   // 聊天列表滚动容器：展开时滚动到底部显示最新消息
-  const chatListRef = useRef<HTMLDivElement>(null);
+  const chatListRef = history.listRef;
   // 进房体统一入场动画（与直播间同源：成员面板先浮入，聊天卡随后）
   const { step } = useRevealOnEnter(true);
 
   useEffect(() => {
-    if (!channelId) return;
-    let cancelled = false;
     seenIdsRef.current = new Set();
-    setMessages([]);
     setUnreadCount(0);
     setError(null);
-    void voiceApi.listVoiceChatMessages(channelId).then((items) => {
-      if (cancelled) return;
-      items.forEach((m) => seenIdsRef.current.add(m.id));
-      setMessages(items);
-    }).catch((err) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "加载房内聊天失败");
-    });
-    return () => { cancelled = true; };
-  }, [channelId]);
+    setSending(false);
+    setUploading(false);
+  }, [chatOwner]);
+  useEffect(() => {
+    messages.forEach((message) => seenIdsRef.current.add(message.id));
+    while (seenIdsRef.current.size > 1000) seenIdsRef.current.delete(seenIdsRef.current.values().next().value!);
+  }, [messages]);
 
   // 房内聊天 WS 热更新：订阅 voice.chat.message 帧，按 message.id 幂等去重 append。
   // 后端先 group_send 广播、后返回 POST 响应，WS 回播可能先于 sendMessage 的乐观 append 到达，
@@ -118,7 +124,7 @@ export function VoiceRoomBody({
       const isNew = !seenIdsRef.current.has(msg.id);
       seenIdsRef.current.add(msg.id);
       // 显示去重：无论乐观 append 与 WS 回播谁先到，同一 id 只渲染一条
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      history.append(msg);
       if (!isNew) return;
       // 未读仅在聊天栏收起、且非自己发送时累加
       const selfId = useAuthStore.getState().currentUser?.id;
@@ -128,7 +134,7 @@ export function VoiceRoomBody({
       }
     });
     return off;
-  }, [channelId]);
+  }, [channelId, history.append]);
 
   // 展开聊天栏即清空未读红点，并把列表滚动到底部显示最新消息；同步维护 ref 供 WS 回调读取
   useEffect(() => {
@@ -141,45 +147,49 @@ export function VoiceRoomBody({
   }, [chatExpanded]);
 
   const sendMessage = async (mediaId?: string | null) => {
-    if (!channelId || sending) return;
+    if (!channelId || sending || ownerRef.current !== chatOwner) return;
     const content = text.trim();
     if (!content && !mediaId) return;
     setSending(true);
     setError(null);
+    const revision = draftRevision.current;
     try {
       const message = await voiceApi.sendVoiceChatMessage(channelId, {
         content: content || "图片",
         media_id: mediaId ?? null,
       });
+      if (ownerRef.current !== chatOwner) return;
       seenIdsRef.current.add(message.id);
       // 乐观 append 同样按 id 去重：若 WS 回播已先到并渲染过，这里跳过，避免双气泡
-      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
-      setText("");
+      history.append(message);
+      if (draftRevision.current === revision) setText("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "发送失败，请重试");
+      if (ownerRef.current === chatOwner) setError(err instanceof Error ? err.message : "发送失败，请重试");
     } finally {
-      setSending(false);
+      if (ownerRef.current === chatOwner) setSending(false);
     }
   };
 
   const sendImage = async (file: File) => {
-    if (!channelId || sending || uploading) return;
+    if (!channelId || sending || uploading || ownerRef.current !== chatOwner) return;
     setUploading(true);
     setError(null);
     try {
       const uploaded = await uploadMediaFile(file, "image");
+      if (ownerRef.current !== chatOwner) return;
       await sendMessage(uploaded.media_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "图片发送失败，请重试");
+      if (ownerRef.current === chatOwner) setError(err instanceof Error ? err.message : "图片发送失败，请重试");
     } finally {
-      setUploading(false);
+      if (ownerRef.current === chatOwner) setUploading(false);
     }
   };
 
   const chatList = (
-    <div className="voice-room-chat-list" aria-live="polite" ref={chatListRef}>
+    <div className="voice-room-chat-list" aria-live="polite" ref={chatListRef} onScroll={history.handleScroll}>
+      <HistoryControls {...history} />
       {messages.map((message) => (
-        <div key={message.id} className="voice-room-chat-message">
+        <div key={message.id} className="voice-room-chat-message" data-history-id={message.id}>
           <span className="voice-room-chat-sender">{message.sender.nickname}：</span>
           {message.media_id && message.media && (
             <ResourceImage

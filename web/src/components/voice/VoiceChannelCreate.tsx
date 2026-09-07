@@ -1,7 +1,7 @@
 /**
  * VoiceChannelCreate —— 建语音频道（M5-3 §1）。空名称前端拦截不发。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as voiceApi from "../../api/voice";
 import { useVoiceStore } from "../../stores/voice";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
@@ -21,14 +21,17 @@ export function VoiceChannelCreate({
   );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (submitting.current) return;
     const trimmed = name.trim();
     if (!trimmed) {
       setError("频道名称不能为空");
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -45,6 +48,7 @@ export function VoiceChannelCreate({
     } catch (e) {
       setError(e instanceof Error ? e.message : "创建失败");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };

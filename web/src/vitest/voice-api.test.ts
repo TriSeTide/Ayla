@@ -145,14 +145,36 @@ describe("api/voice 频道 REST", () => {
 
   it("listVoiceChannelMembers → 成员 descriptor 数组", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse([
+      jsonResponse({ results: [
         { id: 1, user_id: "u1", joined_at: "t1", last_seen_at: "t2" },
         { id: 2, user_id: "elysia-user", joined_at: "t1", last_seen_at: "t3" },
-      ]),
+      ], next_cursor: null, has_more: false, total: 2 }),
     );
     vi.stubGlobal("fetch", fetchMock);
     const members = await voiceApi.listVoiceChannelMembers("1");
     expect(members.map((m) => m.user_id)).toEqual(["u1", "elysia-user"]);
+    expect(fetchMock.mock.calls[0][0]).toContain("pagination=cursor&limit=100");
+  });
+
+  it("runtime成员对账按页收齐并去重；下一页失败不会返回首屏伪装完整", async () => {
+    const a = { id: 1, user_id: "u1", joined_at: "t1", last_seen_at: "t2" };
+    const b = { id: 2, user_id: "u2", joined_at: "t1", last_seen_at: "t2" };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ results: [a], next_cursor: "next", has_more: true, total: 2 }))
+      .mockResolvedValueOnce(jsonResponse({ results: [a, b], next_cursor: null, has_more: false, total: 2 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await voiceApi.listVoiceChannelMembers("1")).map((row) => row.user_id)).toEqual(["u1", "u2"]);
+    expect(fetchMock.mock.calls[1][0]).toContain("cursor=next");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ results: [a], next_cursor: "next", has_more: true, total: 2 }))
+      .mockResolvedValueOnce(jsonResponse({ detail: "offline" }, 503));
+    await expect(voiceApi.listVoiceChannelMembers("1")).rejects.toThrow("offline");
+  });
+
+  it("runtime成员对账拒绝循环cursor", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => jsonResponse({
+      results: [{ id: 1, user_id: "u1", joined_at: "t1", last_seen_at: "t2" }],
+      next_cursor: "loop", has_more: true, total: 2,
+    })));
+    await expect(voiceApi.listVoiceChannelMembers("1")).rejects.toThrow("继续位置");
   });
 });
 

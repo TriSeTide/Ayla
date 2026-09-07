@@ -85,6 +85,23 @@ afterEach(() => {
 });
 
 describe("useVoiceChannel", () => {
+  it("125人成员事实分100+25读取，不自动拉取125份用户资料", async () => {
+    const members = Array.from({ length: 125 }, (_, i) => ({ id: i + 1, user_id: `batch-user-${i + 1}`, joined_at: "t", last_seen_at: "t" }));
+    useAuthStore.setState({ currentUser: null });
+    stubFetch({
+      "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () => jsonResponse({ results: members.slice(0, 100), next_cursor: "next", has_more: true, total: 125 }),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100&cursor=next": () => jsonResponse({ results: members.slice(100), next_cursor: null, has_more: false, total: 125 }),
+      "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
+    });
+    const { result } = renderHook(() => useVoiceChannel());
+    await act(async () => { await result.current.join("ch1"); });
+    expect(Object.keys(useVoiceStore.getState().members)).toHaveLength(125);
+    expect(calledWith("GET", "/members/")).toBe(2);
+    expect(calledWith("GET", "/users/")).toBe(0);
+    await act(async () => { await result.current.leave(); });
+  });
+
   it("join 503（LiveKit 未配置）→ 提示语音服务未配置，不进入媒体连接", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () =>
@@ -120,8 +137,8 @@ describe("useVoiceChannel", () => {
   it("join 成功 → 成员铺底 + 心跳按间隔发 heartbeat/；重复加入不叠加定时器", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
-      "GET /voice/channels/ch1/members/": () =>
-        jsonResponse([{ id: 1, user_id: "me", joined_at: "t", last_seen_at: "t" }]),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
+        jsonResponse({ results: [{ id: 1, user_id: "me", joined_at: "t", last_seen_at: "t" }], next_cursor: null, has_more: false, total: 1 }),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
       "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
     });
@@ -151,7 +168,7 @@ describe("useVoiceChannel", () => {
     let heartbeatCalls = 0;
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
-      "GET /voice/channels/ch1/members/": () => jsonResponse([]),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () => jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
       "POST /voice/channels/ch1/heartbeat/": () => {
         heartbeatCalls += 1;
         return jsonResponse({ detail: "非频道成员不可心跳" }, 403);
@@ -182,7 +199,7 @@ describe("useVoiceChannel", () => {
   it("leave → 断媒体 + 停心跳 + 调 leave/（幂等，未加入时空调用安全）", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
-      "GET /voice/channels/ch1/members/": () => jsonResponse([]),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () => jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
       "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
     });
@@ -213,7 +230,7 @@ describe("useVoiceChannel", () => {
   it("leave/ 返回 403（房主必须先转让）→ leave() 抛错且本地状态保留", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
-      "GET /voice/channels/ch1/members/": () => jsonResponse([]),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () => jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
       "POST /voice/channels/ch1/leave/": () =>
         jsonResponse({ detail: "房主请先转让房主后再离开" }, 403),
@@ -257,7 +274,7 @@ describe("useVoiceChannel", () => {
   it("toggleMic 乐观 UI + SDK 失败回滚", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
-      "GET /voice/channels/ch1/members/": () => jsonResponse([]),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () => jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
       "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
     });

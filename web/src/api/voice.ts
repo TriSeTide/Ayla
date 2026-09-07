@@ -13,6 +13,8 @@
  * 纪律：LiveKit token 是媒体凭据，本层不打日志、不缓存跨房间复用。
  */
 import { apiRequest } from "./client";
+import { useAuthStore } from "../stores/auth";
+import { mediaPageQuery, type MediaPage, type MediaPageParams } from "./mediaPagination";
 import { directoryQuery, type DirectoryPage, type DirectoryParams } from "./directory";
 import type {
   ElysiaVoiceCallCreateResult,
@@ -99,10 +101,31 @@ export function heartbeatVoiceChannel(channelId: string) {
   );
 }
 
-/** GET /voice/channels/<id>/members/ —— 当前成员列表（WS 重连后对账用） */
-export function listVoiceChannelMembers(channelId: string) {
-  return apiRequest<VoiceChannelMemberDescriptor[]>(
-    `/voice/channels/${encodeURIComponent(channelId)}/members/`,
+/** Complete runtime reconciliation, assembled from bounded reads before publishing. */
+export async function listVoiceChannelMembers(channelId: string) {
+  const owner = useAuthStore.getState().currentUser?.id;
+  const rows = new Map<string, VoiceChannelMemberDescriptor>();
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    if (useAuthStore.getState().currentUser?.id !== owner) throw new DOMException("成员对账所属账号已改变", "AbortError");
+    const page = await listVoiceChannelMembersPage(channelId, { cursor, limit: 100 });
+    if (useAuthStore.getState().currentUser?.id !== owner) throw new DOMException("成员对账所属账号已改变", "AbortError");
+    page.results.forEach((member) => rows.set(member.user_id, member));
+    if (!page.has_more) return [...rows.values()];
+    if (!page.next_cursor || seenCursors.has(page.next_cursor) || !page.results.length) {
+      throw new Error("成员对账分页响应缺少有效的继续位置，请重试");
+    }
+    seenCursors.add(page.next_cursor);
+    cursor = page.next_cursor;
+  } while (cursor);
+  return [...rows.values()];
+}
+
+/** Visible member pages; connection reconciliation retains its complete snapshot. */
+export function listVoiceChannelMembersPage(channelId: string, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<VoiceChannelMemberDescriptor>>(
+    `/voice/channels/${encodeURIComponent(channelId)}/members/?${mediaPageQuery({ limit: 20, ...params })}`,
   );
 }
 
@@ -110,6 +133,12 @@ export function listVoiceChannelMembers(channelId: string) {
 export function listVoiceChatMessages(channelId: string, limit = 100) {
   return apiRequest<VoiceChatMessage[]>(
     `/voice/channels/${encodeURIComponent(channelId)}/messages/?limit=${limit}`,
+  );
+}
+
+export function listVoiceChatMessagesPage(channelId: string, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<VoiceChatMessage>>(
+    `/voice/channels/${encodeURIComponent(channelId)}/messages/?${mediaPageQuery(params)}`,
   );
 }
 

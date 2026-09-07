@@ -118,7 +118,8 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
     const list = await voiceApi.listVoiceChannelMembers(channelId);
     if (useVoiceStore.getState().currentChannelId !== channelId || !voiceSessionRuntime.isRevisionCurrent(revision)) return;
     useVoiceStore.getState().reconcileMembers(list);
-    ensureUsers(list.map((m) => m.user_id));
+    // Visible VoiceMemberRow instances fetch their own profiles; runtime facts
+    // must not fan out a profile request for every member in the channel.
   }, []);
 
   // LiveKit 事件 → store（挂载一次；voiceLiveKit 是单例）
@@ -289,7 +290,6 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
             useSessionActivityStore.getState().setStatus("voice", "connected");
             startHeartbeat(channelId);
             voiceWS.subscribe([channelId]);
-            ensureUsers(members.map((member) => member.user_id));
             const me = useAuthStore.getState().currentUser;
             if (me) ensureUsers([me.id]);
             committed = true;
