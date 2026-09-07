@@ -7,24 +7,26 @@ S5 聚合搜索 —— 只读聚合层（无模型、无迁移）。
 - **可见性过滤**：post/live/game 走 `apps/common/visibility.py` 的 `visible_queryset`，
   与列表接口同语义（public 全登录 / friends 好友 / group 群员）；user/group 不涉及可见性
   （user 为公开资料，group 无 visibility 字段，见 `search_groups` 的取舍注释）。
-- **每组截断 + total**：每类先 `order_by` 再 `[:limit]` 截断，`total` 单独 `count()`，
-  二者分离保证"截断前匹配总数"准确；`limit` 默认 10、上限 50、下限 1。
+- **有界结果 + total**：旧调用保持每组截断；显式游标模式由 pagination.py 在 SQL 中
+  应用时间/主键 keyset 与 limit+1。total 始终是当前完整可见匹配数，不是剩余页数。
 - **超时预算 2s 是设计目标，非本期硬编码实现**：采用同步聚合 + 每类独立 LIMIT 截断
   （数据量小、单次查询可控），不引入线程池硬超时/协程并发，避免过度设计；若未来数据量
   增长需在调用方加超时预算与并发降级。
 """
 from django.contrib.auth import get_user_model
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 
 from apps.accounts.serializers import UserPublicSerializer
 from apps.boardgame.models import GameRoom
 from apps.boardgame.serializers import GameRoomSerializer
-from apps.chat.models import Conversation
+from apps.chat.models import Conversation, ConversationMember
 from apps.common.visibility import visible_queryset
 from apps.live.models import LiveChannel
 from apps.live.serializers import LiveChannelSerializer
 from apps.posts.models import Post
 from apps.posts.serializers import PostSerializer
+
+from .pagination import SearchPageOptions, search_page
 
 User = get_user_model()
 
@@ -65,17 +67,25 @@ def parse_limit(raw: str | None) -> int:
     return max(MIN_LIMIT, min(value, MAX_LIMIT))
 
 
-def search_users(q: str, limit: int, request) -> dict:
+def _rows(base, q, kind, limit, request, page, time_field="created_at"):
+    if page is not None:
+        return search_page(
+            base, request, query=q, kind=kind, time_field=time_field, options=page,
+        )
+    return base.order_by(f"-{time_field}", "-pk")[:limit], {"total": base.count()}
+
+
+def search_users(q: str, limit: int, request, page: SearchPageOptions | None = None) -> dict:
     """用户：username/nickname icontains，UserPublicSerializer 输出，无可见性过滤。"""
     base = User.objects.filter(Q(username__icontains=q) | Q(nickname__icontains=q))
-    total = base.count()
+    rows, metadata = _rows(base, q, TYPE_USERS, limit, request, page, "date_joined")
     items = UserPublicSerializer(
-        base.order_by("-date_joined")[:limit], many=True, context={"request": request}
+        rows, many=True, context={"request": request}
     ).data
-    return {"items": items, "total": total}
+    return {"items": items, **metadata}
 
 
-def search_groups(q: str, limit: int) -> dict:
+def search_groups(q: str, limit: int, request, page: SearchPageOptions | None = None) -> dict:
     """群聊：title icontains，轻量 dict 输出。
 
     已知取舍：Conversation 没有 visibility 字段（S2 已登记），入群申请对任意登录用户
@@ -84,23 +94,28 @@ def search_groups(q: str, limit: int) -> dict:
     join_policy（public/application）随条目输出，供前端区分"直接加入/申请制"弹窗。
     avatar 复用已有群头像媒体地址；未设置时为空串，不要求调用者已经入群。
     """
-    base = Conversation.objects.filter(type="group").filter(title__icontains=q)
-    total = base.count()
+    base = Conversation.objects.filter(type="group").filter(title__icontains=q).annotate(
+        _search_is_member=Exists(ConversationMember.objects.filter(
+            conversation_id=OuterRef("pk"), user=request.user,
+        )),
+    )
+    rows, metadata = _rows(base, q, TYPE_GROUPS, limit, request, page)
     items = [
         {
             "id": str(c.id),
             "type": c.type,
             "title": c.title,
             "avatar": c.avatar,
+            "is_member": c._search_is_member,
             "join_policy": c.join_policy,
             "created_at": c.created_at.isoformat(),
         }
-        for c in base.order_by("-created_at")[:limit]
+        for c in rows
     ]
-    return {"items": items, "total": total}
+    return {"items": items, **metadata}
 
 
-def search_posts(q: str, limit: int, request) -> dict:
+def search_posts(q: str, limit: int, request, page: SearchPageOptions | None = None) -> dict:
     """帖子：可见性过滤 + title/body icontains；select_related/prefetch 减少 N+1。"""
     base = (
         visible_queryset(Post, request.user)
@@ -108,28 +123,28 @@ def search_posts(q: str, limit: int, request) -> dict:
         .select_related("owner", "group")
         .prefetch_related("images__media")
     )
-    total = base.count()
+    rows, metadata = _rows(base, q, TYPE_POSTS, limit, request, page)
     items = PostSerializer(
-        base.order_by("-created_at")[:limit], many=True, context={"request": request}
+        rows, many=True, context={"request": request}
     ).data
-    return {"items": items, "total": total}
+    return {"items": items, **metadata}
 
 
-def search_lives(q: str, limit: int, request) -> dict:
+def search_lives(q: str, limit: int, request, page: SearchPageOptions | None = None) -> dict:
     """直播间：可见性过滤 + title icontains。"""
     base = (
         visible_queryset(LiveChannel, request.user)
         .filter(title__icontains=q)
         .select_related("group")
     )
-    total = base.count()
+    rows, metadata = _rows(base, q, TYPE_LIVES, limit, request, page)
     items = LiveChannelSerializer(
-        base.order_by("-created_at")[:limit], many=True, context={"request": request}
+        rows, many=True, context={"request": request}
     ).data
-    return {"items": items, "total": total}
+    return {"items": items, **metadata}
 
 
-def search_games(q: str, limit: int, request) -> dict:
+def search_games(q: str, limit: int, request, page: SearchPageOptions | None = None) -> dict:
     """桌游室：可见性过滤 + name icontains；select_related/prefetch 减少 N+1。"""
     base = (
         visible_queryset(GameRoom, request.user)
@@ -137,8 +152,8 @@ def search_games(q: str, limit: int, request) -> dict:
         .select_related("owner", "group")
         .prefetch_related("members__user")
     )
-    total = base.count()
+    rows, metadata = _rows(base, q, TYPE_GAMES, limit, request, page)
     items = GameRoomSerializer(
-        base.order_by("-created_at")[:limit], many=True, context={"request": request}
+        rows, many=True, context={"request": request}
     ).data
-    return {"items": items, "total": total}
+    return {"items": items, **metadata}

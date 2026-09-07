@@ -57,7 +57,8 @@ class TestAggregateSearch:
         by_id = {item["id"]: item for item in result["items"]}
         assert by_id[str(pictured.id)]["avatar"] == avatar
         assert by_id[str(empty.id)]["avatar"] == ""
-        assert set(by_id[str(pictured.id)]) == {"id", "type", "title", "avatar", "join_policy", "created_at"}
+        assert set(by_id[str(pictured.id)]) == {"id", "type", "title", "avatar", "join_policy", "created_at", "is_member"}
+        assert by_id[str(pictured.id)]["is_member"] is False
         assert not ConversationMember.objects.filter(user=viewer, conversation__in=[pictured, empty]).exists()
 
     def test_all_types_grouped(self, auth_client, user_factory):

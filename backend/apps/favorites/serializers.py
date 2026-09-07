@@ -69,4 +69,11 @@ class FavoriteSerializer(serializers.ModelSerializer):
                 conversation_id=target.conversation_id, user=user
             ).exists():
                 return None
+        elif target is not None and obj.target_type != Favorite.TARGET_GROUP:
+            from apps.common.visibility import can_view
+
+            # Keeping a private bookmark does not preserve access to its target.
+            # Recheck current access on every legacy response and cursor page.
+            if not can_view(user, target):
+                return None
         return _target_summary(obj.target_type, target)

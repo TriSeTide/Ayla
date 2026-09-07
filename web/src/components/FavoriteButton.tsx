@@ -1,148 +1,79 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as favoritesApi from "../api/favorites";
 import type { FavoriteTargetType } from "../api/types";
+import { useFavoriteStatuses } from "../hooks/useFavoriteStatuses";
+import { applyFavoriteStatus, ensureFavoriteScope, favoriteStatusKey, loadFavoriteStatuses, useFavoriteStatusStore } from "../stores/favoriteStatus";
 import { IconHeart } from "./icons";
+import { useAuthStore } from "../stores/auth";
 
-type FavoriteCache = Map<string, number>;
-
-const cache = new Map<FavoriteTargetType, FavoriteCache>();
-const pending = new Map<FavoriteTargetType, Promise<FavoriteCache>>();
-
-/** 挂载中的 FavoriteButton 订阅者（WS 收藏变更时通知重读缓存） */
-type FavoriteListener = () => void;
-const listeners = new Set<FavoriteListener>();
-
-/**
- * 订阅收藏状态变更（WS favorite.changed 驱动）；返回解注册函数。
- * 供组件内部使用；外部（chatWS 分发）通过 applyFavoriteChanged 触发。
- */
-export function subscribeFavoriteChanges(listener: FavoriteListener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export const subscribeFavoriteChanges = (listener: () => void) => useFavoriteStatusStore.subscribe(listener);
+export function applyFavoriteChanged(type: FavoriteTargetType, id: string, favoriteId: number | null) {
+  applyFavoriteStatus(type, id, favoriteId);
 }
 
-/**
- * 应用外部收藏变更（WS 广播）：更新模块缓存并通知所有挂载的按钮。
- * - favoriteId 为 null 表示取消收藏（从缓存移除）；
- * - 幂等：重复应用同一状态不产生副作用。
- */
-export function applyFavoriteChanged(
-  targetType: FavoriteTargetType,
-  targetId: string,
-  favoriteId: number | null,
-) {
-  const typeCache = cache.get(targetType) ?? new Map<string, number>();
-  if (favoriteId == null) typeCache.delete(targetId);
-  else typeCache.set(targetId, favoriteId);
-  cache.set(targetType, typeCache);
-  for (const listener of listeners) listener();
-}
-
-function cacheKey(targetId: string | number): string {
-  return String(targetId);
-}
-
-function loadType(targetType: FavoriteTargetType): Promise<FavoriteCache> {
-  const ready = cache.get(targetType);
-  if (ready) return Promise.resolve(ready);
-  const running = pending.get(targetType);
-  if (running) return running;
-  const request = favoritesApi.listFavorites(targetType).then((items) => {
-    const next = new Map<string, number>();
-    for (const item of items) next.set(item.target_id, item.id);
-    cache.set(targetType, next);
-    pending.delete(targetType);
-    return next;
-  }).catch((error) => {
-    pending.delete(targetType);
-    throw error;
-  });
-  pending.set(targetType, request);
-  return request;
-}
-
-export function FavoriteButton({
-  targetType,
-  targetId,
-  compact = false,
-}: {
+export function FavoriteButton({ targetType, targetId, compact = false, className = "" }: {
   targetType: FavoriteTargetType;
   targetId: string | number;
   compact?: boolean;
+  className?: string;
 }) {
-  const key = cacheKey(targetId);
-  const [favoriteId, setFavoriteId] = useState<number | null>(() => cache.get(targetType)?.get(key) ?? null);
-  const [loading, setLoading] = useState(!cache.has(targetType));
-  const [error, setError] = useState<string | null>(null);
-
+  const key = String(targetId);
+  const account = useAuthStore((state) => `${state.currentUser?.id ?? "anonymous"}:${!!state.accessToken}`);
+  const state = useFavoriteStatuses(targetType, [key])[key];
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const owner = useRef(0);
   useEffect(() => {
-    let cancelled = false;
-    if (cache.has(targetType)) {
-      setFavoriteId(cache.get(targetType)?.get(key) ?? null);
-      setLoading(false);
-      return () => { cancelled = true; };
-    }
-    void loadType(targetType).then((items) => {
-      if (!cancelled) {
-        setFavoriteId(items.get(key) ?? null);
-        setLoading(false);
-      }
-    }).catch((err) => {
-      if (!cancelled) {
-        setError(err instanceof Error ? err.message : "收藏状态加载失败");
-        setLoading(false);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [key, targetType]);
-
-  // WS 收藏变更（favorite.changed，任务 07）→ 重读模块缓存，
-  // 同账号其他界面（收藏页/详情/其他卡片）的收藏操作实时反映到本按钮。
-  useEffect(() => {
-    return subscribeFavoriteChanges(() => {
-      setFavoriteId(cache.get(targetType)?.get(key) ?? null);
-    });
-  }, [key, targetType]);
-
+    owner.current += 1;
+    setBusy(false);
+    setActionError(null);
+    return () => { owner.current += 1; };
+  }, [targetType, key, account]);
   const toggle = async (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    if (loading) return;
-    setLoading(true);
-    setError(null);
+    if (busy || state.loading) return;
+    if (state.error || state.favoriteId === undefined) {
+      loadFavoriteStatuses(targetType, [key], true);
+      return;
+    }
+    const requestEpoch = ensureFavoriteScope();
+    const requestOwner = owner.current;
+    const requestRevision = state.revision;
+    setBusy(true);
+    setActionError(null);
     try {
-      const typeCache = cache.get(targetType) ?? new Map<string, number>();
-      if (favoriteId != null) {
-        await favoritesApi.removeFavorite(favoriteId);
-        typeCache.delete(key);
-        setFavoriteId(null);
+      let favoriteId: number | null;
+      if (state.favoriteId !== null) {
+        await favoritesApi.removeFavorite(state.favoriteId);
+        favoriteId = null;
       } else {
-        const favorite = await favoritesApi.addFavorite(targetType, key);
-        typeCache.set(key, favorite.id);
-        setFavoriteId(favorite.id);
+        favoriteId = (await favoritesApi.addFavorite(targetType, key)).id;
       }
-      cache.set(targetType, typeCache);
-      // 本地操作也通知所有挂载按钮（不依赖 WS 回环，离线/慢连接时仍即时一致）
-      for (const listener of listeners) listener();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "收藏操作失败，请重试");
+      if (requestEpoch === ensureFavoriteScope() && useFavoriteStatusStore.getState().entries.get(favoriteStatusKey(targetType, key))?.revision === requestRevision) {
+        applyFavoriteStatus(targetType, key, favoriteId);
+      }
+    } catch (error) {
+      if (requestOwner === owner.current && requestEpoch === ensureFavoriteScope()) setActionError(error instanceof Error ? error.message : "收藏操作失败，请重试");
     } finally {
-      setLoading(false);
+      if (requestOwner === owner.current) setBusy(false);
     }
   };
-
-  const active = favoriteId != null;
+  const active = state.favoriteId != null;
+  const unknown = state.favoriteId === undefined;
+  const label = state.error ? "收藏状态加载失败，点击重试" : unknown ? "正在加载收藏状态" : active ? "取消收藏" : "收藏";
   return (
     <button
       type="button"
-      className={`favorite-toggle ${active ? "is-active" : ""} ${compact ? "is-compact" : ""}`}
-      onClick={toggle}
-      disabled={loading}
-      aria-label={active ? "取消收藏" : "收藏"}
-      aria-pressed={active}
-      title={error ?? (active ? "取消收藏" : "收藏")}
+      className={`favorite-toggle ${active ? "is-active is-favorited" : ""} ${compact ? "is-compact" : ""} ${className}`}
+      onClick={(event) => void toggle(event)}
+      disabled={busy || state.loading || (unknown && !state.error)}
+      aria-label={label}
+      aria-pressed={unknown ? undefined : active}
+      title={actionError ?? state.error ?? label}
     >
       <IconHeart width={compact ? 16 : 18} height={compact ? 16 : 18} fill={active ? "currentColor" : "none"} />
-      {!compact && <span>{active ? "已收藏" : "收藏"}</span>}
+      {!compact && <span>{state.error ? "重试收藏状态" : unknown ? "加载中…" : active ? "已收藏" : "收藏"}</span>}
+      {actionError && <span role="alert">{actionError}</span>}
     </button>
   );
 }

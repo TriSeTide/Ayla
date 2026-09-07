@@ -9,6 +9,13 @@ import type { SearchResults } from "./types";
 
 export type SearchType = "user" | "group" | "post" | "live" | "game";
 
+export type SearchPageResults = {
+  [Key in keyof SearchResults]?: NonNullable<SearchResults[Key]> & {
+    next_cursor: string | null;
+    has_more: boolean;
+  };
+};
+
 export function search(params: {
   q: string;
   types?: SearchType[];
@@ -18,4 +25,13 @@ export function search(params: {
   if (params.types && params.types.length > 0) qs.set("types", params.types.join(","));
   if (params.limit != null) qs.set("limit", String(params.limit));
   return apiRequest<SearchResults>(`/search/?${qs.toString()}`);
+}
+
+/** Opt-in grouped keyset pages; a continuation requests one type only. */
+export function searchPages(params: { q: string; types?: SearchType[]; limit?: number; cursor?: string | null }) {
+  const query = new URLSearchParams({ q: params.q, pagination: "cursor" });
+  if (params.types?.length) query.set("types", params.types.join(","));
+  if (params.limit != null) query.set("limit", String(params.limit));
+  if (params.cursor != null) query.set("cursor", params.cursor);
+  return apiRequest<SearchPageResults>(`/search/?${query}`);
 }

@@ -1,20 +1,25 @@
+import { ensureFavoriteScope, useFavoriteStatusStore } from "../stores/favoriteStatus";
 /**
  * FavoriteButton WS 订阅机制测试（任务 07）：
  * applyFavoriteChanged 更新模块缓存并通知挂载中的按钮，
  * 同账号其他界面的收藏操作实时反映到本按钮（live/voice/game/message 类型）。
  */
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as favoritesApi from "../api/favorites";
 import { applyFavoriteChanged, FavoriteButton } from "../components/FavoriteButton";
 
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn(),
+  getFavoriteStatuses: vi.fn(),
   addFavorite: vi.fn(),
   removeFavorite: vi.fn(),
 }));
 
 beforeEach(() => {
+  ensureFavoriteScope();
+  useFavoriteStatusStore.setState({ entries: new Map() });
+  vi.mocked(favoritesApi.getFavoriteStatuses).mockImplementation(async (target_type, ids) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) }));
   vi.mocked(favoritesApi.listFavorites).mockResolvedValue([]);
 });
 
@@ -57,5 +62,27 @@ describe("FavoriteButton WS 订阅（任务 07）", () => {
       applyFavoriteChanged("game", "2", 77);
     });
     await waitFor(() => expect(btn).toHaveAttribute("aria-pressed", "false"));
+  });
+
+  it("状态失败保持未知；点击只重试状态，不错误地新增收藏", async () => {
+    vi.mocked(favoritesApi.getFavoriteStatuses).mockRejectedValueOnce(new Error("暂时离线"));
+    render(<FavoriteButton targetType="post" targetId="5" compact />);
+    const button = await screen.findByRole("button", { name: "收藏状态加载失败，点击重试" });
+    expect(button).not.toHaveAttribute("aria-pressed");
+    fireEvent.click(button);
+    await screen.findByRole("button", { name: "收藏" });
+    expect(favoritesApi.addFavorite).not.toHaveBeenCalled();
+    expect(favoritesApi.getFavoriteStatuses).toHaveBeenCalledTimes(2);
+  });
+
+  it("延迟状态响应不能清掉读取期间到达的 WS 收藏", async () => {
+    let resolve!: (value: favoritesApi.FavoriteStatuses) => void;
+    vi.mocked(favoritesApi.getFavoriteStatuses).mockReturnValueOnce(new Promise((yes) => { resolve = yes; }));
+    render(<FavoriteButton targetType="post" targetId="6" compact />);
+    await waitFor(() => expect(favoritesApi.getFavoriteStatuses).toHaveBeenCalled());
+    act(() => applyFavoriteChanged("post", "6", 66));
+    const button = await screen.findByRole("button", { name: "取消收藏" });
+    await act(async () => resolve({ target_type: "post", statuses: { "6": null } }));
+    expect(button).toHaveAttribute("aria-pressed", "true");
   });
 });

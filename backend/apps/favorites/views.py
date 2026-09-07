@@ -2,6 +2,7 @@
 收藏 REST 视图（挂 /api/v1/favorites/，S6）。
 
 - GET  /favorites/：我的收藏列表，可选 ?type=post|live|voice|game|group 过滤；
+- GET  /favorites/?limit=20[&cursor=...]：按收藏时间/id 倒序的有界页；旧调用仍返回数组；
 - POST /favorites/：收藏 {target_type, target_id}，幂等（已收藏 200，新建 201）；
 - DELETE /favorites/<id>/：取消收藏（仅本人，非本人 403，不存在 404）。
 
@@ -11,6 +12,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.common.catalog_pagination import paginate_catalog
 
 from . import services
 from .models import Favorite
@@ -41,8 +44,15 @@ class FavoriteListView(APIView):
             if target_type not in {choice[0] for choice in Favorite.TARGET_CHOICES}:
                 return _bad_request("target_type 非法")
             qs = qs.filter(target_type=target_type)
-        serializer = FavoriteSerializer(qs, many=True, context={"request": request})
-        return Response(serializer.data)
+        page = paginate_catalog(
+            qs, request, resource="favorites", ordering="-created_at",
+            filters={"type": target_type or ""},
+        )
+        serializer = FavoriteSerializer(
+            page.rows if page is not None else qs,
+            many=True, context={"request": request},
+        )
+        return Response(page.response_data(serializer.data) if page is not None else serializer.data)
 
     def post(self, request):
         target_type = request.data.get("target_type")
@@ -62,6 +72,37 @@ class FavoriteListView(APIView):
         )
         serializer = FavoriteSerializer(favorite, context={"request": request})
         return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class FavoriteStatusView(APIView):
+    """POST /favorites/status/: only the caller's state for at most 100 IDs.
+
+    A bookmark's existence grants no access to its target. This endpoint does
+    not load or serialize target content and never enumerates other bookmarks.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        target_type = request.data.get("target_type")
+        target_ids = request.data.get("target_ids")
+        if target_type not in {choice[0] for choice in Favorite.TARGET_CHOICES}:
+            return _bad_request("target_type 非法")
+        if not isinstance(target_ids, list) or len(target_ids) > 100:
+            return _bad_request("target_ids 必须是最多 100 项的数组")
+        ids = []
+        for target_id in target_ids:
+            if isinstance(target_id, bool) or not isinstance(target_id, (str, int)):
+                return _bad_request("target_ids 包含非法 ID")
+            value = str(target_id).strip()
+            if not value or len(value) > 64:
+                return _bad_request("target_ids 包含非法 ID")
+            ids.append(value)
+        states = dict.fromkeys(ids)
+        states.update(Favorite.objects.filter(
+            user=request.user, target_type=target_type, target_id__in=states,
+        ).values_list("target_id", "id"))
+        return Response({"target_type": target_type, "statuses": states})
 
 
 class FavoriteDetailView(APIView):

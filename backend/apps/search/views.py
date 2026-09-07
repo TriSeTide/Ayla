@@ -5,8 +5,9 @@ S5 聚合搜索视图 —— `GET /api/v1/search/`。
 - `q`：关键字，必填；strip 后为空 → 400 `{"detail": "q 不能为空"}`；
 - `types`：逗号分隔类型子集（user/group/post/live/game），缺省=全部，非法忽略；
 - `limit`：每组截断条数，默认 10，上限 50，下限 1。
+- `pagination=cursor`：显式启用每组 SQL keyset 分页；`cursor` 续页须指定单一 `types`。
 
-返回：按请求类型给出 `{items, total}` 分组（只含被请求的类型）。
+返回：旧调用保持 `{items, total}`；游标模式每组附加 `next_cursor, has_more`。
 """
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -14,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services
+from .pagination import parse_page_options
 
 
 class SearchView(APIView):
@@ -28,19 +30,20 @@ class SearchView(APIView):
         q = q.strip()
 
         types = services.parse_types(request.query_params.get("types"))
+        page = parse_page_options(request, types)
         limit = services.parse_limit(request.query_params.get("limit"))
 
         payload: dict = {}
         # 顺序与契约一致：users/groups/posts/lives/games，仅输出被请求的类型
         for type_name in types:
             if type_name == services.TYPE_USERS:
-                payload["users"] = services.search_users(q, limit, request)
+                payload["users"] = services.search_users(q, limit, request, page)
             elif type_name == services.TYPE_GROUPS:
-                payload["groups"] = services.search_groups(q, limit)
+                payload["groups"] = services.search_groups(q, limit, request, page)
             elif type_name == services.TYPE_POSTS:
-                payload["posts"] = services.search_posts(q, limit, request)
+                payload["posts"] = services.search_posts(q, limit, request, page)
             elif type_name == services.TYPE_LIVES:
-                payload["lives"] = services.search_lives(q, limit, request)
+                payload["lives"] = services.search_lives(q, limit, request, page)
             elif type_name == services.TYPE_GAMES:
-                payload["games"] = services.search_games(q, limit, request)
+                payload["games"] = services.search_games(q, limit, request, page)
         return Response(payload)
