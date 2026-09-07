@@ -13,6 +13,7 @@
  * 纪律：LiveKit token 是媒体凭据，本层不打日志、不缓存跨房间复用。
  */
 import { apiRequest } from "./client";
+import { directoryQuery, type DirectoryPage, type DirectoryParams } from "./directory";
 import type {
   ElysiaVoiceCallCreateResult,
   ElysiaVoiceCallStatus,
@@ -30,6 +31,10 @@ import type {
 export function listVoiceChannels(params?: { scope?: string }) {
   const query = params?.scope ? `?scope=${encodeURIComponent(params.scope)}` : "";
   return apiRequest<VoiceChannelDescriptor[]>(`/voice/channels/${query}`);
+}
+
+export function listVoiceChannelsPage(params: DirectoryParams = {}) {
+  return apiRequest<DirectoryPage<VoiceChannelDescriptor>>(`/voice/channels/?${directoryQuery(params)}`);
 }
 
 /** POST /voice/channels/ —— 建频道（name 空 → 400；group 可选，群内创建归属该群） */

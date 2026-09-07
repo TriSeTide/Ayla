@@ -9,18 +9,13 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { useAuthStore } from "./stores/auth";
 import { useChatStore } from "./stores/chat";
-import { useVoiceStore } from "./stores/voice";
-import { useLiveStore } from "./stores/live";
 import { usePostsStore } from "./stores/posts";
-import { useBoardgameStore } from "./stores/boardgame";
+import { loadDirectory } from "./stores/directory";
 import { chatWS, subscribeGroupConversations } from "./ws/chat";
 import { presenceClient } from "./ws/presence";
 import { listConversations } from "./api/chat";
-import { listVoiceChannels } from "./api/voice";
-import { listLiveChannels } from "./api/live";
 import { listPosts } from "./api/posts";
 import { listFavorites } from "./api/favorites";
-import { listGameRooms } from "./api/boardgame";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
@@ -48,23 +43,20 @@ async function bootstrap() {
     // 并发预加载核心列表（含帖子信息流/收藏/桌游房，进各页面秒开）
     const loadCoreData = async () => {
       try {
-        const [convs, voices, lives, posts, favs, games] = await Promise.all([
+        const [convs, , , posts, favs] = await Promise.all([
           listConversations(),
-          listVoiceChannels(),
-          listLiveChannels(),
+          loadDirectory("voice"),
+          loadDirectory("live"),
           listPosts({ scope: "feed", limit: 20 }),
           listFavorites("post"),
-          listGameRooms(),
+          loadDirectory("game"),
         ]);
         useChatStore.getState().setConversations(convs);
         // 订阅所有群：主页/宽屏 ServerRail 不打开群聊天也能收到群消息 message.new，
         // 红点/轮播消息卡/排序实时刷新。
         subscribeGroupConversations(convs);
-        useVoiceStore.getState().setChannels(voices);
-        useLiveStore.getState().setChannels(lives);
         usePostsStore.getState().setPage(posts.results, posts.next_cursor, posts.has_more);
         usePostsStore.getState().loadFavorites(favs);
-        useBoardgameStore.getState().reconcileRooms(games);
       } catch (err) {
         console.error("[预加载] 核心数据加载失败", err);
         // 不阻断流程，用户访问页面时会重试

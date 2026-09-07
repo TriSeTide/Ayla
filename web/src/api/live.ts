@@ -9,6 +9,7 @@
  * - 弹幕发送走 REST（落库后服务端广播 WS），GET 历史返回裸数组、升序、无分页游标。
  */
 import { apiRequest } from "./client";
+import { directoryQuery, type DirectoryPage, type DirectoryParams } from "./directory";
 import type {
   DanmakuItem,
   LiveChannelDescriptor,
@@ -55,6 +56,12 @@ export function listLiveChannels(params?: { onlyLive?: boolean; scope?: string; 
   if (params?.owner) queryParts.push(`owner=${encodeURIComponent(params.owner)}`);
   const query = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
   return apiRequest<LiveChannelDescriptor[]>(`/live/channels/${query}`);
+}
+
+export function listLiveChannelsPage(params: DirectoryParams & { onlyLive?: boolean } = {}) {
+  const query = directoryQuery(params);
+  if (params.onlyLive) query.set("only_live", "1");
+  return apiRequest<DirectoryPage<LiveChannelDescriptor>>(`/live/channels/?${query}`);
 }
 
 /** GET /live/channels/<id>/ —— 频道详情（owner 可见 stream_key/rtmp_url，他人为 null） */

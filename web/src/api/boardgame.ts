@@ -6,6 +6,7 @@
  * 玩法引擎、WS 对局通道非本期目标（进入房间后前端为占位界面）。
  */
 import { apiRequest } from "./client";
+import { directoryQuery, type DirectoryPage, type DirectoryParams } from "./directory";
 import type { GameRoom, GameRoomMember } from "./types";
 
 /** GET /rooms/ —— 房间列表（mine=1 仅我在局；?scope=group:<id> 群内过滤；?owner=<id> 他人主页） */
@@ -16,6 +17,10 @@ export function listGameRooms(params?: { mine?: boolean; scope?: string; owner?:
   if (params?.owner) queryParts.push(`owner=${encodeURIComponent(params.owner)}`);
   const qs = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
   return apiRequest<GameRoom[]>(`/boardgame/rooms/${qs}`);
+}
+
+export function listGameRoomsPage(params: DirectoryParams = {}) {
+  return apiRequest<DirectoryPage<GameRoom>>(`/boardgame/rooms/?${directoryQuery(params)}`);
 }
 
 /** POST /rooms/ —— 创建房间（group 归属群；game_type 默认 boardgame） */
