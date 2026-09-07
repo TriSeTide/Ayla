@@ -7,13 +7,18 @@
 - POST /search/ 按 tag/名称检索；
 - POST /packs/{id}/set_system/ 系统包管理（管理员）。
 """
-from django.db.models import Q
+from types import SimpleNamespace
+
+from django.db.models import Case, Count, F, IntegerField, Q, Value, When
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
 
 from apps.media.models import MediaObject
 from apps.media.services import get_media_or_none
+from apps.common.catalog_pagination import paginate_catalog
+from apps.common.media_pagination import paginate_media
 
 from . import services
 from .models import EmojiItem, EmojiPack
@@ -42,12 +47,29 @@ class EmojiPackListView(APIView):
     """GET /emoji/packs/ —— 我的 + 系统包。POST —— 建个人包。"""
 
     def get(self, request):
+        page_request = request
+        if "before_id" in request.query_params:
+            raise ValidationError({"detail": "表情包目录不支持 before_id"})
+        if "pagination" in request.query_params:
+            if request.query_params.getlist("pagination") != ["cursor"]:
+                raise ValidationError({"detail": "pagination 必须为 cursor 且只能提供一次"})
+            params = request.query_params.copy()
+            if "limit" not in params:
+                params["limit"] = "20"
+            page_request = SimpleNamespace(user=request.user, query_params=params)
         packs = (
             EmojiPack.objects.filter(Q(is_system=True) | Q(owner=request.user))
-            .prefetch_related("items__media")
             .order_by("-is_system", "-created_at")
         )
-        return Response(EmojiPackSerializer(packs, many=True).data)
+        page = paginate_catalog(
+            packs.annotate(_item_count=Count("items"), _catalog_rank=Case(
+                When(is_system=True, then=Value(0)), default=Value(1), output_field=IntegerField(),
+            ), _catalog_time=F("created_at")), page_request,
+            resource="emoji-packs", ordering="activity", filters={},
+        )
+        if page is not None:
+            return Response(page.response_data(EmojiPackBriefSerializer(page.rows, many=True).data))
+        return Response(EmojiPackSerializer(packs.prefetch_related("items__media"), many=True).data)
 
     def post(self, request):
         name = (request.data.get("name") or "").strip()
@@ -71,7 +93,9 @@ class EmojiPackDetailView(APIView):
         if not services.can_view_pack(request.user, pack):
             return Response({"detail": "无权访问"}, status=status.HTTP_403_FORBIDDEN)
         items = pack.items.select_related("media").order_by("-created_at")
-        return Response(EmojiItemSerializer(items, many=True).data)
+        page = paginate_media(items, request, resource="emoji-items", scope=str(pack.pk), default_limit=30)
+        data = EmojiItemSerializer(page.rows if page else items, many=True).data
+        return Response(page.response_data(data) if page else data)
 
 
 class EmojiItemCreateView(APIView):
@@ -130,6 +154,18 @@ class EmojiSearchView(APIView):
 
     def post(self, request):
         keyword = request.data.get("keyword", "")
+        if any(key in request.query_params for key in ("pagination", "cursor", "before_id")):
+            if not isinstance(keyword, str) or len(keyword) > 200:
+                return Response({"detail": "keyword 必须是不超过 200 字的文本"}, status=status.HTTP_400_BAD_REQUEST)
+            keyword = keyword.strip()
+            visible = EmojiPack.objects.filter(Q(is_system=True) | Q(owner=request.user))
+            items = EmojiItem.objects.filter(pack__in=visible).select_related("pack", "media")
+            if keyword:
+                items = items.filter(Q(tag__contains=keyword) | Q(pack__name__contains=keyword))
+            page = paginate_media(items, request, resource="emoji-search", scope=keyword, default_limit=30)
+            results = [{**EmojiItemSerializer(item).data, "pack_id": str(item.pack_id),
+                        "pack_name": item.pack.name, "is_system": item.pack.is_system} for item in page.rows]
+            return Response(page.response_data(results))
         results = services.search_emoji(request.user, str(keyword))
         payload = [
             {
@@ -167,12 +203,12 @@ def _group_member_role(user, conv):
     return member.role
 
 
-def _group_pack_payload(user, pack):
+def _group_pack_payload(user, pack, *, summary=False):
     """群表情包响应：pack + 权限信息（can_upload/can_delete/allow_member_upload）。"""
     from .services import can_delete_group_item, can_manage_pack
 
     return {
-        "pack": EmojiPackSerializer(pack).data,
+        "pack": (EmojiPackBriefSerializer if summary else EmojiPackSerializer)(pack).data,
         "allow_member_upload": pack.allow_member_upload,
         "can_upload": can_manage_pack(user, pack),
         "can_delete": can_delete_group_item(user, pack),
@@ -194,7 +230,7 @@ class GroupEmojiPackView(APIView):
             return Response(
                 {"detail": "group_pack_not_found"}, status=status.HTTP_404_NOT_FOUND
             )
-        return Response(_group_pack_payload(request.user, pack))
+        return Response(_group_pack_payload(request.user, pack, summary=request.query_params.get("summary") == "1"))
 
     def patch(self, request, conv_id):
         conv = _conv_or_404(conv_id)
@@ -213,7 +249,7 @@ class GroupEmojiPackView(APIView):
         pack = services.get_or_create_group_pack(conv)
         pack.allow_member_upload = allow
         pack.save(update_fields=["allow_member_upload"])
-        return Response(_group_pack_payload(request.user, pack))
+        return Response(_group_pack_payload(request.user, pack, summary=request.query_params.get("summary") == "1"))
 
 
 class GroupEmojiItemCreateView(APIView):
@@ -221,6 +257,19 @@ class GroupEmojiItemCreateView(APIView):
 
     权限：群成员 + 群主/管理员，或群主开启 allow_member_upload 后的普通成员。
     """
+
+    def get(self, request, conv_id):
+        conv = _conv_or_404(conv_id)
+        if conv is None:
+            return Response({"detail": "群不存在"}, status=status.HTTP_404_NOT_FOUND)
+        if _group_member_role(request.user, conv) is None:
+            return _forbidden()
+        pack = EmojiPack.objects.filter(group=conv).first()
+        if pack is None:
+            return Response({"detail": "group_pack_not_found"}, status=status.HTTP_404_NOT_FOUND)
+        page = paginate_media(pack.items.select_related("media"), request, resource="group-emoji-items",
+                              scope=str(conv.pk), default_limit=30, required=True)
+        return Response(page.response_data(EmojiItemSerializer(page.rows, many=True).data))
 
     def post(self, request, conv_id):
         conv = _conv_or_404(conv_id)

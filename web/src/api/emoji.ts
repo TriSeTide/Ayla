@@ -10,6 +10,33 @@
  */
 import { apiRequest } from "./client";
 import type { EmojiItem, EmojiPack } from "./types";
+import { mediaPageQuery, type MediaPage, type MediaPageParams } from "./mediaPagination";
+
+export type EmojiPackSummary = Omit<EmojiPack, "items">;
+export type EmojiSearchHit = EmojiItem & { pack_id: string; pack_name: string; is_system: boolean };
+export type GroupEmojiPackSummaryPayload = Omit<GroupEmojiPackPayload, "pack"> & { pack: EmojiPackSummary };
+
+export function listEmojiPacksPage(params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<EmojiPackSummary>>(`/emoji/packs/?${mediaPageQuery({ limit: 20, ...params })}`);
+}
+
+export function listEmojiItemsPage(packId: string, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<EmojiItem>>(`/emoji/packs/${encodeURIComponent(packId)}/items/?${mediaPageQuery({ limit: 30, ...params })}`);
+}
+
+export function searchEmojiPage(keyword: string, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<EmojiSearchHit>>(`/emoji/search/?${mediaPageQuery({ limit: 30, ...params })}`, {
+    method: "POST", body: { keyword },
+  });
+}
+
+export function getGroupEmojiPackSummary(convId: string) {
+  return apiRequest<GroupEmojiPackSummaryPayload>(`/emoji/groups/${seg(convId)}/pack/?summary=1`);
+}
+
+export function listGroupEmojiItemsPage(convId: string, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<EmojiItem>>(`/emoji/groups/${seg(convId)}/pack/items/?${mediaPageQuery({ limit: 30, ...params })}`);
+}
 
 /** 群表情包响应：pack + 权限信息 */
 export interface GroupEmojiPackPayload {
@@ -33,7 +60,7 @@ export function getGroupEmojiPack(convId: string) {
 
 /** PATCH 群主设置"允许普通群成员上传"开关 */
 export function setGroupEmojiUploadPolicy(convId: string, allowMemberUpload: boolean) {
-  return apiRequest<GroupEmojiPackPayload>(`/emoji/groups/${seg(convId)}/pack/`, {
+  return apiRequest<GroupEmojiPackSummaryPayload>(`/emoji/groups/${seg(convId)}/pack/?summary=1`, {
     method: "PATCH",
     body: { allow_member_upload: allowMemberUpload },
   });

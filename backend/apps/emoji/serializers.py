@@ -55,7 +55,8 @@ class EmojiPackBriefSerializer(serializers.ModelSerializer):
         fields = ["id", "owner_id", "name", "is_system", "item_count", "created_at"]
 
     def get_item_count(self, obj) -> int:
-        return obj.items.count()
+        annotated = getattr(obj, "_item_count", None)
+        return annotated if annotated is not None else obj.items.count()
 
 
 class EmojiSearchResultSerializer(serializers.Serializer):

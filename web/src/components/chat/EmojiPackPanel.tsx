@@ -20,11 +20,15 @@ import { ResourceImage } from "../ResourceImage";
 import {
   addGroupEmojiItem,
   deleteGroupEmojiItem,
-  getGroupEmojiPack,
-  type GroupEmojiPackPayload,
+  getGroupEmojiPackSummary,
+  listGroupEmojiItemsPage,
+  type GroupEmojiPackSummaryPayload,
 } from "../../api/emoji";
 import type { EmojiItem } from "../../api/types";
 import { IconClose, IconPlus } from "../icons";
+import { useAuthStore } from "../../stores/auth";
+import { usePagedMediaList } from "../../hooks/usePagedMediaList";
+import { DirectoryLoadMore } from "../DirectoryLoadMore";
 
 interface EmojiPackPanelProps {
   convId: string;
@@ -36,33 +40,57 @@ interface EmojiPackPanelProps {
 }
 
 export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPackPanelProps) {
-  const [payload, setPayload] = useState<GroupEmojiPackPayload | null>(null);
+  const userId = useAuthStore((state) => state.currentUser?.id ?? "");
+  const scope = `group-emoji:${userId}:${convId}`;
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const metaGeneration = useRef(0);
+  const [metadata, setMetadata] = useState<{ scope: string; payload: GroupEmojiPackSummaryPayload | null; loaded: boolean; error: string | null }>({
+    scope, payload: null, loaded: false, error: null,
+  });
+  const metadataCurrent = metadata.scope === scope;
+  const payload = metadataCurrent ? metadata.payload : null;
+  const metaLoaded = metadataCurrent && metadata.loaded;
+  const metaError = metadataCurrent ? metadata.error : null;
   const [uploading, setUploading] = useState(false);
   /** 多选上传进度（"2/3"）；单张上传时为空 */
   const [uploadProgress, setUploadProgress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const canUpload = payload ? payload.can_upload : myRole === "owner" || myRole === "admin";
+  const canUpload = payload ? payload.can_upload : metaLoaded && !metaError && (myRole === "owner" || myRole === "admin");
   const canDelete = payload?.can_delete ?? false;
-  const items: EmojiItem[] = payload?.pack.items ?? [];
+  const fetchItems = useCallback((cursor: string | null) => listGroupEmojiItemsPage(convId, { cursor, limit: 30 }), [convId]);
+  const pages = usePagedMediaList(`${scope}:${payload?.pack.id ?? "missing"}`, fetchItems, Boolean(payload));
+  const items = pages.items;
 
-  const load = useCallback(() => {
-    getGroupEmojiPack(convId)
-      .then((data) => {
-        setPayload(data);
-      })
-      .catch((e) => {
-        // 包未创建（404）→ 空态（payload 保持 null）；其他错误展示
-        if (!(e instanceof ApiError && e.status === 404)) {
-          setError(e instanceof Error ? e.message : "加载群表情包失败");
-        }
-      });
-  }, [convId]);
+  const load = useCallback(async () => {
+    const generation = ++metaGeneration.current;
+    setMetadata((previous) => ({ ...previous, scope, error: null }));
+    try {
+      const data = await getGroupEmojiPackSummary(convId);
+      if (currentScope.current !== scope || generation !== metaGeneration.current) return;
+      setMetadata({ scope, payload: data, loaded: true, error: null });
+      return data;
+    } catch (e) {
+      if (currentScope.current !== scope || generation !== metaGeneration.current) return;
+      const missing = e instanceof ApiError && e.status === 404 && e.message === "group_pack_not_found";
+      setMetadata((previous) => ({ scope, payload: previous.scope === scope ? previous.payload : null,
+        loaded: true, error: missing ? null : e instanceof Error ? e.message : "加载群表情包失败" }));
+    }
+  }, [convId, scope]);
+
+  const refresh = useCallback(async () => {
+    const updated = await load();
+    if (updated && currentScope.current === scope && updated.pack.id === payload?.pack.id) await pages.refresh();
+  }, [load, scope, payload?.pack.id, pages.refresh]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    setMetadata({ scope, payload: null, loaded: false, error: null });
+    setUploading(false); setUploadProgress(""); setError(null);
+    void load();
+    return () => { metaGeneration.current += 1; };
+  }, [load, scope]);
 
   /**
    * 选图（支持多选）→ 逐张三步上传 kind=emoji → 加入群表情包 → 刷新。
@@ -80,12 +108,15 @@ export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPac
     let done = 0;
     const errors: string[] = [];
     for (const file of valid) {
+      if (currentScope.current !== scope) return;
       try {
         const uploaded = await uploadMediaFile(file, "emoji");
+        if (currentScope.current !== scope) return;
         await addGroupEmojiItem(convId, uploaded.media_id);
       } catch (e) {
         errors.push(e instanceof Error ? e.message : "上传失败");
       }
+      if (currentScope.current !== scope) return;
       done += 1;
       setUploadProgress(valid.length > 1 ? `${done}/${valid.length}` : "");
     }
@@ -94,7 +125,7 @@ export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPac
     if (errors.length > 0) {
       setError(`部分表情上传失败：${errors[0]}`);
     }
-    load();
+    await refresh();
   };
 
   /**
@@ -106,7 +137,9 @@ export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPac
     void sendMessage(convId, "", {
       type: "emoji",
       mediaId: item.media.media_id,
-    }, subgroupId);
+    }, subgroupId).catch((reason: unknown) => {
+      if (currentScope.current === scope) setError(reason instanceof Error ? reason.message : "发送表情失败");
+    });
   };
 
   const handleDelete = async (item: EmojiItem) => {
@@ -114,9 +147,11 @@ export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPac
     setError(null);
     try {
       await deleteGroupEmojiItem(convId, item.id);
-      load();
+      if (currentScope.current !== scope) return;
+      pages.updateItems((rows) => rows.filter((row) => row.id !== item.id));
+      await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "删除表情失败");
+      if (currentScope.current === scope) setError(e instanceof Error ? e.message : "删除表情失败");
     }
   };
 
@@ -189,7 +224,10 @@ export function EmojiPackPanel({ convId, myRole, subgroupId, onClose }: EmojiPac
         )}
       </div>
 
-      {items.length === 0 && (
+      <DirectoryLoadMore {...pages} loading={!metaLoaded || pages.loading} error={metaError ?? pages.error}
+        invalidated={false} refresh={refresh} loadMore={metaError ? refresh : pages.loadMore} retainCompletedSpace={false} />
+
+      {metaLoaded && !metaError && !pages.loading && !pages.error && items.length === 0 && (
         <p className="emoji-pack-empty">
           {canUpload ? "还没有表情，点加号上传" : "群内还没有表情包"}
         </p>
