@@ -1,3 +1,5 @@
+import * as chatApi from "../api/chat";
+import { disposeSocialTracking } from "../stores/social";
 /**
  * QuickMessagesSheet —— 红点快捷消息栏测试（R-QM）。
  *
@@ -60,6 +62,11 @@ vi.mock("../components/chat/PrivateChatPane", () => ({
 }));
 
 vi.mock("../api/chat", () => ({
+  listConversationsPage: vi.fn(async (params: { type?: string }) => { const all = await chatApi.listConversations(); const results = all.filter((row) => !params.type || params.type === "all" || row.type === params.type); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listMyInvitesPage: vi.fn(async () => { const results = await chatApi.listMyInvites(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listLeaveNoticesPage: vi.fn(async () => { const results = await chatApi.listLeaveNotices(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listManagedJoinRequestsPage: vi.fn(async () => { const results = await chatApi.listJoinRequests("fixture-group"); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listJoinRequestsPage: vi.fn(async (id: string) => { const results = await chatApi.listJoinRequests(id); return { results, total: results.length, has_more: false, next_cursor: null }; }),
   listConversations: vi.fn().mockResolvedValue([]),
   listMyInvites: vi.fn().mockResolvedValue([]),
   listLeaveNotices: vi.fn().mockResolvedValue([]),
@@ -71,6 +78,8 @@ vi.mock("../api/chat", () => ({
 }));
 
 vi.mock("../api/users", () => ({
+  listFriendsPage: vi.fn(async () => { const results = await usersApi.listFriends(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listFriendRequestsPage: vi.fn(async () => { const results = await usersApi.listFriendRequests(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
   listFriends: vi.fn().mockResolvedValue([]),
   listFriendRequests: vi.fn().mockResolvedValue([]),
   actionFriendRequest: vi.fn().mockResolvedValue({ detail: "ok", status: "accepted" }),
@@ -108,6 +117,7 @@ const req: FriendRequest = {
 };
 
 beforeEach(() => {
+  disposeSocialTracking();
   useChatStore.setState({ conversations: [] });
   useAuthStore.setState({ currentUser: req.to_user, accessToken: "acc" });
   useBadgesStore.setState({ badges: null, fetch: vi.fn() } as never);

@@ -11,7 +11,7 @@
  */
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ConversationSummary, ElysiaProfile, Friendship, UserPublic } from "../api/types";
+import type { ChatMessage, ConversationSummary, ElysiaProfile, UserPublic } from "../api/types";
 import { PrivateChatPane } from "../components/chat/PrivateChatPane";
 import { useChatStore } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
@@ -19,10 +19,14 @@ import { useAuthStore } from "../stores/auth";
 /** 捕获 chatWS.onFrame 注册的 handler（vi.mock hoisted，测试里 fire typing 帧用） */
 const ws = vi.hoisted(() => ({
   frameHandler: null as ((frame: unknown) => void) | null,
+  onRecall: null as ((message: ChatMessage) => void) | null,
 }));
 
 vi.mock("../components/chat/MessageList", () => ({
-  MessageList: () => <div data-testid="message-list" />,
+  MessageList: (props: { onRecall: (message: ChatMessage) => void }) => {
+    ws.onRecall = props.onRecall;
+    return <div data-testid="message-list" />;
+  },
 }));
 vi.mock("../components/chat/MessageInput", () => ({
   MessageInput: () => <div data-testid="message-input" />,
@@ -45,8 +49,10 @@ vi.mock("../ws/chat", () => ({
   },
 }));
 
+vi.mock("../api/chat", () => ({ getConversationMetadata: vi.fn(async () => useChatStore.getState().conversations[0]) }));
+
 vi.mock("../api/users", () => ({
-  listFriends: vi.fn(),
+  getUserDetail: vi.fn(),
 }));
 
 vi.mock("../api/elysia", () => ({
@@ -55,6 +61,7 @@ vi.mock("../api/elysia", () => ({
 
 import * as usersApi from "../api/users";
 import * as elysiaApi from "../api/elysia";
+import { recallMessage } from "../hooks/useChat";
 
 function user(id: string, nickname = "友友"): UserPublic {
   return {
@@ -86,10 +93,6 @@ function privateConv(peerId: string): ConversationSummary {
   };
 }
 
-function friendshipOf(friendId: string): Friendship {
-  return { id: 1, user: user(friendId), created_at: "2026-01-01T00:00:00Z" };
-}
-
 function elysiaProfileOf(userId: string, enabled = true): ElysiaProfile {
   return {
     id: 1,
@@ -109,8 +112,25 @@ function renderPane() {
 }
 
 describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
+  it("撤回失败后重试开始清除旧提示，成功后不保留旧失败", async () => {
+    vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "friend" });
+    vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
+    const message: ChatMessage = { id: "recall-fixture", conversation_id: "c1", sender_id: "me", type: "text", content: "合成撤回内容", media_id: null, media: null, reply_to: null, status: "sent", seq: 1, created_at: "2026-09-08T00:00:00Z" };
+    vi.mocked(recallMessage).mockRejectedValueOnce(new Error("合成撤回失败"));
+    renderPane();
+    await act(async () => ws.onRecall!(message));
+    expect(await screen.findByRole("alert")).toHaveTextContent("合成撤回失败");
+    let resolveRecall!: (value: ChatMessage) => void;
+    vi.mocked(recallMessage).mockReturnValueOnce(new Promise((resolve) => { resolveRecall = resolve; }));
+    act(() => ws.onRecall!(message));
+    expect(screen.queryByText(/合成撤回失败/)).toBeNull();
+    await act(async () => resolveRecall({ ...message, status: "recalled" }));
+    expect(screen.queryByText(/合成撤回失败/)).toBeNull();
+    expect(recallMessage).toHaveBeenLastCalledWith("c1", "recall-fixture");
+  });
+
   it("对端不在好友列表 → 显示提示且无输入区", async () => {
-    vi.mocked(usersApi.listFriends).mockResolvedValue([]);
+    vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "none" });
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
     renderPane();
     await waitFor(() =>
@@ -120,7 +140,7 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
   });
 
   it("对端是好友 → 正常渲染输入区，无提示", async () => {
-    vi.mocked(usersApi.listFriends).mockResolvedValue([friendshipOf("peer1")]);
+    vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "friend" });
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
     renderPane();
     await waitFor(() => expect(screen.getByTestId("message-input")).toBeInTheDocument());
@@ -128,7 +148,7 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
   });
 
   it("对端是爱莉 → 放行（非好友也渲染输入区，防回归）", async () => {
-    vi.mocked(usersApi.listFriends).mockResolvedValue([]);
+    vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "none" });
     vi.mocked(elysiaApi.getElysiaProfile).mockResolvedValue(elysiaProfileOf("peer1"));
     renderPane();
     await waitFor(() => expect(screen.getByTestId("message-input")).toBeInTheDocument());
@@ -136,7 +156,7 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
   });
 
   it("好友列表加载中 → 不禁用输入（未知态，后端 403 兜底）", async () => {
-    vi.mocked(usersApi.listFriends).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(usersApi.getUserDetail).mockImplementation(() => new Promise(() => {}));
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
     renderPane();
     // 等待加载 effect 跑完（渲染后立即有输入区）
@@ -146,7 +166,7 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
 
   it("自己输入不显示「对方正在输入」（忽略自己的 typing 帧）", async () => {
     useAuthStore.setState({ currentUser: user("me") });
-    vi.mocked(usersApi.listFriends).mockResolvedValue([friendshipOf("peer1")]);
+    vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "friend" });
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
     renderPane();
     await waitFor(() => expect(screen.getByTestId("message-input")).toBeInTheDocument());
@@ -162,7 +182,7 @@ describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
 
   it("仅当前会话的他人 typing 帧在顶栏显示「对方正在输入」", async () => {
     useAuthStore.setState({ currentUser: user("me") });
-    vi.mocked(usersApi.listFriends).mockResolvedValue([friendshipOf("peer1")]);
+    vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "friend" });
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
     renderPane();
     await waitFor(() => expect(screen.getByTestId("message-input")).toBeInTheDocument());

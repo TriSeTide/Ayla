@@ -130,6 +130,16 @@ export class ChatWSClient {
   private hasConnectedOnce = false;
   /** 已订阅的会话 id 集合（重连后据此发 resume） */
   private subscribed = new Set<string>();
+  /** Transport heads are independent of whether a conversation's history/UI page was loaded. */
+  private subscriptionHeads = new Map<string, number>();
+  private registrationRevision = 0;
+  private registrationPending: Promise<void> | null = null;
+  private registrationRetry: ReturnType<typeof setTimeout> | null = null;
+  private registrationAttempt = 0;
+  private summaryReconciliations = new Map<string, Promise<void>>();
+  private presenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private presencePending = false;
+  private presenceDirty = false;
   private handlers = new Set<ChatFrameHandler>();
 
   /** 连接状态（供 UI 展示"连接中"） */
@@ -144,6 +154,7 @@ export class ChatWSClient {
     this.connection = "connecting";
     useRealtimeStore.getState().setStatus("chat", "connecting");
     this.open(access);
+    void this.registerAuthorizedGroups();
   }
 
   private open(access: string) {
@@ -160,7 +171,8 @@ export class ChatWSClient {
     ws.onopen = () => {
       this.attempt = 0;
       this.connection = "online";
-      useRealtimeStore.getState().setStatus("chat", "online");
+      useRealtimeStore.getState().setStatus("chat", this.registrationRetry ? "failed" : "online",
+        this.registrationRetry ? "群消息订阅未完成，正在重试" : null);
       this.startHeartbeat();
       if (this.hasConnectedOnce) {
         // 断线重连：对已订阅会话逐条 resume，补发断线期间漏掉的消息。
@@ -177,7 +189,8 @@ export class ChatWSClient {
         // 正是「刷新群聊时一口气加载所有历史消息」的根因。
         this.hasConnectedOnce = true;
         if (this.subscribed.size > 0) {
-          this.sendJson({ type: "subscribe", conversation_ids: [...this.subscribed] });
+          const ids = [...this.subscribed];
+          for (let offset = 0; offset < ids.length; offset += 100) this.sendJson({ type: "subscribe", conversation_ids: ids.slice(offset, offset + 100) });
         }
       }
     };
@@ -240,7 +253,7 @@ export class ChatWSClient {
   /** 订阅一批会话（打开会话/加载列表时调用，幂等） */
   subscribe(convIds: string[]) {
     for (const id of convIds) this.subscribed.add(id);
-    this.sendJson({ type: "subscribe", conversation_ids: convIds });
+    for (let offset = 0; offset < convIds.length; offset += 100) this.sendJson({ type: "subscribe", conversation_ids: convIds.slice(offset, offset + 100) });
   }
 
   /** 退订单个会话（关闭会话时调用） */
@@ -256,8 +269,112 @@ export class ChatWSClient {
   }
 
   private sendResume(convId: string) {
-    const lastSeq = useMessageStore.getState().buckets[convId]?.lastSeq ?? 0;
+    const lastSeq = Math.max(this.subscriptionHeads.get(convId) ?? 0, useMessageStore.getState().buckets[convId]?.lastSeq ?? 0);
+    // An unacknowledged subscription has no reliable resume baseline. Subscribe
+    // first; never turn an unloaded visible page into replay-from-zero history.
+    if (lastSeq === 0 && !this.subscriptionHeads.has(convId)) {
+      this.sendJson({ type: "subscribe", conversation_ids: [convId] });
+      return;
+    }
     this.sendJson({ type: "resume", conversation_id: convId, last_message_seq: lastSeq });
+  }
+
+  /** Register compact authorized group IDs; no visible directory is auto-drained. */
+  registerAuthorizedGroups(): Promise<void> {
+    if (this.registrationPending) return this.registrationPending;
+    const actor = useAuthStore.getState().currentUser?.id;
+    if (!actor || !useAuthStore.getState().accessToken || this.manualClosed) return Promise.resolve();
+    const revision = this.registrationRevision;
+    const current = () => revision === this.registrationRevision && !this.manualClosed
+      && useAuthStore.getState().currentUser?.id === actor && !!useAuthStore.getState().accessToken;
+    const task = (async () => {
+      let cursor: string | null = null;
+      const cursors = new Set<string>();
+      do {
+        const page = await chatApi.listConversationSubscriptionsPage({ limit: 100, cursor });
+        if (!current()) return;
+        for (const item of page.results) {
+          if (!this.subscriptionHeads.has(item.id)) this.subscriptionHeads.set(item.id, item.last_message_seq);
+        }
+        this.subscribe(page.results.map((item) => item.id));
+        if (!page.has_more) break;
+        if (!page.next_cursor || cursors.has(page.next_cursor)) throw new Error("群消息订阅分页无效");
+        cursors.add(page.next_cursor);
+        cursor = page.next_cursor;
+      } while (current());
+      if (current()) {
+        this.registrationAttempt = 0;
+        if (this.registrationRetry) { clearTimeout(this.registrationRetry); this.registrationRetry = null; }
+        useRealtimeStore.getState().setStatus("chat", this.connection === "online" ? "online" : "connecting");
+      }
+    })().catch(() => {
+      if (!current()) return;
+      useRealtimeStore.getState().setStatus("chat", "failed", "群消息订阅未完成，正在重试");
+      if (!this.registrationRetry) this.registrationRetry = setTimeout(() => {
+        this.registrationRetry = null;
+        void this.registerAuthorizedGroups();
+      }, Math.min(5000 * 2 ** Math.min(this.registrationAttempt++, 4), 60_000));
+    }).finally(() => { if (this.registrationPending === task) this.registrationPending = null; });
+    this.registrationPending = task;
+    return task;
+  }
+
+  private reconcileConversation(convId: string) {
+    if (this.summaryReconciliations.has(convId)) return;
+    const actor = useAuthStore.getState().currentUser?.id;
+    const revision = this.registrationRevision;
+    const task = chatApi.getConversationSummary(convId).then((conversation) => {
+      if (actor === useAuthStore.getState().currentUser?.id && revision === this.registrationRevision) {
+        useChatStore.getState().upsertConversation(conversation);
+      }
+    }).catch(() => { /* The UI's next explicit refresh reports inaccessible or failed rows. */ })
+      .finally(() => { if (this.summaryReconciliations.get(convId) === task) this.summaryReconciliations.delete(convId); });
+    this.summaryReconciliations.set(convId, task);
+  }
+
+  /** Coalesce room events and reconcile only loaded group badges in bounded batches. */
+  private queueGroupPresence() {
+    this.presenceDirty = true;
+    if (this.presenceTimer || this.presencePending || this.manualClosed) return;
+    this.presenceTimer = setTimeout(() => {
+      this.presenceTimer = null;
+      void this.refreshGroupPresence();
+    }, 250);
+  }
+
+  private async refreshGroupPresence() {
+    const actor = useAuthStore.getState().currentUser?.id;
+    const revision = this.registrationRevision;
+    if (!actor || this.manualClosed) return;
+    const current = () => !this.manualClosed && revision === this.registrationRevision
+      && useAuthStore.getState().currentUser?.id === actor;
+    this.presencePending = true;
+    this.presenceDirty = false;
+    const ids = useChatStore.getState().conversations.filter((conversation) => conversation.type === "group").map((conversation) => conversation.id);
+    try {
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        const result = await chatApi.getGroupPresence(ids.slice(offset, offset + 100));
+        if (!current()) return;
+        for (const [id, presence] of Object.entries(result.presences)) {
+          const conversation = useChatStore.getState().conversations.find((item) => item.id === id);
+          if (!conversation) continue;
+          if (presence === null) {
+            useChatStore.getState().removeConversation(id);
+            this.unsubscribe(id);
+          } else {
+            useChatStore.getState().upsertConversation({ ...conversation, group_presence: presence });
+          }
+        }
+      }
+      if (current() && this.connection === "online") useRealtimeStore.getState().setStatus("chat", "online");
+    } catch {
+      if (current()) useRealtimeStore.getState().setStatus("chat", "failed", "群状态更新失败，刷新页面可重试");
+    } finally {
+      if (current()) {
+        this.presencePending = false;
+        if (this.presenceDirty) this.queueGroupPresence();
+      }
+    }
   }
 
   sendJson(payload: unknown) {
@@ -291,6 +408,7 @@ export class ChatWSClient {
     switch (frame.type) {
       case "message.new": {
         const d = frame.data;
+        this.subscriptionHeads.set(d.conversation_id, Math.max(this.subscriptionHeads.get(d.conversation_id) ?? 0, d.seq));
         // 后端 WS 帧 media 字段是 MediaDescriptor 对象（或 null）；历史兼容字符串 media_id
         const wsMedia = d.media;
         const wsMediaId = typeof wsMedia === "string" ? wsMedia : (wsMedia?.media_id ?? null);
@@ -330,6 +448,7 @@ export class ChatWSClient {
         );
         const isReply = isFromOther && d.reply_to != null;
         const conv = chat.conversations.find((c) => c.id === d.conversation_id);
+        if (!conv) this.reconcileConversation(d.conversation_id);
         const isActive = chat.activeConversationId === d.conversation_id;
         // 活跃会话还需用户在底部才视为「正在看」；翻聊天记录（不在底部）时新消息进标签。
         const atBottom = isActive && (message.viewerAtBottom[d.conversation_id] ?? true);
@@ -429,6 +548,9 @@ export class ChatWSClient {
         if (currentUserId != null && String(d.user_id) === String(currentUserId)) {
           // 旧帧只有 marked，无法证明哪些消息已读；绝不能据此清空新到的未读。
           if (d.marked_seqs) applySubgroupReadReceipt(d.conversation_id, d.subgroup_id, d.marked_seqs);
+          if (chat.conversations.find((item) => item.id === d.conversation_id)?.unread_seqs_complete === false) {
+            this.reconcileConversation(d.conversation_id);
+          }
         }
         break;
       }
@@ -476,6 +598,10 @@ export class ChatWSClient {
       case "message.read": {
         const d = frame.data;
         message.markReadByMessage(d.conversation_id, d.message_id, d.user_id);
+        if (String(d.user_id) === String(useAuthStore.getState().currentUser?.id)
+          && chat.conversations.find((item) => item.id === d.conversation_id)?.unread_seqs_complete === false) {
+          this.reconcileConversation(d.conversation_id);
+        }
         break;
       }
       case "typing": {
@@ -526,39 +652,15 @@ export class ChatWSClient {
       }
       case "group.created": {
         const d = frame as import("../api/types").GroupCreatedFrame;
-        chat.upsertConversation({
-          id: d.conversation.id,
-          type: "group",
-          title: d.conversation.title,
-          announcement: d.conversation.announcement,
-          avatar: d.conversation.avatar || "",
-          owner_id: d.conversation.owner_id,
-          members: [],
-          my_role: null,
-          member_count: 0,
-          unread_count: 0,
-          created_at: d.conversation.created_at,
-          peer: null,
-        });
+        this.subscribe([d.conversation.id]);
+        this.reconcileConversation(d.conversation.id);
         break;
       }
       case "group.joined": {
         const d = frame as import("../api/types").GroupJoinedFrame;
         // group.joined 已按用户组推送给新成员，只需加入会话列表。
-        chat.upsertConversation({
-          id: d.conversation.id,
-          type: "group",
-          title: d.conversation.title,
-          announcement: d.conversation.announcement,
-          avatar: d.conversation.avatar || "",
-          owner_id: d.conversation.owner_id,
-          members: [],
-          my_role: "member",
-          member_count: 0,
-          unread_count: 0,
-          created_at: d.conversation.created_at,
-          peer: null,
-        });
+        this.subscribe([d.conversation.id]);
+        this.reconcileConversation(d.conversation.id);
         break;
       }
       case "voice.channel.created": {
@@ -822,11 +924,17 @@ export class ChatWSClient {
         break;
       }
       case "chat.subscribed":
+        this.subscriptionHeads.set(frame.data.conversation_id,
+          Math.max(this.subscriptionHeads.get(frame.data.conversation_id) ?? 0, frame.data.last_seq));
+        break;
       case "pong":
       case "error":
         break;
     }
 
+    if (frame.type.startsWith("voice.channel.") || frame.type.startsWith("live.channel.") || frame.type.startsWith("boardgame.room.")) {
+      this.queueGroupPresence();
+    }
     for (const h of this.handlers) h(frame);
   }
 
@@ -839,6 +947,15 @@ export class ChatWSClient {
   disconnect() {
     this.manualClosed = true;
     this.subscribed.clear();
+    this.subscriptionHeads.clear();
+    this.registrationRevision += 1;
+    this.registrationPending = null;
+    this.registrationAttempt = 0;
+    this.summaryReconciliations.clear();
+    if (this.presenceTimer) { clearTimeout(this.presenceTimer); this.presenceTimer = null; }
+    this.presencePending = false;
+    this.presenceDirty = false;
+    if (this.registrationRetry) { clearTimeout(this.registrationRetry); this.registrationRetry = null; }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

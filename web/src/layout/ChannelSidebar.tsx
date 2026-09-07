@@ -32,6 +32,7 @@ import type { GroupScene } from "../stores/group";
 import { useGroupStore } from "../stores/group";
 import { useDirectoryPage } from "../hooks/useDirectoryPage";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
+import { useSocialPage } from "../hooks/useSocialPage";
 import { useChatStore } from "../stores/chat";
 import { sortSubgroupsByActivity, subgroupKey, useSubGroupStore } from "../stores/subgroup";
 
@@ -132,6 +133,7 @@ function ChannelSidebarContent({
 
   // ---- 子群状态 ----
   const subgroupList = useSubGroupStore((state) => state.byGroup[currentGroupId ?? ""] ?? []);
+  const subgroupPage = useSocialPage("subgroups", { groupId: currentGroupId ?? undefined }, !!currentGroupId);
   const subgroups = sortSubgroupsByActivity(subgroupList);
   const activeSubgroupId = useSubGroupStore((state) => state.activeByGroup[currentGroupId ?? ""] ?? null);
   const unreadByKey = useSubGroupStore((state) => state.unreadByKey);
@@ -249,7 +251,7 @@ function ChannelSidebarContent({
   }, [currentGroupId, onNavigateLiveStart]);
 
   // 展开更多按钮：基础 3 条 + 追加部分（追加部分复用 collapseVariants 展开收起动画）
-  const showMore = !editing && subgroups.length > 3;
+  const showMore = !editing && Math.max(subgroups.length, subgroupPage.total) > 3;
   const showVoiceMore = voiceDirectory.total > 3 || voiceChannels.length > 3;
   const showLiveMore = liveDirectory.total > 3 || liveChannels.length > 3;
 
@@ -486,14 +488,16 @@ function ChannelSidebarContent({
                     <ul className="channel-subgroup-list">
                       {subgroups.slice(3).map((sg) => renderSubgroupLi(sg))}
                     </ul>
+                    <DirectoryLoadMore {...subgroupPage} retainCompletedSpace={false} />
                   </motion.div>
                 )}
               </AnimatePresence>
               {showMore && (
                 <button type="button" className="channel-subgroup-more" onClick={() => setSubgroupsExpanded((v) => !v)} aria-expanded={subgroupsExpanded}>
-                  {subgroupsExpanded ? "收起" : `展开更多（${subgroups.length - 3}）`}
+                  {subgroupsExpanded ? "收起" : `展开更多（${Math.max(subgroups.length, subgroupPage.total) - 3}）`}
                 </button>
               )}
+              {!subgroupsExpanded && !editing && subgroupPage.error && <DirectoryLoadMore {...subgroupPage} retainCompletedSpace={false} />}
               {canManage && editing && (
                 <button type="button" className="channel-subgroup-add" onClick={() => { setDialogError(null); setDialog({ kind: "add" }); }} aria-label="添加子群" title="添加子群">
                   <IconPlus width={16} height={16} />

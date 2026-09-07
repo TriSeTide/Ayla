@@ -8,7 +8,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationDetail } from "../api/types";
+import type { ConversationSummary } from "../api/types";
 import { useChatStore } from "../stores/chat";
 import { ChatConversationRoute } from "../pages/ChatConversationRoute";
 
@@ -18,7 +18,7 @@ vi.mock("../pages/PrivateChatPage", () => ({
 
 vi.mock("../api/chat", () => ({
   // 默认返回私聊详情，避免任何未显式设置实现的路径返回 undefined（.then 崩溃）
-  getConversation: vi.fn().mockResolvedValue({
+  getConversationSummary: vi.fn().mockResolvedValue({
     id: "c-default",
     type: "private",
     title: "私聊",
@@ -46,9 +46,10 @@ function renderRoute(path: string) {
   );
 }
 
-function conv(type: "private" | "group"): ConversationDetail {
+function conv(type: "private" | "group"): ConversationSummary {
   return {
     id: "c1",
+    peer: null,
     type,
     title: type === "group" ? "测试群" : "私聊",
     announcement: "",
@@ -91,20 +92,20 @@ describe("ChatConversationRoute", () => {
   });
 
   it("store 未命中时查详情：群聊 → 重定向", async () => {
-    vi.mocked(chatApi.getConversation).mockResolvedValue(conv("group"));
+    vi.mocked(chatApi.getConversationSummary).mockResolvedValue(conv("group"));
     renderRoute("/chat/g2");
     await waitFor(() => expect(screen.getByText("群聊场景页面")).toBeInTheDocument());
-    expect(chatApi.getConversation).toHaveBeenCalledWith("g2");
+    expect(chatApi.getConversationSummary).toHaveBeenCalledWith("g2");
   });
 
   it("store 未命中时查详情：私聊 → 渲染 ChatPage", async () => {
-    vi.mocked(chatApi.getConversation).mockResolvedValue(conv("private"));
+    vi.mocked(chatApi.getConversationSummary).mockResolvedValue(conv("private"));
     renderRoute("/chat/p2");
     await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
   });
 
   it("详情查询失败显示错误并可重试", async () => {
-    vi.mocked(chatApi.getConversation)
+    vi.mocked(chatApi.getConversationSummary)
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce(conv("private"));
     renderRoute("/chat/x");
@@ -112,11 +113,11 @@ describe("ChatConversationRoute", () => {
     const retry = screen.getByRole("button", { name: "重试" });
     retry.click();
     await waitFor(() => expect(screen.getByText("私聊窗口本体")).toBeInTheDocument());
-    expect(chatApi.getConversation).toHaveBeenCalledTimes(2);
+    expect(chatApi.getConversationSummary).toHaveBeenCalledTimes(2);
   });
 
   it("详情查询中显示骨架屏", async () => {
-    vi.mocked(chatApi.getConversation).mockImplementation(
+    vi.mocked(chatApi.getConversationSummary).mockImplementation(
       () => new Promise(() => {}), // 永不 resolve
     );
     renderRoute("/chat/x");

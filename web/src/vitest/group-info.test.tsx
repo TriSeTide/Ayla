@@ -1,10 +1,11 @@
+import { disposeSocialTracking, updateSocialItems } from "../stores/social";
 /**
  * GroupInfo 测试（F3 R-G9 角色化）：
  * - owner/admin 看到「编辑群资料」+ 管理项占位；成员看不到编辑，看到退出占位；
  * - 成员列表角色标签（owner/admin/member）；
  * - 群头像上传（M5-2.1）：owner 可换、成员不可；选择→预览→保存上传+PATCH→store 更新；失败重试。
  */
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary, ConversationMember, SubGroup, UserPublic } from "../api/types";
@@ -17,6 +18,12 @@ import * as chatApi from "../api/chat";
 import * as mediaApi from "../api/media";
 
 vi.mock("../api/chat", () => ({
+  listManagedJoinRequestsPage: vi.fn(async () => { const results = await chatApi.listJoinRequests("fixture-group"); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listJoinRequestsPage: vi.fn(async (id: string) => { const results = await chatApi.listJoinRequests(id); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  getConversationMetadata: vi.fn((id: string) => chatApi.getConversation(id)),
+  getConversationSummary: vi.fn(async (id: string) => ({ ...await chatApi.getConversation(id), peer: null })),
+  listConversationMembersPage: vi.fn(async (_id: string, params: { q?: string; exclude_self?: string }) => { const results = (useChatStore.getState().conversations[0]?.members ?? []).filter((row) => (params.exclude_self !== "1" || row.user.id !== useAuthStore.getState().currentUser?.id) && (!params.q || `${row.user.nickname} ${row.user.username}`.includes(params.q))); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listSubgroupsPage: vi.fn(async (id: string) => { const results = useSubGroupStore.getState().byGroup[id] ?? []; return { results, total: results.length, has_more: false, next_cursor: null, default: results.find((row) => row.is_default) ?? null }; }),
   // 默认返回一个群详情，避免未命中 store 时的 effect 拿 undefined（.then 崩）
   getConversation: vi.fn().mockResolvedValue({
     id: "1",
@@ -40,6 +47,7 @@ vi.mock("../api/chat", () => ({
   transferGroupOwner: vi.fn().mockResolvedValue({}),
   dissolveGroup: vi.fn().mockResolvedValue({ deleted: true }),
   leaveGroup: vi.fn().mockResolvedValue({ left: true }),
+  deleteSubgroup: vi.fn().mockResolvedValue({ detail: "ok" }),
 }));
 
 vi.mock("../api/media", async (importOriginal) => {
@@ -91,6 +99,8 @@ function conv(myRole: ConversationSummary["my_role"]): ConversationSummary {
 
 function renderInfo(myRole: ConversationSummary["my_role"]) {
   useChatStore.setState({ conversations: [conv(myRole)] });
+  updateSocialItems("members", { groupId: "1", q: "" }, conv(myRole).members);
+  updateSocialItems("subgroups", { groupId: "1" }, useSubGroupStore.getState().byGroup["1"] ?? []);
   return render(
     <MemoryRouter>
       <GroupInfo groupId="1" />
@@ -99,6 +109,7 @@ function renderInfo(myRole: ConversationSummary["my_role"]) {
 }
 
 beforeEach(() => {
+  disposeSocialTracking();
   useAuthStore.setState({
     accessToken: "acc",
     currentUser: user("u1", "爱丽丝"),
@@ -110,8 +121,8 @@ afterEach(() => {
   useChatStore.setState({ conversations: [] });
 });
 
-describe("GroupInfo 角色化", () => {
-  it("owner 看到编辑群资料 + 成员角色标签（群主/管理员）", () => {
+describe("GroupInfo 角色化", async () => {
+  it("owner 看到编辑群资料 + 成员角色标签（群主/管理员）", async () => {
     renderInfo("owner");
     expect(screen.getByRole("button", { name: "编辑群资料" })).toBeInTheDocument();
     expect(screen.getByText("群主")).toBeInTheDocument();
@@ -119,19 +130,19 @@ describe("GroupInfo 角色化", () => {
     expect(screen.getByText("群公告")).toBeInTheDocument();
   });
 
-  it("owner 看到管理项占位（入群申请审批）", () => {
+  it("owner 看到管理项占位（入群申请审批）", async () => {
     renderInfo("owner");
     expect(screen.getByText(/入群申请审批/)).toBeInTheDocument();
   });
 
-  it("普通成员不看到编辑按钮，看到退出占位", () => {
+  it("普通成员不看到编辑按钮，看到退出占位", async () => {
     renderInfo("member");
     expect(screen.queryByRole("button", { name: "编辑群资料" })).not.toBeInTheDocument();
     expect(screen.getByText(/退出群/)).toBeInTheDocument();
   });
 });
 
-describe("GroupInfo 群头像上传（M5-2.1）", () => {
+describe("GroupInfo 群头像上传（M5-2.1）", async () => {
   beforeEach(() => {
     Object.defineProperty(URL, "createObjectURL", {
       value: vi.fn(() => "blob:mock-group-avatar"),
@@ -157,7 +168,7 @@ describe("GroupInfo 群头像上传（M5-2.1）", () => {
     expect(screen.getByRole("button", { name: "保存群头像" })).toBeInTheDocument();
   });
 
-  it("普通成员不看到更换群头像按钮", () => {
+  it("普通成员不看到更换群头像按钮", async () => {
     renderInfo("member");
     expect(screen.queryByLabelText("更换群头像")).not.toBeInTheDocument();
   });
@@ -208,18 +219,20 @@ describe("GroupInfo 群头像上传（M5-2.1）", () => {
   });
 });
 
-describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）", () => {
-  function openTransferDialog() {
+describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）", async () => {
+  async function openTransferDialog() {
     renderInfo("owner");
     fireEvent.click(screen.getByRole("button", { name: "转让群主" }));
-    return screen.getByRole("dialog", { name: "转让群主" });
+    const dialog = screen.getByRole("dialog", { name: "转让群主" });
+    await within(dialog).findByRole("button", { name: "转让给 用户m1" });
+    return dialog;
   }
 
-  it("点转让群主弹出对话框：列出除自己与群主外的成员（含角色标签）", () => {
-    const dialog = openTransferDialog();
+  it("点转让群主弹出对话框：列出除自己与群主外的成员（含角色标签）", async () => {
+    const dialog = await openTransferDialog();
     // 候选：a1（管理员）、m1（成员）；群主 o1 与自己 u1 被排除
     expect(within(dialog).getByRole("button", { name: "转让给 用户a1" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toBeInTheDocument();
+    expect(await within(dialog).findByRole("button", { name: "转让给 用户m1" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "转让给 爱丽丝" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "转让给 用户a1" })).toHaveAttribute(
       "aria-pressed",
@@ -231,19 +244,19 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
     expect(within(dialog).getByRole("button", { name: "确认转让" })).toBeDisabled();
   });
 
-  it("搜索框按昵称/用户名过滤成员", () => {
-    const dialog = openTransferDialog();
+  it("搜索框按昵称/用户名过滤成员", async () => {
+    const dialog = await openTransferDialog();
     const search = within(dialog).getByLabelText("搜索成员");
     fireEvent.change(search, { target: { value: "m1" } });
-    expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toBeInTheDocument();
+    expect(await within(dialog).findByRole("button", { name: "转让给 用户m1" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "转让给 用户a1" })).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "不存在的昵称" } });
-    expect(within(dialog).getByText("没有匹配的成员")).toBeInTheDocument();
+    expect(await within(dialog).findByText("没有匹配的成员")).toBeInTheDocument();
   });
 
   it("选择成员 → 确认 → 二次确认弹窗 → 调用 transferGroupOwner 并关闭对话框", async () => {
-    const dialog = openTransferDialog();
+    const dialog = await openTransferDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "转让给 用户m1" }));
     expect(within(dialog).getByRole("button", { name: "转让给 用户m1" })).toHaveAttribute(
       "aria-pressed",
@@ -262,7 +275,7 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
   });
 
   it("二次确认取消则不执行转让，选择对话框保留", async () => {
-    const dialog = openTransferDialog();
+    const dialog = await openTransferDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "转让给 用户m1" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "确认转让" }));
 
@@ -273,7 +286,7 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
     expect(screen.getByRole("dialog", { name: "转让群主" })).toBeInTheDocument();
   });
 
-  it("仅群主一人的群：显示暂无其他成员可转让且确认禁用", () => {
+  it("仅群主一人的群：显示暂无其他成员可转让且确认禁用", async () => {
     // 群主 u1 即当前用户，群内只有自己（不能用 renderInfo，它会覆盖 store 为 4 人群）
     useChatStore.setState({
       conversations: [
@@ -292,12 +305,12 @@ describe("GroupInfo 转让群主（Bug #5：弹窗选人替代 window.prompt）"
     );
     fireEvent.click(screen.getByRole("button", { name: "转让群主" }));
     const dialog = screen.getByRole("dialog", { name: "转让群主" });
-    expect(within(dialog).getByText("暂无其他成员可转让")).toBeInTheDocument();
+    expect(await within(dialog).findByText("没有匹配的成员")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "确认转让" })).toBeDisabled();
   });
 });
 
-describe("GroupInfo 解散群聊与退出群聊", () => {
+describe("GroupInfo 解散群聊与退出群聊", async () => {
   beforeEach(() => {
     useHomeStore.setState({ layout: "card", recentGroupId: "1" });
     useChatStore.setState({ conversations: [conv("owner")] });
@@ -338,7 +351,7 @@ describe("GroupInfo 解散群聊与退出群聊", () => {
   });
 });
 
-describe("GroupInfo 子群预览与「查看更多」（默认只展示前 3 个）", () => {
+describe("GroupInfo 子群预览与「查看更多」（默认只展示前 3 个）", async () => {
   function sg(id: string, name: string, isDefault = false): SubGroup {
     return {
       id,
@@ -363,9 +376,9 @@ describe("GroupInfo 子群预览与「查看更多」（默认只展示前 3 个
     useSubGroupStore.setState({ byGroup: {}, unreadByKey: {}, activeByGroup: {} });
   });
 
-  it("超过 3 个子群时默认只展示前 3 个，点「查看更多」展开全部，可再收起", () => {
+  it("超过 3 个子群时默认只展示前 3 个，点「查看更多」展开全部，可再收起", async () => {
     render(<MemoryRouter><GroupInfo groupId="1" /></MemoryRouter>);
-    expect(screen.getByText("群聊")).toBeInTheDocument();
+    expect(await screen.findByText("群聊")).toBeInTheDocument();
     expect(screen.getByText("学习")).toBeInTheDocument();
     expect(screen.getByText("摸鱼")).toBeInTheDocument();
     expect(screen.queryByText("工作")).not.toBeInTheDocument();
@@ -380,16 +393,43 @@ describe("GroupInfo 子群预览与「查看更多」（默认只展示前 3 个
     expect(screen.queryByText("工作")).not.toBeInTheDocument();
   });
 
-  it("子群不超过 3 个时不显示「查看更多」", () => {
+  it("子群不超过 3 个时不显示「查看更多」", async () => {
     useSubGroupStore.setState({ byGroup: { 1: [sg("a", "群聊"), sg("b", "学习")] } });
     render(<MemoryRouter><GroupInfo groupId="1" /></MemoryRouter>);
-    expect(screen.getByText("群聊")).toBeInTheDocument();
+    expect(await screen.findByText("群聊")).toBeInTheDocument();
     expect(screen.getByText("学习")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /查看更多/ })).not.toBeInTheDocument();
   });
+
+  it("删除子群等待时锁住确认，失败回到编辑框显示错误并保留子群，重试成功才移除", async () => {
+    let rejectDelete!: (error: Error) => void;
+    vi.mocked(chatApi.deleteSubgroup).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectDelete = reject; }));
+    renderInfo("owner");
+    fireEvent.click(await screen.findByRole("button", { name: "编辑子群" }));
+    fireEvent.click(screen.getByRole("button", { name: "编辑子群 学习" }));
+    const edit = screen.getByRole("dialog", { name: "编辑子群" });
+    fireEvent.change(within(edit).getByRole("textbox", { name: "子群群名" }), { target: { value: "保留的草稿" } });
+    fireEvent.click(within(edit).getByRole("button", { name: "删除" }));
+    const confirm = screen.getByRole("dialog", { name: "删除子群" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+    expect(within(confirm).getByRole("button", { name: "处理中…" })).toBeDisabled();
+    expect(within(confirm).getByRole("button", { name: "取消" })).toBeDisabled();
+    fireEvent.keyDown(confirm, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "删除子群" })).toBeInTheDocument();
+    await act(async () => rejectDelete(new Error("合成删除失败")));
+    expect(screen.queryByRole("dialog", { name: "删除子群" })).toBeNull();
+    expect(within(edit).getByRole("alert")).toHaveTextContent("合成删除失败");
+    expect(within(edit).getByRole("textbox", { name: "子群群名" })).toHaveValue("保留的草稿");
+    expect(useSubGroupStore.getState().byGroup["1"].some((row) => row.id === "b")).toBe(true);
+    fireEvent.click(within(edit).getByRole("button", { name: "删除" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "删除子群" })).getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑子群" })).toBeNull());
+    expect(useSubGroupStore.getState().byGroup["1"].some((row) => row.id === "b")).toBe(false);
+    expect(chatApi.deleteSubgroup).toHaveBeenCalledTimes(2);
+  });
 });
 
-describe("GroupInfo 加入方式自定义下拉（用户反馈：不用原始 select）", () => {
+describe("GroupInfo 加入方式自定义下拉（用户反馈：不用原始 select）", async () => {
   it("点按钮展开玻璃选项浮层；选择「公开加入」调用 patchConversation 并关闭", async () => {
     renderInfo("owner");
     // conv() 未设 join_policy → 默认「申请加入」
@@ -407,7 +447,7 @@ describe("GroupInfo 加入方式自定义下拉（用户反馈：不用原始 se
     expect(screen.queryByRole("listbox", { name: "加入方式" })).not.toBeInTheDocument();
   });
 
-  it("点击外部关闭下拉", () => {
+  it("点击外部关闭下拉", async () => {
     renderInfo("owner");
     fireEvent.click(screen.getByRole("button", { name: /申请加入/ }));
     expect(screen.getByRole("listbox", { name: "加入方式" })).toBeInTheDocument();

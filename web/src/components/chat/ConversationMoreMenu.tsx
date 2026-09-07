@@ -5,10 +5,11 @@
  * - 置顶/取消置顶：调 POST /conversations/<id>/pin/，成功后更新 chat store；
  * - 删除（仅 showDelete=true 时，消息列表私信用）：confirm 确认后调 POST
  *   /conversations/<id>/hide/（软删除），移除本人列表；群聊场景不提供删除（需求）；
- * - 菜单向上展开 + z-index 60（不被滚动容器裁剪、不被固定栏遮挡）；
- * - 点击菜单外部关闭。
+ * - 菜单 portal 到 body，按触发按钮和视口空间选择上下位置；
+ * - 外点/滚动关闭，Esc 返回触发按钮，方向键在菜单项间移动。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as chatApi from "../../api/chat";
 import { useChatStore } from "../../stores/chat";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -30,18 +31,65 @@ export function ConversationMoreMenu({
   const [busy, setBusy] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const initialFocus = useRef<"first" | "last">("first");
+  const menuId = useId();
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const closeMenu = useCallback((restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  }, []);
 
-  // 点击菜单外部 → 关闭
+  useLayoutEffect(() => {
+    if (!open) return;
+    const positionMenu = () => {
+      const anchor = triggerRef.current?.getBoundingClientRect();
+      const menu = menuRef.current;
+      if (!anchor || !menu) return;
+      const box = menu.getBoundingClientRect();
+      const gap = 6, edge = 8;
+      const below = anchor.bottom + gap;
+      const above = anchor.top - gap - box.height;
+      const top = below + box.height <= window.innerHeight - edge ? below : above;
+      setPosition({
+        left: Math.max(edge, Math.min(anchor.right - box.width, window.innerWidth - box.width - edge)),
+        top: Math.max(edge, Math.min(top, window.innerHeight - box.height - edge)),
+      });
+    };
+    positionMenu();
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+    items?.[initialFocus.current === "last" ? items.length - 1 : 0]?.focus();
+    window.addEventListener("resize", positionMenu);
+    return () => window.removeEventListener("resize", positionMenu);
+  }, [open, showDelete]);
+
+  // Portal nodes are outside the trigger subtree; both boundaries participate.
   useEffect(() => {
     if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
+    const onDocClick = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!ref.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeMenu(true);
       }
     };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+    const onScroll = (event: Event) => {
+      if (!menuRef.current?.contains(event.target as Node)) closeMenu();
+    };
+    document.addEventListener("pointerdown", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open, closeMenu]);
 
   const reportError = (message: string) => {
     if (onError) onError(message);
@@ -49,9 +97,10 @@ export function ConversationMoreMenu({
   };
 
   const handleTogglePin = () => {
+    if (busy) return;
     const next = !conversation.is_pinned;
     setBusy(true);
-    setOpen(false);
+    closeMenu(true);
     chatApi
       .togglePinConversation(conversation.id, next)
       .then(() => useChatStore.getState().setPin(conversation.id, next))
@@ -60,7 +109,7 @@ export function ConversationMoreMenu({
   };
 
   const handleDelete = () => {
-    setOpen(false);
+    closeMenu();
     setConfirmDeleteOpen(true);
   };
 
@@ -75,25 +124,56 @@ export function ConversationMoreMenu({
   };
 
   return (
-    <div className="conv-more" ref={ref}>
+    <div className="conv-more" ref={ref} onClick={(event) => event.stopPropagation()}>
       <button
+        ref={triggerRef}
         type="button"
         className="conv-more-btn"
         aria-label={`${conversation.title} 的更多操作`}
         aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls={open ? menuId : undefined}
+        disabled={busy}
         onClick={(e) => {
           e.stopPropagation();
+          initialFocus.current = "first";
           setOpen(!open);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            initialFocus.current = event.key === "ArrowUp" ? "last" : "first";
+            setOpen(true);
+          }
         }}
       >
         <IconDots width={18} height={18} />
       </button>
-      {open && (
-        <div className="conv-menu" role="menu" aria-label={`${conversation.title} 操作菜单`}>
+      {open && createPortal(
+        <div ref={menuRef} id={menuId} className="conv-menu" role="menu" aria-label={`${conversation.title} 操作菜单`}
+          style={position}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              closeMenu(true);
+              return;
+            }
+            const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+            if (event.key === "Tab") { closeMenu(true); return; }
+            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || !items.length) return;
+            event.preventDefault();
+            const index = items.indexOf(document.activeElement as HTMLButtonElement);
+            const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+              : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+            items[next]?.focus();
+          }}>
           <button
             type="button"
             className="conv-menu-item"
             role="menuitem"
+            tabIndex={-1}
             disabled={busy}
             onClick={handleTogglePin}
           >
@@ -105,6 +185,7 @@ export function ConversationMoreMenu({
               type="button"
               className="conv-menu-item conv-menu-item-danger"
               role="menuitem"
+              tabIndex={-1}
               disabled={busy}
               onClick={handleDelete}
             >
@@ -114,14 +195,14 @@ export function ConversationMoreMenu({
               删除会话
             </button>
           )}
-        </div>
+        </div>, document.body,
       )}
       {confirmDeleteOpen && (
         <ConfirmDialog
           title="删除会话"
           message={`删除会话「${conversation.title}」？\n消息记录会保留，对方再发消息时会话将重新出现。`}
           onConfirm={doDelete}
-          onClose={() => setConfirmDeleteOpen(false)}
+          onClose={() => { setConfirmDeleteOpen(false); triggerRef.current?.focus(); }}
         />
       )}
     </div>

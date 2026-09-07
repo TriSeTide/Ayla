@@ -715,15 +715,13 @@
 }
 
 .conv-menu {
-  position: absolute;
-  /* 向上展开：列表滚动容器 overflow-y:auto 会裁剪向下溢出的菜单，
-     向上展开保证底部行（最常操作区）的菜单完整可见可点 */
-  bottom: calc(100% - 2px);
-  right: 2px;
-  /* 层级 60：高于底栏/顶栏/侧栏（20–50），低于弹层遮罩（70+），
-     保证菜单展开时不被固定栏遮挡、可点击（Bug：z-index 30 时被底栏盖住） */
-  z-index: 60;
+  /* Body portal escapes scroll clips and the row's backdrop stacking context. */
+  position: fixed;
+  z-index: 75;
   min-width: 152px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
   padding: var(--sp-1);
   display: flex;
   flex-direction: column;
@@ -1445,12 +1443,30 @@
 
 .video-load-failed {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--sp-2);
   min-height: 120px;
   padding: var(--sp-3);
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.voice-media-error,
+.image-viewer-video-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+}
+
+.voice-media-error,
+.file-error {
+  color: var(--destructive);
+  font-size: 12px;
 }
 
 .media-frame-image img.media-image,
@@ -2361,6 +2377,14 @@
   max-height: 280px;
   overflow-y: auto;
   padding: var(--sp-1);
+}
+
+/* Escape composer backdrop roots so the layer blurs the actual chat behind it. */
+.mention-picker.is-portal {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 75;
 }
 
 .mention-picker-item {

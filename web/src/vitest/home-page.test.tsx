@@ -1,3 +1,4 @@
+import { disposeSocialTracking } from "../stores/social";
 /**
  * HomePage 测试（F2）：
  * - 窄屏：空态引导 / 卡片网格 / 列表切换 / 失败重试；
@@ -16,6 +17,8 @@ import { useChatStore } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
 
 vi.mock("../api/chat", () => ({
+  getConversationSummary: vi.fn(async (id: string) => groupConv(id, "测试群")),
+  listConversationsPage: vi.fn(async (params: { type?: string }) => { const all = await chatApi.listConversations(); const results = all.filter((row) => !params.type || params.type === "all" || row.type === params.type); return { results, total: results.length, has_more: false, next_cursor: null }; }),
   listConversations: vi.fn(),
   fetchHighlights: vi.fn(),
 }));
@@ -63,6 +66,7 @@ function renderHome(path: string) {
 }
 
 beforeEach(() => {
+  disposeSocialTracking();
   useAuthStore.setState({
     accessToken: "acc",
     currentUser: {

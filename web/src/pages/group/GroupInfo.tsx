@@ -18,10 +18,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as chatApi from "../../api/chat";
-import { getGroupEmojiPack, setGroupEmojiUploadPolicy } from "../../api/emoji";
+import { getGroupEmojiPackSummary, setGroupEmojiUploadPolicy } from "../../api/emoji";
+import { ApiError } from "../../api/client";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../../api/media";
 import type { ConversationMember, ConversationSummary, SubGroup } from "../../api/types";
 import { Avatar } from "../../components/Avatar";
+import { useSocialPage } from "../../hooks/useSocialPage";
+import { DirectoryLoadMore } from "../../components/DirectoryLoadMore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { SubGroupDialog, type SubGroupDialogState } from "../../components/group/SubGroupDialog";
 import {
@@ -83,7 +86,6 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadRetry, setLoadRetry] = useState(0);
-  const [joinRequests, setJoinRequests] = useState<import("../../api/types").GroupJoinRequest[]>([]);
   const [managementError, setManagementError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   // 加入方式自定义下拉（用户反馈：原生 select 太原始；完全自绘按钮 + 玻璃选项浮层）
@@ -107,7 +109,8 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   >(null);
 
   // ---- 子群管理（窄屏编辑入口；宽屏在 ChannelSidebar） ----
-  const subgroups = useSubGroupStore((s) => s.byGroup[groupId] ?? []);
+  const subgroupPage = useSocialPage("subgroups", { groupId });
+  const subgroups = subgroupPage.items;
   const unreadByKey = useSubGroupStore((s) => s.unreadByKey);
   // 子群是否展开全部（默认只展示前 SUBGROUP_PREVIEW_COUNT 个）
   const [showAllSubgroups, setShowAllSubgroups] = useState(false);
@@ -175,7 +178,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     if (group) return;
     let cancelled = false;
     chatApi
-      .getConversation(groupId)
+      .getConversationMetadata(groupId)
       .then((c) => {
         if (!cancelled) setGroupDetail({ ...c, peer: null });
       })
@@ -191,8 +194,12 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   const isOwner = conv?.my_role === "owner";
   const isAdmin = conv?.my_role === "admin";
   const canManage = isOwner || isAdmin;
-  const members = conv?.members ?? [];
-  const memberCount = conv?.member_count ?? members.length;
+  const [memberQuery, setMemberQuery] = useState("");
+  const memberPage = useSocialPage("members", { groupId, q: memberQuery });
+  const members = memberPage.items;
+  const memberCount = conv?.member_count ?? memberPage.total;
+  const joinPage = useSocialPage("joinRequests", { groupId }, canManage);
+  const { items: joinRequests, setItems: setJoinRequests } = joinPage;
 
   // 在线成员数（光环 + 文字双通道，design.md §10）
   const onlineCount = useMemo(
@@ -204,7 +211,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   );
 
   const reloadGroup = async () => {
-    const fresh = await chatApi.getConversation(groupId);
+    const fresh = await chatApi.getConversationMetadata(groupId);
     useChatStore.getState().upsertConversation(fresh);
     setGroupDetail({ ...fresh, peer: null });
     return fresh;
@@ -212,29 +219,30 @@ export function GroupInfo({ groupId }: { groupId: string }) {
 
   useEffect(() => {
     if (!isOwner) return;
-    getGroupEmojiPack(groupId)
+    let cancelled = false;
+    setEmojiPolicyLoaded(false);
+    getGroupEmojiPackSummary(groupId)
       .then((d) => {
+        if (cancelled) return;
         setAllowMemberUpload(d.allow_member_upload);
         setEmojiPolicyLoaded(true);
       })
-      .catch(() => {
-        // 包未创建（404）→ 默认关闭
-        setAllowMemberUpload(false);
-        setEmojiPolicyLoaded(true);
+      .catch((error) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 404) {
+          setAllowMemberUpload(false);
+          setEmojiPolicyLoaded(true);
+        } else {
+          setManagementError(error instanceof Error ? error.message : "表情上传权限加载失败");
+        }
       });
+    return () => { cancelled = true; };
   }, [isOwner, groupId]);
-
-  useEffect(() => {
-    if (!canManage || typeof chatApi.listJoinRequests !== "function") return;
-    chatApi.listJoinRequests(groupId)
-      .then((items) => setJoinRequests(items.filter((item) => item.status === "pending")))
-      .catch((e) => setManagementError(e instanceof Error ? e.message : "加载入群申请失败"));
-  }, [canManage, groupId]);
 
   const runManagementAction = async (key: string, action: () => Promise<unknown>) => {
     setBusyAction(key);
     setManagementError(null);
-    try { await action(); await reloadGroup(); }
+    try { await action(); await reloadGroup(); await memberPage.refresh(); }
     catch (e) { setManagementError(e instanceof Error ? e.message : "操作失败"); }
     finally { setBusyAction(null); }
   };
@@ -288,12 +296,6 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     }
   };
 
-  // 可转让候选：排除群主自己（m.role === "owner" 与 m.user.id === currentUser.id 双条件最稳）
-  const transferCandidates = useMemo(
-    () => members.filter((m) => m.user.id !== currentUser?.id && m.role !== "owner"),
-    [members, currentUser?.id],
-  );
-
   // ---- 子群管理操作（窄屏群信息内编辑；与宽屏侧栏同交互） ----
   const runSubgroupAction = async (action: () => Promise<unknown>) => {
     setSubgroupBusy(true);
@@ -332,6 +334,8 @@ export function GroupInfo({ groupId }: { groupId: string }) {
       setSubgroupDelete(null);
       setSubgroupDialog(null);
     } catch (e) {
+      // 失败回到原编辑框，让错误与重试入口可见，保留子群及输入草稿。
+      setSubgroupDelete(null);
       setSubgroupError(e instanceof Error ? e.message : "删除失败");
     } finally {
       setSubgroupBusy(false);
@@ -364,7 +368,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
         title: title.trim(),
         announcement,
       });
-      const c = await chatApi.getConversation(groupId);
+      const c = await chatApi.getConversationMetadata(groupId);
       useChatStore.getState().upsertConversation(c);
       setEditing(false);
     } catch (e) {
@@ -484,10 +488,10 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                   </div>
                   <div className="group-info-stat">
                     <span className="group-info-stat-num">{onlineCount}</span>
-                    <span className="group-info-stat-label">在线</span>
+                    <span className="group-info-stat-label">已载入在线</span>
                   </div>
                   <div className="group-info-stat">
-                    <span className="group-info-stat-num">{subgroups.length}</span>
+                    <span className="group-info-stat-num">{subgroupPage.total}</span>
                     <span className="group-info-stat-label">子群</span>
                   </div>
                 </div>
@@ -583,7 +587,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
 
                 <div className="group-info-requests">
                   <h4 className="group-info-requests-title">
-                    入群申请审批 · 待处理（{joinRequests.length}）
+                    入群申请审批 · 待处理（{joinPage.total}）
                   </h4>
                   {joinRequests.length > 0 ? (
                     joinRequests.map((request) => (
@@ -601,10 +605,11 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                       </div>
                     ))
                   ) : (
-                    <p className="group-info-placeholder">暂无待处理申请</p>
+                    <p className="group-info-placeholder">{joinPage.loading ? "加载中…" : joinPage.error ? "申请加载失败" : "暂无待处理申请"}</p>
                   )}
                 </div>
 
+                <DirectoryLoadMore {...joinPage} retainCompletedSpace={false} />
                 {isOwner && (
                   <div className="group-info-danger">
                     <button type="button" className="btn btn-ghost group-info-action-row" onClick={() => setTransferOpen(true)}>
@@ -632,7 +637,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
             <header className="group-info-card-head">
               <IconGrid width={18} height={18} className="group-info-card-icon" />
               <h3 className="group-info-card-title">子群</h3>
-              <span className="group-info-count">{subgroups.length}</span>
+              <span className="group-info-count">{subgroupPage.total}</span>
               {canManage && !subgroupEditing && (
                 <button
                   type="button"
@@ -649,7 +654,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
             </header>
             {subgroupError && <p className="group-info-error" role="alert">{subgroupError}</p>}
             {subgroups.length === 0 ? (
-              <p className="group-info-placeholder">暂无子群</p>
+              <p className="group-info-placeholder">{subgroupPage.loading ? "加载中…" : subgroupPage.error ? "子群加载失败" : "暂无子群"}</p>
             ) : (
               <>
                 <ul className="group-info-subgroup-list">
@@ -699,6 +704,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                 )}
               </>
             )}
+            {(showAllSubgroups || subgroupPage.error || subgroupPage.loading) && <DirectoryLoadMore {...subgroupPage} retainCompletedSpace={false} />}
             {canManage && subgroupEditing && (
               <div className="group-info-subgroup-edit-actions">
                 <button
@@ -728,11 +734,12 @@ export function GroupInfo({ groupId }: { groupId: string }) {
             <header className="group-info-card-head">
               <IconUsers width={18} height={18} className="group-info-card-icon" />
               <h3 className="group-info-card-title">成员</h3>
-              <span className="group-info-count">{members.length}</span>
-              <span className="group-info-online">在线 {onlineCount}</span>
+              <span className="group-info-count">{memberPage.total}</span>
+              <span className="group-info-online">已载入成员在线 {onlineCount}</span>
             </header>
+            <input className="field" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="搜索成员" aria-label="搜索群成员" />
             {members.length === 0 ? (
-              <p className="group-info-placeholder">暂无成员</p>
+              <p className="group-info-placeholder">{memberPage.loading ? "加载中…" : memberPage.error ? "成员加载失败" : "没有匹配的成员"}</p>
             ) : (
               <ul className="group-info-member-list">
                 {members.map((m) => (
@@ -768,13 +775,14 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                 ))}
               </ul>
             )}
+            <DirectoryLoadMore {...memberPage} retainCompletedSpace={false} />
           </section>
         </div>
       </div>
 
       {transferOpen && (
         <TransferOwnerDialog
-          members={transferCandidates}
+          groupId={groupId}
           busy={busyAction === "transfer"}
           error={managementError}
           onConfirm={(m) => setConfirmAction({ kind: "transfer", member: m })}
@@ -816,6 +824,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
           title="删除子群"
           message={`确定删除子群「${subgroupDelete.name}」？该子群的所有聊天记录将永久删除，无法恢复。`}
           confirmLabel="删除"
+          busy={subgroupBusy}
           onConfirm={() => void confirmDeleteSubgroup()}
           onClose={() => {
             if (subgroupBusy) return;
@@ -879,14 +888,13 @@ export function GroupInfo({ groupId }: { groupId: string }) {
  * 无障碍：role="dialog" + aria-label；搜索框带 label；关闭按钮可聚焦。
  */
 function TransferOwnerDialog({
-  members,
+  groupId,
   busy,
   error,
   onConfirm,
   onClose,
 }: {
-  /** 可转让候选（已排除群主自己） */
-  members: ConversationMember[];
+  groupId: string;
   busy: boolean;
   error: string | null;
   onConfirm: (m: ConversationMember) => void;
@@ -897,15 +905,8 @@ function TransferOwnerDialog({
   const onlineUsers = usePresenceStore((s) => s.users);
   const onlineStatuses = usePresenceStore((s) => s.statuses);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return members;
-    return members.filter((m) => {
-      const nickname = (m.user.nickname || m.user.username).toLowerCase();
-      const username = m.user.username.toLowerCase();
-      return nickname.includes(q) || username.includes(q);
-    });
-  }, [members, query]);
+  const memberPage = useSocialPage("members", { groupId, q: query, excludeSelf: true });
+  const filtered = memberPage.items.filter((member) => member.role !== "owner");
 
   return (
     <div className="group-transfer-overlay" onClick={busy ? undefined : onClose}>
@@ -926,10 +927,7 @@ function TransferOwnerDialog({
           选择一位群成员接任群主。转让后你将成为普通成员。
         </p>
 
-        {members.length === 0 ? (
-          <p className="group-transfer-empty">暂无其他成员可转让</p>
-        ) : (
-          <>
+        <>
             <div className="group-transfer-search">
               <IconSearch width={15} height={15} className="group-transfer-search-icon" />
               <input
@@ -969,10 +967,13 @@ function TransferOwnerDialog({
                   </li>
                 );
               })}
-              {filtered.length === 0 && <li className="search-empty">没有匹配的成员</li>}
+              {!memberPage.loading && !memberPage.error && filtered.length === 0 && <li className="search-empty">没有匹配的成员</li>}
+              {(memberPage.loading || memberPage.error || memberPage.hasMore || memberPage.invalidated) && <li>
+                <DirectoryLoadMore {...memberPage} retainCompletedSpace={false} />
+              </li>}
             </ul>
-          </>
-        )}
+          {selected && <p className="group-transfer-desc">已选择：{selected.user.nickname || selected.user.username}</p>}
+        </>
 
         {error && <p className="group-info-error" role="alert">{error}</p>}
 
@@ -984,7 +985,7 @@ function TransferOwnerDialog({
             type="button"
             className="btn btn-primary"
             onClick={() => selected && onConfirm(selected)}
-            disabled={!selected || busy || members.length === 0}
+            disabled={!selected || busy}
           >
             {busy ? "转让中…" : "确认转让"}
           </button>

@@ -11,6 +11,8 @@ import { useTabPanelMotion } from "../../hooks/useTabPanelMotion";
 import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import * as chatApi from "../../api/chat";
+import { useSocialPage } from "../../hooks/useSocialPage";
+import { DirectoryLoadMore } from "../../components/DirectoryLoadMore";
 import { getElysiaProfile } from "../../api/elysia";
 import * as usersApi from "../../api/users";
 import type {
@@ -18,13 +20,12 @@ import type {
   FriendRequest,
   GroupInvite,
   GroupJoinRequest,
-  GroupMemberLeaveNotice,
 } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { IconClose } from "../icons";
 import { useAuthStore } from "../../stores/auth";
 import { useBadgesStore } from "../../stores/badges";
-import { useChatStore, isChatStale, sortPrivateByActivity } from "../../stores/chat";
+import { useChatStore, sortPrivateByActivity } from "../../stores/chat";
 import { useNoticeStore } from "../../stores/notices";
 import { usePresenceStore } from "../../stores/presence";
 import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
@@ -38,24 +39,29 @@ type Tab = "chat" | "requests";
 export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
   const selectionId = useId();
   const [tab, setTab] = useState<Tab>("chat");
+  const privatePage = useSocialPage("conversations", { type: "private" });
+  const conversations = privatePage.items;
+  const friendRequestPage = useSocialPage("friendRequests", {}, tab === "requests");
+  const { items: friendRequests, setItems: setFriendRequests } = friendRequestPage;
+  const invitePage = useSocialPage("invites", {}, tab === "requests");
+  const { items: invites, setItems: setInvites } = invitePage;
+  const joinPage = useSocialPage("joinRequests", {}, tab === "requests");
+  const { items: joinRequests, setItems: setJoinRequests } = joinPage;
+  const leavePage = useSocialPage("leaveNotices", {}, tab === "requests");
+  const { items: leaveNotices, setItems: setLeaveNotices } = leavePage;
+
   /** 私信 tab 内联打开的会话 id；null = 列表态 */
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const tabPanelRef = useTabPanelMotion<HTMLDivElement>(activeChatId ?? tab, ":scope > .quick-messages-chat, :scope > .messages-private, :scope > .messages-friends");
 
   const currentUser = useAuthStore((s) => s.currentUser);
-  const conversations = useChatStore((s) => s.conversations);
   const realtimeNotices = useNoticeStore((s) => s.notices);
   const dismissNotice = useNoticeStore((s) => s.dismiss);
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
 
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
-  const [leaveNotices, setLeaveNotices] = useState<GroupMemberLeaveNotice[]>([]);
-  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
-  const [invites, setInvites] = useState<GroupInvite[]>([]);
-  const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [requestsError, setRequestsError] = useState<string | null>(null);
+  const loadError = privatePage.error;
 
   // ESC 关闭
   useEffect(() => {
@@ -75,43 +81,14 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
       });
   }, []);
 
-  // 会话列表（私信 tab 复用；main 已预加载，此处兜底过期/空）
-  useEffect(() => {
-    if (conversations.length === 0 || isChatStale()) {
-      chatApi
-        .listConversations()
-        .then((l) => useChatStore.getState().setConversations(l))
-        .catch((e) => setLoadError(e instanceof Error ? e.message : "加载会话失败"));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // 认证消息数据（与 /messages 认证消息 tab 同源：好友申请/群邀请/退群通知/入群申请）
+  const refreshSocial0 = friendRequestPage.refresh;
+  const refreshSocial1 = invitePage.refresh;
+  const refreshSocial2 = joinPage.refresh;
+  const refreshSocial3 = leavePage.refresh;
   const loadRequests = useCallback(() => {
-    setRequestsError(null);
-    usersApi
-      .listFriendRequests()
-      .then(setFriendRequests)
-      .catch((e) => setRequestsError(e instanceof Error ? e.message : "加载好友申请失败"));
-    chatApi
-      .listMyInvites()
-      .then((l) => setInvites(l.filter((i) => i.status === "pending")))
-      .catch((e) => setRequestsError(e instanceof Error ? e.message : "加载群邀请失败"));
-    chatApi
-      .listLeaveNotices()
-      .then(setLeaveNotices)
-      .catch((e) => setRequestsError(e instanceof Error ? e.message : "加载退群通知失败"));
-    const managed = conversations.filter(
-      (c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"),
-    );
-    Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
-      .then((lists) => setJoinRequests(lists.flat().filter((r) => r.status === "pending")))
-      .catch((e) => setRequestsError(e instanceof Error ? e.message : "加载入群申请失败"));
-  }, [conversations]);
-
-  useEffect(() => {
-    if (tab === "requests") loadRequests();
-  }, [tab, loadRequests]);
+    void refreshSocial0(); void refreshSocial1(); void refreshSocial2(); void refreshSocial3();
+  }, [refreshSocial0, refreshSocial1, refreshSocial2, refreshSocial3]);
 
   // 认证相关 WS 事件 → 实时刷新（与 MessagesPage 一致）
   useEffect(() => {
@@ -261,11 +238,11 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
               onError={setActionError}
               disableAvatarNav
             />
+          <DirectoryLoadMore {...privatePage} retainCompletedSpace={false} />
           </div>
         ) : (
           <div className="messages-friends quick-messages-requests" aria-label="认证消息">
-            {requestsError && <div className="chat-notice" role="alert">{requestsError}</div>}
-            {(leaveNotices.length > 0 || realtimeLeaveNotices.length > 0) && (
+            {(leaveNotices.length > 0 || realtimeLeaveNotices.length > 0 || leavePage.loading || !!leavePage.error || leavePage.hasMore) && (
               <section className="messages-group">
                 <h3 className="messages-group-title">退群通知</h3>
                 {leaveNotices.map((notice) => (
@@ -280,8 +257,7 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
                       type="button"
                       className="btn btn-ghost request-btn"
                       onClick={() => {
-                        void chatApi.readLeaveNotice(notice.id);
-                        setLeaveNotices((items) => items.filter((item) => item.id !== notice.id));
+                        void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch((e) => setActionError(e instanceof Error ? e.message : "标记通知失败"));
                       }}
                     >
                       知道了
@@ -303,9 +279,10 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
                     </button>
                   </div>
                 ))}
-              </section>
+              <DirectoryLoadMore {...leavePage} retainCompletedSpace={false} />
+            </section>
             )}
-            {pendingFriendRequests.length > 0 && (
+            {(pendingFriendRequests.length > 0 || friendRequestPage.loading || !!friendRequestPage.error || friendRequestPage.hasMore) && (
               <section className="messages-group">
                 <h3 className="messages-group-title">好友申请</h3>
                 {pendingFriendRequests.map((r) => (
@@ -318,9 +295,10 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
                     onReject={() => void handleFriendAction(r, "reject")}
                   />
                 ))}
-              </section>
+              <DirectoryLoadMore {...friendRequestPage} retainCompletedSpace={false} />
+            </section>
             )}
-            {invites.length > 0 && (
+            {(invites.length > 0 || invitePage.loading || !!invitePage.error || invitePage.hasMore) && (
               <section className="messages-group">
                 <h3 className="messages-group-title">群邀请</h3>
                 {invites.map((i) => (
@@ -333,9 +311,10 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
                     onReject={() => void handleInviteAction(i, "reject")}
                   />
                 ))}
-              </section>
+              <DirectoryLoadMore {...invitePage} retainCompletedSpace={false} />
+            </section>
             )}
-            {joinRequests.length > 0 && (
+            {(joinRequests.length > 0 || joinPage.loading || !!joinPage.error || joinPage.hasMore) && (
               <section className="messages-group">
                 <h3 className="messages-group-title">入群申请（群主/管理员）</h3>
                 {joinRequests.map((r) => (
@@ -348,9 +327,10 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
                     onReject={() => void handleJoinRequestAction(r, "reject")}
                   />
                 ))}
-              </section>
+              <DirectoryLoadMore {...joinPage} retainCompletedSpace={false} />
+            </section>
             )}
-            {requestsEmpty && <p className="messages-empty">暂无待处理认证消息</p>}
+            {requestsEmpty && ![leavePage, invitePage, joinPage, friendRequestPage].some((page) => page.loading || page.error || page.hasMore) && <p className="messages-empty">暂无待处理认证消息</p>}
           </div>
         )}
       </div>

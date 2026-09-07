@@ -9,7 +9,7 @@ import { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useState } fr
 import { motion, useIsPresent } from "framer-motion";
 import type { ChatMessage } from "../../api/types";
 import { getElysiaProfile } from "../../api/elysia";
-import { listFriends } from "../../api/users";
+import { getUserDetail } from "../../api/users";
 import * as chatApi from "../../api/chat";
 import { Avatar } from "../Avatar";
 import { MessageInput } from "./MessageInput";
@@ -56,9 +56,9 @@ export function PrivateChatPane({
   const [notice, setNotice] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
-  // Bug #2：私聊好友状态 —— 好友 id 集合 + 爱莉对端身份（爱莉私聊必须放行）。
+  // 精确查询当前对端好友关系；爱莉身份由独立配置接口返回。
   // friendsLoaded=false（加载中/失败）→ 视为未知，不禁用输入（后端 403 权威拦截）。
-  const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
+  const [peerIsFriend, setPeerIsFriend] = useState(false);
   const [friendsLoaded, setFriendsLoaded] = useState(false);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
 
@@ -67,18 +67,16 @@ export function PrivateChatPane({
     [conversations, conversationId],
   );
 
-  // 好友列表 + 爱莉身份（与 MessagesPage/WideMessagesSidebar 同一数据源模式）
+  const peerId = conv?.peer?.id;
   useEffect(() => {
     let cancelled = false;
-    listFriends()
-      .then((list) => {
-        if (cancelled) return;
-        setFriendIds(new Set(list.map((f) => f.user.id)));
-        setFriendsLoaded(true);
-      })
-      .catch(() => {
-        // 好友列表加载失败 → 保持未知（不误禁）；发消息仍由后端 403 兜底
-      });
+    setFriendsLoaded(false);
+    setPeerIsFriend(false);
+    if (peerId) void getUserDetail(peerId).then((user) => {
+      if (cancelled) return;
+      setPeerIsFriend(user.relation === "friend" || user.relation === "self");
+      setFriendsLoaded(true);
+    }).catch(() => { /* Unknown relationship remains server-authorized. */ });
     getElysiaProfile()
       .then((p) => {
         if (!cancelled) setElysiaUserId(p.user?.id ?? null);
@@ -89,7 +87,18 @@ export function PrivateChatPane({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [peerId]);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    void chatApi.getConversationMetadata(conversationId).then((conversation) => {
+      if (!cancelled) useChatStore.getState().upsertConversation(conversation);
+    }).catch((error) => {
+      if (!cancelled) setNotice(error instanceof Error ? error.message : "加载会话资料失败");
+    });
+    return () => { cancelled = true; };
+  }, [conversationId, active]);
 
   // 打开私聊会话：拉历史 + 订阅 + 标已读
   useEffect(() => {
@@ -133,6 +142,7 @@ export function PrivateChatPane({
 
   const handleRecall = async (msg: ChatMessage) => {
     if (msg.status === "recalled") return;
+    setNotice(null);
     try {
       await recallMessage(conversationId, msg.id);
     } catch (e) {
@@ -159,7 +169,7 @@ export function PrivateChatPane({
     peer != null &&
     friendsLoaded &&
     !(elysiaUserId != null && peer.id === elysiaUserId) &&
-    !friendIds.has(peer.id);
+    !peerIsFriend;
 
   return (
     <motion.div

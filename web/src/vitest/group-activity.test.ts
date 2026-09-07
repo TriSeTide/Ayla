@@ -15,6 +15,7 @@ import {
   hasGroupActivity,
   sortGroupsByActivity,
   useGroupActivityMap,
+  useGroupPresenceMap,
   useGroupCarouselSlides,
   type GroupActivity,
   type NewEvent,
@@ -330,5 +331,15 @@ describe("useGroupActivityMap（单调排序时间戳合并）", () => {
     useLiveStore.getState().setChannels([liveChannel("g1", "ended")]);
     const { result: r2 } = renderHook(() => useGroupActivityMap());
     expect(r2.current("g1", null).lastNewAt).toBe(bumped);
+  });
+});
+
+describe("complete group badge projection", () => {
+  afterEach(() => useChatStore.getState().reset());
+  it("uses directory aggregates when the active room is outside loaded room pages", () => {
+    useVoiceStore.getState().reset(); useLiveStore.getState().reset(); useBoardgameStore.getState().reset();
+    useChatStore.getState().upsertConversation({ id: "g1", type: "group", title: "group", announcement: "", avatar: "", owner_id: "me", members: [], member_count: 500, unread_count: 0, my_role: "owner", created_at: "", peer: null, group_presence: { live: true, voice: true, game: true } });
+    const { result } = renderHook(() => useGroupPresenceMap());
+    expect(result.current("g1")).toEqual({ live: true, voice: true, game: true });
   });
 });

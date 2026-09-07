@@ -1,10 +1,10 @@
 /**
  * chat 全局状态：会话列表 + 未读数 + 当前会话（文档 §2 stores/chat.ts）。
  *
- * - conversations：会话列表（来自 GET /chat/conversations/）；
+ * - conversations：已加载目录页和单项详情的描述符缓存，不代表完整会话目录；
  * - activeConversationId：当前打开的会话；
  * - 未读数：来自会话列表 unread_count + 实时 message.new 增量（未打开会话 +1）；
- * - 打开会话时清空该会话未读。
+ * - 打开会话只登记视图；已读状态由服务端回执更新。
  */
 import { create } from "zustand";
 import type {
@@ -21,6 +21,7 @@ function toSummary(conv: ConversationSummary | ConversationDetail): Conversation
     peer: (conv as ConversationSummary).peer ?? null,
     is_pinned: (conv as ConversationSummary).is_pinned ?? false,
     last_message: (conv as ConversationSummary).last_message ?? null,
+    unread_seqs_complete: conv.unread_seqs_complete ?? true,
   };
 }
 
@@ -124,9 +125,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const normalized = toSummary(conv);
       const exists = state.conversations.some((c) => c.id === normalized.id);
       const conversations = exists
-        ? state.conversations.map((c) => (c.id === normalized.id ? { ...c, ...normalized } : c))
+        ? state.conversations.map((c) => (c.id === normalized.id ? {
+          ...c, ...normalized,
+          ...(normalized.members_complete === false && c.members_complete !== false && c.members.length > 0
+            ? { members: c.members, members_complete: c.members_complete } : {}),
+        } : c))
         : [normalized, ...state.conversations];
-      return { conversations: sortConversations(conversations) };
+      const at = Date.parse(normalized.directory_activity_at ?? "") || 0;
+      return { conversations: sortConversations(conversations),
+        groupActivityAt: normalized.type === "group" && at > (state.groupActivityAt[normalized.id] ?? 0)
+          ? { ...state.groupActivityAt, [normalized.id]: at } : state.groupActivityAt,
+        conversationActivityAt: normalized.type === "private" && at > (state.conversationActivityAt[normalized.id] ?? 0)
+          ? { ...state.conversationActivityAt, [normalized.id]: at } : state.conversationActivityAt };
     }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
@@ -168,6 +178,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (c.id !== convId) return c;
         const seq = details?.seq;
         const unreadSeqs = c.unread_seqs ?? [];
+        if (seq != null && c.unread_seqs_complete === false && seq <= (c.last_message?.seq ?? 0) && !unreadSeqs.includes(seq)) return c;
         const nextUnread = seq != null && !unreadSeqs.includes(seq)
           ? [...unreadSeqs, seq].sort((a, b) => a - b)
           : unreadSeqs;
@@ -181,10 +192,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : replySeqs;
         return {
           ...c,
-          unread_count: seq != null ? nextUnread.length : c.unread_count + 1,
+          unread_count: seq != null && c.unread_seqs_complete !== false ? nextUnread.length
+            : c.unread_count + (seq == null || !unreadSeqs.includes(seq) ? 1 : 0),
           unread_seqs: seq != null ? nextUnread : c.unread_seqs,
           mention_unread_seqs: seq != null ? nextMention : c.mention_unread_seqs,
-          mention_unread_count: seq != null ? nextMention.length : c.mention_unread_count,
+          mention_unread_count: seq != null && c.unread_seqs_complete !== false ? nextMention.length
+            : (c.mention_unread_count ?? 0) + (details?.mention && seq != null && !mentionSeqs.includes(seq) ? 1 : 0),
           reply_unread_seqs: seq != null ? nextReply : c.reply_unread_seqs,
         };
         }),
@@ -222,9 +235,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const reply = (c.reply_unread_seqs ?? []).filter((seq) => !read.has(seq));
         return {
           ...c,
-          unread_count: unread.length,
+          unread_count: c.unread_seqs_complete === false
+            ? Math.max(0, c.unread_count - (c.unread_seqs ?? []).filter((seq) => read.has(seq)).length) : unread.length,
           unread_seqs: unread,
-          mention_unread_count: mention.length,
+          mention_unread_count: c.unread_seqs_complete === false
+            ? Math.max(0, (c.mention_unread_count ?? 0) - (c.mention_unread_seqs ?? []).filter((seq) => read.has(seq)).length) : mention.length,
           mention_unread_seqs: mention,
           reply_unread_seqs: reply,
         };

@@ -45,7 +45,7 @@ import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { ServerRail } from "../layout/ServerRail";
 import { useChatStore } from "../stores/chat";
 import { useSubGroupStore } from "../stores/subgroup";
-import { subscribeGroupConversations } from "../ws/chat";
+import { useSocialPage } from "../hooks/useSocialPage";
 import { GROUP_SCENE_ORDER, useGroupStore } from "../stores/group";
 import type { GroupScene } from "../stores/group";
 import { useHomeStore } from "../stores/home";
@@ -84,6 +84,9 @@ export function GroupPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
   const conversations = useChatStore((s) => s.conversations);
+  const groupPage = useSocialPage("conversations", { type: "group" });
+  const subgroupPage = useSocialPage("subgroups", { groupId: id }, !!id);
+  const selectedSubgroup = useSubGroupStore((state) => id ? state.activeByGroup[id] : null);
   const activeScene = useGroupStore((s) => s.activeScene);
   const setActiveScene = useGroupStore((s) => s.setActiveScene);
   const setCurrentGroup = useGroupStore((s) => s.setCurrentGroup);
@@ -189,8 +192,12 @@ export function GroupPage() {
   }, [reducedMotion, pullSwipe.tracker, pullY, pullOpacity, leaving]);
 
   const groups = useMemo(
-    () => conversations.filter((c) => c.type === "group"),
-    [conversations],
+    () => {
+      const loaded = groupPage.items;
+      const selected = conversations.find((conversation) => conversation.id === id && conversation.type === "group");
+      return selected && !loaded.some((conversation) => conversation.id === selected.id) ? [...loaded, selected] : loaded;
+    },
+    [conversations, groupPage.items, id],
   );
 
   // 群"新内容"活跃度：WS 实时维护 live/voice/boardgame/posts store → 排序即时刷新
@@ -235,17 +242,15 @@ export function GroupPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, effectiveScene]);
 
-  // 直接访问 /group/:id 时会话列表可能为空：补齐加载（复用 chat store）
+  // Direct routes resolve their own descriptor, even outside the first group page.
   useEffect(() => {
-    // 只要已有会话就可渲染当前群；实时变化由 WebSocket upsert 驱动，避免首屏重复请求。
-    if (conversations.length > 0) return;
+    if (!id || currentGroup) return;
     let cancelled = false;
     chatApi
-      .listConversations()
-      .then((list) => {
+      .getConversationSummary(id)
+      .then((conversation) => {
         if (!cancelled) {
-          useChatStore.getState().setConversations(list);
-          subscribeGroupConversations(list);
+          useChatStore.getState().upsertConversation(conversation);
           setConversationLoadError(null);
         }
       })
@@ -255,31 +260,30 @@ export function GroupPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationRetry]);
+  }, [id, currentGroup, conversationRetry]);
 
-  // 进入群：拉子群列表（宽屏侧栏/窄屏选项卡共用），未选中时默认「默认组」
+  // Default and selected identities are independent of the visible page boundary.
   useEffect(() => {
     if (!id) return;
+    if (selectedSubgroup == null) {
+      const defaultGroup = subgroupPage.items.find((item) => item.is_default);
+      if (defaultGroup) useSubGroupStore.getState().setActiveSubgroup(id, defaultGroup.id);
+      return;
+    }
+    if (useSubGroupStore.getState().byGroup[id]?.some((item) => item.id === selectedSubgroup)) return;
     let cancelled = false;
-    chatApi
-      .listSubgroups(id)
-      .then((list) => {
+    void chatApi.getSubgroup(id, selectedSubgroup)
+      .then((subgroup) => {
         if (cancelled) return;
-        useSubGroupStore.getState().setSubgroups(id, list);
-        const active = useSubGroupStore.getState().activeByGroup[id];
-        if (active == null) {
-          const defaultSg = list.find((sg) => sg.is_default) ?? list[0];
-          useSubGroupStore.getState().setActiveSubgroup(id, defaultSg?.id ?? null);
-        }
+        useSubGroupStore.getState().upsertSubgroup(id, subgroup);
       })
-      .catch(() => {
-        // 子群列表加载失败：保持无子群视图（聊天仍按全部消息加载）
+      .catch((error) => {
+        if (!cancelled) setConversationLoadError(error instanceof Error ? error.message : "加载选中子群失败");
       });
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, selectedSubgroup, subgroupPage.items]);
 
   // 切换场景：store（单一事实）+ URL 回显
   const goScene = useCallback(
@@ -379,7 +383,7 @@ export function GroupPage() {
             {actionError}（点击关闭）
           </div>
         )}
-        {conversationLoadError && <div className="chat-notice" role="alert"><span>{conversationLoadError}</span><button type="button" className="btn btn-ghost" onClick={() => { setConversationLoadError(null); setConversationRetry((value) => value + 1); }}>重试</button></div>}
+        {(conversationLoadError || groupPage.error) && <div className="chat-notice" role="alert"><span>{conversationLoadError || groupPage.error}</span><button type="button" className="btn btn-ghost" onClick={() => { setConversationLoadError(null); setConversationRetry((value) => value + 1); void groupPage.refresh(); }}>重试</button></div>}
         <ServerRail
           groups={sortedGroups}
           currentGroupId={id ?? null}

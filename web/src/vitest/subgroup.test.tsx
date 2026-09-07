@@ -1,3 +1,6 @@
+import { useAuthStore } from "../stores/auth";
+import * as chatApi from "../api/chat";
+import { disposeSocialTracking } from "../stores/social";
 /**
  * 群聊子群功能测试：
  * - subgroup store：列表/未读投影/upsert 保留未读；
@@ -88,6 +91,8 @@ function groupConv(id: string, myRole: "owner" | "admin" | "member" = "owner"): 
 }
 
 beforeEach(() => {
+  disposeSocialTracking();
+  useAuthStore.setState({ currentUser: { id: "me", username: "me", nickname: "", avatar: "", signature: "", status: "auto", online: false, date_joined: "" }, accessToken: "test" });
   disposeDirectoryTracking();
   useMessageStore.getState().reset();
   useSubGroupStore.getState().reset();
@@ -474,6 +479,8 @@ describe("GroupChat 子群选项卡", () => {
     ) };
   });
   vi.mock("../api/chat", () => ({
+  listSubgroupsPage: vi.fn(async (id: string) => { const results = await chatApi.listSubgroups(id); return { results, total: results.length, has_more: false, next_cursor: null, default: results.find((row) => row.is_default) ?? null }; }),
+  getConversationMetadata: vi.fn(async (id: string) => useChatStore.getState().conversations.find((row) => row.id === id)!),
     listSubgroups: vi.fn().mockResolvedValue([
       sg("1", "默认组", true),
       { ...sg("2", "闲聊"), unread_count: 3, unread_seqs: [1, 2, 3] },
@@ -642,7 +649,7 @@ describe("GroupChat 子群选项卡", () => {
       expect(useSubGroupStore.getState().activeByGroup.g1).toBe("2");
     });
     const input = screen.getByText("输入框");
-    expect(input.dataset.disabled).toBe("true");
+    await waitFor(() => expect(input.dataset.disabled).toBe("true"));
     expect(input.dataset.hint).toBe("该子群已禁言，仅群主/管理员可发言");
   });
 

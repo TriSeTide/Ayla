@@ -114,11 +114,14 @@ function messageEvent(
  * 订阅 live/voice/boardgame store，返回 (groupId) => GroupPresence（角标/存在性）。
  */
 export function useGroupPresenceMap(): (groupId: string) => GroupPresence {
+  const conversations = useChatStore((state) => state.conversations);
   const liveChannels = useLiveStore((s) => s.channels);
   const voiceChannels = useVoiceStore((s) => s.channels);
   const gameRooms = useBoardgameStore((s) => s.rooms);
 
   return (groupId) => {
+    const aggregate = conversations.find((conversation) => conversation.id === groupId)?.group_presence;
+    if (aggregate) return aggregate;
     let live = false;
     let voice = false;
     let game = false;

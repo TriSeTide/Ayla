@@ -8,10 +8,11 @@
  *
  * 建群成功跳 /group/:id；发起私聊跳 /chat/:id（复用原入口语义）。
  */
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
-import { searchUsers } from "../api/users";
+import { useSocialPage } from "../hooks/useSocialPage";
+import { DirectoryLoadMore } from "./DirectoryLoadMore";
 import type { UserPublic } from "../api/types";
 import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
@@ -24,28 +25,16 @@ export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
 
   const [title, setTitle] = useState("");
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<UserPublic[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const userPage = useSocialPage("users", { q: searchQuery }, !!searchQuery.trim());
+  const results = query.trim() === searchQuery.trim() ? userPage.items.filter((user) => user.id !== currentUser?.id) : [];
   const [selected, setSelected] = useState<UserPublic[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const doSearch = (q: string) => {
-    setQuery(q);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (!q.trim()) {
-      setResults([]);
-      return;
-    }
-    timerRef.current = setTimeout(async () => {
-      try {
-        const list = await searchUsers(q.trim());
-        setResults(list.filter((u) => u.id !== currentUser?.id));
-      } catch {
-        setResults([]);
-      }
-    }, 300);
-  };
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   // 勾选/取消成员（结果行是候选，已选进 selected 数组）
   const toggleMember = (u: UserPublic) => {
@@ -121,7 +110,7 @@ export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
           <input
             className="field"
             value={query}
-            onChange={(e) => doSearch(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索成员（可选，可稍后在群内添加）"
             aria-label="搜索成员"
           />
@@ -175,7 +164,8 @@ export function GroupCreateDialog({ onClose }: { onClose: () => void }) {
                 </li>
               );
             })}
-            {results.length === 0 && <li className="search-empty">没有匹配的用户</li>}
+            {!userPage.loading && !userPage.error && query.trim() === searchQuery && results.length === 0 && <li className="search-empty">没有匹配的用户</li>}
+            <li><DirectoryLoadMore {...userPage} retainCompletedSpace={false} /></li>
           </ul>
         )}
 

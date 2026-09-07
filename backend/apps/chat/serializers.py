@@ -441,7 +441,7 @@ class ConversationSerializer(serializers.ModelSerializer):
         ).values_list("message_id", flat=True)
         return (
             obj.messages.exclude(sender=request.user)
-            .exclude(id__in=list(read_msg_ids))
+            .exclude(id__in=read_msg_ids)
             .exclude(status=Message.STATUS_RECALLED)
             .filter(segments__contains=[{"type": "mention", "user_id": str(request.user.id)}])
             .count()
@@ -488,6 +488,65 @@ class ConversationListSerializer(ConversationSerializer):
         return UserPublicSerializer(
             member.user, context={"request": request}
         ).data
+
+
+class ConversationMetadataSerializer(ConversationSerializer):
+    """Group metadata explicitly excludes its independently paged members.
+
+    The legacy detail serializer remains complete. Private conversations have
+    exactly two participants, so their fixed participant data remains inline.
+    """
+
+    members = serializers.SerializerMethodField()
+    members_complete = serializers.SerializerMethodField()
+    my_muted = serializers.SerializerMethodField()
+    unread_seqs_complete = serializers.SerializerMethodField()
+
+    class Meta(ConversationSerializer.Meta):
+        fields = ConversationSerializer.Meta.fields + ["members_complete", "my_muted", "unread_seqs_complete"]
+
+    def get_members(self, obj):
+        if obj.type == Conversation.TYPE_GROUP:
+            return []
+        return ConversationMemberSerializer(obj.members.select_related("user")[:2], many=True).data
+
+    def get_members_complete(self, obj):
+        return obj.type != Conversation.TYPE_GROUP
+
+    def get_my_muted(self, obj):
+        request = self.context["request"]
+        return bool(obj.members.filter(user=request.user).values_list("muted", flat=True).first())
+
+    def get_unread_seqs_complete(self, obj):
+        return True
+
+
+class ConversationDirectorySerializer(ConversationListSerializer):
+    """Bounded directory row: no growing member or unread-sequence arrays."""
+
+    members = serializers.SerializerMethodField()
+    members_complete = serializers.SerializerMethodField()
+    my_muted = serializers.SerializerMethodField()
+    unread_seqs_complete = serializers.SerializerMethodField()
+    directory_activity_at = serializers.DateTimeField(source="_social_activity", read_only=True)
+    group_presence = serializers.SerializerMethodField()
+
+    class Meta(ConversationListSerializer.Meta):
+        fields = [field for field in ConversationListSerializer.Meta.fields if field not in (
+            "unread_seqs", "mention_unread_seqs", "reply_unread_seqs",
+        )] + ["members_complete", "my_muted", "unread_seqs_complete", "directory_activity_at", "group_presence"]
+
+    get_members = ConversationMetadataSerializer.get_members
+    get_members_complete = ConversationMetadataSerializer.get_members_complete
+    get_my_muted = ConversationMetadataSerializer.get_my_muted
+
+    def get_unread_seqs_complete(self, obj):
+        return False
+
+    def get_group_presence(self, obj):
+        return {"live": bool(getattr(obj, "_social_live", False)),
+                "voice": bool(getattr(obj, "_social_voice", False)),
+                "game": bool(getattr(obj, "_social_game", False))}
 
 
 class CreateMessageSerializer(serializers.Serializer):

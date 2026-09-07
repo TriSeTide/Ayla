@@ -1,159 +1,78 @@
-/**
- * VisibilitySelector 按需加载兜底测试（验收：数据未加载时弹窗显示空的问题）
- */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VisibilitySelector } from "../components/VisibilitySelector";
+import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
+import { disposeSocialTracking } from "../stores/social";
 import * as chatApi from "../api/chat";
-import type { ConversationSummary } from "../api/types";
+import type { ConversationSummary, UserPublic } from "../api/types";
 
-vi.mock("../api/chat");
-
-function groupConv(id: string, title: string): ConversationSummary {
-  return {
-    id,
-    type: "group",
-    title,
-    announcement: "",
-    avatar: "",
-    owner_id: "u1",
-    members: [],
-    my_role: "member",
-    member_count: 1,
-    unread_count: 0,
-    created_at: "2025-01-01T00:00:00Z",
-    peer: null,
-  };
+vi.mock("../api/chat", () => ({ listConversationsPage: vi.fn(), listConversations: vi.fn() }));
+const group = (id: string, title: string): ConversationSummary => ({ id, type: "group", title, announcement: "", avatar: "", owner_id: "me", members: [], member_count: 1, unread_count: 0, my_role: "member", created_at: "", peer: null });
+const page = (results: ConversationSummary[], next: string | null = null) => ({ results, total: next ? 31 : results.length, has_more: !!next, next_cursor: next });
+function Selection({ initial = [] as string[], locked = false }) {
+  const [ids, setIds] = useState(initial);
+  return <VisibilitySelector value={{ public: false, friends: false, group: true }} onChange={vi.fn()} selectedGroupIds={ids} onSelectedGroupIdsChange={setIds} initialGroupId={locked ? initial[0] : undefined} lockGroup={locked} />;
 }
+beforeEach(() => {
+  disposeSocialTracking(); useChatStore.getState().reset(); vi.clearAllMocks();
+  useAuthStore.setState({ currentUser: { id: "me" } as UserPublic, accessToken: "test" });
+});
+afterEach(() => { disposeSocialTracking(); useAuthStore.setState({ currentUser: null, accessToken: null }); });
 
-describe("VisibilitySelector 按需加载", () => {
-  beforeEach(() => {
-    // 重置 store 为空状态（模拟弹窗打开时数据未加载；含 lastFetched 归零）
-    useChatStore.getState().reset();
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    useChatStore.getState().reset();
-  });
-
-  it("conversations 为空时自动调用 listConversations 加载", async () => {
-    const mockConversations = [groupConv("g1", "测试群1"), groupConv("g2", "测试群2")];
-    vi.mocked(chatApi.listConversations).mockResolvedValue(mockConversations);
-
-    const onChange = vi.fn();
-    const onSelectedGroupIdsChange = vi.fn();
-
-    render(
-      <VisibilitySelector
-        value={{ public: false, friends: false, group: true }}
-        onChange={onChange}
-        selectedGroupIds={[]}
-        onSelectedGroupIdsChange={onSelectedGroupIdsChange}
-      />
-    );
-
-    // 验证 API 被调用
-    await waitFor(() => {
-      expect(chatApi.listConversations).toHaveBeenCalledTimes(1);
-    });
-
-    // 验证数据加载到 store
-    await waitFor(() => {
-      expect(useChatStore.getState().conversations).toHaveLength(2);
-    });
-
-    // 验证群列表显示
-    await waitFor(() => {
-      expect(screen.getByText("测试群1")).toBeInTheDocument();
-      expect(screen.getByText("测试群2")).toBeInTheDocument();
-    });
-  });
-
-  it("conversations 已有数据时不重复加载", () => {
-    // 模拟 store 已持有新鲜群列表（lastFetched 为当前时间）
-    useChatStore.setState({
-      conversations: [groupConv("g1", "已有群")],
-      loading: false,
-      error: null,
-      lastFetched: Date.now(),
-    });
-
-    const onChange = vi.fn();
-    const onSelectedGroupIdsChange = vi.fn();
-
-    render(
-      <VisibilitySelector
-        value={{ public: false, friends: false, group: true }}
-        onChange={onChange}
-        selectedGroupIds={[]}
-        onSelectedGroupIdsChange={onSelectedGroupIdsChange}
-      />
-    );
-
-    // API 不应被调用
+describe("VisibilitySelector actual pages", () => {
+  it("loads the first bounded page and reaches another page without fetching the legacy array", async () => {
+    vi.mocked(chatApi.listConversationsPage).mockResolvedValueOnce(page([group("1", "第一页")], "second"))
+      .mockResolvedValueOnce(page([group("31", "第三十一群")]));
+    render(<Selection />);
+    expect(await screen.findByText("第一页")).toBeInTheDocument();
+    expect(screen.queryByText("第三十一群")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(await screen.findByText("第三十一群")).toBeInTheDocument();
+    expect(chatApi.listConversationsPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "second", type: "group", limit: 30 }));
     expect(chatApi.listConversations).not.toHaveBeenCalled();
-
-    // 已有数据应正常显示
-    expect(screen.getByText("已有群")).toBeInTheDocument();
   });
-
-  it("加载期间显示骨架屏", async () => {
-    vi.mocked(chatApi.listConversations).mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve([]), 50))
-    );
-
-    const onChange = vi.fn();
-    const onSelectedGroupIdsChange = vi.fn();
-
-    render(
-      <VisibilitySelector
-        value={{ public: false, friends: false, group: true }}
-        onChange={onChange}
-        selectedGroupIds={[]}
-        onSelectedGroupIdsChange={onSelectedGroupIdsChange}
-      />
-    );
-
-    // 加载期间应显示骨架屏
-    await waitFor(() => {
-      expect(document.querySelector(".visibility-groups-skeleton")).toBeInTheDocument();
-    });
-
-    // 等待加载完成后骨架屏消失，显示空状态
-    await waitFor(() => {
-      expect(document.querySelector(".visibility-groups-skeleton")).not.toBeInTheDocument();
-      expect(screen.getByText("没有匹配的群")).toBeInTheDocument();
-    }, { timeout: 2000 });
+  it("keeps selections while a server-side search replaces candidates", async () => {
+    vi.mocked(chatApi.listConversationsPage).mockResolvedValueOnce(page([group("1", "已选的群")]))
+      .mockResolvedValueOnce(page([group("99", "远处的群")]));
+    render(<Selection />);
+    fireEvent.click(await screen.findByLabelText("已选的群"));
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索群" }), { target: { value: "远处" } });
+    expect(await screen.findByText("远处的群")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("已选群")).getByText("已选的群")).toBeInTheDocument();
+    expect(chatApi.listConversationsPage).toHaveBeenLastCalledWith(expect.objectContaining({ q: "远处", cursor: null }));
   });
-
-  it("加载失败时不中断界面", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(chatApi.listConversations).mockRejectedValue(new Error("网络错误"));
-
-    const onChange = vi.fn();
-    const onSelectedGroupIdsChange = vi.fn();
-
-    render(
-      <VisibilitySelector
-        value={{ public: false, friends: false, group: true }}
-        onChange={onChange}
-        selectedGroupIds={[]}
-        onSelectedGroupIdsChange={onSelectedGroupIdsChange}
-      />
-    );
-
-    await waitFor(() => {
-      expect(consoleError).toHaveBeenCalledWith("加载群列表失败", expect.any(Error));
-    });
-
-    // 等待加载状态清除后，界面应显示"没有匹配的群"而非崩溃
-    await waitFor(() => {
-      expect(document.querySelector(".visibility-groups-skeleton")).not.toBeInTheDocument();
-      expect(screen.getByText("没有匹配的群")).toBeInTheDocument();
-    }, { timeout: 2000 });
-
-    consoleError.mockRestore();
+  it("exposes a failure and retries rather than claiming no matching groups", async () => {
+    vi.mocked(chatApi.listConversationsPage).mockRejectedValueOnce(new Error("群目录断网"))
+      .mockResolvedValueOnce(page([group("1", "恢复的群")]));
+    render(<Selection />);
+    expect(await screen.findByText("群目录断网")).toBeInTheDocument();
+    expect(screen.queryByText("没有匹配的群")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByText("恢复的群")).toBeInTheDocument();
+  });
+  it("shows the successful empty state only after the response", async () => {
+    let finish!: (value: ReturnType<typeof page>) => void;
+    vi.mocked(chatApi.listConversationsPage).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    render(<Selection />);
+    expect(screen.queryByText("没有匹配的群")).not.toBeInTheDocument();
+    await waitFor(() => expect(chatApi.listConversationsPage).toHaveBeenCalled());
+    finish(page([]));
+    expect(await screen.findByText("没有匹配的群")).toBeInTheDocument();
+  });
+  it("does not interpret a descriptor cache as the complete group collection", async () => {
+    useChatStore.getState().setConversations([group("cached", "缓存群")]);
+    vi.mocked(chatApi.listConversationsPage).mockResolvedValueOnce(page([group("new", "服务端第一页")]));
+    render(<Selection />);
+    expect(await screen.findByText("服务端第一页")).toBeInTheDocument();
+    expect(chatApi.listConversationsPage).toHaveBeenCalledTimes(1);
+  });
+  it("preserves a locked initial selection even when it lies beyond the first page", async () => {
+    vi.mocked(chatApi.listConversationsPage).mockResolvedValueOnce(page([group("1", "第一页")], "second"));
+    render(<Selection initial={["999"]} locked />);
+    expect(await screen.findByText("第一页")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("已选群")).getByText("群 999")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "取消选择群 999" })).not.toBeInTheDocument();
   });
 });

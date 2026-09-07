@@ -1,3 +1,5 @@
+import * as chatApi from "../api/chat";
+import { disposeSocialTracking } from "../stores/social";
 /**
  * 消息中心审批错误提示测试（测试报告 #3 修复）：
  * - 好友申请/群邀请/入群申请的「同意/拒绝」请求失败 → 显示错误提示条；
@@ -22,6 +24,11 @@ vi.mock("../components/chat/ElysiaEntry", () => ({
 }));
 
 vi.mock("../api/chat", () => ({
+  listConversationsPage: vi.fn(async (params: { type?: string }) => { const all = await chatApi.listConversations(); const results = all.filter((row) => !params.type || params.type === "all" || row.type === params.type); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listMyInvitesPage: vi.fn(async () => { const results = await chatApi.listMyInvites(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listLeaveNoticesPage: vi.fn(async () => { const results = await chatApi.listLeaveNotices(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listManagedJoinRequestsPage: vi.fn(async () => { const results = await chatApi.listJoinRequests("fixture-group"); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listJoinRequestsPage: vi.fn(async (id: string) => { const results = await chatApi.listJoinRequests(id); return { results, total: results.length, has_more: false, next_cursor: null }; }),
   listConversations: vi.fn().mockResolvedValue([]),
   listMyInvites: vi.fn().mockResolvedValue([]),
   listLeaveNotices: vi.fn().mockResolvedValue([]),
@@ -32,6 +39,8 @@ vi.mock("../api/chat", () => ({
 }));
 
 vi.mock("../api/users", () => ({
+  listFriendsPage: vi.fn(async () => { const results = await usersApi.listFriends(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  listFriendRequestsPage: vi.fn(async () => { const results = await usersApi.listFriendRequests(); return { results, total: results.length, has_more: false, next_cursor: null }; }),
   listFriends: vi.fn().mockResolvedValue([]),
   listFriendRequests: vi.fn().mockResolvedValue([]),
   actionFriendRequest: vi.fn().mockResolvedValue({ detail: "ok", status: "accepted" }),
@@ -79,6 +88,7 @@ function renderSidebar() {
 }
 
 beforeEach(() => {
+  disposeSocialTracking();
   useChatStore.setState({ conversations: [] });
   useAuthStore.setState({ currentUser: req.to_user, accessToken: "acc" });
   useBadgesStore.setState({ fetch: vi.fn() } as never);

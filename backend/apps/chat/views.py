@@ -17,6 +17,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import services
+from .pagination import page_requested, serialized_page, social_page
+from .conversation_directory import CONVERSATION_ORDER, SUBGROUP_ORDER, with_conversation_order, with_group_presence, with_subgroup_order
 from .models import (
     Conversation,
     ConversationMember,
@@ -25,10 +27,12 @@ from .models import (
     GroupMemberLeaveNotice,
     GroupSubGroup,
     Message,
-    MessageRead,
 )
 from .serializers import (
     ConversationListSerializer,
+    ConversationDirectorySerializer,
+    ConversationMetadataSerializer,
+    ConversationMemberSerializer,
     ConversationSerializer,
     CreateMessageSerializer,
     GroupActionSerializer,
@@ -72,6 +76,27 @@ def _bad_request(msg):
 
 # ---------- 会话 ----------
 
+class GroupPresenceBatchView(APIView):
+    """POST /group-presence/: exact requested badge projections, at most 100 IDs."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        ids = request.data.get("conversation_ids") if isinstance(request.data, dict) else None
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 100
+                or any(not isinstance(value, str) or not value.isascii()
+                       or not value.isdecimal() or value.startswith("0") or len(value) > 19
+                       or not 1 <= int(value) <= 2**63 - 1 for value in ids)):
+            return _bad_request("conversation_ids 必须包含 1 到 100 个有效会话 ID")
+        ids = list(dict.fromkeys(ids))
+        queryset = Conversation.objects.filter(pk__in=ids, type=Conversation.TYPE_GROUP,
+            members__user=request.user)
+        rows = with_group_presence(queryset).values("pk", "_social_live", "_social_voice", "_social_game")
+        result = dict.fromkeys(ids)
+        for row in rows:
+            result[str(row["pk"])] = {kind: bool(row[f"_social_{kind}"]) for kind in ("live", "voice", "game")}
+        return Response({"presences": result})
+
+
 class ConversationListView(APIView):
     """GET /conversations/ —— 当前用户会话列表（含未读数、对方信息/群标题）。
 
@@ -88,12 +113,45 @@ class ConversationListView(APIView):
             Conversation.objects.filter(members__user=request.user)
             .exclude(id__in=hidden_ids)
             .distinct()
-            .prefetch_related("members__user")
         )
+        if page_requested(request):
+            kind = request.query_params.get("type", "all")
+            query = request.query_params.get("q", "").strip()
+            if kind not in ("all", "group", "private"):
+                return _bad_request("会话类型无效")
+            if kind != "all":
+                qs = qs.filter(type=kind)
+            if query:
+                qs = qs.filter(Q(title__icontains=query) | Q(
+                    type=Conversation.TYPE_PRIVATE,
+                    members__user__nickname__icontains=query,
+                ) | Q(type=Conversation.TYPE_PRIVATE, members__user__username__icontains=query)).distinct()
+            qs = with_conversation_order(qs, request.user)
+            rows, metadata = social_page(qs, request,
+                scope={"kind": "conversations", "type": kind, "q": query}, ordering=CONVERSATION_ORDER)
+            return Response({"results": ConversationDirectorySerializer(rows, many=True,
+                context={"request": request}).data, **metadata})
         data = ConversationListSerializer(
-            qs, many=True, context={"request": request}
+            qs.prefetch_related("members__user"), many=True, context={"request": request}
         ).data
         return Response(data)
+
+
+class ConversationSubscriptionsView(APIView):
+    """Compact authorized group registrations, independently paged from UI rows."""
+
+    def get(self, request):
+        if not page_requested(request):
+            return _bad_request("群订阅登记必须使用 pagination=cursor")
+        queryset = Conversation.objects.filter(
+            type=Conversation.TYPE_GROUP, members__user=request.user,
+        ).distinct()
+        rows, metadata = social_page(queryset, request, scope={"kind": "group-subscriptions"}, ascending=True)
+        sequences = {row["conversation_id"]: row["latest"] for row in Message.objects.filter(
+            conversation_id__in=[row.pk for row in rows],
+        ).order_by().values("conversation_id").annotate(latest=Max("seq"))}
+        return Response({"results": [{"id": str(row.pk), "last_message_seq": sequences.get(row.pk, 0)}
+                                     for row in rows], **metadata})
 
 
 class PrivateConversationView(APIView):
@@ -176,6 +234,17 @@ class SubGroupListView(APIView):
             return _forbidden()
         if conv.type != Conversation.TYPE_GROUP:
             return _bad_request("仅群聊有子群")
+        if page_requested(request):
+            rows, metadata = social_page(with_subgroup_order(conv.subgroups.all(), conv), request,
+                scope={"kind": "subgroups", "group": str(conv.pk)}, ordering=SUBGROUP_ORDER)
+            default = conv.subgroups.filter(is_default=True).first()
+            ids = [row.pk for row in rows] + ([default.pk] if default else [])
+            seqs = {item["subgroup_id"]: item["last_message_seq"] for item in conv.messages.filter(
+                Q(subgroup_id__in=ids) | Q(subgroup_id__isnull=True),
+            ).order_by().values("subgroup_id").annotate(last_message_seq=Max("seq"))}
+            context = {"request": request, "last_message_seqs": seqs}
+            return Response({"results": SubGroupSerializer(rows, many=True, context=context).data,
+                "default": SubGroupSerializer(default, context=context).data if default else None, **metadata})
         last_message_seqs = {
             item["subgroup_id"]: item["last_message_seq"]
             for item in conv.messages.order_by().values("subgroup_id").annotate(
@@ -230,6 +299,12 @@ class SubGroupDetailView(APIView):
         except (GroupSubGroup.DoesNotExist, ValueError):
             return None, _not_found("子群不存在")
         return sg, None
+
+    def get(self, request, conv_id, sid):
+        sg, error = self._get_subgroup(request, conv_id, sid)
+        if error is not None:
+            return error
+        return Response(SubGroupSerializer(sg, context={"request": request}).data)
 
     def patch(self, request, conv_id, sid):
         sg, err = self._get_subgroup(request, conv_id, sid)
@@ -305,7 +380,12 @@ class ConversationDetailView(APIView):
             return _not_found("会话不存在")
         if not services.user_can_access(request.user, conv):
             return _forbidden()
-        return Response(ConversationSerializer(conv, context={"request": request}).data)
+        mode = request.query_params.get("metadata")
+        if mode == "directory":
+            conv = with_conversation_order(Conversation.objects.filter(pk=conv.pk), request.user).get()
+        serializer = (ConversationDirectorySerializer if mode == "directory" else
+                      ConversationMetadataSerializer if mode == "1" else ConversationSerializer)
+        return Response(serializer(conv, context={"request": request}).data)
 
     def patch(self, request, conv_id):
         conv = _get_conv_or_404(conv_id)
@@ -609,7 +689,28 @@ class TypingView(APIView):
 # ---------- 群管理 ----------
 
 class MemberAddView(APIView):
-    """POST /conversations/<id>/members/ —— 加人 body {user_ids[]}（群管理员）。"""
+    """GET member pages; POST add members remains restricted to group managers."""
+
+    def get(self, request, conv_id):
+        """Read a true member page; role/count remain separate conversation facts."""
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if not services.user_can_access(request.user, conv):
+            return _forbidden()
+        if not page_requested(request):
+            return _bad_request("成员列表必须使用 pagination=cursor")
+        query = request.query_params.get("q", "").strip()
+        exclude_self = request.query_params.get("exclude_self", "0")
+        if exclude_self not in ("0", "1"):
+            return _bad_request("exclude_self 必须是 0 或 1")
+        queryset = conv.members.select_related("user")
+        if query:
+            queryset = queryset.filter(Q(user__nickname__icontains=query) | Q(user__username__icontains=query))
+        if exclude_self == "1":
+            queryset = queryset.exclude(user=request.user)
+        return Response(serialized_page(queryset, request, ConversationMemberSerializer,
+            scope={"kind": "members", "group": str(conv.pk), "q": query, "exclude_self": exclude_self}, ascending=True))
 
     def post(self, request, conv_id):
         conv = _get_conv_or_404(conv_id)
@@ -754,7 +855,11 @@ class GroupMemberLeaveNoticeListView(APIView):
     """GET /chat/leave-notices/；POST /chat/leave-notices/<id>/read/。"""
 
     def get(self, request):
-        notices = GroupMemberLeaveNotice.objects.filter(recipient=request.user, read_at__isnull=True).select_related("conversation")[:50]
+        notices = GroupMemberLeaveNotice.objects.filter(recipient=request.user, read_at__isnull=True).select_related("conversation")
+        if page_requested(request):
+            return Response(serialized_page(notices, request, GroupMemberLeaveNoticeSerializer,
+                scope={"kind": "leave-notices"}))
+        notices = notices[:50]
         return Response(GroupMemberLeaveNoticeSerializer(notices, many=True).data)
 
 
@@ -844,6 +949,9 @@ class GroupJoinRequestView(APIView):
         qs = GroupJoinRequest.objects.filter(
             conversation=conv, status=GroupJoinRequest.STATUS_PENDING
         ).select_related("applicant")
+        if page_requested(request):
+            return Response(serialized_page(qs, request, GroupJoinRequestSerializer,
+                scope={"kind": "join-requests", "group": str(conv.pk)}, time_field="created_at"))
         return Response(
             GroupJoinRequestSerializer(qs, many=True, context={"request": request}).data
         )
@@ -980,9 +1088,27 @@ class MyInvitesView(APIView):
         qs = GroupInvite.objects.filter(
             invitee=request.user, status=GroupInvite.STATUS_PENDING
         ).select_related("conversation", "inviter")
+        if page_requested(request):
+            return Response(serialized_page(qs, request, GroupInviteSerializer,
+                scope={"kind": "my-invites"}, time_field="created_at"))
         return Response(
             GroupInviteSerializer(qs, many=True, context={"request": request}).data
         )
+
+
+class MyJoinRequestsView(APIView):
+    """Pending moderation across every managed group, independent of UI pages."""
+
+    def get(self, request):
+        if not page_requested(request):
+            return _bad_request("聚合申请必须使用 pagination=cursor")
+        managed = ConversationMember.objects.filter(user=request.user,
+            role__in=[ConversationMember.ROLE_OWNER, ConversationMember.ROLE_ADMIN],
+            conversation__type=Conversation.TYPE_GROUP).values("conversation_id")
+        queryset = GroupJoinRequest.objects.filter(conversation_id__in=managed,
+            status=GroupJoinRequest.STATUS_PENDING).select_related("conversation", "applicant")
+        return Response(serialized_page(queryset, request, GroupJoinRequestSerializer,
+            scope={"kind": "managed-join-requests"}, time_field="created_at"))
 
 
 class GroupInviteActionView(APIView):

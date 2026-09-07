@@ -7,7 +7,9 @@ from django.utils import timezone
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
+from apps.chat.pagination import page_requested, serialized_page
 
 from .models import FriendRequest, Friendship
 from .serializers import (
@@ -185,7 +187,15 @@ class UserSearchView(generics.ListAPIView):
         qs = User.objects.exclude(pk=self.request.user.pk)
         if not q:
             return qs.none()
-        return qs.filter(Q(username__icontains=q) | Q(nickname__icontains=q))[:20]
+        matches = qs.filter(Q(username__icontains=q) | Q(nickname__icontains=q))
+        return matches if page_requested(self.request) else matches[:20]
+
+    def list(self, request, *args, **kwargs):
+        return Response(serialized_page(
+            self.get_queryset(), request, self.serializer_class,
+            scope={"kind": "user-search", "q": request.query_params.get("q", "").strip()},
+            time_field="date_joined",
+        ))
 
 
 class UserDetailView(APIView):
@@ -241,6 +251,10 @@ class FriendListView(generics.ListAPIView):
             user=self.request.user, status=Friendship.STATUS_ACCEPTED
         ).select_related("friend")
 
+    def list(self, request, *args, **kwargs):
+        return Response(serialized_page(self.get_queryset(), request, self.serializer_class,
+                                        scope={"kind": "friends"}, time_field="created_at"))
+
 
 class FriendRequestListView(generics.ListCreateAPIView):
     """收到的待处理申请（GET）+ 发起好友申请（POST）。
@@ -252,9 +266,28 @@ class FriendRequestListView(generics.ListCreateAPIView):
     serializer_class = FriendRequestSerializer
 
     def get_queryset(self):
-        return FriendRequest.objects.filter(
+        queryset = FriendRequest.objects.filter(
             Q(to_user=self.request.user) | Q(from_user=self.request.user)
         ).select_related("from_user", "to_user").order_by("-created_at")
+        if page_requested(self.request):
+            direction = self.request.query_params.get("direction", "all")
+            request_status = self.request.query_params.get("status", "all")
+            if direction not in ("all", "received", "sent") or request_status not in (
+                "all", "pending", "accepted", "rejected",
+            ):
+                raise ValidationError({"detail": "申请筛选条件无效"})
+            if direction != "all":
+                queryset = queryset.filter(**{
+                    "to_user" if direction == "received" else "from_user": self.request.user,
+                })
+            if request_status != "all":
+                queryset = queryset.filter(status=request_status)
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        return Response(serialized_page(self.get_queryset(), request, self.serializer_class,
+            scope={"kind": "friend-requests", "direction": request.query_params.get("direction", "all"),
+                   "status": request.query_params.get("status", "all")}, time_field="created_at"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

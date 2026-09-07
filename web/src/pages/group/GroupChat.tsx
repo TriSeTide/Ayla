@@ -34,6 +34,7 @@ import { useHomeStore } from "../../stores/home";
 import { useMessageStore } from "../../stores/message";
 import { subgroupKey, useSubGroupStore } from "../../stores/subgroup";
 import { chatWS } from "../../ws/chat";
+import { useSocialPage } from "../../hooks/useSocialPage";
 
 export function GroupChat({ groupId, panelMotion = false }: { groupId: string; panelMotion?: boolean }) {
   const present = useIsPresent();
@@ -55,8 +56,7 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
   const [notice, setNotice] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
-  // 子群列表加载失败：退化为无子群视图（历史按全部消息加载）
-  const [subgroupsFailed, setSubgroupsFailed] = useState(false);
+  const subgroupPage = useSocialPage("subgroups", { groupId }, active);
   // 窄屏选项卡默认收起；同一按钮始终持有焦点，展开不重挂输入框。
   const [subgroupsCollapsed, setSubgroupsCollapsed] = useState(true);
   // 长按消息头像 @ 成员 → 通过 ref 调输入框插入 @Token
@@ -117,38 +117,29 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
     [conversations, groupId],
   );
 
-  // 进入群：拉子群列表；未选中时默认「默认组」（列表加载完成前不渲染聊天）
+  // The open conversation needs complete unread coordinates, but members stay paged.
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
-    chatApi
-      .listSubgroups(groupId)
-      .then((list) => {
-        if (cancelled) return;
-        useSubGroupStore.getState().setSubgroups(groupId, list);
-        const active = useSubGroupStore.getState().activeByGroup[groupId];
-        if (active == null) {
-          const defaultSg = list.find((sg) => sg.is_default) ?? list[0];
-          useSubGroupStore.getState().setActiveSubgroup(groupId, defaultSg?.id ?? null);
-        }
-      })
-      .catch(() => {
-        // 子群列表加载失败：保持无选项卡的默认视图（历史仍按全部消息加载）
-        if (!cancelled) {
-          setSubgroupsFailed(true);
-          useSubGroupStore.getState().setActiveSubgroup(groupId, null);
-        }
-      });
+    void chatApi.getConversationMetadata(groupId).then((conversation) => {
+      if (!cancelled) useChatStore.getState().upsertConversation(conversation);
+    }).catch((error) => { if (!cancelled) setNotice(error instanceof Error ? error.message : "加载群信息失败"); });
     return () => {
       cancelled = true;
     };
-  }, [groupId]);
+  }, [groupId, active, activeConv?.unread_seqs_complete]);
+  useEffect(() => {
+    if (activeSubgroupId != null) return;
+    const defaultGroup = subgroupPage.items.find((item) => item.is_default);
+    if (defaultGroup) useSubGroupStore.getState().setActiveSubgroup(groupId, defaultGroup.id);
+  }, [groupId, activeSubgroupId, subgroupPage.items]);
 
   // 打开群会话 + 当前子群历史：只拉历史和订阅，已读由 MessageList 可视区确认。
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
     const sgId = activeSubgroupId;
-    if (sgId == null && !subgroupsFailed) return;
+    if (sgId == null) return;
     useChatStore.getState().openConversation(groupId);
     useMessageStore.getState().openBucket(groupId);
     chatWS.subscribe([groupId]);
@@ -233,6 +224,8 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
       exit={panelMotion ? "exit" : undefined}
       variants={panelMotion ? auroraquaPanelOrchestration : undefined}
     >
+      {subgroupPage.error && <div className="chat-notice" role="alert"><span>{subgroupPage.error}</span>
+        <button type="button" className="btn btn-ghost" onClick={() => void subgroupPage.refresh()}>重试子群</button></div>}
       {historyError && (
         <div className="chat-notice" role="alert">
           <span>{historyError}</span>
@@ -293,7 +286,7 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
         inherit={panelMotion}
         variants={panelMotion ? panelVariants(reducedMotion, "bottom") : undefined}
       >
-        {isNarrow && subgroups.length > 1 && (
+        {isNarrow && Math.max(subgroups.length, subgroupPage.total) > 1 && (
           <div
             className={`group-chat-subgroup-switcher${subgroupsCollapsed ? " is-collapsed" : ""}`}
             // 包含折叠按钮：这一栏内的手势仅操作子群，不传给场景横滑。
@@ -357,6 +350,9 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
                     </button>
                   );
                 })}
+                {subgroupPage.hasMore && <button type="button" className="group-chat-subgroup-tab"
+                  disabled={subgroupsCollapsed || subgroupPage.loading} tabIndex={subgroupsCollapsed ? -1 : undefined}
+                  onClick={() => void subgroupPage.loadMore()}>{subgroupPage.loading ? "加载中…" : "加载更多子群"}</button>}
               </div>
             </motion.div>
           </div>
@@ -367,9 +363,12 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
           quote={quote}
           onQuoteClear={() => setQuote(null)}
           members={activeConv?.members}
+          groupId={groupId}
+          groupRole={activeConv?.my_role ?? undefined}
           subgroupId={activeSubgroupId}
-          disabled={isSubgroupMuted || !active}
-          disabledHint={active ? "该子群已禁言，仅群主/管理员可发言" : undefined}
+          disabled={isSubgroupMuted || !active || activeSubgroupId == null || activeConv?.my_muted === true}
+          disabledHint={!active ? undefined : activeSubgroupId == null ? "正在加载子群…"
+            : activeConv?.my_muted === true ? "你已被禁言" : isSubgroupMuted ? "该子群已禁言，仅群主/管理员可发言" : undefined}
         />
       </motion.div>
     </motion.div>

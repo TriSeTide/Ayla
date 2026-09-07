@@ -1,3 +1,5 @@
+import { useAuthStore } from "../stores/auth";
+import { disposeSocialTracking } from "../stores/social";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -10,7 +12,11 @@ import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { useSubGroupStore } from "../stores/subgroup";
 
-vi.mock("../api/chat", () => ({ listSubgroups: vi.fn(() => Promise.resolve(groups())) }));
+vi.mock("../api/chat", () => ({
+  listSubgroups: vi.fn(() => Promise.resolve(groups())),
+  getConversationMetadata: vi.fn(async () => conversation),
+  listSubgroupsPage: vi.fn(async (id: string) => { const results = await chatApi.listSubgroups(id); return { results, total: results.length, has_more: false, next_cursor: null, default: results.find((row) => row.is_default) ?? null }; }),
+}));
 vi.mock("../api/elysia", () => ({ getElysiaProfile: vi.fn(() => new Promise(() => {})) }));
 vi.mock("../ws/chat", () => ({ chatWS: { subscribe: vi.fn() } }));
 vi.mock("../hooks/useChat", async () => ({
@@ -43,6 +49,8 @@ let composerPlayed: Array<{ node: HTMLElement; frames: Keyframe[]; options: Keyf
 let reduce: (next: boolean) => void;
 
 beforeEach(() => {
+  disposeSocialTracking();
+  useAuthStore.setState({ currentUser: { id: "me", username: "me", nickname: "", avatar: "", signature: "", status: "auto", online: false, date_joined: "" }, accessToken: "test" });
   let reduced = false;
   const listeners = new Set<() => void>();
   vi.stubGlobal("matchMedia", vi.fn((query: string) => ({

@@ -22,6 +22,8 @@ import { Avatar } from "../components/Avatar";
 import { AvatarStatusBadges } from "../components/home/AvatarStatusBadges";
 import { useGroupPresenceMap } from "../components/home/groupActivity";
 import { IconPin, IconPinFilled, IconPlus } from "../components/icons";
+import { useSocialPage } from "../hooks/useSocialPage";
+import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 
 /** 关闭置顶面板的延迟（鼠标从头像移动到面板的过渡时间，避免提前收起） */
 const POP_CLOSE_DELAY_MS = 180;
@@ -49,6 +51,7 @@ export function ServerRail({
   onError?: (message: string) => void;
 }) {
   const selectionId = useId();
+  const groupPage = useSocialPage("conversations", { type: "group" });
   const reduced = usePrefersReducedMotion();
   /** 悬停展开置顶面板的锚点（相对铁路坐标，头像右侧） */
   const [anchor, setAnchor] = useState<PopAnchor | null>(null);
@@ -99,7 +102,7 @@ export function ServerRail({
       animate="center"
       variants={panelVariants(reduced, "left")}
     >
-      <ul className="server-rail-list">
+      <ul className="server-rail-list" onScroll={(event) => groupPage.onScroll(event.currentTarget)}>
         {groups.map((g) => (
           <li
             key={g.id}
@@ -146,6 +149,7 @@ export function ServerRail({
             </button>
           </li>
         ))}
+        <li><DirectoryLoadMore {...groupPage} retainCompletedSpace={false} /></li>
       </ul>
       <div className="server-rail-foot">
         <button

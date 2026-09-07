@@ -3,6 +3,7 @@
  * M5-1 只留数据契约；界面在 M5-2 起实现。
  */
 import { apiRequest } from "./client";
+import { socialQuery, type SocialPage, type SocialPageParams } from "./social";
 import type { FriendRequest, FriendRequestPayload, Friendship, UserPublic } from "./types";
 
 /** GET /users/search/?q= */
@@ -10,14 +11,16 @@ export function searchUsers(q: string) {
   return apiRequest<UserPublic[]>(`/users/search/?q=${encodeURIComponent(q)}`);
 }
 
+export function searchUsersPage(q: string, params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<UserPublic>>(`/users/search/?${socialQuery({ ...params, q })}`);
+}
+
 /** GET /users/<id>/ —— 他人主页：公开资料 + 与我的好友关系（relation 字段） */
 export function getUserDetail(userId: string) {
   return apiRequest<UserPublic>(`/users/${encodeURIComponent(userId)}/`);
 }
 
-/* ---------- 用户资料懒拉缓存（M5-3：语音成员昵称/头像不在 voice store 复制数据源） ----------
- * 优先走 GET /users/<id>/（精确 id，含头像/在线状态/好友关系）；
- * 该接口不可用或 404 时回退 users/search 按 username/nickname 模糊匹配。 */
+/* ---------- 用户资料懒拉缓存：只按精确用户 ID 查询 ---------- */
 
 const userCache = new Map<string, UserPublic>();
 const pending = new Map<string, Promise<UserPublic | null>>();
@@ -41,19 +44,12 @@ export function ensureUser(userId: string): Promise<UserPublic | null> {
   if (cached) return Promise.resolve(cached);
   const inFlight = pending.get(userId);
   if (inFlight) return inFlight;
-  // 精确 id 拉取（有头像/在线状态）；失败回退模糊搜索
+  // A missing exact profile is not a matching user from an unrelated search page.
   const p = getUserDetail(userId)
     .then((u) => {
       userCache.set(userId, u);
       return u;
     })
-    .catch(() =>
-      searchUsers(userId).then((list) => {
-        const hit = list.find((u) => u.id === userId) ?? null;
-        if (hit) userCache.set(userId, hit);
-        return hit;
-      }),
-    )
     .catch(() => null)
     .finally(() => {
       pending.delete(userId);
@@ -78,9 +74,20 @@ export function listFriends() {
   return apiRequest<Friendship[]>("/friends/");
 }
 
+export function listFriendsPage(params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<Friendship>>(`/friends/?${socialQuery(params)}`);
+}
+
 /** GET /friends/requests/ */
 export function listFriendRequests() {
   return apiRequest<FriendRequest[]>("/friends/requests/");
+}
+
+export function listFriendRequestsPage(params: SocialPageParams & {
+  direction?: "all" | "received" | "sent";
+  status?: "all" | "pending" | "accepted" | "rejected";
+} = {}) {
+  return apiRequest<SocialPage<FriendRequest>>(`/friends/requests/?${socialQuery(params)}`);
 }
 
 /** POST /friends/requests/ */

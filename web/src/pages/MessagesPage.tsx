@@ -11,6 +11,8 @@ import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighligh
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
+import { useSocialPage } from "../hooks/useSocialPage";
+import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { getElysiaProfile } from "../api/elysia";
 import * as usersApi from "../api/users";
 import type { ElysiaProfile, FriendRequest, GroupInvite, GroupJoinRequest, UserPublic } from "../api/types";
@@ -23,7 +25,7 @@ import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { ConversationTransition } from "../components/motion/ConversationTransition";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useBadgesStore } from "../stores/badges";
-import { useChatStore, isChatStale, sortPrivateByActivity } from "../stores/chat";
+import { useChatStore, sortPrivateByActivity } from "../stores/chat";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
 import { useNoticeStore } from "../stores/notices";
@@ -44,27 +46,33 @@ export function MessagesPage() {
   const realtimeNotices = useNoticeStore((state) => state.notices);
   const dismissNotice = useNoticeStore((state) => state.dismiss);
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
-  const [leaveNotices, setLeaveNotices] = useState<import("../api/types").GroupMemberLeaveNotice[]>([]);
   const [tab, setTab] = useState<Tab>("chat");
+  const privatePage = useSocialPage("conversations", { type: "private" });
+  const conversations = privatePage.items;
+  const friendsPage = useSocialPage("friends", {}, tab === "friends");
+  const { items: friendList, setItems: setFriendList } = friendsPage;
+  const friendRequestPage = useSocialPage("friendRequests", {}, tab === "requests");
+  const { items: friendRequests, setItems: setFriendRequests } = friendRequestPage;
+  const invitePage = useSocialPage("invites", {}, tab === "requests");
+  const { items: invites, setItems: setInvites } = invitePage;
+  const joinPage = useSocialPage("joinRequests", {}, tab === "requests");
+  const { items: joinRequests, setItems: setJoinRequests } = joinPage;
+  const leavePage = useSocialPage("leaveNotices", {}, tab === "requests");
+  const { items: leaveNotices, setItems: setLeaveNotices } = leavePage;
+
   const tabPanelRef = useTabPanelMotion<HTMLDivElement>(tab, ":scope > .messages-private, :scope > .messages-friends");
   // 宽屏右侧选中的私聊会话 id（内联聊天）
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const conversations = useChatStore((s) => s.conversations);
-  const conversationsLoading = useChatStore((s) => s.loading);
+  const conversationsLoading = privatePage.loading;
   // 私信列表按「最近活跃」排序（戳一戳/新消息 bump 后往前排；置顶优先）
   const conversationActivityAt = useChatStore((s) => s.conversationActivityAt);
   const privateRef = useRef<HTMLDivElement>(null);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制会话列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
-  const [friendList, setFriendList] = useState<Awaited<ReturnType<typeof usersApi.listFriends>>>([]);
-  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
-  const [invites, setInvites] = useState<GroupInvite[]>([]);
-  const [joinRequests, setJoinRequests] = useState<GroupJoinRequest[]>([]);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   /** 审批（同意/拒绝）失败提示（点击关闭） */
   const [actionError, setActionError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [friendsLoadError, setFriendsLoadError] = useState<string | null>(null);
+  const loadError = privatePage.error;
   const [profileError, setProfileError] = useState<string | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
@@ -75,33 +83,15 @@ export function MessagesPage() {
       .catch((e) => setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败"));
   }, []);
 
-  // 加载会话列表（私信 tab 复用）
-  useEffect(() => {
-    if (conversations.length === 0 || isChatStale()) {
-      chatApi.listConversations()
-        .then((l) => useChatStore.getState().setConversations(l))
-        .catch((e) => setLoadError(e instanceof Error ? e.message : "加载会话失败"));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // 好友 tab 数据（窄屏用；宽屏由 WideMessagesSidebar 自理）
+  const refreshSocial0 = friendsPage.refresh;
+  const refreshSocial1 = friendRequestPage.refresh;
+  const refreshSocial2 = invitePage.refresh;
+  const refreshSocial3 = joinPage.refresh;
+  const refreshSocial4 = leavePage.refresh;
   const loadFriendsTab = useCallback(() => {
-    setFriendsLoadError(null);
-    usersApi.listFriends().then(setFriendList).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载好友失败"));
-    usersApi.listFriendRequests().then(setFriendRequests).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载好友申请失败"));
-    chatApi.listMyInvites().then((l) => setInvites(l.filter((i) => i.status === "pending"))).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载群邀请失败"));
-    chatApi.listLeaveNotices().then(setLeaveNotices).catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载退群通知失败"));
-    // 我管理的群 → 待审批入群申请
-    const managed = conversations.filter((c) => c.type === "group" && (c.my_role === "owner" || c.my_role === "admin"));
-    Promise.all(managed.map((g) => chatApi.listJoinRequests(g.id)))
-      .then((lists) => setJoinRequests(lists.flat().filter((r) => r.status === "pending")))
-      .catch((e) => setFriendsLoadError(e instanceof Error ? e.message : "加载入群申请失败"));
-  }, [conversations]);
-
-  useEffect(() => {
-    if ((tab === "friends" || tab === "requests") && isNarrow) loadFriendsTab();
-  }, [tab, isNarrow, loadFriendsTab]);
+    void refreshSocial0(); void refreshSocial1(); void refreshSocial2(); void refreshSocial3(); void refreshSocial4();
+  }, [refreshSocial0, refreshSocial1, refreshSocial2, refreshSocial3, refreshSocial4]);
 
   // 认证消息红点：以 badges store 为权威（WS 事件驱动 fetch，实时刷新）
   const badges = useBadgesStore((s) => s.badges);
@@ -179,15 +169,11 @@ export function MessagesPage() {
   );
 
   // 下拉刷新/刷新键共用：强制重拉会话列表（绕过 isChatStale 缓存）。
+  const refreshPrivate = privatePage.refresh;
   const refreshConversations = useCallback(async () => {
-    try {
-      const list = await chatApi.listConversations();
-      useChatStore.getState().setConversations(list);
-      setRevealNonce((n) => n + 1);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "加载会话失败");
-    }
-  }, []);
+    await refreshPrivate();
+    setRevealNonce((n) => n + 1);
+  }, [refreshPrivate]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；引用守卫见 HomePage）
   useEffect(() => {
@@ -237,7 +223,6 @@ export function MessagesPage() {
           {actionError}
         </div>
       )}
-      {friendsLoadError && <div className="chat-notice" role="alert">{friendsLoadError}</div>}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
         <div className="messages-tabs" role="tablist" aria-label="消息中心" style={{ flex: 1 }}>
           <button
@@ -299,12 +284,13 @@ export function MessagesPage() {
               onError={setActionError}
               revealItems={!conversationsLoading}
             />
+          <DirectoryLoadMore {...privatePage} retainCompletedSpace={false} />
           </PullToRefresh>
         </div>
       ) : tab === "friends" ? (
         <div className="messages-friends">
           <section className="messages-group">
-            <h3 className="messages-group-title">我的好友（{friendList.length}）</h3>
+            <h3 className="messages-group-title">我的好友（{friendsPage.total}）</h3>
             {friendList.map((f) => (
               <div key={f.user.id} className="friend-row">
                 <button
@@ -339,24 +325,25 @@ export function MessagesPage() {
                 </button>
               </div>
             ))}
-            {friendList.length === 0 && (
+            {friendList.length === 0 && !friendsPage.loading && !friendsPage.error && (
               <p className="messages-empty">还没有好友，去搜索添加吧</p>
             )}
           </section>
-        </div>
+        <DirectoryLoadMore {...friendsPage} retainCompletedSpace={false} />
+          </div>
       ) : (
         <div className="messages-friends messages-requests" aria-label="认证消息">
           <section className="messages-group">
             <h3 className="messages-group-title">认证消息</h3>
             <p className="messages-section-hint">好友申请、群邀请和入群申请都会集中显示在这里。</p>
           </section>
-          {(leaveNotices.length > 0 || realtimeLeaveNotices.length > 0) && (
+          {(leaveNotices.length > 0 || realtimeLeaveNotices.length > 0 || leavePage.loading || !!leavePage.error || leavePage.hasMore) && (
             <section className="messages-group">
               <h3 className="messages-group-title">退群通知</h3>
               {leaveNotices.map((notice) => (
                 <div key={`persisted-${notice.id}`} className="request-row notice-row">
                   <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
-                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id); setLeaveNotices((items) => items.filter((item) => item.id !== notice.id)); }}>知道了</button>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch((e) => setActionError(e instanceof Error ? e.message : "标记通知失败")); }}>知道了</button>
                 </div>
               ))}
               {realtimeLeaveNotices.map((notice) => (
@@ -365,29 +352,33 @@ export function MessagesPage() {
                   <button type="button" className="btn btn-ghost request-btn" onClick={() => dismissNotice(notice.id)}>知道了</button>
                 </div>
               ))}
+            <DirectoryLoadMore {...leavePage} retainCompletedSpace={false} />
             </section>
           )}
-          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length > 0 && (
+          {(friendRequests.length > 0 || friendRequestPage.loading || !!friendRequestPage.error || friendRequestPage.hasMore) && (
             <section className="messages-group">
               <h3 className="messages-group-title">好友申请</h3>
               {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").map((r) => (
                 <RequestRow key={r.id} avatar={r.from_user} name={r.from_user.nickname || r.from_user.username} message={r.message} onAccept={() => handleFriendAction(r, "accept")} onReject={() => handleFriendAction(r, "reject")} />
               ))}
+            <DirectoryLoadMore {...friendRequestPage} retainCompletedSpace={false} />
             </section>
           )}
-          {invites.length > 0 && (
+          {(invites.length > 0 || invitePage.loading || !!invitePage.error || invitePage.hasMore) && (
             <section className="messages-group">
               <h3 className="messages-group-title">群邀请</h3>
               {invites.map((i) => <RequestRow key={i.id} avatar={i.inviter} name={i.conversation_title} message="邀请你加入群聊" onAccept={() => handleInviteAction(i, "accept")} onReject={() => handleInviteAction(i, "reject")} />)}
+            <DirectoryLoadMore {...invitePage} retainCompletedSpace={false} />
             </section>
           )}
-          {joinRequests.length > 0 && (
+          {(joinRequests.length > 0 || joinPage.loading || !!joinPage.error || joinPage.hasMore) && (
             <section className="messages-group">
               <h3 className="messages-group-title">入群申请（群主/管理员）</h3>
               {joinRequests.map((r) => <RequestRow key={r.id} avatar={r.applicant} name={r.applicant.nickname || r.applicant.username} message={r.message ? r.conversation_title + "：" + r.message : r.conversation_title} onAccept={() => handleJoinRequestAction(r, "accept")} onReject={() => handleJoinRequestAction(r, "reject")} />)}
+            <DirectoryLoadMore {...joinPage} retainCompletedSpace={false} />
             </section>
           )}
-          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length === 0 && invites.length === 0 && joinRequests.length === 0 && <p className="messages-empty">暂无待处理认证消息</p>}
+          {friendRequests.filter((r) => r.to_user.id === currentUser?.id && r.status === "pending").length === 0 && invites.length === 0 && joinRequests.length === 0 && leaveNotices.length === 0 && realtimeLeaveNotices.length === 0 && ![leavePage, invitePage, joinPage, friendRequestPage].some((page) => page.loading || page.error || page.hasMore) && <p className="messages-empty">暂无待处理认证消息</p>}
         </div>
       )}
     </div>

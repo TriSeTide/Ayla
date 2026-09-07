@@ -8,9 +8,11 @@
  * - key 被其他会话使用 → 409。
  */
 import { apiRequest } from "./client";
+import { socialQuery, type SocialPage, type SocialPageParams } from "./social";
 import type {
   ChatMessage,
   ConversationDetail,
+  ConversationMember,
   ConversationHighlightsMap,
   ConversationMessagesParams,
   ConversationSummary,
@@ -23,6 +25,34 @@ import type {
 /** GET /chat/conversations/ —— 当前用户会话列表 */
 export function listConversations() {
   return apiRequest<ConversationSummary[]>("/chat/conversations/");
+}
+
+export function listConversationsPage(params: SocialPageParams & { type?: "all" | "group" | "private" } = {}) {
+  return apiRequest<SocialPage<ConversationSummary>>(`/chat/conversations/?${socialQuery(params)}`);
+}
+
+export interface ConversationSubscription { id: string; last_message_seq: number }
+export function listConversationSubscriptionsPage(params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<ConversationSubscription>>(`/chat/subscriptions/?${socialQuery(params)}`);
+}
+
+/** Metadata explicitly declares incomplete members; use the member page for selection. */
+export function getConversationMetadata(convId: string) {
+  return apiRequest<ConversationDetail>(`/chat/conversations/${convId}/?metadata=1`);
+}
+
+export function getConversationSummary(convId: string) {
+  return apiRequest<ConversationSummary>(`/chat/conversations/${convId}/?metadata=directory`);
+}
+
+export function getGroupPresence(conversationIds: string[]) {
+  return apiRequest<{ presences: Record<string, { live: boolean; voice: boolean; game: boolean } | null> }>(
+    "/chat/group-presence/", { method: "POST", body: { conversation_ids: conversationIds } },
+  );
+}
+
+export function listConversationMembersPage(convId: string, params: SocialPageParams & { exclude_self?: "0" | "1" } = {}) {
+  return apiRequest<SocialPage<ConversationMember>>(`/chat/conversations/${convId}/members/?${socialQuery(params)}`);
 }
 
 /** POST /chat/conversations/private/ —— 开启/获取私聊会话 {user_id} */
@@ -64,6 +94,14 @@ export function listMessages(convId: string, params: ConversationMessagesParams 
 /** GET /chat/conversations/<id>/subgroups/ —— 子群列表（含本人未读） */
 export function listSubgroups(convId: string) {
   return apiRequest<SubGroup[]>(`/chat/conversations/${convId}/subgroups/`);
+}
+
+export function listSubgroupsPage(convId: string, params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<SubGroup> & { default: SubGroup | null }>(`/chat/conversations/${convId}/subgroups/?${socialQuery(params)}`);
+}
+
+export function getSubgroup(convId: string, subgroupId: string) {
+  return apiRequest<SubGroup>(`/chat/conversations/${convId}/subgroups/${subgroupId}/`);
 }
 
 /** POST /chat/conversations/<id>/subgroups/ —— 创建子群（仅群主/管理员） */
@@ -258,6 +296,14 @@ export function listJoinRequests(convId: string) {
   );
 }
 
+export function listJoinRequestsPage(convId: string, params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<GroupJoinRequest>>(`/chat/conversations/${convId}/join-requests/?${socialQuery(params)}`);
+}
+
+export function listManagedJoinRequestsPage(params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<GroupJoinRequest>>(`/chat/me/join-requests/?${socialQuery(params)}`);
+}
+
 /** POST /chat/join-requests/<id>/action/ —— 同意/拒绝入群申请 */
 export function actionJoinRequest(requestId: number, action: "accept" | "reject") {
   return apiRequest<{ detail: string }>(`/chat/join-requests/${requestId}/action/`, {
@@ -271,9 +317,17 @@ export function listMyInvites() {
   return apiRequest<GroupInvite[]>("/chat/me/invites/");
 }
 
+export function listMyInvitesPage(params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<GroupInvite>>(`/chat/me/invites/?${socialQuery(params)}`);
+}
+
 /** GET /chat/leave-notices/ —— 当前用户未读退群通知 */
 export function listLeaveNotices() {
   return apiRequest<import("./types").GroupMemberLeaveNotice[]>("/chat/leave-notices/");
+}
+
+export function listLeaveNoticesPage(params: SocialPageParams = {}) {
+  return apiRequest<SocialPage<import("./types").GroupMemberLeaveNotice>>(`/chat/leave-notices/?${socialQuery(params)}`);
 }
 
 /** POST /chat/leave-notices/<id>/read/ —— 标记退群通知已读 */

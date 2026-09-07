@@ -6,6 +6,9 @@ from . import views
 urlpatterns = [
     # 会话
     path("conversations/", views.ConversationListView.as_view(), name="chat-conv-list"),
+    path("subscriptions/", views.ConversationSubscriptionsView.as_view(), name="chat-subscriptions"),
+    path("group-presence/", views.GroupPresenceBatchView.as_view(), name="chat-group-presence"),
+    path("me/join-requests/", views.MyJoinRequestsView.as_view(), name="chat-my-join-requests"),
     path(
         "conversations/private/",
         views.PrivateConversationView.as_view(),

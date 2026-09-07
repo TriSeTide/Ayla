@@ -33,9 +33,12 @@ export function ChatConversationRoute() {
     if (!conversationId || cachedType) return;
     let cancelled = false;
     chatApi
-      .getConversation(conversationId)
+      .getConversationSummary(conversationId)
       .then((c) => {
-        if (!cancelled) setFetchedType(c.type);
+        if (!cancelled) {
+          useChatStore.getState().upsertConversation(c);
+          setFetchedType(c.type);
+        }
       })
       .catch(() => {
         if (!cancelled) setError("加载会话失败，请重试");

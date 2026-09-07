@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIsPresent } from "framer-motion";
 import { Navigate, useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
+import { useSocialPage } from "../hooks/useSocialPage";
+import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { GroupCard } from "../components/home/GroupCard";
 import { GroupListItem } from "../components/home/GroupListItem";
 import { LayoutSwitch } from "../components/home/LayoutSwitch";
@@ -26,13 +28,9 @@ import { GroupCreateDialog } from "../components/GroupCreateDialog";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { staggerDelay } from "../hooks/useRevealOnEnter";
-import { useChatStore, isChatStale } from "../stores/chat";
+import { useChatStore } from "../stores/chat";
 import { useHomeStore } from "../stores/home";
 import { useShellStore } from "../stores/shell";
-import { subscribeGroupConversations } from "../ws/chat";
-
-/** 卡片布局每批渲染数（增量加载更多，R-H6） */
-const PAGE_SIZE = 12;
 
 function SkeletonCards() {
   return (
@@ -51,13 +49,14 @@ export function HomePage() {
   const present = useIsPresent();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
-  const conversations = useChatStore((s) => s.conversations);
-  const listLoading = useChatStore((s) => s.loading);
+  const groupPage = useSocialPage("conversations", { type: "group" }, present);
+  const conversations = groupPage.items;
+  const listLoading = groupPage.loading;
   const { layout, setLayout, recentGroupId } = useHomeStore((s) => s);
 
-  const [listError, setListError] = useState<string | null>(null);
+  const listError = groupPage.error;
   const [actionError, setActionError] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [resolvedRecent, setResolvedRecent] = useState<string | null | undefined>(undefined);
   const [creatingGroup, setCreatingGroup] = useState(false);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制群列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
@@ -81,46 +80,18 @@ export function HomePage() {
     activityFor(g.id, g.last_message),
   );
 
-  // 加载会话列表（直接访问 /home 时 chat store 可能为空）
+  // A saved group can be outside the first visible page; validate it directly.
   useEffect(() => {
-    let cancelled = false;
-    const { setLoading, setConversations, setError } = useChatStore.getState();
-    if (conversations.length > 0 && !isChatStale()) return; // 已有数据且未过期
-    setLoading(true);
-    setError(null);
-    chatApi
-      .listConversations()
-      .then((list) => {
-        if (!cancelled) {
-          setConversations(list);
-          subscribeGroupConversations(list);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setLoading(false);
-          setListError(e instanceof Error ? e.message : "加载失败");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 增量加载更多：滚到底补一批
-  const handleScroll = useCallback(
-    (el: HTMLElement) => {
-      if (visibleCount >= groups.length) return;
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
-        setVisibleCount((n) => Math.min(n + PAGE_SIZE, groups.length));
-      }
-    },
-    [visibleCount, groups.length],
-  );
+    if (isNarrow || !recentGroupId || !present) return;
+    let active = true;
+    setResolvedRecent(undefined);
+    void chatApi.getConversationSummary(recentGroupId).then((conversation) => {
+      if (!active) return;
+      useChatStore.getState().upsertConversation(conversation);
+      setResolvedRecent(conversation.type === "group" ? conversation.id : null);
+    }).catch(() => { if (active) setResolvedRecent(null); });
+    return () => { active = false; };
+  }, [isNarrow, recentGroupId, present]);
 
   const openGroup = useCallback(
     (id: string) => {
@@ -132,30 +103,10 @@ export function HomePage() {
 
   // 下拉刷新/刷新键共用：强制重拉群会话列表（绕过 isChatStale 缓存）；群动态由 WS 实时维护。
   const refreshGroups = useCallback(async () => {
-    try {
-      const list = await chatApi.listConversations();
-      useChatStore.getState().setConversations(list);
-      subscribeGroupConversations(list);
-      setRevealNonce((n) => n + 1);
-    } catch (e) {
-      setListError(e instanceof Error ? e.message : "加载失败");
-    }
-  }, []);
-
-  const retryGroups = useCallback(async () => {
-    setListError(null);
-    const store = useChatStore.getState();
-    store.setLoading(true);
-    try {
-      const list = await chatApi.listConversations();
-      store.setConversations(list);
-      subscribeGroupConversations(list);
-    } catch (e) {
-      setListError(e instanceof Error ? e.message : "加载失败");
-    } finally {
-      store.setLoading(false);
-    }
-  }, []);
+    await groupPage.refresh();
+    setRevealNonce((n) => n + 1);
+  }, [groupPage.refresh]);
+  const retryGroups = groupPage.refresh;
 
   // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；cleanup 引用守卫，
   // 避免 AnimatePresence sync 转场期间旧页 cleanup 覆盖后注册的新页回调）
@@ -185,11 +136,11 @@ export function HomePage() {
     // AnimatePresence retains the exiting page; its Navigate must not redirect a newer route.
     if (!present) return null;
     const recentValid = recentGroupId != null && groups.some((g) => g.id === recentGroupId);
-    const target = recentValid ? recentGroupId : groups[0]?.id;
+    const target = recentValid ? recentGroupId : resolvedRecent ?? (recentGroupId && resolvedRecent === undefined ? null : groups[0]?.id);
     if (target) {
       return <Navigate to={`/group/${target}`} replace />;
     }
-    if (listLoading) {
+    if (listLoading || (recentGroupId && resolvedRecent === undefined)) {
       return (
         <div className="home-page" role="status" aria-label="正在加载群聊">
           <SkeletonCards />
@@ -210,14 +161,14 @@ export function HomePage() {
   }
 
   // ---- 窄屏主页 ----
-  const visibleGroups = sortedGroups.slice(0, visibleCount);
+  const visibleGroups = sortedGroups;
   const loading = listLoading && groups.length === 0;
 
   return (
     <div
       className="home-page"
       ref={homeRef}
-      onScroll={(e) => handleScroll(e.currentTarget)}
+      onScroll={(e) => groupPage.onScroll(e.currentTarget)}
     >
       <div className="home-toolbar">
         <h1 className="home-title">群聊</h1>
@@ -235,7 +186,7 @@ export function HomePage() {
 
       {loading ? (
         <SkeletonCards />
-      ) : listError ? (
+      ) : listError && groups.length === 0 ? (
         listFailure
       ) : groups.length === 0 ? (
         <div className="home-state">
@@ -266,13 +217,6 @@ export function HomePage() {
                   />
                 ))}
               </div>
-              {visibleCount < groups.length && (
-                <div className="home-load-more" aria-label="加载更多">
-                  <span className="home-load-dot" />
-                  <span className="home-load-dot" />
-                  <span className="home-load-dot" />
-                </div>
-              )}
             </>
           ) : (
             <div className="home-list" key={revealNonce}>
@@ -291,15 +235,9 @@ export function HomePage() {
                   />
                 );
               })}
-              {visibleCount < groups.length && (
-                <div className="home-load-more" aria-label="加载更多">
-                  <span className="home-load-dot" />
-                  <span className="home-load-dot" />
-                  <span className="home-load-dot" />
-                </div>
-              )}
             </div>
           )}
+          <DirectoryLoadMore {...groupPage} />
         </PullToRefresh>
       )}
       {creatingGroup && <GroupCreateDialog onClose={() => setCreatingGroup(false)} />}

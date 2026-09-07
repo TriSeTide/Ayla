@@ -21,12 +21,16 @@ import { sortSubgroupsByActivity, useSubGroupStore } from "../stores/subgroup";
 import * as liveApi from "../api/live";
 import * as accountsApi from "../api/accounts";
 import * as chatApi from "../api/chat";
+import { useRealtimeStore } from "../stores/realtime";
 
 vi.mock("../api/accounts", () => ({
   getBadges: vi.fn(),
 }));
 
 vi.mock("../api/chat", () => ({
+  getGroupPresence: vi.fn().mockResolvedValue({ presences: {} }),
+  listConversationSubscriptionsPage: vi.fn().mockResolvedValue({ results: [], total: 0, has_more: false, next_cursor: null }),
+  getConversationSummary: vi.fn().mockRejectedValue(new Error("fixture unknown")),
   markMessageRead: vi.fn().mockResolvedValue({ detail: "ok" }),
 }));
 
@@ -84,7 +88,7 @@ beforeEach(() => {
   instances = [];
   vi.stubGlobal("WebSocket", MockWebSocket);
   vi.useFakeTimers();
-  useAuthStore.setState({ accessToken: "acc", refreshToken: "ref" });
+  useAuthStore.setState({ accessToken: "acc", refreshToken: "ref", currentUser: null });
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
   useSubGroupStore.getState().reset();
@@ -100,6 +104,7 @@ beforeEach(() => {
   usePostsStore.getState().reset();
   useVoiceStore.getState().reset();
   useLiveStore.getState().reset();
+  useRealtimeStore.getState().reset();
 });
 
 afterEach(() => {
@@ -319,7 +324,8 @@ describe("ChatWSClient", () => {
     client.disconnect();
   });
 
-  it("group.joined → 将审批通过的群加入会话列表", () => {
+  it("group.joined → 获取完整目录状态再加入会话列表", async () => {
+    vi.mocked(chatApi.getConversationSummary).mockResolvedValueOnce({ id: "g1", title: "已通过的群", type: "group", my_role: "member", owner_id: "owner", announcement: "", avatar: "", members: [], member_count: 50, unread_count: 7, created_at: "", peer: null });
     const client = new ChatWSClient();
     client.connect();
     vi.runOnlyPendingTimers();
@@ -335,8 +341,9 @@ describe("ChatWSClient", () => {
         created_at: "2026-08-10T00:00:00Z",
       },
     });
+    await Promise.resolve();
     expect(useChatStore.getState().conversations).toEqual([
-      expect.objectContaining({ id: "g1", title: "已通过的群", type: "group", my_role: "member" }),
+      expect.objectContaining({ id: "g1", title: "已通过的群", type: "group", my_role: "member", unread_count: 7 }),
     ]);
     client.disconnect();
   });
@@ -723,5 +730,73 @@ describe("ChatWSClient", () => {
     instances[0]._close();
     vi.advanceTimersByTime(10_000);
     expect(instances).toHaveLength(1);
+  });
+});
+
+
+describe("compact group subscriptions independent of visible pages", () => {
+  const actor = { id: "subscriber", username: "subscriber", nickname: "", avatar: "", signature: "", status: "auto" as const, online: false, date_joined: "" };
+  it("registers every authorized ID across multiple compact pages without loading directory rows", async () => {
+    useAuthStore.setState({ currentUser: actor });
+    vi.mocked(chatApi.listConversationSubscriptionsPage)
+      .mockResolvedValueOnce({ results: Array.from({ length: 100 }, (_, i) => ({ id: String(i + 1), last_message_seq: 1000 + i })), total: 101, has_more: true, next_cursor: "second" })
+      .mockResolvedValueOnce({ results: [{ id: "101", last_message_seq: 4000 }], total: 101, has_more: false, next_cursor: null });
+    const client = new ChatWSClient(); client.connect(); await vi.advanceTimersByTimeAsync(0);
+    expect(chatApi.listConversationSubscriptionsPage).toHaveBeenLastCalledWith({ limit: 100, cursor: "second" });
+    const frames = instances[0].send.mock.calls.map(([raw]) => JSON.parse(raw)).filter((frame) => frame.type === "subscribe");
+    expect(new Set(frames.flatMap((frame) => frame.conversation_ids)).size).toBe(101);
+    expect(frames.every((frame) => frame.conversation_ids.length <= 100)).toBe(true);
+    expect(useChatStore.getState().conversations).toEqual([]); expect(useMessageStore.getState().buckets).toEqual({});
+    client.resume("101");
+    expect(lastSend(instances[0])).toEqual({ type: "resume", conversation_id: "101", last_message_seq: 4000 });
+    client.disconnect();
+  });
+  it("a subscribe acknowledgement supplies resume baseline even when history was never opened", () => {
+    const client = new ChatWSClient(); client.connect(); vi.runOnlyPendingTimers();
+    client.subscribe(["hidden-page"]);
+    fire(instances[0], { type: "chat.subscribed", data: { conversation_id: "hidden-page", last_seq: 9123 } });
+    client.resume("hidden-page");
+    expect(lastSend(instances[0])).toEqual({ type: "resume", conversation_id: "hidden-page", last_message_seq: 9123 });
+    expect(useMessageStore.getState().buckets["hidden-page"]).toBeUndefined();
+    client.resume("unknown"); expect(lastSend(instances[0])).toEqual({ type: "subscribe", conversation_ids: ["unknown"] });
+    client.disconnect();
+  });
+  it("rejects a late subscription page after logout", async () => {
+    useAuthStore.setState({ currentUser: actor });
+    let finish!: (value: Awaited<ReturnType<typeof chatApi.listConversationSubscriptionsPage>>) => void;
+    vi.mocked(chatApi.listConversationSubscriptionsPage).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const client = new ChatWSClient(); client.connect(); vi.advanceTimersByTime(0);
+    client.disconnect(); useAuthStore.setState({ currentUser: null, accessToken: null });
+    finish({ results: [{ id: "old-account", last_message_seq: 999 }], total: 1, has_more: false, next_cursor: null });
+    await Promise.resolve(); await Promise.resolve();
+    expect(instances[0].send.mock.calls.some(([raw]) => String(raw).includes("old-account"))).toBe(false);
+  });
+  it("subscription failure is visible and successful retry clears it", async () => {
+    useAuthStore.setState({ currentUser: actor });
+    vi.mocked(chatApi.listConversationSubscriptionsPage).mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ results: [], total: 0, has_more: false, next_cursor: null });
+    const client = new ChatWSClient(); client.connect(); await vi.advanceTimersByTimeAsync(0);
+    expect(useRealtimeStore.getState().statuses.chat.connection).toBe("failed");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(useRealtimeStore.getState().statuses.chat.connection).toBe("online");
+    expect(useRealtimeStore.getState().statuses.chat.lastError).toBeNull();
+    client.disconnect();
+  });
+});
+
+
+describe("group presence reconciliation", () => {
+  it("coalesces room events and updates page-outside badges without overwriting unread metadata", async () => {
+    useAuthStore.setState({ currentUser: { id: "me", username: "me", nickname: "", avatar: "", signature: "", status: "auto", online: false, date_joined: "" } });
+    useChatStore.getState().upsertConversation({ id: "1", type: "group", title: "visible", announcement: "", avatar: "", owner_id: "me", members: [], member_count: 1000, unread_count: 3, unread_seqs: [1, 2, 3], unread_seqs_complete: true, my_role: "owner", created_at: "", peer: null, group_presence: { live: false, voice: true, game: false } });
+    vi.mocked(chatApi.getGroupPresence).mockClear();
+    vi.mocked(chatApi.getGroupPresence).mockResolvedValueOnce({ presences: { "1": { live: true, voice: false, game: true } } });
+    const client = new ChatWSClient(); client.connect(); await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 3; i++) fire(instances[0], { type: "voice.channel.deleted", data: { channel_id: `unloaded-${i}` } });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(chatApi.getGroupPresence).toHaveBeenCalledTimes(1);
+    expect(chatApi.getGroupPresence).toHaveBeenCalledWith(["1"]);
+    expect(useChatStore.getState().conversations[0]).toMatchObject({ unread_count: 3, unread_seqs: [1, 2, 3], unread_seqs_complete: true, group_presence: { live: true, voice: false, game: true } });
+    client.disconnect();
   });
 });

@@ -1,3 +1,6 @@
+import { useAuthStore } from "../stores/auth";
+import * as chatApi from "../api/chat";
+import { disposeSocialTracking, updateSocialItems } from "../stores/social";
 /**
  * GroupPage 测试（F3）：
  * - 窄屏默认聊天子界面；群头像两级点击（chat→info，非 chat→chat）；
@@ -48,8 +51,12 @@ vi.mock("../pages/group/GroupPosts", () => ({
   GroupPosts: () => <div>群内帖子内容</div>,
 }));
 vi.mock("../api/chat", () => ({
+  listConversationsPage: vi.fn(async (params: { type?: string }) => { const all = await chatApi.listConversations(); const results = all.filter((row) => !params.type || params.type === "all" || row.type === params.type); return { results, total: results.length, has_more: false, next_cursor: null }; }),
+  getConversationMetadata: vi.fn((id: string) => chatApi.getConversation(id)),
+  getConversationSummary: vi.fn(async (id: string) => ({ ...await chatApi.getConversation(id), peer: null })),
+  listSubgroupsPage: vi.fn(async () => ({ results: [], total: 0, has_more: false, next_cursor: null, default: null })),
   getConversation: vi.fn(),
-  listConversations: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn(async () => useChatStore.getState().conversations),
   listSubgroups: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../api/voice", async () => ({
@@ -98,6 +105,7 @@ function WideGroupFrame() {
 }
 
 function renderGroup(path: string, sharedWideShell = false) {
+  updateSocialItems("conversations", { type: "group" }, useChatStore.getState().conversations);
   const page = sharedWideShell ? <WideGroupFrame /> : <GroupPage />;
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -112,6 +120,8 @@ function renderGroup(path: string, sharedWideShell = false) {
 }
 
 beforeEach(() => {
+  disposeSocialTracking();
+  useAuthStore.setState({ currentUser: { id: "me", username: "me", nickname: "", avatar: "", signature: "", status: "auto", online: false, date_joined: "" }, accessToken: "test" });
   disposeDirectoryTracking();
   useChatStore.setState({
     conversations: [groupConv("1", "测试群"), groupConv("2", "另个群")],
