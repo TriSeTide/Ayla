@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
 import { FavoritesPage } from "../pages/FavoritesPage";
+import { clearMasonryMemory } from "../hooks/useMasonryColumns";
 import { usePostsStore } from "../stores/posts";
 
 /** 捕获 chatWS.onFrame 注册的 handler（测试里 fire favorite.changed 帧用） */
@@ -63,7 +64,30 @@ function renderPage() {
   );
 }
 
+function responsiveViewport(initialWidth: number) {
+  let width = initialWidth;
+  const listeners = new Set<() => void>();
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+    get matches() {
+      return query === "(max-width: 768px)" ? width <= 768 : query === "(prefers-reduced-motion: reduce)";
+    },
+    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+  })));
+  return (nextWidth: number) => {
+    width = nextWidth;
+    act(() => Array.from(listeners).forEach((listener) => listener()));
+  };
+}
+
+function columnIds(container: HTMLElement): string[][] {
+  return Array.from(container.querySelectorAll(".favorites-masonry-col"), (column) =>
+    Array.from(column.querySelectorAll("[data-favorite-id]"), (item) => item.getAttribute("data-favorite-id")!),
+  );
+}
+
 beforeEach(() => {
+  clearMasonryMemory();
   vi.stubGlobal(
     "matchMedia",
     vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
@@ -84,6 +108,69 @@ afterEach(() => {
 });
 
 describe("FavoritesPage", () => {
+  it.each([769, 1440])("宽屏 %d 使用独立两列，取消其他卡片保留剩余 DOM、列归属与焦点", async (width) => {
+    responsiveViewport(width);
+    vi.mocked(favoritesApi.listFavorites).mockResolvedValue([
+      fav(1, "post", "10", { title: "帖子A", body: "较长正文".repeat(60) }),
+      fav(2, "post", "11", { title: "帖子B", body: "短正文" }),
+      fav(3, "post", "12", { title: "帖子C", body: "正文C" }),
+      fav(4, "post", "13", { title: "帖子D", body: "正文D" }),
+    ]);
+    const { container } = renderPage();
+    await screen.findByText("帖子A");
+    expect(columnIds(container)).toEqual([["1", "3"], ["2", "4"]]);
+    const retained = screen.getByText("帖子B").closest("button")!;
+    retained.focus();
+    const removal = container.querySelector('[data-favorite-id="1"] .msg-action-btn')!;
+    fireEvent.click(removal);
+    await waitFor(() => expect(screen.queryByText("帖子A")).not.toBeInTheDocument());
+    expect(columnIds(container)).toEqual([["3"], ["2", "4"]]);
+    expect(screen.getByText("帖子B").closest("button")).toBe(retained);
+    expect(retained).toHaveFocus();
+  });
+
+  it("768/769 断点往返保持窄屏 API 顺序，宽屏恢复各自列归属", async () => {
+    const setWidth = responsiveViewport(768);
+    vi.mocked(favoritesApi.listFavorites).mockResolvedValue([
+      fav(1, "post", "10", { title: "帖子A" }),
+      fav(2, "post", "11", { title: "帖子B" }),
+      fav(3, "post", "12", { title: "帖子C" }),
+    ]);
+    const { container } = renderPage();
+    await screen.findByText("帖子A");
+    expect(columnIds(container)).toEqual([["1", "2", "3"]]);
+    setWidth(769);
+    expect(columnIds(container)).toEqual([["1", "3"], ["2"]]);
+    setWidth(768);
+    expect(columnIds(container)).toEqual([["1", "2", "3"]]);
+    expect(favoritesApi.listFavorites).toHaveBeenCalledTimes(1);
+  });
+
+  it("分类使用独立分列记忆，异步筛选保留筛选按钮焦点", async () => {
+    responsiveViewport(1440);
+    const items = [
+      fav(1, "message", "50", { content: "消息A", conversation_id: "c1" }),
+      fav(2, "post", "11", { title: "帖子B" }),
+      fav(3, "post", "12", { title: "帖子C" }),
+    ];
+    vi.mocked(favoritesApi.listFavorites).mockResolvedValue(items);
+    const { container } = renderPage();
+    await screen.findByText("消息A");
+    expect(columnIds(container)).toEqual([["1", "3"], ["2"]]);
+    let resolveFilter!: (favorites: Favorite[]) => void;
+    vi.mocked(favoritesApi.listFavorites).mockReturnValue(new Promise((resolve) => { resolveFilter = resolve; }));
+    const postFilter = screen.getByRole("tab", { name: "帖子" });
+    postFilter.focus();
+    fireEvent.click(postFilter);
+    expect(container.querySelector(".favorites-list")).toBeNull();
+    expect(container.querySelector(".favorites-skeleton")).not.toBeNull();
+    expect(screen.queryByText("消息A")).not.toBeInTheDocument();
+    await act(async () => resolveFilter(items.slice(1)));
+    expect(columnIds(container)).toEqual([["2"], ["3"]]);
+    expect(postFilter).toHaveFocus();
+    expect(favoritesApi.listFavorites).toHaveBeenLastCalledWith("post");
+  });
+
   it("展示帖子收藏列表", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("帖子A")).toBeInTheDocument());

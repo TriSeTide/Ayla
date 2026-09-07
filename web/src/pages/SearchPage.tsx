@@ -22,6 +22,7 @@ import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
 import { goUserProfile } from "../utils/navigation";
 import { chatWS } from "../ws/chat";
 import type { ChatServerFrame } from "../api/types";
+import { useListEntryMotion } from "../hooks/useListEntryMotion";
 
 export function SearchPage() {
   const navigate = useNavigate();
@@ -48,6 +49,8 @@ export function SearchPage() {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinSent, setJoinSent] = useState(false);
   const searchRequestRef = useRef(0);
+  const pageRef = useRef<HTMLDivElement>(null);
+  useListEntryMotion(pageRef, ".search-row");
 
   /** 公开群（join_policy=public）直接加入；缺失视为申请制（兼容旧数据），与后端默认一致 */
   const isPublicGroup = selectedGroup?.join_policy === "public";
@@ -154,6 +157,7 @@ export function SearchPage() {
   // URL q 驱动：进入 /search?q=… 或顶栏/历史更新 q 时自动搜索
   useEffect(() => {
     if (!q) {
+      searchRequestRef.current += 1;
       setResults(null);
       setLoading(false);
       setError(null);
@@ -171,7 +175,7 @@ export function SearchPage() {
   };
 
   return (
-    <div className="search-page">
+    <div className="search-page" ref={pageRef} aria-busy={loading}>
       {!q && history.length > 0 && (
         <div className="search-history">
           {history.map((h) => (
@@ -196,21 +200,22 @@ export function SearchPage() {
             onMore={() => doSearch(q)}
           >
             {(results.users?.items ?? []).map((u) => (
-              <button key={u.id} type="button" className="search-row" onClick={() => setSelectedUser(u)}>
+              <div key={u.id} className="search-row search-user-row">
                 <Avatar
                   label={u.nickname || u.username}
                   size={36}
                   online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))}
                   imageUrl={u.avatar || null}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
                     goUserProfile(useAuthStore.getState().currentUser?.id, u.id);
                   }}
                   ariaLabel={`查看 ${u.nickname || u.username} 的个人主页`}
                 />
-                <span className="search-row-title">{u.nickname || u.username}</span>
-                {u.signature && <span className="search-row-sub">{u.signature}</span>}
-              </button>
+                <button type="button" className="search-row-copy search-row-main" onClick={() => setSelectedUser(u)}>
+                  <span className="search-row-title">{u.nickname || u.username}</span>
+                  {u.signature && <span className="search-row-sub">{u.signature}</span>}
+                </button>
+              </div>
             ))}
           </ResultGroup>
 
@@ -228,7 +233,7 @@ export function SearchPage() {
                     else if (!accepted) openGroupApply(g);
                   }}
                 >
-                  <span className="search-group-mark" aria-hidden="true">✦</span>
+                  <Avatar label={g.title} size={36} imageUrl={g.avatar || null} />
                   <span className="search-row-title">{g.title}</span>
                   <span className="search-row-action">{joined ? "已加入" : accepted ? "已通过" : "申请入群"}</span>
                 </button>

@@ -96,7 +96,7 @@ export function ProfilePage() {
 
   if (!currentUser) {
     return (
-      <div className="profile-page">
+      <div className="profile-page profile-page-split">
         <div className="profile-column">
           <div className="solid-card profile-card">
             <p className="profile-signature">正在加载个人资料…</p>
@@ -148,7 +148,7 @@ export function ProfilePage() {
 
   return (
     <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
-      <div className="profile-page">
+      <div className="profile-page profile-page-split">
       <div className="profile-column">
         <div className="glass-card profile-topbar">
           <button
@@ -162,6 +162,7 @@ export function ProfilePage() {
           <span className="profile-topbar-title">个人主页</span>
         </div>
 
+        <div className="profile-side">
         {contentError && <div className="chat-notice" role="alert">{contentError}</div>}
         <div className="solid-card profile-card">
           <div className="profile-identity">
@@ -297,6 +298,8 @@ export function ProfilePage() {
           </div>
         </div>
 
+        </div>
+        <div className="profile-main">
         <div className="solid-card profile-mine">
           <div className="profile-mine-head">
             <h4 className="profile-mine-title">我的内容</h4>
@@ -366,6 +369,7 @@ export function ProfilePage() {
             )}
           </section>
         </div>
+      </div>
       </div>
       </div>
     </FullScreenSwipeBack>

@@ -8,20 +8,21 @@
  * 本轮（方案 §4-U2 + §5-A2 + §4-U14 + §3.3）：
  * - U2：>1024px 双列等宽错排瀑布流（useMasonryColumns，ResizeObserver 量高插较矮列），
  *   窄屏单列；
- * - A2：帖子逐条浮入（.reveal-item + staggerDelay）；
+ * - A2：仅新增DOM帖子逐条浮入（useListEntryMotion）；
  * - U14：返回保留滚动位置（useScrollRestore，恢复路径禁 stagger）；
  * - 3.3：下拉刷新（PullToRefresh）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
+import type { Post } from "../api/types";
 import { PostCard } from "../components/posts/PostCard";
+import { StablePaginationFooter } from "../components/StablePaginationFooter";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useMasonryColumns } from "../hooks/useMasonryColumns";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { staggerDelay } from "../hooks/useRevealOnEnter";
+import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { usePostsStore, isPostsStale } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
@@ -33,98 +34,148 @@ const MASONRY_QUERY = "(min-width: 1025px)";
 
 export function PostsHubPage() {
   const navigate = useNavigate();
-  const { posts, nextCursor, hasMore, loading, error, favoriteByPostId } = usePostsStore();
+  const { posts, hasMore, loading, error, favoriteByPostId } = usePostsStore();
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [nextPageError, setNextPageError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [favoriteLoadError, setFavoriteLoadError] = useState<string | null>(null);
-  // §3.4 刷新动画：刷新完成后递增，key 变化强制帖子流重挂载 → reveal 重播
-  const [revealNonce, setRevealNonce] = useState(0);
+  const [resumeEntry, setResumeEntry] = useState(false);
+  const requestOwner = useRef({ active: false, revision: 0, busy: false, nextFailed: false, deletedIds: new Set<number>() });
 
   const hubRef = useRef<HTMLDivElement>(null);
   // 视口浏览上报（浏览与已读同源）：进入视口即加浏览，无需点击
   usePostViewTracking(hubRef);
   // U14：返回保留滚动位置（restoring 时禁 reveal stagger）
   const scrollRestoreKey = "posts-feed";
-  const { restoring } = useScrollRestore(scrollRestoreKey, hubRef);
+  const { restoring } = useScrollRestore(scrollRestoreKey, hubRef, { ready: posts.length > 0 || !loading });
+  useListEntryMotion(hubRef, ".posts-feed-item", restoring && !resumeEntry);
   const isMasonry = useMediaQuery(MASONRY_QUERY);
   const columnCount = isMasonry ? 2 : 1;
   const { columns, columnRefs } = useMasonryColumns(posts, columnCount, (p) => p.id, "posts-feed");
 
-  // stagger 用全局顺序（跨列逐条浮现）；映射 postId → 原始 index
-  const indexByKey = useMemo(() => {
-    const m = new Map<number, number>();
-    posts.forEach((p, i) => m.set(p.id, i));
-    return m;
-  }, [posts]);
-
-  // 首屏：信息流 + 我的收藏集合
-  const loadFirst = useCallback(() => {
+  // 首页替换拥有新revision；迟到的追加响应不得覆写新首页和游标。
+  const requestPage = useCallback(async (kind: "first" | "refresh" | "append") => {
+    const owner = requestOwner.current;
     const store = usePostsStore.getState();
-    if (store.posts.length > 0 && !isPostsStale() && !store.loading) return;
-    store.setLoading(true);
+    if (!owner.active || (kind === "append" && (owner.busy || !store.hasMore))) return;
+    const cursor = kind === "append" ? store.nextCursor : null;
+    const knownIds = new Set(store.posts.map((post) => post.id));
+    const revision = ++owner.revision;
+    owner.busy = true;
+    owner.nextFailed = false;
     store.setError(null);
+    store.setLoading(true);
     setLoadError(null);
-    postsApi
-      .listPosts({ scope: "feed", limit: 20 })
-      .then((page) => {
-        store.setPage(page.results, page.next_cursor, page.has_more);
-      })
-      .catch((e) => {
-        store.setError(e instanceof Error ? e.message : "加载失败");
-        setLoadError(e instanceof Error ? e.message : "加载失败");
-      });
+    setNextPageError(null);
+    const isCurrent = () => owner.active && requestOwner.current === owner && owner.revision === revision;
+    try {
+      if (kind === "append" && !cursor) throw new Error("下一页游标缺失，请刷新列表");
+      const page = await postsApi.listPosts({ scope: "feed", limit: 20, ...(cursor ? { cursor } : {}) });
+      if (!isCurrent()) return;
+      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) {
+        throw new Error("下一页游标未推进，请重试或刷新列表");
+      }
+      const currentPosts = usePostsStore.getState().posts;
+      const currentById = new Map(currentPosts.map((post) => [post.id, post]));
+      const seen = new Set<number>();
+      const incoming: Post[] = [];
+      for (const post of page.results) {
+        if (seen.has(post.id) || owner.deletedIds.has(post.id)) continue;
+        seen.add(post.id);
+        const current = currentById.get(post.id);
+        incoming.push({
+          ...post,
+          is_viewed: post.is_viewed || current?.is_viewed || false,
+          view_count: Math.max(post.view_count, current?.view_count ?? 0),
+        });
+      }
+      if (kind === "append") {
+        store.appendPage(incoming, page.next_cursor, page.has_more);
+      } else {
+        // 请求期间新收到的WS帖子保留；已读/浏览状态不能被较早的HTTP快照倒退。
+        const realtime = currentPosts.filter((post) => !knownIds.has(post.id) && !seen.has(post.id) && !owner.deletedIds.has(post.id));
+        store.setPage([...realtime, ...incoming], page.next_cursor, page.has_more);
+      }
+      if (kind !== "first") setResumeEntry(true);
+    } catch (e) {
+      if (!isCurrent()) return;
+      const message = e instanceof Error ? e.message : "加载失败";
+      if (kind === "append") {
+        owner.nextFailed = true;
+        setNextPageError(message);
+      } else {
+        setLoadError(message);
+        store.setError(message);
+      }
+    } finally {
+      if (isCurrent()) {
+        owner.busy = false;
+        store.setLoading(false);
+      }
+    }
+  }, []);
+
+  // 首屏：信息流 + 我的收藏集合；详情返回保留已加载页和cursor。
+  const loadFirst = useCallback(() => {
+    const owner = requestOwner.current;
+    const store = usePostsStore.getState();
+    if (!owner.active || owner.busy) return;
+    if (store.posts.length > 0 && !isPostsStale()) return;
+    void requestPage("first");
     favoritesApi
       .listFavorites("post")
       .then((list) => {
+        if (!owner.active || requestOwner.current !== owner) return;
         store.loadFavorites(list);
         setFavoriteLoadError(null);
       })
-      .catch((e) => setFavoriteLoadError(e instanceof Error ? e.message : "加载收藏状态失败"));
-  }, []);
+      .catch((e) => {
+        if (owner.active && requestOwner.current === owner) setFavoriteLoadError(e instanceof Error ? e.message : "加载收藏状态失败");
+      });
+  }, [requestPage]);
 
   useEffect(() => {
+    const owner = requestOwner.current;
+    owner.active = true;
     loadFirst();
-    return chatWS.onFrame((frame) => {
+    const unsubscribe = chatWS.onFrame((frame) => {
+      if (!owner.active) return;
       if (frame.type === "post.deleted") {
-        usePostsStore.getState().removePost(Number(frame.post_id));
+        const postId = Number(frame.post_id);
+        owner.deletedIds.add(postId);
+        usePostsStore.getState().removePost(postId);
         return;
       }
       if (frame.type === "post.created") {
         postsApi
           .getPost(Number(frame.post.id))
-          .then((post) => usePostsStore.getState().upsertPost(post))
+          .then((post) => {
+            if (owner.active && !owner.deletedIds.has(post.id)) usePostsStore.getState().upsertPost(post);
+          })
           .catch(() => {
             // 事件只作提示；REST 失败不伪造或插入不完整帖子。
           });
       }
     });
+    return () => {
+      owner.active = false;
+      owner.revision += 1;
+      if (owner.busy) usePostsStore.getState().setLoading(false);
+      owner.busy = false;
+      unsubscribe();
+    };
   }, [loadFirst]);
 
   // 滚到底加载更多
   const handleScroll = (el: HTMLElement) => {
-    if (!hasMore || loading) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
-      const store = usePostsStore.getState();
-      store.setLoading(true);
-      postsApi
-        .listPosts({ scope: "feed", limit: 20, cursor: nextCursor })
-        .then((page) => store.appendPage(page.results, page.next_cursor, page.has_more))
-        .catch(() => store.setLoading(false));
+    if (requestOwner.current.nextFailed) return;
+    if (el.scrollHeight > el.clientHeight && el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
+      void requestPage("append");
     }
   };
 
-  // 下拉刷新/刷新键共用：强制重拉信息流（绕过 isPostsStale 缓存，不设 loading 以免骨架闪现）
-  const refresh = useCallback(async () => {
-    const store = usePostsStore.getState();
-    setLoadError(null);
-    try {
-      const page = await postsApi.listPosts({ scope: "feed", limit: 20 });
-      store.setPage(page.results, page.next_cursor, page.has_more);
-      setRevealNonce((n) => n + 1);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "加载失败");
-    }
-  }, []);
+  // 刷新保留现有卡片；新revision使此前追加失效，失败仍可继续原cursor。
+  const refresh = useCallback(() => requestPage("refresh"), [requestPage]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
@@ -138,9 +189,6 @@ export function PostsHubPage() {
 
   // 下拉刷新仅当滚动容器（.posts-hub）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
-
-  // A2：逐条浮入；恢复路径（restoring）禁 stagger（§7：滚动恢复与入场动画互斥）
-  const revealItems = !loading && !restoring;
 
   const toggleFavorite = useCallback(
     async (postId: number) => {
@@ -170,6 +218,7 @@ export function PostsHubPage() {
       </div>
       {favoriteLoadError && <div className="chat-notice" role="alert">收藏状态加载失败：{favoriteLoadError}</div>}
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
+      {loadError && posts.length > 0 && <div className="chat-notice" role="alert">{loadError}</div>}
       {loading && posts.length === 0 ? (
         <div className="posts-skeleton">
           <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
@@ -190,21 +239,15 @@ export function PostsHubPage() {
         </div>
       ) : (
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`} key={revealNonce}>
+          <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`}>
             {columns.map((colItems, colIdx) => (
               <div key={colIdx} className="posts-masonry-col" ref={columnRefs[colIdx]}>
                 {colItems.map((p) => {
-                  const delay = revealItems ? staggerDelay(indexByKey.get(p.id) ?? 0) : 0;
                   return (
                     <div
                       key={p.id}
                       data-post-id={p.id}
-                      className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
-                      style={
-                        revealItems
-                          ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties)
-                          : undefined
-                      }
+                      className="posts-feed-item"
                     >
                       <PostCard
                         post={p}
@@ -221,7 +264,18 @@ export function PostsHubPage() {
                 })}
               </div>
             ))}
-            {hasMore && <div className="home-load-more" aria-label="加载更多"><span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" /></div>}
+            <StablePaginationFooter className="home-load-more" aria-hidden={!hasMore && !loading}>
+              {hasMore && <>
+                {nextPageError && <span role="alert">{nextPageError}</span>}
+                {loading ? (
+                  <span className="pagination-loading-dots" role="status" aria-label="加载更多"><span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" /></span>
+                ) : (
+                  <button type="button" className="btn btn-ghost" onClick={() => void requestPage("append")}>
+                    {nextPageError ? "重试加载更多" : "加载更多"}
+                  </button>
+                )}
+              </>}
+            </StablePaginationFooter>
           </div>
         </PullToRefresh>
       )}

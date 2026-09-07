@@ -6,6 +6,74 @@
 
 /* ================= 个人页三分区（F10） ================= */
 
+/* Stable wrappers preserve the existing single-column flow on phones. */
+.profile-side,
+.profile-main { display: contents; }
+
+@media (min-width: 769px) {
+  .profile-page-split {
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .profile-page-split > .profile-column {
+    display: grid;
+    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0;
+    height: 100%;
+    max-width: 1200px;
+  }
+
+  .profile-page-split .profile-topbar {
+    grid-column: 1 / -1;
+    margin: var(--sp-6) var(--sp-6) 0;
+  }
+
+  .profile-page-split :is(.profile-side, .profile-main) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    min-width: 0;
+    min-height: 0;
+    padding: var(--sp-6) var(--sp-6) var(--sp-8);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .profile-page-split :is(.profile-side, .profile-main) > * {
+    flex-shrink: 0;
+  }
+
+  /* 两侧仍留24px阴影裁剪余量；滚动区各向中间扩16px，卡片净间隔为16px。
+     透明重叠区不参与命中，实际卡片继续接收点击与滚轮并向所属滚动列冒泡。 */
+  .profile-page-split .profile-column:has(.profile-main) :is(.profile-side, .profile-main) {
+    pointer-events: none;
+  }
+
+  .profile-page-split .profile-column:has(.profile-main) .profile-side { margin-right: calc(-1 * var(--sp-4)); }
+  .profile-page-split .profile-column:has(.profile-main) .profile-main { margin-left: calc(-1 * var(--sp-4)); }
+
+  .profile-page-split .profile-column:has(.profile-main) :is(.profile-side, .profile-main) > * {
+    pointer-events: auto;
+  }
+
+  .profile-page-split .profile-card { padding: var(--sp-6); }
+  .profile-page-split .profile-actions { flex-wrap: wrap; }
+  .profile-page-split .profile-identity { flex-wrap: wrap; }
+
+  /* Private profiles and loading/error states have no empty second panel. */
+  .profile-page-split > .profile-column:not(:has(.profile-main)) {
+    grid-template-columns: minmax(0, 640px);
+    justify-content: center;
+  }
+
+  .profile-page-split .profile-column > .profile-card {
+    align-self: start;
+    margin: var(--sp-6);
+  }
+}
+
 /* 头像上传块（M5-2.1）：头像 + 更换按钮 + 预览提示/校验错误 */
 .profile-avatar-block {
   display: flex;
@@ -175,6 +243,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-decoration: none;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 .profile-section-row:hover {
@@ -217,6 +289,21 @@
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-4) var(--sp-2);
   min-width: 0;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
+}
+
+@media (max-width: 768px) {
+  .favorites-page > .favorites-topbar {
+    width: calc(100% - 2 * var(--sp-4));
+    margin: var(--sp-3) var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    flex-shrink: 0;
+  }
 }
 
 .favorites-title {
@@ -284,18 +371,32 @@
 .favorites-list {
   display: flex;
   flex-direction: column;
+  flex: none;
+  min-width: 0;
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
 }
 
+.favorites-masonry-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
 .favorite-item {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3);
   border-radius: var(--radius-input);
-  background: var(--surface);
+  background: var(--glass-bg);
   border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
 }
 
 .favorite-item-main {
@@ -335,13 +436,60 @@
 
 @media (min-width: 769px) {
   .favorites-page {
+    padding: var(--sp-3) 0 var(--sp-8);
+  }
+
+  .favorites-page > :is(.favorites-topbar, .favorites-filters, .favorites-list, .favorites-skeleton, .home-state, .chat-notice) {
+    max-width: 1200px;
+    width: 100%;
+    margin-inline: auto;
+    flex-shrink: 0;
+    padding-left: var(--sp-6);
+    padding-right: var(--sp-6);
+  }
+
+  .favorites-page > .favorites-topbar {
+    width: calc(100% - 2 * var(--sp-6));
+    max-width: calc(1200px - 2 * var(--sp-6));
+    margin-bottom: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  /* 宽屏统一双列；轨道宽度与内沿沿用帖子列表，断点遵循收藏页要求。 */
+  .favorites-list.is-masonry {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding-top: var(--sp-4);
     padding-bottom: var(--sp-4);
   }
 
-  .favorites-list {
-    max-width: 680px;
-    width: 100%;
-    margin: 0 auto;
+  .favorites-list.is-masonry .favorites-masonry-col {
+    flex: 1 1 0;
+    gap: var(--sp-3);
+  }
+
+  .favorites-skeleton {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: var(--sp-3);
+    padding-top: var(--sp-4);
+    padding-bottom: var(--sp-4);
+  }
+
+  .favorite-item { padding: var(--sp-4); }
+  .favorite-item-main { gap: var(--sp-2); }
+  .favorite-item-title { font-size: 16px; }
+
+  .favorite-item-body {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.6;
   }
 }
 

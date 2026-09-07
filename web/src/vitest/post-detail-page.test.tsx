@@ -14,6 +14,13 @@ import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
 import { PostDetailPage } from "../pages/PostDetailPage";
 import { useChatStore } from "../stores/chat";
+import { usePostsStore } from "../stores/posts";
+import { surfaceEntryVariants, panelVariants } from "../components/motion/auroraquaMotion";
+
+vi.mock("../components/motion/auroraquaMotion", async () => {
+  const actual = await vi.importActual<typeof import("../components/motion/auroraquaMotion")>("../components/motion/auroraquaMotion");
+  return { ...actual, surfaceEntryVariants: vi.fn(actual.surfaceEntryVariants), panelVariants: vi.fn(actual.panelVariants) };
+});
 
 vi.mock("../api/posts", () => ({
   getPost: vi.fn(),
@@ -28,7 +35,7 @@ vi.mock("../api/favorites", () => ({
   removeFavorite: vi.fn(),
 }));
 vi.mock("../components/posts/CommentList", () => ({
-  CommentList: () => <div>评论列表 mock</div>,
+  CommentList: ({ revealItems }: { revealItems?: boolean }) => <div data-comment-reveal={String(revealItems)}>评论列表 mock</div>,
 }));
 
 const author = {
@@ -96,27 +103,78 @@ const groupConversation = {
   peer: null,
 };
 
-function renderDetail(post: Post) {
+function renderDetail(post: Post, groupId?: string) {
   vi.mocked(postsApi.getPost).mockResolvedValue(post);
   vi.mocked(postsApi.listComments).mockResolvedValue([]);
   vi.mocked(postsApi.updatePost).mockResolvedValue(post);
   return render(
     <MemoryRouter initialEntries={["/posts/1"]}>
       <Routes>
-        <Route path="/posts/:postId" element={<PostDetailPage />} />
+        <Route path="/posts/:postId" element={<PostDetailPage groupId={groupId} />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 beforeEach(() => {
+  usePostsStore.setState({ posts: [] });
   useChatStore.getState().reset();
   useChatStore.getState().setConversations([groupConversation]);
   vi.clearAllMocks();
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+describe("PostDetailPage 分区入场边界", () => {
+  it.each([false, true])("群外正文保留原500ms缩放位移和内部reveal，顶栏与输入框独立（narrow=%s）", async (narrow) => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query === "(max-width: 768px)" && narrow, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const post = makePost();
+    usePostsStore.setState({ posts: [post] });
+    const { container } = renderDetail(post);
+    const body = container.querySelector<HTMLElement>(".post-detail-scroll")!;
+    expect(body.style.transform).toContain("translateY(20px)");
+    expect(body.style.transform).toContain("scale(0.95)");
+    expect(vi.mocked(surfaceEntryVariants).mock.results.at(-1)?.value.in).toMatchObject({ transition: { duration: 0.5, ease: [0, 0, 0.58, 1] } });
+    expect(body.querySelector(".post-detail-card")).toHaveClass("reveal");
+    expect(body.querySelector(".post-detail-comments")).toHaveClass("reveal");
+    expect(screen.getByText("评论列表 mock")).toHaveAttribute("data-comment-reveal", "true");
+    const head = container.querySelector(".post-detail-head")!;
+    const composer = container.querySelector(".post-detail-composer")!;
+    expect(head.parentElement).toBe(body.parentElement);
+    expect(composer.parentElement).toBe(body.parentElement);
+    expect(composer).toHaveStyle({ transform: "translateY(0)" });
+    await waitFor(() => expect(body.style.transform).toBe("none"));
+    expect(container.querySelector(".post-detail-scroll")).toBe(body);
+  });
+
+  it.each([false, true])("群内正文补300ms入场，仍不启用群外评论stagger或重挂正文（narrow=%s）", async (narrow) => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query === "(max-width: 768px)" && narrow, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const post = makePost({ group: "g1" });
+    usePostsStore.setState({ posts: [post] });
+    const { container } = renderDetail(post, "g1");
+    const body = container.querySelector<HTMLElement>(".post-detail-scroll")!;
+    expect(body.style.transform).toContain("translateX(20px)");
+    expect(body.style.transform).not.toContain("scale");
+    expect(vi.mocked(panelVariants).mock.results.at(-1)?.value.center).toMatchObject({ transition: { duration: 0.3 } });
+    expect(body.querySelector(".post-detail-card")).not.toHaveClass("reveal");
+    expect(screen.getByText("评论列表 mock")).toHaveAttribute("data-comment-reveal", "false");
+    await waitFor(() => expect(body.style.transform).toBe("none"));
+    expect(container.querySelector(".post-detail-scroll")).toBe(body);
+  });
+
+  it("群外 reduced-motion 正文首帧即完整显示，不先闪透明帧", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query.includes("prefers-reduced-motion"), addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const post = makePost();
+    usePostsStore.setState({ posts: [post] });
+    const { container } = renderDetail(post);
+    const body = container.querySelector<HTMLElement>(".post-detail-scroll")!;
+    expect(body.style.opacity).toBe("1");
+    expect(body.style.transform).toBe("none");
+    await waitFor(() => expect(postsApi.getPost).toHaveBeenCalledWith(1));
+  });
 });
 
 describe("PostDetailPage 编辑可见范围", () => {

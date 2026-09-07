@@ -10,6 +10,7 @@
  * 状态角标 live/voice/game 数据源由 F4/F5/F7 接入（badges.ts 已定义契约）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useIsPresent } from "framer-motion";
 import { Navigate, useNavigate } from "react-router-dom";
 import * as chatApi from "../api/chat";
 import { GroupCard } from "../components/home/GroupCard";
@@ -47,6 +48,7 @@ function SkeletonCards() {
 }
 
 export function HomePage() {
+  const present = useIsPresent();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const conversations = useChatStore((s) => s.conversations);
@@ -140,6 +142,21 @@ export function HomePage() {
     }
   }, []);
 
+  const retryGroups = useCallback(async () => {
+    setListError(null);
+    const store = useChatStore.getState();
+    store.setLoading(true);
+    try {
+      const list = await chatApi.listConversations();
+      store.setConversations(list);
+      subscribeGroupConversations(list);
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      store.setLoading(false);
+    }
+  }, []);
+
   // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；cleanup 引用守卫，
   // 避免 AnimatePresence sync 转场期间旧页 cleanup 覆盖后注册的新页回调）
   useEffect(() => {
@@ -154,13 +171,32 @@ export function HomePage() {
   // 下拉刷新仅当滚动容器（.home-page）已在顶部时响应
   const isAtTop = useCallback(() => (homeRef.current?.scrollTop ?? 0) <= 0, []);
 
+  const listFailure = listError ? (
+    <div className="home-state" role="alert">
+      <p className="placeholder-desc">{listError}</p>
+      <button type="button" className="btn btn-ghost" onClick={() => void retryGroups()}>
+        重试
+      </button>
+    </div>
+  ) : null;
+
   // ---- 宽屏：重定向到最近群（无群空态引导） ----
   if (!isNarrow) {
+    // AnimatePresence retains the exiting page; its Navigate must not redirect a newer route.
+    if (!present) return null;
     const recentValid = recentGroupId != null && groups.some((g) => g.id === recentGroupId);
     const target = recentValid ? recentGroupId : groups[0]?.id;
     if (target) {
       return <Navigate to={`/group/${target}`} replace />;
     }
+    if (listLoading) {
+      return (
+        <div className="home-page" role="status" aria-label="正在加载群聊">
+          <SkeletonCards />
+        </div>
+      );
+    }
+    if (listFailure) return <div className="home-page">{listFailure}</div>;
     return (
       <div className="home-wide-empty">
         <h2 className="placeholder-title">还没有加入群聊</h2>
@@ -200,28 +236,7 @@ export function HomePage() {
       {loading ? (
         <SkeletonCards />
       ) : listError ? (
-        <div className="home-state" role="alert">
-          <p className="placeholder-desc">{listError}</p>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => {
-              setListError(null);
-              useChatStore.getState().setLoading(true);
-              chatApi
-                .listConversations()
-                .then((l) => {
-                  useChatStore.getState().setConversations(l);
-                  subscribeGroupConversations(l);
-                })
-                .catch((e) =>
-                  setListError(e instanceof Error ? e.message : "加载失败"),
-                );
-            }}
-          >
-            重试
-          </button>
-        </div>
+        listFailure
       ) : groups.length === 0 ? (
         <div className="home-state">
           <h2 className="placeholder-title">创建你的第一个群</h2>

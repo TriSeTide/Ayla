@@ -2,10 +2,11 @@
  * PostDetailPage —— 帖子详情（路由 /posts/:postId，F6，R-P3/R-P4）。
  *
  * 详情正文（图片九宫格 / 超 3 行折叠）+ 评论（列表 + 回复 + 发评论）+ 收藏（切换即时反馈）+
- * 删除（仅作者，二次确认）。窄屏：评论输入框与进入直播间一致，
- * 底栏下滑离场后输入框延迟从底部滑入。
+ * 删除（仅作者，二次确认）。顶栏从上、评论输入框从下独立进入；
+ * 群外正文继续保留原 500ms 浮入缩放与内容 reveal。
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { motion } from "framer-motion";
 import { useNavigate, useNavigationType, useParams, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
@@ -21,8 +22,9 @@ import { VisibilitySelector, type VisibilitySelection } from "../components/Visi
 import { IconBack, IconEye, IconHeart, IconImage } from "../components/icons";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
-import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+import { panelVariants, surfaceEntryVariants } from "../components/motion/auroraquaMotion";
 import { usePostsStore } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
 import { useAuthStore } from "../stores/auth";
@@ -46,6 +48,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
+  const reduced = usePrefersReducedMotion();
   const navigationType = useNavigationType();
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const onlineUsers = usePresenceStore((s) => s.users);
@@ -120,7 +123,6 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
 
   // 输入框滑入 + 内容入场动画：内容就绪（loading 结束）后才浮入，
   // 避免异步加载完成前动画就提前跑完、看不到浮入效果（直播间同源节奏）。
-  const { inputEntered } = useEnterRoomAnimation(usesRoomEntryAnimation);
   const { step } = useRevealOnEnter(!loading && usesRoomEntryAnimation);
 
   const load = useCallback(() => {
@@ -598,7 +600,13 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         </div>
       )}
 
-      <div className="post-detail-scroll">
+      <motion.div
+        className="post-detail-scroll"
+        inherit={false}
+        initial={reduced ? false : usesRoomEntryAnimation ? "out" : "enter"}
+        animate={usesRoomEntryAnimation ? "in" : "center"}
+        variants={usesRoomEntryAnimation ? surfaceEntryVariants(reduced) : panelVariants(reduced, "right", "left")}
+      >
         <article className={`post-card post-detail-card ${usesRoomEntryAnimation ? "reveal" : ""} ${usesRoomEntryAnimation && step === 1 ? "is-in" : ""}`}>
           <div className="post-card-main">
             <header className="post-card-head">
@@ -692,12 +700,11 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             revealItems={usesRoomEntryAnimation}
           />
         </div>
-      </div>
+      </motion.div>
       <CommentComposer
         className="post-detail-composer"
-        // 一级详情：复用进直播间输入框滑入动画（inputEntered 由动画驱动）；
-        // 群内详情：无底栏下滑动画，输入框直接显示（不进隐藏态）。
-        inputEntered={usesRoomEntryAnimation ? inputEntered : true}
+        // 底部面板在所有布局都由自己的 20px/300ms 动画持有，不叠加旧 100% 位移。
+        inputEntered
         onSend={sendComment}
         replyTarget={replyTarget}
         onReplyClear={() => setReplyTarget(null)}

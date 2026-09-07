@@ -7,18 +7,19 @@
 /* ================= 帖子卡（design.md §12.8） ================= */
 
 .post-card {
-  background: var(--surface);
-  border-radius: 16px;
-  box-shadow: var(--card-shadow);
+  background: var(--glass-bg);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-shadow);
   overflow: hidden;
-  transition: transform var(--dur-fast) var(--ease-out),
-    filter var(--dur-fast) var(--ease-out);
+  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
 }
 
 /* 浮入动画挂在 posts-feed-item，卡片自身只处理悬停反馈，避免两个动画竞争 transform。 */
 @media (hover: hover) {
   .posts-feed-item:hover .post-card {
-    transform: translateY(-2px);
     filter: brightness(1.01);
   }
 }
@@ -26,10 +27,6 @@
 @media (prefers-reduced-motion: reduce) {
   .post-card {
     transition: none;
-  }
-
-  .posts-feed-item:hover .post-card {
-    transform: none;
   }
 }
 
@@ -635,7 +632,10 @@
 }
 
 .posts-skeleton {
-  padding: var(--sp-4);
+  width: 100%;
+  min-width: 0;
+  flex: none;
+  padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-direction: column;
 }
@@ -648,7 +648,8 @@
     margin: 0 auto;
   }
 
-  .posts-feed {
+  .posts-feed,
+  .posts-skeleton {
     max-width: 680px;
     width: 100%;
     margin: 0 auto;
@@ -665,9 +666,17 @@
     padding-right: var(--sp-6);
   }
 
-  .posts-feed {
+  .posts-feed,
+  .posts-skeleton {
     max-width: 1200px;
     padding: var(--sp-4) var(--sp-6);
+  }
+
+  .posts-skeleton {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: var(--sp-3);
   }
 
   .posts-feed.is-masonry {
@@ -684,11 +693,6 @@
   .posts-feed.is-masonry .home-load-more {
     flex-basis: 100%;
   }
-}
-
-.posts-skeleton {
-  max-width: 680px;
-  margin: 0 auto;
 }
 
 @media (max-width: 768px) {
@@ -774,7 +778,9 @@
   width: 100%;
   box-sizing: border-box;
   padding: var(--sp-3) var(--sp-4);
-  background: var(--surface);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border-top: 1px solid var(--glass-border);
 }
 
@@ -969,6 +975,24 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+  width: 100%;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+@media (min-width: 769px) {
+  .group-posts-loading { max-width: 680px; }
+}
+
+@media (min-width: 1025px) {
+  .group-posts-loading {
+    max-width: 1200px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .group-posts-loading > .home-load-text { grid-column: 1 / -1; }
 }
 
 .group-posts-skel {
@@ -986,10 +1010,49 @@
 .group-posts-input {
   flex: none;
   position: relative;
+  min-width: 0;
   /* 展开编辑时面板盖住上方遮罩（40），遮罩再压暗列表与顶栏（20） */
   z-index: 50;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
   border-top: 1px solid var(--glass-border);
-  background: var(--glass-bg-strong);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  /* 基础输入容器从下进入；expanded的高特异性animation仍独占原展开位移。 */
+  animation: auroraqua-panel-from-bottom var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+/* 外壳统一持有输入区内沿；compact/expanded 不再各叠一层12px。 */
+.group-posts-input > .post-editor.is-collapsible {
+  min-width: 0;
+  padding: 0;
+  gap: var(--sp-2);
+}
+
+.group-posts-input .field {
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  line-height: 22px;
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-inset);
+}
+
+.group-posts-input .field:focus {
+  border-color: var(--glow-500);
+  box-shadow: var(--glow-shadow);
+}
+
+.group-posts-input .post-editor:not(.is-expanded) .post-editor-body {
+  height: 40px;
+}
+
+.group-posts-input .post-editor-image-btn {
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow-compact);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* 群内帖子未读跳转标签：层级高于发帖输入栏（50）与遮罩（45）；
@@ -1015,6 +1078,15 @@
   animation: group-posts-editor-rise 250ms var(--ease-out);
 }
 
+@media (min-width: 769px) {
+  /* 帖子流自己滚动；外壳不裁侧栏12px空隙内的输入阴影。 */
+  .group-content .group-posts { overflow: visible; }
+
+  .group-posts-input.is-expanded {
+    max-height: calc(100% - 2 * var(--sidebar-gutter));
+  }
+}
+
 @keyframes group-posts-editor-rise {
   from {
     opacity: 0;
@@ -1027,6 +1099,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .group-posts-input,
   .group-posts-input.is-expanded {
     animation: none;
   }
@@ -1035,7 +1108,12 @@
 /* ================= 帖子详情结构化骨架 ================= */
 
 .post-detail-skeleton {
-  padding: var(--sp-4);
+  /* 两侧16px外沿包住680px正文轨道，满宽骨架边缘与加载后的卡片重合。 */
+  width: 100%;
+  max-width: calc(680px + 2 * var(--sp-4));
+  min-width: 0;
+  margin-inline: auto;
+  padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);

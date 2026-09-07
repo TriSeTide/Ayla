@@ -8,6 +8,7 @@
 
 .search-page {
   height: 100%;
+  min-width: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -67,7 +68,11 @@
   flex-direction: column;
   gap: var(--sp-4);
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  flex: none;
+  min-width: 0;
 }
+
+.search-group { min-width: 0; }
 
 .search-group-head {
   display: flex;
@@ -105,6 +110,9 @@
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   text-align: left;
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
 }
 
 .search-row-title {
@@ -114,6 +122,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.search-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
+}
+
+/* 用户头像和详情入口为并列按钮，外层仍持有原卡片材料与布局。 */
+.search-row-main {
+  align-self: stretch;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  border-radius: var(--radius-sm);
 }
 
 .search-group-row {
@@ -158,6 +187,9 @@
 .group-apply-dialog {
   width: min(440px, 100%);
   padding: var(--sp-6);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-modal);
 }
 
 .group-apply-head {
@@ -282,6 +314,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-modal);
 }
 
 .user-profile-body {
@@ -336,12 +371,12 @@
   max-height: 360px;
   overflow-y: auto;
   padding: var(--sp-2);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
-  box-shadow: var(--card-shadow);
+  box-shadow: var(--glass-shadow);
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -451,6 +486,38 @@
 
 @media (min-width: 769px) {
   .search-page {
-    padding-bottom: var(--sp-4);
+    padding: var(--sp-4) 0 var(--sp-8);
+  }
+
+  .search-page > :is(.search-history, .search-results, .search-loading, .search-error, .search-empty) {
+    width: 100%;
+    max-width: 680px;
+    margin-inline: auto;
+    flex-shrink: 0;
+  }
+
+  .search-page .search-row {
+    min-height: 64px;
+    min-width: 0;
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .search-page .search-row > .search-row-title { flex: 1; }
+  .search-page .search-group-head { margin-bottom: var(--sp-3); }
+  .search-page .search-group-title { font-size: 14px; }
+}
+
+@media (min-width: 1025px) {
+  .search-page > :is(.search-history, .search-results, .search-loading, .search-error, .search-empty) {
+    max-width: 1200px;
+    padding-left: var(--sp-6);
+    padding-right: var(--sp-6);
+  }
+
+  .search-results {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: var(--sp-6);
   }
 }

@@ -3,16 +3,13 @@
  *
  * 该群帖子信息流 + **底部输入框发帖**（区别于一级 tab 的 FAB 发帖，R-P2）。
  *
- * 加载策略（避免"空白加载"，对齐 GroupLive/GroupVoice 的 store 投影模式）：
- * - posts store 里存的是**全量可见**列表（后端 scope=feed 即 visible_queryset，
- *   已含公开 + 我所在群的群帖 + 好友帖），登录时已预加载；
- * - 因此切到群内帖子时，先从 store 按当前 groupId **前端投影**出该群帖子 → 立即渲染（秒开）；
- * - 同时后台 `load()` 拉完整 `scope=group:<id>` 补齐 store 投影可能缺失的条目，
- *   用**并集按 id 去重**的方式合并展示，既秒开又完整。
+ * 目录由服务端group scope分页：首屏20条，滚到底再取一页，保留cursor与失败重试。
+ * 全局posts store只同步已加载卡的已读/浏览状态，不当作本群完整目录或分页边界。
+ * 详情返回保留已加载页；新DOM卡片单独进入，刷新不重挂整个帖子流。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { StablePaginationFooter } from "../../components/StablePaginationFooter";
 import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
 import * as favoritesApi from "../../api/favorites";
@@ -23,7 +20,7 @@ import { PullToRefresh } from "../../components/motion/PullToRefresh";
 import { useMasonryColumns } from "../../hooks/useMasonryColumns";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePostViewTracking } from "../../hooks/usePostViewTracking";
-import { staggerDelay } from "../../hooks/useRevealOnEnter";
+import { useListEntryMotion } from "../../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../../hooks/useScrollRestore";
 import { usePostsStore } from "../../stores/posts";
 import { useChatStore } from "../../stores/chat";
@@ -33,8 +30,31 @@ import { chatWS } from "../../ws/chat";
 
 /** 瀑布流断点与一级帖子流保持一致：>1024px 双列。 */
 const MASONRY_QUERY = "(min-width: 1025px)";
-/** 进入群内帖子时，为覆盖全部未读最多连续拉取的页数（防极端数据拖垮首屏） */
-const MAX_UNREAD_LOAD_PAGES = 10;
+const PAGE_SIZE = 20;
+
+/** Keep retained cards in place; only previously unseen ids append/prepend. */
+function mergePosts(current: Post[], incoming: Post[], prepend = false): Post[] {
+  const updates = new Map(incoming.map((post) => [post.id, post]));
+  const retained = current.map((post) => {
+    const update = updates.get(post.id);
+    updates.delete(post.id);
+    return update ? {
+      ...update,
+      is_viewed: post.is_viewed || update.is_viewed,
+      view_count: Math.max(post.view_count ?? 0, update.view_count ?? 0),
+    } : post;
+  });
+  const added = [...updates.values()];
+  return prepend ? [...added, ...retained] : [...retained, ...added];
+}
+
+function createRequestOwner(key: string) {
+  return {
+    key, active: true, revision: 0, busy: false, loaded: false,
+    cursor: null as string | null, hasMore: false, nextFailed: false,
+    deletedIds: new Set<number>(),
+  };
+}
 
 export function GroupPosts({
   groupId,
@@ -47,112 +67,133 @@ export function GroupPosts({
   postId?: string;
 }) {
   const navigate = useNavigate();
-  // store 全量可见列表 → 当前群前端投影（登录预加载后通常已就绪，秒开关键）
+  const userId = useAuthStore((s) => s.currentUser?.id ?? "anonymous");
+  const ownerKey = `${userId}:group-posts:${groupId}`;
+  const requestOwner = useRef(createRequestOwner(ownerKey));
+  if (requestOwner.current.key !== ownerKey) requestOwner.current = createRequestOwner(ownerKey);
+  const [dataOwner, setDataOwner] = useState(ownerKey);
+  // 全局缓存只用于已加载卡片的状态同步，不能提前显示不在当前分页中的旧缓存。
   const feedPosts = usePostsStore((s) => s.posts);
   // 帖子收藏态（postId → favoriteId），与一级帖子流/详情页共享同一 store
   const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
-  const groupedFromStore = useMemo(
-    () =>
-      feedPosts.filter((p) =>
-        (p.allowed_group_ids ?? []).some((g) => String(g) === String(groupId)),
-      ),
-    [feedPosts, groupId],
-  );
-  // 完整 group scope 数据（后台补齐）
   const [groupPosts, setGroupPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 收藏操作失败提示（与列表加载 error 分离，列表有数据时也能看到）
   const [actionError, setActionError] = useState<string | null>(null);
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const scrollRestoreKey = `group-posts:${groupId}`;
+  const listActive = useRef(postId == null);
+  listActive.current = postId == null;
+  const scrollRestoreKey = ownerKey;
   // 同组件详情往返会先渲染列表、再由恢复 hook 的 layout effect 标记 restoring；
   // 单独记住本次详情返回，确保该首帧也不挂 stagger。
   const [skipRevealRestoreKey, setSkipRevealRestoreKey] = useState<string | null>(null);
-  // 历史位置恢复后仍可由用户主动刷新重新触发浮入。
+  // 恢复时现有卡静止；之后实际新增卡片可独立进入。
   const [revealAfterRefresh, setRevealAfterRefresh] = useState(false);
-  // §3.4 刷新动画：刷新完成后递增，key 变化强制帖子列表重挂载 → reveal 重播
-  const [revealNonce, setRevealNonce] = useState(0);
 
-  const load = useCallback(async () => {
-    setError(null);
-    // 目标未读数：会话列表权威值；进入列表时连续拉页直到覆盖全部未读
-    // （未读帖子都是最新帖，按时间倒序集中在列表头部，通常 1 页即覆盖）。
-    const targetUnread =
-      useChatStore
-        .getState()
-        .conversations.find((c) => c.id === groupId)?.post_unread_count ?? 0;
-    let cursor: string | null = null;
-    let acc: Post[] = [];
-    let hasMore = true;
-    let pages = 0;
-    while (hasMore && pages < MAX_UNREAD_LOAD_PAGES) {
+  const requestPage = useCallback(async (append: boolean) => {
+    const owner = requestOwner.current;
+    if (!owner.active || owner.key !== ownerKey) return;
+    if (append && (owner.busy || !owner.loaded || !owner.hasMore || !owner.cursor)) return;
+    const wasLoaded = owner.loaded;
+    const cursor = append ? owner.cursor : null;
+    const revision = ++owner.revision;
+    owner.busy = true;
+    owner.nextFailed = false;
+    setLoadMoreError(null);
+    if (append) setLoadingMore(true);
+    else {
+      if (!owner.loaded) { setGroupPosts([]); setHasMore(false); }
+      setDataOwner(ownerKey);
+      setLoading(true);
+      setLoadingMore(false);
+      setError(null);
+    }
+    const current = () => requestOwner.current === owner && owner.active && owner.revision === revision;
+    try {
       const page = await postsApi.listPosts({
         scope: `group:${groupId}`,
-        limit: 20,
+        limit: PAGE_SIZE,
         cursor,
       });
-      acc = [...acc, ...page.results];
-      hasMore = page.has_more;
-      cursor = page.next_cursor;
-      pages += 1;
-      const loadedUnread = acc.filter((p) => !p.is_viewed).length;
-      if (loadedUnread >= targetUnread) break;
-    }
-    setGroupPosts(acc);
-    setLoading(false);
-  }, [groupId]);
-
-  // 上拉刷新/刷新键共用：强制重拉群内帖子（group scope，同样覆盖未读）
-  const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      let cursor: string | null = null;
-      let acc: Post[] = [];
-      let hasMore = true;
-      let pages = 0;
-      while (hasMore && pages < MAX_UNREAD_LOAD_PAGES) {
-        const page = await postsApi.listPosts({
-          scope: `group:${groupId}`,
-          limit: 20,
-          cursor,
-        });
-        acc = [...acc, ...page.results];
-        hasMore = page.has_more;
-        cursor = page.next_cursor;
-        pages += 1;
-        const loadedUnread = acc.filter((p) => !p.is_viewed).length;
-        if (loadedUnread >= (useChatStore.getState().conversations.find((c) => c.id === groupId)?.post_unread_count ?? 0)) break;
+      if (!current()) return;
+      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) {
+        throw new Error("帖子分页游标未推进，请刷新后重试");
       }
-      setGroupPosts(acc);
-      setSkipRevealRestoreKey(null);
-      setRevealAfterRefresh(true);
-      setRevealNonce((n) => n + 1);
+      const rows = page.results.filter((post) => !owner.deletedIds.has(post.id));
+      setGroupPosts((prev) => mergePosts(append ? prev : [], rows));
+      setDataOwner(ownerKey);
+      owner.cursor = page.next_cursor;
+      owner.hasMore = page.has_more;
+      owner.loaded = true;
+      setHasMore(page.has_more);
+      if (listActive.current && wasLoaded) {
+        setSkipRevealRestoreKey(null);
+        setRevealAfterRefresh(true);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "加载群内帖子失败");
+      if (!current()) return;
+      const message = e instanceof Error ? e.message : "加载群内帖子失败";
+      if (append) { owner.nextFailed = true; setLoadMoreError(message); }
+      else setError(message);
+    } finally {
+      if (current()) {
+        owner.busy = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [groupId]);
+  }, [groupId, ownerKey]);
+
+  const load = useCallback(() => requestPage(false), [requestPage]);
+  const refresh = load;
+  const loadMore = useCallback(() => requestPage(true), [requestPage]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
+    if (postId != null) return;
     useShellStore.getState().registerRefresh(refresh);
     return () => {
       if (useShellStore.getState().refreshCallback === refresh) {
         useShellStore.getState().registerRefresh(null);
       }
     };
-  }, [refresh]);
+  }, [postId, refresh]);
 
   // 上拉刷新仅当滚动容器（.group-posts-list）已在顶部时响应
   const isAtTop = useCallback(() => (listRef.current?.scrollTop ?? 0) <= 0, []);
 
   useEffect(() => {
-    load();
-    return chatWS.onFrame((frame) => {
-      if (frame.type === "post.created" || frame.type === "post.deleted") {
-        load();
+    const owner = requestOwner.current;
+    owner.active = true;
+    void load();
+    const unsubscribe = chatWS.onFrame((frame) => {
+      if (frame.type === "post.deleted") {
+        const id = Number(frame.post_id);
+        owner.deletedIds.add(id);
+        setGroupPosts((prev) => prev.filter((post) => post.id !== id));
+        return;
+      }
+      if (frame.type === "post.created" || frame.type === "post.updated") {
+        const id = Number(frame.post.id);
+        if (!id) return;
+        // 单条权限REST对账；目录提示不重拉首页，不丢失已加载页/游标/滚动位置。
+        void postsApi.getPost(id).then((post) => {
+          if (requestOwner.current !== owner || !owner.active || owner.deletedIds.has(id)) return;
+          if (!(post.allowed_group_ids ?? []).some((gid) => String(gid) === String(groupId))) {
+            setGroupPosts((prev) => prev.filter((item) => item.id !== id));
+            return;
+          }
+          setGroupPosts((prev) => mergePosts(prev, [post], true));
+          if (listActive.current) setRevealAfterRefresh(true);
+        }).catch(() => {
+          // 不可见或已删除的目录提示不成为新卡；现有列表仍可继续分页/刷新。
+        });
         return;
       }
       if (frame.type === "post.viewed") {
@@ -169,6 +210,11 @@ export function GroupPosts({
         );
       }
     });
+    return () => {
+      owner.active = false;
+      owner.revision += 1;
+      unsubscribe();
+    };
   }, [load]);
 
   // 收藏态铺底：群内帖子流可能不经 PostsHubPage 直接进入，需自行加载我的帖子收藏
@@ -210,33 +256,28 @@ export function GroupPosts({
 
   const handleCreated = useCallback(
     (post: Post) => {
-      setGroupPosts((prev) => [post, ...prev]);
+      setGroupPosts((prev) => mergePosts(prev, [post], true));
+      setRevealAfterRefresh(true);
     },
     [],
   );
 
-  // 展示 = store 投影 ∪ 完整 group 数据（按 id 去重、时间倒序）。
-  // is_viewed/view_count 单调（浏览后不回退）：合并时取「或 / max」，
-  // 让浏览上报（更新 posts store）能实时反映到本地 groupPosts 的已读态与浏览量。
+  // 只投影本目录已加载卡；共享缓存提供单调已读/浏览量，不扩大分页结果。
   const displayPosts = useMemo(() => {
-    const byId = new Map<number, Post>();
-    for (const p of groupedFromStore) byId.set(p.id, p);
-    for (const p of groupPosts) {
+    if (dataOwner !== ownerKey) return [];
+    const byId = new Map(feedPosts.map((post) => [post.id, post]));
+    return groupPosts.map((p) => {
       const existing = byId.get(p.id);
       if (existing) {
-        byId.set(p.id, {
+        return {
           ...p,
           is_viewed: p.is_viewed || existing.is_viewed,
           view_count: Math.max(p.view_count ?? 0, existing.view_count ?? 0),
-        });
-      } else {
-        byId.set(p.id, p);
+        };
       }
-    }
-    return Array.from(byId.values()).sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-  }, [groupedFromStore, groupPosts]);
+      return p;
+    });
+  }, [dataOwner, feedPosts, groupPosts, ownerKey]);
 
   // 视口浏览上报（浏览与已读同源）：进入视口即加浏览/已读；
   // onViewed 同步本地 groupPosts 的已读态（store 可能不含全部群帖，标签据此实时减少）。
@@ -257,12 +298,22 @@ export function GroupPosts({
     () => displayPosts.filter((p) => !p.is_viewed),
     [displayPosts],
   );
+  const totalUnread = useChatStore((s) =>
+    s.conversations.find((conversation) => conversation.id === groupId)?.post_unread_count ?? 0,
+  );
+  const unloadedUnread = hasMore ? Math.max(0, totalUnread - unreadPosts.length) : 0;
 
   // 滚动位置 → 上方/下方未读数（实时更新：每看到一条即已读，标签随之减少）
   const [scrollTick, setScrollTick] = useState(0);
   const handleListScroll = useCallback(() => {
     setScrollTick((t) => t + 1);
-  }, []);
+    const root = listRef.current;
+    if (root && root.scrollHeight > root.clientHeight
+      && root.scrollHeight - root.scrollTop - root.clientHeight <= 160
+      && !requestOwner.current.nextFailed) {
+      void loadMore();
+    }
+  }, [loadMore]);
   const { aboveUnread, belowUnread } = useMemo(() => {
     const root = listRef.current;
     if (!root) return { aboveUnread: 0, belowUnread: 0 };
@@ -285,8 +336,8 @@ export function GroupPosts({
         else below += 1;
       }
     }
-    return { aboveUnread: above, belowUnread: below };
-  }, [unreadPosts, scrollTick, displayPosts]);
+    return { aboveUnread: above, belowUnread: below + unloadedUnread };
+  }, [unreadPosts, scrollTick, displayPosts, unloadedUnread]);
 
   // 跳转到最近的未读帖子（上方 → 列表顺序中第一个在视口上方的；下方同理）
   const jumpToUnread = useCallback(
@@ -308,12 +359,15 @@ export function GroupPosts({
           break;
         }
       }
-      if (!target) return;
+      if (!target) {
+        if (direction === "below" && unloadedUnread > 0) void loadMore();
+        return;
+      }
       const targetRect = target.getBoundingClientRect();
       root.scrollTop += targetRect.top - elRect.top - root.clientHeight / 2;
       setScrollTick((t) => t + 1);
     },
-    [unreadPosts],
+    [loadMore, unreadPosts, unloadedUnread],
   );
 
   // U14：群内详情不会卸载 GroupPosts，只会用 postId 条件切换列表/详情 DOM。
@@ -336,23 +390,15 @@ export function GroupPosts({
     (post) => post.id,
     scrollRestoreKey,
   );
-  const indexByKey = useMemo(() => {
-    const index = new Map<number, number>();
-    displayPosts.forEach((post, position) => index.set(post.id, position));
-    return index;
-  }, [displayPosts]);
-  // 内容加载完成后才允许首次/刷新浮入；恢复路径不播 stagger，避免卡片高度变化导致位置错位。
-  const revealItems = !loading
-    && displayPosts.length > 0
-    && (!restoring || revealAfterRefresh)
-    && skipRevealRestoreKey !== scrollRestoreKey;
+  useListEntryMotion(listRef, ".posts-feed-item", (
+    postId != null || ((restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh)
+  ));
 
   if (postId) {
     return <PostDetailPage groupId={groupId} />;
   }
 
-  // 无任何数据（store 也没该群帖子）才显示加载骨架；有一点就先用投影渲染，秒开
-  const showLoadingSkeleton = groupedFromStore.length === 0 && groupPosts.length === 0;
+  const showLoadingSkeleton = displayPosts.length === 0 && (loading || dataOwner !== ownerKey);
 
   return (
     <div className="group-posts">
@@ -366,12 +412,12 @@ export function GroupPosts({
         </div>
         {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          {error && groupPosts.length === 0 && groupedFromStore.length === 0 ? (
+          {error && displayPosts.length === 0 && dataOwner === ownerKey ? (
             <div className="group-scene-placeholder" role="alert">
               <p className="placeholder-desc">{error}</p>
               <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
             </div>
-          ) : showLoadingSkeleton && loading ? (
+          ) : showLoadingSkeleton ? (
             <div className="group-posts-loading" aria-busy="true">
               <span className="skeleton group-posts-skel" style={{ height: 120 }} />
               <span className="skeleton group-posts-skel" style={{ height: 120 }} />
@@ -386,21 +432,15 @@ export function GroupPosts({
               </button>
             </div>
           ) : (
-            <div className={`posts-feed group-posts-feed${isMasonry ? " is-masonry" : ""}`} key={revealNonce}>
+            <div className={`posts-feed group-posts-feed${isMasonry ? " is-masonry" : ""}`}>
               {columns.map((columnPosts, columnIndex) => (
                 <div key={columnIndex} className="posts-masonry-col" ref={columnRefs[columnIndex]}>
                   {columnPosts.map((post) => {
-                    const delay = revealItems ? staggerDelay(indexByKey.get(post.id) ?? 0) : 0;
                     return (
                       <div
                         key={post.id}
                         data-post-id={post.id}
-                        className={`posts-feed-item${revealItems ? " reveal-item" : ""}`}
-                        style={
-                          revealItems
-                            ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties)
-                            : undefined
-                        }
+                        className="posts-feed-item"
                       >
                         <PostCard
                           post={post}
@@ -419,7 +459,17 @@ export function GroupPosts({
                   })}
                 </div>
               ))}
-              {loading && <span className="home-load-text group-posts-loading-more">正在刷新…</span>}
+              <StablePaginationFooter className="group-posts-loading-more" aria-hidden={!hasMore && !error && !loading}>
+                {loading && <span className="home-load-text">正在刷新…</span>}
+                {error && <div className="chat-notice" role="alert">
+                  {error} <button type="button" className="btn btn-ghost" onClick={load}>重试刷新</button>
+                </div>}
+                {loadMoreError && <div className="chat-notice" role="alert">{loadMoreError}</div>}
+                {hasMore && <button type="button" className="btn btn-ghost"
+                  disabled={loadingMore || loading} onClick={() => void loadMore()}>
+                  {loadingMore ? "正在加载更多…" : loadMoreError ? "重试加载更多" : "加载更多帖子"}
+                </button>}
+              </StablePaginationFooter>
             </div>
           )}
         </PullToRefresh>

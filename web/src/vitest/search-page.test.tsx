@@ -11,13 +11,22 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { search } from "../api/search";
 import { applyToGroup } from "../api/chat";
+import { getSignedMediaUrl } from "../api/media";
 import type { SearchResults } from "../api/types";
 import { SearchPage } from "../pages/SearchPage";
 import { useAuthStore } from "../stores/auth";
 import { useSearchStore } from "../stores/search";
+import { goUserProfile } from "../utils/navigation";
 
 vi.mock("../api/search", () => ({ search: vi.fn() }));
 vi.mock("../api/chat", () => ({ applyToGroup: vi.fn() }));
+vi.mock("../api/media", () => ({ getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() }));
+vi.mock("../utils/navigation", () => ({ goUserProfile: vi.fn() }));
+vi.mock("../components/UserProfileCard", () => ({
+  UserProfileCard: ({ user, onClose }: { user: { nickname: string }; onClose: () => void }) => (
+    <div role="dialog" aria-label={`${user.nickname} 资料`}><button onClick={onClose}>关闭资料</button></div>
+  ),
+}));
 
 const NARROW = "(max-width: 768px)";
 
@@ -59,7 +68,7 @@ function resultFor(q: string): SearchResults {
 }
 
 /** 只含一个群的搜索结果；joinPolicy 缺省=旧数据（无 join_policy 字段） */
-function groupResult(joinPolicy?: "public" | "application"): SearchResults {
+function groupResult(joinPolicy?: "public" | "application"): SearchResults & { groups: NonNullable<SearchResults["groups"]> } {
   return {
     users: { total: 0, items: [] },
     groups: {
@@ -95,6 +104,7 @@ function renderSearch(initialEntry: string, narrow: boolean) {
 beforeEach(() => {
   vi.mocked(search).mockResolvedValue(resultFor("冰樱"));
   vi.mocked(applyToGroup).mockResolvedValue({} as never);
+  vi.mocked(getSignedMediaUrl).mockResolvedValue("/fixtures/signed-group-avatar.png");
   useAuthStore.setState({ currentUser });
   useSearchStore.setState({ history: [] });
   localStorage.clear();
@@ -118,6 +128,53 @@ describe("SearchPage 顶栏复用（F9）", () => {
       expect(screen.getByText("小樱")).toBeInTheDocument();
     });
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ q: "冰樱" }));
+  });
+
+  it("用户头像与详情是并列入口，无嵌套button，点击各自保留原行为", async () => {
+    renderSearch("/search?q=冰樱", true);
+    const avatar = await screen.findByRole("button", { name: "查看 小樱 的个人主页" });
+    const row = avatar.closest(".search-user-row")!;
+    expect(row.tagName).toBe("DIV");
+    expect(row.querySelector("button button")).toBeNull();
+    const main = screen.getByRole("button", { name: "小樱" });
+    expect(main.parentElement).toBe(row);
+    expect(avatar.parentElement).toBe(row);
+    fireEvent.click(avatar);
+    expect(goUserProfile).toHaveBeenCalledWith("u1", "u2");
+    expect(screen.queryByRole("dialog", { name: "小樱 资料" })).not.toBeInTheDocument();
+    fireEvent.click(main);
+    expect(screen.getByRole("dialog", { name: "小樱 资料" })).toBeInTheDocument();
+    expect(goUserProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it("群结果使用返回的真实头像，加载失败回退首字且仍可申请入群", async () => {
+    const result = groupResult("application");
+    result.groups.items[0].avatar = "/api/v1/media/search-group-avatar/content";
+    vi.mocked(search).mockResolvedValue(result);
+    renderSearch("/search?q=冰樱", false);
+
+    const row = await screen.findByRole("button", { name: /冰樱研究所/ });
+    await waitFor(() => expect(row.querySelector("img")).toHaveAttribute("src", "/fixtures/signed-group-avatar.png"));
+    expect(getSignedMediaUrl).toHaveBeenCalledWith("search-group-avatar", undefined);
+    expect(row.querySelector("button")).toBeNull();
+
+    fireEvent.error(row.querySelector("img")!);
+    expect(row.querySelector(".avatar-core")).toHaveTextContent("冰");
+    expect(row.querySelector("img")).toBeNull();
+    fireEvent.click(row);
+    expect(screen.getByRole("dialog", { name: "申请加入「冰樱研究所」" })).toBeInTheDocument();
+  });
+
+  it.each([undefined, ""])("旧响应或空头像 %s 显示群名首字", async (avatar) => {
+    const result = groupResult("public");
+    if (avatar !== undefined) result.groups.items[0].avatar = avatar;
+    vi.mocked(search).mockResolvedValue(result);
+    renderSearch("/search?q=冰樱", true);
+
+    const row = await screen.findByRole("button", { name: /冰樱研究所/ });
+    expect(row.querySelector(".avatar-core")).toHaveTextContent("冰");
+    expect(row.querySelector("img")).toBeNull();
+    expect(getSignedMediaUrl).not.toHaveBeenCalled();
   });
 
   it("历史 chips 点击 → 更新 URL q 并触发搜索", async () => {

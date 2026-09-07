@@ -132,7 +132,7 @@ export function UserProfilePage() {
   };
 
   return (
-    <div className="profile-page">
+    <div className="profile-page profile-page-split">
       <div className="profile-column">
         <div className="glass-card profile-topbar">
           <button
@@ -160,6 +160,7 @@ export function UserProfilePage() {
           </div>
         ) : (
           <>
+            <div className="profile-side">
             {actionMsg && <div className="chat-notice" role="status">{actionMsg}</div>}
             {error && <div className="chat-notice" role="alert">{error}</div>}
             <div className="solid-card profile-card">
@@ -233,8 +234,10 @@ export function UserProfilePage() {
               )}
             </div>
 
+            </div>
             {/* 他的内容：对方开启「向他人展示内容」才显示；收藏永不对外展示 */}
             {user.show_content && (
+              <div className="profile-main">
               <div className="solid-card profile-mine">
                 <div className="profile-mine-head">
                   <h4 className="profile-mine-title">他的内容</h4>
@@ -305,6 +308,7 @@ export function UserProfilePage() {
                     )
                   )}
                 </section>
+              </div>
               </div>
             )}
           </>

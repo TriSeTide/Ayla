@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
 import { IconBack } from "../components/icons";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
+import { useMasonryColumns } from "../hooks/useMasonryColumns";
+import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { usePostsStore } from "../stores/posts";
 import { chatWS } from "../ws/chat";
 
@@ -66,30 +69,81 @@ function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite
   }
 }
 
+/** 与帖子流共用分列机制；只在数据就绪后挂载，让量高观察器绑定真实列。 */
+function FavoritesList({ favorites, isNarrow, filter, onOpen, onRemove }: {
+  favorites: Favorite[];
+  isNarrow: boolean;
+  filter: FavoriteTargetType | "all";
+  onOpen: (favorite: Favorite) => void;
+  onRemove: (favorite: Favorite) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useListEntryMotion(listRef, ".favorite-item");
+  const { columns, columnRefs } = useMasonryColumns(
+    favorites,
+    isNarrow ? 1 : 2,
+    (favorite) => favorite.id,
+    `favorites:${favorites[0].user_id}:${filter}`,
+  );
+
+  return (
+    <div className={`favorites-list${isNarrow ? "" : " is-masonry"}`} ref={listRef}>
+      {columns.map((column, columnIndex) => (
+        <div key={columnIndex} className="favorites-masonry-col" ref={columnRefs[columnIndex]}>
+          {column.map((favorite) => (
+            <div key={favorite.id} className="favorite-item" data-favorite-id={favorite.id}>
+              <button type="button" className="favorite-item-main" onClick={() => onOpen(favorite)}>
+                <span className="favorite-item-type">{TYPE_LABEL[favorite.target_type]}</span>
+                <span className="favorite-item-title">{targetText(favorite)}</span>
+                {favorite.target_type === "post" && (favorite.target as FavoriteTarget | null)?.body && (
+                  <span className="favorite-item-body">{(favorite.target as FavoriteTarget).body}</span>
+                )}
+              </button>
+              <button type="button" className="msg-action-btn" onClick={() => onRemove(favorite)}>取消收藏</button>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function FavoritesPage() {
+  const selectionId = useId();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const [filter, setFilter] = useState<FavoriteTargetType | "all">("all");
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [loading, setLoading] = useState(true);
+  const [settledFilter, setSettledFilter] = useState(filter);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const requestRef = useRef(0);
 
   const load = useCallback(() => {
+    const requestId = ++requestRef.current;
     setLoading(true);
     setError(null);
     const request = filter === "all" ? favoritesApi.listFavorites() : favoritesApi.listFavorites(filter);
     request
       .then((list) => {
+        if (requestId !== requestRef.current) return;
         setFavorites(list);
         if (filter === "post" || filter === "all") usePostsStore.getState().loadFavorites(list.filter((item) => item.target_type === "post"));
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "加载收藏失败"))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (requestId === requestRef.current) setError(e instanceof Error ? e.message : "加载收藏失败");
+      })
+      .finally(() => {
+        if (requestId !== requestRef.current) return;
+        setSettledFilter(filter);
+        setLoading(false);
+      });
   }, [filter]);
 
   useEffect(() => {
     load();
+    return () => { requestRef.current += 1; };
   }, [load]);
 
   // WS 热更新（任务 07）：收藏/取消收藏后收藏页实时同步。
@@ -134,15 +188,17 @@ export function FavoritesPage() {
             type="button"
             role="tab"
             aria-selected={filter === item.key}
-            className={`favorites-filter ${filter === item.key ? "is-active" : ""}`}
+            className={`favorites-filter has-auroraqua-highlight ${filter === item.key ? "is-active" : ""}`}
             onClick={() => setFilter(item.key)}
           >
-            {item.label}
+            {filter === item.key && <AuroraquaNavHighlight id={selectionId} />}
+            <span className="auroraqua-nav-label">{item.label}</span>
           </button>
         ))}
       </div>
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
-      {loading ? (
+      {/* 分类同步切换早于加载 effect；旧结果不能以新分类身份写入分列记忆。 */}
+      {(loading && favorites.length === 0) || settledFilter !== filter ? (
         <div className="favorites-skeleton">
           <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
           <div className="skeleton" style={{ height: 64 }} />
@@ -158,20 +214,13 @@ export function FavoritesPage() {
           <p className="placeholder-desc">在对应场景点收藏，内容会出现在这里</p>
         </div>
       ) : (
-        <div className="favorites-list">
-          {favorites.map((favorite) => (
-            <div key={favorite.id} className="favorite-item">
-              <button type="button" className="favorite-item-main" onClick={() => openTarget(navigate, favorite)}>
-                <span className="favorite-item-type">{TYPE_LABEL[favorite.target_type]}</span>
-                <span className="favorite-item-title">{targetText(favorite)}</span>
-                {favorite.target_type === "post" && (favorite.target as FavoriteTarget | null)?.body && (
-                  <span className="favorite-item-body">{(favorite.target as FavoriteTarget).body}</span>
-                )}
-              </button>
-              <button type="button" className="msg-action-btn" onClick={() => remove(favorite)}>取消收藏</button>
-            </div>
-          ))}
-        </div>
+        <FavoritesList
+          favorites={favorites}
+          isNarrow={isNarrow}
+          filter={filter}
+          onOpen={(favorite) => openTarget(navigate, favorite)}
+          onRemove={remove}
+        />
       )}
       </div>
     </FullScreenSwipeBack>
