@@ -42,6 +42,8 @@ export interface ApiRequestOptions {
   noRetry401?: boolean;
   /** 额外请求头 */
   headers?: Record<string, string>;
+  /** 调用方生命周期取消；取消后的请求不再重放。 */
+  signal?: AbortSignal;
 }
 
 /** 归一化后端错误：{detail} / {field: [msg]} / {field: msg} → 可读文案 */
@@ -115,6 +117,7 @@ async function doRefresh(): Promise<boolean> {
 }
 
 async function rawRequest(path: string, options: ApiRequestOptions): Promise<Response> {
+  options.signal?.throwIfAborted();
   const headers: Record<string, string> = { ...(options.headers ?? {}) };
   const { accessToken } = useAuthStore.getState();
   if (options.auth !== false && accessToken) {
@@ -131,6 +134,7 @@ async function rawRequest(path: string, options: ApiRequestOptions): Promise<Res
     method: options.method ?? "GET",
     headers,
     body,
+    signal: options.signal,
   });
 }
 
@@ -139,10 +143,12 @@ export async function apiRequest<T>(
   options: ApiRequestOptions = {},
 ): Promise<T> {
   let response = await rawRequest(path, options);
+  options.signal?.throwIfAborted();
 
   // 401 且非 refresh / 非认证端点：静默刷新后重放一次
   if (response.status === 401 && options.isRefresh !== true && options.noRetry401 !== true) {
     const ok = await doRefresh();
+    options.signal?.throwIfAborted();
     if (ok) {
       response = await rawRequest(path, options);
     } else {
@@ -162,6 +168,7 @@ export async function apiRequest<T>(
     return undefined as T;
   }
   const data = await parseBody(response);
+  options.signal?.throwIfAborted();
   return (data ?? null) as T;
 }
 

@@ -49,6 +49,23 @@ describe("normalizeErrorBody", () => {
 });
 
 describe("apiRequest", () => {
+  it("传递取消信号，已取消请求不发出，刷新期间取消不重放", async () => {
+    const stopped = new AbortController();
+    stopped.abort();
+    await expect(apiRequest("/me/", { signal: stopped.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const controller = new AbortController();
+    let refresh!: (value: Response) => void;
+    fetchMock.mockResolvedValueOnce(jsonResponse({}, 401))
+      .mockImplementationOnce(() => new Promise((resolve) => { refresh = resolve; }));
+    const pending = apiRequest("/media/uploads", { method: "POST", signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ signal: controller.signal }));
+    controller.abort();
+    refresh(jsonResponse({ access: "access-refreshed" }));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it("携带 Authorization 且解析 JSON", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ id: "1", username: "a" }));
     const data = await apiRequest<{ id: string; username: string }>("/me/");

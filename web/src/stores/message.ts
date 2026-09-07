@@ -49,7 +49,7 @@ interface MessageState {
   /** 乐观发送失败：消息保留，标记失败态（气泡左上角可重试/删除） */
   markMessageFailed: (convId: string, messageId: string) => void;
   /** 乐观发送中：更新上传进度百分比（0-100；气泡左侧显示进度与取消） */
-  setMessageUploadProgress: (convId: string, messageId: string, pct: number) => void;
+  setMessageUploadProgress: (convId: string, messageId: string, pct: number | null) => void;
   /** 删除消息（乐观失败丢弃/本地清理） */
   removeMessage: (convId: string, messageId: string) => void;
   setRecalled: (convId: string, messageId: string) => void;

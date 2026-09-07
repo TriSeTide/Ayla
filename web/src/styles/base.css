@@ -568,6 +568,49 @@ a:hover {
   font-size: 11px;
 }
 
+/* Image-sized failure states keep one centered retry label inside the media frame.
+   Avatar/cover fallback glyphs keep their existing compact presentation. */
+:is(.comment-image-btn, .post-card-img-btn, .media-frame-open, .composer-pending-image, .post-editor-image) .resource-image-failed-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 64px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.comment-image-btn .resource-image-failed-wrap {
+  aspect-ratio: 4 / 3;
+  min-height: 90px;
+}
+
+:is(.comment-image-btn, .post-card-img-btn, .media-frame-open, .composer-pending-image, .post-editor-image) .resource-image-failed-wrap > .skeleton {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  animation: none;
+}
+
+:is(.comment-image-btn, .post-card-img-btn, .media-frame-open, .composer-pending-image, .post-editor-image) .resource-image-failed-wrap > .resource-image-fallback {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-align: center;
+}
+
 .async-state-loading,
 .async-state-error,
 .async-state-empty {

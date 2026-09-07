@@ -360,6 +360,7 @@ export function sendOptimistic(
       seq: 0,
       created_at: nowIso,
       pending: true,
+      uploadProgress: 0,
       idempotencyKey,
     };
     useMessageStore.getState().addPendingMessage(convId, optimistic);
@@ -369,6 +370,8 @@ export function sendOptimistic(
     void (async () => {
       try {
         const [uploaded] = await uploadPickedWithProgress(convId, localId, opts.picked, controller.signal);
+        controller.signal.throwIfAborted();
+        useMessageStore.getState().setMessageUploadProgress(convId, localId, null);
         const serverMsg = await chatApi.sendMessage(convId, {
           type: "file",
           content: fileItem.file.name,
@@ -428,6 +431,7 @@ export function sendOptimistic(
     seq: 0,
     created_at: nowIso,
     pending: true,
+    uploadProgress: mediaPicked.length > 0 ? 0 : null,
     idempotencyKey,
   };
   useMessageStore.getState().addPendingMessage(convId, optimistic);
@@ -458,6 +462,8 @@ export function sendOptimistic(
   void (async () => {
     try {
       const uploaded = await uploadPickedWithProgress(convId, localId, mediaPicked, controller.signal);
+      controller.signal.throwIfAborted();
+      useMessageStore.getState().setMessageUploadProgress(convId, localId, null);
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [
         ...blocksToSegments(blocks),
         ...mediaPicked.map((p, i) => ({ type: p.kind, media_id: uploaded[i].media_id })),
@@ -510,6 +516,7 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
     idempotencyKey: key,
     seq: 0,
     localMedia: refreshedLocal,
+    uploadProgress: refreshedLocal?.length ? 0 : null,
   };
   store.addPendingMessage(convId, optimistic);
 
@@ -549,6 +556,8 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
     void (async () => {
       try {
         const [uploaded] = await uploadPickedWithProgress(convId, newLocalIdStr, picked, controller.signal);
+        controller.signal.throwIfAborted();
+        store.setMessageUploadProgress(convId, newLocalIdStr, null);
         const serverMsg = await chatApi.sendMessage(convId, {
           type: "file",
           content: msg.content,
@@ -577,6 +586,8 @@ export function retryOptimistic(convId: string, msg: ChatMessage): void {
   void (async () => {
     try {
       const uploaded = await uploadPickedWithProgress(convId, newLocalIdStr, mediaPicked, controller.signal);
+      controller.signal.throwIfAborted();
+      store.setMessageUploadProgress(convId, newLocalIdStr, null);
       const segs: NonNullable<import("../api/types").CreateMessagePayload["segments"]> = [];
       for (const seg of msg.segments ?? []) {
         if (seg.type === "text") segs.push({ type: "text", text: seg.text });

@@ -18,7 +18,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import type { MediaDescriptor } from "../../api/types";
-import { getSignedMediaUrl, mediaContentUrl, takeWarmVideoElement } from "../../api/media";
+import { getSignedMediaUrl, invalidateSignedMediaUrl, mediaContentUrl, takeWarmVideoElement } from "../../api/media";
 import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
 import { useTouchAxisGuard } from "../../hooks/useTouchAxisGuard";
 import { ResourceImage } from "../ResourceImage";
@@ -111,11 +111,15 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
   const [elementReady, setElementReady] = useState(false);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const hasPoster = Boolean(media.thumbnail);
   const thumbUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    thumbUrlRef.current = null;
+    setThumbUrl(null);
+    if (!hasPoster) return;
     getSignedMediaUrl(media.media_id, "thumb")
       .then((url) => {
         if (cancelled) return;
@@ -126,11 +130,21 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
     return () => {
       cancelled = true;
     };
-  }, [hasPoster, media.media_id]);
+  }, [hasPoster, media.media_id, retryKey]);
 
   useEffect(() => {
     let cancelled = false;
     let el: HTMLVideoElement | null = null;
+    setFailed(false);
+    setElementReady(false);
+    const onError = () => {
+      if (cancelled) return;
+      if (el) {
+        el.pause();
+        el.style.display = "none";
+      }
+      setFailed(true);
+    };
     const mount = async () => {
       try {
         const url = await getSignedMediaUrl(media.media_id);
@@ -144,6 +158,7 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
         el.autoplay = true;
         el.playsInline = true;
         el.preload = "auto";
+        el.addEventListener("error", onError);
         if (thumbUrlRef.current) el.poster = thumbUrlRef.current;
         hostRef.current?.appendChild(el);
         setElementReady(true);
@@ -161,6 +176,7 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
     return () => {
       cancelled = true;
       if (el) {
+        el.removeEventListener("error", onError);
         try {
           el.pause();
           el.removeAttribute("src");
@@ -172,12 +188,19 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [media.media_id]);
+  }, [media.media_id, retryKey]);
 
-  if (failed) return <span className="image-viewer-fallback">视频加载失败</span>;
   return (
     <div ref={hostRef} className="image-viewer-video-host">
-      {!elementReady &&
+      {failed ? (
+        <div className="image-viewer-fallback image-viewer-video-error" role="alert">
+          <span>视频加载失败</span>
+          <button type="button" className="media-retry" onClick={() => {
+            invalidateSignedMediaUrl(media.media_id);
+            setRetryKey((key) => key + 1);
+          }}>重试</button>
+        </div>
+      ) : !elementReady &&
         (thumbUrl ? (
           <img
             src={thumbUrl}

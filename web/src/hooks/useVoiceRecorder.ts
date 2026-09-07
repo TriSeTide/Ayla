@@ -7,7 +7,7 @@
  * - 导出 formatDuration 供 UI 显示已录制时长；
  * - 权限失败 / 不支持的浏览器如实报错，不伪造录音成功。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface VoiceRecording {
   /** 录音 Blob（audio/webm 等浏览器默认格式） */
@@ -45,112 +45,149 @@ function pickMimeType(): string {
   return "";
 }
 
+type RecorderPhase = "idle" | "starting" | "recording" | "stopping";
+interface RecorderOwner {
+  stream: MediaStream;
+  recorder: MediaRecorder;
+  chunks: Blob[];
+  mimeType: string;
+  startedAt: number;
+  timer: number | null;
+  deadline: number | null;
+  discarded: boolean;
+  stopPromise: Promise<VoiceRecording | null> | null;
+  resolveStop: ((value: VoiceRecording | null) => void) | null;
+}
+
+/** Release every owned track even if one browser track reports a stop error. */
+function releaseTracks(stream: MediaStream): void {
+  for (const track of stream.getTracks()) {
+    try { track.stop(); } catch { /* Continue releasing the remaining owned tracks. */ }
+  }
+}
+
 export function useVoiceRecorder() {
-  const [recording, setRecording] = useState(false);
+  const [phase, setPhase] = useState<RecorderPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const mimeRef = useRef<string>("");
-  const startedAtRef = useRef<number>(0);
-  const timerRef = useRef<number | null>(null);
+  const phaseRef = useRef<RecorderPhase>("idle");
+  const ownerRef = useRef<RecorderOwner | null>(null);
+  const active = useRef(true);
+  const requestRevision = useRef(0);
 
-  // 卸载时清理资源
-  useEffect(() => {
-    return () => {
-      if (timerRef.current != null) window.clearInterval(timerRef.current);
-      recorderRef.current?.state !== "inactive" && recorderRef.current?.stop();
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-    };
+  const movePhase = useCallback((next: RecorderPhase) => {
+    phaseRef.current = next;
+    if (active.current) setPhase(next);
   }, []);
 
-  /** 开始录音：请求麦克风 → 启动 MediaRecorder → 计时。 */
-  const start = async (): Promise<void> => {
-    if (recording) return;
+  const finish = useCallback((owner: RecorderOwner, result: VoiceRecording | null) => {
+    if (ownerRef.current !== owner) return;
+    ownerRef.current = null;
+    if (owner.timer != null) window.clearInterval(owner.timer);
+    if (owner.deadline != null) window.clearTimeout(owner.deadline);
+    owner.recorder.ondataavailable = null;
+    owner.recorder.onstop = null;
+    owner.recorder.onerror = null;
+    releaseTracks(owner.stream);
+    owner.chunks = [];
+    movePhase("idle");
+    if (active.current) setElapsed(0);
+    owner.resolveStop?.(result);
+    owner.resolveStop = null;
+  }, [movePhase]);
+
+  const fail = useCallback((owner: RecorderOwner, message: string) => {
+    if (ownerRef.current !== owner) return;
+    if (active.current) setError(message);
+    finish(owner, null);
+  }, [finish]);
+
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      requestRevision.current += 1;
+      const owner = ownerRef.current;
+      if (owner) {
+        // Detach callbacks before stopping: unmount may never produce a usable
+        // recording, and an eventual event must not settle another owner's work.
+        finish(owner, null);
+        try { if (owner.recorder.state !== "inactive") owner.recorder.stop(); } catch { /* Owned tracks were already stopped. */ }
+      } else movePhase("idle");
+    };
+  }, [finish, movePhase]);
+
+  /** Permission, constructor and start failures are visible state, never an unhandled rejection. */
+  const start = useCallback(async (): Promise<void> => {
+    if (!active.current || phaseRef.current !== "idle") return;
+    if (!isVoiceRecordingSupported()) { setError("当前浏览器不支持录音"); return; }
+    const request = ++requestRevision.current;
+    movePhase("starting");
     setError(null);
     setElapsed(0);
+    let acquired: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const mime = pickMimeType();
-      const recorder = mime
-        ? new MediaRecorder(stream, { mimeType: mime })
-        : new MediaRecorder(stream);
-      mimeRef.current = recorder.mimeType || mime || "audio/webm";
-      chunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorderRef.current = recorder;
-      startedAtRef.current = Date.now();
-      recorder.start();
-      setRecording(true);
-      timerRef.current = window.setInterval(() => {
-        setElapsed((Date.now() - startedAtRef.current) / 1000);
-      }, 250);
-    } catch (err) {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      setError(
-        err instanceof DOMException && err.name === "NotAllowedError"
-          ? "麦克风权限被拒绝"
-          : "无法访问麦克风",
-      );
-      throw err;
-    }
-  };
-
-  /** 停止录音：resolve 录音结果；未在录音时 resolve null。 */
-  const stop = (): Promise<VoiceRecording | null> => {
-    return new Promise((resolve) => {
-      const recorder = recorderRef.current;
-      if (!recorder || recorder.state === "inactive") {
-        resolve(null);
+      acquired = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!active.current || request !== requestRevision.current) {
+        releaseTracks(acquired);
         return;
       }
-      const duration = (Date.now() - startedAtRef.current) / 1000;
-      recorder.onstop = () => {
-        if (timerRef.current != null) {
-          window.clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-        setRecording(false);
-        setElapsed(0);
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-        recorderRef.current = null;
-        const blob = new Blob(chunksRef.current, { type: mimeRef.current });
-        chunksRef.current = [];
-        resolve({
-          blob,
-          duration: Math.max(0.1, duration),
-          mimeType: mimeRef.current,
-        });
+      const mime = pickMimeType();
+      const recorder = mime ? new MediaRecorder(acquired, { mimeType: mime }) : new MediaRecorder(acquired);
+      const owner: RecorderOwner = { stream: acquired, recorder, chunks: [], mimeType: recorder.mimeType || mime || "audio/webm",
+        startedAt: Date.now(), timer: null, deadline: null, discarded: false, stopPromise: null, resolveStop: null };
+      ownerRef.current = owner;
+      recorder.ondataavailable = (event) => {
+        if (ownerRef.current === owner && event.data?.size > 0) owner.chunks.push(event.data);
       };
-      // 静音片段防抖：时长过短仍保留（由调用方决定是否发送）
-      recorder.stop();
-    });
-  };
+      recorder.onerror = () => fail(owner, "录音失败，请重试");
+      recorder.onstop = () => {
+        if (ownerRef.current !== owner) return;
+        if (phaseRef.current !== "stopping") { fail(owner, "录音意外停止，请重试"); return; }
+        const result = owner.discarded ? null : { blob: new Blob(owner.chunks, { type: owner.mimeType }),
+          duration: Math.max(0.1, (Date.now() - owner.startedAt) / 1000), mimeType: owner.mimeType };
+        finish(owner, result);
+      };
+      recorder.start();
+      if (ownerRef.current !== owner) return;
+      movePhase("recording");
+      owner.timer = window.setInterval(() => {
+        if (ownerRef.current === owner && active.current) setElapsed((Date.now() - owner.startedAt) / 1000);
+      }, 250);
+    } catch (cause) {
+      if (!active.current || request !== requestRevision.current) { if (acquired) releaseTracks(acquired); return; }
+      const owner = ownerRef.current;
+      if (owner) finish(owner, null);
+      else { if (acquired) releaseTracks(acquired); movePhase("idle"); }
+      setError(cause instanceof DOMException && cause.name === "NotAllowedError" ? "麦克风权限被拒绝" : "无法启动录音，请重试");
+    }
+  }, [fail, finish, movePhase]);
 
-  /** 放弃本次录音（不发送）：停止并清理。 */
-  const cancel = (): void => {
-    const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
-    recorder.onstop = () => {
-      if (timerRef.current != null) {
-        window.clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      setRecording(false);
-      setElapsed(0);
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      recorderRef.current = null;
-      chunksRef.current = [];
-    };
-    recorder.stop();
-  };
+  /** A stop operation has one promise and a finite deadline; every outcome releases tracks. */
+  const stop = useCallback((): Promise<VoiceRecording | null> => {
+    if (phaseRef.current === "starting") {
+      requestRevision.current += 1;
+      movePhase("idle");
+      return Promise.resolve(null);
+    }
+    const owner = ownerRef.current;
+    if (!owner) return Promise.resolve(null);
+    if (owner.stopPromise) return owner.stopPromise;
+    movePhase("stopping");
+    const promise = new Promise<VoiceRecording | null>((resolve) => { owner.resolveStop = resolve; });
+    owner.stopPromise = promise;
+    owner.deadline = window.setTimeout(() => fail(owner, "停止录音超时，请重试"), 5000);
+    try { owner.recorder.stop(); }
+    catch { fail(owner, "停止录音失败，请重试"); }
+    return promise;
+  }, [fail, movePhase]);
 
-  return { recording, error, elapsed, start, stop, cancel, clearError: () => setError(null) };
+  const cancel = useCallback(() => {
+    const owner = ownerRef.current;
+    if (owner) owner.discarded = true;
+    void stop();
+  }, [stop]);
+
+  return { recording: phase === "recording" || phase === "stopping", starting: phase === "starting", stopping: phase === "stopping",
+    error, elapsed, start, stop, cancel, clearError: () => setError(null) };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { API_PREFIX } from "../api/client";
 import { getSignedMediaUrl, invalidateSignedMediaUrl } from "../api/media";
@@ -46,9 +46,44 @@ export function ResourceImage({
   variant?: "thumb";
 }) {
   const mediaId = extractMediaId(src);
+  // Empty alt marks decorative images (avatars/row covers). Their containing
+  // control keeps its primary action even when the decoration cannot load.
+  const decorative = alt === "";
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(mediaId ? null : src);
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [enclosingControl, setEnclosingControl] = useState<HTMLElement | null>(null);
+  const bindHost = useCallback((node: HTMLElement | null) => {
+    if (node) setEnclosingControl(node.parentElement?.closest<HTMLElement>("button,a[href],[role=button]") ?? null);
+  }, []);
+  const retryImage = useCallback(() => {
+    if (mediaId) invalidateSignedMediaUrl(mediaId);
+    setFailed(false);
+    setRetry((value) => value + 1);
+  }, [mediaId]);
+
+  // Image cards already own a native button or link. While their image has
+  // failed, that same control retries it; nesting another interactive element
+  // would produce invalid markup and could also open the viewer on retry.
+  useLayoutEffect(() => {
+    if (!failed || !enclosingControl || decorative) return;
+    const previousLabel = enclosingControl.getAttribute("aria-label");
+    const retryLabel = `${alt}：图片加载失败，重试`;
+    const onRetry = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      retryImage();
+    };
+    enclosingControl.setAttribute("aria-label", retryLabel);
+    enclosingControl.addEventListener("click", onRetry, true);
+    return () => {
+      enclosingControl.removeEventListener("click", onRetry, true);
+      if (enclosingControl.getAttribute("aria-label") === retryLabel) {
+        if (previousLabel == null) enclosingControl.removeAttribute("aria-label");
+        else enclosingControl.setAttribute("aria-label", previousLabel);
+      }
+    };
+  }, [failed, enclosingControl, alt, decorative, retryImage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,20 +109,21 @@ export function ResourceImage({
     return () => {
       cancelled = true;
     };
-  }, [src, mediaId, retry]);
+  }, [src, mediaId, variant, retry]);
 
   if (failed) {
+    if (decorative) return <span ref={bindHost} aria-hidden="true">{fallback}</span>;
     return (
-      <span className="resource-image-failed-wrap">
-        {fallback ?? (
+      <span className="resource-image-failed-wrap" ref={bindHost}>
+        {fallback}
+        {enclosingControl ? (
+          <span className="resource-image-fallback" role="status">图片加载失败，点击重试</span>
+        ) : (
           <button
             type="button"
             className="resource-image-fallback"
-            onClick={() => {
-              if (mediaId) invalidateSignedMediaUrl(mediaId);
-              setFailed(false);
-              setRetry((value) => value + 1);
-            }}
+            aria-label={`${alt}：图片加载失败，重试`}
+            onClick={(event) => { event.stopPropagation(); retryImage(); }}
           >
             图片加载失败，点击重试
           </button>
@@ -96,10 +132,11 @@ export function ResourceImage({
     );
   }
 
-  if (!resolvedSrc) return <span className="resource-image-loading">{fallback}</span>;
+  if (!resolvedSrc) return <span className="resource-image-loading" ref={bindHost}>{fallback}</span>;
 
   return (
     <img
+      ref={bindHost}
       key={`${resolvedSrc}:${retry}`}
       src={resolvedSrc}
       alt={alt}

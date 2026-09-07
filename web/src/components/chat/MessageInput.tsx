@@ -35,6 +35,9 @@ interface FailedVoice {
   blob: Blob;
   mimeType: string;
   duration: number;
+  idempotencyKey: string;
+  mediaId?: string;
+  replyTo: number | null;
 }
 
 function newPickId() {
@@ -54,6 +57,9 @@ export interface MessageInputProps {
   onQuoteClear: () => void;
   /** 群成员（仅群聊启用 @）；私聊不传 */
   members?: ConversationMember[];
+  /** Explicit group identity/role; a member page is never the group permission source. */
+  groupId?: string;
+  groupRole?: ConversationMember["role"];
   /** 群聊子群归属（可选；群聊不传时消息归默认组） */
   subgroupId?: string | null;
   /** 子群禁言：禁用输入与发送（普通成员视角） */
@@ -63,7 +69,7 @@ export interface MessageInputProps {
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
-  function MessageInput({ convId, quote, onQuoteClear, members, subgroupId, disabled = false, disabledHint }, ref) {
+  function MessageInput({ convId, quote, onQuoteClear, members, groupId, groupRole, subgroupId, disabled = false, disabledHint }, ref) {
     const setDraft = useChatDraftsStore((state) => state.setDraft);
     const clearDraft = useChatDraftsStore((state) => state.clearDraft);
     const [blocks, setBlocks] = useState<DraftBlock[]>([]);
@@ -80,15 +86,35 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const voice = useVoiceRecorder();
     const isNarrow = useMediaQuery(NARROW_QUERY);
     // 群聊才有 members：@ 与群表情包按钮均仅群聊展示（私信不显示表情包按钮）
-    const isGroup = !!members && members.length > 0;
+    const isGroup = !!groupId || (!!members && members.length > 0);
     // 群聊已删除「对方正在输入」功能：不声明 typing（私聊保留）
     const { onInput } = useTyping(isGroup ? null : convId);
     const enableMention = isGroup;
     // 当前用户在群中的角色（表情面板加号兜底显示用）
     const currentUser = useAuthStore((s) => s.currentUser);
+    const authenticated = useAuthStore((s) => !!s.accessToken);
+    const voiceScopeKey = `${currentUser?.id ?? "anonymous"}:${authenticated}:${convId}:${subgroupId ?? ""}:${disabled}`;
+    const voiceScope = useRef({ key: voiceScopeKey, active: true, sending: false, stopping: false, controller: null as AbortController | null });
+    if (voiceScope.current.key !== voiceScopeKey) {
+      voiceScope.current.active = false;
+      voiceScope.current = { key: voiceScopeKey, active: true, sending: false, stopping: false, controller: null };
+    }
+    const quoteRef = useRef(quote);
+    quoteRef.current = quote;
+    useEffect(() => {
+      const scope = voiceScope.current;
+      scope.active = true;
+      setVoiceUploading(false);
+      setFailedVoice(null);
+      return () => {
+        scope.active = false;
+        scope.controller?.abort();
+        voice.cancel();
+      };
+    }, [voiceScopeKey, voice.cancel]);
     const myRole = useMemo(
-      () => members?.find((m) => m.user.id === currentUser?.id)?.role,
-      [members, currentUser?.id],
+      () => groupRole ?? members?.find((m) => m.user.id === currentUser?.id)?.role,
+      [members, groupRole, currentUser?.id],
     );
 
     // user_id → 显示名（草稿恢复 + @Token 用）
@@ -234,32 +260,51 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     };
 
     /** 语音（旧路径：录音完成 → 上传 → 发送；composer 显示上传中） */
-    const sendVoice = async (rec: VoiceRecording) => {
-      if (voiceUploading || !convId) return;
+    const sendVoice = async (rec: VoiceRecording, previous?: FailedVoice) => {
+      const scope = voiceScope.current;
+      if (!scope.active || scope.sending || !convId || disabled) return;
+      scope.sending = true;
+      scope.controller = new AbortController();
+      const attempt: FailedVoice = previous ?? { ...rec, idempotencyKey: newPickId(), replyTo: quote ? Number(quote.id) : null };
+      const isCurrent = () => scope.active && scope === voiceScope.current;
       setVoiceUploading(true);
       setError(null);
       setFailedVoice(null);
       try {
-        const file = new File([rec.blob], "voice.webm", { type: rec.mimeType || "audio/webm" });
-        const uploaded = await uploadMediaFile(file, "voice");
+        if (!attempt.mediaId) {
+          const file = new File([rec.blob], "voice.webm", { type: rec.mimeType || "audio/webm" });
+          const uploaded = await uploadMediaFile(file, "voice", { signal: scope.controller.signal });
+          attempt.mediaId = uploaded.media_id;
+        }
+        if (!isCurrent()) return;
         await sendMessage(convId, "", {
           type: "voice",
-          replyTo: quote ? Number(quote.id) : null,
-          idempotencyKey: newPickId(),
-          mediaId: uploaded.media_id,
+          replyTo: attempt.replyTo,
+          idempotencyKey: attempt.idempotencyKey,
+          mediaId: attempt.mediaId,
         }, subgroupId);
+        if (isCurrent() && attempt.replyTo != null && String(quoteRef.current?.id) === String(attempt.replyTo)) onQuoteClear();
       } catch (err) {
-        setFailedVoice({ blob: rec.blob, mimeType: rec.mimeType, duration: rec.duration });
-        setError(err instanceof Error ? err.message : "语音发送失败");
+        if (isCurrent()) {
+          setFailedVoice(attempt);
+          setError(err instanceof Error ? err.message : "语音发送失败");
+        }
       } finally {
-        setVoiceUploading(false);
+        scope.sending = false;
+        scope.controller = null;
+        if (isCurrent()) setVoiceUploading(false);
       }
     };
 
     // 录音停止 → 直接上传发送；过短（<0.8s）视为无效丢弃
     const stopAndSend = async () => {
-      const rec = await voice.stop();
-      if (rec && rec.duration >= 0.8) await sendVoice(rec);
+      const scope = voiceScope.current;
+      if (scope.stopping) return;
+      scope.stopping = true;
+      try {
+        const rec = await voice.stop();
+        if (scope.active && scope === voiceScope.current && rec && rec.duration >= 0.8) await sendVoice(rec);
+      } finally { scope.stopping = false; }
     };
 
     const retryVoice = async () => {
@@ -267,7 +312,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       if (!fv) return;
       setFailedVoice(null);
       setError(null);
-      await sendVoice({ blob: fv.blob, mimeType: fv.mimeType, duration: fv.duration });
+      await sendVoice(fv, fv);
     };
 
     const quotePreview = quote ? (segmentPreview(quote.segments) ?? (quote.content || "…")) : null;
@@ -330,6 +375,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           </div>
         )}
         {voiceUploading && <div className="composer-uploading" role="status">语音上传中…</div>}
+        {voice.starting && <div className="composer-uploading" role="status">正在请求麦克风…</div>}
         {error && (
           <div className="composer-error" role="alert">
             <span>{error}</span>
@@ -345,7 +391,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           </div>
         )}
         {mentionOpen && enableMention && (
-          <MentionPicker members={members!} query={mentionQuery} onSelect={handleSelectMention} />
+          <MentionPicker members={members ?? []} groupId={groupId} query={mentionQuery} onSelect={handleSelectMention} anchorRef={editorRef} onClose={() => setMentionOpen(false)} />
         )}
         <div className="composer-row">
           {voice.recording ? (
@@ -359,7 +405,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 className="composer-tool-btn composer-voice-stop"
                 onClick={() => void stopAndSend()}
                 aria-label="停止并发送语音"
-                disabled={voiceUploading}
+                disabled={voiceUploading || voice.stopping}
               >
                 <IconSend width={18} height={18} />
               </button>
@@ -368,7 +414,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 className="composer-tool-btn composer-voice-cancel"
                 onClick={() => voice.cancel()}
                 aria-label="取消录音"
-                disabled={voiceUploading}
+                disabled={voiceUploading || voice.stopping}
               >
                 <IconClose width={16} height={16} />
               </button>
@@ -408,7 +454,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                       onClick={() => void voice.start()}
                       aria-label="发送语音"
                       title="录制语音消息"
-                      disabled={voice.recording || disabled}
+                      disabled={voice.recording || voice.starting || voiceUploading || disabled}
                     >
                       <IconMic width={18} height={18} />
                     </button>
@@ -502,7 +548,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 onClick={() => void voice.start()}
                 aria-label="发送语音"
                 title="录制语音消息"
-                disabled={voice.recording || disabled}
+                disabled={voice.recording || voice.starting || voiceUploading || disabled}
               >
                 <IconMic width={18} height={18} />
               </button>

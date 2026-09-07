@@ -19,6 +19,7 @@ import {
   formatBytes,
   formatDuration,
   getSignedMediaUrl,
+  invalidateSignedMediaUrl,
   mediaContentUrl,
   resolveMediaPath,
   warmUpVideoElement,
@@ -170,13 +171,14 @@ function VideoFrame({
 }) {
   const [videoSrc, setVideoSrc] = useState<string | null>(localUrl ?? null);
   const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hasPoster = Boolean(media?.thumbnail);
 
   // hover/tap 预热：签 URL 并创建 detached <video> 开始缓冲——点击打开查看器
   // 时直接接管已缓冲元素，起播缓冲与点击决策时间窗重叠（点开即播）
   const warmUpOriginal = () => {
-    if (media && !localUrl) warmUpVideoElement(media.media_id);
+    if (media && !localUrl && !failed) warmUpVideoElement(media.media_id);
   };
 
   // 本地预览直接可用；服务端无海报帧的降级路径才签 original 拉首帧
@@ -187,6 +189,7 @@ function VideoFrame({
       return;
     }
     setVideoSrc(null);
+    setFailed(false);
     if (!media) {
       setFailed(true);
       return;
@@ -204,7 +207,14 @@ function VideoFrame({
     return () => {
       cancelled = true;
     };
-  }, [media, localUrl]);
+  }, [media?.media_id, hasPoster, localUrl, retryKey]);
+
+  const retry = () => {
+    if (media) invalidateSignedMediaUrl(media.media_id);
+    setFailed(false);
+    setVideoSrc(localUrl ?? null);
+    setRetryKey((key) => key + 1);
+  };
 
   // 部分浏览器 preload=metadata 不渲染首帧：微 seek 触发首帧解码
   const onLoadedData = () => {
@@ -226,7 +236,12 @@ function VideoFrame({
 
   return (
     <div className="media-frame media-frame-video" style={style} onPointerEnter={warmUpOriginal}>
-      {localUrl ? (
+      {failed ? (
+        <div className="video-load-failed" role="alert">
+          <span>视频加载失败</span>
+          <button type="button" className="media-retry" onClick={retry}>重试</button>
+        </div>
+      ) : localUrl ? (
         <button
           type="button"
           className="media-frame-open"
@@ -235,12 +250,14 @@ function VideoFrame({
           title="点击放大预览"
         >
           <video
+            key={retryKey}
             src={localUrl}
             className="media-video"
             preload="metadata"
             muted
             playsInline
             tabIndex={-1}
+            onError={() => setFailed(true)}
           />
           {playBadge}
         </button>
@@ -281,11 +298,10 @@ function VideoFrame({
             playsInline
             tabIndex={-1}
             onLoadedData={onLoadedData}
+            onError={() => setFailed(true)}
           />
           {playBadge}
         </button>
-      ) : failed ? (
-        <span className="video-load-failed">视频加载失败</span>
       ) : (
         <span className="skeleton media-frame-skeleton" />
       )}
@@ -448,6 +464,10 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
   const wave = resolveMediaPath(media.waveform);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const loadRevision = useRef(0);
+  const playbackRevision = useRef(0);
+  const pendingRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [audioError, setAudioError] = useState(false);
@@ -460,6 +480,7 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
    * 暂停 + 进度归零 + UI 复位。被其他语音抢占或自身结束时都会走到这里。
    */
   const stopPlayback = useCallback(() => {
+    playbackRevision.current += 1;
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
@@ -476,50 +497,75 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
 
   const ensureAudio = async (): Promise<HTMLAudioElement | null> => {
     if (audioRef.current) return audioRef.current;
+    const revision = ++loadRevision.current;
     setLoadingAudio(true);
     setAudioError(false);
     try {
       // 内部媒体须带 Bearer 鉴权读取（原生 Audio 不会携带 token → 403）
       const blob = await apiRequestBlob(mediaContentUrl(media.media_id).slice(API_PREFIX.length));
+      if (!mountedRef.current || revision !== loadRevision.current) return null;
       const url = URL.createObjectURL(blob);
       objectUrlRef.current = url;
       const audio = new Audio(url);
       audio.addEventListener("loadedmetadata", () => {
+        if (audioRef.current !== audio) return;
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           setDuration(audio.duration);
         }
       });
-      audio.addEventListener("timeupdate", () => setCurrent(audio.currentTime));
-      audio.addEventListener("ended", stopPlayback);
+      audio.addEventListener("timeupdate", () => { if (audioRef.current === audio) setCurrent(audio.currentTime); });
+      audio.addEventListener("ended", () => { if (audioRef.current === audio) stopPlayback(); });
       audio.addEventListener("error", () => {
-        setPlaying(false);
+        if (audioRef.current !== audio) return;
+        stopPlayback();
         setAudioError(true);
       });
       audioRef.current = audio;
       return audio;
     } catch {
-      setAudioError(true);
+      if (mountedRef.current && revision === loadRevision.current) setAudioError(true);
       return null;
     } finally {
-      setLoadingAudio(false);
+      if (mountedRef.current && revision === loadRevision.current) setLoadingAudio(false);
     }
   };
 
-  const toggle = async () => {
+  const toggle = async (retry = false) => {
+    if (pendingRef.current) return;
+    if (retry) {
+      stopPlayback();
+      audioRef.current = null;
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
     if (playing && audioRef.current) {
+      playbackRevision.current += 1;
       audioRef.current.pause();
       setPlaying(false);
       releaseAudioPlayback(stopPlayback);
       return;
     }
-    const audio = audioRef.current ?? (await ensureAudio());
-    if (!audio) return;
-    // 先抢占全局播放位：其他正在播放的语音会被 stopPlayback 停止并复位
-    claimAudioPlayback(stopPlayback);
-    void audio.play().then(() => setPlaying(true)).catch(() => {
-      setPlaying(false);
-      releaseAudioPlayback(stopPlayback);
-    });
+    pendingRef.current = true;
+    setAudioError(false);
+    try {
+      const audio = audioRef.current ?? (await ensureAudio());
+      if (!audio || !mountedRef.current) return;
+      // 先抢占全局播放位；失败或旧回执不能恢复已经被抢占的播放状态。
+      claimAudioPlayback(stopPlayback);
+      const revision = ++playbackRevision.current;
+      try {
+        await audio.play();
+        if (mountedRef.current && audioRef.current === audio && revision === playbackRevision.current) setPlaying(true);
+      } catch {
+        if (mountedRef.current && audioRef.current === audio && revision === playbackRevision.current) {
+          setPlaying(false);
+          setAudioError(true);
+          releaseAudioPlayback(stopPlayback);
+        }
+      }
+    } finally {
+      pendingRef.current = false;
+    }
   };
 
   /** 拖动进度条 seek */
@@ -536,8 +582,12 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
 
   // 卸载释放 object URL 并注销播放位
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      loadRevision.current += 1;
       stopPlayback();
+      audioRef.current = null;
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     };
   }, [stopPlayback]);
@@ -581,20 +631,20 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
           </span>
         )}
         <span className="voice-duration">{formatDuration(total ?? 0)}</span>
-        {audioError && (
+      </div>
+      {audioError && (
+        <div className="voice-media-error" role="alert">
+          <span>语音播放失败</span>
           <button
             type="button"
             className="media-retry"
-            onClick={() => {
-              setAudioError(false);
-              audioRef.current = null;
-              void toggle();
-            }}
+            disabled={loadingAudio}
+            onClick={() => void toggle(true)}
           >
             重试
           </button>
-        )}
-      </div>
+        </div>
+      )}
       <div className="voice-seek-row">
         <input
           type="range"
@@ -620,19 +670,23 @@ function FileMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor })
   const name = caption(msg) || "附件";
   // 原生 <a> 下载不带 Authorization：挂载即签短时 URL（同源 download 属性生效）
   const [href, setHref] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
+    setHref(null);
+    setFailed(false);
     getSignedMediaUrl(media.media_id)
       .then((url) => {
         if (!cancelled) setHref(url);
       })
       .catch(() => {
-        // 签名失败保持 null：点击时提示
+        if (!cancelled) setFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [media.media_id]);
+  }, [media.media_id, retryKey]);
 
   return (
     <div className="file-card">
@@ -644,21 +698,24 @@ function FileMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor })
           {name}
         </span>
         <span className="file-size">{formatBytes(media.size)}</span>
+        {failed && <span className="file-error" role="alert">附件加载失败</span>}
       </span>
-      <a
+      {failed ? (
+        <button type="button" className="media-retry" onClick={() => {
+          invalidateSignedMediaUrl(media.media_id);
+          setRetryKey((key) => key + 1);
+        }}>重试</button>
+      ) : href ? <a
         className="file-download"
-        href={href ?? undefined}
+        href={href}
         download={name}
         aria-label={`下载 ${name}`}
-        onClick={(e) => {
-          if (!href) {
-            e.preventDefault();
-            window.setTimeout(() => window.alert("附件准备中，请稍后再试"), 0);
-          }
-        }}
       >
         <IconDownload width={16} height={16} />
       </a>
+      : <button type="button" className="file-download" disabled aria-label="附件加载中">
+          <IconDownload width={16} height={16} />
+        </button>}
     </div>
   );
 }
@@ -772,7 +829,7 @@ export function MediaContent({ msg }: { msg: ChatMessage }) {
     case "video":
       return <VideoMedia msg={msg} media={media} />;
     case "voice":
-      return <VoiceMedia media={media} />;
+      return <VoiceMedia key={media.media_id} media={media} />;
     case "file":
       return <FileMedia msg={msg} media={media} />;
   }

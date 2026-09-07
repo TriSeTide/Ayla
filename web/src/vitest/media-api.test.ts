@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IMAGE_TYPES, FILE_MAX_BYTES, uploadMediaFile, validateImageFile, validateMediaFile } from "../api/media";
 import * as client from "../api/client";
 
@@ -46,6 +46,7 @@ async function waitXhr(): Promise<FakeXHR> {
 }
 
 describe("uploadMediaFile", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
   beforeEach(() => {
     vi.restoreAllMocks();
     FakeXHR.instances = [];
@@ -111,6 +112,64 @@ describe("uploadMediaFile", () => {
       }
     });
     expect(xhr.body).toBe(file);
+  });
+
+  it("已取消的上传不创建会话；建会话期间取消后的迟到成功不发 PUT", async () => {
+    const request = vi.spyOn(client, "apiRequest");
+    const stopped = new AbortController();
+    stopped.abort();
+    const file = new File(["hello"], "a.png", { type: "image/png" });
+    await expect(uploadMediaFile(file, "image", { signal: stopped.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).not.toHaveBeenCalled();
+    let complete!: (value: unknown) => void;
+    request.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    request.mockResolvedValueOnce(undefined);
+    const controller = new AbortController();
+    const pending = uploadMediaFile(file, "image", { signal: controller.signal });
+    expect(request).toHaveBeenCalledWith("/media/uploads", expect.objectContaining({ signal: controller.signal }));
+    controller.abort();
+    complete({ upload_id: "late", max_bytes: null, presigned_url: "https://example.test/object" });
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(FakeXHR.instances).toHaveLength(0);
+    expect(request).toHaveBeenLastCalledWith("/media/uploads/late", { method: "DELETE" });
+  });
+
+  it("complete 携带同一 signal，取消后的迟到完成不能返回可发送媒体", async () => {
+    let finish!: (value: unknown) => void;
+    const request = vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ upload_id: "complete-owned", max_bytes: null, presigned_url: "https://example.test/object" })
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
+      .mockResolvedValueOnce(undefined);
+    const controller = new AbortController();
+    const pending = uploadMediaFile(new File(["image"], "a.png", { type: "image/png" }), "image", { signal: controller.signal });
+    const xhr = await waitXhr();
+    xhr.succeed();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith("/media/uploads/complete-owned:complete", { method: "POST", signal: controller.signal }));
+    controller.abort();
+    finish({ media_id: "too-late", descriptor: { media_id: "too-late" } });
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).toHaveBeenLastCalledWith("/media/uploads/complete-owned", { method: "DELETE" });
+  });
+
+  it("视频首帧等待期间取消会立即结束，释放本地 URL 且不上传海报", async () => {
+    const createUrl = vi.fn().mockReturnValue("blob:owned-video");
+    const revokeUrl = vi.fn();
+    vi.stubGlobal("URL", class extends URL { static createObjectURL = createUrl; static revokeObjectURL = revokeUrl; });
+    const fetchPoster = vi.fn();
+    vi.stubGlobal("fetch", fetchPoster);
+    vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ upload_id: "video-owned", max_bytes: null, presigned_url: "https://example.test/video" })
+      .mockResolvedValueOnce({ media_id: "video-media", descriptor: {} })
+      .mockResolvedValueOnce(undefined);
+    const controller = new AbortController();
+    const pending = uploadMediaFile(new File(["video"], "a.webm", { type: "video/webm" }), "video", { signal: controller.signal });
+    const xhr = await waitXhr();
+    xhr.succeed();
+    await vi.waitFor(() => expect(createUrl).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(revokeUrl).toHaveBeenCalledWith("blob:owned-video");
+    expect(fetchPoster).not.toHaveBeenCalled();
   });
 
   it("max_bytes=null（不设上限）时直接继续上传二进制", async () => {

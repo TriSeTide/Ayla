@@ -80,6 +80,28 @@ describe("useChat 乐观发送（M7 store 级）", () => {
     expect(order).toEqual([1, "pending", "pending"]);
   });
 
+  it("媒体从建会话前就可取消，取消后上传迟到成功也不发送或复活消息", async () => {
+    let finish!: (value: Awaited<ReturnType<typeof mediaApi.uploadMediaFile>>) => void;
+    vi.mocked(mediaApi.uploadMediaFile).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    sendOptimistic("c1", { blocks: blocksOf("取消这张图片"), picked: picked(1) });
+    const pending = useMessageStore.getState().buckets.c1.messages[0];
+    expect(pending.uploadProgress).toBe(0);
+    const signal = vi.mocked(mediaApi.uploadMediaFile).mock.calls.at(-1)![2]!.signal!;
+    cancelOptimistic("c1", pending);
+    expect(signal.aborted).toBe(true);
+    finish({ media_id: "late", descriptor: {} as never, upload_id: "late-upload" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(send).not.toHaveBeenCalled();
+    expect(useMessageStore.getState().buckets.c1.messages).toHaveLength(0);
+  });
+
+  it("上传完成等待发送回执时退出上传取消态", async () => {
+    send.mockImplementationOnce(() => new Promise(() => {}));
+    sendOptimistic("c1", { blocks: blocksOf("发送中"), picked: picked(1) });
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(useMessageStore.getState().buckets.c1.messages[0]).toMatchObject({ pending: true, uploadProgress: null });
+  });
+
   it("上传+发送成功后原地替换为服务端消息（pending 消失、seq 生效）", async () => {
     send.mockResolvedValue(serverMessage());
     sendOptimistic("c1", { blocks: blocksOf("看看"), picked: picked(1) });

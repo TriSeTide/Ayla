@@ -290,6 +290,7 @@ export interface UploadMediaOptions {
  */
 function putBinary(presignedUrl: string, uploadId: string, file: File, mime: string, opts: UploadMediaOptions): Promise<void> {
   return new Promise((resolve, reject) => {
+    opts.signal?.throwIfAborted();
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", toSameOriginMinio(presignedUrl));
     xhr.setRequestHeader("Content-Type", mime);
@@ -332,6 +333,7 @@ export async function uploadMediaFile(
   kind: MediaKind,
   opts: UploadMediaOptions = {},
 ): Promise<UploadCompleteResult> {
+  opts.signal?.throwIfAborted();
   // MIME 规范化：MediaRecorder 输出可能带 codec 参数（如 audio/webm;codecs=opus），
   // 后端 allowlist 只匹配基础类型，上传取分号前主类型（audio/webm）。
   const mime = (file.type || "application/octet-stream").split(";")[0].trim();
@@ -340,6 +342,7 @@ export async function uploadMediaFile(
     session = await apiRequest<UploadSession>("/media/uploads", {
       method: "POST",
       body: { kind, expected_size: file.size, mime_type: mime },
+      signal: opts.signal,
     });
   } catch (e) {
     if (e instanceof ApiError && e.status === 413) {
@@ -347,6 +350,14 @@ export async function uploadMediaFile(
     }
     throw e;
   }
+  // A transport can finish while its caller is cancelling. Do not start the
+  // next phase with an already-aborted signal; clean only this owned session.
+  const ensureActive = () => {
+    if (!opts.signal?.aborted) return;
+    void apiRequest(`/media/uploads/${seg(session.upload_id)}`, { method: "DELETE" }).catch(() => {});
+    opts.signal.throwIfAborted();
+  };
+  ensureActive();
   // max_bytes=null 表示该类别不设上限；有上限时提前拦截并展示具体数值
   if (session.max_bytes != null && file.size > session.max_bytes) {
     throw new Error(`文件超过大小上限（${formatBytes(session.max_bytes)}）`);
@@ -355,55 +366,62 @@ export async function uploadMediaFile(
     throw new Error("后端未返回直传地址");
   }
   await putBinary(session.presigned_url, session.upload_id, file, mime, opts);
-  const result = await apiRequest<UploadCompleteResult>(`/media/uploads/${seg(session.upload_id)}:complete`, {
-    method: "POST",
-  });
+  ensureActive();
+  let result: UploadCompleteResult;
+  try {
+    result = await apiRequest<UploadCompleteResult>(`/media/uploads/${seg(session.upload_id)}:complete`, {
+      method: "POST", signal: opts.signal,
+    });
+  } catch (error) { ensureActive(); throw error; }
+  ensureActive();
   // 视频自动捕获首帧海报回传（QQ 同款封面图）：卡片/列表直接显示画面，
   // 不依赖 <video> 元素加载解码（moov 尾置视频首帧黑块问题的根治）。
   // 失败不阻塞上传结果（海报缺失仅影响封面展示）。
   if (kind === "video") {
     try {
-      const poster = await captureVideoPoster(file);
-      await uploadPoster(result.media_id, poster);
+      const poster = await captureVideoPoster(file, opts.signal);
+      ensureActive();
+      await uploadPoster(result.media_id, poster, opts.signal);
       result.descriptor = { ...result.descriptor, thumbnail: `/api/v1/media/${result.media_id}/thumbnail` };
     } catch {
       // 海报失败静默：封面缺失不影响视频本体
     }
   }
+  ensureActive();
   // 附带 upload_id：调用方移除媒体时可调 DELETE 清理对象存储（孤儿回收）
   return { ...result, upload_id: session.upload_id };
 }
 
 /** 从视频文件捕获 0.1s 处首帧，输出 JPEG Blob（宽边压到 640px）。 */
-async function captureVideoPoster(file: File): Promise<Blob> {
+async function captureVideoPoster(file: File, signal?: AbortSignal): Promise<Blob> {
+  signal?.throwIfAborted();
   const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
   try {
-    const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
     video.src = url;
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error("poster timeout")), 15000);
-      video.onloadeddata = () => {
+    const waitForVideo = (event: "loadeddata" | "seeked", begin?: () => void) => new Promise<void>((resolve, reject) => {
+      signal?.throwIfAborted();
+      const clean = () => {
         window.clearTimeout(timer);
-        resolve();
+        video.removeEventListener(event, ready);
+        video.removeEventListener("error", failed);
+        signal?.removeEventListener("abort", aborted);
       };
-      video.onerror = () => {
-        window.clearTimeout(timer);
-        reject(new Error("video load error"));
-      };
+      const ready = () => { clean(); resolve(); };
+      const failed = () => { clean(); reject(new Error("video load error")); };
+      const aborted = () => { clean(); reject(signal?.reason ?? new DOMException("上传已取消", "AbortError")); };
+      const timer = window.setTimeout(() => { clean(); reject(new Error("poster timeout")); }, 15000);
+      video.addEventListener(event, ready, { once: true });
+      video.addEventListener("error", failed, { once: true });
+      signal?.addEventListener("abort", aborted, { once: true });
+      if (begin) { try { begin(); } catch { ready(); } }
     });
+    await waitForVideo("loadeddata");
     // seek 到 0.1s 确保解码出真实首帧
-    await new Promise<void>((resolve) => {
-      const done = () => resolve();
-      video.onseeked = done;
-      try {
-        video.currentTime = 0.1;
-      } catch {
-        done();
-      }
-    });
+    await waitForVideo("seeked", () => { video.currentTime = 0.1; });
     const scale = Math.min(1, 640 / Math.max(video.videoWidth || 640, 1));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round((video.videoWidth || 640) * scale));
@@ -415,12 +433,14 @@ async function captureVideoPoster(file: File): Promise<Blob> {
     if (!blob) throw new Error("canvas toBlob failed");
     return blob;
   } finally {
+    video.removeAttribute("src");
     URL.revokeObjectURL(url);
   }
 }
 
 /** 上传视频海报帧到 :poster 端点（JPEG ≤2MB，仅上传者本人）。 */
-async function uploadPoster(mediaId: string, blob: Blob): Promise<void> {
+async function uploadPoster(mediaId: string, blob: Blob, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const { accessToken } = useAuthStore.getState();
   const r = await fetch(`${API_PREFIX}/media/${seg(mediaId)}:poster`, {
     method: "POST",
@@ -429,6 +449,7 @@ async function uploadPoster(mediaId: string, blob: Blob): Promise<void> {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: blob,
+    signal,
   });
   if (!r.ok) throw new Error(`poster upload failed (${r.status})`);
 }
