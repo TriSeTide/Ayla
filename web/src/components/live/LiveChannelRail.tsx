@@ -11,9 +11,15 @@
  * - 每项右侧删除按钮（onDeleteChannel）；
  * - 底部加号键新建直播间（onCreateNewChannel）。
  */
+import { useId } from "react";
+import { motion } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
+import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
 import { IconBack, IconChevronLeft, IconClose, IconPlus, IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
+import { DirectoryLoadMore, type DirectoryLoadMoreProps } from "../DirectoryLoadMore";
+import { panelVariants } from "../motion/auroraquaMotion";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 
 export function LiveChannelRail({
   channels,
@@ -26,6 +32,8 @@ export function LiveChannelRail({
   onDeleteChannel,
   onCreateNewChannel,
   deletingChannelId = null,
+  directory,
+  enterFromRight = false,
 }: {
   channels: LiveChannelDescriptor[];
   currentId: number;
@@ -43,14 +51,20 @@ export function LiveChannelRail({
   onCreateNewChannel?: () => void;
   /** 正在删除的频道 id（该项禁用） */
   deletingChannelId?: number | null;
+  directory?: DirectoryLoadMoreProps & { onScroll: (element: HTMLElement) => void };
+  enterFromRight?: boolean;
 }) {
+  const selectionId = useId();
+  const reduced = usePrefersReducedMotion();
   // 收起态：返回/展开键移到顶栏（由 LiveRoomBody wideHead 渲染），侧栏不占布局、不渲染浮动按钮
   if (collapsed) {
     return null;
   }
 
   return (
-    <nav className="live-rail" aria-label="直播间列表">
+    <motion.nav className={`live-rail${enterFromRight ? " is-panel-motion" : ""}`} aria-label="直播间列表"
+      inherit={false} initial={enterFromRight && !reduced ? "enter" : false} animate="center"
+      variants={enterFromRight ? panelVariants(reduced, "right") : undefined}>
       <div className="live-rail-actions">
         {showBack && (
           <button
@@ -74,7 +88,7 @@ export function LiveChannelRail({
           <IconChevronLeft width={18} height={18} />
         </button>
       </div>
-      <ul className="live-rail-list">
+      <ul className="live-rail-list" onScroll={(event) => directory?.onScroll(event.currentTarget)}>
         {channels.map((ch) => {
           const active = ch.id === currentId;
           const deleting = ch.id === deletingChannelId;
@@ -82,11 +96,12 @@ export function LiveChannelRail({
             <li key={ch.id} className="live-rail-item-wrap">
               <button
                 type="button"
-                className={`live-rail-item ${active ? "is-active" : ""}`}
+                className={`live-rail-item has-auroraqua-highlight ${active ? "is-active" : ""}`}
                 onClick={() => onSelect(ch.id)}
                 aria-current={active ? "true" : undefined}
                 aria-label={`切换到直播间 ${ch.title}`}
               >
+                {active && <AuroraquaNavHighlight id={selectionId} />}
                 <div className="live-rail-cover">
                   {ch.cover ? (
                     <ResourceImage src={ch.cover} alt="" className="live-rail-cover-image" fallback={<IconVideo width={18} height={18} aria-hidden="true" />} />
@@ -114,6 +129,7 @@ export function LiveChannelRail({
             </li>
           );
         })}
+        {directory && <li><DirectoryLoadMore {...directory} /></li>}
       </ul>
       {onCreateNewChannel && (
         <div className="live-rail-create">
@@ -123,6 +139,6 @@ export function LiveChannelRail({
           </button>
         </div>
       )}
-    </nav>
+    </motion.nav>
   );
 }

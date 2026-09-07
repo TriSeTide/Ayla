@@ -5,6 +5,29 @@
  * 复用 M5-4 的 .live-room/.live-room-main/.live-room-side 基础布局。
  */
 
+/* 宽屏直播分区进入：各面板拥有自己的位移，播放器与其宿主保持原位。
+   CSS负责常驻左栏首次挂载；标题和媒体分区有JS owner时由auroraqua.css关闭对应CSS入场。 */
+.live-room-body.is-wide > .live-rail {
+  animation: auroraqua-sidebar-in var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+.live-room-body.is-wide > .live-room-side {
+  animation: auroraqua-panel-from-right var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+.live-room-body.is-wide > .live-room-main > .live-room-head {
+  animation: auroraqua-panel-from-top var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-room-body.is-wide > .live-rail,
+  .live-room-body.is-wide > .live-room-side,
+  .live-room-body.is-wide > .live-room-main > .live-room-head {
+    animation: none;
+    translate: none;
+  }
+}
+
 /* ================= 开播选择与控制台 ================= */
 .live-create-form { flex-direction: column; align-items: stretch; }
 .live-create-input { width: 100%; box-sizing: border-box; }
@@ -69,6 +92,9 @@
   color: var(--text-primary);
   text-align: left;
   transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
 }
 
 .live-start-channel:hover,
@@ -113,7 +139,10 @@
 .live-start-new { align-self: stretch; }
 .live-start-back { align-self: flex-start; color: var(--text-primary); font-size: 13px; }
 .live-start-error { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--destructive); font-size: 13px; }
-.live-studio-owner-panel { margin-top: 0; }
+.live-studio-owner-panel {
+  margin-top: 0;
+  container: live-owner / inline-size;
+}
 
 /* 开播控制台空态：暂无直播间 + 创建入口（删空后留在开播界面） */
 .live-studio-empty {
@@ -155,7 +184,7 @@
   min-width: 0;
   padding: var(--sp-3);
   border-top: 1px solid var(--glass-border);
-  background: rgba(255, 250, 251, 0.35);
+  background: transparent;
   border-radius: var(--radius-input);
 }
 @media (max-width: 768px) {
@@ -178,7 +207,26 @@
 }
 
 /* 推流地址区：放在直播视频下方（开播控制台） */
-.live-studio-stream { display: flex; flex-direction: column; gap: var(--sp-2); width: min(100%, 960px); padding: var(--sp-3); background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: var(--radius-card); }
+.live-studio-stream {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: min(100%, 960px);
+  padding: var(--sp-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+
+.live-studio-stream .live-copy-value {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  box-shadow: var(--glass-inset);
+}
 
 /* 侧栏：每项删除按钮 + 底部新建 */
 .live-rail-item-wrap { position: relative; }
@@ -191,7 +239,7 @@
 .live-rail-create-btn:hover { background: var(--glass-bg); }
 
 @media (max-width: 768px) {
-  /* 开播控制台窄屏：整页纵向滚动，弹幕以卡片形式放在内容流底部（非覆盖层） */
+  /* 开播控制台窄屏：整页纵向滚动，弹幕留在内容流底部，最终材料规则保持透明。 */
   .live-room-body.is-studio.is-narrow { overflow-y: auto; }
   .live-room-body.is-studio.is-narrow .live-room-main { flex: none; min-height: 0; overflow: visible; }
   .live-room-body.is-studio.is-narrow .live-room-side { position: static; inset: auto; width: auto; height: auto; max-height: none; flex: none; min-height: min(38vh, 280px); margin: 0 var(--sp-3) var(--sp-3); border-left: none; border-top: 1px solid var(--glass-border); border-radius: var(--radius-card); box-shadow: var(--card-shadow); }
@@ -206,6 +254,40 @@
   .live-owner-start-btn { flex: 1; }
   .live-copy-row { align-items: flex-start; flex-wrap: wrap; }
   .live-copy-value { min-width: 0; }
+}
+
+/* 宽屏侧栏会压缩控制台实际余宽，资料栏按自身宽度换行。 */
+@media (min-width: 769px) {
+  @container live-owner (max-width: 560px) {
+    .live-owner-settings { flex-wrap: wrap; align-items: flex-start; }
+    .live-owner-fields { flex: 1 1 180px; flex-direction: column; }
+    .live-title-input,
+    .live-desc-input { width: 100%; flex: none; }
+    .live-owner-start { flex: 1 1 100%; min-width: 0; flex-direction: row; }
+    .live-owner-start-btn { flex: 1; min-width: 0; }
+  }
+}
+
+/* 中等桌面保留频道栏，主区与弹幕上下排列，避免三栏挤碎资料表单。 */
+@media (min-width: 769px) and (max-width: 1100px) {
+  .live-room-body.is-studio.is-wide {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(220px, 30%);
+  }
+  .live-room-body.is-studio.is-wide > .live-rail { grid-column: 1; grid-row: 1 / 3; }
+  .live-room-body.is-studio.is-wide > .live-room-main {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .live-room-body.is-studio.is-wide > .live-room-side {
+    grid-column: 2;
+    grid-row: 2;
+    width: auto;
+    min-width: 0;
+  }
 }
 
 /* ================= 直播间切换（F4） ================= */
@@ -232,10 +314,14 @@
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  border-right: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   min-height: 0;
+  box-shadow: var(--glass-shadow);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  margin: var(--sidebar-gutter);
+  animation: auroraqua-sidebar-in var(--auroraqua-duration-enter) var(--auroraqua-ease-out);
 }
 
 .live-rail-actions {
@@ -306,7 +392,7 @@
   flex: none;
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-input);
-  background: linear-gradient(150deg, var(--ice-300), var(--sakura-100));
+  background: transparent;
   color: var(--ice-500);
   border: 1px solid var(--glass-border);
   overflow: hidden;
@@ -347,11 +433,11 @@
   gap: var(--sp-2);
   padding: var(--sp-2);
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-card);
-  box-shadow: var(--card-shadow);
+  box-shadow: var(--glass-shadow);
 }
 
 /* 宽屏直播间容器给浮动按钮提供定位基准 */
@@ -452,7 +538,7 @@
     max-height: 240px;
     border-left: none;
     border-top: 1px solid var(--glass-border);
-    background: var(--glass-bg-strong);
+    background: var(--glass-bg);
     backdrop-filter: blur(18px) saturate(1.4);
   }
 
@@ -468,8 +554,8 @@
 
 /* ================= 一级直播聚合页（F4） ================= */
 
-/* 直播间卡片封面占位（需求：卡片显示封面，封面资源未接入 → 渐变占位；
-   已开播/未开播统一同一样式（2026-09-05），LIVE 状态由徽章标识） */
+/* 真实封面保持原像素；空封面透出外层玻璃，避免不透明占位盖住卡片。
+   已开播/未开播统一同一样式，LIVE 状态由徽章标识。 */
 .live-card-cover {
   position: relative;
   display: flex;
@@ -477,7 +563,7 @@
   justify-content: center;
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-input);
-  background: linear-gradient(150deg, var(--ice-300), var(--sakura-100));
+  background: transparent;
   color: var(--ice-500);
   border: 1px solid var(--glass-border);
   overflow: hidden;
@@ -514,8 +600,18 @@
   padding-bottom: 68px; /* 窄屏避让 FAB */
 }
 
+.live-hub > .conv-loading {
+  display: grid;
+  gap: var(--sp-4);
+  align-items: start;
+  flex: none;
+  width: 100%;
+  min-width: 0;
+}
+
 @media (max-width: 768px) {
-  .live-hub .live-hall-grid {
+  .live-hub .live-hall-grid,
+  .live-hub > .conv-loading {
     grid-template-columns: repeat(2, 1fr);
     /* 窄屏左右留白与语音/桌游/帖子列表统一 */
     padding: var(--sp-3) var(--sp-4);
@@ -528,7 +624,8 @@
     /* 内容最大宽度 1200px 居中（design.md §5） */
   }
 
-  .live-hub .live-hall-grid {
+  .live-hub .live-hall-grid,
+  .live-hub > .conv-loading {
     grid-template-columns: repeat(3, 1fr);
     max-width: 1200px;
     width: 100%;
@@ -538,7 +635,8 @@
 }
 
 @media (min-width: 1440px) {
-  .live-hub .live-hall-grid {
+  .live-hub .live-hall-grid,
+  .live-hub > .conv-loading {
     grid-template-columns: repeat(4, 1fr);
   }
 }
@@ -571,9 +669,13 @@
   margin-left: -4px;
 }
 
-/* 宽屏顶栏：贴顶铺满主区（突破 live-room-main 的 padding 16px），与窄屏铺满一致 */
+/* 宽屏标题沿主区内容轨道悬浮，不再用负 margin 铺成顶栏横条。 */
+.live-room-body.is-wide .live-room-main {
+  padding-top: var(--sidebar-gutter);
+}
+
 .live-room-body.is-wide .live-room-head {
-  margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) 0;
+  margin: 0;
 }
 
 /* 宽屏播放器自适应宽高：收起侧栏主区变宽时，player 保持 16:9 完整显示（不留黑边、不截断）。
@@ -649,10 +751,10 @@
   border-radius: 0 0 var(--radius-input) var(--radius-input);
 }
 
-/* 沉浸式窄屏输入框：从 side 独立后补回玻璃底（原 side 的 --glass-bg-strong），
-   避免输入框直接透出极光背景显得割裂 */
+/* 沉浸式窄屏输入框独立持有与其他composer相同的浅玻璃底。
+   控制台中仍位于side内的包装层由auroraqua.css明确置透明。 */
 .live-room-body.is-narrow .live-room-input {
-  background: var(--glass-bg-strong);
+  background: var(--glass-bg);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
 }
@@ -877,7 +979,7 @@
 
 /* 全屏播放弹幕输入框：屏幕下方中间，与悬浮按钮同高（32px）同底（bottom 8px）、
    同显隐（在 .live-player-controls 容器内，随容器 opacity 淡入淡出 + 自动隐藏/唤醒）；
-   风格与 .live-player-btn 一致（indigo 半透明底 + blur(8px) + 白字/白图标）。
+   使用与其他文本输入相同的浅玻璃材料，外框持有一次背景、内input透明。
    仅标准容器全屏时显示（iOS 原生视频全屏无自定义 UI）。 */
 .live-player-fs-input {
   position: absolute;
@@ -890,11 +992,11 @@
   height: 32px;
   padding: 0 4px 0 14px;
   box-sizing: border-box;
-  border-radius: var(--radius-pill);
-  background: rgba(70, 91, 146, 0.32);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  backdrop-filter: blur(8px) saturate(1.2);
-  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   pointer-events: none; /* 默认穿透；容器可见时才可交互（与悬浮按钮同规则） */
 }
 .live-player-controls.is-visible .live-player-fs-input {
@@ -905,12 +1007,12 @@
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 14px;
 }
 .live-player-fs-input input::placeholder {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--slate-500);
 }
 .live-player-fs-send {
   display: inline-flex;
@@ -979,10 +1081,10 @@
   inset: 0;
   border-radius: var(--radius-input);
   background: var(--glass-bg-strong);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border);
-  box-shadow: 0 8px 24px rgba(70, 91, 146, 0.16);
+  box-shadow: var(--glass-shadow-compact);
   overflow: hidden;
 }
 

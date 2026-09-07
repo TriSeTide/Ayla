@@ -1,14 +1,15 @@
 /**
- * GroupLive 测试（F4 R-G7）：群内直播切换范围 = 仅该群（filter group === groupId）。
- * LiveRoomBody / liveApi mock，聚焦范围过滤 + 无直播空态。
+ * GroupLive 测试（F4 R-G7）：以 groupId 请求服务端过滤后的分页目录。
+ * LiveRoomBody / liveApi mock，聚焦查询归属、多群白名单和无直播空态。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as liveApi from "../api/live";
 import type { LiveChannelDescriptor } from "../api/types";
 import { useGroupStore } from "../stores/group";
 import { useLiveStore } from "../stores/live";
+import { disposeDirectoryTracking } from "../stores/directory";
 
 vi.mock("../components/live/LiveRoomBody", () => ({
   LiveRoomBody: ({
@@ -25,6 +26,7 @@ vi.mock("../components/live/LiveRoomBody", () => ({
 }));
 vi.mock("../api/live", () => ({
   listLiveChannels: vi.fn(),
+  listLiveChannelsPage: vi.fn(),
   createLiveChannel: vi.fn(),
   getLiveChannel: vi.fn(),
   listDanmaku: vi.fn(),
@@ -54,6 +56,15 @@ function ch(id: number, group: string | null): LiveChannelDescriptor {
   };
 }
 
+function mockChannels(channels: LiveChannelDescriptor[]) {
+  // 旧无分页入口仍供开播选择器使用；群目录必须单独提交 groupId。
+  vi.mocked(liveApi.listLiveChannels).mockResolvedValue(channels);
+  vi.mocked(liveApi.listLiveChannelsPage).mockImplementation(async (params) => {
+    const results = channels.filter((item) => !params?.groupId || (item.allowed_group_ids ?? []).includes(params.groupId));
+    return { results, next_cursor: null, has_more: false, total: results.length };
+  });
+}
+
 function matchMediaMock() {
   vi.stubGlobal(
     "matchMedia",
@@ -68,6 +79,7 @@ function matchMediaMock() {
 import { GroupLive } from "../pages/group/GroupLive";
 
 beforeEach(() => {
+  disposeDirectoryTracking();
   matchMediaMock();
   useGroupStore.getState().reset();
   // store 是全局单例：不 reset 会让上一用例的 channels 残留，
@@ -76,13 +88,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
+  disposeDirectoryTracking();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe("GroupLive 范围（仅该群）", () => {
-  it("混合列表中只取本群的直播间", async () => {
-    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([
+  it("向服务端请求本群分页目录，房内切换范围不混入其它群", async () => {
+    mockChannels([
       ch(1, "g1"),
       ch(2, "g1"),
       ch(3, null), // 公开
@@ -96,10 +110,11 @@ describe("GroupLive 范围（仅该群）", () => {
     await waitFor(() =>
       expect(screen.getByTestId("room-body")).toHaveAttribute("data-channelid", "1"),
     );
+    expect(liveApi.listLiveChannelsPage).toHaveBeenCalledWith({ groupId: "g1", onlyLive: undefined, limit: 20, cursor: null });
   });
 
   it("本群直播间把创建入口交给直播侧栏", async () => {
-    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([ch(1, "g1")]);
+    mockChannels([ch(1, "g1")]);
     render(
       <MemoryRouter>
         <GroupLive groupId="g1" onExit={vi.fn()} />
@@ -109,7 +124,7 @@ describe("GroupLive 范围（仅该群）", () => {
   });
 
   it("本群无直播 → 空态引导", async () => {
-    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([ch(3, null), ch(4, "g9")]);
+    mockChannels([ch(3, null), ch(4, "g9")]);
     render(
       <MemoryRouter>
         <GroupLive groupId="g1" onExit={vi.fn()} />
@@ -119,7 +134,7 @@ describe("GroupLive 范围（仅该群）", () => {
   });
 
   it("本群无直播 → 空态提供「创建群内直播」入口并可按群创建", async () => {
-    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([ch(3, null), ch(4, "g9")]);
+    mockChannels([ch(3, null), ch(4, "g9")]);
     vi.mocked(liveApi.createLiveChannel).mockResolvedValue(ch(10, "g1"));
     render(
       <MemoryRouter>
@@ -147,7 +162,7 @@ describe("GroupLive 多群可见性（allowed_group_ids）", () => {
   it("同一多群直播（group=null + 白名单 13/14/15）出现在每个被选群的群内页", async () => {
     const multi = ch(50, null);
     multi.allowed_group_ids = ["13", "14", "15"];
-    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([multi]);
+    mockChannels([multi]);
     for (const gid of ["13", "14", "15"]) {
       const { unmount } = render(
         <MemoryRouter>
@@ -157,6 +172,7 @@ describe("GroupLive 多群可见性（allowed_group_ids）", () => {
       await waitFor(() =>
         expect(screen.getByTestId("room-body")).toHaveAttribute("data-channelid", "50"),
       );
+      expect(liveApi.listLiveChannelsPage).toHaveBeenCalledWith({ groupId: gid, onlyLive: undefined, limit: 20, cursor: null });
       unmount();
     }
   });
@@ -164,7 +180,7 @@ describe("GroupLive 多群可见性（allowed_group_ids）", () => {
   it("不在白名单的群看不到该直播（空态）", async () => {
     const multi = ch(51, null);
     multi.allowed_group_ids = ["13", "14"];
-    vi.mocked(liveApi.listLiveChannels).mockResolvedValue([multi]);
+    mockChannels([multi]);
     render(
       <MemoryRouter>
         <GroupLive groupId="15" onExit={vi.fn()} />
@@ -174,22 +190,11 @@ describe("GroupLive 多群可见性（allowed_group_ids）", () => {
   });
 
   it("先看别的群、再看白名单群，多群直播仍在（store 不被单群 scope 覆盖）", async () => {
-    // scope 感知的 mock：模拟后端 scope=group:<id> 只回该群频道（不含白名单多群频道）
+    // 服务端按 groupId 过滤 allowed_group_ids；不同群的分页投影互不替换。
     const g16 = ch(60, "16");
     const multi = ch(61, null);
     multi.allowed_group_ids = ["13", "14", "15"];
-    vi.mocked(liveApi.listLiveChannels).mockImplementation((params) => {
-      const scope = params?.scope;
-      if (scope?.startsWith("group:")) {
-        const gid = scope.split(":")[1];
-        return Promise.resolve(
-          [g16, multi].filter(
-            (c) => (c.allowed_group_ids ?? []).includes(gid),
-          ),
-        );
-      }
-      return Promise.resolve([g16, multi]);
-    });
+    mockChannels([g16, multi]);
 
     // 先进群 16（只有群 16 自己的直播）
     const first = render(

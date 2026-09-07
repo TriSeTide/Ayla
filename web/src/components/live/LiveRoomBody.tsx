@@ -7,15 +7,15 @@
  * 频道切换（需求）：
  * - 宽屏：左侧频道封面列（LiveChannelRail）点击切换；
  * - 窄屏普通观看：**上下滑切换**（方案 §2.5 G3）——视频 + 弹幕区整体跟手滑动
- *   （旧滑出新滑入 250ms ease-out），顶栏与输入框固定不动、切换后顶栏内容再变；
+ *   （采用 Auroraqua 20px / 300ms easeInOut 进出），顶栏与输入框固定不动、切换后顶栏内容再变；
  *   不使用封面预览卡。
  *
  * 切换范围由外层传入的有序频道列表决定（一级 = 全部可见；群内 = 仅该群）。
  * 切换 = 变更 channelId（onSelect）；useLiveRoom 依赖 channelId 自动销毁旧 HLS/断 WS
  * 重进房，播放组件始终单实例（滑动单元内仅当前槽一个真实播放器）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, useDragControls } from "framer-motion";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useIsPresent } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
@@ -25,6 +25,8 @@ import { DanmakuInput } from "./DanmakuInput";
 import { DanmakuList } from "./DanmakuList";
 import { DanmakuOverlay } from "./DanmakuOverlay";
 import { LiveChannelRail } from "./LiveChannelRail";
+import type { DirectoryLoadMoreProps } from "../DirectoryLoadMore";
+import { usePanelReplayMotion, type PanelReplayTarget } from "../../hooks/usePanelReplayMotion";
 import { LiveOwnerPanel } from "./LiveOwnerPanel";
 import { LiveHostAvatar } from "./LiveHostAvatar";
 import { LivePlayer } from "./LivePlayer";
@@ -37,24 +39,14 @@ import { IconBack, IconChevronRight, IconList } from "../icons";
 import { useLiveStore } from "../../stores/live";
 import { liveSessionRuntime } from "../../runtime/liveSessionRuntime";
 import { getVisibilityLabels } from "../../utils/visibility";
+import { directionalVariants, panelVariants } from "../motion/auroraquaMotion";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
+import { useMotionDrag } from "../../hooks/useMotionDrag";
 
-/** 直播间上下滑切换（方案 §2.5）：等价 tokens.css --ease-out / --ease-in（framer-motion ease 需 cubic-bezier 元组） */
-const EASE_OUT: [number, number, number, number] = [0.22, 0.61, 0.36, 1];
-const EASE_IN: [number, number, number, number] = [0.4, 0, 1, 1];
-/** 切换滑入/滑出 250ms（design.md §7：150–300ms）；松手判定统一走 useSwipeCommit */
-const LIVE_SLIDE_DURATION = 0.25;
 /** drag 约束（钉在原点，配合 dragElastic 提供边缘阻尼 + 松手回弹） */
 const LIVE_DRAG_CONSTRAINTS = { top: 0, bottom: 0 };
 /** 跟手弹性：0.8 = 80% 跟手 + 20% 边缘阻尼 */
 const LIVE_DRAG_ELASTIC = 0.8;
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
 
 export function LiveRoomBody({
   channelId,
@@ -63,7 +55,6 @@ export function LiveRoomBody({
   channels,
   onSelect,
   onBack,
-  inputEntered,
   showOwnerPanel = false,
   activityRoute,
   keepLiveActivity = false,
@@ -71,6 +62,7 @@ export function LiveRoomBody({
   onCreateNewChannel,
   deletingChannelId = null,
   hideRail = false,
+  directory,
 }: {
   channelId: number;
   channel: LiveChannelDescriptor | null;
@@ -80,6 +72,7 @@ export function LiveRoomBody({
   /** 点击封面切换直播间 */
   onSelect: (channelId: number) => void;
   onBack: () => void;
+  /** Compatibility with room callers; the input surface now owns its entry animation. */
   inputEntered: boolean;
   /** 仅开播控制台显示主播面板，普通直播间保持观看 + 弹幕。 */
   showOwnerPanel?: boolean;
@@ -95,6 +88,7 @@ export function LiveRoomBody({
   deletingChannelId?: number | null;
   /** 隐藏宽屏频道封面侧栏（群内直播：侧栏已移到左侧 ChannelSidebar）。 */
   hideRail?: boolean;
+  directory?: DirectoryLoadMoreProps & { onScroll: (element: HTMLElement) => void };
 }) {
   // 全屏期间冻结 isNarrow：手机点全屏会锁横屏 → viewport 变宽 → isNarrow 翻转 →
   // 窄↔宽布局切换 → 播放器(video)重建 → 黑屏。冻结让全屏时布局保持进入全屏前的形态，
@@ -131,15 +125,18 @@ export function LiveRoomBody({
 
   // ---- 直播间上下滑切换（§2.5，窄屏普通观看；宽屏走侧栏点击） ----
   const swipeRef = useRef<HTMLDivElement | null>(null);
-  const [reducedMotion] = useState(prefersReducedMotion);
-  // 手动 drag：触摸路由器（视频区直切 / 弹幕区滚动优先+边界接力）按需启动
-  const dragControls = useDragControls();
-  usePagerTouchRouter({
-    containerRef: swipeRef,
-    getListEl: () => listRef.current,
-    controls: dragControls,
-    enabled: isNarrow && !showOwnerPanel && !reducedMotion,
-  });
+  const reducedMotion = usePrefersReducedMotion();
+  const mediaPanels = useMemo<readonly PanelReplayTarget[]>(() => {
+    const scene = `.live-room-swipe-item[data-live-scene-owner="${channelId}"]`;
+    return isNarrow && !showOwnerPanel ? [
+      { selector: `${scene} > .live-room-stage`, edge: "bottom" },
+      { selector: `${scene} > .danmaku-wrap`, edge: "right" },
+    ] : [
+      { selector: ":scope > .live-room-main > .live-room-stage", edge: "bottom" },
+      { selector: ":scope > .live-room-side", edge: "right" },
+    ];
+  }, [channelId, isNarrow, showOwnerPanel]);
+  const mediaPanelsRef = usePanelReplayMotion<HTMLDivElement>(String(channelId), mediaPanels, !error);
 
   // 相邻直播间（切换范围 = 外层传入的有序 channels；端头无相邻项 → 边缘阻尼 + 不切换）
   const currentIdx = channels.findIndex((c) => c.id === channelId);
@@ -161,22 +158,7 @@ export function LiveRoomBody({
   const swipeDirection = directionRef.current;
 
   const swipeVariants = useMemo(
-    () =>
-      reducedMotion
-        ? { enter: { opacity: 1 }, center: { opacity: 1 }, exit: { opacity: 0 } }
-        : {
-            enter: (dir: number) => ({
-              y: dir === 0 ? 0 : `${dir * 100}%`,
-              opacity: 1,
-              transition: { duration: LIVE_SLIDE_DURATION, ease: EASE_OUT },
-            }),
-            center: { y: 0, opacity: 1 },
-            exit: (dir: number) => ({
-              y: dir === 0 ? 0 : `${dir * -30}%`,
-              opacity: 0,
-              transition: { duration: LIVE_SLIDE_DURATION, ease: EASE_IN },
-            }),
-          },
+    () => directionalVariants(reducedMotion, "y"),
     [reducedMotion],
   );
 
@@ -197,6 +179,16 @@ export function LiveRoomBody({
     },
     [nextChannel, prevChannel, onSelect],
   );
+
+  // The outer swipe surface owns y; resetting inner scene variants cannot clear it.
+  const canSwipe = isNarrow && !showOwnerPanel && !reducedMotion;
+  const drag = useMotionDrag(canSwipe, handleSwipeDragEnd);
+  usePagerTouchRouter({
+    containerRef: swipeRef,
+    getListEl: () => listRef.current,
+    controls: drag.controls,
+    enabled: canSwipe,
+  });
 
   const player = (
     <LivePlayer
@@ -340,8 +332,8 @@ export function LiveRoomBody({
     <div
       className="live-room-input"
       style={{
-        transform: inputEntered ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 250ms var(--ease-out)",
+        transform: "translateY(0)",
+        transition: "none",
       }}
     >
       <DanmakuInput sending={sending} error={sendError} onSend={send} />
@@ -352,6 +344,8 @@ export function LiveRoomBody({
     <div className="live-room-rail-overlay">
       <div className="live-room-rail-mask" onClick={() => setRailOpen(false)} aria-hidden="true" />
       <LiveChannelRail
+        enterFromRight
+        directory={directory}
         channels={channels}
         currentId={channelId}
         onSelect={(id) => {
@@ -375,6 +369,7 @@ export function LiveRoomBody({
         {/* 出错时仍保留侧栏与弹幕区，主区显示错误，避免用户卡在"只有返回键"的死页面 */}
         {!isNarrow && !hideRail && (
           <LiveChannelRail
+            directory={directory}
             channels={channels}
             currentId={channelId}
             onSelect={onSelect}
@@ -406,19 +401,22 @@ export function LiveRoomBody({
   // touch-action（会写成 pan-x 禁掉弹幕列表滚动），手动模式下交由本组件声明语义。
   if (isNarrow && !showOwnerPanel) {
     return (
-      <div className="live-room live-room-body is-narrow">
-        <div className="live-room-head">{narrowHead}</div>
+      <div className="live-room live-room-body is-narrow has-media-panel-motion" ref={mediaPanelsRef}>
+        <AnimatePresence mode="wait" propagate>
+          <LiveRoomHeader key={channelId} channelId={channelId}>{narrowHead}</LiveRoomHeader>
+        </AnimatePresence>
         <motion.div
           className="live-room-swipe"
           ref={swipeRef}
-          drag={reducedMotion ? false : "y"}
+          drag={drag.allowed ? "y" : false}
           dragListener={false}
-          dragControls={dragControls}
-          style={{ touchAction: "pan-y" }}
+          dragControls={drag.controls}
+          style={{ touchAction: "pan-y", y: drag.offset }}
           dragConstraints={LIVE_DRAG_CONSTRAINTS}
           dragElastic={LIVE_DRAG_ELASTIC}
           dragMomentum={false}
-          onDragEnd={handleSwipeDragEnd}
+          onDragStart={drag.onDragStart}
+          onDragEnd={drag.onDragEnd}
         >
           <AnimatePresence custom={swipeDirection} mode="sync" initial={false}>
             <motion.div
@@ -429,6 +427,7 @@ export function LiveRoomBody({
               animate="center"
               exit="exit"
               className="live-room-swipe-item"
+              data-live-scene-owner={channelId}
             >
               <div className="live-room-stage">{player}</div>
               {danmakuList}
@@ -443,10 +442,11 @@ export function LiveRoomBody({
 
   // 宽屏观看 + 开播控制台（窄屏整页滚动）：保持三栏 / 纵向分区结构，不上下滑
   return (
-    <div className={`live-room live-room-body ${showOwnerPanel ? "is-studio" : ""} ${isNarrow ? "is-narrow" : "is-wide"}`}>
+    <div className={`live-room live-room-body has-media-panel-motion ${showOwnerPanel ? "is-studio" : ""} ${isNarrow ? "is-narrow" : "is-wide"}`} ref={mediaPanelsRef}>
       {/* 宽屏：频道封面侧栏（返回键在侧栏内 + 收起/展开）；群内直播 hideRail 时不渲染 */}
       {!isNarrow && !hideRail && (
         <LiveChannelRail
+          directory={directory}
           channels={channels}
           currentId={channelId}
           onSelect={onSelect}
@@ -463,7 +463,9 @@ export function LiveRoomBody({
       <main className="live-room-main">
         {/* 开播控制台：宽屏头部整行隐藏（侧栏已有返回/标题），窄屏只留返回 + 列表按钮 */}
         {(isNarrow || !showOwnerPanel) && (
-          <div className="live-room-head">{isNarrow ? narrowHead : wideHead}</div>
+          <AnimatePresence mode="wait" propagate>
+            <LiveRoomHeader key={channelId} channelId={channelId}>{isNarrow ? narrowHead : wideHead}</LiveRoomHeader>
+          </AnimatePresence>
         )}
 
         {showOwnerPanel && channel?.is_owner && (
@@ -490,5 +492,32 @@ export function LiveRoomBody({
 
       {railOverlay}
     </div>
+  );
+}
+
+/** Only the header snapshot changes owner; the player, media session and main layout stay mounted. */
+function LiveRoomHeader({ channelId, children }: { channelId: number; children: ReactNode }) {
+  const reduced = usePrefersReducedMotion();
+  const present = useIsPresent();
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    ref.current?.toggleAttribute("inert", !present);
+  }, [present]);
+  return (
+    <motion.div
+      ref={ref}
+      className="live-room-head is-panel-motion"
+      data-live-header-owner={channelId}
+      data-motion-state={present ? "active" : "exiting"}
+      aria-hidden={!present || undefined}
+      style={{ pointerEvents: present ? undefined : "none" }}
+      inherit={false}
+      initial={reduced ? false : "enter"}
+      animate="center"
+      exit="exit"
+      variants={panelVariants(reduced, "top")}
+    >
+      {children}
+    </motion.div>
   );
 }

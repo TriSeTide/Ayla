@@ -8,88 +8,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../api/elysia";
-import * as liveApi from "../api/live";
 import { ensureUser } from "../api/users";
 import { LiveHall } from "../components/live/LiveHall";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useScrollRestore } from "../hooks/useScrollRestore";
-import { useLiveStore, isLiveStale } from "../stores/live";
+import { useDirectoryPage } from "../hooks/useDirectoryPage";
+import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
+import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { useShellStore } from "../stores/shell";
 
 export function LiveHubPage() {
   const navigate = useNavigate();
-  const channels = useLiveStore((s) => s.channels);
-  const loading = useLiveStore((s) => s.channelsLoading);
   const [onlyLive, setOnlyLive] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const directory = useDirectoryPage("live", { onlyLive });
+  const { items: channels, loading, error, refresh } = directory;
   const [profileError, setProfileError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
-  const requestId = useRef(0);
   const hubRef = useRef<HTMLDivElement>(null);
   const { restoring } = useScrollRestore("live-hub", hubRef);
-  // §3.4 刷新动画：刷新完成后递增，key 变化强制 LiveHall 重挂载 → reveal 重播
-  const [revealNonce, setRevealNonce] = useState(0);
-
-  const load = useCallback(async (only: boolean) => {
-    const store = useLiveStore.getState();
-    if (
-      store.channelsOnlyLive === only
-      && store.channels.length > 0
-      && !isLiveStale()
-      && !store.channelsLoading
-    ) return;
-    const currentRequest = ++requestId.current;
-    store.setChannelsLoading(true);
-    setError(null);
-    try {
-      const list = await liveApi.listLiveChannels({ onlyLive: only });
-      if (currentRequest !== requestId.current) return;
-      store.setChannels(list, only);
-      store.setChannelsLoading(false);
-      const ownerIds = [...new Set(list.map((c) => c.owner_id))];
-      if (ownerIds.length > 0) {
-        const users = await Promise.all(ownerIds.map((id) => ensureUser(id)));
-        const names: Record<string, string> = {};
-        for (const u of users) {
-          if (u) names[u.id] = u.nickname || u.username;
-        }
-        setOwnerNames((prev) => ({ ...prev, ...names }));
-      }
-    } catch (e) {
-      if (currentRequest !== requestId.current) return;
-      store.setChannelsLoading(false);
-      setError(e instanceof Error ? e.message : "加载频道失败");
-    }
-  }, []);
+  useListEntryMotion(hubRef, ".live-card-wrap", restoring);
 
   useEffect(() => {
-    void load(onlyLive);
-  }, [onlyLive, load]);
-
-  // 下拉刷新/刷新键共用：强制重拉直播列表（绕过 isLiveStale 缓存，不设 channelsLoading 以免骨架闪现）
-  const refresh = useCallback(async () => {
-    const currentRequest = ++requestId.current;
-    setError(null);
-    try {
-      const list = await liveApi.listLiveChannels({ onlyLive: onlyLive });
-      if (currentRequest !== requestId.current) return;
-      useLiveStore.getState().setChannels(list, onlyLive);
-      setRevealNonce((n) => n + 1);
-      const ownerIds = [...new Set(list.map((c) => c.owner_id))];
-      if (ownerIds.length > 0) {
-        const users = await Promise.all(ownerIds.map((id) => ensureUser(id)));
-        const names: Record<string, string> = {};
-        for (const u of users) {
-          if (u) names[u.id] = u.nickname || u.username;
-        }
-        setOwnerNames((prev) => ({ ...prev, ...names }));
-      }
-    } catch (e) {
-      if (currentRequest !== requestId.current) return;
-      setError(e instanceof Error ? e.message : "加载频道失败");
-    }
-  }, [onlyLive]);
+    let cancelled = false;
+    const ids = [...new Set(channels.filter((item) => !item.owner_nickname).map((item) => item.owner_id))];
+    void Promise.all(ids.map((id) => ensureUser(id))).then((users) => {
+      if (cancelled) return;
+      setOwnerNames((previous) => ({ ...previous, ...Object.fromEntries(users.filter((user) => user != null).map((user) => [user.id, user.nickname || user.username])) }));
+    });
+    return () => { cancelled = true; };
+  }, [channels]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；引用守卫见 HomePage）
   useEffect(() => {
@@ -123,7 +71,7 @@ export function LiveHubPage() {
   }, []);
 
   return (
-    <div className="live-hub" ref={hubRef}>
+    <div className="live-hub" ref={hubRef} onScroll={(event) => directory.onScroll(event.currentTarget)}>
       <div className="live-hub-toolbar">
         <label className="live-hall-filter">
           <input
@@ -138,23 +86,21 @@ export function LiveHubPage() {
           只看在播
         </label>
       </div>
-      {error && <div className="live-form-error" role="alert">{error}</div>}
       {profileError && <div className="live-form-error" role="alert">爱莉入口暂不可用：{profileError}</div>}
       {loading && visibleChannels.length === 0 ? (
         <div className="conv-loading">
           <div className="skeleton" style={{ height: 96, marginBottom: 8 }} />
           <div className="skeleton" style={{ height: 96 }} />
         </div>
-      ) : (
+      ) : error && channels.length === 0 ? <DirectoryLoadMore {...directory} /> : (
         <PullToRefresh isAtTop={isHubAtTop} onRefresh={refresh}>
           <LiveHall
-            key={revealNonce}
             channels={visibleChannels}
             elysiaUserId={elysiaUserId}
             ownerNames={ownerNames}
             onEnter={(id) => navigate(`/live/${id}`)}
-            revealItems={!loading && !restoring}
           />
+          <DirectoryLoadMore {...directory} />
         </PullToRefresh>
       )}
     </div>

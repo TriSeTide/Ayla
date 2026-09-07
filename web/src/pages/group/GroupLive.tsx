@@ -16,58 +16,53 @@ import { LiveStartSheet } from "../../components/live/LiveStartSheet";
 import { LiveRoomBody } from "../../components/live/LiveRoomBody";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useLiveStore } from "../../stores/live";
+import { useDirectoryPage } from "../../hooks/useDirectoryPage";
 
 export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string; routeChannelId?: string; onExit: () => void }) {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
   const channel = useLiveStore((s) => s.current.channel);
-  const allChannels = useLiveStore((s) => s.channels);
-  const channels = allChannels.filter((item) =>
-    (item.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
-  );
+  const directory = useDirectoryPage("live", { groupId });
+  const { items: channels, loading, refresh: load } = directory;
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailRetry, setDetailRetry] = useState(0);
+  const error = detailError ?? directory.error;
   const [currentId, setCurrentId] = useState<number | null>(() => {
     if (routeChannelId == null) return null;
     const parsed = Number(routeChannelId);
-    return Number.isFinite(parsed) ? parsed : null;
+    const known = useLiveStore.getState().channels.find((item) => item.id === parsed
+      && (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId)));
+    return known?.id ?? null;
   });
-  const loading = useLiveStore((s) => s.channelsLoading);
-  const error = useLiveStore((s) => s.error);
   const [showCreate, setShowCreate] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    // 全量可见列表写入全局 store（后端 visible_queryset 已含本用户所有群的
-    // group/allowed_groups 频道），再在下方按 groupId 前端投影当前群；
-    // 不能用 scope=group:<id> 直接覆盖 store，否则跨群切换时全局列表被单群数据污染。
-    const store = useLiveStore.getState();
-    store.setChannelsLoading(true);
-    store.setError(null);
-    liveApi
-      .listLiveChannels()
-      .then((list) => store.setChannels(list))
-      .catch((e) => {
-        store.setChannelsLoading(false);
-        store.setError(e instanceof Error ? e.message : "加载群内直播失败");
-      });
-  }, [groupId]);
+  useEffect(() => {
+    if (!routeChannelId) return;
+    let cancelled = false;
+    setDetailError(null);
+    void liveApi.getLiveChannel(Number(routeChannelId)).then((item) => {
+      if (cancelled) return;
+      if (!(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) {
+        setDetailError("该直播间不在本群可见范围内");
+        return;
+      }
+      useLiveStore.getState().upsertChannel(item);
+      setCurrentId(item.id);
+    }).catch((reason: unknown) => {
+      if (!cancelled) setDetailError(reason instanceof Error ? reason.message : "加载直播间失败");
+    });
+    return () => { cancelled = true; };
+  }, [groupId, routeChannelId, detailRetry]);
 
   useEffect(() => {
-    const store = useLiveStore.getState();
-    if (store.channels.length === 0 || store.lastFetched == null || Date.now() - store.lastFetched > 60_000) {
-      load();
-    }
-  }, [load]);
-
-  useEffect(() => {
-    if (channels.length === 0) {
-      setCurrentId(null);
-      return;
-    }
-    if (currentId == null || !channels.some((item) => item.id === currentId)) {
+    if (currentId == null && !routeChannelId && channels.length > 0) {
       setCurrentId(channels[0].id);
     }
-  }, [channels, currentId]);
+    const index = channels.findIndex((item) => item.id === currentId);
+    if (index >= 0 && index >= channels.length - 3 && !directory.error) void directory.loadMore();
+  }, [channels, currentId, routeChannelId, directory.loadMore, directory.error]);
 
   // 侧栏点击直播间 → URL 带 liveChannelId：仅在路由参数变化时同步一次，
   // 不覆盖后续上下滑/侧栏切换产生的 currentId。ref 初始为当前 routeChannelId，
@@ -113,7 +108,7 @@ export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string
     }
   }, [groupId, navigate]);
 
-  if (loading) {
+  if (currentId == null && !error && ((loading && channels.length === 0) || routeChannelId != null)) {
     return (
       <div className="group-scene-placeholder">
         <div className="skeleton" style={{ height: 160, width: "80%" }} />
@@ -121,17 +116,17 @@ export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string
     );
   }
 
-  if (error) {
+  if (error && (detailError || currentId == null)) {
     return (
       <div className="group-scene-placeholder" role="alert">
         <h3 className="placeholder-title">群内直播加载失败</h3>
         <p className="placeholder-desc">{error}</p>
-        <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
+        <button type="button" className="btn btn-ghost" onClick={() => { if (detailError) setDetailRetry((value) => value + 1); else void load(); }}>重试</button>
       </div>
     );
   }
 
-  if (channels.length === 0 || currentId == null) {
+  if (currentId == null) {
     return (
       <>
         <div className="group-scene-placeholder">
@@ -170,6 +165,7 @@ export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string
   return (
     <>
     <LiveRoomBody
+      directory={directory}
       channelId={currentId}
       channel={channel}
       isNarrow={isNarrow}

@@ -9,17 +9,15 @@
  *
  * 核心渲染复用 LiveRoomBody（播放器三态 + 弹幕 + 频道侧栏）。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import * as liveApi from "../api/live";
-import type { LiveChannelDescriptor } from "../api/types";
 import { LiveRoomBody } from "../components/live/LiveRoomBody";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useEnterRoomAnimation } from "../hooks/useEnterRoomAnimation";
 import { useLiveStore } from "../stores/live";
 import { useShellStore } from "../stores/shell";
-import { sortLiveChannels } from "../utils/sortChannels";
+import { useDirectoryPage } from "../hooks/useDirectoryPage";
 
 export function LiveRoomPage() {
   const navigate = useNavigate();
@@ -30,11 +28,10 @@ export function LiveRoomPage() {
   const { inputEntered } = useEnterRoomAnimation();
 
   const channel = useLiveStore((s) => s.current.channel);
-  const liveChannels = useLiveStore((s) => s.channels);
-  const [ordered, setOrdered] = useState<LiveChannelDescriptor[]>([]);
-  const [listError, setListError] = useState<string | null>(null);
-  const [listRetry, setListRetry] = useState(0);
-  const loadedRef = useRef(false);
+  const directory = useDirectoryPage("live", {}, validId);
+  const ordered = channel?.id === channelId && !directory.items.some((item) => item.id === channelId)
+    ? [channel, ...directory.items] : directory.items;
+  const listError = directory.error;
 
   // 非法 id 回大厅
   useEffect(() => {
@@ -48,35 +45,10 @@ export function LiveRoomPage() {
     return () => useShellStore.getState().setBottomTabsLeaving(false);
   }, [validId]);
 
-  // 切换范围 = 全部可见直播间（一次性拉列表作为有序上下文；失败则无切换能力）。
-  // 初始列表也套新排序（在播 > 曾播 > 从未），与 live store 维护顺序一致。
   useEffect(() => {
-    if (!validId || loadedRef.current) return;
-    loadedRef.current = true;
-    liveApi
-      .listLiveChannels()
-      .then((list) => {
-        setOrdered(sortLiveChannels(list));
-        setListError(null);
-      })
-      .catch((e) => setListError(e instanceof Error ? e.message : "加载直播列表失败"));
-  }, [validId, listRetry]);
-
-  // 直播详情侧栏与大厅共用 live store；WS/REST 对账更新后立即反映创建、状态和删除。
-  // merge 保留已有相对位置，随后统一按新排序重排（开播/下播实时归位）。
-  useEffect(() => {
-    if (liveChannels.length === 0) return;
-    setOrdered((prev) => {
-      const byId = new Map(liveChannels.map((item) => [item.id, item]));
-      const next = prev
-        .filter((item) => byId.has(item.id))
-        .map((item) => byId.get(item.id) ?? item);
-      for (const item of liveChannels) {
-        if (!next.some((current) => current.id === item.id)) next.push(item);
-      }
-      return sortLiveChannels(next);
-    });
-  }, [liveChannels]);
+    const index = directory.items.findIndex((item) => item.id === channelId);
+    if (index >= 0 && index >= directory.items.length - 3 && !directory.error) void directory.loadMore();
+  }, [channelId, directory.items, directory.loadMore, directory.error]);
 
   const goTo = (id: number) => {
     if (id === channelId) return;
@@ -90,15 +62,12 @@ export function LiveRoomPage() {
       {listError && (
         <div className="chat-notice" role="alert">
           <span>直播列表加载失败：{listError}</span>
-          <button type="button" className="btn btn-ghost" onClick={() => {
-            loadedRef.current = false;
-            setListError(null);
-            setListRetry((value) => value + 1);
-          }}>重试</button>
+          <button type="button" className="btn btn-ghost" onClick={() => void directory.refresh()}>重试</button>
         </div>
       )}
       <FullScreenSwipeBack onBack={() => navigate("/live")} enabled={isNarrow}>
         <LiveRoomBody
+        directory={directory}
         channelId={channelId}
         channel={channel}
         isNarrow={isNarrow}
