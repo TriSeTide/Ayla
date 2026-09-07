@@ -145,8 +145,8 @@ def _dbg_segments_query(media_id):
         owner.save()
         assert can_access_media(other, media) is True
 
-    def test_group_avatar_reference_member_only(self, user_factory):
-        """media 被某群设为头像 → 仅群成员可访问，非成员拒绝。"""
+    def test_group_avatar_reference_visible_to_authenticated_users(self, user_factory):
+        """可发现群的头像对登录用户可见，边界回归另见 test_group_avatar_access。"""
         owner = user_factory(username="acc_ga_o")
         member = user_factory(username="acc_ga_m")
         outsider = user_factory(username="acc_ga_out")
@@ -160,7 +160,7 @@ def _dbg_segments_query(media_id):
         ConversationMember.objects.create(conversation=conv, user=owner, role="owner")
         ConversationMember.objects.create(conversation=conv, user=member)
         assert can_access_media(member, media) is True
-        assert can_access_media(outsider, media) is False
+        assert can_access_media(outsider, media) is True
 
     def test_group_avatar_cleared_revokes_access(self, user_factory):
         """清除群头像后，非 owner 不再可访问该媒体。"""

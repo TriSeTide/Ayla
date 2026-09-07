@@ -42,6 +42,24 @@ def _make_room(owner, name="桌游室", **kwargs):
 
 @pytest.mark.django_db
 class TestAggregateSearch:
+    def test_group_avatar_is_returned_to_nonmember_without_changing_membership(self, auth_client, user_factory):
+        client, viewer = auth_client(username="s_avatar_viewer")
+        owner = user_factory(username="s_avatar_owner")
+        avatar = "/api/v1/media/search-avatar-fixture/content"
+        pictured = _make_group(owner, title="头像测试群", avatar=avatar)
+        empty = _make_group(owner, title="头像测试空白群")
+
+        response = client.get(SEARCH_URL, {"q": "头像测试", "types": "group"})
+
+        assert response.status_code == 200, response.content
+        result = response.json()["groups"]
+        assert result["total"] == 2
+        by_id = {item["id"]: item for item in result["items"]}
+        assert by_id[str(pictured.id)]["avatar"] == avatar
+        assert by_id[str(empty.id)]["avatar"] == ""
+        assert set(by_id[str(pictured.id)]) == {"id", "type", "title", "avatar", "join_policy", "created_at"}
+        assert not ConversationMember.objects.filter(user=viewer, conversation__in=[pictured, empty]).exists()
+
     def test_all_types_grouped(self, auth_client, user_factory):
         client, user = auth_client(username="s_me")
         owner = user_factory(username="s_alice", nickname="爱丽丝")

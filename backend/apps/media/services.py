@@ -639,9 +639,11 @@ def can_access_media(user, media: MediaObject) -> bool:
     4. 表情包：media 属于某 EmojiItem，且该包是系统包（全员）、用户自己的个人包，
        或用户所在的群表情包（任务 03）；
     5. 头像引用：media 被某用户设为头像 → 登录用户可见；
-       被某群设为头像 → 该群成员可见（M5-2.1 头像资源路径）；
+       被可搜索群的 avatar 完整引用 → 登录用户可见；私聊头像仍仅会话成员可见；
     6. 其他情况：拒绝（403/404）。
     """
+    if user is None or not user.is_authenticated:
+        return False
     if media.owner_id == user.id:
         return True
 
@@ -710,7 +712,9 @@ def can_access_media(user, media: MediaObject) -> bool:
 
     # 头像引用路径（M5-2.1）：
     # - 用户头像：被任意 User.avatar 引用 → 登录用户可见（头像出现在公开卡片/成员列表/搜索等）；
-    # - 群头像：被某群 Conversation.avatar 引用 → 仅该群成员可见。
+    # - 群头像：与 search_groups 的 type=group 可发现边界一致，登录用户可见。
+    #   仅匹配完整 content URL，不因 media_id 恰好是另一 URL 的子串而放权。
+    # - 私聊头像：保留原有成员访问边界，不进入群发现规则。
     from apps.accounts.models import User
 
     if User.objects.filter(avatar__contains=media.media_id).exists():
@@ -718,8 +722,13 @@ def can_access_media(user, media: MediaObject) -> bool:
 
     from apps.chat.models import Conversation
 
+    avatar_url = f"/api/v1/media/{media.media_id}/content"
+    if media.kind == MediaObject.KIND_IMAGE and Conversation.objects.filter(
+        type=Conversation.TYPE_GROUP, avatar=avatar_url
+    ).exists():
+        return True
     if Conversation.objects.filter(
-        avatar__contains=media.media_id, members__user=user
+        avatar=avatar_url, members__user=user
     ).exists():
         return True
 

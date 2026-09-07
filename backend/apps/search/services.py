@@ -82,6 +82,7 @@ def search_groups(q: str, limit: int) -> dict:
     开放，故群搜索 = 所有群聊（title 匹配），不做可见性过滤；也不复用
     ConversationListSerializer（避免未读数等重查询）。
     join_policy（public/application）随条目输出，供前端区分"直接加入/申请制"弹窗。
+    avatar 复用已有群头像媒体地址；未设置时为空串，不要求调用者已经入群。
     """
     base = Conversation.objects.filter(type="group").filter(title__icontains=q)
     total = base.count()
@@ -90,6 +91,7 @@ def search_groups(q: str, limit: int) -> dict:
             "id": str(c.id),
             "type": c.type,
             "title": c.title,
+            "avatar": c.avatar,
             "join_policy": c.join_policy,
             "created_at": c.created_at.isoformat(),
         }
