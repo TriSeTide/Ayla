@@ -20,6 +20,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.catalog_pagination import (
+    catalog_scope, paginate_catalog, with_activity_order,
+)
 from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media, parse_avatar_media_id
@@ -102,7 +105,7 @@ class ChannelListView(APIView):
     def get(self, request):
         from django.db.models import Q
 
-        qs = visible_queryset(LiveChannel, request.user)
+        qs = visible_queryset(LiveChannel, request.user).select_related("owner", "group")
         if request.query_params.get("only_live") == "1":
             qs = qs.filter(status="live")
 
@@ -113,7 +116,7 @@ class ChannelListView(APIView):
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性，可见性完全由 allowed_groups 决定）
-        scope = request.query_params.get("scope", "").strip()
+        scope = catalog_scope(request.query_params)
         if scope.startswith("group:"):
             raw_gid = scope.split(":", 1)[1]
             try:
@@ -122,8 +125,27 @@ class ChannelListView(APIView):
                 return _bad_request("group id 无效")
             qs = qs.filter(Q(allowed_groups__id=gid)).distinct()
 
-        payload = [_channel_serializer(ch, request) for ch in qs]
-        return Response(payload)
+        qs = with_activity_order(
+            qs,
+            active_condition=Q(status="live"),
+            previous_condition=Q(started_at__isnull=False),
+            active_time="started_at",
+            previous_time="ended_at",
+        )
+        page = paginate_catalog(
+            qs,
+            request,
+            resource="live",
+            ordering="activity",
+            filters={
+                "scope": scope,
+                "owner": owner_filter,
+                "only_live": "1" if request.query_params.get("only_live") == "1" else "",
+            },
+        )
+        channels = page.rows if page is not None else qs
+        payload = [_channel_serializer(ch, request) for ch in channels]
+        return Response(page.response_data(payload) if page is not None else payload)
 
     def post(self, request):
         title = (request.data.get("title") or "").strip()

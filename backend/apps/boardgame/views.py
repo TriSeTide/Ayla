@@ -13,6 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.catalog_pagination import catalog_scope, paginate_catalog
 from apps.common.visibility import can_join, can_view, visible_queryset
 
 from . import services
@@ -73,7 +74,7 @@ class RoomListView(APIView):
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性）
-        scope = request.query_params.get("scope", "").strip()
+        scope = catalog_scope(request.query_params)
         if scope.startswith("group:"):
             raw_gid = scope.split(":", 1)[1]
             try:
@@ -89,8 +90,20 @@ class RoomListView(APIView):
         owner_filter = request.query_params.get("owner", "").strip()
         if owner_filter:
             qs = qs.filter(owner_id=owner_filter)
-        data = GameRoomSerializer(qs, many=True, context={"request": request}).data
-        return Response(data)
+        page = paginate_catalog(
+            qs,
+            request,
+            resource="boardgame",
+            ordering="-created_at",
+            filters={
+                "scope": scope,
+                "owner": owner_filter,
+                "mine": "1" if request.query_params.get("mine") == "1" else "",
+            },
+        )
+        rooms = page.rows if page is not None else qs
+        data = GameRoomSerializer(rooms, many=True, context={"request": request}).data
+        return Response(page.response_data(data) if page is not None else data)
 
     def post(self, request):
         name = (request.data.get("name") or "").strip()

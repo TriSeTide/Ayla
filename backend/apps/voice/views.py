@@ -11,12 +11,13 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Count
+from django.db.models import Count, Exists, OuterRef
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.catalog_pagination import catalog_scope, paginate_catalog, with_activity_order
 from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media
@@ -66,18 +67,18 @@ def _not_found(msg="频道不存在"):
 
 
 class ChannelListView(APIView):
-    """GET /api/v1/voice/channels/ —— 频道列表（含人数；?scope=group:<id> 群内过滤）；POST —— 建频道。"""
+    """频道列表/创建；GET显式limit/cursor启用分页，默认仍返回兼容数组。"""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from django.db.models import Q
 
-        qs = visible_queryset(VoiceChannel, request.user)
+        qs = visible_queryset(VoiceChannel, request.user).select_related("owner", "group")
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性）
-        scope = request.query_params.get("scope", "").strip()
+        scope = catalog_scope(request.query_params)
         if scope.startswith("group:"):
             raw_gid = scope.split(":", 1)[1]
             try:
@@ -88,20 +89,43 @@ class ChannelListView(APIView):
                 )
             qs = qs.filter(Q(allowed_groups__id=gid)).distinct()
 
-        channels = list(qs)
-        # 附成员数
+        qs = with_activity_order(
+            qs,
+            active_condition=Exists(VoiceChannelMember.objects.filter(channel_id=OuterRef("pk"))),
+            previous_condition=Q(last_occupied_at__isnull=False) | Q(last_vacant_at__isnull=False),
+            active_time="last_occupied_at",
+            previous_time="last_vacant_at",
+        )
+        page = paginate_catalog(
+            qs, request, resource="voice", ordering="activity", filters={"scope": scope}
+        )
+        channels = page.rows if page is not None else list(qs)
+        channel_ids = [ch.id for ch in channels]
+        # 只聚合本页频道，避免分页后仍扫描整个成员目录。
         counts = {
             c["channel_id"]: c["n"]
-            for c in VoiceChannelMember.objects.values("channel_id").annotate(
-                n=Count("id")
-            )
+            for c in VoiceChannelMember.objects.filter(channel_id__in=channel_ids)
+            .values("channel_id")
+            .annotate(n=Count("id"))
         }
+        mine_ids = set(
+            VoiceChannelMember.objects.filter(
+                channel_id__in=channel_ids, user=request.user
+            ).values_list("channel_id", flat=True)
+        )
         payload = []
         for ch in channels:
             s = VoiceChannelSerializer(ch).data
             s["member_count"] = counts.get(ch.id, 0)
-            s["mine"] = services.user_in_channel(ch, request.user)
+            s["mine"] = ch.id in mine_ids
             payload.append(s)
+        if page is not None:
+            data = page.response_data(payload)
+            # 侧栏人数是完整可见目录的成员数，不能把首屏成员和冒充总数。
+            data["total_member_count"] = VoiceChannelMember.objects.filter(
+                channel_id__in=qs.order_by().values("pk")
+            ).count()
+            return Response(data)
         return Response(payload)
 
     def post(self, request):

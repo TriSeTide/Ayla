@@ -11,8 +11,10 @@ def _create_via_api(client, title="爱莉的午后"):
 
 
 @pytest.mark.django_db
-def test_create_channel_returns_stream_urls(auth_client):
+def test_create_channel_returns_stream_urls(auth_client, settings):
     """创建 → 201，返回 stream_key/rtmp/hls/flv；status=idle。"""
+    settings.SRS_RTMP_URL = "rtmp://127.0.0.1:1935/live"
+    settings.SRS_PLAY_URL = "http://127.0.0.1:8080/live"
     client, user = auth_client()
     resp = _create_via_api(client)
     assert resp.status_code == 201, resp.content
