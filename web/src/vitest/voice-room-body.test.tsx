@@ -1,8 +1,11 @@
 /** VoiceRoomBody 房内独立聊天测试：不再把消息发送到群聊。 */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as voiceApi from "../api/voice";
 import { VoiceRoomBody } from "../components/voice/VoiceRoomBody";
+import { voiceWS } from "../ws/voice";
+
+const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
 
 vi.mock("../components/voice/VoiceChannelPanel", () => ({
   VoiceChannelPanel: () => <div>语音面板</div>,
@@ -57,11 +60,58 @@ function renderBody(channelId?: string, inputEntered = true) {
   );
 }
 
+beforeEach(() => {
+  vi.mocked(voiceApi.listVoiceChatMessages).mockResolvedValue([]);
+});
+
 afterEach(() => {
+  if (originalAnimate) Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+  else Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe("VoiceRoomBody 房内独立聊天", () => {
+  it.each([false, true])("换房在原三块DOM重播、取消旧动画且不重复订阅（narrow=%s）", async (narrow) => {
+    let reduced = false;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      get matches() { return query === "(max-width: 768px)" ? narrow : query.includes("prefers-reduced-motion") && reduced; },
+      addEventListener: (_name: string, cb: () => void) => listeners.add(cb),
+      removeEventListener: (_name: string, cb: () => void) => listeners.delete(cb),
+    })));
+    const played: Array<{ node: HTMLElement; frames: Keyframe[]; options: KeyframeAnimationOptions; cancel: ReturnType<typeof vi.fn> }> = [];
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: function(this: HTMLElement, frames: Keyframe[], options: KeyframeAnimationOptions) {
+      const record = { node: this, frames, options, cancel: vi.fn() };
+      played.push(record);
+      return { cancel: record.cancel };
+    } });
+    const onFrame = vi.spyOn(voiceWS, "onFrame");
+    const props = { channelName: "语音房", livekit: "connected" as const, wsConnection: "online" as const, elysiaProfile: null, onToggleMic: vi.fn(), onLeave: vi.fn(), onRejoin: vi.fn(), onVolumeChange: vi.fn(), onLocalVolumeChange: vi.fn(), onToggleMemberMuted: vi.fn(), onBack: vi.fn(), inputEntered: true };
+    const { container, rerender, unmount } = render(<VoiceRoomBody {...props} channelId="v1" />);
+    await waitFor(() => expect(voiceApi.listVoiceChatMessages).toHaveBeenCalledWith("v1"));
+    expect(played).toHaveLength(3);
+    expect(played.every(({ options }) => options.duration === 300 && options.easing === "cubic-bezier(0,0,0.58,1)")).toBe(true);
+    expect(played.map(({ frames }) => frames[0].transform)).toEqual(["translate(0px, -20px)", narrow ? "translate(0px, 20px)" : "translate(20px, 0px)", "translate(0px, 20px)"]);
+    const oldNodes = played.map(({ node }) => node);
+    const input = container.querySelector("textarea");
+    rerender(<VoiceRoomBody {...props} channelId="v2" />);
+    await waitFor(() => expect(voiceApi.listVoiceChatMessages).toHaveBeenCalledWith("v2"));
+    expect(played).toHaveLength(6);
+    expect(played.slice(3).map(({ node }) => node)).toEqual(oldNodes);
+    expect(played.slice(0, 3).every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
+    expect(container.querySelector("textarea")).toBe(input);
+    expect(onFrame).toHaveBeenCalledTimes(2);
+    act(() => { reduced = true; Array.from(listeners).forEach((listener) => listener()); });
+    expect(played.slice(3).every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
+    rerender(<VoiceRoomBody {...props} channelId="v3" />);
+    await waitFor(() => expect(voiceApi.listVoiceChatMessages).toHaveBeenCalledWith("v3"));
+    expect(played).toHaveLength(6);
+    expect(onFrame).toHaveBeenCalledTimes(3);
+    unmount();
+    expect(played.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
+  });
   it("语音房显示独立输入框并发送到 voice chat API", async () => {
     vi.mocked(voiceApi.sendVoiceChatMessage).mockResolvedValue({
       id: "m1",
@@ -89,10 +139,10 @@ describe("VoiceRoomBody 房内独立聊天", () => {
     expect(screen.queryByPlaceholderText("在语音房内聊天")).not.toBeInTheDocument();
   });
 
-  it("群外进入语音房时，输入框完整复用直播间的底部滑入动画", () => {
+  it("输入区由聊天卡单独带入，不再叠加旧100%位移和延迟动画", () => {
     const { container, rerender } = renderBody("v1", false);
-    expect(container.querySelector(".voice-room-composer")).toHaveStyle({ transform: "translateY(100%)" });
-    expect(container.querySelector(".voice-room-composer")).toHaveStyle({ transition: "transform 250ms var(--ease-out)" });
+    const composer = container.querySelector(".voice-room-composer");
+    expect(composer).toHaveStyle({ transform: "translateY(0)", transition: "none" });
 
     rerender(
       <VoiceRoomBody
@@ -112,6 +162,7 @@ describe("VoiceRoomBody 房内独立聊天", () => {
       />,
     );
     expect(container.querySelector(".voice-room-composer")).toHaveStyle({ transform: "translateY(0)" });
+    expect(container.querySelector(".voice-room-composer")).toBe(composer);
   });
 
   it("WS 回播先于乐观 append 到达时不渲染双气泡", async () => {

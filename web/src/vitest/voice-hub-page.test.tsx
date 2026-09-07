@@ -9,7 +9,7 @@
  *
  * 本测试真实渲染 AppShell 转场链路，断言转场完成（旧实例已卸载）后状态保持。
  */
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceChannelDescriptor } from "../api/types";
@@ -19,6 +19,7 @@ import { useAuthStore } from "../stores/auth";
 import { useBadgesStore } from "../stores/badges";
 import { useShellStore } from "../stores/shell";
 import { useVoiceStore } from "../stores/voice";
+import { disposeDirectoryTracking } from "../stores/directory";
 
 // mock 一律用纯 async 实现（不用 mockResolvedValue）：不受 restoreAllMocks/clearAllMocks 影响
 vi.mock("../api/elysia", () => ({
@@ -42,6 +43,7 @@ vi.mock("../api/voice", async () => {
   return {
     ...actual,
     listVoiceChannels: async () => [channel],
+    listVoiceChannelsPage: async () => ({ results: [channel], next_cursor: null, has_more: false, total: 1, total_member_count: 1 }),
     getVoiceChannel: async () => channel,
   };
 });
@@ -131,6 +133,8 @@ function stubChannel(): VoiceChannelDescriptor {
 }
 
 beforeEach(() => {
+  disposeDirectoryTracking();
+  useVoiceStore.getState().reset();
   useAuthStore.setState({
     accessToken: "acc",
     currentUser: {
@@ -146,8 +150,7 @@ beforeEach(() => {
   });
   useBadgesStore.setState({ badges: null });
   useShellStore.setState({ bottomTabsLeaving: false });
-  // 预置频道列表（含 lastFetched 避免 isVoiceStale 判过期触发重拉）：大厅直接出列表、
-  // 房内直接出面板，不依赖网络返回时序
+  // 预置房间 descriptor 供直达房内使用；大厅仍通过独立分页投影取首批。
   useVoiceStore.setState({
     channels: [stubChannel()],
     channelsLoading: false,
@@ -156,6 +159,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
+  disposeDirectoryTracking();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   useVoiceStore.setState({ channels: [], channelsLoading: false, lastFetched: null });

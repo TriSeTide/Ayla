@@ -118,7 +118,7 @@ describe("VoiceChannelList 进房语义（#1）", () => {
     expect(onJoin).not.toHaveBeenCalled();
   });
 
-  it("revealItems 内容就绪后为每张语音卡片挂逐条浮入与 40ms stagger", () => {
+  it("revealItems 内容就绪后为每张语音卡片挂逐条浮入与 50ms stagger", () => {
     const { container } = render(
       <VoiceChannelList
         channels={[ch("v1"), ch("v2"), ch("v3")]}
@@ -132,8 +132,8 @@ describe("VoiceChannelList 进房语义（#1）", () => {
     expect(cards).toHaveLength(3);
     expect(cards[0]).toHaveClass("reveal-item");
     expect(cards[0]).toHaveStyle({ "--reveal-delay": "0ms" });
-    expect(cards[1]).toHaveStyle({ "--reveal-delay": "40ms" });
-    expect(cards[2]).toHaveStyle({ "--reveal-delay": "80ms" });
+    expect(cards[1]).toHaveStyle({ "--reveal-delay": "50ms" });
+    expect(cards[2]).toHaveStyle({ "--reveal-delay": "100ms" });
   });
 
   it("未启用 revealItems 时不附加逐条浮入类", () => {

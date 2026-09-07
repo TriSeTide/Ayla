@@ -1,9 +1,8 @@
 /**
  * VoiceHubPage 列表浮入测试（A2 扩展至群外语音）：
- * 异步频道列表就绪后，页面把 !channelsLoading 传给 VoiceChannelList，
- * 卡片外层用统一 .reveal-item + 40ms stagger 进入。
+ * 异步首批频道就绪后，只为新增卡片播放 50ms stagger。
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import * as voiceApi from "../api/voice";
@@ -11,12 +10,14 @@ import type { VoiceChannelDescriptor } from "../api/types";
 import { VoiceHubPage } from "../pages/VoiceHubPage";
 import { useShellStore } from "../stores/shell";
 import { useVoiceStore } from "../stores/voice";
+import { disposeDirectoryTracking } from "../stores/directory";
 
 vi.mock("../api/elysia", () => ({
   getElysiaProfile: vi.fn().mockResolvedValue({ enabled: false, user: null }),
 }));
 vi.mock("../api/voice", () => ({
   listVoiceChannels: vi.fn(),
+  listVoiceChannelsPage: vi.fn(),
   getVoiceChannel: vi.fn(),
 }));
 vi.mock("../ws/voice", () => ({ voiceWS: { connect: vi.fn() } }));
@@ -37,6 +38,8 @@ vi.mock("../hooks/useVoiceChannel", () => ({
   }),
 }));
 vi.mock("../components/FavoriteButton", () => ({ FavoriteButton: () => null }));
+const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+let animatedCards: Array<{ node: HTMLElement; delay: number | undefined }>;
 
 function channel(id: string): VoiceChannelDescriptor {
   return {
@@ -54,19 +57,31 @@ function channel(id: string): VoiceChannelDescriptor {
 }
 
 beforeEach(() => {
+  disposeDirectoryTracking();
   useVoiceStore.getState().reset();
   useShellStore.setState({ refreshCallback: null, bottomTabsLeaving: false });
-  vi.mocked(voiceApi.listVoiceChannels).mockResolvedValue([channel("1"), channel("2"), channel("3")]);
+  vi.mocked(voiceApi.listVoiceChannelsPage).mockResolvedValue({ results: [channel("1"), channel("2"), channel("3")], next_cursor: null, has_more: false, total: 3, total_member_count: 6 });
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  animatedCards = [];
+  Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: function(this: HTMLElement, _frames: Keyframe[], options: KeyframeAnimationOptions) {
+    if (this.matches(".voice-channel-card-wrap")) animatedCards.push({ node: this, delay: options.delay });
+    return { cancel: vi.fn(), onfinish: null };
+  } });
 });
 
 afterEach(() => {
+  cleanup();
+  disposeDirectoryTracking();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  if (originalAnimate) Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+  else Reflect.deleteProperty(HTMLElement.prototype, "animate");
   useVoiceStore.getState().reset();
   useShellStore.setState({ refreshCallback: null, bottomTabsLeaving: false });
 });
 
 describe("VoiceHubPage 列表逐条浮入", () => {
-  it("异步加载完成后为群外语音卡片应用 40ms stagger", async () => {
+  it("异步加载完成后为群外语音卡片应用 50ms stagger", async () => {
     const { container } = render(
       <MemoryRouter>
         <VoiceHubPage />
@@ -76,9 +91,8 @@ describe("VoiceHubPage 列表逐条浮入", () => {
     await waitFor(() => expect(container.querySelectorAll(".voice-channel-card-wrap")).toHaveLength(3));
 
     const cards = container.querySelectorAll(".voice-channel-card-wrap");
-    expect(cards[0]).toHaveClass("reveal-item");
-    expect(cards[0]).toHaveStyle({ "--reveal-delay": "0ms" });
-    expect(cards[1]).toHaveStyle({ "--reveal-delay": "40ms" });
-    expect(cards[2]).toHaveStyle({ "--reveal-delay": "80ms" });
+    expect(voiceApi.listVoiceChannelsPage).toHaveBeenCalledWith({ groupId: undefined, onlyLive: undefined, limit: 20, cursor: null });
+    expect(animatedCards.map((item) => item.node)).toEqual(Array.from(cards));
+    expect(animatedCards.map((item) => item.delay)).toEqual([0, 50, 100]);
   });
 });

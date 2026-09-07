@@ -34,6 +34,7 @@ export function VoiceChannelPanel({
   channelId,
   ownerId,
   livekit,
+  connectionError,
   wsConnection,
   elysiaProfile,
   onToggleMic,
@@ -47,6 +48,7 @@ export function VoiceChannelPanel({
   channelId?: string;
   ownerId?: string;
   livekit: LiveKitConnectionState;
+  connectionError?: string | null;
   wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
@@ -59,8 +61,9 @@ export function VoiceChannelPanel({
   onToggleMemberMuted: (userId: string) => void;
 }) {
   const members = useVoiceStore((s) => s.members);
+  const currentChannelId = useVoiceStore((s) => s.currentChannelId);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const list = Object.values(members);
+  const list = channelId != null && currentChannelId !== channelId ? [] : Object.values(members);
   const elysiaUserId = elysiaProfile?.user.id ?? null;
   const isOwner = ownerId != null && ownerId === currentUser?.id;
   const [actionError, setActionError] = useState<string | null>(null);
@@ -116,6 +119,7 @@ export function VoiceChannelPanel({
         )}
       </div>
       {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
+      {connectionError && <div className="chat-notice" role="alert">{connectionError}</div>}
       <VoiceControls
         livekit={livekit}
         wsConnection={wsConnection}

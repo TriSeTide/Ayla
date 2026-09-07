@@ -16,7 +16,18 @@ import { useAuthStore } from "../../stores/auth";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
 import { getVisibilityLabels } from "../../utils/visibility";
 import { useRevealOnEnter } from "../../hooks/useRevealOnEnter";
+import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
+import { usePanelReplayMotion, type PanelReplayTarget } from "../../hooks/usePanelReplayMotion";
 import { voiceWS } from "../../ws/voice";
+
+const VOICE_PANELS: readonly PanelReplayTarget[] = [
+  { selector: ":scope > .voice-room-head", edge: "top" },
+  { selector: ":scope > .voice-room-layout > .voice-room-chat-card", edge: "right" },
+  { selector: ":scope > .voice-room-layout > .voice-room-voice-card", edge: "bottom" },
+];
+const VOICE_NARROW_PANELS: readonly PanelReplayTarget[] = VOICE_PANELS.map<PanelReplayTarget>((panel) => (
+  panel.edge === "right" ? { ...panel, edge: "bottom" } : panel
+));
 
 export function VoiceRoomBody({
   channelId,
@@ -24,6 +35,7 @@ export function VoiceRoomBody({
   ownerId,
   channel,
   livekit,
+  connectionError,
   wsConnection,
   elysiaProfile,
   onToggleMic,
@@ -34,7 +46,6 @@ export function VoiceRoomBody({
   onToggleMemberMuted,
   onBack,
   onDeleteChannel,
-  inputEntered,
 }: {
   channelId?: string;
   ownerId?: string;
@@ -44,6 +55,7 @@ export function VoiceRoomBody({
   /** 完整的频道对象，用于显示标签等信息 */
   channel?: VoiceChannelDescriptor | null;
   livekit: LiveKitConnectionState;
+  connectionError?: string | null;
   wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
@@ -54,8 +66,11 @@ export function VoiceRoomBody({
   onToggleMemberMuted: (userId: string) => void;
   onBack: () => void;
   onDeleteChannel?: () => void;
+  /** Compatibility with room callers; the chat card owns the input's entry animation. */
   inputEntered: boolean;
 }) {
+  const isNarrow = useMediaQuery(NARROW_QUERY);
+  const panelsRef = usePanelReplayMotion<HTMLDivElement>(channelId ?? "", isNarrow ? VOICE_NARROW_PANELS : VOICE_PANELS);
   const currentUser = useAuthStore((state) => state.currentUser);
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<VoiceChatMessage[]>([]);
@@ -185,8 +200,8 @@ export function VoiceRoomBody({
     <div
       className="voice-room-composer"
       style={{
-        transform: inputEntered ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 250ms var(--ease-out)",
+        transform: "translateY(0)",
+        transition: "none",
       }}
     >
       <div className="composer-row">
@@ -243,7 +258,7 @@ export function VoiceRoomBody({
   );
 
   return (
-    <div className="voice-room-body">
+    <div className="voice-room-body is-panel-motion" ref={panelsRef} data-voice-motion-owner={channelId}>
       <header className="voice-room-head">
         <button type="button" className="icon-btn-40" onClick={onBack} aria-label="返回">
           <IconBack width={20} height={20} />
@@ -265,6 +280,7 @@ export function VoiceRoomBody({
             channelId={channelId}
             ownerId={ownerId}
             livekit={livekit}
+            connectionError={connectionError}
             wsConnection={wsConnection}
             elysiaProfile={elysiaProfile}
             onToggleMic={onToggleMic}
