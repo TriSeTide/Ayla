@@ -8,7 +8,8 @@
 import { useState } from "react";
 import type { Post } from "../../api/types";
 import { Avatar } from "../Avatar";
-import { IconEye, IconHeart, IconMessage } from "../icons";
+import { IconEye, IconMessage } from "../icons";
+import { FavoriteButton } from "../FavoriteButton";
 import { ResourceImage } from "../ResourceImage";
 import { PostVideoCover } from "./PostVideoCover";
 import { mediaContentUrl } from "../../api/media";
@@ -34,14 +35,10 @@ function formatTime(iso: string): string {
 
 export function PostCard({
   post,
-  favorited,
   onOpen,
-  onToggleFavorite,
 }: {
   post: Post;
-  favorited: boolean;
   onOpen: () => void;
-  onToggleFavorite: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
@@ -130,15 +127,7 @@ export function PostCard({
           <IconEye width={16} height={16} />
           {post.view_count ?? 0}
         </span>
-        <button
-          type="button"
-          className={`post-card-fav ${favorited ? "is-favorited" : ""}`}
-          onClick={onToggleFavorite}
-          aria-label={favorited ? "取消收藏" : "收藏"}
-          aria-pressed={favorited}
-        >
-          <IconHeart width={18} height={18} fill={favorited ? "currentColor" : "none"} />
-        </button>
+        <FavoriteButton targetType="post" targetId={post.id} compact className="post-card-fav" />
       </footer>
     </article>
   );

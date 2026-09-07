@@ -1,3 +1,5 @@
+import { FavoriteButton } from "../components/FavoriteButton";
+import { ensureFavoriteScope, useFavoriteStatusStore } from "../stores/favoriteStatus";
 /**
  * GroupPosts 测试（Bug #8 + 任务 07）：
  * - 群内帖子列表顶部必须有「我的帖子」入口，点击跳转 /posts/mine；
@@ -23,6 +25,7 @@ vi.mock("../api/posts", () => ({
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn(),
+  getFavoriteStatuses: vi.fn(),
   addFavorite: vi.fn(),
   removeFavorite: vi.fn(),
 }));
@@ -30,22 +33,12 @@ vi.mock("../ws/chat", () => ({
   chatWS: { onFrame: vi.fn(() => vi.fn()) },
 }));
 vi.mock("../components/posts/PostCard", () => ({
-  PostCard: ({
-    post,
-    favorited,
-    onToggleFavorite,
-  }: {
-    post: { id: number };
-    favorited: boolean;
-    onToggleFavorite: () => void;
-  }) => (
-    <button type="button" onClick={onToggleFavorite} aria-pressed={favorited}>
-      收藏{post.id}
-    </button>
+  PostCard: ({ post }: { post: Post }) => (
+    <div><span>帖卡</span><span>{post.title}</span><FavoriteButton targetType="post" targetId={post.id} compact /></div>
   ),
 }));
 vi.mock("../components/posts/PostEditor", () => ({
-  PostEditor: () => <div>发帖编辑器</div>,
+  PostEditor: ({ onCreated }: { onCreated: (post: Post) => void }) => <div>发帖编辑器<button type="button" onClick={() => onCreated({ ...post(5), title: "本地新帖" })}>测试发帖</button></div>,
 }));
 vi.mock("../pages/PostDetailPage", () => ({ PostDetailPage: () => <div>帖子详情占位</div> }));
 
@@ -94,6 +87,9 @@ function renderGroupPosts() {
 }
 
 beforeEach(() => {
+  ensureFavoriteScope();
+  useFavoriteStatusStore.setState({ entries: new Map() });
+  vi.mocked(favoritesApi.getFavoriteStatuses).mockImplementation(async (target_type, ids) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) }));
   clearScrollMemory();
   usePostsStore.getState().reset();
   vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
@@ -131,10 +127,10 @@ describe("GroupPosts bounded cursor pages", () => {
       results: [post(2), post(1)], next_cursor: "page-2", has_more: true,
     });
     renderGroupPosts();
-    await screen.findByRole("button", { name: "收藏1" });
+    await findFavorite(1);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(1);
     expect(document.querySelectorAll(".posts-feed-item")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "收藏30" })).not.toBeInTheDocument();
+    expect(getFavorite(30)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加载更多帖子" })).toBeInTheDocument();
   });
 
@@ -144,15 +140,15 @@ describe("GroupPosts bounded cursor pages", () => {
       .mockResolvedValueOnce({ results: [post(3), post(2)], next_cursor: "page-2", has_more: true })
       .mockReturnValueOnce(pending.promise);
     renderGroupPosts();
-    const retained = await screen.findByRole("button", { name: "收藏3" });
+    const retained = await findFavorite(3);
     const root = document.querySelector<HTMLElement>(".group-posts-list")!;
     scrollNearBottom(root);
     fireEvent.scroll(root);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
     expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "group:1", limit: 20, cursor: "page-2" });
     await act(async () => pending.resolve({ results: [post(2), post(1), post(1)], next_cursor: null, has_more: false }));
-    expect(await screen.findByRole("button", { name: "收藏1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "收藏3" })).toBe(retained);
+    expect(await findFavorite(1)).toBeInTheDocument();
+    expect(getFavorite(3)!).toBe(retained);
     expect(document.querySelectorAll(".posts-feed-item")).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "加载更多帖子" })).not.toBeInTheDocument();
   });
@@ -163,15 +159,15 @@ describe("GroupPosts bounded cursor pages", () => {
       .mockRejectedValueOnce(new Error("下一页暂不可用"))
       .mockResolvedValueOnce({ results: [post(1)], next_cursor: null, has_more: false });
     renderGroupPosts();
-    const retained = await screen.findByRole("button", { name: "收藏2" });
+    const retained = await findFavorite(2);
     const root = document.querySelector<HTMLElement>(".group-posts-list")!;
     scrollNearBottom(root);
     await screen.findByText("下一页暂不可用");
     fireEvent.scroll(root);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: "收藏2" })).toBe(retained);
+    expect(getFavorite(2)!).toBe(retained);
     fireEvent.click(screen.getByRole("button", { name: "重试加载更多" }));
-    await screen.findByRole("button", { name: "收藏1" });
+    await findFavorite(1);
     expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "group:1", limit: 20, cursor: "page-2" });
   });
 
@@ -185,10 +181,10 @@ describe("GroupPosts bounded cursor pages", () => {
     view.rerender(<MemoryRouter><GroupPosts groupId="2" onExit={() => {}} /></MemoryRouter>);
     await screen.findByText("群2首屏失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await screen.findByRole("button", { name: "收藏20" });
+    await findFavorite(20);
     await act(async () => stale.resolve({ results: [post(1)], next_cursor: "stale", has_more: true }));
-    expect(screen.queryByRole("button", { name: "收藏1" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "收藏20" })).toBeInTheDocument();
+    expect(getFavorite(1)).not.toBeInTheDocument();
+    expect(getFavorite(20)!).toBeInTheDocument();
   });
 
   it("已加载两页详情往返不重请求，返回后可继续第三页", async () => {
@@ -197,16 +193,16 @@ describe("GroupPosts bounded cursor pages", () => {
       .mockResolvedValueOnce({ results: [post(2)], next_cursor: "page-3", has_more: true })
       .mockResolvedValueOnce({ results: [post(1)], next_cursor: null, has_more: false });
     const view = render(<MemoryRouter><GroupPosts groupId="1" onExit={() => {}} /></MemoryRouter>);
-    await screen.findByRole("button", { name: "收藏3" });
+    await findFavorite(3);
     fireEvent.click(screen.getByRole("button", { name: "加载更多帖子" }));
-    await screen.findByRole("button", { name: "收藏2" });
+    await findFavorite(2);
     view.rerender(<MemoryRouter><GroupPosts groupId="1" postId="3" onExit={() => {}} /></MemoryRouter>);
     expect(screen.getByText("帖子详情占位")).toBeInTheDocument();
     view.rerender(<MemoryRouter><GroupPosts groupId="1" onExit={() => {}} /></MemoryRouter>);
-    expect(await screen.findByRole("button", { name: "收藏2" })).toBeInTheDocument();
+    expect(await findFavorite(2)).toBeInTheDocument();
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole("button", { name: "加载更多帖子" }));
-    await screen.findByRole("button", { name: "收藏1" });
+    await findFavorite(1);
     expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "group:1", limit: 20, cursor: "page-3" });
   });
 
@@ -227,7 +223,7 @@ describe("GroupPosts bounded cursor pages", () => {
         .mockReturnValueOnce(pending.promise)
         .mockResolvedValueOnce({ results: [post(1)], next_cursor: null, has_more: false });
       const view = render(<MemoryRouter><GroupPosts groupId="1" onExit={() => {}} /></MemoryRouter>);
-      await screen.findByRole("button", { name: "收藏3" });
+      await findFavorite(3);
       expect(animated.filter((node) => node.matches(".posts-feed-item"))).toHaveLength(1);
       const root = document.querySelector<HTMLElement>(".group-posts-list")!;
       root.scrollTop = 320;
@@ -236,11 +232,11 @@ describe("GroupPosts bounded cursor pages", () => {
       view.rerender(<MemoryRouter><GroupPosts groupId="1" postId="3" onExit={() => {}} /></MemoryRouter>);
       await act(async () => pending.resolve({ results: [post(2)], next_cursor: "page-3", has_more: true }));
       view.rerender(<MemoryRouter><GroupPosts groupId="1" onExit={() => {}} /></MemoryRouter>);
-      await screen.findByRole("button", { name: "收藏2" });
+      await findFavorite(2);
       expect(document.querySelector<HTMLElement>(".group-posts-list")!.scrollTop).toBe(320);
       expect(animated.filter((node) => node.matches(".posts-feed-item"))).toHaveLength(1);
       fireEvent.click(screen.getByRole("button", { name: "加载更多帖子" }));
-      await screen.findByRole("button", { name: "收藏1" });
+      await findFavorite(1);
       expect(animated.filter((node) => node.matches(".posts-feed-item"))).toHaveLength(2);
       expect(animated.filter((node) => node.dataset.postId === "1")).toHaveLength(1);
       cleanup();
@@ -254,16 +250,16 @@ describe("GroupPosts bounded cursor pages", () => {
     vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post(2), post(1)], next_cursor: "page-2", has_more: true });
     vi.mocked(postsApi.getPost).mockResolvedValue(post(3));
     renderGroupPosts();
-    const retained = await screen.findByRole("button", { name: "收藏2" });
+    const retained = await findFavorite(2);
     const calls = vi.mocked(chatWS.onFrame).mock.calls;
     const handler = calls[calls.length - 1][0];
     act(() => handler({ type: "post.deleted", post_id: "1" }));
-    expect(screen.queryByRole("button", { name: "收藏1" })).not.toBeInTheDocument();
+    expect(getFavorite(1)).not.toBeInTheDocument();
     act(() => handler({ type: "post.created", post: { id: "3" } } as never));
-    await screen.findByRole("button", { name: "收藏3" });
+    await findFavorite(3);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(1);
     expect(postsApi.getPost).toHaveBeenCalledWith(3);
-    expect(screen.getByRole("button", { name: "收藏2" })).toBe(retained);
+    expect(getFavorite(2)!).toBe(retained);
   });
 
   it("刷新仅一页且保留同id卡DOM，不再key重挂整个流", async () => {
@@ -271,12 +267,65 @@ describe("GroupPosts bounded cursor pages", () => {
       .mockResolvedValueOnce({ results: [post(2), post(1)], next_cursor: "page-2", has_more: true })
       .mockResolvedValueOnce({ results: [post(3), post(2)], next_cursor: "fresh-2", has_more: true });
     renderGroupPosts();
-    const retained = await screen.findByRole("button", { name: "收藏2" });
+    const retained = await findFavorite(2);
     await act(async () => { await useShellStore.getState().refreshCallback?.(); });
-    await screen.findByRole("button", { name: "收藏3" });
+    await findFavorite(3);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: "收藏2" })).toBe(retained);
-    expect(screen.queryByRole("button", { name: "收藏1" })).not.toBeInTheDocument();
+    expect(getFavorite(2)!).toBe(retained);
+    expect(getFavorite(1)).not.toBeInTheDocument();
+  });
+
+  it("刷新旧首页不吞掉期间 WS 新帖/编辑、本地发布、删除或可见范围变化", async () => {
+    const pending = deferredPage();
+    vi.mocked(postsApi.listPosts)
+      .mockResolvedValueOnce({ results: [post(1), post(2), post(4)], next_cursor: "old-next", has_more: true })
+      .mockReturnValueOnce(pending.promise);
+    vi.mocked(postsApi.getPost).mockImplementation(async (id) => ({ ...post(id),
+      title: id === 1 ? "实时编辑" : "实时新帖", allowed_group_ids: id === 4 ? ["2"] : ["1"],
+    }));
+    renderGroupPosts();
+    const retained = await findFavorite(1);
+    let refresh!: Promise<void>;
+    act(() => { refresh = Promise.resolve(useShellStore.getState().refreshCallback!()); });
+    const handler = vi.mocked(chatWS.onFrame).mock.calls.at(-1)![0];
+    await act(async () => {
+      handler({ type: "post.created", post: { id: "3" } } as never);
+      handler({ type: "post.updated", post: { id: "1" } } as never);
+      handler({ type: "post.updated", post: { id: "4" } } as never);
+      handler({ type: "post.deleted", post_id: "2" });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "测试发帖" }));
+    await findFavorite(5);
+    await act(async () => {
+      pending.resolve({ results: [post(1), post(2), post(4)], next_cursor: "new-next", has_more: true });
+      await refresh;
+    });
+    expect(screen.getByText("实时编辑")).toBeInTheDocument();
+    expect(screen.getByText("实时新帖")).toBeInTheDocument();
+    expect(screen.getByText("本地新帖")).toBeInTheDocument();
+    expect(getFavorite(1)).toBe(retained);
+    expect(getFavorite(2)).toBeNull();
+    expect(getFavorite(4)).toBeNull();
+    expect(document.querySelectorAll(".posts-feed-item")).toHaveLength(3);
+  });
+
+  it("同帖后来的更新先返回时，早期单条对账不能覆盖它", async () => {
+    let resolveOld!: (value: Post) => void;
+    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post(1)], next_cursor: null, has_more: false });
+    vi.mocked(postsApi.getPost)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ ...post(1), title: "后来的编辑" });
+    renderGroupPosts();
+    await findFavorite(1);
+    const handler = vi.mocked(chatWS.onFrame).mock.calls.at(-1)![0];
+    await act(async () => {
+      handler({ type: "post.updated", post: { id: "1" } } as never);
+      handler({ type: "post.updated", post: { id: "1" } } as never);
+    });
+    await screen.findByText("后来的编辑");
+    await act(async () => resolveOld({ ...post(1), title: "较早的编辑" }));
+    expect(screen.getByText("后来的编辑")).toBeInTheDocument();
+    expect(screen.queryByText("较早的编辑")).toBeNull();
   });
 });
 
@@ -299,14 +348,12 @@ describe("GroupPosts 收藏键（任务 07）", () => {
       next_cursor: null,
       has_more: false,
     });
-    vi.mocked(favoritesApi.listFavorites).mockResolvedValue([
-      { id: 100, target_type: "post", target_id: "1" } as Favorite,
-    ]);
+    vi.mocked(favoritesApi.getFavoriteStatuses).mockResolvedValue({ target_type: "post", statuses: { "1": 100 } });
     renderGroupPosts();
 
-    const btn = await screen.findByRole("button", { name: "收藏1" });
+    const btn = await findFavorite(1);
     await waitFor(() => expect(btn).toHaveAttribute("aria-pressed", "true"));
-    expect(favoritesApi.listFavorites).toHaveBeenCalledWith("post");
+    expect(favoritesApi.listFavorites).not.toHaveBeenCalled();
   });
 
   it("点击收藏键 → 调 addFavorite 并更新 posts store（即时反馈）", async () => {
@@ -322,12 +369,12 @@ describe("GroupPosts 收藏键（任务 07）", () => {
     } as Favorite);
     renderGroupPosts();
 
-    const btn = await screen.findByRole("button", { name: "收藏1" });
+    const btn = await findFavorite(1);
     expect(btn).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(btn);
 
     await waitFor(() => expect(favoritesApi.addFavorite).toHaveBeenCalledWith("post", "1"));
-    expect(usePostsStore.getState().favoriteByPostId["1"]).toBe(100);
+    expect(useFavoriteStatusStore.getState().entries.get("post:1")?.favoriteId).toBe(100);
     await waitFor(() => expect(btn).toHaveAttribute("aria-pressed", "true"));
   });
 
@@ -337,18 +384,27 @@ describe("GroupPosts 收藏键（任务 07）", () => {
       next_cursor: null,
       has_more: false,
     });
-    vi.mocked(favoritesApi.listFavorites).mockResolvedValue([
-      { id: 100, target_type: "post", target_id: "1" } as Favorite,
-    ]);
+    vi.mocked(favoritesApi.getFavoriteStatuses).mockResolvedValue({ target_type: "post", statuses: { "1": 100 } });
     vi.mocked(favoritesApi.removeFavorite).mockResolvedValue({ deleted: true });
     renderGroupPosts();
 
-    const btn = await screen.findByRole("button", { name: "收藏1" });
+    const btn = await findFavorite(1);
     await waitFor(() => expect(btn).toHaveAttribute("aria-pressed", "true"));
     fireEvent.click(btn);
 
     await waitFor(() => expect(favoritesApi.removeFavorite).toHaveBeenCalledWith(100));
-    expect(usePostsStore.getState().favoriteByPostId["1"]).toBeUndefined();
+    expect(useFavoriteStatusStore.getState().entries.get("post:1")?.favoriteId).toBeNull();
     await waitFor(() => expect(btn).toHaveAttribute("aria-pressed", "false"));
   });
 });
+
+function getFavorite(id: number) {
+  return document.querySelector<HTMLElement>(`[data-post-id="${id}"] .favorite-toggle`);
+}
+async function findFavorite(id: number) {
+  return waitFor(() => {
+    const button = getFavorite(id);
+    expect(button).toHaveAttribute("aria-pressed");
+    return button!;
+  });
+}

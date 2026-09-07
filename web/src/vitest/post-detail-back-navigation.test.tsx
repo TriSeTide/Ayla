@@ -28,6 +28,7 @@ vi.mock("../api/posts", () => ({
   listPosts: vi.fn(),
   getPost: vi.fn(),
   listComments: vi.fn(),
+  listCommentsPage: vi.fn().mockResolvedValue({ results: [], next_cursor: null, has_more: false, total: 0 }),
   createComment: vi.fn(),
   deleteComment: vi.fn(),
   updatePost: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("../api/posts", () => ({
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn().mockResolvedValue([]),
+  getFavoriteStatuses: vi.fn().mockImplementation(async (target_type, ids: string[]) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) })),
   addFavorite: vi.fn(),
   removeFavorite: vi.fn(),
 }));

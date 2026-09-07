@@ -28,6 +28,13 @@ function calledUrl(call = 0): string {
 }
 
 describe("posts API", () => {
+  it("comment pages explicitly request a bounded page and preserve the cursor", async () => {
+    await postsApi.listCommentsPage(12, { cursor: "next:/+=", limit: 20 });
+    const url = new URL(calledUrl(), "https://example.test");
+    expect(url.pathname).toContain("/posts/12/comments/");
+    expect(url.searchParams.get("limit")).toBe("20");
+    expect(url.searchParams.get("cursor")).toBe("next:/+=");
+  });
   it("listPosts feed 无参数 → 不带 query", async () => {
     await postsApi.listPosts({ scope: "feed" });
     expect(calledUrl()).toContain("/posts/");

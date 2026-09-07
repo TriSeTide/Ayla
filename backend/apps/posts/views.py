@@ -20,6 +20,7 @@ from apps.common.visibility import can_view, visible_queryset
 
 from . import services
 from .models import Comment, Post, PostView
+from .comment_pagination import paginate_comments
 from .serializers import (
     CommentSerializer,
     CreateCommentSerializer,
@@ -132,6 +133,7 @@ class PostListView(APIView):
             qs = qs.filter(owner_id=owner_filter)
 
         qs = qs.order_by("-created_at", "-id")
+        total = qs.count()
 
         cursor = request.query_params.get("cursor")
         if cursor:
@@ -154,6 +156,7 @@ class PostListView(APIView):
                 ).data,
                 "next_cursor": next_cursor,
                 "has_more": has_more,
+                "total": total,
             }
         )
 
@@ -307,9 +310,9 @@ class CommentListView(APIView):
         if not can_view(request.user, post):
             return _forbidden("无权查看该帖子")
         qs = post.comments.select_related("author").order_by("created_at", "id")
-        return Response(
-            CommentSerializer(qs, many=True, context={"request": request}).data
-        )
+        page = paginate_comments(qs, request, post_id)
+        data = CommentSerializer(page.rows if page is not None else qs, many=True, context={"request": request}).data
+        return Response(page.response_data(data) if page is not None else data)
 
     def post(self, request, post_id):
         post = _get_post_or_404(post_id)

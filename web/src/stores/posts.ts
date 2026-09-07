@@ -7,6 +7,7 @@
  */
 import { create } from "zustand";
 import type { Post, PostScope } from "../api/types";
+import { applyFavoriteStatus } from "./favoriteStatus";
 
 interface PostsState {
   posts: Post[];
@@ -29,7 +30,7 @@ interface PostsState {
 
   /** 记收藏（postId → favoriteId）；null 表示取消 */
   setFavorite: (postId: string, favoriteId: number | null) => void;
-  /** 批量载入我的收藏（拉 GET /favorites/?type=post 后铺底） */
+  /** 旧完整快照兼容入口；网页生产调用改用按目标的 favoriteStatus。 */
   loadFavorites: (favorites: Array<{ id: number; target_id: string }>) => void;
   
   /** WebSocket 实时更新：插入或更新帖子（已存在则更新，不存在则插入到列表头部） */
@@ -69,20 +70,24 @@ export const usePostsStore = create<PostsState>((set) => ({
   setError: (error) => set({ error, loading: false }),
   setScope: (scope) => set({ scope, posts: [], nextCursor: null, hasMore: false }),
 
-  setFavorite: (postId, favoriteId) =>
+  setFavorite: (postId, favoriteId) => {
+    applyFavoriteStatus("post", postId, favoriteId);
     set((state) => {
       const next = { ...state.favoriteByPostId };
       if (favoriteId == null) delete next[postId];
       else next[postId] = favoriteId;
       return { favoriteByPostId: next };
-    }),
+    });
+  },
 
-  loadFavorites: (favorites) =>
+  loadFavorites: (favorites) => {
+    for (const favorite of favorites) applyFavoriteStatus("post", favorite.target_id, favorite.id);
     set(() => {
       const map: Record<string, number> = {};
       for (const f of favorites) map[f.target_id] = f.id;
       return { favoriteByPostId: map };
-    }),
+    });
+  },
 
   upsertPost: (post) =>
     set((state) => {

@@ -14,7 +14,6 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
 import { PostCard } from "../components/posts/PostCard";
@@ -34,11 +33,9 @@ const MASONRY_QUERY = "(min-width: 1025px)";
 
 export function PostsHubPage() {
   const navigate = useNavigate();
-  const { posts, hasMore, loading, error, favoriteByPostId } = usePostsStore();
+  const { posts, hasMore, loading, error } = usePostsStore();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nextPageError, setNextPageError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [favoriteLoadError, setFavoriteLoadError] = useState<string | null>(null);
   const [resumeEntry, setResumeEntry] = useState(false);
   const requestOwner = useRef({ active: false, revision: 0, busy: false, nextFailed: false, deletedIds: new Set<number>() });
 
@@ -115,23 +112,13 @@ export function PostsHubPage() {
     }
   }, []);
 
-  // 首屏：信息流 + 我的收藏集合；详情返回保留已加载页和cursor。
+  // 首屏信息流；详情返回保留已加载页和 cursor。收藏由可见卡片按 ID 查询。
   const loadFirst = useCallback(() => {
     const owner = requestOwner.current;
     const store = usePostsStore.getState();
     if (!owner.active || owner.busy) return;
     if (store.posts.length > 0 && !isPostsStale()) return;
     void requestPage("first");
-    favoritesApi
-      .listFavorites("post")
-      .then((list) => {
-        if (!owner.active || requestOwner.current !== owner) return;
-        store.loadFavorites(list);
-        setFavoriteLoadError(null);
-      })
-      .catch((e) => {
-        if (owner.active && requestOwner.current === owner) setFavoriteLoadError(e instanceof Error ? e.message : "加载收藏状态失败");
-      });
   }, [requestPage]);
 
   useEffect(() => {
@@ -190,34 +177,11 @@ export function PostsHubPage() {
   // 下拉刷新仅当滚动容器（.posts-hub）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
-  const toggleFavorite = useCallback(
-    async (postId: number) => {
-      const store = usePostsStore.getState();
-      const key = String(postId);
-      const favId = store.favoriteByPostId[key];
-      try {
-        if (favId != null) {
-          await favoritesApi.removeFavorite(favId);
-          store.setFavorite(key, null);
-        } else {
-          const fav = await favoritesApi.addFavorite("post", key);
-          store.setFavorite(key, fav.id);
-        }
-      } catch (e) {
-        // 保持原态并明确告知失败；不伪造收藏成功。
-        setActionError(e instanceof Error ? e.message : "收藏操作失败，请重试");
-      }
-    },
-    [],
-  );
-
   return (
     <div className="posts-hub" ref={hubRef} onScroll={(e) => handleScroll(e.currentTarget)}>
       <div className="posts-hub-head">
         <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
       </div>
-      {favoriteLoadError && <div className="chat-notice" role="alert">收藏状态加载失败：{favoriteLoadError}</div>}
-      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
       {loadError && posts.length > 0 && <div className="chat-notice" role="alert">{loadError}</div>}
       {loading && posts.length === 0 ? (
         <div className="posts-skeleton">
@@ -251,13 +215,11 @@ export function PostsHubPage() {
                     >
                       <PostCard
                         post={p}
-                        favorited={favoriteByPostId[String(p.id)] != null}
                         onOpen={() => {
                           // 详情入口同步保存，避免 AnimatePresence 退出阶段覆盖记录。
                           saveScrollPosition(scrollRestoreKey, hubRef.current);
                           navigate(`/posts/${p.id}`);
                         }}
-                        onToggleFavorite={() => void toggleFavorite(p.id)}
                       />
                     </div>
                   );

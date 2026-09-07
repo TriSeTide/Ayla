@@ -799,8 +799,14 @@
 
 /* ================= 帖子编辑全屏面板（PostDetailPage） ================= */
 
+/* 保留详情/评论的 DOM 与滚动位置；编辑时只透出页面背景，不透出底层内容。 */
+.post-detail.is-editing > .post-detail-background {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* 编辑面板：absolute 覆盖帖子详情页整页（保留顶部导航/底栏，不超出帖子界面），
-   极光渐变底 + 玻璃顶栏 + 居中内容列；内容列内部滚动，取消/保存固定顶栏，
+   直接使用页面背景、玻璃顶栏和居中内容列；内容列内部滚动，取消/保存固定顶栏，
    图片预览紧贴正文，不再被挤出屏幕。 */
 .post-edit-fullscreen {
   position: absolute;

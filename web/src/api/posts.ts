@@ -9,6 +9,7 @@
  */
 import { apiRequest } from "./client";
 import type { Post, PostComment, PostListPage, PostScope } from "./types";
+import type { DirectoryPage } from "./directory";
 
 /** GET /posts/ —— 信息流游标分页（?owner=<id> 他人主页） */
 export function listPosts(params: {
@@ -56,6 +57,13 @@ export function deletePost(postId: number) {
 /** GET /posts/<id>/comments/ —— 评论列表（按 created_at 升序） */
 export function listComments(postId: number) {
   return apiRequest<PostComment[]>(`/posts/${postId}/comments/`);
+}
+
+/** Chronological cursor page; each page rechecks visibility of this post. */
+export function listCommentsPage(postId: number, params: { limit?: number; cursor?: string | null } = {}) {
+  const query = new URLSearchParams({ limit: String(params.limit ?? 20) });
+  if (params.cursor != null) query.set("cursor", params.cursor);
+  return apiRequest<DirectoryPage<PostComment>>(`/posts/${postId}/comments/?${query}`);
 }
 
 /** POST /posts/<id>/comments/ —— 发评论（reply_to 可选；images 图文同发 ≤4；media_id 旧单图兼容） */

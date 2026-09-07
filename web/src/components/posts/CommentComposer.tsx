@@ -1,6 +1,5 @@
-import { useState } from "react";
-import { uploadMediaFile, validateMediaFile } from "../../api/media";
-import { apiRequest } from "../../api/client";
+import { useEffect, useRef, useState } from "react";
+import { deleteMedia, uploadMediaFile, validateMediaFile } from "../../api/media";
 import type { MediaDescriptor, PostComment } from "../../api/types";
 import { IconImage } from "../icons";
 import { ResourceImage } from "../ResourceImage";
@@ -11,8 +10,6 @@ type PendingImage = {
   descriptor: MediaDescriptor;
   /** 上传会话 id：移除时清理对象存储 */
   uploadId: string;
-  /** 本地预览 objectURL */
-  localUrl: string;
 };
 
 export function CommentComposer({
@@ -21,6 +18,7 @@ export function CommentComposer({
   onReplyClear,
   className = "",
   inputEntered = true,
+  inert = false,
 }: {
   /** body + 图片 mediaId 列表一起提交（图文同发） */
   onSend: (body: string, replyTo: number | null, imageIds: string[]) => Promise<void>;
@@ -29,20 +27,34 @@ export function CommentComposer({
   className?: string;
   /** 窄屏详情页复用进直播间的底部输入框滑入状态。 */
   inputEntered?: boolean;
+  /** 编辑层覆盖时保留草稿 DOM，但从焦点与无障碍树中隔离。 */
+  inert?: boolean;
 }) {
   const [body, setBody] = useState("");
   const [pending, setPending] = useState<PendingImage[]>([]);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedFiles, setFailedFiles] = useState<File[]>([]);
   const isNarrow = useMediaQuery(NARROW_QUERY);
+  const active = useRef(true);
+  const busy = useRef(false);
+  const currentReply = useRef(replyTarget?.id ?? null);
+  currentReply.current = replyTarget?.id ?? null;
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   const MAX_IMAGES = 4;
 
   const sendComment = async () => {
     const trimmed = body.trim();
-    if ((!trimmed && pending.length === 0) || sending || uploading) return;
+    if ((!trimmed && pending.length === 0) || busy.current || failedFiles.length > 0) return;
+    busy.current = true;
+    const sentIds = new Set(pending.map((item) => item.mediaId));
+    const sentReply = replyTarget?.id ?? null;
     setSending(true);
     setError(null);
     try {
@@ -51,37 +63,51 @@ export function CommentComposer({
         replyTarget ? Number(replyTarget.id) : null,
         pending.map((p) => p.mediaId),
       );
-      setBody("");
-      setPending([]);
+      if (!active.current) return;
+      setBody((current) => current === body ? "" : current);
+      setPending((current) => current.filter((item) => !sentIds.has(item.mediaId)));
       setFailedFiles([]);
-      if (replyTarget) onReplyClear();
+      if (sentReply !== null && currentReply.current === sentReply) onReplyClear();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "发送失败");
+      if (active.current) setError(e instanceof Error ? e.message : "发送失败");
     } finally {
-      setSending(false);
+      busy.current = false;
+      if (active.current) setSending(false);
     }
   };
 
-  const removePending = (p: PendingImage) => {
-    setPending((prev) => prev.filter((x) => x.mediaId !== p.mediaId));
-    // 已直传到 MinIO 的对象即时回收（owner 删除端点）
-    void apiRequest(`/media/${p.mediaId}`, { method: "DELETE" }).catch(() => {});
+  const removePending = async (p: PendingImage) => {
+    if (busy.current) return;
+    busy.current = true;
+    setRemoving(true);
+    setError(null);
+    try {
+      await deleteMedia(p.mediaId);
+      if (active.current) setPending((prev) => prev.filter((x) => x.mediaId !== p.mediaId));
+    } catch (error) {
+      if (active.current) setError(error instanceof Error ? error.message : "移除图片失败，请重试");
+    } finally {
+      busy.current = false;
+      if (active.current) setRemoving(false);
+    }
   };
 
   const uploadFiles = async (files: File[]) => {
-    if (uploading || sending || files.length === 0) return;
+    if (busy.current || files.length === 0) return;
     const room = Math.max(0, MAX_IMAGES - pending.length);
     const take = files.slice(0, Math.max(0, room));
     const overflow = files.length - take.length;
     if (overflow > 0) setError(`最多 ${MAX_IMAGES} 张图片`);
     if (take.length === 0) return;
 
+    busy.current = true;
     setUploading(true);
     setError(overflow > 0 ? `最多 ${MAX_IMAGES} 张图片` : null);
     setFailedFiles([]);
     const ok: PendingImage[] = [];
     const failed: File[] = [];
     for (const file of take) {
+      if (!active.current) break;
       const check = validateMediaFile(file);
       if (check.error || check.kind !== "image") {
         failed.push(file);
@@ -89,17 +115,19 @@ export function CommentComposer({
       }
       try {
         const uploaded = await uploadMediaFile(file, "image");
+        if (!active.current) break;
         ok.push({
           mediaId: uploaded.media_id,
           descriptor: uploaded.descriptor,
           uploadId: uploaded.upload_id,
-          localUrl: URL.createObjectURL(file),
         });
       } catch (err) {
         failed.push(file);
-        setError(err instanceof Error ? err.message : "图片发送失败");
+        if (active.current) setError(err instanceof Error ? err.message : "图片发送失败");
       }
     }
+    busy.current = false;
+    if (!active.current) return;
     setPending((prev) => [...prev, ...ok]);
     setFailedFiles(failed);
     if (failed.length > 0) setError(`${failed.length} 张图片上传失败，可重试`);
@@ -109,6 +137,7 @@ export function CommentComposer({
   return (
     <div
       className={`comment-composer ${className}`.trim()}
+      {...(inert ? { inert: "", "aria-hidden": true as const } : {})}
       style={{
         transform: inputEntered ? "translateY(0)" : "translateY(100%)",
         transition: "transform 250ms var(--ease-out)",
@@ -120,12 +149,12 @@ export function CommentComposer({
           <button type="button" className="comment-action" onClick={onReplyClear}>取消</button>
         </div>
       )}
-      {error && <p className="post-editor-error">{error}</p>}
+      {error && <p className="post-editor-error" role="alert">{error}</p>}
       {failedFiles.length > 0 && (
-        <button
+        <div><button
           type="button"
           className="msg-action-btn"
-          disabled={uploading}
+          disabled={uploading || sending || removing}
           onClick={() => {
             const files = failedFiles;
             setFailedFiles([]);
@@ -133,7 +162,7 @@ export function CommentComposer({
           }}
         >
           重试图片（{failedFiles.length}）
-        </button>
+        </button><button type="button" className="msg-action-btn" disabled={uploading || sending || removing} onClick={() => { setFailedFiles([]); setError(null); }}>移除失败图片</button></div>
       )}
       {pending.length > 0 && (
         <div className="composer-pending-images">
@@ -149,7 +178,8 @@ export function CommentComposer({
               <button
                 type="button"
                 aria-label="移除图片（同时从服务器删除）"
-                onClick={() => removePending(p)}
+                disabled={uploading || sending || removing}
+                onClick={() => void removePending(p)}
               >
                 ×
               </button>
@@ -165,6 +195,7 @@ export function CommentComposer({
             accept="image/*"
             multiple
             hidden
+            disabled={uploading || sending || removing}
             onChange={(event) => {
               const files = Array.from(event.target.files ?? []);
               event.target.value = "";
@@ -182,7 +213,7 @@ export function CommentComposer({
         <button
           type="button"
           className="btn btn-primary"
-          disabled={sending || uploading || (!body.trim() && pending.length === 0)}
+          disabled={sending || uploading || removing || failedFiles.length > 0 || (!body.trim() && pending.length === 0)}
           onClick={() => void sendComment()}
         >
           {sending || uploading ? "发送中…" : "发送"}

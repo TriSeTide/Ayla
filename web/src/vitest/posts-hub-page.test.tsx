@@ -1,3 +1,5 @@
+import { FavoriteButton } from "../components/FavoriteButton";
+import { ensureFavoriteScope, useFavoriteStatusStore } from "../stores/favoriteStatus";
 /**
  * PostsHubPage 测试（Bug #8）：群外帖子信息流顶部必须有「我的帖子」入口，
  * 点击跳转 /posts/mine（scope=mine，全局）。
@@ -21,12 +23,13 @@ vi.mock("../api/posts", () => ({
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn().mockResolvedValue([]),
+  getFavoriteStatuses: vi.fn().mockImplementation(async (target_type, ids: string[]) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) })),
   addFavorite: vi.fn(),
   removeFavorite: vi.fn(),
 }));
 vi.mock("../components/posts/PostCard", () => ({
-  PostCard: ({ post, favorited, onToggleFavorite }: { post: Post; favorited: boolean; onToggleFavorite: () => void }) => (
-    <div><span>帖卡</span><span>{post.title}</span><button type="button" aria-pressed={favorited} onClick={onToggleFavorite}>收藏{post.id}</button></div>
+  PostCard: ({ post }: { post: Post }) => (
+    <div><span>帖卡</span><span>{post.title}</span><FavoriteButton targetType="post" targetId={post.id} compact /></div>
   ),
 }));
 vi.mock("../ws/chat", () => ({ chatWS: { onFrame: vi.fn(() => vi.fn()) } }));
@@ -73,6 +76,9 @@ function renderHub() {
 }
 
 beforeEach(() => {
+  ensureFavoriteScope();
+  useFavoriteStatusStore.setState({ entries: new Map() });
+  vi.mocked(favoritesApi.getFavoriteStatuses).mockImplementation(async (target_type, ids) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) }));
   clearScrollMemory();
   vi.mocked(favoritesApi.listFavorites).mockResolvedValue([]);
 });
@@ -128,7 +134,7 @@ describe("PostsHubPage 我的帖子入口", () => {
     renderHub();
     await waitFor(() => expect(postsApi.listPosts).toHaveBeenCalled());
     expect(screen.getByRole("link", { name: "我的帖子" })).toBeInTheDocument();
-    expect(favoritesApi.listFavorites).toHaveBeenCalledWith("post");
+    expect(favoritesApi.listFavorites).not.toHaveBeenCalled();
   });
 
   it("点击「我的帖子」跳转到 /posts/mine", async () => {
@@ -244,7 +250,7 @@ describe("PostsHubPage 我的帖子入口", () => {
     await act(async () => { fresh.resolve(page([1, 2], "fresh-next")); await refresh; });
     expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([3, 1]);
     expect(usePostsStore.getState().posts[1]).toMatchObject({ is_viewed: true, view_count: 7 });
-    expect(screen.getByRole("button", { name: "收藏1" })).toHaveAttribute("aria-pressed", "true");
+    expect(getFavorite(1)!).toHaveAttribute("aria-pressed", "true");
   });
 
   it("未推进cursor显式失败，不能循环重复取相同页", async () => {
@@ -290,3 +296,7 @@ describe("PostsHubPage 我的帖子入口", () => {
     }
   });
 });
+
+function getFavorite(id: number) {
+  return document.querySelector<HTMLElement>(`[data-post-id="${id}"] .favorite-toggle`);
+}

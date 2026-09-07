@@ -5,19 +5,18 @@
  * + 可选回复（reply_to 显示"回复 @昵称"）；评论作者可删（is_author）。
  * 发评论：正文与图片一起发送（Composer 支持多选 ≤4 张，预签名直传）。
  */
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { MediaDescriptor, PostComment } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { ImageViewer } from "../chat/ImageViewer";
 import { CommentComposer } from "./CommentComposer";
 import { ResourceImage } from "../ResourceImage";
 import { mediaContentUrl } from "../../api/media";
-import { staggerDelay } from "../../hooks/useRevealOnEnter";
+import { useListEntryMotion } from "../../hooks/useListEntryMotion";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
 import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
-import type { CSSProperties } from "react";
 
 function formatTime(iso: string): string {
   try {
@@ -51,12 +50,13 @@ export function CommentList({
   onReplyClear,
   hideComposer = false,
   revealItems = false,
+  suppressEntry = false,
 }: {
   comments: PostComment[];
   /** body + 图片 mediaId 列表一起提交（图文同发） */
   onSend: (body: string, replyTo: number | null, imageIds: string[]) => Promise<void>;
   /** 仅评论作者可删 */
-  onDelete: (comment: PostComment) => void;
+  onDelete: (comment: PostComment) => void | Promise<void>;
   replyTarget: PostComment | null;
   onReply: (comment: PostComment) => void;
   onReplyClear: () => void;
@@ -64,23 +64,39 @@ export function CommentList({
   hideComposer?: boolean;
   /** 详情页入场：每条评论逐条浮入（stagger，直播间节奏） */
   revealItems?: boolean;
+  suppressEntry?: boolean;
 }) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const entered = useRef(false);
+  useListEntryMotion(listRef, ".comment-item", suppressEntry || (!revealItems && !entered.current));
+  useLayoutEffect(() => { entered.current = true; }, []);
   const byId = new Map(comments.map((c) => [c.id, c]));
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const onlineUsers = usePresenceStore((s) => s.users);
   const onlineStatuses = usePresenceStore((s) => s.statuses);
   // 查看器状态：某条评论的图片原图画廊
   const [viewer, setViewer] = useState<{ commentId: number; index: number } | null>(null);
+  const deletingRef = useRef(new Set<number>());
+  const [deleting, setDeleting] = useState(new Set<number>());
+  const deleteComment = async (comment: PostComment) => {
+    if (deletingRef.current.has(comment.id)) return;
+    deletingRef.current.add(comment.id);
+    setDeleting(new Set(deletingRef.current));
+    try { await onDelete(comment); }
+    finally {
+      deletingRef.current.delete(comment.id);
+      setDeleting(new Set(deletingRef.current));
+    }
+  };
 
   return (
     <div className="comment-list">
-      <ul className="comment-list-items">
+      <ul className="comment-list-items" ref={listRef}>
         {comments.length === 0 ? (
           <li className="comment-empty">还没有评论</li>
         ) : (
-          comments.map((c, idx) => {
+          comments.map((c) => {
             const replyTo = c.reply_to != null ? byId.get(Number(c.reply_to)) : undefined;
-            const delay = revealItems ? staggerDelay(idx) : 0;
             // 该评论的全部图片 descriptor（新 images[] 或旧单图兼容）
             const imgs = (c.images && c.images.length > 0
               ? c.images
@@ -91,8 +107,8 @@ export function CommentList({
             return (
               <li
                 key={c.id}
-                className={`comment-item ${revealItems ? "reveal-item" : ""}`}
-                style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
+                className="comment-item"
+                data-comment-id={c.id}
               >
                 <Avatar
                   label={c.author.nickname || c.author.username}
@@ -110,6 +126,7 @@ export function CommentList({
                       回复 @{replyTo.author.nickname || replyTo.author.username}
                     </span>
                   )}
+                  {c.reply_to != null && !replyTo && <span className="comment-reply-hint">回复评论 #{c.reply_to}（未在当前列表中）</span>}
                   {imgs.length > 0 && (
                     <div className={`comment-images count-${Math.min(imgs.length, 4)}`}>
                       {imgs.map((media, i) => (
@@ -131,8 +148,8 @@ export function CommentList({
                       回复
                     </button>
                     {c.is_author && (
-                      <button type="button" className="comment-action comment-del" onClick={() => onDelete(c)}>
-                        删除
+                      <button type="button" className="comment-action comment-del" disabled={deleting.has(c.id)} onClick={() => void deleteComment(c)}>
+                        {deleting.has(c.id) ? "删除中…" : "删除"}
                       </button>
                     )}
                   </div>

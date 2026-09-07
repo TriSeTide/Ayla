@@ -5,10 +5,10 @@
  * 删除（仅作者，二次确认）。顶栏从上、评论输入框从下独立进入；
  * 群外正文继续保留原 500ms 浮入缩放与内容 reveal。
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { motion, useIsPresent } from "framer-motion";
 import { useNavigate, useNavigationType, useParams, useSearchParams } from "react-router-dom";
-import * as favoritesApi from "../api/favorites";
+import { FavoriteButton } from "../components/FavoriteButton";
 import * as postsApi from "../api/posts";
 import type { MediaDescriptor, Post, PostComment } from "../api/types";
 import { Avatar } from "../components/Avatar";
@@ -19,7 +19,7 @@ import { ResourceImage } from "../components/ResourceImage";
 import { PostVideoCover } from "../components/posts/PostVideoCover";
 import { deleteMedia, mediaContentUrl, uploadMediaFile, validateMediaFile } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
-import { IconBack, IconEye, IconHeart, IconImage } from "../components/icons";
+import { IconBack, IconEye, IconImage } from "../components/icons";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
@@ -33,6 +33,9 @@ import { usePresenceStore } from "../stores/presence";
 import { presenceOnline } from "../utils/displayStatus";
 import { goUserProfile } from "../utils/navigation";
 import { getVisibilityLabels } from "../utils/visibility";
+import { usePostComments } from "../hooks/usePostComments";
+import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
+import { StablePaginationFooter } from "../components/StablePaginationFooter";
 
 /** 编辑面板中的媒体项：已有图片（isNew=false，用 descriptor 渲染）或新上传（isNew=true，用 localUrl 预览）。 */
 type EditImageItem = {
@@ -46,10 +49,18 @@ type EditImageItem = {
 
 export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   const { postId } = useParams<{ postId: string }>();
+  const account = useAuthStore((state) => `${state.currentUser?.id ?? "anonymous"}:${!!state.accessToken}`);
+  return <PostDetailContent key={`${account}:${groupId ?? ""}:${postId}`} groupId={groupId} />;
+}
+
+function PostDetailContent({ groupId }: { groupId?: string }) {
+  const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const reduced = usePrefersReducedMotion();
   const navigationType = useNavigationType();
+  const present = useIsPresent();
+  const saveBeforeBack = useRef<() => void>(() => {});
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const onlineUsers = usePresenceStore((s) => s.users);
   const [searchParams] = useSearchParams();
@@ -65,6 +76,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   // 站内点击进入详情是 PUSH，返回时回退原有历史栈，避免再 push 列表页；
   // 直接打开或通过 POP/REPLACE 到达详情时没有可靠的站内来源，替换到显式 returnTo。
   const goBack = useCallback(() => {
+    saveBeforeBack.current();
     if (navigationType === "PUSH") {
       navigate(-1);
     } else {
@@ -82,7 +94,6 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     );
   // 群内详情沿用群场景顶部导航；只有一级帖子详情才让底栏下滑并带动评论输入框滑入。
   const usesRoomEntryAnimation = groupId == null;
-  const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
 
   useEffect(() => {
     if (!usesRoomEntryAnimation) return;
@@ -92,34 +103,60 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
 
   const id = Number(postId);
 
-  // 秒开优化：posts store 里存的是全量可见列表（scope=feed 即 visible_queryset，登录预加载），
-  // 若当前帖已在其中，则初始化直接用缓存对象（正文立即渲染），再后台 load() 刷新最新 +
-  // 评论 + 收藏。命中时 loading 初始为 false，详情不再有"空白加载"。
+  // 已加载的帖子可供即时展示，随后独立刷新正文和有界评论页。
   const cachedPost = Number.isInteger(id) && id > 0
     ? (usePostsStore.getState().posts.find((p) => p.id === id) ?? null)
     : null;
 
   const [post, setPost] = useState<Post | null>(cachedPost);
-  const [comments, setComments] = useState<PostComment[]>([]);
+  const commentPage = usePostComments(id);
   const [loading, setLoading] = useState(cachedPost == null);
   const [error, setError] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<PostComment | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deletingPost, setDeletingPost] = useState(false);
+  const deleteBusy = useRef(false);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editVisibility, setEditVisibility] = useState<VisibilitySelection>({ public: true, friends: false, group: false });
   const [editAllowedGroupIds, setEditAllowedGroupIds] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
+  const editBusy = useRef(false);
   const [editImages, setEditImages] = useState<EditImageItem[]>([]);
   const [editUploading, setEditUploading] = useState(false);
   const [editMediaError, setEditMediaError] = useState<string | null>(null);
   // 打开编辑时的已有图片 media_id 快照：提交时判断图片是否有增删，并在成功后回收被移除的媒体
   const initialExistingMediaIdsRef = useRef<string[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [commentError, setCommentError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollRestore(commentPage.key, scrollRef, { active: present && !loading, ready: !loading && commentPage.loaded });
+  saveBeforeBack.current = () => saveScrollPosition(commentPage.key, scrollRef.current);
+  const activeRef = useRef(true);
+  const detailRequest = useRef(0);
   // 图片查看器（Portal 全屏弹窗，原图 + 保存）
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const editTitleRef = useRef<HTMLInputElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const wasEditingRef = useRef(false);
+  const backgroundInert = editing ? { inert: "", "aria-hidden": true as const } : {};
+  useLayoutEffect(() => {
+    const restoreFocus = !editing && wasEditingRef.current;
+    wasEditingRef.current = editing;
+    if (editing) editTitleRef.current?.focus();
+    else if (restoreFocus) {
+      // 等待按钮实际结束 visibility 过渡，避免焦点被仍隐藏的控件拒绝。
+      let cancelled = false;
+      const button = editButtonRef.current;
+      const visibilityTransitions = button?.getAnimations?.().filter(
+        (animation) => "transitionProperty" in animation && animation.transitionProperty === "visibility",
+      ) ?? [];
+      void Promise.allSettled(visibilityTransitions.map((animation) => animation.finished)).then(() => {
+        if (!cancelled) button?.focus({ preventScroll: true });
+      });
+      return () => { cancelled = true; };
+    }
+  }, [editing]);
 
   // 输入框滑入 + 内容入场动画：内容就绪（loading 结束）后才浮入，
   // 避免异步加载完成前动画就提前跑完、看不到浮入效果（直播间同源节奏）。
@@ -131,40 +168,24 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       setLoading(false);
       return;
     }
-    // 后台刷新：不置 loading=true（避免缓存命中时又闪骨架）；只更新数据。
+    const request = ++detailRequest.current;
     setError(null);
-    // 正文是第一优先 —— getPost 一返回就立刻覆盖（缓存命中时也在后台静默刷新）。
-    // 评论与收藏并发后台填充（各 .then 独立落地，互不阻塞正文显示）。
-    postsApi
-      .getPost(id)
-      .then((p) => {
-        setPost(p);
-        setLoading(false);
-      })
-      .catch((e) => {
-        const message = e instanceof Error ? e.message : "加载帖子失败";
-        setCommentError(message);
-        setError(message);
-        setLoading(false);
-      });
-    postsApi
-      .listComments(id)
-      .then((list) => {
-        setComments(list);
-        setCommentError(null);
-      })
-      .catch((e) => {
-        const message = e instanceof Error ? e.message : "加载评论失败";
-        setCommentError(message);
-      });
-    favoritesApi
-      .listFavorites("post")
-      .then((list) => usePostsStore.getState().loadFavorites(list))
-      .catch((e) => setActionError(e instanceof Error ? e.message : "加载收藏状态失败"));
+    void postsApi.getPost(id).then((next) => {
+      if (!activeRef.current || request !== detailRequest.current) return;
+      setPost((previous) => ({ ...next, is_viewed: previous?.is_viewed || next.is_viewed,
+        view_count: Math.max(previous?.view_count ?? 0, next.view_count ?? 0) }));
+      setLoading(false);
+    }).catch((error) => {
+      if (!activeRef.current || request !== detailRequest.current) return;
+      setError(error instanceof Error ? error.message : "加载帖子失败");
+      setLoading(false);
+    });
   }, [id]);
 
   useEffect(() => {
+    activeRef.current = true;
     load();
+    return () => { activeRef.current = false; detailRequest.current += 1; };
   }, [load]);
 
   // 打开详情即浏览（浏览与已读同源）：上报成功后标记已读 + 更新浏览量 + 群未读递减
@@ -196,27 +217,9 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
   useEffect(() => {
     if (!Number.isInteger(id) || id <= 0) return;
     const off = chatWS.onFrame((frame) => {
-      if (frame.type === "comment.created" && Number(frame.data.post_id) === id) {
-        const c = frame.data.comment;
-        setComments((prev) => {
-          if (prev.some((item) => item.id === c.id)) return prev; // 去重（自己发的也会回传）
-          // 评论按 created_at 升序（与列表接口一致），插入正确位置
-          const next = [...prev, c].sort(
-            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-          );
-          return next;
-        });
-        setPost((prev) =>
-          prev ? { ...prev, comment_count: frame.data.comment_count } : prev,
-        );
-        return;
-      }
-      if (frame.type === "comment.deleted" && Number(frame.data.post_id) === id) {
-        const cid = frame.data.comment_id;
-        setComments((prev) => prev.filter((item) => item.id !== cid));
-        setPost((prev) =>
-          prev ? { ...prev, comment_count: frame.data.comment_count } : prev,
-        );
+      if ((frame.type === "comment.created" || frame.type === "comment.deleted") && Number(frame.data.post_id) === id) {
+        setPost((previous) => previous ? { ...previous, comment_count: frame.data.comment_count } : previous);
+        if (frame.type === "comment.deleted") setReplyTarget((previous) => previous?.id === frame.data.comment_id ? null : previous);
         return;
       }
       if (frame.type === "post.viewed" && Number(frame.data.post_id) === id) {
@@ -247,16 +250,9 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
         images: imageIds,
         media_id: imageIds[0] ?? null, // 旧契约兼容字段
       });
-      // 乐观本地插入（去重靠 WS comment.created 的 id 去重；计数以 WS 权威值为准，
-      // 不做本地 +1，避免与实时推送重复累加）。
-      setComments((prev) => {
-        if (prev.some((item) => item.id === c.id)) return prev;
-        return [...prev, c].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-        );
-      });
+      commentPage.upsert(c);
     },
-    [id],
+    [id, commentPage.upsert],
   );
 
   const deleteComment = useCallback(
@@ -264,41 +260,30 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       if (!comment.is_author) return;
       try {
         await postsApi.deleteComment(comment.id);
-        setComments((prev) => prev.filter((c) => c.id !== comment.id));
+        commentPage.remove(comment.id);
+        setReplyTarget((current) => current?.id === comment.id ? null : current);
       } catch (e) {
-        setActionError(e instanceof Error ? e.message : "删除评论失败，请重试");
+        if (activeRef.current) setActionError(e instanceof Error ? e.message : "删除评论失败，请重试");
       }
     },
-    [],
+    [commentPage.remove],
   );
 
-  const toggleFavorite = useCallback(async () => {
-    if (!post) return;
-    const key = String(post.id);
-    const store = usePostsStore.getState();
-    const favId = store.favoriteByPostId[key];
-    try {
-      if (favId != null) {
-        await favoritesApi.removeFavorite(favId);
-        store.setFavorite(key, null);
-      } else {
-        const fav = await favoritesApi.addFavorite("post", key);
-        store.setFavorite(key, fav.id);
-      }
-    } catch (e) {
-      // 保持原态并显示失败事实，不伪造收藏成功。
-      setActionError(e instanceof Error ? e.message : "收藏操作失败，请重试");
-    }
-  }, [post]);
-
   const confirmDelete = useCallback(() => {
-    if (!post) return;
+    if (!post || deleteBusy.current) return;
+    deleteBusy.current = true;
+    setDeletingPost(true);
+    setActionError(null);
     postsApi
       .deletePost(post.id)
-      .then(() => goBack())
+      .then(() => { if (activeRef.current) goBack(); })
       .catch((e) => {
+        if (!activeRef.current) return;
         setConfirmingDelete(false);
         setActionError(e instanceof Error ? e.message : "删除帖子失败，请重试");
+      }).finally(() => {
+        deleteBusy.current = false;
+        if (activeRef.current) setDeletingPost(false);
       });
   }, [post, goBack]);
 
@@ -365,7 +350,7 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
 
   /** 保存编辑：标题/正文/可见性/媒体（媒体有变化才全量替换） */
   const saveEdit = () => {
-    if (!post) return;
+    if (!post || editBusy.current || editUploading) return;
     if (editVisibility.group && editAllowedGroupIds.length === 0) {
       setActionError("请至少选择一个群");
       return;
@@ -387,11 +372,13 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
       allowed_group_ids: editAllowedGroupIds.length > 0 ? editAllowedGroupIds : undefined,
     };
     if (imagesChanged) payload.images = currentIds;
+    editBusy.current = true;
     setSavingEdit(true);
     setActionError(null);
     postsApi
       .updatePost(post.id, payload)
       .then((updated) => {
+        if (!activeRef.current) return;
         setPost(updated);
         setEditing(false);
         // 提交成功：回收被移除的已有图片（后端已清除其 PostImage 关联）
@@ -403,8 +390,8 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
           }
         }
       })
-      .catch((e) => setActionError(e instanceof Error ? e.message : "保存编辑失败"))
-      .finally(() => setSavingEdit(false));
+      .catch((e) => { if (activeRef.current) setActionError(e instanceof Error ? e.message : "保存编辑失败"); })
+      .finally(() => { editBusy.current = false; if (activeRef.current) setSavingEdit(false); });
   };
 
   if (loading) {
@@ -449,19 +436,18 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
     );
   }
 
-  const favorited = favoriteByPostId[String(post.id)] != null;
 
   return wrapSwipe(
-    <div className="post-detail">
+    <div className={`post-detail${editing ? " is-editing" : ""}`}>
       {actionError && !editing && <div className="chat-notice" role="alert">{actionError}</div>}
-      <header className="post-detail-head">
+      <header className="post-detail-head post-detail-background" {...backgroundInert}>
         <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
           <IconBack width={22} height={22} />
         </button>
         <span className="post-detail-title">帖子</span>
         {post.is_author && (
           <div className="post-detail-owner-actions">
-            <button type="button" className="msg-action-btn" onClick={() => {
+            <button ref={editButtonRef} type="button" className="msg-action-btn" onClick={() => {
               setEditTitle(post.title);
               setEditBody(post.body);
               // 将后端字符串 visibility 转换为前端多选对象
@@ -488,12 +474,13 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             <button
               type="button"
               className="msg-action-btn"
+              disabled={deletingPost}
               onClick={() => {
                 if (confirmingDelete) confirmDelete();
                 else setConfirmingDelete(true);
               }}
             >
-              {confirmingDelete ? "确认删除？" : "删除"}
+              {deletingPost ? "删除中…" : confirmingDelete ? "确认删除？" : "删除"}
             </button>
           </div>
         )}
@@ -516,7 +503,9 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             </button>
           </header>
           <div className="post-edit-body">
+            <fieldset disabled={savingEdit} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: "contents" }}>
             <input
+              ref={editTitleRef}
               className="field"
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
@@ -596,12 +585,20 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             />
             {editMediaError && <p className="post-editor-error" role="alert">{editMediaError}</p>}
             {actionError && <p className="post-editor-error" role="alert">{actionError}</p>}
+            </fieldset>
           </div>
         </div>
       )}
 
       <motion.div
-        className="post-detail-scroll"
+        className="post-detail-scroll post-detail-background"
+        {...backgroundInert}
+        ref={scrollRef}
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          if (!editing && !commentPage.error && !commentPage.loading && commentPage.hasMore
+            && node.scrollHeight > node.clientHeight && node.scrollHeight - node.scrollTop - node.clientHeight < 240) void commentPage.loadMore();
+        }}
         inherit={false}
         initial={reduced ? false : usesRoomEntryAnimation ? "out" : "enter"}
         animate={usesRoomEntryAnimation ? "in" : "center"}
@@ -674,23 +671,15 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
               <IconEye width={16} height={16} />
               {post.view_count ?? 0}
             </span>
-            <button
-              type="button"
-              className={`post-card-fav ${favorited ? "is-favorited" : ""}`}
-              onClick={() => void toggleFavorite()}
-              aria-label={favorited ? "取消收藏" : "收藏"}
-              aria-pressed={favorited}
-            >
-              <IconHeart width={18} height={18} fill={favorited ? "currentColor" : "none"} />
-              收藏
-            </button>
+            <FavoriteButton targetType="post" targetId={post.id} compact className="post-card-fav" />
           </footer>
         </article>
 
         <div className={`post-detail-comments ${usesRoomEntryAnimation ? "reveal" : ""} ${usesRoomEntryAnimation && step === 1 ? "is-in" : ""}`}>
-          {commentError && <div className="chat-notice" role="alert">{commentError}</div>}
-          <CommentList
-            comments={comments}
+          {!commentPage.loaded && commentPage.loading && <div role="status" aria-label="正在加载评论">正在加载评论…</div>}
+          {commentPage.stale && <button type="button" className="btn btn-ghost" disabled={commentPage.loading} onClick={() => void commentPage.refresh()}>刷新评论</button>}
+          {(commentPage.loaded || commentPage.items.length > 0) && <CommentList
+            comments={commentPage.items}
             onSend={sendComment}
             onDelete={deleteComment}
             replyTarget={replyTarget}
@@ -698,11 +687,19 @@ export function PostDetailPage({ groupId }: { groupId?: string } = {}) {
             onReplyClear={() => setReplyTarget(null)}
             hideComposer
             revealItems={usesRoomEntryAnimation}
-          />
+            suppressEntry={commentPage.suppressEntry}
+          />}
+          <StablePaginationFooter className="home-load-more" aria-live="polite">
+            {commentPage.error ? <div role="alert"><span>{commentPage.error}</span><button type="button" className="btn btn-ghost" onClick={() => void commentPage.retry()}>{commentPage.errorKind === "append" ? "重试加载更多评论" : "重试评论"}</button></div>
+              : commentPage.loading && commentPage.loaded ? <span role="status">正在加载更多评论…</span>
+              : commentPage.hasMore ? <button type="button" className="btn btn-ghost" onClick={() => void commentPage.loadMore()}>加载更多评论</button>
+              : commentPage.loaded && commentPage.items.length > 0 ? <span>已加载全部评论</span> : null}
+          </StablePaginationFooter>
         </div>
       </motion.div>
       <CommentComposer
-        className="post-detail-composer"
+        className="post-detail-composer post-detail-background"
+        inert={editing}
         // 底部面板在所有布局都由自己的 20px/300ms 动画持有，不叠加旧 100% 位移。
         inputEntered
         onSend={sendComment}

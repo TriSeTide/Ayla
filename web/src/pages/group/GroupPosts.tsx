@@ -12,7 +12,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { StablePaginationFooter } from "../../components/StablePaginationFooter";
 import { PostDetailPage } from "../PostDetailPage";
 import * as postsApi from "../../api/posts";
-import * as favoritesApi from "../../api/favorites";
 import type { Post } from "../../api/types";
 import { PostCard } from "../../components/posts/PostCard";
 import { PostEditor } from "../../components/posts/PostEditor";
@@ -53,6 +52,9 @@ function createRequestOwner(key: string) {
     key, active: true, revision: 0, busy: false, loaded: false,
     cursor: null as string | null, hasMore: false, nextFailed: false,
     deletedIds: new Set<number>(),
+    mutationRevision: 0,
+    mutations: new Map<number, { revision: number; post: Post | null }>(),
+    detailRevision: new Map<number, number>(),
   };
 }
 
@@ -74,16 +76,12 @@ export function GroupPosts({
   const [dataOwner, setDataOwner] = useState(ownerKey);
   // 全局缓存只用于已加载卡片的状态同步，不能提前显示不在当前分页中的旧缓存。
   const feedPosts = usePostsStore((s) => s.posts);
-  // 帖子收藏态（postId → favoriteId），与一级帖子流/详情页共享同一 store
-  const favoriteByPostId = usePostsStore((s) => s.favoriteByPostId);
   const [groupPosts, setGroupPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 收藏操作失败提示（与列表加载 error 分离，列表有数据时也能看到）
-  const [actionError, setActionError] = useState<string | null>(null);
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -102,6 +100,7 @@ export function GroupPosts({
     if (append && (owner.busy || !owner.loaded || !owner.hasMore || !owner.cursor)) return;
     const wasLoaded = owner.loaded;
     const cursor = append ? owner.cursor : null;
+    const mutationRevision = owner.mutationRevision;
     const revision = ++owner.revision;
     owner.busy = true;
     owner.nextFailed = false;
@@ -125,8 +124,25 @@ export function GroupPosts({
       if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) {
         throw new Error("帖子分页游标未推进，请刷新后重试");
       }
-      const rows = page.results.filter((post) => !owner.deletedIds.has(post.id));
-      setGroupPosts((prev) => mergePosts(append ? prev : [], rows));
+      setGroupPosts((prev) => {
+        const existing = new Map(prev.map((post) => [post.id, post]));
+        const rows: Post[] = [];
+        for (const post of page.results) {
+          if (owner.deletedIds.has(post.id)) continue;
+          const mutation = owner.mutations.get(post.id);
+          // A refresh/append response cannot undo a change delivered after it began.
+          const currentPost = mutation && mutation.revision > mutationRevision ? mutation.post : post;
+          if (!currentPost) continue;
+          const old = existing.get(post.id);
+          rows.push({ ...currentPost, is_viewed: old?.is_viewed || currentPost.is_viewed,
+            view_count: Math.max(old?.view_count ?? 0, currentPost.view_count ?? 0) });
+        }
+        const incomingIds = new Set(rows.map((post) => post.id));
+        const newDuringRequest = prev.filter((post) => !incomingIds.has(post.id)
+          && !owner.deletedIds.has(post.id)
+          && (owner.mutations.get(post.id)?.revision ?? 0) > mutationRevision);
+        return mergePosts(append ? prev : newDuringRequest, rows);
+      });
       setDataOwner(ownerKey);
       owner.cursor = page.next_cursor;
       owner.hasMore = page.has_more;
@@ -173,22 +189,28 @@ export function GroupPosts({
     owner.active = true;
     void load();
     const unsubscribe = chatWS.onFrame((frame) => {
+      if (requestOwner.current !== owner || !owner.active) return;
       if (frame.type === "post.deleted") {
         const id = Number(frame.post_id);
         owner.deletedIds.add(id);
+        owner.mutations.set(id, { revision: ++owner.mutationRevision, post: null });
         setGroupPosts((prev) => prev.filter((post) => post.id !== id));
         return;
       }
       if (frame.type === "post.created" || frame.type === "post.updated") {
         const id = Number(frame.post.id);
         if (!id) return;
+        const detailRevision = (owner.detailRevision.get(id) ?? 0) + 1;
+        owner.detailRevision.set(id, detailRevision);
         // 单条权限REST对账；目录提示不重拉首页，不丢失已加载页/游标/滚动位置。
         void postsApi.getPost(id).then((post) => {
-          if (requestOwner.current !== owner || !owner.active || owner.deletedIds.has(id)) return;
+          if (requestOwner.current !== owner || !owner.active || owner.deletedIds.has(id) || owner.detailRevision.get(id) !== detailRevision) return;
           if (!(post.allowed_group_ids ?? []).some((gid) => String(gid) === String(groupId))) {
+            owner.mutations.set(id, { revision: ++owner.mutationRevision, post: null });
             setGroupPosts((prev) => prev.filter((item) => item.id !== id));
             return;
           }
+          owner.mutations.set(id, { revision: ++owner.mutationRevision, post });
           setGroupPosts((prev) => mergePosts(prev, [post], true));
           if (listActive.current) setRevealAfterRefresh(true);
         }).catch(() => {
@@ -217,49 +239,15 @@ export function GroupPosts({
     };
   }, [load]);
 
-  // 收藏态铺底：群内帖子流可能不经 PostsHubPage 直接进入，需自行加载我的帖子收藏
-  // （幂等：重复加载只是覆盖同一份 favoriteByPostId 映射）。
-  useEffect(() => {
-    let cancelled = false;
-    favoritesApi
-      .listFavorites("post")
-      .then((list) => {
-        if (!cancelled) usePostsStore.getState().loadFavorites(list);
-      })
-      .catch(() => {
-        // 收藏状态加载失败不阻塞列表；收藏键保持未收藏态，点击时再报错。
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // 收藏/取消收藏：与 PostsHubPage/PostDetailPage 同一模式（REST + posts store 即时反馈）
-  const toggleFavorite = useCallback(async (postId: number) => {
-    const store = usePostsStore.getState();
-    const key = String(postId);
-    const favId = store.favoriteByPostId[key];
-    setActionError(null);
-    try {
-      if (favId != null) {
-        await favoritesApi.removeFavorite(favId);
-        store.setFavorite(key, null);
-      } else {
-        const fav = await favoritesApi.addFavorite("post", key);
-        store.setFavorite(key, fav.id);
-      }
-    } catch (e) {
-      // 保持原态并明确告知失败；不伪造收藏成功。
-      setActionError(e instanceof Error ? e.message : "收藏操作失败，请重试");
-    }
-  }, []);
-
   const handleCreated = useCallback(
     (post: Post) => {
+      const owner = requestOwner.current;
+      if (!owner.active || owner.key !== ownerKey) return;
+      owner.mutations.set(post.id, { revision: ++owner.mutationRevision, post });
       setGroupPosts((prev) => mergePosts(prev, [post], true));
       setRevealAfterRefresh(true);
     },
-    [],
+    [ownerKey],
   );
 
   // 只投影本目录已加载卡；共享缓存提供单调已读/浏览量，不扩大分页结果。
@@ -410,7 +398,6 @@ export function GroupPosts({
           </div>
           <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
         </div>
-        {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
           {error && displayPosts.length === 0 && dataOwner === ownerKey ? (
             <div className="group-scene-placeholder" role="alert">
@@ -444,7 +431,6 @@ export function GroupPosts({
                       >
                         <PostCard
                           post={post}
-                          favorited={favoriteByPostId[String(post.id)] != null}
                           onOpen={() => {
                             // 详情入口仍能访问列表 DOM 时同步保存；不依赖路由退出/卸载时序。
                             setSkipRevealRestoreKey(scrollRestoreKey);
@@ -452,7 +438,6 @@ export function GroupPosts({
                             saveScrollPosition(scrollRestoreKey, listRef.current);
                             navigate(`/group/${encodeURIComponent(groupId)}/posts/${post.id}`);
                           }}
-                          onToggleFavorite={() => void toggleFavorite(post.id)}
                         />
                       </div>
                     );

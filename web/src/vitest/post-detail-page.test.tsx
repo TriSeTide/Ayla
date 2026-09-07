@@ -7,7 +7,7 @@
  * - group 可见但未选任何群时阻止保存并提示"请至少选择一个群"；
  * - 群内帖子（post.group 有值）编辑时默认指定群可见，且自动勾选所属群。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as postsApi from "../api/posts";
@@ -25,14 +25,22 @@ vi.mock("../components/motion/auroraquaMotion", async () => {
 vi.mock("../api/posts", () => ({
   getPost: vi.fn(),
   listComments: vi.fn(),
+  listCommentsPage: vi.fn().mockResolvedValue({ results: [], next_cursor: null, has_more: false, total: 0 }),
   updatePost: vi.fn(),
   deletePost: vi.fn(),
   reportPostViews: vi.fn().mockResolvedValue({ updated: {} }),
 }));
 vi.mock("../api/favorites", () => ({
   listFavorites: vi.fn().mockResolvedValue([]),
+  getFavoriteStatuses: vi.fn().mockImplementation(async (target_type, ids: string[]) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) })),
   addFavorite: vi.fn(),
   removeFavorite: vi.fn(),
+}));
+vi.mock("../hooks/useSocialPage", () => ({
+  useSocialPage: () => ({
+    items: [groupConversation], loading: false, loadingMore: false, error: null,
+    hasMore: false, total: 1, loadMore: vi.fn(), refresh: vi.fn(),
+  }),
 }));
 vi.mock("../components/posts/CommentList", () => ({
   CommentList: ({ revealItems }: { revealItems?: boolean }) => <div data-comment-reveal={String(revealItems)}>评论列表 mock</div>,
@@ -140,7 +148,7 @@ describe("PostDetailPage 分区入场边界", () => {
     expect(vi.mocked(surfaceEntryVariants).mock.results.at(-1)?.value.in).toMatchObject({ transition: { duration: 0.5, ease: [0, 0, 0.58, 1] } });
     expect(body.querySelector(".post-detail-card")).toHaveClass("reveal");
     expect(body.querySelector(".post-detail-comments")).toHaveClass("reveal");
-    expect(screen.getByText("评论列表 mock")).toHaveAttribute("data-comment-reveal", "true");
+    expect(await screen.findByText("评论列表 mock")).toHaveAttribute("data-comment-reveal", "true");
     const head = container.querySelector(".post-detail-head")!;
     const composer = container.querySelector(".post-detail-composer")!;
     expect(head.parentElement).toBe(body.parentElement);
@@ -178,6 +186,39 @@ describe("PostDetailPage 分区入场边界", () => {
 });
 
 describe("PostDetailPage 编辑可见范围", () => {
+  it("保存期间冻结标题正文与可见范围，拒绝重复请求，失败恢复原草稿", async () => {
+    let reject!: (error: Error) => void;
+    renderDetail(makePost());
+    vi.mocked(postsApi.updatePost).mockReturnValueOnce(new Promise((_yes, no) => { reject = no; }));
+    fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "帖子正文" }), { target: { value: "待保存正文" } });
+    fireEvent.click(screen.getByRole("button", { name: "重新发布" }));
+    expect(screen.getByRole("textbox", { name: "帖子标题" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "帖子正文" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "公开" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "取消编辑" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "保存中…" }));
+    expect(postsApi.updatePost).toHaveBeenCalledTimes(1);
+    await act(async () => reject(new Error("编辑保存失败")));
+    expect(screen.getByRole("textbox", { name: "帖子正文" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "帖子正文" })).toHaveValue("待保存正文");
+    expect(screen.getByRole("alert")).toHaveTextContent("编辑保存失败");
+  });
+  it("删除请求期间禁用重复提交，失败保留正文并显示可重试状态", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(postsApi.deletePost).mockReturnValueOnce(new Promise((_resolve, no) => { reject = no; }));
+    renderDetail(makePost());
+    fireEvent.click(await screen.findByRole("button", { name: "删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除？" }));
+    const busy = screen.getByRole("button", { name: "删除中…" });
+    expect(busy).toBeDisabled();
+    fireEvent.click(busy);
+    expect(postsApi.deletePost).toHaveBeenCalledTimes(1);
+    await act(async () => reject(new Error("删除暂时失败")));
+    expect(screen.getByRole("alert")).toHaveTextContent("删除暂时失败");
+    expect(screen.getByRole("button", { name: "删除" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
+  });
   it("编辑面板使用 VisibilitySelector，选择指定群后保存携带 allowed_group_ids", async () => {
     renderDetail(makePost());
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
@@ -255,6 +296,36 @@ describe("PostDetailPage 编辑可见范围", () => {
 });
 
 describe("PostDetailPage 编辑媒体", () => {
+  it("编辑只隔离原详情和评论输入，保留 DOM 草稿并在取消后恢复焦点和交互", async () => {
+    const view = renderDetail(makePost());
+    const edit = await screen.findByRole("button", { name: "编辑" });
+    await screen.findByText("评论列表 mock");
+    const detail = view.container.querySelector(".post-detail-scroll")!;
+    const composer = view.container.querySelector(".post-detail-composer")!;
+    const draft = composer.querySelector("textarea")!;
+    fireEvent.change(draft, { target: { value: "编辑前的评论草稿" } });
+    detail.scrollTop = 123;
+    fireEvent.click(edit);
+    const dialog = screen.getByRole("dialog", { name: "编辑帖子" });
+    expect(dialog).not.toHaveAttribute("inert");
+    expect(dialog).not.toHaveAttribute("aria-hidden");
+    expect(screen.getByRole("textbox", { name: "帖子标题" })).toHaveFocus();
+    const backgrounds = view.container.querySelectorAll(".post-detail.is-editing > .post-detail-background");
+    expect(backgrounds).toHaveLength(3);
+    backgrounds.forEach((node) => {
+      expect(node).toHaveAttribute("inert", "");
+      expect(node).toHaveAttribute("aria-hidden", "true");
+    });
+    expect(view.container.querySelector(".post-detail-scroll")).toBe(detail);
+    expect(detail.scrollTop).toBe(123);
+    fireEvent.click(screen.getByRole("button", { name: "取消编辑" }));
+    expect(view.container.querySelector(".post-detail-composer")).toBe(composer);
+    expect(draft).toHaveValue("编辑前的评论草稿");
+    expect(detail).not.toHaveAttribute("inert");
+    expect(composer).not.toHaveAttribute("aria-hidden");
+    await waitFor(() => expect(edit).toHaveFocus());
+  });
+
   it("编辑面板提供媒体上传入口", async () => {
     renderDetail(makePost());
     fireEvent.click(await screen.findByRole("button", { name: "编辑" }));
