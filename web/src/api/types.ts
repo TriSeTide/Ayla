@@ -271,6 +271,13 @@ export interface ConversationSummary {
   join_policy?: "public" | "application";
   owner_id: string;
   members: ConversationMember[];
+  /** False for paged directory metadata; never use this array as the whole group. */
+  members_complete?: boolean;
+  my_muted?: boolean;
+  /** False when the summary contains counts but omits growing unread-sequence arrays. */
+  unread_seqs_complete?: boolean;
+  directory_activity_at?: string;
+  group_presence?: { live: boolean; voice: boolean; game: boolean };
   my_role: "member" | "admin" | "owner" | null;
   member_count: number;
   unread_count: number;
@@ -306,6 +313,10 @@ export interface ConversationDetail {
   join_policy?: "public" | "application";
   owner_id: string;
   members: ConversationMember[];
+  members_complete?: boolean;
+  my_muted?: boolean;
+  unread_seqs_complete?: boolean;
+  directory_activity_at?: string;
   my_role: "member" | "admin" | "owner" | null;
   member_count: number;
   unread_count: number;
@@ -1149,6 +1160,7 @@ export interface PostListPage {
   results: Post[];
   next_cursor: string | null;
   has_more: boolean;
+  total?: number;
 }
 
 /** 帖子信息流 scope：feed（全可见）/ mine（我的）/ group:<id>（群内） */
@@ -1265,6 +1277,8 @@ export interface GroupMemberLeaveNotice {
 
 /** 群搜索结果项（轻量 dict） */
 export interface SearchGroupItem {
+  /** Server-authorized membership, independent of loaded conversation pages. */
+  is_member?: boolean;
   id: string;
   type: "group";
   title: string;
