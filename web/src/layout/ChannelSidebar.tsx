@@ -29,7 +29,7 @@ import { useGroupStore } from "../stores/group";
 import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
 import { useChatStore } from "../stores/chat";
-import { subgroupKey, useSubGroupStore } from "../stores/subgroup";
+import { sortSubgroupsByActivity, subgroupKey, useSubGroupStore } from "../stores/subgroup";
 
 const SCENE_META: Array<{ key: GroupScene; label: string; icon: typeof IconMic }> = [
   { key: "chat", label: "聊天", icon: IconChat },
@@ -89,7 +89,8 @@ export function ChannelSidebar({
     .find((c) => c.id === currentGroupId)?.post_unread_count ?? 0);
 
   // ---- 子群状态 ----
-  const subgroups = useSubGroupStore((state) => state.byGroup[currentGroupId ?? ""] ?? []);
+  const subgroupList = useSubGroupStore((state) => state.byGroup[currentGroupId ?? ""] ?? []);
+  const subgroups = sortSubgroupsByActivity(subgroupList);
   const activeSubgroupId = useSubGroupStore((state) => state.activeByGroup[currentGroupId ?? ""] ?? null);
   const unreadByKey = useSubGroupStore((state) => state.unreadByKey);
   const myRole = useChatStore((state) => state.conversations

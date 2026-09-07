@@ -10,6 +10,7 @@ import { create } from "zustand";
 import * as authApi from "../api/auth";
 import type { UserPublic } from "../api/types";
 import { useSessionActivityStore } from "./sessionActivity";
+import { useSubGroupStore } from "./subgroup";
 import { voiceSessionRuntime } from "../runtime/voiceSessionRuntime";
 import { liveSessionRuntime } from "../runtime/liveSessionRuntime";
 
@@ -69,7 +70,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  setUser: (user) => set({ currentUser: user }),
+  setUser: (user) => {
+    if (get().currentUser?.id !== user.id) useSubGroupStore.getState().reset();
+    set({ currentUser: user });
+  },
 
   setMediaActivity: ({ kind, active, roomId = null }) =>
     set((state) => {
@@ -88,13 +92,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const result = await authApi.login({ username, password });
     get().setTokens(result.access, result.refresh);
     const me = await authApi.fetchMe();
-    set({ currentUser: me });
+    get().setUser(me);
   },
 
   register: async (payload) => {
     const result = await authApi.register(payload);
     get().setTokens(result.access, result.refresh);
-    set({ currentUser: result.user });
+    get().setUser(result.user);
   },
 
   restoreSession: async () => {
@@ -108,7 +112,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // ROTATE_REFRESH_TOKENS=True：用返回值覆盖旧 refresh，否则下次刷新 401
       get().setTokens(access, refresh ?? refreshToken);
       const me = await authApi.fetchMe();
-      set({ currentUser: me, initialized: true });
+      get().setUser(me);
+      set({ initialized: true });
     } catch {
       get().logout();
       set({ initialized: true });
@@ -120,6 +125,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     voiceSessionRuntime.stopHeartbeat();
     liveSessionRuntime.leave();
     useSessionActivityStore.getState().reset();
+    useSubGroupStore.getState().reset();
     writeStoredRefresh(null);
     set({ accessToken: null, refreshToken: null, currentUser: null, initialized: true });
   },

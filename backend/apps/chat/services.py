@@ -14,6 +14,7 @@
 - 禁止把失败伪造成成功投递：只有真正落库并广播后才算发出。
 """
 import logging
+from dataclasses import dataclass
 
 from asgiref.sync import async_to_sync
 from channels.exceptions import ChannelFull
@@ -34,6 +35,22 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ReadReceipt:
+    """一次读取范围的确认快照；重试仍返回已确认序号，marked 仅统计新增回执。"""
+
+    rows: tuple[tuple[int, int, int | None], ...]
+    new_message_ids: frozenset[int]
+
+    @property
+    def marked(self) -> int:
+        return len(self.new_message_ids)
+
+    @property
+    def marked_seqs(self) -> list[int]:
+        return [seq for _, seq, _ in self.rows]
 
 
 # ---------- 会话 ----------
@@ -276,8 +293,8 @@ def _new_key() -> str:
 
 # ---------- 群聊子群 ----------
 
-def subgroup_unread_queryset(subgroup: GroupSubGroup, user):
-    """当前用户在该子群的未读消息查询集（默认组含 subgroup 为 null 的旧消息）。"""
+def _subgroup_readable_queryset(subgroup: GroupSubGroup, user):
+    """该子群可确认已读的消息（默认组包含无子群归属的旧消息）。"""
     qs = Message.objects.filter(conversation=subgroup.conversation)
     if subgroup.is_default:
         qs = qs.filter(Q(subgroup=subgroup) | Q(subgroup__isnull=True))
@@ -287,8 +304,12 @@ def subgroup_unread_queryset(subgroup: GroupSubGroup, user):
         qs.exclude(sender=user)
         .exclude(status=Message.STATUS_RECALLED)
         .exclude(type=Message.TYPE_POKE)
-        .exclude(reads__user=user)
     )
+
+
+def subgroup_unread_queryset(subgroup: GroupSubGroup, user):
+    """当前用户在该子群的未读消息查询集（默认组含 subgroup 为 null 的旧消息）。"""
+    return _subgroup_readable_queryset(subgroup, user).exclude(reads__user=user)
 
 
 def create_subgroup(conversation, name: str) -> GroupSubGroup:
@@ -307,18 +328,9 @@ def delete_subgroup(subgroup: GroupSubGroup) -> None:
         subgroup.delete()
 
 
-def mark_subgroup_read(user, subgroup: GroupSubGroup) -> int:
-    """为该子群内当前用户未读消息创建已读回执；返回本次标记条数（幂等）。"""
-    msgs = list(
-        subgroup_unread_queryset(subgroup, user).values_list("id", flat=True)
-    )
-    if not msgs:
-        return 0
-    MessageRead.objects.bulk_create(
-        [MessageRead(message_id=mid, user=user) for mid in msgs],
-        ignore_conflicts=True,
-    )
-    return len(msgs)
+def mark_subgroup_read(user, subgroup: GroupSubGroup) -> ReadReceipt:
+    """兼容显式子群全读；按固定快照确认，重复请求仍返回已确认的精确序号。"""
+    return _mark_messages_read(user, _subgroup_readable_queryset(subgroup, user))
 
 
 def recall_message(user, message) -> Message:
@@ -385,27 +397,28 @@ def mark_conversation_read(
     _mark_messages_read(user, messages)
 
 
-def _mark_messages_read(user, messages) -> None:
-    """对明确给定的消息集合写入幂等已读回执。"""
+def _mark_messages_read(user, messages) -> ReadReceipt:
+    """先固定消息身份快照再写回执；新到消息不扩入本次确认，重试可修复丢失响应。"""
+    rows = tuple(messages.order_by("seq").values_list("id", "seq", "subgroup_id"))
+    message_ids = {message_id for message_id, _, _ in rows}
+    if not message_ids:
+        return ReadReceipt(rows=(), new_message_ids=frozenset())
     existing = set(
-        MessageRead.objects.filter(message__in=messages, user=user)
+        MessageRead.objects.filter(message_id__in=message_ids, user=user)
         .values_list("message_id", flat=True)
     )
+    new_message_ids = frozenset(message_ids - existing)
     to_create = [
         MessageRead(message_id=message_id, user=user)
-        for message_id in messages.exclude(id__in=existing).values_list("id", flat=True)
+        for message_id in new_message_ids
     ]
     if to_create:
         MessageRead.objects.bulk_create(to_create, ignore_conflicts=True)
+    return ReadReceipt(rows=rows, new_message_ids=new_message_ids)
 
 
-def mark_read(user, message, *, through=True) -> None:
-    """将会话中截至目标消息的对方消息标为已读。
-
-    客户端打开会话时通常只加载最近一页；若只写入最新一条 MessageRead，
-    更早消息仍会持续贡献未读数，导致群聊/私信红点无法消失。因此以目标 seq
-    作为已读游标，批量写入当前用户的 MessageRead，重复调用保持幂等。
-    """
+def mark_read(user, message, *, through=True) -> ReadReceipt:
+    """精确确认一条消息；through=True 保留旧客户端截至目标序号的批量语义。"""
     if through:
         messages = Message.objects.filter(
             conversation=message.conversation,
@@ -415,9 +428,30 @@ def mark_read(user, message, *, through=True) -> None:
         messages = Message.objects.filter(pk=message.pk).exclude(
             sender=user,
         ).exclude(status=Message.STATUS_RECALLED)
-    _mark_messages_read(user, messages)
+    receipt = _mark_messages_read(user, messages)
     if message.sender_id != user.id:
         broadcast_read(message, user)
+    if message.conversation.type == Conversation.TYPE_GROUP:
+        _broadcast_read_subgroups(message.conversation, user, receipt)
+    return receipt
+
+
+def _broadcast_read_subgroups(conversation, user, receipt: ReadReceipt) -> None:
+    """单消息已读也向同账号其他端确认准确子群，不清除尚未看见的消息。"""
+    if not receipt.rows:
+        return
+    subgroups = list(conversation.subgroups.all())
+    default_id = next((sg.pk for sg in subgroups if sg.is_default), None)
+    for subgroup in subgroups:
+        rows = tuple(
+            row for row in receipt.rows
+            if (row[2] if row[2] is not None else default_id) == subgroup.pk
+        )
+        if rows:
+            new_ids = receipt.new_message_ids.intersection(row[0] for row in rows)
+            broadcast_subgroup_read(
+                subgroup, user, ReadReceipt(rows=rows, new_message_ids=new_ids)
+            )
 
 
 # ---------- 广播（统一从这里发出，捕获 ChannelFull） ----------
@@ -531,8 +565,8 @@ def broadcast_subgroup_deleted(conversation_id, subgroup_id) -> None:
     )
 
 
-def broadcast_subgroup_read(subgroup: GroupSubGroup, user, marked: int) -> None:
-    """subgroup.read：某成员把该子群标已读（前端本地清零未读 + 会话未读减 marked）。"""
+def broadcast_subgroup_read(subgroup: GroupSubGroup, user, receipt: ReadReceipt) -> None:
+    """subgroup.read：精确确认集合供前端幂等消除；marked 保留旧协议计数。"""
     _group_send_sync(
         subgroup.conversation_id,
         {
@@ -540,7 +574,8 @@ def broadcast_subgroup_read(subgroup: GroupSubGroup, user, marked: int) -> None:
             "conversation_id": str(subgroup.conversation_id),
             "subgroup_id": str(subgroup.id),
             "user_id": user.id,
-            "marked": marked,
+            "marked": receipt.marked,
+            "marked_seqs": receipt.marked_seqs,
         },
     )
 

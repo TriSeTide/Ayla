@@ -18,6 +18,7 @@ import { useAuthStore } from "../stores/auth";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
 import { useSubGroupStore } from "../stores/subgroup";
+import { applySubgroupReadReceipt } from "../stores/subgroupRead";
 import { useBadgesStore } from "../stores/badges";
 import { chatWS } from "../ws/chat";
 
@@ -670,22 +671,28 @@ export async function markConversationReadThrough(
 
 /** 精确标记一条消息已读（普通未读/@我/回复共用）；不会推进其他消息。 */
 export async function markMessageReadExact(convId: string, messageId: string) {
-  await chatApi.markMessageRead(convId, messageId, true);
+  const actor = useAuthStore.getState().currentUser?.id;
+  const result = await chatApi.markMessageRead(convId, messageId, true);
+  if (actor !== useAuthStore.getState().currentUser?.id) return;
   useMessageStore.getState().markReadByMe(convId, messageId);
   const message = useMessageStore.getState().buckets[convId]?.messages.find((item) => item.id === messageId);
-  if (message) useChatStore.getState().markReadSeqs(convId, [message.seq]);
+  if (message) {
+    const subgroupId = result.subgroup_id ?? message.subgroup_id ?? useSubGroupStore.getState().byGroup[convId]?.find((sg) => sg.is_default)?.id;
+    if (subgroupId != null) {
+      applySubgroupReadReceipt(convId, subgroupId, result.marked_seqs ?? [message.seq]);
+    } else {
+      useChatStore.getState().markReadSeqs(convId, [message.seq]);
+    }
+  }
   void useBadgesStore.getState().fetch();
 }
 
-/** 子群标已读：服务端创建该子群全部未读回执 → 本地清零子群未读 + 会话未读递减。 */
+/** 显式整组已读动作；日常进入/切换/滚动不调用，只应用服务器确认的消息序号。 */
 export async function markSubgroupRead(convId: string, subgroupId: string) {
-  const { marked } = await chatApi.markSubgroupRead(convId, subgroupId);
-  const sg = useSubGroupStore
-    .getState()
-    .byGroup[convId]?.find((item) => item.id === subgroupId);
-  const seqs = sg?.unread_seqs ?? [];
-  useSubGroupStore.getState().clearSubgroupUnread(convId, subgroupId);
-  useChatStore.getState().decrementUnread(convId, marked, seqs);
+  const actor = useAuthStore.getState().currentUser?.id;
+  const { marked_seqs } = await chatApi.markSubgroupRead(convId, subgroupId);
+  if (actor !== useAuthStore.getState().currentUser?.id) return;
+  if (marked_seqs) applySubgroupReadReceipt(convId, subgroupId, marked_seqs);
   void useBadgesStore.getState().fetch();
 }
 

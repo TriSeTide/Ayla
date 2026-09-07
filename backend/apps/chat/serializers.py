@@ -1,6 +1,6 @@
 """chat DRF 序列化器。"""
 from django.contrib.auth import get_user_model
-from django.db.models import Max
+from django.db.models import Max, Q
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
@@ -232,6 +232,7 @@ class SubGroupSerializer(serializers.ModelSerializer):
     conversation_id = serializers.CharField(read_only=True)
     unread_count = serializers.SerializerMethodField()
     unread_seqs = serializers.SerializerMethodField()
+    last_message_seq = serializers.SerializerMethodField()
 
     class Meta:
         model = GroupSubGroup
@@ -243,9 +244,22 @@ class SubGroupSerializer(serializers.ModelSerializer):
             "muted",
             "unread_count",
             "unread_seqs",
+            "last_message_seq",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_last_message_seq(self, obj) -> int:
+        """最近消息与未读无关；默认组兼容无 subgroup 的旧消息，空组为 0。"""
+        seqs = self.context.get("last_message_seqs")
+        if seqs is not None:
+            return max(seqs.get(obj.pk, 0), seqs.get(None, 0) if obj.is_default else 0)
+        # 创建/更新响应只序列化一个子群；列表由视图一次聚合全部子群。
+        qs = Message.objects.filter(conversation_id=obj.conversation_id)
+        scope = Q(subgroup_id=obj.pk)
+        if obj.is_default:
+            scope |= Q(subgroup__isnull=True)
+        return qs.filter(scope).aggregate(seq=Max("seq"))["seq"] or 0
 
     def get_unread_count(self, obj) -> int:
         request = self.context.get("request")

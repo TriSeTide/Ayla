@@ -12,6 +12,7 @@
  */
 import { create } from "zustand";
 import type { ChatMessage, MediaDescriptor } from "../api/types";
+import { isSubgroupMessageConfirmedRead, useSubGroupStore } from "./subgroup";
 
 export interface MessageBucket {
   /** 按 seq 升序（pending 乐观消息恒置底） */
@@ -81,12 +82,19 @@ function insertBySeq(list: ChatMessage[], msg: ChatMessage): ChatMessage[] {
   return sortMessages([...list, msg]);
 }
 
+function withConfirmedRead(convId: string, msg: ChatMessage): ChatMessage {
+  return !msg.read_by_me && isSubgroupMessageConfirmedRead(convId, msg.seq)
+    ? { ...msg, read_by_me: true } : msg;
+}
+
 export const useMessageStore = create<MessageState>((set) => ({
   buckets: {},
   readMarks: {},
   viewerAtBottom: {},
 
-  upsertMessage: (convId, msg) =>
+  upsertMessage: (convId, msg) => {
+    msg = withConfirmedRead(convId, msg);
+    useSubGroupStore.getState().recordMessageActivity(convId, msg.subgroup_id, msg.seq);
     set((state) => {
       const bucket = state.buckets[convId] ?? defaultBucket();
       return {
@@ -99,7 +107,8 @@ export const useMessageStore = create<MessageState>((set) => ({
           },
         },
       };
-    }),
+    });
+  },
 
   addPendingMessage: (convId, msg) =>
     set((state) => {
@@ -122,7 +131,9 @@ export const useMessageStore = create<MessageState>((set) => ({
       };
     }),
 
-  resolvePendingMessage: (convId, localId, idempotencyKey, serverMsg) =>
+  resolvePendingMessage: (convId, localId, idempotencyKey, serverMsg) => {
+    serverMsg = withConfirmedRead(convId, serverMsg);
+    useSubGroupStore.getState().recordMessageActivity(convId, serverMsg.subgroup_id, serverMsg.seq);
     set((state) => {
       const bucket = state.buckets[convId];
       if (!bucket) return state;
@@ -158,9 +169,12 @@ export const useMessageStore = create<MessageState>((set) => ({
           },
         },
       };
-    }),
+    });
+  },
 
-  resolvePendingByKey: (convId, idempotencyKey, serverMsg) =>
+  resolvePendingByKey: (convId, idempotencyKey, serverMsg) => {
+    serverMsg = withConfirmedRead(convId, serverMsg);
+    useSubGroupStore.getState().recordMessageActivity(convId, serverMsg.subgroup_id, serverMsg.seq);
     set((state) => {
       const bucket = state.buckets[convId];
       if (!bucket) return state;
@@ -193,7 +207,8 @@ export const useMessageStore = create<MessageState>((set) => ({
           },
         },
       };
-    }),
+    });
+  },
 
   markMessageFailed: (convId, messageId) =>
     set((state) => {
@@ -305,7 +320,11 @@ export const useMessageStore = create<MessageState>((set) => ({
       };
     }),
 
-  prependHistory: (convId, msgs, hasMore) =>
+  prependHistory: (convId, msgs, hasMore) => {
+    msgs = msgs.map((msg) => withConfirmedRead(convId, msg));
+    for (const msg of msgs) {
+      useSubGroupStore.getState().recordMessageActivity(convId, msg.subgroup_id, msg.seq);
+    }
     set((state) => {
       const bucket = state.buckets[convId] ?? {
         messages: [],
@@ -326,7 +345,8 @@ export const useMessageStore = create<MessageState>((set) => ({
           },
         },
       };
-    }),
+    });
+  },
 
   openBucket: (convId) =>
     set((state) => {

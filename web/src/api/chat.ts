@@ -101,7 +101,7 @@ export function deleteSubgroup(convId: string, subgroupId: string) {
 
 /** POST /chat/conversations/<id>/subgroups/<sid>/read/ —— 把该子群标已读（本人） */
 export function markSubgroupRead(convId: string, subgroupId: string) {
-  return apiRequest<{ marked: number }>(
+  return apiRequest<{ marked: number; marked_seqs?: number[] }>(
     `/chat/conversations/${convId}/subgroups/${subgroupId}/read/`,
     { method: "POST" },
   );
@@ -160,7 +160,7 @@ export function hideConversation(convId: string) {
 
 /** POST /chat/conversations/<id>/messages/<mid>/read/ —— 标已读 */
 export function markMessageRead(convId: string, messageId: string, exact = false) {
-  return apiRequest<{ detail: string }>(
+  return apiRequest<{ detail: string; marked_seqs?: number[]; subgroup_id?: string | null }>(
     `/chat/conversations/${convId}/messages/${messageId}/read/`,
     { method: "POST", body: exact ? { exact: true } : undefined },
   );

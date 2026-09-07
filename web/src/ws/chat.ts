@@ -12,7 +12,8 @@ import { useAuthStore } from "../stores/auth";
 import { useBadgesStore } from "../stores/badges";
 import { useChatStore } from "../stores/chat";
 import { useMessageStore } from "../stores/message";
-import { useSubGroupStore } from "../stores/subgroup";
+import { isSubgroupMessageConfirmedRead, subgroupKey, useSubGroupStore } from "../stores/subgroup";
+import { applySubgroupReadReceipt } from "../stores/subgroupRead";
 import { WS_BASE_URL } from "./presence";
 import type {
   ChatMessage,
@@ -295,6 +296,9 @@ export class ChatWSClient {
         const wsMediaId = typeof wsMedia === "string" ? wsMedia : (wsMedia?.media_id ?? null);
         const currentUserId = useAuthStore.getState().currentUser?.id;
         const subgroupId = d.subgroup_id ?? null;
+        const subgroupState = useSubGroupStore.getState();
+        const projectionId = subgroupId ?? subgroupState.byGroup[d.conversation_id]?.find((sg) => sg.is_default)?.id;
+        const confirmedRead = isSubgroupMessageConfirmedRead(d.conversation_id, d.seq);
         const msg: ChatMessage = {
           id: d.message_id,
           conversation_id: d.conversation_id,
@@ -306,7 +310,7 @@ export class ChatWSClient {
           segments: d.segments ?? null,
           reply_to: d.reply_to,
           reply_to_seq: d.reply_to_seq ?? null,
-          read_by_me: false,
+          read_by_me: confirmedRead,
           status: "sent",
           seq: d.seq,
           created_at: d.ts,
@@ -334,7 +338,7 @@ export class ChatWSClient {
         const isActiveSubgroup =
           subgroupId == null || activeSubgroupId == null || activeSubgroupId === subgroupId;
 
-        if (isFromOther && atBottom && isActiveSubgroup) {
+        if (isFromOther && conv?.type === "private" && atBottom && isActiveSubgroup) {
           // 正在底部看最新消息：直接已读（含 @/回复），不弹标签；
           // 被 @/回复的由 MessageList 直接泛光圈并滚底。
           message.markReadByMe(d.conversation_id, d.message_id);
@@ -342,10 +346,10 @@ export class ChatWSClient {
             .markMessageRead(d.conversation_id, d.message_id, true)
             .then(() => useBadgesStore.getState().fetch())
             .catch(() => { /* 已读失败，下次进入会话重试 */ });
-        } else if (isFromOther) {
-          // 非活跃会话/子群，或活跃但翻历史（不在底部）：进入未读投影，驱动标签。
-          if (subgroupId != null) {
-            useSubGroupStore.getState().bumpSubgroupUnread(d.conversation_id, subgroupId, d.seq);
+        } else if (isFromOther && !confirmedRead) {
+          // 群聊必须由 MessageList 实际可见的消息精确确认；底部状态不等于已看到。
+          if (projectionId != null) {
+            useSubGroupStore.getState().bumpSubgroupUnread(d.conversation_id, projectionId, d.seq);
           }
           chat.bumpUnread(d.conversation_id, {
             seq: d.seq,
@@ -399,8 +403,8 @@ export class ChatWSClient {
           conversation_id: d.conversation_id,
           name: d.name,
           is_default: d.is_default,
-          unread_count: existing?.unread_count ?? 0,
-          unread_seqs: existing?.unread_seqs ?? [],
+          unread_count: useSubGroupStore.getState().unreadByKey[subgroupKey(d.conversation_id, d.subgroup_id)] ?? 0,
+          unread_seqs: useSubGroupStore.getState().unreadSeqsByKey[subgroupKey(d.conversation_id, d.subgroup_id)] ?? [],
           created_at: existing?.created_at ?? new Date().toISOString(),
         });
         break;
@@ -423,8 +427,8 @@ export class ChatWSClient {
         const d = frame.data;
         const currentUserId = useAuthStore.getState().currentUser?.id;
         if (currentUserId != null && String(d.user_id) === String(currentUserId)) {
-          useSubGroupStore.getState().clearSubgroupUnread(d.conversation_id, d.subgroup_id);
-          useChatStore.getState().decrementUnread(d.conversation_id, d.marked);
+          // 旧帧只有 marked，无法证明哪些消息已读；绝不能据此清空新到的未读。
+          if (d.marked_seqs) applySubgroupReadReceipt(d.conversation_id, d.subgroup_id, d.marked_seqs);
         }
         break;
       }

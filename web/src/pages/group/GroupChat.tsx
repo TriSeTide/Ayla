@@ -9,7 +9,7 @@
  * 子群（群聊子群功能）：
  * - 进入群时拉子群列表，默认选中「默认组」；子群数 > 1 时在输入框上方显示
  *   可左右滑动的选项卡切换栏（窄屏/宽屏一致）；
- * - 切换子群：拉该子群历史 + 标该子群已读（子群未读独立统计）；
+ * - 切换子群只拉历史；消息实际进入可视区后逐条精确标已读；
  * - MessageList 按当前子群过滤显示（bucket 仍按会话缓存全量消息）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -21,7 +21,7 @@ import type { ChatMessage, SubGroup } from "../../api/types";
 import { MessageInput, type MessageInputHandle } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
 import { IconChevronDown, IconChevronUp } from "../../components/icons";
-import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markConversationReadThrough, markMessageReadExact, markSubgroupRead, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic, TARGET_HISTORY_MAX_PAGES } from "../../hooks/useChat";
+import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic, TARGET_HISTORY_MAX_PAGES } from "../../hooks/useChat";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { useChatStore } from "../../stores/chat";
 import { useHomeStore } from "../../stores/home";
@@ -104,7 +104,7 @@ export function GroupChat({ groupId }: { groupId: string }) {
     };
   }, [groupId]);
 
-  // 打开群会话 + 当前子群历史：拉历史 + 订阅 + 标该子群已读（复用 useChat 数据流）
+  // 打开群会话 + 当前子群历史：只拉历史和订阅，已读由 MessageList 可视区确认。
   useEffect(() => {
     const sgId = activeSubgroupId;
     if (sgId == null && !subgroupsFailed) return;
@@ -116,12 +116,6 @@ export function GroupChat({ groupId }: { groupId: string }) {
         setHistoryError(null);
       })
       .catch(handleHistoryError);
-    // 打开/切换子群即标该子群已读（子群未读独立统计）
-    if (sgId != null) {
-      void markSubgroupRead(groupId, sgId).catch(() => {
-        // 已读失败保留未读红点，下次切换/进入重试
-      });
-    }
     return () => {
       // 离开群聊时清 activeId，避免残留导致其他会话 message.new 被误判 markRead
       useChatStore.getState().closeConversation();
@@ -165,13 +159,14 @@ export function GroupChat({ groupId }: { groupId: string }) {
     }
   }, [groupId]);
 
-  // 切换子群：store 更新 → 历史加载 effect 拉该子群历史 + 标已读
+  // 切换子群：store 更新 → 历史加载；切换本身不代表消息已被看到。
   const switchSubgroup = useCallback((sg: SubGroup) => {
     if (sg.id === activeSubgroupId) return;
     useSubGroupStore.getState().setActiveSubgroup(groupId, sg.id);
   }, [activeSubgroupId, groupId]);
 
   const activeUnreadSeqs = activeSg ? unreadSeqsByKey[subgroupKey(groupId, activeSg.id)] ?? [] : undefined;
+  const activeUnreadSet = new Set(activeUnreadSeqs);
 
   // 子群禁言：开启后仅群主/管理员可发言（普通成员输入框禁用）
   const myRole = activeConv?.my_role;
@@ -210,12 +205,6 @@ export function GroupChat({ groupId }: { groupId: string }) {
         }
         onQuote={setQuote}
         onMarkRead={(m, exact) => exact ? markMessageReadExact(groupId, m.id) : undefined}
-        onMarkConversationRead={(throughSeq, excluded) => {
-          const sgId = activeSubgroupId;
-          return sgId != null
-            ? markSubgroupRead(groupId, sgId)
-            : markConversationReadThrough(groupId, throughSeq, excluded);
-        }}
         onLoadUntilSeq={(targetSeq) => loadHistoryUntilSeq(groupId, targetSeq, TARGET_HISTORY_MAX_PAGES, activeSubgroupId, activeSg?.is_default ?? false).catch(() => false)}
         onRecall={(m) => void handleRecall(m)}
         onRetry={(m) => retryOptimistic(groupId, m)}
@@ -226,8 +215,8 @@ export function GroupChat({ groupId }: { groupId: string }) {
         subgroupId={activeSubgroupId}
         isDefaultSubgroup={activeSg?.is_default ?? false}
         unreadSeqsOverride={activeUnreadSeqs}
-        mentionUnreadSeqsOverride={activeSg ? [] : undefined}
-        replyUnreadSeqsOverride={activeSg ? [] : undefined}
+        mentionUnreadSeqsOverride={activeSg ? (activeConv?.mention_unread_seqs ?? []).filter((seq) => activeUnreadSet.has(seq)) : undefined}
+        replyUnreadSeqsOverride={activeSg ? (activeConv?.reply_unread_seqs ?? []).filter((seq) => activeUnreadSet.has(seq)) : undefined}
       />
       {/* 子群选项卡切换栏：仅窄屏显示（宽屏用左侧栏子群列表切换）；可收起为半圆按钮 */}
       {isNarrow && subgroups.length > 1 && (

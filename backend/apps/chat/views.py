@@ -9,7 +9,7 @@ chat 视图 —— 私聊/群聊/消息/已读/撤回/群管理 REST。
 import logging
 
 from django.contrib.auth import get_user_model
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -176,9 +176,16 @@ class SubGroupListView(APIView):
             return _forbidden()
         if conv.type != Conversation.TYPE_GROUP:
             return _bad_request("仅群聊有子群")
+        last_message_seqs = {
+            item["subgroup_id"]: item["last_message_seq"]
+            for item in conv.messages.order_by().values("subgroup_id").annotate(
+                last_message_seq=Max("seq")
+            )
+        }
         return Response(
             SubGroupSerializer(
-                conv.subgroups.all(), many=True, context={"request": request}
+                conv.subgroups.all(), many=True,
+                context={"request": request, "last_message_seqs": last_message_seqs},
             ).data
         )
 
@@ -283,9 +290,9 @@ class SubGroupReadView(APIView):
             sg = conv.subgroups.get(pk=sid)
         except (GroupSubGroup.DoesNotExist, ValueError):
             return _not_found("子群不存在")
-        marked = services.mark_subgroup_read(request.user, sg)
-        services.broadcast_subgroup_read(sg, request.user, marked)
-        return Response({"marked": marked})
+        receipt = services.mark_subgroup_read(request.user, sg)
+        services.broadcast_subgroup_read(sg, request.user, receipt)
+        return Response({"marked": receipt.marked, "marked_seqs": receipt.marked_seqs})
 
 
 class ConversationDetailView(APIView):
@@ -547,8 +554,17 @@ class MessageReadView(APIView):
         if msg is None:
             return _not_found("消息不存在")
         exact = bool(request.data.get("exact", False))
-        services.mark_read(request.user, msg, through=not exact)
-        return Response({"detail": "已读"})
+        receipt = services.mark_read(request.user, msg, through=not exact)
+        data = {"detail": "已读", "marked_seqs": receipt.marked_seqs}
+        if exact and conv.type == Conversation.TYPE_GROUP:
+            # 子群列表尚未加载时，客户端仍能归属旧消息的精确确认，避免迟到列表复活未读。
+            subgroup_id = msg.subgroup_id
+            if subgroup_id is None:
+                subgroup_id = (
+                    conv.subgroups.filter(is_default=True).values_list("id", flat=True).first()
+                )
+            data["subgroup_id"] = str(subgroup_id) if subgroup_id is not None else None
+        return Response(data)
 
 
 class MessageRecallView(APIView):

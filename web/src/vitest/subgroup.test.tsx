@@ -2,18 +2,20 @@
  * 群聊子群功能测试：
  * - subgroup store：列表/未读投影/upsert 保留未读；
  * - ChannelSidebar：子群展开/收起、编辑笔、编辑态 +、添加弹窗；
- * - GroupChat：子群数 > 1 显示选项卡、仅默认组不显示、切换子群标已读。
+ * - GroupChat：子群数 > 1 显示选项卡、切换不整组已读，可见消息精确确认。
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationSummary, SubGroup } from "../api/types";
+import type { ChatMessage, ConversationSummary, SubGroup } from "../api/types";
 import { SubGroupDialog } from "../components/group/SubGroupDialog";
+import { MessageList } from "../components/chat/MessageList";
 import { ChannelSidebar } from "../layout/ChannelSidebar";
 import { GroupChat } from "../pages/group/GroupChat";
 import { useChatStore } from "../stores/chat";
 import { useGroupStore } from "../stores/group";
-import { useSubGroupStore } from "../stores/subgroup";
+import { useMessageStore } from "../stores/message";
+import { sortSubgroupsByActivity, useSubGroupStore } from "../stores/subgroup";
 import { useVoiceStore } from "../stores/voice";
 
 // ChannelSidebar 展开/收起下拉用 framer-motion（AnimatePresence + motion.div + useReducedMotion）：
@@ -40,6 +42,14 @@ function sg(id: string, name: string, isDefault = false, unread = 0): SubGroup {
   };
 }
 
+function subgroupMessage(subgroupId: string, seq: number): ChatMessage {
+  return {
+    id: `m${seq}`, conversation_id: "g1", sender_id: "me", type: "text",
+    content: "新消息", media_id: null, reply_to: null, status: "sent", seq,
+    created_at: "2026-09-07T00:00:00Z", subgroup_id: subgroupId,
+  };
+}
+
 function groupConv(id: string, myRole: "owner" | "admin" | "member" = "owner"): ConversationSummary {
   return {
     id,
@@ -58,6 +68,8 @@ function groupConv(id: string, myRole: "owner" | "admin" | "member" = "owner"): 
 }
 
 beforeEach(() => {
+  useMessageStore.getState().reset();
+  useSubGroupStore.getState().reset();
   useChatStore.setState({ conversations: [groupConv("g1")] });
   useGroupStore.setState({ currentGroupId: "g1", activeScene: "chat" });
   useSubGroupStore.setState({
@@ -78,6 +90,49 @@ afterEach(() => {
 });
 
 describe("subgroup store", () => {
+  it("默认组固定首位，按最近消息排序；同序号/无消息保持原顺序且不改基础列表", () => {
+    const list = [
+      { ...sg("2", "较旧"), last_message_seq: 10 },
+      sg("1", "改名的默认组", true),
+      { ...sg("3", "较新"), last_message_seq: 20 },
+      { ...sg("4", "并列"), last_message_seq: 20 },
+      sg("5", "空组甲"), sg("6", "空组乙"),
+    ];
+    expect(sortSubgroupsByActivity(list).map((item) => item.id)).toEqual(["1", "3", "4", "2", "5", "6"]);
+    expect(list.map((item) => item.id)).toEqual(["2", "1", "3", "4", "5", "6"]);
+  });
+
+  it("列表前消息、迟到 REST、重放和改名都不会回退活跃度；删除/退出清理投影", () => {
+    const store = useSubGroupStore.getState();
+    store.reset();
+    store.recordMessageActivity("g1", "2", 30);
+    store.setSubgroups("g1", [{ ...sg("2", "闲聊"), last_message_seq: 10 }]);
+    store.recordMessageActivity("g1", "2", 15);
+    store.upsertSubgroup("g1", sg("2", "改名"));
+    store.clearSubgroupUnread("g1", "2");
+    expect(useSubGroupStore.getState().byGroup.g1[0].last_message_seq).toBe(30);
+    store.setSubgroups("g2", [{ ...sg("2", "别群"), conversation_id: "g2", last_message_seq: 5 }]);
+    expect(useSubGroupStore.getState().byGroup.g2[0].last_message_seq).toBe(5);
+    store.removeSubgroup("g1", "2");
+    expect(useSubGroupStore.getState().lastMessageSeqByKey["g1:2"]).toBeUndefined();
+    store.reset();
+    expect(useSubGroupStore.getState().lastMessageSeqByKey).toEqual({});
+  });
+
+  it("自己消息 REST 确认和 WS 幂等确认推进序号，pending/失败/较早历史不抢位", () => {
+    const messages = useMessageStore.getState();
+    const local = { ...subgroupMessage("2", 0), id: "local", pending: true, idempotencyKey: "send-key" };
+    messages.addPendingMessage("g1", local);
+    messages.markMessageFailed("g1", "local");
+    expect(useSubGroupStore.getState().lastMessageSeqByKey["g1:2"]).toBeUndefined();
+    messages.resolvePendingMessage("g1", "local", "send-key", subgroupMessage("2", 40));
+    messages.resolvePendingByKey("g1", "send-key", subgroupMessage("2", 40));
+    messages.prependHistory("g1", [subgroupMessage("2", 5)], false);
+    expect(useSubGroupStore.getState().byGroup.g1.find((item) => item.id === "2")?.last_message_seq).toBe(40);
+    messages.upsertMessage("g1", { ...subgroupMessage("2", 41), type: "poke" });
+    expect(useSubGroupStore.getState().byGroup.g1.find((item) => item.id === "2")?.last_message_seq).toBe(41);
+  });
+
   it("setSubgroups 同步未读投影；bump/clear 按子群独立", () => {
     const store = useSubGroupStore.getState();
     store.bumpSubgroupUnread("g1", "2", 4);
@@ -100,6 +155,36 @@ describe("subgroup store", () => {
 });
 
 describe("ChannelSidebar 子群", () => {
+  it("新消息子群进入前三位，正在看的子群也重排；默认组固定、选中和点击目标保持", () => {
+    useSubGroupStore.getState().setSubgroups("g1", [
+      sg("1", "默认组", true),
+      { ...sg("2", "闲聊"), last_message_seq: 10 },
+      { ...sg("3", "公告"), last_message_seq: 20 },
+      sg("4", "游戏"),
+    ]);
+    useSubGroupStore.getState().setActiveSubgroup("g1", "4");
+    const select = vi.fn();
+    render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={select} />);
+    const names = () => [...document.querySelectorAll(".channel-subgroup-name")].map((item) => item.textContent);
+    expect(names()).toEqual(["默认组", "公告", "闲聊"]);
+    act(() => useMessageStore.getState().upsertMessage("g1", subgroupMessage("4", 21)));
+    expect(names()).toEqual(["默认组", "游戏", "公告"]);
+    expect(useSubGroupStore.getState().activeByGroup.g1).toBe("4");
+    fireEvent.click(screen.getByRole("button", { name: "游戏" }));
+    expect(select).toHaveBeenCalledWith("4");
+    act(() => useMessageStore.getState().upsertMessage("g1", subgroupMessage("1", 22)));
+    expect(names()).toEqual(["默认组", "游戏", "公告"]);
+    fireEvent.click(screen.getByRole("button", { name: /展开更多/ }));
+    expect(names()).toEqual(["默认组", "游戏", "公告", "闲聊"]);
+    // 刷新仅靠 API 持久消息序号恢复相同顺序。
+    const snapshot = useSubGroupStore.getState().byGroup.g1;
+    act(() => {
+      useSubGroupStore.getState().reset();
+      useSubGroupStore.getState().setSubgroups("g1", snapshot);
+    });
+    expect(names()).toEqual(["默认组", "游戏", "公告", "闲聊"]);
+  });
+
   it("默认展开子群列表；点三角形收起，再展开", () => {
     render(<ChannelSidebar groupName="测试群" activeScene="chat" onSelectScene={() => {}} onOpenInfo={() => {}} onSelectSubgroup={() => {}} />);
     // 默认展开：子群可见
@@ -314,7 +399,7 @@ describe("SubGroupDialog 禁言开关", () => {
 
 describe("GroupChat 子群选项卡", () => {
   vi.mock("../components/chat/MessageList", () => ({
-    MessageList: () => <div>消息列表</div>,
+    MessageList: vi.fn(() => <div>消息列表</div>),
   }));
   vi.mock("../components/chat/MessageInput", () => ({
     MessageInput: ({ disabled, disabledHint }: { disabled?: boolean; disabledHint?: string }) => (
@@ -386,7 +471,7 @@ describe("GroupChat 子群选项卡", () => {
     expect(screen.getByLabelText("3 条未读")).toBeInTheDocument();
   });
 
-  it("切换子群：更新 store 并标该子群已读", async () => {
+  it("进入/切换只加载历史，标签不整段标读；只有可见消息回调精确确认", async () => {
     await renderGroupChatExpanded();
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /闲聊/ })).toBeInTheDocument();
@@ -395,8 +480,25 @@ describe("GroupChat 子群选项卡", () => {
     await waitFor(() => {
       expect(useSubGroupStore.getState().activeByGroup.g1).toBe("2");
     });
-    const { markSubgroupRead } = await import("../hooks/useChat");
-    expect(markSubgroupRead).toHaveBeenCalledWith("g1", "2");
+    const { markSubgroupRead, markMessageReadExact } = await import("../hooks/useChat");
+    expect(markSubgroupRead).not.toHaveBeenCalled();
+    expect(useSubGroupStore.getState().unreadByKey["g1:2"]).toBe(3);
+    const props = vi.mocked(MessageList).mock.calls.at(-1)![0];
+    expect(props.onMarkConversationRead).toBeUndefined();
+    await act(async () => props.onMarkRead?.(subgroupMessage("2", 2), true));
+    expect(markMessageReadExact).toHaveBeenCalledWith("g1", "m2");
+    expect(markSubgroupRead).not.toHaveBeenCalled();
+  });
+
+  it("@/回复未读标签仅投影当前子群，不隐藏未看到的特殊消息或混入别组", async () => {
+    useChatStore.setState({ conversations: [{ ...groupConv("g1"), mention_unread_seqs: [1, 9], reply_unread_seqs: [2, 10] }] });
+    await renderGroupChatExpanded();
+    fireEvent.click(screen.getByRole("tab", { name: /闲聊/ }));
+    await waitFor(() => expect(useSubGroupStore.getState().activeByGroup.g1).toBe("2"));
+    const props = vi.mocked(MessageList).mock.calls.at(-1)![0];
+    expect(props.mentionUnreadSeqsOverride).toEqual([1]);
+    expect(props.replyUnreadSeqsOverride).toEqual([2]);
+    expect(props.unreadSeqsOverride).toEqual([1, 2, 3]);
   });
 
   it("禁言子群 + 普通成员 → 输入框禁用并显示提示", async () => {

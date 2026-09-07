@@ -361,6 +361,8 @@ export interface SubGroup {
   unread_count: number;
   /** 当前用户在该子群的未读消息序号（本人视角；旧后端可缺省） */
   unread_seqs?: number[];
+  /** 子群最近消息的会话内序号；空子群为 0，旧后端可缺省。 */
+  last_message_seq?: number;
   created_at: string;
 }
 
@@ -426,7 +428,7 @@ export interface SubGroupDeletedFrame {
   data: { conversation_id: string; subgroup_id: string };
 }
 
-/** 子群标已读广播帧（本人：本地清零未读 + 会话未读递减） */
+/** 子群已读确认；本人仅移除明确确认的序号，旧帧缺少范围时不得清零。 */
 export interface SubGroupReadFrame {
   type: "subgroup.read";
   data: {
@@ -434,6 +436,7 @@ export interface SubGroupReadFrame {
     subgroup_id: string;
     user_id: string;
     marked: number;
+    marked_seqs?: number[];
   };
 }
 

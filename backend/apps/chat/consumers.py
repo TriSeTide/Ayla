@@ -309,6 +309,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "subgroup_id": event["subgroup_id"],
                     "user_id": str(event["user_id"]),
                     "marked": event["marked"],
+                    **({"marked_seqs": event["marked_seqs"]} if "marked_seqs" in event else {}),
                 },
             }
         )

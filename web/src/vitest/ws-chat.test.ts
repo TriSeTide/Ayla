@@ -17,6 +17,7 @@ import { useBadgesStore } from "../stores/badges";
 import { usePostsStore } from "../stores/posts";
 import { useVoiceStore } from "../stores/voice";
 import { useLiveStore } from "../stores/live";
+import { sortSubgroupsByActivity, useSubGroupStore } from "../stores/subgroup";
 import * as liveApi from "../api/live";
 import * as accountsApi from "../api/accounts";
 import * as chatApi from "../api/chat";
@@ -86,6 +87,7 @@ beforeEach(() => {
   useAuthStore.setState({ accessToken: "acc", refreshToken: "ref" });
   useChatStore.getState().reset();
   useMessageStore.getState().reset();
+  useSubGroupStore.getState().reset();
   useNoticeStore.getState().clear();
   useBadgesStore.getState().reset();
   vi.mocked(accountsApi.getBadges).mockResolvedValue({
@@ -114,6 +116,92 @@ afterEach(() => {
 });
 
 describe("ChatWSClient", () => {
+  it("群聊只消费本用户精确回执；重复/旧回执不清新消息，未知会话不走私信自动已读", () => {
+    vi.mocked(chatApi.markMessageRead).mockClear();
+    useAuthStore.setState({ currentUser: {
+      id: "me", username: "me", nickname: "我", avatar: "", signature: "",
+      status: "online", online: true, date_joined: "",
+    } });
+    useChatStore.setState({ activeConversationId: "g1", conversations: [{
+      id: "g1", type: "group", title: "群", announcement: "", avatar: "", owner_id: "me",
+      members: [], my_role: "member", member_count: 2, unread_count: 3, unread_seqs: [1, 2, 100], created_at: "", peer: null,
+    }] });
+    useSubGroupStore.getState().setSubgroups("g1", [
+      { id: "a", name: "默认", conversation_id: "g1", is_default: true, unread_count: 2, unread_seqs: [1, 2], last_message_seq: 2, created_at: "" },
+      { id: "b", name: "另组", conversation_id: "g1", is_default: false, unread_count: 1, unread_seqs: [100], last_message_seq: 100, created_at: "" },
+    ]);
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    const receipt = (seqs?: number[], actor = "me") => fire(instances[0], { type: "subgroup.read", data: {
+      conversation_id: "g1", subgroup_id: "a", user_id: actor, marked: 99, ...(seqs ? { marked_seqs: seqs } : {}),
+    } });
+    const incoming = (seq: number, convId = "g1") => fire(instances[0], { type: "message.new", data: {
+      conversation_id: convId, message_id: `m${seq}`, sender_id: "peer", subgroup_id: null,
+      content: "消息", type: "text", media: null, reply_to: null, seq, ts: "2026-09-07T00:00:00Z",
+    } });
+    receipt([1]);
+    incoming(3);
+    receipt([1]);
+    receipt(); // 只有 marked 的旧帧不能代表哪些消息已读。
+    receipt([2], "other-user");
+    expect(useSubGroupStore.getState().unreadSeqsByKey["g1:a"]).toEqual([2, 3]);
+    expect(useSubGroupStore.getState().unreadSeqsByKey["g1:b"]).toEqual([100]);
+    expect(useChatStore.getState().conversations[0].unread_count).toBe(3);
+    expect(chatApi.markMessageRead).not.toHaveBeenCalled();
+    receipt([4]);
+    incoming(4);
+    expect(useSubGroupStore.getState().unreadSeqsByKey["g1:a"]).toEqual([2, 3]);
+    expect(useMessageStore.getState().buckets.g1.messages.find((m) => m.seq === 4)?.read_by_me).toBe(true);
+    useChatStore.setState({ activeConversationId: "unknown" });
+    incoming(5, "unknown");
+    expect(chatApi.markMessageRead).not.toHaveBeenCalled();
+    expect(useMessageStore.getState().buckets.unknown.messages[0].read_by_me).toBe(false);
+    client.disconnect();
+    useAuthStore.setState({ currentUser: null });
+  });
+
+  it("子群排序跟随当前子群/自己消息和 poke，重放旧帧不回退且与未读无关", () => {
+    useAuthStore.setState({ currentUser: {
+      id: "me", username: "me", nickname: "我", avatar: "", signature: "",
+      status: "online", online: true, date_joined: "2026-01-01T00:00:00Z",
+    } });
+    useChatStore.setState({ activeConversationId: "g1" });
+    useSubGroupStore.getState().setSubgroups("g1", ["1", "2", "3"].map((id) => ({
+      id, name: id, conversation_id: "g1", is_default: id === "1", unread_count: 0,
+      created_at: "2026-01-01T00:00:00Z", last_message_seq: id === "2" ? 10 : 0,
+    })));
+    useSubGroupStore.getState().setActiveSubgroup("g1", "3");
+    const order = () => sortSubgroupsByActivity(useSubGroupStore.getState().byGroup.g1).map((sg) => sg.id);
+    const client = new ChatWSClient();
+    client.connect();
+    vi.runOnlyPendingTimers();
+    const send = (subgroup: string, seq: number, sender = "peer") => fire(instances[0], {
+      type: "message.new", data: {
+        conversation_id: "g1", subgroup_id: subgroup, message_id: `m${seq}`, sender_id: sender,
+        content: "消息", type: "text", media: null, reply_to: null, seq,
+        ts: "2026-09-07T00:00:00Z", idempotency_key: `key-${seq}`,
+      },
+    });
+    send("3", 11);
+    expect(order()).toEqual(["1", "3", "2"]);
+    expect(useSubGroupStore.getState().unreadByKey["g1:3"]).toBe(1);
+    send("2", 12, "me");
+    expect(order()).toEqual(["1", "2", "3"]);
+    expect(useSubGroupStore.getState().unreadByKey["g1:2"]).toBe(0);
+    send("3", 9, "me");
+    expect(order()).toEqual(["1", "2", "3"]);
+    fire(instances[0], { type: "message.poke", data: {
+      conversation_id: "g1", subgroup_id: "3", message_id: "poke13", seq: 13,
+      sender_id: "peer", target_user_id: "me", sender_name: "对方", target_name: "我",
+      ts: "2026-09-07T00:00:00Z",
+    } });
+    expect(order()).toEqual(["1", "3", "2"]);
+    expect(useSubGroupStore.getState().unreadByKey["g1:3"]).toBe(1);
+    client.disconnect();
+    useAuthStore.setState({ currentUser: null });
+  });
+
   it("live.channel.created：通过 REST 对账完整 descriptor，重复事件幂等", async () => {
     const channel = {
       id: 7, title: "完整直播", status: "live" as const, owner_id: "owner", owner_nickname: "主播",
