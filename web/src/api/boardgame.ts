@@ -6,8 +6,18 @@
  * 玩法引擎、WS 对局通道非本期目标（进入房间后前端为占位界面）。
  */
 import { apiRequest } from "./client";
+import { mediaPageQuery, type MediaPage, type MediaPageParams } from "./mediaPagination";
 import { directoryQuery, type DirectoryPage, type DirectoryParams } from "./directory";
 import type { GameRoom, GameRoomMember } from "./types";
+
+/** members is a bounded preview; is_member/member_count describe the whole room. */
+export type GameRoomWithMemberPreview = GameRoom & { members_has_more?: boolean };
+
+export function listGameRoomMembersPage(roomId: number, params: MediaPageParams = {}) {
+  return apiRequest<MediaPage<GameRoomMember>>(
+    `/boardgame/rooms/${roomId}/members/?${mediaPageQuery({ limit: 20, ...params })}`,
+  );
+}
 
 /** GET /rooms/ —— 房间列表（mine=1 仅我在局；?scope=group:<id> 群内过滤；?owner=<id> 他人主页） */
 export function listGameRooms(params?: { mine?: boolean; scope?: string; owner?: string }) {
@@ -19,8 +29,11 @@ export function listGameRooms(params?: { mine?: boolean; scope?: string; owner?:
   return apiRequest<GameRoom[]>(`/boardgame/rooms/${qs}`);
 }
 
-export function listGameRoomsPage(params: DirectoryParams = {}) {
-  return apiRequest<DirectoryPage<GameRoom>>(`/boardgame/rooms/?${directoryQuery(params)}`);
+export function listGameRoomsPage(params: DirectoryParams & { mine?: boolean; owner?: string } = {}) {
+  const query = directoryQuery(params);
+  if (params.mine) query.set("mine", "1");
+  if (params.owner) query.set("owner", params.owner);
+  return apiRequest<DirectoryPage<GameRoom>>(`/boardgame/rooms/?${query}`);
 }
 
 /** POST /rooms/ —— 创建房间（group 归属群；game_type 默认 boardgame） */
@@ -41,7 +54,7 @@ export async function createGameRoom(payload: {
 
 /** GET /rooms/<id>/ —— 详情 */
 export function getGameRoom(roomId: number) {
-  return apiRequest<GameRoom>(`/boardgame/rooms/${roomId}/`);
+  return apiRequest<GameRoomWithMemberPreview>(`/boardgame/rooms/${roomId}/`);
 }
 
 /** DELETE /rooms/<id>/ —— 删除（仅房主） */

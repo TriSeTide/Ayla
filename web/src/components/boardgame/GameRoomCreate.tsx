@@ -1,7 +1,7 @@
 /**
  * GameRoomCreate —— 创建桌游室（R-F3：房间名必填）。group 归属由调用方传入。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
@@ -19,14 +19,17 @@ export function GameRoomCreate({
   );
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(group ? [group] : []);
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (submitting.current) return;
     const trimmed = name.trim();
     if (!trimmed) {
       setError("房间名不能为空");
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -43,6 +46,7 @@ export function GameRoomCreate({
     } catch (e) {
       setError(e instanceof Error ? e.message : "创建失败");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };

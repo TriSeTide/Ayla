@@ -8,16 +8,18 @@
 
 玩法引擎、WS 对局通道非本期目标（进入房间后前端为占位界面）。
 """
+from django.db.models import Count, Exists, OuterRef
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.catalog_pagination import catalog_scope, paginate_catalog
+from apps.common.media_pagination import paginate_media
 from apps.common.visibility import can_join, can_view, visible_queryset
 
 from . import services
-from .models import GameRoom
+from .models import GameRoom, GameRoomMember
 from .serializers import GameRoomMemberSerializer, GameRoomSerializer
 
 
@@ -25,7 +27,7 @@ def _get_room_or_404(room_id):
     try:
         return (
             GameRoom.objects.select_related("owner", "group")
-            .prefetch_related("members__user")
+            .annotate(_member_count=Count("members", distinct=True))
             .get(pk=room_id)
         )
     except (GameRoom.DoesNotExist, ValueError, TypeError):
@@ -69,7 +71,12 @@ class RoomListView(APIView):
         qs = (
             visible_queryset(GameRoom, request.user)
             .select_related("owner", "group")
-            .prefetch_related("members__user")
+            .annotate(
+                _member_count=Count("members", distinct=True),
+                _requester_member=Exists(GameRoomMember.objects.filter(
+                    room_id=OuterRef("pk"), user=request.user,
+                )),
+            )
         )
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
@@ -187,6 +194,27 @@ class RoomDetailView(APIView):
             services.broadcast_room_deleted(saved_room_id, gid, None)
         
         return Response({"deleted": True})
+
+
+class RoomMembersView(APIView):
+    """Visible member pages; total and requester membership remain independent."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, room_id):
+        room = _get_room_or_404(room_id)
+        if room is None:
+            return _not_found("房间不存在")
+        if not can_view(request.user, room):
+            return _forbidden("无权查看该房间")
+        page = paginate_media(
+            room.members.select_related("user"), request,
+            resource="game-members", scope=str(room.pk), field="seat", field_type="integer",
+            descending=False, default_limit=20, required=True,
+        )
+        return Response(page.response_data(
+            GameRoomMemberSerializer(page.rows, many=True, context={"request": request}).data
+        ))
 
 
 class RoomJoinView(APIView):

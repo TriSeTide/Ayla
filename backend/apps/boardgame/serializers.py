@@ -40,7 +40,9 @@ class GameRoomSerializer(serializers.ModelSerializer):
     visibility = serializers.CharField(read_only=True)
     group = serializers.CharField(source="group_id", read_only=True, default=None)
     group_name = serializers.CharField(source="group.title", read_only=True, default=None)
-    members = GameRoomMemberSerializer(many=True, read_only=True)
+    # A bounded preview, explicitly identified; room membership is never inferred from it.
+    members = serializers.SerializerMethodField()
+    members_has_more = serializers.SerializerMethodField()
     member_count = serializers.SerializerMethodField()
     is_owner = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
@@ -69,6 +71,7 @@ class GameRoomSerializer(serializers.ModelSerializer):
             "game_type",
             "status",
             "members",
+            "members_has_more",
             "member_count",
             "is_owner",
             "is_member",
@@ -79,19 +82,20 @@ class GameRoomSerializer(serializers.ModelSerializer):
     def _requester(self):
         return self.context.get("request").user if self.context.get("request") else None
 
-    def _members(self, obj):
-        if (
-            hasattr(obj, "_prefetched_objects_cache")
-            and "members" in obj._prefetched_objects_cache
-        ):
-            return obj._prefetched_objects_cache["members"]
-        return obj.members.all()
+    def get_members(self, obj):
+        rows = obj.members.select_related("user").order_by("seat", "id")[:20]
+        return GameRoomMemberSerializer(rows, many=True, context=self.context).data
+
+    def get_members_has_more(self, obj) -> bool:
+        return self.get_member_count(obj) > 20
 
     def get_owner(self, obj):
         return UserPublicSerializer(obj.owner, context=self.context).data
 
     def get_member_count(self, obj) -> int:
-        return len(self._members(obj))
+        if not hasattr(obj, "_member_count"):
+            obj._member_count = obj.members.count()
+        return obj._member_count
 
     def get_is_owner(self, obj) -> bool:
         user = self._requester()
@@ -101,4 +105,6 @@ class GameRoomSerializer(serializers.ModelSerializer):
         user = self._requester()
         if not user or not user.is_authenticated:
             return False
-        return any(m.user_id == user.id for m in self._members(obj))
+        if hasattr(obj, "_requester_member"):
+            return obj._requester_member
+        return obj.members.filter(user=user).exists()
