@@ -1,11 +1,22 @@
 # Ayla Web 前端设计方案 ——「千禧冰樱 / Y2K Frost」
 
-> 文档状态：设计规范 v2（阶段五全部界面 + 聚合主页与多端布局增量，见 §12）
+> 文档状态：设计规范 v3（保留千禧冰樱配色，卡片、侧栏、按钮与切换采用 Auroraqua 材质/交互配方）
 > 适用范围：`Ayla/web/`（React 18 + Vite + TS + Zustand），聊天 / 语音 / 直播 / 桌游 / 爱莉集成 / 主页 / 消息 / 搜索 / 个人界面
-> 参考来源：Y2K 美学参考图（冰蓝→樱花粉渐变 + 磨砂卡片 + hot pink 辉光）、Miro 设计系统结构、ui-ux-pro-max 规则库（Y2K Aesthetic / Vibrant & Block-based / Fredoka·Nunito 字配）
+> 参考来源：现有 Y2K Frost 色板、字体与主体身份设计；Auroraqua-UI 实际源码提供材料和交互结构。适配范围和固定源码版本见下文。
 > 结构约定：与 `miro_design.md` 同构，方便对照查阅与 agent 直接消费
 
 ---
+
+## 0. Auroraqua 源码适配边界
+
+用户要求保留本系统配色，学习 Auroraqua 的卡片、侧栏、按钮、选项卡和动效。**所有既有颜色 token、背景渐变、流体背景、字体、消息气泡和在线光环保持原值**。材料阴影使用 Ayla 的 indigo `70,91,146`；选中胶囊使用既有 ice `157,191,230`；按钮分别保留 indigo、sakura、grape 和 destructive 语义。截图只是参考，不能从截图推断上游实现。
+
+固定参考版本：[Auroraqua-UI `087bffc51b3c83b6214c2b3cec5c9899aaed6b2e`](https://github.com/micromimo/Auroraqua-UI/tree/087bffc51b3c83b6214c2b3cec5c9899aaed6b2e)。已读取 `src/index.css`、`GlassCard.jsx`、`GlassButton.jsx`、`TiltCard.jsx`、`PillTabBar.jsx`、`animations.jsx`、`routes.jsx`、`Case3.jsx`、`Case3Sidebar.jsx` 和 `SidebarNavItem.jsx`。
+
+- 普通 `GlassCard` = `liquid-glass` + 16px 圆角 + 300ms 过渡，默认不抬升、不做 3D。可交互列表卡选择上游独立的 `.glass-hover`：上浮 2px、阴影 12/40；不把 TiltCard 的跟随旋转施加到文本、输入、视频或拖拽容器。
+- `.liquid-glass` = blur 24px、宽软阴影 8/32、1px 高光边与顶沿内高光。Ayla 保留原有白底 .55/.78、边框 .65、saturate(1.4)，不引入上游白底 .15、靛紫和粉桃色。
+- `GlassButton` = 200ms hover 1.02 / press .98、600ms 横向白光扫过；`PillTabBar` = 单一选中胶囊 300ms 滑动；`SidebarNavItem` 与 `PillTabBar` 的选中项均有 700ms 扫光。实现扫光使用 transform，不复制上游 left 逐帧更新。
+- CSS 材料变量在 `tokens.css`；页面材料在各自 CSS；共用 hover/press/扫光、导航高亮和侧栏进入在 `auroraqua.css`；React 切换参数在 `components/motion/auroraquaMotion.ts`。继续使用现有 React/CSS/Framer Motion 栈。
 
 ## 1. Visual Theme & Atmosphere
 
@@ -15,11 +26,11 @@ Ayla 是爱莉在 Web 端的「具身家园」。视觉主题定为 **「千禧�
 
 **Key Characteristics:**
 - 全局流体极光渐变背景（冰蓝 `#BDD4E9` ↔ 樱粉 `#FCD8FF`），缓慢流动，内容在其上滚动（见 §7.2）
-- 磨砂玻璃卡片：`backdrop-filter: blur()` + 半透暖白底 + 1px 高光描边
+- Auroraqua 磨砂玻璃卡片：原有半透暖白底 + 24px blur + 1px 高光描边 + 宽软外阴影与顶沿内高光
 - Hot pink 辉光（`#F796FF`）只给三类东西：爱莉身份、主 CTA、在线状态
 - 圆润几何：大圆角（12–28px）、气泡形、胶囊形，无尖锐直角
 - 深靛蓝（`#465B92`）承担全部正文与主要交互，保证可读性不被粉色系拖垮
-- 动效轻快短促（150–300ms）；常驻环境动画仅两个：辉光呼吸 + 流体极光背景（§7.2）
+- 动效分层：按钮200ms、交互卡片/切换/页面分区300ms、普通页面缩放显现与未分区侧栏进入500ms；常驻环境动画仍为辉光呼吸 + 流体极光背景（§7.2）
 
 **与通用 Y2K 的差异**：不用铬金属质感、不用 CRT 扫描线、不用 glitch——那些是复古噱头。本方案只取 Y2K 的「冰蓝×泡泡粉×辉光×乐观」，其余让给现代可用性。
 
@@ -41,7 +52,7 @@ Ayla 是爱莉在 Web 端的「具身家园」。视觉主题定为 **「千禧�
 | `--glow-500` | `#F796FF` | **hot pink 辉光**，阴影/外发光专用，不作文字色 |
 | `--pink-500` | `#F17EB3` | 樱花粉，强调图形、徽标底（文字必须配深底） |
 | `--grape-700` | `#722E88` | 深紫，粉底的文字色（对 `#FCD8FF` 对比度 ~6.6:1 ✓）、爱莉专属强调 |
-| `--surface` | `#FFFAFB` | 暖白，实心卡片底、输入框底 |
+| `--surface` | `#FFFAFB` | 暖白，不支持玻璃的降级表面；正常文本输入使用`--glass-bg` |
 
 ### Functional（派生）
 
@@ -103,20 +114,34 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ## 4. Component Stylings
 
 ### Buttons
-- **Primary**：`--indigo-700` 实底 + 白字，14px/700，圆角 999px（胶囊），hover 时附加 `--glow-shadow`，transition 200ms
-- **Glow CTA**（每屏至多 1 个，如「和爱莉聊天」）：`linear-gradient(135deg, #F9B0FF, #F796FF)` 底 + `--grape-700` 字 + 常驻 `--glow-shadow`
-- **Ghost**：透明底 + `1px solid rgba(70, 91, 146, 0.35)` + indigo 字，hover 底 `rgba(157, 191, 230, 0.18)`
-- 最小高度 40px（触屏目标 ≥44px 的区域用 padding 补足）
+
+- **Primary**：保留 `--indigo-700` 实底和原白字，14px/700，12px 圆角；静态紧凑玻璃阴影，hover 保留品牌辉光。
+- **Glow CTA**：保留 sakura→glow 渐变、grape 文字和既有身份/CTA 辉光。
+- **Ghost**：已有 `--glass-bg` + `--glass-border` + blur(8px) + `--glass-shadow-button`（2/8 阴影）；hover 沿用 ice 底并升到 `--glass-shadow-button-hover`（4/16 阴影）。
+- 三类按钮、图标按钮、输入工具、收藏、播放器控制按钮共用 `200ms ease`，精细指针 hover `scale(1.02)`、按下 `scale(.98)`；使用独立 scale 属性，避免覆盖原有定位 transform。危险操作、disabled/aria-disabled、媒体 overlay 底色保持原语义。
+- 自包含按钮使用 600ms 横向高光扫过，选中导航使用 700ms；伪元素 `pointer-events:none`，不能覆盖文字、截断徽标或阻断点击。
+- 最小高度 40px（触屏推荐 44px）；`prefers-reduced-motion` 禁用缩放和扫光，保留焦点/状态反馈。
 
 ### Cards / Panels
-- 标准卡片：`--glass-bg` + `backdrop-filter: blur(18px) saturate(1.4)` + `1px solid var(--glass-border)` + 圆角 20px + 内阴影 `inset 0 1px 0 rgba(255,255,255,0.5)`
-- 实心卡片（内容密集区，如消息列表）：`--surface` + 圆角 16px + 极浅投影 `0 2px 12px rgba(70, 91, 146, 0.08)`
-- **禁止重投影**——深度靠「玻璃 vs 实心」的质地对比，不靠阴影堆叠（继承 Miro）
+
+- 通用 `.glass-card` 与兼容类 `.solid-card` 统一使用 `--glass-bg` + `--glass-filter` + 完整 `1px --glass-border` + 16px `--radius-card` + `--glass-shadow`。旧 `.solid-card` 类名保留以兼容现有页面，不再代表不透明卡面。
+- `--glass-shadow` = `0 8px 32px rgba(70,91,146,.2), var(--glass-inset)`；可交互卡片 hover 为 `0 12px 40px rgba(70,91,146,.2)` 与同一内高光，上浮 2px、300ms ease；按下缩放 .99。
+- 密集小行卡使用 `--glass-shadow-compact`（4/16 阴影）；菜单用常规玻璃阴影；弹窗/认证卡使用 `--glass-bg-strong`、20px `--radius-panel`、`--glass-shadow-modal`（20/60 阴影）。所有 RGB 来自原系统。
+- 原“禁止重投影、仅靠实心/玻璃区分深度”规范已被本次需求替换：宽软阴影与顶沿高光是新的共同材料。同一视觉卡片只保留一个材料owner，内部布局块不得再叠玻璃底、blur与整块阴影；多张独立卡片的集合wrapper应透明。交互字段和独立浮层仍各自保留材料与状态，不能用`.glass .glass`泛选择器清除所有后代。
+- 已核对的单层组合：宽屏语音成员卡保留外卡、内`.voice-panel`透明；宽屏语音聊天卡的header/composer为透明布局并保留分隔边；直播aside内`.live-room-input > .danmaku-input-area`透明，窄屏普通观看独立input自己持有材料；自/他人`.profile-mine.solid-card`保留外卡，内部`.profile-section-row`无玻璃/blur/阴影，hover保留ice反馈。窄屏语音成员panel与展开聊天浮层保持各自独立材料；收藏、群信息各分卡、帖子正文卡已是单层，不改其背景。
+- 开播控制台`/live/start/:channelId`必须按`showOwnerPanel`的真实分支单独验收：`.live-owner-panel`与`.live-studio-stream`各是一张.55/16px/完整玻璃阴影与blur24卡，内部`.live-owner-visibility`保持透明布局和分隔边，推流值保持只读`code`语义。窄屏`.live-room-body.is-studio.is-narrow > .live-room-side`及其弹幕wrap明确无背景/blur/卡片阴影；240px高度、整页滚动、内部输入与原开播/保存/复制权限逻辑保持。
+- 769–1100px开播控制台保留频道栏，右侧主区与弹幕上下排列，分别保留原滚动；资料栏再按`.live-studio-owner-panel`的实际宽度响应，容器≤560px时字段上下排列，开播/保存按钮另起横排。不能让固定三栏把表单压成竖排或让200px标题覆盖按钮；≤768px仍使用原窄屏资料栏布局。
+- 仅可交互列表卡抬升；资料卡、静态信息板和正在阅读的帖子详情保留稳定位置。滚动恢复时不重播入场，减少动态效果时不抬升/按压缩放。
 
 ### Inputs
-- 底 `#FFFAFB`（不透明，保证可读）、`1px solid #BDD4E9`、圆角 12px、padding 12px 16px
+- 文本字段使用`--glass-bg`（rgba(255,250,251,.55)）、`1px solid --glass-border`（白色.65）、12px圆角、`--glass-inset`顶沿与`--glass-filter`（blur24px/saturate1.4）；普通field保留12px/16px内边距，其他单/多行控件保持原尺寸。不能混用不透明surface、.78强玻璃或白色常量造成输入框明暗不一。
 - focus：边框转 `#F796FF` + `--glow-shadow`，200ms 过渡
 - 错误：边框 `--destructive`，错误文案紧贴字段下方（不放顶部汇总）
+- **宽屏聊天输入外壳**：群聊/私聊`.composer`与帖子`.post-detail-composer`在>768px使用12px外沿、8px内边距、完整16px圆角和亮边、`--glass-bg` + `--glass-filter` + `--glass-shadow`。语音`.voice-room-composer`与直播aside内`.danmaku-input-area`保留相同布局间距，但由父房间卡片持有唯一材料，内部外框透明、不再叠完整卡片阴影，保留分隔边。相邻侧栏已贡献右侧12px时，群聊/私聊输入及私聊标题不再叠加左外边距；侧栏到输入外沿共享间隔为12px。
+- 宽屏私信外壳不在卡片边缘裁剪：`.wide-messages-pane .private-chat`使用`overflow:visible`，实际消息滚动/裁剪由`.message-scroll`持有；标题、输入及其动画wrapper保留阴影溢出空间。不能用抬高z-index绕过祖先overflow裁剪，也不能补第二份左padding把12px间隔扩成24px。
+- **输入行高度**：`.composer-input` 与 contentEditable 使用 22px 行高、上下 8px 内边距、1px 边框，单行 40px；发送与工具按钮同为 40px，宽屏普通空输入外壳为 58px。编辑器只设 `min-height:40px` / `max-height:140px`，真实多行内容自然增高；空 placeholder 单行省略且绝对定位，不得参与高度计算。769–900px 的窄桌面把工具组放在输入行下方，给字段保留可输入宽度，不能靠压扁按钮或把空占位文字折成竖列腾空间。
+- **独立工具行**：窄屏与769–900px换行后的工具组使用等宽网格，占满整行；按当前功能数量自动分为群聊4格、私聊3格，格间8px、按钮高40px。发送按钮留在输入行。所有断点的工具按钮共用12px圆角、原玻璃底/高光边、compact阴影与hover/press，录音停止等功能状态继续保持原有状态色。
+- 所有宽窄屏文本输入由同一材料规则覆盖`.field`（含contenteditable）、`.voice-create-input`、`.live-create-input`、`.danmaku-input`以及复合外框`.top-nav-search`、`.narrow-topbar-search`、`.live-player-fs-input`。搜索和全屏弹幕的原生input保持透明，材料与focus由外框持有一次；全屏弹幕文字改用原`--text-primary`配合浅玻璃底，placeholder共用`--slate-500`。窄屏语音聊天卡、独立直播input与帖子详情composer父底也为.55，避免额外强白底。工具按钮仍12px玻璃钮，focus/disabled/密码类型、禁言/上传/取消提示和媒体预览语义保持，底部定位与safe-area不变。
 
 ### Chat Bubbles
 - 自己：`--bubble-self` 渐变底 + `--indigo-700` 字，圆角 18px（右下 6px 小角）
@@ -125,8 +150,12 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 引用回复：左侧 3px `#9DBFE6` 竖条 + 弱化一层透明度
 
 ### Nav / Sidebar
-- 会话列表侧栏：整面大玻璃（`--glass-bg` + blur 24px），选中项 `rgba(157,191,230,0.35)` 胶囊底
+- 会话、群、语音、直播侧栏：原 `--glass-bg` + `--glass-filter` + 四向高光边框 + 16px 圆角 + `--glass-shadow`，外沿留 12px，形成独立悬浮面板；保持各自宽度、滚动 owner、sticky 和 Portal 边界。选中项使用原 ice 色系渐变胶囊 `--nav-active-bg`、顶沿高光与同色柔光，300ms 共享指示器移动；选中项 hover 有 700ms 扫光。
 - 图标：SVG（Lucide 风格线性图标），**禁止 emoji 当图标**；emoji 只出现在消息内容与表情包
+- 窄屏底部主导航 `.bottom-tabs` 与群场景顶部导航 `.group-top-tabs` 保持方角，顶部五个装饰指示点已移除；其他玻璃卡片、输入和按钮继续使用各自圆角。
+- 窄屏子群栏以稳定 `.group-chat-compose-area` 为锚点，绝对定位在输入框上方，不消耗消息列表高度。开合把手居中贴输入框上沿：透明48×32px命中区，视觉仅36×18px无边框上半圆；同一个按钮DOM保住焦点。展开的panel、选项卡容器与选中胶囊均无边框，直接覆盖在消息区上方；透明空白不拦截消息操作。展开层负责300ms height/opacity（reduced-motion为0ms），收起时同时 `aria-hidden`、禁用按钮并移出tab顺序；选项卡横向滚动独占手势，不触发场景切换。
+- 宽窄屏切换子群时，当前实际`.message-list`执行右20px→0与淡入的300ms内容过渡；仅变更导航胶囊不足以表达消息内容切换。默认子群首次建立只登记选择基线，初入由父面板统一持有，不能父子重复进入；后续真实选择变化时，缓存命中立即进入，无缓存等待当前选择对应的请求完成标记。选择revision区分重复进入同一子群，旧请求不能提前触发新选择。输入使用原`.composer`先向下退出300ms、再从下20px进入300ms；不添加key或重挂编辑器，保留草稿与焦点，快速切换取消旧动画。外层`.group-chat-compose-area`仍只拥有原面板初入，子群条不随消息移动，减少动态直接展示。
+- 窄/宽屏右上角更多入口分别是 `.narrow-topbar-more > .icon-btn-40` 和 `.top-nav-more > .top-nav-icon-btn`，共用12px圆角玻璃按钮、200ms hover/press与600ms扫光；菜单均为300ms顶部淡入/轻移，reduced-motion时关闭位移、缩放和扫光。菜单项与既有返回/收藏/登出行为保持。
 
 ### Tags / Badges
 - 胶囊形，`--sakura-300` 底 + `--grape-700` 字（如参考图里的 hot pink 标签），11px Fredoka
@@ -144,7 +173,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 群内场景标题栏 `.group-scene-head`
 - 语音、帖子、桌游三个可滚动群内子场景共用；标题栏是滚动容器的直接子元素，`position: sticky; top: 0; z-index: 10`，最小高 72px，padding `--sp-4`，标题与尾部动作 gap `--sp-3`。
-- 标题栏是独立玻璃卡片而非拉伸横条：`--glass-bg` + blur(18px) saturate(1.4) + `--glass-border` + 16px 圆角 + `--glass-inset`；滚动容器提供四向 gutter 与 `--sp-4` 内容间距，禁止负 margin 破坏圆角和焦点可见性。
+- 标题栏是独立玻璃卡片而非拉伸横条：`--glass-bg` + `--glass-filter` + `--glass-border` + 16px 圆角 + `--glass-shadow-compact`；滚动容器提供四向 gutter 与 `--sp-4` 内容间距，禁止负 margin 破坏圆角和焦点可见性。
 - 标题使用 `--font-display` 18px/500、说明使用 14px/`--text-secondary` 单行省略；尾部控件保持 ≥40px 触达，滚动容器设置对应 `scroll-padding-top`。
 
 ### 聊天「回到底部」按钮
@@ -155,10 +184,14 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ## 5. Layout Principles
 
 - 间距刻度：4 / 8 / 12 / 16 / 24 / 32 / 48（聊天密度场景以 8/12/16 为主）
-- 圆角刻度：8（小件）/ 12（输入）/ 16–20（卡片）/ 24–28（面板）/ 999（胶囊、头像）
+- 圆角刻度：8（小件）/ 12（按钮、输入、导航项）/ 16（卡片、侧栏）/ 20（弹窗面板）/ 24（贴底抽屉上沿）/ 999（胶囊、头像）
 - 主布局：左侧栏（玻璃，280–320px）+ 主内容区（透明，透出极光背景）+ 按需右栏
 - 内容最大宽度 1200px；聊天页不设限宽，气泡列最大 960px 居中（宽屏加宽，减少两侧留白；窄屏由滚动区内边距自然收缩）
 - 网格：12 列，24px gutter；卡片间距 ≥16px
+- 个人页与公开的他人页在>768px使用同一两栏布局：顶栏横跨，左侧资料/设置，右侧本人或公开内容；`.profile-side`/`.profile-main` 各自滚动，内部卡片保持自然高度，不用 `height:100%` 拉长卡面。无公开内容、加载或错误分支回到居中单列，不渲染空右栏；窄屏wrapper为 `display:contents` 保持原顺序与间距。
+- 个人页两栏卡片之间净间隔16px、页面外沿24px。两滚动区各向中间扩16px，内部仍保留24px阴影裁剪空间；重叠的透明滚动容器禁用pointer命中，直属卡片恢复事件，点击和滚轮仍进入各自滚动列。不能只把内侧padding缩到8px而重新裁断阴影。
+- 全局OverlayScrollbar的fixed thumb必须与实际滚动owner一同结束：DOM移除批次只回收已断开owner及其thumb、timer、hover/active与drag状态，同批移动后仍连接的owner保留。隐藏thumb为`pointer-events:none`，可见或拖动期间继续可命中；全局卸载先断开观察器，再逐owner清理，不能让旧页透明滚动条覆盖新页卡片。
+- 群详情双栏的滚动容器必须给卡片阴影预留左右/顶部24px、底部32px，不能让 `overflow-y:auto` 的裁剪边贴卡边。左轨道为 `clamp(280px,36%,388px)`，左右独立滚动且卡片不被flex收缩；769–1000px因额外两条导航栏挤占内容宽度，详情退为单列整页滚动，≤768px维持既有窄屏规则。
 
 ## 6. Depth & Elevation —— 签名元素
 
@@ -169,39 +202,58 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 | 层级 | 表达 |
 |---|---|
 | 背景 | 固定极光渐变（z 最低，不动） |
-| 内容 | 实心卡片浮于背景 |
-| 浮层 | 玻璃面板 + blur |
+| 内容 | 16px 玻璃卡片 + 8/32 宽软阴影 + 顶沿内高光 |
+| 浮层 | 强玻璃面板 + 24px blur + 20/60 阴影 |
 | 模态 | `--glass-bg-strong` + 背景压暗 `rgba(70,91,146,0.25)`（`--overlay-dim`） |
 | 沉浸查看器 | 图片查看器等 lightbox：压暗加深至 0.45（`--overlay-dim-strong`）+ blur(8px)，z 在弹窗层之上 |
-| 辉光 | 只服务光环、主 CTA、focus |
+| 辉光 | 原有光环、主 CTA、focus；导航选中态增加同色柔光，保持状态颜色语义 |
 
 ## 7. Motion
 
-- 时长：hover/焦点 150–200ms；面板进出 200–300ms；`ease-out` 进、`ease-in` 出（退出快于进入）
+- 时长：按钮200ms ease；卡片hover 300ms ease；方向路由300ms easeInOut；普通页面显现与未分区侧栏500ms easeOut；宽窄屏分区、导航胶囊与折叠300ms easeOut。参数来自§0源码，独立放在Auroraqua命名变量中，不改既有手势/消息/背景动画token。
 - **framer-motion 使用纪律**：只接管 CSS 难以可靠完成的三类能力——① 跟手（motion value 逐帧驱动拖拽/下拉/侧滑）；② 进出协同（`AnimatePresence` 管理旧内容退出与新内容进入）；③ 编排（多层导航、场景内容、输入框的时间线）。既有 CSS keyframes（如 `frost-rise`、`halo-breathe`、`reveal-item-in`）全部保留，不为同一语义建立第二套动画；其余简单状态过渡优先使用 tokens.css 的 CSS transition/keyframes。
+- **路由与拖拽分层**：`.page-transition.primary-nav-page`持有一级路由自身过渡；`.group-scene-inner`自动进入直接归位、退出仅淡出，由子面板执行各自进入方向。内部`.primary-nav-drag` / `.group-scene-drag`只负责真实拖拽offset。两层使用同一`absolute; inset:0; min-width:0; min-height:0`原点，保留业务key、提交门槛与播放器生命周期。正常Presence退出只停止活动拖拽/回弹，保留释放当帧offset参与路由淡出；不能同步清零，否则会在opacity仍为1时硬跳。相同DOM快速返场从保留位置连续归零；真正禁用或运行中开启reduced-motion才立即取消并清零，避免冻结在半途。
+- **宽屏分区进入与切换**：进入主页时左侧栏从左进入、聊天输入从下进入；切群时第一列ServerRail持续存在，只有粉色活动标记移动，第二列频道栏按旧内容退出/收起后新内容从左进入。进入私信时会话列从左进入；选会话时标题从上、输入从下进入，换好友时标题执行退出/进入、消息区执行内容过渡。过渡必须保留单个活动消息订阅/编辑器和会话隔离，不为退出动画复制旧聊天运行实例。减少动态时直接显示最终状态。
+- **分区容器布局**：`.channel-sidebar-slot`固定保留频道栏260px加两侧12px的占位，旧栏退出期间不能挤动主聊天区；`.conversation-transition`、`.chat-messages-motion`、`.chat-composer-motion`保留flex/min-size与阴影溢出空间，消息列表自己持有滚动。已由React motion持有的宽屏群/私信侧栏和输入关闭自动CSS入场，禁止两个owner同时移动同一分区。
+- **直播分区**：宽屏直属`.live-rail`仍由CSS从左20px进入；群内外切换直播间时，既有`.live-room-stage`从下20px、弹幕分区从右20px进入，由同一WAAPI owner按channelId重播300ms easeOut。弹幕目标在宽屏/控制台为`.live-room-side`，窄屏普通观看为当前场景owner下的`.danmaku-wrap`；`.has-media-panel-motion`关闭宽屏侧面板旧CSS入场。标题从上20px进入，并以channelId作为小范围Presence身份，旧标题退出后新标题进入，`.live-room-head.is-panel-motion`关闭CSS入场。body/main/播放器宿主不因视觉动画增加key或重挂；跨频道时video/HLS仍可由原媒体runtime更换，视觉重播不得额外触发媒体切换，不能把宿主稳定误写成跨房video始终同一DOM。窄屏展开直播列表时，覆盖层`.live-rail.is-panel-motion`由Framer从右20px进入，旧CSS左入同时关闭；常驻宽屏左栏方向不变。reduced-motion直接归位。
+- **语音房分区**：标题从上20px、语音成员卡从下20px进入，聊天卡宽屏从右20px、窄屏从下20px进入，均300ms easeOut；首次进入与群内切房均由单一动画owner在相同面板DOM上编排/重播，`.voice-room-body.is-panel-motion`下三面板关闭自动CSS入场及旧`.reveal`的opacity/transform。聊天卡内部输入始终在最终位置，不再叠加100%位移；窄屏聊天列表的浮层开合仍是独立交互。禁止为重播给VoiceRoomBody、音频或LiveKit宿主增加key；连接和订阅继续由真实房间切换管理，reduced-motion直接归位。
+- **其他宽屏固定分区**：群详情`.group-info-side`从左、`.group-info-main`从右；自/他人页顶栏从上、资料列从左、内容列从右；桌游房标题、群内帖子/语音/桌游列表的`.group-scene-head`以及收藏页标题从上进入，统一20px/300ms。分区位移不改变原滚动owner与断点；减少动态时直接归位。收藏标题使用同款玻璃、亮边、16px圆角和compact阴影，左右边缘与1200px轨道内部的卡片对齐。
+- **帖子详情**：宽窄屏头部从上20px、评论输入从下20px进入，均300ms；输入不再叠加原100%位移与100ms延迟。群外正文滚动区单独继承原页面500ms的20px/scale(.95→1)显现，article/comments原300ms reveal与评论stagger保持，不能为新头部动画删掉正文过渡。群内正文补独立300ms进入。帖子外壳不同时持有整页位移，shell底栏离场状态与safe-area继续独立管理。
+- **窄屏分区方向**：NarrowTopBar、个人页/收藏/群列表/桌游房/帖子/直播/语音的普通顶栏从上进入；窄屏进入群聊的导航单独保持“底栏滑动到顶栏”，不能用顶部-20px入场替代这条跨视口轨迹。个人页wrapper为display:contents，实际资料/内容卡片各自从下进入；群详情单列的两段内容也从下进入。群/私聊天输入由各自motion分区从下进入；直播只有窄屏底部`.live-room-input`从下20px/300ms进入，宽屏输入随右侧面板进入，不能再叠第二层。收藏窄屏标题同样使用玻璃面板，与列表16px内沿对齐。顶部/内容/输入不共用整页浮入，PrimaryNav/scene/FullScreenSwipeBack等手势层继续持有原手势，不因分区动画重挂或清空滚动；reduced-motion直接归位。
+- **窄屏消息列表标题**：`.messages-page .messages-tabs`仅在挂载时从上20px/300ms进入；群聊/私信tab切换继续由原胶囊高亮与内容过渡持有，不重播整个tab头。此规则不匹配宽屏侧栏，reduced-motion直接呈现。
+- **群帖子底部编辑器**：宽窄屏基础`.group-posts-input`从下20px/300ms进入；`.is-expanded`以更高特异性继续独占原250ms展开关键帧，保留展开定位、限高与内部滚动，两个animation不同时叠加。减少动态时基础态与展开态均直接归位。
+- **群内左侧阴影空间**：宽屏群语音/桌游/帖子列表及帖子详情的实际竖向滚动器保留原16px内容轨道，以左margin -32px和左padding 48px增加绘制空间；标题、卡片、骨架的原位置及宽度保持，滚动DOM和`overflow-y:auto`不变。群帖子/详情外壳不另裁剪；扩出的透明带不接收指针，真实子内容恢复pointer事件，wheel从内容冒泡至原滚动owner，侧栏右沿仍可点击。
 - **PageTransition 时长表**：
 
   | 路由形态 | 进入 | 退出 | 说明 |
   |---|---|---|---|
-  | 普通路由 | `opacity: 0→1` + `translateY(20px→0)` | `opacity: 1→0` | 进入 200ms `--ease-out`；退出 150ms `--ease-in`，退出快于进入 |
-  | 搜索页内容 | `opacity: 0→1` + `translateY(-20px→0)` | `opacity: 1→0` | 顶栏固定，内容从顶栏下方展开；同样为 200ms / 150ms |
-  | 群内场景 / 直播间同类切换 | 由场景自身的跟手或编排负责 | 全局仅淡出 | 群页进入不叠加 PageTransition 的 y 浮入；直播间详情 key 归一，切台不重跑整页转场 |
+  | 群/私信/直播房/语音房/自他人页/收藏/桌游房分区外壳 | 外层直接`opacity:1`、位移0、scale1；各指定面板按上述宽窄屏结构进入 | 外层仅300ms淡出 | `panelOwned`排除普通整页浮入；群内容也只编排子面板，不再次移动整个内容区；真实手势轨道与机械退出仍独立，减少动态时直接完成 |
+  | 帖子详情 | 外壳直接归位；头上/输入下300ms；正文按上述群内/外规则 | 外层仅300ms淡出 | 群外旧500ms浮入只迁到正文滚动区，原正文reveal与评论stagger保持 |
+  | 普通路由 | `opacity: 0→1` + `translateY(20px→0)` + `scale(.95→1)` | `opacity: 1→0` | 进入 500ms Auroraqua easeOut；退出 300ms easeInOut |
+  | 搜索页内容 | `opacity: 0→1` + `translateY(-20px→0)` + `scale(.95→1)` | `opacity: 1→0` | 顶栏固定，沿原方向展开；500ms / 300ms |
+  | 窄屏群内场景 | 场景外壳直接归位；子面板分别进入 | 300ms淡出 | 真实group-scene-drag继续跟手，不叠加场景自动位移或整页缩放 |
+  | 窄屏直播间同类切换 | inner pager保留原手势方向的20px位移 + 淡入，300ms easeInOut | 反向20px + 淡出 | 直播间路由详情key归一，保持单播放器运行实例；视频/弹幕分区各自重播见上文 |
 
 - **消息到达**：仅新到达的乐观消息或 WS 实时消息挂 `.msg-arrive`，复用 `frost-rise` 从下方 8px 浮入 + 淡入，180ms；初始历史加载、滚动恢复和重新挂载的历史消息不播放到达动画，不弹跳。
-- **滚动恢复与 stagger 互斥**：命中 `useScrollRestore` 的历史位置（包括显式保存的 `scrollTop=0`）时，先恢复内容高度与位置，禁止 `.reveal-item`/stagger；只有真正首次进入或用户主动刷新才播放逐条浮入。
+- **滚动恢复与 stagger 互斥**：命中`useScrollRestore`的历史位置（包括显式保存的`scrollTop=0`）时，先恢复内容高度与位置，恢复节点禁止`.reveal-item`/stagger。增量列表后续分页、实时新增或刷新产生的新DOM才播放进入，刷新保留的DOM不重播；未改为增量hook的既有静态内容继续使用自身reveal。
 - 常驻环境动画仅两个：光环呼吸 + 流体极光背景（§7.2）；其余装饰性循环动画禁止
 - 骨架屏：所有 >300ms 的异步加载用 `animate-pulse` 风格骨架（玻璃质感骨架块），禁止白屏/冻结
-- `prefers-reduced-motion`：关闭呼吸、浮入与跟手位移，保留透明度渐变；拖拽/切换必须退化为可用的直接控件路径
+- `prefers-reduced-motion`：关闭呼吸、浮入与跟手位移；新分区与增量列表直接显示最终opacity/transform，不等待渐变。拖拽/切换必须退化为可用的直接控件路径。
 
-### 7.1 统一内容入场原语 `.reveal`
+### 7.1 内容入场与增量卡片
 
-直播间/语音房/帖子详情/列表等所有异步界面的**主体内容浮入**统一用一套原语（复用，勿到处发明一次性动画）：
+帖子详情及未指定分区方向、未接入增量hook的异步内容共用`.reveal`；宽窄屏直播和语音房的指定面板由§7分区规则接管，同一面板不再叠加本原语：
 
-- **CSS**：`base.css` 新增 `.reveal`（初始 `opacity:0 + translateY(8px)`）与 `.reveal.is-in`（`opacity:1 + translateY(0)`，180ms `--ease-out` 过渡）；`prefers-reduced-motion` 下只保留透明度渐变。
-- **样式元素**：`.reveal-item` 用于**列表/评论逐条浮现**（`animation: reveal-item-in 180ms forwards`，`--reveal-delay` 变量控制 stagger，封顶 300ms）。
+- **CSS**：`base.css` 的 `.reveal` 初始 `opacity:0 + translateY(20px)`，`.reveal.is-in` 300ms Auroraqua easeOut 回到正常位置；`prefers-reduced-motion` 下直接呈现。
+- **静态样式元素**：既有`.reveal-item`保留给尚未改为增量DOM入场的内容与评论（20px/300ms），`staggerDelay`每项50ms、累计封顶300ms。
+- **增量列表**：收藏、搜索、帖子与目录卡片使用`useListEntryMotion`记录已经出现的实际DOM；首屏、加载下一页和实时新增都只让新节点从下20px/300ms进入，批内50ms错峰封顶300ms。已存在卡片不重播，刷新不以key重挂整个列表；减少动态或滚动恢复阶段直接呈现新建DOM，恢复结束后真正追加的新卡仍可入场。
+- **目录活动排序**：语音/直播WS真实sortIdentity变化沿用原业务排序，即时重排当前查询已加载卡，复用旧DOM、不重播入场；正常metadata/count/activity更新不使分页失效，后续页沿原cursor并按ID去重。仅部分目录的真实成员集合/过滤归属变化提供明确刷新入口，完整目录直接同步增删与总数；普通metadata/count变化与分页append不重排，不能把“新页不搬动旧卡”扩大为取消原活动排序。语音侧栏同一稳定UL保存已加载行，折叠仅显示前三项/92px、尾项不可交互，展开恢复auto高度；位置FLIP为300ms easeOut，排序立即生效且不改写scrollTop。完整分页契约见[目录分页架构](architecture/catalog-pagination.md)。
+- **语音选择与连接**：侧栏选中胶囊按路由voiceChannelId立即更新，独立于实际媒体currentChannelId；真实成员活动排序仍即时生效。`.channel-sidebar-list`滚动根登记`layoutScroll`并禁用原生`overflow-anchor`，保留同DOM位置FLIP，避免排序时浏览器锚定把scrollTop跳回。语音房行的胶囊设`sharedLayout=false`，背景随父行一起移动，不再以第二套共享layout投影反向抵消父行位移；其他导航继续使用原共享胶囊过渡。快速切换的共享选择/REST补偿/媒体取消见[语音会话切换](architecture/voice-session-switching.md)，不能用等待连接来延迟导航反馈。
+- **侧栏吸附标题阅读边界**：聊天、语音、直播与固定帖子、桌游共用`.channel-scene`未选/选中/hover材料；上三行没有独立底色或额外backdrop-filter。`useSidebarContentClip`读取同一滚动区内实际标题矩形、可视边界和row-gap，把三个原下拉容器的绘制裁剪在自身标题下方与下一标题上方；标题吸顶、吸底及相邻4px间隙均不绘制后方条目。裁剪不改变列表DOM、尺寸、排序、scrollTop或分页，行FLIP继续由原节点持有；scroll、ResizeObserver与仅直接childList的MutationObserver同步，卸载回收监听、观察器及自身clip。不能把裁剪后的几何存在或单次命中检查当作完整键盘可达性证明。
+- **分页提示区稳定**：目录/群帖/一级帖子的`StablePaginationFooter`保留本次挂载测得的最高高度，错误、重试与加载共用同一DOM，完整错误可换行；主内容终页保留空间，语音/直播侧栏传`retainCompletedSpace=false`，无加载/错误/后续页/失效时移除footer，避免空白尾段。footer不参与浏览器滚动锚定。共享footer用`flex:none`与`width:100%`，禁止在侧栏column内设`flex-basis:100%`，以免自动高度与最高高度保留互相放大；帖子瀑布流的跨列规则只在本布局生效。
 - **Hook**：`useRevealOnEnter(active)` 返回 `{step, revealed}`，双 rAF 首帧隐藏→过渡显示。**内容由异步加载产生时，必须把 `active` 接到「内容就绪」信号（如 `!loading`），否则动画会在加载完成前就跑完、看不到浮入**。
-- **滚动恢复互斥**：列表通过 `useScrollRestore` 命中历史 `scrollTop` 后，恢复路径不得挂 `.reveal-item` / stagger；先稳定恢复内容高度与位置，首次进入和用户主动刷新才播放逐条浮入。
-- 语义边界：`.reveal` 只管**内容块自身**的浮入淡入；**底栏/输入框的位移**由 `useEnterRoomAnimation` / `useEnterGroupAnimation` 负责，两者不混淆、可叠加。
+- **滚动恢复互斥**：`useScrollRestore`命中历史位置时，恢复节点不挂CSS stagger或重播WAAPI入场。分页请求在详情中完成不能撤掉该抑制；返回先恢复原位置，此后新增页只动画新增节点。
+- 语义边界：`.reveal`只管未指定方向的内容块；宽窄屏聊天输入、帖子输入与直播输入分别归上述单一分区owner，底栏显隐状态继续独立管理。不同独立区域可以协调进入，同一节点与其整页祖先不能重复持有同一次位移。
 
 ### 7.2 流体极光背景（Fluid Aurora）
 
@@ -217,11 +269,19 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **降级**：`prefers-reduced-motion` 停止全部流动动画，回退 html 静态 `--bg-aurora`；不支持 `backdrop-filter` 时光斑回退为降低透明度的实色圆；≤768px 双光斑保留并改为上下半区（A 上 80vw / B 下 70vw，alpha 0.7 提亮）且渐变/湍流放慢（省电）
 - **纪律**：光斑不是辉光（`--glow-shadow` 仍限 3 处）；背景保持明亮浅色通透，禁止深色/紫色/深蓝混入
 
+### 7.3 加载指示器与骨架屏
+
+- 转圈使用 `base.css` 的 `.loading-spinner` 与唯一 `ayla-loading-spin`：`--loading-spin-duration:800ms`、linear、循环一整圈。默认/md为18px，sm为14px；2px环使用原ice轨道和indigo顶部，消息发送保留既有 `rgba(70,91,146,.25)` 轨道。消息历史、消息发送与下拉刷新复用同一类；RefreshFab的原SVG仅共享旋转配方，外形与请求状态保持。
+- 骨架统一 `.skeleton`：原玻璃底、白色亮边与 `frost-pulse` 的 `.55→.9→.55`，`--loading-pulse-duration:1600ms`、ease-in-out。span默认inline-block以兑现显式宽高，div保持块级布局；媒体/查看器骨架继续block撑满预留frame，避免资源就绪时跳动。可见范围群列表保留既有樱粉背景。
+- 骨架外层必须跟随真实内容的水平轨道，不能只改骨架内部padding：帖子/我的帖子用同一680→1200px限宽和16→24px内沿，宽屏双列；语音/直播加载区跟随真实列表的2/3/4列与max1200px，桌游和收藏直接复用各自轨道。帖子详情的满宽骨架有效区为680px，两侧16px外沿与加载后的正文卡边缘对齐；搜索当前为文字加载状态，仍使用结果轨道。宽屏主页在跳转群页前的骨架采用max1200px与24px内沿，窄屏共用原群卡网格。
+- `prefers-reduced-motion` 下循环转圈与骨架脉冲均停止，保留静态加载标识、状态文字、aria语义和预留尺寸。不要在场景CSS重新声明同一种循环动画而绕过共同降级。
+- 此配方仅表示真实未完成的异步工作；加载、完成、失败与取消由原请求生命周期控制。页面进入、列表reveal、路由、消息到达、背景和光环属于各自原语，不能随加载样式统一而重放；LivePlayer的600ms单次刷新反馈保持其现有行为。
+
 ## 8. Do's and Don'ts
 
 ### Do
-- 每屏蓝粉双系并置，玻璃与实心卡片分层使用
-- 辉光只给：爱莉、主 CTA、focus——三处以内
+- 保留每屏既有蓝粉配色，卡片/侧栏共用玻璃材料，以阴影尺寸与原底色透明度区分层次
+- 爱莉/主 CTA/focus 延续原辉光；选中导航用同色柔光和可读的胶囊轮廓
 - 圆角走刻度，胶囊留给按钮/标签/头像
 - 图标用线性 SVG，2px 描边，圆角端点
 - 中文用系统圆体回退，拉丁用 Fredoka/Nunito 出挑
@@ -229,8 +289,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ### Don't
 - 不用铬金属、扫描线、glitch、像素字——不做复古噱头
 - 不把 `#F796FF`/`#F17EB3` 当正文文字色（对比度不达标）
-- 不用重阴影、不在玻璃卡片上再叠玻璃卡片
-- 不一屏超过 3 处辉光、2 种 pastel 强调
+- 不使用上游粉桃紫色板；阴影采用 Auroraqua 的宽软几何和 Ayla 原有颜色，不堆叠多层深色阴影
+- 品牌辉光继续限量；导航状态只在各导航组当前项显示柔光，不用持续闪烁强调
 - 不用 emoji 充当功能图标
 - 不把爱莉专属气泡/光环样式复用到普通用户
 
@@ -254,7 +314,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ### Quick Color Reference
 - 背景：`--bg-aurora`（fixed 极光渐变）
 - 正文/交互：`#465B92`；粉底文字：`#722E88`
-- 玻璃卡片：`rgba(255,250,251,0.55)` + `blur(18px)` + `1px rgba(255,255,255,0.65)`
+- 玻璃卡片：原 `rgba(255,250,251,0.55)` + `--glass-filter` + 原亮边 + `--glass-shadow`，详见 §4
 - 辉光：`0 0 16px rgba(247,150,255,0.45)`（限 3 处/屏）
 - 爱莉专属：`#FCD8FF→#F9B0FF` 气泡 + 锥形渐变光环 + 呼吸辉光
 
@@ -279,21 +339,23 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.2 顶部导航栏 TopNav（宽屏常驻）
 
-- 容器：高 64px，整面玻璃 `--glass-bg` + blur 18px，常驻不滚走，底部 1px `--glass-border`
+- 容器：高 64px，原 `--glass-bg` + `--glass-filter`，顶部及左右外沿 12px 留白、16px 圆角、四向 `--glass-border` 与 `--glass-shadow`，常驻不滚走
 - 布局：左起 头像（40px 圆形带 `--ring-online` 光环，→个人界面）→ 一级模块文字链（主页/语音/直播/帖子/桌游，Nunito 700 15px `--text-primary`）→ 消息（带未读徽标）→ 搜索框（240px 胶囊，见 12.9）→ 更多（三，40px 图标按钮）
-- 当前模块：文字 `--text-primary` + 底部 2px `--glow-500` 指示条
+- 当前模块：原文字颜色 + 12px 圆角的 `--nav-active-bg` 胶囊、高光与柔光；`AuroraquaNavHighlight` 300ms 移动，不再显示独立底部线
 - hover：模块文字底 `rgba(157,191,230,0.18)` 胶囊（200ms 过渡）
+- 模块文字必须单行、不收缩成竖排；769–900px 将模块间距收为4px、两端内边距8px，导航外壳内边距/间隙12px，搜索框收为160–200px，消息/更多图标按钮仍为40px。更宽视口保持原24px外壳内边距、240px搜索框。
 
 ### 12.3 服务器栏 ServerRail（宽屏，主页/群场景最左）
 
-- 容器：宽 72px，整面玻璃 `--glass-bg` + blur 24px，纵向排列，间距 12px，顶部留 16px
+- 容器：宽 72px，`--glass-bg` + `--glass-filter` + 四向亮边、16px 圆角、`--glass-shadow`；上下左留 12px，与频道侧栏相隔 12px；头像间距与滚动行为不变
 - 群头像：48px 圆形，带 `--ring-online` 光环；当前群左侧 3px `--glow-500` 指示条 + 头像微放大（48→52px，200ms）
+- 宽屏切换群时AppShell使用稳定的 `wide-group-shell`，ServerRail owner与共享指示条id不重挂，粉色指示条在同一导航owner内移动。第二列ChannelSidebar按当前groupId编排旧内容收起/退出、新内容从左进入；频道栏和群内容保持群私有编辑/弹窗/消息输入的归属，不能为外观连续把状态串到另一群。首次进入主页的左移入场与同一主页内切群须由不同生命周期边界控制，避免第一列反复滑入。
 - 状态角标：头像右下角 16px 圆形底（`--pink-500` 未读 / `--glow-500` 直播 / `--ice-500` 语音 / `--sakura-300` 桌游），内嵌 10px 白色线性图标
 - 底部用户卡：40px 头像带光环 + 在线状态点；点击进个人界面
 
 ### 12.4 频道侧栏 ChannelSidebar（宽屏，主页/群场景）
 
-- 容器：宽 240–280px，整面玻璃 `--glass-bg` + blur 24px
+- 容器：宽 260px，原 `--glass-bg` + `--glass-filter`、四向亮边、16px 圆角、`--glass-shadow`，四向外边距 12px；保持内容独立滚动和场景 sticky
 - 群名头：Fredoka 500 20px `--text-primary`，padding 16px，点击进群信息；右侧 chevron 图标
 - 场景项（聊天/语音/直播/帖子/桌游）：行高 40px，圆角 12px 胶囊，左 20px 线性图标 + Nunito 600 15px 文字（`--text-secondary`）；选中态底 `rgba(157,191,230,0.35)` + 文字转 `--text-primary`；hover 底 `rgba(157,191,230,0.18)`
 - 状态标识：行右侧——语音在麦人数（Space Grotesk 12px `--text-secondary`）、直播 LIVE 徽标（`--pink-500` 底白字 11px Fredoka 胶囊）、帖子未读数（`--pink-500` 圆点）
@@ -303,7 +365,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ### 12.4.1 群内场景统一标题栏 GroupSceneHead
 
 - 适用语音、帖子、桌游三个**可滚动**的群内子场景；标题栏必须是各自滚动容器的直接子元素，以 `position: sticky; top: 0; z-index: 10` 吸顶；顶部留白由滚动容器 gutter 提供，不能再用 sticky 偏移重复叠加，亦不能被下拉刷新或场景切换动画的位移层包住。
-- 规格：最小高 72px、padding 16px、标题区与尾部动作间 gap 12px；滚动容器统一四向 16px gutter，并由父容器 `gap: 16px` 保证头部与下方内容分隔，与卡片内容轨道对齐；`--glass-bg` + `blur(18px) saturate(1.4)` + 完整 `1px --glass-border` + 16px 圆角（与下方实心内容卡对齐），不用负 margin 拉伸成整面横条；不支持 backdrop-filter 时切换 `--glass-bg-strong`。
+- 规格：最小高 72px、padding 16px、标题区与尾部动作间 gap 12px；滚动容器统一四向 16px gutter，并由父容器 `gap: 16px` 保证头部与下方内容分隔，与卡片内容轨道对齐；`--glass-bg` + `--glass-filter` + 完整 `1px --glass-border` + 16px 圆角和 `--glass-shadow-compact`，不用负 margin 拉伸成整面横条；不支持 backdrop-filter 时切换 `--glass-bg-strong`。
 - 文案：标题 Fredoka 500 / 18px `--text-primary`；可选说明 Nunito 14px / 1.45 `--text-secondary`，为保持三场景同高，说明一行省略而标题仍可自然收缩；尾部按钮保持自身 ≥40px 触达目标。滚动容器设置与标题高度匹配的 `scroll-padding-top`，确保键盘焦点/程序定位不被吸顶栏遮住；窄屏不能由玻璃头部制造横向滚动。
 
 ### 12.5 浮动按钮 FAB（两形态）
@@ -314,7 +376,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.6 群卡片 GroupCard 与轮播（窄屏主页）
 
-- 卡片：实心卡片底 `--surface` + 圆角 16px + 极浅投影 `0 2px 12px rgba(70,91,146,0.08)`（design.md §4 实心卡片）
+- 卡片：`--glass-bg` + `--glass-filter` + 16px 圆角 + `--glass-border` + `--glass-shadow`，可交互卡片 hover/press 复用 §4
 - 封面区：4:3，内嵌 8px，轮播图圆角 12px；无任何状态时回退群头像（居中 64px 带光环）
 - 轮播：300ms 滑入切换，3s 间隔；**进视口才启动、离开暂停**（IntersectionObserver）；`prefers-reduced-motion` 降级为首帧静态。轮播指示点：底部居中 4px 圆点（当前 `--glow-500`，其余 `--ice-300`）
 - 状态轮播卡（`useGroupCarouselSlides` 组装，实时 store）：
@@ -350,6 +412,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 宽屏：视频主区 + 弹幕侧列 360px（整面玻璃，弹幕列表 + 底部弹幕输入框）；视频两侧「上一个/下一个」40px 圆形玻璃按钮 + 键盘 ↑↓。
 - LIVE 徽标：`--pink-500` 实底白字 11px Fredoka 胶囊，左上角。
 - 直播间卡片（聚合网格）：封面 16:9 圆角 12px + LIVE 徽标 + 标题 Nunito 700 15px + 主播 13px `--text-secondary` + 来源标识（公开/好友/群名，Micro Tag 11px Fredoka `--sakura-300` 底 `--grape-700` 字）。
+- 直播列表材料与群/语音/帖子卡相同，使用 `.live-card` 的 `--glass-bg`（.55）、`--glass-filter` 和 `--glass-shadow`，不另用更实的 `.78` 底。大厅、直播侧栏及群频道侧栏的空封面均透明，保留亮边/视频图标，避免不透明渐变遮住玻璃；真实封面维持原像素与opacity，不通过降低整张卡片透明度制造通透感。
 
 ### 12.7.1 直播画面飘弹幕层 DanmakuOverlay（任务 04 增量）
 
@@ -395,28 +458,30 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **触发条件**（全部满足）：窄屏（≤768px）+ 普通观看（非主播开播控制台）+ 直播中（`srsStatus=live` 且无播放错误）+ 离开直播间页面（返回列表/切到其他页）。主播控制台离开后仍走活动态悬浮球入口。
 - **播放连续性（核心）**：video 元素由 `liveSessionRuntime` 全局单例唯一持有，HLS 实例**不重建**；大窗↔小窗/宽屏↔窄屏切换时 video 在容器间**原子移动**（`useLayoutEffect` cleanup 在 DOM 移除前把 video 移入暂存容器，再从暂存原子移入目标容器——全程不脱离文档、浏览器不暂停、时间连续）。`attachPlayer` 幂等（相同流不重建），小窗期间播放器不销毁，`attachPlayer`/轮询只在直播结束时兜底释放。
 - **交互**：点击小窗主体 → 回到直播间大窗（`sourceRoute`：一级直播 `/live/:id`，群内直播 `/group/:id/live`）；右上关闭按钮 → 完整销毁会话（hls → WS → 轮询 → store → 活动态）；单指拖动（pointer 位移超阈值，clamp 视口内）；双指缩放（120–320px 宽，保持 16:9，右下角锚定）。
-- **样式**：fixed 右下角 16px，默认 168×94（16:9），`z-index: 60`（活动态悬浮球 45 之上、弹层遮罩 70 之下）；外层无 `overflow:hidden`（关闭按钮突出在小窗**右上角外侧**，不遮挡画面），内层 `.live-mini-player-video-wrap` 负责圆角/边框/投影/裁剪（`--glass-bg-strong` + blur(18px) + `--glass-border` + `--radius-input`）。
+- **样式**：fixed 右下角 16px，默认 168×94（16:9），`z-index: 60`（活动态悬浮球 45 之上、弹层遮罩 70 之下）；外层无 `overflow:hidden`（关闭按钮突出在小窗**右上角外侧**，不遮挡画面），内层 `.live-mini-player-video-wrap` 负责圆角/边框/投影/裁剪（`--glass-bg-strong` + `--glass-filter` + `--glass-shadow-compact` + `--glass-border` + `--radius-input`）。
 - **唯一 owner**：同一时间至多一个小窗（store `miniPlayer` 唯一）；小窗激活时隐藏 SessionActivityIndicator 的直播悬浮球（避免重复入口）；退出登录/切直播间完整清理。
 
 ### 12.8 帖子卡 PostCard 与信息流
 
-- 卡片：实心卡片 `--surface` + 圆角 16px + 极浅投影；padding 16px
+- 卡片：`--glass-bg` + `--glass-filter` + 16px 圆角、完整亮边、`--glass-shadow`；padding 16px，详情卡保持稳定位置
 - 头部：作者头像 36px 带光环 + 昵称 Nunito 700 15px + 时间 Space Grotesk 12px `--text-secondary`
 - 正文：Nunito 400 15px `--text-primary`，超 3 行折叠 +「展开」（`--ice-500` 文字钮）
 - 图片：1 图大图圆角 12px；多图 3 列九宫格 gap 4px 圆角 8px
 - 底排：评论数 / 收藏（线性图标 18px + Space Grotesk 12px 数字，`--text-secondary`）；收藏激活态图标填 `--pink-500`
 - 评论输入框：InputBar 变体（底 `--surface` + 1px `--ice-300`，focus 转 `--glow-500` + 辉光）
-- **列表布局与返回连续性**：窄屏单列；>1024px 为两列等宽错排瀑布流（列 gap 与卡片纵向 gap 均为 12px，最大内容宽 1200px），群外信息流、群内帖子、我的帖子共用。`.reveal-item` 只挂卡片外层，卡片本体 hover 可上浮 2px；reduced-motion 下不位移。进入详情前保存滚动位置；返回时连同已加载分页恢复，且按 §7.1 跳过 stagger。
+- **列表布局与返回连续性**：窄屏单列；>1024px 为两列等宽错排瀑布流（列 gap 与卡片纵向 gap 均为 12px，最大内容宽 1200px），群外信息流、群内帖子、我的帖子共用。入场由卡片外层持有，PostsHub/GroupPosts使用增量WAAPI，卡片本体hover可上浮2px；reduced-motion下不位移。进入详情前保存滚动位置；返回时连同已加载分页恢复，且按§7.1跳过恢复节点的stagger。
 - **视频媒体封面（秒开策略）**：上传时前端抽首帧经 `POST /media/{id}:poster` 回传（JPEG ≤2MB 存为 thumbnail 派生，QQ 同款）；卡片/详情页封面一律渲染 thumbnail 签名缩略图（320px JPEG `<img>` 直连，秒出、零视频拉流，不挂 `<video>` 元素）+ ▶ 角标；查看器播放时 original 签名就绪前显示同一海报帧 `<img>`，`<video poster>` 同帧衔接 + `preload="auto"`——点开即见画面无跳变；无海报帧（存量/抽帧失败）降级 SignedVideo 首帧预览。服务端在 poster 回传后异步做 mp4 faststart 重排（moov 前置，`manage.py ensure_video_faststart` 补存量），起播 Range 往返从 2~3 次降到一次顺序读——详见《媒体预签名直传与播放架构》
 
 ### 12.8.1 发帖编辑器 PostEditor 与创建浮层 CreateSheet
 
 - **创建浮层（CreateSheet 与 GroupCreateDialog 同规格，语音/直播/发帖/桌游/建群共用）**：对齐 §12.5 弹层规格——
-  - 宽屏：居中浮层，宽 `min(480px, 100%)`、max-height 80vh 内滚，`--glass-bg-strong` + blur 18px saturate 1.4 + 1px `--glass-border` + 圆角 16px + 投影 `0 8px 24px rgba(70,91,146,0.16)`；遮罩 `rgba(70,91,146,0.25)`；`@supports not backdrop-filter` 降级 `rgba(255,250,251,0.92)` 实底
+  - 宽屏：居中浮层，宽 `min(480px, 100%)`、max-height 80vh 内滚，`--glass-bg-strong` + `--glass-filter` + 1px `--glass-border` + 20px 圆角 + `--glass-shadow-modal`；遮罩保持原 `rgba(70,91,146,0.25)`；不支持 backdrop-filter 时使用 `--surface` 实底
   - 窄屏：底部上滑面板——全宽贴底、上沿圆角 24px、左右/下无边框、底部 `safe-area-inset-bottom` 补距，`250ms var(--ease-out)` 上滑入场，`prefers-reduced-motion` 关闭
 - **群内发帖输入面板（PostEditor collapsible 变体）**：
+  - 外框：宽屏使用原`.55`玻璃、24px blur、亮边/16px完整圆角、8px内沿和12px外沿；左侧12px由频道栏提供，输入不再叠左margin。窄屏沿用聊天composer的全宽布局、18px blur与8/12/12px内沿，安全区仍归shell持有。只有外壳提供padding，内PostEditor清零，避免双重内沿。
+  - 字段与工具：原强玻璃字段、亮边与内高光，聚焦保留辉光；compact正文与发布按钮均40px，正文22px行高/上下8px。媒体工具使用同款玻璃、圆角和阴影，扩展内容不改可见性、上传与提交语义。
   - 收起态：单行输入框 + 发布按钮，**点输入框直接展开**（无独立展开按钮）；展开后右上角 32px 圆形玻璃收起钮
-  - 展开态：面板容器**脱离文档流贴底**（absolute 覆盖标题栏与列表，二者已被遮罩压暗），可用高度 = 整个群内内容区，`max-height: 100%` + 编辑器兜底 `min(90vh, 1000px)`；可见性/群列表选项区内部滚动，媒体预览横排（128px 方块、超宽横滚）与图片/视频按钮固定在下方始终可见；发布成功自动收起
+  - 展开态：面板容器**脱离文档流贴底**（absolute 覆盖标题栏与列表，二者已被遮罩压暗），可用高度 = 整个群内内容区，窄屏`max-height:100%`、宽屏扣除上下24px外沿；编辑器仍以`min(90vh,1000px)`兜底。可见性/群列表选项区内部滚动，媒体预览横排（128px 方块、超宽横滚）与图片/视频按钮保持原顺序；发布成功自动收起。
   - 上方遮罩：展开时压暗帖子列表与标题栏（`rgba(70,91,146,0.25)`），点击收起。**层级实现约束：遮罩必须与输入面板容器平级（z-index 夹在列表与面板之间，如 45/50），不能作为面板后代用 fixed + 正 z-index——面板容器的堆叠上下文会把遮罩限制在面板内部，反而盖住输入框**
   - 手势隔离：编辑器根元素 touch 事件一律 stopPropagation——图片预览横滑、正文横移光标不触发群内五子界面左右切屏手势；组件级处理，未来一级页面切屏手势同样被隔离（弹层形态天然在路由容器之外，双保险）
   - 展开弹出动画：收起态单行 → 展开态贴底面板的切换用 `group-posts-editor-rise`（`opacity 0→1` + `translateY(20px→0)`，250ms `--ease-out`）入场；上方遮罩同步 200ms 淡入（`group-posts-scrim-in`）；`prefers-reduced-motion` 关闭位移（`animation: none`）
@@ -428,13 +493,15 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ### 12.9 搜索框与结果
 
 - 顶栏搜索框（两形态）：胶囊，底 `--surface`、1px `--ice-300` 描边、圆角 999px，左搜索图标 `--text-secondary`；focus 边框转 `--glow-500` + `--glow-shadow`（200ms）
-- 宽屏内联下拉结果面板：`--glass-bg-strong` + blur 18px + 圆角 16px，宽 360px；分组（用户/群聊/直播间/帖子/桌游室）组头 Micro Tag 11px Fredoka `--text-secondary` 大写，每组 ≤3 条 + 「查看更多」
+- 宽屏内联下拉结果面板：`--glass-bg-strong` + `--glass-filter` + `--glass-shadow` + 16px 圆角，宽 360px；分组（用户/群聊/直播间/帖子/桌游室）组头 Micro Tag 11px Fredoka `--text-secondary` 大写，每组 ≤3 条 + 「查看更多」
 - 窄屏独立搜索页：TopBar 变搜索输入态（自动聚焦）；历史搜索胶囊 chips（`--ice-100` 底 `--text-primary` 字，可清空）
+- 搜索结果与历史/加载/错误共用居中轨道：769–1024px最大680px，1025px起最大1200px、左右24px内沿；宽轨道把结果类别排成两列、间距24px，各类别内部保持原顺序。窄屏单列。用户结果姓名/签名上下排并可省略；群结果使用36px `Avatar` 展示既有搜索接口返回的群头像，资源为空或失败时使用组件原有回退，不从聊天store补造结果。内部图片仍走鉴权签名路径，群头像公开边界仅限被可发现群完整引用的图片；私聊头像与普通附件保留原权限，详见媒体架构文档。
 
 ### 12.10 语音房卡片与语音房
 
-- 语音房卡片：实心卡片；房间名 Nunito 700 15px + 房主 13px `--text-secondary` + 在麦人数（麦克风图标 + Space Grotesk 12px）+ 成员头像堆叠（≤5 个 28px 圆形重叠 -8px，带光环）+ 来源标识 Micro Tag
+- 语音房卡片：§4 统一玻璃卡片，群内外共用；房间名 Nunito 700 15px + 房主 13px `--text-secondary` + 在麦人数（麦克风图标 + Space Grotesk 12px）+ 成员头像堆叠（≤5 个 28px 圆形重叠 -8px，带光环）+ 来源标识 Micro Tag
 - 语音房（进入后）：成员网格（头像 64px 带光环 + 麦克风状态角标——开麦 `--glow-500` / 闭麦 `--ice-300`）；底部控制排（静音/扬声器/上麦/离开，48px 圆形玻璃钮，离开为 `--destructive`）+ 输入框（房内打字）
+- 桌面语音成员/聊天双卡按房间实际余宽布局：两列至少各320px，聊天列最多380px/45%；内容宽度<656px时沿原DOM顺序改为上下等分，分别保留内部滚动。最小宽度需包含成员音量控件、昵称/状态和聊天输入的真实可读空间；窄屏成员卡与底部聊天浮层仍按原结构。
 - 上麦按钮：主 CTA 胶囊（`--indigo-700` 实底白字）
 - 语音成员行的「行尾操作区」（`.voice-member-actions`，**所有成员行同一水平线、上下等距**）：开关按钮 + 音量条（自己麦克风与远端成员**同一样式** VoiceVolumeMeter，90px 行内对齐）。开关按钮 `.voice-meter-toggle`（28px 圆形无底，hover 浅冰底；`is-off` 禁音/静音态灰 + 斜线图标）——自己行 = 麦克风按钮（lucide mic/mic-off，一键禁音/一键恢复，媒体层 toggleMic）；远端行 = 喇叭按钮（lucide volume-2/volume-x，一键静音/一键恢复，本地播放 `locallyMuted`，不改变 volume 设定值）。
 - 音量条（VoiceVolumeMeter）：**三层结构**（下→上）——
@@ -446,7 +513,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.11 桌游室卡片
 
-- 实心卡片 2 列网格；封面占位图（`--ice-100` 底 + 游戏线性图标 `--ice-500` 48px）圆角 12px + 房间名 Nunito 700 15px + 状态 tag（等待中 `--ice-300` 底 / 对局中 `--sakura-300` 底 `--grape-700` 字，Micro Tag 胶囊）+ 人数 Space Grotesk 12px
+- §4 统一玻璃卡片 2 列网格；封面占位图（`--ice-100` 底 + 游戏线性图标 `--ice-500` 48px）圆角 12px + 房间名 Nunito 700 15px + 状态 tag（等待中 `--ice-300` 底 / 对局中 `--sakura-300` 底 `--grape-700` 字，Micro Tag 胶囊）+ 人数 Space Grotesk 12px
 
 ### 12.12 手势与场景动画（窄屏）
 
@@ -463,19 +530,19 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 | 下拉刷新 | 列表顶部（主页/消息/帖子/直播/语音/桌游及群内已接入页） | ✓ 已落地 | `PullToRefresh` 独立状态机；原始下拉 ≥64px 触发，视觉位移阻尼，刷新停留 52px |
 
 - **统一 pager 松手契约**：`resolveSwipeCommit({ net, cross, velocity, size })` 使用 framer-motion `PanInfo.velocity` 的 **px/s** 单位；主判定为净位移 ≥ `size / 3`，补充判定为同向甩动（速度 ≥300px/s、净位移 ≥40px、速度与位移同向），交叉轴净位移 ≥ 主轴时方向锁让位；划回原位不切换。调用处过滤 `pointercancel`（系统取消不等于用户松手），横向 pager 另用 `useTouchAxisGuard` 避免浏览器提前接管。
-- 进群动画：底部导航条上移到视口顶部（`translateY(calc(100vh-64px)→0)` 250ms ease-out）→ 群场景变体滑入；中央槽位「主页」文本交叉淡化为群头像（槽位宽 48→64px 弹性过渡，总时长 ≤300ms）；输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms
-- 进直播间/语音房/帖子详情动画（与进群方向相反，R-L2/R-V2/R-P3）：底部导航条下滑走（`translateY(0→100%)` 200ms ease-in）→ 房内输入框 `translateY(100%→0)` 250ms ease-out 延迟 100ms（先底栏下滑、再输入框升起）
+- 进群动画：窄屏导航以独立`translate`从`0 calc(100dvh - 64px - env(safe-area-inset-bottom, 0px))`滑到`0 0`，300ms easeOut、opacity始终1；原跟手transform继续独立。群消息从右进入，输入从下20px/300ms进入，不为输入叠加100%滑动或100ms延迟。中央槽位的主页/群头像切换保持原导航语义；场景内容由自身分区进入，真实横滑与回退手势仍由原轨道持有。
+- 进直播间/语音房/帖子详情：shell继续管理底部导航下滑离场状态；顶部栏从上20px、底部输入或语音底部聊天卡从下20px进入，统一300ms。各分区拥有自己的进入动画，旧房内输入100%位移/250ms/延迟100ms不再与新分区叠加；宽屏语音聊天从右，具体响应式方向见§7。
 - 下拉回主页：跟手位移 + 阈值 80px，回弹 200ms ease-out；群页内容与顶栏共同移动，退出时内容滑出后再回主页
-- 直播间上下滑现行配方：视频与弹幕区作为唯一滑动单元，`translateY` 跟手 + 250ms 方向转场；顶栏与输入框固定，切换后再更新标题/主播；不常挂多个真实播放器
+- 直播间上下滑现行配方：视频与弹幕区作为唯一滑动单元，`translateY` 跟手 + 300ms / 20px Auroraqua 方向转场；顶栏与输入框固定，切换后再更新标题/主播；不常挂多个真实播放器
 
 ### 12.13 增量场景 Agent Prompt 速查
 
 - 「做底部五 tab：玻璃底 blur 18px 高 64px，语音/直播/帖子/桌游为 24px 线性图标 + 11px Fredoka，主页居中圆形背板 48px 上浮 8px 带 --glow-shadow，未读 --pink-500 徽标」
-- 「做宽屏 TopNav：玻璃底高 64px，左头像 40px 带 --ring-online，一级模块 Nunito 700 15px，当前模块底部 2px #F796FF 指示条，右 240px 胶囊搜索框 focus 转 #F796FF」
+- 「做宽屏 TopNav：原玻璃底高 64px，四向亮边和16px圆角，12px外沿；一级模块沿用字体，当前模块用 Auroraqua 300ms 移动胶囊，配色只取既有 ice；搜索 focus 保留原色」
 - 「做服务器栏：72px 玻璃列，48px 群头像带光环，当前群左 3px #F796FF 指示条，角标 16px 圆底（未读 #F17EB3 / 直播 #F796FF / 语音 #9DBFE6 / 桌游 #F9B0FF）」
 - 「做频道侧栏场景项：行高 40px 圆角 12px，左 20px 线性图标 + Nunito 600 15px，选中底 rgba(157,191,230,0.35)，右侧在麦人数 Space Grotesk 12px 或 LIVE #F17EB3 徽标」
 - 「做直播间卡片：16:9 封面圆角 12px，左上 LIVE #F17EB3 白字胶囊，标题 Nunito 700 15px #465B92，来源 Micro Tag #F9B0FF 底 #722E88 字」
-- 「做帖子卡：实心 --surface 圆角 16px，头像 36px 带光环 + Nunito 700 昵称 + Space Grotesk 12px 时间，正文 15px 超 3 行折叠，底排评论/收藏 18px 线性图标」
+- 「做帖子卡：--glass-bg + --glass-filter + --glass-shadow 圆角 16px，头像 36px 带光环 + Nunito 700 昵称 + Space Grotesk 12px 时间，正文 15px 超 3 行折叠，底排评论/收藏 18px 线性图标」
 
 ### 12.14 会话列表项与会话管理菜单（M5 消息中心）
 
@@ -484,7 +551,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **名字行**：昵称 Nunito 700 15px `--text-primary`（一行省略）+ 紧随其后在线状态胶囊——`is-online` 时 `--success` 字 + 6px 圆点，离线 `--text-secondary`；底 `rgba(157,191,230,0.16)`，圆角 999px，11px/700，padding 1px 8px
 - **预览行**：最新一条消息摘要 Nunito 400 13px `--text-secondary` 一行省略（替代原「在线/离线」文字）；群聊预览带 `发送者名: 内容`，媒体消息占位 `[图片]/[语音]/[表情]`，**文件消息显示文件名**（`content` 即文件名，非 `[文件]` 占位），已撤回 `[已撤回]`，无消息 `暂无消息`
 - **⋯ 更多按钮**：行右侧绝对定位（`right:6px` 垂直居中），40×40px 圆形触达区（§10 ≥40px），三点线性 SVG 18px `#a9b8d4`；hover/展开态底 `rgba(157,191,230,0.25)`、图标转 `--text-primary`；行内 padding-right 52px 给按钮让位
-- **弹出菜单**（`.conv-menu`）：绝对定位**向上展开**（`bottom: calc(100% - 2px)`，避免被列表滚动容器 `overflow-y:auto` 裁剪），右对齐；层级 `z-index: 60`——高于底栏/顶栏/侧栏（20–50），低于弹层遮罩（70+），保证不被固定栏遮挡；`--glass-bg-strong` + blur 18px + 圆角 14px + 1px `--glass-border` + `0 8px 24px rgba(70,91,146,0.16)`；菜单项行高 40px 圆角 10px Nunito 600 14px，hover 底 `rgba(157,191,230,0.22)`，危险项（删除）`--destructive` 字 + hover 底 `rgba(224,100,100,0.12)`
+- **弹出菜单**（`.conv-menu`）：绝对定位**向上展开**（`bottom: calc(100% - 2px)`，避免被列表滚动容器 `overflow-y:auto` 裁剪），右对齐；层级 `z-index: 60`——高于底栏/顶栏/侧栏（20–50），低于弹层遮罩（70+），保证不被固定栏遮挡；`--glass-bg-strong` + `--glass-filter` + 16px 圆角 + `--glass-border` + `--glass-shadow`；菜单项行高 40px 圆角 10px Nunito 600 14px，hover 底 `rgba(157,191,230,0.22)`，危险项（删除）`--destructive` 字 + hover 底 `rgba(224,100,100,0.12)`
 - **置顶会话视觉标识**（`.conv-item.is-pinned`）：左侧 3px `--glow-500` 圆角指示条（同 ServerRail 指示条语言，装饰不承载信息）+ 非选中态淡 sakura 粉底 `rgba(249,176,255,0.1)`（hover 0.16）+ 标题转 `--grape-700`（对比度 ≈6:1 达标）；选中态（active）背景保持 ice 蓝胶囊、标题仍 grape
 - 置顶会话排列表最前（置顶组/非置顶组内保持原顺序）；删除为软删除（仅隐藏本人列表，消息保留），confirm 确认后执行
 
@@ -505,7 +572,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   - `/chat/:id` 私聊窗口：不渲染左下角按钮（底部有聊天输入框，壳层不出 chrome）；
   - **其余页面**（群聊场景 `/group/:id`、直播间、语音房、帖子详情、搜索、个人、收藏、用户页等）：**仅当红点 > 0** 时显示 `QuickMessageFAB`（无红点不显示）。
 - **QuickMessageFAB**（复用 `.message-fab` 外观 + `.quick-message-fab` 修饰）：与 MessageFAB 同位置（`left:16px; bottom:底栏高+12px`，位置天然避让沉浸页底部输入框）；出现后 **4s 无点击 → 侧边半贴**（`translateX(-44px)`，仅露 28px 右半，200ms `--ease-out`），半贴态点击「点出来」展开，展开态点击**就地弹出快捷消息栏**（不跳路由）；`prefers-reduced-motion` 关闭位移过渡。
-- **快捷消息栏**（`.quick-messages-overlay`，`z-index:70`）：底部滑入 **70% 高度**面板（`translateY(100%→0)` 250ms `--ease-out`）+ 上方 **30% 遮罩**（`rgba(70,91,146,0.25)`，点击关闭）；面板 `--glass-bg-strong` + blur 18px + 上沿圆角 24px；ESC 关闭。**开关存 shell store（`quickMessagesOpen`），由 AppShell 独立渲染，只随手动关闭（遮罩/ESC/关闭钮）卸载——打开会话标已读导致红点归零时，QuickMessageFAB 会卸载，但快捷栏保持打开（R-QM 修复）**。
+- **快捷消息栏**（`.quick-messages-overlay`，`z-index:70`）：底部滑入 **70% 高度**面板（`translateY(100%→0)` 250ms `--ease-out`）+ 上方 **30% 遮罩**（`rgba(70,91,146,0.25)`，点击关闭）；面板 `--glass-bg-strong` + `--glass-filter` + `--glass-shadow-modal` + 上沿圆角24px；ESC 关闭。**开关存 shell store（`quickMessagesOpen`），由 AppShell 独立渲染，只随手动关闭（遮罩/ESC/关闭钮）卸载——打开会话标已读导致红点归零时，QuickMessageFAB 会卸载，但快捷栏保持打开（R-QM 修复）**。
 - **两个选项卡**（复用 `.messages-tab`）：私信 / 认证消息。栏内**所有操作不跳转新页面、头像一律不可点**（`disableAvatarNav`）：
   - 私信 tab：爱莉入口 + 会话列表（`ConversationList`），点会话**内联**打开 `PrivateChatPane`（不跳 `/chat/:id`），返回按钮回到列表；
   - 认证消息 tab：与 `/messages` 认证消息 tab 同构（退群通知 / 好友申请 / 群邀请 / 入群申请 + 同意/拒绝），实时刷新同 §12.14。
@@ -535,6 +602,13 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 群外帖子流、群内帖子、我的帖子共用同一布局契约：`>1024px`（即最小 1025px）启用两列等宽瀑布流，内容轨道最大宽度 1200px，列间距与卡片纵向间距使用 `--sp-3`；≤1024px 回到单列，窄屏内容不产生横向滚动。
 - 新卡片优先插入当前较矮列；列高由 `ResizeObserver` 观测，无法立即测量时使用有限的预估增量保证同批卡片交错。一次分配完成后锁定 item→列关系，且记忆键必须包含列表身份与列数，避免断点切换/HMR 把所有卡片留在同一列。
 - `.reveal-item` 只挂在卡片外层，卡片本体保留 hover/focus 的轻微上浮；滚动恢复命中时按 §7.1 禁止 stagger。列表加载提示跨两列排列。
+
+### 12.18.1 收藏列表
+
+- 收藏页在>768px使用与帖子相同的 `useMasonryColumns` 分配机制和两条独立flex列，卡片按各自内容高度连续排列；≤768px保持单列。沿用帖子列表的最大1200px轨道、左右24px内沿与12px列间距，标题、分类、骨架和内容在同一轨道对齐。收藏断点按本页宽屏要求使用768px，不照搬帖子瀑布流的1024px断点。
+- 新卡按当前较矮列优先分配，收藏id到列的关系保持稳定；分配记忆按用户、分类与列数隔离。尚未量高的同批卡片沿用帖子hook的320px预估增量交错分配，量高后仅影响后续新卡，不因高度变化重排既有卡。API数组不排序，列内保留源顺序；宽屏原生键盘顺序沿每列从上至下、再到右列，与帖子一致，不添加正tabindex。窄屏恢复完整API顺序。列容器不裁剪卡片阴影或菜单；列表组件在数据就绪后挂载，共享hook通过动态ref观察/解除观察真实列，覆盖loading后迟挂载、断点变化与重挂载，并在卸载断开observer。
+- 分类切换后，当前分类响应确认前只展示骨架（`loading || settledFilter !== filter`），不能在effect置pending之前把上一分类结果挂到新分类的分列记忆中。
+- 每张收藏卡保留类别、目标标题与取消按钮，宽屏帖子摘要最多显示3行；只改变展示布局，不改变收藏过滤、顺序、目标跳转、取消或实时更新的契约。
 
 ### 12.19 下拉刷新 PullToRefresh
 
