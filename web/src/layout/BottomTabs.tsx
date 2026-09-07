@@ -6,6 +6,8 @@
  * （全屏主 CTA 级辉光之一，≤3 处纪律）；未读徽标 --pink-500 实底白字。
  * badges prop 为 F8 全站未读聚合预留（F1 恒空）。
  */
+import { useId } from "react";
+import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
 import { Link } from "react-router-dom";
 import type { CSSProperties, SVGProps } from "react";
 import { IconGame, IconHome, IconMic, IconPost, IconVideo } from "../components/icons";
@@ -42,6 +44,7 @@ export function BottomTabs({
   /** 直播间窄屏：脱离 flex 流（fixed），下滑走后内容区全高（沉浸视频，F4） */
   dataFixed?: boolean;
 }) {
+  const selectionId = useId();
   return (
     <nav
       className="bottom-tabs"
@@ -59,9 +62,10 @@ export function BottomTabs({
             <li key={key} className={`bottom-tab ${key === "home" ? "bottom-tab-home" : ""}`}>
               <Link
                 to={meta.path}
-                className={`bottom-tab-link ${active ? "is-active" : ""}`}
+                className={`bottom-tab-link has-auroraqua-highlight ${active ? "is-active" : ""}`}
                 aria-current={active ? "page" : undefined}
               >
+                {active && <AuroraquaNavHighlight id={selectionId} />}
                 {key === "home" ? (
                   <span className="bottom-tab-home-disc">
                     <Icon width={24} height={24} />

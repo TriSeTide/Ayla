@@ -59,6 +59,16 @@ export function AppShell() {
   // 窄屏一级五页横滑（方案 §3.1）：一级 tab 路由走 PrimaryNavPage（跟手 + 方向变体），
   // 其余路由走 PageTransition（§2.1 浮入）；两者共用一个 AnimatePresence，custom 供横滑方向
   const primaryTabNarrow = isNarrow && isPrimaryTabPath(pathname);
+  const panelOwned = (
+    isGroupScene(pathname) || isMessagesRoute(pathname)
+    || matchPath({ path: "/live/:id", end: true }, pathname) != null
+    || matchPath({ path: "/live/start/:channelId", end: true }, pathname) != null
+    || matchPath({ path: "/voice/:channelId", end: true }, pathname) != null
+    || matchPath({ path: "/games/:roomId", end: true }, pathname) != null
+    || matchPath({ path: "/user/:userId", end: true }, pathname) != null
+    || pathname === "/profile" || pathname === "/favorites"
+    || (pathname !== "/posts/mine" && matchPath({ path: "/posts/:postId", end: true }, pathname) != null)
+  );
   const navDirection = usePrimaryNavSwipeDirection(pathname);
   // 窄屏顶栏（NarrowTopBar）：/search 为搜索态，其余列表页 default；沉浸/群/私聊路由不渲染
   const narrowTopBarVariant = isNarrowTopBarRoute(pathname)
@@ -105,7 +115,7 @@ export function AppShell() {
               {outlet}
             </PrimaryNavPage>
           ) : (
-            <PageTransition key={resolvePageKey(pathname)} pathname={pathname}>
+            <PageTransition key={resolvePageKey(pathname, !isNarrow)} pathname={pathname} panelOwned={panelOwned}>
               {outlet}
             </PageTransition>
           )}

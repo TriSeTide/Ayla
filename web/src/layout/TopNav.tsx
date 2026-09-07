@@ -6,7 +6,7 @@
  * F8 接线）→ 搜索框（240px 胶囊，回车进 /search；内联下拉结果面板属 F9）
  * → 更多菜单（个人主页 / 退出登录；个性化 / 扫一扫 / 收藏属 F10）。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { search as searchApi } from "../api/search";
@@ -18,6 +18,7 @@ import { usePresenceStore } from "../stores/presence";
 import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
 import type { ModuleKey } from "./shellConfig";
 import { PRIMARY_MODULES } from "./shellConfig";
+import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
 
 export function TopNav({
   moduleKey,
@@ -30,6 +31,7 @@ export function TopNav({
   /** 消息未读聚合（F8 接 me/badges；F1 恒 0） */
   messageBadge?: number;
 }) {
+  const selectionId = useId();
   const currentUser = useAuthStore((s) => s.currentUser);
   const onlineUsers = usePresenceStore((s) => s.users);
   const onlineStatuses = usePresenceStore((s) => s.statuses);
@@ -127,10 +129,11 @@ export function TopNav({
           <Link
             key={m.key}
             to={m.path}
-            className={`top-nav-module ${moduleKey === m.key ? "is-active" : ""}`}
+            className={`top-nav-module has-auroraqua-highlight ${moduleKey === m.key ? "is-active" : ""}`}
             aria-current={moduleKey === m.key ? "page" : undefined}
           >
-            {m.label}
+            {moduleKey === m.key && <AuroraquaNavHighlight id={selectionId} />}
+            <span className="auroraqua-nav-label">{m.label}</span>
           </Link>
         ))}
       </nav>

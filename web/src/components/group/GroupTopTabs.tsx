@@ -1,14 +1,16 @@
 /**
- * GroupTopTabs —— 窄屏群场景顶部导航条（R-G1：底栏上移到顶部后的形态）。
+ * GroupTopTabs —— 窄屏群场景顶部导航条（从原底栏位置连续上移）。
  *
  * 五槽：语音 | 直播 | 群头像（居中）| 帖子 | 桌游（顺序 R-G3，聊天居中）。
  * - 四 tab 点击 = 切换该群对应子界面（等价左右滑动）；
  * - 群头像点击 = 两级语义（R-G4），由父级 onAvatarClick 分支处理，本组件不判断；
- * - 5 小圆点指示当前子界面（仅非聊天子界面显示，布局文档 §2.3）。
+ * - 当前子界面由 tab 的移动玻璃高亮指示。
  *
- * enterStyle 由 useEnterGroupAnimation 提供（translateY 上移 + transition）；
+ * style 使用独立 translate 上移且始终可见，transform 只拥有手势位移；
  * 下拉回主页（R-G6）手势 handlers 由父级注入，展开到整个导航条区域。
  */
+import { useId } from "react";
+import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
 import type { CSSProperties, TouchEvent as ReactTouchEvent } from "react";
 import { Avatar } from "../Avatar";
 import { IconGame, IconPost, IconVideo, IconMic } from "../icons";
@@ -45,12 +47,12 @@ export function GroupTopTabs({
   activeScene: GroupScene;
   onSelectScene: (scene: GroupScene) => void;
   onAvatarClick: () => void;
-  /** 进群动画 + 下拉跟手/退场 transform + transition（父级注入） */
+  /** 自动进入的 translate + 下拉跟手/退场的 transform（父级注入） */
   style?: CSSProperties;
   /** 下拉回主页（R-G6）手势 handlers，绑定到整个导航条区域 */
   pullHandlers?: PullHandlers;
 }) {
-  const showDots = activeScene !== "chat" && activeScene !== "info";
+  const selectionId = useId();
   // 群内未读帖子数（浏览与已读同源）：>0 时帖子 tab 显示红点
   const currentGroupId = useGroupStore((s) => s.currentGroupId);
   const postUnread = useChatStore((s) => s.conversations
@@ -67,10 +69,11 @@ export function GroupTopTabs({
               <li key={t.scene} className="group-top-item">
                 <button
                   type="button"
-                  className={`group-top-btn ${active ? "is-active" : ""}`}
+                  className={`group-top-btn has-auroraqua-highlight ${active ? "is-active" : ""}`}
                   onClick={() => onSelectScene(t.scene)}
                   aria-current={active ? "true" : undefined}
                 >
+                  {active && <AuroraquaNavHighlight id={selectionId} />}
                   <Icon width={22} height={22} />
                   <span>{t.label}</span>
                 </button>
@@ -97,10 +100,11 @@ export function GroupTopTabs({
               <li key={t.scene} className="group-top-item">
                 <button
                   type="button"
-                  className={`group-top-btn ${active ? "is-active" : ""}`}
+                  className={`group-top-btn has-auroraqua-highlight ${active ? "is-active" : ""}`}
                   onClick={() => onSelectScene(t.scene)}
                   aria-current={active ? "true" : undefined}
                 >
+                  {active && <AuroraquaNavHighlight id={selectionId} />}
                   <Icon width={22} height={22} />
                   <span>{t.label}</span>
                   {t.scene === "posts" && postUnread > 0 && (
@@ -116,13 +120,6 @@ export function GroupTopTabs({
           })}
         </ul>
       </nav>
-      {showDots && (
-        <div className="group-top-dots" aria-hidden="true">
-          {["voice", "live", "chat", "posts", "games"].map((s) => (
-            <span key={s} className={`group-top-dot ${activeScene === s ? "is-active" : ""}`} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

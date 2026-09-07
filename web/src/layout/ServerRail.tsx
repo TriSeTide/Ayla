@@ -10,7 +10,11 @@
  * 既不被裁剪也不产生横向滚动条，层级也高于相邻 ChannelSidebar（不受 rail
  * 自身 stacking context 限制）。
  */
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { motion } from "framer-motion";
+import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
+import { panelVariants } from "../components/motion/auroraquaMotion";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import * as chatApi from "../api/chat";
 import type { ConversationSummary } from "../api/types";
 import { useChatStore } from "../stores/chat";
@@ -44,6 +48,8 @@ export function ServerRail({
   /** 置顶失败提示（父组件错误条）；缺省 alert 兜底 */
   onError?: (message: string) => void;
 }) {
+  const selectionId = useId();
+  const reduced = usePrefersReducedMotion();
   /** 悬停展开置顶面板的锚点（相对铁路坐标，头像右侧） */
   const [anchor, setAnchor] = useState<PopAnchor | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -83,12 +89,21 @@ export function ServerRail({
   const hoverGroup = anchor ? groups.find((g) => g.id === anchor.id) ?? null : null;
 
   return (
-    <nav className="server-rail" aria-label="我的群" ref={railRef}>
+    <motion.nav
+      className="server-rail"
+      aria-label="我的群"
+      ref={railRef}
+      data-motion-panel="group-rail"
+      inherit={false}
+      initial={reduced ? false : "enter"}
+      animate="center"
+      variants={panelVariants(reduced, "left")}
+    >
       <ul className="server-rail-list">
         {groups.map((g) => (
           <li
             key={g.id}
-            className={`server-item ${g.id === currentGroupId ? "is-active" : ""}`}
+            className={`server-item has-auroraqua-highlight ${g.id === currentGroupId ? "is-active" : ""}`}
             onMouseEnter={(e) => {
               cancelClose();
               const railRect = railRef.current?.getBoundingClientRect();
@@ -102,6 +117,9 @@ export function ServerRail({
             }}
             onMouseLeave={scheduleClose}
           >
+            {g.id === currentGroupId && (
+              <AuroraquaNavHighlight id={selectionId} className="auroraqua-nav-highlight--rail" />
+            )}
             <button
               type="button"
               className="server-item-btn"
@@ -162,6 +180,6 @@ export function ServerRail({
           </button>
         </div>
       )}
-    </nav>
+    </motion.nav>
   );
 }
