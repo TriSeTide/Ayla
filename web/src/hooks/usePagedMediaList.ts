@@ -44,7 +44,9 @@ export function usePagedMediaList<T extends { id: string | number }>(
       const page = await fetchRef.current(cursor);
       if (currentScope.current !== scope || generation.current !== request) return;
       if (page.has_more && (!page.next_cursor || page.next_cursor === cursor || !page.results.length)) {
-        throw new Error("列表分页响应缺少有效的继续位置，请重试");
+        // 游标异常（防御性检查，正常不触发）：静默降级，不打扰用户
+        setValue((state) => ({ ...state, loading: false }));
+        return;
       }
       setValue((state) => {
         const rows = new Map<string, T>((reset ? [] : state.items).map((item) => [String(item.id), item]));

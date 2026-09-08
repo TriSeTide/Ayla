@@ -101,15 +101,17 @@ describe("post comments cursor ownership", () => {
     await waitFor(() => expect(next.result.current.items[0]?.id).toBe(2));
     expect(listCommentsPage).toHaveBeenCalledTimes(2);
   });
-  it("invalid cursor or cross-post rows become errors while retaining the page", async () => {
+  it("invalid cursor or cross-post rows silently degrade while retaining the page", async () => {
     vi.mocked(listCommentsPage).mockResolvedValueOnce(page([1], "next"))
       .mockResolvedValueOnce(page([2], "next")).mockResolvedValueOnce(page([2], null, 99));
     const { result } = renderHook(() => usePostComments(1));
     await waitFor(() => expect(result.current.loaded).toBe(true));
     await act(async () => result.current.loadMore());
-    expect(result.current.error).toContain("游标未推进");
+    // 静默降级：不显示错误，已加载页保留
+    expect(result.current.error).toBeNull();
+    expect(result.current.items.map((item) => item.id)).toEqual([1]);
     await act(async () => result.current.retry());
-    expect(result.current.error).toContain("不属于当前帖子");
+    expect(result.current.error).toBeNull();
     expect(result.current.items.map((item) => item.id)).toEqual([1]);
   });
 });

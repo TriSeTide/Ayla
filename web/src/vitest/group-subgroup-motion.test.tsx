@@ -16,6 +16,7 @@ vi.mock("../api/chat", () => ({
   listSubgroups: vi.fn(() => Promise.resolve(groups())),
   getConversationMetadata: vi.fn(async () => conversation),
   listSubgroupsPage: vi.fn(async (id: string) => { const results = await chatApi.listSubgroups(id); return { results, total: results.length, has_more: false, next_cursor: null, default: results.find((row) => row.is_default) ?? null }; }),
+  listConversationMembersPage: vi.fn(async () => ({ results: [], total: 0, has_more: false, next_cursor: null })),
 }));
 vi.mock("../api/elysia", () => ({ getElysiaProfile: vi.fn(() => new Promise(() => {})) }));
 vi.mock("../ws/chat", () => ({ chatWS: { subscribe: vi.fn() } }));

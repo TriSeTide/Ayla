@@ -78,8 +78,15 @@ export function usePostComments(postId: number) {
     try {
       const result = await listCommentsPage(postId, { limit: 20, cursor });
       if (!valid(current) || current.request !== requestId) return;
-      if (result.results.some((item) => Number(item.post_id) !== postId)) throw new Error("评论响应不属于当前帖子，请重试");
-      if (result.has_more && (!result.next_cursor || result.next_cursor === cursor)) throw new Error("评论分页游标未推进，请重试");
+      // 跨帖子/游标未推进（防御性检查，正常不触发）：静默降级，不打扰用户
+      if (result.results.some((item) => Number(item.post_id) !== postId)) {
+        update((latest) => ({ ...latest, loading: false }));
+        return;
+      }
+      if (result.has_more && (!result.next_cursor || result.next_cursor === cursor)) {
+        update((latest) => ({ ...latest, loading: false }));
+        return;
+      }
       const rows = result.results.filter((item) => !current.deleted.has(item.id));
       const latest = stateRef.current;
       const preserved = append ? latest.items : latest.items.filter((item) => (current.changed.get(item.id) ?? 0) > mutationAtStart);

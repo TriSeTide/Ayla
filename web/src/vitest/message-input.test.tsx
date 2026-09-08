@@ -235,3 +235,52 @@ describe("MessageInput 群表情包按钮（任务 03）", () => {
     expect(screen.getByRole("dialog", { name: "群表情包" })).toBeInTheDocument();
   });
 });
+
+describe("MessageInput 子群独立草稿", () => {
+  beforeEach(() => {
+    send.mockReset();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("群聊切换子群互不覆盖草稿，切回恢复原草稿", () => {
+    const view = render(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    enterText("子群1的草稿");
+    // 切到子群 2：编辑器为空（子群 2 无草稿），输入内容不覆盖子群 1
+    view.rerender(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="2" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    expect(editor().textContent).toBe("");
+    enterText("子群2的草稿");
+    // 切回子群 1：恢复子群 1 的草稿
+    view.rerender(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    expect(editor().textContent).toBe("子群1的草稿");
+  });
+
+  it("发送后只清当前子群草稿，其他子群草稿保留", async () => {
+    send.mockResolvedValue(serverMessage({ type: "text", content: "子群1的草稿" }));
+    const view = render(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    enterText("子群1的草稿");
+    // 子群 2 先存一份草稿
+    view.rerender(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="2" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    enterText("子群2的草稿");
+    // 回子群 1 发送 → 清子群 1 草稿
+    view.rerender(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="1" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    // 子群 1 草稿已清；切到子群 2 草稿仍在
+    view.rerender(
+      <MemoryRouter><MessageInput convId="g1" groupId="g1" subgroupId="2" quote={null} onQuoteClear={vi.fn()} /></MemoryRouter>,
+    );
+    expect(editor().textContent).toBe("子群2的草稿");
+  });
+});

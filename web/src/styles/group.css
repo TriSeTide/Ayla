@@ -162,9 +162,9 @@
 
 .group-chat-subgroup-panel {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 32px;
+  left: 40px;
+  right: calc(-1 * var(--sp-3));
+  bottom: 0;
   min-width: 0;
   pointer-events: auto;
 }
@@ -188,12 +188,13 @@
   display: none;
 }
 
-/* 48×32 透明命中区，底沿只露出 36×18 上半圆；不覆盖字段或展开选项卡。 */
+/* 开合按钮：48×32 透明命中区贴输入框上沿左侧（略超出输入框左边缘），
+   收起态为上半圆把手、展开态为圆形玻璃按钮；上下位移由 motion y 控制
+   （复用子群面板 disclosure 动画节奏），左右位置两态一致。 */
 :is(.group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed) {
   position: absolute;
-  left: 50%;
+  left: -8px;
   bottom: 0;
-  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -202,14 +203,14 @@
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-input);
   background: transparent;
   color: var(--text-secondary);
   box-shadow: none;
   pointer-events: auto;
 }
 
-:is(.group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed)::before {
+/* 收起态：底沿只露出 36×18 上半圆；不覆盖字段或展开选项卡。 */
+.group-chat-subgroup-collapsed::before {
   content: "";
   position: absolute;
   bottom: 0;
@@ -223,19 +224,47 @@
   pointer-events: none;
 }
 
-:is(.group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed):hover::before {
+.group-chat-subgroup-collapsed:hover::before {
   background: rgba(157, 191, 230, 0.35);
 }
 
-:is(.group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed):hover {
+.group-chat-subgroup-collapsed:hover {
   color: var(--text-primary);
 }
 
-:is(.group-chat-subgroup-collapse-btn, .group-chat-subgroup-collapsed) > svg {
+.group-chat-subgroup-collapsed > svg {
   position: absolute;
   left: 50%;
   bottom: 2px;
   translate: -50% 0;
+  pointer-events: none;
+}
+
+/* 展开态：32×32 圆形玻璃按钮，居中于命中区，与子群胶囊行垂直居中 */
+.group-chat-subgroup-collapse-btn::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 250, 251, 0.6);
+  transition: background 200ms var(--auroraqua-ease);
+  pointer-events: none;
+}
+
+.group-chat-subgroup-collapse-btn:hover::after {
+  background: rgba(157, 191, 230, 0.18);
+}
+
+.group-chat-subgroup-collapse-btn:hover {
+  color: var(--text-primary);
+}
+
+.group-chat-subgroup-collapse-btn > svg {
+  position: relative;
+  z-index: 1;
   pointer-events: none;
 }
 

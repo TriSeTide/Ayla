@@ -240,7 +240,11 @@ export function loadDirectory(
   const task = request.then((page) => {
     const current = useDirectoryStore.getState().records[key];
     if (!current || current.revision !== revision || directoryKey(kind, options) !== key) return;
-    if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) throw new Error("列表分页游标无效，请刷新重试");
+    if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) {
+      // 游标无效（防御性检查，正常不触发）：静默降级，不打扰用户
+      patch(key, { ...current, loading: false });
+      return;
+    }
     // Store descriptors are immutable. A different object received after this request
     // began is newer than its page snapshot, including duplicate IDs on an append.
     const latestDescriptors = new Map(cachedItems(kind).map((item) => [String(item.id), item]));

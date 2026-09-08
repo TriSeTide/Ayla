@@ -66,12 +66,12 @@ export function PostsHubPage() {
     setNextPageError(null);
     const isCurrent = () => owner.active && requestOwner.current === owner && owner.revision === revision;
     try {
-      if (kind === "append" && !cursor) throw new Error("下一页游标缺失，请刷新列表");
+      // 游标缺失/未推进（防御性检查，正常不触发）：静默降级，不显示错误，
+      // 但标记 nextFailed 阻止滚动重复请求相同页
+      if (kind === "append" && !cursor) { owner.nextFailed = true; return; }
       const page = await postsApi.listPosts({ scope: "feed", limit: 20, ...(cursor ? { cursor } : {}) });
       if (!isCurrent()) return;
-      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) {
-        throw new Error("下一页游标未推进，请重试或刷新列表");
-      }
+      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) { owner.nextFailed = true; return; }
       const currentPosts = usePostsStore.getState().posts;
       const currentById = new Map(currentPosts.map((post) => [post.id, post]));
       const seen = new Set<number>();

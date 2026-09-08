@@ -59,7 +59,7 @@ vi.mock("../ws/chat", () => ({
 }));
 vi.mock("../api/users", () => ({ getUserDetail: vi.fn(() => new Promise(() => {})) }));
 vi.mock("../api/elysia", () => ({ getElysiaProfile: vi.fn(() => new Promise(() => {})) }));
-vi.mock("../api/chat", () => ({ listSubgroupsPage: vi.fn(() => new Promise(() => {})), getConversationMetadata: vi.fn(() => new Promise(() => {})), listConversationsPage: vi.fn(() => new Promise(() => {})) }));
+vi.mock("../api/chat", () => ({ listSubgroupsPage: vi.fn(() => new Promise(() => {})), getConversationMetadata: vi.fn(() => new Promise(() => {})), listConversationsPage: vi.fn(() => new Promise(() => {})), listConversationMembersPage: vi.fn(() => new Promise(() => {})) }));
 
 function conversation(id: string, type: "private" | "group" = "private"): ConversationSummary {
   return {

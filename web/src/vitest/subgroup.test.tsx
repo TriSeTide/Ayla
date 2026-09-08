@@ -41,13 +41,13 @@ vi.mock("../api/live", async () => ({
 vi.mock("framer-motion", async () => {
   const { createElement, forwardRef } = await import("react");
   const { isValidMotionProp } = await vi.importActual<typeof import("framer-motion")>("framer-motion");
-  const surface = (tag: "div" | "span" | "aside" | "ul" | "li") => forwardRef<HTMLElement, Record<string, unknown>>(({ children, ...props }, ref) => {
+  const surface = (tag: "div" | "span" | "aside" | "ul" | "li" | "button") => forwardRef<HTMLElement, Record<string, unknown>>(({ children, ...props }, ref) => {
     const domProps = Object.fromEntries(Object.entries(props).filter(([key]) => !isValidMotionProp(key)));
     return createElement(tag, { ...domProps, ref }, children as import("react").ReactNode);
   });
   return {
     AnimatePresence: ({ children }: { children?: unknown }) => children,
-    motion: { div: surface("div"), span: surface("span"), aside: surface("aside"), ul: surface("ul"), li: surface("li") },
+    motion: { div: surface("div"), span: surface("span"), aside: surface("aside"), ul: surface("ul"), li: surface("li"), button: surface("button") },
     useReducedMotion: () => false,
     useIsPresent: () => true,
   };
@@ -481,6 +481,7 @@ describe("GroupChat 子群选项卡", () => {
   vi.mock("../api/chat", () => ({
   listSubgroupsPage: vi.fn(async (id: string) => { const results = await chatApi.listSubgroups(id); return { results, total: results.length, has_more: false, next_cursor: null, default: results.find((row) => row.is_default) ?? null }; }),
   getConversationMetadata: vi.fn(async (id: string) => useChatStore.getState().conversations.find((row) => row.id === id)!),
+  listConversationMembersPage: vi.fn(async () => ({ results: [], total: 0, has_more: false, next_cursor: null })),
     listSubgroups: vi.fn().mockResolvedValue([
       sg("1", "默认组", true),
       { ...sg("2", "闲聊"), unread_count: 3, unread_seqs: [1, 2, 3] },

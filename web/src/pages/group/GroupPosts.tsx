@@ -121,9 +121,8 @@ export function GroupPosts({
         cursor,
       });
       if (!current()) return;
-      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) {
-        throw new Error("帖子分页游标未推进，请刷新后重试");
-      }
+      // 游标未推进（防御性检查，正常不触发）：静默降级，不打扰用户
+      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) return;
       setGroupPosts((prev) => {
         const existing = new Map(prev.map((post) => [post.id, post]));
         const rows: Post[] = [];

@@ -19,10 +19,10 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { getElysiaProfile } from "../../api/elysia";
 import * as chatApi from "../../api/chat";
-import type { ChatMessage, SubGroup } from "../../api/types";
+import type { ChatMessage, ConversationMember, SubGroup } from "../../api/types";
 import { MessageInput, type MessageInputHandle } from "../../components/chat/MessageInput";
 import { MessageList } from "../../components/chat/MessageList";
-import { auroraquaPanelOrchestration, disclosureVariants, panelVariants } from "../../components/motion/auroraquaMotion";
+import { auroraquaIndicatorTransition, auroraquaPanelOrchestration, disclosureVariants, panelVariants } from "../../components/motion/auroraquaMotion";
 import { IconChevronDown, IconChevronUp } from "../../components/icons";
 import { loadHistory, loadMoreHistory, loadHistoryUntilSeq, messageInSubgroup, markMessageReadExact, recallMessage, retryOptimistic, removeOptimistic, cancelOptimistic, TARGET_HISTORY_MAX_PAGES } from "../../hooks/useChat";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
@@ -128,6 +128,42 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
       cancelled = true;
     };
   }, [groupId, active, activeConv?.unread_seqs_complete]);
+  // 群聊发送者头像/昵称依赖完整成员表：metadata 有意排除 members（后端
+  // ConversationMetadataSerializer），会话目录同样为空；这里全量拉取成员分页并
+  // 合并进 conversation.members。members_complete=true 后不再重复拉取；拉取失败
+  // 只缺头像/昵称，不阻断聊天（不弹错误）。
+  useEffect(() => {
+    if (!active) return;
+    if (activeConv?.members_complete === true) return;
+    let cancelled = false;
+    (async () => {
+      const members: ConversationMember[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await chatApi.listConversationMembersPage(groupId, { limit: 100, cursor });
+        if (cancelled) return;
+        members.push(...page.results);
+        cursor = page.next_cursor;
+      } while (cursor != null);
+      if (cancelled) return;
+      useChatStore.setState((state) => {
+        const current = state.conversations.find((c) => c.id === groupId);
+        // conversations 尚未加载该群（如直接 URL 刷新）：等 metadata upsert 后
+        // members_complete 变化触发本 effect 重跑再合并。
+        if (!current) return state;
+        return {
+          conversations: state.conversations.map((c) =>
+            c.id === groupId ? { ...c, members, members_complete: true } : c,
+          ),
+        };
+      });
+    })().catch(() => {
+      // 成员加载失败：头像/昵称缺失但聊天可用
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId, active, activeConv?.members_complete]);
   useEffect(() => {
     if (activeSubgroupId != null) return;
     const defaultGroup = subgroupPage.items.find((item) => item.is_default);
@@ -296,7 +332,7 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
             onTouchEndCapture={(e) => e.stopPropagation()}
             onTouchCancelCapture={(e) => e.stopPropagation()}
           >
-            <button
+            <motion.button
               type="button"
               className={subgroupsCollapsed ? "group-chat-subgroup-collapsed" : "group-chat-subgroup-collapse-btn"}
               onClick={() => setSubgroupsCollapsed((collapsed) => !collapsed)}
@@ -304,9 +340,12 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
               aria-expanded={!subgroupsCollapsed}
               aria-controls={subgroupPanelId}
               title={subgroupsCollapsed ? "展开子群" : "收起子群"}
+              // 展开/收起时按钮随子群面板同节奏上下移动（复用 disclosure 动画时长/缓动）
+              animate={{ y: subgroupsCollapsed ? 0 : -4 }}
+              transition={reducedMotion ? { duration: 0 } : auroraquaIndicatorTransition}
             >
               {subgroupsCollapsed ? <IconChevronUp width={14} height={14} /> : <IconChevronDown width={14} height={14} />}
-            </button>
+            </motion.button>
             <motion.div
               id={subgroupPanelId}
               className="group-chat-subgroup-panel"
@@ -367,7 +406,7 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
           groupRole={activeConv?.my_role ?? undefined}
           subgroupId={activeSubgroupId}
           disabled={isSubgroupMuted || !active || activeSubgroupId == null || activeConv?.my_muted === true}
-          disabledHint={!active ? undefined : activeSubgroupId == null ? "正在加载子群…"
+          disabledHint={!active ? undefined
             : activeConv?.my_muted === true ? "你已被禁言" : isSubgroupMuted ? "该子群已禁言，仅群主/管理员可发言" : undefined}
         />
       </motion.div>

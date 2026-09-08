@@ -253,13 +253,15 @@ describe("PostsHubPage 我的帖子入口", () => {
     expect(getFavorite(1)!).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("未推进cursor显式失败，不能循环重复取相同页", async () => {
+  it("未推进cursor静默降级，不显示错误且不再重复请求", async () => {
     vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([1], "next-1")).mockResolvedValueOnce(page([2], "next-1"));
     const { container } = renderHub();
     await screen.findByText("帖子1");
     scrollNearBottom(container);
-    expect(await screen.findByRole("alert")).toHaveTextContent("下一页游标未推进");
+    // 静默：无错误提示，列表保持已加载页
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([1]);
+    // nextFailed 阻止后续滚动重复请求相同页
     scrollNearBottom(container);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
   });

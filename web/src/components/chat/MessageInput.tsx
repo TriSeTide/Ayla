@@ -87,6 +87,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const isNarrow = useMediaQuery(NARROW_QUERY);
     // 群聊才有 members：@ 与群表情包按钮均仅群聊展示（私信不显示表情包按钮）
     const isGroup = !!groupId || (!!members && members.length > 0);
+    // 草稿按会话+子群隔离：群聊每个子群保留独立草稿，私聊保持会话级 key
+    const draftKey = isGroup ? `${convId}:${subgroupId ?? ""}` : convId;
     // 群聊已删除「对方正在输入」功能：不声明 typing（私聊保留）
     const { onInput } = useTyping(isGroup ? null : convId);
     const enableMention = isGroup;
@@ -128,11 +130,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
     const nameOfRef = useRef(nameOf);
     nameOfRef.current = nameOf;
 
-    // 切换会话 → 恢复草稿（渲染到 DOM + 重置状态）；不随 draft 实时变化（避免光标跳）
+    // 切换会话/子群 → 恢复草稿（渲染到 DOM + 重置状态）；不随 draft 实时变化（避免光标跳）
     useEffect(() => {
       const el = editorRef.current;
       if (!el) return;
-      const d = useChatDraftsStore.getState().getDraft(convId);
+      const d = useChatDraftsStore.getState().getDraft(draftKey);
       const parsed = parseBlocks(d, nameOfRef.current);
       renderBlocksToDOM(el, parsed);
       setBlocks(parsed);
@@ -141,7 +143,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       setEmojiOpen(false);
       setError(null);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [convId]);
+    }, [draftKey]);
 
     /** 校验并加入待发送队列（选文件/粘贴共用） */
     const enqueueFiles = (files: File[]) => {
@@ -194,7 +196,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       if (!el) return;
       const nextBlocks = extractBlocks(el);
       setBlocks(nextBlocks);
-      setDraft(convId, serializeBlocks(nextBlocks));
+      setDraft(draftKey, serializeBlocks(nextBlocks));
       onInput();
       if (enableMention) {
         const detected = detectMentionAtCaret(el);
@@ -215,7 +217,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       insertMentionAtCaret(el, member.user.id, name);
       const nextBlocks = extractBlocks(el);
       setBlocks(nextBlocks);
-      setDraft(convId, serializeBlocks(nextBlocks));
+      setDraft(draftKey, serializeBlocks(nextBlocks));
       setMentionOpen(false);
       setMentionQuery("");
       el.focus();
@@ -229,12 +231,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
         insertMentionToken(el, userId, name);
         const nextBlocks = extractBlocks(el);
         setBlocks(nextBlocks);
-        setDraft(convId, serializeBlocks(nextBlocks));
+        setDraft(draftKey, serializeBlocks(nextBlocks));
         setMentionOpen(false);
         setMentionQuery("");
         el.focus();
       },
-      [convId, setDraft],
+      [draftKey, setDraft],
     );
 
     useImperativeHandle(ref, () => ({ insertMention }), [insertMention]);
@@ -253,7 +255,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
       const el = editorRef.current;
       if (el) el.innerHTML = "";
       setBlocks([]);
-      clearDraft(convId);
+      clearDraft(draftKey);
       setPicked([]);
       setError(null);
       if (quote) onQuoteClear();

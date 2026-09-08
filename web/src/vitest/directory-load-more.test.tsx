@@ -57,19 +57,22 @@ describe("DirectoryLoadMore", () => {
     expect(footer).toBeEmptyDOMElement();
   });
 
-  it("初次失败重试走刷新，已失效目录只允许显式刷新", () => {
+  it("初次失败重试走刷新，已失效目录自动刷新恢复", () => {
     const initial = props({ hasMore: false, error: "加载失败" });
     const { rerender } = render(<DirectoryLoadMore {...initial} />);
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(initial.refresh).toHaveBeenCalledTimes(1);
     expect(initial.loadMore).not.toHaveBeenCalled();
 
-    rerender(<DirectoryLoadMore {...initial} hasMore invalidated loading />);
-    expect(screen.getByRole("button", { name: "列表有更新，刷新后继续加载" })).toBeDisabled();
-    rerender(<DirectoryLoadMore {...initial} hasMore invalidated />);
-    fireEvent.click(screen.getByRole("button", { name: "列表有更新，刷新后继续加载" }));
+    // invalidated → 自动 refresh（不再显示"列表有更新"按钮，显示刷新中状态）
+    rerender(<DirectoryLoadMore {...initial} hasMore invalidated error={null} />);
     expect(initial.refresh).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "列表有更新，刷新后继续加载" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "正在刷新列表" })).toBeInTheDocument();
     expect(initial.loadMore).not.toHaveBeenCalled();
+    // 刷新完成（invalidated 清除）→ 恢复正常加载更多
+    rerender(<DirectoryLoadMore {...initial} hasMore error={null} />);
+    expect(screen.getByRole("button", { name: "加载更多" })).toBeInTheDocument();
   });
 
   it("完整长错误撑高后，加载与空终页不缩矮；后续尺寸增长继续保留并清理观察器", () => {

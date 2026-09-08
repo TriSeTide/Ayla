@@ -178,10 +178,11 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
     const isCurrent = () => currentOwner.active && currentOwner.revision === revision && favoriteAccount() === account;
     update((value) => ({ ...value, loading: true, error: null, errorKind: null }));
     try {
-      if (append && !cursor) throw new Error("下一页游标缺失，请刷新收藏");
+      // 游标缺失/未推进（防御性检查，正常不触发）：静默降级，不打扰用户
+      if (append && !cursor) return;
       const page = await favoritesApi.listFavoritesPage({ type: filter === "all" ? undefined : filter, limit: 20, cursor });
       if (!isCurrent()) return;
-      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) throw new Error("下一页游标未推进，请重试或刷新收藏");
+      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) return;
       const rows = new Map((append ? stateRef.current.rows : []).map((favorite) => [favorite.id, favorite]));
       for (const favorite of page.results) {
         if (currentOwner.removed.has(favorite.id)) continue;
