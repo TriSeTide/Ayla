@@ -12,6 +12,7 @@ import type {
   ConversationSummary,
   LastMessagePreview,
 } from "../api/types";
+import { useAuthStore } from "./auth";
 
 /** 归一：ConversationDetail（无 peer）→ ConversationSummary（peer 补 null）
  *  并给 is_pinned/last_message 补默认值（兼容旧后端/旧缓存数据）。 */
@@ -123,10 +124,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   upsertConversation: (conv) =>
     set((state) => {
       const normalized = toSummary(conv);
+      // 详情接口（ConversationDetail）无 peer 字段：私聊时从 members 推导对端
+      // （metadata 接口对私聊返回 members[:2] 含对端），避免"未命名会话/私聊"标题
+      if (normalized.peer == null && normalized.type === "private" && normalized.members.length > 0) {
+        const me = useAuthStore.getState().currentUser?.id;
+        const peerMember = normalized.members.find((m) => m.user.id !== me) ?? normalized.members[0];
+        if (peerMember) normalized.peer = peerMember.user;
+      }
       const exists = state.conversations.some((c) => c.id === normalized.id);
       const conversations = exists
         ? state.conversations.map((c) => (c.id === normalized.id ? {
           ...c, ...normalized,
+          // 详情接口（ConversationDetail）无 peer 字段，toSummary 补 null；
+          // 合并时不得用 null 覆盖已有对端（否则左侧栏变"未命名会话"、顶栏变"私聊"）
+          ...(normalized.peer == null && c.peer != null ? { peer: c.peer } : {}),
           ...(normalized.members_complete === false && c.members_complete !== false && c.members.length > 0
             ? { members: c.members, members_complete: c.members_complete } : {}),
         } : c))

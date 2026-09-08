@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ConversationSummary } from "../api/types";
+import { useAuthStore } from "../stores/auth";
 import { useChatStore, sortPrivateByActivity } from "../stores/chat";
 
 function conv(id: string, unread = 0): ConversationSummary {
@@ -52,6 +53,47 @@ describe("chat store", () => {
     const st = useChatStore.getState();
     expect(st.conversations).toHaveLength(2);
     expect(st.conversations.find((c) => c.id === "1")?.title).toBe("改名");
+  });
+
+  it("upsertConversation：详情接口（无 peer）不得覆盖已有对端", () => {
+    const s = useChatStore.getState();
+    const peer = {
+      id: "u2", username: "xiaoying", nickname: "小樱", avatar: "", signature: "",
+      status: "auto", online: true, date_joined: "2026-01-01T00:00:00Z",
+    };
+    s.setConversations([{ ...conv("1"), peer }]);
+    // 模拟 getConversationMetadata 返回的 ConversationDetail（无 peer 字段）
+    s.upsertConversation({
+      id: "1", type: "private", title: "", announcement: "", avatar: "",
+      owner_id: "o", members: [], my_role: "member", member_count: 2, unread_count: 0,
+      is_pinned: false, last_message: null, created_at: new Date().toISOString(),
+    });
+    const st = useChatStore.getState();
+    expect(st.conversations.find((c) => c.id === "1")?.peer).toEqual(peer);
+  });
+
+  it("upsertConversation：详情接口无 peer 时从 members 推导对端", () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as never });
+    const s = useChatStore.getState();
+    const peer = {
+      id: "u2", username: "xiaoying", nickname: "小樱", avatar: "", signature: "",
+      status: "auto", online: true, date_joined: "2026-01-01T00:00:00Z",
+    };
+    const me = {
+      id: "me", username: "me", nickname: "我", avatar: "", signature: "",
+      status: "auto", online: true, date_joined: "2026-01-01T00:00:00Z",
+    };
+    // 模拟 getConversationMetadata 返回的 ConversationDetail（无 peer 字段，members 含对端）
+    s.upsertConversation({
+      id: "1", type: "private", title: "", announcement: "", avatar: "",
+      owner_id: "o", members: [
+        { id: "m1", user: me, role: "member", muted: false, joined_at: "2026-01-01T00:00:00Z" },
+        { id: "m2", user: peer, role: "member", muted: false, joined_at: "2026-01-01T00:00:00Z" },
+      ], my_role: "member", member_count: 2, unread_count: 0,
+      is_pinned: false, last_message: null, created_at: new Date().toISOString(),
+    });
+    const st = useChatStore.getState();
+    expect(st.conversations.find((c) => c.id === "1")?.peer).toEqual(peer);
   });
 
   it("bumpUnread：未打开会话 +1；打开会话不加", () => {
