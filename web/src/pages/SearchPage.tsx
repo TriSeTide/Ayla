@@ -324,6 +324,13 @@ export function SearchPage() {
     setSearchParams({ q: trimmed }, { replace: true });
   };
 
+  // 搜索结果可能过时（成员关系变化/缓存过期）→ 自动重新搜索，不打扰用户；
+  // 刷新失败（真实错误）停止自动刷新，显示错误+重试；刷新期间再有成员事件
+  // 会保持 stale 继续刷新，直到数据稳定。
+  useEffect(() => {
+    if (stale && q.trim() && !loading && !error) refreshSearch(q);
+  }, [stale, q, loading, error, refreshSearch]);
+
   return (
     <div className="search-page" ref={pageRef} aria-busy={loading}>
       {!q && history.length > 0 && (
@@ -342,9 +349,6 @@ export function SearchPage() {
       {loading && <div className="search-loading">搜索中…</div>}
       {error && <div className="search-error" role="alert">
         <p>{error}</p><button type="button" className="btn btn-ghost" onClick={() => doSearch(q)}>重试搜索</button>
-      </div>}
-      {stale && <div className="home-load-more" role="status">
-        <button type="button" className="btn btn-ghost" disabled={loading} onClick={() => doSearch(q)}>搜索结果有更新，重新搜索</button>
       </div>}
 
       {results && hasAnyResult(results) && (

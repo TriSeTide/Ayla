@@ -251,6 +251,13 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
     }
   }, [account, removeLocal]);
 
+  // 收藏可能过时（请求期间收藏变化/缓存过期）→ 自动重新拉取，不打扰用户；
+  // 刷新失败（真实错误）停止自动刷新，显示错误+重试；刷新期间再有收藏变化
+  // 会保持 stale 继续刷新，直到数据稳定。
+  useEffect(() => {
+    if (state.stale && !state.loading && !state.error) void requestPage();
+  }, [state.stale, state.loading, state.error, requestPage]);
+
   if (!state.loaded && !state.error) return <div className="favorites-skeleton" role="status" aria-label="正在加载收藏">
     <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
     <div className="skeleton" style={{ height: 64 }} />
@@ -261,9 +268,6 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
   </div>;
   return <>
     {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
-    {state.stale && <div className="home-load-more" role="status">
-      <button type="button" className="btn btn-ghost" disabled={state.loading} onClick={() => void requestPage()}>收藏有更新，刷新列表</button>
-    </div>}
     {state.rows.length === 0 ? <div className="home-state">
       <h3 className="placeholder-title">这个分类还没有收藏</h3>
       <p className="placeholder-desc">在对应场景点收藏，内容会出现在这里</p>

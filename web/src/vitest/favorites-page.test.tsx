@@ -173,14 +173,16 @@ describe("收藏真实分页", () => {
     const a = fav(1, "post", "10", { title: "将被移除" });
     const pending = deferred<ReturnType<typeof favoritePage>>();
     vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValueOnce(favoritePage([a], "next"))
-      .mockReturnValueOnce(pending.promise);
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(favoritePage([fav(2, "post", "11", { title: "保留的新页" })]));
     renderPage();
     await screen.findByText("将被移除");
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
     act(() => ws.frameHandler?.({ type: "favorite.changed", data: { target_type: "post", target_id: "10", favorite_id: 1, action: "removed" } }));
     await act(async () => pending.resolve(favoritePage([a, fav(2, "post", "11", { title: "保留的新页" })])));
+    // stale → 自动刷新（重新拉取，a 已移除）
+    await waitFor(() => expect(screen.getByText("保留的新页")).toBeInTheDocument());
     expect(screen.queryByText("将被移除")).not.toBeInTheDocument();
-    expect(screen.getByText("保留的新页")).toBeInTheDocument();
   });
 
   it("切换分类后旧首屏响应不得污染新分类", async () => {
@@ -247,7 +249,7 @@ describe("收藏真实分页", () => {
     renderPage();
     await screen.findByText("原有收藏");
     act(() => ws.frameHandler?.({ type: "favorite.changed", data: { target_type: "post", target_id: "11", favorite_id: 2, action: "added" } }));
-    fireEvent.click(screen.getByRole("button", { name: "收藏有更新，刷新列表" }));
+    // stale → 自动刷新首页（无需点击"收藏有更新"按钮）；失败后显示错误+重试
     await screen.findByText("首页刷新失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await screen.findByText("新首页");
@@ -424,7 +426,7 @@ describe("FavoritesPage", () => {
       expect(screen.getByText("帖子B")).toBeInTheDocument();
     });
 
-    it("added 帧保留已加载页并提供显式刷新", async () => {
+    it("added 帧保留已加载页并自动刷新", async () => {
       renderPage();
       await waitFor(() => expect(screen.getByText("帖子A")).toBeInTheDocument());
       vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
@@ -437,9 +439,9 @@ describe("FavoritesPage", () => {
           data: { target_type: "post", target_id: "12", favorite_id: 3, action: "added" },
         });
       });
-      expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(1);
-      fireEvent.click(screen.getByRole("button", { name: "收藏有更新，刷新列表" }));
+      // stale → 自动刷新（无需点击按钮）
       await waitFor(() => expect(screen.getByText("帖子C")).toBeInTheDocument());
+      expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(2);
     });
   });
 });
