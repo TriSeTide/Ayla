@@ -1377,28 +1377,14 @@
   width: 100%;
 }
 
-/* 宽屏：整页不滚动，左右两栏各自独立滚动（用户反馈 2026-09） */
+/* 整页持有滚动；列保持自然高度，卡片阴影由外沿留白容纳。 */
 @media (min-width: 769px) {
   .group-info {
-    overflow: hidden;
-    gap: 0;
-    padding: 0;
-    max-width: 1200px;
-    margin: 0 auto;
+    padding: var(--sp-6) var(--sp-6) var(--sp-8);
   }
 
   .group-info-layout {
-    flex: 1;
-    min-height: 0;
-  }
-
-  .group-info-side,
-  .group-info-main {
-    height: 100%;
-    min-height: 0;
-    overflow-y: auto;
-    padding: var(--sp-6) var(--sp-6) var(--sp-8);
-    overscroll-behavior: contain;
+    flex: none;
   }
 }
 
@@ -1420,7 +1406,7 @@
   color: var(--text-primary);
 }
 
-/* 主布局：窄屏单列整页滚动 / 宽屏两栏（左资料+管理，右子群+成员）各自滚动 */
+/* 主布局：窄屏连续单列 / 宽屏两栏（左资料+管理，右子群+成员）。 */
 .group-info-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1436,13 +1422,12 @@
   min-width: 0;
 }
 
-/* 两栏独立滚动区域：滚动条样式统一走 base.css 的全局隐藏（零占位、内容全宽）；
-   此处不再设局部 ::-webkit-scrollbar——局部宽度会覆盖全局隐藏并重新占宽。 */
+.group-info-main { container-type: inline-size; }
 
 @media (min-width: 769px) {
   .group-info-layout {
-    grid-template-columns: clamp(280px, 36%, 388px) minmax(0, 1fr);
-    gap: 0;
+    grid-template-columns: clamp(280px, 32%, 340px) minmax(0, 1fr);
+    gap: var(--sp-4);
   }
 
   .group-info-side,
@@ -1456,15 +1441,8 @@
 
 /* The two navigation rails leave too little room for readable detail columns here. */
 @media (min-width: 769px) and (max-width: 1000px) {
-  .group-info { overflow-y: auto; }
   .group-info-layout {
-    flex: none;
     grid-template-columns: minmax(0, 1fr);
-  }
-  .group-info-side,
-  .group-info-main {
-    height: auto;
-    overflow: visible;
   }
 }
 
@@ -1488,6 +1466,13 @@
 @media (max-width: 768px) {
   .group-info-profile {
     padding: var(--sp-8) var(--sp-4) var(--sp-4);
+  }
+}
+
+@media (min-width: 769px) {
+  .group-info-profile {
+    gap: var(--sp-2);
+    padding: var(--sp-6) var(--sp-4) var(--sp-4);
   }
 }
 
@@ -1777,6 +1762,16 @@
   padding: 2px 12px;
   font-size: 12px;
   border-radius: var(--radius-pill);
+}
+
+/* Management actions get their own row when the available card width is narrow. */
+@container (max-width: 420px) {
+  .group-info-member { flex-wrap: wrap; }
+  .group-info-member-actions {
+    width: 100%;
+    justify-content: flex-end;
+    opacity: 1;
+  }
 }
 
 /* ---- 管理卡：设置行 / 审批 / 危险操作 ---- */

@@ -7,7 +7,7 @@
  * 每组独立游标续页；用户点击弹资料卡（加好友/发消息），其余跳对应界面。
  * 可见性过滤由后端完成，前端仅展示（R-S3）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { searchPages, type SearchPageResults, type SearchType } from "../api/search";
 import { applyToGroup } from "../api/chat";
@@ -25,9 +25,21 @@ import type { ChatServerFrame } from "../api/types";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { StablePaginationFooter } from "../components/StablePaginationFooter";
+import { DirectoryFilters } from "../components/DirectoryFilters";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 
 type ResultKey = keyof SearchResults;
 const RESULT_TYPES: Record<ResultKey, SearchType> = { users: "user", groups: "group", posts: "post", lives: "live", games: "game" };
+const RESULT_KEYS: Record<SearchType, ResultKey> = { user: "users", group: "groups", post: "posts", live: "lives", game: "games" };
+type SearchFilter = SearchType | "all";
+const FILTERS: ReadonlyArray<{ key: SearchFilter; label: string }> = [
+  { key: "all", label: "全部" },
+  { key: "user", label: "用户" },
+  { key: "group", label: "群聊" },
+  { key: "post", label: "帖子" },
+  { key: "live", label: "直播间" },
+  { key: "game", label: "桌游室" },
+];
 type PageStatus = Partial<Record<ResultKey, { loading: boolean; error: string | null }>>;
 const searchPageMemory = new Map<string, { results: SearchPageResults; updatedAt: number; stale: boolean }>();
 let searchSession = 0;
@@ -39,14 +51,21 @@ useAuthStore.subscribe((state, previous) => {
 });
 export function clearSearchPageMemory() { searchPageMemory.clear(); }
 function searchAccount() { return `${useAuthStore.getState().currentUser?.id ?? "anonymous"}:${searchSession}`; }
-function searchScope(query: string) { return JSON.stringify([searchAccount(), query.trim()]); }
+function searchScope(query: string, filter: SearchFilter) { return JSON.stringify([searchAccount(), query.trim(), filter]); }
+function invalidateSearchPages() {
+  // Authentication changes clear this map, so every entry belongs to the current reader.
+  for (const [key, cached] of searchPageMemory) searchPageMemory.set(key, { ...cached, stale: true });
+}
 
 export function SearchPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get("q") ?? "";
+  const filter = FILTERS.find((item) => item.key === searchParams.get("type"))?.key ?? "all";
+  const filterId = useId();
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   useAuthStore((state) => `${state.currentUser?.id ?? "anonymous"}:${Boolean(state.accessToken)}`);
-  const scope = searchScope(q);
+  const scope = searchScope(q, filter);
   const activeScope = useRef(scope);
   activeScope.current = scope;
   const { history, pushHistory, clearHistory } = useSearchStore();
@@ -59,7 +78,10 @@ export function SearchPage() {
   );
   const [resultData, setResultData] = useState<SearchPageResults | null>(null);
   const [resultScope, setResultScope] = useState(scope);
-  const results = resultScope === scope ? resultData : null;
+  const scopedResults = resultScope === scope ? resultData : null;
+  const resultKey = filter === "all" ? null : RESULT_KEYS[filter];
+  const results: SearchPageResults | null = scopedResults && resultKey
+    ? { [resultKey]: scopedResults[resultKey] } : scopedResults;
   const resultRef = useRef<SearchPageResults | null>(null);
   const [pageStatus, setPageStatus] = useState<PageStatus>({});
   const [stale, setStale] = useState(false);
@@ -83,7 +105,7 @@ export function SearchPage() {
   const searchRequestRef = useRef(0);
   const pageRef = useRef<HTMLDivElement>(null);
   const { restoring } = useScrollRestore(scope, pageRef, { ready: results != null });
-  useListEntryMotion(pageRef, ".search-row", (restoring || restoredScope.current === scope) && !resumeEntry);
+  useListEntryMotion(pageRef, ".search-row, .search-group .stable-pagination-footer .btn", (restoring || restoredScope.current === scope) && !resumeEntry);
   const openPath = (path: string) => {
     saveScrollPosition(scope, pageRef.current);
     navigate(path);
@@ -141,7 +163,7 @@ export function SearchPage() {
     setJoinError(null);
     try {
       const response = await applyToGroup(selectedGroup.id, joinMessage.trim());
-      if (!active.current || activeScope.current !== actionScope || searchScope(q) !== actionScope) return;
+      if (!active.current || activeScope.current !== actionScope || searchScope(q, filter) !== actionScope) return;
       if ("conversation_id" in response && response.status === "accepted") {
         setSelectedGroup(null);
         openPath("/group/" + response.conversation_id);
@@ -158,7 +180,7 @@ export function SearchPage() {
   const refreshSearch = useCallback((query: string) => {
     const trimmed = query.trim();
     if (!trimmed) return;
-    const key = searchScope(trimmed);
+    const key = searchScope(trimmed, filter);
     const membershipAtStart = membershipRevision.current;
     const replacingVisible = resultRef.current != null && activeScope.current === key;
     const requestId = ++searchRequestRef.current;
@@ -167,10 +189,11 @@ export function SearchPage() {
     setLoading(true);
     setError(null);
     const isCurrent = () => active.current && requestId === searchRequestRef.current
-      && activeScope.current === key && searchScope(trimmed) === key;
-    searchPages({ q: trimmed, limit: 3 })
+      && activeScope.current === key && searchScope(trimmed, filter) === key;
+    searchPages(filter === "all" ? { q: trimmed, limit: 3 } : { q: trimmed, types: [filter], limit: 20 })
       .then((nextResults) => {
         if (!isCurrent()) return;
+        if (filter !== "all" && !nextResults[RESULT_KEYS[filter]]) throw new Error("搜索分类结果缺失，请重试");
         for (const group of Object.values(nextResults)) {
           if (group?.has_more && !group.next_cursor) throw new Error("搜索续页游标缺失，请重试");
         }
@@ -185,7 +208,7 @@ export function SearchPage() {
       .finally(() => {
         if (isCurrent()) setLoading(false);
       });
-  }, [commitResults, withCurrentMembership]);
+  }, [commitResults, filter, withCurrentMembership]);
 
   const loadMore = useCallback(async (type: ResultKey) => {
     const key = activeScope.current;
@@ -197,7 +220,7 @@ export function SearchPage() {
     appendRequests.current.add(type);
     setPageStatus((value) => ({ ...value, [type]: { loading: true, error: null } }));
     const isCurrent = () => active.current && requestId === searchRequestRef.current
-      && activeScope.current === key && searchScope(q) === key;
+      && activeScope.current === key && searchScope(q, filter) === key;
     try {
       if (!cursor) throw new Error("下一页游标缺失，请重新搜索");
       const response = await searchPages({ q: q.trim(), types: [RESULT_TYPES[type]], limit: 20, cursor });
@@ -219,7 +242,7 @@ export function SearchPage() {
         setPageStatus((value) => ({ ...value, [type]: { loading: false, error: value[type]?.error ?? null } }));
       }
     }
-  }, [commitResults, q, withCurrentMembership]);
+  }, [commitResults, filter, q, withCurrentMembership]);
 
   const doSearch = useCallback(
     (query: string) => {
@@ -232,10 +255,11 @@ export function SearchPage() {
   );
 
   // 成员事实来自服务端 is_member 与用户级成员事件，不能由部分群目录是否命中推断。
-  // 提示重新搜索而不丢弃已展开页；请求途中发生的成员事件优先于更早的响应。
+  // 自动刷新完成前保留当前结果；请求途中发生的成员事件优先于更早的响应。
   useEffect(() => {
     const membershipChanged = (id: string, member: boolean) => {
       membershipChanges.current.set(id, { member, revision: ++membershipRevision.current });
+      invalidateSearchPages();
       const current = resultRef.current;
       if (current?.groups) commitResults({ ...current, groups: { ...current.groups,
         items: current.groups.items.map((group) => group.id === id ? { ...group, is_member: member } : group),
@@ -243,7 +267,7 @@ export function SearchPage() {
       setStale(true);
     };
     const off = chatWS.onFrame((frame: ChatServerFrame) => {
-      if (!active.current || activeScope.current !== scope || searchScope(q) !== scope) return;
+      if (!active.current || activeScope.current !== scope || searchScope(q, filter) !== scope) return;
       if (frame.type === "group.request.resolved") {
         if (frame.data.status === "accepted") {
           setAcceptedGroupIds((current) => new Set(current).add(frame.data.conversation_id));
@@ -255,6 +279,7 @@ export function SearchPage() {
           });
         }
         if (q) {
+          invalidateSearchPages();
           setStale(true);
           const cached = searchPageMemory.get(scope);
           if (cached) searchPageMemory.set(scope, { ...cached, stale: true });
@@ -276,7 +301,7 @@ export function SearchPage() {
       }
     });
     return off;
-  }, [q, scope, commitResults]);
+  }, [q, filter, scope, commitResults]);
 
   // 五类分组是否全空（决定无结果空态）
   const hasAnyResult = useCallback((r: SearchResults | null): boolean => {
@@ -321,7 +346,7 @@ export function SearchPage() {
     const trimmed = query.trim();
     if (!trimmed) return;
     // replace：搜索词变更不进历史栈，返回键直接回上一个界面
-    setSearchParams({ q: trimmed }, { replace: true });
+    setSearchParams(filter === "all" ? { q: trimmed } : { q: trimmed, type: filter }, { replace: true });
   };
 
   // 搜索结果可能过时（成员关系变化/缓存过期）→ 自动重新搜索，不打扰用户；
@@ -332,7 +357,19 @@ export function SearchPage() {
   }, [stale, q, loading, error, refreshSearch]);
 
   return (
-    <div className="search-page" ref={pageRef} aria-busy={loading}>
+    <div className="search-page directory-page">
+      <div className="directory-body">
+        <DirectoryFilters id={filterId} label="搜索分类" options={FILTERS} value={filter} narrow={isNarrow}
+          className="search-filters" buttonClassName="search-filter" onChange={(next) => {
+            saveScrollPosition(scope, pageRef.current);
+            const params = new URLSearchParams(searchParams);
+            if (next === "all") params.delete("type");
+            else params.set("type", next);
+            setSearchParams(params, { replace: true });
+          }} />
+        <div key={scope} className="directory-content search-content" ref={pageRef} aria-busy={loading}
+          id={`${filterId}-panel`} role="tabpanel" aria-labelledby={`${filterId}-${filter}`} tabIndex={0}
+          data-search-filter={filter}>
       {!q && history.length > 0 && (
         <div className="search-history">
           {history.map((h) => (
@@ -347,7 +384,7 @@ export function SearchPage() {
       )}
 
       {loading && <div className="search-loading">搜索中…</div>}
-      {error && <div className="search-error" role="alert">
+      {resultScope === scope && error && <div className="search-error" role="alert">
         <p>{error}</p><button type="button" className="btn btn-ghost" onClick={() => doSearch(q)}>重试搜索</button>
       </div>}
 
@@ -441,6 +478,9 @@ export function SearchPage() {
         </div>
       )}
 
+        </div>
+      </div>
+
       {resultScope === scope && selectedUser && (
         <div className="user-profile-overlay" onClick={() => setSelectedUser(null)}>
           <div onClick={(e) => e.stopPropagation()}>
@@ -499,17 +539,19 @@ function ResultGroup({ title, count, children, hasMore, loading, error, onMore }
   if (count === 0) return null;
   return (
     <section className="search-group" aria-busy={loading}>
-      <header className="search-group-head">
+      <div className="search-group-head">
         <span className="search-group-title">{title}</span>
-      </header>
+      </div>
       <div className="search-group-body">{children}</div>
-      <StablePaginationFooter className="home-load-more" role={error ? "alert" : "status"} aria-busy={loading}>
-        {error && <span>{error}</span>}
-        {(hasMore || error) && <button type="button" className="btn btn-ghost" disabled={loading} onClick={onMore}
-          aria-label={error ? `重试加载${title}` : `加载更多${title}`}>
-          {loading ? "加载中…" : error ? "重试" : "查看更多"}
-        </button>}
-      </StablePaginationFooter>
+      {(hasMore || error) && (
+        <StablePaginationFooter className="home-load-more" role={error ? "alert" : "status"} aria-busy={loading}>
+          {error && <span>{error}</span>}
+          <button type="button" className="btn btn-ghost" disabled={loading} onClick={onMore}
+            aria-label={error ? `重试加载${title}` : `加载更多${title}`}>
+            {loading ? "加载中…" : error ? "重试" : "查看更多"}
+          </button>
+        </StablePaginationFooter>
+      )}
     </section>
   );
 }

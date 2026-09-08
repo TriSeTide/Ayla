@@ -1,0 +1,188 @@
+/* Search and favorites only: page chrome remains outside the result scroller. */
+.directory-page:is(.search-page, .favorites-page) {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+
+.directory-page > .directory-body {
+  display: flex;
+  flex: 1 1 0;
+  gap: var(--sp-3);
+  min-height: 0;
+  min-width: 0;
+  /* 内容区滚动裁切线延伸到视口物理底边（body 无底部 padding），
+     半张卡只被屏幕边缘自然裁切，不出现悬空截断线；侧栏底部呼吸空间由自身 margin 承担 */
+}
+
+.directory-page .directory-filters {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: var(--sp-2);
+  width: 176px;
+  max-height: 100%;
+  min-width: 0;
+  flex: 0 0 176px;
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow-compact);
+}
+
+.directory-page .directory-filter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex: none;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 200ms var(--auroraqua-ease), border-color 200ms var(--auroraqua-ease),
+    box-shadow 200ms var(--auroraqua-ease), scale 200ms var(--auroraqua-ease);
+}
+
+.directory-page .directory-filter.is-active {
+  background: transparent;
+  border-color: var(--glass-border);
+  box-shadow: none;
+}
+
+.directory-page .directory-filter:focus-visible {
+  outline: 2px solid var(--glow-500);
+  outline-offset: 2px;
+  box-shadow: var(--glow-shadow);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .directory-page .directory-filter:hover {
+    background: var(--ice-100);
+    border-color: var(--glass-border);
+    box-shadow: var(--glass-shadow-nav);
+    scale: 1.02;
+  }
+}
+
+.directory-page .directory-filter:active { scale: .98; }
+
+.directory-page .directory-content {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  padding: var(--sp-2) var(--sp-2) var(--sp-6);
+  /* 切换分类选项卡时内容区重挂载（key=scope），进入时淡入 + 轻微上移（Auroraqua 300ms） */
+  animation: directory-content-in 300ms var(--auroraqua-ease);
+}
+
+@keyframes directory-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.directory-page .directory-content > :is(.search-history, .search-results, .search-loading, .search-error,
+    .search-empty, .favorites-list, .favorites-skeleton, .home-state, .chat-notice, .home-load-more) {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.search-content:not([data-search-filter="all"]) .search-results { display: block; }
+
+/* 收藏页空状态：顶部与侧栏内容对齐（侧栏 padding 12px），消除内容区顶部大块空白 */
+.favorites-content .home-state {
+  padding-top: var(--sp-3);
+}
+
+/* 宽屏：内容首张卡片顶边与侧栏玻璃卡顶边对齐——滚动容器与列表容器的顶部留白归零
+   （此前 directory-content 8px + 列表 12–16px 双重留白使首卡低于侧栏顶边 20px+）。
+   纯文本状态（历史 chips/空态/加载/错误）保留自身 padding-top，与侧栏文字对齐；
+   底部呼吸空间不动，滚动到底内容不贴底不截断。窄屏布局由 max-width 媒体查询覆盖，不受影响。 */
+@media (min-width: 769px) {
+  .directory-page .directory-content { padding-top: 0; }
+  .directory-page .directory-content > :is(.search-results, .favorites-list, .favorites-skeleton) {
+    padding-top: 0;
+  }
+}
+
+.directory-page.favorites-page > .favorites-topbar {
+  width: 100%;
+  max-width: none;
+  flex: none;
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+@media (min-width: 1025px) {
+  .directory-page .favorites-skeleton {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: var(--sp-3);
+  }
+}
+
+@media (max-width: 768px) {
+  .directory-page:is(.search-page, .favorites-page) { padding: 0; }
+  .directory-page > .directory-body { flex-direction: column; gap: 0; }
+  .directory-page .directory-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: none;
+    align-self: stretch;
+    width: auto;
+    max-height: none;
+    margin: var(--sp-2) var(--sp-3);
+    padding: var(--sp-2);
+    overflow: visible;
+  }
+  .directory-page .directory-filter { justify-content: center; padding-inline: var(--sp-2); }
+  .directory-page .favorites-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .directory-page .directory-content {
+    padding: var(--sp-2) var(--sp-4) calc(68px + env(safe-area-inset-bottom));
+  }
+  .directory-page.favorites-page > .favorites-topbar {
+    width: calc(100% - 2 * var(--sp-3));
+    margin: var(--sp-3) var(--sp-3) 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-page .directory-filter { transition: none; }
+  .directory-page .directory-filter:is(:hover, :active) { scale: 1; }
+  .directory-page .directory-content { animation: none; }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .directory-page .directory-filters { background: var(--surface); }
+}

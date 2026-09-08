@@ -1,5 +1,4 @@
-import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as favoritesApi from "../api/favorites";
 import type { Favorite, FavoriteTargetType } from "../api/types";
@@ -10,6 +9,7 @@ import { useMasonryColumns } from "../hooks/useMasonryColumns";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
+import { DirectoryFilters } from "../components/DirectoryFilters";
 import { useAuthStore } from "../stores/auth";
 import { usePostsStore } from "../stores/posts";
 import { chatWS } from "../ws/chat";
@@ -81,17 +81,19 @@ function FavoritesList({ favorites, isNarrow, filter, suppressEntry, onOpen, onR
   onOpen: (favorite: Favorite) => void;
   onRemove: (favorite: Favorite) => void;
 }) {
+  const compact = useMediaQuery("(max-width: 1024px)");
+  const singleColumn = isNarrow || compact;
   const listRef = useRef<HTMLDivElement>(null);
   useListEntryMotion(listRef, ".favorite-item", suppressEntry);
   const { columns, columnRefs } = useMasonryColumns(
     favorites,
-    isNarrow ? 1 : 2,
+    singleColumn ? 1 : 2,
     (favorite) => favorite.id,
     `favorites:${favorites[0].user_id}:${filter}`,
   );
 
   return (
-    <div className={`favorites-list${isNarrow ? "" : " is-masonry"}`} ref={listRef}>
+    <div className={`favorites-list${singleColumn ? "" : " is-masonry"}`} ref={listRef}>
       {columns.map((column, columnIndex) => (
         <div key={columnIndex} className="favorites-masonry-col" ref={columnRefs[columnIndex]}>
           {column.map((favorite) => (
@@ -138,12 +140,12 @@ export function clearFavoritePageMemory() { favoritePages.clear(); }
 function favoriteAccount() { return `${useAuthStore.getState().currentUser?.id ?? "anonymous"}:${favoriteSession}`; }
 const emptyFavoritePage = (): FavoritePageState => ({ rows: [], cursor: null, hasMore: false, total: 0, loaded: false, loading: false, error: null, errorKind: null, stale: false, updatedAt: 0 });
 
-function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }: {
+function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen }: {
   scope: string;
   filter: Filter;
   isNarrow: boolean;
   pageRef: React.RefObject<HTMLDivElement>;
-  pageReady: boolean;
+  filterId: string;
   onOpen: (favorite: Favorite) => void;
 }) {
   const account = favoriteAccount();
@@ -155,7 +157,10 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
   const owner = useRef({ active: false, revision: 0, busy: false, changes: 0, removed: new Set<number>() });
   const [actionError, setActionError] = useState<string | null>(null);
   const [resumeEntry, setResumeEntry] = useState(false);
-  const { restoring } = useScrollRestore(scope, pageRef, { ready: state.loaded && pageReady });
+  const { restoring } = useScrollRestore(scope, pageRef, { ready: state.loaded });
+  const wrapResults = (children: ReactNode) => <div className="directory-content favorites-content" ref={pageRef}
+    id={`${filterId}-panel`} role="tabpanel" aria-labelledby={`${filterId}-${filter}`} tabIndex={0}
+    data-favorite-filter={filter}>{children}</div>;
   const update = useCallback((change: (current: FavoritePageState) => FavoritePageState) => {
     const next = change(stateRef.current);
     stateRef.current = next;
@@ -234,7 +239,7 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
         if (key.startsWith(`favorites:${account}:`)) favoritePages.set(key, { ...cached, stale: true });
       }
       // A new first-page item does not invalidate older keyset positions.
-      // Keep all loaded pages and let the user choose when to refresh the head.
+      // Preserve the current view until the automatic head refresh completes.
       update((value) => ({ ...value, stale: true }));
     }
   }), [account, removeLocal, update]);
@@ -258,15 +263,15 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
     if (state.stale && !state.loading && !state.error) void requestPage();
   }, [state.stale, state.loading, state.error, requestPage]);
 
-  if (!state.loaded && !state.error) return <div className="favorites-skeleton" role="status" aria-label="正在加载收藏">
+  if (!state.loaded && !state.error) return wrapResults(<div className="favorites-skeleton" role="status" aria-label="正在加载收藏">
     <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
     <div className="skeleton" style={{ height: 64 }} />
-  </div>;
-  if (!state.loaded && state.error) return <div className="home-state" role="alert">
+  </div>);
+  if (!state.loaded && state.error) return wrapResults(<div className="home-state" role="alert">
     <p className="placeholder-desc">{state.error}</p>
     <button type="button" className="btn btn-ghost" onClick={() => void requestPage()}>重试</button>
-  </div>;
-  return <>
+  </div>);
+  return wrapResults(<>
     {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
     {state.rows.length === 0 ? <div className="home-state">
       <h3 className="placeholder-title">这个分类还没有收藏</h3>
@@ -275,7 +280,7 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, pageReady, onOpen }
       suppressEntry={restoring && !resumeEntry} onOpen={onOpen} onRemove={(favorite) => void remove(favorite)} />}
     <DirectoryLoadMore loading={state.loading} error={state.error} hasMore={state.hasMore} invalidated={false}
       loadMore={() => requestPage(state.errorKind !== "first")} refresh={() => requestPage()} />
-  </>;
+  </>);
 }
 
 export function FavoritesPage() {
@@ -288,35 +293,25 @@ export function FavoritesPage() {
   const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
   const scope = `favorites:${favoriteAccount()}:${filter}`;
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const [pageReady, setPageReady] = useState(false);
-  // The body owns pagination while this parent owns the scroll element.
-  // Cached children can commit before the parent's ref is attached on remount.
-  const bindPage = useCallback((node: HTMLDivElement | null) => {
-    pageRef.current = node;
-    setPageReady(node !== null);
-  }, []);
   const onOpen = (favorite: Favorite) => {
     saveScrollPosition(scope, pageRef.current);
     openTarget(navigate, favorite);
   };
   return <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
-    <div className="favorites-page" ref={bindPage}>
+    <div className="favorites-page directory-page">
       <div className="favorites-topbar">
         <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回"><IconBack width={20} height={20} /></button>
         <h2 className="favorites-title">我的收藏</h2>
       </div>
-      <div className="favorites-filters" role="tablist" aria-label="收藏分类">
-        {FILTERS.map((item) => <button key={item.key} type="button" role="tab" aria-selected={filter === item.key}
-          className={`favorites-filter has-auroraqua-highlight ${filter === item.key ? "is-active" : ""}`}
-          onClick={() => {
+      <div className="directory-body">
+        <DirectoryFilters id={selectionId} label="收藏分类" options={FILTERS} value={filter} narrow={isNarrow}
+          className="favorites-filters" buttonClassName="favorites-filter" onChange={(next) => {
             saveScrollPosition(scope, pageRef.current);
-            setParams(item.key === "all" ? {} : { type: item.key }, { replace: true });
-          }}>
-          {filter === item.key && <AuroraquaNavHighlight id={selectionId} />}
-          <span className="auroraqua-nav-label">{item.label}</span>
-        </button>)}
+            setParams(next === "all" ? {} : { type: next }, { replace: true });
+          }} />
+        <FavoriteResults key={scope} scope={scope} filter={filter} isNarrow={isNarrow} pageRef={pageRef}
+          filterId={selectionId} onOpen={onOpen} />
       </div>
-      <FavoriteResults key={scope} scope={scope} filter={filter} isNarrow={isNarrow} pageRef={pageRef} pageReady={pageReady} onOpen={onOpen} />
     </div>
   </FullScreenSwipeBack>;
 }

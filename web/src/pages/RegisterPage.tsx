@@ -49,10 +49,12 @@ export function RegisterPage() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
-        <h1 className="auth-brand">创建账号</h1>
-        <p className="auth-subtitle">加入 Ayla</p>
-        <form className="auth-form" onSubmit={onSubmit}>
+      <section className="auth-card" aria-labelledby="register-title">
+        <header className="auth-heading">
+          <h1 className="auth-brand" id="register-title">创建账号</h1>
+          <p className="auth-subtitle">加入 Ayla</p>
+        </header>
+        <form className="auth-form" onSubmit={onSubmit} aria-busy={submitting}>
           {error && (
             <div className="auth-error" role="alert">
               {error}
@@ -97,9 +99,11 @@ export function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"
+              aria-invalid={Boolean(fieldError.password)}
+              aria-describedby={fieldError.password ? "register-password-error" : undefined}
               required
             />
-            {fieldError.password && <span className="field-error">{fieldError.password}</span>}
+            {fieldError.password && <span className="field-error" id="register-password-error">{fieldError.password}</span>}
           </label>
           <label className="auth-field">
             确认密码
@@ -109,18 +113,20 @@ export function RegisterPage() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               autoComplete="new-password"
+              aria-invalid={Boolean(fieldError.confirm)}
+              aria-describedby={fieldError.confirm ? "register-confirm-error" : undefined}
               required
             />
-            {fieldError.confirm && <span className="field-error">{fieldError.confirm}</span>}
+            {fieldError.confirm && <span className="field-error" id="register-confirm-error">{fieldError.confirm}</span>}
           </label>
-          <button type="submit" className="btn btn-glow" disabled={submitting}>
+          <button type="submit" className="btn btn-glow auth-submit" disabled={submitting}>
             {submitting ? "注册中…" : "注册"}
           </button>
         </form>
         <p className="auth-switch">
-          已有账号？<Link to="/login">登录</Link>
+          <span>已有账号？</span><Link className="btn btn-ghost auth-switch-link" to="/login">登录</Link>
         </p>
-      </div>
+      </section>
     </div>
   );
 }

@@ -1,0 +1,102 @@
+/** Public authentication routes use the same Auroraqua panel/field/button recipes.
+ * The card is the only panel material owner; its heading and form are transparent.
+ */
+.auth-page {
+  height: 100%;
+  min-height: 100dvh;
+  display: flex;
+  align-items: safe center;
+  justify-content: center;
+  padding: var(--sp-8) var(--sp-6);
+  overflow-y: auto;
+  scroll-padding-block: var(--sp-6);
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: min(440px, 100%);
+  margin-block: auto;
+  padding: var(--sp-8);
+  gap: var(--sp-6);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--glass-shadow-modal);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+
+.auth-heading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.auth-brand {
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  line-height: 1.15;
+  text-align: center;
+  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.auth-subtitle { margin: 0; text-align: center; font-size: 14px; color: var(--text-secondary); }
+.auth-form { display: flex; flex-direction: column; gap: var(--sp-4); }
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--sp-2);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.auth-field .field { min-height: 44px; }
+.auth-field .field[aria-invalid="true"] { border-color: var(--destructive); }
+.auth-error {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(214, 77, 110, 0.1);
+  border: 1px solid rgba(214, 77, 110, 0.35);
+  color: var(--destructive);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.auth-submit { width: 100%; min-height: 44px; margin-top: var(--sp-1); }
+
+.auth-switch {
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--glass-border);
+}
+
+.auth-switch-link {
+  min-width: 72px;
+  min-height: 44px;
+  padding-inline: var(--sp-4);
+  text-decoration: none;
+}
+
+@media (max-width: 480px), (max-height: 700px) {
+  .auth-page {
+    padding: max(var(--sp-4), env(safe-area-inset-top))
+      var(--sp-4) max(var(--sp-4), env(safe-area-inset-bottom));
+  }
+  .auth-card { padding: var(--sp-6); }
+  .auth-brand { font-size: 32px; }
+}

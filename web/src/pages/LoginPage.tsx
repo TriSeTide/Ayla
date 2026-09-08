@@ -35,10 +35,12 @@ export function LoginPage() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
-        <h1 className="auth-brand">Ayla</h1>
-        <p className="auth-subtitle">登录，回到爱莉的家</p>
-        <form className="auth-form" onSubmit={onSubmit}>
+      <section className="auth-card" aria-labelledby="login-title">
+        <header className="auth-heading">
+          <h1 className="auth-brand" id="login-title">Ayla</h1>
+          <p className="auth-subtitle">登录，回到爱莉的家</p>
+        </header>
+        <form className="auth-form" onSubmit={onSubmit} aria-busy={submitting}>
           {error && (
             <div className="auth-error" role="alert">
               {error}
@@ -66,14 +68,14 @@ export function LoginPage() {
               required
             />
           </label>
-          <button type="submit" className="btn btn-glow" disabled={submitting}>
+          <button type="submit" className="btn btn-glow auth-submit" disabled={submitting}>
             {submitting ? "登录中…" : "登录"}
           </button>
         </form>
         <p className="auth-switch">
-          还没有账号？<Link to="/register">注册</Link>
+          <span>还没有账号？</span><Link className="btn btn-ghost auth-switch-link" to="/register">注册</Link>
         </p>
-      </div>
+      </section>
     </div>
   );
 }

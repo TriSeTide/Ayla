@@ -764,6 +764,7 @@
 /* U3：输入框负责收缩，发送按钮永不被挤成竖排。 */
 .danmaku-input-row { min-width: 0; }
 .danmaku-input { min-width: 0; }
+.danmaku-image-btn.btn { width: 40px; height: 40px; padding: 0; }
 .danmaku-send-btn {
   flex: 0 0 auto;
   min-width: 72px;
@@ -977,7 +978,7 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
-/* 全屏播放弹幕输入框：屏幕下方中间，与悬浮按钮同高（32px）同底（bottom 8px）、
+/* 全屏播放弹幕输入框：屏幕下方中间，40px发送触达区与其他composer一致；
    同显隐（在 .live-player-controls 容器内，随容器 opacity 淡入淡出 + 自动隐藏/唤醒）；
    使用与其他文本输入相同的浅玻璃材料，外框持有一次背景、内input透明。
    仅标准容器全屏时显示（iOS 原生视频全屏无自定义 UI）。 */
@@ -989,8 +990,9 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 32px;
-  padding: 0 4px 0 14px;
+  width: min(320px, calc(100% - 120px));
+  min-height: 50px;
+  padding: 4px 4px 4px 12px;
   box-sizing: border-box;
   border-radius: var(--radius-input);
   background: var(--glass-bg);
@@ -1026,7 +1028,10 @@
   text-align: center;
 }
 .live-player-fs-input input {
-  width: 200px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  min-height: 40px;
   background: transparent;
   border: none;
   outline: none;
@@ -1038,29 +1043,10 @@
   color: var(--slate-500);
 }
 .live-player-fs-send {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
   flex: none;
-  border-radius: var(--radius-pill);
-  background: rgba(70, 91, 146, 0.32);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  color: #fff;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.live-player-fs-send:hover:not(:disabled) {
-  background: rgba(70, 91, 146, 0.52);
-}
-.live-player-fs-send:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.live-player-fs-send:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: 2px;
+  padding: 0;
 }
 
 @keyframes danmaku-fly {

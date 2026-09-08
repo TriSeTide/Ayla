@@ -8,7 +8,7 @@
  */
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { search as searchApi } from "../api/search";
 import type { SearchResults } from "../api/types";
 import { Avatar } from "../components/Avatar";
@@ -19,6 +19,7 @@ import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
 import type { ModuleKey } from "./shellConfig";
 import { PRIMARY_MODULES } from "./shellConfig";
 import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
+import { searchLocation } from "../utils/searchLocation";
 
 export function TopNav({
   moduleKey,
@@ -37,13 +38,18 @@ export function TopNav({
   const onlineStatuses = usePresenceStore((s) => s.statuses);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
+  const location = useLocation();
+  const urlQuery = location.pathname === "/search" ? new URLSearchParams(location.search).get("q") ?? "" : null;
+  const [query, setQuery] = useState(urlQuery ?? "");
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // URL navigation updates the input; changing only a filter keeps an unsubmitted draft.
+  useEffect(() => { if (urlQuery !== null) setQuery(urlQuery); }, [urlQuery]);
 
   // 更多菜单：点击外部 / ESC 关闭
   useEffect(() => {
@@ -65,18 +71,19 @@ export function TopNav({
   const submitSearch = (e: FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search");
+    navigate(searchLocation(q, location.pathname === "/search" ? location.search : ""));
     setSearchOpen(false);
   };
 
   const clearQuery = () => {
     setQuery("");
+    if (location.pathname === "/search") navigate(searchLocation("", location.search), { replace: true });
     searchInputRef.current?.focus();
   };
 
   /** 「查看更多」：跳转完整搜索页查看该类型全部结果 */
   const goFullSearch = () => {
-    navigate(`/search?q=${encodeURIComponent(query.trim())}`);
+    navigate(searchLocation(query, location.pathname === "/search" ? location.search : ""));
     setSearchOpen(false);
   };
 
@@ -93,11 +100,11 @@ export function TopNav({
       searchApi({ q: trimmed, limit: 3 })
         .then((r) => {
           setSearchResults(r);
-          setSearchOpen(true);
+          setSearchOpen(document.activeElement === searchInputRef.current);
         })
         .catch((e) => {
           setSearchError(e instanceof Error ? e.message : "搜索失败");
-          setSearchOpen(true);
+          setSearchOpen(document.activeElement === searchInputRef.current);
         });
     }, 300);
     return () => window.clearTimeout(timer);

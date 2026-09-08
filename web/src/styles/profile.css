@@ -10,24 +10,27 @@
 .profile-side,
 .profile-main { display: contents; }
 
+/* 返回键在个人信息卡片内、与头像昵称同一行（profile-identity 为 flex row，按钮自然居中） */
+.profile-card-back {
+  flex: none;
+}
+
 @media (min-width: 769px) {
   .profile-page-split {
-    overflow: hidden;
-    padding: 0;
+    /* 左右与顶栏条（--sidebar-gutter 悬浮圆角条）边缘对齐（需求：个人主页左右宽度对齐最顶栏） */
+    padding: var(--sp-6) var(--sidebar-gutter) var(--sp-8);
   }
 
   .profile-page-split > .profile-column {
     display: grid;
-    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 0;
-    height: 100%;
-    max-width: 1200px;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: var(--sp-4);
+    align-items: start;
+    max-width: none;
   }
 
   .profile-page-split .profile-topbar {
     grid-column: 1 / -1;
-    margin: var(--sp-6) var(--sp-6) 0;
   }
 
   .profile-page-split :is(.profile-side, .profile-main) {
@@ -35,30 +38,15 @@
     flex-direction: column;
     gap: var(--sp-4);
     min-width: 0;
-    min-height: 0;
-    padding: var(--sp-6) var(--sp-6) var(--sp-8);
-    overflow-y: auto;
-    overscroll-behavior: contain;
   }
 
   .profile-page-split :is(.profile-side, .profile-main) > * {
     flex-shrink: 0;
   }
 
-  /* 两侧仍留24px阴影裁剪余量；滚动区各向中间扩16px，卡片净间隔为16px。
-     透明重叠区不参与命中，实际卡片继续接收点击与滚轮并向所属滚动列冒泡。 */
-  .profile-page-split .profile-column:has(.profile-main) :is(.profile-side, .profile-main) {
-    pointer-events: none;
-  }
-
-  .profile-page-split .profile-column:has(.profile-main) .profile-side { margin-right: calc(-1 * var(--sp-4)); }
-  .profile-page-split .profile-column:has(.profile-main) .profile-main { margin-left: calc(-1 * var(--sp-4)); }
-
-  .profile-page-split .profile-column:has(.profile-main) :is(.profile-side, .profile-main) > * {
-    pointer-events: auto;
-  }
-
-  .profile-page-split .profile-card { padding: var(--sp-6); }
+  /* The page owns scrolling; natural-height columns leave shadows and wheel hit areas intact. */
+  .profile-page-split .profile-card { padding: var(--sp-4); gap: var(--sp-4); }
+  .profile-page-split .profile-form { gap: var(--sp-3); }
   .profile-page-split .profile-actions { flex-wrap: wrap; }
   .profile-page-split .profile-identity { flex-wrap: wrap; }
 
@@ -70,7 +58,6 @@
 
   .profile-page-split .profile-column > .profile-card {
     align-self: start;
-    margin: var(--sp-6);
   }
 }
 
@@ -273,15 +260,7 @@
 
 /* ================= 收藏页（FavoritesPage） ================= */
 
-.favorites-page {
-  height: 100%;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 68px;
-  /* 防 flex 子项被内容撑开导致页面横向溢出（任务 07：导航条截断修复） */
-  min-width: 0;
-}
+/* 收藏页的筛选、外壳和滚动轨道位于 directory-filters.css。 */
 
 .favorites-topbar {
   display: flex;
@@ -297,15 +276,6 @@
   box-shadow: var(--glass-shadow-compact);
 }
 
-@media (max-width: 768px) {
-  .favorites-page > .favorites-topbar {
-    width: calc(100% - 2 * var(--sp-4));
-    margin: var(--sp-3) var(--sp-4);
-    padding: var(--sp-3) var(--sp-4);
-    flex-shrink: 0;
-  }
-}
-
 .favorites-title {
   padding: 0;
   font-family: var(--font-display);
@@ -318,48 +288,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.favorites-filters {
-  display: flex;
-  gap: var(--sp-2);
-  padding: 0 var(--sp-4) var(--sp-2);
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scroll-padding-inline: var(--sp-4);
-  /* 关键：flex column 子项默认 min-width:auto 会被七个 tab 撑开父容器，
-     导致整页横向溢出/导航条截断；置 0 后宽度收敛为容器宽，tab 走横向滚动 */
-  min-width: 0;
-  width: 100%;
-  /* 关键：overflow-x:auto 会使 min-height:auto 失效（CSS 规范），
-     flex 容器高度不足时筛选条会被压缩到只剩 padding、tab 内容垂直裁切
-     （宽屏收藏选项卡截断的根因）；禁止参与 flex 压缩 */
-  flex-shrink: 0;
-}
-
-.favorites-filters::after {
-  content: "";
-  flex: 0 0 var(--sp-4);
-}
-
-.favorites-filter {
-  flex: none;
-  min-height: 36px;
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-pill);
-  background: var(--glass-bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.favorites-filter.is-active,
-.favorites-filter:hover,
-.favorites-filter:focus-visible {
-  border-color: var(--glow-500);
-  background: var(--ice-300);
-  color: var(--text-primary);
-  box-shadow: var(--glow-shadow);
 }
 
 .favorites-skeleton {
@@ -435,27 +363,7 @@
 }
 
 @media (min-width: 769px) {
-  .favorites-page {
-    padding: var(--sp-3) 0 var(--sp-8);
-  }
-
-  .favorites-page > :is(.favorites-topbar, .favorites-filters, .favorites-list, .favorites-skeleton, .home-state, .chat-notice) {
-    max-width: 1200px;
-    width: 100%;
-    margin-inline: auto;
-    flex-shrink: 0;
-    padding-left: var(--sp-6);
-    padding-right: var(--sp-6);
-  }
-
-  .favorites-page > .favorites-topbar {
-    width: calc(100% - 2 * var(--sp-6));
-    max-width: calc(1200px - 2 * var(--sp-6));
-    margin-bottom: var(--sp-3);
-    padding: var(--sp-3) var(--sp-4);
-  }
-
-  /* 宽屏统一双列；轨道宽度与内沿沿用帖子列表，断点遵循收藏页要求。 */
+  /* 两列时的卡片材料与间距；列数由页面按可用宽度决定。 */
   .favorites-list.is-masonry {
     flex-direction: row;
     align-items: flex-start;
@@ -467,15 +375,6 @@
   .favorites-list.is-masonry .favorites-masonry-col {
     flex: 1 1 0;
     gap: var(--sp-3);
-  }
-
-  .favorites-skeleton {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-    gap: var(--sp-3);
-    padding-top: var(--sp-4);
-    padding-bottom: var(--sp-4);
   }
 
   .favorite-item { padding: var(--sp-4); }
@@ -526,6 +425,8 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  /* 与头像左边缘对齐：返回键 40px + profile-identity 间距 16px */
+  padding-left: calc(40px + var(--sp-4));
 }
 
 /* ① 个性签名 textarea：禁用原生 resize 手柄 */

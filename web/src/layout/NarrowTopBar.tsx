@@ -12,12 +12,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Avatar } from "../components/Avatar";
 import { IconBack, IconClose, IconDots, IconSearch } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
 import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
+import { searchLocation } from "../utils/searchLocation";
 
 export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "search" }) {
   const currentUser = useAuthStore((s) => s.currentUser);
@@ -27,8 +28,9 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
   const navigate = useNavigate();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const location = useLocation();
+  const urlQuery = new URLSearchParams(location.search).get("q") ?? "";
+  const [query, setQuery] = useState(urlQuery);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 搜索输入态：进入即自动聚焦（布局文档 §2.7）
@@ -38,8 +40,8 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
 
   // URL q 变化（如从历史/结果回退）时同步输入框
   useEffect(() => {
-    setQuery(searchParams.get("q") ?? "");
-  }, [searchParams]);
+    if (variant === "search") setQuery(urlQuery);
+  }, [urlQuery, variant]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -61,13 +63,13 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
     e.preventDefault();
     const q = query.trim();
     // replace：搜索词变更不进历史栈，返回键 navigate(-1) 直接回上一个界面
-    navigate(q ? `/search?q=${encodeURIComponent(q)}` : "/search", { replace: true });
+    navigate(searchLocation(q, location.pathname === "/search" ? location.search : ""), { replace: true });
   };
 
   const clearQuery = () => {
     setQuery("");
     // 清空 URL q 让 SearchPage 同步清空结果区；replace 避免清除操作产生历史记录
-    setSearchParams({}, { replace: true });
+    navigate(searchLocation("", location.pathname === "/search" ? location.search : ""), { replace: true });
     inputRef.current?.focus();
   };
 

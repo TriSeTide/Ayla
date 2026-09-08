@@ -79,7 +79,7 @@ function responsiveViewport(initialWidth: number) {
   const listeners = new Set<() => void>();
   vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
     get matches() {
-      return query === "(max-width: 768px)" ? width <= 768 : query === "(prefers-reduced-motion: reduce)";
+      return query === "(max-width: 768px)" ? width <= 768 : query === "(max-width: 1024px)" ? width <= 1024 : query === "(prefers-reduced-motion: reduce)";
     },
     addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
     removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
@@ -122,6 +122,35 @@ function deferred<T>() {
 }
 
 describe("收藏真实分页", () => {
+  it("筛选位于结果滚动区外，首次分类归零、返回分类恢复分页和位置", async () => {
+    vi.mocked(favoritesApi.listFavoritesPage)
+      .mockResolvedValueOnce(favoritePage([fav(1, "message", "50", { content: "全部消息", conversation_id: "c1" })], "all-next"))
+      .mockResolvedValueOnce(favoritePage([fav(2, "post", "11", { title: "帖子分类" })], "post-next"));
+    const { container } = renderPage();
+    await screen.findByText("全部消息");
+    const filters = screen.getByRole("tablist", { name: "收藏分类" });
+    const allScroll = container.querySelector<HTMLElement>(".favorites-content")!;
+    expect(allScroll.contains(filters)).toBe(false);
+    allScroll.scrollTop = 280;
+    fireEvent.click(screen.getByRole("tab", { name: "帖子" }));
+    await screen.findByText("帖子分类");
+    const postScroll = container.querySelector<HTMLElement>(".favorites-content")!;
+    expect(postScroll).not.toBe(allScroll);
+    expect(postScroll.scrollTop).toBe(0);
+    postScroll.scrollTop = 90;
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    await screen.findByText("全部消息");
+    expect(container.querySelector<HTMLElement>(".favorites-content")!.scrollTop).toBe(280);
+    fireEvent.click(screen.getByRole("tab", { name: "帖子" }));
+    await screen.findByText("帖子分类");
+    expect(container.querySelector<HTMLElement>(".favorites-content")!.scrollTop).toBe(90);
+    expect(screen.getByRole("tablist", { name: "收藏分类" })).toBe(filters);
+    expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(2);
+    vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValueOnce(favoritePage([]));
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    await waitFor(() => expect(favoritesApi.listFavoritesPage).toHaveBeenLastCalledWith({ type: "post", limit: 20, cursor: "post-next" }));
+  });
+
   it("目标已删除或权限撤销时显示不可用并保留取消收藏操作", async () => {
     vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValueOnce(favoritePage([fav(1, "post", "10", null)]));
     renderPage();
@@ -138,7 +167,7 @@ describe("收藏真实分页", () => {
     const { container } = renderPage();
     const retained = await screen.findByRole("button", { name: /第一页B/ });
     retained.focus();
-    const scroll = container.querySelector<HTMLElement>(".favorites-page")!;
+    const scroll = container.querySelector<HTMLElement>(".favorites-content")!;
     scroll.scrollTop = 440;
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
     await screen.findByText("第二页C");
@@ -225,7 +254,7 @@ describe("收藏真实分页", () => {
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
     await screen.findByText("第二页卡片");
     expect(animated).toHaveLength(2);
-    const scroll = container.querySelector<HTMLElement>(".favorites-page")!;
+    const scroll = container.querySelector<HTMLElement>(".favorites-content")!;
     scroll.scrollTop = 370;
     fireEvent.scroll(scroll);
     fireEvent.click(screen.getByText("第二页卡片"));
@@ -233,7 +262,7 @@ describe("收藏真实分页", () => {
     await screen.findByText("第二页卡片");
     expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("tab", { name: "帖子" })).toHaveAttribute("aria-selected", "true");
-    expect(container.querySelector<HTMLElement>(".favorites-page")!.scrollTop).toBe(370);
+    expect(container.querySelector<HTMLElement>(".favorites-content")!.scrollTop).toBe(370);
     expect(animated).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
     await screen.findByText("第三页卡片");
@@ -266,7 +295,7 @@ afterEach(() => {
 });
 
 describe("FavoritesPage", () => {
-  it.each([769, 1440])("宽屏 %d 使用独立两列，取消其他卡片保留剩余 DOM、列归属与焦点", async (width) => {
+  it.each([1025, 1440])("宽屏 %d 使用独立两列，取消其他卡片保留剩余 DOM、列归属与焦点", async (width) => {
     responsiveViewport(width);
     vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
       fav(1, "post", "10", { title: "帖子A", body: "较长正文".repeat(60) }),
@@ -287,8 +316,8 @@ describe("FavoritesPage", () => {
     expect(retained).toHaveFocus();
   });
 
-  it("768/769 断点往返保持窄屏 API 顺序，宽屏恢复各自列归属", async () => {
-    const setWidth = responsiveViewport(768);
+  it("1024/1025 断点往返保留单列 API 顺序，宽屏恢复各自列归属", async () => {
+    const setWidth = responsiveViewport(1024);
     vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
       fav(1, "post", "10", { title: "帖子A" }),
       fav(2, "post", "11", { title: "帖子B" }),
@@ -297,9 +326,9 @@ describe("FavoritesPage", () => {
     const { container } = renderPage();
     await screen.findByText("帖子A");
     expect(columnIds(container)).toEqual([["1", "2", "3"]]);
-    setWidth(769);
+    setWidth(1025);
     expect(columnIds(container)).toEqual([["1", "3"], ["2"]]);
-    setWidth(768);
+    setWidth(1024);
     expect(columnIds(container)).toEqual([["1", "2", "3"]]);
     expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(1);
   });

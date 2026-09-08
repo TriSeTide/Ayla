@@ -399,7 +399,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
   return (
     <div className="group-info">
       <div className="group-info-layout">
-        {/* ---- 左列（宽屏独立滚动）：资料卡 + 管理卡 ---- */}
+        {/* ---- 左列：资料卡 + 管理卡，随整页连续滚动 ---- */}
         <aside className="group-info-side">
           <section className="group-info-profile glass-card">
             <div className="group-info-profile-top">
@@ -631,7 +631,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
           </section>
         </aside>
 
-        {/* ---- 右列（独立滚动）：子群卡（上） + 成员卡（下） ---- */}
+        {/* ---- 右列：子群卡（上） + 成员卡（下） ---- */}
         <div className="group-info-main">
           <section className="group-info-subgroups solid-card">
             <header className="group-info-card-head">
@@ -752,7 +752,7 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                       onClick={() => goUserProfile(currentUser?.id, m.user.id)}
                       ariaLabel={`查看 ${m.user.nickname || m.user.username} 的个人主页`}
                     />
-                    <span className="group-info-member-name">{m.user.nickname || m.user.username}</span>
+                    <span className="group-info-member-name" title={m.user.nickname || m.user.username}>{m.user.nickname || m.user.username}</span>
                     {m.user.id === currentUser?.id && <span className="group-info-me">我</span>}
                     {m.role !== "member" && (
                       <span className={`group-info-role group-info-role-${m.role}`}>

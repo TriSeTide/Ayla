@@ -130,7 +130,7 @@ function FullscreenDanmakuInput({
         aria-label="全屏发弹幕"
         maxLength={200}
       />
-      <button type="button" className="live-player-fs-send" onClick={() => void submit()}
+      <button type="button" className="btn btn-primary live-player-fs-send" onClick={() => void submit()}
         aria-label="发送弹幕" title="发送弹幕" disabled={sending || !draft.trim()}>
         <IconSend width={16} height={16} />
       </button>

@@ -143,6 +143,109 @@ function renderSearchControls(motion = false) {
 }
 
 describe("搜索分组游标分页", () => {
+  it.each([
+    ["user", "用户", "users"], ["group", "群聊", "groups"], ["post", "帖子", "posts"],
+    ["live", "直播间", "lives"], ["game", "桌游室", "games"],
+  ] as const)("直达 %s 分类只展示本类，使用20条类型分页", async (type, label, key) => {
+    const { container } = renderSearch(`/search?q=冰樱&type=${type}`, false);
+    await waitFor(() => expect(screen.queryByText("搜索中…")).not.toBeInTheDocument());
+    expect(searchPages).toHaveBeenCalledWith({ q: "冰樱", types: [type], limit: 20 });
+    expect(screen.getByRole("tab", { name: label })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: label })).toHaveAttribute("data-search-filter", type);
+    expect(screen.getAllByRole("tab")).toHaveLength(6);
+    // 分组标题已按需求移除（左侧栏选项卡即分类标识），只验证本类分组存在
+    expect(container.querySelectorAll(".search-group")).toHaveLength(resultFor("")[key]!.total ? 1 : 0);
+    expect(container.querySelector(".search-content .search-filters")).toBeNull();
+  });
+
+  it("分类各自保存分页和滚动，首次进入归零、切回恢复且不重拉", async () => {
+    const all = resultFor("冰樱");
+    all.users = { ...all.users!, next_cursor: "all-u1", has_more: true };
+    vi.mocked(searchPages).mockResolvedValueOnce(all).mockResolvedValueOnce({ users: {
+      ...all.users, next_cursor: "all-u2", items: [{ ...all.users.items[0], id: "u3", nickname: "全部第二页" }],
+    } }).mockResolvedValueOnce({ users: { ...all.users, next_cursor: "type-u1",
+      items: [{ ...all.users.items[0], id: "u4", nickname: "用户分类第一页" }],
+    } });
+    const { container } = renderSearch("/search?q=冰樱", false);
+    await screen.findByText("小樱");
+    fireEvent.click(screen.getByRole("button", { name: "加载更多用户" }));
+    await screen.findByText("全部第二页");
+    const allScroll = container.querySelector<HTMLElement>(".search-content")!;
+    const filters = screen.getByRole("tablist", { name: "搜索分类" });
+    allScroll.scrollTop = 410;
+    fireEvent.click(screen.getByRole("tab", { name: "用户" }));
+    await screen.findByText("用户分类第一页");
+    const userScroll = container.querySelector<HTMLElement>(".search-content")!;
+    expect(userScroll).not.toBe(allScroll);
+    expect(userScroll.scrollTop).toBe(0);
+    expect(screen.queryByText("全部第二页")).not.toBeInTheDocument();
+    userScroll.scrollTop = 130;
+    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    await screen.findByText("全部第二页");
+    expect(container.querySelector<HTMLElement>(".search-content")!.scrollTop).toBe(410);
+    fireEvent.click(screen.getByRole("tab", { name: "用户" }));
+    await screen.findByText("用户分类第一页");
+    expect(container.querySelector<HTMLElement>(".search-content")!.scrollTop).toBe(130);
+    expect(screen.getByRole("tablist", { name: "搜索分类" })).toBe(filters);
+    expect(searchPages).toHaveBeenCalledTimes(3);
+    vi.mocked(searchPages).mockResolvedValueOnce({ users: { ...all.users, has_more: false, next_cursor: null, items: [] } });
+    fireEvent.click(screen.getByRole("button", { name: "加载更多用户" }));
+    await waitFor(() => expect(searchPages).toHaveBeenLastCalledWith({ q: "冰樱", types: ["user"], limit: 20, cursor: "type-u1" }));
+  });
+
+  it("快速分类切换丢弃旧分类迟到响应，当前错误重试仍使用本类", async () => {
+    const previous = deferred<SearchPageResults>();
+    vi.mocked(searchPages).mockReturnValueOnce(previous.promise).mockRejectedValueOnce(new Error("群聊首屏失败"))
+      .mockResolvedValueOnce(groupResult());
+    renderSearch("/search?q=冰樱&type=user", true);
+    fireEvent.click(screen.getByRole("tab", { name: "群聊" }));
+    await screen.findByText("群聊首屏失败");
+    await act(async () => previous.resolve(resultFor("冰樱")));
+    expect(screen.queryByText("小樱")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试搜索" }));
+    await screen.findByRole("button", { name: /冰樱研究所/ });
+    expect(searchPages).toHaveBeenLastCalledWith({ q: "冰樱", types: ["group"], limit: 20 });
+    expect(screen.getByRole("tab", { name: "群聊" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("成员事件继续自动刷新当前分类，并使其他已缓存分类在返回时自动刷新", async () => {
+    const before = groupResult();
+    before.groups.items[0].is_member = false;
+    const after = groupResult();
+    after.groups.items[0].is_member = true;
+    vi.mocked(searchPages).mockResolvedValueOnce(before).mockResolvedValueOnce({ users: resultFor("").users })
+      .mockResolvedValueOnce({ users: resultFor("").users }).mockResolvedValueOnce(after);
+    renderSearch("/search?q=冰樱&type=group", true);
+    await screen.findByRole("button", { name: /冰樱研究所 申请入群/ });
+    fireEvent.click(screen.getByRole("tab", { name: "用户" }));
+    await screen.findByText("小樱");
+    act(() => searchWS.handler?.({ type: "group.joined", conversation: { id: "g1" } }));
+    await waitFor(() => expect(searchPages).toHaveBeenCalledTimes(3));
+    fireEvent.click(screen.getByRole("tab", { name: "群聊" }));
+    await screen.findByRole("button", { name: /冰樱研究所 已加入/ });
+    expect(searchPages).toHaveBeenCalledTimes(4);
+    expect(searchPages).toHaveBeenLastCalledWith({ q: "冰樱", types: ["group"], limit: 20 });
+    expect(screen.queryByRole("button", { name: /已更新|重新搜索/ })).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])("筛选键盘方向与布局一致并保留焦点（narrow=%s）", async (narrow) => {
+    renderSearch("/search", narrow);
+    const all = screen.getByRole("tab", { name: "全部" });
+    expect(screen.getByRole("tablist", { name: "搜索分类" })).toHaveAttribute("aria-orientation", narrow ? "horizontal" : "vertical");
+    all.focus();
+    fireEvent.keyDown(all, { key: narrow ? "ArrowRight" : "ArrowDown" });
+    const user = screen.getByRole("tab", { name: "用户" });
+    expect(user).toHaveFocus();
+    expect(user).toHaveAttribute("aria-selected", "true");
+    expect(user).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(user, { key: "End" });
+    expect(screen.getByRole("tab", { name: "桌游室" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "桌游室" }), { key: "Home" });
+    expect(all).toHaveFocus();
+    expect(all).toHaveAttribute("aria-selected", "true");
+    expect(searchPages).not.toHaveBeenCalled();
+  });
+
   it("群目录未加载该群时仍按服务端is_member显示已加入并直接进群", async () => {
     const result = groupResult("application");
     result.groups.items[0].is_member = true;
@@ -159,12 +262,14 @@ describe("搜索分组游标分页", () => {
     const pending = deferred<SearchPageResults>();
     const response = groupResult("application");
     response.groups.items[0].is_member = false;
-    vi.mocked(searchPages).mockReturnValueOnce(pending.promise);
+    const joined = groupResult("application");
+    joined.groups.items[0].is_member = true;
+    vi.mocked(searchPages).mockReturnValueOnce(pending.promise).mockResolvedValueOnce(joined).mockResolvedValueOnce(response);
     renderSearchControls();
     act(() => searchWS.handler?.({ type: "group.joined", conversation: { id: "g1" } }));
     await act(async () => pending.resolve(response));
     expect(screen.getByRole("button", { name: /冰樱研究所 已加入/ })).toBeInTheDocument();
-    act(() => searchWS.handler?.({ type: "group.member.left", data: { conversation_id: "g1", member_id: "u1" } }));
+    await act(async () => searchWS.handler?.({ type: "group.member.left", data: { conversation_id: "g1", member_id: "u1" } }));
     expect(screen.getByRole("button", { name: /冰樱研究所 申请入群/ })).toBeInTheDocument();
   });
   it("各组独立请求自己的cursor，追加去重且其他组和原DOM保持", async () => {
@@ -177,7 +282,7 @@ describe("搜索分组游标分页", () => {
     const { container } = renderSearchControls();
     const retained = await screen.findByRole("button", { name: "小樱" });
     const retainedGroup = screen.getByRole("button", { name: /冰樱研究所/ });
-    const scroll = container.querySelector<HTMLElement>(".search-page")!;
+    const scroll = container.querySelector<HTMLElement>(".search-content")!;
     scroll.scrollTop = 330;
     fireEvent.click(screen.getByRole("button", { name: "加载更多用户" }));
     expect(screen.getByRole("button", { name: "加载更多群聊" })).not.toBeDisabled();
@@ -273,7 +378,7 @@ describe("搜索分组游标分页", () => {
     fireEvent.click(screen.getByRole("button", { name: "加载更多用户" }));
     await screen.findByText("第二页用户");
     expect(animated).toHaveLength(3);
-    const scroll = container.querySelector<HTMLElement>(".search-page")!;
+    const scroll = container.querySelector<HTMLElement>(".search-content")!;
     scroll.scrollTop = 420;
     fireEvent.scroll(scroll);
     fireEvent.click(screen.getByRole("button", { name: "打开详情" }));
@@ -281,7 +386,7 @@ describe("搜索分组游标分页", () => {
     fireEvent.click(screen.getByRole("button", { name: "返回搜索" }));
     await screen.findByText("第二页用户");
     expect(searchPages).toHaveBeenCalledTimes(2);
-    expect(container.querySelector<HTMLElement>(".search-page")!.scrollTop).toBe(420);
+    expect(container.querySelector<HTMLElement>(".search-content")!.scrollTop).toBe(420);
     expect(animated).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "加载更多用户" }));
     await screen.findByText("第三页用户");

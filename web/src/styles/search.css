@@ -6,14 +6,7 @@
 
 /* ================= 搜索页 ================= */
 
-.search-page {
-  height: 100%;
-  min-width: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 68px;
-}
+/* Page/filter/scroll geometry is shared with favorites in directory-filters.css. */
 
 .search-history {
   flex: none;
@@ -73,6 +66,16 @@
 }
 
 .search-group { min-width: 0; }
+
+/* 分组标题只用于「全部」视图标注每块内容；单类视图左侧选项卡已标注，不重复 */
+.search-content:not([data-search-filter="all"]) .search-group-head { display: none; }
+
+/* 搜索分组内分页 footer 紧凑化：去掉 80px 防跳预留高度，按钮贴在卡片正下方
+   （组间呼吸由 .search-results 的 gap 承担；帖子流等其它使用处不受影响） */
+.search-group .stable-pagination-footer {
+  min-height: 0;
+  padding: var(--sp-2) 0 0;
+}
 
 .search-group-head {
   display: flex;
@@ -485,17 +488,6 @@
 }
 
 @media (min-width: 769px) {
-  .search-page {
-    padding: var(--sp-4) 0 var(--sp-8);
-  }
-
-  .search-page > :is(.search-history, .search-results, .search-loading, .search-error, .search-empty) {
-    width: 100%;
-    max-width: 680px;
-    margin-inline: auto;
-    flex-shrink: 0;
-  }
-
   .search-page .search-row {
     min-height: 64px;
     min-width: 0;
@@ -503,21 +495,16 @@
   }
 
   .search-page .search-row > .search-row-title { flex: 1; }
-  .search-page .search-group-head { margin-bottom: var(--sp-3); }
+  .search-page .search-group-head { margin-bottom: var(--sp-2); }
   .search-page .search-group-title { font-size: 14px; }
 }
 
 @media (min-width: 1025px) {
-  .search-page > :is(.search-history, .search-results, .search-loading, .search-error, .search-empty) {
-    max-width: 1200px;
-    padding-left: var(--sp-6);
-    padding-right: var(--sp-6);
-  }
-
   .search-results {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
-    gap: var(--sp-6);
+    /* 行距收紧（组间主要靠标题与卡片自身节奏），列距保持宽松 */
+    gap: var(--sp-4) var(--sp-6);
   }
 }

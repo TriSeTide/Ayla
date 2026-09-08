@@ -268,85 +268,11 @@
   }
 }
 
-/* ================= 认证页 ================= */
-/* 居中单卡悬浮极光上，一屏内蓝粉双系并置（design.md §8 Do） */
-
-.auth-page {
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  padding: var(--sp-6);
-}
-
-.auth-card {
-  width: min(400px, 100%);
-  padding: var(--sp-8);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-  background: var(--glass-bg-strong);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-panel);
-  box-shadow: var(--glass-shadow-modal);
-}
-
-.auth-brand {
-  font-family: var(--font-display);
-  font-size: 40px;
-  font-weight: 600;
-  letter-spacing: -0.5px;
-  line-height: 1.15;
-  text-align: center;
-  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.auth-subtitle {
-  text-align: center;
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-top: calc(var(--sp-3) * -1);
-}
-
-.auth-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-
-.auth-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
 /* 错误紧贴字段下方（design.md §4 Inputs / ui-ux-pro-max §8） */
 .field-error {
   font-size: 13px;
   font-weight: 400;
   color: var(--destructive);
-}
-
-.auth-error {
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-input);
-  background: rgba(214, 77, 110, 0.1);
-  border: 1px solid rgba(214, 77, 110, 0.35);
-  color: var(--destructive);
-  font-size: 13px;
-}
-
-.auth-switch {
-  text-align: center;
-  font-size: 14px;
-  color: var(--text-secondary);
 }
 
 /* ================= 头像 · 在线光环（签名元素） ================= */

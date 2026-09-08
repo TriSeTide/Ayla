@@ -17,6 +17,7 @@ import { listPosts } from "./api/posts";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
+import "./styles/auth.css";
 import "./styles/shell.css";
 import "./styles/home.css";
 import "./styles/group.css";

@@ -145,21 +145,17 @@ export function ProfilePage() {
     <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
       <div className="profile-page profile-page-split">
       <div className="profile-column">
-        <div className="glass-card profile-topbar">
-          <button
-            type="button"
-            className="icon-btn-40"
-            onClick={() => navigate(-1)}
-            aria-label="返回"
-          >
-            <IconBack width={20} height={20} />
-          </button>
-          <span className="profile-topbar-title">个人主页</span>
-        </div>
-
         <div className="profile-side">
         <div className="solid-card profile-card">
           <div className="profile-identity">
+            <button
+              type="button"
+              className="icon-btn-40 profile-card-back"
+              onClick={() => navigate(-1)}
+              aria-label="返回"
+            >
+              <IconBack width={20} height={20} />
+            </button>
             <div className="profile-avatar-block">
               <Avatar
                 label={displayName}

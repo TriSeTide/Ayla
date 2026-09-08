@@ -46,6 +46,7 @@ function ScopedDanmakuInput({
   const busy = useRef(false);
   const mounted = useRef(true);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   useLayoutEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -123,21 +124,24 @@ function ScopedDanmakuInput({
         </div>
       )}
       <div className="danmaku-input-row">
-        <label className="danmaku-image-btn" aria-label="发送弹幕图片">
+        <button type="button" className="btn btn-ghost danmaku-image-btn"
+          aria-label="发送弹幕图片" title="发送弹幕图片" disabled={disabled}
+          onClick={() => imageInputRef.current?.click()}>
           <IconImage width={17} height={17} />
-          <input
-            type="file"
-            accept="image/*"
-            hidden
-            disabled={disabled}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              await sendImage({ file, content: text, revision: revision.current });
-            }}
-          />
-        </label>
+        </button>
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          disabled={disabled}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            await sendImage({ file, content: text, revision: revision.current });
+          }}
+        />
         <input
           ref={inputRef}
           className="danmaku-input"
@@ -153,7 +157,7 @@ function ScopedDanmakuInput({
         />
         <button
           type="button"
-          className="btn btn-glow danmaku-send-btn"
+          className="btn btn-primary danmaku-send-btn"
           disabled={disabled || !text.trim()}
           onClick={() => void submit()}
         >
