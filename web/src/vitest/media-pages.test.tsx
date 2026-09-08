@@ -83,6 +83,24 @@ describe("visible member pages", () => {
     expect(Object.keys(useVoiceStore.getState().members)).toHaveLength(23);
   });
 
+  it("keeps the self row visible when the first page omits it (≥20 members or join race)", async () => {
+    const runtimeMembers = Array.from({ length: 23 }, (_, index) => ({ ...member(index + 1), muted: false, volume: 70, locallyMuted: false, audioLevel: 0 }));
+    // 自己也在频道里（store 对账含自己，joined_at 最新排最后）
+    runtimeMembers.push({ ...member(99), user_id: "me", muted: false, volume: 100, locallyMuted: false, audioLevel: 0 });
+    useVoiceStore.getState().enterChannel("v1", runtimeMembers);
+    // 第一页不含自己（自己排最后）；强制刷新后第一页仍不含自己（≥20 人场景）
+    vi.mocked(voiceApi.listVoiceChannelMembersPage)
+      .mockResolvedValueOnce(paged([member(1)], "next", 24))
+      .mockResolvedValueOnce(paged([member(1)], "next", 24));
+    render(<VoiceChannelPanel channelId="v1" channelName="room" ownerId="me" livekit="connected" wsConnection="online" elysiaProfile={null}
+      onToggleMic={vi.fn()} onLeave={vi.fn()} onRejoin={vi.fn()} onVolumeChange={vi.fn()} onLocalVolumeChange={vi.fn()} onToggleMemberMuted={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("u1:70")).toBeInTheDocument());
+    // 自己不在第一页也必须可见（渲染兜底置顶）
+    expect(screen.getByText("me:100")).toBeInTheDocument();
+    // 进入房间后强制刷新一次成员列表
+    await waitFor(() => expect(voiceApi.listVoiceChannelMembersPage).toHaveBeenCalledTimes(2));
+  });
+
   it("game ownership actions can address a member outside the embedded preview", async () => {
     const room = { id: "g1", name: "game", is_owner: true, owner_id: "me", owner: { username: "owner" },
       is_member: true, member_count: 23, members: [], created_at: "" } as unknown as GameRoom;

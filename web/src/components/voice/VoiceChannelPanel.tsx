@@ -82,6 +82,18 @@ export function VoiceChannelPanel({
     muted: false, volume: 100, locallyMuted: false, audioLevel: 0,
     ...(currentChannelId === channelId ? members[member.user_id] : {}),
   }));
+  // 自己兜底：分页第一页可能不含自己（进入时 join 未完成 / 成员 ≥20 人时自己按
+  // joined_at 升序排最后），只要 store 对账里有自己就保证渲染（置顶），
+  // 避免"进去了不显示自己"。
+  const selfId = currentUser?.id;
+  const selfMember = selfId != null ? members[selfId] : undefined;
+  const mergedList = selfMember && !list.some((m) => m.user_id === selfId)
+    ? [selfMember, ...list]
+    : list;
+  // 进入房间后强制刷新一次成员列表：面板可能在 join 完成前挂载，第一页不含自己；
+  // 渲染层已兜底自己可见，这里纠正分页数据本身（joined 帧若在订阅前广播则不会触发 invalidate）。
+  const selfInStore = useVoiceStore((s) => (selfId != null ? s.members[selfId] != null : false));
+  const refreshedChannelRef = useRef<string | null>(null);
   const elysiaUserId = elysiaProfile?.user.id ?? null;
   const isOwner = ownerId != null && ownerId === currentUser?.id;
   const [actionError, setActionError] = useState<string | null>(null);
@@ -99,6 +111,14 @@ export function VoiceChannelPanel({
     const revision = memberRevision.current;
     if (await pages.refreshPage() && memberRevision.current === revision) setInvalidated(false);
   }, [pages.refreshPage]);
+  // 进入房间后强制刷新一次成员列表（refresh 定义之后挂 effect，避免 TDZ）：
+  // 面板可能在 join 完成前挂载，第一页不含自己；渲染层已兜底自己可见，
+  // 这里纠正分页数据本身（joined 帧若在订阅前广播则不会触发 invalidate）。
+  useEffect(() => {
+    if (!channelId || refreshedChannelRef.current === channelId || !pages.loaded || !selfInStore) return;
+    refreshedChannelRef.current = channelId;
+    void refresh();
+  }, [channelId, pages.loaded, selfInStore, refresh]);
   const memberAction = async (userId: string, action: "kick" | "transfer") => {
     if (!channelId || busyUserId) return;
     setBusyUserId(userId);
@@ -122,10 +142,10 @@ export function VoiceChannelPanel({
         <span className="voice-panel-count">{currentChannelId === channelId ? Object.keys(members).length : pages.total} 人</span>
       </header>
       <div className="voice-member-list">
-        {list.length === 0 ? (
+        {mergedList.length === 0 ? (
           !pages.loading && !pages.error && <div className="voice-list-empty">当前还没有成员</div>
         ) : (
-          list.map((m) => {
+          mergedList.map((m) => {
             const isElysia = elysiaUserId != null && m.user_id === elysiaUserId;
             return (
               <Fragment key={m.user_id}>
