@@ -10,9 +10,11 @@ import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { DirectoryFilters } from "../components/DirectoryFilters";
+import { FavoriteResultCard } from "../components/cards/DirectoryResultCards";
 import { useAuthStore } from "../stores/auth";
 import { usePostsStore } from "../stores/posts";
 import { chatWS } from "../ws/chat";
+import { IconHeart } from "../components/icons";
 
 const FILTERS: Array<{ key: FavoriteTargetType | "all"; label: string }> = [
   { key: "all", label: "全部" },
@@ -24,27 +26,7 @@ const FILTERS: Array<{ key: FavoriteTargetType | "all"; label: string }> = [
   { key: "group", label: "群" },
 ];
 
-const TYPE_LABEL: Record<FavoriteTargetType, string> = {
-  message: "消息",
-  post: "帖子",
-  live: "直播间",
-  voice: "语音房",
-  game: "桌游房",
-  group: "群",
-};
-
-type FavoriteTarget = {
-  title?: string;
-  body?: string;
-  name?: string;
-  content?: string;
-  conversation_id?: string;
-};
-
-function targetText(favorite: Favorite): string {
-  const target = favorite.target as FavoriteTarget | null;
-  return target?.title || target?.name || target?.content || target?.body || TYPE_LABEL[favorite.target_type];
-}
+type FavoriteTarget = { conversation_id?: string };
 
 function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite) {
   const target = favorite.target as FavoriteTarget | null;
@@ -81,8 +63,7 @@ function FavoritesList({ favorites, isNarrow, filter, suppressEntry, onOpen, onR
   onOpen: (favorite: Favorite) => void;
   onRemove: (favorite: Favorite) => void;
 }) {
-  const compact = useMediaQuery("(max-width: 1024px)");
-  const singleColumn = isNarrow || compact;
+  const singleColumn = isNarrow;
   const listRef = useRef<HTMLDivElement>(null);
   useListEntryMotion(listRef, ".favorite-item", suppressEntry);
   const { columns, columnRefs } = useMasonryColumns(
@@ -97,15 +78,12 @@ function FavoritesList({ favorites, isNarrow, filter, suppressEntry, onOpen, onR
       {columns.map((column, columnIndex) => (
         <div key={columnIndex} className="favorites-masonry-col" ref={columnRefs[columnIndex]}>
           {column.map((favorite) => (
-            <div key={favorite.id} className="favorite-item" data-favorite-id={favorite.id}>
-              <button type="button" className="favorite-item-main" disabled={favorite.target == null} onClick={() => onOpen(favorite)}>
-                <span className="favorite-item-type">{TYPE_LABEL[favorite.target_type]}</span>
-                <span className="favorite-item-title">{favorite.target == null ? "内容不可用" : targetText(favorite)}</span>
-                {favorite.target_type === "post" && (favorite.target as FavoriteTarget | null)?.body && (
-                  <span className="favorite-item-body">{(favorite.target as FavoriteTarget).body}</span>
-                )}
-              </button>
-              <button type="button" className="msg-action-btn" onClick={() => onRemove(favorite)}>取消收藏</button>
+            <div key={favorite.id} className="favorite-item typed-result-card" data-favorite-id={favorite.id} data-result-type={favorite.target_type}>
+              <FavoriteResultCard favorite={favorite} onOpen={() => onOpen(favorite)} action={
+                <button type="button" className="msg-action-btn typed-card-remove" onClick={(event) => {
+                  event.stopPropagation(); onRemove(favorite);
+                }}>取消收藏</button>
+              } />
             </div>
           ))}
         </div>
@@ -299,16 +277,14 @@ export function FavoritesPage() {
   };
   return <FullScreenSwipeBack onBack={() => navigate(-1)} enabled={isNarrow}>
     <div className="favorites-page directory-page">
-      <div className="favorites-topbar">
-        <button type="button" className="icon-btn-40" onClick={() => navigate(-1)} aria-label="返回"><IconBack width={20} height={20} /></button>
-        <h2 className="favorites-title">我的收藏</h2>
-      </div>
       <div className="directory-body">
         <DirectoryFilters id={selectionId} label="收藏分类" options={FILTERS} value={filter} narrow={isNarrow}
           className="favorites-filters" buttonClassName="favorites-filter" onChange={(next) => {
             saveScrollPosition(scope, pageRef.current);
             setParams(next === "all" ? {} : { type: next }, { replace: true });
-          }} />
+          }}
+          leading={<button type="button" className="icon-btn-40 directory-filter-back" onClick={() => navigate(-1)} aria-label="返回"><IconBack width={20} height={20} /></button>}
+          decor={<IconHeart width={52} height={52} className="directory-filter-decor favorites-filter-decor" role="presentation" aria-hidden="true" />} />
         <FavoriteResults key={scope} scope={scope} filter={filter} isNarrow={isNarrow} pageRef={pageRef}
           filterId={selectionId} onOpen={onOpen} />
       </div>

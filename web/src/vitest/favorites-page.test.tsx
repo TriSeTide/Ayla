@@ -165,7 +165,7 @@ describe("收藏真实分页", () => {
       .mockResolvedValueOnce(favoritePage([b, c]));
     usePostsStore.getState().setFavorite("outside-page", 888);
     const { container } = renderPage();
-    const retained = await screen.findByRole("button", { name: /第一页B/ });
+    const retained = (await screen.findByText("第一页B")).closest(".favorite-item")!.querySelector("button")!;
     retained.focus();
     const scroll = container.querySelector<HTMLElement>(".favorites-content")!;
     scroll.scrollTop = 440;
@@ -173,7 +173,7 @@ describe("收藏真实分页", () => {
     await screen.findByText("第二页C");
     expect(favoritesApi.listFavoritesPage).toHaveBeenLastCalledWith({ type: undefined, limit: 20, cursor: "cursor-one" });
     expect(container.querySelectorAll(".favorite-item")).toHaveLength(3);
-    expect(screen.getByRole("button", { name: /第一页B/ })).toBe(retained);
+    expect(screen.getByText("第一页B").closest(".favorite-item")!.querySelector("button")).toBe(retained);
     expect(retained).toHaveFocus();
     expect(scroll.scrollTop).toBe(440);
     expect(usePostsStore.getState().favoriteByPostId["outside-page"]).toBe(888);
@@ -306,17 +306,17 @@ describe("FavoritesPage", () => {
     const { container } = renderPage();
     await screen.findByText("帖子A");
     expect(columnIds(container)).toEqual([["1", "3"], ["2", "4"]]);
-    const retained = screen.getByText("帖子B").closest("button")!;
+    const retained = screen.getByText("帖子B").closest(".favorite-item")!.querySelector("button")!;
     retained.focus();
     const removal = container.querySelector('[data-favorite-id="1"] .msg-action-btn')!;
     fireEvent.click(removal);
     await waitFor(() => expect(screen.queryByText("帖子A")).not.toBeInTheDocument());
     expect(columnIds(container)).toEqual([["3"], ["2", "4"]]);
-    expect(screen.getByText("帖子B").closest("button")).toBe(retained);
+    expect(screen.getByText("帖子B").closest(".favorite-item")!.querySelector("button")).toBe(retained);
     expect(retained).toHaveFocus();
   });
 
-  it("1024/1025 断点往返保留单列 API 顺序，宽屏恢复各自列归属", async () => {
+  it("1024/1025 断点往返保持两列瀑布列归属（宽屏统一两列）", async () => {
     const setWidth = responsiveViewport(1024);
     vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
       fav(1, "post", "10", { title: "帖子A" }),
@@ -325,11 +325,11 @@ describe("FavoritesPage", () => {
     ]));
     const { container } = renderPage();
     await screen.findByText("帖子A");
-    expect(columnIds(container)).toEqual([["1", "2", "3"]]);
+    expect(columnIds(container)).toEqual([["1", "3"], ["2"]]);
     setWidth(1025);
     expect(columnIds(container)).toEqual([["1", "3"], ["2"]]);
     setWidth(1024);
-    expect(columnIds(container)).toEqual([["1", "2", "3"]]);
+    expect(columnIds(container)).toEqual([["1", "3"], ["2"]]);
     expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(1);
   });
 
