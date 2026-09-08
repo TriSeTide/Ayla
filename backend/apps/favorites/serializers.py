@@ -2,46 +2,29 @@
 收藏序列化（S6）。
 
 FavoriteSerializer 输出 id/user_id/target_type/target_id/created_at，
-并附带可选 `target` 摘要 dict（前端直接展示收藏卡片）：
-- 目标仍存在且当前用户可访问 → 返回摘要；
+并附带可选 `target` 安全卡片 dict（消息仍为原摘要）：
+- 目标仍存在且当前用户可访问 → 返回公开卡片字段；
 - 目标已被删除 → `target` 为 null，收藏记录本身仍返回（不报错）。
 """
 from rest_framework import serializers
 
 from .models import Favorite
+from .target_cards import build_target_cards, target_key
 
 
-def _target_summary(target_type: str, target) -> dict | None:
-    """按 target_type 生成目标摘要 dict；目标不存在返回 None。"""
-    if target is None:
-        return None
-    if target_type == Favorite.TARGET_POST:
-        return {
-            "id": str(target.id),
-            "title": target.title or (target.body or "")[:30],
-            "body": (target.body or "")[:120],
-        }
-    if target_type == Favorite.TARGET_MESSAGE:
-        return {
-            "id": str(target.id),
-            "conversation_id": str(target.conversation_id),
-            "type": target.type,
-            "content": (target.content or "")[:120],
-            "created_at": target.created_at.isoformat(),
-        }
-    if target_type == Favorite.TARGET_LIVE:
-        return {"id": str(target.id), "title": target.title}
-    if target_type == Favorite.TARGET_VOICE:
-        return {"id": str(target.id), "name": target.name}
-    if target_type == Favorite.TARGET_GAME:
-        return {"id": str(target.id), "name": target.name}
-    if target_type == Favorite.TARGET_GROUP:
-        return {"id": str(target.id), "title": target.title}
-    return None
+class FavoriteListSerializer(serializers.ListSerializer):
+    """Share one permission-filtered target batch across the current page."""
+
+    def to_representation(self, data):
+        rows = list(data)
+        self.context["favorite_target_cards"] = build_target_cards(
+            rows, self.context.get("request"),
+        )
+        return super().to_representation(rows)
 
 
 class FavoriteSerializer(serializers.ModelSerializer):
-    """收藏记录对外序列化（含 target 摘要）。"""
+    """收藏记录对外序列化（含本次权限过滤后的 target 卡片）。"""
 
     id = serializers.IntegerField(read_only=True)
     user_id = serializers.CharField(read_only=True)
@@ -53,27 +36,14 @@ class FavoriteSerializer(serializers.ModelSerializer):
         model = Favorite
         fields = ["id", "user_id", "target_type", "target_id", "target", "created_at"]
         read_only_fields = fields
+        list_serializer_class = FavoriteListSerializer
 
     def get_target(self, obj) -> dict | None:
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
             return None
-        from .services import load_target
-
-        target = load_target(obj.target_type, obj.target_id)
-        if obj.target_type == Favorite.TARGET_MESSAGE and target is not None:
-            from apps.chat.models import ConversationMember
-
-            if not ConversationMember.objects.filter(
-                conversation_id=target.conversation_id, user=user
-            ).exists():
-                return None
-        elif target is not None and obj.target_type != Favorite.TARGET_GROUP:
-            from apps.common.visibility import can_view
-
-            # Keeping a private bookmark does not preserve access to its target.
-            # Recheck current access on every legacy response and cursor page.
-            if not can_view(user, target):
-                return None
-        return _target_summary(obj.target_type, target)
+        cards = self.context.get("favorite_target_cards")
+        if cards is None:
+            cards = build_target_cards([obj], request)
+        return cards.get(target_key(obj.target_type, obj.target_id))
