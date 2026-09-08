@@ -1,6 +1,6 @@
 """S5 聚合搜索 REST 契约测试。
 
-覆盖：五类对象分组返回、可见性过滤（friends 帖子/直播间/桌游室对路人不可见）、
+覆盖：六类对象分组返回、可见性过滤（friends 内容/房间对路人不可见）、
 空结果、空关键字 400、每组截断（limit）、types 子集。
 """
 import pytest
@@ -11,6 +11,7 @@ from apps.chat.models import Conversation, ConversationMember
 from apps.common.visibility import Visibility
 from apps.live.models import LiveChannel
 from apps.posts.models import Post
+from apps.voice.models import VoiceChannel
 
 SEARCH_URL = "/api/v1/search/"
 
@@ -57,8 +58,9 @@ class TestAggregateSearch:
         by_id = {item["id"]: item for item in result["items"]}
         assert by_id[str(pictured.id)]["avatar"] == avatar
         assert by_id[str(empty.id)]["avatar"] == ""
-        assert set(by_id[str(pictured.id)]) == {"id", "type", "title", "avatar", "join_policy", "created_at", "is_member"}
+        assert set(by_id[str(pictured.id)]) == {"id", "type", "title", "avatar", "join_policy", "created_at", "is_member", "member_count"}
         assert by_id[str(pictured.id)]["is_member"] is False
+        assert by_id[str(pictured.id)]["member_count"] == 1
         assert not ConversationMember.objects.filter(user=viewer, conversation__in=[pictured, empty]).exists()
 
     def test_all_types_grouped(self, auth_client, user_factory):
@@ -69,12 +71,13 @@ class TestAggregateSearch:
         _make_group(owner, title="爱丽丝后援会")
         _make_post(owner, "爱丽丝的帖子", visibility=Visibility.PUBLIC)
         _make_live(owner, "爱丽丝直播", visibility=Visibility.PUBLIC)
+        VoiceChannel.objects.create(owner=owner, name="爱丽丝语音", room_name="search-all-voice")
         _make_room(owner, "爱丽丝桌游局", visibility=Visibility.PUBLIC)
 
         resp = client.get(SEARCH_URL, {"q": "爱"})
         assert resp.status_code == 200, resp.content
         data = resp.json()
-        assert set(data.keys()) == {"users", "groups", "posts", "lives", "games"}
+        assert set(data.keys()) == {"users", "groups", "posts", "lives", "voices", "games"}
         assert data["users"]["total"] == 1
         assert data["users"]["items"][0]["nickname"] == "爱丽丝"
         assert data["groups"]["total"] == 1
@@ -85,6 +88,8 @@ class TestAggregateSearch:
         assert data["posts"]["items"][0]["body"] == "爱丽丝的帖子"
         assert data["lives"]["total"] == 1
         assert data["lives"]["items"][0]["title"] == "爱丽丝直播"
+        assert data["voices"]["total"] == 1
+        assert data["voices"]["items"][0]["name"] == "爱丽丝语音"
         assert data["games"]["total"] == 1
         assert data["games"]["items"][0]["name"] == "爱丽丝桌游局"
 
@@ -122,7 +127,7 @@ class TestAggregateSearch:
         resp = client.get(SEARCH_URL, {"q": "不存在的关键字xyz"})
         assert resp.status_code == 200
         data = resp.json()
-        for key in ("users", "groups", "posts", "lives", "games"):
+        for key in ("users", "groups", "posts", "lives", "voices", "games"):
             assert data[key] == {"items": [], "total": 0}
 
     def test_empty_q_400(self, auth_client):

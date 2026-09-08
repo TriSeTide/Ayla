@@ -11,10 +11,11 @@ from apps.chat.models import Conversation, ConversationMember
 from apps.common.visibility import Visibility
 from apps.live.models import LiveChannel
 from apps.posts.models import Post
+from apps.voice.models import VoiceChannel
 
 URL = "/api/v1/search/"
 TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
-KINDS = {"user": "users", "group": "groups", "post": "posts", "live": "lives", "game": "games"}
+KINDS = {"user": "users", "group": "groups", "post": "posts", "live": "lives", "voice": "voices", "game": "games"}
 
 
 def make_rows(kind, owner, user_factory, count=5):
@@ -22,15 +23,17 @@ def make_rows(kind, owner, user_factory, count=5):
         rows = [user_factory(username=f"cursor_find_{index}") for index in range(count)]
         get_user_model().objects.filter(pk__in=[row.pk for row in rows]).update(date_joined=TIME)
         return rows
-    models = {"group": Conversation, "post": Post, "live": LiveChannel, "game": GameRoom}
+    models = {"group": Conversation, "post": Post, "live": LiveChannel, "voice": VoiceChannel, "game": GameRoom}
     fields = {
         "group": {"type": "group", "title": "cursor_find"},
         "post": {"body": "cursor_find", "visibility": Visibility.PUBLIC},
         "live": {"title": "cursor_find", "visibility": Visibility.PUBLIC},
+        "voice": {"name": "cursor_find", "visibility": Visibility.PUBLIC},
         "game": {"name": "cursor_find", "visibility": Visibility.PUBLIC},
     }
     rows = [models[kind].objects.create(owner=owner, **fields[kind], **(
-        {"stream_key": f"cursor-stream-{index}"} if kind == "live" else {}
+        {"stream_key": f"cursor-stream-{index}"} if kind == "live" else
+        {"room_name": f"cursor-voice-{index}"} if kind == "voice" else {}
     )) for index in range(count)]
     models[kind].objects.filter(pk__in=[row.pk for row in rows]).update(created_at=TIME)
     return rows
@@ -75,7 +78,7 @@ class TestSearchCursor:
         assert all(set(group) == {"items", "total"} for group in legacy.values())
         first = client.get(URL, {"q": "cursor_find", "pagination": "cursor", "limit": 2}).json()
         assert all(group["has_more"] and len(group["items"]) == 2 for group in first.values())
-        assert len({group["next_cursor"] for group in first.values()}) == 5
+        assert len({group["next_cursor"] for group in first.values()}) == 6
 
     def test_cursor_binding_and_malformed_values_fail_explicitly(self, auth_client, user_factory):
         client, user = auth_client(username="search_bound")

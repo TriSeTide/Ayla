@@ -3,7 +3,7 @@ S5 聚合搜索视图 —— `GET /api/v1/search/`。
 
 查询参数：
 - `q`：关键字，必填；strip 后为空 → 400 `{"detail": "q 不能为空"}`；
-- `types`：逗号分隔类型子集（user/group/post/live/game），缺省=全部，非法忽略；
+- `types`：逗号分隔类型子集（user/group/post/live/voice/game），缺省=全部，非法忽略；
 - `limit`：每组截断条数，默认 10，上限 50，下限 1。
 - `pagination=cursor`：显式启用每组 SQL keyset 分页；`cursor` 续页须指定单一 `types`。
 
@@ -34,7 +34,7 @@ class SearchView(APIView):
         limit = services.parse_limit(request.query_params.get("limit"))
 
         payload: dict = {}
-        # 顺序与契约一致：users/groups/posts/lives/games，仅输出被请求的类型
+        # 顺序与契约一致：users/groups/posts/lives/voices/games，仅输出被请求的类型
         for type_name in types:
             if type_name == services.TYPE_USERS:
                 payload["users"] = services.search_users(q, limit, request, page)
@@ -44,6 +44,8 @@ class SearchView(APIView):
                 payload["posts"] = services.search_posts(q, limit, request, page)
             elif type_name == services.TYPE_LIVES:
                 payload["lives"] = services.search_lives(q, limit, request, page)
+            elif type_name == services.TYPE_VOICES:
+                payload["voices"] = services.search_voices(q, limit, request, page)
             elif type_name == services.TYPE_GAMES:
                 payload["games"] = services.search_games(q, limit, request, page)
         return Response(payload)

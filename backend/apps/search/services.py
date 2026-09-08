@@ -2,9 +2,9 @@
 S5 聚合搜索 —— 只读聚合层（无模型、无迁移）。
 
 设计边界（工程约束，AGENTS.md §2.2 / §3）：
-- **只读聚合**：不建 FTS、不引搜索引擎、不建索引；五类查询各自复用现有 queryset 与
+- **只读聚合**：不建 FTS、不引搜索引擎、不建索引；六类查询各自复用现有 queryset 与
   输出 serializer，`q` 用 `icontains` 做内存外的数据库 LIKE 过滤（数据量小，天然满足）。
-- **可见性过滤**：post/live/game 走 `apps/common/visibility.py` 的 `visible_queryset`，
+- **可见性过滤**：post/live/voice/game 走 `apps/common/visibility.py` 的 `visible_queryset`，
   与列表接口同语义（public 全登录 / friends 好友 / group 群员）；user/group 不涉及可见性
   （user 为公开资料，group 无 visibility 字段，见 `search_groups` 的取舍注释）。
 - **有界结果 + total**：旧调用保持每组截断；显式游标模式由 pagination.py 在 SQL 中
@@ -14,7 +14,7 @@ S5 聚合搜索 —— 只读聚合层（无模型、无迁移）。
   增长需在调用方加超时预算与并发降级。
 """
 from django.contrib.auth import get_user_model
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Q
 
 from apps.accounts.serializers import UserPublicSerializer
 from apps.boardgame.models import GameRoom
@@ -25,6 +25,8 @@ from apps.live.models import LiveChannel
 from apps.live.serializers import LiveChannelSerializer
 from apps.posts.models import Post
 from apps.posts.serializers import PostSerializer
+from apps.voice.models import VoiceChannel, VoiceChannelMember
+from apps.voice.serializers import VoiceChannelSerializer
 
 from .pagination import SearchPageOptions, search_page
 
@@ -35,8 +37,9 @@ TYPE_USERS = "user"
 TYPE_GROUPS = "group"
 TYPE_POSTS = "post"
 TYPE_LIVES = "live"
+TYPE_VOICES = "voice"
 TYPE_GAMES = "game"
-VALID_TYPES = (TYPE_USERS, TYPE_GROUPS, TYPE_POSTS, TYPE_LIVES, TYPE_GAMES)
+VALID_TYPES = (TYPE_USERS, TYPE_GROUPS, TYPE_POSTS, TYPE_LIVES, TYPE_VOICES, TYPE_GAMES)
 
 # limit 参数边界
 DEFAULT_LIMIT = 10
@@ -98,6 +101,7 @@ def search_groups(q: str, limit: int, request, page: SearchPageOptions | None = 
         _search_is_member=Exists(ConversationMember.objects.filter(
             conversation_id=OuterRef("pk"), user=request.user,
         )),
+        _search_member_count=Count("members", distinct=True),
     )
     rows, metadata = _rows(base, q, TYPE_GROUPS, limit, request, page)
     items = [
@@ -107,6 +111,7 @@ def search_groups(q: str, limit: int, request, page: SearchPageOptions | None = 
             "title": c.title,
             "avatar": c.avatar,
             "is_member": c._search_is_member,
+            "member_count": c._search_member_count,
             "join_policy": c.join_policy,
             "created_at": c.created_at.isoformat(),
         }
@@ -156,4 +161,30 @@ def search_games(q: str, limit: int, request, page: SearchPageOptions | None = N
     items = GameRoomSerializer(
         rows, many=True, context={"request": request}
     ).data
+    return {"items": items, **metadata}
+
+
+def search_voices(q: str, limit: int, request, page: SearchPageOptions | None = None) -> dict:
+    """Visible voice rooms with current membership counts and requester presence.
+
+    Counts use the same VoiceChannelMember authority as the voice directory;
+    no LiveKit token is issued and membership is never inferred from a preview.
+    """
+    base = (
+        visible_queryset(VoiceChannel, request.user)
+        .filter(name__icontains=q)
+        .select_related("owner", "group")
+        .annotate(
+            member_count=Count("members", distinct=True),
+            _search_mine=Exists(VoiceChannelMember.objects.filter(
+                channel_id=OuterRef("pk"), user=request.user,
+            )),
+        )
+    )
+    rows, metadata = _rows(base, q, TYPE_VOICES, limit, request, page)
+    items = []
+    for channel in rows:
+        item = VoiceChannelSerializer(channel, context={"request": request}).data
+        item["mine"] = channel._search_mine
+        items.append(item)
     return {"items": items, **metadata}
