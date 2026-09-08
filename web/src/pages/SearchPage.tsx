@@ -3,7 +3,7 @@
  *
  * 顶栏复用窄屏 TopBar（variant="search"：自动聚焦 + 左返回 + 输入框，布局文档 §2.7），
  * 搜索词走 URL ?q=（与宽屏 TopNav 同一通道）；宽屏由 AppShell TopNav 承载搜索框。
- * 历史 chips（可清空）+ 六类分组结果（用户/群/帖子/直播间/桌游室/语音房）+
+ * 历史 chips（可清空）+ 六类分组结果（用户/群/帖子/直播间/语音房/桌游室）+
  * 每组独立游标续页；用户点击弹资料卡（加好友/发消息），其余跳对应界面。
  * 可见性过滤由后端完成，前端仅展示（R-S3）。
  */
@@ -453,15 +453,6 @@ export function SearchPage() {
             ))}
           </ResultGroup>
 
-          <ResultGroup title="直播间" count={results.lives?.total ?? 0} hasMore={results.lives?.has_more ?? false}
-            loading={loading || Boolean(pageStatus.lives?.loading)} error={pageStatus.lives?.error ?? null} onMore={() => void loadMore("lives")}>
-            {(results.lives?.items ?? []).map((l) => (
-              <div key={l.id} className="typed-result-card" data-result-type="live">
-                <LiveChannelCard channel={l} onEnter={() => openPath(`/live/${l.id}`)} action={null} />
-              </div>
-            ))}
-          </ResultGroup>
-
           <ResultGroup title="桌游室" count={results.games?.total ?? 0} hasMore={results.games?.has_more ?? false}
             loading={loading || Boolean(pageStatus.games?.loading)} error={pageStatus.games?.error ?? null} onMore={() => void loadMore("games")}>
             {(results.games?.items ?? []).map((g) => (
@@ -470,11 +461,20 @@ export function SearchPage() {
               </div>
             ))}
           </ResultGroup>
+
           <ResultGroup title="语音房" count={results.voices?.total ?? 0} hasMore={results.voices?.has_more ?? false}
             loading={loading || Boolean(pageStatus.voices?.loading)} error={pageStatus.voices?.error ?? null} onMore={() => void loadMore("voices")}>
             {(results.voices?.items ?? []).map((channel) => <div key={channel.id} className="typed-result-card" data-result-type="voice">
               <VoiceChannelCard channel={channel} onEnter={() => openPath(`/voice/${channel.id}`)} action={null} browsing />
             </div>)}
+          </ResultGroup>
+          <ResultGroup title="直播间" count={results.lives?.total ?? 0} hasMore={results.lives?.has_more ?? false}
+            loading={loading || Boolean(pageStatus.lives?.loading)} error={pageStatus.lives?.error ?? null} onMore={() => void loadMore("lives")}>
+            {(results.lives?.items ?? []).map((l) => (
+              <div key={l.id} className="typed-result-card" data-result-type="live">
+                <LiveChannelCard channel={l} onEnter={() => openPath(`/live/${l.id}`)} action={null} />
+              </div>
+            ))}
           </ResultGroup>
         </div>
       )}
