@@ -5,26 +5,27 @@
  * （等待中 --ice-300 底 / 对局中 --sakura-300 底）+ 人数 + 来源标识。
  * 点击进入房间（onEnter，父级 navigate 到占位界面）。
  */
-import type { CSSProperties } from "react";
-import type { GameRoom } from "../../api/types";
+import type { CSSProperties, ReactNode } from "react";
+import { cardVisibilityLabels, type GameCardData } from "../cards/cardData";
 import { FavoriteButton } from "../FavoriteButton";
 import { ScrollingText } from "../ScrollingText";
 import { ScrollingTags } from "../ScrollingTags";
 import { IconGame } from "../icons";
-import { getVisibilityLabels } from "../../utils/visibility";
 
 export function GameRoomCard({
   room,
   onEnter,
   revealDelay,
+  action,
 }: {
-  room: GameRoom;
+  room: GameCardData;
   onEnter: () => void;
   /** 逐条浮入延迟（ms）；undefined 则不挂 reveal-item（A2 扩展至桌游列表） */
   revealDelay?: number;
+  action?: ReactNode;
 }) {
   const playing = room.status === "playing";
-  const labels = getVisibilityLabels(room);
+  const labels = cardVisibilityLabels(room);
   return (
     <div
       className={`game-room-card-wrap${revealDelay != null ? " reveal-item" : ""}`}
@@ -36,16 +37,17 @@ export function GameRoomCard({
         </div>
         <div className="game-room-info">
           <ScrollingText text={room.name} className="game-room-name" />
-          <span className={`game-room-status ${playing ? "is-playing" : "is-waiting"}`}>
+          {room.status && <span className={`game-room-status ${playing ? "is-playing" : "is-waiting"}`}>
             {room.status === "playing" ? "对局中" : room.status === "ended" ? "已结束" : "等待中"}
-          </span>
+          </span>}
+          {room.owner && <span className="game-room-owner">{room.owner.nickname || room.owner.username}</span>}
           <span className="game-room-meta">
-            <span className="game-room-count">{room.member_count} 人</span>
+            {typeof room.member_count === "number" && <span className="game-room-count">{room.member_count} 人</span>}
             <ScrollingTags labels={labels} tagClassName="game-room-source" className="game-room-source-tags" />
           </span>
         </div>
       </button>
-      <FavoriteButton targetType="game" targetId={room.id} compact />
+      {action === undefined ? <FavoriteButton targetType="game" targetId={room.id} compact /> : action}
     </div>
   );
 }

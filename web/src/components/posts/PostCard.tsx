@@ -5,8 +5,8 @@
  * 图片九宫格（1 图大图 / 多图 3 列，缩略图）；底排评论数 + 收藏（激活态填 --pink-500）。
  * 点击进入帖子详情（onOpen，父级 navigate）。
  */
-import { useState } from "react";
-import type { Post } from "../../api/types";
+import { useState, type ReactNode } from "react";
+import { cardVisibilityLabels, type PostCardData } from "../cards/cardData";
 import { Avatar } from "../Avatar";
 import { IconEye, IconMessage } from "../icons";
 import { FavoriteButton } from "../FavoriteButton";
@@ -15,13 +15,13 @@ import { PostVideoCover } from "./PostVideoCover";
 import { mediaContentUrl } from "../../api/media";
 import { useAuthStore } from "../../stores/auth";
 import { usePresenceStore } from "../../stores/presence";
-import { presenceOnline, withLiveStatus } from "../../utils/displayStatus";
+import { presenceOnline, presenceStatus } from "../../utils/displayStatus";
 import { goUserProfile } from "../../utils/navigation";
-import { getVisibilityLabels } from "../../utils/visibility";
 
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return "";
     const now = new Date();
     const diff = now.getTime() - d.getTime();
     if (diff < 60_000) return "刚刚";
@@ -36,37 +36,48 @@ function formatTime(iso: string): string {
 export function PostCard({
   post,
   onOpen,
+  action,
+  previewOnly = false,
 }: {
-  post: Post;
+  post: PostCardData;
   onOpen: () => void;
+  action?: ReactNode;
+  /** Directory cards never mount a video decoder, including videos without posters. */
+  previewOnly?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const onlineUsers = usePresenceStore((s) => s.users);
   const onlineStatuses = usePresenceStore((s) => s.statuses);
   // 媒体列表（图片/视频封面统一走 thumbnail 缩略图；视频无海报帧才降级首帧预览）
-  const mediaList = post.images.filter((i) => i.media);
-  const longBody = post.body.length > 120;
+  const mediaList = (post.images ?? []).filter((i) => i.media);
+  const body = post.body ?? "";
+  const longBody = body.length > 120;
+  const author = post.author;
+  const authorName = author?.nickname || author?.username || post.author_nickname;
+  const liveAuthor = author?.id
+    ? { id: author.id, status: presenceStatus(onlineStatuses, { id: author.id, status: author.status ?? "auto" }), online: author.online ?? false }
+    : undefined;
 
-  const visibilityLabels = getVisibilityLabels(post);
+  const visibilityLabels = cardVisibilityLabels(post);
 
   return (
     <article className="post-card">
-      <button type="button" className="post-card-main" onClick={onOpen} aria-label={`查看帖子`}>
+      <div className="post-card-main" onClick={onOpen}>
         <header className="post-card-head">
-          <Avatar
-            label={post.author.nickname || post.author.username}
+          {authorName && <Avatar
+            label={authorName}
             size={36}
-            online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, post.author))}
-            imageUrl={post.author.avatar || null}
-            onClick={(e) => {
+            online={liveAuthor ? presenceOnline(onlineUsers, liveAuthor) : undefined}
+            imageUrl={author?.avatar || null}
+            onClick={author?.id ? (e) => {
               e.stopPropagation();
-              goUserProfile(currentUserId, post.author.id);
-            }}
-            ariaLabel={`查看 ${post.author.nickname || post.author.username} 的个人主页`}
-          />
-          <span className="post-card-nick">{post.author.nickname || post.author.username}</span>
-          <span className="post-card-time">{formatTime(post.created_at)}</span>
+              goUserProfile(currentUserId, author.id!);
+            } : undefined}
+            ariaLabel={`查看 ${authorName} 的个人主页`}
+          />}
+          {authorName && <span className="post-card-nick">{authorName}</span>}
+          {post.created_at && <span className="post-card-time">{formatTime(post.created_at)}</span>}
           {visibilityLabels.length > 0 && (
             <div className="post-card-tags">
               {visibilityLabels.map((label, idx) => (
@@ -76,7 +87,7 @@ export function PostCard({
           )}
         </header>
         {post.title && <h3 className="post-card-title">{post.title}</h3>}
-        <p className={`post-card-body ${expanded ? "is-expanded" : ""}`}>{post.body}</p>
+        <p className={`post-card-body ${expanded ? "is-expanded" : ""}`}>{body}</p>
         {longBody && (
           <button
             type="button"
@@ -99,7 +110,8 @@ export function PostCard({
                 // 不挂 <video> 拉流；无 thumbnail 降级首帧预览）+ 播放角标。
                 // thumbnail 是图片/视频共用的派生对象路径，绝不可当 video src
                 <div key={img.id} className="post-card-img post-card-video">
-                  <PostVideoCover media={media} className="post-card-video-el" ariaLabel="帖子视频" />
+                  {previewOnly && !media.thumbnail ? <span className="post-card-video-placeholder" aria-label="帖子视频">视频</span>
+                    : <PostVideoCover media={media} className="post-card-video-el" ariaLabel="帖子视频" />}
                   <span className="post-card-video-badge" aria-hidden="true">▶</span>
                 </div>
               ) : (
@@ -117,17 +129,18 @@ export function PostCard({
             })}
           </div>
         )}
-      </button>
+      </div>
       <footer className="post-card-foot">
-        <span className="post-card-stat">
+        <button type="button" className="post-card-open" onClick={onOpen} aria-label="查看帖子">查看帖子</button>
+        {typeof post.comment_count === "number" && <span className="post-card-stat">
           <IconMessage width={16} height={16} />
           {post.comment_count}
-        </span>
-        <span className="post-card-stat">
+        </span>}
+        {typeof post.view_count === "number" && <span className="post-card-stat">
           <IconEye width={16} height={16} />
-          {post.view_count ?? 0}
-        </span>
-        <FavoriteButton targetType="post" targetId={post.id} compact className="post-card-fav" />
+          {post.view_count}
+        </span>}
+        {action === undefined ? <FavoriteButton targetType="post" targetId={post.id} compact className="post-card-fav" /> : action}
       </footer>
     </article>
   );

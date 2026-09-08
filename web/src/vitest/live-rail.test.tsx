@@ -12,6 +12,7 @@ import { LiveChannelRail } from "../components/live/LiveChannelRail";
 import { LiveHall } from "../components/live/LiveHall";
 import { LiveStartSheet } from "../components/live/LiveStartSheet";
 import * as liveApi from "../api/live";
+import { useAuthStore } from "../stores/auth";
 
 function liveCh(id: number, title: string, status: LiveChannelDescriptor["status"] = "live"): LiveChannelDescriptor {
   return {
@@ -159,9 +160,13 @@ describe("LiveChannelRail 窄屏覆盖层", () => {
 
 describe("LiveStartSheet 开播选择器", () => {
   it("只展示自己的直播间，选择后进入开播控制台", async () => {
+    useAuthStore.setState({ currentUser: { id: "u1", username: "owner", nickname: "房主", avatar: "", signature: "", status: "auto", online: false, date_joined: "2026-01-01T00:00:00Z" } });
     const mine = { ...liveCh(1, "我的直播间"), is_owner: true };
     const other = { ...liveCh(2, "别人的直播间"), is_owner: false };
-    const request = vi.spyOn(liveApi, "listLiveChannels").mockResolvedValue([mine, other]);
+    const request = vi.spyOn(liveApi, "listLiveChannelsPage").mockImplementation(async ({ owner } = {}) => ({
+      results: [mine, other].filter((channel) => channel.owner_id === owner),
+      next_cursor: null, has_more: false, total: 1,
+    }));
     const onStart = vi.fn();
     const onCreateNew = vi.fn();
     render(<LiveStartSheet onStart={onStart} onCreateNew={onCreateNew} />);

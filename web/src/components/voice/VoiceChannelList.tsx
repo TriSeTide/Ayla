@@ -7,14 +7,9 @@
  *   - 不在频道 →「加入」
  * 窄屏 2 列 / 宽屏 3-4 列（voice.css 网格）。
  */
-import type { CSSProperties, KeyboardEvent } from "react";
 import type { VoiceChannelDescriptor } from "../../api/types";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
-import { FavoriteButton } from "../FavoriteButton";
-import { ScrollingText } from "../ScrollingText";
-import { ScrollingTags } from "../ScrollingTags";
-import { IconMic } from "../icons";
-import { getVisibilityLabels } from "../../utils/visibility";
+import { VoiceChannelCard } from "./VoiceChannelCard";
 
 export function VoiceChannelList({
   channels,
@@ -40,69 +35,9 @@ export function VoiceChannelList({
   }
   return (
     <div className="voice-channel-list">
-      {channels.map((ch, idx) => {
-        const active = ch.id === currentChannelId;
-        const delay = revealItems ? staggerDelay(idx) : 0;
-        // 已在频道（mine）：卡片整体点击「进入」（回到频道，aria-label），
-        // foot 右侧用「我在其中」按钮标识占位（与非成员「加入」按钮等高对齐）。
-        // 非成员：显示「加入」按钮。join 幂等，重复进入安全。
-        const label = ch.mine ? "进入" : "加入";
-        const labels = getVisibilityLabels(ch);
-        const enter = () => {
-          if (!joining) onJoin(ch.id);
-        };
-        const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            enter();
-          }
-        };
-        return (
-          /* 动画挂在 grid item 外层，避免 .reveal-item 的 transform 动画压过卡片 hover 位移。 */
-          <div
-            key={ch.id}
-            className={`voice-channel-card-wrap${revealItems ? " reveal-item" : ""}`}
-            style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
-          >
-            <div
-              className={`voice-channel-card ${active ? "active" : ""}`}
-              role="button"
-              tabIndex={0}
-              aria-disabled={joining}
-              aria-label={`${label}语音频道 ${ch.name}`}
-              onClick={enter}
-              onKeyDown={onKeyDown}
-            >
-              <div className="voice-card-head">
-                <ScrollingTags labels={labels} tagClassName="voice-source-tag" className="voice-source-tags" />
-                <FavoriteButton targetType="voice" targetId={ch.id} compact />
-              </div>
-              <div className="voice-card-title">
-                <IconMic width={14} height={14} className="voice-card-title-icon" />
-                <ScrollingText text={ch.name} className="voice-card-title-text" />
-              </div>
-              <div className="voice-card-foot">
-                <span className="voice-card-meta">{ch.member_count} 人</span>
-                {ch.mine ? (
-                  <span className="voice-mine-btn">我在其中</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-primary voice-join-btn"
-                    disabled={joining}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      enter();
-                    }}
-                  >
-                    {joining ? "加入中…" : "加入"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {channels.map((channel, index) => <VoiceChannelCard key={channel.id} channel={channel}
+        active={channel.id === currentChannelId} joining={joining} onEnter={() => onJoin(channel.id)}
+        revealDelay={revealItems ? staggerDelay(index) : undefined} />)}
     </div>
   );
 }

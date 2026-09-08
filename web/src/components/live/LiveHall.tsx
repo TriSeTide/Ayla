@@ -7,28 +7,8 @@
  * 加"爱莉"角标（普通频道渲染，无特殊数据通道）。
  */
 import type { LiveChannelDescriptor } from "../../api/types";
-import { FavoriteButton } from "../FavoriteButton";
-import { ScrollingText } from "../ScrollingText";
-import { ScrollingTags } from "../ScrollingTags";
-import { IconVideo } from "../icons";
-import { ResourceImage } from "../ResourceImage";
-import { getVisibilityLabels } from "../../utils/visibility";
+import { LiveChannelCard } from "./LiveChannelCard";
 import { staggerDelay } from "../../hooks/useRevealOnEnter";
-import type { CSSProperties } from "react";
-
-function statusBadge(status: LiveChannelDescriptor["status"]): {
-  className: string;
-  label: string;
-} {
-  switch (status) {
-    case "live":
-      return { className: "live-badge live-badge-live", label: "直播中" };
-    case "ended":
-      return { className: "live-badge live-badge-ended", label: "已结束" };
-    default:
-      return { className: "live-badge live-badge-idle", label: "未开播" };
-  }
-}
 
 export function LiveHall({
   channels,
@@ -56,48 +36,10 @@ export function LiveHall({
   }
   return (
     <div className="live-hall-grid">
-      {channels.map((ch, idx) => {
-        const badge = statusBadge(ch.status);
-        const isElysia = elysiaUserId != null && ch.owner_id === elysiaUserId;
-        const labels = getVisibilityLabels(ch);
-        const delay = revealItems ? staggerDelay(idx) : 0;
-        return (
-          <div
-            key={ch.id}
-            className={`live-card-wrap${revealItems ? " reveal-item" : ""}`}
-            style={revealItems ? ({ ["--reveal-delay" as string]: `${delay}ms` } as CSSProperties) : undefined}
-          >
-            <button
-              type="button"
-              className="live-card"
-              onClick={() => onEnter(ch.id)}
-            >
-              <div className="live-card-cover">
-              {ch.cover ? (
-                <ResourceImage src={ch.cover} alt="" className="live-card-cover-image" />
-              ) : (
-                <IconVideo width={28} height={28} aria-hidden="true" />
-              )}
-              <span className="live-card-cover-badge">
-                <span className={badge.className}>{badge.label}</span>
-                {isElysia && <span className="live-badge live-badge-elysia">爱莉</span>}
-              </span>
-              </div>
-              <div className="live-card-title">
-                <ScrollingText text={ch.title} />
-              </div>
-              <div className="live-card-meta">
-                <ScrollingText
-                  text={ch.owner_nickname ?? ownerNames[ch.owner_id] ?? "未知主播"}
-                  className="live-card-owner"
-                />
-                <ScrollingTags labels={labels} tagClassName="live-badge live-badge-source" className="live-card-source-tags" />
-              </div>
-            </button>
-            <FavoriteButton targetType="live" targetId={ch.id} compact />
-          </div>
-        );
-      })}
+      {channels.map((channel, index) => <LiveChannelCard key={channel.id} channel={channel}
+        onEnter={() => onEnter(channel.id)} ownerName={ownerNames[channel.owner_id]}
+        isElysia={elysiaUserId != null && channel.owner_id === elysiaUserId}
+        revealDelay={revealItems ? staggerDelay(index) : undefined} />)}
     </div>
   );
 }
