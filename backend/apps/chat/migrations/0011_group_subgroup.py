@@ -42,6 +42,11 @@ def _align_engine_and_fk(apps, schema_editor):
     测试库由 Django 迁移创建（utf8_unicode_ci），生产库可能是 utf8mb4_0900_ai_ci，
     因此按 conversations 实际 collation 动态对齐，不写死。
     """
+    # 以下 SQL 均为 MySQL 专属语法（ALTER TABLE ... ENGINE、information_schema、
+    # CONVERT TO CHARACTER SET、手动 ADD CONSTRAINT）。SQLite 测试库由 Django
+    # 迁移直接建表即可生成外键，无需手动对齐引擎/字符集，非 MySQL 直接跳过。
+    if schema_editor.connection.vendor != "mysql":
+        return
     with schema_editor.connection.cursor() as cur:
         cur.execute("ALTER TABLE group_subgroups ENGINE=InnoDB")
         cur.execute(
