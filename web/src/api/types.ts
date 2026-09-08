@@ -1284,6 +1284,7 @@ export interface SearchGroupItem {
   title: string;
   /** 群头像媒体 content URL；旧搜索响应可缺省，未设置时为空串。 */
   avatar?: string;
+  member_count?: number;
   /** 加入方式：public=直接加入 / application=申请制（旧数据缺失时按申请制兜底） */
   join_policy?: "public" | "application";
   created_at: string;
@@ -1302,4 +1303,5 @@ export interface SearchResults {
   posts?: SearchGroup<Post>;
   lives?: SearchGroup<LiveChannelDescriptor>;
   games?: SearchGroup<GameRoom>;
+  voices?: SearchGroup<VoiceChannelDescriptor>;
 }

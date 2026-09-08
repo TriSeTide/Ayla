@@ -1,5 +1,5 @@
 /**
- * 搜索样式（F9）：搜索页（输入 + 历史 chips + 五类分组结果）+ 用户资料卡 +
+ * 搜索样式（F9）：搜索页（输入 + 历史 chips + 六类分组结果）+ 用户资料卡 +
  * 宽屏顶栏内联搜索下拉。
  * 事实源：design.md §12.9 搜索框与结果。
  */
@@ -497,14 +497,28 @@
   .search-page .search-row > .search-row-title { flex: 1; }
   .search-page .search-group-head { margin-bottom: var(--sp-2); }
   .search-page .search-group-title { font-size: 14px; }
-}
 
-@media (min-width: 1025px) {
+  /* 所有选项卡宽屏统一两列瀑布：全部按分组瀑布，单类型按卡片瀑布 */
   .search-results {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-    /* 行距收紧（组间主要靠标题与卡片自身节奏），列距保持宽松 */
-    gap: var(--sp-4) var(--sp-6);
+    display: block;
+    columns: 2;
+    column-gap: var(--sp-6);
+  }
+
+  .search-content:not([data-search-filter="all"]) .search-group-body {
+    columns: 2;
+    column-gap: var(--sp-6);
+  }
+
+  .search-content:not([data-search-filter="all"]) .search-group-body > * {
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    margin-bottom: var(--sp-3);
+  }
+
+  .search-content[data-search-filter="all"] .search-group {
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    margin-bottom: var(--sp-4);
   }
 }

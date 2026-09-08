@@ -2,7 +2,7 @@
  * SearchPage 测试（F9）：
  * - URL ?q= 直接进入自动搜索 → 结果分组显示；
  * - 历史 chips 点击 → URL 更新；
- * - 五类分组空态 / 群结果申请弹窗（申请制/公开/旧数据）；
+ * - 六类分组空态 / 群结果申请弹窗（申请制/公开/旧数据）；
  * - 窄屏顶栏（NarrowTopBar search variant）已抽取到 AppShell，本页不再渲染
  *   （其交互测试见 shell.test.tsx）。
  */
@@ -71,6 +71,7 @@ function resultFor(q: string): SearchPageResults {
     groups: { next_cursor: null, has_more: false, total: 1, items: [{ id: "g1", type: "group", title: "冰樱研究所", join_policy: "application", created_at: "2026-01-01T00:00:00Z" }] },
     posts: { next_cursor: null, has_more: false, total: 0, items: [] },
     lives: { next_cursor: null, has_more: false, total: 0, items: [] },
+    voices: { next_cursor: null, has_more: false, total: 0, items: [] },
     games: { next_cursor: null, has_more: false, total: 0, items: [] },
   };
 }
@@ -93,6 +94,7 @@ function groupResult(joinPolicy?: "public" | "application"): SearchPageResults &
     },
     posts: { next_cursor: null, has_more: false, total: 0, items: [] },
     lives: { next_cursor: null, has_more: false, total: 0, items: [] },
+    voices: { next_cursor: null, has_more: false, total: 0, items: [] },
     games: { next_cursor: null, has_more: false, total: 0, items: [] },
   };
 }
@@ -152,7 +154,7 @@ describe("搜索分组游标分页", () => {
     expect(searchPages).toHaveBeenCalledWith({ q: "冰樱", types: [type], limit: 20 });
     expect(screen.getByRole("tab", { name: label })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: label })).toHaveAttribute("data-search-filter", type);
-    expect(screen.getAllByRole("tab")).toHaveLength(6);
+    expect(screen.getAllByRole("tab")).toHaveLength(7);
     // 分组标题已按需求移除（左侧栏选项卡即分类标识），只验证本类分组存在
     expect(container.querySelectorAll(".search-group")).toHaveLength(resultFor("")[key]!.total ? 1 : 0);
     expect(container.querySelector(".search-content .search-filters")).toBeNull();
@@ -216,13 +218,13 @@ describe("搜索分组游标分页", () => {
     vi.mocked(searchPages).mockResolvedValueOnce(before).mockResolvedValueOnce({ users: resultFor("").users })
       .mockResolvedValueOnce({ users: resultFor("").users }).mockResolvedValueOnce(after);
     renderSearch("/search?q=冰樱&type=group", true);
-    await screen.findByRole("button", { name: /冰樱研究所 申请入群/ });
+    await screen.findByRole("button", { name: /冰樱研究所.*申请入群/ });
     fireEvent.click(screen.getByRole("tab", { name: "用户" }));
     await screen.findByText("小樱");
     act(() => searchWS.handler?.({ type: "group.joined", conversation: { id: "g1" } }));
     await waitFor(() => expect(searchPages).toHaveBeenCalledTimes(3));
     fireEvent.click(screen.getByRole("tab", { name: "群聊" }));
-    await screen.findByRole("button", { name: /冰樱研究所 已加入/ });
+    await screen.findByRole("button", { name: /冰樱研究所.*已加入/ });
     expect(searchPages).toHaveBeenCalledTimes(4);
     expect(searchPages).toHaveBeenLastCalledWith({ q: "冰樱", types: ["group"], limit: 20 });
     expect(screen.queryByRole("button", { name: /已更新|重新搜索/ })).not.toBeInTheDocument();
@@ -251,7 +253,7 @@ describe("搜索分组游标分页", () => {
     result.groups.items[0].is_member = true;
     vi.mocked(searchPages).mockResolvedValueOnce(result);
     renderSearch("/search?q=冰樱", true);
-    const joined = await screen.findByRole("button", { name: /冰樱研究所 已加入/ });
+    const joined = await screen.findByRole("button", { name: /冰樱研究所.*已加入/ });
     expect(useChatStore.getState().conversations).toEqual([]);
     fireEvent.click(joined);
     await waitFor(() => expect(screen.queryByText("冰樱研究所")).not.toBeInTheDocument());
@@ -268,9 +270,9 @@ describe("搜索分组游标分页", () => {
     renderSearchControls();
     act(() => searchWS.handler?.({ type: "group.joined", conversation: { id: "g1" } }));
     await act(async () => pending.resolve(response));
-    expect(screen.getByRole("button", { name: /冰樱研究所 已加入/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /冰樱研究所.*已加入/ })).toBeInTheDocument();
     await act(async () => searchWS.handler?.({ type: "group.member.left", data: { conversation_id: "g1", member_id: "u1" } }));
-    expect(screen.getByRole("button", { name: /冰樱研究所 申请入群/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /冰樱研究所.*申请入群/ })).toBeInTheDocument();
   });
   it("各组独立请求自己的cursor，追加去重且其他组和原DOM保持", async () => {
     const first = resultFor("冰樱");
@@ -364,7 +366,7 @@ describe("搜索分组游标分页", () => {
   it("详情返回恢复各组全部已加载项、滚动和下一游标", async () => {
     const animated: HTMLElement[] = [];
     Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: function(this: HTMLElement) {
-      if (this.matches(".search-row")) animated.push(this);
+      if (this.matches(".search-row, .typed-result-card")) animated.push(this);
       return { cancel: vi.fn(), onfinish: null };
     } });
     const first = resultFor("冰樱");
@@ -481,12 +483,13 @@ describe("SearchPage 顶栏复用（F9）", () => {
     expect(useSearchStore.getState().history).toEqual([]);
   });
 
-  it("五类分组全空时显示「未找到」空态（不空白）", async () => {
+  it("六类分组全空时显示「未找到」空态（不空白）", async () => {
     vi.mocked(searchPages).mockResolvedValue({
       users: { next_cursor: null, has_more: false, total: 0, items: [] },
       groups: { next_cursor: null, has_more: false, total: 0, items: [] },
       posts: { next_cursor: null, has_more: false, total: 0, items: [] },
       lives: { next_cursor: null, has_more: false, total: 0, items: [] },
+      voices: { next_cursor: null, has_more: false, total: 0, items: [] },
       games: { next_cursor: null, has_more: false, total: 0, items: [] },
     });
     renderSearch("/search?q=不存在的词", true);

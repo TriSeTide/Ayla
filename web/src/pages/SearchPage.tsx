@@ -3,7 +3,7 @@
  *
  * 顶栏复用窄屏 TopBar（variant="search"：自动聚焦 + 左返回 + 输入框，布局文档 §2.7），
  * 搜索词走 URL ?q=（与宽屏 TopNav 同一通道）；宽屏由 AppShell TopNav 承载搜索框。
- * 历史 chips（可清空）+ 五类分组结果（用户/群/帖子/直播间/桌游室）+
+ * 历史 chips（可清空）+ 六类分组结果（用户/群/帖子/直播间/桌游室/语音房）+
  * 每组独立游标续页；用户点击弹资料卡（加好友/发消息），其余跳对应界面。
  * 可见性过滤由后端完成，前端仅展示（R-S3）。
  */
@@ -26,11 +26,17 @@ import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { StablePaginationFooter } from "../components/StablePaginationFooter";
 import { DirectoryFilters } from "../components/DirectoryFilters";
+import { GroupResultCard } from "../components/cards/DirectoryResultCards";
+import { PostCard } from "../components/posts/PostCard";
+import { LiveChannelCard } from "../components/live/LiveChannelCard";
+import { GameRoomCard } from "../components/boardgame/GameRoomCard";
+import { VoiceChannelCard } from "../components/voice/VoiceChannelCard";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
+import { IconBack, IconSearch } from "../components/icons";
 
 type ResultKey = keyof SearchResults;
-const RESULT_TYPES: Record<ResultKey, SearchType> = { users: "user", groups: "group", posts: "post", lives: "live", games: "game" };
-const RESULT_KEYS: Record<SearchType, ResultKey> = { user: "users", group: "groups", post: "posts", live: "lives", game: "games" };
+const RESULT_TYPES: Record<ResultKey, SearchType> = { users: "user", groups: "group", posts: "post", lives: "live", games: "game", voices: "voice" };
+const RESULT_KEYS: Record<SearchType, ResultKey> = { user: "users", group: "groups", post: "posts", live: "lives", game: "games", voice: "voices" };
 type SearchFilter = SearchType | "all";
 const FILTERS: ReadonlyArray<{ key: SearchFilter; label: string }> = [
   { key: "all", label: "全部" },
@@ -38,6 +44,7 @@ const FILTERS: ReadonlyArray<{ key: SearchFilter; label: string }> = [
   { key: "group", label: "群聊" },
   { key: "post", label: "帖子" },
   { key: "live", label: "直播间" },
+  { key: "voice", label: "语音房" },
   { key: "game", label: "桌游室" },
 ];
 type PageStatus = Partial<Record<ResultKey, { loading: boolean; error: string | null }>>;
@@ -105,7 +112,7 @@ export function SearchPage() {
   const searchRequestRef = useRef(0);
   const pageRef = useRef<HTMLDivElement>(null);
   const { restoring } = useScrollRestore(scope, pageRef, { ready: results != null });
-  useListEntryMotion(pageRef, ".search-row, .search-group .stable-pagination-footer .btn", (restoring || restoredScope.current === scope) && !resumeEntry);
+  useListEntryMotion(pageRef, ".search-row, .typed-result-card, .search-group .stable-pagination-footer .btn", (restoring || restoredScope.current === scope) && !resumeEntry);
   const openPath = (path: string) => {
     saveScrollPosition(scope, pageRef.current);
     navigate(path);
@@ -303,10 +310,10 @@ export function SearchPage() {
     return off;
   }, [q, filter, scope, commitResults]);
 
-  // 五类分组是否全空（决定无结果空态）
+  // 六类分组是否全空（决定无结果空态）
   const hasAnyResult = useCallback((r: SearchResults | null): boolean => {
     if (!r) return false;
-    return [r.users, r.groups, r.posts, r.lives, r.games].some(
+    return [r.users, r.groups, r.posts, r.lives, r.voices, r.games].some(
       (g) => (g?.total ?? 0) > 0,
     );
   }, []);
@@ -366,7 +373,9 @@ export function SearchPage() {
             if (next === "all") params.delete("type");
             else params.set("type", next);
             setSearchParams(params, { replace: true });
-          }} />
+          }}
+          leading={<button type="button" className="icon-btn-40 directory-filter-back" onClick={() => navigate(-1)} aria-label="返回"><IconBack width={20} height={20} /></button>}
+          decor={<IconSearch width={52} height={52} className="directory-filter-decor search-filter-decor" role="presentation" aria-hidden="true" />} />
         <div key={scope} className="directory-content search-content" ref={pageRef} aria-busy={loading}
           id={`${filterId}-panel`} role="tabpanel" aria-labelledby={`${filterId}-${filter}`} tabIndex={0}
           data-search-filter={filter}>
@@ -425,19 +434,12 @@ export function SearchPage() {
               const joined = groupIsJoined(g);
               const accepted = acceptedGroupIds.has(g.id);
               return (
-                <button
-                  key={g.id}
-                  type="button"
-                  className="search-row search-group-row"
-                  onClick={() => {
+                <div key={g.id} className="typed-result-card search-group-row" data-result-type="group">
+                  <GroupResultCard group={g} entryLabel={joined ? "已加入" : accepted ? "已通过" : "申请入群"} onOpen={() => {
                     if (joined) openPath(`/group/${g.id}`);
                     else if (!accepted) openGroupApply(g);
-                  }}
-                >
-                  <Avatar label={g.title} size={36} imageUrl={g.avatar || null} />
-                  <span className="search-row-title">{g.title}</span>
-                  <span className="search-row-action">{joined ? "已加入" : accepted ? "已通过" : "申请入群"}</span>
-                </button>
+                  }} />
+                </div>
               );
             })}
           </ResultGroup>
@@ -445,28 +447,34 @@ export function SearchPage() {
           <ResultGroup title="帖子" count={results.posts?.total ?? 0} hasMore={results.posts?.has_more ?? false}
             loading={loading || Boolean(pageStatus.posts?.loading)} error={pageStatus.posts?.error ?? null} onMore={() => void loadMore("posts")}>
             {(results.posts?.items ?? []).map((p) => (
-              <button key={p.id} type="button" className="search-row" onClick={() => openPath(`/posts/${p.id}`)}>
-                <span className="search-row-title">{p.title || p.body.slice(0, 30)}</span>
-              </button>
+              <div key={p.id} className="typed-result-card" data-result-type="post">
+                <PostCard post={p} onOpen={() => openPath(`/posts/${p.id}`)} action={null} previewOnly />
+              </div>
             ))}
           </ResultGroup>
 
           <ResultGroup title="直播间" count={results.lives?.total ?? 0} hasMore={results.lives?.has_more ?? false}
             loading={loading || Boolean(pageStatus.lives?.loading)} error={pageStatus.lives?.error ?? null} onMore={() => void loadMore("lives")}>
             {(results.lives?.items ?? []).map((l) => (
-              <button key={l.id} type="button" className="search-row" onClick={() => openPath(`/live/${l.id}`)}>
-                <span className="search-row-title">{l.title}</span>
-              </button>
+              <div key={l.id} className="typed-result-card" data-result-type="live">
+                <LiveChannelCard channel={l} onEnter={() => openPath(`/live/${l.id}`)} action={null} />
+              </div>
             ))}
           </ResultGroup>
 
           <ResultGroup title="桌游室" count={results.games?.total ?? 0} hasMore={results.games?.has_more ?? false}
             loading={loading || Boolean(pageStatus.games?.loading)} error={pageStatus.games?.error ?? null} onMore={() => void loadMore("games")}>
             {(results.games?.items ?? []).map((g) => (
-              <button key={g.id} type="button" className="search-row" onClick={() => openPath(`/games/${g.id}`)}>
-                <span className="search-row-title">{g.name}</span>
-              </button>
+              <div key={g.id} className="typed-result-card" data-result-type="game">
+                <GameRoomCard room={g} onEnter={() => openPath(`/games/${g.id}`)} action={null} />
+              </div>
             ))}
+          </ResultGroup>
+          <ResultGroup title="语音房" count={results.voices?.total ?? 0} hasMore={results.voices?.has_more ?? false}
+            loading={loading || Boolean(pageStatus.voices?.loading)} error={pageStatus.voices?.error ?? null} onMore={() => void loadMore("voices")}>
+            {(results.voices?.items ?? []).map((channel) => <div key={channel.id} className="typed-result-card" data-result-type="voice">
+              <VoiceChannelCard channel={channel} onEnter={() => openPath(`/voice/${channel.id}`)} action={null} browsing />
+            </div>)}
           </ResultGroup>
         </div>
       )}

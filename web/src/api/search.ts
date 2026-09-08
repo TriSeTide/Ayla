@@ -1,13 +1,13 @@
 /**
  * 聚合搜索 REST 封装（F9，对齐 backend/apps/search/views.py）。
  *
- * - GET /search/?q=&types=&limit= —— 五类分组（user/group/post/live/game），
+ * - GET /search/?q=&types=&limit= —— 六类分组（user/group/post/live/game/voice），
  *   每组 {items, total}（截断 + 总数分离）；q 空 → 400。
  */
 import { apiRequest } from "./client";
 import type { SearchResults } from "./types";
 
-export type SearchType = "user" | "group" | "post" | "live" | "game";
+export type SearchType = "user" | "group" | "post" | "live" | "game" | "voice";
 
 export type SearchPageResults = {
   [Key in keyof SearchResults]?: NonNullable<SearchResults[Key]> & {

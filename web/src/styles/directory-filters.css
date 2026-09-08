@@ -32,6 +32,7 @@
   padding: var(--sp-3);
   overflow-x: hidden;
   overflow-y: auto;
+  scroll-padding: var(--sp-3);
   overscroll-behavior: contain;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-card);
@@ -39,6 +40,26 @@
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
   box-shadow: var(--glass-shadow-compact);
+  animation: auroraqua-sidebar-in var(--auroraqua-duration) var(--auroraqua-ease-out);
+}
+
+.directory-page .directory-filter-back + .directory-filter-decor {
+  margin-top: 2px;
+}
+
+.directory-page .directory-filter-decor {
+  flex: none;
+  align-self: center;
+  margin: 6px auto 2px;
+  color: var(--ice-500);
+  opacity: 0.42;
+  transform: rotate(-8deg);
+  pointer-events: none;
+  user-select: none;
+}
+
+.directory-page .directory-filter-decor + .directory-filter {
+  margin-top: var(--sp-1);
 }
 
 .directory-page .directory-filter {
@@ -135,14 +156,6 @@
   }
 }
 
-.directory-page.favorites-page > .favorites-topbar {
-  width: 100%;
-  max-width: none;
-  flex: none;
-  margin: 0 0 var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-}
-
 @media (min-width: 1025px) {
   .directory-page .favorites-skeleton {
     display: grid;
@@ -156,24 +169,28 @@
   .directory-page:is(.search-page, .favorites-page) { padding: 0; }
   .directory-page > .directory-body { flex-direction: column; gap: 0; }
   .directory-page .directory-filters {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
     flex: none;
     align-self: stretch;
-    width: auto;
+    width: 100%;
     max-height: none;
-    margin: var(--sp-2) var(--sp-3);
-    padding: var(--sp-2);
-    overflow: visible;
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x pinch-zoom;
+    border-width: 0 0 1px;
+    border-radius: 0;
+    box-shadow: none;
+    animation: auroraqua-panel-from-top var(--auroraqua-duration) var(--auroraqua-ease-out);
   }
-  .directory-page .directory-filter { justify-content: center; padding-inline: var(--sp-2); }
-  .directory-page .favorites-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .directory-page .directory-filter-decor { display: none; }
+  .directory-page .directory-filter { justify-content: center; min-width: 44px; padding-inline: var(--sp-2); }
   .directory-page .directory-content {
     padding: var(--sp-2) var(--sp-4) calc(68px + env(safe-area-inset-bottom));
-  }
-  .directory-page.favorites-page > .favorites-topbar {
-    width: calc(100% - 2 * var(--sp-3));
-    margin: var(--sp-3) var(--sp-3) 0;
   }
 }
 
@@ -181,6 +198,7 @@
   .directory-page .directory-filter { transition: none; }
   .directory-page .directory-filter:is(:hover, :active) { scale: 1; }
   .directory-page .directory-content { animation: none; }
+  .directory-page .directory-filters { animation: none; }
 }
 
 @supports not (backdrop-filter: blur(1px)) {
