@@ -62,6 +62,7 @@ function renderShell(path: string, narrow: boolean) {
           <Route path="/games" element={<div>桌游内容</div>} />
           <Route path="/messages" element={<div>消息内容</div>} />
           <Route path="/search" element={<div>搜索内容</div>} />
+          <Route path="/favorites" element={<div>收藏内容</div>} />
           <Route path="/profile" element={<div>个人内容</div>} />
           <Route path="/group/:id" element={<div>群聊内容</div>} />
           <Route path="/group/:id/:scene" element={<div>群子场景</div>} />
@@ -374,6 +375,23 @@ describe("AppShell 窄屏顶栏（NarrowTopBar）", () => {
   it("宽屏不渲染 NarrowTopBar（顶栏为 TopNav，无返回键）", () => {
     renderShell("/search", false);
     expect(screen.queryByRole("button", { name: "返回" })).not.toBeInTheDocument();
+  });
+
+  it("窄屏 /favorites 渲染收藏态顶栏：返回键顶替头像 + 标题 + 更多菜单", () => {
+    renderShell("/favorites", true);
+    expect(screen.getByRole("button", { name: "返回" })).toBeInTheDocument();
+    expect(screen.getByText("我的收藏")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "个人主页" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "更多" })).toBeInTheDocument();
+  });
+
+  it("窄屏 /search 与 /favorites 返回键复用全站通用 icon-btn-40", () => {
+    for (const path of ["/search", "/favorites"]) {
+      const { unmount } = renderShell(path, true);
+      const back = screen.getByRole("button", { name: "返回" });
+      expect(back.classList.contains("icon-btn-40")).toBe(true);
+      unmount();
+    }
   });
 });
 

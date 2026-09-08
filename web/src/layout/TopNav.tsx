@@ -116,6 +116,7 @@ export function TopNav({
       (searchResults.groups?.total ?? 0) > 0 ||
       (searchResults.posts?.total ?? 0) > 0 ||
       (searchResults.lives?.total ?? 0) > 0 ||
+      (searchResults.voices?.total ?? 0) > 0 ||
       (searchResults.games?.total ?? 0) > 0);
 
   return (
@@ -212,6 +213,13 @@ export function TopNav({
                 {(searchResults?.lives?.items ?? []).map((l) => (
                   <button key={l.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/live/${l.id}`)}>
                     <span>直播 · {l.title}</span>
+                  </button>
+                ))}
+              </SearchDropGroup>
+              <SearchDropGroup title="语音房" count={searchResults?.voices?.total ?? 0} onMore={goFullSearch}>
+                {(searchResults?.voices?.items ?? []).map((v) => (
+                  <button key={v.id} type="button" className="search-drop-row" onMouseDown={() => navigate(`/voice/${v.id}`)}>
+                    <span>语音 · {v.name}</span>
                   </button>
                 ))}
               </SearchDropGroup>

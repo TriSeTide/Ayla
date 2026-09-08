@@ -66,15 +66,18 @@ export function AppShell() {
     || matchPath({ path: "/voice/:channelId", end: true }, pathname) != null
     || matchPath({ path: "/games/:roomId", end: true }, pathname) != null
     || matchPath({ path: "/user/:userId", end: true }, pathname) != null
-    || pathname === "/profile" || pathname === "/favorites"
+    || pathname === "/profile" || pathname === "/favorites" || pathname === "/search"
     || (pathname !== "/posts/mine" && matchPath({ path: "/posts/:postId", end: true }, pathname) != null)
   );
   const navDirection = usePrimaryNavSwipeDirection(pathname);
-  // 窄屏顶栏（NarrowTopBar）：/search 为搜索态，其余列表页 default；沉浸/群/私聊路由不渲染
+  // 窄屏顶栏（NarrowTopBar）：/search 为搜索态，/favorites 为收藏态；
+  // 其余列表页 default；沉浸/群/私聊路由不渲染
   const narrowTopBarVariant = isNarrowTopBarRoute(pathname)
     ? matchPath({ path: "/search", end: true }, pathname)
       ? "search"
-      : "default"
+      : matchPath({ path: "/favorites", end: true }, pathname)
+        ? "favorites"
+        : "default"
     : null;
 
   // 全站未读聚合：进入即拉 + **纯 WS 事件驱动**（R-N4）——

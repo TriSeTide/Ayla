@@ -20,7 +20,7 @@ import { usePresenceStore } from "../stores/presence";
 import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
 import { searchLocation } from "../utils/searchLocation";
 
-export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "search" }) {
+export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "search" | "favorites" }) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const onlineUsers = usePresenceStore((s) => s.users);
   const onlineStatuses = usePresenceStore((s) => s.statuses);
@@ -65,6 +65,17 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
     // replace：搜索词变更不进历史栈，返回键 navigate(-1) 直接回上一个界面
     navigate(searchLocation(q, location.pathname === "/search" ? location.search : ""), { replace: true });
   };
+
+  const backButton = (
+    <button
+      type="button"
+      className="icon-btn-40"
+      aria-label="返回"
+      onClick={() => navigate(-1)}
+    >
+      <IconBack width={20} height={20} />
+    </button>
+  );
 
   const clearQuery = () => {
     setQuery("");
@@ -125,16 +136,15 @@ export function NarrowTopBar({ variant = "default" }: { variant?: "default" | "s
 
   return (
     <header className="narrow-topbar">
-      {variant === "search" ? (
+      {variant === "favorites" ? (
         <>
-          <button
-            type="button"
-            className="icon-btn-40"
-            aria-label="返回"
-            onClick={() => navigate(-1)}
-          >
-            <IconBack width={20} height={20} />
-          </button>
+          {backButton}
+          <h2 className="narrow-topbar-title">我的收藏</h2>
+          {moreMenu}
+        </>
+      ) : variant === "search" ? (
+        <>
+          {backButton}
           <form className="narrow-topbar-search narrow-topbar-search-input" role="search" onSubmit={submitSearch}>
             <input
               ref={inputRef}

@@ -260,35 +260,8 @@
 
 /* ================= 收藏页（FavoritesPage） ================= */
 
-/* 收藏页的筛选、外壳和滚动轨道位于 directory-filters.css。 */
-
-.favorites-topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-4) var(--sp-2);
-  min-width: 0;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-card);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  box-shadow: var(--glass-shadow-compact);
-}
-
-.favorites-title {
-  padding: 0;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-primary);
-  /* 窄屏标题过长时省略而非撑破顶栏 */
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* 收藏页的筛选、外壳和滚动轨道位于 directory-filters.css；顶栏已移除，
+   返回键由宽屏侧栏左上角 / 窄屏 AppShell 收藏态顶栏提供。 */
 
 .favorites-skeleton {
   padding: var(--sp-4);

@@ -1,7 +1,7 @@
 /**
  * TopNav 宽屏搜索（U10 + 清除键）：
  * - 输入文本 → 清除键出现，点击清空并保持聚焦；
- * - 输入文本 → 内联下拉按五类分组渲染（组头 Micro Tag + 每组 ≤3 + 查看更多）。
+ * - 输入文本 → 内联下拉按六类分组渲染（组头 Micro Tag + 每组 ≤3 + 查看更多）。
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -64,8 +64,8 @@ function renderWide(path: string, narrow = false) {
   );
 }
 
-/** 五类都有结果；用户组 total=5（>3）触发「查看更多」 */
-const fiveGroups = {
+/** 六类都有结果；用户组 total=5（>3）触发「查看更多」 */
+const sixGroups = {
   users: {
     total: 5,
     items: [
@@ -86,6 +86,7 @@ const fiveGroups = {
     ],
   },
   lives: { total: 1, items: [{ id: "l1", title: "深夜直播" }] },
+  voices: { total: 1, items: [{ id: "v1", name: "深夜语音" }] },
   games: { total: 1, items: [{ id: "game1", name: "狼人杀" }] },
 } as unknown as SearchResults;
 
@@ -94,6 +95,7 @@ const emptyResults: SearchResults = {
   groups: { total: 0, items: [] },
   posts: { total: 0, items: [] },
   lives: { total: 0, items: [] },
+  voices: { total: 0, items: [] },
   games: { total: 0, items: [] },
 };
 
@@ -181,8 +183,8 @@ describe("TopNav 宽屏搜索（U10 + 清除键）", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("输入文本 → 内联下拉按五类分组渲染（组头 + 查看更多）", async () => {
-    vi.mocked(search).mockResolvedValue(fiveGroups);
+  it("输入文本 → 内联下拉按六类分组渲染（组头 + 查看更多）", async () => {
+    vi.mocked(search).mockResolvedValue(sixGroups);
     renderWide("/home");
     const input = screen.getByRole("textbox", { name: "全局搜索" });
     input.focus();
@@ -191,11 +193,12 @@ describe("TopNav 宽屏搜索（U10 + 清除键）", () => {
       expect(screen.getByRole("listbox")).toBeInTheDocument();
     });
     const panel = screen.getByRole("listbox");
-    // 五个组头（Micro Tag 大写语义）；限定在下拉面板内避免与 TopNav 一级模块文字冲突
+    // 六个组头（Micro Tag 大写语义）；限定在下拉面板内避免与 TopNav 一级模块文字冲突
     expect(within(panel).getByText("用户")).toBeInTheDocument();
     expect(within(panel).getByText("群聊")).toBeInTheDocument();
     expect(within(panel).getByText("帖子")).toBeInTheDocument();
     expect(within(panel).getByText("直播间")).toBeInTheDocument();
+    expect(within(panel).getByText("语音房")).toBeInTheDocument();
     expect(within(panel).getByText("桌游室")).toBeInTheDocument();
     // 用户组 total=5 > 3 → 显示「查看更多」
     expect(within(panel).getByText("查看更多")).toBeInTheDocument();
@@ -205,7 +208,7 @@ describe("TopNav 宽屏搜索（U10 + 清除键）", () => {
 
   it("总数 ≤3 的组不显示「查看更多」", async () => {
     vi.mocked(search).mockResolvedValue({
-      ...fiveGroups,
+      ...sixGroups,
       users: { total: 1, items: [{ id: "u1", username: "bob", nickname: "小樱", avatar: "", online: true }] },
     } as unknown as SearchResults);
     renderWide("/home");
