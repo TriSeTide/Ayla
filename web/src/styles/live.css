@@ -592,15 +592,16 @@
   min-width: 0;
 }
 
+/* 滚动容器已迁移到 .directory-content（directory-page 布局）；根元素只负责
+   flex column 骨架，overflow/padding 由 directory-filters.css 统一接管。 */
+
 .live-hub {
   height: 100%;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding-bottom: 68px; /* 窄屏避让 FAB */
 }
 
-.live-hub > .conv-loading {
+.live-hub .conv-loading {
   display: grid;
   gap: var(--sp-4);
   align-items: start;
@@ -611,7 +612,7 @@
 
 @media (max-width: 768px) {
   .live-hub .live-hall-grid,
-  .live-hub > .conv-loading {
+  .live-hub .conv-loading {
     grid-template-columns: repeat(2, 1fr);
     /* 窄屏左右留白与语音/桌游/帖子列表统一 */
     padding: var(--sp-3) var(--sp-4);
@@ -619,33 +620,17 @@
 }
 
 @media (min-width: 769px) {
-  .live-hub {
-    padding-bottom: var(--sp-4);
-    /* 内容最大宽度 1200px 居中（design.md §5） */
-  }
-
   .live-hub .live-hall-grid,
-  .live-hub > .conv-loading {
+  .live-hub .conv-loading {
     grid-template-columns: repeat(3, 1fr);
-    max-width: 1200px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 0 var(--sp-6);
   }
 }
 
 @media (min-width: 1440px) {
   .live-hub .live-hall-grid,
-  .live-hub > .conv-loading {
+  .live-hub .conv-loading {
     grid-template-columns: repeat(4, 1fr);
   }
-}
-
-.live-hub-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3) var(--sp-4);
 }
 
 /* ================= 直播间上下滑切换（方案 §2.5：视频+弹幕区整体滑动） ================= */
@@ -793,64 +778,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* U6：大厅「只看在播」从原生 checkbox 升级为可键盘操作的玻璃胶囊开关。 */
-.live-hall-filter {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: 44px;
-  padding: 0 var(--sp-3);
-  border-radius: var(--radius-pill);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  color: var(--text-primary);
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.live-hall-filter-input {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-.live-hall-switch {
-  display: inline-flex;
-  align-items: center;
-  flex: none;
-  inline-size: 44px;
-  block-size: 24px;
-  padding: 2px;
-  box-sizing: border-box;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-pill);
-  background: var(--ice-300);
-  box-shadow: var(--glass-inset);
-  transition: background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
-}
-.live-hall-switch-thumb {
-  inline-size: 18px;
-  block-size: 18px;
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  box-shadow: var(--card-shadow);
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-.live-hall-filter-input:checked + .live-hall-switch { background: var(--pink-500); }
-.live-hall-filter-input:checked + .live-hall-switch .live-hall-switch-thumb {
-  transform: translateX(20px);
-}
-.live-hall-filter-input:focus-visible + .live-hall-switch {
-  outline: var(--focus-ring);
-  outline-offset: 2px;
 }
 
 /* U9：直播状态徽章使用规范规定的 pink-500 实底白字（design.md §12.7）。 */

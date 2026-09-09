@@ -1,5 +1,5 @@
-/* Search and favorites only: page chrome remains outside the result scroller. */
-.directory-page:is(.search-page, .favorites-page) {
+/* Search/favorites/voice/live/posts/games: page chrome remains outside the result scroller. */
+.directory-page:is(.search-page, .favorites-page, .voice-hub, .live-hub, .posts-hub, .games-hub) {
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -24,10 +24,10 @@
   flex-direction: column;
   align-self: stretch;
   gap: var(--sp-2);
-  width: 176px;
+  width: 224px;
   max-height: 100%;
   min-width: 0;
-  flex: 0 0 176px;
+  flex: 0 0 224px;
   margin: 0 0 var(--sp-3);
   padding: var(--sp-3);
   overflow-x: hidden;
@@ -51,11 +51,48 @@
   flex: none;
   align-self: center;
   margin: 6px auto 2px;
-  color: var(--ice-500);
+  color: var(--pink-500);
   opacity: 0.42;
   transform: rotate(-8deg);
   pointer-events: none;
   user-select: none;
+}
+
+/* 侧栏标题（kicker + 标题）与统计行：加宽后的装饰信息区，窄屏隐藏 */
+.directory-page .directory-filter-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  margin: var(--sp-1) 0 var(--sp-2);
+  text-align: center;
+  user-select: none;
+}
+
+.directory-page .directory-filter-kicker {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--pink-500);
+  opacity: 0.75;
+  text-transform: uppercase;
+}
+
+.directory-page .directory-filter-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.directory-page .directory-filter-stats {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
 .directory-page .directory-filter-decor + .directory-filter {
@@ -130,7 +167,9 @@
 }
 
 .directory-page .directory-content > :is(.search-history, .search-results, .search-loading, .search-error,
-    .search-empty, .favorites-list, .favorites-skeleton, .home-state, .chat-notice, .home-load-more) {
+    .search-empty, .favorites-list, .favorites-skeleton, .home-state, .chat-notice, .home-load-more,
+    .voice-channel-list, .voice-list-empty, .live-hall-grid, .live-hall-empty, .posts-feed, .posts-skeleton,
+    .games-grid, .games-grid-loading, .conv-loading, .pull-to-refresh) {
   width: 100%;
   max-width: none;
   margin-inline: 0;
@@ -151,7 +190,8 @@
    底部呼吸空间不动，滚动到底内容不贴底不截断。窄屏布局由 max-width 媒体查询覆盖，不受影响。 */
 @media (min-width: 769px) {
   .directory-page .directory-content { padding-top: 0; }
-  .directory-page .directory-content > :is(.search-results, .favorites-list, .favorites-skeleton) {
+  .directory-page .directory-content > :is(.search-results, .favorites-list, .favorites-skeleton,
+      .voice-channel-list, .live-hall-grid, .posts-feed, .posts-skeleton, .games-grid) {
     padding-top: 0;
   }
 }
@@ -166,7 +206,7 @@
 }
 
 @media (max-width: 768px) {
-  .directory-page:is(.search-page, .favorites-page) { padding: 0; }
+  .directory-page:is(.search-page, .favorites-page, .voice-hub, .live-hub, .posts-hub, .games-hub) { padding: 0; }
   .directory-page > .directory-body { flex-direction: column; gap: 0; }
   .directory-page .directory-filters {
     flex-direction: row;
@@ -188,6 +228,7 @@
     animation: auroraqua-panel-from-top var(--auroraqua-duration) var(--auroraqua-ease-out);
   }
   .directory-page .directory-filter-decor { display: none; }
+  .directory-page .directory-filter-header { display: none; }
   .directory-page .directory-filter { justify-content: center; min-width: 44px; padding-inline: var(--sp-2); }
   .directory-page .directory-content {
     padding: var(--sp-2) var(--sp-4) calc(68px + env(safe-area-inset-bottom));

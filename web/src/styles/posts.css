@@ -584,21 +584,13 @@
 
 /* ================= 一级帖子 tab（PostsHubPage） ================= */
 
+/* 滚动容器已迁移到 .directory-content（directory-page 布局）；根元素只负责
+   flex column 骨架，overflow 由 directory-filters.css 统一接管。 */
+
 .posts-hub {
   height: 100%;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-}
-
-.posts-hub-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-4);
-  border-bottom: 1px solid var(--glass-border);
 }
 
 .my-posts-head {
@@ -641,15 +633,7 @@
 }
 
 @media (min-width: 769px) {
-  .posts-hub-head,
   .my-posts-head {
-    max-width: 680px;
-    width: 100%;
-    margin: 0 auto;
-  }
-
-  .posts-feed,
-  .posts-skeleton {
     max-width: 680px;
     width: 100%;
     margin: 0 auto;
@@ -657,19 +641,12 @@
 }
 
 /* 宽屏双列瀑布流（>1024px，方案 §4-U2）：两列等宽错排，较矮列优先由 JS 分配。
-   左右留白与语音/桌游/直播列表统一（1200px 容器 + padding var(--sp-4) var(--sp-6)） */
+   左右留白由 .directory-content 统一提供（directory-page 布局）。 */
 @media (min-width: 1025px) {
-  .posts-hub-head,
   .my-posts-head {
     max-width: 1200px;
     padding-left: var(--sp-6);
     padding-right: var(--sp-6);
-  }
-
-  .posts-feed,
-  .posts-skeleton {
-    max-width: 1200px;
-    padding: var(--sp-4) var(--sp-6);
   }
 
   .posts-skeleton {
@@ -692,12 +669,6 @@
   /* 加载更多提示横跨两列底部 */
   .posts-feed.is-masonry .home-load-more {
     flex-basis: 100%;
-  }
-}
-
-@media (max-width: 768px) {
-  .posts-feed {
-    max-width: 100%;
   }
 }
 

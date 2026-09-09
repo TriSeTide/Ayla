@@ -486,25 +486,31 @@
 
 /* ================= 一级语音聚合页（F5） ================= */
 
+/* 滚动容器已迁移到 .directory-content（directory-page 布局）；根元素只负责
+   flex column 骨架，overflow/padding 由 directory-filters.css 统一接管。 */
+
 .voice-hub {
   height: 100%;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding-bottom: 68px; /* 窄屏避让 FAB */
+}
+
+/* 直达进房加载态（/voice/:id 列表未返回，无 directory-page 布局）：保持自身可滚动 */
+.voice-hub:not(.directory-page) {
+  overflow-y: auto;
 }
 
 /* ---- 语音卡片网格（需求：宽屏窄屏统一卡片布局，与直播/桌游同构） ---- */
 
 .voice-hub .voice-channel-list,
-.voice-hub > .conv-loading {
+.voice-hub .conv-loading {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
 }
 
-.voice-hub > .conv-loading {
+.voice-hub .conv-loading {
   flex: none;
   width: 100%;
   min-width: 0;
@@ -639,23 +645,15 @@
 }
 
 @media (min-width: 769px) {
-  .voice-hub {
-    padding-bottom: var(--sp-4);
-  }
-
   .voice-hub .voice-channel-list,
-  .voice-hub > .conv-loading {
+  .voice-hub .conv-loading {
     grid-template-columns: repeat(3, 1fr);
-    max-width: 1200px;
-    width: 100%;
-    margin: 0 auto;
-    padding: var(--sp-4) var(--sp-6);
   }
 }
 
 @media (min-width: 1440px) {
   .voice-hub .voice-channel-list,
-  .voice-hub > .conv-loading {
+  .voice-hub .conv-loading {
     grid-template-columns: repeat(4, 1fr);
   }
 }

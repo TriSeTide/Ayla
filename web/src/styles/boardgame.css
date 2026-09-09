@@ -220,12 +220,13 @@
 
 /* ================= 一级桌游聚合页 ================= */
 
+/* 滚动容器已迁移到 .directory-content（directory-page 布局）；根元素只负责
+   flex column 骨架，overflow/padding 由 directory-filters.css 统一接管。 */
+
 .games-hub {
   height: 100%;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding-bottom: 68px;
 }
 
 .games-grid {
@@ -236,16 +237,8 @@
 }
 
 @media (min-width: 769px) {
-  .games-hub {
-    padding-bottom: var(--sp-4);
-  }
-
   .games-grid {
     grid-template-columns: repeat(4, 1fr);
-    max-width: 1200px;
-    width: 100%;
-    margin: 0 auto;
-    padding: var(--sp-4) var(--sp-6);
   }
 }
 

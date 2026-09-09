@@ -247,7 +247,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
   | 窄屏直播间同类切换 | inner pager保留原手势方向的20px位移 + 淡入，300ms easeInOut | 反向20px + 淡出 | 直播间路由详情key归一，保持单播放器运行实例；视频/弹幕分区各自重播见上文 |
 
 - **消息到达**：仅新到达的乐观消息或 WS 实时消息挂 `.msg-arrive`，复用 `frost-rise` 从下方 8px 浮入 + 淡入，180ms；初始历史加载、滚动恢复和重新挂载的历史消息不播放到达动画，不弹跳。
-- **滚动恢复与 stagger 互斥**：命中`useScrollRestore`的历史位置（包括显式保存的`scrollTop=0`）时，先恢复内容高度与位置，恢复节点禁止`.reveal-item`/stagger。增量列表后续分页、实时新增或刷新产生的新DOM才播放进入，刷新保留的DOM不重播；未改为增量hook的既有静态内容继续使用自身reveal。
+- **滚动恢复与 stagger 互斥**：命中`useScrollRestore`的历史位置（包括显式保存的`scrollTop=0`）时，先恢复内容高度与位置，恢复节点禁止`.reveal-item`/stagger。增量列表后续分页、实时新增或刷新产生的新DOM才播放进入；刷新保留的DOM不重挂，但刷新完成后经`useListEntryMotion`的`replayKey`整批重播一次浮入（第一页也有动画，见 §7.1）；未改为增量hook的既有静态内容继续使用自身reveal。
 - 常驻环境动画仅两个：光环呼吸 + 流体极光背景（§7.2）；其余装饰性循环动画禁止
 - 骨架屏：所有 >300ms 的异步加载用 `animate-pulse` 风格骨架（玻璃质感骨架块），禁止白屏/冻结
 - `prefers-reduced-motion`：关闭呼吸、浮入与跟手位移；新分区与增量列表直接显示最终opacity/transform，不等待渐变。拖拽/切换必须退化为可用的直接控件路径。
@@ -258,7 +258,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - **CSS**：`base.css` 的 `.reveal` 初始 `opacity:0 + translateY(20px)`，`.reveal.is-in` 300ms Auroraqua easeOut 回到正常位置；`prefers-reduced-motion` 下直接呈现。
 - **静态样式元素**：既有`.reveal-item`保留给尚未改为增量DOM入场的内容与评论（20px/300ms），`staggerDelay`每项50ms、累计封顶300ms。
-- **增量列表**：收藏、搜索、帖子与目录卡片使用`useListEntryMotion`记录已经出现的实际DOM；首屏、加载下一页和实时新增都只让新节点从下20px/300ms进入，批内50ms错峰封顶300ms。已存在卡片不重播，刷新不以key重挂整个列表；减少动态或滚动恢复阶段直接呈现新建DOM，恢复结束后真正追加的新卡仍可入场。
+- **增量列表**：收藏、搜索、帖子与目录卡片使用`useListEntryMotion`记录已经出现的实际DOM；首屏、加载下一页和实时新增都只让新节点从下20px/300ms进入，批内50ms错峰封顶300ms。已存在卡片不重播，刷新不以key重挂整个列表；减少动态或滚动恢复阶段直接呈现新建DOM，恢复结束后真正追加的新卡仍可入场。**刷新反馈**：各列表页（帖子/直播/语音/桌游及群内对应子界面、收藏、搜索、帖子详情评论）在刷新完成后递增`replayKey`，`useListEntryMotion`对已入场卡片整批重播一次浮入（同样20px/300ms、50ms错峰封顶300ms），让第一页也有动画；重播不重挂DOM、不动seen，保留滚动位置与焦点，新增卡片仍由主effect单独入场不重复播放，`prefers-reduced-motion`与滚动恢复抑制期不重播。
 - **目录活动排序**：语音/直播WS真实sortIdentity变化沿用原业务排序，即时重排当前查询已加载卡，复用旧DOM、不重播入场；正常metadata/count/activity更新不使分页失效，后续页沿原cursor并按ID去重。仅部分目录的真实成员集合/过滤归属变化提供明确刷新入口，完整目录直接同步增删与总数；普通metadata/count变化与分页append不重排，不能把“新页不搬动旧卡”扩大为取消原活动排序。语音侧栏同一稳定UL保存已加载行，折叠仅显示前三项/92px、尾项不可交互，展开恢复auto高度；位置FLIP为300ms easeOut，排序立即生效且不改写scrollTop。完整分页契约见[目录分页架构](architecture/catalog-pagination.md)。
 - **语音选择与连接**：侧栏选中胶囊按路由voiceChannelId立即更新，独立于实际媒体currentChannelId；真实成员活动排序仍即时生效。`.channel-sidebar-list`滚动根登记`layoutScroll`并禁用原生`overflow-anchor`，保留同DOM位置FLIP，避免排序时浏览器锚定把scrollTop跳回。语音房行的胶囊设`sharedLayout=false`，背景随父行一起移动，不再以第二套共享layout投影反向抵消父行位移；其他导航继续使用原共享胶囊过渡。快速切换的共享选择/REST补偿/媒体取消见[语音会话切换](architecture/voice-session-switching.md)，不能用等待连接来延迟导航反馈。
 - **侧栏吸附标题阅读边界**：聊天、语音、直播与固定帖子、桌游共用`.channel-scene`未选/选中/hover材料；上三行没有独立底色或额外backdrop-filter。`useSidebarContentClip`读取同一滚动区内实际标题矩形、可视边界和row-gap，把三个原下拉容器的绘制裁剪在自身标题下方与下一标题上方；标题吸顶、吸底及相邻4px间隙均不绘制后方条目。裁剪不改变列表DOM、尺寸、排序、scrollTop或分页，行FLIP继续由原节点持有；scroll、ResizeObserver与仅直接childList的MutationObserver同步，卸载回收监听、观察器及自身clip。不能把裁剪后的几何存在或单次命中检查当作完整键盘可达性证明。
@@ -518,11 +518,29 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 窄屏独立搜索页：TopBar 变搜索输入态（自动聚焦）；历史搜索胶囊 chips（`--ice-100` 底 `--text-primary` 字，可清空）
 - 搜索提供“全部、用户、群聊、帖子、直播间、语音房、桌游室”七个筛选。全部保留六类分组（用户/群聊/帖子/直播间/语音房/桌游室）和各组独立续页，类型筛选仅显示对应类别。查询、分类、账号共同隔离缓存与滚动位置；切换新分类从顶部开始，返回已浏览分类恢复原位置，旧请求不得落到新分类。
 - 当前搜索页通过宽/窄顶栏提交或清空关键词时保留有效分类；从其他页面新发起搜索默认全部。顶栏在搜索页随URL关键词更新，只有分类变化时不覆盖尚未提交的输入。
-- 搜索与收藏共用`DirectoryFilters`：>768px为176px左栏，页面12px外沿、筛选与结果之间12px间隔，结果轨道填满余宽；≤768px为结果区上方固定筛选，单行横向滚动（可左右滑动），选中项自动滚入可视区。筛选处于结果滚动容器之外，滚动结果不能带走筛选或上方导航。筛选支持方向键、Home/End、选中态与tabpanel关联，减少动态时直接归位。
+- 搜索与收藏共用`DirectoryFilters`：>768px为224px左栏，页面12px外沿、筛选与结果之间12px间隔，结果轨道填满余宽；≤768px为结果区上方固定筛选，单行横向滚动（可左右滑动），选中项自动滚入可视区。筛选处于结果滚动容器之外，滚动结果不能带走筛选或上方导航。筛选支持方向键、Home/End、选中态与tabpanel关联，减少动态时直接归位。
 - 搜索窄屏顶栏贴顶铺满：`.narrow-topbar` 在 ≤768px 取消外边距、圆角与阴影，仅保留底部分隔线，与筛选条同属方角顶栏；收藏页独立顶栏已移除，窄屏改用 AppShell 收藏态顶栏（返回键 +「我的收藏」标题 + 更多菜单），宽屏由侧栏左上角返回键承担。宽屏侧栏（`.directory-filters`）与窄屏顶栏/筛选条挂载时分别按 `auroraqua-sidebar-in`（左入）与 `auroraqua-panel-from-top`（上入）滑入，`prefers-reduced-motion` 直接归位。
 - 搜索所有选项卡在>768px统一两列瀑布：全部按分组瀑布（`columns:2` + `column-gap:24px` + `break-inside:avoid`，组块不跨列、列间高度自然平衡，不留空行），单个类型按卡片瀑布（组内 `columns:2`，卡片不跨列）；≤768px 单列。历史、加载、错误、空状态共用结果轨道。用户结果姓名/签名上下排并可省略；群结果使用36px `Avatar` 展示既有搜索接口返回的群头像，资源为空或失败时使用组件原有回退，不从聊天store补造结果。内部图片仍走鉴权签名路径，群头像公开边界仅限被可发现群完整引用的图片；私聊头像与普通附件保留原权限，详见媒体架构文档。
-- 搜索/收藏宽屏侧栏顶部各有一个仅装饰的线性图标（搜索=放大镜，收藏=爱心）：52px、`--ice-500` 低透明度、`-8deg` 倾角、`pointer-events:none`，不作为按钮；选项卡整体随之下移。窄屏隐藏装饰图标，保持单行方角筛选条。
+- 搜索/收藏宽屏侧栏顶部各有一个仅装饰的线性图标（搜索=放大镜，收藏=爱心）：64px、`--pink-500` 低透明度（opacity 0.42）、`-8deg` 倾角、`pointer-events:none`，不作为按钮；选项卡整体随之下移。窄屏隐藏装饰图标，保持单行方角筛选条。
 - `/search` 与收藏同样属于面板自编排路由：整页转场外层立即归位，窄屏顶栏/筛选条及宽屏侧栏分别复用 `auroraqua-panel-from-top` / `auroraqua-sidebar-in` 滑入，避免整页位移覆盖内部滑入动画。
+
+### 12.9.1 分类选项卡 DirectoryFilters（6 页面共用）
+
+> 搜索、收藏、语音（/voice）、直播（/live）、帖子（/posts）、桌游（/games）六个一级页面共用同一 `DirectoryFilters` 组件与 `directory-filters.css` 布局（2026-09-09 起覆盖 6 页面）。组件零改动复用，页面只传参。
+
+- **布局**：页面根元素加 `directory-page` 类（`height:100% + overflow:hidden + flex column`），内包 `directory-body`（`flex:1 1 0` 横排，gap 12px）。宽屏左侧 224px 玻璃侧栏（`auroraqua-sidebar-in` 从左滑入）；窄屏（≤768px）转为顶部水平选项卡（`auroraqua-panel-from-top` 从顶滑入，`flex:none` 固定不随内容滚动，`touch-action: pan-x` 横向滑动，选项卡多时可横滑）。
+- **滚动容器迁移（窄屏顶栏固定的前提）**：滚动必须由 `.directory-content`（`overflow-y:auto`）持有；页面根元素不得残留 `overflow-y:auto`（否则双层滚动或顶栏跟随滚动）。各页面的 onScroll（分页加载/滚动恢复）、`useScrollRestore`、`useListEntryMotion`、下拉刷新 `isAtTop` 全部挂到 `.directory-content`。窄屏内容区 `padding-bottom: calc(68px + env(safe-area-inset-bottom))` 避让 FAB。
+- **内容区**：`.directory-content` 占满侧栏右侧（`flex:1 1 0`），内部网格/瀑布流列数断点与卡片样式保持各页面原样，只去掉原 max-width 居中容器（语音/直播/桌游 1200px、帖子 680px）；列表左右 padding 归零由内容区统一提供，宽屏首卡顶边与侧栏顶边对齐。
+- **装饰与标题（宽屏侧栏，窄屏隐藏）**：decor 图标 64px、`--pink-500`、opacity 0.42、rotate -8deg、`pointer-events:none`——搜索 IconSearch / 收藏 IconHeart / 语音 IconMic / 直播 IconVideo / 帖子 IconPost / 桌游 IconGame；下方 header = kicker（10px Fredoka 粉色大写）+ 标题（17px Fredoka 700）+ 统计行（12px Space Grotesk `--text-secondary`）。统计：语音「X 房间在线 · Y 人在聊」（directory.total / totalMemberCount）、直播「X 直播间 · Y 在播」（total + 已加载在播数）、帖子「X 条帖子」（已加载数）、桌游「X 个房间」（total）；拿不到统计只放 kicker + 标题。
+- **选项卡与过滤（全部前端实现，分页加载后过滤够用）**：
+  - 语音：全部 / 公开 / 好友 / 有人（member_count>0）/ 我的（owner_id=当前用户）
+  - 直播：全部 / 在播（status=live）/ 公开 / 好友 / 停播（status≠live）/ 我的（is_owner）
+  - 帖子：全部 / 热门（view_count 降序，唯一排序例外）/ 公开 / 好友 / 我的（is_author，前端过滤已加载数据，不重拉 scope=mine）
+  - 桌游：全部 / 公开 / 好友 / 我的（is_owner）/ 等待中（status=waiting）/ 对局中（status=playing）
+  - 排序除帖子热门外全部保持原页面排序（语音有人区优先+last_occupied_at、直播在播优先+started_at、桌游 created_at 倒序、帖子 feed 原顺序）
+- **状态保持**：选项卡切换用 URL search 参数（?type=xxx，与收藏/搜索一致），支持返回/刷新保持；各 tab 独立滚动位置（`useScrollRestore`，scope 含 filter）；切换时内容区重挂载（key=scope）走 `directory-content-in` 淡入上移动画（300ms，reduced-motion 关闭）。
+- **无返回键**：六个页面均不传 `leading`（窄屏由 AppShell 顶栏承担返回语义）。
+- **过滤空态**：非「全部」tab 过滤后为空时显示分类空态（「这个分类还没有…」+ 换分类引导）；「全部」tab 空态保持各页面原文案。
 
 ### 12.10 语音房卡片与语音房
 

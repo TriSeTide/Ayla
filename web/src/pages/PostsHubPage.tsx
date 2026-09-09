@@ -12,24 +12,35 @@
  * - U14：返回保留滚动位置（useScrollRestore，恢复路径禁 stagger）；
  * - 3.3：下拉刷新（PullToRefresh）。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
 import { PostCard } from "../components/posts/PostCard";
 import { StablePaginationFooter } from "../components/StablePaginationFooter";
 import { PullToRefresh } from "../components/motion/PullToRefresh";
 import { useMasonryColumns } from "../hooks/useMasonryColumns";
-import { useMediaQuery } from "../hooks/useMediaQuery";
+import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { usePostsStore, isPostsStale } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
 import { usePostViewTracking } from "../hooks/usePostViewTracking";
+import { DirectoryFilters } from "../components/DirectoryFilters";
+import { IconPost } from "../components/icons";
 import { chatWS } from "../ws/chat";
 
 /** 瀑布流断点：>1024px 双列（方案 §4-U2；design.md §9 断点 1024）。 */
 const MASONRY_QUERY = "(min-width: 1025px)";
+
+type PostFilter = "all" | "hot" | "public" | "friends" | "mine";
+const FILTERS: ReadonlyArray<{ key: PostFilter; label: string }> = [
+  { key: "all", label: "全部" },
+  { key: "hot", label: "热门" },
+  { key: "public", label: "公开" },
+  { key: "friends", label: "好友" },
+  { key: "mine", label: "我的" },
+];
 
 export function PostsHubPage() {
   const navigate = useNavigate();
@@ -37,18 +48,34 @@ export function PostsHubPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nextPageError, setNextPageError] = useState<string | null>(null);
   const [resumeEntry, setResumeEntry] = useState(false);
+  // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
   const requestOwner = useRef({ active: false, revision: 0, busy: false, nextFailed: false, deletedIds: new Set<number>() });
 
   const hubRef = useRef<HTMLDivElement>(null);
   // 视口浏览上报（浏览与已读同源）：进入视口即加浏览，无需点击
   usePostViewTracking(hubRef);
+  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
+  const selectionId = useId();
+  const [params, setParams] = useSearchParams();
+  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
+  const scrollRestoreKey = `posts-feed:${filter}`;
   // U14：返回保留滚动位置（restoring 时禁 reveal stagger）
-  const scrollRestoreKey = "posts-feed";
   const { restoring } = useScrollRestore(scrollRestoreKey, hubRef, { ready: posts.length > 0 || !loading });
-  useListEntryMotion(hubRef, ".posts-feed-item", restoring && !resumeEntry);
+  useListEntryMotion(hubRef, ".posts-feed-item", restoring && !resumeEntry, replayNonce);
+  const isNarrow = useMediaQuery(NARROW_QUERY);
   const isMasonry = useMediaQuery(MASONRY_QUERY);
   const columnCount = isMasonry ? 2 : 1;
-  const { columns, columnRefs } = useMasonryColumns(posts, columnCount, (p) => p.id, "posts-feed");
+  // 过滤/排序全部前端实现（对已加载数据）：公开/好友/我的按字段过滤；
+  // 热门按 view_count 降序（唯一排序例外，其余保持 feed 原顺序）
+  const visiblePosts = useMemo(() => {
+    if (filter === "hot") return [...posts].sort((a, b) => b.view_count - a.view_count);
+    if (filter === "public") return posts.filter((post) => post.visibility === "public");
+    if (filter === "friends") return posts.filter((post) => post.visibility === "friends");
+    if (filter === "mine") return posts.filter((post) => post.is_author);
+    return posts;
+  }, [posts, filter]);
+  const { columns, columnRefs } = useMasonryColumns(visiblePosts, columnCount, (p) => p.id, `posts-feed:${filter}`);
 
   // 首页替换拥有新revision；迟到的追加响应不得覆写新首页和游标。
   const requestPage = useCallback(async (kind: "first" | "refresh" | "append") => {
@@ -162,7 +189,11 @@ export function PostsHubPage() {
   };
 
   // 刷新保留现有卡片；新revision使此前追加失效，失败仍可继续原cursor。
-  const refresh = useCallback(() => requestPage("refresh"), [requestPage]);
+  // 刷新完成后递增 replayNonce，让已入场卡片整批重播浮入（第一页也有动画）。
+  const refresh = useCallback(async () => {
+    await requestPage("refresh");
+    setReplayNonce((n) => n + 1);
+  }, [requestPage]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
@@ -174,73 +205,95 @@ export function PostsHubPage() {
     };
   }, [refresh]);
 
-  // 下拉刷新仅当滚动容器（.posts-hub）已在顶部时响应
+  // 下拉刷新仅当滚动容器（.directory-content）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
   return (
-    <div className="posts-hub" ref={hubRef} onScroll={(e) => handleScroll(e.currentTarget)}>
-      <div className="posts-hub-head">
-        <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
-      </div>
-      {loadError && posts.length > 0 && <div className="chat-notice" role="alert">{loadError}</div>}
-      {loading && posts.length === 0 ? (
-        <div className="posts-skeleton">
-          <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
-          <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
-          <div className="skeleton" style={{ height: 120 }} />
-        </div>
-      ) : error && posts.length === 0 ? (
-        <div className="home-state" role="alert">
-          <p className="placeholder-desc">{loadError ?? error}</p>
-          <button type="button" className="btn btn-ghost" onClick={loadFirst}>
-            重试
-          </button>
-        </div>
-      ) : posts.length === 0 ? (
-        <div className="home-state">
-          <h2 className="placeholder-title">还没有帖子</h2>
-          <p className="placeholder-desc">点右下角 + 发布第一条帖子</p>
-        </div>
-      ) : (
-        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`}>
-            {columns.map((colItems, colIdx) => (
-              <div key={colIdx} className="posts-masonry-col" ref={columnRefs[colIdx]}>
-                {colItems.map((p) => {
-                  return (
-                    <div
-                      key={p.id}
-                      data-post-id={p.id}
-                      className="posts-feed-item"
-                    >
-                      <PostCard
-                        post={p}
-                        onOpen={() => {
-                          // 详情入口同步保存，避免 AnimatePresence 退出阶段覆盖记录。
-                          saveScrollPosition(scrollRestoreKey, hubRef.current);
-                          navigate(`/posts/${p.id}`);
-                        }}
-                      />
+    <div className="posts-hub directory-page">
+      <div className="directory-body">
+        <DirectoryFilters id={selectionId} label="帖子分类" options={FILTERS} value={filter} narrow={isNarrow}
+          className="posts-filters" buttonClassName="posts-filter"
+          onChange={(next) => {
+            saveScrollPosition(scrollRestoreKey, hubRef.current);
+            setParams(next === "all" ? {} : { type: next }, { replace: true });
+          }}
+          decor={<IconPost width={64} height={64} className="directory-filter-decor posts-filter-decor" role="presentation" aria-hidden="true" />}
+          header={<div className="directory-filter-header">
+            <span className="directory-filter-kicker">Posts</span>
+            <span className="directory-filter-title">帖子</span>
+            {posts.length > 0 && <span className="directory-filter-stats">{posts.length} 条帖子</span>}
+          </div>} />
+        <div key={scrollRestoreKey} className="directory-content posts-content" ref={hubRef}
+          id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}
+          onScroll={(e) => handleScroll(e.currentTarget)}>
+          {loadError && posts.length > 0 && <div className="chat-notice" role="alert">{loadError}</div>}
+          {loading && posts.length === 0 ? (
+            <div className="posts-skeleton">
+              <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
+              <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
+              <div className="skeleton" style={{ height: 120 }} />
+            </div>
+          ) : error && posts.length === 0 ? (
+            <div className="home-state" role="alert">
+              <p className="placeholder-desc">{loadError ?? error}</p>
+              <button type="button" className="btn btn-ghost" onClick={loadFirst}>
+                重试
+              </button>
+            </div>
+          ) : posts.length === 0 ? (
+            <div className="home-state">
+              <h2 className="placeholder-title">还没有帖子</h2>
+              <p className="placeholder-desc">点右下角 + 发布第一条帖子</p>
+            </div>
+          ) : (
+            <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+              {visiblePosts.length === 0 && filter !== "all" ? (
+                <div className="home-state">
+                  <h2 className="placeholder-title">这个分类还没有帖子</h2>
+                  <p className="placeholder-desc">换个分类看看</p>
+                </div>
+              ) : (
+                <div className={`posts-feed${isMasonry ? " is-masonry" : ""}`}>
+                  {columns.map((colItems, colIdx) => (
+                    <div key={colIdx} className="posts-masonry-col" ref={columnRefs[colIdx]}>
+                      {colItems.map((p) => {
+                        return (
+                          <div
+                            key={p.id}
+                            data-post-id={p.id}
+                            className="posts-feed-item"
+                          >
+                            <PostCard
+                              post={p}
+                              onOpen={() => {
+                                // 详情入口同步保存，避免 AnimatePresence 退出阶段覆盖记录。
+                                saveScrollPosition(scrollRestoreKey, hubRef.current);
+                                navigate(`/posts/${p.id}`);
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            ))}
-            <StablePaginationFooter className="home-load-more" aria-hidden={!hasMore && !loading}>
-              {hasMore && <>
-                {nextPageError && <span role="alert">{nextPageError}</span>}
-                {loading ? (
-                  <span className="pagination-loading-dots" role="status" aria-label="加载更多"><span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" /></span>
-                ) : (
-                  <button type="button" className="btn btn-ghost" onClick={() => void requestPage("append")}>
-                    {nextPageError ? "重试加载更多" : "加载更多"}
-                  </button>
-                )}
-              </>}
-            </StablePaginationFooter>
-          </div>
-        </PullToRefresh>
-      )}
+                  ))}
+                  <StablePaginationFooter className="home-load-more" aria-hidden={!hasMore && !loading}>
+                    {hasMore && <>
+                      {nextPageError && <span role="alert">{nextPageError}</span>}
+                      {loading ? (
+                        <span className="pagination-loading-dots" role="status" aria-label="加载更多"><span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" /></span>
+                      ) : (
+                        <button type="button" className="btn btn-ghost" onClick={() => void requestPage("append")}>
+                          {nextPageError ? "重试加载更多" : "加载更多"}
+                        </button>
+                      )}
+                    </>}
+                  </StablePaginationFooter>
+                </div>
+              )}
+            </PullToRefresh>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

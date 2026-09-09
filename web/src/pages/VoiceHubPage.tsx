@@ -6,8 +6,8 @@
  * 群会话（仅群语音房，开发文档 §1.9）；返回键回卡片列表（底栏复位）。
  * 建语音房走右下 FAB（CreateFab handler=voice，F5 接线）。
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getElysiaProfile } from "../api/elysia";
 import * as voiceApi from "../api/voice";
 import type { ElysiaProfile } from "../api/types";
@@ -23,8 +23,21 @@ import { useVoiceChannel } from "../hooks/useVoiceChannel";
 import { useVoiceStore } from "../stores/voice";
 import { useDirectoryPage } from "../hooks/useDirectoryPage";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
+import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
+import { DirectoryFilters } from "../components/DirectoryFilters";
+import { IconMic } from "../components/icons";
+import { useAuthStore } from "../stores/auth";
 import { voiceWS } from "../ws/voice";
+
+type VoiceFilter = "all" | "public" | "friends" | "occupied" | "mine";
+const FILTERS: ReadonlyArray<{ key: VoiceFilter; label: string }> = [
+  { key: "all", label: "全部" },
+  { key: "public", label: "公开" },
+  { key: "friends", label: "好友" },
+  { key: "occupied", label: "有人" },
+  { key: "mine", label: "我的" },
+];
 
 export function VoiceHubPage() {
   const navigate = useNavigate();
@@ -43,7 +56,29 @@ export function VoiceHubPage() {
   // 删除语音房确认弹窗
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const hubRef = useRef<HTMLDivElement>(null);
-  useListEntryMotion(hubRef, ".voice-channel-card-wrap");
+  // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
+  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
+  const selectionId = useId();
+  const [params, setParams] = useSearchParams();
+  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
+  const scope = `voice-hub:${filter}`;
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  // 过滤全部前端实现（用户自建房间量级小，分页加载后过滤够用）；排序保持 directory 原排序
+  const visibleChannels = useMemo(() => {
+    if (filter === "all") return directory.items;
+    return directory.items.filter((channel) => {
+      switch (filter) {
+        case "public": return channel.visibility === "public";
+        case "friends": return channel.visibility === "friends";
+        case "occupied": return channel.member_count > 0;
+        case "mine": return channel.owner_id === currentUserId;
+        default: return true;
+      }
+    });
+  }, [directory.items, filter, currentUserId]);
+  const { restoring } = useScrollRestore(scope, hubRef, { ready: !channelsLoading || directory.items.length > 0 });
+  useListEntryMotion(hubRef, ".voice-channel-card-wrap", restoring, replayNonce);
   // 记录上次已触发 join 的路由频道 id：仅当 routeChannelId 变化时才 join，
   // 避免 leave 清空 currentChannelId 后、navigate 尚未更新路由的窗口里被 effect 误判
   // 为"需要重新加入"而把用户拉回房间（"离开不了"）；离房时清空以支持再次进入。
@@ -66,18 +101,23 @@ export function VoiceHubPage() {
 
   const refresh = directory.refresh;
   const loadChannels = directory.refresh;
+  // 刷新键/下拉刷新共用：刷新完成后重播已入场卡片浮入
+  const refreshWithReplay = useCallback(async () => {
+    await refresh();
+    setReplayNonce((n) => n + 1);
+  }, [refresh]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
-    useShellStore.getState().registerRefresh(refresh);
+    useShellStore.getState().registerRefresh(refreshWithReplay);
     return () => {
-      if (useShellStore.getState().refreshCallback === refresh) {
+      if (useShellStore.getState().refreshCallback === refreshWithReplay) {
         useShellStore.getState().registerRefresh(null);
       }
     };
-  }, [refresh]);
+  }, [refreshWithReplay]);
 
-  // 上拉刷新仅当滚动容器（.voice-hub）已在顶部时响应
+  // 上拉刷新仅当滚动容器（.directory-content）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
 
   // 进房/退房：底栏下滑走（R-V2，与直播同向）。路由是壳层底栏是否让位的唯一事实：
@@ -229,36 +269,65 @@ export function VoiceHubPage() {
   </div></div>;
 
   return (
-    <div className="voice-hub" ref={hubRef} onScroll={(event) => directory.onScroll(event.currentTarget)}>
-      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
-       {notice && (
-        <div
-          className="chat-notice"
-          role="alert"
-          onClick={() => {
-            clearError();
-            loadChannels();
+    <div className="voice-hub directory-page">
+      <div className="directory-body">
+        <DirectoryFilters id={selectionId} label="语音分类" options={FILTERS} value={filter} narrow={isNarrow}
+          className="voice-filters" buttonClassName="voice-filter"
+          onChange={(next) => {
+            saveScrollPosition(scope, hubRef.current);
+            setParams(next === "all" ? {} : { type: next }, { replace: true });
           }}
-        >
-          {notice}（点击重试）
+          decor={<IconMic width={64} height={64} className="directory-filter-decor voice-filter-decor" role="presentation" aria-hidden="true" />}
+          header={<div className="directory-filter-header">
+            <span className="directory-filter-kicker">Voice</span>
+            <span className="directory-filter-title">语音房间</span>
+            {directory.total > 0 && <span className="directory-filter-stats">
+              {directory.totalMemberCount != null
+                ? `${directory.total} 房间在线 · ${directory.totalMemberCount} 人在聊`
+                : `${directory.total} 房间在线`}
+            </span>}
+          </div>} />
+        <div key={scope} className="directory-content voice-content" ref={hubRef}
+          id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}
+          onScroll={(event) => directory.onScroll(event.currentTarget)}>
+          {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
+          {notice && (
+            <div
+              className="chat-notice"
+              role="alert"
+              onClick={() => {
+                clearError();
+                loadChannels();
+              }}
+            >
+              {notice}（点击重试）
+            </div>
+          )}
+          {channelsLoading && directory.items.length === 0 ? (
+            <div className="conv-loading">
+              <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 64 }} />
+            </div>
+          ) : directory.error && directory.items.length === 0 ? <DirectoryLoadMore {...directory} /> : (
+            <PullToRefresh isAtTop={isAtTop} onRefresh={refreshWithReplay}>
+              {visibleChannels.length === 0 && filter !== "all" ? (
+                <div className="home-state">
+                  <h3 className="placeholder-title">这个分类还没有语音房</h3>
+                  <p className="placeholder-desc">换个分类看看</p>
+                </div>
+              ) : (
+                <VoiceChannelList
+                  channels={visibleChannels}
+                  currentChannelId={currentChannelId}
+                  joining={joining}
+                  onJoin={handleJoin}
+                />
+              )}
+              <DirectoryLoadMore {...directory} />
+            </PullToRefresh>
+          )}
         </div>
-      )}
-      {channelsLoading && directory.items.length === 0 ? (
-        <div className="conv-loading">
-          <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
-          <div className="skeleton" style={{ height: 64 }} />
-        </div>
-      ) : directory.error && directory.items.length === 0 ? <DirectoryLoadMore {...directory} /> : (
-        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          <VoiceChannelList
-            channels={directory.items}
-            currentChannelId={currentChannelId}
-            joining={joining}
-            onJoin={handleJoin}
-          />
-          <DirectoryLoadMore {...directory} />
-        </PullToRefresh>
-      )}
+      </div>
     </div>
   );
 }
