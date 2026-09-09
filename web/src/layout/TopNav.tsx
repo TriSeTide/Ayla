@@ -146,6 +146,12 @@ export function TopNav({
         ))}
       </nav>
 
+      {/* 品牌 logo：导航条水平居中（绝对定位于两端集群之间的空白区），点击回主页；
+          屏幕变窄（≤900px）中间空白不足时隐藏 */}
+      <Link to="/group" className="top-nav-logo" aria-label="Ayla 首页">
+        Ayla
+      </Link>
+
       <div className="top-nav-right">
         <Link
           to="/messages"

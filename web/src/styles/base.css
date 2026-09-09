@@ -533,6 +533,34 @@ a:hover {
   height: 18px;
 }
 
+/* ================= 全屏加载界面（FullScreenLoader） =================
+   进入网页/刷新/登录后，核心数据预加载完成前覆盖全屏（z 最高层）。
+   品牌 + 转圈直接浮于全局极光之上，无卡片容器。 */
+.fullscreen-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+}
+
+.fullscreen-loader-brand {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 600;
+  /* line-height ≥1.25 防 background-clip: text 裁剪字形（同 auth-brand 断言） */
+  line-height: 1.25;
+  background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 .skeleton {
   border-radius: var(--radius-sm);
   background: var(--glass-bg);

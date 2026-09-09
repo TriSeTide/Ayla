@@ -16,6 +16,7 @@
  * 如确需分包，应针对性只拆"重依赖"（livekit/hls）并常驻内存，不能整页懒加载。
  */
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useSyncExternalStore } from "react";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppShell } from "./layout/AppShell";
 import { ChatConversationRoute } from "./pages/ChatConversationRoute";
@@ -38,8 +39,16 @@ import { UserProfilePage } from "./pages/UserProfilePage";
 import { MinePostsRoute, UserPostsRoute } from "./pages/UserPostsRoute";
 import { NavigateBridge } from "./components/NavigateBridge";
 import OverlayScrollbar from "./components/overlay/OverlayScrollbar";
+import { FullScreenLoader } from "./components/FullScreenLoader";
+import { appInit } from "./appInit";
 
 export default function App() {
+  // 预加载门：进入网页/刷新由 main.tsx 等待完成；登录后由 useAuth 触发 run，
+  // 此处在 loading 期间渲染全屏加载界面，ready 后才渲染路由。
+  const initStatus = useSyncExternalStore(appInit.subscribe, () => appInit.status);
+  if (initStatus === "loading") {
+    return <FullScreenLoader />;
+  }
   return (
     <>
       <NavigateBridge />

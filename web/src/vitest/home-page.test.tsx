@@ -151,13 +151,14 @@ describe("HomePage 宽屏重定向", () => {
     expect(screen.getByRole("status")).toHaveTextContent("/profile");
     expect(screen.getByText("个人页内容")).toBeInTheDocument();
   });
-  it("会话请求未完成时显示骨架，确认空列表后才展示无群引导", async () => {
+  it("会话请求未完成时显示加载指示，确认空列表后才展示无群引导", async () => {
     mockMatchMedia(false);
     let resolveList!: (list: ConversationSummary[]) => void;
     vi.mocked(chatApi.listConversations).mockReturnValue(new Promise((resolve) => { resolveList = resolve; }));
     renderHome("/home");
 
-    expect(screen.getByRole("status", { name: "正在加载群聊" }).querySelector(".skeleton")).not.toBeNull();
+    // 宽屏跳转群页前不铺骨架，用轻量加载指示（spinner + 文字）
+    expect(screen.getByRole("status", { name: "正在加载群聊" }).querySelector(".loading-spinner")).not.toBeNull();
     expect(screen.queryByText("还没有加入群聊")).not.toBeInTheDocument();
     expect(screen.queryByText("群聊场景")).not.toBeInTheDocument();
     await act(async () => resolveList([]));
@@ -165,7 +166,7 @@ describe("HomePage 宽屏重定向", () => {
     expect(screen.getByText("还没有加入群聊")).toBeInTheDocument();
   });
 
-  it("骨架等待结束拿到群后仍自动进入群聊", async () => {
+  it("加载等待结束拿到群后仍自动进入群聊", async () => {
     mockMatchMedia(false);
     let resolveList!: (list: ConversationSummary[]) => void;
     vi.mocked(chatApi.listConversations).mockReturnValue(new Promise((resolve) => { resolveList = resolve; }));
@@ -177,7 +178,7 @@ describe("HomePage 宽屏重定向", () => {
     expect(screen.queryByText("还没有加入群聊")).not.toBeInTheDocument();
   });
 
-  it("加载或重试失败显示错误并结束骨架，不冒充没有群", async () => {
+  it("加载或重试失败显示错误并结束加载，不冒充没有群", async () => {
     mockMatchMedia(false);
     vi.mocked(chatApi.listConversations).mockRejectedValueOnce(new Error("网络错误"));
     renderHome("/home");

@@ -214,14 +214,11 @@
   padding: 0 var(--sp-3) var(--sp-3);
 }
 
-/* 宽屏主页在会话GET完成前短暂展示骨架，沿用列表页内容轨道而不贴满视口。 */
-@media (min-width: 769px) {
-  .home-page > .home-grid[aria-hidden="true"] {
-    width: 100%;
-    max-width: 1200px;
-    margin-inline: auto;
-    padding: var(--sp-4) var(--sp-6);
-  }
+/* 宽屏主页在会话GET完成前不铺骨架（登录后宽屏主页即三列群聊界面，跳转前用轻量加载指示） */
+.home-loading {
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
 }
 
 .group-card {

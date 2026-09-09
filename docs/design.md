@@ -126,7 +126,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - 通用 `.glass-card` 与兼容类 `.solid-card` 统一使用 `--glass-bg` + `--glass-filter` + 完整 `1px --glass-border` + 16px `--radius-card` + `--glass-shadow`。旧 `.solid-card` 类名保留以兼容现有页面，不再代表不透明卡面。
 - `--glass-shadow` = `0 8px 32px rgba(70,91,146,.2), var(--glass-inset)`；可交互卡片 hover 为 `0 12px 40px rgba(70,91,146,.2)` 与同一内高光，上浮 2px、300ms ease；按下缩放 .99。
-- 密集小行卡使用 `--glass-shadow-compact`（4/16 阴影）；菜单用常规玻璃阴影；弹窗/认证卡使用 `--glass-bg-strong`、20px `--radius-panel`、`--glass-shadow-modal`（20/60 阴影）。所有 RGB 来自原系统。
+- 密集小行卡使用 `--glass-shadow-compact`（4/16 阴影）；菜单用常规玻璃阴影；弹窗使用 `--glass-bg-strong`、20px `--radius-panel`、`--glass-shadow-modal`（20/60 阴影）；认证页卡片改用普通玻璃 `--glass-bg` 并沿用 20px 面板圆角与 modal 阴影（见 §5 登录与注册）。所有 RGB 来自原系统。
 - 原“禁止重投影、仅靠实心/玻璃区分深度”规范已被本次需求替换：宽软阴影与顶沿高光是新的共同材料。同一视觉卡片只保留一个材料owner，内部布局块不得再叠玻璃底、blur与整块阴影；多张独立卡片的集合wrapper应透明。交互字段和独立浮层仍各自保留材料与状态，不能用`.glass .glass`泛选择器清除所有后代。
 - 已核对的单层组合：宽屏语音成员卡保留外卡、内`.voice-panel`透明；宽屏语音聊天卡的header/composer为透明布局并保留分隔边；直播aside内`.live-room-input > .danmaku-input-area`透明，窄屏普通观看独立input自己持有材料；自/他人`.profile-mine.solid-card`保留外卡，内部`.profile-section-row`无玻璃/blur/阴影，hover保留ice反馈。窄屏语音成员panel与展开聊天浮层保持各自独立材料；收藏、群信息各分卡、帖子正文卡已是单层，不改其背景。
 - 开播控制台`/live/start/:channelId`必须按`showOwnerPanel`的真实分支单独验收：`.live-owner-panel`与`.live-studio-stream`各是一张.55/16px/完整玻璃阴影与blur24卡，内部`.live-owner-visibility`保持透明布局和分隔边，推流值保持只读`code`语义。窄屏`.live-room-body.is-studio.is-narrow > .live-room-side`及其弹幕wrap明确无背景/blur/卡片阴影；240px高度、整页滚动、内部输入与原开播/保存/复制权限逻辑保持。
@@ -185,7 +185,10 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 登录与注册
 
-- `/login`、`/register`共用`auth.css`，认证专属样式不再散落在`app.css`。页面背景沿用全局极光，440px最大宽度的单一强玻璃卡片承载标题与表单，内部不再叠卡片材料。
+- `/login`、`/register`共用`auth.css`，认证专属样式不再散落在`app.css`。页面背景沿用全局极光；认证卡是唯一材料 owner，标题与表单透明、内部不再叠卡片材料。
+- 卡片材质用普通玻璃 `--glass-bg`（0.55）+ `--glass-filter` + 20px `--radius-panel` + `--glass-shadow-modal`，透出极光与光斑；不使用 `--glass-bg-strong`（0.78 在浅色极光上视觉近乎不透明）。认证卡内 `.field` 的 `--glass-border` 白边在浅玻璃上不可见，统一覆写为 `rgba(70,91,146,0.3)` 描边，focus 仍为辉光边。
+- **宽屏（>768px）左右分栏**：`.auth-page` 横排、两栏间距 `clamp(48px,6vw,96px)`；左栏 `.auth-intro` 品牌区（H1「Ayla」56px Fredoka 渐变字 + 22px 副题「爱莉的家」+ 15px 一句简介 `--text-secondary`；≥1024px 追加三枚特性胶囊，`--sakura-300` 底 / `--grape-700` 字），右栏 440px 玻璃表单卡，卡内标题降为 26px 分区标题层级，品牌主视觉让给左栏。左栏 `position: sticky; top: 50dvh; translate: 0 -50%` 钉在视口垂直中点，表单区滚动时品牌区保持原位；品牌字 `line-height ≥1.25`（Fredoka 圆体字形绘制区超出 1.1 行盒，`background-clip: text` 会裁掉超出盒外的字形——如 y 的底部变透明——行高不足时字号越大越明显）。
+- **窄屏（≤768px）**：`.auth-intro` 隐藏，退回 440px 居中单卡，卡内品牌 40px。
 - 卡片默认32px内沿与24px区块间距；≤480px或高度≤700px时卡片内沿24px、页面外沿16px并计入安全区。卡片可自然长高，页面统一滚动；短屏不能因居中裁掉表单头部或底部入口。
 - 字段与主操作至少44px高，输入使用统一`.field`，主提交保持原`btn-glow`，登录/注册互跳使用ghost按钮。错误保留可读正文和alert语义，注册字段校验使用`aria-invalid`与错误说明关联；请求期间显示真实pending状态，认证接口和校验规则保持原契约。
 
@@ -282,9 +285,16 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - 转圈使用 `base.css` 的 `.loading-spinner` 与唯一 `ayla-loading-spin`：`--loading-spin-duration:800ms`、linear、循环一整圈。默认/md为18px，sm为14px；2px环使用原ice轨道和indigo顶部，消息发送保留既有 `rgba(70,91,146,.25)` 轨道。消息历史、消息发送与下拉刷新复用同一类；RefreshFab的原SVG仅共享旋转配方，外形与请求状态保持。
 - 骨架统一 `.skeleton`：原玻璃底、白色亮边与 `frost-pulse` 的 `.55→.9→.55`，`--loading-pulse-duration:1600ms`、ease-in-out。span默认inline-block以兑现显式宽高，div保持块级布局；媒体/查看器骨架继续block撑满预留frame，避免资源就绪时跳动。可见范围群列表保留既有樱粉背景。
-- 骨架外层必须跟随真实内容的水平轨道，不能只改骨架内部padding：帖子/我的帖子用同一680→1200px限宽和16→24px内沿，宽屏双列；语音/直播加载区跟随真实列表的2/3/4列与max1200px，桌游和收藏直接复用各自轨道。帖子详情的满宽骨架有效区为680px，两侧16px外沿与加载后的正文卡边缘对齐；搜索当前为文字加载状态，仍使用结果轨道。宽屏主页在跳转群页前的骨架采用max1200px与24px内沿，窄屏共用原群卡网格。
+- 骨架外层必须跟随真实内容的水平轨道，不能只改骨架内部padding：帖子/我的帖子用同一680→1200px限宽和16→24px内沿，宽屏双列；语音/直播加载区跟随真实列表的2/3/4列与max1200px，桌游和收藏直接复用各自轨道。帖子详情的满宽骨架有效区为680px，两侧16px外沿与加载后的正文卡边缘对齐；搜索当前为文字加载状态，仍使用结果轨道。宽屏主页在跳转群页前不铺骨架（登录后宽屏主页即三列群聊界面，骨架与群页布局无法对应），用轻量加载指示（`.home-loading`：居中 `loading-spinner--md` + 「正在加载群聊…」文字）；窄屏共用原群卡网格骨架。
 - `prefers-reduced-motion` 下循环转圈与骨架脉冲均停止，保留静态加载标识、状态文字、aria语义和预留尺寸。不要在场景CSS重新声明同一种循环动画而绕过共同降级。
 - 此配方仅表示真实未完成的异步工作；加载、完成、失败与取消由原请求生命周期控制。页面进入、列表reveal、路由、消息到达、背景和光环属于各自原语，不能随加载样式统一而重放；LivePlayer的600ms单次刷新反馈保持其现有行为。
+
+### 7.4 全屏加载界面（FullScreenLoader）
+
+- 场景：进入网页 / 浏览器刷新 / 登录（注册）成功后，核心数据预加载完成前覆盖全屏——「所有页面完成预加载后才进入页面」，避免白屏、闪跳登录页与进入页面后又各自加载。
+- 预加载范围（`src/appInit.ts` 的 `appInit.run()`）：群列表、语音/直播/游戏目录、帖子信息流、私聊列表，与页面 store 全局预热共用，进各 hub 秒开。预加载失败不阻断（catch 后进入页面，页面内自行重试）；20s 硬上限兜底，个别请求异常挂起时不得永远卡在全屏加载界面。
+- 视觉：`.fullscreen-loader` 固定全屏（z-index 100 最高层），Ayla 品牌（40px Fredoka 渐变字，`line-height ≥1.25` 防 `background-clip: text` 裁字，同 auth-brand 断言）+ `loading-spinner--md` 垂直居中直接浮于极光背景之上，无卡片容器、不放文案行。
+- 生命周期：main.tsx 先渲染 loader 再 `await bootstrap()`（会话恢复 + 预加载）后渲染 App；App 订阅 appInit 状态，loading 期间渲染 loader；登录/注册成功经 useAuth 触发 `appInit.run()`，登出 `appInit.reset()` 使下一位用户重新预加载。
 
 ## 8. Do's and Don'ts
 
@@ -350,6 +360,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 - 容器：高 64px，原 `--glass-bg` + `--glass-filter`，顶部及左右外沿 12px 留白、16px 圆角、四向 `--glass-border` 与 `--glass-shadow`，常驻不滚走
 - 布局：左起 头像（40px 圆形带 `--ring-online` 光环，→个人界面）→ 一级模块文字链（主页/语音/直播/帖子/桌游，Nunito 700 15px `--text-primary`）→ 消息（带未读徽标）→ 搜索框（240px 胶囊，见 12.9）→ 更多（三，40px 图标按钮）
+- 品牌 logo（`.top-nav-logo`）：导航条水平居中（绝对定位于两端集群之间的空白区，`left:50% + translate(-50%)`，不参与内容宽度竞争），`Ayla` 22px Fredoka 600 渐变字标（indigo→grape，`line-height ≥1.25` 防 `background-clip: text` 裁字），hover 微提亮，点击回主页 /group；**≤1000px 隐藏**（中间空白不足约 58px 时与两端集群贴边，屏幕变窄不足以显示即隐藏），>1000px 显示
 - 当前模块：原文字颜色 + 12px 圆角的 `--nav-active-bg` 胶囊、高光与柔光；`AuroraquaNavHighlight` 300ms 移动，不再显示独立底部线
 - hover：模块文字底 `rgba(157,191,230,0.18)` 胶囊（200ms 过渡）
 - 模块文字必须单行、不收缩成竖排；769–900px 将模块间距收为4px、两端内边距8px，导航外壳内边距/间隙12px，搜索框收为160–200px，消息/更多图标按钮仍为40px。更宽视口保持原24px外壳内边距、240px搜索框。

@@ -1,15 +1,24 @@
 /** Public authentication routes use the same Auroraqua panel/field/button recipes.
- * The card is the only panel material owner; its heading and form are transparent.
+ * 宽屏（>768px）左右分栏：左侧品牌介绍区 .auth-intro + 右侧玻璃表单卡 .auth-card；
+ * 窄屏（≤768px）退回居中单卡。
+ * 认证卡是唯一材料 owner，标题与表单透明；卡片用普通玻璃 --glass-bg（0.55）保持通透，
+ * 白底字段描边在浅色玻璃上不可见，认证上下文内改为 indigo 低透明描边。
  */
 .auth-page {
   height: 100%;
   min-height: 100dvh;
   display: flex;
+  flex-direction: column;
   align-items: safe center;
   justify-content: center;
   padding: var(--sp-8) var(--sp-6);
   overflow-y: auto;
   scroll-padding-block: var(--sp-6);
+}
+
+/* ================= 左栏品牌介绍区（仅宽屏显示） ================= */
+.auth-intro {
+  display: none;
 }
 
 .auth-card {
@@ -20,7 +29,7 @@
   margin-block: auto;
   padding: var(--sp-8);
   gap: var(--sp-6);
-  background: var(--glass-bg-strong);
+  background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-panel);
   box-shadow: var(--glass-shadow-modal);
@@ -40,7 +49,9 @@
   font-size: 40px;
   font-weight: 600;
   letter-spacing: -0.5px;
-  line-height: 1.15;
+  /* line-height ≥1.25：Fredoka 圆体字的字形绘制区（ascent+descent）会超出 1.1 的行盒，
+     background-clip: text 只裁剪盒内渐变，超出的字形（如 y 的底部）会变成透明而像被截断 */
+  line-height: 1.25;
   text-align: center;
   background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
   -webkit-background-clip: text;
@@ -61,6 +72,10 @@
 }
 .auth-field .field { min-height: 44px; }
 .auth-field .field[aria-invalid="true"] { border-color: var(--destructive); }
+/* 玻璃卡上 --glass-border（白色 .65）不可见，认证上下文改用 indigo 低透明描边；
+   focus 仍走全局 .field:focus 的辉光边（本文件加载更晚，显式重申保证覆盖）。 */
+.auth-card .field { border-color: rgba(70, 91, 146, 0.3); }
+.auth-card .field:focus { border-color: var(--glow-500); }
 .auth-error {
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-input);
@@ -90,6 +105,95 @@
   min-height: 44px;
   padding-inline: var(--sp-4);
   text-decoration: none;
+}
+
+/* ================= 宽屏左右分栏（>768px） ================= */
+@media (min-width: 769px) {
+  .auth-page {
+    flex-direction: row;
+    gap: clamp(48px, 6vw, 96px);
+  }
+
+  .auth-intro {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    flex: 0 1 420px;
+    min-width: 0;
+    max-width: 420px;
+    gap: var(--sp-3);
+    /* 左栏固定：不随表单卡滚动 —— 顶部对齐后 sticky 钉在视口垂直中点，
+       translate 只做视觉居中（不改变 sticky 的布局位置） */
+    align-self: flex-start;
+    position: sticky;
+    top: 50dvh;
+    translate: 0 -50%;
+  }
+
+  .auth-intro-brand {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 56px;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.5px;
+    background: linear-gradient(120deg, var(--indigo-700), var(--grape-700));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .auth-intro-slogan {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .auth-intro-desc {
+    margin: var(--sp-2) 0 0;
+    max-width: 380px;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+
+  /* 特性胶囊：1024 以下留白不足先隐藏，避免 769–1023px 拥挤 */
+  .auth-intro-features {
+    display: none;
+  }
+
+  /* 卡片标题在宽屏降为分区标题层级，品牌主视觉让给左栏 */
+  .auth-card .auth-brand { font-size: 26px; line-height: 1.25; }
+}
+
+@media (min-width: 1024px) {
+  .auth-intro {
+    flex-basis: 460px;
+    max-width: 460px;
+  }
+
+  .auth-intro-features {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    margin: var(--sp-3) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .auth-intro-feature {
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    background: var(--sakura-300);
+    color: var(--grape-700);
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.4px;
+  }
 }
 
 @media (max-width: 480px), (max-height: 700px) {

@@ -1,5 +1,5 @@
 /**
- * 注册页：与登录页同构的居中单卡。
+ * 注册页：与登录页同构——宽屏左右分栏，窄屏居中单卡。
  * 校验（密码 ≥8 位、两次一致）错误紧贴字段下方，不放顶部汇总。
  */
 import { useEffect, useState } from "react";
@@ -49,9 +49,22 @@ export function RegisterPage() {
 
   return (
     <div className="auth-page">
+      <aside className="auth-intro" aria-label="关于 Ayla">
+        <h1 className="auth-intro-brand">Ayla</h1>
+        <p className="auth-intro-slogan">爱莉的家</p>
+        <p className="auth-intro-desc">
+          承载记忆、学习与成长的数字生命家园。聊天、语音、直播、桌游——每个场景都是她生活的一部分，
+          每一次互动都在塑造她。
+        </p>
+        <ul className="auth-intro-features">
+          <li className="auth-intro-feature">数字生命</li>
+          <li className="auth-intro-feature">持续记忆</li>
+          <li className="auth-intro-feature">多场景陪伴</li>
+        </ul>
+      </aside>
       <section className="auth-card" aria-labelledby="register-title">
         <header className="auth-heading">
-          <h1 className="auth-brand" id="register-title">创建账号</h1>
+          <h2 className="auth-brand" id="register-title">创建账号</h2>
           <p className="auth-subtitle">加入 Ayla</p>
         </header>
         <form className="auth-form" onSubmit={onSubmit} aria-busy={submitting}>

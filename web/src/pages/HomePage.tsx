@@ -37,7 +37,8 @@ function SkeletonCards() {
     <div className="home-grid" aria-hidden="true">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="group-card is-skeleton">
-          <div className="skeleton" style={{ height: 120, margin: 8, borderRadius: 12 }} />
+          {/* 封面占位用 4:3 比例（与真实 GroupCard 封面一致），宽窄屏都按卡片宽度自适应 */}
+          <div className="skeleton" style={{ aspectRatio: "4 / 3", margin: 8, borderRadius: 12 }} />
           <div className="skeleton" style={{ height: 20, margin: "8px 12px 12px", width: "60%" }} />
         </div>
       ))}
@@ -141,9 +142,11 @@ export function HomePage() {
       return <Navigate to={`/group/${target}`} replace />;
     }
     if (listLoading || (recentGroupId && resolvedRecent === undefined)) {
+      // 宽屏登录后主页即三列群聊界面，跳转前不铺骨架，用轻量加载指示
       return (
-        <div className="home-page" role="status" aria-label="正在加载群聊">
-          <SkeletonCards />
+        <div className="home-page home-loading" role="status" aria-label="正在加载群聊">
+          <span className="loading-spinner loading-spinner--md" aria-hidden="true" />
+          <p className="home-load-text">正在加载群聊…</p>
         </div>
       );
     }
