@@ -138,15 +138,12 @@ class TestFavoriteList:
         client, user = auth_client(username="fav_list")
         post = _make_post(user, "帖子A")
         post2 = _make_post(user, "帖子B")
-        # 再收藏一个 group，验证 type 过滤隔离
-        group = _make_group(user)
         client.post("/api/v1/favorites/", {"target_type": "post", "target_id": str(post.id)}, format="json")
         client.post("/api/v1/favorites/", {"target_type": "post", "target_id": str(post2.id)}, format="json")
-        client.post("/api/v1/favorites/", {"target_type": "group", "target_id": str(group.id)}, format="json")
 
         resp = client.get("/api/v1/favorites/")
         assert resp.status_code == 200
-        assert len(resp.json()) == 3
+        assert len(resp.json()) == 2
 
         resp = client.get("/api/v1/favorites/?type=post")
         assert resp.status_code == 200
@@ -154,9 +151,28 @@ class TestFavoriteList:
         assert len(data) == 2
         assert all(item["target_type"] == "post" for item in data)
 
+    def test_group_favorite_rejected(self, auth_client):
+        """群已不再支持收藏：POST 拒绝、type 过滤拒绝、存量记录列表排除。"""
+        client, user = auth_client(username="fav_group_off")
+        group = _make_group(user)
+        resp = client.post(
+            "/api/v1/favorites/",
+            {"target_type": "group", "target_id": str(group.id)},
+            format="json",
+        )
+        assert resp.status_code == 400
+        assert "target_type 非法" in resp.json()["detail"]
+
         resp = client.get("/api/v1/favorites/?type=group")
-        assert len(resp.json()) == 1
-        assert resp.json()[0]["target_type"] == "group"
+        assert resp.status_code == 400
+
+        # 存量群收藏（API 关闭前创建）不再展示
+        post = _make_post(user, "帖子A")
+        client.post("/api/v1/favorites/", {"target_type": "post", "target_id": str(post.id)}, format="json")
+        Favorite.objects.create(user=user, target_type="group", target_id=str(group.id))
+        data = client.get("/api/v1/favorites/").json()
+        assert len(data) == 1
+        assert data[0]["target_type"] == "post"
 
     def test_list_only_own(self, auth_client, user_factory):
         client, user = auth_client(username="fav_me")

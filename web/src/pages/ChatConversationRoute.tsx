@@ -7,7 +7,7 @@
  *   按私聊处理，由消息流自愈）。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useParams } from "react-router-dom";
 import * as chatApi from "../api/chat";
 import type { ConversationType } from "../api/types";
 import { useChatStore } from "../stores/chat";
@@ -16,6 +16,7 @@ import { AsyncState } from "../components/AsyncState";
 
 export function ChatConversationRoute() {
   const { conversationId } = useParams<{ conversationId: string }>();
+  const location = useLocation();
   const conversations = useChatStore((s) => s.conversations);
 
   const cachedType = useMemo(
@@ -51,7 +52,8 @@ export function ChatConversationRoute() {
   const type = cachedType ?? fetchedType;
 
   if (type === "group" && conversationId) {
-    return <Navigate to={`/group/${conversationId}`} replace />;
+    // 保留 search（收藏消息跳转的 ?msg=&seq=&subgroup= 定位参数随重定向进入群聊）
+    return <Navigate to={`/group/${conversationId}${location.search}`} replace />;
   }
   if (type === "private") {
     return <PrivateChatPage />;

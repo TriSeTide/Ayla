@@ -6,7 +6,7 @@
  * PrivateChatPage/GroupPage/chatApi 全部 mock，避免真实 API/WS 副作用。
  */
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationSummary } from "../api/types";
 import { useChatStore } from "../stores/chat";
@@ -15,6 +15,12 @@ import { ChatConversationRoute } from "../pages/ChatConversationRoute";
 vi.mock("../pages/PrivateChatPage", () => ({
   PrivateChatPage: () => <div>私聊窗口本体</div>,
 }));
+
+/** 群聊场景占位：显示 search，供断言收藏消息跳转参数随重定向保留 */
+function GroupPlaceholder() {
+  const location = useLocation();
+  return <div>群聊场景页面{location.search}</div>;
+}
 
 vi.mock("../api/chat", () => ({
   // 默认返回私聊详情，避免任何未显式设置实现的路径返回 undefined（.then 崩溃）
@@ -40,7 +46,7 @@ function renderRoute(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/chat/:conversationId" element={<ChatConversationRoute />} />
-        <Route path="/group/:id" element={<div>群聊场景页面</div>} />
+        <Route path="/group/:id" element={<GroupPlaceholder />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -81,6 +87,18 @@ describe("ChatConversationRoute", () => {
     });
     renderRoute("/chat/g1");
     await waitFor(() => expect(screen.getByText("群聊场景页面")).toBeInTheDocument());
+  });
+
+  it("群聊重定向保留收藏消息跳转的 search 定位参数", async () => {
+    useChatStore.setState({
+      conversations: [
+        { ...conv("group"), id: "g1", peer: null } as never,
+      ],
+    });
+    renderRoute("/chat/g1?msg=99&seq=5&subgroup=sg1");
+    await waitFor(() =>
+      expect(screen.getByText("群聊场景页面?msg=99&seq=5&subgroup=sg1")).toBeInTheDocument(),
+    );
   });
 
   it("私聊会话（store 命中）渲染 ChatPage", async () => {

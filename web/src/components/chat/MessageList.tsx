@@ -139,6 +139,7 @@ export function MessageList({
   unreadSeqsOverride,
   mentionUnreadSeqsOverride,
   replyUnreadSeqsOverride,
+  externalJump,
 }: {
   messages: ChatMessage[];
   conversation: ConversationSummary | null;
@@ -175,6 +176,12 @@ export function MessageList({
   mentionUnreadSeqsOverride?: number[];
   /** 子群视图回复未读序号覆盖（同上） */
   replyUnreadSeqsOverride?: number[];
+  /**
+   * 外部跳转请求（收藏消息定位等）：消息进入窗口后滚动定位并复用粉框高亮。
+   * subgroupId 为 null 表示默认组（要求当前视图是默认组视图）；不匹配时
+   * 由父级切换子群后重挂载再处理。定位成功后内部去重，不重复跳转。
+   */
+  externalJump?: { messageId: string; seq: number; subgroupId?: string | null } | null;
 }) {
   const currentUserId = useAuthStore((s) => s.currentUser?.id ?? null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -202,6 +209,8 @@ export function MessageList({
   }, []);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const jumpLoadRef = useRef<Promise<boolean> | null>(null);
+  /** 已处理的外部跳转请求（会话+消息+seq 组合键），避免消息流变化时重复触发 */
+  const handledJumpRef = useRef<string | null>(null);
   const reducedMotion = useReducedMotion();
   const isGroup = conversation?.type === "group";
   // 私聊对端显示名（poke 文案 target 兜底；群聊用成员 map）
@@ -395,6 +404,7 @@ export function MessageList({
     pendingAnchorRef.current = null;
     loadMoreInFlightRef.current = false;
     jumpToBottomRef.current = false;
+    handledJumpRef.current = null;
     setFarFromBottom(false);
     setWindowRange(null);
     setActiveActionsId(null);
@@ -768,6 +778,44 @@ export function MessageList({
       }
     }
   }, [findBySeq, jumpToMessage, messages, onLoadUntilSeq]);
+
+  // 外部跳转（收藏消息定位）：消息进入缓存/窗口后滚动定位 + 复用粉框高亮。
+  // 子群不匹配时等待父级切换子群（MessageList 重挂载后新实例重新处理）；
+  // 已处理过的请求由 handledJumpRef 去重，消息流变化不会重复触发。
+  useEffect(() => {
+    if (!externalJump) return;
+    const key = `${conversation?.id ?? ""}:${externalJump.messageId}:${externalJump.seq}`;
+    if (handledJumpRef.current === key) return;
+    // 子群匹配：无子群过滤（私聊）要求目标也无子群；群聊子群视图要求
+    // 目标属于当前子群；默认组消息要求当前视图是默认组视图。
+    const subgroupMatches = subgroupId == null
+      ? externalJump.subgroupId == null
+      : externalJump.subgroupId != null
+        ? subgroupId === externalJump.subgroupId
+        : isDefaultSubgroup;
+    if (!subgroupMatches) return;
+    const target = confirmedMessages.find((m) => m.id === externalJump.messageId) ?? findBySeq(externalJump.seq);
+    if (target) {
+      handledJumpRef.current = key;
+      void jumpToMessage(target, "reply");
+      return;
+    }
+    if (externalJump.seq > 0 && onLoadUntilSeq) {
+      const loaded = jumpLoadRef.current ?? onLoadUntilSeq(externalJump.seq);
+      jumpLoadRef.current = loaded;
+      loaded.then((ok) => {
+        if (jumpLoadRef.current === loaded) jumpLoadRef.current = null;
+        if (!ok) return;
+        const loadedTarget = findBySeq(externalJump.seq);
+        if (loadedTarget) {
+          handledJumpRef.current = key;
+          void jumpToMessage(loadedTarget, "reply");
+        }
+      }).catch(() => {
+        if (jumpLoadRef.current === loaded) jumpLoadRef.current = null;
+      });
+    }
+  }, [conversation?.id, confirmedMessages, externalJump, findBySeq, isDefaultSubgroup, jumpToMessage, onLoadUntilSeq, subgroupId]);
 
   const tagDirection = useCallback((seq: number): "above" | "below" | null => {
     const element = scrollRef.current;

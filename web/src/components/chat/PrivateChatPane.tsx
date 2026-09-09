@@ -31,6 +31,7 @@ export function PrivateChatPane({
   backLabel = "返回消息中心",
   disableAvatarNav = false,
   panelMotion = false,
+  externalJump = null,
 }: {
   conversationId: string;
   /** 可选返回按钮（窄屏私聊窗口 → /messages；宽屏两列不渲染返回） */
@@ -40,6 +41,8 @@ export function PrivateChatPane({
   disableAvatarNav?: boolean;
   /** Conversation panels own their entry; surrounding swipe wrappers only own the gesture. */
   panelMotion?: boolean;
+  /** 收藏消息跳转定位（由路由页读取 ?msg=&seq= 后传入；私聊无子群概念） */
+  externalJump?: { messageId: string; seq: number; subgroupId?: string | null } | null;
 }) {
   const present = useIsPresent();
   const active = !panelMotion || present;
@@ -261,6 +264,7 @@ export function PrivateChatPane({
         onRemove={(m) => removeOptimistic(conversationId, m)}
         onCancel={(m) => cancelOptimistic(conversationId, m)}
         onPoke={handlePoke}
+        externalJump={externalJump}
       />
       </motion.div>
       <motion.div

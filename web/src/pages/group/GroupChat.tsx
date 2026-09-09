@@ -15,7 +15,7 @@
 import { AuroraquaNavHighlight } from "../../components/motion/AuroraquaNavHighlight";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useIsPresent } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { getElysiaProfile } from "../../api/elysia";
 import * as chatApi from "../../api/chat";
@@ -71,6 +71,36 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
     () => subgroups.find((sg) => sg.id === activeSubgroupId) ?? null,
     [activeSubgroupId, subgroups],
   );
+  // 收藏消息跳转定位：/group/:id?msg=<messageId>&seq=<seq>&subgroup=<子群id>
+  // （subgroup 缺省 = 默认组；私聊跳转经 ChatConversationRoute 重定向时同样携带）。
+  const [searchParams] = useSearchParams();
+  const jumpMsg = searchParams.get("msg");
+  const jumpSeq = searchParams.get("seq");
+  const jumpSubgroup = searchParams.get("subgroup");
+  const externalJump = useMemo(() => {
+    if (!jumpMsg) return null;
+    const seq = Number(jumpSeq);
+    return {
+      messageId: jumpMsg,
+      seq: Number.isInteger(seq) && seq > 0 ? seq : 0,
+      subgroupId: jumpSubgroup ?? null,
+    };
+  }, [jumpMsg, jumpSeq, jumpSubgroup]);
+  // 跳转目标在指定子群（或默认组）时先切过去：子群切换会重挂载 MessageList，
+  // 新实例在子群匹配后执行定位；子群已删除时保持当前视图（跳转自然失败）。
+  useEffect(() => {
+    if (!jumpMsg) return;
+    if (jumpSubgroup != null) {
+      if (subgroups.some((sg) => sg.id === jumpSubgroup) && activeSubgroupId !== jumpSubgroup) {
+        useSubGroupStore.getState().setActiveSubgroup(groupId, jumpSubgroup);
+      }
+    } else {
+      const defaultGroup = subgroupPage.items.find((item) => item.is_default);
+      if (defaultGroup && activeSubgroupId !== defaultGroup.id) {
+        useSubGroupStore.getState().setActiveSubgroup(groupId, defaultGroup.id);
+      }
+    }
+  }, [activeSubgroupId, groupId, jumpMsg, jumpSubgroup, subgroupPage.items, subgroups]);
   const subgroupSelection = `${groupId}:${activeSubgroupId ?? "all"}`;
   const selectionInitialized = useRef(activeSubgroupId != null);
   const establishingSelection = !selectionInitialized.current;
@@ -311,6 +341,7 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
         unreadSeqsOverride={activeUnreadSeqs}
         mentionUnreadSeqsOverride={activeSg ? (activeConv?.mention_unread_seqs ?? []).filter((seq) => activeUnreadSet.has(seq)) : undefined}
         replyUnreadSeqsOverride={activeSg ? (activeConv?.reply_unread_seqs ?? []).filter((seq) => activeUnreadSet.has(seq)) : undefined}
+        externalJump={externalJump}
       />
       </motion.div>
       {/* 输入区始终使用同一 DOM；窄屏子群条绝对定位于其顶部，不参与消息列表高度分配。 */}

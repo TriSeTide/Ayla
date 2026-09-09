@@ -1168,7 +1168,7 @@ export type PostScope = "feed" | "mine" | `group:${string}`;
 
 /* ================= S6 收藏域（对齐 backend/apps/favorites/serializers.py） ================= */
 
-export type FavoriteTargetType = "post" | "message" | "live" | "voice" | "game" | "group";
+export type FavoriteTargetType = "post" | "message" | "live" | "voice" | "game";
 
 /** 收藏条目（FavoriteSerializer） */
 export interface Favorite {
@@ -1177,6 +1177,31 @@ export interface Favorite {
   target_type: FavoriteTargetType;
   target_id: string;
   target: Record<string, unknown> | null;
+  created_at: string;
+}
+
+/**
+ * 收藏消息卡片 target（对齐 backend/apps/favorites/target_cards.py message 卡片）。
+ * 携带聊天气泡所需字段：媒体引用、混排段、子群归属、撤回态与定位序号，
+ * 使收藏卡片能渲染媒体并跳转到原消息位置。
+ */
+export interface FavoriteMessageTarget {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  sender_nickname: string;
+  /** 群聊子群归属（null = 默认组/旧消息） */
+  subgroup_id: string | null;
+  type: MessageType;
+  content: string;
+  media_id: string | null;
+  /** 图文混排段（type=mixed；媒体段带完整 descriptor；单媒体/文本为 null） */
+  segments?: MediaSegment[] | null;
+  reply_to: string | null;
+  reply_to_seq?: number | null;
+  status: MessageStatus;
+  /** 会话内序号（跳转定位用） */
+  seq: number;
   created_at: string;
 }
 

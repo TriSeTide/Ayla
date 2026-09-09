@@ -3,6 +3,10 @@
 Public resource serializers own field meaning. These projections select the
 fields needed by a card before serialization; they never emit live transport
 addresses, publishing credentials, message attachments or private group data.
+Message cards carry the fields a chat bubble needs (media_id/segments/seq/
+subgroup_id/status) so favorites can render media and jump to the original
+message; media descriptors are expanded by the chat serializer contract and
+never include signed URLs or storage paths.
 """
 from collections import defaultdict
 
@@ -11,7 +15,8 @@ from rest_framework import serializers
 
 from apps.boardgame.models import GameRoom, GameRoomMember
 from apps.boardgame.serializers import GameRoomSerializer
-from apps.chat.models import Conversation, ConversationMember, Message
+from apps.chat.models import Conversation, Message
+from apps.chat.serializers import expand_segments
 from apps.common.visibility import visible_queryset
 from apps.live.models import LiveChannel
 from apps.live.serializers import LiveChannelSerializer
@@ -85,7 +90,9 @@ def build_target_cards(favorites, request) -> dict[tuple[str, int], dict]:
 
     Visibility is reapplied to every call. A saved bookmark, prior page or
     cached card grants no access after group/friendship removal. Message
-    previews keep their original 120-character, membership-checked contract.
+    cards keep the 120-character content preview and stay membership-checked;
+    media fields are only the chat bubble contract (media_id/segments), never
+    signed URLs or storage paths.
     """
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
@@ -138,32 +145,25 @@ def build_target_cards(favorites, request) -> dict[tuple[str, int], dict]:
                 card["mine"] = target._favorite_mine
             cards[(kind, target.pk)] = card
 
-    if ids[Favorite.TARGET_GROUP]:
-        groups = Conversation.objects.filter(
-            pk__in=ids[Favorite.TARGET_GROUP], type=Conversation.TYPE_GROUP,
-        ).annotate(
-            _favorite_member_count=Count("members", distinct=True),
-            _favorite_is_member=Exists(ConversationMember.objects.filter(
-                conversation_id=OuterRef("pk"), user=user,
-            )),
-        )
-        for group in groups:
-            cards[(Favorite.TARGET_GROUP, group.pk)] = {
-                "id": str(group.pk), "type": group.type, "title": group.title,
-                "avatar": group.avatar, "join_policy": group.join_policy,
-                "is_member": group._favorite_is_member,
-                "member_count": group._favorite_member_count,
-                "created_at": group.created_at.isoformat(),
-            }
-
     if ids[Favorite.TARGET_MESSAGE]:
         messages = Message.objects.filter(
             pk__in=ids[Favorite.TARGET_MESSAGE], conversation__members__user=user,
-        )
+        ).select_related("conversation", "sender", "reply_to")
         for message in messages:
             cards[(Favorite.TARGET_MESSAGE, message.pk)] = {
-                "id": str(message.pk), "conversation_id": str(message.conversation_id),
-                "type": message.type, "content": (message.content or "")[:120],
+                "id": str(message.pk),
+                "conversation_id": str(message.conversation_id),
+                "sender_id": str(message.sender_id),
+                "sender_nickname": message.sender.nickname or message.sender.username,
+                "subgroup_id": str(message.subgroup_id) if message.subgroup_id else None,
+                "type": message.type,
+                "content": (message.content or "")[:120],
+                "media_id": message.media_id,
+                "segments": expand_segments(message),
+                "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
+                "reply_to_seq": message.reply_to.seq if message.reply_to_id and message.reply_to else None,
+                "status": message.status,
+                "seq": message.seq,
                 "created_at": message.created_at.isoformat(),
             }
     return cards

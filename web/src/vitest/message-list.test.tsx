@@ -543,3 +543,110 @@ describe("MessageList 未读消息视口已读", () => {
     expect(onMarkRead).not.toHaveBeenCalled();
   });
 });
+
+describe("MessageList 外部跳转（收藏消息定位）", () => {
+  it("目标在缓存中：滚动定位 + 粉框高亮 + 精确标已读", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const messages = Array.from({ length: 20 }, (_, i) => serverMessage(i + 1));
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onMarkRead={onMarkRead}
+        externalJump={{ messageId: "m5", seq: 5, subgroupId: null }}
+      />,
+    );
+    await act(async () => {});
+    const targetNode = Array.from(container.querySelectorAll("[data-message-id]")).find(
+      (n) => n.getAttribute("data-message-id") === "m5",
+    ) as HTMLElement;
+    expect(targetNode.className).toContain("mention-jump-highlight");
+    expect(onMarkRead).toHaveBeenCalledWith(messages[4], true);
+  });
+
+  it("目标不在缓存：按 seq 调 onLoadUntilSeq 加载", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const messages = Array.from({ length: 20 }, (_, i) => serverMessage(i + 1));
+    const onLoadUntilSeq = vi.fn().mockResolvedValue(true);
+    render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onLoadUntilSeq={onLoadUntilSeq}
+        externalJump={{ messageId: "m99", seq: 99, subgroupId: null }}
+      />,
+    );
+    await act(async () => {});
+    expect(onLoadUntilSeq).toHaveBeenCalledWith(99);
+  });
+
+  it("子群不匹配时不处理（等待父级切换子群后重挂载）", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      ...serverMessage(i + 1),
+      subgroup_id: "sg2",
+    }));
+    const onLoadUntilSeq = vi.fn().mockResolvedValue(true);
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onLoadUntilSeq={onLoadUntilSeq}
+        onMarkRead={onMarkRead}
+        subgroupId="sg2"
+        isDefaultSubgroup={false}
+        externalJump={{ messageId: "m5", seq: 5, subgroupId: "sg1" }}
+      />,
+    );
+    await act(async () => {});
+    expect(onLoadUntilSeq).not.toHaveBeenCalled();
+    expect(onMarkRead).not.toHaveBeenCalled();
+    const targetNode = Array.from(container.querySelectorAll("[data-message-id]")).find(
+      (n) => n.getAttribute("data-message-id") === "m5",
+    ) as HTMLElement;
+    expect(targetNode.className).not.toContain("mention-jump-highlight");
+  });
+
+  it("默认组消息要求当前视图是默认组视图", async () => {
+    useAuthStore.setState({ currentUser: { id: "me" } as UserPublic });
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      ...serverMessage(i + 1),
+      subgroup_id: "sg2",
+    }));
+    const onMarkRead = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(
+      <MessageList
+        messages={messages}
+        conversation={conversation()}
+        elysiaUserId={null}
+        hasMore={false}
+        loading={false}
+        onLoadMore={vi.fn()}
+        onMarkRead={onMarkRead}
+        subgroupId="sg2"
+        isDefaultSubgroup={false}
+        externalJump={{ messageId: "m5", seq: 5, subgroupId: null }}
+      />,
+    );
+    await act(async () => {});
+    expect(onMarkRead).not.toHaveBeenCalled();
+    const targetNode = Array.from(container.querySelectorAll("[data-message-id]")).find(
+      (n) => n.getAttribute("data-message-id") === "m5",
+    ) as HTMLElement;
+    expect(targetNode.className).not.toContain("mention-jump-highlight");
+  });
+});

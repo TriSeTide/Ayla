@@ -632,10 +632,11 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.18.1 收藏列表
 
-- 收藏筛选按§12.9使用宽屏左栏/窄屏固定顶部，保留全部、消息、帖子、直播间、语音房、桌游室、群聊七类。结果区是独立滚动容器，分类切换与详情返回保存该容器的位置。>768px所有分类统一使用与帖子相同的`useMasonryColumns`和两条flex列，列间距12px；≤768px单列。结果填满可用余宽，不再限制1200px并居中留白。
+- 收藏筛选按§12.9使用宽屏左栏/窄屏固定顶部，保留全部、消息、帖子、直播间、语音房、桌游室六类（群聊已不再支持收藏，分类与入口一并移除）。结果区是独立滚动容器，分类切换与详情返回保存该容器的位置。>768px所有分类统一使用与帖子相同的`useMasonryColumns`和两条flex列，列间距12px；≤768px单列。结果填满可用余宽，不再限制1200px并居中留白。
 - 新卡按当前较矮列优先分配，收藏id到列的关系保持稳定；分配记忆按用户、分类与列数隔离。尚未量高的同批卡片沿用帖子hook的320px预估增量交错分配，量高后仅影响后续新卡，不因高度变化重排既有卡。API数组不排序，列内保留源顺序；宽屏原生键盘顺序沿每列从上至下、再到右列，与帖子一致，不添加正tabindex。窄屏恢复完整API顺序。列容器不裁剪卡片阴影或菜单；列表组件在数据就绪后挂载，共享hook通过动态ref观察/解除观察真实列，覆盖loading后迟挂载、断点变化与重挂载，并在卸载断开observer。
 - 分类切换后，当前分类响应确认前只展示骨架（`loading || settledFilter !== filter`），不能在effect置pending之前把上一分类结果挂到新分类的分列记忆中。
 - 每张收藏卡保留类别、目标标题与取消按钮，宽屏帖子摘要最多显示3行；只改变展示布局，不改变收藏过滤、顺序、目标跳转、取消或实时更新的契约。
+- **收藏消息卡片**（`.typed-message-card`）：头部为发送者昵称（`--text-secondary` 13px + `IconMessage` 18px），下方为消息内容。媒体消息（图片/语音/文件/表情/图文混排）复用聊天 `MediaContent` 真实渲染（§4 Chat Bubbles 同款媒体样式：图片缩略图+查看器、语音波形+播放、文件下载、mixed 图文段），媒体本体独占一行（`.typed-message-media`，`flex-basis:100%`）。**整卡可点**（`.is-openable` cursor:pointer）：点击头部/文本/空白区域跳转到原消息位置（`/chat/:id?msg=&seq=&subgroup=`，群聊经路由重定向保留参数，定位后复用 `mention-jump-highlight` 粉框辉光）；媒体区（`.typed-message-media` cursor:default）与取消收藏按钮自带交互并 stopPropagation，点击不触发跳转。撤回消息显示「该消息已撤回」弱化占位（`.typed-message-recalled`，ice 底 + `--text-secondary`），不渲染媒体；戳一戳消息显示「戳一戳消息」占位。
 
 ### 12.19 下拉刷新 PullToRefresh
 

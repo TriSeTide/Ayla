@@ -1,10 +1,13 @@
 """
 收藏域模型（S6，收藏 + 群动态 highlights）。
 
-Favorite：用户对任意可见目标（帖子/直播间/语音房/桌游室/群）的收藏。
-- `target_id` 用 CharField：User.id 是 uuid 字符串，而 live/voice/post/boardgame/group
+Favorite：用户对任意可见目标（帖子/消息/直播间/语音房/桌游室）的收藏。
+- `target_id` 用 CharField：User.id 是 uuid 字符串，而 live/voice/post/boardgame
   的 id 是 AutoField 整数；统一存字符串，查询时在 services 层转成对应类型。
 - `(user, target_type, target_id)` 唯一：收藏幂等由 DB 兜底（MySQL 唯一约束）。
+
+群（group）不再支持收藏：TARGET_CHOICES 不含群，新收藏被校验拒绝；存量群收藏
+记录保留在 DB（不可变历史），由列表接口显式排除不再展示。
 """
 from django.conf import settings
 from django.db import models
@@ -18,6 +21,7 @@ class Favorite(models.Model):
     TARGET_LIVE = "live"
     TARGET_VOICE = "voice"
     TARGET_GAME = "game"
+    # 存量群收藏排除标记（列表接口 exclude 用；不进入 TARGET_CHOICES，新收藏被拒）
     TARGET_GROUP = "group"
     TARGET_CHOICES = [
         (TARGET_POST, "帖子"),
@@ -25,7 +29,6 @@ class Favorite(models.Model):
         (TARGET_LIVE, "直播间"),
         (TARGET_VOICE, "语音房"),
         (TARGET_GAME, "桌游室"),
-        (TARGET_GROUP, "群"),
     ]
 
     id = models.AutoField(primary_key=True)

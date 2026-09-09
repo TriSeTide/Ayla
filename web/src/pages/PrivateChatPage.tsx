@@ -10,7 +10,8 @@
  * 复用 PrivateChatPane 承载聊天内容（数据流与宽屏消息中心右侧一致）。
  * 群聊会话由 ChatConversationRoute 重定向到 /group/:id（GroupPage），本页不承载群聊。
  */
-import { useNavigate, useParams } from "react-router-dom";
+import { useMemo } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useChatStore } from "../stores/chat";
 import { PrivateChatPane } from "../components/chat/PrivateChatPane";
@@ -23,6 +24,18 @@ export function PrivateChatPage() {
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const conversations = useChatStore((s) => s.conversations);
+  // 收藏消息跳转定位：/chat/:id?msg=<messageId>&seq=<seq>（私聊无子群概念）
+  const [searchParams] = useSearchParams();
+  const externalJump = useMemo(() => {
+    const messageId = searchParams.get("msg");
+    if (!messageId) return null;
+    const seq = Number(searchParams.get("seq"));
+    return {
+      messageId,
+      seq: Number.isInteger(seq) && seq > 0 ? seq : 0,
+      subgroupId: null,
+    };
+  }, [searchParams]);
 
   if (isNarrow) {
     return (
@@ -35,6 +48,7 @@ export function PrivateChatPage() {
             conversationId={conversationId ?? ""}
             onBack={() => navigate("/messages")}
             panelMotion
+            externalJump={externalJump}
           />
         </ConversationTransition>
       </FullScreenSwipeBack>
@@ -51,7 +65,7 @@ export function PrivateChatPage() {
       />
       <div className="wide-messages-pane">
         <ConversationTransition identity={`private:${conversationId ?? ""}`}>
-          <PrivateChatPane conversationId={conversationId ?? ""} panelMotion />
+          <PrivateChatPane conversationId={conversationId ?? ""} panelMotion externalJump={externalJump} />
         </ConversationTransition>
       </div>
     </div>

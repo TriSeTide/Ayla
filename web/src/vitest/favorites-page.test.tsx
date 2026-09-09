@@ -1,20 +1,29 @@
 /**
  * FavoritesPage 测试（F10 R-U3 + 任务 07）：
  * - 分类收藏列表 + 取消收藏即时移除；
- * - openTarget 全类型跳转（voice 直达语音房 / game 直达桌游房 / live/post/group/message）；
+ * - openTarget 全类型跳转（voice 直达语音房 / game 直达桌游房 / live/post/message）；
  * - WS favorite.changed 实时同步（removed 本地移除 / added 重新加载）。
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as favoritesApi from "../api/favorites";
-import type { Favorite, FavoriteTargetType } from "../api/types";
+import type { ChatMessage, Favorite, FavoriteTargetType } from "../api/types";
 import { FavoritesPage, clearFavoritePageMemory } from "../pages/FavoritesPage";
 import { clearMasonryMemory } from "../hooks/useMasonryColumns";
 import { usePostsStore } from "../stores/posts";
 import { useAuthStore } from "../stores/auth";
 import { clearScrollMemory } from "../hooks/useScrollRestore";
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+
+/** 收藏消息卡片复用 MediaContent 渲染媒体：测试里断言传入的消息形状 */
+vi.mock("../components/chat/MediaContent", () => ({
+  MediaContent: ({ msg }: { msg: ChatMessage }) => (
+    <div data-testid="media-content" data-msg-type={msg.type} data-media-id={msg.media_id ?? ""}>
+      {msg.type}
+    </div>
+  ),
+}));
 
 /** 捕获 chatWS.onFrame 注册的 handler（测试里 fire favorite.changed 帧用） */
 const ws = vi.hoisted(() => ({
@@ -58,6 +67,12 @@ function DetailWithBack() {
   return <div>帖子详情占位<button onClick={() => navigate(-1)}>返回收藏列表</button></div>;
 }
 
+/** 会话占位：显示 search，供断言收藏消息跳转携带的定位参数 */
+function ChatPlaceholder() {
+  const location = useLocation();
+  return <div>会话占位{location.search}</div>;
+}
+
 function renderPage(entry = "/favorites") {
   return render(
     <MemoryRouter initialEntries={[entry]}>
@@ -67,8 +82,7 @@ function renderPage(entry = "/favorites") {
         <Route path="/games/:roomId" element={<div>桌游房占位</div>} />
         <Route path="/live/:channelId" element={<div>直播间占位</div>} />
         <Route path="/posts/:postId" element={<DetailWithBack />} />
-        <Route path="/group/:id" element={<div>群占位</div>} />
-        <Route path="/chat/:conversationId" element={<div>会话占位</div>} />
+        <Route path="/chat/:conversationId" element={<ChatPlaceholder />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -420,24 +434,80 @@ describe("FavoritesPage", () => {
       expect(await screen.findByText("帖子详情占位")).toBeInTheDocument();
     });
 
-    it("群收藏 → /group/:id", async () => {
+    it("消息收藏 → /chat/:conversationId 携带 msg/seq/subgroup 定位参数", async () => {
       vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
-        fav(1, "group", "5", { id: "5", title: "群A" }),
-      ]));
-      renderPage();
-      await waitFor(() => expect(screen.getByText("群A")).toBeInTheDocument());
-      fireEvent.click(screen.getByText("群A"));
-      expect(await screen.findByText("群占位")).toBeInTheDocument();
-    });
-
-    it("消息收藏 → /chat/:conversationId（用 target.conversation_id）", async () => {
-      vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
-        fav(1, "message", "99", { id: "99", conversation_id: "conv-1", content: "消息内容" }),
+        fav(1, "message", "99", {
+          id: "99", conversation_id: "conv-1", content: "消息内容",
+          seq: 5, subgroup_id: "sg1",
+        }),
       ]));
       renderPage();
       await waitFor(() => expect(screen.getByText("消息内容")).toBeInTheDocument());
       fireEvent.click(screen.getByText("消息内容"));
-      expect(await screen.findByText("会话占位")).toBeInTheDocument();
+      expect(await screen.findByText("会话占位?msg=99&seq=5&subgroup=sg1")).toBeInTheDocument();
+    });
+
+    it("消息收藏无 seq/subgroup（旧数据）时只带 msg 参数", async () => {
+      vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
+        fav(1, "message", "99", { id: "99", conversation_id: "conv-1", content: "旧消息" }),
+      ]));
+      renderPage();
+      await waitFor(() => expect(screen.getByText("旧消息")).toBeInTheDocument());
+      fireEvent.click(screen.getByText("旧消息"));
+      expect(await screen.findByText("会话占位?msg=99")).toBeInTheDocument();
+    });
+
+    it("媒体消息收藏卡片复用 MediaContent 渲染（图片/语音/文件/表情）", async () => {
+      vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
+        fav(1, "message", "99", {
+          id: "99", conversation_id: "conv-1", sender_id: "u2", sender_nickname: "发送者",
+          type: "image", content: "图片说明", media_id: "media-1", status: "sent",
+          seq: 3, subgroup_id: null, reply_to: null, created_at: "2026-01-01T00:00:00Z",
+        }),
+        fav(2, "message", "100", {
+          id: "100", conversation_id: "conv-1", sender_id: "u2", sender_nickname: "发送者",
+          type: "voice", content: "", media_id: "media-2", status: "sent",
+          seq: 4, subgroup_id: null, reply_to: null, created_at: "2026-01-01T00:00:00Z",
+        }),
+      ]));
+      renderPage();
+      const media = await screen.findAllByTestId("media-content");
+      expect(media).toHaveLength(2);
+      expect(media[0]).toHaveAttribute("data-msg-type", "image");
+      expect(media[0]).toHaveAttribute("data-media-id", "media-1");
+      expect(media[1]).toHaveAttribute("data-msg-type", "voice");
+      expect(media[1]).toHaveAttribute("data-media-id", "media-2");
+      expect(screen.getAllByText("发送者")).toHaveLength(2);
+      // 点击媒体本体不触发跳转（媒体自带查看/播放交互，stopPropagation）
+      fireEvent.click(media[0]);
+      expect(screen.queryByText(/^会话占位/)).not.toBeInTheDocument();
+    });
+
+    it("消息收藏卡片空白处点击也跳转（整卡可点）", async () => {
+      vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
+        fav(1, "message", "99", {
+          id: "99", conversation_id: "conv-1", content: "消息内容", seq: 3,
+        }),
+      ]));
+      const { container } = renderPage();
+      await waitFor(() => expect(screen.getByText("消息内容")).toBeInTheDocument());
+      // 点击卡片空白区域（非头部按钮/非媒体）→ 同样跳转并携带定位参数
+      const card = container.querySelector<HTMLElement>(".typed-message-card")!;
+      fireEvent.click(card);
+      expect(await screen.findByText("会话占位?msg=99&seq=3")).toBeInTheDocument();
+    });
+
+    it("撤回消息收藏卡片显示已撤回，不渲染媒体", async () => {
+      vi.mocked(favoritesApi.listFavoritesPage).mockResolvedValue(favoritePage([
+        fav(1, "message", "99", {
+          id: "99", conversation_id: "conv-1", sender_id: "u2", sender_nickname: "发送者",
+          type: "image", content: "图片说明", media_id: "media-1", status: "recalled",
+          seq: 3, subgroup_id: null, reply_to: null, created_at: "2026-01-01T00:00:00Z",
+        }),
+      ]));
+      renderPage();
+      expect(await screen.findByText("该消息已撤回")).toBeInTheDocument();
+      expect(screen.queryByTestId("media-content")).not.toBeInTheDocument();
     });
   });
 

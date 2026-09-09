@@ -29,10 +29,18 @@
 .typed-group-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
 .typed-group-copy strong { overflow-wrap: anywhere; color: var(--text-primary); }
 .typed-card-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-secondary); font-size: 12px; }
-.typed-message-card { align-items: flex-start; }
+.typed-message-card { align-items: flex-start; flex-wrap: wrap; }
 .typed-message-main { flex: 1; min-width: 0; text-align: left; }
 .typed-message-heading { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-secondary); font-size: 13px; }
 .typed-message-main blockquote { margin: var(--sp-3) 0 0; padding: var(--sp-3); border-radius: var(--radius-input); background: var(--ice-100); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.typed-message-recalled { margin: var(--sp-3) 0 0; padding: var(--sp-3); border-radius: var(--radius-input); background: var(--ice-100); color: var(--text-secondary); font-size: 13px; display: inline-block; }
+/* 媒体本体独占一行（图片/语音/文件/表情/混排复用聊天 MediaContent 样式） */
+.typed-message-media { flex-basis: 100%; min-width: 0; margin-top: var(--sp-3); }
+.typed-message-media .voice-card { width: 100%; }
+.typed-message-media .file-card { width: 100%; }
+/* 消息卡片整卡可点（空白处跳转原消息）；媒体区自带交互不跳转，cursor 归位 */
+.typed-message-card.is-openable { cursor: pointer; }
+.typed-message-card.is-openable .typed-message-media { cursor: default; }
 .typed-result-card .voice-card-owner, .game-room-owner { font-size: 12px; color: var(--text-secondary); }
 
 /* 目录里的语音房沿用语音大厅的竖排卡片布局（不含封面视觉） */

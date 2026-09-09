@@ -57,43 +57,21 @@ def load_target(target_type: str, target_id: str):
             return GameRoom.objects.filter(pk=int(target_id)).first()
         except (TypeError, ValueError):
             return None
-    if target_type == Favorite.TARGET_GROUP:
-        from apps.chat.models import Conversation
-
-        try:
-            return Conversation.objects.filter(
-                pk=int(target_id), type=Conversation.TYPE_GROUP
-            ).first()
-        except (TypeError, ValueError):
-            return None
     return None
 
 
 def validate_target(user, target_type: str, target_id: str):
     """校验收藏目标：返回目标对象；非法/不存在/不可见 → 抛 ValueError。
 
-    - target_type 必须在 TARGET_CHOICES 内；
+    - target_type 必须在 TARGET_CHOICES 内（群已不再支持收藏，直接拒绝）；
     - 目标必须存在（post/live/voice/game 还需当前用户 can_view）；
-    - group：Conversation 无 visibility 字段，存在即可（成员与非成员都能收藏群）。
+    - message：要求当前用户是该消息会话的成员。
     """
     valid_types = {choice[0] for choice in Favorite.TARGET_CHOICES}
     if target_type not in valid_types:
         raise ValueError("target_type 非法")
 
     target_id = _coerce_id(target_id)
-
-    if target_type == Favorite.TARGET_GROUP:
-        from apps.chat.models import Conversation
-
-        try:
-            conv = Conversation.objects.filter(
-                pk=int(target_id), type=Conversation.TYPE_GROUP
-            ).first()
-        except (TypeError, ValueError):
-            conv = None
-        if conv is None:
-            raise ValueError("目标不存在")
-        return conv
 
     target = load_target(target_type, target_id)
     if target is None:

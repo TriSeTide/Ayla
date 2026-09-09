@@ -1,7 +1,8 @@
 """
 收藏 REST 视图（挂 /api/v1/favorites/，S6）。
 
-- GET  /favorites/：我的收藏列表，可选 ?type=post|live|voice|game|group 过滤；
+- GET  /favorites/：我的收藏列表，可选 ?type=post|live|voice|game|message 过滤；
+  群（group）已不再支持收藏，列表显式排除存量群收藏记录，不再展示；
 - GET  /favorites/?limit=20[&cursor=...]：按收藏时间/id 倒序的有界页；旧调用仍返回数组；
 - POST /favorites/：收藏 {target_type, target_id}，幂等（已收藏 200，新建 201）；
 - DELETE /favorites/<id>/：取消收藏（仅本人，非本人 403，不存在 404）。
@@ -38,7 +39,10 @@ class FavoriteListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = Favorite.objects.filter(user=request.user)
+        # 群不再支持收藏：排除存量 group 收藏记录，收藏页/列表不再展示
+        qs = Favorite.objects.filter(user=request.user).exclude(
+            target_type=Favorite.TARGET_GROUP
+        )
         target_type = request.query_params.get("type")
         if target_type:
             if target_type not in {choice[0] for choice in Favorite.TARGET_CHOICES}:

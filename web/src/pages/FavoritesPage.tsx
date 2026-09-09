@@ -23,10 +23,15 @@ const FILTERS: Array<{ key: FavoriteTargetType | "all"; label: string }> = [
   { key: "live", label: "直播" },
   { key: "voice", label: "语音房" },
   { key: "game", label: "桌游房" },
-  { key: "group", label: "群" },
 ];
 
-type FavoriteTarget = { conversation_id?: string };
+/** 收藏 target 卡片（message 卡片字段用于跳转定位，见 FavoriteMessageTarget） */
+type FavoriteTarget = {
+  conversation_id?: string;
+  id?: string;
+  seq?: number;
+  subgroup_id?: string;
+};
 
 function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite) {
   const target = favorite.target as FavoriteTarget | null;
@@ -45,12 +50,19 @@ function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite
       // 直达具体桌游房（/games/:roomId 路由，GamesHubPage 自动 join 进房）
       navigate(`/games/${favorite.target_id}`);
       break;
-    case "message":
-      if (target?.conversation_id) navigate(`/chat/${target.conversation_id}`);
+    case "message": {
+      if (!target?.conversation_id) break;
+      // 跳转带定位参数：msg=消息 id、seq=会话内序号（历史未加载时按 seq 翻页）、
+      // subgroup=群聊子群归属（null 省略，默认组）。群聊会话由
+      // ChatConversationRoute 重定向到 /group/:id 并保留 search。
+      const params = new URLSearchParams();
+      if (typeof target.id === "string" && target.id) params.set("msg", target.id);
+      if (typeof target.seq === "number" && target.seq > 0) params.set("seq", String(target.seq));
+      if (typeof target.subgroup_id === "string" && target.subgroup_id) params.set("subgroup", target.subgroup_id);
+      const qs = params.toString();
+      navigate(`/chat/${target.conversation_id}${qs ? `?${qs}` : ""}`);
       break;
-    case "group":
-      navigate(`/group/${favorite.target_id}`);
-      break;
+    }
   }
 }
 
