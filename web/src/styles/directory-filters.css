@@ -166,7 +166,9 @@
   }
 }
 
-.directory-page .directory-content > :is(.search-history, .search-results, .search-loading, .search-error,
+/* 列表容器可能在 PullToRefresh 内层（.pull-to-refresh > .pull-refresh-content > 列表），
+   必须用后代选择器才能归零其左右 padding（直接子元素选择器会漏掉内层列表）。 */
+.directory-page .directory-content :is(.search-history, .search-results, .search-loading, .search-error,
     .search-empty, .favorites-list, .favorites-skeleton, .home-state, .chat-notice, .home-load-more,
     .voice-channel-list, .voice-list-empty, .live-hall-grid, .live-hall-empty, .posts-feed, .posts-skeleton,
     .games-grid, .games-grid-loading, .conv-loading, .pull-to-refresh) {
@@ -190,7 +192,7 @@
    底部呼吸空间不动，滚动到底内容不贴底不截断。窄屏布局由 max-width 媒体查询覆盖，不受影响。 */
 @media (min-width: 769px) {
   .directory-page .directory-content { padding-top: 0; }
-  .directory-page .directory-content > :is(.search-results, .favorites-list, .favorites-skeleton,
+  .directory-page .directory-content :is(.search-results, .favorites-list, .favorites-skeleton,
       .voice-channel-list, .live-hall-grid, .posts-feed, .posts-skeleton, .games-grid) {
     padding-top: 0;
   }

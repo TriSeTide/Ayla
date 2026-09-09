@@ -23,6 +23,7 @@ import { useVoiceChannel } from "../hooks/useVoiceChannel";
 import { useVoiceStore } from "../stores/voice";
 import { useDirectoryPage } from "../hooks/useDirectoryPage";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
+import { useSocialPage } from "../hooks/useSocialPage";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { DirectoryFilters } from "../components/DirectoryFilters";
@@ -46,7 +47,14 @@ export function VoiceHubPage() {
   // 仅在房内路由启动输入框滑入；离房复位，避免大厅预挂载使下次动画失效。
   const { inputEntered } = useEnterRoomAnimation(routeChannelId != null);
   const channels = useVoiceStore((s) => s.channels);
-  const directory = useDirectoryPage("voice", {}, !routeChannelId);
+  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
+  const selectionId = useId();
+  const [params, setParams] = useSearchParams();
+  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
+  const scope = `voice-hub:${filter}`;
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 第一页）
+  const directory = useDirectoryPage("voice", { filter }, !routeChannelId);
   const channelsLoading = directory.loading;
   const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
@@ -58,25 +66,22 @@ export function VoiceHubPage() {
   const hubRef = useRef<HTMLDivElement>(null);
   // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
   const [replayNonce, setReplayNonce] = useState(0);
-  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
-  const selectionId = useId();
-  const [params, setParams] = useSearchParams();
-  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
-  const scope = `voice-hub:${filter}`;
-  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  // 好友 tab：作者是好友（friendIds 集合），不是 visibility=friends 才显示
+  const friendsPage = useSocialPage("friends", {}, !routeChannelId);
+  const friendIds = useMemo(() => new Set(friendsPage.items.map((f) => f.user.id)), [friendsPage.items]);
   // 过滤全部前端实现（用户自建房间量级小，分页加载后过滤够用）；排序保持 directory 原排序
   const visibleChannels = useMemo(() => {
     if (filter === "all") return directory.items;
     return directory.items.filter((channel) => {
       switch (filter) {
         case "public": return channel.visibility === "public";
-        case "friends": return channel.visibility === "friends";
+        case "friends": return friendIds.has(channel.owner_id);
         case "occupied": return channel.member_count > 0;
         case "mine": return channel.owner_id === currentUserId;
         default: return true;
       }
     });
-  }, [directory.items, filter, currentUserId]);
+  }, [directory.items, filter, currentUserId, friendIds]);
   const { restoring } = useScrollRestore(scope, hubRef, { ready: !channelsLoading || directory.items.length > 0 });
   useListEntryMotion(hubRef, ".voice-channel-card-wrap", restoring, replayNonce);
   // 记录上次已触发 join 的路由频道 id：仅当 routeChannelId 变化时才 join，

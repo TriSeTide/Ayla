@@ -16,10 +16,12 @@ import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useBoardgameStore } from "../stores/boardgame";
 import { useDirectoryPage } from "../hooks/useDirectoryPage";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
+import { useSocialPage } from "../hooks/useSocialPage";
 import { saveScrollPosition, useScrollRestore } from "../hooks/useScrollRestore";
 import { DirectoryLoadMore } from "../components/DirectoryLoadMore";
 import { DirectoryFilters } from "../components/DirectoryFilters";
 import { IconGame } from "../components/icons";
+import { useAuthStore } from "../stores/auth";
 import { useShellStore } from "../stores/shell";
 
 type GameFilter = "all" | "public" | "friends" | "mine" | "waiting" | "playing";
@@ -36,7 +38,15 @@ export function GamesHubPage() {
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const { roomId } = useParams<{ roomId?: string }>();
-  const directory = useDirectoryPage("game", {}, !roomId);
+  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
+  const selectionId = useId();
+  const [params, setParams] = useSearchParams();
+  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
+  const scope = `games-hub:${filter}`;
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 第一页）；
+  // 「我的」tab 用后端 owner 过滤（owner_id=当前用户），其余 tab 拉到数据后前端过滤
+  const directory = useDirectoryPage("game", { filter, owner: filter === "mine" ? currentUserId : undefined }, !roomId);
   const { items: rooms, loading, error, refresh } = directory;
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 进入的房间（占位界面） */
@@ -48,25 +58,23 @@ export function GamesHubPage() {
   const hubRef = useRef<HTMLDivElement>(null);
   // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
   const [replayNonce, setReplayNonce] = useState(0);
-  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
-  const selectionId = useId();
-  const [params, setParams] = useSearchParams();
-  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
-  const scope = `games-hub:${filter}`;
+  // 好友 tab：作者是好友（friendIds 集合），不是 visibility=friends 才显示
+  const friendsPage = useSocialPage("friends", {}, !roomId);
+  const friendIds = useMemo(() => new Set(friendsPage.items.map((f) => f.user.id)), [friendsPage.items]);
   // 过滤全部前端实现（分页加载后过滤够用）；排序保持 directory 原排序（created_at 倒序）
   const visibleRooms = useMemo(() => {
     if (filter === "all") return rooms;
     return rooms.filter((room) => {
       switch (filter) {
         case "public": return room.visibility === "public";
-        case "friends": return room.visibility === "friends";
+        case "friends": return friendIds.has(room.owner_id);
         case "mine": return room.is_owner;
         case "waiting": return room.status === "waiting";
         case "playing": return room.status === "playing";
         default: return true;
       }
     });
-  }, [rooms, filter]);
+  }, [rooms, filter, friendIds]);
   const { restoring } = useScrollRestore(scope, hubRef, { ready: !loading || rooms.length > 0 });
   useListEntryMotion(hubRef, ".game-room-card-wrap", restoring, replayNonce);
   const load = refresh;

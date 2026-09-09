@@ -18,7 +18,16 @@ export interface DirectoryItems {
 }
 export type DirectoryKind = keyof DirectoryItems;
 type Item = DirectoryItems[DirectoryKind];
-export interface DirectoryOptions { groupId?: string; onlyLive?: boolean }
+export interface DirectoryOptions {
+  groupId?: string;
+  onlyLive?: boolean;
+  /** 分类选项卡（voice-hub/live-hub/games-hub 大厅）：每个 tab 独立 key/游标/加载 */
+  filter?: string;
+  /** 直播/桌游「我的」tab：后端 owner 过滤（owner_id=当前用户） */
+  owner?: string;
+  /** 桌游「我在局」过滤（本任务未用，保留给后端契约） */
+  mine?: boolean;
+}
 export interface DirectoryRecord {
   kind: DirectoryKind;
   groupId?: string;
@@ -67,7 +76,8 @@ export const useDirectoryStore = create<{
 }>((set) => ({ records: {}, reset: () => { pending.clear(); requestDeletions.clear(); clearMutationHints(); attempt += 1; set({ records: {} }); } }));
 
 export function directoryKey(kind: DirectoryKind, options: DirectoryOptions = {}) {
-  return JSON.stringify([useAuthStore.getState().currentUser?.id ?? null, kind, options.groupId ?? null, !!options.onlyLive]);
+  return JSON.stringify([useAuthStore.getState().currentUser?.id ?? null, kind, options.groupId ?? null,
+    !!options.onlyLive, options.filter ?? null, options.owner ?? null, !!options.mine]);
 }
 
 function patch(key: string, record: DirectoryRecord) {
@@ -234,9 +244,12 @@ export function loadDirectory(
   const descriptorsAtStart = new Map(cachedItems(kind).map((item) => [String(item.id), item]));
   const cursor = mode === "more" ? previous.nextCursor : null;
   patch(key, { ...previous, ...options, loading: true, error: null, revision });
-  const params = { ...options, limit: 20, cursor };
-  const request: Promise<DirectoryPage<Item>> = kind === "live" ? listLiveChannelsPage(params)
-    : kind === "voice" ? listVoiceChannelsPage(params) : listGameRoomsPage(params);
+  // 按 kind 精确传参：语音后端不支持 owner/mine 过滤（filter 仅用于 key 隔离，页面层过滤）
+  const base = { limit: 20, cursor, groupId: options.groupId };
+  const request: Promise<DirectoryPage<Item>> = kind === "live"
+    ? listLiveChannelsPage({ ...base, onlyLive: options.onlyLive, owner: options.owner })
+    : kind === "voice" ? listVoiceChannelsPage(base)
+      : listGameRoomsPage({ ...base, mine: options.mine, owner: options.owner });
   const task = request.then((page) => {
     const current = useDirectoryStore.getState().records[key];
     if (!current || current.revision !== revision || directoryKey(kind, options) !== key) return;

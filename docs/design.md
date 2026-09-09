@@ -535,9 +535,11 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **选项卡与过滤（全部前端实现，分页加载后过滤够用）**：
   - 语音：全部 / 公开 / 好友 / 有人（member_count>0）/ 我的（owner_id=当前用户）
   - 直播：全部 / 在播（status=live）/ 公开 / 好友 / 停播（status≠live）/ 我的（is_owner）
-  - 帖子：全部 / 热门（view_count 降序，唯一排序例外）/ 公开 / 好友 / 我的（is_author，前端过滤已加载数据，不重拉 scope=mine）
+  - 帖子：全部 / 热门（view_count 降序，唯一排序例外）/ 公开 / 好友 / 我的（is_author）
   - 桌游：全部 / 公开 / 好友 / 我的（is_owner）/ 等待中（status=waiting）/ 对局中（status=playing）
+  - **好友 tab = 作者是好友**（friendIds 集合，`useSocialPage("friends")` 加载），不是 visibility=friends 才显示——好友发布的 public/friends 内容都归入该类
   - 排序除帖子热门外全部保持原页面排序（语音有人区优先+last_occupied_at、直播在播优先+started_at、桌游 created_at 倒序、帖子 feed 原顺序）
+- **每 tab 独立加载（2026-09-09 用户反馈修正）**：filter 进 directory key（语音/直播/桌游），每个 tab 独立游标/分页，切 tab 自动拉取该 tab 第一页（有加载态），滚到底加载该 tab 的下一页；直播/桌游「我的」tab 用后端 owner 过滤（owner_id=当前用户），语音「我的」无后端支持走前端过滤；帖子页每 tab 独立缓存（模块级 Map，账号切换清空），「我的」tab 拉 scope=mine，其余 tab 拉 scope=feed 后前端过滤/排序。切回已加载 tab 缓存命中（60s 内不重拉）。
 - **状态保持**：选项卡切换用 URL search 参数（?type=xxx，与收藏/搜索一致），支持返回/刷新保持；各 tab 独立滚动位置（`useScrollRestore`，scope 含 filter）；切换时内容区重挂载（key=scope）走 `directory-content-in` 淡入上移动画（300ms，reduced-motion 关闭）。
 - **无返回键**：六个页面均不传 `leading`（窄屏由 AppShell 顶栏承担返回语义）。
 - **过滤空态**：非「全部」tab 过滤后为空时显示分类空态（「这个分类还没有…」+ 换分类引导）；「全部」tab 空态保持各页面原文案。

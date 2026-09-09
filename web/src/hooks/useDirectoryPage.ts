@@ -6,14 +6,14 @@ const EMPTY_ITEMS: never[] = [];
 
 export function useDirectoryPage<K extends DirectoryKind>(kind: K, options: DirectoryOptions = {}, enabled = true) {
   const userId = useAuthStore((state) => state.currentUser?.id);
-  const { groupId, onlyLive } = options;
-  const key = directoryKey(kind, { groupId, onlyLive });
+  const { groupId, onlyLive, filter, owner, mine } = options;
+  const key = directoryKey(kind, { groupId, onlyLive, filter, owner, mine });
   const record = useDirectoryStore((state) => state.records[key]);
   useEffect(() => {
-    if (enabled) void loadDirectory(kind, { groupId, onlyLive });
-  }, [kind, groupId, onlyLive, enabled, userId]);
-  const refresh = useCallback(() => loadDirectory(kind, { groupId, onlyLive }, "refresh"), [kind, groupId, onlyLive]);
-  const loadMore = useCallback(() => loadDirectory(kind, { groupId, onlyLive }, "more"), [kind, groupId, onlyLive]);
+    if (enabled) void loadDirectory(kind, { groupId, onlyLive, filter, owner, mine });
+  }, [kind, groupId, onlyLive, filter, owner, mine, enabled, userId]);
+  const refresh = useCallback(() => loadDirectory(kind, { groupId, onlyLive, filter, owner, mine }, "refresh"), [kind, groupId, onlyLive, filter, owner, mine]);
+  const loadMore = useCallback(() => loadDirectory(kind, { groupId, onlyLive, filter, owner, mine }, "more"), [kind, groupId, onlyLive, filter, owner, mine]);
   const onScroll = useCallback((element: HTMLElement) => {
     if (useDirectoryStore.getState().records[key]?.error) return;
     if (element.scrollHeight - element.scrollTop - element.clientHeight < 240) void loadMore();

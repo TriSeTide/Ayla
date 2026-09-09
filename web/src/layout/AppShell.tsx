@@ -67,6 +67,10 @@ export function AppShell() {
     || matchPath({ path: "/games/:roomId", end: true }, pathname) != null
     || matchPath({ path: "/user/:userId", end: true }, pathname) != null
     || pathname === "/profile" || pathname === "/favorites" || pathname === "/search"
+    // 四个一级大厅页与收藏/搜索同属面板自编排路由：整页转场外层立即归位，
+    // 宽屏侧栏 auroraqua-sidebar-in / 窄屏顶栏 auroraqua-panel-from-top 各自滑入，
+    // 避免整页位移覆盖内部滑入动画（design.md §12.9.1）。
+    || pathname === "/voice" || pathname === "/live" || pathname === "/posts" || pathname === "/games"
     || (pathname !== "/posts/mine" && matchPath({ path: "/posts/:postId", end: true }, pathname) != null)
   );
   const navDirection = usePrimaryNavSwipeDirection(pathname);

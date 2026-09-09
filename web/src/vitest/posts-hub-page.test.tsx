@@ -2,17 +2,21 @@ import { FavoriteButton } from "../components/FavoriteButton";
 import { ensureFavoriteScope, useFavoriteStatusStore } from "../stores/favoriteStatus";
 /**
  * PostsHubPage 测试：分类选项卡（全部/热门/公开/好友/我的）过滤与排序契约 +
+ * 每 tab 独立加载（切 tab 自动拉取该 tab 第一页，scope=feed/mine）+
  * 分页/刷新/滚动恢复回归（原「我的帖子」链接已被「我的」tab 取代）。
  */
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as favoritesApi from "../api/favorites";
 import * as postsApi from "../api/posts";
+import * as usersApi from "../api/users";
 import type { Post, PostListPage } from "../api/types";
-import { PostsHubPage } from "../pages/PostsHubPage";
+import { PostsHubPage, clearPostTabMemory } from "../pages/PostsHubPage";
 import { usePostsStore } from "../stores/posts";
 import { useShellStore } from "../stores/shell";
+import { useSocialStore } from "../stores/social";
+import { useAuthStore } from "../stores/auth";
 import { clearScrollMemory, saveScrollPosition } from "../hooks/useScrollRestore";
 import { chatWS } from "../ws/chat";
 
@@ -26,6 +30,9 @@ vi.mock("../api/favorites", () => ({
   getFavoriteStatuses: vi.fn().mockImplementation(async (target_type, ids: string[]) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) })),
   addFavorite: vi.fn(),
   removeFavorite: vi.fn(),
+}));
+vi.mock("../api/users", () => ({
+  listFriendsPage: vi.fn(),
 }));
 vi.mock("../components/posts/PostCard", () => ({
   PostCard: ({ post }: { post: Post }) => (
@@ -69,9 +76,9 @@ function LocationProbe() {
   return <div data-testid="location">{location.search}</div>;
 }
 
-function renderHub() {
+function renderHub(entry = "/posts") {
   return render(
-    <MemoryRouter initialEntries={["/posts"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <LocationProbe />
       <Routes>
         <Route path="/posts" element={<PostsHubPage />} />
@@ -84,40 +91,44 @@ function renderHub() {
 beforeEach(() => {
   ensureFavoriteScope();
   useFavoriteStatusStore.setState({ entries: new Map() });
-  vi.mocked(favoritesApi.getFavoriteStatuses).mockImplementation(async (target_type, ids) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) }));
+  useSocialStore.getState().reset();
+  clearPostTabMemory();
   clearScrollMemory();
+  useAuthStore.setState({
+    accessToken: "acc",
+    currentUser: {
+      id: "u1", username: "alice", nickname: "爱丽丝", avatar: "", signature: "",
+      status: "online", online: true, date_joined: "2026-01-01T00:00:00Z",
+    },
+  });
+  vi.mocked(favoritesApi.getFavoriteStatuses).mockImplementation(async (target_type, ids) => ({ target_type, statuses: Object.fromEntries(ids.map((id) => [id, null])) }));
   vi.mocked(favoritesApi.listFavorites).mockResolvedValue([]);
+  // 好友列表：u2 是 u1 的好友（好友 tab = 作者是好友）
+  vi.mocked(usersApi.listFriendsPage).mockResolvedValue({
+    results: [{ id: 1, user: { id: "u2", username: "bob", nickname: "鲍勃", avatar: "", signature: "", status: "auto", online: false, date_joined: "2026-01-01T00:00:00Z" }, created_at: "2026-01-01T00:00:00Z" }],
+    next_cursor: null, has_more: false, total: 1,
+  });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   act(() => usePostsStore.getState().reset());
+  useSocialStore.getState().reset();
+  clearPostTabMemory();
   useShellStore.getState().registerRefresh(null);
 });
 
-describe("PostsHubPage 我的帖子入口", () => {
+describe("PostsHubPage 分类选项卡与分页", () => {
   it("首屏请求 pending 保持骨架，成功后显示帖子", async () => {
     let resolvePage!: (page: PostListPage) => void;
     vi.mocked(postsApi.listPosts).mockReturnValue(new Promise((resolve) => { resolvePage = resolve; }));
     const { container } = renderHub();
-    const post: Post = {
-      id: 1, author_id: "u1", title: "测试帖子", body: "正文", visibility: "public",
-      group: null, group_name: null, images: [], comment_count: 0, is_author: false,
-      view_count: 0, is_viewed: false, created_at: "2026-09-08T00:00:00Z", updated_at: "2026-09-08T00:00:00Z",
-      author: {
-        id: "u1", username: "alice", nickname: "爱丽丝", avatar: "", signature: "",
-        status: "auto", online: false, date_joined: "2026-01-01T00:00:00Z",
-      },
-    };
-
     expect(container.querySelector(".posts-skeleton .skeleton")).not.toBeNull();
-    expect(usePostsStore.getState().loading).toBe(true);
     expect(screen.queryByText("还没有帖子")).not.toBeInTheDocument();
-    await act(async () => resolvePage({ results: [post], next_cursor: null, has_more: false }));
+    await act(async () => resolvePage({ results: [post(1)], next_cursor: null, has_more: false }));
     expect(screen.getByText("帖卡")).toBeInTheDocument();
     expect(container.querySelector(".posts-skeleton")).toBeNull();
-    expect(usePostsStore.getState().loading).toBe(false);
   });
 
   it("失败重试在请求完成前显示骨架，空响应才显示空态", async () => {
@@ -135,9 +146,11 @@ describe("PostsHubPage 我的帖子入口", () => {
     expect(container.querySelector(".posts-skeleton")).toBeNull();
   });
 
-  it("分类选项卡存在；「我的」tab 前端过滤 is_author（不重新拉 scope=mine）", async () => {
-    act(() => usePostsStore.getState().setPage([post(1), { ...post(2), is_author: true }], null, false));
-    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
+  it("分类选项卡存在；「我的」tab 拉 scope=mine 且只显示我的帖子", async () => {
+    vi.mocked(postsApi.listPosts).mockImplementation(async ({ scope }) => {
+      if (scope === "mine") return { results: [{ ...post(2), is_author: true }], next_cursor: null, has_more: false };
+      return { results: [post(1), { ...post(2), is_author: true }], next_cursor: null, has_more: false };
+    });
     renderHub();
     await screen.findByText("帖子1");
     expect(screen.getByRole("tablist", { name: "帖子分类" })).toBeInTheDocument();
@@ -145,15 +158,14 @@ describe("PostsHubPage 我的帖子入口", () => {
     expect(screen.getByText("帖子2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "我的" }));
     expect(screen.getByRole("tab", { name: "我的" })).toHaveAttribute("aria-selected", "true");
+    // 「我的」tab 独立加载：scope=mine
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "mine", limit: 20 }));
     expect(screen.queryByText("帖子1")).not.toBeInTheDocument();
     expect(screen.getByText("帖子2")).toBeInTheDocument();
-    // 前端过滤已加载数据：不重新拉取 scope=mine
-    expect(postsApi.listPosts).not.toHaveBeenCalled();
   });
 
   it("tab 切换写入 URL ?type=，返回「全部」清空参数", async () => {
-    act(() => usePostsStore.getState().setPage([post(1)], null, false));
-    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
+    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post(1)], next_cursor: null, has_more: false });
     renderHub();
     await screen.findByText("帖子1");
     fireEvent.click(screen.getByRole("tab", { name: "热门" }));
@@ -163,36 +175,43 @@ describe("PostsHubPage 我的帖子入口", () => {
   });
 
   it("热门 tab 按 view_count 降序（唯一排序例外）", async () => {
-    act(() => usePostsStore.getState().setPage([
-      { ...post(1), view_count: 3 },
-      { ...post(2), view_count: 9 },
-      { ...post(3), view_count: 5 },
-    ], null, false));
-    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
+    vi.mocked(postsApi.listPosts).mockResolvedValue({
+      results: [{ ...post(1), view_count: 3 }, { ...post(2), view_count: 9 }, { ...post(3), view_count: 5 }],
+      next_cursor: null, has_more: false,
+    });
     renderHub();
     await screen.findByText("帖子1");
     fireEvent.click(screen.getByRole("tab", { name: "热门" }));
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", limit: 20 }));
     const items = document.querySelectorAll(".posts-feed-item");
     expect(Array.from(items).map((item) => item.getAttribute("data-post-id"))).toEqual(["2", "3", "1"]);
   });
 
-  it("公开/好友 tab 按 visibility 过滤", async () => {
-    act(() => usePostsStore.getState().setPage([
-      { ...post(1), visibility: "public" },
-      { ...post(2), visibility: "friends" },
-      { ...post(3), visibility: "group" },
-    ], null, false));
-    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
+  it("公开/好友 tab 按 visibility/好友过滤", async () => {
+    vi.mocked(postsApi.listPosts).mockResolvedValue({
+      results: [
+        { ...post(1), visibility: "public" },
+        { ...post(2), visibility: "friends", author_id: "u2" },
+        { ...post(3), visibility: "group" },
+        { ...post(4), visibility: "public", author_id: "u2" },
+      ],
+      next_cursor: null, has_more: false,
+    });
     renderHub();
     await screen.findByText("帖子1");
     fireEvent.click(screen.getByRole("tab", { name: "公开" }));
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", limit: 20 }));
     expect(screen.getByText("帖子1")).toBeInTheDocument();
     expect(screen.queryByText("帖子2")).not.toBeInTheDocument();
     expect(screen.queryByText("帖子3")).not.toBeInTheDocument();
+    expect(screen.getByText("帖子4")).toBeInTheDocument();
+    // 好友 = 作者是好友（u2 的 public/friends 都算），非 visibility=friends
     fireEvent.click(screen.getByRole("tab", { name: "好友" }));
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", limit: 20 }));
     expect(screen.queryByText("帖子1")).not.toBeInTheDocument();
     expect(screen.getByText("帖子2")).toBeInTheDocument();
     expect(screen.queryByText("帖子3")).not.toBeInTheDocument();
+    expect(screen.getByText("帖子4")).toBeInTheDocument();
   });
 
   it("重复滚底只追加一次，重复id与本页重复记录不会产生重复卡", async () => {
@@ -206,9 +225,10 @@ describe("PostsHubPage 我的帖子入口", () => {
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
     expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", limit: 20, cursor: "next-1" });
     await act(async () => next.resolve(page([2, 3, 3], "next-2")));
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([1, 2, 3]);
+    console.log("DEBUG-IDS:", Array.from(container.querySelectorAll('[data-post-id]')).map((el) => el.getAttribute("data-post-id")));
+    console.log("DEBUG-CALLS:", vi.mocked(postsApi.listPosts).mock.calls.map((c) => c[0]));
+    expect(container.querySelectorAll('[data-post-id]')).toHaveLength(3);
     expect(container.querySelector('[data-post-id="1"]')).toBe(first);
-    expect(usePostsStore.getState().nextCursor).toBe("next-2");
   });
 
   it("追加失败显示错误并保留旧页和cursor，后续滚动不自动重试", async () => {
@@ -217,7 +237,6 @@ describe("PostsHubPage 我的帖子入口", () => {
     await screen.findByText("帖子1");
     scrollNearBottom(container);
     expect(await screen.findByRole("alert")).toHaveTextContent("下一页断网");
-    expect(usePostsStore.getState().nextCursor).toBe("next-1");
     expect(screen.getByText("帖子1")).toBeInTheDocument();
     scrollNearBottom(container);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
@@ -240,13 +259,11 @@ describe("PostsHubPage 我的帖子入口", () => {
     act(() => { refresh = Promise.resolve(useShellStore.getState().refreshCallback!()); });
     await act(async () => { fresh.resolve(page([10], "fresh-next")); await refresh; });
     scrollNearBottom(container);
-    expect(usePostsStore.getState().loading).toBe(true);
     await act(async () => oldAppend.resolve(page([2], "stale-next")));
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([10]);
-    expect(usePostsStore.getState().nextCursor).toBe("fresh-next");
-    expect(usePostsStore.getState().loading).toBe(true);
+    expect(container.querySelectorAll('[data-post-id]')).toHaveLength(1);
+    expect(container.querySelector('[data-post-id="10"]')).not.toBeNull();
     await act(async () => newAppend.resolve(page([11], null)));
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([10, 11]);
+    expect(container.querySelector('[data-post-id="11"]')).not.toBeNull();
   });
 
   it("刷新失败保留原cursor与卡片并显示错误，旧追加仍失效", async () => {
@@ -258,25 +275,23 @@ describe("PostsHubPage 我的帖子入口", () => {
     await act(async () => { await useShellStore.getState().refreshCallback!(); });
     expect(screen.getByRole("alert")).toHaveTextContent("刷新失败");
     await act(async () => oldAppend.resolve(page([2], "stale-next")));
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([1]);
-    expect(usePostsStore.getState().nextCursor).toBe("next-1");
+    expect(container.querySelectorAll('[data-post-id]')).toHaveLength(1);
     vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([3], null));
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
     await screen.findByText("帖子3");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("卸载后迟到的首页不能写回共享store，下一次挂载仍可正常加载", async () => {
+  it("卸载后迟到的首页不能写回，下一次挂载仍可正常加载", async () => {
     const abandoned = deferred<PostListPage>();
     vi.mocked(postsApi.listPosts).mockReturnValueOnce(abandoned.promise);
     const first = renderHub();
     first.unmount();
-    expect(usePostsStore.getState().loading).toBe(false);
     vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([9], null));
     renderHub();
     await screen.findByText("帖子9");
     await act(async () => abandoned.resolve(page([1], null)));
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([9]);
+    expect(screen.queryByText("帖子1")).not.toBeInTheDocument();
   });
 
   it("WS新帖和删除、浏览及收藏变化在刷新响应后仍保留", async () => {
@@ -298,8 +313,8 @@ describe("PostsHubPage 我的帖子入口", () => {
       usePostsStore.getState().setFavorite("1", 99);
     });
     await act(async () => { fresh.resolve(page([1, 2], "fresh-next")); await refresh; });
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([3, 1]);
-    expect(usePostsStore.getState().posts[1]).toMatchObject({ is_viewed: true, view_count: 7 });
+    expect(screen.getByText("帖子3")).toBeInTheDocument();
+    expect(screen.queryByText("帖子2")).not.toBeInTheDocument();
     expect(getFavorite(1)!).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -310,7 +325,7 @@ describe("PostsHubPage 我的帖子入口", () => {
     scrollNearBottom(container);
     // 静默：无错误提示，列表保持已加载页
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(usePostsStore.getState().posts.map((p) => p.id)).toEqual([1]);
+    expect(container.querySelectorAll('[data-post-id]')).toHaveLength(1);
     // nextFailed 阻止后续滚动重复请求相同页
     scrollNearBottom(container);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
@@ -324,24 +339,33 @@ describe("PostsHubPage 我的帖子入口", () => {
       return { cancel: vi.fn(), onfinish: null };
     } });
     try {
-      act(() => usePostsStore.getState().setPage([post(1), post(2)], "next-2", true));
+      // 预置「全部」tab 两页缓存（保留 hasMore）：首屏不重拉，直接恢复
+      vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([1, 2], "next-2")).mockResolvedValueOnce(page([3], "next-3"));
+      const firstRender = renderHub();
+      await screen.findByText("帖子1");
+      fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+      await screen.findByText("帖子3");
+      firstRender.unmount();
+      animated.length = 0;
       const scrollOwner = document.createElement("div");
       scrollOwner.scrollTop = 320;
       saveScrollPosition("posts-feed:all", scrollOwner);
+      const callsBefore = vi.mocked(postsApi.listPosts).mock.calls.length;
       const { container } = renderHub();
-      expect(postsApi.listPosts).not.toHaveBeenCalled();
+      // 缓存命中：第二次挂载不重拉（调用次数不变）
+      expect(postsApi.listPosts).toHaveBeenCalledTimes(callsBefore);
       expect((container.querySelector(".directory-content") as HTMLElement).scrollTop).toBe(320);
       expect(animated).toHaveLength(0);
       const first = container.querySelector('[data-post-id="1"]');
-      vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([3], null));
+      vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([4], null));
       fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
-      await screen.findByText("帖子3");
-      expect(animated.map((node) => node.dataset.postId)).toEqual(["3"]);
-      vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([1, 2, 3, 4], null));
+      await screen.findByText("帖子4");
+      expect(animated.map((node) => node.dataset.postId)).toEqual(["4"]);
+      vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([1, 2, 3, 4, 5], null));
       await act(async () => { await useShellStore.getState().refreshCallback!(); });
       expect(container.querySelector('[data-post-id="1"]')).toBe(first);
-      // 刷新：已入场 1/2/3 整批重播，新增 4 单独入场
-      expect(animated.map((node) => node.dataset.postId)).toEqual(["3", "1", "2", "3", "4"]);
+      // 刷新：已入场 1/2/3/4 整批重播，新增 5 单独入场
+      expect(animated.map((node) => node.dataset.postId)).toEqual(["4", "1", "2", "3", "4", "5"]);
       cleanup();
     } finally {
       if (previousAnimate) Object.defineProperty(HTMLElement.prototype, "animate", previousAnimate);

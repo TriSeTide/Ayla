@@ -18,6 +18,8 @@ import { DirectoryFilters } from "../components/DirectoryFilters";
 import { IconVideo } from "../components/icons";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useListEntryMotion } from "../hooks/useListEntryMotion";
+import { useSocialPage } from "../hooks/useSocialPage";
+import { useAuthStore } from "../stores/auth";
 import { useShellStore } from "../stores/shell";
 
 type LiveFilter = "all" | "live" | "public" | "friends" | "offline" | "mine";
@@ -33,7 +35,15 @@ const FILTERS: ReadonlyArray<{ key: LiveFilter; label: string }> = [
 export function LiveHubPage() {
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
-  const directory = useDirectoryPage("live", {});
+  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
+  const selectionId = useId();
+  const [params, setParams] = useSearchParams();
+  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
+  const scope = `live-hub:${filter}`;
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
+  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 第一页）；
+  // 「我的」tab 用后端 owner 过滤（owner_id=当前用户），其余 tab 拉到数据后前端过滤
+  const directory = useDirectoryPage("live", { filter, owner: filter === "mine" ? currentUserId : undefined });
   const { items: channels, loading, error, refresh } = directory;
   const [profileError, setProfileError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
@@ -41,11 +51,9 @@ export function LiveHubPage() {
   // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
   const [replayNonce, setReplayNonce] = useState(0);
   const hubRef = useRef<HTMLDivElement>(null);
-  // 分类选项卡：URL ?type= 驱动（与收藏/搜索一致），各 tab 独立滚动位置
-  const selectionId = useId();
-  const [params, setParams] = useSearchParams();
-  const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
-  const scope = `live-hub:${filter}`;
+  // 好友 tab：作者是好友（friendIds 集合），不是 visibility=friends 才显示
+  const friendsPage = useSocialPage("friends", {});
+  const friendIds = useMemo(() => new Set(friendsPage.items.map((f) => f.user.id)), [friendsPage.items]);
   // 过滤全部前端实现（分页加载后过滤够用）；排序保持 directory 原排序（sortLiveChannels）
   const visibleChannels = useMemo(() => {
     if (filter === "all") return channels;
@@ -53,13 +61,13 @@ export function LiveHubPage() {
       switch (filter) {
         case "live": return channel.status === "live";
         case "public": return channel.visibility === "public";
-        case "friends": return channel.visibility === "friends";
+        case "friends": return friendIds.has(channel.owner_id);
         case "offline": return channel.status !== "live";
         case "mine": return channel.is_owner;
         default: return true;
       }
     });
-  }, [channels, filter]);
+  }, [channels, filter, friendIds]);
   const { restoring } = useScrollRestore(scope, hubRef, { ready: !loading || channels.length > 0 });
   useListEntryMotion(hubRef, ".live-card-wrap", restoring, replayNonce);
 
