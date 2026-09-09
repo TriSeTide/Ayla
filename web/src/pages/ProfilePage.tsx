@@ -3,13 +3,13 @@
  * 收藏入口、账号区（登出）。契约：PATCH /me/profile/（nickname/avatar/signature/status）。
  */
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { updateProfile } from "../api/auth";
 import { ApiError } from "../api/client";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../api/media";
 import { Avatar } from "../components/Avatar";
 import { ProfileContentSections } from "../components/ProfileContentSections";
-import { IconBack, IconLogout } from "../components/icons";
+import { IconBack, IconHeart, IconLogout } from "../components/icons";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useAuth } from "../hooks/useAuth";
@@ -182,6 +182,10 @@ export function ProfilePage() {
                 }}
               />
             </label>
+            <Link to="/favorites" className="btn btn-ghost profile-favorites-btn">
+              <IconHeart width={15} height={15} />
+              我的收藏
+            </Link>
             {avatarPreview && (
               <span className="profile-avatar-hint">新头像将在保存后生效</span>
             )}
@@ -290,7 +294,7 @@ export function ProfilePage() {
 
         </div>
         <div className="profile-main">
-          <ProfileContentSections key={currentUser.id} ownerId={currentUser.id} mine />
+          <ProfileContentSections key={currentUser.id} owner={currentUser} mine />
       </div>
       </div>
       </div>

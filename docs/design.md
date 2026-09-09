@@ -651,6 +651,18 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **乐观文件消息**（descriptor 未就绪、上传中/失败）：复用 `.file-card` 显示本地文件名+大小（无下载钮）；上传进度/取消/失败重试/删除由 `MessageBubble` 外层 `.msg-send-state` 承接（§12.16）。服务端确认后原地替换为带 descriptor 的文件气泡。
 - **列表预览**：`file` 消息 preview = 文件名（后端 `message_preview` 对 `TYPE_FILE` 取 `content`，非 `[文件]` 占位）；群聊带 `发送者名: 文件名`。WS `message.new` 与 REST 会话列表同契约。
 
+### 12.22 个人页右侧内容卡片（重构版）
+
+> 个人主页（/profile）与他人主页（/user/:id）右侧内容区共用 `ProfileContentSections`。重构后**不再折叠**，按固定顺序展示完整卡片；外层 `.profile-mine` 是透明 wrapper（design.md §4 单材料 owner），每类内容一张独立玻璃卡 `.profile-content-card`，不叠卡片。
+
+- **顺序与数量**：① 正在直播的直播间（最多 1 个）→ ② 正在语音的语音房（最多 1 个）→ ③ 帖子（最多 3 条 +「更多帖子」按钮）→ ④ 正在玩的桌游（占位，玩法未实现）。
+- **直播/语音并排**：两者同时存在时包在 `.profile-media-row`（flex row，子卡 `flex:1 1 0` 平均分配宽度）；只有一个时占满整行；≤768px 退回单列。
+- **数据来源**：直播/语音用 `owner.is_live + live_room_id` / `owner.is_in_voice + voice_room_id` 拉频道详情（`getLiveChannel`/`getVoiceChannel`，走 can_view 过滤，403 静默不展示）；帖子 mine 走 `scope=mine`、他人走 `?owner=<id>`（后端要求对方开启 show_content）。mine 时 owner 为 auth store 的 currentUser（is_live/is_in_voice 由 WS 实时更新）。
+- **卡片结构**：`.profile-content-card` = 玻璃卡（§4 材料）+ `.profile-content-head`（图标 + 标题 + 尾部徽标）；直播卡 LIVE 徽标 `--pink-500` 白字胶囊 + 封面缩略图（88×50 圆角 12px，无封面用 `--ice-100` 底视频图标占位）；语音卡在麦人数 Space Grotesk 12px；帖子卡 3 行（标题 + 摘要/时间）+ ghost「更多帖子」按钮。
+- **更多帖子跳转**：mine → `/posts/mine`；他人 → `/user/:id/posts`（路由守卫见下）。
+- **收藏入口**：个人主页的「我的收藏」移到左侧资料卡（`.profile-avatar-actions` 内、更换头像按钮右侧），ghost 按钮 + `IconHeart` 爱心图标（`--pink-500`），不再放右侧内容区头部。
+- **他人帖子界面路由守卫**：`/user/:id/posts` 由 `UserPostsRoute` 守卫——`getUserDetail` 确认对方 `show_content` 开启才渲染 `MyPostsPage`（owner 模式，标题「xx的帖子」）；未开启显示提示页（「对方未开启内容展示」+ 返回），不渲染帖子内容。后端 posts/live/boardgame 的 `?owner=` 过滤同步要求 `owner__show_content=True`（权限边界，防止绕过前端直调 API）。
+
 ---
 
 > 本文件是 `Ayla/web/` 视觉唯一事实源。新增组件先看 §4 / §12 有没有配方；没有就按 §2/§3/§5 的 token 与刻度推导，推导不出来再改本文件——不要在组件里散落裸 hex。

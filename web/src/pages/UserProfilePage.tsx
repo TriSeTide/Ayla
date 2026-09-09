@@ -208,7 +208,7 @@ export function UserProfilePage() {
             {/* 他的内容：对方开启「向他人展示内容」才显示；收藏永不对外展示 */}
             {user.show_content && (
               <div className="profile-main">
-                <ProfileContentSections key={user.id} ownerId={user.id} />
+                <ProfileContentSections key={user.id} owner={user} />
               </div>
             )}
           </>

@@ -101,6 +101,26 @@ def test_channel_list_and_only_live_filter(auth_client, live_channel_factory):
 
 
 @pytest.mark.django_db
+def test_owner_filter_requires_show_content(auth_client, user_factory, live_channel_factory):
+    """他人主页 owner=<id>：对方未开启「向他人展示内容」→ 视为无内容；开启后可见。"""
+    client, viewer = auth_client(username="l_owner_viewer")
+    owner = user_factory(username="l_owner_hidden")
+    live_channel_factory(owner=owner, title="隐藏直播间")
+
+    # 默认 show_content=False → owner 过滤返回空
+    resp = client.get(f"/api/v1/live/channels/?owner={owner.id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    # 开启 show_content → 可见
+    owner.show_content = True
+    owner.save(update_fields=["show_content"])
+    resp = client.get(f"/api/v1/live/channels/?owner={owner.id}")
+    assert resp.status_code == 200
+    assert [ch["title"] for ch in resp.json()] == ["隐藏直播间"]
+
+
+@pytest.mark.django_db
 def test_list_includes_owner_nickname(auth_client, live_channel_factory):
     """列表直接带主播昵称；nickname 为空时回退 username（前端大厅卡片不再经懒拉）。"""
     client, owner = auth_client()

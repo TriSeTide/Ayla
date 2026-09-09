@@ -85,40 +85,208 @@
   color: var(--destructive);
 }
 
+/* 内容卡集合 wrapper：透明容器，不叠卡片（design.md §4 单材料 owner）。
+   内部每类内容一张独立玻璃卡 .profile-content-card。 */
 .profile-mine {
-  padding: var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  min-width: 0;
 }
 
-.profile-mine-head {
+/* 直播/语音并排：一左一右平均分配宽度；窄屏退回单列 */
+.profile-media-row {
+  display: flex;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.profile-media-row .profile-content-card {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .profile-media-row {
+    flex-direction: column;
+  }
+}
+
+/* ================= 内容卡（重构版：直播/语音/帖子/桌游，顺序完整卡片） ================= */
+
+.profile-content-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-shadow);
+}
+
+.profile-content-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
 }
 
-/* 「我的内容」分类展开/收起：整行可点，标题+计数+chevron 一行 */
-.profile-section-toggle {
-  display: flex;
+.profile-content-title {
+  display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  width: 100%;
-  padding: var(--sp-1) 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
-.profile-section-chevron {
+.profile-content-title svg {
+  color: var(--ice-500);
+}
+
+/* LIVE 徽标：--pink-500 实底白字胶囊（design.md §12.7） */
+.profile-live-badge {
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  background: var(--pink-500);
+  color: var(--surface);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+}
+
+.profile-voice-count,
+.profile-content-count {
+  font-family: var(--font-utility);
   font-size: 12px;
   color: var(--text-secondary);
-  transition: transform var(--dur-fast) var(--ease-out);
 }
-.profile-section-chevron.is-open {
-  transform: rotate(90deg);
+
+/* 内容行（直播/语音/帖子共用）：玻璃行，点击进入 */
+.profile-content-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.4);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.profile-content-row:hover {
+  text-decoration: none;
+  background: rgba(157, 191, 230, 0.18);
+  border-color: var(--glass-border);
+}
+
+.profile-content-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.profile-content-row-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-content-row-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-content-row-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-input);
+  background: var(--ice-100);
+  color: var(--ice-500);
+}
+
+/* 直播行：封面缩略图（16:9 小图）+ 标题 + 主播 */
+.profile-live-cover {
+  flex: none;
+  width: 88px;
+  height: 50px;
+  border-radius: var(--radius-input);
+  object-fit: cover;
+}
+
+.profile-live-cover-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ice-100);
+  color: var(--ice-500);
+}
+
+/* 帖子列表：3 条 + 更多按钮 */
+.profile-posts-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.profile-post-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-more-posts {
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 0 var(--sp-4);
+}
+
+.profile-posts-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.profile-content-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 桌游占位卡 */
+.profile-game-placeholder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--radius-input);
+  background: rgba(255, 250, 251, 0.4);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.profile-game-placeholder svg {
+  color: var(--ice-500);
 }
 
 /* 「向他人展示内容」开关行 */
@@ -186,76 +354,19 @@
   padding: 0 var(--sp-4);
 }
 
-.profile-mine-title {
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.profile-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--sp-2);
-}
-
-.profile-section-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.profile-section-count {
-  font-family: var(--font-utility);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.profile-section-empty {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.profile-section-row {
-  display: block;
-  padding: var(--sp-2) var(--sp-3);
-  margin-bottom: var(--sp-1);
-  border-radius: var(--radius-input);
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  font-size: 14px;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-decoration: none;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  box-shadow: var(--glass-shadow-compact);
-  transition: box-shadow var(--auroraqua-duration) var(--auroraqua-ease), border-color var(--auroraqua-duration) var(--auroraqua-ease), translate var(--auroraqua-duration) var(--auroraqua-ease);
-}
-
-.profile-section-row:hover {
-  text-decoration: none;
-  background: rgba(157, 191, 230, 0.18);
-}
-
-.profile-favorites-link {
+/* 收藏按钮（资料卡内，更换头像右侧更靠右）：ghost 按钮 + 爱心图标 */
+.profile-favorites-btn {
   display: inline-flex;
-  align-self: center;
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-pill);
-  background: var(--sakura-300);
-  color: var(--grape-700);
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 28px;
+  padding: 0 var(--sp-3);
+  font-size: 12px;
+  margin-left: auto;
 }
 
-.profile-favorites-link:hover {
-  text-decoration: none;
-  filter: brightness(1.04);
+.profile-favorites-btn svg {
+  color: var(--pink-500);
 }
 
 /* ================= 收藏页（FavoritesPage） ================= */

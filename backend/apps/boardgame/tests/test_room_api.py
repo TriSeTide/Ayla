@@ -212,6 +212,24 @@ class TestRoomList:
         names = {r["name"] for r in resp.json()}
         assert names == {"我加入的"}
 
+    def test_owner_filter_requires_show_content(self, auth_client, user_factory):
+        """他人主页 owner=<id>：对方未开启「向他人展示内容」→ 视为无内容；开启后可见。"""
+        client, viewer = auth_client(username="l_owner_viewer")
+        owner = user_factory(username="l_owner_hidden")
+        _make_room(owner, "隐藏桌游房", visibility=Visibility.PUBLIC)
+
+        # 默认 show_content=False → owner 过滤返回空
+        resp = client.get(f"/api/v1/boardgame/rooms/?owner={owner.id}")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+        # 开启 show_content → 可见
+        owner.show_content = True
+        owner.save(update_fields=["show_content"])
+        resp = client.get(f"/api/v1/boardgame/rooms/?owner={owner.id}")
+        assert resp.status_code == 200
+        assert [r["name"] for r in resp.json()] == ["隐藏桌游房"]
+
 
 # ---------- 详情 / 删除 ----------
 

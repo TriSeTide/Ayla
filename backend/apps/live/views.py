@@ -110,10 +110,11 @@ class ChannelListView(APIView):
         if request.query_params.get("only_live") == "1":
             qs = qs.filter(status="live")
 
-        # 他人主页：owner=<user_id> 只看该用户的内容（仍受可见性过滤）
+        # 他人主页：owner=<user_id> 只看该用户的内容（仍受可见性过滤；
+        # 且对方必须开启「向他人展示内容」show_content，否则视为无内容）
         owner_filter = request.query_params.get("owner", "").strip()
         if owner_filter:
-            qs = qs.filter(owner_id=owner_filter)
+            qs = qs.filter(owner_id=owner_filter, owner__show_content=True)
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性，可见性完全由 allowed_groups 决定）

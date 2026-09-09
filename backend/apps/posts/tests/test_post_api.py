@@ -218,6 +218,30 @@ class TestFeed:
         resp = client.get("/api/v1/posts/?scope=whatever")
         assert resp.status_code == 400
 
+    def test_owner_filter_requires_show_content(self, auth_client, user_factory):
+        """他人主页 owner=<id>：对方未开启「向他人展示内容」→ 视为无内容；开启后可见。"""
+        client, viewer = auth_client(username="f_owner_viewer")
+        owner = user_factory(username="f_owner_hidden")
+        _make_post(owner, "hidden-post", visibility=Visibility.PUBLIC)
+
+        # 默认 show_content=False → owner 过滤返回空
+        resp = client.get(f"/api/v1/posts/?owner={owner.id}")
+        assert resp.status_code == 200
+        assert resp.json()["results"] == []
+
+        # 开启 show_content → 公开帖子可见
+        owner.show_content = True
+        owner.save(update_fields=["show_content"])
+        resp = client.get(f"/api/v1/posts/?owner={owner.id}")
+        assert resp.status_code == 200
+        bodies = {p["body"] for p in resp.json()["results"]}
+        assert bodies == {"hidden-post"}
+
+        # 自己的帖子不受开关影响（scope=mine 不传 owner）
+        resp = client.get("/api/v1/posts/?scope=mine")
+        assert resp.status_code == 200
+        assert resp.json()["results"] == []
+
     def test_cursor_pagination_no_duplicates(self, auth_client):
         client, user = auth_client(username="f_pages")
         # 同一微秒可能撞 created_at，靠 id 兜底排序去重（游标设计点）

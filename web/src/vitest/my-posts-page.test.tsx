@@ -1,7 +1,7 @@
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MyPostsPage } from "../pages/MyPostsPage";
+import { MyPostsPage, _clearMyPostsMemory } from "../pages/MyPostsPage";
 import * as postsApi from "../api/posts";
 import { useAuthStore } from "../stores/auth";
 
@@ -26,17 +26,24 @@ const post = {
   images: [], comment_count: 0, is_author: true, view_count: 0, is_viewed: false, created_at: "2026-01-01", updated_at: "2026-01-01",
 };
 
+/** 当前登录用户（与 post.author 一致，MyPostsPage 的 mine 模式依赖它） */
+const me = { id: "u1", username: "alice", nickname: "爱丽丝", avatar: "", signature: "", status: "online", online: true, date_joined: "2026-01-01" };
+
 function DetailLocation() {
   const location = useLocation();
   return <div>详情地址：{location.pathname}{location.search}</div>;
 }
 
 beforeEach(() => {
-  useAuthStore.setState({ currentUser: null });
+  _clearMyPostsMemory();
+  // 清除 listPosts 的默认实现与 Once 队列（clearAllMocks 不清实现，跨测试会残留）
+  vi.mocked(postsApi.listPosts).mockReset();
+  useAuthStore.setState({ currentUser: me });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  _clearMyPostsMemory();
   useAuthStore.setState({ currentUser: null });
 });
 
@@ -46,7 +53,7 @@ describe("MyPostsPage", () => {
     render(
       <MemoryRouter initialEntries={["/posts/mine"]}>
         <Routes>
-          <Route path="/posts/mine" element={<MyPostsPage />} />
+          <Route path="/posts/mine" element={<MyPostsPage ownerId="u1" />} />
           <Route path="/posts/:postId" element={<DetailLocation />} />
         </Routes>
       </MemoryRouter>,
@@ -59,7 +66,7 @@ describe("MyPostsPage", () => {
 
   it("空列表显示明确空态", async () => {
     vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
-    render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
+    render(<MemoryRouter><MyPostsPage ownerId="u1" /></MemoryRouter>);
     expect(await screen.findByText("还没有帖子")).toBeInTheDocument();
   });
 
@@ -68,7 +75,7 @@ describe("MyPostsPage", () => {
       .mockResolvedValueOnce({ results: [post], next_cursor: "page-2", has_more: true })
       .mockRejectedValueOnce(new Error("尾页读取失败"))
       .mockResolvedValueOnce({ results: [post, { ...post, id: 2, title: "第二页帖子" }], next_cursor: null, has_more: false });
-    const { container } = render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
+    const { container } = render(<MemoryRouter><MyPostsPage ownerId="u1" /></MemoryRouter>);
     await screen.findByText("我的第一帖");
     fireEvent.click(screen.getByRole("button", { name: "加载更多帖子" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("尾页读取失败");
@@ -89,7 +96,7 @@ describe("MyPostsPage", () => {
     vi.mocked(postsApi.listPosts)
       .mockResolvedValueOnce({ results: [post], next_cursor: "page-2", has_more: true })
       .mockReturnValueOnce(pending);
-    const view = render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
+    const view = render(<MemoryRouter><MyPostsPage ownerId="u1" /></MemoryRouter>);
     await screen.findByText("我的第一帖");
     const scroller = view.container.querySelector(".my-posts-page")!;
     fireEvent.scroll(scroller);
@@ -99,15 +106,16 @@ describe("MyPostsPage", () => {
     view.unmount();
     await act(async () => finish({ results: [{ ...post, id: 99, title: "过期返回" }], next_cursor: null, has_more: false }));
     vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [], next_cursor: null, has_more: false });
-    render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
-    await screen.findByText("还没有帖子");
+    render(<MemoryRouter><MyPostsPage ownerId="u1" /></MemoryRouter>);
+    // 卸载前已加载的快照保留（首次加载的帖子），卸载后 resolve 的「过期返回」不写回缓存
+    await screen.findByText("我的第一帖");
     expect(screen.queryByText("过期返回")).not.toBeInTheDocument();
   });
 
   it("首屏错误允许明确重试，恢复时退出错误状态", async () => {
     vi.mocked(postsApi.listPosts).mockRejectedValueOnce(new Error("首屏读取失败"))
       .mockResolvedValueOnce({ results: [post], next_cursor: null, has_more: false });
-    render(<MemoryRouter><MyPostsPage /></MemoryRouter>);
+    render(<MemoryRouter><MyPostsPage ownerId="u1" /></MemoryRouter>);
     expect(await screen.findByRole("alert")).toHaveTextContent("首屏读取失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await screen.findByText("我的第一帖");
@@ -120,7 +128,7 @@ describe("MyPostsPage", () => {
       <MemoryRouter initialEntries={["/posts", "/posts/mine"]}>
         <Routes>
           <Route path="/posts" element={<div>帖子主页占位</div>} />
-          <Route path="/posts/mine" element={<MyPostsPage />} />
+          <Route path="/posts/mine" element={<MyPostsPage ownerId="u1" />} />
         </Routes>
       </MemoryRouter>,
     );

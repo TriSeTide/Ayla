@@ -27,7 +27,7 @@
 
 /* Individual translate/scale avoid competing with route and gesture transforms. */
 :is(.group-card, .group-list-item, .game-room-card, .live-card,
-    .voice-channel-card, .post-card, .profile-section-row, .favorite-item) {
+    .voice-channel-card, .post-card, .favorite-item) {
   transform-origin: center;
   transition: translate var(--auroraqua-duration) var(--auroraqua-ease),
     scale 200ms var(--auroraqua-ease),
@@ -37,7 +37,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   :is(.group-card, .group-list-item, .game-room-card, .live-card,
-      .voice-channel-card, .profile-section-row, .favorite-item):not([aria-disabled="true"]):hover,
+      .voice-channel-card, .favorite-item):not([aria-disabled="true"]):hover,
   .posts-feed-item:hover .post-card {
     translate: 0 -2px;
     box-shadow: var(--glass-shadow-hover);
@@ -45,7 +45,7 @@
 }
 
 :is(.group-card, .group-list-item, .game-room-card, .live-card,
-    .voice-channel-card, .profile-section-row, .favorite-item):not([aria-disabled="true"]):active,
+    .voice-channel-card, .favorite-item):not([aria-disabled="true"]):active,
 .posts-feed-item .post-card:has(.post-card-main:active) {
   translate: 0 0;
   scale: 0.99;
@@ -532,7 +532,7 @@
   :is(.glass-card, .solid-card, .group-card, .game-room-card, .post-card,
       .voice-channel-card, .voice-panel, .elysia-voice-panel, .live-card,
       .live-owner-panel, .group-list-item, .request-row, .friend-row,
-      .profile-section-row, .favorite-item, .server-rail, .channel-sidebar,
+      .favorite-item, .server-rail, .channel-sidebar,
       .wide-messages-sidebar, .live-rail, .chat-sidebar, .voice-sidebar,
       .live-sidebar, .top-nav, .auth-card, .subgroup-dialog, .create-sheet-card,
       .group-create-dialog, .quick-messages-panel, .voice-room-voice-card,
@@ -578,19 +578,6 @@
 
 .live-room-body.is-studio.is-narrow > .live-room-side {
   border-color: transparent;
-}
-
-.profile-mine.solid-card .profile-section-row {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-.profile-mine.solid-card .profile-section-row:hover {
-  background: rgba(157, 191, 230, 0.18);
-  box-shadow: none;
 }
 
 @media (max-width: 768px) {
@@ -669,7 +656,7 @@
   :is(.chat-sidebar, .voice-sidebar, .live-sidebar, .server-rail,
       .channel-sidebar, .wide-messages-sidebar, .live-rail) { animation: none; }
   :is(.group-card, .group-list-item, .game-room-card, .live-card,
-      .voice-channel-card, .post-card, .profile-section-row, .favorite-item,
+      .voice-channel-card, .post-card, .favorite-item,
       .btn, .icon-btn-40, .top-nav-icon-btn, .live-player-btn, .live-player-fs-send, .live-mini-player-close,
       .composer-send, .composer-tool-btn, .msg-action-btn, .favorite-toggle,
       .server-create-btn, .live-rail-icon-btn, .live-room-rail-toggle, .live-cover-picker,

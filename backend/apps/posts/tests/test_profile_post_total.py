@@ -9,6 +9,9 @@ from apps.posts.models import Post
 def test_owner_total_remains_stable_across_pages_and_excludes_hidden_posts(auth_client, user_factory):
     client, viewer = auth_client(username="profile_total_viewer")
     owner = user_factory(username="profile_total_owner")
+    # 他人主页 owner 过滤要求对方开启「向他人展示内容」（show_content）
+    owner.show_content = True
+    owner.save(update_fields=["show_content"])
     visible = [Post.objects.create(owner=owner, body=f"row {index}", visibility=Visibility.PUBLIC) for index in range(23)]
     Post.objects.create(owner=owner, body="hidden", visibility=Visibility.FRIENDS)
     Post.objects.create(owner=viewer, body="viewer unrelated", visibility=Visibility.PUBLIC)

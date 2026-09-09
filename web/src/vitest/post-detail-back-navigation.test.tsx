@@ -20,7 +20,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as postsApi from "../api/posts";
 import type { Post } from "../api/types";
-import { MyPostsPage } from "../pages/MyPostsPage";
+import { MyPostsPage, _clearMyPostsMemory } from "../pages/MyPostsPage";
 import { PostDetailPage } from "../pages/PostDetailPage";
 import { useAuthStore } from "../stores/auth";
 
@@ -71,6 +71,12 @@ const post: Post = {
   updated_at: "2026-01-01",
 };
 
+/** 当前登录用户（与 post.author 一致，MyPostsPage 的 mine 模式依赖它） */
+const me = {
+  id: "u1", username: "alice", nickname: "爱丽丝", avatar: "", signature: "",
+  status: "online", online: true, date_joined: "2026-01-01",
+};
+
 function renderMineFlow() {
   vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post], next_cursor: null, has_more: false });
   vi.mocked(postsApi.getPost).mockResolvedValue(post);
@@ -79,7 +85,7 @@ function renderMineFlow() {
     <MemoryRouter initialEntries={["/posts", "/posts/mine"]}>
       <Routes>
         <Route path="/posts" element={<div>帖子主页占位</div>} />
-        <Route path="/posts/mine" element={<MyPostsPage />} />
+        <Route path="/posts/mine" element={<MyPostsPage ownerId="u1" />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />
       </Routes>
     </MemoryRouter>,
@@ -87,11 +93,15 @@ function renderMineFlow() {
 }
 
 beforeEach(() => {
-  useAuthStore.setState({ currentUser: null });
+  _clearMyPostsMemory();
+  // 清除 listPosts 的默认实现与 Once 队列（clearAllMocks 不清实现，跨测试会残留）
+  vi.mocked(postsApi.listPosts).mockReset();
+  useAuthStore.setState({ currentUser: me });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  _clearMyPostsMemory();
   useAuthStore.setState({ currentUser: null });
 });
 
@@ -119,7 +129,7 @@ describe("PostDetailPage 返回导航（历史栈）", () => {
       <MemoryRouter initialEntries={["/group/g1/posts", "/posts/mine"]}>
         <Routes>
           <Route path="/group/:id/posts" element={<div>群内帖子占位</div>} />
-          <Route path="/posts/mine" element={<MyPostsPage />} />
+          <Route path="/posts/mine" element={<MyPostsPage ownerId="u1" />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -137,7 +147,7 @@ describe("PostDetailPage 返回导航（历史栈）", () => {
       <MemoryRouter initialEntries={["/posts/1?from=mine"]}>
         <Routes>
           <Route path="/posts/:postId" element={<PostDetailPage />} />
-          <Route path="/posts/mine" element={<MyPostsPage />} />
+          <Route path="/posts/mine" element={<MyPostsPage ownerId="u1" />} />
         </Routes>
       </MemoryRouter>,
     );

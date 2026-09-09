@@ -28,7 +28,6 @@ import { LiveRoomPage } from "./pages/LiveRoomPage";
 import { LiveStudioPage } from "./pages/LiveStudioPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MessagesPage } from "./pages/MessagesPage";
-import { MyPostsPage } from "./pages/MyPostsPage";
 import { PostDetailPage } from "./pages/PostDetailPage";
 import { PostsHubPage } from "./pages/PostsHubPage";
 import { ProfilePage } from "./pages/ProfilePage";
@@ -36,6 +35,7 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { SearchPage } from "./pages/SearchPage";
 import { VoiceHubPage } from "./pages/VoiceHubPage";
 import { UserProfilePage } from "./pages/UserProfilePage";
+import { MinePostsRoute, UserPostsRoute } from "./pages/UserPostsRoute";
 import { NavigateBridge } from "./components/NavigateBridge";
 import OverlayScrollbar from "./components/overlay/OverlayScrollbar";
 
@@ -64,7 +64,7 @@ export default function App() {
         <Route path="/live/start/:channelId" element={<LiveStudioPage />} />
         <Route path="/live/:channelId" element={<LiveRoomPage />} />
         <Route path="/posts" element={<PostsHubPage />} />
-        <Route path="/posts/mine" element={<MyPostsPage />} />
+        <Route path="/posts/mine" element={<MinePostsRoute />} />
         <Route path="/posts/:postId" element={<PostDetailPage />} />
         <Route path="/games" element={<GamesHubPage />} />
         <Route path="/games/:roomId" element={<GamesHubPage />} />
@@ -72,6 +72,7 @@ export default function App() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/user/:userId" element={<UserProfilePage />} />
+        <Route path="/user/:userId/posts" element={<UserPostsRoute />} />
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/group/:id" element={<GroupPage />} />
         <Route path="/group/:id/posts/:postId" element={<GroupPage />} />
