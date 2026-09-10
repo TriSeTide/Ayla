@@ -179,6 +179,18 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = None
 MEDIA_TMP_TTL_SECONDS = env.int("MEDIA_TMP_TTL_SECONDS", default=600)
 MEDIA_THUMB_MAX = env.int("MEDIA_THUMB_MAX", default=320)
 
+# 聊天媒体过期 TTL（天，docs/architecture/media-storage-expiration.md）：
+# - 图片两级：MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS 删原图留缩略图（默认 7 天）、
+#   MEDIA_CHAT_IMAGE_FULL_TTL_DAYS 完全过期删派生对象（默认 30 天）；
+# - 语音/文件/视频单级：无缩略图阶段，到期直接删除全部对象（默认 7 天）；
+# - <=0 表示禁用对应阶段；IMAGE FULL < ORIGINAL 时清理命令报配置错误（显式失败）。
+# 资产类媒体（帖子配图/表情包/评论/群头像）由清理命令保护集合豁免，不受此配置影响。
+MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS = env.int("MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS", default=7)
+MEDIA_CHAT_IMAGE_FULL_TTL_DAYS = env.int("MEDIA_CHAT_IMAGE_FULL_TTL_DAYS", default=30)
+MEDIA_CHAT_VOICE_TTL_DAYS = env.int("MEDIA_CHAT_VOICE_TTL_DAYS", default=7)
+MEDIA_CHAT_FILE_TTL_DAYS = env.int("MEDIA_CHAT_FILE_TTL_DAYS", default=7)
+MEDIA_CHAT_VIDEO_TTL_DAYS = env.int("MEDIA_CHAT_VIDEO_TTL_DAYS", default=7)
+
 # 大文件上传的本地中转临时目录（PUT 接收 / complete 校验的过路文件，传完即删）。
 # 必须指向空间充足的数据盘：默认系统 Temp 在 C 盘，2.9G 视频上传峰值会在
 # C 盘临时占用 3~6GB。backend/runtime 已 gitignore，不进仓库。

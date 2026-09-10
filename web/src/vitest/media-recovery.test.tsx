@@ -5,10 +5,11 @@ import { MediaContent } from "../components/chat/MediaContent";
 import { ImageViewer } from "../components/chat/ImageViewer";
 import { resetAudioPlayback } from "../utils/mediaPlayback";
 
-const mocks = vi.hoisted(() => ({ sign: vi.fn(), blob: vi.fn(), invalidate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ sign: vi.fn(), signState: vi.fn(), blob: vi.fn(), invalidate: vi.fn() }));
 vi.mock("../api/media", async (original) => ({
   ...await original<typeof import("../api/media")>(),
   getSignedMediaUrl: mocks.sign,
+  getSignedMediaUrlState: mocks.signState,
   invalidateSignedMediaUrl: mocks.invalidate,
   warmUpVideoElement: vi.fn(),
   takeWarmVideoElement: vi.fn(() => null),
@@ -50,6 +51,7 @@ class FakeAudio extends EventTarget {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.sign.mockReset().mockImplementation(async (id: string) => "/signed/" + id);
+  mocks.signState.mockReset().mockImplementation(async (id: string) => ({ url: "/signed/" + id, originalExpired: false }));
   mocks.blob.mockReset().mockResolvedValue(new Blob(["synthetic audio"]));
   FakeAudio.instances = [];
   FakeAudio.nextPlay = null;
@@ -82,7 +84,7 @@ describe("Media failure recovery", () => {
   });
 
   it("posterless bubble video retries signing and a failed native decode replaces the failed element", async () => {
-    mocks.sign.mockRejectedValueOnce(new Error("synthetic signing failure"));
+    mocks.signState.mockRejectedValueOnce(new Error("synthetic signing failure"));
     const { container } = render(<MediaContent msg={message("video")} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("视频加载失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
@@ -93,12 +95,12 @@ describe("Media failure recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(container.querySelector("video")).not.toBeNull());
     expect(container.querySelector("video")).not.toBe(first);
-    expect(mocks.sign).toHaveBeenCalledTimes(3);
+    expect(mocks.signState).toHaveBeenCalledTimes(3);
     expect(mocks.invalidate).toHaveBeenCalledTimes(2);
   });
 
   it("viewer video retries signing and native failure, preserving controls and disposing the previous element", async () => {
-    mocks.sign.mockRejectedValueOnce(new Error("synthetic signing failure"));
+    mocks.signState.mockRejectedValueOnce(new Error("synthetic signing failure"));
     render(<ImageViewer media={descriptor("video")} alt="fixture video" onClose={() => {}} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("视频加载失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
@@ -115,7 +117,7 @@ describe("Media failure recovery", () => {
     expect(first.hasAttribute("src")).toBe(false);
     fireEvent.error(first);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(mocks.sign).toHaveBeenCalledTimes(3);
+    expect(mocks.signState).toHaveBeenCalledTimes(3);
   });
 
   it("voice blob failure remains visible until a successful authenticated retry", async () => {

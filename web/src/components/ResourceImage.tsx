@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { API_PREFIX } from "../api/client";
-import { getSignedMediaUrl, invalidateSignedMediaUrl } from "../api/media";
+import {
+  getSignedMediaUrlState,
+  invalidateSignedMediaUrl,
+  MediaExpiredError,
+} from "../api/media";
 
 const MEDIA_PATH_PREFIX = `${API_PREFIX}/media/`;
 
@@ -20,6 +24,10 @@ function extractMediaId(src: string): string | null {
  *   HTTP 缓存（Cache-Control private），前端不再 fetch 全量 blob 占内存；
  * - 外部资源：直接交给浏览器。
  * 失败不吞掉内容，显式重试（重签 URL）。
+ * 聊天媒体两级过期（docs/architecture/media-storage-expiration.md）：
+ * - 完全过期（阶段 2）→ 「已过期」占位（灰底 + 文字，不裂图、不重试）；
+ * - 原图过期（阶段 1，original 自动降级缩略图）→ expiredBadge 开启时叠加
+ *   「原图已过期」角标（聊天气泡/查看器用；资产类媒体永不触发降级）。
  */
 export function ResourceImage({
   src,
@@ -32,6 +40,7 @@ export function ResourceImage({
   onReady,
   fallback,
   variant,
+  expiredBadge = false,
 }: {
   src: string;
   alt: string;
@@ -44,6 +53,8 @@ export function ResourceImage({
   fallback?: ReactNode;
   /** 签发变体："thumb" = 缩略图（气泡用）；缺省 = 原图（查看器/保存） */
   variant?: "thumb";
+  /** 原图已过期（阶段 1 降级）时叠加「原图已过期」角标（聊天场景） */
+  expiredBadge?: boolean;
 }) {
   const mediaId = extractMediaId(src);
   // Empty alt marks decorative images (avatars/row covers). Their containing
@@ -51,6 +62,8 @@ export function ResourceImage({
   const decorative = alt === "";
   const [resolvedSrc, setResolvedSrc] = useState<string | null>(mediaId ? null : src);
   const [failed, setFailed] = useState(false);
+  const [expired, setExpired] = useState(false);
+  const [originalExpired, setOriginalExpired] = useState(false);
   const [retry, setRetry] = useState(0);
   const [enclosingControl, setEnclosingControl] = useState<HTMLElement | null>(null);
   const bindHost = useCallback((node: HTMLElement | null) => {
@@ -88,6 +101,8 @@ export function ResourceImage({
   useEffect(() => {
     let cancelled = false;
     setFailed(false);
+    setExpired(false);
+    setOriginalExpired(false);
 
     if (!mediaId) {
       // 外部资源 / 非媒体路径直接使用
@@ -98,18 +113,37 @@ export function ResourceImage({
     }
 
     setResolvedSrc(null);
-    void getSignedMediaUrl(mediaId, variant)
-      .then((url) => {
-        if (!cancelled) setResolvedSrc(url);
+    void getSignedMediaUrlState(mediaId, variant)
+      .then((result) => {
+        if (!cancelled) {
+          setResolvedSrc(result.url);
+          setOriginalExpired(result.originalExpired);
+        }
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof MediaExpiredError) {
+          // 完全过期：媒体已永久删除，重试无意义 → 占位不裂图
+          setExpired(true);
+        } else {
+          setFailed(true);
+        }
       });
 
     return () => {
       cancelled = true;
     };
   }, [src, mediaId, variant, retry]);
+
+  if (expired) {
+    // 「已过期」占位（灰底 + 文字）：与「加载失败重试」区分，媒体已永久删除
+    if (decorative) return <span ref={bindHost} aria-hidden="true">{fallback}</span>;
+    return (
+      <span className="resource-image-expired" ref={bindHost} role="status">
+        已过期
+      </span>
+    );
+  }
 
   if (failed) {
     if (decorative) return <span ref={bindHost} aria-hidden="true">{fallback}</span>;
@@ -135,18 +169,25 @@ export function ResourceImage({
   if (!resolvedSrc) return <span className="resource-image-loading" ref={bindHost}>{fallback}</span>;
 
   return (
-    <img
-      ref={bindHost}
-      key={`${resolvedSrc}:${retry}`}
-      src={resolvedSrc}
-      alt={alt}
-      className={className}
-      style={style}
-      width={width}
-      height={height}
-      loading={loading}
-      onLoad={onReady}
-      onError={() => setFailed(true)}
-    />
+    <>
+      <img
+        ref={bindHost}
+        key={`${resolvedSrc}:${retry}`}
+        src={resolvedSrc}
+        alt={alt}
+        className={className}
+        style={style}
+        width={width}
+        height={height}
+        loading={loading}
+        onLoad={onReady}
+        onError={() => setFailed(true)}
+      />
+      {originalExpired && expiredBadge && (
+        <span className="resource-image-expired-badge" aria-label="原图已过期">
+          原图已过期
+        </span>
+      )}
+    </>
   );
 }

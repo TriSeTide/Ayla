@@ -1584,11 +1584,13 @@
 }
 
 /* 横滑条目层（方案 §3.2）：grid 同格重叠，AnimatePresence sync 下新旧条目重叠转场；
-   x 位移由 framer-motion 驱动（transform 不影响布局，无需 absolute 脱离文档流） */
+   x 位移由 framer-motion 驱动（transform 不影响布局，无需 absolute 脱离文档流）。
+   position: relative 为「原图已过期」角标提供定位基准（媒体过期降级，§8.1）。 */
 .image-viewer-stage-item {
   grid-area: 1 / 1;
   display: grid;
   place-items: center;
+  position: relative;
 }
 
 .image-viewer-img {

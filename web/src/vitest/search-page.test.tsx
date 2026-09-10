@@ -11,7 +11,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { searchPages, type SearchPageResults } from "../api/search";
 import { applyToGroup } from "../api/chat";
-import { getSignedMediaUrl } from "../api/media";
+import { getSignedMediaUrl, getSignedMediaUrlState } from "../api/media";
 
 import { SearchPage, clearSearchPageMemory } from "../pages/SearchPage";
 import { useAuthStore } from "../stores/auth";
@@ -28,7 +28,7 @@ vi.mock("../ws/chat", () => ({ chatWS: {
 
 vi.mock("../api/search", () => ({ searchPages: vi.fn() }));
 vi.mock("../api/chat", () => ({ applyToGroup: vi.fn() }));
-vi.mock("../api/media", () => ({ getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() }));
+vi.mock("../api/media", () => ({ getSignedMediaUrl: vi.fn(), getSignedMediaUrlState: vi.fn(), invalidateSignedMediaUrl: vi.fn() }));
 vi.mock("../utils/navigation", () => ({ goUserProfile: vi.fn() }));
 vi.mock("../components/UserProfileCard", () => ({
   UserProfileCard: ({ user, onClose }: { user: { nickname: string }; onClose: () => void }) => (
@@ -117,6 +117,7 @@ beforeEach(() => {
   vi.mocked(searchPages).mockReset().mockResolvedValue(resultFor("冰樱"));
   vi.mocked(applyToGroup).mockResolvedValue({} as never);
   vi.mocked(getSignedMediaUrl).mockResolvedValue("/fixtures/signed-group-avatar.png");
+  vi.mocked(getSignedMediaUrlState).mockResolvedValue({ url: "/fixtures/signed-group-avatar.png", originalExpired: false });
   useAuthStore.setState({ currentUser });
   useSearchStore.setState({ history: [] });
   useChatStore.setState({ conversations: [] });
@@ -444,7 +445,7 @@ describe("SearchPage 顶栏复用（F9）", () => {
 
     const row = await screen.findByRole("button", { name: /冰樱研究所/ });
     await waitFor(() => expect(row.querySelector("img")).toHaveAttribute("src", "/fixtures/signed-group-avatar.png"));
-    expect(getSignedMediaUrl).toHaveBeenCalledWith("search-group-avatar", undefined);
+    expect(getSignedMediaUrlState).toHaveBeenCalledWith("search-group-avatar", undefined);
     expect(row.querySelector("button")).toBeNull();
 
     fireEvent.error(row.querySelector("img")!);
@@ -463,7 +464,7 @@ describe("SearchPage 顶栏复用（F9）", () => {
     const row = await screen.findByRole("button", { name: /冰樱研究所/ });
     expect(row.querySelector(".avatar-core")).toHaveTextContent("冰");
     expect(row.querySelector("img")).toBeNull();
-    expect(getSignedMediaUrl).not.toHaveBeenCalled();
+    expect(getSignedMediaUrlState).not.toHaveBeenCalled();
   });
 
   it("历史 chips 点击 → 更新 URL q 并触发搜索", async () => {

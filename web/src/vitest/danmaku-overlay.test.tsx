@@ -11,16 +11,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DanmakuItem, MediaDescriptor } from "../api/types";
 import { useLiveStore } from "../stores/live";
 import { DanmakuOverlay } from "../components/live/DanmakuOverlay";
-import { getSignedMediaUrl } from "../api/media";
+import { getSignedMediaUrlState } from "../api/media";
 import { DANMAKU_MIN_GAP_PX, DANMAKU_SPEED_PX_PER_SEC } from "../components/live/danmakuTracks";
 
-// ResourceImage 内部用 getSignedMediaUrl 签名加载：mock 返回固定签名 URL（保留 resolveMediaPath 等真实实现）
+// ResourceImage 内部用 getSignedMediaUrlState 签名加载：mock 返回固定签名 URL（保留 resolveMediaPath 等真实实现）
 vi.mock("../api/media", async () => {
   const actual = await vi.importActual<typeof import("../api/media")>("../api/media");
-  return { ...actual, getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() };
+  return { ...actual, getSignedMediaUrlState: vi.fn(), getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() };
 });
 
-const mockedSign = vi.mocked(getSignedMediaUrl);
+const mockedSign = vi.mocked(getSignedMediaUrlState);
 
 class FakeResizeObserver {
   observe = vi.fn();
@@ -68,7 +68,7 @@ beforeEach(() => {
   matchMediaMock(false);
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   mockedSign.mockReset();
-  mockedSign.mockResolvedValue("/api/v1/media/m1/thumb?uid=u&exp=9&sig=s");
+  mockedSign.mockResolvedValue({ url: "/api/v1/media/m1/thumb?uid=u&exp=9&sig=s", originalExpired: false });
   useLiveStore.getState().reset();
 });
 

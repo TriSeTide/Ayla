@@ -1,14 +1,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ResourceImage } from "../components/ResourceImage";
-import { getSignedMediaUrl, invalidateSignedMediaUrl } from "../api/media";
+import { getSignedMediaUrlState, invalidateSignedMediaUrl, MediaExpiredError } from "../api/media";
 
 vi.mock("../api/media", async () => {
   const actual = await vi.importActual<typeof import("../api/media")>("../api/media");
-  return { ...actual, getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() };
+  return {
+    ...actual,
+    getSignedMediaUrlState: vi.fn(),
+    getSignedMediaUrl: vi.fn(),
+    invalidateSignedMediaUrl: vi.fn(),
+  };
 });
 
-const mockedSign = vi.mocked(getSignedMediaUrl);
+const mockedSign = vi.mocked(getSignedMediaUrlState);
 
 describe("ResourceImage", () => {
   beforeEach(() => {
@@ -23,7 +28,7 @@ describe("ResourceImage", () => {
   });
 
   it("内部媒体通过短时签名 URL 直连（<img> 原生流式加载），而不是 blob 全量下载", async () => {
-    mockedSign.mockResolvedValue("/api/v1/media/m-1/content?uid=u&exp=9&sig=s");
+    mockedSign.mockResolvedValue({ url: "/api/v1/media/m-1/content?uid=u&exp=9&sig=s", originalExpired: false });
     const { container } = render(<ResourceImage src="/api/v1/media/m-1/content" alt="" fallback="头像" />);
 
     expect(screen.getByText("头像")).toBeInTheDocument();
@@ -43,7 +48,7 @@ describe("ResourceImage", () => {
   });
 
   it("图片卡片复用外层原生按钮重试，成功后恢复打开动作，不产生嵌套按钮", async () => {
-    mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce("/signed-image.png");
+    mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce({ url: "/signed-image.png", originalExpired: false });
     const open = vi.fn();
     const { container } = render(<button type="button" aria-label="查看原图" onClick={open}>
       <ResourceImage src="/api/v1/media/card/content" alt="卡片图片" />
@@ -60,7 +65,7 @@ describe("ResourceImage", () => {
   });
 
   it("评论缩略图的自定义加载占位不掩盖签名失败，重试不会打开查看器", async () => {
-    mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce("/signed-comment.png");
+    mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce({ url: "/signed-comment.png", originalExpired: false });
     const open = vi.fn();
     render(<button type="button" aria-label="查看评论图片" onClick={open}>
       <ResourceImage src="/api/v1/media/comment/thumbnail" alt="评论图片" fallback={<span>占位图</span>} variant="thumb" />
@@ -74,7 +79,7 @@ describe("ResourceImage", () => {
   });
 
   it("独立图片失败时提供独立重试按钮并恢复图片", async () => {
-    mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce("/signed-viewer.png");
+    mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce({ url: "/signed-viewer.png", originalExpired: false });
     render(<ResourceImage src="/api/v1/media/viewer/content" alt="查看器图片" fallback="正在加载" />);
     fireEvent.click(await screen.findByRole("button", { name: "查看器图片：图片加载失败，重试" }));
     expect(await screen.findByRole("img")).toHaveAttribute("src", "/signed-viewer.png");
@@ -96,10 +101,40 @@ describe("ResourceImage", () => {
   });
 
   it("媒体变体切换会重新签发对应变体而不复用旧缩略图", async () => {
-    mockedSign.mockResolvedValue("/signed.png");
+    mockedSign.mockResolvedValue({ url: "/signed.png", originalExpired: false });
     const view = render(<ResourceImage src="/api/v1/media/same/content" alt="图片" variant="thumb" />);
     await screen.findByRole("img");
     view.rerender(<ResourceImage src="/api/v1/media/same/content" alt="图片" />);
     await waitFor(() => expect(mockedSign).toHaveBeenLastCalledWith("same", undefined));
+  });
+
+  it("完全过期（MediaExpiredError）显示「已过期」占位，不显示重试", async () => {
+    mockedSign.mockRejectedValue(new MediaExpiredError());
+    render(<ResourceImage src="/api/v1/media/expired/content" alt="过期图片" />);
+    expect(await screen.findByText("已过期")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /重试/ })).toBeNull();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("原图过期降级（originalExpired）显示缩略图，expiredBadge 开启时叠加角标", async () => {
+    mockedSign.mockResolvedValue({ url: "/signed-thumb.png", originalExpired: true });
+    const { container } = render(
+      <div className="media-frame">
+        <ResourceImage src="/api/v1/media/degraded/content" alt="降级图片" expiredBadge />
+      </div>,
+    );
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute("src", "/signed-thumb.png"),
+    );
+    expect(screen.getByText("原图已过期")).toBeInTheDocument();
+  });
+
+  it("原图过期降级但未开启 expiredBadge 时不显示角标", async () => {
+    mockedSign.mockResolvedValue({ url: "/signed-thumb.png", originalExpired: true });
+    const { container } = render(<ResourceImage src="/api/v1/media/degraded2/content" alt="降级图片" />);
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute("src", "/signed-thumb.png"),
+    );
+    expect(screen.queryByText("原图已过期")).toBeNull();
   });
 });

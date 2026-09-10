@@ -19,45 +19,108 @@ interface SignedUrlEntry {
   url: string;
   /** 过期时间戳（秒）；到期前 60s 主动重签 */
   expiresAt: number;
-  inflight?: Promise<string>;
+  /** original 已过期（阶段 1），url 已降级为缩略图签名 */
+  originalExpired?: boolean;
+  inflight?: Promise<SignedMediaResult>;
+}
+
+/** 签名结果：url + 降级标记（聊天媒体分级过期，docs/architecture/media-storage-expiration.md） */
+export interface SignedMediaResult {
+  url: string;
+  /** original 已过期（图片阶段 1，7 天）：url 已自动降级为缩略图签名 */
+  originalExpired: boolean;
+}
+
+/** 媒体已完全过期（图片阶段 2 / 语音文件视频单级到期）：对象已删除，前端显示「已过期」占位 */
+export class MediaExpiredError extends Error {
+  constructor() {
+    super("media_expired");
+    this.name = "MediaExpiredError";
+  }
 }
 
 // media_id → 签名 URL 缓存（模块级，页面生命周期内复用）
 const signedUrlCache = new Map<string, SignedUrlEntry>();
 
 /**
- * 获取媒体内容的短时签名 URL（<img>/<video> 直接 src 引用）。
+ * 获取媒体内容的短时签名 URL（<img>/<video> 直接 src 引用），并报告降级状态。
  * 浏览器原生 Range 流式加载/播放：视频首帧秒出、拖动即点即播、
  * 图片渐进解码——不再 apiRequestBlob 全量下载进内存。
  * 缓存至到期前 60s，同一媒体+变体并发请求只签发一次。
+ * 聊天媒体分级过期降级（后端 :sign 对过期媒体返回 410）：
+ * - original 变体 410（图片阶段 1，原图已删）→ 自动改签 thumb 变体，返回缩略图 URL
+ *   并置 originalExpired=true（调用方显示「原图已过期」角标）；
+ * - original/thumb 变体 410（图片阶段 2 / 语音文件视频单级到期）→ 抛
+ *   MediaExpiredError（调用方显示「已过期」占位）。
+ * @param variant "thumb" = 气泡缩略图（几 KB~百 KB）；缺省 = original（查看器/保存）
+ */
+export async function getSignedMediaUrlState(
+  mediaId: string,
+  variant?: "thumb",
+): Promise<SignedMediaResult> {
+  const cacheKey = variant ? `${mediaId}|${variant}` : mediaId;
+  const cached = signedUrlCache.get(cacheKey);
+  const now = Date.now() / 1000;
+  if (cached && cached.expiresAt - 60 > now) {
+    return { url: cached.url, originalExpired: cached.originalExpired ?? false };
+  }
+  if (cached?.inflight) return cached.inflight;
+
+  const inflight = (async () => {
+    try {
+      const r = await apiRequest<{ url: string; expires_at: number }>(
+        `/media/${seg(mediaId)}:sign`,
+        { method: "POST", body: variant ? { variant } : undefined },
+      );
+      const url = toSameOriginMinio(r.url);
+      signedUrlCache.set(cacheKey, { url, expiresAt: r.expires_at });
+      return { url, originalExpired: false };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 410) {
+        if (variant) {
+          // thumb 变体 410 = 完全过期（图片阶段 2 / 单级媒体），派生对象已删
+          throw new MediaExpiredError();
+        }
+        // original 变体 410 = 原图已删（图片阶段 1）→ 自动降级 thumb，避免无效签名往返
+        try {
+          const thumb = await apiRequest<{ url: string; expires_at: number }>(
+            `/media/${seg(mediaId)}:sign`,
+            { method: "POST", body: { variant: "thumb" } },
+          );
+          const url = toSameOriginMinio(thumb.url);
+          signedUrlCache.set(`${mediaId}|thumb`, { url, expiresAt: thumb.expires_at });
+          signedUrlCache.set(cacheKey, { url, expiresAt: thumb.expires_at, originalExpired: true });
+          return { url, originalExpired: true };
+        } catch (thumbErr) {
+          // thumb 410 = 完全过期；404 = 无缩略图（文件/语音等）→ 原图过期即不可用
+          if (thumbErr instanceof ApiError && (thumbErr.status === 410 || thumbErr.status === 404)) {
+            throw new MediaExpiredError();
+          }
+          signedUrlCache.delete(cacheKey);
+          throw thumbErr;
+        }
+      }
+      // 失败清缓存允许下次重试
+      signedUrlCache.delete(cacheKey);
+      throw err;
+    }
+  })();
+  signedUrlCache.set(cacheKey, { url: "", expiresAt: now, inflight });
+  return inflight;
+}
+
+/**
+ * 获取媒体内容的短时签名 URL（<img>/<video> 直接 src 引用）。
+ * 内部自动处理聊天媒体两级过期降级（original 410 → 缩略图）；
+ * 完全过期抛 MediaExpiredError。需要感知降级状态时用 getSignedMediaUrlState。
  * @param variant "thumb" = 气泡缩略图（几 KB~百 KB）；缺省 = original（查看器/保存）
  */
 export async function getSignedMediaUrl(
   mediaId: string,
   variant?: "thumb",
 ): Promise<string> {
-  const cacheKey = variant ? `${mediaId}|${variant}` : mediaId;
-  const cached = signedUrlCache.get(cacheKey);
-  const now = Date.now() / 1000;
-  if (cached && cached.expiresAt - 60 > now) return cached.url;
-  if (cached?.inflight) return cached.inflight;
-
-  const inflight = apiRequest<{ url: string; expires_at: number }>(
-    `/media/${seg(mediaId)}:sign`,
-    { method: "POST", body: variant ? { variant } : undefined },
-  )
-    .then((r) => {
-      const url = toSameOriginMinio(r.url);
-      signedUrlCache.set(cacheKey, { url, expiresAt: r.expires_at });
-      return url;
-    })
-    .catch((err) => {
-      // 失败清缓存允许下次重试
-      signedUrlCache.delete(cacheKey);
-      throw err;
-    });
-  signedUrlCache.set(cacheKey, { url: "", expiresAt: now, inflight });
-  return inflight;
+  const result = await getSignedMediaUrlState(mediaId, variant);
+  return result.url;
 }
 
 /** 失效缓存（401/加载失败时调用，下次重签） */

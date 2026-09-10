@@ -267,12 +267,27 @@ class MediaSignView(APIView):
         # variant=thumb → 缩略图派生（气泡用，几 KB~百 KB）；默认 original（查看器/保存）
         variant = (request.data.get("variant") or request.query_params.get("variant") or "").strip()
         if variant == "thumb":
+            # 完全过期（阶段 2 / 单级媒体）：派生对象已删，410 引导前端显示「已过期」占位
+            if media.expired_at is not None:
+                return Response(
+                    {"detail": "media_expired"}, status=status.HTTP_410_GONE
+                )
             if not media.thumbnail_path:
                 return Response(
                     {"detail": "thumbnail_not_ready"}, status=status.HTTP_404_NOT_FOUND
                 )
             url = storage.get_storage().presign_get(media.thumbnail_path, expires)
         else:
+            # 完全过期（阶段 2 / 单级媒体）：410 引导前端显示「已过期」占位
+            if media.expired_at is not None:
+                return Response(
+                    {"detail": "media_expired"}, status=status.HTTP_410_GONE
+                )
+            # 原图已删（阶段 1，仅图片）：410 引导前端降级请求 thumb 变体，避免无效签名往返
+            if media.original_expired_at is not None:
+                return Response(
+                    {"detail": "original_expired"}, status=status.HTTP_410_GONE
+                )
             url = storage.get_storage().presign_get(media.storage_path, expires)
         return Response(
             {

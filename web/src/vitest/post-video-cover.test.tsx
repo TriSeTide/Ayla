@@ -10,15 +10,21 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PostVideoCover } from "../components/posts/PostVideoCover";
-import { getSignedMediaUrl } from "../api/media";
+import { getSignedMediaUrl, getSignedMediaUrlState } from "../api/media";
 import type { MediaDescriptor } from "../api/types";
 
 vi.mock("../api/media", async () => {
   const actual = await vi.importActual<typeof import("../api/media")>("../api/media");
-  return { ...actual, getSignedMediaUrl: vi.fn(), invalidateSignedMediaUrl: vi.fn() };
+  return {
+    ...actual,
+    getSignedMediaUrl: vi.fn(),
+    getSignedMediaUrlState: vi.fn(),
+    invalidateSignedMediaUrl: vi.fn(),
+  };
 });
 
 const mockedSign = vi.mocked(getSignedMediaUrl);
+const mockedSignState = vi.mocked(getSignedMediaUrlState);
 
 function videoMedia(overrides: Partial<MediaDescriptor> = {}): MediaDescriptor {
   return {
@@ -40,10 +46,11 @@ function videoMedia(overrides: Partial<MediaDescriptor> = {}): MediaDescriptor {
 describe("PostVideoCover", () => {
   beforeEach(() => {
     mockedSign.mockReset();
+    mockedSignState.mockReset();
   });
 
   it("有海报帧：渲染签名缩略图封面（variant=thumb），不挂 <video> 元素", async () => {
-    mockedSign.mockResolvedValue("/signed/med-v-thumb");
+    mockedSignState.mockResolvedValue({ url: "/signed/med-v-thumb", originalExpired: false });
     const { container } = render(
       <PostVideoCover
         media={videoMedia({ thumbnail: "/api/v1/media/med-v/thumbnail" })}
@@ -58,7 +65,7 @@ describe("PostVideoCover", () => {
       "/signed/med-v-thumb",
     );
     expect(container.querySelector("video")).toBeNull();
-    expect(mockedSign).toHaveBeenCalledWith("med-v", "thumb");
+    expect(mockedSignState).toHaveBeenCalledWith("med-v", "thumb");
   });
 
   it("无海报帧：降级 SignedVideo，按 original 签发 <video> 首帧预览", async () => {

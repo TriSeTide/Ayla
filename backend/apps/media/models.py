@@ -68,6 +68,12 @@ class MediaObject(models.Model):
     duration = models.FloatField("时长", null=True, blank=True)
     thumbnail_path = models.CharField("缩略图路径", max_length=256, blank=True, default="")
     waveform_path = models.CharField("波形图路径", max_length=256, blank=True, default="")
+    # 聊天媒体两级过期标记（docs/architecture/media-storage-expiration.md）：
+    # - original_expired_at：阶段 1（7 天）完成时间，原图对象已删、缩略图保留；null = 原图仍在；
+    # - expired_at：阶段 2（30 天）完成时间，派生对象已删；null = 未完全过期。
+    # 记录本身永不删除（FK 强引用 + 前端区分「已过期」与「不存在」）。
+    original_expired_at = models.DateTimeField("原图过期时间", null=True, blank=True, db_index=True)
+    expired_at = models.DateTimeField("完全过期时间", null=True, blank=True, db_index=True)
     created_at = models.DateTimeField("创建时间", auto_now_add=True, db_index=True)
 
     class Meta:

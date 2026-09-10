@@ -38,6 +38,10 @@ vi.mock("../api/media", async (importOriginal) => {
       const key = variant ? `${mediaId}|${variant}` : mediaId;
       return signedById.get(key) ?? `/signed/${key}`;
     }),
+    getSignedMediaUrlState: vi.fn(async (mediaId: string, variant?: string) => {
+      const key = variant ? `${mediaId}|${variant}` : mediaId;
+      return { url: signedById.get(key) ?? `/signed/${key}`, originalExpired: false };
+    }),
   };
 });
 
@@ -94,9 +98,9 @@ describe("ImageMedia 原图渲染", () => {
       const img = document.querySelector("img.media-image") as HTMLImageElement | null;
       expect(img).not.toBeNull();
     });
-    // getSignedMediaUrl 以 thumb 变体签发；<img src> 用缩略图签名 URL
-    const { getSignedMediaUrl } = await import("../api/media");
-    expect(getSignedMediaUrl).toHaveBeenCalledWith("med-1", "thumb");
+    // getSignedMediaUrlState 以 thumb 变体签发；<img src> 用缩略图签名 URL
+    const { getSignedMediaUrlState } = await import("../api/media");
+    expect(getSignedMediaUrlState).toHaveBeenCalledWith("med-1", "thumb");
     expect((document.querySelector("img.media-image") as HTMLImageElement).getAttribute("src")).toBe(
       "/signed/med-1/thumb",
     );
@@ -488,12 +492,12 @@ describe("MixedMedia 图文混排（type=mixed + segments）", () => {
   it("查看器视频秒开：海报帧先行显示，<video> 挂同帧 poster + preload=auto", async () => {
     // original 签名延迟、thumb（海报）即时返回：模拟真实网络时序——
     // 等待期画面必须是海报 <img> 而非骨架屏；video 出现后 poster 同帧衔接
-    const { getSignedMediaUrl } = await import("../api/media");
-    const impl = vi.mocked(getSignedMediaUrl).getMockImplementation();
-    vi.mocked(getSignedMediaUrl).mockImplementation(async (mediaId, variant) => {
-      if (variant === "thumb") return `/signed/${mediaId}-poster`;
+    const { getSignedMediaUrlState } = await import("../api/media");
+    const impl = vi.mocked(getSignedMediaUrlState).getMockImplementation();
+    vi.mocked(getSignedMediaUrlState).mockImplementation(async (mediaId, variant) => {
+      if (variant === "thumb") return { url: `/signed/${mediaId}-poster`, originalExpired: false };
       await new Promise((r) => setTimeout(r, 20));
-      return `/signed/${mediaId}-original`;
+      return { url: `/signed/${mediaId}-original`, originalExpired: false };
     });
     try {
       render(<MediaContent msg={mixedMessage()} />);
@@ -513,7 +517,7 @@ describe("MixedMedia 图文混排（type=mixed + segments）", () => {
       expect(video.getAttribute("poster")).toBe("/signed/med-v-poster");
       expect(video.getAttribute("preload")).toBe("auto");
     } finally {
-      vi.mocked(getSignedMediaUrl).mockImplementation(impl!);
+      vi.mocked(getSignedMediaUrlState).mockImplementation(impl!);
     }
   });
 });

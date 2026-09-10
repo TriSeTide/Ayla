@@ -18,7 +18,14 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import type { MediaDescriptor } from "../../api/types";
-import { getSignedMediaUrl, invalidateSignedMediaUrl, mediaContentUrl, takeWarmVideoElement } from "../../api/media";
+import {
+  getSignedMediaUrl,
+  getSignedMediaUrlState,
+  invalidateSignedMediaUrl,
+  mediaContentUrl,
+  MediaExpiredError,
+  takeWarmVideoElement,
+} from "../../api/media";
 import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
 import { useTouchAxisGuard } from "../../hooks/useTouchAxisGuard";
 import { ResourceImage } from "../ResourceImage";
@@ -111,6 +118,8 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
   const [elementReady, setElementReady] = useState(false);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [expired, setExpired] = useState(false);
+  const [originalExpired, setOriginalExpired] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const hasPoster = Boolean(media.thumbnail);
   const thumbUrlRef = useRef<string | null>(null);
@@ -120,11 +129,11 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
     thumbUrlRef.current = null;
     setThumbUrl(null);
     if (!hasPoster) return;
-    getSignedMediaUrl(media.media_id, "thumb")
-      .then((url) => {
+    getSignedMediaUrlState(media.media_id, "thumb")
+      .then((result) => {
         if (cancelled) return;
-        thumbUrlRef.current = url;
-        setThumbUrl(url);
+        thumbUrlRef.current = result.url;
+        setThumbUrl(result.url);
       })
       .catch(() => {});
     return () => {
@@ -136,6 +145,8 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
     let cancelled = false;
     let el: HTMLVideoElement | null = null;
     setFailed(false);
+    setExpired(false);
+    setOriginalExpired(false);
     setElementReady(false);
     const onError = () => {
       if (cancelled) return;
@@ -147,8 +158,14 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
     };
     const mount = async () => {
       try {
-        const url = await getSignedMediaUrl(media.media_id);
+        const result = await getSignedMediaUrlState(media.media_id);
         if (cancelled) return;
+        if (result.originalExpired) {
+          // 视频本体已过期（阶段 1）：仅剩海报帧，显示封面 + 「视频已过期」角标
+          setOriginalExpired(true);
+          return;
+        }
+        const url = result.url;
         // 优先接管预热元素（已在缓冲）；无则新建并开始加载
         const warm = takeWarmVideoElement(media.media_id);
         el = warm ?? document.createElement("video");
@@ -168,8 +185,14 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
         } catch {
           /* jsdom/受限环境 play 不可用时静默（用户可手点播放） */
         }
-      } catch {
-        if (!cancelled) setFailed(true);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof MediaExpiredError) {
+          // 完全过期（阶段 2）：媒体已永久删除，占位不裂图
+          setExpired(true);
+        } else {
+          setFailed(true);
+        }
       }
     };
     void mount();
@@ -189,6 +212,34 @@ function VideoPlayer({ media }: { media: MediaDescriptor }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [media.media_id, retryKey]);
+
+  if (expired) {
+    return (
+      <div className="image-viewer-fallback image-viewer-video-error" role="alert">
+        <span>已过期</span>
+      </div>
+    );
+  }
+
+  if (originalExpired) {
+    // 视频本体已删（阶段 1）：仅剩海报帧封面 + 角标，不可播放
+    return (
+      <div className="image-viewer-video-host">
+        {thumbUrl ? (
+          <img
+            src={thumbUrl}
+            alt=""
+            className="image-viewer-video image-viewer-video-poster"
+          />
+        ) : (
+          <span className="skeleton media-frame-skeleton image-viewer-video-skeleton" />
+        )}
+        <span className="resource-image-expired-badge" aria-label="视频已过期">
+          视频已过期
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div ref={hostRef} className="image-viewer-video-host">
@@ -246,6 +297,7 @@ export function ImageViewer({
   const [index, setIndex] = useState(Math.min(Math.max(initialIndex, 0), list.length - 1));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [saveExpired, setSaveExpired] = useState(false);
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
   const current = list[index];
@@ -333,8 +385,13 @@ export function ImageViewer({
     setSaveError(false);
     try {
       await downloadMedia(current.media);
-    } catch {
-      setSaveError(true);
+    } catch (err) {
+      if (err instanceof MediaExpiredError) {
+        setSaveError(true);
+        setSaveExpired(true);
+      } else {
+        setSaveError(true);
+      }
     } finally {
       setSaving(false);
     }
@@ -386,6 +443,7 @@ export function ImageViewer({
                 alt={current.alt || "图片原图"}
                 className="image-viewer-img"
                 loading="eager"
+                expiredBadge
                 fallback={<span className="image-viewer-fallback">图片加载失败</span>}
               />
             ) : (
@@ -435,7 +493,9 @@ export function ImageViewer({
         </button>
       </div>
       {saveError && (
-        <div className="image-viewer-error" role="alert">保存失败，请重试</div>
+        <div className="image-viewer-error" role="alert">
+          {saveExpired ? "媒体已过期，无法保存" : "保存失败，请重试"}
+        </div>
       )}
     </div>,
     document.body

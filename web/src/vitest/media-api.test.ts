@@ -267,3 +267,74 @@ describe("validateImageFile", () => {
     expect(IMAGE_TYPES.has("application/x-msdownload")).toBe(false);
   });
 });
+
+describe("getSignedMediaUrlState 聊天媒体两级过期降级", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("original 410 → 自动降级 thumb 并标记 originalExpired", async () => {
+    const request = vi.spyOn(client, "apiRequest")
+      .mockRejectedValueOnce(new client.ApiError(410, "original_expired"))
+      .mockResolvedValueOnce({ url: "http://minio.local/thumb?sig=1", expires_at: 9999999999 });
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-1");
+    const result = await getSignedMediaUrlState("exp-1");
+    expect(result.originalExpired).toBe(true);
+    expect(result.url).toBe("/minio/thumb?sig=1");
+    expect(request).toHaveBeenNthCalledWith(1, "/media/exp-1:sign", { method: "POST", body: undefined });
+    expect(request).toHaveBeenNthCalledWith(2, "/media/exp-1:sign", { method: "POST", body: { variant: "thumb" } });
+  });
+
+  it("original 410 且 thumb 也 410（完全过期）→ 抛 MediaExpiredError", async () => {
+    vi.spyOn(client, "apiRequest")
+      .mockRejectedValueOnce(new client.ApiError(410, "original_expired"))
+      .mockRejectedValueOnce(new client.ApiError(410, "media_expired"));
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl, MediaExpiredError } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-2");
+    await expect(getSignedMediaUrlState("exp-2")).rejects.toBeInstanceOf(MediaExpiredError);
+  });
+
+  it("original 410 且 thumb 404（无缩略图的文件/语音）→ 抛 MediaExpiredError", async () => {
+    vi.spyOn(client, "apiRequest")
+      .mockRejectedValueOnce(new client.ApiError(410, "original_expired"))
+      .mockRejectedValueOnce(new client.ApiError(404, "thumbnail_not_ready"));
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl, MediaExpiredError } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-3");
+    await expect(getSignedMediaUrlState("exp-3")).rejects.toBeInstanceOf(MediaExpiredError);
+  });
+
+  it("thumb 变体 410（完全过期）→ 抛 MediaExpiredError", async () => {
+    vi.spyOn(client, "apiRequest").mockRejectedValueOnce(new client.ApiError(410, "media_expired"));
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl, MediaExpiredError } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-4");
+    await expect(getSignedMediaUrlState("exp-4", "thumb")).rejects.toBeInstanceOf(MediaExpiredError);
+  });
+
+  it("正常 original 签发 → { url, originalExpired: false }", async () => {
+    vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ url: "http://minio.local/orig?sig=1", expires_at: 9999999999 });
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-5");
+    const result = await getSignedMediaUrlState("exp-5");
+    expect(result).toEqual({ url: "/minio/orig?sig=1", originalExpired: false });
+  });
+
+  it("getSignedMediaUrl 包装返回 string（既有调用方契约不变）", async () => {
+    vi.spyOn(client, "apiRequest")
+      .mockResolvedValueOnce({ url: "http://minio.local/orig?sig=1", expires_at: 9999999999 });
+    const { getSignedMediaUrl, invalidateSignedMediaUrl } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-6");
+    await expect(getSignedMediaUrl("exp-6")).resolves.toBe("/minio/orig?sig=1");
+  });
+
+  it("降级结果缓存：再次请求 original 命中缓存，不重复签发", async () => {
+    const request = vi.spyOn(client, "apiRequest")
+      .mockRejectedValueOnce(new client.ApiError(410, "original_expired"))
+      .mockResolvedValueOnce({ url: "http://minio.local/thumb?sig=1", expires_at: 9999999999 });
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-7");
+    const first = await getSignedMediaUrlState("exp-7");
+    const second = await getSignedMediaUrlState("exp-7");
+    expect(first).toEqual(second);
+    expect(request).toHaveBeenCalledTimes(2); // 仅首次 original+thumb 两次签发
+  });
+});

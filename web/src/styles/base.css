@@ -596,6 +596,54 @@ a:hover {
   font-size: 11px;
 }
 
+/* 聊天媒体完全过期（阶段 2，30 天）占位：灰底 + 文字，不裂图、不重试
+   （媒体已永久删除，重试无意义；docs/architecture/media-storage-expiration.md §8.2） */
+.resource-image-expired {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  min-height: 64px;
+  padding: var(--sp-3);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 图片尺寸的过期占位撑满媒体框（与 failed-wrap 同布局） */
+:is(.comment-image-btn, .post-card-img-btn, .media-frame-open, .composer-pending-image, .post-editor-image) .resource-image-expired {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 64px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* 原图已过期（阶段 1，7 天）角标：缩略图右上角，聊天气泡/查看器用。
+   定位基准：.media-frame（relative）与 .image-viewer-stage-item（relative）。 */
+.resource-image-expired-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(20, 24, 40, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* Image-sized failure states keep one centered retry label inside the media frame.
    Avatar/cover fallback glyphs keep their existing compact presentation. */
 :is(.comment-image-btn, .post-card-img-btn, .media-frame-open, .composer-pending-image, .post-editor-image) .resource-image-failed-wrap {

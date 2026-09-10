@@ -19,8 +19,10 @@ import {
   formatBytes,
   formatDuration,
   getSignedMediaUrl,
+  getSignedMediaUrlState,
   invalidateSignedMediaUrl,
   mediaContentUrl,
+  MediaExpiredError,
   resolveMediaPath,
   warmUpVideoElement,
 } from "../../api/media";
@@ -130,6 +132,7 @@ function ImageMedia({
             loading="lazy"
             fallback={<span className="skeleton media-frame-skeleton" />}
             variant={src.includes("/thumbnail") ? "thumb" : undefined}
+            expiredBadge={!src.includes("/thumbnail")}
           />
         </button>
       </div>
@@ -171,6 +174,7 @@ function VideoFrame({
 }) {
   const [videoSrc, setVideoSrc] = useState<string | null>(localUrl ?? null);
   const [failed, setFailed] = useState(false);
+  const [expired, setExpired] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hasPoster = Boolean(media?.thumbnail);
@@ -185,24 +189,36 @@ function VideoFrame({
   useEffect(() => {
     if (localUrl) {
       setFailed(false);
+      setExpired(false);
       setVideoSrc(localUrl);
       return;
     }
     setVideoSrc(null);
     setFailed(false);
+    setExpired(false);
     if (!media) {
       setFailed(true);
       return;
     }
     if (hasPoster) return;
     let cancelled = false;
-    setFailed(false);
-    getSignedMediaUrl(media.media_id)
-      .then((url) => {
-        if (!cancelled) setVideoSrc(url);
+    getSignedMediaUrlState(media.media_id)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.originalExpired) {
+          // 视频本体已过期（阶段 1）且无海报帧可降级 → 视为不可用
+          setExpired(true);
+          return;
+        }
+        setVideoSrc(result.url);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof MediaExpiredError) {
+          setExpired(true);
+        } else {
+          setFailed(true);
+        }
       });
     return () => {
       cancelled = true;
@@ -236,7 +252,11 @@ function VideoFrame({
 
   return (
     <div className="media-frame media-frame-video" style={style} onPointerEnter={warmUpOriginal}>
-      {failed ? (
+      {expired ? (
+        <div className="video-load-failed" role="alert">
+          <span>已过期</span>
+        </div>
+      ) : failed ? (
         <div className="video-load-failed" role="alert">
           <span>视频加载失败</span>
           <button type="button" className="media-retry" onClick={retry}>重试</button>
@@ -418,6 +438,7 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
                     loading="lazy"
                     fallback={<span className="skeleton media-frame-skeleton" />}
                     variant={hasThumb ? "thumb" : undefined}
+                    expiredBadge={!hasThumb}
                   />
                 ) : local ? (
                   <img src={local.url} alt="图片" className="mixed-img-media" />
@@ -671,17 +692,25 @@ function FileMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor })
   // 原生 <a> 下载不带 Authorization：挂载即签短时 URL（同源 download 属性生效）
   const [href, setHref] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [expired, setExpired] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setHref(null);
     setFailed(false);
+    setExpired(false);
     getSignedMediaUrl(media.media_id)
       .then((url) => {
         if (!cancelled) setHref(url);
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof MediaExpiredError) {
+          // 文件本体已过期（阶段 1/2）：无缩略图可降级，显示「已过期」
+          setExpired(true);
+        } else {
+          setFailed(true);
+        }
       });
     return () => {
       cancelled = true;
@@ -698,9 +727,14 @@ function FileMedia({ msg, media }: { msg: ChatMessage; media: MediaDescriptor })
           {name}
         </span>
         <span className="file-size">{formatBytes(media.size)}</span>
+        {expired && <span className="file-error" role="alert">已过期</span>}
         {failed && <span className="file-error" role="alert">附件加载失败</span>}
       </span>
-      {failed ? (
+      {expired ? (
+        <span className="file-download" aria-label="附件已过期">
+          <IconDownload width={16} height={16} />
+        </span>
+      ) : failed ? (
         <button type="button" className="media-retry" onClick={() => {
           invalidateSignedMediaUrl(media.media_id);
           setRetryKey((key) => key + 1);
