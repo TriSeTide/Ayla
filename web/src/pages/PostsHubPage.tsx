@@ -65,6 +65,8 @@ type PostTabState = {
   hasMore: boolean;
   loaded: boolean;
   loading: boolean;
+  /** 后端返回的当前 tab 过滤后总数（header 统计用，不随分页进度变化） */
+  total: number;
   /** 首屏/刷新错误（列表顶部提示） */
   error: string | null;
   /** 追加错误（分页 footer 提示，滚动不自动重试） */
@@ -82,7 +84,7 @@ useAuthStore.subscribe((state, previous) => {
 });
 export function clearPostTabMemory() { postTabPages.clear(); }
 function postTabAccount() { return `${useAuthStore.getState().currentUser?.id ?? "anonymous"}:${postTabSession}`; }
-const emptyPostTab = (): PostTabState => ({ posts: [], cursor: null, hasMore: false, loaded: false, loading: false, error: null, nextPageError: null, updatedAt: 0 });
+const emptyPostTab = (): PostTabState => ({ posts: [], cursor: null, hasMore: false, loaded: false, loading: false, total: 0, error: null, nextPageError: null, updatedAt: 0 });
 
 export function PostsHubPage() {
   const navigate = useNavigate();
@@ -187,13 +189,15 @@ export function PostsHubPage() {
         update((value) => {
           const seen = new Set(value.posts.map((p) => p.id));
           return { ...value, posts: [...value.posts, ...incoming.filter((p) => !seen.has(p.id))],
-            cursor: page.next_cursor, hasMore: page.has_more, loaded: true, error: null, nextPageError: null, updatedAt: Date.now() };
+            cursor: page.next_cursor, hasMore: page.has_more, loaded: true, total: page.total ?? value.total,
+            error: null, nextPageError: null, updatedAt: Date.now() };
         });
       } else {
         // 请求期间新收到的WS帖子保留；已读/浏览状态不能被较早的HTTP快照倒退。
         const realtime = currentPosts.filter((post) => !knownIds.has(post.id) && !seen.has(post.id) && !owner.deletedIds.has(post.id));
         update((value) => ({ ...value, posts: [...realtime, ...incoming], cursor: page.next_cursor,
-          hasMore: page.has_more, loaded: true, error: null, nextPageError: null, updatedAt: Date.now() }));
+          hasMore: page.has_more, loaded: true, total: page.total ?? value.total,
+          error: null, nextPageError: null, updatedAt: Date.now() }));
       }
       if (kind !== "first") setResumeEntry(true);
     } catch (e) {
@@ -305,7 +309,7 @@ export function PostsHubPage() {
           header={<div className="directory-filter-header">
             <span className="directory-filter-kicker">Posts</span>
             <span className="directory-filter-title">帖子</span>
-            {state.posts.length > 0 && <span className="directory-filter-stats">{state.posts.length} 条帖子</span>}
+            {state.total > 0 && <span className="directory-filter-stats">{state.total} 条帖子</span>}
           </div>} />
         <div key={scrollRestoreKey} className="directory-content posts-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}

@@ -174,6 +174,13 @@ describe("PostsHubPage 分类选项卡与分页", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("");
   });
 
+  it("侧栏统计显示后端 total（分页后总数），非已加载条数", async () => {
+    vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post(1)], next_cursor: "next", has_more: true, total: 25 });
+    renderHub();
+    await screen.findByText("帖子1");
+    expect(screen.getByText("25 条帖子")).toBeInTheDocument();
+  });
+
   it("热门 tab 按 view_count 降序（唯一排序例外）", async () => {
     vi.mocked(postsApi.listPosts).mockResolvedValue({
       results: [{ ...post(1), view_count: 3 }, { ...post(2), view_count: 9 }, { ...post(3), view_count: 5 }],
