@@ -35,8 +35,22 @@ export function listVoiceChannels(params?: { scope?: string }) {
   return apiRequest<VoiceChannelDescriptor[]>(`/voice/channels/${query}`);
 }
 
-export function listVoiceChannelsPage(params: DirectoryParams = {}) {
-  return apiRequest<DirectoryPage<VoiceChannelDescriptor>>(`/voice/channels/?${directoryQuery(params)}`);
+export function listVoiceChannelsPage(params: DirectoryParams & {
+  /** 分类选项卡：public/friends/group（后端过滤） */
+  visibility?: "public" | "friends" | "group";
+  /** 分类选项卡：只看我的好友发布的内容（作者是好友） */
+  friends?: boolean;
+  /** 分类选项卡：有人（member_count>0） */
+  occupied?: boolean;
+  /** 分类选项卡：我的（owner_id=当前用户） */
+  owner?: string;
+} = {}) {
+  const query = directoryQuery(params);
+  if (params.visibility) query.set("visibility", params.visibility);
+  if (params.friends) query.set("friends", "1");
+  if (params.occupied) query.set("occupied", "1");
+  if (params.owner) query.set("owner", params.owner);
+  return apiRequest<DirectoryPage<VoiceChannelDescriptor>>(`/voice/channels/?${query}`);
 }
 
 /** POST /voice/channels/ —— 建频道（name 空 → 400；group 可选，群内创建归属该群） */

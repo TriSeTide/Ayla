@@ -59,10 +59,22 @@ export function listLiveChannels(params?: { onlyLive?: boolean; scope?: string; 
   return apiRequest<LiveChannelDescriptor[]>(`/live/channels/${query}`);
 }
 
-export function listLiveChannelsPage(params: DirectoryParams & { onlyLive?: boolean; owner?: string } = {}) {
+export function listLiveChannelsPage(params: DirectoryParams & {
+  onlyLive?: boolean;
+  owner?: string;
+  /** 分类选项卡：public/friends/group（后端过滤） */
+  visibility?: "public" | "friends" | "group";
+  /** 分类选项卡：只看我的好友发布的内容（作者是好友） */
+  friends?: boolean;
+  /** 分类选项卡：live/idle/ended/offline（offline=停播，status≠live） */
+  status?: "live" | "idle" | "ended" | "offline";
+} = {}) {
   const query = directoryQuery(params);
   if (params.onlyLive) query.set("only_live", "1");
   if (params.owner) query.set("owner", params.owner);
+  if (params.visibility) query.set("visibility", params.visibility);
+  if (params.friends) query.set("friends", "1");
+  if (params.status) query.set("status", params.status);
   return apiRequest<DirectoryPage<LiveChannelDescriptor>>(`/live/channels/?${query}`);
 }
 

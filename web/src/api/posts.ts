@@ -11,18 +11,24 @@ import { apiRequest } from "./client";
 import type { Post, PostComment, PostListPage, PostScope } from "./types";
 import type { DirectoryPage } from "./directory";
 
-/** GET /posts/ —— 信息流游标分页（?owner=<id> 他人主页） */
+/** GET /posts/ —— 信息流游标分页（?owner=<id> 他人主页；?visibility= 分类选项卡；?friends=1 好友发布） */
 export function listPosts(params: {
   scope?: PostScope;
   cursor?: string | null;
   limit?: number;
   owner?: string;
+  /** 分类选项卡：public/friends/group（后端过滤，不依赖 feed 分页进度） */
+  visibility?: "public" | "friends" | "group";
+  /** 分类选项卡：只看我的好友发布的内容（作者是好友，含 public/friends） */
+  friends?: boolean;
 } = {}) {
   const qs = new URLSearchParams();
   if (params.scope && params.scope !== "feed") qs.set("scope", params.scope);
   if (params.cursor) qs.set("cursor", params.cursor);
   if (params.limit != null) qs.set("limit", String(params.limit));
   if (params.owner) qs.set("owner", params.owner);
+  if (params.visibility) qs.set("visibility", params.visibility);
+  if (params.friends) qs.set("friends", "1");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return apiRequest<PostListPage>(`/posts/${suffix}`);
 }

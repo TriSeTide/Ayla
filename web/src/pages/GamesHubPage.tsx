@@ -44,9 +44,15 @@ export function GamesHubPage() {
   const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
   const scope = `games-hub:${filter}`;
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
-  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 第一页）；
-  // 「我的」tab 用后端 owner 过滤（owner_id=当前用户），其余 tab 拉到数据后前端过滤
-  const directory = useDirectoryPage("game", { filter, owner: filter === "mine" ? currentUserId : undefined }, !roomId);
+  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 过滤后的第一页）；
+  // 过滤参数由后端执行（visibility/friends/status/owner），不依赖「全部」分页进度
+  const directory = useDirectoryPage("game", {
+    filter,
+    visibility: filter === "public" ? "public" : undefined,
+    friends: filter === "friends" ? true : undefined,
+    status: filter === "waiting" ? "waiting" : filter === "playing" ? "playing" : undefined,
+    owner: filter === "mine" ? currentUserId : undefined,
+  }, !roomId);
   const { items: rooms, loading, error, refresh } = directory;
   const [loadError, setLoadError] = useState<string | null>(null);
   /** 进入的房间（占位界面） */

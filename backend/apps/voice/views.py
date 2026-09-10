@@ -19,7 +19,13 @@ from rest_framework.views import APIView
 
 from apps.common.catalog_pagination import catalog_scope, paginate_catalog, with_activity_order
 from apps.common.media_pagination import paginate_media
-from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
+from apps.common.visibility import (
+    Visibility,
+    apply_catalog_filters,
+    can_join,
+    can_view,
+    visible_queryset,
+)
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media
 from apps.media.serializers import MediaObjectSerializer
@@ -76,6 +82,15 @@ class ChannelListView(APIView):
         from django.db.models import Q
 
         qs = visible_queryset(VoiceChannel, request.user).select_related("owner", "group")
+
+        # 分类选项卡：?visibility=public|friends|group；?friends=1（作者是我的好友）；
+        # ?occupied=1（有人，member_count>0）；?owner=<id>（我的/他人主页）
+        qs = apply_catalog_filters(qs, request)
+        if request.query_params.get("occupied") == "1":
+            qs = qs.annotate(_member_count=Count("members")).filter(_member_count__gt=0)
+        owner_filter = request.query_params.get("owner", "").strip()
+        if owner_filter:
+            qs = qs.filter(owner_id=owner_filter, owner__show_content=True)
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性）

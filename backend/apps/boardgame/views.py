@@ -16,7 +16,12 @@ from rest_framework.views import APIView
 
 from apps.common.catalog_pagination import catalog_scope, paginate_catalog
 from apps.common.media_pagination import paginate_media
-from apps.common.visibility import can_join, can_view, visible_queryset
+from apps.common.visibility import (
+    apply_catalog_filters,
+    can_join,
+    can_view,
+    visible_queryset,
+)
 
 from . import services
 from .models import GameRoom, GameRoomMember
@@ -78,6 +83,10 @@ class RoomListView(APIView):
                 )),
             )
         )
+
+        # 分类选项卡：?visibility=public|friends|group；?friends=1（作者是我的好友）；
+        # ?status=waiting|playing|ended（等待中/对局中 tab）
+        qs = apply_catalog_filters(qs, request)
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性）

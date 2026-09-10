@@ -29,10 +29,22 @@ export function listGameRooms(params?: { mine?: boolean; scope?: string; owner?:
   return apiRequest<GameRoom[]>(`/boardgame/rooms/${qs}`);
 }
 
-export function listGameRoomsPage(params: DirectoryParams & { mine?: boolean; owner?: string } = {}) {
+export function listGameRoomsPage(params: DirectoryParams & {
+  mine?: boolean;
+  owner?: string;
+  /** 分类选项卡：public/friends/group（后端过滤） */
+  visibility?: "public" | "friends" | "group";
+  /** 分类选项卡：只看我的好友发布的内容（作者是好友） */
+  friends?: boolean;
+  /** 分类选项卡：waiting/playing/ended（等待中/对局中 tab） */
+  status?: "waiting" | "playing" | "ended";
+} = {}) {
   const query = directoryQuery(params);
   if (params.mine) query.set("mine", "1");
   if (params.owner) query.set("owner", params.owner);
+  if (params.visibility) query.set("visibility", params.visibility);
+  if (params.friends) query.set("friends", "1");
+  if (params.status) query.set("status", params.status);
   return apiRequest<DirectoryPage<GameRoom>>(`/boardgame/rooms/?${query}`);
 }
 

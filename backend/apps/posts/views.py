@@ -16,7 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.visibility import can_view, visible_queryset
+from apps.common.visibility import apply_catalog_filters, can_view, visible_queryset
 
 from . import services
 from .models import Comment, Post, PostView
@@ -132,6 +132,9 @@ class PostListView(APIView):
         owner_filter = request.query_params.get("owner", "").strip()
         if owner_filter:
             qs = qs.filter(owner_id=owner_filter, owner__show_content=True)
+
+        # 分类选项卡：?visibility=public|friends|group；?friends=1（作者是我的好友）
+        qs = apply_catalog_filters(qs, request)
 
         qs = qs.order_by("-created_at", "-id")
         total = qs.count()

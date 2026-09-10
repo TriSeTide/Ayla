@@ -49,9 +49,14 @@ const FILTERS: ReadonlyArray<{ key: PostFilter; label: string }> = [
   { key: "mine", label: "我的" },
 ];
 
-/** 每个 tab 的后端 scope：「我的」独立拉 mine，其余共享 feed 数据源但游标独立 */
-const TAB_SCOPE: Record<PostFilter, PostScope> = {
-  all: "feed", hot: "feed", public: "feed", friends: "feed", mine: "mine",
+/** 每个 tab 的后端查询：「我的」独立拉 mine；公开/好友由后端过滤（不依赖「全部」分页进度）；
+    热门/全部拉 feed 后前端排序/过滤（热门只排序不筛内容，无"加载不到"问题） */
+const TAB_QUERY: Record<PostFilter, { scope: PostScope; visibility?: "public" | "friends" | "group"; friends?: boolean }> = {
+  all: { scope: "feed" },
+  hot: { scope: "feed" },
+  public: { scope: "feed", visibility: "public" },
+  friends: { scope: "feed", friends: true },
+  mine: { scope: "mine" },
 };
 
 type PostTabState = {
@@ -161,7 +166,7 @@ export function PostsHubPage() {
       // 游标缺失/未推进（防御性检查，正常不触发）：静默降级，不显示错误，
       // 但标记 nextFailed 阻止滚动重复请求相同页
       if (kind === "append" && !cursor) { owner.nextFailed = true; return; }
-      const page = await postsApi.listPosts({ scope: TAB_SCOPE[filter], limit: 20, ...(cursor ? { cursor } : {}) });
+      const page = await postsApi.listPosts({ ...TAB_QUERY[filter], limit: 20, ...(cursor ? { cursor } : {}) });
       if (!isCurrent()) return;
       if (page.has_more && (!page.next_cursor || page.next_cursor === cursor)) { owner.nextFailed = true; return; }
       const currentPosts = stateRef.current.posts;

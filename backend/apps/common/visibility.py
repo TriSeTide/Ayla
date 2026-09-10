@@ -66,6 +66,30 @@ def visible_queryset(model, user):
     ).distinct()
 
 
+def apply_catalog_filters(qs, request):
+    """分类选项卡过滤（语音/直播/帖子/桌游列表共用，2026-09-09 分类选项卡增量）。
+
+    在 `visible_queryset` 之后叠加，让每个 tab 由后端过滤（前端不再依赖
+    「全部」分页进度）：
+    - `?visibility=public|friends|group`：按可见性精确过滤；
+    - `?friends=1`：只看我的好友发布的内容（作者是好友，含 public/friends，
+      与「好友」tab 语义一致——不是 visibility=friends 才显示）；
+    - `?status=live|idle|ended|waiting|playing|offline`：按状态过滤
+      （直播/桌游；offline = 非在播，直播「停播」tab 用）。
+    """
+    visibility = request.query_params.get("visibility", "").strip()
+    if visibility in {Visibility.PUBLIC, Visibility.FRIENDS, Visibility.GROUP}:
+        qs = qs.filter(visibility=visibility)
+    if request.query_params.get("friends") == "1":
+        qs = qs.filter(owner_id__in=_my_friend_ids(request.user))
+    status_filter = request.query_params.get("status", "").strip()
+    if status_filter == "offline":
+        qs = qs.exclude(status="live")
+    elif status_filter:
+        qs = qs.filter(status=status_filter)
+    return qs
+
+
 def can_view(user, obj) -> bool:
     """当前用户能否查看该对象（详情/内容/历史）。
 

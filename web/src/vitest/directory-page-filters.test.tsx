@@ -237,6 +237,19 @@ describe("VoiceHubPage 分类选项卡", () => {
     expect(voiceApi.listVoiceChannelsPage).toHaveBeenCalledTimes(2);
   });
 
+  it("各 tab 传后端过滤参数（visibility/friends/occupied/owner），不依赖「全部」分页进度", async () => {
+    renderVoice();
+    await screen.findByTestId("voice-hub-list");
+    fireEvent.click(screen.getByRole("tab", { name: "公开" }));
+    await waitFor(() => expect(voiceApi.listVoiceChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "public" })));
+    fireEvent.click(screen.getByRole("tab", { name: "好友" }));
+    await waitFor(() => expect(voiceApi.listVoiceChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ friends: true })));
+    fireEvent.click(screen.getByRole("tab", { name: "有人" }));
+    await waitFor(() => expect(voiceApi.listVoiceChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ occupied: true })));
+    fireEvent.click(screen.getByRole("tab", { name: "我的" }));
+    await waitFor(() => expect(voiceApi.listVoiceChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ owner: "u1" })));
+  });
+
   it("tab 切换写入 URL ?type=；侧栏 header 显示房间/人数统计", async () => {
     renderVoice();
     await screen.findByTestId("voice-hub-list");
@@ -311,6 +324,21 @@ describe("LiveHubPage 分类选项卡", () => {
     ));
   });
 
+  it("各 tab 传后端过滤参数（status/visibility/friends/owner），不依赖「全部」分页进度", async () => {
+    renderLive();
+    await screen.findByTestId("live-hall");
+    fireEvent.click(screen.getByRole("tab", { name: "在播" }));
+    await waitFor(() => expect(listLiveChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: "live" })));
+    fireEvent.click(screen.getByRole("tab", { name: "公开" }));
+    await waitFor(() => expect(listLiveChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "public" })));
+    fireEvent.click(screen.getByRole("tab", { name: "好友" }));
+    await waitFor(() => expect(listLiveChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ friends: true })));
+    fireEvent.click(screen.getByRole("tab", { name: "停播" }));
+    await waitFor(() => expect(listLiveChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: "offline" })));
+    fireEvent.click(screen.getByRole("tab", { name: "我的" }));
+    await waitFor(() => expect(listLiveChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ owner: "u1" })));
+  });
+
   it("tab 切换写入 URL ?type=；侧栏 header 显示直播间/在播统计", async () => {
     renderLive();
     await screen.findByTestId("live-hall");
@@ -380,6 +408,21 @@ describe("GamesHubPage 分类选项卡", () => {
     await waitFor(() => expect(boardgameApi.listGameRoomsPage).toHaveBeenLastCalledWith(
       expect.objectContaining({ owner: "u1" }),
     ));
+  });
+
+  it("各 tab 传后端过滤参数（visibility/friends/status/owner），不依赖「全部」分页进度", async () => {
+    renderGames();
+    await screen.findByText("我的等待房");
+    fireEvent.click(screen.getByRole("tab", { name: "公开" }));
+    await waitFor(() => expect(boardgameApi.listGameRoomsPage).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "public" })));
+    fireEvent.click(screen.getByRole("tab", { name: "好友" }));
+    await waitFor(() => expect(boardgameApi.listGameRoomsPage).toHaveBeenLastCalledWith(expect.objectContaining({ friends: true })));
+    fireEvent.click(screen.getByRole("tab", { name: "等待中" }));
+    await waitFor(() => expect(boardgameApi.listGameRoomsPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: "waiting" })));
+    fireEvent.click(screen.getByRole("tab", { name: "对局中" }));
+    await waitFor(() => expect(boardgameApi.listGameRoomsPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: "playing" })));
+    fireEvent.click(screen.getByRole("tab", { name: "我的" }));
+    await waitFor(() => expect(boardgameApi.listGameRoomsPage).toHaveBeenLastCalledWith(expect.objectContaining({ owner: "u1" })));
   });
 
   it("tab 切换写入 URL ?type=；侧栏 header 显示房间统计", async () => {

@@ -147,7 +147,7 @@ describe("PostsHubPage 分类选项卡与分页", () => {
   });
 
   it("分类选项卡存在；「我的」tab 拉 scope=mine 且只显示我的帖子", async () => {
-    vi.mocked(postsApi.listPosts).mockImplementation(async ({ scope }) => {
+    vi.mocked(postsApi.listPosts).mockImplementation(async ({ scope } = {}) => {
       if (scope === "mine") return { results: [{ ...post(2), is_author: true }], next_cursor: null, has_more: false };
       return { results: [post(1), { ...post(2), is_author: true }], next_cursor: null, has_more: false };
     });
@@ -200,14 +200,15 @@ describe("PostsHubPage 分类选项卡与分页", () => {
     renderHub();
     await screen.findByText("帖子1");
     fireEvent.click(screen.getByRole("tab", { name: "公开" }));
-    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", limit: 20 }));
+    // 公开 tab 由后端过滤（visibility=public），不依赖「全部」分页进度
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", visibility: "public", limit: 20 }));
     expect(screen.getByText("帖子1")).toBeInTheDocument();
     expect(screen.queryByText("帖子2")).not.toBeInTheDocument();
     expect(screen.queryByText("帖子3")).not.toBeInTheDocument();
     expect(screen.getByText("帖子4")).toBeInTheDocument();
-    // 好友 = 作者是好友（u2 的 public/friends 都算），非 visibility=friends
+    // 好友 = 作者是好友（u2 的 public/friends 都算），后端 friends=1 过滤
     fireEvent.click(screen.getByRole("tab", { name: "好友" }));
-    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", limit: 20 }));
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "feed", friends: true, limit: 20 }));
     expect(screen.queryByText("帖子1")).not.toBeInTheDocument();
     expect(screen.getByText("帖子2")).toBeInTheDocument();
     expect(screen.queryByText("帖子3")).not.toBeInTheDocument();

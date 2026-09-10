@@ -53,8 +53,15 @@ export function VoiceHubPage() {
   const filter = FILTERS.find((item) => item.key === params.get("type"))?.key ?? "all";
   const scope = `voice-hub:${filter}`;
   const currentUserId = useAuthStore((s) => s.currentUser?.id);
-  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 第一页）
-  const directory = useDirectoryPage("voice", { filter }, !routeChannelId);
+  // filter 进 directory key：每个 tab 独立游标/加载（切 tab 自动拉取该 tab 过滤后的第一页）；
+  // 过滤参数由后端执行（visibility/friends/occupied/owner），不依赖「全部」分页进度
+  const directory = useDirectoryPage("voice", {
+    filter,
+    visibility: filter === "public" ? "public" : undefined,
+    friends: filter === "friends" ? true : undefined,
+    occupied: filter === "occupied" ? true : undefined,
+    owner: filter === "mine" ? currentUserId : undefined,
+  }, !routeChannelId);
   const channelsLoading = directory.loading;
   const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);

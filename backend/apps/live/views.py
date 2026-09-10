@@ -23,7 +23,13 @@ from rest_framework.views import APIView
 from apps.common.catalog_pagination import (
     catalog_scope, paginate_catalog, with_activity_order,
 )
-from apps.common.visibility import Visibility, can_join, can_view, visible_queryset
+from apps.common.visibility import (
+    Visibility,
+    apply_catalog_filters,
+    can_join,
+    can_view,
+    visible_queryset,
+)
 from apps.common.media_pagination import paginate_media
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media, parse_avatar_media_id
@@ -109,6 +115,10 @@ class ChannelListView(APIView):
         qs = visible_queryset(LiveChannel, request.user).select_related("owner", "group")
         if request.query_params.get("only_live") == "1":
             qs = qs.filter(status="live")
+
+        # 分类选项卡：?visibility=public|friends|group；?friends=1（作者是我的好友）；
+        # ?status=live|idle|ended|offline（offline=停播，status≠live）
+        qs = apply_catalog_filters(qs, request)
 
         # 他人主页：owner=<user_id> 只看该用户的内容（仍受可见性过滤；
         # 且对方必须开启「向他人展示内容」show_content，否则视为无内容）

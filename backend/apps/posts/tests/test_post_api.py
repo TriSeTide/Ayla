@@ -242,6 +242,39 @@ class TestFeed:
         assert resp.status_code == 200
         assert resp.json()["results"] == []
 
+    def test_visibility_filter(self, auth_client, user_factory):
+        """分类选项卡 ?visibility=public：后端精确过滤，不依赖 feed 分页进度。"""
+        client, viewer = auth_client(username="f_vis_viewer")
+        owner = user_factory(username="f_vis_owner")
+        friend = user_factory(username="f_vis_friend")
+        _make_friends(owner, friend)
+        _make_post(owner, "pub", visibility=Visibility.PUBLIC)
+        _make_post(owner, "fri", visibility=Visibility.FRIENDS)
+        _make_post(owner, "grp", visibility=Visibility.GROUP)
+
+        resp = client.get("/api/v1/posts/?visibility=public")
+        assert resp.status_code == 200
+        assert {p["body"] for p in resp.json()["results"]} == {"pub"}
+
+        # viewer 是 owner 好友 → visibility=friends 可见
+        _make_friends(viewer, owner)
+        resp = client.get("/api/v1/posts/?visibility=friends")
+        assert {p["body"] for p in resp.json()["results"]} == {"fri"}
+
+    def test_friends_filter(self, auth_client, user_factory):
+        """分类选项卡 ?friends=1：作者是我的好友（含 public/friends），非 visibility=friends。"""
+        client, viewer = auth_client(username="f_fr_viewer")
+        friend = user_factory(username="f_fr_friend")
+        stranger = user_factory(username="f_fr_stranger")
+        _make_friends(viewer, friend)
+        _make_post(friend, "friend-pub", visibility=Visibility.PUBLIC)
+        _make_post(friend, "friend-fri", visibility=Visibility.FRIENDS)
+        _make_post(stranger, "stranger-pub", visibility=Visibility.PUBLIC)
+
+        resp = client.get("/api/v1/posts/?friends=1")
+        assert resp.status_code == 200
+        assert {p["body"] for p in resp.json()["results"]} == {"friend-pub", "friend-fri"}
+
     def test_cursor_pagination_no_duplicates(self, auth_client):
         client, user = auth_client(username="f_pages")
         # 同一微秒可能撞 created_at，靠 id 兜底排序去重（游标设计点）

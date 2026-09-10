@@ -23,9 +23,17 @@ export interface DirectoryOptions {
   onlyLive?: boolean;
   /** 分类选项卡（voice-hub/live-hub/games-hub 大厅）：每个 tab 独立 key/游标/加载 */
   filter?: string;
-  /** 直播/桌游「我的」tab：后端 owner 过滤（owner_id=当前用户） */
+  /** 分类选项卡：public/friends/group（后端过滤，不依赖「全部」分页进度） */
+  visibility?: "public" | "friends" | "group";
+  /** 分类选项卡：只看我的好友发布的内容（作者是好友，后端过滤） */
+  friends?: boolean;
+  /** 分类选项卡：语音「有人」（member_count>0，后端过滤） */
+  occupied?: boolean;
+  /** 分类选项卡：直播/桌游状态（live/idle/ended/offline、waiting/playing/ended，后端过滤） */
+  status?: string;
+  /** 直播/桌游/语音「我的」tab：后端 owner 过滤（owner_id=当前用户） */
   owner?: string;
-  /** 桌游「我在局」过滤（本任务未用，保留给后端契约） */
+  /** 桌游「我在局」过滤（保留给后端契约） */
   mine?: boolean;
 }
 export interface DirectoryRecord {
@@ -77,7 +85,8 @@ export const useDirectoryStore = create<{
 
 export function directoryKey(kind: DirectoryKind, options: DirectoryOptions = {}) {
   return JSON.stringify([useAuthStore.getState().currentUser?.id ?? null, kind, options.groupId ?? null,
-    !!options.onlyLive, options.filter ?? null, options.owner ?? null, !!options.mine]);
+    !!options.onlyLive, options.filter ?? null, options.visibility ?? null, !!options.friends,
+    !!options.occupied, options.status ?? null, options.owner ?? null, !!options.mine]);
 }
 
 function patch(key: string, record: DirectoryRecord) {
@@ -244,12 +253,16 @@ export function loadDirectory(
   const descriptorsAtStart = new Map(cachedItems(kind).map((item) => [String(item.id), item]));
   const cursor = mode === "more" ? previous.nextCursor : null;
   patch(key, { ...previous, ...options, loading: true, error: null, revision });
-  // 按 kind 精确传参：语音后端不支持 owner/mine 过滤（filter 仅用于 key 隔离，页面层过滤）
+  // 按 kind 精确传参：分类选项卡过滤参数（visibility/friends/status/occupied/owner）由后端执行，
+  // 每个 tab 独立 key/游标，切 tab 自动拉取该 tab 过滤后的第一页
   const base = { limit: 20, cursor, groupId: options.groupId };
   const request: Promise<DirectoryPage<Item>> = kind === "live"
-    ? listLiveChannelsPage({ ...base, onlyLive: options.onlyLive, owner: options.owner })
-    : kind === "voice" ? listVoiceChannelsPage(base)
-      : listGameRoomsPage({ ...base, mine: options.mine, owner: options.owner });
+    ? listLiveChannelsPage({ ...base, onlyLive: options.onlyLive, owner: options.owner,
+      visibility: options.visibility, friends: options.friends, status: options.status as "live" | "idle" | "ended" | "offline" | undefined })
+    : kind === "voice" ? listVoiceChannelsPage({ ...base, visibility: options.visibility,
+      friends: options.friends, occupied: options.occupied, owner: options.owner })
+      : listGameRoomsPage({ ...base, mine: options.mine, owner: options.owner,
+        visibility: options.visibility, friends: options.friends, status: options.status as "waiting" | "playing" | "ended" | undefined });
   const task = request.then((page) => {
     const current = useDirectoryStore.getState().records[key];
     if (!current || current.revision !== revision || directoryKey(kind, options) !== key) return;
