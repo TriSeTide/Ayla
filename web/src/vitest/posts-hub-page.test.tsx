@@ -131,18 +131,17 @@ describe("PostsHubPage 分类选项卡与分页", () => {
     expect(container.querySelector(".posts-skeleton")).toBeNull();
   });
 
-  it("失败重试在请求完成前显示骨架，空响应才显示空态", async () => {
+  it("首屏失败静默显示空态，刷新成功后显示帖子", async () => {
+    // bcb00dc 起首屏/刷新失败静默：无错误文案与重试按钮，空数据时显示空态；
+    // 后续刷新（RefreshFAB 通道）成功 → 正常显示帖子。
     vi.mocked(postsApi.listPosts).mockRejectedValueOnce(new Error("帖子加载失败"));
     const { container } = renderHub();
-    expect(await screen.findByRole("alert")).toHaveTextContent("帖子加载失败");
-
-    let resolvePage!: (page: PostListPage) => void;
-    vi.mocked(postsApi.listPosts).mockReturnValue(new Promise((resolve) => { resolvePage = resolve; }));
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(container.querySelector(".posts-skeleton .skeleton")).not.toBeNull();
-    expect(screen.queryByText("还没有帖子")).not.toBeInTheDocument();
-    await act(async () => resolvePage({ results: [], next_cursor: null, has_more: false }));
-    expect(screen.getByText("还没有帖子")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("还没有帖子")).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([1], null));
+    await act(async () => { await useShellStore.getState().refreshCallback!(); });
+    expect(screen.getByText("帖卡")).toBeInTheDocument();
     expect(container.querySelector(".posts-skeleton")).toBeNull();
   });
 
@@ -274,14 +273,17 @@ describe("PostsHubPage 分类选项卡与分页", () => {
     expect(container.querySelector('[data-post-id="11"]')).not.toBeNull();
   });
 
-  it("刷新失败保留原cursor与卡片并显示错误，旧追加仍失效", async () => {
+  it("刷新失败静默保留原cursor与卡片，旧追加仍失效，加载更多可重试", async () => {
+    // bcb00dc 起刷新失败静默：无错误文案；核心意图保留——旧卡片与 cursor 保留、
+    // 旧追加失效，后续「加载更多」按原 cursor 重试成功。
     const oldAppend = deferred<PostListPage>();
     vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([1], "next-1")).mockReturnValueOnce(oldAppend.promise).mockRejectedValueOnce(new Error("刷新失败"));
     const { container } = renderHub();
     await screen.findByText("帖子1");
     scrollNearBottom(container);
     await act(async () => { await useShellStore.getState().refreshCallback!(); });
-    expect(screen.getByRole("alert")).toHaveTextContent("刷新失败");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("刷新失败")).not.toBeInTheDocument();
     await act(async () => oldAppend.resolve(page([2], "stale-next")));
     expect(container.querySelectorAll('[data-post-id]')).toHaveLength(1);
     vi.mocked(postsApi.listPosts).mockResolvedValueOnce(page([3], null));

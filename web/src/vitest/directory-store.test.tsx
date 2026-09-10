@@ -271,6 +271,8 @@ describe("query-specific bounded directories", () => {
     await loadDirectory("live", {}, "more");
     expect(read().items.map((item) => item.id)).toEqual([1]);
     expect(read().nextCursor).toBe("same");
-    expect(read().error).toContain("游标");
+    // 游标未推进：静默降级（不设置错误、不消费页面），hasMore 保持可重试
+    expect(read().error).toBeNull();
+    expect(read().hasMore).toBe(true);
   });
 });

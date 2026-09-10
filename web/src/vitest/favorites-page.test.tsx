@@ -194,22 +194,22 @@ describe("收藏真实分页", () => {
     expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
   });
 
-  it("续页失败保留已有卡片和cursor，显式重试同一页", async () => {
+  it("续页失败保留已有卡片和cursor，静默处理（无错误提示与重试按钮）", async () => {
+    // bcb00dc 起失败操作静默：DirectoryLoadMore 错误时整体隐藏（无文案、无重试按钮），
+    // 旧卡片与 cursor 保留；重试通道不再存在，仅验证失败不丢数据。
     vi.mocked(favoritesApi.listFavoritesPage)
       .mockResolvedValueOnce(favoritePage([fav(1, "post", "10", { title: "保留内容" })], "retry-cursor"))
-      .mockRejectedValueOnce(new Error("续页网络失败"))
-      .mockResolvedValueOnce(favoritePage([fav(2, "post", "11", { title: "重试成功" })]));
+      .mockRejectedValueOnce(new Error("续页网络失败"));
     renderPage();
     const retained = await screen.findByText("保留内容");
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
-    await screen.findByText("续页网络失败");
+    await waitFor(() => expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(2));
     expect(screen.getByText("保留内容")).toBe(retained);
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await screen.findByText("重试成功");
-    expect(vi.mocked(favoritesApi.listFavoritesPage).mock.calls.slice(1)).toEqual([
-      [{ type: undefined, limit: 20, cursor: "retry-cursor" }],
-      [{ type: undefined, limit: 20, cursor: "retry-cursor" }],
-    ]);
+    expect(screen.queryByText("续页网络失败")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+    // cursor 保留：失败请求携带原 cursor，且失败后未再发起任何请求
+    expect(favoritesApi.listFavoritesPage).toHaveBeenLastCalledWith({ type: undefined, limit: 20, cursor: "retry-cursor" });
   });
 
   it("删除在续页响应之前发生时，重复项不能复活已取消收藏", async () => {
@@ -284,18 +284,21 @@ describe("收藏真实分页", () => {
     expect(animated).toHaveLength(3);
   });
 
-  it("刷新首页失败后的重试仍是首页请求，不能误续旧页", async () => {
+  it("刷新首页失败静默处理，失败请求仍是首页请求（不误续旧页）", async () => {
+    // bcb00dc 起失败静默：无错误文案与重试按钮；核心意图保留——
+    // 自动刷新走首页请求（cursor: null），失败不误续旧页。
     vi.mocked(favoritesApi.listFavoritesPage)
       .mockResolvedValueOnce(favoritePage([fav(1, "post", "10", { title: "原有收藏" })], "older-page"))
-      .mockRejectedValueOnce(new Error("首页刷新失败"))
-      .mockResolvedValueOnce(favoritePage([fav(2, "post", "11", { title: "新首页" })]));
+      .mockRejectedValueOnce(new Error("首页刷新失败"));
     renderPage();
     await screen.findByText("原有收藏");
     act(() => ws.frameHandler?.({ type: "favorite.changed", data: { target_type: "post", target_id: "11", favorite_id: 2, action: "added" } }));
-    // stale → 自动刷新首页（无需点击"收藏有更新"按钮）；失败后显示错误+重试
-    await screen.findByText("首页刷新失败");
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await screen.findByText("新首页");
+    // stale → 自动刷新首页；失败静默：旧数据保留、无错误文案与重试按钮
+    await waitFor(() => expect(favoritesApi.listFavoritesPage).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("原有收藏")).toBeInTheDocument();
+    expect(screen.queryByText("首页刷新失败")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    // 失败请求是首页请求（cursor: null），不是续页
     expect(favoritesApi.listFavoritesPage).toHaveBeenLastCalledWith({ type: undefined, limit: 20, cursor: null });
   });
 });

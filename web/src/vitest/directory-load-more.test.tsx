@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DirectoryLoadMore, type DirectoryLoadMoreProps } from "../components/DirectoryLoadMore";
 
@@ -32,41 +32,48 @@ describe("DirectoryLoadMore", () => {
     rerender(<DirectoryLoadMore {...initial} retainCompletedSpace />);
     expect(document.querySelector(".directory-load-more")).not.toBeNull();
   });
-  it("分页、完整错误、重试加载和终页保持同一个页尾占位", () => {
+  it("分页、错误静默隐藏、加载和终页保持同一个页尾占位", () => {
     const initial = props();
     const { rerender } = render(<DirectoryLoadMore {...initial} />);
-    const footer = document.querySelector(".directory-load-more")!;
     expect(screen.getByRole("button", { name: "加载更多" })).toBeInTheDocument();
 
+    // bcb00dc 起错误静默：页尾整体隐藏（无错误文案、无重试按钮）
     const error = "下一页加载失败，已加载的房间仍可查看。".repeat(12);
     rerender(<DirectoryLoadMore {...initial} error={error} />);
-    expect(document.querySelector(".directory-load-more")).toBe(footer);
-    expect(screen.getByRole("alert")).toHaveTextContent(error);
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(initial.loadMore).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".directory-load-more")).toBeNull();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    expect(initial.loadMore).not.toHaveBeenCalled();
     expect(initial.refresh).not.toHaveBeenCalled();
 
+    // 错误清除后页尾重新出现（错误隐藏会卸载/重建页尾；加载与终页保持同一节点）
+    rerender(<DirectoryLoadMore {...initial} error={null} />);
+    const restored = document.querySelector(".directory-load-more")!;
+    expect(restored).not.toBeNull();
+    expect(screen.getByRole("button", { name: "加载更多" })).toBeInTheDocument();
+
     rerender(<DirectoryLoadMore {...initial} loading />);
-    expect(document.querySelector(".directory-load-more")).toBe(footer);
-    expect(footer).toHaveAttribute("aria-busy", "true");
+    expect(document.querySelector(".directory-load-more")).toBe(restored);
+    expect(restored).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
 
     rerender(<DirectoryLoadMore {...initial} hasMore={false} />);
-    expect(document.querySelector(".directory-load-more")).toBe(footer);
-    expect(footer).toHaveAttribute("aria-busy", "false");
-    expect(footer).toBeEmptyDOMElement();
+    expect(document.querySelector(".directory-load-more")).toBe(restored);
+    expect(restored).toHaveAttribute("aria-busy", "false");
+    expect(restored).toBeEmptyDOMElement();
   });
 
-  it("初次失败重试走刷新，已失效目录自动刷新恢复", () => {
+  it("初次失败静默隐藏，已失效目录自动刷新恢复", () => {
     const initial = props({ hasMore: false, error: "加载失败" });
     const { rerender } = render(<DirectoryLoadMore {...initial} />);
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(initial.refresh).toHaveBeenCalledTimes(1);
+    // bcb00dc 起错误静默：无重试按钮，不触发任何请求
+    expect(document.querySelector(".directory-load-more")).toBeNull();
+    expect(initial.refresh).not.toHaveBeenCalled();
     expect(initial.loadMore).not.toHaveBeenCalled();
 
     // invalidated → 自动 refresh（不再显示"列表有更新"按钮，显示刷新中状态）
     rerender(<DirectoryLoadMore {...initial} hasMore invalidated error={null} />);
-    expect(initial.refresh).toHaveBeenCalledTimes(2);
+    expect(initial.refresh).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "列表有更新，刷新后继续加载" })).not.toBeInTheDocument();
     expect(screen.getByRole("status", { name: "正在刷新列表" })).toBeInTheDocument();
     expect(initial.loadMore).not.toHaveBeenCalled();
@@ -75,7 +82,8 @@ describe("DirectoryLoadMore", () => {
     expect(screen.getByRole("button", { name: "加载更多" })).toBeInTheDocument();
   });
 
-  it("完整长错误撑高后，加载与空终页不缩矮；后续尺寸增长继续保留并清理观察器", () => {
+  it("加载与空终页不缩矮；后续尺寸增长继续保留并清理观察器", () => {
+    // bcb00dc 起错误静默隐藏页尾，不再有"长错误撑高"场景；保留加载/终页不缩矮契约。
     let height = 80;
     let resize: ResizeObserverCallback | undefined;
     const disconnect = vi.fn();
@@ -92,12 +100,9 @@ describe("DirectoryLoadMore", () => {
     expect(footer.style.minHeight).toBe("80px");
 
     height = 184;
-    rerender(<DirectoryLoadMore {...initial} error={"完整错误".repeat(80)} />);
-    expect(footer.style.minHeight).toBe("184px");
-    height = 80;
     rerender(<DirectoryLoadMore {...initial} loading />);
     expect(footer.style.minHeight).toBe("184px");
-    height = 0;
+    height = 80;
     rerender(<DirectoryLoadMore {...initial} hasMore={false} />);
     expect(footer.style.minHeight).toBe("184px");
     height = 220;

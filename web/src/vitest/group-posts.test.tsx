@@ -154,6 +154,7 @@ describe("GroupPosts bounded cursor pages", () => {
   });
 
   it("下一页失败保留旧卡及cursor，停止滚动自动重试直到用户明确重试", async () => {
+    // bcb00dc 起失败静默：无错误文案；「加载更多帖子」按钮保留，点击按原 cursor 重试。
     vi.mocked(postsApi.listPosts)
       .mockResolvedValueOnce({ results: [post(2)], next_cursor: "page-2", has_more: true })
       .mockRejectedValueOnce(new Error("下一页暂不可用"))
@@ -162,29 +163,30 @@ describe("GroupPosts bounded cursor pages", () => {
     const retained = await findFavorite(2);
     const root = document.querySelector<HTMLElement>(".group-posts-list")!;
     scrollNearBottom(root);
-    await screen.findByText("下一页暂不可用");
+    await waitFor(() => expect(postsApi.listPosts).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("下一页暂不可用")).not.toBeInTheDocument();
+    expect(getFavorite(2)!).toBe(retained);
     fireEvent.scroll(root);
     expect(postsApi.listPosts).toHaveBeenCalledTimes(2);
-    expect(getFavorite(2)!).toBe(retained);
-    fireEvent.click(screen.getByRole("button", { name: "重试加载更多" }));
+    fireEvent.click(screen.getByRole("button", { name: "加载更多帖子" }));
     await findFavorite(1);
     expect(postsApi.listPosts).toHaveBeenLastCalledWith({ scope: "group:1", limit: 20, cursor: "page-2" });
   });
 
-  it("旧群未完成的请求不能覆盖新群，首屏失败可明确重试", async () => {
+  it("旧群未完成的请求不能覆盖新群，首屏失败静默显示空态", async () => {
+    // bcb00dc 起首屏失败静默：无错误文案与重试按钮，显示空态；
+    // 核心意图保留——旧群迟到响应不能覆盖新群。
     const stale = deferredPage();
     vi.mocked(postsApi.listPosts)
       .mockReturnValueOnce(stale.promise)
-      .mockRejectedValueOnce(new Error("群2首屏失败"))
-      .mockResolvedValueOnce({ results: [{ ...post(20), allowed_group_ids: ["2"] }], next_cursor: null, has_more: false });
+      .mockRejectedValueOnce(new Error("群2首屏失败"));
     const view = render(<MemoryRouter><GroupPosts groupId="1" onExit={() => {}} /></MemoryRouter>);
     view.rerender(<MemoryRouter><GroupPosts groupId="2" onExit={() => {}} /></MemoryRouter>);
-    await screen.findByText("群2首屏失败");
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await findFavorite(20);
+    await waitFor(() => expect(screen.getByText("群内还没有帖子")).toBeInTheDocument());
+    expect(screen.queryByText("群2首屏失败")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
     await act(async () => stale.resolve({ results: [post(1)], next_cursor: "stale", has_more: true }));
     expect(getFavorite(1)).not.toBeInTheDocument();
-    expect(getFavorite(20)!).toBeInTheDocument();
   });
 
   it("已加载两页详情往返不重请求，返回后可继续第三页", async () => {

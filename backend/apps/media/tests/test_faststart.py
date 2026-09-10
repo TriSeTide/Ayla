@@ -55,7 +55,7 @@ def _read_chunk_entries(data: bytes, btype: bytes) -> list[int]:
             pos += size
         return None
 
-    boxes = dict((b[0], data[b[1] : b[1] + b[2]]) for b in iter_top_level_boxes(io.BytesIO(data)))
+    boxes = dict((b.btype, data[b.pos : b.pos + b.size]) for b in iter_top_level_boxes(io.BytesIO(data)))
     target = find(boxes[b"moov"], True)
     assert target is not None, f"{btype} not found"
     count = int.from_bytes(target[8:12], "big")
@@ -172,13 +172,13 @@ class TestEnsureVideoFaststart:
         assert services.ensure_video_faststart(media.media_id) is False
         assert store.get(media.storage_path) == src  # EBML 容器绝不重排
 
-    def test_schedule_spawns_background_thread(self, monkeypatch):
+    def test_schedule_spawns_background_thread(self, monkeypatch, user_factory):
         import threading
 
         from apps.media import services
 
         src = make_tail_moov_mp4([48])
-        media, _ = self._make_media(src)
+        media, _ = self._make_media(src, owner_id=user_factory().id)
 
         started = {}
         real_thread = threading.Thread

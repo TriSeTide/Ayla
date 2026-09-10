@@ -43,13 +43,17 @@ describe("VisibilitySelector actual pages", () => {
     expect(within(screen.getByLabelText("已选群")).getByText("已选的群")).toBeInTheDocument();
     expect(chatApi.listConversationsPage).toHaveBeenLastCalledWith(expect.objectContaining({ q: "远处", cursor: null }));
   });
-  it("exposes a failure and retries rather than claiming no matching groups", async () => {
+  it("exposes a failure silently and does not claim no matching groups", async () => {
+    // bcb00dc 起失败静默：无错误文案、无重试按钮，也不显示"没有匹配的群"；
+    // 搜索变化触发重新加载 → 成功显示恢复的群。
     vi.mocked(chatApi.listConversationsPage).mockRejectedValueOnce(new Error("群目录断网"))
       .mockResolvedValueOnce(page([group("1", "恢复的群")]));
     render(<Selection />);
-    expect(await screen.findByText("群目录断网")).toBeInTheDocument();
+    await waitFor(() => expect(chatApi.listConversationsPage).toHaveBeenCalled());
+    expect(screen.queryByText("群目录断网")).not.toBeInTheDocument();
     expect(screen.queryByText("没有匹配的群")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索群" }), { target: { value: "恢复" } });
     expect(await screen.findByText("恢复的群")).toBeInTheDocument();
   });
   it("shows the successful empty state only after the response", async () => {

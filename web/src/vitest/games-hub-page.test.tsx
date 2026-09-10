@@ -106,12 +106,13 @@ describe("GamesHubPage 直达进房（任务 07）", () => {
     expect(await screen.findByText("群外桌游二")).toBeInTheDocument();
   });
 
-  it("房间不存在/无权 → 回大厅并提示，不伪造进房", async () => {
+  it("房间不存在/无权 → 静默回大厅，不伪造进房", async () => {
+    // bcb00dc 起失败静默：无错误提示，直接回大厅渲染列表。
     vi.mocked(boardgameApi.getGameRoom).mockRejectedValue(new Error("404"));
     renderHub(["/games/999"]);
 
     await waitFor(() => expect(boardgameApi.getGameRoom).toHaveBeenCalledWith(999));
-    expect(await screen.findByText("桌游房不存在或无权访问")).toBeInTheDocument();
+    expect(screen.queryByText("桌游房不存在或无权访问")).not.toBeInTheDocument();
     // 回大厅：列表正常渲染
     expect(await screen.findByText("群外桌游一")).toBeInTheDocument();
   });

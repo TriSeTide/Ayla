@@ -119,12 +119,14 @@ describe("HomePage 窄屏", () => {
     expect(useHomeStore.getState().layout).toBe("list");
   });
 
-  it("列表加载失败 → 失败文案 + 重试", async () => {
+  it("列表加载失败 → 静默显示空态引导，不冒充有群", async () => {
+    // bcb00dc 起失败静默：无错误文案与重试按钮，空数据时显示空态引导。
     mockMatchMedia(true);
     vi.mocked(chatApi.listConversations).mockRejectedValue(new Error("网络错误"));
     renderHome("/home");
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("创建你的第一个群")).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
   });
 });
 
@@ -178,19 +180,14 @@ describe("HomePage 宽屏重定向", () => {
     expect(screen.queryByText("还没有加入群聊")).not.toBeInTheDocument();
   });
 
-  it("加载或重试失败显示错误并结束加载，不冒充没有群", async () => {
+  it("加载失败静默结束加载，显示无群引导而非错误", async () => {
+    // bcb00dc 起失败静默：无错误文案与重试按钮，显示无群引导（不冒充有群）。
     mockMatchMedia(false);
     vi.mocked(chatApi.listConversations).mockRejectedValueOnce(new Error("网络错误"));
     renderHome("/home");
-    expect(await screen.findByRole("alert")).toHaveTextContent("网络错误");
-    expect(screen.queryByText("还没有加入群聊")).not.toBeInTheDocument();
-
-    let rejectList!: (reason: Error) => void;
-    vi.mocked(chatApi.listConversations).mockReturnValue(new Promise((_resolve, reject) => { rejectList = reject; }));
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(screen.getByRole("status", { name: "正在加载群聊" })).toBeInTheDocument();
-    await act(async () => rejectList(new Error("再次失败")));
-    expect(screen.getByRole("alert")).toHaveTextContent("再次失败");
+    await waitFor(() => expect(screen.getByText("还没有加入群聊")).toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
     expect(useChatStore.getState().loading).toBe(false);
     expect(screen.queryByRole("status", { name: "正在加载群聊" })).not.toBeInTheDocument();
   });

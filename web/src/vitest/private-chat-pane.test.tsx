@@ -112,20 +112,21 @@ function renderPane() {
 }
 
 describe("PrivateChatPane 非好友禁发（Bug #2）", () => {
-  it("撤回失败后重试开始清除旧提示，成功后不保留旧失败", async () => {
+  it("撤回失败静默处理，重试成功后不残留任何提示", async () => {
+    // bcb00dc 起撤回失败静默：无错误提示条；核心意图保留——重试仍走同一撤回通道。
     vi.mocked(usersApi.getUserDetail).mockResolvedValue({ ...user("peer1"), relation: "friend" });
     vi.mocked(elysiaApi.getElysiaProfile).mockRejectedValue(new Error("404"));
     const message: ChatMessage = { id: "recall-fixture", conversation_id: "c1", sender_id: "me", type: "text", content: "合成撤回内容", media_id: null, media: null, reply_to: null, status: "sent", seq: 1, created_at: "2026-09-08T00:00:00Z" };
     vi.mocked(recallMessage).mockRejectedValueOnce(new Error("合成撤回失败"));
     renderPane();
     await act(async () => ws.onRecall!(message));
-    expect(await screen.findByRole("alert")).toHaveTextContent("合成撤回失败");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/合成撤回失败/)).not.toBeInTheDocument();
     let resolveRecall!: (value: ChatMessage) => void;
     vi.mocked(recallMessage).mockReturnValueOnce(new Promise((resolve) => { resolveRecall = resolve; }));
     act(() => ws.onRecall!(message));
-    expect(screen.queryByText(/合成撤回失败/)).toBeNull();
     await act(async () => resolveRecall({ ...message, status: "recalled" }));
-    expect(screen.queryByText(/合成撤回失败/)).toBeNull();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(recallMessage).toHaveBeenLastCalledWith("c1", "recall-fixture");
   });
 

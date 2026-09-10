@@ -204,7 +204,9 @@ describe("PostDetailPage 编辑可见范围", () => {
     expect(screen.getByRole("textbox", { name: "帖子正文" })).toHaveValue("待保存正文");
     expect(screen.getByRole("alert")).toHaveTextContent("编辑保存失败");
   });
-  it("删除请求期间禁用重复提交，失败保留正文并显示可重试状态", async () => {
+  it("删除请求期间禁用重复提交，失败静默恢复可重试状态", async () => {
+    // bcb00dc 起删除失败静默：无错误提示；核心意图保留——请求期间禁重复提交、
+    // 失败后按钮恢复可重试。
     let reject!: (error: Error) => void;
     vi.mocked(postsApi.deletePost).mockReturnValueOnce(new Promise((_resolve, no) => { reject = no; }));
     renderDetail(makePost());
@@ -215,7 +217,7 @@ describe("PostDetailPage 编辑可见范围", () => {
     fireEvent.click(busy);
     expect(postsApi.deletePost).toHaveBeenCalledTimes(1);
     await act(async () => reject(new Error("删除暂时失败")));
-    expect(screen.getByRole("alert")).toHaveTextContent("删除暂时失败");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "编辑" })).toBeInTheDocument();
   });

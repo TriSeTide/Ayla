@@ -133,21 +133,27 @@ describe("GroupVoice 范围（仅该群）", () => {
     expect(voiceApi.joinVoiceChannel).toHaveBeenCalledTimes(1);
   });
 
-  it("直达详情不在本群 allowed_group_ids 中时显示错误且绝不 join", async () => {
+  it("直达详情不在本群 allowed_group_ids 中时静默保持加载态且绝不 join", async () => {
+    // bcb00dc 起权限校验失败静默：不注入频道、无错误文案，界面保持加载态。
     vi.mocked(voiceApi.getVoiceChannel).mockResolvedValue(ch("foreign", "other", "别群语音房"));
     render(<MemoryRouter><GroupVoice groupId="g1" routeChannelId="foreign" onExit={vi.fn()} /></MemoryRouter>);
-    expect(await screen.findByText("该语音房不在本群可见范围内")).toBeInTheDocument();
+    await waitFor(() => expect(voiceApi.getVoiceChannel).toHaveBeenCalledWith("foreign"));
+    expect(screen.queryByText("该语音房不在本群可见范围内")).not.toBeInTheDocument();
+    expect(screen.getByText("正在加载语音房…")).toBeInTheDocument();
     expect(voiceApi.joinVoiceChannel).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "离开频道" })).not.toBeInTheDocument();
     expect(useVoiceStore.getState().channels.some((channel) => channel.id === "foreign")).toBe(false);
   });
 
-  it("目标房加入失败显示可重试错误，重试绑定路由房而非仍连接的旧房", async () => {
+  it("目标房加入失败静默提示，重试绑定路由房而非仍连接的旧房", async () => {
+    // bcb00dc 起加入失败静默：无错误文案；livekit=failed 仍提供「重新加入」，
+    // 重试绑定路由房 B 而非仍连接的旧房 A。
     mockChannels([ch("A", "g1", "旧房"), ch("B", "g1", "目标房")]);
     useVoiceStore.setState({ channels: [ch("A", "g1"), ch("B", "g1", "目标房")], currentChannelId: "A", livekit: "connected" });
     vi.mocked(voiceApi.joinVoiceChannel).mockRejectedValue(new Error("目标房加入失败"));
     render(<MemoryRouter><GroupVoice groupId="g1" routeChannelId="B" onExit={vi.fn()} /></MemoryRouter>);
-    expect(await screen.findByRole("alert")).toHaveTextContent("目标房加入失败");
+    await waitFor(() => expect(voiceApi.joinVoiceChannel).toHaveBeenCalledWith("B"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(useVoiceStore.getState().currentChannelId).toBe("A");
     fireEvent.click(screen.getByRole("button", { name: "重新加入" }));
     await waitFor(() => expect(voiceApi.joinVoiceChannel).toHaveBeenCalledTimes(2));

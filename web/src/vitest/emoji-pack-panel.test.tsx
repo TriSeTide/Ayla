@@ -179,20 +179,21 @@ describe("EmojiPackPanel 群表情包（任务 03）", () => {
     await waitFor(() => expect(getPack).toHaveBeenCalledTimes(2));
   });
 
-  it("后续表情页失败保留首屏并按原cursor重试，不把权限总数当可见数量", async () => {
+  it("后续表情页失败静默保留首屏，不把权限总数当可见数量", async () => {
+    // bcb00dc 起失败静默：DirectoryLoadMore 错误时整体隐藏（无文案、无重试按钮），
+    // 首屏保留；失败请求仍按原 cursor 发起。
     getPack.mockResolvedValue(packPayload());
     const first = packPayload().pack.items[0];
     listItems.mockResolvedValueOnce({ results: [first], next_cursor: "next", has_more: true, total: 2 })
-      .mockRejectedValueOnce(new Error("下一页暂时失败"))
-      .mockResolvedValueOnce({ results: [{ ...first, id: "i2" }], next_cursor: null, has_more: false, total: 2 });
+      .mockRejectedValueOnce(new Error("下一页暂时失败"));
     render(<EmojiPackPanel convId="c1" myRole="owner" onClose={vi.fn()} />);
     await waitFor(() => expect(screen.getByLabelText("发送表情")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
-    await waitFor(() => expect(screen.getByText("下一页暂时失败")).toBeInTheDocument());
+    await waitFor(() => expect(listItems).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("下一页暂时失败")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
     expect(screen.getAllByLabelText("发送表情")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await waitFor(() => expect(screen.getAllByLabelText("发送表情")).toHaveLength(2));
-    expect(listItems.mock.calls[2]).toEqual(["c1", { cursor: "next", limit: 30 }]);
+    expect(listItems.mock.calls[1]).toEqual(["c1", { cursor: "next", limit: 30 }]);
   });
 
   it("旧群summary迟到不能显示在新群或恢复旧上传权限", async () => {
