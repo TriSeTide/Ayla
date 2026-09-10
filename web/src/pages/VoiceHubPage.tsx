@@ -293,11 +293,11 @@ export function VoiceHubPage() {
           header={<div className="directory-filter-header">
             <span className="directory-filter-kicker">Voice</span>
             <span className="directory-filter-title">语音房间</span>
-            {directory.total > 0 && <span className="directory-filter-stats">
-              {directory.totalMemberCount != null
-                ? `${directory.total} 房间在线 · ${directory.totalMemberCount} 人在聊`
-                : `${directory.total} 房间在线`}
-            </span>}
+            <span className="directory-filter-stats">
+              {channelsLoading
+                ? "… 房间在线 · … 人在聊"
+                : `${directory.total} 房间在线${directory.totalMemberCount != null ? ` · ${directory.totalMemberCount} 人在聊` : ""}`}
+            </span>
           </div>} />
         <div key={scope} className="directory-content voice-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}

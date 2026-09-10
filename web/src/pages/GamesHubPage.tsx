@@ -179,7 +179,7 @@ export function GamesHubPage() {
           header={<div className="directory-filter-header">
             <span className="directory-filter-kicker">Games</span>
             <span className="directory-filter-title">桌游室</span>
-            {directory.total > 0 && <span className="directory-filter-stats">{directory.total} 个房间</span>}
+            <span className="directory-filter-stats">{loading ? "… 个房间" : `${directory.total} 个房间`}</span>
           </div>} />
         <div key={scope} className="directory-content games-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}

@@ -309,7 +309,7 @@ export function PostsHubPage() {
           header={<div className="directory-filter-header">
             <span className="directory-filter-kicker">Posts</span>
             <span className="directory-filter-title">帖子</span>
-            {state.total > 0 && <span className="directory-filter-stats">{state.total} 条帖子</span>}
+            <span className="directory-filter-stats">{state.loaded ? `${state.total} 条帖子` : "… 条帖子"}</span>
           </div>} />
         <div key={scrollRestoreKey} className="directory-content posts-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}

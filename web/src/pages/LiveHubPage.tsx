@@ -136,7 +136,7 @@ export function LiveHubPage() {
           header={<div className="directory-filter-header">
             <span className="directory-filter-kicker">Live</span>
             <span className="directory-filter-title">直播间</span>
-            {directory.total > 0 && <span className="directory-filter-stats">{directory.total} 直播间 · {liveCount} 在播</span>}
+            <span className="directory-filter-stats">{loading ? "… 直播间 · … 在播" : `${directory.total} 直播间 · ${liveCount} 在播`}</span>
           </div>} />
         <div key={scope} className="directory-content live-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}

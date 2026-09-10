@@ -89,10 +89,17 @@ export function SearchPage() {
   const resultKey = filter === "all" ? null : RESULT_KEYS[filter];
   const results: SearchPageResults | null = scopedResults && resultKey
     ? { [resultKey]: scopedResults[resultKey] } : scopedResults;
+  // 侧栏统计行：当前分类结果总数（六类分组 total 汇总；未搜索/无结果时为 0）
+  const totalResults = useMemo(() => {
+    if (!results) return 0;
+    return Object.values(results).reduce((sum, group) => sum + (group?.total ?? 0), 0);
+  }, [results]);
   const resultRef = useRef<SearchPageResults | null>(null);
   const [pageStatus, setPageStatus] = useState<PageStatus>({});
   const [stale, setStale] = useState(false);
   const [resumeEntry, setResumeEntry] = useState(false);
+  // §3.4 刷新动画：刷新完成后递增，已入场结果整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
   const restoredScope = useRef<string | null>(null);
   const appendRequests = useRef(new Set<ResultKey>());
   const membershipChanges = useRef(new Map<string, { member: boolean; revision: number }>());
@@ -112,7 +119,7 @@ export function SearchPage() {
   const searchRequestRef = useRef(0);
   const pageRef = useRef<HTMLDivElement>(null);
   const { restoring } = useScrollRestore(scope, pageRef, { ready: results != null });
-  useListEntryMotion(pageRef, ".search-row, .typed-result-card, .search-group .stable-pagination-footer .btn", (restoring || restoredScope.current === scope) && !resumeEntry);
+  useListEntryMotion(pageRef, ".search-row, .typed-result-card, .search-group .stable-pagination-footer .btn", (restoring || restoredScope.current === scope) && !resumeEntry, replayNonce);
   const openPath = (path: string) => {
     saveScrollPosition(scope, pageRef.current);
     navigate(path);
@@ -206,7 +213,11 @@ export function SearchPage() {
         }
         const membershipChangedDuringRequest = membershipRevision.current > membershipAtStart;
         commitResults(withCurrentMembership(nextResults, membershipAtStart), key, Date.now(), membershipChangedDuringRequest);
-        if (replacingVisible) setResumeEntry(true);
+        if (replacingVisible) {
+          setResumeEntry(true);
+          // 已有结果时刷新：重播已入场结果浮入（第一页也有动画）
+          setReplayNonce((n) => n + 1);
+        }
         setStale(membershipChangedDuringRequest);
       })
       .catch((e) => {
@@ -375,7 +386,12 @@ export function SearchPage() {
             setSearchParams(params, { replace: true });
           }}
           leading={<button type="button" className="icon-btn-40 directory-filter-back" onClick={() => navigate(-1)} aria-label="返回"><IconBack width={20} height={20} /></button>}
-          decor={<IconSearch width={52} height={52} className="directory-filter-decor search-filter-decor" role="presentation" aria-hidden="true" />} />
+          decor={<IconSearch width={64} height={64} className="directory-filter-decor search-filter-decor" role="presentation" aria-hidden="true" />}
+          header={<div className="directory-filter-header">
+            <span className="directory-filter-kicker">Search</span>
+            <span className="directory-filter-title">全局搜索</span>
+            <span className="directory-filter-stats">{loading || !q ? "… 条结果" : `${totalResults} 条结果`}</span>
+          </div>} />
         <div key={scope} className="directory-content search-content" ref={pageRef} aria-busy={loading}
           id={`${filterId}-panel`} role="tabpanel" aria-labelledby={`${filterId}-${filter}`} tabIndex={0}
           data-search-filter={filter}>

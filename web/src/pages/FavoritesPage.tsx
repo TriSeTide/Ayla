@@ -67,17 +67,19 @@ function openTarget(navigate: ReturnType<typeof useNavigate>, favorite: Favorite
 }
 
 /** 与帖子流共用分列机制；只在数据就绪后挂载，让量高观察器绑定真实列。 */
-function FavoritesList({ favorites, isNarrow, filter, suppressEntry, onOpen, onRemove }: {
+function FavoritesList({ favorites, isNarrow, filter, suppressEntry, replayNonce, onOpen, onRemove }: {
   favorites: Favorite[];
   isNarrow: boolean;
   filter: FavoriteTargetType | "all";
   suppressEntry: boolean;
+  /** §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画） */
+  replayNonce: number;
   onOpen: (favorite: Favorite) => void;
   onRemove: (favorite: Favorite) => void;
 }) {
   const singleColumn = isNarrow;
   const listRef = useRef<HTMLDivElement>(null);
-  useListEntryMotion(listRef, ".favorite-item", suppressEntry);
+  useListEntryMotion(listRef, ".favorite-item", suppressEntry, replayNonce);
   const { columns, columnRefs } = useMasonryColumns(
     favorites,
     singleColumn ? 1 : 2,
@@ -130,13 +132,17 @@ export function clearFavoritePageMemory() { favoritePages.clear(); }
 function favoriteAccount() { return `${useAuthStore.getState().currentUser?.id ?? "anonymous"}:${favoriteSession}`; }
 const emptyFavoritePage = (): FavoritePageState => ({ rows: [], cursor: null, hasMore: false, total: 0, loaded: false, loading: false, error: null, errorKind: null, stale: false, updatedAt: 0 });
 
-function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen }: {
+function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen, onTotalChange, onLoadedChange }: {
   scope: string;
   filter: Filter;
   isNarrow: boolean;
   pageRef: React.RefObject<HTMLDivElement>;
   filterId: string;
   onOpen: (favorite: Favorite) => void;
+  /** 侧栏统计行：当前分类收藏总数变化时上报（total 在分页 state 内部） */
+  onTotalChange: (total: number) => void;
+  /** 侧栏统计行：加载完成状态上报（加载中显示 …，避免统计行跳变） */
+  onLoadedChange: (loaded: boolean) => void;
 }) {
   const account = favoriteAccount();
   const [state, setState] = useState<FavoritePageState>(() => {
@@ -147,6 +153,8 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen }:
   const owner = useRef({ active: false, revision: 0, busy: false, changes: 0, removed: new Set<number>() });
   const [actionError, setActionError] = useState<string | null>(null);
   const [resumeEntry, setResumeEntry] = useState(false);
+  // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
   const { restoring } = useScrollRestore(scope, pageRef, { ready: state.loaded });
   const wrapResults = (children: ReactNode) => <div className="directory-content favorites-content" ref={pageRef}
     id={`${filterId}-panel`} role="tabpanel" aria-labelledby={`${filterId}-${filter}`} tabIndex={0}
@@ -155,12 +163,14 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen }:
     const next = change(stateRef.current);
     stateRef.current = next;
     setState(next);
+    onLoadedChange(next.loaded);
     if (next.loaded) {
+      onTotalChange(next.total);
       favoritePages.delete(scope);
       favoritePages.set(scope, { ...next, loading: false });
       while (favoritePages.size > 14) favoritePages.delete(favoritePages.keys().next().value!);
     }
-  }, [scope]);
+  }, [onTotalChange, scope, onLoadedChange]);
 
   const requestPage = useCallback(async (append = false) => {
     const currentOwner = owner.current;
@@ -185,7 +195,11 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen }:
         // A page is only a partial index; it must not clear favorites outside it.
         if (favorite.target_type === "post") usePostsStore.getState().setFavorite(favorite.target_id, favorite.id);
       }
-      if (append || current.loaded) setResumeEntry(true);
+      if (append || current.loaded) {
+        setResumeEntry(true);
+        // 仅刷新（非首次/非追加）重播已入场卡片；追加只让新增卡片入场
+        if (current.loaded && !append) setReplayNonce((n) => n + 1);
+      }
       update((value) => ({ ...value, rows: [...rows.values()], cursor: page.next_cursor,
         hasMore: page.has_more, total: page.total, loaded: true, error: null, errorKind: null,
         stale: (append && value.stale) || currentOwner.changes !== changes, updatedAt: Date.now() }));
@@ -267,7 +281,7 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen }:
       <h3 className="placeholder-title">这个分类还没有收藏</h3>
       <p className="placeholder-desc">在对应场景点收藏，内容会出现在这里</p>
     </div> : <FavoritesList favorites={state.rows} isNarrow={isNarrow} filter={filter}
-      suppressEntry={restoring && !resumeEntry} onOpen={onOpen} onRemove={(favorite) => void remove(favorite)} />}
+      suppressEntry={restoring && !resumeEntry} replayNonce={replayNonce} onOpen={onOpen} onRemove={(favorite) => void remove(favorite)} />}
     <DirectoryLoadMore loading={state.loading} error={state.error} hasMore={state.hasMore} invalidated={false}
       loadMore={() => requestPage(state.errorKind !== "first")} refresh={() => requestPage()} />
   </>);
@@ -277,6 +291,10 @@ export function FavoritesPage() {
   const selectionId = useId();
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
+  // 侧栏统计行：当前分类收藏总数（FavoriteResults 分页 state 内部上报）；
+  // loaded 状态用于加载中显示 …（统计行常驻不跳变）
+  const [total, setTotal] = useState(0);
+  const [loaded, setLoaded] = useState(false);
   // Subscribe to both actor and logout transitions; tokens are never stored in snapshots.
   useAuthStore((state) => `${state.currentUser?.id ?? "anonymous"}:${Boolean(state.accessToken)}`);
   const [params, setParams] = useSearchParams();
@@ -296,9 +314,14 @@ export function FavoritesPage() {
             setParams(next === "all" ? {} : { type: next }, { replace: true });
           }}
           leading={<button type="button" className="icon-btn-40 directory-filter-back" onClick={() => navigate(-1)} aria-label="返回"><IconBack width={20} height={20} /></button>}
-          decor={<IconHeart width={52} height={52} className="directory-filter-decor favorites-filter-decor" role="presentation" aria-hidden="true" />} />
+          decor={<IconHeart width={64} height={64} className="directory-filter-decor favorites-filter-decor" role="presentation" aria-hidden="true" />}
+          header={<div className="directory-filter-header">
+            <span className="directory-filter-kicker">Favorites</span>
+            <span className="directory-filter-title">我的收藏</span>
+            <span className="directory-filter-stats">{loaded ? `${total} 条收藏` : "… 条收藏"}</span>
+          </div>} />
         <FavoriteResults key={scope} scope={scope} filter={filter} isNarrow={isNarrow} pageRef={pageRef}
-          filterId={selectionId} onOpen={onOpen} />
+          filterId={selectionId} onOpen={onOpen} onTotalChange={setTotal} onLoadedChange={setLoaded} />
       </div>
     </div>
   </FullScreenSwipeBack>;
