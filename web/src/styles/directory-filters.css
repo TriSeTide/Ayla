@@ -189,9 +189,18 @@
 /* 宽屏：内容首张卡片顶边与侧栏玻璃卡顶边对齐——滚动容器与列表容器的顶部留白归零
    （此前 directory-content 8px + 列表 12–16px 双重留白使首卡低于侧栏顶边 20px+）。
    纯文本状态（历史 chips/空态/加载/错误）保留自身 padding-top，与侧栏文字对齐；
-   底部呼吸空间不动，滚动到底内容不贴底不截断。窄屏布局由 max-width 媒体查询覆盖，不受影响。 */
+   底部呼吸空间不动，滚动到底内容不贴底不截断。窄屏布局由 max-width 媒体查询覆盖，不受影响。
+
+   阴影绘制带（2026-09-10）：滚动裁剪边界上/左/右各外扩 12px（同群内列表先例
+   auroraqua.css §12.9）——卡片阴影（--glass-shadow 模糊 32px 可见扩散约 16px）
+   在滚动容器 padding box 内完整绘制，不再被 overflow 裁剪；padding 补偿 margin
+   后卡片位置与宽度不变。顶部外扩后滚动时内容可穿透页面 padding 空白直达视口顶
+   （TopNav 之下），首卡初始位置仍与侧栏顶边对齐（12px 补偿 = 页面 padding-top）。 */
 @media (min-width: 769px) {
-  .directory-page .directory-content { padding-top: 0; }
+  .directory-page .directory-content {
+    margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)) 0;
+    padding: var(--sp-3) calc(var(--sp-2) + var(--sp-3)) var(--sp-6);
+  }
   .directory-page .directory-content :is(.search-results, .favorites-list, .favorites-skeleton,
       .voice-channel-list, .live-hall-grid, .posts-feed, .posts-skeleton, .games-grid) {
     padding-top: 0;

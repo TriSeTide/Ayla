@@ -93,7 +93,12 @@
     overscroll-behavior: contain;
   }
 
-  /* 右侧内容区：与 .directory-content 同款（flex:1 独立滚动 + 底部呼吸） */
+  /* 右侧内容区：与 .directory-content 同款（flex:1 独立滚动 + 底部呼吸）。
+     阴影绘制带（2026-09-10）：滚动裁剪边界上/左/右各外扩 12px（同
+     directory-filters.css）——内容卡阴影（--glass-shadow 模糊 32px 可见扩散约
+     16px）在滚动容器 padding box 内完整绘制，不再被 overflow 裁剪；padding
+     补偿 margin 后卡片位置与宽度不变。顶部外扩后滚动时内容可穿透页面 padding
+     空白直达视口顶（TopNav 之下），首卡初始位置仍与侧栏顶边对齐。 */
   .profile-page-split:has(.profile-main) .profile-main {
     flex: 1 1 0;
     min-width: 0;
@@ -102,7 +107,8 @@
     overflow-x: hidden;
     overscroll-behavior-y: contain;
     scrollbar-gutter: stable;
-    padding: var(--sp-2) var(--sp-2) var(--sp-6);
+    margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)) 0;
+    padding: var(--sp-3) calc(var(--sp-2) + var(--sp-3)) var(--sp-6);
   }
 
   /* 侧栏资料卡铺满侧栏高度：区块间距放宽、表单铺满中间、操作沉底 */
