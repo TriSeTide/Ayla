@@ -26,7 +26,7 @@ describe("danmaku draft and uploaded-image ownership", () => {
     render(<DanmakuInput channelId={810} sending={false} error={null} onSend={onSend} />);
     const input = screen.getByPlaceholderText("发条弹幕吧");
     fireEvent.change(input, { target: { value: "先发送这一句" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送弹幕" }));
     fireEvent.change(input, { target: { value: "等待期间新写的草稿" } });
     await act(async () => pending.resolve(true));
     expect(onSend).toHaveBeenCalledWith("先发送这一句", undefined);

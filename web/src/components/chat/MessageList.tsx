@@ -609,7 +609,7 @@ export function MessageList({
     loadMoreInFlightRef.current = true;
     void Promise.resolve()
       .then(onLoadMore)
-      // 页面父级负责把 API 错误显示为 chat-notice；这里仅避免滚动事件产生未处理 rejection。
+      // 错误由调用方静默处理；这里仅避免滚动事件产生未处理 rejection。
       .catch(() => {
         // API 失败没有新的 store 提交可触发锚定 effect，必须释放本次锚点，允许用户重试。
         pendingAnchorRef.current = null;

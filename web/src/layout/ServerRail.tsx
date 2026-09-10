@@ -40,15 +40,12 @@ export function ServerRail({
   currentGroupId,
   onSelectGroup,
   onCreateGroup,
-  onError,
 }: {
   groups: ConversationSummary[];
   currentGroupId: string | null;
   onSelectGroup: (id: string) => void;
   /** 底部加号：创建群聊（打开建群对话框） */
   onCreateGroup: () => void;
-  /** 置顶失败提示（父组件错误条）；缺省 alert 兜底 */
-  onError?: (message: string) => void;
 }) {
   const selectionId = useId();
   const groupPage = useSocialPage("conversations", { type: "group" });
@@ -81,10 +78,8 @@ export function ServerRail({
     chatApi
       .togglePinConversation(g.id, next)
       .then(() => useChatStore.getState().setPin(g.id, next))
-      .catch((e) => {
-        const msg = e instanceof Error ? e.message : "置顶操作失败";
-        if (onError) onError(msg);
-        else alert(msg);
+      .catch(() => {
+        // 置顶失败静默
       })
       .finally(() => setBusyId(null));
   };

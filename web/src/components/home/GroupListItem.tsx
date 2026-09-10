@@ -21,7 +21,6 @@ export function GroupListItem({
   isPinned,
   newEventText,
   onOpen,
-  onError,
   revealDelay,
 }: {
   group: { id: string; title: string; avatar?: string; memberCount?: number };
@@ -33,8 +32,6 @@ export function GroupListItem({
   /** 最近"新内容"事件描述（如「小樱：今晚一起吃饭吗」/「阿蓝 创建了语音房 xxx」）；有则 sub 显示 */
   newEventText?: string;
   onOpen: () => void;
-  /** 置顶/删除失败提示（父组件错误条）；缺省 alert 兜底 */
-  onError?: (message: string) => void;
   /** 逐条浮入延迟（ms）；undefined 则不挂 reveal-item（方案 §5-A2） */
   revealDelay?: number;
 }) {
@@ -66,7 +63,6 @@ export function GroupListItem({
       <ConversationMoreMenu
         conversation={{ id: group.id, title: group.title, is_pinned: isPinned }}
         showDelete={false}
-        onError={onError}
       />
     </div>
   );

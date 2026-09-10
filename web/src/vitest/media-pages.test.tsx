@@ -73,7 +73,7 @@ describe("visible member pages", () => {
     useVoiceStore.getState().enterChannel("v1", runtimeMembers);
     vi.mocked(voiceApi.listVoiceChannelMembersPage).mockResolvedValueOnce(paged([member(1)], "next", 23))
       .mockResolvedValueOnce(paged([member(23)], null, 23));
-    render(<VoiceChannelPanel channelId="v1" channelName="room" ownerId="me" livekit="connected" wsConnection="online" elysiaProfile={null}
+    render(<VoiceChannelPanel channelId="v1" channelName="room" ownerId="me" livekit="connected" elysiaProfile={null}
       onToggleMic={vi.fn()} onLeave={vi.fn()} onRejoin={vi.fn()} onVolumeChange={vi.fn()} onLocalVolumeChange={vi.fn()} onToggleMemberMuted={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("u1:70")).toBeInTheDocument());
     expect(screen.getByText("23 人")).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe("visible member pages", () => {
     vi.mocked(voiceApi.listVoiceChannelMembersPage)
       .mockResolvedValueOnce(paged([member(1)], "next", 24))
       .mockResolvedValueOnce(paged([member(1)], "next", 24));
-    render(<VoiceChannelPanel channelId="v1" channelName="room" ownerId="me" livekit="connected" wsConnection="online" elysiaProfile={null}
+    render(<VoiceChannelPanel channelId="v1" channelName="room" ownerId="me" livekit="connected" elysiaProfile={null}
       onToggleMic={vi.fn()} onLeave={vi.fn()} onRejoin={vi.fn()} onVolumeChange={vi.fn()} onLocalVolumeChange={vi.fn()} onToggleMemberMuted={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("u1:70")).toBeInTheDocument());
     // 自己不在第一页也必须可见（渲染兜底置顶）

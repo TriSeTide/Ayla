@@ -54,7 +54,6 @@ export function GamesHubPage() {
     owner: filter === "mine" ? currentUserId : undefined,
   }, !roomId);
   const { items: rooms, loading, error, refresh } = directory;
-  const [loadError, setLoadError] = useState<string | null>(null);
   /** 进入的房间（占位界面） */
   const [current, setCurrent] = useState<GameRoom | null>(null);
   // 记录上次已触发 join 的路由房间 id：仅当 routeRoomId 变化时才 join，
@@ -123,7 +122,6 @@ export function GamesHubPage() {
     lastJoinRouteRef.current = roomId;
     const roomIdNum = Number(roomId);
     if (!Number.isFinite(roomIdNum)) {
-      setLoadError("桌游房不存在");
       navigate("/games", { replace: true });
       return;
     }
@@ -139,8 +137,7 @@ export function GamesHubPage() {
           .catch(() => setCurrent(room));
       })
       .catch(() => {
-        // 房间不存在/无权访问：回大厅并明确提示，不伪造进房。
-        setLoadError("桌游房不存在或无权访问");
+        // 房间不存在/无权访问：静默回大厅
         navigate("/games", { replace: true });
       });
   }, [navigate, roomId]);
@@ -184,11 +181,6 @@ export function GamesHubPage() {
         <div key={scope} className="directory-content games-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}
           onScroll={(event) => directory.onScroll(event.currentTarget)}>
-          {loadError && (
-            <div className="chat-notice" role="alert">
-              <span>{loadError}</span>
-            </div>
-          )}
           {loading && rooms.length === 0 ? (
             <div className="games-grid games-grid-loading" aria-busy="true">
               <div className="games-skeleton-card">

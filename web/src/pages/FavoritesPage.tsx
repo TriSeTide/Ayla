@@ -151,7 +151,6 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen, o
   });
   const stateRef = useRef(state);
   const owner = useRef({ active: false, revision: 0, busy: false, changes: 0, removed: new Set<number>() });
-  const [actionError, setActionError] = useState<string | null>(null);
   const [resumeEntry, setResumeEntry] = useState(false);
   // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
   const [replayNonce, setReplayNonce] = useState(0);
@@ -249,14 +248,13 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen, o
   }), [account, removeLocal, update]);
 
   const remove = useCallback(async (favorite: Favorite) => {
-    setActionError(null);
     try {
       await favoritesApi.removeFavorite(favorite.id);
       if (!owner.current.active || favoriteAccount() !== account) return;
       if (!owner.current.removed.has(favorite.id)) removeLocal(favorite.id, favorite.target_type);
       if (favorite.target_type === "post") usePostsStore.getState().setFavorite(favorite.target_id, null);
-    } catch (error) {
-      if (owner.current.active && favoriteAccount() === account) setActionError(error instanceof Error ? error.message : "取消收藏失败，请重试");
+    } catch {
+      // 取消收藏失败静默
     }
   }, [account, removeLocal]);
 
@@ -271,12 +269,7 @@ function FavoriteResults({ scope, filter, isNarrow, pageRef, filterId, onOpen, o
     <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />
     <div className="skeleton" style={{ height: 64 }} />
   </div>);
-  if (!state.loaded && state.error) return wrapResults(<div className="home-state" role="alert">
-    <p className="placeholder-desc">{state.error}</p>
-    <button type="button" className="btn btn-ghost" onClick={() => void requestPage()}>重试</button>
-  </div>);
   return wrapResults(<>
-    {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
     {state.rows.length === 0 ? <div className="home-state">
       <h3 className="placeholder-title">这个分类还没有收藏</h3>
       <p className="placeholder-desc">在对应场景点收藏，内容会出现在这里</p>

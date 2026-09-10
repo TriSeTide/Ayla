@@ -24,7 +24,8 @@ import {
   validateMediaFile,
 } from "../../api/media";
 import type { MediaDescriptor, Post } from "../../api/types";
-import { IconImage, IconChevronDown } from "../icons";
+import { IconImage, IconChevronDown, IconSend } from "../icons";
+import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { VisibilitySelector, type VisibilitySelection } from "../VisibilitySelector";
 
 type PostMediaDraft = {
@@ -84,6 +85,7 @@ export function PostEditor({
     onExpandedChange?.(value);
   };
   const [progress, setProgress] = useState<number | null>(null);
+  const isNarrow = useMediaQuery(NARROW_QUERY);
 
   const removeMedia = (draft: PostMediaDraft) => {
     // 从待发列表移除；已直传到 MinIO 的对象即时回收（owner 删除端点）
@@ -240,8 +242,10 @@ export function PostEditor({
           className="btn btn-primary post-editor-submit"
           disabled={submitting || uploading || !body.trim() || !title.trim() || failedFiles.length > 0}
           onClick={() => void submit()}
+          aria-label="发布"
         >
-          {uploading ? "上传中…" : submitting ? "发布中…" : "发布"}
+          <IconSend width={15} height={15} />
+          {!isNarrow && (uploading ? "上传中…" : submitting ? "发布中…" : "发布")}
         </button>
       </div>
       {expanded && (

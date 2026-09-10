@@ -56,7 +56,6 @@ export function ConversationList({
   activeId,
   elysiaUserId,
   onSelect,
-  onError,
   disableAvatarNav = false,
   revealItems = false,
 }: {
@@ -64,8 +63,6 @@ export function ConversationList({
   activeId: string | null;
   elysiaUserId?: string | null;
   onSelect: (id: string) => void;
-  /** 操作失败提示（父组件错误条）；缺省时用 alert 兜底 */
-  onError?: (message: string) => void;
   /** 快捷消息栏内：头像不可点（不跳个人主页，R-QM） */
   disableAvatarNav?: boolean;
   /** 列表逐条浮入（stagger，active 接 !loading，方案 §5-A2） */
@@ -158,7 +155,7 @@ export function ConversationList({
                 </span>
               )}
             </button>
-            <ConversationMoreMenu conversation={conv} onError={onError} />
+            <ConversationMoreMenu conversation={conv} />
           </li>
         );
       })}

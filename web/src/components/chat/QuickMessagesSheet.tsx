@@ -60,8 +60,6 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
 
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const loadError = privatePage.error;
 
   // ESC 关闭
   useEffect(() => {
@@ -114,11 +112,10 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
 
   // 打开与某用户（爱莉/会话）的私聊，栏内联（不跳路由）
   const openUserChat = useCallback((userId: string) => {
-    setActionError(null);
     chatApi
       .openPrivateConversation(userId)
       .then((conv) => setActiveChatId(conv.id))
-      .catch((e) => setActionError(e instanceof Error ? e.message : "打开私聊失败"));
+      .catch(() => {});
   }, []);
 
   const handleFriendAction = useCallback((req: FriendRequest, action: "accept" | "reject") => {
@@ -128,7 +125,7 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
         setFriendRequests((prev) => prev.filter((r) => r.id !== req.id));
         refreshBadges();
       })
-      .catch((e) => setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试"));
+      .catch(() => {});
   }, []);
 
   const handleInviteAction = useCallback((inv: GroupInvite, action: "accept" | "reject") => {
@@ -138,7 +135,7 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
         setInvites((prev) => prev.filter((i) => i.id !== inv.id));
         refreshBadges();
       })
-      .catch((e) => setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试"));
+      .catch(() => {});
   }, []);
 
   const handleJoinRequestAction = useCallback((req: GroupJoinRequest, action: "accept" | "reject") => {
@@ -148,7 +145,7 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
         setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
         refreshBadges();
       })
-      .catch((e) => setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试"));
+      .catch(() => {});
   }, []);
 
   const conversationActivityAt = useChatStore((s) => s.conversationActivityAt);
@@ -208,13 +205,6 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
           </button>
         </header>
 
-        {actionError && (
-          <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
-            {actionError}（点击关闭）
-          </div>
-        )}
-        {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
-
         {activeChatId ? (
           <div className="quick-messages-chat">
             <PrivateChatPane
@@ -235,7 +225,6 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
               activeId={null}
               elysiaUserId={elysiaProfile?.user.id ?? null}
               onSelect={(id) => setActiveChatId(id)}
-              onError={setActionError}
               disableAvatarNav
             />
           <DirectoryLoadMore {...privatePage} retainCompletedSpace={false} />
@@ -257,7 +246,7 @@ export function QuickMessagesSheet({ onClose }: { onClose: () => void }) {
                       type="button"
                       className="btn btn-ghost request-btn"
                       onClick={() => {
-                        void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch((e) => setActionError(e instanceof Error ? e.message : "标记通知失败"));
+                        void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch(() => {});
                       }}
                     >
                       知道了

@@ -18,14 +18,11 @@ import { IconPin, IconDots } from "../icons";
 export function ConversationMoreMenu({
   conversation,
   showDelete = true,
-  onError,
 }: {
   /** 会话（群聊/私聊均可；is_pinned 用于菜单文案） */
   conversation: { id: string; title: string; is_pinned?: boolean };
   /** 是否提供「删除会话」项（群聊不提供，需求；私信保留） */
   showDelete?: boolean;
-  /** 操作失败提示（父组件错误条）；缺省时用 alert 兜底 */
-  onError?: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -91,11 +88,6 @@ export function ConversationMoreMenu({
     };
   }, [open, closeMenu]);
 
-  const reportError = (message: string) => {
-    if (onError) onError(message);
-    else alert(message);
-  };
-
   const handleTogglePin = () => {
     if (busy) return;
     const next = !conversation.is_pinned;
@@ -104,7 +96,9 @@ export function ConversationMoreMenu({
     chatApi
       .togglePinConversation(conversation.id, next)
       .then(() => useChatStore.getState().setPin(conversation.id, next))
-      .catch((e) => reportError(e instanceof Error ? e.message : "置顶操作失败"))
+      .catch(() => {
+        // 置顶失败静默
+      })
       .finally(() => setBusy(false));
   };
 
@@ -119,7 +113,9 @@ export function ConversationMoreMenu({
     chatApi
       .hideConversation(conversation.id)
       .then(() => useChatStore.getState().removeConversation(conversation.id))
-      .catch((e) => reportError(e instanceof Error ? e.message : "删除会话失败"))
+      .catch(() => {
+        // 删除会话失败静默
+      })
       .finally(() => setBusy(false));
   };
 

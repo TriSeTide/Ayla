@@ -26,20 +26,18 @@ export function DirectoryLoadMore({ loading, error, hasMore, invalidated, loadMo
     observer.observe(sentinel.current);
     return () => observer.disconnect();
   }, [loading, error, invalidated, hasMore, loadMore]);
-  if (!retainCompletedSpace && !loading && !error && !hasMore && !invalidated) return null;
+  if (error) return null;
+  if (!retainCompletedSpace && !loading && !hasMore && !invalidated) return null;
   return <StablePaginationFooter
     ref={sentinel}
     className="home-load-more directory-load-more"
-    role={error && !invalidated ? "alert" : "status"}
+    role={invalidated ? "alert" : "status"}
     aria-label={loading || invalidated ? "加载更多中" : hasMore ? "加载更多" : undefined}
     aria-busy={loading || invalidated}
   >
     {invalidated ? <span className="pagination-loading-dots" role="status" aria-label="正在刷新列表">
       <span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" />
-    </span> : error ? <>
-      <span>{error}</span>
-      <button type="button" className="btn btn-ghost" disabled={loading} onClick={() => void (hasMore ? loadMore() : refresh())}>重试</button>
-    </> : loading ? <span className="pagination-loading-dots">
+    </span> : loading ? <span className="pagination-loading-dots">
       <span className="home-load-dot" /><span className="home-load-dot" /><span className="home-load-dot" />
     </span> : hasMore ? <button type="button" className="btn btn-ghost" onClick={() => void loadMore()}>加载更多</button> : null}
   </StablePaginationFooter>;

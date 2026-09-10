@@ -70,17 +70,13 @@ export function MessagesPage() {
   // §3.4 刷新动画：刷新完成后递增，key 变化强制会话列表重挂载 → reveal 重播
   const [revealNonce, setRevealNonce] = useState(0);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
-  /** 审批（同意/拒绝）失败提示（点击关闭） */
-  const [actionError, setActionError] = useState<string | null>(null);
-  const loadError = privatePage.error;
-  const [profileError, setProfileError] = useState<string | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
   useEffect(() => {
     getElysiaProfile()
       .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch((e) => setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败"));
+      .catch(() => {});
   }, []);
 
   // 好友 tab 数据（窄屏用；宽屏由 WideMessagesSidebar 自理）
@@ -117,14 +113,13 @@ export function MessagesPage() {
 
   const handleRemoveFriend = useCallback(async (userId: string) => {
     if (removingFriendId) return;
-    setActionError(null);
     setRemovingFriendId(userId);
     try {
       await usersApi.deleteFriend(userId);
       setFriendList((prev) => prev.filter((item) => item.user.id !== userId));
       refreshBadges();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : "解除好友失败");
+    } catch {
+      // 解除好友失败静默
     } finally {
       setRemovingFriendId(null);
     }
@@ -135,9 +130,7 @@ export function MessagesPage() {
     usersApi.actionFriendRequest(req.id, action).then(() => {
       setFriendRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch((e) => {
-      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    });
+    }).catch(() => {});
   }, []);
 
   // 群邀请处理
@@ -145,9 +138,7 @@ export function MessagesPage() {
     chatApi.actionGroupInvite(inv.id, action).then(() => {
       setInvites((prev) => prev.filter((i) => i.id !== inv.id));
       refreshBadges();
-    }).catch((e) => {
-      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    });
+    }).catch(() => {});
   }, []);
 
   // 入群申请审批
@@ -155,9 +146,7 @@ export function MessagesPage() {
     chatApi.actionJoinRequest(req.id, action).then(() => {
       setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch((e) => {
-      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    });
+    }).catch(() => {});
   }, []);
 
   const privateConvs = useMemo(
@@ -216,13 +205,6 @@ export function MessagesPage() {
   // 窄屏：双选项卡 + 列表，点会话跳 /chat/:id
   return (
     <div className="messages-page" ref={tabPanelRef}>
-      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
-      {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
-      {actionError && (
-        <div className="messages-action-error" role="alert">
-          {actionError}
-        </div>
-      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
         <div className="messages-tabs" role="tablist" aria-label="消息中心" style={{ flex: 1 }}>
           <button
@@ -271,7 +253,7 @@ export function MessagesPage() {
                   chatApi
                     .openPrivateConversation(elysiaProfile.user.id)
                     .then((conv) => navigate(`/chat/${conv.id}`))
-                    .catch((e) => setActionError(e instanceof Error ? e.message : "打开爱莉私聊失败"));
+                    .catch(() => {});
                 }}
               />
             )}
@@ -281,7 +263,6 @@ export function MessagesPage() {
               activeId={null}
               elysiaUserId={elysiaProfile?.user.id ?? null}
               onSelect={(id) => navigate(`/chat/${id}`)}
-              onError={setActionError}
               revealItems={!conversationsLoading}
             />
           <DirectoryLoadMore {...privatePage} retainCompletedSpace={false} />
@@ -299,7 +280,7 @@ export function MessagesPage() {
                   onClick={() => {
                     chatApi.openPrivateConversation(f.user.id)
                       .then((conv) => navigate(`/chat/${conv.id}`))
-                      .catch((e) => setActionError(e instanceof Error ? e.message : "打开私聊失败"));
+                      .catch(() => {});
                   }}
                 >
                   <Avatar
@@ -343,7 +324,7 @@ export function MessagesPage() {
               {leaveNotices.map((notice) => (
                 <div key={`persisted-${notice.id}`} className="request-row notice-row">
                   <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
-                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch((e) => setActionError(e instanceof Error ? e.message : "标记通知失败")); }}>知道了</button>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch(() => {}); }}>知道了</button>
                 </div>
               ))}
               {realtimeLeaveNotices.map((notice) => (

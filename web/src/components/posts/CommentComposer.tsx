@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { deleteMedia, uploadMediaFile, validateMediaFile } from "../../api/media";
 import type { MediaDescriptor, PostComment } from "../../api/types";
-import { IconImage } from "../icons";
+import { IconImage, IconSend } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 
@@ -215,8 +215,10 @@ export function CommentComposer({
           className="btn btn-primary"
           disabled={sending || uploading || removing || failedFiles.length > 0 || (!body.trim() && pending.length === 0)}
           onClick={() => void sendComment()}
+          aria-label="发送"
         >
-          {sending || uploading ? "发送中…" : "发送"}
+          <IconSend width={15} height={15} />
+          {!isNarrow && (sending || uploading ? "发送中…" : "发送")}
         </button>
       </div>
     </div>

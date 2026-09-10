@@ -34,14 +34,10 @@ export function GroupVoice({
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const channels = useVoiceStore((s) => s.channels);
-  const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const directory = useDirectoryPage("voice", { groupId }, !routeChannelId);
   const groupChannels = directory.items;
   const loaded = !directory.loading || groupChannels.length > 0;
-  const [error, setError] = useState<string | null>(null);
-  const [detailRetry, setDetailRetry] = useState(0);
-  const [profileError, setProfileError] = useState<string | null>(null);
   // 删除语音房确认弹窗
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const hubRef = useRef<HTMLDivElement>(null);
@@ -91,19 +87,14 @@ export function GroupVoice({
     if (!routeChannelId || channels.some((item) => item.id === routeChannelId
       && (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId)))) return;
     let cancelled = false;
-    setError(null);
     void voiceApi.getVoiceChannel(routeChannelId).then((item) => {
       if (cancelled) return;
-      if (!(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) {
-        setError("该语音房不在本群可见范围内");
-        return;
-      }
+      // 权限校验：不在本群可见范围内不注入频道（界面保持加载态，静默）
+      if (!(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) return;
       useVoiceStore.getState().upsertChannel(item);
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "加载语音房失败");
-    });
+    }).catch(() => {});
     return () => { cancelled = true; };
-  }, [routeChannelId, groupId, channels, detailRetry]);
+  }, [routeChannelId, groupId, channels]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,9 +102,7 @@ export function GroupVoice({
       .then((p) => {
         if (!cancelled) setElysiaProfile(p.enabled ? p : null);
       })
-      .catch((e) => {
-        if (!cancelled) setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败");
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -153,8 +142,8 @@ export function GroupVoice({
     try {
       await leave();
       navigate(`/group/${groupId}/voice`);
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "离开语音房失败");
+    } catch {
+      // 离开失败静默
     }
   }, [groupId, leave, navigate]);
 
@@ -167,8 +156,6 @@ export function GroupVoice({
           channelName={currentChannel.name}
           channel={currentChannel}
           livekit={joining ? "connecting" : joinError ? "failed" : currentChannelId === currentChannel.id ? livekit : "idle"}
-          connectionError={joinError ?? error}
-          wsConnection={wsConnection}
           elysiaProfile={elysiaProfile}
           groupId={currentChannel.group}
           onToggleMic={() => void toggleMic()}
@@ -181,7 +168,7 @@ export function GroupVoice({
             if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
           }}
           onBack={handleBack}
-          onDeleteChannel={() => { setError(null); setConfirmDeleteOpen(true); }}
+          onDeleteChannel={() => setConfirmDeleteOpen(true)}
           inputEntered // 群内子界面无底栏下滑动画
         />
         {confirmDeleteOpen && (
@@ -199,7 +186,7 @@ export function GroupVoice({
                   useVoiceStore.getState().removeChannel(currentChannel.id);
                   navigate(`/group/${groupId}/voice`);
                 })
-                .catch((e) => setError(e instanceof Error ? e.message : "删除语音房失败"));
+                .catch(() => {});
             }}
             onClose={() => setConfirmDeleteOpen(false)}
           />
@@ -208,9 +195,8 @@ export function GroupVoice({
     );
   }
 
-  if (routeChannelId) return <div className="group-scene-placeholder" role={error ? "alert" : "status"}>
-    {error ? <><p>{error}</p><button type="button" className="btn btn-ghost" onClick={() => setDetailRetry((value) => value + 1)}>重试</button></>
-      : <><div className="skeleton" style={{ height: 96, width: "80%" }} /><span>正在加载语音房…</span></>}
+  if (routeChannelId) return <div className="group-scene-placeholder" role="status">
+    <div className="skeleton" style={{ height: 96, width: "80%" }} /><span>正在加载语音房…</span>
   </div>;
 
   return (
@@ -221,13 +207,7 @@ export function GroupVoice({
           <p className="group-scene-desc">选择一个房间加入，或点击右下角创建新的群内语音房</p>
         </div>
       </div>
-      {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
-      {(error || directory.error) && groupChannels.length === 0 ? (
-        <div className="group-scene-placeholder" role="alert">
-          <p className="placeholder-desc">{error ?? directory.error}</p>
-          <button type="button" className="btn btn-ghost" onClick={() => void refresh()}>重试</button>
-        </div>
-      ) : !loaded ? (
+      {!loaded ? (
         <div className="group-voice-loading" aria-busy="true">
           <span className="skeleton" style={{ height: 64, width: "100%", borderRadius: 12 }} />
           <span className="skeleton" style={{ height: 64, width: "100%", borderRadius: 12 }} />

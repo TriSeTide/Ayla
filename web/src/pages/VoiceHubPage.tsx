@@ -63,11 +63,7 @@ export function VoiceHubPage() {
     owner: filter === "mine" ? currentUserId : undefined,
   }, !routeChannelId);
   const channelsLoading = directory.loading;
-  const wsConnection = useVoiceStore((s) => s.wsConnection);
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
-  const [detailRetry, setDetailRetry] = useState(0);
-  const [profileError, setProfileError] = useState<string | null>(null);
   // 删除语音房确认弹窗
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const hubRef = useRef<HTMLDivElement>(null);
@@ -101,7 +97,6 @@ export function VoiceHubPage() {
     livekit,
     joining,
     error: joinError,
-    clearError,
     join,
     leave,
     toggleMic,
@@ -112,7 +107,6 @@ export function VoiceHubPage() {
   } = useVoiceChannel(routeChannelId ?? null);
 
   const refresh = directory.refresh;
-  const loadChannels = directory.refresh;
   // 刷新键/下拉刷新共用：刷新完成后重播已入场卡片浮入
   const refreshWithReplay = useCallback(async () => {
     await refresh();
@@ -157,9 +151,7 @@ export function VoiceHubPage() {
       .then((p) => {
         if (!cancelled) setElysiaProfile(p.enabled ? p : null);
       })
-      .catch((e) => {
-        if (!cancelled) setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败");
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -176,18 +168,15 @@ export function VoiceHubPage() {
   useEffect(() => {
     if (!routeChannelId || channels.some((channel) => channel.id === routeChannelId)) return;
     let cancelled = false;
-    setListError(null);
     void voiceApi.getVoiceChannel(routeChannelId)
       .then((channel) => {
         if (!cancelled) useVoiceStore.getState().upsertChannel(channel);
       })
-      .catch((reason: unknown) => {
-        if (!cancelled) setListError(reason instanceof Error ? reason.message : "加载语音房失败");
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [channels, routeChannelId, detailRetry]);
+  }, [channels, routeChannelId]);
 
   // /voice/:channelId 是真实的语音房路由：进入该 URL 就加入对应房间，
   // 浮层点击因此不会只回列表，也支持刷新后按用户状态重新建立媒体连接。
@@ -214,11 +203,10 @@ export function VoiceHubPage() {
     try {
       await leave();
       navigate("/voice");
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "离开语音房失败");
+    } catch {
+      // 离开失败静默
     }
   }, [leave, navigate]);
-  const notice = joinError ?? listError;
 
   // 进房态（两种形态都渲染语音房面板 + 房内打字）
   if (currentChannel) {
@@ -231,8 +219,6 @@ export function VoiceHubPage() {
             channelName={currentChannel.name}
             channel={currentChannel}
             livekit={joining ? "connecting" : joinError ? "failed" : currentChannelId === currentChannel.id ? livekit : "idle"}
-            connectionError={joinError ?? listError}
-            wsConnection={wsConnection}
             elysiaProfile={elysiaProfile}
             groupId={currentChannel.group}
             onToggleMic={() => void toggleMic()}
@@ -245,7 +231,7 @@ export function VoiceHubPage() {
               if (m) setMemberLocallyMuted(userId, !m.locallyMuted);
             }}
             onBack={handleBack}
-            onDeleteChannel={() => { setListError(null); setConfirmDeleteOpen(true); }}
+            onDeleteChannel={() => setConfirmDeleteOpen(true)}
             inputEntered={inputEntered}
           />
         </FullScreenSwipeBack>
@@ -264,9 +250,7 @@ export function VoiceHubPage() {
                   useVoiceStore.getState().removeChannel(currentChannel.id);
                   navigate("/voice");
                 })
-                .catch((error) =>
-                  setListError(error instanceof Error ? error.message : "删除语音房失败"),
-                );
+                .catch(() => {});
             }}
             onClose={() => setConfirmDeleteOpen(false)}
           />
@@ -275,9 +259,8 @@ export function VoiceHubPage() {
     );
   }
 
-  if (routeChannelId) return <div className="voice-hub"><div className="home-state" role={listError ? "alert" : "status"}>
-    {listError ? <><p>{listError}</p><button type="button" className="btn btn-ghost" onClick={() => setDetailRetry((value) => value + 1)}>重试</button></>
-      : <><div className="skeleton" style={{ height: 96 }} /><span>正在加载语音房…</span></>}
+  if (routeChannelId) return <div className="voice-hub"><div className="home-state" role="status">
+    <div className="skeleton" style={{ height: 96 }} /><span>正在加载语音房…</span>
   </div></div>;
 
   return (
@@ -302,19 +285,6 @@ export function VoiceHubPage() {
         <div key={scope} className="directory-content voice-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}
           onScroll={(event) => directory.onScroll(event.currentTarget)}>
-          {profileError && <div className="chat-notice" role="alert">爱莉入口暂不可用：{profileError}</div>}
-          {notice && (
-            <div
-              className="chat-notice"
-              role="alert"
-              onClick={() => {
-                clearError();
-                loadChannels();
-              }}
-            >
-              {notice}（点击重试）
-            </div>
-          )}
           {channelsLoading && directory.items.length === 0 ? (
             <div className="conv-loading">
               <div className="skeleton" style={{ height: 64, marginBottom: 8 }} />

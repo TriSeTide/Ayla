@@ -49,13 +49,12 @@ function privateConv(overrides: Partial<ConversationSummary> = {}): Conversation
   };
 }
 
-function renderList(convs: ConversationSummary[], onSelect = vi.fn(), onError = vi.fn()) {
+function renderList(convs: ConversationSummary[], onSelect = vi.fn()) {
   return render(
     <ConversationList
       conversations={convs}
       activeId={null}
       onSelect={onSelect}
-      onError={onError}
     />,
   );
 }
@@ -297,13 +296,12 @@ describe("会话管理菜单", () => {
     expect(useChatStore.getState().conversations).toHaveLength(1);
   });
 
-  it("置顶失败 → 调用 onError 提示", async () => {
+  it("置顶失败 → 静默处理（不再有错误提示通道）", async () => {
     togglePinMock.mockRejectedValue(new Error("服务器错误"));
-    const onError = vi.fn();
-    renderList([privateConv()], vi.fn(), onError);
+    renderList([privateConv()]);
     fireEvent.click(screen.getByRole("button", { name: /更多操作/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "置顶" }));
-    await waitFor(() => expect(onError).toHaveBeenCalledWith("服务器错误"));
+    await waitFor(() => expect(togglePinMock).toHaveBeenCalled());
   });
 
   it("点击会话仍触发 onSelect（菜单关闭）", () => {

@@ -649,7 +649,7 @@
   overflow-anchor: none;
 }
 
-.stable-pagination-footer > :is([role="alert"], .chat-notice) {
+.stable-pagination-footer > [role="alert"] {
   max-width: 100%;
   margin: 0;
   white-space: normal;

@@ -2,14 +2,13 @@
  * VoiceChannelPanel —— 当前频道面板（成员列表 + 控制条，M5-3 §2）。
  *
  * - 可见成员由独立 cursor 页读取；媒体状态取 voice store 的完整成员对账；
- * - 爱莉条目识别：profile.user.id 命中成员 user_id → 中性技术标签（§4.6）；
  * - 控制条复用 VoiceControls。
  */
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { ElysiaProfile } from "../../api/types";
 import * as voiceApi from "../../api/voice";
 import { useAuthStore } from "../../stores/auth";
-import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
+import type { LiveKitConnectionState } from "../../stores/voice";
 import { useVoiceStore } from "../../stores/voice";
 import { VoiceControls } from "./VoiceControls";
 import { VoiceMemberRow } from "./VoiceMemberRow";
@@ -17,28 +16,11 @@ import { usePagedMediaList } from "../../hooks/usePagedMediaList";
 import { DirectoryLoadMore } from "../DirectoryLoadMore";
 import { voiceWS } from "../../ws/voice";
 
-/** 爱莉 voice.state 技术状态 → 中性标签（§4.6：禁止主观化文案） */
-export function elysiaStateLabel(techState: string | null): string | null {
-  switch (techState) {
-    case "connected":
-    case "active":
-      return "通话中";
-    case "speaking":
-      return "输出中";
-    case "listening":
-      return "接收中";
-    default:
-      return null;
-  }
-}
-
 export function VoiceChannelPanel({
   channelName,
   channelId,
   ownerId,
   livekit,
-  connectionError,
-  wsConnection,
   elysiaProfile,
   onToggleMic,
   onLeave,
@@ -51,8 +33,6 @@ export function VoiceChannelPanel({
   channelId?: string;
   ownerId?: string;
   livekit: LiveKitConnectionState;
-  connectionError?: string | null;
-  wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
   onLeave: () => void;
@@ -96,9 +76,8 @@ export function VoiceChannelPanel({
   const refreshedChannelRef = useRef<string | null>(null);
   const elysiaUserId = elysiaProfile?.user.id ?? null;
   const isOwner = ownerId != null && ownerId === currentUser?.id;
-  const [actionError, setActionError] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  useEffect(() => { setInvalidated(false); setActionError(null); setBusyUserId(null); }, [scope]);
+  useEffect(() => { setInvalidated(false); setBusyUserId(null); }, [scope]);
   useEffect(() => voiceWS.onFrame((frame) => {
     if (frame.type !== "voice.state" || String(frame.data.channel_id) !== channelId) return;
     if (frame.data.state === "joined" || frame.data.state === "left") {
@@ -122,14 +101,12 @@ export function VoiceChannelPanel({
   const memberAction = async (userId: string, action: "kick" | "transfer") => {
     if (!channelId || busyUserId) return;
     setBusyUserId(userId);
-    setActionError(null);
     try {
       await voiceApi.actionVoiceMember(channelId, userId, action);
       if (currentScope.current !== scope) return;
-      if (action === "transfer") setActionError("房主已转让");
       await refresh();
-    } catch (error) {
-      if (currentScope.current === scope) setActionError(error instanceof Error ? error.message : "房主操作失败");
+    } catch {
+      // 成员操作失败静默
     } finally {
       if (currentScope.current === scope) setBusyUserId(null);
     }
@@ -154,7 +131,6 @@ export function VoiceChannelPanel({
                 member={m}
                 isSelf={m.user_id === currentUser?.id}
                 isElysia={isElysia}
-                elysiaLabel={isElysia ? elysiaStateLabel("connected") : null}
                 onVolumeChange={onVolumeChange}
                 onLocalVolumeChange={onLocalVolumeChange}
                 onToggleMic={onToggleMic}
@@ -172,11 +148,8 @@ export function VoiceChannelPanel({
         )}
         <DirectoryLoadMore {...pages} invalidated={invalidated} refresh={refresh} retainCompletedSpace={false} />
       </div>
-      {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
-      {connectionError && <div className="chat-notice" role="alert">{connectionError}</div>}
       <VoiceControls
         livekit={livekit}
-        wsConnection={wsConnection}
         onLeave={onLeave}
         onRejoin={onRejoin}
       />

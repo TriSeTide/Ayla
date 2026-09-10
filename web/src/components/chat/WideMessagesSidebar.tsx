@@ -82,10 +82,6 @@ export function WideMessagesSidebar({
   const dismissNotice = useNoticeStore((state) => state.dismiss);
   const realtimeLeaveNotices = realtimeNotices.filter((notice) => notice.kind === "group.member.left");
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
-  /** 审批（同意/拒绝）失败提示（点击关闭） */
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [openError, setOpenError] = useState<string | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
 
   // 爱莉入口（私信 tab 顶部）
@@ -93,16 +89,15 @@ export function WideMessagesSidebar({
     import("../../api/elysia")
       .then(({ getElysiaProfile }) => getElysiaProfile())
       .then((p) => setElysiaProfile(p.enabled ? p : null))
-      .catch((e) => setLoadError(e instanceof Error ? e.message : "加载爱莉资料失败"));
+      .catch(() => {});
   }, []);
 
   // 打开与某用户的私聊会话（好友/爱莉点击 → 选中会话）
   const openUserChat = useCallback(
     (userId: string) => {
-      setOpenError(null);
       chatApi.openPrivateConversation(userId)
         .then((conv) => onSelect(conv.id))
-        .catch((e) => setOpenError(e instanceof Error ? e.message : "打开私聊失败"));
+        .catch(() => {});
     },
     [onSelect],
   );
@@ -141,14 +136,13 @@ export function WideMessagesSidebar({
 
   const handleRemoveFriend = useCallback(async (userId: string) => {
     if (removingFriendId) return;
-    setActionError(null);
     setRemovingFriendId(userId);
     try {
       await usersApi.deleteFriend(userId);
       setFriendList((prev) => prev.filter((item) => item.user.id !== userId));
       refreshBadges();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : "解除好友失败");
+    } catch {
+      // 解除好友失败静默
     } finally {
       setRemovingFriendId(null);
     }
@@ -158,27 +152,21 @@ export function WideMessagesSidebar({
     usersApi.actionFriendRequest(req.id, action).then(() => {
       setFriendRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch((e) => {
-      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    });
+    }).catch(() => {});
   }, []);
 
   const handleInviteAction = useCallback((inv: GroupInvite, action: "accept" | "reject") => {
     chatApi.actionGroupInvite(inv.id, action).then(() => {
       setInvites((prev) => prev.filter((i) => i.id !== inv.id));
       refreshBadges();
-    }).catch((e) => {
-      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    });
+    }).catch(() => {});
   }, []);
 
   const handleJoinRequestAction = useCallback((req: GroupJoinRequest, action: "accept" | "reject") => {
     chatApi.actionJoinRequest(req.id, action).then(() => {
       setJoinRequests((prev) => prev.filter((r) => r.id !== req.id));
       refreshBadges();
-    }).catch((e) => {
-      setActionError(e instanceof Error ? e.message : "操作失败，请稍后重试");
-    });
+    }).catch(() => {});
   }, []);
 
   return (
@@ -192,13 +180,6 @@ export function WideMessagesSidebar({
       animate="center"
       variants={panelVariants(reduced, "left")}
     >
-      {loadError && <div className="chat-notice" role="alert">{loadError}</div>}
-      {openError && <div className="chat-notice" role="alert">{openError}</div>}
-      {actionError && (
-        <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
-          {actionError}（点击关闭）
-        </div>
-      )}
       <div className="messages-tabs">
         <button
           type="button"
@@ -243,7 +224,6 @@ export function WideMessagesSidebar({
             activeId={activeId}
             elysiaUserId={elysiaProfile?.user?.id}
             onSelect={onSelect}
-            onError={setActionError}
             revealItems={!loading}
           />
           <DirectoryLoadMore {...privatePage} retainCompletedSpace={false} />
@@ -291,7 +271,7 @@ export function WideMessagesSidebar({
               {leaveNotices.map((notice) => (
                 <div key={`persisted-${notice.id}`} className="request-row notice-row">
                   <div className="request-body"><span className="request-name">群成员已离开</span><span className="request-msg">{notice.conversation_title}：{notice.member_name} 已离开</span></div>
-                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch((e) => setActionError(e instanceof Error ? e.message : "标记通知失败")); }}>知道了</button>
+                  <button type="button" className="btn btn-ghost request-btn" onClick={() => { void chatApi.readLeaveNotice(notice.id).then(() => setLeaveNotices((items) => items.filter((item) => item.id !== notice.id))).catch(() => {}); }}>知道了</button>
                 </div>
               ))}
               {realtimeLeaveNotices.map((notice) => (

@@ -46,7 +46,6 @@ function renderBody(channelId?: string, inputEntered = true) {
       channelId={channelId}
       channelName="语音房"
       livekit="connected"
-      wsConnection="online"
       elysiaProfile={null}
       onToggleMic={vi.fn()}
       onLeave={vi.fn()}
@@ -88,7 +87,7 @@ describe("VoiceRoomBody 房内独立聊天", () => {
       return { cancel: record.cancel };
     } });
     const onFrame = vi.spyOn(voiceWS, "onFrame");
-    const props = { channelName: "语音房", livekit: "connected" as const, wsConnection: "online" as const, elysiaProfile: null, onToggleMic: vi.fn(), onLeave: vi.fn(), onRejoin: vi.fn(), onVolumeChange: vi.fn(), onLocalVolumeChange: vi.fn(), onToggleMemberMuted: vi.fn(), onBack: vi.fn(), inputEntered: true };
+    const props = { channelName: "语音房", livekit: "connected" as const, elysiaProfile: null, onToggleMic: vi.fn(), onLeave: vi.fn(), onRejoin: vi.fn(), onVolumeChange: vi.fn(), onLocalVolumeChange: vi.fn(), onToggleMemberMuted: vi.fn(), onBack: vi.fn(), inputEntered: true };
     const { container, rerender, unmount } = render(<VoiceRoomBody {...props} channelId="v1" />);
     await waitFor(() => expect(voiceApi.listVoiceChatMessagesPage).toHaveBeenCalledWith("v1", { cursor: null, beforeId: undefined }));
     expect(played).toHaveLength(3);
@@ -149,7 +148,6 @@ describe("VoiceRoomBody 房内独立聊天", () => {
         channelId="v1"
         channelName="语音房"
         livekit="connected"
-        wsConnection="online"
         elysiaProfile={null}
         onToggleMic={vi.fn()}
         onLeave={vi.fn()}
@@ -194,7 +192,7 @@ describe("VoiceRoomBody 房内独立聊天", () => {
   it("旧房发送迟到不清空新房草稿，同房发送期间继续编辑也保留新文字", async () => {
     let resolveSend!: (value: Awaited<ReturnType<typeof voiceApi.sendVoiceChatMessage>>) => void;
     vi.mocked(voiceApi.sendVoiceChatMessage).mockImplementationOnce(() => new Promise((resolve) => { resolveSend = resolve; }));
-    const props = { channelName: "语音房", livekit: "connected" as const, wsConnection: "online" as const, elysiaProfile: null,
+    const props = { channelName: "语音房", livekit: "connected" as const, elysiaProfile: null,
       onToggleMic: vi.fn(), onLeave: vi.fn(), onRejoin: vi.fn(), onVolumeChange: vi.fn(), onLocalVolumeChange: vi.fn(),
       onToggleMemberMuted: vi.fn(), onBack: vi.fn(), inputEntered: true };
     const { rerender } = render(<VoiceRoomBody {...props} channelId="old" />);

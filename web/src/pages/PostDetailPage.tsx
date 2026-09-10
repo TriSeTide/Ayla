@@ -439,7 +439,6 @@ function PostDetailContent({ groupId }: { groupId?: string }) {
 
   return wrapSwipe(
     <div className={`post-detail${editing ? " is-editing" : ""}`}>
-      {actionError && !editing && <div className="chat-notice" role="alert">{actionError}</div>}
       <header className="post-detail-head post-detail-background" {...backgroundInert}>
         <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
           <IconBack width={22} height={22} />

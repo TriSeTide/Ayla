@@ -27,8 +27,6 @@ export function UserProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"friend" | "chat" | null>(null);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   // 在线状态：presence 实时增量优先，REST 快照兜底；文案按 display_status 规则
   const online = usePresenceOnline(user);
   const displayStatus = useDisplayStatus(user);
@@ -41,8 +39,6 @@ export function UserProfilePage() {
     setLoading(true);
     setUser(null);
     setError(null);
-    setActionMsg(null);
-    setActionError(null);
     setBusy(null);
     getUserDetail(userId)
       .then((u) => {
@@ -73,15 +69,12 @@ export function UserProfilePage() {
     if (!user || busy) return;
     const revision = loadRevision.current;
     setBusy("friend");
-    setActionMsg(null);
-    setActionError(null);
     try {
       await createFriendRequest({ to_user_id: user.id });
       if (revision !== loadRevision.current) return;
       setUser({ ...user, relation: "pending_sent" });
-      setActionMsg("好友申请已发送");
-    } catch (e) {
-      if (revision === loadRevision.current) setActionError(e instanceof Error ? e.message : "发起申请失败");
+    } catch {
+      // 发起申请失败静默
     } finally {
       if (revision === loadRevision.current) setBusy(null);
     }
@@ -91,14 +84,12 @@ export function UserProfilePage() {
     if (!user || busy) return;
     const revision = loadRevision.current;
     setBusy("chat");
-    setActionMsg(null);
-    setActionError(null);
     try {
       const conv = await openPrivateConversation(user.id);
       if (revision !== loadRevision.current) return;
       navigate(`/chat/${conv.id}`);
-    } catch (e) {
-      if (revision === loadRevision.current) setActionError(e instanceof Error ? e.message : "进入私聊失败");
+    } catch {
+      // 进入私聊失败静默
     } finally {
       if (revision === loadRevision.current) setBusy(null);
     }
@@ -114,7 +105,7 @@ export function UserProfilePage() {
           </div>
         ) : error || !user ? (
           <div className="solid-card profile-card">
-            <p className="profile-signature">{error ?? "用户不存在"}</p>
+            <p className="profile-signature">用户不存在或暂时无法访问</p>
             <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
             <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)}>
               返回
@@ -123,8 +114,6 @@ export function UserProfilePage() {
         ) : (
           <>
             <div className="profile-side">
-            {actionMsg && <div className="chat-notice" role="status">{actionMsg}</div>}
-            {actionError && <div className="chat-notice" role="alert">{actionError}</div>}
             <div className="solid-card profile-card">
               <div className="profile-identity">
                 <button

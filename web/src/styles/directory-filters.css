@@ -169,7 +169,7 @@
 /* 列表容器可能在 PullToRefresh 内层（.pull-to-refresh > .pull-refresh-content > 列表），
    必须用后代选择器才能归零其左右 padding（直接子元素选择器会漏掉内层列表）。 */
 .directory-page .directory-content :is(.search-history, .search-results, .search-loading, .search-error,
-    .search-empty, .favorites-list, .favorites-skeleton, .home-state, .chat-notice, .home-load-more,
+    .search-empty, .favorites-list, .favorites-skeleton, .home-state, .home-load-more,
     .voice-channel-list, .voice-list-empty, .live-hall-grid, .live-hall-empty, .posts-feed, .posts-skeleton,
     .games-grid, .games-grid-loading, .conv-loading, .pull-to-refresh) {
   width: 100%;

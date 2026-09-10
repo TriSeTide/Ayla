@@ -314,19 +314,11 @@ export function PostsHubPage() {
         <div key={scrollRestoreKey} className="directory-content posts-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}
           onScroll={(e) => handleScroll(e.currentTarget)}>
-          {state.error && state.posts.length > 0 && <div className="chat-notice" role="alert">{state.error}</div>}
           {state.loading && state.posts.length === 0 ? (
             <div className="posts-skeleton">
               <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
               <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
               <div className="skeleton" style={{ height: 120 }} />
-            </div>
-          ) : state.error && state.posts.length === 0 ? (
-            <div className="home-state" role="alert">
-              <p className="placeholder-desc">{state.error}</p>
-              <button type="button" className="btn btn-ghost" onClick={loadFirst}>
-                重试
-              </button>
             </div>
           ) : state.posts.length === 0 ? (
             <div className="home-state">

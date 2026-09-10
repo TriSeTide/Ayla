@@ -31,7 +31,6 @@ import { RefreshFab } from "./RefreshFab";
 import { ScrollTopFab } from "./ScrollTopFab";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 import { LiveMiniPlayer } from "../components/live/LiveMiniPlayer";
-import { RealtimeStatusBanner } from "./RealtimeStatusBanner";
 import { TopNav } from "./TopNav";
 import { isGroupScene, isMessagesRoute, isNarrowTopBarRoute, isPrimaryNavRoute, isPrivateChatRoute, resolveCornerFabs, resolveFabAction, resolveModule } from "./shellConfig";
 
@@ -129,7 +128,6 @@ export function AppShell() {
         </AnimatePresence>
       </main>
       <SessionActivityIndicator />
-      <RealtimeStatusBanner />
       {/* 手机端浮动小窗（任务 05）：窄屏离开直播间后继续播放；唯一 owner */}
       {isNarrow && liveMiniPlayer ? <LiveMiniPlayer /> : null}
       {isNarrow && !groupSceneNarrow && !privateChatNarrow ? (

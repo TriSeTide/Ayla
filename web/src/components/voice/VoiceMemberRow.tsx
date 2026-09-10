@@ -12,8 +12,7 @@
  *   上层 slider（透明轨道 + indigo 圆把手）；
  *   - 自己条目：设定 = 本地麦克风音量（0~100），跳动随 localAudioLevel；
  *   - 远端条目：设定 = 本地播放音量（0~100），跳动随 member.audioLevel；
- * - 爱莉条目（isElysia）：状态只渲染中性技术标签（"通话中/输出中/接收中"），
- *   禁止主观化文案（主体性铁律 M5-3 硬约束）。
+ * - 爱莉条目（isElysia）：头像光环区分，状态显示与普通成员一致。
  */
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
@@ -94,7 +93,6 @@ export function VoiceMemberRow({
   member,
   isSelf,
   isElysia,
-  elysiaLabel,
   onVolumeChange,
   onLocalVolumeChange,
   onToggleMic,
@@ -102,10 +100,8 @@ export function VoiceMemberRow({
 }: {
   member: VoiceMemberState;
   isSelf: boolean;
-  /** 爱莉条目（profile.user.id 命中）；只影响渲染标签与光环 */
+  /** 爱莉条目（profile.user.id 命中）；只影响头像光环 */
   isElysia: boolean;
-  /** 爱莉中性技术标签（"通话中"/"输出中"/"接收中"/null）；非爱莉条目忽略 */
-  elysiaLabel?: string | null;
   onVolumeChange: (userId: string, volume: number) => void;
   /** 本地麦克风音量 0~100（自己说话别人听到的响度） */
   onLocalVolumeChange: (volume: number) => void;
@@ -161,9 +157,7 @@ export function VoiceMemberRow({
           </span>
         </div>
         <span className="voice-member-sub">
-          {isElysia && elysiaLabel ? (
-            <span className="voice-elysia-state">{elysiaLabel}</span>
-          ) : member.muted ? (
+          {member.muted ? (
             <span className="voice-muted-tag">
               <IconMic width={11} height={11} /> 已静音
             </span>

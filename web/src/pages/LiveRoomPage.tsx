@@ -31,7 +31,6 @@ export function LiveRoomPage() {
   const directory = useDirectoryPage("live", {}, validId);
   const ordered = channel?.id === channelId && !directory.items.some((item) => item.id === channelId)
     ? [channel, ...directory.items] : directory.items;
-  const listError = directory.error;
 
   // 非法 id 回大厅
   useEffect(() => {
@@ -59,12 +58,6 @@ export function LiveRoomPage() {
 
   return (
     <>
-      {listError && (
-        <div className="chat-notice" role="alert">
-          <span>直播列表加载失败：{listError}</span>
-          <button type="button" className="btn btn-ghost" onClick={() => void directory.refresh()}>重试</button>
-        </div>
-      )}
       <FullScreenSwipeBack onBack={() => navigate("/live")} enabled={isNarrow}>
         <LiveRoomBody
         directory={directory}

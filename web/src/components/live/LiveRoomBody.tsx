@@ -116,7 +116,6 @@ export function LiveRoomBody({
   const { danmaku, sending, sendOwner, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll, history } =
     useDanmaku(channelId);
   const srsStatus = useLiveStore((s) => s.current.srsStatus);
-  const wsConnection = useLiveStore((s) => s.wsConnection);
 
   // 宽屏侧栏：默认展开，可收起（窄条）；窄屏侧栏：默认关闭（覆盖层）
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -294,13 +293,6 @@ export function LiveRoomBody({
         />
       )}
       {channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
-      <span className={`live-ws-state live-ws-${wsConnection}`}>
-        {wsConnection === "online"
-          ? "弹幕已连接"
-          : wsConnection === "connecting"
-            ? "弹幕连接中…"
-            : "弹幕已断开"}
-      </span>
     </>
   );
 

@@ -4,30 +4,12 @@
  * - 打开时创建/复用 Voice Live 通话（reused=true 正常接入，不报错）；
  * - 通话状态与转写投影由后端 observer WS 事件驱动（elysia.voice.call.status /
  *   elysia.voice.projected 帧），本面板只消费事件；创建后一次性 poll 对账兜底；
- *   语音页只显示"已投影 N 条"中性计数，爱莉发言在聊天链渲染——单一渲染源，不双写；
  * - 文本注入：空文本前端拦截；502 → "爱莉侧不可用"；
  * - 结束幂等，重复点击安全；
- * - 主体性铁律：本组件不生成任何爱莉第一人称内容；状态只渲染中性技术标签。
+ * - 主体性铁律：本组件不生成任何爱莉第一人称内容。
  */
 import { useEffect, useState } from "react";
 import { useElysiaVoice } from "../../hooks/useElysiaVoice";
-
-/** 爱莉通话 state → 中性技术标签 */
-export function callStateLabel(state: string): string {
-  switch (state) {
-    case "connecting":
-      return "连接中";
-    case "active":
-    case "connected":
-      return "通话中";
-    case "ended":
-      return "已结束";
-    case "failed":
-      return "连接失败";
-    default:
-      return state;
-  }
-}
 
 export function ElysiaVoicePanel() {
   const [open, setOpen] = useState(false);
@@ -35,11 +17,7 @@ export function ElysiaVoicePanel() {
   const {
     call,
     busy,
-    error,
-    reused,
-    projectedTotal,
     isTerminal,
-    clearError,
     ensureCall,
     sendText,
     endCall,
@@ -75,23 +53,10 @@ export function ElysiaVoicePanel() {
         </button>
       </header>
 
-      {error && (
-        <div className="chat-notice" role="alert" onClick={clearError}>
-          {error}（点击关闭）
-        </div>
-      )}
-
       {!call ? (
         <div className="voice-list-empty">{busy ? "接入中…" : "等待接入"}</div>
       ) : (
         <>
-          <div className="elysia-voice-status">
-            <span className={`status-dot ${call.connected ? "online" : "offline"}`} />
-            {callStateLabel(call.state)}
-            {reused && <span className="voice-ws-state"> · 已接入进行中的通话</span>}
-            <span className="voice-ws-state"> · 已投影 {projectedTotal} 条到聊天</span>
-          </div>
-
           {!isTerminal && (
             <div className="elysia-voice-input">
               <input

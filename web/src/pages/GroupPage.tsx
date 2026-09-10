@@ -98,9 +98,6 @@ export function GroupPage() {
 
   // 宽屏 ServerRail 底部加号：创建群聊（需求：左下角头像键改加号）
   const [showGroupCreate, setShowGroupCreate] = useState(false);
-  const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
-  const [conversationRetry, setConversationRetry] = useState(0);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   // ---- 下拉回主页（R-G6 / §2.3）：顶栏跟手 + 内容区协同（translateY/scale/opacity 视差） ----
   const [pullOffset, setPullOffset] = useState(0);
@@ -251,16 +248,13 @@ export function GroupPage() {
       .then((conversation) => {
         if (!cancelled) {
           useChatStore.getState().upsertConversation(conversation);
-          setConversationLoadError(null);
         }
       })
-      .catch((e) => {
-        if (!cancelled) setConversationLoadError(e instanceof Error ? e.message : "加载群列表失败");
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [id, currentGroup, conversationRetry]);
+  }, [id, currentGroup]);
 
   // Default and selected identities are independent of the visible page boundary.
   useEffect(() => {
@@ -277,9 +271,7 @@ export function GroupPage() {
         if (cancelled) return;
         useSubGroupStore.getState().upsertSubgroup(id, subgroup);
       })
-      .catch((error) => {
-        if (!cancelled) setConversationLoadError(error instanceof Error ? error.message : "加载选中子群失败");
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -378,18 +370,11 @@ export function GroupPage() {
   if (!isNarrow) {
     return (
       <div className="group-page group-page-wide">
-        {actionError && (
-          <div className="messages-action-error" role="alert" onClick={() => setActionError(null)}>
-            {actionError}（点击关闭）
-          </div>
-        )}
-        {(conversationLoadError || groupPage.error) && <div className="chat-notice" role="alert"><span>{conversationLoadError || groupPage.error}</span><button type="button" className="btn btn-ghost" onClick={() => { setConversationLoadError(null); setConversationRetry((value) => value + 1); void groupPage.refresh(); }}>重试</button></div>}
         <ServerRail
           groups={sortedGroups}
           currentGroupId={id ?? null}
           onSelectGroup={(gid) => navigate(`/group/${gid}`)}
           onCreateGroup={() => setShowGroupCreate(true)}
-          onError={setActionError}
         />
         <ChannelSidebar
           groupId={id ?? null}

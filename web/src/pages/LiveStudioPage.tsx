@@ -31,8 +31,6 @@ export function LiveStudioPage() {
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
   const ordered = directory.items;
-  const [actionError, setListError] = useState<string | null>(null);
-  const listError = actionError ?? directory.error;
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const listLoaded = directory.loaded;
   // ref 始终持有最新 ordered，供删除/新建事件回调使用（避免连续操作读到旧闭包）
@@ -48,7 +46,7 @@ export function LiveStudioPage() {
   // ref 始终持有最新当前频道 id（渲染后同步），避免连续删除回调读到旧 channelId 闭包
   const channelIdRef = useRef(channelId);
   channelIdRef.current = channelId;
-  useEffect(() => { setListError(null); setDeletingId(null); }, [owner]);
+  useEffect(() => { setDeletingId(null); }, [owner]);
 
   // 当前频道详情更新（保存资料/封面、开播状态等）→ 同步到侧栏列表项，保证封面实时刷新；
   // 状态/时间戳变化（开播/下播）后同样按新排序归位。
@@ -71,11 +69,6 @@ export function LiveStudioPage() {
     useShellStore.getState().setBottomTabsLeaving(true);
     return () => useShellStore.getState().setBottomTabsLeaving(false);
   }, [validId]);
-
-  const reloadList = useCallback(() => {
-    setListError(null);
-    void directory.refresh();
-  }, [directory.refresh]);
 
   const handleDeleteChannel = async (targetId: number) => {
     setDeletingId(targetId);
@@ -100,9 +93,8 @@ export function LiveStudioPage() {
           navigate(`/live/start/${next.id}`, { replace: true });
         }
       }
-    } catch (e) {
-      // 直播中删除 → 400「直播中禁止删除，请先 :stop」；错误文案在顶部 notice 展示
-      if (currentOwner.current === owner) setListError(e instanceof Error ? e.message : "删除直播间失败");
+    } catch {
+      // 删除失败静默
     } finally {
       if (currentOwner.current === owner) setDeletingId(null);
     }
@@ -116,8 +108,8 @@ export function LiveStudioPage() {
       // 新建后立即加入侧栏列表（同组件不重挂载，loadedRef 不会重置），并进入新频道控制台
       applyOrdered([created, ...orderedRef.current.filter((item) => item.id !== created.id)]);
       navigate(`/live/start/${created.id}`, { replace: true });
-    } catch (e) {
-      if (currentOwner.current === owner) setListError(e instanceof Error ? e.message : "创建直播间失败");
+    } catch {
+      // 创建失败静默
     }
   };
 
@@ -127,14 +119,6 @@ export function LiveStudioPage() {
   if (listLoaded && !directory.loading && !directory.error && !directory.hasMore && ordered.length === 0) {
     return (
       <>
-        {listError && (
-          <div className="chat-notice" role="alert">
-            <span>{listError}</span>
-            <button type="button" className="btn btn-ghost" onClick={reloadList}>
-              重试
-            </button>
-          </div>
-        )}
         <div className="live-studio-empty">
           <p className="live-studio-empty-title">暂无直播间</p>
           <p className="live-studio-empty-desc">创建你的第一个直播间，开始推流吧</p>
@@ -152,14 +136,6 @@ export function LiveStudioPage() {
 
   return (
     <>
-      {listError && (
-        <div className="chat-notice" role="alert">
-          <span>{listError}</span>
-          <button type="button" className="btn btn-ghost" onClick={reloadList}>
-            重试
-          </button>
-        </div>
-      )}
       <LiveRoomBody
         channelId={channelId}
         channel={channel}

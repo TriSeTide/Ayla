@@ -497,7 +497,6 @@ function ChannelSidebarContent({
                   {subgroupsExpanded ? "收起" : `展开更多（${Math.max(subgroups.length, subgroupPage.total) - 3}）`}
                 </button>
               )}
-              {!subgroupsExpanded && !editing && subgroupPage.error && <DirectoryLoadMore {...subgroupPage} retainCompletedSpace={false} />}
               {canManage && editing && (
                 <button type="button" className="channel-subgroup-add" onClick={() => { setDialogError(null); setDialog({ kind: "add" }); }} aria-label="添加子群" title="添加子群">
                   <IconPlus width={16} height={16} />

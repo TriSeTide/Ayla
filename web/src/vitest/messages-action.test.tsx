@@ -1,10 +1,9 @@
 import * as chatApi from "../api/chat";
 import { disposeSocialTracking } from "../stores/social";
 /**
- * 消息中心审批错误提示测试（测试报告 #3 修复）：
- * - 好友申请/群邀请/入群申请的「同意/拒绝」请求失败 → 显示错误提示条；
- * - 点击提示条关闭；
- * - 成功路径 → 条目移除 + 不显示错误。
+ * 消息中心审批操作测试：
+ * - 好友申请的「同意/拒绝」请求失败 → 静默处理（不显示错误提示条）；
+ * - 成功路径 → 条目移除。
  * 渲染 WideMessagesSidebar（宽屏认证消息 tab），mock 子组件与 API。
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -99,8 +98,8 @@ afterEach(() => {
   useChatStore.setState({ conversations: [] });
 });
 
-describe("审批失败错误提示（#3）", () => {
-  it("好友申请同意失败 → 显示错误提示，点击关闭后消失", async () => {
+describe("审批失败静默处理", () => {
+  it("好友申请同意失败 → 静默处理，条目保留且无错误提示", async () => {
     vi.mocked(usersApi.listFriendRequests).mockResolvedValue([req]);
     vi.mocked(usersApi.actionFriendRequest).mockRejectedValue(new Error("服务器错误"));
     renderSidebar();
@@ -108,25 +107,22 @@ describe("审批失败错误提示（#3）", () => {
     fireEvent.click(screen.getByRole("button", { name: /认证消息/ }));
     await waitFor(() => expect(screen.getByText("加个好友")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "同意" }));
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toBeInTheDocument();
-    });
-    expect(screen.getByText(/服务器错误/)).toBeInTheDocument();
-    // 点击关闭
-    fireEvent.click(screen.getByRole("alert"));
+    await waitFor(() => expect(usersApi.actionFriendRequest).toHaveBeenCalled());
+    // 失败静默：条目保留、无任何错误提示
+    expect(screen.getByText("加个好友")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("好友申请拒绝失败 → 显示错误提示（拒绝同路径）", async () => {
+  it("好友申请拒绝失败 → 静默处理（拒绝同路径）", async () => {
     vi.mocked(usersApi.listFriendRequests).mockResolvedValue([req]);
     vi.mocked(usersApi.actionFriendRequest).mockRejectedValue(new Error("网络异常"));
     renderSidebar();
     fireEvent.click(screen.getByRole("button", { name: /认证消息/ }));
     await waitFor(() => expect(screen.getByText("加个好友")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
-    await waitFor(() => {
-      expect(screen.getByText(/网络异常/)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(usersApi.actionFriendRequest).toHaveBeenCalled());
+    expect(screen.getByText("加个好友")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("同意成功 → 条目移除且无错误提示", async () => {

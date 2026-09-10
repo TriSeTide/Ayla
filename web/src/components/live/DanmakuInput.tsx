@@ -6,7 +6,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { uploadMediaFile } from "../../api/media";
 import { useAuthStore } from "../../stores/auth";
-import { IconImage } from "../icons";
+import { IconImage, IconSend } from "../icons";
 import { DANMAKU_MAX_LENGTH } from "../../hooks/useDanmaku";
 
 interface DanmakuInputProps {
@@ -160,8 +160,10 @@ function ScopedDanmakuInput({
           className="btn btn-primary danmaku-send-btn"
           disabled={disabled || !text.trim()}
           onClick={() => void submit()}
+          aria-label="发送弹幕"
+          title="发送弹幕"
         >
-          {sending || working === "sending" ? "发送中…" : "发送"}
+          <IconSend width={16} height={16} />
         </button>
       </div>
       <div className="danmaku-input-meta">

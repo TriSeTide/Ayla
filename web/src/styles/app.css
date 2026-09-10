@@ -795,17 +795,6 @@
   color: var(--text-secondary);
 }
 
-.chat-notice {
-  margin: var(--sp-3) var(--sp-6) 0;
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-input);
-  background: rgba(232, 163, 61, 0.12);
-  border: 1px solid rgba(232, 163, 61, 0.4);
-  color: var(--text-primary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
 /* U16 聊天列表壳：滚动区与容器内回底浮钮共享定位上下文。 */
 .message-list {
   position: relative;
@@ -2896,10 +2885,6 @@
   color: var(--destructive);
 }
 
-.voice-elysia-state {
-  color: var(--grape-700);
-}
-
 /* ================= 覆盖式音量条（自己麦克风 + 远端成员共用） ================= */
 /* 三层结构（下→上）：底层轨道（双色填充）→ 中层跳动条（覆盖在轨道上方）→ 上层 slider（透明轨道 + 圆把手） */
 
@@ -3037,22 +3022,10 @@
   border: 1px solid var(--destructive);
 }
 
-.voice-conn-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
 .voice-rejoin-btn {
   min-height: 28px;
   font-size: 12px;
   padding: 0 var(--sp-3);
-}
-
-.voice-ws-state {
-  color: var(--text-secondary);
 }
 
 /* 爱莉语音面板 */
@@ -3081,13 +3054,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.elysia-voice-status {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: 13px;
 }
 
 .elysia-voice-input {
@@ -3457,16 +3423,6 @@
   font-family: var(--font-display);
   font-size: 18px;
   color: var(--text-primary);
-}
-
-.live-ws-state {
-  font-size: 12px;
-  font-family: var(--font-utility);
-  color: var(--text-secondary);
-}
-
-.live-ws-online {
-  color: var(--success);
 }
 
 .live-player {

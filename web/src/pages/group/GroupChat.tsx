@@ -53,8 +53,6 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
   const messages = bucket?.messages ?? [];
 
   const [quote, setQuote] = useState<ChatMessage | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const subgroupPage = useSocialPage("subgroups", { groupId }, active);
   // 窄屏选项卡默认收起；同一按钮始终持有焦点，展开不重挂输入框。
@@ -153,7 +151,7 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
     let cancelled = false;
     void chatApi.getConversationMetadata(groupId).then((conversation) => {
       if (!cancelled) useChatStore.getState().upsertConversation(conversation);
-    }).catch((error) => { if (!cancelled) setNotice(error instanceof Error ? error.message : "加载群信息失败"); });
+    }).catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -212,7 +210,6 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
     loadHistory(groupId, undefined, true, sgId, activeSg?.is_default ?? false)
       .then(() => {
         if (!cancelled) {
-          setHistoryError(null);
           setSettledHistoryRevision(currentSelectionRevision);
         }
       })
@@ -236,17 +233,15 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
         useHomeStore.getState().setRecentGroup(null);
       }
       navigate("/group", { replace: true });
-      return;
     }
-    setHistoryError(error instanceof Error ? error.message : "加载聊天记录失败");
   }, [groupId, navigate]);
 
   const handleRecall = async (msg: ChatMessage) => {
     if (msg.status === "recalled") return;
     try {
       await recallMessage(groupId, msg.id);
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "撤回失败");
+    } catch {
+      // 撤回失败静默
     }
   };
 
@@ -259,8 +254,8 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
   const handlePoke = useCallback(async (targetUserId: string) => {
     try {
       await chatApi.sendPoke(groupId, targetUserId);
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "戳一戳发送失败");
+    } catch {
+      // 戳一戳失败静默
     }
   }, [groupId]);
 
@@ -290,23 +285,6 @@ export function GroupChat({ groupId, panelMotion = false }: { groupId: string; p
       exit={panelMotion ? "exit" : undefined}
       variants={panelMotion ? auroraquaPanelOrchestration : undefined}
     >
-      {subgroupPage.error && <div className="chat-notice" role="alert"><span>{subgroupPage.error}</span>
-        <button type="button" className="btn btn-ghost" onClick={() => void subgroupPage.refresh()}>重试子群</button></div>}
-      {historyError && (
-        <div className="chat-notice" role="alert">
-          <span>{historyError}</span>
-          <button type="button" className="btn btn-ghost" onClick={() => {
-            setHistoryError(null);
-            loadHistory(groupId, undefined, true, activeSubgroupId, activeSg?.is_default ?? false)
-              .catch(handleHistoryError);
-          }}>重试</button>
-        </div>
-      )}
-      {notice && (
-        <div className="chat-notice" role="alert" onClick={() => setNotice(null)}>
-          {notice}（点击关闭）
-        </div>
-      )}
       <motion.div
         ref={subgroupMessagesRef}
         className="chat-messages-motion"

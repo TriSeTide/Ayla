@@ -11,7 +11,7 @@ import { ScrollingText } from "../ScrollingText";
 import { ScrollingTags } from "../ScrollingTags";
 import { IconBack, IconImage, IconSend } from "../icons";
 import { ResourceImage } from "../ResourceImage";
-import type { LiveKitConnectionState, VoiceWSConnectionState } from "../../stores/voice";
+import type { LiveKitConnectionState } from "../../stores/voice";
 import { useAuthStore } from "../../stores/auth";
 import { VoiceChannelPanel } from "./VoiceChannelPanel";
 import { getVisibilityLabels } from "../../utils/visibility";
@@ -37,8 +37,6 @@ export function VoiceRoomBody({
   ownerId,
   channel,
   livekit,
-  connectionError,
-  wsConnection,
   elysiaProfile,
   onToggleMic,
   onLeave,
@@ -57,8 +55,6 @@ export function VoiceRoomBody({
   /** 完整的频道对象，用于显示标签等信息 */
   channel?: VoiceChannelDescriptor | null;
   livekit: LiveKitConnectionState;
-  connectionError?: string | null;
-  wsConnection: VoiceWSConnectionState;
   elysiaProfile: ElysiaProfile | null;
   onToggleMic: () => void;
   onLeave: () => void;
@@ -290,8 +286,6 @@ export function VoiceRoomBody({
             channelId={channelId}
             ownerId={ownerId}
             livekit={livekit}
-            connectionError={connectionError}
-            wsConnection={wsConnection}
             elysiaProfile={elysiaProfile}
             onToggleMic={onToggleMic}
             onLeave={onLeave}

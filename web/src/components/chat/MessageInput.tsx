@@ -524,9 +524,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
                 className="btn btn-primary composer-send"
                 onClick={submit}
                 disabled={!canSend || !convId}
+                aria-label="发送"
               >
                 <IconSend width={15} height={15} />
-                发送
+                {!isNarrow && "发送"}
               </button>
             </>
           )}

@@ -56,8 +56,6 @@ export function PrivateChatPane({
 
   const [quote, setQuote] = useState<ChatMessage | null>(null);
   const [peerTyping, setPeerTyping] = useState<Record<string, boolean>>({});
-  const [notice, setNotice] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // 精确查询当前对端好友关系；爱莉身份由独立配置接口返回。
   // friendsLoaded=false（加载中/失败）→ 视为未知，不禁用输入（后端 403 权威拦截）。
@@ -97,28 +95,19 @@ export function PrivateChatPane({
     let cancelled = false;
     void chatApi.getConversationMetadata(conversationId).then((conversation) => {
       if (!cancelled) useChatStore.getState().upsertConversation(conversation);
-    }).catch((error) => {
-      if (!cancelled) setNotice(error instanceof Error ? error.message : "加载会话资料失败");
-    });
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [conversationId, active]);
 
   // 打开私聊会话：拉历史 + 订阅 + 标已读
   useEffect(() => {
     if (!active) return;
-    let cancelled = false;
     useChatStore.getState().openConversation(conversationId);
     useMessageStore.getState().openBucket(conversationId);
     chatWS.subscribe([conversationId]);
     loadHistory(conversationId, undefined, true)
-      .then(async () => {
-        if (!cancelled) setHistoryError(null);
-      })
-      .catch((e) => {
-        if (!cancelled) setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败");
-      });
+      .catch(() => {});
     return () => {
-      cancelled = true;
       // 离开私聊（切换会话/返回消息中心）时清 activeId，避免残留导致
       // 其他会话的 message.new 被误判为"正在聊天"而 markRead（串会话）。
       const store = useChatStore.getState();
@@ -145,11 +134,10 @@ export function PrivateChatPane({
 
   const handleRecall = async (msg: ChatMessage) => {
     if (msg.status === "recalled") return;
-    setNotice(null);
     try {
       await recallMessage(conversationId, msg.id);
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "撤回失败");
+    } catch {
+      // 撤回失败静默
     }
   };
 
@@ -157,8 +145,8 @@ export function PrivateChatPane({
   const handlePoke = useCallback(async (targetUserId: string) => {
     try {
       await chatApi.sendPoke(conversationId, targetUserId);
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "戳一戳发送失败");
+    } catch {
+      // 戳一戳失败静默
     }
   }, [conversationId]);
 
@@ -221,22 +209,6 @@ export function PrivateChatPane({
         </div>
       </motion.header>
 
-      {historyError && (
-        <div className="chat-notice" role="alert">
-          <span>{historyError}</span>
-          <button type="button" className="btn btn-ghost" onClick={() => {
-            setHistoryError(null);
-            loadHistory(conversationId, undefined, true)
-              .catch((e) => setHistoryError(e instanceof Error ? e.message : "加载聊天记录失败"));
-          }}>重试</button>
-        </div>
-      )}
-      {notice && (
-        <div className="chat-notice" role="alert" onClick={() => setNotice(null)}>
-          {notice}（点击关闭）
-        </div>
-      )}
-
       <motion.div
         className="chat-messages-motion"
         data-motion-panel="chat-messages"
@@ -249,12 +221,7 @@ export function PrivateChatPane({
         elysiaUserId={elysiaUserId}
         hasMore={bucket?.hasMore ?? false}
         loading={bucket?.loading ?? false}
-        onLoadMore={() =>
-          loadMoreHistory(conversationId).catch((e) => {
-            setHistoryError(e instanceof Error ? e.message : "加载更早消息失败");
-            throw e;
-          })
-        }
+        onLoadMore={() => loadMoreHistory(conversationId)}
         onQuote={setQuote}
         onMarkRead={(m, exact) => active && exact ? markMessageReadExact(conversationId, m.id) : undefined}
         onMarkConversationRead={(throughSeq, excluded) => active ? markConversationReadThrough(conversationId, throughSeq, excluded) : undefined}

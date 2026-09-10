@@ -22,7 +22,6 @@ export function GroupCard({
   unread,
   isPinned,
   onOpen,
-  onError,
   revealDelay,
 }: {
   group: { id: string; title: string; avatar?: string; memberCount?: number };
@@ -34,8 +33,6 @@ export function GroupCard({
   isPinned?: boolean;
   /** 进入群聊场景（点击轮播区或底部行） */
   onOpen: () => void;
-  /** 置顶失败提示（父组件错误条）；缺省 alert 兜底 */
-  onError?: (message: string) => void;
   /** 逐条浮入延迟（ms）；undefined 则不挂 reveal-item（方案 §5-A2） */
   revealDelay?: number;
 }) {
@@ -69,7 +66,6 @@ export function GroupCard({
       <ConversationMoreMenu
         conversation={{ id: group.id, title: group.title, is_pinned: isPinned }}
         showDelete={false}
-        onError={onError}
       />
     </article>
   );

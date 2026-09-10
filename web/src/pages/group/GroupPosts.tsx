@@ -80,8 +80,6 @@ export function GroupPosts({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   // 发帖编辑器展开态：驱动上方遮罩（与输入面板平级，z 夹在列表与面板之间）
   const [editorExpanded, setEditorExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -106,14 +104,12 @@ export function GroupPosts({
     const revision = ++owner.revision;
     owner.busy = true;
     owner.nextFailed = false;
-    setLoadMoreError(null);
     if (append) setLoadingMore(true);
     else {
       if (!owner.loaded) { setGroupPosts([]); setHasMore(false); }
       setDataOwner(ownerKey);
       setLoading(true);
       setLoadingMore(false);
-      setError(null);
     }
     const current = () => requestOwner.current === owner && owner.active && owner.revision === revision;
     try {
@@ -155,11 +151,9 @@ export function GroupPosts({
         // 仅刷新（非追加）重播已入场卡片；追加只让新增卡片入场
         if (!append) setReplayNonce((n) => n + 1);
       }
-    } catch (e) {
+    } catch {
       if (!current()) return;
-      const message = e instanceof Error ? e.message : "加载群内帖子失败";
-      if (append) { owner.nextFailed = true; setLoadMoreError(message); }
-      else setError(message);
+      if (append) owner.nextFailed = true;
     } finally {
       if (current()) {
         owner.busy = false;
@@ -402,12 +396,7 @@ export function GroupPosts({
           <Link to="/posts/mine" className="btn btn-ghost">我的帖子</Link>
         </div>
         <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
-          {error && displayPosts.length === 0 && dataOwner === ownerKey ? (
-            <div className="group-scene-placeholder" role="alert">
-              <p className="placeholder-desc">{error}</p>
-              <button type="button" className="btn btn-ghost" onClick={load}>重试</button>
-            </div>
-          ) : showLoadingSkeleton ? (
+          {showLoadingSkeleton ? (
             <div className="group-posts-loading" aria-busy="true">
               <span className="skeleton group-posts-skel" style={{ height: 120 }} />
               <span className="skeleton group-posts-skel" style={{ height: 120 }} />
@@ -447,15 +436,11 @@ export function GroupPosts({
                   })}
                 </div>
               ))}
-              <StablePaginationFooter className="group-posts-loading-more" aria-hidden={!hasMore && !error && !loading}>
+              <StablePaginationFooter className="group-posts-loading-more" aria-hidden={!hasMore && !loading}>
                 {loading && <span className="home-load-text">正在刷新…</span>}
-                {error && <div className="chat-notice" role="alert">
-                  {error} <button type="button" className="btn btn-ghost" onClick={load}>重试刷新</button>
-                </div>}
-                {loadMoreError && <div className="chat-notice" role="alert">{loadMoreError}</div>}
                 {hasMore && <button type="button" className="btn btn-ghost"
                   disabled={loadingMore || loading} onClick={() => void loadMore()}>
-                  {loadingMore ? "正在加载更多…" : loadMoreError ? "重试加载更多" : "加载更多帖子"}
+                  {loadingMore ? "正在加载更多…" : "加载更多帖子"}
                 </button>}
               </StablePaginationFooter>
             </div>

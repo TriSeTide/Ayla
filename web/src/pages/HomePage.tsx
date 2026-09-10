@@ -55,8 +55,6 @@ export function HomePage() {
   const listLoading = groupPage.loading;
   const { layout, setLayout, recentGroupId } = useHomeStore((s) => s);
 
-  const listError = groupPage.error;
-  const [actionError, setActionError] = useState<string | null>(null);
   const [resolvedRecent, setResolvedRecent] = useState<string | null | undefined>(undefined);
   const [creatingGroup, setCreatingGroup] = useState(false);
   // §3.4 刷新动画：刷新完成后递增，key 变化强制群列表重挂载 → reveal 重播
@@ -107,7 +105,6 @@ export function HomePage() {
     await groupPage.refresh();
     setRevealNonce((n) => n + 1);
   }, [groupPage.refresh]);
-  const retryGroups = groupPage.refresh;
 
   // §3.4 RefreshFAB：注册当前页刷新回调（复用下拉刷新通道；cleanup 引用守卫，
   // 避免 AnimatePresence sync 转场期间旧页 cleanup 覆盖后注册的新页回调）
@@ -122,15 +119,6 @@ export function HomePage() {
 
   // 下拉刷新仅当滚动容器（.home-page）已在顶部时响应
   const isAtTop = useCallback(() => (homeRef.current?.scrollTop ?? 0) <= 0, []);
-
-  const listFailure = listError ? (
-    <div className="home-state" role="alert">
-      <p className="placeholder-desc">{listError}</p>
-      <button type="button" className="btn btn-ghost" onClick={() => void retryGroups()}>
-        重试
-      </button>
-    </div>
-  ) : null;
 
   // ---- 宽屏：重定向到最近群（无群空态引导） ----
   if (!isNarrow) {
@@ -150,7 +138,6 @@ export function HomePage() {
         </div>
       );
     }
-    if (listFailure) return <div className="home-page">{listFailure}</div>;
     return (
       <div className="home-wide-empty">
         <h2 className="placeholder-title">还没有加入群聊</h2>
@@ -177,20 +164,9 @@ export function HomePage() {
         <h1 className="home-title">群聊</h1>
         <LayoutSwitch layout={layout} onChange={setLayout} />
       </div>
-      {actionError && (
-        <div
-          className="messages-action-error"
-          role="alert"
-          onClick={() => setActionError(null)}
-        >
-          {actionError}（点击关闭）
-        </div>
-      )}
 
       {loading ? (
         <SkeletonCards />
-      ) : listError && groups.length === 0 ? (
-        listFailure
       ) : groups.length === 0 ? (
         <div className="home-state">
           <h2 className="placeholder-title">创建你的第一个群</h2>
@@ -215,7 +191,6 @@ export function HomePage() {
                     unread={g.unread_count + (g.post_unread_count ?? 0)}
                     isPinned={g.is_pinned}
                     onOpen={() => openGroup(g.id)}
-                    onError={setActionError}
                     revealDelay={staggerDelay(idx)}
                   />
                 ))}
@@ -233,7 +208,6 @@ export function HomePage() {
                     newEventText={act.lastEvent?.text}
                     isPinned={g.is_pinned}
                     onOpen={() => openGroup(g.id)}
-                    onError={setActionError}
                     revealDelay={staggerDelay(idx)}
                   />
                 );
