@@ -10,6 +10,10 @@
   `ELYSIA_BRIDGE_INLINE`（默认 True）控制，无需第二个进程；
 - 启动前检查目标端口是否已被占用：被占用则报告真实监听进程 PID（netstat
   查询），不偷偷启动第二实例；
+- **启动前自动应用数据库迁移**（`manage.py migrate --no-input`）：Django
+  runserver 只警告不自动迁移（2026-09-10 事故：迁移未执行 + 新代码访问
+  新字段 → 生产 500，见 docs/report/媒体链路500-迁移未执行-根因与修复）；
+  迁移失败拒绝启动（显式失败，避免"新代码 + 旧 schema"静默上线）；
 - Ctrl+C（SIGINT）→ runserver 自身优雅退出（内嵌 bridge 随 lifespan
   shutdown 停止）；
 - runserver 默认 `--noreload`：避免 reloader 分裂出的 worker 与启动器
@@ -76,6 +80,32 @@ def find_listener_pid(port: int) -> str:
     return ""
 
 
+def run_migrations(python: str) -> bool:
+    """启动前自动应用数据库迁移（幂等：已应用的迁移自动跳过）。
+
+    Django runserver 只打印未应用迁移警告、不自动执行（Django 5.2 源码
+    BaseCommand.check_migrations 仅提示）。2026-09-10 事故证明警告会被忽略：
+    迁移 0004 未执行 + 新代码访问新字段 → 生产 500。因此启动器显式执行
+    `migrate --no-input`，失败拒绝启动（显式失败，不静默上线旧 schema）。
+    """
+    cmd = [python, "manage.py", "migrate", "--no-input"]
+    print(f"[launcher] 应用数据库迁移: {' '.join(cmd)}", flush=True)
+    try:
+        proc = subprocess.run(cmd, cwd=str(BACKEND_DIR))
+    except KeyboardInterrupt:
+        print("[launcher] 迁移被中断，不启动", file=sys.stderr, flush=True)
+        return False
+    if proc.returncode != 0:
+        print(
+            f"[launcher] 数据库迁移失败（退出码 {proc.returncode}），拒绝启动。"
+            "请修复迁移问题后重试。",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    return True
+
+
 def main() -> int:
     host = os.environ.get("AYLA_HOST", DEFAULT_HOST)
     port = int(os.environ.get("AYLA_PORT", DEFAULT_PORT))
@@ -90,6 +120,9 @@ def main() -> int:
             file=sys.stderr,
             flush=True,
         )
+        return 1
+
+    if not run_migrations(python):
         return 1
 
     runserver_cmd = [python, "manage.py", "runserver", "--noreload", f"{host}:{port}"]
