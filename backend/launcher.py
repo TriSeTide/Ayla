@@ -80,6 +80,58 @@ def find_listener_pid(port: int) -> str:
     return ""
 
 
+def _unapplied_migrations() -> list[str]:
+    """轻量检查未应用迁移（不加载 Django，避免每次启动 2~16 秒 migrate 开销）。
+
+    对比 django_migrations 表与磁盘迁移文件（apps/*/migrations/*.py），
+    返回未应用的 "app.name" 列表。数据库不可达/表不存在时返回 ["<unknown>"]，
+    表示需要跑完整 migrate（由 migrate 报真实错误并拒绝启动）。
+    """
+    import glob as _glob
+
+    # 读 .env 数据库配置（与 config/settings.py 的 environ 读取保持一致）
+    env: dict[str, str] = {}
+    env_path = BACKEND_DIR / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip().strip('"').strip("'")
+
+    try:
+        import pymysql
+
+        conn = pymysql.connect(
+            host=env.get("DB_HOST", "127.0.0.1"),
+            port=int(env.get("DB_PORT", "3306")),
+            user=env.get("DB_USER", "root"),
+            password=env.get("DB_PASSWORD", ""),
+            database=env.get("DB_NAME", "ayla"),
+            connect_timeout=3,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT app, name FROM django_migrations")
+                applied = {(app, name) for app, name in cur.fetchall()}
+        finally:
+            conn.close()
+    except Exception:
+        # 数据库不可达 / django_migrations 表不存在：交给完整 migrate 报真实错误
+        return ["<unknown>"]
+
+    on_disk: set[tuple[str, str]] = set()
+    for path in _glob.glob(str(BACKEND_DIR / "apps" / "*" / "migrations" / "*.py")):
+        filename = path.replace("\\", "/").rsplit("/", 1)[-1]
+        if filename == "__init__.py":
+            continue
+        app = path.replace("\\", "/").split("/apps/")[-1].split("/migrations/")[0]
+        on_disk.add((app, filename[:-3]))
+
+    return [f"{app}.{name}" for app, name in sorted(on_disk - applied)]
+
+
 def run_migrations(python: str) -> bool:
     """启动前自动应用数据库迁移（幂等：已应用的迁移自动跳过）。
 
@@ -87,7 +139,16 @@ def run_migrations(python: str) -> bool:
     BaseCommand.check_migrations 仅提示）。2026-09-10 事故证明警告会被忽略：
     迁移 0004 未执行 + 新代码访问新字段 → 生产 500。因此启动器显式执行
     `migrate --no-input`，失败拒绝启动（显式失败，不静默上线旧 schema）。
+
+    性能：先用轻量检查（pymysql 对比 django_migrations 表与磁盘迁移文件，
+    不加载 Django，<1s）判断是否有未应用迁移；无则跳过完整 migrate
+    （完整 migrate 冷启动约 16s，不能每次启动都付）。
     """
+    pending = _unapplied_migrations()
+    if not pending:
+        print("[launcher] 数据库迁移已是最新，跳过", flush=True)
+        return True
+    print(f"[launcher] 检测到未应用迁移: {', '.join(pending)}", flush=True)
     cmd = [python, "manage.py", "migrate", "--no-input"]
     print(f"[launcher] 应用数据库迁移: {' '.join(cmd)}", flush=True)
     try:
