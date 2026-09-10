@@ -513,7 +513,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.9 搜索框与结果
 
-- 顶栏搜索框（两形态）：胶囊，底 `--surface`、1px `--ice-300` 描边、圆角 999px，左搜索图标 `--text-secondary`；focus 边框转 `--glow-500` + `--glow-shadow`（200ms）
+- 顶栏搜索框（两形态）：胶囊，底 `--surface`、1px `--ice-300` 描边、圆角 999px；focus 边框转 `--glow-500` + `--glow-shadow`（200ms）。搜索图标为**右侧提交钮**（放大镜，`--indigo-700` 主交互色，40px 圆形触达，hover 浅冰蓝底），点击与回车同通道提交进搜索页；有输入时图标左侧显示清除 ×（`--text-secondary`，hover 转主色）。两形态同构：输入框 → 清除 ×（有词时）→ 放大镜提交钮
 - 宽屏内联下拉结果面板：`--glass-bg-strong` + `--glass-filter` + `--glass-shadow` + 16px 圆角，宽 360px；分组（用户/群聊/直播间/帖子/桌游室）组头 Micro Tag 11px Fredoka `--text-secondary` 大写，每组 ≤3 条 + 「查看更多」
 - 窄屏独立搜索页：TopBar 变搜索输入态（自动聚焦）；历史搜索胶囊 chips（`--ice-100` 底 `--text-primary` 字，可清空）
 - 搜索提供“全部、用户、群聊、帖子、直播间、语音房、桌游室”七个筛选。全部保留六类分组（用户/群聊/帖子/直播间/语音房/桌游室）和各组独立续页，类型筛选仅显示对应类别。查询、分类、账号共同隔离缓存与滚动位置；切换新分类从顶部开始，返回已浏览分类恢复原位置，旧请求不得落到新分类。

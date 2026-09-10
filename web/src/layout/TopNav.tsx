@@ -3,8 +3,8 @@
  *
  * 玻璃 64px 常驻：左起 头像（40px 带光环 → 个人界面）→ 一级模块链
  * （当前模块 --text-primary + 底部 2px --glow-500 指示条）→ 消息（未读徽标，
- * F8 接线）→ 搜索框（240px 胶囊，回车进 /search；内联下拉结果面板属 F9）
- * → 更多菜单（个人主页 / 退出登录；个性化 / 扫一扫 / 收藏属 F10）。
+ * F8 接线）→ 搜索框（240px 胶囊，回车或点击右侧放大镜进 /search；内联下拉
+ * 结果面板属 F9）→ 更多菜单（个人主页 / 退出登录；个性化 / 扫一扫 / 收藏属 F10）。
  */
 import { useEffect, useId, useRef, useState } from "react";
 import type { ComponentType, FormEvent, ReactNode, SVGProps } from "react";
@@ -182,7 +182,6 @@ export function TopNav({
 
         <div className="top-nav-search-wrap">
           <form className="top-nav-search" role="search" onSubmit={submitSearch}>
-            <IconSearch width={16} height={16} />
             <input
               ref={searchInputRef}
               value={query}
@@ -202,6 +201,13 @@ export function TopNav({
                 <IconClose width={14} height={14} />
               </button>
             )}
+            <button
+              type="submit"
+              className="search-box-submit"
+              aria-label="搜索"
+            >
+              <IconSearch width={16} height={16} />
+            </button>
           </form>
           {searchOpen && (searchError || hasDropResults) && (
             <div className="top-nav-search-panel" role="listbox">

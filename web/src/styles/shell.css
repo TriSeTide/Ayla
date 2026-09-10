@@ -311,14 +311,15 @@
   background: var(--glow-500);
 }
 
-/* 搜索胶囊（design.md §12.9）：focus 转辉光边；F9 接内联下拉结果面板 */
+/* 搜索胶囊（design.md §12.9）：focus 转辉光边；F9 接内联下拉结果面板。
+   无左侧装饰放大镜（搜索图标为右侧提交钮，同窄屏输入态），padding 收紧给输入框留宽 */
 .top-nav-search {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   width: 240px;
   height: 40px;
-  padding: 0 var(--sp-4);
+  padding: 0 var(--sp-3);
   border-radius: var(--radius-input);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);

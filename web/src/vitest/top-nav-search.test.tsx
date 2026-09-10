@@ -170,6 +170,25 @@ describe("TopNav 宽屏搜索（U10 + 清除键）", () => {
     expect(new URLSearchParams(target.textContent!).has("type")).toBe(false);
   });
 
+  it("点击右侧放大镜提交钮进搜索页（与回车同通道）", () => {
+    renderWide("/home");
+    const input = screen.getByRole("textbox", { name: "全局搜索" });
+    fireEvent.change(input, { target: { value: "冰樱" } });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    const target = screen.getByTestId("search-location");
+    expect(target).toHaveAttribute("data-path", "/search");
+    expect(new URLSearchParams(target.textContent!).get("q")).toBe("冰樱");
+    expect(new URLSearchParams(target.textContent!).has("type")).toBe(false);
+  });
+
+  it("搜索页点击提交钮保留已选分类", () => {
+    renderWide("/search?q=冰樱&type=post");
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    const params = new URLSearchParams(screen.getByTestId("search-location").textContent!);
+    expect(params.get("q")).toBe("冰樱");
+    expect(params.get("type")).toBe("post");
+  });
+
   it("输入文本显示清除键，点击清空并保持聚焦", () => {
     renderWide("/home");
     const input = screen.getByRole("textbox", { name: "全局搜索" }) as HTMLInputElement;
