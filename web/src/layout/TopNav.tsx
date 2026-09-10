@@ -7,12 +7,12 @@
  * → 更多菜单（个人主页 / 退出登录；个性化 / 扫一扫 / 收藏属 F10）。
  */
 import { useEffect, useId, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ComponentType, FormEvent, ReactNode, SVGProps } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { search as searchApi } from "../api/search";
 import type { SearchResults } from "../api/types";
 import { Avatar } from "../components/Avatar";
-import { IconClose, IconDots, IconMessage, IconSearch } from "../components/icons";
+import { IconClose, IconDots, IconGame, IconHome, IconMessage, IconMic, IconPost, IconSearch, IconVideo } from "../components/icons";
 import { useAuthStore } from "../stores/auth";
 import { usePresenceStore } from "../stores/presence";
 import { presenceOnline, withLiveStatus } from "../utils/displayStatus";
@@ -20,6 +20,15 @@ import type { ModuleKey } from "./shellConfig";
 import { PRIMARY_MODULES } from "./shellConfig";
 import { AuroraquaNavHighlight } from "../components/motion/AuroraquaNavHighlight";
 import { searchLocation } from "../utils/searchLocation";
+
+/** 一级模块图标（与 BottomTabs 的 TAB_ORDER 图标映射同源，视觉一致） */
+const MODULE_ICONS: Record<ModuleKey, ComponentType<SVGProps<SVGSVGElement>>> = {
+  home: IconHome,
+  voice: IconMic,
+  live: IconVideo,
+  posts: IconPost,
+  games: IconGame,
+};
 
 export function TopNav({
   moduleKey,
@@ -133,17 +142,21 @@ export function TopNav({
       </Link>
 
       <nav className="top-nav-modules" aria-label="一级模块">
-        {PRIMARY_MODULES.map((m) => (
-          <Link
-            key={m.key}
-            to={m.path}
-            className={`top-nav-module has-auroraqua-highlight ${moduleKey === m.key ? "is-active" : ""}`}
-            aria-current={moduleKey === m.key ? "page" : undefined}
-          >
-            {moduleKey === m.key && <AuroraquaNavHighlight id={selectionId} />}
-            <span className="auroraqua-nav-label">{m.label}</span>
-          </Link>
-        ))}
+        {PRIMARY_MODULES.map((m) => {
+          const Icon = MODULE_ICONS[m.key];
+          return (
+            <Link
+              key={m.key}
+              to={m.path}
+              className={`top-nav-module has-auroraqua-highlight ${moduleKey === m.key ? "is-active" : ""}`}
+              aria-current={moduleKey === m.key ? "page" : undefined}
+            >
+              {moduleKey === m.key && <AuroraquaNavHighlight id={selectionId} />}
+              <Icon width={16} height={16} className="top-nav-module-icon" />
+              <span className="auroraqua-nav-label">{m.label}</span>
+            </Link>
+          );
+        })}
       </nav>
 
       {/* 品牌 logo：导航条水平居中（绝对定位于两端集群之间的空白区），点击回主页；

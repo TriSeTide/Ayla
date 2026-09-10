@@ -209,6 +209,15 @@
   text-decoration: none;
 }
 
+/* 模块图标：跟随文字颜色（未选中 text-secondary / 选中 text-primary），与文字垂直居中；
+   盒模型已居中，但文字行高留白使字形视觉中心偏上、Lucide 图形重心偏下，图标上移 2px 对齐视觉重心 */
+.top-nav-module-icon {
+  flex: none;
+  margin-right: 6px;
+  color: inherit;
+  translate: 0 -2px;
+}
+
 .top-nav-module.is-active {
   color: var(--text-primary);
 }
@@ -254,8 +263,9 @@
 }
 
 /* 屏幕变窄到中间空白不足以容纳 logo（与两端集群贴边）时隐藏；
-   实测 ≤1000px 时空隙 <58px，视觉拥挤 */
-@media (max-width: 1000px) {
+   模块链加图标后左侧集群变宽，实测 ≤1240px 时左间隙 <58px（1200px 时 47px、1100px 时重叠 3px），
+   断点从 1000px 提高到 1240px；1250px 时左间隙 72px 正常 */
+@media (max-width: 1240px) {
   .top-nav-logo {
     display: none;
   }
