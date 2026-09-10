@@ -51,6 +51,7 @@ export function CommentList({
   hideComposer = false,
   revealItems = false,
   suppressEntry = false,
+  replayKey,
 }: {
   comments: PostComment[];
   /** body + 图片 mediaId 列表一起提交（图文同发） */
@@ -65,10 +66,12 @@ export function CommentList({
   /** 详情页入场：每条评论逐条浮入（stagger，直播间节奏） */
   revealItems?: boolean;
   suppressEntry?: boolean;
+  /** §3.4 刷新动画：变化时已入场评论整批重播浮入（第一页也有动画） */
+  replayKey?: unknown;
 }) {
   const listRef = useRef<HTMLUListElement>(null);
   const entered = useRef(false);
-  useListEntryMotion(listRef, ".comment-item", suppressEntry || (!revealItems && !entered.current));
+  useListEntryMotion(listRef, ".comment-item", suppressEntry || (!revealItems && !entered.current), replayKey);
   useLayoutEffect(() => { entered.current = true; }, []);
   const byId = new Map(comments.map((c) => [c.id, c]));
   const currentUserId = useAuthStore((s) => s.currentUser?.id);

@@ -54,6 +54,8 @@ export function usePostComments(postId: number) {
     restored.current = snapshots.has(key);
   }
   const [resumeEntry, setResumeEntry] = useState(false);
+  // §3.4 刷新动画：刷新完成后递增，已入场评论整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
   const valid = useCallback((candidate: typeof owner.current) => candidate.active && candidate === owner.current && candidate.epoch === ensureAccount(), []);
   const update = useCallback((next: CommentsPage | ((current: CommentsPage) => CommentsPage)) => {
     const value = typeof next === "function" ? next(stateRef.current) : next;
@@ -93,7 +95,11 @@ export function usePostComments(postId: number) {
       update({ items: merge(preserved, rows), cursor: result.next_cursor, hasMore: result.has_more,
         total: current.mutation > mutationAtStart ? latest.total : result.total,
         loaded: true, loading: false, error: null, errorKind: null, updatedAt: Date.now(), revision: latest.revision + 1 });
-      if (page.loaded) setResumeEntry(true);
+      if (page.loaded) {
+        setResumeEntry(true);
+        // 仅刷新（非首次/非追加）重播已入场评论；追加只让新增评论入场
+        if (!append) setReplayNonce((n) => n + 1);
+      }
     } catch (error) {
       if (!valid(current) || current.request !== requestId) return;
       update((latest) => ({ ...latest, loading: false, error: error instanceof Error ? error.message : "加载评论失败", errorKind: append ? "append" : "first" }));
@@ -138,7 +144,7 @@ export function usePostComments(postId: number) {
   }, [request, postId, valid, upsert, remove]);
 
   const visibleState = stateRef.current;
-  return { ...visibleState, key, suppressEntry: restored.current && !resumeEntry,
+  return { ...visibleState, key, suppressEntry: restored.current && !resumeEntry, replayNonce,
     stale: visibleState.loaded && Date.now() - visibleState.updatedAt > 60_000,
     loadMore: () => request(true), refresh: () => request(false),
     retry: () => request(stateRef.current.errorKind === "append"), upsert, remove };

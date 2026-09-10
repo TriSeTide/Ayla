@@ -93,6 +93,8 @@ export function GroupPosts({
   const [skipRevealRestoreKey, setSkipRevealRestoreKey] = useState<string | null>(null);
   // 恢复时现有卡静止；之后实际新增卡片可独立进入。
   const [revealAfterRefresh, setRevealAfterRefresh] = useState(false);
+  // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
 
   const requestPage = useCallback(async (append: boolean) => {
     const owner = requestOwner.current;
@@ -150,6 +152,8 @@ export function GroupPosts({
       if (listActive.current && wasLoaded) {
         setSkipRevealRestoreKey(null);
         setRevealAfterRefresh(true);
+        // 仅刷新（非追加）重播已入场卡片；追加只让新增卡片入场
+        if (!append) setReplayNonce((n) => n + 1);
       }
     } catch (e) {
       if (!current()) return;
@@ -379,7 +383,7 @@ export function GroupPosts({
   );
   useListEntryMotion(listRef, ".posts-feed-item", (
     postId != null || ((restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh)
-  ));
+  ), replayNonce);
 
   if (postId) {
     return <PostDetailPage groupId={groupId} />;

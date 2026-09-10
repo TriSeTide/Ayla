@@ -45,7 +45,9 @@ export function GroupVoice({
   // 删除语音房确认弹窗
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const hubRef = useRef<HTMLDivElement>(null);
-  useListEntryMotion(hubRef, ".voice-channel-card-wrap");
+  // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
+  useListEntryMotion(hubRef, ".voice-channel-card-wrap", false, replayNonce);
   // 记录上次已触发 join 的路由频道 id：仅当 routeChannelId 变化时才 join，
   // 避免 leave 清空 currentChannelId 后、navigate 尚未更新路由的窗口里被 effect 误判
   // 为"需要重新加入"而把用户拉回房间（"离开不了"）。
@@ -66,16 +68,21 @@ export function GroupVoice({
   } = useVoiceChannel(routeChannelId ?? null);
 
   const refresh = directory.refresh;
+  // 刷新键/下拉刷新共用：刷新完成后重播已入场卡片浮入
+  const refreshWithReplay = useCallback(async () => {
+    await refresh();
+    setReplayNonce((n) => n + 1);
+  }, [refresh]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
-    useShellStore.getState().registerRefresh(refresh);
+    useShellStore.getState().registerRefresh(refreshWithReplay);
     return () => {
-      if (useShellStore.getState().refreshCallback === refresh) {
+      if (useShellStore.getState().refreshCallback === refreshWithReplay) {
         useShellStore.getState().registerRefresh(null);
       }
     };
-  }, [refresh]);
+  }, [refreshWithReplay]);
 
   // 上拉刷新仅当滚动容器（.group-voice）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
@@ -238,7 +245,7 @@ export function GroupVoice({
           </div>
         </div>
       ) : (
-        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refreshWithReplay}>
           <VoiceChannelList
             channels={groupChannels}
             currentChannelId={currentChannelId}

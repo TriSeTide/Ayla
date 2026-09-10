@@ -688,6 +688,7 @@ function PostDetailContent({ groupId }: { groupId?: string }) {
             hideComposer
             revealItems={usesRoomEntryAnimation}
             suppressEntry={commentPage.suppressEntry}
+            replayKey={commentPage.replayNonce}
           />}
           <StablePaginationFooter className="home-load-more" aria-live="polite">
             {commentPage.error ? <div role="alert"><span>{commentPage.error}</span><button type="button" className="btn btn-ghost" onClick={() => void commentPage.retry()}>{commentPage.errorKind === "append" ? "重试加载更多评论" : "重试评论"}</button></div>

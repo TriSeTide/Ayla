@@ -21,18 +21,25 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
   const { items: rooms, loading, error, refresh } = directory;
   const [current, setCurrent] = useState<GameRoom | null>(null);
   const hubRef = useRef<HTMLDivElement>(null);
-  useListEntryMotion(hubRef, ".game-room-card-wrap");
+  // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
+  const [replayNonce, setReplayNonce] = useState(0);
+  useListEntryMotion(hubRef, ".game-room-card-wrap", false, replayNonce);
   const load = refresh;
+  // 刷新键/下拉刷新共用：刷新完成后重播已入场卡片浮入
+  const refreshWithReplay = useCallback(async () => {
+    await refresh();
+    setReplayNonce((n) => n + 1);
+  }, [refresh]);
 
   // §3.4 RefreshFAB：注册当前页刷新回调（引用守卫见 HomePage）
   useEffect(() => {
-    useShellStore.getState().registerRefresh(refresh);
+    useShellStore.getState().registerRefresh(refreshWithReplay);
     return () => {
-      if (useShellStore.getState().refreshCallback === refresh) {
+      if (useShellStore.getState().refreshCallback === refreshWithReplay) {
         useShellStore.getState().registerRefresh(null);
       }
     };
-  }, [refresh]);
+  }, [refreshWithReplay]);
 
   // 上拉刷新仅当滚动容器（.group-games）已在顶部时响应
   const isAtTop = useCallback(() => (hubRef.current?.scrollTop ?? 0) <= 0, []);
@@ -99,7 +106,7 @@ export function GroupGames({ groupId, onExit }: { groupId: string; onExit: () =>
           </button>
         </div>
       ) : (
-        <PullToRefresh isAtTop={isAtTop} onRefresh={refresh}>
+        <PullToRefresh isAtTop={isAtTop} onRefresh={refreshWithReplay}>
           <div className="group-games-grid">
             {rooms.map((r) => (
               <GameRoomCard
