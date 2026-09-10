@@ -584,13 +584,15 @@
 
 /* ================= 一级帖子 tab（PostsHubPage） ================= */
 
-/* 滚动容器已迁移到 .directory-content（directory-page 布局）；根元素只负责
-   flex column 骨架，overflow 由 directory-filters.css 统一接管。 */
+/* 一级帖子页滚动容器已迁移到 .directory-content（directory-page 布局），
+   根元素 overflow 由 directory-filters.css 的 overflow:hidden 覆盖；
+   MyPostsPage（/posts/mine、/user/:id/posts）仍以本元素为滚动容器，必须保留 overflow-y:auto。 */
 
 .posts-hub {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .my-posts-head {
@@ -638,15 +640,31 @@
     width: 100%;
     margin: 0 auto;
   }
+
+  /* 我的帖子/他人帖子界面：内容流保持 680px 居中（一级帖子页在 directory-content 内，
+     由 directory-filters.css 的 :is() 规则覆盖为占满，不受此限宽影响） */
+  .posts-feed,
+  .posts-skeleton {
+    max-width: 680px;
+    width: 100%;
+    margin: 0 auto;
+  }
 }
 
 /* 宽屏双列瀑布流（>1024px，方案 §4-U2）：两列等宽错排，较矮列优先由 JS 分配。
-   左右留白由 .directory-content 统一提供（directory-page 布局）。 */
+   一级帖子页左右留白由 .directory-content 统一提供（directory-page 布局）；
+   我的帖子/他人帖子界面保持 1200px 居中。 */
 @media (min-width: 1025px) {
   .my-posts-head {
     max-width: 1200px;
     padding-left: var(--sp-6);
     padding-right: var(--sp-6);
+  }
+
+  .posts-feed,
+  .posts-skeleton {
+    max-width: 1200px;
+    padding: var(--sp-4) var(--sp-6);
   }
 
   .posts-skeleton {
@@ -669,6 +687,12 @@
   /* 加载更多提示横跨两列底部 */
   .posts-feed.is-masonry .home-load-more {
     flex-basis: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .posts-feed {
+    max-width: 100%;
   }
 }
 
