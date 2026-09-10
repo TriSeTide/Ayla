@@ -50,6 +50,77 @@
   .profile-page-split .profile-actions { flex-wrap: wrap; }
   .profile-page-split .profile-identity { flex-wrap: wrap; }
 
+  /* ===== 侧栏模式：照搬语音列表 directory-page 布局（directory-filters.css） =====
+     页面根 flex column + overflow hidden + 底部 0；中间层 flex row 不裁剪；
+     左侧侧栏 align-self:stretch + max-height:100% 自适应高度自滚动；
+     右侧内容区 flex:1 独立滚动。 */
+  .profile-page-split:has(.profile-main) {
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* 滚动裁切线延伸到视口物理底边；侧栏底部呼吸由自身 margin 承担 */
+    padding: var(--sp-3) var(--sp-3) 0;
+  }
+
+  .profile-page-split:has(.profile-main) > .profile-column {
+    display: flex;
+    flex-direction: row;
+    flex: 1 1 0;
+    gap: var(--sp-3);
+    min-height: 0;
+    min-width: 0;
+    align-items: stretch;
+    margin: 0;
+  }
+
+  /* 左侧资料侧栏：与 .directory-filters 同款（stretch 自适应高度 + 自滚动 + 底部 margin 呼吸） */
+  .profile-page-split:has(.profile-main) .profile-side {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    gap: var(--sp-2);
+    width: clamp(280px, 32%, 340px);
+    max-height: 100%;
+    min-width: 0;
+    flex: 0 0 clamp(280px, 32%, 340px);
+    margin: 0 0 var(--sp-3);
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-padding: var(--sp-3);
+    overscroll-behavior: contain;
+  }
+
+  /* 右侧内容区：与 .directory-content 同款（flex:1 独立滚动 + 底部呼吸） */
+  .profile-page-split:has(.profile-main) .profile-main {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    padding: var(--sp-2) var(--sp-2) var(--sp-6);
+  }
+
+  /* 侧栏资料卡铺满侧栏高度：区块间距放宽、表单铺满中间、操作沉底 */
+  .profile-page-split:has(.profile-main) .profile-side .profile-card {
+    flex: 1 0 auto;
+    min-height: 0;
+    gap: var(--sp-6);
+  }
+
+  .profile-page-split:has(.profile-main) .profile-side .profile-form {
+    flex: 1;
+    gap: var(--sp-4);
+  }
+
+  .profile-page-split:has(.profile-main) .profile-side .profile-actions {
+    margin-top: auto;
+  }
+
   /* Private profiles and loading/error states have no empty second panel. */
   .profile-page-split > .profile-column:not(:has(.profile-main)) {
     grid-template-columns: minmax(0, 640px);
