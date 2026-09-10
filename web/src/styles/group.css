@@ -488,7 +488,6 @@
   width: 72px;
   display: flex;
   flex-direction: column;
-  padding: var(--sp-4) 0;
   background: var(--glass-bg);
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
@@ -510,11 +509,18 @@
   flex-direction: column;
   align-items: center;
   gap: var(--sp-3);
-  /* 顶部 4px 让首个头像的置顶 pin 图标（越出头像 -3px）不被裁剪；
-     overflow-x:hidden 禁止头像/图标的横向溢出产生滚动条 */
-  padding: var(--sp-1) 0 0;
+  /* 顶部 20px（原 rail 16px + 列表 4px）还原首个头像原本的上方高度，
+     pin 与光环均不裁剪；overflow-x:hidden 禁止横向溢出产生滚动条；
+     底部 77px（53px 加号 + 8px 间隙 + 16px 底距）让列表占满整列、
+     头像可从悬浮加号后方穿透，滚动终点时最后一个头像完整停在加号上方 */
+  padding: calc(var(--sp-4) + var(--sp-1)) 0 77px;
   overflow-y: auto;
   overflow-x: hidden;
+  /* 上 20px / 下 16px 滚动渐隐：头像滚到列表边缘时淡出；玻璃底由 rail 持有，不受遮罩影响。
+     圆角裁剪贴合 rail 内缘（16px 圆角 - 1px 边框），pin 等内容不再超出侧栏圆角容器 */
+  clip-path: inset(0 round calc(var(--radius-card) - 1px));
+  mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 16px), transparent 100%);
 }
 
 .server-item {
@@ -636,27 +642,33 @@
   cursor: default;
 }
 
+/* 加号悬浮在头像列表之上（需求：头像向下穿透，不再有列表底部分隔/裁切边界）；
+   空白处放行列表滚动与点击，只有加号本身可交互 */
 .server-rail-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--sp-4);
+  z-index: 5;
   display: flex;
   justify-content: center;
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--glass-border);
-  margin-top: var(--sp-2);
+  pointer-events: none;
 }
 
-/* 创建群聊加号（需求：左下角头像键改加号；56px 圆形玻璃底同 FAB 视觉） */
+/* 创建群聊加号（需求：左下角头像键改加号；53px 同群头像含光环的视觉直径） */
 .server-create-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 53px;
+  height: 53px;
   border-radius: var(--radius-pill);
   background: var(--glass-bg-strong);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
+  pointer-events: auto;
   transition: box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 
