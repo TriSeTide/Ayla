@@ -45,9 +45,9 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLElement.prototype, "animate");
 });
 
-function List({ ids, suppressed = false, label = "" }: { ids: string[]; suppressed?: boolean; label?: string }) {
+function List({ ids, suppressed = false, label = "", replayKey }: { ids: string[]; suppressed?: boolean; label?: string; replayKey?: number }) {
   const ref = useRef<HTMLDivElement>(null);
-  useListEntryMotion(ref, ".list-item", suppressed);
+  useListEntryMotion(ref, ".list-item", suppressed, replayKey);
   return (
     <div ref={ref} data-testid="list">
       {ids.map((id) => <button key={id} className="list-item" data-testid={id}>{id}{label}</button>)}
@@ -151,10 +151,13 @@ describe("列表入场动画只属于本批新增节点", () => {
     expect(animations).toHaveLength(0);
     rerender(<List ids={["a", "b", "c"]} />);
     expect(animations.map((animation) => animation.node)).toEqual([screen.getByTestId("c")]);
+    // 进入抑制期不中途取消已开始的动画（节点仍在文档中 → 动画继续跑完）；
+    // 刷新重播动画可能正在运行，中途取消会让它卡住。
     rerender(<List ids={["a", "b", "c"]} suppressed />);
-    expect(animations[0].cancel).toHaveBeenCalledTimes(1);
+    expect(animations[0].cancel).not.toHaveBeenCalled();
     expect(screen.getByTestId("c")).toBeVisible();
     unmount();
+    // 卸载时统一清理
     expect(animations[0].cancel).toHaveBeenCalledTimes(1);
   });
 
@@ -180,5 +183,93 @@ describe("列表入场动画只属于本批新增节点", () => {
     expect(screen.getByTestId("a").style.opacity).toBe("");
     expect(screen.getByTestId("a").style.transform).toBe("");
     expect(animations).toHaveLength(0);
+  });
+});
+
+describe("刷新重播（replayKey）", () => {
+  it("replayKey 变化时已入场卡片整批重播，新增卡片只入场一次", () => {
+    const { rerender } = render(<List ids={["a", "b"]} replayKey={0} />);
+    const first = screen.getByTestId("a"), second = screen.getByTestId("b");
+    expect(activeFor(first)).toHaveLength(1);
+    expect(activeFor(second)).toHaveLength(1);
+    act(() => [...animations].forEach((animation) => animation.onfinish?.()));
+    const beforeReplay = animations.length;
+
+    // 刷新：保留 a/b，新增 c；replayKey 递增 → a/b 重播、c 只入场一次
+    rerender(<List ids={["a", "b", "c"]} replayKey={1} />);
+    expect(screen.getByTestId("a")).toBe(first);
+    expect(screen.getByTestId("b")).toBe(second);
+    const replayed = animations.slice(beforeReplay);
+    // 先重播已入场 a/b（0、50 错峰），主 effect 随后让新增 c 入场（delay 0）
+    expect(replayed.map((animation) => animation.node)).toEqual([first, second, screen.getByTestId("c")]);
+    expect(replayed.map((animation) => animation.options.delay)).toEqual([0, 50, 0]);
+    expect(activeFor(first)).toHaveLength(1);
+    expect(activeFor(second)).toHaveLength(1);
+    expect(activeFor(screen.getByTestId("c"))).toHaveLength(1);
+  });
+
+  it("replayKey 不变时普通更新不重播；再次变化才重播", () => {
+    const { rerender } = render(<List ids={["a", "b"]} replayKey={0} />);
+    act(() => [...animations].forEach((animation) => animation.onfinish?.()));
+    const count = animations.length;
+    rerender(<List ids={["a", "b"]} replayKey={0} label="更新" />);
+    expect(animations).toHaveLength(count);
+    rerender(<List ids={["a", "b"]} replayKey={1} />);
+    expect(animations.length).toBeGreaterThan(count);
+    expect(animations.slice(count).map((animation) => animation.node)).toEqual([screen.getByTestId("a"), screen.getByTestId("b")]);
+  });
+
+  it("首次挂载不因初始 replayKey 重播", () => {
+    render(<List ids={["a", "b"]} replayKey={7} />);
+    expect(activeFor(screen.getByTestId("a"))).toHaveLength(1);
+    expect(activeFor(screen.getByTestId("b"))).toHaveLength(1);
+  });
+
+  it("抑制期仍重播（切换选项卡后刷新动画不失效）；只有 reduced-motion 阻止", () => {
+    const { rerender } = render(<List ids={["a", "b"]} replayKey={0} />);
+    act(() => [...animations].forEach((animation) => animation.onfinish?.()));
+    const count = animations.length;
+    // suppressed = 命中历史滚动位置。切换分类选项卡时 onChange 会写入位置记录，
+    // 切回该 tab 后 restoring 持续为真；若用它抑制重播，切 tab 后刷新将永远无动画。
+    rerender(<List ids={["a", "b"]} replayKey={1} suppressed />);
+    expect(animations).toHaveLength(count + 2);
+    // reduced-motion 仍关闭重播
+    setReduced(true);
+    rerender(<List ids={["a", "b"]} replayKey={2} suppressed />);
+    expect(animations).toHaveLength(count + 2);
+    setReduced(false);
+    rerender(<List ids={["a", "b"]} replayKey={3} suppressed />);
+    expect(animations.slice(count + 2).map((animation) => animation.node))
+      .toEqual([screen.getByTestId("a"), screen.getByTestId("b")]);
+  });
+
+  it("抑制期不中途取消刷新重播动画（避免刷新动画卡住）", () => {
+    const { rerender } = render(<List ids={["a", "b"]} replayKey={0} />);
+    act(() => [...animations].forEach((animation) => animation.onfinish?.()));
+    const count = animations.length;
+    // 刷新重播启动（suppressed 同时为真，模拟切 tab 后命中历史位置时刷新）
+    rerender(<List ids={["a", "b"]} replayKey={1} suppressed />);
+    const replayed = animations.slice(count);
+    expect(replayed).toHaveLength(2);
+    // 后续渲染（主 effect 每次 commit 都跑）不得取消正在跑的刷新重播动画
+    rerender(<List ids={["a", "b"]} replayKey={1} suppressed label="再渲染" />);
+    replayed.forEach((animation) => expect(animation.cancel).not.toHaveBeenCalled());
+    rerender(<List ids={["a", "b"]} replayKey={1} suppressed label="再渲染二" />);
+    replayed.forEach((animation) => expect(animation.cancel).not.toHaveBeenCalled());
+    // 动画完成时仍按原语义清理
+    act(() => replayed.forEach((animation) => animation.onfinish?.()));
+    replayed.forEach((animation) => expect(animation.cancel).toHaveBeenCalledTimes(1));
+  });
+
+  it("重播会取消该节点仍在运行的旧动画，卸载时统一清理", () => {
+    const { rerender, unmount } = render(<List ids={["a", "b"]} replayKey={0} />);
+    const [first, second] = animations;
+    rerender(<List ids={["a", "b"]} replayKey={1} />);
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+    expect(second.cancel).toHaveBeenCalledTimes(1);
+    const replayed = animations.slice(2);
+    expect(replayed.map((animation) => animation.node)).toEqual([screen.getByTestId("a"), screen.getByTestId("b")]);
+    unmount();
+    replayed.forEach((animation) => expect(animation.cancel).toHaveBeenCalledTimes(1));
   });
 });

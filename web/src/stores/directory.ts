@@ -40,6 +40,8 @@ export interface DirectoryRecord {
   kind: DirectoryKind;
   groupId?: string;
   onlyLive?: boolean;
+  /** 分类选项卡标识（每个 tab 独立 key/游标）；用于 total 调整判定 */
+  filter?: string;
   items: Item[];
   nextCursor: string | null;
   hasMore: boolean;
@@ -110,6 +112,28 @@ function matchesQuery(record: DirectoryRecord, item: Item): boolean {
     && (!record.onlyLive || (item as LiveChannelDescriptor).status === "live");
 }
 
+/**
+ * 分类选项卡维度判定（2026-09-09）：只用于 **total 调整**，不参与 items 过滤——
+ * WS 新增事件的 descriptor 可能带不完整字段，前端若据此过滤 items 有丢数据风险；
+ * items 保持宽松、由页面层过滤兜底，此处仅决定"新增是否计入该 tab 的统计"。
+ * 好友 tab 需要好友列表才能判断（store 无此数据）→ 放行（页面层过滤兜底）。
+ */
+function matchesFilter(record: DirectoryRecord, item: Item): boolean {
+  const filter = record.filter;
+  if (!filter || filter === "all" || filter === "friends") return true;
+  const row = item as { visibility?: string; status?: string; member_count?: number; is_owner?: boolean; owner_id?: string };
+  switch (filter) {
+    case "public": return row.visibility === "public";
+    case "mine": return row.is_owner === true || row.owner_id === useAuthStore.getState().currentUser?.id;
+    case "occupied": return (row.member_count ?? 0) > 0;
+    case "live": return row.status === "live";
+    case "offline": return row.status !== "live";
+    case "waiting": return row.status === "waiting";
+    case "playing": return row.status === "playing";
+    default: return true;
+  }
+}
+
 function sortItems(kind: DirectoryKind, items: Item[]): Item[] {
   if (kind === "live") return sortLiveChannels(items as LiveChannelDescriptor[]);
   if (kind === "voice") return sortVoiceChannels(items as VoiceChannelDescriptor[]);
@@ -158,8 +182,10 @@ function updateCachedItems(kind: DirectoryKind, next: Item[], previous: Item[]) 
           return sum + (replacement ? (matchesQuery(record, replacement) ? replacement.member_count : 0)
             - (item as VoiceChannelDescriptor).member_count : 0);
         }, 0) + added.reduce((sum, item) => sum + (item as VoiceChannelDescriptor).member_count, 0) : 0;
+      // 统计只计入确实属于该 tab 分类的新增（removed 必然属于本 record，直接计入）
+      const addedTotal = added.filter((item) => matchesFilter(record, item)).length;
       return [key, { ...record, items,
-        total: Math.max(0, record.total + (membershipChanged ? added.length - removed.length : 0)),
+        total: Math.max(0, record.total + (membershipChanged ? addedTotal - removed.length : 0)),
         totalMemberCount: record.totalMemberCount == null ? null : Math.max(0, record.totalMemberCount + memberDelta),
         invalidated: record.invalidated || invalidated,
         mutationRevision: record.mutationRevision + (membershipChanged ? 1 : 0),

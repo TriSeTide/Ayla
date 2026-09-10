@@ -380,6 +380,31 @@ describe("PostsHubPage 分类选项卡与分页", () => {
       else delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
     }
   });
+
+  it("切换 tab 后手动刷新重播已入场卡片（刷新动画不失效）", async () => {
+    const previousAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animated: HTMLElement[] = [];
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: function (this: HTMLElement) {
+      animated.push(this);
+      return { cancel: vi.fn(), onfinish: null };
+    } });
+    try {
+      vi.mocked(postsApi.listPosts).mockResolvedValue({ results: [post(1)], next_cursor: null, has_more: false });
+      renderHub();
+      await screen.findByText("帖子1");
+      // 切到热门 tab：新 tab 独立加载，卡片入场
+      fireEvent.click(screen.getByRole("tab", { name: "热门" }));
+      await screen.findByText("帖子1");
+      animated.length = 0;
+      // 手动刷新（RefreshFAB 通道）：已入场卡片整批重播
+      await act(async () => { await useShellStore.getState().refreshCallback!(); });
+      expect(animated.map((node) => node.dataset.postId)).toEqual(["1"]);
+      cleanup();
+    } finally {
+      if (previousAnimate) Object.defineProperty(HTMLElement.prototype, "animate", previousAnimate);
+      else delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+    }
+  });
 });
 
 function getFavorite(id: number) {

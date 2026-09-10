@@ -7,7 +7,7 @@
  * - tab 切换内容区重挂载（key=scope）+ 各 tab 独立滚动位置（useScrollRestore）；
  * - 侧栏 header 统计（decor 粉色 64px 由 directory-filters.css 统一，此处断言文案）。
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as boardgameApi from "../api/boardgame";
@@ -25,7 +25,7 @@ import { useShellStore } from "../stores/shell";
 import { useSocialStore } from "../stores/social";
 import { useVoiceStore } from "../stores/voice";
 import { disposeDirectoryTracking } from "../stores/directory";
-import { clearScrollMemory } from "../hooks/useScrollRestore";
+import { clearScrollMemory, saveScrollPosition } from "../hooks/useScrollRestore";
 
 /* ---------------- 语音 ---------------- */
 
@@ -57,7 +57,9 @@ vi.mock("../components/voice/VoiceRoomBody", () => ({ VoiceRoomBody: () => null 
 vi.mock("../components/voice/VoiceChannelList", () => ({
   VoiceChannelList: ({ channels }: { channels: VoiceChannelDescriptor[] }) => (
     <div data-testid="voice-hub-list">
-      {channels.map((c) => <span key={c.id} data-channel-id={c.id}>{c.name}</span>)}
+      {channels.map((c) => (
+        <div key={c.id} className="voice-channel-card-wrap" data-channel-id={c.id}>{c.name}</div>
+      ))}
     </div>
   ),
 }));
@@ -235,6 +237,35 @@ describe("VoiceHubPage 分类选项卡", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true"));
     // 切回「全部」：缓存命中（60s 内），不重拉
     expect(voiceApi.listVoiceChannelsPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("切换 tab 后手动刷新（RefreshFAB 通道）刷新当前 tab 并重播入场动画", async () => {
+    const previousAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    const animated: HTMLElement[] = [];
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: function (this: HTMLElement) {
+      animated.push(this);
+      return { cancel: vi.fn(), onfinish: null };
+    } });
+    try {
+      renderVoice();
+      await screen.findByTestId("voice-hub-list");
+      const callsBefore = vi.mocked(voiceApi.listVoiceChannelsPage).mock.calls.length;
+      // 切 tab 前预置「公开」tab 的历史滚动记录 → 切过去后 restoring=true（抑制入场动画）
+      const scrollOwner = document.createElement("div");
+      scrollOwner.scrollTop = 120;
+      saveScrollPosition("voice-hub:public", scrollOwner);
+      fireEvent.click(screen.getByRole("tab", { name: "公开" }));
+      await waitFor(() => expect(voiceApi.listVoiceChannelsPage).toHaveBeenCalledTimes(callsBefore + 1));
+      expect(voiceApi.listVoiceChannelsPage).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "public" }));
+      animated.length = 0;
+      await act(async () => { await useShellStore.getState().refreshCallback!(); });
+      // restoring=true（命中历史位置）时刷新仍须重播已入场卡片
+      expect(animated.map((node) => node.getAttribute("data-channel-id")).filter(Boolean).length)
+        .toBeGreaterThan(0);
+    } finally {
+      if (previousAnimate) Object.defineProperty(HTMLElement.prototype, "animate", previousAnimate);
+      else Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    }
   });
 
   it("各 tab 传后端过滤参数（visibility/friends/occupied/owner），不依赖「全部」分页进度", async () => {
