@@ -3,7 +3,7 @@ import { AuroraquaNavHighlight } from "./motion/AuroraquaNavHighlight";
 import "../styles/directory-filters.css";
 
 /** Page-owned filters stay outside the result scroller in both layouts. */
-export function DirectoryFilters<Value extends string>({ id, label, options, value, narrow, className = "", buttonClassName = "", decor, leading, onChange }: {
+export function DirectoryFilters<Value extends string>({ id, label, options, value, narrow, className = "", buttonClassName = "", decor, header, leading, onChange }: {
   id: string;
   label: string;
   options: ReadonlyArray<{ key: Value; label: string }>;
@@ -13,6 +13,8 @@ export function DirectoryFilters<Value extends string>({ id, label, options, val
   buttonClassName?: string;
   /** 仅装饰的侧栏图标；不属于交互控件，窄屏隐藏。 */
   decor?: ReactNode;
+  /** 侧栏标题/统计信息区（decor 下方）；窄屏隐藏。 */
+  header?: ReactNode;
   /** 宽屏侧栏左上角的独立操作（如返回键）；窄屏由 AppShell 顶栏接管，不渲染。 */
   leading?: ReactNode;
   onChange: (value: Value) => void;
@@ -67,6 +69,7 @@ export function DirectoryFilters<Value extends string>({ id, label, options, val
     onTouchMoveCapture={keepNativeSwipe} onTouchEndCapture={keepNativeSwipe} onTouchCancelCapture={keepNativeSwipe}>
     {!narrow && leading}
     {decor}
+    {!narrow && header}
     {options.map((option, index) => <button key={option.key} ref={(node) => {
       if (node) buttons.current.set(option.key, node);
       else buttons.current.delete(option.key);
