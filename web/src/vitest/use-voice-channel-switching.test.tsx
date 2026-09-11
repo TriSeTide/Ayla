@@ -87,11 +87,13 @@ describe("latest selected voice session", () => {
   it.each(["join", "members", "connect", "previous-leave"] as const)("A → B → C while A's %s waits only commits C", async (stage) => {
     const reached = deferred<void>();
     const gate = deferred<void>();
-    const media: Array<{ token: string; room: LiveKitRoomLike }> = [];
+    // WS 中继传输下 connect 入参 = (relayWsUrl(channelId), 访问令牌)；
+    // 房间身份以 url 里的 channel 区分（token 恒为访问令牌，不再随房间变化）
+    const media: Array<{ url: string; room: LiveKitRoomLike }> = [];
     voiceLiveKit.setRoomFactory(() => {
-      const owned = room({ connect: vi.fn(async (_url, token) => {
-        media.push({ token, room: owned });
-        if (stage === "connect" && token === "media-A") { reached.resolve(); await gate.promise; }
+      const owned = room({ connect: vi.fn(async (url) => {
+        media.push({ url, room: owned });
+        if (stage === "connect" && url.includes("channel=A")) { reached.resolve(); await gate.promise; }
       }) });
       return owned;
     });
@@ -122,9 +124,9 @@ describe("latest selected voice session", () => {
     expect(voiceApi.joinVoiceChannel).not.toHaveBeenCalledWith("B");
     expect(voiceApi.leaveVoiceChannel).toHaveBeenCalledWith("A", "original-session");
     expect(vi.mocked(voiceWS.subscribe).mock.calls.at(-1)).toEqual([["C"]]);
-    const currentRoom = media.find((item) => item.token === "media-C")!.room;
+    const currentRoom = media.find((item) => item.url.includes("channel=C"))!.room;
     expect(currentRoom.disconnect).not.toHaveBeenCalled();
-    for (const previous of media.filter((item) => item.token !== "media-C")) expect(previous.room.disconnect).toHaveBeenCalled();
+    for (const previous of media.filter((item) => !item.url.includes("channel=C"))) expect(previous.room.disconnect).toHaveBeenCalled();
     const calls = vi.mocked(voiceApi.joinVoiceChannel).mock.calls.map(([id]) => id);
     expect(calls).toEqual(stage === "previous-leave" ? ["old", "A", "C"] : ["A", "C"]);
     expect(result.current.joining).toBe(false);

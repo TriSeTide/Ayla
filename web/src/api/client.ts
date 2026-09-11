@@ -86,6 +86,17 @@ function handleSessionExpired() {
 /** 刷新并重放：互斥锁避免并发 401 触发多次 refresh */
 let refreshPromise: Promise<boolean> | null = null;
 
+/**
+ * 静默续期 access token（互斥锁避免并发刷新）。
+ *
+ * 供 API 拦截器（401 重放）与语音媒体层共用：WS 重连前令牌临期时调用，
+ * 避免「断线重连仍携带过期 token → 服务端持续拒绝」的循环
+ * （既存症状：WSREJECT /ws/voice/ + ExpiredSignatureError 反复出现）。
+ */
+export async function refreshAccessToken(): Promise<boolean> {
+  return doRefresh();
+}
+
 async function doRefresh(): Promise<boolean> {
   const current = refreshPromise;
   if (current) return current; // 已有刷新进行中，复用同一 promise

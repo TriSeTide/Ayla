@@ -2,7 +2,12 @@
  * LiveKit 薄封装（M5-3 §3.4 / §4.3）：连接/静音/音量/远端轨道/事件归一。
  *
  * 依赖倒置：VoiceLiveKitClient 只依赖 LiveKitRoomLike 接口；真实实现由
- * createLiveKitRoom()（livekit-client 动态导入）给出，测试注入 fake。
+ * createLiveKitRoom()（livekit-client 动态导入）或 createWsRelayRoom()
+ * （WS 音频中继，见 wsRelayRoom.ts）给出，测试注入 fake。
+ *
+ * 传输选择（2026-09-11 起）：默认 WS 音频中继 —— frp 穿透下 UDP 源地址被改写，
+ * WebRTC/TURN 媒体面不可用（详见 wsRelayRoom.ts 头注）；VITE_VOICE_TRANSPORT=livekit
+ * 可整体回滚旧引擎（livekit-client 依赖仍在，未删除）。
  *
  * 语义边界（M5-3 §4.3）：
  * - 轨道 mute 是媒体事实（LiveKit 层）；voice.state 的 muted/unmuted 是应用层
@@ -11,6 +16,7 @@
  * - 媒体断线 ≠ 离开频道：Disconnected 只映射为 livekit="failed"，由用户决定重进。
  * - token 纪律：token 只作为 connect 入参传递，不打日志、不缓存。
  */
+import { createWsRelayRoom, voiceMediaTransport } from "./wsRelayRoom";
 
 /** LiveKit 连接状态（与 voice store 对齐） */
 export type LiveKitState = "idle" | "connecting" | "connected" | "reconnecting" | "failed";
@@ -619,6 +625,11 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
 
 type RoomFactory = (events: LiveKitEvents) => Promise<LiveKitRoomLike> | LiveKitRoomLike;
 
+/** 缺省 Room 工厂：按 VITE_VOICE_TRANSPORT 选择 WS 中继或 LiveKit（回滚用） */
+function defaultRoomFactory(): RoomFactory {
+  return voiceMediaTransport() === "livekit" ? createLiveKitRoom : createWsRelayRoom;
+}
+
 interface RoomOwner {
   generation: number;
   room: LiveKitRoomLike | null;
@@ -660,7 +671,7 @@ export class VoiceLiveKitClient {
     };
     this.owner = owner;
     previous?.cancel();
-    const factory = this.roomFactory ?? createLiveKitRoom;
+    const factory = this.roomFactory ?? defaultRoomFactory();
     const events = this.guardedEvents(owner, this.events);
     const connectOwned = async () => {
       try {

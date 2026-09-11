@@ -88,7 +88,11 @@ class VoiceAudioConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
         member, roster_before = await audio_relay.join(
-            channel_id, self.channel_name, getattr(self.user, "username", "") or str(self.user.pk)
+            channel_id,
+            self.channel_name,
+            # identity = 应用 user_id（裸 id，与 LiveKit 时代契约一致）：前端成员表
+            # / 音量调节 / 说话指示都以 user_id 为 key，用 username 会导致全部失配。
+            str(self.user.pk),
         )
         self.slot = member.slot
 
