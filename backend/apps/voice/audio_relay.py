@@ -183,6 +183,25 @@ async def may_relay(channel_id: int, channel_name: str) -> int | None:
         return member.slot
 
 
+def describe(channel_id: int, channel_name: str) -> dict:
+    """诊断用：某连接在房间里的当前裁决状态（muted/speaking/topk）。"""
+    room = _ROOMS.get(int(channel_id))
+    if room is None:
+        return {"room": False}
+    member = room.members.get(channel_name)
+    if member is None:
+        return {"room": True, "member": False}
+    return {
+        "room": True,
+        "member": True,
+        "slot": member.slot,
+        "muted": member.muted,
+        "speaking": member.speaking,
+        "active": member.slot in room.active_slots(),
+        "room_members": len(room.members),
+    }
+
+
 def stats() -> dict:
     """给运维/测试看的快照。"""
     return {

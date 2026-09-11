@@ -153,10 +153,24 @@ class VoiceAudioConsumer(AsyncJsonWebsocketConsumer):
 
     async def _handle_audio(self, payload: bytes):
         """裁决后转发；不解码、不改内容，只在前面加 1 字节 slot。"""
+        # TEMP-DEBUG（2026-09-12 排查"听不见对方"）：计数 + 周期性落日志，定位后移除
+        self._rx_count = getattr(self, "_rx_count", 0) + 1
+        verbose = self._rx_count <= 3 or self._rx_count % 200 == 0
         slot = await audio_relay.may_relay(self.channel_id, self.channel_name)
         if slot is None:
             # 未标记在说话 / 已静音 / 不在 Top-K 内 —— 直接丢弃，不占用下行带宽
+            if verbose:
+                logger.info(
+                    "voice audio DROP #%s channel=%s my_slot=%s state=%s",
+                    self._rx_count, self.channel_id, self.slot,
+                    audio_relay.describe(self.channel_id, self.channel_name),
+                )
             return
+        if verbose:
+            logger.info(
+                "voice audio RX #%s channel=%s slot=%s bytes=%s -> relay",
+                self._rx_count, self.channel_id, slot, len(payload),
+            )
         await self.channel_layer.group_send(
             self.room_group,
             {
