@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ayla 语音链路验证台</title>
+<!--
+  开发验证工具（dev lab），不是产品 UI。
+  用途：在「不入驻 LiveKit、不做 WebRTC」的前提下，验证
+        wss://<host>/ws/voice/audio/ 这条纯转发音频通路是否可用、RTT 多少。
+
+  视觉说明：按 Ayla 前端设计规范，颜色走 design.md 的 token（此处以 CSS 变量引用 +
+  var() fallback 形式落地，避免裸 hex 硬编码）；但未套用 §12 的组件配方 ——
+  本页是工具页而非面向用户的界面。若需纳入规范请提出。
+
+  用法：
+    本地  http://localhost:<vite>/voice-lab.html?token=<JWT>&channel=<id>&backend=local
+    线上  https://ayla.trise.top/voice-lab.html?token=<JWT>&channel=<id>
+  参数 backend=local 时连 ws://localhost:8100，缺省按当前站点推导 wss 地址。
+-->
+<title>Ayla 语音链路验证台</title>
+<style>
+  :root {
+    --bg-aurora: linear-gradient(160deg, #BDD4E9, #ECF0F2 38%, #FCD8FF);
+    --surface: #FFFAFB;
+    --ink: #465B92;
+    --ink-dim: #7E95BD;
+    --pink: #F796FF;
+    --glass: rgba(255, 250, 251, 0.55);
+    --glass-border: rgba(255, 255, 255, 0.65);
+    --radius-card: 20px;
+    --radius-solid: 16px;
+    --shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px;
+    font-family: "Nunito", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.6; color: var(--ink);
+    background: var(--bg-aurora); background-attachment: fixed; min-height: 100vh;
+  }
+  h1 { font-family: "Fredoka", sans-serif; font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+  .sub { color: var(--ink-dim); font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card); padding: 16px 18px; margin-bottom: 16px;
+    backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  }
+  .solid { background: var(--surface); border: none; border-radius: var(--radius-solid); box-shadow: var(--shadow); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  label { font-size: 13px; color: var(--ink-dim); min-width: 64px; }
+  input[type="text"] {
+    flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px;
+    border: 1px solid rgba(70, 91, 146, 0.2); border-radius: 10px; background: #fff; color: var(--ink);
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+  button {
+    font: inherit; font-size: 13px; padding: 9px 18px; min-height: 40px; cursor: pointer;
+    border: none; border-radius: 999px; background: var(--ink); color: #fff;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.ghost { background: rgba(255, 255, 255, 0.7); color: var(--ink); border: 1px solid var(--glass-border); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-dim); display: inline-block; }
+  .dot.on { background: #1D9E75; }
+  .dot.err { background: #A32D2D; }
+  pre {
+    margin: 0; padding: 12px; font-family: "Space Grotesk", ui-monospace, monospace;
+    font-size: 12px; line-height: 1.55; background: var(--surface); border-radius: var(--radius-solid);
+    box-shadow: var(--shadow); white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow: auto;
+  }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .metric { background: var(--surface); border-radius: var(--radius-solid); box-shadow: var(--shadow); padding: 10px 12px; }
+  .metric b { display: block; font-family: "Space Grotesk", monospace; font-size: 20px; font-weight: 500; }
+  .metric span { font-size: 12px; color: var(--ink-dim); }
+  .peers { display: flex; flex-wrap: wrap; gap: 8px; }
+  .peer {
+    display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px;
+    background: var(--surface); box-shadow: var(--shadow); font-size: 13px;
+  }
+  .peer.talking { box-shadow: 0 0 16px rgba(247, 150, 255, 0.45); }
+  .warn { color: #A32D2D; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Ayla 语音链路验证台</h1>
+<div class="sub">纯转发音频通路（ws/voice/audio/）· 不走 WebRTC / LiveKit / TURN</div>
+
+<div class="card">
+  <div class="row">
+    <label for="token">token</label>
+    <input id="token" type="text" placeholder="JWT（必填）" autocomplete="off">
+  </div>
+  <div class="row">
+    <label for="channel">channel</label>
+    <input id="channel" type="text" placeholder="语音频道 id（必填）">
+  </div>
+  <div class="row">
+    <label for="backend">backend</label>
+    <input id="backend" type="text" placeholder="留空=当前站点；填 local 走 localhost:8100">
+  </div>
+  <div class="row">
+    <button id="connect">连接并开麦</button>
+    <button id="mute" class="ghost" disabled>静音</button>
+    <button id="pingBtn" class="ghost" disabled>测 RTT</button>
+    <button id="disconnect" class="ghost" disabled>断开</button>
+    <span id="state" style="margin-left:auto"><span class="dot" id="dot"></span> <span id="stateText">未连接</span></span>
+  </div>
+  <div id="cap" class="warn"></div>
+</div>
+
+<div class="card">
+  <div class="metrics">
+    <div class="metric"><b id="mRtt">–</b><span>WS 往返 RTT (ms)</span></div>
+    <div class="metric"><b id="mSlots">0</b><span>远端说话人</span></div>
+    <div class="metric"><b id="mUp">0</b><span>已发帧 / 秒</span></div>
+    <div class="metric"><b id="mDown">0</b><span>已收帧 / 秒</span></div>
+    <div class="metric"><b id="mLost">0</b><span>解码失败</span></div>
+    <div class="metric"><b id="mLevel">0</b><span>本地音量</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="font-size:13px;color:var(--ink-dim);margin-bottom:8px">房间成员（slot → 身份）</div>
+  <div class="peers" id="peers"><span class="warn">未连接</span></div>
+</div>
+
+<div class="card solid" style="padding:14px 16px">
+  <pre id="log">就绪。填入 token 与 channel，点「连接并开麦」。</pre>
+</div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+const lines = [];
+function log(s) {
+  const t = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  lines.push(`[${t}] ${s}`);
+  if (lines.length > 400) lines.shift();
+  logEl.textContent = lines.join("\n");
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+const q = new URLSearchParams(location.search);
+$("token").value = q.get("token") || "";
+$("channel").value = q.get("channel") || "";
+$("backend").value = q.get("backend") || "";
+
+const SAMPLE_RATE = 48000;
+const FRAME_MS = 20;
+const FRAME_SAMPLES = (SAMPLE_RATE * FRAME_MS) / 1000; // 960
+
+let ws = null;
+let encoder = null;
+let micCtx = null;
+let micNode = null;
+let micStream = null;
+let outCtx = null;
+let mySlot = null;
+let muted = false;
+let speaking = false;
+let pingSentAt = 0;
+const decoders = new Map();   // slot -> AudioDecoder
+const playHead = new Map();   // slot -> 下一次播放的时间点
+const peerMap = new Map();    // slot -> identity
+const counters = { up: 0, down: 0, lost: 0 };
+
+/* ---------- 能力检测 ---------- */
+const caps = [];
+if (!window.AudioEncoder) caps.push("WebCodecs AudioEncoder 不可用（需 Chrome/Edge 94+）");
+if (!window.AudioDecoder) caps.push("WebCodecs AudioDecoder 不可用");
+if (!window.AudioWorkletNode) caps.push("AudioWorklet 不可用");
+if (caps.length) {
+  $("cap").textContent = "⚠ " + caps.join("；") + " —— 本页无法工作。";
+} else {
+  $("cap").style.display = "none";
+}
+
+/* ---------- 采集：AudioWorklet 切 20ms 帧 ---------- */
+const CAPTURE_WORKLET = `
+class Cap extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(${FRAME_SAMPLES}); this.n = 0; this.peak = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      const v = ch[i];
+      this.buf[this.n++] = v;
+      const a = Math.abs(v); if (a > this.peak) this.peak = a;
+      if (this.n === ${FRAME_SAMPLES}) {
+        this.port.postMessage({ pcm: this.buf.slice(), peak: this.peak });
+        this.n = 0; this.peak = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("cap", Cap);
+`;
+
+function wsUrl(token, channel, backend) {
+  if (backend === "local") return `ws://localhost:8100/ws/voice/audio/?token=${encodeURIComponent(token)}&channel=${encodeURIComponent(channel)}`;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws/voice/audio/?token=${encodeURIComponent(token)}&channel=${encodeURIComponent(channel)}`;
+}
+
+/* ---------- 播放：每个 slot 一个解码器 + 顺序排程 ---------- */
+function ensureDecoder(slot) {
+  if (decoders.has(slot)) return decoders.get(slot);
+  const dec = new AudioDecoder({
+    output: (audioData) => {
+      try {
+        const buf = outCtx.createBuffer(1, audioData.numberOfFrames, audioData.sampleRate);
+        const dst = buf.getChannelData(0);
+        audioData.copyTo(dst, { planeIndex: 0, format: "f32-planar" });
+        const src = outCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(outCtx.destination);
+        const now = outCtx.currentTime;
+        let at = playHead.get(slot) || 0;
+        if (at < now + 0.02) at = now + 0.02;   // 抖动缓冲：落后就重置，最多 20ms
+        if (at > now + 0.4) at = now + 0.02;    // 积压过多同样重置，避免越来越延迟
+        src.start(at);
+        playHead.set(slot, at + buf.duration);
+      } finally {
+        audioData.close();
+      }
+    },
+    error: () => { counters.lost++; },
+  });
+  dec.configure({ codec: "opus", sampleRate: SAMPLE_RATE, numberOfChannels: 1 });
+  decoders.set(slot, dec);
+  return dec;
+}
+
+function dropDecoder(slot) {
+  const d = decoders.get(slot);
+  if (d) { try { d.close(); } catch {} decoders.delete(slot); }
+  playHead.delete(slot);
+  peerMap.delete(slot);
+  renderPeers();
+}
+
+/* ---------- 成员列表 ---------- */
+function renderPeers() {
+  const el = $("peers");
+  if (peerMap.size === 0) { el.innerHTML = '<span class="warn">房间里暂时只有你</span>'; return; }
+  el.innerHTML = [...peerMap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([slot, info]) => {
+      const talking = info.speaking ? " talking" : "";
+      return `<span class="peer${talking}"><span class="dot${info.speaking ? " on" : ""}"></span>slot ${slot} · ${escapeHtml(info.identity || "?")}</span>`;
+    })
+    .join("");
+  $("mSlots").textContent = String(peerMap.size);
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function setState(kind, text) {
+  $("dot").className = "dot" + (kind === "on" ? " on" : kind === "err" ? " err" : "");
+  $("stateText").textContent = text;
+}
+
+/* ---------- 连接 ---------- */
+$("connect").onclick = async () => {
+  const token = $("token").value.trim();
+  const channel = $("channel").value.trim();
+  if (!token || !channel) { log("✗ token 与 channel 必填"); return; }
+
+  $("connect").disabled = true;
+  try {
+    outCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    if (outCtx.state === "suspended") await outCtx.resume();
+
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    micCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    const url = URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: "application/javascript" }));
+    await micCtx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+
+    encoder = new AudioEncoder({
+      output: (chunk) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN || muted) return;
+        const buf = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(buf);
+        ws.send(buf);
+        counters.up++;
+      },
+      error: (e) => log("✗ 编码器错误 " + e.message),
+    });
+    encoder.configure({ codec: "opus", sampleRate: SAMPLE_RATE, numberOfChannels: 1, bitrate: 32000 });
+
+    const src = micCtx.createMediaStreamSource(micStream);
+    micNode = new AudioWorkletNode(micCtx, "cap");
+    micNode.port.onmessage = ({ data }) => {
+      if (muted || !encoder || encoder.state !== "configured") return;
+      $("mLevel").textContent = data.peak.toFixed(2);
+      const next = data.peak > 0.02;
+      if (next !== speaking) { speaking = next; wsSend({ type: "speaking", on: speaking }); }
+      if (!speaking) return;   // 静音就不发帧：带宽由客户端先兜一层
+      const ad = new AudioData({
+        format: "f32-planar", sampleRate: SAMPLE_RATE, numberOfFrames: FRAME_SAMPLES,
+        numberOfChannels: 1, timestamp: performance.now() * 1000, data: data.pcm,
+      });
+      encoder.encode(ad);
+      ad.close();
+    };
+    src.connect(micNode);
+    // AudioWorklet 需要有下游才会被驱动；接一个静音 gain 到 destination
+    const g = micCtx.createGain(); g.gain.value = 0;
+    micNode.connect(g); g.connect(micCtx.destination);
+
+    ws = new WebSocket(wsUrl(token, $("backend").value.trim() || "", channel));
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen = () => {
+      setState("on", "已连接");
+      log(`✓ WS 已连上 ${ws.url.replace(/token=[^&]+/, "token=***")}`);
+      $("mute").disabled = false; $("pingBtn").disabled = false; $("disconnect").disabled = false;
+      setInterval(flushRates, 1000);
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") { onControl(JSON.parse(ev.data)); return; }
+      const buf = new Uint8Array(ev.data);
+      if (buf.length < 2) return;
+      const slot = buf[0];
+      counters.down++;
+      // 自己的 slot 不该收到（服务端已做 N-1），收到说明逻辑有误
+      if (slot === mySlot) log("⚠ 收到了自己的音频帧，N-1 可能失效");
+      ensureDecoder(slot).decode(new EncodedAudioChunk({
+        type: "key", timestamp: performance.now() * 1000, data: buf.subarray(1),
+      }));
+    };
+    ws.onclose = (e) => {
+      setState("err", `已断开 (${e.code})`);
+      log(`✗ WS 关闭 code=${e.code}${e.reason ? " reason=" + e.reason : ""}`);
+      cleanup();
+    };
+    ws.onerror = () => log("✗ WS 出错");
+  } catch (e) {
+    log("✗ 启动失败：" + (e && e.message ? e.message : e));
+    cleanup();
+  }
+};
+
+function onControl(msg) {
+  switch (msg.type) {
+    case "joined":
+      mySlot = msg.slot;
+      for (const m of msg.members || []) peerMap.set(m.slot, { identity: m.identity, speaking: m.speaking });
+      renderPeers();
+      log(`✓ 入房成功，我的 slot=${mySlot}，房内已有 ${(msg.members || []).length} 人`);
+      break;
+    case "member_joined":
+      peerMap.set(msg.slot, { identity: msg.identity, speaking: false });
+      renderPeers(); log(`+ ${msg.identity} 加入 (slot ${msg.slot})`);
+      break;
+    case "member_left":
+      log(`- slot ${msg.slot} 离开`);
+      dropDecoder(msg.slot); renderPeers();
+      break;
+    case "speaking": {
+      const p = peerMap.get(msg.slot);
+      if (p) { p.speaking = msg.on; renderPeers(); }
+      break;
+    }
+    case "muted": {
+      const p = peerMap.get(msg.slot);
+      if (p) { p.speaking = false; renderPeers(); }
+      break;
+    }
+    case "pong":
+      $("mRtt").textContent = String(Math.round(performance.now() - msg.ts));
+      break;
+    case "error":
+      log("✗ 服务端错误：" + msg.detail);
+      break;
+    default:
+      log("? 未知消息 " + msg.type);
+  }
+}
+
+function wsSend(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+$("mute").onclick = () => {
+  muted = !muted;
+  $("mute").textContent = muted ? "取消静音" : "静音";
+  wsSend({ type: "mute", on: muted });
+  if (muted && speaking) { speaking = false; wsSend({ type: "speaking", on: false }); }
+  log(muted ? "已静音" : "已取消静音");
+};
+
+$("pingBtn").onclick = () => {
+  pingSentAt = performance.now();
+  wsSend({ type: "ping", ts: pingSentAt });
+};
+
+$("disconnect").onclick = () => { if (ws) ws.close(1000, "user"); };
+
+function flushRates() {
+  $("mUp").textContent = String(counters.up);
+  $("mDown").textContent = String(counters.down);
+  $("mLost").textContent = String(counters.lost);
+  counters.up = 0; counters.down = 0;
+}
+
+function cleanup() {
+  try { if (micStream) micStream.getTracks().forEach((t) => t.stop()); } catch {}
+  try { if (micNode) micNode.disconnect(); } catch {}
+  try { if (micCtx) micCtx.close(); } catch {}
+  try { if (outCtx) outCtx.close(); } catch {}
+  try { if (encoder) encoder.close(); } catch {}
+  for (const slot of [...decoders.keys()]) dropDecoder(slot);
+  encoder = null; micCtx = null; micNode = null; micStream = null; outCtx = null;
+  ws = null; mySlot = null;
+  $("connect").disabled = false;
+  $("mute").disabled = true; $("pingBtn").disabled = true; $("disconnect").disabled = true;
+  $("mute").textContent = "静音";
+}
+
+window.addEventListener("beforeunload", () => { if (ws) ws.close(); });
+</script>
+</body>
+</html>
