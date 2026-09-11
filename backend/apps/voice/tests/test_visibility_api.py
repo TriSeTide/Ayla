@@ -79,6 +79,38 @@ def test_list_filters_by_visibility(auth_client, user_factory):
     assert names == {"pub", "fri", "grp"}
 
 
+@pytest.mark.django_db
+def test_owner_filter_requires_show_content(auth_client, user_factory):
+    """他人主页 owner=<id>：对方未开启「向他人展示内容」→ 视为无内容；开启后可见。"""
+    client, viewer = auth_client(username="v_owner_viewer")
+    owner = user_factory(username="v_owner_hidden")
+    _make_channel(owner, "room_owner_hidden", name="隐藏语音房", visibility=Visibility.PUBLIC)
+
+    # 默认 show_content=False → owner 过滤返回空
+    resp = client.get(f"/api/v1/voice/channels/?owner={owner.id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    # 开启 show_content → 可见
+    owner.show_content = True
+    owner.save(update_fields=["show_content"])
+    resp = client.get(f"/api/v1/voice/channels/?owner={owner.id}")
+    assert resp.status_code == 200
+    assert [c["name"] for c in resp.json()] == ["隐藏语音房"]
+
+
+@pytest.mark.django_db
+def test_owner_filter_self_ignores_show_content(auth_client):
+    """自己查自己（owner=<自己>）不受 show_content 限制。"""
+    client, me = auth_client(username="v_owner_self")
+    _make_channel(me, "room_owner_self", name="我的语音房", visibility=Visibility.PUBLIC)
+
+    # 默认 show_content=False → 自己的语音房仍可见
+    resp = client.get(f"/api/v1/voice/channels/?owner={me.id}")
+    assert resp.status_code == 200
+    assert [c["name"] for c in resp.json()] == ["我的语音房"]
+
+
 # ---------- 详情 / join 403 ----------
 
 @pytest.mark.django_db

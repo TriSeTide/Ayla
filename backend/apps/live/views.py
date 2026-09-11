@@ -121,10 +121,14 @@ class ChannelListView(APIView):
         qs = apply_catalog_filters(qs, request)
 
         # 他人主页：owner=<user_id> 只看该用户的内容（仍受可见性过滤；
-        # 且对方必须开启「向他人展示内容」show_content，否则视为无内容）
+        # 且对方必须开启「向他人展示内容」show_content，否则视为无内容；
+        # 自己查自己不受该开关限制——开关只约束他人视角，开播入口等
+        # 「我的直播间」列表以 owner=<自己> 拉取，不能被过滤为空）
         owner_filter = request.query_params.get("owner", "").strip()
         if owner_filter:
-            qs = qs.filter(owner_id=owner_filter, owner__show_content=True)
+            qs = qs.filter(owner_id=owner_filter)
+            if owner_filter != str(request.user.id):
+                qs = qs.filter(owner__show_content=True)
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性，可见性完全由 allowed_groups 决定）

@@ -128,10 +128,13 @@ class PostListView(APIView):
             return _bad_request("scope 无效")
 
         # 他人主页：owner=<user_id> 只看该用户的帖子（仍受可见性过滤；
-        # 且对方必须开启「向他人展示内容」show_content，否则视为无内容）
+        # 且对方必须开启「向他人展示内容」show_content，否则视为无内容；
+        # 自己查自己不受该开关限制——开关只约束他人视角）
         owner_filter = request.query_params.get("owner", "").strip()
         if owner_filter:
-            qs = qs.filter(owner_id=owner_filter, owner__show_content=True)
+            qs = qs.filter(owner_id=owner_filter)
+            if owner_filter != str(request.user.id):
+                qs = qs.filter(owner__show_content=True)
 
         # 分类选项卡：?visibility=public|friends|group；?friends=1（作者是我的好友）
         qs = apply_catalog_filters(qs, request)

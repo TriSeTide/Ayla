@@ -121,6 +121,18 @@ def test_owner_filter_requires_show_content(auth_client, user_factory, live_chan
 
 
 @pytest.mark.django_db
+def test_owner_filter_self_ignores_show_content(auth_client, live_channel_factory):
+    """自己查自己（开播入口「我的直播间」owner=<自己>）不受 show_content 限制。"""
+    client, me = auth_client(username="l_owner_self")
+    live_channel_factory(owner=me, title="我的直播间")
+
+    # 默认 show_content=False → 自己的直播间仍可见（否则无法开播）
+    resp = client.get(f"/api/v1/live/channels/?owner={me.id}")
+    assert resp.status_code == 200
+    assert [ch["title"] for ch in resp.json()] == ["我的直播间"]
+
+
+@pytest.mark.django_db
 def test_list_includes_owner_nickname(auth_client, live_channel_factory):
     """列表直接带主播昵称；nickname 为空时回退 username（前端大厅卡片不再经懒拉）。"""
     client, owner = auth_client()

@@ -242,6 +242,17 @@ class TestFeed:
         assert resp.status_code == 200
         assert resp.json()["results"] == []
 
+    def test_owner_filter_self_ignores_show_content(self, auth_client):
+        """自己查自己（owner=<自己>）不受 show_content 限制。"""
+        client, me = auth_client(username="f_owner_self")
+        _make_post(me, "my-post", visibility=Visibility.PUBLIC)
+
+        # 默认 show_content=False → 自己的帖子仍可见
+        resp = client.get(f"/api/v1/posts/?owner={me.id}")
+        assert resp.status_code == 200
+        bodies = {p["body"] for p in resp.json()["results"]}
+        assert bodies == {"my-post"}
+
     def test_visibility_filter(self, auth_client, user_factory):
         """分类选项卡 ?visibility=public：后端精确过滤，不依赖 feed 分页进度。"""
         client, viewer = auth_client(username="f_vis_viewer")

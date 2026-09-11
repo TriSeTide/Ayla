@@ -230,6 +230,16 @@ class TestRoomList:
         assert resp.status_code == 200
         assert [r["name"] for r in resp.json()] == ["隐藏桌游房"]
 
+    def test_owner_filter_self_ignores_show_content(self, auth_client):
+        """自己查自己（owner=<自己>）不受 show_content 限制。"""
+        client, me = auth_client(username="l_owner_self")
+        _make_room(me, "我的桌游房", visibility=Visibility.PUBLIC)
+
+        # 默认 show_content=False → 自己的房间仍可见
+        resp = client.get(f"/api/v1/boardgame/rooms/?owner={me.id}")
+        assert resp.status_code == 200
+        assert [r["name"] for r in resp.json()] == ["我的桌游房"]
+
 
 # ---------- 详情 / 删除 ----------
 

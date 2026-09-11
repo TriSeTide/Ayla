@@ -90,7 +90,9 @@ class ChannelListView(APIView):
             qs = qs.annotate(_member_count=Count("members")).filter(_member_count__gt=0)
         owner_filter = request.query_params.get("owner", "").strip()
         if owner_filter:
-            qs = qs.filter(owner_id=owner_filter, owner__show_content=True)
+            qs = qs.filter(owner_id=owner_filter)
+            if owner_filter != str(request.user.id):
+                qs = qs.filter(owner__show_content=True)
 
         # 群内过滤：scope=group:<id> 仅匹配 allowed_groups 白名单包含该群
         # （归属群 group FK 不提供可见性）

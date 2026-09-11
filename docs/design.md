@@ -693,7 +693,7 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **卡片结构**：`.profile-content-card` = 玻璃卡（§4 材料）+ `.profile-content-head`（图标 + 标题 + 尾部徽标）；直播卡 LIVE 徽标 `--pink-500` 白字胶囊 + 封面缩略图（88×50 圆角 12px，无封面用 `--ice-100` 底视频图标占位）；语音卡在麦人数 Space Grotesk 12px；帖子卡 3 行（标题 + 摘要/时间）+ ghost「更多帖子」按钮。
 - **更多帖子跳转**：mine → `/posts/mine`；他人 → `/user/:id/posts`（路由守卫见下）。
 - **收藏入口**：个人主页的「我的收藏」移到左侧资料卡（`.profile-avatar-actions` 内、更换头像按钮右侧），ghost 按钮 + `IconHeart` 爱心图标（`--pink-500`），不再放右侧内容区头部。
-- **他人帖子界面路由守卫**：`/user/:id/posts` 由 `UserPostsRoute` 守卫——`getUserDetail` 确认对方 `show_content` 开启才渲染 `MyPostsPage`（owner 模式，标题「xx的帖子」）；未开启显示提示页（「对方未开启内容展示」+ 返回），不渲染帖子内容。后端 posts/live/boardgame 的 `?owner=` 过滤同步要求 `owner__show_content=True`（权限边界，防止绕过前端直调 API）。
+- **他人帖子界面路由守卫**：`/user/:id/posts` 由 `UserPostsRoute` 守卫——`getUserDetail` 确认对方 `show_content` 开启才渲染 `MyPostsPage`（owner 模式，标题「xx的帖子」）；未开启显示提示页（「对方未开启内容展示」+ 返回），不渲染帖子内容。后端 posts/live/boardgame/voice 的 `?owner=` 过滤同步要求 `owner__show_content=True`（权限边界，防止绕过前端直调 API）；**自己查自己（`owner=<自己>`）不受该开关限制**——开关只约束他人视角，开播入口「我的直播间」等以 `owner=<自己>` 拉取的列表不能被过滤为空。
 
 ---
 
