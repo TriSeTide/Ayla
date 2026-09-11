@@ -14,11 +14,17 @@
   本页是工具页而非面向用户的界面。若需纳入规范请提出。
 
   用法：
-    本地  http://localhost:<vite>/voice-lab.html?token=<JWT>&channel=<id>&backend=local
-    线上  https://ayla.trise.top/voice-lab.html?token=<JWT>&channel=<id>
-  参数 backend=local 时连 ws://localhost:8100，缺省按当前站点推导 wss 地址。
+    线上  https://ayla.trise.top/voice-lab.html?channel=1
+    本地  http://localhost:3100/voice-lab.html?channel=1&backend=local
+
+  凭据两种给法（推荐第一种）：
+    1) 填账号密码 → 本页直接调 /api/v1/auth/login/ 换访问令牌（不用手抄）
+    2) 手贴 Ayla 访问令牌（会自动清洗 Bearer 前缀、URL 片段、LiveKit token 误粘贴）
+
+  为什么需要「预检」：服务端在 accept 之前拒绝连接时（token 失效 / channel 非法 /
+  非频道成员），浏览器只能看到 close code 1006，看不出原因。预检用 REST 把这三件事
+  各自问一遍，把 1006 变成明确结论。
 -->
-<title>Ayla 语音链路验证台</title>
 <style>
   :root {
     --bg-aurora: linear-gradient(160deg, #BDD4E9, #ECF0F2 38%, #FCD8FF);
@@ -31,6 +37,8 @@
     --radius-card: 20px;
     --radius-solid: 16px;
     --shadow: 0 2px 12px rgba(70, 91, 146, 0.08);
+    --ok: #1D9E75;
+    --err: #A32D2D;
   }
   * { box-sizing: border-box; }
   body {
@@ -49,7 +57,7 @@
   .solid { background: var(--surface); border: none; border-radius: var(--radius-solid); box-shadow: var(--shadow); }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   label { font-size: 13px; color: var(--ink-dim); min-width: 64px; }
-  input[type="text"] {
+  input[type="text"], input[type="password"] {
     flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px;
     border: 1px solid rgba(70, 91, 146, 0.2); border-radius: 10px; background: #fff; color: var(--ink);
   }
@@ -61,8 +69,8 @@
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   button.ghost { background: rgba(255, 255, 255, 0.7); color: var(--ink); border: 1px solid var(--glass-border); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-dim); display: inline-block; }
-  .dot.on { background: #1D9E75; }
-  .dot.err { background: #A32D2D; }
+  .dot.on { background: var(--ok); }
+  .dot.err { background: var(--err); }
   pre {
     margin: 0; padding: 12px; font-family: "Space Grotesk", ui-monospace, monospace;
     font-size: 12px; line-height: 1.55; background: var(--surface); border-radius: var(--radius-solid);
@@ -78,7 +86,9 @@
     background: var(--surface); box-shadow: var(--shadow); font-size: 13px;
   }
   .peer.talking { box-shadow: 0 0 16px rgba(247, 150, 255, 0.45); }
-  .warn { color: #A32D2D; font-size: 13px; }
+  .warn { color: var(--err); font-size: 13px; }
+  .ok { color: var(--ok); font-size: 13px; }
+  .hint { color: var(--ink-dim); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -87,24 +97,34 @@
 
 <div class="card">
   <div class="row">
-    <label for="token">token</label>
-    <input id="token" type="text" placeholder="JWT（必填）" autocomplete="off">
-  </div>
-  <div class="row">
-    <label for="channel">channel</label>
-    <input id="channel" type="text" placeholder="语音频道 id（必填）">
-  </div>
-  <div class="row">
     <label for="backend">backend</label>
     <input id="backend" type="text" placeholder="留空=当前站点；填 local 走 localhost:8100">
   </div>
   <div class="row">
+    <label for="username">账号</label>
+    <input id="username" type="text" placeholder="用户名（留空则用手贴 token）" autocomplete="username">
+  </div>
+  <div class="row">
+    <label for="password">密码</label>
+    <input id="password" type="password" placeholder="密码（仅本页用于换访问令牌）" autocomplete="current-password">
+  </div>
+  <div class="row">
+    <label for="channel">channel</label>
+    <input id="channel" type="text" placeholder="语音频道 id（必填，如 1）">
+  </div>
+  <div class="row">
+    <label for="token">token</label>
+    <input id="token" type="text" placeholder="可选：Ayla 访问令牌（会清洗 Bearer 前缀 / URL 片段）" autocomplete="off">
+  </div>
+  <div class="row">
+    <button id="preflight" class="ghost">预检</button>
     <button id="connect">连接并开麦</button>
     <button id="mute" class="ghost" disabled>静音</button>
     <button id="pingBtn" class="ghost" disabled>测 RTT</button>
     <button id="disconnect" class="ghost" disabled>断开</button>
     <span id="state" style="margin-left:auto"><span class="dot" id="dot"></span> <span id="stateText">未连接</span></span>
   </div>
+  <div id="tinfo" class="hint"></div>
   <div id="cap" class="warn"></div>
 </div>
 
@@ -115,17 +135,17 @@
     <div class="metric"><b id="mUp">0</b><span>已发帧 / 秒</span></div>
     <div class="metric"><b id="mDown">0</b><span>已收帧 / 秒</span></div>
     <div class="metric"><b id="mLost">0</b><span>解码失败</span></div>
-    <div class="metric"><b id="mLevel">0</b><span>本地音量</span></div>
+    <div class="metric"><b id="mLevel">0.00</b><span>本地音量</span></div>
   </div>
 </div>
 
 <div class="card">
   <div style="font-size:13px;color:var(--ink-dim);margin-bottom:8px">房间成员（slot → 身份）</div>
-  <div class="peers" id="peers"><span class="warn">未连接</span></div>
+  <div class="peers" id="peers"><span class="hint">未连接</span></div>
 </div>
 
 <div class="card solid" style="padding:14px 16px">
-  <pre id="log">就绪。填入 token 与 channel，点「连接并开麦」。</pre>
+  <pre id="log">就绪。填账号密码 + channel，点「预检」可先只验证凭据与成员资格（不开麦）。</pre>
 </div>
 
 <script type="module">
@@ -135,7 +155,7 @@ const lines = [];
 function log(s) {
   const t = new Date().toLocaleTimeString("zh-CN", { hour12: false });
   lines.push(`[${t}] ${s}`);
-  if (lines.length > 400) lines.shift();
+  while (lines.length > 400) lines.shift();
   logEl.textContent = lines.join("\n");
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -144,7 +164,196 @@ const q = new URLSearchParams(location.search);
 $("token").value = q.get("token") || "";
 $("channel").value = q.get("channel") || "";
 $("backend").value = q.get("backend") || "";
+if (q.get("user")) $("username").value = q.get("user");
 
+/* ================= 地址推导 ================= */
+function isLocal() { return ($("backend").value.trim() || "").toLowerCase() === "local"; }
+function apiBase() { return isLocal() ? "http://localhost:8100" : location.origin; }
+function wsUrl(token, channel) {
+  const qs = `token=${encodeURIComponent(token)}&channel=${encodeURIComponent(channel)}`;
+  if (isLocal()) return `ws://localhost:8100/ws/voice/audio/?${qs}`;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws/voice/audio/?${qs}`;
+}
+
+/* ================= token 清洗与自检 =================
+   实测踩到的三种粘贴错误，全部在这里兜住：
+   1) 整段 URL 或 query 片段（token=...&join_request=...）
+   2) 带 "Bearer " 前缀（抄 Authorization 头）
+   3) 抄成 LiveKit 媒体 token（iss=ayla-livekit）—— 服务端必然 401/403
+*/
+function b64urlDecode(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  // JWT payload 是 UTF-8；用 TextDecoder 保证中文身份名不乱码
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function normalizeToken(raw) {
+  let t = (raw || "").trim();
+  const m = t.match(/[?&]token=([^&\s]+)/);
+  if (m) t = decodeURIComponent(m[1]);
+  t = t.replace(/^Bearer\s+/i, "").trim();
+  const amp = t.indexOf("&");
+  if (amp >= 0) t = t.slice(0, amp);
+  return t.trim();
+}
+
+function decodeJwt(t) {
+  const parts = (t || "").split(".");
+  if (parts.length !== 3) return null;
+  try { return JSON.parse(b64urlDecode(parts[1])); } catch { return null; }
+}
+
+/** 返回 { ok, token, payload?, reason? } —— reason 面向人话，直接进日志 */
+function inspectToken(raw) {
+  const token = normalizeToken(raw);
+  if (!token) return { ok: false, reason: "token 为空" };
+  const payload = decodeJwt(token);
+  if (!payload) return { ok: false, reason: "不是合法 JWT（应形如 aaa.bbb.ccc）" };
+  if (payload.iss === "ayla-livekit" || payload.video) {
+    return {
+      ok: false,
+      payload,
+      reason: [
+        "这是 LiveKit 的媒体 token（iss=ayla-livekit），不是 Ayla 访问令牌。",
+        "  正确来源：Network → 过滤 WS → 点开 ws/voice/（不是 /livekit/）→ Request URL 里的 token= 值；",
+        "  或者更省事：上面的账号 / 密码栏填一下，本页自己换令牌。",
+      ].join("\n"),
+    };
+  }
+  if (!payload.user_id) {
+    return { ok: false, payload, reason: "token 里没有 user_id 字段，不是 Ayla 访问令牌" };
+  }
+  const left = Math.round(payload.exp - Date.now() / 1000);
+  if (left <= 0) {
+    return { ok: false, payload, reason: `token 已过期（${-left}s 前），请重新登录` };
+  }
+  return { ok: true, token, payload, left };
+}
+
+/* ================= 把三种 1006 拆开 =================
+   服务端在 accept 之前 close() 时，daphne 只能回 HTTP 403，
+   浏览器因此只看到 close code 1006，看不出原因。预检用 REST 分头问：
+     1) GET /api/v1/me/                       → 令牌是否有效
+     2) GET /api/v1/voice/channels/<id>/      → 频道是否存在 + mine 是否成员
+     3) POST .../join/（可选）                → 不在成员表时补上
+*/
+async function getToken() {
+  const manual = $("token").value.trim();
+  if (manual) return { token: manual, source: "手贴" };
+
+  const username = $("username").value.trim();
+  const password = $("password").value;
+  if (!username || !password) return { token: "", source: "", reason: "未填 token，也未填账号密码" };
+
+  log(`→ 登录中：${username} @ ${apiBase()}`);
+  let r;
+  try {
+    r = await fetch(`${apiBase()}/api/v1/auth/login/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch (e) {
+    return { token: "", source: "", reason: `登录请求失败：${e && e.message ? e.message : e}` };
+  }
+  const text = await r.text();
+  if (!r.ok) return { token: "", source: "", reason: `登录失败 HTTP ${r.status} ${text.slice(0, 200)}` };
+  let access = "";
+  try { access = JSON.parse(text).access || ""; } catch { /* 落到下面的空值分支 */ }
+  if (!access) return { token: "", source: "", reason: "登录响应里没有 access 字段" };
+  $("token").value = access;
+  log("✓ 登录成功，已取得访问令牌");
+  return { token: access, source: "登录", reason: "" };
+}
+
+/** @returns {{ok:boolean, token:string, channel:string}} */
+async function preflight(opts = {}) {
+  const { autoJoin = true, quiet = false } = opts;
+  const say = quiet ? (() => {}) : log;
+
+  const channel = $("channel").value.trim();
+  if (!channel) { log("✗ channel 必填（不知道哪个频道？频道 1 = test）"); return { ok: false }; }
+
+  const got = await getToken();
+  if (!got.token) { log("✗ " + got.reason); return { ok: false }; }
+
+  const info = inspectToken(got.token);
+  if (info.payload) {
+    const p = info.payload;
+    $("tinfo").textContent = `token 来源=${got.source || "手贴"} · user_id=${p.user_id || "?"} · 剩余 ${info.left != null ? info.left + "s" : "已过期"}`;
+  }
+  if (!info.ok) {
+    log("✗ token 自检未通过：\n  " + info.reason);
+    return { ok: false };
+  }
+  say(`✓ token 有效：user_id=${info.payload.user_id}，剩余 ${info.left}s`);
+
+  const auth = { Authorization: `Bearer ${info.token}` };
+
+  // 1) 我是谁
+  let me;
+  try {
+    const r = await fetch(`${apiBase()}/api/v1/me/`, { headers: auth });
+    if (!r.ok) { log(`✗ /me/ 返回 HTTP ${r.status} —— 令牌不被服务端接受（可能已过期或密钥不符）`); return { ok: false }; }
+    me = await r.json();
+    say(`✓ 身份确认：${me.username || me.nickname || me.id}`);
+  } catch (e) {
+    log(`✗ 请求 /me/ 失败：${e && e.message ? e.message : e}（本地模式请确认后端在 localhost:8100）`);
+    return { ok: false };
+  }
+
+  // 2) 频道是否存在 + 我是不是成员
+  let ch;
+  try {
+    const r = await fetch(`${apiBase()}/api/v1/voice/channels/${encodeURIComponent(channel)}/`, { headers: auth });
+    if (r.status === 404) { log(`✗ 频道 ${channel} 不存在`); return { ok: false }; }
+    if (!r.ok) { log(`✗ 频道详情返回 HTTP ${r.status}（可能无权查看）`); return { ok: false }; }
+    ch = await r.json();
+  } catch (e) {
+    log(`✗ 请求频道详情失败：${e && e.message ? e.message : e}`);
+    return { ok: false };
+  }
+  say(`✓ 频道 ${channel}「${ch.name || "?"}」存在，成员数 ${ch.member_count ?? "?"}`);
+
+  if (!ch.mine) {
+    log(`⚠ 当前账号不在频道 ${channel} 的成员表里 —— 服务端会在 accept 前拒绝（浏览器只会显示 1006）`);
+    if (!autoJoin) return { ok: false };
+    log("→ 自动加入频道…");
+    try {
+      const r = await fetch(`${apiBase()}/api/v1/voice/channels/${encodeURIComponent(channel)}/join/`, {
+        method: "POST", headers: auth,
+      });
+      const body = await r.text();
+      if (!r.ok) { log(`✗ 加入失败 HTTP ${r.status} ${body.slice(0, 200)}`); return { ok: false }; }
+      log("✓ 已加入频道（成员行已建立）");
+    } catch (e) {
+      log(`✗ 加入请求失败：${e && e.message ? e.message : e}`);
+      return { ok: false };
+    }
+  } else {
+    say("✓ 已是频道成员");
+  }
+
+  say("✓ 预检全部通过，可以连接音频通道");
+  return { ok: true, token: info.token, channel };
+}
+
+/* ================= 能力检测 ================= */
+const caps = [];
+if (!window.AudioEncoder) caps.push("WebCodecs AudioEncoder 不可用（需 Chrome/Edge 94+）");
+if (!window.AudioDecoder) caps.push("WebCodecs AudioDecoder 不可用");
+if (!window.AudioWorkletNode) caps.push("AudioWorklet 不可用");
+if (caps.length) {
+  $("cap").textContent = "⚠ " + caps.join("；") + " —— 本页无法工作。";
+} else {
+  $("cap").style.display = "none";
+}
+
+/* ================= 采集：AudioWorklet 切 20ms 帧 ================= */
 const SAMPLE_RATE = 48000;
 const FRAME_MS = 20;
 const FRAME_SAMPLES = (SAMPLE_RATE * FRAME_MS) / 1000; // 960
@@ -158,24 +367,12 @@ let outCtx = null;
 let mySlot = null;
 let muted = false;
 let speaking = false;
-let pingSentAt = 0;
+let rateTimer = null;
 const decoders = new Map();   // slot -> AudioDecoder
 const playHead = new Map();   // slot -> 下一次播放的时间点
 const peerMap = new Map();    // slot -> identity
 const counters = { up: 0, down: 0, lost: 0 };
 
-/* ---------- 能力检测 ---------- */
-const caps = [];
-if (!window.AudioEncoder) caps.push("WebCodecs AudioEncoder 不可用（需 Chrome/Edge 94+）");
-if (!window.AudioDecoder) caps.push("WebCodecs AudioDecoder 不可用");
-if (!window.AudioWorkletNode) caps.push("AudioWorklet 不可用");
-if (caps.length) {
-  $("cap").textContent = "⚠ " + caps.join("；") + " —— 本页无法工作。";
-} else {
-  $("cap").style.display = "none";
-}
-
-/* ---------- 采集：AudioWorklet 切 20ms 帧 ---------- */
 const CAPTURE_WORKLET = `
 class Cap extends AudioWorkletProcessor {
   constructor() { super(); this.buf = new Float32Array(${FRAME_SAMPLES}); this.n = 0; this.peak = 0; }
@@ -197,13 +394,7 @@ class Cap extends AudioWorkletProcessor {
 registerProcessor("cap", Cap);
 `;
 
-function wsUrl(token, channel, backend) {
-  if (backend === "local") return `ws://localhost:8100/ws/voice/audio/?token=${encodeURIComponent(token)}&channel=${encodeURIComponent(channel)}`;
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.host}/ws/voice/audio/?token=${encodeURIComponent(token)}&channel=${encodeURIComponent(channel)}`;
-}
-
-/* ---------- 播放：每个 slot 一个解码器 + 顺序排程 ---------- */
+/* ================= 播放：每个 slot 一个解码器 + 顺序排程 ================= */
 function ensureDecoder(slot) {
   if (decoders.has(slot)) return decoders.get(slot);
   const dec = new AudioDecoder({
@@ -234,16 +425,19 @@ function ensureDecoder(slot) {
 
 function dropDecoder(slot) {
   const d = decoders.get(slot);
-  if (d) { try { d.close(); } catch {} decoders.delete(slot); }
+  if (d) { try { d.close(); } catch { /* 已关闭 */ } decoders.delete(slot); }
   playHead.delete(slot);
   peerMap.delete(slot);
   renderPeers();
 }
 
-/* ---------- 成员列表 ---------- */
+/* ================= 成员列表 ================= */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 function renderPeers() {
   const el = $("peers");
-  if (peerMap.size === 0) { el.innerHTML = '<span class="warn">房间里暂时只有你</span>'; return; }
+  if (peerMap.size === 0) { el.innerHTML = '<span class="hint">房间里暂时只有你</span>'; return; }
   el.innerHTML = [...peerMap.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([slot, info]) => {
@@ -253,23 +447,31 @@ function renderPeers() {
     .join("");
   $("mSlots").textContent = String(peerMap.size);
 }
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
 
 function setState(kind, text) {
   $("dot").className = "dot" + (kind === "on" ? " on" : kind === "err" ? " err" : "");
   $("stateText").textContent = text;
 }
 
-/* ---------- 连接 ---------- */
-$("connect").onclick = async () => {
-  const token = $("token").value.trim();
-  const channel = $("channel").value.trim();
-  if (!token || !channel) { log("✗ token 与 channel 必填"); return; }
+function explainClose(code) {
+  if (code === 1006) return "握手被拒（服务端回 HTTP 403）或链路中断。accept 前被关闭时浏览器只能看到 1006 —— 点「预检」定位真因。";
+  if (code === 4400) return "channel 参数非法";
+  if (code === 4401) return "未认证（令牌无效或已过期）";
+  if (code === 4403) return "不是该频道成员";
+  if (code === 1000) return "正常关闭";
+  return "";
+}
 
+/* ================= 连接 ================= */
+$("preflight").onclick = () => { preflight({ autoJoin: false }); };
+
+$("connect").onclick = async () => {
   $("connect").disabled = true;
   try {
+    const pre = await preflight({ autoJoin: true });
+    if (!pre.ok) { $("connect").disabled = false; return; }
+    const { token, channel } = pre;
+
     outCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
     if (outCtx.state === "suspended") await outCtx.resume();
 
@@ -300,7 +502,7 @@ $("connect").onclick = async () => {
       $("mLevel").textContent = data.peak.toFixed(2);
       const next = data.peak > 0.02;
       if (next !== speaking) { speaking = next; wsSend({ type: "speaking", on: speaking }); }
-      if (!speaking) return;   // 静音就不发帧：带宽由客户端先兜一层
+      if (!speaking) return;   // 静音不发帧：带宽先由客户端兜一层
       const ad = new AudioData({
         format: "f32-planar", sampleRate: SAMPLE_RATE, numberOfFrames: FRAME_SAMPLES,
         numberOfChannels: 1, timestamp: performance.now() * 1000, data: data.pcm,
@@ -313,14 +515,22 @@ $("connect").onclick = async () => {
     const g = micCtx.createGain(); g.gain.value = 0;
     micNode.connect(g); g.connect(micCtx.destination);
 
-    ws = new WebSocket(wsUrl(token, $("backend").value.trim() || "", channel));
+    const target = wsUrl(token, channel);
+    log(`→ 连接 ${target.replace(/token=[^&]+/, "token=***")}`);
+    ws = new WebSocket(target);
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
       setState("on", "已连接");
-      log(`✓ WS 已连上 ${ws.url.replace(/token=[^&]+/, "token=***")}`);
+      log("✓ WS 握手成功（HTTP 101）");
       $("mute").disabled = false; $("pingBtn").disabled = false; $("disconnect").disabled = false;
-      setInterval(flushRates, 1000);
+      if (rateTimer) clearInterval(rateTimer);
+      rateTimer = setInterval(() => {
+        $("mUp").textContent = String(counters.up);
+        $("mDown").textContent = String(counters.down);
+        $("mLost").textContent = String(counters.lost);
+        counters.up = 0; counters.down = 0;
+      }, 1000);
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") { onControl(JSON.parse(ev.data)); return; }
@@ -337,9 +547,11 @@ $("connect").onclick = async () => {
     ws.onclose = (e) => {
       setState("err", `已断开 (${e.code})`);
       log(`✗ WS 关闭 code=${e.code}${e.reason ? " reason=" + e.reason : ""}`);
+      const why = explainClose(e.code);
+      if (why) log("   → " + why);
       cleanup();
     };
-    ws.onerror = () => log("✗ WS 出错");
+    ws.onerror = () => log("✗ WS 出错（若紧接着出现 code=1006，说明是握手被拒而非链路抖动）");
   } catch (e) {
     log("✗ 启动失败：" + (e && e.message ? e.message : e));
     cleanup();
@@ -395,29 +607,20 @@ $("mute").onclick = () => {
   log(muted ? "已静音" : "已取消静音");
 };
 
-$("pingBtn").onclick = () => {
-  pingSentAt = performance.now();
-  wsSend({ type: "ping", ts: pingSentAt });
-};
+$("pingBtn").onclick = () => { wsSend({ type: "ping", ts: performance.now() }); };
 
 $("disconnect").onclick = () => { if (ws) ws.close(1000, "user"); };
 
-function flushRates() {
-  $("mUp").textContent = String(counters.up);
-  $("mDown").textContent = String(counters.down);
-  $("mLost").textContent = String(counters.lost);
-  counters.up = 0; counters.down = 0;
-}
-
 function cleanup() {
-  try { if (micStream) micStream.getTracks().forEach((t) => t.stop()); } catch {}
-  try { if (micNode) micNode.disconnect(); } catch {}
-  try { if (micCtx) micCtx.close(); } catch {}
-  try { if (outCtx) outCtx.close(); } catch {}
-  try { if (encoder) encoder.close(); } catch {}
+  try { if (micStream) micStream.getTracks().forEach((t) => t.stop()); } catch { /* 已停止 */ }
+  try { if (micNode) micNode.disconnect(); } catch { /* 已断开 */ }
+  try { if (micCtx) micCtx.close(); } catch { /* 已关闭 */ }
+  try { if (outCtx) outCtx.close(); } catch { /* 已关闭 */ }
+  try { if (encoder) encoder.close(); } catch { /* 已关闭 */ }
   for (const slot of [...decoders.keys()]) dropDecoder(slot);
+  if (rateTimer) { clearInterval(rateTimer); rateTimer = null; }
   encoder = null; micCtx = null; micNode = null; micStream = null; outCtx = null;
-  ws = null; mySlot = null;
+  ws = null; mySlot = null; speaking = false;
   $("connect").disabled = false;
   $("mute").disabled = true; $("pingBtn").disabled = true; $("disconnect").disabled = true;
   $("mute").textContent = "静音";

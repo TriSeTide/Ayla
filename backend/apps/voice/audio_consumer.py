@@ -22,7 +22,7 @@ import logging
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
-from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from apps.accounts.consumers import _jwt_user_from_scope
 
@@ -47,8 +47,14 @@ def _resolve_membership(channel_id, user) -> bool:
     return user_in_channel(ch, user)
 
 
-class VoiceAudioConsumer(AsyncWebsocketConsumer):
-    """房间音频中继。收到二进制帧只做裁决 + 前缀 slot 后转发，不解码。"""
+class VoiceAudioConsumer(AsyncJsonWebsocketConsumer):
+    """房间音频中继。收到二进制帧只做裁决 + 前缀 slot 后转发，不解码。
+
+    基类必须是 AsyncJsonWebsocketConsumer（而非 AsyncWebsocketConsumer）：
+    `send_json` 只定义在前者上，用后者调用会抛 AttributeError，
+    daphne 在 accept 之后捕获异常 → 客户端收到 close 1011、且看不到任何业务帧。
+    它的 receive_json 分支不适用于本通道，因此下面重写 receive 同时接二进制与文本。
+    """
 
     async def connect(self):
         # 失败路径要留痕：connect 里提前 return 前必须先给 self.xxx 兜底默认值，
