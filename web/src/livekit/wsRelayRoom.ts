@@ -61,7 +61,7 @@ interface WsAudioEncoder {
 }
 interface WsAudioDecoder {
   configure(config: { codec: string; sampleRate: number; numberOfChannels: number }): void;
-  decode(chunk: { type: "key"; timestamp: number; data: Uint8Array }): void;
+  decode(chunk: WsEncodedAudioChunk): void;
   close(): void;
 }
 

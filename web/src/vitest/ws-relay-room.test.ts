@@ -81,15 +81,15 @@ class FakeEncoder {
 
 class FakeDecoder {
   static instances: FakeDecoder[] = [];
-  chunks: Uint8Array[] = [];
+  chunks: Array<{ data?: Uint8Array }> = [];
   constructor(_init: { output: (audioData: unknown) => void }) {
     FakeDecoder.instances.push(this);
   }
   configure() {
     /* 无操作 */
   }
-  decode(chunk: { data: Uint8Array }) {
-    this.chunks.push(chunk.data);
+  decode(chunk: { data?: Uint8Array }) {
+    this.chunks.push(chunk);
   }
   close() {
     /* 无操作 */
@@ -104,7 +104,10 @@ class FakeAudioData {
 }
 
 class FakeEncodedAudioChunk {
-  constructor(public init: Record<string, unknown>) {}
+  data?: Uint8Array;
+  constructor(init: Record<string, unknown>) {
+    Object.assign(this, init); // 真实实例没有 .data，fake 摊开 init 方便断言
+  }
 }
 
 class FakeGainNode {
@@ -285,7 +288,7 @@ describe("wsRelayRoom", () => {
 
     sock.serverBinary(new Uint8Array([2, 1, 2, 3]));
     expect(FakeDecoder.instances).toHaveLength(1);
-    expect(FakeDecoder.instances[0].chunks[0]).toEqual(new Uint8Array([1, 2, 3]));
+    expect(FakeDecoder.instances[0].chunks[0]?.data).toEqual(new Uint8Array([1, 2, 3]));
 
     // 未知 slot 也要解码（成员事件偶发丢失不应导致整段无声）→ 新建第二个解码器
     sock.serverBinary(new Uint8Array([7, 9, 9]));
@@ -295,7 +298,7 @@ describe("wsRelayRoom", () => {
     const before = FakeDecoder.instances[0].chunks.length;
     sock.serverBinary(new Uint8Array([1, 8, 8])); // mySlot=1
     expect(FakeDecoder.instances[0].chunks).toHaveLength(before);
-    expect((window as unknown as { __voiceDebug: { snapshot: () => { selfFrames: number } } }).__voiceDebug.snapshot().selfFrames).toBe(1);
+    expect((window as unknown as { __voiceDebug: { snapshot: { selfFrames: number } } }).__voiceDebug.snapshot.selfFrames).toBe(1);
   });
 
   it("远端音量快照按 user_id 输出且含 0；setRemoteVolume 改对应增益", async () => {
