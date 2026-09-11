@@ -41,6 +41,17 @@ export function relayWsUrl(channelId: string): string {
   return `${WS_BASE}/ws/voice/audio/?channel=${encodeURIComponent(channelId)}`;
 }
 
+/**
+ * 直连通道（主用）：volx frps 的 TCP 7881 → 本机 nginx 443（TLS）→ 中继。
+ * live.trise.top 灰云 A → 47.108.85.223，国内直连低延迟，不经 CF。
+ * 需要有效证书（现有 LE SAN 覆盖 live.trise.top，12-10 到期前须把续签切 dns_cf）。
+ */
+export const VOICE_DIRECT_WS_BASE = ((import.meta.env as Record<string, string | undefined>)?.VITE_VOICE_DIRECT_WS) ?? "wss://live.trise.top:7881";
+
+export function voiceDirectWsUrl(channelId: string): string {
+  return `${VOICE_DIRECT_WS_BASE}/ws/voice/audio/?channel=${encodeURIComponent(channelId)}`;
+}
+
 /* ================= WebCodecs 最小类型（TS 5.6 lib.dom 未含 WebCodecs） ================= */
 
 interface WsEncodedAudioChunk {
@@ -191,11 +202,11 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
   let ws: WebSocket | null = null;
   let closed = true; // 用户已 disconnect：之后所有异步回调都不再动作
   let handshaken = false; // 当前连接是否收到过 joined
-  let channelId = "";
   let reconnectTimer: number | null = null;
   let reconnectAttempts = 0;
   let consecutiveFailures = 0;
   let mySlot: number | null = null;
+  let channelCandidates: string[] = [];
 
   /* ---- 诊断计数（window.__voiceDebug 暴露；F12 即可查看卡点） ---- */
   const debug = {
@@ -610,10 +621,24 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
     scheduleReconnect();
   };
 
-  const openOnce = (token: string): Promise<void> =>
+  /** 依次尝试通道候选（直连优先，CF 回退）；任一握手成功即用 */
+  const openBest = async (token: string): Promise<void> => {
+    let lastError: unknown = null;
+    for (const candidate of channelCandidates) {
+      try {
+        await openOnce(token, candidate);
+        return;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? new Error("语音通道全部候选地址不可达");
+  };
+
+  const openOnce = (token: string, target: string): Promise<void> =>
     new Promise<void>((resolve, reject) => {
       let settled = false;
-      const socket = new WebSocket(`${relayWsUrl(channelId)}&token=${encodeURIComponent(token)}`);
+      const socket = new WebSocket(`${target}&token=${encodeURIComponent(token)}`);
       socket.binaryType = "arraybuffer";
       const timeout = window.setTimeout(() => {
         if (settled) return;
@@ -694,7 +719,7 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
     }
     try {
       const token = await freshToken();
-      await openOnce(token);
+      await openBest(token);
       // 重连成功：向新房间同步媒体事实（服务端房间表是按连接重建的）
       sendControl({ type: "mute", on: !micEnabled });
     } catch {
@@ -715,14 +740,15 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
       const id = parsed.searchParams.get("channel");
       if (!id) throw new Error("语音通道缺少 channel 参数");
       if (!token) throw new Error("登录状态失效，请重新登录");
-      channelId = id;
       closed = false;
       handshaken = false;
       consecutiveFailures = 0;
       reconnectAttempts = 0;
+      // 通道候选：直连（frp TCP，国内低延迟）优先，CF Tunnel 自动回退
+      channelCandidates = [url, relayWsUrl(id)].filter((v, i, arr) => arr.indexOf(v) === i);
       events.onStateChange?.("connecting");
       try {
-        await openOnce(token);
+        await openBest(token);
       } catch (error) {
         closed = true;
         events.onStateChange?.("failed");

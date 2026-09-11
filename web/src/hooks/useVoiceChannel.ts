@@ -20,7 +20,7 @@ import { ApiError } from "../api/client";
 import * as voiceApi from "../api/voice";
 import { ensureUsers } from "../api/users";
 import { voiceLiveKit } from "../livekit/client";
-import { relayWsUrl, voiceMediaTransport } from "../livekit/wsRelayRoom";
+import { voiceDirectWsUrl, voiceMediaTransport } from "../livekit/wsRelayRoom";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
@@ -263,14 +263,14 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
             });
             useVoiceStore.getState().setLivekit("connecting");
             voiceSessionRuntime.setMediaChannel(channelId);
-            // 传输方式二选一：WS 音频中继（默认）用本站 WS + 访问令牌；
-            // livekit（回滚开关）用 join 返回的媒体服务器地址与媒体 token。
+            // 传输方式二选一：WS 音频中继（默认）传直连地址（房间内部自动以
+            // CF Tunnel 为回退候选）；livekit（回滚开关）用 join 返回的媒体参数。
             if (voiceMediaTransport() === "livekit") {
               await voiceLiveKit.connect(joinResult.ws_url, joinResult.token);
             } else {
               const mediaToken = useAuthStore.getState().accessToken;
               if (!mediaToken) throw new Error("登录状态失效，请重新登录");
-              await voiceLiveKit.connect(relayWsUrl(channelId), mediaToken);
+              await voiceLiveKit.connect(voiceDirectWsUrl(channelId), mediaToken);
             }
             if (!isCurrent()) return;
             await voiceLiveKit.startAudio().catch(() => {});
