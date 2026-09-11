@@ -51,7 +51,6 @@ export function LiveHubPage() {
     owner: filter === "mine" ? currentUserId : undefined,
   });
   const { items: channels, loading, error, refresh } = directory;
-  const [profileError, setProfileError] = useState<string | null>(null);
   const [elysiaUserId, setElysiaUserId] = useState<string | null>(null);
   const [ownerNames, setOwnerNames] = useState<Record<string, string>>({});
   // §3.4 刷新动画：刷新完成后递增，已入场卡片整批重播浮入（第一页也有动画）
@@ -112,8 +111,8 @@ export function LiveHubPage() {
       .then((p) => {
         if (!cancelled) setElysiaUserId(p.enabled ? p.user.id : null);
       })
-      .catch((e) => {
-        if (!cancelled) setProfileError(e instanceof Error ? e.message : "加载爱莉资料失败");
+      .catch(() => {
+        /* 爱莉入口静默降级：加载失败不展示（elysiaUserId 保持 null） */
       });
     return () => {
       cancelled = true;
@@ -141,7 +140,6 @@ export function LiveHubPage() {
         <div key={scope} className="directory-content live-content" ref={hubRef}
           id={`${selectionId}-panel`} role="tabpanel" aria-labelledby={`${selectionId}-${filter}`} tabIndex={0}
           onScroll={(event) => directory.onScroll(event.currentTarget)}>
-          {profileError && <div className="live-form-error" role="alert">爱莉入口暂不可用：{profileError}</div>}
           {loading && visibleChannels.length === 0 ? (
             <div className="conv-loading">
               <div className="skeleton" style={{ height: 96, marginBottom: 8 }} />
