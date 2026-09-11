@@ -112,7 +112,10 @@ const SAMPLE_RATE = 48000;
 const FRAME_MS = 20;
 const FRAME_SAMPLES = (SAMPLE_RATE * FRAME_MS) / 1000; // 960
 const LEVEL_TICK_MS = 100;
-const SPEAKING_THRESHOLD = 0.02;
+// 说话判定用迟滞阈值：开 0.02 / 关 0.012。单一阈值会导致音量在阈值附近时
+// speaking 每几百 ms 翻转一次（服务端日志实测），接收方听到断续的"颤音"
+const SPEAKING_ON = 0.02;
+const SPEAKING_OFF = 0.012;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -194,6 +197,33 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
   let consecutiveFailures = 0;
   let mySlot: number | null = null;
 
+  /* ---- 诊断计数（window.__voiceDebug 暴露；F12 即可查看卡点） ---- */
+  const debug = {
+    binary: 0, // 收到的二进制帧总数
+    decoded: 0, // 解码输出回调次数
+    decodeError: 0, // 解码/播放异常次数
+    suspended: 0, // AudioContext 非 running 的次数（autoplay 受阻信号）
+    selfFrames: 0, // 收到自己帧的次数（N-1 失效信号）
+    noDecoder: 0, // 解码器创建失败的次数
+    lastError: "",
+  };
+  if (typeof window !== "undefined") {
+    (window as unknown as { __voiceDebug: unknown }).__voiceDebug = {
+      get snapshot() {
+        return {
+          ...debug,
+          mySlot,
+          members: [...slotToIdentity.entries()],
+          decoders: decoders.size,
+          outCtxState: outCtx?.state ?? "未创建",
+          micEnabled,
+          speakingSent,
+          wsState: ws?.readyState ?? null,
+        };
+      },
+    };
+  }
+
   /* ---- 成员表（slot ↔ user_id）与说话/静音事实 ---- */
   const slotToIdentity = new Map<number, string>();
   const speakingSlots = new Set<number>();
@@ -264,7 +294,11 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
         output: (audioData) => {
           try {
             const ctx = ensureOutCtx();
-            if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+            if (ctx.state !== "running") {
+              debug.suspended += 1;
+              void ctx.resume().catch(() => {});
+            }
+            debug.decoded += 1;
             const buf = ctx.createBuffer(1, audioData.numberOfFrames, audioData.sampleRate);
             const dst = buf.getChannelData(0);
             audioData.copyTo(dst, { planeIndex: 0, format: "f32-planar" });
@@ -283,6 +317,10 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
             if (at < now + 0.02 || at > now + 0.4) at = now + 0.02;
             src.start(at);
             playHead.set(slot, at + buf.duration);
+          } catch (e) {
+            debug.decodeError += 1;
+            debug.lastError = `decode output: ${String(e)}`;
+            throw e;
           } finally {
             audioData.close();
           }
@@ -388,14 +426,31 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
   const handleBinary = (buf: ArrayBuffer) => {
     const bytes = new Uint8Array(buf);
     if (bytes.length < 2) return;
+    debug.binary += 1;
     const slot = bytes[0];
-    // 只收已登记的远端 slot；自己的帧（N-1 失效）与未知 slot 一律丢弃
-    if (slot === mySlot || !slotToIdentity.has(slot)) return;
+    if (slot === mySlot) {
+      debug.selfFrames += 1; // 不应发生（服务端已做 N-1）；仅计数
+      return;
+    }
+    // 不再要求 slot 已登记（对齐 lab 行为）：成员事件偶发丢失不应导致整段无声。
+    // identity 未知时增益取默认 1，member 事件到达后自动归位。
     const dec = ensureDecoder(slot);
-    if (!dec) return;
+    if (!dec) {
+      debug.noDecoder += 1;
+      return;
+    }
     try {
-      dec.decode({ type: "key", timestamp: performance.now() * 1000, data: bytes.subarray(1) });
-    } catch {
+      // AudioDecoder.decode 做品牌检查：必须传入真正的 EncodedAudioChunk 实例，
+      // 普通对象字面量会被 Chrome 以 "parameter 1 is not of type 'EncodedAudioChunk'" 拒绝
+      const chunk = new codecs.EncodedAudioChunk({
+        type: "key",
+        timestamp: performance.now() * 1000,
+        data: bytes.subarray(1),
+      });
+      dec.decode(chunk);
+    } catch (e) {
+      debug.decodeError += 1;
+      debug.lastError = `decode: ${String(e)}`;
       slotLevels.set(slot, 0);
     }
   };
@@ -471,7 +526,7 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
     micWorklet.port.onmessage = ({ data }: MessageEvent<{ pcm: Float32Array; peak: number }>) => {
       if (!micEnabled || !encoder || encoder.state !== "configured") return;
       localPeak = data.peak;
-      const speaking = data.peak > SPEAKING_THRESHOLD;
+      const speaking = speakingSent ? data.peak > SPEAKING_OFF : data.peak > SPEAKING_ON;
       if (speaking !== speakingSent) {
         speakingSent = speaking;
         sendControl({ type: "speaking", on: speaking });
@@ -673,6 +728,10 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
         events.onStateChange?.("failed");
         throw error;
       }
+      // 播放上下文提前创建并 resume：不等第一帧解码（autoplay 策略下，
+      // 越早出现在用户手势链里越可靠），与 startAudio() 双保险
+      const ctx = ensureOutCtx();
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
       // 新入房：默认静音事实同步给服务端（join 流程随后按选项开麦）
       sendControl({ type: "mute", on: !micEnabled });
     },

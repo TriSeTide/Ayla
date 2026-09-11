@@ -279,7 +279,7 @@ describe("wsRelayRoom", () => {
     expect(left).toEqual(["u2"]);
   });
 
-  it("二进制帧只收已登记的远端 slot，交由解码器", async () => {
+  it("二进制帧解码播放；未知 slot 也收（对齐 lab 行为），自己的帧丢弃", async () => {
     const { sock } = await makeConnectedRoom();
     sock.serverText({ type: "member_joined", slot: 2, identity: "u2" });
 
@@ -287,10 +287,15 @@ describe("wsRelayRoom", () => {
     expect(FakeDecoder.instances).toHaveLength(1);
     expect(FakeDecoder.instances[0].chunks[0]).toEqual(new Uint8Array([1, 2, 3]));
 
-    // 未知 slot 丢弃
-    const before = FakeDecoder.instances[0].chunks.length;
+    // 未知 slot 也要解码（成员事件偶发丢失不应导致整段无声）→ 新建第二个解码器
     sock.serverBinary(new Uint8Array([7, 9, 9]));
+    expect(FakeDecoder.instances).toHaveLength(2);
+
+    // 自己的帧（N-1 失效信号）丢弃
+    const before = FakeDecoder.instances[0].chunks.length;
+    sock.serverBinary(new Uint8Array([1, 8, 8])); // mySlot=1
     expect(FakeDecoder.instances[0].chunks).toHaveLength(before);
+    expect((window as unknown as { __voiceDebug: { snapshot: () => { selfFrames: number } } }).__voiceDebug.snapshot().selfFrames).toBe(1);
   });
 
   it("远端音量快照按 user_id 输出且含 0；setRemoteVolume 改对应增益", async () => {
