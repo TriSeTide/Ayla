@@ -1,0 +1,68 @@
+# ============================================================================
+# frpc 客户端配置模板（朋友 frps 节点：frp.volx.top:2101）
+# ----------------------------------------------------------------------------
+# 实际文件位于服务器 ~/frp/frpc.toml，权限 600（含 token），**不提交仓库**。
+# 本模板仅作部署参考；token 用占位符。
+#
+# 转发矩阵（remote -> 本机）：
+#   ssh        6020 -> 22     运维直连
+#   srs-rtmp   1935 -> 1935   OBS 推流
+#   live-pull  7882 -> 8443   HLS/FLV 拉流（nginx 独立入口）
+#   voice-ws   7881 -> 443    语音 WS 中继（nginx TLS 终结）
+#
+# 注意：
+#   - 443 已由朋友 frps 占用，语音走 7881（映射到本机 443）。
+#   - 3443 被阿里云安全组 drop（真机实测 SYN 超时），拉流改用 7882。
+#   - LiveKit 退役前占用的 7882/tcp、7881/udp 隧道已删除。
+# ============================================================================
+
+serverAddr = "frp.volx.top"
+serverPort = 2101
+
+auth.method = "token"
+auth.token = "<FRPS_TOKEN>"
+
+transport.protocol = "tcp"
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+transport.dialServerTimeout = 10
+transport.dialServerKeepalive = 7200
+transport.tcpMux = true
+transport.tcpMuxKeepaliveInterval = 30
+transport.tls.enable = true
+
+# frpc 本地管理面板（仅 loopback）
+webServer.addr = "127.0.0.1"
+webServer.port = 7400
+
+[[proxies]]
+name = "ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 6020
+
+# SRS RTMP 推流
+[[proxies]]
+name = "ayla-srs-rtmp"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1935
+remotePort = 1935
+
+# 拉流：HLS/FLV 下行（独立入口）-> 本机 nginx 8443（仅 /live/ 流文件）
+[[proxies]]
+name = "ayla-live-pull"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8443
+remotePort = 7882
+
+# 语音 WS 中继（Opus over WebSocket over TCP）
+# wss://live.trise.top:7881 -> 本机 nginx 443（TLS 终结）-> daphne 8100
+[[proxies]]
+name = "ayla-voice-ws"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 443
+remotePort = 7881

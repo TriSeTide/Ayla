@@ -1,0 +1,48 @@
+# ============================================================================
+# SRS 生产配置模板（Ayla 直播）
+# ----------------------------------------------------------------------------
+# 实际文件：服务器 ~/Elysia/ayla-deploy/srs.conf（compose 挂载到
+# /usr/local/srs/conf/docker.conf）。证书用 ./nginx/certs 自签，挂载到
+# /usr/local/srs/conf/cert。
+#
+# 数据流：
+#   OBS --rtmp://live.trise.top:1935/live/{key}--> SRS（推流，朋友 frp 1935）
+#   播放 --https://live.trise.top:7882/live/{key}.m3u8|.flv--> nginx 8443
+#          --https://127.0.0.1:8089--> SRS HTTPS
+#   backend 经 http://127.0.0.1:1985 查询流状态
+# 无 WebRTC（RTC 需 UDP，frp 源地址改写后不可用）。
+# ============================================================================
+
+listen              1935;
+max_connections     1000;
+srs_log_tank        console;
+daemon              off;
+
+# SRS HTTP API（后端 apps/live/srs.py 内部查询状态用，仅内网）
+http_api {
+    enabled         on;
+    listen          1985;
+}
+
+# 播放服务器：8089 = HTTPS-FLV/HLS（nginx 8443 反代）
+http_server {
+    enabled         on;
+    listen          8080;
+    dir             ./objs/nginx/html;
+    https {
+        enabled     on;
+        listen      8089;
+        key         ./conf/cert/key.pem;
+        cert        ./conf/cert/cert.pem;
+    }
+}
+
+vhost __defaultVhost__ {
+    hls {
+        enabled         on;
+    }
+    http_remux {
+        enabled         on;
+        mount       [vhost]/[app]/[stream].flv;
+    }
+}

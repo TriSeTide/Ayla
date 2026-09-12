@@ -1,0 +1,192 @@
+# ⚠️ 模板文件 → 线上 ~/Elysia/ayla-deploy/nginx/nginx.conf（容器内 /etc/nginx/conf.d/default.conf）
+# 部署时改名为 nginx.conf。**文件级 bind-mount**：更新必须原地覆盖（`cp` 保 inode），
+# 否则容器仍读旧 inode，表现为"改了没生效"。
+#
+# Ayla 生产 Nginx 配置（frp 服务器，host 网络）
+# 职责：
+#   1. HTTPS 托管 Vite 构建静态文件
+#   2. 反代 /api/ /ws/ -> backend 127.0.0.1:8100（host 网络直连）
+#   3. 反代 /minio/ -> minio 127.0.0.1:9000（预签名直传/播放数据面）
+#   4. SPA 路由回退
+#   5. 拉流独立入口 127.0.0.1:8443（仅 /live/*.m3u8|flv|ts -> SRS 8089）
+# 仅监听 127.0.0.1：公网访问全部经 frpc 穿透（樱花 26211 -> 本机 443；
+#   朋友 frp live.trise.top:7881 -> 本机 443 语音 WS、:7882 -> 本机 8443 拉流）。
+# 历史：LiveKit 已于 2026-09-12 退役（语音改走 ws 音频中继，见 web/src/livekit/wsRelayRoom.ts）。
+
+upstream ayla_backend {
+    server 127.0.0.1:8100;
+}
+
+# HTTP -> HTTPS 跳转（公网入口 26211，必须带端口，否则丢端口号）
+server {
+    listen 127.0.0.1:80;
+    server_name _;
+    return 301 https://$host:26211$request_uri;
+}
+
+server {
+    listen 127.0.0.1:443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/trise-cert.pem;
+    ssl_certificate_key /etc/nginx/certs/trise-key.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # 关键：公网走 frp 穿透（非标端口），目录补全/跳转必须用相对路径，
+    # 否则 301 的 Location 会丢端口（absolute_redirect 默认用 $host，无端口）
+    absolute_redirect off;
+    port_in_redirect on;
+
+    # 媒体上传上限（voice 30M / file 50M 余量）
+    client_max_body_size 60m;
+
+    # Gzip 压缩
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript image/svg+xml;
+    gzip_min_length 1024;
+
+    # 静态资源缓存
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # API 反向代理
+    location /api/ {
+        proxy_pass http://ayla_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # WebSocket 反向代理（Django Channels）
+    location /ws/ {
+        proxy_pass http://ayla_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    # MinIO 媒体数据面（预签名直传/播放，剥 /minio 前缀还原对象 key 路径）。
+    # Host 必须固定为 S3_ENDPOINT_URL 的 host（127.0.0.1:9000）——预签名 URL 的
+    # host 是签名的一部分，等价于 Vite 代理 changeOrigin:true 的行为。
+    location /minio/ {
+        proxy_pass http://127.0.0.1:9000/;
+        proxy_set_header Host 127.0.0.1:9000;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        client_max_body_size 0;
+    }
+
+    # SPA 路由回退
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# ---- 拉流专用入口（独立于 443，胖流量与网页/信令物理隔离）----
+# 只服务 /live/ 流文件（m3u8/flv/ts）→ SRS 8089，其余一律 404（不暴露网页/API/信令）。
+# 拉流隧道（朋友 frp，带宽最大的一条）remotePort -> 本机 127.0.0.1:8443。
+server {
+    listen 127.0.0.1:8443 ssl;
+    server_name _;
+
+    # 拉流入口（live.trise.top / 或 IP 直连），用 trise 的 LE 证书（SAN 覆盖 live.trise.top）
+    ssl_certificate     /etc/nginx/certs/trise-cert.pem;
+    ssl_certificate_key /etc/nginx/certs/trise-key.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    absolute_redirect off;
+    port_in_redirect on;
+
+    location ~ ^/live/.+\.(m3u8|flv|ts)$ {
+        proxy_pass https://127.0.0.1:8089;
+        proxy_ssl_verify off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 86400s;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+
+# ---- Cloudflare Tunnel 专用入口（纯 HTTP，无 TLS）----
+# cloudflared 回源 http://127.0.0.1:8080，TLS 与证书由 Cloudflare 边缘负责。
+# 与 443 块的两点关键区别：
+#   1. 不依赖本机证书 —— trise 的 LE 证书是走阿里云 DNS-01 签的，
+#      NS 迁到 Cloudflare 后续签链路已断，不能把公网入口绑在它身上。
+#   2. 不做端口跳转 —— CF 只暴露 443，任何带 :26211 的 301 都会把用户打死。
+# X-Forwarded-Proto 固定为 https：CF 边缘已终止 TLS，若不固定 Django 会生成 http 链接。
+server {
+    listen 127.0.0.1:8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # 相对路径跳转，避免 Location 泄漏内部端口
+    absolute_redirect off;
+
+    client_max_body_size 60m;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript image/svg+xml;
+    gzip_min_length 1024;
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location /api/ {
+        proxy_pass http://ayla_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+
+    location /ws/ {
+        proxy_pass http://ayla_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    location /minio/ {
+        proxy_pass http://127.0.0.1:9000/;
+        proxy_set_header Host 127.0.0.1:9000;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        client_max_body_size 0;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

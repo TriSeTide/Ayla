@@ -1,0 +1,51 @@
+#!/bin/bash
+# ============================================================================
+# TLS 证书签发 / 自动续签模板（acme.sh + Cloudflare DNS-01）
+# ----------------------------------------------------------------------------
+# 背景（重要）：
+#   trise.top 的 NS 已托管到 Cloudflare（elaine/benedict.ns.cloudflare.com），
+#   因此 DNS-01 校验必须用 **dns_cf**；原先走阿里云 DNS 的续签链路已断。
+#   旧证书（trise-cert.pem）2026-12-10 到期，此前必须完成切换，否则公网入口
+#   （樱花 26211 / 拉流 7882 / 语音 7881）全部因证书过期而握手失败。
+#
+# 证书 SAN 覆盖三处入口：
+#   ayla.trise.top      —— CF Tunnel / 樱花直连网页入口
+#   live.trise.top      —— 语音 WS 7881 / 拉流 7882
+#   s.ayla.trise.top    —— 樱花直连入口别名（Sakura TCP 隧道按端口路由，任意 SNI
+#                          都通，但证书必须覆盖该名字浏览器才不报警）
+#
+# 一次性准备（在服务器上执行一次）：
+#   export CF_Token="<Cloudflare API Token: Zone > DNS > Edit, 作用域 trise.top>"
+#   export CF_Account_ID="<可选，多账号时填>"
+#   把上面两行写入 ~/.acme.sh/account.conf（acme.sh 会自动保存），或每次签发前 export。
+#
+# 安装路径（deploy/nginx/certs，文件级 bind-mount -> 必须原地覆盖保 inode，
+# acme.sh install-cert 用 `cat > file` 重定向，天然保 inode，安全）。
+# ============================================================================
+set -euo pipefail
+
+ACME="$HOME/.acme.sh/acme.sh"
+DOMAIN=ayla.trise.top
+ALTDOMAINS=(-d live.trise.top -d s.ayla.trise.top)
+CERT_DIR=/home/ayerelysia/Elysia/ayla-deploy/nginx/certs
+RELOAD_CMD="docker exec ayla-nginx nginx -s reload"
+
+# --- 1. 签发（首次）/ 续签（已有证书时加 --force 可强制重签）---
+"$ACME" --issue --dns dns_cf \
+  -d "$DOMAIN" "${ALTDOMAINS[@]}" \
+  --keylength ec-256
+
+# --- 2. 安装到 nginx 证书目录 + 装载后自动 reload ---
+"$ACME" --install-cert -d "$DOMAIN" --ecc \
+  --key-file       "$CERT_DIR/trise-key.pem" \
+  --fullchain-file "$CERT_DIR/trise-cert.pem" \
+  --reloadcmd      "$RELOAD_CMD"
+
+# --- 3. 续签定时任务（acme.sh 安装时通常已自带；确认存在）---
+#   crontab -l | grep acme
+#   若无：  "$ACME" --install-cronjob
+#   经验值：LE 证书 90 天，acme.sh 默认在到期前 60 天起每天尝试续签。
+
+echo "== 完成。校验 =="
+echo | openssl s_client -connect 127.0.0.1:443 -servername ayla.trise.top 2>/dev/null \
+  | openssl x509 -noout -subject -dates -ext subjectAltName

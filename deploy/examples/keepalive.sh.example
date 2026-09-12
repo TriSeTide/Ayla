@@ -1,0 +1,24 @@
+#!/bin/bash
+# ============================================================================
+# frpc 守护脚本模板（穿透基础设施，非 Elysium 主进程）
+# ----------------------------------------------------------------------------
+# 实际文件：服务器 ~/frp/keepalive.sh；由 cron 每分钟执行：进程不在则拉起。
+# 模式用命令行开头锚定 / 唯一 token 子串，避免误匹配其它 frpc 进程。
+#
+# ⚠️ 两个 frpc 必须都存活：
+#   1) 朋友 frps 客户端（~/frp/frpc -c frpc.toml）—— ssh/推流/拉流/语音
+#   2) 樱花 frps 客户端（~/sakurafrp/frpc -f <token>）—— 网页直连入口 26211
+# ============================================================================
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 1) 朋友 frp：ssh 6020 / rtmp 1935 / live-pull 7882 / voice-ws 7881
+if ! pgrep -f "^/home/ayerelysia/frp/frpc -c" > /dev/null 2>&1; then
+  cd /home/ayerelysia/frp && setsid nohup ./frpc -c frpc.toml >> frpc.log 2>&1 < /dev/null &
+  logger -t frpc-keepalive "friend frpc restarted"
+fi
+
+# 2) 樱花 frp：web + signaling 26211
+if ! pgrep -f "frpc -f <SAKURA_TOKEN>" > /dev/null 2>&1; then
+  cd /home/ayerelysia/sakurafrp && setsid nohup ./frpc -f <SAKURA_TOKEN> >> frpc-sakura.log 2>&1 < /dev/null &
+  logger -t frpc-keepalive "sakura frpc restarted"
+fi
