@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "../stores/auth";
-import { createWsRelayRoom, relayWsUrl, voiceMediaTransport } from "../livekit/wsRelayRoom";
+import { createWsRelayRoom, voiceDirectWsUrl, voiceMediaTransport } from "../livekit/wsRelayRoom";
 import type { LiveKitEvents, LiveKitState } from "../livekit/client";
 
 vi.mock("../api/client", () => ({ refreshAccessToken: vi.fn(async () => true) }));
@@ -195,7 +195,7 @@ describe("wsRelayRoom", () => {
 
   async function makeConnectedRoom(): Promise<{ room: Awaited<ReturnType<typeof createWsRelayRoom>>; sock: FakeWebSocket }> {
     const room = await createWsRelayRoom(makeEvents());
-    const pending = room.connect(relayWsUrl("1"), "tok-0");
+    const pending = room.connect(voiceDirectWsUrl("1"), "tok-0");
     const sock = FakeWebSocket.instances.at(-1)!;
     sock.serverOpen();
     sock.serverText({ type: "joined", slot: 1, members: [] });
@@ -247,9 +247,12 @@ describe("wsRelayRoom", () => {
     vi.restoreAllMocks();
   });
 
-  it("传输选择默认 ws；relayWsUrl 带上 channel", () => {
+  it("传输选择默认 ws；直连地址带上 channel 且指向 frp 直连端口", () => {
     expect(voiceMediaTransport()).toBe("ws");
-    expect(relayWsUrl("42")).toContain("/ws/voice/audio/?channel=42");
+    const url = voiceDirectWsUrl("42");
+    expect(url).toContain("/ws/voice/audio/?channel=42");
+    expect(url).toContain("7881");
+    expect(url).not.toContain("ayla.trise.top"); // 不再经 CF
   });
 
   it("缺 WebCodecs 时给出明确错误（而非深处的 TypeError）", async () => {

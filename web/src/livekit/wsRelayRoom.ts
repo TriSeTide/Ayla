@@ -33,16 +33,8 @@ export function voiceMediaTransport(): VoiceMediaTransport {
   return raw === "livekit" ? "livekit" : "ws";
 }
 
-/** 复制 ws/presence.ts 的取值逻辑而非导入它：避免 stores↔ws 的模块环在初始化期放大 */
-const WS_BASE = ((import.meta.env as Record<string, string | undefined>)?.VITE_WS_BASE_URL) ?? "";
-
-/** 中继 WS 端点（token 由 connect 入参另行携带，不预拼进 URL） */
-export function relayWsUrl(channelId: string): string {
-  return `${WS_BASE}/ws/voice/audio/?channel=${encodeURIComponent(channelId)}`;
-}
-
 /**
- * 直连通道（主用）：volx frps 的 TCP 7881 → 本机 nginx 443（TLS）→ 中继。
+ * 直连通道：volx frps 的 TCP 7881 → 本机 nginx 443（TLS）→ 中继。
  * live.trise.top 灰云 A → 47.108.85.223，国内直连低延迟，不经 CF。
  * 需要有效证书（现有 LE SAN 覆盖 live.trise.top，12-10 到期前须把续签切 dns_cf）。
  */
@@ -206,7 +198,8 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
   let reconnectAttempts = 0;
   let consecutiveFailures = 0;
   let mySlot: number | null = null;
-  let channelCandidates: string[] = [];
+  /** 当前媒体通道地址（connect 入参；断线重连沿用它） */
+  let targetUrl = "";
 
   /* ---- 诊断计数（window.__voiceDebug 暴露；F12 即可查看卡点） ---- */
   const debug = {
@@ -621,20 +614,6 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
     scheduleReconnect();
   };
 
-  /** 依次尝试通道候选（直连优先，CF 回退）；任一握手成功即用 */
-  const openBest = async (token: string): Promise<void> => {
-    let lastError: unknown = null;
-    for (const candidate of channelCandidates) {
-      try {
-        await openOnce(token, candidate);
-        return;
-      } catch (e) {
-        lastError = e;
-      }
-    }
-    throw lastError ?? new Error("语音通道全部候选地址不可达");
-  };
-
   const openOnce = (token: string, target: string): Promise<void> =>
     new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -719,7 +698,7 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
     }
     try {
       const token = await freshToken();
-      await openBest(token);
+      await openOnce(token, targetUrl);
       // 重连成功：向新房间同步媒体事实（服务端房间表是按连接重建的）
       sendControl({ type: "mute", on: !micEnabled });
     } catch {
@@ -744,11 +723,10 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
       handshaken = false;
       consecutiveFailures = 0;
       reconnectAttempts = 0;
-      // 通道候选：直连（frp TCP，国内低延迟）优先，CF Tunnel 自动回退
-      channelCandidates = [url, relayWsUrl(id)].filter((v, i, arr) => arr.indexOf(v) === i);
+      targetUrl = url;
       events.onStateChange?.("connecting");
       try {
-        await openBest(token);
+        await openOnce(token, targetUrl);
       } catch (error) {
         closed = true;
         events.onStateChange?.("failed");
