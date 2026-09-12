@@ -9,7 +9,6 @@
 """
 import logging
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Exists, OuterRef
 from rest_framework import status
@@ -30,7 +29,7 @@ from apps.media.models import MediaObject
 from apps.media.services import can_access_media
 from apps.media.serializers import MediaObjectSerializer
 
-from . import livekit, services
+from . import services
 from .models import VoiceChannel, VoiceChannelMember, VoiceChatMessage
 from .serializers import VoiceChannelMemberSerializer, VoiceChannelSerializer
 from .services import (
@@ -265,7 +264,11 @@ class ChannelDetailView(APIView):
 
 
 class ChannelJoinView(APIView):
-    """POST /api/v1/voice/channels/<id>/join/ —— 加入（拿 LiveKit token）+ 落成员表 + 广播。"""
+    """POST /api/v1/voice/channels/<id>/join/ —— 加入 + 落成员表 + 广播。
+
+    媒体层已随 LiveKit 退役改走 WS 音频中继：直连地址由前端本地推导
+    （见 web/src/livekit/wsRelayRoom.ts），服务端不再签发媒体凭据。
+    """
 
     permission_classes = [IsAuthenticated]
 
@@ -275,23 +278,11 @@ class ChannelJoinView(APIView):
             return _not_found()
         if not can_join(request.user, ch):
             return _forbidden("无权加入该语音频道")
-        try:
-            token = livekit.issue_token(request.user, ch.room_name)
-        except livekit.LiveKitNotConfigured:
-            # token 不可签（未配置）显式失败，不伪造媒体凭据，也不落成员活动态
-            logger.warning("join without LiveKit config, channel=%s", ch.id)
-            return Response(
-                {"detail": "LiveKit 未配置，无法加入语音频道"},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
         services.join_channel(ch, request.user)
         return Response(
             {
                 "channel_id": str(ch.id),
                 "room_name": ch.room_name,
-                "token": token,
-                "ws_url": settings.LIVEKIT_WS_URL,
-                "ttl": settings.LIVEKIT_TOKEN_TTL_SECONDS,
                 "joined": True,
             },
             status=status.HTTP_200_OK,

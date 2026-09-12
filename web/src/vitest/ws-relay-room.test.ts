@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "../stores/auth";
-import { createWsRelayRoom, voiceDirectWsUrl, voiceMediaTransport } from "../livekit/wsRelayRoom";
+import { createWsRelayRoom, voiceDirectWsUrl } from "../livekit/wsRelayRoom";
 import type { LiveKitEvents, LiveKitState } from "../livekit/client";
 
 vi.mock("../api/client", () => ({ refreshAccessToken: vi.fn(async () => true) }));
@@ -247,8 +247,7 @@ describe("wsRelayRoom", () => {
     vi.restoreAllMocks();
   });
 
-  it("传输选择默认 ws；直连地址带上 channel 且指向 frp 直连端口", () => {
-    expect(voiceMediaTransport()).toBe("ws");
+  it("直连地址带上 channel 且指向 frp 直连端口", () => {
     const url = voiceDirectWsUrl("42");
     expect(url).toContain("/ws/voice/audio/?channel=42");
     expect(url).toContain("7881");

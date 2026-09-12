@@ -2,25 +2,25 @@
  * useVoiceChannel：加入/离开/心跳/成员同步编排（M5-3 §4.2 / §4.4）。
  *
  * 加入流程：
- *   1. POST join/ → {token, ws_url}；503 → "语音服务未配置"终止（不进媒体连接）
- *   2. LiveKit 连接房间；connected 后：按选项开/关麦、启动 presence 心跳、
+ *   1. POST join/ → {channel_id, room_name, joined}（落成员表，幂等）
+ *   2. 连接 WS 音频中继房间；connected 后：按选项开/关麦、启动 presence 心跳、
  *      Voice WS subscribe（WS 单例未连则先连）
  *   3. 成员铺底：GET members/ 对账 + 懒拉用户资料
- * 离开流程：POST leave/ → 断开 LiveKit → 停止心跳 → WS 本地退订 → store 清空
+ * 离开流程：POST leave/ → 断开媒体连接 → 停止心跳 → WS 本地退订 → store 清空
  * 异常路径：
- *   - join 成功但 LiveKit 连接失败 → 调 leave/ 回滚成员状态
+ *   - join 成功但媒体连接失败 → 调 leave/ 回滚成员状态
  *   - 心跳 403（被超时清理）→ 视为已被移出，本地重置到未加入态
  * 断线恢复（双层）：
  *   - 应用 WS：VoiceWSClient 指数退避自动重连 + 重 subscribe + onReconnected 对账
- *   - LiveKit 媒体：SDK 自连；Reconnecting → "媒体重连中"（成员面板不清空）；
- *     Disconnected → livekit="failed"，UI 给"重新加入"（不自动 leave/）
+ *   - 媒体（WS 中继）：房间内指数退避自动重连；Reconnecting → "媒体重连中"
+ *     （成员面板不清空）；失败 → livekit="failed"，UI 给"重新加入"（不自动 leave/）
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import * as voiceApi from "../api/voice";
 import { ensureUsers } from "../api/users";
 import { voiceLiveKit } from "../livekit/client";
-import { voiceDirectWsUrl, voiceMediaTransport } from "../livekit/wsRelayRoom";
+import { voiceDirectWsUrl } from "../livekit/wsRelayRoom";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
@@ -241,7 +241,7 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
           try {
             // REST changes membership. Wait for its receipt even if superseded, then
             // compensate that exact channel before the next queued selection can join.
-            const joinResult = await voiceApi.joinVoiceChannel(channelId);
+            await voiceApi.joinVoiceChannel(channelId);
             joined = true;
             if (!isCurrent()) return;
             if (previousChannelId && previousChannelId !== channelId) {
@@ -263,15 +263,10 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
             });
             useVoiceStore.getState().setLivekit("connecting");
             voiceSessionRuntime.setMediaChannel(channelId);
-            // 传输方式二选一：WS 音频中继（默认）传直连地址（房间内部自动以
-            // CF Tunnel 为回退候选）；livekit（回滚开关）用 join 返回的媒体参数。
-            if (voiceMediaTransport() === "livekit") {
-              await voiceLiveKit.connect(joinResult.ws_url, joinResult.token);
-            } else {
-              const mediaToken = useAuthStore.getState().accessToken;
-              if (!mediaToken) throw new Error("登录状态失效，请重新登录");
-              await voiceLiveKit.connect(voiceDirectWsUrl(channelId), mediaToken);
-            }
+            // 媒体通道：WS 音频中继（LiveKit 已退役，无回滚分支）。
+            const mediaToken = useAuthStore.getState().accessToken;
+            if (!mediaToken) throw new Error("登录状态失效，请重新登录");
+            await voiceLiveKit.connect(voiceDirectWsUrl(channelId), mediaToken);
             if (!isCurrent()) return;
             await voiceLiveKit.startAudio().catch(() => {});
             if (!isCurrent()) return;

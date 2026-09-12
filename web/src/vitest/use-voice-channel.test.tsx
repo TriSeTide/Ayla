@@ -25,9 +25,6 @@ function jsonResponse(body: unknown, status = 200) {
 const JOIN_OK = {
   channel_id: "ch1",
   room_name: "vc-x",
-  token: "lk-token",
-  ws_url: "ws://lk",
-  ttl: 600,
   joined: true,
 };
 

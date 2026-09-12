@@ -23,15 +23,7 @@ import { refreshAccessToken } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import type { LiveKitEvents, LiveKitRoomLike, RemoteAudioTrackLike, RemoteParticipantLike } from "./client";
 
-/* ================= 传输选择（回滚开关） ================= */
-
-export type VoiceMediaTransport = "ws" | "livekit";
-
-/** 语音媒体传输方式：默认 WS 中继；VITE_VOICE_TRANSPORT=livekit 可回滚旧引擎 */
-export function voiceMediaTransport(): VoiceMediaTransport {
-  const raw = String((import.meta.env?.VITE_VOICE_TRANSPORT as string | undefined) ?? "ws").toLowerCase();
-  return raw === "livekit" ? "livekit" : "ws";
-}
+/* ================= 传输通道 ================= */
 
 /**
  * 直连通道：volx frps 的 TCP 7881 → 本机 nginx 443（TLS）→ 中继。

@@ -835,14 +835,10 @@ export interface VoiceChatMessage {
   created_at: string;
 }
 
-/** POST /voice/channels/<id>/join/ 返回（LiveKit 媒体凭据，禁止打日志） */
+/** POST /voice/channels/<id>/join/ 返回（成员落表确认；媒体凭据已随 LiveKit 退役移除） */
 export interface VoiceJoinResult {
   channel_id: string;
   room_name: string;
-  token: string;
-  ws_url: string;
-  /** token TTL（秒，默认 600） */
-  ttl: number;
   joined: boolean;
 }
 

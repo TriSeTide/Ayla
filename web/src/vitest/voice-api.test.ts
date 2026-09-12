@@ -66,32 +66,18 @@ describe("api/voice 频道 REST", () => {
     expect(body).toEqual({ name: "新频道" });
   });
 
-  it("joinVoiceChannel → 返回 token/ws_url/ttl；503（LiveKit 未配置）抛 ApiError(503)", async () => {
-    // 成功路径
+  it("joinVoiceChannel → 返回成员确认（媒体凭据已随 LiveKit 退役移除）", async () => {
     const okFetch = vi.fn().mockResolvedValue(
       jsonResponse({
         channel_id: "1",
         room_name: "vc-abc",
-        token: "lk-token",
-        ws_url: "ws://127.0.0.1:7880",
-        ttl: 600,
         joined: true,
       }),
     );
     vi.stubGlobal("fetch", okFetch);
     const joined = await voiceApi.joinVoiceChannel("1");
-    expect(joined.token).toBe("lk-token");
-    expect(joined.ttl).toBe(600);
-
-    // 503 路径
-    const failFetch = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ detail: "LiveKit 未配置，无法加入语音频道" }, 503));
-    vi.stubGlobal("fetch", failFetch);
-    const err = await voiceApi.joinVoiceChannel("1").catch((e) => e);
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(503);
-    expect((err as ApiError).message).toContain("LiveKit 未配置");
+    expect(joined.joined).toBe(true);
+    expect(joined.room_name).toBe("vc-abc");
   });
 
   it("leaveVoiceChannel 幂等：重复离开都返回 {left:true}", async () => {

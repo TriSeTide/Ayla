@@ -21,7 +21,7 @@ dependencies = [
     "boto3>=1.34",  # M4-3 对象存储（MinIO/S3 兼容）
     "Pillow>=10.0",  # M4-3 缩略图/波形派生
     # M4-5 语音：LiveKit 官方 Python SDK（签发 AccessToken/VideoGrants）
-    "livekit-api>=1.0,<2.0",
+    # 语音媒体走 WS 音频中继（Opus over WebSocket over TCP），无 LiveKit 依赖
 ]
 
 [build-system]

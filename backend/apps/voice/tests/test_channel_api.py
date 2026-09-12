@@ -2,7 +2,6 @@
 import pytest
 from django.test import override_settings
 
-from apps.voice import livekit
 from apps.voice.models import VoiceChannel, VoiceChannelMember, VoiceChatMessage
 
 
@@ -31,40 +30,18 @@ def test_create_channel_requires_name(auth_client):
 
 
 @pytest.mark.django_db
-def test_join_returns_livekit_token(auth_client, monkeypatch):
-    """加入频道 → 落成员表 + 返回 LiveKit token（配置存在时）。"""
+def test_join_lands_member(auth_client):
+    """加入频道 → 落成员表 + 返回成员确认（媒体凭据已随 LiveKit 退役移除）。"""
     client, user = auth_client()
     ch = VoiceChannel.objects.create(name="语音", room_name="room_join", owner=user)
-    monkeypatch.setattr(
-        "apps.voice.views.livekit.issue_token", lambda u, r: "signed-token"
-    )
-    monkeypatch.setattr(
-        "apps.voice.views.settings.LIVEKIT_WS_URL", "ws://127.0.0.1:7880"
-    )
-    monkeypatch.setattr(
-        "apps.voice.views.settings.LIVEKIT_TOKEN_TTL_SECONDS", 600
-    )
     resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
     assert resp.status_code == 200, resp.content
     data = resp.json()
-    assert data["token"] == "signed-token"
     assert data["room_name"] == "room_join"
-    assert data["ws_url"] == "ws://127.0.0.1:7880"
+    assert data["joined"] is True
+    assert "token" not in data
+    assert "ws_url" not in data
     assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
-
-
-@pytest.mark.django_db
-def test_join_fails_without_livekit_config(auth_client, monkeypatch):
-    """LiveKit 未配置时 join 返回 503（不伪造 token）。"""
-    client, user = auth_client()
-    ch = VoiceChannel.objects.create(name="语音", room_name="room_nc", owner=user)
-
-    def _raise(*a, **k):
-        raise livekit.LiveKitNotConfigured("no config")
-
-    monkeypatch.setattr("apps.voice.views.livekit.issue_token", _raise)
-    resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
-    assert resp.status_code == 503
 
 
 @pytest.mark.django_db

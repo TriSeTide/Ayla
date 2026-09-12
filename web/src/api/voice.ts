@@ -77,8 +77,8 @@ export function renameVoiceChannel(channelId: string, name: string) {
 }
 
 /**
- * POST /voice/channels/<id>/join/ —— 加入频道拿 LiveKit token。
- * 成员落表幂等（重复 join 安全）；LiveKit 未配置 → 503。
+ * POST /voice/channels/<id>/join/ —— 加入频道（成员落表，幂等）。
+ * 媒体走 WS 音频中继，直连地址由前端本地推导，无需服务端下发凭据。
  */
 export function joinVoiceChannel(channelId: string) {
   return apiRequest<VoiceJoinResult>(

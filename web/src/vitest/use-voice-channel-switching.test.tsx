@@ -44,7 +44,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const member = (channelId: string) => ({ id: 1, user_id: `member-${channelId}`, joined_at: "t", last_seen_at: "t" });
-const joinResult = (channelId: string) => ({ channel_id: channelId, room_name: channelId, token: `media-${channelId}`, ws_url: "ws://fixture", ttl: 60, joined: true });
+const joinResult = (channelId: string) => ({ channel_id: channelId, room_name: channelId, joined: true });
 function room(overrides: Partial<LiveKitRoomLike> = {}): LiveKitRoomLike {
   return {
     connect: vi.fn().mockResolvedValue(undefined), disconnect: vi.fn().mockResolvedValue(undefined),

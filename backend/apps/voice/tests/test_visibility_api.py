@@ -133,18 +133,15 @@ def test_detail_and_join_forbidden_for_invisible(auth_client, user_factory):
 
 
 @pytest.mark.django_db
-def test_join_ok_for_visible_public(auth_client, user_factory, monkeypatch):
-    """public 语音房：路人 join → 200（存量行为不回退；token 走 mock）。"""
+def test_join_ok_for_visible_public(auth_client, user_factory):
+    """public 语音房：路人 join → 200（存量行为不回退；媒体凭据已退役移除）。"""
     client, _ = auth_client()
     owner = user_factory(username="owner")
     ch = _make_channel(owner, "room_pub_join", visibility=Visibility.PUBLIC)
-    monkeypatch.setattr("apps.voice.views.livekit.issue_token", lambda u, r: "t")
-    monkeypatch.setattr("apps.voice.views.settings.LIVEKIT_WS_URL", "ws://x")
-    monkeypatch.setattr("apps.voice.views.settings.LIVEKIT_TOKEN_TTL_SECONDS", 600)
 
     resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
     assert resp.status_code == 200, resp.content
-    assert resp.json()["token"] == "t"
+    assert resp.json()["joined"] is True
 
 
 # ---------- 创建约束与序列化 ----------

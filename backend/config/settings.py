@@ -226,12 +226,9 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # ---------- 语音频道（M4-5） ----------
-# LiveKit SFU：自托管 LiveKit Server。API key/secret 走本机配置（Git 忽略），不提交仓库。
-# LIVEKIT_WS_URL：前端连接 LiveKit 的 WS 地址（如 ws://127.0.0.1:7880）。
-LIVEKIT_API_KEY = env.str("LIVEKIT_API_KEY", default="")
-LIVEKIT_API_SECRET = env.str("LIVEKIT_API_SECRET", default="")
-LIVEKIT_WS_URL = env.str("LIVEKIT_WS_URL", default="ws://127.0.0.1:7880")
-LIVEKIT_TOKEN_TTL_SECONDS = env.int("LIVEKIT_TOKEN_TTL_SECONDS", default=600)
+# 媒体层：WS 音频中继（Opus over WebSocket over TCP）。
+# 历史：曾用自托管 LiveKit SFU；因 frp 穿透改写 UDP 源地址导致 WebRTC/TURN 媒体面
+# 不可用，于 2026-09-12 整体退役（服务/依赖/媒体凭据签发全部移除）。
 # presence 心跳超时：超过该秒数未心跳的成员被标记离开（后台任务 owner，见 apps/voice/services.py）
 VOICE_MEMBER_TIMEOUT_SECONDS = env.int("VOICE_MEMBER_TIMEOUT_SECONDS", default=120)
 
