@@ -2,6 +2,7 @@
 
 > 本文描述 **实际生产环境**（Jetson `ayerelysia`，frp 半容器化）的配置全貌。
 > 示例配置见 [`examples/`](./examples/)；从零部署流程见 [部署运行手册](./部署运行手册.md)。
+> **将来拿到公网后脱离 Cloudflare 的预案**见 [脱离Cloudflare迁移方案](./脱离Cloudflare迁移方案.md)。
 > 设计期方案（历史归档）见 `docs/服务器半容器化部署方案.md`。
 
 ---
@@ -67,7 +68,7 @@
 | 入口 | 域名 / 地址 | DNS | 证书 | 用途 |
 | --- | --- | --- | --- | --- |
 | 网页（主直连） | `frp-one.com:26211` | 樱花节点 | trise 证书（SAN `ayla.trise.top`） | 低延迟直连，任意 SNI 可达 |
-| 网页（别名） | `s.ayla.trise.top:26211` | **Cloudflare**（需 A → 樱花节点 IP，灰云） | 需把 `s.ayla.trise.top` 加进 SAN | 同上，域名更友好 |
+| 网页（别名） | `s.ayla.trise.top:26211` | **Cloudflare**（A → 樱花节点 IP，灰云） | trise 证书（SAN 已含 `s.ayla.trise.top`） | 同上，域名更友好 |
 | 网页（CF Tunnel） | `ayla.trise.top`（443） | Cloudflare 橙云 → Tunnel → 8080 | CF 边缘 | 免端口/兜底，跨境绕行较慢 |
 | 拉流 | `live.trise.top:7882`（HLS/FLV） | 灰云 A | trise 证书（SAN `live.trise.top`） | 观众侧播放 |
 | 语音 WS | `live.trise.top:7881` | 灰云 A | 同上 | `wss://…:7881/ws/voice/audio/?channel=<id>` |
@@ -150,17 +151,36 @@ SRS_PLAY_URL=https://live.trise.top:7882/live
 
 ---
 
-## 7. 证书与续签
+## 7. 证书与自动续签
 
 - 文件：`~/Elysia/ayla-deploy/nginx/certs/trise-{cert,key}.pem`
   （`trise-cert.pem` = fullchain，`trise-key.pem` = EC P-256 私钥）。
-- 覆盖名：`ayla.trise.top`、`live.trise.top`（**待补**：`s.ayla.trise.top`）。
-- 签发：acme.sh + Let's Encrypt DNS-01，目录 `~/.acme.sh/ayla.trise.top_ecc/`。
-- **当前续签链路已断**：证书当初走阿里云 DNS-01 签发，NS 迁 CF 后无法再校验。
-  必须切 `dns_cf`，脚本模板见 [`examples/acme-cert-renew.sh.example`](./examples/acme-cert-renew.sh.example)。
-- 到期：**2026-12-10**（硬期限。过期则 26211 / 7881 / 7882 全部握手失败）。
-- 装载：`--install-cert` 的 `--reloadcmd "docker exec ayla-nginx nginx -s reload"`。
-  acme.sh 用 `cat > file` 重定向写目标文件 → **保 inode**，与文件级 bind-mount 兼容。
+- **SAN 覆盖**：`trise.top`、`*.trise.top`、`s.ayla.trise.top`。
+  ⚠️ `*.trise.top` **覆盖不了** `s.ayla.trise.top`（两级子域），必须单列。
+- 到期：**2026-12-11**（`notAfter Dec 11 15:09:11 2026 GMT`）。
+  这张证书同时撑 **语音 7881 / 拉流 7882 / 樱花入口 26211**——覆盖名少的每一个都会
+  变成浏览器拦截，所以改 SAN 前务必三处都核对。
+- 签发：acme.sh v3.1.5（`~/.acme.sh`）+ Let's Encrypt **DNS-01**，
+  证书目录 `~/.acme.sh/trise.top_ecc/`，`Le_Webroot='dns_cf'`。
+- 凭据（`~/.acme.sh/account.conf`，权限 600）：
+  `SAVED_CF_Token`（CF API Token，**仅 Zone:DNS:Edit、作用域 trise.top**）、
+  `SAVED_CF_Zone_ID`。
+- **自动续签已启用**：crontab `17 3 * * * … acme.sh --cron …`，日志 `~/.acme.sh/cron.log`。
+  下次续签时间见 `trise.top_ecc/trise.top.conf` 的 `Le_NextRenewTimeStr`（约 2026-11-10）。
+- 装载：`--install-cert` 的 `--reloadcmd "docker exec ayla-nginx nginx -s reload"`
+  （已存入 `trise.top_ecc/trise.top.conf` 的 `Le_ReloadCmd`）。acme.sh 用 `cat > file`
+  重定向写目标文件 → **保 inode**，与文件级 bind-mount 兼容。
+- 手动/强制验证：
+  ```bash
+  ~/.acme.sh/acme.sh --renew -d trise.top --ecc --force
+  ```
+- 脚本模板：[`examples/acme-cert-renew.sh.example`](./examples/acme-cert-renew.sh.example)
+- **将来脱离 CF 的完整预案**：[脱离Cloudflare迁移方案.md](./脱离Cloudflare迁移方案.md)
+
+> 为什么不能用阿里云 API 续签（除非买新域名或迁 NS）：
+> `trise.top` 的权威 NS 在 CF，写在阿里云的记录不生效；而 **CF 免费版不服务子域 NS 委派**
+> （实测 `delegtest.trise.top/NS` → `ENODATA`），所以也无法"只把 `_acme-challenge` 交给阿里云"。
+> 详见迁移方案 §0.3。
 
 ---
 
@@ -180,6 +200,25 @@ SRS_PLAY_URL=https://live.trise.top:7882/live
 5. **两个 frpc 都要活**：只靠 `keepalive.sh`（cron 每分钟）；确认 `crontab -l` 里有它。
 6. **SRS 8080 未映射**：compose 只映射 `8089/1985/1935`，SRS 内部 `http_server 8080`
    不对外，播放只走 8089（HTTPS）。
+7. **CF 控制台的 API「只能读不能写」**
+   在 CF 页面上下文里 `fetch('/api/v4/...', {method:'POST'|'DELETE'})` 会返回
+   **403 + Cloudflare 拦截页**（WAF/CSRF），`GET` 正常。
+   ⇒ 想改 CF 的 DNS 记录**只能走 UI 点击**，写脚本批量改是行不通的。
+8. **别信本地解析缓存**
+   刚创建的名字在 `192.168.1.1` / `223.5.5.5` 上可能是**陈旧的 NXDOMAIN**。
+   判断"记录生效没有"要去查**权威 NS**，不要靠本机递归解析器。
+9. **`nginx -s reload` 之后立刻取证书可能读到旧的**
+   graceful reload 期间旧 worker 仍在服务在途连接。等 1~2 秒重试，
+   或直接比对指纹：`md5sum certs/trise-cert.pem` vs
+   `docker exec ayla-nginx md5sum /etc/nginx/certs/trise-cert.pem`。
+10. **acme.sh 是「精简安装」**
+    服务器上这份 acme.sh 原本**连 `dnsapi/` 目录都没有**（签发是手工贴 TXT 做的）。
+    `dns_cf.sh` / `dns_ali.sh` 都是后来手工 curl 进去的；换机或重装时记得补：
+    ```bash
+    mkdir -p ~/.acme.sh/dnsapi && cd ~/.acme.sh/dnsapi
+    curl -fsSL -O https://raw.githubusercontent.com/acmesh-official/acme.sh/master/dnsapi/dns_cf.sh
+    chmod +x dns_cf.sh
+    ```
 
 ---
 

@@ -1,51 +1,119 @@
 #!/bin/bash
 # ============================================================================
-# TLS 证书签发 / 自动续签模板（acme.sh + Cloudflare DNS-01）
+# TLS 证书签发 / 自动续签（acme.sh + Cloudflare DNS-01）—— 现网实际配置
 # ----------------------------------------------------------------------------
-# 背景（重要）：
-#   trise.top 的 NS 已托管到 Cloudflare（elaine/benedict.ns.cloudflare.com），
-#   因此 DNS-01 校验必须用 **dns_cf**；原先走阿里云 DNS 的续签链路已断。
-#   旧证书（trise-cert.pem）2026-12-10 到期，此前必须完成切换，否则公网入口
-#   （樱花 26211 / 拉流 7882 / 语音 7881）全部因证书过期而握手失败。
+# 现状（2026-09-13 已实测通过）：
+#   证书 SAN = trise.top, *.trise.top, s.ayla.trise.top
+#   到期      = 2026-12-11
+#   续签方式  = acme.sh v3.1.5 + Let's Encrypt DNS-01，Le_Webroot='dns_cf'
+#   自动续签  = crontab `17 3 * * *  acme.sh --cron`
+#   下次续签  = 见 trise.top_ecc/trise.top.conf 的 Le_NextRenewTimeStr
 #
-# 证书 SAN 覆盖三处入口：
-#   ayla.trise.top      —— CF Tunnel / 樱花直连网页入口
-#   live.trise.top      —— 语音 WS 7881 / 拉流 7882
-#   s.ayla.trise.top    —— 樱花直连入口别名（Sakura TCP 隧道按端口路由，任意 SNI
-#                          都通，但证书必须覆盖该名字浏览器才不报警）
+# 为什么是 dns_cf：
+#   trise.top 的权威 NS 已托管 Cloudflare（elaine/benedict.ns.cloudflare.com）。
+#   写在阿里云控制台的记录**不生效**；而 **CF 免费版不服务子域 NS 委派**
+#   （实测 delegtest.trise.top/NS → ENODATA），所以没法"只把 _acme-challenge
+#   交给阿里云"。DNS-01 只能走 CF。
+#   想彻底脱离 CF → 见 ../脱离Cloudflare迁移方案.md
 #
-# 一次性准备（在服务器上执行一次）：
-#   export CF_Token="<Cloudflare API Token: Zone > DNS > Edit, 作用域 trise.top>"
-#   export CF_Account_ID="<可选，多账号时填>"
-#   把上面两行写入 ~/.acme.sh/account.conf（acme.sh 会自动保存），或每次签发前 export。
-#
-# 安装路径（deploy/nginx/certs，文件级 bind-mount -> 必须原地覆盖保 inode，
-# acme.sh install-cert 用 `cat > file` 重定向，天然保 inode，安全）。
+# ⚠️ `*.trise.top` 覆盖不了 `s.ayla.trise.top`（两级子域），必须单列进 SAN。
+#    这张证书同时撑：语音 7881 / 拉流 7882 / 樱花入口 26211。
 # ============================================================================
 set -euo pipefail
 
 ACME="$HOME/.acme.sh/acme.sh"
-DOMAIN=ayla.trise.top
-ALTDOMAINS=(-d live.trise.top -d s.ayla.trise.top)
 CERT_DIR=/home/ayerelysia/Elysia/ayla-deploy/nginx/certs
 RELOAD_CMD="docker exec ayla-nginx nginx -s reload"
+CONF="$HOME/.acme.sh/trise.top_ecc/trise.top.conf"
 
-# --- 1. 签发（首次）/ 续签（已有证书时加 --force 可强制重签）---
+# ---------------------------------------------------------------------------
+# 0. 一次性准备
+# ---------------------------------------------------------------------------
+# a) 建 CF API Token：CF 控制台 → My Profile → API Tokens → Create Token
+#    模板 "Edit zone DNS" → Zone Resources 选 **Specific zone: trise.top**
+#    → 得到形如 `cfut_...` 的令牌（只显示一次）
+# b) 存进 acme.sh（acme.sh 会自动以 SAVED_ 前缀持久化到 account.conf）
+#      export CF_Token='<token>'
+#      export CF_Zone_ID='<zone id>'      # trise.top 的 zone id，避免 token 无权列 zone
+# c) 确认 dnsapi 就位（acme.sh 是精简装的，默认没有 dnsapi 目录）
+#      mkdir -p ~/.acme.sh/dnsapi && cd ~/.acme.sh/dnsapi
+#      curl -fsSL -O https://raw.githubusercontent.com/acmesh-official/acme.sh/master/dnsapi/dns_cf.sh
+#      chmod +x dns_cf.sh
+#
+# 验证凭据（不消耗 LE 额度）：
+#   curl -s -H "Authorization: Bearer $CF_Token" \
+#     "https://api.cloudflare.com/client/v4/zones/$CF_Zone_ID/dns_records?name=_acme-challenge.trise.top"
+#   # → {"success":true, ...}
+
+# ---------------------------------------------------------------------------
+# 1. 首次签发
+# ---------------------------------------------------------------------------
+# 注意：签发时用的是**集群主名 + 通配 + s.ayla**，与现网一致
 "$ACME" --issue --dns dns_cf \
-  -d "$DOMAIN" "${ALTDOMAINS[@]}" \
+  -d trise.top -d '*.trise.top' -d s.ayla.trise.top \
   --keylength ec-256
 
-# --- 2. 安装到 nginx 证书目录 + 装载后自动 reload ---
-"$ACME" --install-cert -d "$DOMAIN" --ecc \
+# ---------------------------------------------------------------------------
+# 2. 装到 nginx 证书目录（装载后自动 reload）
+# ---------------------------------------------------------------------------
+# acme.sh 用 `cat > file` 重定向写目标 → **保 inode**，与文件级 bind-mount 兼容。
+# 千万别手工 `mv` 替换证书文件，否则容器仍读旧 inode。
+"$ACME" --install-cert -d trise.top --ecc \
   --key-file       "$CERT_DIR/trise-key.pem" \
   --fullchain-file "$CERT_DIR/trise-cert.pem" \
   --reloadcmd      "$RELOAD_CMD"
 
-# --- 3. 续签定时任务（acme.sh 安装时通常已自带；确认存在）---
-#   crontab -l | grep acme
-#   若无：  "$ACME" --install-cronjob
-#   经验值：LE 证书 90 天，acme.sh 默认在到期前 60 天起每天尝试续签。
+# 装完确认 Le_ReloadCmd 已落盘（--cron 续签时靠它自动 reload）
+grep -E "^Le_ReloadCmd=|^Le_RealFullChainPath=|^Le_RealKeyPath=" "$CONF"
 
-echo "== 完成。校验 =="
-echo | openssl s_client -connect 127.0.0.1:443 -servername ayla.trise.top 2>/dev/null \
-  | openssl x509 -noout -subject -dates -ext subjectAltName
+# ---------------------------------------------------------------------------
+# 3. 安装自动续签 cron（幂等）
+# ---------------------------------------------------------------------------
+LINE='17 3 * * * "/home/ayerelysia/.acme.sh"/acme.sh --cron --home "/home/ayerelysia/.acme.sh" >> /home/ayerelysia/.acme.sh/cron.log 2>&1'
+crontab -l > /tmp/ct.old 2>/dev/null || true
+if grep -q "acme.sh --cron" /tmp/ct.old; then
+  echo "cron 已存在"
+else
+  { cat /tmp/ct.old; echo "$LINE"; } | crontab -
+  echo "cron 已添加"
+fi
+crontab -l
+
+# ---------------------------------------------------------------------------
+# 4. 验证（三类，缺一不可）
+# ---------------------------------------------------------------------------
+echo "== 4.1 到期时间 / SAN =="
+openssl x509 -in "$CERT_DIR/trise-cert.pem" -noout -dates -ext subjectAltName
+
+echo "== 4.2 容器内是否也是新证书（bind-mount 同步） =="
+md5sum "$CERT_DIR/trise-cert.pem"
+docker exec ayla-nginx md5sum /etc/nginx/certs/trise-cert.pem
+
+echo "== 4.3 nginx 实际吐出的证书（reload 是优雅切换，errno 间隔 1~2s 再读） =="
+sleep 2
+echo | openssl s_client -connect 127.0.0.1:443 -servername live.trise.top 2>/dev/null \
+  | openssl x509 -noout -dates -ext subjectAltName
+
+echo "== 4.4 cron 干跑（应显示 trise.top 的下次续签时间，而非报错） =="
+"$ACME" --cron --home "$HOME/.acme.sh" 2>&1 | tail -8
+
+# ---------------------------------------------------------------------------
+# 5. 强制续签（改动 SAN / 换 DNS API 之后必做，会真的写 TXT → LE 验证 → 装证书 → reload）
+# ---------------------------------------------------------------------------
+#   "$ACME" --renew -d trise.top --ecc --force
+#
+# 若改动的是 DNS API（例如 dns_cf → dns_ali），改法：
+#   sed -i "s|^Le_Webroot=.*|Le_Webroot='dns_ali'|" "$CONF"
+#   并在 account.conf 写入 SAVED_Ali_Key / SAVED_Ali_Secret
+#
+# 【彩排技巧·强烈推荐】换 DNS API 后先用**一次性域名 + LE staging** 跑通整条链，
+# 不消耗生产额度、不会动到线上证书：
+#   "$ACME" --issue --dns dns_cf -d rehearsal.trise.top \
+#     --keylength ec-256 --server letsencrypt_test
+#   "$ACME" --remove -d rehearsal.trise.top --ecc && rm -rf ~/.acme.sh/rehearsal.trise.top_ecc
+# 验收点：签发成功 + CF 侧 `?name=_acme-challenge.rehearsal.trise.top` 残留为 0 条。
+#
+# 【注意·容易误判】刚签完就 --renew --force 时，日志可能出现
+#   "trise.top is already verified, skipping dns-01."
+# 这是 LE 缓存了授权，并**没有真正走 DNS API**。想真正验证 DNS API，用上面的
+# staging 彩排（全新域名 + 全新账户，绕不过验证）。
