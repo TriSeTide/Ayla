@@ -26,6 +26,11 @@ urlpatterns = [
         name="live-channel-status",
     ),
     path(
+        "channels/<int:channel_id>/viewers/",
+        views.ChannelViewersView.as_view(),
+        name="live-channel-viewers",
+    ),
+    path(
         "channels/<int:channel_id>/danmaku/",
         views.DanmakuListView.as_view(),
         name="live-danmaku-list",

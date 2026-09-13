@@ -15,11 +15,12 @@ import { useId } from "react";
 import { motion } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
-import { IconBack, IconChevronLeft, IconClose, IconPlus, IconVideo } from "../icons";
+import { IconBack, IconChevronLeft, IconClose, IconPlus, IconUsers, IconVideo } from "../icons";
 import { ResourceImage } from "../ResourceImage";
 import { DirectoryLoadMore, type DirectoryLoadMoreProps } from "../DirectoryLoadMore";
 import { panelVariants } from "../motion/auroraquaMotion";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
+import { formatViewerCount, liveViewerBadge } from "../../utils/liveViewers";
 
 export function LiveChannelRail({
   channels,
@@ -92,6 +93,7 @@ export function LiveChannelRail({
         {channels.map((ch) => {
           const active = ch.id === currentId;
           const deleting = ch.id === deletingChannelId;
+          const viewers = liveViewerBadge(ch);
           return (
             <li key={ch.id} className="live-rail-item-wrap">
               <button
@@ -113,6 +115,12 @@ export function LiveChannelRail({
                   )}
                 </div>
                 <span className="live-rail-item-title">{ch.title}</span>
+                {viewers != null && (
+                  <span className="live-rail-viewers" aria-label={`${viewers} 人在看`}>
+                    <IconUsers width={11} height={11} aria-hidden="true" />
+                    {formatViewerCount(viewers)}
+                  </span>
+                )}
               </button>
               {onDeleteChannel && (
                 <button

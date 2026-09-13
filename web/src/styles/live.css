@@ -569,10 +569,13 @@
   overflow: hidden;
 }
 
+/* 徽标/人数角标在封面内缩 3px（扣卡片 1px 亮边后与收藏键同一条基线）——
+   窄屏：封面内沿 8 + 亮边 1 + 内缩 3 = 收藏键的 12px 偏移；
+   宽屏：16 + 1 + 3 = 收藏键的 20px 偏移（见下方收藏键覆盖）。 */
 .live-card-cover-badge {
   position: absolute;
-  top: var(--sp-2);
-  left: var(--sp-2);
+  top: calc(var(--sp-1) - 1px);
+  left: var(--sp-1);
   display: flex;
   gap: var(--sp-1);
 }
@@ -617,6 +620,23 @@
     /* 窄屏左右留白与语音/桌游/帖子列表统一 */
     padding: var(--sp-3) var(--sp-4);
   }
+
+  /* 窄屏直播封面加大（需求，按对齐关系定尺寸，不通铺）：
+     - 卡片内沿 8px + 「直播中」徽标内缩 4px = 收藏键的 12px 顶距 → 徽标顶部与收藏键顶部对齐；
+     - 卡片内沿 8px + 人数角标内缩 4px = 收藏键的 12px 右距 → 人数右侧与收藏键右侧对齐；
+     封面四周保留留白、16:9、12px 圆角与完整亮边（原 16px 内沿让它偏小，改为 8px）。 */
+  .live-hub .live-card {
+    padding: var(--sp-2);
+  }
+}
+
+/* 宽屏直播卡：收藏键落在封面右上，与「直播中」徽标顶部、人数角标右侧同一条线
+   （16px 内沿 + 1px 亮边 + 3px 内缩 = 20px）。窄屏内沿 8px，保持默认 12px 偏移。 */
+@media (min-width: 769px) {
+  .live-card-wrap > .favorite-toggle {
+    top: calc(var(--sp-4) + var(--sp-1));
+    right: calc(var(--sp-4) + var(--sp-1));
+  }
 }
 
 @media (min-width: 769px) {
@@ -654,9 +674,16 @@
   margin-left: -4px;
 }
 
-/* 宽屏标题沿主区内容轨道悬浮，不再用负 margin 铺成顶栏横条。 */
+/* 宽屏标题沿主区内容轨道悬浮，不再用负 margin 铺成顶栏横条。
+   底内沿与左右侧栏的 12px 外沿同值：观众条底边因此与频道侧栏/弹幕列底边齐平
+   （需求：底部人数卡片的底边对齐左右栏底边，视频因此获得这部分高度）。
+   开播控制台（is-studio）主区下方还有推流地址卡，不适用该对齐，保持 16px。 */
 .live-room-body.is-wide .live-room-main {
   padding-top: var(--sidebar-gutter);
+}
+
+.live-room-body.is-wide:not(.is-studio) > .live-room-main {
+  padding-bottom: var(--sidebar-gutter);
 }
 
 .live-room-body.is-wide .live-room-head {
@@ -1063,4 +1090,281 @@
 .live-mini-player-close:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* ================= 直播间在看观众（人数 + 头像条 + 名单弹层） =================
+
+   [人数（小人图标 + 数字）][头像][头像]…[……] 一排圆形，整排是一个按钮：
+   点击任意位置打开完整名单（宽屏居中浮层 / 窄屏 60% 上滑，见 .live-viewer-sheet-*）。
+   材料沿用房间内的玻璃配方（glass-bg + blur(18px) + 亮边 + 12px 圆角），不新增视觉语言。 */
+
+.live-viewer-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 44px; /* §10 触达下限 */
+  padding: var(--sp-1) var(--sp-3);
+  box-sizing: border-box;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  /* 极光底接近白色，白亮边不足以界定这一排；用密集小行卡的 compact 阴影给出材料边界 */
+  box-shadow: var(--glass-shadow-compact);
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-viewer-strip:hover {
+  background: rgba(255, 250, 251, 0.72);
+}
+
+.live-viewer-strip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 人数圆：1–2 位数是正圆（32px），3 位以上自然长成胶囊——不缩小字号、不截断数字。 */
+.live-viewer-strip-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: var(--radius-pill);
+  background: var(--ice-300);
+  color: var(--indigo-700);
+}
+
+.live-viewer-strip-num {
+  font-family: var(--font-utility);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  line-height: 1;
+}
+
+/* 人数未知（presence 存储不可用 / 尚未读到）：占位显示 `–`，不写 0。
+   高度与已知态完全一致——这一排的存在与否不允许改变播放器尺寸（禁止画面跳变）。 */
+.live-viewer-strip.is-unknown .live-viewer-strip-num,
+.live-viewer-strip.is-unknown .live-viewer-strip-count {
+  color: var(--text-secondary);
+  background: var(--ice-100);
+}
+
+/* 头像排：吃满中间宽度，放不下的头像被裁掉，「更多」始终钉在排尾可见 */
+.live-viewer-strip-avatars {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.live-viewer-strip-more {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--ice-100);
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+/* 窄屏沉浸式：视频（.live-room-stage）与弹幕区之间的独立一排；
+   它把弹幕区顶部往下推，正为这排腾出位置（视频四角已收圆，这里保持同宽对齐）。 */
+.live-room-body.is-narrow .live-room-swipe-item > .live-viewer-strip {
+  margin-top: var(--sp-2);
+}
+
+/* 宽屏观看：视频正下方，不与弹幕侧列共享材料。
+   不额外加 margin——主区的 flex gap（12px）已经是"标题栏↔画面"的间距，
+   画面↔卡片取同一个值，上下留白才相等（需求：视频距下方卡片 = 视频距上方标题栏）。 */
+.live-room-body.is-wide:not(.is-studio) > .live-room-main > .live-viewer-strip {
+  margin-top: 0;
+}
+
+/* 开播控制台（下方还有推流地址卡）：保留与 stage 的间隔 */
+.live-room-body.is-studio.is-wide > .live-room-main > .live-viewer-strip {
+  margin-top: var(--sp-2);
+}
+
+/* 群内直播（窄屏子界面，可用高度更小）：维持 ≥40px 触达，压缩上下内沿 */
+.live-room-body.is-narrow .live-room-main > .live-viewer-strip {
+  margin-top: var(--sp-2);
+}
+
+/* ---- 名单弹层（复用 CreateSheet 的 overlay/材料/上滑入场） ---- */
+
+.live-viewer-sheet-card {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 标题行固定，只有名单自身滚动——长名单不该把标题和关闭键带走 */
+.live-viewer-sheet-card .create-sheet-head {
+  flex: none;
+}
+
+.live-viewer-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.live-viewer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.live-viewer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--sp-1) var(--sp-2);
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.live-viewer-row:hover {
+  background: var(--glass-bg);
+}
+
+.live-viewer-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.live-viewer-row.is-skeleton {
+  cursor: default;
+}
+
+.live-viewer-row.is-skeleton:hover {
+  background: transparent;
+}
+
+.live-viewer-row-name {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 骨架尺寸与真实行一致（头像 36 + 光环 2.5×2），就绪时不跳动 */
+.live-viewer-skeleton-avatar {
+  flex: none;
+  width: 41px;
+  height: 41px;
+  border-radius: var(--radius-pill);
+}
+
+.live-viewer-skeleton-name {
+  width: 40%;
+  height: 14px;
+  border-radius: var(--radius-pill);
+}
+
+.live-viewer-sheet-state {
+  margin: var(--sp-4) 0;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.live-viewer-sheet-state .btn {
+  margin-top: var(--sp-3);
+}
+
+.live-viewer-sheet-error {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.live-viewer-sheet-hint {
+  margin: var(--sp-2) 0 0;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  /* 需求：窄屏从下方滑入，弹窗高度 = 60% 屏（上滑入场/圆角/材料沿用 create-sheet 配方） */
+  .live-viewer-sheet-card {
+    height: 60vh;
+    max-height: 60vh;
+  }
+}
+
+/* ---- 直播列表项的在看人数（群内 / 群外列表共用卡面） ---- */
+
+/* 大厅卡片：封面右下角玻璃胶囊（LIVE 徽标在左上，互不遮挡）。
+   右侧内缩 3px：与收藏键右缘同一条线（宽屏收藏键偏移 20px = 16 内沿 + 1 亮边 + 3） */
+.live-card-viewers {
+  position: absolute;
+  right: calc(var(--sp-1) - 1px);
+  bottom: var(--sp-1);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 22px;
+  padding: 0 var(--sp-2);
+  box-sizing: border-box;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-primary);
+  font-family: var(--font-utility);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  line-height: 1;
+}
+
+/* 侧栏直播项：72px 封面放不下第二枚角标，人数跟在标题右侧（icon + 数字） */
+.live-rail-viewers {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-family: var(--font-utility);
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  line-height: 1;
+}
+
+.live-rail-item.is-active .live-rail-viewers {
+  color: var(--text-primary);
 }

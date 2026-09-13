@@ -11,7 +11,7 @@
  * 唯一 owner：同一时间至多一个直播会话/小窗（AGENTS.md 工程约束）。
  */
 import * as liveApi from "../api/live";
-import type { DanmakuFrame } from "../api/types";
+import type { DanmakuFrame, LiveViewersFrame } from "../api/types";
 import { useLiveStore } from "../stores/live";
 import { useAuthStore } from "../stores/auth";
 import { liveWS } from "../ws/live";
@@ -22,6 +22,9 @@ import { useSessionActivityStore } from "../stores/sessionActivity";
 /** 事件驱动 SRS 状态补拉：开播事件后推流建立有延迟，有界退避重试确认（非周期轮询） */
 const SRS_RETRY_BASE_MS = 2_000;
 const SRS_RETRY_MAX = 3;
+
+/** 进房快照写入 store 的预览上限（与后端 WS 帧上限一致；完整名单走弹层 REST） */
+const LIVE_VIEWER_PREVIEW = 12;
 
 /** 事件驱动黑屏/卡死检测：卡顿（waiting/stalled/error）持续多久未恢复则重建 */
 const STALL_TIMEOUT_MS = 2_000;
@@ -159,6 +162,15 @@ class LiveSessionRuntime {
       if (useLiveStore.getState().miniPlayer) {
         useLiveStore.getState().setMiniPlayer(null);
       }
+      // 同频道重复进入 = 会话被**新视图**接管：代际前移，使更早视图尚未执行的
+      // detachView(旧 epoch) 被拒绝。
+      // 为什么必须前移：宽窄屏切换会让页面渲染两棵结构不同的树（GroupPage 三列 vs
+      // 单列、LiveRoomPage 同理），新旧视图并存且挂载可能先于卸载。此时新视图 enter
+      // 走本分支拿到**同一个** epoch，旧视图 cleanup 的 detachView 因而通过校验，
+      // 把刚被接管的会话 leave 掉——store 当前频道被清空（头部退化为"直播间"、
+      // 在看观众条消失），而新视图 effect 依赖未变、不会重进房，状态不再自愈。
+      // StrictMode 的 挂载→卸载→挂载 顺序不受影响：cleanup 在第二次 enter 之前执行。
+      this.epoch += 1;
       return this.epoch;
     }
     // 切频道：先完整销毁旧会话（含旧小窗）；首次进房无旧会话，跳过（leave 会无条件断 WS）
@@ -178,8 +190,15 @@ class LiveSessionRuntime {
     store.setCurrentError(null);
     store.setCurrentPlayerError(null);
 
-    // 弹幕 WS 帧 → store（按 id 去重由 store 保证）
+    // 弹幕 WS 帧 → store（按 id 去重由 store 保证）；在看人数帧 → 人数 + 头像预览
     this.offFrame = liveWS.onFrame((frame) => {
+      if (frame.type === "viewers") {
+        const v = frame as LiveViewersFrame;
+        // 切台竞态：只接受当前会话频道的帧（旧连接可能仍在关闭途中）
+        if (this.channelId !== null && String(v.channel_id) !== String(this.channelId)) return;
+        useLiveStore.getState().setViewers(v.channel_id, v.count, v.viewers ?? []);
+        return;
+      }
       if (frame.type !== "danmaku") return;
       const f = frame as DanmakuFrame;
       useLiveStore.getState().appendDanmaku({
@@ -206,6 +225,8 @@ class LiveSessionRuntime {
       if (!this.alive || this.channelId !== channelId) return;
       this.historyListeners.forEach((listener) => listener(channelId));
       void this.refreshSrsStatus(channelId);
+      // WS 无补发语义：重连后补读一次在看人数快照（断线期间的增减不补发）。
+      void this.refreshViewers(channelId);
     };
 
     void this.enterAsync(channelId);
@@ -243,6 +264,9 @@ class LiveSessionRuntime {
 
       // Historical pages belong to the visible reading window, never the flying overlay.
       liveWS.connect(channelId);
+      // 在看人数权威快照：弹幕 WS 还没连上/掉线时人数依然正确。必须晚于
+      // setCurrentChannel——store 的 setViewers 只认当前直播间（切台竞态防御）。
+      void this.refreshViewers(channelId);
       if (this.tracksOwnerActivity) {
         useSessionActivityStore.getState().setStatus(
           "live",
@@ -518,6 +542,25 @@ class LiveSessionRuntime {
       }
     } catch {
       // 补拉失败不打断（下次事件再试）；SRS 不可用时后端自身返回 degraded
+    }
+  }
+
+  /**
+   * 在读人数快照（进房 / WS 重连各读一次，非周期轮询）。
+   *
+   * 只有 store 里还没有该直播间的读数时才写入：同一次进房内「快照响应」与
+   * 「WS viewers 帧」的先后无法保证，用较旧的快照覆盖刚到达的实时帧会让人数倒退。
+   * presence 存储不可用（503）→ 保持"未知"（不写 0）——读不到 ≠ 没人在看。
+   */
+  private async refreshViewers(channelId: number): Promise<void> {
+    try {
+      const page = await liveApi.getLiveChannelViewers(channelId);
+      if (!this.alive || this.channelId !== channelId) return;
+      const store = useLiveStore.getState();
+      if (store.current.channel?.id === channelId && store.current.viewerCount !== null) return;
+      store.setViewers(channelId, page.count, page.viewers.slice(0, LIVE_VIEWER_PREVIEW));
+    } catch {
+      // 503（presence 不可用）/ 403 / 404：保持未知，不冒充 0 人在看
     }
   }
 

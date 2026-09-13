@@ -31,6 +31,7 @@ import { LiveOwnerPanel } from "./LiveOwnerPanel";
 import { LiveHostAvatar } from "./LiveHostAvatar";
 import { LivePlayer } from "./LivePlayer";
 import { LiveStreamAddresses } from "./LiveStreamAddresses";
+import { LiveViewerStrip } from "./LiveViewerStrip";
 import { useDanmaku } from "../../hooks/useDanmaku";
 import { useLiveRoom } from "../../hooks/useLiveRoom";
 import { resolveSwipeCommit } from "../../hooks/useSwipeCommit";
@@ -116,6 +117,15 @@ export function LiveRoomBody({
   const { danmaku, sending, sendOwner, sendError, send, listRef, hasNewBelow, scrollToBottom, handleListScroll, history } =
     useDanmaku(channelId);
   const srsStatus = useLiveStore((s) => s.current.srsStatus);
+  // 在看人数/头像条：store 里的读数是"当前直播间"的投影，切台转场期间旧场景仍挂载，
+  // 必须按 id 校验，否则退出场景会短暂显示新直播间的人数。缺读数时退到 descriptor
+  // 里的快照值（进房详情已带）；两者都没有 = 未知 → 头像条不渲染（不显示 0 冒充没人看）。
+  const viewerOwnerId = useLiveStore((s) => s.current.channel?.id ?? null);
+  const storeViewerCount = useLiveStore((s) => s.current.viewerCount);
+  const storeViewers = useLiveStore((s) => s.current.viewers);
+  const viewerCount =
+    viewerOwnerId === channelId ? storeViewerCount : (channel?.viewer_count ?? null);
+  const viewerList = viewerOwnerId === channelId ? storeViewers : [];
 
   // 宽屏侧栏：默认展开，可收起（窄条）；窄屏侧栏：默认关闭（覆盖层）
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -128,9 +138,11 @@ export function LiveRoomBody({
     const scene = `.live-room-swipe-item[data-live-scene-owner="${channelId}"]`;
     return isNarrow && !showOwnerPanel ? [
       { selector: `${scene} > .live-room-stage`, edge: "bottom" },
+      { selector: `${scene} > .live-viewer-strip`, edge: "bottom" },
       { selector: `${scene} > .danmaku-wrap`, edge: "right" },
     ] : [
       { selector: ":scope > .live-room-main > .live-room-stage", edge: "bottom" },
+      { selector: ":scope > .live-room-main > .live-viewer-strip", edge: "bottom" },
       { selector: ":scope > .live-room-side", edge: "right" },
     ];
   }, [channelId, isNarrow, showOwnerPanel]);
@@ -209,6 +221,13 @@ export function LiveRoomBody({
     </LivePlayer>
   );
   const visibilityLabels = channel ? getVisibilityLabels(channel) : [];
+
+  // 视频下方的在看观众条（人数 + 头像 + 「……」，整排可点开完整名单）。
+  // 窄屏：视频与弹幕区之间（弹幕区因此下移，为这排腾位置）；
+  // 宽屏/控制台：视频（.live-room-stage）正下方，弹幕侧列不受影响。
+  const viewerStrip = (
+    <LiveViewerStrip channelId={channelId} count={viewerCount} viewers={viewerList} />
+  );
 
   const narrowHead = (
     <>
@@ -424,6 +443,7 @@ export function LiveRoomBody({
               data-live-scene-owner={channelId}
             >
               <div className="live-room-stage">{player}</div>
+              {viewerStrip}
               {danmakuList}
             </motion.div>
           </AnimatePresence>
@@ -472,6 +492,9 @@ export function LiveRoomBody({
         <div className="live-room-stage">
           <div className="live-room-player-wrap">{player}</div>
         </div>
+
+        {/* 视频下方：在看观众条（宽屏/控制台，与视频同处主区，不挤弹幕侧列） */}
+        {viewerStrip}
 
         {/* 下面：推流密钥（服务器 / 串流密钥 / FLV） */}
         {showOwnerPanel && channel?.is_owner && (

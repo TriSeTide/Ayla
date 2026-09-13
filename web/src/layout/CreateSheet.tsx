@@ -18,10 +18,13 @@ export function CreateSheet({
   title,
   onClose,
   children,
+  className,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** 追加到卡片根类名：调用方按需覆盖尺寸/内部滚动（如观众名单的 60% 高窄屏弹层） */
+  className?: string;
 }) {
   // ESC 关闭
   useEffect(() => {
@@ -39,7 +42,11 @@ export function CreateSheet({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="create-sheet-card" role="dialog" aria-label={title}>
+      <div
+        className={`create-sheet-card${className ? ` ${className}` : ""}`}
+        role="dialog"
+        aria-label={title}
+      >
         <header className="create-sheet-head">
           <span className="create-sheet-title">{title}</span>
           <button type="button" className="icon-btn-40" aria-label="关闭" onClick={onClose}>

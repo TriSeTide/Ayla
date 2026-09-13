@@ -12,6 +12,7 @@ import type {
   LiveChannelDescriptor,
   LiveChannelStatus,
   LiveSrsStatus,
+  LiveViewerItem,
 } from "../api/types";
 import { sortLiveChannels } from "../utils/sortChannels";
 
@@ -24,6 +25,10 @@ export interface LiveRoomState {
   srsStatus: LiveSrsStatus | null;
   /** 升序，按 id 去重 */
   danmaku: DanmakuItem[];
+  /** 当前在看人数（弹幕 WS 连接数）；null = 未知（presence 存储不可用 / 尚未读到） */
+  viewerCount: number | null;
+  /** 在看观众预览（后端上限 12 位，最近活跃优先）；完整名单走 REST */
+  viewers: LiveViewerItem[];
 }
 
 /** 手机端 App 内浮动小窗（任务 05）：离开直播间页面后继续播放的迷你播放器状态。
@@ -69,6 +74,17 @@ interface LiveState {
   setCurrentPlayerError: (error: string | null) => void;
   setMiniPlayer: (mini: MiniPlayerState | null) => void;
 
+  /** 房内在看人数/预览（弹幕 WS `viewers` 帧或 REST 快照）；仅对当前直播间生效 */
+  setViewers: (channelId: number, count: number, viewers: LiveViewerItem[]) => void;
+  /**
+   * 按频道 id patch 在看人数（chat WS `live.viewers.changed`）：更新大厅/群内列表项
+   * 与当前直播间。人数是瞬态投影，**不参与排序**——重排由 useDirectoryPage 的
+   * sortIdentity 决定（只含 status/时间），这里只替换描述符。
+   */
+  patchViewerCount: (channelId: number, count: number) => void;
+  /** 在看人数未知（presence 不可用）：清空人数而不写 0，UI 隐藏人数展示 */
+  clearViewers: () => void;
+
   /** 追加单条弹幕（WS 回帧 / POST 之外的来源），按 id 去重、定长截断 */
   appendDanmaku: (item: DanmakuItem) => void;
   /** 旧消费者兼容；当前可见历史页不写回此实时队列，避免重播 overlay。 */
@@ -84,6 +100,8 @@ const initialRoom: LiveRoomState = {
   channel: null,
   srsStatus: null,
   danmaku: [],
+  viewerCount: null,
+  viewers: [],
 };
 
 const initialState = {
@@ -99,6 +117,16 @@ const initialState = {
   lastFetched: null,
   channelsOnlyLive: null,
 };
+
+/** 按频道 id 替换列表项的在看人数；未加载的频道原样返回（不凭空插入条目）。 */
+function patchChannels(
+  channels: LiveChannelDescriptor[],
+  channelId: number,
+  count: number,
+): LiveChannelDescriptor[] {
+  if (!channels.some((c) => c.id === channelId && c.viewer_count !== count)) return channels;
+  return channels.map((c) => (c.id === channelId ? { ...c, viewer_count: count } : c));
+}
 
 /** 按 id 去重后按 created_at 升序，再按 DANMAKU_MAX_ITEMS 截断（保留最新） */
 function normalizeDanmaku(list: DanmakuItem[]): DanmakuItem[] {
@@ -178,6 +206,27 @@ export const useLiveStore = create<LiveState>((set) => ({
   setCurrentPlayerError: (error) => set({ currentPlayerError: error }),
 
   setMiniPlayer: (mini) => set({ miniPlayer: mini }),
+
+  setViewers: (channelId, count, viewers) =>
+    set((state) => {
+      const current = state.current.channel?.id === channelId
+        ? { ...state.current, viewerCount: count, viewers }
+        : state.current;
+      return { current, channels: patchChannels(state.channels, channelId, count) };
+    }),
+
+  patchViewerCount: (channelId, count) =>
+    set((state) => {
+      const current = state.current.channel?.id === channelId
+        ? { ...state.current, viewerCount: count }
+        : state.current;
+      return { current, channels: patchChannels(state.channels, channelId, count) };
+    }),
+
+  clearViewers: () =>
+    set((state) => ({
+      current: { ...state.current, viewerCount: null, viewers: [] },
+    })),
 
   appendDanmaku: (item) =>
     set((state) => ({

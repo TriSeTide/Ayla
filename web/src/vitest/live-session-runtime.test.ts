@@ -22,6 +22,7 @@ import { HlsPlayer } from "../player/hls";
 vi.mock("../api/live", () => ({
   getLiveChannel: vi.fn(),
   getLiveChannelStatus: vi.fn(),
+  getLiveChannelViewers: vi.fn(),
   listDanmaku: vi.fn(),
 }));
 
@@ -90,6 +91,12 @@ beforeEach(() => {
     ({ ...channel, id, title: `直播${id}` }) as never,
   );
   vi.mocked(liveApi.getLiveChannelStatus).mockResolvedValue({ status: "live" } as never);
+  vi.mocked(liveApi.getLiveChannelViewers).mockResolvedValue({
+    channel_id: 7,
+    count: 0,
+    has_more: false,
+    viewers: [],
+  } as never);
   vi.mocked(liveApi.listDanmaku).mockResolvedValue([] as never);
   useLiveStore.getState().reset();
   useSessionActivityStore.getState().reset();
@@ -112,6 +119,50 @@ describe("liveSessionRuntime 进房", () => {
     expect(liveWS.onFrame).toHaveBeenCalled();
     expect(liveApi.listDanmaku).not.toHaveBeenCalled();
     expect(useLiveStore.getState().current.danmaku).toEqual([]);
+  });
+
+  it("enter 读一次在看人数快照写入 store；presence 不可用时保持未知（不写 0）", async () => {
+    vi.mocked(liveApi.getLiveChannelViewers).mockResolvedValue({
+      channel_id: 7,
+      count: 3,
+      has_more: false,
+      viewers: [{ user_id: "u1", nickname: "小冰", avatar: "" }],
+    } as never);
+    liveSessionRuntime.enter(7, {});
+    await flush();
+    expect(liveApi.getLiveChannelViewers).toHaveBeenCalledWith(7);
+    expect(useLiveStore.getState().current.viewerCount).toBe(3);
+    expect(useLiveStore.getState().current.viewers).toHaveLength(1);
+
+    // 切频道重新进房：presence 存储不可用（503）→ 保持 null（读不到 ≠ 没人看）
+    vi.mocked(liveApi.getLiveChannelViewers).mockRejectedValue(
+      new Error("viewer_presence_unavailable"),
+    );
+    liveSessionRuntime.enter(8, {});
+    await flush();
+    expect(useLiveStore.getState().current.channel?.id).toBe(8);
+    expect(useLiveStore.getState().current.viewerCount).toBeNull();
+  });
+
+  it("宽窄屏切换：新视图接管后旧视图 cleanup 不得销毁会话（代际前移）", async () => {
+    // 旧视图（窄屏）进房并持有 epoch
+    const oldEpoch = liveSessionRuntime.enter(7, {});
+    await flush();
+    expect(useLiveStore.getState().current.channel?.id).toBe(7);
+
+    // 新视图（宽屏）先挂载：同频道幂等接管 → 代际必须前移
+    const newEpoch = liveSessionRuntime.enter(7, {});
+    expect(newEpoch).not.toBe(oldEpoch);
+
+    // 旧视图随后卸载，携带旧 epoch → 必须被拒绝（否则 store 频道被清空）
+    liveSessionRuntime.detachView({ epoch: oldEpoch, isNarrow: true, isOwnerConsole: false });
+    expect(useLiveStore.getState().current.channel?.id).toBe(7);
+    expect(liveWS.disconnect).not.toHaveBeenCalled();
+
+    // 新视图自身卸载时仍能正常销毁
+    liveSessionRuntime.detachView({ epoch: newEpoch, isNarrow: false, isOwnerConsole: false });
+    expect(useLiveStore.getState().current.channel).toBeNull();
+    expect(liveWS.disconnect).toHaveBeenCalled();
   });
 
   it("enter 幂等：同频道重复 enter 不重复进房（StrictMode 安全）", async () => {

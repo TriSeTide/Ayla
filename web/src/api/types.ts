@@ -679,6 +679,23 @@ export interface LiveChannelUpdatedFrame {
   };
 }
 
+/**
+ * 直播间在看人数变动（chat WS，`live_catalog` 组）。
+ *
+ * 刻意不叫 `live.channel.viewers`：`live.channel.*` 命名空间承载「目录成员/元数据
+ * 变化」，前端多处按 `startsWith("live.channel.")` 判定目录失效与活动排序。
+ * 在看人数是**瞬态展示投影**（每次进/出房间都变），既不改变列表成员，也不改变
+ * 排序依据；放进该命名空间会让工作室列表的游标被无谓作废（useOwnedLiveDirectory）。
+ * 帧只带频道 id 与人数，客户端按 id patch 已加载的列表项。
+ */
+export interface LiveViewersChangedFrame {
+  type: "live.viewers.changed";
+  data: {
+    channel_id: number;
+    viewer_count: number;
+  };
+}
+
 export interface PostCreatedFrame {
   type: "post.created";
   post: {
@@ -770,6 +787,7 @@ export type ChatServerFrame =
   | LiveChannelStatusChangedFrame
   | LiveChannelDeletedFrame
   | LiveChannelUpdatedFrame
+  | LiveViewersChangedFrame
   | PostCreatedFrame
   | PostDeletedFrame
   | PostUpdatedFrame
@@ -985,6 +1003,8 @@ export interface LiveChannelDescriptor {
   stream_key: string | null;
   /** 仅 owner 非 null */
   rtmp_url: string | null;
+  /** 当前在看直播的人数（弹幕 WS 连接数，运行事实）；null = presence 存储不可用（未知） */
+  viewer_count?: number | null;
   /** 全员可见（HLS 播放地址） */
   hls_url: string;
   /** 全员可见（HTTP-FLV 备选地址） */
@@ -1047,7 +1067,38 @@ export interface LiveErrorFrame {
   detail: string;
 }
 
-export type LiveServerFrame = DanmakuFrame | LiveErrorFrame | PongFrame;
+/**
+ * 直播间在看观众（展示投影：昵称/头像原样来自用户资料，不承载任何判断）。
+ * 语义 = 当前持有该直播间弹幕 WS 连接的登录用户（连接即观看、断开即离开）。
+ */
+export interface LiveViewerItem {
+  user_id: string;
+  nickname: string;
+  avatar: string;
+}
+
+/**
+ * 服务端 → 客户端：在看人数变化（弹幕 WS 房内帧）。
+ *
+ * `viewers` 是头像条用的**预览**（后端上限 12 位，最近活跃优先），完整名单走
+ * `GET /live/channels/<id>/viewers/`；`count` 是真实总数，二者可能不等。
+ */
+export interface LiveViewersFrame {
+  type: "viewers";
+  channel_id: number;
+  count: number;
+  viewers: LiveViewerItem[];
+}
+
+/** GET /live/channels/<id>/viewers/ 响应；has_more=true 表示名单被上限截断 */
+export interface LiveViewersResult {
+  channel_id: number;
+  count: number;
+  has_more: boolean;
+  viewers: LiveViewerItem[];
+}
+
+export type LiveServerFrame = DanmakuFrame | LiveViewersFrame | LiveErrorFrame | PongFrame;
 
 /* ================= S4 Boardgame WS 帧（对齐 backend/apps/boardgame/services.py） ================= */
 

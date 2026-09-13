@@ -34,7 +34,7 @@ from apps.common.media_pagination import paginate_media
 from apps.media.models import MediaObject
 from apps.media.services import can_access_media, parse_avatar_media_id
 
-from . import services
+from . import services, viewers
 from .models import Danmaku, LiveChannel
 from .serializers import LiveChannelSerializer
 from .services import (
@@ -100,8 +100,12 @@ def _validate_cover(user, value: str) -> str | None:
     return None
 
 
-def _channel_serializer(ch, request):
-    return LiveChannelSerializer(ch, context={"request": request}).data
+def _channel_serializer(ch, request, viewer_counts=None):
+    """序列化单条 descriptor；`viewer_counts` 为整页预取的在看人数（缺省则逐条读）。"""
+    context = {"request": request}
+    if viewer_counts is not None:
+        context["viewer_counts"] = viewer_counts
+    return LiveChannelSerializer(ch, context=context).data
 
 
 class ChannelListView(APIView):
@@ -160,7 +164,13 @@ class ChannelListView(APIView):
             },
         )
         channels = page.rows if page is not None else qs
-        payload = [_channel_serializer(ch, request) for ch in channels]
+        # 在看人数整页预取（单次 pipeline）：逐行读 Redis 会让列表请求变成 N 次往返。
+        # 预取不可用（None）时整页 viewer_count 一律 null（"读不到"），
+        # 不再逐行重试——避免 Redis 故障时每次列表请求打出一串 warning 却仍然拿不到值。
+        viewer_counts = viewers.viewer_counts([ch.id for ch in channels]) or {}
+        payload = [
+            _channel_serializer(ch, request, viewer_counts) for ch in channels
+        ]
         return Response(page.response_data(payload) if page is not None else payload)
 
     def post(self, request):
@@ -349,6 +359,33 @@ class ChannelStatusView(APIView):
             return _forbidden("无权查看该直播间")
         # 实时判定在 services 内完成；SRS 查询失败 → degraded（不伪装"未在播"）
         return Response(services.resolve_live_status(ch))
+
+
+class ChannelViewersView(APIView):
+    """GET /api/v1/live/channels/<id>/viewers/ —— 当前在看直播的人（运行事实）。
+
+    - 语义：持有该直播间弹幕 WS 连接的登录用户（连接即观看，断开即离开）；
+    - 权限：与查看直播间一致（`can_view`），非可见 → 403；不存在 → 404；
+    - presence 存储不可用 → 503：**读不到就说读不到**，不返回空名单冒充"没人在看"
+      （同 `status/` 的 degraded 处置，AGENTS.md §8）；
+    - `count` 是真实总数，名单受 `LIVE_VIEWER_LIST_MAX` 截断时由 `has_more` 显式标注。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, channel_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return _not_found()
+        if not can_view(request.user, ch):
+            return _forbidden("无权查看该直播间")
+        page = services.viewer_page(ch.id)
+        if page is None:
+            return Response(
+                {"detail": "viewer_presence_unavailable"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(page)
 
 
 class DanmakuListView(APIView):

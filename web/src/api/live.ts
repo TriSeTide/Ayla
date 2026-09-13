@@ -15,6 +15,7 @@ import type {
   DanmakuItem,
   LiveChannelDescriptor,
   LiveStatusResult,
+  LiveViewersResult,
 } from "./types";
 
 /** POST /live/channels/ —— 创建频道（创建者即 owner；201 回显 stream_key/rtmp_url，仅本次）
@@ -107,6 +108,16 @@ export function deleteLiveChannel(channelId: number) {
 /** GET /live/channels/<id>/status/ —— SRS 实时判定（权威）；degraded = SRS 不可用 */
 export function getLiveChannelStatus(channelId: number) {
   return apiRequest<LiveStatusResult>(`/live/channels/${channelId}/status/`);
+}
+
+/**
+ * GET /live/channels/<id>/viewers/ —— 当前在看直播的人（运行事实）。
+ *
+ * `count` 是真实总数；名单受上限截断时 `has_more=true`。presence 存储不可用 →
+ * 503（`viewer_presence_unavailable`）——**读不到 ≠ 没人在看**，调用方必须区分。
+ */
+export function getLiveChannelViewers(channelId: number) {
+  return apiRequest<LiveViewersResult>(`/live/channels/${channelId}/viewers/`);
 }
 
 /** POST /live/channels/<id>/danmaku/ —— 发弹幕；空/超长（>200）→ 400 */

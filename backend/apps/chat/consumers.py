@@ -137,6 +137,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         # 避免向无权用户泄露好友/群白名单频道元数据。
         self.voice_catalog_group = "voice_catalog"
         await self.channel_layer.group_add(self.voice_catalog_group, self.channel_name)
+        # 直播间目录事件同理：只携带频道 id 与在看人数（人数不涉可见性元数据），
+        # 客户端按 id patch 已加载的列表项；不可见的频道没有对应列表项，无副作用。
+        from apps.live.services import LIVE_CATALOG_GROUP
+
+        self.live_catalog_group = LIVE_CATALOG_GROUP
+        await self.channel_layer.group_add(self.live_catalog_group, self.channel_name)
         # 爱莉语音通话事件（observer 事件驱动）：elysia.voice.call.status /
         # elysia.voice.projected。通话是应用级单例（所有用户共享同一爱莉通话），
         # 帧只含中性技术状态与计数，不含通话内容；前端仅面板打开时消费。
@@ -164,6 +170,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if getattr(self, "voice_catalog_group", None):
             await self.channel_layer.group_discard(
                 self.voice_catalog_group, self.channel_name
+            )
+        if getattr(self, "live_catalog_group", None):
+            await self.channel_layer.group_discard(
+                self.live_catalog_group, self.channel_name
             )
         await self.channel_layer.group_discard("elysia_voice", self.channel_name)
         if getattr(self, "post_feed_group", None):
@@ -600,6 +610,24 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     "group_id": event.get("group_id"),
                     "status": event["status"],
                     "created_at": event["created_at"],
+                },
+            }
+        )
+
+    # ---------- 直播间在看人数推送 ----------
+
+    async def live_viewers_changed(self, event):
+        """直播间在看人数变动 → 群内/群外直播列表人数热更新。
+
+        帧只带频道 id 与人数：客户端按 id patch 已加载的列表项，不触发目录对账，
+        因此既不会误标列表失效，也不进入 `live.channel.*` 的活动排序语义。
+        """
+        await self.send_json(
+            {
+                "type": "live.viewers.changed",
+                "data": {
+                    "channel_id": event["channel_id"],
+                    "viewer_count": event["viewer_count"],
                 },
             }
         )

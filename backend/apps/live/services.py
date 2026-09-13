@@ -23,6 +23,7 @@ from django.utils import timezone
 
 from apps.common.visibility import Visibility
 
+from . import viewers
 from .models import Danmaku, LiveChannel
 from .srs import SrsClient, SrsUnavailable, get_srs
 
@@ -30,6 +31,15 @@ logger = logging.getLogger(__name__)
 
 # 弹幕历史上限（?limit= 允许的最大值）
 DANMAKU_HISTORY_MAX = 200
+
+# 直播间在看人数的 WS 预览上限（房内头像条只需一排，完整名单走 REST）
+LIVE_VIEWER_PREVIEW_LIMIT = 12
+# 在看名单一次返回的上限（超出部分由 count/has_more 显式标注，不静默截断）
+LIVE_VIEWER_LIST_MAX = 200
+
+# 直播间目录（所有在线客户端）组名：与 voice_catalog 同款——帧只带频道 id 与人数，
+# 客户端据此 patch 列表人数，不依赖可见性定向广播（O(1) 而非按收件人遍历）。
+LIVE_CATALOG_GROUP = "live_catalog"
 
 
 # ---------- 频道生命周期 ----------
@@ -396,3 +406,111 @@ def broadcast_channel_updated(channel) -> None:
     """
     event = _channel_event(channel, "live.channel.updated")
     _broadcast_to_users(event, _visible_recipient_ids(channel))
+
+
+# ---------- 在看观众（Viewer Presence） ----------
+
+def viewer_descriptors(user_ids) -> list[dict]:
+    """把观众 id 投影为 `{user_id, nickname, avatar}`，保持传入顺序。
+
+    这是**展示投影**，不是关于人的判断：昵称/头像原样取自用户资料，
+    不参与任何排序、权重或真值推导（AGENTS.md §2/§5.3）。
+    账号已删除的 id 从投影中省略——权威事实（"他曾持有连接"）在 presence 存储里，
+    不在展示层伪造一个成员。
+    """
+    from apps.accounts.models import User
+
+    ids = [str(uid) for uid in user_ids]
+    if not ids:
+        return []
+    rows = {str(user.id): user for user in User.objects.filter(id__in=ids)}
+    descriptors: list[dict] = []
+    for uid in ids:
+        user = rows.get(uid)
+        if user is None:
+            continue
+        descriptors.append(
+            {
+                "user_id": uid,
+                "nickname": user.nickname or user.username,
+                "avatar": user.avatar or "",
+            }
+        )
+    return descriptors
+
+
+def viewer_snapshot(
+    channel_id, *, limit: int = LIVE_VIEWER_PREVIEW_LIMIT
+) -> tuple[int | None, list[dict]]:
+    """返回 `(在看人数, 前 limit 位观众描述)`。
+
+    人数为 None 表示 presence 存储不可用（**不是 0 人**，调用方不得伪装成空房间）；
+    此时描述列表为空。presence 存储只保存运行事实，昵称/头像不落库到直播域。
+    """
+    ids = viewers.viewer_ids(channel_id)
+    if ids is None:
+        return None, []
+    return len(ids), viewer_descriptors(ids[: max(0, int(limit))])
+
+
+def viewer_page(channel_id, *, limit: int = LIVE_VIEWER_LIST_MAX) -> dict | None:
+    """完整在看名单（REST 用）；presence 存储不可用返回 None。
+
+    `count` 是真实总数；`has_more` 显式标注名单被上限截断，客户端据此续读/提示，
+    不允许把截断后的长度冒充成总人数（AGENTS.md §3）。
+    """
+    ids = viewers.viewer_ids(channel_id)
+    if ids is None:
+        return None
+    limit = max(1, int(limit))
+    shown = ids[:limit]
+    return {
+        "channel_id": int(channel_id),
+        "count": len(ids),
+        "has_more": len(ids) > len(shown),
+        "viewers": viewer_descriptors(shown),
+    }
+
+
+def _viewers_event(channel_id, count: int, preview: list[dict] | None = None) -> dict:
+    """房内帧：人数 + 头像预览（`{type: "viewers"}`，与弹幕帧同组同形）。"""
+    return {
+        "type": "viewers",
+        "channel_id": int(channel_id),
+        "count": int(count),
+        "viewers": preview or [],
+    }
+
+
+def _viewer_count_event(channel_id, count: int) -> dict:
+    """目录帧：只带频道 id 与人数（不涉可见性元数据，客户端按 id 匹配现有列表项）。"""
+    return {
+        "type": "live.viewers.changed",
+        "channel_id": int(channel_id),
+        "viewer_count": int(count),
+    }
+
+
+async def abroadcast_viewers(channel_id, count: int, preview: list[dict] | None = None) -> None:
+    """在看人数变化（WS 消费者异步调用）：房内帧 + 目录帧。
+
+    房内帧让直播间头像条即时跟随；目录帧让群内/群外直播列表的人数热更新。
+    两个广播各自捕获异常，互不阻塞。
+    """
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    try:
+        await layer.group_send(
+            _danmaku_group_name(channel_id), _viewers_event(channel_id, count, preview)
+        )
+    except ChannelFull:
+        logger.warning("live viewers frame dropped (room full) for live %s", channel_id)
+    except Exception:
+        logger.exception("live viewers room broadcast failed for live %s", channel_id)
+    try:
+        await layer.group_send(LIVE_CATALOG_GROUP, _viewer_count_event(channel_id, count))
+    except ChannelFull:
+        logger.warning("live viewers frame dropped (catalog full) for live %s", channel_id)
+    except Exception:
+        logger.exception("live viewers catalog broadcast failed for live %s", channel_id)

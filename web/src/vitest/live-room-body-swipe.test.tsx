@@ -110,27 +110,35 @@ afterEach(() => {
 });
 
 describe("LiveRoomBody 窄屏上下滑切换（§2.5）", () => {
-  it.each([false, true])("宽屏切房重播视频bottom/弹幕right，hideRail=%s不增视频挂卸", async (hideRail) => {
+  it.each([false, true])("宽屏切房重播视频bottom/观众条bottom/弹幕right，hideRail=%s不增视频挂卸", async (hideRail) => {
     useLiveStore.getState().setCurrentChannel(ch(1));
     useLiveStore.getState().setSrsStatus("live");
     const props = { isNarrow: false, hideRail, channels: [ch(1), ch(2), ch(3)], onSelect: vi.fn(), onBack: vi.fn(), inputEntered: true };
     const { container, rerender } = render(<LiveRoomBody {...props} channelId={1} channel={ch(1)} />);
     const stage = container.querySelector(".live-room-stage");
+    const strip = container.querySelector(".live-room-stage + .live-viewer-strip");
     const side = container.querySelector(".live-room-side");
     const host = container.querySelector(".live-player");
     const video = container.querySelector("video");
-    expect(mediaAnimations).toHaveLength(2);
+    // 在看观众条必须在首帧就位于布局中（占位恒定），否则播放器会先按"没有它"的高度
+    // 定尺寸、数据到达再被挤一次——画面出现缩放跳变（用户实测反馈）。
+    expect(strip).not.toBeNull();
+    expect(mediaAnimations).toHaveLength(3);
     expect(mediaAnimations[0].node).toBe(stage);
     expect(mediaAnimations[0].frames[0]).toEqual({ opacity: 0, transform: "translate(0px, 20px)" });
-    expect(mediaAnimations[1].node).toBe(side);
-    expect(mediaAnimations[1].frames[0]).toEqual({ opacity: 0, transform: "translate(20px, 0px)" });
+    expect(mediaAnimations[1].node).toBe(strip);
+    expect(mediaAnimations[1].frames[0]).toEqual({ opacity: 0, transform: "translate(0px, 20px)" });
+    expect(mediaAnimations[2].node).toBe(side);
+    expect(mediaAnimations[2].frames[0]).toEqual({ opacity: 0, transform: "translate(20px, 0px)" });
     rerender(<LiveRoomBody {...props} channelId={2} channel={ch(2)} />);
     rerender(<LiveRoomBody {...props} channelId={3} channel={ch(3)} />);
-    expect(mediaAnimations).toHaveLength(6);
-    expect(mediaAnimations.slice(0, 4).every((animation) => animation.cancel.mock.calls.length === 1)).toBe(true);
-    expect(mediaAnimations[4].node).toBe(stage);
-    expect(mediaAnimations[5].node).toBe(side);
-    expect(mediaAnimations[4].options.duration).toBe(300);
+    // 三次渲染各 3 个目标（stage / 观众条 / side）；前两批在重播时被取消
+    expect(mediaAnimations).toHaveLength(9);
+    expect(mediaAnimations.slice(0, 6).every((animation) => animation.cancel.mock.calls.length === 1)).toBe(true);
+    expect(mediaAnimations[6].node).toBe(stage);
+    expect(mediaAnimations[7].node).toBe(strip);
+    expect(mediaAnimations[8].node).toBe(side);
+    expect(mediaAnimations[6].options.duration).toBe(300);
     expect(container.querySelector(".live-room-stage")).toBe(stage);
     expect(container.querySelector(".live-room-side")).toBe(side);
     expect(container.querySelector(".live-player")).toBe(host);

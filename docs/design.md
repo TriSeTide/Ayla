@@ -433,6 +433,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - 普通弹幕输入的发送按钮共用`.btn-primary`，图片入口共用ghost玻璃按钮；两者至少40px高、12px圆角，图片按钮为原生button并以ref唤起文件选择，键盘可达。输入保持可收缩，发送按钮不被挤成竖排；pending、图片失败重试、已上传媒体复用及新草稿保留继续由原请求生命周期控制。
 - LIVE 徽标：`--pink-500` 实底白字 11px Fredoka 胶囊，左上角。
 - 直播间卡片（聚合网格）：封面 16:9 圆角 12px + LIVE 徽标 + 标题 Nunito 700 15px + 主播 13px `--text-secondary` + 来源标识（公开/好友/群名，Micro Tag 11px Fredoka `--sakura-300` 底 `--grape-700` 字）。
+- **窄屏直播列表封面加大（需求，仅 `.live-hub` 一级直播列表；按对齐关系定尺寸，不通铺）**：封面**保留四周留白**——卡片内沿 16px → **8px**，取景仍为 **16:9**、12px 圆角与完整亮边。封面面积 +16%（205×115 → 221×124 @525vw）。
+- **直播卡对齐关系（全端生效）**：「直播中」徽标顶部与收藏键顶部对齐、人数角标右侧与收藏键右侧对齐——收藏键落在封面右上角内。徽标/角标在封面内缩 `calc(var(--sp-1) - 1px)`（3px，扣卡片 1px 亮边），收藏键偏移 = 卡片内沿 + 1 + 3：窄屏（内沿 8px）为默认 12px；宽屏（内沿 16px）覆写为 `calc(var(--sp-4) + var(--sp-1))`（20px），实测两断点对齐差 ≤1px。
 - 直播列表材料与群/语音/帖子卡相同，使用 `.live-card` 的 `--glass-bg`（.55）、`--glass-filter` 和 `--glass-shadow`，不另用更实的 `.78` 底。大厅、直播侧栏及群频道侧栏的空封面均透明，保留亮边/视频图标，避免不透明渐变遮住玻璃；真实封面维持原像素与opacity，不通过降低整张卡片透明度制造通透感。
 
 ### 12.7.1 直播画面飘弹幕层 DanmakuOverlay（任务 04 增量）
@@ -481,6 +483,18 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 - **交互**：点击小窗主体 → 回到直播间大窗（`sourceRoute`：一级直播 `/live/:id`，群内直播 `/group/:id/live`）；右上关闭按钮 → 完整销毁会话（hls → WS → 轮询 → store → 活动态）；单指拖动（pointer 位移超阈值，clamp 视口内）；双指缩放（120–320px 宽，保持 16:9，右下角锚定）。
 - **样式**：fixed 右下角 16px，默认 168×94（16:9），`z-index: 60`（活动态悬浮球 55 之上、弹层遮罩 70 之下）；外层无 `overflow:hidden`（关闭按钮突出在小窗**右上角外侧**，不遮挡画面），内层 `.live-mini-player-video-wrap` 负责圆角/边框/投影/裁剪（`--glass-bg-strong` + `--glass-filter` + `--glass-shadow-compact` + `--glass-border` + `--radius-input`）。
 - **唯一 owner**：同一时间至多一个小窗（store `miniPlayer` 唯一）；小窗激活时隐藏 SessionActivityIndicator 的直播悬浮球（避免重复入口）；退出登录/切直播间完整清理。
+
+### 12.7.5 直播间在看观众（人数角标 + 观众条 + 名单弹层）
+
+> 语义：**在看直播 = 当前持有该直播间弹幕 WS 连接的登录用户**（连接即观看、断开即离开，心跳 30s 刷新）。人数是运行事实，不是推荐分或权重；不参与列表排序、不影响事实状态（§2 认知零规则 / AGENTS.md §5.3）。
+
+- **列表人数角标（群内群外列表共用）**：`IconUsers` 12px + `Space Grotesk` 12px 数字。大厅卡 `.live-card-viewers` 贴在封面右下角（`--glass-bg-strong` + blur(8px) + `--glass-border` + 22px 胶囊，LIVE 徽标在左上互不遮挡）；侧栏直播项封面只有 72×40px，改用标题右侧的 `.live-rail-viewers`（11px，`--text-secondary`，选中态转 `--text-primary`）。**仅在播（乐观 status=live）且服务端给得出人数时展示**；`viewer_count` 为 `null`（presence 存储不可用）→ 不渲染角标，不允许回落成「0 人在看」；`0` 是真实读数，照常展示。≥1000 用 `1.2k` 紧凑写法（`utils/liveViewers.ts`）。
+- **观众条 `.live-viewer-strip`**（视频下方一排圆形）：`[人数（IconUsers + 数字）][头像][头像]…[三圆点]`。整排是一个按钮（≥44px 触达，含 `aria-label="正在观看 N 人，查看完整名单"`）。人数圆 `--ice-300` 底 + `--indigo-700` 字，1–2 位数是 32px 正圆、3 位以上自然长成胶囊（不缩字号、不截断）；头像复用 `Avatar`（size 26、`online`）；**排尾是经典「更多」三圆点图标**（`IconDots` 14px，26px 圆形玻璃钮，不是文本省略号），**固定在排尾不被裁剪**（中间头像区 `flex:1 + overflow:hidden`，放不下先裁头像）。
+- **落位（宽屏）**：观众条在 `.live-room-main > .live-room-stage` 正下方，不挤弹幕侧列；**底边与频道侧栏/弹幕列底边齐平**（主区底内沿取 `--sidebar-gutter` 12px，与左右栏的 12px 外沿同值；开播控制台主区下方还有推流地址卡，不适用该对齐）；观众条与 stage 之间**不加额外 margin**，沿用主区 flex gap 12px——这样「标题栏↔画面」与「画面↔卡片」的留白相等（都是 12px），且播放器按容器高度定尺寸（`100cqh`），卡片下移让出的高度直接变成画面高度。窄屏在 `.live-room-stage` 与 `.danmaku-wrap` 之间（8px 间距、弹幕区贴卡片下沿），弹幕区因此下移，为这排腾位置。材料为 `--glass-bg` + blur(18px) + 亮边 + compact 阴影 + 12px 圆角（与房间内输入框同族，不新增视觉语言）。
+- **高度恒占位（禁止画面跳变，用户实测反馈）**：这一排**从首帧就渲染在布局中**，`min-height: 44px` 恒定，未知时也不塌陷——宽屏播放器按容器高度定尺寸（`100cqh`），若这排晚一步才出现，播放器先按"没有它"的高度算好、数据到达再被挤一次，画面会出现一次缩放跳变。因此 `count === null`（presence 存储不可用 / 尚未读到）时人数位显示 `–`（`.is-unknown` 转为 `--ice-100` 底 + `--text-secondary` 字），**既不写 0 冒充"没人看"，也不先消失后出现**；`count === 0` 是真实读数，照常显示 `0`。
+- **入场动画归 `LiveRoomBody` 统一编排**：观众条加入分区重播目标（`mediaPanels`），与 video 同从下方 20px 滑入（300ms easeOut，`usePanelReplayMotion`）——窄屏即"从视频画面下方滑出"，宽屏即"从下方滑入"。位移用 transform，不改变布局高度，所以画面尺寸不受影响。<br>组件自身**不带入场动画**，避免同一节点两个动画 owner。
+- **名单弹层**：复用 `CreateSheet` 配方（portal 到 body，规避侧栏 `backdrop-filter` 的 stacking context 裁剪；遮罩 `rgba(70,91,146,0.25)`）。宽屏 = 居中 modal（`min(480px,100%)`、`--glass-bg-strong` + `--radius-panel` + `--glass-shadow-modal`）；窄屏 = 底部上滑（全宽、上沿 24px 圆角、250ms `--ease-out`），**高度 60vh**（需求指定，`.live-viewer-sheet-card` 媒体查询）。标题行固定、只有名单自身滚动（`.live-viewer-sheet-body`）。每行 = 36px `Avatar` + 昵称（15px/600），整行是按钮（≥48px），点击跳个人主页（自己 → `/profile`，他人 → `/user/:id`）。名单按上限截断时提示「仅显示前 N 位」；presence 不可用（503）时明示「暂时读不到在看名单」并提供重试，**不得回落为空名单冒充没人看**。
+- **实时链路**：房内帧走弹幕 WS（`{"type":"viewers", count, viewers}`，`viewers` 是上限 12 位的头像预览，最近活跃优先）；列表热更新走 chat WS 的 `live.viewers.changed`（只带频道 id + 人数，客户端 patch 已加载列表项）。进房另有一次权威快照 `GET /live/channels/<id>/viewers/`（列表 WS 掉线时人数仍然正确）。**命名边界**：该帧刻意不叫 `live.channel.*`——那一名空间承载目录成员/元数据变化，前端多处按 `startsWith("live.channel.")` 判定目录失效与活动排序；在线人数是瞬态投影，放进该空间会无谓作废列表游标。
 
 ### 12.8 帖子卡 PostCard 与信息流
 

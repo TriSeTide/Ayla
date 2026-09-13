@@ -752,6 +752,16 @@ export class ChatWSClient {
         this.reconcileLiveChannel(frame.data.channel_id);
         break;
       }
+      case "live.viewers.changed": {
+        // 在看人数是瞬态展示投影：只 patch 已加载列表项的人数——不拉 REST、
+        // 不标目录失效、不改活动排序（帧不含元数据，也不属于 live.channel.* 命名空间）。
+        // 未加载该频道的客户端没有对应列表项，patch 自然为空操作。
+        useLiveStore.getState().patchViewerCount(
+          frame.data.channel_id,
+          frame.data.viewer_count,
+        );
+        break;
+      }
       case "post.created": {
         // WS 帧只带简化字段；以权限 REST 详情为权威（作者/可见群/`images`），
         // 拉取完整帖子 upsert 到 posts store → 群"新内容"排序/列表事件描述实时刷新。
