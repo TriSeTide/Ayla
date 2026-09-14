@@ -39,3 +39,9 @@ vi.stubGlobal("fetch", vi.fn());
 if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
   Element.prototype.scrollTo = () => {};
 }
+
+// 同理由：LiveChannelRail「自动滚动到当前聚焦直播间」调用 scrollIntoView，
+// jsdom 同样未实现 → 补 no-op（单测用 vi.spyOn 替换以断言调用参数）。
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

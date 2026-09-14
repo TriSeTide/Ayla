@@ -1,7 +1,8 @@
 /**
  * LiveChannelRail —— 直播间频道封面侧栏（需求）。
  *
- * 一列直播间封面（16:9 渐变占位 + 标题横排），点击切换当前直播间，当前项高亮。
+ * 一列直播间封面（16:9 渐变占位 + 标题横排），点击切换当前直播间，当前项高亮；
+ * 进入/切台/收起重开/窄屏覆盖层打开时，若当前项不在可视区自动滚动到它（不打断手动滚动）。
  * - 宽屏：完整侧栏含顶部操作区（返回 + 收起按钮），宽度 240px；
  *   collapsed 时**整个收成一个浮动按钮**（悬浮左上角，含返回 + 展开键，
  *   不占布局、不在左边留侧栏）。
@@ -11,7 +12,7 @@
  * - 每项右侧删除按钮（onDeleteChannel）；
  * - 底部加号键新建直播间（onCreateNewChannel）。
  */
-import { useId } from "react";
+import { useId, useLayoutEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { AuroraquaNavHighlight } from "../motion/AuroraquaNavHighlight";
@@ -57,6 +58,21 @@ export function LiveChannelRail({
 }) {
   const selectionId = useId();
   const reduced = usePrefersReducedMotion();
+
+  // 自动滚动到当前聚焦直播间（从直播列表点进 / 侧栏切台 / 收起重开 / 窄屏覆盖层打开）：
+  // 仅当前项不在侧栏可视区时滚动（block:"nearest"），不打断用户手动滚动；
+  // prefers-reduced-motion 时瞬时跳转，不做平滑动画。
+  const railListRef = useRef<HTMLUListElement | null>(null);
+  const currentIndex = channels.findIndex((ch) => ch.id === currentId);
+  useLayoutEffect(() => {
+    if (collapsed || currentIndex < 0) return;
+    const listEl = railListRef.current;
+    if (!listEl) return;
+    const itemEl = listEl.querySelector<HTMLElement>(`[data-channel-id="${currentId}"]`);
+    if (!itemEl) return;
+    itemEl.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+  }, [currentId, currentIndex, collapsed, reduced]);
+
   // 收起态：返回/展开键移到顶栏（由 LiveRoomBody wideHead 渲染），侧栏不占布局、不渲染浮动按钮
   if (collapsed) {
     return null;
@@ -89,13 +105,13 @@ export function LiveChannelRail({
           <IconChevronLeft width={18} height={18} />
         </button>
       </div>
-      <ul className="live-rail-list" onScroll={(event) => directory?.onScroll(event.currentTarget)}>
+      <ul ref={railListRef} className="live-rail-list" onScroll={(event) => directory?.onScroll(event.currentTarget)}>
         {channels.map((ch) => {
           const active = ch.id === currentId;
           const deleting = ch.id === deletingChannelId;
           const viewers = liveViewerBadge(ch);
           return (
-            <li key={ch.id} className="live-rail-item-wrap">
+            <li key={ch.id} className="live-rail-item-wrap" data-channel-id={ch.id}>
               <button
                 type="button"
                 className={`live-rail-item has-auroraqua-highlight ${active ? "is-active" : ""}`}

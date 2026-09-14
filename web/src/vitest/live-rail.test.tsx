@@ -13,6 +13,13 @@ import { LiveHall } from "../components/live/LiveHall";
 import { LiveStartSheet } from "../components/live/LiveStartSheet";
 import * as liveApi from "../api/live";
 import { useAuthStore } from "../stores/auth";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
+
+// 自动滚动测试需要切换 reduced-motion 偏好；文件内其它组件不用该 hook，mock 无副作用。
+vi.mock("../hooks/usePrefersReducedMotion", () => ({
+  usePrefersReducedMotion: vi.fn(),
+}));
+const mockReduced = vi.mocked(usePrefersReducedMotion);
 
 function liveCh(id: number, title: string, status: LiveChannelDescriptor["status"] = "live"): LiveChannelDescriptor {
   return {
@@ -155,6 +162,130 @@ describe("LiveChannelRail 窄屏覆盖层", () => {
     );
     screen.getByRole("button", { name: "切换到直播间 第三场直播" }).click();
     expect(onSelect).toHaveBeenCalledWith(3);
+  });
+});
+
+describe("LiveChannelRail 自动滚动到当前聚焦直播间", () => {
+  beforeEach(() => {
+    mockReduced.mockReturnValue(false);
+  });
+
+  it("挂载时（从直播列表点进）→ 把侧栏滚动到当前聚焦的直播间", () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(
+      <LiveChannelRail
+        channels={channels}
+        currentId={3}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    const item = screen.getByRole("button", { name: "切换到直播间 第三场直播" }).closest("li")!;
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" });
+    expect(scrollIntoView.mock.contexts[0]).toBe(item);
+    scrollIntoView.mockRestore();
+  });
+
+  it("currentId 切换（侧栏点封面）→ 滚动到新聚焦的直播间", () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    const { rerender } = render(
+      <LiveChannelRail
+        channels={channels}
+        currentId={1}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    scrollIntoView.mockClear();
+    rerender(
+      <LiveChannelRail
+        channels={channels}
+        currentId={3}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(
+      screen.getByRole("button", { name: "切换到直播间 第三场直播" }).closest("li"),
+    );
+    scrollIntoView.mockRestore();
+  });
+
+  it("目录异步加载后当前项才出现在列表 → 出现时滚动到它", () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    const { rerender } = render(
+      <LiveChannelRail
+        channels={[channels[0], channels[1]]}
+        currentId={3}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    // 列表里没有聚焦项：不滚动
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    rerender(
+      <LiveChannelRail
+        channels={channels}
+        currentId={3}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    scrollIntoView.mockRestore();
+  });
+
+  it("收起态不渲染列表 → 不滚动", () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(
+      <LiveChannelRail
+        channels={channels}
+        currentId={3}
+        onSelect={vi.fn()}
+        collapsed
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    scrollIntoView.mockRestore();
+  });
+
+  it("prefers-reduced-motion → 瞬时跳转（behavior auto，不做平滑动画）", () => {
+    mockReduced.mockReturnValue(true);
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    render(
+      <LiveChannelRail
+        channels={channels}
+        currentId={3}
+        onSelect={vi.fn()}
+        collapsed={false}
+        onToggle={vi.fn()}
+        onBack={vi.fn()}
+        showBack
+      />,
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "auto" });
+    scrollIntoView.mockRestore();
   });
 });
 
