@@ -219,6 +219,21 @@ SRS_PLAY_URL=https://live.trise.top:7882/live
     curl -fsSL -O https://raw.githubusercontent.com/acmesh-official/acme.sh/master/dnsapi/dns_cf.sh
     chmod +x dns_cf.sh
     ```
+11. **`pkill -f "xxx"` / `pgrep -f "xxx"` 会杀掉执行它的 shell 自身（SSH 断连事故 ×2）**
+    若 bash 命令行里含目标字符串（例如 `pkill -f "sakurafrp/frpc"`、循环里
+    `pgrep -f "lk room join"`），模式会匹配到**正在执行这条命令的 bash 自己** → 被 killed →
+    表现为 `ssh: connection lost mid-flight` / `channel closed`，且后续命令全部不执行，
+    极难排查（你以为只是网络抖动）。
+    **规则**：进程控制一律 `pkill -x <可执行名>`（精确进程名），或
+    `pgrep -f "^绝对路径…"`（`^` 锚定、模式不含可变子串）；绝不要让模式可能匹配自身命令行。
+12. **服务器是弱网环境：GitHub / Docker Hub 直连不稳定**
+    - `git pull`/`curl raw.githubusercontent.com` 常 `GnuTLS recv error` 或超时 →
+      多试几次；大文件走 `gh-proxy.com`（如 `https://gh-proxy.com/<github-url>`）。
+    - `docker pull` Docker Hub 常 `i/o timeout 108.160.x.x:443` → Dockerfile 的
+      `FROM` 直接换 `docker.m.daocloud.io/library/<镜像>`（不需要改 daemon；
+      `docker.1panel.live` 也可用）。
+    - **不要为了拉 GitHub 开代理**：本机代理端口（7890 等）一旦占用异常，
+      frp 穿透可能连带断，先排查 frpc 再动网络。
 
 ---
 
