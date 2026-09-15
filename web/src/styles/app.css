@@ -1135,6 +1135,93 @@
   border-radius: var(--radius-bubble) var(--radius-bubble) var(--radius-bubble) 6px;
 }
 
+/* 分享消息卡片（ShareBubble，design.md §4 玻璃材料）：
+   整卡为按钮（≥40px 触达），左封面 72px，标题 15px/700，副标题 13px 次要色。
+   卡片内用 --glass-bg 与自身描边，避免叠在气泡材质上再套一层深玻璃。 */
+.share-bubble-card {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  width: min(264px, 100%);
+  min-height: 64px;
+  padding: 8px;
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-compact);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+  overflow: hidden;
+}
+.share-bubble-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(70, 91, 146, 0.2);
+}
+.share-bubble-card:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.share-bubble-card:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+.share-bubble-cover,
+.share-bubble-cover-fallback {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.share-bubble-cover-fallback {
+  background: linear-gradient(135deg, var(--ice-100), var(--sakura-100));
+  color: var(--text-secondary);
+}
+.share-bubble-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px 0;
+}
+.share-bubble-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.share-bubble-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-bubble-chevron {
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--text-secondary);
+  border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(-45deg);
+  opacity: 0.7;
+}
+
 .bubble.recalled {
   opacity: 0.6;
   font-style: italic;

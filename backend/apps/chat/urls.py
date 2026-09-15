@@ -27,6 +27,11 @@ urlpatterns = [
         name="chat-conv-highlights",
     ),
     path(
+        "conversations/<int:conv_id>/public-summary/",
+        views.ConversationPublicSummaryView.as_view(),
+        name="chat-conv-public-summary",
+    ),
+    path(
         "conversations/<int:conv_id>/",
         views.ConversationDetailView.as_view(),
         name="chat-conv-detail",

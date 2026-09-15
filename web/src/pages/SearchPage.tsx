@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { searchPages, type SearchPageResults, type SearchType } from "../api/search";
-import { applyToGroup } from "../api/chat";
+import { GroupApplyDialog } from "../components/group/GroupApplyDialog";
 import type { SearchGroupItem, SearchResults, UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { UserProfileCard } from "../components/UserProfileCard";
@@ -112,10 +112,7 @@ export function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserPublic | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<SearchGroupItem | null>(null);
-  const [joinMessage, setJoinMessage] = useState("");
-  const [joinBusy, setJoinBusy] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-  const [joinSent, setJoinSent] = useState(false);
+
   const searchRequestRef = useRef(0);
   const pageRef = useRef<HTMLDivElement>(null);
   const { restoring } = useScrollRestore(scope, pageRef, { ready: results != null });
@@ -150,45 +147,13 @@ export function SearchPage() {
     ?? group.is_member
     ?? joinedConversationIds.has(group.id);
 
-  /** 公开群（join_policy=public）直接加入；缺失视为申请制（兼容旧数据），与后端默认一致 */
-  const isPublicGroup = selectedGroup?.join_policy === "public";
 
   const openGroupApply = (group: SearchGroupItem) => {
     setSelectedGroup(group);
-    setJoinMessage("");
-    setJoinError(null);
-    setJoinSent(false);
   };
 
   const closeGroupApply = () => {
-    if (joinBusy) return;
     setSelectedGroup(null);
-    setJoinError(null);
-  };
-
-  const submitGroupApply = async () => {
-    if (!selectedGroup || joinBusy || joinSent) return;
-    if (acceptedGroupIds.has(selectedGroup.id) || groupIsJoined(selectedGroup)) {
-      setSelectedGroup(null);
-      return;
-    }
-    const actionScope = scope;
-    setJoinBusy(true);
-    setJoinError(null);
-    try {
-      const response = await applyToGroup(selectedGroup.id, joinMessage.trim());
-      if (!active.current || activeScope.current !== actionScope || searchScope(q, filter) !== actionScope) return;
-      if ("conversation_id" in response && response.status === "accepted") {
-        setSelectedGroup(null);
-        openPath("/group/" + response.conversation_id);
-        return;
-      }
-      setJoinSent(true);
-    } catch (e) {
-      if (active.current && activeScope.current === actionScope) setJoinError(e instanceof Error ? e.message : "发送入群申请失败");
-    } finally {
-      if (active.current && activeScope.current === actionScope) setJoinBusy(false);
-    }
   };
 
   const refreshSearch = useCallback((query: string) => {
@@ -340,7 +305,6 @@ export function SearchPage() {
     setError(null);
     setSelectedGroup(null);
     setSelectedUser(null);
-    setJoinBusy(false);
     setAcceptedGroupIds(new Set());
     setResumeEntry(false);
     const cached = searchPageMemory.get(scope);
@@ -514,38 +478,14 @@ export function SearchPage() {
       )}
 
       {resultScope === scope && selectedGroup && (
-        <div className="group-apply-overlay" onClick={closeGroupApply}>
-          <div className="group-apply-dialog glass-card" role="dialog" aria-modal="true" aria-labelledby="group-apply-title" onClick={(e) => e.stopPropagation()}>
-            <header className="group-apply-head">
-              <div>
-                <span className="group-apply-kicker">GROUP REQUEST</span>
-                <h2 id="group-apply-title">{isPublicGroup ? "加入" : "申请加入"}「{selectedGroup.title}」</h2>
-              </div>
-              <button type="button" className="icon-btn-40" onClick={closeGroupApply} aria-label="关闭">×</button>
-            </header>
-            {joinSent ? (
-              <div className="group-apply-success" role="status">
-                <span className="group-apply-success-icon" aria-hidden="true">✓</span>
-                <strong>申请已发送</strong>
-                <p>等待群主或管理员审核，同意后你就能进入群聊。</p>
-                <button type="button" className="btn btn-primary" onClick={closeGroupApply}>知道了</button>
-              </div>
-            ) : (
-              <>
-                <p className="group-apply-desc">{isPublicGroup ? "这是一个公开群聊，点击即可直接加入。" : "这是一个申请制群聊，群主或管理员同意后才能入群。"}</p>
-                <label className="group-apply-label" htmlFor="group-apply-message">给群主留言 <span>（可选）</span></label>
-                <textarea id="group-apply-message" aria-label="给群主留言" className="field group-apply-message" value={joinMessage} maxLength={200} onChange={(e) => setJoinMessage(e.target.value)} placeholder="简单介绍一下自己吧…" />
-                {joinError && <p className="group-apply-error" role="alert">{joinError}</p>}
-                <div className="group-apply-actions">
-                  <button type="button" className="btn btn-ghost" onClick={closeGroupApply} disabled={joinBusy}>取消</button>
-                  <button type="button" className="btn btn-primary" onClick={() => void submitGroupApply()} disabled={joinBusy}>
-                    {joinBusy ? (isPublicGroup ? "加入中…" : "发送中…") : (isPublicGroup ? "直接加入" : "发送入群申请")}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <GroupApplyDialog
+          group={{ id: selectedGroup.id, title: selectedGroup.title, join_policy: selectedGroup.join_policy ?? null }}
+          onClose={closeGroupApply}
+          onJoined={(convId) => {
+            setSelectedGroup(null);
+            openPath(`/group/${convId}`);
+          }}
+        />
       )}
     </div>
   );

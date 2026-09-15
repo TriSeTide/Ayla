@@ -8,7 +8,7 @@
  * 输入框直接显示）；宽屏同 ChannelSidebar 内容区。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import * as liveApi from "../../api/live";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { CreateSheet } from "../../layout/CreateSheet";
@@ -21,6 +21,8 @@ import { useDirectoryPage } from "../../hooks/useDirectoryPage";
 export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string; routeChannelId?: string; onExit: () => void }) {
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const navigate = useNavigate();
+  // 从分享消息点击进入：免本群白名单校验（2026-09-15 用户定稿：任何人点进都能看到）
+  const fromShare = (useLocation().state as { fromShare?: boolean } | null)?.fromShare === true;
   const channel = useLiveStore((s) => s.current.channel);
   const directory = useDirectoryPage("live", { groupId });
   const { items: channels, loading, refresh: load } = directory;
@@ -31,7 +33,7 @@ export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string
     if (routeChannelId == null) return null;
     const parsed = Number(routeChannelId);
     const known = useLiveStore.getState().channels.find((item) => item.id === parsed
-      && (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId)));
+      && (fromShare || (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))));
     return known?.id ?? null;
   });
   const [showCreate, setShowCreate] = useState(false);
@@ -44,7 +46,7 @@ export function GroupLive({ groupId, routeChannelId, onExit }: { groupId: string
     setDetailError(null);
     void liveApi.getLiveChannel(Number(routeChannelId)).then((item) => {
       if (cancelled) return;
-      if (!(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) {
+      if (!fromShare && !(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) {
         setDetailError("该直播间不在本群可见范围内");
         return;
       }

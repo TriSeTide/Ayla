@@ -19,6 +19,8 @@ import { AnimatePresence, motion, useIsPresent } from "framer-motion";
 import type { PanHandler, PanInfo } from "framer-motion";
 import type { LiveChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
+import { ShareButton } from "../share/ShareButton";
+import { liveSharePayload } from "../../utils/sharePayload";
 import { ScrollingText } from "../ScrollingText";
 import { ScrollingTags } from "../ScrollingTags";
 import { DanmakuInput } from "./DanmakuInput";
@@ -256,6 +258,18 @@ export function LiveRoomBody({
         />
       )}
       {!showOwnerPanel && channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
+      {!showOwnerPanel && channel && (
+        <ShareButton
+          payload={liveSharePayload({
+            id: channel.id,
+            title: channel.title,
+            cover: typeof channel.cover === "string" ? channel.cover : null,
+            owner_name: channel.owner_nickname,
+            group_id: channel.group,
+          })}
+          label="分享直播间"
+        />
+      )}
       <button
         type="button"
         className="live-room-rail-toggle"
@@ -312,6 +326,18 @@ export function LiveRoomBody({
         />
       )}
       {channel && <FavoriteButton targetType="live" targetId={channel.id} compact />}
+      {channel && (
+        <ShareButton
+          payload={liveSharePayload({
+            id: channel.id,
+            title: channel.title,
+            cover: typeof channel.cover === "string" ? channel.cover : null,
+            owner_name: channel.owner_nickname,
+            group_id: channel.group,
+          })}
+          label="分享直播间"
+        />
+      )}
     </>
   );
 

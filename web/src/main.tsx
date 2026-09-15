@@ -25,6 +25,7 @@ import "./styles/voice.css";
 import "./styles/posts.css";
 import "./styles/boardgame.css";
 import "./styles/messages.css";
+import "./styles/share.css";
 import "./styles/search.css";
 import "./styles/profile.css";
 import "./styles/private.css";

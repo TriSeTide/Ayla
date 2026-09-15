@@ -29,6 +29,7 @@ import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "
 import type { PanHandler, PanInfo } from "framer-motion";
 import * as chatApi from "../api/chat";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
+import { GroupApplyDialog } from "../components/group/GroupApplyDialog";
 import { GroupTopTabs } from "../components/group/GroupTopTabs";
 import { sortGroupsByActivity, useGroupActivityMap } from "../components/home/groupActivity";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -84,6 +85,10 @@ export function GroupPage() {
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
   const conversations = useChatStore((s) => s.conversations);
+  // 直达群路由时：非成员（summary 403）→ 路由守卫标记（未加入的群不能输链接进入）
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  // 守卫弹窗用的公开群信息（public-summary：非成员也可读 join_policy/群名）
+  const [guardInfo, setGuardInfo] = useState<{ title: string; join_policy: "public" | "application" | null } | null>(null);
   const groupPage = useSocialPage("conversations", { type: "group" });
   const subgroupPage = useSocialPage("subgroups", { groupId: id }, !!id);
   const selectedSubgroup = useSubGroupStore((state) => id ? state.activeByGroup[id] : null);
@@ -250,7 +255,7 @@ export function GroupPage() {
           useChatStore.getState().upsertConversation(conversation);
         }
       })
-      .catch(() => {});
+      .catch(() => { setSummaryFailed(true); });
     return () => {
       cancelled = true;
     };
@@ -365,6 +370,39 @@ export function GroupPage() {
     },
     [activeScene, goScene],
   );
+
+  // ---- 路由守卫：未加入的群聊不能通过输入链接进入查看 ----
+  const isMyGroup = conversations.some((c) => c.id === id && c.type === "group");
+  const gated = Boolean(id) && !isMyGroup && summaryFailed;
+  // 守卫信息：非成员可读的公开摘要（群名 + 加入方式），弹窗按公开/申请制渲染
+  useEffect(() => {
+    if (!gated || !id || guardInfo) return;
+    let cancelled = false;
+    chatApi
+      .getConversationPublicSummary(id)
+      .then((d) => {
+        if (!cancelled) setGuardInfo({ title: d.title, join_policy: d.join_policy });
+      })
+      .catch(() => {
+        if (!cancelled) setGuardInfo({ title: "", join_policy: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gated, id, guardInfo]);
+
+  if (gated) {
+    // 路由守卫：未加入的群不能输链接进入；弹出复用搜索页的 GROUP REQUEST 申请弹窗。
+    return (
+      <>
+        <div className="group-page group-page-guard" />
+        <GroupApplyDialog
+          group={{ id: id ?? "", title: guardInfo?.title ?? "", join_policy: guardInfo?.join_policy ?? null }}
+          onClose={() => navigate("/group")}
+        />
+      </>
+    );
+  }
 
   // ---- 宽屏：三列（ServerRail + ChannelSidebar + 内容区） ----
   if (!isNarrow) {

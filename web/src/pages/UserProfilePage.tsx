@@ -18,6 +18,8 @@ import type { UserPublic } from "../api/types";
 import { Avatar } from "../components/Avatar";
 import { ProfileContentSections } from "../components/ProfileContentSections";
 import { IconBack } from "../components/icons";
+import { ShareButton } from "../components/share/ShareButton";
+import { userSharePayload } from "../utils/sharePayload";
 import { useDisplayStatus, usePresenceOnline } from "../utils/displayStatus";
 
 export function UserProfilePage() {
@@ -124,6 +126,7 @@ export function UserProfilePage() {
                 >
                   <IconBack width={20} height={20} />
                 </button>
+                <ShareButton payload={userSharePayload(user)} label="分享用户" className="icon-btn-40 profile-card-share" />
                 <div className="profile-avatar-block">
                   <Avatar
                     label={user.nickname || user.username}

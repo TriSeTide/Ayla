@@ -6,7 +6,7 @@
  * 进房与切房由 VoiceRoomBody 独立编排标题、成员和聊天面板，内部输入不叠加入场。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getElysiaProfile } from "../../api/elysia";
 import * as voiceApi from "../../api/voice";
 import type { ElysiaProfile } from "../../api/types";
@@ -34,6 +34,8 @@ export function GroupVoice({
   const navigate = useNavigate();
   const isNarrow = useMediaQuery(NARROW_QUERY);
   const channels = useVoiceStore((s) => s.channels);
+  // 从分享消息点击进入：免本群白名单校验（2026-09-15 用户定稿：任何人点进都能看到）
+  const fromShare = (useLocation().state as { fromShare?: boolean } | null)?.fromShare === true;
   const [elysiaProfile, setElysiaProfile] = useState<ElysiaProfile | null>(null);
   const directory = useDirectoryPage("voice", { groupId }, !routeChannelId);
   const groupChannels = directory.items;
@@ -85,12 +87,13 @@ export function GroupVoice({
 
   useEffect(() => {
     if (!routeChannelId || channels.some((item) => item.id === routeChannelId
-      && (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId)))) return;
+      && (fromShare || (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))))) return;
     let cancelled = false;
     void voiceApi.getVoiceChannel(routeChannelId).then((item) => {
       if (cancelled) return;
-      // 权限校验：不在本群可见范围内不注入频道（界面保持加载态，静默）
-      if (!(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) return;
+      // 权限校验：不在本群可见范围内不注入频道（界面保持加载态，静默）；
+      // 从分享消息点击进入（fromShare）免校验——任何人点进都能看到。
+      if (!fromShare && !(item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))) return;
       useVoiceStore.getState().upsertChannel(item);
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -121,7 +124,7 @@ export function GroupVoice({
     ? channels.find(
         (c) =>
           c.id === routeChannelId &&
-          (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId)),
+          (fromShare || (c.allowed_group_ids ?? []).some((allowedId) => String(allowedId) === String(groupId))),
       ) ?? null
     : null;
   useEffect(() => {

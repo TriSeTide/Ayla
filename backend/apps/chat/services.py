@@ -220,6 +220,7 @@ def create_message(
     idempotency_key=None,
     media_id=None,
     segments=None,
+    share_payload=None,
     seq=None,
     subgroup=None,
 ) -> Message:
@@ -229,6 +230,7 @@ def create_message(
     - 否则在事务内算 seq 并落库；
     - 调用方负责广播（本函数不做广播，保证 REST 与 WS 落库后再各自广播）。
     - subgroup：群聊子群归属（None = 默认组语义，旧消息兼容）。
+    - share_payload：分享消息载荷（type=share；其他类型恒为 None，由 serializer 保证）。
     """
     key = idempotency_key
     if key is None:
@@ -250,6 +252,7 @@ def create_message(
                 content=content,
                 media_id=media_id,
                 segments=segments,
+                share_payload=share_payload,
                 reply_to=reply_to,
                 idempotency_key=key,
                 seq=seq,
@@ -272,6 +275,7 @@ def create_message(
                     content=content,
                     media_id=media_id,
                     segments=segments,
+                    share_payload=share_payload,
                     reply_to=reply_to,
                     idempotency_key=key,
                     seq=seq,
@@ -504,6 +508,7 @@ def _message_new_event(message: Message) -> dict:
         "msg_type": message.type,
         "media": _media_descriptor(message.media_id),
         "segments": expand_segments(message),
+        "share_payload": message.share_payload,
         "reply_to": str(message.reply_to_id) if message.reply_to_id else None,
         "reply_to_seq": message.reply_to.seq if message.reply_to_id and message.reply_to else None,
         "idempotency_key": message.idempotency_key,

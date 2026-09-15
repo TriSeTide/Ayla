@@ -74,6 +74,18 @@ export function createGroupConversation(payload: {
   });
 }
 
+/** GET /chat/conversations/<id>/public-summary/ —— 群聊公开摘要（无需入群；GROUP REQUEST 弹窗用） */
+export function getConversationPublicSummary(convId: string) {
+  return apiRequest<{
+    id: string;
+    title: string;
+    announcement: string;
+    join_policy: "public" | "application";
+    avatar: string;
+    member_count: number;
+  }>(`/chat/conversations/${convId}/public-summary/`);
+}
+
 /** GET /chat/conversations/<id>/ —— 会话详情 */
 export function getConversation(convId: string) {
   return apiRequest<ConversationDetail>(`/chat/conversations/${convId}/`);

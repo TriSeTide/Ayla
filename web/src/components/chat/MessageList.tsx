@@ -1085,6 +1085,7 @@ export function MessageList({
                   onRetry={onRetry && m.sendFailed ? onRetry : undefined}
                   onRemove={onRemove && m.sendFailed ? onRemove : undefined}
                   onCancel={onCancel && m.pending && m.uploadProgress != null ? onCancel : undefined}
+                  shareGroupId={isGroup ? conversation?.id ?? null : null}
                 />
               </div>
             );

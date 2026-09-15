@@ -108,8 +108,28 @@ export type ApiErrorBody = Record<string, unknown>;
 /* ================= M5-2 聊天域（对齐 backend/apps/chat/serializers.py） ================= */
 
 export type MessageType =
-  | "text" | "image" | "voice" | "file" | "emoji" | "video" | "mixed" | "system" | "poke";
+  | "text" | "image" | "voice" | "file" | "emoji" | "video" | "mixed" | "system" | "poke" | "share";
 export type MessageStatus = "sent" | "delivered" | "read" | "recalled";
+
+/* ================= 分享消息（type=share；对齐 backend apps/chat/serializers.SHARE_TYPES） ================= */
+
+/** 分享来源类型：群/语音房/直播间/帖子/桌游室/用户（与后端 SHARE_TYPES 一致） */
+export type ShareType = "group" | "voice" | "live" | "post" | "boardgame" | "user";
+
+/** SharePayload 序列化结构（Message.share_payload JSON；发送/渲染共用契约） */
+export interface SharePayload {
+  share_type: ShareType;
+  /** 分享目标 id（群 id/语音频道 id/直播频道 id/帖子 id/桌游房 id/用户 id） */
+  target_id: string;
+  /** 展示标题（如群名/房名/直播标题/帖子标题/用户昵称） */
+  title: string;
+  /** 封面：站内相对路径（/api/v1/media/... 或空串/null） */
+  cover?: string | null;
+  /** 副标题（如人数/作者名，可为空） */
+  subtitle?: string | null;
+  /** 附加字段（如 group_id 供群内场景跳转、member_count 等） */
+  extra?: Record<string, unknown> | null;
+}
 
 /* ================= M4-3 表情包（对齐 backend/apps/emoji/serializers.py） ================= */
 
@@ -212,6 +232,8 @@ export interface ChatMessage {
   media?: MediaDescriptor | null;
   /** 图文混排段（type=mixed；媒体段带完整 descriptor；旧消息/单媒体为 null） */
   segments?: MediaSegment[] | null;
+  /** 分享载荷（type=share 消息；其他类型为 null；旧服务端可缺省） */
+  share_payload?: SharePayload | null;
   reply_to: string | null;
   /** 被引用消息的会话序号，供窗口化聊天按 before_seq 定位；旧服务端可缺省。 */
   reply_to_seq?: number | null;
@@ -350,6 +372,8 @@ export interface CreateMessagePayload {
     | { type: "image" | "video"; media_id: string }
     | { type: "mention"; user_id: string }
   )[];
+  /** 分享载荷（type=share 必填；其他类型携带会被服务端拒绝） */
+  share_payload?: SharePayload;
 }
 
 /** 会话列表查询参数 */
@@ -410,6 +434,8 @@ export interface MessageNewFrame {
     media: MediaDescriptor | string | null;
     /** 图文混排段（type=mixed；媒体段带 descriptor；旧后端缺失为 null） */
     segments?: MediaSegment[] | null;
+    /** 分享载荷（type=share；旧后端缺失为 null） */
+    share_payload?: SharePayload | null;
     reply_to: string | null;
     /** 被引用消息的会话序号，供跨窗口定位；旧 WS 服务端可缺省。 */
     reply_to_seq?: number | null;

@@ -370,6 +370,33 @@ class SubGroupReadView(APIView):
         return Response({"marked": receipt.marked, "marked_seqs": receipt.marked_seqs})
 
 
+class ConversationPublicSummaryView(APIView):
+    """GET /conversations/<id>/public-summary/ —— 群聊公开摘要（无需入群）。
+
+    用途：未加入群聊的路由守卫 / 分享跳转守卫需要知道群名与加入方式
+    （join_policy）来渲染 GROUP REQUEST 弹窗（公开群=直接加入，申请制=申请）。
+    仅群聊开放；私聊返回 404。返回字段刻意最小（title/join_policy/avatar/member_count），
+    不泄露成员、消息与公告以外信息。
+    """
+
+    def get(self, request, conv_id):
+        conv = _get_conv_or_404(conv_id)
+        if conv is None:
+            return _not_found("会话不存在")
+        if conv.type != Conversation.TYPE_GROUP:
+            return _not_found("会话不存在")
+        return Response(
+            {
+                "id": str(conv.id),
+                "title": conv.title,
+                "announcement": conv.announcement,
+                "join_policy": conv.join_policy,
+                "avatar": conv.avatar,
+                "member_count": conv.members.count(),
+            }
+        )
+
+
 class ConversationDetailView(APIView):
     """GET /conversations/<id>/ —— 会话详情（成员列表 + 我的角色）。
     PATCH —— 改群标题/公告/头像（群管理员）。"""
@@ -540,6 +567,7 @@ class MessageView(APIView):
                     existing.content != (data.get("content") or "")
                     or existing.type != data.get("type")
                     or existing.segments != (data.get("segments") or None)
+                    or existing.share_payload != data.get("share_payload")
                 ):
                     return Response(
                         {"detail": "idempotency_key 冲突：内容不一致"},
@@ -566,6 +594,7 @@ class MessageView(APIView):
             idempotency_key=key,
             media_id=data.get("media_id"),
             segments=data.get("segments"),
+            share_payload=data.get("share_payload"),
             subgroup=subgroup,
         )
         # 戳一戳：独立广播帧（不进未读/已读/红点链路），也不 inject 爱莉主链

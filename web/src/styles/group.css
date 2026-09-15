@@ -2230,3 +2230,11 @@
 .subgroup-dialog-actions .btn-destructive {
   margin-right: auto;
 }
+
+/* 群信息卡操作行：分享入口 + 编辑按钮（design.md §4 图标钮） */
+.group-info-actions-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}

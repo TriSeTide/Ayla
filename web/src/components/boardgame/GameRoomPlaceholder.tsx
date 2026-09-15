@@ -9,6 +9,8 @@ import * as boardgameApi from "../../api/boardgame";
 import type { GameRoom } from "../../api/types";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { FavoriteButton } from "../FavoriteButton";
+import { ShareButton } from "../share/ShareButton";
+import { boardgameSharePayload } from "../../utils/sharePayload";
 import { IconBack } from "../icons";
 import { useAuthStore } from "../../stores/auth";
 import { usePagedMediaList } from "../../hooks/usePagedMediaList";
@@ -134,6 +136,10 @@ export function GameRoomPlaceholder({
           <IconBack width={20} height={20} />
         </button>
         <span className="game-room-placeholder-name">{room.name}</span>
+        <ShareButton
+          payload={boardgameSharePayload({ id: room.id, name: room.name, group: room.group ?? null, game_type: room.game_type ?? null })}
+          label="分享桌游室"
+        />
         <FavoriteButton targetType="game" targetId={room.id} compact />
       </header>
       <div className="game-room-placeholder-body">

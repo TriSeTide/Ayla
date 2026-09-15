@@ -18,6 +18,7 @@ import { FavoriteButton } from "../FavoriteButton";
 import { RECALL_SECONDS } from "../../hooks/useChat";
 import { HOVER_NONE_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 import { MediaContent } from "./MediaContent";
+import { ShareBubble } from "./ShareBubble";
 import { IconQuote, IconUndo, IconClose } from "../icons";
 
 function timeAgo(iso: string): string {
@@ -68,6 +69,7 @@ export function MessageBubble({
   onRetry,
   onRemove,
   onCancel,
+  shareGroupId,
 }: {
   message: ChatMessage;
   isSelf: boolean;
@@ -105,6 +107,8 @@ export function MessageBubble({
   onRemove?: (msg: ChatMessage) => void;
   /** 乐观发送中：取消上传（abort + 删除气泡） */
   onCancel?: (msg: ChatMessage) => void;
+  /** 当前会话为群聊时的群 id（分享卡片分流跳转用；私聊为 null） */
+  shareGroupId?: string | null;
 }) {
   const recalled = message.status === "recalled";
   const isMedia = MEDIA_TYPES.has(message.type);
@@ -351,6 +355,8 @@ export function MessageBubble({
               <span>{jumpedRecalled ? "该消息已撤回" : isSelf ? "你撤回了一条消息" : "对方撤回了一条消息"}</span>
             ) : message.type === "system" ? (
               <span>{message.content}</span>
+            ) : message.type === "share" ? (
+              <ShareBubble message={message} groupId={shareGroupId} />
             ) : isMedia ? (
               <MediaContent msg={message} />
             ) : (

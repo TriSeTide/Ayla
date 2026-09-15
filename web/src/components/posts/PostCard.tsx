@@ -10,6 +10,8 @@ import { cardVisibilityLabels, type PostCardData } from "../cards/cardData";
 import { Avatar } from "../Avatar";
 import { IconEye, IconMessage } from "../icons";
 import { FavoriteButton } from "../FavoriteButton";
+import { ShareButton } from "../share/ShareButton";
+import { postSharePayload } from "../../utils/sharePayload";
 import { ResourceImage } from "../ResourceImage";
 import { PostVideoCover } from "./PostVideoCover";
 import { mediaContentUrl } from "../../api/media";
@@ -141,6 +143,14 @@ export function PostCard({
           {post.view_count}
         </span>}
         {action === undefined ? <FavoriteButton targetType="post" targetId={post.id} compact className="post-card-fav" /> : action}
+        <ShareButton
+          payload={postSharePayload(
+            { id: Number(post.id), title: post.title ?? "", body: post.body ?? "", group: post.group ?? null },
+            mediaList[0]?.media?.thumbnail || (mediaList[0]?.media ? mediaContentUrl(mediaList[0].media.media_id) : null),
+          )}
+          label="分享帖子"
+          className="icon-btn-40 post-card-share"
+        />
       </footer>
     </article>
   );

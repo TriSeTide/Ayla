@@ -426,6 +426,7 @@ export class ChatWSClient {
           media_id: wsMediaId,
           media: typeof wsMedia === "string" ? null : wsMedia,
           segments: d.segments ?? null,
+          share_payload: d.share_payload ?? null,
           reply_to: d.reply_to,
           reply_to_seq: d.reply_to_seq ?? null,
           read_by_me: confirmedRead,

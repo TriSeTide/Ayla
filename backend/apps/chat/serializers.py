@@ -31,6 +31,18 @@ _MEDIA_TYPE_PLACEHOLDER = {
 }
 _PREVIEW_MAX = 60
 
+# 分享消息：可分享的来源类型（契约，前端 sharePayload.ts 必须与此一致）
+SHARE_TYPES = {"group", "voice", "live", "post", "boardgame", "user"}
+
+
+def _share_preview(msg) -> str:
+    """分享消息列表预览：`[分享]标题`（payload 缺失回退 content）。"""
+    payload = msg.share_payload or {}
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        title = (msg.content or "").strip()
+    return f"[分享]{title}" if title else "[分享]"
+
 
 def expand_segments(msg) -> list | None:
     """把 DB 里 segments（媒体段只存 media_id、@ 段只存 user_id）展开为带完整
@@ -120,6 +132,8 @@ def message_preview(msg) -> str:
         return "[已撤回]"
     if msg.type == Message.TYPE_POKE:
         return _poke_preview(msg)
+    if msg.type == Message.TYPE_SHARE:
+        return _share_preview(msg)
     if msg.type == Message.TYPE_MIXED and msg.segments:
         parts = []
         for seg in msg.segments:
@@ -172,6 +186,8 @@ class MessageSerializer(serializers.ModelSerializer):
     media = serializers.SerializerMethodField()
     # 图文混排段（type=mixed 消息；媒体段带完整 descriptor；无 segments 为 null）
     segments = serializers.SerializerMethodField()
+    # 分享载荷（type=share 消息；其他类型为 null）
+    share_payload = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -185,6 +201,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "media_id",
             "media",
             "segments",
+            "share_payload",
             "reply_to",
             "reply_to_seq",
             "read_by_me",
@@ -223,6 +240,10 @@ class MessageSerializer(serializers.ModelSerializer):
 
     def get_segments(self, obj):
         return expand_segments(obj)
+
+    def get_share_payload(self, obj):
+        """分享载荷（type=share 消息；其他类型恒为 null）。"""
+        return obj.share_payload or None
 
 
 class SubGroupSerializer(serializers.ModelSerializer):
@@ -568,6 +589,8 @@ class CreateMessageSerializer(serializers.Serializer):
     segments = serializers.ListField(
         required=False, allow_empty=False, child=serializers.DictField()
     )
+    # 分享载荷（type=share 必填）：{share_type, target_id, title, cover?, subtitle?, extra?}
+    share_payload = serializers.DictField(required=False, allow_empty=False)
 
     # M4-3：媒体消息类型（type=image/voice/file/emoji/video 时 media_id 必填并校验）
     MEDIA_TYPES = {
@@ -675,6 +698,63 @@ class CreateMessageSerializer(serializers.Serializer):
             attrs["type"] = Message.TYPE_MIXED
             attrs["content"] = "".join(text_parts)
             return attrs
+
+        # 分享：payload 必填并校验结构；不得携带媒体/引用；content 允许为空（预览取 title）
+        if msg_type == Message.TYPE_SHARE:
+            if media_id:
+                raise serializers.ValidationError(
+                    {"media_id": "分享消息不能携带媒体"}
+                )
+            if attrs.get("reply_to"):
+                raise serializers.ValidationError(
+                    {"reply_to": "分享消息不支持引用"}
+                )
+            payload = attrs.get("share_payload") or {}
+            share_type = str(payload.get("share_type") or "")
+            if share_type not in SHARE_TYPES:
+                raise serializers.ValidationError(
+                    {"share_payload": "share_type 必须是 group/voice/live/post/boardgame/user 之一"}
+                )
+            target_id = str(payload.get("target_id") or "").strip()
+            if not target_id:
+                raise serializers.ValidationError(
+                    {"share_payload": "target_id 必填"}
+                )
+            title = str(payload.get("title") or "").strip()
+            if not title:
+                raise serializers.ValidationError(
+                    {"share_payload": "title 必填"}
+                )
+            cover = payload.get("cover")
+            if cover is not None and not (
+                isinstance(cover, str) and cover.startswith("/")
+            ):
+                raise serializers.ValidationError(
+                    {"share_payload": "cover 必须是站内相对路径（/ 开头）或 null"}
+                )
+            normalized = {
+                "share_type": share_type,
+                "target_id": target_id,
+                "title": title,
+                "cover": cover if isinstance(cover, str) and cover else None,
+                "subtitle": payload.get("subtitle")
+                if isinstance(payload.get("subtitle"), str)
+                else None,
+                "extra": payload.get("extra")
+                if isinstance(payload.get("extra"), dict)
+                else None,
+            }
+            attrs["share_payload"] = normalized
+            # 会话列表预览兜底：content 空时存 `[分享]title`（旧读路径/搜索兼容）
+            if not (attrs.get("content") or "").strip():
+                attrs["content"] = f"[分享]{title}"
+            return attrs
+
+        # 非 share 类型：携带 share_payload 拒绝（payload 只属于 share 消息）
+        if attrs.get("share_payload") is not None:
+            raise serializers.ValidationError(
+                {"share_payload": "仅 type=share 消息可携带分享载荷"}
+            )
 
         # 戳一戳：content 存目标用户 id；不得携带媒体/引用；目标必须是会话成员。
         if msg_type == Message.TYPE_POKE:

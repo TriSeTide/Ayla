@@ -10,6 +10,8 @@ import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../api/medi
 import { Avatar } from "../components/Avatar";
 import { ProfileContentSections } from "../components/ProfileContentSections";
 import { IconBack, IconHeart, IconLogout } from "../components/icons";
+import { ShareButton } from "../components/share/ShareButton";
+import { userSharePayload } from "../utils/sharePayload";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useAuth } from "../hooks/useAuth";
@@ -156,6 +158,7 @@ export function ProfilePage() {
             >
               <IconBack width={20} height={20} />
             </button>
+            <ShareButton payload={userSharePayload(currentUser)} label="分享我的主页" className="icon-btn-40 profile-card-share" />
             <div className="profile-avatar-block">
               <Avatar
                 label={displayName}

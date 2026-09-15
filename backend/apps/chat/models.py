@@ -150,6 +150,7 @@ class Message(models.Model):
     TYPE_MIXED = "mixed"
     TYPE_SYSTEM = "system"
     TYPE_POKE = "poke"
+    TYPE_SHARE = "share"
     TYPE_CHOICES = [
         (TYPE_TEXT, "文本"),
         (TYPE_IMAGE, "图片"),
@@ -160,6 +161,7 @@ class Message(models.Model):
         (TYPE_MIXED, "图文混排"),
         (TYPE_SYSTEM, "系统"),
         (TYPE_POKE, "戳一戳"),
+        (TYPE_SHARE, "分享"),
     ]
 
     STATUS_SENT = "sent"
@@ -198,6 +200,11 @@ class Message(models.Model):
     # content 冗余保存全部 text 段拼接（旧逻辑/搜索/预览兼容）；单媒体消息（image/voice/
     # video/file/emoji）不使用 segments（保持旧格式 media_id + type）。
     segments = models.JSONField("图文段", null=True, blank=True, default=None)
+    # 分享消息载荷（type=share）：结构见 CreateMessageSerializer.SHARE_TYPES 契约
+    #   {"share_type": "group|voice|live|post|boardgame|user", "target_id": "...",
+    #    "title": "...", "cover": "相对路径|null", "subtitle": "..."|null, "extra": {...}|null}
+    # 非 share 消息恒为 null。
+    share_payload = models.JSONField("分享载荷", null=True, blank=True, default=None)
     reply_to = models.ForeignKey(
         "self",
         related_name="replies",

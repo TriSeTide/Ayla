@@ -7,6 +7,8 @@ import * as voiceApi from "../../api/voice";
 import { uploadMediaFile, mediaContentUrl, resolveMediaPath } from "../../api/media";
 import type { ElysiaProfile, VoiceChannelDescriptor } from "../../api/types";
 import { FavoriteButton } from "../FavoriteButton";
+import { ShareButton } from "../share/ShareButton";
+import { voiceSharePayload } from "../../utils/sharePayload";
 import { ScrollingText } from "../ScrollingText";
 import { ScrollingTags } from "../ScrollingTags";
 import { IconBack, IconImage, IconSend } from "../icons";
@@ -274,6 +276,17 @@ export function VoiceRoomBody({
           <ScrollingTags labels={getVisibilityLabels(channel)} tagClassName="post-card-tag" className="voice-room-tags" />
         )}
         {channelId != null && <FavoriteButton targetType="voice" targetId={channelId} compact />}
+        {channelId != null && channel && (
+          <ShareButton
+            payload={voiceSharePayload({
+              id: channel.id,
+              name: channel.name || channel.room_name,
+              member_count: channel.member_count,
+              group_id: channel.group,
+            })}
+            label="分享语音房"
+          />
+        )}
         {ownerId === currentUser?.id && onDeleteChannel && (
           <button type="button" className="btn btn-danger" onClick={onDeleteChannel}>删除房间</button>
         )}

@@ -20,6 +20,8 @@ import { PostVideoCover } from "../components/posts/PostVideoCover";
 import { deleteMedia, mediaContentUrl, uploadMediaFile, validateMediaFile } from "../api/media";
 import { VisibilitySelector, type VisibilitySelection } from "../components/VisibilitySelector";
 import { IconBack, IconEye, IconImage } from "../components/icons";
+import { ShareButton } from "../components/share/ShareButton";
+import { postSharePayload } from "../utils/sharePayload";
 import { FullScreenSwipeBack } from "../components/motion/FullScreenSwipeBack";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
 import { useRevealOnEnter } from "../hooks/useRevealOnEnter";
@@ -444,6 +446,13 @@ function PostDetailContent({ groupId }: { groupId?: string }) {
           <IconBack width={22} height={22} />
         </button>
         <span className="post-detail-title">帖子</span>
+        <ShareButton
+          payload={postSharePayload(
+            { id: post.id, title: post.title, body: post.body, group: post.group ?? null },
+            post.images?.[0]?.media?.thumbnail || null,
+          )}
+          label="分享帖子"
+        />
         {post.is_author && (
           <div className="post-detail-owner-actions">
             <button ref={editButtonRef} type="button" className="msg-action-btn" onClick={() => {

@@ -27,6 +27,8 @@ import { useSocialPage } from "../../hooks/useSocialPage";
 import { DirectoryLoadMore } from "../../components/DirectoryLoadMore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { SubGroupDialog, type SubGroupDialogState } from "../../components/group/SubGroupDialog";
+import { ShareButton } from "../../components/share/ShareButton";
+import { groupSharePayload } from "../../utils/sharePayload";
 import {
   IconBack,
   IconCheck,
@@ -495,11 +497,14 @@ export function GroupInfo({ groupId }: { groupId: string }) {
                     <span className="group-info-stat-label">子群</span>
                   </div>
                 </div>
-                {canManage && (
-                  <button type="button" className="btn btn-ghost" onClick={startEdit}>
-                    编辑群资料
-                  </button>
-                )}
+                <div className="group-info-actions-row">
+                  <ShareButton payload={groupSharePayload({ id: conv.id, title: conv.title, avatar: conv.avatar ?? null, member_count: conv.member_count, join_policy: conv.join_policy ?? null })} label="分享群聊" />
+                  {canManage && (
+                    <button type="button" className="btn btn-ghost" onClick={startEdit}>
+                      编辑群资料
+                    </button>
+                  )}
+                </div>
               </>
             )}
           </section>
