@@ -522,3 +522,35 @@
     margin-bottom: var(--sp-4);
   }
 }
+
+/* GroupApplyGate：路由守卫的右侧卡片形态（非遮罩，不拦截左侧栏） */
+.group-page-guard {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.group-apply-gate {
+  width: min(400px, 100%);
+  max-height: min(80vh, 620px);
+  overflow: auto;
+  padding: 0 0 var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+.group-apply-gate .group-apply-form {
+  padding: 0 var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+.group-apply-gate .group-apply-actions {
+  padding: var(--sp-3) var(--sp-4) 0;
+  justify-content: flex-end;
+}
+.group-apply-gate .group-apply-submit {
+  width: 100%;
+}
+.group-apply-back {
+  width: 100%;
+}

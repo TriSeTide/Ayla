@@ -29,7 +29,7 @@ import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "
 import type { PanHandler, PanInfo } from "framer-motion";
 import * as chatApi from "../api/chat";
 import { GroupCreateDialog } from "../components/GroupCreateDialog";
-import { GroupApplyDialog } from "../components/group/GroupApplyDialog";
+import { GroupApplyGate } from "../components/group/GroupApplyDialog";
 import { GroupTopTabs } from "../components/group/GroupTopTabs";
 import { sortGroupsByActivity, useGroupActivityMap } from "../components/home/groupActivity";
 import { NARROW_QUERY, useMediaQuery } from "../hooks/useMediaQuery";
@@ -392,15 +392,13 @@ export function GroupPage() {
   }, [gated, id, guardInfo]);
 
   if (gated) {
-    // 路由守卫：未加入的群不能输链接进入；弹出复用搜索页的 GROUP REQUEST 申请弹窗。
+    // 路由守卫：未加入的群不能输链接进入；右侧渲染 GROUP REQUEST 申请卡片
+    // （非遮罩形态——左侧栏仍可自由切换其他群，不会"卡死"）。
     return (
-      <>
-        <div className="group-page group-page-guard" />
-        <GroupApplyDialog
-          group={{ id: id ?? "", title: guardInfo?.title ?? "", join_policy: guardInfo?.join_policy ?? null }}
-          onClose={() => navigate("/group")}
-        />
-      </>
+      <GroupApplyGate
+        group={{ id: id ?? "", title: guardInfo?.title ?? "", join_policy: guardInfo?.join_policy ?? null }}
+        onBack={() => navigate("/group")}
+      />
     );
   }
 

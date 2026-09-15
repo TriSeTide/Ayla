@@ -280,17 +280,26 @@ export function GroupInfo({ groupId }: { groupId: string }) {
     }
   };
 
-  // 退出群聊：成功后从会话列表移除并清掉最近群记录，再回主页
+  // 退出群聊：先清最近群（防主页重定向回已退群），再前端定向跳转离开
+  // （不整页刷新）——宽屏跳左侧栏第一个剩余群，窄屏回主页；
+  // 无剩余群时回主页（空态由主页承接）。
   const handleLeave = async () => {
     setBusyAction("leave");
     setManagementError(null);
     try {
       await chatApi.leaveGroup(groupId);
-      useChatStore.getState().removeConversation(groupId);
       if (useHomeStore.getState().recentGroupId === groupId) {
         useHomeStore.getState().setRecentGroup(null);
       }
-      navigate("/group", { replace: true });
+      useChatStore.getState().removeConversation(groupId);
+      const remaining = useChatStore
+        .getState()
+        .conversations.filter((c) => c.type === "group" && String(c.id) !== String(groupId));
+      if (!isNarrow && remaining.length > 0) {
+        navigate(`/group/${remaining[0].id}`, { replace: true });
+      } else {
+        navigate("/group", { replace: true });
+      }
     } catch (e) {
       setManagementError(e instanceof Error ? e.message : "退出群聊失败");
     } finally {
