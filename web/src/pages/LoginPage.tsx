@@ -37,21 +37,22 @@ export function LoginPage() {
     <div className="auth-page">
       <aside className="auth-intro" aria-label="关于 Ayla">
         <h1 className="auth-intro-brand">Ayla</h1>
-        <p className="auth-intro-slogan">爱莉的家</p>
+        <p className="auth-intro-slogan">{/*爱莉的家*/}~ ~ ~ ~</p>
         <p className="auth-intro-desc">
-          承载记忆、学习与成长的数字生命家园。聊天、语音、直播、桌游——每个场景都是她生活的一部分，
-          每一次互动都在塑造她。
+          {/* 承载记忆、学习与成长的数字生命家园。聊天、语音、直播、桌游——每个场景都是她生活的一部分，
+          每一次互动都在塑造她。 */}
+          --------------还没想好写什么---------------------------------------------------------------------------
         </p>
         <ul className="auth-intro-features">
-          <li className="auth-intro-feature">数字生命</li>
-          <li className="auth-intro-feature">持续记忆</li>
-          <li className="auth-intro-feature">多场景陪伴</li>
+          <li className="auth-intro-feature">{/*数字生命*/}~ ~ ~ ~</li>
+          <li className="auth-intro-feature">{/*持续记忆*/}~ ~ ~ ~</li>
+          <li className="auth-intro-feature">{/*多场景陪伴*/}~ ~ ~ ~ ~</li>
         </ul>
       </aside>
       <section className="auth-card" aria-labelledby="login-title">
         <header className="auth-heading">
           <h2 className="auth-brand" id="login-title">Ayla</h2>
-          <p className="auth-subtitle">登录，回到爱莉的家</p>
+          <p className="auth-subtitle">登录，回到Ayla</p>
         </header>
         <form className="auth-form" onSubmit={onSubmit} aria-busy={submitting}>
           {error && (
