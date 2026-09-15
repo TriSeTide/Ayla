@@ -8,7 +8,7 @@
  */
 import { create } from "zustand";
 import * as authApi from "../api/auth";
-import type { UserPublic } from "../api/types";
+import type { RegisterPayload, UserPublic } from "../api/types";
 import { useSessionActivityStore } from "./sessionActivity";
 import { useSubGroupStore } from "./subgroup";
 import { voiceSessionRuntime } from "../runtime/voiceSessionRuntime";
@@ -35,9 +35,7 @@ interface AuthState {
     roomId?: number | null;
   }) => void;
   login: (username: string, password: string) => Promise<void>;
-  register: (
-    payload: { username: string; email: string; password: string; nickname?: string },
-  ) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   /** 页面启动恢复：有持久化 refresh 则续期拿 access + 拉取 me */
   restoreSession: () => Promise<void>;
   logout: () => void;

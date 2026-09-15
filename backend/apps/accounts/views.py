@@ -2,9 +2,12 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import ValidationError
@@ -20,6 +23,7 @@ from .serializers import (
     RegisterSerializer,
     UserPublicSerializer,
 )
+from .services.email_code import EmailCodeError, check_code, consume_code, send_code
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,90 @@ def _broadcast_presence_status(user) -> None:
 
 
 # ---------- 注册 / 令牌 ----------
+
+class SendEmailCodeView(APIView):
+    """发送注册邮箱验证码（AllowAny）。业务限流（冷却/每日/IP）在服务层。"""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = (request.data.get("email") or "").strip()
+        client_ip = request.META.get("REMOTE_ADDR")
+        try:
+            send_code(email, client_ip)
+        except EmailCodeError as exc:
+            return Response(
+                {"detail": exc.detail, "code": "email_code_failed"},
+                status=exc.status_code,
+            )
+        return Response(
+            {"detail": "验证码已发送，请查收邮件", "code": "email_code_sent"},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ChangePasswordView(APIView):
+    """修改密码（JWT 认证）：验证码发到当前绑定邮箱，通过后 set_password（Django 强度校验）。"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        if not user.email:
+            raise ValidationError({"email": "当前账号未绑定邮箱，无法使用邮箱验证"})
+        code = (request.data.get("code") or "").strip()
+        new_password = request.data.get("new_password") or ""
+        if not check_code(user.email, code):
+            raise ValidationError({"code": "验证码无效或已过期"})
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": exc.messages}) from exc
+        try:
+            consume_code(user.email, code)
+        except EmailCodeError as exc:
+            raise ValidationError({"code": exc.detail}) from exc
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+        return Response({"detail": "密码已更新"}, status=status.HTTP_200_OK)
+
+
+class ChangeEmailView(APIView):
+    """换绑邮箱（JWT 认证）：双验证——当前绑定邮箱验证码 + 新邮箱验证码，全部弹窗内完成。
+
+    用户未绑定邮箱时仅需新邮箱验证码（首绑）。
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        new_email = ((request.data.get("new_email") or "").strip()).lower()
+        new_code = (request.data.get("new_code") or "").strip()
+        current_code = (request.data.get("current_code") or "").strip()
+        if not new_email:
+            raise ValidationError({"new_email": "请输入新邮箱"})
+        if User.objects.filter(email=new_email).exists():
+            raise ValidationError({"new_email": "邮箱已被注册"})
+        if user.email:
+            if not check_code(user.email, current_code):
+                raise ValidationError({"current_code": "当前邮箱验证码无效或已过期"})
+        if not check_code(new_email, new_code):
+            raise ValidationError({"new_code": "新邮箱验证码无效或已过期"})
+        try:
+            if user.email:
+                consume_code(user.email, current_code)
+            consume_code(new_email, new_code)
+        except EmailCodeError as exc:
+            raise ValidationError({"code": exc.detail}) from exc
+        try:
+            user.email = new_email
+            user.save(update_fields=["email"])
+        except IntegrityError as exc:
+            # 并发下唯一性竞态兜底：DB unique 约束保证无脏数据，这里把 500 转成业务 400
+            raise ValidationError({"new_email": "邮箱已被注册"}) from exc
+        return Response({"detail": "邮箱已更新", "email": new_email}, status=status.HTTP_200_OK)
+
 
 class RegisterView(generics.CreateAPIView):
     """注册：返回用户 + access/refresh。"""
@@ -105,10 +193,11 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
 
 class MeView(APIView):
-    """当前登录用户信息。"""
+    """当前登录用户信息（含本人 email——隐私设置换绑/改密流程需要展示当前绑定邮箱）。"""
 
     def get(self, request):
         data = UserPublicSerializer(request.user, context={"request": request}).data
+        data["email"] = request.user.email or ""
         return Response(data)
 
 

@@ -1,11 +1,18 @@
 /**
  * 注册页：与登录页同构——宽屏左右分栏，窄屏居中单卡。
- * 校验（密码 ≥8 位、两次一致）错误紧贴字段下方，不放顶部汇总。
+ * 校验（密码 ≥8 位、两次一致、验证码 6 位）错误紧贴字段下方，不放顶部汇总。
+ * 邮箱验证：发送 6 位验证码（后端限流：60s 冷却/每日上限），本地 60s 倒计时后可重发；
+ * 注册提交必须携带验证码，未发码或格式不符时贴字段提示。
  */
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { sendEmailCode } from "../api/auth";
 import { useAuth } from "../hooks/useAuth";
+
+const CODE_COOLDOWN = 60;
+
+type FieldError = { password?: string; confirm?: string; code?: string };
 
 export function RegisterPage() {
   const { register, isAuthenticated } = useAuth();
@@ -15,7 +22,11 @@ export function RegisterPage() {
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [fieldError, setFieldError] = useState<{ password?: string; confirm?: string }>({});
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [fieldError, setFieldError] = useState<FieldError>({});
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,14 +34,42 @@ export function RegisterPage() {
     if (isAuthenticated) navigate("/group", { replace: true });
   }, [isAuthenticated, navigate]);
 
+  // 发码倒计时：每秒递减，到 0 允许重发
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setInterval(() => setCountdown((c) => c - 1), 1000);
+    return () => clearInterval(timer);
+  }, [countdown > 0]);
+
+  async function handleSendCode() {
+    setError(null);
+    if (!email.trim()) {
+      setFieldError((f) => ({ ...f, code: "请先填写邮箱" }));
+      return;
+    }
+    setSendingCode(true);
+    try {
+      await sendEmailCode({ email: email.trim() });
+      setCodeSent(true);
+      setCountdown(CODE_COOLDOWN);
+      setFieldError((f) => ({ ...f, code: undefined }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "验证码发送失败，请稍后重试");
+    } finally {
+      setSendingCode(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const fe: { password?: string; confirm?: string } = {};
+    const fe: FieldError = {};
     if (password.length < 8) fe.password = "密码至少 8 位";
     if (password !== confirm) fe.confirm = "两次输入的密码不一致";
+    if (!codeSent) fe.code = "请先发送验证码";
+    else if (!/^\d{6}$/.test(code.trim())) fe.code = "请输入 6 位数字验证码";
     setFieldError(fe);
-    if (fe.password || fe.confirm) return;
+    if (fe.password || fe.confirm || fe.code) return;
     setSubmitting(true);
     try {
       await register({
@@ -38,6 +77,7 @@ export function RegisterPage() {
         email: email.trim(),
         password,
         nickname: nickname.trim() || undefined,
+        code: code.trim(),
       });
       navigate("/group", { replace: true });
     } catch (err) {
@@ -93,9 +133,43 @@ export function RegisterPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
+              placeholder="用于接收注册验证码"
               required
             />
           </label>
+          <div className="auth-field">
+            <label htmlFor="register-code">邮箱验证码</label>
+            <div className="auth-code-row">
+              <input
+                id="register-code"
+                className="field"
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="6 位验证码"
+                autoComplete="one-time-code"
+                disabled={!codeSent}
+                aria-invalid={Boolean(fieldError.code)}
+                aria-describedby={fieldError.code ? "register-code-error" : undefined}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost auth-code-btn"
+                onClick={handleSendCode}
+                disabled={sendingCode || countdown > 0}
+              >
+                {sendingCode
+                  ? "发送中…"
+                  : countdown > 0
+                    ? `重新发送（${countdown}s）`
+                    : codeSent
+                      ? "重新发送"
+                      : "发送验证码"}
+              </button>
+            </div>
+            {fieldError.code && <span className="field-error" id="register-code-error">{fieldError.code}</span>}
+          </div>
           <label className="auth-field">
             昵称（可选）
             <input

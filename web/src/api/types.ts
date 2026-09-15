@@ -28,14 +28,42 @@ export interface UserPublic {
   relation?: "self" | "friend" | "pending_sent" | "pending_received" | "none";
   /** 是否向他人展示内容（发帖/直播间/桌游）；他人主页据此显示"他的内容"卡片 */
   show_content?: boolean;
+  /** 仅 GET /me/ 返回本人邮箱（UserPublicSerializer 不含 email；隐私设置展示用） */
+  email?: string;
 }
 
-/** 注册入参（RegisterSerializer） */
+/** 注册入参（RegisterSerializer）：邮箱验证码必填（POST /auth/send-email-code/ 发放） */
 export interface RegisterPayload {
   username: string;
   email: string;
   password: string;
   nickname?: string;
+  /** 6 位邮箱验证码 */
+  code: string;
+}
+
+/** 发送邮箱验证码入参 */
+export interface SendEmailCodePayload {
+  email: string;
+}
+
+/** POST /auth/send-email-code/ 返回 */
+export interface SendEmailCodeResult {
+  detail: string;
+  code: "email_code_sent" | "email_code_failed";
+}
+
+/** POST /auth/change-password/：邮箱验证码 + 新密码（JWT） */
+export interface ChangePasswordPayload {
+  code: string;
+  new_password: string;
+}
+
+/** POST /auth/change-email/：当前邮箱码 + 新邮箱 + 新邮箱码（JWT；未绑邮箱时 current_code 可空） */
+export interface ChangeEmailPayload {
+  current_code: string;
+  new_email: string;
+  new_code: string;
 }
 
 /** 登录入参（SimpleJWT TokenObtainPairView） */

@@ -60,6 +60,7 @@ describe("auth store", () => {
       username: "b",
       email: "b@x.com",
       password: "password123",
+      code: "123456",
     });
     expect(useAuthStore.getState().currentUser?.username).toBe("b");
     expect(sessionStorage.getItem("elysia.refresh_token")).toBe("ref-r");

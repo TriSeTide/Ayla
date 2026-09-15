@@ -26,7 +26,7 @@ export function useAuth() {
   );
 
   const register = useCallback(
-    async (payload: { username: string; email: string; password: string; nickname?: string }) => {
+    async (payload: { username: string; email: string; password: string; nickname?: string; code: string }) => {
       await useAuthStore.getState().register(payload);
       presenceClient.connect();
       chatWS.connect();

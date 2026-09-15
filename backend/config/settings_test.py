@@ -51,3 +51,6 @@ LOGGING = {
     "handlers": {"null": {"class": "logging.NullHandler"}},
     "root": {"handlers": ["null"], "level": "CRITICAL"},
 }
+
+# 邮件：测试不触网，使用 locmem backend（mail.outbox 断言）
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"

@@ -3,13 +3,42 @@
  */
 import { apiRequest } from "./client";
 import type {
+  ChangeEmailPayload,
+  ChangePasswordPayload,
   LoginPayload,
   LoginResult,
   ProfileUpdatePayload,
   RegisterPayload,
   RegisterResult,
+  SendEmailCodePayload,
+  SendEmailCodeResult,
   UserPublic,
 } from "./types";
+
+/** POST /auth/send-email-code/（发送注册邮箱验证码，未登录可用） */
+export function sendEmailCode(payload: SendEmailCodePayload) {
+  return apiRequest<SendEmailCodeResult>("/auth/send-email-code/", {
+    method: "POST",
+    body: payload,
+    noRetry401: true,
+  });
+}
+
+/** POST /auth/change-password/（JWT：邮箱验证码 + 新密码） */
+export function changePassword(payload: ChangePasswordPayload) {
+  return apiRequest<{ detail: string }>("/auth/change-password/", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+/** POST /auth/change-email/（JWT：当前邮箱码 + 新邮箱 + 新邮箱码） */
+export function changeEmail(payload: ChangeEmailPayload) {
+  return apiRequest<{ detail: string; email: string }>("/auth/change-email/", {
+    method: "POST",
+    body: payload,
+  });
+}
 
 /** POST /auth/register/ */
 export function register(payload: RegisterPayload) {

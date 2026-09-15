@@ -113,6 +113,23 @@ CACHES = {
     }
 }
 
+# 邮件（注册邮箱验证码等）：EMAIL_BACKEND 默认 console（开发可见、不触网）；
+# 生产必须显式配置 SMTP；发信失败由服务层显式抛错，绝不静默放行。
+EMAIL_BACKEND = env.str(
+    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = env.str("EMAIL_HOST", default="")
+EMAIL_PORT = env.int("EMAIL_PORT", default=465)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=True)
+EMAIL_HOST_USER = env.str("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env.str("EMAIL_HOST_PASSWORD", default="")
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="Ayla <noreply@ayla.local>")
+
+# 邮箱验证码限流参数（生产默认保守；开发/测试可在 .env 调大，如 EMAIL_CODE_DAILY_LIMIT=999）
+EMAIL_CODE_DAILY_LIMIT = env.int("EMAIL_CODE_DAILY_LIMIT", default=5)
+EMAIL_CODE_IP_HOURLY_LIMIT = env.int("EMAIL_CODE_IP_HOURLY_LIMIT", default=30)
+EMAIL_CODE_RESEND_COOLDOWN = env.int("EMAIL_CODE_RESEND_COOLDOWN", default=60)
+
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [

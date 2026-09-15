@@ -85,6 +85,22 @@
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+/* 邮箱验证码行：输入框 + 发送按钮并排；触达目标高度与 .field 一致 */
+.auth-code-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.auth-code-row .field {
+  flex: 1;
+  min-width: 0;
+}
+.auth-code-btn {
+  min-width: 104px;
+  min-height: 44px;
+  padding-inline: var(--sp-3);
+  white-space: nowrap;
+}
 .auth-submit { width: 100%; min-height: 44px; margin-top: var(--sp-1); }
 
 .auth-switch {

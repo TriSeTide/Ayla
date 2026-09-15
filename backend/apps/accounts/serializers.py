@@ -4,6 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .models import FriendRequest, Friendship
+from .services.email_code import EmailCodeError, check_code, consume_code
 
 User = get_user_model()
 
@@ -60,10 +61,13 @@ class UserPublicSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    # 邮箱验证：邮箱必填；注册必须携带 6 位验证码（由 send-email-code 接口发放）
+    email = serializers.EmailField(write_only=True, required=True)
+    code = serializers.CharField(write_only=True, required=True, min_length=6, max_length=6)
 
     class Meta:
         model = User
-        fields = ["username", "email", "password", "nickname"]
+        fields = ["username", "email", "password", "nickname", "code"]
 
     def validate_username(self, value: str) -> str:
         if User.objects.filter(username=value).exists():
@@ -75,10 +79,22 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("邮箱已被注册")
         return value
 
+    def validate(self, attrs):
+        # 验证码有效性检查（不消费；消费在 create 内与建号同事务，避免用户名冲突时烧掉验证码）
+        if not check_code(attrs.get("email", ""), attrs.get("code", "")):
+            raise serializers.ValidationError({"code": "验证码无效或已过期"})
+        return attrs
+
     @transaction.atomic
     def create(self, validated_data):
+        code = validated_data.pop("code")
+        email = validated_data["email"]
+        try:
+            consume_code(email, code)
+        except EmailCodeError as exc:
+            raise serializers.ValidationError({"code": exc.detail}) from exc
         nickname = validated_data.pop("nickname", "") or validated_data["username"]
-        user = User(username=validated_data["username"], email=validated_data["email"])
+        user = User(username=validated_data["username"], email=email)
         user.set_password(validated_data["password"])
         user.nickname = nickname
         user.save()

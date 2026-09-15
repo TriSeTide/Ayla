@@ -9,6 +9,7 @@ import { ApiError } from "../api/client";
 import { mediaContentUrl, uploadMediaFile, validateImageFile } from "../api/media";
 import { Avatar } from "../components/Avatar";
 import { ProfileContentSections } from "../components/ProfileContentSections";
+import { PrivacySheet } from "../components/PrivacySheet";
 import { IconBack, IconHeart, IconLogout } from "../components/icons";
 import { ShareButton } from "../components/share/ShareButton";
 import { userSharePayload } from "../utils/sharePayload";
@@ -41,6 +42,7 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
   // 头像上传（M5-2.1）：选择 → 本地校验 → 预览 → 保存时三步上传 + PATCH，失败保留可重试
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -158,7 +160,6 @@ export function ProfilePage() {
             >
               <IconBack width={20} height={20} />
             </button>
-            <ShareButton payload={userSharePayload(currentUser)} label="分享我的主页" className="icon-btn-40 profile-card-share" />
             <div className="profile-avatar-block">
               <Avatar
                 label={displayName}
@@ -171,6 +172,8 @@ export function ProfilePage() {
               <span className="profile-nickname">{displayName}</span>
               <span className="profile-username">@{currentUser.username}</span>
             </div>
+            {/* 分享键置右（margin-left:auto），避免挤压头像块导致与下方更换按钮错位 */}
+            <ShareButton payload={userSharePayload(currentUser)} label="分享我的主页" className="icon-btn-40 profile-card-share profile-share-right" />
           </div>
           <div className="profile-avatar-actions">
             <label className="btn btn-ghost profile-avatar-btn">
@@ -185,6 +188,13 @@ export function ProfilePage() {
                 }}
               />
             </label>
+            <button
+              type="button"
+              className="btn btn-ghost profile-avatar-btn"
+              onClick={() => setPrivacyOpen(true)}
+            >
+              隐私设置
+            </button>
             <Link to="/favorites" className="btn btn-ghost profile-favorites-btn">
               <IconHeart width={15} height={15} />
               我的收藏
@@ -301,6 +311,7 @@ export function ProfilePage() {
       </div>
       </div>
       </div>
+      {privacyOpen && <PrivacySheet onClose={() => setPrivacyOpen(false)} />}
     </FullScreenSwipeBack>
   );
 }

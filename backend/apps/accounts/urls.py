@@ -11,8 +11,16 @@ urlpatterns = [
     path("health/live/", LiveView.as_view(), name="health-live"),
     # 认证
     path("auth/register/", views.RegisterView.as_view(), name="register"),
+    path(
+        "auth/send-email-code/",
+        views.SendEmailCodeView.as_view(),
+        name="send-email-code",
+    ),
     path("auth/login/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # 隐私设置（JWT）：邮箱验证码换绑/改密
+    path("auth/change-password/", views.ChangePasswordView.as_view(), name="change-password"),
+    path("auth/change-email/", views.ChangeEmailView.as_view(), name="change-email"),
     # 资料
     path("me/", views.MeView.as_view(), name="me"),
     path("me/profile/", views.ProfileView.as_view(), name="profile"),
