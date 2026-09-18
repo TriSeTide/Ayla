@@ -17,6 +17,9 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/app_init.dart';
+import 'pages/login_page.dart';
+import 'theme/app_theme.dart';
+import 'theme/aurora_background.dart';
 import 'core/net/dio_client.dart';
 import 'core/ws/ws_manager.dart';
 import 'poc/echo_page.dart';
@@ -47,10 +50,56 @@ void main() {
   runApp(
     UncontrolledProviderScope(
       container: container,
-      // UI 重建期：根 = 组件库审核画布（批 0 验收通过后恢复 AppShell 接入）
-      child: const ComponentGallery(),
+      // UI 重建期：根 = 登录页（批 0 验收通过后恢复 AppShell 接入）
+      child: const _UiStage(),
     ),
   );
+}
+
+/// 临时 UI 舞台：登录页 + 组件库画布的切换壳（预览用，M0 路由接入后移除）。
+class _UiStage extends StatefulWidget {
+  const _UiStage();
+
+  @override
+  State<_UiStage> createState() => _UiStageState();
+}
+
+class _UiStageState extends State<_UiStage> {
+  bool _showGallery = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildAylaTheme(),
+      // 必须包 Scaffold：MaterialApp 在没有 Scaffold 时会给所有 Text 套上
+      // 「未落在 Material 上」的默认文本装饰（**黄色双下划线**）——这是
+      // Flutter 的视觉提示而非设计线，debug/release 都会出现。
+      // 极光背景交给 Scaffold 的 body 铺满。
+      home: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AuroraBackground(
+          child: Stack(
+            children: <Widget>[
+              Positioned.fill(
+                child:
+                    _showGallery ? const ComponentGallery() : const LoginPage(),
+              ),
+              // 舞台切换开关（仅重建期临时存在）
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: FloatingActionButton.small(
+                  onPressed: () => setState(() => _showGallery = !_showGallery),
+                  child: Text(_showGallery ? '登录' : '组件'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// PoC 最小壳（自 PoC 基线 93cc2e9 原样保留，勿改）。

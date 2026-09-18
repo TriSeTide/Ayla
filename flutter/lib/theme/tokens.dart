@@ -139,6 +139,24 @@ abstract final class AylaGradients {
   ];
 }
 
+/// 毛玻璃滤镜参数（t:--glass-filter = `blur(24px) saturate(1.4)`）。
+///
+/// Flutter 无 CSS 那样的 `saturate()` 关键字，但 `dart:ui` 的
+/// `ColorFilter implements ImageFilter`，配合 `ImageFilter.compose` 可组合出
+/// 「先模糊、后饱和」的等价效果（见 [kSaturation14] 与 GlassSurface 用法）。
+
+/// 饱和度 1.4 的颜色矩阵（20 元素，行主序 RGB 通道 + 偏移）。
+///
+/// 公式（标准饱和度矩阵）：`M = (1-s)·L + s·I`，其中 s = 1.4，
+/// L 为亮度权重行（sRGB 权重 0.2126 / 0.7152 / 0.0722）。
+/// 展开后每行：`r = 0.2126(1-s)+s`, `g = 0.7152(1-s)`, `b = 0.0722(1-s)`。
+const List<double> kSaturation14 = <double>[
+  1.27604, -0.28608, -0.02888, 0, 0, //
+  -0.08992, 1.11392, -0.02888, 0, 0, //
+  -0.08992, -0.28608, 1.38632, 0, 0, //
+  0, 0, 0, 1, 0,
+];
+
 /// =================== 排版（d:§3 / t:--font-*） ===================
 abstract final class AylaFonts {
   /// --font-display：Fredoka（标题/品牌/大数字）
@@ -291,8 +309,10 @@ abstract final class AylaShadows {
 
 /// =================== 时长（t:--dur-* / --auroraqua-* / d:§7） ===================
 abstract final class AylaDurations {
-  /// --dur-fast 180ms：按钮/字段过渡
+  /// --dur-fast 180ms：字段过渡（app.css .field）
   static const Duration fast = Duration(milliseconds: 180);
+  /// auroraqua.css 按钮组统一 200ms（覆盖 app.css .btn 的 180ms）
+  static const Duration button = Duration(milliseconds: 200);
   /// --dur-panel 240ms：面板
   static const Duration panel = Duration(milliseconds: 240);
   /// --auroraqua-duration 300ms：卡片 hover/切换/分区

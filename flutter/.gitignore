@@ -51,3 +51,5 @@ app.*.map.json
 **/*.o
 **/*.a
 **/*.so
+# Widget Preview related
+.widget_preview/

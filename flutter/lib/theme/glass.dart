@@ -120,23 +120,108 @@ class GlassSurface extends StatelessWidget {
       ),
     );
 
-    // 外阴影：先于卡面绘制（在下层），不参与裁剪。
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: radiusValue,
-        boxShadow: shadow,
-      ),
-      child: opaque
-          ? face
-          : ClipRRect(
-              borderRadius: radiusValue,
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-                child: face,
+    // 玻璃层结构（对齐 CSS `backdrop-filter: blur(24px) saturate(1.4)`）：
+    //   Stack[
+    //     ① BackdropFilter(blur+saturate) ← 只作用于卡背后的页面内容
+    //     ② 阴影环（只画在卡外；在模糊层之上，避免被模糊采样）
+    //     ③ face（.55 半透明白底 + 亮边 + 内高光）
+    //   ]
+    //
+    // 两个 Flutter 与 CSS 的关键差异（必须这样处理，否则卡内发黑）：
+    //  a) CSS 的 backdrop-filter **不含元素自身 box-shadow**，而 Flutter 的
+    //     BackdropFilter 会把它所在离屏层内已绘制的内容一并模糊 → 阴影画在
+    //     模糊层**之上**；
+    //  b) CSS 的 box-shadow **只在 border-box 之外绘制**，Flutter 的 BoxShadow
+    //     会铺满整个形状（含内部）→ 用 CustomPainter 把内部挖空。
+    final Widget glassBody = opaque
+        ? face
+        : Stack(
+            fit: StackFit.passthrough,
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              // ① 模糊 + 饱和层：CSS `backdrop-filter: blur(24px) saturate(1.4)`
+              //    的完整等价实现。
+              //
+              //    关键 API（dart:ui）：`ColorFilter implements ImageFilter`
+              //    → 可作 BackdropFilter 的 filter；配合
+              //    `ImageFilter.compose(outer:, inner:)` 组合两个滤镜，
+              //    即 result = outer(inner(source))。
+              //    compose 已在多端可用（sky_engine painting.dart:4406）。
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: radiusValue,
+                  child: BackdropFilter(
+                    filter: ImageFilter.compose(
+                      // 外层：饱和度 1.4（在模糊结果上做，等价 CSS 顺序）
+                      outer: const ColorFilter.matrix(kSaturation14),
+                      // 内层：blur(24px)（t:--glass-filter）
+                      inner: ImageFilter.blur(
+                        sigmaX: blur,
+                        sigmaY: blur,
+                      ),
+                    ),
+                    // child 必须是纯透明内容：只贡献滤镜层，不携带颜色
+                    child: const SizedBox.expand(),
+                  ),
+                ),
               ),
-            ),
-    );
+              // ② 阴影环（在模糊层之上、卡面之下）
+              if (shadow.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _OuterShadowPainter(
+                        radius: radiusValue,
+                        shadows: shadow,
+                      ),
+                    ),
+                  ),
+                ),
+              // ③ 卡面
+              face,
+            ],
+          );
+
+    return glassBody;
   }
+}
+
+/// 只绘制「形状之外」的外阴影（等价 CSS `box-shadow` 的 border-box 裁剪）。
+///
+/// Flutter 的 `BoxShadow` 会把阴影铺满整个形状（含内部），在半透明卡面下
+/// 透出灰暗；本 painter 用 `Path.combine(difference, 外框, 形状)` 挖空内部。
+class _OuterShadowPainter extends CustomPainter {
+  const _OuterShadowPainter({required this.radius, required this.shadows});
+
+  final BorderRadius radius;
+  final List<BoxShadow> shadows;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Path hole = Path()..addRRect(radius.toRRect(Offset.zero & size));
+    // 外框足够大以容纳 blur 扩散与 offset
+    final Path frame = Path()
+      ..addRect(Rect.fromLTWH(
+        -size.width * 2,
+        -size.height * 2,
+        size.width * 5,
+        size.height * 5,
+      ));
+    final Path ring = Path.combine(PathOperation.difference, frame, hole);
+
+    canvas.save();
+    canvas.clipPath(ring);
+    for (final BoxShadow s in shadows) {
+      final Paint paint = s.toPaint();
+      final Rect r = (Offset.zero & size).shift(s.offset);
+      canvas.drawRRect(radius.toRRect(r), paint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _OuterShadowPainter old) =>
+      old.radius != radius || old.shadows != shadows;
 }
 
 /// 模糊半径归一（--glass-filter blur(24px)；导航 18 / 按钮 8 有各自覆写）。
@@ -346,8 +431,17 @@ class _GlassButtonState extends State<GlassButton>
     duration: AylaDurations.sweep, // 600ms
   );
 
+  /// ::after 的 `transition: transform 600ms var(--auroraqua-ease)` 是
+  /// **ease 曲线**（先快后慢），不是 linear——直接用 controller 的线性值
+  /// 会让扫光匀速掠过，与 web 手感不一致（实测）。
+  late final Animation<double> _sweepEased = CurvedAnimation(
+    parent: _sweep,
+    curve: AylaCurves.auroraqua,
+  );
+
   bool _hovered = false;
   bool _pressed = false;
+  bool _focused = false;
 
   bool get _enabled => widget.onPressed != null;
 
@@ -439,10 +533,10 @@ class _GlassButtonState extends State<GlassButton>
                   child: Opacity(
                     opacity: 0.5,
                     child: AnimatedBuilder(
-                      animation: _sweep,
+                      animation: _sweepEased,
                       builder: (BuildContext context, Widget? child) {
                         return FractionalTranslation(
-                          translation: Offset(-1.2 + _sweep.value * 2.4, 0),
+                          translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
                           child: child,
                         );
                       },
@@ -473,16 +567,24 @@ class _GlassButtonState extends State<GlassButton>
                     ),
                     const SizedBox(width: AylaSpacing.sp2), // gap: var(--sp-2)
                   ],
+                  // 文字：外层 Flexible(loose) 承接超长省略，内层 Center 保证
+                  // 文字自身居中——不用 tight flex（会吃掉主轴空间把字推到左侧，
+                  // expand 满宽时可见，实测）。
                   Flexible(
-                    child: Text(
-                      widget.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.label.copyWith(
-                        color: foreground,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.2,
+                    fit: FlexFit.loose,
+                    child: Center(
+                      widthFactor: 1,
+                      child: Text(
+                        widget.label,
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.label.copyWith(
+                          color: foreground,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
+                        ),
                       ),
                     ),
                   ),
@@ -548,11 +650,22 @@ class _GlassButtonState extends State<GlassButton>
     }
 
     // :hover { scale: 1.02 } / :active { scale: .98 }（独立 scale，200ms）
-    final double pressScale =
-        _enabled && _pressed && !_reduceMotion ? 0.98 : 1.0;
+    //
+    // 优先级：CSS 中 :active 规则写在 :hover 之后且同等特异性 → 按下时 .98
+    // 胜出；因此这里必须让 pressed 覆盖 hovered（此前写成
+    // `hovered ? 1.02 : pressScale`，鼠标按下时 hovered 恒为 true，
+    // 0.98 永远显示不出来 = 「没有按压动画」，实测）。
+    final double scaleTarget = _reduceMotion
+        ? 1.0
+        : (!_enabled
+            ? 1.0
+            : (_pressed
+                ? 0.98
+                : (_hovered ? 1.02 : 1.0)));
     final Widget body = AnimatedScale(
-      scale: hovered ? 1.02 : pressScale,
-      duration: _reduceMotion ? Duration.zero : AylaDurations.fast,
+      scale: scaleTarget,
+      // auroraqua.css 按钮组统一 200ms（覆盖 app.css .btn 的 180ms）
+      duration: _reduceMotion ? Duration.zero : AylaDurations.button,
       curve: AylaCurves.auroraqua,
       child: decorated,
     );
@@ -561,27 +674,52 @@ class _GlassButtonState extends State<GlassButton>
       button: true,
       enabled: _enabled,
       label: widget.semanticLabel ?? widget.label,
-      child: MouseRegion(
-        cursor: _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-        onEnter: (_) {
-          setState(() => _hovered = true);
-          if (animate) _sweep.forward(); // ::after → translateX(120%)
-        },
-        onExit: (_) {
-          setState(() {
-            _hovered = false;
-            _pressed = false;
-          });
-          if (animate) _sweep.reverse(); // 移出时 600ms 扫回
-        },
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onPressed,
-          onTapDown: _enabled ? (_) => setState(() => _pressed = true) : null,
-          onTapCancel: _enabled ? () => setState(() => _pressed = false) : null,
-          onTapUp: _enabled ? (_) => setState(() => _pressed = false) : null,
-          // base.css button:disabled { opacity: .55 }
-          child: Opacity(opacity: _enabled ? 1 : 0.55, child: body),
+      child: Focus(
+        // base.css `:focus-visible { outline: 2px solid #F796FF; outline-offset: 2px }`
+        onFocusChange: (bool has) => setState(() => _focused = has),
+        child: MouseRegion(
+          cursor:
+              _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          onEnter: (_) {
+            setState(() => _hovered = true);
+            if (animate) _sweep.forward(); // ::after → translateX(120%)
+          },
+          onExit: (_) {
+            setState(() {
+              _hovered = false;
+              _pressed = false;
+            });
+            if (animate) _sweep.reverse(); // 移出时 600ms 扫回
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onPressed,
+            onTapDown:
+                _enabled ? (_) => setState(() => _pressed = true) : null,
+            onTapCancel:
+                _enabled ? () => setState(() => _pressed = false) : null,
+            onTapUp:
+                _enabled ? (_) => setState(() => _pressed = false) : null,
+            // base.css button:disabled { opacity: .55 }
+            child: Opacity(
+              opacity: _enabled ? 1 : 0.55,
+              child: _focused && _enabled
+                  // focus ring：2px 辉光边 + 2px offset（outline-offset）
+                  ? Container(
+                      decoration: BoxDecoration(
+                        borderRadius:
+                            BorderRadius.circular(AylaRadii.rInput + 2 + 2),
+                        border: Border.all(
+                          color: AylaColors.glow500,
+                          width: 2,
+                        ),
+                      ),
+                      padding: const EdgeInsets.all(2),
+                      child: body,
+                    )
+                  : body,
+            ),
+          ),
         ),
       ),
     );
