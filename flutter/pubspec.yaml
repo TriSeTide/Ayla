@@ -51,9 +51,22 @@ dependencies:
   flutter_miniaudio: ^1.0.7
   ffi: ^2.2.0
 
+  # M0 基座：状态管理 / 路由 / HTTP 客户端（06 §3.1）
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.6.2
+  dio: ^5.7.0
+  # 图标：线性 SVG 风格（05 纪律 6：禁止 emoji 当功能图标）。
+  # 不用 lucide_icons pub 包：0.257.0 的 LucideIconData extends IconData 在
+  # Flutter 3.47 上编译失败（IconData 已是 final class，实测构建中断）；
+  # web 端本身也是手写 path（components/icons.tsx），故移植同一份 path 数据到
+  # lib/theme/app_icons.dart，形状与 web 逐条一致（详见该文件头注释）。
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # 测试用：ws_manager_test 的 _FakeWs 继承 StreamChannelMixin（web_socket_channel 传递依赖，
+  # 显式声明避免 depend_on_referenced_packages）
+  stream_channel: ^2.1.2
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -91,22 +104,26 @@ flutter:
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/to/asset-from-package
 
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
-  #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+  # M0 字体：三字体离线打包（05 §1 字体行 + 坑 10：不用 google_fonts 运行时联网）
+  # 文件：@expo-google-fonts 静态 ttf（latin 覆盖）；CJK 走 fontFamilyFallback（app_theme.dart）
+  fonts:
+    - family: Fredoka
+      fonts:
+        - asset: assets/fonts/Fredoka_500Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Fredoka_600SemiBold.ttf
+          weight: 600
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito_400Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Nunito_600SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Nunito_700Bold.ttf
+          weight: 700
+    - family: Space Grotesk
+      fonts:
+        - asset: assets/fonts/SpaceGrotesk_400Regular.ttf
+          weight: 400
+        - asset: assets/fonts/SpaceGrotesk_500Medium.ttf
+          weight: 500
