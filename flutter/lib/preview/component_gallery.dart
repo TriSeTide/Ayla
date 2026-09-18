@@ -28,6 +28,7 @@ import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import '../widgets/avatar_halo.dart';
 import '../widgets/loading.dart';
+import '../widgets/primitives.dart';
 import '../widgets/tab_badge.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
@@ -304,6 +305,62 @@ class ComponentGallery extends StatelessWidget {
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
+          // ---------- B2 展示型基元 ----------
+          _Section(
+            title: 'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
+            source: 'home.css .layout-switch 182–206 · messages.css .messages-tab 24–37 · '
+                'd:§4 胶囊 · base.css .scroll-text 724–758（marquee）',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _Row(
+                  children: <Widget>[
+                    _Slot(
+                      label: 'LayoutSwitch（点击切换·胶囊 300ms 迁移）',
+                      child: const _LayoutSwitchDemo(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AylaSpacing.sp6),
+                const SizedBox(width: 420, child: _TabsDemo()),
+                const SizedBox(height: AylaSpacing.sp4),
+                const Wrap(
+                  spacing: AylaSpacing.sp2,
+                  runSpacing: AylaSpacing.sp2,
+                  children: <Widget>[
+                    AylaCapsuleTag('数字生命'),
+                    AylaCapsuleTag('持续记忆'),
+                    AylaCapsuleTag('历史搜索', tone: CapsuleTone.ice),
+                    AylaCapsuleTag('玻璃胶囊', tone: CapsuleTone.glass),
+                    AylaCapsuleTag('LIVE', tone: CapsuleTone.pink),
+                    AylaCapsuleTag('实底', tone: CapsuleTone.indigo),
+                  ],
+                ),
+                const SizedBox(height: AylaSpacing.sp4),
+                const SizedBox(
+                  width: 300,
+                  child: AylaScrollingText(
+                    text: '长文本 marquee 滚动验证：这是一段超出容器的文本，用来核对来回滚动与停顿时序',
+                  ),
+                ),
+                const SizedBox(height: AylaSpacing.sp4),
+                const SizedBox(
+                  width: 260,
+                  child: AylaScrollingTags(
+                    children: <Widget>[
+                      AylaCapsuleTag('公开'),
+                      AylaCapsuleTag('好友可见', tone: CapsuleTone.ice),
+                      AylaCapsuleTag('指定群可见', tone: CapsuleTone.glass),
+                      AylaCapsuleTag('我的收藏', tone: CapsuleTone.pink),
+                      AylaCapsuleTag('更多标签', tone: CapsuleTone.indigo),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
           // ---------- 排版阶梯 ----------
           _Section(
             title: 'Typography（design.md §3 九级）',
@@ -325,6 +382,48 @@ class ComponentGallery extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 布局切换演示（可点击，观察胶囊 300ms 迁移）。
+class _LayoutSwitchDemo extends StatefulWidget {
+  const _LayoutSwitchDemo();
+
+  @override
+  State<_LayoutSwitchDemo> createState() => _LayoutSwitchDemoState();
+}
+
+class _LayoutSwitchDemoState extends State<_LayoutSwitchDemo> {
+  bool _isCard = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AylaLayoutSwitch(
+      isCard: _isCard,
+      onChanged: (bool v) => setState(() => _isCard = v),
+    );
+  }
+}
+
+/// 选项卡迁移演示（可点击切换，观察共享胶囊 300ms 滑动）。
+class _TabsDemo extends StatefulWidget {
+  const _TabsDemo();
+
+  @override
+  State<_TabsDemo> createState() => _TabsDemoState();
+}
+
+class _TabsDemoState extends State<_TabsDemo> {
+  int _i = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return AylaSegmentedTabs(
+      labels: const <String>['私信', '认证消息', '系统'],
+      index: _i,
+      badges: const <int>[0, 5, 0],
+      onChanged: (int i) => setState(() => _i = i),
     );
   }
 }
