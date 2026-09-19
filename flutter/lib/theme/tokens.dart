@@ -19,6 +19,12 @@ abstract final class AylaColors {
   static const Color ice500 = Color(0xFF9DBFE6);
   /// --slate-500：灰蓝，仅 ≥14px 次要文字/图标（对比度 ~2.9:1）
   static const Color slate500 = Color(0xFF7E95BD);
+
+  /// `.conv-more-btn` 的静息图标色 `#a9b8d4`（app.css 633）。
+  ///
+  /// web 未把它提为 token（仅此一处裸值），Flutter 侧按"组件内禁裸色值"纪律
+  /// 落盘于此并标注来源；hover/展开态切到 [textPrimary]。
+  static const Color convMoreIdle = Color(0xFFA9B8D4);
   /// --indigo-700：主文字 + 主交互色（对 #FFFAFB 对比度 ~6.4:1）
   static const Color indigo700 = Color(0xFF465B92);
   /// --sakura-100：淡樱粉，渐变终点、爱莉气泡底

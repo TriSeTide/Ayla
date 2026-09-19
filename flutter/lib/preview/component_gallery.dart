@@ -27,6 +27,8 @@ import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import '../widgets/avatar_halo.dart';
+import '../widgets/avatar_status_badges.dart';
+import '../widgets/group_card.dart';
 import '../widgets/loading.dart';
 import '../widgets/primitives.dart';
 import '../widgets/tab_badge.dart';
@@ -377,6 +379,15 @@ class ComponentGallery extends StatelessWidget {
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
+          // ---------- B3 卡片族（窄屏组件） ----------
+          _Section(
+            title: 'GroupCard / GroupCarousel（home.css 224–503 + auroraqua 29–52）',
+            source:
+                '玻璃卡 16 圆角 · 4:3 轮播内嵌 8 · 3s/300ms · 指示点 4px · hover -2px + shadow-hover · active .99',
+            child: const _GroupCardDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
           // ---------- 排版阶梯 ----------
           _Section(
             title: 'Typography（design.md §3 九级）',
@@ -670,3 +681,147 @@ class _InputSampleState extends State<_InputSample> {
   wrapper: previewScope,
 )
 Widget componentGalleryPreview() => const ComponentGallery();
+
+/// B3 卡片族样张：窄屏 2 列网格 + 列表（卡片族**仅 ≤768 生效**——HomePage
+/// 在宽屏 `if (!isNarrow) return <Navigate to={/group/:id}/>`）。
+class _GroupCardDemo extends StatelessWidget {
+  const _GroupCardDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    // 预览用外部占位图（真实链路走后端媒体签名，属媒体批次）
+    const String imgA = 'https://picsum.photos/seed/ayla-live/600/450';
+    const String imgB = 'https://picsum.photos/seed/ayla-post/600/450';
+
+    final List<GroupCarouselSlide> slides = <GroupCarouselSlide>[
+      const GroupCarouselSlide.messageVoice(
+        newMessageCount: 12,
+        voiceRooms: <GroupSlideVoiceRoom>[
+          GroupSlideVoiceRoom(name: '深夜电台', memberCount: 5),
+          GroupSlideVoiceRoom(name: '作业互助', memberCount: 3),
+        ],
+      ),
+      const GroupCarouselSlide.live(
+          host: '小樱', title: '一起看星星', cover: imgA),
+      const GroupCarouselSlide.post(
+        title: '周末去哪玩',
+        body: '大家周末有空吗？想去海边看日落，顺便拍点照片。',
+        image: imgB,
+        hasUnread: true,
+      ),
+      const GroupCarouselSlide.game(name: '你画我猜', memberCount: 4),
+    ];
+
+    const List<GroupCarouselSlide> noImage = <GroupCarouselSlide>[
+      GroupCarouselSlide.messageVoice(
+          newMessageCount: 3, voiceRooms: <GroupSlideVoiceRoom>[]),
+      GroupCarouselSlide.live(host: '小蓝', title: '新番同步看'),
+    ];
+
+    // 用 Wrap 而非 Row：测试视口（800 宽）下两列会溢出 46px（widget test 抓到）；
+    // 画布 1800 宽时仍是并排两列。
+    return Wrap(
+      spacing: AylaSpacing.sp8,
+      runSpacing: AylaSpacing.sp6,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        // 窄屏列宽 375（卡片族设计基准）
+        SizedBox(
+          width: 375,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              AylaGroupGrid(
+                children: <Widget>[
+                  AylaGroupCard(
+                    groupId: 'g1',
+                    title: '星海观测站',
+                    slides: slides,
+                    unread: 12,
+                    onOpen: () {},
+                    onTogglePin: (_) {},
+                  ),
+                  AylaGroupCard(
+                    groupId: 'g2',
+                    title: '置顶的长群名测试省略号',
+                    slides: noImage,
+                    unread: 128,
+                    isPinned: true,
+                    onOpen: () {},
+                    onTogglePin: (_) {},
+                  ),
+                ],
+              ),
+              AylaGroupList(
+                children: <Widget>[
+                  AylaGroupListItem(
+                    groupId: 'g1',
+                    title: '星海观测站',
+                    status: const AvatarStatus(
+                      unread: 12,
+                      live: true,
+                      voice: true,
+                    ),
+                    preview: '小樱：今晚一起吃饭吗',
+                    isPinned: true,
+                    onOpen: () {},
+                  ),
+                  AylaGroupListItem(
+                    groupId: 'g2',
+                    title: '作业互助',
+                    status: const AvatarStatus(unread: 3, voice: true),
+                    memberCount: 8,
+                    onOpen: () {},
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        // 空态 / 状态组合
+        SizedBox(
+          width: 375,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              AylaGroupGrid(
+                children: <Widget>[
+                  AylaGroupCard(
+                    groupId: 'g3',
+                    title: '空状态群',
+                    slides: const <GroupCarouselSlide>[],
+                    onOpen: () {},
+                  ),
+                  AylaGroupCard(
+                    groupId: 'g4',
+                    title: '无图占位',
+                    slides: noImage,
+                    unread: 3,
+                    onOpen: () {},
+                  ),
+                ],
+              ),
+              AylaGroupList(
+                children: <Widget>[
+                  AylaGroupListItem(
+                    groupId: 'g3',
+                    title: '新内容群',
+                    newEventText: '阿蓝 创建了语音房 深夜电台',
+                    memberCount: 5,
+                    onOpen: () {},
+                  ),
+                  AylaGroupListItem(
+                    groupId: 'g4',
+                    title: '静默群',
+                    memberCount: 2,
+                    onOpen: () {},
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
