@@ -58,7 +58,8 @@ class ComponentGallery extends StatelessWidget {
           // ---------- GlassButton ----------
           _Section(
             title: 'GlassButton（app.css .btn 21–67 / auroraqua.css 54–166）',
-            source: '.btn：gap 8 · min-h 40 · padding 0 24 · radius 12 · 14px/700/ls .2 · 200ms',
+            source:
+                '.btn：gap 8 · min-h 40 · padding 0 24 · radius 12 · 14px/700/ls .2 · 200ms',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -113,7 +114,8 @@ class ComponentGallery extends StatelessWidget {
           // ---------- GlassCard ----------
           _Section(
             title: 'GlassCard（app.css .glass-card 230–248）',
-            source: '.glass-bg .55 · blur 24 saturate 1.4 · 1px 白边 .65 · 16px 圆角 · 8/32 阴影 · 顶沿内高光',
+            source:
+                '.glass-bg .55 · blur 24 saturate 1.4 · 1px 白边 .65 · 16px 圆角 · 8/32 阴影 · 顶沿内高光',
             child: _Row(
               children: <Widget>[
                 _Slot(
@@ -165,18 +167,27 @@ class ComponentGallery extends StatelessWidget {
           // 满宽字段与它同宽,故样张统一按 374 呈现,不缩成窄列）。
           _Section(
             title: 'GlassInput（app.css .field 70–88 / auroraqua.css 502–523）',
-            source: 'padding 12×16 · radius 12 · --glass-bg + 亮边 · focus 辉光边 · placeholder slate-500',
+            source:
+                'padding 12×16 · radius 12 · --glass-bg + 亮边 · focus 辉光边 · placeholder slate-500',
             child: SizedBox(
               width: 374,
               child: _Rows(
                 children: <Widget>[
-                  _InputSample(label: '常态（认证卡内：indigo .3 描边）', onGlassBorder: true),
+                  _InputSample(
+                    label: '常态（认证卡内：indigo .3 描边）',
+                    onGlassBorder: true,
+                  ),
                   _InputSample(
                     label: 'focus（#F796FF 边 + 辉光）',
                     autofocus: true,
                     onGlassBorder: true,
                   ),
-                  _InputSample(label: '密码类型', obscure: true, text: '12345678', onGlassBorder: true),
+                  _InputSample(
+                    label: '密码类型',
+                    obscure: true,
+                    text: '12345678',
+                    onGlassBorder: true,
+                  ),
                 ],
               ),
             ),
@@ -185,7 +196,8 @@ class ComponentGallery extends StatelessWidget {
 
           // ---------- AvatarHalo ----------
           _Section(
-            title: 'AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
+            title:
+                'AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
             source: '2.5px 锥形渐变环 conic 210° · 离线 --ice-100 · 爱莉 3.2s 呼吸辉光',
             child: _Row(
               children: <Widget>[
@@ -222,7 +234,8 @@ class ComponentGallery extends StatelessWidget {
           // ---------- TabBadge ----------
           _Section(
             title: 'TabBadge（shell.css .tab-badge 579–593）',
-            source: 'min-w 16 · h 16 · padding 0 4 · pink-500 底 · Fredoka 11 · top -4 / right -12 · >99 → 99+',
+            source:
+                'min-w 16 · h 16 · padding 0 4 · pink-500 底 · Fredoka 11 · top -4 / right -12 · >99 → 99+',
             child: _Row(
               children: <Widget>[
                 _Slot(label: '1', child: _BadgeHost(count: 1)),
@@ -236,7 +249,8 @@ class ComponentGallery extends StatelessWidget {
           // ---------- 加载族 ----------
           _Section(
             title: 'Skeleton + Spinner + FullScreenLoader（base.css 515–574）',
-            source: 'spinner 18px/800ms · skeleton radius 8 + frost-pulse .55↔.9 1600ms · loader 品牌 40px 渐变字',
+            source:
+                'spinner 18px/800ms · skeleton radius 8 + frost-pulse .55↔.9 1600ms · loader 品牌 40px 渐变字',
             child: _Row(
               children: <Widget>[
                 _Slot(
@@ -307,8 +321,10 @@ class ComponentGallery extends StatelessWidget {
 
           // ---------- B2 展示型基元 ----------
           _Section(
-            title: 'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
-            source: 'home.css .layout-switch 182–206 · messages.css .messages-tab 24–37 · '
+            title:
+                'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
+            source:
+                'home.css .layout-switch 182–206 · messages.css .messages-tab 24–37 · '
                 'd:§4 胶囊 · base.css .scroll-text 724–758（marquee）',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -364,7 +380,8 @@ class ComponentGallery extends StatelessWidget {
           // ---------- 排版阶梯 ----------
           _Section(
             title: 'Typography（design.md §3 九级）',
-            source: 'Display=Fredoka / Body=Nunito / Utility=Space Grotesk，CJK 回退链',
+            source:
+                'Display=Fredoka / Body=Nunito / Utility=Space Grotesk，CJK 回退链',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -520,8 +537,9 @@ class _Slot extends StatelessWidget {
           child: Text(
             label,
             textAlign: TextAlign.center,
-            style: AylaTextStyles.light.timestamp
-                .copyWith(color: AylaColors.textSecondary),
+            style: AylaTextStyles.light.timestamp.copyWith(
+              color: AylaColors.textSecondary,
+            ),
           ),
         ),
       ],

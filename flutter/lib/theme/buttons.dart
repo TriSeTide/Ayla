@@ -33,8 +33,6 @@
 ///   button 阴影与 blur(8px)，hover → button-hover（134–139）。
 library;
 
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 
@@ -55,6 +53,8 @@ class AylaPressScale extends StatefulWidget {
     this.enabled = true,
     this.semanticLabel,
     this.isButton = true,
+    this.hoverScale = true,
+    this.onPressChanged,
   });
 
   /// 内容。
@@ -71,6 +71,23 @@ class AylaPressScale extends StatefulWidget {
 
   /// 是否暴露为按钮语义。
   final bool isButton;
+
+  /// 是否启用 hover 放大 1.02。
+  ///
+  /// **两组不同的 web 规则**（auroraqua.css）：
+  /// - **按钮组**（54–94，`.btn`/`.icon-btn-40`/…/`.layout-switch-btn`）：
+  ///   `:hover { scale: 1.02 }` + `:active { scale: .98 }` → `hoverScale: true`
+  /// - **导航/选项卡组**（236–249，`.messages-tab`/`.channel-scene`/
+  ///   `.top-nav-module`/`.bottom-tab-link` 等）：**只有 `:active { scale: .98 }`，
+  ///   hover 不放大** → `hoverScale: false`
+  final bool hoverScale;
+
+  /// 按压状态回调（按下 true / 松开 false）。
+  ///
+  /// 用途：web 里高亮胶囊是按钮的**子元素**，父按钮 `:active { scale: .98 }`
+  /// 会连带胶囊一起缩放；Flutter 侧胶囊与按钮平级（容器级单实例），
+  /// 必须由容器监听该回调让胶囊同步缩放。
+  final ValueChanged<bool>? onPressChanged;
 
   @override
   State<AylaPressScale> createState() => _AylaPressScaleState();
@@ -89,7 +106,7 @@ class _AylaPressScaleState extends State<AylaPressScale> {
         ? 1.0
         : (_pressed
             ? 0.98
-            : (_hovered ? 1.02 : 1.0));
+            : (_hovered && widget.hoverScale ? 1.02 : 1.0));
     final BorderRadius ringRadius =
         BorderRadius.circular(AylaRadii.rPill + 2 + 2);
 
@@ -131,13 +148,22 @@ class _AylaPressScaleState extends State<AylaPressScale> {
             behavior: HitTestBehavior.opaque,
             onTap: widget.onTap,
             onTapDown: widget.enabled
-                ? (_) => setState(() => _pressed = true)
+                ? (_) {
+                    setState(() => _pressed = true);
+                    widget.onPressChanged?.call(true);
+                  }
                 : null,
             onTapCancel: widget.enabled
-                ? () => setState(() => _pressed = false)
+                ? () {
+                    setState(() => _pressed = false);
+                    widget.onPressChanged?.call(false);
+                  }
                 : null,
             onTapUp: widget.enabled
-                ? (_) => setState(() => _pressed = false)
+                ? (_) {
+                    setState(() => _pressed = false);
+                    widget.onPressChanged?.call(false);
+                  }
                 : null,
             child: content,
           ),
@@ -204,12 +230,18 @@ class _AylaIconButtonState extends State<AylaIconButton> {
         color: background,
         borderRadius: radius,
         border: Border.all(color: AylaColors.glassBorder),
+        // auroraqua.css 124–132：box-shadow: var(--glass-shadow-button)
+        // 该 token = `0 2px 8px rgba(70,91,146,.1), var(--glass-inset)` —— 外阴影
+        // 在 BoxShadow 里，`--glass-inset`（顶沿 1px 内高光）由下面的
+        // AylaGlassInset.over 叠层实现。
         boxShadow: _hovered && _enabled
             ? AylaShadows.buttonHover
             : AylaShadows.button,
       ),
       child: Center(child: widget.icon),
     );
+    // --glass-inset（顶沿 1px 内高光）
+    box = AylaGlassInset.over(child: box, radius: radius);
 
     // auroraqua.css 125–132：backdrop-filter blur(8px)
     if (!GlassConfig.useOpaqueFallback) {
@@ -220,10 +252,11 @@ class _AylaIconButtonState extends State<AylaIconButton> {
             child: ClipRRect(
               borderRadius: radius,
               child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: AylaGlass.blurButton,
-                  sigmaY: AylaGlass.blurButton,
-                ),
+                // auroraqua.css 124–132（`.icon-btn-40` 等 surface 按钮）：
+                // `backdrop-filter: blur(8px)` —— **只有 blur，没有 saturate**
+                // （与 18px 档的 `.corner-fab`/`.message-fab`
+                //  `blur(18px) saturate(1.4)` 不同，不能统一按 1.4 处理）。
+                filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -295,10 +328,10 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
             child: ClipRRect(
               borderRadius: AylaRadii.pill,
               child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: AylaGlass.blurNav, // blur(18px) saturate(1.4)
-                  sigmaY: AylaGlass.blurNav,
-                ),
+                // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
+                // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
+                // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
+                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -403,10 +436,10 @@ class AylaMessageFab extends StatelessWidget {
             child: ClipRRect(
               borderRadius: AylaRadii.pill,
               child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: AylaGlass.blurNav, // blur(18px) saturate(1.4)
-                  sigmaY: AylaGlass.blurNav,
-                ),
+                // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
+                // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
+                // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
+                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -522,6 +555,12 @@ class _AylaToolButtonState extends State<AylaToolButton> {
       ),
       child: Center(child: widget.icon),
     );
+    // `.composer-tool-btn`（auroraqua.css 105–112）：box-shadow:
+    // var(--glass-shadow-compact) —— 该 token 含 `var(--glass-inset)`，
+    // 故补顶沿 1px 内高光（danger 态为 destructive 实底、非玻璃材质，不加）。
+    if (!widget.danger) {
+      box = AylaGlassInset.over(child: box, radius: AylaRadii.pill);
+    }
 
     if (!GlassConfig.useOpaqueFallback && !widget.danger) {
       box = Stack(
@@ -531,10 +570,9 @@ class _AylaToolButtonState extends State<AylaToolButton> {
             child: ClipRRect(
               borderRadius: AylaRadii.pill,
               child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: AylaGlass.blurButton,
-                  sigmaY: AylaGlass.blurButton,
-                ),
+                // auroraqua.css 110–111（`.composer-tool-btn`）：`blur(8px)`
+                // 无 saturate（见 8px 档三处均为纯 blur）。
+                filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -597,7 +635,7 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
             ? AylaColors.indigo700
             : AylaColors.textSecondary);
 
-    final Widget box = AnimatedContainer(
+    Widget box = AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: AylaCurves.easeOut,
       padding: const EdgeInsets.symmetric(
@@ -608,6 +646,8 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
         color: AylaColors.glassBgStrong,
         borderRadius: BorderRadius.circular(AylaRadii.rSm),
         border: Border.all(color: AylaColors.glassBorder),
+        // auroraqua.css 124–132 覆写：box-shadow: var(--glass-shadow-button)
+        // / -hover，两者都含 `var(--glass-inset)` → 补顶沿 1px 内高光
         boxShadow: _hovered && _enabled
             ? AylaShadows.buttonHover
             : AylaShadows.button,
@@ -641,7 +681,14 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: Opacity(opacity: _enabled ? 1 : 0.55, child: box),
+        child: Opacity(
+          opacity: _enabled ? 1 : 0.55,
+          // --glass-inset（顶沿 1px 内高光；radius 与卡面一致 = --radius-sm 8）
+          child: AylaGlassInset.over(
+            child: box,
+            radius: BorderRadius.circular(AylaRadii.rSm),
+          ),
+        ),
       ),
     );
   }

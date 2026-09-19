@@ -97,17 +97,18 @@ class _SpinnerPainter extends CustomPainter {
       ..color = track;
     canvas.drawCircle(center, radius, trackPaint);
 
-    // 顶部 90° 弧推进（border-top-color 语义）
+    // 顶部高亮弧：web 用 `border-top-color: --indigo-700` 实现，其余三边为
+    // 轨道色（base.css 520–521）。CSS 圆角边框的四段是**梯形拼接**，接缝落在
+    // 对角线方向 ⇒ top 段恰好覆盖 **90°**（π/2）。此前写 1.2 rad(≈69°) 是错的。
     final Paint topPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.round
+      ..strokeCap = StrokeCap.butt // border 无圆头
       ..color = top;
-    final double sweep = 1.2; // ~69° 可见弧
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2 + progress * 2 * math.pi,
-      sweep,
+      -math.pi / 2 + progress * 2 * math.pi, // 从 12 点方向起转
+      math.pi / 2, // 90°：border-top 的可见段
       false,
       topPaint,
     );

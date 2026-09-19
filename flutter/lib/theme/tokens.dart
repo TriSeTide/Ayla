@@ -380,3 +380,31 @@ abstract final class Breakpoint {
   /// ≥1024 帖子流双列瀑布（d:§12.18）
   static bool isWideMasonry(double width) => width >= md;
 }
+
+/// `--glass-inset`（`inset 0 1px 0 rgba(255,255,255,.5)`）的 Flutter 等价物。
+///
+/// **为什么需要**：web 的每个阴影 token 都拼了 `var(--glass-inset)`
+/// （tokens.css 124–130）——`--glass-shadow` / `-hover` / `-compact` /
+/// `-button` / `-button-hover` / `-modal` / `-nav` 共 7 个全部带顶沿 1px
+/// 内高光，玻璃材质"亮起来"的观感就靠它；Flutter 的 `BoxShadow` 没有
+/// inset 变体，必须单独绘制。
+///
+/// **1px 必须按高度换算**：stops 取 `1/height`，否则高盒子上高光会被拉成
+/// 一大条（固定比例近似法的坑）。
+abstract final class AylaInset {
+  /// 把 `--glass-inset` 铺到一个形状上（实现见 `glass.dart` 的 `AylaGlassInset.over`）。
+  ///
+  /// 放在 glass.dart 是因为 tokens.dart 保持纯 token（不依赖 widgets 库）。
+  static LinearGradient topHighlight(double height) {
+    final double stop = height > 0 ? (1 / height).clamp(0.0, 0.5) : 0.1;
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: const <Color>[
+        Color(0x80FFFFFF), // rgba(255,255,255,.5)
+        Color(0x00FFFFFF),
+      ],
+      stops: <double>[0, stop],
+    );
+  }
+}

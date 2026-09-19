@@ -42,6 +42,26 @@ abstract final class GlassConfig {
     if (useOpaqueFallback) return AylaColors.glassOpaqueFallback;
     return strong ? AylaColors.glassBgStrong : AylaColors.glassBg;
   }
+
+  /// `backdrop-filter: blur(Npx) saturate(1.4)` 的 Flutter 等价物。
+  ///
+  /// CSS 里凡带模糊的玻璃材质**都同时带 saturate(1.4)**（tokens.css
+  /// `--glass-filter`、shell.css `.corner-fab`/`.message-fab` 的
+  /// `blur(18px) saturate(1.4)`、按钮的 `blur(8px)` 三档）。
+  /// `ColorFilter implements ImageFilter` ⇒ 可用 `ImageFilter.compose`
+  /// 组合；顺序必须是 `outer: saturate`、`inner: blur`（= 先模糊后饱和，
+  /// 与 CSS 一致）。**只做 blur 会丢失玻璃的通透鲜艳感**（此前实测）。
+  static ImageFilter backdropFilter({required double sigma}) {
+    return ImageFilter.compose(
+      outer: const ColorFilter.matrix(kSaturation14), // saturate(1.4)
+      inner: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+    );
+  }
+
+  /// 只模糊、不饱和（用于 CSS 中确实没写 saturate 的场合）。
+  static ImageFilter blurOnly({required double sigma}) {
+    return ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
+  }
 }
 
 /// 玻璃材料的通用绘制（底色 + 模糊 + 亮边 + 宽软阴影 + 顶沿内高光）。
@@ -96,22 +116,21 @@ class GlassSurface extends StatelessWidget {
       ),
       child: Stack(
         children: <Widget>[
-          // 顶沿内高光（--glass-inset：inset 0 1px 0 rgba(255,255,255,.5)）
+          // 顶沿内高光：`--glass-inset` = `inset 0 1px 0 rgba(255,255,255,.5)`。
+          // Flutter 的 BoxShadow 无 inset 变体，且「非均匀 Border + borderRadius」
+          // 会被断言拒绝，故用 `AylaInset.topHighlight(height)`——它按实际高度
+          // 取 stops = 1/height，视觉上恰为 1px（固定比例近似会被拉成一条带）。
           Positioned.fill(
             child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: radiusValue,
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: <Color>[
-                      AylaColors.glassInsetHighlight,
-                      const Color(0x00FFFFFF),
-                    ],
-                    stops: const <double>[0, 0.25],
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints c) {
+                  return DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: radiusValue,
+                      gradient: AylaInset.topHighlight(c.maxHeight),
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -226,12 +245,47 @@ class _OuterShadowPainter extends CustomPainter {
 
 /// 模糊半径归一（--glass-filter blur(24px)；导航 18 / 按钮 8 有各自覆写）。
 abstract final class AylaGlass {
-  /// blur(24px) saturate(1.4)（t:--glass-filter）——卡片/侧栏/弹层
+  /// blur(24px) saturate(1.4)（t:--glass-filter）——卡片/侧栏/弹层/输入框
   static const double blurCard = 24;
   /// blur(18px)——底栏/顶栏/搜索面板/FAB
   static const double blurNav = 18;
   /// blur(8px)——ghost 按钮/工具钮
   static const double blurButton = 8;
+}
+
+/// `--glass-inset` 的组合工具（把顶沿 1px 内高光铺到任意形状上）。
+///
+/// web 的每个玻璃材质都由**四层**组成：半透明底 + 1px 亮边 + 外阴影 +
+/// **顶沿内高光 `--glass-inset`**；Flutter 的 `BoxShadow` 无 inset 变体，
+/// 故内高光用 `AylaInset.topHighlight` 单独叠一层。
+abstract final class AylaGlassInset {
+  /// 在 [child] 之上叠一层「形状内顶沿 1px 白色高光」。
+  ///
+  /// [radius] 必须与 [child] 的形状圆角一致，否则高光会溢出/被裁。
+  static Widget over({
+    required Widget child,
+    required BorderRadius radius,
+  }) {
+    return Stack(
+      children: <Widget>[
+        child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints c) {
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: radius,
+                    gradient: AylaInset.topHighlight(c.maxHeight),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// GlassCard —— 全站卡面材料（app.css .glass-card / d:§4 Cards）。
@@ -504,7 +558,21 @@ class _GlassButtonState extends State<GlassButton>
     // CSS `.btn::after { inset: 0 }` 的扫光是相对 padding box（含左右
     // 24px），若 padding 留在外层面板，Positioned.fill 扫光层只能覆盖
     // 内容区，光条会比按钮窄、扫不过按钮两端。
-    final Widget face = AnimatedContainer(
+    //
+    // 渐变角度换算需要**真实宽高比**（CSS 渐变线长 = |W sinθ|+|H cosθ|，
+    // 而 Flutter Alignment 端点在归一化空间插值 → 只有正方形时等价；
+    // 宽扁按钮上 135deg 斜向渐变会整体错位，实测偏差可达 0.58）。
+    // 故这里用 LayoutBuilder 拿到实际尺寸再生成渐变；非渐变变体直接复用。
+    Widget buildFace(double aspectRatio) {
+      final Gradient? g = switch (widget.variant) {
+        GlassButtonVariant.glow => cssLinearGradient(
+            angleDeg: 135, // 135deg #f9b0ff → #f796ff（app.css .btn-glow）
+            colors: AylaGradients.btnGlow,
+            aspectRatio: aspectRatio,
+          ),
+        _ => gradient,
+      };
+      return AnimatedContainer(
       duration: _reduceMotion ? Duration.zero : AylaDurations.fast,
       curve: AylaCurves.easeOut,
       constraints: BoxConstraints(
@@ -513,7 +581,7 @@ class _GlassButtonState extends State<GlassButton>
       ),
       decoration: BoxDecoration(
         color: background,
-        gradient: gradient,
+        gradient: g,
         borderRadius: rInput,
         border: borderColor == null ? null : Border.all(color: borderColor),
       ),
@@ -595,6 +663,19 @@ class _GlassButtonState extends State<GlassButton>
         ),
       ),
     );
+    } // end buildFace
+    // 用 LayoutBuilder 取真实尺寸 → 生成含正确宽高比的 face
+    final Widget face = LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints c) {
+        final double h = c.maxHeight.isFinite && c.maxHeight > 0
+            ? c.maxHeight
+            : widget.minHeight;
+        final double w = c.maxWidth.isFinite && c.maxWidth > 0
+            ? c.maxWidth
+            : (widget.minWidth ?? h);
+        return buildFace(w / h);
+      },
+    );
 
     // ---- 外阴影：不参与裁剪（box-shadow 在元素外侧）----
     Widget decorated = Stack(
@@ -609,6 +690,25 @@ class _GlassButtonState extends State<GlassButton>
           ),
         ),
         face,
+        // --glass-inset（顶沿 1px 内高光）：`.btn-primary` 的
+        // `--glass-shadow-compact`、`.btn-ghost` 的 `--glass-shadow-button[-hover]`
+        // 两个 token 都含 `var(--glass-inset)`（tokens.css 126–128）。
+        // `.btn-glow` 用的是 `--glow-shadow`（不含 inset），故不叠加。
+        if (widget.variant != GlassButtonVariant.glow)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints c) {
+                  return DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: rInput,
+                      gradient: AylaInset.topHighlight(c.maxHeight),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
       ],
     );
 
@@ -636,10 +736,9 @@ class _GlassButtonState extends State<GlassButton>
             child: ClipRRect(
               borderRadius: rInput,
               child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: AylaGlass.blurButton,
-                  sigmaY: AylaGlass.blurButton,
-                ),
+                // auroraqua.css 100–101（`.btn-ghost`）：`backdrop-filter: blur(8px)`
+                // ——**无 saturate**（8px 档三处均为纯 blur；18px/24px 档才带 1.4）。
+                filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -752,6 +851,7 @@ class GlassInput extends StatefulWidget {
     this.textStyle,
     this.semanticLabel,
     this.focusNode,
+    this.invalid = false,
   });
 
   /// 文本控制器。
@@ -793,6 +893,10 @@ class GlassInput extends StatefulWidget {
   /// 焦点节点。
   final FocusNode? focusNode;
 
+  /// 校验失败态：`.auth-field .field[aria-invalid="true"] { border-color:
+  /// var(--destructive) }`（auth.css 74）。
+  final bool invalid;
+
   @override
   State<GlassInput> createState() => _GlassInputState();
 }
@@ -825,13 +929,34 @@ class _GlassInputState extends State<GlassInput> {
   Widget build(BuildContext context) {
     final AylaTextStyles text = AylaTextStyles.of(context);
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final Color border = _focused
-        ? AylaColors.glow500
-        : (widget.onGlassBorder
-            ? AylaColors.fieldBorderOnGlass
-            : AylaColors.glassBorder);
+    final bool opaque = GlassConfig.useOpaqueFallback;
 
-    final Widget field = AnimatedContainer(
+    // ── `.field` 材料统一 owner：app.css 70–88 + **auroraqua.css 502–510 覆写** ──
+    //   :is(.field, .voice-create-input, …) {
+    //     background: var(--glass-bg);
+    //     background-image: none;               ← 清除背景图（单一材料 owner）
+    //     border: 1px solid var(--glass-border);
+    //     border-radius: var(--radius-input);
+    //     box-shadow: var(--glass-inset);       ← 顶沿 1px 内高光
+    //     backdrop-filter: var(--glass-filter); ← **blur(24px) saturate(1.4)**
+    //   }
+    //   :focus → border-color: --glow-500; box-shadow: --glow-shadow
+    //   auth.css 73–78：认证上下文 min-height 44 / 描边 rgba(70,91,146,.3) /
+    //     focus 仍走辉光边；auth.css 74：`[aria-invalid="true"]` → --destructive
+    final Color border = widget.invalid
+        // auth.css 74：`[aria-invalid="true"]` → --destructive
+        ? AylaColors.destructive
+        : (_focused
+            ? AylaColors.glow500
+            : (widget.onGlassBorder
+                ? AylaColors.fieldBorderOnGlass
+                : AylaColors.glassBorder));
+
+    final BorderRadius rInput =
+        BorderRadius.all(Radius.circular(AylaRadii.rInput));
+
+    // 卡面（底 + 边 + 圆角）。**不含阴影/内高光**——它们按 CSS 语义分层。
+    final Widget face = AnimatedContainer(
       duration: reduceMotion ? Duration.zero : AylaDurations.fast,
       curve: AylaCurves.easeOut,
       constraints: BoxConstraints(minHeight: widget.minHeight),
@@ -840,21 +965,13 @@ class _GlassInputState extends State<GlassInput> {
         vertical: AylaSpacing.sp3,
       ),
       decoration: BoxDecoration(
+        // background: var(--glass-bg)（降级时 --surface，auroraqua 526–531）
         color: GlassConfig.resolveBackground(strong: false),
-        borderRadius: BorderRadius.all(Radius.circular(AylaRadii.rInput)),
+        // background-image: none —— 不叠任何渐变（清除背景图语义）
+        borderRadius: rInput,
         border: Border.all(color: border),
+        // box-shadow: var(--glass-inset)（未 focus 时）；focus → --glow-shadow
         boxShadow: _focused ? AylaShadows.glow : null,
-        gradient: _focused
-            ? null
-            : LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: <Color>[
-                  AylaColors.glassInsetHighlight,
-                  const Color(0x00FFFFFF),
-                ],
-                stops: const <double>[0, 0.25],
-              ),
       ),
       child: TextField(
         controller: widget.controller,
@@ -879,6 +996,42 @@ class _GlassInputState extends State<GlassInput> {
           hintStyle: text.body.copyWith(color: AylaColors.textSecondary),
         ),
       ),
+    );
+
+    // 层序（对齐 CSS）：
+    //   ① backdrop-filter（blur 24 + saturate 1.4）——只模糊字段背后的内容
+    //   ② --glass-inset 顶沿 1px 内高光（不参与裁剪）
+    //   ③ face（半透明底 + 亮边）
+    Widget field = Stack(
+      children: <Widget>[
+        if (!opaque)
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: rInput,
+              child: BackdropFilter(
+                // auroraqua.css 507：`.field { backdrop-filter: var(--glass-filter) }`
+                // = `blur(24px) saturate(1.4)`（tokens.css 76）
+                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints c) {
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: rInput,
+                    gradient: AylaInset.topHighlight(c.maxHeight),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        face,
+      ],
     );
 
     return Semantics(

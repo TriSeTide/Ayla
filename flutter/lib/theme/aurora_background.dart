@@ -12,6 +12,8 @@
 /// 由后续 M 阶段按 d:§7.2 参数接入，本层为静态同构底。
 library;
 
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import 'tokens.dart';
@@ -113,16 +115,21 @@ class AuroraBackground extends StatelessWidget {
               colors: <Color>[AylaColors.surface, Color(0x00FFFAFB)],
               stops: <double>[0, 0.45],
             ),
-            // 9：中心暖白光晕（tokens.css 36 行，33%/.5 → 52%/.15 → 63%/0）
+            // 9：中心暖白光晕。CSS（tokens.css 36）是 **4 个 stop**：
+            //   `#fffafb 0%, rgba(255,250,251,.5) 33%, rgba(255,250,251,.15) 52%,
+            //    rgba(255,250,251,0) 63%`
+            // = 完全不透明 → 33% 降到 .5 → 52% 降到 .15 → 63% 归零。
+            // 此前漏了 33% 这一档（只写 0/.52/.63）→ 中心过曝、扩散偏硬。
             const _RadialLayer(
               alignment: Alignment(0, 0),
               radius: 0.85,
               colors: <Color>[
-                Color(0x80FFFAFB),
-                Color(0x26FFFAFB),
-                Color(0x00FFFAFB),
+                Color(0xFFFFFAFB), // 0%  rgba(255,250,251,1)
+                Color(0x80FFFAFB), // 33% .5
+                Color(0x26FFFAFB), // 52% .15
+                Color(0x00FFFAFB), // 63% 0
               ],
-              stops: <double>[0, 0.52, 0.63],
+              stops: <double>[0, 0.33, 0.52, 0.63],
             ),
             // 极淡网格纹理（tokens.css --bg-aurora-grid，96px 周期）：
             // repeating-linear-gradient 两个方向各一组，透明度极低。
@@ -143,15 +150,51 @@ class AuroraBackground extends StatelessWidget {
 class _AuroraGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
+    // `--bg-aurora-grid`（tokens.css 39–40）是两层 repeating-linear-gradient：
+    //   repeating-linear-gradient(0deg,                  // 横线
+    //     rgba(157,191,230,.015) 0 1px,                  //  0–1px  全亮
+    //     rgba(157,191,230,.008) 3px,                    //  1→3px 渐隐到半亮
+    //     transparent 4px 96px)                          //  4–96px 透明（周期 96）
+    //   … 另一层为 90deg 竖线，参数相同。
+    // **不是 1px 实线**：0→1px 全亮、1→3px 线性衰减到 .008、3→4px 再衰减到 0，
+    // 4px 之后到底透明（每 96px 重复）。1px 实线会让网格偏硬、出现摩尔纹。
     const double period = 96;
-    final Paint paint = Paint()
-      ..color = AylaColors.ice500.withValues(alpha: 0.015)
-      ..strokeWidth = 1;
-    for (double x = 0; x <= size.width; x += period) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
+    const double fadeEnd = 3; // 半亮位置（1→3px 线性衰减到 .008）
+    const double zeroEnd = 4; // 完全透明位置（3→4px 衰减到 0）
+
+    // stop 比例：0 → .015；1/4 → .008；3/4 → 0（4px 内完成整段渐隐）
+    const List<double> stops = <double>[0, 1 / zeroEnd, fadeEnd / zeroEnd];
+    final List<Color> ramp = <Color>[
+      AylaColors.ice500.withValues(alpha: 0.015),
+      AylaColors.ice500.withValues(alpha: 0.008),
+      AylaColors.ice500.withValues(alpha: 0.0),
+    ];
+
     for (double y = 0; y <= size.height; y += period) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+      // 横线（0deg）：从 y 向下 4px 渐隐
+      canvas.drawRect(
+        Rect.fromLTWH(0, y, size.width, zeroEnd),
+        Paint()
+          ..shader = ui.Gradient.linear(
+            Offset(0, y),
+            Offset(0, y + zeroEnd),
+            ramp,
+            stops,
+          ),
+      );
+    }
+    for (double x = 0; x <= size.width; x += period) {
+      // 竖线（90deg）：从 x 向右 4px 渐隐
+      canvas.drawRect(
+        Rect.fromLTWH(x, 0, zeroEnd, size.height),
+        Paint()
+          ..shader = ui.Gradient.linear(
+            Offset(x, 0),
+            Offset(x + zeroEnd, 0),
+            ramp,
+            stops,
+          ),
+      );
     }
   }
 

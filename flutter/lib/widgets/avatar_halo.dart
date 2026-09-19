@@ -175,7 +175,9 @@ class _AvatarHaloState extends State<AvatarHalo>
               fontFamily: AylaFonts.display,
               fontFamilyFallback: AylaFonts.cjkFallback,
               fontWeight: FontWeight.w500,
-              fontSize: size * 0.42,
+              // web `Avatar.tsx` 38 行：`const fontSize = Math.round(size * 0.42)`
+              // —— JS 侧已**取整为整数 px**，故这里也要 round（size 40 → 17）。
+              fontSize: (size * 0.42).roundToDouble(),
               color: coreColor,
             ),
           ),
@@ -206,7 +208,8 @@ class _AvatarHaloState extends State<AvatarHalo>
                           fontFamily: AylaFonts.display,
                           fontFamilyFallback: AylaFonts.cjkFallback,
                           fontWeight: FontWeight.w500,
-                          fontSize: size * 0.42,
+                          // 同 web `Math.round(size * 0.42)`（取整 px）
+                          fontSize: (size * 0.42).roundToDouble(),
                           color: coreColor,
                         ),
                       ),
