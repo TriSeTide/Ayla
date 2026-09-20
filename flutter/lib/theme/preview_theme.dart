@@ -25,10 +25,41 @@ Widget previewTheme(Widget child) {
       // 预览宿主可能没有 MaterialApp → 缺 Directionality(Material 的
       // Stack/alignment 断言)与 Material 祖先(TextField 断言)会直接崩溃
       textDirection: TextDirection.ltr,
-      child: Material(
-        type: MaterialType.transparency,
-        child: AuroraBackground(
-          child: Center(child: child),
+      // ⚠️ **必须显式提供 Localizations + MaterialLocalizations**：
+      // `TextField` 构建时要求祖先存在 `MaterialLocalizations`，否则抛
+      // "No MaterialLocalizations found. TextField widgets require
+      //  MaterialLocalizations to be provided by a Localizations widget ancestor."
+      // 预览宿主（widget_preview_scaffold）与 widget test 都不会自动提供，
+      // 导致任何含输入框的组件（GlassInput / PrivacySheet /
+      // VisibilitySelector / 登录页…）在预览与测试里全部崩溃。
+      child: Localizations(
+        // ⚠️ locale 必须是 `en`：`DefaultMaterialLocalizations.delegate`
+        // 的 `isSupported` **只认英文**。若这里传 zh_CN，委托不会命中 →
+        // Localizations.of<MaterialLocalizations> 返回 null → TextField 仍然
+        // 抛 "No MaterialLocalizations found"（已实测踩过）。
+        // 本组件的界面文案全部硬编码中文，不需要本地化资源，故用 en 即可。
+        locale: const Locale('en'),
+        delegates: const <LocalizationsDelegate<dynamic>>[
+          DefaultMaterialLocalizations.delegate,
+          DefaultWidgetsLocalizations.delegate,
+        ],
+        child: Material(
+          type: MaterialType.transparency,
+          // ⚠️ **必须提供 Overlay**：`EditableText`（TextField 内核）在获得焦点/
+          // 选择文本时需要祖先 `Overlay` 承载选择工具栏与放大镜，否则抛
+          // "No Overlay widget found. EditableText widgets require an Overlay
+          //  widget ancestor within the closest LookupBoundary."
+          // 预览宿主与 widget test 都不会自带 Overlay（只有 Navigator 会创建），
+          // 故这里显式包一层。
+          child: Overlay(
+            initialEntries: <OverlayEntry>[
+              OverlayEntry(
+                builder: (BuildContext context) => AuroraBackground(
+                  child: Center(child: child),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     ),

@@ -21,6 +21,7 @@ library;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show TextInputFormatter;
 import 'package:flutter/widget_previews.dart';
 
 import 'app_theme.dart';
@@ -78,6 +79,8 @@ class GlassSurface extends StatelessWidget {
     this.shadow = AylaShadows.glass,
     this.border = true,
     this.padding,
+    this.radiusOverride,
+    this.borderOverride,
   });
 
   /// 内容。
@@ -98,6 +101,16 @@ class GlassSurface extends StatelessWidget {
   /// 是否绘制 1px 亮边。
   final bool border;
 
+  /// 圆角覆盖（用于「无圆角顶栏」：`BorderRadius.zero`；以及只做顶部圆角）。
+  ///
+  /// 传了就优先于 [radius]（后者只能表达均匀圆角）。
+  final BorderRadius? radiusOverride;
+
+  /// 边框覆盖（用于「只有下边框」的顶栏：`Border(bottom: ...)`）。
+  ///
+  /// 传了就优先于 [border]（后者只能表达「四边都有 / 都没有」）。
+  final BoxBorder? borderOverride;
+
   /// 内边距。
   final EdgeInsetsGeometry? padding;
 
@@ -107,12 +120,16 @@ class GlassSurface extends StatelessWidget {
 
     // 卡面（底色 + 亮边 + 顶沿内高光）。**不含外阴影**——阴影必须在裁剪
     // 之外绘制，否则会被 ClipRRect 连同圆角裁掉（web box-shadow 在元素外侧）。
-    final BorderRadius radiusValue = BorderRadius.circular(radius);
+    // 圆角/边框优先用 override（支持「无圆角顶栏」与「只下边框」）
+    final BorderRadius radiusValue =
+        radiusOverride ?? BorderRadius.circular(radius);
+    final BoxBorder? borderValue = borderOverride ??
+        (border ? Border.all(color: AylaColors.glassBorder) : null);
     final Widget face = DecoratedBox(
       decoration: BoxDecoration(
         color: GlassConfig.resolveBackground(strong: strong),
         borderRadius: radiusValue,
-        border: border ? Border.all(color: AylaColors.glassBorder) : null,
+        border: borderValue,
       ),
       child: Stack(
         children: <Widget>[
@@ -202,6 +219,37 @@ class GlassSurface extends StatelessWidget {
           );
 
     return glassBody;
+  }
+}
+
+/// `box-shadow` 的「只画形状之外」工具（等价 CSS 的 border-box 裁剪）。
+///
+/// **为什么需要**：CSS 规范规定 `box-shadow` **不在 border-box 内部绘制**
+/// （outer shadow is clipped inside the border-box）；而 Flutter 的
+/// [BoxShadow] / `BoxDecoration(boxShadow:)` **会铺满整个形状含内部**：
+/// - 半透明卡面 → 阴影透过卡面被看见，卡内发灰暗；
+/// - 悬停时给按钮加 `--glass-shadow-nav`（`0 0 8px rgba(157,191,230,.3)`）
+///   → 冰蓝阴影染进按钮内部，**悬停瞬间闪一下蓝色**。
+///
+/// 本项目此前只在 [GlassSurface] 内部（私有 `_OuterShadowPainter`）处理过，
+/// 导致其他组件各自裸用 `BoxShadow` 时重现同一问题 → 提升为公共 API。
+abstract final class AylaGlassShadow {
+  /// 外阴影层：铺满父级，但**只在形状之外**绘制 [shadows]。
+  ///
+  /// 用法（叠在面层**之下**）：
+  /// ```dart
+  /// Stack(children: <Widget>[
+  ///   Positioned.fill(child: AylaGlassShadow.ring(
+  ///     radius: BorderRadius.circular(12), shadows: AylaShadows.nav)),
+  ///   face,
+  /// ])
+  /// ```
+  static Widget ring({
+    required BorderRadius radius,
+    required List<BoxShadow> shadows,
+  }) {
+    if (shadows.isEmpty) return const SizedBox.shrink();
+    return CustomPaint(painter: _OuterShadowPainter(radius: radius, shadows: shadows));
   }
 }
 
@@ -411,6 +459,11 @@ enum GlassButtonVariant {
 
   /// .btn-ghost：玻璃底 + 亮边 + blur(8px) + button 阴影；hover 换 ice 蓝底
   ghost,
+
+  /// .btn-destructive（app.css 2764–2770）：`--destructive` 实底 + `#fffafb` 字；
+  /// `:hover:not(:disabled) → filter: brightness(1.06)`。
+  /// 用于确认删除等危险操作（ConfirmDialog 的确认键、群管理类操作）。
+  destructive,
 }
 
 /// GlassButton —— 严格照 web CSS 实现的三类按钮。
@@ -548,6 +601,14 @@ class _GlassButtonState extends State<GlassButton>
         borderColor = AylaColors.glassBorder; // auroraqua 覆写 --glass-border
         gradient = null;
         shadow = hovered ? AylaShadows.buttonHover : AylaShadows.button;
+      case GlassButtonVariant.destructive:
+        // `.btn-destructive { background: var(--destructive); color: #fffafb }`
+        // 无边框、无阴影（web 未声明）；hover 走下方 brightness(1.06) 滤镜分支
+        background = AylaColors.destructive;
+        foreground = AylaColors.surface;
+        borderColor = null;
+        gradient = null;
+        shadow = const <BoxShadow>[]; // 空 = 无阴影（web 未声明 box-shadow）
     }
 
     final BorderRadius rInput =
@@ -712,9 +773,12 @@ class _GlassButtonState extends State<GlassButton>
       ],
     );
 
-    // .btn-glow:hover:not(:disabled) { filter: brightness(1.06) }
+    // `.btn-glow:hover:not(:disabled) { filter: brightness(1.06) }`
+    // `.btn-destructive:hover:not(:disabled) { filter: brightness(1.06) }`
     // CSS filter 是通道乘法（×1.06 后钳位）→ ColorFilter.matrix 等价。
-    if (widget.variant == GlassButtonVariant.glow && hovered) {
+    if ((widget.variant == GlassButtonVariant.glow ||
+            widget.variant == GlassButtonVariant.destructive) &&
+        hovered) {
       decorated = ColorFiltered(
         colorFilter: const ColorFilter.matrix(<double>[
           1.06, 0, 0, 0, 0, //
@@ -852,6 +916,10 @@ class GlassInput extends StatefulWidget {
     this.semanticLabel,
     this.focusNode,
     this.invalid = false,
+    this.keyboardType,
+    this.inputFormatters,
+    this.maxLength,
+    this.onChanged,
   });
 
   /// 文本控制器。
@@ -859,7 +927,6 @@ class GlassInput extends StatefulWidget {
 
   /// 占位文案（--slate-500）。
   final String? hintText;
-
   /// 密码输入。
   final bool obscureText;
 
@@ -896,6 +963,19 @@ class GlassInput extends StatefulWidget {
   /// 校验失败态：`.auth-field .field[aria-invalid="true"] { border-color:
   /// var(--destructive) }`（auth.css 74）。
   final bool invalid;
+
+  /// 键盘类型（验证码/邮箱等场景，web 用 `inputMode` 表达）。
+  final TextInputType? keyboardType;
+
+  /// 输入格式化（例：验证码 `FilteringTextInputFormatter.digitsOnly`
+  /// 对应 web 的 `e.target.value.replace(/\D/g, "")`）。
+  final List<TextInputFormatter>? inputFormatters;
+
+  /// 最大长度（tsx `maxLength`）。
+  final int? maxLength;
+
+  /// 输入变化回调（供调用方按内容启用/禁用提交按钮）。
+  final ValueChanged<String>? onChanged;
 
   @override
   State<GlassInput> createState() => _GlassInputState();
@@ -982,6 +1062,12 @@ class _GlassInputState extends State<GlassInput> {
         textInputAction: widget.textInputAction,
         autofillHints: widget.autofillHints,
         onSubmitted: widget.onSubmitted,
+        // 新增能力（供验证码/邮箱等场景；web 用 inputMode + maxLength +
+        // `replace(/\D/g,"")` 表达）
+        keyboardType: widget.keyboardType,
+        inputFormatters: widget.inputFormatters,
+        maxLength: widget.maxLength,
+        onChanged: widget.onChanged,
         cursorColor: AylaColors.indigo700,
         style: widget.textStyle ??
             text.body.copyWith(color: AylaColors.textPrimary),

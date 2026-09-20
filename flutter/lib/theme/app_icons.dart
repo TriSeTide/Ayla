@@ -34,6 +34,7 @@ class AylaIcon extends StatelessWidget {
     this.size = 18,
     this.color,
     this.semanticLabel,
+    this.filled,
   });
 
   /// 图标数据（自动生成表）。
@@ -48,6 +49,14 @@ class AylaIcon extends StatelessWidget {
   /// 可访问性标签。
   final String? semanticLabel;
 
+  /// **运行时**实心覆盖（对应 web 按用途传 `fill="currentColor"`）。
+  ///
+  /// web 的 `<svg {...base(props)}>` 默认 `fill:none` + `stroke:currentColor`，
+  /// 个别调用处会覆盖为实心 —— 例如 `FavoriteButton` 已收藏时
+  /// `<IconHeart fill={active ? "currentColor" : "none"} />`。
+  /// null = 沿用图标数据自带的 filled 标志（多数图标为描边）。
+  final bool? filled;
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
@@ -58,6 +67,7 @@ class AylaIcon extends StatelessWidget {
         painter: _AylaIconPainter(
           icon,
           color ?? AylaColors.textPrimary,
+          filledOverride: filled,
         ),
       ),
     );
@@ -66,9 +76,12 @@ class AylaIcon extends StatelessWidget {
 
 /// 图标 painter：viewBox 24 缩放到 [size]，逐元素按渲染模式绘制。
 class _AylaIconPainter extends CustomPainter {
-  const _AylaIconPainter(this.icon, this.color);
+  const _AylaIconPainter(this.icon, this.color, {this.filledOverride});
 
   final AylaIconData icon;
+
+  /// 运行时实心覆盖（null = 用元素自带 filled）。
+  final bool? filledOverride;
   final Color color;
 
   @override
@@ -89,7 +102,7 @@ class _AylaIconPainter extends CustomPainter {
       switch (el.kind) {
         case AylaIconKind.circle:
           final Offset c = Offset(el.cx!, el.cy!);
-          if (el.filled) {
+          if (filledOverride ?? el.filled) {
             canvas.drawCircle(c, el.r!, fill);
           } else {
             canvas.drawCircle(c, el.r!, stroke);
@@ -102,11 +115,11 @@ class _AylaIconPainter extends CustomPainter {
           );
         case AylaIconKind.path:
           final Path p = _parseSvgPath(el.d!);
-          canvas.drawPath(p, el.filled ? fill : stroke);
+          canvas.drawPath(p, (filledOverride ?? el.filled) ? fill : stroke);
         case AylaIconKind.polygon:
           final Path p = _pointsPath(el.points!);
           p.close();
-          canvas.drawPath(p, el.filled ? fill : stroke);
+          canvas.drawPath(p, (filledOverride ?? el.filled) ? fill : stroke);
         case AylaIconKind.polyline:
           final Path p = _pointsPath(el.points!);
           canvas.drawPath(p, stroke);
@@ -120,7 +133,7 @@ class _AylaIconPainter extends CustomPainter {
             ),
             Radius.circular(el.rx ?? el.ry ?? 0),
           );
-          if (el.filled) {
+          if (filledOverride ?? el.filled) {
             canvas.drawRRect(rr, fill);
           } else {
             canvas.drawRRect(rr, stroke);

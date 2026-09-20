@@ -293,13 +293,16 @@ class _MoreButton extends StatelessWidget {
                 height: 40, // height: 40px
                 decoration: BoxDecoration(
                   // :hover / [aria-expanded=true] → rgba(157,191,230,.25)
+                  // ⚠️ 零透明用**同色相**（`Colors.transparent` 是透明黑，
+                  // AnimatedContainer 逐通道插值的中途会闪灰；见
+                  // profile_and_filters.dart 的详细说明）
                   color: active
                       ? AylaColors.ice500.withValues(alpha: 0.25)
-                      : Colors.transparent,
+                      : AylaColors.ice500.withValues(alpha: 0),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Opacity(
-                  opacity: busy ? 0.5 : 1,
+                  opacity: busy ? 0.5 : 1.0,
                   child: Center(
                     child: AylaIcon(
                       aylaIconByName('iconDots')!,
@@ -696,15 +699,18 @@ class _MenuItemState extends State<_MenuItem> {
               ),
               decoration: BoxDecoration(
                 // :hover → rgba(157,191,230,.22)；danger:hover → rgba(224,100,100,.12)
+                // 零透明用**同色相**（透明黑若参与插值会闪灰）
                 color: (!_hovered || widget.disabled)
-                    ? Colors.transparent
+                    ? (widget.danger
+                        ? const Color(0x00E06464)
+                        : AylaColors.ice500.withValues(alpha: 0))
                     : (widget.danger
                         ? const Color(0x1FE06464)
                         : AylaColors.ice500.withValues(alpha: 0.22)),
                 borderRadius: BorderRadius.circular(10), // border-radius: 10px
               ),
               child: Opacity(
-                opacity: widget.disabled ? 0.5 : 1, // :disabled { opacity: .5 }
+                opacity: widget.disabled ? 0.5 : 1.0, // :disabled { opacity: .5 }
                 child: Row(
                   children: <Widget>[
                     IconTheme(

@@ -28,7 +28,15 @@ import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import '../widgets/avatar_halo.dart';
 import '../widgets/avatar_status_badges.dart';
+import '../widgets/dialogs.dart';
+import '../widgets/directory_controls.dart';
+import '../widgets/privacy_sheet.dart';
+import '../widgets/profile_and_filters.dart';
 import '../widgets/group_card.dart';
+import '../widgets/media_interaction.dart';
+import '../core/media/media_signer.dart';
+import '../core/net/dio_client.dart';
+import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
 import '../widgets/primitives.dart';
 import '../widgets/tab_badge.dart';
@@ -381,10 +389,50 @@ class ComponentGallery extends StatelessWidget {
 
           // ---------- B3 卡片族（窄屏组件） ----------
           _Section(
-            title: 'GroupCard / GroupCarousel（home.css 224–503 + auroraqua 29–52）',
+            title:
+                'GroupCard / GroupCarousel（home.css 224–503 + auroraqua 29–52）',
             source:
                 '玻璃卡 16 圆角 · 4:3 轮播内嵌 8 · 3s/300ms · 指示点 4px · hover -2px + shadow-hover · active .99',
             child: const _GroupCardDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- B4 通用基元 ----------
+          _Section(
+            title: 'ResourceImage（ResourceImage.tsx + api/media.ts）',
+            source:
+                '签名链路（缓存至到期前 60s / 并发只签一次 / 原图 410 降级 thumb / thumb 410 过期）· alt="" 装饰图失败不提示',
+            child: const _ResourceImageDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title:
+                'ConfirmDialog / AsyncState（ConfirmDialog.tsx + AsyncState.tsx）',
+            source:
+                'create-sheet 弹层复用（overlay .25 + glass-bg-strong + radius-panel 20 + modal 阴影）· 窄屏贴底 · 自动聚焦取消 · busy 禁全部关闭',
+            child: const _DialogsDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title:
+                'PullToRefresh / SignedVideo（PullToRefresh.tsx + SignedVideo.tsx）',
+            source:
+                '阻尼 dampPull = maxPull*(1-e^-dy/90) · 阈值用原始 dy · 36 玻璃圆点三态 · thumbnail 不可作 video src',
+            child: const _InteractionDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '分页族 / 收藏按钮（DirectoryLoadMore + StablePaginationFooter + FavoriteButton）',
+            source:
+                'stable-pagination-footer min-h 80（最高高度锁定不塌缩）· 三点 6px ice-500 · favorite-toggle 36/pill/glass-bg-strong，选中转 pink+辉光',
+            child: const _PaginationAndFavoriteDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: 'VisibilitySelector / 资料卡 / 筛选条 / 隐私设置',
+            source:
+                '公开↔好友互斥、群可见独立可叠加 · user-profile-card min(320,85vw)+sp6+modal 阴影 · directory-filters 224 侧栏 · privacy-sheet 60dvh 窄屏 + 两步换绑',
+            child: const _DirectoryAndProfileDemo(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
@@ -701,8 +749,7 @@ class _GroupCardDemo extends StatelessWidget {
           GroupSlideVoiceRoom(name: '作业互助', memberCount: 3),
         ],
       ),
-      const GroupCarouselSlide.live(
-          host: '小樱', title: '一起看星星', cover: imgA),
+      const GroupCarouselSlide.live(host: '小樱', title: '一起看星星', cover: imgA),
       const GroupCarouselSlide.post(
         title: '周末去哪玩',
         body: '大家周末有空吗？想去海边看日落，顺便拍点照片。',
@@ -714,7 +761,9 @@ class _GroupCardDemo extends StatelessWidget {
 
     const List<GroupCarouselSlide> noImage = <GroupCarouselSlide>[
       GroupCarouselSlide.messageVoice(
-          newMessageCount: 3, voiceRooms: <GroupSlideVoiceRoom>[]),
+        newMessageCount: 3,
+        voiceRooms: <GroupSlideVoiceRoom>[],
+      ),
       GroupCarouselSlide.live(host: '小蓝', title: '新番同步看'),
     ];
 
@@ -817,6 +866,499 @@ class _GroupCardDemo extends StatelessWidget {
                     onOpen: () {},
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ======================= B4 通用基元素材 =======================
+
+/// ResourceImage 全状态样张。
+class _ResourceImageDemo extends StatelessWidget {
+  const _ResourceImageDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    // ⚠️「原图已过期」角标只有签名链路能产生（original 410 → 降级 thumb 并置
+    // originalExpired=true，api/media.ts 50–53）；外部 URL 永远看不到。
+    // 故注入受控假 client，让 `expired-original` / `fully-expired` 两个 id
+    // 走真实的降级/过期分支（同一代码路径，数据源可控）。
+    MediaSigner.instance.attach(PreviewMediaClient());
+    const String ok = 'https://picsum.photos/seed/ayla-ri/240/180';
+    const String expiredOriginal = '/api/v1/media/expired-original/content';
+    const String fullyExpired = '/api/v1/media/fully-expired/content';
+    Widget cell(String label, Widget child) => SizedBox(
+      width: 200,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          SizedBox(width: 200, height: 140, child: child),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(fontSize: 11)),
+        ],
+      ),
+    );
+    return Wrap(
+      spacing: AylaSpacing.sp4,
+      runSpacing: AylaSpacing.sp4,
+      children: <Widget>[
+        cell('正常（外部 URL 直连）', const ResourceImage(src: ok, alt: '示例图')),
+        cell(
+          '⭐ 原图已过期 → 缩略图 + 角标',
+          const ResourceImage(
+            src: expiredOriginal,
+            alt: '图',
+            expiredBadge: true,
+          ),
+        ),
+        cell(
+          '完全过期 → 「已过期」占位',
+          const ResourceImage(src: fullyExpired, alt: '图'),
+        ),
+        cell('装饰图（alt="" → 过期不提示）', const ResourceImage(src: fullyExpired)),
+      ],
+    );
+  }
+}
+
+/// ConfirmDialog + AsyncState 样张。
+class _DialogsDemo extends StatelessWidget {
+  const _DialogsDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AylaSpacing.sp4,
+      runSpacing: AylaSpacing.sp4,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        // ConfirmDialog 需要占位画框（它是 overlay 式布局）
+        SizedBox(
+          width: 300,
+          height: 300,
+          child: Stack(
+            children: <Widget>[
+              ConfirmDialog(
+                title: '删除会话',
+                message: '删除会话「小樱」？\n消息记录会保留。',
+                onConfirm: () {},
+                onClose: () {},
+              ),
+              const Positioned(
+                left: 4,
+                bottom: 4,
+                child: Text(
+                  'ConfirmDialog（默认）',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 300,
+          height: 300,
+          child: Stack(
+            children: <Widget>[
+              ConfirmDialog(
+                title: '删除会话',
+                message: '删除会话「小樱」？',
+                busy: true,
+                onConfirm: () {},
+                onClose: () {},
+              ),
+              const Positioned(
+                left: 4,
+                bottom: 4,
+                child: Text(
+                  'ConfirmDialog（busy）',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // AsyncState 四态
+        SizedBox(
+          width: 220,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              // 高度需容纳：minHeight 96 + padding 32（loading/empty 足够）
+              const SizedBox(
+                height: 130,
+                child: AylaAsyncState(status: AsyncStatus.loading),
+              ),
+              const Text('loading', style: TextStyle(fontSize: 11)),
+              // error 态还需「文案 + gap sp3 + 重试按钮」→ 给足 210
+              SizedBox(
+                height: 210,
+                child: AylaAsyncState(
+                  status: AsyncStatus.error,
+                  error: '网络连接失败',
+                  onRetry: () {},
+                ),
+              ),
+              const Text('error', style: TextStyle(fontSize: 11)),
+              const SizedBox(
+                height: 130,
+                child: AylaAsyncState(status: AsyncStatus.empty),
+              ),
+              const Text('empty', style: TextStyle(fontSize: 11)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// PullToRefresh / SignedVideo 样张。
+class _InteractionDemo extends StatelessWidget {
+  const _InteractionDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AylaSpacing.sp4,
+      runSpacing: AylaSpacing.sp4,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 375,
+          height: 380,
+          child: AylaPullToRefresh(
+            isAtTop: () => true,
+            onRefresh: () async =>
+                Future<void>.delayed(const Duration(milliseconds: 600)),
+            child: ListView(
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(AylaSpacing.sp3),
+              children: <Widget>[
+                for (int i = 0; i < 6; i++)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: AylaSpacing.sp2),
+                    height: 48,
+                    alignment: Alignment.centerLeft,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AylaSpacing.sp3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AylaColors.glassBg,
+                      borderRadius: BorderRadius.circular(AylaRadii.rInput),
+                      border: Border.all(color: AylaColors.glassBorder),
+                    ),
+                    child: Text('列表项 ${i + 1}（下拉刷新）'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 260,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const SignedVideo(mediaId: 'demo-1'),
+              const SizedBox(height: 6),
+              const Text(
+                'SignedVideo（failed 态，可点重试）',
+                style: TextStyle(fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 预览用假签名 client（公开版，画布与 @Preview 复用）：
+/// 按 media_id 前缀模拟后端 `:sign` 的分级过期行为。
+class PreviewMediaClient implements DioClient {
+  @override
+  Future<T> post<T>(
+    String path, {
+    Object? body,
+    Map<String, dynamic>? query,
+  }) async {
+    final bool isThumb = body is Map && body['variant'] == 'thumb';
+    final bool expiredOriginal = path.contains('expired-original');
+    final bool fullyExpired = path.contains('fully-expired');
+    if ((expiredOriginal && !isThumb) || fullyExpired) {
+      throw const ApiException(410, 'media_expired');
+    }
+    return <String, dynamic>{
+          'url':
+              'https://picsum.photos/seed/ayla-${isThumb ? "thumb" : "orig"}/240/180',
+          'expires_at': DateTime.now().millisecondsSinceEpoch / 1000 + 3600,
+        }
+        as T;
+  }
+
+  @override
+  noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName}');
+}
+
+
+// ======================= B4 剩余素材 =======================
+
+/// 分页族 + 收藏按钮。
+class _PaginationAndFavoriteDemo extends StatelessWidget {
+  const _PaginationAndFavoriteDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget cell(String label, Widget child) => SizedBox(
+          width: 240,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0x22465B92)),
+                ),
+                child: child,
+              ),
+              const SizedBox(height: 6),
+              Text(label, style: const TextStyle(fontSize: 11)),
+            ],
+          ),
+        );
+
+    return Wrap(
+      spacing: AylaSpacing.sp4,
+      runSpacing: AylaSpacing.sp4,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        cell(
+          'hasMore → 加载更多',
+          AylaDirectoryLoadMore(
+            loading: false, error: null, hasMore: true, invalidated: false,
+            loadMore: () async {}, refresh: () async {},
+          ),
+        ),
+        cell(
+          'loading → 三点',
+          AylaDirectoryLoadMore(
+            loading: true, error: null, hasMore: true, invalidated: false,
+            loadMore: () async {}, refresh: () async {},
+          ),
+        ),
+        cell(
+          'invalidated → 刷新中',
+          AylaDirectoryLoadMore(
+            loading: false, error: null, hasMore: true, invalidated: true,
+            loadMore: () async {}, refresh: () async {},
+          ),
+        ),
+        cell(
+          '历史控制：更早 + 返回最新',
+          AylaHistoryControls(
+            loading: false, error: null, hasMore: true, hasNewer: true,
+            loadOlder: () async {}, returnLatest: () async {}, retry: () async {},
+          ),
+        ),
+        SizedBox(
+          width: 320,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Wrap(
+                spacing: AylaSpacing.sp3,
+                runSpacing: AylaSpacing.sp3,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  AylaFavoriteButton(
+                    state: FavoriteState.notFavorited, onToggle: (_) {}),
+                  AylaFavoriteButton(
+                    state: FavoriteState.favorited, onToggle: (_) {}),
+                  AylaFavoriteButton(
+                    state: FavoriteState.unknown, onRetryStatus: () {}),
+                  AylaFavoriteButton(
+                    state: FavoriteState.error, onRetryStatus: () {}),
+                  AylaFavoriteButton(
+                    state: FavoriteState.favorited, compact: true, onToggle: (_) {}),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text('FavoriteButton 五态（含 compact 32 圆钮）',
+                  style: TextStyle(fontSize: 11)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 可见性选择器 + 资料卡 + 筛选条 + 隐私设置。
+///
+/// **有状态**：DirectoryFilters 两种形态都可点击/键盘切换（高亮 300ms 迁移）。
+class _DirectoryAndProfileDemo extends StatefulWidget {
+  const _DirectoryAndProfileDemo();
+
+  @override
+  State<_DirectoryAndProfileDemo> createState() =>
+      _DirectoryAndProfileDemoState();
+}
+
+class _DirectoryAndProfileDemoState extends State<_DirectoryAndProfileDemo> {
+  /// 宽屏侧栏选中项（点击/↑↓ 切换）。
+  String _wideValue = 'posts';
+
+  /// 窄屏顶栏选中项（点击/←→ 切换）。
+  String _narrowValue = 'groups';
+
+  @override
+  Widget build(BuildContext context) {
+    const List<({String id, String title})> groups =
+        <({String id, String title})>[
+      (id: 'g1', title: '星海观测站'),
+      (id: 'g2', title: '作业互助'),
+      (id: 'g3', title: '深夜电台'),
+    ];
+    const List<({String key, String label})> opts = <({String key, String label})>[
+      (key: 'all', label: '全部'),
+      (key: 'users', label: '用户'),
+      (key: 'groups', label: '群聊'),
+      (key: 'posts', label: '帖子'),
+      (key: 'live', label: '直播间'),
+      (key: 'games', label: '桌游室'),
+    ];
+
+    return Wrap(
+      spacing: AylaSpacing.sp4,
+      runSpacing: AylaSpacing.sp4,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 340,
+          child: AylaVisibilitySelector(
+            value: const VisibilitySelection(isPublic: true, group: true),
+            onChange: (_) {},
+            selectedGroupIds: const <String>['g1', 'g3'],
+            onSelectedGroupIdsChange: (_) {},
+            groups: groups,
+          ),
+        ),
+        SizedBox(
+          width: 340,
+          child: AylaVisibilitySelector(
+            value: const VisibilitySelection(group: true),
+            onChange: (_) {},
+            lockGroup: true,
+            initialGroupId: 'g2',
+            selectedGroupIds: const <String>['g2'],
+            onSelectedGroupIdsChange: (_) {},
+            groups: groups,
+          ),
+        ),
+        // ---------- DirectoryFilters 宽屏侧栏（可交互） ----------
+        SizedBox(
+          height: 380,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              SizedBox(
+                height: 340,
+                child: AylaDirectoryFilters(
+                  label: '搜索结果分类',
+                  options: opts,
+                  value: _wideValue, // 可交互：点击 / ↑↓ / Home / End
+                  onChange: (String v) => setState(() => _wideValue = v),
+                  header: Column(
+                    spacing: 2,
+                    children: <Widget>[
+                      Text('SEARCH',
+                          style: TextStyle(
+                            fontFamily: 'Fredoka',
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.4,
+                            color: AylaColors.pink500,
+                          )),
+                      Text('搜索结果',
+                          style: TextStyle(
+                            fontFamily: 'Fredoka',
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: AylaColors.textPrimary,
+                          )),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text('DirectoryFilters 宽屏侧栏（点击/↑↓ 切换 · 当前 $_wideValue）',
+                  style: const TextStyle(fontSize: 11)),
+            ],
+          ),
+        ),
+        // ---------- DirectoryFilters 窄屏顶栏（可交互） ----------
+        SizedBox(
+          width: 420,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              AylaDirectoryFilters(
+                label: '搜索结果分类（窄屏顶栏）',
+                options: opts,
+                value: _narrowValue, // 可交互：点击 / ←→ 切换
+                narrow: true,
+                onChange: (String v) => setState(() => _narrowValue = v),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'DirectoryFilters 窄屏顶栏（无圆角·只下边框·点击/←→ 切换 · 当前 $_narrowValue）',
+                style: const TextStyle(fontSize: 11),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 90,
+                alignment: Alignment.center,
+                child: const Text('内容区', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 340,
+          height: 330,
+          child: Stack(
+            children: <Widget>[
+              AylaUserProfileCard(
+                nickname: '小樱',
+                signature: '今天也要开开心心的',
+                online: true,
+                displayStatus: '在线',
+              ),
+              const Positioned(
+                left: 0,
+                bottom: 0,
+                child: Text('UserProfileCard', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 340,
+          height: 330,
+          child: Stack(
+            children: <Widget>[
+              PrivacySheet(onClose: () {}, boundEmail: 'ayla@example.com'),
+              const Positioned(
+                left: 0,
+                bottom: 0,
+                child: Text('PrivacySheet（menu）', style: TextStyle(fontSize: 11)),
               ),
             ],
           ),

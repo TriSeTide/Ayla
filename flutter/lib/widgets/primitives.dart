@@ -481,6 +481,7 @@ class AylaNavHighlight extends StatefulWidget {
     this.sweep = false,
     this.sweepActive = false,
     this.radiusValue,
+    this.showBorder = true,
   });
 
   /// 外部（父级 tab/按钮）的 hover 状态——web 的选择器是
@@ -491,6 +492,16 @@ class AylaNavHighlight extends StatefulWidget {
 
   /// 覆盖圆角（不传则按 [pill] 推导）。
   final BorderRadius? radiusValue;
+
+  /// 是否绘制 1px 亮边（`--glass-border`）。
+  ///
+  /// **默认 true**（对齐 `.auroraqua-nav-highlight { border: 1px solid ... }`）。
+  /// 当**宿主按钮自己也画了同色 1px 边框**时（如 `.directory-filter.is-active {
+  /// border-color: var(--glass-border) }`），两层 border 会**精确重叠**成
+  /// 「双线」（实测：按钮层 (230,236,248) + 胶囊层 (248,251,253) 各 1px）。
+  /// web 靠 `z-index: -1` 让胶囊退到按钮之下、视觉合一；Flutter 侧显式
+  /// 只保留按钮那一层更稳定 → 此场景传 `false`。
+  final bool showBorder;
 
   /// 圆角是否为 pill（`.layout-switch-btn` / `.favorites-filter` /
   /// `.group-chat-subgroup-tab` 覆写为 radius-pill，auroraqua.css 190–192）。
@@ -506,10 +517,10 @@ class AylaNavHighlight extends StatefulWidget {
   final bool sweep;
 
   @override
-  State<AylaNavHighlight> createState() => _AylaNavHighlightState();
+  State<AylaNavHighlight> createState() => AylaNavHighlightState();
 }
 
-class _AylaNavHighlightState extends State<AylaNavHighlight>
+class AylaNavHighlightState extends State<AylaNavHighlight>
     with SingleTickerProviderStateMixin {
   late final AnimationController _sweep = AnimationController(
     vsync: this,
@@ -519,6 +530,34 @@ class _AylaNavHighlightState extends State<AylaNavHighlight>
     parent: _sweep,
     curve: AylaCurves.auroraqua, // var(--auroraqua-ease)
   );
+
+  /// **直接驱动扫光**（供宿主在指针进入时立即调用）。
+  ///
+  /// 为什么要这个入口：web 的 `:hover` 由浏览器合成器**原生响应（0 帧）**；
+  /// 而「子级通知父级 → 父级 setState → rebuild → 子级才 forward()」需要
+  /// **2 帧**（实测 32ms 才见位移），手感明显滞后于 web。
+  /// 让命中指针的那个 tab 直达这里启动动画，可省掉 1 帧。
+  void setSweep(bool active, {bool jump = false}) {
+    if (!widget.sweep || MediaQuery.disableAnimationsOf(context)) return;
+    if (active) {
+      if (jump) {
+        // **挂载即命中**：web 上胶囊被挂载到「鼠标已在上面」的 tab 时，
+        // 元素首次绘制的 computed style 就已经是 `translateX(120%)`
+        // （`:hover` 从第一帧就匹配）→ **没有 transition**（无"前值"可过渡）。
+        // 之后鼠标移走 → `120% → -120%` → transition 跑出**完整的一次
+        // 从右往左扫**。这正是用户看到的效果。
+        // 反之若此处启动 forward()，行程会被提前消耗（16ms 只走 3%），
+        // 移走时的回程几乎为零 → 看不到扫光（实测 dx 恒 ≈ -1.17）。
+        _sweep.value = 1.0;
+      } else if (!_sweep.isAnimating && _sweep.value < 1.0) {
+        // 普通 hover 进入已挂载的胶囊：-120% → 120%，从左往右扫
+        _sweep.forward();
+      }
+    } else {
+      // `:hover` 消失 → 目标变回 -120%；从**当前值**过渡（CSS transition 语义）
+      if (_sweep.isAnimating || _sweep.value > 0) _sweep.reverse();
+    }
+  }
 
   @override
   void dispose() {
@@ -538,8 +577,10 @@ class _AylaNavHighlightState extends State<AylaNavHighlight>
     final bool shouldSweep = widget.sweep && !reduceMotion;
     if (shouldSweep) {
       if (widget.sweepActive) {
-        if (!_sweep.isAnimating) _sweep.forward();
-      } else if (_sweep.value > 0) {
+        if (!_sweep.isAnimating && _sweep.value < 1.0) _sweep.forward();
+      } else if (_sweep.isAnimating || _sweep.value > 0) {
+        // 同 setSweep：单用 `value > 0` 会在「刚 forward 未 tick」时失效
+        // （value 还是 0 → 不 reverse → 扫光卡在起点）
         _sweep.reverse();
       }
     }
@@ -552,12 +593,28 @@ class _AylaNavHighlightState extends State<AylaNavHighlight>
     //   box-shadow: var(--glass-shadow-nav);→ 0 0 8px rgba(157,191,230,.3)
     //   border: 1px solid var(--glass-border);
     //
-    // **分层纪律**（此前两处做错）：
-    //  ① 底/边/圆角必须在**同一层** `BoxDecoration`（拆成两层时边框沿矩形绘制、
-    //     圆角只作用于裁剪 → 白边丢失/圆被切）；
-    //  ② `overflow: hidden` 只包**扫光层**——若用它包住含 boxShadow 的整层，
+    // **分层纪律**（此前三处做错）：
+    //  ① **边框必须与渐变分层**：Flutter 的 `BoxDecoration` 同时设 `gradient` 与
+    //     `border` 时，**渐变填充会盖住 1px 边框**（实测：胶囊单独渲染时
+    //     y=18 起直接进渐变底色，白边完全不可见）。web 的 `background` 与
+    //     `border` 是分离绘制、两者都可见。故这里拆成
+    //     「底色+阴影层」→「边框层」→「扫光层」。
+    //  ② 圆角必须在**画边框的那一层**给出（否则边框沿矩形绘制 → 圆被切）；
+    //  ③ `overflow: hidden` 只包**扫光层**——若包住含 boxShadow 的整层，
     //     Flutter 的 ClipRRect 会把阴影一起裁掉（CSS 的 overflow 不裁自身阴影）
     //     → 胶囊看起来"上下左右被切"。
+    // ⚠️ **阴影不能挂 `BoxDecoration(boxShadow:)`**：CSS 规定 `box-shadow`
+    // **不在 border-box 内部绘制**；Flutter 的 `BoxShadow` 会**铺满形状含内部**。
+    // `--glass-shadow-nav` = `0 0 8px rgba(157,191,230,.3)` → 把整个胶囊内部
+    // 再染一层冰蓝。
+    //
+    // 实测证据（卡片底 #FFFAFB + ice-500 渐变）：
+    //   web 胶囊内部应为 **(229,234,245)**（纯 `--nav-active-bg`）
+    //   我的是           **(205,220,240)**
+    //   ≈ 在 web 值上再叠 `.3` 冰蓝 → **(207,221,240)**（差仅 (2,1,0)）
+    //   ⇒ 证实内部被多画一层阴影 → 高亮块偏暗偏蓝，"不如 web 通透"。
+    //
+    // 故阴影改由 `AylaGlassShadow.ring` 单独绘制（只画形状之外）。
     final Widget surface = DecoratedBox(
       decoration: BoxDecoration(
         gradient: cssLinearGradient(
@@ -565,13 +622,11 @@ class _AylaNavHighlightState extends State<AylaNavHighlight>
           colors: AylaGradients.navActive,
         ),
         borderRadius: radius,
-        border: Border.all(color: AylaColors.glassBorder), // 1px 亮边
-        boxShadow: AylaShadows.nav, // --glass-shadow-nav
       ),
-      // --glass-inset（顶沿 1px 内高光）也在此层内绘制
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
+          // --glass-inset（顶沿 1px 内高光）也在此层内绘制
           if (widget.sweep && !reduceMotion)
             ClipRRect(
               // overflow: hidden 只作用于扫光
@@ -599,13 +654,19 @@ class _AylaNavHighlightState extends State<AylaNavHighlight>
       ),
     );
 
-    // --glass-inset 的等价层（形状内顶沿 1px 白高光），叠在 surface 之上
+    // --glass-inset 的等价层（形状内顶沿 1px 白高光）+ 1px 亮边，叠在 surface 之上。
+    //
+    // **为什么边框单独一层**：Flutter 的 `BoxDecoration` 同时设 `gradient` 与
+    // `border` 时，**渐变填充会盖住 1px 边框**（实测：胶囊单独渲染时从内容起点
+    // 直接进渐变底色，白边完全不可见）。web 的 `background` 与 `border` 分离
+    // 绘制、两者都可见 → 这里同样拆层。
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints c) {
           return Stack(
             children: <Widget>[
               surface,
+              // --glass-inset：形状内顶沿 1px 白高光
               Positioned.fill(
                 child: IgnorePointer(
                   child: DecoratedBox(
@@ -616,6 +677,19 @@ class _AylaNavHighlightState extends State<AylaNavHighlight>
                   ),
                 ),
               ),
+              // 1px 亮边（`--glass-border`）。宿主按钮已画同色边时传
+              // showBorder=false 以避免两层重叠（见 showBorder 文档）。
+              if (widget.showBorder)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        border: Border.all(color: AylaColors.glassBorder),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           );
         },
