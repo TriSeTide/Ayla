@@ -6,6 +6,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/app_icons.dart';
+import '../lib/theme/buttons.dart' show AylaIconButton;
+import '../lib/widgets/reveal.dart' show AylaRevealItem, AylaRevealMotion;
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
@@ -137,6 +139,17 @@ void main() {
       isTrue,
       reason: '白边 = auroraqua.css:186 的 `border: 1px solid --glass-border`',
     );
+    // 按压同步与扫光（照范本 AylaDirectoryFilters 的选项卡契约）：
+    // web 的胶囊是按钮子元素 → 按钮 `:active { scale: .98 }` 时胶囊跟着缩；
+    // 本实现胶囊在容器级，故必须由 AnimatedScale 显式同步（否则按压无动画）。
+    expect(
+      find.ancestor(
+        of: find.byType(AylaNavHighlight),
+        matching: find.byType(AnimatedScale),
+      ),
+      findsWidgets,
+      reason: '胶囊必须包在 AnimatedScale 内以同步 `.98`（auroraqua:245–249）',
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -184,6 +197,38 @@ void main() {
       anyOf(isNull, TextDecoration.none),
       reason: '浮层文字必须由 DefaultTextStyle 兜底，不能继承 fallback 的下划线',
     );
+  });
+
+  testWidgets('扫光只给「更多」钮（auroraqua.css:142–148 的选择器组）',
+      (WidgetTester tester) async {
+    await setWidth(tester, 1600);
+    await tester.pumpWidget(host(const AylaTopNav(userName: '爱莉')));
+    await tester.pumpAndSettle();
+    // 宽屏：消息钮 + 更多钮各一个 AylaIconButton；只有「更多」开了 sweep
+    final List<AylaIconButton> buttons = tester
+        .widgetList<AylaIconButton>(find.byType(AylaIconButton))
+        .toList();
+    final int sweeping =
+        buttons.where((AylaIconButton b) => b.sweep).length;
+    final AylaIconButton? moreBtn = buttons
+        .where((AylaIconButton b) => b.semanticLabel == '更多')
+        .firstOrNull;
+    expect(moreBtn?.sweep, isTrue, reason: '更多钮在扫光组内');
+    expect(sweeping, 1, reason: '消息钮不在扫光组（web 选择器只含 more）');
+  });
+
+  testWidgets('窄屏条带入场动画（auroraqua.css:412–424 panel-from-top）',
+      (WidgetTester tester) async {
+    await setWidth(tester, 375);
+    await tester.pumpWidget(host(const AylaTopNav(userName: '爱莉')));
+    await tester.pump(); // 首帧：动画起点
+    // AylaRevealItem 的 offset 必须是「上入 20px」（= translate: 0 -20px）
+    final AylaRevealItem reveal = tester.widget<AylaRevealItem>(
+      find.byType(AylaRevealItem),
+    );
+    expect(reveal.offset.dy, -AylaRevealMotion.distance, reason: 'translate: 0 -20px');
+    await tester.pumpAndSettle();
+    expect(find.text('搜索'), findsOneWidget, reason: '入场后内容就位');
   });
 
   testWidgets('宽屏内容垂直居中（web `.top-nav { align-items: center }`）',

@@ -37,6 +37,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 
 import 'app_theme.dart';
+import 'css_gradient.dart';
 import 'glass.dart';
 import 'preview_theme.dart';
 import 'tokens.dart';
@@ -194,6 +195,7 @@ class AylaIconButton extends StatefulWidget {
     this.square = false,
     this.size = 40,
     this.semanticLabel,
+    this.sweep = false,
   });
 
   /// 图标（AylaIcon）。
@@ -211,14 +213,42 @@ class AylaIconButton extends StatefulWidget {
   /// 可访问性标签。
   final String? semanticLabel;
 
+  /// 是否带 **hover 扫光**。
+  ///
+  /// web 的扫光只给两处图标钮（`auroraqua.css:142–148`）：
+  /// `.top-nav-more > .top-nav-icon-btn` 与 `.narrow-topbar-more > .icon-btn-40`
+  /// —— 消息钮、搜索框尾部按钮**都不在**该选择器组内，故默认 false。
+  ///
+  /// 语义（`auroraqua.css:148–166`）：父级 `:hover` → `translateX(-120% → 120%)`，
+  /// 600ms `--auroraqua-ease`；移出时反向扫回。
+  final bool sweep;
+
   @override
   State<AylaIconButton> createState() => _AylaIconButtonState();
 }
 
-class _AylaIconButtonState extends State<AylaIconButton> {
+class _AylaIconButtonState extends State<AylaIconButton>
+    with SingleTickerProviderStateMixin {
   bool _hovered = false;
 
+  /// 扫光进度（`_SweepBand` 的 -120% → +120%，600ms `--auroraqua-ease`）。
+  /// 与 `GlassButton` 的写法一致（glass.dart:756–765）。
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: AylaDurations.sweep, // 600ms
+  );
+  late final Animation<double> _sweepEased = CurvedAnimation(
+    parent: _sweep,
+    curve: AylaCurves.auroraqua,
+  );
+
   bool get _enabled => widget.onPressed != null;
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -257,6 +287,47 @@ class _AylaIconButtonState extends State<AylaIconButton> {
     // --glass-inset（顶沿 1px 内高光）
     box = AylaGlassInset.over(child: box, radius: radius);
 
+    // auroraqua.css 142–148：扫光组（`.top-nav-more > .top-nav-icon-btn`、
+    // `.narrow-topbar-more > .icon-btn-40`）声明了 `position: relative;
+    // overflow: hidden; isolation: isolate` ⇒ `::after` 被**裁在圆角内**。
+    // 传入 `sweep: true` 时，把扫光带叠在面层之上并裁圆角。
+    if (widget.sweep && !GlassConfig.useOpaqueFallback) {
+      box = ClipRRect(
+        borderRadius: radius,
+        child: Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            box,
+            if (!MediaQuery.disableAnimationsOf(context))
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: 0.5, // `::after { opacity: .5 }`（auroraqua.css:157）
+                    child: AnimatedBuilder(
+                      animation: _sweepEased,
+                      builder: (BuildContext context, Widget? child) {
+                        // `transform: translateX(-120% → 120%)`，600ms --auroraqua-ease
+                        return FractionalTranslation(
+                          translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
+                          child: child,
+                        );
+                      },
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: cssLinearGradient(
+                            angleDeg: 90, // linear-gradient(90deg, …)
+                            colors: AylaGradients.sweep,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
     // auroraqua.css 125–132：backdrop-filter blur(8px)
     if (!GlassConfig.useOpaqueFallback) {
       box = Stack(
@@ -285,8 +356,15 @@ class _AylaIconButtonState extends State<AylaIconButton> {
       enabled: _enabled,
       semanticLabel: widget.semanticLabel,
       child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        onEnter: (_) {
+          setState(() => _hovered = true);
+          // `:hover::after { translateX(120%) }`（auroraqua.css:161–166）
+          if (widget.sweep && _enabled) _sweep.forward();
+        },
+        onExit: (_) {
+          setState(() => _hovered = false);
+          if (widget.sweep) _sweep.reverse(); // 移出时 600ms 扫回
+        },
         child: Opacity(opacity: _enabled ? 1 : 0.55, child: box),
       ),
     );

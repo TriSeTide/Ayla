@@ -68,8 +68,9 @@ import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'overlays.dart';
+import 'reveal.dart';
 import 'bottom_tabs.dart' show AylaPrimaryModule, aylaBottomTabOrder;
-import 'primitives.dart' show AylaNavHighlight;
+import 'primitives.dart' show AylaNavHighlight, AylaNavHighlightState;
 import 'tab_badge.dart';
 
 /// 一级模块顺序 —— **宽屏顶栏专用**，与 `shellConfig.ts:22–28` 的 `PRIMARY_MODULES` 一致
@@ -267,7 +268,24 @@ class _AylaTopNavState extends State<AylaTopNav> {
   Rect? _capsuleRect;
 
   /// 指针所在模块（驱动悬停冰蓝底与胶囊扫光）。
+  ///
+  /// ⚠️ 不能只记「是否 hover 选中项」这个 bool：web 的扫光选择器是
+  /// `.has-auroraqua-highlight:hover > .auroraqua-nav-highlight::after`，**CSS 每帧实时求值**；
+  /// 而 Flutter 的 `MouseRegion.onEnter/onExit` 只在指针移动时触发 →
+  /// 「指针静止、点击后高亮滑到指针下」会漏掉（同 AylaDirectoryFilters 的注释，profile_and_filters.dart:344–354）。
   AylaPrimaryModule? _hoveredModule;
+
+  /// **按压中**的模块（驱动容器级胶囊同步 `.98`）。
+  ///
+  /// web 的胶囊是按钮的**子元素** → 按钮 `:active { scale: .98 }` 时胶囊跟着缩；
+  /// 本实现为支持共享迁移把胶囊放在容器级，故必须显式同步
+  /// （范本：profile_and_filters.dart:356–360 + 568–578）。
+  AylaPrimaryModule? _pressedModule;
+
+  /// 直达高亮 State 的 key —— 「指针进入选中项」时**当场**启动扫光，
+  /// 不经父级 setState → rebuild 的 1 帧往返（对齐 web `:hover` 原生响应）。
+  final GlobalKey<AylaNavHighlightState> _moduleHighlightKey =
+      GlobalKey<AylaNavHighlightState>();
 
   /// 浮层锚点：等价 web 的「`position: relative` wrap + `absolute; top: calc(100% + 8px); right: 0`」。
   /// 用 [LayerLink] 让浮层**跟随锚点**，不再手算全局坐标（手算会导致错位）。
@@ -433,17 +451,26 @@ class _AylaTopNavState extends State<AylaTopNav> {
               top: r.top,
               width: r.width,
               height: r.height,
-              child: AylaNavHighlight(
-                radiusValue: BorderRadius.circular(AylaRadii.rInput),
-                // 白边走库内默认（showBorder: true = `border: 1px solid --glass-border`，
-                // auroraqua.css:186）；此前误传 false ⇒ 用户「看不出来有白边」。
-                // TODO(待补)：胶囊按压同步 `.98` —— 等价 `AylaDirectoryFilters`
-                // 的 AnimatedScale（profile_and_filters.dart:568–578）。胶囊在容器级，
-                // 不会自动继承项的按压缩放；需再跟踪 _pressedModule 后补上。
-                sweep: true,
-                // CSS：`.has-auroraqua-highlight:hover > .auroraqua-nav-highlight`
-                // → 指针所在项 == 选中项时扫光（每帧求值，故「高亮滑到静止指针下」也触发）
-                sweepActive: _hoveredModule != null && _hoveredModule == widget.module,
+              // `:active → scale: .98` —— web 的胶囊是**按钮的子元素**（`inset: 0`），
+              // 按钮按下缩放时胶囊**跟着缩**；本实现为支持共享迁移把胶囊放在容器级，
+              // 不会自动继承 → 需在此同步同样的缩放（复刻范本 AylaDirectoryFilters 的
+              // 做法，profile_and_filters.dart:568–578）。
+              child: AnimatedScale(
+                duration: AylaDurations.button, // transition 200ms
+                curve: AylaCurves.auroraqua, // --auroraqua-ease
+                scale: _pressedModule != null && _pressedModule == widget.module
+                    ? 0.98
+                    : 1.0,
+                child: AylaNavHighlight(
+                  key: _moduleHighlightKey, // 供 onSweep 直达（省 1 帧）
+                  radiusValue: BorderRadius.circular(AylaRadii.rInput),
+                  // 白边走库内默认（showBorder: true = `border: 1px solid --glass-border`，
+                  // auroraqua.css:186）；此前误传 false ⇒ 用户「看不出来有白边」。
+                  sweep: true,
+                  // CSS：`.has-auroraqua-highlight:hover > .auroraqua-nav-highlight`
+                  // → 指针所在项 == 选中项时扫光（**每帧求值**，故「高亮滑到静止指针下」也触发）
+                  sweepActive: _hoveredModule != null && _hoveredModule == widget.module,
+                ),
               ),
             ),
           Row(
@@ -501,9 +528,26 @@ class _AylaTopNavState extends State<AylaTopNav> {
 
     // 悬停冰蓝底（`shell.css:207–210`）：`transition: background 180ms --ease-out`
     final bool hovered = _hoveredModule == m;
+    // 复刻范本 AylaDirectoryFilters 的选项卡交互（profile_and_filters.dart:861–898）：
+    //   ① hover 上报（驱动容器级胶囊扫光的每帧求值）；
+    //   ② 本项**就是选中项**时，在 MouseRegion 里**当场**驱动扫光（省掉父级 rebuild 的 1 帧）；
+    //   ③ Listener 上报按压态（驱动容器级胶囊同步 `.98`）。
     return MouseRegion(
-      onEnter: (_) => setState(() => _hoveredModule = m),
-      onExit: (_) => setState(() => _hoveredModule = null),
+      onEnter: (_) {
+        setState(() => _hoveredModule = m);
+        if (active) {
+          _moduleHighlightKey.currentState?.setSweep(true);
+        }
+      },
+      onExit: (_) {
+        setState(() {
+          _hoveredModule = null;
+          if (_pressedModule == m) _pressedModule = null;
+        });
+        if (active) {
+          _moduleHighlightKey.currentState?.setSweep(false);
+        }
+      },
       child: SizedBox(
         key: _moduleKeys[m], // 供胶囊实测（项宽由内容决定）
         // ⚠️ 必须**固定** 44：web 是 `min-height: 44px` + 内容高（≈22）⇒ 按钮高 44；
@@ -511,16 +555,34 @@ class _AylaTopNavState extends State<AylaTopNav> {
         // 胶囊随之变成 64 高（2026-09-20 用户实测指出「圆角块比我大」，实测 76.5×64）。
         height: 44, // auroraqua:258
         child: AylaPressScale(
-          onTap: widget.onModuleTap == null ? null : () => widget.onModuleTap!(m),
+          onTap: widget.onModuleTap == null
+              ? null
+              : () {
+                  // **挂载即命中**（对齐 web，同范本 profile_and_filters.dart:533–550）：
+                  // 点击的是「指针已经在上面」的 tab 时，web 上胶囊被挂载到该项，`:hover`
+                  // 从第一帧就匹配 → 首次绘制即 `translateX(120%)`（右侧界外），**不产生 transition**；
+                  // 随后鼠标移走 → `120% → -120%` → 跑出完整一次「从右往左」扫光。
+                  // 用 `jump: true` 把进度直接置 1.0 复刻该语义（若用 forward()，行程会在
+                  // 点击后立刻被消耗，移走时回程几乎为零 → 看不到扫光）。
+                  _moduleHighlightKey.currentState?.setSweep(true, jump: true);
+                  widget.onModuleTap!(m);
+                },
           semanticLabel: m.label,
           hoverScale: false, // 导航组：只 :active scale .98（auroraqua:245–249）
+          // 按压态上报 → 容器级胶囊同步 `.98`（web 胶囊是按钮子元素，自动跟随）
+          onPressChanged: (bool pressed) {
+            setState(() => _pressedModule = pressed ? m : null);
+          },
           child: AnimatedContainer(
-            duration: AylaDurations.fast, // 180ms（--dur-fast）
-            curve: AylaCurves.easeOut,
+            // ⚠️ 覆写链：`shell.css:204–205` 给的是 `var(--dur-fast)`(180ms)，但
+            // `auroraqua.css:236–243` 的导航组（含 `.top-nav-module`）把它覆写为
+            // `background var(--auroraqua-duration) var(--auroraqua-ease)` = **300ms**。
+            duration: AylaDurations.auroraqua, // 300ms（auroraqua:238）
+            curve: AylaCurves.auroraqua,
             decoration: BoxDecoration(
               color: hovered && !active
                   ? AylaColors.ice500.withValues(alpha: 0.18)
-                  : Colors.transparent,
+                  : AylaColors.ice500.withValues(alpha: 0), // 同色相零透明
               borderRadius: BorderRadius.circular(AylaRadii.rInput),
             ),
             child: Center(child: inner),
@@ -559,6 +621,7 @@ class _AylaTopNavState extends State<AylaTopNav> {
           size: 20,
           onPressed: _toggleMenu,
           square: true, // 「更多」钮圆角是 radius-input（auroraqua:120）
+          sweep: true, // 唯一带扫光的图标钮（auroraqua.css:142–148）
         ),
       ],
     );
@@ -667,6 +730,7 @@ class _AylaTopNavState extends State<AylaTopNav> {
     bool active = false,
     int badge = 0,
     bool square = false,
+    bool sweep = false,
   }) {
     return Stack(
       key: wrapKey,
@@ -687,6 +751,9 @@ class _AylaTopNavState extends State<AylaTopNav> {
             icon: AylaIcon(aylaIconByName(iconName)!, size: size),
             onPressed: onPressed,
             square: square,
+            // 扫光只给「更多」钮（auroraqua.css:142–148 的选择器组）：
+            // `.top-nav-more > .top-nav-icon-btn` / `.narrow-topbar-more > .icon-btn-40`
+            sweep: sweep,
             semanticLabel: semanticLabel,
           ),
         ),
@@ -748,7 +815,20 @@ class _AylaTopNavState extends State<AylaTopNav> {
         ],
     };
 
-    // 窄屏条：无圆角 + 仅底部 1px 边（home.css:34–48）⇒ 复用 [GlassSurface] + override
+    // 入场动画（`auroraqua.css:412–424`）：`@media (max-width:768px)` 内 `.narrow-topbar`
+    // 与一批「窄屏顶栏类」元素共用 `auroraqua-panel-from-top` ——
+    // 关键帧（auroraqua.css:18–21）：`from { opacity: 0; translate: 0 -20px } → to { … 0 0 }`，
+    // 时长/曲线 `var(--auroraqua-duration)`(300ms) `var(--auroraqua-ease-out)`；
+    // reduced-motion 由 `AylaRevealItem` 内部处理（auroraqua.css:631 亦有开关）。
+    // 复用现成件 [AylaRevealItem]（offset 上入 20px = 同一关键帧语义）。
+    return AylaRevealItem(
+      offset: const Offset(0, -AylaRevealMotion.distance), // `translate: 0 -20px`
+      child: _narrowBar(context, items),
+    );
+  }
+
+  /// 窄屏条本体：无圆角 + 仅底部 1px 边（home.css:34–48）⇒ 复用 [GlassSurface] + override。
+  Widget _narrowBar(BuildContext context, List<Widget> items) {
     return GlassSurface(
       blur: AylaGlass.blurNav,
       shadow: const <BoxShadow>[], // 窄屏条未声明阴影
@@ -793,6 +873,7 @@ class _AylaTopNavState extends State<AylaTopNav> {
       size: 20,
       onPressed: _toggleMenu,
       square: true,
+      sweep: true, // `.narrow-topbar-more > .icon-btn-40` 在扫光组（auroraqua:142–148）
     );
   }
 
@@ -1011,7 +1092,6 @@ class _AylaTopNavState extends State<AylaTopNav> {
   /// 「更多」菜单（shell.css:354–391 / home.css:136–179）：
   /// `--glass-bg-strong` + `radius-card` + `padding sp2` + `min-width 160` + 菜单项高 40 / 14/600。
   Widget _menuContent(BuildContext context) {
-    final AylaTextStyles t = AylaTextStyles.of(context);
     return GlassSurface(
       strong: true, // --glass-bg-strong
       radius: AylaRadii.rCard,
@@ -1024,31 +1104,12 @@ class _AylaTopNavState extends State<AylaTopNav> {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             for (final AylaTopNavMenuAction a in AylaTopNavMenuAction.values)
-              AylaPressScale(
+              _TopNavMenuItem(
+                label: a.label,
                 onTap: () {
                   _closeOverlay();
                   widget.onMenuSelected?.call(a);
                 },
-                semanticLabel: a.label,
-                child: SizedBox(
-                  height: 40,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AylaSpacing.sp3,
-                    ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        a.label,
-                        style: t.body.copyWith(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600, // shell.css:385 font-weight 600
-                          color: AylaColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
               ),
           ],
         ),
@@ -1159,6 +1220,63 @@ class _AylaTopNavState extends State<AylaTopNav> {
   }
 }
 
+/// 顶栏「更多」菜单项（`shell.css:377–391`）：
+/// `height: 40px` / `padding: 0 sp3` / `border-radius: var(--radius-input)` /
+/// `font-size: 14px` / `font-weight: 600` / `color: --text-primary`；
+/// `:hover → background: rgba(157,191,230,.18)`。
+///
+/// 复用范本 `conversation_more_menu.dart` 的 `_MenuItem`（同款 hover 语义 +
+/// **同色相零透明**做法：透明黑参与插值会闪灰，见该文件 705–715 注释）。
+class _TopNavMenuItem extends StatefulWidget {
+  const _TopNavMenuItem({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_TopNavMenuItem> createState() => _TopNavMenuItemState();
+}
+
+class _TopNavMenuItemState extends State<_TopNavMenuItem> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: AylaDurations.fast, // transition 180ms --ease-out
+          curve: AylaCurves.easeOut,
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp3),
+          decoration: BoxDecoration(
+            color: _hovered
+                ? AylaColors.ice500.withValues(alpha: 0.18)
+                : AylaColors.ice500.withValues(alpha: 0), // 同色相零透明
+            borderRadius: BorderRadius.circular(AylaRadii.rInput),
+          ),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              widget.label,
+              style: t.body.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w600, // shell.css:385
+                color: AylaColors.textPrimary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 /// 搜索框尾部按钮（`search.css:413–441`）：40×40 圆形、无边框、
 /// `--dur-fast --ease-out` 过渡；hover 冰蓝 `.18`（clear 再转 `--text-primary`）。
 class _SearchTailButton extends StatefulWidget {
