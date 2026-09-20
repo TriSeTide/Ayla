@@ -9,24 +9,11 @@
 /// 不猜测、不造默认值（认知零规则：不得把"未知"伪装成某个具体值）。
 library;
 
-/// 媒体种类（`types.ts:186`）。
-enum AylaMediaKind {
-  image,
-  voice,
-  file,
-  emoji,
-  video;
+import 'media_kind.dart';
 
-  /// 未知种类返回 null（**不 fallback 成 image**）。
-  static AylaMediaKind? parse(String? raw) => switch (raw) {
-        'image' => AylaMediaKind.image,
-        'voice' => AylaMediaKind.voice,
-        'file' => AylaMediaKind.file,
-        'emoji' => AylaMediaKind.emoji,
-        'video' => AylaMediaKind.video,
-        _ => null,
-      };
-}
+// 媒体种类定义在 `media_kind.dart`（2026-09-20 抽出，供 core/media 复用）；
+// 这里 re-export，保持既有 `import '.../post.dart'` 调用点不变。
+export 'media_kind.dart';
 
 /// 帖子可见性（`types.ts:1227`：public / friends / group）。
 ///
