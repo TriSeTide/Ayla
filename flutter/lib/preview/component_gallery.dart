@@ -1038,13 +1038,24 @@ class _ResourceImageDemo extends StatelessWidget {
             src: expiredOriginal,
             alt: '图',
             expiredBadge: true,
+            ignoreSampleMedia: true, // 状态演示，不被示例图盖掉
           ),
         ),
         cell(
           '完全过期 → 「已过期」占位',
-          const ResourceImage(src: fullyExpired, alt: '图'),
+          const ResourceImage(
+            src: fullyExpired,
+            alt: '图',
+            ignoreSampleMedia: true,
+          ),
         ),
-        cell('装饰图（alt="" → 过期不提示）', const ResourceImage(src: fullyExpired)),
+        cell(
+          '装饰图（alt="" → 过期不提示）',
+          const ResourceImage(
+            src: fullyExpired,
+            ignoreSampleMedia: true,
+          ),
+        ),
       ],
     );
   }

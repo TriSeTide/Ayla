@@ -69,6 +69,7 @@ class ResourceImage extends StatefulWidget {
     this.expiredBadge = false,
     this.reserveSpaceWhileLoading = true,
     this.previewImage,
+    this.ignoreSampleMedia = false,
   });
 
   /// 图片地址（可为 `/api/v1/media/<id>/content` 或外部 URL）。
@@ -105,6 +106,14 @@ class ResourceImage extends StatefulWidget {
   /// 生产调用点一律不传 —— 示例数据不得进入产品路径。
   final ImageProvider? previewImage;
 
+  /// 忽略预览示例媒体开关（**演示过期/失败/装饰静默等特殊态的样张专用**）。
+  ///
+  /// 默认 false。置 true 时即便 [aylaSampleMediaEnabled] 打开也走真实链路 ——
+  /// 否则「原图已过期 / 完全过期 / 装饰图失败静默」这些样张会被示例图盖成
+  /// 「正常图片」，把要演示的状态演示没了（2026-09-20 用户点名）。
+  /// [previewImage] 非空时仍以显式注入为准。
+  final bool ignoreSampleMedia;
+
   @override
   State<ResourceImage> createState() => _ResourceImageState();
 }
@@ -140,6 +149,8 @@ class _ResourceImageState extends State<ResourceImage> {
   ImageProvider? get _injectedImage {
     final ImageProvider? explicit = widget.previewImage;
     if (explicit != null) return explicit;
+    // 演示特殊态的样张强制走真实链路（过期/失败/装饰静默不能被示例图盖掉）
+    if (widget.ignoreSampleMedia) return null;
     if (aylaSampleMediaEnabled) return aylaSampleImageFor(widget.src);
     return null;
   }
@@ -508,15 +519,24 @@ Widget previewResourceImage() {
             src: expiredOriginal,
             alt: '图',
             expiredBadge: true, // 必须为 true 才显示角标（同 web）
+            // 状态演示：不能被预览示例图盖成「正常图片」
+            ignoreSampleMedia: true,
           ),
         ),
         cell(
           '完全过期 → 「已过期」占位（不重试）',
-          const ResourceImage(src: fullyExpired, alt: '图'),
+          const ResourceImage(
+            src: fullyExpired,
+            alt: '图',
+            ignoreSampleMedia: true,
+          ),
         ),
         cell(
           '装饰图（alt="" → 过期不提示）',
-          const ResourceImage(src: fullyExpired), // alt 默认 ''
+          const ResourceImage(
+            src: fullyExpired, // alt 默认 ''
+            ignoreSampleMedia: true,
+          ),
         ),
       ],
     ),
