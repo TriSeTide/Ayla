@@ -119,7 +119,7 @@ void main() {
         title: '标题',
         body: long,
       );
-      expect(truncated.subtitle, List<String>.filled(24, 'a').join() + '\u2026');
+      expect(truncated.subtitle, '${List<String>.filled(24, 'a').join()}\u2026');
       expect(
         AylaSharePayload.post(id: '44', title: 't', body: '   ').subtitle,
         isNull,

@@ -1182,12 +1182,19 @@ Widget _shareStage({
       SizedBox(
         width: size.width,
         height: size.height,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AylaRadii.rCard),
-          child: MediaQuery(
-            data: MediaQueryData(size: size),
-            child: child,
-          ),
+        child: Builder(
+          builder: (BuildContext context) {
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(AylaRadii.rCard),
+              // ⚠️ 必须 `copyWith`：凭空 `MediaQueryData(size:)` 会丢掉真实环境的
+              // textScaler / padding / gestureSettings 等字段，web 的滚动条与手势
+              // 路径会读到它们（本项在 web 预览里出现过运行期报错，2026-09-20）。
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(size: size),
+                child: child,
+              ),
+            );
+          },
         ),
       ),
     ],
