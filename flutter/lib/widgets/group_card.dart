@@ -33,6 +33,7 @@ import '../theme/app_theme.dart';
 import '../theme/css_gradient.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'avatar_status_badges.dart';
@@ -1453,6 +1454,8 @@ class AylaGroupList extends StatelessWidget {
   wrapper: previewTheme,
 )
 Widget previewGroupCardsNarrow() {
+  // 封面示例图：程序生成（外链 picsum 本机不可达，原先封面对空）
+  aylaEnableSampleMedia();
   // ⚠️ 预览用**外部占位图 URL**（picsum.photos）呈现 `object-fit: cover` 的真实观感；
   // 真实数据来自后端媒体接口（`/api/v1/media/<id>/` 短时签名），签名链路属
   // 媒体批次——届时替换 URL 来源即可，组件无需改动。

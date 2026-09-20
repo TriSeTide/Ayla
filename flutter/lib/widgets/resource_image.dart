@@ -483,6 +483,9 @@ class _ExpiredBadge extends StatelessWidget {
   wrapper: previewTheme,
 )
 Widget previewResourceImage() {
+  // 示例图：程序生成（外链 picsum 本机不可达）；过期/装饰 cell 用
+  // ignoreSampleMedia: true 保持真实状态演示
+  aylaEnableSampleMedia();
   // 注入假 client：演示签名链路的降级分支
   MediaSigner.instance.attach(_PreviewMediaClient());
   const String ok = 'https://picsum.photos/seed/ayla-ri/240/180';
