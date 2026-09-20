@@ -707,7 +707,14 @@ class GlassButton extends StatefulWidget {
     this.padding = const EdgeInsets.symmetric(horizontal: AylaSpacing.sp6),
     this.expand = false,
     this.semanticLabel,
+    this.glowHover = false,
   });
+
+  /// hover 态改走 **glow 边 + 粉辉光**（web `.post-editor-image-btn:hover
+  /// { border-color: var(--glow-500); box-shadow: var(--glow-shadow) }`，
+  /// posts.css 410–414）：与 ghost 默认的「冰蓝底 + button-hover 阴影」不同，
+  /// 供帖子编辑器「图片/视频」等媒体选择钮使用。
+  final bool glowHover;
 
   /// 文案。
   final String label;
@@ -804,13 +811,18 @@ class _GlassButtonState extends State<GlassButton>
         shadow = narrow ? AylaShadows.glowNarrow : AylaShadows.glow;
       case GlassButtonVariant.ghost:
         // auroraqua 覆写：glass-bg + glass-border + button 阴影 + blur(8px)
-        background = hovered
+        // glowHover（.post-editor-image-btn）：hover 不改底色，只换 glow 边 + 粉辉光
+        background = (hovered && !widget.glowHover)
             ? AylaColors.ice500.withValues(alpha: 0.18) // :hover rgba(157,191,230,.18)
             : GlassConfig.resolveBackground(strong: false);
         foreground = AylaColors.indigo700;
-        borderColor = AylaColors.glassBorder; // auroraqua 覆写 --glass-border
+        borderColor = (hovered && widget.glowHover)
+            ? AylaColors.glow500 // :hover border-color: var(--glow-500)
+            : AylaColors.glassBorder; // auroraqua 覆写 --glass-border
         gradient = null;
-        shadow = hovered ? AylaShadows.buttonHover : AylaShadows.button;
+        shadow = (hovered && widget.glowHover)
+            ? AylaShadows.glow
+            : (hovered ? AylaShadows.buttonHover : AylaShadows.button);
       case GlassButtonVariant.destructive:
         // `.btn-destructive { background: var(--destructive); color: #fffafb }`
         // 无边框、无阴影（web 未声明）；hover 走下方 brightness(1.06) 滤镜分支
@@ -1135,6 +1147,8 @@ class GlassInput extends StatefulWidget {
     this.inputFormatters,
     this.maxLength,
     this.onChanged,
+    this.minLines,
+    this.maxLines,
   });
 
   /// 文本控制器。
@@ -1197,6 +1211,13 @@ class GlassInput extends StatefulWidget {
 
   /// 输入变化回调（供调用方按内容启用/禁用提交按钮）。
   final ValueChanged<String>? onChanged;
+
+  /// 文本域最小行数（web `<textarea rows>`；null = 单行输入框）。
+  final int? minLines;
+
+  /// 文本域最大行数（web `rows` + `resize: vertical`；null = 单行、>1 可换行）。
+
+  final int? maxLines;
 
   @override
   State<GlassInput> createState() => _GlassInputState();
@@ -1288,6 +1309,11 @@ class _GlassInputState extends State<GlassInput> {
         inputFormatters: widget.inputFormatters,
         maxLength: widget.maxLength,
         onChanged: widget.onChanged,
+        minLines: widget.minLines,
+        // ⚠️ TextField 的 maxLines 语义：**null = 不限行数**（不是默认单行）——
+        // 直接透传 null 会把所有单行字段变成多行（实测：隐私设置校验/画布冒烟全崩）。
+        // 故未显式传时统一回落 1（= TextField 默认单行）。
+        maxLines: widget.maxLines ?? 1,
         cursorColor: AylaColors.indigo700,
         style: widget.textStyle ??
             text.body.copyWith(color: AylaColors.textPrimary),

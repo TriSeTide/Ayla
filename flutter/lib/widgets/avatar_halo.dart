@@ -25,6 +25,7 @@ import 'package:flutter/widget_previews.dart';
 import '../theme/css_gradient.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
+import 'resource_image.dart';
 
 /// 头像形状。
 enum AvatarCore {
@@ -191,19 +192,27 @@ class _AvatarHaloState extends State<AvatarHalo>
         : Stack(
             fit: StackFit.expand,
             children: <Widget>[
-              // 图片加载失败回退文字首字
+              // 图片走组件库 ResourceImage（**2026-09-20 B5 前置修复**）：
+              // web `Avatar.tsx:46–48` 用的是 ResourceImage → 媒体头像
+              // （/api/v1/media/<id>/content）需要签名，裸 `Image.network`
+              // 会 401 破图。ResourceImage 对非媒体 URL 直接加载、对媒体路径
+              // 走 MediaSigner 签名 + 过期重签，语义与 web 一致。
+              // 失败/加载中回退文字首字（`alt: ''` = 装饰图，只渲染 fallback）。
               ClipOval(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient:
                         cssLinearGradient(angleDeg: 135, colors: coreColors),
                   ),
-                  child: Image.network(
-                    widget.resourceUrl!,
+                  child: ResourceImage(
+                    src: widget.resourceUrl!,
+                    alt: '',
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Center(
+                    fallback: Center(
                       child: Text(
-                        widget.label.isEmpty ? '?' : widget.label.characters.first,
+                        widget.label.isEmpty
+                            ? '?'
+                            : widget.label.characters.first,
                         style: TextStyle(
                           fontFamily: AylaFonts.display,
                           fontFamilyFallback: AylaFonts.cjkFallback,

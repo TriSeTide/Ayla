@@ -38,6 +38,8 @@ import '../core/media/media_signer.dart';
 import '../core/net/dio_client.dart';
 import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
+import '../widgets/post_card.dart';
+import '../widgets/post_editor.dart';
 import '../widgets/primitives.dart';
 import '../widgets/reveal.dart';
 import '../widgets/tab_badge.dart';
@@ -272,6 +274,26 @@ class ComponentGallery extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 帖子卡族（B5） ----------
+          _Section(
+            title:
+                'AylaPostCard / AylaPostVideoCover（PostCard.tsx + posts.css 9–217 + typed-result-cards.css 5,7）',
+            source:
+                'glass-bg + 16 圆角 + overflow hidden · hover（父级）translate -2px + shadow-hover + brightness 1.01 · active scale .99 · 正文 15/1.55 三行折叠 · 1 图 contain max-h 240 / 多图 3 列 gap 4 · 底排：查看帖子(12 secondary) + 统计(Space Grotesk 12) + 收藏(compact) + 分享(纯圆钮 40) · 排列：>1025 两列瀑布（轨道 1200 / 列距 12）/ <=1024 单列',
+            child: aylaPostCardSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 发帖编辑器（B5） ----------
+          _Section(
+            title:
+                'AylaPostEditor（PostEditor.tsx + posts.css 219–418 + auroraqua.css 105–166）',
+            source:
+                '三形态：常规 / 群内 collapsible 收起 / 展开 · padding sp3（collapsible sp2 sp3）· 展开 max-height min(90vh,1000px) · 收起钮 32 圆 · 标题 min-h 40 · 正文 展开 rows4/min-h 64、收起 单行 40 · 媒体块 128 方角（web --radius-md 未定义）、移除钮 28 圆 · 进度条 4px pill pink-500 · 图片/视频钮 glass 亮边 + hover glow（glowHover）· 可见性复用 AylaVisibilitySelector（群内 lockGroup）',
+            child: aylaPostEditorSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

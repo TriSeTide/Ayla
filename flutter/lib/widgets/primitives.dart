@@ -885,6 +885,12 @@ class AylaCapsuleTag extends StatelessWidget {
     this.tone = CapsuleTone.sakura,
     this.icon,
     this.semanticLabel,
+    this.padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    this.fontFamily = AylaFonts.display,
+    this.fontSize = 12,
+    this.fontWeight = FontWeight.w500,
+    this.letterSpacing = 0.4,
+    this.textHeight,
   });
 
   /// 文案。
@@ -898,6 +904,24 @@ class AylaCapsuleTag extends StatelessWidget {
 
   /// 可访问性标签。
   final String? semanticLabel;
+
+  /// 内边距（默认 sakura 档 14×6；其他站点按各自 CSS 覆写）。
+  final EdgeInsetsGeometry padding;
+
+  /// 字体族（默认 Fredoka；`.post-card-tag` 用 Space Grotesk）。
+  final String fontFamily;
+
+  /// 字号（默认 12；`.post-card-tag` 11、`.search-chip` 13）。
+  final double fontSize;
+
+  /// 字重（默认 w500；`.post-card-tag` 600）。
+  final FontWeight fontWeight;
+
+  /// 字距（默认 0.4；`.post-card-tag` 未声明 → 0）。
+  final double letterSpacing;
+
+  /// 行高倍数（null = 字体默认；`.post-card-tag` 继承 body 的 1.55）。
+  final double? textHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -930,7 +954,7 @@ class AylaCapsuleTag extends StatelessWidget {
     return Semantics(
       label: semanticLabel ?? label,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: padding,
         decoration: BoxDecoration(
           color: bg,
           borderRadius: AylaRadii.pill,
@@ -943,16 +967,23 @@ class AylaCapsuleTag extends StatelessWidget {
               IconTheme(data: IconThemeData(color: fg, size: 12), child: icon!),
               const SizedBox(width: AylaSpacing.sp1),
             ],
-            Text(
-              label,
-              maxLines: 1,
-              style: TextStyle(
-                fontFamily: AylaFonts.display,
-                fontFamilyFallback: AylaFonts.cjkFallback,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.4,
-                color: fg,
+            // ⚠️ 必须用 Flexible 包住：胶囊放进窄容器（Wrap 的某一列 / 卡片右组）时，
+            // 裸 Text 会以固有宽度撑破内层 Row（实测 `RenderFlex overflowed by 12px`）。
+            // web 的胶囊是 inline 元素、由容器决定换行/裁剪，这里等价表达为「收缩 + 省略号」。
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: fontFamily,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
+                  fontSize: fontSize,
+                  fontWeight: fontWeight,
+                  letterSpacing: letterSpacing,
+                  height: textHeight,
+                  color: fg,
+                ),
               ),
             ),
           ],

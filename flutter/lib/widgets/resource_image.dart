@@ -39,6 +39,10 @@ const String kApiPrefix = '/api/v1';
 /// 媒体路径前缀（`api/media.ts` 的 `MEDIA_PATH_PREFIX`）。
 const String kMediaPathPrefix = '$kApiPrefix/media/';
 
+/// 媒体内容路径（web `api/media.ts:12–14` `mediaContentUrl` 同源）。
+String mediaContentUrl(String mediaId) =>
+    '$kApiPrefix/media/${Uri.encodeComponent(mediaId)}/content';
+
 /// 从媒体 URL 提取 media_id（`extractMediaId`）。
 ///
 /// 仅识别 `/api/v1/media/<id>/...` 形式；非媒体路径返回 null（外部资源直接加载）。

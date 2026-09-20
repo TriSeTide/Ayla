@@ -66,7 +66,17 @@ class AylaIcon extends StatelessWidget {
         size: Size.square(size),
         painter: _AylaIconPainter(
           icon,
-          color ?? AylaColors.textPrimary,
+          // 颜色解析顺序：显式 color → 祖先 IconTheme（按钮族用 IconTheme 传前景色，
+          // 例如 GlassButton primary 的 #fffafb、AylaMsgActionButton 的 fg、
+          // AylaCreateFab 的 surface）→ 默认 text-primary。
+          //
+          // ⚠️ 必须用 IconTheme.maybeOf：IconTheme.of 在无祖先时返回
+          // IconThemeData.fallback()（**黑色**），会让全站默认图标从 indigo 变黑
+          // （2026-09-20 实测：此前 AylaIcon 完全忽略 IconTheme，导致
+          // GlassButton 里的纸飞机图标用 indigo 画在 indigo 底上 → 肉眼不可见）。
+          color ??
+              context.dependOnInheritedWidgetOfExactType<IconTheme>()?.data.color ??
+              AylaColors.textPrimary,
           filledOverride: filled,
         ),
       ),
