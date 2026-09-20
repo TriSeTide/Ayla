@@ -385,6 +385,7 @@ class AylaModalCard extends StatefulWidget {
     this.padding,
     this.narrowRadius = 24,
     this.scrollable = true,
+    this.wideEntrance = false,
   });
 
   /// 内容。
@@ -405,6 +406,22 @@ class AylaModalCard extends StatefulWidget {
 
   /// 内容是否整体可滚（create-sheet true；privacy-sheet false → head 固定）。
   final bool scrollable;
+
+  /// 宽屏入场（opacity 淡入 + 缩放 + 下移）。
+  ///
+  /// 事实源：`components/share/ShareSheet.tsx` 的 framer-motion ——
+  /// `initial { opacity: 0, scale: 0.96, y: 12 }` →
+  /// `animate { opacity: 1, scale: 1, y: 0 }`，`250ms --ease-out`。
+  ///
+  /// 默认 false：create-sheet / privacy-sheet 宽屏无入场（privacy-sheet 的
+  /// -12px 下落由调用方自行处理），保持既有行为不变。
+  final bool wideEntrance;
+
+  /// 宽屏入场初始缩放（web `initial.scale`）。
+  static const double wideEnterScaleFrom = 0.96;
+
+  /// 宽屏入场初始下移 px（web `initial.y`）。
+  static const double wideEnterOffsetY = 12;
 
   /// 宽（`width: min(480px, 100%)`）。
   static const double maxWidth = 480;
@@ -535,9 +552,32 @@ class _AylaModalCardState extends State<AylaModalCard>
       ),
     );
 
-    // 窄屏上滑入场（`@keyframes create-sheet-slide-in`：translateY(100% → 0)）；
-    // 宽屏无位移（PrivacySheet 用 -12px 下落，由调用方自行处理）
-    if (!narrow) return card;
+    // 宽屏入场（仅 [wideEntrance] 时）：opacity 0→1 + scale .96→1 + y 12→0，
+    // 250ms --ease-out（controller 已是 250ms）。
+    // ⚠️ Opacity(<1) 会建离屏层，但 250ms 结束即 v == 1.0 —— RenderOpacity
+    // 在 alpha == 255 时跳过 layer，卡内 BackdropFilter 不会长期退化。
+    if (!narrow) {
+      if (!widget.wideEntrance) return card;
+      return AnimatedBuilder(
+        animation: _slide,
+        builder: (BuildContext context, Widget? child) {
+          final double v = AylaCurves.easeOut.transform(_slide.value);
+          return Opacity(
+            opacity: v,
+            child: Transform.translate(
+              offset: Offset(0, (1 - v) * AylaModalCard.wideEnterOffsetY),
+              child: Transform.scale(
+                scale: AylaModalCard.wideEnterScaleFrom +
+                    (1 - AylaModalCard.wideEnterScaleFrom) * v,
+                child: child,
+              ),
+            ),
+          );
+        },
+        child: card,
+      );
+    }
+    // 窄屏上滑入场（`@keyframes create-sheet-slide-in`：translateY(100% → 0)，250ms）
     return AnimatedBuilder(
       animation: _slide,
       builder: (BuildContext context, Widget? child) {

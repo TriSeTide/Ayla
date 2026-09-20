@@ -1,6 +1,6 @@
-/// TabBadge —— 未读/计数徽标（三档真实规格，一处实现）。
+/// TabBadge —— 未读/计数徽标（四档真实规格，一处实现）。
 ///
-/// 事实源（**web 是三个不同类，规格并不完全一致**；2026-09-20 组件库审查 R8 之前，
+/// 事实源（**web 是四个不同类，规格并不完全一致**；2026-09-20 组件库审查 R8 之前，
 /// 库内是 3 份各自实现：`TabBadge` / `_UnreadBadge` / `_TabBadgeInline`）：
 ///
 /// | metrics | web 类 | 盒模型 | 字体 | 定位 |
@@ -8,6 +8,7 @@
 /// | [TabBadgeMetrics.tab] | shell.css 579–593 `.tab-badge` | min 16×16 / padding 0 4 / pill | Fredoka 11 w500 | 绝对 `top -4 right -12`（宿主须为 Stack） |
 /// | [TabBadgeMetrics.groupBadge] | home.css 302–317 `.group-badge(-unread)` | min 16×16 / padding 0 4 / pill | Fredoka 11（未声明 font-weight） | 行内（Row 里排在文案后） |
 /// | [TabBadgeMetrics.messages] | messages.css 43–55 `.messages-tab-badge` | min 18×18 / padding 0 5 / pill + `--glow-shadow` | Space Grotesk 11 | 行内 |
+/// | [TabBadgeMetrics.shareUnread] | share.css 130–143 `.share-sheet-unread` | min 18×18 / padding 0 5 / pill，**无辉光** | Space Grotesk 11 | 行内（分享目标行） |
 ///
 /// 数字 > [max] 显示 `max+`（消息中心红点语义，d:§12.14）。
 library;
@@ -18,7 +19,7 @@ import 'package:flutter/widget_previews.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 
-/// 徽标度量档位（对应 web 三个类；**不是「统一规格」**，见文件头表格）。
+/// 徽标度量档位（对应 web 四个类；**不是「统一规格」**，见文件头表格）。
 enum TabBadgeMetrics {
   /// `.tab-badge`（shell.css 579–593）：16×16 / padding 0 4 / Fredoka 11 w500。
   tab(
@@ -47,6 +48,17 @@ enum TabBadgeMetrics {
     fontFamily: AylaFonts.utility,
     fontWeight: FontWeight.w400,
     glow: true,
+  ),
+
+  /// `.share-sheet-unread`（share.css 130–143）：18×18 / padding 0 5 /
+  /// Space Grotesk 11（web 未声明 font-weight → 继承正文常规字重）/ **无辉光**。
+  /// 文字色是 `#fff` 纯白（配 [TabBadge.foregroundColor]），非 `--surface`。
+  shareUnread(
+    minSize: 18,
+    horizontalPadding: 5,
+    fontFamily: AylaFonts.utility,
+    fontWeight: FontWeight.w400,
+    glow: false,
   );
 
   const TabBadgeMetrics({
@@ -90,6 +102,7 @@ class TabBadge extends StatelessWidget {
     this.max = 99,
     this.metrics = TabBadgeMetrics.tab,
     this.placement = TabBadgePlacement.positioned,
+    this.foregroundColor,
   });
 
   /// 未读数（>0 才渲染；≤0 返回空）。
@@ -103,6 +116,12 @@ class TabBadge extends StatelessWidget {
 
   /// 定位方式。
   final TabBadgePlacement placement;
+
+  /// 文字色覆写（默认 `--surface` #fffafb）。
+  ///
+  /// `.share-sheet-unread`（share.css 141）用 **`#fff` 纯白**，与其余档位的
+  /// `#fffafb` 不同，故按处覆写而不改基类默认值。
+  final Color? foregroundColor;
 
   @override
   Widget build(BuildContext context) {
@@ -138,7 +157,7 @@ class TabBadge extends StatelessWidget {
                 fontSize: 11, // font-size: 11px
                 height: 1, // line-height: 1（16px 与 18px 两档的等比表达）
                 fontWeight: metrics.fontWeight,
-                color: AylaColors.surface, // color: #fffafb
+                color: foregroundColor ?? AylaColors.surface, // #fffafb（share 档 #fff）
               ),
             ),
           ),

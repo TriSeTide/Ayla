@@ -44,6 +44,7 @@ import '../widgets/post_card.dart';
 import '../widgets/post_editor.dart';
 import '../widgets/primitives.dart';
 import '../widgets/reveal.dart';
+import '../widgets/share.dart';
 import '../widgets/tab_badge.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
@@ -316,6 +317,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '遮罩 --overlay-dim-strong + blur(8)（无 saturate）· 入场 opacity 180ms --ease-out · 关闭钮 40 圆 · 舞台 max min(92vw,1200) / 82vh · 图片 contain + radius-input + --surface + --card-shadow · 导航 44 圆（blur12 saturate1.4，禁用 0.35）· 操作条 pill 玻璃（blur18）+ 计数（Space Grotesk 12/ls.5）+ 保存（IconDownload 16）· 失败提示 bottom 76 · 横滑阈值 1/3 或 300px/s+40px（useSwipeCommit）· 条目 enter x=±40% 250ms · 样张走 embedded（嵌入画布不做 backdrop 模糊，避免糊宿主页面）',
             child: aylaImageViewerSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 分享族（B5） ----------
+          _Section(
+            title:
+                'AylaShareSheet / AylaShareButton（ShareSheet.tsx + ShareButton.tsx + share.css 1–275）',
+            source:
+                '遮罩 --overlay-dim + padding 24 居中；窄屏 60dvh 贴底（上沿 radius-panel、去左右下边框、safe-area）· 卡 min(480,100%) + max-h min(80vh,720) + glass-bg-strong + blur24 sat1.4 + modal 阴影 + 宽屏入场 opacity/scale.96/y12 250ms ease-out · head sp4 + 底边 + 关闭 40 圆钮 · 预览条 8×12 + 28 圆 135deg ice→sakura + 14/600 单行省略 · 选项卡 2 列 gap8 / 40 高 / radius 10，选中 --nav-active-bg + --glass-shadow-compact（无边框、无扫光，只有文字色 200ms 过渡）· 行 min-h 48 / radius 12 / hover rgba(157,191,230,.18) / active .98 / 禁用 .6 · 子群缩进 52 + 8px ice-500 点 +「默认」sakura 胶囊 · 未读 18/pink-500/#fff 字 99+ 封顶 · 入口钮 = icon-btn-40 pill（无扫光）',
+            child: aylaShareSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
