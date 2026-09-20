@@ -30,6 +30,7 @@ import '../theme/tokens.dart';
 import '../widgets/avatar_halo.dart';
 import '../widgets/avatar_status_badges.dart';
 import '../widgets/bottom_tabs.dart';
+import '../widgets/group_top_tabs.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/directory_controls.dart';
 import '../widgets/privacy_sheet.dart';
@@ -339,13 +340,18 @@ class ComponentGallery extends StatelessWidget {
             title: 'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
             source:
                 '玻璃 64px + safe-area · **上沿 radius-panel 20 / 下方角**（auroraqua 252）+ 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 按钮 margin 4/2（auroraqua 254，胶囊随之内缩）· **容器级共享胶囊跨槽迁移 300ms**[0,0,.58,1] + hover 扫光 · 图标/文字 150ms 过渡 · 导航组 active .98、hover 不放大 · **F1 阶段不渲染红点**（badges 恒空）',
-            child: SizedBox(
-              width: 375,
-              child: AylaBottomTabs(module: AylaPrimaryModule.home),
-            ),
+            child: aylaBottomTabsSamples(), // 可交互：点 tab 看胶囊跨槽迁移
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
+          // ---------- Shell 顶栏（2026-09-20） ----------
+          _Section(
+            title: 'AylaGroupTopTabs（components/group/GroupTopTabs.tsx 1–125 + group.css 21–91）',
+            source:
+                '窄屏群场景顶栏（与底栏同构、中央换群头像）：玻璃 64 + 底部 1px 边 · blur18 saturate1.4 · **方角**（auroraqua 448 覆写 253 的 0 0 20 20）· `--glass-shadow-compact` · 五槽（语音|直播|头像|帖子|桌游）· 按钮 inline-flex 按内容宽（auroraqua 255 padding 6/12 + radius-input）· 选中共享胶囊**实测按钮矩形**跨槽迁移 300ms · hover 扫光 · 帖子 tab 8px 粉点（top 6 / 距中心右 18）· 入场「从底栏升起」由父级 translate 300ms --auroraqua-ease-out 注入',
+            child: aylaGroupTopTabsSamples(), // 可交互：点 tab 看胶囊迁移
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
           // ---------- 入场动画（2026-09-20 审查 R7：公共件） ----------
           _Section(
             title: 'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',

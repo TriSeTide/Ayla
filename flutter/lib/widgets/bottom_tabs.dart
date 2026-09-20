@@ -278,6 +278,36 @@ class _AylaBottomTabsState extends State<AylaBottomTabs> {
   }
 }
 
+// ======================= 画布样张（可交互） =======================
+
+/// 画布/预览用**可交互**样张：点任一 tab 切换选中，观察共享胶囊跨槽迁移（300ms）。
+///
+/// 组件本身是**受控**的（`module` + `onSelect`，与 web 的路由驱动一致）：样张若不传
+/// `onSelect`，`AylaPressScale` 处于 disabled，点击自然无响应（2026-09-20 用户实测）。
+Widget aylaBottomTabsSamples() => const _BottomTabsDemo();
+
+class _BottomTabsDemo extends StatefulWidget {
+  const _BottomTabsDemo();
+
+  @override
+  State<_BottomTabsDemo> createState() => _BottomTabsDemoState();
+}
+
+class _BottomTabsDemoState extends State<_BottomTabsDemo> {
+  AylaPrimaryModule _module = AylaPrimaryModule.home;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 375, // 窄屏口径（底栏只出现在窄屏）
+      child: AylaBottomTabs(
+        module: _module,
+        onSelect: (AylaPrimaryModule next) => setState(() => _module = next),
+      ),
+    );
+  }
+}
+
 // ======================= 预览 =======================
 
 /// 窄屏底栏（375 宽，选中主页；F1 阶段不渲染红点；**方角**）。
@@ -288,7 +318,8 @@ class _AylaBottomTabsState extends State<AylaBottomTabs> {
   wrapper: previewTheme,
 )
 Widget aylaBottomTabsPreview() {
-  return const AylaBottomTabs(module: AylaPrimaryModule.home);
+  // 可交互：点 tab 看胶囊跨槽迁移
+  return aylaBottomTabsSamples();
 }
 
 /// 未选中（胶囊不渲染）与「帖子」选中对照 —— 看胶囊位置/尺寸与迁移起点。
