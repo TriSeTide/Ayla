@@ -38,6 +38,7 @@ import '../core/media/media_signer.dart';
 import '../core/net/dio_client.dart';
 import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
+import '../widgets/comments.dart';
 import '../widgets/post_card.dart';
 import '../widgets/post_editor.dart';
 import '../widgets/primitives.dart';
@@ -294,6 +295,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '三形态：常规 / 群内 collapsible 收起 / 展开 · padding sp3（collapsible sp2 sp3）· 展开 max-height min(90vh,1000px) · 收起钮 32 圆 · 标题 min-h 40 · 正文 展开 rows4/min-h 64、收起 单行 40 · 媒体块 128 方角（web --radius-md 未定义）、移除钮 28 圆 · 进度条 4px pill pink-500 · 图片/视频钮 glass 亮边 + hover glow（glowHover）· 可见性复用 AylaVisibilitySelector（群内 lockGroup）',
             child: aylaPostEditorSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 评论族（B5） ----------
+          _Section(
+            title:
+                'AylaCommentList / AylaCommentComposer（CommentList.tsx + CommentComposer.tsx + posts.css 420–583）',
+            source:
+                '评论项：padding sp3 sp4 + 底部 1px 亮边 · 头像 32 · 昵称 14/700 · 时间 utility 11（zh-CN）· 回复提示 12 · 正文 14 · 操作行 12/600（回复 / 作者可删除，删除色 --destructive）· 图片 2 列 gap sp1 max-w 280（单图 200）、4:3 cover、方角（web --radius-md 未定义）· 输入：padding sp3 sp4 + 上边框 · 行 gap sp3 align-end · 工具钮 40（AylaToolButton，12 圆角）· 待发图 64px + 18px × · 底部滑入 250ms',
+            child: aylaCommentSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

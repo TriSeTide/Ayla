@@ -555,6 +555,13 @@ class _AylaToolButtonState extends State<AylaToolButton> {
         ? AylaColors.destructive
         : GlassConfig.resolveBackground(strong: false);
 
+    // ⚠️ 圆角 = --radius-input(12)，**不是 pill**：app.css 2105–2113 的
+    // `border-radius: var(--radius-pill)` 被 auroraqua.css 105–112 覆写为
+    // `border-radius: var(--radius-input)`（后加载者胜）→ web 实际渲染是 12 圆角方形。
+    // 2026-09-20 修正（此前按 base 写成 pill，视觉偏圆）。
+    final BorderRadius toolRadius =
+        BorderRadius.all(Radius.circular(AylaRadii.rInput));
+
     Widget box = AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: AylaCurves.easeOut,
@@ -562,14 +569,14 @@ class _AylaToolButtonState extends State<AylaToolButton> {
       height: 40,
       decoration: BoxDecoration(
         color: background,
-        borderRadius: AylaRadii.pill,
+        borderRadius: toolRadius,
         border: Border.all(color: border),
       ),
       child: Center(child: widget.icon),
     );
     // 外阴影只画形状之外（2026-09-20 审查 R2；原裸 boxShadow 会染进 .55 玻璃内部）
     box = AylaGlassShadow.animatedRing(
-      radius: AylaRadii.pill,
+      radius: toolRadius,
       shadows: _hovered && _enabled && !widget.danger
           ? AylaShadows.glow
           : AylaShadows.compact,
@@ -580,7 +587,7 @@ class _AylaToolButtonState extends State<AylaToolButton> {
     // var(--glass-shadow-compact) —— 该 token 含 `var(--glass-inset)`，
     // 故补顶沿 1px 内高光（danger 态为 destructive 实底、非玻璃材质，不加）。
     if (!widget.danger) {
-      box = AylaGlassInset.over(child: box, radius: AylaRadii.pill);
+      box = AylaGlassInset.over(child: box, radius: toolRadius);
     }
 
     if (!GlassConfig.useOpaqueFallback && !widget.danger) {
@@ -589,7 +596,7 @@ class _AylaToolButtonState extends State<AylaToolButton> {
         children: <Widget>[
           Positioned.fill(
             child: ClipRRect(
-              borderRadius: AylaRadii.pill,
+              borderRadius: toolRadius,
               child: BackdropFilter(
                 // auroraqua.css 110–111（`.composer-tool-btn`）：`blur(8px)`
                 // 无 saturate（见 8px 档三处均为纯 blur）。

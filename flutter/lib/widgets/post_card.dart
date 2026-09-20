@@ -42,15 +42,6 @@ import 'directory_controls.dart' show AylaFavoriteButton, FavoriteState;
 import 'media_interaction.dart';
 import 'resource_image.dart';
 
-/// `.posts-feed-item:hover .post-card { filter: brightness(1.01) }` 的等价矩阵
-/// （与 GlassButton 对 1.06 的处理一致：CSS filter 是通道乘法）。
-final ColorFilter _kPostCardHoverBrightness = ColorFilter.matrix(<double>[
-  1.01, 0, 0, 0, 0, //
-  0, 1.01, 0, 0, 0, //
-  0, 0, 1.01, 0, 0, //
-  0, 0, 0, 1, 0,
-]);
-
 /// 帖子卡时间（web `PostCard.tsx:23–36` 逐条同源；非法/缺失返回空串）。
 String aylaPostCardTime(String? iso, {DateTime? now}) {
   if (iso == null || iso.isEmpty) return '';
@@ -471,31 +462,27 @@ class _AylaPostCardState extends State<AylaPostCard> {
       ),
     );
 
-    // 卡片本体：hover −2px + 阴影升级 + brightness(1.01)；active scale .99
-    return AylaCardInteraction(
+    // 卡片本体：**复用库内「可交互卡」**（GlassCard(interactive: true)）——
+    // hover 上浮 2px + 按下 scale .99 + 阴影升 --glass-shadow-hover（auroraqua 卡片族），
+    // 与卡片族其它成员（群卡/群列表行）同一份实现。
+    //
+    // ⚠️ 2026-09-20 事故：此前自己拼 AylaCardInteraction + GlassSurface，并在 hover 外面套
+    // `ColorFiltered(brightness 1.01)`（想对齐 web 的 `filter: brightness(1.01)`）→
+    // **ColorFiltered 会建立离屏层，层内的 BackdropFilter 采样不到卡片背后的内容** →
+    // 玻璃面退化成一块发白的半透明底（用户实测「鼠标悬停变白」）。
+    // 结论：玻璃卡不要套 ColorFiltered/Opacity 一类会新建 layer 的祖先；
+    // hover 一律走 GlassCard(interactive:)，不要再手搓。
+    return GlassCard(
       interactive: true,
-      builder: (BuildContext context, bool hovered) {
-        final Widget surface = GlassSurface(
-          radius: AylaRadii.rCard,
-          // hover → --glass-shadow-hover（12/40）；静止 → --glass-shadow（8/32）
-          shadow: hovered ? AylaShadows.glassHover : AylaShadows.glass,
-          shadowTransition: AylaDurations.auroraqua,
-          padding: null,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AylaRadii.rCard), // overflow: hidden
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[main, footer],
-            ),
-          ),
-        );
-        return hovered
-            ? ColorFiltered(
-                colorFilter: _kPostCardHoverBrightness,
-                child: surface,
-              )
-            : surface;
-      },
+      radius: AylaRadii.rCard,
+      padding: EdgeInsets.zero, // .post-card 自身无内边距（main/foot 各自带）
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AylaRadii.rCard), // overflow: hidden
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[main, footer],
+        ),
+      ),
     );
   }
 
