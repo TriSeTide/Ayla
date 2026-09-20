@@ -226,8 +226,6 @@ class _AylaDirectoryLoadMoreState extends State<AylaDirectoryLoadMore> {
 
   @override
   Widget build(BuildContext context) {
-    final AylaTextStyles t = AylaTextStyles.of(context);
-
     // tsx：error 时完全不渲染（错误由外层呈现）
     if (widget.error != null) return const SizedBox.shrink();
 
@@ -242,10 +240,15 @@ class _AylaDirectoryLoadMoreState extends State<AylaDirectoryLoadMore> {
     } else if (widget.loading) {
       content = const PaginationLoadingDots();
     } else if (widget.hasMore) {
-      content = _GhostButton(
+      // 2026-09-20 审查 R3：改用组件库 GlassButton(ghost)——原 _GhostButton 手搓
+      // `.btn-ghost`，缺 blur(8px)、600ms 扫光、hover scale 1.02 / press .98
+      // 与 200ms transition 组（auroraqua.css 55–70/100–102/142–166）。
+      content = GlassButton(
         label: '加载更多',
-        onTap: () => widget.loadMore(),
-        style: t,
+        variant: GlassButtonVariant.ghost,
+        onPressed: () {
+          widget.loadMore();
+        },
       );
     } else {
       content = const SizedBox.shrink();
@@ -314,23 +317,35 @@ class AylaHistoryControls extends StatelessWidget {
           error!,
           style: t.body.copyWith(color: AylaColors.destructive),
         ),
-        _GhostButton(
+        GlassButton(
           label: '重试',
-          enabled: !loading,
-          onTap: retry,
-          style: t,
+          variant: GlassButtonVariant.ghost,
+          onPressed: loading
+              ? null
+              : () {
+                  retry();
+                },
         ),
       ],
       if (loading)
         const PaginationLoadingDots(semanticLabel: '正在加载历史')
       else if (hasMore)
-        _GhostButton(label: '加载更早记录', onTap: loadOlder, style: t),
+        GlassButton(
+          label: '加载更早记录',
+          variant: GlassButtonVariant.ghost,
+          onPressed: () {
+            loadOlder();
+          },
+        ),
       if (hasNewer)
-        _GhostButton(
+        GlassButton(
           label: '返回最新消息',
-          enabled: !loading,
-          onTap: returnLatest,
-          style: t,
+          variant: GlassButtonVariant.ghost,
+          onPressed: loading
+              ? null
+              : () {
+                  returnLatest();
+                },
         ),
     ];
 
@@ -522,8 +537,6 @@ class _AylaFavoriteButtonState extends State<AylaFavoriteButton> {
                 // hover/focus/active → --pink-500；否则 --glass-border
                 color: highlight ? AylaColors.pink500 : AylaColors.glassBorder,
               ),
-              // hover/focus/active → --glow-shadow
-              boxShadow: highlight ? AylaShadows.glow : null,
             ),
             child: Row(
               // compact 时容器被 `minWidth: 32` 撑开、而内容只有 16 图标 + padding，
@@ -563,6 +576,16 @@ class _AylaFavoriteButtonState extends State<AylaFavoriteButton> {
       ),
     );
 
+    // hover/focus/active → --glow-shadow：只画形状之外 + 180ms 淡入淡出
+    // （2026-09-20 审查 R2：原裸 boxShadow 会把 .45 粉辉光染进 .78 强玻璃内部）
+    final Widget withGlow = AylaGlassShadow.fadeRing(
+      radius: AylaRadii.pill,
+      shadows: AylaShadows.glow,
+      visible: highlight,
+      duration: AylaDurations.fast,
+      child: button,
+    );
+
     Widget result = Semantics(
       button: true,
       enabled: !_disabled,
@@ -572,7 +595,7 @@ class _AylaFavoriteButtonState extends State<AylaFavoriteButton> {
       child: Opacity(
         // :disabled { opacity: .7 }
         opacity: _disabled && widget.busy ? 0.7 : 1,
-        child: button,
+        child: withGlow,
       ),
     );
 
@@ -601,71 +624,6 @@ class _AylaFavoriteButtonState extends State<AylaFavoriteButton> {
 }
 
 // ======================= 内部：ghost 按钮 =======================
-
-/// `.btn.btn-ghost`（分页页脚与历史控制共用）。
-class _GhostButton extends StatefulWidget {
-  const _GhostButton({
-    required this.label,
-    required this.onTap,
-    required this.style,
-    this.enabled = true,
-  });
-
-  final String label;
-  final Future<void> Function() onTap;
-  final AylaTextStyles style;
-  final bool enabled;
-
-  @override
-  State<_GhostButton> createState() => _GhostButtonState();
-}
-
-class _GhostButtonState extends State<_GhostButton> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      enabled: widget.enabled,
-      label: widget.label,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.enabled ? () => widget.onTap() : null,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 40),
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              // `.btn-ghost { background: --glass-bg; border: 1px --glass-border;
-              //   box-shadow: --glass-shadow-button }`
-              color: GlassConfig.resolveBackground(strong: false),
-              borderRadius: BorderRadius.circular(AylaRadii.rInput),
-              border: Border.all(color: AylaColors.glassBorder),
-              boxShadow: _hovered
-                  ? AylaShadows.buttonHover
-                  : AylaShadows.button,
-            ),
-            child: Opacity(
-              opacity: widget.enabled ? 1 : 0.55,
-              child: Text(
-                widget.label,
-                style: widget.style.label.copyWith(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ======================= 预览 =======================
 
@@ -1004,11 +962,20 @@ class _AylaVisibilitySelectorState extends State<AylaVisibilitySelector> {
           crossAxisAlignment: CrossAxisAlignment.start,
           spacing: AylaSpacing.sp1, // gap: var(--sp-1)
           children: <Widget>[
-            // 搜索框（`.visibility-selector-groups .field`：min-height 40）
-            _GroupSearchField(
+            // 搜索框：**复用组件库 GlassInput**（2026-09-20 审查 R4——原
+            // _GroupSearchField 手搓 `.field`，缺 --glass-inset 内高光、
+            // focus 辉光边与 blur(24)+saturate(1.4) 玻璃层）。
+            // 位置覆写：`.visibility-selector-groups .field { padding-block: sp2;
+            //   min-height: 40px }`（app.css 186–189）。
+            GlassInput(
               controller: _query,
-              onChanged: () => setState(() {}),
-              style: t,
+              hintText: '搜索群', // placeholder
+              minHeight: 40,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp4,
+                vertical: AylaSpacing.sp2,
+              ),
+              onChanged: (_) => setState(() {}),
             ),
             // 已选群 chips
             if (widget.selectedGroupIds.isNotEmpty)
@@ -1094,12 +1061,13 @@ class _AylaVisibilitySelectorState extends State<AylaVisibilitySelector> {
     return Stack(
       clipBehavior: Clip.none,
       children: <Widget>[
-        // --glass-shadow-compact（含 --glass-inset）
+        // --glass-shadow-compact（含 --glass-inset）——只画形状之外
+        // （2026-09-20 审查 R2：裸 boxShadow 会染进半透明玻璃内部）
         Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: r,
-              boxShadow: AylaShadows.compact,
+          child: IgnorePointer(
+            child: AylaGlassShadow.ring(
+              radius: r,
+              shadows: AylaShadows.compact,
             ),
           ),
         ),
@@ -1229,43 +1197,6 @@ class _Checkbox extends StatelessWidget {
         child: checked
             ? const Icon(Icons.check, size: 12, color: Colors.white)
             : null,
-      ),
-    );
-  }
-}
-
-/// 群搜索输入（`.visibility-selector-groups .field`）。
-class _GroupSearchField extends StatelessWidget {
-  const _GroupSearchField({
-    required this.controller,
-    required this.onChanged,
-    required this.style,
-  });
-
-  final TextEditingController controller;
-  final VoidCallback onChanged;
-  final AylaTextStyles style;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 40), // min-height: 40px
-      padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp3),
-      decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: false),
-        borderRadius: BorderRadius.circular(AylaRadii.rInput),
-        border: Border.all(color: AylaColors.glassBorder),
-      ),
-      child: TextField(
-        controller: controller,
-        onChanged: (_) => onChanged(),
-        style: style.body.copyWith(color: AylaColors.textPrimary),
-        decoration: InputDecoration(
-          isDense: true,
-          border: InputBorder.none,
-          hintText: '搜索群', // placeholder
-          hintStyle: style.body.copyWith(color: AylaColors.textSecondary),
-        ),
       ),
     );
   }

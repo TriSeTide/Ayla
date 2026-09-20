@@ -230,15 +230,20 @@ class _AylaIconButtonState extends State<AylaIconButton> {
         color: background,
         borderRadius: radius,
         border: Border.all(color: AylaColors.glassBorder),
-        // auroraqua.css 124–132：box-shadow: var(--glass-shadow-button)
-        // 该 token = `0 2px 8px rgba(70,91,146,.1), var(--glass-inset)` —— 外阴影
-        // 在 BoxShadow 里，`--glass-inset`（顶沿 1px 内高光）由下面的
-        // AylaGlassInset.over 叠层实现。
-        boxShadow: _hovered && _enabled
-            ? AylaShadows.buttonHover
-            : AylaShadows.button,
       ),
       child: Center(child: widget.icon),
+    );
+    // auroraqua.css 124–132：`box-shadow: var(--glass-shadow-button)` → hover 换
+    // `-hover`；`--glass-inset`（顶沿 1px 内高光）由下面的 AylaGlassInset.over 叠层实现。
+    // ⚠️ 2026-09-20 审查 R2：外阴影必须**只画形状之外**——原裸用 boxShadow 会把
+    // `.1` indigo 铺进 `.55` 玻璃面内部（按钮内部发灰，hover 升到 .15 更明显）。
+    box = AylaGlassShadow.animatedRing(
+      radius: radius,
+      shadows: _hovered && _enabled
+          ? AylaShadows.buttonHover
+          : AylaShadows.button,
+      duration: AylaDurations.button, // auroraqua transition 组 200ms
+      child: box,
     );
     // --glass-inset（顶沿 1px 内高光）
     box = AylaGlassInset.over(child: box, radius: radius);
@@ -315,9 +320,15 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
             : GlassConfig.resolveBackground(strong: false),
         borderRadius: AylaRadii.pill,
         border: Border.all(color: AylaColors.glassBorder),
-        boxShadow: _hovered && _enabled ? AylaShadows.fab : AylaShadows.card,
       ),
       child: Center(child: widget.icon),
+    );
+    // 外阴影只画形状之外（2026-09-20 审查 R2；原裸 boxShadow 会染进 .55 玻璃内部）
+    box = AylaGlassShadow.animatedRing(
+      radius: AylaRadii.pill,
+      shadows: _hovered && _enabled ? AylaShadows.fab : AylaShadows.card,
+      duration: AylaDurations.button,
+      child: box,
     );
 
     if (!GlassConfig.useOpaqueFallback) {
@@ -371,21 +382,25 @@ class AylaCreateFab extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool enabled = onPressed != null;
     return _FabHover(
-      builder: (bool hovered) => Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: AylaColors.indigo700,
-          borderRadius: AylaRadii.pill,
-          // 常驻 0 2px 12px rgba(70,91,146,.18)；hover → --glow-shadow
-          boxShadow: hovered && enabled
-              ? AylaShadows.glow
-              : AylaShadows.fab,
-        ),
-        child: Center(
-          child: IconTheme(
-            data: const IconThemeData(color: AylaColors.surface),
-            child: icon,
+      // 实底 indigo（不透明）——外观与裸 boxShadow 等价；此处统一走 ring
+      // 只为消灭「同一件事两种写法」（2026-09-20 审查 R2）。
+      builder: (bool hovered) => AylaGlassShadow.animatedRing(
+        radius: AylaRadii.pill,
+        // 常驻 0 2px 12px rgba(70,91,146,.18)；hover → --glow-shadow
+        shadows: hovered && enabled ? AylaShadows.glow : AylaShadows.fab,
+        duration: AylaDurations.button,
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: const BoxDecoration(
+            color: AylaColors.indigo700,
+            borderRadius: AylaRadii.pill,
+          ),
+          child: Center(
+            child: IconTheme(
+              data: const IconThemeData(color: AylaColors.surface),
+              child: icon,
+            ),
           ),
         ),
       ),
@@ -549,11 +564,17 @@ class _AylaToolButtonState extends State<AylaToolButton> {
         color: background,
         borderRadius: AylaRadii.pill,
         border: Border.all(color: border),
-        boxShadow: _hovered && _enabled && !widget.danger
-            ? AylaShadows.glow
-            : AylaShadows.compact,
       ),
       child: Center(child: widget.icon),
+    );
+    // 外阴影只画形状之外（2026-09-20 审查 R2；原裸 boxShadow 会染进 .55 玻璃内部）
+    box = AylaGlassShadow.animatedRing(
+      radius: AylaRadii.pill,
+      shadows: _hovered && _enabled && !widget.danger
+          ? AylaShadows.glow
+          : AylaShadows.compact,
+      duration: AylaDurations.button,
+      child: box,
     );
     // `.composer-tool-btn`（auroraqua.css 105–112）：box-shadow:
     // var(--glass-shadow-compact) —— 该 token 含 `var(--glass-inset)`，
@@ -646,11 +667,6 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
         color: AylaColors.glassBgStrong,
         borderRadius: BorderRadius.circular(AylaRadii.rSm),
         border: Border.all(color: AylaColors.glassBorder),
-        // auroraqua.css 124–132 覆写：box-shadow: var(--glass-shadow-button)
-        // / -hover，两者都含 `var(--glass-inset)` → 补顶沿 1px 内高光
-        boxShadow: _hovered && _enabled
-            ? AylaShadows.buttonHover
-            : AylaShadows.button,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -672,6 +688,17 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
           ),
         ],
       ),
+    );
+
+    // auroraqua.css 124–132 覆写：`--glass-shadow-button` / `-hover`（含 inset）→
+    // 外阴影只画形状之外（2026-09-20 审查 R2；.78 强玻璃内部会被 .1 indigo 染色）
+    box = AylaGlassShadow.animatedRing(
+      radius: BorderRadius.circular(AylaRadii.rSm),
+      shadows: _hovered && _enabled
+          ? AylaShadows.buttonHover
+          : AylaShadows.button,
+      duration: AylaDurations.button,
+      child: box,
     );
 
     return AylaPressScale(

@@ -39,6 +39,7 @@ import '../core/net/dio_client.dart';
 import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
 import '../widgets/primitives.dart';
+import '../widgets/reveal.dart';
 import '../widgets/tab_badge.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
@@ -241,16 +242,82 @@ class ComponentGallery extends StatelessWidget {
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
-          // ---------- TabBadge ----------
+          // ---------- TabBadge（三档规格，2026-09-20 审查 R8 合并） ----------
           _Section(
-            title: 'TabBadge（shell.css .tab-badge 579–593）',
+            title:
+                'TabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
             source:
-                'min-w 16 · h 16 · padding 0 4 · pink-500 底 · Fredoka 11 · top -4 / right -12 · >99 → 99+',
+                'tab：min 16 / padding 0 4 / Fredoka 11 w500 / 绝对 top -4 right -12 · '
+                'groupBadge：16 / Fredoka 11 w400 / 行内 · messages：18 / Space Grotesk 11 / 行内 + glow · >99 → 99+',
             child: _Row(
               children: <Widget>[
-                _Slot(label: '1', child: _BadgeHost(count: 1)),
-                _Slot(label: '12', child: _BadgeHost(count: 12)),
-                _Slot(label: '150 → 99+', child: _BadgeHost(count: 150)),
+                _Slot(label: 'tab：1', child: _BadgeHost(count: 1)),
+                _Slot(label: 'tab：12', child: _BadgeHost(count: 12)),
+                _Slot(label: 'tab：150 → 99+', child: _BadgeHost(count: 150)),
+                _Slot(
+                  label: 'groupBadge（.group-badge-unread）',
+                  child: const TabBadge(
+                    count: 8,
+                    metrics: TabBadgeMetrics.groupBadge,
+                    placement: TabBadgePlacement.inline,
+                  ),
+                ),
+                _Slot(
+                  label: 'messages（.messages-tab-badge + glow）',
+                  child: const TabBadge(
+                    count: 120,
+                    metrics: TabBadgeMetrics.messages,
+                    placement: TabBadgePlacement.inline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 入场动画（2026-09-20 审查 R7：公共件） ----------
+          _Section(
+            title: 'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
+            source:
+                'opacity 0→1 + 下 20px · 300ms --auroraqua-ease-out · stagger 50ms（cap 300）· reduced-motion 直接到位 · enabled:false 不挂动画',
+            child: _Row(
+              children: <Widget>[
+                _Slot(
+                  label: '下入 20px · stagger 0/50/100ms',
+                  width: 300,
+                  child: AylaRevealScope(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      spacing: AylaSpacing.sp2,
+                      children: <Widget>[
+                        for (int i = 0; i < 3; i++)
+                          AylaRevealItem(
+                            index: i,
+                            child: Text(
+                              '条目 $i（delay ${i * 50}ms）',
+                              style: t.caption,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                _Slot(
+                  label: '上入 20px（offset 0,-20）',
+                  width: 300,
+                  child: AylaRevealItem(
+                    offset: const Offset(0, -AylaRevealMotion.distance),
+                    child: Text('上入样张', style: t.caption),
+                  ),
+                ),
+                _Slot(
+                  label: 'enabled:false（滚动恢复/历史节点）',
+                  width: 300,
+                  child: const AylaRevealItem(
+                    enabled: false,
+                    child: Text('直接显示，不挂动画', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
               ],
             ),
           ),

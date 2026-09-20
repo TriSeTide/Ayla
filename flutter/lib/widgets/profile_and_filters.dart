@@ -16,6 +16,7 @@ import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'dialogs.dart' show AylaModalOverlay;
 import 'primitives.dart' show AylaNavHighlight, AylaNavHighlightState;
+import 'reveal.dart';
 
 // ======================= UserProfileCard =======================
 
@@ -587,7 +588,7 @@ class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
 
     // ═══════════════ 窄屏（≤768）：无圆角顶栏 ═══════════════
     if (widget.narrow) {
-      return _EnterFrom(
+      return AylaRevealItem(
         // animation: auroraqua-panel-from-top（0 -20px → 0,0）
         offset: const Offset(0, -20),
         child: GlassSurface(
@@ -627,7 +628,7 @@ class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
     }
 
     // ═══════════════ 宽屏（>768）：玻璃卡片侧栏 ═══════════════
-    return _EnterFrom(
+    return AylaRevealItem(
       // animation: auroraqua-sidebar-in（-20px 0 → 0,0）
       offset: const Offset(-20, 0),
       child: SizedBox(
@@ -670,71 +671,6 @@ class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
   }
 }
 
-/// 入场动画包装（`auroraqua-sidebar-in` / `auroraqua-panel-from-top`）。
-///
-/// `from { opacity: 0; translate: <offset> }` → `to { opacity: 1; translate: 0 }`，
-/// 300ms `--auroraqua-ease-out`；reduced-motion 直接到位。
-class _EnterFrom extends StatefulWidget {
-  const _EnterFrom({required this.child, required this.offset});
-
-  final Widget child;
-
-  /// 起始位移（宽屏 -20px 横向；窄屏 -20px 纵向）。
-  final Offset offset;
-
-  @override
-  State<_EnterFrom> createState() => _EnterFromState();
-}
-
-class _EnterFromState extends State<_EnterFrom>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: AylaDurations.auroraqua, // --auroraqua-duration 300ms
-  );
-
-  bool _started = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_started) return;
-    _started = true;
-    // 不能在 initState 里读 MediaQuery（本项目已踩过两次）
-    if (MediaQuery.of(context).disableAnimations) {
-      _c.value = 1;
-    } else {
-      _c.forward();
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (BuildContext context, Widget? child) {
-        final double v = AylaCurves.auroraquaEaseOut.transform(_c.value);
-        return Opacity(
-          opacity: v,
-          child: Transform.translate(
-            offset: Offset(
-              widget.offset.dx * (1 - v),
-              widget.offset.dy * (1 - v),
-            ),
-            child: child,
-          ),
-        );
-      },
-      child: widget.child,
-    );
-  }
-}
 
 /// `.directory-filter` —— 44 高选项卡。
 ///
@@ -900,17 +836,16 @@ class _FilterTabState extends State<_FilterTab> {
       child: tab,
     );
 
-    // `:focus-visible → box-shadow: var(--glow-shadow)`（描边由 outline 表达，
-    // Flutter 用外层 DecoratedBox 叠辉光）
-    if (_focused) {
-      tab = DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: r,
-          boxShadow: AylaShadows.glow,
-        ),
-        child: tab,
-      );
-    }
+    // `:focus-visible → box-shadow: var(--glow-shadow)`（描边由 outline 表达）——
+    // 只画形状之外 + 200ms 淡入淡出（2026-09-20 审查 R2：原 DecoratedBox 裸阴影
+    // 会把辉光铺进按钮内部）
+    tab = AylaGlassShadow.fadeRing(
+      radius: r,
+      shadows: AylaShadows.glow,
+      visible: _focused,
+      duration: AylaDurations.button,
+      child: tab,
+    );
 
     return Semantics(
       button: true,

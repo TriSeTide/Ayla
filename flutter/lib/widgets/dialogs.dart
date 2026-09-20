@@ -520,12 +520,13 @@ class _AylaModalCardState extends State<AylaModalCard>
       child: Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
-          // `box-shadow: var(--glass-shadow-modal)`（20/60 + --glass-inset）
+          // `box-shadow: var(--glass-shadow-modal)`（20/60 + --glass-inset）——
+          // 只画形状之外（2026-09-20 审查 R2：裸 boxShadow 会染进 .78 玻璃内部）
           Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                boxShadow: AylaShadows.modal,
+            child: IgnorePointer(
+              child: AylaGlassShadow.ring(
+                radius: radius,
+                shadows: AylaShadows.modal,
               ),
             ),
           ),

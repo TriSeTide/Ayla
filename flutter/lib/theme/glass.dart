@@ -81,6 +81,7 @@ class GlassSurface extends StatelessWidget {
     this.padding,
     this.radiusOverride,
     this.borderOverride,
+    this.shadowTransition = Duration.zero,
   });
 
   /// 内容。
@@ -114,9 +115,18 @@ class GlassSurface extends StatelessWidget {
   /// 内边距。
   final EdgeInsetsGeometry? padding;
 
+  /// 外阴影过渡时长（对应 CSS `transition: box-shadow <dur>`）。
+  ///
+  /// [Duration.zero]（默认）= 阴影瞬时切换；非零时用 `BoxShadow.lerpList`
+  /// 在两份阴影之间插值（auroraqua.css 卡片族为 300ms、按钮族为 200ms）。
+  /// 插值在 ring painter 内完成 → 即便某帧 blur 为 0 也只画形状之外，
+  /// 不会出现「实心矩形闪现」。
+  final Duration shadowTransition;
+
   @override
   Widget build(BuildContext context) {
     final bool opaque = GlassConfig.useOpaqueFallback;
+    final bool reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
     // 卡面（底色 + 亮边 + 顶沿内高光）。**不含外阴影**——阴影必须在裁剪
     // 之外绘制，否则会被 ClipRRect 连同圆角裁掉（web box-shadow 在元素外侧）。
@@ -201,16 +211,31 @@ class GlassSurface extends StatelessWidget {
                   ),
                 ),
               ),
-              // ② 阴影环（在模糊层之上、卡面之下）
+              // ② 阴影环（在模糊层之上、卡面之下；只画形状之外）
               if (shadow.isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: CustomPaint(
-                      painter: _OuterShadowPainter(
-                        radius: radiusValue,
-                        shadows: shadow,
-                      ),
-                    ),
+                    child: shadowTransition == Duration.zero || reduceMotion
+                        ? CustomPaint(
+                            painter: _OuterShadowPainter(
+                              radius: radiusValue,
+                              shadows: shadow,
+                            ),
+                          )
+                        : TweenAnimationBuilder<List<BoxShadow>>(
+                            tween: _ShadowListTween(end: shadow),
+                            duration: shadowTransition,
+                            curve: AylaCurves.auroraqua,
+                            builder: (BuildContext context,
+                                List<BoxShadow> value, Widget? _) {
+                              return CustomPaint(
+                                painter: _OuterShadowPainter(
+                                  radius: radiusValue,
+                                  shadows: value,
+                                ),
+                              );
+                            },
+                          ),
                   ),
                 ),
               // ③ 卡面
@@ -251,6 +276,103 @@ abstract final class AylaGlassShadow {
     if (shadows.isEmpty) return const SizedBox.shrink();
     return CustomPaint(painter: _OuterShadowPainter(radius: radius, shadows: shadows));
   }
+
+  /// 在 [child] 之下叠一层**只画形状之外**的外阴影（形状尺寸取 child 的）。
+  ///
+  /// [shadows] 变化时按 CSS `transition: box-shadow` 语义插值；
+  /// 两侧都有阴影时不会出现「blur 从 0 起步」的硬边（形状内部始终被挖空）。
+  /// [shadows] 为空 = 不画（web 未声明 box-shadow 的构件）。
+  static Widget animatedRing({
+    required Widget child,
+    required BorderRadius radius,
+    required List<BoxShadow> shadows,
+    Duration duration = AylaDurations.auroraqua,
+  }) {
+    if (shadows.isEmpty) return child;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        Positioned.fill(
+          child: IgnorePointer(
+            child: _AnimatedShadowRing(
+              radius: radius,
+              shadows: shadows,
+              duration: duration,
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+
+  /// 在 [child] 之下叠一层**淡入淡出**的外阴影环（用于「无 → 有」的场景：
+  /// hover/focus 才出现的光晕）。
+  ///
+  /// 为什么不用 [animatedRing]：从「无阴影」插值时 `BoxShadow.lerp` 会把
+  /// blurRadius 从 0 拉起，头几帧是**硬边**（实测会闪一下）；淡入固定阴影
+  /// 既无硬边，也与 CSS 观感一致。
+  static Widget fadeRing({
+    required Widget child,
+    required BorderRadius radius,
+    required List<BoxShadow> shadows,
+    required bool visible,
+    Duration duration = AylaDurations.button,
+  }) {
+    if (shadows.isEmpty) return child;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              duration: duration,
+              curve: AylaCurves.auroraqua,
+              opacity: visible ? 1.0 : 0.0,
+              child: CustomPaint(
+                painter: _OuterShadowPainter(radius: radius, shadows: shadows),
+              ),
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+/// [AylaGlassShadow.animatedRing] 的插值实现（reduced-motion 时不做过渡）。
+class _AnimatedShadowRing extends StatelessWidget {
+  const _AnimatedShadowRing({
+    required this.radius,
+    required this.shadows,
+    required this.duration,
+  });
+
+  final BorderRadius radius;
+  final List<BoxShadow> shadows;
+  final Duration duration;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (reduceMotion) {
+      return CustomPaint(
+        painter: _OuterShadowPainter(radius: radius, shadows: shadows),
+      );
+    }
+    return TweenAnimationBuilder<List<BoxShadow>>(
+      tween: _ShadowListTween(end: shadows),
+      duration: duration,
+      curve: AylaCurves.auroraqua,
+      builder: (BuildContext context, List<BoxShadow> value, Widget? _) {
+        return CustomPaint(
+          painter: _OuterShadowPainter(radius: radius, shadows: value),
+        );
+      },
+    );
+  }
 }
 
 /// 只绘制「形状之外」的外阴影（等价 CSS `box-shadow` 的 border-box 裁剪）。
@@ -289,6 +411,18 @@ class _OuterShadowPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _OuterShadowPainter old) =>
       old.radius != radius || old.shadows != shadows;
+}
+
+/// 两组阴影之间的插值（等价 CSS `transition: box-shadow`）。
+///
+/// `BoxShadow.lerpList` 按索引逐项插值（长度不等时短的一方按「无阴影」补齐），
+/// 语义与浏览器一致：color / offset / blur / spread 各自线性插值。
+class _ShadowListTween extends Tween<List<BoxShadow>> {
+  _ShadowListTween({super.end});
+
+  @override
+  List<BoxShadow> lerp(double t) =>
+      BoxShadow.lerpList(begin, end, t) ?? const <BoxShadow>[];
 }
 
 /// 模糊半径归一（--glass-filter blur(24px)；导航 18 / 按钮 8 有各自覆写）。
@@ -338,10 +472,13 @@ abstract final class AylaGlassInset {
 
 /// GlassCard —— 全站卡面材料（app.css .glass-card / d:§4 Cards）。
 ///
-/// [interactive] 为 true 时启用「可交互卡」行为：hover 上浮 2px + 阴影升
-/// 12/40（300ms ease，auroraqua.css 卡片族），按下 scale .99；reduced-motion
-/// 下不位移不缩放。非交互卡保持稳定位置（d:§4「仅可交互列表卡抬升」）。
-class GlassCard extends StatefulWidget {
+/// [interactive] 为 true 时启用「可交互卡」行为（hover 上浮 2px + 阴影升
+/// 12/40、按下 scale .99）；非交互卡保持稳定位置（d:§4「仅可交互列表卡抬升」）。
+///
+/// 2026-09-20 组件库审查 R6：交互动效本体收敛到公共件 [AylaCardInteraction]，
+/// 与卡片族（群卡 / 群列表行）共用同一份实现（此前 GlassCard 与 group_card
+/// 各写一份，是同一 CSS 配方两套代码）。
+class GlassCard extends StatelessWidget {
   const GlassCard({
     super.key,
     required this.child,
@@ -370,7 +507,7 @@ class GlassCard extends StatefulWidget {
   /// 强玻璃（弹层用 .78，d:§4 Panels）。
   final bool strong;
 
-  /// 覆盖阴影（默认 [AylaShadows.glass]）。
+  /// 覆盖阴影（默认静止 `--glass-shadow`、hover `--glass-shadow-hover`）。
   final List<BoxShadow>? shadow;
 
   /// 可交互（hover 抬升 + 按下缩放）。
@@ -383,68 +520,141 @@ class GlassCard extends StatefulWidget {
   final String? semanticLabel;
 
   @override
-  State<GlassCard> createState() => _GlassCardState();
+  Widget build(BuildContext context) {
+    return AylaCardInteraction(
+      interactive: interactive,
+      onTap: onTap,
+      semanticLabel: semanticLabel,
+      builder: (BuildContext context, bool hovered) => GlassSurface(
+        radius: radius,
+        blur: blur,
+        strong: strong,
+        // hover → `--glass-shadow-hover`（12/40）；静止 → `--glass-shadow`（8/32）。
+        // box-shadow 300ms 过渡由 GlassSurface.shadowTransition 表达（卡片族）。
+        shadow:
+            shadow ?? (hovered ? AylaShadows.glassHover : AylaShadows.glass),
+        shadowTransition: AylaDurations.auroraqua,
+        padding: padding ?? const EdgeInsets.all(AylaSpacing.sp4),
+        child: child,
+      ),
+    );
+  }
 }
 
-class _GlassCardState extends State<GlassCard> {
+/// 卡片族交互动效（auroraqua.css 29–52 卡片族；与按钮族 55–94 区分）。
+///
+/// 事实源：
+/// ```
+/// transition: translate 300ms var(--auroraqua-ease), scale 200ms var(--auroraqua-ease);
+/// :hover  → translate: 0 -2px; box-shadow: var(--glass-shadow-hover);
+/// :active → translate: 0 0;    scale: 0.99;
+/// ```
+/// 与 [AylaPressScale]（按钮族 hover 1.02 / active .98）区分：
+/// 卡片是「上浮 2px + 轻微缩小 .99」，按钮是「放大 1.02 / 缩小 .98」。
+///
+/// [interactive] == false 时完全不挂指针层（静态卡）；有 [onTap] 时仍可点击。
+class AylaCardInteraction extends StatefulWidget {
+  const AylaCardInteraction({
+    super.key,
+    required this.builder,
+    this.onTap,
+    this.semanticLabel,
+    this.interactive = true,
+  });
+
+  /// 内容构建器（`hovered` 用于切换阴影与其它 hover 态）。
+  final Widget Function(BuildContext context, bool hovered) builder;
+
+  /// 点击回调（null 则不响应；交互动效仍保留）。
+  final VoidCallback? onTap;
+
+  /// 可访问性标签。
+  final String? semanticLabel;
+
+  /// 是否参与卡片族交互动效（hover 上浮 2px / 按下 scale .99）。
+  final bool interactive;
+
+  @override
+  State<AylaCardInteraction> createState() => _AylaCardInteractionState();
+}
+
+class _AylaCardInteractionState extends State<AylaCardInteraction> {
   bool _hovered = false;
   bool _pressed = false;
 
-  bool get _reduceMotion => MediaQuery.disableAnimationsOf(context);
-
   @override
   Widget build(BuildContext context) {
-    final bool lifted = widget.interactive && _hovered && !_reduceMotion;
-    final List<BoxShadow> shadow = lifted
-        ? (widget.shadow ?? AylaShadows.glassHover)
-        : (widget.shadow ?? AylaShadows.glass);
-    final double scale = widget.interactive && _pressed && !_reduceMotion
-        ? 0.99
-        : 1.0;
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    // 位移用独立 transform（auroraqua.css 卡片族：translate 300ms + scale 200ms）
-    Widget card = AnimatedContainer(
-      duration: _reduceMotion
-          ? Duration.zero
-          : (lifted ? AylaDurations.auroraqua : Duration.zero),
-      curve: AylaCurves.auroraqua,
-      transform: Matrix4.identity()
-        ..translateByDouble(0, lifted ? -2 : 0, 0, 1)
-        ..scaleByDouble(scale, scale, scale, 1),
-      transformAlignment: Alignment.center,
-      child: GlassSurface(
-        radius: widget.radius,
-        blur: widget.blur,
-        strong: widget.strong,
-        shadow: shadow,
-        padding: widget.padding ?? const EdgeInsets.all(AylaSpacing.sp4),
-        child: widget.child,
-      ),
-    );
-
-    if (widget.onTap != null) {
-      card = Semantics(
+    // 非交互卡：不挂 hover/按压动效；有 onTap 时保持可点击（对齐原 GlassCard
+    // interactive=false 的行为）。
+    if (!widget.interactive) {
+      if (widget.onTap == null) return widget.builder(context, false);
+      return Semantics(
         button: true,
         label: widget.semanticLabel,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapCancel: () => setState(() => _pressed = false),
-          onTapUp: (_) => setState(() => _pressed = false),
-          child: card,
+          child: widget.builder(context, false),
         ),
       );
     }
 
-    if (!widget.interactive) return card;
+    // translate：hover → -2px；按下复位 0（CSS `:active { translate: 0 0 }`）
+    final double dy = reduceMotion
+        ? 0
+        : (_pressed
+              ? 0
+              : (_hovered ? -2 : 0));
+    // scale：按下 .99（200ms）
+    final double scale = reduceMotion || !_pressed ? 1.0 : 0.99;
+
+    // CSS `translate` 是**像素位移**（不影响布局、不改变自身坐标系原点），
+    // 故用 Transform.translate 而非 AnimatedSlide（后者 offset 是尺寸百分比）。
+    Widget content = TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: dy),
+      duration: reduceMotion
+          ? Duration.zero
+          : AylaDurations.auroraqua, // translate / box-shadow 300ms
+      curve: AylaCurves.auroraqua,
+      builder: (BuildContext context, double v, Widget? child) {
+        return Transform.translate(offset: Offset(0, v), child: child);
+      },
+      child: AnimatedScale(
+        duration: reduceMotion
+            ? Duration.zero
+            : AylaDurations.button, // scale 200ms
+        curve: AylaCurves.auroraqua,
+        scale: scale,
+        child: widget.builder(context, _hovered),
+      ),
+    );
+
+    if (widget.semanticLabel != null) {
+      content = Semantics(
+        button: widget.onTap != null,
+        label: widget.semanticLabel,
+        child: content,
+      );
+    }
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() {
         _hovered = false;
         _pressed = false;
       }),
-      child: card,
+      child: Listener(
+        onPointerDown: (_) => setState(() => _pressed = true),
+        onPointerUp: (_) => setState(() => _pressed = false),
+        onPointerCancel: (_) => setState(() => _pressed = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: content,
+        ),
+      ),
     );
   }
 }
@@ -742,11 +952,15 @@ class _GlassButtonState extends State<GlassButton>
     Widget decorated = Stack(
       clipBehavior: Clip.none,
       children: <Widget>[
+        // 外阴影**只画形状之外**（2026-09-20 审查 R2：原裸 boxShadow 会把
+        // `--glass-shadow-*` 的 indigo 铺进 ghost 的 .55 玻璃面内部）
+        // + `transition: box-shadow 200ms`（auroraqua.css 55–70）。
         Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: rInput,
-              boxShadow: shadow,
+          child: IgnorePointer(
+            child: _AnimatedShadowRing(
+              radius: rInput,
+              shadows: shadow,
+              duration: AylaDurations.button,
             ),
           ),
         ),
@@ -916,6 +1130,7 @@ class GlassInput extends StatefulWidget {
     this.semanticLabel,
     this.focusNode,
     this.invalid = false,
+    this.padding,
     this.keyboardType,
     this.inputFormatters,
     this.maxLength,
@@ -963,6 +1178,12 @@ class GlassInput extends StatefulWidget {
   /// 校验失败态：`.auth-field .field[aria-invalid="true"] { border-color:
   /// var(--destructive) }`（auth.css 74）。
   final bool invalid;
+
+  /// 内部内边距；null = `.field` 基类 `padding: 12px 16px`（app.css 70–73）。
+  ///
+  /// 覆写场景：`.visibility-selector-groups .field { padding-block: var(--sp-2);
+  /// min-height: 40px }`（app.css 186–189）等按位置改内沿的字段。
+  final EdgeInsetsGeometry? padding;
 
   /// 键盘类型（验证码/邮箱等场景，web 用 `inputMode` 表达）。
   final TextInputType? keyboardType;
@@ -1040,18 +1261,17 @@ class _GlassInputState extends State<GlassInput> {
       duration: reduceMotion ? Duration.zero : AylaDurations.fast,
       curve: AylaCurves.easeOut,
       constraints: BoxConstraints(minHeight: widget.minHeight),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp4,
-        vertical: AylaSpacing.sp3,
-      ),
+      padding: widget.padding ??
+          const EdgeInsets.symmetric(
+            horizontal: AylaSpacing.sp4, // .field: padding 12px 16px
+            vertical: AylaSpacing.sp3,
+          ),
       decoration: BoxDecoration(
         // background: var(--glass-bg)（降级时 --surface，auroraqua 526–531）
         color: GlassConfig.resolveBackground(strong: false),
         // background-image: none —— 不叠任何渐变（清除背景图语义）
         borderRadius: rInput,
         border: Border.all(color: border),
-        // box-shadow: var(--glass-inset)（未 focus 时）；focus → --glow-shadow
-        boxShadow: _focused ? AylaShadows.glow : null,
       ),
       child: TextField(
         controller: widget.controller,
@@ -1102,6 +1322,22 @@ class _GlassInputState extends State<GlassInput> {
               ),
             ),
           ),
+        // `:focus → box-shadow: var(--glow-shadow)`（auroraqua.css 513–518）——
+        // 只画形状之外 + 200ms 淡入淡出；2026-09-20 审查 R2：原裸 boxShadow 会把
+        // `.45` 粉辉光铺进 `.55` 玻璃内部（聚焦时输入框内部发粉）。
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              duration: AylaDurations.button,
+              curve: AylaCurves.auroraqua,
+              opacity: _focused ? 1.0 : 0.0,
+              child: AylaGlassShadow.ring(
+                radius: rInput,
+                shadows: AylaShadows.glow,
+              ),
+            ),
+          ),
+        ),
         Positioned.fill(
           child: IgnorePointer(
             child: LayoutBuilder(

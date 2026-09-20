@@ -21,6 +21,7 @@
 /// 3. **逐条浮入**（`reveal-item`，base.css 483–506）：从下方 20px + 淡入、
 ///    300ms `--auroraqua-ease-out`，延迟 `staggerDelay(i)` = `min(i*80, 300)`ms；
 ///    reduced-motion 直接可见。
+///    实现已收敛到公共件 `AylaRevealItem`（`widgets/reveal.dart`，2026-09-20 审查 R7）。
 library;
 
 import 'package:flutter/material.dart';
@@ -36,6 +37,9 @@ import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'avatar_status_badges.dart';
 import 'conversation_more_menu.dart';
+import 'resource_image.dart';
+import 'reveal.dart';
+import 'tab_badge.dart';
 
 // ======================= 轮播数据 =======================
 
@@ -627,7 +631,10 @@ class _LiveContent extends StatelessWidget {
       return Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          _CarouselImage(url: cover), // ResourceImage（alt="" ⇒ decorative）
+          // 2026-09-20 审查 R5：改用组件库 ResourceImage（web 同一位置就是
+          // ResourceImage，GroupCarousel.tsx:42）。原 _CarouselImage 用
+          // Image.network → 绕过签名/缓存/过期重签链路（401 破图）。
+          ResourceImage(src: cover, fit: BoxFit.cover), // alt="" ⇒ decorative
           _Caption(text: '${slide.host} 在直播 ${slide.title}'),
         ],
       );
@@ -664,7 +671,8 @@ class _PostContent extends StatelessWidget {
       fit: StackFit.expand,
       children: <Widget>[
         if (image != null)
-          _CarouselImage(url: image) // ResourceImage（alt="" ⇒ decorative）
+          // 同上（GroupCarousel.tsx:53）
+          ResourceImage(src: image, fit: BoxFit.cover) // alt="" ⇒ decorative
         else
           const _PostFallback(),
         if (slide.hasUnread)
@@ -781,39 +789,6 @@ class _GameContent extends StatelessWidget {
         ),
         _Caption(text: '${slide.memberCount}人在玩${slide.name}'),
       ],
-    );
-  }
-}
-
-/// `.group-carousel-img` 的 Flutter 等价（`width/height 100%` + `object-fit: cover`）。
-///
-/// **对应 web `ResourceImage`**（`components/ResourceImage.tsx`）在轮播里的用法：
-/// 两处调用都传 `alt=""` ⇒ **decorative**，因此**加载失败/过期不显示任何提示**，
-/// 由下层渐变底透出（web：`if (decorative) return <span>{fallback}</span>`；
-/// 轮播未传 `fallback` ⇒ 渲染空）。
-///
-/// ⚠️ **web 的完整媒体链路**（media_id 提取 → 短时签名 URL → 过期降级/重试）
-/// 属**媒体批次**；本组件只实现轮播所需的最小语义（直连 URL + 失败留空）。
-/// 签名链路落地后替换此处实现即可，调用方不变。
-class _CarouselImage extends StatelessWidget {
-  const _CarouselImage({required this.url});
-
-  final String url;
-
-  @override
-  Widget build(BuildContext context) {
-    return Image.network(
-      url,
-      fit: BoxFit.cover, // object-fit: cover
-      width: double.infinity, // width: 100%
-      height: double.infinity, // height: 100%
-      // decorative（alt=""）→ 失败留空，透出下层渐变底
-      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-      // 加载中同样留空（web `resource-image-loading` + 无 fallback ⇒ 空）
-      frameBuilder: (BuildContext context, Widget child, int? frame,
-          bool wasSync) {
-        return frame == null ? const SizedBox.shrink() : child;
-      },
     );
   }
 }
@@ -1062,14 +1037,23 @@ class AylaGroupCard extends StatelessWidget {
     final Widget glass = AylaCardInteraction(
       onTap: onOpen,
       semanticLabel: '进入群聊 $title',
-      builder: (BuildContext context, bool hovered) => _GlassCardShell(
-        radius: cardRadius,
+      // 材质/阴影环全部走组件库 GlassSurface（2026-09-20 审查 R1：删除本地
+      // _GlassCardShell——它与 GlassSurface 是同一份四层结构的复制品）。
+      // transition: box-shadow 300ms 由 shadowTransition 表达（auroraqua.css 29–52）。
+      builder: (BuildContext context, bool hovered) => GlassSurface(
+        radiusOverride: cardRadius,
         // hover → --glass-shadow-hover（12/40）；静止 → --glass-shadow（8/32）
         shadow: hovered ? AylaShadows.glassHover : AylaShadows.glass,
+        shadowTransition: AylaDurations.auroraqua,
         child: card,
       ),
     );
-    return _RevealItem(delay: revealDelay, child: glass);
+    return AylaRevealItem(
+      // `delay == null` = 不挂动画（滚动恢复/历史节点直接可见）
+      enabled: revealDelay != null,
+      delay: revealDelay,
+      child: glass,
+    );
   }
 }
 
@@ -1128,143 +1112,6 @@ class _GroupCardFoot extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 玻璃卡外壳（`.group-card` 材质：底 + 边 + 模糊 + 阴影环 + 内高光）。
-///
-/// 分层顺序遵循 skill「卡片发黑」事故结论：
-/// `模糊层 → 阴影环 → 卡面`（阴影必须在模糊层**之上**，否则被 BackdropFilter
-/// 一并模糊吸进卡内）。
-class _GlassCardShell extends StatelessWidget {
-  const _GlassCardShell({
-    required this.radius,
-    required this.child,
-    this.shadow = AylaShadows.glass,
-  });
-
-  final BorderRadius radius;
-  final Widget child;
-
-  /// 当前阴影（静止 `--glass-shadow`；hover `--glass-shadow-hover`）。
-  final List<BoxShadow> shadow;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool opaque = GlassConfig.useOpaqueFallback;
-
-    final Widget face = DecoratedBox(
-      decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: false), // --glass-bg .55
-        borderRadius: radius,
-        border: Border.all(color: AylaColors.glassBorder), // 1px --glass-border
-      ),
-      child: child,
-    );
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        // ① 模糊层（blur24 + saturate1.4；只作用于卡片背后的页面内容）
-        if (!opaque)
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: radius,
-              child: BackdropFilter(
-                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
-                child: const SizedBox.expand(),
-              ),
-            ),
-          ),
-        // ② 阴影环（--glass-shadow / hover → --glass-shadow-hover；含
-        //    --glass-inset；不参与裁剪、位于模糊层之上）
-        Positioned.fill(
-          child: AnimatedContainer(
-            duration: AylaDurations.auroraqua, // box-shadow 300ms
-            curve: AylaCurves.auroraqua,
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              boxShadow: shadow,
-            ),
-          ),
-        ),
-        // ③ 卡面
-        face,
-        // ④ --glass-inset 顶沿 1px 内高光
-        Positioned.fill(
-          child: IgnorePointer(
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints c) {
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: radius,
-                    gradient: AylaInset.topHighlight(c.maxHeight),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 逐条浮入（`.reveal-item`，base.css 483–506）：
-/// 下方 20px + 淡入、300ms `--auroraqua-ease-out`、延迟 [delay]；
-/// `delay == null` 则不挂载动画（直接可见）。
-class _RevealItem extends StatefulWidget {
-  const _RevealItem({required this.child, this.delay});
-
-  final Widget child;
-  final Duration? delay;
-
-  @override
-  State<_RevealItem> createState() => _RevealItemState();
-}
-
-class _RevealItemState extends State<_RevealItem>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: AylaDurations.auroraqua, // --auroraqua-duration 300ms
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.delay == null) {
-      _c.value = 1;
-    } else {
-      Future<void>.delayed(widget.delay!, () {
-        if (mounted) _c.forward();
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.delay == null) return widget.child; // 不挂 reveal-item
-    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (reduceMotion) return widget.child; // reduced-motion：直接可见
-
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (BuildContext context, Widget? child) {
-        final double t = AylaCurves.auroraquaEaseOut.transform(_c.value);
-        return Opacity(
-          opacity: t,
-          child: Transform.translate(offset: Offset(0, 20 * (1 - t)), child: child),
-        );
-      },
-      child: widget.child,
     );
   }
 }
@@ -1449,7 +1296,12 @@ class AylaGroupListItem extends StatelessWidget {
               // ---------- 未读徽标 ----------
               if (status.unread != null && status.unread! > 0) ...<Widget>[
                 const SizedBox(width: AylaSpacing.sp2),
-                _UnreadBadge(count: status.unread!),
+                // 2026-09-20 审查 R8：合并到组件库 TabBadge（.group-badge 档）
+                TabBadge(
+                  count: status.unread!,
+                  metrics: TabBadgeMetrics.groupBadge,
+                  placement: TabBadgePlacement.inline,
+                ),
               ],
             ],
           ),
@@ -1462,10 +1314,12 @@ class AylaGroupListItem extends StatelessWidget {
     final Widget glass = AylaCardInteraction(
       onTap: onOpen,
       semanticLabel: '进入群聊 $title',
-      builder: (BuildContext context, bool hovered) => _ListItemShell(
-        radius: r,
+      // 同上：列表行也用 GlassSurface（原 _ListItemShell 是同一份复制品）
+      builder: (BuildContext context, bool hovered) => GlassSurface(
+        radiusOverride: r,
         // hover → --glass-shadow-hover；静止 → --glass-shadow-compact
         shadow: hovered ? AylaShadows.glassHover : AylaShadows.compact,
+        shadowTransition: AylaDurations.auroraqua,
         child: row,
       ),
     );
@@ -1473,7 +1327,11 @@ class AylaGroupListItem extends StatelessWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: <Widget>[
-        _RevealItem(delay: revealDelay, child: glass),
+        AylaRevealItem(
+          enabled: revealDelay != null,
+          delay: revealDelay,
+          child: glass,
+        ),
         // `.group-list-item-wrap .conv-more { right: 6px }`（行内垂直居中）
         AylaConversationMoreMenu(
           conversation: AylaConversation(
@@ -1484,107 +1342,6 @@ class AylaGroupListItem extends StatelessWidget {
           showDelete: false,
           right: 6,
           onTogglePin: onTogglePin,
-        ),
-      ],
-    );
-  }
-}
-
-/// 未读徽标（`.group-badge.group-badge-unread`）。
-class _UnreadBadge extends StatelessWidget {
-  const _UnreadBadge({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 16), // min-width: 16px
-      height: 16, // height: 16px
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 4), // padding: 0 4px
-      decoration: BoxDecoration(
-        color: AylaColors.pink500, // .group-badge-unread { background: --pink-500 }
-        borderRadius: AylaRadii.pill,
-      ),
-      child: Text(
-        formatGroupCount(count),
-        style: TextStyle(
-          fontFamily: AylaFonts.display,
-          fontFamilyFallback: AylaFonts.cjkFallback,
-          fontSize: 11, // font-size: 11px
-          height: 1, // line-height: 1
-          color: AylaColors.surface, // color: #fffafb
-        ),
-      ),
-    );
-  }
-}
-
-/// 列表行的玻璃外壳（`--glass-shadow-compact` 含 `--glass-inset`）。
-class _ListItemShell extends StatelessWidget {
-  const _ListItemShell({
-    required this.radius,
-    required this.child,
-    this.shadow = AylaShadows.compact,
-  });
-
-  final BorderRadius radius;
-  final Widget child;
-
-  /// 当前阴影（静止 `--glass-shadow-compact`；hover `--glass-shadow-hover`）。
-  final List<BoxShadow> shadow;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool opaque = GlassConfig.useOpaqueFallback;
-
-    final Widget face = DecoratedBox(
-      decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: false),
-        borderRadius: radius,
-        border: Border.all(color: AylaColors.glassBorder),
-      ),
-      child: child,
-    );
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        if (!opaque)
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: radius,
-              child: BackdropFilter(
-                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
-                child: const SizedBox.expand(),
-              ),
-            ),
-          ),
-        Positioned.fill(
-          child: AnimatedContainer(
-            duration: AylaDurations.auroraqua, // box-shadow 300ms
-            curve: AylaCurves.auroraqua,
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              boxShadow: shadow, // --glass-shadow-compact / hover → -hover
-            ),
-          ),
-        ),
-        face,
-        Positioned.fill(
-          child: IgnorePointer(
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints c) {
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: radius,
-                    gradient: AylaInset.topHighlight(c.maxHeight),
-                  ),
-                );
-              },
-            ),
-          ),
         ),
       ],
     );
@@ -1685,118 +1442,6 @@ class AylaGroupList extends StatelessWidget {
 }
 
 // ======================= 卡片族共用交互 =======================
-
-/// 卡片族 hover/press 动效（`auroraqua.css` 29–52）。
-///
-/// ```
-/// :is(.group-card, .group-list-item, .game-room-card, .live-card,
-///     .voice-channel-card, .post-card, .favorite-item) {
-///   transform-origin: center;
-///   transition: translate 300ms ease, scale 200ms ease,
-///               box-shadow 300ms ease, border-color 300ms ease;
-/// }
-/// @media (hover: hover) and (pointer: fine) {
-///   :hover  → translate: 0 -2px; box-shadow: var(--glass-shadow-hover);
-/// }
-/// :active → translate: 0 0; scale: 0.99;
-/// ```
-///
-/// 要点：
-/// - hover **上浮 2px 同时换 `--glass-shadow-hover`**（12/40 阴影）；
-/// - **按下会把 translate 复位为 0**（`translate: 0 0`）并缩到 `.99`
-///   —— 不是"在 -2px 基础上再缩"，而是先回到原位（用户可感知的"按下去"）；
-/// - 时长不同：`translate`/`box-shadow` 300ms，`scale` **200ms**（`--auroraqua-ease`）；
-/// - 仅指针精确设备生效（Flutter 侧用 `MouseRegion` 天然只对鼠标触发）；
-/// - reduced-motion 下不做位移。
-///
-/// [shadowFor] 回调：把「当前该用哪条阴影」交给调用方绘制（hover →
-/// `AylaShadows.glassHover`）。卡片的阴影环是独立层（不参与裁剪），
-/// 不能由本组件用 BoxDecoration 包一层，故用回调而非参数。
-class AylaCardInteraction extends StatefulWidget {
-  const AylaCardInteraction({
-    super.key,
-    required this.builder,
-    this.onTap,
-    this.semanticLabel,
-  });
-
-  /// 内容构建器（`hovered` 用于切换阴影与其它 hover 态）。
-  final Widget Function(BuildContext context, bool hovered) builder;
-
-  /// 点击回调（null 则不响应；动效仍保留）。
-  final VoidCallback? onTap;
-
-  /// 可访问性标签。
-  final String? semanticLabel;
-
-  @override
-  State<AylaCardInteraction> createState() => _AylaCardInteractionState();
-}
-
-class _AylaCardInteractionState extends State<AylaCardInteraction> {
-  bool _hovered = false;
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    // translate：hover → -2px；按下复位 0（CSS `:active { translate: 0 0 }`）
-    final double dy = reduceMotion
-        ? 0
-        : (_pressed
-            ? 0
-            : (_hovered ? -2 : 0));
-    // scale：按下 .99（200ms）
-    final double scale = reduceMotion || !_pressed ? 1.0 : 0.99;
-
-    // CSS `translate` 是**像素位移**（不影响布局、不改变自身坐标系原点），
-    // 故用 Transform.translate 而非 AnimatedSlide（后者 offset 是自身尺寸百分比）。
-    Widget content = TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0, end: dy),
-      duration: reduceMotion
-          ? Duration.zero
-          : AylaDurations.auroraqua, // translate / box-shadow 300ms
-      curve: AylaCurves.auroraqua,
-      builder: (BuildContext context, double v, Widget? child) {
-        return Transform.translate(offset: Offset(0, v), child: child);
-      },
-      child: AnimatedScale(
-        duration: reduceMotion
-            ? Duration.zero
-            : AylaDurations.button, // scale 200ms
-        curve: AylaCurves.auroraqua,
-        scale: scale,
-        child: widget.builder(context, _hovered),
-      ),
-    );
-
-    if (widget.semanticLabel != null) {
-      content = Semantics(
-        button: widget.onTap != null,
-        label: widget.semanticLabel,
-        child: content,
-      );
-    }
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() {
-        _hovered = false;
-        _pressed = false;
-      }),
-      child: Listener(
-        onPointerDown: (_) => setState(() => _pressed = true),
-        onPointerUp: (_) => setState(() => _pressed = false),
-        onPointerCancel: (_) => setState(() => _pressed = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          child: content,
-        ),
-      ),
-    );
-  }
-}
 
 // ======================= 预览 =======================
 

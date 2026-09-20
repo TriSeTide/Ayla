@@ -383,13 +383,11 @@ class _PrivacySheetState extends State<PrivacySheet> {
       child: Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
-          // --glass-shadow-modal（20/60 + --glass-inset）
+          // --glass-shadow-modal（20/60 + --glass-inset）——只画形状之外
+          // （2026-09-20 审查 R2：裸 boxShadow 会染进 .78 玻璃内部）
           Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: r,
-                boxShadow: AylaShadows.modal,
-              ),
+            child: IgnorePointer(
+              child: AylaGlassShadow.ring(radius: r, shadows: AylaShadows.modal),
             ),
           ),
           face,

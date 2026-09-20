@@ -42,8 +42,18 @@ void main() {
       find.text('AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）'),
       findsOneWidget,
     );
+    // 2026-09-20 审查 R8：TabBadge 分区标题改为「三档规格」写法
     expect(
-      find.text('TabBadge（shell.css .tab-badge 579–593）'),
+      find.text(
+        'TabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-20 审查 R7：入场件分区
+    expect(
+      find.text(
+        'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
+      ),
       findsOneWidget,
     );
     expect(find.text('登录'), findsWidgets);

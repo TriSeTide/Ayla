@@ -473,7 +473,7 @@ class _AylaPullToRefreshState extends State<AylaPullToRefresh>
                 // 注意：必须写 1.0/0.0 —— 条件表达式的 int 不会自动提升为 double
                 opacity: showIndicator ? 1.0 : 0.0, // .is-* → opacity:1
                 child: Center(
-                  child: _RefreshDot(status: _status),
+                  child: AylaRefreshDot(status: _status),
                 ),
               ),
             ),
@@ -485,8 +485,8 @@ class _AylaPullToRefreshState extends State<AylaPullToRefresh>
 }
 
 /// `.pull-refresh-dot` —— 36×36 玻璃圆点；内含 arrow / spinner / check 三态。
-class _RefreshDot extends StatelessWidget {
-  const _RefreshDot({required this.status});
+class AylaRefreshDot extends StatelessWidget {
+  const AylaRefreshDot({super.key, required this.status});
 
   final PullStatus status;
 
@@ -543,13 +543,11 @@ class _RefreshDot extends StatelessWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: <Widget>[
-        // --card-shadow（不含 --glass-inset，见 tokens.css 75）
+        // --card-shadow（不含 --glass-inset，见 tokens.css 75）——只画形状之外
+        // （2026-09-20 审查 R2：裸 boxShadow 会染进 .78 玻璃内部）
         Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: r,
-              boxShadow: AylaShadows.card,
-            ),
+          child: IgnorePointer(
+            child: AylaGlassShadow.ring(radius: r, shadows: AylaShadows.card),
           ),
         ),
         layered,
@@ -610,9 +608,8 @@ Widget previewRefreshDotStates() {
   Widget cell(String label, PullStatus s) => Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // 直接复用指示器本体（_RefreshDot 是私有类，用 AylaPullToRefresh 的
-          // 状态无法静态摆出三态 → 这里用同规格自绘对照）
-          _RefreshDotPreview(status: s),
+          // 直接复用指示器本体（2026-09-20 审查：原预览替身类已删，改为公开复用）
+          AylaRefreshDot(status: s),
           const SizedBox(height: 6),
           Text(label, style: const TextStyle(fontSize: 11)),
         ],
@@ -629,39 +626,6 @@ Widget previewRefreshDotStates() {
       ],
     ),
   );
-}
-
-/// 指示器预览替身（与 `_RefreshDot` 同规格；私有类无法直接引用）。
-class _RefreshDotPreview extends StatelessWidget {
-  const _RefreshDotPreview({required this.status});
-
-  final PullStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    final BorderRadius r = BorderRadius.circular(18);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: true),
-        borderRadius: r,
-        border: Border.all(color: AylaColors.glassBorder),
-        boxShadow: AylaShadows.card,
-      ),
-      child: SizedBox(
-        width: 36,
-        height: 36,
-        child: Center(
-          child: switch (status) {
-            PullStatus.refreshing => const LoadingSpinner(size: 18),
-            PullStatus.done =>
-              const Icon(Icons.check, size: 16, color: AylaColors.success),
-            _ => const Icon(Icons.keyboard_arrow_down,
-                size: 14, color: AylaColors.indigo700),
-          },
-        ),
-      ),
-    );
-  }
 }
 
 /// SignedVideo 三态（loading / failed / ready；真实播放属媒体批次）。

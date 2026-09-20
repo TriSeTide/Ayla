@@ -31,6 +31,7 @@ import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
+import 'tab_badge.dart';
 
 /// `.layout-switch` —— 主页布局切换（卡片 / 列表）。
 ///
@@ -796,7 +797,12 @@ class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
           ),
           if (widget.badgeCount > 0) ...<Widget>[
             const SizedBox(width: AylaSpacing.sp1), // margin-left: var(--sp-1)
-            _TabBadgeInline(count: widget.badgeCount),
+            // 2026-09-20 审查 R8：合并到组件库 TabBadge（.messages-tab-badge 档）
+            TabBadge(
+              count: widget.badgeCount,
+              metrics: TabBadgeMetrics.messages,
+              placement: TabBadgePlacement.inline,
+            ),
           ],
         ],
       ),
@@ -829,51 +835,6 @@ class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
         hoverScale: false,
         onPressChanged: widget.onPressChanged,
         child: button,
-      ),
-    );
-  }
-}
-
-/// `.messages-tab-badge`（messages.css 43–57）：
-/// `display:inline-grid`、**min-width 18 / height 18**、`padding 0 5`、
-/// `margin-left: var(--sp-1)`、`border-radius: var(--radius-pill)`、
-/// 底 `--pink-500`、字 `--surface`、**`font-family: var(--font-utility)`**
-/// （Space Grotesk，不是 Fredoka）、`font-size: 11px`、`line-height: 1`、
-/// `box-shadow: var(--glow-shadow)`。
-///
-/// 注意：它是**固定 18px 高的小圆**（内容更长时按 padding 撑成胶囊），
-/// 绝不能跟随父容器高度拉伸——此前用 Row 内默认 stretch 导致被拉成大胶囊。
-class _TabBadgeInline extends StatelessWidget {
-  const _TabBadgeInline({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 18, maxHeight: 18),
-      child: Container(
-        height: 18, // height: 18px（固定,不随父拉伸）
-        padding: const EdgeInsets.symmetric(horizontal: 5), // padding: 0 5px
-        decoration: const BoxDecoration(
-          color: AylaColors.pink500, // background: var(--pink-500)
-          borderRadius: AylaRadii.pill,
-          boxShadow: AylaShadows.glow, // box-shadow: var(--glow-shadow)
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          count > 99 ? '99+' : '$count',
-          maxLines: 1,
-          style: const TextStyle(
-            // font-family: var(--font-utility) → Space Grotesk
-            fontFamily: AylaFonts.utility,
-            fontFamilyFallback: AylaFonts.cjkFallback,
-            fontSize: 11,
-            height: 1, // line-height: 1
-            fontWeight: FontWeight.w400,
-            color: AylaColors.surface,
-          ),
-        ),
       ),
     );
   }
