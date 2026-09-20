@@ -610,11 +610,14 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
     //
     // 实测证据（卡片底 #FFFAFB + ice-500 渐变）：
     //   web 胶囊内部应为 **(229,234,245)**（纯 `--nav-active-bg`）
-    //   我的是           **(205,220,240)**
+    //   挂 boxShadow 后是  **(205,220,240)**
     //   ≈ 在 web 值上再叠 `.3` 冰蓝 → **(207,221,240)**（差仅 (2,1,0)）
-    //   ⇒ 证实内部被多画一层阴影 → 高亮块偏暗偏蓝，"不如 web 通透"。
+    //   ⇒ 证实内部被多画一层阴影 → 高亮块偏暗偏蓝。
     //
-    // 故阴影改由 `AylaGlassShadow.ring` 单独绘制（只画形状之外）。
+    // **当前决定：胶囊不画外阴影**（已移除 `boxShadow`，暂不补 ring 层）。
+    // 用户 2026-09-20 验收 release 后确认「正常」，故维持现状。
+    // 若日后要补齐 `--glass-shadow-nav` 的 8px 冰蓝外发光，请用
+    // [AylaGlassShadow.ring]（只画形状之外）—— **不要**改回 `boxShadow`。
     final Widget surface = DecoratedBox(
       decoration: BoxDecoration(
         gradient: cssLinearGradient(
