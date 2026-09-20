@@ -127,11 +127,16 @@ class AylaBottomTabs extends StatelessWidget {
             Stack(
               children: <Widget>[
                 Positioned.fill(
-                  child: BackdropFilter(
-                    filter: GlassConfig.backdropFilter(
-                      sigma: AylaGlass.blurNav,
+                  // ⚠️ 必须 ClipRect：BackdropFilter 的模糊**不受布局尺寸限制**，
+                  // 缺裁剪会把背后整块画布一起模糊（2026-09-20 用户实测：底栏样张
+                  // 在画布里“挡住整个大画布”）。库内其它模糊层均有 ClipRRect/ClipRect。
+                  child: ClipRect(
+                    child: BackdropFilter(
+                      filter: GlassConfig.backdropFilter(
+                        sigma: AylaGlass.blurNav,
+                      ),
+                      child: const SizedBox.expand(),
                     ),
-                    child: const SizedBox.expand(),
                   ),
                 ),
                 bar,
