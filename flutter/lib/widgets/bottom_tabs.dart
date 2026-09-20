@@ -158,7 +158,9 @@ class _AylaBottomTabsState extends State<AylaBottomTabs> {
                           height: AylaBottomTabs.barHeight - m.vertical,
                           child: AylaNavHighlight(
                             radiusValue: capsuleRadius,
-                            showBorder: false, // link 自身无 1px 边
+                            // 白边走库内默认（`showBorder: true` = `.auroraqua-nav-highlight`
+                            // 的 `border: 1px solid --glass-border`，auroraqua.css:186）。
+                            // 此前误传 false 导致白边丢失（2026-09-20 用户指出「选项卡白边没加」）。
                             sweep: true,
                             sweepActive: _hoveredIndex == activeIndex,
                           ),

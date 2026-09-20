@@ -49,6 +49,7 @@ import '../widgets/primitives.dart';
 import '../widgets/reveal.dart';
 import '../widgets/share.dart';
 import '../widgets/tab_badge.dart';
+import '../widgets/top_nav.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
 /// 高度按内容收紧——图标区 + 排版区结束约在 1450，余量留到 1700）。
@@ -352,6 +353,16 @@ class ComponentGallery extends StatelessWidget {
             child: aylaGroupTopTabsSamples(), // 可交互：点 tab 看胶囊迁移
           ),
           const SizedBox(height: AylaSpacing.sp8),
+          // ---------- Shell 顶栏（2026-09-20） ----------
+          _Section(
+            title:
+                'AylaTopNav（layout/TopNav.tsx 1–343 / layout/NarrowTopBar.tsx 1–199）',
+            source:
+                '响应式（>768 宽屏 / ≤768 窄屏自动切换）· 宽屏＝圆角浮动卡（复用 GlassCard：margin 12/12/0 + radius-card 16 + 四周 1px 边 + --glass-shadow + blur18）· 窄屏＝方角条（高 56 / padding 0 sp4 / 底部 1px 边 / 入场 auroraqua-panel-from-top）· 模块链 15/700 + 图标 16 上移 2px + 共享胶囊（有胶囊即不画底条，auroraqua 213）· logo 绝对居中 + 渐变字 indigo→grape + ≤1240 隐藏 · 图标钮复用 AylaIconButton（玻璃小卡 + hover 1.02 / press .98）· 搜索框＝文本字段族（radius-input + --glass-inset + focus 转辉光边）· 菜单与下拉浮层 300ms auroraqua-menu-in（opacity + −8px + .95→1）· 769–900 收窄降档（gap/padding + 搜索框 clamp(160,22vw,200)）',
+            child: aylaTopNavSamples(), // 可交互：点模块 / 更多菜单 / 搜索框，切三形态
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
           // ---------- 入场动画（2026-09-20 审查 R7：公共件） ----------
           _Section(
             title: 'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',

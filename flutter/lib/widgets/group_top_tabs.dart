@@ -213,7 +213,7 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
                       radiusValue: const BorderRadius.all(
                         Radius.circular(AylaRadii.rInput), // auroraqua 255
                       ),
-                      showBorder: false,
+                      // 白边走库内默认（showBorder: true，auroraqua.css:186）
                       sweep: true,
                       // 扫光是**父级 hover** 触发（auroraqua 161–166）：只有 hover 到当前选中槽时才播
                       sweepActive: _hoveredScene == widget.activeScene,
