@@ -10,6 +10,8 @@ import '../lib/core/models/share_payload.dart';
 import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/theme/preview_theme.dart';
 import '../lib/widgets/dialogs.dart' show AylaModalCard;
+import '../lib/widgets/primitives.dart'
+    show AylaNavHighlight, AylaSegmentedTabs, AylaSegmentedTabsVariant;
 import '../lib/widgets/share.dart';
 
 void main() {
@@ -434,6 +436,35 @@ void main() {
       await tester.tap(find.text('私信'));
       await tester.pumpAndSettle();
       expect(find.text('暂无私信'), findsOneWidget);
+    });
+
+    testWidgets('选项卡复用组件库：shareSheet 档 + 无共享滑动胶囊', (WidgetTester tester) async {
+      setViewport(tester, const Size(1440, 900));
+      await tester.pumpWidget(
+        host(
+          AylaShareSheet(
+            payload: livePayload,
+            groups: pageOf(const <AylaShareTarget>[]),
+            privates: pageOf(const <AylaShareTarget>[]),
+            onClose: () {},
+          ),
+        ),
+      );
+      final AylaSegmentedTabs tabs =
+          tester.widget<AylaSegmentedTabs>(find.byType(AylaSegmentedTabs));
+      expect(tabs.variant, AylaSegmentedTabsVariant.shareSheet);
+      expect(tabs.labels, <String>['群聊', '私信']);
+      expect(tabs.index, 0);
+      expect(tabs.semanticLabel, '分享目标类型');
+      // share.css 63–91 没有 `.auroraqua-nav-highlight` 元素 → 无共享滑动胶囊，
+      // 选中底由 `AylaSegmentedTab` 自身静态层提供
+      expect(find.byType(AylaNavHighlight), findsNothing);
+      await tester.tap(find.text('私信'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AylaSegmentedTabs>(find.byType(AylaSegmentedTabs)).index,
+        1,
+      );
     });
 
     testWidgets('关闭：关闭按钮触发 onClose，且重复关闭只回调一次', (WidgetTester tester) async {

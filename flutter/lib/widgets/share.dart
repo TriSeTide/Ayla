@@ -329,6 +329,7 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final Size viewport = MediaQuery.of(context).size;
+    final bool narrow = viewport.width <= 768; // 与 AylaModalCard 同一断点
     final AylaShareTargetPage page =
         _tab == AylaShareTab.group ? widget.groups : widget.privates;
 
@@ -366,8 +367,17 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
                 children: <Widget>[
                   _head(t),
                   _preview(t),
-                  _tabs(t),
-                  Flexible(fit: FlexFit.loose, child: _body(t, page)),
+                  _tabs(),
+                  // web `.share-sheet-body { flex: 1; min-height: 0 }`：
+                  // · 窄屏卡片是**固定 60dvh**（`.is-narrow { height: 60dvh }`）→
+                  //   剩余空间必须由 body 拿走（tight）：空列表时的留白归属 body
+                  //   （可滚动区），与 web 一致，而不是掉在卡片尾部；
+                  // · 宽屏卡片高度由内容决定（只受 max-height 约束）→ 必须 loose，
+                  //   否则内容少时也会被撑到 max-height（720）。
+                  if (narrow)
+                    Expanded(child: _body(t, page))
+                  else
+                    Flexible(fit: FlexFit.loose, child: _body(t, page)),
                   if (_error != null) _errorBar(t),
                 ],
               ),
@@ -460,35 +470,18 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
     );
   }
 
-  /// `.share-sheet-tabs`：2 列 grid / gap 8 / margin 12 16 8 / padding 4 / radius-input。
-  Widget _tabs(AylaTextStyles t) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: false),
-        borderRadius: BorderRadius.circular(AylaRadii.rInput),
-        border: Border.all(color: AylaColors.glassBorder),
-      ),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: _ShareTabButton(
-              label: '群聊',
-              active: _tab == AylaShareTab.group,
-              onTap: () => setState(() => _tab = AylaShareTab.group),
-            ),
-          ),
-          const SizedBox(width: 8), // grid gap 8
-          Expanded(
-            child: _ShareTabButton(
-              label: '私信',
-              active: _tab == AylaShareTab.private,
-              onTap: () => setState(() => _tab = AylaShareTab.private),
-            ),
-          ),
-        ],
-      ),
+  /// 选项卡 —— **复用组件库** [AylaSegmentedTabs] 的 shareSheet 档
+  /// （容器 margin 12/16/8 + radius-input 12 + `--glass-bg`；项 radius 10 +
+  /// 静态选中底，无共享滑动胶囊）。事实源 share.css 63–91。
+  Widget _tabs() {
+    return AylaSegmentedTabs(
+      labels: const <String>['群聊', '私信'],
+      index: _tab == AylaShareTab.group ? 0 : 1,
+      variant: AylaSegmentedTabsVariant.shareSheet,
+      semanticLabel: '分享目标类型', // web `role="tablist" aria-label="分享目标类型"`
+      onChanged: (int i) => setState(() {
+        _tab = i == 0 ? AylaShareTab.group : AylaShareTab.private;
+      }),
     );
   }
 
@@ -784,92 +777,6 @@ class _ShareRowState extends State<_ShareRow> {
               borderRadius: BorderRadius.circular(12), // border-radius: 12px
             ),
             child: widget.child,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// `.share-sheet-tab`：40 高 / radius 10 / 14 700；选中 = `--nav-active-bg` 渐变
-/// + `--glass-shadow-compact`（**无边框**、无扫光、无 hover 放大）。
-/// `transition: color 200ms ease` —— 只有文字颜色过渡，底色/阴影瞬时切换。
-class _ShareTabButton extends StatelessWidget {
-  const _ShareTabButton({
-    required this.label,
-    required this.active,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final AylaTextStyles t = AylaTextStyles.of(context);
-    final BorderRadius radius = BorderRadius.circular(10);
-    return Semantics(
-      button: true,
-      selected: active, // web `role=tab aria-selected`
-      label: label,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          child: SizedBox(
-            height: 40, // `.share-sheet-tab { height: 40px }`
-            width: double.infinity,
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints c) {
-                return Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    if (active) ...<Widget>[
-                      // `--glass-shadow-compact`（只画形状之外）
-                      IgnorePointer(
-                        child: AylaGlassShadow.ring(
-                          radius: radius,
-                          shadows: AylaShadows.compact,
-                        ),
-                      ),
-                      // `--nav-active-bg`：135deg 非方形渐变需按 CSS 渐变线长换算
-                      AylaGlassInset.over(
-                        radius: radius,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: radius,
-                            gradient: cssLinearGradient(
-                              angleDeg: 135,
-                              colors: const <Color>[
-                                Color(0x599DBFE6), // rgba(157,191,230,.35)
-                                Color(0x2E9DBFE6), // rgba(157,191,230,.18)
-                              ],
-                              aspectRatio: c.maxWidth / 40, // 盒宽 / 盒高
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    Center(
-                      child: AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200), // transition: color 200ms
-                        curve: AylaCurves.auroraqua, // CSS `ease`
-                        style: t.body.copyWith(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: active
-                              ? AylaColors.textPrimary
-                              : AylaColors.textSecondary,
-                        ),
-                        child: Text(label),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
           ),
         ),
       ),

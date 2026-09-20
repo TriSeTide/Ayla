@@ -303,9 +303,33 @@ class _LayoutSwitchButton extends StatelessWidget {
   }
 }
 
-/// 分段选项卡容器（`.messages-tabs`）—— 选中胶囊 300ms 迁移。
+/// 选项卡族两个真实规格（web 是两个**独立类**，样式并不一致）。
 ///
-/// **1:1 对照 `messages.css` 17–37 + `MessagesPage.tsx` 209–241**
+/// | 维度 | [AylaSegmentedTabsVariant.messages] | [AylaSegmentedTabsVariant.shareSheet] |
+/// |---|---|---|
+/// | 事实源 | `messages.css` 17–33 + `auroraqua.css` 272–278 | `share.css` 63–91 |
+/// | 容器 margin | `sp2`（覆写 messages.css 的 `sp3 sp4`） | `12px 16px 8px` |
+/// | 容器 padding | `sp1` | `4px`（= sp1） |
+/// | 容器圆角 | `--radius-card` 16 | `--radius-input` 12 |
+/// | 容器底 | 无（透明） | `--glass-bg` |
+/// | 容器内高光 | `--glass-inset` | **无** |
+/// | 选中态 | 共享滑动胶囊（`AylaNavHighlight`：nav 阴影 + 1px 边框 + 700ms 扫光，
+/// 300ms 迁移） | 项自带**静态**底（`--nav-active-bg` + `--glass-shadow-compact`，
+/// **无边框、无扫光、无迁移**） |
+/// | 项圆角 | `--radius-input` 12 | `10px` |
+/// | 项按下缩放 | `:active scale .98`（auroraqua 236–249） | **无**（不在任何 `:is()` 组） |
+/// | 文字过渡 | 180ms `--ease-out` | 200ms `ease` |
+enum AylaSegmentedTabsVariant {
+  /// `.messages-tabs` / `.messages-tab`（消息中心双 tab）。
+  messages,
+
+  /// `.share-sheet-tabs` / `.share-sheet-tab`（分享弹窗「群聊 / 私信」）。
+  shareSheet,
+}
+
+/// 分段选项卡容器 —— 选中态随 [AylaSegmentedTabsVariant] 切换。
+///
+/// **messages 档 1:1 对照 `messages.css` 17–37 + `MessagesPage.tsx` 209–241**
 /// （`.messages-tabs { gap: sp2 }`；`.messages-tab { flex:1; height:40px;
 /// border-radius: --radius-input }`；选中项内含 `AuroraquaNavHighlight`）。
 ///
@@ -320,6 +344,7 @@ class AylaSegmentedTabs extends StatefulWidget {
     required this.onChanged,
     this.badges = const <int>[],
     this.semanticLabel,
+    this.variant = AylaSegmentedTabsVariant.messages,
   });
 
   /// 各 tab 文案。
@@ -336,6 +361,9 @@ class AylaSegmentedTabs extends StatefulWidget {
 
   /// 组语义标签。
   final String? semanticLabel;
+
+  /// 规格档（默认消息中心档；分享弹窗传 [AylaSegmentedTabsVariant.shareSheet]）。
+  final AylaSegmentedTabsVariant variant;
 
   @override
   State<AylaSegmentedTabs> createState() => _AylaSegmentedTabsState();
@@ -370,8 +398,12 @@ class _AylaSegmentedTabsState extends State<AylaSegmentedTabs> {
     //   }
     //   .messages-tabs { margin: var(--sp-2); padding: var(--sp-1); }
     //     ← 覆写 messages.css 的 padding: sp3 sp4
-    final BorderRadius containerRadius =
-        BorderRadius.circular(AylaRadii.rCard);
+    final bool shareSheet =
+        widget.variant == AylaSegmentedTabsVariant.shareSheet;
+    // messages 档 16（auroraqua 275 覆写）；shareSheet 档 12（share.css 70）
+    final BorderRadius containerRadius = BorderRadius.circular(
+      shareSheet ? AylaRadii.rInput : AylaRadii.rCard,
+    );
 
     return MouseRegion(
       onHover: (PointerHoverEvent e) => _pointerPos = e.position,
@@ -379,11 +411,21 @@ class _AylaSegmentedTabsState extends State<AylaSegmentedTabs> {
         container: true,
         label: widget.semanticLabel,
         child: Container(
-          margin: const EdgeInsets.all(AylaSpacing.sp2), // margin: sp2
+          // messages：`.messages-tabs { margin: sp2 }`（auroraqua 272–278）
+          // shareSheet：`.share-sheet-tabs { margin: 12px 16px 8px }`（share.css 67）
+          margin: shareSheet
+              ? const EdgeInsets.fromLTRB(16, 12, 16, 8)
+              : const EdgeInsets.all(AylaSpacing.sp2),
           decoration: BoxDecoration(
-            borderRadius: containerRadius, // --radius-card 16
+            // shareSheet：`background: var(--glass-bg)`（share.css 71）
+            // messages：web 无 background（透明），选中底由内层胶囊提供
+            color: shareSheet
+                ? GlassConfig.resolveBackground(strong: false)
+                : null,
+            borderRadius: containerRadius, // rCard 16 / rInput 12
             border: Border.all(color: AylaColors.glassBorder),
-            // box-shadow: var(--glass-inset)：内高光见下（无外阴影）
+            // messages：box-shadow: var(--glass-inset)（内高光见下，无外阴影）
+            // shareSheet：share.css 无 box-shadow → 不叠内高光
           ),
           // 关键：LayoutBuilder 放在 **padding 内部**，它的 maxWidth 即
           // Stack 的真实可用宽——几何才不会因 border/padding 产生累积误差
@@ -399,17 +441,21 @@ class _AylaSegmentedTabsState extends State<AylaSegmentedTabs> {
 
                 return Stack(
                   children: <Widget>[
-                    // box-shadow: var(--glass-inset) 的等价层（顶沿 1px 高光）
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: AylaInset.topHighlight(40),
+                    // box-shadow: var(--glass-inset) 的等价层（顶沿 1px 高光）；
+                    // shareSheet 档无 box-shadow → 不叠（share.css 63–74）
+                    if (!shareSheet)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: AylaInset.topHighlight(40),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    if (w > 0 && tabW > 0)
+                    // shareSheet 档**没有共享滑动胶囊**（tsx 未渲染
+                    // AuroraquaNavHighlight；share.css 也无迁移规则）
+                    if (!shareSheet && w > 0 && tabW > 0)
                       AnimatedPositioned(
                         duration: const Duration(milliseconds: 300),
                         curve: AylaCurves.auroraquaEaseOut,
@@ -439,6 +485,7 @@ class _AylaSegmentedTabsState extends State<AylaSegmentedTabs> {
                             child: AylaSegmentedTab(
                               label: widget.labels[i],
                               active: i == widget.index,
+                              variant: widget.variant,
                               badgeCount: i < widget.badges.length
                                   ? widget.badges[i]
                                   : 0,
@@ -719,15 +766,18 @@ class _SweepBand extends StatelessWidget {
   }
 }
 
-/// `.messages-tab` 单枚（分段选项卡，`.messages-tabs` 容器由调用方排布）。
+/// 选项卡按钮本体（高 40 / 14-700）—— 规格随 [AylaSegmentedTabsVariant] 切换。
 ///
-/// 高度 40、radius 12、14px/700；选中 → `rgba(157,191,230,.35)` + 主色字
-/// `.messages-tab` —— 选项卡按钮本体（高 40 / radius 12 / 14-700）。
+/// **messages 档**（`messages.css` 24–37）：`flex: 1`、`height: 40px`、
+/// `border-radius: var(--radius-input)` 12、14px/700、`text-secondary`；
+/// `.is-active` → `text-primary`（选中底由容器共享胶囊提供，对齐 auroraqua.css
+/// 194–197 的 `background: transparent`）；`:active scale .98`。
 ///
-/// `messages.css` 24–37：`flex: 1`、`height: 40px`、
-/// `border-radius: var(--radius-input)`、14px/700、`text-secondary`；
-/// `.is-active` → `text-primary`（选中底由容器胶囊提供，对齐 auroraqua.css
-/// 194–197 的 `background: transparent`）。可选右侧徽标。
+/// **shareSheet 档**（`share.css` 74–91）：`height: 40px`、`border-radius: 10px`、
+/// `transition: color 200ms ease`；`.is-active` → `text-primary` +
+/// `background: var(--nav-active-bg)` + `box-shadow: var(--glass-shadow-compact)`
+/// （**项自带静态底：无边框、无扫光、无迁移**）；**无 `:active` 缩放**。
+/// 可选右侧徽标。
 class AylaSegmentedTab extends StatefulWidget {
   const AylaSegmentedTab({
     super.key,
@@ -737,6 +787,7 @@ class AylaSegmentedTab extends StatefulWidget {
     this.badgeCount = 0,
     this.onHoverChanged,
     this.onPressChanged,
+    this.variant = AylaSegmentedTabsVariant.messages,
   });
 
   /// 文案。
@@ -757,6 +808,9 @@ class AylaSegmentedTab extends StatefulWidget {
   /// 按压状态回调（供容器让共享胶囊同步 scale .98）。
   final ValueChanged<bool>? onPressChanged;
 
+  /// 规格档（与容器 [AylaSegmentedTabs.variant] 保持一致）。
+  final AylaSegmentedTabsVariant variant;
+
   @override
   State<AylaSegmentedTab> createState() => _AylaSegmentedTabState();
 }
@@ -766,6 +820,11 @@ class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final bool shareSheet =
+        widget.variant == AylaSegmentedTabsVariant.shareSheet;
+    final BorderRadius radius = BorderRadius.circular(
+      shareSheet ? 10 : AylaRadii.rInput, // share.css 77 / messages.css 28
+    );
 
     Widget button = Container(
       height: 40, // height: 40px
@@ -780,7 +839,14 @@ class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
           Flexible(
             fit: FlexFit.loose,
             child: AnimatedDefaultTextStyle(
-              duration: reduceMotion ? Duration.zero : AylaDurations.fast,
+              // messages：`transition: … color var(--dur-fast) --ease-out`
+              // shareSheet：`transition: color 200ms ease`（share.css 81）
+              duration: reduceMotion
+                  ? Duration.zero
+                  : (shareSheet
+                      ? const Duration(milliseconds: 200)
+                      : AylaDurations.fast),
+              curve: shareSheet ? AylaCurves.auroraqua : AylaCurves.easeOut,
               style: t.label.copyWith(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
@@ -808,6 +874,56 @@ class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
       ),
     );
 
+    // shareSheet：`.share-sheet-tab.is-active` 的静态底 ——
+    // `background: var(--nav-active-bg)`（135deg ice .35 → .18）
+    // + `box-shadow: var(--glass-shadow-compact)`（含顶沿内高光），**无边框**。
+    // 它属于项自身（不是容器共享胶囊），因此不随索引迁移。
+    // ⚠️ 用 `SizedBox(height: 40)` + `Positioned.fill` 固定几何：
+    // 选项卡 Row 在 Column（mainAxisSize.min）里高度**无界**，
+    // `StackFit.expand` 会强推 `h=Infinity` 断言失败（2026-09-20 实测）。
+    if (shareSheet && widget.active) {
+      button = SizedBox(
+        height: 40, // `.share-sheet-tab { height: 40px }`
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AylaGlassShadow.ring(
+                  radius: radius,
+                  shadows: AylaShadows.compact,
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: AylaGlassInset.over(
+                radius: radius,
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints c) {
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        gradient: cssLinearGradient(
+                          angleDeg: 135,
+                          colors: const <Color>[
+                            Color(0x599DBFE6), // rgba(157,191,230,.35)
+                            Color(0x2E9DBFE6), // rgba(157,191,230,.18)
+                          ],
+                          aspectRatio: c.maxWidth.isFinite
+                              ? c.maxWidth / 40
+                              : 1,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            Positioned.fill(child: button),
+          ],
+        ),
+      );
+    }
+
     button = MouseRegion(
       opaque: true,
       onEnter: (_) => widget.onHoverChanged?.call(true),
@@ -833,6 +949,9 @@ class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
         // **只有 `:active { scale: .98 }`，hover 不放大**（它不在 54–83 的
         // 按钮组里，那组的 hover 1.02 不适用于选项卡）。
         hoverScale: false,
+        // `.share-sheet-tab` 不在任何一组 `:is()` 里，web 无 `:active` 规则
+        // （share.css 74–85 只有 color 过渡）→ 不做按压缩放。
+        pressScale: !shareSheet,
         onPressChanged: widget.onPressChanged,
         child: button,
       ),

@@ -54,6 +54,7 @@ class AylaPressScale extends StatefulWidget {
     this.semanticLabel,
     this.isButton = true,
     this.hoverScale = true,
+    this.pressScale = true,
     this.onPressChanged,
   });
 
@@ -71,6 +72,14 @@ class AylaPressScale extends StatefulWidget {
 
   /// 是否暴露为按钮语义。
   final bool isButton;
+
+  /// 是否启用按压缩小 0.98。
+  ///
+  /// web 的 `:active { scale: .98 }` 只写在两处：按钮组（54–94）与导航/选项卡组
+  /// （236–249）。**不在任何一组的元素没有按下缩放** —— 例如
+  /// `.share-sheet-tab`（share.css 74–85 只有 `transition: color 200ms ease`，
+  /// 无 `:active` 规则，也不在 auroraqua 的 `:is()` 列表里）→ 传 `false`。
+  final bool pressScale;
 
   /// 是否启用 hover 放大 1.02。
   ///
@@ -104,7 +113,7 @@ class _AylaPressScaleState extends State<AylaPressScale> {
   Widget build(BuildContext context) {
     final double scale = _reduceMotion || !widget.enabled
         ? 1.0
-        : (_pressed
+        : (_pressed && widget.pressScale
             ? 0.98
             : (_hovered && widget.hoverScale ? 1.02 : 1.0));
     final BorderRadius ringRadius =
