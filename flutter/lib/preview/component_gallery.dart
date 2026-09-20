@@ -338,16 +338,10 @@ class ComponentGallery extends StatelessWidget {
           _Section(
             title: 'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
             source:
-                '玻璃 64px + safe-area · 方角 + 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 选中共享胶囊 radius-input + 图标/文字 150ms 过渡 · 未读 tab-badge 相对图标 top -4 / right -12（99+ 封顶）· 项属导航组：active .98、hover 不放大',
+                '玻璃 64px + safe-area · **上沿 radius-panel 20 / 下方角**（auroraqua 252）+ 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 按钮 margin 4/2（auroraqua 254，胶囊随之内缩）· **容器级共享胶囊跨槽迁移 300ms**[0,0,.58,1] + hover 扫光 · 图标/文字 150ms 过渡 · 导航组 active .98、hover 不放大 · **F1 阶段不渲染红点**（badges 恒空）',
             child: SizedBox(
               width: 375,
-              child: AylaBottomTabs(
-                module: AylaPrimaryModule.home,
-                badges: const <AylaPrimaryModule, int>{
-                  AylaPrimaryModule.posts: 3,
-                  AylaPrimaryModule.live: 128,
-                },
-              ),
+              child: AylaBottomTabs(module: AylaPrimaryModule.home),
             ),
           ),
           const SizedBox(height: AylaSpacing.sp8),

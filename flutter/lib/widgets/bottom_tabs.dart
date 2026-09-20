@@ -1,16 +1,26 @@
-/// 窄屏底部五 tab（web `layout/BottomTabs.tsx` 1–91 + `shell.css` 77–162）。
+/// 窄屏底部五 tab —— 完整调用链（2026-09-20 逐条核对，含覆盖关系）：
 ///
-/// 事实源要点（逐条对应，禁自由发挥）：
-/// - 容器 `.bottom-tabs`：高 64px + safe-area、`--glass-bg` + `blur(18px) saturate(1.4)`、
-///   **顶部 1px `--glass-border`、无圆角**（用户口中的「窄屏方角底栏」）；
-/// - 五等分，视觉顺序 = 语音 / 直播 / **主页（居中凸起）** / 帖子 / 桌游
-///   （`BottomTabs.tsx:18` 的 `TAB_ORDER`，与 `shellConfig.ts` 的 `PRIMARY_MODULES` 同源）；
-/// - 主页 tab：48px 圆盘（`--surface` + 1px `--glass-border` + `--card-shadow`）`margin-top: -8px`
-///   上浮，选中换 `--glow-shadow`（主 CTA 级辉光，§12.1「≤3 处/屏」纪律）；
-/// - 选中态：共享胶囊 `AuroraquaNavHighlight`（radius-input 12、**无扫光** —— 底栏项不在
-///   `::after` 扫光列表里）+ 图标/文字颜色 150ms `--ease-out` 过渡；
-/// - 未读：`.tab-badge` 相对图标 `top:-4 / right:-12`（复用组件库 [TabBadge]）；
-/// - 项属 auroraqua 236–249「导航/选项卡组」→ `:active scale .98`、hover **不**放大。
+/// 结构（`layout/BottomTabs.tsx` 1–91）：`nav.bottom-tabs > ul.bottom-tabs-list > li.bottom-tab
+/// (+.bottom-tab-home) > a.bottom-tab-link.has-auroraqua-highlight[.is-active]`，内含
+/// `AuroraquaNavHighlight`（仅 active，`layoutId` → **跨槽迁移**）、主页 `.bottom-tab-home-disc` /
+/// 其它 `.bottom-tab-icon`、以及 `.bottom-tab-label`。
+///
+/// 样式链（按加载顺序；**后者覆盖前者**）：
+/// | # | 出处 | 内容 |
+/// |---|---|---|
+/// | 1 | `shell.css:77–86` | 64+safe-area、`--glass-bg`、blur(18px) saturate(1.4)、border-top 1px、z50 |
+/// | 2 | `shell.css:96–139` | 列表 64；tab flex1；link column/center/**gap 2**/min-h 48/color 150ms ease-out |
+/// | 3 | `shell.css:141–158` | 圆盘 48 + **margin-top:-8** + pill + `--surface`+1px边+`--card-shadow`；选中 `--glow-shadow` |
+/// | 4 | `auroraqua.css:238–249` | `.bottom-tab-link` 属导航组 → `:active scale .98`（hover 不放大） |
+/// | 5 | `auroraqua.css:252/254`（顶层） | 圆角 `20 20 0 0` + `--glass-shadow`；link `margin 4px 2px` + `radius-input` |
+/// | 6 | `shell.css:667`（`@media max-width:768px`） | 主页圆盘选中辉光**降档** `0 0 16px rgba(247,150,255,.32)` |
+/// | 7 | **`auroraqua.css:412 块内 447–448`** | **`.bottom-tabs { border-radius: 0 }` → 最终是「方角」**（覆盖 #5） |
+/// | 8 | `auroraqua.css:149–166/175–187/194–197` | 胶囊 inset0/z-1/radius inherit/`--nav-active-bg`/`--glass-shadow-nav`/1px 边；父 hover 扫光 700ms |
+/// | 9 | `auroraqua.css:655–676` | reduced-motion：扫光关、scale 取消 |
+///
+/// 复用（组件库全量清点后无新增件）：容器 [GlassSurface]、选中 [AylaNavHighlight]、
+/// 按压 [AylaPressScale]、图标 [AylaIcon]、token 取 [AylaColors]/[AylaRadii]/[AylaSpacing]/
+/// [AylaDurations]/[AylaCurves]。
 library;
 
 import 'package:flutter/material.dart';
@@ -23,7 +33,6 @@ import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import 'primitives.dart' show AylaNavHighlight;
-import 'tab_badge.dart';
 
 /// 一级模块（web `shellConfig.ts` `PRIMARY_MODULES`）。
 enum AylaPrimaryModule {
@@ -51,7 +60,7 @@ enum AylaPrimaryModule {
         AylaPrimaryModule.games => '/games',
       };
 
-  /// 图标名（`icons.tsx`：Mic / Video / Home / Post / Game）。
+  /// 图标名（`icons.tsx`）。
   String get iconName => switch (this) {
         AylaPrimaryModule.home => 'iconHome',
         AylaPrimaryModule.voice => 'iconMic',
@@ -70,160 +79,199 @@ const List<AylaPrimaryModule> aylaBottomTabOrder = <AylaPrimaryModule>[
   AylaPrimaryModule.games,
 ];
 
-/// 窄屏底部五 tab（展示型：路由跳转由外层处理，本件只报选中 key）。
-class AylaBottomTabs extends StatelessWidget {
-  const AylaBottomTabs({
-    super.key,
-    this.module,
-    this.onSelect,
-    this.badges = const <AylaPrimaryModule, int>{},
-  });
+/// 窄屏底部五 tab（展示型：路由跳转由外层处理）。
+class AylaBottomTabs extends StatefulWidget {
+  const AylaBottomTabs({super.key, this.module, this.onSelect});
 
-  /// 当前一级模块（`resolveModule` 输出；null = 无选中）。
+  /// 当前一级模块（null = 无选中，胶囊不渲染）。
   final AylaPrimaryModule? module;
 
-  /// 点击回调（路由由外层）。
+  /// 点击回调。
   final ValueChanged<AylaPrimaryModule>? onSelect;
 
-  /// 各 tab 未读数（F8 接线；F1 恒空）。
-  final Map<AylaPrimaryModule, int> badges;
-
-  /// 容器高度（`shell.css:78` `height: calc(64px + safe-area)`）。
+  /// 条高（`shell.css:78`）。
   static const double barHeight = 64;
 
-  /// 主页凸起圆盘直径与上浮量（`shell.css:139–150`）。
+  /// 按钮外边距（`auroraqua.css:254` `margin: 4px 2px`）——胶囊 `inset:0` 在按钮内，随之内缩。
+  static const EdgeInsets tabMargin =
+      EdgeInsets.symmetric(vertical: 4, horizontal: 2);
+
+  /// 主页圆盘（`shell.css:141–158`）。
   static const double homeDiscSize = 48;
   static const double homeDiscOffset = 8;
+
+  /// 主页圆盘选中辉光 —— **窄屏降档值**（`shell.css:667` 在 `@media (max-width:768px)` 内：
+  /// `0 0 16px rgba(247,150,255,.32)`，§9「≤768px 辉光降 30%」）。
+  /// 底栏本身只出现在窄屏 → 用降档值，不用全局 `--glow-shadow`。
+  static const List<BoxShadow> homeDiscGlow = <BoxShadow>[
+    BoxShadow(color: Color(0x52F796FF), blurRadius: 16),
+  ];
+
+  @override
+  State<AylaBottomTabs> createState() => _AylaBottomTabsState();
+}
+
+class _AylaBottomTabsState extends State<AylaBottomTabs> {
+  /// 指针所在槽位（-1 = 无）。web 是 `:hover` 谓词 → 记录索引、**build 时求值**。
+  int _hoveredIndex = -1;
 
   @override
   Widget build(BuildContext context) {
     final double safeBottom = MediaQuery.of(context).padding.bottom;
-    final Widget list = SizedBox(
-      height: barHeight, // `.bottom-tabs-list { height: 64px }`
-      child: Row(
-        children: <Widget>[
-          for (final AylaPrimaryModule item in aylaBottomTabOrder)
-            Expanded(child: _tab(context, item)),
-        ],
-      ),
-    );
-    final Widget bar = DecoratedBox(
-      decoration: const BoxDecoration(
-        color: AylaColors.glassBg, // background: var(--glass-bg)
-        // border-top: 1px solid var(--glass-border)（**方角**：无 border-radius）
-        border: Border(top: BorderSide(color: AylaColors.glassBorder)),
-      ),
-      child: list,
-    );
+    final int activeIndex = widget.module == null
+        ? -1
+        : aylaBottomTabOrder.indexOf(widget.module!);
+
     return Semantics(
       label: '主导航',
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          // backdrop-filter: blur(18px) saturate(1.4)（18 档 → 1.4，见 skill 分档表）
-          if (GlassConfig.useOpaqueFallback)
-            bar
-          else
-            Stack(
-              children: <Widget>[
-                Positioned.fill(
-                  // ⚠️ 必须 ClipRect：BackdropFilter 的模糊**不受布局尺寸限制**，
-                  // 缺裁剪会把背后整块画布一起模糊（2026-09-20 用户实测：底栏样张
-                  // 在画布里“挡住整个大画布”）。库内其它模糊层均有 ClipRRect/ClipRect。
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: GlassConfig.backdropFilter(
-                        sigma: AylaGlass.blurNav,
+      child: GlassSurface(
+        blur: AylaGlass.blurNav, // blur(18px) saturate(1.4)（shell.css:81）
+        shadow: AylaShadows.glass, // auroraqua 252：`--glass-shadow`
+        // auroraqua 447–448（@media max-width:768px）：`border-radius: 0` → **方角**
+        radiusOverride: BorderRadius.zero,
+        borderOverride:
+            const Border(top: BorderSide(color: AylaColors.glassBorder)),
+        padding: EdgeInsets.zero,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            SizedBox(
+              height: AylaBottomTabs.barHeight,
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints c) {
+                  final double slot =
+                      c.maxWidth / aylaBottomTabOrder.length;
+                  const EdgeInsets m = AylaBottomTabs.tabMargin;
+                  const BorderRadius capsuleRadius = BorderRadius.all(
+                    Radius.circular(AylaRadii.rInput), // auroraqua 254
+                  );
+                  return Stack(
+                    children: <Widget>[
+                      // 容器级共享胶囊：跨槽 300ms 迁移（web framer `layoutId` 语义）
+                      if (activeIndex >= 0)
+                        AnimatedPositioned(
+                          duration: AylaDurations.auroraqua, // 0.3s
+                          curve: AylaCurves.auroraquaEaseOut, // [0,0,.58,1]
+                          left: activeIndex * slot + m.horizontal / 2,
+                          top: m.top,
+                          width: slot - m.horizontal,
+                          height: AylaBottomTabs.barHeight - m.vertical,
+                          child: AylaNavHighlight(
+                            radiusValue: capsuleRadius,
+                            showBorder: false, // link 自身无 1px 边
+                            sweep: true,
+                            sweepActive: _hoveredIndex == activeIndex,
+                          ),
+                        ),
+                      Row(
+                        children: <Widget>[
+                          for (int i = 0;
+                              i < aylaBottomTabOrder.length;
+                              i++)
+                            Expanded(
+                              child: _tab(
+                                aylaBottomTabOrder[i],
+                                i,
+                                active: i == activeIndex,
+                              ),
+                            ),
+                        ],
                       ),
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
-                ),
-                bar,
-              ],
+                    ],
+                  );
+                },
+              ),
             ),
-          if (safeBottom > 0)
-            SizedBox(height: safeBottom, child: const ColoredBox(color: AylaColors.glassBg)),
-        ],
+            // 安全区与条同属一个玻璃面（shell.css:79：padding-bottom 在容器内）
+            if (safeBottom > 0) SizedBox(height: safeBottom),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _tab(BuildContext context, AylaPrimaryModule item) {
+  Widget _tab(AylaPrimaryModule item, int index, {required bool active}) {
     final AylaTextStyles t = AylaTextStyles.of(context);
-    final bool active = module == item;
+    const Color idle = AylaColors.textSecondary;
+    const Color selected = AylaColors.textPrimary;
+    final Widget icon = AylaIcon(
+      aylaIconByName(item.iconName)!,
+      size: 24,
+      color: active ? selected : idle,
+    );
     final bool isHome = item == AylaPrimaryModule.home;
-    final int count = badges[item] ?? 0;
-    final Color color =
-        active ? AylaColors.textPrimary : AylaColors.textSecondary;
-    const BorderRadius radius = BorderRadius.all(
-      Radius.circular(AylaRadii.rInput), // `.has-auroraqua-highlight { radius-input }`
-    );
 
-    Widget iconBox = Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        AylaIcon(aylaIconByName(item.iconName)!, size: 24, color: color),
-        if (count > 0 && !isHome)
-          // `.tab-badge` 相对 `.bottom-tab-icon`（position: relative）定位
-          TabBadge(count: count, max: 99),
-      ],
-    );
-    if (isHome) {
-      iconBox = Transform.translate(
-        offset: const Offset(0, -homeDiscOffset), // margin-top: -8px（上浮，不占布局）
-        child: Container(
-          width: homeDiscSize,
-          height: homeDiscSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: AylaColors.surface,
-            border: Border.all(color: AylaColors.glassBorder),
-            // 不透明面层 → 外阴影不会被透出（同 TabBadge 的理由）
-            boxShadow: active ? AylaShadows.glow : AylaShadows.card,
-          ),
-          child: Center(
-            child: AylaIcon(
-              aylaIconByName(item.iconName)!,
-              size: 24,
-              color: color,
+    final Widget iconSlot = isHome
+        // `margin-top: -8px` = **底边贴槽底、向上溢出 8**，布局占位 48→40
+        // （用 topCenter 会往下溢压住文案；用 Transform.translate 则占满 48 撑破 56 槽）
+        ? SizedBox(
+            width: AylaBottomTabs.homeDiscSize,
+            height: AylaBottomTabs.homeDiscSize -
+                AylaBottomTabs.homeDiscOffset, // 40
+            child: OverflowBox(
+              alignment: Alignment.bottomCenter,
+              maxWidth: AylaBottomTabs.homeDiscSize,
+              maxHeight: AylaBottomTabs.homeDiscSize,
+              child: Container(
+                width: AylaBottomTabs.homeDiscSize,
+                height: AylaBottomTabs.homeDiscSize,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AylaColors.surface, // --surface
+                  border: Border.all(color: AylaColors.glassBorder),
+                  // 选中 → 窄屏降档辉光；未选中 → --card-shadow
+                  boxShadow: active
+                      ? AylaBottomTabs.homeDiscGlow
+                      : AylaShadows.card,
+                ),
+                child: Center(child: icon),
+              ),
+            ),
+          )
+        : icon;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hoveredIndex = index),
+      onExit: (_) => setState(() => _hoveredIndex = -1),
+      child: Padding(
+        padding: AylaBottomTabs.tabMargin,
+        child: AylaPressScale(
+          onTap: widget.onSelect == null
+              ? null
+              : () => widget.onSelect!(item),
+          semanticLabel: item.label,
+          hoverScale: false, // 导航组：只 :active scale .98
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              spacing: 2, // `.bottom-tab-link { gap: 2px }`（shell.css:118–131）
+              children: <Widget>[
+                iconSlot,
+                // color 150ms --ease-out（图标与文字同步过渡）
+                TweenAnimationBuilder<double>(
+                  duration: const Duration(milliseconds: 150),
+                  curve: AylaCurves.easeOut,
+                  tween: Tween<double>(
+                    begin: active ? 0 : 1,
+                    end: active ? 1 : 0,
+                  ),
+                  builder: (
+                    BuildContext context,
+                    double v,
+                    Widget? child,
+                  ) =>
+                      DefaultTextStyle(
+                    style: t.microTag.copyWith(
+                      color: Color.lerp(idle, selected, v),
+                    ),
+                    child: child!,
+                  ),
+                  child: Text(item.label),
+                ),
+              ],
             ),
           ),
-        ),
-      );
-    }
-
-    final Widget content = Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        iconBox,
-        AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 150), // transition: color 150ms --ease-out
-          curve: AylaCurves.easeOut,
-          style: t.microTag.copyWith(color: color), // Fredoka 11/500/ls .8
-          child: Text(item.label),
-        ),
-      ],
-    );
-
-    return AylaPressScale(
-      onTap: onSelect == null ? null : () => onSelect!(item),
-      semanticLabel: item.label,
-      // auroraqua 236–249「导航/选项卡组」：只有 :active scale .98
-      hoverScale: false,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48), // 触达目标 ≥40px
-        child: Stack(
-          children: <Widget>[
-            if (active)
-              Positioned.fill(
-                child: AylaNavHighlight(
-                  radiusValue: radius,
-                  showBorder: false, // 底栏项自身无 1px 边框（share 档同款判断）
-                ),
-              ),
-            Center(child: content),
-          ],
         ),
       ),
     );
@@ -232,19 +280,31 @@ class AylaBottomTabs extends StatelessWidget {
 
 // ======================= 预览 =======================
 
-/// 窄屏底栏（375 宽；含未读徽标与主页居中凸起）.
+/// 窄屏底栏（375 宽，选中主页；F1 阶段不渲染红点；**方角**）。
 @Preview(
   group: 'Widgets',
-  name: 'BottomTabs 窄屏（语音/直播/主页/帖子/桌游）',
+  name: 'BottomTabs 窄屏（方角玻璃条 + 主页居中凸起）',
   size: Size(375, 120),
   wrapper: previewTheme,
 )
 Widget aylaBottomTabsPreview() {
-  return const AylaBottomTabs(
-    module: AylaPrimaryModule.home,
-    badges: <AylaPrimaryModule, int>{
-      AylaPrimaryModule.posts: 3,
-      AylaPrimaryModule.live: 128,
-    },
+  return const AylaBottomTabs(module: AylaPrimaryModule.home);
+}
+
+/// 未选中（胶囊不渲染）与「帖子」选中对照 —— 看胶囊位置/尺寸与迁移起点。
+@Preview(
+  group: 'Widgets',
+  name: 'BottomTabs 窄屏（未选中 / 帖子选中）',
+  size: Size(375, 260),
+  wrapper: previewTheme,
+)
+Widget aylaBottomTabsStatesPreview() {
+  return const Column(
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      AylaBottomTabs(),
+      SizedBox(height: AylaSpacing.sp4),
+      AylaBottomTabs(module: AylaPrimaryModule.posts),
+    ],
   );
 }
