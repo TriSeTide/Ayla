@@ -39,6 +39,7 @@ import '../core/net/dio_client.dart';
 import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
 import '../widgets/comments.dart';
+import '../widgets/image_viewer.dart';
 import '../widgets/post_card.dart';
 import '../widgets/post_editor.dart';
 import '../widgets/primitives.dart';
@@ -305,6 +306,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '评论项：padding sp3 sp4 + 底部 1px 亮边 · 头像 32 · 昵称 14/700 · 时间 utility 11（zh-CN）· 回复提示 12 · 正文 14 · 操作行 12/600（回复 / 作者可删除，删除色 --destructive）· 图片 2 列 gap sp1 max-w 280（单图 200）、4:3 cover、方角（web --radius-md 未定义）· 输入：padding sp3 sp4 + 上边框 · 行 gap sp3 align-end · 工具钮 40（AylaToolButton，12 圆角）· 待发图 64px + 18px × · 底部滑入 250ms',
             child: aylaCommentSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 查看器（B5） ----------
+          _Section(
+            title:
+                'AylaImageViewer（ImageViewer.tsx + app.css 1459–1836 + auroraqua.css 55–94）',
+            source:
+                '遮罩 --overlay-dim-strong + blur(8)（无 saturate）· 入场 opacity 180ms --ease-out · 关闭钮 40 圆 · 舞台 max min(92vw,1200) / 82vh · 图片 contain + radius-input + --surface + --card-shadow · 导航 44 圆（blur12 saturate1.4，禁用 0.35）· 操作条 pill 玻璃（blur18）+ 计数（Space Grotesk 12/ls.5）+ 保存（IconDownload 16）· 失败提示 bottom 76 · 横滑阈值 1/3 或 300px/s+40px（useSwipeCommit）· 条目 enter x=±40% 250ms · 样张走 embedded（嵌入画布不做 backdrop 模糊，避免糊宿主页面）',
+            child: aylaImageViewerSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

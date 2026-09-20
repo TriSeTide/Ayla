@@ -193,6 +193,9 @@ class GlassSurface extends StatelessWidget {
               //    `ImageFilter.compose(outer:, inner:)` 组合两个滤镜，
               //    即 result = outer(inner(source))。
               //    compose 已在多端可用（sky_engine painting.dart:4406）。
+              // blur <= 0 → 不建滤镜层：sigma 0 只是白白多一个 saveLayer，
+              // 且嵌入式场景（如组件画布里的查看器样张）会采样宿主页面造成糊页。
+              if (blur > 0)
               Positioned.fill(
                 child: ClipRRect(
                   borderRadius: radiusValue,
