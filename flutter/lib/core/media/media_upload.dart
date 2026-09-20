@@ -238,6 +238,14 @@ class AylaMediaUploader {
     );
   }
 
+  /// 删除自己上传的媒体（`DELETE /media/{id}`：对象存储 original/thumbnail + 记录；
+  /// web `deleteMedia`，`media.ts:188–190`）。异常透传给调用方（移除失败要报错，
+  /// 不能静默把「还在服务端」当成删掉了）。
+  Future<void> deleteMedia(String mediaId) async {
+    final DioClient client = _requireClient();
+    await client.delete<void>('/media/$mediaId');
+  }
+
   /// 取消上传后清理临时对象与会话（幂等；失败静默 —— 与 web `catch(() => {})` 同义）。
   ///
   /// 这是**资源清理路径**：拿不到会话/已删除/非本人，后端都安全返回 204，
