@@ -206,6 +206,14 @@ ThemeData buildAylaTheme() {
       bodyColor: AylaColors.textPrimary,
       displayColor: AylaColors.textPrimary,
     ),
+    // ⚠️ **必须显式设置 `iconTheme`**：SDK 的 `ThemeData` 在缺省时会兜底注入
+    // `IconThemeData(color: kDefaultIconDarkColor)`（= `Color(0xDD000000)`，肉眼即纯黑，
+    // theme_data.dart:526），而 `Theme` 会把它注入整棵树（theme.dart:147）。
+    // `AylaIcon` 的颜色解析顺序是「显式 color → 祖先 IconTheme → textPrimary」
+    // （app_icons.dart:77–79），于是**所有未显式传色的图标**都会停在第 2 级、取到黑色，
+    // `textPrimary` 永远轮不到 —— 2026-09-20 用户发现「分享图标是纯黑」，违反 design。
+    // web 侧 SVG 用 `currentColor` 继承 `body { color: var(--text-primary) }`，此处对齐。
+    iconTheme: const IconThemeData(color: AylaColors.textPrimary),
     extensions: <ThemeExtension<AylaTextStyles>>[AylaTextStyles.light],
     // 全局 focus 环（d:§10：辉光式 focus ring，禁无替代 outline:none）
     splashFactory: NoSplash.splashFactory,

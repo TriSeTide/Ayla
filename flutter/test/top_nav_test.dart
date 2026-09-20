@@ -2,8 +2,10 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/theme/app_icons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
@@ -171,6 +173,17 @@ void main() {
     // 菜单应在按钮下方（top ≈ 按钮底 + 8），且右对齐（right ≈ 按钮右）
     expect(item.top, greaterThan(more.bottom), reason: 'top: calc(100% + 8px)');
     expect(item.left, greaterThan(1000), reason: '挂在右侧锚点附近');
+    // ⚠️ 回归：Overlay 内没有 DefaultTextStyle 祖先时，`Text` 会继承
+    // `DefaultTextStyle.fallback`（下划线 + 红色）→ release 版浮层文字出现「黄线」。
+    // 断言**渲染层实际生效**的样式没有下划线（而不是只看我传进去的 style）。
+    final RenderParagraph para =
+        tester.renderObject<RenderParagraph>(find.text('个人主页'));
+    final TextSpan span = para.text as TextSpan;
+    expect(
+      span.style?.decoration,
+      anyOf(isNull, TextDecoration.none),
+      reason: '浮层文字必须由 DefaultTextStyle 兜底，不能继承 fallback 的下划线',
+    );
   });
 
   testWidgets('宽屏内容垂直居中（web `.top-nav { align-items: center }`）',
@@ -186,6 +199,23 @@ void main() {
     print('VCENTER bar=${bar.center.dy} avatar=${avatar.center.dy} '
         'logo=${logo.center.dy} search=${search.center.dy}');
     expect(avatar.center.dy, closeTo(bar.center.dy, 1.0), reason: '头像居中');
+    // 图标与文字的像素关系（web：`align-items: center` 后图标再 `translate: 0 -2px`）
+    final Finder labelRow = find
+        .ancestor(of: find.text('主页'), matching: find.byType(Row))
+        .first;
+    final Rect icon = tester.getRect(
+      find.descendant(of: labelRow, matching: find.byType(AylaIcon)),
+    );
+    final Rect label = tester.getRect(find.text('主页'));
+    // ignore: avoid_print
+    print('ALIGN icon=${icon} label=${label} '
+        'delta=${icon.center.dy - label.center.dy}');
+    // 校准值：web 的 -2px 在 Flutter 渲染下偏上 ⇒ 用户实测要求「下移 2px」，故 delta = 0
+    expect(
+      icon.center.dy,
+      closeTo(label.center.dy + 1, 0.5),
+      reason: '用户实机校准：图标在文字行盒中心下 1px',
+    );
     expect(logo.center.dy, closeTo(bar.center.dy, 1.0), reason: 'logo 居中');
     expect(search.center.dy, closeTo(bar.center.dy, 1.0), reason: '搜索框居中');
   });

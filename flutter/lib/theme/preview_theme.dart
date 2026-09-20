@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../widgets/overlays.dart';
 import 'app_theme.dart';
 import 'aurora_background.dart';
 
@@ -53,7 +54,10 @@ Widget previewTheme(Widget child) {
           // 故这里显式包一层。
           child: Overlay(
             initialEntries: <OverlayEntry>[
-              OverlayEntry(
+              // ⚠️ entry 是独立子树：页面里的 Material/DefaultTextStyle 传不进来，
+              // 缺兜底时内部 Text 会落到 `DefaultTextStyle.fallback`（双下划线 + 红色，
+              // 用户看到的「黄线」）→ 用组件库统一作用域兜底（widgets/overlays.dart）。
+              aylaOverlayEntry(
                 builder: (BuildContext context) => AuroraBackground(
                   child: Center(child: child),
                 ),

@@ -56,6 +56,7 @@ import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
+import 'overlays.dart';
 
 /// 会话摘要（菜单所需字段；对应 tsx 的 `conversation` 参数）。
 class AylaConversation {
@@ -166,7 +167,10 @@ class _AylaConversationMoreMenuState extends State<AylaConversationMoreMenu> {
     _anchorRect = anchor.localToGlobal(Offset.zero) & anchor.size;
 
     setState(() => _open = true);
-    _entry = OverlayEntry(
+    // 浮层一律走统一入口（`overlays.dart`）：它在 entry 内部兜底 DefaultTextStyle ——
+    // Overlay 的 entry 是独立子树、页面 Material 传不进来，缺兜底时内部 Text 会落到
+    // `DefaultTextStyle.fallback`（双下划线 + 红色 = 用户看到的「黄线」）。
+    _entry = aylaOverlayEntry(
       builder: (BuildContext context) => _MenuOverlay(
         anchorRect: _anchorRect!,
         onDismiss: () => _closeMenu(),

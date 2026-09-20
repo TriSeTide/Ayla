@@ -67,6 +67,7 @@ import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
+import 'overlays.dart';
 import 'bottom_tabs.dart' show AylaPrimaryModule, aylaBottomTabOrder;
 import 'primitives.dart' show AylaNavHighlight;
 import 'tab_badge.dart';
@@ -464,7 +465,9 @@ class _AylaTopNavState extends State<AylaTopNav> {
     final bool active = widget.module == m;
     final Color color = active ? AylaColors.textPrimary : AylaColors.textSecondary;
     // 模块项：15px/700（= bodyStrong）
-    final TextStyle style = t.bodyStrong.copyWith(color: color, height: 1.2);
+    // ⚠️ 不要擅自设 `height`：web 的 `.top-nav-module` 只声明 font-size(15)/font-weight(700)，
+    // 行高继承 body；此前写死 `height: 1.2` 导致图标与文字视觉不齐（用户给 web 参考图指出）。
+    final TextStyle style = t.bodyStrong.copyWith(color: color);
 
     final Widget inner = Padding(
       padding: EdgeInsets.symmetric(
@@ -473,9 +476,15 @@ class _AylaTopNavState extends State<AylaTopNav> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // 图标 16 + margin-right 6 + `translate: 0 -2px`（shell.css:214–219）
+          // 图标 16 + margin-right 6；垂直微调**经用户实测校准为 0**：
+          //   web 的 `.top-nav-module-icon { translate: 0 -2px }`（shell.css:214–219）是针对浏览器
+          //   字形重心硬调的；Flutter 里同一图标（Lucide 数据）+ 同一字体栈（Nunito → PingFang/
+          //   Noto/YaHei）+ 同一行高（15 × 1.55 = 23px）渲染后，`-2` 反而偏上 ⇒ 用户实机判断
+          //   「下移 2px」→ 取 0。保留 Transform 以便后续按 px 微调。
           Transform.translate(
-            offset: const Offset(0, -2),
+            // 用户逐次实机校准（preview 与 release 观感有差）：web 的 -2 在此字形下偏上
+            // → 下移 2 → 上移 1 → 下移 0.5 → 上移 0.5 ⇒ +1
+            offset: const Offset(0, 1),
             child: Padding(
               padding: const EdgeInsets.only(right: 6),
               child: AylaIcon(
@@ -942,7 +951,9 @@ class _AylaTopNavState extends State<AylaTopNav> {
     );
     final double overlayWidth = overlayRO.size.width;
     _removeOverlay();
-    _overlay = OverlayEntry(
+    // 浮层一律走统一入口（`overlays.dart`）：它在 entry 内部兜底 DefaultTextStyle
+    // （Overlay 的 entry 是独立子树，页面里的 Material 传不进来）。
+    _overlay = aylaOverlayEntry(
       builder: (BuildContext ctx) {
         return Stack(
           children: <Widget>[
