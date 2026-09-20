@@ -50,6 +50,7 @@ class AvatarHalo extends StatefulWidget {
     this.resourceUrl,
     this.onTap,
     this.semanticLabel,
+    this.previewImage,
   });
 
   /// 头像内容文字（无图时的首字/名字；有图时作语义标签）。
@@ -72,6 +73,10 @@ class AvatarHalo extends StatefulWidget {
 
   /// 可访问性标签（默认 [label] 后附在线状态，双通道语义）。
   final String? semanticLabel;
+
+  /// 预览/样张注入的头像图（透传给内部 `ResourceImage.previewImage`）；
+  /// **只用于预览与画布样张**，生产调用点不传。
+  final ImageProvider? previewImage;
 
   static const double haloWidth = 2.5;
 
@@ -208,6 +213,7 @@ class _AvatarHaloState extends State<AvatarHalo>
                     src: widget.resourceUrl!,
                     alt: '',
                     fit: BoxFit.cover,
+                    previewImage: widget.previewImage,
                     fallback: Center(
                       child: Text(
                         widget.label.isEmpty

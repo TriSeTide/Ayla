@@ -35,6 +35,7 @@ import '../theme/app_theme.dart';
 import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'primitives.dart' show AylaCapsuleTag, CapsuleTone;
@@ -623,6 +624,8 @@ class _AylaPostCardState extends State<AylaPostCard> {
 /// **单一来源**：组件画布（component_gallery）与 @Preview 都调用它，
 /// 避免「样例数据两处各写一份」而漂移。
 Widget aylaPostCardSamples() {
+  // 预览/画布：媒体存储链路未落地，启用程序生成的示例图（生产默认关闭）
+  aylaEnableSampleMedia();
   AylaPostImage img(String id) => AylaPostImage(
         id: id.hashCode,
         media: AylaMediaDescriptor(
@@ -635,6 +638,8 @@ Widget aylaPostCardSamples() {
     id: 'u1',
     nickname: '星野遥',
     online: true,
+    // 头像：示例媒体开关打开后由程序生成的示例图渲染（不发起网络请求）
+    avatar: '/api/v1/media/sample-avatar-1/content',
   );
   // 三张样张卡（**宽度由容器决定**，与 web 一致：单列 ≤1024 / 两列 >1025）
   final Widget card1 = AylaPostCard(

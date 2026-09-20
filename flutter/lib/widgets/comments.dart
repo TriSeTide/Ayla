@@ -44,6 +44,7 @@ import '../theme/app_theme.dart';
 import '../theme/buttons.dart' show AylaMsgActionButton, AylaToolButton;
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'resource_image.dart';
@@ -959,6 +960,8 @@ class _AylaCommentListState extends State<AylaCommentList> {
 /// 1. 评论列表：3 条（带图 / 带回复提示 / 自己发的可删）+ 底部输入框
 /// 2. 评论输入框：回复条 + 待发图片 ×2（64px 方块）
 Widget aylaCommentSamples() {
+  // 预览/画布：媒体存储链路未落地，启用程序生成的示例图（生产默认关闭）
+  aylaEnableSampleMedia();
   Future<void> send(String body, int? replyTo, List<String> mediaIds) async {}
 
   String iso(int minutesAgo) => DateTime.now()
@@ -969,6 +972,8 @@ Widget aylaCommentSamples() {
     id: 'u1',
     nickname: '星野遥',
     online: true,
+    // 头像：示例媒体开关打开后由程序生成的示例图渲染（不发起网络请求）
+    avatar: '/api/v1/media/sample-avatar-1/content',
   );
   const AylaPostAuthor me = AylaPostAuthor(id: 'me', nickname: '我');
   final AylaPostComment c1 = AylaPostComment(

@@ -45,6 +45,7 @@ import '../theme/app_theme.dart';
 import '../theme/buttons.dart' show AylaIconButton, AylaMsgActionButton;
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import 'directory_controls.dart'
     show AylaVisibilitySelector, VisibilitySelection;
@@ -704,6 +705,8 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
 /// 2. 群内 collapsible **收起态**：单行正文 + 发布钮（点输入框即展开）
 /// 3. 群内 collapsible **展开态**：32px 圆形收起钮 + 标题/正文 + 可见性锁定本群 + 媒体预览
 Widget aylaPostEditorSamples() {
+  // 预览/画布：媒体存储链路未落地，启用程序生成的示例图（生产默认关闭）
+  aylaEnableSampleMedia();
   const List<({String id, String title})> groups = <({String id, String title})>[
     (id: 'g1', title: '深夜电台'),
     (id: 'g2', title: '星海观测站'),

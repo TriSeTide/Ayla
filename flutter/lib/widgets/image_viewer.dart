@@ -46,6 +46,7 @@ import '../core/models/post.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import 'loading.dart' show AylaSkeleton;
 import 'media_interaction.dart' show SignedVideo;
@@ -1061,6 +1062,8 @@ class _ViewerRetryButtonState extends State<_ViewerRetryButton> {
 /// 1. 单图（无计数/导航，仅关闭钮 + 保存条）
 /// 2. 多图（计数 2/3 + 左右导航 + 保存条）
 Widget aylaImageViewerSamples() {
+  // 预览/画布：媒体存储链路未落地，启用程序生成的示例图（生产默认关闭）
+  aylaEnableSampleMedia();
   const List<AylaViewerItem> items = <AylaViewerItem>[
     AylaViewerItem(
       media: AylaMediaDescriptor(

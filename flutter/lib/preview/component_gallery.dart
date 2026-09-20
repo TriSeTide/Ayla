@@ -25,6 +25,7 @@ import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import '../widgets/avatar_halo.dart';
 import '../widgets/avatar_status_badges.dart';
@@ -57,6 +58,8 @@ class ComponentGallery extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 画布：启用程序生成的示例图（媒体存储链路未落地；生产默认关闭）
+    aylaEnableSampleMedia();
     final AylaTextStyles t = AylaTextStyles.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AylaSpacing.sp8),

@@ -29,6 +29,7 @@ import 'package:flutter/widget_previews.dart';
 
 import '../theme/app_theme.dart';
 import '../theme/preview_theme.dart';
+import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import '../core/media/media_signer.dart';
 import '../core/net/dio_client.dart';
@@ -67,6 +68,7 @@ class ResourceImage extends StatefulWidget {
     this.variant,
     this.expiredBadge = false,
     this.reserveSpaceWhileLoading = true,
+    this.previewImage,
   });
 
   /// 图片地址（可为 `/api/v1/media/<id>/content` 或外部 URL）。
@@ -96,6 +98,13 @@ class ResourceImage extends StatefulWidget {
   /// 加载中是否占位（web 的 `resource-image-loading` 常配 skeleton）。
   final bool reserveSpaceWhileLoading;
 
+  /// 预览/样张注入的图片源：非 null 时**直接渲染该图**，跳过签名与网络链路。
+  ///
+  /// **只用于预览与画布样张**（媒体存储链路未落地时让样张看到真实画面，
+  /// 例如 `lib/preview/sample_media.dart` 的程序生成示例图）；
+  /// 生产调用点一律不传 —— 示例数据不得进入产品路径。
+  final ImageProvider? previewImage;
+
   @override
   State<ResourceImage> createState() => _ResourceImageState();
 }
@@ -120,12 +129,32 @@ class _ResourceImageState extends State<ResourceImage> {
   @override
   void didUpdateWidget(covariant ResourceImage old) {
     super.didUpdateWidget(old);
-    if (old.src != widget.src || old.variant != widget.variant) {
+    if (old.src != widget.src ||
+        old.variant != widget.variant ||
+        !identical(old.previewImage, widget.previewImage)) {
       _load();
     }
   }
 
+  /// 本次渲染实际使用的注入图源：显式参数优先，其次预览总开关，最后 null（走真实链路）。
+  ImageProvider? get _injectedImage {
+    final ImageProvider? explicit = widget.previewImage;
+    if (explicit != null) return explicit;
+    if (aylaSampleMediaEnabled) return aylaSampleImageFor(widget.src);
+    return null;
+  }
+
   Future<void> _load() async {
+    // 预览注入：直接进入就绪态，**不走签名/网络**（示例图不是真实媒体）
+    if (_injectedImage != null) {
+      if (!mounted) return;
+      setState(() {
+        _state = _State.ready;
+        _resolvedUrl = null;
+        _originalExpired = false;
+      });
+      return;
+    }
     setState(() {
       _state = _State.loading;
       _resolvedUrl = null;
@@ -206,6 +235,30 @@ class _ResourceImageState extends State<ResourceImage> {
             : const SizedBox.shrink();
 
       case _State.ready:
+        // 预览注入（样张示例图）：直接渲染注入的 ImageProvider（不走网络）
+        if (_injectedImage case final ImageProvider preview) {
+          final Widget previewImg = Image(
+            image: preview,
+            key: ValueKey<String>('preview:$_retry'),
+            width: widget.width,
+            height: widget.height,
+            fit: widget.fit ?? BoxFit.cover,
+          );
+          if (_originalExpired && widget.expiredBadge) {
+            return Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                previewImg,
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: _ExpiredBadge(style: t),
+                ),
+              ],
+            );
+          }
+          return previewImg;
+        }
         final Widget img = Image.network(
           _resolvedUrl!,
           key: ValueKey<String>('${_resolvedUrl!}:$_retry'), // 重试时强制重建
