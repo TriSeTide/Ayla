@@ -438,7 +438,7 @@ void main() {
       expect(find.text('暂无私信'), findsOneWidget);
     });
 
-    testWidgets('选项卡复用组件库：shareSheet 档 + 无共享滑动胶囊', (WidgetTester tester) async {
+    testWidgets('选项卡复用组件库（默认档，与消息中心同一件）', (WidgetTester tester) async {
       setViewport(tester, const Size(1440, 900));
       await tester.pumpWidget(
         host(
@@ -452,13 +452,13 @@ void main() {
       );
       final AylaSegmentedTabs tabs =
           tester.widget<AylaSegmentedTabs>(find.byType(AylaSegmentedTabs));
-      expect(tabs.variant, AylaSegmentedTabsVariant.shareSheet);
+      // 用户 2026-09-20 指定：与画布「Batch 2 基元」里的分段选项卡同一件（默认档），
+      // 即共享滑动胶囊档；`shareSheet` 档保留为 web 原版规格备用。
+      expect(tabs.variant, AylaSegmentedTabsVariant.messages);
       expect(tabs.labels, <String>['群聊', '私信']);
       expect(tabs.index, 0);
       expect(tabs.semanticLabel, '分享目标类型');
-      // share.css 63–91 没有 `.auroraqua-nav-highlight` 元素 → 无共享滑动胶囊，
-      // 选中底由 `AylaSegmentedTab` 自身静态层提供
-      expect(find.byType(AylaNavHighlight), findsNothing);
+      expect(find.byType(AylaNavHighlight), findsOneWidget); // 共享滑动胶囊
       await tester.tap(find.text('私信'));
       await tester.pumpAndSettle();
       expect(

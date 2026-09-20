@@ -470,14 +470,18 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
     );
   }
 
-  /// 选项卡 —— **复用组件库** [AylaSegmentedTabs] 的 shareSheet 档
-  /// （容器 margin 12/16/8 + radius-input 12 + `--glass-bg`；项 radius 10 +
-  /// 静态选中底，无共享滑动胶囊）。事实源 share.css 63–91。
+  /// 选项卡 —— **复用组件库** [AylaSegmentedTabs]。
+  ///
+  /// **2026-09-20 用户指定**：分享弹窗与消息中心统一使用**默认档**（共享滑动胶囊 +
+  /// 容器 radius-card + 仅内高光）——即画布「Batch 2 基元」里那一件。
+  ///
+  /// `AylaSegmentedTabsVariant.shareSheet` 保留为 web `.share-sheet-tabs` 原版规格
+  /// （share.css 63–91：静态选中底 / 项 radius 10 / 容器 radius-input + `--glass-bg`），
+  /// 需要严格贴 web 时改传该档即可（一行切换）。
   Widget _tabs() {
     return AylaSegmentedTabs(
       labels: const <String>['群聊', '私信'],
       index: _tab == AylaShareTab.group ? 0 : 1,
-      variant: AylaSegmentedTabsVariant.shareSheet,
       semanticLabel: '分享目标类型', // web `role="tablist" aria-label="分享目标类型"`
       onChanged: (int i) => setState(() {
         _tab = i == 0 ? AylaShareTab.group : AylaShareTab.private;
