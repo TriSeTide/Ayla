@@ -29,6 +29,7 @@ import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import '../widgets/avatar_halo.dart';
 import '../widgets/avatar_status_badges.dart';
+import '../widgets/bottom_tabs.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/directory_controls.dart';
 import '../widgets/privacy_sheet.dart';
@@ -330,6 +331,24 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '遮罩 --overlay-dim + padding 24 居中；窄屏 60dvh 贴底（上沿 radius-panel、去左右下边框、safe-area）· 卡 min(480,100%) + max-h min(80vh,720) + glass-bg-strong + blur24 sat1.4 + modal 阴影 + 宽屏入场 opacity/scale.96/y12 250ms ease-out · head sp4 + 底边 + 关闭 40 圆钮 · 预览条 8×12 + 28 圆 135deg ice→sakura + 14/600 单行省略 · 选项卡 2 列 gap8 / 40 高 / radius 10，选中 --nav-active-bg + --glass-shadow-compact（无边框、无扫光，只有文字色 200ms 过渡）· 行 min-h 48 / radius 12 / hover rgba(157,191,230,.18) / active .98 / 禁用 .6 · 子群缩进 52 + 8px ice-500 点 +「默认」sakura 胶囊 · 未读 18/pink-500/#fff 字 99+ 封顶 · 入口钮 = icon-btn-40 pill（无扫光）',
             child: aylaShareSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- Shell 底栏（2026-09-20） ----------
+          _Section(
+            title: 'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
+            source:
+                '玻璃 64px + safe-area · 方角 + 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 选中共享胶囊 radius-input + 图标/文字 150ms 过渡 · 未读 tab-badge 相对图标 top -4 / right -12（99+ 封顶）· 项属导航组：active .98、hover 不放大',
+            child: SizedBox(
+              width: 375,
+              child: AylaBottomTabs(
+                module: AylaPrimaryModule.home,
+                badges: const <AylaPrimaryModule, int>{
+                  AylaPrimaryModule.posts: 3,
+                  AylaPrimaryModule.live: 128,
+                },
+              ),
+            ),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
