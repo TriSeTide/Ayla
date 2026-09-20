@@ -485,43 +485,51 @@ class _GroupTopTabsDemoState extends State<_GroupTopTabsDemo> {
     const double stageHeight = AylaGroupTopTabs.barHeight + _riseDistance;
 
     if (_home) {
-      // 新页入场（web `PageTransition.tsx:1–10` / `auroraquaMotion.ts` FadeInCard）：
-      // **0.95 → 1 缩放 + 淡入，500ms --ease-out**；旧页是 300ms --ease-in-out 淡出。
-      // ⚠️ 淡入期间 Opacity<1 会建层 → 底栏玻璃短暂退化，落到 1 即恢复（可接受）。
-      return TweenAnimationBuilder<double>(
-        tween: Tween<double>(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 500),
-        curve: AylaCurves.easeOut,
-        builder: (BuildContext context, double v, Widget? child) => Opacity(
-          opacity: v,
-          child: Transform.scale(scale: 0.95 + 0.05 * v, child: child),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            SizedBox(
-              width: 375,
-              height: stageHeight,
-              child: Stack(
-                children: <Widget>[
-                  // 主页内容（群列表占位）——「整页切换」而不是只有一条底栏
-                  const Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Color(0x1AFFFAFB),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          SizedBox(
+            width: 375,
+            height: stageHeight,
+            child: Stack(
+              children: <Widget>[
+                // 内容区：**只有它参与页面转场** ——
+                // web `PageTransition.tsx:1–10` 的 FadeInCard（新页 0.95→1 + 淡入 500ms --ease-out、
+                // 旧页 300ms --ease-in-out 淡出），且 `AppShell.tsx` 的 `AnimatePresence` 只包 `<main>` 里的 outlet。
+                Positioned.fill(
+                  bottom: AylaGroupTopTabs.barHeight, // 内容位于底栏之上
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: 1),
+                    duration: const Duration(milliseconds: 500),
+                    curve: AylaCurves.easeOut,
+                    builder: (
+                      BuildContext context,
+                      double v,
+                      Widget? child,
+                    ) =>
+                        Opacity(
+                      opacity: v,
+                      child: Transform.scale(
+                        scale: 0.95 + 0.05 * v,
+                        child: child,
                       ),
+                    ),
+                    child: const DecoratedBox(
+                      decoration: BoxDecoration(color: Color(0x1AFFFAFB)),
                       child: Center(child: Text('主页内容（群列表）')),
                     ),
                   ),
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    // 主页状态：壳层渲染底栏（AppShell.tsx:133 的 else 分支）
-                    child: AylaBottomTabs(module: AylaPrimaryModule.home),
-                  ),
-                ],
-              ),
+                ),
+                // 底栏：**壳层常驻元素，不参与页面转场** ——
+                // `AppShell.tsx` 里 `<BottomTabs>` 在 `<main>` 之外，转场动画只管 outlet。
+                const Align(
+                  alignment: Alignment.bottomCenter,
+                  child: AylaBottomTabs(module: AylaPrimaryModule.home),
+                ),
+              ],
             ),
+          ),
             const SizedBox(height: AylaSpacing.sp2),
             Text(
               '已回主页（web navigate("/group") → 页面转场：新页 0.95→1 / 500ms easeOut）',
@@ -534,8 +542,7 @@ class _GroupTopTabsDemoState extends State<_GroupTopTabsDemo> {
               onPressed: _reenter,
             ),
           ],
-        ),
-      );
+        );
     }
 
     return Column(
