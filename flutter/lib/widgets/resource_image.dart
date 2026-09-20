@@ -243,6 +243,22 @@ class _ResourceImageState extends State<ResourceImage> {
             width: widget.width,
             height: widget.height,
             fit: widget.fit ?? BoxFit.cover,
+            // ⚠️ 注入图也是**异步解码**的：解码完成前 RenderImage 的尺寸是 0×0
+            // （loose 约束下取 constraints.smallest）→ 样张会短暂空白。
+            // 与真实链路同样加 `frameBuilder`，解码前显示骨架（实测解码后为固有尺寸，
+            // 例如示例图 480×360）。
+            frameBuilder: (
+              BuildContext context,
+              Widget child,
+              int? frame,
+              bool wasSync,
+            ) {
+              if (wasSync || frame != null) return child;
+              if (_decorative) return widget.fallback ?? const SizedBox.shrink();
+              return widget.reserveSpaceWhileLoading
+                  ? _LoadingPlaceholder(width: widget.width, height: widget.height)
+                  : const SizedBox.shrink();
+            },
           );
           if (_originalExpired && widget.expiredBadge) {
             return Stack(
