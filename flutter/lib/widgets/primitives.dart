@@ -612,6 +612,12 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
   /// 而「子级通知父级 → 父级 setState → rebuild → 子级才 forward()」需要
   /// **2 帧**（实测 32ms 才见位移），手感明显滞后于 web。
   /// 让命中指针的那个 tab 直达这里启动动画，可省掉 1 帧。
+  /// 扫光当前进度（0 = 起点 −120%、1 = 终点 +120%）。
+  ///
+  /// 仅供测试断言「挂载即命中」（点击后必须**立刻**在终点，而不是重播一次
+  /// 从左往右）—— 生产代码不读它。
+  double get sweepProgress => _sweep.value;
+
   void setSweep(bool active, {bool jump = false}) {
     if (!widget.sweep || MediaQuery.disableAnimationsOf(context)) return;
     if (active) {

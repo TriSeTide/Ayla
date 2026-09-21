@@ -713,15 +713,33 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         AylaGroupScene.live: GlobalKey(),
       };
 
-  /// 共享胶囊（容器级单实例；scene/subgroup/live 跨项迁移）——**照范本**
+  /// 共享胶囊的**组**：web 里是三个互相独立的 `layoutId`
+  /// （`selectionId-scene` / `-subgroup` / `-live`）——**它们可以同时存在**。
+  ///
+  /// ⚠️ 语音房行**不在**其中：web 给该行传 `sharedLayout={false}`（tsx 316–318，
+  /// 行有自己的排序位移）→ 行内独立胶囊（[_voiceHighlightKeys]）。
+  static const List<String> _capsuleKinds = <String>[
+    'scene',
+    'subgroup',
+    'live',
+  ];
+
+  /// 各组共享胶囊（容器级**每组一个**；组内跨项迁移）——**照范本**
   /// `AylaDirectoryFilters`（`widgets/profile_and_filters.dart` 405–424 + 555–587）：
   /// 位置 = `GlobalKey` 实测选中项按钮矩形 + `AnimatedPositioned`（300ms），
   /// 按压 `.98` 由容器级 `AnimatedScale` 同步（胶囊不在按钮内，拿不到 `:active`）。
-  final GlobalKey<AylaNavHighlightState> _highlightKey =
-      GlobalKey<AylaNavHighlightState>();
+  ///
+  /// 此前做成「全组件单实例」是错的：选「聊天」时该实例被**子群**占用 →
+  /// 父级（场景组）永远没有胶囊，子项收起时旧矩形还被误用（用户 2026-09-21 实报
+  /// 「父级选项卡没有，二级选项卡还窜到父级去了」）。
+  final Map<String, GlobalKey<AylaNavHighlightState>> _highlightKeys =
+      <String, GlobalKey<AylaNavHighlightState>>{
+        for (final String k in <String>['scene', 'subgroup', 'live'])
+          k: GlobalKey<AylaNavHighlightState>(),
+      };
 
-  /// 选中项按钮的**实测矩形**（相对卡片 Stack）——胶囊按它定位与定尺寸。
-  Rect? _capsuleRect;
+  /// 各组选中项按钮的**实测矩形**（相对卡片 Stack）——胶囊按它定位与定尺寸。
+  final Map<String, Rect?> _capsuleRects = <String, Rect?>{};
 
   /// 首帧 element 未就绪时的测量重试计数（自愈，避免永久不画）。
   int _measureRetries = 0;
@@ -826,12 +844,20 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     }
   }
 
-  Rect? _rectInCard(GlobalKey key) {
-    final RenderBox? card = _cardBox;
+  Rect? _rectInCard(GlobalKey key) => _rectIn(_cardKey, key);
+
+  /// 相对任意祖先（RenderBox）求 rect。
+  Rect? _rectIn(GlobalKey ancestorKey, GlobalKey key) {
+    final RenderObject? anc = _renderObjectOf(ancestorKey);
     final RenderObject? ro = _renderObjectOf(key);
-    if (card == null || ro is! RenderBox || !ro.hasSize) return null;
-    return ro.localToGlobal(Offset.zero, ancestor: card) & ro.size;
+    if (anc is! RenderBox || ro is! RenderBox || !ro.hasSize) return null;
+    return ro.localToGlobal(Offset.zero, ancestor: anc) & ro.size;
   }
+
+  /// 各组胶囊的测量基准：**统一用卡片 Stack**（三组胶囊都画在卡片级 Stack 里；
+  /// 子群/直播间那两组额外套一层与各自下拉**同参数的裁剪**，见卡片级渲染 ——
+  /// 这样它们既与行同坐标系，又继承下拉裁剪，不会超出视口。
+  Rect? _rectOfGroup(String kind, GlobalKey key) => _rectInCard(key);
 
   /// 主列场景行的**吸附后**顶部（卡片坐标系）。
   ///
@@ -871,23 +897,62 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
   /// 列表内容轨道左缘（卡片坐标系）：列表 padding 8。
   double get _trackLeft => _SidebarMetrics.listPaddingH;
 
-  /// 当前选中项（驱动共享胶囊）。
-  _Selection? get _selection => switch (widget.activeScene) {
-    AylaGroupScene.chat =>
-      widget.data.activeSubgroupId == null
-          ? null
-          : _Selection('subgroup', widget.data.activeSubgroupId!),
-    AylaGroupScene.voice =>
-      widget.data.activeVoiceChannelId == null
-          ? null
-          : _Selection('voice', widget.data.activeVoiceChannelId!),
-    AylaGroupScene.live =>
-      widget.data.activeLiveChannelId == null
-          ? null
-          : _Selection('live', widget.data.activeLiveChannelId!),
-    AylaGroupScene.posts => const _Selection('scene', 'posts'),
-    AylaGroupScene.games => const _Selection('scene', 'games'),
+  /// 某组当前的选中项（**每组各自一个**共享胶囊）。
+  ///
+  /// - `scene`：**总是有**（五个场景项之一）—— 与 web 一致，父级选项卡在任何场景下
+  ///   都有自己的胶囊；
+  /// - `subgroup` / `live`：只有当前场景与组匹配、且该组有选中项时才存在
+  ///   （否则该组不画胶囊）；
+  /// - `voice`：不在共享组内（行内独立，见 [_voiceHighlightKeys]）。
+  _Selection? _selectionOf(String kind) => switch (kind) {
+    'scene' => _Selection('scene', widget.activeScene.name),
+    'subgroup' =>
+      widget.activeScene == AylaGroupScene.chat &&
+              widget.data.activeSubgroupId != null
+          ? _Selection('subgroup', widget.data.activeSubgroupId!)
+          : null,
+    'live' =>
+      widget.activeScene == AylaGroupScene.live &&
+              widget.data.activeLiveChannelId != null
+          ? _Selection('live', widget.data.activeLiveChannelId!)
+          : null,
+    _ => null,
   };
+
+  /// 单组胶囊（位置 = 该组选中项按钮的实测矩形，坐标系 = 该胶囊**所在层**）。
+  ///
+  /// - scene：画在**卡片级** Stack（在内容之下 = web 的 z-index:-1）；
+  /// - subgroup / live：画在**各自下拉的 Stack 内** → 继承下拉裁剪（web 的胶囊
+  ///   是按钮子元素，同样被 .channel-subgroups 的 overflow:hidden 裁住）。
+  Widget? _capsuleFor(String kind) {
+    final Rect? rect = _capsuleRects[kind];
+    if (rect == null) return null;
+    final _Selection? sel = _selectionOf(kind);
+    final bool reduce = MediaQuery.disableAnimationsOf(context);
+    return AnimatedPositioned(
+      duration: reduce ? Duration.zero : AylaDurations.auroraqua,
+      curve: AylaCurves.auroraquaEaseOut,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      child: AnimatedScale(
+        duration: reduce ? Duration.zero : AylaDurations.button,
+        curve: AylaCurves.auroraqua,
+        scale: _pressed != null && _pressed == sel ? 0.98 : 1.0,
+        // **不加入场动画**（照 web `AuroraquaNavHighlight.tsx`：`initial={false}`
+        // → 胶囊挂载时直接到位）。组内跨项迁移由外层 `AnimatedPositioned` 的 300ms
+        // 负责，与 Framer 的 `layoutId` 迁移一一对应 ⇒ 三组行为天然**统一**。
+        child: AylaNavHighlight(
+          key: _highlightKeys[kind],
+          // web：只有**按钮本体**命中才扫光（.has-auroraqua-highlight:hover）；
+          // 行级 :has() 只驱动底色 ⇒ 两套 hover 必须分开。
+          sweep: true,
+          sweepActive: _hoveredButton != null && _hoveredButton == sel,
+        ),
+      ),
+    );
+  }
 
   /// 布局后测量「选中项按钮」矩形（胶囊按它定位与定尺寸）。
   ///
@@ -900,19 +965,26 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
   void _measureCapsule() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final _Selection? sel = _selection;
-      final GlobalKey? key = (sel == null || sel.kind == 'voice')
-          ? null
-          : _buttonKeys[sel];
-      final Rect? next = key == null ? null : _rectInCard(key);
-      if (next == null && key != null && _measureRetries < 3) {
-        // 首帧 element 可能尚未就绪 → 再排一次（最多 3 次，避免空转）
+      bool changed = false;
+      bool pending = false;
+      for (final String kind in _capsuleKinds) {
+        final _Selection? sel = _selectionOf(kind);
+        final GlobalKey? key = sel == null ? null : _buttonKeys[sel];
+        final Rect? next = key == null ? null : _rectOfGroup(kind, key);
+        // 有选中项却测不到 rect（首帧 element 未就绪）→ 待重试
+        if (next == null && key != null) pending = true;
+        if (_capsuleRects[kind] != next) {
+          _capsuleRects[kind] = next;
+          changed = true;
+        }
+      }
+      if (pending && _measureRetries < 3) {
         _measureRetries += 1;
         _measureCapsule();
         return;
       }
-      if (next != null) _measureRetries = 0;
-      if (next != _capsuleRect) setState(() => _capsuleRect = next);
+      if (!pending) _measureRetries = 0;
+      if (changed) setState(() {});
     });
   }
 
@@ -929,9 +1001,42 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     });
   }
 
+  /// **只**改行级 hover（底色）—— 行容器用。
+  ///
+  /// 与按钮级分开是必须的：web 里
+  /// `.channel-scene-row:has(.channel-scene-*-toggle:hover) .channel-scene { background: .18 }`
+  /// （group.css 878–881）让「浮层钮 hover」也联动词条底色；而扫光只看**按钮本体**
+  /// （auroraqua 163）。若行与按钮共用一次 `_setHovered(row:…, button:…)`，
+  /// 指针在浮层钮上时会把 button 也点亮 → 扫光误触发。
+  void _setHoveredRow(_Selection? s) {
+    if (s == _hoveredRow) return;
+    setState(() => _hoveredRow = s);
+  }
+
+  /// **只**改按钮级 hover（扫光 + 按钮底色）。
+  void _setHoveredButton(_Selection? s) {
+    if (s == _hoveredButton) return;
+    setState(() => _hoveredButton = s);
+  }
+
   void _setPressed(_Selection? s) {
     if (s == _pressed) return;
     setState(() => _pressed = s);
+  }
+
+  /// 「挂载即命中」：点击选中后让该组胶囊**立即停在扫光终点**
+  /// （web 上该帧的 computed style 已是 `translateX(120%)`，不存在 transition；
+  /// 之后指针移开才跑出完整的一次从右往左扫）。
+  ///
+  /// ⚠️ 必须排到**下一帧**：点击回调执行时选中态刚变、胶囊可能尚未挂载
+  /// （`if (active)` 分支），此刻 `currentState` 是 null，直接调用会打在空气上 ——
+  /// 那样就只能等 `sweepActive` 变 true 触发 `forward()`，于是**从左往右重播一次**
+  /// 才反向（用户 2026-09-21 实报：底部两项「过一会才从左往右扫」）。
+  void _jumpSweep(String kind) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _highlightKeys[kind]?.currentState?.setSweep(true, jump: true);
+    });
   }
 
   // ---- 点击场景项：滚到该行自身的吸顶位（tsx 161–172） ----
@@ -993,6 +1098,48 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         child: Stack(
           key: _cardKey,
           children: <Widget>[
+            // 场景组胶囊（**卡片级**：5 个场景项跨中部三行与底部两行迁移）。
+            // 子群 / 直播间胶囊各自画在**其下拉的 Stack 内**（继承下拉裁剪，见
+            // [_capsuleFor]）—— 画在卡片级会逃出裁剪、超出视口（用户实报）。
+            // 照范本 `AylaDirectoryFilters` 555–587：
+            // · 位置/尺寸 = 选中项按钮的**实测矩形**；
+            // · `AnimatedPositioned` 300ms `--auroraqua-ease-out` 等价 Framer `layoutId`
+            //   的组内跨项迁移（同一个实体滑过去，而不是旧底消失/新底出现）；
+            // · `AnimatedScale(.98, 200ms)` 同步按压（胶囊不在按钮内，拿不到按钮自身的
+            //   `:active { scale: .98 }`，范本 568–578 的同一处理）。
+            // ⚠️ **必须画在内容之下**（本 Stack 的第一个子）：web 的胶囊是
+            // `.auroraqua-nav-highlight { z-index: -1 }`（auroraqua.css 178）——在按钮
+            // 内容（图标/文字）之下、玻璃面之上。画在内容之上会让图标与文字被半透明
+            // 渐变盖住（视觉发糊）。
+            ?_capsuleFor('scene'),
+            // 子群 / 直播间胶囊：**再套一层与各自下拉同参数的裁剪**。
+            // web 里胶囊是按钮的子元素 → 被 .channel-subgroups /
+            // .channel-live-rooms 的 overflow:hidden 裁住；卡片级单画会逃出裁剪
+            // → 高亮块跑到视口外/别的区域（用户 2026-09-21 实报）。
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Stack(
+                  children: <Widget>[
+                    _SidebarDropdownClip(
+                      cardKey: _cardKey,
+                      viewportKey: _viewportKey,
+                      gap: _SidebarMetrics.listGap,
+                      rowTop: () => _stickyRowTop(AylaGroupScene.chat),
+                      nextRowTop: () => _stickyRowTop(AylaGroupScene.voice),
+                      child: Stack(children: <Widget>[?_capsuleFor('subgroup')]),
+                    ),
+                    _SidebarDropdownClip(
+                      cardKey: _cardKey,
+                      viewportKey: _viewportKey,
+                      gap: _SidebarMetrics.listGap,
+                      rowTop: () => _stickyRowTop(AylaGroupScene.live),
+                      nextRowTop: null,
+                      child: Stack(children: <Widget>[?_capsuleFor('live')]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             Positioned.fill(
               child: Column(
                 children: <Widget>[
@@ -1002,43 +1149,6 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                 ],
               ),
             ),
-            // 共享胶囊（容器级**单实例**）——照范本 `AylaDirectoryFilters` 555–587：
-            // · 位置/尺寸 = 选中项按钮的**实测矩形**（不是按组推算，尺寸随组别自然变化）；
-            // · `AnimatedPositioned` 300ms `--auroraqua-ease-out` 等价 Framer `layoutId`
-            //   的跨项迁移（同一个实体滑过去，而不是旧底消失/新底出现）；
-            // · `AnimatedScale(.98, 200ms)` 同步按压 —— 胶囊在容器级、不在按钮内，
-            //   拿不到按钮自身的 `:active { scale: .98 }`（范本 568–578 的同一处理）。
-            // z 序：web 的胶囊是 `z-index: -1`（在按钮内容之下），故画在内容之前。
-            if (_capsuleRect != null)
-              AnimatedPositioned(
-                duration: reduceMotion
-                    ? Duration.zero
-                    : AylaDurations.auroraqua,
-                curve: AylaCurves.auroraquaEaseOut,
-                left: _capsuleRect!.left,
-                top: _capsuleRect!.top,
-                width: _capsuleRect!.width,
-                height: _capsuleRect!.height,
-                child: AnimatedScale(
-                  duration: reduceMotion ? Duration.zero : AylaDurations.button,
-                  curve: AylaCurves.auroraqua,
-                  scale: _pressed != null && _pressed == _selection
-                      ? 0.98
-                      : 1.0,
-                  child: AylaNavHighlight(
-                    key: _highlightKey,
-                    // web：`.has-auroraqua-highlight:hover > .auroraqua-nav-highlight::after`
-                    // （auroraqua 163）—— 只有**按钮本体**命中才扫光；行级 `:has()`
-                    // （878–881）只驱动底色 ⇒ 两套 hover 必须分开。
-                    sweep: true,
-                    sweepActive:
-                        _hoveredButton != null && _hoveredButton == _selection,
-                    // `.group-chat-subgroup-tab > .auroraqua-nav-highlight { border: 0 }`
-                    // （auroraqua 199）**只对子群选项卡**取消胶囊亮边；`.channel-scene`
-                    // 与三个子列表行都保留 → 这里用库内默认（showBorder: true）。
-                  ),
-                ),
-              ),
             // 三行浮层（paint 定位；在内容之上 —— web 的行 `z-index: 2`）
             for (final AylaGroupScene scene in _rowScenes)
               Positioned.fill(
@@ -1201,7 +1311,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
             )
           : null,
       trailingPushedRight: unread > 0, // `margin-left: auto`（group.css 779）
-      onTap: () => widget.onSelectScene?.call(scene),
+      onTap: () {
+        widget.onSelectScene?.call(scene);
+        // 与中部三行**同款**的「挂载即命中」——此前只有 `_buildSceneRow` 里有，
+        // 底部两项漏掉 ⇒ 点击后扫光会从左往右重播一次才反向（用户实报的差异）。
+        _jumpSweep('scene');
+      },
     );
   }
 
@@ -1242,7 +1357,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
       // tsx 456：`subgroupsOpen && canManage` 才有编辑笔
       AylaGroupScene.chat => open && d.canManageSubgroups,
       // tsx 273 / 348：展开时才渲染 ＋
-      _ => open,
+      AylaGroupScene.voice || AylaGroupScene.live => open,
+      // ⚠️ tsx 511–522：**帖子 / 桌游两项没有任何浮层钮**（只有按钮 + 未读徽标）。
+      // 之前写成 `_ => open`，使底部两项也渲染 ＋/三角：钮会盖住按钮右端，鼠标落在
+      // 右侧时命中的是「钮」（只点亮**行级** hover）→ **扫光不触发**，且 padding
+      // 被撑成 76（用户 2026-09-21 实报「帖子、桌游的扫光还是有问题」）。
+      _ => false,
     };
 
     final _Selection sel = _Selection('scene', scene.name);
@@ -1269,8 +1389,15 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                 }
                 _scrollSceneRowToPin(scene);
               case AylaGroupScene.voice:
+                widget.onSelectScene?.call(scene);
+                _scrollSceneRowToPin(scene);
               case AylaGroupScene.live:
                 widget.onSelectScene?.call(scene);
+                // 用户 2026-09-21：点直播默认选中**第一个直播间**
+                // （与「点聊天自动选中默认子群」同一交互意图，tsx 451 同款）。
+                if (d.liveRooms.isNotEmpty) {
+                  widget.onSelectLiveChannel?.call(d.liveRooms.first.id);
+                }
                 _scrollSceneRowToPin(scene);
               case AylaGroupScene.posts:
               case AylaGroupScene.games:
@@ -1278,7 +1405,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
             }
             // 「挂载即命中」：点击选中时胶囊迁到指针所在项，web 该帧 computed style
             // 已是 translateX(120%)、**不产生过渡** → 直达 jump（范本 544–548）。
-            _highlightKey.currentState?.setSweep(true, jump: true);
+            _jumpSweep('scene');
           },
         ),
         if (hasSecondary)
@@ -1385,8 +1512,10 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     );
 
     return MouseRegion(
-      onEnter: (_) => _setHovered(row: sel, button: sel),
-      onExit: (_) => _setHovered(row: null, button: null),
+      // 只点亮**按钮级**（扫光判定）；行级由 [_buildSceneRow] 的整行 MouseRegion 负责
+      // （浮层钮 hover 也要联动词条底色 —— group.css 878–881）。
+      onEnter: (_) => _setHoveredButton(sel),
+      onExit: (_) => _setHoveredButton(null),
       child: AylaPressScale(
         // 导航组（auroraqua 236–249）：**只有 `:active { scale: .98 }`**，无 hover 放大
         hoverScale: false,
@@ -1483,9 +1612,9 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
 
     return MouseRegion(
       // 行级 hover：web `.channel-scene-row:has(...:hover) .channel-scene`（878–881）
-      // → 只驱动**底色**（button 位传 null，扫光仍只认按钮本体）
-      onEnter: (_) => _setHovered(row: sel),
-      onExit: (_) => _setHovered(row: null),
+      // → 只驱动**底色**（按钮级传 null，扫光仍只认按钮本体）
+      onEnter: (_) => _setHoveredRow(sel),
+      onExit: (_) => _setHoveredRow(null),
       child: inButtonGroup
           ? AylaPressScale(
               // 按钮组：hover 1.02 + active .98（auroraqua 72–94）
@@ -1659,7 +1788,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         onTap: () {
           widget.onSelectSubgroup?.call(sg.id);
           widget.onSelectScene?.call(AylaGroupScene.chat);
-          _highlightKey.currentState?.setSweep(true, jump: true);
+          _jumpSweep('subgroup');
         },
         onPressChanged: (bool p) => _setPressed(p ? sel : null),
         child: Container(
@@ -1858,8 +1987,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                 onTap: () {
                   widget.onSelectScene?.call(AylaGroupScene.voice);
                   widget.onSelectVoiceChannel?.call(room.id);
-                  // 行内独立胶囊（`sharedLayout={false}`）→ 直接驱动自身扫光
-                  hk.currentState?.setSweep(true, jump: true);
+                  // 行内独立胶囊（`sharedLayout={false}`）→ 直接驱动自身扫光；
+                  // 同样排到下一帧（该行胶囊在选中态生效后才挂载）。
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    hk.currentState?.setSweep(true, jump: true);
+                  });
                 },
                 child: Stack(
                   children: <Widget>[
@@ -1868,10 +2001,18 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                     // **行内独立胶囊**（扫光 / hover 底仍与其它行一致）。
                     if (active)
                       Positioned.fill(
+                        // **不做入场淡入**（照 web：`AuroraquaNavHighlight` 的
+                        // `initial={false}`，挂载即到位）。用户要的「高亮移动动画」来自
+                        // 行自身：它在 `motion.li layout="position"` 里 ⇒ 高亮是行的
+                        // 子元素、**随行一起位移**（300ms `auroraquaIndicatorTransition`）。
+                        // Flutter 侧同理由外层 `AnimatedPositioned(top: i × pitch)`
+                        // 驱动整行（含本胶囊）位移 —— 这就是「边播动画边上移」。
                         child: AylaNavHighlight(
                           key: hk,
                           sweep: true,
-                          sweepActive: hovered && active,
+                          // 与三组共享胶囊**同一语义**：扫光只看**按钮本体**
+                          // （auroraqua 163）。该行无浮层钮 → 行级 == 按钮级。
+                          sweepActive: _hoveredButton == sel,
                           showBorder: false,
                         ),
                       ),
@@ -2013,7 +2154,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               pressScale: true,
               onTap: () {
                 widget.onSelectLiveChannel?.call(room.id);
-                _highlightKey.currentState?.setSweep(true, jump: true);
+                _jumpSweep('live');
               },
               onPressChanged: (bool p) => _setPressed(p ? sel : null),
               child: Container(
@@ -2808,6 +2949,36 @@ class _SidebarDemoState extends State<_SidebarDemo> {
   late String? _voiceChannelId = widget.initialVoiceChannelId;
   late String? _liveChannelId = widget.initialLiveChannelId;
 
+  /// 语音房列表（样张自持，可重排）。
+  ///
+  /// **为什么样张要自己排序**：web 的语音房顺序来自**活跃排序投影**
+  /// （`VoiceChannelDescriptor.last_occupied_at / last_vacant_at`：最近有人进入的在前、
+  /// 有人区在无人区之前），组件只按传入顺序渲染 —— 与 `AylaChannelSidebar` 的
+  /// 「受控属性」契约一致。
+  /// tsx 305–311 的 `motion.li layout="position"`（300ms `auroraquaIndicatorTransition`）
+  /// 就是**重排时行的平滑位移**；组件侧由 `AnimatedPositioned(top: i × pitch)` 等价实现，
+  /// 所以只有**顺序真的变了**才看得到那段动画 —— 这里用示例数据把它演出来：
+  /// 点任意语音房 → 该房视为「有人进入」→ 排到最前，其余行平滑下移。
+  late final List<AylaChannelVoiceRoom> _voiceRooms =
+      List<AylaChannelVoiceRoom>.of(widget.voiceRooms);
+
+  /// 模拟一次「进入语音房」：把该房提到最前（活跃排序），并标记为有人。
+  void _enterVoiceRoom(String id) {
+    final int index = _voiceRooms.indexWhere(
+      (AylaChannelVoiceRoom r) => r.id == id,
+    );
+    if (index <= 0) return;
+    final AylaChannelVoiceRoom picked = _voiceRooms.removeAt(index);
+    _voiceRooms.insert(
+      0,
+      AylaChannelVoiceRoom(
+        id: picked.id,
+        name: picked.name,
+        memberCount: math.max(1, picked.memberCount),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AylaChannelSidebar(
@@ -2818,7 +2989,7 @@ class _SidebarDemoState extends State<_SidebarDemo> {
       activeVoiceChannelId: _voiceChannelId,
       activeLiveChannelId: _liveChannelId,
       subgroups: widget.subgroups,
-      voiceRooms: widget.voiceRooms,
+      voiceRooms: _voiceRooms,
       liveRooms: widget.liveRooms,
       canManageSubgroups: widget.canManage,
       postUnread: widget.postUnread,
@@ -2834,6 +3005,7 @@ class _SidebarDemoState extends State<_SidebarDemo> {
       onSelectVoiceChannel: (String id) => setState(() {
         _scene = AylaGroupScene.voice;
         _voiceChannelId = id;
+        _enterVoiceRoom(id); // 活跃排序：该房排到最前 → 行平滑位移
       }),
       onSelectLiveChannel: (int id) => setState(() {
         _scene = AylaGroupScene.live;
@@ -2896,7 +3068,8 @@ Widget aylaChannelSidebarSamples() {
           ),
         ),
         cell(
-          '语音：语音房【闲聊房】选中（行内独立胶囊，不迁移）+ 三个下拉都展开更多',
+          '语音：语音房【闲聊房】选中（行内独立胶囊，不迁移）+ 展开更多；'
+          '点任意语音房 → 它视为「有人进入」排到最前 = web 的活跃排序位移动画',
           const _SidebarDemo(
             initialScene: AylaGroupScene.voice,
             initialVoiceChannelId: 'v2',

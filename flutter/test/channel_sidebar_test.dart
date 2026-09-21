@@ -21,7 +21,8 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/channel_sidebar.dart';
 import '../lib/widgets/directory_controls.dart' show AylaDirectoryLoadMore;
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/primitives.dart'
+    show AylaNavHighlight, AylaNavHighlightState;
 import '../lib/widgets/reveal.dart' show AylaRevealItem;
 import '../lib/widgets/tab_badge.dart';
 
@@ -580,15 +581,21 @@ void main() {
 
   // ======================= 动态裁剪 =======================
 
-  testWidgets('动态裁剪层：三个下拉各挂一个 paint-only 裁剪层', (WidgetTester tester) async {
+  testWidgets('动态裁剪层：三个下拉各一个 + 子群/直播胶囊各一个（同参数裁剪）', (
+    WidgetTester tester,
+  ) async {
     await pumpHost(tester, host());
     await tester.pumpAndSettle();
 
+    // 3 个下拉容器 + 2 个胶囊裁剪层（子群、直播间）。
+    // 胶囊在 web 里是按钮子元素 → 被下拉的 `overflow:hidden` 裁住；Flutter 侧
+    // 胶囊画在卡片级，必须再套一层**同参数**的裁剪，否则高亮块会超出视口
+    // （用户 2026-09-21 实报）。
     expect(
       find.byWidgetPredicate(
         (Widget w) => w.runtimeType.toString() == '_SidebarDropdownClip',
       ),
-      findsNWidgets(3),
+      findsNWidgets(5),
     );
   });
 
@@ -909,12 +916,23 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // voice 组不进共享胶囊（web `sharedLayout={false}`）→ 容器级实例**不渲染**，
-    // 只剩该行内部那一个（`find.byType(...).last` 即它）
-    expect(find.byType(AylaNavHighlight), findsOneWidget);
-    final Rect inRow = highlightRect(tester);
-    expect(inRow.height, 30);
-    expect(inRow.width, 200);
+    // 该场景下应有两组胶囊：① 场景组（父级「语音」项，宽 242 / 高 40）
+    // ② 语音房**行内**那一个（web `sharedLayout={false}`，宽 200 / 高 30）
+    expect(find.byType(AylaNavHighlight), findsNWidgets(2));
+    final List<Rect> rects = <Rect>[
+      for (int i = 0; i < 2; i++) highlightRect(tester, i),
+    ];
+    expect(
+      rects.any((Rect r) => r.height == 30 && r.width == 200),
+      isTrue,
+      reason: '行内胶囊（200×30）必须在语音房行内',
+    );
+    expect(
+      rects.any((Rect r) => r.height == 40 && r.width == 242),
+      isTrue,
+      reason: '父级「语音」场景项也要有自己的胶囊（每组一个）',
+    );
+    final Rect inRow = rects.firstWhere((Rect r) => r.height == 30);
     expect(
       inRow.center.dy,
       closeTo(tester.getRect(find.text('语音房B')).center.dy, 0.5),
@@ -1059,7 +1077,7 @@ void main() {
     await pumpHost(tester, host(playing: false));
     await tester.pumpAndSettle();
     // web 退场只加 `inert` / `aria-hidden`，视觉（含高亮）不变
-    expect(find.byType(AylaNavHighlight), findsOneWidget);
+    expect(find.byType(AylaNavHighlight), findsWidgets);
     await tester.tap(find.text('直播'), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(pickedScene, isNull);
@@ -1105,7 +1123,16 @@ void main() {
     // 二级：点第一个 cell 的子群行「技术」→ 高亮迁到该行（胶囊 rect 覆盖它）
     await tester.tap(find.text('技术').first);
     await tester.pumpAndSettle();
-    final Rect cap = tester.getRect(find.byType(AylaNavHighlight).first);
+    // 三组胶囊并存 → 按尺寸取「子群组」那一个（200×30）
+    final List<Rect> caps = <Rect>[
+      for (
+        int i = 0;
+        i < find.byType(AylaNavHighlight).evaluate().length;
+        i++
+      )
+        highlightRect(tester, i),
+    ];
+    final Rect cap = caps.firstWhere((Rect r) => r.height == 30);
     expect(cap.width, 200);
     expect(cap.height, 30);
     expect(
@@ -1134,5 +1161,186 @@ void main() {
     // 滚到 live 的吸顶位（88）→ live 行中心 = 88 + 20
     expect(rowCenterInViewport(tester, '直播'), closeTo(108, 1.5));
     expect(pickedScene, AylaGroupScene.live);
+  });
+  testWidgets('语音房活跃排序：点某房 → 排到最前，行随之平滑位移（web layout="position"）', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: previewTheme(
+          SingleChildScrollView(child: aylaChannelSidebarSamples()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 语音那档：先点「语音」场景项切进去
+    await tester.tap(find.text('语音').first);
+    await tester.pumpAndSettle();
+
+    final Finder target = find.text('闲聊房').first;
+    final double before = tester.getRect(target).top;
+
+    // 点它 → 样张按活跃排序把它提到最前 → 该行上移到第 1 位
+    await tester.tap(target);
+    await tester.pumpAndSettle();
+    final double after = tester.getRect(find.text('闲聊房').first).top;
+    expect(
+      after,
+      lessThan(before - 20),
+      reason: '活跃排序后该行应上移到第 1 位（web motion.li layout="position" 的位移动画）',
+    );
+  });
+  testWidgets('扫光触发面（帖子/桌游大卡）：只 hover 选中项才扫，hover 其它项不扫', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, host(activeScene: AylaGroupScene.posts));
+    await tester.pumpAndSettle();
+
+    final TestGesture mouse = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+    );
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+
+    await mouse.moveTo(tester.getCenter(find.text('帖子').first));
+    await tester.pumpAndSettle();
+    expect(sweepActiveCount(tester), 1, reason: 'hover 选中项 → 扫光');
+
+    await mouse.moveTo(tester.getCenter(find.text('桌游').first));
+    await tester.pumpAndSettle();
+    expect(
+      sweepActiveCount(tester),
+      0,
+      reason: 'hover 未选中项 → 不得扫光（扫光只在被 hover 且含胶囊的按钮上）',
+    );
+  });
+
+  testWidgets('三组子菜单胶囊都不带入场动画（照 web 的 initial={false}）＋迁移由容器级承担', (
+    WidgetTester tester,
+  ) async {
+    // chat + 子群选中 → 场景组与子群组两个胶囊同时在场
+    await pumpHost(tester, host(activeSubgroupId: 'sg2'));
+    await tester.pumpAndSettle();
+
+    // web 的 AuroraquaNavHighlight：initial={false} → 挂载即到位、没有入场动画；
+    // 「切换」动画全部来自 layoutId 的共享迁移（Flutter 侧 = 容器级
+    // AnimatedPositioned 300ms）⇒ 三组行为天然统一。
+    expect(
+      find.byType(TweenAnimationBuilder<double>),
+      findsNothing,
+      reason: '不得自造入场动画（web 用 initial={false}）',
+    );
+    expect(
+      find.byType(AnimatedPositioned),
+      findsWidgets,
+      reason: '迁移由容器级 AnimatedPositioned 承担',
+    );
+
+    // 点「直播」→ 默认选中第一个直播间 → 直播组胶囊出现（同样无入场动画）
+    await tester.tap(find.text('直播').first);
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(AylaNavHighlight).evaluate().length,
+      greaterThanOrEqualTo(2),
+      reason: '点直播默认选中第一个直播间 → 直播组也有胶囊',
+    );
+    expect(find.byType(TweenAnimationBuilder<double>), findsNothing);
+  });
+
+  testWidgets('帖子/桌游没有任何浮层钮（tsx 511–522）—— 右侧不再被钮盖住', (
+    WidgetTester tester,
+  ) async {
+    // 之前 hasSecondary 写成 '_ => open'，使底部两项也渲染 ＋/三角：钮盖住按钮右端，
+    // 鼠标落在右侧时命中的是「钮」（只点亮行级 hover）→ 扫光不触发。
+    await pumpHost(tester, host(activeScene: AylaGroupScene.posts));
+    await tester.pumpAndSettle();
+    // 只应有**中部直播行**那一个 ＋（底部两项必须一个都没有）；
+    // 若 hasSecondary 仍写成 `_ => open`，这里会变成 3 个。
+    expect(find.bySemanticsLabel('创建直播'), findsOneWidget);
+    // 语音行展开时也有自己的 ＋（与底部两项无关）—— 两个 ＋ 各自只在对应行，
+    // 若底部两项也被渲染成带钮的行，这里的计数会翻倍。
+    expect(find.bySemanticsLabel('创建语音房'), findsOneWidget);
+
+    // 切到直播（展开态）→ 该行才应有 ＋
+    await tester.tap(find.text('直播').first);
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('创建直播'), findsOneWidget);
+  });
+
+  testWidgets('语音房切换：整行（含高亮）一起位移 —— 中途位置在旧位与新位之间', (
+    WidgetTester tester,
+  ) async {
+    // web：语音房行是 motion.li layout=position（300ms），高亮是它的子元素
+    // ⇒ 切到某房时**行带着高亮一起移动**（用户要的「高亮移动动画」）。
+    // 排序由调用方给（组件是受控的）⇒ 用**样张**（自持活跃排序）验证这条。
+    tester.view.physicalSize = const Size(1400, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: previewTheme(
+          SingleChildScrollView(child: aylaChannelSidebarSamples()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('语音').first); // 切到语音档
+    await tester.pumpAndSettle();
+
+    final Finder room = find.text('闲聊房').first;
+    final double before = tester.getRect(room).top;
+    await tester.tap(room);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    final double mid = tester.getRect(find.text('闲聊房').first).top;
+    await tester.pumpAndSettle();
+    final double after = tester.getRect(find.text('闲聊房').first).top;
+
+    expect(after, lessThan(before), reason: '选中后该房应上移');
+    expect(
+      mid,
+      greaterThan(after),
+      reason: '中途应仍在旧位与新位之间（行位移有真实动画，而不是瞬移）',
+    );
+  });
+  testWidgets('扫光「挂载即命中」：点中部项与底部项都**立刻在终点**（不重播左→右）', (
+    WidgetTester tester,
+  ) async {
+    // web：点击使胶囊迁到鼠标所在项时，该帧 computed style 已是 translateX(120%)
+    // （:hover 从第一帧就匹配）⇒ 没有 transition。之后指针移开才跑出完整的一次
+    // 从右往左扫。此前底部两项（帖子/桌游）漏了这个 jump ⇒ 会从左往右重播一次。
+    List<double> progress() => <double>[
+      for (int i = 0; i < find.byType(AylaNavHighlight).evaluate().length; i++)
+        tester
+            .state<AylaNavHighlightState>(find.byType(AylaNavHighlight).at(i))
+            .sweepProgress,
+    ];
+
+    await pumpHost(tester, host(activeScene: AylaGroupScene.voice));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('帖子').first);
+    await tester.pump();
+    await tester.pump(); // postFrame：jump 生效
+    expect(
+      progress().any((double p) => p == 1.0),
+      isTrue,
+      reason: '点中部项后扫光必须立刻在终点',
+    );
+
+    // 底部项（桌游）—— 用户实报有差异的那个
+    await tester.tap(find.text('桌游').first);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      progress().any((double p) => p == 1.0),
+      isTrue,
+      reason: '点底部项（桌游）后扫光也必须立刻在终点，不得从左往右重播',
+    );
   });
 }
