@@ -41,6 +41,7 @@ import '../core/media/media_signer.dart';
 import '../core/net/dio_client.dart';
 import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
+import '../widgets/channel_sidebar.dart';
 import '../widgets/comments.dart';
 import '../widgets/image_viewer.dart';
 import '../widgets/post_card.dart';
@@ -339,7 +340,8 @@ class ComponentGallery extends StatelessWidget {
 
           // ---------- Shell 底栏（2026-09-20） ----------
           _Section(
-            title: 'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
+            title:
+                'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
             source:
                 '玻璃 64px + safe-area · **上沿 radius-panel 20 / 下方角**（auroraqua 252）+ 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 按钮 margin 4/2（auroraqua 254，胶囊随之内缩）· **容器级共享胶囊跨槽迁移 300ms**[0,0,.58,1] + hover 扫光 · 图标/文字 150ms 过渡 · 导航组 active .98、hover 不放大 · **F1 阶段不渲染红点**（badges 恒空）',
             child: aylaBottomTabsSamples(), // 可交互：点 tab 看胶囊跨槽迁移
@@ -348,7 +350,8 @@ class ComponentGallery extends StatelessWidget {
 
           // ---------- Shell 顶栏（2026-09-20） ----------
           _Section(
-            title: 'AylaGroupTopTabs（components/group/GroupTopTabs.tsx 1–125 + group.css 21–91）',
+            title:
+                'AylaGroupTopTabs（components/group/GroupTopTabs.tsx 1–125 + group.css 21–91）',
             source:
                 '窄屏群场景顶栏（与底栏同构、中央换群头像）：玻璃 64 + 底部 1px 边 · blur18 saturate1.4 · **方角**（auroraqua 448 覆写 253 的 0 0 20 20）· `--glass-shadow-compact` · 五槽（语音|直播|头像|帖子|桌游）· 按钮 inline-flex 按内容宽（auroraqua 255 padding 6/12 + radius-input）· 选中共享胶囊**实测按钮矩形**跨槽迁移 300ms · hover 扫光 · 帖子 tab 8px 粉点（top 6 / 距中心右 18）· 入场「从底栏升起」由父级 translate 300ms --auroraqua-ease-out 注入',
             child: aylaGroupTopTabsSamples(), // 可交互：点 tab 看胶囊迁移
@@ -375,9 +378,21 @@ class ComponentGallery extends StatelessWidget {
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
+          // ---------- Shell 侧栏（2026-09-21：频道侧栏重做版） ----------
+          _Section(
+            title:
+                'AylaChannelSidebar（layout/ChannelSidebar.tsx 1–627 + group.css 680–1370 + auroraqua.css 54–94 / 142–197 / 236–249 / 288–291 / 310–313 / 655–676）',
+            source:
+                '宽屏频道侧栏 slot 284（260 + 2×12）：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 内 1px 占位（CSS border 占布局、Flutter 不占；否则列表轨道 242→244、浮层钮偏 1px）· 群名头 Fredoka 500 20px + 16px chevron · 场景项 40 高 / gap 12 / padding 0 16 / radius 12 / 底 rgba(255,250,251,.4)；hover .18；选中底由**容器级单实例胶囊**画（auroraqua 194–197 取消按钮自身底）· 状态标识三型：语音在麦人数与 LIVE 是**裸文本**（web `.channel-scene-status` 零样式，继承 15px/600/secondary）、帖子未读才是粉徽标（margin-left auto 贴右）· 三个下拉各挂一个 paint-only 裁剪层（等价 useSidebarContentClip 的 inset；命中也随之裁剪，与 CSS clip-path 一致）· 自建 sticky：chat 0 / voice 44+吸底52 / live 88+吸底8，行本体画在浮层并在 **paint** 阶段按同帧几何定位（applyPaintTransform 同偏移）· 三角键属 auroraqua 按钮组（hover 1.02 + active .98），＋/笔不属于任何组（仅 180ms 底色）· 扫光只由**按钮本体** hover 触发（700ms），行级 hover 只管底色 · 语音房行 `sharedLayout={false}` → 行内独立胶囊、活跃度重排做 300ms 位置过渡 · 切群旧面板先退场再挂新面板（AnimatePresence mode="wait"）· **弹窗接线未做**（CreateSheet/VoiceChannelCreate/LiveStartSheet/SubGroupDialog 属后续批次，＋/笔点击暂无副作用）',
+            child:
+                aylaChannelSidebarSamples(), // 可交互：点场景项/子群/语音房/直播间看胶囊迁移与吸顶滚动，hover 看两套 hover
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
           // ---------- 入场动画（2026-09-20 审查 R7：公共件） ----------
           _Section(
-            title: 'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
+            title:
+                'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
             source:
                 'opacity 0→1 + 下 20px · 300ms --auroraqua-ease-out · stagger 50ms（cap 300）· reduced-motion 直接到位 · enabled:false 不挂动画',
             child: _Row(
@@ -589,7 +604,8 @@ class ComponentGallery extends StatelessWidget {
           ),
           const SizedBox(height: AylaSpacing.sp8),
           _Section(
-            title: '分页族 / 收藏按钮（DirectoryLoadMore + StablePaginationFooter + FavoriteButton）',
+            title:
+                '分页族 / 收藏按钮（DirectoryLoadMore + StablePaginationFooter + FavoriteButton）',
             source:
                 'stable-pagination-footer min-h 80（最高高度锁定不塌缩）· 三点 6px ice-500 · favorite-toggle 36/pill/glass-bg-strong，选中转 pink+辉光',
             child: const _PaginationAndFavoriteDemo(),
@@ -1093,10 +1109,7 @@ class _ResourceImageDemo extends StatelessWidget {
         ),
         cell(
           '装饰图（alt="" → 过期不提示）',
-          const ResourceImage(
-            src: fullyExpired,
-            ignoreSampleMedia: true,
-          ),
+          const ResourceImage(src: fullyExpired, ignoreSampleMedia: true),
         ),
       ],
     );
@@ -1283,7 +1296,6 @@ class PreviewMediaClient implements DioClient {
       throw UnimplementedError('${invocation.memberName}');
 }
 
-
 // ======================= B4 剩余素材 =======================
 
 /// 分页族 + 收藏按钮。
@@ -1293,21 +1305,21 @@ class _PaginationAndFavoriteDemo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget cell(String label, Widget child) => SizedBox(
-          width: 240,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0x22465B92)),
-                ),
-                child: child,
-              ),
-              const SizedBox(height: 6),
-              Text(label, style: const TextStyle(fontSize: 11)),
-            ],
+      width: 240,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0x22465B92)),
+            ),
+            child: child,
           ),
-        );
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(fontSize: 11)),
+        ],
+      ),
+    );
 
     return Wrap(
       spacing: AylaSpacing.sp4,
@@ -1317,29 +1329,46 @@ class _PaginationAndFavoriteDemo extends StatelessWidget {
         cell(
           'hasMore → 加载更多',
           AylaDirectoryLoadMore(
-            loading: false, error: null, hasMore: true, invalidated: false,
-            loadMore: () async {}, refresh: () async {},
+            loading: false,
+            error: null,
+            hasMore: true,
+            invalidated: false,
+            loadMore: () async {},
+            refresh: () async {},
           ),
         ),
         cell(
           'loading → 三点',
           AylaDirectoryLoadMore(
-            loading: true, error: null, hasMore: true, invalidated: false,
-            loadMore: () async {}, refresh: () async {},
+            loading: true,
+            error: null,
+            hasMore: true,
+            invalidated: false,
+            loadMore: () async {},
+            refresh: () async {},
           ),
         ),
         cell(
           'invalidated → 刷新中',
           AylaDirectoryLoadMore(
-            loading: false, error: null, hasMore: true, invalidated: true,
-            loadMore: () async {}, refresh: () async {},
+            loading: false,
+            error: null,
+            hasMore: true,
+            invalidated: true,
+            loadMore: () async {},
+            refresh: () async {},
           ),
         ),
         cell(
           '历史控制：更早 + 返回最新',
           AylaHistoryControls(
-            loading: false, error: null, hasMore: true, hasNewer: true,
-            loadOlder: () async {}, returnLatest: () async {}, retry: () async {},
+            loading: false,
+            error: null,
+            hasMore: true,
+            hasNewer: true,
+            loadOlder: () async {},
+            returnLatest: () async {},
+            retry: () async {},
           ),
         ),
         SizedBox(
@@ -1354,20 +1383,33 @@ class _PaginationAndFavoriteDemo extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   AylaFavoriteButton(
-                    state: FavoriteState.notFavorited, onToggle: (_) {}),
+                    state: FavoriteState.notFavorited,
+                    onToggle: (_) {},
+                  ),
                   AylaFavoriteButton(
-                    state: FavoriteState.favorited, onToggle: (_) {}),
+                    state: FavoriteState.favorited,
+                    onToggle: (_) {},
+                  ),
                   AylaFavoriteButton(
-                    state: FavoriteState.unknown, onRetryStatus: () {}),
+                    state: FavoriteState.unknown,
+                    onRetryStatus: () {},
+                  ),
                   AylaFavoriteButton(
-                    state: FavoriteState.error, onRetryStatus: () {}),
+                    state: FavoriteState.error,
+                    onRetryStatus: () {},
+                  ),
                   AylaFavoriteButton(
-                    state: FavoriteState.favorited, compact: true, onToggle: (_) {}),
+                    state: FavoriteState.favorited,
+                    compact: true,
+                    onToggle: (_) {},
+                  ),
                 ],
               ),
               const SizedBox(height: 6),
-              const Text('FavoriteButton 五态（含 compact 32 圆钮）',
-                  style: TextStyle(fontSize: 11)),
+              const Text(
+                'FavoriteButton 五态（含 compact 32 圆钮）',
+                style: TextStyle(fontSize: 11),
+              ),
             ],
           ),
         ),
@@ -1398,18 +1440,19 @@ class _DirectoryAndProfileDemoState extends State<_DirectoryAndProfileDemo> {
   Widget build(BuildContext context) {
     const List<({String id, String title})> groups =
         <({String id, String title})>[
-      (id: 'g1', title: '星海观测站'),
-      (id: 'g2', title: '作业互助'),
-      (id: 'g3', title: '深夜电台'),
-    ];
-    const List<({String key, String label})> opts = <({String key, String label})>[
-      (key: 'all', label: '全部'),
-      (key: 'users', label: '用户'),
-      (key: 'groups', label: '群聊'),
-      (key: 'posts', label: '帖子'),
-      (key: 'live', label: '直播间'),
-      (key: 'games', label: '桌游室'),
-    ];
+          (id: 'g1', title: '星海观测站'),
+          (id: 'g2', title: '作业互助'),
+          (id: 'g3', title: '深夜电台'),
+        ];
+    const List<({String key, String label})> opts =
+        <({String key, String label})>[
+          (key: 'all', label: '全部'),
+          (key: 'users', label: '用户'),
+          (key: 'groups', label: '群聊'),
+          (key: 'posts', label: '帖子'),
+          (key: 'live', label: '直播间'),
+          (key: 'games', label: '桌游室'),
+        ];
 
     return Wrap(
       spacing: AylaSpacing.sp4,
@@ -1455,28 +1498,34 @@ class _DirectoryAndProfileDemoState extends State<_DirectoryAndProfileDemo> {
                   header: Column(
                     spacing: 2,
                     children: <Widget>[
-                      Text('SEARCH',
-                          style: TextStyle(
-                            fontFamily: 'Fredoka',
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.4,
-                            color: AylaColors.pink500,
-                          )),
-                      Text('搜索结果',
-                          style: TextStyle(
-                            fontFamily: 'Fredoka',
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: AylaColors.textPrimary,
-                          )),
+                      Text(
+                        'SEARCH',
+                        style: TextStyle(
+                          fontFamily: 'Fredoka',
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.4,
+                          color: AylaColors.pink500,
+                        ),
+                      ),
+                      Text(
+                        '搜索结果',
+                        style: TextStyle(
+                          fontFamily: 'Fredoka',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AylaColors.textPrimary,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 6),
-              Text('DirectoryFilters 宽屏侧栏（点击/↑↓ 切换 · 当前 $_wideValue）',
-                  style: const TextStyle(fontSize: 11)),
+              Text(
+                'DirectoryFilters 宽屏侧栏（点击/↑↓ 切换 · 当前 $_wideValue）',
+                style: const TextStyle(fontSize: 11),
+              ),
             ],
           ),
         ),
@@ -1536,7 +1585,10 @@ class _DirectoryAndProfileDemoState extends State<_DirectoryAndProfileDemo> {
               const Positioned(
                 left: 0,
                 bottom: 0,
-                child: Text('PrivacySheet（menu）', style: TextStyle(fontSize: 11)),
+                child: Text(
+                  'PrivacySheet（menu）',
+                  style: TextStyle(fontSize: 11),
+                ),
               ),
             ],
           ),

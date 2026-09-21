@@ -80,6 +80,22 @@ enum TabBadgeMetrics {
     glow: false,
     // CSS `line-height: 16px` ÷ `font-size: 11px` = TextStyle.height 倍数。
     textHeight: 16 / 11,
+  ),
+
+  /// `.channel-scene-posts-badge`（group.css 775–788）/ `.channel-subgroup-badge`
+  /// （group.css 1070–1082）—— 宽屏频道侧栏的帖子未读徽标与子群未读徽标：
+  /// min 16×16 / padding 0 4 / pill / Fredoka 11 / **`line-height: 16px`**。
+  ///
+  /// 与 [serverItem] 的差别只在**字重**：这两处 web 未声明 `font-weight`，
+  /// 徽标是 flex 子元素、**继承宿主按钮的 `font-weight: 600`**
+  /// （`.channel-scene` 760 / `.channel-subgroup` 1057）→ 取 w600。
+  channelBadge(
+    minSize: 16,
+    horizontalPadding: 4,
+    fontFamily: AylaFonts.display,
+    fontWeight: FontWeight.w600,
+    glow: false,
+    textHeight: 16 / 11,
   );
 
   const TabBadgeMetrics({
@@ -186,7 +202,9 @@ class TabBadge extends StatelessWidget {
                 // line-height：四档 1（等比），`.server-item-badge` 档 16/11（CSS 16px）
                 height: metrics.textHeight,
                 fontWeight: metrics.fontWeight,
-                color: foregroundColor ?? AylaColors.surface, // #fffafb（share 档 #fff）
+                color:
+                    foregroundColor ??
+                    AylaColors.surface, // #fffafb（share 档 #fff）
               ),
             ),
           ),
