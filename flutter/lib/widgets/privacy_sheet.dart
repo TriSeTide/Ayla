@@ -53,7 +53,9 @@ import 'package:flutter/services.dart'
 import 'package:flutter/widget_previews.dart';
 
 import '../core/net/dio_client.dart';
+import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
+import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
@@ -406,6 +408,7 @@ class _PrivacySheetState extends State<PrivacySheet> {
         ),
       ),
       child: Row(
+        spacing: AylaSpacing.sp3, // `.privacy-sheet-head { gap: var(--sp-3) }`（profile.css:673）
         children: <Widget>[
           Expanded(
             child: Text(
@@ -419,17 +422,16 @@ class _PrivacySheetState extends State<PrivacySheet> {
               ),
             ),
           ),
-          Semantics(
-            button: true,
-            label: '关闭',
-            child: GestureDetector(
-              onTap: _close,
-              child: const SizedBox(
-                width: 40, // .icon-btn-40
-                height: 40,
-                child: Icon(Icons.close, size: 18, color: AylaColors.textSecondary),
-              ),
-            ),
+          // `<button type="button" className="icon-btn-40" onClick={close}
+          //   aria-label="关闭"><IconClose width={18} height={18} /></button>`
+          // （`PrivacySheet.tsx:188–190`）—— 复用组件库 AylaIconButton
+          // （= `.icon-btn-40`：玻璃小卡 / blur(8) / hover 底 .18 / 按压 .98）。
+          // ⚠️ 原先手搓 40 盒 + Material `Icons.close` 丢掉了整套材质，
+          // 且颜色用的次要色（web 是 `.icon-btn-40 { color: var(--text-primary) }`）。
+          AylaIconButton(
+            icon: AylaIcon(aylaIconByName('iconClose')!, size: 18),
+            onPressed: _close,
+            semanticLabel: '关闭',
           ),
         ],
       ),

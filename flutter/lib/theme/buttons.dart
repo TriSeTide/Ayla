@@ -261,8 +261,11 @@ class _AylaIconButtonState extends State<AylaIconButton>
         : GlassConfig.resolveBackground(strong: false);
 
     Widget box = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: AylaCurves.easeOut,
+      // ⚠️ auroraqua.css:54–94 把本类一并纳入按钮组：`transition` 全组为
+      // **200ms `--auroraqua-ease`**（与 shell.css / app.css 里各自的 `--dur-fast` 180ms
+      // 声明同特异性，但它后加载 ⇒ 实际生效值）→ [AylaDurations.button] + [AylaCurves.auroraqua]。
+      duration: AylaDurations.button,
+      curve: AylaCurves.auroraqua,
       width: widget.size,
       height: widget.size,
       decoration: BoxDecoration(
@@ -396,8 +399,14 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
   @override
   Widget build(BuildContext context) {
     Widget box = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: AylaCurves.easeOut,
+      // ⚠️ web 的 `.corner-fab` 过渡**不是** shell.css:713–714 的 `--dur-fast` 180ms：
+      // `auroraqua.css:54–94` 把 `.create-fab / .message-fab / .corner-fab` 一并纳入按钮组，
+      // 以**同特异性（0,1,0）+ 后加载**覆盖为 `200ms var(--auroraqua-ease)`
+      // （全组 transition 列表含 scale/box-shadow/background/color/filter/opacity/
+      // transform/visibility）→ 取 [AylaDurations.button] + [AylaCurves.auroraqua]；
+      // hover 1.02 / active .98 同由该组提供，见下面的 AylaPressScale。
+      duration: AylaDurations.button,
+      curve: AylaCurves.auroraqua,
       width: 44,
       height: 44,
       decoration: BoxDecoration(
@@ -650,8 +659,11 @@ class _AylaToolButtonState extends State<AylaToolButton> {
         BorderRadius.all(Radius.circular(AylaRadii.rInput));
 
     Widget box = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: AylaCurves.easeOut,
+      // ⚠️ auroraqua.css:54–94 把本类一并纳入按钮组：`transition` 全组为
+      // **200ms `--auroraqua-ease`**（与 shell.css / app.css 里各自的 `--dur-fast` 180ms
+      // 声明同特异性，但它后加载 ⇒ 实际生效值）→ [AylaDurations.button] + [AylaCurves.auroraqua]。
+      duration: AylaDurations.button,
+      curve: AylaCurves.auroraqua,
       width: 40,
       height: 40,
       decoration: BoxDecoration(
@@ -751,8 +763,11 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
             : AylaColors.textSecondary);
 
     Widget box = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: AylaCurves.easeOut,
+      // ⚠️ auroraqua.css:54–94 把本类一并纳入按钮组：`transition` 全组为
+      // **200ms `--auroraqua-ease`**（与 shell.css / app.css 里各自的 `--dur-fast` 180ms
+      // 声明同特异性，但它后加载 ⇒ 实际生效值）→ [AylaDurations.button] + [AylaCurves.auroraqua]。
+      duration: AylaDurations.button,
+      curve: AylaCurves.auroraqua,
       padding: const EdgeInsets.symmetric(
         horizontal: AylaSpacing.sp2,
         vertical: AylaSpacing.sp1,

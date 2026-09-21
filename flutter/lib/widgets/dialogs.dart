@@ -37,7 +37,9 @@ import 'package:flutter/widget_previews.dart';
 import 'package:flutter/services.dart'
     show KeyDownEvent, LogicalKeyboardKey;
 
+import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
+import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
@@ -130,42 +132,16 @@ class _ConfirmDialogState extends State<ConfirmDialog> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 // ---------- .create-sheet-head ----------
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        style: t.cardTitle.copyWith(
-                          fontFamily: AylaFonts.display, // --font-display
-                          fontSize: 18, // font-size: 18px
-                          fontWeight: FontWeight.w600, // font-weight: 600
-                          color: AylaColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    // 关闭按钮（`.icon-btn-40`）
-                    Semantics(
-                      button: true,
-                      label: '关闭',
-                      child: GestureDetector(
-                        onTap: widget.busy ? null : widget.onClose,
-                        child: Opacity(
-                          opacity: widget.busy ? 0.5 : 1.0,
-                          child: SizedBox(
-                            width: 40, // .icon-btn-40 = 40×40
-                            height: 40,
-                            child: Icon(
-                              Icons.close,
-                              size: 18,
-                              color: AylaColors.textSecondary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                // 公共件（与 AylaCreateSheet 同规格；web 两处 head 完全一致）：
+                // `.create-sheet-head` + `.create-sheet-title` + `.icon-btn-40`。
+                AylaSheetHead(
+                  title: widget.title,
+                  onClose: widget.onClose,
+                  // `ConfirmDialog.tsx:85`：`<IconClose width={18} height={18} />`
+                  closeIconSize: 18,
+                  // `ConfirmDialog.tsx:88`：`disabled={busy}`（关闭路径全禁）
+                  disabled: widget.busy,
                 ),
-                const SizedBox(height: AylaSpacing.sp3), // margin-bottom: sp3
                 // ---------- .confirm-dialog-message ----------
                 Text(
                   widget.message,
@@ -645,6 +621,89 @@ class AylaModalOverlay extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ======================= 通用弹层头（AylaSheetHead） =======================
+
+/// `.create-sheet-head` + `.create-sheet-title` —— 通用弹层标题行（**公共件**）。
+///
+/// ## 为什么抽
+/// web 里 `ConfirmDialog.tsx:82–89` 与 `layout/CreateSheet.tsx:50–55` 用的是
+/// **同一套 head 规格**（同一个 `.create-sheet-head` / `.create-sheet-title` /
+/// `.icon-btn-40`）。Flutter 侧若各自内联，材质与图标就会在两处漂移 ——
+/// 本项目已发生过一次：ConfirmDialog 内联的是手搓 40 盒 + Material `Icons.close`，
+/// 丢掉 `.icon-btn-40` 的玻璃材质/hover/按压，颜色也从 `--text-primary` 掉到次要色。
+///
+/// ## 事实源（`private.css:214–226`）
+/// ```
+/// .create-sheet-head  { display:flex; align-items:center; justify-content:space-between;
+///                       margin-bottom: var(--sp-3); }              /* → Padding(bottom: sp3) */
+/// .create-sheet-title { font-family: var(--font-display); font-size:18px;
+///                       font-weight:600; color: var(--text-primary); }
+/// 关闭钮               { button.icon-btn-40 + <IconClose /> }        /* tsx 52–54 */
+/// ```
+/// 关闭钮的材质/交互全部来自 [AylaIconButton]（= `.icon-btn-40`：`home.css:121–134`
+/// 的 40×40 / pill / hover 底 `rgba(157,191,230,.18)` + `auroraqua.css:125–139`
+/// 的 `--glass-bg` / 1px 亮边 / `--glass-shadow-button` / `blur(8px)`（无 saturate）/
+/// 按压 .98）。**不得**改回 Material 图标或手搓 40 盒。
+///
+/// ## 参数取值必须逐处按 web（不要凭印象统一）
+/// - [closeIconSize]：`CreateSheet.tsx:53` = **20**、`ConfirmDialog.tsx:85` = **18**
+///   → 设为必填，由调用方给出对应行号的值；
+/// - [disabled]：web 用 `disabled={busy}`（`ConfirmDialog.tsx:88`）；禁用态样式
+///   `base.css:343 button:disabled { cursor: not-allowed; opacity: 0.55 }`
+///   —— 与 [AylaIconButton] 的 `_enabled ? 1 : 0.55` 同值。
+class AylaSheetHead extends StatelessWidget {
+  const AylaSheetHead({
+    super.key,
+    required this.title,
+    required this.onClose,
+    required this.closeIconSize,
+    this.disabled = false,
+  });
+
+  /// 标题文案（`.create-sheet-title`）。
+  final String title;
+
+  /// 关闭回调（`.icon-btn-40` 的点击）。
+  final VoidCallback onClose;
+
+  /// 关闭图标边长；**逐处按 web 传值**（CreateSheet 20 / ConfirmDialog 18）。
+  final double closeIconSize;
+
+  /// 禁用关闭路径（web `disabled={busy}`）。
+  final bool disabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return Padding(
+      // `.create-sheet-head { margin-bottom: var(--sp-3) }`
+      padding: const EdgeInsets.only(bottom: AylaSpacing.sp3),
+      child: Row(
+        // `align-items: center`（Row 默认即 center）
+        children: <Widget>[
+          // `justify-content: space-between` → 标题占满左侧、钮贴右
+          Expanded(
+            child: Text(
+              title,
+              style: t.cardTitle.copyWith(
+                fontFamily: AylaFonts.display, // --font-display
+                fontSize: 18, // font-size: 18px
+                fontWeight: FontWeight.w600, // font-weight: 600
+                color: AylaColors.textPrimary,
+              ),
+            ),
+          ),
+          AylaIconButton(
+            icon: AylaIcon(aylaIconByName('iconClose')!, size: closeIconSize),
+            onPressed: disabled ? null : onClose,
+            semanticLabel: '关闭', // aria-label="关闭"
+          ),
+        ],
+      ),
     );
   }
 }

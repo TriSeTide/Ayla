@@ -56,6 +56,20 @@ void main() {
       ),
       findsOneWidget,
     );
+    // 2026-09-21 A3：Shell 弹层分区（CreateSheet 两形态）
+    expect(
+      find.text(
+        'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-21 A4：右下浮层按钮族分区
+    expect(
+      find.text(
+        'AylaCornerFabStack / AylaRefreshFab / AylaScrollTopFab / AylaQuickMessageFab（layout/*.tsx + shell.css 423–456 / 679–787）',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('登录'), findsWidgets);
     expect(find.text('注册'), findsOneWidget);
   });

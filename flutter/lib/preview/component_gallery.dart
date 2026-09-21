@@ -43,6 +43,8 @@ import '../widgets/resource_image.dart';
 import '../widgets/loading.dart';
 import '../widgets/channel_sidebar.dart';
 import '../widgets/comments.dart';
+import '../widgets/create_sheet.dart';
+import '../widgets/fab.dart';
 import '../widgets/image_viewer.dart';
 import '../widgets/post_card.dart';
 import '../widgets/post_editor.dart';
@@ -386,6 +388,26 @@ class ComponentGallery extends StatelessWidget {
                 '宽屏频道侧栏 slot 284（260 + 2×12）：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 内 1px 占位（CSS border 占布局、Flutter 不占；否则列表轨道 242→244、浮层钮偏 1px）· 群名头 Fredoka 500 20px + 16px chevron · 场景项 40 高 / gap 12 / padding 0 16 / radius 12 / 底 rgba(255,250,251,.4)；hover .18；选中底由**容器级单实例胶囊**画（auroraqua 194–197 取消按钮自身底）· 状态标识三型：语音在麦人数与 LIVE 是**裸文本**（web `.channel-scene-status` 零样式，继承 15px/600/secondary）、帖子未读才是粉徽标（margin-left auto 贴右）· 三个下拉各挂一个 paint-only 裁剪层（等价 useSidebarContentClip 的 inset；命中也随之裁剪，与 CSS clip-path 一致）· 自建 sticky：chat 0 / voice 44+吸底52 / live 88+吸底8，行本体画在浮层并在 **paint** 阶段按同帧几何定位（applyPaintTransform 同偏移）· 三角键属 auroraqua 按钮组（hover 1.02 + active .98），＋/笔不属于任何组（仅 180ms 底色）· 扫光只由**按钮本体** hover 触发（700ms），行级 hover 只管底色 · 语音房行 `sharedLayout={false}` → 行内独立胶囊、活跃度重排做 300ms 位置过渡 · 切群旧面板先退场再挂新面板（AnimatePresence mode="wait"）· **弹窗接线未做**（CreateSheet/VoiceChannelCreate/LiveStartSheet/SubGroupDialog 属后续批次，＋/笔点击暂无副作用）',
             child:
                 aylaChannelSidebarSamples(), // 可交互：点场景项/子群/语音房/直播间看胶囊迁移与吸顶滚动，hover 看两套 hover
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- Shell 弹层（2026-09-21：A3 CreateSheet） ----------
+          _Section(
+            title:
+                'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',
+            source:
+                '通用弹层容器 = AylaModalOverlay（--overlay-dim + 宽屏居中 / 窄屏贴底）+ AylaModalCard（--glass-bg-strong + blur24 sat1.4 + 1px 亮边 + radius-panel 20 + --glass-shadow-modal）· overlay 与卡片 padding 都是 sp4=16 · head = AylaSheetHead（Fredoka 18/600 + .icon-btn-40 关闭钮 = AylaIconButton，IconClose **20**；ConfirmDialog 那处是 18）· 三条关闭路径（ESC / 点遮罩 / 关闭钮；点卡内不关）· 窄屏 width 100% + radius 24 24 0 0 + 去左右下边框 + padding-bottom calc(sp4 + safe-area) + 上滑 250ms · 内容用 web CreateFab.tsx:93–103 的 post 分支（PostEditor），**可交互**：点关闭钮/遮罩即收起，点「重新打开」还原',
+            child: const _CreateSheetDemo(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- Shell 右下浮层按钮族（2026-09-21：A4） ----------
+          _Section(
+            title:
+                'AylaCornerFabStack / AylaRefreshFab / AylaScrollTopFab / AylaQuickMessageFab（layout/*.tsx + shell.css 423–456 / 679–787）',
+            source:
+                '堆叠容器 = fixed right 38（32 + (56-44)/2）/ bottom 100（32 + 56 + sp3）/ column · gap 12 · align end · 容器不吃指针（Flutter 裸 Column 天然等价）· 44px 玻璃钮复用 AylaCornerFab（--glass-bg + blur18 sat1.4 + --card-shadow，hover → strong + 0 2px 12px .18；**过渡 200ms --auroraqua-ease**，因 auroraqua.css 54–94 把 .corner-fab 并入按钮组覆盖 shell.css 的 180ms）· 刷新：iconRetry 20，spinning = ayla-loading-spin 800ms linear infinite（reduced-motion 不转），无回调时按钮照常可点只是无动作 · 回顶：iconArrowUp 20，滚动超过一屏（pixels > 视口高）且命中**主滚动容器**（viewportDimension ≥ 40% 视口高）才浮入（opacity + translateY 8→0，200ms；隐藏态不可点 + 语义排除），点击 smooth 回顶（300ms ease-out；reduced-motion 直切）· 消息钮复用 AylaMessageFab 外观，4s 无点击 → 半贴 translateX(-44px)（200ms --ease-out），半贴点击点出来、展开点击打开快捷栏 · **样张可交互**：滚列表看回顶钮浮入、点刷新看旋转、等 4s 看消息钮半贴',
+            child: aylaFabSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
@@ -1594,6 +1616,95 @@ class _DirectoryAndProfileDemoState extends State<_DirectoryAndProfileDemo> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// AylaCreateSheet 两形态样张（**可交互**：关闭钮/遮罩收起 → 「重新打开」还原）。
+///
+/// ⚠️ 弹层的宽窄与尺寸**全部读 `MediaQuery` 视口**（`AylaModalCard` 的 80vh /
+/// `AylaModalOverlay` 的 flex-end 判定）→ 画布里必须用
+/// `MediaQuery.copyWith(size:)` **覆写局部视口**，否则两种形态都会按预览宿主的
+/// 窗口尺寸走（`13-工作进度与待办.md` §6.6 同一教训）。
+class _CreateSheetDemo extends StatefulWidget {
+  const _CreateSheetDemo();
+
+  @override
+  State<_CreateSheetDemo> createState() => _CreateSheetDemoState();
+}
+
+class _CreateSheetDemoState extends State<_CreateSheetDemo> {
+  /// 一级 tab 发帖（web `CreateFab.tsx:93–103` 的 post 分支）
+  bool _wideOpen = true;
+  bool _narrowOpen = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AylaSpacing.sp6,
+      runSpacing: AylaSpacing.sp6,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        _stage(
+          viewport: const Size(1024, 620),
+          label: '宽屏 1024：居中 480 卡 · overlay padding sp4=16',
+          open: _wideOpen,
+          onToggle: (bool v) => setState(() => _wideOpen = v),
+        ),
+        _stage(
+          viewport: const Size(375, 620),
+          label: '窄屏 375：贴底 + radius 24 24 0 0 + 上滑 250ms',
+          open: _narrowOpen,
+          onToggle: (bool v) => setState(() => _narrowOpen = v),
+        ),
+      ],
+    );
+  }
+
+  /// 固定视口的弹层舞台（`Stack` 需要 tight 约束，`Positioned.fill` 才成立）。
+  Widget _stage({
+    required Size viewport,
+    required String label,
+    required bool open,
+    required ValueChanged<bool> onToggle,
+  }) {
+    return SizedBox(
+      width: viewport.width,
+      height: viewport.height,
+      child: Builder(
+        builder: (BuildContext inner) => MediaQuery(
+          data: MediaQuery.of(inner).copyWith(size: viewport),
+          child: Stack(
+            children: <Widget>[
+              if (open)
+                AylaCreateSheet(
+                  title: '发帖', // web `shellConfig.ts:256` 的 action.label
+                  onClose: () => onToggle(false),
+                  child: AylaPostEditor(
+                    onSubmit: (_) async {},
+                    groups: const <({String id, String title})>[
+                      (id: 'g1', title: '深夜电台'),
+                      (id: 'g2', title: '星海观测站'),
+                    ],
+                  ),
+                )
+              else
+                Center(
+                  child: GlassButton(
+                    label: '重新打开（$label）',
+                    variant: GlassButtonVariant.ghost,
+                    onPressed: () => onToggle(true),
+                  ),
+                ),
+              Positioned(
+                left: 0,
+                bottom: 0,
+                child: Text(label, style: const TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
