@@ -577,7 +577,11 @@ class _AylaTopNavState extends State<AylaTopNav> {
             // ⚠️ 覆写链：`shell.css:204–205` 给的是 `var(--dur-fast)`(180ms)，但
             // `auroraqua.css:236–243` 的导航组（含 `.top-nav-module`）把它覆写为
             // `background var(--auroraqua-duration) var(--auroraqua-ease)` = **300ms**。
-            duration: AylaDurations.auroraqua, // 300ms（auroraqua:238）
+            // ⚠️ **选中态不给过渡**：web 的 `.has-auroraqua-highlight.is-active {
+            // background: transparent }` 是瞬时的 —— 高亮块直接出现/消失；
+            // 渐隐会让半透明底色与后方胶囊/玻璃混色成灰（用户 2026-09-21 实报
+            // 「出现和消失有一段灰色过渡，拖沓很脏」）。未选中态（hover）保留 300ms。
+            duration: active ? Duration.zero : AylaDurations.auroraqua,
             curve: AylaCurves.auroraqua,
             decoration: BoxDecoration(
               color: hovered && !active
@@ -1320,9 +1324,12 @@ class _SearchTailButtonState extends State<_SearchTailButton> {
           height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle, // border-radius: 50%（search.css:423）
+            // ⚠️ 零透明用**同色相**（ice500 alpha 0），不能写 `Colors.transparent`：
+            // 那是透明黑，`Color.lerp` 逐通道直插 → 悬停进出时中途会闪**深灰/中灰**
+            // （库内同款教训见 `profile_and_filters.dart` 761–768 的详细推导）。
             color: _hovered
                 ? AylaColors.ice500.withValues(alpha: 0.18)
-                : Colors.transparent,
+                : AylaColors.ice500.withValues(alpha: 0),
           ),
           child: Center(
             child: AylaIcon(

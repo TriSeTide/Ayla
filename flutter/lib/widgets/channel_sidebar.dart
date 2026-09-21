@@ -185,6 +185,17 @@ abstract final class _SidebarTints {
   static const Color moreButtonBg = Color(0x80FFFAFB);
 }
 
+/// **同色相的零透明**（alpha = 0，色相与 [_SidebarTints.hover] 一致）。
+///
+/// ⚠️ 颜色过渡的「零值」**不能**写 `Colors.transparent`：那是 `0x00000000`（**透明黑**），
+/// 从 `.18 冰蓝` 插值到它会**经过中性灰** —— 视觉上就是那层「很脏的灰」
+/// （库内同款教训见 `menu_item.dart` / `profile_and_filters.dart` 的注释）。
+/// 用同色相透明则插值全程保持冰蓝色相，不会闪灰。
+abstract final class _SidebarZeroTint {
+  /// 与 [_SidebarTints.hover] 同色相的 alpha 0。
+  static const Color hover = Color(0x009DBFE6);
+}
+
 // ======================= 数据模型 =======================
 
 /// 群内场景（`stores/group.ts` 的 `GroupScene`；tsx 39–45 的顺序）。
@@ -1498,7 +1509,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     // hover 按钮本体时底色透明（交给胶囊）。`:has()` 那条特异性更高（0,4,0 > 0,2,0）
     // → 浮层钮 hover 时即便选中也仍是 .18。
     final Color bg = active
-        ? (hoveredRow ? _SidebarTints.hover : Colors.transparent)
+        ? (hoveredRow ? _SidebarTints.hover : _SidebarZeroTint.hover)
         : ((hoveredButton || hoveredRow)
               ? _SidebarTints.hover
               : _SidebarTints.rowBase);
@@ -1525,8 +1536,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         onPressChanged: (bool p) => _setPressed(p ? sel : null),
         child: AnimatedContainer(
           key: _keyFor(sel), // 胶囊目标 rect 的实测基准（= 按钮本体）
-          // 导航组 transition：background/color/box-shadow 300ms `--auroraqua-ease`
-          duration: AylaDurations.auroraqua,
+          // 导航组 transition：background/color/box-shadow 300ms `--auroraqua-ease`。
+          // ⚠️ **选中态不给过渡**：web 的 \`.has-auroraqua-highlight.is-active { background:
+          // transparent }\` 是瞬时的，高亮块直接出现/消失；渐隐会让半透明底色与后方
+          // 胶囊、玻璃卡混色成**灰**（用户 2026-09-21 实报「出现和消失有一段灰色过渡，
+          // 很拖沓很脏」）。未选中态（hover 底色）保留 300ms —— 与 web 一致。
+          duration: active ? Duration.zero : AylaDurations.auroraqua,
           curve: AylaCurves.auroraqua,
           height: _SidebarMetrics.rowHeight, // height: 40px
           padding: EdgeInsets.only(
@@ -1717,13 +1732,16 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         padding: const EdgeInsets.only(right: 2), // `.channel-subgroup-item`
         child: AnimatedContainer(
           // `:hover { background: .18 }`；选中时自身底被 auroraqua 288–291 取消
-          // （`:has(.has-auroraqua-highlight)` 特异性更高）
-          duration: AylaDurations.auroraqua,
+          // （`:has(.has-auroraqua-highlight)` 特异性更高）。
+          // ⚠️ **选中态不给过渡**：web 是直接 `background: transparent`（瞬时交还给共享
+          // 胶囊）；渐隐会让半透明底色与后方胶囊/玻璃卡混色成**灰**（用户 2026-09-21 实报
+          // 「高亮块出现和消失有一段灰色过渡，拖沓很脏」）。
+          duration: active ? Duration.zero : AylaDurations.auroraqua,
           curve: AylaCurves.auroraqua,
           decoration: BoxDecoration(
             color: active
-                ? Colors.transparent
-                : (hovered ? _SidebarTints.hover : Colors.transparent),
+                ? _SidebarZeroTint.hover
+                : (hovered ? _SidebarTints.hover : _SidebarZeroTint.hover),
             borderRadius: BorderRadius.circular(AylaRadii.rInput),
           ),
           child: Row(
@@ -1968,12 +1986,13 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         child: ExcludeSemantics(
           excluding: hidden,
           child: AnimatedContainer(
-            duration: AylaDurations.auroraqua,
+            // 选中态瞬时（见子群行注释：渐隐会与后方胶囊混色成灰）
+            duration: active ? Duration.zero : AylaDurations.auroraqua,
             curve: AylaCurves.auroraqua,
             decoration: BoxDecoration(
               color: active
-                  ? Colors.transparent
-                  : (hovered ? _SidebarTints.hover : Colors.transparent),
+                  ? _SidebarZeroTint.hover
+                  : (hovered ? _SidebarTints.hover : _SidebarZeroTint.hover),
               borderRadius: BorderRadius.circular(AylaRadii.rInput),
             ),
             child: MouseRegion(
@@ -2138,12 +2157,13 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
       child: Padding(
         padding: const EdgeInsets.only(right: 2),
         child: AnimatedContainer(
-          duration: AylaDurations.auroraqua,
+          // 选中态瞬时（见子群行注释：渐隐会与后方胶囊混色成灰）
+          duration: active ? Duration.zero : AylaDurations.auroraqua,
           curve: AylaCurves.auroraqua,
           decoration: BoxDecoration(
             color: active
-                ? Colors.transparent
-                : (hovered ? _SidebarTints.hover : Colors.transparent),
+                ? _SidebarZeroTint.hover
+                : (hovered ? _SidebarTints.hover : _SidebarZeroTint.hover),
             borderRadius: BorderRadius.circular(AylaRadii.rInput),
           ),
           child: MouseRegion(

@@ -777,7 +777,10 @@ void main() {
     await pumpHost(tester, host());
     await tester.pumpAndSettle();
 
-    expect(rowColor(tester, '聊天'), Colors.transparent); // auroraqua 194–197
+    // 选中项自身底取消（auroraqua 194–197）——**零透明用同色相**
+    // （`Colors.transparent` 是透明黑，`Color.lerp` 会闪灰；见组件内 _SidebarZeroTint 注释），
+    // 所以断言 alpha == 0 而不是与某个具体颜色相等。
+    expect(rowColor(tester, '聊天')!.a, 0);
     expect(rowColor(tester, '语音'), const Color(0x66FFFAFB)); // 未选中 = .4 白
 
     final TestGesture gesture = await tester.createGesture(
@@ -1118,7 +1121,7 @@ void main() {
     expect(firstRowColor('帖子'), const Color(0x66FFFAFB));
     await tester.tap(find.text('帖子').first);
     await tester.pumpAndSettle();
-    expect(firstRowColor('帖子'), Colors.transparent);
+    expect(firstRowColor('帖子')!.a, 0); // 零透明（同色相）
 
     // 二级：点第一个 cell 的子群行「技术」→ 高亮迁到该行（胶囊 rect 覆盖它）
     await tester.tap(find.text('技术').first);

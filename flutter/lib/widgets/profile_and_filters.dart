@@ -735,7 +735,13 @@ class _FilterTabState extends State<_FilterTab> {
     // `:hover → background: var(--ice-100)`；`:active/.is-active` 时
     // web 未给背景（.is-active 是 transparent，选中底由高亮层画）
     Widget tab = AnimatedContainer(
-      duration: const Duration(milliseconds: 200), // transition 200ms
+      // ⚠️ **选中态不给过渡**：web 的 `.has-auroraqua-highlight.is-active {
+      // background: transparent }\` 是瞬时的 —— 选中底直接交还给共享胶囊；渐隐会让
+      // 半透明底色与后方胶囊/玻璃混色成灰（用户 2026-09-21 实报「出现和消失有一段
+      // 灰色过渡，拖沓很脏」）。未选中态（hover 底色）保留 200ms。
+      duration: widget.active
+          ? Duration.zero
+          : const Duration(milliseconds: 200), // transition 200ms
       curve: AylaCurves.auroraqua,
       constraints: BoxConstraints(
         minHeight: 44, // min-height: 44px
