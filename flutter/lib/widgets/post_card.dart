@@ -231,11 +231,24 @@ class _AylaPostCardState extends State<AylaPostCard> {
             //   ② 组只排在昵称后面、没有 auto 语义 → 紧贴昵称、**不靠右**
             //      （用户指出「时间和标签是靠右的」）。
             // 故：昵称与右侧组之间放 Spacer（= CSS `margin-left:auto`），右侧组按
-            // 「可用宽 − 左侧 − 昵称最小保留」显式给宽（LayoutBuilder，不参与 flex 分配），
-            // 组内 WrapAlignment.end 右对齐、仅极端超宽兜底折行。
+            // 「可用宽 − 左侧固定部分 − [nickReserve]」显式给宽（LayoutBuilder，不参与
+            // flex 分配），组内 WrapAlignment.end 右对齐、仅极端超宽兜底折行。
+            // `nickReserve` 现为 0（见下）；昵称自身仍由 `Flexible` + ellipsis 兜底，
+            // 不会溢出。
             LayoutBuilder(
               builder: (BuildContext context, BoxConstraints head) {
-                const double nickReserve = 64; // 昵称最少保留 4 个汉字宽
+                // ⚠️ nickReserve = 0（2026-09-21 修正；此前为 64「昵称最少保留 4 个汉字」）：
+                // CSS 里 `.post-card-nick` 带 `overflow: hidden` ⇒ **flex item 的
+                // `min-width: auto` 解析为 0**（规范：overflow 非 visible 的 flex 项，
+                // 自动最小尺寸为 0）→ 昵称可以被压缩到 0，由 `text-overflow: ellipsis` 兜底；
+                // 真正需要保住完整宽度的是**标签组**（`.post-card-tags` 无 overflow:hidden
+                // ⇒ min-width = min-content = 最长标签宽）。
+                // 实测（探针量得，卡片 360 / 内容区 328）：固定部分 53 + sp3 12，
+                // 右侧组自然宽 = 时间「2026/9/20」108 + sp3 12 + 「公开」38 + sp1 4 +
+                // 「深夜电台」60 = **222**；旧值给的上限只有 328−53−12−64 = 199 ⇒ 标签被迫
+                // 折行（`post_card_test` 的既有失败即此）。改成 0 后上限 263 ≥ 222 ⇒ 单行，
+                // 与 web 一致；窄卡（220）上限 123 ⇒ 标签组内部兜底折行、不溢出。
+                const double nickReserve = 0;
                 final double leftWidth = authorName != null
                     ? AvatarHalo.haloWidth * 2 + 36 + AylaSpacing.sp3
                     : 0;
