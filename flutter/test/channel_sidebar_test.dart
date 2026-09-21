@@ -1346,4 +1346,81 @@ void main() {
       reason: '点底部项（桌游）后扫光也必须立刻在终点，不得从左往右重播',
     );
   });
+  testWidgets('三角展开键：常态透明（.is-open 只旋转，不点底色）', (
+    WidgetTester tester,
+  ) async {
+    // host 默认三个下拉**都是展开的** —— 也就是三角键都处于 .is-open。
+    // web group.css 874–876 的 .is-open **只有 transform**（rotate 180deg）；
+    // 底色/字色**只有 :hover 才给**（883–886）。此前把 is-open 也当成 activeState
+    // ⇒ 展开时三角键常驻亮底（用户 2026-09-21 实报「常态时这里不高亮的」）。
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+
+    Iterable<AnimatedContainer> toggles() => tester
+        .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+        .where(
+          (AnimatedContainer c) =>
+              c.constraints?.maxWidth == 28 && c.constraints?.maxHeight == 28,
+        );
+
+    expect(toggles().isNotEmpty, isTrue, reason: '三个三角展开键应存在（28×28）');
+    expect(
+      toggles().every(
+        (AnimatedContainer c) =>
+            ((c.decoration as BoxDecoration?)?.color?.a ?? 0) == 0,
+      ),
+      isTrue,
+      reason: '未 hover 时三角键必须透明（展开态只旋转，不点亮底色）',
+    );
+
+    // 而旋转是给了的：展开态 turns == 0.5
+    expect(
+      tester
+          .widgetList<AnimatedRotation>(find.byType(AnimatedRotation))
+          .where((AnimatedRotation r) => r.turns == 0.5)
+          .isNotEmpty,
+      isTrue,
+      reason: '展开态应旋转 180°',
+    );
+  });
+  testWidgets('同一行的两个浮层钮分开高亮（＋ 与 三角互不串扰）', (
+    WidgetTester tester,
+  ) async {
+    // web 里每个钮有自己的 :hover（.channel-scene-voice-add:hover 852 /
+    // .channel-scene-voice-toggle:hover 883），但两者都联动词条底色（878–881）。
+    // 此前两个钮共用行级 hover 身份 ⇒ 悬停一个两个一起亮（用户 2026-09-21 实报）。
+    await pumpHost(tester, host(activeScene: AylaGroupScene.voice));
+    await tester.pumpAndSettle();
+
+    List<Color?> overlayColors() => tester
+        .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+        .where(
+          (AnimatedContainer c) =>
+              c.constraints?.maxWidth == 28 && c.constraints?.maxHeight == 28,
+        )
+        .map((AnimatedContainer c) => (c.decoration as BoxDecoration?)?.color)
+        .toList();
+
+    expect(
+      overlayColors().every((Color? c) => (c?.a ?? 0) == 0),
+      isTrue,
+      reason: '常态下所有浮层钮都应透明',
+    );
+
+    final TestGesture mouse = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+    );
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+
+    // 悬停「创建语音房」＋（语音行右侧左钮）
+    await mouse.moveTo(tester.getCenter(find.bySemanticsLabel('创建语音房').first));
+    await tester.pumpAndSettle();
+    expect(
+      overlayColors().where((Color? c) => (c?.a ?? 0) > 0).length,
+      1,
+      reason: '只有被 hover 的那一个钮亮，同行的三角键必须保持透明',
+    );
+  });
 }

@@ -780,6 +780,14 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
   /// 按钮级 hover → 驱动底色**与扫光**（auroraqua 163）。
   _Selection? _hoveredButton;
 
+  /// **单个浮层钮**的 hover 身份（`＋` / 笔 / 三角各自独立）。
+  ///
+  /// web 里每个钮有自己的 `:hover`（`.channel-scene-voice-add:hover` 852、
+  /// `.channel-scene-voice-toggle:hover` 883）；而 `_hoveredRow` 是**行级**、
+  /// 任一钮 hover 都要联动词条底色（878–881）⇒ 两者必须分开，否则同行的
+  /// 两个钮会一起亮（用户 2026-09-21 实报）。
+  _Selection? _hoveredOverlay;
+
   /// 按压中的行（导航组 `:active { scale: .98 }`，auroraqua 245–249）。
   _Selection? _pressed;
 
@@ -1028,6 +1036,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
   void _setHoveredButton(_Selection? s) {
     if (s == _hoveredButton) return;
     setState(() => _hoveredButton = s);
+  }
+
+  /// **只**改浮层钮自身的 hover（不影响行底；行底由 [_setHoveredRow] 管）。
+  void _setHoveredOverlay(_Selection? s) {
+    if (s == _hoveredOverlay) return;
+    setState(() => _hoveredOverlay = s);
   }
 
   void _setPressed(_Selection? s) {
@@ -1429,6 +1443,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               child: scene == AylaGroupScene.chat
                   ? _buildOverlayButton(
                       sel: sel,
+                      slot: 'edit',
                       inButtonGroup: false, // 笔不在 auroraqua 任何一组 → 无缩放
                       activeState: _editing, // tsx 457：编辑态 is-active
                       semanticLabel: _editing ? '退出编辑' : '编辑',
@@ -1441,6 +1456,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                     )
                   : _buildOverlayButton(
                       sel: sel,
+                      slot: 'add',
                       inButtonGroup: false, // ＋同上
                       semanticLabel: scene == AylaGroupScene.voice
                           ? '创建语音房'
@@ -1460,10 +1476,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
           child: Center(
             child: _buildOverlayButton(
               sel: sel,
+              slot: 'toggle',
               // 三个三角键在 auroraqua 按钮组内（60/78/90）→ hover 1.02 + active .98
               inButtonGroup: true,
-              activeState: open,
-              rotateWhenActive: true, // `.is-open { rotate(180deg) }`（874–876）
+              // `.is-open` **只旋转**（874–876）；底色/字色只有 `:hover` 才给（883–886）
+              // ⇒ 常态（未 hover）时三角键必须是透明的（用户实报）
+              rotated: open,
               semanticLabel: open ? '收起' : '展开',
               glyph: _SidebarGlyphKind.chevronDown,
               glyphSize: 14,
@@ -1583,15 +1601,30 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
   /// - ＋ / 笔**不在任何组** → 无缩放，只有自身 `background/color 180ms`。
   Widget _buildOverlayButton({
     required _Selection sel,
+    /// 该钮在行内的槽位（`edit` / `add` / `toggle`）—— 与行 id 合成**钮自己的**身份，
+    /// 使同一行的多个钮 hover 互不串扰。
+    required String slot,
     required bool inButtonGroup,
     required _SidebarGlyphKind glyph,
     required double glyphSize,
     required VoidCallback onTap,
     required String semanticLabel,
+    /// `.is-active`（**只有编辑笔**用它）→ 底 .3 + 字 primary
+    /// （group.css 852–855 / 999–1002 等）。
     bool activeState = false,
-    bool rotateWhenActive = false,
+
+    /// `.is-open`（三角展开键）→ **只旋转，不点底色**。
+    ///
+    /// ⚠️ web `group.css 874–876`：`.channel-scene-voice-toggle.is-open {
+    /// transform: translateY(-50%) rotate(180deg) }` —— **只有 transform**；
+    /// 底色与字色**只有 `:hover` 才给**（883–886）。此前把 `is-open` 也传成
+    /// `activeState` ⇒ 只要下拉是展开的，三角键就常驻亮底（用户 2026-09-21 实报
+    /// 「常态时这里不高亮的」）。
+    bool rotated = false,
   }) {
-    final bool hovered = _hoveredRow == sel;
+    // **钮自己的**身份 —— 同一行的两个钮必须分开判定（web 各有 `:hover`）
+    final _Selection selfId = _Selection('overlay', '${sel.kind}:${sel.id}:$slot');
+    final bool hovered = _hoveredOverlay == selfId;
     // `:hover` / `.is-active` → 底 .3 + 字 primary（group.css 852–855 / 883–886 /
     // 910–913 / 942–945 / 965–969 / 999–1002）
     final Color bg = hovered || activeState
@@ -1613,10 +1646,10 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         borderRadius: BorderRadius.circular(AylaRadii.rInput),
       ),
       child: Center(
-        child: rotateWhenActive
+        child: rotated
             ? AnimatedRotation(
                 // `.is-open { transform: translateY(-50%) rotate(180deg) }`（874–876）
-                turns: activeState ? 0.5 : 0,
+                turns: rotated ? 0.5 : 0,
                 duration: AylaDurations.button,
                 curve: AylaCurves.auroraqua,
                 child: _SidebarGlyph(glyph, size: glyphSize, color: fg),
@@ -1626,10 +1659,16 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     );
 
     return MouseRegion(
-      // 行级 hover：web `.channel-scene-row:has(...:hover) .channel-scene`（878–881）
-      // → 只驱动**底色**（按钮级传 null，扫光仍只认按钮本体）
-      onEnter: (_) => _setHoveredRow(sel),
-      onExit: (_) => _setHoveredRow(null),
+      // ① **钮自身**高亮（独立身份）② **行底**联动 —— web 878–881 里任一钮 hover
+      // 都会把词条底点亮 .18；按钮级（扫光）仍只认按钮本体，故不设 button。
+      onEnter: (_) {
+        _setHoveredRow(sel);
+        _setHoveredOverlay(selfId);
+      },
+      onExit: (_) {
+        _setHoveredRow(null);
+        _setHoveredOverlay(null);
+      },
       child: inButtonGroup
           ? AylaPressScale(
               // 按钮组：hover 1.02 + active .98（auroraqua 72–94）
