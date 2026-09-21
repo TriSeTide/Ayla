@@ -53,9 +53,9 @@ import 'package:flutter/services.dart'
     show KeyDownEvent, KeyRepeatEvent, LogicalKeyboardKey;
 
 import '../theme/app_icons.dart';
-import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
+import 'menu_item.dart';
 import 'overlays.dart';
 
 /// 会话摘要（菜单所需字段；对应 tsx 的 `conversation` 参数）。
@@ -541,17 +541,16 @@ class _MenuPanelState extends State<_MenuPanel> {
       // 也加 2px，面板底部多出空隙）；Column.spacing 语义与 CSS gap 一致。
       spacing: 2,
       children: <Widget>[
-        _MenuItem(
+        AylaMenuItem(
           focusNode: _nodes[0],
           onKey: _onKey,
           icon: AylaIcon(aylaIconByName('iconPin')!, size: 16),
           label: widget.pinned ? '取消置顶' : '置顶',
-          danger: false,
           disabled: widget.busy,
           onTap: widget.onTogglePin,
         ),
         if (widget.showDelete)
-          _MenuItem(
+          AylaMenuItem(
             focusNode: _nodes[1],
             onKey: _onKey,
             icon: const _TrashGlyph(),
@@ -642,100 +641,6 @@ class _MenuPanelState extends State<_MenuPanel> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// `.conv-menu-item` —— 40 高 / radius 10 / 14px 600 / hover 冰蓝底。
-class _MenuItem extends StatefulWidget {
-  const _MenuItem({
-    required this.focusNode,
-    required this.onKey,
-    required this.icon,
-    required this.label,
-    required this.danger,
-    required this.disabled,
-    required this.onTap,
-  });
-
-  final FocusNode focusNode;
-  final KeyEventResult Function(FocusNode, KeyEvent) onKey;
-  final Widget icon;
-  final String label;
-  final bool danger;
-  final bool disabled;
-  final VoidCallback onTap;
-
-  @override
-  State<_MenuItem> createState() => _MenuItemState();
-}
-
-class _MenuItemState extends State<_MenuItem> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final AylaTextStyles t = AylaTextStyles.of(context);
-    // danger → color: var(--destructive)；其余 --text-primary
-    final Color fg = widget.danger
-        ? AylaColors.destructive
-        : AylaColors.textPrimary;
-
-    return Semantics(
-      button: true,
-      enabled: !widget.disabled,
-      label: widget.label,
-      child: Focus(
-        focusNode: widget.focusNode,
-        onKeyEvent: widget.onKey,
-        child: MouseRegion(
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.disabled ? null : widget.onTap,
-            child: Container(
-              // gap 由父级 Column.spacing 提供（对齐 CSS `.conv-menu { gap: 2px }`）
-              constraints: const BoxConstraints(minHeight: 40), // min-height: 40px
-              padding: const EdgeInsets.symmetric(
-                horizontal: AylaSpacing.sp3, // padding: 0 var(--sp-3)
-              ),
-              decoration: BoxDecoration(
-                // :hover → rgba(157,191,230,.22)；danger:hover → rgba(224,100,100,.12)
-                // 零透明用**同色相**（透明黑若参与插值会闪灰）
-                color: (!_hovered || widget.disabled)
-                    ? (widget.danger
-                        ? const Color(0x00E06464)
-                        : AylaColors.ice500.withValues(alpha: 0))
-                    : (widget.danger
-                        ? const Color(0x1FE06464)
-                        : AylaColors.ice500.withValues(alpha: 0.22)),
-                borderRadius: BorderRadius.circular(10), // border-radius: 10px
-              ),
-              child: Opacity(
-                opacity: widget.disabled ? 0.5 : 1.0, // :disabled { opacity: .5 }
-                child: Row(
-                  children: <Widget>[
-                    IconTheme(
-                      data: IconThemeData(color: fg, size: 16),
-                      child: widget.icon,
-                    ),
-                    const SizedBox(width: AylaSpacing.sp2), // gap: var(--sp-2)
-                    Text(
-                      widget.label,
-                      style: t.label.copyWith(
-                        fontSize: 14, // font-size: 14px
-                        fontWeight: FontWeight.w600, // font-weight: 600
-                        color: fg,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
         ),
       ),
     );

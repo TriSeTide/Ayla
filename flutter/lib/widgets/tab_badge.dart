@@ -9,6 +9,7 @@
 /// | [TabBadgeMetrics.groupBadge] | home.css 302–317 `.group-badge(-unread)` | min 16×16 / padding 0 4 / pill | Fredoka 11（未声明 font-weight） | 行内（Row 里排在文案后） |
 /// | [TabBadgeMetrics.messages] | messages.css 43–55 `.messages-tab-badge` | min 18×18 / padding 0 5 / pill + `--glow-shadow` | Space Grotesk 11 | 行内 |
 /// | [TabBadgeMetrics.shareUnread] | share.css 130–143 `.share-sheet-unread` | min 18×18 / padding 0 5 / pill，**无辉光** | Space Grotesk 11 | 行内（分享目标行） |
+/// | [TabBadgeMetrics.serverItem] | group.css 561–575 `.server-item-badge` | min 16×16 / padding 0 4 / pill | Fredoka 11（`line-height: 16px`） | **由调用方绝对定位**（头像左下角 `left:-3 bottom:-3`） |
 ///
 /// 数字 > [max] 显示 `max+`（消息中心红点语义，d:§12.14）。
 library;
@@ -28,6 +29,7 @@ enum TabBadgeMetrics {
     fontFamily: AylaFonts.display,
     fontWeight: FontWeight.w500,
     glow: false,
+    textHeight: 1,
   ),
 
   /// `.group-badge(-unread)`（home.css 302–317）：16×16 / padding 0 4 / Fredoka 11，
@@ -38,6 +40,7 @@ enum TabBadgeMetrics {
     fontFamily: AylaFonts.display,
     fontWeight: FontWeight.w400,
     glow: false,
+    textHeight: 1,
   ),
 
   /// `.messages-tab-badge`（messages.css 43–55）：18×18 / padding 0 5 /
@@ -48,6 +51,7 @@ enum TabBadgeMetrics {
     fontFamily: AylaFonts.utility,
     fontWeight: FontWeight.w400,
     glow: true,
+    textHeight: 1,
   ),
 
   /// `.share-sheet-unread`（share.css 130–143）：18×18 / padding 0 5 /
@@ -59,6 +63,23 @@ enum TabBadgeMetrics {
     fontFamily: AylaFonts.utility,
     fontWeight: FontWeight.w400,
     glow: false,
+    textHeight: 1,
+  ),
+
+  /// `.server-item-badge`（group.css 561–575，宽屏 ServerRail 群头像的未读徽标）：
+  /// min 16×16 / padding 0 4 / pill / Fredoka 11 / **`line-height: 16px`**。
+  ///
+  /// 与 [groupBadge] 是 web 的**两个不同类**（后者 `line-height: 1`），故单列一档；
+  /// 定位由调用方给（web `left:-3; bottom:-3` 绝对定位在头像左下角），
+  /// 本档只用 [TabBadgePlacement.inline]。
+  serverItem(
+    minSize: 16,
+    horizontalPadding: 4,
+    fontFamily: AylaFonts.display,
+    fontWeight: FontWeight.w400,
+    glow: false,
+    // CSS `line-height: 16px` ÷ `font-size: 11px` = TextStyle.height 倍数。
+    textHeight: 16 / 11,
   );
 
   const TabBadgeMetrics({
@@ -67,6 +88,7 @@ enum TabBadgeMetrics {
     required this.fontFamily,
     required this.fontWeight,
     required this.glow,
+    required this.textHeight,
   });
 
   /// 最小边长（`min-width` / `height`，px）。
@@ -83,6 +105,12 @@ enum TabBadgeMetrics {
 
   /// 是否带 `--glow-shadow` 辉光。
   final bool glow;
+
+  /// 文字行高（`TextStyle.height` 倍数 = CSS `line-height` ÷ `font-size`）。
+  ///
+  /// 四档 CSS 都是 `line-height: 1`（tokens 未给，由 base.css 的继承值提供）→ 1；
+  /// [serverItem] 档 CSS 显式写了 `line-height: 16px`（11px 字）→ `16 / 11`。
+  final double textHeight;
 }
 
 /// 徽标定位方式。
@@ -155,7 +183,8 @@ class TabBadge extends StatelessWidget {
                 fontFamily: metrics.fontFamily,
                 fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 11, // font-size: 11px
-                height: 1, // line-height: 1（16px 与 18px 两档的等比表达）
+                // line-height：四档 1（等比），`.server-item-badge` 档 16/11（CSS 16px）
+                height: metrics.textHeight,
                 fontWeight: metrics.fontWeight,
                 color: foregroundColor ?? AylaColors.surface, // #fffafb（share 档 #fff）
               ),
@@ -207,6 +236,13 @@ Widget tabBadgePreview() {
           metrics: TabBadgeMetrics.messages,
           placement: TabBadgePlacement.inline,
         ),
+        // `.server-item-badge`（ServerRail 头像左下角档；样例同时显示 1 / 7 / 99+）
+        for (final int c in <int>[1, 7, 180])
+          TabBadge(
+            count: c,
+            metrics: TabBadgeMetrics.serverItem,
+            placement: TabBadgePlacement.inline,
+          ),
       ],
     ),
   );

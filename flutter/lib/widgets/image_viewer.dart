@@ -1108,7 +1108,21 @@ Widget aylaImageViewerSamples() {
             ),
           ),
           const SizedBox(height: AylaSpacing.sp2),
-          SizedBox(width: 520, height: 560, child: child),
+          SizedBox(
+            width: 520,
+            height: 680,
+            // 舞台尺寸按 MediaQuery 视口算（本文件 304–306：stageMaxW = vw*0.92
+            // 上限 1200、stageMaxH = vh*0.82）—— 样张必须覆写局部视口，否则在
+            // 预览宿主/画布的大视口下舞台会撑破这个固定盒子（2026-09-21 用户预览
+            // 实测：底部溢出 889px、右侧 4px ×2）。盒子同时由 560 加到 680，
+            // 让 0.82 视口换算后的舞台（557）留出操作条余量。
+            child: Builder(
+              builder: (BuildContext ctx) => MediaQuery(
+                data: MediaQuery.of(ctx).copyWith(size: const Size(520, 680)),
+                child: child,
+              ),
+            ),
+          ),
         ],
       );
 

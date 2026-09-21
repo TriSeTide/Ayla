@@ -1458,7 +1458,9 @@ class _TopNavDemoState extends State<_TopNavDemo> {
 @Preview(
   group: 'Widgets',
   name: 'TopNav 响应式（宽屏圆角浮动卡）',
-  size: Size(1600, 140),
+  // 高 140 → 220：宽屏样例除顶栏（64 + 上边距 12）还有说明行与按钮行，
+  // 实测 140 会 RenderFlex 溢出 15px（2026-09-21 预览日志定位）。
+  size: Size(1600, 220),
   wrapper: previewTheme,
 )
 Widget aylaTopNavWidePreview() => aylaTopNavSamples();

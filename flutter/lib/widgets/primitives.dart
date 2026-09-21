@@ -518,6 +518,25 @@ class _AylaSegmentedTabsState extends State<AylaSegmentedTabs> {
   }
 }
 
+/// 共享高亮的造型档位。
+///
+/// web 用「同一个组件 + 变体类」表达两种造型：
+/// - [nav] = `.auroraqua-nav-highlight`（auroraqua.css 175–185）：`inset: 0`、
+///   `--nav-active-bg` 冰蓝渐变底 + `--glass-shadow-nav` + 1px `--glass-border`；
+///   尺寸由宿主按钮决定，跨项迁移 300ms；
+/// - [rail] = `.auroraqua-nav-highlight--rail`（auroraqua.css 217–229）：ServerRail
+///   的**竖条指示条**——`inset: auto; left:0; top:50%; margin-top:-16px;`
+///   `width:3px; height:32px; border-radius:2px; background: var(--glow-500);`
+///   `border: 0; box-shadow: none;` 且 `::after { display: none }`（**无扫光**）。
+///   尺寸/位置**由调用方给定**（3×32 + 垂直居中于所在行）。
+enum AylaNavHighlightVariant {
+  /// 常规选项卡/导航选中胶囊（`--nav-active-bg` 渐变 + 亮边 + 可选扫光）。
+  nav,
+
+  /// ServerRail 竖条指示条（`--glow-500` 纯色，无边框/无阴影/无扫光）。
+  rail,
+}
+
 /// `auroraqua.css .auroraqua-nav-highlight` 175–191：
 /// `inset: 0`、`z-index: -1`（内容之下）、`border-radius: inherit`、
 /// `background: var(--nav-active-bg)`（135deg ice .35 → ice .18）、
@@ -530,7 +549,15 @@ class AylaNavHighlight extends StatefulWidget {
     this.sweepActive = false,
     this.radiusValue,
     this.showBorder = true,
+    this.variant = AylaNavHighlightVariant.nav,
   });
+
+  /// 造型档位（[AylaNavHighlightVariant.nav] 默认 = 全库既有 6 处调用；
+  /// [AylaNavHighlightVariant.rail] = ServerRail 竖条指示条）。
+  final AylaNavHighlightVariant variant;
+
+  /// [AylaNavHighlightVariant.rail] 的默认圆角（auroraqua.css 225 `border-radius: 2px`）。
+  static const double railRadius = 2;
 
   /// 外部（父级 tab/按钮）的 hover 状态——web 的选择器是
   /// `.has-auroraqua-highlight:hover > .auroraqua-nav-highlight::after`：
@@ -615,14 +642,20 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
 
   @override
   Widget build(BuildContext context) {
+    final bool rail = widget.variant == AylaNavHighlightVariant.rail;
     final BorderRadius radius = widget.radiusValue ??
-        (widget.pill ? AylaRadii.pill : BorderRadius.circular(AylaRadii.rInput));
+        (rail
+            ? BorderRadius.circular(AylaNavHighlight.railRadius)
+            : (widget.pill
+                ? AylaRadii.pill
+                : BorderRadius.circular(AylaRadii.rInput)));
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     // 扫光由**父级 hover**驱动（web: `.has-auroraqua-highlight:hover >
     // .auroraqua-nav-highlight::after`）。胶囊自身不接收指针事件
     // （web 的 `pointer-events: none`），所以这里不挂 MouseRegion。
-    final bool shouldSweep = widget.sweep && !reduceMotion;
+    // rail 档另有 `::after { display: none }`（auroraqua.css 229）→ 永不扫光。
+    final bool shouldSweep = widget.sweep && !reduceMotion && !rail;
     if (shouldSweep) {
       if (widget.sweepActive) {
         if (!_sweep.isAnimating && _sweep.value < 1.0) _sweep.forward();
@@ -668,17 +701,22 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
     // [AylaGlassShadow.ring]（只画形状之外）—— **不要**改回 `boxShadow`。
     final Widget surface = DecoratedBox(
       decoration: BoxDecoration(
-        gradient: cssLinearGradient(
-          angleDeg: 135, // --nav-active-bg: linear-gradient(135deg, …)
-          colors: AylaGradients.navActive,
-        ),
+        // rail 档 = `background: var(--glow-500)`（auroraqua.css 226）**纯色**；
+        // nav 档 = `--nav-active-bg` 的 135deg 冰蓝渐变（同文件 182）。
+        gradient: rail
+            ? null
+            : cssLinearGradient(
+                angleDeg: 135, // --nav-active-bg: linear-gradient(135deg, …)
+                colors: AylaGradients.navActive,
+              ),
+        color: rail ? AylaColors.glow500 : null,
         borderRadius: radius,
       ),
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
           // --glass-inset（顶沿 1px 内高光）也在此层内绘制
-          if (widget.sweep && !reduceMotion)
+          if (shouldSweep)
             ClipRRect(
               // overflow: hidden 只作用于扫光
               borderRadius: radius,
@@ -717,7 +755,10 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
           return Stack(
             children: <Widget>[
               surface,
-              // --glass-inset：形状内顶沿 1px 白高光
+              // --glass-inset：形状内顶沿 1px 白高光。
+              // rail 档是 3px 宽的纯色竖条，web 未给它（也没有基础类的 inset）
+              // → 不画，否则 `--glow-500` 会被白色高光冲淡。
+              if (!rail)
               Positioned.fill(
                 child: IgnorePointer(
                   child: DecoratedBox(
@@ -730,7 +771,8 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
               ),
               // 1px 亮边（`--glass-border`）。宿主按钮已画同色边时传
               // showBorder=false 以避免两层重叠（见 showBorder 文档）。
-              if (widget.showBorder)
+              // rail 档 `border: 0`（auroraqua.css 224）→ 无亮边。
+              if (widget.showBorder && !rail)
                 Positioned.fill(
                   child: IgnorePointer(
                     child: DecoratedBox(
