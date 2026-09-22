@@ -1025,29 +1025,35 @@ class _GlassButtonState extends State<GlassButton>
                       data: IconThemeData(color: foreground, size: 18),
                       child: widget.icon!,
                     ),
-                    const SizedBox(width: AylaSpacing.sp2), // gap: var(--sp-2)
+                    // ⚠️ `gap: var(--sp-2)` **只在图标与文字同时存在**时生效——
+                    // CSS 的 `gap` 对单个子元素不产生任何间距。空 label 的图标钮
+                    // （窄屏发帖/评论/房内聊天的发送键）曾因这 8px 多出半个间隙而整体偏左
+                    // 4px（用户 2026-09-21 实报「这三个发送键好歪」）。
+                    if (widget.label.isNotEmpty)
+                      const SizedBox(width: AylaSpacing.sp2),
                   ],
                   // 文字：外层 Flexible(loose) 承接超长省略，内层 Center 保证
                   // 文字自身居中——不用 tight flex（会吃掉主轴空间把字推到左侧，
                   // expand 满宽时可见，实测）。
-                  Flexible(
-                    fit: FlexFit.loose,
-                    child: Center(
-                      widthFactor: 1,
-                      child: Text(
-                        widget.label,
-                        maxLines: 1,
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        style: text.label.copyWith(
-                          color: foreground,
-                          fontSize: widget.fontSize,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
+                  if (widget.label.isNotEmpty)
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: Center(
+                        widthFactor: 1,
+                        child: Text(
+                          widget.label,
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.label.copyWith(
+                            color: foreground,
+                            fontSize: widget.fontSize,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
+                          ),
                         ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1174,7 +1180,9 @@ class _GlassButtonState extends State<GlassButton>
     return Semantics(
       button: true,
       enabled: _enabled,
-      label: widget.semanticLabel ?? widget.label,
+      // 空 label 的图标钮：语义标签只取 semanticLabel（否则会写进一个空串）
+      label: widget.semanticLabel ??
+          (widget.label.isEmpty ? null : widget.label),
       child: Focus(
         // base.css `:focus-visible { outline: 2px solid #F796FF; outline-offset: 2px }`
         onFocusChange: (bool has) => setState(() => _focused = has),

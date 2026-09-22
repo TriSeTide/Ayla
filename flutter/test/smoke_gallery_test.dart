@@ -98,6 +98,27 @@ void main() {
       ),
       findsOneWidget,
     );
+    // 2026-09-21 B1-4：语音频道面板分区
+    expect(
+      find.text(
+        'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-21 B1-5：爱莉语音面板分区
+    expect(
+      find.text(
+        'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-21 B1-6：语音房整页分区
+    expect(
+      find.text(
+        'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('登录'), findsWidgets);
     expect(find.text('注册'), findsOneWidget);
   });

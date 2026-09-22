@@ -381,7 +381,27 @@ void main() {
     expect(enters, 0);
   });
 
-  testWidgets('active：描边 --indigo-700（且压过 hover 的 .65）', (WidgetTester tester) async {
+  testWidgets('mine（我在其中）：描边 --indigo-700（app.css:2832）',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    await tester.pumpWidget(
+      host(
+        const AylaVoiceChannelCard(
+          channel: AylaVoiceCardData(
+            id: 'x',
+            name: '深夜电台', // 卡名别也叫「我在其中」，否则与 foot 胶囊文案撞车
+            visibility: AylaPostVisibility.public,
+            mine: true,
+          ),
+        ),
+      ),
+    );
+    // `.voice-channel-card.mine { border-color: var(--indigo-700) }`
+    expect(cardBorder(tester, 0), AylaColors.indigo700);
+    expect(find.text('我在其中'), findsOneWidget); // foot 占位胶囊
+  });
+
+  testWidgets('active：描边 --indigo-700（状态，不是悬停）', (WidgetTester tester) async {
     setViewport(tester, const Size(1200, 700));
     await tester.pumpWidget(
       host(const AylaVoiceChannelCard(channel: basic, active: true)),
@@ -392,14 +412,44 @@ void main() {
     expect(cardBorder(tester, 0), AylaColors.indigo700);
   });
 
-  testWidgets('hover：描边 → rgba(157,191,230,.65)（voice.css 543–545）',
+  testWidgets('hover = 库内统一卡片悬停：**不改边色**，只上浮 2px + 换 --glass-shadow-hover',
       (WidgetTester tester) async {
+    // 用户 2026-09-21 裁决：web 的 `.voice-hub .voice-channel-card:hover { border-color:
+    // rgba(157,191,230,.65) }`（voice.css:543–545）是 **web 端错误**（整个 web 的卡片本应复用
+    // 同一套悬停）⇒ Flutter **不复刻**该 hover 换边色。统一悬停 = auroraqua.css:28–52 的
+    // 「`translate: 0 -2px` + `box-shadow: --glass-shadow-hover`」；press `.99` 归
+    // AylaCardInteraction（见下一条用例）。
     setViewport(tester, const Size(1200, 700));
     await tester.pumpWidget(host(const AylaVoiceChannelCard(channel: basic)));
     expect(cardBorder(tester, 0), AylaColors.glassBorder);
+    expect(tester.widget<GlassSurface>(cardSurface(0)).shadow, AylaShadows.glass);
+    final double topBefore = tester.getRect(cardSurface(0)).top;
 
     await hover(tester, cardSurface(0));
-    expect(cardBorder(tester, 0), AylaColors.ice500.withValues(alpha: 0.65));
+
+    expect(cardBorder(tester, 0), AylaColors.glassBorder); // 悬停**不改边色**
+    expect(
+      tester.widget<GlassSurface>(cardSurface(0)).shadow,
+      AylaShadows.glassHover, // 换 hover 阴影
+    );
+    await tester.pump(const Duration(milliseconds: 400)); // 300ms 位移走完
+    expect(tester.getRect(cardSurface(0)).top, closeTo(topBefore - 2, 0.5));
+  });
+
+  testWidgets('press：scale .99（卡片族共用；不是悬停态）', (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    await tester.pumpWidget(host(const AylaVoiceChannelCard(channel: basic)));
+    final TestGesture gesture =
+        await tester.startGesture(tester.getCenter(cardSurface(0)));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(
+      tester
+          .widgetList<AnimatedScale>(find.byType(AnimatedScale))
+          .any((AnimatedScale s) => (s.scale - 0.99).abs() < 0.001),
+      isTrue,
+    );
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 250));
   });
 
   testWidgets('键盘：聚焦出 ice-500 焦点环（2px、画在形状外、不占布局）+ Enter 进房',
@@ -550,6 +600,28 @@ void main() {
     demo.setState(() => uiReveal = true);
     await tester.pump();
     expect(find.byType(AylaRevealItem), findsNWidgets(2));
+  });
+
+  testWidgets('列表：「我在其中」只有一张 ⇒ 只有它的卡带描边（用户 2026-09-21）',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1000, 700));
+    await tester.pumpWidget(
+      host(
+        AylaVoiceChannelList(
+          channels: <AylaVoiceCardData>[
+            const AylaVoiceCardData(id: '1', name: '普通一'),
+            const AylaVoiceCardData(id: '2', name: '深夜电台', mine: true),
+            const AylaVoiceCardData(id: '3', name: '普通二'),
+          ],
+          currentChannelId: '2', // mine 同时是当前频道
+          columns: 2,
+        ),
+      ),
+    );
+    expect(cardBorder(tester, 0), AylaColors.glassBorder);
+    expect(cardBorder(tester, 1), AylaColors.indigo700); // 唯一带描边的卡
+    expect(cardBorder(tester, 2), AylaColors.glassBorder);
+    expect(find.text('我在其中'), findsOneWidget); // 全列表只有一张
   });
 
   testWidgets('列表 active 与 joining 透传：currentChannelId 命中者描边 indigo-700',

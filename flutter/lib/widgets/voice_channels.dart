@@ -33,8 +33,11 @@
 ///
 /// ## 交互事实
 /// - 整卡可点（`role="button" tabIndex={0}`，`Enter`/`Space` 同义，tsx 21–24）→
-///   [AylaCardInteraction]（hover 上浮 2 / press .99）+ `focusRingColor: --ice-500`
-///   （`voice.css:547/718`、`typed-result-cards.css:68`）；
+///   [AylaCardInteraction]（**库内统一卡片悬停**：hover 上浮 2 + `--glass-shadow-hover`、
+///   press `.99`）+ `focusRingColor: --ice-500`（`voice.css:547/718`、
+///   `typed-result-cards.css:68`）；
+///   ⚠️ web 另写的 `.voice-hub .voice-channel-card:hover { border-color: rgba(157,191,230,.65) }`
+///   （`voice.css:543–545`）被用户判定为 web 端错误 ⇒ **不复刻**（悬停不改边色）；
 /// - foot 的加入钮先 `stopPropagation()` 再进房（tsx 41）→ Flutter 里内层按钮天然赢下
 ///   手势竞技场，卡片的 `onTap` **不会**触发（已用测试锁死这条）；
 /// - `joining`：卡片 `aria-disabled` → `opacity .7` + 不可点；按钮 disabled（`.55`）+「加入中…」。
@@ -277,22 +280,31 @@ class AylaVoiceChannelCard extends StatelessWidget {
       ],
     );
 
-    // 只挂一次交互壳：卡面材质与描边色都跟着 hover 走
-    // （web：`.voice-hub .voice-channel-card:hover { border-color: rgba(157,191,230,.65) }`、
-    //  `.active { border-color: --indigo-700 }`——两条同特异性，`.active` 在后 ⇒ 它优先）。
+    // 悬停 = **库内统一的卡片悬停**（用户 2026-09-21 裁决，勿照 web 改回）：
+    //   auroraqua.css:28–52 的卡片族只给「`translate: 0 -2px` + `box-shadow: --glass-shadow-hover`」
+    //   （`:active { translate: 0 0; scale: .99 }` 由 [AylaCardInteraction] 承载）。
+    // ⚠️ web 另外给语音卡单独加了一条
+    //   `.voice-hub .voice-channel-card:hover { border-color: rgba(157,191,230,.65) }`
+    //   （voice.css:543–545，`.group-voice` 与 typed-result 同款）——用户判定那是 **web 端的错误**：
+    //   整个 web 的卡片本应复用同一套悬停，故 Flutter 侧**不实现这条 hover 换边色**，
+    //   描边在任何悬停态都保持 `--glass-border`。
+    // 描边 `--indigo-700` 是 **`.mine`（我在其中）卡特有**的状态色，两条规则都要实现：
+    //   · `app.css:2832`  `.voice-channel-card.mine { border-color: var(--indigo-700) }`（基类）
+    //   · `voice.css:557–559`（hub）/ `:728–730`（group-voice）/ typed-result 的 `.active`
+    //   两者在真实数据里通常重合（你在哪个频道，哪个频道就是 active），但语义不同 ⇒ **或** 关系。
+    // ⚠️ 用户 2026-09-21 明确指出：带边框的就是「我在其中」那张卡，且**同时最多只有一张**。
     Widget body(BuildContext context, bool hovered) {
-      final Color borderColor = active
+      final Color borderColor = (active || channel.mine)
           ? AylaColors.indigo700
-          : (hovered
-              ? AylaColors.ice500.withValues(alpha: 0.65)
-              : AylaColors.glassBorder);
+          : AylaColors.glassBorder;
       // `[aria-disabled="true"] { cursor: default; opacity: .7 }`（外观保留）
       return Opacity(
         opacity: joining ? 0.7 : 1,
         child: GlassSurface(
           radiusOverride: radius,
           blur: AylaGlass.blurCard, // --glass-filter: blur(24px) saturate(1.4)
-          shadow: AylaShadows.glass, // --glass-shadow
+          // 悬停换成 `--glass-shadow-hover`（卡片族统一悬停的另一半）
+          shadow: hovered ? AylaShadows.glassHover : AylaShadows.glass,
           borderOverride: Border.all(color: borderColor),
           padding: const EdgeInsets.all(AylaSpacing.sp3), // padding: var(--sp-3)
           child: card,
@@ -608,8 +620,8 @@ class AylaVoiceControls extends StatelessWidget {
 ///
 /// - 宽屏舞台（1200）看 `.voice-hub` 的 **4 列**（≥1440 才是 4 列，1200 时是 3 列 —— 见下）；
 /// - 窄屏舞台（375）看 **2 列**；
-/// - 卡片档位：常规 / `mine`（「我在其中」）/ `active`（当前频道边色）/ `joining`（`.7` + 禁用钮）
-///   / `browsing`（「查看语音房」）/ 无 owner、无人数；
+/// - 卡片档位：常规 / **`mine`（「我在其中」= 描边 `--indigo-700`，全站同时最多一张，
+///   且它就是当前频道）/ `joining`（`.7` + 禁用钮）/ `browsing`（「查看语音房」）/ 无 owner、无人数；
 /// - 点卡片与点「加入」都会累加计数（验证两者各自触发一次，不叠加）；
 /// - 空态与「重新加入」形态各一档。
 Widget aylaVoiceChannelSamples() => const _VoiceChannelDemo();
@@ -634,9 +646,11 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
       memberCount: 5,
       visibility: AylaPostVisibility.public,
     ),
+    // ⚠️ 「我在其中」**全站同时最多一张**（用户 2026-09-21 要求）：它同时是 currentChannelId
+    //    ⇒ 描边 `.mine`（app.css:2832）与 `.active`（voice.css:557–559）落在同一张卡上。
     AylaVoiceCardData(
       id: '2',
-      name: '我在的频道（mine）',
+      name: '我在其中（同时是当前频道）',
       ownerNickname: '汐汐',
       memberCount: 3,
       visibility: AylaPostVisibility.friends,
@@ -644,7 +658,7 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
     ),
     AylaVoiceCardData(
       id: '3',
-      name: '当前频道（active）',
+      name: '普通卡（非 mine 非 active）',
       ownerNickname: '小满',
       memberCount: 12,
       visibility: AylaPostVisibility.public,
@@ -665,11 +679,10 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
     ),
     AylaVoiceCardData(
       id: '6',
-      name: '我在其中 + browse 语境',
+      name: 'browse 语境（普通卡：按钮变「查看语音房」）',
       ownerNickname: '爱莉',
       memberCount: 8,
       visibility: AylaPostVisibility.friends,
-      mine: true,
     ),
   ];
 
@@ -688,7 +701,7 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
       width: viewport.width,
       child: AylaVoiceChannelList(
         channels: _channels,
-        currentChannelId: '3',
+        currentChannelId: '2', // 唯一那张 mine 卡同时是当前频道
         joining: joining,
         browsing: browsing,
         columns: columns,
@@ -707,8 +720,9 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
       children: <Widget>[
         _Stage(
           viewport: const Size(1200, 560),
-          label: '宽屏 1200（<1440 ⇒ 3 列；≥1440 才 4 列）· 卡片档位：常规 / mine / active / '
-              '无 owner / 标签 12ch 截断 · 点卡片或「加入」各计一次（$_joinCount 次，最后一次 ${_lastJoin.isEmpty ? '—' : _lastJoin}）',
+          label: '宽屏 1200（<1440 ⇒ 3 列；≥1440 才 4 列）· 卡片档位：常规 / **我在其中（唯一一张，'
+              '描边 --indigo-700）** / 无 owner / 标签 12ch 截断 · 点卡片或「加入」各计一次'
+              '（$_joinCount 次，最后一次 ${_lastJoin.isEmpty ? '—' : _lastJoin}）',
           child: _list(),
         ),
         _Stage(
@@ -727,7 +741,8 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
               // mine + browsing（web：mine && !browsing 才显示「我在其中」）
               _Stage(
                 viewport: const Size(320, 150),
-                label: 'browsing 语境：mine 也走按钮「查看语音房」',
+                label: 'browsing 语境：按钮变「查看语音房」（web 里 mine + browsing 也走按钮、'
+                    '不显示「我在其中」——这里用普通卡演示，保持「最多一张 mine」）',
                 child: AylaVoiceChannelList(
                   channels: <AylaVoiceCardData>[_channels[5]],
                   columns: 1,

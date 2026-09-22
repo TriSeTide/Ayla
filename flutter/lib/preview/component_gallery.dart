@@ -33,6 +33,7 @@ import '../widgets/bottom_tabs.dart';
 import '../widgets/group_top_tabs.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/directory_controls.dart';
+import '../widgets/elysia_voice_panel.dart';
 import '../widgets/privacy_sheet.dart';
 import '../widgets/profile_and_filters.dart';
 import '../widgets/group_card.dart';
@@ -56,8 +57,10 @@ import '../widgets/share.dart';
 import '../widgets/tab_badge.dart';
 import '../widgets/top_nav.dart';
 import '../widgets/voice_channel_create.dart';
+import '../widgets/voice_channel_panel.dart';
 import '../widgets/voice_channels.dart';
 import '../widgets/voice_member_row.dart';
+import '../widgets/voice_room_body.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
 /// 高度按内容收紧——图标区 + 排版区结束约在 1450，余量留到 1700）。
@@ -452,6 +455,36 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '可见性选择器（**复用 AylaVisibilitySelector**：群内创建 group 锁定 + 本群恒勾选）+ 名称输入 + 「建频道」+ 错误行 · 输入 = GlassInput（min-height 36 / 13px / hint「新语音频道名称」/ 64 上限用 formatter 表达以免多出「0/64」计数器 / Enter 提交；圆角是 auroraqua 覆写的 --radius-input 12，app.css 的 pill 不生效；focus → glow-500 边 + --glow-shadow）· 两个挂载点（ChannelSidebar / CreateFab）**都在 AylaCreateSheet 内** ⇒ private.css 的 sheet 作用域恒生效：输入与按钮 width 100% + 输入 margin-bottom sp3（与容器 gap 8 叠加 = 与按钮 20）· 空名拦截「频道名称不能为空」（不发请求）· 防重入守卫 + busy 禁用 · 多选→单值 public→friends→group · 成功清空名称 + onCreated（外层关浮层）、失败显示文案并**保留表单** · 请求与列表插入由页面层 onSubmit 注入（web 是组件内直接调 API + store）· **样张可交互**：空名提交看报错、填名提交看清空与计数、第三个表单固定失败看文案',
             child: aylaVoiceChannelCreateSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- voice 域第四批（2026-09-21：B1-4） ----------
+          _Section(
+            title:
+                'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
+            source:
+                '面板 = head（标题 **16/700**（h3 默认 bold，base.css 只重置 margin）+ 人数 12/secondary，**baseline 对齐**）+ 成员列表（`gap 8`）+ 控制条 · 材质 = radius 16 / --glass-bg / 1px 亮边 / blur24 sat1.4 / --glass-shadow / padding 16 / **max-width 560**（app.css）· **房间上下文档** `roomContext`（voice.css 32–56）：max-width→none、成员列表 `flex:1; min-height:0` 自己滚动、其余子项不收缩 · **材质归属档** `ownMaterial`（auroraqua 584–610）：宽屏房间面板透明（材质交外层卡）、窄屏外层卡透明（材质归面板）· 成员行复用 AylaVoiceMemberRow（isSelf/isElysia/展示投影注入）· 房主操作行（两个 `.btn.btn-ghost`「踢出/转让房主」，该类**无 CSS** ⇒ 4px 间距来自 JSX 空白；busy 时**两个一起** disabled + 当前行「处理中…」；失败静默）· 分页复用 AylaDirectoryLoadMore（retainCompletedSpace=false）· 控制条复用 AylaVoiceControls · 面板内只留两条纯列表规则：自己置顶兜底 / busy 管理 · **样张可交互**：普通档（拖音量条、点喇叭/麦克风）、房主档（点踢出看「处理中…」）、房间档（固定高 420 + 成员列表自带滚动 + **面板透明**：web 的 `.voice-room-voice-card` 自身无材质声明，宽屏内外两层都透明 ⇒ 整列浮在极光背景上）',
+            child: aylaVoiceChannelPanelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- voice 域第五批（2026-09-21：B1-5） ----------
+          _Section(
+            title:
+                'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
+            source:
+                '⚠️ **web 里该组件没有挂载点**（只有 hook + vitest）⇒ 本画布是唯一视觉验收面 · 收起档 = 单个 .btn-glow「爱莉语音」+ `.collapsed`（padding **sp3** + `align-items: flex-start`）· 展开档 = head（`.elysia-voice-head` **align-items: center**（B1-4 那个面板是 baseline，别抄错）+ 标题 16/700 + `.msg-action-btn`「收起」）+ 未接入态（`.voice-list-empty`：「接入中…」/「等待接入」）+ 输入行（`input.voice-create-input` 同 B1-3 档 + 2000 上限用 formatter + Enter 提交 + primary「发送」）+ 行动区（终态 → primary「重新发起」；否则 `.voice-leave-btn` = outlineDestructive「结束通话」）· busy 时三按钮一起禁用 · 空文本不受理则**不清空**输入 · 材质 = radius 16 + --glass-bg + blur24 sat1.4 + --glass-shadow + max-width 560 · **样张可交互**：点「爱莉语音」展开、输入后点发送/Enter、点结束通话看终态档切换、开关 busy',
+            child: aylaElysiaVoicePanelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- voice 域收尾（2026-09-21：B1-6，voice 域 8/8） ----------
+          _Section(
+            title:
+                'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
+            source:
+                '**语音房整页（进房态）· voice 域最后一件** · 两形态：**≥769** body padding sp4 + gap sp4，layout = **grid** `minmax(320,1fr) minmax(320, min(380,45%))`（+ `@container voice-room (max-width:655px)` → 单列两行），三分区各自动画（head 上入 / chat 右入 / voice 下入 300ms），两张卡自带材质 + chat head/列表常驻 + 开关隐藏；**≤768** 无 padding、head 只有下边框、上下堆叠、聊天 = 底部输入卡 + **上方浮层**（h300、只有上两角 radius 16、`--glass-bg-strong` + blur18、opacity/translateY(12)/visibility 240ms）· **材质归属按断点切换**：宽屏材质在 `.voice-room-voice-card`、面板透明；窄屏外层透明、材质归 `.voice-panel`（样张里 builder 参数会显示 false/true）· head 六件：返回 · 标题（Fredoka 18）· 可见性标签（容器 16ch、标签 12ch 同 `.post-card-tag` 档）· 收藏 · 分享 · 「删除房间」（⚠️ web 的 `.btn-danger` **全 CSS 无定义** ⇒ 实渲染是无材质的裸 `.btn`，已按用户裁决照实复刻）· 房内聊天：消息行（sender 700 secondary + 「图片」占位不渲染文本 + 缩略图 120×80）+ 历史控件 + 输入条（工具钮 40 pill / `min-height 40` `max-height 140` 的输入 / primary 发送 / 窄屏开关）+ **未读徽标**（18/11/600/`--pink-500`/99+；规则：新 id + 聊天栏收起 + 非自己才 +1，展开清零，seenIds 上限 1000）+ `.live-form-error` · **样张可交互**：发文本（空文本禁用发送）、点图片钮、开关「下一次发送失败」看错误行、点右下 ▲ 展开窄屏浮层看未读红点',
+            child: aylaVoiceRoomBodySamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
