@@ -22,6 +22,8 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show TextInputFormatter;
+import 'package:flutter/services.dart'
+    show KeyDownEvent, LogicalKeyboardKey;
 import 'package:flutter/widget_previews.dart';
 
 import 'app_theme.dart';
@@ -285,11 +287,17 @@ abstract final class AylaGlassShadow {
   /// [shadows] 变化时按 CSS `transition: box-shadow` 语义插值；
   /// 两侧都有阴影时不会出现「blur 从 0 起步」的硬边（形状内部始终被挖空）。
   /// [shadows] 为空 = 不画（web 未声明 box-shadow 的构件）。
+  ///
+  /// [curve] 是插值缓动：CSS 里各构件的 `transition` 缓动**不统一**——按钮组用
+  /// `--auroraqua-ease`（= `ease`，本参数默认值，既有调用点全部不变），
+  /// 而 `.session-activity-ball` 用的是 `--ease-out`（`shell.css:495–496`，150ms）
+  /// ⇒ 该处显式传 [AylaCurves.easeOut]。
   static Widget animatedRing({
     required Widget child,
     required BorderRadius radius,
     required List<BoxShadow> shadows,
     Duration duration = AylaDurations.auroraqua,
+    Cubic curve = AylaCurves.auroraqua,
   }) {
     if (shadows.isEmpty) return child;
     return Stack(
@@ -301,6 +309,7 @@ abstract final class AylaGlassShadow {
               radius: radius,
               shadows: shadows,
               duration: duration,
+              curve: curve,
             ),
           ),
         ),
@@ -350,11 +359,13 @@ class _AnimatedShadowRing extends StatelessWidget {
     required this.radius,
     required this.shadows,
     required this.duration,
+    this.curve = AylaCurves.auroraqua,
   });
 
   final BorderRadius radius;
   final List<BoxShadow> shadows;
   final Duration duration;
+  final Cubic curve;
 
   @override
   Widget build(BuildContext context) {
@@ -368,7 +379,7 @@ class _AnimatedShadowRing extends StatelessWidget {
     return TweenAnimationBuilder<List<BoxShadow>>(
       tween: _ShadowListTween(end: shadows),
       duration: duration,
-      curve: AylaCurves.auroraqua,
+      curve: curve,
       builder: (BuildContext context, List<BoxShadow> value, Widget? _) {
         return CustomPaint(
           painter: _OuterShadowPainter(radius: radius, shadows: value),
@@ -563,6 +574,8 @@ class AylaCardInteraction extends StatefulWidget {
     this.onTap,
     this.semanticLabel,
     this.interactive = true,
+    this.focusRingColor,
+    this.focusRingRadius = const BorderRadius.all(Radius.circular(AylaRadii.rCard)),
   });
 
   /// 内容构建器（`hovered` 用于切换阴影与其它 hover 态）。
@@ -577,6 +590,25 @@ class AylaCardInteraction extends StatefulWidget {
   /// 是否参与卡片族交互动效（hover 上浮 2px / 按下 scale .99）。
   final bool interactive;
 
+  /// `:focus-visible` 环色；**null = 不画、也不进 tab 序列**（保持既有组件现状）。
+  ///
+  /// 事实源：卡片族的焦点环是**逐域声明**的，且都用 **`--ice-500`** ——
+  /// `voice.css:547`（`.voice-hub .voice-channel-card`）、`voice.css:718`
+  /// （`.group-voice`）、`typed-result-cards.css:68`；
+  /// `outline: 2px solid var(--ice-500); outline-offset: 2px`（环跟随卡片自身 radius 16）。
+  ///
+  /// ⚠️ 环画在**形状之外**（`left/top/right/bottom: -4` 的 2px 描边 = offset 2 + width 2），
+  /// **不参与布局** —— 库内 `AylaPressScale` 的环是内嵌 Container，会让元素长大 4px，
+  /// 卡片上会明显撑大（`13-*` §6.21 已记录该差异）。
+  ///
+  /// 传了环色即表示**该卡参与键盘可达性**：`tab` 可聚焦 + `Enter` / `Space` 触发 [onTap]
+  /// （web 卡片是 `role="button" tabIndex={0}` + `onKeyDown` 同语义，如
+  /// `VoiceChannelCard.tsx:21–24`）。
+  final Color? focusRingColor;
+
+  /// 环的内侧圆角（默认 `--radius-card` 16；环自身半径 = 该值 + 2）。
+  final BorderRadius focusRingRadius;
+
   @override
   State<AylaCardInteraction> createState() => _AylaCardInteractionState();
 }
@@ -584,6 +616,54 @@ class AylaCardInteraction extends StatefulWidget {
 class _AylaCardInteractionState extends State<AylaCardInteraction> {
   bool _hovered = false;
   bool _pressed = false;
+  bool _focused = false;
+
+  /// `outline` 环层：画在形状之外、不吃指针（等价 CSS outline）。
+  Widget _focusRing() {
+    final Color? ring = widget.focusRingColor;
+    if (ring == null || !_focused) return const SizedBox.shrink();
+    return Positioned(
+      left: -4,
+      top: -4,
+      right: -4,
+      bottom: -4,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: ring, width: 2), // outline: 2px
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(widget.focusRingRadius.topLeft.x + 2),
+              topRight: Radius.circular(widget.focusRingRadius.topRight.x + 2),
+              bottomLeft:
+                  Radius.circular(widget.focusRingRadius.bottomLeft.x + 2),
+              bottomRight:
+                  Radius.circular(widget.focusRingRadius.bottomRight.x + 2),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 键盘可达（`tab` + `Enter` / `Space`）与焦点环；未传环色时原样返回。
+  Widget _withFocus(Widget child) {
+    if (widget.focusRingColor == null) return child;
+    return Focus(
+      onFocusChange: (bool has) => setState(() => _focused = has),
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        final bool activate = event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.space;
+        if (!activate || widget.onTap == null) return KeyEventResult.ignored;
+        widget.onTap!();
+        return KeyEventResult.handled;
+      },
+      child: Stack(
+        clipBehavior: Clip.none, // 环画在卡片之外，不能被裁
+        children: <Widget>[_focusRing(), child],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -642,20 +722,22 @@ class _AylaCardInteractionState extends State<AylaCardInteraction> {
       );
     }
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() {
-        _hovered = false;
-        _pressed = false;
-      }),
-      child: Listener(
-        onPointerDown: (_) => setState(() => _pressed = true),
-        onPointerUp: (_) => setState(() => _pressed = false),
-        onPointerCancel: (_) => setState(() => _pressed = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          child: content,
+    return _withFocus(
+      MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() {
+          _hovered = false;
+          _pressed = false;
+        }),
+        child: Listener(
+          onPointerDown: (_) => setState(() => _pressed = true),
+          onPointerUp: (_) => setState(() => _pressed = false),
+          onPointerCancel: (_) => setState(() => _pressed = false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            child: content,
+          ),
         ),
       ),
     );
@@ -677,6 +759,12 @@ enum GlassButtonVariant {
   /// `:hover:not(:disabled) → filter: brightness(1.06)`。
   /// 用于确认删除等危险操作（ConfirmDialog 的确认键、群管理类操作）。
   destructive,
+
+  /// `.voice-leave-btn`（app.css 3108–3112）：**透明底 + `--destructive` 字 +
+  /// 1px `--destructive` 边**，无阴影（`.btn` 基础块本身不声明 background/box-shadow）。
+  /// 与 [destructive]（红**实底**）不是一档；2026-09-21 由 voice 域第一批按
+  /// 「先加档位、不新造」补入。
+  outlineDestructive,
 }
 
 /// GlassButton —— 严格照 web CSS 实现的三类按钮。
@@ -708,6 +796,7 @@ class GlassButton extends StatefulWidget {
     this.minHeight = 40,
     this.minWidth,
     this.padding = const EdgeInsets.symmetric(horizontal: AylaSpacing.sp6),
+    this.fontSize = 14,
     this.expand = false,
     this.semanticLabel,
     this.glowHover = false,
@@ -739,6 +828,12 @@ class GlassButton extends StatefulWidget {
 
   /// `.btn { padding: 0 24px }`；认证页可传 padding-inline 16。
   final EdgeInsetsGeometry padding;
+
+  /// `.btn { font-size: 14px }`。
+  ///
+  /// 逐处覆写的档位：`.voice-join-btn` **13**、`.voice-rejoin-btn` **12**
+  /// （app.css 623–628 区的 `voice.css` 覆写 / app.css 3114–3118）。
+  final double fontSize;
 
   /// `.auth-submit { width: 100% }`。
   final bool expand;
@@ -834,6 +929,17 @@ class _GlassButtonState extends State<GlassButton>
         borderColor = null;
         gradient = null;
         shadow = const <BoxShadow>[]; // 空 = 无阴影（web 未声明 box-shadow）
+      case GlassButtonVariant.outlineDestructive:
+        // `.voice-leave-btn { background: transparent; color: var(--destructive);
+        //  border: 1px solid var(--destructive) }`（app.css 3108–3112）
+        // ⚠️ web 的 `transparent` 就是 `rgba(0,0,0,0)`，且本档**没有** hover 换底
+        //    （`.voice-leave-btn` 不声明 :hover）⇒ 不存在「透明黑插值闪灰」问题，
+        //    故按字面写 Colors.transparent（不是同色相近似）。
+        background = Colors.transparent;
+        foreground = AylaColors.destructive;
+        borderColor = AylaColors.destructive;
+        gradient = null;
+        shadow = const <BoxShadow>[]; // `.btn` 基础块未声明 box-shadow
     }
 
     final BorderRadius rInput =
@@ -935,7 +1041,7 @@ class _GlassButtonState extends State<GlassButton>
                         overflow: TextOverflow.ellipsis,
                         style: text.label.copyWith(
                           color: foreground,
-                          fontSize: 14,
+                          fontSize: widget.fontSize,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.2,
                         ),
@@ -983,8 +1089,11 @@ class _GlassButtonState extends State<GlassButton>
         // --glass-inset（顶沿 1px 内高光）：`.btn-primary` 的
         // `--glass-shadow-compact`、`.btn-ghost` 的 `--glass-shadow-button[-hover]`
         // 两个 token 都含 `var(--glass-inset)`（tokens.css 126–128）。
-        // `.btn-glow` 用的是 `--glow-shadow`（不含 inset），故不叠加。
-        if (widget.variant != GlassButtonVariant.glow)
+        // `.btn-glow` 用的是 `--glow-shadow`（不含 inset），故不叠加；
+        // 新档 `outlineDestructive` 的 `.btn` 基础块**没有任何 box-shadow**
+        // ⇒ 也不该有内高光（`--glass-inset` 只随阴影 token 出现）。
+        if (widget.variant != GlassButtonVariant.glow &&
+            widget.variant != GlassButtonVariant.outlineDestructive)
           Positioned.fill(
             child: IgnorePointer(
               child: LayoutBuilder(

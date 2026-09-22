@@ -10,30 +10,16 @@
 library;
 
 import 'media_kind.dart';
+// ⚠️ `export` 只对「导入 post.dart 的人」生效；本文件自身也用到这些名字，
+// 故 import 与 export 两件都要写（与 media_kind.dart 同一写法）。
+import 'visibility.dart';
 
 // 媒体种类定义在 `media_kind.dart`（2026-09-20 抽出，供 core/media 复用）；
-// 这里 re-export，保持既有 `import '.../post.dart'` 调用点不变。
+// 可见性（AylaPostVisibility / aylaVisibilityLabels）定义在 `visibility.dart`
+// （2026-09-21 抽出，供语音/直播域共用——web 的联合与生成函数本就是跨域共用件）。
+// 两者都在这里 re-export，保持既有 `import '.../post.dart'` 调用点不变。
 export 'media_kind.dart';
-
-/// 帖子可见性（`types.ts:1227`：public / friends / group）。
-///
-/// 注意：**group 是独立维度**（白名单 allowed_groups），与 public/friends 可叠加；
-/// 后端单值字段只是准入映射，标签由 [aylaVisibilityLabels] 生成。
-enum AylaPostVisibility {
-  public,
-  friends,
-  group;
-
-  static AylaPostVisibility? parse(String? raw) => switch (raw) {
-        'public' => AylaPostVisibility.public,
-        'friends' => AylaPostVisibility.friends,
-        'group' => AylaPostVisibility.group,
-        _ => null,
-      };
-
-  /// 后端字段值。
-  String get wire => name;
-}
+export 'visibility.dart';
 
 /// 媒体描述符（`MediaDescriptor`）。
 class AylaMediaDescriptor {
@@ -352,36 +338,6 @@ class AylaPostPage {
   }
 }
 
-/// 可见性标签（web `utils/visibility.ts getVisibilityLabels` 逐条同源）。
-///
-/// - public → ["公开"]；friends → ["好友"]（二者互斥，最多一个）；
-/// - `allowedGroupNames` → 白名单群名（**可与公开/好友叠加**：「公开+群」）；
-/// - group 可见且无白名单名 → 回退 `groupName`（旧数据兼容）；
-/// - 一条都生不出来时按 visibility 兜底（friends→好友 / public→公开 / 否则群可见）。
-List<String> aylaVisibilityLabels({
-  AylaPostVisibility? visibility,
-  List<String> allowedGroupNames = const <String>[],
-  String? groupName,
-}) {
-  final List<String> labels = <String>[];
-  if (visibility == AylaPostVisibility.public) {
-    labels.add('公开');
-  } else if (visibility == AylaPostVisibility.friends) {
-    labels.add('好友');
-  }
-  if (allowedGroupNames.isNotEmpty) {
-    labels.addAll(allowedGroupNames);
-  } else if (visibility == AylaPostVisibility.group &&
-      (groupName ?? '').isNotEmpty) {
-    labels.add(groupName!);
-  }
-  if (labels.isEmpty) {
-    if (visibility == AylaPostVisibility.friends) return <String>['好友'];
-    if (visibility == AylaPostVisibility.public) return <String>['公开'];
-    return <String>['群可见'];
-  }
-  return labels;
-}
 
 List<String> _stringList(Object? raw) {
   if (raw is! List) return const <String>[];

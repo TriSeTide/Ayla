@@ -51,9 +51,13 @@ import '../widgets/post_editor.dart';
 import '../widgets/primitives.dart';
 import '../widgets/reveal.dart';
 import '../widgets/server_rail.dart';
+import '../widgets/session_activity.dart';
 import '../widgets/share.dart';
 import '../widgets/tab_badge.dart';
 import '../widgets/top_nav.dart';
+import '../widgets/voice_channel_create.dart';
+import '../widgets/voice_channels.dart';
+import '../widgets/voice_member_row.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
 /// 高度按内容收紧——图标区 + 排版区结束约在 1450，余量留到 1700）。
@@ -408,6 +412,46 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '堆叠容器 = fixed right 38（32 + (56-44)/2）/ bottom 100（32 + 56 + sp3）/ column · gap 12 · align end · 容器不吃指针（Flutter 裸 Column 天然等价）· 44px 玻璃钮复用 AylaCornerFab（--glass-bg + blur18 sat1.4 + --card-shadow，hover → strong + 0 2px 12px .18；**过渡 200ms --auroraqua-ease**，因 auroraqua.css 54–94 把 .corner-fab 并入按钮组覆盖 shell.css 的 180ms）· 刷新：iconRetry 20，spinning = ayla-loading-spin 800ms linear infinite（reduced-motion 不转），无回调时按钮照常可点只是无动作 · 回顶：iconArrowUp 20，滚动超过一屏（pixels > 视口高）且命中**主滚动容器**（viewportDimension ≥ 40% 视口高）才浮入（opacity + translateY 8→0，200ms；隐藏态不可点 + 语义排除），点击 smooth 回顶（300ms ease-out；reduced-motion 直切）· 消息钮复用 AylaMessageFab 外观，4s 无点击 → 半贴 translateX(-44px)（200ms --ease-out），半贴点击点出来、展开点击打开快捷栏 · **样张可交互**：滚列表看回顶钮浮入、点刷新看旋转、等 4s 看消息钮半贴',
             child: aylaFabSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- Shell 会话活动悬浮球（2026-09-21：A5） ----------
+          _Section(
+            title:
+                'AylaSessionActivityIndicator（layout/SessionActivityIndicator.tsx 1–181 + shell.css 458–575 / 651–660）',
+            source:
+                '固定层（web position:fixed；right 24 / top 80 / z 55；窄屏 right 16 / top calc(56 + safe-top + 48)）= 语音球 + 直播球 + 收起把手 · 球 44×44：1px --glass-border + **不透明** sakura-100/ice-300 底（字色 grape-700/indigo-700）+ 0 2px 12px rgba(70,91,146,.12)；hover/focus → scale(1.08) + --glow-shadow（150ms --ease-out）——球**不在** auroraqua 按钮组 ⇒ 无 1.02/.98，且**不加**背板模糊（不透明底把 blur(18) 完全盖住，视觉恒为零）· 把手 28×44 玻璃（--glass-bg-strong + blur18 sat1.4，保留）+ `›` 字符 16/w500/line-height 1 · 收起：整组右移 24（窄屏 16 ⇒ 把手贴屏幕右缘）+ 球 translateX(64px) 淡隐 + 图标 rotate(180deg)，全 200ms --ease-out；把手可上下拖（**5px** 阈值 / clamp 8 … 视口高-44-8 / 拖动后抑制合成 click）· 把手 hover 底色 = **透明**（web 的 --glass-bg-hover 全历史未定义 ⇒ 实渲染回落初始值）+ 字色转 --text-primary · **样张可交互**：点把手收起/展开、按住把手上下拖、点球看回调、开关模拟会话进出',
+            child: aylaSessionActivitySamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- voice 域第一批（2026-09-21：B1-1） ----------
+          _Section(
+            title:
+                'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
+            source:
+                '卡片三处上下文（.voice-hub / .group-voice / typed-result-card）的视觉声明**逐字相同** ⇒ 只有一个竖排形态，差异全在容器网格：.voice-hub 2→(≥769)3→(≥1440)4 列 + padding 12/16；.group-voice 恒 2 列 + padding 0 ⇒ 由 List 的 columns/padding 表达，**不设 variant**（app.css 的横排基础卡在真实渲染中从不出现，故不实现）· 卡面 = --glass-bg + 1px 亮边 + blur24 sat1.4 + --glass-shadow + radius 16 + padding 12 + gap 8 · hover 描边 → rgba(157,191,230,.65)（上浮 -2 / 按下 .99 由 AylaCardInteraction 提供）、active → --indigo-700（同特异性在后 ⇒ 压过 hover）· focus-visible 环 = **--ice-500** 2px（画在形状外、不占布局；Enter/Space 同义可进房）· head = 标签组（AylaScrollingTags；来源标签 sakura-300/grape-700、Fredoka 11/ls .8/**max-width 12ch** 实测换算、无字重） + 收藏槽（AylaFavoriteButton compact，调用方注入）· title = mic 14 + 15px/700/1.3 单行滚动 · owner/meta = 12px secondary · foot = 人数 + 加入钮（primary min-height 32 / 13px / padding 0 12），mine&!browsing → 「我在其中」占位胶囊（ice-100 底/indigo-700 字/pill，min-height 32）· joining → 卡片 .7 + 按钮禁用（.55）+「加入中…」· 文案：加入 / 加入中… / 查看语音房（browsing）· 空态 = placeholder 两行（Fredoka 28/600 + 14px secondary）· 控制条 = padding-top 8 + 顶部 1px --glass-border，离开钮走**新增档 GlassButtonVariant.outlineDestructive**（透明底 + destructive 字 + 1px destructive 边、无阴影/无内高光），重新加入（livekit=failed）= primary min-height 28 / 12px · **样张可交互**：点卡或加入钮各计一次、控制条可切 failed 态',
+            child: aylaVoiceChannelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- voice 域第二批（2026-09-21：B1-2） ----------
+          _Section(
+            title:
+                'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
+            source:
+                '行 = 头像 32（AvatarHalo；爱莉走 AvatarCore.elysia 光环，在线由页面层注入）+ 名称 13/w600 单行省略（「我」是名称行内的 11px indigo 子 span）+ 副行 11px（「在频道中」secondary /「已静音」destructive + IconMic 11）+ 操作区（flex:none）= 开关钮 + 音量条 · 开关钮 28 正圆：透明底 / --indigo-700，hover rgba(189,212,233,.35)、.is-off → --text-secondary + rgba(189,212,233,.25)，图标 15；在 auroraqua 按钮组内 ⇒ 200ms + hover 1.02 + active .98 · 音量条 90×20 三层（下→上）：轨道（双色 stops [0,fill,fill,1]：左 --indigo-700、右 ice-300@.55）→ 跳动条（宽 90×levelPct%、`linear-gradient(90deg, --glow-500, --ice-500)`、**80ms --ease-out**、`.is-speaking` 加 `0 0 6px rgba(247,150,255,.55)`）→ slider（轨道透明 4px + 自绘把手 14 圆 / --indigo-700 / 2px #fff 边 / `0 1px 4px rgba(70,91,146,.35)`；用 Flutter Slider 保住拖动/键盘/无障碍语义，divisions 100 = 原生 step 1）· 电平映射 `levelPct = round(min(1, level^0.4)×100)`（0.02→21 / 0.2→53 / 0.5→76）、说话阈值 **0.02** · 自己行 = 麦克风开关 + 本地麦音量（aria-pressed = micEnabled）；远端行 = 喇叭开关 + 播放音量（aria-pressed = locallyMuted，**语义与自身行不同**；locallyMuted 时跳动条归零、辉光消失）· 名称兜底 `user_id` 前 6 位 · **样张可交互**：拖滑块改音量、点开关切 is-off、拖「说话电平」看跳动条按 ^0.4 放大 + 说话辉光',
+            child: aylaVoiceMemberSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- voice 域第三批（2026-09-21：B1-3 第一件） ----------
+          _Section(
+            title:
+                'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
+            source:
+                '可见性选择器（**复用 AylaVisibilitySelector**：群内创建 group 锁定 + 本群恒勾选）+ 名称输入 + 「建频道」+ 错误行 · 输入 = GlassInput（min-height 36 / 13px / hint「新语音频道名称」/ 64 上限用 formatter 表达以免多出「0/64」计数器 / Enter 提交；圆角是 auroraqua 覆写的 --radius-input 12，app.css 的 pill 不生效；focus → glow-500 边 + --glow-shadow）· 两个挂载点（ChannelSidebar / CreateFab）**都在 AylaCreateSheet 内** ⇒ private.css 的 sheet 作用域恒生效：输入与按钮 width 100% + 输入 margin-bottom sp3（与容器 gap 8 叠加 = 与按钮 20）· 空名拦截「频道名称不能为空」（不发请求）· 防重入守卫 + busy 禁用 · 多选→单值 public→friends→group · 成功清空名称 + onCreated（外层关浮层）、失败显示文案并**保留表单** · 请求与列表插入由页面层 onSubmit 注入（web 是组件内直接调 API + store）· **样张可交互**：空名提交看报错、填名提交看清空与计数、第三个表单固定失败看文案',
+            child: aylaVoiceChannelCreateSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

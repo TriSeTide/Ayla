@@ -70,6 +70,34 @@ void main() {
       ),
       findsOneWidget,
     );
+    // 2026-09-21 A5：会话活动悬浮球分区
+    expect(
+      find.text(
+        'AylaSessionActivityIndicator（layout/SessionActivityIndicator.tsx 1–181 + shell.css 458–575 / 651–660）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-21 B1-1：voice 域第一批分区
+    expect(
+      find.text(
+        'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-21 B1-2：voice 成员行（含音量条）分区
+    expect(
+      find.text(
+        'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
+      ),
+      findsOneWidget,
+    );
+    // 2026-09-21 B1-3：建语音频道表单分区
+    expect(
+      find.text(
+        'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('登录'), findsWidgets);
     expect(find.text('注册'), findsOneWidget);
   });
