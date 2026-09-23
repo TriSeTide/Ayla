@@ -38,7 +38,6 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:ui' show PathMetric;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -50,6 +49,7 @@ import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
+import 'dashed_border.dart';
 import 'directory_controls.dart';
 import 'primitives.dart';
 import 'resource_image.dart';
@@ -2398,12 +2398,10 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
-          child: CustomPaint(
+          child: AylaDashedBorder(
             // `border: 1px dashed var(--glass-border)`（group.css 1112 等）
-            foregroundPainter: const _DashedBorderPainter(
-              radius: AylaRadii.rInput,
-              color: AylaColors.glassBorder,
-            ),
+            radius: AylaRadii.rInput,
+            color: AylaColors.glassBorder,
             child: Container(
               height: _SidebarMoreButton.height, // 28
               padding: const EdgeInsets.symmetric(
@@ -2652,42 +2650,6 @@ Path parseMiniSvgPath(String d) {
     }
   }
   return path;
-}
-
-/// 1px 虚线圆角边框（CSS `border: 1px dashed`；Flutter 无 dashed border）。
-///
-/// 段长按浏览器对 1px 边框的常见画法取 **3px 实 / 3px 空**。
-class _DashedBorderPainter extends CustomPainter {
-  const _DashedBorderPainter({required this.radius, required this.color});
-
-  final double radius;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Path outline = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)),
-      );
-    final Paint paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = color;
-    const double dash = 3;
-    const double gap = 3;
-    for (final PathMetric metric in outline.computeMetrics()) {
-      double distance = 0;
-      while (distance < metric.length) {
-        final double end = math.min(distance + dash, metric.length);
-        canvas.drawPath(metric.extractPath(distance, end), paint);
-        distance = end + gap;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter old) =>
-      old.radius != radius || old.color != color;
 }
 
 // ======================= 图标常量 =======================

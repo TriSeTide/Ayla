@@ -55,6 +55,26 @@ String? extractMediaId(String src) {
   return rest.substring(0, slash);
 }
 
+/// 图片加载状态（[ResourceImage.onStateChanged] 的投影）。
+///
+/// web 没有这个回调：调用方若要「失败时把点击路由到重试」只能靠
+/// `ResourceImage.tsx` 96–115 的 `enclosingControl` 捕获（把外层
+/// `button/a[role=button]` 的 click 抢过来重试）。Flutter 没有事件捕获阶段，
+/// 故把状态作为显式接线暴露给需要它的宿主（当前唯一调用点：弹幕图片钮）。
+enum AylaResourceImageState {
+  /// 签名 / 网络加载中（`.resource-image-loading`）。
+  loading,
+
+  /// 已就绪（签名完成或外部 URL 直接可用）。
+  ready,
+
+  /// 加载失败（可重试）。
+  failed,
+
+  /// 完全过期（媒体已永久删除，重试无意义）。
+  expired,
+}
+
 /// 统一图片组件（对应 `ResourceImage`）。
 class ResourceImage extends StatefulWidget {
   const ResourceImage({
@@ -70,6 +90,7 @@ class ResourceImage extends StatefulWidget {
     this.reserveSpaceWhileLoading = true,
     this.previewImage,
     this.ignoreSampleMedia = false,
+    this.onStateChanged,
   });
 
   /// 图片地址（可为 `/api/v1/media/<id>/content` 或外部 URL）。
@@ -114,6 +135,12 @@ class ResourceImage extends StatefulWidget {
   /// [previewImage] 非空时仍以显式注入为准。
   final bool ignoreSampleMedia;
 
+  /// 加载状态变化通知（见 [AylaResourceImageState]）。
+  ///
+  /// 去重后**排到帧后**回调（首帧的 loading 与 `didUpdateWidget` 里的重载都发生在
+  /// build 期，直接回调会让宿主在 build 中 setState）。不传 = 行为与从前完全一致。
+  final ValueChanged<AylaResourceImageState>? onStateChanged;
+
   @override
   State<ResourceImage> createState() => _ResourceImageState();
 }
@@ -128,6 +155,27 @@ class _ResourceImageState extends State<ResourceImage> {
 
   /// 重试计数（web 用 `key={`${resolvedSrc}:${retry}`}` 强制重建 `<img>`）。
   int _retry = 0;
+
+  /// 已上报的状态（去重，避免同一状态反复回调）。
+  AylaResourceImageState? _notified;
+
+  /// 上报加载状态（见 [ResourceImage.onStateChanged]）。
+  void _notifyState() {
+    final ValueChanged<AylaResourceImageState>? callback =
+        widget.onStateChanged;
+    if (callback == null) return;
+    final AylaResourceImageState next = switch (_state) {
+      _State.loading => AylaResourceImageState.loading,
+      _State.ready => AylaResourceImageState.ready,
+      _State.failed => AylaResourceImageState.failed,
+      _State.expired => AylaResourceImageState.expired,
+    };
+    if (_notified == next) return;
+    _notified = next;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) callback(next);
+    });
+  }
 
   @override
   void initState() {
@@ -164,6 +212,7 @@ class _ResourceImageState extends State<ResourceImage> {
         _resolvedUrl = null;
         _originalExpired = false;
       });
+      _notifyState();
       return;
     }
     setState(() {
@@ -171,6 +220,7 @@ class _ResourceImageState extends State<ResourceImage> {
       _resolvedUrl = null;
       _originalExpired = false;
     });
+    _notifyState();
 
     final String? mediaId = extractMediaId(widget.src);
     if (mediaId == null) {
@@ -180,6 +230,7 @@ class _ResourceImageState extends State<ResourceImage> {
         _resolvedUrl = widget.src;
         _state = _State.ready;
       });
+      _notifyState();
       return;
     }
 
@@ -192,13 +243,16 @@ class _ResourceImageState extends State<ResourceImage> {
         _originalExpired = r.originalExpired;
         _state = _State.ready;
       });
+      _notifyState();
     } on MediaExpiredError {
       // 完全过期：媒体已永久删除，重试无意义 → 占位不裂图
       if (!mounted) return;
       setState(() => _state = _State.expired);
+      _notifyState();
     } catch (_) {
       if (!mounted) return;
       setState(() => _state = _State.failed);
+      _notifyState();
     }
   }
 
@@ -297,6 +351,7 @@ class _ResourceImageState extends State<ResourceImage> {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted && _state != _State.failed) {
                 setState(() => _state = _State.failed);
+                _notifyState();
               }
             });
             return widget.fallback ?? const SizedBox.shrink();

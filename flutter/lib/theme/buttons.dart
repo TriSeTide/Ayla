@@ -46,6 +46,28 @@ import 'tokens.dart';
 ///
 /// 按下时 **必须** 覆盖 hover（CSS 中 :active 规则在后）——否则鼠标按住时
 /// 只能看到 1.02、没有按压反馈。
+// ======================= 禁用态：按颜色降透明 =======================
+
+/// `base.css button:disabled { opacity: .55 }` —— **按颜色降透明**（用户 2026-09-22 裁决）。
+///
+/// ⚠️ 不能用整层 `Opacity(.55)` 包住盒子：这些件的盒子里含 `BackdropFilter`（blur 8/18px），
+/// Opacity 叠在它上面会被 Impeller 拒绝并刷屏
+/// （`ImpellerValidationBreak: Contents::SetInheritedOpacity should never be called when
+/// Contents::CanAcceptOpacity returns false`，实测），且**禁用态的变暗并不生效**。
+/// ⇒ .55 落到颜色上（底/边/阴影各乘 .55），内容层单独 Opacity（图标/文字层不含
+/// backdrop-filter ⇒ Impeller 安全）；视觉等价、无层叠冲突。
+/// 首个修复在 `glass.dart` 的 `GlassButton`（同一机制），本文件三处按钮件跟随。
+Color _dimDisabled(Color c, bool enabled) =>
+    enabled ? c : c.withValues(alpha: c.a * 0.55);
+
+/// [BoxShadow] 列表的禁用态降透明（阴影色 ×.55）。
+List<BoxShadow> _dimDisabledShadows(List<BoxShadow> list, bool enabled) => enabled
+    ? list
+    : <BoxShadow>[
+        for (final BoxShadow s in list)
+          s.copyWith(color: _dimDisabled(s.color, enabled)),
+      ];
+
 class AylaPressScale extends StatefulWidget {
   const AylaPressScale({
     super.key,
@@ -269,11 +291,18 @@ class _AylaIconButtonState extends State<AylaIconButton>
       width: widget.size,
       height: widget.size,
       decoration: BoxDecoration(
-        color: background,
+        // 禁用态：颜色降透明（不再套整层 Opacity，见文件内 _dimDisabled 说明）
+        color: _dimDisabled(background, _enabled),
         borderRadius: radius,
-        border: Border.all(color: AylaColors.glassBorder),
+        border: Border.all(color: _dimDisabled(AylaColors.glassBorder, _enabled)),
       ),
-      child: Center(child: widget.icon),
+      child: Center(
+        child: Opacity(
+          // 只对**内容**用 Opacity（图标层不含 backdrop-filter ⇒ Impeller 安全）
+          opacity: _enabled ? 1 : 0.55,
+          child: widget.icon,
+        ),
+      ),
     );
     // auroraqua.css 124–132：`box-shadow: var(--glass-shadow-button)` → hover 换
     // `-hover`；`--glass-inset`（顶沿 1px 内高光）由下面的 AylaGlassInset.over 叠层实现。
@@ -281,9 +310,10 @@ class _AylaIconButtonState extends State<AylaIconButton>
     // `.1` indigo 铺进 `.55` 玻璃面内部（按钮内部发灰，hover 升到 .15 更明显）。
     box = AylaGlassShadow.animatedRing(
       radius: radius,
-      shadows: _hovered && _enabled
-          ? AylaShadows.buttonHover
-          : AylaShadows.button,
+      shadows: _dimDisabledShadows(
+        _hovered && _enabled ? AylaShadows.buttonHover : AylaShadows.button,
+        _enabled,
+      ),
       duration: AylaDurations.button, // auroraqua transition 组 200ms
       child: box,
     );
@@ -368,7 +398,8 @@ class _AylaIconButtonState extends State<AylaIconButton>
           setState(() => _hovered = false);
           if (widget.sweep) _sweep.reverse(); // 移出时 600ms 扫回
         },
-        child: Opacity(opacity: _enabled ? 1 : 0.55, child: box),
+        // 禁用态已改为按颜色降透明（见 _dimDisabled）——不能再套整层 Opacity（Impeller 拒绝叠加 blur）
+        child: box,
       ),
     );
   }
@@ -411,18 +442,29 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
       height: 44,
       decoration: BoxDecoration(
         // hover → glass-bg-strong + 0 2px 12px rgba(70,91,146,.18)
-        color: _hovered && _enabled
-            ? AylaColors.glassBgStrong
-            : GlassConfig.resolveBackground(strong: false),
+        color: _dimDisabled(
+          _hovered && _enabled
+              ? AylaColors.glassBgStrong
+              : GlassConfig.resolveBackground(strong: false),
+          _enabled,
+        ),
         borderRadius: AylaRadii.pill,
-        border: Border.all(color: AylaColors.glassBorder),
+        border: Border.all(color: _dimDisabled(AylaColors.glassBorder, _enabled)),
       ),
-      child: Center(child: widget.icon),
+      child: Center(
+        child: Opacity(
+          opacity: _enabled ? 1 : 0.55, // 只对内容（图标层无 backdrop-filter）
+          child: widget.icon,
+        ),
+      ),
     );
     // 外阴影只画形状之外（2026-09-20 审查 R2；原裸 boxShadow 会染进 .55 玻璃内部）
     box = AylaGlassShadow.animatedRing(
       radius: AylaRadii.pill,
-      shadows: _hovered && _enabled ? AylaShadows.fab : AylaShadows.card,
+      shadows: _dimDisabledShadows(
+        _hovered && _enabled ? AylaShadows.fab : AylaShadows.card,
+        _enabled,
+      ),
       duration: AylaDurations.button,
       child: box,
     );
@@ -455,7 +497,8 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: Opacity(opacity: _enabled ? 1 : 0.55, child: box),
+        // 禁用态已改为按颜色降透明（见 _dimDisabled）——不能再套整层 Opacity（Impeller 拒绝叠加 blur）
+        child: box,
       ),
     );
   }
@@ -667,18 +710,26 @@ class _AylaToolButtonState extends State<AylaToolButton> {
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: background,
+        color: _dimDisabled(background, _enabled),
         borderRadius: toolRadius,
-        border: Border.all(color: border),
+        border: Border.all(color: _dimDisabled(border, _enabled)),
       ),
-      child: Center(child: widget.icon),
+      child: Center(
+        child: Opacity(
+          opacity: _enabled ? 1 : 0.55, // 只对内容（图标层无 backdrop-filter）
+          child: widget.icon,
+        ),
+      ),
     );
     // 外阴影只画形状之外（2026-09-20 审查 R2；原裸 boxShadow 会染进 .55 玻璃内部）
     box = AylaGlassShadow.animatedRing(
       radius: toolRadius,
-      shadows: _hovered && _enabled && !widget.danger
-          ? AylaShadows.glow
-          : AylaShadows.compact,
+      shadows: _dimDisabledShadows(
+        _hovered && _enabled && !widget.danger
+            ? AylaShadows.glow
+            : AylaShadows.compact,
+        _enabled,
+      ),
       duration: AylaDurations.button,
       child: box,
     );
@@ -716,7 +767,8 @@ class _AylaToolButtonState extends State<AylaToolButton> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: Opacity(opacity: _enabled ? 1 : 0.55, child: box),
+        // 禁用态已改为按颜色降透明（见 _dimDisabled）——不能再套整层 Opacity（Impeller 拒绝叠加 blur）
+        child: box,
       ),
     );
   }
@@ -731,7 +783,24 @@ class AylaMsgActionButton extends StatefulWidget {
     this.onPressed,
     this.danger = false,
     this.semanticLabel,
+    this.minWidth,
+    this.minHeight,
   });
+
+  /// 胶囊最小宽度（null = 按内容自适应，web `.msg-action-btn` 的原生行为）。
+  ///
+  /// 2026-09-22 用户裁决新增：控制台资料栏的「保存」键要与「开播」键**同宽对齐**
+  /// （web 的 `.live-owner-start { align-items: stretch }` 只让**槽位**拉伸，而 `.msg-action-btn`
+  /// 是 inline-flex ⇒ 胶囊仍按内容宽；用户画了目标宽度要求改成 96）。
+  ///
+  /// 实现说明：本件的阴影环用 `Stack`（`fit: loose`）⇒ 会把约束**放宽**给面层，
+  /// 单靠外层 `SizedBox(width:)` 拉不宽胶囊（实测：槽位 96、胶囊仍 42）
+  /// —— 必须把最小尺寸**透传到面层**（`AnimatedContainer` 的 constraints）。
+  final double? minWidth;
+
+  /// 胶囊最小高度（null = 按内容自适应）。与 [minWidth] 同一机制与同一裁决：
+  /// 2026-09-22 用户要求控制台资料栏右侧的「保存」键**铺满整列高度**（= 112）。
+  final double? minHeight;
 
   final String label;
   final Widget? icon;
@@ -768,6 +837,15 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
       // 声明同特异性，但它后加载 ⇒ 实际生效值）→ [AylaDurations.button] + [AylaCurves.auroraqua]。
       duration: AylaDurations.button,
       curve: AylaCurves.auroraqua,
+      // 胶囊最小宽（见 [AylaMsgActionButton.minWidth]：阴影环 Stack 会放宽约束，须在这层兜住）
+      constraints: BoxConstraints(
+        minWidth: widget.minWidth ?? 0,
+        minHeight: widget.minHeight ?? 0,
+      ),
+      // `.msg-action-btn { justify-content: center }`：胶囊被拉宽时**内容居中**
+      // （内容 Row 是 mainAxisSize.min，缺这一句会贴在左侧 —— 用户 2026-09-22 实报
+      //  「保存两个字要居中」）
+      alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(
         horizontal: AylaSpacing.sp2,
         vertical: AylaSpacing.sp1,

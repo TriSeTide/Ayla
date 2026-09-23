@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/models/share_payload.dart';
+import '../lib/theme/app_icons.dart' show AylaIcon;
 import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/theme/preview_theme.dart';
 import '../lib/widgets/dialogs.dart' show AylaModalCard;
@@ -571,6 +572,24 @@ void main() {
         tester.widget<AylaIconButton>(find.byType(AylaIconButton)).onPressed,
         isNull,
       );
+    });
+
+    testWidgets('默认 32×32 + 图标 16（与收藏键 compact 统一；用户 2026-09-22 裁决）',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(host(AylaShareButton(onPressed: () {})));
+      final AylaIconButton button =
+          tester.widget<AylaIconButton>(find.byType(AylaIconButton));
+      expect(button.size, 32);
+      expect(tester.getSize(find.byType(AylaIconButton)), const Size(32, 32));
+      expect(tester.widget<AylaIcon>(find.byType(AylaIcon)).size, 16);
+    });
+
+    testWidgets('显式 size: 40 → 复刻 web icon-btn-40 档（图标 18）', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(AylaShareButton(onPressed: () {}, size: 40)),
+      );
+      expect(tester.getSize(find.byType(AylaIconButton)), const Size(40, 40));
+      expect(tester.widget<AylaIcon>(find.byType(AylaIcon)).size, 18);
     });
   });
 }

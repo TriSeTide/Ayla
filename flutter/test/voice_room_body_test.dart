@@ -17,6 +17,7 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/directory_controls.dart';
 import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/primitives.dart' show AylaSourceTag;
 import '../lib/widgets/reveal.dart';
 import '../lib/widgets/voice_room_body.dart';
 
@@ -148,6 +149,49 @@ void main() {
     );
   });
 
+  testWidgets('chat head 材质：**透明底** + 仅下边框（auroraqua 593–599 清零 voice.css 的 --glass-bg）',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    await tester.pumpWidget(host(
+      body(messages: const <AylaVoiceChatMessage>[
+        AylaVoiceChatMessage(id: 'm1', senderNickname: '爱莉', content: '在的'),
+      ]),
+    ));
+    await settle(tester);
+
+    // head 容器 = 「房内聊天」所在的那个带 decoration 的 Container
+    final Finder head = find
+        .ancestor(
+          of: find.text('房内聊天'),
+          matching: find.byWidgetPredicate(
+            (Widget w) => w is Container && w.decoration is BoxDecoration,
+          ),
+        )
+        .first;
+    final Container container = tester.widget<Container>(head);
+    final BoxDecoration decoration = container.decoration! as BoxDecoration;
+    // ⚠️ 用户 2026-09-22 实报「这处造轮子」：此前照 voice.css 抄了 `--glass-bg`
+    // ⇒ 卡面上又叠一层；auroraqua 覆写后实渲染是透明
+    expect(decoration.color, isNull);
+    expect(
+      decoration.border,
+      const Border(bottom: BorderSide(color: AylaColors.glassBorder)),
+    );
+    expect(
+      container.padding,
+      const EdgeInsets.symmetric(
+        horizontal: AylaSpacing.sp4,
+        vertical: AylaSpacing.sp3,
+      ),
+    );
+    // `gap: var(--sp-2)` + `justify-content: space-between`
+    final Row row = tester.widget<Row>(
+      find.descendant(of: head, matching: find.byType(Row)),
+    );
+    expect(row.spacing, AylaSpacing.sp2);
+    expect(row.mainAxisAlignment, MainAxisAlignment.spaceBetween);
+  });
+
   testWidgets('材质归属（宽屏）：面板透明（builder 收 false）、材质在外层卡',
       (WidgetTester tester) async {
     setViewport(tester, const Size(1200, 700));
@@ -177,7 +221,7 @@ void main() {
 
   // ======================= head =======================
 
-  testWidgets('head：标题 Fredoka 18 + 标签 .post-card-tag 档 + 收藏/分享槽',
+  testWidgets('head：标题 Fredoka 18 + 标签共享件 AylaSourceTag + 收藏/分享槽',
       (WidgetTester tester) async {
     setViewport(tester, const Size(1200, 700));
     await tester.pumpWidget(
@@ -199,9 +243,12 @@ void main() {
     expect(find.text('收藏键'), findsOneWidget);
     expect(find.text('分享键'), findsOneWidget);
     final Text tag = tester.widget<Text>(find.text('公开'));
-    expect(tag.style!.fontSize, 11); // `.post-card-tag { font-size: 11px }`
-    expect(tag.style!.fontWeight, FontWeight.w600);
+    // 用户 2026-09-22 裁决：三域统一复用 `AylaSourceTag`（live 徽章档）
+    expect(find.byType(AylaSourceTag), findsWidgets);
+    expect(tag.style!.fontSize, 12); // utility 12（旧 `.post-card-tag` 是 11/w600，已废弃）
+    expect(tag.style!.fontWeight, FontWeight.w400); // 未声明字重 ⇒ 继承 body 400
     expect(tag.style!.fontFamily, AylaFonts.utility); // Space Grotesk
+    expect(tag.style!.color, AylaColors.grape700); // 粉色底上的字色（sakura-300 底）
   });
 
   testWidgets('「删除房间」：房主才有，且是**无材质的裸 .btn**（web `.btn-danger` 未定义）',

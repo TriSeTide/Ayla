@@ -3,6 +3,8 @@
 /// 直接满足组件库的注入契约：
 /// - `AylaPostEditor.onPickMedia` / `onRetryFailedMedia`（签名见组件内定义）；
 /// - `AylaCommentComposer.onPickImages`；
+/// - `AylaDanmakuInput.onPickImage` / `onUploadImage`（弹幕图片：**选与传分开**，
+///   以便上传失败时重传同一份文件、发送失败时复用 `media_id`）；
 /// - `onRemoveMedia` / `onRemoveImage`（`Future<void> Function(AylaPostMediaDraft)`）。
 ///
 /// 页面/组件接线只需一行，例如：
@@ -97,6 +99,42 @@ class AylaMediaActions {
   /// 移除草稿媒体（`DELETE /media/{id}`；异常透传，组件据此报错且不移回）。
   static Future<void> removeDraft(AylaPostMediaDraft draft) =>
       AylaMediaUploader.instance.deleteMedia(draft.mediaId);
+
+  // ---- 弹幕图片的「选 / 传」两步（`AylaDanmakuInput` 的注入契约）----
+  //
+  // web `DanmakuInput`（tsx 84–105）把「选文件」与「上传」分成两步不是偶然：
+  // 上传失败时它把同一份 `File` 留在 `failedImage` 里，「重试图片」重传**同一份文件**
+  // （不重新打开选择器）；发送失败时复用已拿到的 `media_id`（不重传）。
+  // 故这里提供两个一步动作，由组件持有 attempt（文件 + mediaId）并编排重试。
+
+  /// 选**单张**图片（不上传）。
+  ///
+  /// - 用户取消 → 返回 null（不是错误，不伪造文件）；
+  /// - 本地校验失败（类型/空文件/超限）→ 抛 [AylaUploadException]（文案交回组件展示）。
+  static Future<AylaPickedFile?> pickImage() async {
+    final AylaPickResult picked =
+        await AylaMediaPicker.pickImages(multiple: false);
+    final String? error = picked.error;
+    if (error != null) throw AylaUploadException(error);
+    return picked.files.isEmpty ? null : picked.files.first;
+  }
+
+  /// 上传单张图片 → `media_id`（三步受控上传，见 [AylaMediaUploader]）。
+  static Future<String> uploadImage(
+    AylaPickedFile file, {
+    ValueChanged<double?>? onProgress,
+  }) async {
+    final Uint8List bytes = await file.readBytes();
+    final AylaUploadResult uploaded =
+        await AylaMediaUploader.instance.uploadBytes(
+      bytes: bytes,
+      kind: AylaMediaKind.image,
+      mimeType: file.mimeType,
+      onProgress: (AylaUploadProgress progress) =>
+          onProgress?.call(progress.fraction),
+    );
+    return uploaded.mediaId;
+  }
 
   static Future<AylaMediaPickResult> _pick({
     required AylaPickKind kind,

@@ -60,6 +60,13 @@ import '../widgets/voice_channel_create.dart';
 import '../widgets/voice_channel_panel.dart';
 import '../widgets/voice_channels.dart';
 import '../widgets/voice_member_row.dart';
+import '../widgets/danmaku.dart';
+import '../widgets/live_hall.dart';
+import '../widgets/live_rail.dart';
+import '../widgets/live_create.dart';
+import '../widgets/live_owner_panel.dart';
+import '../widgets/live_studio.dart';
+import '../widgets/live_viewers.dart';
 import '../widgets/voice_room_body.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
@@ -485,6 +492,72 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '**语音房整页（进房态）· voice 域最后一件** · 两形态：**≥769** body padding sp4 + gap sp4，layout = **grid** `minmax(320,1fr) minmax(320, min(380,45%))`（+ `@container voice-room (max-width:655px)` → 单列两行），三分区各自动画（head 上入 / chat 右入 / voice 下入 300ms），两张卡自带材质 + chat head/列表常驻 + 开关隐藏；**≤768** 无 padding、head 只有下边框、上下堆叠、聊天 = 底部输入卡 + **上方浮层**（h300、只有上两角 radius 16、`--glass-bg-strong` + blur18、opacity/translateY(12)/visibility 240ms）· **材质归属按断点切换**：宽屏材质在 `.voice-room-voice-card`、面板透明；窄屏外层透明、材质归 `.voice-panel`（样张里 builder 参数会显示 false/true）· head 六件：返回 · 标题（Fredoka 18）· 可见性标签（容器 16ch、标签 12ch 同 `.post-card-tag` 档）· 收藏 · 分享 · 「删除房间」（⚠️ web 的 `.btn-danger` **全 CSS 无定义** ⇒ 实渲染是无材质的裸 `.btn`，已按用户裁决照实复刻）· 房内聊天：消息行（sender 700 secondary + 「图片」占位不渲染文本 + 缩略图 120×80）+ 历史控件 + 输入条（工具钮 40 pill / `min-height 40` `max-height 140` 的输入 / primary 发送 / 窄屏开关）+ **未读徽标**（18/11/600/`--pink-500`/99+；规则：新 id + 聊天栏收起 + 非自己才 +1，展开清零，seenIds 上限 1000）+ `.live-form-error` · **样张可交互**：发文本（空文本禁用发送）、点图片钮、开关「下一次发送失败」看错误行、点右下 ▲ 展开窄屏浮层看未读红点',
             child: aylaVoiceRoomBodySamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- live 域第一批（2026-09-22：B2-1，弹幕三件） ----------
+          _Section(
+            title:
+                'AylaDanmakuList / AylaDanmakuInput / AylaDanmakuOverlay（components/live/Danmaku{List,Input,Overlay}.tsx 139+180+213 行 + danmakuTracks.ts 55 行 + app.css 3671–3827 + live.css 756–784/860–929/1006–1018 + auroraqua.css 347–359/378–383/390/502–523）',
+            source:
+                '**弹幕三件一批 · live 域第一批** · 列表 = `.danmaku-wrap`（组件根，**自身永不持材质**：app.css 3671–3676 只有布局；⚠️ live.css 756–764 给 `.live-room-swipe-item .danmaku-wrap` 的玻璃 + `radius 0 0 12 12` **没有任何渲染面** —— `.live-room-swipe-item` 只在窄屏分支出现（`LiveRoomBody.tsx` 441/468），而 live.css 818–839 的 `@media (max-width:768px)` 又把同元素的 border/background/backdrop-filter/radius 全清零 ⇒ 此前据它做过一档材质，是造轮子，**已删**；宽屏材质归 `<aside class="live-room-side">` 那张卡片（auroraqua 392–400），窄屏实渲染透明 + 仅 `min-height: 96`）+ `.danmaku-list`（padding sp3 + gap sp2）+ 行（**头像 20** + 昵称 **Space Grotesk 12** secondary + 内容 14/1.5）+ 空态 + **新弹幕提示**（`--bubble-elysia` 渐变底 + `--text-on-pink` + pill + `--glow-shadow`，bottom sp3 居中，无 hover）+ 图片钮 **96×64 / radius 8**；⚠️ **失败态照实渲染**（用户 2026-09-22 拍板）：骨架铺满 96×64、「图片加载失败，点击重试」芯片被 `overflow:hidden` 裁掉不可见，且 `ResourceImage.tsx 96–115` 的 `enclosingControl` 语义 ⇒ **点击=重试而不开查看器**（Flutter 用新增的 `ResourceImage.onStateChanged` 判态路由）· 输入条**三档材质**（`narrowCard` ≤768 沉浸态——live.css 768–772 的 `--glass-bg` + blur18 sat1.4 原本在包装层 `.live-room-input` 上，已并入组件／**`sideCard` ≥769 直播侧栏卡内**——auroraqua 347–359 的玻璃材质被 555–567 清零，实渲染 = `margin 12` + `padding 8` + 透明底 + **仅上边框分隔线** + 方角，即用户截图那栏／`base` studio 窄屏——侧栏卡本身透明，只剩 app.css 的 `padding sp3` + 上边框）= 状态行（上传中/两种失败 + 「重试图片」`AylaMsgActionButton`）+ 输入行（`GlassButton(ghost, glowBorderOnHover)` 40×40 图片钮 / `GlassInput` padding 8-12 单行「发条弹幕吧」400 上限 / primary 发送钮 **min-width 72**）+ 元行（`.live-form-error` 或 `计数器 trim/200`）；**图片三步（选/传/发）由页面注入**（`AylaMediaActions.pickImage`/`uploadImage`），组件持 attempt ⇒ 上传失败**重传同一文件**、发送失败**复用 media_id**；发送中**不禁用输入框**（保焦点）· 飘弹幕层 = 只飘**新出现**的弹幕（挂载/切台基线排除历史与重连对账）+ 轨道算法（速度 150px/s、间距 60px、行高 36、轨道 2–10）+ 关键帧 `translateX(calc(-100% - 24px))` 线性 + 上限 80 + reduced-motion 整层不渲染 + `ExcludeSemantics`（aria-hidden）· **样张可交互**：点弹幕图片开全屏查看器（root Overlay）、切「有新弹幕」、输入计数与回车发送、图片上传失败→重试、点「发一条/图片弹幕」看从右向左飘、点「换台」看基线重建',
+            child: aylaDanmakuSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- live 域第二批（2026-09-22：B2-2，大厅卡片 + 网格） ----------
+          _Section(
+            title:
+                'AylaLiveChannelCard / AylaLiveHall（components/live/LiveChannelCard.tsx 53 行 + LiveHall.tsx 45 行 + app.css 3275–3397 + live.css 486–493/559–596/617–655/811–814/1333–1354 + shell.css 619–629 + auroraqua.css 29–52）',
+            source:
+                '**直播大厅（卡片 + 网格）· live 域第二批** · 卡片 = `AylaCardInteraction`（卡片族悬停 `translate 0 -2px` + `--glass-shadow-hover`、按压 .99）+ `GlassSurface`（radius 16 / blur24 sat1.4 / `--glass-shadow`）+ 封面 **16:9**（`--radius-input` / 1px 亮边 / 透明底 / 无封面用 `iconVideo 28` + `--ice-500`）+ 状态徽章三档（**`.live-badge-live` 被 live.css 811–814 后加载覆写为 `--pink-500` 底 + `--surface` 字**；idle/ended = `--ice-100` + secondary）+「爱莉」角标（`--bubble-elysia` 渐变 + `--text-on-pink`）+ **人数角标**（右下玻璃胶囊 `--glass-bg-strong` + blur8 无 saturate；**仅 status==live 且有读数**才渲染，`null` 不渲染、`0` 照常、`1.2k/53k` 紧凑写法）+ 标题（Fredoka 16 / **line-height 1.35 固定行高**）+ 主播名（13/1.4 secondary，`ownerNickname` 优先于 `ownerNames` 兜底）+ 来源标签（**共享件 `AylaSourceTag`**，容器 `max-width: 55%` 滚动）· **收藏键**：compact 32×32 落在封面右上（窄屏 12 / 宽屏 `calc(sp4+sp1)`=20 与徽标同线；点按不触发进房）——⚠️ **卡片上不放转发键**（用户 2026-09-22 追加裁决：首轮按「都要」加过，随后被否决；转发键只在**房头部**）· **卡片等高**（用户 2026-09-22）：web 靠 CSS grid 的 `align-items: stretch` 拉平，Flutter 侧由 `reserveMetaSpace` **恒占位 meta 行**（固定高 `max(13×1.4, 12×body+2×2)`）保证——不能用 `IntrinsicHeight`（卡片含 `LayoutBuilder`，不支持 intrinsics）· 网格：**≤768 → 2 列（+ 上下 padding sp3、卡片 padding sp2）/ ≥769 → 3 列 / ≥1440 → 4 列**、`gap sp4`；用 `Wrap` 表达等宽列（**等高由 `reserveMetaSpace` 预留保证**，等价 web 的 `align-items: stretch`）· 空态 = `placeholder-title`（Fredoka 28/600）+ `placeholder-desc`（14 secondary）+ `padding sp12 0` · **样张可交互**：点卡进入计数、点收藏键切换、三档断点与空态各一格',
+            child: aylaLiveHallSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- live 域第三批（2026-09-22：B2-3，直播侧栏 + 开播选择器） ----------
+          _Section(
+            title:
+                'AylaLiveChannelRail / AylaLiveStartSheet（components/live/LiveChannelRail.tsx 168 行 + LiveStartSheet.tsx 86 行 + live.css 10–29/48–139/232–239/311–423/1356–1370 + auroraqua.css 125–139/175–205/412–454）',
+            source:
+                '**直播侧栏 + 开播选择器 · live 域第三批** · 侧栏 = 240 宽（≤768 → `min(240, 100vw-48)`）+ `margin 12` + `GlassSurface`（radius 16 / blur24 sat1.4 / `--glass-shadow`）；⚠️ `width` 必须用 `UnconstrainedBox` 松掉父级横向紧约束才权威（`SizedBox(width:)` 的 `constraints.enforce` 会被紧父级夹回——实测 420 宿主里变 396）；竖向仍受父约束（web flex 行 `align-items: stretch`）· 操作区 `min-height 54`（与顶栏等高）+ `padding sp2 sp3` + 下边框；两个 36×36 pill 图标钮（返回 / 收起，**不在扫光组** ⇒ `sweep: false`）· 列表 `padding sp3` + `gap sp2`；行 = 封面 **72×16:9**（radius-input / 1px 亮边 / 无封面用 `iconVideo 18` + `--ice-500`；在播时 **8×8 `--pink-500` 圆点** top/right 4）+ 标题 **13/1.35 两行截断**（不是单行滚动）+ 人数角标（utility 11 / ls .3 / lh 1 / gap 2，active → text-primary）+ 删除键（**22×22** pill / `rgba(255,250,251,.72)` / destructive / opacity 0→整行 hover 或自身 focus 显形 / disabled .4）· **选中高亮 = 容器级单实例 + 跨项迁移 300ms**（web 是 `AuroraquaNavHighlight` **裸变体** + 共享 `layoutId`；选中行自身底色被 auroraqua 194–197 清零）· **自动滚到当前项 = CSS `block:"nearest"` 的显式等价**（已可见不动 / 上方顶对齐 / 下方底对齐；`Scrollable.ensureVisible` 的两种 keepVisible 策略都是单向的，不合用）· 收起态**整个组件不渲染**（返回/展开键移到顶栏；`.live-rail-float` 是死 CSS 不复刻）· 底部「新建直播间」= **1px 虚线 `--ice-500`**（复用新共享件 `AylaDashedBorder`，原为 `channel_sidebar` 私有 painter）· 目录页脚由 `directoryFooter` 槽注入 · 开播选择器 = intro（Fredoka 20 + 13 secondary）+ 五态（加载/列表失败 alert+重试/创建失败/空态/有内容）+ 列表（`max-height: min(42vh,360px)`；行 **min-height 68** / `rgba(255,250,251,.45)` 底 / 145deg `ice-300→sakura-100` 封面 + 「LIVE」/ 标题 14 + 副行 13 / `→` 20）+ 底部 `.btn-glow` 键 · **样张可交互**：点封面切台看高亮迁移、删除键 hover、收起/重开、开播选择器两态',
+            child: aylaLiveRailSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- live 域第四批（2026-09-22：B2-4，观看条/名单弹层 + 主播头像 + 推流地址） ----------
+          _Section(
+            title:
+                'AylaLiveViewerStrip / AylaLiveViewerSheet / AylaLiveHostAvatar / AylaLiveStreamAddresses（components/live/LiveViewerStrip.tsx 85 行 + LiveViewerSheet.tsx 147 行 + LiveHostAvatar.tsx 52 行 + LiveStreamAddresses.tsx 72 行 + live.css 206–229/1095–1325/249–257 + app.css 3443–3477）',
+            source:
+                '**观看条 + 名单弹层 + 主播头像 + 推流地址 · live 域第四批** · 观看条 = 整排按钮（`min-height 44` / `padding sp1 sp3` / radius-input / `--glass-bg` + blur18 sat1.4 / **compact 阴影** / hover `rgba(255,250,251,.72)`）+ 人数圆（`min-width 32` / h32 / pill / **`--ice-300` 底 + `--indigo-700` 字** / utility 12 ls .3 lh 1）+ 头像排（size **26** / gap sp1 / **overflow hidden 裁掉放不下的**）+ 排尾「更多」三圆点（26×26 / ice-100 / `IconDots 14`）· **未知人数显示 `–`**（ice-100 + secondary，尺寸与已知态**完全一致**，禁止画面跳变）、`0` 是真实读数照常显示 · **纯展示**（不自行拉数据）· 整排/名单行复用 `AylaCardInteraction(interactive: false, focusRingColor: --focus-ring 即 glow-500)`——它们**不在** auroraqua 的卡片/按钮 `:is()` 组里（无 1.02/.98、无扫光），只有 `outline 2px` 环 · 名单弹层 = **复用 A3 `AylaCreateSheet`**（`narrowHeightFactor: 0.6` = 窄屏 **60vh** 贴底上滑）+ **head 固定、只有名单自身滚**（body 最大高 = 卡上限 − padding sp4×2 − 安全区 − head 52）+ 行（min-height 48 / 头像 36 / 名字 15 w600 / hover glass-bg）+ 骨架 6 行（头像 **41×41** = 36 + 光环 2.5×2）+ 空态「还没有人在看」+ 截断「仅显示前 N 位」+ 503 `role=alert` + 重试（**不冒充空名单**）· **弹层插 root Overlay**（等价 web `createPortal(document.body)`；官方用例明确「侧栏 backdrop-filter 不裁剪弹层」）· 主播头像（label 回退链 `nickname → username → owner_nickname → 主播`；aria「查看主播 X 的个人主页」；size 默认 36；在线由页面按 presence 判（隐身恒离线））· 推流地址（`width: min(100%,960px)` 卡 + 三行：标签 **64** / 值 utility 12 省略号 **卡内覆写玻璃底 + radius-input + 内高光** / 复制键 `.msg-action-btn` →「已复制」1.5s / 失败 destructive 文案；**缺 rtmp_url 或 stream_key 时整块不渲染**；`stream_key` 是推流指纹**不打日志不持久化**）· **样张可交互**：点整排开名单（root overlay）、状态切换、复制/失败态',
+            child: aylaLiveViewersSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title:
+                'AylaLiveHostAvatar / AylaLiveStreamAddresses（同批：主播头像 + 推流地址区）',
+            source:
+                '**同批两件（B2-4）** · 主播头像 = `AvatarHalo`（有头像/无头像、在线/离线、size 36/28/52 三档）· 推流地址 = 卡 `width: min(100%,960px)`（用 `Align` 松横向紧约束才权威——`ConstrainedBox(maxWidth:)` 会被紧父级 `enforce` 夹回）+ padding sp3 + 三行（标签 64 / 值 utility 12 + 卡内玻璃覆写 + `--glass-inset` 内高光 / 复制键）+ `.live-form-error` · 窄屏 `align-items: flex-start`（同档 `flex-wrap: wrap` **无渲染面**：值 `min-width: 0` 可压到 0 ⇒ 永不换行，照实只表达交叉轴对齐）· 样张可交互：复制 →「已复制」1.5s、失败态开关',
+            child: aylaLiveStudioSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- live 域第五批（2026-09-22：B2-5，建播表单 + 控制台资料栏） ----------
+          _Section(
+            title:
+                'AylaLiveCreate（components/live/LiveCreate.tsx 189 行 + app.css 3401–3477 + live.css 32–33/164–174 + auroraqua.css 502–531）',
+            source:
+                '**建直播间表单 + 推流指引 · live 域第五批** · ⚠️ **本件在 web 里零挂载点**（全仓 `<LiveCreate>` 零命中、vitest 也无用例；真实建播走 `ChannelSidebar.handleCreateNewLive` → `createLiveChannel("新直播间")`）⇒ **组件画布是唯一视觉验收面**（同 B1-4 `ElysiaVoicePanel`）· 表单 = `.live-create-form`（app.css 的 row+gap sp2 **被 live.css 32 覆写为 column/stretch**）+ 标题（placeholder「给直播间起个标题」· maxLength 128）+ 介绍（「告诉观众这场直播聊什么（可选）」· 2000 · min-height 72）+ 可见范围（**复用 `AylaVisibilitySelector`**：群内默认勾本群**不锁定**、群外默认公开）+ 封面（**96 → ≤768 88** / 16:9 / `1px dashed --ice-500` / radius-input / glass-bg；⚠️ 用户的 `<img>` **漏了 `live-cover-preview-img` 类** ⇒ live.css 174 的 object-fit 是死规则 —— **用户 2026-09-22 裁决按 web 本意用 `cover`**）+ `.btn-glow`「开播」→「准备中…」· 字段族 = `--glass-bg` + 1px 亮边 + radius-input + **`--glass-inset`** + blur24 sat1.4 + focus `--glow-500` 边 + `--glow-shadow`（⚠️ app.css 写的 `box-shadow: var(--focus-ring)` 是**无效声明**：`2px solid #f796ff` 里的 `solid` 在 box-shadow 里非法）+ placeholder `--slate-500` · 指引（`.live-create-guide`：`--glass-bg-strong` + radius 16 + margin-top sp3 + 标题 Fredoka 15 + notice **`--warning` 13** + 两行复制**基础档**（`--ice-100` + radius-sm 8）+「我已保存，关闭」右对齐）· 空标题「标题不能为空」**不发请求**；`stream_key` 是推流指纹**不打日志不持久化** · **样张可交互**：填标题后点「开播」看指引、点复制/关闭、失败态',
+            child: aylaLiveCreateSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title:
+                'AylaLiveOwnerPanel（components/live/LiveOwnerPanel.tsx 217 行 + app.css 3831–3843 + live.css 168–180/190–269）',
+            source:
+                '**控制台资料栏（真实挂载：`LiveRoomBody` 的 showOwnerPanel）** · 卡 = padding **sp3**（live.css 168 覆写 app.css 的 sp4）+ `--glass-bg` + blur24 sat1.4 + 1px 亮边 + radius 16 + `--glass-shadow` + column gap sp3 · 行 = 封面 96×16:9（虚线冰蓝；⚠️ 本件 tsx **确实带** `live-cover-preview-img` ⇒ cover **生效**，与 LiveCreate 的死规则不同）+ 标题 **200 固定**（`flex-shrink: 0`）+ 介绍 flex 1 + 开播（`.btn-glow`）/保存竖排（`min-width 96` / `min-height 40`）· 可见范围块 = padding sp3（≤768 sp2）+ **上边框 1px** · 三档断点：≤768 与 **769–1100**（侧栏压缩控制台余宽）都换行 ⇒ 封面+字段一行、开播/保存独占一行 · 保存 = 载荷（trim + 可见性单值 `public→friends→group`）→ **用后端回显刷新封面与可见范围**（后端可能规范化 `allowed_group_ids`）· 「标题不能为空」不发请求；开播/下播 busy 期禁用、失败「操作失败」· ⚠️ **下播键 web 是裸 `.btn`**（app.css 21–34 只有盒模型/字体，**没有任何底/边/阴影**）—— **用户 2026-09-22 裁决当 web 的 bug** ⇒ 改用库内 `ghost` 档给回玻璃面（登记为有意偏离）· **样张可交互**：改标题→保存看回显、开播/下播切换、切可见范围',
+            child: aylaLiveOwnerPanelSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

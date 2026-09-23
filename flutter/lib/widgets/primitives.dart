@@ -1029,6 +1029,87 @@ enum CapsuleTone {
   indigo,
 }
 
+/// 来源标签（可见性标签）——**语音 / 直播 / 帖子三域统一复用**的胶囊。
+///
+/// 用户 2026-09-22 裁决：
+/// > 「这个标签……语音、直播、帖子都应该统一复用这个，统一为 web 界面的粉色，
+/// > web 界面的帖子标签灰色视为错误。」
+///
+/// 事实源（统一后的度量取 **live 徽章档**）：
+/// ```
+/// app.css 3371–3377   .live-badge { display: inline-block; padding: 2px var(--sp-2);
+///                     border-radius: var(--radius-pill); font-size: 12px; font-family: --font-utility }
+/// live.css 486–493    .live-badge-source { background: --sakura-300; color: --grape-700;
+///                     max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/// ```
+/// 两处都**不声明 font-weight / letter-spacing / line-height** ⇒ 全部继承 body
+/// （400 / 0 / 1.55）。
+///
+/// ⚠️ 被本件取代的三份旧实现（三域规格原本各不相同，统一后不再使用）：
+/// - `.voice-source-tag`（voice.css 471–485）：Fredoka 11 / ls .8 / padding 0×8；
+/// - `.post-card-tag`（posts.css 68–76）：utility 11 / w600 / **ice-100 灰底 + `--ice-600`**
+///   —— `--ice-600` 在 tokens.css **零定义**（同 `--glass-bg-hover` 那类），该声明整条作废、
+///   字色继承 ⇒ 实渲染就是灰底。用户判为错误，**不复刻**；
+/// - `.live-badge.live-badge-source`：本身就是本档（保持）。
+///
+/// 容器由调用方决定（web 亦然）：live 卡 / 语音卡走 [AylaScrollingTags] 横向滚动，
+/// 帖子卡走 `flex-wrap` 换行平铺（posts.css 62–66）——**只统一 chip，不统一容器**。
+class AylaSourceTag extends StatelessWidget {
+  const AylaSourceTag(
+    this.label, {
+    super.key,
+    this.maxWidth,
+    this.semanticLabel,
+  });
+
+  /// 标签文案（「公开」「好友」、白名单群名…，见 `getVisibilityLabels`）。
+  final String label;
+
+  /// 宽度上限（web 默认 `12ch`；各头部上下文另有 10ch/8ch 覆写）。null = 用默认 12ch。
+  final double? maxWidth;
+
+  /// 可访问性标签（默认同文案）。
+  final String? semanticLabel;
+
+  /// `.live-badge` 的字级（12px / utility）下 `1ch` 的实测宽度。
+  static double chWidth(AylaTextStyles style) {
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: '0',
+        style: TextStyle(
+          fontFamily: AylaFonts.utility,
+          fontFamilyFallback: AylaFonts.cjkFallback,
+          fontSize: 12,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return painter.width;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth ?? chWidth(t) * 12),
+      child: AylaCapsuleTag(
+        label,
+        tone: CapsuleTone.sakura, // sakura-300 底 + grape-700 字
+        padding: const EdgeInsets.symmetric(
+          horizontal: AylaSpacing.sp2, // padding: 2px var(--sp-2)
+          vertical: 2,
+        ),
+        fontFamily: AylaFonts.utility, // --font-utility
+        fontSize: 12,
+        fontWeight: FontWeight.w400, // 未声明 ⇒ 继承 body
+        letterSpacing: 0, // 未声明 ⇒ 0
+        textHeight: t.body.height, // 未声明 ⇒ 继承 body 行高（1.55）
+        semanticLabel: semanticLabel,
+      ),
+    );
+  }
+}
+
 /// 胶囊标签（尺寸/圆角/字级按 [CapsuleTone] 与调用方给定）。
 ///
 /// ⚠️ **事实源边界（2026-09-19 审查）**：web 里**没有统一的胶囊基类**，
@@ -1345,6 +1426,9 @@ class _AylaScrollingTagsState extends State<AylaScrollingTags>
     duration: const Duration(seconds: 8),
   );
 
+  /// 内部标签容器**右侧收窄量**（用户 2026-09-22 实测校准；0 = 与 web 同宽）。
+  static const double _innerRightInset = 1;
+
   final GlobalKey _innerKey = GlobalKey();
   double _overflow = 0;
 
@@ -1383,50 +1467,66 @@ class _AylaScrollingTagsState extends State<AylaScrollingTags>
   Widget build(BuildContext context) {
     final bool overflowing = _overflow > 0;
 
-    Widget content = Row(
-      key: _innerKey,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        for (int i = 0; i < widget.children.length; i++) ...<Widget>[
-          if (i > 0) const SizedBox(width: AylaSpacing.sp1), // gap: sp1
-          widget.children[i],
-        ],
-      ],
-    );
-
-    if (overflowing) {
-      content = AnimatedBuilder(
-        animation: _marquee,
-        builder: (BuildContext context, Widget? child) => Transform.translate(
-          offset: Offset(_offsetFor(_marquee.value), 0),
-          child: child,
-        ),
-        child: content,
-      );
-    }
-
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _measure(c.maxWidth);
         });
 
-        // 内层 Row 按内容自然宽度排布，溢出由 ClipRect 裁剪（对齐 web 的
-        // `overflow: hidden` + `white-space: nowrap`）。
-        // SizedBox(height: 40) 给有限高度：否则 OverflowBox 在无界高度祖先
-        // 下会抛 "given an infinite size during layout"（实测）。
-        Widget clipped = ClipRect(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: SizedBox(
-              height: 40,
-              child: OverflowBox(
-                alignment: Alignment.centerLeft,
-                maxWidth: double.infinity,
-                minHeight: 40,
-                maxHeight: 40,
-                child: content,
-              ),
+        // ⚠️ 标签**收窄**方案（按可用宽均分）已于 2026-09-22 按用户要求**回退**：
+        // 收窄后内容不再溢出 ⇒ 滚动/marquee 与渐隐一起失效（用户：「怎么直接不滚动了！回退回退」）。
+        // 内层 Row 保持内容自然宽度，溢出由容器裁剪 + 渐隐（对齐 web `.scroll-tags`）。
+        final int count = widget.children.length;
+        Widget content = Row(
+          key: _innerKey,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (int i = 0; i < count; i++) ...<Widget>[
+              if (i > 0) const SizedBox(width: AylaSpacing.sp1), // gap: sp1
+              widget.children[i],
+            ],
+          ],
+        );
+
+        if (overflowing) {
+          content = AnimatedBuilder(
+            animation: _marquee,
+            builder: (BuildContext context, Widget? child) => Transform.translate(
+              offset: Offset(_offsetFor(_marquee.value), 0),
+              child: child,
+            ),
+            child: content,
+          );
+        }
+
+        // 内层 Row 按内容自然宽度排布，溢出由容器裁剪（对齐 web 的
+        // `.scroll-tags { display:block; min-width:0; overflow:hidden; white-space:nowrap }`）。
+        //
+        // ⚠️ **高度必须等于内容**——2026-09-22 用户实测报「渐隐右边/下面有一条接缝线」
+        // （语音卡、直播卡、帖子卡都中）。此前这里用 `SizedBox(height: 40)` +
+        // `OverflowBox(min/maxHeight: 40)` 顶高度：本组件高度恒为 40（无界祖先）或父级可用高
+        // （有界祖先），而真标签只有 ~23 ⇒ 父级一矮（卡片 meta 行 22.6 / head 行 32）
+        // 就把居中的标签**上下裁掉几像素**，圆角被切断 ⇒ 看起来是一条接缝。
+        // ⚠️ 也不能只用 `OverflowBox(maxWidth: infinity)`：它不设高时自身取父级最大高。
+        // 正解 = 横向 `SingleChildScrollView`（禁手势）：子级拿**无界宽**（可超出、无 overflow 报错）、
+        // 自身高度 = 内容高、自带裁剪 ⇒ mask / 裁剪 / 标签三者同高。
+        // ⚠️ 必须关掉滚动条：桌面端 `Scrollable` 会自动挂 `Scrollbar`，其拇指会被画成
+        // 一条**灰色竖线**（实测像素 `d7cbdb` vs 背景 `eeeeee`）——用户 2026-09-22 报的
+        // 「渐隐右边有一条接缝线」就是它（每个标签条都有一条，看起来像容器的边）。
+        // 库内 server_rail 同款处理（web 全局隐藏原生滚动条）。
+        // ⚠️ **内部标签容器右侧收窄 1px**（用户 2026-09-22 校准，原话：
+        // 「内部标签容器宽度收窄右侧一点点，渐隐遮罩完全不动」）。
+        // 收窄只作用于**内层容器**（滚动视口 = 标签容器），**渐隐遮罩的几何一行未动**
+        //（`ShaderMask` 仍以 LayoutBuilder 的尺寸为基准）——需要再调就改这里的数值。
+        Widget clipped = Padding(
+          padding: const EdgeInsets.only(right: _innerRightInset),
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(), // web `overflow: hidden`：不可拖
+              clipBehavior: Clip.hardEdge,
+              child: content,
             ),
           ),
         );
@@ -1435,18 +1535,26 @@ class _AylaScrollingTagsState extends State<AylaScrollingTags>
         if (overflowing) {
           clipped = ShaderMask(
             blendMode: BlendMode.dstIn,
-            shaderCallback: (Rect bounds) => LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: const <Color>[Color(0x00000000), Color(0xFF000000),
-                  Color(0xFF000000), Color(0x00000000)],
-              stops: <double>[
-                0,
-                widget.fadeWidth / (bounds.width == 0 ? 1 : bounds.width),
-                1 - widget.fadeWidth / (bounds.width == 0 ? 1 : bounds.width),
-                1,
-              ],
-            ).createShader(bounds),
+            shaderCallback: (Rect bounds) {
+              // ⚠️ 渐隐几何 = 容器自身（web `.scroll-tags.is-overflow` 的 mask-image 同构）：
+              // `linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px),
+              // transparent 100%)`（base.css 787–802）。
+              // 2026-09-22 用户实测期间试过两种偏离（整体平移 1px / 右缘加宽 1px），**均已回退**——
+              // 那两处改动对「边缘接缝」无效，改回与 web 同构的几何。
+              final double w = bounds.width == 0 ? 1 : bounds.width;
+              return LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: const <Color>[Color(0x00000000), Color(0xFF000000),
+                    Color(0xFF000000), Color(0x00000000)],
+                stops: <double>[
+                  0,
+                  widget.fadeWidth / w,
+                  1 - widget.fadeWidth / w,
+                  1,
+                ],
+              ).createShader(bounds);
+            },
             child: clipped,
           );
         }

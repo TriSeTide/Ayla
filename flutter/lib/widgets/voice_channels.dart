@@ -57,6 +57,7 @@ import '../theme/app_theme.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
+import 'directory_controls.dart' show AylaFavoriteButton, FavoriteState;
 import 'primitives.dart';
 import 'reveal.dart';
 
@@ -85,8 +86,8 @@ class AylaVoiceCardData {
   /// 在麦人数（tsx 39：`typeof === "number"` 才渲染）。
   final int? memberCount;
 
-  /// 可见性（`types.ts:872`）。null = 未知（由 [visibilityLabels] 兜底成「群可见」，
-  /// 与 web `getVisibilityLabels` 同一兜底）。
+  /// 可见性（`types.ts:872`）。null = **未知 → 无标签**（web 的 `cardVisibilityLabels`
+  /// 是 `item.visibility ? getVisibilityLabels(...) : []`，`cardData.ts:14–16`）。
   final AylaPostVisibility? visibility;
 
   final List<String> allowedGroupNames;
@@ -96,11 +97,16 @@ class AylaVoiceCardData {
   final bool mine;
 
   /// web `cardVisibilityLabels(channel)` → `getVisibilityLabels`（逐条同源）。
-  List<String> get visibilityLabels => aylaVisibilityLabels(
-        visibility: visibility,
-        allowedGroupNames: allowedGroupNames,
-        groupName: groupName,
-      );
+  ///
+  /// ⚠️ 2026-09-22 修正：web 的转发函数有 `item.visibility ?` 三元守卫 ⇒
+  /// **visibility 缺失时返回空数组**（此前这里无条件走兜底、错误地给出「群可见」）。
+  List<String> get visibilityLabels => visibility == null
+      ? const <String>[]
+      : aylaVisibilityLabels(
+          visibility: visibility,
+          allowedGroupNames: allowedGroupNames,
+          groupName: groupName,
+        );
 }
 
 /// `.voice-channel-card-wrap` + `.voice-channel-card` —— 语音频道卡（`VoiceChannelCard.tsx`）。
@@ -142,6 +148,10 @@ class AylaVoiceChannelCard extends StatelessWidget {
   /// [action] 与 [favorite] 都为 null = web `action={null}`（SearchPage 的用法）→ 不渲染。
   final Widget? favorite;
 
+
+  /// head 行的预留高度 = 收藏键 compact 的 32（`.favorite-toggle.is-compact`）。
+  static const double _headMinHeight = 32;
+
   /// tsx 19：`browsing ? "查看" : mine ? "进入" : "加入"`（用于卡片 aria-label）。
   String get _verb => browsing
       ? '查看'
@@ -154,10 +164,8 @@ class AylaVoiceChannelCard extends StatelessWidget {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final BorderRadius radius =
         BorderRadius.all(Radius.circular(AylaRadii.rCard));
-    // voice.css 471–485：来源标签（Micro Tag）。
-    // ⚠️ 该规则**不声明 font-weight** ⇒ 继承 body（400），不是 `.auth-intro-feature`
-    //    的 500；`max-width: 12ch` 按同字体实测（见 [_sourceTagMaxWidth]）。
-    final double sourceTagMaxWidth = _sourceTagMaxWidth();
+    // 来源标签：共享件 `AylaSourceTag`（用户 2026-09-22 裁决统一三域）；
+    // 它自带 `max-width: 12ch` 的实测换算，本组件不再自己算。
     // `.voice-card-owner` / `.voice-card-meta`：font-size 12 + 继承 body 的 line-height 1.55。
     final TextStyle metaStyle = t.body.copyWith(
       fontSize: 12,
@@ -172,24 +180,27 @@ class AylaVoiceChannelCard extends StatelessWidget {
       spacing: AylaSpacing.sp2, // gap: var(--sp-2) = 8
       children: <Widget>[
         // ---- head：标签组（占满剩余）+ 收藏键（不收缩）----
-        Row(
-          children: <Widget>[
+        // 等高审计（用户 2026-09-22 要求）：head 行高度 = max(标签 22.6, 收藏键 32)，
+        // 而「无收藏键」的卡（web `action={null}` 的搜索页用法）会矮 ~9px ——
+        // web 的 grid `align-items: stretch` 会拉平，Flutter 侧改为**预留收藏键高度**，
+        // 使同行卡高度由构造决定（与下方「预留 owner 行」同一手法）。
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: _headMinHeight),
+          child: Row(
+            // `.voice-card-head { gap: var(--sp-2); min-height: 20px; space-between }`
+            //（voice.css 732–738 基础规则 + 561–567 的 `.voice-hub` 同参数）
+            spacing: AylaSpacing.sp2,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
             Expanded(
               child: AylaScrollingTags(
                 children: <Widget>[
+                  // 来源标签：**共享件 `AylaSourceTag`**（用户 2026-09-22 裁决：
+                  // 语音/直播/帖子三域统一复用，度量取 live 徽章档 utility 12 + 粉色；
+                  // 此前的 `.voice-source-tag`（Fredoka 11 / ls .8 / max-width 12ch）已废弃）。
+                  // 容器仍是 `AylaScrollingTags`（web `.voice-source-tags` 是滚动条）。
                   for (final String label in channel.visibilityLabels)
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: sourceTagMaxWidth),
-                      child: AylaCapsuleTag(
-                        label,
-                        tone: CapsuleTone.sakura,
-                        // `.voice-source-tag`：padding 0 8 / Fredoka 11 / ls .8 / 无字重声明
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w400,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
+                    AylaSourceTag(label),
                 ],
               ),
             ),
@@ -198,7 +209,8 @@ class AylaVoiceChannelCard extends StatelessWidget {
               action!
             else if (favorite != null)
               favorite!,
-          ],
+            ],
+          ),
         ),
         // ---- title：mic 14（不收缩）+ 名称（滚动单行）----
         Row(
@@ -320,27 +332,6 @@ class AylaVoiceChannelCard extends StatelessWidget {
       focusRingRadius: radius,
       builder: body,
     );
-  }
-
-  /// `max-width: 12ch` 的 Flutter 等价：同字体（Fredoka 11 / ls .8 / w400）下 `0` 的实测宽 × 12。
-  ///
-  /// CSS 的 `ch` = 元素字体中 `0` 的 advance（含 letter-spacing）；
-  /// Flutter 无 `ch` 单位 ⇒ 按语义实测（用户 2026-09-21 拍板：不写死像素）。
-  static double _sourceTagMaxWidth() {
-    final TextPainter painter = TextPainter(
-      text: const TextSpan(
-        text: '0',
-        style: TextStyle(
-          fontFamily: AylaFonts.display,
-          fontFamilyFallback: AylaFonts.cjkFallback,
-          fontSize: 11,
-          fontWeight: FontWeight.w400,
-          letterSpacing: 0.8,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    return painter.width * 12;
   }
 }
 
@@ -634,6 +625,7 @@ class _VoiceChannelDemo extends StatefulWidget {
 }
 
 class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
+  final Set<String> _favorites = <String>{'2'};
   int _joinCount = 0;
   String _lastJoin = '—';
   bool _rejoinVisible = false;
@@ -707,6 +699,21 @@ class _VoiceChannelDemoState extends State<_VoiceChannelDemo> {
         columns: columns,
         revealItems: false,
         onJoin: _joined,
+        // 收藏键 + 转发键（用户 2026-09-22：两键都要，且统一 32×32）
+        favoriteBuilder: (BuildContext context, AylaVoiceCardData channel) =>
+            AylaFavoriteButton(
+          state: _favorites.contains(channel.id)
+              ? FavoriteState.favorited
+              : FavoriteState.notFavorited,
+          compact: true,
+          onToggle: (bool next) => setState(() {
+            if (next) {
+              _favorites.add(channel.id);
+            } else {
+              _favorites.remove(channel.id);
+            }
+          }),
+        ),
       ),
     );
   }

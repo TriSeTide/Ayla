@@ -800,6 +800,7 @@ class GlassButton extends StatefulWidget {
     this.expand = false,
     this.semanticLabel,
     this.glowHover = false,
+    this.glowBorderOnHover = false,
   });
 
   /// hover 态改走 **glow 边 + 粉辉光**（web `.post-editor-image-btn:hover
@@ -807,6 +808,21 @@ class GlassButton extends StatefulWidget {
   /// posts.css 410–414）：与 ghost 默认的「冰蓝底 + button-hover 阴影」不同，
   /// 供帖子编辑器「图片/视频」等媒体选择钮使用。
   final bool glowHover;
+
+  /// **只**在 hover / focus 时把边色换成 `--glow-500`，其余仍按 ghost 本档
+  /// （hover 保留冰蓝底 `.18` 与 `--glass-shadow-button-hover`）。
+  ///
+  /// 事实源：`.danmaku-image-btn`（app.css 3774–3791，元素同时带
+  /// `btn btn-ghost`）的高亮是**三条规则共存、各属性分别胜出**：
+  /// - 底色：`.btn-ghost:hover:not(:disabled)`（app.css 65，0-3-0）→ `rgba(157,191,230,.18)`
+  /// - 阴影：auroraqua 按钮组 `:is(.btn-ghost,…):not(:disabled):hover`（134–139，0-3-0）
+  ///   → `--glass-shadow-button-hover`（压过本条自己的 `--glow-shadow`，0-2-0）
+  /// - 边色：`.danmaku-image-btn:hover/:focus-within`（3787–3791，0-2-0）
+  ///   → `--glow-500`（压过静止档 0-1-0 的 `--glass-border`）
+  ///
+  /// 故它是 [glowHover]（连底色/阴影一起换成辉光）之外的另一档；focus 无 hover 时
+  /// 三条 hover 规则不命中 ⇒ 边 `--glow-500` + 阴影 `--glow-shadow`。
+  final bool glowBorderOnHover;
 
   /// 文案。
   final String label;
@@ -881,6 +897,9 @@ class _GlassButtonState extends State<GlassButton>
     final bool narrow = Breakpoint.isNarrow(MediaQuery.sizeOf(context).width);
     final bool animate = _enabled && !_reduceMotion;
     final bool hovered = _hovered && animate;
+    // `:focus-within` 与 hover 同列的高亮来源（**不受** reduced-motion 影响：
+    // 它换的是边色/阴影，不是位移动画）
+    final bool focused = _focused && _enabled;
 
     // ---- 三类材质 ----
     late final Color background;
@@ -910,17 +929,26 @@ class _GlassButtonState extends State<GlassButton>
       case GlassButtonVariant.ghost:
         // auroraqua 覆写：glass-bg + glass-border + button 阴影 + blur(8px)
         // glowHover（.post-editor-image-btn）：hover 不改底色，只换 glow 边 + 粉辉光
+        // glowBorderOnHover（.danmaku-image-btn）：hover 保留 ghost 底色/阴影，只换 glow 边
+        final bool hoverGlow = hovered && widget.glowHover;
+        // `:focus-within` 在两条 web 规则里都与 `:hover` 同列（posts.css 410 / app.css 3787）
+        final bool focusGlow =
+            focused && (widget.glowHover || widget.glowBorderOnHover);
+        final bool glowBorder =
+            hoverGlow || (hovered && widget.glowBorderOnHover) || focusGlow;
         background = (hovered && !widget.glowHover)
             ? AylaColors.ice500.withValues(alpha: 0.18) // :hover rgba(157,191,230,.18)
             : GlassConfig.resolveBackground(strong: false);
         foreground = AylaColors.indigo700;
-        borderColor = (hovered && widget.glowHover)
-            ? AylaColors.glow500 // :hover border-color: var(--glow-500)
+        borderColor = glowBorder
+            ? AylaColors.glow500 // :hover/:focus-within border-color: var(--glow-500)
             : AylaColors.glassBorder; // auroraqua 覆写 --glass-border
         gradient = null;
-        shadow = (hovered && widget.glowHover)
+        shadow = hoverGlow
             ? AylaShadows.glow
-            : (hovered ? AylaShadows.buttonHover : AylaShadows.button);
+            : (hovered
+                ? AylaShadows.buttonHover // auroraqua 按钮组 hover 阴影（0-3-0 胜出）
+                : (focusGlow ? AylaShadows.glow : AylaShadows.button));
       case GlassButtonVariant.destructive:
         // `.btn-destructive { background: var(--destructive); color: #fffafb }`
         // 无边框、无阴影（web 未声明）；hover 走下方 brightness(1.06) 滤镜分支
@@ -944,6 +972,34 @@ class _GlassButtonState extends State<GlassButton>
 
     final BorderRadius rInput =
         BorderRadius.all(Radius.circular(AylaRadii.rInput));
+
+    // ---- 禁用态：**按颜色降透明度**（用户 2026-09-22 裁决）----
+    //
+    // 事实源：`base.css button:disabled { opacity: .55 }`。
+    // ⚠️ 不能用整层 `Opacity(.55)`：ghost 档的 face 内含 `BackdropFilter`（blur 8px），
+    //    Opacity 叠在 BackdropFilter 上会被 Impeller 拒绝并刷屏
+    //    （实测：`ImpellerValidationBreak: Contents::SetInheritedOpacity should never be called
+    //    when Contents::CanAcceptOpacity returns false`），且**禁用态的变暗不生效**。
+    //    ⇒ 把 .55 落到**颜色**上（底/渐变/边/字/阴影各乘 .55），视觉等价、无层叠冲突。
+    const double kDisabledAlpha = 0.55;
+    Color dimColor(Color c) =>
+        _enabled ? c : c.withValues(alpha: c.a * kDisabledAlpha);
+    Color? dimColorOrNull(Color? c) => _enabled || c == null ? c : dimColor(c);
+    /// 渐变降透明：本库按钮只可能出现 [LinearGradient]（glow 档），其余档为 null。
+    Gradient? dimGradient(Gradient? g) => _enabled || g == null || g is! LinearGradient
+        ? g
+        : LinearGradient(
+            begin: g.begin,
+            end: g.end,
+            stops: g.stops,
+            colors: <Color>[for (final Color c in g.colors) dimColor(c)],
+          );
+    List<BoxShadow> dimShadows(List<BoxShadow> list) => _enabled
+        ? list
+        : <BoxShadow>[
+            for (final BoxShadow sh in list)
+              sh.copyWith(color: dimColor(sh.color)),
+          ];
 
     // ---- 卡面：底色/渐变 + 描边 + 圆角裁剪（.btn 盒模型与材质）----
     // 注意：padding 必须放在 Stack **内部**（内容 Row 外包 Padding）——
@@ -972,10 +1028,12 @@ class _GlassButtonState extends State<GlassButton>
         minWidth: widget.minWidth ?? 0,
       ),
       decoration: BoxDecoration(
-        color: background,
-        gradient: g,
+        color: dimColor(background),
+        gradient: dimGradient(g),
         borderRadius: rInput,
-        border: borderColor == null ? null : Border.all(color: borderColor),
+        border: borderColor == null
+            ? null
+            : Border.all(color: dimColorOrNull(borderColor)!),
       ),
       // ::after 在圆角内裁剪（.btn { overflow: hidden; isolation: isolate }）
       child: ClipRRect(
@@ -1022,7 +1080,7 @@ class _GlassButtonState extends State<GlassButton>
                 children: <Widget>[
                   if (widget.icon != null) ...<Widget>[
                     IconTheme(
-                      data: IconThemeData(color: foreground, size: 18),
+                      data: IconThemeData(color: dimColor(foreground), size: 18),
                       child: widget.icon!,
                     ),
                     // ⚠️ `gap: var(--sp-2)` **只在图标与文字同时存在**时生效——
@@ -1046,7 +1104,7 @@ class _GlassButtonState extends State<GlassButton>
                           textAlign: TextAlign.center,
                           overflow: TextOverflow.ellipsis,
                           style: text.label.copyWith(
-                            color: foreground,
+                            color: dimColor(foreground),
                             fontSize: widget.fontSize,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.2,
@@ -1086,7 +1144,7 @@ class _GlassButtonState extends State<GlassButton>
           child: IgnorePointer(
             child: _AnimatedShadowRing(
               radius: rInput,
-              shadows: shadow,
+              shadows: dimShadows(shadow),
               duration: AylaDurations.button,
             ),
           ),
@@ -1209,25 +1267,23 @@ class _GlassButtonState extends State<GlassButton>
                 _enabled ? () => setState(() => _pressed = false) : null,
             onTapUp:
                 _enabled ? (_) => setState(() => _pressed = false) : null,
-            // base.css button:disabled { opacity: .55 }
-            child: Opacity(
-              opacity: _enabled ? 1 : 0.55,
-              child: _focused && _enabled
-                  // focus ring：2px 辉光边 + 2px offset（outline-offset）
-                  ? Container(
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(AylaRadii.rInput + 2 + 2),
-                        border: Border.all(
-                          color: AylaColors.glow500,
-                          width: 2,
-                        ),
+            // `base.css button:disabled { opacity: .55 }` 已改为**按颜色降透明**
+            // （见上方 dimColor 段）——不能再套整层 Opacity（Impeller 拒绝 Opacity 叠 BackdropFilter）
+            child: _focused && _enabled
+                // focus ring：2px 辉光边 + 2px offset（outline-offset）
+                ? Container(
+                    decoration: BoxDecoration(
+                      borderRadius:
+                          BorderRadius.circular(AylaRadii.rInput + 2 + 2),
+                      border: Border.all(
+                        color: AylaColors.glow500,
+                        width: 2,
                       ),
-                      padding: const EdgeInsets.all(2),
-                      child: body,
-                    )
-                  : body,
-            ),
+                    ),
+                    padding: const EdgeInsets.all(2),
+                    child: body,
+                  )
+                : body,
           ),
         ),
       ),

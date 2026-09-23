@@ -12,6 +12,7 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/widgets/directory_controls.dart' show AylaFavoriteButton;
+import '../lib/widgets/share.dart' show AylaShareButton;
 import '../lib/widgets/primitives.dart' show AylaCapsuleTag;
 import '../lib/widgets/post_card.dart';
 import '../lib/widgets/resource_image.dart';
@@ -345,17 +346,30 @@ void main() {
       expect(tagsHeight, lessThan(30)); // 单行
     });
 
-    testWidgets('分享钮是纯圆钮（.icon-btn-40 radius-pill，非 12 方角）', (WidgetTester tester) async {
+    testWidgets('分享钮 = 共享件 AylaShareButton（32×32 纯圆，与收藏键 compact 统一）',
+        (WidgetTester tester) async {
       await tester.pumpWidget(
         host(
           SizedBox(width: 360, child: AylaPostCard(post: sample(), onOpen: () {})),
         ),
       );
+      // 用户 2026-09-22 裁决：web 的收藏键 compact 32×32 与转发键 `.icon-btn-40` 40×40
+      // 同排不等大 ⇒ 判为错误，Flutter 侧统一取 32（`AylaShareButton` 默认档）。
+      expect(find.byType(AylaShareButton), findsOneWidget);
       final AylaIconButton share = tester.widget<AylaIconButton>(
-        find.byType(AylaIconButton),
+        find.descendant(
+          of: find.byType(AylaShareButton),
+          matching: find.byType(AylaIconButton),
+        ),
       );
-      expect(share.square, isFalse); // false → pill（40×40 = 正圆）
-      expect(share.size, 40);
+      expect(share.square, isFalse); // false → pill（纯圆）
+      expect(share.size, 32);
+      expect(tester.getSize(find.byType(AylaShareButton)), const Size(32, 32));
+      // 与左侧收藏键同尺寸
+      final AylaFavoriteButton favorite = tester.widget<AylaFavoriteButton>(
+        find.byType(AylaFavoriteButton),
+      );
+      expect(favorite.compact, isTrue); // compact = 32×32
     });
 
     testWidgets('可见性标签渲染（公开 + 群名叠加）', (WidgetTester tester) async {

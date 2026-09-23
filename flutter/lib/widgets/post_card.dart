@@ -32,16 +32,16 @@ import '../core/media/media_signer.dart' show MediaVariant;
 import '../core/models/post.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
-import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
-import 'primitives.dart' show AylaCapsuleTag, CapsuleTone;
+import 'primitives.dart' show AylaSourceTag;
 import 'directory_controls.dart' show AylaFavoriteButton, FavoriteState;
 import 'media_interaction.dart';
 import 'resource_image.dart';
+import 'share.dart' show AylaShareButton;
 
 /// 帖子卡时间（web `PostCard.tsx:23–36` 逐条同源；非法/缺失返回空串）。
 String aylaPostCardTime(String? iso, {DateTime? now}) {
@@ -335,22 +335,13 @@ class _AylaPostCardState extends State<AylaPostCard> {
                             ),
                           ),
                         for (final String label in tags)
-                          // 复用组件库胶囊（2026-09-20 用户要求）：tone=ice（ice-100 底 +
-                          // text-primary 字），盒模型/字级按 .post-card-tag 覆写
-                          // （posts.css 68–76：padding 2px 8px、Space Grotesk 11 w600）。
-                          AylaCapsuleTag(
-                            label,
-                            tone: CapsuleTone.ice,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            fontFamily: AylaFonts.utility,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0, // web 未声明 letter-spacing
-                            textHeight: 1.55, // 继承 body 行高
-                          ),
+                          // 来源标签：**共享件 `AylaSourceTag`**（用户 2026-09-22 裁决：
+                          // 语音/直播/帖子三域统一，统一为粉色）。
+                          // ⚠️ 不再复刻 `.post-card-tag`（posts.css 68–76）的
+                          // ice-100 灰底：其 `color: var(--ice-600)` 全库零定义（同
+                          // `--glass-bg-hover` 那类）⇒ 声明作废、字色继承，实渲染就是灰底；
+                          // 用户判为**错误**。容器仍是 posts.css 62–66 的 flex-wrap 换行平铺。
+                          AylaSourceTag(label),
                       ],
                     ),
                   ),
@@ -461,15 +452,12 @@ class _AylaPostCardState extends State<AylaPostCard> {
                 onRetryStatus: widget.onRetryFavoriteStatus,
               ),
             const SizedBox(width: AylaSpacing.sp4),
-            AylaIconButton(
-              // ⚠️ home.css:127 `.icon-btn-40 { border-radius: var(--radius-pill) }`
-              // → **纯圆钮**（40×40 + pill = 正圆）。此前误写成 square（12 方角）
-              // 是漏读：auroraqua.css:119–122 的 radius-input 覆写只作用于
-              // `.narrow-topbar-more > .icon-btn-40` 与 `.top-nav-more > .top-nav-icon-btn`。
-              size: 40,
-              icon: AylaIcon(aylaIconByName('iconShare')!),
+            AylaShareButton(
+              // 转发键：**共享件**（用户 2026-09-22 裁决 —— web 里收藏键 compact 32×32、
+              // 转发键 `.icon-btn-40` 40×40，同排却不等大，判为错误 ⇒ 统一取 32×32 +
+              // 图标 16，与左侧收藏键同尺寸；`AylaShareButton` 默认即 32）。
+              label: '分享帖子',
               onPressed: widget.onShare,
-              semanticLabel: '分享帖子',
             ),
           ],
         ),

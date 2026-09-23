@@ -858,6 +858,7 @@ class AylaShareButton extends StatelessWidget {
     super.key,
     this.label = '分享',
     this.onPressed,
+    this.size = 32,
   });
 
   /// 可访问性文案（web `aria-label={label} title={label}`）。
@@ -866,11 +867,21 @@ class AylaShareButton extends StatelessWidget {
   /// 点击回调（页面打开 [AylaShareSheet]）；null = 禁用。
   final VoidCallback? onPressed;
 
+  /// 边长。**默认 32 = 与收藏键 compact 同尺寸**。
+  ///
+  /// 用户 2026-09-22 裁决：web 把收藏键做成 `.favorite-toggle.is-compact`（**32×32**）、
+  /// 转发键做成 `.icon-btn-40`（**40×40**），两者在帖子卡底排与各房头部**同排却不等大**
+  /// —— 判为错误 ⇒ Flutter 侧统一取收藏键的 32（图标随之降到 16，与收藏键 compact 的
+  /// 16px 图标一致）；确实需要复刻 web 40 档的地方显式传 `size: 40`。
+  final double size;
+
   @override
   Widget build(BuildContext context) {
     return AylaIconButton(
-      icon: AylaIcon(aylaIconByName('iconShare')!, size: 18),
+      // web `IconShare 18`（40 档）；32 档取 16 与收藏键 compact 对齐
+      icon: AylaIcon(aylaIconByName('iconShare')!, size: size >= 40 ? 18 : 16),
       onPressed: onPressed,
+      size: size,
       semanticLabel: label,
     );
   }

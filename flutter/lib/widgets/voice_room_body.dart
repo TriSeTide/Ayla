@@ -36,6 +36,10 @@
 /// voice.css 146–157            .voice-room-tags：flex 0 0 auto · **max-width 16ch**；
 ///                              内部 `.post-card-tag` **max-width 12ch** + 省略号
 /// voice.css 202–215/…/295–313  聊天卡 head（title 13/600 secondary · count-label 12）·
+///                              ⚠️ 其 `background: --glass-bg`（voice.css 389–397，≥769）
+///                              被 auroraqua.css 593–599 **同一断点、最后加载、特异性 0-2-0**
+///                              清零 ⇒ 实渲染 = **透明底 + 仅下边框**（用户 2026-09-22 实报
+///                              「这处造轮子」：照 voice.css 抄底会在卡面上叠一层）
 ///                              消息行（flex wrap · gap sp1 · 13px/1.4 · sender 700 secondary ·
 ///                              图片 120×80 radius-sm）
 /// voice.css 233–251            .voice-room-chat-toggle-btn：flex none · gap sp1 · padding sp1/sp2 ·
@@ -93,6 +97,7 @@ import 'directory_controls.dart';
 import 'primitives.dart';
 import 'resource_image.dart';
 import 'reveal.dart';
+import 'share.dart' show AylaShareButton;
 
 /// 房内聊天消息投影（web `voice.chat.message` 帧 / `listVoiceChatMessagesPage` 的 item）。
 class AylaVoiceChatMessage {
@@ -443,24 +448,11 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
           child: AylaScrollingTags(
             children: <Widget>[
               for (final String label in widget.visibilityLabels)
-                ConstrainedBox(
-                  // `.post-card-tag { max-width: 12ch }` + 省略号
-                  constraints: BoxConstraints(maxWidth: _postTag12ch()),
-                  child: AylaCapsuleTag(
-                    // 与 `.post-card-tag` 同档（post_card.dart:341–352 逐参数一致）
-                    label,
-                    tone: CapsuleTone.ice,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    fontFamily: AylaFonts.utility,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0, // web 未声明 letter-spacing
-                    textHeight: 1.55, // 继承 body 行高（post_card 同档）
-                  ),
-                ),
+                // 来源标签：**共享件 `AylaSourceTag`**（用户 2026-09-22 裁决统一三域，
+                // 粉色；它自带 `max-width: 12ch` 实测换算）。
+                // ⚠️ 不再复刻 `.post-card-tag` 的 ice-100 灰底（`--ice-600` 零定义、
+                // 用户判为错误）。容器 `.voice-room-tags { max-width: 16ch }` 不变。
+                AylaSourceTag(label),
             ],
           ),
         ),
@@ -618,27 +610,38 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
         // `.voice-room-chat-card-head { display: none }`（窄屏）⇒ 只在宽屏渲染
         if (wide)
           Container(
+            // voice.css 389–397（≥769）：flex none / center / space-between /
+            // `gap: var(--sp-2)` / `padding: var(--sp-3) var(--sp-4)` /
+            // `border-bottom: 1px solid var(--glass-border)` / `background: var(--glass-bg)`
             padding: const EdgeInsets.symmetric(
               horizontal: AylaSpacing.sp4,
               vertical: AylaSpacing.sp3,
             ),
             decoration: const BoxDecoration(
-              color: Color(0x8CFFFAFB), // --glass-bg（宽屏 head 自带该底）
+              // ⚠️ 底色是**透明**：auroraqua.css 593–599（同样 ≥769、最后加载、
+              // 特异性 0-2-0 压过 voice.css 的 0-1-0）把
+              // `.voice-room-chat-card > .voice-room-chat-card-head` 的
+              // background / box-shadow / backdrop-filter **全部清零**
+              // ⇒ voice.css 那条 `--glass-bg` 不生效（卡片底透上来）。
+              // 此前照 voice.css 抄了 --glass-bg ⇒ 卡面上又叠一层（用户 2026-09-22
+              // 实报「这处造轮子」）。
               border: Border(bottom: BorderSide(color: AylaColors.glassBorder)),
             ),
             child: Row(
+              spacing: AylaSpacing.sp2, // gap: var(--sp-2)
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
                 Text(
                   '房内聊天', // tsx 315
                   style: t.body.copyWith(
-                    fontSize: 13,
+                    fontSize: 13, // `.voice-room-chat-title`
                     fontWeight: FontWeight.w600,
                     color: AylaColors.textSecondary,
                   ),
                 ),
-                const Spacer(),
                 Text(
                   '${widget.messages.length} 条消息', // tsx 316
+                  // `.voice-room-chat-count-label`：--text-secondary / 12px
                   style: t.body.copyWith(
                     fontSize: 12,
                     color: AylaColors.textSecondary,
@@ -794,22 +797,6 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
       textDirection: TextDirection.ltr,
     )..layout();
     return p.width * 16;
-  }
-
-  /// `.post-card-tag` 的 `max-width: 12ch`（Space Grotesk 11 / w600 / ls 0）。
-  double _postTag12ch() {
-    final TextPainter p = TextPainter(
-      text: const TextSpan(
-        text: '0',
-        style: TextStyle(
-          fontFamily: AylaFonts.utility,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    return p.width * 12;
   }
 }
 
@@ -1025,6 +1012,8 @@ class _VoiceRoomBodyDemoState extends State<_VoiceRoomBodyDemo> {
   ];
   int _seq = 3;
   bool _failNext = false;
+  bool _favorited = true; // 样张：收藏键可点
+  int _shareTaps = 0; // 样张：转发键可点（计数仅用于演示）
 
   Future<void> _send(String content) async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -1060,7 +1049,17 @@ class _VoiceRoomBodyDemoState extends State<_VoiceRoomBodyDemo> {
       visibilityLabels: const <String>['公开', '冰樱研究社'],
       messages: _messages,
       history: const AylaVoiceChatHistory(hasMore: true),
-      favorite: const SizedBox.shrink(), // 样张不接收藏状态
+      // 头部两键：收藏（compact 32）+ 转发（32）——与卡片族同尺寸
+      //（用户 2026-09-22 裁决：web 的 40×40 转发键判为错误，统一取收藏键的 32）
+      favorite: AylaFavoriteButton(
+        state: _favorited ? FavoriteState.favorited : FavoriteState.notFavorited,
+        compact: true,
+        onToggle: (bool next) => setState(() => _favorited = next),
+      ),
+      share: AylaShareButton(
+        label: '分享语音房',
+        onPressed: () => setState(() => _shareTaps += 1),
+      ),
       onBack: () {},
       onDeleteChannel: owner ? () {} : null,
       onSendText: _send,

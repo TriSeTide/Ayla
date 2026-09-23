@@ -265,6 +265,56 @@ class _AylaDirectoryLoadMoreState extends State<AylaDirectoryLoadMore> {
 
 // ======================= HistoryControls =======================
 
+/// 历史分页投影（[AylaHistoryControls] 的输入；web `HistoryControlsProps`）。
+///
+/// 各域共用同一形状（voice 房内聊天 / 直播弹幕 / 以后的消息列表…）：数据来自
+/// 页面层的 `useCursorHistory` 等价物，组件只负责展示三态与转发回调。
+/// 回调为 null 时按「无动作」处理（不是 disabled：web 里这些按钮由
+/// `hasMore` / `hasNewer` 决定是否渲染）。
+class AylaHistoryControlsData {
+  const AylaHistoryControlsData({
+    this.loading = false,
+    this.error,
+    this.hasMore = false,
+    this.hasNewer = false,
+    this.loadOlder,
+    this.returnLatest,
+    this.retry,
+  });
+
+  /// 加载中（三点 + aria「正在加载历史」）。
+  final bool loading;
+
+  /// 错误文案（非 null → 文案 + 「重试」）。
+  final String? error;
+
+  /// 还有更早记录。
+  final bool hasMore;
+
+  /// 有更新消息（可跳回最新）。
+  final bool hasNewer;
+
+  /// 加载更早。
+  final Future<void> Function()? loadOlder;
+
+  /// 返回最新。
+  final Future<void> Function()? returnLatest;
+
+  /// 重试。
+  final Future<void> Function()? retry;
+
+  /// 转成 [AylaHistoryControls]（回调缺省为空实现，与 voice 域既有调用同口径）。
+  Widget toControls() => AylaHistoryControls(
+    loading: loading,
+    error: error,
+    hasMore: hasMore,
+    hasNewer: hasNewer,
+    loadOlder: loadOlder ?? () async {},
+    returnLatest: returnLatest ?? () async {},
+    retry: retry ?? () async {},
+  );
+}
+
 /// 历史分页控制（`HistoryControls.tsx`）。
 ///
 /// 同样是「投影边界 + 显式续读/重试」：

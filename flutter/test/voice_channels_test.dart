@@ -15,11 +15,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/models/visibility.dart';
 import '../lib/theme/app_icons.dart';
+import '../lib/theme/app_theme.dart' show AylaTextStyles;
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/primitives.dart';
+import '../lib/widgets/directory_controls.dart'
+    show AylaFavoriteButton, FavoriteState;
 import '../lib/widgets/reveal.dart';
+import '../lib/widgets/share.dart' show AylaShareButton;
 import '../lib/widgets/voice_channels.dart';
 
 void main() {
@@ -159,48 +163,112 @@ void main() {
     expect(tester.getSize(find.byWidget(join)).height, 32);
   });
 
-  testWidgets('来源标签：max-width 12ch（同字体实测 `0` 宽 ×12）+ 无字重（继承 400）',
+  testWidgets('来源标签：共享件 AylaSourceTag（三域统一；12ch / utility 12 / 粉色 / 无字重）',
       (WidgetTester tester) async {
     setViewport(tester, const Size(1200, 700));
     await tester.pumpWidget(host(const AylaVoiceChannelCard(channel: basic)));
 
-    // 与实现同口径算一遍 12ch
-    final TextPainter painter = TextPainter(
-      text: const TextSpan(
-        text: '0',
-        style: TextStyle(
-          fontFamily: AylaFonts.display,
-          fontSize: 11,
-          fontWeight: FontWeight.w400,
-          letterSpacing: 0.8,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final double expected = painter.width * 12;
+    // 用户 2026-09-22 裁决：语音/直播/帖子统一复用同一个来源标签，
+    // 度量取 live 徽章档（utility 12 / padding 2×8 / 12ch），色统一为粉色
+    // ⇒ 旧的 `.voice-source-tag`（Fredoka 11 / ls .8）已废弃。
+    expect(find.byType(AylaSourceTag), findsOneWidget);
 
+    final Element tagElement = tester.element(find.byType(AylaSourceTag));
     final ConstrainedBox box = tester.widget<ConstrainedBox>(
-      find.descendant(
-        of: cardAt(0),
-        matching: find.byWidgetPredicate(
-          (Widget w) =>
-              w is ConstrainedBox && w.constraints.maxWidth < 200,
-        ),
-      ),
+      find
+          .descendant(
+            of: cardAt(0),
+            matching: find.byWidgetPredicate(
+              (Widget w) => w is ConstrainedBox && w.constraints.maxWidth < 400,
+            ),
+          )
+          .first,
     );
-    expect(box.constraints.maxWidth, closeTo(expected, 0.01));
+    expect(
+      box.constraints.maxWidth,
+      closeTo(AylaSourceTag.chWidth(AylaTextStyles.of(tagElement)) * 12, 0.01),
+    );
 
     final AylaCapsuleTag tag = tester.widget<AylaCapsuleTag>(
-      find.byType(AylaCapsuleTag),
+      find.descendant(
+        of: find.byType(AylaSourceTag),
+        matching: find.byType(AylaCapsuleTag),
+      ),
     );
     expect(tag.tone, CapsuleTone.sakura); // sakura-300 底 + grape-700 字
-    expect(tag.fontSize, 11);
-    expect(tag.letterSpacing, 0.8);
-    expect(tag.fontWeight, FontWeight.w400); // 该规则未声明字重 ⇒ 继承 body 400
-    expect(tag.padding, const EdgeInsets.symmetric(horizontal: 8));
+    expect(tag.fontFamily, AylaFonts.utility); // live 徽章档：Space Grotesk
+    expect(tag.fontSize, 12);
+    expect(tag.letterSpacing, 0); // 未声明 ⇒ 0
+    expect(tag.fontWeight, FontWeight.w400); // 未声明字重 ⇒ 继承 body 400
+    expect(
+      tag.padding,
+      const EdgeInsets.symmetric(horizontal: AylaSpacing.sp2, vertical: 2),
+    );
   });
 
-  testWidgets('可见性标签：公开/好友互斥、白名单群名可叠加、group 回落群名、未知→群可见',
+  testWidgets('卡片上**没有**转发键（用户 2026-09-22：语音列表卡片不用显示分享键）',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    await tester.pumpWidget(
+      host(
+        AylaVoiceChannelList(
+          channels: const <AylaVoiceCardData>[basic],
+          columns: 1,
+          favoriteBuilder: (BuildContext context, AylaVoiceCardData channel) =>
+              AylaFavoriteButton(
+            state: FavoriteState.favorited,
+            compact: true,
+            onToggle: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(AylaFavoriteButton), findsOneWidget);
+    expect(find.byType(AylaShareButton), findsNothing);
+  });
+
+  testWidgets('等高审计：有收藏键与无收藏键的卡同高（head 行预留 32）', (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    await tester.pumpWidget(
+      host(
+        AylaVoiceChannelList(
+          channels: const <AylaVoiceCardData>[
+            basic,
+            AylaVoiceCardData(
+              id: '2',
+              name: '第二间',
+              ownerNickname: '汐汐',
+              memberCount: 3,
+              visibility: AylaPostVisibility.public,
+            ),
+          ],
+          columns: 1,
+          // 只有第一张卡带收藏键（对应 web `action={null}` 的搜索页用法）
+          favoriteBuilder: (BuildContext context, AylaVoiceCardData channel) =>
+              channel.id == '1'
+              ? AylaFavoriteButton(
+                  state: FavoriteState.notFavorited,
+                  compact: true,
+                  onToggle: (_) {},
+                )
+              : const SizedBox.shrink(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final double withFavorite =
+        tester.getRect(find.byType(AylaVoiceChannelCard).at(0)).height;
+    final double withoutFavorite =
+        tester.getRect(find.byType(AylaVoiceChannelCard).at(1)).height;
+    // web 的 grid `align-items: stretch` 会拉平；Flutter 侧靠「head 行 min-height 32」保证
+    expect(withoutFavorite, withFavorite);
+  });
+
+  testWidgets('可见性标签：公开/好友互斥、白名单群名可叠加、group 回落群名、未知→**无标签**',
       (WidgetTester tester) async {
     expect(
       const AylaVoiceCardData(
@@ -230,7 +298,16 @@ void main() {
     );
     expect(
       const AylaVoiceCardData(id: 'd', name: 'n').visibilityLabels,
-      <String>['群可见'], // 未知 visibility 的兜底（与 web getVisibilityLabels 同）
+      <String>[], // 2026-09-22 修正：web `cardVisibilityLabels` 有 `item.visibility ?` 守卫
+      // ⇒ visibility 缺失返回空数组（不走 getVisibilityLabels 的「群可见」兜底）
+    );
+    expect(
+      const AylaVoiceCardData(
+        id: 'e',
+        name: 'n',
+        visibility: AylaPostVisibility.group, // group 且群名为空 → 才是「群可见」兜底
+      ).visibilityLabels,
+      <String>['群可见']
     );
   });
 
@@ -672,7 +749,10 @@ void main() {
   testWidgets('离开钮 = outlineDestructive：透明底 + destructive 字 + 1px destructive 边、无阴影',
       (WidgetTester tester) async {
     setViewport(tester, const Size(1000, 700));
-    await tester.pumpWidget(host(const AylaVoiceControls()));
+    // ⚠️ 传 onLeave 让按钮**可用**：禁用态自 2026-09-22 起按颜色 ×.55 降透明
+    //（用户裁决：禁用态不再套整层 Opacity，避免 Opacity 叠 BackdropFilter 被 Impeller 拒绝），
+    // 本条测的是**可用态**的面层规格。
+    await tester.pumpWidget(host(AylaVoiceControls(onLeave: () {})));
 
     final GlassButton leave = tester.widget<GlassButton>(
       find.byWidgetPredicate(
