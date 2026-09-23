@@ -64,7 +64,10 @@ import '../widgets/danmaku.dart';
 import '../widgets/live_hall.dart';
 import '../widgets/live_rail.dart';
 import '../widgets/live_create.dart';
+import '../widgets/live_mini_player.dart';
 import '../widgets/live_owner_panel.dart';
+import '../widgets/live_player.dart';
+import '../widgets/live_room_body.dart';
 import '../widgets/live_studio.dart';
 import '../widgets/live_viewers.dart';
 import '../widgets/voice_room_body.dart';
@@ -558,6 +561,32 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '**控制台资料栏（真实挂载：`LiveRoomBody` 的 showOwnerPanel）** · 卡 = padding **sp3**（live.css 168 覆写 app.css 的 sp4）+ `--glass-bg` + blur24 sat1.4 + 1px 亮边 + radius 16 + `--glass-shadow` + column gap sp3 · 行 = 封面 96×16:9（虚线冰蓝；⚠️ 本件 tsx **确实带** `live-cover-preview-img` ⇒ cover **生效**，与 LiveCreate 的死规则不同）+ 标题 **200 固定**（`flex-shrink: 0`）+ 介绍 flex 1 + 开播（`.btn-glow`）/保存竖排（`min-width 96` / `min-height 40`）· 可见范围块 = padding sp3（≤768 sp2）+ **上边框 1px** · 三档断点：≤768 与 **769–1100**（侧栏压缩控制台余宽）都换行 ⇒ 封面+字段一行、开播/保存独占一行 · 保存 = 载荷（trim + 可见性单值 `public→friends→group`）→ **用后端回显刷新封面与可见范围**（后端可能规范化 `allowed_group_ids`）· 「标题不能为空」不发请求；开播/下播 busy 期禁用、失败「操作失败」· ⚠️ **下播键 web 是裸 `.btn`**（app.css 21–34 只有盒模型/字体，**没有任何底/边/阴影**）—— **用户 2026-09-22 裁决当 web 的 bug** ⇒ 改用库内 `ghost` 档给回玻璃面（登记为有意偏离）· **样张可交互**：改标题→保存看回显、开播/下播切换、切可见范围',
             child: aylaLiveOwnerPanelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- live 域最后一批（2026-09-22：B2-6，播放器 / 浮动小窗 / 直播间装配） ----------
+          _Section(
+            title:
+                'AylaLivePlayer（components/live/LivePlayer.tsx 420 行 + app.css 3517–3636 + live.css 939–1005）',
+            source:
+                '**播放器三态 + 悬浮控件 · live 域最后一批** · 根 = 16:9 / `rgba(70,91,146,.12)` / radius-card / 1px 亮边 / overflow hidden；视频 `object-fit: contain` + #000 底 · **三态**：`srsStatus == null` →「正在查询直播状态…」/ degraded →「直播服务状态未知，请稍后再试」（`--warning`）/ idle →「等待推流信号…」（乐观已开播）或「主播未开播」/ live + 播放失败 →「播放失败」（`--destructive`）+ `.btn-glow`「重试」· **悬浮控件**（`.live-player-controls`）：`opacity 0→1`（180ms）+ 隐藏时整层穿透；**桌面悬停/移动、触屏点击**显示，显示后 **3s 无操作自动隐藏**（`AUTO_HIDE_MS = 3000`）；左下「刷新」（32×32 · `rgba(70,91,146,.32)` + 1px `rgba(255,255,255,.28)` + 白图标 16 + blur8 sat1.2 · hover .52 · 点击转一圈 0.6s，reduced-motion 不转）+ 右下「全屏」· **画中画键不实现**（浏览器 PiP 无 Flutter 等价物；窄屏 web 本就隐藏 ⇒ 有意偏离）· **全屏改用 root Overlay 铺满 + 移动端锁横屏**（web 是 `requestFullscreen` 让容器进 top layer；Flutter 无此能力），全屏时 inline 侧不再挂视频（避免平台视图被同时 attach），屏幕下方居中显示**全屏弹幕输入框**（`min(320, 100%-120)` / min-height 50 / 内 input 透明 40 高 / 40×40 `.btn-primary` 发送键 / 失败提示玻璃片）· video 由页面注入（`HlsPlaybackController.videoView`，PoC-B 封装层）· **样张可交互**：悬停/点击显示控件、3s 自动隐藏、刷新旋转、进全屏',
+            child: aylaLivePlayerSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title:
+                'AylaLiveMiniPlayer（components/live/LiveMiniPlayer.tsx 228 行 + live.css 1021–1095）',
+            source:
+                '**手机端 App 内浮动小窗** · 仅**窄屏离开直播间且直播中**出现（调用方判断）；同一时刻至多一个 owner · **fixed 右下 16 / z 60** / **168×94（16:9）** / `touch-action:none` + 禁选中 · 内层 `.live-mini-player-video-wrap` = radius-input + `--glass-bg-strong` + blur24 sat1.4 + 1px 亮边 + compact 阴影 + overflow hidden（**外层不裁剪**，关闭键才能突出在外）· 关闭键 **top/right = -10**（24×24 · `rgba(70,91,146,.32)` · 1px `rgba(255,255,255,.28)` · 白 `IconClose 14` · hover .52）· **单指拖动**（阈值 **5px**、边缘间距 **8**、clamp 在视口内）+ **双指缩放**（宽 **120–320**、高按 16:9、**右下角锚定**）· 点主体/Enter/Space → 回直播间；关闭 → 完整销毁会话 · ⚠️ Flutter 侧**不做 web 的 `suppressClick`**（没有合成 click；拖动一开始 tap 识别器就输给 scale 识别器）· 返回 **Positioned** ⇒ 调用方放在最外层 Stack 直接子级 · **样张可交互**：拖动 / 点主体 / 点关闭',
+            child: aylaLiveMiniPlayerSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title:
+                'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760）',
+            source:
+                '**直播间核心装配（live 域收官件）** · 宽屏三栏 = `.live-rail`（240 侧栏，可收起；收起后展开键回头部）+ `.live-room-main`（头部 + 控制台资料栏 + `.live-room-stage`(播放器 16:9) + 观众条 + 推流地址）+ `.live-room-side`（弹幕列表 + 输入框）· **窄屏沉浸式** = 固定头部 + **视频与弹幕区整体上下滑切台**（dragElastic **0.8**；松手判定：净位移 > **1/3 高**优先，否则同向甩动补充）+ 固定输入框 + 右下列表键打开**覆盖层**（`.live-room-rail-overlay`：`rgba(70,91,146,.25)` 遮罩点关闭 + 右侧 240 侧栏）· **进房错误态仍保留侧栏与弹幕区**（避免卡在只有返回键的死页面）· 头部 = 返回(40×40) + 主播头像(32) + 标题滚动 + **来源标签（共享件 `AylaSourceTag`）** + 收藏(compact) + 转发 + 窄屏列表键 · 控制台（`showOwnerPanel`）头部整行不渲染、改由侧栏承载返回/标题 · **全屏期间冻结 isNarrow**（防锁横屏导致窄↔宽切换、播放器重建黑屏）· 飘弹幕层**仅 `!loading && srsStatus === "live"`** 才挂 · 数据全部由页面注入（`AylaLiveRoomData` + 回调；web 的 `useLiveRoom`/`useDanmaku`/live store 属数据层与运行时）· **样张可交互**：点侧栏切台、收起/展开、窄屏上滑切台、列表覆盖层开关',
+            child: aylaLiveRoomBodySamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

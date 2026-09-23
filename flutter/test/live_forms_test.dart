@@ -355,7 +355,7 @@ void main() {
       expect(titleField.top, moreOrLessEquals(descField.top, epsilon: 0.5)); // 上沿对齐
       expect(titleField.top, moreOrLessEquals(cover.top, epsilon: 0.5));
       // 开播键在**标题正下方**，与标题**同宽同左/右缘**，高度填满剩余（112 − 48 − 4 = 60），**下沿齐平**
-      expect(startPill.width, 200);
+      expect(startPill.width, closeTo(200, 0.5));
       expect(startPill.height, closeTo(112 - 48 - 4, 0.5));
       expect(startPill.top, greaterThan(titleField.bottom));
       expect(startPill.left, moreOrLessEquals(titleField.left, epsilon: 0.5));
@@ -384,7 +384,9 @@ void main() {
       final TextField desc = tester.widget<TextField>(find.byType(TextField).at(1));
       expect(title.maxLines, 1);
       expect(desc.maxLines, isNull); // 多行
-      expect(desc.minLines, 3);
+      // 多行铺满：`expands: true` + maxLines/minLines 均为 null（高度由父级 112 决定）
+      expect(desc.expands, isTrue);
+      expect(desc.minLines, isNull);
 
       // 可见范围块：padding sp3 + 上边框
       final Iterable<Container> containers = tester.widgetList<Container>(

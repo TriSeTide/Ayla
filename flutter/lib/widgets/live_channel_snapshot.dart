@@ -16,6 +16,9 @@ class AylaLiveChannelSnapshot {
     this.description = '',
     this.cover,
     this.status,
+    this.ownerId = '',
+    this.ownerNickname,
+    this.isOwner = false,
     this.visibility,
     this.allowedGroupIds = const <String>[],
     this.group,
@@ -35,6 +38,15 @@ class AylaLiveChannelSnapshot {
 
   /// 封面地址（`/api/v1/media/...`）。
   final String? cover;
+
+  /// 归属用户 id（web `owner_id`）。
+  final String ownerId;
+
+  /// 主播昵称（web `owner_nickname`）。
+  final String? ownerNickname;
+
+  /// 是否本人拥有（web `is_owner`；控制台资料栏/推流地址仅 owner 渲染）。
+  final bool isOwner;
 
   /// 状态（live / idle / ended）。
   final AylaLiveStatus? status;

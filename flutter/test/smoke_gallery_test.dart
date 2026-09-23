@@ -18,7 +18,19 @@ void main() {
   /// 留给无壳场景)。
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
 
+  /// 画布真实宽度（组件画布按 1800 宽排布；样张舞台最宽 1240/1100）。
+  ///
+  /// ⚠️ 必须显式钉死：默认测试窗口物理 800×600 / **DPR 3** ⇒ 逻辑仅 266×200，
+  /// 样张里那些 1100 宽的舞台会被挤到 ~150 ⇒ 带固定侧栏的样张（如直播间三栏）
+  /// 主区被挤没、头部报 RenderFlex overflow（2026-09-22 实测）。
+  void pinCanvas(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+  }
+
   testWidgets('Batch 1 全组件渲染无异常', (WidgetTester tester) async {
+    pinCanvas(tester);
     await tester.pumpWidget(
       host(const ComponentGallery()),
     );
@@ -124,6 +136,7 @@ void main() {
   });
 
   testWidgets('hover GlassButton 触发扫光与缩放不抛错', (WidgetTester tester) async {
+    pinCanvas(tester);
     await tester.pumpWidget(
       host(const ComponentGallery()),
     );
