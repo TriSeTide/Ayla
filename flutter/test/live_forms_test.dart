@@ -346,18 +346,17 @@ void main() {
       final Rect startPill = pillOf(find.byType(GlassButton));
       final Rect savePill = pillOf(find.byType(AylaMsgActionButton));
 
-      // 封面等比加宽：160 × 90（16:9，96 → 160）
-      expect(cover.width, 160);
-      expect(cover.height, 90);
-      // 标题：**单行按内容自然高**（≈ web `.live-title-input { min-height: 32px }`；用户 2026-09-22
-      // 「标题输入框还原」）；介绍：**高 68 且可换行**
-      expect(titleField.height, closeTo(32, 3));
-      expect(descField.height, 68);
+      // 行高 112：封面按 16:9 反推宽度（199.1 × 112）、四个元素**上沿与下沿全部齐平**
+      expect(cover.height, closeTo(112, 0.5));
+      expect(cover.width, closeTo(112 * 16 / 9, 0.5));
+      // 标题：单行固定 48（用户 2026-09-22「标题高一点」）；介绍：112 且可换行
+      expect(titleField.height, closeTo(48, 0.5));
+      expect(descField.height, closeTo(112, 0.5));
       expect(titleField.top, moreOrLessEquals(descField.top, epsilon: 0.5)); // 上沿对齐
       expect(titleField.top, moreOrLessEquals(cover.top, epsilon: 0.5));
-      // 开播键在**标题输入框正下方**，与标题**同宽同左/右缘**（用户画框定稿：按钮不能歪、不能小）
+      // 开播键在**标题正下方**，与标题**同宽同左/右缘**，高度填满剩余（112 − 48 − 4 = 60），**下沿齐平**
       expect(startPill.width, 200);
-      expect(startPill.height, 40);
+      expect(startPill.height, closeTo(112 - 48 - 4, 0.5));
       expect(startPill.top, greaterThan(titleField.bottom));
       expect(startPill.left, moreOrLessEquals(titleField.left, epsilon: 0.5));
       expect(startPill.right, moreOrLessEquals(titleField.right, epsilon: 0.5));
@@ -366,9 +365,13 @@ void main() {
         tester.getRect(find.text('开播')).center.dx,
         moreOrLessEquals(startPill.center.dx, epsilon: 0.5),
       );
+      // 用户 2026-09-22：「下方全都对齐」—— 开播 / 介绍 / 保存 / 封面 **下沿同一条线**
+      expect(startPill.bottom, moreOrLessEquals(descField.bottom, epsilon: 0.5));
+      expect(startPill.bottom, moreOrLessEquals(savePill.bottom, epsilon: 0.5));
+      expect(startPill.bottom, moreOrLessEquals(cover.bottom, epsilon: 0.5));
       // 保存键独占右列并**铺满**（96 × 112 = 字段 68 + gap 4 + 开播 40）
       expect(savePill.width, 96);
-      expect(savePill.height, 112);
+      expect(savePill.height, closeTo(112, 0.5));
       expect(savePill.top, moreOrLessEquals(titleField.top, epsilon: 0.5));
       expect(savePill.bottom, moreOrLessEquals(startPill.bottom, epsilon: 0.5));
       // 拉宽的胶囊里文案必须**居中**（web `.msg-action-btn { justify-content: center }`）
@@ -527,15 +530,15 @@ void main() {
       await settle(tester);
       final Rect titleField = tester.getRect(find.byType(TextField).first);
       final Rect descField = tester.getRect(find.byType(TextField).at(1));
-      // 标题与介绍同行、上沿对齐；标题自然高（≈32）、介绍 68
+      // 与宽屏同构：标题 48 单行、介绍 112 可换行、上沿对齐
       expect(titleField.top, descField.top);
-      expect(titleField.height, closeTo(32, 3));
-      expect(titleField.height, 68);
-      // 封面同样等比加宽 160×90
+      expect(titleField.height, closeTo(48, 0.5));
+      expect(descField.height, closeTo(112, 0.5));
+      // 封面同样按 16:9 反推（199.1 × 112）
       final Rect cover = tester.getRect(find.byType(AspectRatio).first);
-      expect(cover.width, 160);
-      expect(cover.height, 90);
-      // 保存键铺满整列高
+      expect(cover.width, closeTo(112 * 16 / 9, 0.5));
+      expect(cover.height, closeTo(112, 0.5));
+      // 保存键高 = 行高 112，下沿与其余元素齐平
       final Rect savePill = tester.getRect(
         find
             .descendant(
@@ -544,10 +547,12 @@ void main() {
             )
             .first,
       );
-      expect(savePill.height, 112);
+      expect(savePill.height, closeTo(112, 0.5));
+      expect(savePill.bottom, moreOrLessEquals(descField.bottom, epsilon: 0.5));
+      expect(savePill.bottom, moreOrLessEquals(cover.bottom, epsilon: 0.5));
     });
 
-    testWidgets('窄屏（≤768）→ 封面 88 + 字段改列 + 可见范围 padding sp2', (WidgetTester tester) async {
+    testWidgets('窄屏（≤768）→ 布局不变 + **三列下沿对齐**（用户 2026-09-22）', (WidgetTester tester) async {
       await tester.pumpWidget(
         host(
           tester,
@@ -556,23 +561,39 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(tester.getSize(find.byType(AspectRatio).first).width, 88);
-      // 字段成列（两个 TextField 上下排：y 不同）
-      final double y1 = tester.getRect(find.byType(TextField).first).top;
-      final double y3 = tester.getRect(find.byType(TextField).at(1)).top;
-      expect(y3, greaterThan(y1));
+      final Rect cover = tester.getRect(find.byType(AspectRatio).first);
+      final Rect titleField = tester.getRect(find.byType(TextField).first);
+      final Rect descField = tester.getRect(find.byType(TextField).at(1));
+      final Rect startPill = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(GlassButton),
+              matching: find.byType(AnimatedContainer),
+            )
+            .first,
+      );
+      final Rect savePill = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(AylaMsgActionButton),
+              matching: find.byType(AnimatedContainer),
+            )
+            .first,
+      );
+      // 布局不变：封面 | 字段成列（两框上下排）| 两键竖排
+      expect(descField.top, greaterThan(titleField.top));
+      expect(savePill.top, greaterThan(startPill.top));
+      // 三列下沿对齐（行高 72 = 字段列自然高；封面按 16:9 配到 128 × 72）
+      expect(cover.height, closeTo(72, 0.5));
+      expect(cover.width, closeTo(72 * 16 / 9, 0.5));
+      expect(cover.bottom, moreOrLessEquals(descField.bottom, epsilon: 0.5));
+      expect(cover.bottom, moreOrLessEquals(savePill.bottom, epsilon: 0.5));
+      expect(descField.bottom, moreOrLessEquals(savePill.bottom, epsilon: 0.5));
       // 窄屏字段仍是 web 的 min-height 32（用户要求「仅宽屏」加高）
-      expect(tester.getSize(find.byType(TextField).first).height, closeTo(32, 3));
-      // 用户 2026-09-22 裁决：按钮**不独占一行** ⇒ 三档同构，settings 恒为一行
-      expect(
-        tester.getRect(find.text('开播')).top,
-        lessThan(tester.getRect(find.byType(TextField).first).bottom),
-      );
-      // 按钮块恒定 96 宽（`.live-owner-start { min-width: 96px }` 的实值）
-      expect(
-        find.byWidgetPredicate((Widget w) => w is SizedBox && w.width == 96),
-        findsWidgets,
-      );
+      expect(titleField.height, closeTo(32, 0.5));
+      // 按钮列恒定 96 宽（`.live-owner-start { min-width: 96px }` 的实值）
+      expect(startPill.width, closeTo(96, 0.5));
+      expect(savePill.width, closeTo(96, 0.5));
     });
   });
 }

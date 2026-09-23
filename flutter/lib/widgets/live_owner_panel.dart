@@ -47,6 +47,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
@@ -301,6 +302,11 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
   ///   因为 160 宽的封面在 420 视口里会把字段挤没。
   Widget _settings({required bool narrow}) {
     if (narrow) {
+      // 窄屏：**布局不变**（封面 | 字段成列 | 两键竖排），但三列**下沿对齐**
+      //（用户 2026-09-22：「窄屏这个，布局不变，对齐下沿」）。
+      // 行高 = 字段列自然高（标题 32 + `gap sp2` 8 + 介绍 32 = 72，web 原间距不动）；
+      // 封面按 16:9 等比配到该高（宽 = 72 × 16 ÷ 9 = 128）；按钮列用 `spaceBetween`
+      // 吸收 4px 差值（开播顶、保存底），于是三列下沿同在 72。
       return Row(
         spacing: AylaSpacing.sp2,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,35 +317,43 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
         ],
       );
     }
-    final Widget startKey = _startButton(); // 开播/下播（96×40）
     return Row(
       spacing: AylaSpacing.sp2, // gap: var(--sp-2)
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         _coverPicker(narrow: false), // 160 × 90（16:9 等比加宽）
         Expanded(
-          child: Column(
+          // 左块**自己成列**：标题在上、开播**紧贴其下**（用户 2026-09-22：「位置歪了」——
+          // 上一版开播被右侧很高的介绍撑出的空档顶到了下方）；介绍是**独立的高框**，在右侧并列。
+          child: Row(
+            spacing: AylaSpacing.sp2,
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            spacing: AylaSpacing.sp1, // gap: var(--sp-1)
             children: <Widget>[
-              // 第一行：标题（固定宽，按内容自然高）+ 介绍（吃满剩余，高 68 可换行）
-              Row(
-                spacing: AylaSpacing.sp2,
-                crossAxisAlignment: CrossAxisAlignment.start, // 标题与介绍**上沿对齐**
-                // ⚠️ 介绍自带 `Expanded`（`.live-desc-input { flex: 1 }`）——不要再包一层
-                //（双 Expanded 会触发 ParentDataWidget 断言，实测）
-                children: <Widget>[_titleField(), _descField()],
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                spacing: AylaSpacing.sp1, // gap: var(--sp-1)
+                children: <Widget>[
+                  _titleField(), // 单行，固定 32（web `.live-title-input { min-height: 32px }`）
+                  // 开播：与标题同宽，**填满标题以下的剩余高**（= 112 − 32 − 4 = 76），
+                  // 下沿与介绍/保存/封面齐平（用户 2026-09-22：下方全都对齐 + 加高）
+                  SizedBox(
+                    width: _titleWidth,
+                    height: _startKeyHeight,
+                    child: _startButton(),
+                  ),
+                ],
               ),
-              // 第二行：**标题输入框下面的空位** = 开播键（与标题**同宽同左缘**）
-              SizedBox(width: _titleWidth, child: startKey),
+              // 介绍：吃满剩余宽，固定**很高**且可换行（用户「加高加高加高」）
+              // ⚠️ 自带 `Expanded`（`.live-desc-input { flex: 1 }`）——不要再包一层
+              _descField(),
             ],
           ),
         ),
-        // 右列：保存键铺满整列高（用户 2026-09-22）
+        // 右列：保存键（**高 = 行高 112**，下沿与其余元素齐平）
         SizedBox(
           width: _keyWidth,
-          child: _saveButton(minHeight: _rightColumnHeight),
+          child: _saveButton(minHeight: _wideFieldHeight),
         ),
       ],
     );
@@ -347,19 +361,23 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
 
   // ======================= 尺寸常量（含用户 2026-09-22 校准） =======================
 
-  /// 宽/中屏字段高度（**用户三轮校准定稿 = 铺满整行**）。
+  /// 宽/中屏**行高**（= 介绍输入框高，**用户 2026-09-22 定稿**）。
   ///
-  /// web 原值：`.live-title-input` / `.live-desc-input { min-height: 32px }`。
-  /// 用户依次要求「改高一些、对齐」（40）→ 54（封面高）→「**加高啊，铺满啊**」（画框下沿落在行底）
-  /// ⇒ 定稿为**字段列第一行的高**：标题/介绍都取 68（= 开播 40 + `gap sp1` + 保存 24 的自然高）。
-  /// 窄屏档仍按 web 的 32（用户明确「仅宽屏的」）。
-  static const double _wideFieldHeight = _startBlockHeight;
+  /// web 原值：`.live-desc-input { min-height: 32px }`。用户逐轮加高并画框写「**加高加高加高**」，
+  /// 最终要求「**下方全都对齐**」⇒ 本行四个元素（封面 / 开播 / 介绍 / 保存）**高度都是 112**、
+  /// 上沿与下沿全部齐平。标题仍单行 32（web 的 `min-height: 32px`）。
+  static const double _wideFieldHeight = 112;
 
-  /// 窄屏档右列两键的自然高（开播 40 + `gap sp1` + 保存 24）= 68；也是宽屏字段高的来源。
-  static const double _startBlockHeight = 40 + AylaSpacing.sp1 + 24;
+  /// 标题输入框高度（web `.live-title-input { min-height: 32px }`）。
+  ///
+  /// 用户 2026-09-22 定稿 **48**：「标题输入框高一点，开播按钮矮一点，保持对齐，**仅修改两个的大小**」
+  /// ⇒ 标题加高到 48，开播随之变矮（[_startKeyHeight] = 112 − 48 − 4 = **60**），下沿仍与
+  /// 封面 / 简介 / 保存齐平；其余元素尺寸一律未动。
+  static const double _titleHeight = 48;
 
-  /// 宽/中屏**右列「保存」铺满**的高度 = 字段列总高：标题 68 + `gap sp1` 4 + 开播 40 = **112**。
-  static const double _rightColumnHeight = 68 + AylaSpacing.sp1 + 40;
+  /// 开播键高度 = 行高 − 标题 − `gap sp1`（112 − 32 − 4 = 76）：**下沿与其它元素齐平**。
+  static const double _startKeyHeight =
+      _wideFieldHeight - _titleHeight - AylaSpacing.sp1;
 
   /// 开播/保存两键的宽度（`.live-owner-start { min-width: 96px }` 的实值）。
   static const double _keyWidth = 96;
@@ -368,9 +386,16 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
   /// 用户 2026-09-22 定稿：**开播键与标题同宽同左缘**（画框指定，解决「按钮歪了、小了」）。
   static const double _titleWidth = 200;
 
-  /// 宽/中屏封面宽度：96 → **160**（用户 2026-09-22：「等比例拉啊，加宽呗，把右边的元素挤一点过去」），
-  /// 16:9 ⇒ 高 90。窄屏档仍 88（live.css 249）。
-  static const double _coverWidthWide = 160;
+  /// 宽/中屏封面宽度：按 **16:9 反推** —— 行高 112 ⇒ 宽 = 112 × 16 ÷ 9 ≈ 199.1
+  /// （用户 2026-09-22：「等比例拉啊，加宽呗」+「下方全都对齐」⇒ 封面也要与整行等高）。
+  static const double _coverWidthWide = _wideFieldHeight * 16 / 9;
+
+  /// 窄屏（≤768）行高 = 字段列自然高：标题 32 + `gap sp2` 8 + 介绍 32 = **72**
+  /// （web 原间距不动；用户只要求「布局不变，对齐下沿」）。
+  static const double _narrowRowHeight = 32 + AylaSpacing.sp2 + 32;
+
+  /// 窄屏封面宽度：同样按 16:9 反推（72 × 16 ÷ 9 = 128），底沿与其余两列齐平。
+  static const double _coverWidthNarrow = _narrowRowHeight * 16 / 9;
 
   /// `.live-cover-picker`（live.css 173–175；按钮组成员 ⇒ hover 1.02 / active .98）。
   Widget _coverPicker({required bool narrow}) {
@@ -379,8 +404,8 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
       semanticLabel: preview == null ? '设置直播间封面' : '更换直播间封面', // tsx 124
       onTap: () => unawaited(_pickCover()),
       child: SizedBox(
-        // 窄屏 88（live.css 249）；宽/中屏 **160**（用户 2026-09-22 等比加宽）
-        width: narrow ? 88 : _coverWidthWide,
+        // 窄屏 128（= 行高 72 × 16 ÷ 9，等比且下沿齐平）；宽/中屏 199.1（用户 2026-09-22）
+        width: narrow ? _coverWidthNarrow : _coverWidthWide,
         child: AspectRatio(
           aspectRatio: 16 / 9,
           child: ClipRRect(
@@ -418,7 +443,7 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
     );
   }
 
-  /// 标题输入（宽屏：固定 200 宽 × 68 高；窄屏：100% 宽 × 32 高）。
+  /// 标题输入（宽/中屏：固定 200 宽 × **32** 高；窄屏：100% 宽 × 32 高）。
   Widget _titleField() => _input(
     controller: _title,
     placeholder: '直播间标题', // tsx 156
@@ -426,7 +451,7 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
     maxLength: 128,
     width: _titleWidth, // `.live-title-input { width: 200px; flex-shrink: 0 }`
     expandInRow: false,
-    height: _wideFieldHeight,
+    height: _titleHeight,
   );
 
   /// 介绍输入（**多行**，用户 2026-09-22：「标题仍然单行，介绍支持换行」）。
@@ -471,9 +496,9 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
 
   /// `.field` 族输入（auroraqua 502–517 同一族；本件两个输入都在 `.live-owner-fields` 内）。
   ///
-  /// [height]：**只对多行（介绍）生效** —— 用户 2026-09-22 定稿：介绍要是「很高的输入框」且可换行
-  /// （默认 68）；**标题保持单行按内容自然高**（≈ web `.live-title-input` 的 `min-height: 32px`，
-  /// 用户随后要求「标题输入框还原」）。
+  /// [height]：行内固定高 —— 标题 32（web `.live-title-input { min-height: 32px }`）、
+  /// 介绍 [_wideFieldHeight] 112（用户「加高加高加高」+「下方全都对齐」）；窄屏档 32。
+  /// [multiline]：介绍为**多行可换行**（用户 2026-09-22 明确）。
   Widget _input({
     required TextEditingController controller,
     required String placeholder,
@@ -481,16 +506,21 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
     required int maxLength,
     required double? width,
     required bool expandInRow,
-    double height = 68,
+    double height = 32,
     /// 是否多行（用户 2026-09-22：「标题仍然单行，介绍支持换行」）。
     bool multiline = false,
   }) {
     final AylaTextStyles t = AylaTextStyles.of(context);
-    // 高度：`null` = **按内容自然高**（web `.live-title-input { min-height: 32px }` 的实渲染，
-    // 文字 22.5 + `padding-block: sp1` + 1px 边 ≈ 32）——用户 2026-09-22：「**标题输入框还原**」。
-    // ⚠️ 不要给单行框硬塞 `SizedBox(height: 68)`：`InputDecorator` 会按内容自算高度并在盒子里
-    //    **顶部收起/裁切**提示文字（实测：盒子 68、填充块 ~30，用户截图里标题被裁坏）；
-    //    想给死高就必须把垂直内沿算成 `(h - lineHeight) / 2`，而那样单行的观感也不对。
+    // ⚠️ **可见填充块（InputDecorator）的高度必须等于盒子高**：
+    //    单行框的装饰器按「内容 + contentPadding」自算 ⇒ 只给 `SizedBox(height:)` 时，
+    //    填充块会在盒子里**顶部收起**（实测：盒子 48、填充块 ~31 —— 用户连续两次截图指出
+    //    「输入框没加高」就是这个）。⇒ 单行把垂直内沿**按目标高度反算**：padV = (h − 行高) / 2，
+    //    装饰器自然 = 盒子高。多行框走 `expands: true`（高度由父级决定），内沿保持 web 的 sp1。
+    final double lineHeight =
+        (t.body.fontSize ?? 15) * (t.body.height ?? 1.5); // 15 × 1.5 = 22.5
+    final double padV = multiline
+        ? AylaSpacing.sp1
+        : math.max(AylaSpacing.sp1, (height - lineHeight) / 2);
     final Widget textField = TextField(
       controller: controller,
       // 单行（标题）：内容垂直居中（等价 web 的 `align-items: center`）；
@@ -499,8 +529,13 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
       textAlignVertical: multiline
           ? TextAlignVertical.top
           : TextAlignVertical.center,
+      // ⚠️ 多行用 **`expands: true` + maxLines/minLines 均为 null**：
+      //    装饰器会按**父级给的固定高度铺满**（Flutter 官方做法）⇒ 不用手算高度就自适应对齐。
+      //    若给 `minLines: 3`，装饰器按内容自算（≈76）并在 112 的盒子里**顶部收起**
+      //    —— 用户截图里「简介比别的矮一截」就是这个（2026-09-22 实报）。
       maxLines: multiline ? null : 1,
-      minLines: multiline ? 3 : 1,
+      minLines: multiline ? null : 1,
+      expands: multiline,
       keyboardType: multiline ? TextInputType.multiline : TextInputType.text,
       maxLength: maxLength,
       style: t.body.copyWith(color: AylaColors.textPrimary),
@@ -512,9 +547,9 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
         hintStyle: t.body.copyWith(color: AylaColors.slate500), // ::placeholder
         filled: true,
         fillColor: AylaColors.glassBg,
-        contentPadding: const EdgeInsets.symmetric(
+        contentPadding: EdgeInsets.symmetric(
           horizontal: AylaSpacing.sp3, // 同字段族 padding sp2 sp3 的横向（sp3）
-          vertical: AylaSpacing.sp1, // `padding-block: var(--sp-1)`
+          vertical: padV, // 单行：按高度反算使填充块 = 盒子；多行：web 的 `padding-block: sp1`
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AylaRadii.rInput),
@@ -526,11 +561,8 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
         ),
       ),
     );
-    // 高度：多行（介绍）给**固定高**（默认 68，用户 2026-09-22「很高的输入框」+ 可换行）；
-    // 单行（标题）**不给高度** ⇒ 按内容自然高（web `.live-title-input { min-height: 32px }`）。
-    final Widget field = multiline
-        ? SizedBox(height: height, child: textField)
-        : textField;
+    // 行内固定高 ⇒ 装饰器与盒子等高（标题 32 / 介绍 112 都能填满）
+    final Widget field = SizedBox(height: height, child: textField);
     final Widget labelled = Semantics(label: ariaLabel, child: field);
     if (width != null) {
       return SizedBox(width: width, child: labelled); // `.live-title-input { width: 200px }`
@@ -577,11 +609,15 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
   );
 
   /// 窄屏档的右列：开播 + 保存竖排（96 宽；web ≤768 的 `flex-direction: column` 档）。
+  ///
+  /// 固定高 = [_narrowRowHeight]（= 字段列自然高 72），`spaceBetween` ⇒ **开播贴顶、保存贴底**
+  /// （两者下沿与封面 / 字段列齐平；web 的 `gap sp1` 保留为最小间距）。
   Widget _startColumn() => SizedBox(
     width: _keyWidth,
+    height: _narrowRowHeight,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       spacing: AylaSpacing.sp1, // gap: var(--sp-1)
       children: <Widget>[_startButton(), _saveButton()],
     ),
