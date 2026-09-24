@@ -41,96 +41,53 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pump(const Duration(milliseconds: 600));
 
-    // 分区标题应全部存在
-    expect(
-      find.text('GlassButton（app.css .btn 21–67 / auroraqua.css 54–166）'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('GlassCard（app.css .glass-card 230–248）'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）'),
-      findsOneWidget,
-    );
-    // 2026-09-20 审查 R8：TabBadge 分区标题改为「三档规格」写法
-    expect(
-      find.text(
-        'TabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-20 审查 R7：入场件分区
-    expect(
-      find.text(
-        'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 A3：Shell 弹层分区（CreateSheet 两形态）
-    expect(
-      find.text(
-        'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 A4：右下浮层按钮族分区
-    expect(
-      find.text(
-        'AylaCornerFabStack / AylaRefreshFab / AylaScrollTopFab / AylaQuickMessageFab（layout/*.tsx + shell.css 423–456 / 679–787）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 A5：会话活动悬浮球分区
-    expect(
-      find.text(
-        'AylaSessionActivityIndicator（layout/SessionActivityIndicator.tsx 1–181 + shell.css 458–575 / 651–660）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 B1-1：voice 域第一批分区
-    expect(
-      find.text(
-        'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 B1-2：voice 成员行（含音量条）分区
-    expect(
-      find.text(
-        'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 B1-3：建语音频道表单分区
-    expect(
-      find.text(
-        'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 B1-4：语音频道面板分区
-    expect(
-      find.text(
-        'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 B1-5：爱莉语音面板分区
-    expect(
-      find.text(
-        'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
-      ),
-      findsOneWidget,
-    );
-    // 2026-09-21 B1-6：语音房整页分区
-    expect(
-      find.text(
-        'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
-      ),
-      findsOneWidget,
-    );
+    // 分区标题应全部可渲染（⚠️ 2026-09-24 起画布是**懒加载** `ListView.builder`：
+    // 只为可见 section 建 Element/语义节点——一次性 1685 个语义节点会让 Windows
+    // accessibility bridge 更新失败并 `Lost connection to device`）⇒ 逐个滚动到可见再断言。
+    // 分区标题应全部存在（画布整体 `ExcludeSemantics` + 一次性构建；
+    // 注：曾尝试 `ListView.builder` 懒加载来减语义节点，但样张里的 autofocus 组件
+    // 在被滚动销毁时会触发 framework 焦点断言 ⇒ 已回退，改在组件侧关语义）
+    void expectSection(String title) {
+      expect(find.text(title), findsOneWidget, reason: title);
+    }
+
+    for (final String title in <String>[
+      'GlassButton（app.css .btn 21–67 / auroraqua.css 54–166）',
+      'GlassCard（app.css .glass-card 230–248）',
+      'AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
+      // 2026-09-20 审查 R8：TabBadge 分区标题改为「三档规格」写法
+      'TabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
+      // 2026-09-20 审查 R7：入场件分区
+      'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
+      // 2026-09-21 A3：Shell 弹层分区（CreateSheet 两形态）
+      'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',
+      // 2026-09-21 A4：右下浮层按钮族分区
+      'AylaCornerFabStack / AylaRefreshFab / AylaScrollTopFab / AylaQuickMessageFab（layout/*.tsx + shell.css 423–456 / 679–787）',
+      // 2026-09-21 A5：会话活动悬浮球分区
+      'AylaSessionActivityIndicator（layout/SessionActivityIndicator.tsx 1–181 + shell.css 458–575 / 651–660）',
+      // 2026-09-21 B1-1：voice 域第一批分区
+      'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
+      // 2026-09-21 B1-2：voice 成员行（含音量条）分区
+      'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
+      // 2026-09-21 B1-3：建语音频道表单分区
+      'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
+      // 2026-09-21 B1-4：语音频道面板分区
+      'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
+      // 2026-09-21 B1-5：爱莉语音面板分区
+      'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
+      // 2026-09-21 B1-6：语音房整页分区
+      'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
+      // 2026-09-24 B3 chat 域第一批三节（本批新增）
+      '聊天消息气泡（MessageBubble.tsx）',
+      '媒体消息族（MediaContent.tsx）',
+      '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
+      // 2026-09-24 B3 chat 域第二批三节
+      '会话列表（ConversationList.tsx）',
+      '@ 成员选择器（MentionPicker.tsx）',
+      '群表情包面板（EmojiPackPanel.tsx）',
+    ]) {
+      expectSection(title);
+    }
     expect(find.text('登录'), findsWidgets);
     expect(find.text('注册'), findsOneWidget);
   });

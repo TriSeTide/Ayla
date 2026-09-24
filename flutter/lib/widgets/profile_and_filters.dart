@@ -4,8 +4,6 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show KeyDownEvent, LogicalKeyboardKey;
 import 'package:flutter/widget_previews.dart';
 
 import '../theme/app_theme.dart';
@@ -15,8 +13,10 @@ import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 import 'avatar_halo.dart';
 import 'dialogs.dart' show AylaModalOverlay;
-import 'primitives.dart' show AylaNavHighlight, AylaNavHighlightState;
+import 'nav_highlight_list.dart'
+    show AylaNavHighlightList, AylaNavHighlightListState, AylaNavHighlightSlot;
 import 'reveal.dart';
+import 'sidebar_card.dart';
 
 // ======================= UserProfileCard =======================
 
@@ -327,264 +327,56 @@ class AylaDirectoryFilters extends StatefulWidget {
 
 class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
   final ScrollController _scroll = ScrollController();
-  final List<FocusNode> _nodes = <FocusNode>[];
-  final List<GlobalKey> _slotKeys = <GlobalKey>[];
 
-  /// 高亮所在层的 key —— **测量基准必须与高亮同坐标系**。
-  ///
-  /// 高亮画在 `GlassSurface` 的 child 内（即 padding **之内**），而
-  /// `AylaDirectoryFilters` 的 RenderBox 在 padding **之外**。若拿后者当
-  /// `ancestor` 测量，槽位坐标会多减一次 padding → 高亮左移出卡片
-  /// （实测：高亮跑到卡片左边被裁）。故测量与绘制都用同一层。
-  final GlobalKey _stackKey = GlobalKey();
+  /// 直达槽位列表 State（子项 onFocus → 滚动揭示；本件不再自持高亮测量）。
+  final GlobalKey<AylaNavHighlightListState> _navKey =
+      GlobalKey<AylaNavHighlightListState>();
 
-  /// 选中槽位的**实测矩形**（相对高亮所在层）——共享高亮按它定位。
-  Rect? _capsuleRect;
-
-  /// 指针当前所在**的选项卡索引**（-1 = 不在任何选项卡上）。
-  ///
-  /// ⚠️ 不能只记「是否 hover 选中项」这个 bool：web 的扫光选择器是
-  /// `.has-auroraqua-highlight:hover > .auroraqua-nav-highlight::after`
-  /// —— **CSS 每帧实时求值**。所以「指针静止、点击后高亮滑到指针下」
-  /// 也会立即触发扫光；而 Flutter 的 `MouseRegion.onEnter/onExit`
-  /// **只在指针移动时**触发，指针不动就收不到 → 漏掉这一半（实测报障）。
-  ///
-  /// 记索引 + 在 build 里求值 `_hoveredIndex == 选中索引`，即可复刻
-  /// CSS 的实时语义：选中项一变，等式结果随之变化，无需新的指针事件。
-  int _hoveredIndex = -1;
-
-  /// **按压中**的选项卡索引（-1 = 无）。
-  ///
-  /// web 的胶囊是按钮的子元素 → 按钮 `:active { scale: .98 }` 时胶囊跟着缩。
-  /// 本实现把胶囊放在容器级（为共享迁移），故需显式同步缩放。
-  int _pressedIndex = -1;
-
-  /// 直达高亮 State 的 key —— 让「指针进入选中项」**当场**启动扫光，
-  /// 不经父级 setState → rebuild 的 1 帧往返（对齐 web `:hover` 的原生响应）。
-  final GlobalKey<AylaNavHighlightState> _highlightKey =
-      GlobalKey<AylaNavHighlightState>();
-
-  /// 当前选中项索引。
+  /// 当前选中项索引（-1 = 无）。
   int get _selectedIndex => widget.options
       .indexWhere((({String key, String label}) o) => o.key == widget.value);
 
   @override
-  void initState() {
-    super.initState();
-    _syncKeys();
-  }
-
-  void _syncKeys() {
-    while (_slotKeys.length < widget.options.length) {
-      _slotKeys.add(GlobalKey());
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant AylaDirectoryFilters old) {
-    super.didUpdateWidget(old);
-    if (old.options.length != widget.options.length) _syncKeys();
-  }
-
-  @override
   void dispose() {
     _scroll.dispose();
-    for (final FocusNode n in _nodes) {
-      n.dispose();
-    }
     super.dispose();
-  }
-
-  FocusNode _nodeFor(int i) {
-    while (_nodes.length <= i) {
-      _nodes.add(FocusNode(debugLabel: 'directory-filter-$i'));
-    }
-    return _nodes[i];
-  }
-
-  /// 布局后测量「选中槽位」矩形（含 padding —— 高亮必须铺满整个按钮）。
-  ///
-  /// 每次 build 都排一次测量：字体加载、滚动、切换都会改变几何。
-  void _measureCapsule() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final int idx = widget.options
-          .indexWhere((({String key, String label}) o) => o.key == widget.value);
-      if (idx < 0 || idx >= _slotKeys.length) return;
-      // 基准 = 高亮所在层（与高亮同坐标系），不是本组件的 RenderBox
-      final RenderBox? self =
-          _stackKey.currentContext?.findRenderObject() as RenderBox?;
-      final RenderBox? slot =
-          _slotKeys[idx].currentContext?.findRenderObject() as RenderBox?;
-      if (self == null || slot == null || !slot.hasSize) return;
-      final Rect rect =
-          (slot.localToGlobal(Offset.zero, ancestor: self)) & slot.size;
-      if (rect != _capsuleRect) setState(() => _capsuleRect = rect);
-    });
-  }
-
-  /// 把第 [index] 项滚入可视区（**只滚筛选条**，保留结果区滚动位置）。
-  void _reveal(int index) {
-    if (!_scroll.hasClients ||
-        index < 0 ||
-        index >= widget.options.length ||
-        index >= _slotKeys.length) {
-      return;
-    }
-    final RenderBox? box =
-        _slotKeys[index].currentContext?.findRenderObject() as RenderBox?;
-    // 基准同高亮层（padding 之内）
-    final RenderBox? self =
-        _stackKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || self == null || !box.hasSize || !self.hasSize) return;
-
-    final Offset topLeft = box.localToGlobal(Offset.zero, ancestor: self);
-    // padding 在 GlassSurface 内（sp3）；scroll-padding 与之同值
-    const double padding = AylaSpacing.sp3;
-    final double viewport = widget.narrow ? self.size.width : self.size.height;
-    final double start = widget.narrow ? topLeft.dx : topLeft.dy;
-    final double end = start + (widget.narrow ? box.size.width : box.size.height);
-    final double usable = viewport - padding * 2;
-
-    double delta = 0;
-    if (start < padding) {
-      delta = start - padding;
-    } else if (end > padding + usable) {
-      delta = end - (padding + usable);
-    }
-    if (delta == 0) return;
-    _scroll.jumpTo(
-      (_scroll.offset + delta).clamp(0, _scroll.position.maxScrollExtent),
-    );
-  }
-
-  /// 键盘导航（tsx onKeyDown）：窄屏 ←/→、宽屏 ↑/↓ 循环；Home/End；
-  /// **方向键同时改变选中值**。
-  KeyEventResult _onKey(int index, FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final int n = widget.options.length;
-    if (n == 0) return KeyEventResult.ignored;
-
-    final LogicalKeyboardKey nextKey = widget.narrow
-        ? LogicalKeyboardKey.arrowRight
-        : LogicalKeyboardKey.arrowDown;
-    final LogicalKeyboardKey prevKey = widget.narrow
-        ? LogicalKeyboardKey.arrowLeft
-        : LogicalKeyboardKey.arrowUp;
-
-    int? nextIndex;
-    if (event.logicalKey == LogicalKeyboardKey.home) {
-      nextIndex = 0;
-    } else if (event.logicalKey == LogicalKeyboardKey.end) {
-      nextIndex = n - 1;
-    } else if (event.logicalKey == nextKey) {
-      nextIndex = (index + 1) % n;
-    } else if (event.logicalKey == prevKey) {
-      nextIndex = (index - 1 + n) % n;
-    }
-    if (nextIndex == null) return KeyEventResult.ignored;
-
-    final String next = widget.options[nextIndex].key;
-    _nodeFor(nextIndex).requestFocus();
-    _reveal(nextIndex);
-    if (next != widget.value) widget.onChange(next);
-    return KeyEventResult.handled;
   }
 
   @override
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
-    _measureCapsule();
 
-    // ---------- 选项卡（不含任何底；底由容器级高亮绘制） ----------
-    final List<Widget> tabs = <Widget>[
-      for (int i = 0; i < widget.options.length; i++)
-        KeyedSubtree(
-          key: _slotKeys[i],
-          child: _FilterTab(
-            focusNode: _nodeFor(i),
-            label: widget.options[i].label,
-            active: widget.options[i].key == widget.value,
-            narrow: widget.narrow,
-            style: t,
-            onKey: (FocusNode n, KeyEvent e) => _onKey(i, n, e),
-            onFocus: () => _reveal(i),
-            // 只更新「指针所在索引」；扫光与否在 build 里按 CSS 语义求值
-            onHoverChanged: (bool h) {
-              final int next = h ? i : (_hoveredIndex == i ? -1 : _hoveredIndex);
-              if (next != _hoveredIndex) {
-                setState(() => _hoveredIndex = next);
-              }
-            },
-            // 按压态上报（驱动容器级高亮的同步缩放，对齐 web 的
-            // 「胶囊是按钮子元素 → 跟随 :active scale .98」）
-            onPressedChanged: (bool p) {
-              final int next = p ? i : (_pressedIndex == i ? -1 : _pressedIndex);
-              if (next != _pressedIndex) {
-                setState(() => _pressedIndex = next);
-              }
-            },
-            // 选中项被指到/离开 → **直接**驱动高亮扫光（无父级 rebuild 往返）
-            onSweep: (bool entering) {
-              if (_highlightKey.currentState case final AylaNavHighlightState s) {
-                s.setSweep(entering);
-              }
-            },
-            onTap: () {
-              if (widget.options[i].key != widget.value) {
-                // **挂载即命中**（对齐 web）：点击的是一个「指针已经在上面」的
-                // tab，web 上胶囊被挂载到该 tab 时 `:hover` 从第一帧就匹配 →
-                // 首次绘制的 computed style 直接是 `translateX(120%)`（右侧界外），
-                // **不产生 transition**。随后鼠标移走 → `120% → -120%` →
-                // transition 跑出**完整的一次「从右往左」扫光**。
-                //
-                // 用 `jump: true` 把进度直接置到 1.0（= +120%），复刻这一语义。
-                // 若改成 forward()，行程会在点击后立刻被消耗（16ms 才走 3%），
-                // 「点击后马上移走」时回程几乎为零 → 看不到扫光（实测复现）。
-                if (_highlightKey.currentState
-                    case final AylaNavHighlightState sw) {
-                  sw.setSweep(true, jump: true);
-                }
-                widget.onChange(widget.options[i].key);
-              }
-            },
-          ),
-        ),
-    ];
-
-    // ---------- 高亮（容器级单实例；尺寸 = 实测槽位矩形，含 padding） ----------
-    // 高亮（容器级单实例）。用 [AnimatedPositioned] 让切换时**平滑迁移**
-    // （300ms `--auroraqua-ease-out`）—— 等价 web 的 Framer `layoutId`：
-    // 同一个实体在两项之间滑动，而不是旧底消失/新底出现。
-    final Widget? highlight = _capsuleRect == null
-        ? null
-        : AnimatedPositioned(
-            duration: AylaDurations.auroraqua, // 300ms --auroraqua-duration
-            curve: AylaCurves.auroraquaEaseOut, // --auroraqua-ease-out
-            left: _capsuleRect!.left,
-            top: _capsuleRect!.top,
-            width: _capsuleRect!.width,
-            height: _capsuleRect!.height,
-            // `:active → scale: .98` —— web 的胶囊是**按钮的子元素**
-            // （`position:absolute; inset:0`），按钮按下缩放时胶囊**跟着缩**。
-            // 本实现为支持共享迁移把胶囊放在**容器级**，因此不会自动继承按钮的
-            // `AnimatedScale` → 需在此**同步同样的缩放**（时长/曲线一致）。
-            // 判据：指针所在项 == 选中项 且该 tab 处于按压态。
-            child: AnimatedScale(
-              duration: const Duration(milliseconds: 200), // transition 200ms
-              curve: AylaCurves.auroraqua,
-              scale: _pressedIndex >= 0 && _pressedIndex == _selectedIndex
-                  ? 0.98
-                  : 1.0,
-              child: AylaNavHighlight(
-                key: _highlightKey,
-                sweep: true,
-                // CSS 语义：`.has-auroraqua-highlight:hover > .auroraqua-nav-highlight`
-                // → 指针所在项 == 选中项时扫光（每帧求值，故"高亮滑到静止指针下"也触发）
-                sweepActive: _hoveredIndex >= 0 && _hoveredIndex == _selectedIndex,
-              ),
-            ),
-          );
+    // ---------- 选项卡（不含任何底；底由容器级共享高亮绘制） ----------
+    //
+    // ⚠️ 高亮/迁移/按压/扫光/键盘/滚动揭示**全部**由公共件
+    // [AylaNavHighlightList] 承担（2026-09-24 从本文件抽出 —— 用户点名
+    // 「会话列表背景卡片、选中高亮、切换动画等应直接复用 DirectoryFilters 宽屏侧栏」
+    // ⇒ 抽成公共件后 `AylaDirectoryFilters` 与会话列表共用同一份实现）。
+    final Widget nav = AylaNavHighlightList(
+      key: _navKey,
+      itemCount: widget.options.length,
+      selectedIndex: _selectedIndex,
+      axis: widget.narrow ? Axis.horizontal : Axis.vertical,
+      gap: AylaSpacing.sp2, // gap: sp2
+      scrollController: _scroll,
+      semanticLabel: widget.label, // role=tablist 的 aria-label
+      // 方向键同时改变选中值（tsx onKeyDown 语义）
+      onSelect: (int i) => widget.onChange(widget.options[i].key),
+      itemBuilder: (BuildContext context, AylaNavHighlightSlot slot) => _FilterTab(
+        focusNode: slot.focusNode,
+        label: widget.options[slot.index].label,
+        active: slot.active,
+        narrow: widget.narrow,
+        style: t,
+        onKey: slot.onKey,
+        // 聚焦揭示由公共件的 FocusNode listener 处理（等价 web 的 onFocus → reveal）
+        onFocus: () {},
+        onTap: slot.onTap,
+        onSweep: slot.onSweep,
+        onPressedChanged: slot.onPressedChanged,
+        onHoverChanged: slot.onHoverChanged,
+      ),
+    );
 
     // ═══════════════ 窄屏（≤768）：无圆角顶栏 ═══════════════
     if (widget.narrow) {
@@ -607,65 +399,32 @@ class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
               horizontal: AylaSpacing.sp3, // padding: sp2 sp3
               vertical: AylaSpacing.sp2,
             ),
-            child: Stack(
-              key: _stackKey, // 与高亮同坐标系（测量基准）
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                if (highlight != null) highlight,
-                Row(
-                  children: <Widget>[
-                    for (int i = 0; i < tabs.length; i++) ...<Widget>[
-                      if (i > 0) const SizedBox(width: AylaSpacing.sp2),
-                      tabs[i],
-                    ],
-                  ],
-                ),
-              ],
-            ),
+            child: nav,
           ),
         ),
       );
     }
 
     // ═══════════════ 宽屏（>768）：玻璃卡片侧栏 ═══════════════
-    return AylaRevealItem(
-      // animation: auroraqua-sidebar-in（-20px 0 → 0,0）
-      offset: const Offset(-20, 0),
-      child: SizedBox(
-        width: AylaDirectoryFilters.sidebarWidth, // flex: 0 0 224px
-        child: GlassSurface(
-          radius: AylaRadii.rCard, // border-radius: var(--radius-card) 16
-          shadow: AylaShadows.compact, // --glass-shadow-compact
-          padding: null,
-          child: SingleChildScrollView(
-            controller: _scroll,
-            // ⚠️ **padding 必须放在滚动视图内部**：CSS 的 `overflow-y: auto`
-            // 裁剪边界是 **padding box**（含 padding），而 Flutter 的
-            // `SingleChildScrollView` 裁剪在**自己的 content box**。若 padding
-            // 留在外层 `GlassSurface`，滚动视图就落在 padding 之内 → tab 的
-            // hover 外阴影（`--glass-shadow-nav` 的 8px 扩散）**左右两侧被裁断**。
-            // 故 padding 归滚动内容承担（与 CSS 的 padding 等效）。
-            padding: const EdgeInsets.all(AylaSpacing.sp3), // padding: var(--sp-3)
-            child: Stack(
-              key: _stackKey, // 与高亮同坐标系（测量基准）
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                if (highlight != null) highlight,
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  spacing: AylaSpacing.sp2, // gap: sp2
-                  children: <Widget>[
-                    // leading / decor / header 仅宽屏渲染（窄屏 display:none）
-                    if (widget.leading != null) widget.leading!,
-                    if (widget.decor != null) widget.decor!,
-                    if (widget.header != null) widget.header!,
-                    ...tabs,
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+    // 容器材质/滚动/入场统一走公共件 [AylaSidebarCard]
+    // （`.directory-page .directory-filters`：224 / `--glass-shadow-compact` /
+    //  `auroraqua-sidebar-in` **300ms**；padding 归滚动内容承担的理由见该件文档）。
+    return AylaSidebarCard(
+      width: AylaDirectoryFilters.sidebarWidth, // flex: 0 0 224px
+      shadow: AylaShadows.compact, // --glass-shadow-compact
+      padding: const EdgeInsets.all(AylaSpacing.sp3), // padding: var(--sp-3)
+      enterDuration: AylaDurations.auroraqua, // --auroraqua-duration 300ms
+      scrollController: _scroll,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: AylaSpacing.sp2, // gap: sp2
+        children: <Widget>[
+          // leading / decor / header 仅宽屏渲染（窄屏 display:none）
+          if (widget.leading != null) widget.leading!,
+          if (widget.decor != null) widget.decor!,
+          if (widget.header != null) widget.header!,
+          nav,
+        ],
       ),
     );
   }

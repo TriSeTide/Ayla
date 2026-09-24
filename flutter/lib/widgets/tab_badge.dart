@@ -96,6 +96,19 @@ enum TabBadgeMetrics {
     fontWeight: FontWeight.w600,
     glow: false,
     textHeight: 16 / 11,
+  ),
+
+  /// `.conv-unread`（app.css 693–706，会话列表的未读徽标）：
+  /// **min 20×20** / padding `0 6` / pill / `--pink-500` 底 + `#fffafb` 字 /
+  /// `--font-utility` **12**px **w500**（字比其余档大 1px）。
+  convUnread(
+    minSize: 20,
+    horizontalPadding: 6,
+    fontFamily: AylaFonts.utility,
+    fontWeight: FontWeight.w500,
+    glow: false,
+    textHeight: 1,
+    fontSize: 12,
   );
 
   const TabBadgeMetrics({
@@ -105,6 +118,7 @@ enum TabBadgeMetrics {
     required this.fontWeight,
     required this.glow,
     required this.textHeight,
+    this.fontSize = 11,
   });
 
   /// 最小边长（`min-width` / `height`，px）。
@@ -121,6 +135,9 @@ enum TabBadgeMetrics {
 
   /// 是否带 `--glow-shadow` 辉光。
   final bool glow;
+
+  /// 字号（`font-size`）。各档 11px；[convUnread] 是 `12px`。
+  final double fontSize;
 
   /// 文字行高（`TextStyle.height` 倍数 = CSS `line-height` ÷ `font-size`）。
   ///
@@ -198,7 +215,7 @@ class TabBadge extends StatelessWidget {
               style: TextStyle(
                 fontFamily: metrics.fontFamily,
                 fontFamilyFallback: AylaFonts.cjkFallback,
-                fontSize: 11, // font-size: 11px
+                fontSize: metrics.fontSize, // font-size: 11px（convUnread 档 12px）
                 // line-height：四档 1（等比），`.server-item-badge` 档 16/11（CSS 16px）
                 height: metrics.textHeight,
                 fontWeight: metrics.fontWeight,

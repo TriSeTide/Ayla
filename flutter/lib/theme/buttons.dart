@@ -830,8 +830,19 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
         : (_hovered && _enabled
             ? AylaColors.indigo700
             : AylaColors.textSecondary);
+    // 禁用态 `base.css button:disabled { opacity: .55 }` —— **按颜色降透明**，
+    // 不能用整层 Opacity：本件自 2026-09-24 起补齐 `auroraqua.css:130` 的
+    // `backdrop-filter: blur(8px)`（此前登记为待补项），含模糊层的盒子套整层
+    // Opacity 会被 Impeller 拒绝且禁用态不变暗（13 号 §6.33 的全库修法）。
+    final double dim = _enabled ? 1.0 : 0.55;
+    Color dimColor(Color c) => dim >= 1.0 ? c : c.withValues(alpha: c.a * dim);
+    List<BoxShadow> dimShadows(List<BoxShadow> list) => dim >= 1.0
+        ? list
+        : <BoxShadow>[
+            for (final BoxShadow sh in list) sh.copyWith(color: dimColor(sh.color)),
+          ];
 
-    Widget box = AnimatedContainer(
+    final Widget face = AnimatedContainer(
       // ⚠️ auroraqua.css:54–94 把本类一并纳入按钮组：`transition` 全组为
       // **200ms `--auroraqua-ease`**（与 shell.css / app.css 里各自的 `--dur-fast` 180ms
       // 声明同特异性，但它后加载 ⇒ 实际生效值）→ [AylaDurations.button] + [AylaCurves.auroraqua]。
@@ -851,39 +862,68 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
         vertical: AylaSpacing.sp1,
       ),
       decoration: BoxDecoration(
-        color: AylaColors.glassBgStrong,
+        color: dimColor(AylaColors.glassBgStrong),
         borderRadius: BorderRadius.circular(AylaRadii.rSm),
-        border: Border.all(color: AylaColors.glassBorder),
+        border: Border.all(color: dimColor(AylaColors.glassBorder)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          if (widget.icon != null) ...<Widget>[
-            IconTheme(
-              data: IconThemeData(color: fg, size: 11),
-              child: widget.icon!,
+      child: Opacity(
+        // 内容层（图标/文字）不含模糊 ⇒ 可单独降透明（web 的整层 .55 观感）
+        opacity: dim,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (widget.icon != null) ...<Widget>[
+              IconTheme(
+                data: IconThemeData(color: fg, size: 11),
+                child: widget.icon!,
+              ),
+              const SizedBox(width: AylaSpacing.sp1),
+            ],
+            Text(
+              widget.label,
+              style: t.caption.copyWith(
+                fontSize: 12,
+                color: fg,
+                height: 1.2,
+              ),
             ),
-            const SizedBox(width: AylaSpacing.sp1),
           ],
-          Text(
-            widget.label,
-            style: t.caption.copyWith(
-              fontSize: 12,
-              color: fg,
-              height: 1.2,
+        ),
+      ),
+    );
+
+    // auroraqua.css 126–132：`background: --glass-bg` + 1px 边 + **`blur(8px)`**
+    // （注意 130 行只有 blur、没有 saturate ⇒ [GlassConfig.blurOnly]）。
+    // ⚠️ 模糊层必须画在底/边**之下**：BackdropFilter 采样其下方已绘制内容，
+    // 若嵌在 face 内部会把按钮自己的底与亮边一起糊掉。
+    Widget box = Stack(
+      children: <Widget>[
+        Positioned.fill(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AylaRadii.rSm),
+            child: BackdropFilter(
+              filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
+              child: const SizedBox.expand(),
             ),
           ),
-        ],
-      ),
+        ),
+        // --glass-inset（顶沿 1px 内高光；radius 与卡面一致 = --radius-sm 8）。
+        // 禁用态不额外降透明：它只是一条 1px 高光，且不能再套一层 Opacity（会包住
+        // 含模糊层的 box，见本文件顶部禁用态说明）。
+        AylaGlassInset.over(
+          child: face,
+          radius: BorderRadius.circular(AylaRadii.rSm),
+        ),
+      ],
     );
 
     // auroraqua.css 124–132 覆写：`--glass-shadow-button` / `-hover`（含 inset）→
     // 外阴影只画形状之外（2026-09-20 审查 R2；.78 强玻璃内部会被 .1 indigo 染色）
     box = AylaGlassShadow.animatedRing(
       radius: BorderRadius.circular(AylaRadii.rSm),
-      shadows: _hovered && _enabled
-          ? AylaShadows.buttonHover
-          : AylaShadows.button,
+      shadows: dimShadows(
+        _hovered && _enabled ? AylaShadows.buttonHover : AylaShadows.button,
+      ),
       duration: AylaDurations.button,
       child: box,
     );
@@ -895,14 +935,7 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: Opacity(
-          opacity: _enabled ? 1 : 0.55,
-          // --glass-inset（顶沿 1px 内高光；radius 与卡面一致 = --radius-sm 8）
-          child: AylaGlassInset.over(
-            child: box,
-            radius: BorderRadius.circular(AylaRadii.rSm),
-          ),
-        ),
+        child: box,
       ),
     );
   }

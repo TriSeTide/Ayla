@@ -103,15 +103,15 @@ class AylaDanmakuEntry {
   final AylaMediaDescriptor? media;
 }
 
-/// `resolveMediaPath`（web `api/media.ts` 192–196）：只接受后端媒体路径前缀，
-/// 其余（外部 URL / 非法路径）一律 null。
-String? aylaResolveMediaPath(String? path) =>
-    (path != null && path.startsWith(kMediaPathPrefix)) ? path : null;
+/// `resolveMediaPath`（web `api/media.ts` 192–196）—— 2026-09-24 提升为共享件
+/// （`resource_image.dart` 的 [aylaResolveMediaPath]，chat 域媒体族同样需要）。
+/// 本文件保留同名局部别名，既有调用点不变。
+String? _resolveMediaPath(String? path) => aylaResolveMediaPath(path);
 
 /// 列表图源 = `resolveMediaPath(media.thumbnail) ?? mediaContentUrl(media_id)`
 /// （tsx 73）。
 String? _listImageSrc(AylaDanmakuEntry item) {
-  final String? path = aylaResolveMediaPath(item.media?.thumbnail);
+  final String? path = _resolveMediaPath(item.media?.thumbnail);
   if (path != null) return path;
   final String? id = item.mediaId;
   return id == null ? null : mediaContentUrl(id);
@@ -119,7 +119,7 @@ String? _listImageSrc(AylaDanmakuEntry item) {
 
 /// 飘弹幕**只飘缩略图**（tsx 68–71）：无缩略图整条不飘。
 String? _thumbSrc(AylaDanmakuEntry item) =>
-    aylaResolveMediaPath(item.media?.thumbnail);
+    _resolveMediaPath(item.media?.thumbnail);
 
 /// 媒体弹幕在列表里的 alt（tsx 67）：`item.content || "弹幕图片"`。
 String _mediaAlt(AylaDanmakuEntry item) =>

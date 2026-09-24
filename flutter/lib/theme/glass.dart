@@ -84,6 +84,7 @@ class GlassSurface extends StatelessWidget {
     this.radiusOverride,
     this.borderOverride,
     this.shadowTransition = Duration.zero,
+    this.dimAlpha,
   });
 
   /// 内容。
@@ -125,21 +126,57 @@ class GlassSurface extends StatelessWidget {
   /// 不会出现「实心矩形闪现」。
   final Duration shadowTransition;
 
+  /// 禁用态降透明系数（null = 不降透明）。
+  ///
+  /// 等价 web 的 `:disabled { opacity: .7 }`（如 `.share-bubble-card:disabled`），
+  /// 但**必须按颜色降透明**、不能用整层 `Opacity`：本件的玻璃层含
+  /// `BackdropFilter`，整层 Opacity 在 Windows/Impeller 下会被拒绝
+  /// （`Contents::SetInheritedOpacity should never be called when
+  /// Contents::CanAcceptOpacity returns false`）**且禁用态根本不生效**
+  /// （2026-09-22 用户批准的全库修法，见 13 号 §6.33）。
+  ///
+  /// 覆盖范围：底色、亮边（含 [borderOverride]）、顶沿内高光、外阴影。
+  /// **不含子内容** —— 内容层（图标/文字，无模糊）由调用方自行
+  /// `Opacity(opacity: dimAlpha)` 保持同一观感。
+  final double? dimAlpha;
+
   @override
   Widget build(BuildContext context) {
     final bool opaque = GlassConfig.useOpaqueFallback;
     final bool reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final double dimA = (dimAlpha ?? 1.0).clamp(0.0, 1.0);
+    Color dimColor(Color c) =>
+        dimA >= 1.0 ? c : c.withValues(alpha: c.a * dimA);
+    List<BoxShadow> dimShadows(List<BoxShadow> list) => dimA >= 1.0
+        ? list
+        : <BoxShadow>[
+            for (final BoxShadow sh in list) sh.copyWith(color: dimColor(sh.color)),
+          ];
+    BoxBorder? dimBorder(BoxBorder? b) {
+      if (b == null || dimA >= 1.0) return b;
+      // 只处理四边均匀的 [Border]（库内 borderOverride 的两种用法：全 null /
+      // Border(bottom:)）；方向性边框（BorderDirectional）保持原样。
+      if (b is Border) {
+        return Border(
+          top: b.top.copyWith(color: dimColor(b.top.color)),
+          right: b.right.copyWith(color: dimColor(b.right.color)),
+          bottom: b.bottom.copyWith(color: dimColor(b.bottom.color)),
+          left: b.left.copyWith(color: dimColor(b.left.color)),
+        );
+      }
+      return b;
+    }
 
     // 卡面（底色 + 亮边 + 顶沿内高光）。**不含外阴影**——阴影必须在裁剪
     // 之外绘制，否则会被 ClipRRect 连同圆角裁掉（web box-shadow 在元素外侧）。
     // 圆角/边框优先用 override（支持「无圆角顶栏」与「只下边框」）
     final BorderRadius radiusValue =
         radiusOverride ?? BorderRadius.circular(radius);
-    final BoxBorder? borderValue = borderOverride ??
-        (border ? Border.all(color: AylaColors.glassBorder) : null);
+    final BoxBorder? borderValue = dimBorder(borderOverride ??
+        (border ? Border.all(color: AylaColors.glassBorder) : null));
     final Widget face = DecoratedBox(
       decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: strong),
+        color: dimColor(GlassConfig.resolveBackground(strong: strong)),
         borderRadius: radiusValue,
         border: borderValue,
       ),
@@ -153,10 +190,21 @@ class GlassSurface extends StatelessWidget {
             child: IgnorePointer(
               child: LayoutBuilder(
                 builder: (BuildContext context, BoxConstraints c) {
+                  final LinearGradient inset = AylaInset.topHighlight(c.maxHeight);
                   return DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: radiusValue,
-                      gradient: AylaInset.topHighlight(c.maxHeight),
+                      gradient: dimA >= 1.0
+                          ? inset
+                          : LinearGradient(
+                              begin: inset.begin,
+                              end: inset.end,
+                              stops: inset.stops,
+                              colors: <Color>[
+                                for (final Color color in inset.colors)
+                                  dimColor(color),
+                              ],
+                            ),
                     ),
                   );
                 },
@@ -224,11 +272,11 @@ class GlassSurface extends StatelessWidget {
                         ? CustomPaint(
                             painter: _OuterShadowPainter(
                               radius: radiusValue,
-                              shadows: shadow,
+                              shadows: dimShadows(shadow),
                             ),
                           )
                         : TweenAnimationBuilder<List<BoxShadow>>(
-                            tween: _ShadowListTween(end: shadow),
+                            tween: _ShadowListTween(end: dimShadows(shadow)),
                             duration: shadowTransition,
                             curve: AylaCurves.auroraqua,
                             builder: (BuildContext context,

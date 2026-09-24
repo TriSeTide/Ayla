@@ -217,6 +217,36 @@ class AylaSharePayload {
         'subtitle': subtitle,
         'extra': extra,
       };
+
+  /// 解析后端 `Message.share_payload`（`types.ts:148–160` 的序列化结构）。
+  ///
+  /// 与工厂方法**不同**：这里保留后端原值（不 trim、不 normalizeCover），
+  /// 由消费方按 web 的渲染口径处理（如 `ShareBubble` 的
+  /// `payload?.title?.trim() || message.content?.trim()`、`payload?.cover || ""`）。
+  ///
+  /// `share_type` 未知或 `target_id` 缺失 → 返回 null（**不 fallback 成某个类型**）。
+  static AylaSharePayload? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final AylaShareType? type = AylaShareType.parse(raw['share_type'] as String?);
+    if (type == null) return null;
+    final Object? target = raw['target_id'];
+    if (target == null) return null;
+    final String targetId = target.toString();
+    if (targetId.isEmpty) return null;
+    final Object? extra = raw['extra'];
+    return AylaSharePayload(
+      shareType: type,
+      targetId: targetId,
+      title: (raw['title'] as String?) ?? '',
+      cover: raw['cover'] as String?,
+      subtitle: raw['subtitle'] as String?,
+      extra: extra is Map
+          ? extra.map(
+              (Object? k, Object? v) => MapEntry<String, Object?>(k.toString(), v),
+            )
+          : null,
+    );
+  }
 }
 
 /// `s(value)`（`sharePayload.ts:13–16`）：`String(value ?? "").trim()`。

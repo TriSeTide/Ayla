@@ -44,6 +44,14 @@ const String kMediaPathPrefix = '$kApiPrefix/media/';
 String mediaContentUrl(String mediaId) =>
     '$kApiPrefix/media/${Uri.encodeComponent(mediaId)}/content';
 
+/// 媒体相对路径归一（web `api/media.ts:192–196` `resolveMediaPath`）：
+/// 只接受后端媒体路径前缀，其余（外部 URL / 非法路径 / null）一律 null。
+///
+/// 原为 `danmaku.dart` 的私有实现（弹幕缩略图用），2026-09-24 提升为共享件
+/// （chat 域的媒体波形/缩略图同样需要），口径与 web 一致：**不 fallback**。
+String? aylaResolveMediaPath(String? path) =>
+    (path != null && path.startsWith(kMediaPathPrefix)) ? path : null;
+
 /// 从媒体 URL 提取 media_id（`extractMediaId`）。
 ///
 /// 仅识别 `/api/v1/media/<id>/...` 形式；非媒体路径返回 null（外部资源直接加载）。

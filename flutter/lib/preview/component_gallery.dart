@@ -61,6 +61,7 @@ import '../widgets/voice_channel_panel.dart';
 import '../widgets/voice_channels.dart';
 import '../widgets/voice_member_row.dart';
 import '../widgets/danmaku.dart';
+import '../widgets/elysia_entry.dart';
 import '../widgets/live_hall.dart';
 import '../widgets/live_rail.dart';
 import '../widgets/live_create.dart';
@@ -70,6 +71,12 @@ import '../widgets/live_player.dart';
 import '../widgets/live_room_body.dart';
 import '../widgets/live_studio.dart';
 import '../widgets/live_viewers.dart';
+import '../widgets/conversation_list.dart';
+import '../widgets/emoji_pack_panel.dart';
+import '../widgets/media_content.dart';
+import '../widgets/mention_picker.dart';
+import '../widgets/message_bubble.dart';
+import '../widgets/share_bubble.dart';
 import '../widgets/voice_room_body.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
@@ -85,12 +92,27 @@ class ComponentGallery extends StatelessWidget {
     // 画布：启用程序生成的示例图（媒体存储链路未落地；生产默认关闭）
     aylaEnableSampleMedia();
     final AylaTextStyles t = AylaTextStyles.of(context);
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AylaSpacing.sp8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('Ayla Flutter 组件库 · Batch 1（材料基元）', style: t.pageTitle),
+    // ⚠️ **画布整体关闭语义树**（2026-09-24 用户实报「启动不了了」后改）：
+    // 画布一次性构建 ~50 个 section，实测产生 **1685 个语义节点**；而 debug 下
+    // `main.dart` 常开语义树（`SemanticsBinding.instance.ensureSemantics()`），
+    // 一次更新 1600+ 节点会让 Flutter Windows 的 accessibility bridge 更新失败
+    // （`Failed to update ui::AXTree … Nodes left pending by the update: 1612`），
+    // 反复报错后 `Lost connection to device`。
+    // 画布是**开发审核画布**（视觉对照用）而非产品界面：`ensureSemantics` 的注释也写明
+    // widget-preview 宿主不支持语义树 ⇒ 无消费者。
+    // ⚠️ 不要改成 `ListView.builder` 懒加载来「减少节点」：样张里有 autofocus 组件
+    // （CreateSheet 等），滚动销毁焦点节点会触发 framework 断言
+    // （`_ModalScopeState Focus Scope: Focused child does not have the same idea of its
+    // enclosing scope`），实测复现。
+    // ⚠️ 注：下面这段 section 内容的缩进未随外层包装 +2（项目不使用 `dart format`，
+    // 避免无关重排 diff）。
+    return ExcludeSemantics(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AylaSpacing.sp8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Ayla Flutter 组件库 · Batch 1（材料基元）', style: t.pageTitle),
           const SizedBox(height: AylaSpacing.sp2),
           Text(
             '对照 web：tokens.css/app.css/auroraqua.css/base.css/shell.css · Windows 125% 口径',
@@ -820,6 +842,81 @@ class ComponentGallery extends StatelessWidget {
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
+          // ---------- B3 chat 域第一批（气泡 / 媒体 / 分享卡 / 爱莉入口） ----------
+          _Section(
+            title: '聊天消息气泡（MessageBubble.tsx）',
+            source:
+                'app.css 1041–1102：.msg-row gap 8 / align-end · .msg-body max 75%（窄屏 84%）· '
+                '气泡 padding 10/14 · radius 18（自己右下 6 / 他人与爱莉左下 6）· '
+                '他人玻璃底 blur12（无 saturate）· 操作栏 hover/focus/触屏三条件 · frost-rise 180ms',
+            child: SizedBox(
+              width: 760,
+              height: 980,
+              child: aylaMessageBubbleSamples(),
+            ),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '媒体消息族（MediaContent.tsx）',
+            source:
+                'app.css 1383–1639 / 1839–1979：媒体帧 radius-input · 图片 max 320 且不放大 · '
+                '表情 96×96 · 播放键徽标 48 玻璃 blur8 sat1.4 · 语音卡 min-w 240 + '
+                'seek 4px 轨/12px 拇指 · 文件卡 min 240 / max 320 · 混排 180 方块 + 240×180 视频',
+            child: SizedBox(
+              width: 760,
+              height: 1180,
+              child: aylaMediaContentSamples(),
+            ),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
+            source:
+                'app.css 1138–1223：卡片 min(264,100%) · 封面 72 · 标题 15/700 两行 · hover -1px + '
+                '0 4px 16px rgba(70,91,146,.2) · :disabled opacity .7（按颜色降透明）· '
+                'app.css 435–478：入口卡 135deg 樱粉 + 1px rgba(247,150,255,.5) + hover 辉光（窄屏降 30%）',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(width: 640, child: aylaShareBubbleSamples()),
+                const SizedBox(height: AylaSpacing.sp6),
+                SizedBox(width: 420, child: aylaElysiaEntrySamples()),
+              ],
+            ),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- B3 chat 域第二批（会话列表 / @ 选择器 / 群表情包） ----------
+          _Section(
+            title: '会话列表（ConversationList.tsx）',
+            source:
+                'app.css 490–543：行 padding 12 / padding-right 52 / 圆角**实际 12**（auroraqua 172 覆写 16）· '
+                'hover .18 / 选中 .35 · 置顶粉底 + 左 3px 辉光竖条 · 545–617 标题 15/700 + 状态胶囊 '
+                '（6px 圆点）/ 预览 13 · 693–706 未读徽标 20×20 utility 12 w500（TabBadge convUnread 档）· '
+                '选中胶囊容器级 300ms 迁移（可点切换）',
+            child: aylaConversationListSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '@ 成员选择器（MentionPicker.tsx）',
+            source:
+                'app.css 2364–2428：glass-bg-strong + blur24 sat1.4 + 1px 边 + radius 16 + --glass-shadow · '
+                '列表 padding 4 · 行 padding 8/12 + gap 12 + radius 8（hover/focus 同款 .35）· '
+                '名称 14/600 · 空态「无匹配成员」· 定位 edge 8 / gap 8 / 高上限 280（↑↓ 循环、ESC 关闭）',
+            child: aylaMentionPickerSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '群表情包面板（EmojiPackPanel.tsx）',
+            source:
+                'app.css 2186–2323：面板 max-h 280 + padding sp3 + gap sp2 + glass-bg-strong/blur24 sat1.4/'
+                'radius 16 · 网格 minmax(56px,1fr) gap 8 · 格 aspect 1 / radius 8 / 1px 边 / surface 底 · '
+                'hover 边 --glow-500 + --glow-shadow · 图片 object-fit contain · 加号虚线边 · '
+                '删除键 18 圆（上右 -5，hover 显示）',
+            child: aylaEmojiPackPanelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
           // ---------- 排版阶梯 ----------
           _Section(
             title: 'Typography（design.md §3 九级）',
@@ -840,7 +937,8 @@ class ComponentGallery extends StatelessWidget {
               ],
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
