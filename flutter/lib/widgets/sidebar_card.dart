@@ -44,6 +44,7 @@ class AylaSidebarCard extends StatelessWidget {
     this.enterDuration = AylaDurations.enter,
     this.enterOffset = const Offset(-20, 0),
     this.enter = true,
+    this.scrollable = true,
   });
 
   /// 卡片内容。
@@ -75,17 +76,26 @@ class AylaSidebarCard extends StatelessWidget {
   /// 是否播入场（已有动画宿主时传 false）。
   final bool enter;
 
+  /// 是否自滚动。
+  ///
+  /// `.directory-filters` / `.chat-sidebar` 自身 `overflow-y: auto`（内容整体滚），
+  /// 而 **`.wide-messages-sidebar` 不声明 overflow**（`min-height: 0`，滚动归各 tab 内容区）
+  /// ⇒ 后者传 `false`（用 `Padding` 代替滚动视图），否则会出现「内外双滚动」且 tabs 跟着滚。
+  final bool scrollable;
+
   @override
   Widget build(BuildContext context) {
     Widget card = GlassSurface(
       radius: AylaRadii.rCard,
       shadow: shadow,
       padding: null,
-      child: SingleChildScrollView(
-        controller: scrollController,
-        padding: padding,
-        child: child,
-      ),
+      child: scrollable
+          ? SingleChildScrollView(
+              controller: scrollController,
+              padding: padding,
+              child: child,
+            )
+          : Padding(padding: padding, child: child),
     );
 
     if (width != null) {

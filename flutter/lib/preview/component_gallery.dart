@@ -74,10 +74,17 @@ import '../widgets/live_viewers.dart';
 import '../widgets/conversation_list.dart';
 import '../widgets/emoji_pack_panel.dart';
 import '../widgets/media_content.dart';
+import '../widgets/message_input.dart';
+import '../widgets/message_list.dart';
+import '../widgets/messages_tabs.dart';
 import '../widgets/mention_picker.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/private_chat_pane.dart';
+import '../widgets/quick_messages_sheet.dart';
+import '../widgets/request_rows.dart';
 import '../widgets/share_bubble.dart';
 import '../widgets/voice_room_body.dart';
+import '../widgets/wide_messages_sidebar.dart';
 
 /// 审核画布尺寸（单张大画面；宽度 1800 容纳四列组件与 12 列图标，
 /// 高度按内容收紧——图标区 + 排版区结束约在 1450，余量留到 1700）。
@@ -914,6 +921,82 @@ class ComponentGallery extends StatelessWidget {
                 'hover 边 --glow-500 + --glow-shadow · 图片 object-fit contain · 加号虚线边 · '
                 '删除键 18 圆（上右 -5，hover 显示）',
             child: aylaEmojiPackPanelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- B3 chat 域第三批（输入区 / 消息滚动区） ----------
+          _Section(
+            title: '消息输入区（MessageInput.tsx）',
+            source:
+                'app.css 1983–2185：`.composer`（窄屏方角 + blur18 sat1.4 + 上边框）/ '
+                '宽屏 auroraqua 347–358 浮卡（padding 8 / radius 16 / glass-shadow）· 工具键 40×40 '
+                'radius 12 玻璃档（auroraqua 105–112）· 编辑器 min-h 40 / max-h 140 / padding 8 12 / lh 22 · '
+                '引用条 2484–2527 · 待发媒体 2001–2093（44/58 缩略图 + 18 圆移除键）· 录音态 2431–2483 · '
+                '@ 编辑器 = `\\uFFFC` 占位 + 胶囊渲染（web contentEditable 的等价）',
+            child: aylaMessageInputSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '消息滚动区（MessageList.tsx）',
+            source:
+                'app.css 799–1037：`.message-scroll` padding sp6 + `.message-column` max-width 960 居中 · '
+                '时间分隔（> 5 分钟，utility 12）· 戳一戳居中胶囊（rgba(126,149,189,.14) + blur8）· '
+                '跳转标签 911–962（粉边玻璃胶囊，上/下两条）· 回底键 44 圆（超过一屏才显示）· '
+                '高亮 1.6s 粉框辉光 · 历史控制 min-h 40；列表用 `reverse: true` 表达前插不跳动',
+            child: aylaMessageListSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- B3 chat 域第四批（选项卡 / 认证面板 / 私聊面板） ----------
+          _Section(
+            title: '消息中心选项卡（messages-tabs；WideMessagesSidebar 与 QuickMessagesSheet 共用）',
+            source:
+                'messages.css 17–55 + auroraqua 273–285：容器 1px 边 + radius-card 16 + '
+                '**只有 --glass-inset 内高光（无外阴影、无底色）** + margin sp2 / padding sp1 · '
+                'tab 40 高 / radius 12 / 14/700，**选中底由共享胶囊提供**（auroraqua 194–197 取消自身底）· '
+                '徽标复用 `TabBadgeMetrics.messages`（min 18 / padding 0 5 / utility 11 + glow-shadow）· '
+                '宽度按 `flex: 1` 等宽（LayoutBuilder 算每项宽）',
+            child: aylaMessagesTabsSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '认证消息面板（WideMessagesSidebar / QuickMessagesSheet 共用）',
+            source:
+                'messages.css 83–143 / 199–205：分组标题 15/700 + gap sp2 · 行材质 `--glass-bg` + 1px 边 + '
+                '--glass-filter + --glass-shadow-compact（padding sp2 sp3 / radius 12 / gap sp3）· '
+                '`.request-btn` min-h 32 · 空态「暂无待处理认证消息」· 好友行 `.friend-row` 同材质 + 解除好友键',
+            child: aylaRequestsPanelSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '私聊面板（PrivateChatPane.tsx）',
+            source:
+                'private.css 8–64 + auroraqua 402–410：头部恒 56 高 / padding sp2 sp4 / gap sp3 · '
+                '窄屏通栏（--glass-bg + blur18 sat1.4 + 下边框）/ 宽屏**卡片化**（1px 边 + radius 16 + '
+                'compact 阴影 + blur24）· 标题 15/700 + 状态 12（**typing → glow-500**）· '
+                '非好友禁发 `.private-chat-blocked` 替换输入区（warning-soft 底/边）',
+            child: aylaPrivateChatPaneSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- B3 chat 域第四批下（宽屏左列 / 快捷消息栏） ----------
+          _Section(
+            title: '宽屏消息左列（WideMessagesSidebar.tsx）',
+            source:
+                'messages.css 243–279：332 玻璃侧栏卡（`AylaSidebarCard`）· 三 tab（私信/好友/认证 + 徽标，'
+                '`AylaMessagesTabs`）· 各 tab 内容区 `flex:1 + min-height:0 + overflow-y:auto` + '
+                'padding sp2 sp2 sp4（**侧栏自身不滚动**，滚动归内容区 · `scrollable: false`）',
+            child: aylaWideMessagesSidebarSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+          _Section(
+            title: '快捷消息栏（QuickMessagesSheet.tsx）',
+            source:
+                'messages.css 343–425：上 30% 遮罩（rgba(70,91,146,.25) 点击关闭）+ 下 70% 面板'
+                '（glass-bg-strong + blur24 sat1.4 + 上边框 + **radius 24 24 0 0** + --glass-shadow-modal + '
+                'slide-in 250ms）· 头部 padding sp3 sp4 + 下边框（tabs padding 0）· ESC 关闭走全局键盘监听 · '
+                '私信 tab 点会话 → **内联**打开私聊面板（不跳路由）',
+            child: aylaQuickMessagesSheetSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

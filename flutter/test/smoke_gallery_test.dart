@@ -85,6 +85,16 @@ void main() {
       '会话列表（ConversationList.tsx）',
       '@ 成员选择器（MentionPicker.tsx）',
       '群表情包面板（EmojiPackPanel.tsx）',
+      // 2026-09-24 B3 chat 域第三批两节
+      '消息输入区（MessageInput.tsx）',
+      '消息滚动区（MessageList.tsx）',
+      // 2026-09-24 B3 chat 域第四批三节
+      '消息中心选项卡（messages-tabs；WideMessagesSidebar 与 QuickMessagesSheet 共用）',
+      '认证消息面板（WideMessagesSidebar / QuickMessagesSheet 共用）',
+      '私聊面板（PrivateChatPane.tsx）',
+      // 2026-09-24 B3 chat 域第四批下两节（chat 域收官）
+      '宽屏消息左列（WideMessagesSidebar.tsx）',
+      '快捷消息栏（QuickMessagesSheet.tsx）',
     ]) {
       expectSection(title);
     }
