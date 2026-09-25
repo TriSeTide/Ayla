@@ -104,6 +104,8 @@ void main() {
       '群聊申请弹窗（GroupApplyDialog.tsx 25–137 行 + search.css 175–296）',
       // 2026-09-25 B6-1
       '建群对话框（GroupCreateDialog.tsx 184 行 + private.css 66–186 / 188–280）',
+      // 2026-09-25 B6-2
+      '目录结果卡（DirectoryResultCards.tsx 119 行 + typed-result-cards.css）',
     ]) {
       expectSection(title);
     }

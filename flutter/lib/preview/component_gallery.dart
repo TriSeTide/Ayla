@@ -76,6 +76,7 @@ import '../widgets/game_room_card.dart';
 import '../widgets/game_room_create.dart';
 import '../widgets/game_room_placeholder.dart';
 import '../widgets/group_apply.dart';
+import '../widgets/directory_result_cards.dart';
 import '../widgets/group_create_dialog.dart';
 import '../widgets/subgroup_dialog.dart';
 import '../widgets/emoji_pack_panel.dart';
@@ -1073,6 +1074,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '弹层与卡片**与 CreateSheet 同规格**（private.css 明写共用同一段）⇒ 直接复用 AylaModalOverlay + AylaModalCard（480 / 80vh / padding sp4 / 窄屏贴底上滑）+ AylaSheetHead（title display 18/w600 + icon-btn-40 + IconClose 18）· 群名 input.field（必填 / autoFocus）+ 成员搜索（左搜索图标 15 + 输入 padding-left 34 / margin-top sp2）+ .field-error 13 destructive + 已选 chips（复用提升后的 AylaGroupChip：pill / ice-100 / 12-600 / 叉 16×16 hover destructive）+ 结果列表（max-height 220 自滚；行 = 16×16 checkbox + 名称 14/600 省略 + 幽灵「私聊」32/12；勾选行整行可点 = web label）+ 建群键（primary 全宽 / IconPlus 16 / 「建群（N 人）」/ disabled = busy 或群名空）· 搜索 **300ms 防抖**；结果仅在 q == searchQuery 时可见 · 空态「没有匹配的用户」照实无 padding（.search-empty 用了未定义的 --sp-10 ⇒ 整条作废）· 请求与跳转全注入（未注入即禁用）· **样张可交互**：打字试防抖搜索、勾选进 chips、开关切「下一次建群失败」看错误行',
             child: aylaGroupCreateDialogSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 顶层散件（2026-09-25：B6-2 目录结果卡） ----------
+          _Section(
+            title:
+                '目录结果卡（DirectoryResultCards.tsx 119 行 + typed-result-cards.css）',
+            source:
+                '两个卡：**群结果卡**（.typed-group-card：玻璃卡 + padding sp4/窄屏 sp3 + radius-card + compact 阴影 + blur24；Avatar 44 + 标题 + meta「N 人 / 公开群聊 / 申请制群聊」12px secondary + 可选入口文案 + action 槽位）· **收藏结果卡**（按 target_type 分派到既有 post/live/voice/game 卡并传 action；**投影缺失 = 内容不可用**（.typed-unavailable-card，按钮 disabled）；message 情形自绘 .typed-message-card：IconMessage 18 + 昵称/「消息」13px + 正文三态（已撤回 / 戳一戳 / blockquote 原文，ice-100 + padding sp3 + radius-input）+ 媒体区独占一行复用 AylaMediaContent（点媒体不跳转），整卡 canOpen 时可点）· .typed-result-card 只是宽度归一 ⇒ Flutter 侧由各卡自身表达，不新造空壳容器 · 附带补档：**live 卡补 action 槽位**（web tsx 56 用它换「取消收藏」直删键）· 样张静态展示四档（群卡 meta 两档 / 消息文本 / 已撤回 / 不可用）',
+            child: aylaDirectoryResultCardSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

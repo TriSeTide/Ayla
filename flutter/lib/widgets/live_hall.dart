@@ -158,6 +158,7 @@ class AylaLiveChannelCard extends StatelessWidget {
     this.isElysia = false,
     this.revealDelay,
     this.showActions = true,
+    this.action,
     this.favoriteState = FavoriteState.unknown,
     this.favoriteBusy = false,
     this.favoriteError,
@@ -186,6 +187,10 @@ class AylaLiveChannelCard extends StatelessWidget {
   /// ⚠️ **卡片上不放转发键**（用户 2026-09-22：「语音列表卡片上不用显示分享键，直播也不用」）——
   /// 转发键只出现在**房头部**（web `LiveRoomBody.tsx` 330–339）。
   final bool showActions;
+
+  /// 收藏位替换件（web 的 `action` 槽位 —— 目录/收藏结果里换成「取消收藏」直删键，
+  /// `DirectoryResultCards.tsx:56` 就是这么用的）。非 null 时**替换**默认收藏键。
+  final Widget? action;
 
   /// 收藏状态（`AylaFavoriteButton` 契约）。
   final FavoriteState favoriteState;
@@ -223,6 +228,17 @@ class AylaLiveChannelCard extends StatelessWidget {
 
   Widget _buildWrap(BuildContext context) {
     final bool narrow = Breakpoint.isNarrow(MediaQuery.sizeOf(context).width);
+    final Widget? slot = action ??
+        (showActions
+            ? AylaFavoriteButton(
+                state: favoriteState,
+                compact: true, // `.favorite-toggle.is-compact`：32×32、图标 16
+                busy: favoriteBusy,
+                actionError: favoriteError,
+                onToggle: onToggleFavorite,
+                onRetryStatus: onRetryFavoriteStatus,
+              )
+            : null);
     // ≥769：收藏键 top/right = calc(sp4 + sp1) = 20px；窄屏 = sp3 = 12px（app.css 3306–3310）
     final double actionInset = narrow
         ? AylaSpacing.sp3
@@ -231,18 +247,11 @@ class AylaLiveChannelCard extends StatelessWidget {
     return Stack(
       children: <Widget>[
         _card(context, narrow),
-        if (showActions)
+        if (slot != null)
           Positioned(
             top: actionInset,
             right: actionInset,
-            child: AylaFavoriteButton(
-              state: favoriteState,
-              compact: true, // `.favorite-toggle.is-compact`：32×32、图标 16
-              busy: favoriteBusy,
-              actionError: favoriteError,
-              onToggle: onToggleFavorite,
-              onRetryStatus: onRetryFavoriteStatus,
-            ),
+            child: slot,
           ),
       ],
     );
