@@ -95,6 +95,10 @@ void main() {
       // 2026-09-24 B3 chat 域第四批下两节（chat 域收官）
       '宽屏消息左列（WideMessagesSidebar.tsx）',
       '快捷消息栏（QuickMessagesSheet.tsx）',
+      // 2026-09-24 B4 boardgame 域第一批三节
+      '桌游室卡片（GameRoomCard.tsx 53 行 + boardgame.css 9–119 + auroraqua.css 28–52 + typed-result-cards.css 44）',
+      '创建桌游室表单（GameRoomCreate.tsx 78 行 + boardgame.css 123–132 + app.css 70–79 + private.css 229–236）',
+      '桌游室占位整页壳（GameRoomPlaceholder.tsx 189 行 + boardgame.css 136–219 + auroraqua.css 335/402–408/418）',
     ]) {
       expectSection(title);
     }
