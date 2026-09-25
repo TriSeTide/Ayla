@@ -99,6 +99,9 @@ void main() {
       '桌游室卡片（GameRoomCard.tsx 53 行 + boardgame.css 9–119 + auroraqua.css 28–52 + typed-result-cards.css 44）',
       '创建桌游室表单（GameRoomCreate.tsx 78 行 + boardgame.css 123–132 + app.css 70–79 + private.css 229–236）',
       '桌游室占位整页壳（GameRoomPlaceholder.tsx 189 行 + boardgame.css 136–219 + auroraqua.css 335/402–408/418）',
+      // 2026-09-24 B5 group 域第一批两节
+      '子群弹窗（SubGroupDialog.tsx 111 行 + group.css 2131–2231）',
+      '群聊申请弹窗（GroupApplyDialog.tsx 25–137 行 + search.css 175–296）',
     ]) {
       expectSection(title);
     }

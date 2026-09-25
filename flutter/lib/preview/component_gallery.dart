@@ -75,6 +75,8 @@ import '../widgets/conversation_list.dart';
 import '../widgets/game_room_card.dart';
 import '../widgets/game_room_create.dart';
 import '../widgets/game_room_placeholder.dart';
+import '../widgets/group_apply.dart';
+import '../widgets/subgroup_dialog.dart';
 import '../widgets/emoji_pack_panel.dart';
 import '../widgets/media_content.dart';
 import '../widgets/message_input.dart';
@@ -1043,7 +1045,27 @@ class ComponentGallery extends StatelessWidget {
             ),
             const SizedBox(height: AylaSpacing.sp8),
 
-            // ---------- 排版阶梯 ----------
+            // ---------- group 域第一批（2026-09-24：B5-1 子群弹窗） ----------
+          _Section(
+            title:
+                '子群弹窗（SubGroupDialog.tsx 111 行 + group.css 2131–2231）',
+            source:
+                '添加/编辑子群弹窗 · overlay 遮罩 .18 + blur3（窄屏也居中）· 卡片 min(360px) + padding sp6 + radius 20 + glass-bg-strong · title display 18/w500 + icon-btn-40 · 名称 input.field（64 上限 formatter / autoFocus）· 禁言行仅 edit（整行可点，checkbox 18×18）· 错误 13 destructive · 按钮排 = 删除靠左（默认组禁用）+ 取消 + 确定（busy「保存中…」）· 二次确认归调用方 · 样张可交互',
+            child: aylaSubGroupDialogSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- group 域第一批（2026-09-24：B5-2 群聊申请） ----------
+          _Section(
+            title:
+                '群聊申请弹窗（GroupApplyDialog.tsx 25–137 行 + search.css 175–296）',
+            source:
+                'Form（弹窗/守卫卡共用）= desc 14/1.6（公开群/申请制两档；join_policy 未知按申请制）+ label + textarea（min-height 104 / 200 上限）+ 错误 13 + 提交键（accepted → onDone；否则成功态：圆 48 success + glow + ✓）· Dialog = 遮罩 .28、卡片 min(440px) + radius 16 + modal 阴影、head = kicker（utility 11 / ls 1.2 / pink-500）+ h2 display 22 + 文字「×」· ⚠️ web 的第三个形态 GroupApplyGate（GroupPage.tsx:398 的路由守卫卡）**按用户 2026-09-25 裁决不实现**（属页面层路由守卫，且 web 实渲染里 head 无左右 padding）· 提交与跳转全注入（未注入即禁用）· 样张可交互',
+            child: aylaGroupApplySamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 排版阶梯 ----------
             _Section(
               title: 'Typography（design.md §3 九级）',
               source:

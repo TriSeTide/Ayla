@@ -71,6 +71,7 @@ class AylaGameRoomPlaceholder extends StatefulWidget {
     super.key,
     required this.room,
     required this.onBack,
+    this.narrow,
     this.onShare,
     this.onJoin,
     this.onLeave,
@@ -102,6 +103,16 @@ class AylaGameRoomPlaceholder extends StatefulWidget {
 
   /// 返回（tsx 135）。
   final VoidCallback onBack;
+
+  /// 窄屏形态（≤768）：通栏 head（无圆角 / 无外边距 / 无阴影）；宽屏 = 卡片化 head。
+  ///
+  /// **库内同款惯例**：`AylaPrivateChatPane`（`narrow` 构造参数）、`AylaMessagesTabs`
+  /// 的窄屏档都由**调用方注入**。null = 组件自行按 `MediaQuery` 视口判定（真机页面可省）。
+  ///
+  /// ⚠️ **画布 / `@Preview` 样张必须显式注入**：舞台是固定宽（375），而预览宿主注入的
+  /// `MediaQuery` 视口宽可能仍是宿主宽 ⇒ 只读 MediaQuery 会把窄屏样张渲染成宽屏卡片档
+  /// （用户 2026-09-24 实报「窄屏顶栏是没有圆角的」）。
+  final bool? narrow;
 
   /// 分享（tsx 139–142：页面层构造 boardgameSharePayload 并打开分享弹窗）。
   final VoidCallback? onShare;
@@ -216,7 +227,9 @@ class _AylaGameRoomPlaceholderState extends State<AylaGameRoomPlaceholder> {
 
   /// head：窄屏通栏玻璃条 / 宽屏卡片（两档高度恒 64）。
   Widget _head(BuildContext context) {
-    final bool narrow = Breakpoint.isNarrow(MediaQuery.sizeOf(context).width);
+    // 形态由调用方注入（[narrow]）；缺省才回退到视口判定（见 [narrow] 的注释）
+    final bool narrow = widget.narrow ??
+        Breakpoint.isNarrow(MediaQuery.sizeOf(context).width);
 
     // 行内最高子项是 40 的返回键（.icon-btn-40）⇒ 行高恒 40，head 高恒 sp3×2 + 40 = 64
     final Widget sized = SizedBox(
@@ -519,16 +532,14 @@ class _GameRoomPlaceholderDemoState extends State<_GameRoomPlaceholderDemo> {
     final Widget framed = SizedBox(
       width: width,
       height: height,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AylaRadii.rCard),
-        child: narrow
-            // 窄屏档必须覆写 MediaQuery（断点读的是视口，13 号既有结论）
-            ? MediaQuery(
-                data: MediaQueryData(size: Size(width, height)),
-                child: child,
-              )
-            : child,
-      ),
+      // ⚠️ 舞台**不裁圆角**：窄屏 head 是通栏方角（web 无 radius），裁圆角会让它看起来像卡片
+      //    （用户 2026-09-24 实报「窄屏顶栏是没有圆角的」）；弹窗样张的遮罩也要铺满舞台。
+      child: narrow
+          ? MediaQuery(
+              data: MediaQueryData(size: Size(width, height)),
+              child: child,
+            )
+          : child,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -560,6 +571,7 @@ class _GameRoomPlaceholderDemoState extends State<_GameRoomPlaceholderDemo> {
               height: 620,
               child: AylaGameRoomPlaceholder(
                 room: _room,
+                narrow: false,
                 currentUserId: 'u1',
                 onBack: () => _say('返回'),
                 onShare: () => _say('分享'),
@@ -578,6 +590,7 @@ class _GameRoomPlaceholderDemoState extends State<_GameRoomPlaceholderDemo> {
               width: 900,
               height: 620,
               child: const AylaGameRoomPlaceholder(
+                narrow: false,
                 room: AylaGameRoom(
                   id: 8,
                   name: '别人的桌游室',
@@ -597,6 +610,7 @@ class _GameRoomPlaceholderDemoState extends State<_GameRoomPlaceholderDemo> {
               height: 700,
               narrow: true,
               child: const AylaGameRoomPlaceholder(
+                narrow: true,
                 room: AylaGameRoom(
                   id: 9,
                   name: '深夜局',

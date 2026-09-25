@@ -32,6 +32,8 @@
 /// 四态：`loading`（骨架）/ `error`（文案 + 「重试」ghost 按钮）/ `empty` / `content`。
 library;
 
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter/services.dart'
@@ -362,6 +364,8 @@ class AylaModalCard extends StatefulWidget {
     this.narrowRadius = 24,
     this.scrollable = true,
     this.wideEntrance = false,
+    this.cardMaxWidth,
+    this.narrowCentered = false,
   });
 
   /// 内容。
@@ -398,6 +402,22 @@ class AylaModalCard extends StatefulWidget {
 
   /// 宽屏入场初始下移 px（web `initial.y`）。
   static const double wideEnterOffsetY = 12;
+
+  /// 卡片宽度上限（`width: min(Npx, 100%)`）；null = 用 [AylaModalCard.maxWidth]（480）。
+  ///
+  /// 逐处档位：create-sheet / privacy-sheet / share-sheet / confirm-dialog /
+  /// quick-messages **480**（默认）；子群弹窗 **360**（`group.css:2146–2148`）、
+  /// 群申请弹窗 **440**（`search.css:190–192`）、群申请守卫卡 **400**（`search.css:534–536`）。
+  final double? cardMaxWidth;
+
+  /// 窄屏形态：false（默认）= 既有「贴底上滑面板」（create-sheet / privacy-sheet /
+  /// share-sheet / confirm-dialog / quick-messages）；true = **居中浮卡** ——
+  /// 窄屏同样是 `--radius-panel` 全圆角 + 四边 1px 边框 + 无上滑。
+  ///
+  /// 事实源：本域两个弹窗（`.subgroup-dialog` / `.group-apply-dialog`）在 web 里
+  /// **全仓没有窄屏媒体查询** ⇒ 窄屏与宽屏同形；而 create-sheet 系的窄屏档在
+  /// `private.css:240–275`（贴底 + `radius 24 24 0 0` + 去左右下边框）。
+  final bool narrowCentered;
 
   /// 宽（`width: min(480px, 100%)`）。
   static const double maxWidth = 480;
@@ -441,21 +461,23 @@ class _AylaModalCardState extends State<AylaModalCard>
   Widget build(BuildContext context) {
     final Size vp = MediaQuery.of(context).size;
     final bool narrow = vp.width <= 768;
+    // 「浮卡」形态：宽屏恒是；窄屏在 [narrowCentered] 时也是（本域两个弹窗）
+    final bool floatCard = !narrow || widget.narrowCentered;
 
-    // 圆角：宽屏 --radius-panel 20；窄屏顶部圆角（create-sheet 24 / privacy 20）
-    final BorderRadius radius = narrow
-        ? BorderRadius.vertical(top: Radius.circular(widget.narrowRadius))
-        : BorderRadius.circular(AylaModalCard.panelRadius);
+    // 圆角：浮卡 --radius-panel 20；窄屏贴底档用顶部圆角（create-sheet 24 / privacy 20）
+    final BorderRadius radius = floatCard
+        ? BorderRadius.circular(AylaModalCard.panelRadius)
+        : BorderRadius.vertical(top: Radius.circular(widget.narrowRadius));
 
-    // 高度：窄屏按 factor（60dvh）或 maxHeight；宽屏 maxHeight（默认 80vh）
-    final double maxH = narrow
-        ? (widget.narrowHeightFactor != null
+    // 高度：窄屏贴底档按 factor（60dvh）或 maxHeight；浮卡 maxHeight（默认 80vh）
+    final double maxH = floatCard
+        ? (widget.maxHeight ?? vp.height * 0.8)
+        : (widget.narrowHeightFactor != null
             ? vp.height * widget.narrowHeightFactor!
-            : (widget.maxHeight ?? vp.height * 0.8))
-        : (widget.maxHeight ?? vp.height * 0.8);
+            : (widget.maxHeight ?? vp.height * 0.8));
 
-    // 窄屏贴底固定高（60dvh）；宽屏按需收缩
-    final double? fixedH = narrow && widget.narrowHeightFactor != null
+    // 窄屏贴底固定高（60dvh）；浮卡按需收缩
+    final double? fixedH = !floatCard && widget.narrowHeightFactor != null
         ? vp.height * widget.narrowHeightFactor!
         : null;
 
@@ -474,10 +496,10 @@ class _AylaModalCardState extends State<AylaModalCard>
         // `background: var(--glass-bg-strong)`
         color: GlassConfig.resolveBackground(strong: true),
         borderRadius: radius,
-        // 窄屏：去左右下边框（只留上边框）
-        border: narrow
-            ? const Border(top: BorderSide(color: AylaColors.glassBorder))
-            : Border.all(color: AylaColors.glassBorder),
+        // 窄屏贴底档：去左右下边框（只留上边框）；浮卡：四边 1px
+        border: floatCard
+            ? Border.all(color: AylaColors.glassBorder)
+            : const Border(top: BorderSide(color: AylaColors.glassBorder)),
       ),
       child: ClipRRect(
         // privacy-sheet `overflow: hidden`；create-sheet 由 SingleChildScrollView
@@ -506,7 +528,7 @@ class _AylaModalCardState extends State<AylaModalCard>
 
     final Widget card = ConstrainedBox(
       constraints: BoxConstraints(
-        maxWidth: AylaModalCard.maxWidth, // min(480px, 100%)
+        maxWidth: widget.cardMaxWidth ?? AylaModalCard.maxWidth, // min(Npx, 100%)
         maxHeight: maxH,
         minHeight: fixedH ?? 0,
       ),
@@ -532,7 +554,7 @@ class _AylaModalCardState extends State<AylaModalCard>
     // 250ms --ease-out（controller 已是 250ms）。
     // ⚠️ Opacity(<1) 会建离屏层，但 250ms 结束即 v == 1.0 —— RenderOpacity
     // 在 alpha == 255 时跳过 layer，卡内 BackdropFilter 不会长期退化。
-    if (!narrow) {
+    if (floatCard) {
       if (!widget.wideEntrance) return card;
       return AnimatedBuilder(
         animation: _slide,
@@ -583,6 +605,9 @@ class AylaModalOverlay extends StatelessWidget {
     required this.child,
     this.onDismiss,
     this.padding = 24,
+    this.centerBoth = false,
+    this.maskColor = const Color(0x40465B92), // rgba(70,91,146,.25) = --overlay-dim
+    this.maskBlur,
   });
 
   /// 内容（通常是 [AylaModalCard]）。
@@ -594,25 +619,62 @@ class AylaModalOverlay extends StatelessWidget {
   /// 宽屏四周留白（create-sheet sp4 / privacy 24）。
   final double padding;
 
+  /// 两档都居中（窄屏同样居中 + [padding] 生效）。
+  ///
+  /// false（默认）= **既有行为**：窄屏贴底、padding 只在宽屏生效 —— create-sheet /
+  /// privacy-sheet / share-sheet / confirm-dialog / quick-messages 都是贴底档。
+  ///
+  /// true = 本域两个弹窗（2026-09-24 用户批准加档）：web 的
+  /// `.subgroup-dialog-overlay`（group.css 2131）与 `.group-apply-overlay`
+  /// （search.css 180）**全仓没有窄屏媒体查询** ⇒ 窄屏同样居中 + `padding: var(--sp-4)`。
+  final bool centerBoth;
+
+  /// 遮罩底色（默认 `--overlay-dim` = rgba(70,91,146,.25)）。
+  ///
+  /// 逐处档位：create-sheet 系 **.25**（默认）；子群弹窗 **.18**（`group.css:2141`）；
+  /// 群申请弹窗 **.28**（`search.css:187`）。
+  final Color maskColor;
+
+  /// 遮罩模糊半径（px）；null = 不模糊。
+  ///
+  /// 子群弹窗 `backdrop-filter: blur(3px)`（`group.css:2142–2143`）；群申请弹窗无模糊。
+  final double? maskBlur;
+
   @override
   Widget build(BuildContext context) {
     final bool narrow = MediaQuery.of(context).size.width <= 768;
+    final bool centered = centerBoth || !narrow;
+
+    Widget mask = ColoredBox(color: maskColor);
+    final double? blur = maskBlur;
+    if (blur != null && blur > 0) {
+      // ⚠️ BackdropFilter **不受布局尺寸限制**：必须自己配 ClipRect，否则会把背后**整块画布**
+      //    糊掉（用户 2026-09-24 实报「编辑子群模糊遮罩直接糊掉整个画布」）。web 的
+      //    .subgroup-dialog-overlay 是 position: fixed + inset: 0 ⇒ 天然裁剪在视口内。
+      mask = ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          child: mask,
+        ),
+      );
+    }
+
     return Stack(
       children: <Widget>[
-        // 遮罩（`background: var(--overlay-dim)`）
+        // 遮罩（`background: var(--overlay-dim)`；子群档另有 blur(3px)）
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onDismiss,
-            child: const ColoredBox(color: Color(0x40465B92)), // rgba(70,91,146,.25)
+            child: mask,
           ),
         ),
-        // 定位：窄屏贴底（padding 0）；宽屏居中
+        // 定位：窄屏贴底（padding 0）；宽屏居中；[centerBoth] 时两档都居中
         Positioned.fill(
           child: Padding(
-            padding: EdgeInsets.all(narrow ? 0 : padding),
+            padding: EdgeInsets.all(centered ? padding : 0),
             child: Align(
-              alignment: narrow ? Alignment.bottomCenter : Alignment.center,
+              alignment: centered ? Alignment.center : Alignment.bottomCenter,
               child: GestureDetector(
                 onTap: () {}, // 卡内点击不冒泡到遮罩
                 child: child,
