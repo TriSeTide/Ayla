@@ -76,6 +76,7 @@ import '../widgets/game_room_card.dart';
 import '../widgets/game_room_create.dart';
 import '../widgets/game_room_placeholder.dart';
 import '../widgets/group_apply.dart';
+import '../widgets/group_create_dialog.dart';
 import '../widgets/subgroup_dialog.dart';
 import '../widgets/emoji_pack_panel.dart';
 import '../widgets/media_content.dart';
@@ -1062,6 +1063,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 'Form（弹窗/守卫卡共用）= desc 14/1.6（公开群/申请制两档；join_policy 未知按申请制）+ label + textarea（min-height 104 / 200 上限）+ 错误 13 + 提交键（accepted → onDone；否则成功态：圆 48 success + glow + ✓）· Dialog = 遮罩 .28、卡片 min(440px) + radius 16 + modal 阴影、head = kicker（utility 11 / ls 1.2 / pink-500）+ h2 display 22 + 文字「×」· ⚠️ web 的第三个形态 GroupApplyGate（GroupPage.tsx:398 的路由守卫卡）**按用户 2026-09-25 裁决不实现**（属页面层路由守卫，且 web 实渲染里 head 无左右 padding）· 提交与跳转全注入（未注入即禁用）· 样张可交互',
             child: aylaGroupApplySamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 顶层散件（2026-09-25：B6-1 建群对话框） ----------
+          _Section(
+            title:
+                '建群对话框（GroupCreateDialog.tsx 184 行 + private.css 66–186 / 188–280）',
+            source:
+                '弹层与卡片**与 CreateSheet 同规格**（private.css 明写共用同一段）⇒ 直接复用 AylaModalOverlay + AylaModalCard（480 / 80vh / padding sp4 / 窄屏贴底上滑）+ AylaSheetHead（title display 18/w600 + icon-btn-40 + IconClose 18）· 群名 input.field（必填 / autoFocus）+ 成员搜索（左搜索图标 15 + 输入 padding-left 34 / margin-top sp2）+ .field-error 13 destructive + 已选 chips（复用提升后的 AylaGroupChip：pill / ice-100 / 12-600 / 叉 16×16 hover destructive）+ 结果列表（max-height 220 自滚；行 = 16×16 checkbox + 名称 14/600 省略 + 幽灵「私聊」32/12；勾选行整行可点 = web label）+ 建群键（primary 全宽 / IconPlus 16 / 「建群（N 人）」/ disabled = busy 或群名空）· 搜索 **300ms 防抖**；结果仅在 q == searchQuery 时可见 · 空态「没有匹配的用户」照实无 padding（.search-empty 用了未定义的 --sp-10 ⇒ 整条作废）· 请求与跳转全注入（未注入即禁用）· **样张可交互**：打字试防抖搜索、勾选进 chips、开关切「下一次建群失败」看错误行',
+            child: aylaGroupCreateDialogSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

@@ -1036,7 +1036,7 @@ class _AylaVisibilitySelectorState extends State<AylaVisibilitySelector> {
                   runSpacing: AylaSpacing.sp2,
                   children: <Widget>[
                     for (final String id in widget.selectedGroupIds)
-                      _GroupChip(
+                      AylaGroupChip(
                         label: widget.groups
                                 .where((({String id, String title}) g) => g.id == id)
                                 .map((({String id, String title}) g) => g.title)
@@ -1269,20 +1269,41 @@ class AylaCheckbox extends StatelessWidget {
     );
   }
 }
-
-/// `.group-create-chip` —— 已选群胶囊（可删）。
-class _GroupChip extends StatelessWidget {
-  const _GroupChip({
+/// `.group-create-chip` —— 已选成员 / 已选群胶囊（可删）。
+///
+/// 事实源：`.group-create-chip`（private.css 115–125）+ `.group-create-chip-x`（127–141）——
+/// padding `2px 8px 2px 10px` · radius-pill · `--ice-100` 底 · 12/600 · 叉 **16×16**
+/// （静息 `--text-secondary`，**hover → `--destructive`**）；gap 4。
+///
+/// 同一件服务两处（用户 2026-09-25 裁决：照 `AylaCheckbox` 先例把私有件提升为公共件）：
+/// - `AylaVisibilitySelector` 的「已选群」——叉的 aria 默认「取消选择群 label」；
+/// - 建群弹窗的「已选成员」——传 [removeSemanticLabel]「移除 name」（web tsx 131）。
+class AylaGroupChip extends StatefulWidget {
+  const AylaGroupChip({
+    super.key,
     required this.label,
-    required this.onRemove,
     required this.style,
+    this.onRemove,
+    this.removeSemanticLabel,
   });
 
   final String label;
 
+  /// 文本样式来源（调用方从 `AylaTextStyles.of(context)` 取）。
+  final AylaTextStyles style;
+
   /// null = 不显示 ×（锁定群）。
   final VoidCallback? onRemove;
-  final AylaTextStyles style;
+
+  /// 叉钮的可访问文案；null = 默认「取消选择群 label」。
+  final String? removeSemanticLabel;
+
+  @override
+  State<AylaGroupChip> createState() => _AylaGroupChipState();
+}
+
+class _AylaGroupChipState extends State<AylaGroupChip> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1298,28 +1319,36 @@ class _GroupChip extends StatelessWidget {
         spacing: 4, // gap: 4px
         children: <Widget>[
           Text(
-            label,
-            style: style.label.copyWith(
+            widget.label,
+            style: widget.style.label.copyWith(
               fontSize: 12, // font-size: 12px
               fontWeight: FontWeight.w600, // font-weight: 600
               color: AylaColors.textPrimary,
             ),
           ),
-          if (onRemove != null)
+          if (widget.onRemove != null)
             Semantics(
               button: true,
-              label: '取消选择群 $label',
-              child: GestureDetector(
-                onTap: onRemove,
-                child: SizedBox(
-                  width: 16, // width: 16px
-                  height: 16, // height: 16px
-                  child: Center(
-                    child: Text(
-                      '×',
-                      style: style.label.copyWith(
-                        fontSize: 13,
-                        color: AylaColors.textSecondary, // 静息 secondary
+              label: widget.removeSemanticLabel ?? '取消选择群 ${widget.label}',
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (_) => setState(() => _hovered = true),
+                onExit: (_) => setState(() => _hovered = false),
+                child: GestureDetector(
+                  onTap: widget.onRemove,
+                  child: SizedBox(
+                    width: 16, // width: 16px
+                    height: 16, // height: 16px
+                    child: Center(
+                      child: Text(
+                        '×',
+                        style: widget.style.label.copyWith(
+                          fontSize: 13,
+                          // 静息 --text-secondary；hover → --destructive（.group-create-chip-x:hover）
+                          color: _hovered
+                              ? AylaColors.destructive
+                              : AylaColors.textSecondary,
+                        ),
                       ),
                     ),
                   ),

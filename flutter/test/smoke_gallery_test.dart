@@ -102,6 +102,8 @@ void main() {
       // 2026-09-24 B5 group 域第一批两节
       '子群弹窗（SubGroupDialog.tsx 111 行 + group.css 2131–2231）',
       '群聊申请弹窗（GroupApplyDialog.tsx 25–137 行 + search.css 175–296）',
+      // 2026-09-25 B6-1
+      '建群对话框（GroupCreateDialog.tsx 184 行 + private.css 66–186 / 188–280）',
     ]) {
       expectSection(title);
     }
