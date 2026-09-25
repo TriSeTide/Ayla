@@ -138,7 +138,7 @@ class AylaGroupResultCard extends StatelessWidget {
                             children: <Widget>[
                               if (group.memberCount != null)
                                 Text(
-                                  '\u0024{group.memberCount} 人', // tsx 29
+                                  '${group.memberCount} 人', // tsx 29
                                   style: t.body.copyWith(
                                     fontSize: 12,
                                     color: AylaColors.textSecondary,
@@ -428,7 +428,10 @@ class AylaFavoriteResultCard extends StatelessWidget {
 
 /// 目录结果卡样张（画布与 @Preview 共用）。
 ///
-/// 群结果卡（meta 两档）· 收藏·消息卡（文本 / 已撤回）· 收藏·不可用卡。
+/// 群结果卡（meta 两档）· 收藏·消息卡（文本 / 已撤回）。
+///
+/// ⚠️ 「内容不可用」档（收藏投影缺失，web tsx 46–48）**有意不在样张里展示** —— 它是失效数据的
+/// 兜底形态，摆在画布上容易被误读成坏卡；组件分支保留。
 Widget aylaDirectoryResultCardSamples() => const _DirectoryResultCardsDemo();
 
 class _DirectoryResultCardsDemo extends StatelessWidget {
@@ -510,16 +513,6 @@ class _DirectoryResultCardsDemo extends StatelessWidget {
             onOpen: _noop,
           ),
         ),
-        SizedBox(
-          width: 420,
-          child: AylaFavoriteResultCard(
-            favorite: const AylaFavoriteResultData(
-              id: 3,
-              targetType: AylaFavoriteTargetType.post,
-            ),
-            onOpen: _noop,
-          ),
-        ),
       ],
     );
   }
@@ -530,7 +523,7 @@ void _noop() {}
 /// 目录结果卡（群 / 收藏消息 / 不可用）—— 静态样张。
 @Preview(
   group: 'Widgets',
-  name: '目录结果卡（群结果 / 收藏消息 / 内容不可用）',
+  name: '目录结果卡（群结果 / 收藏消息）',
   size: Size(1000, 900),
   wrapper: previewTheme,
 )
