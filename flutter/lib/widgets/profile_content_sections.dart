@@ -633,7 +633,10 @@ class _ProfileContentRowState extends State<_ProfileContentRow> {
 
 /// 个人主页内容分区样张（画布与 @Preview 共用）。
 ///
-/// 两档：全内容（直播 + 语音并排 + 3 帖 + 桌游占位）· 空态（骨架 loading / 空帖文案）。
+/// 单档：全内容（直播 + 语音并排 + 3 帖 + 桌游占位）。
+///
+/// ⚠️ loading / error / 空态**不在画布上重复摆档**（组件每档都会渲染「帖子」与「正在玩的桌游」
+/// 两张卡，多摆会显得像多余的卡）—— 这三种状态由定向测试覆盖（骨架 3×44、error 文案、两档空态文案）。
 Widget aylaProfileContentSectionsSamples() => const _ProfileSectionsDemo();
 
 class _ProfileSectionsDemo extends StatelessWidget {
@@ -686,20 +689,6 @@ class _ProfileSectionsDemo extends StatelessWidget {
             onOpenVoice: _noopId,
             onOpenPost: _noopId,
             onMorePosts: _noop,
-          ),
-        ),
-        SizedBox(
-          width: 420,
-          child: AylaProfileContentSections(
-            displayName: 'bob',
-            postsLoading: true,
-          ),
-        ),
-        SizedBox(
-          width: 420,
-          child: AylaProfileContentSections(
-            displayName: 'bob',
-            postsError: '帖子加载失败',
           ),
         ),
       ],
