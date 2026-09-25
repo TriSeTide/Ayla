@@ -77,6 +77,7 @@ import '../widgets/game_room_create.dart';
 import '../widgets/game_room_placeholder.dart';
 import '../widgets/group_apply.dart';
 import '../widgets/directory_result_cards.dart';
+import '../widgets/overlay_scrollbar.dart';
 import '../widgets/profile_content_sections.dart';
 import '../widgets/group_create_dialog.dart';
 import '../widgets/subgroup_dialog.dart';
@@ -1095,6 +1096,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '顺序完整卡片（不折叠、不叠卡：外层透明 + 每类一张玻璃卡）· 四张卡 = 正在直播（LIVE 徽标 pink-500 / 封面 88×50 或 ice-100 占位 IconVideo 20 / 副行「主播 正在直播」）· 正在语音（badge **仅 member_count > 0**「N 人在麦」utility 12 / 36×36 ice-100 图标块 IconMic 18 / 副行「主播 的语音房」）· 帖子（badge 数字 utility 12 / loading = 三条高 44 骨架 / error 与空态 13px secondary（mine「还没有发帖」/ 他人「暂无帖子」）/ 行 = 标题或正文前 40 + 副行「正文前 40 · 时间」/「更多帖子」ghost 36 高左对齐）· 桌游占位（rgba(255,250,251,.4) 圆角块 + IconGame 28 + 「桌游玩法即将上线」）· 卡片 head = 图标 16（**--ice-500**）+ 标题 14/700 + badge；内容行三处共用（静息 rgba(255,250,251,.4) → hover ice 蓝 .18 + 边，180ms）· 直播/语音宽屏并排（各 flex 1）、**≤768 单列** · formatTime 四档（刚刚 / N 分钟前 / N 小时前 / 日期 zh-CN）· 数据与跳转全注入 · **样张三档**：全内容（直播+语音并排+3 帖+桌游占位）/ loading 骨架 / error 文案',
             child: aylaProfileContentSectionsSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 顶层散件（2026-09-25：B6-4 覆盖层滚动条，B6 收官） ----------
+          _Section(
+            title:
+                '覆盖层滚动条（OverlayScrollbar.tsx 311 行 + base.css 385–421）',
+            source:
+                'web 用 document 级事件委托 + body 挂 fixed thumb；Flutter 等价 = NotificationListener 包住子树（滚动通知向上冒泡）+ 自身 Stack 槽位画条 + MouseRegion 判悬停 + GestureDetector 拖拽 ⇒ **页面层要包在应用根**· 常量逐条照 web：THICKNESS 4 / OFFSET 2 / PAD 3（视觉条 4px + 四边 3px 透明命中区）/ MIN_VERT 28 / MIN_HORZ 48 / 停滚 **600ms** 淡出（悬停与拖拽期间不淡出）/ thumb 长 = round(track²/scrollSize) / 静息 rgba(126,149,189,.38) → hover .55 / 显隐 180ms ease-out（reduced-motion 无过渡）/ **窄屏 ≤768 完全不显示** · 样张：420×320 可滚列表，滚动即出细条，停 600ms 淡出 · ⚠️ 定向测试待补',
+            child: aylaOverlayScrollbarSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 

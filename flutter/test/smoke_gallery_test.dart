@@ -108,6 +108,8 @@ void main() {
       '目录结果卡（DirectoryResultCards.tsx 119 行 + typed-result-cards.css）',
       // 2026-09-25 B6-3
       '个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）',
+      // 2026-09-25 B6-4（B6 收官）
+      '覆盖层滚动条（OverlayScrollbar.tsx 311 行 + base.css 385–421）',
     ]) {
       expectSection(title);
     }
