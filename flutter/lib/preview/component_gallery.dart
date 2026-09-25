@@ -77,6 +77,7 @@ import '../widgets/game_room_create.dart';
 import '../widgets/game_room_placeholder.dart';
 import '../widgets/group_apply.dart';
 import '../widgets/directory_result_cards.dart';
+import '../widgets/profile_content_sections.dart';
 import '../widgets/group_create_dialog.dart';
 import '../widgets/subgroup_dialog.dart';
 import '../widgets/emoji_pack_panel.dart';
@@ -1084,6 +1085,16 @@ class ComponentGallery extends StatelessWidget {
             source:
                 '两个卡：**群结果卡**（.typed-group-card：玻璃卡 + padding sp4/窄屏 sp3 + radius-card + compact 阴影 + blur24；Avatar 44 + 标题 + meta「N 人 / 公开群聊 / 申请制群聊」12px secondary + 可选入口文案 + action 槽位）· **收藏结果卡**（按 target_type 分派到既有 post/live/voice/game 卡并传 action；**投影缺失 = 内容不可用**（.typed-unavailable-card，按钮 disabled）；message 情形自绘 .typed-message-card：IconMessage 18 + 昵称/「消息」13px + 正文三态（已撤回 / 戳一戳 / blockquote 原文，ice-100 + padding sp3 + radius-input）+ 媒体区独占一行复用 AylaMediaContent（点媒体不跳转），整卡 canOpen 时可点）· .typed-result-card 只是宽度归一 ⇒ Flutter 侧由各卡自身表达，不新造空壳容器 · 附带补档：**live 卡补 action 槽位**（web tsx 56 用它换「取消收藏」直删键）· 样张静态展示四档（群卡 meta 两档 / 消息文本 / 已撤回 / 不可用）',
             child: aylaDirectoryResultCardSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp8),
+
+          // ---------- 顶层散件（2026-09-25：B6-3 个人主页内容分区） ----------
+          _Section(
+            title:
+                '个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）',
+            source:
+                '顺序完整卡片（不折叠、不叠卡：外层透明 + 每类一张玻璃卡）· 四张卡 = 正在直播（LIVE 徽标 pink-500 / 封面 88×50 或 ice-100 占位 IconVideo 20 / 副行「主播 正在直播」）· 正在语音（badge **仅 member_count > 0**「N 人在麦」utility 12 / 36×36 ice-100 图标块 IconMic 18 / 副行「主播 的语音房」）· 帖子（badge 数字 utility 12 / loading = 三条高 44 骨架 / error 与空态 13px secondary（mine「还没有发帖」/ 他人「暂无帖子」）/ 行 = 标题或正文前 40 + 副行「正文前 40 · 时间」/「更多帖子」ghost 36 高左对齐）· 桌游占位（rgba(255,250,251,.4) 圆角块 + IconGame 28 + 「桌游玩法即将上线」）· 卡片 head = 图标 16（**--ice-500**）+ 标题 14/700 + badge；内容行三处共用（静息 rgba(255,250,251,.4) → hover ice 蓝 .18 + 边，180ms）· 直播/语音宽屏并排（各 flex 1）、**≤768 单列** · formatTime 四档（刚刚 / N 分钟前 / N 小时前 / 日期 zh-CN）· 数据与跳转全注入 · **样张三档**：全内容（直播+语音并排+3 帖+桌游占位）/ loading 骨架 / error 文案',
+            child: aylaProfileContentSectionsSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp8),
 
