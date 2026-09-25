@@ -230,13 +230,21 @@ class AylaProfileContentSections extends StatelessWidget {
               children: <Widget>[liveCard, voiceCard],
             )
           else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: AylaSpacing.sp4,
-              children: <Widget>[
-                Expanded(child: liveCard),
-                Expanded(child: voiceCard),
-              ],
+            // ⚠️ 必须 stretch：web 的 .profile-media-row 是 flex 行（默认 align-items: stretch）
+            //    ⇒ 两张卡**等高、底部对齐**；用 start 会让矮的那张按内容高、底边错开（用户实报
+            //    「语音卡底部和直播卡底部没对齐」）。
+            // ⚠️ 等高靠 IntrinsicHeight（web 的 flex 行默认 align-items: stretch）：
+            //    竖向无界父级（SingleChildScrollView）下 CrossAxisAlignment.stretch 不可靠，
+            //    实测两卡底边仍错开（用户实报）。IntrinsicHeight 会把两卡拉到同一高度。
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: AylaSpacing.sp4,
+                children: <Widget>[
+                  Expanded(child: liveCard),
+                  Expanded(child: voiceCard),
+                ],
+              ),
             )
         else if (liveCard != null)
           liveCard

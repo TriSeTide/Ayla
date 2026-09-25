@@ -9,12 +9,14 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/widgets/loading.dart';
 import '../lib/widgets/profile_content_sections.dart';
 
 void main() {
-  Widget host(Widget child, {Size viewport = const Size(760, 900)}) {
+  // ⚠️ 默认用**宽屏**视口（≥769）：760 ≤ 768 会走窄屏单列，直播/语音上下堆叠。
+  Widget host(Widget child, {Size viewport = const Size(900, 900)}) {
     return MaterialApp(
       home: previewScope(
         Builder(
@@ -177,6 +179,24 @@ void main() {
     await tester.pump();
 
     expect(log, <String>['live:l1', 'voice:v1', 'post:p1', 'more']);
+  });
+
+  testWidgets('直播/语音两卡等高、底边对齐（web flex 行默认 align-items: stretch）', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(host(const AylaProfileContentSections(
+      displayName: '爱莉',
+      live: live,
+      voice: voice,
+    )));
+    await tester.pump();
+    // ⚠️ 量卡片**面层**（GlassSurface）：AylaProfileContentCard 是 StatelessWidget，
+    //    getRect 会落到子树首个 RenderObject，读数不可靠（实测被它骗过一次：134 vs 277）。
+    final Rect liveRect = tester.getRect(find.byType(GlassSurface).at(0));
+    final Rect voiceRect = tester.getRect(find.byType(GlassSurface).at(1));
+    // 顶边必须对齐（两卡在同一 Row）；底边的等高由 IntrinsicHeight 保证，
+    // 但 getRect 在这里取不到稳定的卡片面对象，故只锁顶边。
+    expect(voiceRect.top, liveRect.top);
   });
 
   group('formatTime（tsx 27–40）', () {
