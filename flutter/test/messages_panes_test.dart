@@ -12,8 +12,10 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
-import '../lib/theme/tokens.dart';
 import '../lib/widgets/messages_tabs.dart';
+import '../lib/widgets/dialogs.dart'
+    show AylaModalCard, AylaModalOverlay, AylaSheetHead;
+import '../lib/widgets/messages_tabs.dart' show AylaMessagesTabs;
 import '../lib/widgets/quick_messages_sheet.dart';
 import '../lib/widgets/wide_messages_sidebar.dart';
 
@@ -200,24 +202,35 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('私信列表占位'), findsOneWidget);
-    // 面板高 = 70%
-    final Finder panel = find.byType(ClipRRect).first;
-    expect(
-      tester.getSize(panel).height,
-      moreOrLessEquals(600 * AylaQuickMessagesSheet.panelFraction, epsilon: 1),
-      reason: '`.quick-messages-panel { height: 70% }`',
+    // ⚠️ 2026-09-24 改：本栏**复用通用弹层配方**（`AylaModalOverlay` + `AylaModalCard`，
+    // 与 `AylaCreateSheet` 同源），不再自己拼「30% 遮罩带 + 70% 面板 + ClipRRect」——
+    // 那种写法下遮罩只到面板顶边，面板 24px 上圆角切掉的两角会露出未压暗的页面（web 既有 bug）。
+    // 复用库内**现成的弹层容器**（与名单弹层同一套）：`AylaModalOverlay` + `AylaModalCard`
+    final Finder sheet = find.byType(AylaModalOverlay);
+    expect(sheet, findsOneWidget);
+    final AylaModalCard modal = tester.widget<AylaModalCard>(
+      find.byType(AylaModalCard),
     );
-    // 上圆角 24（不是 radius-card 16）
-    final GlassSurface surface = tester.widget<GlassSurface>(
-      find.descendant(of: panel, matching: find.byType(GlassSurface)).first,
+    expect(modal.narrowHeightFactor, AylaQuickMessagesSheet.panelFraction, // 70%
+        reason: '`.quick-messages-panel { height: 70% }`');
+    expect(modal.narrowRadius, AylaQuickMessagesSheet.panelRadius, // 24
+        reason: '`.quick-messages-panel { border-radius: 24px 24px 0 0 }`');
+    // 下方弹出的半屏弹层：贴底 + 高 70%
+    final Rect card = tester.getRect(find.byType(AylaModalCard));
+    expect(card.height, moreOrLessEquals(600 * AylaQuickMessagesSheet.panelFraction, epsilon: 1.5));
+    expect(card.bottom, moreOrLessEquals(600, epsilon: 0.5));
+    // 遮罩**铺满**（修的就是「遮罩只到面板顶边 ⇒ 上圆角切角露出未压暗页面」）
+    final Rect scrim = tester.getRect(
+      find.descendant(
+        of: find.byType(AylaModalOverlay),
+        matching: find.byType(ColoredBox),
+      ).first,
     );
-    expect(
-      surface.radiusOverride,
-      const BorderRadius.vertical(top: Radius.circular(24)),
-      reason: '`.quick-messages-panel { border-radius: 24px 24px 0 0 }`',
-    );
-    expect(surface.strong, isTrue, reason: '--glass-bg-strong');
-    expect(surface.shadow, AylaShadows.modal);
+    expect(scrim.height, moreOrLessEquals(600, epsilon: 0.5));
+    // head 是本件自己的（web 原样）：选项卡 + `.icon-btn-40` 关闭键，**没有标题**
+    expect(find.byType(AylaMessagesTabs), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('quick-messages-close')), findsOneWidget);
+    expect(find.byType(AylaSheetHead), findsNothing);
   });
 
   testWidgets('快捷栏：遮罩点击关闭 + 关闭键关闭', (WidgetTester tester) async {

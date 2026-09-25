@@ -254,35 +254,10 @@ void main() {
     expect(tester.getSize(find.byType(TabBadge)).height, 18);
   });
 
-  testWidgets('选项卡窄屏档：竖排 + 宽 260', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      host(
-        tester,
-        AylaMessagesTabs(
-          narrow: true,
-          value: 'chat',
-          onChange: (_) {},
-          items: const <AylaMessagesTabItem>[
-            AylaMessagesTabItem(key: 'chat', label: '私信'),
-            AylaMessagesTabItem(key: 'friends', label: '好友'),
-            AylaMessagesTabItem(key: 'requests', label: '认证消息'),
-          ],
-        ),
-      ),
-    );
-    await tester.pump(const Duration(milliseconds: 50));
-    final Rect r1 = tester.getRect(find.text('私信'));
-    final Rect r2 = tester.getRect(find.text('好友'));
-    expect(r2.top, greaterThan(r1.bottom), reason: '竖排（flex-direction: column）');
-    // ⚠️ 量**内容层**的固定宽（外层 `UnconstrainedBox` 自身会被紧宿主 clamp，量它会骗人）
-    expect(
-      find.byWidgetPredicate(
-        (Widget w) => w is SizedBox && w.width == AylaMessagesTabs.narrowWidth,
-      ),
-      findsOneWidget,
-      reason: 'messages.css 217 `width: 260px`',
-    );
-  });
+  // ⚠️ 2026-09-25：「选项卡窄屏档（竖排 + 宽 260）」用例**已删** —— 该档本来就不存在
+  // （用户实报「消息中心选项卡根本没有这样的窄屏档」）：它对应的 web 规则是
+  // `.messages-page` 的**宽屏消息页版式**（messages.css 211–227，`@media (min-width: 769px)`），
+  // 而 `.wide-messages-sidebar .messages-tabs`（259–263）又把它覆写回横排 ⇒ 组件只有横排一档。
 
   // ======================= 认证面板 =======================
 

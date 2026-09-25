@@ -9,7 +9,7 @@
 /// | 面板 | messages.css 358–378（`.quick-messages-panel`：**下 70%** + `--glass-bg-strong` + `--glass-filter` + 上边框 + **radius `24 24 0 0`** + `overflow: hidden` + `--glass-shadow-modal` + **slide-in 250ms ease-out**） |
 /// | 头部 | messages.css 392–404（`.quick-messages-head`：padding `sp3 sp4` + 下边框；`.quick-messages-tabs { flex: 1; padding: 0 }`） |
 /// | 内容区 | messages.css 406–425（`.quick-messages-private/-requests`：`flex: 1` + `min-height: 0` + `overflow-y: auto`；`.quick-messages-chat`：`flex: 1` + `display: flex`，内层 `.private-chat flex: 1`） |
-/// | ESC 关闭 | tsx 64–71（`document.addEventListener("keydown")`）⇒ Flutter 侧用 `HardwareKeyboard.instance.addHandler`（同 `AylaMentionPickerHost`：web 监听 document，不能用 `Shortcuts`） |
+/// | ESC 关闭 | tsx 64–71（`document.addEventListener("keydown")`）⇒ **由复用的通用弹层提供**（`AylaCreateSheet` 的 `Shortcuts` + `Actions(DismissIntent)`）；本件**不再**自己加全局监听 |
 /// | 两个 tab | tsx 178–202（私信 / 认证消息 + 徽标）⇒ 复用 `AylaMessagesTabs` |
 ///
 /// ## 与 web 的差异（有意，登记）
@@ -27,8 +27,8 @@ import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter/widget_previews.dart';
 
+import 'dialogs.dart' show AylaModalCard, AylaModalOverlay;
 import '../theme/app_icons.dart';
-import '../theme/glass.dart';
 import '../theme/preview_theme.dart';
 import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
@@ -90,17 +90,14 @@ class AylaQuickMessagesSheet extends StatefulWidget {
 
 class _AylaQuickMessagesSheetState extends State<AylaQuickMessagesSheet> {
   late String _tab = widget.initialTab;
-  bool _entered = false;
 
   @override
   void initState() {
     super.initState();
-    // ESC 关闭：web 监听 document（tsx 64–71）⇒ 全局键盘监听（不是 `Shortcuts`）
+    // ESC 关闭：web 监听 document（`QuickMessagesSheet.tsx 64–71`）⇒ 全局键盘监听
+    // （这里**必须**自己实现：本件用的是裸的 `AylaModalOverlay + AylaModalCard` 容器，
+    //  它们不带 ESC；`AylaCreateSheet` 才带，但它会多渲染一行 web 没有的标题 head ✗）
     HardwareKeyboard.instance.addHandler(_onKey);
-    // slide-in：挂载后下一帧把 offset 从 1 归零（250ms ease-out）
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _entered = true);
-    });
   }
 
   @override
@@ -130,67 +127,51 @@ class _AylaQuickMessagesSheetState extends State<AylaQuickMessagesSheet> {
       ),
     ];
 
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints c) {
-        final double height = c.maxHeight.isFinite ? c.maxHeight : 0;
-        final double panelHeight = height * AylaQuickMessagesSheet.panelFraction;
-        return Stack(
-          fit: StackFit.expand,
-          children: <Widget>[
-            // 上 30% 遮罩（点击关闭）
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              height: height * AylaQuickMessagesSheet.scrimFraction,
-              child: GestureDetector(
-                onTap: widget.onClose,
-                child: const ColoredBox(color: Color(0x40465B92)), // rgba(70,91,146,.25)
-              ),
-            ),
-            // 下 70% 面板
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: panelHeight,
-              child: AnimatedSlide(
-                // ⚠️ `AnimatedSlide` 的基准是**直接 child 尺寸**（= 面板高）
-                // ⇒ offset 1 = translateY(100%)，与 web 的 slide-in 关键帧等价。
-                offset: _entered ? Offset.zero : const Offset(0, 1),
-                duration: const Duration(milliseconds: 250),
-                curve: AylaCurves.easeOut,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(AylaQuickMessagesSheet.panelRadius),
-                  ),
-                  child: GlassSurface(
-                    strong: true, // --glass-bg-strong
-                    blur: AylaGlass.blurCard, // --glass-filter（blur24 sat1.4）
-                    radiusOverride: const BorderRadius.vertical(
-                      top: Radius.circular(AylaQuickMessagesSheet.panelRadius),
-                    ),
-                    borderOverride: const Border(
-                      top: BorderSide(color: AylaColors.glassBorder),
-                    ),
-                    shadow: AylaShadows.modal, // --glass-shadow-modal
-                    padding: EdgeInsets.zero,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        _head(tabs),
-                        Expanded(child: _body(hasChat)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+    // 复用库内**现成的弹层容器**（与名单弹层同一套）：遮罩铺满 + 下方弹出的半屏卡
+    // （`narrowHeightFactor` 表达 web 的 70% 高、`narrowRadius: 24` 表达 `24 24 0 0`、
+    // 窄屏贴底上滑 250ms、卡片材质 `--glass-bg-strong` + blur24 sat1.4 + `--glass-shadow-modal`）。
+    //
+    // head 用**本件自己的**（web 原样）：`QuickMessagesSheet.tsx 177–204` ——
+    // `.quick-messages-head` = **选项卡（flex:1）+ `.icon-btn-40` 关闭键**，**没有标题**
+    // （标题只是 `role="dialog" aria-label="快捷消息"`）；CSS `padding: sp3 sp4` + 下边框
+    // （messages.css 392–404）。
+    // ⚠️ 别改用 `AylaCreateSheet`：它会渲染 `AylaSheetHead(title + 关闭键)` ⇒ 多出一行 web 没有的标题，
+    // 且 ESC/关闭键会重复（实测 onClose 触发两次）。
+    //
+    // ⚠️ 本栏**窄屏专属**（web「R-QM，窄屏非导航页」；宽屏根本没有快捷消息栏）——由**调用方**保证；
+    // 组件画布/`@Preview` 那类宽宿主由**样张舞台覆写 MediaQuery**（见 `aylaQuickMessagesSheetSamples`）。
+    return AylaModalOverlay(
+      onDismiss: widget.onClose, // 点遮罩关闭（`.quick-messages-scrim` 的 onClick）
+      padding: 0, // 贴底铺满（无四周内沿）
+      child: AylaModalCard(
+        narrowHeightFactor:
+            AylaQuickMessagesSheet.panelFraction, // `.quick-messages-panel { height: 70% }`
+        narrowRadius: AylaQuickMessagesSheet.panelRadius, // `border-radius: 24px 24px 0 0`
+        scrollable: false, // 各 tab 内容区自滚（`overflow-y: auto`）
+        padding: EdgeInsets.zero,
+        // 卡片给子级的是**无界高度** ⇒ 自己定死面板高（各 tab 内部滚动视图因此有界；
+        // 与名单弹层同法）。head 是本件自己的，所以只扣面板高本身，不再扣 head。
+        child: SizedBox(
+          height: _contentHeight(context),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _head(tabs),
+              Expanded(child: _body(hasChat)),
+            ],
+          ),
+        ),
+      ),
     );
   }
+
+  /// 面板内容高 = `.quick-messages-panel { height: 70% }`（**只按屏高算**，卡内自己不再留内沿
+  /// —— 卡片的 `padding` 传 `EdgeInsets.zero`；head 是本件自己的，不额外扣高）。
+  ///
+  /// ⚠️ 不依赖任何行高估算：探针踩过「估 tabs 行高 60 ⇒ 溢出 23px、改成实测 82 又差 1px」，
+  /// 现在改成**只定面板高、内部用 `Expanded` 分配**，任何行高变化都不会溢出。
+  double _contentHeight(BuildContext context) =>
+      MediaQuery.sizeOf(context).height * AylaQuickMessagesSheet.panelFraction;
 
   /// `.quick-messages-head`（padding `sp3 sp4` + 下边框）。
   Widget _head(List<AylaMessagesTabItem> tabs) {
@@ -216,8 +197,8 @@ class _AylaQuickMessagesSheetState extends State<AylaQuickMessagesSheet> {
               },
             ),
           ),
+          // `.icon-btn-40` 关闭键（`QuickMessagesSheet.tsx 202–204`：`aria-label="关闭快捷消息"`）
           const SizedBox(width: AylaSpacing.sp2),
-          // `.icon-btn-40` 关闭键
           Semantics(
             button: true,
             label: '关闭快捷消息',
@@ -289,7 +270,18 @@ Widget aylaQuickMessagesSheetSamples() {
             child: SizedBox(
               width: width,
               height: height,
-              child: child,
+              // ⚠️ **必须覆写 MediaQuery**：本栏是窄屏专属（web「R-QM，窄屏非导航页」），
+              // 而组件画布/预览宿主的 MediaQuery 是 1800 宽 ⇒ 弹层会按宽屏档渲染成
+              // 「居中 + 四角圆角」✗（用户 2026-09-24 实报）。覆写成窄屏舞台尺寸后，
+              // 弹层才走「下方弹出的半屏弹层」档（贴底 + 仅上圆角 24 + 70% 高）。
+              child: Builder(
+                builder: (BuildContext inner) => MediaQuery(
+                  data: MediaQuery.of(inner).copyWith(
+                    size: Size(width, height),
+                  ),
+                  child: child,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: AylaSpacing.sp6),

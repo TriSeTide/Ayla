@@ -72,6 +72,9 @@ import '../widgets/live_room_body.dart';
 import '../widgets/live_studio.dart';
 import '../widgets/live_viewers.dart';
 import '../widgets/conversation_list.dart';
+import '../widgets/game_room_card.dart';
+import '../widgets/game_room_create.dart';
+import '../widgets/game_room_placeholder.dart';
 import '../widgets/emoji_pack_panel.dart';
 import '../widgets/media_content.dart';
 import '../widgets/message_input.dart';
@@ -120,906 +123,946 @@ class ComponentGallery extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text('Ayla Flutter 组件库 · Batch 1（材料基元）', style: t.pageTitle),
-          const SizedBox(height: AylaSpacing.sp2),
-          Text(
-            '对照 web：tokens.css/app.css/auroraqua.css/base.css/shell.css · Windows 125% 口径',
-            style: t.caption.copyWith(color: AylaColors.textSecondary),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- GlassButton ----------
-          _Section(
-            title: 'GlassButton（app.css .btn 21–67 / auroraqua.css 54–166）',
-            source:
-                '.btn：gap 8 · min-h 40 · padding 0 24 · radius 12 · 14px/700/ls .2 · 200ms',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                // 登录页主 CTA：.auth-submit（width 100% / 44 高 / btn-glow）
-                _Slot(
-                  label: '登录主 CTA（.auth-submit 44 · btn-glow）',
-                  width: 374,
-                  child: GlassButton(
-                    label: '登录',
-                    variant: GlassButtonVariant.glow,
-                    minHeight: 44,
-                    expand: true,
-                    onPressed: () {},
-                  ),
-                ),
-                const SizedBox(height: AylaSpacing.sp6),
-                _Row(
-                  children: <Widget>[
-                    _Slot(
-                      label: 'pending（disabled .55）',
-                      width: 220,
-                      child: GlassButton(
-                        label: '登录中…',
-                        variant: GlassButtonVariant.glow,
-                        minHeight: 44,
-                        expand: true,
-                        onPressed: null,
-                      ),
-                    ),
-                    _Slot(
-                      label: 'ghost（.auth-switch-link\nmin-w 72 / 44）',
-                      child: GlassButton(
-                        label: '注册',
-                        variant: GlassButtonVariant.ghost,
-                        minHeight: 44,
-                        minWidth: 72,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        onPressed: () {},
-                      ),
-                    ),
-                    _Slot(
-                      label: 'primary（40 高）',
-                      child: GlassButton(label: '登录', onPressed: () {}),
-                    ),
-                  ],
-                ),
-              ],
+            const SizedBox(height: AylaSpacing.sp2),
+            Text(
+              '对照 web：tokens.css/app.css/auroraqua.css/base.css/shell.css · Windows 125% 口径',
+              style: t.caption.copyWith(color: AylaColors.textSecondary),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
+            const SizedBox(height: AylaSpacing.sp8),
 
-          // ---------- GlassCard ----------
-          _Section(
-            title: 'GlassCard（app.css .glass-card 230–248）',
-            source:
-                '.glass-bg .55 · blur 24 saturate 1.4 · 1px 白边 .65 · 16px 圆角 · 8/32 阴影 · 顶沿内高光',
-            child: _Row(
-              children: <Widget>[
-                _Slot(
-                  label: '静态卡（padding 16）',
-                  width: 300,
-                  child: GlassCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Text('静态玻璃卡', style: t.cardTitle),
-                        const SizedBox(height: AylaSpacing.sp2),
-                        Text(
-                          '--glass-bg .55 / blur 24 / 16 圆角 / 8·32 阴影',
-                          style: t.caption.copyWith(
-                            color: AylaColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                _Slot(
-                  label: '可交互（hover 上浮 2px）',
-                  width: 300,
-                  child: GlassCard(
-                    interactive: true,
-                    onTap: () {},
-                    child: Text('可交互玻璃卡', style: t.cardTitle),
-                  ),
-                ),
-                _Slot(
-                  label: 'strong 弹层底（.78）',
-                  width: 300,
-                  child: GlassCard(
-                    strong: true,
-                    radius: AylaRadii.rPanel,
-                    shadow: AylaShadows.modal,
-                    child: Text('strong 弹层卡', style: t.cardTitle),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- GlassInput ----------
-          // 尺寸口径:登录认证卡内宽 440 − 卡内沿 32×2 = 374（.auth-submit
-          // 满宽字段与它同宽,故样张统一按 374 呈现,不缩成窄列）。
-          _Section(
-            title: 'GlassInput（app.css .field 70–88 / auroraqua.css 502–523）',
-            source:
-                'padding 12×16 · radius 12 · --glass-bg + 亮边 · focus 辉光边 · placeholder slate-500',
-            child: SizedBox(
-              width: 374,
-              child: _Rows(
+            // ---------- GlassButton ----------
+            _Section(
+              title: 'GlassButton（app.css .btn 21–67 / auroraqua.css 54–166）',
+              source:
+                  '.btn：gap 8 · min-h 40 · padding 0 24 · radius 12 · 14px/700/ls .2 · 200ms',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  _InputSample(
-                    label: '常态（认证卡内：indigo .3 描边）',
-                    onGlassBorder: true,
+                  // 登录页主 CTA：.auth-submit（width 100% / 44 高 / btn-glow）
+                  _Slot(
+                    label: '登录主 CTA（.auth-submit 44 · btn-glow）',
+                    width: 374,
+                    child: GlassButton(
+                      label: '登录',
+                      variant: GlassButtonVariant.glow,
+                      minHeight: 44,
+                      expand: true,
+                      onPressed: () {},
+                    ),
                   ),
-                  _InputSample(
-                    label: 'focus（#F796FF 边 + 辉光）',
-                    autofocus: true,
-                    onGlassBorder: true,
-                  ),
-                  _InputSample(
-                    label: '密码类型',
-                    obscure: true,
-                    text: '12345678',
-                    onGlassBorder: true,
+                  const SizedBox(height: AylaSpacing.sp6),
+                  _Row(
+                    children: <Widget>[
+                      _Slot(
+                        label: 'pending（disabled .55）',
+                        width: 220,
+                        child: GlassButton(
+                          label: '登录中…',
+                          variant: GlassButtonVariant.glow,
+                          minHeight: 44,
+                          expand: true,
+                          onPressed: null,
+                        ),
+                      ),
+                      _Slot(
+                        label: 'ghost（.auth-switch-link\nmin-w 72 / 44）',
+                        child: GlassButton(
+                          label: '注册',
+                          variant: GlassButtonVariant.ghost,
+                          minHeight: 44,
+                          minWidth: 72,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          onPressed: () {},
+                        ),
+                      ),
+                      _Slot(
+                        label: 'primary（40 高）',
+                        child: GlassButton(label: '登录', onPressed: () {}),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
+            const SizedBox(height: AylaSpacing.sp8),
 
-          // ---------- AvatarHalo ----------
-          _Section(
-            title:
-                'AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
-            source: '2.5px 锥形渐变环 conic 210° · 离线 --ice-100 · 爱莉 3.2s 呼吸辉光',
-            child: _Row(
-              children: <Widget>[
-                _Slot(
-                  label: '40 爱莉在线（呼吸 + 辉光）',
-                  child: const AvatarHalo(
-                    label: '爱莉',
-                    size: 40,
-                    online: true,
-                    core: AvatarCore.elysia,
-                  ),
-                ),
-                _Slot(
-                  label: '40 在线',
-                  child: const AvatarHalo(label: '在线', size: 40, online: true),
-                ),
-                _Slot(
-                  label: '40 离线',
-                  child: const AvatarHalo(label: '离线', size: 40),
-                ),
-                _Slot(
-                  label: '36 在线（窄屏顶栏）',
-                  child: const AvatarHalo(label: '在线', size: 36, online: true),
-                ),
-                _Slot(
-                  label: '24 在线（群卡底行）',
-                  child: const AvatarHalo(label: '群', size: 24, online: true),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- TabBadge（三档规格，2026-09-20 审查 R8 合并） ----------
-          _Section(
-            title:
-                'TabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
-            source:
-                'tab：min 16 / padding 0 4 / Fredoka 11 w500 / 绝对 top -4 right -12 · '
-                'groupBadge：16 / Fredoka 11 w400 / 行内 · messages：18 / Space Grotesk 11 / 行内 + glow · >99 → 99+',
-            child: _Row(
-              children: <Widget>[
-                _Slot(label: 'tab：1', child: _BadgeHost(count: 1)),
-                _Slot(label: 'tab：12', child: _BadgeHost(count: 12)),
-                _Slot(label: 'tab：150 → 99+', child: _BadgeHost(count: 150)),
-                _Slot(
-                  label: 'groupBadge（.group-badge-unread）',
-                  child: const TabBadge(
-                    count: 8,
-                    metrics: TabBadgeMetrics.groupBadge,
-                    placement: TabBadgePlacement.inline,
-                  ),
-                ),
-                _Slot(
-                  label: 'messages（.messages-tab-badge + glow）',
-                  child: const TabBadge(
-                    count: 120,
-                    metrics: TabBadgeMetrics.messages,
-                    placement: TabBadgePlacement.inline,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 帖子卡族（B5） ----------
-          _Section(
-            title:
-                'AylaPostCard / AylaPostVideoCover（PostCard.tsx + posts.css 9–217 + typed-result-cards.css 5,7）',
-            source:
-                'glass-bg + 16 圆角 + overflow hidden · hover（父级）translate -2px + shadow-hover + brightness 1.01 · active scale .99 · 正文 15/1.55 三行折叠 · 1 图 contain max-h 240 / 多图 3 列 gap 4 · 底排：查看帖子(12 secondary) + 统计(Space Grotesk 12) + 收藏(compact) + 分享(纯圆钮 40) · 排列：>1025 两列瀑布（轨道 1200 / 列距 12）/ <=1024 单列',
-            child: aylaPostCardSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 发帖编辑器（B5） ----------
-          _Section(
-            title:
-                'AylaPostEditor（PostEditor.tsx + posts.css 219–418 + auroraqua.css 105–166）',
-            source:
-                '三形态：常规 / 群内 collapsible 收起 / 展开 · padding sp3（collapsible sp2 sp3）· 展开 max-height min(90vh,1000px) · 收起钮 32 圆 · 标题 min-h 40 · 正文 展开 rows4/min-h 64、收起 单行 40 · 媒体块 128 方角（web --radius-md 未定义）、移除钮 28 圆 · 进度条 4px pill pink-500 · 图片/视频钮 glass 亮边 + hover glow（glowHover）· 可见性复用 AylaVisibilitySelector（群内 lockGroup）',
-            child: aylaPostEditorSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 评论族（B5） ----------
-          _Section(
-            title:
-                'AylaCommentList / AylaCommentComposer（CommentList.tsx + CommentComposer.tsx + posts.css 420–583）',
-            source:
-                '评论项：padding sp3 sp4 + 底部 1px 亮边 · 头像 32 · 昵称 14/700 · 时间 utility 11（zh-CN）· 回复提示 12 · 正文 14 · 操作行 12/600（回复 / 作者可删除，删除色 --destructive）· 图片 2 列 gap sp1 max-w 280（单图 200）、4:3 cover、方角（web --radius-md 未定义）· 输入：padding sp3 sp4 + 上边框 · 行 gap sp3 align-end · 工具钮 40（AylaToolButton，12 圆角）· 待发图 64px + 18px × · 底部滑入 250ms',
-            child: aylaCommentSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 查看器（B5） ----------
-          _Section(
-            title:
-                'AylaImageViewer（ImageViewer.tsx + app.css 1459–1836 + auroraqua.css 55–94）',
-            source:
-                '遮罩 --overlay-dim-strong + blur(8)（无 saturate）· 入场 opacity 180ms --ease-out · 关闭钮 40 圆 · 舞台 max min(92vw,1200) / 82vh · 图片 contain + radius-input + --surface + --card-shadow · 导航 44 圆（blur12 saturate1.4，禁用 0.35）· 操作条 pill 玻璃（blur18）+ 计数（Space Grotesk 12/ls.5）+ 保存（IconDownload 16）· 失败提示 bottom 76 · 横滑阈值 1/3 或 300px/s+40px（useSwipeCommit）· 条目 enter x=±40% 250ms · 样张走 embedded（嵌入画布不做 backdrop 模糊，避免糊宿主页面）',
-            child: aylaImageViewerSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 分享族（B5） ----------
-          _Section(
-            title:
-                'AylaShareSheet / AylaShareButton（ShareSheet.tsx + ShareButton.tsx + share.css 1–275）',
-            source:
-                '遮罩 --overlay-dim + padding 24 居中；窄屏 60dvh 贴底（上沿 radius-panel、去左右下边框、safe-area）· 卡 min(480,100%) + max-h min(80vh,720) + glass-bg-strong + blur24 sat1.4 + modal 阴影 + 宽屏入场 opacity/scale.96/y12 250ms ease-out · head sp4 + 底边 + 关闭 40 圆钮 · 预览条 8×12 + 28 圆 135deg ice→sakura + 14/600 单行省略 · 选项卡 2 列 gap8 / 40 高 / radius 10，选中 --nav-active-bg + --glass-shadow-compact（无边框、无扫光，只有文字色 200ms 过渡）· 行 min-h 48 / radius 12 / hover rgba(157,191,230,.18) / active .98 / 禁用 .6 · 子群缩进 52 + 8px ice-500 点 +「默认」sakura 胶囊 · 未读 18/pink-500/#fff 字 99+ 封顶 · 入口钮 = icon-btn-40 pill（无扫光）',
-            child: aylaShareSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 底栏（2026-09-20） ----------
-          _Section(
-            title:
-                'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
-            source:
-                '玻璃 64px + safe-area · **上沿 radius-panel 20 / 下方角**（auroraqua 252）+ 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 按钮 margin 4/2（auroraqua 254，胶囊随之内缩）· **容器级共享胶囊跨槽迁移 300ms**[0,0,.58,1] + hover 扫光 · 图标/文字 150ms 过渡 · 导航组 active .98、hover 不放大 · **F1 阶段不渲染红点**（badges 恒空）',
-            child: aylaBottomTabsSamples(), // 可交互：点 tab 看胶囊跨槽迁移
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 顶栏（2026-09-20） ----------
-          _Section(
-            title:
-                'AylaGroupTopTabs（components/group/GroupTopTabs.tsx 1–125 + group.css 21–91）',
-            source:
-                '窄屏群场景顶栏（与底栏同构、中央换群头像）：玻璃 64 + 底部 1px 边 · blur18 saturate1.4 · **方角**（auroraqua 448 覆写 253 的 0 0 20 20）· `--glass-shadow-compact` · 五槽（语音|直播|头像|帖子|桌游）· 按钮 inline-flex 按内容宽（auroraqua 255 padding 6/12 + radius-input）· 选中共享胶囊**实测按钮矩形**跨槽迁移 300ms · hover 扫光 · 帖子 tab 8px 粉点（top 6 / 距中心右 18）· 入场「从底栏升起」由父级 translate 300ms --auroraqua-ease-out 注入',
-            child: aylaGroupTopTabsSamples(), // 可交互：点 tab 看胶囊迁移
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          // ---------- Shell 顶栏（2026-09-20） ----------
-          _Section(
-            title:
-                'AylaTopNav（layout/TopNav.tsx 1–343 / layout/NarrowTopBar.tsx 1–199）',
-            source:
-                '响应式（>768 宽屏 / ≤768 窄屏自动切换）· 宽屏＝圆角浮动卡（复用 GlassCard：margin 12/12/0 + radius-card 16 + 四周 1px 边 + --glass-shadow + blur18）· 窄屏＝方角条（高 56 / padding 0 sp4 / 底部 1px 边 / 入场 auroraqua-panel-from-top）· 模块链 15/700 + 图标 16 上移 2px + 共享胶囊（有胶囊即不画底条，auroraqua 213）· logo 绝对居中 + 渐变字 indigo→grape + ≤1240 隐藏 · 图标钮复用 AylaIconButton（玻璃小卡 + hover 1.02 / press .98）· 搜索框＝文本字段族（radius-input + --glass-inset + focus 转辉光边）· 菜单与下拉浮层 300ms auroraqua-menu-in（opacity + −8px + .95→1）· 769–900 收窄降档（gap/padding + 搜索框 clamp(160,22vw,200)）',
-            child: aylaTopNavSamples(), // 可交互：点模块 / 更多菜单 / 搜索框，切三形态
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 侧栏（2026-09-21） ----------
-          _Section(
-            title:
-                'AylaServerRail（layout/ServerRail.tsx 1–184 + group.css 484–678 + auroraqua.css 216 / 217–229 / 270 / 311–313 / 125–138）',
-            source:
-                '宽屏服务器列 72px：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 外距 12/0/12/12（auroraqua 270 覆写右 0）· 内 1px 占位（CSS border 占布局、Flutter 不占）· 列表 padding 20/77 + 行距 12 + clip-path 15 + 上 20/下 16 mask 渐隐 · 群头像 48 + 光环（选中 scale 52/48 · 180ms）· 选中指示条 3×32 --glow-500（group.css 的 ::before 版被 auroraqua 216 关掉，实际用 --rail 变体）· 未读 = 消息 + 帖子（左下角 -3/-3、99+ 截断、.server-item-badge 档）· 置顶 pin 左上 -6/-4 45° 粉 · 状态角标（直播/语音/桌游，右上竖列）· 悬停行 → 180ms 后展开置顶面板（行右缘 +2、垂直居中；浮层走 Overlay，否则溢出区收不到指针）· 底部 53 加号复用 AylaIconButton · 入场 panelVariants(left) 左入 20 / 300ms easeInOut · **滚动条已关**（web base.css 372–383 全局隐藏原生滚动条；自绘覆盖层条属 §B6 OverlayScrollbar）· **9 个群超出列高** → 可滚动，验收上 20 / 下 16 渐隐与「底部 77 让位悬浮加号」',
-            child:
-                aylaServerRailSamples(), // 可交互：点行切群看指示条 300ms 迁移 / 悬停头像看置顶面板 / 滚轮看上下渐隐
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 侧栏（2026-09-21：频道侧栏重做版） ----------
-          _Section(
-            title:
-                'AylaChannelSidebar（layout/ChannelSidebar.tsx 1–627 + group.css 680–1370 + auroraqua.css 54–94 / 142–197 / 236–249 / 288–291 / 310–313 / 655–676）',
-            source:
-                '宽屏频道侧栏 slot 284（260 + 2×12）：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 内 1px 占位（CSS border 占布局、Flutter 不占；否则列表轨道 242→244、浮层钮偏 1px）· 群名头 Fredoka 500 20px + 16px chevron · 场景项 40 高 / gap 12 / padding 0 16 / radius 12 / 底 rgba(255,250,251,.4)；hover .18；选中底由**容器级单实例胶囊**画（auroraqua 194–197 取消按钮自身底）· 状态标识三型：语音在麦人数与 LIVE 是**裸文本**（web `.channel-scene-status` 零样式，继承 15px/600/secondary）、帖子未读才是粉徽标（margin-left auto 贴右）· 三个下拉各挂一个 paint-only 裁剪层（等价 useSidebarContentClip 的 inset；命中也随之裁剪，与 CSS clip-path 一致）· 自建 sticky：chat 0 / voice 44+吸底52 / live 88+吸底8，行本体画在浮层并在 **paint** 阶段按同帧几何定位（applyPaintTransform 同偏移）· 三角键属 auroraqua 按钮组（hover 1.02 + active .98），＋/笔不属于任何组（仅 180ms 底色）· 扫光只由**按钮本体** hover 触发（700ms），行级 hover 只管底色 · 语音房行 `sharedLayout={false}` → 行内独立胶囊、活跃度重排做 300ms 位置过渡 · 切群旧面板先退场再挂新面板（AnimatePresence mode="wait"）· **弹窗接线未做**（CreateSheet/VoiceChannelCreate/LiveStartSheet/SubGroupDialog 属后续批次，＋/笔点击暂无副作用）',
-            child:
-                aylaChannelSidebarSamples(), // 可交互：点场景项/子群/语音房/直播间看胶囊迁移与吸顶滚动，hover 看两套 hover
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 弹层（2026-09-21：A3 CreateSheet） ----------
-          _Section(
-            title:
-                'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',
-            source:
-                '通用弹层容器 = AylaModalOverlay（--overlay-dim + 宽屏居中 / 窄屏贴底）+ AylaModalCard（--glass-bg-strong + blur24 sat1.4 + 1px 亮边 + radius-panel 20 + --glass-shadow-modal）· overlay 与卡片 padding 都是 sp4=16 · head = AylaSheetHead（Fredoka 18/600 + .icon-btn-40 关闭钮 = AylaIconButton，IconClose **20**；ConfirmDialog 那处是 18）· 三条关闭路径（ESC / 点遮罩 / 关闭钮；点卡内不关）· 窄屏 width 100% + radius 24 24 0 0 + 去左右下边框 + padding-bottom calc(sp4 + safe-area) + 上滑 250ms · 内容用 web CreateFab.tsx:93–103 的 post 分支（PostEditor），**可交互**：点关闭钮/遮罩即收起，点「重新打开」还原',
-            child: const _CreateSheetDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 右下浮层按钮族（2026-09-21：A4） ----------
-          _Section(
-            title:
-                'AylaCornerFabStack / AylaRefreshFab / AylaScrollTopFab / AylaQuickMessageFab（layout/*.tsx + shell.css 423–456 / 679–787）',
-            source:
-                '堆叠容器 = fixed right 38（32 + (56-44)/2）/ bottom 100（32 + 56 + sp3）/ column · gap 12 · align end · 容器不吃指针（Flutter 裸 Column 天然等价）· 44px 玻璃钮复用 AylaCornerFab（--glass-bg + blur18 sat1.4 + --card-shadow，hover → strong + 0 2px 12px .18；**过渡 200ms --auroraqua-ease**，因 auroraqua.css 54–94 把 .corner-fab 并入按钮组覆盖 shell.css 的 180ms）· 刷新：iconRetry 20，spinning = ayla-loading-spin 800ms linear infinite（reduced-motion 不转），无回调时按钮照常可点只是无动作 · 回顶：iconArrowUp 20，滚动超过一屏（pixels > 视口高）且命中**主滚动容器**（viewportDimension ≥ 40% 视口高）才浮入（opacity + translateY 8→0，200ms；隐藏态不可点 + 语义排除），点击 smooth 回顶（300ms ease-out；reduced-motion 直切）· 消息钮复用 AylaMessageFab 外观，4s 无点击 → 半贴 translateX(-44px)（200ms --ease-out），半贴点击点出来、展开点击打开快捷栏 · **样张可交互**：滚列表看回顶钮浮入、点刷新看旋转、等 4s 看消息钮半贴',
-            child: aylaFabSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- Shell 会话活动悬浮球（2026-09-21：A5） ----------
-          _Section(
-            title:
-                'AylaSessionActivityIndicator（layout/SessionActivityIndicator.tsx 1–181 + shell.css 458–575 / 651–660）',
-            source:
-                '固定层（web position:fixed；right 24 / top 80 / z 55；窄屏 right 16 / top calc(56 + safe-top + 48)）= 语音球 + 直播球 + 收起把手 · 球 44×44：1px --glass-border + **不透明** sakura-100/ice-300 底（字色 grape-700/indigo-700）+ 0 2px 12px rgba(70,91,146,.12)；hover/focus → scale(1.08) + --glow-shadow（150ms --ease-out）——球**不在** auroraqua 按钮组 ⇒ 无 1.02/.98，且**不加**背板模糊（不透明底把 blur(18) 完全盖住，视觉恒为零）· 把手 28×44 玻璃（--glass-bg-strong + blur18 sat1.4，保留）+ `›` 字符 16/w500/line-height 1 · 收起：整组右移 24（窄屏 16 ⇒ 把手贴屏幕右缘）+ 球 translateX(64px) 淡隐 + 图标 rotate(180deg)，全 200ms --ease-out；把手可上下拖（**5px** 阈值 / clamp 8 … 视口高-44-8 / 拖动后抑制合成 click）· 把手 hover 底色 = **透明**（web 的 --glass-bg-hover 全历史未定义 ⇒ 实渲染回落初始值）+ 字色转 --text-primary · **样张可交互**：点把手收起/展开、按住把手上下拖、点球看回调、开关模拟会话进出',
-            child: aylaSessionActivitySamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- voice 域第一批（2026-09-21：B1-1） ----------
-          _Section(
-            title:
-                'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
-            source:
-                '卡片三处上下文（.voice-hub / .group-voice / typed-result-card）的视觉声明**逐字相同** ⇒ 只有一个竖排形态，差异全在容器网格：.voice-hub 2→(≥769)3→(≥1440)4 列 + padding 12/16；.group-voice 恒 2 列 + padding 0 ⇒ 由 List 的 columns/padding 表达，**不设 variant**（app.css 的横排基础卡在真实渲染中从不出现，故不实现）· 卡面 = --glass-bg + 1px 亮边 + blur24 sat1.4 + --glass-shadow + radius 16 + padding 12 + gap 8 · hover 描边 → rgba(157,191,230,.65)（上浮 -2 / 按下 .99 由 AylaCardInteraction 提供）、active → --indigo-700（同特异性在后 ⇒ 压过 hover）· focus-visible 环 = **--ice-500** 2px（画在形状外、不占布局；Enter/Space 同义可进房）· head = 标签组（AylaScrollingTags；来源标签 sakura-300/grape-700、Fredoka 11/ls .8/**max-width 12ch** 实测换算、无字重） + 收藏槽（AylaFavoriteButton compact，调用方注入）· title = mic 14 + 15px/700/1.3 单行滚动 · owner/meta = 12px secondary · foot = 人数 + 加入钮（primary min-height 32 / 13px / padding 0 12），mine&!browsing → 「我在其中」占位胶囊（ice-100 底/indigo-700 字/pill，min-height 32）· joining → 卡片 .7 + 按钮禁用（.55）+「加入中…」· 文案：加入 / 加入中… / 查看语音房（browsing）· 空态 = placeholder 两行（Fredoka 28/600 + 14px secondary）· 控制条 = padding-top 8 + 顶部 1px --glass-border，离开钮走**新增档 GlassButtonVariant.outlineDestructive**（透明底 + destructive 字 + 1px destructive 边、无阴影/无内高光），重新加入（livekit=failed）= primary min-height 28 / 12px · **样张可交互**：点卡或加入钮各计一次、控制条可切 failed 态',
-            child: aylaVoiceChannelSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- voice 域第二批（2026-09-21：B1-2） ----------
-          _Section(
-            title:
-                'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
-            source:
-                '行 = 头像 32（AvatarHalo；爱莉走 AvatarCore.elysia 光环，在线由页面层注入）+ 名称 13/w600 单行省略（「我」是名称行内的 11px indigo 子 span）+ 副行 11px（「在频道中」secondary /「已静音」destructive + IconMic 11）+ 操作区（flex:none）= 开关钮 + 音量条 · 开关钮 28 正圆：透明底 / --indigo-700，hover rgba(189,212,233,.35)、.is-off → --text-secondary + rgba(189,212,233,.25)，图标 15；在 auroraqua 按钮组内 ⇒ 200ms + hover 1.02 + active .98 · 音量条 90×20 三层（下→上）：轨道（双色 stops [0,fill,fill,1]：左 --indigo-700、右 ice-300@.55）→ 跳动条（宽 90×levelPct%、`linear-gradient(90deg, --glow-500, --ice-500)`、**80ms --ease-out**、`.is-speaking` 加 `0 0 6px rgba(247,150,255,.55)`）→ slider（轨道透明 4px + 自绘把手 14 圆 / --indigo-700 / 2px #fff 边 / `0 1px 4px rgba(70,91,146,.35)`；用 Flutter Slider 保住拖动/键盘/无障碍语义，divisions 100 = 原生 step 1）· 电平映射 `levelPct = round(min(1, level^0.4)×100)`（0.02→21 / 0.2→53 / 0.5→76）、说话阈值 **0.02** · 自己行 = 麦克风开关 + 本地麦音量（aria-pressed = micEnabled）；远端行 = 喇叭开关 + 播放音量（aria-pressed = locallyMuted，**语义与自身行不同**；locallyMuted 时跳动条归零、辉光消失）· 名称兜底 `user_id` 前 6 位 · **样张可交互**：拖滑块改音量、点开关切 is-off、拖「说话电平」看跳动条按 ^0.4 放大 + 说话辉光',
-            child: aylaVoiceMemberSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- voice 域第三批（2026-09-21：B1-3 第一件） ----------
-          _Section(
-            title:
-                'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
-            source:
-                '可见性选择器（**复用 AylaVisibilitySelector**：群内创建 group 锁定 + 本群恒勾选）+ 名称输入 + 「建频道」+ 错误行 · 输入 = GlassInput（min-height 36 / 13px / hint「新语音频道名称」/ 64 上限用 formatter 表达以免多出「0/64」计数器 / Enter 提交；圆角是 auroraqua 覆写的 --radius-input 12，app.css 的 pill 不生效；focus → glow-500 边 + --glow-shadow）· 两个挂载点（ChannelSidebar / CreateFab）**都在 AylaCreateSheet 内** ⇒ private.css 的 sheet 作用域恒生效：输入与按钮 width 100% + 输入 margin-bottom sp3（与容器 gap 8 叠加 = 与按钮 20）· 空名拦截「频道名称不能为空」（不发请求）· 防重入守卫 + busy 禁用 · 多选→单值 public→friends→group · 成功清空名称 + onCreated（外层关浮层）、失败显示文案并**保留表单** · 请求与列表插入由页面层 onSubmit 注入（web 是组件内直接调 API + store）· **样张可交互**：空名提交看报错、填名提交看清空与计数、第三个表单固定失败看文案',
-            child: aylaVoiceChannelCreateSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- voice 域第四批（2026-09-21：B1-4） ----------
-          _Section(
-            title:
-                'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
-            source:
-                '面板 = head（标题 **16/700**（h3 默认 bold，base.css 只重置 margin）+ 人数 12/secondary，**baseline 对齐**）+ 成员列表（`gap 8`）+ 控制条 · 材质 = radius 16 / --glass-bg / 1px 亮边 / blur24 sat1.4 / --glass-shadow / padding 16 / **max-width 560**（app.css）· **房间上下文档** `roomContext`（voice.css 32–56）：max-width→none、成员列表 `flex:1; min-height:0` 自己滚动、其余子项不收缩 · **材质归属档** `ownMaterial`（auroraqua 584–610）：宽屏房间面板透明（材质交外层卡）、窄屏外层卡透明（材质归面板）· 成员行复用 AylaVoiceMemberRow（isSelf/isElysia/展示投影注入）· 房主操作行（两个 `.btn.btn-ghost`「踢出/转让房主」，该类**无 CSS** ⇒ 4px 间距来自 JSX 空白；busy 时**两个一起** disabled + 当前行「处理中…」；失败静默）· 分页复用 AylaDirectoryLoadMore（retainCompletedSpace=false）· 控制条复用 AylaVoiceControls · 面板内只留两条纯列表规则：自己置顶兜底 / busy 管理 · **样张可交互**：普通档（拖音量条、点喇叭/麦克风）、房主档（点踢出看「处理中…」）、房间档（固定高 420 + 成员列表自带滚动 + **面板透明**：web 的 `.voice-room-voice-card` 自身无材质声明，宽屏内外两层都透明 ⇒ 整列浮在极光背景上）',
-            child: aylaVoiceChannelPanelSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- voice 域第五批（2026-09-21：B1-5） ----------
-          _Section(
-            title:
-                'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
-            source:
-                '⚠️ **web 里该组件没有挂载点**（只有 hook + vitest）⇒ 本画布是唯一视觉验收面 · 收起档 = 单个 .btn-glow「爱莉语音」+ `.collapsed`（padding **sp3** + `align-items: flex-start`）· 展开档 = head（`.elysia-voice-head` **align-items: center**（B1-4 那个面板是 baseline，别抄错）+ 标题 16/700 + `.msg-action-btn`「收起」）+ 未接入态（`.voice-list-empty`：「接入中…」/「等待接入」）+ 输入行（`input.voice-create-input` 同 B1-3 档 + 2000 上限用 formatter + Enter 提交 + primary「发送」）+ 行动区（终态 → primary「重新发起」；否则 `.voice-leave-btn` = outlineDestructive「结束通话」）· busy 时三按钮一起禁用 · 空文本不受理则**不清空**输入 · 材质 = radius 16 + --glass-bg + blur24 sat1.4 + --glass-shadow + max-width 560 · **样张可交互**：点「爱莉语音」展开、输入后点发送/Enter、点结束通话看终态档切换、开关 busy',
-            child: aylaElysiaVoicePanelSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- voice 域收尾（2026-09-21：B1-6，voice 域 8/8） ----------
-          _Section(
-            title:
-                'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
-            source:
-                '**语音房整页（进房态）· voice 域最后一件** · 两形态：**≥769** body padding sp4 + gap sp4，layout = **grid** `minmax(320,1fr) minmax(320, min(380,45%))`（+ `@container voice-room (max-width:655px)` → 单列两行），三分区各自动画（head 上入 / chat 右入 / voice 下入 300ms），两张卡自带材质 + chat head/列表常驻 + 开关隐藏；**≤768** 无 padding、head 只有下边框、上下堆叠、聊天 = 底部输入卡 + **上方浮层**（h300、只有上两角 radius 16、`--glass-bg-strong` + blur18、opacity/translateY(12)/visibility 240ms）· **材质归属按断点切换**：宽屏材质在 `.voice-room-voice-card`、面板透明；窄屏外层透明、材质归 `.voice-panel`（样张里 builder 参数会显示 false/true）· head 六件：返回 · 标题（Fredoka 18）· 可见性标签（容器 16ch、标签 12ch 同 `.post-card-tag` 档）· 收藏 · 分享 · 「删除房间」（⚠️ web 的 `.btn-danger` **全 CSS 无定义** ⇒ 实渲染是无材质的裸 `.btn`，已按用户裁决照实复刻）· 房内聊天：消息行（sender 700 secondary + 「图片」占位不渲染文本 + 缩略图 120×80）+ 历史控件 + 输入条（工具钮 40 pill / `min-height 40` `max-height 140` 的输入 / primary 发送 / 窄屏开关）+ **未读徽标**（18/11/600/`--pink-500`/99+；规则：新 id + 聊天栏收起 + 非自己才 +1，展开清零，seenIds 上限 1000）+ `.live-form-error` · **样张可交互**：发文本（空文本禁用发送）、点图片钮、开关「下一次发送失败」看错误行、点右下 ▲ 展开窄屏浮层看未读红点',
-            child: aylaVoiceRoomBodySamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- live 域第一批（2026-09-22：B2-1，弹幕三件） ----------
-          _Section(
-            title:
-                'AylaDanmakuList / AylaDanmakuInput / AylaDanmakuOverlay（components/live/Danmaku{List,Input,Overlay}.tsx 139+180+213 行 + danmakuTracks.ts 55 行 + app.css 3671–3827 + live.css 756–784/860–929/1006–1018 + auroraqua.css 347–359/378–383/390/502–523）',
-            source:
-                '**弹幕三件一批 · live 域第一批** · 列表 = `.danmaku-wrap`（组件根，**自身永不持材质**：app.css 3671–3676 只有布局；⚠️ live.css 756–764 给 `.live-room-swipe-item .danmaku-wrap` 的玻璃 + `radius 0 0 12 12` **没有任何渲染面** —— `.live-room-swipe-item` 只在窄屏分支出现（`LiveRoomBody.tsx` 441/468），而 live.css 818–839 的 `@media (max-width:768px)` 又把同元素的 border/background/backdrop-filter/radius 全清零 ⇒ 此前据它做过一档材质，是造轮子，**已删**；宽屏材质归 `<aside class="live-room-side">` 那张卡片（auroraqua 392–400），窄屏实渲染透明 + 仅 `min-height: 96`）+ `.danmaku-list`（padding sp3 + gap sp2）+ 行（**头像 20** + 昵称 **Space Grotesk 12** secondary + 内容 14/1.5）+ 空态 + **新弹幕提示**（`--bubble-elysia` 渐变底 + `--text-on-pink` + pill + `--glow-shadow`，bottom sp3 居中，无 hover）+ 图片钮 **96×64 / radius 8**；⚠️ **失败态照实渲染**（用户 2026-09-22 拍板）：骨架铺满 96×64、「图片加载失败，点击重试」芯片被 `overflow:hidden` 裁掉不可见，且 `ResourceImage.tsx 96–115` 的 `enclosingControl` 语义 ⇒ **点击=重试而不开查看器**（Flutter 用新增的 `ResourceImage.onStateChanged` 判态路由）· 输入条**三档材质**（`narrowCard` ≤768 沉浸态——live.css 768–772 的 `--glass-bg` + blur18 sat1.4 原本在包装层 `.live-room-input` 上，已并入组件／**`sideCard` ≥769 直播侧栏卡内**——auroraqua 347–359 的玻璃材质被 555–567 清零，实渲染 = `margin 12` + `padding 8` + 透明底 + **仅上边框分隔线** + 方角，即用户截图那栏／`base` studio 窄屏——侧栏卡本身透明，只剩 app.css 的 `padding sp3` + 上边框）= 状态行（上传中/两种失败 + 「重试图片」`AylaMsgActionButton`）+ 输入行（`GlassButton(ghost, glowBorderOnHover)` 40×40 图片钮 / `GlassInput` padding 8-12 单行「发条弹幕吧」400 上限 / primary 发送钮 **min-width 72**）+ 元行（`.live-form-error` 或 `计数器 trim/200`）；**图片三步（选/传/发）由页面注入**（`AylaMediaActions.pickImage`/`uploadImage`），组件持 attempt ⇒ 上传失败**重传同一文件**、发送失败**复用 media_id**；发送中**不禁用输入框**（保焦点）· 飘弹幕层 = 只飘**新出现**的弹幕（挂载/切台基线排除历史与重连对账）+ 轨道算法（速度 150px/s、间距 60px、行高 36、轨道 2–10）+ 关键帧 `translateX(calc(-100% - 24px))` 线性 + 上限 80 + reduced-motion 整层不渲染 + `ExcludeSemantics`（aria-hidden）· **样张可交互**：点弹幕图片开全屏查看器（root Overlay）、切「有新弹幕」、输入计数与回车发送、图片上传失败→重试、点「发一条/图片弹幕」看从右向左飘、点「换台」看基线重建',
-            child: aylaDanmakuSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- live 域第二批（2026-09-22：B2-2，大厅卡片 + 网格） ----------
-          _Section(
-            title:
-                'AylaLiveChannelCard / AylaLiveHall（components/live/LiveChannelCard.tsx 53 行 + LiveHall.tsx 45 行 + app.css 3275–3397 + live.css 486–493/559–596/617–655/811–814/1333–1354 + shell.css 619–629 + auroraqua.css 29–52）',
-            source:
-                '**直播大厅（卡片 + 网格）· live 域第二批** · 卡片 = `AylaCardInteraction`（卡片族悬停 `translate 0 -2px` + `--glass-shadow-hover`、按压 .99）+ `GlassSurface`（radius 16 / blur24 sat1.4 / `--glass-shadow`）+ 封面 **16:9**（`--radius-input` / 1px 亮边 / 透明底 / 无封面用 `iconVideo 28` + `--ice-500`）+ 状态徽章三档（**`.live-badge-live` 被 live.css 811–814 后加载覆写为 `--pink-500` 底 + `--surface` 字**；idle/ended = `--ice-100` + secondary）+「爱莉」角标（`--bubble-elysia` 渐变 + `--text-on-pink`）+ **人数角标**（右下玻璃胶囊 `--glass-bg-strong` + blur8 无 saturate；**仅 status==live 且有读数**才渲染，`null` 不渲染、`0` 照常、`1.2k/53k` 紧凑写法）+ 标题（Fredoka 16 / **line-height 1.35 固定行高**）+ 主播名（13/1.4 secondary，`ownerNickname` 优先于 `ownerNames` 兜底）+ 来源标签（**共享件 `AylaSourceTag`**，容器 `max-width: 55%` 滚动）· **收藏键**：compact 32×32 落在封面右上（窄屏 12 / 宽屏 `calc(sp4+sp1)`=20 与徽标同线；点按不触发进房）——⚠️ **卡片上不放转发键**（用户 2026-09-22 追加裁决：首轮按「都要」加过，随后被否决；转发键只在**房头部**）· **卡片等高**（用户 2026-09-22）：web 靠 CSS grid 的 `align-items: stretch` 拉平，Flutter 侧由 `reserveMetaSpace` **恒占位 meta 行**（固定高 `max(13×1.4, 12×body+2×2)`）保证——不能用 `IntrinsicHeight`（卡片含 `LayoutBuilder`，不支持 intrinsics）· 网格：**≤768 → 2 列（+ 上下 padding sp3、卡片 padding sp2）/ ≥769 → 3 列 / ≥1440 → 4 列**、`gap sp4`；用 `Wrap` 表达等宽列（**等高由 `reserveMetaSpace` 预留保证**，等价 web 的 `align-items: stretch`）· 空态 = `placeholder-title`（Fredoka 28/600）+ `placeholder-desc`（14 secondary）+ `padding sp12 0` · **样张可交互**：点卡进入计数、点收藏键切换、三档断点与空态各一格',
-            child: aylaLiveHallSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- live 域第三批（2026-09-22：B2-3，直播侧栏 + 开播选择器） ----------
-          _Section(
-            title:
-                'AylaLiveChannelRail / AylaLiveStartSheet（components/live/LiveChannelRail.tsx 168 行 + LiveStartSheet.tsx 86 行 + live.css 10–29/48–139/232–239/311–423/1356–1370 + auroraqua.css 125–139/175–205/412–454）',
-            source:
-                '**直播侧栏 + 开播选择器 · live 域第三批** · 侧栏 = 240 宽（≤768 → `min(240, 100vw-48)`）+ `margin 12` + `GlassSurface`（radius 16 / blur24 sat1.4 / `--glass-shadow`）；⚠️ `width` 必须用 `UnconstrainedBox` 松掉父级横向紧约束才权威（`SizedBox(width:)` 的 `constraints.enforce` 会被紧父级夹回——实测 420 宿主里变 396）；竖向仍受父约束（web flex 行 `align-items: stretch`）· 操作区 `min-height 54`（与顶栏等高）+ `padding sp2 sp3` + 下边框；两个 36×36 pill 图标钮（返回 / 收起，**不在扫光组** ⇒ `sweep: false`）· 列表 `padding sp3` + `gap sp2`；行 = 封面 **72×16:9**（radius-input / 1px 亮边 / 无封面用 `iconVideo 18` + `--ice-500`；在播时 **8×8 `--pink-500` 圆点** top/right 4）+ 标题 **13/1.35 两行截断**（不是单行滚动）+ 人数角标（utility 11 / ls .3 / lh 1 / gap 2，active → text-primary）+ 删除键（**22×22** pill / `rgba(255,250,251,.72)` / destructive / opacity 0→整行 hover 或自身 focus 显形 / disabled .4）· **选中高亮 = 容器级单实例 + 跨项迁移 300ms**（web 是 `AuroraquaNavHighlight` **裸变体** + 共享 `layoutId`；选中行自身底色被 auroraqua 194–197 清零）· **自动滚到当前项 = CSS `block:"nearest"` 的显式等价**（已可见不动 / 上方顶对齐 / 下方底对齐；`Scrollable.ensureVisible` 的两种 keepVisible 策略都是单向的，不合用）· 收起态**整个组件不渲染**（返回/展开键移到顶栏；`.live-rail-float` 是死 CSS 不复刻）· 底部「新建直播间」= **1px 虚线 `--ice-500`**（复用新共享件 `AylaDashedBorder`，原为 `channel_sidebar` 私有 painter）· 目录页脚由 `directoryFooter` 槽注入 · 开播选择器 = intro（Fredoka 20 + 13 secondary）+ 五态（加载/列表失败 alert+重试/创建失败/空态/有内容）+ 列表（`max-height: min(42vh,360px)`；行 **min-height 68** / `rgba(255,250,251,.45)` 底 / 145deg `ice-300→sakura-100` 封面 + 「LIVE」/ 标题 14 + 副行 13 / `→` 20）+ 底部 `.btn-glow` 键 · **样张可交互**：点封面切台看高亮迁移、删除键 hover、收起/重开、开播选择器两态',
-            child: aylaLiveRailSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- live 域第四批（2026-09-22：B2-4，观看条/名单弹层 + 主播头像 + 推流地址） ----------
-          _Section(
-            title:
-                'AylaLiveViewerStrip / AylaLiveViewerSheet / AylaLiveHostAvatar / AylaLiveStreamAddresses（components/live/LiveViewerStrip.tsx 85 行 + LiveViewerSheet.tsx 147 行 + LiveHostAvatar.tsx 52 行 + LiveStreamAddresses.tsx 72 行 + live.css 206–229/1095–1325/249–257 + app.css 3443–3477）',
-            source:
-                '**观看条 + 名单弹层 + 主播头像 + 推流地址 · live 域第四批** · 观看条 = 整排按钮（`min-height 44` / `padding sp1 sp3` / radius-input / `--glass-bg` + blur18 sat1.4 / **compact 阴影** / hover `rgba(255,250,251,.72)`）+ 人数圆（`min-width 32` / h32 / pill / **`--ice-300` 底 + `--indigo-700` 字** / utility 12 ls .3 lh 1）+ 头像排（size **26** / gap sp1 / **overflow hidden 裁掉放不下的**）+ 排尾「更多」三圆点（26×26 / ice-100 / `IconDots 14`）· **未知人数显示 `–`**（ice-100 + secondary，尺寸与已知态**完全一致**，禁止画面跳变）、`0` 是真实读数照常显示 · **纯展示**（不自行拉数据）· 整排/名单行复用 `AylaCardInteraction(interactive: false, focusRingColor: --focus-ring 即 glow-500)`——它们**不在** auroraqua 的卡片/按钮 `:is()` 组里（无 1.02/.98、无扫光），只有 `outline 2px` 环 · 名单弹层 = **复用 A3 `AylaCreateSheet`**（`narrowHeightFactor: 0.6` = 窄屏 **60vh** 贴底上滑）+ **head 固定、只有名单自身滚**（body 最大高 = 卡上限 − padding sp4×2 − 安全区 − head 52）+ 行（min-height 48 / 头像 36 / 名字 15 w600 / hover glass-bg）+ 骨架 6 行（头像 **41×41** = 36 + 光环 2.5×2）+ 空态「还没有人在看」+ 截断「仅显示前 N 位」+ 503 `role=alert` + 重试（**不冒充空名单**）· **弹层插 root Overlay**（等价 web `createPortal(document.body)`；官方用例明确「侧栏 backdrop-filter 不裁剪弹层」）· 主播头像（label 回退链 `nickname → username → owner_nickname → 主播`；aria「查看主播 X 的个人主页」；size 默认 36；在线由页面按 presence 判（隐身恒离线））· 推流地址（`width: min(100%,960px)` 卡 + 三行：标签 **64** / 值 utility 12 省略号 **卡内覆写玻璃底 + radius-input + 内高光** / 复制键 `.msg-action-btn` →「已复制」1.5s / 失败 destructive 文案；**缺 rtmp_url 或 stream_key 时整块不渲染**；`stream_key` 是推流指纹**不打日志不持久化**）· **样张可交互**：点整排开名单（root overlay）、状态切换、复制/失败态',
-            child: aylaLiveViewersSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                'AylaLiveHostAvatar / AylaLiveStreamAddresses（同批：主播头像 + 推流地址区）',
-            source:
-                '**同批两件（B2-4）** · 主播头像 = `AvatarHalo`（有头像/无头像、在线/离线、size 36/28/52 三档）· 推流地址 = 卡 `width: min(100%,960px)`（用 `Align` 松横向紧约束才权威——`ConstrainedBox(maxWidth:)` 会被紧父级 `enforce` 夹回）+ padding sp3 + 三行（标签 64 / 值 utility 12 + 卡内玻璃覆写 + `--glass-inset` 内高光 / 复制键）+ `.live-form-error` · 窄屏 `align-items: flex-start`（同档 `flex-wrap: wrap` **无渲染面**：值 `min-width: 0` 可压到 0 ⇒ 永不换行，照实只表达交叉轴对齐）· 样张可交互：复制 →「已复制」1.5s、失败态开关',
-            child: aylaLiveStudioSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- live 域第五批（2026-09-22：B2-5，建播表单 + 控制台资料栏） ----------
-          _Section(
-            title:
-                'AylaLiveCreate（components/live/LiveCreate.tsx 189 行 + app.css 3401–3477 + live.css 32–33/164–174 + auroraqua.css 502–531）',
-            source:
-                '**建直播间表单 + 推流指引 · live 域第五批** · ⚠️ **本件在 web 里零挂载点**（全仓 `<LiveCreate>` 零命中、vitest 也无用例；真实建播走 `ChannelSidebar.handleCreateNewLive` → `createLiveChannel("新直播间")`）⇒ **组件画布是唯一视觉验收面**（同 B1-4 `ElysiaVoicePanel`）· 表单 = `.live-create-form`（app.css 的 row+gap sp2 **被 live.css 32 覆写为 column/stretch**）+ 标题（placeholder「给直播间起个标题」· maxLength 128）+ 介绍（「告诉观众这场直播聊什么（可选）」· 2000 · min-height 72）+ 可见范围（**复用 `AylaVisibilitySelector`**：群内默认勾本群**不锁定**、群外默认公开）+ 封面（**96 → ≤768 88** / 16:9 / `1px dashed --ice-500` / radius-input / glass-bg；⚠️ 用户的 `<img>` **漏了 `live-cover-preview-img` 类** ⇒ live.css 174 的 object-fit 是死规则 —— **用户 2026-09-22 裁决按 web 本意用 `cover`**）+ `.btn-glow`「开播」→「准备中…」· 字段族 = `--glass-bg` + 1px 亮边 + radius-input + **`--glass-inset`** + blur24 sat1.4 + focus `--glow-500` 边 + `--glow-shadow`（⚠️ app.css 写的 `box-shadow: var(--focus-ring)` 是**无效声明**：`2px solid #f796ff` 里的 `solid` 在 box-shadow 里非法）+ placeholder `--slate-500` · 指引（`.live-create-guide`：`--glass-bg-strong` + radius 16 + margin-top sp3 + 标题 Fredoka 15 + notice **`--warning` 13** + 两行复制**基础档**（`--ice-100` + radius-sm 8）+「我已保存，关闭」右对齐）· 空标题「标题不能为空」**不发请求**；`stream_key` 是推流指纹**不打日志不持久化** · **样张可交互**：填标题后点「开播」看指引、点复制/关闭、失败态',
-            child: aylaLiveCreateSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                'AylaLiveOwnerPanel（components/live/LiveOwnerPanel.tsx 217 行 + app.css 3831–3843 + live.css 168–180/190–269）',
-            source:
-                '**控制台资料栏（真实挂载：`LiveRoomBody` 的 showOwnerPanel）** · 卡 = padding **sp3**（live.css 168 覆写 app.css 的 sp4）+ `--glass-bg` + blur24 sat1.4 + 1px 亮边 + radius 16 + `--glass-shadow` + column gap sp3 · 行 = 封面 96×16:9（虚线冰蓝；⚠️ 本件 tsx **确实带** `live-cover-preview-img` ⇒ cover **生效**，与 LiveCreate 的死规则不同）+ 标题 **200 固定**（`flex-shrink: 0`）+ 介绍 flex 1 + 开播（`.btn-glow`）/保存竖排（`min-width 96` / `min-height 40`）· 可见范围块 = padding sp3（≤768 sp2）+ **上边框 1px** · 三档断点：≤768 与 **769–1100**（侧栏压缩控制台余宽）都换行 ⇒ 封面+字段一行、开播/保存独占一行 · 保存 = 载荷（trim + 可见性单值 `public→friends→group`）→ **用后端回显刷新封面与可见范围**（后端可能规范化 `allowed_group_ids`）· 「标题不能为空」不发请求；开播/下播 busy 期禁用、失败「操作失败」· ⚠️ **下播键 web 是裸 `.btn`**（app.css 21–34 只有盒模型/字体，**没有任何底/边/阴影**）—— **用户 2026-09-22 裁决当 web 的 bug** ⇒ 改用库内 `ghost` 档给回玻璃面（登记为有意偏离）· **样张可交互**：改标题→保存看回显、开播/下播切换、切可见范围',
-            child: aylaLiveOwnerPanelSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- live 域最后一批（2026-09-22：B2-6，播放器 / 浮动小窗 / 直播间装配） ----------
-          _Section(
-            title:
-                'AylaLivePlayer（components/live/LivePlayer.tsx 420 行 + app.css 3517–3636 + live.css 939–1005）',
-            source:
-                '**播放器三态 + 悬浮控件 · live 域最后一批** · 根 = 16:9 / `rgba(70,91,146,.12)` / radius-card / 1px 亮边 / overflow hidden；视频 `object-fit: contain` + #000 底 · **三态**：`srsStatus == null` →「正在查询直播状态…」/ degraded →「直播服务状态未知，请稍后再试」（`--warning`）/ idle →「等待推流信号…」（乐观已开播）或「主播未开播」/ live + 播放失败 →「播放失败」（`--destructive`）+ `.btn-glow`「重试」· **悬浮控件**（`.live-player-controls`）：`opacity 0→1`（180ms）+ 隐藏时整层穿透；**桌面悬停/移动、触屏点击**显示，显示后 **3s 无操作自动隐藏**（`AUTO_HIDE_MS = 3000`）；左下「刷新」（32×32 · `rgba(70,91,146,.32)` + 1px `rgba(255,255,255,.28)` + 白图标 16 + blur8 sat1.2 · hover .52 · 点击转一圈 0.6s，reduced-motion 不转）+ 右下「全屏」· **画中画键不实现**（浏览器 PiP 无 Flutter 等价物；窄屏 web 本就隐藏 ⇒ 有意偏离）· **全屏改用 root Overlay 铺满 + 移动端锁横屏**（web 是 `requestFullscreen` 让容器进 top layer；Flutter 无此能力），全屏时 inline 侧不再挂视频（避免平台视图被同时 attach），屏幕下方居中显示**全屏弹幕输入框**（`min(320, 100%-120)` / min-height 50 / 内 input 透明 40 高 / 40×40 `.btn-primary` 发送键 / 失败提示玻璃片）· video 由页面注入（`HlsPlaybackController.videoView`，PoC-B 封装层）· **样张可交互**：悬停/点击显示控件、3s 自动隐藏、刷新旋转、进全屏',
-            child: aylaLivePlayerSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                'AylaLiveMiniPlayer（components/live/LiveMiniPlayer.tsx 228 行 + live.css 1021–1095）',
-            source:
-                '**手机端 App 内浮动小窗** · 仅**窄屏离开直播间且直播中**出现（调用方判断）；同一时刻至多一个 owner · **fixed 右下 16 / z 60** / **168×94（16:9）** / `touch-action:none` + 禁选中 · 内层 `.live-mini-player-video-wrap` = radius-input + `--glass-bg-strong` + blur24 sat1.4 + 1px 亮边 + compact 阴影 + overflow hidden（**外层不裁剪**，关闭键才能突出在外）· 关闭键 **top/right = -10**（24×24 · `rgba(70,91,146,.32)` · 1px `rgba(255,255,255,.28)` · 白 `IconClose 14` · hover .52）· **单指拖动**（阈值 **5px**、边缘间距 **8**、clamp 在视口内）+ **双指缩放**（宽 **120–320**、高按 16:9、**右下角锚定**）· 点主体/Enter/Space → 回直播间；关闭 → 完整销毁会话 · ⚠️ Flutter 侧**不做 web 的 `suppressClick`**（没有合成 click；拖动一开始 tap 识别器就输给 scale 识别器）· 返回 **Positioned** ⇒ 调用方放在最外层 Stack 直接子级 · **样张可交互**：拖动 / 点主体 / 点关闭',
-            child: aylaLiveMiniPlayerSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760）',
-            source:
-                '**直播间核心装配（live 域收官件）** · 宽屏三栏 = `.live-rail`（240 侧栏，可收起；收起后展开键回头部）+ `.live-room-main`（头部 + 控制台资料栏 + `.live-room-stage`(播放器 16:9) + 观众条 + 推流地址）+ `.live-room-side`（弹幕列表 + 输入框）· **窄屏沉浸式** = 固定头部 + **视频与弹幕区整体上下滑切台**（dragElastic **0.8**；松手判定：净位移 > **1/3 高**优先，否则同向甩动补充）+ 固定输入框 + 右下列表键打开**覆盖层**（`.live-room-rail-overlay`：`rgba(70,91,146,.25)` 遮罩点关闭 + 右侧 240 侧栏）· **进房错误态仍保留侧栏与弹幕区**（避免卡在只有返回键的死页面）· 头部 = 返回(40×40) + 主播头像(32) + 标题滚动 + **来源标签（共享件 `AylaSourceTag`）** + 收藏(compact) + 转发 + 窄屏列表键 · 控制台（`showOwnerPanel`）头部整行不渲染、改由侧栏承载返回/标题 · **全屏期间冻结 isNarrow**（防锁横屏导致窄↔宽切换、播放器重建黑屏）· 飘弹幕层**仅 `!loading && srsStatus === "live"`** 才挂 · 数据全部由页面注入（`AylaLiveRoomData` + 回调；web 的 `useLiveRoom`/`useDanmaku`/live store 属数据层与运行时）· **样张可交互**：点侧栏切台、收起/展开、窄屏上滑切台、列表覆盖层开关',
-            child: aylaLiveRoomBodySamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 入场动画（2026-09-20 审查 R7：公共件） ----------
-          _Section(
-            title:
-                'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
-            source:
-                'opacity 0→1 + 下 20px · 300ms --auroraqua-ease-out · stagger 50ms（cap 300）· reduced-motion 直接到位 · enabled:false 不挂动画',
-            child: _Row(
-              children: <Widget>[
-                _Slot(
-                  label: '下入 20px · stagger 0/50/100ms',
-                  width: 300,
-                  child: AylaRevealScope(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      spacing: AylaSpacing.sp2,
-                      children: <Widget>[
-                        for (int i = 0; i < 3; i++)
-                          AylaRevealItem(
-                            index: i,
-                            child: Text(
-                              '条目 $i（delay ${i * 50}ms）',
-                              style: t.caption,
+            // ---------- GlassCard ----------
+            _Section(
+              title: 'GlassCard（app.css .glass-card 230–248）',
+              source:
+                  '.glass-bg .55 · blur 24 saturate 1.4 · 1px 白边 .65 · 16px 圆角 · 8/32 阴影 · 顶沿内高光',
+              child: _Row(
+                children: <Widget>[
+                  _Slot(
+                    label: '静态卡（padding 16）',
+                    width: 300,
+                    child: GlassCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text('静态玻璃卡', style: t.cardTitle),
+                          const SizedBox(height: AylaSpacing.sp2),
+                          Text(
+                            '--glass-bg .55 / blur 24 / 16 圆角 / 8·32 阴影',
+                            style: t.caption.copyWith(
+                              color: AylaColors.textSecondary,
                             ),
                           ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  _Slot(
+                    label: '可交互（hover 上浮 2px）',
+                    width: 300,
+                    child: GlassCard(
+                      interactive: true,
+                      onTap: () {},
+                      child: Text('可交互玻璃卡', style: t.cardTitle),
+                    ),
+                  ),
+                  _Slot(
+                    label: 'strong 弹层底（.78）',
+                    width: 300,
+                    child: GlassCard(
+                      strong: true,
+                      radius: AylaRadii.rPanel,
+                      shadow: AylaShadows.modal,
+                      child: Text('strong 弹层卡', style: t.cardTitle),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- GlassInput ----------
+            // 尺寸口径:登录认证卡内宽 440 − 卡内沿 32×2 = 374（.auth-submit
+            // 满宽字段与它同宽,故样张统一按 374 呈现,不缩成窄列）。
+            _Section(
+              title: 'GlassInput（app.css .field 70–88 / auroraqua.css 502–523）',
+              source:
+                  'padding 12×16 · radius 12 · --glass-bg + 亮边 · focus 辉光边 · placeholder slate-500',
+              child: SizedBox(
+                width: 374,
+                child: _Rows(
+                  children: <Widget>[
+                    _InputSample(
+                      label: '常态（认证卡内：indigo .3 描边）',
+                      onGlassBorder: true,
+                    ),
+                    _InputSample(
+                      label: 'focus（#F796FF 边 + 辉光）',
+                      autofocus: true,
+                      onGlassBorder: true,
+                    ),
+                    _InputSample(
+                      label: '密码类型',
+                      obscure: true,
+                      text: '12345678',
+                      onGlassBorder: true,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- AvatarHalo ----------
+            _Section(
+              title:
+                  'AvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
+              source: '2.5px 锥形渐变环 conic 210° · 离线 --ice-100 · 爱莉 3.2s 呼吸辉光',
+              child: _Row(
+                children: <Widget>[
+                  _Slot(
+                    label: '40 爱莉在线（呼吸 + 辉光）',
+                    child: const AvatarHalo(
+                      label: '爱莉',
+                      size: 40,
+                      online: true,
+                      core: AvatarCore.elysia,
+                    ),
+                  ),
+                  _Slot(
+                    label: '40 在线',
+                    child: const AvatarHalo(
+                      label: '在线',
+                      size: 40,
+                      online: true,
+                    ),
+                  ),
+                  _Slot(
+                    label: '40 离线',
+                    child: const AvatarHalo(label: '离线', size: 40),
+                  ),
+                  _Slot(
+                    label: '36 在线（窄屏顶栏）',
+                    child: const AvatarHalo(
+                      label: '在线',
+                      size: 36,
+                      online: true,
+                    ),
+                  ),
+                  _Slot(
+                    label: '24 在线（群卡底行）',
+                    child: const AvatarHalo(label: '群', size: 24, online: true),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- TabBadge（三档规格，2026-09-20 审查 R8 合并） ----------
+            _Section(
+              title:
+                  'TabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',
+              source:
+                  'tab：min 16 / padding 0 4 / Fredoka 11 w500 / 绝对 top -4 right -12 · '
+                  'groupBadge：16 / Fredoka 11 w400 / 行内 · messages：18 / Space Grotesk 11 / 行内 + glow · >99 → 99+',
+              child: _Row(
+                children: <Widget>[
+                  _Slot(label: 'tab：1', child: _BadgeHost(count: 1)),
+                  _Slot(label: 'tab：12', child: _BadgeHost(count: 12)),
+                  _Slot(label: 'tab：150 → 99+', child: _BadgeHost(count: 150)),
+                  _Slot(
+                    label: 'groupBadge（.group-badge-unread）',
+                    child: const TabBadge(
+                      count: 8,
+                      metrics: TabBadgeMetrics.groupBadge,
+                      placement: TabBadgePlacement.inline,
+                    ),
+                  ),
+                  _Slot(
+                    label: 'messages（.messages-tab-badge + glow）',
+                    child: const TabBadge(
+                      count: 120,
+                      metrics: TabBadgeMetrics.messages,
+                      placement: TabBadgePlacement.inline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 帖子卡族（B5） ----------
+            _Section(
+              title:
+                  'AylaPostCard / AylaPostVideoCover（PostCard.tsx + posts.css 9–217 + typed-result-cards.css 5,7）',
+              source:
+                  'glass-bg + 16 圆角 + overflow hidden · hover（父级）translate -2px + shadow-hover + brightness 1.01 · active scale .99 · 正文 15/1.55 三行折叠 · 1 图 contain max-h 240 / 多图 3 列 gap 4 · 底排：查看帖子(12 secondary) + 统计(Space Grotesk 12) + 收藏(compact) + 分享(纯圆钮 40) · 排列：>1025 两列瀑布（轨道 1200 / 列距 12）/ <=1024 单列',
+              child: aylaPostCardSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 发帖编辑器（B5） ----------
+            _Section(
+              title:
+                  'AylaPostEditor（PostEditor.tsx + posts.css 219–418 + auroraqua.css 105–166）',
+              source:
+                  '三形态：常规 / 群内 collapsible 收起 / 展开 · padding sp3（collapsible sp2 sp3）· 展开 max-height min(90vh,1000px) · 收起钮 32 圆 · 标题 min-h 40 · 正文 展开 rows4/min-h 64、收起 单行 40 · 媒体块 128 方角（web --radius-md 未定义）、移除钮 28 圆 · 进度条 4px pill pink-500 · 图片/视频钮 glass 亮边 + hover glow（glowHover）· 可见性复用 AylaVisibilitySelector（群内 lockGroup）',
+              child: aylaPostEditorSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 评论族（B5） ----------
+            _Section(
+              title:
+                  'AylaCommentList / AylaCommentComposer（CommentList.tsx + CommentComposer.tsx + posts.css 420–583）',
+              source:
+                  '评论项：padding sp3 sp4 + 底部 1px 亮边 · 头像 32 · 昵称 14/700 · 时间 utility 11（zh-CN）· 回复提示 12 · 正文 14 · 操作行 12/600（回复 / 作者可删除，删除色 --destructive）· 图片 2 列 gap sp1 max-w 280（单图 200）、4:3 cover、方角（web --radius-md 未定义）· 输入：padding sp3 sp4 + 上边框 · 行 gap sp3 align-end · 工具钮 40（AylaToolButton，12 圆角）· 待发图 64px + 18px × · 底部滑入 250ms',
+              child: aylaCommentSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 查看器（B5） ----------
+            _Section(
+              title:
+                  'AylaImageViewer（ImageViewer.tsx + app.css 1459–1836 + auroraqua.css 55–94）',
+              source:
+                  '遮罩 --overlay-dim-strong + blur(8)（无 saturate）· 入场 opacity 180ms --ease-out · 关闭钮 40 圆 · 舞台 max min(92vw,1200) / 82vh · 图片 contain + radius-input + --surface + --card-shadow · 导航 44 圆（blur12 saturate1.4，禁用 0.35）· 操作条 pill 玻璃（blur18）+ 计数（Space Grotesk 12/ls.5）+ 保存（IconDownload 16）· 失败提示 bottom 76 · 横滑阈值 1/3 或 300px/s+40px（useSwipeCommit）· 条目 enter x=±40% 250ms · 样张走 embedded（嵌入画布不做 backdrop 模糊，避免糊宿主页面）',
+              child: aylaImageViewerSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 分享族（B5） ----------
+            _Section(
+              title:
+                  'AylaShareSheet / AylaShareButton（ShareSheet.tsx + ShareButton.tsx + share.css 1–275）',
+              source:
+                  '遮罩 --overlay-dim + padding 24 居中；窄屏 60dvh 贴底（上沿 radius-panel、去左右下边框、safe-area）· 卡 min(480,100%) + max-h min(80vh,720) + glass-bg-strong + blur24 sat1.4 + modal 阴影 + 宽屏入场 opacity/scale.96/y12 250ms ease-out · head sp4 + 底边 + 关闭 40 圆钮 · 预览条 8×12 + 28 圆 135deg ice→sakura + 14/600 单行省略 · 选项卡 2 列 gap8 / 40 高 / radius 10，选中 --nav-active-bg + --glass-shadow-compact（无边框、无扫光，只有文字色 200ms 过渡）· 行 min-h 48 / radius 12 / hover rgba(157,191,230,.18) / active .98 / 禁用 .6 · 子群缩进 52 + 8px ice-500 点 +「默认」sakura 胶囊 · 未读 18/pink-500/#fff 字 99+ 封顶 · 入口钮 = icon-btn-40 pill（无扫光）',
+              child: aylaShareSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 底栏（2026-09-20） ----------
+            _Section(
+              title:
+                  'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
+              source:
+                  '玻璃 64px + safe-area · **上沿 radius-panel 20 / 下方角**（auroraqua 252）+ 顶部 1px 边 · blur18 saturate1.4 · 五等分（主页居中凸起：48 圆盘上浮 8 + 选中辉光）· 按钮 margin 4/2（auroraqua 254，胶囊随之内缩）· **容器级共享胶囊跨槽迁移 300ms**[0,0,.58,1] + hover 扫光 · 图标/文字 150ms 过渡 · 导航组 active .98、hover 不放大 · **F1 阶段不渲染红点**（badges 恒空）',
+              child: aylaBottomTabsSamples(), // 可交互：点 tab 看胶囊跨槽迁移
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 顶栏（2026-09-20） ----------
+            _Section(
+              title:
+                  'AylaGroupTopTabs（components/group/GroupTopTabs.tsx 1–125 + group.css 21–91）',
+              source:
+                  '窄屏群场景顶栏（与底栏同构、中央换群头像）：玻璃 64 + 底部 1px 边 · blur18 saturate1.4 · **方角**（auroraqua 448 覆写 253 的 0 0 20 20）· `--glass-shadow-compact` · 五槽（语音|直播|头像|帖子|桌游）· 按钮 inline-flex 按内容宽（auroraqua 255 padding 6/12 + radius-input）· 选中共享胶囊**实测按钮矩形**跨槽迁移 300ms · hover 扫光 · 帖子 tab 8px 粉点（top 6 / 距中心右 18）· 入场「从底栏升起」由父级 translate 300ms --auroraqua-ease-out 注入',
+              child: aylaGroupTopTabsSamples(), // 可交互：点 tab 看胶囊迁移
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            // ---------- Shell 顶栏（2026-09-20） ----------
+            _Section(
+              title:
+                  'AylaTopNav（layout/TopNav.tsx 1–343 / layout/NarrowTopBar.tsx 1–199）',
+              source:
+                  '响应式（>768 宽屏 / ≤768 窄屏自动切换）· 宽屏＝圆角浮动卡（复用 GlassCard：margin 12/12/0 + radius-card 16 + 四周 1px 边 + --glass-shadow + blur18）· 窄屏＝方角条（高 56 / padding 0 sp4 / 底部 1px 边 / 入场 auroraqua-panel-from-top）· 模块链 15/700 + 图标 16 上移 2px + 共享胶囊（有胶囊即不画底条，auroraqua 213）· logo 绝对居中 + 渐变字 indigo→grape + ≤1240 隐藏 · 图标钮复用 AylaIconButton（玻璃小卡 + hover 1.02 / press .98）· 搜索框＝文本字段族（radius-input + --glass-inset + focus 转辉光边）· 菜单与下拉浮层 300ms auroraqua-menu-in（opacity + −8px + .95→1）· 769–900 收窄降档（gap/padding + 搜索框 clamp(160,22vw,200)）',
+              child: aylaTopNavSamples(), // 可交互：点模块 / 更多菜单 / 搜索框，切三形态
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 侧栏（2026-09-21） ----------
+            _Section(
+              title:
+                  'AylaServerRail（layout/ServerRail.tsx 1–184 + group.css 484–678 + auroraqua.css 216 / 217–229 / 270 / 311–313 / 125–138）',
+              source:
+                  '宽屏服务器列 72px：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 外距 12/0/12/12（auroraqua 270 覆写右 0）· 内 1px 占位（CSS border 占布局、Flutter 不占）· 列表 padding 20/77 + 行距 12 + clip-path 15 + 上 20/下 16 mask 渐隐 · 群头像 48 + 光环（选中 scale 52/48 · 180ms）· 选中指示条 3×32 --glow-500（group.css 的 ::before 版被 auroraqua 216 关掉，实际用 --rail 变体）· 未读 = 消息 + 帖子（左下角 -3/-3、99+ 截断、.server-item-badge 档）· 置顶 pin 左上 -6/-4 45° 粉 · 状态角标（直播/语音/桌游，右上竖列）· 悬停行 → 180ms 后展开置顶面板（行右缘 +2、垂直居中；浮层走 Overlay，否则溢出区收不到指针）· 底部 53 加号复用 AylaIconButton · 入场 panelVariants(left) 左入 20 / 300ms easeInOut · **滚动条已关**（web base.css 372–383 全局隐藏原生滚动条；自绘覆盖层条属 §B6 OverlayScrollbar）· **9 个群超出列高** → 可滚动，验收上 20 / 下 16 渐隐与「底部 77 让位悬浮加号」',
+              child:
+                  aylaServerRailSamples(), // 可交互：点行切群看指示条 300ms 迁移 / 悬停头像看置顶面板 / 滚轮看上下渐隐
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 侧栏（2026-09-21：频道侧栏重做版） ----------
+            _Section(
+              title:
+                  'AylaChannelSidebar（layout/ChannelSidebar.tsx 1–627 + group.css 680–1370 + auroraqua.css 54–94 / 142–197 / 236–249 / 288–291 / 310–313 / 655–676）',
+              source:
+                  '宽屏频道侧栏 slot 284（260 + 2×12）：--glass-bg + blur24 sat1.4 + 1px 亮边 + --glass-shadow + radius-card 16 · 内 1px 占位（CSS border 占布局、Flutter 不占；否则列表轨道 242→244、浮层钮偏 1px）· 群名头 Fredoka 500 20px + 16px chevron · 场景项 40 高 / gap 12 / padding 0 16 / radius 12 / 底 rgba(255,250,251,.4)；hover .18；选中底由**容器级单实例胶囊**画（auroraqua 194–197 取消按钮自身底）· 状态标识三型：语音在麦人数与 LIVE 是**裸文本**（web `.channel-scene-status` 零样式，继承 15px/600/secondary）、帖子未读才是粉徽标（margin-left auto 贴右）· 三个下拉各挂一个 paint-only 裁剪层（等价 useSidebarContentClip 的 inset；命中也随之裁剪，与 CSS clip-path 一致）· 自建 sticky：chat 0 / voice 44+吸底52 / live 88+吸底8，行本体画在浮层并在 **paint** 阶段按同帧几何定位（applyPaintTransform 同偏移）· 三角键属 auroraqua 按钮组（hover 1.02 + active .98），＋/笔不属于任何组（仅 180ms 底色）· 扫光只由**按钮本体** hover 触发（700ms），行级 hover 只管底色 · 语音房行 `sharedLayout={false}` → 行内独立胶囊、活跃度重排做 300ms 位置过渡 · 切群旧面板先退场再挂新面板（AnimatePresence mode="wait"）· **弹窗接线未做**（CreateSheet/VoiceChannelCreate/LiveStartSheet/SubGroupDialog 属后续批次，＋/笔点击暂无副作用）',
+              child:
+                  aylaChannelSidebarSamples(), // 可交互：点场景项/子群/语音房/直播间看胶囊迁移与吸顶滚动，hover 看两套 hover
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 弹层（2026-09-21：A3 CreateSheet） ----------
+            _Section(
+              title:
+                  'AylaCreateSheet（layout/CreateSheet.tsx 1–61 + private.css 185–275）',
+              source:
+                  '通用弹层容器 = AylaModalOverlay（--overlay-dim + 宽屏居中 / 窄屏贴底）+ AylaModalCard（--glass-bg-strong + blur24 sat1.4 + 1px 亮边 + radius-panel 20 + --glass-shadow-modal）· overlay 与卡片 padding 都是 sp4=16 · head = AylaSheetHead（Fredoka 18/600 + .icon-btn-40 关闭钮 = AylaIconButton，IconClose **20**；ConfirmDialog 那处是 18）· 三条关闭路径（ESC / 点遮罩 / 关闭钮；点卡内不关）· 窄屏 width 100% + radius 24 24 0 0 + 去左右下边框 + padding-bottom calc(sp4 + safe-area) + 上滑 250ms · 内容用 web CreateFab.tsx:93–103 的 post 分支（PostEditor），**可交互**：点关闭钮/遮罩即收起，点「重新打开」还原',
+              child: const _CreateSheetDemo(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 右下浮层按钮族（2026-09-21：A4） ----------
+            _Section(
+              title:
+                  'AylaCornerFabStack / AylaRefreshFab / AylaScrollTopFab / AylaQuickMessageFab（layout/*.tsx + shell.css 423–456 / 679–787）',
+              source:
+                  '堆叠容器 = fixed right 38（32 + (56-44)/2）/ bottom 100（32 + 56 + sp3）/ column · gap 12 · align end · 容器不吃指针（Flutter 裸 Column 天然等价）· 44px 玻璃钮复用 AylaCornerFab（--glass-bg + blur18 sat1.4 + --card-shadow，hover → strong + 0 2px 12px .18；**过渡 200ms --auroraqua-ease**，因 auroraqua.css 54–94 把 .corner-fab 并入按钮组覆盖 shell.css 的 180ms）· 刷新：iconRetry 20，spinning = ayla-loading-spin 800ms linear infinite（reduced-motion 不转），无回调时按钮照常可点只是无动作 · 回顶：iconArrowUp 20，滚动超过一屏（pixels > 视口高）且命中**主滚动容器**（viewportDimension ≥ 40% 视口高）才浮入（opacity + translateY 8→0，200ms；隐藏态不可点 + 语义排除），点击 smooth 回顶（300ms ease-out；reduced-motion 直切）· 消息钮复用 AylaMessageFab 外观，4s 无点击 → 半贴 translateX(-44px)（200ms --ease-out），半贴点击点出来、展开点击打开快捷栏 · **样张可交互**：滚列表看回顶钮浮入、点刷新看旋转、等 4s 看消息钮半贴',
+              child: aylaFabSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- Shell 会话活动悬浮球（2026-09-21：A5） ----------
+            _Section(
+              title:
+                  'AylaSessionActivityIndicator（layout/SessionActivityIndicator.tsx 1–181 + shell.css 458–575 / 651–660）',
+              source:
+                  '固定层（web position:fixed；right 24 / top 80 / z 55；窄屏 right 16 / top calc(56 + safe-top + 48)）= 语音球 + 直播球 + 收起把手 · 球 44×44：1px --glass-border + **不透明** sakura-100/ice-300 底（字色 grape-700/indigo-700）+ 0 2px 12px rgba(70,91,146,.12)；hover/focus → scale(1.08) + --glow-shadow（150ms --ease-out）——球**不在** auroraqua 按钮组 ⇒ 无 1.02/.98，且**不加**背板模糊（不透明底把 blur(18) 完全盖住，视觉恒为零）· 把手 28×44 玻璃（--glass-bg-strong + blur18 sat1.4，保留）+ `›` 字符 16/w500/line-height 1 · 收起：整组右移 24（窄屏 16 ⇒ 把手贴屏幕右缘）+ 球 translateX(64px) 淡隐 + 图标 rotate(180deg)，全 200ms --ease-out；把手可上下拖（**5px** 阈值 / clamp 8 … 视口高-44-8 / 拖动后抑制合成 click）· 把手 hover 底色 = **透明**（web 的 --glass-bg-hover 全历史未定义 ⇒ 实渲染回落初始值）+ 字色转 --text-primary · **样张可交互**：点把手收起/展开、按住把手上下拖、点球看回调、开关模拟会话进出',
+              child: aylaSessionActivitySamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- voice 域第一批（2026-09-21：B1-1） ----------
+            _Section(
+              title:
+                  'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
+              source:
+                  '卡片三处上下文（.voice-hub / .group-voice / typed-result-card）的视觉声明**逐字相同** ⇒ 只有一个竖排形态，差异全在容器网格：.voice-hub 2→(≥769)3→(≥1440)4 列 + padding 12/16；.group-voice 恒 2 列 + padding 0 ⇒ 由 List 的 columns/padding 表达，**不设 variant**（app.css 的横排基础卡在真实渲染中从不出现，故不实现）· 卡面 = --glass-bg + 1px 亮边 + blur24 sat1.4 + --glass-shadow + radius 16 + padding 12 + gap 8 · hover 描边 → rgba(157,191,230,.65)（上浮 -2 / 按下 .99 由 AylaCardInteraction 提供）、active → --indigo-700（同特异性在后 ⇒ 压过 hover）· focus-visible 环 = **--ice-500** 2px（画在形状外、不占布局；Enter/Space 同义可进房）· head = 标签组（AylaScrollingTags；来源标签 sakura-300/grape-700、Fredoka 11/ls .8/**max-width 12ch** 实测换算、无字重） + 收藏槽（AylaFavoriteButton compact，调用方注入）· title = mic 14 + 15px/700/1.3 单行滚动 · owner/meta = 12px secondary · foot = 人数 + 加入钮（primary min-height 32 / 13px / padding 0 12），mine&!browsing → 「我在其中」占位胶囊（ice-100 底/indigo-700 字/pill，min-height 32）· joining → 卡片 .7 + 按钮禁用（.55）+「加入中…」· 文案：加入 / 加入中… / 查看语音房（browsing）· 空态 = placeholder 两行（Fredoka 28/600 + 14px secondary）· 控制条 = padding-top 8 + 顶部 1px --glass-border，离开钮走**新增档 GlassButtonVariant.outlineDestructive**（透明底 + destructive 字 + 1px destructive 边、无阴影/无内高光），重新加入（livekit=failed）= primary min-height 28 / 12px · **样张可交互**：点卡或加入钮各计一次、控制条可切 failed 态',
+              child: aylaVoiceChannelSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- voice 域第二批（2026-09-21：B1-2） ----------
+            _Section(
+              title:
+                  'AylaVoiceMemberRow（components/voice/VoiceMemberRow.tsx 219 行 + app.css 2917–3095 + auroraqua.css 59/77/89/664）',
+              source:
+                  '行 = 头像 32（AvatarHalo；爱莉走 AvatarCore.elysia 光环，在线由页面层注入）+ 名称 13/w600 单行省略（「我」是名称行内的 11px indigo 子 span）+ 副行 11px（「在频道中」secondary /「已静音」destructive + IconMic 11）+ 操作区（flex:none）= 开关钮 + 音量条 · 开关钮 28 正圆：透明底 / --indigo-700，hover rgba(189,212,233,.35)、.is-off → --text-secondary + rgba(189,212,233,.25)，图标 15；在 auroraqua 按钮组内 ⇒ 200ms + hover 1.02 + active .98 · 音量条 90×20 三层（下→上）：轨道（双色 stops [0,fill,fill,1]：左 --indigo-700、右 ice-300@.55）→ 跳动条（宽 90×levelPct%、`linear-gradient(90deg, --glow-500, --ice-500)`、**80ms --ease-out**、`.is-speaking` 加 `0 0 6px rgba(247,150,255,.55)`）→ slider（轨道透明 4px + 自绘把手 14 圆 / --indigo-700 / 2px #fff 边 / `0 1px 4px rgba(70,91,146,.35)`；用 Flutter Slider 保住拖动/键盘/无障碍语义，divisions 100 = 原生 step 1）· 电平映射 `levelPct = round(min(1, level^0.4)×100)`（0.02→21 / 0.2→53 / 0.5→76）、说话阈值 **0.02** · 自己行 = 麦克风开关 + 本地麦音量（aria-pressed = micEnabled）；远端行 = 喇叭开关 + 播放音量（aria-pressed = locallyMuted，**语义与自身行不同**；locallyMuted 时跳动条归零、辉光消失）· 名称兜底 `user_id` 前 6 位 · **样张可交互**：拖滑块改音量、点开关切 is-off、拖「说话电平」看跳动条按 ^0.4 放大 + 说话辉光',
+              child: aylaVoiceMemberSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- voice 域第三批（2026-09-21：B1-3 第一件） ----------
+            _Section(
+              title:
+                  'AylaVoiceChannelCreate（components/voice/VoiceChannelCreate.tsx 80 行 + app.css 2848–2869 + auroraqua.css 502–531 + private.css 229–236）',
+              source:
+                  '可见性选择器（**复用 AylaVisibilitySelector**：群内创建 group 锁定 + 本群恒勾选）+ 名称输入 + 「建频道」+ 错误行 · 输入 = GlassInput（min-height 36 / 13px / hint「新语音频道名称」/ 64 上限用 formatter 表达以免多出「0/64」计数器 / Enter 提交；圆角是 auroraqua 覆写的 --radius-input 12，app.css 的 pill 不生效；focus → glow-500 边 + --glow-shadow）· 两个挂载点（ChannelSidebar / CreateFab）**都在 AylaCreateSheet 内** ⇒ private.css 的 sheet 作用域恒生效：输入与按钮 width 100% + 输入 margin-bottom sp3（与容器 gap 8 叠加 = 与按钮 20）· 空名拦截「频道名称不能为空」（不发请求）· 防重入守卫 + busy 禁用 · 多选→单值 public→friends→group · 成功清空名称 + onCreated（外层关浮层）、失败显示文案并**保留表单** · 请求与列表插入由页面层 onSubmit 注入（web 是组件内直接调 API + store）· **样张可交互**：空名提交看报错、填名提交看清空与计数、第三个表单固定失败看文案',
+              child: aylaVoiceChannelCreateSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- voice 域第四批（2026-09-21：B1-4） ----------
+            _Section(
+              title:
+                  'AylaVoiceChannelPanel（components/voice/VoiceChannelPanel.tsx 158 行 + app.css 2873–2915 + voice.css 32–56/377–381 + auroraqua.css 584–610）',
+              source:
+                  '面板 = head（标题 **16/700**（h3 默认 bold，base.css 只重置 margin）+ 人数 12/secondary，**baseline 对齐**）+ 成员列表（`gap 8`）+ 控制条 · 材质 = radius 16 / --glass-bg / 1px 亮边 / blur24 sat1.4 / --glass-shadow / padding 16 / **max-width 560**（app.css）· **房间上下文档** `roomContext`（voice.css 32–56）：max-width→none、成员列表 `flex:1; min-height:0` 自己滚动、其余子项不收缩 · **材质归属档** `ownMaterial`（auroraqua 584–610）：宽屏房间面板透明（材质交外层卡）、窄屏外层卡透明（材质归面板）· 成员行复用 AylaVoiceMemberRow（isSelf/isElysia/展示投影注入）· 房主操作行（两个 `.btn.btn-ghost`「踢出/转让房主」，该类**无 CSS** ⇒ 4px 间距来自 JSX 空白；busy 时**两个一起** disabled + 当前行「处理中…」；失败静默）· 分页复用 AylaDirectoryLoadMore（retainCompletedSpace=false）· 控制条复用 AylaVoiceControls · 面板内只留两条纯列表规则：自己置顶兜底 / busy 管理 · **样张可交互**：普通档（拖音量条、点喇叭/麦克风）、房主档（点踢出看「处理中…」）、房间档（固定高 420 + 成员列表自带滚动 + **面板透明**：web 的 `.voice-room-voice-card` 自身无材质声明，宽屏内外两层都透明 ⇒ 整列浮在极光背景上）',
+              child: aylaVoiceChannelPanelSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- voice 域第五批（2026-09-21：B1-5） ----------
+            _Section(
+              title:
+                  'AylaElysiaVoicePanel（components/voice/ElysiaVoicePanel.tsx 108 行 + app.css 3122–3156 / 1324–1333 / 1362）',
+              source:
+                  '⚠️ **web 里该组件没有挂载点**（只有 hook + vitest）⇒ 本画布是唯一视觉验收面 · 收起档 = 单个 .btn-glow「爱莉语音」+ `.collapsed`（padding **sp3** + `align-items: flex-start`）· 展开档 = head（`.elysia-voice-head` **align-items: center**（B1-4 那个面板是 baseline，别抄错）+ 标题 16/700 + `.msg-action-btn`「收起」）+ 未接入态（`.voice-list-empty`：「接入中…」/「等待接入」）+ 输入行（`input.voice-create-input` 同 B1-3 档 + 2000 上限用 formatter + Enter 提交 + primary「发送」）+ 行动区（终态 → primary「重新发起」；否则 `.voice-leave-btn` = outlineDestructive「结束通话」）· busy 时三按钮一起禁用 · 空文本不受理则**不清空**输入 · 材质 = radius 16 + --glass-bg + blur24 sat1.4 + --glass-shadow + max-width 560 · **样张可交互**：点「爱莉语音」展开、输入后点发送/Enter、点结束通话看终态档切换、开关 busy',
+              child: aylaElysiaVoicePanelSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- voice 域收尾（2026-09-21：B1-6，voice 域 8/8） ----------
+            _Section(
+              title:
+                  'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
+              source:
+                  '**语音房整页（进房态）· voice 域最后一件** · 两形态：**≥769** body padding sp4 + gap sp4，layout = **grid** `minmax(320,1fr) minmax(320, min(380,45%))`（+ `@container voice-room (max-width:655px)` → 单列两行），三分区各自动画（head 上入 / chat 右入 / voice 下入 300ms），两张卡自带材质 + chat head/列表常驻 + 开关隐藏；**≤768** 无 padding、head 只有下边框、上下堆叠、聊天 = 底部输入卡 + **上方浮层**（h300、只有上两角 radius 16、`--glass-bg-strong` + blur18、opacity/translateY(12)/visibility 240ms）· **材质归属按断点切换**：宽屏材质在 `.voice-room-voice-card`、面板透明；窄屏外层透明、材质归 `.voice-panel`（样张里 builder 参数会显示 false/true）· head 六件：返回 · 标题（Fredoka 18）· 可见性标签（容器 16ch、标签 12ch 同 `.post-card-tag` 档）· 收藏 · 分享 · 「删除房间」（⚠️ web 的 `.btn-danger` **全 CSS 无定义** ⇒ 实渲染是无材质的裸 `.btn`，已按用户裁决照实复刻）· 房内聊天：消息行（sender 700 secondary + 「图片」占位不渲染文本 + 缩略图 120×80）+ 历史控件 + 输入条（工具钮 40 pill / `min-height 40` `max-height 140` 的输入 / primary 发送 / 窄屏开关）+ **未读徽标**（18/11/600/`--pink-500`/99+；规则：新 id + 聊天栏收起 + 非自己才 +1，展开清零，seenIds 上限 1000）+ `.live-form-error` · **样张可交互**：发文本（空文本禁用发送）、点图片钮、开关「下一次发送失败」看错误行、点右下 ▲ 展开窄屏浮层看未读红点',
+              child: aylaVoiceRoomBodySamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- live 域第一批（2026-09-22：B2-1，弹幕三件） ----------
+            _Section(
+              title:
+                  'AylaDanmakuList / AylaDanmakuInput / AylaDanmakuOverlay（components/live/Danmaku{List,Input,Overlay}.tsx 139+180+213 行 + danmakuTracks.ts 55 行 + app.css 3671–3827 + live.css 756–784/860–929/1006–1018 + auroraqua.css 347–359/378–383/390/502–523）',
+              source:
+                  '**弹幕三件一批 · live 域第一批** · 列表 = `.danmaku-wrap`（组件根，**自身永不持材质**：app.css 3671–3676 只有布局；⚠️ live.css 756–764 给 `.live-room-swipe-item .danmaku-wrap` 的玻璃 + `radius 0 0 12 12` **没有任何渲染面** —— `.live-room-swipe-item` 只在窄屏分支出现（`LiveRoomBody.tsx` 441/468），而 live.css 818–839 的 `@media (max-width:768px)` 又把同元素的 border/background/backdrop-filter/radius 全清零 ⇒ 此前据它做过一档材质，是造轮子，**已删**；宽屏材质归 `<aside class="live-room-side">` 那张卡片（auroraqua 392–400），窄屏实渲染透明 + 仅 `min-height: 96`）+ `.danmaku-list`（padding sp3 + gap sp2）+ 行（**头像 20** + 昵称 **Space Grotesk 12** secondary + 内容 14/1.5）+ 空态 + **新弹幕提示**（`--bubble-elysia` 渐变底 + `--text-on-pink` + pill + `--glow-shadow`，bottom sp3 居中，无 hover）+ 图片钮 **96×64 / radius 8**；⚠️ **失败态照实渲染**（用户 2026-09-22 拍板）：骨架铺满 96×64、「图片加载失败，点击重试」芯片被 `overflow:hidden` 裁掉不可见，且 `ResourceImage.tsx 96–115` 的 `enclosingControl` 语义 ⇒ **点击=重试而不开查看器**（Flutter 用新增的 `ResourceImage.onStateChanged` 判态路由）· 输入条**三档材质**（`narrowCard` ≤768 沉浸态——live.css 768–772 的 `--glass-bg` + blur18 sat1.4 原本在包装层 `.live-room-input` 上，已并入组件／**`sideCard` ≥769 直播侧栏卡内**——auroraqua 347–359 的玻璃材质被 555–567 清零，实渲染 = `margin 12` + `padding 8` + 透明底 + **仅上边框分隔线** + 方角，即用户截图那栏／`base` studio 窄屏——侧栏卡本身透明，只剩 app.css 的 `padding sp3` + 上边框）= 状态行（上传中/两种失败 + 「重试图片」`AylaMsgActionButton`）+ 输入行（`GlassButton(ghost, glowBorderOnHover)` 40×40 图片钮 / `GlassInput` padding 8-12 单行「发条弹幕吧」400 上限 / primary 发送钮 **min-width 72**）+ 元行（`.live-form-error` 或 `计数器 trim/200`）；**图片三步（选/传/发）由页面注入**（`AylaMediaActions.pickImage`/`uploadImage`），组件持 attempt ⇒ 上传失败**重传同一文件**、发送失败**复用 media_id**；发送中**不禁用输入框**（保焦点）· 飘弹幕层 = 只飘**新出现**的弹幕（挂载/切台基线排除历史与重连对账）+ 轨道算法（速度 150px/s、间距 60px、行高 36、轨道 2–10）+ 关键帧 `translateX(calc(-100% - 24px))` 线性 + 上限 80 + reduced-motion 整层不渲染 + `ExcludeSemantics`（aria-hidden）· **样张可交互**：点弹幕图片开全屏查看器（root Overlay）、切「有新弹幕」、输入计数与回车发送、图片上传失败→重试、点「发一条/图片弹幕」看从右向左飘、点「换台」看基线重建',
+              child: aylaDanmakuSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- live 域第二批（2026-09-22：B2-2，大厅卡片 + 网格） ----------
+            _Section(
+              title:
+                  'AylaLiveChannelCard / AylaLiveHall（components/live/LiveChannelCard.tsx 53 行 + LiveHall.tsx 45 行 + app.css 3275–3397 + live.css 486–493/559–596/617–655/811–814/1333–1354 + shell.css 619–629 + auroraqua.css 29–52）',
+              source:
+                  '**直播大厅（卡片 + 网格）· live 域第二批** · 卡片 = `AylaCardInteraction`（卡片族悬停 `translate 0 -2px` + `--glass-shadow-hover`、按压 .99）+ `GlassSurface`（radius 16 / blur24 sat1.4 / `--glass-shadow`）+ 封面 **16:9**（`--radius-input` / 1px 亮边 / 透明底 / 无封面用 `iconVideo 28` + `--ice-500`）+ 状态徽章三档（**`.live-badge-live` 被 live.css 811–814 后加载覆写为 `--pink-500` 底 + `--surface` 字**；idle/ended = `--ice-100` + secondary）+「爱莉」角标（`--bubble-elysia` 渐变 + `--text-on-pink`）+ **人数角标**（右下玻璃胶囊 `--glass-bg-strong` + blur8 无 saturate；**仅 status==live 且有读数**才渲染，`null` 不渲染、`0` 照常、`1.2k/53k` 紧凑写法）+ 标题（Fredoka 16 / **line-height 1.35 固定行高**）+ 主播名（13/1.4 secondary，`ownerNickname` 优先于 `ownerNames` 兜底）+ 来源标签（**共享件 `AylaSourceTag`**，容器 `max-width: 55%` 滚动）· **收藏键**：compact 32×32 落在封面右上（窄屏 12 / 宽屏 `calc(sp4+sp1)`=20 与徽标同线；点按不触发进房）——⚠️ **卡片上不放转发键**（用户 2026-09-22 追加裁决：首轮按「都要」加过，随后被否决；转发键只在**房头部**）· **卡片等高**（用户 2026-09-22）：web 靠 CSS grid 的 `align-items: stretch` 拉平，Flutter 侧由 `reserveMetaSpace` **恒占位 meta 行**（固定高 `max(13×1.4, 12×body+2×2)`）保证——不能用 `IntrinsicHeight`（卡片含 `LayoutBuilder`，不支持 intrinsics）· 网格：**≤768 → 2 列（+ 上下 padding sp3、卡片 padding sp2）/ ≥769 → 3 列 / ≥1440 → 4 列**、`gap sp4`；用 `Wrap` 表达等宽列（**等高由 `reserveMetaSpace` 预留保证**，等价 web 的 `align-items: stretch`）· 空态 = `placeholder-title`（Fredoka 28/600）+ `placeholder-desc`（14 secondary）+ `padding sp12 0` · **样张可交互**：点卡进入计数、点收藏键切换、三档断点与空态各一格',
+              child: aylaLiveHallSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- live 域第三批（2026-09-22：B2-3，直播侧栏 + 开播选择器） ----------
+            _Section(
+              title:
+                  'AylaLiveChannelRail / AylaLiveStartSheet（components/live/LiveChannelRail.tsx 168 行 + LiveStartSheet.tsx 86 行 + live.css 10–29/48–139/232–239/311–423/1356–1370 + auroraqua.css 125–139/175–205/412–454）',
+              source:
+                  '**直播侧栏 + 开播选择器 · live 域第三批** · 侧栏 = 240 宽（≤768 → `min(240, 100vw-48)`）+ `margin 12` + `GlassSurface`（radius 16 / blur24 sat1.4 / `--glass-shadow`）；⚠️ `width` 必须用 `UnconstrainedBox` 松掉父级横向紧约束才权威（`SizedBox(width:)` 的 `constraints.enforce` 会被紧父级夹回——实测 420 宿主里变 396）；竖向仍受父约束（web flex 行 `align-items: stretch`）· 操作区 `min-height 54`（与顶栏等高）+ `padding sp2 sp3` + 下边框；两个 36×36 pill 图标钮（返回 / 收起，**不在扫光组** ⇒ `sweep: false`）· 列表 `padding sp3` + `gap sp2`；行 = 封面 **72×16:9**（radius-input / 1px 亮边 / 无封面用 `iconVideo 18` + `--ice-500`；在播时 **8×8 `--pink-500` 圆点** top/right 4）+ 标题 **13/1.35 两行截断**（不是单行滚动）+ 人数角标（utility 11 / ls .3 / lh 1 / gap 2，active → text-primary）+ 删除键（**22×22** pill / `rgba(255,250,251,.72)` / destructive / opacity 0→整行 hover 或自身 focus 显形 / disabled .4）· **选中高亮 = 容器级单实例 + 跨项迁移 300ms**（web 是 `AuroraquaNavHighlight` **裸变体** + 共享 `layoutId`；选中行自身底色被 auroraqua 194–197 清零）· **自动滚到当前项 = CSS `block:"nearest"` 的显式等价**（已可见不动 / 上方顶对齐 / 下方底对齐；`Scrollable.ensureVisible` 的两种 keepVisible 策略都是单向的，不合用）· 收起态**整个组件不渲染**（返回/展开键移到顶栏；`.live-rail-float` 是死 CSS 不复刻）· 底部「新建直播间」= **1px 虚线 `--ice-500`**（复用新共享件 `AylaDashedBorder`，原为 `channel_sidebar` 私有 painter）· 目录页脚由 `directoryFooter` 槽注入 · 开播选择器 = intro（Fredoka 20 + 13 secondary）+ 五态（加载/列表失败 alert+重试/创建失败/空态/有内容）+ 列表（`max-height: min(42vh,360px)`；行 **min-height 68** / `rgba(255,250,251,.45)` 底 / 145deg `ice-300→sakura-100` 封面 + 「LIVE」/ 标题 14 + 副行 13 / `→` 20）+ 底部 `.btn-glow` 键 · **样张可交互**：点封面切台看高亮迁移、删除键 hover、收起/重开、开播选择器两态',
+              child: aylaLiveRailSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- live 域第四批（2026-09-22：B2-4，观看条/名单弹层 + 主播头像 + 推流地址） ----------
+            _Section(
+              title:
+                  'AylaLiveViewerStrip / AylaLiveViewerSheet / AylaLiveHostAvatar / AylaLiveStreamAddresses（components/live/LiveViewerStrip.tsx 85 行 + LiveViewerSheet.tsx 147 行 + LiveHostAvatar.tsx 52 行 + LiveStreamAddresses.tsx 72 行 + live.css 206–229/1095–1325/249–257 + app.css 3443–3477）',
+              source:
+                  '**观看条 + 名单弹层 + 主播头像 + 推流地址 · live 域第四批** · 观看条 = 整排按钮（`min-height 44` / `padding sp1 sp3` / radius-input / `--glass-bg` + blur18 sat1.4 / **compact 阴影** / hover `rgba(255,250,251,.72)`）+ 人数圆（`min-width 32` / h32 / pill / **`--ice-300` 底 + `--indigo-700` 字** / utility 12 ls .3 lh 1）+ 头像排（size **26** / gap sp1 / **overflow hidden 裁掉放不下的**）+ 排尾「更多」三圆点（26×26 / ice-100 / `IconDots 14`）· **未知人数显示 `–`**（ice-100 + secondary，尺寸与已知态**完全一致**，禁止画面跳变）、`0` 是真实读数照常显示 · **纯展示**（不自行拉数据）· 整排/名单行复用 `AylaCardInteraction(interactive: false, focusRingColor: --focus-ring 即 glow-500)`——它们**不在** auroraqua 的卡片/按钮 `:is()` 组里（无 1.02/.98、无扫光），只有 `outline 2px` 环 · 名单弹层 = **复用 A3 `AylaCreateSheet`**（`narrowHeightFactor: 0.6` = 窄屏 **60vh** 贴底上滑）+ **head 固定、只有名单自身滚**（body 最大高 = 卡上限 − padding sp4×2 − 安全区 − head 52）+ 行（min-height 48 / 头像 36 / 名字 15 w600 / hover glass-bg）+ 骨架 6 行（头像 **41×41** = 36 + 光环 2.5×2）+ 空态「还没有人在看」+ 截断「仅显示前 N 位」+ 503 `role=alert` + 重试（**不冒充空名单**）· **弹层插 root Overlay**（等价 web `createPortal(document.body)`；官方用例明确「侧栏 backdrop-filter 不裁剪弹层」）· 主播头像（label 回退链 `nickname → username → owner_nickname → 主播`；aria「查看主播 X 的个人主页」；size 默认 36；在线由页面按 presence 判（隐身恒离线））· 推流地址（`width: min(100%,960px)` 卡 + 三行：标签 **64** / 值 utility 12 省略号 **卡内覆写玻璃底 + radius-input + 内高光** / 复制键 `.msg-action-btn` →「已复制」1.5s / 失败 destructive 文案；**缺 rtmp_url 或 stream_key 时整块不渲染**；`stream_key` 是推流指纹**不打日志不持久化**）· **样张可交互**：点整排开名单（root overlay）、状态切换、复制/失败态',
+              child: aylaLiveViewersSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  'AylaLiveHostAvatar / AylaLiveStreamAddresses（同批：主播头像 + 推流地址区）',
+              source:
+                  '**同批两件（B2-4）** · 主播头像 = `AvatarHalo`（有头像/无头像、在线/离线、size 36/28/52 三档）· 推流地址 = 卡 `width: min(100%,960px)`（用 `Align` 松横向紧约束才权威——`ConstrainedBox(maxWidth:)` 会被紧父级 `enforce` 夹回）+ padding sp3 + 三行（标签 64 / 值 utility 12 + 卡内玻璃覆写 + `--glass-inset` 内高光 / 复制键）+ `.live-form-error` · 窄屏 `align-items: flex-start`（同档 `flex-wrap: wrap` **无渲染面**：值 `min-width: 0` 可压到 0 ⇒ 永不换行，照实只表达交叉轴对齐）· 样张可交互：复制 →「已复制」1.5s、失败态开关',
+              child: aylaLiveStudioSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- live 域第五批（2026-09-22：B2-5，建播表单 + 控制台资料栏） ----------
+            _Section(
+              title:
+                  'AylaLiveCreate（components/live/LiveCreate.tsx 189 行 + app.css 3401–3477 + live.css 32–33/164–174 + auroraqua.css 502–531）',
+              source:
+                  '**建直播间表单 + 推流指引 · live 域第五批** · ⚠️ **本件在 web 里零挂载点**（全仓 `<LiveCreate>` 零命中、vitest 也无用例；真实建播走 `ChannelSidebar.handleCreateNewLive` → `createLiveChannel("新直播间")`）⇒ **组件画布是唯一视觉验收面**（同 B1-4 `ElysiaVoicePanel`）· 表单 = `.live-create-form`（app.css 的 row+gap sp2 **被 live.css 32 覆写为 column/stretch**）+ 标题（placeholder「给直播间起个标题」· maxLength 128）+ 介绍（「告诉观众这场直播聊什么（可选）」· 2000 · min-height 72）+ 可见范围（**复用 `AylaVisibilitySelector`**：群内默认勾本群**不锁定**、群外默认公开）+ 封面（**96 → ≤768 88** / 16:9 / `1px dashed --ice-500` / radius-input / glass-bg；⚠️ 用户的 `<img>` **漏了 `live-cover-preview-img` 类** ⇒ live.css 174 的 object-fit 是死规则 —— **用户 2026-09-22 裁决按 web 本意用 `cover`**）+ `.btn-glow`「开播」→「准备中…」· 字段族 = `--glass-bg` + 1px 亮边 + radius-input + **`--glass-inset`** + blur24 sat1.4 + focus `--glow-500` 边 + `--glow-shadow`（⚠️ app.css 写的 `box-shadow: var(--focus-ring)` 是**无效声明**：`2px solid #f796ff` 里的 `solid` 在 box-shadow 里非法）+ placeholder `--slate-500` · 指引（`.live-create-guide`：`--glass-bg-strong` + radius 16 + margin-top sp3 + 标题 Fredoka 15 + notice **`--warning` 13** + 两行复制**基础档**（`--ice-100` + radius-sm 8）+「我已保存，关闭」右对齐）· 空标题「标题不能为空」**不发请求**；`stream_key` 是推流指纹**不打日志不持久化** · **样张可交互**：填标题后点「开播」看指引、点复制/关闭、失败态',
+              child: aylaLiveCreateSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  'AylaLiveOwnerPanel（components/live/LiveOwnerPanel.tsx 217 行 + app.css 3831–3843 + live.css 168–180/190–269）',
+              source:
+                  '**控制台资料栏（真实挂载：`LiveRoomBody` 的 showOwnerPanel）** · 卡 = padding **sp3**（live.css 168 覆写 app.css 的 sp4）+ `--glass-bg` + blur24 sat1.4 + 1px 亮边 + radius 16 + `--glass-shadow` + column gap sp3 · 行 = 封面 96×16:9（虚线冰蓝；⚠️ 本件 tsx **确实带** `live-cover-preview-img` ⇒ cover **生效**，与 LiveCreate 的死规则不同）+ 标题 **200 固定**（`flex-shrink: 0`）+ 介绍 flex 1 + 开播（`.btn-glow`）/保存竖排（`min-width 96` / `min-height 40`）· 可见范围块 = padding sp3（≤768 sp2）+ **上边框 1px** · 三档断点：≤768 与 **769–1100**（侧栏压缩控制台余宽）都换行 ⇒ 封面+字段一行、开播/保存独占一行 · 保存 = 载荷（trim + 可见性单值 `public→friends→group`）→ **用后端回显刷新封面与可见范围**（后端可能规范化 `allowed_group_ids`）· 「标题不能为空」不发请求；开播/下播 busy 期禁用、失败「操作失败」· ⚠️ **下播键 web 是裸 `.btn`**（app.css 21–34 只有盒模型/字体，**没有任何底/边/阴影**）—— **用户 2026-09-22 裁决当 web 的 bug** ⇒ 改用库内 `ghost` 档给回玻璃面（登记为有意偏离）· **样张可交互**：改标题→保存看回显、开播/下播切换、切可见范围',
+              child: aylaLiveOwnerPanelSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- live 域最后一批（2026-09-22：B2-6，播放器 / 浮动小窗 / 直播间装配） ----------
+            _Section(
+              title:
+                  'AylaLivePlayer（components/live/LivePlayer.tsx 420 行 + app.css 3517–3636 + live.css 939–1005）',
+              source:
+                  '**播放器三态 + 悬浮控件 · live 域最后一批** · 根 = 16:9 / `rgba(70,91,146,.12)` / radius-card / 1px 亮边 / overflow hidden；视频 `object-fit: contain` + #000 底 · **三态**：`srsStatus == null` →「正在查询直播状态…」/ degraded →「直播服务状态未知，请稍后再试」（`--warning`）/ idle →「等待推流信号…」（乐观已开播）或「主播未开播」/ live + 播放失败 →「播放失败」（`--destructive`）+ `.btn-glow`「重试」· **悬浮控件**（`.live-player-controls`）：`opacity 0→1`（180ms）+ 隐藏时整层穿透；**桌面悬停/移动、触屏点击**显示，显示后 **3s 无操作自动隐藏**（`AUTO_HIDE_MS = 3000`）；左下「刷新」（32×32 · `rgba(70,91,146,.32)` + 1px `rgba(255,255,255,.28)` + 白图标 16 + blur8 sat1.2 · hover .52 · 点击转一圈 0.6s，reduced-motion 不转）+ 右下「全屏」· **画中画键不实现**（浏览器 PiP 无 Flutter 等价物；窄屏 web 本就隐藏 ⇒ 有意偏离）· **全屏改用 root Overlay 铺满 + 移动端锁横屏**（web 是 `requestFullscreen` 让容器进 top layer；Flutter 无此能力），全屏时 inline 侧不再挂视频（避免平台视图被同时 attach），屏幕下方居中显示**全屏弹幕输入框**（`min(320, 100%-120)` / min-height 50 / 内 input 透明 40 高 / 40×40 `.btn-primary` 发送键 / 失败提示玻璃片）· video 由页面注入（`HlsPlaybackController.videoView`，PoC-B 封装层）· **样张可交互**：悬停/点击显示控件、3s 自动隐藏、刷新旋转、进全屏',
+              child: aylaLivePlayerSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  'AylaLiveMiniPlayer（components/live/LiveMiniPlayer.tsx 228 行 + live.css 1021–1095）',
+              source:
+                  '**手机端 App 内浮动小窗** · 仅**窄屏离开直播间且直播中**出现（调用方判断）；同一时刻至多一个 owner · **fixed 右下 16 / z 60** / **168×94（16:9）** / `touch-action:none` + 禁选中 · 内层 `.live-mini-player-video-wrap` = radius-input + `--glass-bg-strong` + blur24 sat1.4 + 1px 亮边 + compact 阴影 + overflow hidden（**外层不裁剪**，关闭键才能突出在外）· 关闭键 **top/right = -10**（24×24 · `rgba(70,91,146,.32)` · 1px `rgba(255,255,255,.28)` · 白 `IconClose 14` · hover .52）· **单指拖动**（阈值 **5px**、边缘间距 **8**、clamp 在视口内）+ **双指缩放**（宽 **120–320**、高按 16:9、**右下角锚定**）· 点主体/Enter/Space → 回直播间；关闭 → 完整销毁会话 · ⚠️ Flutter 侧**不做 web 的 `suppressClick`**（没有合成 click；拖动一开始 tap 识别器就输给 scale 识别器）· 返回 **Positioned** ⇒ 调用方放在最外层 Stack 直接子级 · **样张可交互**：拖动 / 点主体 / 点关闭',
+              child: aylaLiveMiniPlayerSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760）',
+              source:
+                  '**直播间核心装配（live 域收官件）** · 宽屏三栏 = `.live-rail`（240 侧栏，可收起；收起后展开键回头部）+ `.live-room-main`（头部 + 控制台资料栏 + `.live-room-stage`(播放器 16:9) + 观众条 + 推流地址）+ `.live-room-side`（弹幕列表 + 输入框）· **窄屏沉浸式** = 固定头部 + **视频与弹幕区整体上下滑切台**（dragElastic **0.8**；松手判定：净位移 > **1/3 高**优先，否则同向甩动补充）+ 固定输入框 + 右下列表键打开**覆盖层**（`.live-room-rail-overlay`：`rgba(70,91,146,.25)` 遮罩点关闭 + 右侧 240 侧栏）· **进房错误态仍保留侧栏与弹幕区**（避免卡在只有返回键的死页面）· 头部 = 返回(40×40) + 主播头像(32) + 标题滚动 + **来源标签（共享件 `AylaSourceTag`）** + 收藏(compact) + 转发 + 窄屏列表键 · 控制台（`showOwnerPanel`）头部整行不渲染、改由侧栏承载返回/标题 · **全屏期间冻结 isNarrow**（防锁横屏导致窄↔宽切换、播放器重建黑屏）· 飘弹幕层**仅 `!loading && srsStatus === "live"`** 才挂 · 数据全部由页面注入（`AylaLiveRoomData` + 回调；web 的 `useLiveRoom`/`useDanmaku`/live store 属数据层与运行时）· **样张可交互**：点侧栏切台、收起/展开、窄屏上滑切台、列表覆盖层开关',
+              child: aylaLiveRoomBodySamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 入场动画（2026-09-20 审查 R7：公共件） ----------
+            _Section(
+              title:
+                  'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
+              source:
+                  'opacity 0→1 + 下 20px · 300ms --auroraqua-ease-out · stagger 50ms（cap 300）· reduced-motion 直接到位 · enabled:false 不挂动画',
+              child: _Row(
+                children: <Widget>[
+                  _Slot(
+                    label: '下入 20px · stagger 0/50/100ms',
+                    width: 300,
+                    child: AylaRevealScope(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        spacing: AylaSpacing.sp2,
+                        children: <Widget>[
+                          for (int i = 0; i < 3; i++)
+                            AylaRevealItem(
+                              index: i,
+                              child: Text(
+                                '条目 $i（delay ${i * 50}ms）',
+                                style: t.caption,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  _Slot(
+                    label: '上入 20px（offset 0,-20）',
+                    width: 300,
+                    child: AylaRevealItem(
+                      offset: const Offset(0, -AylaRevealMotion.distance),
+                      child: Text('上入样张', style: t.caption),
+                    ),
+                  ),
+                  _Slot(
+                    label: 'enabled:false（滚动恢复/历史节点）',
+                    width: 300,
+                    child: const AylaRevealItem(
+                      enabled: false,
+                      child: Text('直接显示，不挂动画', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 加载族 ----------
+            _Section(
+              title: 'Skeleton + Spinner + FullScreenLoader（base.css 515–574）',
+              source:
+                  'spinner 18px/800ms · skeleton radius 8 + frost-pulse .55↔.9 1600ms · loader 品牌 40px 渐变字',
+              child: _Row(
+                children: <Widget>[
+                  _Slot(
+                    label: '骨架行（44 头像 + 两行）',
+                    width: 260,
+                    child: const _SkeletonSample(),
+                  ),
+                  _Slot(
+                    label: 'spinner md / sm',
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        LoadingSpinner(),
+                        SizedBox(width: AylaSpacing.sp3),
+                        LoadingSpinner(size: 14),
                       ],
                     ),
                   ),
-                ),
-                _Slot(
-                  label: '上入 20px（offset 0,-20）',
-                  width: 300,
-                  child: AylaRevealItem(
-                    offset: const Offset(0, -AylaRevealMotion.distance),
-                    child: Text('上入样张', style: t.caption),
-                  ),
-                ),
-                _Slot(
-                  label: 'enabled:false（滚动恢复/历史节点）',
-                  width: 300,
-                  child: const AylaRevealItem(
-                    enabled: false,
-                    child: Text('直接显示，不挂动画', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 加载族 ----------
-          _Section(
-            title: 'Skeleton + Spinner + FullScreenLoader（base.css 515–574）',
-            source:
-                'spinner 18px/800ms · skeleton radius 8 + frost-pulse .55↔.9 1600ms · loader 品牌 40px 渐变字',
-            child: _Row(
-              children: <Widget>[
-                _Slot(
-                  label: '骨架行（44 头像 + 两行）',
-                  width: 260,
-                  child: const _SkeletonSample(),
-                ),
-                _Slot(
-                  label: 'spinner md / sm',
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      LoadingSpinner(),
-                      SizedBox(width: AylaSpacing.sp3),
-                      LoadingSpinner(size: 14),
-                    ],
-                  ),
-                ),
-                _Slot(
-                  label: 'FullScreenLoader（无卡片）',
-                  width: 300,
-                  child: SizedBox(
-                    height: 220,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(AylaRadii.rCard),
-                      child: const FullScreenLoader(),
+                  _Slot(
+                    label: 'FullScreenLoader（无卡片）',
+                    width: 300,
+                    child: SizedBox(
+                      height: 220,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(AylaRadii.rCard),
+                        child: const FullScreenLoader(),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
+            const SizedBox(height: AylaSpacing.sp8),
 
-          // ---------- 图标库（全量 47 个） ----------
-          _Section(
-            title: 'Icon 图标库（web components/icons.tsx 全量 47 个）',
-            source: 'viewBox 24 · 2px 描边 · round cap/join · 默认 18px · 实心特例已还原',
-            child: Wrap(
-              spacing: AylaSpacing.sp4,
-              runSpacing: AylaSpacing.sp6,
-              crossAxisAlignment: WrapCrossAlignment.start,
-              children: <Widget>[
-                for (final AylaIconData icon in kAylaIcons)
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      AylaIcon(icon, size: 18, color: AylaColors.indigo700),
-                      const SizedBox(height: AylaSpacing.sp1),
-                      SizedBox(
-                        width: 110,
-                        child: Text(
-                          icon.name,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.timestamp.copyWith(
-                            color: AylaColors.textSecondary,
+            // ---------- 图标库（全量 47 个） ----------
+            _Section(
+              title: 'Icon 图标库（web components/icons.tsx 全量 47 个）',
+              source:
+                  'viewBox 24 · 2px 描边 · round cap/join · 默认 18px · 实心特例已还原',
+              child: Wrap(
+                spacing: AylaSpacing.sp4,
+                runSpacing: AylaSpacing.sp6,
+                crossAxisAlignment: WrapCrossAlignment.start,
+                children: <Widget>[
+                  for (final AylaIconData icon in kAylaIcons)
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        AylaIcon(icon, size: 18, color: AylaColors.indigo700),
+                        const SizedBox(height: AylaSpacing.sp1),
+                        SizedBox(
+                          width: 110,
+                          child: Text(
+                            icon.name,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.timestamp.copyWith(
+                              color: AylaColors.textSecondary,
+                            ),
                           ),
                         ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B2 展示型基元 ----------
+            _Section(
+              title:
+                  'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
+              source:
+                  'home.css .layout-switch 182–206 · messages.css .messages-tab 24–37 · '
+                  'd:§4 胶囊 · base.css .scroll-text 724–758（marquee）',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  _Row(
+                    children: <Widget>[
+                      _Slot(
+                        label: 'LayoutSwitch（点击切换·胶囊 300ms 迁移）',
+                        child: const _LayoutSwitchDemo(),
                       ),
                     ],
                   ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B2 展示型基元 ----------
-          _Section(
-            title:
-                'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
-            source:
-                'home.css .layout-switch 182–206 · messages.css .messages-tab 24–37 · '
-                'd:§4 胶囊 · base.css .scroll-text 724–758（marquee）',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _Row(
-                  children: <Widget>[
-                    _Slot(
-                      label: 'LayoutSwitch（点击切换·胶囊 300ms 迁移）',
-                      child: const _LayoutSwitchDemo(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AylaSpacing.sp6),
-                const SizedBox(width: 420, child: _TabsDemo()),
-                const SizedBox(height: AylaSpacing.sp4),
-                const Wrap(
-                  spacing: AylaSpacing.sp2,
-                  runSpacing: AylaSpacing.sp2,
-                  children: <Widget>[
-                    AylaCapsuleTag('数字生命'),
-                    AylaCapsuleTag('持续记忆'),
-                    AylaCapsuleTag('历史搜索', tone: CapsuleTone.ice),
-                    AylaCapsuleTag('玻璃胶囊', tone: CapsuleTone.glass),
-                    AylaCapsuleTag('LIVE', tone: CapsuleTone.pink),
-                    AylaCapsuleTag('实底', tone: CapsuleTone.indigo),
-                  ],
-                ),
-                const SizedBox(height: AylaSpacing.sp4),
-                const SizedBox(
-                  width: 300,
-                  child: AylaScrollingText(
-                    text: '长文本 marquee 滚动验证：这是一段超出容器的文本，用来核对来回滚动与停顿时序',
-                  ),
-                ),
-                const SizedBox(height: AylaSpacing.sp4),
-                const SizedBox(
-                  width: 260,
-                  child: AylaScrollingTags(
+                  const SizedBox(height: AylaSpacing.sp6),
+                  const SizedBox(width: 420, child: _TabsDemo()),
+                  const SizedBox(height: AylaSpacing.sp4),
+                  const Wrap(
+                    spacing: AylaSpacing.sp2,
+                    runSpacing: AylaSpacing.sp2,
                     children: <Widget>[
-                      AylaCapsuleTag('公开'),
-                      AylaCapsuleTag('好友可见', tone: CapsuleTone.ice),
-                      AylaCapsuleTag('指定群可见', tone: CapsuleTone.glass),
-                      AylaCapsuleTag('我的收藏', tone: CapsuleTone.pink),
-                      AylaCapsuleTag('更多标签', tone: CapsuleTone.indigo),
+                      AylaCapsuleTag('数字生命'),
+                      AylaCapsuleTag('持续记忆'),
+                      AylaCapsuleTag('历史搜索', tone: CapsuleTone.ice),
+                      AylaCapsuleTag('玻璃胶囊', tone: CapsuleTone.glass),
+                      AylaCapsuleTag('LIVE', tone: CapsuleTone.pink),
+                      AylaCapsuleTag('实底', tone: CapsuleTone.indigo),
                     ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: AylaSpacing.sp4),
+                  const SizedBox(
+                    width: 300,
+                    child: AylaScrollingText(
+                      text: '长文本 marquee 滚动验证：这是一段超出容器的文本，用来核对来回滚动与停顿时序',
+                    ),
+                  ),
+                  const SizedBox(height: AylaSpacing.sp4),
+                  const SizedBox(
+                    width: 260,
+                    child: AylaScrollingTags(
+                      children: <Widget>[
+                        AylaCapsuleTag('公开'),
+                        AylaCapsuleTag('好友可见', tone: CapsuleTone.ice),
+                        AylaCapsuleTag('指定群可见', tone: CapsuleTone.glass),
+                        AylaCapsuleTag('我的收藏', tone: CapsuleTone.pink),
+                        AylaCapsuleTag('更多标签', tone: CapsuleTone.indigo),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
+            const SizedBox(height: AylaSpacing.sp8),
 
-          // ---------- B3 卡片族（窄屏组件） ----------
-          _Section(
-            title:
-                'GroupCard / GroupCarousel（home.css 224–503 + auroraqua 29–52）',
-            source:
-                '玻璃卡 16 圆角 · 4:3 轮播内嵌 8 · 3s/300ms · 指示点 4px · hover -2px + shadow-hover · active .99',
-            child: const _GroupCardDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B4 通用基元 ----------
-          _Section(
-            title: 'ResourceImage（ResourceImage.tsx + api/media.ts）',
-            source:
-                '签名链路（缓存至到期前 60s / 并发只签一次 / 原图 410 降级 thumb / thumb 410 过期）· alt="" 装饰图失败不提示',
-            child: const _ResourceImageDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                'ConfirmDialog / AsyncState（ConfirmDialog.tsx + AsyncState.tsx）',
-            source:
-                'create-sheet 弹层复用（overlay .25 + glass-bg-strong + radius-panel 20 + modal 阴影）· 窄屏贴底 · 自动聚焦取消 · busy 禁全部关闭',
-            child: const _DialogsDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                'PullToRefresh / SignedVideo（PullToRefresh.tsx + SignedVideo.tsx）',
-            source:
-                '阻尼 dampPull = maxPull*(1-e^-dy/90) · 阈值用原始 dy · 36 玻璃圆点三态 · thumbnail 不可作 video src',
-            child: const _InteractionDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title:
-                '分页族 / 收藏按钮（DirectoryLoadMore + StablePaginationFooter + FavoriteButton）',
-            source:
-                'stable-pagination-footer min-h 80（最高高度锁定不塌缩）· 三点 6px ice-500 · favorite-toggle 36/pill/glass-bg-strong，选中转 pink+辉光',
-            child: const _PaginationAndFavoriteDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: 'VisibilitySelector / 资料卡 / 筛选条 / 隐私设置',
-            source:
-                '公开↔好友互斥、群可见独立可叠加 · user-profile-card min(320,85vw)+sp6+modal 阴影 · directory-filters 224 侧栏 · privacy-sheet 60dvh 窄屏 + 两步换绑',
-            child: const _DirectoryAndProfileDemo(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B3 chat 域第一批（气泡 / 媒体 / 分享卡 / 爱莉入口） ----------
-          _Section(
-            title: '聊天消息气泡（MessageBubble.tsx）',
-            source:
-                'app.css 1041–1102：.msg-row gap 8 / align-end · .msg-body max 75%（窄屏 84%）· '
-                '气泡 padding 10/14 · radius 18（自己右下 6 / 他人与爱莉左下 6）· '
-                '他人玻璃底 blur12（无 saturate）· 操作栏 hover/focus/触屏三条件 · frost-rise 180ms',
-            child: SizedBox(
-              width: 760,
-              height: 980,
-              child: aylaMessageBubbleSamples(),
+            // ---------- B3 卡片族（窄屏组件） ----------
+            _Section(
+              title:
+                  'GroupCard / GroupCarousel（home.css 224–503 + auroraqua 29–52）',
+              source:
+                  '玻璃卡 16 圆角 · 4:3 轮播内嵌 8 · 3s/300ms · 指示点 4px · hover -2px + shadow-hover · active .99',
+              child: const _GroupCardDemo(),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '媒体消息族（MediaContent.tsx）',
-            source:
-                'app.css 1383–1639 / 1839–1979：媒体帧 radius-input · 图片 max 320 且不放大 · '
-                '表情 96×96 · 播放键徽标 48 玻璃 blur8 sat1.4 · 语音卡 min-w 240 + '
-                'seek 4px 轨/12px 拇指 · 文件卡 min 240 / max 320 · 混排 180 方块 + 240×180 视频',
-            child: SizedBox(
-              width: 760,
-              height: 1180,
-              child: aylaMediaContentSamples(),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B4 通用基元 ----------
+            _Section(
+              title: 'ResourceImage（ResourceImage.tsx + api/media.ts）',
+              source:
+                  '签名链路（缓存至到期前 60s / 并发只签一次 / 原图 410 降级 thumb / thumb 410 过期）· alt="" 装饰图失败不提示',
+              child: const _ResourceImageDemo(),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
-            source:
-                'app.css 1138–1223：卡片 min(264,100%) · 封面 72 · 标题 15/700 两行 · hover -1px + '
-                '0 4px 16px rgba(70,91,146,.2) · :disabled opacity .7（按颜色降透明）· '
-                'app.css 435–478：入口卡 135deg 樱粉 + 1px rgba(247,150,255,.5) + hover 辉光（窄屏降 30%）',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                SizedBox(width: 640, child: aylaShareBubbleSamples()),
-                const SizedBox(height: AylaSpacing.sp6),
-                SizedBox(width: 420, child: aylaElysiaEntrySamples()),
-              ],
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  'ConfirmDialog / AsyncState（ConfirmDialog.tsx + AsyncState.tsx）',
+              source:
+                  'create-sheet 弹层复用（overlay .25 + glass-bg-strong + radius-panel 20 + modal 阴影）· 窄屏贴底 · 自动聚焦取消 · busy 禁全部关闭',
+              child: const _DialogsDemo(),
             ),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B3 chat 域第二批（会话列表 / @ 选择器 / 群表情包） ----------
-          _Section(
-            title: '会话列表（ConversationList.tsx）',
-            source:
-                'app.css 490–543：行 padding 12 / padding-right 52 / 圆角**实际 12**（auroraqua 172 覆写 16）· '
-                'hover .18 / 选中 .35 · 置顶粉底 + 左 3px 辉光竖条 · 545–617 标题 15/700 + 状态胶囊 '
-                '（6px 圆点）/ 预览 13 · 693–706 未读徽标 20×20 utility 12 w500（TabBadge convUnread 档）· '
-                '选中胶囊容器级 300ms 迁移（可点切换）',
-            child: aylaConversationListSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '@ 成员选择器（MentionPicker.tsx）',
-            source:
-                'app.css 2364–2428：glass-bg-strong + blur24 sat1.4 + 1px 边 + radius 16 + --glass-shadow · '
-                '列表 padding 4 · 行 padding 8/12 + gap 12 + radius 8（hover/focus 同款 .35）· '
-                '名称 14/600 · 空态「无匹配成员」· 定位 edge 8 / gap 8 / 高上限 280（↑↓ 循环、ESC 关闭）',
-            child: aylaMentionPickerSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '群表情包面板（EmojiPackPanel.tsx）',
-            source:
-                'app.css 2186–2323：面板 max-h 280 + padding sp3 + gap sp2 + glass-bg-strong/blur24 sat1.4/'
-                'radius 16 · 网格 minmax(56px,1fr) gap 8 · 格 aspect 1 / radius 8 / 1px 边 / surface 底 · '
-                'hover 边 --glow-500 + --glow-shadow · 图片 object-fit contain · 加号虚线边 · '
-                '删除键 18 圆（上右 -5，hover 显示）',
-            child: aylaEmojiPackPanelSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B3 chat 域第三批（输入区 / 消息滚动区） ----------
-          _Section(
-            title: '消息输入区（MessageInput.tsx）',
-            source:
-                'app.css 1983–2185：`.composer`（窄屏方角 + blur18 sat1.4 + 上边框）/ '
-                '宽屏 auroraqua 347–358 浮卡（padding 8 / radius 16 / glass-shadow）· 工具键 40×40 '
-                'radius 12 玻璃档（auroraqua 105–112）· 编辑器 min-h 40 / max-h 140 / padding 8 12 / lh 22 · '
-                '引用条 2484–2527 · 待发媒体 2001–2093（44/58 缩略图 + 18 圆移除键）· 录音态 2431–2483 · '
-                '@ 编辑器 = `\\uFFFC` 占位 + 胶囊渲染（web contentEditable 的等价）',
-            child: aylaMessageInputSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '消息滚动区（MessageList.tsx）',
-            source:
-                'app.css 799–1037：`.message-scroll` padding sp6 + `.message-column` max-width 960 居中 · '
-                '时间分隔（> 5 分钟，utility 12）· 戳一戳居中胶囊（rgba(126,149,189,.14) + blur8）· '
-                '跳转标签 911–962（粉边玻璃胶囊，上/下两条）· 回底键 44 圆（超过一屏才显示）· '
-                '高亮 1.6s 粉框辉光 · 历史控制 min-h 40；列表用 `reverse: true` 表达前插不跳动',
-            child: aylaMessageListSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B3 chat 域第四批（选项卡 / 认证面板 / 私聊面板） ----------
-          _Section(
-            title: '消息中心选项卡（messages-tabs；WideMessagesSidebar 与 QuickMessagesSheet 共用）',
-            source:
-                'messages.css 17–55 + auroraqua 273–285：容器 1px 边 + radius-card 16 + '
-                '**只有 --glass-inset 内高光（无外阴影、无底色）** + margin sp2 / padding sp1 · '
-                'tab 40 高 / radius 12 / 14/700，**选中底由共享胶囊提供**（auroraqua 194–197 取消自身底）· '
-                '徽标复用 `TabBadgeMetrics.messages`（min 18 / padding 0 5 / utility 11 + glow-shadow）· '
-                '宽度按 `flex: 1` 等宽（LayoutBuilder 算每项宽）',
-            child: aylaMessagesTabsSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '认证消息面板（WideMessagesSidebar / QuickMessagesSheet 共用）',
-            source:
-                'messages.css 83–143 / 199–205：分组标题 15/700 + gap sp2 · 行材质 `--glass-bg` + 1px 边 + '
-                '--glass-filter + --glass-shadow-compact（padding sp2 sp3 / radius 12 / gap sp3）· '
-                '`.request-btn` min-h 32 · 空态「暂无待处理认证消息」· 好友行 `.friend-row` 同材质 + 解除好友键',
-            child: aylaRequestsPanelSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '私聊面板（PrivateChatPane.tsx）',
-            source:
-                'private.css 8–64 + auroraqua 402–410：头部恒 56 高 / padding sp2 sp4 / gap sp3 · '
-                '窄屏通栏（--glass-bg + blur18 sat1.4 + 下边框）/ 宽屏**卡片化**（1px 边 + radius 16 + '
-                'compact 阴影 + blur24）· 标题 15/700 + 状态 12（**typing → glow-500**）· '
-                '非好友禁发 `.private-chat-blocked` 替换输入区（warning-soft 底/边）',
-            child: aylaPrivateChatPaneSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- B3 chat 域第四批下（宽屏左列 / 快捷消息栏） ----------
-          _Section(
-            title: '宽屏消息左列（WideMessagesSidebar.tsx）',
-            source:
-                'messages.css 243–279：332 玻璃侧栏卡（`AylaSidebarCard`）· 三 tab（私信/好友/认证 + 徽标，'
-                '`AylaMessagesTabs`）· 各 tab 内容区 `flex:1 + min-height:0 + overflow-y:auto` + '
-                'padding sp2 sp2 sp4（**侧栏自身不滚动**，滚动归内容区 · `scrollable: false`）',
-            child: aylaWideMessagesSidebarSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-          _Section(
-            title: '快捷消息栏（QuickMessagesSheet.tsx）',
-            source:
-                'messages.css 343–425：上 30% 遮罩（rgba(70,91,146,.25) 点击关闭）+ 下 70% 面板'
-                '（glass-bg-strong + blur24 sat1.4 + 上边框 + **radius 24 24 0 0** + --glass-shadow-modal + '
-                'slide-in 250ms）· 头部 padding sp3 sp4 + 下边框（tabs padding 0）· ESC 关闭走全局键盘监听 · '
-                '私信 tab 点会话 → **内联**打开私聊面板（不跳路由）',
-            child: aylaQuickMessagesSheetSamples(),
-          ),
-          const SizedBox(height: AylaSpacing.sp8),
-
-          // ---------- 排版阶梯 ----------
-          _Section(
-            title: 'Typography（design.md §3 九级）',
-            source:
-                'Display=Fredoka / Body=Nunito / Utility=Space Grotesk，CJK 回退链',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('Display Hero 40/600 · Ayla 爱莉', style: t.displayHero),
-                Text('Page Title 28/600 · 语音大厅', style: t.pageTitle),
-                Text('Card Title 20/500 · 静态玻璃卡', style: t.cardTitle),
-                Text('Bubble / Body 15/400 · 聊天正文示例', style: t.body),
-                Text('Body Strong 15/700 · 昵称加粗', style: t.bodyStrong),
-                Text('Label / Button 14/700 · 登录按钮', style: t.label),
-                Text('Caption 13/400 · 次要说明文字', style: t.caption),
-                Text('Timestamp 12/400 · 21:10', style: t.timestamp),
-                Text('MICRO TAG 11/500 · 新内容', style: t.microTag),
-              ],
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  'PullToRefresh / SignedVideo（PullToRefresh.tsx + SignedVideo.tsx）',
+              source:
+                  '阻尼 dampPull = maxPull*(1-e^-dy/90) · 阈值用原始 dy · 36 玻璃圆点三态 · thumbnail 不可作 video src',
+              child: const _InteractionDemo(),
             ),
-          ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title:
+                  '分页族 / 收藏按钮（DirectoryLoadMore + StablePaginationFooter + FavoriteButton）',
+              source:
+                  'stable-pagination-footer min-h 80（最高高度锁定不塌缩）· 三点 6px ice-500 · favorite-toggle 36/pill/glass-bg-strong，选中转 pink+辉光',
+              child: const _PaginationAndFavoriteDemo(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: 'VisibilitySelector / 资料卡 / 筛选条 / 隐私设置',
+              source:
+                  '公开↔好友互斥、群可见独立可叠加 · user-profile-card min(320,85vw)+sp6+modal 阴影 · directory-filters 224 侧栏 · privacy-sheet 60dvh 窄屏 + 两步换绑',
+              child: const _DirectoryAndProfileDemo(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B3 chat 域第一批（气泡 / 媒体 / 分享卡 / 爱莉入口） ----------
+            _Section(
+              title: '聊天消息气泡（MessageBubble.tsx）',
+              source:
+                  'app.css 1041–1102：.msg-row gap 8 / align-end · .msg-body max 75%（窄屏 84%）· '
+                  '气泡 padding 10/14 · radius 18（自己右下 6 / 他人与爱莉左下 6）· '
+                  '他人玻璃底 blur12（无 saturate）· 操作栏 hover/focus/触屏三条件 · frost-rise 180ms',
+              child: SizedBox(
+                width: 760,
+                height: 980,
+                child: aylaMessageBubbleSamples(),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '媒体消息族（MediaContent.tsx）',
+              source:
+                  'app.css 1383–1639 / 1839–1979：媒体帧 radius-input · 图片 max 320 且不放大 · '
+                  '表情 96×96 · 播放键徽标 48 玻璃 blur8 sat1.4 · 语音卡 min-w 240 + '
+                  'seek 4px 轨/12px 拇指 · 文件卡 min 240 / max 320 · 混排 180 方块 + 240×180 视频',
+              child: SizedBox(
+                width: 760,
+                height: 1180,
+                child: aylaMediaContentSamples(),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
+              source:
+                  'app.css 1138–1223：卡片 min(264,100%) · 封面 72 · 标题 15/700 两行 · hover -1px + '
+                  '0 4px 16px rgba(70,91,146,.2) · :disabled opacity .7（按颜色降透明）· '
+                  'app.css 435–478：入口卡 135deg 樱粉 + 1px rgba(247,150,255,.5) + hover 辉光（窄屏降 30%）',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SizedBox(width: 640, child: aylaShareBubbleSamples()),
+                  const SizedBox(height: AylaSpacing.sp6),
+                  SizedBox(width: 420, child: aylaElysiaEntrySamples()),
+                ],
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B3 chat 域第二批（会话列表 / @ 选择器 / 群表情包） ----------
+            _Section(
+              title: '会话列表（ConversationList.tsx）',
+              source:
+                  'app.css 490–543：行 padding 12 / padding-right 52 / 圆角**实际 12**（auroraqua 172 覆写 16）· '
+                  'hover .18 / 选中 .35 · 置顶粉底 + 左 3px 辉光竖条 · 545–617 标题 15/700 + 状态胶囊 '
+                  '（6px 圆点）/ 预览 13 · 693–706 未读徽标 20×20 utility 12 w500（TabBadge convUnread 档）· '
+                  '选中胶囊容器级 300ms 迁移（可点切换）',
+              child: aylaConversationListSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '@ 成员选择器（MentionPicker.tsx）',
+              source:
+                  'app.css 2364–2428：glass-bg-strong + blur24 sat1.4 + 1px 边 + radius 16 + --glass-shadow · '
+                  '列表 padding 4 · 行 padding 8/12 + gap 12 + radius 8（hover/focus 同款 .35）· '
+                  '名称 14/600 · 空态「无匹配成员」· 定位 edge 8 / gap 8 / 高上限 280（↑↓ 循环、ESC 关闭）',
+              child: aylaMentionPickerSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '群表情包面板（EmojiPackPanel.tsx）',
+              source:
+                  'app.css 2186–2323：面板 max-h 280 + padding sp3 + gap sp2 + glass-bg-strong/blur24 sat1.4/'
+                  'radius 16 · 网格 minmax(56px,1fr) gap 8 · 格 aspect 1 / radius 8 / 1px 边 / surface 底 · '
+                  'hover 边 --glow-500 + --glow-shadow · 图片 object-fit contain · 加号虚线边 · '
+                  '删除键 18 圆（上右 -5，hover 显示）',
+              child: aylaEmojiPackPanelSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B3 chat 域第三批（输入区 / 消息滚动区） ----------
+            _Section(
+              title: '消息输入区（MessageInput.tsx）',
+              source:
+                  'app.css 1983–2185：`.composer`（窄屏方角 + blur18 sat1.4 + 上边框）/ '
+                  '宽屏 auroraqua 347–358 浮卡（padding 8 / radius 16 / glass-shadow）· 工具键 40×40 '
+                  'radius 12 玻璃档（auroraqua 105–112）· 编辑器 min-h 40 / max-h 140 / padding 8 12 / lh 22 · '
+                  '引用条 2484–2527 · 待发媒体 2001–2093（44/58 缩略图 + 18 圆移除键）· 录音态 2431–2483 · '
+                  '@ 编辑器 = `\\uFFFC` 占位 + 胶囊渲染（web contentEditable 的等价）',
+              child: aylaMessageInputSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '消息滚动区（MessageList.tsx）',
+              source:
+                  'app.css 799–1037：`.message-scroll` padding sp6 + `.message-column` max-width 960 居中 · '
+                  '时间分隔（> 5 分钟，utility 12）· 戳一戳居中胶囊（rgba(126,149,189,.14) + blur8）· '
+                  '跳转标签 911–962（粉边玻璃胶囊，上/下两条）· 回底键 44 圆（超过一屏才显示）· '
+                  '高亮 1.6s 粉框辉光 · 历史控制 min-h 40；列表用 `reverse: true` 表达前插不跳动',
+              child: aylaMessageListSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B3 chat 域第四批（选项卡 / 认证面板 / 私聊面板） ----------
+            _Section(
+              // 2026-09-25：用户手动删掉了本节的窄屏竖排样张 ⇒ 标题尾部的 `·` 残片一并收干净
+              title: '消息中心选项卡（messages-tabs；WideMessagesSidebar 与 QuickMessagesSheet 共用）',
+              source:
+                  'messages.css 17–55 + auroraqua 273–285：容器 1px 边 + radius-card 16 + '
+                  '**只有 --glass-inset 内高光（无外阴影、无底色）** + margin sp2 / padding sp1 · '
+                  'tab 40 高 / radius 12 / 14/700，**选中底由共享胶囊提供**（auroraqua 194–197 取消自身底）· '
+                  '徽标复用 `TabBadgeMetrics.messages`（min 18 / padding 0 5 / utility 11 + glow-shadow）· '
+                  '宽度按 `flex: 1` 等宽（LayoutBuilder 算每项宽）',
+              child: aylaMessagesTabsSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '认证消息面板（WideMessagesSidebar / QuickMessagesSheet 共用）',
+              source:
+                  'messages.css 83–143 / 199–205：分组标题 15/700 + gap sp2 · 行材质 `--glass-bg` + 1px 边 + '
+                  '--glass-filter + --glass-shadow-compact（padding sp2 sp3 / radius 12 / gap sp3）· '
+                  '`.request-btn` min-h 32 · 空态「暂无待处理认证消息」· 好友行 `.friend-row` 同材质 + 解除好友键',
+              child: aylaRequestsPanelSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '私聊面板（PrivateChatPane.tsx）',
+              source:
+                  'private.css 8–64 + auroraqua 402–410：头部恒 56 高 / padding sp2 sp4 / gap sp3 · '
+                  '窄屏通栏（--glass-bg + blur18 sat1.4 + 下边框）/ 宽屏**卡片化**（1px 边 + radius 16 + '
+                  'compact 阴影 + blur24）· 标题 15/700 + 状态 12（**typing → glow-500**）· '
+                  '非好友禁发 `.private-chat-blocked` 替换输入区（warning-soft 底/边）',
+              child: aylaPrivateChatPaneSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- B3 chat 域第四批下（宽屏左列 / 快捷消息栏） ----------
+            _Section(
+              title: '宽屏消息左列（WideMessagesSidebar.tsx）',
+              source:
+                  'messages.css 243–279：332 玻璃侧栏卡（`AylaSidebarCard`）· 三 tab（私信/好友/认证 + 徽标，'
+                  '`AylaMessagesTabs`）· 各 tab 内容区 `flex:1 + min-height:0 + overflow-y:auto` + '
+                  'padding sp2 sp2 sp4（**侧栏自身不滚动**，滚动归内容区 · `scrollable: false`）',
+              child: aylaWideMessagesSidebarSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+            _Section(
+              title: '快捷消息栏（QuickMessagesSheet.tsx）',
+              source:
+                  'messages.css 343–425：上 30% 遮罩（rgba(70,91,146,.25) 点击关闭）+ 下 70% 面板'
+                  '（glass-bg-strong + blur24 sat1.4 + 上边框 + **radius 24 24 0 0** + --glass-shadow-modal + '
+                  'slide-in 250ms）· 头部 padding sp3 sp4 + 下边框（tabs padding 0）· ESC 关闭走全局键盘监听 · '
+                  '私信 tab 点会话 → **内联**打开私聊面板（不跳路由）',
+              child: aylaQuickMessagesSheetSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- boardgame 域第一批（2026-09-24：B4-1 卡片） ----------
+            _Section(
+              title:
+                  '桌游室卡片（GameRoomCard.tsx 53 行 + boardgame.css 9–119 + auroraqua.css 28–52 + typed-result-cards.css 44）',
+              source:
+                  '两列/四列网格里的房间卡（games-grid 由页面层排布）· 结构 = relative 容器 + 卡片按钮 + 右上角收藏键（绝对定位 top/right sp2=8、compact 32×32）· 卡面 = --glass-bg + 1px 亮边 + radius 16 + --glass-shadow + overflow hidden + blur24 sat1.4；hover → translate -2 + --glass-shadow-hover（300ms，卡片族专属组）、active → scale .99；focus-visible 走**全局** --focus-ring（#f796ff 2px + offset 2），桌游卡在 web 里没有域内覆写 · 封面 = 16:9 的 --ice-100 底 + --ice-500 图标（IconGame 48，margin 8 8 0、radius 12）· info = gap 2 + padding sp2 sp3 sp3 · 名称 = 单行滚动 15/700/text-primary/lh 1.35 · 状态 tag = pill、padding 1×8、Fredoka 11/ls .8/lh 1.4（playing → sakura-300+grape-700；waiting 与 **ended** → ice-300+indigo-700）· 房主 = 12px secondary（类定义在 typed-result-cards.css 的**裸选择器**里，全站生效）· meta = 人数（flex 0 0 auto + nowrap，仅 number 时渲染）+ 来源标签横向滚动（flex 1 1 auto + min-width 0）· 来源标签按用户裁决**并入统一档 AylaSourceTag**（web 的 .game-room-source 是 display 11/ls .8 的独立规格，不再复刻）· reserveSpace 档 = 网格等高（status/owner/meta 三行恒占位；缺行卡片与满行卡片等高，默认 false 供搜索结果）· reveal 由 revealDelay 非 null 时挂 AylaRevealItem · **样张可交互**：点卡进房、四档单卡（对局中/等待中/极简/action 槽位）+ 网格等高对照',
+              child: aylaGameRoomCardSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- boardgame 域第一批（2026-09-24：B4-2 建房间表单） ----------
+            _Section(
+              title:
+                  '创建桌游室表单（GameRoomCreate.tsx 78 行 + boardgame.css 123–132 + app.css 70–79 + private.css 229–236）',
+              source:
+                  '容器 = flex column + gap sp2 + padding sp3 · 顺序 = 可见性选择器 → 名称输入 → **错误行** → 创建键（与语音表单把错误放最后不同）· 选择器复用 AylaVisibilitySelector（群内 → group + 本群且 lockGroup；一级 → public）· 输入 = GlassInput 的 .field 档（padding 12×16、radius 12、focus → glow-500 边 + --glow-shadow；hint「桌游室名称」、64 上限用 formatter 表达以免多出「0/64」计数器、Enter 提交、**随文本 setState** 以刷新按钮可用性）· 错误 = .post-editor-error（**13px** + --destructive，不是语音表单的 12px）· 提交键 = primary「创建」/「创建中…」，disabled = busy || 空名 · 空名拦截文案「房间名不能为空」**不发请求**、失败保留表单 · sheet 作用域（唯一挂载点 CreateFab 在 CreateSheet 内 ⇒ private.css 恒生效）：输入与按钮 width 100%、输入 margin-bottom sp3 · 请求由页面层 onSubmit 注入 · **样张可交互**：空名看禁用、填名提交看清空与计数、群内档看锁定、失败档看文案与表单保留',
+              child: aylaGameRoomCreateSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- boardgame 域第一批（2026-09-24：B4-3 占位整页壳） ----------
+            _Section(
+              title:
+                  '桌游室占位整页壳（GameRoomPlaceholder.tsx 189 行 + boardgame.css 136–219 + auroraqua.css 335/402–408/418）',
+              source:
+                  '进入房间后的整页框架（玩法后续）· head 两档：**≤768** 通栏玻璃条（--glass-bg + blur18 sat1.4 + 下边框、无圆角无外边距）、**≥769** 卡片化（margin --sidebar-gutter 12 + radius 16 + --glass-shadow-compact + blur24）；两档都有 auroraqua-panel-from-top 入场（translate 0 -20px + fade 300ms ease-out），reduced-motion 关闭 · head 内容 = 返回键 .icon-btn-40（IconBack 20）+ 名字（Fredoka 18 单行省略）+ 分享（AylaShareButton 32）+ 收藏（compact），行高恒 40 ⇒ head 高恒 64（两档恒定）· body = flex 1 + 居中 + gap sp3 + padding sp6 + **safe center**（不满一屏居中、超出可滚）· 内容 = 说明 14/secondary + 人数·房主（utility 13/text-primary）+ 错误行（13 destructive）+ 房主控制 + 加入/离开 · 房主控制 = width min(100%,680) + gap sp3 + 左对齐（web 无 align-items ⇒ 删除键全宽）+ 成员行（排除自己；名字 flex 1 1 120px；「移出」「转让房主」ghost，actionBusy 时一起禁用）+ 分页（AylaDirectoryLoadMore）+「删除房间」（destructive、全宽）· 删除确认复用 ConfirmDialog（标题「删除桌游房间」+「确定删除桌游房间「房名」？此操作不可撤销。」）· 加入（primary）/ 离开（ghost）两态 + busy 文案 · **web 组件内直接调 API 的 join/leave/成员操作与竞态守卫改为全注入**（与 live/voice 整页壳同范式）· **样张可交互**：点删除房间看确认弹窗、切成员/非成员看底部键、窄屏 375 档看通栏 head',
+              child: aylaGameRoomPlaceholderSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp8),
+
+            // ---------- 排版阶梯 ----------
+            _Section(
+              title: 'Typography（design.md §3 九级）',
+              source:
+                  'Display=Fredoka / Body=Nunito / Utility=Space Grotesk，CJK 回退链',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text('Display Hero 40/600 · Ayla 爱莉', style: t.displayHero),
+                  Text('Page Title 28/600 · 语音大厅', style: t.pageTitle),
+                  Text('Card Title 20/500 · 静态玻璃卡', style: t.cardTitle),
+                  Text('Bubble / Body 15/400 · 聊天正文示例', style: t.body),
+                  Text('Body Strong 15/700 · 昵称加粗', style: t.bodyStrong),
+                  Text('Label / Button 14/700 · 登录按钮', style: t.label),
+                  Text('Caption 13/400 · 次要说明文字', style: t.caption),
+                  Text('Timestamp 12/400 · 21:10', style: t.timestamp),
+                  Text('MICRO TAG 11/500 · 新内容', style: t.microTag),
+                ],
+              ),
+            ),
           ],
         ),
       ),

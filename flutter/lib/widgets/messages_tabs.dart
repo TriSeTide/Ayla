@@ -71,27 +71,28 @@ class AylaMessagesTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final int selected = items
-        .indexWhere((AylaMessagesTabItem i) => i.key == value);
+    final int selected = items.indexWhere(
+      (AylaMessagesTabItem i) => i.key == value,
+    );
 
     // ⚠️ 等宽项：web 是 `flex: 1`（宽屏）—— `AylaNavHighlightList` 自排项（Row + gap），
     // 塞不进 `Expanded` ⇒ 在 `itemBuilder` 里按算出的每项宽度包一层 `SizedBox`
     // （与 `EmojiPackPanel` 的网格同手法；槽位几何随子项宽度，胶囊测量不受影响）。
     Widget buildNav(double? each) => AylaNavHighlightList(
-          itemCount: items.length,
-          selectedIndex: selected,
-          axis: narrow ? Axis.vertical : Axis.horizontal,
-          gap: AylaSpacing.sp2, // `gap: var(--sp-2)`
-          semanticLabel: '消息中心视图',
-          onSelect: (int i) => onChange(items[i].key),
-          itemBuilder: (BuildContext context, AylaNavHighlightSlot slot) =>
-              _MessagesTab(
+      itemCount: items.length,
+      selectedIndex: selected,
+      axis: narrow ? Axis.vertical : Axis.horizontal,
+      gap: AylaSpacing.sp2, // `gap: var(--sp-2)`
+      semanticLabel: '消息中心视图',
+      onSelect: (int i) => onChange(items[i].key),
+      itemBuilder: (BuildContext context, AylaNavHighlightSlot slot) =>
+          _MessagesTab(
             item: items[slot.index],
             slot: slot,
             narrow: narrow,
             width: each,
           ),
-        );
+    );
 
     final Widget sized = narrow
         ? buildNav(null)
@@ -99,17 +100,21 @@ class AylaMessagesTabs extends StatelessWidget {
             builder: (BuildContext context, BoxConstraints c) {
               final double total = c.maxWidth.isFinite ? c.maxWidth : 0;
               if (items.isEmpty || total <= 0) return buildNav(null);
-              final double each = (total - AylaSpacing.sp2 * (items.length - 1)) /
-                  items.length;
+              final double each =
+                  (total - AylaSpacing.sp2 * (items.length - 1)) / items.length;
               return buildNav(each);
             },
           );
 
     final Widget box = Container(
-      margin: const EdgeInsets.all(AylaSpacing.sp2), // auroraqua 278 `margin: sp2`
+      margin: const EdgeInsets.all(
+        AylaSpacing.sp2,
+      ), // auroraqua 278 `margin: sp2`
       padding: padding, // auroraqua 278 `padding: sp1`（快捷栏覆写为 0）
       decoration: BoxDecoration(
-        border: Border.all(color: AylaColors.glassBorder), // 1px `--glass-border`
+        border: Border.all(
+          color: AylaColors.glassBorder,
+        ), // 1px `--glass-border`
         borderRadius: BorderRadius.circular(AylaRadii.rCard), // radius-card 16
       ),
       child: sized,
@@ -158,8 +163,9 @@ class _MessagesTabState extends State<_MessagesTab> {
   Widget build(BuildContext context) {
     final AylaNavHighlightSlot slot = widget.slot;
     final AylaMessagesTabItem item = widget.item;
-    final Color color =
-        slot.active ? AylaColors.textPrimary : AylaColors.textSecondary;
+    final Color color = slot.active
+        ? AylaColors.textPrimary
+        : AylaColors.textSecondary;
     return SizedBox(
       width: widget.width,
       child: Focus(
@@ -202,7 +208,8 @@ class _MessagesTabState extends State<_MessagesTab> {
                           item.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          softWrap: false, // `white-space: nowrap`（auroraqua 284）
+                          softWrap:
+                              false, // `white-space: nowrap`（auroraqua 284）
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: AylaFonts.body,
@@ -213,7 +220,9 @@ class _MessagesTabState extends State<_MessagesTab> {
                         ),
                       ),
                       if (item.badge > 0) ...<Widget>[
-                        const SizedBox(width: AylaSpacing.sp1), // `margin-left: sp1`
+                        const SizedBox(
+                          width: AylaSpacing.sp1,
+                        ), // `margin-left: sp1`
                         TabBadge(
                           count: item.badge,
                           metrics: TabBadgeMetrics.messages,
@@ -256,29 +265,29 @@ class _MessagesTabsSampleState extends State<_MessagesTabsSample> {
   String _quick = 'chat';
 
   Widget _cell(String label, Widget child) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.only(bottom: AylaSpacing.sp2),
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontFamily: AylaFonts.body,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AylaColors.textSecondary,
-              ),
-            ),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      Padding(
+        padding: const EdgeInsets.only(bottom: AylaSpacing.sp2),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontFamily: AylaFonts.body,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AylaColors.textSecondary,
           ),
-          Align(
-            alignment: Alignment.topLeft,
-            widthFactor: 1,
-            child: SizedBox(width: 332, child: child),
-          ),
-          const SizedBox(height: AylaSpacing.sp6),
-        ],
-      );
+        ),
+      ),
+      Align(
+        alignment: Alignment.topLeft,
+        widthFactor: 1,
+        child: SizedBox(width: 332, child: child),
+      ),
+      const SizedBox(height: AylaSpacing.sp6),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -306,19 +315,6 @@ class _MessagesTabsSampleState extends State<_MessagesTabsSample> {
             items: const <AylaMessagesTabItem>[
               AylaMessagesTabItem(key: 'chat', label: '私信'),
               AylaMessagesTabItem(key: 'requests', label: '认证消息', badge: 12),
-            ],
-          ),
-        ),
-        _cell(
-          '窄屏档（竖排 + 宽 260）',
-          AylaMessagesTabs(
-            narrow: true,
-            value: 'chat',
-            onChange: (_) {},
-            items: const <AylaMessagesTabItem>[
-              AylaMessagesTabItem(key: 'chat', label: '私信'),
-              AylaMessagesTabItem(key: 'friends', label: '好友'),
-              AylaMessagesTabItem(key: 'requests', label: '认证消息', badge: 1),
             ],
           ),
         ),
