@@ -18,10 +18,10 @@ import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/dialogs.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/game_room_placeholder.dart';
-import '../lib/widgets/share.dart';
+import '../lib/widgets/base/dialogs.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/game/game_room_placeholder.dart';
+import '../lib/widgets/base/share.dart';
 
 void main() {
   const AylaUserPublic alice = AylaUserPublic(
@@ -139,7 +139,7 @@ void main() {
 
     await tester.pumpWidget(host(pane(), viewport: const Size(900, 640)));
     await tester.pump();
-    final Size wide = tester.getSize(find.byType(GlassSurface).first);
+    final Size wide = tester.getSize(find.byType(AylaGlassSurface).first);
     expect(wide.width, 900 - 2 * AylaSpacing.sidebarGutter); // 卡片化 = 四周 12 留白
     expect(wide.height, 64); // padding sp3×2 + 内容 40（两档恒定）
   });
@@ -151,7 +151,7 @@ void main() {
 
     await tester.pumpWidget(host(pane(), viewport: const Size(375, 700)));
     await tester.pump();
-    final Size narrow = tester.getSize(find.byType(GlassSurface).first);
+    final Size narrow = tester.getSize(find.byType(AylaGlassSurface).first);
     expect(narrow.width, 375); // 通栏：无 margin
     expect(narrow.height, 64);
   });
@@ -175,8 +175,8 @@ void main() {
     expect(find.text('加入房间'), findsOneWidget); // tsx 182–184
     expect(find.text('离开房间'), findsNothing);
     expect(
-      tester.widget<GlassButton>(find.byType(GlassButton).last).variant,
-      GlassButtonVariant.primary,
+      tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).variant,
+      AylaGlassButtonVariant.primary,
     );
 
   });
@@ -186,8 +186,8 @@ void main() {
     await tester.pump();
     expect(find.text('离开房间'), findsOneWidget); // tsx 178–180
     expect(
-      tester.widget<GlassButton>(find.byType(GlassButton).last).variant,
-      GlassButtonVariant.ghost,
+      tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).variant,
+      AylaGlassButtonVariant.ghost,
     );
   });
 
@@ -195,7 +195,7 @@ void main() {
     await tester.pumpWidget(host(pane(isMember: false, busy: true)));
     await tester.pump();
     expect(find.text('加入中…'), findsOneWidget);
-    expect(tester.widget<GlassButton>(find.byType(GlassButton).last).onPressed, isNull);
+    expect(tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).onPressed, isNull);
 
   });
 
@@ -203,7 +203,7 @@ void main() {
     await tester.pumpWidget(host(pane(isMember: true, busy: true)));
     await tester.pump();
     expect(find.text('离开中…'), findsOneWidget);
-    expect(tester.widget<GlassButton>(find.byType(GlassButton).last).onPressed, isNull);
+    expect(tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).onPressed, isNull);
   });
 
   testWidgets('房主控制：排除自己 + 移出/转让 + 删除房间（全宽）+ 分页件', (
@@ -230,7 +230,7 @@ void main() {
     // 删除键全宽（web 的 .game-room-owner-controls 是 flex column 默认 stretch）
     final Finder delBtn = find.ancestor(
       of: find.text('删除房间'),
-      matching: find.byType(GlassButton),
+      matching: find.byType(AylaGlassButton),
     );
     expect(delBtn, findsOneWidget);
     final Size del = tester.getSize(delBtn);
@@ -283,11 +283,11 @@ void main() {
     for (final String label in <String>['移出', '转让房主']) {
       final Finder btn = find.ancestor(
         of: find.text(label).first,
-        matching: find.byType(GlassButton),
+        matching: find.byType(AylaGlassButton),
       );
       expect(btn, findsOneWidget, reason: label);
       expect(
-        tester.widget<GlassButton>(btn).onPressed,
+        tester.widget<AylaGlassButton>(btn).onPressed,
         isNull,
         reason: label,
       );
@@ -306,12 +306,12 @@ void main() {
     )));
     await tester.pump();
 
-    expect(find.byType(ConfirmDialog), findsNothing);
+    expect(find.byType(AylaConfirmDialog), findsNothing);
     await tester.tap(find.text('删除房间'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300)); // 弹层入场
 
-    expect(find.byType(ConfirmDialog), findsOneWidget);
+    expect(find.byType(AylaConfirmDialog), findsOneWidget);
     expect(find.text('删除桌游房间'), findsOneWidget); // tsx 165
     expect(
       find.text('确定删除桌游房间「爱莉的桌游室」？此操作不可撤销。'), // tsx 166
@@ -322,7 +322,7 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(ConfirmDialog), findsNothing);
+    expect(find.byType(AylaConfirmDialog), findsNothing);
     expect(deleted, 0);
 
     // 确认 → 关闭并回调
@@ -333,7 +333,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(deleted, 1);
-    expect(find.byType(ConfirmDialog), findsNothing);
+    expect(find.byType(AylaConfirmDialog), findsNothing);
   });
 
   testWidgets('返回 / 分享 / 加入 / 离开回调', (WidgetTester tester) async {

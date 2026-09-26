@@ -1,6 +1,6 @@
 /// B2-1：弹幕列表定向测试 —— 逐条对照 `components/live/DanmakuList.tsx`(139)
 /// 与 `app.css:3671–3762`（列表族全部样式，全库唯一命中、不在任何 @media 内）、
-/// `live.css:756–764 / 830–838`（上下文材质档）、`ResourceImage.tsx:96–115`
+/// `live.css:756–764 / 830–838`（上下文材质档）、`AylaResourceImage.tsx:96–115`
 /// （失败态的 enclosingControl 重试语义）。
 ///
 /// 覆盖：结构（wrap/list/行/空态/新弹幕提示/查看器）/ 关键尺寸（20 头像、96×64 图片、
@@ -19,12 +19,12 @@ import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/danmaku.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/image_viewer.dart';
-import '../lib/widgets/loading.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/live/danmaku.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/chat/image_viewer.dart';
+import '../lib/widgets/base/loading.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 AylaDanmakuEntry _entry(
   String id,
@@ -197,8 +197,8 @@ void main() {
       );
       await settle(tester);
 
-      final List<AvatarHalo> avatars = tester
-          .widgetList<AvatarHalo>(find.byType(AvatarHalo))
+      final List<AylaAvatarHalo> avatars = tester
+          .widgetList<AylaAvatarHalo>(find.byType(AylaAvatarHalo))
           .toList();
       expect(avatars.length, 2);
       expect(avatars.first.size, 20); // tsx 54 `size={20}`
@@ -207,7 +207,7 @@ void main() {
       expect(avatars.first.semanticLabel, '查看 观众A 的个人主页'); // tsx 58
       expect(avatars.last.online, isFalse);
 
-      await tester.tap(find.byType(AvatarHalo).first);
+      await tester.tap(find.byType(AylaAvatarHalo).first);
       await tester.pump();
       expect(opened, <String>['u-a']);
     });
@@ -280,8 +280,8 @@ void main() {
       );
       expect(clip.borderRadius, BorderRadius.circular(AylaRadii.rSm));
       // 图源 = resolveMediaPath(thumbnail) ?? mediaContentUrl(media_id)
-      final ResourceImage image = tester.widget<ResourceImage>(
-        find.byType(ResourceImage),
+      final AylaResourceImage image = tester.widget<AylaResourceImage>(
+        find.byType(AylaResourceImage),
       );
       expect(image.src, '${kMediaPathPrefix}m1/thumbnail');
       expect(image.alt, '图片'); // tsx 67 `item.content || "弹幕图片"`
@@ -302,7 +302,7 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(find.byType(ResourceImage), findsNothing);
+      expect(find.byType(AylaResourceImage), findsNothing);
     });
   });
 
@@ -388,7 +388,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(AylaDanmakuList),
-          matching: find.byType(GlassSurface),
+          matching: find.byType(AylaGlassSurface),
         ),
         findsNothing,
       );
@@ -422,7 +422,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(AylaDanmakuList),
-          matching: find.byType(GlassSurface),
+          matching: find.byType(AylaGlassSurface),
         ),
         findsNothing,
       );
@@ -436,7 +436,7 @@ void main() {
           tester,
           Padding(
             padding: const EdgeInsets.all(AylaSpacing.sidebarGutter),
-            child: GlassSurface(
+            child: AylaGlassSurface(
               radiusOverride: BorderRadius.all(
                 Radius.circular(AylaRadii.rCard),
               ),
@@ -452,19 +452,19 @@ void main() {
       expect(
         find.ancestor(
           of: find.byType(AylaDanmakuList),
-          matching: find.byType(GlassSurface),
+          matching: find.byType(AylaGlassSurface),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
           of: find.byType(AylaDanmakuList),
-          matching: find.byType(GlassSurface),
+          matching: find.byType(AylaGlassSurface),
         ),
         findsNothing,
       );
-      final GlassSurface card = tester.widget<GlassSurface>(
-        find.byType(GlassSurface),
+      final AylaGlassSurface card = tester.widget<AylaGlassSurface>(
+        find.byType(AylaGlassSurface),
       );
       expect(card.blur, AylaGlass.blurCard); // auroraqua 392–400：blur24 sat1.4
     });
@@ -582,16 +582,16 @@ void main() {
       // 语义标签按 web 的 enclosingControl 语义切换为「重试」
       expect(imageSemantics('看图：图片加载失败，重试'), findsOneWidget);
       final Key? before = tester
-          .widget<ResourceImage>(find.byType(ResourceImage))
+          .widget<AylaResourceImage>(find.byType(AylaResourceImage))
           .key;
 
       await tester.tap(imageButton(), warnIfMissed: false);
       await settle(tester);
 
-      // 点击被路由到重试（重建 ResourceImage），且**不**打开查看器
+      // 点击被路由到重试（重建 AylaResourceImage），且**不**打开查看器
       expect(find.byType(AylaImageViewer), findsNothing);
       final Key? after = tester
-          .widget<ResourceImage>(find.byType(ResourceImage))
+          .widget<AylaResourceImage>(find.byType(AylaResourceImage))
           .key;
       expect(after, isNot(before));
     });

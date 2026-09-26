@@ -19,8 +19,8 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/message_bubble.dart';
-import '../lib/widgets/message_list.dart';
+import '../lib/widgets/chat/message_bubble.dart';
+import '../lib/widgets/chat/message_list.dart';
 
 AylaChatMessage _msg({
   required String id,

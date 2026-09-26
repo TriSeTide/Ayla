@@ -18,13 +18,13 @@ import '../lib/theme/app_icons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart'
-    show AylaFavoriteButton, FavoriteState;
-import '../lib/widgets/live_hall.dart';
-import '../lib/widgets/primitives.dart' show AylaSourceTag;
-import '../lib/widgets/resource_image.dart';
-import '../lib/widgets/reveal.dart';
-import '../lib/widgets/share.dart' show AylaShareButton;
+import '../lib/widgets/base/directory_controls.dart'
+    show AylaFavoriteButton, AylaFavoriteState;
+import '../lib/widgets/live/live_hall.dart';
+import '../lib/widgets/base/primitives.dart' show AylaSourceTag;
+import '../lib/widgets/base/resource_image.dart';
+import '../lib/widgets/base/reveal.dart';
+import '../lib/widgets/base/share.dart' show AylaShareButton;
 
 AylaLiveCardData _channel({
   String id = 'lc1',
@@ -137,7 +137,7 @@ void main() {
           closeTo(16 / 9, 0.01));
     });
 
-    testWidgets('有封面 → ResourceImage(alt: '' 装饰图) + cover 填充', (WidgetTester tester) async {
+    testWidgets('有封面 → AylaResourceImage(alt: '' 装饰图) + cover 填充', (WidgetTester tester) async {
       await tester.pumpWidget(
         host(
           tester,
@@ -162,8 +162,8 @@ void main() {
         ),
         findsNothing,
       ); // 有封面 ⇒ 无 iconVideo 占位（人数角标的 iconUsers 仍在）
-      final ResourceImage image = tester.widget<ResourceImage>(
-        find.descendant(of: cover(), matching: find.byType(ResourceImage)),
+      final AylaResourceImage image = tester.widget<AylaResourceImage>(
+        find.descendant(of: cover(), matching: find.byType(AylaResourceImage)),
       );
       expect(image.src, 'https://x/cover.jpg');
       expect(image.alt, ''); // 装饰图（失败静默）
@@ -540,7 +540,7 @@ void main() {
         );
         await settle(tester);
 
-        final Rect card = tester.getRect(find.byType(GlassSurface));
+        final Rect card = tester.getRect(find.byType(AylaGlassSurface));
         final Rect favorite = tester.getRect(find.byType(AylaFavoriteButton));
         expect(card.right - favorite.right, inset);
         expect(favorite.top - card.top, inset);
@@ -558,7 +558,7 @@ void main() {
               width: 320,
               child: AylaLiveChannelCard(
                 channel: _channel(),
-                favoriteState: FavoriteState.notFavorited,
+                favoriteState: AylaFavoriteState.notFavorited,
                 onToggleFavorite: toggles.add,
                 onEnter: () => enters += 1,
               ),
@@ -699,7 +699,7 @@ void main() {
           ),
         );
         await settle(tester);
-        return tester.getRect(find.byType(GlassSurface)).height;
+        return tester.getRect(find.byType(AylaGlassSurface)).height;
       }
 
       final double withoutReserve = await heightOf(reserve: false);
@@ -727,7 +727,7 @@ void main() {
 
       // 预留高度 = max(13×1.4, 12×body 行高 + 2×2) —— 与「有 meta 的卡」同高
       final double reserved =
-          tester.getRect(find.byType(GlassSurface)).height;
+          tester.getRect(find.byType(AylaGlassSurface)).height;
       final double metaRow = tester
           .getSize(
             find.byWidgetPredicate(

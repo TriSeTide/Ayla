@@ -16,15 +16,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/buttons.dart' show AylaPressScale;
-import '../lib/theme/glass.dart' show GlassSurface;
+import '../lib/theme/glass.dart' show AylaGlassSurface;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/channel_sidebar.dart';
-import '../lib/widgets/directory_controls.dart' show AylaDirectoryLoadMore;
-import '../lib/widgets/primitives.dart'
+import '../lib/widgets/shell/channel_sidebar.dart';
+import '../lib/widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
+import '../lib/widgets/base/primitives.dart'
     show AylaNavHighlight, AylaNavHighlightState;
-import '../lib/widgets/reveal.dart' show AylaRevealItem;
-import '../lib/widgets/tab_badge.dart';
+import '../lib/widgets/base/reveal.dart' show AylaRevealItem;
+import '../lib/widgets/base/tab_badge.dart';
 
 // ======================= 测试数据 =======================
 
@@ -384,7 +384,7 @@ void main() {
       findsOneWidget,
     );
     // `.channel-sidebar { width: 260px; margin: 12px; border: 1px }`
-    final Rect card = tester.getRect(find.byType(GlassSurface).first);
+    final Rect card = tester.getRect(find.byType(AylaGlassSurface).first);
     expect(card.width, 260);
     expect(card.height, 620 - 24); // 620 − 上下 margin 12×2
     // 列表视口宽 = 260 − 2(边框) − 2×8(padding) = 242（§6.5 的 1px 补位）
@@ -470,12 +470,12 @@ void main() {
     // 帖子未读（tsx 517–519）：唯一有独立样式的状态（粉徽标 + margin-left auto）
     final Finder badge = find.descendant(
       of: sceneRow('帖子').first,
-      matching: find.byType(TabBadge),
+      matching: find.byType(AylaTabBadge),
     );
     expect(badge, findsOneWidget);
     expect(
-      tester.widget<TabBadge>(badge).metrics,
-      TabBadgeMetrics.channelBadge,
+      tester.widget<AylaTabBadge>(badge).metrics,
+      AylaTabBadgeMetrics.channelBadge,
     );
 
     final Rect badgeRect = tester.getRect(badge);

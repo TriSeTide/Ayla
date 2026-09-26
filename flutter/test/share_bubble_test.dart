@@ -17,8 +17,8 @@ import '../lib/theme/app_icons.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/resource_image.dart';
-import '../lib/widgets/share_bubble.dart';
+import '../lib/widgets/base/resource_image.dart';
+import '../lib/widgets/chat/share_bubble.dart';
 
 AylaChatMessage _shareMsg({
   String id = 's1',
@@ -187,8 +187,8 @@ void main() {
     expect(find.text('今晚一起看星星'), findsOneWidget);
     expect(find.text('直播间 · 爱莉'), findsOneWidget, reason: 'label + subtitle（tsx 118–120）');
 
-    // 封面 72×72：ResourceImage 撑满封面槽
-    final Rect cover = tester.getRect(find.byType(ResourceImage));
+    // 封面 72×72：AylaResourceImage 撑满封面槽
+    final Rect cover = tester.getRect(find.byType(AylaResourceImage));
     expect(cover.size, const Size(72, 72));
 
     // 卡片宽度上限 264（tsx/app.css 1145）
@@ -228,7 +228,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.byType(ResourceImage), findsNothing, reason: 'voice 工厂 cover 恒为 null');
+    expect(find.byType(AylaResourceImage), findsNothing, reason: 'voice 工厂 cover 恒为 null');
     final AylaIcon icon = tester.widget<AylaIcon>(find.byType(AylaIcon).first);
     expect(icon.size, 22, reason: '封面兜底图标 22');
     expect(icon.icon.name, 'iconMic', reason: 'voice → IconMic（tsx 41–42）');

@@ -11,11 +11,11 @@ import '../lib/core/models/post.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/theme/buttons.dart' show AylaIconButton;
-import '../lib/widgets/directory_controls.dart' show AylaFavoriteButton;
-import '../lib/widgets/share.dart' show AylaShareButton;
-import '../lib/widgets/primitives.dart' show AylaCapsuleTag;
-import '../lib/widgets/post_card.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/base/directory_controls.dart' show AylaFavoriteButton;
+import '../lib/widgets/base/share.dart' show AylaShareButton;
+import '../lib/widgets/base/primitives.dart' show AylaCapsuleTag;
+import '../lib/widgets/posts/post_card.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 void main() {
   setUp(() => MediaSigner.instance.detach()); // 隔离：避免真实签名请求
@@ -177,7 +177,7 @@ void main() {
       );
       await tester.pump();
       // slice(0, 9)：10 张图 + 1 视频 → 只渲染前 9 个（含第 10 张图片位）
-      expect(find.byType(ResourceImage), findsNWidgets(9));
+      expect(find.byType(AylaResourceImage), findsNWidgets(9));
       expect(find.text('▶'), findsNothing); // 视频在 slice(0,9) 之外
     });
 
@@ -448,7 +448,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.byType(ResourceImage), findsOneWidget);
+      expect(find.byType(AylaResourceImage), findsOneWidget);
       expect(find.text('视频'), findsOneWidget);
     });
   });

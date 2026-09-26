@@ -12,18 +12,18 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/app_icons.dart' show AylaIcon;
 import '../lib/theme/buttons.dart' show AylaIconButton;
-import '../lib/theme/glass.dart' show GlassSurface;
+import '../lib/theme/glass.dart' show AylaGlassSurface;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/avatar_status_badges.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/menu_item.dart';
-import '../lib/widgets/primitives.dart'
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/avatar_status_badges.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/base/menu_item.dart';
+import '../lib/widgets/base/primitives.dart'
     show AylaNavHighlight, AylaNavHighlightVariant;
-import '../lib/widgets/reveal.dart' show AylaRevealItem;
-import '../lib/widgets/server_rail.dart';
-import '../lib/widgets/tab_badge.dart';
+import '../lib/widgets/base/reveal.dart' show AylaRevealItem;
+import '../lib/widgets/shell/server_rail.dart';
+import '../lib/widgets/base/tab_badge.dart';
 
 const List<AylaServerRailGroup> kGroups = <AylaServerRailGroup>[
   AylaServerRailGroup(
@@ -32,7 +32,7 @@ const List<AylaServerRailGroup> kGroups = <AylaServerRailGroup>[
     unreadCount: 12,
     postUnreadCount: 3,
     isPinned: true,
-    presence: AvatarStatus(live: true, voice: true),
+    presence: AylaAvatarStatus(live: true, voice: true),
   ),
   AylaServerRailGroup(id: 'g2', title: '摸鱼群'),
   AylaServerRailGroup(id: 'g3', title: '爱莉的客厅', unreadCount: 180),
@@ -85,7 +85,7 @@ void main() {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    expect(find.byType(AvatarHalo), findsNWidgets(3));
+    expect(find.byType(AylaAvatarHalo), findsNWidgets(3));
     expect(find.byType(AylaAvatarStatusBadges), findsNWidgets(3));
     expect(find.byType(AylaIconButton), findsOneWidget);
     expect(find.byType(AylaDirectoryLoadMore), findsOneWidget);
@@ -94,10 +94,10 @@ void main() {
     expect(create.width, AylaServerRail.createButtonSize);
     expect(create.height, AylaServerRail.createButtonSize);
 
-    final AvatarHalo halo = tester.widget(find.byType(AvatarHalo).first);
+    final AylaAvatarHalo halo = tester.widget(find.byType(AylaAvatarHalo).first);
     expect(halo.size, 48);
     expect(halo.online, isTrue);
-    expect(tester.getSize(find.byType(AvatarHalo).first).width, 53);
+    expect(tester.getSize(find.byType(AylaAvatarHalo).first).width, 53);
   });
 
   testWidgets('容器：列宽 72、外距 12/0/12/12（auroraqua 270 覆写右 0）', (
@@ -106,7 +106,7 @@ void main() {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    expect(tester.getSize(find.byType(GlassSurface).first).width, 72);
+    expect(tester.getSize(find.byType(AylaGlassSurface).first).width, 72);
     expect(
       find.byWidgetPredicate(
         (Widget w) => w is Padding && w.padding == AylaServerRail.wideMargin,
@@ -207,12 +207,12 @@ void main() {
     expect(tester.getSize(indicator).width, 3);
     expect(tester.getSize(indicator).height, 32);
 
-    final Rect row1 = tester.getRect(find.byType(AvatarHalo).at(0));
+    final Rect row1 = tester.getRect(find.byType(AylaAvatarHalo).at(0));
     expect(tester.getRect(indicator).center.dy, closeTo(row1.center.dy, 0.5));
 
     rebuild(() => current = 'g3');
     await tester.pumpAndSettle();
-    final Rect row3 = tester.getRect(find.byType(AvatarHalo).at(2));
+    final Rect row3 = tester.getRect(find.byType(AylaAvatarHalo).at(2));
     expect(tester.getRect(indicator).center.dy, closeTo(row3.center.dy, 0.5));
   });
 
@@ -220,21 +220,21 @@ void main() {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    final List<TabBadge> badges = tester
-        .widgetList<TabBadge>(find.byType(TabBadge))
+    final List<AylaTabBadge> badges = tester
+        .widgetList<AylaTabBadge>(find.byType(AylaTabBadge))
         .toList();
     expect(badges.length, 2);
     expect(badges[0].count, 15);
     expect(badges[1].count, 180);
     expect(badges[1].max, 99);
-    for (final TabBadge b in badges) {
-      expect(b.metrics, TabBadgeMetrics.serverItem);
+    for (final AylaTabBadge b in badges) {
+      expect(b.metrics, AylaTabBadgeMetrics.serverItem);
     }
     expect(find.text('15'), findsOneWidget);
     expect(find.text('99+'), findsOneWidget);
 
-    final Rect badgeRect = tester.getRect(find.byType(TabBadge).first);
-    final Rect haloRect = tester.getRect(find.byType(AvatarHalo).first);
+    final Rect badgeRect = tester.getRect(find.byType(AylaTabBadge).first);
+    final Rect haloRect = tester.getRect(find.byType(AylaAvatarHalo).first);
     expect(badgeRect.left, closeTo(haloRect.left - 3, 0.5));
     expect(badgeRect.bottom, closeTo(haloRect.bottom + 3, 0.5));
   });
@@ -263,7 +263,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    final Rect haloRect = tester.getRect(find.byType(AvatarHalo).first);
+    final Rect haloRect = tester.getRect(find.byType(AylaAvatarHalo).first);
     final Offset pinCenter = tester.getRect(find.byWidget(pin)).center;
     expect(pinCenter.dx, closeTo(haloRect.left - 6 + 8, 0.5));
     expect(pinCenter.dy, closeTo(haloRect.top - 4 + 8, 0.5));
@@ -287,7 +287,7 @@ void main() {
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(AvatarHalo).at(1));
+    await tester.tap(find.byType(AylaAvatarHalo).at(1));
     await tester.pump();
     expect(selected, 'g2');
 
@@ -338,7 +338,7 @@ void main() {
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(find.byType(AvatarHalo).at(1)));
+    await gesture.moveTo(tester.getCenter(find.byType(AylaAvatarHalo).at(1)));
     await tester.pump();
 
     expect(find.text('置顶'), findsOneWidget);
@@ -346,13 +346,13 @@ void main() {
 
     final Finder panel = find.ancestor(
       of: find.text('置顶'),
-      matching: find.byType(GlassSurface),
+      matching: find.byType(AylaGlassSurface),
     );
     expect(panel, findsOneWidget);
-    expect(tester.widget<GlassSurface>(panel).strong, isTrue);
+    expect(tester.widget<AylaGlassSurface>(panel).strong, isTrue);
     final Rect panelRect = tester.getRect(panel);
-    final Rect railRect = tester.getRect(find.byType(GlassSurface).first);
-    final Rect rowRect = tester.getRect(find.byType(AvatarHalo).at(1));
+    final Rect railRect = tester.getRect(find.byType(AylaGlassSurface).first);
+    final Rect rowRect = tester.getRect(find.byType(AylaAvatarHalo).at(1));
     expect(panelRect.center.dy, closeTo(rowRect.center.dy + 1, 0.5));
     expect(panelRect.left, closeTo(railRect.right + 2, 0.5));
     expect(panelRect.width, greaterThanOrEqualTo(136));
@@ -376,7 +376,7 @@ void main() {
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(find.byType(AvatarHalo).at(1)));
+    await gesture.moveTo(tester.getCenter(find.byType(AylaAvatarHalo).at(1)));
     await tester.pump();
 
     final AylaMenuItem item = tester.widget(find.byType(AylaMenuItem));
@@ -402,7 +402,7 @@ void main() {
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(find.byType(AvatarHalo).first));
+    await gesture.moveTo(tester.getCenter(find.byType(AylaAvatarHalo).first));
     await tester.pump();
     expect(find.text('取消置顶'), findsOneWidget);
   });

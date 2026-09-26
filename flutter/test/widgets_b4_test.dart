@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/privacy_sheet.dart';
-import '../lib/widgets/profile_and_filters.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/base/privacy_sheet.dart';
+import '../lib/widgets/base/profile_and_filters.dart';
 import '../lib/theme/preview_theme.dart';
 
 void main() {
@@ -43,7 +43,7 @@ void main() {
       ));
       await tester.pump();
       expect(find.text('加载更多'), findsNothing);
-      expect(find.byType(PaginationLoadingDots), findsOneWidget);
+      expect(find.byType(AylaPaginationLoadingDots), findsOneWidget);
     });
 
     testWidgets('invalidated → 自动 refresh（不打扰用户）', (WidgetTester tester) async {
@@ -57,7 +57,7 @@ void main() {
       await tester.pump(); // 触发 post-frame
       await tester.pump();
       expect(refreshed, 1, reason: 'invalidated 应自动 refresh');
-      expect(find.byType(PaginationLoadingDots), findsOneWidget);
+      expect(find.byType(AylaPaginationLoadingDots), findsOneWidget);
     });
 
     testWidgets('紧凑模式（retainCompletedSpace=false）+ 到底 → 不渲染',
@@ -70,7 +70,7 @@ void main() {
         ),
       ));
       await tester.pump();
-      expect(find.byType(StablePaginationFooter), findsNothing,
+      expect(find.byType(AylaStablePaginationFooter), findsNothing,
           reason: '紧凑侧栏不保留空页脚');
     });
   });
@@ -112,8 +112,8 @@ void main() {
         ),
       ));
       await tester.pump();
-      // 三点本体（PaginationLoadingDots 带 aria-label「正在加载历史」）
-      expect(find.byType(PaginationLoadingDots), findsOneWidget);
+      // 三点本体（AylaPaginationLoadingDots 带 aria-label「正在加载历史」）
+      expect(find.byType(AylaPaginationLoadingDots), findsOneWidget);
     });
   });
 
@@ -122,7 +122,7 @@ void main() {
       bool? got;
       await tester.pumpWidget(previewTheme(
         AylaFavoriteButton(
-          state: FavoriteState.notFavorited, onToggle: (v) => got = v),
+          state: AylaFavoriteState.notFavorited, onToggle: (v) => got = v),
       ));
       await tester.pump();
       expect(find.text('收藏'), findsOneWidget);
@@ -134,7 +134,7 @@ void main() {
     testWidgets('已收藏 → 「已收藏」，点击回调 false（取消）', (WidgetTester tester) async {
       bool? got;
       await tester.pumpWidget(previewTheme(
-        AylaFavoriteButton(state: FavoriteState.favorited, onToggle: (v) => got = v),
+        AylaFavoriteButton(state: AylaFavoriteState.favorited, onToggle: (v) => got = v),
       ));
       await tester.pump();
       expect(find.text('已收藏'), findsOneWidget);
@@ -150,7 +150,7 @@ void main() {
       bool? toggled;
       await tester.pumpWidget(previewTheme(
         AylaFavoriteButton(
-          state: FavoriteState.unknown,
+          state: AylaFavoriteState.unknown,
           onRetryStatus: () => retried++,
           onToggle: (v) => toggled = v,
         ),
@@ -169,7 +169,7 @@ void main() {
       bool? toggled;
       await tester.pumpWidget(previewTheme(
         AylaFavoriteButton(
-          state: FavoriteState.error,
+          state: AylaFavoriteState.error,
           onRetryStatus: () => retried++,
           onToggle: (v) => toggled = v,
         ),
@@ -184,7 +184,7 @@ void main() {
 
     testWidgets('compact → 无文字、图标 16', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        AylaFavoriteButton(state: FavoriteState.favorited, compact: true, onToggle: (_) {}),
+        AylaFavoriteButton(state: AylaFavoriteState.favorited, compact: true, onToggle: (_) {}),
       ));
       await tester.pump();
       expect(find.text('已收藏'), findsNothing);
@@ -193,10 +193,10 @@ void main() {
 
   group('VisibilitySelector（互斥 + 独立 + 锁定）', () {
     testWidgets('勾选公开 → 好友被取消（互斥）', (WidgetTester tester) async {
-      VisibilitySelection? out;
+      AylaVisibilitySelection? out;
       await tester.pumpWidget(previewTheme(
         AylaVisibilitySelector(
-          value: const VisibilitySelection(friends: true), // 先选好友
+          value: const AylaVisibilitySelection(friends: true), // 先选好友
           onChange: (v) => out = v,
         ),
       ));
@@ -209,10 +209,10 @@ void main() {
     });
 
     testWidgets('勾选好友 → 公开被取消（互斥）', (WidgetTester tester) async {
-      VisibilitySelection? out;
+      AylaVisibilitySelection? out;
       await tester.pumpWidget(previewTheme(
         AylaVisibilitySelector(
-          value: const VisibilitySelection(isPublic: true),
+          value: const AylaVisibilitySelection(isPublic: true),
           onChange: (v) => out = v,
         ),
       ));
@@ -224,10 +224,10 @@ void main() {
     });
 
     testWidgets('群可见独立：切换 group 不影响 public/friends', (WidgetTester tester) async {
-      VisibilitySelection? out;
+      AylaVisibilitySelection? out;
       await tester.pumpWidget(previewTheme(
         AylaVisibilitySelector(
-          value: const VisibilitySelection(isPublic: true),
+          value: const AylaVisibilitySelection(isPublic: true),
           onChange: (v) => out = v,
         ),
       ));
@@ -239,10 +239,10 @@ void main() {
     });
 
     testWidgets('lockGroup → 大类不可取消（点击无效）', (WidgetTester tester) async {
-      VisibilitySelection? out;
+      AylaVisibilitySelection? out;
       await tester.pumpWidget(previewTheme(
         AylaVisibilitySelector(
-          value: const VisibilitySelection(group: true),
+          value: const AylaVisibilitySelection(group: true),
           lockGroup: true,
           onChange: (v) => out = v,
         ),
@@ -257,7 +257,7 @@ void main() {
       List<String>? cleared;
       await tester.pumpWidget(previewTheme(
         AylaVisibilitySelector(
-          value: const VisibilitySelection(group: true),
+          value: const AylaVisibilitySelection(group: true),
           selectedGroupIds: const <String>['g1', 'g2'],
           onSelectedGroupIdsChange: (ids) => cleared = ids,
           onChange: (_) {},
@@ -270,10 +270,10 @@ void main() {
     });
   });
 
-  group('PrivacySheet（状态机 + 校验，tsx 逐条）', () {
+  group('AylaPrivacySheet（状态机 + 校验，tsx 逐条）', () {
     testWidgets('menu：两项入口 + 提示文案', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: 'ayla@example.com'),
+        AylaPrivacySheet(onClose: () {}, boundEmail: 'ayla@example.com'),
       ));
       await tester.pump();
       expect(find.text('隐私设置'), findsOneWidget);
@@ -285,7 +285,7 @@ void main() {
 
     testWidgets('未绑定邮箱 → menu 显示「当前未绑定邮箱」', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: ''),
+        AylaPrivacySheet(onClose: () {}, boundEmail: ''),
       ));
       await tester.pump();
       expect(find.text('当前未绑定邮箱'), findsOneWidget);
@@ -294,7 +294,7 @@ void main() {
     testWidgets('改密：验证码非 6 位 → 报错「请输入 6 位数字验证码」',
         (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
+        AylaPrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
       ));
       await tester.pump();
       await tester.tap(find.text('更改密码'));
@@ -308,7 +308,7 @@ void main() {
     testWidgets('改密：密码 < 8 位 → 报错「新密码至少 8 位」',
         (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
+        AylaPrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
       ));
       await tester.pump();
       await tester.tap(find.text('更改密码'));
@@ -322,7 +322,7 @@ void main() {
 
     testWidgets('换绑：已绑定 → 进 step1', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
+        AylaPrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
       ));
       await tester.pump();
       await tester.tap(find.text('邮箱换绑'));
@@ -333,7 +333,7 @@ void main() {
     testWidgets('换绑：未绑定 → 直接 step2（跳过 step1）',
         (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: ''),
+        AylaPrivacySheet(onClose: () {}, boundEmail: ''),
       ));
       await tester.pump();
       await tester.tap(find.text('邮箱换绑'));
@@ -346,7 +346,7 @@ void main() {
     testWidgets('换绑 step1：「下一步」在验证码 6 位前禁用',
         (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
+        AylaPrivacySheet(onClose: () {}, boundEmail: 'a@b.com'),
       ));
       await tester.pump();
       await tester.tap(find.text('邮箱换绑'));
@@ -366,7 +366,7 @@ void main() {
     testWidgets('ESC 关闭（tsx 全局 keydown）', (WidgetTester tester) async {
       int closed = 0;
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () => closed++),
+        AylaPrivacySheet(onClose: () => closed++),
       ));
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -377,7 +377,7 @@ void main() {
     testWidgets('点遮罩关闭', (WidgetTester tester) async {
       int closed = 0;
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(onClose: () => closed++),
+        AylaPrivacySheet(onClose: () => closed++),
       ));
       await tester.pump();
       // 遮罩铺满；点左上角（卡片外）
@@ -389,7 +389,7 @@ void main() {
     testWidgets('发码：未填新邮箱时按钮禁用（step2）', (WidgetTester tester) async {
       int sent = 0;
       await tester.pumpWidget(previewTheme(
-        PrivacySheet(
+        AylaPrivacySheet(
           onClose: () {}, boundEmail: '',
           sendEmailCode: (String e) async => sent++,
         ),

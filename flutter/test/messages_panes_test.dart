@@ -12,12 +12,12 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
-import '../lib/widgets/messages_tabs.dart';
-import '../lib/widgets/dialogs.dart'
+import '../lib/widgets/chat/messages_tabs.dart';
+import '../lib/widgets/base/dialogs.dart'
     show AylaModalCard, AylaModalOverlay, AylaSheetHead;
-import '../lib/widgets/messages_tabs.dart' show AylaMessagesTabs;
-import '../lib/widgets/quick_messages_sheet.dart';
-import '../lib/widgets/wide_messages_sidebar.dart';
+import '../lib/widgets/chat/messages_tabs.dart' show AylaMessagesTabs;
+import '../lib/widgets/chat/quick_messages_sheet.dart';
+import '../lib/widgets/chat/wide_messages_sidebar.dart';
 
 AylaConversationSummary _conv(String id, String name, {int unread = 0}) =>
     AylaConversationSummary(
@@ -79,7 +79,7 @@ void main() {
 
     // 宽度权威（量卡片本体：外层会被紧宿主 clamp）
     expect(
-      tester.getSize(find.byType(GlassSurface).first).width,
+      tester.getSize(find.byType(AylaGlassSurface).first).width,
       AylaWideMessagesSidebar.sidebarWidth,
     );
     // 侧栏自身不自滚动 ⇒ 只有各 tab 内容区的滚动视图

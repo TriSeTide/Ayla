@@ -18,9 +18,9 @@ import '../lib/core/models/post.dart'
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/dashed_border.dart';
-import '../lib/widgets/emoji_pack_panel.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/base/dashed_border.dart';
+import '../lib/widgets/chat/emoji_pack_panel.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 AylaEmojiItem _emoji(String id) => AylaEmojiItem(
       id: id,
@@ -192,7 +192,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     // 面板 padding sp3×2 = 24 ⇒ 网格可用宽 396；列数 = floor((396+8)/(56+8)) = 6
-    final Finder firstCell = find.byType(ResourceImage).first;
+    final Finder firstCell = find.byType(AylaResourceImage).first;
     final double cellWidth = tester.getSize(
       find.ancestor(of: firstCell, matching: find.byType(AspectRatio)).first,
     ).width;
@@ -236,7 +236,7 @@ void main() {
     final TestGesture mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     addTearDown(mouse.removePointer);
-    await mouse.moveTo(tester.getCenter(find.byType(ResourceImage)));
+    await mouse.moveTo(tester.getCenter(find.byType(AylaResourceImage)));
     await tester.pump(const Duration(milliseconds: 200));
     expect(opacityOf(), 1, reason: '单元格 hover 显示（app.css 2307–2310）');
   });
@@ -262,7 +262,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    await tester.tap(find.byType(ResourceImage));
+    await tester.tap(find.byType(AylaResourceImage));
     await tester.pump(const Duration(milliseconds: 50));
     expect(sent, 'media-a');
     expect(closed, 0, reason: '连发表情时面板保持打开（tsx 131–134）');

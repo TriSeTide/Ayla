@@ -233,7 +233,7 @@ void main() {
     expect(third.left, greaterThan(first.left), reason: '切换到第三档');
   });
 
-  testWidgets('选项卡：徽标用 TabBadgeMetrics.messages（min 18 / utility 11）', (WidgetTester tester) async {
+  testWidgets('选项卡：徽标用 AylaTabBadgeMetrics.messages（min 18 / utility 11）', (WidgetTester tester) async {
     await tester.pumpWidget(
       host(
         tester,
@@ -249,9 +249,9 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('5'), findsOneWidget);
-    final TabBadge badge = tester.widget<TabBadge>(find.byType(TabBadge));
-    expect(badge.metrics, TabBadgeMetrics.messages);
-    expect(tester.getSize(find.byType(TabBadge)).height, 18);
+    final AylaTabBadge badge = tester.widget<AylaTabBadge>(find.byType(AylaTabBadge));
+    expect(badge.metrics, AylaTabBadgeMetrics.messages);
+    expect(tester.getSize(find.byType(AylaTabBadge)).height, 18);
   });
 
   // ⚠️ 2026-09-25：「选项卡窄屏档（竖排 + 宽 260）」用例**已删** —— 该档本来就不存在
@@ -294,7 +294,7 @@ void main() {
     expect(find.text('暂无待处理认证消息'), findsNothing, reason: '有数据 ⇒ 不显示空态');
   });
 
-  testWidgets('认证面板：行材质走 GlassSurface（glass-bg + compact 阴影 + radius 12）', (
+  testWidgets('认证面板：行材质走 AylaGlassSurface（glass-bg + compact 阴影 + radius 12）', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -311,10 +311,10 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    final GlassSurface surface = tester.widget<GlassSurface>(
+    final AylaGlassSurface surface = tester.widget<AylaGlassSurface>(
       find.ancestor(
         of: find.text('小樱'),
-        matching: find.byType(GlassSurface),
+        matching: find.byType(AylaGlassSurface),
       ).first,
     );
     expect(surface.radius, AylaRadii.rInput, reason: 'radius-input 12');
@@ -496,8 +496,8 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    final GlassSurface narrowHead = tester.widget<GlassSurface>(
-      find.byType(GlassSurface).first,
+    final AylaGlassSurface narrowHead = tester.widget<AylaGlassSurface>(
+      find.byType(AylaGlassSurface).first,
     );
     expect(narrowHead.radiusOverride, BorderRadius.zero, reason: '窄屏通栏无圆角');
     expect(
@@ -525,8 +525,8 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    final GlassSurface wideHead = tester.widget<GlassSurface>(
-      find.byType(GlassSurface).first,
+    final AylaGlassSurface wideHead = tester.widget<AylaGlassSurface>(
+      find.byType(AylaGlassSurface).first,
     );
     expect(wideHead.radius, AylaRadii.rCard, reason: '宽屏卡片化 radius 16');
     expect(wideHead.shadow, AylaShadows.compact);

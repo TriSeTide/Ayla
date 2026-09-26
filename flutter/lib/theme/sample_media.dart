@@ -3,7 +3,7 @@
 /// 背景（2026-09-20 用户指定）：媒体存储链路（MinIO 签名）暂不落地，
 /// 且本机外网受限 —— 原先样张里的 `https://picsum.photos/...` 这类外链示例图
 /// **显示不出来**，所有图片位都是空的。本文件提供同步生成的示例位图，
-/// 让画布与 `@Preview` 能真实看到图片渲染效果（布局/圆角/裁切/角标）。
+/// 让画布与 `画布` 能真实看到图片渲染效果（布局/圆角/裁切/角标）。
 ///
 /// 纪律：
 /// - **只用于预览与画布样张**，生产调用点不得使用（示例数据不是真实媒体）；
@@ -265,7 +265,7 @@ void aylaDisableSampleMedia() {
 
 /// 由媒体地址派生一张稳定的示例图（同一 src → 同一张图）。
 ///
-/// 只用于预览：`ResourceImage` 在开关打开且未显式注入时用它替代签名链路。
+/// 只用于预览：`AylaResourceImage` 在开关打开且未显式注入时用它替代签名链路。
 ImageProvider aylaSampleImageFor(String src) {
   int seed = 0;
   for (final int unit in src.codeUnits) {

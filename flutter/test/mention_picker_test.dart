@@ -16,8 +16,8 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/mention_picker.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/chat/mention_picker.dart';
 
 AylaConversationMember _member(String id, String name, {bool online = false}) =>
     AylaConversationMember(
@@ -154,7 +154,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    final AvatarHalo halo = tester.widget<AvatarHalo>(find.byType(AvatarHalo));
+    final AylaAvatarHalo halo = tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
     expect(halo.size, 32, reason: 'tsx 136（Avatar size 32）');
     expect(halo.online, isTrue);
 

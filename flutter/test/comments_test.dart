@@ -8,10 +8,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/models/post.dart';
 import '../lib/theme/buttons.dart' show AylaToolButton;
-import '../lib/theme/glass.dart' show GlassButton;
+import '../lib/theme/glass.dart' show AylaGlassButton;
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/comments.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/posts/comments.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -134,7 +134,7 @@ void main() {
       await tester.tap(find.text('回复'));
       await tester.pump();
       expect(replied?.id, 1);
-      expect(find.byType(ResourceImage), findsNWidgets(2));
+      expect(find.byType(AylaResourceImage), findsNWidgets(2));
     });
   });
 
@@ -154,8 +154,8 @@ void main() {
           ),
         ),
       );
-      GlassButton sendButton() => tester.widget<GlassButton>(
-            find.ancestor(of: find.text('发送'), matching: find.byType(GlassButton)),
+      AylaGlassButton sendButton() => tester.widget<AylaGlassButton>(
+            find.ancestor(of: find.text('发送'), matching: find.byType(AylaGlassButton)),
           );
       expect(sendButton().onPressed, isNull);
       await tester.enterText(find.byType(TextField), '写一条');

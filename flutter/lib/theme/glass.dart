@@ -1,4 +1,4 @@
-/// 玻璃基类：GlassSurface / GlassCard / GlassButton / GlassInput（全站单材料 owner）。
+/// 玻璃基类：AylaGlassSurface / AylaGlassCard / AylaGlassButton / AylaGlassInput（全站单材料 owner）。
 ///
 /// 事实源（逐条对应 web CSS，禁自由发挥）：
 /// - 材料：`tokens.css` `--glass-bg`(.55) / `--glass-bg-strong`(.78) /
@@ -24,11 +24,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show TextInputFormatter;
 import 'package:flutter/services.dart'
     show KeyDownEvent, LogicalKeyboardKey;
-import 'package:flutter/widget_previews.dart';
 
 import 'app_theme.dart';
 import 'css_gradient.dart';
-import 'preview_theme.dart';
 import 'tokens.dart';
 
 /// 毛玻璃运行期配置（性能降级链，05 坑 1 / d:§9）。
@@ -36,7 +34,7 @@ import 'tokens.dart';
 /// web 端降级条件是「浏览器不支持 `backdrop-filter`」（app.css @supports →
 /// `rgba(255,250,251,0.92)` 实底），Flutter 侧对应「平台/设备不适合逐帧
 /// 离屏模糊」——统一用 .92 不透明实底兜底，保住可读性且不再付模糊代价。
-abstract final class GlassConfig {
+abstract final class AylaGlassConfig {
   /// 为 true 时全站玻璃卡改用不透明实底（低端设备/性能告警时手动开启）。
   static bool useOpaqueFallback = false;
 
@@ -71,8 +69,8 @@ abstract final class GlassConfig {
 ///
 /// 只做一层离屏模糊（每处 `BackdropFilter` = 一次离屏模糊，全站用量必须
 /// 收敛到本基类；d:§4 单材料 owner）。
-class GlassSurface extends StatelessWidget {
-  const GlassSurface({
+class AylaGlassSurface extends StatelessWidget {
+  const AylaGlassSurface({
     super.key,
     required this.child,
     this.radius = AylaRadii.rCard,
@@ -142,7 +140,7 @@ class GlassSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool opaque = GlassConfig.useOpaqueFallback;
+    final bool opaque = AylaGlassConfig.useOpaqueFallback;
     final bool reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final double dimA = (dimAlpha ?? 1.0).clamp(0.0, 1.0);
     Color dimColor(Color c) =>
@@ -176,7 +174,7 @@ class GlassSurface extends StatelessWidget {
         (border ? Border.all(color: AylaColors.glassBorder) : null));
     final Widget face = DecoratedBox(
       decoration: BoxDecoration(
-        color: dimColor(GlassConfig.resolveBackground(strong: strong)),
+        color: dimColor(AylaGlassConfig.resolveBackground(strong: strong)),
         borderRadius: radiusValue,
         border: borderValue,
       ),
@@ -309,7 +307,7 @@ class GlassSurface extends StatelessWidget {
 /// - 悬停时给按钮加 `--glass-shadow-nav`（`0 0 8px rgba(157,191,230,.3)`）
 ///   → 冰蓝阴影染进按钮内部，**悬停瞬间闪一下蓝色**。
 ///
-/// 本项目此前只在 [GlassSurface] 内部（私有 `_OuterShadowPainter`）处理过，
+/// 本项目此前只在 [AylaGlassSurface] 内部（私有 `_OuterShadowPainter`）处理过，
 /// 导致其他组件各自裸用 `BoxShadow` 时重现同一问题 → 提升为公共 API。
 abstract final class AylaGlassShadow {
   /// 外阴影层：铺满父级，但**只在形状之外**绘制 [shadows]。
@@ -532,16 +530,16 @@ abstract final class AylaGlassInset {
   }
 }
 
-/// GlassCard —— 全站卡面材料（app.css .glass-card / d:§4 Cards）。
+/// AylaGlassCard —— 全站卡面材料（app.css .glass-card / d:§4 Cards）。
 ///
 /// [interactive] 为 true 时启用「可交互卡」行为（hover 上浮 2px + 阴影升
 /// 12/40、按下 scale .99）；非交互卡保持稳定位置（d:§4「仅可交互列表卡抬升」）。
 ///
 /// 2026-09-20 组件库审查 R6：交互动效本体收敛到公共件 [AylaCardInteraction]，
-/// 与卡片族（群卡 / 群列表行）共用同一份实现（此前 GlassCard 与 group_card
+/// 与卡片族（群卡 / 群列表行）共用同一份实现（此前 AylaGlassCard 与 group_card
 /// 各写一份，是同一 CSS 配方两套代码）。
-class GlassCard extends StatelessWidget {
-  const GlassCard({
+class AylaGlassCard extends StatelessWidget {
+  const AylaGlassCard({
     super.key,
     required this.child,
     this.padding,
@@ -587,12 +585,12 @@ class GlassCard extends StatelessWidget {
       interactive: interactive,
       onTap: onTap,
       semanticLabel: semanticLabel,
-      builder: (BuildContext context, bool hovered) => GlassSurface(
+      builder: (BuildContext context, bool hovered) => AylaGlassSurface(
         radius: radius,
         blur: blur,
         strong: strong,
         // hover → `--glass-shadow-hover`（12/40）；静止 → `--glass-shadow`（8/32）。
-        // box-shadow 300ms 过渡由 GlassSurface.shadowTransition 表达（卡片族）。
+        // box-shadow 300ms 过渡由 AylaGlassSurface.shadowTransition 表达（卡片族）。
         shadow:
             shadow ?? (hovered ? AylaShadows.glassHover : AylaShadows.glass),
         shadowTransition: AylaDurations.auroraqua,
@@ -717,7 +715,7 @@ class _AylaCardInteractionState extends State<AylaCardInteraction> {
   Widget build(BuildContext context) {
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    // 非交互卡：不挂 hover/按压动效；有 onTap 时保持可点击（对齐原 GlassCard
+    // 非交互卡：不挂 hover/按压动效；有 onTap 时保持可点击（对齐原 AylaGlassCard
     // interactive=false 的行为）。
     if (!widget.interactive) {
       if (widget.onTap == null) return widget.builder(context, false);
@@ -793,7 +791,7 @@ class _AylaCardInteractionState extends State<AylaCardInteraction> {
 }
 
 /// 按钮类型（.btn-primary / .btn-glow / .btn-ghost）。
-enum GlassButtonVariant {
+enum AylaGlassButtonVariant {
   /// .btn-primary：indigo 实底 + 白字 + compact 阴影；hover 换 glow 阴影
   primary,
 
@@ -805,7 +803,7 @@ enum GlassButtonVariant {
 
   /// .btn-destructive（app.css 2764–2770）：`--destructive` 实底 + `#fffafb` 字；
   /// `:hover:not(:disabled) → filter: brightness(1.06)`。
-  /// 用于确认删除等危险操作（ConfirmDialog 的确认键、群管理类操作）。
+  /// 用于确认删除等危险操作（AylaConfirmDialog 的确认键、群管理类操作）。
   destructive,
 
   /// `.voice-leave-btn`（app.css 3108–3112）：**透明底 + `--destructive` 字 +
@@ -815,7 +813,7 @@ enum GlassButtonVariant {
   outlineDestructive,
 }
 
-/// GlassButton —— 严格照 web CSS 实现的三类按钮。
+/// AylaGlassButton —— 严格照 web CSS 实现的三类按钮。
 ///
 /// **事实源（app.css + auroraqua.css，逐条对应，无自由发挥）**：
 ///
@@ -834,12 +832,12 @@ enum GlassButtonVariant {
 ///   glass-border→transparent，opacity .5，translateX(-120%→120%)）。
 /// base.css button:disabled：opacity .55。
 /// 窄屏（≤768）：辉光降 30%（0 0 11px rgba(247,150,255,.32)）。
-class GlassButton extends StatefulWidget {
-  const GlassButton({
+class AylaGlassButton extends StatefulWidget {
+  const AylaGlassButton({
     super.key,
     required this.label,
     this.onPressed,
-    this.variant = GlassButtonVariant.primary,
+    this.variant = AylaGlassButtonVariant.primary,
     this.icon,
     this.minHeight = 40,
     this.minWidth,
@@ -879,7 +877,7 @@ class GlassButton extends StatefulWidget {
   final VoidCallback? onPressed;
 
   /// 变体。
-  final GlassButtonVariant variant;
+  final AylaGlassButtonVariant variant;
 
   /// 前置图标（.btn 的 gap 8 作用在图标与文字之间）。
   final Widget? icon;
@@ -906,10 +904,10 @@ class GlassButton extends StatefulWidget {
   final String? semanticLabel;
 
   @override
-  State<GlassButton> createState() => _GlassButtonState();
+  State<AylaGlassButton> createState() => _GlassButtonState();
 }
 
-class _GlassButtonState extends State<GlassButton>
+class _GlassButtonState extends State<AylaGlassButton>
     with SingleTickerProviderStateMixin {
   /// 扫光位置：0 = translateX(-120%)，1 = translateX(+120%)（::after）。
   late final AnimationController _sweep = AnimationController(
@@ -942,7 +940,7 @@ class _GlassButtonState extends State<GlassButton>
   @override
   Widget build(BuildContext context) {
     final AylaTextStyles text = AylaTextStyles.of(context);
-    final bool narrow = Breakpoint.isNarrow(MediaQuery.sizeOf(context).width);
+    final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     final bool animate = _enabled && !_reduceMotion;
     final bool hovered = _hovered && animate;
     // `:focus-within` 与 hover 同列的高亮来源（**不受** reduced-motion 影响：
@@ -957,13 +955,13 @@ class _GlassButtonState extends State<GlassButton>
     late final LinearGradient? gradient;
 
     switch (widget.variant) {
-      case GlassButtonVariant.primary:
+      case AylaGlassButtonVariant.primary:
         background = AylaColors.indigo700;
         foreground = AylaColors.surface;
         borderColor = null;
         gradient = null;
         shadow = hovered ? AylaShadows.glow : AylaShadows.compact;
-      case GlassButtonVariant.glow:
+      case AylaGlassButtonVariant.glow:
         background = AylaColors.sakura300; // 渐变盖其上，底色兜底
         foreground = AylaColors.grape700;
         borderColor = null;
@@ -974,7 +972,7 @@ class _GlassButtonState extends State<GlassButton>
         );
         // 常驻辉光；窄屏（≤768）强度降 30%
         shadow = narrow ? AylaShadows.glowNarrow : AylaShadows.glow;
-      case GlassButtonVariant.ghost:
+      case AylaGlassButtonVariant.ghost:
         // auroraqua 覆写：glass-bg + glass-border + button 阴影 + blur(8px)
         // glowHover（.post-editor-image-btn）：hover 不改底色，只换 glow 边 + 粉辉光
         // glowBorderOnHover（.danmaku-image-btn）：hover 保留 ghost 底色/阴影，只换 glow 边
@@ -986,7 +984,7 @@ class _GlassButtonState extends State<GlassButton>
             hoverGlow || (hovered && widget.glowBorderOnHover) || focusGlow;
         background = (hovered && !widget.glowHover)
             ? AylaColors.ice500.withValues(alpha: 0.18) // :hover rgba(157,191,230,.18)
-            : GlassConfig.resolveBackground(strong: false);
+            : AylaGlassConfig.resolveBackground(strong: false);
         foreground = AylaColors.indigo700;
         borderColor = glowBorder
             ? AylaColors.glow500 // :hover/:focus-within border-color: var(--glow-500)
@@ -997,7 +995,7 @@ class _GlassButtonState extends State<GlassButton>
             : (hovered
                 ? AylaShadows.buttonHover // auroraqua 按钮组 hover 阴影（0-3-0 胜出）
                 : (focusGlow ? AylaShadows.glow : AylaShadows.button));
-      case GlassButtonVariant.destructive:
+      case AylaGlassButtonVariant.destructive:
         // `.btn-destructive { background: var(--destructive); color: #fffafb }`
         // 无边框、无阴影（web 未声明）；hover 走下方 brightness(1.06) 滤镜分支
         background = AylaColors.destructive;
@@ -1005,7 +1003,7 @@ class _GlassButtonState extends State<GlassButton>
         borderColor = null;
         gradient = null;
         shadow = const <BoxShadow>[]; // 空 = 无阴影（web 未声明 box-shadow）
-      case GlassButtonVariant.outlineDestructive:
+      case AylaGlassButtonVariant.outlineDestructive:
         // `.voice-leave-btn { background: transparent; color: var(--destructive);
         //  border: 1px solid var(--destructive) }`（app.css 3108–3112）
         // ⚠️ web 的 `transparent` 就是 `rgba(0,0,0,0)`，且本档**没有** hover 换底
@@ -1021,7 +1019,7 @@ class _GlassButtonState extends State<GlassButton>
     final BorderRadius rInput =
         BorderRadius.all(Radius.circular(AylaRadii.rInput));
 
-    // ---- 禁用态：**按颜色降透明度**（用户 2026-09-22 裁决）----
+    // ---- 禁用态：**按颜色降透明度**（裁决）----
     //
     // 事实源：`base.css button:disabled { opacity: .55 }`。
     // ⚠️ 不能用整层 `Opacity(.55)`：ghost 档的 face 内含 `BackdropFilter`（blur 8px），
@@ -1061,7 +1059,7 @@ class _GlassButtonState extends State<GlassButton>
     // 故这里用 LayoutBuilder 拿到实际尺寸再生成渐变；非渐变变体直接复用。
     Widget buildFace(double aspectRatio) {
       final Gradient? g = switch (widget.variant) {
-        GlassButtonVariant.glow => cssLinearGradient(
+        AylaGlassButtonVariant.glow => cssLinearGradient(
             angleDeg: 135, // 135deg #f9b0ff → #f796ff（app.css .btn-glow）
             colors: AylaGradients.btnGlow,
             aspectRatio: aspectRatio,
@@ -1134,7 +1132,7 @@ class _GlassButtonState extends State<GlassButton>
                     // ⚠️ `gap: var(--sp-2)` **只在图标与文字同时存在**时生效——
                     // CSS 的 `gap` 对单个子元素不产生任何间距。空 label 的图标钮
                     // （窄屏发帖/评论/房内聊天的发送键）曾因这 8px 多出半个间隙而整体偏左
-                    // 4px（用户 2026-09-21 实报「这三个发送键好歪」）。
+                    // 4px（实测「这三个发送键好歪」）。
                     if (widget.label.isNotEmpty)
                       const SizedBox(width: AylaSpacing.sp2),
                   ],
@@ -1204,8 +1202,8 @@ class _GlassButtonState extends State<GlassButton>
         // `.btn-glow` 用的是 `--glow-shadow`（不含 inset），故不叠加；
         // 新档 `outlineDestructive` 的 `.btn` 基础块**没有任何 box-shadow**
         // ⇒ 也不该有内高光（`--glass-inset` 只随阴影 token 出现）。
-        if (widget.variant != GlassButtonVariant.glow &&
-            widget.variant != GlassButtonVariant.outlineDestructive)
+        if (widget.variant != AylaGlassButtonVariant.glow &&
+            widget.variant != AylaGlassButtonVariant.outlineDestructive)
           Positioned.fill(
             child: IgnorePointer(
               child: LayoutBuilder(
@@ -1226,8 +1224,8 @@ class _GlassButtonState extends State<GlassButton>
     // `.btn-glow:hover:not(:disabled) { filter: brightness(1.06) }`
     // `.btn-destructive:hover:not(:disabled) { filter: brightness(1.06) }`
     // CSS filter 是通道乘法（×1.06 后钳位）→ ColorFilter.matrix 等价。
-    if ((widget.variant == GlassButtonVariant.glow ||
-            widget.variant == GlassButtonVariant.destructive) &&
+    if ((widget.variant == AylaGlassButtonVariant.glow ||
+            widget.variant == AylaGlassButtonVariant.destructive) &&
         hovered) {
       decorated = ColorFiltered(
         colorFilter: const ColorFilter.matrix(<double>[
@@ -1241,8 +1239,8 @@ class _GlassButtonState extends State<GlassButton>
     }
 
     // .btn-ghost { backdrop-filter: blur(8px) }（auroraqua.css）
-    if (widget.variant == GlassButtonVariant.ghost &&
-        !GlassConfig.useOpaqueFallback) {
+    if (widget.variant == AylaGlassButtonVariant.ghost &&
+        !AylaGlassConfig.useOpaqueFallback) {
       decorated = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
@@ -1252,7 +1250,7 @@ class _GlassButtonState extends State<GlassButton>
               child: BackdropFilter(
                 // auroraqua.css 100–101（`.btn-ghost`）：`backdrop-filter: blur(8px)`
                 // ——**无 saturate**（8px 档三处均为纯 blur；18px/24px 档才带 1.4）。
-                filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
+                filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -1339,7 +1337,7 @@ class _GlassButtonState extends State<GlassButton>
   }
 }
 
-/// GlassInput —— 文本输入基类（.field + auroraqua 统一 owner）。
+/// AylaGlassInput —— 文本输入基类（.field + auroraqua 统一 owner）。
 ///
 /// 材料（app.css .field + auroraqua.css 统一 owner）：
 /// 底 `--glass-bg`(.55) + 1px `--glass-border` + 12px 圆角 +
@@ -1349,8 +1347,8 @@ class _GlassButtonState extends State<GlassButton>
 ///
 /// 认证上下文（d:§5）：字段描边覆写为 rgba(70,91,146,.3)
 /// （白边在浅玻璃上不可见）、min-height 44px。[onGlassBorder] 控制前者。
-class GlassInput extends StatefulWidget {
-  const GlassInput({
+class AylaGlassInput extends StatefulWidget {
+  const AylaGlassInput({
     super.key,
     required this.controller,
     this.hintText,
@@ -1444,10 +1442,10 @@ class GlassInput extends StatefulWidget {
   final int? maxLines;
 
   @override
-  State<GlassInput> createState() => _GlassInputState();
+  State<AylaGlassInput> createState() => _GlassInputState();
 }
 
-class _GlassInputState extends State<GlassInput> {
+class _GlassInputState extends State<AylaGlassInput> {
   FocusNode? _ownedFocus;
   bool _focused = false;
 
@@ -1475,7 +1473,7 @@ class _GlassInputState extends State<GlassInput> {
   Widget build(BuildContext context) {
     final AylaTextStyles text = AylaTextStyles.of(context);
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final bool opaque = GlassConfig.useOpaqueFallback;
+    final bool opaque = AylaGlassConfig.useOpaqueFallback;
 
     // ── `.field` 材料统一 owner：app.css 70–88 + **auroraqua.css 502–510 覆写** ──
     //   :is(.field, .voice-create-input, …) {
@@ -1513,7 +1511,7 @@ class _GlassInputState extends State<GlassInput> {
           ),
       decoration: BoxDecoration(
         // background: var(--glass-bg)（降级时 --surface，auroraqua 526–531）
-        color: GlassConfig.resolveBackground(strong: false),
+        color: AylaGlassConfig.resolveBackground(strong: false),
         // background-image: none —— 不叠任何渐变（清除背景图语义）
         borderRadius: rInput,
         border: Border.all(color: border),
@@ -1567,7 +1565,7 @@ class _GlassInputState extends State<GlassInput> {
               child: BackdropFilter(
                 // auroraqua.css 507：`.field { backdrop-filter: var(--glass-filter) }`
                 // = `blur(24px) saturate(1.4)`（tokens.css 76）
-                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
+                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -1614,78 +1612,8 @@ class _GlassInputState extends State<GlassInput> {
   }
 }
 
-// ======================= 预览 =======================
+// ======================= 样张 =======================
 
-/// GlassCard 静态 + 可交互。
-@Preview(
-  group: 'Glass',
-  name: 'GlassCard 静态 + 可交互',
-  size: Size(420, 240),
-  wrapper: previewTheme,
-)
-Widget glassCardPreview() {
-  return Padding(
-    padding: const EdgeInsets.all(AylaSpacing.sp6),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        GlassCard(
-          child: Text('静态玻璃卡', style: AylaTextStyles.light.cardTitle),
-        ),
-        const SizedBox(height: AylaSpacing.sp4),
-        GlassCard(
-          interactive: true,
-          onTap: () {},
-          child: Text('可交互（hover 上浮 2px）', style: AylaTextStyles.light.body),
-        ),
-      ],
-    ),
-  );
-}
-
-/// GlassButton 三类 + disabled。
-@Preview(
-  group: 'Glass',
-  name: 'GlassButton primary/glow/ghost/disabled',
-  size: Size(420, 300),
-  wrapper: previewTheme,
-)
-Widget glassButtonPreview() {
-  return Padding(
-    padding: const EdgeInsets.all(AylaSpacing.sp6),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: <Widget>[
-        GlassButton(label: '登录', onPressed: () {}),
-        const SizedBox(height: AylaSpacing.sp3),
-        GlassButton(
-          label: '登录',
-          variant: GlassButtonVariant.glow,
-          onPressed: () {},
-        ),
-        const SizedBox(height: AylaSpacing.sp3),
-        GlassButton(
-          label: '注册',
-          variant: GlassButtonVariant.ghost,
-          minHeight: 44,
-          onPressed: () {},
-        ),
-        const SizedBox(height: AylaSpacing.sp3),
-        GlassButton(label: '登录中…', onPressed: null),
-      ],
-    ),
-  );
-}
-
-/// GlassInput 常态 / focus。
-@Preview(
-  group: 'Glass',
-  name: 'GlassInput 常态 + focus',
-  size: Size(420, 260),
-  wrapper: previewTheme,
-)
-Widget glassInputPreview() => const _GlassInputSample();
 
 class _GlassInputSample extends StatefulWidget {
   const _GlassInputSample();
@@ -1712,9 +1640,9 @@ class _GlassInputSampleState extends State<_GlassInputSample> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
-          GlassInput(controller: _a, hintText: 'hint = slate-500'),
+          AylaGlassInput(controller: _a, hintText: 'hint = slate-500'),
           const SizedBox(height: AylaSpacing.sp4),
-          GlassInput(controller: _b, autofocus: true),
+          AylaGlassInput(controller: _b, autofocus: true),
         ],
       ),
     );

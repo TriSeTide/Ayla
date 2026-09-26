@@ -19,12 +19,12 @@ import '../lib/theme/app_theme.dart' show AylaTextStyles;
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/primitives.dart';
-import '../lib/widgets/directory_controls.dart'
-    show AylaFavoriteButton, FavoriteState;
-import '../lib/widgets/reveal.dart';
-import '../lib/widgets/share.dart' show AylaShareButton;
-import '../lib/widgets/voice_channels.dart';
+import '../lib/widgets/base/primitives.dart';
+import '../lib/widgets/base/directory_controls.dart'
+    show AylaFavoriteButton, AylaFavoriteState;
+import '../lib/widgets/base/reveal.dart';
+import '../lib/widgets/base/share.dart' show AylaShareButton;
+import '../lib/widgets/voice/voice_channels.dart';
 
 void main() {
   // 用例级可变状态（配合 `stateful` 助手在**同一棵树**里切态）
@@ -87,12 +87,12 @@ void main() {
 
   Finder cardSurface(int index) => find.descendant(
         of: cardAt(index),
-        matching: find.byType(GlassSurface),
+        matching: find.byType(AylaGlassSurface),
       );
 
   Color cardBorder(WidgetTester tester, int index) {
-    final GlassSurface surface =
-        tester.widget<GlassSurface>(cardSurface(index));
+    final AylaGlassSurface surface =
+        tester.widget<AylaGlassSurface>(cardSurface(index));
     final BoxBorder? border = surface.borderOverride;
     return (border! as Border).top.color;
   }
@@ -143,22 +143,22 @@ void main() {
     setViewport(tester, const Size(1200, 700));
     await tester.pumpWidget(host(const AylaVoiceChannelCard(channel: basic)));
 
-    final GlassSurface surface =
-        tester.widget<GlassSurface>(cardSurface(0));
+    final AylaGlassSurface surface =
+        tester.widget<AylaGlassSurface>(cardSurface(0));
     expect(surface.padding, const EdgeInsets.all(AylaSpacing.sp3)); // 12
     expect(
       surface.radiusOverride,
       BorderRadius.all(Radius.circular(AylaRadii.rCard)), // 16
     );
 
-    final GlassButton join = tester.widget<GlassButton>(
+    final AylaGlassButton join = tester.widget<AylaGlassButton>(
       find.byWidgetPredicate(
-        (Widget w) => w is GlassButton && w.label == '加入',
+        (Widget w) => w is AylaGlassButton && w.label == '加入',
       ),
     );
     expect(join.minHeight, 32);
     expect(join.fontSize, 13);
-    expect(join.variant, GlassButtonVariant.primary);
+    expect(join.variant, AylaGlassButtonVariant.primary);
     expect(join.padding, const EdgeInsets.symmetric(horizontal: AylaSpacing.sp3));
     expect(tester.getSize(find.byWidget(join)).height, 32);
   });
@@ -195,7 +195,7 @@ void main() {
         matching: find.byType(AylaCapsuleTag),
       ),
     );
-    expect(tag.tone, CapsuleTone.sakura); // sakura-300 底 + grape-700 字
+    expect(tag.tone, AylaCapsuleTone.sakura); // sakura-300 底 + grape-700 字
     expect(tag.fontFamily, AylaFonts.utility); // live 徽章档：Space Grotesk
     expect(tag.fontSize, 12);
     expect(tag.letterSpacing, 0); // 未声明 ⇒ 0
@@ -216,7 +216,7 @@ void main() {
           columns: 1,
           favoriteBuilder: (BuildContext context, AylaVoiceCardData channel) =>
               AylaFavoriteButton(
-            state: FavoriteState.favorited,
+            state: AylaFavoriteState.favorited,
             compact: true,
             onToggle: (_) {},
           ),
@@ -249,7 +249,7 @@ void main() {
           favoriteBuilder: (BuildContext context, AylaVoiceCardData channel) =>
               channel.id == '1'
               ? AylaFavoriteButton(
-                  state: FavoriteState.notFavorited,
+                  state: AylaFavoriteState.notFavorited,
                   compact: true,
                   onToggle: (_) {},
                 )
@@ -328,10 +328,10 @@ void main() {
     );
     expect(find.text('加入中…'), findsOneWidget);
     expect(
-      tester.widget<GlassButton>(find.byType(GlassButton)).onPressed,
+      tester.widget<AylaGlassButton>(find.byType(AylaGlassButton)).onPressed,
       isNull, // disabled
     );
-    // 卡内还有 GlassButton 自己的 disabled `Opacity(.55)` 与扫光 `Opacity(.5)`
+    // 卡内还有 AylaGlassButton 自己的 disabled `Opacity(.55)` 与扫光 `Opacity(.5)`
     // ⇒ 按值锁定卡片那层（不能只按类型取，否则 "Too many elements"）
     expect(
       find.descendant(
@@ -379,7 +379,7 @@ void main() {
       ),
     );
     expect(find.text('我在其中'), findsOneWidget);
-    expect(find.byType(GlassButton), findsNothing);
+    expect(find.byType(AylaGlassButton), findsNothing);
     final Rect pill = tester.getRect(find.text('我在其中'));
     expect(pill.height, lessThanOrEqualTo(32)); // 胶囊内容高度不超过 32
     final Container container = tester.widget<Container>(
@@ -499,14 +499,14 @@ void main() {
     setViewport(tester, const Size(1200, 700));
     await tester.pumpWidget(host(const AylaVoiceChannelCard(channel: basic)));
     expect(cardBorder(tester, 0), AylaColors.glassBorder);
-    expect(tester.widget<GlassSurface>(cardSurface(0)).shadow, AylaShadows.glass);
+    expect(tester.widget<AylaGlassSurface>(cardSurface(0)).shadow, AylaShadows.glass);
     final double topBefore = tester.getRect(cardSurface(0)).top;
 
     await hover(tester, cardSurface(0));
 
     expect(cardBorder(tester, 0), AylaColors.glassBorder); // 悬停**不改边色**
     expect(
-      tester.widget<GlassSurface>(cardSurface(0)).shadow,
+      tester.widget<AylaGlassSurface>(cardSurface(0)).shadow,
       AylaShadows.glassHover, // 换 hover 阴影
     );
     await tester.pump(const Duration(milliseconds: 400)); // 300ms 位移走完
@@ -735,12 +735,12 @@ void main() {
     demo.setState(() => uiRejoin = true);
     await tester.pump();
     expect(find.text('重新加入'), findsOneWidget);
-    final GlassButton rejoin = tester.widget<GlassButton>(
+    final AylaGlassButton rejoin = tester.widget<AylaGlassButton>(
       find.byWidgetPredicate(
-        (Widget w) => w is GlassButton && w.label == '重新加入',
+        (Widget w) => w is AylaGlassButton && w.label == '重新加入',
       ),
     );
-    expect(rejoin.variant, GlassButtonVariant.primary);
+    expect(rejoin.variant, AylaGlassButtonVariant.primary);
     expect(rejoin.minHeight, 28); // `.voice-rejoin-btn { min-height: 28px }`
     expect(rejoin.fontSize, 12);
     expect(rejoin.padding, const EdgeInsets.symmetric(horizontal: AylaSpacing.sp3));
@@ -754,12 +754,12 @@ void main() {
     // 本条测的是**可用态**的面层规格。
     await tester.pumpWidget(host(AylaVoiceControls(onLeave: () {})));
 
-    final GlassButton leave = tester.widget<GlassButton>(
+    final AylaGlassButton leave = tester.widget<AylaGlassButton>(
       find.byWidgetPredicate(
-        (Widget w) => w is GlassButton && w.label == '离开频道',
+        (Widget w) => w is AylaGlassButton && w.label == '离开频道',
       ),
     );
-    expect(leave.variant, GlassButtonVariant.outlineDestructive);
+    expect(leave.variant, AylaGlassButtonVariant.outlineDestructive);
 
     // 面层：透明底 + destructive 1px 边（app.css 3108–3112）
     final AnimatedContainer face = tester.widget<AnimatedContainer>(
@@ -774,7 +774,7 @@ void main() {
 
     // `.btn` 基础块未声明 box-shadow ⇒ 该档 `shadow = []`（阴影环 painter 存在但零绘制）；
     // 同时也不叠 `--glass-inset` 内高光（那条只随阴影 token 出现）⇒ 面层无内高光渐变。
-    expect(leave.variant, GlassButtonVariant.outlineDestructive);
+    expect(leave.variant, AylaGlassButtonVariant.outlineDestructive);
   });
 
   testWidgets('控制条外观：padding-top 8 + 顶部 1px --glass-border（app.css 3099–3106）',

@@ -7,11 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/models/post.dart';
-import '../lib/theme/glass.dart' show GlassButton, GlassInput;
+import '../lib/theme/glass.dart' show AylaGlassButton, AylaGlassInput;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/post_editor.dart';
-import '../lib/widgets/directory_controls.dart' show VisibilitySelection;
+import '../lib/widgets/posts/post_editor.dart';
+import '../lib/widgets/base/directory_controls.dart' show AylaVisibilitySelection;
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -59,11 +59,11 @@ void main() {
 
   setUp(() => submitted = null);
 
-  group('GlassInput 多行扩展（TextField maxLines 语义回归）', () {
+  group('AylaGlassInput 多行扩展（TextField maxLines 语义回归）', () {
     testWidgets('未传 minLines/maxLines → 仍是单行（maxLines=1，非 null）', (WidgetTester tester) async {
       final TextEditingController controller = TextEditingController();
       addTearDown(controller.dispose);
-      await tester.pumpWidget(host(GlassInput(controller: controller)));
+      await tester.pumpWidget(host(AylaGlassInput(controller: controller)));
       final TextField field = tester.widget<TextField>(find.byType(TextField));
       // ⚠️ TextField 的 maxLines=null 表示「不限行数」→ 不能直接透传 null
       expect(field.maxLines, 1);
@@ -74,7 +74,7 @@ void main() {
       final TextEditingController controller = TextEditingController();
       addTearDown(controller.dispose);
       await tester.pumpWidget(
-        host(GlassInput(controller: controller, minLines: 4, maxLines: 4, minHeight: 64)),
+        host(AylaGlassInput(controller: controller, minLines: 4, maxLines: 4, minHeight: 64)),
       );
       final TextField field = tester.widget<TextField>(find.byType(TextField));
       expect(field.minLines, 4);
@@ -100,8 +100,8 @@ void main() {
 
     testWidgets('标题/正文为空 → 发布钮 disabled（web 语义；校验是防御性代码）', (WidgetTester tester) async {
       await tester.pumpWidget(host(build()));
-      GlassButton submitButton() => tester.widget<GlassButton>(
-            find.ancestor(of: find.text('发布'), matching: find.byType(GlassButton)),
+      AylaGlassButton submitButton() => tester.widget<AylaGlassButton>(
+            find.ancestor(of: find.text('发布'), matching: find.byType(AylaGlassButton)),
           );
       // 标题空 + 正文有 → disabled
       await tester.enterText(find.byType(TextField).at(1), '正文');
@@ -175,14 +175,14 @@ void main() {
       await tester.enterText(find.byType(TextField).at(0), '标题');
       await tester.enterText(find.byType(TextField).at(1), '正文');
       await tester.pump();
-      // 图标在 GlassButton 的 IconTheme(foreground) 之内 → 取 #fffafb（surface），
+      // 图标在 AylaGlassButton 的 IconTheme(foreground) 之内 → 取 #fffafb（surface），
       // 否则 indigo 图标画在 indigo 底上不可见。
       // ⚠️ 不能用 find.ancestor(...).first：祖先顺序是「由外向内」，会先抓到 Material
-      // 默认的 IconTheme(black87)（实测）。改为在整个 GlassButton 子树里找是否存在
+      // 默认的 IconTheme(black87)（实测）。改为在整个 AylaGlassButton 子树里找是否存在
       // surface 色的 IconTheme（AylaIcon 取的是**最近**祖先）。
       final Iterable<IconTheme> themes = tester.widgetList<IconTheme>(
         find.descendant(
-          of: find.byType(GlassButton),
+          of: find.byType(AylaGlassButton),
           matching: find.byType(IconTheme),
         ),
       );

@@ -11,13 +11,13 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/reveal.dart';
-import '../lib/widgets/tab_badge.dart';
+import '../lib/widgets/base/reveal.dart';
+import '../lib/widgets/base/tab_badge.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
 
-  group('TabBadge（R8 三档合并）', () {
+  group('AylaTabBadge（R8 三档合并）', () {
     testWidgets('行内档贴合内容，不被有界宽度拉满', (WidgetTester tester) async {
       // 关键回归：Container(alignment:) 在有界宽度父级下会撑满整行（曾实测拉伸）
       await tester.pumpWidget(
@@ -28,15 +28,15 @@ void main() {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: const <Widget>[
-                  TabBadge(
+                  AylaTabBadge(
                     count: 7,
-                    metrics: TabBadgeMetrics.groupBadge,
-                    placement: TabBadgePlacement.inline,
+                    metrics: AylaTabBadgeMetrics.groupBadge,
+                    placement: AylaTabBadgePlacement.inline,
                   ),
-                  TabBadge(
+                  AylaTabBadge(
                     count: 7,
-                    metrics: TabBadgeMetrics.messages,
-                    placement: TabBadgePlacement.inline,
+                    metrics: AylaTabBadgeMetrics.messages,
+                    placement: AylaTabBadgePlacement.inline,
                   ),
                 ],
               ),
@@ -44,8 +44,8 @@ void main() {
           ),
         ),
       );
-      final Size group = tester.getSize(find.byType(TabBadge).first);
-      final Size messages = tester.getSize(find.byType(TabBadge).last);
+      final Size group = tester.getSize(find.byType(AylaTabBadge).first);
+      final Size messages = tester.getSize(find.byType(AylaTabBadge).last);
       // 单字符：宽度 = minWidth + 2×padding（16+8 / 18+10），远小于 400
       expect(group.width, lessThan(40));
       expect(group.height, 16);
@@ -65,8 +65,8 @@ void main() {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: const <Widget>[
-                  TabBadge(count: 0),
-                  TabBadge(count: 150),
+                  AylaTabBadge(count: 0),
+                  AylaTabBadge(count: 150),
                 ],
               ),
             ),
@@ -246,11 +246,11 @@ void main() {
     });
   });
 
-  group('GlassSurface.shadowTransition（R1/R2 能力）', () {
+  group('AylaGlassSurface.shadowTransition（R1/R2 能力）', () {
     testWidgets('动画阴影层只画形状之外：切换不抛错且不改变布局尺寸', (WidgetTester tester) async {
       Widget build(List<BoxShadow> shadows) => host(
             Center(
-              child: GlassSurface(
+              child: AylaGlassSurface(
                 radiusOverride: BorderRadius.circular(AylaRadii.rCard),
                 shadow: shadows,
                 shadowTransition: AylaDurations.auroraqua,
@@ -260,11 +260,11 @@ void main() {
             ),
           );
       await tester.pumpWidget(build(AylaShadows.glass));
-      final Size before = tester.getSize(find.byType(GlassSurface));
+      final Size before = tester.getSize(find.byType(AylaGlassSurface));
       await tester.pumpWidget(build(AylaShadows.glassHover));
       await tester.pump(const Duration(milliseconds: 150));
       await tester.pump(const Duration(milliseconds: 200));
-      expect(tester.getSize(find.byType(GlassSurface)), before);
+      expect(tester.getSize(find.byType(AylaGlassSurface)), before);
       expect(tester.takeException(), isNull);
     });
   });

@@ -21,9 +21,9 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/mention_editor.dart';
-import '../lib/widgets/mention_picker.dart';
-import '../lib/widgets/message_input.dart';
+import '../lib/widgets/chat/mention_editor.dart';
+import '../lib/widgets/chat/mention_picker.dart';
+import '../lib/widgets/chat/message_input.dart';
 
 AylaChatMessage _quote() => AylaChatMessage(
       id: '9',

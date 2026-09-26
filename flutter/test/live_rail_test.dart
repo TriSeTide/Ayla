@@ -17,13 +17,13 @@ import '../lib/theme/buttons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
-import '../lib/widgets/create_sheet.dart' show AylaCreateSheet;
-import '../lib/widgets/dialogs.dart' show AylaModalCard, AylaSheetHead;
-import '../lib/widgets/live_rail.dart';
+import '../lib/widgets/live/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
+import '../lib/widgets/shell/create_sheet.dart' show AylaCreateSheet;
+import '../lib/widgets/base/dialogs.dart' show AylaModalCard, AylaSheetHead;
+import '../lib/widgets/live/live_rail.dart';
 import '../lib/theme/app_icons.dart' show AylaIcon;
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
-import '../lib/widgets/reveal.dart' show AylaRevealItem;
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/base/reveal.dart' show AylaRevealItem;
 
 AylaLiveCardData _ch(
   String id,
@@ -171,9 +171,9 @@ void main() {
       await settle(tester);
 
       // `width: 240` 是权威值（CSS 压过父级拉伸）；组件根会填满宿主，故量侧栏本体
-      expect(tester.getRect(find.byType(GlassSurface)).width, 240);
+      expect(tester.getRect(find.byType(AylaGlassSurface)).width, 240);
       // `margin: var(--sidebar-gutter)`
-      expect(tester.getRect(find.byType(GlassSurface)).left, AylaSpacing.sidebarGutter);
+      expect(tester.getRect(find.byType(AylaGlassSurface)).left, AylaSpacing.sidebarGutter);
       // `.live-rail-actions { min-height: 54px }`
       expect(
         find.byWidgetPredicate(
@@ -205,7 +205,7 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(find.byType(GlassSurface), findsNothing);
+      expect(find.byType(AylaGlassSurface), findsNothing);
       expect(item('切换到直播间 第一场直播'), findsNothing);
       expect(item('收起直播间列表'), findsNothing);
     });
@@ -239,7 +239,7 @@ void main() {
       expect(reveal.offset.dx, 20);
       // ≤768：`width: min(240px, calc(100vw - 48px))`
       expect(
-        tester.getRect(find.byType(GlassSurface)).width,
+        tester.getRect(find.byType(AylaGlassSurface)).width,
         lessThanOrEqualTo(240),
       );
     });
@@ -259,7 +259,7 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(tester.getRect(find.byType(GlassSurface)).width, 172);
+      expect(tester.getRect(find.byType(AylaGlassSurface)).width, 172);
     });
   });
 
@@ -445,7 +445,7 @@ void main() {
 
       // 滚过之后末项进入视口
       final Rect row = tester.getRect(item('切换到直播间 第 12 场直播'));
-      final Rect rail = tester.getRect(find.byType(GlassSurface));
+      final Rect rail = tester.getRect(find.byType(AylaGlassSurface));
       expect(row.top, greaterThanOrEqualTo(rail.top));
       expect(row.bottom, lessThanOrEqualTo(rail.bottom + 0.5));
     });
@@ -757,9 +757,9 @@ void main() {
       );
       await settle(tester);
       expect(find.text('创建中…'), findsOneWidget);
-      final GlassButton button = tester.widget<GlassButton>(
+      final AylaGlassButton button = tester.widget<AylaGlassButton>(
         find.byWidgetPredicate(
-          (Widget w) => w is GlassButton && w.variant == GlassButtonVariant.glow,
+          (Widget w) => w is AylaGlassButton && w.variant == AylaGlassButtonVariant.glow,
         ),
       );
       expect(button.onPressed, isNull); // disabled

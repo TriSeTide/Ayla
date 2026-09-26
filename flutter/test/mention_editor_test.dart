@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/models/chat_message.dart';
 import '../lib/core/models/mention.dart';
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/mention_editor.dart';
+import '../lib/widgets/chat/mention_editor.dart';
 
 void main() {
   // ======================= 纯函数（utils/mention.ts） =======================

@@ -15,11 +15,11 @@ import '../lib/theme/buttons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/resource_image.dart';
-import '../lib/widgets/primitives.dart' show AylaSourceTag;
-import '../lib/widgets/reveal.dart';
-import '../lib/widgets/voice_room_body.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/base/resource_image.dart';
+import '../lib/widgets/base/primitives.dart' show AylaSourceTag;
+import '../lib/widgets/base/reveal.dart';
+import '../lib/widgets/voice/voice_room_body.dart';
 
 const Key _panelKey = Key('room-body-panel');
 
@@ -198,7 +198,7 @@ void main() {
     await tester.pumpWidget(host(body()));
     await settle(tester);
     expect(builderFlags.last, isFalse); // `.voice-room-voice-card > .voice-panel` 透明
-    expect(find.byType(GlassSurface), findsWidgets); // 外层卡自带材质
+    expect(find.byType(AylaGlassSurface), findsWidgets); // 外层卡自带材质
   });
 
   testWidgets('材质归属（窄屏）：面板自带材质（builder 收 true）', (WidgetTester tester) async {
@@ -257,7 +257,7 @@ void main() {
     await tester.pumpWidget(host(body(isOwner: true)));
     await settle(tester);
     expect(find.text('删除房间'), findsOneWidget);
-    // 裸 .btn：TextButton 形态（无 GlassSurface 包裹）
+    // 裸 .btn：TextButton 形态（无 AylaGlassSurface 包裹）
     expect(
       find.ancestor(
         of: find.text('删除房间'),
@@ -425,9 +425,9 @@ void main() {
     );
     await settle(tester);
 
-    GlassButton sendBtn() => tester.widget<GlassButton>(
+    AylaGlassButton sendBtn() => tester.widget<AylaGlassButton>(
           find.byWidgetPredicate(
-            (Widget w) => w is GlassButton && w.semanticLabel == '发送语音房消息',
+            (Widget w) => w is AylaGlassButton && w.semanticLabel == '发送语音房消息',
           ),
         );
     expect(sendBtn().onPressed, isNull); // 空文本
@@ -436,7 +436,7 @@ void main() {
     await settle(tester);
     expect(sendBtn().onPressed, isNotNull);
     await tester.tap(find.byWidgetPredicate(
-      (Widget w) => w is GlassButton && w.semanticLabel == '发送语音房消息',
+      (Widget w) => w is AylaGlassButton && w.semanticLabel == '发送语音房消息',
     ));
     await settle(tester);
     expect(sent, <String>['晚上好']);
@@ -458,7 +458,7 @@ void main() {
     await tester.enterText(find.byType(TextField).first, '晚上好');
     await settle(tester);
     await tester.tap(find.byWidgetPredicate(
-      (Widget w) => w is GlassButton && w.semanticLabel == '发送语音房消息',
+      (Widget w) => w is AylaGlassButton && w.semanticLabel == '发送语音房消息',
     ));
     await settle(tester);
 
@@ -480,7 +480,7 @@ void main() {
     await tester.enterText(find.byType(TextField).first, '晚上好');
     await settle(tester);
     await tester.tap(find.byWidgetPredicate(
-      (Widget w) => w is GlassButton && w.semanticLabel == '发送语音房消息',
+      (Widget w) => w is AylaGlassButton && w.semanticLabel == '发送语音房消息',
     ));
     await settle(tester);
     expect(find.text(AylaVoiceRoomBody.sendErrorFallback), findsOneWidget);
@@ -539,8 +539,8 @@ void main() {
     expect(find.text('在的'), findsOneWidget);
     expect(find.text('图片'), findsNothing); // tsx 201：占位文案不渲染
     // 缩略图 120×80 + radius-sm
-    expect(tester.getSize(find.byType(ResourceImage)).width, 120);
-    expect(tester.getSize(find.byType(ResourceImage)).height, 80);
+    expect(tester.getSize(find.byType(AylaResourceImage)).width, 120);
+    expect(tester.getSize(find.byType(AylaResourceImage)).height, 80);
   });
 
   testWidgets('历史控件：7 个字段透传（AylaHistoryControls）', (WidgetTester tester) async {
@@ -597,7 +597,7 @@ void main() {
     );
     await settle(tester);
     expect(find.text('在的'), findsOneWidget);
-    // 浮层改用库内 GlassSurface（手搓裸 BackdropFilter 会糊掉整块画布）+ 固定高 300
+    // 浮层改用库内 AylaGlassSurface（手搓裸 BackdropFilter 会糊掉整块画布）+ 固定高 300
     final Finder overlayBox = find.byWidgetPredicate(
       (Widget w) =>
           w is SizedBox && w.height == AylaVoiceRoomBody.narrowChatListHeight,

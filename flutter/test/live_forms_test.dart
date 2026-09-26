@@ -13,13 +13,13 @@ import '../lib/theme/buttons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/dashed_border.dart';
-import '../lib/widgets/directory_controls.dart' show AylaVisibilitySelector;
-import '../lib/widgets/live_channel_snapshot.dart';
-import '../lib/widgets/live_create.dart';
-import '../lib/widgets/live_hall.dart' show AylaLiveStatus;
-import '../lib/widgets/live_owner_panel.dart';
-import '../lib/widgets/live_studio.dart' show AylaLiveCopyRow, AylaLiveCopyRowVariant;
+import '../lib/widgets/base/dashed_border.dart';
+import '../lib/widgets/base/directory_controls.dart' show AylaVisibilitySelector;
+import '../lib/widgets/live/live_channel_snapshot.dart';
+import '../lib/widgets/live/live_create.dart';
+import '../lib/widgets/live/live_hall.dart' show AylaLiveStatus;
+import '../lib/widgets/live/live_owner_panel.dart';
+import '../lib/widgets/live/live_studio.dart' show AylaLiveCopyRow, AylaLiveCopyRowVariant;
 
 AylaLiveChannelSnapshot _snapshot({
   String title = '深夜电台',
@@ -132,9 +132,9 @@ void main() {
       expect(find.byType(AylaDashedBorder), findsOneWidget);
       // 提交键文案（tsx 141）
       expect(find.text('开播'), findsOneWidget);
-      final GlassButton submit = tester.widget<GlassButton>(
+      final AylaGlassButton submit = tester.widget<AylaGlassButton>(
         find.byWidgetPredicate(
-          (Widget w) => w is GlassButton && w.variant == GlassButtonVariant.glow,
+          (Widget w) => w is AylaGlassButton && w.variant == AylaGlassButtonVariant.glow,
         ),
       );
       expect(submit.expand, isTrue); // 卡片作用域 width 100%
@@ -343,7 +343,7 @@ void main() {
       final Rect cover = tester.getRect(find.byType(AspectRatio).first);
       final Rect titleField = tester.getRect(find.byType(TextField).first);
       final Rect descField = tester.getRect(find.byType(TextField).at(1));
-      final Rect startPill = pillOf(find.byType(GlassButton));
+      final Rect startPill = pillOf(find.byType(AylaGlassButton));
       final Rect savePill = pillOf(find.byType(AylaMsgActionButton));
 
       // 行高 112：封面按 16:9 反推宽度（199.1 × 112）、四个元素**上沿与下沿全部齐平**
@@ -420,13 +420,13 @@ void main() {
         ),
       );
       await settle(tester);
-      final GlassButton primary = tester.widget<GlassButton>(
+      final AylaGlassButton primary = tester.widget<AylaGlassButton>(
         find.byWidgetPredicate(
           (Widget w) =>
-              w is GlassButton && w.label == '下播',
+              w is AylaGlassButton && w.label == '下播',
         ),
       );
-      expect(primary.variant, GlassButtonVariant.ghost);
+      expect(primary.variant, AylaGlassButtonVariant.ghost);
     });
 
     testWidgets('空标题保存 → 「标题不能为空」且不调 onSave（tsx 76–79）', (
@@ -569,7 +569,7 @@ void main() {
       final Rect startPill = tester.getRect(
         find
             .descendant(
-              of: find.byType(GlassButton),
+              of: find.byType(AylaGlassButton),
               matching: find.byType(AnimatedContainer),
             )
             .first,

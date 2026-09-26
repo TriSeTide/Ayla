@@ -8,13 +8,13 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/theme/glass.dart' show GlassButton, GlassButtonVariant;
+import '../lib/theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/live_hall.dart' show AylaLiveStatus;
-import '../lib/widgets/live_mini_player.dart';
-import '../lib/widgets/live_player.dart';
-import '../lib/widgets/overlays.dart';
+import '../lib/widgets/live/live_hall.dart' show AylaLiveStatus;
+import '../lib/widgets/live/live_mini_player.dart';
+import '../lib/widgets/live/live_player.dart';
+import '../lib/widgets/base/overlays.dart';
 
 void main() {
   Widget host(
@@ -142,10 +142,10 @@ void main() {
         tester.widget<Text>(find.text('播放失败')).style?.color,
         AylaColors.destructive,
       );
-      final GlassButton retry = tester.widget<GlassButton>(
-        find.byWidgetPredicate((Widget w) => w is GlassButton && w.label == '重试'),
+      final AylaGlassButton retry = tester.widget<AylaGlassButton>(
+        find.byWidgetPredicate((Widget w) => w is AylaGlassButton && w.label == '重试'),
       );
-      expect(retry.variant, GlassButtonVariant.glow);
+      expect(retry.variant, AylaGlassButtonVariant.glow);
       await tester.tap(find.text('重试'));
       await settle(tester);
       expect(retries, 1);

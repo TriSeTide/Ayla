@@ -57,10 +57,10 @@ class _RadialLayer extends StatelessWidget {
 /// 极光背景（全屏，静态九层同构底 + 极淡网格）。
 ///
 /// 用法：作为页面根 Scaffold 的底层（`Stack` 最下层）或 `body` 背景。
-class AuroraBackground extends StatelessWidget {
-  const AuroraBackground({super.key, this.child});
+class AylaAuroraBackground extends StatelessWidget {
+  const AylaAuroraBackground({super.key, this.child});
 
-  const AuroraBackground.fill({super.key}) : child = null;
+  const AylaAuroraBackground.fill({super.key}) : child = null;
 
   /// 可选内容（置于背景之上）。
   final Widget? child;

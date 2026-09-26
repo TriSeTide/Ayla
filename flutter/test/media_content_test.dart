@@ -21,10 +21,10 @@ import '../lib/core/models/post.dart' show AylaMediaDescriptor;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/image_viewer.dart';
-import '../lib/widgets/loading.dart';
-import '../lib/widgets/media_content.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/chat/image_viewer.dart';
+import '../lib/widgets/base/loading.dart';
+import '../lib/widgets/chat/media_content.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 AylaMediaDescriptor _media({
   String id = 'm1',
@@ -118,7 +118,7 @@ class _FakeAudioEngine implements AylaAudioEngine {
 void main() {
   setUp(() {
     // 媒体图走**程序生成的示例图**（就绪态、尺寸确定）；签名链路在 setUp 里 detach
-    // （示例图优先于签名，见 `ResourceImage._resolveInjectedImage`）
+    // （示例图优先于签名，见 `AylaResourceImage._resolveInjectedImage`）
     aylaEnableSampleMedia();
     AylaAudioClaims.reset();
     MediaSigner.instance.detach();
@@ -170,11 +170,11 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    final Rect frame = tester.getRect(find.byType(ResourceImage));
+    final Rect frame = tester.getRect(find.byType(AylaResourceImage));
     expect(frame.width, 320, reason: 'scale = min(320/640, 320/480) = 0.5');
     expect(frame.height, 240);
 
-    await tester.tap(find.byType(ResourceImage));
+    await tester.tap(find.byType(AylaResourceImage));
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.byType(AylaImageViewer), findsOneWidget, reason: '点击 → root overlay 查看器');
 
@@ -192,7 +192,7 @@ void main() {
       host(tester, AylaMediaContent(msg: _msg(media: _media(width: 100, height: 80)))),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    final Rect small = tester.getRect(find.byType(ResourceImage));
+    final Rect small = tester.getRect(find.byType(AylaResourceImage));
     expect(small.width, 100, reason: 'scale 上限 1（不放大）');
     expect(small.height, 80);
   });
@@ -210,7 +210,7 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    final Rect frame = tester.getRect(find.byType(ResourceImage));
+    final Rect frame = tester.getRect(find.byType(AylaResourceImage));
     expect(frame.size, const Size(96, 96), reason: '.media-emoji 96×96（app.css 1506–1511）');
   });
 
@@ -234,7 +234,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.byType(ResourceImage), findsOneWidget, reason: '海报帧封面（秒出，不挂播放器）');
+    expect(find.byType(AylaResourceImage), findsOneWidget, reason: '海报帧封面（秒出，不挂播放器）');
     // 播放键徽标 48×48（`.video-play-badge`，app.css 1423–1439）
     final Finder badge = find
         .ancestor(
@@ -312,7 +312,7 @@ void main() {
 
     expect(fetched, 1, reason: 'media_id 存在时补拉一次（tsx 781–804）');
     expect(delivered?.mediaId, 'm-ws', reason: '拉回后交回持有方（mergeMedia 等价）');
-    expect(find.byType(ResourceImage), findsOneWidget);
+    expect(find.byType(AylaResourceImage), findsOneWidget);
   });
 
   testWidgets('补拉失败 → 失败占位 + 重试；重试后成功', (WidgetTester tester) async {
@@ -335,7 +335,7 @@ void main() {
     await tester.pump(); // setState → rebuild → 触发补拉
     await tester.pump(const Duration(milliseconds: 50)); // 补拉完成 → 渲染媒体
     expect(calls, 2);
-    expect(find.byType(ResourceImage), findsOneWidget, reason: '重试成功后渲染媒体');
+    expect(find.byType(AylaResourceImage), findsOneWidget, reason: '重试成功后渲染媒体');
   });
 
   testWidgets('既无 descriptor 也无 media_id → 直接失败态（tsx 785–788）', (WidgetTester tester) async {
@@ -480,12 +480,12 @@ void main() {
     expect(find.text('@我自己'), findsOneWidget);
 
     // 图片段 180×180（`.mixed-img`，app.css 1951–1962）
-    final Rect img = tester.getRect(find.byType(ResourceImage).first);
+    final Rect img = tester.getRect(find.byType(AylaResourceImage).first);
     expect(img.width, 180);
     expect(img.height, 180);
 
     // 视频段 240×180（tsx 461）
-    final Rect video = tester.getRect(find.byType(ResourceImage).last);
+    final Rect video = tester.getRect(find.byType(AylaResourceImage).last);
     expect(video.width, 240);
     expect(video.height, 180);
 

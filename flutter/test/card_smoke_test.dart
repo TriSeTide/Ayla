@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/widgets/avatar_status_badges.dart';
-import '../lib/widgets/group_card.dart';
+import '../lib/widgets/base/avatar_status_badges.dart';
+import '../lib/widgets/group/group_card.dart';
 import '../lib/theme/preview_theme.dart';
 
 void main() {
@@ -14,9 +14,9 @@ void main() {
         AylaGroupCard(
           groupId: 'g1',
           title: '测试群',
-          slides: <GroupCarouselSlide>[
-            const GroupCarouselSlide.messageVoice(
-                newMessageCount: 3, voiceRooms: <GroupSlideVoiceRoom>[]),
+          slides: <AylaGroupCarouselSlide>[
+            const AylaGroupCarouselSlide.messageVoice(
+                newMessageCount: 3, voiceRooms: <AylaGroupSlideVoiceRoom>[]),
           ],
           unread: 5,
           onOpen: () {},
@@ -37,7 +37,7 @@ void main() {
         AylaGroupListItem(
           groupId: 'g1',
           title: '列表群',
-          status: const AvatarStatus(unread: 7, live: true),
+          status: const AylaAvatarStatus(unread: 7, live: true),
           preview: '小樱：你好',
           onOpen: () {},
         ),

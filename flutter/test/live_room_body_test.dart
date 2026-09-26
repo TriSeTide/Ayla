@@ -8,18 +8,18 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/theme/glass.dart' show GlassSurface;
+import '../lib/theme/glass.dart' show AylaGlassSurface;
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/danmaku.dart'
+import '../lib/widgets/live/danmaku.dart'
     show AylaDanmakuEntry, AylaDanmakuInput, AylaDanmakuList, AylaDanmakuOverlay;
-import '../lib/widgets/live_channel_snapshot.dart';
-import '../lib/widgets/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
-import '../lib/widgets/live_owner_panel.dart' show AylaLiveOwnerPanel;
-import '../lib/widgets/live_player.dart' show AylaLivePlayer, AylaLiveSrsStatus;
-import '../lib/widgets/live_rail.dart' show AylaLiveChannelRail;
-import '../lib/widgets/live_room_body.dart';
-import '../lib/widgets/live_studio.dart' show AylaLiveStreamAddresses;
-import '../lib/widgets/live_viewers.dart' show AylaLiveViewerStrip;
+import '../lib/widgets/live/live_channel_snapshot.dart';
+import '../lib/widgets/live/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
+import '../lib/widgets/live/live_owner_panel.dart' show AylaLiveOwnerPanel;
+import '../lib/widgets/live/live_player.dart' show AylaLivePlayer, AylaLiveSrsStatus;
+import '../lib/widgets/live/live_rail.dart' show AylaLiveChannelRail;
+import '../lib/widgets/live/live_room_body.dart';
+import '../lib/widgets/live/live_studio.dart' show AylaLiveStreamAddresses;
+import '../lib/widgets/live/live_viewers.dart' show AylaLiveViewerStrip;
 
 const List<AylaLiveCardData> _channels = <AylaLiveCardData>[
   AylaLiveCardData(id: 'lc1', title: '第一场直播', status: AylaLiveStatus.live),
@@ -105,14 +105,14 @@ void main() {
       // 顶栏卡片（宽屏 = 卡片材质：margin 0 / radius 16 / 1px 边 / compact 阴影 / blur24）
       final Finder headCard = find.ancestor(
         of: find.text('深夜电台 · 爱莉陪你写代码'),
-        matching: find.byType(GlassSurface),
+        matching: find.byType(AylaGlassSurface),
       );
       expect(headCard, findsOneWidget);
       expect(tester.getRect(headCard).height, closeTo(56, 0.5)); // 高度恒定（收起/展开都一样）
       // 弹幕侧列卡片（宽 340 / margin 12 / radius 16 / glass 阴影）
       final Finder sideCard = find.ancestor(
         of: find.byType(AylaDanmakuList),
-        matching: find.byType(GlassSurface),
+        matching: find.byType(AylaGlassSurface),
       );
       expect(sideCard, findsOneWidget);
       expect(tester.getRect(sideCard).width, closeTo(340, 0.5));
@@ -175,14 +175,14 @@ void main() {
       // （web 顶栏恒有 40 高键 ⇒ 卡片恒 56；收起后多出的返回/展开键不得把顶栏撑高）
       final Finder head = find.ancestor(
         of: find.byType(AylaLivePlayer),
-        matching: find.byType(GlassSurface),
+        matching: find.byType(AylaGlassSurface),
       );
       expect(head, findsNothing); // 播放器不在顶栏卡里（自证 finder 有区分度）
       final Finder headCard = find.ancestor(
         of: find.byWidgetPredicate(
           (Widget w) => w is Semantics && w.properties.label == '展开直播间列表',
         ),
-        matching: find.byType(GlassSurface),
+        matching: find.byType(AylaGlassSurface),
       );
       expect(tester.getRect(headCard).height, closeTo(56, 0.5));
     });

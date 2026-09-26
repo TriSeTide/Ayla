@@ -20,10 +20,10 @@ import '../lib/core/models/visibility.dart';
 import '../lib/theme/app_icons.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/game_room_card.dart';
-import '../lib/widgets/primitives.dart';
-import '../lib/widgets/reveal.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/game/game_room_card.dart';
+import '../lib/widgets/base/primitives.dart';
+import '../lib/widgets/base/reveal.dart';
 
 void main() {
   const AylaUserPublic alice = AylaUserPublic(

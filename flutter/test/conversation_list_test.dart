@@ -17,11 +17,11 @@ import '../lib/core/models/conversation.dart';
 import '../lib/core/models/user_public.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/conversation_list.dart';
-import '../lib/widgets/conversation_more_menu.dart';
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
-import '../lib/widgets/tab_badge.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/chat/conversation_list.dart';
+import '../lib/widgets/chat/conversation_more_menu.dart';
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/base/tab_badge.dart';
 
 AylaConversationSummary _conv({
   String id = 'c1',
@@ -171,7 +171,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(tester.widget<AvatarHalo>(find.byType(AvatarHalo)).size, 40);
+    expect(tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).size, 40);
     expect(find.text('小樱'), findsOneWidget);
     expect(find.text('晚上一起看直播吗？'), findsOneWidget);
     expect(find.byType(AylaConversationMoreMenu), findsOneWidget, reason: '⋯ 菜单（tsx 158）');
@@ -288,14 +288,14 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('3'), findsOneWidget);
-    final TabBadge badge = tester.widget<TabBadge>(find.byType(TabBadge));
-    expect(badge.metrics, TabBadgeMetrics.convUnread);
+    final AylaTabBadge badge = tester.widget<AylaTabBadge>(find.byType(AylaTabBadge));
+    expect(badge.metrics, AylaTabBadgeMetrics.convUnread);
     expect(badge.metrics.minSize, 20);
     expect(badge.metrics.fontSize, 12);
     expect(badge.metrics.fontFamily, AylaFonts.utility);
     expect(badge.metrics.fontWeight, FontWeight.w500);
     expect(
-      tester.getSize(find.byType(TabBadge)).height,
+      tester.getSize(find.byType(AylaTabBadge)).height,
       20,
       reason: '`.conv-unread { height: 20px }`（app.css 697）',
     );
@@ -362,7 +362,7 @@ void main() {
     await tester.pump();
     expect(selected, 'c9');
 
-    await tester.tap(find.byType(AvatarHalo));
+    await tester.tap(find.byType(AylaAvatarHalo));
     await tester.pump();
     expect(avatarTarget?.id, 'u-c9');
   });
@@ -382,7 +382,7 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    expect(tester.widget<AvatarHalo>(find.byType(AvatarHalo)).onTap, isNull);
+    expect(tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).onTap, isNull);
     expect(avatarTarget, isNull);
   });
 

@@ -1,8 +1,8 @@
 /// A3：CreateSheet 定向测试 —— 逐条对照 `layout/CreateSheet.tsx` 1–61 与
 /// `styles/private.css` 185–275。
 ///
-/// 另含本轮同批修正的既存偏差回归：`ConfirmDialog.tsx:82–89` /
-/// `PrivacySheet.tsx:188–190` 的关闭钮都是 `button.icon-btn-40` + `<IconClose />`，
+/// 另含本轮同批修正的既存偏差回归：`AylaConfirmDialog.tsx:82–89` /
+/// `AylaPrivacySheet.tsx:188–190` 的关闭钮都是 `button.icon-btn-40` + `<IconClose />`，
 /// Flutter 侧此前是手搓 40 盒 + Material `Icons.close`。
 library;
 
@@ -14,10 +14,10 @@ import '../lib/theme/app_icons.dart' show AylaIcon;
 import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart' show AylaColors, AylaFonts, AylaSpacing;
-import '../lib/widgets/create_sheet.dart';
-import '../lib/widgets/dialogs.dart'
-    show AylaModalCard, AylaModalOverlay, AylaSheetHead, ConfirmDialog;
-import '../lib/widgets/privacy_sheet.dart' show PrivacySheet;
+import '../lib/widgets/shell/create_sheet.dart';
+import '../lib/widgets/base/dialogs.dart'
+    show AylaModalCard, AylaModalOverlay, AylaSheetHead, AylaConfirmDialog;
+import '../lib/widgets/base/privacy_sheet.dart' show AylaPrivacySheet;
 
 /// 弹层内容（宽度撑满，模拟 web 里 width:100% 的表单）。
 const Key kSheetBody = ValueKey<String>('create-sheet-body');
@@ -79,7 +79,7 @@ void main() {
           tester.widget<AylaSheetHead>(find.byType(AylaSheetHead));
       expect(head.title, '发帖');
       // `CreateSheet.tsx:53`：`<IconClose width={20} height={20} />`
-      expect(head.closeIconSize, 20, reason: 'CreateSheet.tsx:53 = 20（ConfirmDialog 是 18）');
+      expect(head.closeIconSize, 20, reason: 'CreateSheet.tsx:53 = 20（AylaConfirmDialog 是 18）');
       expect(head.disabled, isFalse);
 
       final AylaIconButton close =
@@ -265,13 +265,13 @@ void main() {
 
   // ==================== 同批既存偏差回归 ====================
 
-  group('同批修正：ConfirmDialog / PrivacySheet 的关闭钮（web = icon-btn-40 + IconClose）', () {
-    testWidgets('ConfirmDialog 关闭钮 = AylaIconButton/iconClose 18；busy 时禁用', (
+  group('同批修正：AylaConfirmDialog / AylaPrivacySheet 的关闭钮（web = icon-btn-40 + IconClose）', () {
+    testWidgets('AylaConfirmDialog 关闭钮 = AylaIconButton/iconClose 18；busy 时禁用', (
       WidgetTester tester,
     ) async {
       setViewport(tester, const Size(1440, 900));
       int closed = 0;
-      await tester.pumpWidget(host(ConfirmDialog(
+      await tester.pumpWidget(host(AylaConfirmDialog(
         title: '删除会话',
         message: '删除会话「小樱」？',
         onConfirm: () {},
@@ -282,7 +282,7 @@ void main() {
       expect(find.byType(AylaSheetHead), findsOneWidget);
       final AylaSheetHead head =
           tester.widget<AylaSheetHead>(find.byType(AylaSheetHead));
-      expect(head.closeIconSize, 18, reason: 'ConfirmDialog.tsx:85 = 18');
+      expect(head.closeIconSize, 18, reason: 'AylaConfirmDialog.tsx:85 = 18');
       expect(head.disabled, isFalse);
 
       final AylaIconButton close =
@@ -296,10 +296,10 @@ void main() {
       expect(closed, 1);
     });
 
-    testWidgets('ConfirmDialog busy → 关闭钮禁用（disabled={busy}）', (WidgetTester tester) async {
+    testWidgets('AylaConfirmDialog busy → 关闭钮禁用（disabled={busy}）', (WidgetTester tester) async {
       setViewport(tester, const Size(1440, 900));
       int closed = 0;
-      await tester.pumpWidget(host(ConfirmDialog(
+      await tester.pumpWidget(host(AylaConfirmDialog(
         title: 'T',
         message: 'M',
         busy: true,
@@ -321,16 +321,16 @@ void main() {
       expect(closed, 0);
     });
 
-    testWidgets('PrivacySheet 关闭钮 = AylaIconButton/iconClose 18', (WidgetTester tester) async {
+    testWidgets('AylaPrivacySheet 关闭钮 = AylaIconButton/iconClose 18', (WidgetTester tester) async {
       setViewport(tester, const Size(1440, 900));
       int closed = 0;
-      await tester.pumpWidget(host(PrivacySheet(onClose: () => closed++)));
+      await tester.pumpWidget(host(AylaPrivacySheet(onClose: () => closed++)));
       await tester.pump();
 
       final AylaIconButton close =
           tester.widget<AylaIconButton>(find.byType(AylaIconButton));
       expect((close.icon as AylaIcon).icon.name, 'iconClose');
-      expect((close.icon as AylaIcon).size, 18, reason: 'PrivacySheet.tsx:189 = 18');
+      expect((close.icon as AylaIcon).size, 18, reason: 'AylaPrivacySheet.tsx:189 = 18');
       expect(close.semanticLabel, '关闭');
       expect(find.byIcon(Icons.close), findsNothing);
 

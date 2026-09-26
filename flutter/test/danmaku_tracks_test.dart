@@ -4,7 +4,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/widgets/danmaku_tracks.dart';
+import '../lib/widgets/live/danmaku_tracks.dart';
 
 void main() {
   group('trackCountForHeight（tsx 24–30）', () {
@@ -58,10 +58,10 @@ void main() {
 
   group('pickTrack（tsx 49–54）', () {
     test('恒选最近开始时间最早（最空闲）的轨道', () {
-      final List<DanmakuTrackState> tracks = <DanmakuTrackState>[
-        DanmakuTrackState(lastStartAt: 500),
-        DanmakuTrackState(lastStartAt: 100),
-        DanmakuTrackState(lastStartAt: 300),
+      final List<AylaDanmakuTrackState> tracks = <AylaDanmakuTrackState>[
+        AylaDanmakuTrackState(lastStartAt: 500),
+        AylaDanmakuTrackState(lastStartAt: 100),
+        AylaDanmakuTrackState(lastStartAt: 300),
       ];
       expect(pickTrack(tracks), 1);
       // 更新后重新选（1 号变最忙 → 最闲换到 2 号）
@@ -70,10 +70,10 @@ void main() {
     });
 
     test('空轨道（0 起始）优先被选中', () {
-      final List<DanmakuTrackState> tracks = <DanmakuTrackState>[
-        DanmakuTrackState(lastStartAt: 100),
-        DanmakuTrackState(),
-        DanmakuTrackState(lastStartAt: 200),
+      final List<AylaDanmakuTrackState> tracks = <AylaDanmakuTrackState>[
+        AylaDanmakuTrackState(lastStartAt: 100),
+        AylaDanmakuTrackState(),
+        AylaDanmakuTrackState(lastStartAt: 200),
       ];
       expect(pickTrack(tracks), 1);
     });

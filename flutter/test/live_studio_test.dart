@@ -9,8 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/live_studio.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/live/live_studio.dart';
 
 void main() {
   Widget host(
@@ -89,7 +89,7 @@ void main() {
       Future<String> labelAt(int i) async {
         setLocal(() => idx = i);
         await settle(tester);
-        return tester.widget<AvatarHalo>(find.byType(AvatarHalo)).label;
+        return tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).label;
       }
 
       expect(await labelAt(0), '爱莉');
@@ -116,13 +116,13 @@ void main() {
         ),
       );
       await settle(tester);
-      final AvatarHalo halo = tester.widget<AvatarHalo>(find.byType(AvatarHalo));
+      final AylaAvatarHalo halo = tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
       expect(halo.semanticLabel, '查看主播 爱莉 的个人主页');
       expect(halo.size, 36); // tsx 18 `size = 36`
       expect(halo.online, isTrue);
       expect(halo.resourceUrl, 'https://cdn.local/a.png');
       // 头像本体 36；含流光环外扩 2.5×2 ⇒ 渲染盒 41（与名单骨架头像 41×41 同源）
-      expect(tester.getSize(find.byType(AvatarHalo)).width, 41);
+      expect(tester.getSize(find.byType(AylaAvatarHalo)).width, 41);
     });
 
     testWidgets('空头像 → 无 resourceUrl（走首字符光环）；点击走注入回调', (
@@ -142,8 +142,8 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(tester.widget<AvatarHalo>(find.byType(AvatarHalo)).resourceUrl, isNull);
-      await tester.tap(find.byType(AvatarHalo));
+      expect(tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).resourceUrl, isNull);
+      await tester.tap(find.byType(AylaAvatarHalo));
       await settle(tester);
       expect(taps, 1);
     });
@@ -236,9 +236,9 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(tester.getSize(find.byType(GlassSurface)).width, 960);
-      final GlassSurface glass = tester.widget<GlassSurface>(
-        find.byType(GlassSurface),
+      expect(tester.getSize(find.byType(AylaGlassSurface)).width, 960);
+      final AylaGlassSurface glass = tester.widget<AylaGlassSurface>(
+        find.byType(AylaGlassSurface),
       );
       expect(glass.padding, const EdgeInsets.all(AylaSpacing.sp3));
     });
@@ -258,7 +258,7 @@ void main() {
         ),
       );
       await settle(tester);
-      expect(find.byType(GlassSurface), findsNothing);
+      expect(find.byType(AylaGlassSurface), findsNothing);
       expect(find.text('服务器'), findsNothing);
     });
 

@@ -7,14 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/app_icons.dart';
 import '../lib/theme/buttons.dart' show AylaIconButton;
-import '../lib/widgets/reveal.dart' show AylaRevealItem, AylaRevealMotion;
+import '../lib/widgets/base/reveal.dart' show AylaRevealItem, AylaRevealMotion;
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/bottom_tabs.dart' show AylaPrimaryModule;
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
-import '../lib/widgets/top_nav.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/shell/bottom_tabs.dart' show AylaPrimaryModule;
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/shell/top_nav.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -29,15 +29,15 @@ void main() {
     await setWidth(tester, 1600);
     await tester.pumpWidget(host(const AylaTopNav(userName: '爱莉')));
     await tester.pumpAndSettle();
-    // 条 = 复用 GlassCard（auroraqua:262–270 的浮动圆角卡）
-    expect(find.byType(GlassCard), findsWidgets);
+    // 条 = 复用 AylaGlassCard（auroraqua:262–270 的浮动圆角卡）
+    expect(find.byType(AylaGlassCard), findsWidgets);
     for (final String label in <String>['主页', '语音', '直播', '帖子', '桌游']) {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.text('Ayla'), findsOneWidget, reason: '1600 > 1240 → logo 显示');
     expect(find.text('搜索'), findsOneWidget, reason: '宽屏搜索框 placeholder');
     // 宽屏条高 64（shell.css:168）
-    expect(tester.getSize(find.byType(GlassCard).first).height, greaterThanOrEqualTo(64));
+    expect(tester.getSize(find.byType(AylaGlassCard).first).height, greaterThanOrEqualTo(64));
   });
 
   testWidgets('≤1240 隐藏 logo（shell.css:268–272）', (WidgetTester tester) async {
@@ -54,10 +54,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('主页'), findsNothing, reason: '窄屏不出模块链');
     expect(find.text('搜索'), findsOneWidget, reason: 'default 变体的搜索胶囊文案');
-    expect(find.byType(AvatarHalo), findsOneWidget);
+    expect(find.byType(AylaAvatarHalo), findsOneWidget);
     // 头像 36（NarrowTopBar.tsx:182）。⚠️ 量 **widget 属性**而非渲染尺寸：
-    // AvatarHalo 在线时有呼吸动画（AnimationController _breathe），渲染尺寸会抖动。
-    final AvatarHalo halo = tester.widget<AvatarHalo>(find.byType(AvatarHalo));
+    // AylaAvatarHalo 在线时有呼吸动画（AnimationController _breathe），渲染尺寸会抖动。
+    final AylaAvatarHalo halo = tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
     expect(halo.size, 36);
     // 窄屏条：方角（radiusOverride: BorderRadius.zero → ClipRRect 半径 0）
     final Finder clips = find.descendant(
@@ -236,8 +236,8 @@ void main() {
     await setWidth(tester, 1600);
     await tester.pumpWidget(host(const AylaTopNav(userName: '爱莉')));
     await tester.pumpAndSettle();
-    final Rect bar = tester.getRect(find.byType(GlassCard).first);
-    final Rect avatar = tester.getRect(find.byType(AvatarHalo));
+    final Rect bar = tester.getRect(find.byType(AylaGlassCard).first);
+    final Rect avatar = tester.getRect(find.byType(AylaAvatarHalo));
     final Rect logo = tester.getRect(find.text('Ayla'));
     final Rect search = tester.getRect(find.byType(TextField));
     // ignore: avoid_print

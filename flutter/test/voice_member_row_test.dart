@@ -19,8 +19,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/app_icons.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/voice_member_row.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/voice/voice_member_row.dart';
 
 const Key _rowKey = Key('voice-member-row-probe');
 
@@ -140,7 +140,7 @@ void main() {
       ),
     );
 
-    expect(find.byType(AvatarHalo), findsOneWidget);
+    expect(find.byType(AylaAvatarHalo), findsOneWidget);
     expect(find.text('爱莉'), findsOneWidget);
     expect(find.text('在频道中'), findsOneWidget); // 未静音 → 副行文案
     expect(meterBox(), findsOneWidget);
@@ -191,12 +191,12 @@ void main() {
         ),
       ),
     );
-    final AvatarHalo halo = tester.widget<AvatarHalo>(find.byType(AvatarHalo));
+    final AylaAvatarHalo halo = tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
     expect(halo.size, 32);
     expect(halo.online, isTrue);
-    expect(halo.core, AvatarCore.elysia); // tsx 147：爱莉条目光环
+    expect(halo.core, AylaAvatarCore.elysia); // tsx 147：爱莉条目光环
     expect(halo.semanticLabel, '查看 爱莉 的个人主页'); // tsx 150
-    await tester.tap(find.byType(AvatarHalo));
+    await tester.tap(find.byType(AylaAvatarHalo));
     await tester.pump();
     expect(opened, 1);
   });

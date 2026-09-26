@@ -14,10 +14,10 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/nav_highlight_list.dart';
-import '../lib/widgets/primitives.dart' show AylaNavHighlight, AylaNavHighlightState;
-import '../lib/widgets/reveal.dart';
-import '../lib/widgets/sidebar_card.dart';
+import '../lib/widgets/base/nav_highlight_list.dart';
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight, AylaNavHighlightState;
+import '../lib/widgets/base/reveal.dart';
+import '../lib/widgets/base/sidebar_card.dart';
 
 /// 简项：固定 40 高、带 hover/press 上报与键盘。
 class _Item extends StatefulWidget {
@@ -346,16 +346,16 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 50));
-      // 量**卡片本体**（`GlassSurface`），不是外层的 `UnconstrainedBox` ——
+      // 量**卡片本体**（`AylaGlassSurface`），不是外层的 `UnconstrainedBox` ——
       // 后者自身会被紧宿主 clamp 到宿主宽（同「槽位宽度 ≠ 可见胶囊宽度」，skill §五）
       expect(
-        tester.getSize(find.byType(GlassSurface)).width,
+        tester.getSize(find.byType(AylaGlassSurface)).width,
         224,
         reason: '内部用 UnconstrainedBox 松横向紧约束（live_rail 先例）',
       );
     });
 
-    testWidgets('材质与入场：GlassSurface 圆角 16 + 阴影档可配 + 入场件默认存在', (
+    testWidgets('材质与入场：AylaGlassSurface 圆角 16 + 阴影档可配 + 入场件默认存在', (
       WidgetTester tester,
     ) async {
       setViewport(tester, const Size(400, 400));
@@ -375,8 +375,8 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 50));
 
-      final GlassSurface surface = tester.widget<GlassSurface>(
-        find.byType(GlassSurface),
+      final AylaGlassSurface surface = tester.widget<AylaGlassSurface>(
+        find.byType(AylaGlassSurface),
       );
       expect(surface.radius, AylaRadii.rCard, reason: 'border-radius: var(--radius-card)');
       expect(surface.shadow, AylaShadows.compact, reason: '`.directory-filters` 用 compact 阴影');

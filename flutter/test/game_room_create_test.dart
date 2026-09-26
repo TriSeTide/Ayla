@@ -19,8 +19,8 @@ import '../lib/core/models/visibility.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/game_room_create.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/game/game_room_create.dart';
 
 void main() {
   const List<({String id, String title})> groups = <({String id, String title})>[
@@ -54,10 +54,10 @@ void main() {
   Finder nameField() => find.byType(TextField).last;
 
   /// 提交键（busy 时文案变「创建中…」）。
-  GlassButton submitButton(WidgetTester tester) =>
-      tester.widget<GlassButton>(find.byWidgetPredicate(
+  AylaGlassButton submitButton(WidgetTester tester) =>
+      tester.widget<AylaGlassButton>(find.byWidgetPredicate(
         (Widget w) =>
-            w is GlassButton && (w.label == '创建' || w.label == '创建中…'),
+            w is AylaGlassButton && (w.label == '创建' || w.label == '创建中…'),
       ));
 
   testWidgets('结构：可见性选择器 → 输入（hint 桌游室名称）→ 创建键；初始禁用', (

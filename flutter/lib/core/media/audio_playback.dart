@@ -18,7 +18,7 @@ import 'dart:async';
 import 'package:media_kit/media_kit.dart';
 
 import '../net/dio_client.dart';
-import '../../widgets/resource_image.dart' show mediaContentUrl;
+import '../../widgets/base/resource_image.dart' show mediaContentUrl;
 
 /// 播放状态（web `VoiceMedia` 的 `playing` / `loadingAudio` / `audioError` /
 /// `duration` / `current` 五态投影）。

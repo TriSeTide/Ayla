@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/models/post.dart';
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/image_viewer.dart';
+import '../lib/widgets/chat/image_viewer.dart';
 
 void main() {
   setUp(() => MediaSigner.instance.detach()); // 隔离：不做真实签名

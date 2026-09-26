@@ -16,10 +16,10 @@ import '../lib/core/models/media_kind.dart';
 import '../lib/core/models/post.dart' show AylaMediaDescriptor;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
-import '../lib/widgets/danmaku.dart';
-import '../lib/widgets/danmaku_tracks.dart';
-import '../lib/widgets/image_viewer.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/live/danmaku.dart';
+import '../lib/widgets/live/danmaku_tracks.dart';
+import '../lib/widgets/chat/image_viewer.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 AylaDanmakuEntry _entry(
   String id, {
@@ -308,8 +308,8 @@ void main() {
       await tester.pump();
 
       expect(find.text('图片'), findsNothing); // tsx 121
-      final ResourceImage image = tester.widget<ResourceImage>(
-        find.byType(ResourceImage),
+      final AylaResourceImage image = tester.widget<AylaResourceImage>(
+        find.byType(AylaResourceImage),
       );
       expect(image.src, '${kMediaPathPrefix}m1/thumbnail'); // tsx 68–71
       final Finder frame = find.byWidgetPredicate(
@@ -318,7 +318,7 @@ void main() {
       expect(tester.getSize(frame), const Size(72, 36));
 
       // 起点在容器右缘之外 ⇒ 先推进 1s 让它飘进画面，再点图片钮本体
-      // （ResourceImage 解码前可能是 0 尺寸，不可作点击目标）
+      // （AylaResourceImage 解码前可能是 0 尺寸，不可作点击目标）
       await tester.pump(const Duration(milliseconds: 1000));
       await tester.tap(frame, warnIfMissed: false);
       await tester.pump();

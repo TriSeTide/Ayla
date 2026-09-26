@@ -18,7 +18,7 @@
 /// invalidateSignedMediaUrl(mediaId)  → 清 `mediaId` 与其所有 `|variant` 条目
 /// ```
 ///
-/// ## 使用（`ResourceImage`）
+/// ## 使用（`AylaResourceImage`）
 /// 由 [MediaSigner] 统一签发；失败清缓存后下次进入会重签，因此 UI 侧
 /// 「点重试」= `invalidate` + 重建即可。
 library;

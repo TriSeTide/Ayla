@@ -7,10 +7,10 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/buttons.dart' show AylaPressScale;
 import '../lib/theme/tokens.dart';
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/bottom_tabs.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/group_top_tabs.dart';
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/shell/bottom_tabs.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/shell/group_top_tabs.dart';
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight;
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -35,8 +35,8 @@ void main() {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.text('主页'), findsNothing, reason: '群顶栏中央是头像槽，不是主页 tab');
-    expect(find.byType(AvatarHalo), findsOneWidget);
-    expect(tester.getSize(find.byType(AvatarHalo)).width, 48);
+    expect(find.byType(AylaAvatarHalo), findsOneWidget);
+    expect(tester.getSize(find.byType(AylaAvatarHalo)).width, 48);
   });
 
   testWidgets('选中胶囊画在按钮内且随场景跨槽迁移', (WidgetTester tester) async {

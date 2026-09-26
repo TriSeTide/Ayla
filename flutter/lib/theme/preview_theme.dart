@@ -4,20 +4,20 @@
 /// - 预览宿主 Theme **没有 AylaTextStyles 扩展** → 页面强解包崩
 ///   "Unexpected null value" → 必须包 [previewTheme]；
 /// - 宿主**不渲染根部极光背景** → 不包就没有 Ayla 语境 → 必须包
-///   [previewTheme]（内含 [AuroraBackground]）；
+///   [previewTheme]（内含 [AylaAuroraBackground]）；
 /// - Consumer 页面还要再包 [previewScope]（宿主无 Provider 容器）。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../widgets/overlays.dart';
+import '../widgets/base/overlays.dart';
 import 'app_theme.dart';
 import 'aurora_background.dart';
 
 /// 预览 wrapper：主题 + 极光背景。
 ///
-/// 公开命名（@Preview 参数必须是字面量或公共符号，私有名会报
+/// 公开命名（画布 参数必须是字面量或公共符号，私有名会报
 /// `invalid_widget_preview_private_argument`，实测）。
 Widget previewTheme(Widget child) {
   return Theme(
@@ -31,7 +31,7 @@ Widget previewTheme(Widget child) {
       // "No MaterialLocalizations found. TextField widgets require
       //  MaterialLocalizations to be provided by a Localizations widget ancestor."
       // 预览宿主（widget_preview_scaffold）与 widget test 都不会自动提供，
-      // 导致任何含输入框的组件（GlassInput / PrivacySheet /
+      // 导致任何含输入框的组件（AylaGlassInput / AylaPrivacySheet /
       // VisibilitySelector / 登录页…）在预览与测试里全部崩溃。
       child: Localizations(
         // ⚠️ locale 必须是 `en`：`DefaultMaterialLocalizations.delegate`
@@ -58,7 +58,7 @@ Widget previewTheme(Widget child) {
               // 缺兜底时内部 Text 会落到 `DefaultTextStyle.fallback`（双下划线 + 红色，
               // 用户看到的「黄线」）→ 用组件库统一作用域兜底（widgets/overlays.dart）。
               aylaOverlayEntry(
-                builder: (BuildContext context) => AuroraBackground(
+                builder: (BuildContext context) => AylaAuroraBackground(
                   child: Center(child: child),
                 ),
               ),

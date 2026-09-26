@@ -1,0 +1,1566 @@
+/// 展示型基元（Batch 2）：LayoutSwitch / SegmentedTabs / CapsuleTag /
+/// StatusPill / ScrollingText。
+///
+/// 事实源（逐条对应 web CSS，禁自由发挥）：
+/// - `.layout-switch` / `.layout-switch-btn`（home.css 182–206）：
+///   inline-flex + gap sp2 + padding sp1 + radius-pill + glass-bg + 1px
+///   glass-border；按钮 36×36 pill、text-secondary、180ms background/color；
+///   `is-active` → 底 `rgba(157,191,230,.35)` + text-primary。
+/// - `.messages-tabs` / `.messages-tab`（messages.css 17–37）：flex gap sp2 +
+///   padding sp3 sp4；tab 高 40、radius-input 12、14px/700、text-secondary；
+///   `is-active` → 同款 ice .35 底 + text-primary。
+/// - `.tab-badge` 语义的徽标见 tab_badge.dart（本文件的胶囊不是它）。
+/// - design.md §4 Tags/Badges：胶囊形、`--sakura-300` 底 + `--grape-700` 字、
+///   11px Fredoka（Micro Tag 等级见 d:§3）。
+/// - `.scroll-text` / `.scroll-text-inner` + `scroll-text-marquee`
+///   （base.css 724–758）：单行 nowrap + overflow hidden；溢出时内层
+///   marquee 来回滚动（0–20% 停开头、50–70% 停结尾、100% 回开头，
+///   linear 匀速），距离/时长由组件测量（d/speed，夹 4~16s）；
+///   未溢出静态显示；`prefers-reduced-motion` 关闭滚动。
+library;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+
+import '../../theme/app_icons.dart';
+import '../../theme/app_theme.dart';
+import '../../theme/css_gradient.dart';
+import '../../theme/buttons.dart';
+import '../../theme/glass.dart';
+import '../../theme/tokens.dart';
+import 'tab_badge.dart';
+
+/// `.layout-switch` —— 主页布局切换（卡片 / 列表）。
+///
+/// ══ web 事实链（完整，含 CSS 层叠） ══
+/// DOM：`div.layout-switch` > 两个 `button.layout-switch-btn.has-auroraqua-highlight`
+///      选中项加 `.is-active`，且**选中项内部**渲染 `<span.auroraqua-nav-highlight>`。
+/// CSS 加载序：home.css → auroraqua.css（**后者覆盖**）。
+///
+/// 1. `.layout-switch`（home.css 182–189）
+///      `inline-flex` / `gap: sp2` / `padding: sp1` / `radius-pill` /
+///      `--glass-bg` / `1px --glass-border`
+///    **auroraqua.css 272–277 覆写**：
+///      `:is(.messages-tabs, .layout-switch) { border: 1px solid --glass-border;
+///        border-radius: var(--radius-card);      ← **16px 圆角矩形**（覆写 pill）
+///        box-shadow: var(--glass-inset); }        ← **只有顶沿 1px 内高光**
+///    ⇒ 最终：16 圆角 + glass-bg + 1px 亮边 + **无外阴影、有内高光**
+/// 2. `.layout-switch-btn`（home.css 191–201）
+///      `width/height: 36px` / `border-radius: var(--radius-pill)` /
+///      `color: --text-secondary` / `transition: background,color 180ms ease-out`
+/// 3. `.layout-switch-btn.is-active`（home.css 203–206）：`background:
+///    rgba(157,191,230,.35)` + `text-primary`
+///    **auroraqua.css 194–197 覆写**：
+///      `.has-auroraqua-highlight:is(.is-active, .active) { background: transparent;
+///        box-shadow: none; }`  ← 选中底**不再由按钮画**
+/// 4. `.auroraqua-nav-highlight`（auroraqua.css 175–185）：`position:absolute;
+///    inset:0`（= 按钮 36×36）/ **`border-radius: inherit`**（继承按钮 pill →
+///    36×36 正方形上即 **正圆**）/ `overflow:hidden` / `--nav-active-bg` 渐变 /
+///    `--glass-shadow-nav` / `1px --glass-border`
+/// 5. 交互动画（auroraqua.css 54–94）：200ms 组过渡 + `:hover { scale: 1.02 }`
+///    + `:active { scale: .98 }`
+/// 6. 选中胶囊扫光（auroraqua.css 149–166 + 187）：`::after` 700ms
+/// 7. 共享布局动画（LayoutSwitch.tsx 两个按钮共用同一 `useId`）：Framer
+///    `layoutId` ⇒ **同一胶囊实体**在按钮间迁移，300ms、easeOut `[0,0,0.58,1]`
+class AylaLayoutSwitch extends StatefulWidget {
+  const AylaLayoutSwitch({
+    super.key,
+    required this.isCard,
+    required this.onChanged,
+    this.semanticLabel = '主页布局',
+  });
+
+  /// true = 卡片布局选中，false = 列表布局选中。
+  final bool isCard;
+
+  /// 切换回调（true = 选卡片）。
+  final ValueChanged<bool> onChanged;
+
+  /// 组语义标签。
+  final String semanticLabel;
+
+  /// `.layout-switch-btn { width: 36px; height: 36px }`。
+  static const double btnSize = 36;
+
+  /// `.layout-switch { gap: var(--sp-2) }`。
+  static const double gap = AylaSpacing.sp2; // 8
+
+  /// `.layout-switch { padding: var(--sp-1) }`。
+  static const double pad = AylaSpacing.sp1; // 4
+
+  /// 容器总高 = 36 + padding×2 + border×2 = 46（内高光按此高度算 1px）。
+  static const double containerHeight = btnSize + pad * 2 + 2;
+
+  @override
+  State<AylaLayoutSwitch> createState() => _AylaLayoutSwitchState();
+}
+
+class _AylaLayoutSwitchState extends State<AylaLayoutSwitch> {
+  /// 选中按钮是否被 hover —— 驱动胶囊扫光（web：`.has-auroraqua-highlight:hover
+  /// > .auroraqua-nav-highlight::after`）。
+  bool _activeHovered = false;
+
+  /// 选中按钮是否被按下 —— 驱动**胶囊**同步 `scale: .98`
+  /// （web 里胶囊是 `<button>` 的子元素，`:active { scale:.98 }` 连带缩放；
+  ///  Flutter 侧胶囊与按钮平级，须显式同步）。
+  bool _activePressed = false;
+
+  /// 最近指针位置：用于「胶囊滑到静止指针下方」的迁移后复检
+  /// （浏览器会在元素移入指针位置时重判 `:hover`，Flutter 不会）。
+  Offset? _pointerPos;
+
+  void _recheckHover() {
+    final Offset? p = _pointerPos;
+    if (p == null || !mounted) return;
+    final RenderBox? self = context.findRenderObject() as RenderBox?;
+    if (self == null) return;
+    final HitTestResult result = HitTestResult();
+    WidgetsBinding.instance.hitTestInView(result, p, View.of(context).viewId);
+    if (!mounted) return;
+    final bool over = result.path.any((HitTestEntry e) => e.target == self);
+    if (over != _activeHovered) setState(() => _activeHovered = over);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const double btn = AylaLayoutSwitch.btnSize;
+    const double gap = AylaLayoutSwitch.gap;
+    final double left = widget.isCard ? 0 : btn + gap;
+    // `.layout-switch` 最终圆角 = --radius-card（auroraqua.css 275 覆写 home.css 的 pill）
+    final BorderRadius containerRadius =
+        BorderRadius.circular(AylaRadii.rCard);
+
+    return MouseRegion(
+      onHover: (PointerHoverEvent e) => _pointerPos = e.position,
+      child: Semantics(
+        container: true,
+        label: widget.semanticLabel,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AylaGlassConfig.resolveBackground(strong: false), // --glass-bg
+            borderRadius: containerRadius, // --radius-card 16
+            border: Border.all(color: AylaColors.glassBorder), // 1px --glass-border
+            // box-shadow: var(--glass-inset) —— **无外阴影**，内高光见下
+          ),
+          child: Stack(
+            children: <Widget>[
+              // box-shadow: var(--glass-inset) 的等价层（顶沿 1px 白高光）
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: containerRadius,
+                      gradient: AylaInset.topHighlight(
+                        AylaLayoutSwitch.containerHeight,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(AylaLayoutSwitch.pad), // padding: sp1
+                child: SizedBox(
+                  height: btn,
+                  child: Stack(
+                    children: <Widget>[
+                      // `.auroraqua-nav-highlight`：absolute inset:0 +
+                      // border-radius: inherit（按钮 pill → 正圆）——
+                      // 单实例 + 300ms 迁移（Framer layoutId 的等价）
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 300),
+                        curve: AylaCurves.auroraquaEaseOut, // [0,0,0.58,1]
+                        onEnd: _recheckHover,
+                        left: left,
+                        top: 0,
+                        width: btn,
+                        height: btn,
+                    // 胶囊随选中 tab 一起按压缩放（web：胶囊是按钮子元素）
+                    child: AnimatedScale(
+                      scale: _activePressed ? 0.98 : 1.0,
+                      duration: const Duration(milliseconds: 200), // scale 200ms
+                      curve: AylaCurves.auroraqua,
+                      child: AylaNavHighlight(
+                        // `.auroraqua-nav-highlight { border-radius: inherit }`
+                        // 父 `.layout-switch-btn` 是 `--radius-pill` 且盒子
+                        // 36×36 → **正圆**（不是圆角矩形）
+                        pill: true,
+                        sweep: true,
+                        sweepActive: _activeHovered,
+                      ),
+                    ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          _LayoutSwitchButton(
+                            icon: aylaIconByName('iconGrid')!,
+                            active: widget.isCard,
+                            label: '卡片布局',
+                            onHoverChanged: (bool h) {
+                              if (widget.isCard && h != _activeHovered) {
+                                setState(() => _activeHovered = h);
+                              }
+                            },
+                            onPressChanged: (bool p) {
+                              if (widget.isCard && p != _activePressed) {
+                                setState(() => _activePressed = p);
+                              }
+                            },
+                            onTap: () => widget.onChanged(true),
+                          ),
+                          const SizedBox(width: gap), // gap: sp2
+                          _LayoutSwitchButton(
+                            icon: aylaIconByName('iconList')!,
+                            active: !widget.isCard,
+                            label: '列表布局',
+                            onHoverChanged: (bool h) {
+                              if (!widget.isCard && h != _activeHovered) {
+                                setState(() => _activeHovered = h);
+                              }
+                            },
+                            onPressChanged: (bool p) {
+                              if (!widget.isCard && p != _activePressed) {
+                                setState(() => _activePressed = p);
+                              }
+                            },
+                            onTap: () => widget.onChanged(false),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// `.layout-switch-btn` —— 36×36 图标按钮（选中底由容器胶囊提供）。
+class _LayoutSwitchButton extends StatelessWidget {
+  const _LayoutSwitchButton({
+    required this.icon,
+    required this.active,
+    required this.label,
+    required this.onTap,
+    this.onHoverChanged,
+    this.onPressChanged,
+  });
+
+  final AylaIconData icon;
+  final bool active;
+  final String label;
+  final VoidCallback onTap;
+  final ValueChanged<bool>? onHoverChanged;
+
+  /// 按压状态回调（供容器让共享胶囊同步 scale .98）。
+  final ValueChanged<bool>? onPressChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return Semantics(
+      button: true,
+      selected: active,
+      label: label,
+      child: AylaPressScale(
+        onTap: onTap,
+        semanticLabel: label,
+        onPressChanged: onPressChanged,
+        child: MouseRegion(
+          opaque: true,
+          onEnter: (_) => onHoverChanged?.call(true),
+          onExit: (_) => onHoverChanged?.call(false),
+          child: SizedBox(
+            width: AylaLayoutSwitch.btnSize,
+            height: AylaLayoutSwitch.btnSize,
+            child: Center(
+              // .layout-switch-btn { transition: color 180ms }；选中转 text-primary
+              // （选中底由胶囊画，按钮自身 background: transparent）
+              child: AnimatedDefaultTextStyle(
+                duration:
+                    reduceMotion ? Duration.zero : AylaDurations.fast,
+                style: const TextStyle(),
+                child: AylaIcon(
+                  icon,
+                  size: 18,
+                  color: active
+                      ? AylaColors.textPrimary
+                      : AylaColors.textSecondary,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 选项卡族两个真实规格（web 是两个**独立类**，样式并不一致）。
+///
+/// | 维度 | [AylaSegmentedTabsVariant.messages] | [AylaSegmentedTabsVariant.shareSheet] |
+/// |---|---|---|
+/// | 事实源 | `messages.css` 17–33 + `auroraqua.css` 272–278 | `share.css` 63–91 |
+/// | 容器 margin | `sp2`（覆写 messages.css 的 `sp3 sp4`） | `12px 16px 8px` |
+/// | 容器 padding | `sp1` | `4px`（= sp1） |
+/// | 容器圆角 | `--radius-card` 16 | `--radius-input` 12 |
+/// | 容器底 | 无（透明） | `--glass-bg` |
+/// | 容器内高光 | `--glass-inset` | **无** |
+/// | 选中态 | 共享滑动胶囊（`AylaNavHighlight`：nav 阴影 + 1px 边框 + 700ms 扫光，
+/// 300ms 迁移） | 项自带**静态**底（`--nav-active-bg` + `--glass-shadow-compact`，
+/// **无边框、无扫光、无迁移**） |
+/// | 项圆角 | `--radius-input` 12 | `10px` |
+/// | 项按下缩放 | `:active scale .98`（auroraqua 236–249） | **无**（不在任何 `:is()` 组） |
+/// | 文字过渡 | 180ms `--ease-out` | 200ms `ease` |
+enum AylaSegmentedTabsVariant {
+  /// `.messages-tabs` / `.messages-tab`（消息中心双 tab）。
+  messages,
+
+  /// `.share-sheet-tabs` / `.share-sheet-tab`（分享弹窗「群聊 / 私信」）。
+  shareSheet,
+}
+
+/// 分段选项卡容器 —— 选中态随 [AylaSegmentedTabsVariant] 切换。
+///
+/// **messages 档 1:1 对照 `messages.css` 17–37 + `MessagesPage.tsx` 209–241**
+/// （`.messages-tabs { gap: sp2 }`；`.messages-tab { flex:1; height:40px;
+/// border-radius: --radius-input }`；选中项内含 `AuroraquaNavHighlight`）。
+///
+/// Flutter 等价：单个胶囊 + `AnimatedPositioned`；几何纯算术
+/// （n 个等分槽 + gap×(n−1) 间隙）：
+///   `tabW = (W − gap×(n−1)) / n`，`left(i) = i × (tabW + gap)`
+class AylaSegmentedTabs extends StatefulWidget {
+  const AylaSegmentedTabs({
+    super.key,
+    required this.labels,
+    required this.index,
+    required this.onChanged,
+    this.badges = const <int>[],
+    this.semanticLabel,
+    this.variant = AylaSegmentedTabsVariant.messages,
+  });
+
+  /// 各 tab 文案。
+  final List<String> labels;
+
+  /// 当前选中索引。
+  final int index;
+
+  /// 切换回调。
+  final ValueChanged<int> onChanged;
+
+  /// 各 tab 徽标数（可为空；长度不足处视为 0）。
+  final List<int> badges;
+
+  /// 组语义标签。
+  final String? semanticLabel;
+
+  /// 规格档（默认消息中心档；分享弹窗传 [AylaSegmentedTabsVariant.shareSheet]）。
+  final AylaSegmentedTabsVariant variant;
+
+  @override
+  State<AylaSegmentedTabs> createState() => _AylaSegmentedTabsState();
+}
+
+class _AylaSegmentedTabsState extends State<AylaSegmentedTabs> {
+  bool _activeHovered = false;
+  bool _activePressed = false;
+  Offset? _pointerPos;
+
+  void _recheckHover() {
+    final Offset? p = _pointerPos;
+    if (p == null || !mounted) return;
+    final RenderBox? self = context.findRenderObject() as RenderBox?;
+    if (self == null) return;
+    final HitTestResult result = HitTestResult();
+    WidgetsBinding.instance.hitTestInView(result, p, View.of(context).viewId);
+    if (!mounted) return;
+    final bool over = result.path.any((HitTestEntry e) => e.target == self);
+    if (over != _activeHovered) setState(() => _activeHovered = over);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const double gap = AylaSpacing.sp2; // `.messages-tabs { gap: var(--sp-2) }`
+    final int n = widget.labels.length;
+    // `.messages-tabs`（messages.css 17–22）+ **auroraqua.css 272–278 覆写**：
+    //   :is(.messages-tabs, .layout-switch) {
+    //     border: 1px solid --glass-border;
+    //     border-radius: var(--radius-card);   ← 16 圆角矩形（覆写默认）
+    //     box-shadow: var(--glass-inset);      ← 只有顶沿 1px 内高光
+    //   }
+    //   .messages-tabs { margin: var(--sp-2); padding: var(--sp-1); }
+    //     ← 覆写 messages.css 的 padding: sp3 sp4
+    final bool shareSheet =
+        widget.variant == AylaSegmentedTabsVariant.shareSheet;
+    // messages 档 16（auroraqua 275 覆写）；shareSheet 档 12（share.css 70）
+    final BorderRadius containerRadius = BorderRadius.circular(
+      shareSheet ? AylaRadii.rInput : AylaRadii.rCard,
+    );
+
+    return MouseRegion(
+      onHover: (PointerHoverEvent e) => _pointerPos = e.position,
+      child: Semantics(
+        container: true,
+        label: widget.semanticLabel,
+        child: Container(
+          // messages：`.messages-tabs { margin: sp2 }`（auroraqua 272–278）
+          // shareSheet：`.share-sheet-tabs { margin: 12px 16px 8px }`（share.css 67）
+          margin: shareSheet
+              ? const EdgeInsets.fromLTRB(16, 12, 16, 8)
+              : const EdgeInsets.all(AylaSpacing.sp2),
+          decoration: BoxDecoration(
+            // shareSheet：`background: var(--glass-bg)`（share.css 71）
+            // messages：web 无 background（透明），选中底由内层胶囊提供
+            color: shareSheet
+                ? AylaGlassConfig.resolveBackground(strong: false)
+                : null,
+            borderRadius: containerRadius, // rCard 16 / rInput 12
+            border: Border.all(color: AylaColors.glassBorder),
+            // messages：box-shadow: var(--glass-inset)（内高光见下，无外阴影）
+            // shareSheet：share.css 无 box-shadow → 不叠内高光
+          ),
+          // 关键：LayoutBuilder 放在 **padding 内部**，它的 maxWidth 即
+          // Stack 的真实可用宽——几何才不会因 border/padding 产生累积误差
+          // （此前 LayoutBuilder 在外层、又手工减 padding 却漏了 border，
+          //  导致胶囊与 tab 错位，实测滑到下一个 tab）。
+          child: Padding(
+            padding: const EdgeInsets.all(AylaSpacing.sp1), // padding: sp1
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints c) {
+                final double w = c.maxWidth.isFinite ? c.maxWidth : 0;
+                final double tabW = n > 0 ? (w - gap * (n - 1)) / n : 0;
+                final double left = widget.index * (tabW + gap);
+
+                return Stack(
+                  children: <Widget>[
+                    // box-shadow: var(--glass-inset) 的等价层（顶沿 1px 高光）；
+                    // shareSheet 档无 box-shadow → 不叠（share.css 63–74）
+                    if (!shareSheet)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: AylaInset.topHighlight(40),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // shareSheet 档**没有共享滑动胶囊**（tsx 未渲染
+                    // AuroraquaNavHighlight；share.css 也无迁移规则）
+                    if (!shareSheet && w > 0 && tabW > 0)
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 300),
+                        curve: AylaCurves.auroraquaEaseOut,
+                        onEnd: _recheckHover,
+                        left: left,
+                        top: 0,
+                        width: tabW,
+                        height: 40,
+                        // 胶囊随选中 tab 一起按压缩放（web：胶囊是按钮子元素）
+                        child: AnimatedScale(
+                          scale: _activePressed ? 0.98 : 1.0,
+                          duration: const Duration(milliseconds: 200),
+                          curve: AylaCurves.auroraqua,
+                          child: AylaNavHighlight(
+                            // 不传 pill → 继承 `.messages-tab` 的
+                            // `--radius-input`(12) ⇒ **圆角矩形**
+                            sweep: true,
+                            sweepActive: _activeHovered,
+                          ),
+                        ),
+                      ),
+                    Row(
+                      children: <Widget>[
+                        for (int i = 0; i < n; i++) ...<Widget>[
+                          if (i > 0) const SizedBox(width: gap),
+                          Expanded(
+                            child: AylaSegmentedTab(
+                              label: widget.labels[i],
+                              active: i == widget.index,
+                              variant: widget.variant,
+                              badgeCount: i < widget.badges.length
+                                  ? widget.badges[i]
+                                  : 0,
+                              onHoverChanged: (bool h) {
+                                if (i == widget.index &&
+                                    h != _activeHovered) {
+                                  setState(() => _activeHovered = h);
+                                }
+                              },
+                              onPressChanged: (bool p) {
+                                if (i == widget.index &&
+                                    p != _activePressed) {
+                                  setState(() => _activePressed = p);
+                                }
+                              },
+                              onTap: () => widget.onChanged(i),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 共享高亮的造型档位。
+///
+/// web 用「同一个组件 + 变体类」表达两种造型：
+/// - [nav] = `.auroraqua-nav-highlight`（auroraqua.css 175–185）：`inset: 0`、
+///   `--nav-active-bg` 冰蓝渐变底 + `--glass-shadow-nav` + 1px `--glass-border`；
+///   尺寸由宿主按钮决定，跨项迁移 300ms；
+/// - [rail] = `.auroraqua-nav-highlight--rail`（auroraqua.css 217–229）：ServerRail
+///   的**竖条指示条**——`inset: auto; left:0; top:50%; margin-top:-16px;`
+///   `width:3px; height:32px; border-radius:2px; background: var(--glow-500);`
+///   `border: 0; box-shadow: none;` 且 `::after { display: none }`（**无扫光**）。
+///   尺寸/位置**由调用方给定**（3×32 + 垂直居中于所在行）。
+enum AylaNavHighlightVariant {
+  /// 常规选项卡/导航选中胶囊（`--nav-active-bg` 渐变 + 亮边 + 可选扫光）。
+  nav,
+
+  /// ServerRail 竖条指示条（`--glow-500` 纯色，无边框/无阴影/无扫光）。
+  rail,
+}
+
+/// `auroraqua.css .auroraqua-nav-highlight` 175–191：
+/// `inset: 0`、`z-index: -1`（内容之下）、`border-radius: inherit`、
+/// `background: var(--nav-active-bg)`（135deg ice .35 → ice .18）、
+/// `box-shadow: var(--glass-shadow-nav)`、`border: 1px solid --glass-border`。
+class AylaNavHighlight extends StatefulWidget {
+  const AylaNavHighlight({
+    super.key,
+    this.pill = false,
+    this.sweep = false,
+    this.sweepActive = false,
+    this.radiusValue,
+    this.showBorder = true,
+    this.variant = AylaNavHighlightVariant.nav,
+  });
+
+  /// 造型档位（[AylaNavHighlightVariant.nav] 默认 = 全库既有 6 处调用；
+  /// [AylaNavHighlightVariant.rail] = ServerRail 竖条指示条）。
+  final AylaNavHighlightVariant variant;
+
+  /// [AylaNavHighlightVariant.rail] 的默认圆角（auroraqua.css 225 `border-radius: 2px`）。
+  static const double railRadius = 2;
+
+  /// 外部（父级 tab/按钮）的 hover 状态——web 的选择器是
+  /// `.has-auroraqua-highlight:hover > .auroraqua-nav-highlight::after`：
+  /// **hover 判定在父元素上，作用于子级胶囊的伪元素**。
+  /// 胶囊自身不接收指针（`pointer-events: none`），因此必须由父级驱动。
+  final bool sweepActive;
+
+  /// 覆盖圆角（不传则按 [pill] 推导）。
+  final BorderRadius? radiusValue;
+
+  /// 是否绘制 1px 亮边（`--glass-border`）。
+  ///
+  /// **默认 true**（对齐 `.auroraqua-nav-highlight { border: 1px solid ... }`）。
+  /// 当**宿主按钮自己也画了同色 1px 边框**时（如 `.directory-filter.is-active {
+  /// border-color: var(--glass-border) }`），两层 border 会**精确重叠**成
+  /// 「双线」（实测：按钮层 (230,236,248) + 胶囊层 (248,251,253) 各 1px）。
+  /// web 靠 `z-index: -1` 让胶囊退到按钮之下、视觉合一；Flutter 侧显式
+  /// 只保留按钮那一层更稳定 → 此场景传 `false`。
+  final bool showBorder;
+
+  /// 圆角是否为 pill（`.layout-switch-btn` / `.favorites-filter` /
+  /// `.group-chat-subgroup-tab` 覆写为 radius-pill，auroraqua.css 190–192）。
+  final bool pill;
+
+  /// 是否启用选中项 hover 扫光。
+  ///
+  /// 事实源 auroraqua.css 149–166 + 187：`.auroraqua-nav-highlight::after`
+  /// 是一条 `linear-gradient(90deg, transparent, --glass-border, transparent)`
+  /// 光带，`opacity .5`、`translateX(-120%)`、**700ms**
+  /// （`.auroraqua-nav-highlight::after { transition-duration: 700ms }`）；
+  /// 父级 `.has-auroraqua-highlight:hover` 时 → `translateX(120%)`。
+  final bool sweep;
+
+  @override
+  State<AylaNavHighlight> createState() => AylaNavHighlightState();
+}
+
+class AylaNavHighlightState extends State<AylaNavHighlight>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700), // 700ms（导航选中项）
+  );
+  late final Animation<double> _sweepEased = CurvedAnimation(
+    parent: _sweep,
+    curve: AylaCurves.auroraqua, // var(--auroraqua-ease)
+  );
+
+  /// **直接驱动扫光**（供宿主在指针进入时立即调用）。
+  ///
+  /// 为什么要这个入口：web 的 `:hover` 由浏览器合成器**原生响应（0 帧）**；
+  /// 而「子级通知父级 → 父级 setState → rebuild → 子级才 forward()」需要
+  /// **2 帧**（实测 32ms 才见位移），手感明显滞后于 web。
+  /// 让命中指针的那个 tab 直达这里启动动画，可省掉 1 帧。
+  /// 扫光当前进度（0 = 起点 −120%、1 = 终点 +120%）。
+  ///
+  /// 仅供测试断言「挂载即命中」（点击后必须**立刻**在终点，而不是重播一次
+  /// 从左往右）—— 生产代码不读它。
+  double get sweepProgress => _sweep.value;
+
+  void setSweep(bool active, {bool jump = false}) {
+    if (!widget.sweep || MediaQuery.disableAnimationsOf(context)) return;
+    if (active) {
+      if (jump) {
+        // **挂载即命中**：web 上胶囊被挂载到「鼠标已在上面」的 tab 时，
+        // 元素首次绘制的 computed style 就已经是 `translateX(120%)`
+        // （`:hover` 从第一帧就匹配）→ **没有 transition**（无"前值"可过渡）。
+        // 之后鼠标移走 → `120% → -120%` → transition 跑出**完整的一次
+        // 从右往左扫**。这正是用户看到的效果。
+        // 反之若此处启动 forward()，行程会被提前消耗（16ms 只走 3%），
+        // 移走时的回程几乎为零 → 看不到扫光（实测 dx 恒 ≈ -1.17）。
+        _sweep.value = 1.0;
+      } else if (!_sweep.isAnimating && _sweep.value < 1.0) {
+        // 普通 hover 进入已挂载的胶囊：-120% → 120%，从左往右扫
+        _sweep.forward();
+      }
+    } else {
+      // `:hover` 消失 → 目标变回 -120%；从**当前值**过渡（CSS transition 语义）
+      if (_sweep.isAnimating || _sweep.value > 0) _sweep.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool rail = widget.variant == AylaNavHighlightVariant.rail;
+    final BorderRadius radius = widget.radiusValue ??
+        (rail
+            ? BorderRadius.circular(AylaNavHighlight.railRadius)
+            : (widget.pill
+                ? AylaRadii.pill
+                : BorderRadius.circular(AylaRadii.rInput)));
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+
+    // 扫光由**父级 hover**驱动（web: `.has-auroraqua-highlight:hover >
+    // .auroraqua-nav-highlight::after`）。胶囊自身不接收指针事件
+    // （web 的 `pointer-events: none`），所以这里不挂 MouseRegion。
+    // rail 档另有 `::after { display: none }`（auroraqua.css 229）→ 永不扫光。
+    final bool shouldSweep = widget.sweep && !reduceMotion && !rail;
+    if (shouldSweep) {
+      if (widget.sweepActive) {
+        if (!_sweep.isAnimating && _sweep.value < 1.0) _sweep.forward();
+      } else if (_sweep.isAnimating || _sweep.value > 0) {
+        // 同 setSweep：单用 `value > 0` 会在「刚 forward 未 tick」时失效
+        // （value 还是 0 → 不 reverse → 扫光卡在起点）
+        _sweep.reverse();
+      }
+    }
+
+    // ── 严格照抄 auroraqua.css 175–185 ──
+    //   position: absolute; inset: 0;      → 尺寸 = 调用方给定
+    //   border-radius: inherit;            → radius（继承父元素圆角）
+    //   overflow: hidden;                  → **只裁内部扫光**
+    //   background: var(--nav-active-bg);  → 135deg 冰蓝渐变
+    //   box-shadow: var(--glass-shadow-nav);→ 0 0 8px rgba(157,191,230,.3)
+    //   border: 1px solid var(--glass-border);
+    //
+    // **分层纪律**（此前三处做错）：
+    //  ① **边框必须与渐变分层**：Flutter 的 `BoxDecoration` 同时设 `gradient` 与
+    //     `border` 时，**渐变填充会盖住 1px 边框**（实测：胶囊单独渲染时
+    //     y=18 起直接进渐变底色，白边完全不可见）。web 的 `background` 与
+    //     `border` 是分离绘制、两者都可见。故这里拆成
+    //     「底色+阴影层」→「边框层」→「扫光层」。
+    //  ② 圆角必须在**画边框的那一层**给出（否则边框沿矩形绘制 → 圆被切）；
+    //  ③ `overflow: hidden` 只包**扫光层**——若包住含 boxShadow 的整层，
+    //     Flutter 的 ClipRRect 会把阴影一起裁掉（CSS 的 overflow 不裁自身阴影）
+    //     → 胶囊看起来"上下左右被切"。
+    // ⚠️ **阴影不能挂 `BoxDecoration(boxShadow:)`**：CSS 规定 `box-shadow`
+    // **不在 border-box 内部绘制**；Flutter 的 `BoxShadow` 会**铺满形状含内部**。
+    // `--glass-shadow-nav` = `0 0 8px rgba(157,191,230,.3)` → 把整个胶囊内部
+    // 再染一层冰蓝。
+    //
+    // 实测证据（卡片底 #FFFAFB + ice-500 渐变）：
+    //   web 胶囊内部应为 **(229,234,245)**（纯 `--nav-active-bg`）
+    //   挂 boxShadow 后是  **(205,220,240)**
+    //   ≈ 在 web 值上再叠 `.3` 冰蓝 → **(207,221,240)**（差仅 (2,1,0)）
+    //   ⇒ 证实内部被多画一层阴影 → 高亮块偏暗偏蓝。
+    //
+    // **当前决定：胶囊不画外阴影**（已移除 `boxShadow`，暂不补 ring 层）。
+    // 验收 release 后确认「正常」，故维持现状。
+    // 若日后要补齐 `--glass-shadow-nav` 的 8px 冰蓝外发光，请用
+    // [AylaGlassShadow.ring]（只画形状之外）—— **不要**改回 `boxShadow`。
+    final Widget surface = DecoratedBox(
+      decoration: BoxDecoration(
+        // rail 档 = `background: var(--glow-500)`（auroraqua.css 226）**纯色**；
+        // nav 档 = `--nav-active-bg` 的 135deg 冰蓝渐变（同文件 182）。
+        gradient: rail
+            ? null
+            : cssLinearGradient(
+                angleDeg: 135, // --nav-active-bg: linear-gradient(135deg, …)
+                colors: AylaGradients.navActive,
+              ),
+        color: rail ? AylaColors.glow500 : null,
+        borderRadius: radius,
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          // --glass-inset（顶沿 1px 内高光）也在此层内绘制
+          if (shouldSweep)
+            ClipRRect(
+              // overflow: hidden 只作用于扫光
+              borderRadius: radius,
+              child: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  AnimatedBuilder(
+                    animation: _sweepEased,
+                    builder: (BuildContext context, Widget? child) {
+                      return FractionalTranslation(
+                        translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
+                        child: child,
+                      );
+                    },
+                    child: const Opacity(
+                      opacity: 0.5, // ::after { opacity: .5 }
+                      child: _SweepBand(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+
+    // --glass-inset 的等价层（形状内顶沿 1px 白高光）+ 1px 亮边，叠在 surface 之上。
+    //
+    // **为什么边框单独一层**：Flutter 的 `BoxDecoration` 同时设 `gradient` 与
+    // `border` 时，**渐变填充会盖住 1px 边框**（实测：胶囊单独渲染时从内容起点
+    // 直接进渐变底色，白边完全不可见）。web 的 `background` 与 `border` 分离
+    // 绘制、两者都可见 → 这里同样拆层。
+    return IgnorePointer(
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints c) {
+          return Stack(
+            children: <Widget>[
+              surface,
+              // --glass-inset：形状内顶沿 1px 白高光。
+              // rail 档是 3px 宽的纯色竖条，web 未给它（也没有基础类的 inset）
+              // → 不画，否则 `--glow-500` 会被白色高光冲淡。
+              if (!rail)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: radius,
+                      gradient: AylaInset.topHighlight(c.maxHeight),
+                    ),
+                  ),
+                ),
+              ),
+              // 1px 亮边（`--glass-border`）。宿主按钮已画同色边时传
+              // showBorder=false 以避免两层重叠（见 showBorder 文档）。
+              // rail 档 `border: 0`（auroraqua.css 224）→ 无亮边。
+              if (widget.showBorder && !rail)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        border: Border.all(color: AylaColors.glassBorder),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 扫光带（`linear-gradient(90deg, transparent, --glass-border, transparent)`）。
+class _SweepBand extends StatelessWidget {
+  const _SweepBand();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: cssLinearGradient(
+          angleDeg: 90,
+          colors: AylaGradients.sweep,
+        ),
+      ),
+    );
+  }
+}
+
+/// 选项卡按钮本体（高 40 / 14-700）—— 规格随 [AylaSegmentedTabsVariant] 切换。
+///
+/// **messages 档**（`messages.css` 24–37）：`flex: 1`、`height: 40px`、
+/// `border-radius: var(--radius-input)` 12、14px/700、`text-secondary`；
+/// `.is-active` → `text-primary`（选中底由容器共享胶囊提供，对齐 auroraqua.css
+/// 194–197 的 `background: transparent`）；`:active scale .98`。
+///
+/// **shareSheet 档**（`share.css` 74–91）：`height: 40px`、`border-radius: 10px`、
+/// `transition: color 200ms ease`；`.is-active` → `text-primary` +
+/// `background: var(--nav-active-bg)` + `box-shadow: var(--glass-shadow-compact)`
+/// （**项自带静态底：无边框、无扫光、无迁移**）；**无 `:active` 缩放**。
+/// 可选右侧徽标。
+class AylaSegmentedTab extends StatefulWidget {
+  const AylaSegmentedTab({
+    super.key,
+    required this.label,
+    required this.active,
+    this.onTap,
+    this.badgeCount = 0,
+    this.onHoverChanged,
+    this.onPressChanged,
+    this.variant = AylaSegmentedTabsVariant.messages,
+  });
+
+  /// 文案。
+  final String label;
+
+  /// 是否选中。
+  final bool active;
+
+  /// 点击回调。
+  final VoidCallback? onTap;
+
+  /// 徽标数字（>0 显示；`.messages-tab-badge`）。
+  final int badgeCount;
+
+  /// hover 状态回调（供容器驱动共享胶囊扫光）。
+  final ValueChanged<bool>? onHoverChanged;
+
+  /// 按压状态回调（供容器让共享胶囊同步 scale .98）。
+  final ValueChanged<bool>? onPressChanged;
+
+  /// 规格档（与容器 [AylaSegmentedTabs.variant] 保持一致）。
+  final AylaSegmentedTabsVariant variant;
+
+  @override
+  State<AylaSegmentedTab> createState() => _AylaSegmentedTabState();
+}
+
+class _AylaSegmentedTabState extends State<AylaSegmentedTab> {
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final bool shareSheet =
+        widget.variant == AylaSegmentedTabsVariant.shareSheet;
+    final BorderRadius radius = BorderRadius.circular(
+      shareSheet ? 10 : AylaRadii.rInput, // share.css 77 / messages.css 28
+    );
+
+    Widget button = Container(
+      height: 40, // height: 40px
+      padding: widget.badgeCount > 0
+          ? const EdgeInsets.symmetric(horizontal: AylaSpacing.sp2)
+          : EdgeInsets.zero,
+      child: Row(
+        // 内容居中（`.messages-tab` 是 flex 容器，文字+徽标整体居中）
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Flexible(
+            fit: FlexFit.loose,
+            child: AnimatedDefaultTextStyle(
+              // messages：`transition: … color var(--dur-fast) --ease-out`
+              // shareSheet：`transition: color 200ms ease`（share.css 81）
+              duration: reduceMotion
+                  ? Duration.zero
+                  : (shareSheet
+                      ? const Duration(milliseconds: 200)
+                      : AylaDurations.fast),
+              curve: shareSheet ? AylaCurves.auroraqua : AylaCurves.easeOut,
+              style: t.label.copyWith(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: widget.active
+                    ? AylaColors.textPrimary
+                    : AylaColors.textSecondary,
+              ),
+              child: Text(
+                widget.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          if (widget.badgeCount > 0) ...<Widget>[
+            const SizedBox(width: AylaSpacing.sp1), // margin-left: var(--sp-1)
+            // 2026-09-20 审查 R8：合并到组件库 AylaTabBadge（.messages-tab-badge 档）
+            AylaTabBadge(
+              count: widget.badgeCount,
+              metrics: AylaTabBadgeMetrics.messages,
+              placement: AylaTabBadgePlacement.inline,
+            ),
+          ],
+        ],
+      ),
+    );
+
+    // shareSheet：`.share-sheet-tab.is-active` 的静态底 ——
+    // `background: var(--nav-active-bg)`（135deg ice .35 → .18）
+    // + `box-shadow: var(--glass-shadow-compact)`（含顶沿内高光），**无边框**。
+    // 它属于项自身（不是容器共享胶囊），因此不随索引迁移。
+    // ⚠️ 用 `SizedBox(height: 40)` + `Positioned.fill` 固定几何：
+    // 选项卡 Row 在 Column（mainAxisSize.min）里高度**无界**，
+    // `StackFit.expand` 会强推 `h=Infinity` 断言失败（2026-09-20 实测）。
+    if (shareSheet && widget.active) {
+      button = SizedBox(
+        height: 40, // `.share-sheet-tab { height: 40px }`
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AylaGlassShadow.ring(
+                  radius: radius,
+                  shadows: AylaShadows.compact,
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: AylaGlassInset.over(
+                radius: radius,
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints c) {
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        gradient: cssLinearGradient(
+                          angleDeg: 135,
+                          colors: const <Color>[
+                            Color(0x599DBFE6), // rgba(157,191,230,.35)
+                            Color(0x2E9DBFE6), // rgba(157,191,230,.18)
+                          ],
+                          aspectRatio: c.maxWidth.isFinite
+                              ? c.maxWidth / 40
+                              : 1,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            Positioned.fill(child: button),
+          ],
+        ),
+      );
+    }
+
+    button = MouseRegion(
+      opaque: true,
+      onEnter: (_) => widget.onHoverChanged?.call(true),
+      onExit: (_) => widget.onHoverChanged?.call(false),
+      child: button,
+    );
+
+    if (widget.onTap == null) {
+      return Semantics(
+        selected: widget.active,
+        label: widget.label,
+        child: button,
+      );
+    }
+    return Semantics(
+      button: true,
+      selected: widget.active,
+      label: widget.label,
+      child: AylaPressScale(
+        onTap: widget.onTap,
+        semanticLabel: widget.label,
+        // auroraqua.css 236–249：`.messages-tab` 属「导航/选项卡组」——
+        // **只有 `:active { scale: .98 }`，hover 不放大**（它不在 54–83 的
+        // 按钮组里，那组的 hover 1.02 不适用于选项卡）。
+        hoverScale: false,
+        // `.share-sheet-tab` 不在任何一组 `:is()` 里，web 无 `:active` 规则
+        // （share.css 74–85 只有 color 过渡）→ 不做按压缩放。
+        pressScale: !shareSheet,
+        onPressChanged: widget.onPressChanged,
+        child: button,
+      ),
+    );
+  }
+}
+
+/// 胶囊标签（design.md §4 Tags/Badges + §12.9.1 Micro Tag）。
+///
+/// 默认（Micro Tag）：`--sakura-300` 底 + `--grape-700` 字 + Fredoka 11/500
+/// + ls .8 + padding 6/14 + radius-pill（d:§3 Micro Tag / auth.css 203–212
+/// 的特性胶囊同规格）。[tone] 提供其余语义色板（ice / glow / pink / surface）。
+enum AylaCapsuleTone {
+  /// sakura-300 底 + grape-700 字（默认，Micro Tag）
+  sakura,
+
+  /// ice-100 底 + text-primary 字（历史搜索 chips）
+  ice,
+
+  /// glass-bg 底 + text-primary 字（玻璃胶囊）
+  glass,
+
+  /// pink-500 底 + surface 字（LIVE 徽标）
+  pink,
+
+  /// indigo-700 底 + surface 字（实底强调）
+  indigo,
+}
+
+/// 来源标签（可见性标签）——**语音 / 直播 / 帖子三域统一复用**的胶囊。
+///
+/// 裁决：
+/// > 「这个标签……语音、直播、帖子都应该统一复用这个，统一为 web 界面的粉色，
+/// > web 界面的帖子标签灰色视为错误。」
+///
+/// 事实源（统一后的度量取 **live 徽章档**）：
+/// ```
+/// app.css 3371–3377   .live-badge { display: inline-block; padding: 2px var(--sp-2);
+///                     border-radius: var(--radius-pill); font-size: 12px; font-family: --font-utility }
+/// live.css 486–493    .live-badge-source { background: --sakura-300; color: --grape-700;
+///                     max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/// ```
+/// 两处都**不声明 font-weight / letter-spacing / line-height** ⇒ 全部继承 body
+/// （400 / 0 / 1.55）。
+///
+/// ⚠️ 被本件取代的三份旧实现（三域规格原本各不相同，统一后不再使用）：
+/// - `.voice-source-tag`（voice.css 471–485）：Fredoka 11 / ls .8 / padding 0×8；
+/// - `.post-card-tag`（posts.css 68–76）：utility 11 / w600 / **ice-100 灰底 + `--ice-600`**
+///   —— `--ice-600` 在 tokens.css **零定义**（同 `--glass-bg-hover` 那类），该声明整条作废、
+///   字色继承 ⇒ 实渲染就是灰底。用户判为错误，**不复刻**；
+/// - `.live-badge.live-badge-source`：本身就是本档（保持）。
+///
+/// 容器由调用方决定（web 亦然）：live 卡 / 语音卡走 [AylaScrollingTags] 横向滚动，
+/// 帖子卡走 `flex-wrap` 换行平铺（posts.css 62–66）——**只统一 chip，不统一容器**。
+class AylaSourceTag extends StatelessWidget {
+  const AylaSourceTag(
+    this.label, {
+    super.key,
+    this.maxWidth,
+    this.semanticLabel,
+  });
+
+  /// 标签文案（「公开」「好友」、白名单群名…，见 `getVisibilityLabels`）。
+  final String label;
+
+  /// 宽度上限（web 默认 `12ch`；各头部上下文另有 10ch/8ch 覆写）。null = 用默认 12ch。
+  final double? maxWidth;
+
+  /// 可访问性标签（默认同文案）。
+  final String? semanticLabel;
+
+  /// `.live-badge` 的字级（12px / utility）下 `1ch` 的实测宽度。
+  static double chWidth(AylaTextStyles style) {
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: '0',
+        style: TextStyle(
+          fontFamily: AylaFonts.utility,
+          fontFamilyFallback: AylaFonts.cjkFallback,
+          fontSize: 12,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return painter.width;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth ?? chWidth(t) * 12),
+      child: AylaCapsuleTag(
+        label,
+        tone: AylaCapsuleTone.sakura, // sakura-300 底 + grape-700 字
+        padding: const EdgeInsets.symmetric(
+          horizontal: AylaSpacing.sp2, // padding: 2px var(--sp-2)
+          vertical: 2,
+        ),
+        fontFamily: AylaFonts.utility, // --font-utility
+        fontSize: 12,
+        fontWeight: FontWeight.w400, // 未声明 ⇒ 继承 body
+        letterSpacing: 0, // 未声明 ⇒ 0
+        textHeight: t.body.height, // 未声明 ⇒ 继承 body 行高（1.55）
+        semanticLabel: semanticLabel,
+      ),
+    );
+  }
+}
+
+/// 胶囊标签（尺寸/圆角/字级按 [AylaCapsuleTone] 与调用方给定）。
+///
+/// ⚠️ **事实源边界（2026-09-19 审查）**：web 里**没有统一的胶囊基类**，
+/// 各处胶囊是各自独立的类，规格并不一致：
+///
+/// | tone | web 真实来源 | 底 / 字 | 盒模型 |
+/// |---|---|---|---|
+/// | [AylaCapsuleTone.sakura] | `auth.css 203–212` `.auth-intro-feature` | sakura-300 / grape-700 | padding 6×14、12px/500、ls .4 |
+/// | [AylaCapsuleTone.ice] | `search.css 19–25` `.search-chip` | ice-100 / text-primary | padding **4×12**、**13px** |
+/// | [AylaCapsuleTone.pink] | `live.css 811–814` `.live-badge-live` | pink-500 / surface | 随 `.live-badge` 基类 |
+/// | [AylaCapsuleTone.glass] | **暂无精确对应**（就近：`--glass-bg` + `--glass-border`） | — | — |
+/// | [AylaCapsuleTone.indigo] | **暂无精确对应**（就近：`--indigo-700` 实底） | — | — |
+///
+/// 本组件**当前实现的是 [AylaCapsuleTone.sakura] 的规格**；其余 tone 仅共享色板，
+/// **盒模型与字级需在各组件落地时按各自 CSS 覆写**，不要用本组件的固定值套用
+/// （否则 ice chip 偏大、live badge 偏离）。
+class AylaCapsuleTag extends StatelessWidget {
+  const AylaCapsuleTag(
+    this.label, {
+    super.key,
+    this.tone = AylaCapsuleTone.sakura,
+    this.icon,
+    this.semanticLabel,
+    this.padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    this.fontFamily = AylaFonts.display,
+    this.fontSize = 12,
+    this.fontWeight = FontWeight.w500,
+    this.letterSpacing = 0.4,
+    this.textHeight,
+  });
+
+  /// 文案。
+  final String label;
+
+  /// 色板。
+  final AylaCapsuleTone tone;
+
+  /// 可选前置图标（12–14px 线性图标）。
+  final Widget? icon;
+
+  /// 可访问性标签。
+  final String? semanticLabel;
+
+  /// 内边距（默认 sakura 档 14×6；其他站点按各自 CSS 覆写）。
+  final EdgeInsetsGeometry padding;
+
+  /// 字体族（默认 Fredoka；`.post-card-tag` 用 Space Grotesk）。
+  final String fontFamily;
+
+  /// 字号（默认 12；`.post-card-tag` 11、`.search-chip` 13）。
+  final double fontSize;
+
+  /// 字重（默认 w500；`.post-card-tag` 600）。
+  final FontWeight fontWeight;
+
+  /// 字距（默认 0.4；`.post-card-tag` 未声明 → 0）。
+  final double letterSpacing;
+
+  /// 行高倍数（null = 字体默认；`.post-card-tag` 继承 body 的 1.55）。
+  final double? textHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    late final Color bg;
+    late final Color fg;
+    late final Border? border;
+    switch (tone) {
+      case AylaCapsuleTone.sakura:
+        bg = AylaColors.sakura300;
+        fg = AylaColors.grape700;
+        border = null;
+      case AylaCapsuleTone.ice:
+        bg = AylaColors.ice100; // 历史搜索 chips
+        fg = AylaColors.textPrimary;
+        border = null;
+      case AylaCapsuleTone.glass:
+        bg = AylaGlassConfig.resolveBackground(strong: false);
+        fg = AylaColors.textPrimary;
+        border = Border.all(color: AylaColors.glassBorder);
+      case AylaCapsuleTone.pink:
+        bg = AylaColors.pink500; // LIVE 徽标
+        fg = AylaColors.surface;
+        border = null;
+      case AylaCapsuleTone.indigo:
+        bg = AylaColors.indigo700;
+        fg = AylaColors.surface;
+        border = null;
+    }
+
+    return Semantics(
+      label: semanticLabel ?? label,
+      child: Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: AylaRadii.pill,
+          border: border,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (icon != null) ...<Widget>[
+              IconTheme(data: IconThemeData(color: fg, size: 12), child: icon!),
+              const SizedBox(width: AylaSpacing.sp1),
+            ],
+            // ⚠️ 必须用 Flexible 包住：胶囊放进窄容器（Wrap 的某一列 / 卡片右组）时，
+            // 裸 Text 会以固有宽度撑破内层 Row（实测 `RenderFlex overflowed by 12px`）。
+            // web 的胶囊是 inline 元素、由容器决定换行/裁剪，这里等价表达为「收缩 + 省略号」。
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: fontFamily,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
+                  fontSize: fontSize,
+                  fontWeight: fontWeight,
+                  letterSpacing: letterSpacing,
+                  height: textHeight,
+                  color: fg,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// `.scroll-text` —— 长文本单行 marquee（溢出才滚，未溢出静态）。
+///
+/// 事实源 base.css 724–758：容器 `white-space: nowrap` + overflow hidden；
+/// 溢出时内层按 `scroll-text-marquee` 来回滚动——0–20% 停开头、
+/// 50–70% 停结尾、100% 回到开头，linear 匀速；时长由距离/速度得出并夹在
+/// 4~16s。`prefers-reduced-motion` 关闭滚动只裁剪。
+class AylaScrollingText extends StatefulWidget {
+  const AylaScrollingText({
+    super.key,
+    required this.text,
+    this.style,
+    this.speed = 24,
+  });
+
+  /// 文本。
+  final String text;
+
+  /// 文字样式（默认 body）。
+  final TextStyle? style;
+
+  /// 每秒滚动像素（默认 24；越大越快）。
+  final double speed;
+
+  @override
+  State<AylaScrollingText> createState() => _AylaScrollingTextState();
+}
+
+class _AylaScrollingTextState extends State<AylaScrollingText>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _marquee = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 8),
+  );
+
+  /// 溢出距离（>0 才滚动）。用 TextPainter 同步测量，避免依赖"先渲染再回读"
+  /// 造成的死锁：未溢出分支不带测量用的 key，就永远测不出溢出（此前实测
+  /// 「长文本不滚」的根因）。
+  double _overflow = 0;
+  double _lastWidth = -1;
+
+  /// marquee 时间轴（对齐 base.css keyframes 百分比）：
+  /// 0–20% 停开头 → 20–50% 滚到尾 → 50–70% 停结尾 → 70–100% 滚回开头。
+  double _offsetFor(double t) {
+    if (t <= 0.2) return 0;
+    if (t <= 0.5) return -(t - 0.2) / 0.3 * _overflow;
+    if (t <= 0.7) return -_overflow;
+    return -(1 - (t - 0.7) / 0.3) * _overflow;
+  }
+
+  TextStyle _resolveStyle(BuildContext context) =>
+      widget.style ??
+      AylaTextStyles.of(context)
+          .body
+          .copyWith(color: AylaColors.textPrimary);
+
+  /// 测量文本自然宽度与容器可用宽度的差（正数=溢出）。
+  void _measure(double available, TextStyle style, double scale) {
+    if ((available - _lastWidth).abs() < 0.5) return; // 宽度没变不必重测
+    _lastWidth = available;
+    final TextPainter tp = TextPainter(
+      text: TextSpan(text: widget.text, style: style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.linear(scale),
+    )..layout();
+    final double overflow = tp.size.width - available;
+    tp.dispose();
+
+    final double next = overflow > 1 ? overflow : 0;
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (next > 0 && !reduceMotion) {
+      // duration = clamp(distance / speed, 4, 16) 秒（web ScrollingText 同式）
+      final double secs = (next / widget.speed).clamp(4.0, 16.0);
+      _marquee.duration = Duration(milliseconds: (secs * 1000).round());
+      if (!_marquee.isAnimating) _marquee.repeat();
+    } else {
+      _marquee.stop();
+    }
+    if ((next - _overflow).abs() > 0.5) {
+      // 布局阶段更新测量结果：用 post-frame 避免 build 期间 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _overflow = next);
+      });
+      _overflow = next; // 本帧即用新值（避免闪一帧静态）
+    }
+  }
+
+  @override
+  void dispose() {
+    _marquee.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle style = _resolveStyle(context);
+    final double scale = MediaQuery.textScalerOf(context).scale(1);
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double available = constraints.maxWidth;
+        if (available.isFinite && available > 0) {
+          _measure(available, style, scale);
+        }
+
+        final Widget label = Text(
+          widget.text,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.visible, // 溢出交给外层 ClipRect 裁
+          style: style,
+        );
+
+        if (_overflow <= 0) {
+          // 未溢出：静态单行（超出即省略，语义同 web 未溢出分支）
+          return ClipRect(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                widget.text,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+          );
+        }
+
+        return ClipRect(
+          child: AnimatedBuilder(
+            animation: _marquee,
+            builder: (BuildContext context, Widget? child) {
+              return Transform.translate(
+                offset: Offset(_offsetFor(_marquee.value), 0),
+                child: child,
+              );
+            },
+            child: label,
+          ),
+        );
+      },
+    );
+  }
+}
+/// `.scroll-tags` —— 标签横向 marquee（溢出时滚 + **左右 14px 渐隐**）。
+///
+/// 事实源 `base.css` 760–806：
+/// - `.scroll-tags`：`display:block`、`min-width:0`、overflow hidden、nowrap；
+/// - `.scroll-tags-inner`：inline-flex、`gap: var(--sp-1)`、nowrap；
+/// - 溢出时 `.scroll-tags-inner` 复用 `scroll-text-marquee` 关键帧（与
+///   ScrollingText 同一时序：0–20% 停开头 / 50–70% 停结尾 / 100% 回开头，
+///   linear，时长由组件测量夹 4~16s）；
+/// - **溢出时左右边缘渐隐**（`mask-image: linear-gradient(to right,
+///   transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%)`）
+///   ——替代硬裁剪的生硬截断；未溢出时不加 mask。
+/// - `prefers-reduced-motion`：停止滚动（仅裁剪）。
+class AylaScrollingTags extends StatefulWidget {
+  const AylaScrollingTags({
+    super.key,
+    required this.children,
+    this.speed = 24,
+    this.fadeWidth = 14, // mask 渐隐 14px（base.css）
+  });
+
+  /// 标签（横向排列，间距 sp1）。
+  final List<Widget> children;
+
+  /// 每秒滚动像素（默认 24）。
+  final double speed;
+
+  /// 左右渐隐宽度（px，web 为 14px）。
+  final double fadeWidth;
+
+  @override
+  State<AylaScrollingTags> createState() => _AylaScrollingTagsState();
+}
+
+class _AylaScrollingTagsState extends State<AylaScrollingTags>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _marquee = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 8),
+  );
+
+  /// 内部标签容器**右侧收窄量**（实测校准；0 = 与 web 同宽）。
+  static const double _innerRightInset = 1;
+
+  final GlobalKey _innerKey = GlobalKey();
+  double _overflow = 0;
+
+  double _offsetFor(double t) {
+    if (t <= 0.2) return 0;
+    if (t <= 0.5) return -(t - 0.2) / 0.3 * _overflow;
+    if (t <= 0.7) return -_overflow;
+    return -(1 - (t - 0.7) / 0.3) * _overflow;
+  }
+
+  void _measure(double available) {
+    final RenderBox? inner =
+        _innerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (inner == null || !available.isFinite || available <= 0) return;
+    final double d = inner.size.width - available;
+    final double next = d > 1 ? d : 0;
+    if ((next - _overflow).abs() < 0.5) return;
+    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
+    setState(() => _overflow = next);
+    if (next > 0 && !reduceMotion) {
+      final double secs = (next / widget.speed).clamp(4.0, 16.0);
+      _marquee.duration = Duration(milliseconds: (secs * 1000).round());
+      if (!_marquee.isAnimating) _marquee.repeat();
+    } else {
+      _marquee.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _marquee.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool overflowing = _overflow > 0;
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints c) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _measure(c.maxWidth);
+        });
+
+        // ⚠️ 标签**收窄**方案（按可用宽均分）已于 2026-09-22 按用户要求**回退**：
+        // 收窄后内容不再溢出 ⇒ 滚动/marquee 与渐隐一起失效。
+        // 内层 Row 保持内容自然宽度，溢出由容器裁剪 + 渐隐（对齐 web `.scroll-tags`）。
+        final int count = widget.children.length;
+        Widget content = Row(
+          key: _innerKey,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (int i = 0; i < count; i++) ...<Widget>[
+              if (i > 0) const SizedBox(width: AylaSpacing.sp1), // gap: sp1
+              widget.children[i],
+            ],
+          ],
+        );
+
+        if (overflowing) {
+          content = AnimatedBuilder(
+            animation: _marquee,
+            builder: (BuildContext context, Widget? child) => Transform.translate(
+              offset: Offset(_offsetFor(_marquee.value), 0),
+              child: child,
+            ),
+            child: content,
+          );
+        }
+
+        // 内层 Row 按内容自然宽度排布，溢出由容器裁剪（对齐 web 的
+        // `.scroll-tags { display:block; min-width:0; overflow:hidden; white-space:nowrap }`）。
+        //
+        // ⚠️ **高度必须等于内容**——2026-09-22 用户实测报「渐隐右边/下面有一条接缝线」
+        // （语音卡、直播卡、帖子卡都中）。此前这里用 `SizedBox(height: 40)` +
+        // `OverflowBox(min/maxHeight: 40)` 顶高度：本组件高度恒为 40（无界祖先）或父级可用高
+        // （有界祖先），而真标签只有 ~23 ⇒ 父级一矮（卡片 meta 行 22.6 / head 行 32）
+        // 就把居中的标签**上下裁掉几像素**，圆角被切断 ⇒ 看起来是一条接缝。
+        // ⚠️ 也不能只用 `OverflowBox(maxWidth: infinity)`：它不设高时自身取父级最大高。
+        // 正解 = 横向 `SingleChildScrollView`（禁手势）：子级拿**无界宽**（可超出、无 overflow 报错）、
+        // 自身高度 = 内容高、自带裁剪 ⇒ mask / 裁剪 / 标签三者同高。
+        // ⚠️ 必须关掉滚动条：桌面端 `Scrollable` 会自动挂 `Scrollbar`，其拇指会被画成
+        // 一条**灰色竖线**（实测像素 `d7cbdb` vs 背景 `eeeeee`）——报的
+        // 「渐隐右边有一条接缝线」就是它（每个标签条都有一条，看起来像容器的边）。
+        // 库内 server_rail 同款处理（web 全局隐藏原生滚动条）。
+        // ⚠️ **内部标签容器右侧收窄 1px**（校准，原话：
+        // 「内部标签容器宽度收窄右侧一点点，渐隐遮罩完全不动」）。
+        // 收窄只作用于**内层容器**（滚动视口 = 标签容器），**渐隐遮罩的几何一行未动**
+        //（`ShaderMask` 仍以 LayoutBuilder 的尺寸为基准）——需要再调就改这里的数值。
+        Widget clipped = Padding(
+          padding: const EdgeInsets.only(right: _innerRightInset),
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(), // web `overflow: hidden`：不可拖
+              clipBehavior: Clip.hardEdge,
+              child: content,
+            ),
+          ),
+        );
+
+        // 溢出时套 mask 渐隐（未溢出不加，对齐 web）
+        if (overflowing) {
+          clipped = ShaderMask(
+            blendMode: BlendMode.dstIn,
+            shaderCallback: (Rect bounds) {
+              // ⚠️ 渐隐几何 = 容器自身（web `.scroll-tags.is-overflow` 的 mask-image 同构）：
+              // `linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px),
+              // transparent 100%)`（base.css 787–802）。
+              // 2026-09-22 用户实测期间试过两种偏离（整体平移 1px / 右缘加宽 1px），**均已回退**——
+              // 那两处改动对「边缘接缝」无效，改回与 web 同构的几何。
+              final double w = bounds.width == 0 ? 1 : bounds.width;
+              return LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: const <Color>[Color(0x00000000), Color(0xFF000000),
+                    Color(0xFF000000), Color(0x00000000)],
+                stops: <double>[
+                  0,
+                  widget.fadeWidth / w,
+                  1 - widget.fadeWidth / w,
+                  1,
+                ],
+              ).createShader(bounds);
+            },
+            child: clipped,
+          );
+        }
+
+        return clipped;
+      },
+    );
+  }
+}
+
+// ======================= 样张 =======================

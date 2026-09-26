@@ -22,7 +22,7 @@ import '../lib/theme/app_icons.dart';
 import '../lib/theme/buttons.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/session_activity.dart';
+import '../lib/widgets/shell/session_activity.dart';
 
 void main() {
   const AylaActivitySession voice = AylaActivitySession(
@@ -69,7 +69,7 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  /// 组件返回的那层 `Positioned`（子树里还有阴影层的 `Positioned.fill`、TabBadge 等）。
+  /// 组件返回的那层 `Positioned`（子树里还有阴影层的 `Positioned.fill`、AylaTabBadge 等）。
   Positioned groupPositioned(WidgetTester tester) {
     return tester.widget<Positioned>(
       find.byWidgetPredicate(

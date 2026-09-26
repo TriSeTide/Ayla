@@ -14,9 +14,9 @@ import '../lib/core/models/subgroup.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/dialogs.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/subgroup_dialog.dart';
+import '../lib/widgets/base/dialogs.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/group/subgroup_dialog.dart';
 
 void main() {
   const AylaSubGroup custom = AylaSubGroup(
@@ -49,8 +49,8 @@ void main() {
   }
 
   /// 按文案取按钮（按钮内的 Text 是唯一锚点）。
-  GlassButton byLabel(WidgetTester tester, String label) => tester.widget<GlassButton>(
-        find.ancestor(of: find.text(label), matching: find.byType(GlassButton)).first,
+  AylaGlassButton byLabel(WidgetTester tester, String label) => tester.widget<AylaGlassButton>(
+        find.ancestor(of: find.text(label), matching: find.byType(AylaGlassButton)).first,
       );
 
   testWidgets('add 态结构：标题「添加子群」· hint · 无禁言行 · 无删除键 · 空名禁用', (

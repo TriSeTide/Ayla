@@ -10,10 +10,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/dialogs.dart' show AylaModalCard;
-import '../lib/widgets/loading.dart' show AylaSkeleton;
-import '../lib/widgets/live_viewers.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/dialogs.dart' show AylaModalCard;
+import '../lib/widgets/base/loading.dart' show AylaSkeleton;
+import '../lib/widgets/live/live_viewers.dart';
 
 const List<AylaLiveViewerItem> _watchers = <AylaLiveViewerItem>[
   AylaLiveViewerItem(userId: 'u1', nickname: '小冰'),
@@ -67,8 +67,8 @@ void main() {
 
       expect(strip('正在观看 2 人，查看完整名单'), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
-      // 预览头像复用 AvatarHalo（在流光环）
-      expect(find.byType(AvatarHalo), findsNWidgets(2));
+      // 预览头像复用 AylaAvatarHalo（在流光环）
+      expect(find.byType(AylaAvatarHalo), findsNWidgets(2));
       // 排尾是「更多」三圆点图标（不是文本省略号）
       expect(
         find.byWidgetPredicate(
@@ -128,7 +128,7 @@ void main() {
       );
       await settle(tester);
       expect(find.text('0'), findsOneWidget);
-      expect(find.byType(AvatarHalo), findsNothing);
+      expect(find.byType(AylaAvatarHalo), findsNothing);
       expect(find.text('–'), findsNothing);
     });
 
@@ -148,7 +148,7 @@ void main() {
       );
       await settle(tester);
       expect(kAylaLiveViewerPreviewMax, 12);
-      expect(find.byType(AvatarHalo), findsNWidgets(12));
+      expect(find.byType(AylaAvatarHalo), findsNWidgets(12));
     });
 
     testWidgets('纯展示：空数据也不报错、不弹层（不自行拉数据）', (WidgetTester tester) async {
@@ -215,7 +215,7 @@ void main() {
 
       expect(find.text('小冰'), findsOneWidget);
       expect(find.text('小樱'), findsOneWidget);
-      expect(find.byType(AvatarHalo), findsNWidgets(2));
+      expect(find.byType(AylaAvatarHalo), findsNWidgets(2));
 
       await tester.tap(strip('查看 小冰 的个人主页'));
       await settle(tester);
@@ -244,7 +244,7 @@ void main() {
       expect(closes, 1);
     });
 
-    testWidgets('截断 → 「仅显示前 N 位」；爱莉标记走 AvatarHalo 的 elysia 档', (
+    testWidgets('截断 → 「仅显示前 N 位」；爱莉标记走 AylaAvatarHalo 的 elysia 档', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(
@@ -265,11 +265,11 @@ void main() {
       );
       await settle(tester);
       expect(find.text('仅显示前 2 位'), findsOneWidget);
-      final List<AvatarHalo> avatars = tester
-          .widgetList<AvatarHalo>(find.byType(AvatarHalo))
+      final List<AylaAvatarHalo> avatars = tester
+          .widgetList<AylaAvatarHalo>(find.byType(AylaAvatarHalo))
           .toList();
-      expect(avatars[1].core, AvatarCore.elysia); // u2 = 爱莉
-      expect(avatars[0].core, AvatarCore.user);
+      expect(avatars[1].core, AylaAvatarCore.elysia); // u2 = 爱莉
+      expect(avatars[0].core, AylaAvatarCore.user);
     });
 
     testWidgets('503 → role=alert 明示读不到 + 重试；**不**回落空名单', (WidgetTester tester) async {

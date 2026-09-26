@@ -149,7 +149,7 @@ abstract final class AylaGradients {
 ///
 /// Flutter 无 CSS 那样的 `saturate()` 关键字，但 `dart:ui` 的
 /// `ColorFilter implements ImageFilter`，配合 `ImageFilter.compose` 可组合出
-/// 「先模糊、后饱和」的等价效果（见 [kSaturation14] 与 GlassSurface 用法）。
+/// 「先模糊、后饱和」的等价效果（见 [kSaturation14] 与 AylaGlassSurface 用法）。
 
 /// 饱和度 1.4 的颜色矩阵（20 元素，行主序 RGB 通道 + 偏移）。
 ///
@@ -366,7 +366,7 @@ enum AylaBreakpoint {
 }
 
 /// 断点判定（CSS px 口径；Flutter 逻辑 px 在 Windows 125% 下 1:1 对应）。
-abstract final class Breakpoint {
+abstract final class AylaBreakpoints {
   static const double xs = 480;
   static const double sm = 768;
   static const double md = 1024;

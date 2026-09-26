@@ -19,7 +19,7 @@ import '../lib/theme/app_theme.dart' show AylaTextStyles;
 import '../lib/theme/glass.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/primitives.dart';
+import '../lib/widgets/base/primitives.dart';
 
 void main() {
   Widget host(
@@ -184,7 +184,7 @@ void main() {
       final AylaCapsuleTag tag = tester.widget<AylaCapsuleTag>(
         find.byType(AylaCapsuleTag),
       );
-      expect(tag.tone, CapsuleTone.sakura);
+      expect(tag.tone, AylaCapsuleTone.sakura);
       expect(tag.fontFamily, AylaFonts.utility);
       expect(tag.fontSize, 12);
       expect(tag.fontWeight, FontWeight.w400);

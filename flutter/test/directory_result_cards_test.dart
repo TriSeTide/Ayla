@@ -19,11 +19,11 @@ import '../lib/core/models/subgroup.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/directory_result_cards.dart';
-import '../lib/widgets/game_room_card.dart';
-import '../lib/widgets/live_hall.dart';
-import '../lib/widgets/voice_channels.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/directory_result_cards.dart';
+import '../lib/widgets/game/game_room_card.dart';
+import '../lib/widgets/live/live_hall.dart';
+import '../lib/widgets/voice/voice_channels.dart';
 
 void main() {
   Widget host(Widget child, {Size viewport = const Size(460, 700)}) {
@@ -79,7 +79,7 @@ void main() {
     expect(find.text('42 人'), findsOneWidget); // tsx 29
     expect(find.text('公开群聊'), findsOneWidget); // tsx 30
     expect(find.text('进入'), findsOneWidget); // .search-row-action
-    expect(tester.widget<AvatarHalo>(find.byType(AvatarHalo)).size, 44); // tsx 26
+    expect(tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).size, 44); // tsx 26
 
     await tester.tap(find.text('冰樱研究社').last);
     await tester.pump();

@@ -1,7 +1,7 @@
 /// 按钮族「禁用态 = 按颜色降透明」回归（2026-09-22 用户裁决）。
 ///
 /// 背景：`base.css button:disabled { opacity: .55 }` 原先实现为**整层 `Opacity(.55)`**，
-/// 而 `GlassButton(ghost)` / `AylaIconButton` / `AylaCornerFab` / `AylaToolButton` 的盒子里含
+/// 而 `AylaGlassButton(ghost)` / `AylaIconButton` / `AylaCornerFab` / `AylaToolButton` 的盒子里含
 /// `BackdropFilter` ⇒ Opacity 叠在 BackdropFilter 上被 Impeller 拒绝并刷屏
 /// （`SetInheritedOpacity … CanAcceptOpacity returns false`），且禁用态变暗并不生效。
 /// ⇒ 改为把 .55 落到颜色上（底/边/阴影 ×.55），内容层单独 Opacity。
@@ -38,20 +38,20 @@ void main() {
     return (face.decoration! as BoxDecoration).color!;
   }
 
-  testWidgets('GlassButton（ghost）禁用 → 底色 ×.55；BackdropFilter 不被 Opacity 包住', (
+  testWidgets('AylaGlassButton（ghost）禁用 → 底色 ×.55；BackdropFilter 不被 Opacity 包住', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
       host(
-        const GlassButton(
+        const AylaGlassButton(
           label: '开播',
-          variant: GlassButtonVariant.ghost, // hover 才用 Opacity? 不：禁用态才是
+          variant: AylaGlassButtonVariant.ghost, // hover 才用 Opacity? 不：禁用态才是
         ),
       ),
     );
     await tester.pump();
 
-    final Finder button = find.byType(GlassButton);
+    final Finder button = find.byType(AylaGlassButton);
     final Color dimmed = faceColor(tester, button);
     expect(
       dimmed.a,
@@ -68,18 +68,18 @@ void main() {
     );
   });
 
-  testWidgets('GlassButton（ghost）可用 → 底色为原值（不受降透明影响）', (WidgetTester tester) async {
+  testWidgets('AylaGlassButton（ghost）可用 → 底色为原值（不受降透明影响）', (WidgetTester tester) async {
     await tester.pumpWidget(
       host(
-        GlassButton(
+        AylaGlassButton(
           label: '开播',
-          variant: GlassButtonVariant.ghost,
+          variant: AylaGlassButtonVariant.ghost,
           onPressed: () {},
         ),
       ),
     );
     await tester.pump();
-    expect(faceColor(tester, find.byType(GlassButton)).a, AylaColors.glassBg.a);
+    expect(faceColor(tester, find.byType(AylaGlassButton)).a, AylaColors.glassBg.a);
   });
 
   testWidgets('AylaIconButton 禁用 → 底色/边 ×.55 且 BackdropFilter 不被 Opacity 包住', (

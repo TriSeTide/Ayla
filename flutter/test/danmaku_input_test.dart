@@ -21,7 +21,7 @@ import '../lib/theme/app_icons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/danmaku.dart';
+import '../lib/widgets/live/danmaku.dart';
 
 AylaPickedFile _file([String name = 'pic.jpg']) => AylaPickedFile(
   name: name,
@@ -62,12 +62,12 @@ void main() {
   }
 
   /// 输入框（web `input.danmaku-input`）与两个按钮。
-  Finder input() => find.byType(GlassInput);
+  Finder input() => find.byType(AylaGlassInput);
   Finder sendButton() => find.byWidgetPredicate(
-    (Widget w) => w is GlassButton && w.semanticLabel == '发送弹幕',
+    (Widget w) => w is AylaGlassButton && w.semanticLabel == '发送弹幕',
   );
   Finder imageButton() => find.byWidgetPredicate(
-    (Widget w) => w is GlassButton && w.semanticLabel == '发送弹幕图片',
+    (Widget w) => w is AylaGlassButton && w.semanticLabel == '发送弹幕图片',
   );
 
   group('结构与样式', () {
@@ -77,17 +77,17 @@ void main() {
       );
       await settle(tester);
 
-      final GlassButton image = tester.widget<GlassButton>(imageButton());
+      final AylaGlassButton image = tester.widget<AylaGlassButton>(imageButton());
       expect(image.minHeight, 40);
       expect(image.minWidth, 40); // `.danmaku-image-btn.btn { width: 40; height: 40; padding: 0 }`
       expect(image.padding, EdgeInsets.zero);
-      expect(image.variant, GlassButtonVariant.ghost);
+      expect(image.variant, AylaGlassButtonVariant.ghost);
       expect(image.glowBorderOnHover, isTrue); // hover/focus 只换 glow 边
       expect(tester.getSize(imageButton()), const Size(40, 40));
 
-      final GlassButton send = tester.widget<GlassButton>(sendButton());
+      final AylaGlassButton send = tester.widget<AylaGlassButton>(sendButton());
       expect(send.minWidth, 72); // `.danmaku-send-btn { min-width: 72px }`
-      expect(send.variant, GlassButtonVariant.primary);
+      expect(send.variant, AylaGlassButtonVariant.primary);
       expect(tester.getSize(sendButton()).width, greaterThanOrEqualTo(72));
 
       // 图标尺寸：IconImage 17 / IconSend 16（tsx 130/166）
@@ -107,7 +107,7 @@ void main() {
       );
 
       // 输入框：placeholder「发条弹幕吧」/ 单行 / padding sp2 sp3 / 行高 40
-      final GlassInput field = tester.widget<GlassInput>(input());
+      final AylaGlassInput field = tester.widget<AylaGlassInput>(input());
       expect(field.hintText, '发条弹幕吧');
       expect(field.maxLines, 1);
       expect(field.minHeight, 40);
@@ -145,8 +145,8 @@ void main() {
       );
       await settle(tester);
 
-      final GlassSurface surface = tester.widget<GlassSurface>(
-        find.byType(GlassSurface),
+      final AylaGlassSurface surface = tester.widget<AylaGlassSurface>(
+        find.byType(AylaGlassSurface),
       );
       expect(surface.blur, AylaGlass.blurNav); // blur(18px) saturate(1.4)
       expect(surface.strong, isFalse); // --glass-bg（不是 strong .78）
@@ -166,7 +166,7 @@ void main() {
       );
       // 玻璃底确实铺在输入行下面（宽 = 组件宽，不含 margin——只有 sideCard 档才有 margin）
       expect(
-        tester.getSize(find.byType(GlassSurface)).width,
+        tester.getSize(find.byType(AylaGlassSurface)).width,
         tester.getSize(find.byType(AylaDanmakuInput)).width,
       );
     });
@@ -185,8 +185,8 @@ void main() {
       );
       await settle(tester);
 
-      // 347–359 那套玻璃材质在这条链路上永不生效 ⇒ 组件里**没有** GlassSurface
-      expect(find.byType(GlassSurface), findsNothing);
+      // 347–359 那套玻璃材质在这条链路上永不生效 ⇒ 组件里**没有** AylaGlassSurface
+      expect(find.byType(AylaGlassSurface), findsNothing);
       // margin: var(--sidebar-gutter)（由外层 Padding 表达）
       expect(
         find.byWidgetPredicate(
@@ -223,7 +223,7 @@ void main() {
       await settle(tester);
       expect(find.text('2/200'), findsOneWidget); // trim 后 2
 
-      final GlassInput field = tester.widget<GlassInput>(input());
+      final AylaGlassInput field = tester.widget<AylaGlassInput>(input());
       expect(field.inputFormatters?.length, 1); // LengthLimitingTextInputFormatter(400)
     });
   });
@@ -234,11 +234,11 @@ void main() {
         host(tester, AylaDanmakuInput(onSend: (_, _) async => true)),
       );
       await settle(tester);
-      expect(tester.widget<GlassButton>(sendButton()).onPressed, isNull);
+      expect(tester.widget<AylaGlassButton>(sendButton()).onPressed, isNull);
 
       await tester.enterText(input(), '嗨');
       await settle(tester);
-      expect(tester.widget<GlassButton>(sendButton()).onPressed, isNotNull);
+      expect(tester.widget<AylaGlassButton>(sendButton()).onPressed, isNotNull);
     });
 
     testWidgets('发送成功 → 清空草稿 + 计数归零 + 焦点回输入框（tsx 59–66）', (WidgetTester tester) async {
@@ -262,11 +262,11 @@ void main() {
       await settle(tester);
 
       expect(sent, <(String, String?)>[('第一条', null)]);
-      expect(tester.widget<GlassInput>(input()).controller.text, isEmpty);
+      expect(tester.widget<AylaGlassInput>(input()).controller.text, isEmpty);
       expect(find.text('0/200'), findsOneWidget);
       // 焦点回到输入框（连续发弹幕不打断）
       expect(
-        tester.widget<GlassInput>(input()).focusNode?.hasFocus,
+        tester.widget<AylaGlassInput>(input()).focusNode?.hasFocus,
         isTrue,
       );
     });
@@ -280,7 +280,7 @@ void main() {
       await settle(tester);
       await tester.tap(sendButton());
       await settle(tester);
-      expect(tester.widget<GlassInput>(input()).controller.text, '失败也不丢');
+      expect(tester.widget<AylaGlassInput>(input()).controller.text, '失败也不丢');
     });
 
     testWidgets('发送抛错 → `.live-form-error` 文案（destructive 13 + margin-top 8）', (WidgetTester tester) async {
@@ -332,7 +332,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await settle(tester);
       expect(count, 1);
-      expect(tester.widget<GlassInput>(input()).controller.text, isEmpty);
+      expect(tester.widget<AylaGlassInput>(input()).controller.text, isEmpty);
     });
 
     testWidgets('外部 error 文案优先于计数显示（tsx 107/170）', (WidgetTester tester) async {
@@ -355,9 +355,9 @@ void main() {
         host(tester, AylaDanmakuInput(onSend: (_, _) async => true, sending: true)),
       );
       await settle(tester);
-      expect(tester.widget<GlassInput>(input()).enabled, isTrue);
-      expect(tester.widget<GlassButton>(sendButton()).onPressed, isNull);
-      expect(tester.widget<GlassButton>(imageButton()).onPressed, isNull);
+      expect(tester.widget<AylaGlassInput>(input()).enabled, isTrue);
+      expect(tester.widget<AylaGlassButton>(sendButton()).onPressed, isNull);
+      expect(tester.widget<AylaGlassButton>(imageButton()).onPressed, isNull);
     });
   });
 
@@ -441,7 +441,7 @@ void main() {
       expect(uploads, 1, reason: '发送失败重试不得重新上传');
       expect(sentMedia, <String?>['media-9', 'media-9']);
       // 成功且草稿未被再编辑 → 清空
-      expect(tester.widget<GlassInput>(input()).controller.text, isEmpty);
+      expect(tester.widget<AylaGlassInput>(input()).controller.text, isEmpty);
     });
 
     testWidgets('取消选择：无状态行、无错误（web `if (!file) return`）', (WidgetTester tester) async {
@@ -507,7 +507,7 @@ void main() {
         host(tester, AylaDanmakuInput(onSend: (_, _) async => true)),
       );
       await settle(tester);
-      expect(tester.widget<GlassButton>(imageButton()).onPressed, isNotNull);
+      expect(tester.widget<AylaGlassButton>(imageButton()).onPressed, isNotNull);
       expect(tester.getSize(imageButton()), const Size(40, 40));
       await tester.tap(imageButton());
       await settle(tester);
@@ -543,11 +543,11 @@ void main() {
       await tester.tap(imageButton());
       await settle(tester);
       expect(find.text('图片上传失败'), findsOneWidget);
-      expect(tester.widget<GlassInput>(input()).controller.text, '旧草稿');
+      expect(tester.widget<AylaGlassInput>(input()).controller.text, '旧草稿');
 
       setLocalState(() => owner = 'acc:2');
       await settle(tester);
-      expect(tester.widget<GlassInput>(input()).controller.text, isEmpty);
+      expect(tester.widget<AylaGlassInput>(input()).controller.text, isEmpty);
       expect(find.text('图片上传失败'), findsNothing);
     });
   });

@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/net/dio_client.dart';
-import '../lib/widgets/dialogs.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/base/dialogs.dart';
+import '../lib/widgets/base/resource_image.dart';
 import '../lib/theme/preview_theme.dart';
 
 void main() {
@@ -24,7 +24,7 @@ void main() {
   group('AsyncState 四态', () {
     testWidgets('loading → 骨架', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        const AylaAsyncState(status: AsyncStatus.loading),
+        const AylaAsyncState(status: AylaAsyncStatus.loading),
       ));
       expect(find.bySemanticsLabel('正在加载'), findsOneWidget);
     });
@@ -33,7 +33,7 @@ void main() {
       bool retried = false;
       await tester.pumpWidget(previewTheme(
         AylaAsyncState(
-          status: AsyncStatus.error,
+          status: AylaAsyncStatus.error,
           error: '网络错误',
           onRetry: () => retried = true,
         ),
@@ -46,7 +46,7 @@ void main() {
 
     testWidgets('empty → 默认文案', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        const AylaAsyncState(status: AsyncStatus.empty),
+        const AylaAsyncState(status: AylaAsyncStatus.empty),
       ));
       expect(find.text('这里还没有内容'), findsOneWidget);
     });
@@ -54,7 +54,7 @@ void main() {
     testWidgets('content → 渲染子项', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
         const AylaAsyncState(
-          status: AsyncStatus.content,
+          status: AylaAsyncStatus.content,
           child: Text('真实内容'),
         ),
       ));
@@ -62,10 +62,10 @@ void main() {
     });
   });
 
-  group('ConfirmDialog（tsx 行为逐条）', () {
+  group('AylaConfirmDialog（tsx 行为逐条）', () {
     testWidgets('渲染标题/文案/两个按钮', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        ConfirmDialog(
+        AylaConfirmDialog(
           title: '删除会话',
           message: '删除会话「小樱」？\n消息记录会保留。',
           onConfirm: () {},
@@ -80,7 +80,7 @@ void main() {
 
     testWidgets('自动聚焦「取消」（危险操作防回车误触）', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        ConfirmDialog(title: 'T', message: 'M', onConfirm: () {}, onClose: () {}),
+        AylaConfirmDialog(title: 'T', message: 'M', onConfirm: () {}, onClose: () {}),
       ));
       await tester.pump(); // post-frame 聚焦
       await tester.pump();
@@ -95,7 +95,7 @@ void main() {
     testWidgets('点取消 → onClose；点确认 → onConfirm', (WidgetTester tester) async {
       int closed = 0, confirmed = 0;
       await tester.pumpWidget(previewTheme(
-        ConfirmDialog(
+        AylaConfirmDialog(
           title: 'T', message: 'M',
           onConfirm: () => confirmed++,
           onClose: () => closed++,
@@ -113,7 +113,7 @@ void main() {
     testWidgets('busy → 确认文案「处理中…」且禁用关闭', (WidgetTester tester) async {
       int closed = 0, confirmed = 0;
       await tester.pumpWidget(previewTheme(
-        ConfirmDialog(
+        AylaConfirmDialog(
           title: 'T', message: 'M', busy: true,
           onConfirm: () => confirmed++,
           onClose: () => closed++,
@@ -132,7 +132,7 @@ void main() {
     testWidgets('ESC → onClose（busy 时不关）', (WidgetTester tester) async {
       int closed = 0;
       await tester.pumpWidget(previewTheme(
-        ConfirmDialog(title: 'T', message: 'M', onConfirm: () {}, onClose: () => closed++),
+        AylaConfirmDialog(title: 'T', message: 'M', onConfirm: () {}, onClose: () => closed++),
       ));
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -141,10 +141,10 @@ void main() {
     });
   });
 
-  group('ResourceImage（decorative 语义）', () {
+  group('AylaResourceImage（decorative 语义）', () {
     testWidgets('外部 URL 直接加载（不走签名）', (WidgetTester tester) async {
       await tester.pumpWidget(previewTheme(
-        const ResourceImage(src: 'https://example.com/a.png', alt: '图'),
+        const AylaResourceImage(src: 'https://example.com/a.png', alt: '图'),
       ));
       await tester.pump();
       // 应进入 ready 态并创建 Image（不抛 "未注入 DioClient" → 证明未走签名）
@@ -155,7 +155,7 @@ void main() {
       await tester.pumpWidget(previewTheme(
         const SizedBox(
           width: 40, height: 40,
-          child: ResourceImage(src: 'https://example.com/a.png'), // alt 默认 ''
+          child: AylaResourceImage(src: 'https://example.com/a.png'), // alt 默认 ''
         ),
       ));
       await tester.pump();
@@ -164,7 +164,7 @@ void main() {
     });
   });
 
-  group('ResourceImage 签名降级 / 过期态', signerDegradationTests);
+  group('AylaResourceImage 签名降级 / 过期态', signerDegradationTests);
 }
 
 
@@ -206,7 +206,7 @@ void signerDegradationTests() {
     await tester.pumpWidget(previewTheme(
       const SizedBox(
         width: 200, height: 150,
-        child: ResourceImage(
+        child: AylaResourceImage(
           src: '/api/v1/media/expired-original/content',
           alt: '图',
           expiredBadge: true,
@@ -224,7 +224,7 @@ void signerDegradationTests() {
     await tester.pumpWidget(previewTheme(
       const SizedBox(
         width: 200, height: 150,
-        child: ResourceImage(src: '/api/v1/media/expired-original/content', alt: '图'),
+        child: AylaResourceImage(src: '/api/v1/media/expired-original/content', alt: '图'),
       ),
     ));
     await tester.pump();
@@ -237,9 +237,9 @@ void signerDegradationTests() {
     await tester.pumpWidget(previewTheme(
       const Column(children: <Widget>[
         SizedBox(width: 200, height: 150,
-          child: ResourceImage(src: '/api/v1/media/fully-expired/content', alt: '图')),
+          child: AylaResourceImage(src: '/api/v1/media/fully-expired/content', alt: '图')),
         SizedBox(width: 200, height: 150,
-          child: ResourceImage(src: '/api/v1/media/fully-expired/content')),
+          child: AylaResourceImage(src: '/api/v1/media/fully-expired/content')),
       ]),
     ));
     await tester.pump();

@@ -1,4 +1,4 @@
-/// 按钮族（GlassButton 之外的 web 按钮样式全量）——
+/// 按钮族（AylaGlassButton 之外的 web 按钮样式全量）——
 /// IconButton40 / CornerFab / CreateFab / MessageFab / ComposerToolButton /
 /// MsgActionButton。
 ///
@@ -34,12 +34,10 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/widget_previews.dart';
 
 import 'app_theme.dart';
 import 'css_gradient.dart';
 import 'glass.dart';
-import 'preview_theme.dart';
 import 'tokens.dart';
 
 /// 统一按钮交互壳（auroraqua.css 全族共用：200ms + hover 1.02 + active .98）。
@@ -48,7 +46,7 @@ import 'tokens.dart';
 /// 只能看到 1.02、没有按压反馈。
 // ======================= 禁用态：按颜色降透明 =======================
 
-/// `base.css button:disabled { opacity: .55 }` —— **按颜色降透明**（用户 2026-09-22 裁决）。
+/// `base.css button:disabled { opacity: .55 }` —— **按颜色降透明**（裁决）。
 ///
 /// ⚠️ 不能用整层 `Opacity(.55)` 包住盒子：这些件的盒子里含 `BackdropFilter`（blur 8/18px），
 /// Opacity 叠在它上面会被 Impeller 拒绝并刷屏
@@ -56,7 +54,7 @@ import 'tokens.dart';
 /// Contents::CanAcceptOpacity returns false`，实测），且**禁用态的变暗并不生效**。
 /// ⇒ .55 落到颜色上（底/边/阴影各乘 .55），内容层单独 Opacity（图标/文字层不含
 /// backdrop-filter ⇒ Impeller 安全）；视觉等价、无层叠冲突。
-/// 首个修复在 `glass.dart` 的 `GlassButton`（同一机制），本文件三处按钮件跟随。
+/// 首个修复在 `glass.dart` 的 `AylaGlassButton`（同一机制），本文件三处按钮件跟随。
 Color _dimDisabled(Color c, bool enabled) =>
     enabled ? c : c.withValues(alpha: c.a * 0.55);
 
@@ -254,7 +252,7 @@ class _AylaIconButtonState extends State<AylaIconButton>
   bool _hovered = false;
 
   /// 扫光进度（`_SweepBand` 的 -120% → +120%，600ms `--auroraqua-ease`）。
-  /// 与 `GlassButton` 的写法一致（glass.dart:756–765）。
+  /// 与 `AylaGlassButton` 的写法一致（glass.dart:756–765）。
   late final AnimationController _sweep = AnimationController(
     vsync: this,
     duration: AylaDurations.sweep, // 600ms
@@ -280,7 +278,7 @@ class _AylaIconButtonState extends State<AylaIconButton>
     // .icon-btn-40 { transition: background 180ms --ease-out }；hover 浅冰蓝底
     final Color background = _hovered && _enabled
         ? AylaColors.ice500.withValues(alpha: 0.18)
-        : GlassConfig.resolveBackground(strong: false);
+        : AylaGlassConfig.resolveBackground(strong: false);
 
     Widget box = AnimatedContainer(
       // ⚠️ auroraqua.css:54–94 把本类一并纳入按钮组：`transition` 全组为
@@ -324,7 +322,7 @@ class _AylaIconButtonState extends State<AylaIconButton>
     // `.narrow-topbar-more > .icon-btn-40`）声明了 `position: relative;
     // overflow: hidden; isolation: isolate` ⇒ `::after` 被**裁在圆角内**。
     // 传入 `sweep: true` 时，把扫光带叠在面层之上并裁圆角。
-    if (widget.sweep && !GlassConfig.useOpaqueFallback) {
+    if (widget.sweep && !AylaGlassConfig.useOpaqueFallback) {
       box = ClipRRect(
         borderRadius: radius,
         child: Stack(
@@ -362,7 +360,7 @@ class _AylaIconButtonState extends State<AylaIconButton>
       );
     }
     // auroraqua.css 125–132：backdrop-filter blur(8px)
-    if (!GlassConfig.useOpaqueFallback) {
+    if (!AylaGlassConfig.useOpaqueFallback) {
       box = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
@@ -374,7 +372,7 @@ class _AylaIconButtonState extends State<AylaIconButton>
                 // `backdrop-filter: blur(8px)` —— **只有 blur，没有 saturate**
                 // （与 18px 档的 `.corner-fab`/`.message-fab`
                 //  `blur(18px) saturate(1.4)` 不同，不能统一按 1.4 处理）。
-                filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
+                filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -445,7 +443,7 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
         color: _dimDisabled(
           _hovered && _enabled
               ? AylaColors.glassBgStrong
-              : GlassConfig.resolveBackground(strong: false),
+              : AylaGlassConfig.resolveBackground(strong: false),
           _enabled,
         ),
         borderRadius: AylaRadii.pill,
@@ -469,7 +467,7 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
       child: box,
     );
 
-    if (!GlassConfig.useOpaqueFallback) {
+    if (!AylaGlassConfig.useOpaqueFallback) {
       box = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
@@ -480,7 +478,7 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
                 // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
                 // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
                 // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
-                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
+                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -575,14 +573,14 @@ class AylaMessageFab extends StatelessWidget {
       width: 56,
       height: 56,
       decoration: BoxDecoration(
-        color: GlassConfig.resolveBackground(strong: false),
+        color: AylaGlassConfig.resolveBackground(strong: false),
         borderRadius: AylaRadii.pill,
         border: Border.all(color: AylaColors.glassBorder),
       ),
       child: Center(child: icon),
     );
 
-    if (!GlassConfig.useOpaqueFallback) {
+    if (!AylaGlassConfig.useOpaqueFallback) {
       box = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
@@ -593,7 +591,7 @@ class AylaMessageFab extends StatelessWidget {
                 // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
                 // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
                 // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
-                filter: GlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
+                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -692,7 +690,7 @@ class _AylaToolButtonState extends State<AylaToolButton> {
         : (_hovered && _enabled ? AylaColors.glow500 : AylaColors.glassBorder);
     final Color background = widget.danger
         ? AylaColors.destructive
-        : GlassConfig.resolveBackground(strong: false);
+        : AylaGlassConfig.resolveBackground(strong: false);
 
     // ⚠️ 圆角 = --radius-input(12)，**不是 pill**：app.css 2105–2113 的
     // `border-radius: var(--radius-pill)` 被 auroraqua.css 105–112 覆写为
@@ -740,7 +738,7 @@ class _AylaToolButtonState extends State<AylaToolButton> {
       box = AylaGlassInset.over(child: box, radius: toolRadius);
     }
 
-    if (!GlassConfig.useOpaqueFallback && !widget.danger) {
+    if (!AylaGlassConfig.useOpaqueFallback && !widget.danger) {
       box = Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
@@ -750,7 +748,7 @@ class _AylaToolButtonState extends State<AylaToolButton> {
               child: BackdropFilter(
                 // auroraqua.css 110–111（`.composer-tool-btn`）：`blur(8px)`
                 // 无 saturate（见 8px 档三处均为纯 blur）。
-                filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
+                filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -854,7 +852,7 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
         minHeight: widget.minHeight ?? 0,
       ),
       // `.msg-action-btn { justify-content: center }`：胶囊被拉宽时**内容居中**
-      // （内容 Row 是 mainAxisSize.min，缺这一句会贴在左侧 —— 用户 2026-09-22 实报
+      // （内容 Row 是 mainAxisSize.min，缺这一句会贴在左侧 —— 实测
       //  「保存两个字要居中」）
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(
@@ -893,7 +891,7 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
     );
 
     // auroraqua.css 126–132：`background: --glass-bg` + 1px 边 + **`blur(8px)`**
-    // （注意 130 行只有 blur、没有 saturate ⇒ [GlassConfig.blurOnly]）。
+    // （注意 130 行只有 blur、没有 saturate ⇒ [AylaGlassConfig.blurOnly]）。
     // ⚠️ 模糊层必须画在底/边**之下**：BackdropFilter 采样其下方已绘制内容，
     // 若嵌在 face 内部会把按钮自己的底与亮边一起糊掉。
     Widget box = Stack(
@@ -902,7 +900,7 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(AylaRadii.rSm),
             child: BackdropFilter(
-              filter: GlassConfig.blurOnly(sigma: AylaGlass.blurButton),
+              filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
               child: const SizedBox.expand(),
             ),
           ),
@@ -936,82 +934,6 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
         child: box,
-      ),
-    );
-  }
-}
-
-// ======================= 预览 =======================
-
-/// 按钮族全量（后台复核用：40 图标钮 / 44 corner / 56 create+message / 工具钮 / 消息操作钮）。
-@Preview(
-  group: 'Buttons',
-  name: '按钮族全量（IconButton/CornerFab/FAB/Tool/MsgAction）',
-  size: Size(720, 460),
-  wrapper: previewTheme,
-)
-Widget buttonsFamilyPreview() {
-  return Padding(
-    padding: const EdgeInsets.all(AylaSpacing.sp6),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            AylaIconButton(
-              icon: const _Dot(),
-              onPressed: () {},
-              semanticLabel: 'icon-btn-40',
-            ),
-            const SizedBox(width: AylaSpacing.sp4),
-            AylaIconButton(icon: const _Dot(), square: true, onPressed: () {}),
-            const SizedBox(width: AylaSpacing.sp4),
-            AylaCornerFab(icon: const _Dot(), onPressed: () {}),
-            const SizedBox(width: AylaSpacing.sp4),
-            AylaCreateFab(icon: const _Dot(), onPressed: () {}),
-            const SizedBox(width: AylaSpacing.sp4),
-            AylaMessageFab(icon: const _Dot(), onPressed: () {}),
-          ],
-        ),
-        const SizedBox(height: AylaSpacing.sp6),
-        Row(
-          children: <Widget>[
-            AylaToolButton(icon: const _Dot(), onPressed: () {}),
-            const SizedBox(width: AylaSpacing.sp4),
-            AylaToolButton(icon: const _Dot(), onPressed: () {}, danger: true),
-            const SizedBox(width: AylaSpacing.sp4),
-            AylaMsgActionButton(
-              label: '重试',
-              icon: const _Dot(),
-              onPressed: () {},
-            ),
-            const SizedBox(width: AylaSpacing.sp2),
-            AylaMsgActionButton(
-              label: '删除',
-              icon: const _Dot(),
-              onPressed: () {},
-              danger: true,
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
-/// 占位图标点（预览用；真实图标走 AylaIcon）。
-class _Dot extends StatelessWidget {
-  const _Dot();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 18,
-      height: 18,
-      decoration: const BoxDecoration(
-        color: AylaColors.indigo700,
-        shape: BoxShape.circle,
       ),
     );
   }

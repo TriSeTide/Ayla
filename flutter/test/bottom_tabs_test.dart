@@ -6,9 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/buttons.dart' show AylaPressScale;
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/bottom_tabs.dart';
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
-import '../lib/widgets/tab_badge.dart';
+import '../lib/widgets/shell/bottom_tabs.dart';
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/base/tab_badge.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -28,7 +28,7 @@ void main() {
     await tester.pumpWidget(
       host(const AylaBottomTabs(module: AylaPrimaryModule.home)),
     );
-    expect(find.byType(TabBadge), findsNothing);
+    expect(find.byType(AylaTabBadge), findsNothing);
   });
 
   testWidgets('方角容器（auroraqua 447–448 覆写）+ 主页圆盘 48 且上浮 8',
@@ -40,7 +40,7 @@ void main() {
       host(const AylaBottomTabs(module: AylaPrimaryModule.home)),
     );
     await tester.pumpAndSettle();
-    // 容器方角：GlassSurface 的 ClipRRect 半径应为 0
+    // 容器方角：AylaGlassSurface 的 ClipRRect 半径应为 0
     final Finder clips = find.descendant(
       of: find.byType(AylaBottomTabs),
       matching: find.byType(ClipRRect),

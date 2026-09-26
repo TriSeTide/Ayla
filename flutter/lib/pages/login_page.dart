@@ -29,12 +29,10 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/widget_previews.dart';
 
 import '../theme/app_theme.dart';
 import '../theme/css_gradient.dart';
 import '../theme/glass.dart';
-import '../theme/preview_theme.dart';
 import '../theme/tokens.dart';
 
 /// 登录页（视觉 + 本地表单状态；提交回调由外部注入，未接网络）。
@@ -89,7 +87,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final Size viewport = MediaQuery.sizeOf(context);
-    final bool wide = viewport.width > Breakpoint.sm; // >768 宽屏分栏
+    final bool wide = viewport.width > AylaBreakpoints.sm; // >768 宽屏分栏
     final bool compact =
         viewport.width <= 480 || viewport.height <= 700; // 窄/短屏收紧
 
@@ -114,7 +112,7 @@ class _LoginPageState extends State<LoginPage> {
                     // .auth-intro（≥1024 flex-basis 460；gap clamp(48,6vw,96)）
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                        maxWidth: viewport.width >= Breakpoint.md ? 460 : 420,
+                        maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
                       ),
                       child: const _AuthIntro(),
                     ),
@@ -158,7 +156,7 @@ class _AuthIntro extends StatelessWidget {
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final bool showFeatures =
-        MediaQuery.sizeOf(context).width >= Breakpoint.md; // ≥1024 才显示
+        MediaQuery.sizeOf(context).width >= AylaBreakpoints.md; // ≥1024 才显示
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -292,7 +290,7 @@ class _AuthCard extends StatelessWidget {
     final AylaTextStyles t = AylaTextStyles.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 440), // width: min(440px,100%)
-      child: GlassCard(
+      child: AylaGlassCard(
         radius: AylaRadii.rPanel, // --radius-panel 20
         shadow: AylaShadows.modal, // --glass-shadow-modal
         blur: AylaGlass.blurCard, // --glass-filter blur(24)
@@ -353,9 +351,9 @@ class _AuthCard extends StatelessWidget {
             // .auth-submit：满宽 44 高 + margin-top sp1
             Padding(
               padding: const EdgeInsets.only(top: AylaSpacing.sp1),
-              child: GlassButton(
+              child: AylaGlassButton(
                 label: submitting ? '登录中…' : '登录',
-                variant: GlassButtonVariant.glow,
+                variant: AylaGlassButtonVariant.glow,
                 minHeight: 44,
                 expand: true,
                 onPressed: submitting ? null : onSubmit,
@@ -383,9 +381,9 @@ class _AuthCard extends StatelessWidget {
                       letterSpacing: 0,
                     ),
                   ),
-                  GlassButton(
+                  AylaGlassButton(
                     label: '注册',
-                    variant: GlassButtonVariant.ghost,
+                    variant: AylaGlassButtonVariant.ghost,
                     minHeight: 44,
                     minWidth: 72,
                     padding:
@@ -434,7 +432,7 @@ class _AuthField extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AylaSpacing.sp2), // gap: var(--sp-2)
-        GlassInput(
+        AylaGlassInput(
           controller: controller,
           obscureText: obscure,
           autofillHints: autofillHints,
@@ -478,78 +476,4 @@ class _AuthError extends StatelessWidget {
   }
 }
 
-// ======================= 预览 =======================
-
-/// 窄屏单卡（375×812）。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 窄屏 375×812',
-  size: Size(375, 812),
-  wrapper: previewTheme,
-)
-Widget loginNarrowPreview() => const LoginPage();
-
-/// 窄屏 · 错误态。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 窄屏 · 错误态',
-  size: Size(375, 812),
-  wrapper: previewTheme,
-)
-Widget loginNarrowErrorPreview() => const LoginPage(
-      initialUsername: '123',
-      initialPassword: 'wrongpass',
-      errorText: '用户名或密码错误',
-    );
-
-/// 窄屏 · 登录中。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 窄屏 · 登录中',
-  size: Size(375, 812),
-  wrapper: previewTheme,
-)
-Widget loginNarrowPendingPreview() => const LoginPage(
-      initialUsername: '123',
-      initialPassword: '12345678',
-      submitting: true,
-    );
-
-/// 宽屏左右分栏（1440×900）。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 宽屏 1440×900',
-  size: Size(1440, 900),
-  wrapper: previewTheme,
-)
-Widget loginWidePreview() => const LoginPage();
-
-/// 宽屏 · 分栏 + 错误态。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 宽屏 · 错误态',
-  size: Size(1440, 900),
-  wrapper: previewTheme,
-)
-Widget loginWideErrorPreview() => const LoginPage(
-      initialUsername: '123',
-      errorText: '网络异常，登录失败，请稍后重试',
-    );
-
-/// 短屏 1024×680（≤700 高触发 compact：page/card 收紧、brand 32px）。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 短屏 1024×680（compact）',
-  size: Size(1024, 680),
-  wrapper: previewTheme,
-)
-Widget loginCompactPreview() => const LoginPage();
-
-/// 断点边界 768×900（= 窄屏上限，仍单卡）。
-@Preview(
-  group: 'Pages',
-  name: 'LoginPage 768×900（窄屏上限）',
-  size: Size(768, 900),
-  wrapper: previewTheme,
-)
-Widget loginBreakpointPreview() => const LoginPage();
+// ======================= 样张 =======================

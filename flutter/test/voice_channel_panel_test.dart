@@ -14,9 +14,9 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/voice_channel_panel.dart';
-import '../lib/widgets/voice_member_row.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/voice/voice_channel_panel.dart';
+import '../lib/widgets/voice/voice_member_row.dart';
 
 void main() {
   const AylaVoicePanelMember elysia = AylaVoicePanelMember(
@@ -81,10 +81,10 @@ void main() {
       tester.widgetList<AylaVoiceMemberRow>(find.byType(AylaVoiceMemberRow)).toList();
 
   /// 房主操作行的按钮（按 label 取；**每个成员行各一个** ⇒ 返回列表）。
-  List<GlassButton> actionButtons(WidgetTester tester, String label) => tester
-      .widgetList<GlassButton>(
+  List<AylaGlassButton> actionButtons(WidgetTester tester, String label) => tester
+      .widgetList<AylaGlassButton>(
         find.byWidgetPredicate(
-          (Widget w) => w is GlassButton && w.label == label,
+          (Widget w) => w is AylaGlassButton && w.label == label,
         ),
       )
       .toList();
@@ -141,8 +141,8 @@ void main() {
         ),
       ),
     );
-    final GlassSurface surface =
-        tester.widget<GlassSurface>(find.byType(GlassSurface));
+    final AylaGlassSurface surface =
+        tester.widget<AylaGlassSurface>(find.byType(AylaGlassSurface));
     expect(
       surface.radiusOverride,
       BorderRadius.all(Radius.circular(AylaRadii.rCard)), // --radius-card 16
@@ -191,7 +191,7 @@ void main() {
         ),
       ),
     );
-    expect(find.byType(GlassSurface), findsNothing);
+    expect(find.byType(AylaGlassSurface), findsNothing);
     expect(find.byType(AylaVoiceMemberRow), findsOneWidget);
   });
 
@@ -350,7 +350,7 @@ void main() {
     expect(find.text('转让房主'), findsNWidgets(2));
     expect(
       actionButtons(tester, '踢出').first.variant,
-      GlassButtonVariant.ghost, // `.btn.btn-ghost`
+      AylaGlassButtonVariant.ghost, // `.btn.btn-ghost`
     );
   });
 
@@ -416,7 +416,7 @@ void main() {
     expect(calls, <(String, AylaVoiceMemberAction)>[('u2', AylaVoiceMemberAction.kick)]);
     expect(actionButtons(tester, '处理中…').single.onPressed, isNull); // 当前行文案
     expect(
-      actionButtons(tester, '转让房主').every((GlassButton b) => b.onPressed == null),
+      actionButtons(tester, '转让房主').every((AylaGlassButton b) => b.onPressed == null),
       isTrue,
       reason: 'busy 期间两个按钮一起禁用',
     );
@@ -428,7 +428,7 @@ void main() {
     gate.complete();
     await settle(tester);
     expect(
-      actionButtons(tester, '踢出').every((GlassButton b) => b.onPressed != null),
+      actionButtons(tester, '踢出').every((AylaGlassButton b) => b.onPressed != null),
       isTrue,
     );
     expect(find.text('处理中…'), findsNothing);

@@ -19,8 +19,8 @@ import '../lib/core/models/visibility.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/voice_channel_create.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/voice/voice_channel_create.dart';
 
 void main() {
   const List<({String id, String title})> groups = <({String id, String title})>[
@@ -60,22 +60,22 @@ void main() {
 
   /// 本表单的名称输入框。
   ///
-  /// ⚠️ `AylaVisibilitySelector` 的**群搜索框也复用了 `GlassInput`**
+  /// ⚠️ `AylaVisibilitySelector` 的**群搜索框也复用了 `AylaGlassInput`**
   /// （`directory_controls.dart:970`，且只在「指定群可见」勾选时渲染）
   /// ⇒ 按类型取会命中两个；这里按 hint 唯一锁定。
   Finder nameInput() => find.byWidgetPredicate(
-        (Widget w) => w is GlassInput && w.hintText == '新语音频道名称',
+        (Widget w) => w is AylaGlassInput && w.hintText == '新语音频道名称',
       );
 
-  GlassInput input(WidgetTester tester) => tester.widget<GlassInput>(nameInput());
+  AylaGlassInput input(WidgetTester tester) => tester.widget<AylaGlassInput>(nameInput());
 
   Finder nameField() => find.descendant(
         of: nameInput(),
         matching: find.byType(TextField),
       );
 
-  GlassButton submitButton(WidgetTester tester) =>
-      tester.widget<GlassButton>(find.byType(GlassButton));
+  AylaGlassButton submitButton(WidgetTester tester) =>
+      tester.widget<AylaGlassButton>(find.byType(AylaGlassButton));
 
   Future<void> settle(WidgetTester tester) async {
     await tester.pump();
@@ -134,7 +134,7 @@ void main() {
     setViewport(tester, const Size(420, 620));
     await tester.pumpWidget(host(const AylaVoiceChannelCreate(groups: groups)));
 
-    final GlassInput field = input(tester);
+    final AylaGlassInput field = input(tester);
     expect(field.hintText, '新语音频道名称');
     expect(field.minHeight, 36);
     expect(field.textStyle!.fontSize, 13);
@@ -167,7 +167,7 @@ void main() {
     expect(submitButton(tester).expand, isTrue); // `.btn-primary { width: 100% }`
     final double available = 420 - AylaSpacing.sp4 * 2; // host padding 两侧
     expect(tester.getRect(nameInput()).width, available);
-    expect(tester.getRect(find.byType(GlassButton)).width, available); // 按钮同样整宽
+    expect(tester.getRect(find.byType(AylaGlassButton)).width, available); // 按钮同样整宽
   });
 
   // ======================= 提交路径 =======================

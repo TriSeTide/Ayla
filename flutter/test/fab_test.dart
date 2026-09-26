@@ -15,8 +15,8 @@ import '../lib/theme/app_icons.dart' show AylaIcon;
 import '../lib/theme/buttons.dart' show AylaCornerFab, AylaMessageFab;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart' show AylaDurations, AylaSpacing;
-import '../lib/widgets/fab.dart';
-import '../lib/widgets/tab_badge.dart' show TabBadge;
+import '../lib/widgets/shell/fab.dart';
+import '../lib/widgets/base/tab_badge.dart' show AylaTabBadge;
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -389,7 +389,7 @@ void main() {
       expect((fab.icon as AylaIcon).icon.name, 'iconMessage');
       expect((fab.icon as AylaIcon).size, 24);
       expect(fab.semanticLabel, '消息，3 条未读'); // unread > 0
-      expect(fab.badge, isA<TabBadge>());
+      expect(fab.badge, isA<AylaTabBadge>());
       expect(find.text('3'), findsOneWidget);
     });
 

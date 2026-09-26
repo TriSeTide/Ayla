@@ -15,7 +15,7 @@ import '../lib/theme/app_icons.dart';
 import '../lib/theme/app_theme.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/share.dart';
+import '../lib/widgets/base/share.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));

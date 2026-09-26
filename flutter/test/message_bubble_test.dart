@@ -19,10 +19,10 @@ import '../lib/core/models/post.dart' show AylaMediaDescriptor;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/directory_controls.dart' show AylaFavoriteButton;
-import '../lib/widgets/message_bubble.dart';
-import '../lib/widgets/resource_image.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/directory_controls.dart' show AylaFavoriteButton;
+import '../lib/widgets/chat/message_bubble.dart';
+import '../lib/widgets/base/resource_image.dart';
 
 AylaChatMessage _msg({
   String id = 'm1',
@@ -151,8 +151,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 头像（`AvatarHalo(size: 32)`，光环外径 = size + 2×2.5）
-    final AvatarHalo halo = tester.widget<AvatarHalo>(find.byType(AvatarHalo));
+    // 头像（`AylaAvatarHalo(size: 32)`，光环外径 = size + 2×2.5）
+    final AylaAvatarHalo halo = tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
     expect(halo.size, 32);
     expect(halo.online, isTrue);
     expect(find.text('小樱'), findsOneWidget);
@@ -197,7 +197,7 @@ void main() {
         )
         .first;
 
-    final double haloCenter = tester.getCenter(find.byType(AvatarHalo)).dx;
+    final double haloCenter = tester.getCenter(find.byType(AylaAvatarHalo)).dx;
     final double bubbleCenter = tester.getCenter(bubbleFinder).dx;
     expect(haloCenter, greaterThan(bubbleCenter), reason: '自己行 `row-reverse`（app.css 1069–1071）');
 
@@ -272,7 +272,7 @@ void main() {
 
     expect(find.text('你撤回了一条消息'), findsOneWidget, reason: '自己撤回的文案（tsx 355）');
     // 撤回态不显示头像（tsx 220–221）
-    expect(find.byType(AvatarHalo), findsNothing);
+    expect(find.byType(AylaAvatarHalo), findsNothing);
 
     // ⚠️ 有意偏离 web：web 是 `font-style: italic`（app.css 1227），但中文无真斜体变体
     // ⇒ Flutter 合成斜体倾角明显更大（用户 2026-09-24 实报「过于斜」）⇒ 只保留 opacity 弱化。
@@ -327,7 +327,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('小樱 加入了群聊'), findsOneWidget);
-    expect(find.byType(AvatarHalo), findsNothing);
+    expect(find.byType(AylaAvatarHalo), findsNothing);
     expect(find.byType(AylaFavoriteButton), findsNothing, reason: '系统消息无操作栏（tsx 244）');
     expect(find.text('引用'), findsNothing);
   });
@@ -405,7 +405,7 @@ void main() {
 
     // 气泡 = 最外层 ClipRRect（`.first` 是 `_ImageMedia` 自己的图片圆角裁剪，宽 = 图片宽）
     final Finder bubbleFinder = find.ancestor(
-      of: find.byType(ResourceImage),
+      of: find.byType(AylaResourceImage),
       matching: find.byType(ClipRRect),
     );
     final Rect bubble = tester.getRect(bubbleFinder.last);
@@ -632,16 +632,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(AvatarHalo));
+    await tester.tap(find.byType(AylaAvatarHalo));
     await tester.pump(const Duration(milliseconds: 200));
     expect(clicks, 0, reason: '双击窗口内先不跳转（DOUBLE_CLICK_MS = 250）');
     await tester.pump(const Duration(milliseconds: 100));
     expect(clicks, 1);
 
     // 双击：取消挂起单击，触发 poke
-    await tester.tap(find.byType(AvatarHalo));
+    await tester.tap(find.byType(AylaAvatarHalo));
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.byType(AvatarHalo));
+    await tester.tap(find.byType(AylaAvatarHalo));
     await tester.pump(const Duration(milliseconds: 400));
     expect(pokes, 1);
     expect(clicks, 1, reason: '双击不再触发单击跳转');
@@ -663,7 +663,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.longPress(find.byType(AvatarHalo));
+    await tester.longPress(find.byType(AylaAvatarHalo));
     await tester.pumpAndSettle();
     expect(mentioned, '小樱');
   });
@@ -683,7 +683,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.longPress(find.byType(AvatarHalo));
+    await tester.longPress(find.byType(AylaAvatarHalo));
     await tester.pumpAndSettle();
     expect(mentioned, isNull);
   });

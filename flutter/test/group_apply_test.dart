@@ -13,9 +13,9 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/models/subgroup.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/dialogs.dart';
+import '../lib/widgets/base/dialogs.dart';
 import '../lib/theme/glass.dart';
-import '../lib/widgets/group_apply.dart';
+import '../lib/widgets/group/group_apply.dart';
 
 void main() {
   const AylaGroupApplyData publicGroup = AylaGroupApplyData(
@@ -43,8 +43,8 @@ void main() {
     );
   }
 
-  GlassButton byLabel(WidgetTester tester, String label) => tester.widget<GlassButton>(
-        find.ancestor(of: find.text(label), matching: find.byType(GlassButton)).first,
+  AylaGlassButton byLabel(WidgetTester tester, String label) => tester.widget<AylaGlassButton>(
+        find.ancestor(of: find.text(label), matching: find.byType(AylaGlassButton)).first,
       );
 
   testWidgets('Form 公开群：desc 文案 + 「直接加入」键', (WidgetTester tester) async {
@@ -105,8 +105,8 @@ void main() {
       field.inputFormatters!.whereType<LengthLimitingTextInputFormatter>(),
       isNotEmpty,
     );
-    // min-height 104 由 GlassInput 的容器表达（TextField 自身只占内容高）
-    expect(tester.getSize(find.byType(GlassInput)).height >= 104, isTrue);
+    // min-height 104 由 AylaGlassInput 的容器表达（TextField 自身只占内容高）
+    expect(tester.getSize(find.byType(AylaGlassInput)).height >= 104, isTrue);
   });
 
   testWidgets('公开群提交：accepted → onDone(conversation_id)（tsx 45–48）', (

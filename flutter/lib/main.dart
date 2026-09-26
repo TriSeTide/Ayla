@@ -22,8 +22,6 @@ import 'theme/app_theme.dart';
 import 'theme/aurora_background.dart';
 import 'core/net/dio_client.dart';
 import 'core/ws/ws_manager.dart';
-import 'poc/echo_page.dart';
-import 'poc/hls_page.dart';
 import 'preview/component_gallery.dart';
 import 'state/auth_state.dart';
 
@@ -78,7 +76,7 @@ class _UiStageState extends State<_UiStage> {
       // 极光背景交给 Scaffold 的 body 铺满。
       home: Scaffold(
         backgroundColor: Colors.transparent,
-        body: AuroraBackground(
+        body: AylaAuroraBackground(
           child: Stack(
             children: <Widget>[
               Positioned.fill(
@@ -96,58 +94,6 @@ class _UiStageState extends State<_UiStage> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// PoC 最小壳（自 PoC 基线 93cc2e9 原样保留，勿改）。
-///
-/// 用途：基线 `test/widget_test.dart`（PoC shell smoke test）导入本函数做
-/// 双 PoC 入口回归；UI 重建期 main() 指向组件库画布，PoC 壳不参与启动。
-class PocApp extends StatelessWidget {
-  const PocApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Ayla Flutter PoC',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        colorSchemeSeed: const Color(0xFF9DBFE6),
-      ),
-      home: const HomePage(),
-    );
-  }
-}
-
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ayla Flutter PoC')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            FilledButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const EchoPage()),
-              ),
-              child: const Text('PoC-A 音频 Echo（语音中继）'),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const HlsPage()),
-              ),
-              child: const Text('PoC-B HLS 播放（直播）'),
-            ),
-          ],
         ),
       ),
     );

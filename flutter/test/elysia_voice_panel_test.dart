@@ -17,7 +17,7 @@ import '../lib/theme/buttons.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/elysia_voice_panel.dart';
+import '../lib/widgets/voice/elysia_voice_panel.dart';
 
 void main() {
   Widget host(Widget child, {Size viewport = const Size(700, 520)}) {
@@ -48,26 +48,26 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   }
 
-  GlassSurface shell(WidgetTester tester) =>
-      tester.widget<GlassSurface>(find.byType(GlassSurface));
+  AylaGlassSurface shell(WidgetTester tester) =>
+      tester.widget<AylaGlassSurface>(find.byType(AylaGlassSurface));
 
-  GlassInput input(WidgetTester tester) => tester.widget<GlassInput>(
+  AylaGlassInput input(WidgetTester tester) => tester.widget<AylaGlassInput>(
         find.byWidgetPredicate(
-          (Widget w) => w is GlassInput && w.hintText == AylaElysiaVoicePanel.inputHint,
+          (Widget w) => w is AylaGlassInput && w.hintText == AylaElysiaVoicePanel.inputHint,
         ),
       );
 
   Finder nameField() => find.descendant(
         of: find.byWidgetPredicate(
-          (Widget w) => w is GlassInput && w.hintText == AylaElysiaVoicePanel.inputHint,
+          (Widget w) => w is AylaGlassInput && w.hintText == AylaElysiaVoicePanel.inputHint,
         ),
         matching: find.byType(TextField),
       );
 
-  GlassButton buttonOf(WidgetTester tester, String label) =>
-      tester.widget<GlassButton>(
+  AylaGlassButton buttonOf(WidgetTester tester, String label) =>
+      tester.widget<AylaGlassButton>(
         find.byWidgetPredicate(
-          (Widget w) => w is GlassButton && w.label == label,
+          (Widget w) => w is AylaGlassButton && w.label == label,
         ),
       );
 
@@ -80,14 +80,14 @@ void main() {
 
     expect(find.text('爱莉语音'), findsOneWidget);
     expect(find.text('收起'), findsNothing); // 收起态没有 head
-    expect(buttonOf(tester, '爱莉语音').variant, GlassButtonVariant.glow);
+    expect(buttonOf(tester, '爱莉语音').variant, AylaGlassButtonVariant.glow);
 
     // `.collapsed { padding: var(--sp-3) }`（展开是 sp4）
     expect(shell(tester).padding, const EdgeInsets.all(AylaSpacing.sp3));
     // `.collapsed { align-items: flex-start }` ⇒ **按钮**贴左（= 面板 padding 12），
     // 不是居中；按钮内部的 24px 左右内边距属 `.btn` 本身，不影响这条断言。
-    final double buttonLeft = tester.getRect(find.byType(GlassButton)).left;
-    final double shellLeft = tester.getRect(find.byType(GlassSurface)).left;
+    final double buttonLeft = tester.getRect(find.byType(AylaGlassButton)).left;
+    final double shellLeft = tester.getRect(find.byType(AylaGlassSurface)).left;
     expect(buttonLeft - shellLeft, closeTo(AylaSpacing.sp3, 1.0));
   });
 
@@ -105,7 +105,7 @@ void main() {
       shell(tester).padding,
       const EdgeInsets.all(AylaSpacing.sp4), // 展开档 padding: sp4
     );
-    expect(find.byType(GlassInput), findsOneWidget);
+    expect(find.byType(AylaGlassInput), findsOneWidget);
   });
 
   // ======================= 展开 head =======================
@@ -138,7 +138,7 @@ void main() {
     await tester.tap(find.text('收起'));
     await settle(tester);
     expect(find.text('收起'), findsNothing);
-    expect(find.byType(GlassInput), findsNothing);
+    expect(find.byType(AylaGlassInput), findsNothing);
   });
 
   // ======================= 未接入态 =======================
@@ -153,7 +153,7 @@ void main() {
     final Text empty = tester.widget<Text>(find.text('等待接入'));
     expect(empty.style!.fontSize, 13);
     expect(empty.style!.color, AylaColors.textSecondary);
-    expect(find.byType(GlassInput), findsNothing); // 未接入没有输入行
+    expect(find.byType(AylaGlassInput), findsNothing); // 未接入没有输入行
   });
 
   testWidgets('未接入 + busy：文案「接入中…」', (WidgetTester tester) async {
@@ -186,14 +186,14 @@ void main() {
     await tester.tap(find.text('爱莉语音'));
     await settle(tester);
 
-    final GlassInput field = input(tester);
+    final AylaGlassInput field = input(tester);
     expect(field.hintText, AylaElysiaVoicePanel.inputHint);
     expect(field.minHeight, 36);
     expect(field.textStyle!.fontSize, 13);
     // tsx 66：`maxLength={2000}` —— formatter 表达（`maxLength` 会带「0/2000」计数器）
     expect(field.maxLength, isNull);
     expect(field.inputFormatters!.first, isA<LengthLimitingTextInputFormatter>());
-    expect(buttonOf(tester, '发送').variant, GlassButtonVariant.primary);
+    expect(buttonOf(tester, '发送').variant, AylaGlassButtonVariant.primary);
 
     // 真输入 2100 字符 → 截到 2000
     await tester.enterText(nameField(), 'x' * 2100);
@@ -278,7 +278,7 @@ void main() {
     expect(find.text('重新发起'), findsNothing);
     expect(
       buttonOf(tester, '结束通话').variant,
-      GlassButtonVariant.outlineDestructive, // `.btn.voice-leave-btn`
+      AylaGlassButtonVariant.outlineDestructive, // `.btn.voice-leave-btn`
     );
     await tester.tap(find.text('结束通话'));
     await settle(tester);
@@ -303,8 +303,8 @@ void main() {
 
     expect(find.text('重新发起'), findsOneWidget);
     expect(find.text('结束通话'), findsNothing);
-    expect(buttonOf(tester, '重新发起').variant, GlassButtonVariant.primary);
-    expect(find.byType(GlassInput), findsNothing); // tsx 60：终态不显示输入行
+    expect(buttonOf(tester, '重新发起').variant, AylaGlassButtonVariant.primary);
+    expect(find.byType(AylaGlassInput), findsNothing); // tsx 60：终态不显示输入行
     await tester.tap(find.text('重新发起'));
     await settle(tester);
     expect(ensures, 1);
@@ -345,7 +345,7 @@ void main() {
     await tester.pumpWidget(host(const AylaElysiaVoicePanel()));
     expect(tester.getSize(find.byType(AylaElysiaVoicePanel)).width, 560);
 
-    final GlassSurface s = shell(tester);
+    final AylaGlassSurface s = shell(tester);
     expect(
       s.radiusOverride,
       BorderRadius.all(Radius.circular(AylaRadii.rCard)),

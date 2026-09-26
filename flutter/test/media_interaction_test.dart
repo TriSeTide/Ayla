@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/net/dio_client.dart';
-import '../lib/widgets/media_interaction.dart';
+import '../lib/widgets/base/media_interaction.dart';
 import '../lib/theme/preview_theme.dart';
 
 void main() {
@@ -32,13 +32,13 @@ void main() {
     });
   });
 
-  group('PullTracker 状态机（对齐 createPullTracker 57–100）', () {
+  group('AylaPullTracker 状态机（对齐 createPullTracker 57–100）', () {
     late double offset;
     late bool? endedWith;
     late int cancels;
     late bool atTop;
 
-    PullTracker build({double threshold = 64}) => PullTracker(
+    AylaPullTracker build({double threshold = 64}) => AylaPullTracker(
           threshold: threshold,
           canPull: () => atTop,
           onOffsetChange: (v) => offset = v,
@@ -209,7 +209,7 @@ void main() {
     });
   });
 
-  group('SignedVideo 状态机', () {
+  group('AylaSignedVideo 状态机', () {
     setUp(() => MediaSigner.instance.detach()); // 隔离：还原为未注入态
     tearDown(() => MediaSigner.instance.detach());
 
@@ -220,7 +220,7 @@ void main() {
       await tester.pumpWidget(previewTheme(
         const SizedBox(
           width: 300, height: 200,
-          child: SignedVideo(mediaId: 'v-pending'),
+          child: AylaSignedVideo(mediaId: 'v-pending'),
         ),
       ));
       await tester.pump();
@@ -233,7 +233,7 @@ void main() {
       await tester.pumpWidget(previewTheme(
         const SizedBox(
           width: 300, height: 200,
-          child: SignedVideo(mediaId: 'v1'),
+          child: AylaSignedVideo(mediaId: 'v1'),
         ),
       ));
       await tester.pump(); // 触发 _sign
@@ -246,7 +246,7 @@ void main() {
       await tester.pumpWidget(previewTheme(
         const SizedBox(
           width: 300, height: 200,
-          child: SignedVideo(mediaId: 'v3'),
+          child: AylaSignedVideo(mediaId: 'v3'),
         ),
       ));
       await tester.pump();

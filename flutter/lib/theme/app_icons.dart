@@ -10,12 +10,9 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/widget_previews.dart';
 
 import 'app_icons_data.dart';
 export 'app_icons_data.dart';
-import 'app_theme.dart';
-import 'preview_theme.dart';
 import 'tokens.dart';
 
 /// 按名取图标(web 名小驼峰,如 `iconSend`);找不到返回 null。
@@ -67,13 +64,13 @@ class AylaIcon extends StatelessWidget {
         painter: _AylaIconPainter(
           icon,
           // 颜色解析顺序：显式 color → 祖先 IconTheme（按钮族用 IconTheme 传前景色，
-          // 例如 GlassButton primary 的 #fffafb、AylaMsgActionButton 的 fg、
+          // 例如 AylaGlassButton primary 的 #fffafb、AylaMsgActionButton 的 fg、
           // AylaCreateFab 的 surface）→ 默认 text-primary。
           //
           // ⚠️ 必须用 IconTheme.maybeOf：IconTheme.of 在无祖先时返回
           // IconThemeData.fallback()（**黑色**），会让全站默认图标从 indigo 变黑
           // （2026-09-20 实测：此前 AylaIcon 完全忽略 IconTheme，导致
-          // GlassButton 里的纸飞机图标用 indigo 画在 indigo 底上 → 肉眼不可见）。
+          // AylaGlassButton 里的纸飞机图标用 indigo 画在 indigo 底上 → 肉眼不可见）。
           color ??
               context.dependOnInheritedWidgetOfExactType<IconTheme>()?.data.color ??
               AylaColors.textPrimary,
@@ -392,43 +389,4 @@ class _AylaIconPainter extends CustomPainter {
       oldDelegate.icon != icon || oldDelegate.color != color;
 }
 
-// ======================= 预览 =======================
-
-/// 全量图标平铺（18px 真实尺寸 + 名称）。
-@Preview(
-  group: 'Icons',
-  name: '图标库全量（47 个）',
-  size: Size(900, 900),
-  wrapper: previewTheme,
-)
-Widget aylaIconsPreview() {
-  return Padding(
-    padding: const EdgeInsets.all(AylaSpacing.sp6),
-    child: Wrap(
-      spacing: AylaSpacing.sp4,
-      runSpacing: AylaSpacing.sp6,
-      crossAxisAlignment: WrapCrossAlignment.start,
-      children: <Widget>[
-        for (final AylaIconData icon in kAylaIcons)
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              AylaIcon(icon, size: 18, color: AylaColors.indigo700),
-              const SizedBox(height: AylaSpacing.sp1),
-              SizedBox(
-                width: 110,
-                child: Text(
-                  icon.name,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AylaTextStyles.light.timestamp
-                      .copyWith(color: AylaColors.textSecondary),
-                ),
-              ),
-            ],
-          ),
-      ],
-    ),
-  );
-}
+// ======================= 样张 =======================

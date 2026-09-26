@@ -14,8 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/models/elysia_profile.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/avatar_halo.dart';
-import '../lib/widgets/elysia_entry.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/chat/elysia_entry.dart';
 
 const AylaElysiaProfile _profile = AylaElysiaProfile(
   id: 1,
@@ -56,9 +56,9 @@ void main() {
     await tester.pumpWidget(host(tester, AylaElysiaEntry(profile: _profile, onEnter: () {})));
     await tester.pump(const Duration(milliseconds: 50));
 
-    final AvatarHalo halo = tester.widget<AvatarHalo>(find.byType(AvatarHalo));
+    final AylaAvatarHalo halo = tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
     expect(halo.size, 40, reason: '`<Avatar size={40}>`（tsx 21）');
-    expect(halo.core, AvatarCore.elysia, reason: '爱莉专属光环（辉光归属爱莉身份）');
+    expect(halo.core, AylaAvatarCore.elysia, reason: '爱莉专属光环（辉光归属爱莉身份）');
     expect(halo.online, isTrue, reason: '`online={profile.enabled}`');
 
     expect(find.text('爱莉'), findsOneWidget);
@@ -88,7 +88,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('已停用'), findsOneWidget);
-    expect(tester.widget<AvatarHalo>(find.byType(AvatarHalo)).online, isFalse);
+    expect(tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).online, isFalse);
   });
 
   testWidgets('display_name 为空 → 回退「爱莉」', (WidgetTester tester) async {

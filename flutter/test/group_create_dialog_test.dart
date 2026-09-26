@@ -14,8 +14,8 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/directory_controls.dart';
-import '../lib/widgets/group_create_dialog.dart';
+import '../lib/widgets/base/directory_controls.dart';
+import '../lib/widgets/group/group_create_dialog.dart';
 
 void main() {
   const AylaUserPublic alice = AylaUserPublic(
@@ -47,9 +47,9 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  GlassButton byLabel(WidgetTester tester, String label) =>
-      tester.widget<GlassButton>(
-        find.ancestor(of: find.text(label), matching: find.byType(GlassButton)).first,
+  AylaGlassButton byLabel(WidgetTester tester, String label) =>
+      tester.widget<AylaGlassButton>(
+        find.ancestor(of: find.text(label), matching: find.byType(AylaGlassButton)).first,
       );
 
   testWidgets('结构：标题 / 群名 / 搜索 / 建群键（空名禁用）', (WidgetTester tester) async {
@@ -101,13 +101,13 @@ void main() {
     await tester.pump();
     await tester.enterText(find.byType(TextField).first, '  深夜电台  ');
     await tester.pump();
-    await tester.ensureVisible(find.byType(GlassButton).last);
+    await tester.ensureVisible(find.byType(AylaGlassButton).last);
     await tester.pump();
     // ⚠️ 用回调直调而不是 tap：宿主（previewScope + SizedBox）里弹层 Stack 的实际高度
     //    与固定宽舞台不一致，按钮矩形会落到组件边界之外 ⇒ tester.tap 一律 hit-test miss
     //    （实测：按钮 y=854 而组件只到 700）。**组件逻辑本身正确**（探针直调回调即回传正确值），
     //    真实页面里按钮可见可点；这里只验证「禁用态 / 回调参数 / 成功与失败分支」。
-    tester.widget<GlassButton>(find.byType(GlassButton).last).onPressed?.call();
+    tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).onPressed?.call();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
 
@@ -130,13 +130,13 @@ void main() {
     await tester.pump();
     await tester.enterText(find.byType(TextField).first, '重名群');
     await tester.pump();
-    await tester.ensureVisible(find.byType(GlassButton).last);
+    await tester.ensureVisible(find.byType(AylaGlassButton).last);
     await tester.pump();
     // ⚠️ 用回调直调而不是 tap：宿主（previewScope + SizedBox）里弹层 Stack 的实际高度
     //    与固定宽舞台不一致，按钮矩形会落到组件边界之外 ⇒ tester.tap 一律 hit-test miss
     //    （实测：按钮 y=854 而组件只到 700）。**组件逻辑本身正确**（探针直调回调即回传正确值），
     //    真实页面里按钮可见可点；这里只验证「禁用态 / 回调参数 / 成功与失败分支」。
-    tester.widget<GlassButton>(find.byType(GlassButton).last).onPressed?.call();
+    tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).onPressed?.call();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
 
@@ -156,13 +156,13 @@ void main() {
     await tester.pump();
     await tester.enterText(find.byType(TextField).first, '群');
     await tester.pump();
-    await tester.ensureVisible(find.byType(GlassButton).last);
+    await tester.ensureVisible(find.byType(AylaGlassButton).last);
     await tester.pump();
     // ⚠️ 用回调直调而不是 tap：宿主（previewScope + SizedBox）里弹层 Stack 的实际高度
     //    与固定宽舞台不一致，按钮矩形会落到组件边界之外 ⇒ tester.tap 一律 hit-test miss
     //    （实测：按钮 y=854 而组件只到 700）。**组件逻辑本身正确**（探针直调回调即回传正确值），
     //    真实页面里按钮可见可点；这里只验证「禁用态 / 回调参数 / 成功与失败分支」。
-    tester.widget<GlassButton>(find.byType(GlassButton).last).onPressed?.call();
+    tester.widget<AylaGlassButton>(find.byType(AylaGlassButton).last).onPressed?.call();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('建群失败'), findsOneWidget);

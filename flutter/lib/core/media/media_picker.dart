@@ -4,7 +4,7 @@
 /// Flutter 侧把两步分开：本模块负责「选文件 + 本地校验」，上传交给
 /// [AylaMediaUploader]（便于「选择 → 预览 → 发送」的交互，也便于测试）。
 ///
-/// 平台实现走 `file_picker`（用户 2026-09-20 选定）；后端可注入（测试替身）。
+/// 平台实现走 `file_picker`（选定）；后端可注入（测试替身）。
 library;
 
 import 'dart:typed_data';

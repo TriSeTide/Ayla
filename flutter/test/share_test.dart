@@ -10,10 +10,10 @@ import '../lib/core/models/share_payload.dart';
 import '../lib/theme/app_icons.dart' show AylaIcon;
 import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/theme/preview_theme.dart';
-import '../lib/widgets/dialogs.dart' show AylaModalCard;
-import '../lib/widgets/primitives.dart'
+import '../lib/widgets/base/dialogs.dart' show AylaModalCard;
+import '../lib/widgets/base/primitives.dart'
     show AylaNavHighlight, AylaSegmentedTabs, AylaSegmentedTabsVariant;
-import '../lib/widgets/share.dart';
+import '../lib/widgets/base/share.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -344,7 +344,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('小汐'), findsOneWidget);
       expect(find.text('no-nickname'), findsOneWidget);
-      // 两处：头像首字（AvatarHalo label 首字）+ 行标题
+      // 两处：头像首字（AylaAvatarHalo label 首字）+ 行标题
       expect(find.text('我'), findsNWidgets(2));
       await tester.tap(find.text('小汐'));
       await tester.pumpAndSettle();
