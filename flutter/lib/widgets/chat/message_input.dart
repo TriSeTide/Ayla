@@ -1109,7 +1109,7 @@ class _RecDotState extends State<_RecDot> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+    final Widget dot = AnimatedBuilder(
       animation: _controller,
       builder: (BuildContext context, Widget? child) {
         // 0%/100% opacity 1 ↔ 50% opacity .35
@@ -1127,6 +1127,11 @@ class _RecDotState extends State<_RecDot> with SingleTickerProviderStateMixin {
         );
       },
     );
+
+    // 录音红点的呼吸是**持续循环动画**（1.2s reverse 循环）：包一层重绘边界，让每帧的
+    // markNeedsPaint 止步于此 —— 否则录音态下的输入区/整页会跟着每帧重绘。
+    // 2026-09-25 全库审计：动画组件此前**没有一个** RepaintBoundary。
+    return RepaintBoundary(child: dot);
   }
 }
 

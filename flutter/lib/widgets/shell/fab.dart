@@ -177,11 +177,17 @@ class _AylaRefreshFabState extends State<AylaRefreshFab>
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final Widget icon = AylaIcon(aylaIconByName('iconRetry')!, size: 20);
 
+    // 刷新旋转是**持续循环动画**（800ms linear infinite）：包一层重绘边界，让每帧的
+    // markNeedsPaint 止步于此 —— 否则在顶栏/直播间这类**静态布局**里会一路上传到最近
+    // 的边界（即整页重绘）。只包旋转分支，静态图标分支无需隔离。
+    // 2026-09-25 全库审计：动画组件此前**没有一个** RepaintBoundary。
+    final Widget spinning = RepaintBoundary(
+      child: RotationTransition(turns: _spin, child: icon),
+    );
+
     final Widget button = AylaCornerFab(
       // `.corner-fab-icon` 是旋转宿主（inline-flex 居中，尺寸由图标决定）
-      icon: _spinning && !reduceMotion
-          ? RotationTransition(turns: _spin, child: icon)
-          : icon,
+      icon: _spinning && !reduceMotion ? spinning : icon,
       onPressed: () => unawaited(_handleTap()),
       semanticLabel: '刷新当前页', // aria-label="刷新当前页"
     );

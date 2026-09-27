@@ -1219,7 +1219,7 @@ class _AylaDanmakuOverlayState extends State<AylaDanmakuOverlay> {
         // 与 web 的 ResizeObserver 同语义：记录当前尺寸，供**后续**新条目使用
         _width = constraints.hasBoundedWidth ? constraints.maxWidth : 0;
         _height = constraints.hasBoundedHeight ? constraints.maxHeight : 0;
-        return ExcludeSemantics(
+        final Widget overlay = ExcludeSemantics(
           // tsx 159 `aria-hidden`：整层不进无障碍树（含图片钮的 aria-label）
           child: ClipRect(
             // `.danmaku-overlay { overflow: hidden }`
@@ -1240,6 +1240,15 @@ class _AylaDanmakuOverlayState extends State<AylaDanmakuOverlay> {
             ),
           ),
         );
+
+        // 飘弹幕整层是**持续循环动画**（每条从入场到离屏全程每帧位移）：包一层重绘边界，
+        // 让每帧的 markNeedsPaint 止步于此 —— 否则在直播间这类**静态布局**里会一路上传到
+        // 最近的边界（即整页重绘）。2026-09-25 全库审计：动画组件此前**没有一个**边界。
+        //
+        // 边界包**整层**而不是每条 AnimatedBuilder 外面：位移由 Transform 承担
+        //（`Transform.hitTest` 明确跳过自身尺寸检查），而 RepaintBoundary 是布局盒、
+        // 命中测试受自身尺寸约束 —— 包在每条外面会让飘出布局位置的图片钮点不到。
+        return RepaintBoundary(child: overlay);
       },
     );
   }
