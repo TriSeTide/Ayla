@@ -195,20 +195,27 @@ void main() {
     expect(layerBox(tester, AylaAuroraKeys.turbulence).left, -w * 0.25 - tOver);
     expect(layerBox(tester, AylaAuroraKeys.turbulence).top, -h * 0.25 - tOver);
 
-    // ④ 冰蓝光斑：40vw · top -10% · left 25%（base.css 110–118）
-    expect(layerSize(tester, AylaAuroraKeys.blobIce), const Size(w * 0.4, w * 0.4));
-    expect(layerBox(tester, AylaAuroraKeys.blobIce).left, w * 0.25);
-    expect(layerBox(tester, AylaAuroraKeys.blobIce).top, -h * 0.1);
+    // ④ 冰蓝光斑：40vw · top -10% · left 25%（base.css 110–118）+ 2×overscan（模糊扩散）
+    const double bOver = AylaFluidAurora.blobOverscan;
+    expect(
+      layerSize(tester, AylaAuroraKeys.blobIce),
+      Size(w * 0.4 + bOver * 2, w * 0.4 + bOver * 2),
+    );
+    expect(layerBox(tester, AylaAuroraKeys.blobIce).left, w * 0.25 - bOver);
+    expect(layerBox(tester, AylaAuroraKeys.blobIce).top, -h * 0.1 - bOver);
 
     // ⑤ 亮粉光斑：40vw · bottom -10% · right 25%（base.css 120–128）
-    expect(layerSize(tester, AylaAuroraKeys.blobSakura), const Size(w * 0.4, w * 0.4));
+    expect(
+      layerSize(tester, AylaAuroraKeys.blobSakura),
+      Size(w * 0.4 + bOver * 2, w * 0.4 + bOver * 2),
+    );
     expect(
       layerBox(tester, AylaAuroraKeys.blobSakura).left,
-      closeTo(w * 0.75 - w * 0.4, 1e-9),
+      closeTo(w * 0.75 - w * 0.4 - bOver, 1e-9),
     );
     expect(
       layerBox(tester, AylaAuroraKeys.blobSakura).top,
-      closeTo(h * 1.1 - w * 0.4, 1e-9),
+      closeTo(h * 1.1 - w * 0.4 - bOver, 1e-9),
     );
   });
 
@@ -218,14 +225,27 @@ void main() {
     );
     await tester.pump();
 
+    const double bOver = AylaFluidAurora.blobOverscan;
     // 冰蓝 80vw · top 25% · left 50%（base.css 212–224）
-    expect(layerSize(tester, AylaAuroraKeys.blobIce), const Size(300, 300));
-    expect(layerBox(tester, AylaAuroraKeys.blobIce).left, 375 * 0.5 - 150);
-    expect(layerBox(tester, AylaAuroraKeys.blobIce).top, 240 * 0.25);
+    expect(
+      layerSize(tester, AylaAuroraKeys.blobIce),
+      Size(300 + bOver * 2, 300 + bOver * 2),
+    );
+    expect(layerBox(tester, AylaAuroraKeys.blobIce).left, 375 * 0.5 - 150 - bOver);
+    expect(layerBox(tester, AylaAuroraKeys.blobIce).top, 240 * 0.25 - bOver);
     // 亮粉 70vw · bottom 25% · right 50%（base.css 225–237）
-    expect(layerSize(tester, AylaAuroraKeys.blobSakura), const Size(262.5, 262.5));
-    expect(layerBox(tester, AylaAuroraKeys.blobSakura).left, 375 * 0.5 - 262.5 / 2);
-    expect(layerBox(tester, AylaAuroraKeys.blobSakura).top, 240 * 0.75 - 262.5);
+    expect(
+      layerSize(tester, AylaAuroraKeys.blobSakura),
+      Size(262.5 + bOver * 2, 262.5 + bOver * 2),
+    );
+    expect(
+      layerBox(tester, AylaAuroraKeys.blobSakura).left,
+      375 * 0.5 - 262.5 / 2 - bOver,
+    );
+    expect(
+      layerBox(tester, AylaAuroraKeys.blobSakura).top,
+      240 * 0.75 - 262.5 - bOver,
+    );
   });
 
   testWidgets('窄屏：渐变层仍取视口最长边（150vmax）且居中', (WidgetTester tester) async {
@@ -352,6 +372,30 @@ void main() {
   // 5. 纹理与半径
   // ------------------------------------------------------------------
 
+  testWidgets('烘焙未就绪/失败时降级为直接绘制 —— 背景永远不是白板', (WidgetTester tester) async {
+    // 烘焙是异步的（Picture.toImage）；首帧时图还没回来。此前 build 返回
+    // RawImage(image: null) —— **什么都不画**，直接透出兜底底色（用户报「app 背景白很多」）。
+    // 现在未就绪一律走 CustomPaint 直接绘制 ⇒ 断言：不允许存在空 image 的 RawImage。
+    await tester.pumpWidget(host(const AylaAuroraBackground()));
+    await tester.pump();
+    final Iterable<RawImage> raws = tester.widgetList<RawImage>(
+      find.descendant(
+        of: find.byType(AylaAuroraBackground),
+        matching: find.byType(RawImage),
+      ),
+    );
+    for (final RawImage raw in raws) {
+      expect(
+        raw.image,
+        isNotNull,
+        reason: '未就绪的层必须降级为直接绘制，不能返回空 RawImage（那会是一块白板）',
+      );
+    }
+    // ⚠️ 不在这里断言「必须有 CustomPaint 降级层」：实测测试环境下 picture.toImage 往往在
+    // 首帧就完成（pump 会跑微任务）⇒ 时序依赖的断言会变成噪声。降级路径本身由
+    // build 里的「image == null ⇒ CustomPaint」分支保证，这里只锁「不许出现空 RawImage」。
+  });
+
   test('烘焙模糊 σ 必须按 ratio 缩放（否则降采样会让视觉模糊翻倍）', () {
     // ImageFilter 作用在光栅化后的像素空间、不受 canvas 变换影响；烘焙图按 ratio 缩过，
     // 显示时又放回逻辑尺寸 ⇒ σ 不乘 ratio 就会被等比例放大。
@@ -383,7 +427,8 @@ void main() {
     expect(AylaFluidAurora.turbulenceOverscan, AylaFluidAurora.turbulenceBlur * 3);
     expect(AylaFluidAurora.gradientOverscan, greaterThan(0));
     expect(AylaFluidAurora.turbulenceOverscan, greaterThan(0));
-    // 光斑层内容边缘本就透明（radial 70% 截止）⇒ 不需要预留，避免白花像素预算
+    // 光斑同样要预留（2026-09-27 更正）：blur 会把圆内颜色向外扩散，裁掉就变「一个圆斑」
+    expect(AylaFluidAurora.blobOverscan, AylaFluidAurora.blobBlur * 3);
   });
 
   test('farthest-corner 半径：正方形四角 √2 / 中心 √2÷2 / 非正方形按短边归一', () {

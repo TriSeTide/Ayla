@@ -192,6 +192,12 @@ abstract final class AylaFluidAurora {
   static const double gradientOverscan = gradientBlur * 3;
   static const double turbulenceOverscan = turbulenceBlur * 3;
 
+  /// 光斑也要预留（2026-09-27 **更正**）：此前的理由是「radial 70% 截止 ⇒ 圆外已透明 ⇒
+  /// 不需要」——**那是错的**：blur(40) 会把圆内的颜色向外扩散，而 saveLayer 把扩散裁在
+  /// 元素盒内 ⇒ 圆边界被硬切，观感从 web 的「弥漫大片光」变成「一个圆斑」（用户看图第一眼
+  /// 就说「少了一层的感觉」）。补上后与 web 的 filter region 语义一致。
+  static const double blobOverscan = blobBlur * 3;
+
   /// 五层烘焙像素总量上限（RGBA 4 字节/像素 ⇒ 10M ≈ 40 MB）。
   /// 2026-09-27 由 6M 上调到 10M 配合 cap 提高（1080p 实测 ≈7.8M，4K ≈8.1M）。
   /// 由定向测试锁定 —— 谁把层改回 1:1 大纹理，测试就红。
@@ -460,7 +466,12 @@ int aylaAuroraBakePixels(Size viewport, double dpr) {
         AylaFluidAurora.bakeTurbulenceMaxSide,
         AylaFluidAurora.turbulenceOverscan,
       ) +
-      pixelsOf(Size(blobSide, blobSide), AylaFluidAurora.bakeBlobMaxSide) * 2;
+      pixelsOf(
+        Size(blobSide, blobSide),
+        AylaFluidAurora.bakeBlobMaxSide,
+        AylaFluidAurora.blobOverscan,
+      ) *
+      2;
 }
 
 // ======================= 绘制原语（供烘焙管线调用） =======================
@@ -789,17 +800,21 @@ class _BlobLayer extends StatelessWidget {
         : (ice ? -viewport.height * 0.1 : viewport.height * 1.1 - diameter);
 
     final Color color = ice ? AylaColors.ice500 : AylaColors.sakura300;
+    // 模糊扩散预留（见 [AylaFluidAurora.blobOverscan]）：中心不变，Transform 的位移基准
+    // 仍是 diameter（CSS 的百分比基准 = 元素自身尺寸）。
+    final double overscan = AylaFluidAurora.blobOverscan;
     return Positioned(
-      left: left,
-      top: top,
-      width: diameter,
-      height: diameter,
+      left: left - overscan,
+      top: top - overscan,
+      width: diameter + overscan * 2,
+      height: diameter + overscan * 2,
       child: IgnorePointer(
         child: AnimatedBuilder(
           animation: controller,
           child: AylaAuroraBakedLayer(
             size: Size(diameter, diameter),
             blurSigma: AylaFluidAurora.blobBlur,
+            blurOverscan: overscan,
             bakeMaxSide: AylaFluidAurora.bakeBlobMaxSide,
             draw: (Canvas canvas, Size size) => aylaPaintBlob(canvas, size, color, alpha),
           ),
@@ -1030,6 +1045,67 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
 
 // ======================= 样张 =======================
 
+/// 冰蓝光斑的单层绘制（层分解样张用）。
+void _iceBlobPaint(Canvas canvas, Size size) =>
+    aylaPaintBlob(canvas, size, AylaColors.ice500, AylaFluidAurora.blobWideAlpha);
+
+/// 樱粉光斑的单层绘制（层分解样张用）。
+void _sakuraBlobPaint(Canvas canvas, Size size) =>
+    aylaPaintBlob(canvas, size, AylaColors.sakura300, AylaFluidAurora.blobWideAlpha);
+
+/// 单层诊断舞台：只渲染一层（走与 app 相同的 [AylaAuroraBakedLayer] 烘焙管线）。
+class _AuroraLayerStage extends StatelessWidget {
+  const _AuroraLayerStage({
+    required this.label,
+    required this.draw,
+    this.blur = 0,
+    this.bakeMaxSide,
+  });
+
+  final String label;
+  final AylaAuroraPaint draw;
+  final double blur;
+  final double? bakeMaxSide;
+
+  @override
+  Widget build(BuildContext context) {
+    const Size stage = Size(360, 216);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        SizedBox(
+          width: stage.width,
+          height: stage.height,
+          child: ClipRect(
+            child: DecoratedBox(
+              // 白底 = app 的兜底底色（base.css 的 body/#root transparent ⇒ 浏览器默认白）
+              decoration: const BoxDecoration(color: Color(0xFFFFFFFF)),
+              child: AylaAuroraBakedLayer(
+                size: stage,
+                draw: draw,
+                blurSigma: blur,
+                blurOverscan: blur * 3,
+                bakeMaxSide: bakeMaxSide,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp2),
+        SizedBox(
+          width: stage.width,
+          child: Text(
+            label,
+            style: AylaTextStyles.light.timestamp.copyWith(
+              color: AylaColors.textSecondary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// 背景样张（画布「AylaAuroraBackground」节）。
 ///
 /// 三档都是**同一个组件**在不同 MediaQuery 下的真实渲染：
@@ -1051,6 +1127,31 @@ class _AuroraBackgroundDemo extends StatelessWidget {
       runSpacing: AylaSpacing.sp6,
       crossAxisAlignment: WrapCrossAlignment.start,
       children: <Widget>[
+        // ---------- 层分解（诊断用：一眼看出「哪一层没显示」） ----------
+        // 2026-09-27 用户反复报「app 背景比 web 白很多，像是有一层没显示」。
+        // 逐层单独渲染成小舞台，配合左侧完整合成档即可定位缺的是哪一层。
+        const _AuroraLayerStage(
+          label: '① 静态兜底（九层 radial）—— app 的 html 背景',
+          draw: aylaPaintAuroraRadials,
+        ),
+        const _AuroraLayerStage(
+          label: '② 渐变流层（九层 + 96px 网格 + blur40 + 旋转）',
+          draw: aylaPaintGradientContent,
+          blur: AylaFluidAurora.gradientBlur,
+          bakeMaxSide: AylaFluidAurora.bakeGradientMaxSide,
+        ),
+        const _AuroraLayerStage(
+          label: '③ 冰蓝光斑（40vw 圆 + blur40 + radial 70%）',
+          draw: _iceBlobPaint,
+          blur: AylaFluidAurora.blobBlur,
+          bakeMaxSide: AylaFluidAurora.bakeBlobMaxSide,
+        ),
+        const _AuroraLayerStage(
+          label: '④ 樱粉光斑（40vw 圆 + blur40 + radial 70%）',
+          draw: _sakuraBlobPaint,
+          blur: AylaFluidAurora.blobBlur,
+          bakeMaxSide: AylaFluidAurora.bakeBlobMaxSide,
+        ),
         // ⚠️ 舞台取**真实视口尺度**（1440×810）：早先用 560×315 的小舞台 ⇒ 流层只有 840、
         // 根本不触发 bakeMaxSide 降采样，而 app 在 1400×800 下流层是 2100、ratio≈0.69
         // —— 同一套参数在两个尺度下的观感必然不同（用户报「组件库里的背景比 app 好看」）。

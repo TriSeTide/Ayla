@@ -22,6 +22,7 @@ library;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// 烘焙纹理的最大边长（像素）。
@@ -164,19 +165,50 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
       widget.draw(canvas, size);
     }
     final ui.Picture picture = recorder.endRecording();
-    final ui.Image image = await picture.toImage(width, height);
-    picture.dispose();
-    _baking = false;
-    if (!mounted || _bakedSize != size || _bakedRevision != widget.revision) {
-      return;
+    try {
+      final ui.Image image = await picture.toImage(width, height);
+      picture.dispose();
+      if (!mounted ||
+          _bakedSize != size ||
+          _bakedRevision != widget.revision) {
+        return;
+      }
+      setState(() => _image = image);
+    } catch (error) {
+      // 烘焙失败（显存不足 / 设备丢失等）：**必须复位状态允许重试**，否则 _baking 永远为 true
+      // ⇒ 该层永久空白（只透出兜底底色）—— 那正是用户看到的「app 背景白很多」。
+      // 复位后 build 会走 [CustomPaint] 的**直接绘制降级**，至少保证有内容。
+      _bakedSize = null;
+      _bakedRevision = null;
+      if (kDebugMode) {
+        debugPrint('AylaAuroraBakedLayer 烘焙失败（$size）：$error');
+      }
+    } finally {
+      _baking = false;
     }
-    setState(() => _image = image);
   }
 
   @override
   Widget build(BuildContext context) {
+    final ui.Image? image = _image;
+    if (image == null) {
+      // 烘焙未完成（首帧几毫秒）或**失败**：降级为**直接绘制** —— 宁可每帧重画一次内容，
+      // 也不能给用户一块白板（RawImage(null) 什么都不画，直接透出兜底底色）。
+      // ⚠️ 降级路径**不施加 blur**（那会变成每帧跑滤镜，正是本组件要避免的）；正常路径不受影响。
+      return CustomPaint(
+        painter: _AylaAuroraDirectPainter(
+          widget.draw,
+          widget.size,
+          widget.blurOverscan,
+        ),
+        size: Size(
+          widget.size.width + widget.blurOverscan * 2,
+          widget.size.height + widget.blurOverscan * 2,
+        ),
+      );
+    }
     return RawImage(
-      image: _image,
+      image: image,
       // 尺寸含 overscan：调用方的 Positioned 也必须按 size + 2×overscan 布局
       //（内容仍在中间、中心不变 ⇒ 旋转/缩放的基准点不受影响）。
       width: widget.size.width + widget.blurOverscan * 2,
@@ -192,6 +224,36 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
   }
 }
 
+
+/// 烘焙未就绪/失败时的**直接绘制降级**（每帧调用一次 [AylaAuroraPaint]）。
+///
+/// 它存在的唯一理由是「背景不能是白的」（2026-09-27：异步烘焙失败会让整层空白）。
+/// 只在不正常路径上使用；正常路径一律走 [RawImage] 的烘焙纹理。
+class _AylaAuroraDirectPainter extends CustomPainter {
+  const _AylaAuroraDirectPainter(this.draw, this.contentSize, this.overscan);
+
+  final AylaAuroraPaint draw;
+
+  /// 内容逻辑尺寸（= [AylaAuroraBakedLayer.size]，不含 overscan）。
+  final Size contentSize;
+
+  /// 模糊扩散预留；外框 = 内容 + 2×overscan ⇒ 内容要平移 overscan 才居中。
+  final double overscan;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.translate(overscan, overscan);
+    draw(canvas, contentSize);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _AylaAuroraDirectPainter oldDelegate) =>
+      oldDelegate.draw != draw ||
+      oldDelegate.contentSize != contentSize ||
+      oldDelegate.overscan != overscan;
+}
 
 /// 背景时间轴的通知闸门（默认**不节流**：每个 vsync 都通知 = 满帧）。
 ///
