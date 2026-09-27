@@ -177,6 +177,45 @@ void main() {
   });
 
   group('AylaPageSwap（AppShell.tsx:113 的 AnimatePresence mode="sync" 等价）', () {
+    testWidgets('切页后新页进场动画**只播一次**（透明度单调上升，不回落）', (
+      WidgetTester tester,
+    ) async {
+      // 回归：早前树形在「有/无旧页」间切换 ⇒ 新页子树换位被重建 ⇒ 进场重播（用户实测「播放两次动画」）
+      final ValueNotifier<String> key = ValueNotifier<String>('/a');
+      addTearDown(key.dispose);
+      await tester.pumpWidget(
+        host(
+          ValueListenableBuilder<String>(
+            valueListenable: key,
+            builder: (BuildContext context, String value, Widget? _) =>
+                AylaPageSwap(
+                  pageKey: value,
+                  builder: (BuildContext context) => AylaPageTransition(
+                    child: Center(child: Text('页面 $value')),
+                  ),
+                ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle(); // 首屏进场走完
+      key.value = '/b';
+      await tester.pump();
+      await tester.pump(); // ticker 起跑帧
+      final List<double> samples = <double>[];
+      for (int i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        samples.add(opacityOf(tester));
+      }
+      for (int i = 1; i < samples.length; i++) {
+        expect(
+          samples[i],
+          greaterThanOrEqualTo(samples[i - 1]),
+          reason: '进场透明度不得回落（回落 = 动画重播）：$samples',
+        );
+      }
+      expect(samples.last, 1);
+    });
+
     testWidgets('换页：新页立即挂载，旧页保留 300ms 后卸载', (WidgetTester tester) async {
       final ValueNotifier<String> key = ValueNotifier<String>('/a');
       addTearDown(key.dispose);

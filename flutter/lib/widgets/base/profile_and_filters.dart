@@ -47,8 +47,11 @@ import 'sidebar_card.dart';
 /// - 可选「关闭」（`msg-action-btn`）
 /// - 失败显示 `error`（12px destructive）
 class AylaUserProfileCard extends StatelessWidget {
+  /// 可见文案（web 原文「关闭」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
   const AylaUserProfileCard({
     super.key,
+    this.actionLabel = '关闭',
     required this.nickname,
     this.username = '',
     this.signature,
@@ -186,7 +189,7 @@ class AylaUserProfileCard extends StatelessWidget {
               ),
               // 关闭（`.msg-action-btn`）
               if (onClose != null)
-                AylaMsgActionButton(label: '关闭', onPressed: onClose),
+                AylaMsgActionButton(label: actionLabel, onPressed: onClose),
             ],
           ),
         ],

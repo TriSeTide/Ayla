@@ -539,8 +539,14 @@ class _CardSlot extends StatelessWidget {
 /// `VoiceMemberRow onToggleMic`）；本件只有「离开频道」和 `livekit === "failed"` 时的
 /// 「重新加入」（媒体断线 ≠ 离开频道，不自动 leave）。
 class AylaVoiceControls extends StatelessWidget {
+  /// 可见文案（web 原文「重新加入」；**开放给调用方**，默认值 = web 文案）。
+  final String action2Label;
+  /// 可见文案（web 原文「离开频道」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
   const AylaVoiceControls({
     super.key,
+    this.action2Label = '重新加入',
+    this.actionLabel = '离开频道',
     this.showRejoin = false,
     this.onLeave,
     this.onRejoin,
@@ -568,14 +574,14 @@ class AylaVoiceControls extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
           AylaGlassButton(
-            label: '离开频道',
+            label: actionLabel,
             // `.voice-leave-btn`：透明底 + --destructive 字 + 1px --destructive 边
             variant: AylaGlassButtonVariant.outlineDestructive,
             onPressed: onLeave,
           ),
           if (showRejoin)
             AylaGlassButton(
-              label: '重新加入',
+              label: action2Label,
               variant: AylaGlassButtonVariant.primary,
               minHeight: 28, // `.voice-rejoin-btn { min-height: 28px }`
               fontSize: 12, // font-size: 12px

@@ -175,8 +175,11 @@ class AylaProfileContentCard extends StatelessWidget {
 
 /// .profile-mine —— 个人主页内容分区（顺序：直播/语音 → 帖子 → 桌游占位）。
 class AylaProfileContentSections extends StatelessWidget {
+  /// 可见文案（web 原文「更多帖子」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
   const AylaProfileContentSections({
     super.key,
+    this.actionLabel = '更多帖子',
     required this.displayName,
     this.live,
     this.voice,
@@ -420,7 +423,7 @@ class AylaProfileContentSections extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: AylaGlassButton(
-              label: '更多帖子',
+              label: actionLabel,
               variant: AylaGlassButtonVariant.ghost,
               minHeight: 36,
               padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp4),

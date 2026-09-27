@@ -71,8 +71,11 @@ class AylaProfileCard extends StatelessWidget {
 
 /// 身份行：返回键 + 头像块 + 昵称/用户名 + 右侧分享槽位。
 class AylaProfileIdentity extends StatelessWidget {
+  /// 可见文案（web 原文「分享我的主页」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
   const AylaProfileIdentity({
     super.key,
+    this.actionLabel = '分享我的主页',
     required this.displayName,
     required this.username,
     this.avatarUrl,
@@ -98,7 +101,7 @@ class AylaProfileIdentity extends StatelessWidget {
   final VoidCallback? onBack;
 
   /// 右侧分享槽位（`.profile-card-share.profile-share-right`，`margin-left: auto`）；
-  /// 通常传 `AylaShareButton(size: 40, label: '分享我的主页')`。
+  /// 通常传 `AylaShareButton(size: 40, label: actionLabel)`。
   final Widget? share;
 
   /// 头像直径（web `size={64}`）。

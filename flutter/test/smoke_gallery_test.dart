@@ -113,6 +113,8 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
   ],
   'motion · 转场与手势': <String>[
     'AylaPageTransition / AylaPageSwap（PageTransition.tsx 117 行 + AppShell.tsx:113）',
+    '手势动画（空白卡片模拟）—— 淡入淡出 · 左上右下四向滑入 · 右滑返回 · 切换选项卡',
+    'AylaPanelTransition / AylaConversationTransition / AylaFullScreenSwipeBack / AylaPrimaryNavPage（auroraquaMotion panel 段 + useSwipeCommit / useEdgeSwipeBack / ConversationTransition / FullScreenSwipeBack / PrimaryNavPage）',
   ],
   '通用件 · 分享 / 分页 / 弹层 / 资源': <String>[
     'AylaShareSheet / AylaShareButton（ShareSheet.tsx + ShareButton.tsx + share.css 1–275）',

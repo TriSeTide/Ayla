@@ -274,12 +274,23 @@ class _AylaPageSwapState extends State<AylaPageSwap>
       child: Builder(builder: widget.builder),
     );
     final Widget? leaving = _leaving;
-    if (leaving == null) return current;
+    // ⚠️ 树形必须**恒定**：早前版本在「无旧页」时直接返回 `current`、有旧页时才套 `Stack`，
+    //    新页子树因此换位被重建，`AylaPageTransition` 的进场动画**重播一次**（用户实测
+    //    「点击进入下一页时会播放两次动画」）。现在永远走同一个 Stack，且旧页槽位带 key 占位，
+    //    `current` 的下标恒为 1 ⇒ 元素按 key 复用，不会重建。
     return Stack(
       clipBehavior: Clip.none,
       children: <Widget>[
+        // 旧页槽位：有旧页 ⇒ 淡出中的旧页；无 ⇒ 零尺寸占位（key 固定，保证 current 下标不变）
+        if (leaving != null)
+          FadeTransition(
+            key: const ValueKey<String>('page-swap-leaving'),
+            opacity: _c,
+            child: leaving,
+          )
+        else
+          const SizedBox.shrink(key: ValueKey<String>('page-swap-leaving')),
         // 旧页在下（淡出）、新页在上：两页重叠转场（web 同）
-        FadeTransition(opacity: _c, child: leaving),
         current,
       ],
     );

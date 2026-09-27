@@ -74,8 +74,14 @@ class AylaHistoryControlsData {
 ///
 /// `role`：有 error 时 `alert`，否则 `status`；`aria-busy = loading`。
 class AylaHistoryControls extends StatelessWidget {
+  /// 可见文案（web 原文「返回最新消息」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
+  /// 可见文案（web 原文「重试」；**开放给调用方**，默认值 = web 文案）。
+  final String loadLabel;
   const AylaHistoryControls({
     super.key,
+    this.actionLabel = '返回最新消息',
+    this.loadLabel = '重试',
     required this.loading,
     required this.error,
     required this.hasMore,
@@ -117,7 +123,7 @@ class AylaHistoryControls extends StatelessWidget {
           style: t.body.copyWith(color: AylaColors.destructive),
         ),
         AylaGlassButton(
-          label: '重试',
+          label: loadLabel,
           variant: AylaGlassButtonVariant.ghost,
           onPressed: loading
               ? null
@@ -138,7 +144,7 @@ class AylaHistoryControls extends StatelessWidget {
         ),
       if (hasNewer)
         AylaGlassButton(
-          label: '返回最新消息',
+          label: actionLabel,
           variant: AylaGlassButtonVariant.ghost,
           onPressed: loading
               ? null

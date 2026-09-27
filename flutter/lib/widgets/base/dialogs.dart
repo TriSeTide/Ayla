@@ -233,8 +233,17 @@ enum AylaAsyncStatus { loading, error, empty, content }
 
 /// 异步状态占位（加载 / 错误 / 空 / 内容）。
 class AylaAsyncState extends StatelessWidget {
+  /// 可见文案（web 原文「空」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
+  /// 可见文案（web 原文「重试」；**开放给调用方**，默认值 = web 文案）。
+  final String load2Label;
+  /// 可见文案（web 原文「正在加载」；**开放给调用方**，默认值 = web 文案）。
+  final String loadLabel;
   const AylaAsyncState({
     super.key,
+    this.actionLabel = '空',
+    this.load2Label = '重试',
+    this.loadLabel = '正在加载',
     required this.status,
     this.child,
     this.error,
@@ -265,7 +274,7 @@ class AylaAsyncState extends StatelessWidget {
       case AylaAsyncStatus.loading:
         // role=status aria-label="正在加载" + `.async-state-skeleton`
         return Semantics(
-          label: '正在加载',
+          label: loadLabel,
           child: Container(
             constraints: const BoxConstraints(minHeight: 96), // min-height: 96px
             padding: const EdgeInsets.all(AylaSpacing.sp4),
@@ -295,7 +304,7 @@ class AylaAsyncState extends StatelessWidget {
                 if (onRetry != null)
                   TextButton(
                     onPressed: onRetry,
-                    child: Text('重试', style: t.label),
+                    child: Text(load2Label, style: t.label),
                   ),
               ],
             ),
@@ -305,7 +314,7 @@ class AylaAsyncState extends StatelessWidget {
       case AylaAsyncStatus.empty:
         // role=status
         return Semantics(
-          label: '空',
+          label: actionLabel,
           child: Container(
             constraints: const BoxConstraints(minHeight: 96),
             padding: const EdgeInsets.all(AylaSpacing.sp4),

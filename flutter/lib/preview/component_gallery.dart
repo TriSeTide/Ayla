@@ -106,6 +106,7 @@ import '../widgets/game/games_grid.dart';
 import '../widgets/group/group_role_chip.dart';
 import '../widgets/group/transfer_owner_dialog.dart';
 import '../widgets/group/group_info_profile.dart';
+import '../widgets/motion/gestures.dart';
 
 /// 审核画布宽度（导航 248 + 内容区；高度按所选分类内容收紧，不再是一张 1700 高的大画面）。
 const Size kGallerySize = Size(1800, 1200);
@@ -225,6 +226,8 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
   ]),
   AylaGalleryCategory('motion', 'motion · 转场与手势', <String>[
     'AylaPageTransition',
+    '手势动画（空白卡片模拟）',
+    'AylaPanelTransition / AylaConversationTransition / AylaFullScreenSwipeBack / AylaPrimaryNavPage',
   ]),
   AylaGalleryCategory('common', '通用件 · 分享 / 分页 / 弹层 / 资源', <String>[
     'AylaShareSheet',
@@ -339,6 +342,25 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                     const _GalleryHeader(),
                     const SizedBox(height: AylaSpacing.sp6),
 
+                    // ---------- 手势动画（空白卡片模拟：淡入淡出 / 四方向滑入 / 右滑返回 / 切选项卡） ----------
+                    _Section(
+                      title: '手势动画（空白卡片模拟）—— 淡入淡出 · 左上右下四向滑入 · 右滑返回 · 切换选项卡',
+                      source:
+                          '常量取自 web：面板位移 ±20 / 300ms easeInOut（`panelVariants`）· '
+                          '边缘返回 阈值 120px 或速度 ≥300px/s、退出与回弹各 200ms（`useEdgeSwipeBack`）· '
+                          '横滑判定 净位移 ≥ 宽/3 优先、同向甩动 ≥300px/s 且 ≥40px 补充、方向锁让位（`resolveSwipeCommit`）· '
+                          '跟手弹性 .8（`DRAG_ELASTIC`）· 纵向滚动优先由 Flutter 手势竞技场天然等价（机制差异已登记）',
+                      child: const _MotionShowcaseDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaPanelTransition / AylaConversationTransition / AylaFullScreenSwipeBack / AylaPrimaryNavPage（auroraquaMotion panel 段 + useSwipeCommit / useEdgeSwipeBack / ConversationTransition / FullScreenSwipeBack / PrimaryNavPage）',
+                      source:
+                          '四件的手势语义与常量见上一节样张；本节点名事实源：`panelVariants`（±20 / 300ms easeInOut）· '
+                          '`AnimatePresence mode="wait"`（旧件先退再挂新件，退出期 inert + aria-hidden）· '
+                          '`useEdgeSwipeBack`（120px / 300px/s / 200ms）· `resolveSwipeCommit`（size/3 优先 + 甩动补充 + 方向锁让位）· '
+                          '`DRAG_ELASTIC .8`。空白卡片即上一节的七张样张。',
+                      child: const _MotionPiecesNote(),
+                    ),
                     // ---------- 路由转场（PageTransition + AnimatePresence 等价宿主） ----------
                     _Section(
                       title: 'AylaPageTransition / AylaPageSwap（PageTransition.tsx 117 行 + AppShell.tsx:113）',
@@ -3284,6 +3306,198 @@ class _GroupInfoProfileDemo extends StatelessWidget {
         _Slot(label: '展示态 · 宽档（头像 92 / gap sp2）', width: 420, child: card(editing: false, about: '一起看星星')),
         _Slot(label: '简介为空 ⇒「暂无简介」', width: 360, child: card(editing: false, about: '')),
         _Slot(label: '编辑态（两键等宽）', width: 360, child: card(editing: true, about: '一起看星星')),
+      ],
+    );
+  }
+}
+
+/// 手势动画样张：七张**空白卡片**，各自演示一种转场/手势（点卡片或按钮重播）。
+class _MotionShowcaseDemo extends StatefulWidget {
+  const _MotionShowcaseDemo();
+
+  @override
+  State<_MotionShowcaseDemo> createState() => _MotionShowcaseDemoState();
+}
+
+class _MotionShowcaseDemoState extends State<_MotionShowcaseDemo> {
+  int _nonce = 0; // 递增 ⇒ 重挂载 ⇒ 重播进场动画
+  int _tab = 0; // 选项卡演示
+  int _dir = 0; // 选项卡切换方向
+  int _backCount = 0; // 右滑返回触发次数
+
+  static const List<String> _tabs = <String>['首页', '语音', '直播'];
+
+  void _replay() => setState(() => _nonce++);
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    Widget blank({required String label, String? hint, Color? tint}) => Container(
+      height: 96,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: tint ?? AylaColors.glassBgStrong,
+        borderRadius: BorderRadius.circular(AylaRadii.rCard),
+        border: Border.all(color: AylaColors.glassBorder),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          Text(label, style: t.body),
+          if (hint != null)
+            Text(hint, style: t.timestamp.copyWith(fontSize: 11)),
+        ],
+      ),
+    );
+
+    Widget slideCard(String label, AylaPanelEdge edge) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: AylaSpacing.sp2,
+      children: <Widget>[
+        AylaPanelTransition(
+          key: ValueKey<String>('$label-$_nonce'),
+          edge: edge,
+          child: blank(label: label, hint: '点下方重播'),
+        ),
+        AylaGlassButton(
+          label: '重播',
+          variant: AylaGlassButtonVariant.ghost,
+          minHeight: 28,
+          fontSize: 12,
+          expand: true,
+          onPressed: _replay,
+        ),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: AylaSpacing.sp4,
+      children: <Widget>[
+        Text('① 淡入淡出 / 四方向滑入（±20px，300ms）', style: t.cardTitle.copyWith(fontSize: 13, fontWeight: FontWeight.w600)),
+        Wrap(
+          spacing: AylaSpacing.sp3,
+          runSpacing: AylaSpacing.sp3,
+          children: <Widget>[
+            SizedBox(
+              width: 170,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: AylaSpacing.sp2,
+                children: <Widget>[
+                  AylaPageTransition(
+                    key: ValueKey<String>('fade-$_nonce'),
+                    groupScene: true, // 只淡入（web 群页档）
+                    child: blank(label: '淡入淡出', hint: '只透明度'),
+                  ),
+                  AylaGlassButton(
+                    label: '重播',
+                    variant: AylaGlassButtonVariant.ghost,
+                    minHeight: 28,
+                    fontSize: 12,
+                    expand: true,
+                    onPressed: _replay,
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(width: 170, child: slideCard('右滑入', AylaPanelEdge.right)),
+            SizedBox(width: 170, child: slideCard('左滑入', AylaPanelEdge.left)),
+            SizedBox(width: 170, child: slideCard('下滑入', AylaPanelEdge.bottom)),
+            SizedBox(width: 170, child: slideCard('上滑入', AylaPanelEdge.top)),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp2),
+        Text('② 右滑返回（阈值 120px 或速度 ≥300px/s；松手未过阈值回弹）', style: t.cardTitle.copyWith(fontSize: 13, fontWeight: FontWeight.w600)),
+        SizedBox(
+          width: 340,
+          child: AylaFullScreenSwipeBack(
+            onBack: () => setState(() => _backCount++),
+            child: blank(
+              label: '在这一行上向右滑 →',
+              hint: '已触发返回 $_backCount 次',
+            ),
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp2),
+        Text('③ 切换选项卡（横滑判定：净位移 ≥ 宽/3 或甩动 ≥300px/s）', style: t.cardTitle.copyWith(fontSize: 13, fontWeight: FontWeight.w600)),
+        SizedBox(
+          width: 340,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: AylaSpacing.sp2,
+            children: <Widget>[
+              Row(
+                spacing: AylaSpacing.sp2,
+                children: <Widget>[
+                  for (int i = 0; i < _tabs.length; i++)
+                    Expanded(
+                      child: AylaGlassButton(
+                        label: _tabs[i],
+                        variant: i == _tab
+                            ? AylaGlassButtonVariant.primary
+                            : AylaGlassButtonVariant.ghost,
+                        minHeight: 28,
+                        fontSize: 12,
+                        expand: true,
+                        onPressed: () => setState(() {
+                          _dir = i > _tab ? 1 : -1;
+                          _tab = i;
+                        }),
+                      ),
+                    ),
+                ],
+              ),
+              AylaPrimaryNavPage(
+                key: ValueKey<int>(_tab),
+                direction: _dir,
+                // 与 web 一致：`onNavigate` 的 +1 = 下一项（手指左滑），落页 `(idx + step + len) % len`
+                onNavigate: (int step) => setState(() {
+                  _dir = step;
+                  _tab = (_tab + step + _tabs.length) % _tabs.length;
+                }),
+                child: blank(
+                  label: '第 ${_tab + 1} 页 · ${_tabs[_tab]}',
+                  hint: '向左滑下一页 / 向右滑上一页', // web `forward = net < 0`：手指左滑 ⇒ 下一项
+                  tint: AylaColors.glassBgStrong,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 手势四件的文字说明样张（视觉演示在上一节「手势动画（空白卡片模拟）」）。
+class _MotionPiecesNote extends StatelessWidget {
+  const _MotionPiecesNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    const List<(String, String)> rows = <(String, String)>[
+      ('AylaPanelTransition', '四向滑入面板（±20px / 300ms）· enter→center→exit，exit 边可另指定'),
+      ('AylaConversationTransition', '会话转场宿主：旧件先退 300ms，退完才挂最新件（mode="wait"）'),
+      ('AylaFullScreenSwipeBack', '全屏右滑返回：≥120px 或 ≥300px/s ⇒ onBack，否则 200ms 回弹'),
+      ('AylaPrimaryNavPage', '一级页横滑：跟手 0.8 + 松手 1/3 宽判定 + 方向相关进出（0 ⇒ 只淡入淡出）'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: AylaSpacing.sp2,
+      children: <Widget>[
+        for (final (String name, String desc) in rows)
+          Row(
+            spacing: AylaSpacing.sp3,
+            children: <Widget>[
+              SizedBox(
+                width: 210,
+                child: Text(name, style: t.timestamp.copyWith(fontSize: 12)),
+              ),
+              Expanded(child: Text(desc, style: t.body.copyWith(fontSize: 13))),
+            ],
+          ),
       ],
     );
   }

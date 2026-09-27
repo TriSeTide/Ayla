@@ -88,8 +88,11 @@ class AylaVoiceSelfState {
 
 /// `.voice-member-row` —— 单个语音成员行（`VoiceMemberRow.tsx:141–218`）。
 class AylaVoiceMemberRow extends StatelessWidget {
+  /// 可见文案（web 原文「在频道中」；**开放给调用方**，默认值 = web 文案）。
+  final String actionLabel;
   const AylaVoiceMemberRow({
     super.key,
+    this.actionLabel = '在频道中',
     required this.member,
     this.isSelf = false,
     this.isElysia = false,
@@ -182,7 +185,7 @@ class AylaVoiceMemberRow extends StatelessWidget {
               ),
             ],
           )
-        : Text('在频道中', style: _subStyle);
+        : Text(actionLabel, style: _subStyle);
 
     return Row(
       // `.voice-member-row { display: flex; align-items: center; gap: var(--sp-2) }`
