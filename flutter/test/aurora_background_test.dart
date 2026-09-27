@@ -143,8 +143,9 @@ void main() {
       // 也不能退化成"没烘焙"（每层至少要有像素）
       expect(pixels, greaterThan(100 * 1000));
     }
-    // 首版事故口径（150vmax 1:1 + 1.5×视口 1:1）在 1080p 下是 1300 万像素以上
-    expect(AylaFluidAurora.bakePixelBudget, lessThan(13000000));
+    // 首版事故口径（150vmax 1:1 + 1.5×视口 1:1）在 1080p 下是 1300 万像素以上；
+    // 2026-09-27 cap 上调后预算放宽到 10M（1080p 实测 ≈7.8M），仍远低于事故口径。
+    expect(AylaFluidAurora.bakePixelBudget, lessThanOrEqualTo(10000000));
   });
 
   test('每层烘焙上限常量都受控（防止有人把 cap 改回 4096 级）', () {
@@ -350,6 +351,16 @@ void main() {
   // ------------------------------------------------------------------
   // 5. 纹理与半径
   // ------------------------------------------------------------------
+
+  test('烘焙模糊 σ 必须按 ratio 缩放（否则降采样会让视觉模糊翻倍）', () {
+    // ImageFilter 作用在光栅化后的像素空间、不受 canvas 变换影响；烘焙图按 ratio 缩过，
+    // 显示时又放回逻辑尺寸 ⇒ σ 不乘 ratio 就会被等比例放大。
+    // 2026-09-27 实测：流层 ratio≈0.50 ⇒ 视觉 σ 80（web 是 40）⇒ 颜色摊平变白。
+    expect(aylaBakedBlurSigma(40, 1.0), 40);
+    expect(aylaBakedBlurSigma(40, 0.5), 20);
+    expect(aylaBakedBlurSigma(60, 0.25), 15);
+    expect(aylaBakedBlurSigma(0, 0.5), 0);
+  });
 
   test('兜底底色是白（base.css：body/#root 都 transparent ⇒ 浏览器默认白底）', () {
     // 曾经的错：写成 --ice-100（冷灰）⇒ 整片偏灰偏暗。像素对账才暴露（见 13 号 §八）。

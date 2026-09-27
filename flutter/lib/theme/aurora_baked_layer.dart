@@ -34,6 +34,13 @@ const double kMaxAuroraBakeSide = 4096;
 /// 的预留档位存在（想降档时把它设成 33ms 之类即可），正常路径**不要动它**。
 const Duration kAuroraFrameInterval = Duration.zero;
 
+/// 烘焙时该用的模糊 σ。
+///
+/// [blurSigma] 是**逻辑像素**（CSS «filter: blur(Npx)» 的语义）；[ratio] 是烘焙像素比例
+/// （= 烘焙图边长 / 逻辑边长）。«ImageFilter.blur» 的 σ 落在**光栅化后的像素空间**、
+/// 不受 canvas 变换影响 ⇒ 必须乘 [ratio]，图放大回逻辑尺寸时视觉半径才等于 [blurSigma]。
+double aylaBakedBlurSigma(double blurSigma, double ratio) => blurSigma * ratio;
+
 /// 图层绘制函数：在**逻辑坐标**（尺寸 = [AylaAuroraBakedLayer.size]）里画内容。
 typedef AylaAuroraPaint = void Function(Canvas canvas, Size size);
 
@@ -141,13 +148,15 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
     canvas.scale(width / outer.width, height / outer.height);
     canvas.translate(widget.blurOverscan, widget.blurOverscan);
     if (widget.blurSigma > 0) {
+      // ⚠️ σ **必须乘 ratio**：ImageFilter 作用在**光栅化后的像素空间**（不受 canvas 变换影响），
+      // 而烘焙图是按 ratio 缩过的 —— 不乘的话，图放大回逻辑尺寸时模糊半径等比例放大。
+      // 实测后果（2026-09-27）：流层 ratio≈0.50 ⇒ 视觉 σ 变成 80 逻辑像素（web 是 40）⇒
+      // 颜色被摊平到接近白，用户报「比 web 端白一些」。
+      final double sigma = aylaBakedBlurSigma(widget.blurSigma, ratio);
       canvas.saveLayer(
         Offset.zero & size,
         Paint()
-          ..imageFilter = ui.ImageFilter.blur(
-            sigmaX: widget.blurSigma,
-            sigmaY: widget.blurSigma,
-          ),
+          ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
       );
       widget.draw(canvas, size);
       canvas.restore();

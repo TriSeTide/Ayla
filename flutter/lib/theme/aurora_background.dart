@@ -172,10 +172,15 @@ abstract final class AylaFluidAurora {
   // ------------------------------------------------------------------
 
   /// 每层烘焙纹理的**最长边像素上限**：低频内容降采样，显存按面积下降。
+  /// 2026-09-27 上调（用户报「组件库里的背景比 app 好看」）：两个宿主的**视口尺寸**不同，
+  /// 而 cap 是绝对像素 —— 画布样张 560×315（流层 840）根本不触发降采样，app 1400×800
+  /// （流层 2100）却被砍到 ratio≈0.69、湍流 0.49 ⇒ 同一套参数在大窗口下细节更糊。
+  /// 现在流层/光斑提到 2048/1024：1080p 下流层 ratio≈0.71、光斑 1:1；4K 下流层仍是 2048。
+  /// 代价：1080p 五层合计 ≈7.8M 像素（≈31 MB），4K ≈8.1M —— 由 [bakePixelBudget] 锁定。
   static const double bakeStaticMaxSide = 1440;
-  static const double bakeGradientMaxSide = 1440;
+  static const double bakeGradientMaxSide = 2048;
   static const double bakeTurbulenceMaxSide = 1024;
-  static const double bakeBlobMaxSide = 512;
+  static const double bakeBlobMaxSide = 1024;
 
   /// 流层渲染帧间隔：**默认满帧**（[kAuroraFrameInterval] = [Duration.zero]）。
   /// 只作低端设备/省电预留档；见 [AylaAuroraClock]。
@@ -187,9 +192,10 @@ abstract final class AylaFluidAurora {
   static const double gradientOverscan = gradientBlur * 3;
   static const double turbulenceOverscan = turbulenceBlur * 3;
 
-  /// 五层烘焙像素总量上限（RGBA 4 字节/像素 ⇒ 6M ≈ 24 MB）。
+  /// 五层烘焙像素总量上限（RGBA 4 字节/像素 ⇒ 10M ≈ 40 MB）。
+  /// 2026-09-27 由 6M 上调到 10M 配合 cap 提高（1080p 实测 ≈7.8M，4K ≈8.1M）。
   /// 由定向测试锁定 —— 谁把层改回 1:1 大纹理，测试就红。
-  static const int bakePixelBudget = 6 * 1000 * 1000;
+  static const int bakePixelBudget = 10 * 1000 * 1000;
 
   // ------------------------------------------------------------------
   // ① 静态兜底：`html { background: var(--bg-aurora) fixed }`（base.css:25）
@@ -1045,15 +1051,19 @@ class _AuroraBackgroundDemo extends StatelessWidget {
       runSpacing: AylaSpacing.sp6,
       crossAxisAlignment: WrapCrossAlignment.start,
       children: <Widget>[
+        // ⚠️ 舞台取**真实视口尺度**（1440×810）：早先用 560×315 的小舞台 ⇒ 流层只有 840、
+        // 根本不触发 bakeMaxSide 降采样，而 app 在 1400×800 下流层是 2100、ratio≈0.69
+        // —— 同一套参数在两个尺度下的观感必然不同（用户报「组件库里的背景比 app 好看」）。
+        // 样张必须如实反映 app 的尺度，否则审核画布会给人错误的安全感。
         const _AuroraStage(
-          viewport: Size(560, 315),
-          label: '默认（宽屏档：渐变流层 · 湍流层 · 双光斑 · 静态兜底）',
+          viewport: Size(1440, 810),
+          label: '默认 · 真实视口尺度（宽屏档：渐变流层 · 湍流层 · 双光斑 · 静态兜底）',
           child: AylaAuroraBackground(),
         ),
         const _AuroraStage(
-          viewport: Size(560, 315),
+          viewport: Size(1440, 810),
           reduceMotion: true,
-          label: '静态降级（reduced-motion：四层隐藏，只剩静态九层）',
+          label: '静态降级 · 真实视口尺度（reduced-motion：四层隐藏，只剩静态九层）',
           child: AylaAuroraBackground(),
         ),
         const _AuroraStage(
