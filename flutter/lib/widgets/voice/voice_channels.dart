@@ -295,6 +295,14 @@ class AylaVoiceChannelCard extends StatelessWidget {
           ? AylaColors.indigo700
           : AylaColors.glassBorder;
       // `[aria-disabled="true"] { cursor: default; opacity: .7 }`（外观保留）
+      //
+      // 依据（2026-09-27 收口；13 号 §8.19）：web 用的就是**整层 opacity**，不是颜色 alpha ——
+      //   · voice.css:552–555 `.voice-hub .voice-channel-card[aria-disabled="true"] { cursor: default; opacity: .7 }`
+      //   · voice.css:723–726 `.group-voice .voice-channel-card[aria-disabled="true"]`（同款）
+      //   · typed-result-cards.css:73–76（typed 结果卡同款）
+      // ⇒ **保持整层 Opacity**。子树里的 `AylaGlassSurface` 带 blur(24px) 层，Impeller 会拒绝
+      //   「Opacity 祖先 + BackdropFilter」并刷 validation 日志，但 web 的观感就是「整卡压暗」
+      //   ⇒ 以 web 为准，不改成按颜色降透明（那会让模糊层不再被压暗）。
       return Opacity(
         opacity: joining ? 0.7 : 1,
         child: AylaGlassSurface(

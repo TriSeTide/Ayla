@@ -870,6 +870,14 @@ class _NarrowChatOverlay extends StatelessWidget {
           child: ExcludeSemantics(
             excluding: !expanded,
             child: AnimatedOpacity(
+              // 依据（2026-09-27 收口；13 号 §8.19）：web 是**整层 opacity** ——
+              //   `.voice-room-chat-card > .voice-room-chat-list { opacity: 0;
+              //   transform: translateY(12px); visibility: hidden; pointer-events: none;
+              //   transition: opacity/transform/visibility var(--dur-panel) }`（voice.css:72–99）；
+              //   展开态 `.is-expanded > … { opacity: 1; translateY(0); visibility: visible;
+              //   pointer-events: auto }`（voice.css:100–105）。
+              //   该浮层自身是 `--glass-bg-strong` + `backdrop-filter: blur(18px) saturate(1.4)`
+              //   （voice.css:84–86）⇒ 保持整层（不以颜色 alpha 替代）。
               opacity: expanded ? 1 : 0,
               duration: d,
               curve: AylaCurves.easeOut,

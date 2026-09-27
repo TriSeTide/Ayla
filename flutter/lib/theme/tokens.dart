@@ -58,8 +58,25 @@ abstract final class AylaColors {
   static const Color glassBgStrong = Color(0xC7FFFAFB);
   /// 玻璃 1px 高光描边 rgba(255,255,255,.65)（t:--glass-border）
   static const Color glassBorder = Color(0xA6FFFFFF);
-  /// backdrop-filter 不支持时的降级实底 .92（app.css @supports / d:§9）
-  static const Color glassOpaqueFallback = Color(0xEBFFFAFB);
+  /// backdrop-filter 降级实底（性能档 [AylaGlassQuality.opaque] 的面层色）。
+  ///
+  /// **同色同透明度 = web `--surface: #fffafb`**（tokens.css:19），对应
+  /// auroraqua.css:527–551 的 `@supports not ((backdrop-filter…) or (-webkit-…))`
+  /// 降级段：它覆盖全部卡片 / 顶栏 / 侧栏 / 输入框 / 弹卡，且与 app.css:252–270
+  /// 的 `.92` 段重叠时**因后加载而实际生效**（两段特异性同为单类）⇒ 这是 web 上
+  /// 绝大多数玻璃件降级后的真实底色。
+  static const Color glassOpaqueFallback = Color(0xFFFFFAFB);
+
+  /// 降级实底的「软」变体 `.92` —— web **app.css:252–270** 的降级值
+  /// `rgba(255,250,251,0.92)`。
+  ///
+  /// 只命中该清单、**未**命中 auroraqua.css:527–551 段的件在 web 降级时用这一档：
+  /// `.bubble-other`（:1129–1136）/ `.message-jump-bottom`（:868–893）/
+  /// `.conv-menu`（:643–661）/ `.server-pop`（group.css:594–613）/
+  /// `.message-history-spinner`（:851–865）/ `.conv-item`（:494–506）/
+  /// `.profile-topbar`（:2644–2650）。
+  /// Flutter 侧由 [AylaGlassConfig.resolveBackground] 的 `opaqueSoft` 选这一档。
+  static const Color glassOpaqueFallbackSoft = Color(0xEBFFFAFB);
   /// 他人气泡玻璃底 rgba(255,250,251,.72)（t:--bubble-other）
   static const Color bubbleOther = Color(0xB8FFFAFB);
   /// 认证卡字段描边 rgba(70,91,146,.3)（d:§5 auth.css 覆写）

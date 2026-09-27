@@ -695,7 +695,12 @@ class _AylaServerRailState extends State<AylaServerRail> {
             minWidth: AylaServerRail.popMinWidth, // min-width: 136px
             maxWidth: AylaServerRail.popMaxWidth, // max-width: 200px
           ),
+          // `.server-pop { background: var(--glass-bg-strong);
+          // backdrop-filter: var(--glass-filter) }`（group.css:594–613）—— 只命中
+          // app.css:252–270 的 `.92` 降级段（不在 auroraqua.css:527–551 清单里）
+          // ⇒ 实底档用软值 `.92`。
           child: AylaGlassSurface(
+            opaqueSoft: true,
             strong: true, // --glass-bg-strong（607）
             radius: AylaRadii.rCard, // --radius-card（606）
             child: Padding(

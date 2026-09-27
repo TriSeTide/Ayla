@@ -620,7 +620,14 @@ class _MenuPanelState extends State<_MenuPanel> {
             // 底 + 亮边
             DecoratedBox(
               decoration: BoxDecoration(
-                color: AylaGlassConfig.resolveBackground(strong: true), // .78
+                // `.conv-menu { background: var(--glass-bg-strong); backdrop-filter:
+                // var(--glass-filter) }`（app.css:643–661）—— 只命中 app.css:252–270
+                // 的 `.92` 降级段（不在 auroraqua.css:527–551 清单里）
+                // ⇒ 实底档用软值 `.92`（opaqueSoft）。
+                color: AylaGlassConfig.resolveBackground(
+                  strong: true, // .78
+                  opaqueSoft: true,
+                ),
                 borderRadius: r,
                 border: Border.all(color: AylaColors.glassBorder),
               ),

@@ -579,8 +579,14 @@ class _FilterTabState extends State<_FilterTab> {
     // 冰蓝会整块闪现在按钮内部 —— 这正是"悬停瞬间闪一下蓝色"的根因。
     // ring 把形状内部挖空，无论 blur 多小都不会染色。
     //
-    // `transition: box-shadow 200ms var(--auroraqua-ease)` → 用 AnimatedOpacity
-    // 淡入淡出（opacity 0 时 Flutter 的 RenderOpacity 会跳过绘制，无额外开销）。
+    // `transition: background 200ms …, box-shadow 200ms var(--auroraqua-ease)`
+    // （directory-filters.css:118–119）+ hover 值 `box-shadow: var(--glass-shadow-nav)`
+    // （directory-filters.css:135–140）⇒ **web 的机制是 box-shadow 过渡，不是 opacity**
+    // （本处与 13 号 §8.19 的另外 6 处「web 本来就是 opacity」不是一类）。
+    // Flutter 的 `BoxShadow` 无法只画形状之外（见上），所以改成「ring + AnimatedOpacity」：
+    // 这里的 `AnimatedOpacity` 只包着**阴影环** `AylaGlassShadow.ring`，子树内**没有
+    // BackdropFilter** ⇒ 既不是每帧模糊成本，也没有 Impeller 的「Opacity 祖先 + 玻璃」问题；
+    // 且 opacity 0 时 RenderOpacity 直接跳过绘制，无额外开销。
     tab = Stack(
       clipBehavior: Clip.none,
       children: <Widget>[

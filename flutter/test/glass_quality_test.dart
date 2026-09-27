@@ -23,6 +23,9 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 
 void main() {
+  /// 注册期读到的静态初始值（setUp 之前）—— 用来锁「默认档」。
+  final AylaGlassQuality initialQuality = AylaGlassConfig.quality;
+
   Widget host(Widget child) => MaterialApp(
     home: previewScope(
       Builder(
@@ -86,7 +89,7 @@ void main() {
     expect(pre.a, closeTo(AylaColors.glassBg.a, 0.001));
   });
 
-  testWidgets('实底档：0 滤镜、0 采样，面层换成 .92 实底', (WidgetTester tester) async {
+  testWidgets('实底档：0 滤镜、0 采样，面层换成 --surface 实底', (WidgetTester tester) async {
     AylaGlassConfig.quality = AylaGlassQuality.opaque;
     await tester.pumpWidget(host(card()));
     await tester.pump();
@@ -96,6 +99,35 @@ void main() {
       faceColor(tester, find.byType(AylaGlassSurface)),
       AylaColors.glassOpaqueFallback,
     );
+    // **同色同透明度** = web `--surface: #fffafb`（tokens.css:19），
+    // 即 auroraqua.css:527–551 的 `@supports` 降级值：不透明、无 alpha。
+    expect(AylaColors.glassOpaqueFallback, AylaColors.surface);
+    expect(AylaColors.glassOpaqueFallback.a, 1.0);
+  });
+
+  testWidgets('软实底件：web 只落 app.css:252–270 清单的件用 .92（opaqueSoft）', (
+    WidgetTester tester,
+  ) async {
+    AylaGlassConfig.quality = AylaGlassQuality.opaque;
+    await tester.pumpWidget(
+      host(
+        const AylaGlassSurface(
+          opaqueSoft: true,
+          child: SizedBox(width: 120, height: 40),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      faceColor(tester, find.byType(AylaGlassSurface)),
+      AylaColors.glassOpaqueFallbackSoft,
+    );
+    expect(AylaColors.glassOpaqueFallbackSoft.a, closeTo(0.92, 0.005));
+  });
+
+  test('默认档必须是 realBackdrop（web 无预模糊档，它是 Flutter 侧兜底选项）', () {
+    expect(initialQuality, AylaGlassQuality.realBackdrop);
+    expect(AylaGlassQuality.values.first, AylaGlassQuality.realBackdrop);
   });
 
   testWidgets('预模糊档：玻璃按钮同样 0 个 BackdropFilter', (WidgetTester tester) async {

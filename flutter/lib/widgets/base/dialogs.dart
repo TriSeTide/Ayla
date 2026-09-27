@@ -556,6 +556,12 @@ class _AylaModalCardState extends State<AylaModalCard>
 
     // 宽屏入场（仅 [wideEntrance] 时）：opacity 0→1 + scale .96→1 + y 12→0，
     // 250ms --ease-out（controller 已是 250ms）。
+    //
+    // 依据（2026-09-27 收口；13 号 §8.19）：web 是 **framer-motion 的整层动画**，
+    // 不是颜色 alpha —— `ShareSheet.tsx:231–252` 的 `initial={{ opacity: 0, scale: 0.96,
+    // y: 12 }}` → `animate={{ opacity: 1, scale: 1, y: 0 }}`（250ms EASE_OUT）；
+    // `PrivacySheet.tsx:177–179` 是同族写法（宽屏 y: -12）。卡片本身是玻璃
+    // （`.share-sheet-card` / `.privacy-sheet-card`）⇒ **保持整层 Opacity**。
     // ⚠️ Opacity(<1) 会建离屏层，但 250ms 结束即 v == 1.0 —— RenderOpacity
     // 在 alpha == 255 时跳过 layer，卡内 BackdropFilter 不会长期退化。
     if (floatCard) {

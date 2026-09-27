@@ -768,7 +768,12 @@ class _AylaMessageListState extends State<AylaMessageList> {
       constraints: const BoxConstraints(minHeight: 40),
       child: Center(
         child: widget.loading
+            // `.message-history-spinner { background: var(--glass-bg-strong);
+            // backdrop-filter: blur(18px) saturate(1.4) }`（app.css:851–865）——
+            // 它只命中 app.css:252–270 的 `.92` 降级段（不在 auroraqua.css:527–551
+            // 的清单里）⇒ 实底档用软值 `.92`。
             ? AylaGlassSurface(
+                opaqueSoft: true,
                 radiusOverride: AylaRadii.pill,
                 shadow: const <BoxShadow>[],
                 padding: const EdgeInsets.symmetric(
@@ -875,6 +880,13 @@ class _AylaMessageListState extends State<AylaMessageList> {
   /// `.message-jump-bottom`（44 圆玻璃钮；`is-visible` 淡入 + 上移 8）。
   Widget _jumpBottomButton() {
     return AnimatedOpacity(
+      // 依据（2026-09-27 收口；13 号 §8.19）：web 是**整层 opacity + visibility +
+      //   pointer-events**，不是颜色 alpha —— `.message-jump-bottom { opacity: 0;
+      //   visibility: hidden; pointer-events: none; transform: translateY(8px) }`
+      //   （app.css:868–893）⇒ `.is-visible { opacity: 1; visibility: visible;
+      //   pointer-events: auto; transform: translateY(0) }`（app.css:895–903）。
+      //   钮本身带 `backdrop-filter: blur(18px) saturate(1.4)`（app.css:881–882）
+      //   ⇒ 保持整层 AnimatedOpacity（下方 IgnorePointer 即 web 的 pointer-events）。
       key: const ValueKey<String>('message-jump-bottom'),
       opacity: _farFromBottom ? 1 : 0,
       duration: AylaDurations.fast,
@@ -900,7 +912,11 @@ class _AylaMessageListState extends State<AylaMessageList> {
                   );
                 }
               },
+              // `.message-jump-bottom { background: var(--glass-bg-strong);
+              // backdrop-filter: blur(18px) saturate(1.4) }`（app.css:868–893）——
+              // 只命中 app.css:252–270 的 `.92` 降级段 ⇒ 实底档用软值 `.92`。
               child: AylaGlassSurface(
+                opaqueSoft: true,
                 radiusOverride: AylaRadii.pill,
                 shadow: AylaShadows.card,
                 padding: EdgeInsets.zero,

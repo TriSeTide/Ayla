@@ -50,22 +50,38 @@ enum AylaGlassQuality {
   /// 预模糊：**不装滤镜**，改用 [AylaBackdropSnapshot]（背景静态九层的低频
   /// 快照）按卡片在屏幕上的位置采样。
   ///
+  /// ⚠️ **web 里没有这一档**（web 只有「真玻璃」与 `@supports` 实底两条路径，
+  /// tokens.css:19 + auroraqua.css:527–551）—— 它是 **Flutter 侧的性能兜底选项**，
+  /// 由用户在画布上拍板后才用；**不是默认档**，任何情况下都不得设为默认
+  /// （默认必须是 [realBackdrop]，见 `test/glass_quality_test.dart`）。
+  ///
   /// 代价（**降档近似，不是等价实现**）：采样的是相位无关的静态层 ⇒ 卡片里
   /// 看不到流层的动态变化；卡片若在滚动容器里且重绘被 `RepaintBoundary` 挡住，
   /// 采样会滞留在上一帧位置。
   /// 收益：整屏玻璃卡从「每帧 N 次高斯模糊」降到「N 次纹理采样」。
   preblurred,
 
-  /// 实底：连采样都不做，改用不透明玻璃底（web 的 `@supports` 降级路径，
-  /// app.css 的 `rgba(255,250,251,.92)`）。
+  /// 实底：连采样都不做，面层换成 web `@supports` 降级路径的实底。
+  ///
+  /// **与 web 同色同透明度**：主值 = `--surface`（`#fffafb`，**无 alpha**），
+  /// 事实源 = auroraqua.css:527–551（覆盖全部卡片 / 顶栏 / 侧栏 / 输入框 / 弹卡；
+  /// 与 app.css:252–270 的 `.92` 段重叠时因后加载而实际生效）；
+  /// 少数只在 app.css:252–270 清单里的件（别人气泡 / 回底钮 / 会话菜单 /
+  /// 服务器弹层 / 历史加载 pill）用 `.92`（[AylaColors.glassOpaqueFallbackSoft]）——
+  /// 由 [AylaGlassConfig.resolveBackground] 的 `opaqueSoft` 逐件选择。
   opaque,
 }
 
 /// 毛玻璃运行期配置（性能降级链，05 坑 1 / d:§9）。
 ///
-/// web 端降级条件是「浏览器不支持 `backdrop-filter`」（app.css @supports →
-/// `rgba(255,250,251,0.92)` 实底），Flutter 侧对应「平台/设备不适合逐帧
-/// 离屏模糊」——统一用 .92 不透明实底兜底，保住可读性且不再付模糊代价。
+/// web 端降级条件是「浏览器不支持 `backdrop-filter`」：`@supports not (…)` 把面层
+/// 换成实底。**web 有两段、两个值**（2026-09-27 逐条核对）：
+///   · auroraqua.css:527–551 → `background: var(--surface)` = `#fffafb`（**无 alpha**）；
+///   · app.css:252–270      → `background: rgba(255,250,251,0.92)`（只列了少数件）。
+/// 两段重叠的件由**后加载**的 auroraqua 段胜出 ⇒ 主值取 `--surface`；只落在
+/// app.css 段的件（别人气泡 / 回底钮 / 会话菜单 / 服务器弹层 / 历史加载 pill）
+/// 用 `.92`。Flutter 侧对应「平台/设备不适合逐帧离屏模糊」的兜底档
+/// （[AylaGlassQuality.opaque]），保住可读性且不再付模糊代价。
 abstract final class AylaGlassConfig {
   /// 当前质量档。**默认 [AylaGlassQuality.realBackdrop]**（与改造前逐像素
   /// 一致，见 `test/glass_quality_test.dart` 的结构锁）。
@@ -89,9 +105,21 @@ abstract final class AylaGlassConfig {
   /// 是否还需要「背后内容」层（真玻璃 或 预模糊）。实底档整层不装。
   static bool get backdropLayerEnabled => quality != AylaGlassQuality.opaque;
 
-  /// 依据当前环境解析材料底色（默认 .55 / strong .78；降级 .92）。
-  static Color resolveBackground({required bool strong}) {
-    if (useOpaqueFallback) return AylaColors.glassOpaqueFallback;
+  /// 依据当前环境解析材料底色（默认 .55 / strong .78）。
+  ///
+  /// 实底档（[AylaGlassQuality.opaque]）返回的是 web 的降级值：
+  ///   · 默认 [AylaColors.glassOpaqueFallback] = `--surface`（`#fffafb`，无 alpha）
+  ///     —— auroraqua.css:527–551，web 上绝大多数玻璃件的实际降级色；
+  ///   · `opaqueSoft: true` → [AylaColors.glassOpaqueFallbackSoft] = `.92`
+  ///     —— app.css:252–270，只给 web 上仅命中该清单的件用
+  ///     （`.bubble-other` / `.message-jump-bottom` / `.conv-menu` / `.server-pop` /
+  ///      `.message-history-spinner`）。
+  static Color resolveBackground({required bool strong, bool opaqueSoft = false}) {
+    if (useOpaqueFallback) {
+      return opaqueSoft
+          ? AylaColors.glassOpaqueFallbackSoft
+          : AylaColors.glassOpaqueFallback;
+    }
     return strong ? AylaColors.glassBgStrong : AylaColors.glassBg;
   }
 
@@ -218,9 +246,22 @@ class AylaGlassBackdrop extends StatelessWidget {
           // child 必须是纯透明内容：只贡献滤镜层，不携带颜色。
           child: child ?? const SizedBox.expand(),
         );
-        return radius == null
+        final Widget clipped = radius == null
             ? filtered
             : ClipRRect(borderRadius: radius!, child: filtered);
+        // **滤镜层自己的 repaint 边界**（2026-09-27 §8.19，量化后加）。
+        //
+        // 事实：真实 app 的页面内容挂在 `AylaAuroraBackground.child` 下
+        // （`main.dart:84–102`），而背景四层流层的动画与内容同属
+        // `aurora_background.dart:1106` 那一个 `RepaintBoundary` ⇒ 背景每帧
+        // 变化会让整棵内容树重绘、**玻璃滤镜层每帧重录**（定向测试实测
+        // 10 帧 = 10 次；`test/repaint_boundary_audit_test.dart`）。
+        // 这里给滤镜层一个独立边界：祖先/邻居重绘时它的 layer 直接复用
+        // （同测 0 次），代价是每张玻璃卡多一个 `OffsetLayer`（远小于它本来
+        // 就有的 `BackdropFilterLayer`）。
+        // ⚠️ 若背景线把 `aurora_background.dart:1106` 的边界下移到「只包背景层」，
+        // 这里就会变成冗余边界 —— 届时可连同本条注释一起评估移除。
+        return RepaintBoundary(child: clipped);
     }
   }
 }
@@ -315,6 +356,7 @@ class AylaGlassSurface extends StatelessWidget {
     this.borderOverride,
     this.shadowTransition = Duration.zero,
     this.dimAlpha,
+    this.opaqueSoft = false,
   });
 
   /// 内容。
@@ -328,6 +370,14 @@ class AylaGlassSurface extends StatelessWidget {
 
   /// 是否使用强玻璃底（.78，弹层）。
   final bool strong;
+
+  /// 实底档（[AylaGlassQuality.opaque]）用 web 的「软」降级值 `.92` 而不是
+  /// `--surface`。
+  ///
+  /// 只给 web 上**仅命中 app.css:252–270 清单**的件开：`.bubble-other` /
+  /// `.message-jump-bottom` / `.conv-menu` / `.server-pop` / `.message-history-spinner`
+  /// （auroraqua.css:527–551 覆盖不到的件）。其余件保持默认 false ⇒ `--surface`。
+  final bool opaqueSoft;
 
   /// 外阴影。
   final List<BoxShadow> shadow;
@@ -406,7 +456,12 @@ class AylaGlassSurface extends StatelessWidget {
         (border ? Border.all(color: AylaColors.glassBorder) : null));
     final Widget face = DecoratedBox(
       decoration: BoxDecoration(
-        color: dimColor(AylaGlassConfig.resolveBackground(strong: strong)),
+        color: dimColor(
+          AylaGlassConfig.resolveBackground(
+            strong: strong,
+            opaqueSoft: opaqueSoft,
+          ),
+        ),
         borderRadius: radiusValue,
         border: borderValue,
       ),

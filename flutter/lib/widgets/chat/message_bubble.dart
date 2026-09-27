@@ -475,6 +475,9 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               if (_arrive.value >= 1.0) return child!;
               final double t = AylaCurves.easeOut.transform(_arrive.value);
               // `frost-rise`：opacity 0→1 + translateY 8→0（180ms）
+              // 依据（2026-09-27 收口；13 号 §8.19）：web `@keyframes frost-rise`
+              // （base.css:426–435）作用在**整行** `.msg-row` 上 ⇒ 整层 opacity，
+              // 含气泡自身的 `.bubble-other` blur(12px) 层 ⇒ 保持整层 Opacity。
               return Opacity(
                 opacity: t,
                 child: Transform.translate(
@@ -680,7 +683,10 @@ class _BubbleFace extends StatelessWidget {
     );
 
     return Opacity(
-      // `.bubble.recalled { opacity: .6 }`（内容层无模糊，安全）
+      // `.bubble.recalled { opacity: .6; font-style: italic }`（app.css:1225–1228）
+      // ⇒ web 是**整层 opacity**：它连同 `.bubble-other { background: var(--bubble-other);
+      //   backdrop-filter: blur(12px) }`（app.css:1129–1136）一起被压暗
+      //   ⇒ 保持整层（不以颜色 alpha 替代，否则模糊层不再被压暗；13 号 §8.19）。
       opacity: recalled ? 0.6 : 1.0,
       child: ClipRRect(
         borderRadius: radius,
@@ -700,7 +706,16 @@ class _BubbleFace extends StatelessWidget {
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: self || elysia ? null : AylaColors.bubbleOther,
+                  // 别人气泡的降级值 = `rgba(255,250,251,.92)`：web 的
+                  // `.bubble-other { background: var(--bubble-other); backdrop-filter:
+                  // blur(12px) }`（app.css:1129–1136）**只命中** app.css:252–270 的
+                  // `@supports` 降级段（不在 auroraqua.css:527–551 的清单里）
+                  // ⇒ 实底档换软值 `.92` 而不是 `--surface`。
+                  color: self || elysia
+                      ? null
+                      : (AylaGlassConfig.useOpaqueFallback
+                            ? AylaColors.glassOpaqueFallbackSoft
+                            : AylaColors.bubbleOther),
                   gradient: self
                       ? const LinearGradient(
                           begin: Alignment.topLeft,
@@ -1013,6 +1028,13 @@ class _MsgActions extends StatelessWidget {
       child: IgnorePointer(
         ignoring: !visible,
         child: AnimatedOpacity(
+          // `.msg-actions { opacity: 0; pointer-events: none; transition: opacity var(--dur-fast)
+          //   var(--ease-out) }`（app.css:1290–1298）；显示态 → `opacity: 1`：
+          //   `.msg-row:focus-within`（app.css:1301–1304）/ `@media (hover:hover) .msg-row:hover`
+          //   （app.css:1307–1312）/ `@media (hover:none) .msg-row.is-actions-open`（app.css:1317–1322）
+          // ⇒ web 是**整层 opacity** ⇒ 保持 AnimatedOpacity。子树里的 AylaMsgActionButton 带
+          //   blur(8px)（web 同款：auroraqua.css:122–129 的按钮材质组含 `.msg-action-btn`）
+          //   ⇒ 不以颜色 alpha 替代（13 号 §8.19）。
           opacity: visible ? 1.0 : 0.0,
           duration: AylaDurations.fast,
           curve: AylaCurves.easeOut,
