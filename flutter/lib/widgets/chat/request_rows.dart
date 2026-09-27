@@ -18,6 +18,10 @@
 ///    本库抽成一件共用（`sectionTitle` 由调用方给）；
 /// 2. 群邀请行的名称文案两处不同（宽屏 `「X（来自 Y）」` / 快捷栏 `「X」`）⇒ 由调用方传 `name`，
 ///    本件不拼文案；入群申请的 `message` 拼接同理由调用方完成（web 两处不一致，属调用方职责）。
+///
+/// ## 公开面
+/// `AylaRequestRow` · `AylaNoticeRow` · `AylaFriendRow` · `AylaRequestsPanel` · `AylaGlassRowShell` · 样张 `aylaRequestsPanelSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

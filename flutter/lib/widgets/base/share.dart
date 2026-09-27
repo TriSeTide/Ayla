@@ -1,6 +1,6 @@
 /// ShareSheet / ShareButton —— 分享弹窗与分享入口（B5 分享族）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 ///
 /// - `components/share/ShareSheet.tsx`：结构、状态机、关闭语义、发送契约；
 /// - `styles/share.css` 1–275：全部盒模型/材质/状态；
@@ -14,7 +14,7 @@
 ///
 /// ## 展示型组件（注入契约）
 ///
-/// 群/私信列表分页、子群加载、发送全部由调用方注入（对齐 B5 既有模式：
+///
 /// `AylaPostCard.onShare` / `AylaFavoriteButton.state+onToggle`）——本批不接线
 /// 聊天域 API，页面批次落地时把 `useSocialPage` / `listSubgroups` / `sendMessage`
 /// 接到这些回调上。
@@ -22,6 +22,10 @@
 /// 弹层挂载：本组件返回**全屏遮罩 + 卡片**（与 `AylaModalOverlay` 同族），
 /// 调用方需把 [AylaShareSheet] 放在页面最外层的 `Stack` 之上（web 用 createPortal
 /// 挂 document.body 规避父级 backdrop-filter 的 stacking context 裁剪）。
+///
+/// ## 公开面
+/// `AylaShareTab` · `AylaShareSubGroup` · `AylaShareTarget` · `AylaShareTargetPage` · `AylaShareSendRequest` · `AylaShareSheet` · `AylaShareButton` · 样张 `aylaShareSamples()`
+
 library;
 
 import 'dart:math' as math;
@@ -42,6 +46,7 @@ import 'directory_controls.dart';
 import 'loading.dart';
 import 'primitives.dart';
 import 'tab_badge.dart';
+import 'tooltip.dart';
 
 /// 分享目标类型选项卡（web `tab: `group` | `private``）。
 enum AylaShareTab {
@@ -875,12 +880,16 @@ class AylaShareButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AylaIconButton(
-      // web `IconShare 18`（40 档）；32 档取 16 与收藏键 compact 对齐
-      icon: AylaIcon(aylaIconByName('iconShare')!, size: size >= 40 ? 18 : 16),
-      onPressed: onPressed,
-      size: size,
-      semanticLabel: label,
+    // web `title={label}`（ShareButton.tsx:29）⇒ 悬停提示与 aria 文案同源
+    return AylaTooltip(
+      message: label,
+      child: AylaIconButton(
+        // web `IconShare 18`（40 档）；32 档取 16 与收藏键 compact 对齐
+        icon: AylaIcon(aylaIconByName('iconShare')!, size: size >= 40 ? 18 : 16),
+        onPressed: onPressed,
+        size: size,
+        semanticLabel: label,
+      ),
     );
   }
 }

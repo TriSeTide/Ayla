@@ -1,44 +1,23 @@
-/// live 域第三批（B2-3）：直播间封面侧栏 + 开播选择器。
+/// 直播间封面侧栏 + 开播选择器。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// components/live/LiveChannelRail.tsx  168 行（nav 壳 / 操作区 / 封面列表 / 新建区 / 自动滚到当前项）
 /// components/live/LiveStartSheet.tsx   86 行（开播入口：选已有直播间 or 新建）
 /// live.css 311–326    .live-rail：flex none · width 240 · column · --glass-bg · blur24 sat1.4 ·
-///                     1px 亮边 · radius 16 · --glass-shadow · margin 12 · min-height 0
-/// live.css 10–12/22–29 .live-room-body.is-wide > .live-rail 入场 auroraqua-sidebar-in（500ms 左入；
-///                     reduced-motion 关闭）
-/// auroraqua.css 412–454（≤768）  .live-rail { width: min(240px, calc(100vw - 48px)) }
-/// auroraqua.css 202–205 .live-rail.is-panel-motion { animation: none; translate: none }
-///                     （窄屏覆盖层的从右入场由 Framer/调用方持有）
-/// live.css 327–353    .live-rail-actions：min-height 54（与顶栏等高）· padding sp2 sp3 ·
-///                     border-bottom 1px；.live-rail-icon-btn 36×36 pill
-/// auroraqua.css 125–139  图标钮并入按钮组（玻璃材质 + button 阴影 + hover→button-hover），
-///                     但**不在**扫光组（142–148）
-/// live.css 355–363    .live-rail-list：flex 1 · min-height 0 · overflow-y auto · gap sp2 · padding sp3
-/// live.css 232–239    wrap 相对定位 · .live-rail-del-btn（absolute right/top 4 · 22×22 · pill ·
-///                     rgba(255,250,251,.72) · destructive · opacity 0→hover/focus 1 · disabled .4）
-///                     · .live-rail-create（padding sp2 sp3 + border-top）· create-btn（1px dashed ice-500）
-/// live.css 365–384    .live-rail-item：row · center · gap sp2 · padding sp2 · radius-input ·
-///                     color secondary；hover → rgba(157,191,230,.18)；.is-active → .35（**被
-///                     auroraqua 194–197 清零**，选中态由高亮元素提供）；过渡 background 180ms
-/// live.css 386–409    .live-rail-cover：72 宽 · 16/9 · radius-input · 1px 亮边 · ice-500 图标；
-///                     .live-rail-live-dot 8×8 pink-500 top/right 4
-/// live.css 411–423    .live-rail-item-title：flex 1 · min-width 0 · 13/1.35 · 左对齐 ·
-///                     color inherit · **-webkit-line-clamp: 2**
-/// live.css 1356–1370  .live-rail-viewers：gap 2 · utility 11 · ls .3 · lh 1 · secondary（active→primary）
-/// auroraqua.css 175–187  .auroraqua-nav-highlight：absolute inset 0 · radius inherit ·
-///                     --nav-active-bg 渐变 · --glass-shadow-nav · 1px 亮边（**裸变体**，非 --rail 竖条）
-/// live.css 48–139     .live-start-*（开播选择器全量，见各段落）
-/// vitest/live-rail.test.tsx  官方用例（宽屏/收起态/窄屏覆盖层/自动滚动/开播控制台扩展/开播选择器）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_rail.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - 数据（本人直播间列表 + WS 热更新合并排序）由页面投影：web 的 `useOwnedLiveDirectory` /
 ///   `listLiveChannelsPage` 属数据层；
 /// - 窄屏覆盖层的**遮罩与定位**属 `LiveRoomBody`（`.live-room-rail-overlay` / `-rail-mask`），
 ///   本件只接受 [AylaLiveChannelRail.enterFromRight] 的入场档；
 /// - 目录分页用 [AylaLiveChannelRail.directoryFooter] 槽注入（web 是 `<li><DirectoryLoadMore/></li>`）。
+///
+/// ## 公开面
+/// `AylaLiveChannelRail` · `AylaLiveStartSheet` · 样张 `aylaLiveRailSamples()`
+
 library;
 
 import 'dart:math' as math;
@@ -1154,7 +1133,7 @@ class _RailDemoState extends State<_RailDemo> {
               onPressed: () => setState(() => _collapsed = false),
             ),
             if (_deleted > 0)
-              Text('已点删除 $_deleted 次', style: const TextStyle(fontSize: 11)),
+              Text('删除 ×$_deleted', style: const TextStyle(fontSize: 11)),
           ],
         ),
       );

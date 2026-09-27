@@ -1,6 +1,10 @@
 /// 资料卡与目录筛选（`UserProfileCard.tsx` + `DirectoryFilters.tsx`）。
 ///
 /// 事实源见各段落注释。
+///
+/// ## 公开面
+/// `AylaUserProfileCard` · `AylaDirectoryFilters`
+
 library;
 
 import 'package:flutter/material.dart';
@@ -270,7 +274,7 @@ class AylaUserProfileCard extends StatelessWidget {
 ///    而按钮有 `padding: sp2 sp3`。若把高亮画在**带 padding 的容器内部**，
 ///    它只能铺到 padding 内沿（**这是之前的 bug**）。故高亮由**容器级 Stack**
 ///    绘制、尺寸取**实测槽位矩形**（含 padding）。
-/// 2. **迁移用 `AnimatedPositioned`**（B3 已验证的等价做法）：即 Framer
+/// 即 Framer
 ///    `layoutId` 的 Flutter 等价，300ms `--auroraqua-ease-out`。
 /// 3. 容器材质一律走 [AylaGlassSurface]（不自行拼玻璃层）。
 ///

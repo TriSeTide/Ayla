@@ -1,39 +1,14 @@
-/// voice 域第四批（B1-4）：当前频道面板（成员列表 + 控制条）。
+/// 当前频道面板（成员列表 + 控制条）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// VoiceChannelPanel.tsx 115–157  section.voice-panel = head(标题+人数) +
 ///                                .voice-member-list(成员行 + 房主操作 + 分页) + VoiceControls
 /// VoiceChannelPanel.tsx 65–72    自己兜底：store 有自己但分页列表没有 ⇒ 置顶插入
-/// VoiceChannelPanel.tsx 139–144  房主且非自己 ⇒ 行下插 .voice-owner-member-actions
-///                                （两个 `.btn.btn-ghost`：「踢出」/「转让房主」）
-/// VoiceChannelPanel.tsx 101–113  成员操作：busy 期间两个按钮都 disabled、
-///                                当前行文案「处理中…」、失败**静默**
-/// VoiceChannelPanel.tsx 119      人数：当前频道 → store 成员数；否则 → 分页 total
-/// VoiceChannelPanel.tsx 149      DirectoryLoadMore（invalidated / refresh /
-///                                retainCompletedSpace={false}）
-/// app.css 2873–2886              .voice-panel：flex column · gap sp3 = 12 ·
-///                                max-width 560 · padding sp4 = 16 · radius 16 ·
-///                                --glass-bg · 1px --glass-border · blur(24) sat(1.4) ·
-///                                --glass-shadow
-/// app.css 2888–2892              .voice-panel-head：flex · **align-items: baseline** ·
-///                                justify-content: space-between
-/// app.css 2894–2897 + base.css 316  .voice-panel-title：16px（`h3` 的 `font-weight: bold`
-///                                未被重置 ⇒ **700**；base.css 只重置 margin/padding）
-/// app.css 2899–2902              .voice-panel-count：12px · --text-secondary
-/// app.css 2904–2908              .voice-member-list：flex column · gap sp2 = 8
-/// app.css 2910–2915              .voice-list-empty：padding sp4 · 13px · secondary · 居中
-/// voice.css 32–56                `.voice-room-body .voice-panel { flex:1; min-height:0;
-///                                margin:0; width:100%; max-width:none }`；
-///                                成员列表 `flex:1; min-height:0; overflow-y:auto`；
-///                                其余子项 `flex-shrink:0`
-/// voice.css 377–381              窄屏 `.voice-room-voice-card .voice-panel`：100% 宽 + 保留自身材质
-/// auroraqua.css 584–610          窄屏：外层 `.voice-room-voice-card` 透明（材质归面板）；
-///                                宽屏：`.voice-room-voice-card > .voice-panel` 透明
-///                                （材质归外层卡）⇒ 材质归属**按断点切换**
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/voice/voice_channel_panel.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 面板自拉分页（`usePagedMediaList`）、自订阅 `voiceWS` 帧（`joined`/`left` ⇒ 失效 +
 /// 移除行）、自己调 `actionVoiceMember`，并从 auth/presence/用户缓存取展示信息。
 /// Flutter 侧按既有「展示型 + 注入」模式：
@@ -50,6 +25,10 @@
 ///    JSX 换行产生的空白 ⇒ Flutter 侧用 `Row(spacing: 4)` 等价表达；
 /// 2. `.voice-member-list` 在房间上下文里是**滚动容器**（`flex:1; overflow-y:auto`）⇒
 ///    由 [AylaVoiceChannelPanel.scrollMembers] 档表达（`Expanded` + 可滚动列表）。
+///
+/// ## 公开面
+/// `AylaVoiceMemberAction` · `AylaVoicePanelMember` · `AylaVoiceMembersPage` · `AylaVoiceChannelPanel` · 样张 `aylaVoiceChannelPanelSamples()`
+
 library;
 
 import 'dart:async';
@@ -512,7 +491,7 @@ class _VoicePanelDemoState extends State<_VoicePanelDemo> {
               const SizedBox(height: AylaSpacing.sp2),
               _panel(owner: true),
               const SizedBox(height: AylaSpacing.sp2),
-              Text('成员操作已触发 $_kickCount 次', style: const TextStyle(fontSize: 11)),
+              Text('成员操作 ×$_kickCount', style: const TextStyle(fontSize: 11)),
             ],
           ),
         ),

@@ -10,6 +10,10 @@
 /// 纪律：背景是 z 最低层，内容在其上滚动；光斑在玻璃卡片之下，被
 /// backdrop-filter 模糊后透出（d:§7.2 层级）。fluid 动画（旋转/漂移/呼吸）
 /// 由后续 M 阶段按 d:§7.2 参数接入，本层为静态同构底。
+///
+/// ## 公开面
+/// `AylaAuroraBackground`
+
 library;
 
 import 'dart:ui' as ui;

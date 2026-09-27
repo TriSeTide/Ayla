@@ -29,6 +29,10 @@
 ///
 /// **展示型组件**：图片选择上传、查看器、发送/删除请求由页面注入（同一批的
 /// `api/media.ts` 三步上传与 `ImageViewer` 属后续批次）。
+///
+/// ## 公开面
+/// `AylaCommentComposer` · `AylaCommentList` · 样张 `aylaCommentSamples()`
+
 library;
 
 import 'dart:async';

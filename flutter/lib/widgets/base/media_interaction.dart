@@ -2,6 +2,10 @@
 /// `overlay/OverlayScrollbar.tsx`）。
 ///
 /// 三者都是**交互/媒体**类组件，事实源见各段落注释。
+///
+/// ## 公开面
+/// `AylaSignedVideo` · `AylaPullStatus` · `AylaPullTracker` · `AylaPullToRefresh` · `AylaRefreshDot`
+
 library;
 
 import 'dart:math' as math;
@@ -10,6 +14,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/media/media_signer.dart';
 import '../../theme/glass.dart';
+import '../../theme/svg_path.dart';
 import '../../theme/tokens.dart';
 import 'loading.dart';
 
@@ -505,16 +510,18 @@ class AylaRefreshDot extends StatelessWidget {
       child: switch (status) {
         // refreshing → spinner（loading-spinner--md = 18px）
         AylaPullStatus.refreshing => const AylaLoadingSpinner(size: 18),
-        // done → 对勾（`--success`）
-        AylaPullStatus.done => Icon(
-            Icons.check,
+        // done → 对勾（web 内联 `<svg viewBox="0 0 16 16">`：`M3 8.5l3.2 3.2L13 5`，stroke 2 / round）
+        AylaPullStatus.done => const AylaSvgGlyph(
+            d: 'M3 8.5l3.2 3.2L13 5',
             size: 16,
+            viewBox: 16,
             color: AylaColors.success, // color: var(--success)
           ),
-        // idle / pulling → 下箭头（--indigo-700）
-        _ => Icon(
-            Icons.keyboard_arrow_down,
+        // idle / pulling → 下箭头（web 内联：`M3.5 6l4.5 4.5L12.5 6`，14×14 / stroke 2 / round）
+        _ => const AylaSvgGlyph(
+            d: 'M3.5 6l4.5 4.5L12.5 6',
             size: 14,
+            viewBox: 16,
             color: AylaColors.indigo700, // color: var(--indigo-700)
           ),
       },

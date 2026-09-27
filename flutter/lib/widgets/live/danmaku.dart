@@ -1,26 +1,14 @@
-/// live 域第一批（B2-1）：弹幕族 —— 列表 / 输入 / 画面飘弹幕层。
+/// 弹幕族 —— 列表 / 输入 / 画面飘弹幕层。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// components/live/DanmakuList.tsx     25–85 行条目 / 87–139 列表 + 空态 + 新弹幕提示 + 查看器
 /// components/live/DanmakuInput.tsx    1–180（草稿 revision 守卫 / 上传 / 重试 / 计数 / 状态行）
 /// components/live/DanmakuOverlay.tsx  1–213（基线只飘新弹幕 / 轨道 / 上限 / 关键帧）
-/// components/live/danmakuTracks.ts    12–55 → 本库 danmaku_tracks.dart（纯函数 1:1）
-/// app.css 3671–3762   .danmaku-wrap/-list/-empty/-item/-sender/-content/-image-open/
-///                     -image-skeleton/-image/-new-hint（**全库唯一命中**，不在任何 @media 内）
-/// app.css 3764–3827   .danmaku-input-area/-input-row/-image-btn/-input-status/-input/-input-meta/-counter
-/// app.css 21–67 / 1324–1366 / 3473–3477   .btn 族 / .msg-action-btn / .live-form-error
-/// auroraqua.css 54–94 · 96–102 · 134–139 · 142–166   按钮组：200ms + hover 1.02 + active .98 + 扫光 600ms
-/// auroraqua.css 347–359 · 378–383 · 390（**≥769**）  .danmaku-input-area 浮动卡 / .danmaku-image-btn 材质
-/// auroraqua.css 502–523（顶层）                      .danmaku-input 字段族材质 + focus 转辉光边
-/// auroraqua.css 555–567 · 569–581                    studio side 内透明档
-/// live.css 756–764 · 830–838                         滑动单元内 .danmaku-wrap 材质 / ≤768 透明覆盖
-/// live.css 768–772 · 777–784                         窄屏输入卡底 / min-width 0 / 图片钮 40 / 发送钮 min-width 72
-/// live.css 860–930 · 1006–1018                       飘弹幕层 / 头像 / 图片 / 关键帧
-/// base.css 333–346 · 564–578                         button 重置（字体继承）/ .skeleton
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/danmaku.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 三个组件各自直连 `useLiveStore` / `useAuthStore` / `matchMedia` /
 /// `ResizeObserver` / `uploadMediaFile`；Flutter 侧按库内既有「展示型 + 注入」：
 /// - 弹幕数据、在线态、历史分页由页面装进 [AylaDanmakuEntry] / [AylaHistoryControlsData]；
@@ -28,6 +16,10 @@
 ///   （`AylaMediaActions.pickImage` / `.uploadImage` 即一行实现）——
 ///   组件持有 attempt（文件 + mediaId），重试语义与 web 一致；
 /// - 弹幕列表的 listRef（web 用于跳底）→ 页面注入 `ScrollController`。
+///
+/// ## 公开面
+/// `AylaDanmakuEntry` · `AylaDanmakuList` · `AylaDanmakuInputMaterial` · `AylaDanmakuInput` · `AylaDanmakuOverlay` · 样张 `aylaDanmakuSamples()`
+
 library;
 
 import 'dart:async';
@@ -1872,7 +1864,7 @@ class _DanmakuInputDemoState extends State<_DanmakuInputDemo> {
               onPressed: () => setState(() => _error = _error == null ? '弹幕不能为空' : null),
               child: const Text('外部错误文案'),
             ),
-            Text('已发送 $_sent 条', style: const TextStyle(fontSize: 11)),
+            Text('已发送 ×$_sent', style: const TextStyle(fontSize: 11)),
           ],
         ),
       ],

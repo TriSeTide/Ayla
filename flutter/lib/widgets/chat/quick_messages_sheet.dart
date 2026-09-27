@@ -20,6 +20,10 @@
 ///    ⇒ `offset: (0, 1)` = `translateY(100%)`，与 web 关键帧等价（skill「百分比基准」条的正例）；
 /// 4. 栏内所有操作**不跳路由**：私信 tab 点会话 → 内联打开私聊面板（`activeChatId`），
 ///    头像一律不可点（`disableAvatarNav`）——判定与装配由调用方给。
+///
+/// ## 公开面
+/// `AylaQuickMessagesSheet` · 样张 `aylaQuickMessagesSheetSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

@@ -7,6 +7,10 @@
 ///
 /// 事实源（段长）：浏览器对 1px 虚线的常见画法是 **3px 实 / 3px 空**；CSS 未显式声明
 /// `stroke-dasharray`（web 用的是原生 `dashed` 关键字）⇒ 取该常见值，两侧同一实现。
+///
+/// ## 公开面
+/// `AylaDashedBorder`
+
 library;
 
 import 'dart:math' as math;

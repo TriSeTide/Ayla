@@ -93,6 +93,19 @@ import '../widgets/chat/request_rows.dart';
 import '../widgets/chat/share_bubble.dart';
 import '../widgets/voice/voice_room_body.dart';
 import '../widgets/chat/wide_messages_sidebar.dart';
+import '../widgets/base/tooltip.dart';
+import '../theme/buttons.dart';
+import '../widgets/motion/page_transition.dart';
+import '../widgets/search/search_history_chips.dart';
+import '../widgets/search/search_result_group.dart';
+import '../widgets/search/search_user_row.dart';
+import '../widgets/posts/masonry_grid.dart';
+import '../widgets/profile/favorites_skeleton.dart';
+import '../widgets/profile/profile_card.dart';
+import '../widgets/game/games_grid.dart';
+import '../widgets/group/group_role_chip.dart';
+import '../widgets/group/transfer_owner_dialog.dart';
+import '../widgets/group/group_info_profile.dart';
 
 /// 审核画布宽度（导航 248 + 内容区；高度按所选分类内容收紧，不再是一张 1700 高的大画面）。
 const Size kGallerySize = Size(1800, 1200);
@@ -130,6 +143,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'Icon 图标库',
     'Batch 2 基元',
     'Typography',
+    'AylaTooltip',
   ]),
   AylaGalleryCategory('shell', 'Shell · 导航壳与浮层', <String>[
     'AylaBottomTabs',
@@ -178,6 +192,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaVoiceRoomBody',
   ]),
   AylaGalleryCategory('posts', 'posts · 帖子 / 评论', <String>[
+    'AylaMasonryGrid',
     'AylaPostCard',
     'AylaPostEditor',
     'AylaCommentList',
@@ -188,12 +203,28 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     '群聊申请弹窗',
     '建群对话框',
     '目录结果卡',
-    '个人主页内容分区',
+    'AylaTransferOwnerDialog',
+    'AylaGroupRoleChip',
+    'AylaGroupInfoProfile',
   ]),
   AylaGalleryCategory('game', 'boardgame · 桌游域', <String>[
+    'AylaGamesGrid',
     '桌游室卡片',
     '创建桌游室表单',
     '桌游室占位整页壳',
+  ]),
+  AylaGalleryCategory('profile', 'profile · 个人主页域', <String>[
+    'AylaProfileCard',
+    'AylaFavoritesSkeleton',
+    '个人主页内容分区', // 2026-09-25 用户指正：本件属 profile 域（早期误放在「群与目录」，当时还没有 profile 分类）
+  ]),
+  AylaGalleryCategory('search', 'search · 搜索域', <String>[
+    'AylaSearchHistoryChips',
+    'AylaSearchResultGroup',
+    'AylaSearchUserRow',
+  ]),
+  AylaGalleryCategory('motion', 'motion · 转场与手势', <String>[
+    'AylaPageTransition',
   ]),
   AylaGalleryCategory('common', '通用件 · 分享 / 分页 / 弹层 / 资源', <String>[
     'AylaShareSheet',
@@ -307,6 +338,150 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   children: <Widget>[
                     const _GalleryHeader(),
                     const SizedBox(height: AylaSpacing.sp6),
+
+                    // ---------- 路由转场（PageTransition + AnimatePresence 等价宿主） ----------
+                    _Section(
+                      title: 'AylaPageTransition / AylaPageSwap（PageTransition.tsx 117 行 + AppShell.tsx:113）',
+                      source:
+                          '进入：opacity 0 + y ±20 + scale .95 → 500ms auroraquaEaseOut；退出：300ms auroraquaEaseInOut · '
+                          '群页 / reduced-motion 只淡入 · panelOwned 整页不动 · 页面互换宿主保留旧页 300ms（sync 重叠转场）· '
+                          'resolvePageKey 5 条归一规则（群页 / 宽屏群壳 / 宽屏私聊壳 / 直播间 / 开播台）',
+                      child: const _PageSwapDemo(),
+                    ),
+                    // ---------- 瀑布流容器（帖子流 / 群内帖子 / 帖子中心 / 收藏 四处共用） ----------
+                    _Section(
+                      title: 'AylaMasonryGrid（useMasonryColumns.ts 146 行 + posts.css 607–694 / profile.css 458–545）',
+                      source:
+                          '单列（<1025）/ 双列（≥1025，页面常量 MASONRY_QUERY）· 新项插**最矮列** + 预估 320 交错 · '
+                          '**分配一旦确定即锁定**（不因测量重排）· 分配记忆按 `memoryKey:columnCount` 隔离并**跨挂载恢复** · '
+                          'posts 档 gap sp3；favorites 档单列 sp2 / 双列 sp3 + 上下 padding sp4 · footer 横跨两列',
+                      child: const _MasonryDemo(),
+                    ),
+                    // ---------- 群资料卡（群信息页主卡） ----------
+                    _Section(
+                      title: 'AylaGroupInfoProfile（GroupInfo.tsx 461–520 + group.css 1382–1610 / 2235–2240）',
+                      source:
+                          '玻璃卡 · column 居中 · gap 窄 sp3 / 宽 sp2 · padding 窄 sp8 sp4 sp4 / 宽 sp6 sp4 sp4 · text-align center · '
+                          '返回键 **absolute** top sp3 / left sp3（glass 底 + blur18）· 头像 窄 76 / 宽 92 + canManage 才出「更换群头像」'
+                          '（12px / padding sp1 sp3 / min-h 36）· 选了新图 ⇒ hint「新头像将在保存后生效」+「保存群头像」· '
+                          '展示态：群名 Display 24/600/1.25 · 群简介（label 12/700/ls .4 + 正文，**空 ⇒「暂无简介」**，max-w 420）· '
+                          '「创建于 {日期}」（Utility 12；无值 ⇒「—」）· 统计三格（成员 / 已载入在线 / 子群；Utility 22/500 + 12，'
+                          '**上下 1px rgba(157,191,230,.28) 分隔线**）· 动作行：分享群聊 + 「编辑群资料」· '
+                          '编辑态：群名 input + 群简介 textarea(rows 3) + error + **两键等宽**（保存 / 取消）',
+                      child: const _GroupInfoProfileDemo(),
+                    ),
+                    // ---------- 转让群主弹窗 + 角色标签（群信息域） ----------
+                    _Section(
+                      title: 'AylaTransferOwnerDialog（GroupInfo.tsx 904–1010 + app.css 3894–4005）',
+                      source:
+                          '遮罩 rgba(70,91,146,.25)（点遮罩关，busy 不关）· 卡 min(480,100%) / max-h 80vh / padding sp4 + 玻璃 · '
+                          '标题 Display 18/600 + 关闭键 40 · 搜索框左内距 34px（图标 absolute left sp3）· 列表 max-h 260 / gap sp2 · '
+                          '行：头像 36 + 名字 14/600 省略 + **非 member 才出角色标签**（aria-pressed / aria-label 转让给 X）· '
+                          '已选提示「已选择：X」· 错误行 role=alert · 动作 ghost 取消 + primary「转让中… / 确认转让」（无选中或 busy ⇒ disabled）· '
+                          '⚠️ `.group-transfer-empty` 是死声明（tsx 零使用），空态实际走 `.search-empty`',
+                      child: const _TransferDialogDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaGroupRoleChip（group.css 1734–1750 + GroupInfo.tsx 52–56）',
+                      source:
+                          'padding 1px 8px / pill / Display 11 · owner = --sakura-300 底 + --grape-700 字 · '
+                          'admin = --ice-300 底 + --indigo-700 字 · **member ⇒ 不渲染**（web 只在 role !== "member" 时出标签）',
+                      child: const _RoleChipDemo(),
+                    ),
+                    // ---------- 桌游网格 + 加载骨架（一级 games-grid 与群内共用） ----------
+                    _Section(
+                      title: 'AylaGamesGrid / AylaGamesGridSkeleton（GamesHubPage.tsx 184–216 + boardgame.css 232–275）',
+                      source:
+                          'CSS grid repeat(2, 1fr) → ≥769 变 repeat(4, 1fr)（群内恒 2 列）· gap sp3 / padding sp3 sp4 · '
+                          '骨架：2 张 120 高圆角 12 的骨架卡 + 跨列文案「正在加载桌游室…」（aria-busy）· '
+                          'Flutter 无 grid ⇒ LayoutBuilder 算等宽列 + Wrap（与 1fr 等价，机制差异已登记）',
+                      child: const _GamesGridDemo(),
+                    ),
+                    // ---------- 个人主页域（资料卡族 + 收藏骨架） ----------
+                    _Section(
+                      title: 'AylaProfileCard / AylaProfileIdentity / AylaProfileAvatarActions（ProfilePage.tsx 154–180 + app.css 241–248/2657–2695 + profile.css 14–16/44–52/142–171/584–591/623–625）',
+                      source:
+                          '容器 = `.solid-card`（**名字叫 solid，实为玻璃卡**：--glass-bg + filter + shadow + 1px 边 + radius 16）'
+                          '+ `.profile-card` padding sp8 / gap sp6（≥769 双栏档：sp4 / sp4）· identity gap sp4（返回键 40 + 头像 64 + '
+                          '昵称 Display 28/600/ls −.3 + `@用户名` Utility 13/ls .3）· 分享键 `margin-left: auto` 推右 · '
+                          'avatar-actions：等宽按钮（12px / padding sp1 sp2 / min-h 28）+ hint(12/secondary)/error(12/destructive)，左内距 48（与头像左缘对齐）',
+                      child: const _ProfileCardDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456）',
+                      source: 'padding sp4 · 两条骨架条高 64（首条下方留 8）· role=status aria-label「正在加载收藏」',
+                      child: const _FavoritesSkeletonDemo(),
+                    ),
+                    // ---------- 搜索域三件（SearchPage 自有件） ----------
+                    _Section(
+                      title: 'AylaSearchHistoryChips（search.css 11–30 + SearchPage.tsx 362–372）',
+                      source:
+                          '.search-history flex-wrap · gap sp2 · padding sp3 sp4 sp3 · .search-chip padding 4×12 / pill / '
+                          '--ice-100 底 / 13px · **chip 在 auroraqua 按钮组内**（hover 1.02 / active .98）· .search-clear 13px / --slate-500（不在组内）· '
+                          '**有查询词或历史为空 ⇒ 整块不渲染**',
+                      child: const _SearchHistoryDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaSearchResultGroup（ResultGroup：SearchPage.tsx 494–521 + search.css 68–105）',
+                      source:
+                          '**count === 0 ⇒ 整组不渲染** · 标题 Display 13 / ls .8 / uppercase / secondary（单类视图隐藏）· '
+                          '组内页脚紧凑化 min-height 0 / padding sp2 0 0 · 页脚三态：加载中… / 重试（带 error 文案）/ 查看更多',
+                      child: const _SearchGroupDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaSearchUserRow（search.css 107–176 + SearchPage.tsx 391–408）',
+                      source:
+                          '.search-row flex / gap sp3 / padding sp2 sp3 / radius 12 / glass 底 + 1px 边 + blur24 · '
+                          '头像 36（点头像=去主页，aria「查看 X 的个人主页」）· 标题 14/600 单行省略 · 副行 = signature（有才渲染，'
+                          '`.search-row-sub` **CSS 无定义 ⇒ 照实继承**）· action 槽位 grape-700 / 13（用户行未用）',
+                      child: const _SearchRowDemo(),
+                    ),
+                    // ---------- AylaTooltip（全库统一项：web 原生 title 提示的平台等价物） ----------
+                    _Section(
+                      title: 'AylaTooltip（web `title=` 28 处；提示气泡由浏览器/OS 绘制，无 CSS 可移植）',
+                      source:
+                          'Material `Tooltip`：迟滞 500ms（浏览器 title 量级）· 展示 1.5s · 样式取 Material 默认'
+                          '（web 那份是 OS 绘制 ⇒ 不凭印象设计）· `message` 为 null/空 ⇒ 完全透传（等价 `title={undefined}`）',
+                      child: _Row(
+                        children: <Widget>[
+                          _Slot(
+                            label: '包住图标钮（悬停 0.5s 弹出）',
+                            child: AylaTooltip(
+                              message: '分享',
+                              child: AylaIconButton(
+                                icon: AylaIcon(aylaIconByName('iconShare')!),
+                                semanticLabel: '分享',
+                                onPressed: () {},
+                              ),
+                            ),
+                          ),
+                          _Slot(
+                            label: '包住溢出长文本（提示读全文）',
+                            width: 220,
+                            child: AylaTooltip(
+                              message: '被省略号截断的长文本，完整内容由提示给出',
+                              child: Text(
+                                '被省略号截断的长文本，完整内容由提示给出',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: t.body,
+                              ),
+                            ),
+                          ),
+                          _Slot(
+                            label: 'message 为空 ⇒ 不提示（透传）',
+                            child: AylaTooltip(
+                              message: '',
+                              child: AylaIconButton(
+                                icon: AylaIcon(aylaIconByName('iconClose')!),
+                                semanticLabel: '关闭',
+                                onPressed: () {},
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
             // ---------- AylaGlassButton ----------
             _Section(
@@ -2592,6 +2767,524 @@ class _CreateSheetDemoState extends State<_CreateSheetDemo> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 转场样张：点「进入下一页」看**新旧页重叠**（新页浮入 + 旧页 300ms 淡出），点「重播」看单页进入动画。
+class _PageSwapDemo extends StatefulWidget {
+  const _PageSwapDemo();
+
+  @override
+  State<_PageSwapDemo> createState() => _PageSwapDemoState();
+}
+
+class _PageSwapDemoState extends State<_PageSwapDemo> {
+  int _page = 0;
+  int _replay = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return SizedBox(
+      width: 560,
+      height: 220,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            spacing: AylaSpacing.sp3,
+            children: <Widget>[
+              AylaGlassButton(
+                label: '进入下一页',
+                minHeight: 32,
+                onPressed: () => setState(() => _page = (_page + 1) % 3),
+              ),
+              AylaGlassButton(
+                label: '重播进入动画',
+                variant: AylaGlassButtonVariant.ghost,
+                minHeight: 32,
+                onPressed: () => setState(() => _replay++),
+              ),
+            ],
+          ),
+          const SizedBox(height: AylaSpacing.sp3),
+          Expanded(
+            child: ClipRect(
+              child: AylaPageSwap(
+                pageKey: 'page-$_page',
+                builder: (BuildContext context) => AylaPageTransition(
+                  key: ValueKey<int>(_replay),
+                  groupScene: _page == 2, // 第三页演示「群页只淡入」
+                  child: Container(
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AylaColors.glassBgStrong,
+                      borderRadius: BorderRadius.circular(AylaRadii.rCard),
+                      border: Border.all(color: AylaColors.glassBorder),
+                    ),
+                    child: Text(
+                      '第 ${_page + 1} 页'
+                      '${_page == 2 ? '（群页档：只淡入）' : ''}',
+                      style: t.cardTitle,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 搜索历史样张：点词回填、点「清空」清空（演示两种状态）。
+class _SearchHistoryDemo extends StatefulWidget {
+  const _SearchHistoryDemo();
+
+  @override
+  State<_SearchHistoryDemo> createState() => _SearchHistoryDemoState();
+}
+
+class _SearchHistoryDemoState extends State<_SearchHistoryDemo> {
+  List<String> _history = <String>['爱莉', '语音房', '桌游', '直播'];
+  String _query = '';
+  String _last = '（未点）';
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 420,
+          child: AylaSearchHistoryChips(
+            history: _history,
+            query: _query,
+            onSelect: (String w) => setState(() {
+              _query = w;
+              _last = '选了「$w」';
+            }),
+            onClear: () => setState(() {
+              _history = <String>[];
+              _last = '已清空';
+            }),
+          ),
+        ),
+        Text('最近操作：$_last', style: t.timestamp),
+        const SizedBox(height: AylaSpacing.sp3),
+        AylaGlassButton(
+          label: '重置样张',
+          variant: AylaGlassButtonVariant.ghost,
+          minHeight: 32,
+          onPressed: () => setState(() {
+            _history = <String>['爱莉', '语音房', '桌游', '直播'];
+            _query = '';
+            _last = '（未点）';
+          }),
+        ),
+      ],
+    );
+  }
+}
+
+/// 结果分组样张：三档页脚（查看更多 / 加载中 / 失败重试）+ 空组不渲染。
+class _SearchGroupDemo extends StatefulWidget {
+  const _SearchGroupDemo();
+
+  @override
+  State<_SearchGroupDemo> createState() => _SearchGroupDemoState();
+}
+
+class _SearchGroupDemoState extends State<_SearchGroupDemo> {
+  int _mode = 0; // 0 更多 · 1 加载中 · 2 失败
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 420,
+          child: AylaSearchResultGroup(
+            title: '用户',
+            count: 2,
+            hasMore: _mode != 2,
+            loading: _mode == 1,
+            error: _mode == 2 ? '加载失败，请重试' : null,
+            showTitle: true,
+            onMore: () {},
+            children: const <Widget>[
+              AylaSearchUserRow(nickname: '爱莉', username: 'elysia', signature: '今天也想见你'),
+              AylaSearchUserRow(nickname: '', username: 'sakura', online: true),
+            ],
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp3),
+        AylaGlassButton(
+          label: _mode == 0
+              ? '切到「加载中」'
+              : (_mode == 1 ? '切到「失败」' : '切回「查看更多」'),
+          variant: AylaGlassButtonVariant.ghost,
+          minHeight: 32,
+          onPressed: () => setState(() => _mode = (_mode + 1) % 3),
+        ),
+      ],
+    );
+  }
+}
+
+/// 用户结果行样张：有/无签名两态 + 尾部槽位。
+class _SearchRowDemo extends StatelessWidget {
+  const _SearchRowDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: AylaSpacing.sp3,
+      children: <Widget>[
+        SizedBox(
+          width: 420,
+          child: AylaSearchUserRow(
+            nickname: '爱莉',
+            username: 'elysia',
+            signature: '今天也想见你',
+            online: true,
+            onOpenProfile: () {},
+            onTap: () {},
+          ),
+        ),
+        SizedBox(
+          width: 420,
+          child: AylaSearchUserRow(
+            nickname: '',
+            username: 'sakura',
+            onOpenProfile: () {},
+            onTap: () {},
+          ),
+        ),
+        SizedBox(
+          width: 420,
+          child: AylaSearchUserRow(
+            nickname: '星海观测站',
+            username: 'group_xinghai',
+            signature: '128 人 · 公开',
+            onOpenProfile: () {},
+            onTap: () {},
+            trailing: Text(
+              '进入',
+              style: AylaTextStyles.of(context).label.copyWith(
+                fontSize: 13,
+                color: AylaColors.grape700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 瀑布流样张：高度错落的卡片（看「最矮列优先」的交错），底部挂一个跨列 footer。
+class _MasonryDemo extends StatelessWidget {
+  const _MasonryDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    const List<double> heights = <double>[96, 148, 120, 176, 104, 132];
+    return SizedBox(
+      width: 720,
+      child: AylaMasonryGrid<int>(
+        items: const <int>[0, 1, 2, 3, 4, 5],
+        itemKey: (int i) => i,
+        memoryKey: 'gallery-masonry',
+        itemBuilder: (BuildContext context, int item, int index) => Container(
+          height: heights[item],
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AylaColors.glassBgStrong,
+            borderRadius: BorderRadius.circular(AylaRadii.rCard),
+            border: Border.all(color: AylaColors.glassBorder),
+          ),
+          child: Text('卡片 $item · 高 ${heights[item].round()}', style: t.body),
+        ),
+        footer: Text(
+          '跨列页脚（web `.home-load-more { flex-basis: 100% }`）',
+          textAlign: TextAlign.center,
+          style: t.timestamp,
+        ),
+      ),
+    );
+  }
+}
+
+/// 资料卡样张：返回 + 头像 + 昵称/用户名 + 分享槽位；下方等宽头像操作三键 + 提示行。
+class _ProfileCardDemo extends StatelessWidget {
+  const _ProfileCardDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    Widget card({required bool compact}) => SizedBox(
+      width: 420,
+      child: AylaProfileCard(
+        compact: compact,
+        children: <Widget>[
+          AylaProfileIdentity(
+            displayName: '爱莉',
+            username: 'elysia',
+            online: true,
+            onBack: () {},
+            share: AylaShareButton(size: 40, label: '分享我的主页', onPressed: () {}),
+          ),
+          AylaProfileAvatarActions(
+            hint: compact ? '新头像将在保存后生效' : null,  // web：仅选了新图时显示
+            error: compact ? '图片过大' : null,
+            actions: <Widget>[
+              AylaGlassButton(
+                expand: true,
+                label: '更换头像',
+                variant: AylaGlassButtonVariant.ghost,
+                fontSize: 12,
+                minHeight: 28,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AylaSpacing.sp2,
+                  vertical: AylaSpacing.sp1,
+                ),
+                onPressed: () {},
+              ),
+              AylaGlassButton(
+                expand: true,
+                label: '隐私设置',
+                variant: AylaGlassButtonVariant.ghost,
+                fontSize: 12,
+                minHeight: 28,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AylaSpacing.sp2,
+                  vertical: AylaSpacing.sp1,
+                ),
+                onPressed: () {},
+              ),
+              // web：`.profile-favorites-btn` 同盒模型 + **IconHeart 15 前置图标**（文案「我的收藏」）
+              AylaGlassButton(
+                expand: true,
+                label: '我的收藏',
+                icon: AylaIcon(aylaIconByName('iconHeart')!, size: 15),
+                variant: AylaGlassButtonVariant.ghost,
+                fontSize: 12,
+                minHeight: 28,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AylaSpacing.sp2,
+                  vertical: AylaSpacing.sp1,
+                ),
+                onPressed: () {},
+              ),
+            ],
+          ),
+          Text('个性签名：今天也想见你', style: t.body.copyWith(color: AylaColors.textSecondary)),
+        ],
+      ),
+    );
+    return Wrap(
+      spacing: AylaSpacing.sp6,
+      runSpacing: AylaSpacing.sp6,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        _Slot(label: '宽档（padding sp8 / gap sp6）', child: card(compact: false)),
+        _Slot(
+          label: '紧凑档（≥769 双栏：padding sp4 / gap sp4）+ 已选新图（hint）+ error 行',
+          child: card(compact: true),
+        ),
+      ],
+    );
+  }
+}
+
+/// 收藏骨架样张。
+class _FavoritesSkeletonDemo extends StatelessWidget {
+  const _FavoritesSkeletonDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(width: 420, child: AylaFavoritesSkeleton());
+  }
+}
+
+/// 桌游网格样张：2 列（窄）与 4 列（宽）并排 + 骨架态。
+class _GamesGridDemo extends StatelessWidget {
+  const _GamesGridDemo();
+
+  static const List<String> _rooms = <String>['星海棋局', '深夜狼人', '作业互助', '空状态房'];
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    Widget cell(String name) => Container(
+      height: 88,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AylaColors.glassBgStrong,
+        borderRadius: BorderRadius.circular(AylaRadii.rCard),
+        border: Border.all(color: AylaColors.glassBorder),
+      ),
+      child: Text(name, style: t.body),
+    );
+    return Wrap(
+      spacing: AylaSpacing.sp6,
+      runSpacing: AylaSpacing.sp6,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        _Slot(
+          label: '窄档：2 列（<769）',
+          child: SizedBox(
+            width: 420,
+            child: AylaGamesGrid(
+              children: <Widget>[for (final String r in _rooms) cell(r)],
+            ),
+          ),
+        ),
+        _Slot(
+          label: '宽档：4 列（≥769）',
+          child: SizedBox(
+            width: 900,
+            child: AylaGamesGrid(
+              children: <Widget>[for (final String r in _rooms) cell(r)],
+            ),
+          ),
+        ),
+        _Slot(
+          label: '加载骨架（两张 120 高卡 + 跨列文案）',
+          child: const SizedBox(width: 420, child: AylaGamesGridSkeleton()),
+        ),
+      ],
+    );
+  }
+}
+
+/// 转让群主弹窗样张：可搜索/可选中/可确认（确认后进入 busy 再复原）。
+class _TransferDialogDemo extends StatefulWidget {
+  const _TransferDialogDemo();
+
+  @override
+  State<_TransferDialogDemo> createState() => _TransferDialogDemoState();
+}
+
+class _TransferDialogDemoState extends State<_TransferDialogDemo> {
+  static const List<AylaTransferMember> _all = <AylaTransferMember>[
+    AylaTransferMember(id: 'u1', displayName: '爱莉', online: true),
+    AylaTransferMember(id: 'u2', displayName: '小樱', avatarUrl: null),
+    AylaTransferMember(id: 'u3', displayName: '管理员小可', role: AylaGroupRole.admin),
+    AylaTransferMember(id: 'u4', displayName: '夜行者'),
+    AylaTransferMember(id: 'u5', displayName: '星海', role: AylaGroupRole.admin),
+  ];
+
+  String _query = '';
+  String? _selected;
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<AylaTransferMember> shown = _all
+        .where((AylaTransferMember m) => m.displayName.contains(_query))
+        .toList();
+    return _Slot(
+      label: '弹窗（480 宽 / 列表 max-h 260 / 点遮罩关闭；「确认转让」会先进入 busy 再复原）',
+      child: SizedBox(
+        width: 620,
+        height: 460,
+        child: AylaTransferOwnerDialog(
+        members: shown,
+        selectedId: _selected,
+        query: _query,
+        busy: _busy,
+        onQueryChanged: (String v) => setState(() => _query = v),
+        onSelect: (AylaTransferMember m) => setState(() => _selected = m.id),
+        onConfirm: (AylaTransferMember m) {
+          setState(() => _busy = true);
+          Future<void>.delayed(const Duration(milliseconds: 900), () {
+            if (mounted) setState(() => _busy = false);
+          });
+        },
+          onClose: () => setState(() {
+            _selected = null;
+            _query = '';
+          }),
+        ),
+      ),
+    );
+  }
+}
+
+/// 角色标签样张：群主 / 管理员 / 成员（成员不渲染）。
+class _RoleChipDemo extends StatelessWidget {
+  const _RoleChipDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return Wrap(
+      spacing: AylaSpacing.sp4,
+      runSpacing: AylaSpacing.sp3,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        const AylaGroupRoleChip(role: AylaGroupRole.owner),
+        const AylaGroupRoleChip(role: AylaGroupRole.admin),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          spacing: AylaSpacing.sp2,
+          children: <Widget>[
+            const AylaGroupRoleChip(role: AylaGroupRole.member),
+            Text('← member 不渲染标签（web 同）', style: t.timestamp),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 群资料卡样张：展示态（窄/宽两档）+ 编辑态。
+class _GroupInfoProfileDemo extends StatelessWidget {
+  const _GroupInfoProfileDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime created = DateTime(2026, 3, 14);
+    Widget card({required bool editing, String? about, bool canManage = true}) =>
+        AylaGroupInfoProfile(
+          title: '星海观测站',
+          about: about,
+          createdAt: created,
+          canManage: canManage,
+          stats: const <AylaGroupInfoStat>[
+            AylaGroupInfoStat(value: '128', label: '成员'),
+            AylaGroupInfoStat(value: '37', label: '已载入在线'),
+            AylaGroupInfoStat(value: '4', label: '子群'),
+          ],
+          editing: editing,
+          initialTitle: '星海观测站',
+          initialAbout: about,
+          onBack: () {},
+          onChangeAvatar: () {},
+          onSaveAvatar: () {},
+          onEdit: () {},
+          onSaveEdit: (String a, String b) {},
+          onCancelEdit: () {},
+          share: AylaShareButton(label: '分享群聊', onPressed: () {}),
+        );
+    return Wrap(
+      spacing: AylaSpacing.sp6,
+      runSpacing: AylaSpacing.sp6,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        _Slot(label: '展示态 · 窄档（头像 76 / gap sp3）', width: 360, child: card(editing: false, about: '一起看星星')),
+        _Slot(label: '展示态 · 宽档（头像 92 / gap sp2）', width: 420, child: card(editing: false, about: '一起看星星')),
+        _Slot(label: '简介为空 ⇒「暂无简介」', width: 360, child: card(editing: false, about: '')),
+        _Slot(label: '编辑态（两键等宽）', width: 360, child: card(editing: true, about: '一起看星星')),
+      ],
     );
   }
 }

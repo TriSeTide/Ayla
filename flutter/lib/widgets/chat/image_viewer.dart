@@ -29,6 +29,10 @@
 ///
 /// **展示型组件**：关闭、切换、保存都在组件内完成（保存用 MediaSigner 签名 + dio 直连下载，
 /// 与 web 的 `a[download]` 同语义）；页面只需传条目与 onClose。
+///
+/// ## 公开面
+/// `AylaViewerItem` · `AylaImageViewer` · 样张 `aylaImageViewerSamples()`
+
 library;
 
 import 'dart:io' show Directory, File, Platform;

@@ -21,6 +21,10 @@
 /// 复用（组件库全量清点后无新增件）：容器 [AylaGlassSurface]、选中 [AylaNavHighlight]、
 /// 按压 [AylaPressScale]、图标 [AylaIcon]、token 取 [AylaColors]/[AylaRadii]/[AylaSpacing]/
 /// [AylaDurations]/[AylaCurves]。
+///
+/// ## 公开面
+/// `AylaPrimaryModule` · `AylaBottomTabs` · 样张 `aylaBottomTabsSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

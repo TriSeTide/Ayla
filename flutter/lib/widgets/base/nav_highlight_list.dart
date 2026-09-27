@@ -23,6 +23,10 @@
 /// 调用方给出**项数**与 `itemBuilder`；[AylaNavHighlightSlot] 提供槽位 key、FocusNode、
 /// hover/press 上报、扫光直达与点击处理，由子项按自身样式渲染（**子项自己不给选中底**：
 /// web 的 `is-active { background: transparent }` 把底交给胶囊）。
+///
+/// ## 公开面
+/// `AylaNavHighlightSlot` · `AylaNavHighlightList` · `AylaNavHighlightListState`
+
 library;
 
 import 'package:flutter/material.dart';

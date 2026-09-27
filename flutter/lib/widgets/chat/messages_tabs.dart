@@ -15,6 +15,10 @@
 /// `AylaGlassSurface` 恒画 `--glass-bg` ⇒ 此处按 web 用**裸容器 + 1px 边 + `AylaGlassInset.over`**
 /// （内高光走公共件），不套 `AylaGlassSurface`。这与 `AylaSidebarCard` 的取舍同源：
 /// **一切以 web 实际声明的声明块为准**。
+///
+/// ## 公开面
+/// `AylaMessagesTabItem` · `AylaMessagesTabs` · 样张 `aylaMessagesTabsSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

@@ -5,6 +5,10 @@
 /// 属性还原(如 IconPlay/IconPause/IconPinFilled 为实心)。
 /// 来源:https://lucide.dev 线性图标风格,d 数据为 web 源码逐字导入,
 /// 禁止手改;新增图标=改 web 端 icons.tsx 后重新生成。
+///
+/// ## 公开面
+/// `AylaIconKind` · `AylaIconElement` · `AylaIconData`
+
 library;
 
 

@@ -15,6 +15,10 @@
 /// - reduced-motion：静态 `0 0 8px rgba(247,150,255,.5)`（base.css 375–380 行）
 ///
 /// 在线状态 = 光环 + 文字标签双通道（d:§10），光环只表达运行事实。
+///
+/// ## 公开面
+/// `AylaAvatarCore` · `AylaAvatarHalo`
+
 library;
 
 import 'dart:math' as math;

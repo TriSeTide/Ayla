@@ -1,28 +1,11 @@
-/// voice 域第一批（B1-1）：语音频道卡片 / 卡片网格列表 / 控制条。
+/// 语音频道卡片 / 卡片网格列表 / 控制条。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// VoiceChannelCard.tsx 1–47    wrap > card(role=button,tabIndex=0) > head(标签组 + 收藏键)
 ///                              > title(IconMic 14 + 名称) > owner? > foot(人数 + 加入钮)
 /// VoiceChannelList.tsx 1–43    channels.map → 卡片；0 项 → .voice-list-empty 空态
-/// VoiceControls.tsx 1–31       离开频道；`livekit === "failed"` 时追加「重新加入」
-/// app.css 2811–2815            .voice-channel-list（基础竖列 gap sp2 —— 被网格覆盖）
-/// app.css 2817–2832            .voice-channel-card 基础**横排** + `.mine` 边色
-/// app.css 2910–2915            .voice-list-empty：padding sp4 / 13px / secondary / 居中
-/// app.css 3099–3120            .voice-controls / .voice-leave-btn / .voice-rejoin-btn
-/// voice.css 471–485            .voice-source-tag（Micro Tag）：pill / padding 0 8 /
-///                              sakura-300 底 / grape-700 字 / Fredoka 11 / ls .8 /
-///                              max-width 12ch + ellipsis
-/// voice.css 505–523            .voice-hub 网格：2 列 · gap sp3 · padding sp3 sp4；
-///                              .voice-channel-card-wrap { min-width: 0 }（reveal 挂外层）
-/// voice.css 526–628            .voice-hub 竖排卡全族（head / title / owner / foot / meta / join）
-/// voice.css 647–659            ≥769 → 3 列；≥1440 → 4 列（**只有 `.voice-hub` 有这两条**）
-/// voice.css 690–695            .group-voice 网格：**恒 2 列** · padding 0
-/// voice.css 697–789            .group-voice 竖排卡全族（与 hub **逐字相同**）
-/// typed-result-cards.css 46–140  目录结果上下文（同样逐字相同；单列）
-/// auroraqua.css 28–52          卡片族动效：transition translate/box-shadow/border-color
-///                              300ms `--auroraqua-ease` + scale 200ms；hover 上浮 -2 +
-///                              `--glass-shadow-hover`；`:active` 归位 + `scale .99`
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/voice/voice_channels.dart` 一节）
 /// ```
 ///
 /// ## 层叠关键结论（防后人误加档位）
@@ -42,10 +25,14 @@
 ///   手势竞技场，卡片的 `onTap` **不会**触发（已用测试锁死这条）；
 /// - `joining`：卡片 `aria-disabled` → `opacity .7` + 不可点；按钮 disabled（`.55`）+「加入中…」。
 ///
-/// ## 与 web 的装配差异
+/// ## 机制差异
 /// web 自取 store/网络（`useVoiceChannel.join`、`FavoriteButton` 自拉状态）；Flutter 侧按既有
 /// 「展示型 + 注入」模式：进房走 [AylaVoiceChannelCard.onEnter]、收藏槽走
 /// [AylaVoiceChannelCard.favorite]（调用方传 `AylaFavoriteButton(compact: true, ...)`）。
+///
+/// ## 公开面
+/// `AylaVoiceCardData` · `AylaVoiceChannelCard` · `AylaVoiceChannelList` · `AylaVoiceControls` · 样张 `aylaVoiceChannelSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

@@ -1,30 +1,11 @@
-/// B4 boardgame 域第一批（1/3）：桌游室卡片。
+/// 桌游室卡片。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// GameRoomCard.tsx 15–53   结构：wrap（relative）> button.game-room-card + FavoriteButton(compact)
 /// boardgame.css 9–13       .game-room-card-wrap：position relative · width 100% · min-width 0
 /// boardgame.css 15–19      .game-room-card-wrap > .favorite-toggle：绝对定位 top/right = sp2 = 8
-/// boardgame.css 21–37      .game-room-card：flex column · --glass-bg · radius-card 16 ·
-///                          --glass-shadow · overflow hidden · padding 0 · 1px --glass-border ·
-///                          --glass-filter(blur24 saturate1.4)；transition 含 box-shadow 300ms
-/// auroraqua.css 28–52      卡片族 hover：translate 0 -2px + --glass-shadow-hover；
-///                          :active → scale .99（**卡片族这一组**，不是 1.02 的按钮组）
-/// base.css 366–370         全局 :focus-visible：outline 2px #f796ff(--focus-ring) + offset 2
-/// boardgame.css 39–48      .game-room-cover：aspect 16/9 · --ice-100 底 · --ice-500 图标 ·
-///                          margin 8 8 0 · radius 12（IconGame 48×48，tsx 36）
-/// boardgame.css 50–55      .game-room-info：flex column · gap 2 · padding sp2 sp3 sp3
-/// boardgame.css 57–63      .game-room-name：ScrollingText · 15 / w700 / text-primary / lh 1.35
-/// boardgame.css 65–83      .game-room-status：pill · padding 1px 8 · display 11 · ls .8 · lh 1.4；
-///                          is-waiting → ice-300 底 + indigo-700 字；is-playing → sakura-300 + grape-700
-/// typed-result-cards.css 44  .game-room-owner（**裸选择器**，全局生效）：12px · text-secondary
-/// boardgame.css 86–105     .game-room-meta：flex · gap sp2 · utility 12 · text-secondary · lh 1.4；
-///                          .game-room-count flex 0 0 auto + nowrap；
-///                          .game-room-source-tags flex 1 1 auto + min-width 0
-/// tsx 31–32                revealDelay != null 才挂 .reveal-item + --reveal-delay
-/// tsx 50                   action === undefined → 默认收藏键；action === null → 不渲染
-/// tsx 40–45                条件渲染：status（无 → 不渲染）· owner（无 → 不渲染）·
-///                          member_count（非 number → 不渲染）；meta 行**恒渲染**
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/game/game_room_card.dart` 一节）
 /// ```
 ///
 /// ## 来源标签（裁决）
@@ -32,6 +13,10 @@
 /// 独立规格；用户裁决**桌游并入统一档** ⇒ 复用 [AylaSourceTag]（live 徽章档 =
 /// utility 12 / padding 2×8 / sakura-300 底 / grape-700 字 / 12ch），与语音/直播/帖子一致。
 /// 容器仍照 web：flex 1 1 auto + min-width 0 的横向滚动条（[AylaScrollingTags]）。
+///
+/// ## 公开面
+/// `AylaGameRoomCard` · 样张 `aylaGameRoomCardSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

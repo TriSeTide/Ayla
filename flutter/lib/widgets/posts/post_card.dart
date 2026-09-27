@@ -21,6 +21,10 @@
 /// 4. 「查看帖子」`.post-card-open` 的样式在 typed-result-cards.css:5：
 ///    12px + `--text-secondary`（不在 posts.css 里）。
 /// 5. 时间格式 `PostCard.tsx:23–36`：刚刚 / N 分钟前 / N 小时前 / `zh-CN` 日期。
+///
+/// ## 公开面
+/// `AylaPostVideoCover` · `AylaPostCard` · 样张 `aylaPostCardSamples()`
+
 library;
 
 import 'dart:math' as math;

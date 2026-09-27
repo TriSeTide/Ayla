@@ -6,15 +6,10 @@
 /// 卡      app.css 3831–3843（--glass-bg / 1px 亮边 / radius-card 16 / --glass-shadow / blur24 sat1.4）
 ///         padding sp4 **被 live.css:168 覆写成 sp3**（层叠结论）
 /// 版式    live.css 168–192（settings / fields / title **width 200** / desc flex1 /
-///         开播键 **min-width 96 · min-height 40** / 可见范围 padding sp3 + border-top）·
-///         live.css 241–269（≤768 与 769–1100 两档折行）
-/// 封面    live.css 173–175（与 LiveCreate 共用；本件**确实带** .live-cover-preview-img ⇒ cover 生效）
-/// 错误行  app.css 3473–3477（.live-form-error：destructive 13 + margin-top sp2）
-/// 交互    auroraqua.css 57/75/87（封面选择器在按钮组内 ⇒ 组过渡 200ms + hover 1.02 + active .98）
-/// 行为    tsx 22–38 状态初值 / tsx 74–114 保存与**后端回显** / tsx 40–72·173–191 开播下播 busy 语义
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_owner_panel.dart` 一节）
 /// ```
 ///
-/// ## 挂载点（与 LiveCreate 不同，本件是**真实挂载**的）
+/// ## 挂载点
 /// `LiveRoomBody.tsx:498–520` 在 `showOwnerPanel` 时渲染本件（宽屏主区顶部 / 窄屏控制台流内）。
 ///
 /// ## 机制差异（组件不写页面）

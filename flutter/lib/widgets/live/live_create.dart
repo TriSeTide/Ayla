@@ -1,37 +1,11 @@
-/// live 域第五批（B2-5）之一：建直播间表单 + 推流指引一次性回显。
+/// 建直播间表单 + 推流指引一次性回显。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// components/live/LiveCreate.tsx 189 行
 /// tsx 88            .live-create —— 类名**零 CSS 命中**（无样式）
 /// tsx 89–143        .live-create-form：app.css 3401–3404 `flex` + `gap sp2`，
-///                   **被 live.css 32 后加载覆写**为 `flex-direction: column` + `align-items: stretch`
-/// tsx 90–99         标题：placeholder「给直播间起个标题」· maxLength 128
-/// tsx 100–109       介绍：placeholder「告诉观众这场直播聊什么（可选）」· maxLength 2000 ·
-///                   `.live-create-textarea { min-height: 72px; resize: vertical }`（live.css 165）
-/// tsx 110–110       <VisibilitySelector>（群内默认勾本群但**不锁定**；群外默认公开）
-/// tsx 111–134       封面字段：`.live-cover-field`（flex column · gap sp1）+ `.live-cover-picker`
-///                   （**96 宽 / 16:9 / flex-shrink 0 / 1px dashed --ice-500 / radius-input /
-///                   --glass-bg / text-secondary / overflow hidden**；≤768 → **88 宽**，live.css 249）
-///                   + 隐藏 file input；`validateImageFile` 不通过 ⇒ 只报错、不接受文件
-/// tsx 135–142       提交键 `.btn.btn-glow`：「开播」→「准备中…」（**不是**「创建中…」）
-/// tsx 45–75         提交：`title.trim()` 空 ⇒ 「标题不能为空」**不发请求**；先传封面
-///                   （`uploadMediaFile(file,"image")` → `mediaContentUrl(media_id)`）；
-///                   成功 ⇒ `setCreated` + 清空标题 + `onCreated(channel)`；失败 ⇒ `message` / 「创建失败」
-/// tsx 146–186       推流指引 `.live-create-guide`（app.css 3421–3442：margin-top sp3 · padding sp3 ·
-///                   **--glass-bg-strong** · 1px 亮边 · radius-card 16 · column gap sp2）+
-///                   `.live-create-guide-title`（**Fredoka / text-primary，无 font-size ⇒ 继承 body 15px**）
-///                   + `.live-create-guide-notice`（**--warning 13px**）
-///                   + 两行 `.live-copy-row`（**基础档**：--ice-100 + radius-sm 8）
-///                   + `.live-guide-dismiss { align-self: flex-end }`（app.css 3469）「我已保存，关闭」
-/// app.css 3406–3419 .live-create-input（flex 1 · padding sp2 sp3 · 1px 亮边 · radius-input ·
-///                   --glass-bg · body 字）；`:focus { box-shadow: var(--focus-ring) }`
-///                   ⚠️ **该声明无效**：`--focus-ring` = `2px solid #f796ff`，`solid` 在 box-shadow 里非法
-///                   ⇒ 浏览器丢弃；实际生效的是 auroraqua 513–517（outline none +
-///                   border-color --glow-500 + box-shadow --glow-shadow）
-/// auroraqua 502–531 字段族：--glass-bg + 1px 亮边 + radius-input + **--glass-inset** + blur24 sat1.4；
-///                   ::placeholder → **--slate-500**
-/// live.css 33       .live-create-input { width: 100%; box-sizing: border-box }
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_create.dart` 一节）
 /// ```
 ///
 /// ## ⚠️ 挂载点事实（照实登记，勿当成漏项）
@@ -39,13 +13,17 @@
 /// 真实建播流程走 `ChannelSidebar.handleCreateNewLive` → `createLiveChannel("新直播间")` 后直接进控制台。
 /// 本件属**孤儿件**（与 B1-4 `ElysiaVoicePanel` 同款），**组件画布是它唯一的视觉验收面**。
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - 上传与建频道由页面注入（[AylaLiveCreate.onCreate]）：web 在组件内直接调 `uploadMediaFile` +
 ///   `liveApi.createLiveChannel`，网络层不进 `lib/widgets`；
 /// - 选图默认走 `AylaMediaActions.pickImage()`（内部已含 `validateImageFile` 校验，失败抛
 ///   `AylaUploadException(文案)` —— 与 web「只报错、不接受文件」同语义）；
 /// - 裁决：封面预览**按 web 本意**用 `BoxFit.cover`（web 的 `<img>` 漏了
 ///   `live-cover-preview-img` 类名 ⇒ live.css 174 的 object-fit 是死规则，属 web 的 bug）。
+///
+/// ## 公开面
+/// `AylaLiveCreateRequest` · `AylaLiveCreate` · 样张 `aylaLiveCreateSamples()`
+
 library;
 
 import 'dart:async';

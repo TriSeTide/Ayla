@@ -1,6 +1,6 @@
 /// ServerRail —— 宽屏服务器栏（design.md §12.3，布局文档 §3.2）。
 ///
-/// ## 事实源（逐条已读，非推断）
+/// ## 事实源
 /// - layout/ServerRail.tsx（184 行）：DOM 结构、hover 面板锚点算法、关闭延迟、
 ///   置顶动作与未读求和；
 /// - group.css 484–678：.server-rail / -list / -item / -avatar /
@@ -27,6 +27,10 @@
 ///    只能用 Overlay 等价实现（库内范本 conversation_more_menu / top_nav）；
 /// 3. **面板锚点取「行」而非「头像」**：ServerRail.tsx:105–114 的 e.currentTarget
 ///    是 li.server-item（整行 100% 宽），注释写「头像右侧」与实现不符 —— 以实现为准。
+///
+/// ## 公开面
+/// `AylaServerRailGroup` · `AylaServerRail` · 样张 `aylaServerRailSamples()`
+
 library;
 
 import 'dart:async';

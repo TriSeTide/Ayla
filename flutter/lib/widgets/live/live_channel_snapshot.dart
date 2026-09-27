@@ -4,6 +4,10 @@
 /// **描述/可见性/白名单群/推流三址**等字段，而 B2-2 的 `AylaLiveCardData` 只承载列表卡所需
 /// （标题/封面/状态/人数/主播名）——**不改动已验收的那个类**（跨组件改动需单独批准），
 /// 由页面层在两处之间映射。
+///
+/// ## 公开面
+/// `AylaLiveChannelSnapshot`
+
 library;
 
 import 'live_hall.dart' show AylaLiveStatus;

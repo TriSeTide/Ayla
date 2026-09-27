@@ -1,46 +1,24 @@
-/// live 域最后一批（B2-6）之三：直播间核心装配（`LiveRoomBody.tsx` 566 行）。
+/// 直播间核心装配（`LiveRoomBody.tsx` 566 行）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// tsx 405–435          进房错误态：仍保留**侧栏与弹幕区**（宽屏 + 非 hideRail），
 ///                      主区换 `.live-room-error`（`<p>error</p>` + `.btn.btn-glow`「返回」）
 /// tsx 441–481          **窄屏沉浸式**（isNarrow && !showOwnerPanel）：
-///                      head（窄屏头）→ `.live-room-swipe`（**上下滑切台**，dragElastic 0.8、
-///                      位移 > 1/3 高优先 + 同向甩动补充）→ `.live-room-swipe-item`
-///                      （`data-live-scene-owner`）= stage(player) + viewerStrip + danmakuList
-///                      → 输入框（`.live-room-input`）→ 侧栏覆盖层
-/// tsx 484–538          宽屏观看 + 开播控制台：三栏 `.live-room-body.is-wide`
-///                      = `.live-rail`（!hideRail，可收起）+ `.live-room-main`
-///                      （head + 控制台资料栏 + `.live-room-stage > .live-room-player-wrap`(player)
-///                      + viewerStrip + 推流地址）+ `.live-room-side`（弹幕列表 + 输入框）
-///                      + 窄屏侧栏覆盖层
-/// tsx 132–134          railCollapsed（宽屏默认展开）/ railOpen（窄屏覆盖层默认关闭）
-/// tsx 205–224          player 槽：LivePlayer + **仅 `!loading && srsStatus==="live"` 才挂
-///                      DanmakuOverlay**（避免未就绪时挂播放器投影）
-/// tsx 234–283          窄屏头：返回(icon-btn-40) + 主播头像(32) + 标题滚动（loading→「加载中…」）
-///                      + 来源标签滚动 + 收藏(compact) + 转发 + `.live-room-rail-toggle`(40×40)
-/// tsx 285–342          宽屏头：hideRail → 只留返回；railCollapsed → 返回 + 展开键
-///                      （IconChevronRight 20）；头像 + 标题 + 来源标签 + 收藏 + 转发
-/// tsx 382–403          窄屏侧栏覆盖层：`.live-room-rail-overlay`（z 60）
-///                      = `.live-room-rail-mask`（点关闭）+ `LiveChannelRail(enterFromRight,
-///                      showBack=false, onToggle=关闭)`
-/// tsx 96–111           **全屏期间冻结 isNarrow**：手机全屏会锁横屏 → viewport 变宽 →
-///                      窄↔宽布局切换会让播放器重建（黑屏）⇒ 冻结进入全屏前的形态
-/// live.css 10–12/23    `.live-room-body.is-wide > .live-rail` sidebar-in · 主区 side from-right
-///                      · head from-top（reduced-motion 关闭）
-/// live.css 704–760     宽屏非控制台：`.live-player { width: min(100%, 100cqh*1.7778) }`
-///                      （stage 按容器高定尺寸，避免播放器把弹幕列挤没）
-/// live.css 747–755     沉浸式内：`.live-room-swipe-item .live-player` 去圆角去边框（由 stage 裁剪）
-/// live.css 526–528     窄屏：`.live-room-body.is-narrow .live-player { max-height: 100% }`
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_room_body.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - **数据全部由页面注入**（[AylaLiveRoomData] + 回调）：web 的 `useLiveRoom` / `useDanmaku` /
 ///   live store 属数据层与运行时（HLS、WS、轮询），不进 `lib/widgets`；
 /// - video 由页面持有（`HlsPlaybackController`），本件只把它交给 [AylaLivePlayer]；
 /// - 侧栏 = 复用 [AylaLiveChannelRail]；弹幕三件 = 复用 [AylaDanmakuList] / [AylaDanmakuInput] /
 ///   [AylaDanmakuOverlay]；观众条 = 复用 [AylaLiveViewerStrip]；控制台 = 复用
 ///   [AylaLiveOwnerPanel] + [AylaLiveStreamAddresses]；头部来源标签 = 复用 **AylaSourceTag** 的滚动容器。
+///
+/// ## 公开面
+/// `AylaLiveRoomData` · `AylaLiveRoomBody` · 样张 `aylaLiveRoomBodySamples()`
+
 library;
 
 import 'dart:async';

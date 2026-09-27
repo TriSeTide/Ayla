@@ -1,6 +1,6 @@
-/// B6-3：个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）。
+/// 个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ── 外层 `.profile-mine`：透明 wrapper（column · gap sp4 · min-width 0）——**不叠卡片**，
 /// 每类内容一张独立玻璃卡（design.md §4 的材料纪律）
 /// ── `.profile-content-card`（私有 ContentCard 外壳）：column · gap sp3 · padding sp4 ·
@@ -33,6 +33,10 @@
 /// web 组件内直接调 api（getLiveChannel / getVoiceChannel / listPosts）+ Link 跳转；
 /// Flutter 侧沿用注入范式：三个数据源与跳转全部由页面层注入（[onOpenLive] / [onOpenVoice] /
 /// [onOpenPost] / [onMorePosts]），组件不自持请求。
+///
+/// ## 公开面
+/// `AylaProfileLiveData` · `AylaProfileVoiceData` · `AylaProfilePostItem` · `AylaProfileContentCard` · `AylaProfileContentSections` · 样张 `aylaProfileContentSectionsSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

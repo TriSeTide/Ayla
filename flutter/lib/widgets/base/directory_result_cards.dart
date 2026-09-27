@@ -1,6 +1,6 @@
-/// B6-2：目录结果卡族（DirectoryResultCards.tsx 119 行 + typed-result-cards.css）。
+/// 目录结果卡族（DirectoryResultCards.tsx 119 行 + typed-result-cards.css）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ── GroupResultCard（tsx 18–37 + css .typed-group-card）：玻璃卡（--glass-bg + 1px 边 +
 /// radius-card 16 + --glass-shadow-compact + blur24 sat1.4）· padding sp4（窄屏 sp3）·
 /// flex 居中 · gap sp3；主按钮 .typed-group-main（flex 居中 gap sp3 + width 100%）=
@@ -21,6 +21,10 @@
 /// ## 附带补档
 /// .live-card 在 web 的收藏卡里接受 action（tsx 56）⇒ 给 AylaLiveChannelCard 补上 action 槽位
 /// （此前只有 showActions，与 post/voice/game 三卡不一致）。
+///
+/// ## 公开面
+/// `AylaGroupResultData` · `AylaGroupResultCard` · `AylaFavoriteTargetType` · `AylaFavoriteResultData` · `AylaFavoriteResultCard` · 样张 `aylaDirectoryResultCardSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

@@ -1,40 +1,19 @@
-/// voice 域第五批（B1-5）：爱莉语音面板。
+/// 爱莉语音面板。
 ///
 /// ## ⚠️ 事实前提：web 里这个组件**没有挂载点**
 /// `grep -rn "ElysiaVoicePanel" --include=*.tsx` 只命中它自己（`useElysiaVoice` 也只有 vitest
 /// 测试）——「控制面闭环」只做到 hook，页面接线从未做 ⇒ **web 上无法对照观感**，
 /// 视觉验收只能靠本文件的样张对照下面这些行号（已与用户确认仍按清单复刻）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// ElysiaVoicePanel.tsx 1–108    收起态 = 一个 .btn.btn-glow「爱莉语音」；
 ///                               展开态 = head(标题 + 收起) + 未接入态/输入行 + 行动区
 /// ElysiaVoicePanel.tsx 9        **主体性铁律：本组件不生成任何爱莉第一人称内容**（红线）
-/// ElysiaVoicePanel.tsx 32–35    空文本拦截在 hook 的 sendText 里；只在受理后才清空输入
-/// ElysiaVoicePanel.tsx 38–44    收起：`<section class="elysia-voice-panel collapsed">`
-///                               + `<button class="btn btn-glow">爱莉语音</button>`
-/// ElysiaVoicePanel.tsx 49–54    head：`h3.voice-panel-title`「爱莉语音」 + `.msg-action-btn`「收起」
-/// ElysiaVoicePanel.tsx 56–57    `!call` → `.voice-list-empty`：`busy ? "接入中…" : "等待接入"`
-/// ElysiaVoicePanel.tsx 61–71    输入行：`input.voice-create-input`（placeholder
-///                               「对爱莉说的话（文本注入，爱莉发言在聊天页查看）」、
-///                               `maxLength={2000}`、Enter 提交）+ `.btn.btn-primary`「发送」
-/// ElysiaVoicePanel.tsx 83–103   行动区：`isTerminal` → `.btn.btn-primary`「重新发起」；
-///                               否则 `.btn.voice-leave-btn`「结束通话」；两者 `disabled={busy}`
-/// app.css 3122–3136              .elysia-voice-panel：flex column · gap sp3 = 12 ·
-///                               max-width 560 · padding sp4 = 16 · radius 16 · --glass-bg ·
-///                               1px --glass-border · blur(24) sat(1.4) · --glass-shadow
-/// app.css 3137–3140              .collapsed：padding **sp3 = 12** + align-items: flex-start
-/// app.css 3142–3146              .elysia-voice-head：flex · **align-items: center** ·
-///                               justify-content: space-between
-///                               （⚠️ B1-4 的 `.voice-panel-head` 是 `baseline`，**别抄错**）
-/// app.css 3148–3151              .elysia-voice-input：flex · gap sp2 = 8
-/// app.css 3153–3156              .elysia-voice-actions：flex · gap sp2 = 8
-/// app.css 1324–1333 / 1362       .msg-action-btn：padding sp1/sp2 · radius-sm ·
-///                               12px · --text-secondary · --glass-bg-strong · 1px 亮边；
-///                               :hover → --indigo-700
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/voice/elysia_voice_panel.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 用 `useElysiaVoice(open)` 自管通话生命周期（创建/复用、`elysia.voice.call.status` /
 /// `elysia.voice.projected` 帧、502 → 「爱莉侧不可用」、结束幂等）。Flutter 侧按既有
 /// 「展示型 + 注入」模式，把通话编排留给页面层：
@@ -46,6 +25,10 @@
 /// ## 未完成项（登记，交用户裁决）
 /// 「收起」与「爱莉语音」等按钮的 `title`（浏览器原生 tooltip）属全库 `Tooltip` 统一项
 /// （`13-工作进度与待办.md` §4.2）。
+///
+/// ## 公开面
+/// `AylaElysiaVoicePanel` · 样张 `aylaElysiaVoicePanelSamples()`
+
 library;
 
 import 'dart:async';
@@ -410,7 +393,7 @@ class _ElysiaVoicePanelDemoState extends State<_ElysiaVoicePanelDemo> {
             mainAxisSize: MainAxisSize.min,
             spacing: AylaSpacing.sp2,
             children: <Widget>[
-              const Text('驱动开关', style: TextStyle(fontSize: 11)),
+              const Text('演示开关', style: TextStyle(fontSize: 11)),
               AylaGlassButton(
                 label: _busy ? 'busy = true（三按钮禁用）' : 'busy = false',
                 variant: AylaGlassButtonVariant.ghost,

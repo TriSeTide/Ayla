@@ -7,35 +7,12 @@
 /// 再点把手恢复展开。把手支持**上下拖动**（位移超过阈值即判为拖动），整组 top 随之改变
 /// 并 clamp 在视口内；拖动结束要抑制随后的合成 click，避免误触收起/展开。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// .session-activity-group              shell.css:459–471  fixed right 24 / top 80 / z-index 55；
 ///                                      flex row · align-items center · gap sp2 = 8；
 ///                                      translateX(0) + transform 200ms --ease-out
-/// .is-collapsed                        475–480          translateX(24px)；pointer-events: none
-///                                      651–660（≤768）  top calc(56 + safe-top + 48) / right 16 /
-///                                                        translateX(16px)
-/// .session-activity-ball               482–497          44×44 / radius 50% / 1px --glass-border /
-///                                      --glass-bg-strong / blur(18px) saturate(1.4) /
-///                                      0 2px 12px rgba(70,91,146,.12) /
-///                                      transform·box-shadow 150ms --ease-out + opacity 200ms
-/// .is-voice / .is-live                 519–527          grape-700 字 + sakura-100 底 /
-///                                                        indigo-700 字 + ice-300 底（**不透明**底）
-/// .is-collapsed .ball                  500–506          translateX(64px) + opacity 0 +
-///                                      visibility hidden（延迟 200ms；flex 占位保留）
-/// .ball:hover / :focus-visible         513–517          scale(1.08) + --glow-shadow
-///                                      （本组件窄屏段**没有**辉光降档规则 → 窄屏仍用满强度）
-/// .session-activity-toggle             529–548          28×44 / radius pill / 1px --glass-border /
-///                                      --glass-bg-strong / blur(18px) saturate(1.4) /
-///                                      同一个 .12 影 / color --text-secondary / touch-action none
-/// .toggle:hover / :focus-visible       550–554          background var(--glass-bg-hover)、
-///                                                        color --text-primary
-/// .session-activity-toggle-icon        556–567          `›` 字符 / font-size 16 / font-weight 500 /
-///                                      line-height 1 / transform 200ms --ease-out；
-///                                      .is-collapsed → rotate(180deg)
-/// reduced-motion          shell 569–575 / auroraqua 667  transition: none；按钮组缩放取消
-/// tsx 常量                     9–13                    DRAG_THRESHOLD 5 / GROUP_HEIGHT 44 /
-///                                                        DRAG_MARGIN 8；仅鼠标主键可拖（tsx 87）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/shell/session_activity.dart` 一节）
 /// ```
 ///
 /// ## 层叠（已逐条确认，勿凭印象改）
@@ -44,7 +21,7 @@
 ///   `:hover { scale: 1.02 }`、`:active { scale: .98 }` → 由 [AylaPressScale] 承载；
 /// - 该组**不含 `.session-activity-ball`** ⇒ 球没有 1.02/.98，只有自己的 `scale(1.08)`（150ms）。
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 自取 `useAuthStore` / `useSessionActivityStore` / `useLocation` 判定显示与目标路由；
 /// Flutter 侧没有全局 store 与路由，按既有「展示型 + 注入」模式改为**参数注入**：
 /// [voice] / [live] 是已经解析好的会话投影（null = 不渲染该球），[onOpenSession] 回传目标会话。
@@ -75,6 +52,10 @@
 /// ## 未完成项（登记，交用户裁决）
 /// 两球的 `title={session.title}`（浏览器原生 tooltip）属全库 `Tooltip` 统一项
 /// （`13-工作进度与待办.md` §4.2：一次补齐、别只给单个组件加）→ 本件不加。
+///
+/// ## 公开面
+/// `AylaActivitySession` · `AylaSessionActivityIndicator` · 样张 `aylaSessionActivitySamples()`
+
 library;
 
 import 'dart:math' as math;

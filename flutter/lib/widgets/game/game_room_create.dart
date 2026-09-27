@@ -1,33 +1,14 @@
-/// B4 boardgame 域第一批（2/3）：创建桌游室表单。
+/// 创建桌游室表单。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// GameRoomCreate.tsx 9–78     可见性选择器 + 名称输入 + 错误行 + 「创建」按钮
 /// boardgame.css 123–128       .game-room-create：flex · flex-direction column · gap sp2 ·
 ///                             padding var(--sp-3) = 12
-/// boardgame.css 130–132       .game-room-create .btn { align-self: flex-end }
-/// app.css 70–79               .field：width 100% · padding 12px 16px · radius-input 12 ·
-///                             1px --glass-border · --glass-bg；focus → --glow-500 边 + --glow-shadow
-/// auroraqua.css 502–512       :is(.field, …)：--glass-bg + 1px --glass-border +
-///                             radius-input（12）+ box-shadow --glass-inset + blur24 saturate1.4
-/// auroraqua.css 520–522       ::placeholder → --slate-500
-/// posts.css 373–376           .post-editor-error：13px · --destructive
-/// private.css 229–231         .create-sheet-card .game-room-create .field：
-///                             width 100% + margin-bottom var(--sp-3)
-/// private.css 233–236         .create-sheet-card .btn-primary:not(.post-editor-submit)：
-///                             width 100% + justify-content center
-/// layout/CreateFab.tsx 106    挂载点：CreateSheet(title = 动作标签) —— **唯一挂载点，
-///                             恒在 sheet 内** ⇒ private.css 的两条作用域规则恒生效
-/// tsx 17–20                   初始可见性：群内 → {group:true} + [groupId]；一级 → {public:true}
-/// tsx 28–31                   空名拦截「房间名不能为空」，**不发请求**
-/// tsx 32/49–50 防重入：submitting ref 守卫 + busy 禁用按钮
-/// tsx 37                      多选 → 后端单值：public → friends → group
-/// tsx 44–45                   成功：清空名称 + onCreated（外层关浮层）
-/// tsx 46–47                   失败：显示 error 并**保留表单**
-/// tsx 57–66                   输入：placeholder「桌游室名称」· maxLength 64 · Enter 提交
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/game/game_room_create.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 在组件内直接 `boardgameApi.createGameRoom(...)`，Flutter 侧按既有
 /// 「展示型 + 注入」模式（同 `AylaVoiceChannelCreate`）：组件只负责
 /// 校验 / 防重入 / busy / 错误展示 / 成功后清空，请求由页面层在 [onSubmit] 完成。
@@ -37,6 +18,10 @@
 ///    `maxLength`：后者会让 Flutter 在字段下方多渲染「0/64」计数器，web 没有该元素；
 /// 2. **提交键可用性随文本变化 setState**（chat 域 `MessageInput` 的真实事故：
 ///    漏 setState ⇒ 按钮永远停在初始禁用态，输入文字后点发送无反应）。
+///
+/// ## 公开面
+/// `AylaGameRoomCreateRequest` · `AylaGameRoomCreateException` · `AylaGameRoomCreate` · 样张 `aylaGameRoomCreateSamples()`
+
 library;
 
 import 'dart:async';

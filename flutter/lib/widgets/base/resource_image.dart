@@ -1,6 +1,6 @@
 /// 统一图片加载事实（`components/AylaResourceImage.tsx` 的 Flutter 等价）。
 ///
-/// ## 事实源（`AylaResourceImage.tsx` + `api/media.ts` + base.css 588–679）
+/// ## 事实源
 ///
 /// **加载路径**
 /// - 内部媒体（src 以 `/api/v1/media/` 开头）→ 提取 `media_id` → 走签名链路
@@ -22,6 +22,10 @@
 /// web 用 `<img>` 原生渐进解码 + HTTP 缓存；Flutter 侧用 `Image.network`
 /// 的 `loadingBuilder` 呈现骨架、`errorBuilder` 呈现失败态。
 /// 图片解码缓存交给 Flutter 的 `ImageCache`（等价浏览器缓存）。
+///
+/// ## 公开面
+/// `AylaResourceImageState` · `AylaResourceImage`
+
 library;
 
 import 'package:flutter/material.dart';

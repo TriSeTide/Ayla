@@ -30,6 +30,10 @@
 ///    （绑祖先 `ScrollPosition` + 矩形求交 ≥ .6，同库内轮播卡手法），滚动停止时上报；
 /// 5. **跳转标签的方向判定**：目标项已构建时用实测矩形（与 web 同口径）；被回收时按
 ///    「目标 seq 是否大于当前消息尾部」判定（web 有窗口首尾 seq 可比，Flutter 无窗口 ⇒ 有界近似）。
+///
+/// ## 公开面
+/// `AylaJumpTag` · `AylaMessageList` · 样张 `aylaMessageListSamples()`
+
 library;
 
 import 'dart:async';

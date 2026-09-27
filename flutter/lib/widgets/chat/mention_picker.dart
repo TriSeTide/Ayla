@@ -22,6 +22,10 @@
 ///    （行高固定 = padding 8×2 + 头像 32 = 48），用于 above/below 判定 —— 结果等价；
 /// 3. **点外部关闭**：Flutter 无全局 pointerdown 钩子 ⇒ 用 `TapRegion.onTapOutside`
 ///    + 命中 anchor 矩形时不关闭（等价 web 的 `anchorRef.contains(target)` 判断）。
+///
+/// ## 公开面
+/// `AylaMentionMemberPage` · `AylaMentionPicker` · `AylaMentionPickerState` · `AylaMentionPickerHost` · 样张 `aylaMentionPickerSamples()`
+
 library;
 
 import 'dart:math' as math;

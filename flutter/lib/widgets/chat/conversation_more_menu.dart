@@ -7,8 +7,7 @@
 /// display:grid; place-items:center; width:40px; height:40px;   /* 触达 ≥40 */
 /// border-radius:12px; color:#a9b8d4;
 /// transition: background 180ms, color 180ms;
-/// :hover, [aria-expanded="true"] { background: rgba(157,191,230,.25);
-///                                 color: var(--text-primary); }
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/chat/conversation_more_menu.dart` 一节）
 /// ```
 /// 外框 `.conv-more { position:absolute; top:50%; right:6px; translateY(-50%) }`；
 /// 群卡片覆写为 `bottom:10px; right:8px`（home.css 267–272），群列表覆写
@@ -46,6 +45,10 @@
 /// 1. web 用 `createPortal` 把面板挂到 `body`（脱离滚动裁剪与 backdrop 层叠
 ///    上下文）→ Flutter 用 [OverlayEntry] 达到同一目的。
 /// 2. 定位在插入 Overlay 后**下一帧测量**（需要真实尺寸才能算上/下与夹取）。
+///
+/// ## 公开面
+/// `AylaConversation` · `AylaConversationMoreMenu` · `AylaConversationMoreAlign`
+
 library;
 
 import 'package:flutter/material.dart';

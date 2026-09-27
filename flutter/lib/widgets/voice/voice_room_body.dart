@@ -1,73 +1,14 @@
-/// voice 域第六批（B1-6，voice 域收尾）：语音房整页（进房态）。
+/// 语音房整页（进房态）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// VoiceRoomBody.tsx 268–326    .voice-room-body.is-panel-motion = head + layout(两张卡)
 /// VoiceRoomBody.tsx 270–293    head：返回钮 .icon-btn-40（IconBack 20）· ScrollingText
 ///                              （Fredoka 18）· ScrollingTags（max-width 16ch）· 收藏(compact) ·
-///                              分享 · 「删除房间」（房主 + onDeleteChannel）
-/// VoiceRoomBody.tsx 147–184    发送：乐观 append（双向按 id 去重）+ 成功才清空（草稿 revision 守卫）；
-///                              图片 = 先上传再 sendMessage(media_id)；错误文案见 165/180
-/// VoiceRoomBody.tsx 113–135    房内聊天 WS 帧 `voice.chat.message`：按 id 幂等 append；
-///                              **未读只在聊天栏收起且非自己发送时 +1**（tsx 130）
-/// VoiceRoomBody.tsx 137–145    展开即清未读 + 列表滚到底
-/// VoiceRoomBody.tsx 90–95      seenIds 上限 1000（LRU 截断）
-/// VoiceRoomBody.tsx 186–205    聊天列表：HistoryControls + 每行（sender 名 + 可选图片 + 文本）
-/// VoiceRoomBody.tsx 207–266    composer：图片工具钮 + textarea + 发送 + 聊天栏开关（窄屏）
-/// VoiceRoomBody.tsx 291        ⚠️ `className="btn btn-danger"` —— **`.btn-danger` 全 CSS 无定义**
-///                              ⇒ 实渲染是**无材质的裸 `.btn`**（拍板：按实渲染）
-/// voice.css 12–15              .voice-room-body：height 100% · flex column · overflow hidden
-/// voice.css 16–21              .voice-room-layout：flex 1 · min-height 0 · flex column
-/// voice.css 23–29              .voice-room-voice-card：flex 1 · min-height 0 · column ·
-///                              overflow hidden · margin sp4
-/// voice.css 32–56              .voice-room-body .voice-panel：flex 1 · min-height 0 · margin 0 ·
-///                              width 100% · max-width none；成员列表自滚、其余子项不收缩
-/// voice.css 55–66              .voice-room-chat-card：flex none · column · relative ·
-///                              border-top 1px · --glass-bg · blur(18) sat(1.4)
-/// voice.css 78–124             窄屏聊天列表 = 从输入卡**上方**展开的浮层：绝对定位 bottom 100% ·
-///                              h300 · --glass-bg-strong + blur18 · 只有上两角 radius 16 ·
-///                              `0 -4px 16px rgba(70,91,146,.12)` · opacity/translateY(12px)/visibility
-///                              `--dur-panel` 240ms --ease-out；`.is-expanded` 才显示
-/// voice.css 127–136 / 325–328  .voice-room-head：flex none · center · gap sp3 · padding sp3 ·
-///                              --glass-bg + blur18 · border-bottom 1px；
-///                              **≥769 再加 1px 全边 + radius 16**
-/// voice.css 138–143            .voice-room-title：flex 1 · min-width 0 · **font-display 18** ·
-///                              --text-primary
-/// voice.css 146–157            .voice-room-tags：flex 0 0 auto · **max-width 16ch**；
-///                              内部 `.post-card-tag` **max-width 12ch** + 省略号
-/// voice.css 202–215/…/295–313  聊天卡 head（title 13/600 secondary · count-label 12）·
-///                              ⚠️ 其 `background: --glass-bg`（voice.css 389–397，≥769）
-///                              被 auroraqua.css 593–599 **同一断点、最后加载、特异性 0-2-0**
-///                              清零 ⇒ 实渲染 = **透明底 + 仅下边框**（实测
-///                              「这处造轮子」：照 voice.css 抄底会在卡面上叠一层）
-///                              消息行（flex wrap · gap sp1 · 13px/1.4 · sender 700 secondary ·
-///                              图片 120×80 radius-sm）
-/// voice.css 233–251            .voice-room-chat-toggle-btn：flex none · gap sp1 · padding sp1/sp2 ·
-///                              radius-sm · 1px 亮边 · --glass-bg · 12px secondary；
-///                              :hover → `--glass-bg-hover`（**未定义 ⇒ 透明**，同 A5 裁决）+ --text-primary
-/// voice.css 271–282            .voice-room-chat-count：min-width 18 · h18 · padding 0 4 · pill ·
-///                              **--pink-500 底 + 白字** · 11/600
-/// voice.css 318–322 / 355–360  ≥769：body padding sp4 + gap sp4 + `container-type: inline-size`；
-///                              layout = **grid** `minmax(320px,1fr) minmax(320px, min(380px,45%))`
-///                              + gap sp4 + overflow hidden
-/// voice.css 325–346            ≥769：三分区各自动画 panel-from-top / -right / -bottom
-///                              （300ms --auroraqua-ease-out）
-/// voice.css 361–381            ≥769：两张卡自带材质（1px 边 + radius 16 + --glass-bg +
-///                              --glass-shadow + blur24）；.voice-room-voice-card padding sp4 · margin 0
-/// voice.css 382–470            ≥769：chat head 常驻、列表常驻（重置窄屏浮层定位与动画）、
-///                              **chat-toggle-btn display none**、composer-row 加 border-top；
-///                              `@container voice-room (max-width: 655px)` → 单列两行
-/// voice.css 126–133            .voice-room-chat-card > .voice-room-composer > .composer-row：
-///                              padding sp3 · align-items center · gap sp2 · width 100%
-/// app.css 2131–2138            .composer-input：flex 1 · resize none · min-height 40 ·
-///                              max-height 140 · padding 8 12 · line-height 22
-/// app.css 2105–2123            .composer-tool-btn：40×40 pill · 1px --ice-300 边 ·
-///                              hover/focus-within → --glow-500 边 + --glow-shadow
-/// app.css 3473–3477            .live-form-error：--destructive 13px + margin-top sp2
-/// base.css 463–472             窄屏 `.reveal`（浮入）：opacity 0 + translateY(20px) → is-in（300ms）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/voice/voice_room_body.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 自管：`voiceWS` 帧订阅、`useCursorHistory` 分页、`uploadMediaFile` 上传、
 /// `useAuthStore`、`useMediaQuery`、`usePanelReplayMotion`。Flutter 侧按既有「展示型 + 注入」：
 /// - 房内聊天消息与历史分页由页面层装进 [AylaVoiceChatMessage] / [AylaVoiceChatHistory]；
@@ -80,6 +21,10 @@
 ///   `.voice-panel`——`auroraqua.css:584–610` + `voice.css:361–381`）。web 是把 11 个 props
 ///   直接透传给面板，而 Flutter 侧面板参数更多（成员/分页/音量回调…），故改用 builder 槽，
 ///   避免本组件重复声明两套注入面。
+///
+/// ## 公开面
+/// `AylaVoiceChatMessage` · `AylaVoiceChatHistory` · `AylaVoiceRoomBody` · `AylaVoiceChatSendException` · 样张 `aylaVoiceRoomBodySamples()`
+
 library;
 
 import 'dart:async';
@@ -1101,7 +1046,7 @@ class _VoiceRoomBodyDemoState extends State<_VoiceRoomBodyDemo> {
             mainAxisSize: MainAxisSize.min,
             spacing: AylaSpacing.sp2,
             children: <Widget>[
-              const Text('开关：让下一次文本发送失败（看 .live-form-error）',
+              const Text('下次发送失败',
                   style: TextStyle(fontSize: 11)),
               AylaGlassButton(
                 label: _failNext ? '下一次发送：失败' : '下一次发送：成功',

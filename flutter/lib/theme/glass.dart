@@ -16,6 +16,10 @@
 /// - **禁裸色值**：一切颜色走 [AylaColors]；
 /// - **reduced-motion**（`MediaQuery.disableAnimations`）：关闭上浮/缩放/扫光，
 ///   保留焦点与状态反馈；手势路径不依赖动画。
+///
+/// ## 公开面
+/// `AylaGlassConfig` · `AylaGlassSurface` · `AylaGlassShadow` · `AylaGlass` · `AylaGlassInset` · `AylaGlassCard` · `AylaCardInteraction` · `AylaGlassButtonVariant` · `AylaGlassButton` · `AylaGlassInput`
+
 library;
 
 import 'dart:ui' show ImageFilter;

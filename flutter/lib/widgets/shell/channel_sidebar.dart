@@ -1,6 +1,6 @@
 /// AylaChannelSidebar —— 宽屏频道/场景侧栏（重做版）。
 ///
-/// ## 事实源（逐条标注，禁自由发挥）
+/// ## 事实源
 /// - 结构/行为：`Ayla/web/src/layout/ChannelSidebar.tsx`（627 行）
 /// - 样式：`Ayla/web/src/styles/group.css` 680–1370（`.channel-sidebar*` /
 ///   `.channel-scene*` / `.channel-subgroup*` / `.channel-voice-room*` /
@@ -35,6 +35,10 @@
 ///   （`AnimatedSize` 只重绘自身、不触发父级 build）；
 /// - 动态裁剪：`_SidebarDropdownClip` 在 paint 里按「本行吸顶后的底 + gap」到
 ///   「下一行吸顶后的顶 − gap」裁剪，等价 `useSidebarContentClip` 的 `inset()`。
+///
+/// ## 公开面
+/// `AylaGroupScene` · `AylaChannelSubgroup` · `AylaChannelVoiceRoom` · `AylaChannelLiveRoom` · `AylaChannelDirectory` · `AylaChannelSidebar` · 样张 `aylaChannelSidebarSamples()`
+
 library;
 
 import 'dart:math' as math;
@@ -46,6 +50,7 @@ import 'package:flutter/scheduler.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
+import '../../theme/svg_path.dart';
 import '../../theme/tokens.dart';
 import '../base/dashed_border.dart';
 import '../base/directory_controls.dart';
@@ -2537,7 +2542,7 @@ class _SidebarGlyphPainter extends CustomPainter {
     canvas.save();
     canvas.scale(size.width / 24, size.height / 24); // viewBox 0 0 24 24
     canvas.drawPath(
-      parseMiniSvgPath(d),
+      aylaParseSvgPath(d),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth =
@@ -2556,99 +2561,6 @@ class _SidebarGlyphPainter extends CustomPainter {
       old.d != d || old.color != color;
 }
 
-/// 极简 SVG path 解析（只覆盖本文件三条 path 用到的 `M/m L/l H/h V/v A/a Z`）。
-///
-/// `A/a` 只取半径与终点（本组件用于笔尖的圆弧），不解析 large-arc / sweep 标志。
-@visibleForTesting
-Path parseMiniSvgPath(String d) {
-  final Path path = Path();
-  // ⚠️ 分词必须用「命令字母 | 数字」正则，**不能按空白切分**：SVG path 里
-  // 数字可以紧凑书写（`m9 6 6 6-6 6` 的 `6-6`），按空白切会得到 `'6-6'`
-  // → `double.parse` 抛 FormatException（实测踩过）。
-  final RegExp tokenRe = RegExp(r'[MLHVAZmlhvaz]|-?\d*\.?\d+(?:[eE][-+]?\d+)?');
-  final List<String> tokens = tokenRe
-      .allMatches(d)
-      .map((RegExpMatch m) => m[0]!)
-      .toList();
-  double x = 0;
-  double y = 0;
-  double sx = 0;
-  double sy = 0;
-  int i = 0;
-  String cmd = '';
-  double next() => double.parse(tokens[i++]);
-  bool isCmd(String t) => t.length == 1 && 'MLHVAZmlhvaz'.contains(t);
-
-  while (i < tokens.length) {
-    if (isCmd(tokens[i])) {
-      cmd = tokens[i];
-      i++;
-      if (cmd == 'Z' || cmd == 'z') {
-        path.close();
-        x = sx;
-        y = sy;
-      }
-      continue;
-    }
-    switch (cmd) {
-      case 'M':
-        x = next();
-        y = next();
-        sx = x;
-        sy = y;
-        path.moveTo(x, y);
-        cmd = 'L';
-      case 'm':
-        x += next();
-        y += next();
-        sx = x;
-        sy = y;
-        path.moveTo(x, y);
-        cmd = 'l';
-      case 'L':
-        x = next();
-        y = next();
-        path.lineTo(x, y);
-      case 'l':
-        x += next();
-        y += next();
-        path.lineTo(x, y);
-      case 'H':
-        x = next();
-        path.lineTo(x, y);
-      case 'h':
-        x += next();
-        path.lineTo(x, y);
-      case 'V':
-        y = next();
-        path.lineTo(x, y);
-      case 'v':
-        y += next();
-        path.lineTo(x, y);
-      case 'A':
-        final double rx = next();
-        final double ry = next();
-        next(); // x-axis-rotation
-        next(); // large-arc-flag
-        next(); // sweep-flag
-        x = next();
-        y = next();
-        path.arcToPoint(Offset(x, y), radius: Radius.elliptical(rx, ry));
-      case 'a':
-        final double rx = next();
-        final double ry = next();
-        next();
-        next();
-        next();
-        x += next();
-        y += next();
-        path.arcToPoint(Offset(x, y), radius: Radius.elliptical(rx, ry));
-      default:
-        i++;
-    }
-  }
-  return path;
-}
 
 // ======================= 图标常量 =======================
 

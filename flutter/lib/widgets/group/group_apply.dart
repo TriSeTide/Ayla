@@ -1,10 +1,10 @@
-/// B5 group 域第一批（2/2）：群聊申请/加入（GROUP REQUEST）—— 表单主体 + 弹窗形态。
+/// 群聊申请/加入（GROUP REQUEST）—— 表单主体 + 弹窗形态。
 ///
 /// ⚠️ web 的第三个形态 `GroupApplyGate`（`GroupPage.tsx:398` 的路由守卫卡，非遮罩）**按用户
 /// 2026-09-25 裁决不实现**（「也不知道哪里用得到，直接删掉吧」）—— 它属页面层路由守卫，
 /// 且 web 的实渲染里 head 无左右 padding（只有 form/actions 各自带），观感不对。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ── GroupApplyDialog.tsx 25–92（GroupApplyForm 主体）：desc + 留言 label + textarea +
 /// 错误 + 提交键；成功态替换整个表单区
 /// ── search.css 221–226：.group-apply-desc —— margin sp6 0 sp4 · 14px · lh 1.6 · text-primary；
@@ -40,6 +40,10 @@
 /// web 在 Form 内直接调 api.applyToGroup；Flutter 侧注入 [AylaGroupApplyForm.onSubmit]
 /// （页面层发请求 + 抛 [AylaGroupApplyException] 显示文案），**未注入时提交键禁用**
 /// （不伪造「已发送」）。跳转也归调用方（[onDone] / 弹窗的 [AylaGroupApplyDialog.onJoined]）。
+///
+/// ## 公开面
+/// `AylaGroupApplyException` · `AylaGroupApplyForm` · `AylaGroupApplyDialog` · 样张 `aylaGroupApplySamples()`
+
 library;
 
 import 'package:flutter/material.dart';

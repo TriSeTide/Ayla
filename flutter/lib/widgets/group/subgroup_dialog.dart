@@ -1,6 +1,6 @@
-/// B5 group 域第一批（1/2）：添加 / 编辑子群弹窗。
+/// 添加 / 编辑子群弹窗。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ── SubGroupDialog.tsx 18–110：结构 = overlay > dialog > head + 名称输入 + 禁言开关（仅 edit）
 /// + 错误 + 按钮排
 /// ── group.css 2131–2144：.subgroup-dialog-overlay —— fixed inset · z 60 · flex 居中 ·
@@ -23,7 +23,7 @@
 /// canDelete = edit && !is_default
 /// ── tsx 98–104：空名拦截（trim 后为空直接 return，不发请求）；busy →「保存中…」
 ///
-/// ## 与 web 的装配差异
+/// ## 机制差异
 /// web 在组件内直接调 chatApi（create / update / delete），并把「删除二次确认」交给调用方
 /// （ChannelSidebar.tsx:588–601 渲染 AylaConfirmDialog + 文案「确定删除子群「…」？该子群的所有
 /// 聊天记录将永久删除，无法恢复。」）。Flutter 侧沿用注入范式：组件只负责表单状态 / 校验 /
@@ -32,6 +32,10 @@
 /// ## 一处有意偏离
 /// web 的 .subgroup-dialog 未声明 max-height / overflow（内容高时直接溢出屏幕）；
 /// Flutter 侧走 [AylaModalCard] 的默认兜底（80vh + 内部滚动），避免小屏把按钮挤出可视区。
+///
+/// ## 公开面
+/// `AylaSubGroupDialogState` · `AylaSubGroupDialog` · 样张 `aylaSubGroupDialogSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

@@ -17,6 +17,10 @@
 /// 2. **存在性检查**：web 点击时异步查各域目录判断群内路径（见 `share_routes.dart`
 ///    文件头）；Flutter 侧默认走静态路由，页面层可注入
 ///    [AylaShareBubble.onResolveTarget] 覆盖。
+///
+/// ## 公开面
+/// `AylaShareTypeIcon` · `AylaShareBubble` · 样张 `aylaShareBubbleSamples()`
+
 library;
 
 import 'dart:math' as math;

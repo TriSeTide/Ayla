@@ -7,14 +7,7 @@
 /// .avatar-status-badge { position:absolute; inline-flex; center;
 ///   width:16px; height:16px; border-radius:pill;
 ///   pointer-events:none;  /* 纯展示，不拦截头像点击 */
-///   z-index:3; }
-/// .avatar-status-bottom-right { right:-3px; bottom:-3px; }
-/// .avatar-status-middle-right { right:-3px; top:50%; transform:translateY(-50%); }
-/// .avatar-status-top-right    { right:-3px; top:-3px; }
-///
-/// .group-badge-live  { background: var(--glow-500);   color:#fffafb; }
-/// .group-badge-voice { background: var(--ice-500);    color:var(--indigo-700); }
-/// .group-badge-game  { background: var(--sakura-300); color:var(--grape-700); }
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/base/avatar_status_badges.dart` 一节）
 /// ```
 ///
 /// **槽位填充顺序**（`badges.ts` 109–114）：竖向一列、**从下往上填**
@@ -25,6 +18,10 @@
 ///
 /// **桌游开关**：`SHOW_GAME_STATUS = false`（`badges.ts` 97；“是否有人在玩”
 /// 判断未实现，先强制关闭显示；**保留完整实现，实现后置 true 即恢复**）。
+///
+/// ## 公开面
+/// `AylaAvatarBadgeKind` · `AylaAvatarBadgePosition` · `AylaAvatarStatus` · `AylaAvatarStatusBadge` · `AylaAvatarStatusBadges`
+
 library;
 
 import 'package:flutter/material.dart';

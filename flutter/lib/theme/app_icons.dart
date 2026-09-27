@@ -7,6 +7,10 @@
 ///
 /// 纪律(05 §4 / d:§8):图标用线性 SVG 风格,**禁止 emoji 当功能图标**;
 /// 图标色一律显式传参,不裸色值。
+///
+/// ## 公开面
+/// `AylaIcon`
+
 library;
 
 import 'package:flutter/material.dart';

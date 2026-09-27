@@ -31,6 +31,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'Icon 图标库（web components/icons.tsx 全量 47 个）',
     'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
     'Typography（design.md §3 九级）',
+    'AylaTooltip（web `title=` 28 处；提示气泡由浏览器/OS 绘制，无 CSS 可移植）',
   ],
   'Shell · 导航壳与浮层': <String>[
     'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
@@ -79,6 +80,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaVoiceRoomBody（components/voice/VoiceRoomBody.tsx 327 行 + voice.css 12–470 + app.css 2105–2138/3473–3477 + base.css 463–472）',
   ],
   'posts · 帖子 / 评论': <String>[
+    'AylaMasonryGrid（useMasonryColumns.ts 146 行 + posts.css 607–694 / profile.css 458–545）',
     'AylaPostCard / AylaPostVideoCover（PostCard.tsx + posts.css 9–217 + typed-result-cards.css 5,7）',
     'AylaPostEditor（PostEditor.tsx + posts.css 219–418 + auroraqua.css 105–166）',
     'AylaCommentList / AylaCommentComposer（CommentList.tsx + CommentComposer.tsx + posts.css 420–583）',
@@ -89,12 +91,28 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     '群聊申请弹窗（GroupApplyDialog.tsx 25–137 行 + search.css 175–296）',
     '建群对话框（GroupCreateDialog.tsx 184 行 + private.css 66–186 / 188–280）',
     '目录结果卡（DirectoryResultCards.tsx 119 行 + typed-result-cards.css）',
-    '个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）',
+    'AylaTransferOwnerDialog（GroupInfo.tsx 904–1010 + app.css 3894–4005）',
+    'AylaGroupRoleChip（group.css 1734–1750 + GroupInfo.tsx 52–56）',
+    'AylaGroupInfoProfile（GroupInfo.tsx 461–520 + group.css 1382–1610 / 2235–2240）',
   ],
   'boardgame · 桌游域': <String>[
+    'AylaGamesGrid / AylaGamesGridSkeleton（GamesHubPage.tsx 184–216 + boardgame.css 232–275）',
     '桌游室卡片（GameRoomCard.tsx 53 行 + boardgame.css 9–119 + auroraqua.css 28–52 + typed-result-cards.css 44）',
     '创建桌游室表单（GameRoomCreate.tsx 78 行 + boardgame.css 123–132 + app.css 70–79 + private.css 229–236）',
     '桌游室占位整页壳（GameRoomPlaceholder.tsx 189 行 + boardgame.css 136–219 + auroraqua.css 335/402–408/418）',
+  ],
+  'profile · 个人主页域': <String>[
+    'AylaProfileCard / AylaProfileIdentity / AylaProfileAvatarActions（ProfilePage.tsx 154–180 + app.css 241–248/2657–2695 + profile.css 14–16/44–52/142–171/584–591/623–625）',
+    'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456）',
+    '个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）',
+  ],
+  'search · 搜索域': <String>[
+    'AylaSearchHistoryChips（search.css 11–30 + SearchPage.tsx 362–372）',
+    'AylaSearchResultGroup（ResultGroup：SearchPage.tsx 494–521 + search.css 68–105）',
+    'AylaSearchUserRow（search.css 107–176 + SearchPage.tsx 391–408）',
+  ],
+  'motion · 转场与手势': <String>[
+    'AylaPageTransition / AylaPageSwap（PageTransition.tsx 117 行 + AppShell.tsx:113）',
   ],
   '通用件 · 分享 / 分页 / 弹层 / 资源': <String>[
     'AylaShareSheet / AylaShareButton（ShareSheet.tsx + ShareButton.tsx + share.css 1–275）',

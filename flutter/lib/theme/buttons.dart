@@ -31,6 +31,10 @@
 ///   padding sp1 sp2、radius 8、12px、text-secondary、glass-bg-strong 底 +
 ///   glass-border；hover → indigo 字 + `--glow-shadow`；auroraqua 追加
 ///   button 阴影与 blur(8px)，hover → button-hover（134–139）。
+///
+/// ## 公开面
+/// `AylaPressScale` · `AylaIconButton` · `AylaCornerFab` · `AylaCreateFab` · `AylaMessageFab` · `AylaToolButton` · `AylaMsgActionButton`
+
 library;
 
 import 'package:flutter/material.dart';

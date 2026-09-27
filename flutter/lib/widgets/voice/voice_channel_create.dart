@@ -1,40 +1,14 @@
-/// voice 域第三批（B1-3 第一件）：建语音频道表单。
+/// 建语音频道表单。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// VoiceChannelCreate.tsx 1–80    可见性选择器 + 名称输入 + 「建频道」按钮 + 错误行
 /// app.css 2848–2853              .voice-channel-create：flex · align-center · gap sp2 = 8 · wrap
 /// app.css 2855–2865              .voice-create-input：flex 1 · min-width 120 · min-height 36 ·
-///                                padding 0 sp3 · radius pill（**被 auroraqua 覆写**）·
-///                                1px --glass-border · --glass-bg · 13px
-/// auroraqua.css 502–512          :is(.field, .voice-create-input, …)：--glass-bg +
-///                                1px --glass-border + **--radius-input（12）** +
-///                                box-shadow --glass-inset + backdrop blur(24) saturate(1.4)
-///                                ⇒ app.css 的 pill 圆角不生效
-/// auroraqua.css 513–517          :focus → outline none + border-color --glow-500 +
-///                                box-shadow --glow-shadow
-/// auroraqua.css 520–522          ::placeholder → --slate-500
-/// auroraqua.css 526–531          @supports 无 backdrop-filter → background --surface
-/// app.css 2866–2869              .voice-create-error：12px · --destructive
-/// private.css 229–231            .create-sheet-card .voice-create-input：
-///                                width 100% + margin-bottom sp3
-/// private.css 233–236            .create-sheet-card .btn-primary:not(.post-editor-submit)：
-///                                width 100% + justify-content center
-/// tsx 19–22                      初始可见性：群内 → {group:true} + [groupId]；
-///                                一级 → {public:true} + []
-/// tsx 29–33                      空名拦截：「频道名称不能为空」，**不发请求**
-/// tsx 24/28/34/51                防重入：submitting ref 守卫 + busy 禁用按钮
-/// tsx 39                         多选 → 后端单值：public → friends → group
-/// tsx 44–53                      成功：清空名称 + onCreated（外层关浮层）；
-///                                失败：显示 error 并**保留表单**
-/// tsx 59–68                      输入：placeholder「新语音频道名称」· maxLength 64 ·
-///                                Enter 提交
-/// layout/ChannelSidebar.tsx 543  挂载点 1：CreateSheet(title「创建语音房」)
-/// layout/CreateFab.tsx 80        挂载点 2：CreateSheet(title = 动作标签)
-///                                ⇒ **两处都在 sheet 内** ⇒ private.css 的两条作用域规则恒生效
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/voice/voice_channel_create.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 在组件内直接 `voiceApi.createVoiceChannel(...)` + `useVoiceStore.setChannels(...)`
 /// （插到列表头、`mine:false`）。Flutter 侧按既有「展示型 + 注入」模式：
 /// 组件只负责**校验 / 防重入 / busy / 错误展示 / 成功后清空**，
@@ -47,6 +21,10 @@
 /// 2. **垂直居中靠 `padding` 补足**：web 是 flex `align-items: center` + `min-height: 36px`，
 ///    而 Flutter 的 `Container` 没有该语义（子项贴顶）⇒ 传 `vertical: 8`
 ///    （13px × body 行高 1.55 ≈ 20 ⇒ 8 + 20 + 8 = 36，等效）。
+///
+/// ## 公开面
+/// `AylaVoiceChannelCreateRequest` · `AylaVoiceChannelCreateException` · `AylaVoiceChannelCreate` · 样张 `aylaVoiceChannelCreateSamples()`
+
 library;
 
 import 'dart:async';
@@ -376,7 +354,7 @@ class _VoiceChannelCreateDemoState extends State<_VoiceChannelCreateDemo> {
             mainAxisSize: MainAxisSize.min,
             spacing: AylaSpacing.sp2,
             children: <Widget>[
-              const Text('开关：让第一个表单的下一次提交失败', style: TextStyle(fontSize: 11)),
+              const Text('下次提交失败', style: TextStyle(fontSize: 11)),
               AylaGlassButton(
                 label: _failOnce ? '下一次提交：失败' : '下一次提交：成功',
                 variant: AylaGlassButtonVariant.ghost,

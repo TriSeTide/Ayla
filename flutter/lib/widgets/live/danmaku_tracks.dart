@@ -13,13 +13,12 @@
 /// 12  DANMAKU_SPEED_PX_PER_SEC = 150
 /// 14  DANMAKU_MIN_GAP_PX = 60
 /// 16  DANMAKU_TRACK_HEIGHT = 36
-/// 18  DANMAKU_TRACK_MIN = 2 / 19  DANMAKU_TRACK_MAX = 10
-/// 21  DANMAKU_TEXT_EST_WIDTH = 280
-/// 24  trackCountForHeight（非法高度回退下限；floor 取整；上限封顶）
-/// 33  flyDurationMs（非法宽度用 640 兜底）
-/// 39  minGapMs（最小间距 / 速度，取整）
-/// 49  pickTrack（恒选 lastStartAt 最小者；并列取下标最小）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/danmaku_tracks.dart` 一节）
 /// ```
+///
+/// ## 公开面
+/// `AylaDanmakuTrackState`
+
 library;
 
 import 'dart:math' as math;

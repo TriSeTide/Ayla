@@ -15,6 +15,10 @@
 /// web 在本件内直连 store / `useSocialPage` / WS（`chatWS.onFrame` 刷新认证数据）；
 /// Flutter 侧这些属页面层：本件只接收**已排序**的会话、好友、分页投影与回调，
 /// 认证 tab 内容由调用方构造 `AylaRequestsPanel` 传入（`requestsPanel`）。
+///
+/// ## 公开面
+/// `AylaWideMessagesSidebar` · 样张 `aylaWideMessagesSidebarSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

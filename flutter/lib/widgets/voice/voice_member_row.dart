@@ -1,40 +1,14 @@
-/// voice 域第二批（B1-2）：单个语音成员行（含覆盖式音量条）。
+/// 单个语音成员行（含覆盖式音量条）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// VoiceMemberRow.tsx 1–219    行 = 头像 32 + (名称+/我) + 副行(在频道中/已静音) +
 ///                             操作区(开关钮 + 音量条)；私有 VoiceVolumeMeter 40–90
 /// VoiceMemberRow.tsx 56–63    电平映射：levelPct = round(min(1, level^0.4) × 100)
-/// VoiceMemberRow.tsx 134–135  说话阈值：level > 0.02
-/// VoiceMemberRow.tsx 133      名称兜底：nickname || username || user_id.slice(0, 6)
-/// VoiceMemberRow.tsx 171–215  自己 = 麦克风开关 + 本地麦音量；远端 = 喇叭开关 + 播放音量
-///                             （locallyMuted 时跳动条归零、speaking=false）
-/// app.css 2917–2921           .voice-member-row：flex · align-center · gap sp2 = 8
-/// app.css 2923–2936           .voice-member-main（flex 1 / column / min-width 0）
-///                             .voice-member-topline（flex / gap sp2 / min-width 0）
-/// app.css 2939–2944           .voice-member-actions：flex:none · inline-flex · center · gap 8
-/// app.css 2946–2954           .voice-member-name：flex 1 · 13px · w600 · nowrap + ellipsis
-/// app.css 2956–2960           .voice-self-tag：margin-left sp1 = 4 · 11px · --indigo-700
-/// app.css 2962–2968           .voice-member-sub：11px · --text-secondary · gap 3
-/// app.css 2970–2975           .voice-muted-tag：gap 3 · --destructive（IconMic 11 + 已静音）
-/// app.css 2981–3005           .voice-meter-toggle：28×28 正圆 · 透明底 · --indigo-700 ·
-///                             hover rgba(189,212,233,.35) · .is-off → --text-secondary +
-///                             rgba(189,212,233,.25)；图标 15×15（tsx 180/192）
-/// auroraqua.css 59/77/89/664  .voice-meter-toggle 属按钮组 ⇒ transition 200ms
-///                             --auroraqua-ease + hover 1.02 + active .98（reduced-motion 取消缩放）
-/// app.css 3007–3013           .voice-meter：90 × 20 · relative
-/// app.css 3015–3032           .voice-meter-track：绝对居中 · 100%×4 · pill ·
-///                             linear-gradient(90deg, --indigo-700 0→--fill,
-///                             rgba(189,212,233,.55) --fill→100%) · 不吃指针
-/// app.css 3034–3046           .voice-meter-fill：绝对居中 · 宽 levelPct% · 4 · pill ·
-///                             linear-gradient(90deg, --glow-500, --ice-500) · width 80ms --ease-out
-/// app.css 3048–3051           .is-speaking → fill 加 0 0 6px rgba(247,150,255,.55)
-/// app.css 3053–3095           slider：绝对 inset 0 · 轨道透明 4px pill ·
-///                             把手 14×14 圆 · --indigo-700 · 2px #fff 边 ·
-///                             margin-top -5px · 0 1px 4px rgba(70,91,146,.35)
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/voice/voice_member_row.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 自取 `useVoiceStore`（`localAudioLevel` / `localVolume` / `micEnabled`）、
 /// `usePresenceStore`（在线光环）、`api/users`（昵称/头像懒拉缓存）与 `goUserProfile`。
 /// Flutter 侧按既有「展示型 + 注入」模式：
@@ -49,6 +23,10 @@
 /// ## 未完成项（登记，交用户裁决）
 /// 开关钮的 `title`（浏览器原生 tooltip）属全库 `Tooltip` 统一项
 /// （`13-工作进度与待办.md` §4.2：一次补齐、别只给单个组件加）→ 本件不加。
+///
+/// ## 公开面
+/// `AylaVoiceMember` · `AylaVoiceSelfState` · `AylaVoiceMemberRow` · 样张 `aylaVoiceMemberSamples()`
+
 library;
 
 import 'dart:math' as math;
@@ -735,7 +713,7 @@ class _VoiceMemberDemoState extends State<_VoiceMemberDemo> {
             mainAxisSize: MainAxisSize.min,
             spacing: AylaSpacing.sp3,
             children: <Widget>[
-              const Text('模拟驱动（拖动看跳动条 / 辉光）', style: TextStyle(fontSize: 12)),
+              const Text('拖动查看跳动与辉光', style: TextStyle(fontSize: 12)),
               Text('说话电平 = ${_level.toStringAsFixed(2)} '
                   '→ 跳动条 ${_VoiceVolumeMeter.levelPercent(_level)}%'
                   '（level^0.4 映射，阈值 ${AylaVoiceMemberRow.speakingThreshold}）',

@@ -1,30 +1,12 @@
 /// 右下角浮层按钮族（`layout/CornerFabStack.tsx` / `RefreshFab.tsx` /
 /// `ScrollTopFab.tsx` / `QuickMessageFab.tsx` + `shell.css` 423–456 / 679–787）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// .corner-fab-stack  shell.css:684–694  fixed; right: calc(32px + (56-44)/2) = 38px;
 ///                   bottom: calc(32px + 56px + sp3) = 100px; z-index: 40;
 ///                   flex column / align-items: flex-end / gap: sp3 = 12px;
-///                   pointer-events: none（子项 auto）
-/// .corner-fab        shell.css:697–720  44×44 / 1px --glass-border / radius-pill /
-///                   --glass-bg / blur(18px) saturate(1.4) / --card-shadow；
-///                   hover → --glass-bg-strong + 0 2px 12px rgba(70,91,146,.18)
-/// .corner-fab-icon   shell.css:742–746  inline-flex 居中（旋转宿主）
-/// .is-spinning       shell.css:748–750  animation: ayla-loading-spin 800ms linear infinite
-/// .is-bottom-left    shell.css:753–758  fixed left 32 / bottom 32 / z 40
-/// .corner-fab-scroll-top     723–739    opacity 0 / visibility hidden / translateY(8px)
-/// .is-visible                732–739    opacity 1 / visible / translateY(0)
-/// .is-narrow                 762–767    fixed right 16 / bottom calc(64px + safe + sp3)
-/// .is-narrow.is-stacked      769–773    right calc(16 + (56-44)/2) = 22px /
-///                                       bottom 64 + safe + sp3 + 56 + sp3 = 144 + safe
-/// .message-fab       shell.css:423–439  56×56 / left 16 / bottom calc(64px + safe + 12px) /
-///                   --glass-bg + blur18 sat1.4 —— 外观由 AylaMessageFab 承载
-/// .quick-message-fab         442–450    transition: transform 200ms --ease-out；
-///                                       .is-collapsed → translateX(-44px)（仅露 28px 右半）
-/// reduced-motion     shell.css:775–787 / auroraqua.css:655–680
-///                   scroll-top 只留 opacity（transform: none）、spinning animation: none、
-///                   按钮组 hover/active 缩放取消
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/shell/fab.dart` 一节）
 /// ```
 ///
 /// ## 层叠（易错，已逐条确认）
@@ -34,7 +16,7 @@
 /// **特异性相同（0,1,0）而 auroraqua 后加载** ⇒ 实际是 **200ms**，不是 180ms。
 /// Flutter 侧即 [AylaDurations.button] + [AylaCurves.auroraqua]（缩放由 [AylaPressScale] 提供）。
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 的 `CornerFabStack` 只接收两个 bool，子件通过 `useShellStore`（refreshCallback /
 /// quickMessagesOpen）与 document 级 scroll 监听自取数据。Flutter 侧没有全局 store，
 /// 按既有「展示型 + 注入」模式改为**参数注入**：
@@ -45,6 +27,10 @@
 ///   覆盖两种装配）；
 /// - 路由切换重置 → Flutter 无 `pathname`：页面层用 `ValueKey(path)` 重建本组件即可
 ///   （等价 tsx 里 `useEffect([pathname])` 的清引用 + 隐藏）。
+///
+/// ## 公开面
+/// `AylaRefreshFabPosition` · `AylaScrollTopFabPosition` · `AylaCornerFabStack` · `AylaRefreshFab` · `AylaScrollTopFab` · `AylaQuickMessageFab` · 样张 `aylaFabSamples()`
+
 library;
 
 import 'dart:async';

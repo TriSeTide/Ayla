@@ -22,6 +22,10 @@
 /// ## 上传能力
 /// 选图+三步上传复用库内 `AylaMediaActions.pickImages`（含本地校验、进度聚合、失败计数），
 /// 「加入群包」与「发送表情」是两个注入回调（业务链路属页面层）。
+///
+/// ## 公开面
+/// `AylaEmojiPackData` · `AylaEmojiPackPanel` · 样张 `aylaEmojiPackPanelSamples()`
+
 library;
 
 import 'dart:math' as math;

@@ -28,6 +28,10 @@
 ///    窄屏走 `position: static` 档（向下展开）——与 `AylaMentionPickerHost` 同口径；
 /// 4. **上传不在这里**：web 的 `sendOptimistic`（hook 层）负责上传 + 乐观发送 ⇒
 ///    本件只把 [AylaMessageInputSubmission] 交回调用方（语音路径除外：web 也在组件内上传发送）。
+///
+/// ## 公开面
+/// `AylaPickedMedia` · `AylaMessageInputSubmission` · `AylaMessageInput` · 样张 `aylaMessageInputSamples()`
+
 library;
 
 import 'dart:async';

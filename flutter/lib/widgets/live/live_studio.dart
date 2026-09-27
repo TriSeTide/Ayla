@@ -1,27 +1,22 @@
-/// live 域第四批（B2-4）：主播头像 + 推流地址复制区。
+/// 主播头像 + 推流地址复制区。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// components/live/LiveHostAvatar.tsx      52 行（主播头像：资料懒拉 + 回退首字符光环）
 /// components/live/LiveStreamAddresses.tsx 72 行（服务器 / 串流密钥 / FLV 三行 + 复制）
 /// components/live/LiveCreate.tsx:15–18    obsServerFromRtmpUrl（取最后一个 `/` 之前）
-/// live.css 206–229    .live-studio-stream：column · gap sp2 · width min(100%, 960px) ·
-///                     padding sp3 · --glass-bg · 1px 亮边 · radius 16 · --glass-shadow ·
-///                     blur24 sat1.4；卡内 .live-copy-value 覆写为
-///                     （--glass-bg + 1px 亮边 + radius-input + --glass-inset）
-/// live.css 249–257    （≤768）`.live-copy-row { align-items: flex-start; flex-wrap: wrap }`
-///                     + `.live-copy-value { min-width: 0 }`
-/// app.css 3443–3467   .live-copy-row（flex center · gap sp2）· -label（width 64 · flex-shrink 0 ·
-///                     secondary · 12px）· -value（flex 1 · 省略号 · nowrap · padding sp1 sp2 ·
-///                     --ice-100 底 · radius-sm 8 · utility 12 · text-primary）
-/// app.css 3473–3477   .live-form-error（destructive · 13px · margin-top sp2）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_studio.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - `LiveHostAvatar` 在 web 里是**数据壳**（`ensureUser` 懒拉 + 缓存）：昵称/头像/在线全部
 ///   由页面注入（网络层不进 `lib/widgets`）；label 回退链与 aria 文案是**组件语义**，照实现；
 /// - `ensureUser` 的懒拉、`goUserProfile` 的跳转由页面持（[AylaLiveHostAvatar.onOpenProfile]）；
 /// - 复制走 `Clipboard.setData`（web 是 `navigator.clipboard.writeText`），可注入替身便于测试。
+///
+/// ## 公开面
+/// `AylaLiveHostAvatar` · `AylaLiveStreamAddresses` · `AylaLiveCopyRowVariant` · `AylaLiveCopyRow` · 样张 `aylaLiveStudioSamples()`
+
 library;
 
 import 'dart:async';
@@ -465,7 +460,7 @@ class _StreamAddressesDemoState extends State<_StreamAddressesDemo> {
         Row(
           spacing: AylaSpacing.sp2,
           children: <Widget>[
-            Text('已触发复制 $_copies 次', style: const TextStyle(fontSize: 11)),
+            Text('复制 ×$_copies', style: const TextStyle(fontSize: 11)),
             AylaGlassButton(
               label: _fail ? '失败态：开' : '失败态：关',
               variant: AylaGlassButtonVariant.ghost,

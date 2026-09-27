@@ -25,6 +25,10 @@
 ///    因此不占布局位、不会压缩气泡；
 /// 3. **收藏键状态**：web `FavoriteButton` 自持状态；Flutter 侧状态在页面层 ⇒
 ///    由 [AylaMessageBubble.favoriteState] 等参数注入（与库内 `AylaFavoriteButton` 契约一致）。
+///
+/// ## 公开面
+/// `AylaMessageBubble` · 样张 `aylaMessageBubbleSamples()`
+
 library;
 
 import 'dart:async';

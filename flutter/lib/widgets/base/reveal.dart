@@ -21,6 +21,10 @@
 /// 列表（`useListEntryMotion`）为 `min(i*50,300)`；群卡网格为 `min(i*80,300)`
 /// （见 `group_card.dart` 的 `staggerDelay(i)` 注释）。故 [AylaRevealItem.delay]
 /// 支持显式传入，不强制用本文件的默认步长。
+///
+/// ## 公开面
+/// `AylaRevealMotion` · `AylaRevealScope` · `AylaRevealScopeState` · `AylaRevealItem`
+
 library;
 
 import 'dart:async';

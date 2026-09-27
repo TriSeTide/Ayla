@@ -28,6 +28,10 @@
 ///
 /// **展示型组件**：媒体选择上传、失败重试、移除清理、提交请求全部由页面注入
 /// （文件选择插件与三步上传属平台层，对应 web `api/media.ts` 的实现位置）。
+///
+/// ## 公开面
+/// `AylaPostEditor` · 样张 `aylaPostEditorSamples()`
+
 library;
 
 import 'dart:async';

@@ -5,22 +5,7 @@
 /// .privacy-sheet-overlay { fixed; inset:0; z-index:120; --overlay-dim;
 ///   flex center; padding: 24px }
 /// .privacy-sheet-card { flex column; width: min(480px,100%);
-///   max-height: min(80vh, 720px); overflow:hidden;
-///   --glass-bg-strong; blur(24px) saturate(1.4); 1px --glass-border;
-///   radius-panel 20; --glass-shadow-modal }
-/// .is-narrow（≤768）{ absolute bottom:0; width:100%; height:60dvh;
-///   max-height:60dvh; radius 20 20 0 0; 去左右下边框; padding-bottom safe-area }
-/// .privacy-sheet-head { flex between; gap sp3; padding sp4; 下边框 glass-border }
-/// .privacy-sheet-title { font-display 16/700 }
-/// .privacy-sheet-body { flex column; gap sp3; padding sp4; overflow-y:auto }
-/// .privacy-sheet-hint { 13px --text-secondary }  strong → --indigo-700 700
-/// .privacy-menu-item { 左对齐列; gap 2px; padding sp3 sp2; radius-input;
-///   透明底; transition background 180ms }  :hover → rgba(157,191,230,.2)
-/// .privacy-menu-item-title { 15/700 --indigo-700 }
-/// .privacy-menu-item-desc { 12px --text-secondary }
-/// .privacy-sheet-submit { width:100%; min-height:44px; margin-top: sp1 }
-/// .privacy-done { align-items:center; text-align:center; padding-block: sp8 }
-/// .privacy-done-icon { 32px --success }  .privacy-done-text { 15/700 }
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/base/privacy_sheet.dart` 一节）
 /// ```
 ///
 /// ## 视图流（tsx，全部在弹窗内完成）
@@ -42,6 +27,10 @@
 /// - 发码按钮禁用条件：`sending || countdown>0`（换绑 step2 另加 `newEmail` 为空）
 /// - 错误显示在 `.auth-error`（`role=alert`）
 /// - 验证码输入 `inputMode=numeric` + **过滤非数字** + `maxLength 6`
+///
+/// ## 公开面
+/// `AylaPrivacyView` · `AylaPrivacySheet`
+
 library;
 
 import 'dart:async';

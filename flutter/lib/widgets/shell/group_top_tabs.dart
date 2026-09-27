@@ -23,6 +23,10 @@
 ///   `translate` 到 `calc(100dvh - 64px - safe-area)`（= 正好落在底栏位置），`entered` 后归零，
 ///   过渡 `translate 300ms --auroraqua-ease-out` → 视觉上「从底栏位置连续升至顶部」；
 ///   下拉回主页时父级用 `pullOffset` 驱动同一 `translate`（reduced-motion 时全部归零）。
+///
+/// ## 公开面
+/// `AylaGroupScene` · `AylaGroupTopTabs` · 样张 `aylaGroupTopTabsSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

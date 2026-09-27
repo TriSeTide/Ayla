@@ -10,6 +10,10 @@
 ///
 /// 视觉：樱粉渐变底 + grape 字 + 爱莉专属光环（辉光归属爱莉身份，design.md §2）。
 /// `display_name` 仅 UI 展示 —— **前端不生成爱莉的第一人称内容**（AGENTS.md §4.1）。
+///
+/// ## 公开面
+/// `AylaElysiaEntry` · 样张 `aylaElysiaEntrySamples()`
+
 library;
 
 import 'package:flutter/material.dart';

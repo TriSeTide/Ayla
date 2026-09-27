@@ -1,37 +1,23 @@
-/// live 域第四批（B2-4）：在看观众条 + 在看名单弹层。
+/// 在看观众条 + 在看名单弹层。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// components/live/LiveViewerStrip.tsx  85 行（整排按钮 / 人数圆 / 头像排 / 更多圆点 / 未知态）
 /// components/live/LiveViewerSheet.tsx 147 行（CreateSheet 配方 + 名单行 / 骨架 / 三态 / 60vh）
 /// live.css 1095–1183  .live-viewer-strip：min-height 44 · padding sp1 sp3 · 1px 亮边 ·
-///                     radius-input · --glass-bg + blur18 sat1.4 · --glass-shadow-compact ·
-///                     hover rgba(255,250,251,.72) · focus-visible 环；
-///                     .live-viewer-strip-count（min-width 32 / h32 / padding 0 6 / pill /
-///                     --ice-300 底 + --indigo-700 字 / gap 2）；-num（utility 12 / ls .3 / lh 1）；
-///                     is-unknown（`–` + --ice-100 + secondary，尺寸不变）；
-///                     -avatars（gap sp1 / flex 1 / overflow hidden）；-more（26×26 / pill /
-///                     1px 亮边 / --ice-100 底 / IconDots 14）
-/// live.css 1186–1210  落位：窄屏 swipe-item 内 margin-top sp2；宽屏非控制台 margin-top 0；
-///                     控制台 sp2；群内窄屏 sp2（**落位由调用方 Stack/Column 决定**）
-/// live.css 1212–1226  .live-viewer-sheet-card：flex column；head flex:none（标题不随名单滚）；
-///                     body flex 1 / min-height 0 / overflow-y auto / overscroll contain
-/// live.css 1237–1316  .live-viewer-row（min-height 48 / padding sp1 sp2 / radius-input /
-///                     透明底 / hover --glass-bg / focus ring）/ -row-name（15 / w600 / 1.4 单行省略）/
-///                     骨架（头像 41×41 pill + 名字 40%×14 pill，尺寸与真行一致）
-/// live.css 1298–1316  .live-viewer-sheet-state（sp4 0 / center / 14 secondary）+
-///                     -sheet-error（text-primary）/ -sheet-hint（「仅显示前 N 位」13 secondary）
-/// live.css 1318–1325  （≤768）`.live-viewer-sheet-card { height: 60vh; max-height: 60vh }`
-/// vitest/live-viewers.test.tsx 161–256  官方用例（整排可点 / 未知不冒充 0 / 0 是真实读数 /
-///                     纯展示不拉数据 / 行跳个人主页后关闭 / 截断提示 / 503 明示 + 重试 / portal）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_viewers.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - **数据全部由页面注入**（[AylaLiveViewerSheetData]）：web 在弹层内部 `getLiveChannelViewers`
 ///   拉取 + `getElysiaProfile` 判爱莉，网络层不进 `lib/widgets`；
 /// - **弹层宿主改为插 root Overlay**（[aylaOverlayEntry]，等价 web `createPortal(document.body)`；
 ///   官方用例 248–256 明确「侧栏 backdrop-filter 不裁剪弹层」）——库内先例 = 弹幕图片查看器宿主；
 /// - 落位（`margin-top` 与所属分区）由调用方决定，组件自身不带 margin。
+///
+/// ## 公开面
+/// `AylaLiveViewerItem` · `AylaLiveViewerSheetData` · `AylaLiveViewerStrip` · `AylaLiveViewerSheet` · 样张 `aylaLiveViewersSamples()`
+
 library;
 
 import 'dart:math' as math;
@@ -308,6 +294,8 @@ class AylaLiveViewerSheet extends StatelessWidget {
     required this.data,
     required this.onClose,
     this.titleOverride,
+    this.emptyLabel = '还没有人在看',
+    this.retryLabel = '重试',
   });
 
   /// 弹幕 WS 的预览名单（权威名单未到时打底，tsx 81）。
@@ -321,6 +309,12 @@ class AylaLiveViewerSheet extends StatelessWidget {
 
   /// 标题覆盖（默认按 tsx 83–86 推导）。
   final String? titleOverride;
+
+  /// 空态文案（web `LiveViewerSheet.tsx:109` 内硬编码；**开放给调用方**）。
+  final String emptyLabel;
+
+  /// 失败态重试键文案（web tsx 91–100 内硬编码；同上）。
+  final String retryLabel;
 
   /// 骨架行数（tsx 24 `ROW_SKELETON_COUNT = 6`）。
   static const int skeletonRows = 6;
@@ -399,7 +393,7 @@ class AylaLiveViewerSheet extends StatelessWidget {
               ),
             ),
             AylaGlassButton(
-              label: '重试',
+              label: retryLabel,
               variant: AylaGlassButtonVariant.ghost,
               onPressed: data.onRetry,
             ),
@@ -424,7 +418,7 @@ class AylaLiveViewerSheet extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: AylaSpacing.sp4),
         child: Text(
-          '还没有人在看',
+          emptyLabel,
           textAlign: TextAlign.center,
           style: t.body.copyWith(
             fontSize: 14,
@@ -691,7 +685,7 @@ class _ViewerSheetDemoState extends State<_ViewerSheetDemo> {
               onPressed: () => setState(() => _open = true),
             ),
             if (_picked != null)
-              Text('已点：$_picked', style: const TextStyle(fontSize: 11)),
+              Text('已选 ×$_picked', style: const TextStyle(fontSize: 11)),
           ],
         ),
       );

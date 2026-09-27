@@ -1,33 +1,23 @@
-/// live 域最后一批（B2-6）之二：手机端 App 内浮动小窗（`LiveMiniPlayer.tsx` 228 行）。
+/// 手机端 App 内浮动小窗（`LiveMiniPlayer.tsx` 228 行）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// live.css 1021–1039  .live-mini-player：**fixed · right 16 · bottom 16 · z-index 60** ·
 ///                     **168 × 94（16:9）** · cursor pointer · `touch-action:none` · 禁选中 ·
 ///                     `:focus-visible { outline: var(--focus-ring); outline-offset: 2px }`
-/// live.css 1042–1063  .live-mini-player-video-wrap：absolute inset 0 · radius-input ·
-///                     **--glass-bg-strong** · --glass-filter（blur24 sat1.4）· 1px 亮边 ·
-///                     --glass-shadow-compact · overflow hidden（**外层不裁剪**，关闭键才能突出在外）
-///                     + video：100%×100% · object-fit contain · background #000
-/// live.css 1065–1095  .live-mini-player-close：**top -10 / right -10** · 24×24 · pill ·
-///                     rgba(70,91,146,.32) · 1px rgba(255,255,255,.28) · #fff · blur8 sat1.2 ·
-///                     `0 2px 8px rgba(70,91,146,.2)` · hover → .52 · focus-visible 环
-/// tsx 25–33           DRAG_THRESHOLD 5 / DRAG_MARGIN 8 / **MINI 168×94** /
-///                     双指缩放 **宽 120–320**（高按 16:9）、**右下角锚定**
-/// tsx 36–41           默认位置 = 右下角（`innerWidth - 168 - 8` / `innerHeight - 94 - 8`）
-/// tsx 84–96           点击小窗 → 回直播间（`navigate(sourceRoute)`）
-/// tsx 93–96           关闭 → 完整销毁会话（hls → WS → 轮询 → store → 活动态；幂等）
-/// tsx 189–211         role=button + tabIndex=0 + **Enter/Space** 打开；aria「返回直播间」；
-///                     title = 频道标题；拖动/缩放后抑制合成 click（tsx 70/182–186）
-/// tsx 12–15（头注释）  仅**窄屏**离开直播间页面且直播中出现；同一时刻至多一个 owner
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_mini_player.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - video 由页面注入（同一 `HlsPlaybackController.videoView` ⇒ HLS 不断流），
 ///   组件只摆位与显隐；
 /// - web 是 `position: fixed` + `z-index 60`：Flutter 侧返回 **[Positioned]**（与 A4 的
 ///   `bottomLeft`/`narrow` 档同规矩）⇒ 调用方必须把它放在页面最外层 `Stack` 的直接子级；
 /// - 「窄屏 + 已离开直播间」这两个前置条件由**调用方**判断（本件只负责小窗本体）。
+///
+/// ## 公开面
+/// `AylaLiveMiniPlayer` · 样张 `aylaLiveMiniPlayerSamples()`
+
 library;
 
 import 'dart:math' as math;

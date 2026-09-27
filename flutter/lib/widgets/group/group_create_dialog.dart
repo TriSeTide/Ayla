@@ -1,6 +1,6 @@
-/// B6 第一件：创建群聊对话框（GroupCreateDialog.tsx 184 行）。
+/// 创建群聊对话框（GroupCreateDialog.tsx 184 行）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ── 弹层与卡片**与 CreateSheet 同规格**（private.css 「通用弹层」段 188–280 明写两者共用）：
 /// overlay 遮罩 rgba(70,91,146,.25) · padding sp4 · **窄屏贴底 padding 0**；
 /// 卡片 min(480px,100%) · max-height 80vh · overflow-y auto · padding sp4 · glass-bg-strong ·
@@ -33,6 +33,10 @@
 /// web 在组件内直接调 chatApi 并 navigate；Flutter 侧注入：搜索结果与分页由页面层注入
 /// （[searchResults] / [onSearchChanged] / [onLoadMoreResults]），建群与私聊分别走
 /// [onSubmit] / [onOpenPrivate]（返回 conversation_id），跳转归调用方（[onDone]）。
+///
+/// ## 公开面
+/// `AylaGroupCreateException` · `AylaGroupCreateDialog` · 样张 `aylaGroupCreateDialogSamples()`
+
 library;
 
 import 'dart:async';

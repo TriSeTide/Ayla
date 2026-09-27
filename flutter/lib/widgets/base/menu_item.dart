@@ -19,6 +19,10 @@
 ///
 /// **零透明用同色相**（`ice500.withValues(alpha: 0)`）：Flutter 的 `Color.lerp`
 /// 逐通道直插，从 `Colors.transparent`（透明黑）出发中途会闪中性灰。
+///
+/// ## 公开面
+/// `AylaMenuItemMetrics` · `AylaMenuItem`
+
 library;
 
 import 'package:flutter/material.dart';

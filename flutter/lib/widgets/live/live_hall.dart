@@ -1,32 +1,14 @@
-/// live 域第二批（B2-2）：直播大厅卡片 + 大厅网格。
+/// 直播大厅卡片 + 大厅网格。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// components/live/LiveChannelCard.tsx  12–53（封面 + 徽章 + 人数 + 标题 + meta + 收藏/转发）
 /// components/live/LiveHall.tsx         13–45（空态 + 网格 + stagger）
 /// app.css 3275–3279   .live-hall-grid：grid / repeat(auto-fill, minmax(240px,1fr)) / gap sp4
-/// app.css 3281–3285   .live-card-wrap：relative / width 100% / min-width 0
-/// app.css 3287–3305   .live-card：flex column / gap sp2 / padding sp4 / transparent-bg…（下面逐条）
-/// app.css 3306–3310   .live-card-wrap > .favorite-toggle：absolute top sp3 / right sp3
-/// app.css 3350–3355   .live-card-title：--font-display / text-primary / 16 / line-height 1.35
-/// app.css 3357–3363   .live-card-owner：flex 1 1 auto / min-width 0 / secondary / 13 / 1.4
-/// app.css 3365–3369   .live-hall-empty：secondary / center / padding sp12 0
-/// app.css 3371–3397   .live-badge 族（padding 2×sp2 / pill / 12 / --font-utility）
-/// live.css 486–493    .live-badge-source：--sakura-300 底 + --grape-700 字 + max-width 12ch
-/// live.css 559–572    .live-card-cover：relative / center / aspect-ratio 16/9 / radius-input /
-///                     透明底 / color --ice-500 / 1px --glass-border / overflow hidden
-/// live.css 575–583    .live-card-cover-badge：absolute top calc(sp1 - 1px) / left sp1 / gap sp1
-/// live.css 585–596    .live-card-meta（gap sp2 / min-width 0）+ .live-card-source-tags（max-width 55%）
-/// live.css 617–655    .live-hub 网格覆写：≤768 2 列 + padding sp3 sp4；≥769 3 列；≥1440 4 列
-/// live.css 628–631    .live-hub .live-card { padding: sp2 }（≤768）
-/// live.css 636–640    ≥769：收藏键 top/right = calc(sp4 + sp1) = 20px
-/// live.css 811–814    .live-badge-live 覆写为 --pink-500 底 + --surface 字（U9）
-/// live.css 1333–1354  .live-card-viewers：右下玻璃胶囊（--glass-bg-strong + blur8 无 saturate）
-/// shell.css 619–629   .placeholder-title（Fredoka 28/600）+ .placeholder-desc（14 secondary）
-/// auroraqua.css 29–52 卡片族过渡/悬停（translate 0 -2px + --glass-shadow-hover）/按压 .99
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_hall.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - 收藏键与转发键由**页面注入状态与回调**（Flutter 侧收藏有独立状态机：
 ///   `AylaFavoriteButton` 的 state/busy/onToggle）；web 里 `action === undefined`
 ///   默认渲染 `<FavoriteButton compact/>`，这里由 [AylaLiveChannelCard.showActions] 表达
@@ -34,6 +16,10 @@
 /// - ⚠️ **转发键是有意偏离 web 的补充**：web 的 `LiveChannelCard` 只有收藏键
 ///   （转发键在直播**房头部**，`LiveRoomBody.tsx` 330–339）。要求
 ///   「要转发键，都要」⇒ 卡片也补上，位置贴收藏键左侧（收藏键保持 web 的右上角位置）。
+///
+/// ## 公开面
+/// `AylaLiveStatus` · `AylaLiveCardData` · `AylaLiveChannelCard` · `AylaLiveHall` · 样张 `aylaLiveHallSamples()`
+
 library;
 
 import 'dart:math' as math;
@@ -552,10 +538,18 @@ class AylaLiveHall extends StatelessWidget {
     this.padding,
     this.favoriteStateBuilder,
     this.onToggleFavorite,
+    this.emptyTitleLabel = '还没有直播间',
+    this.emptyHintLabel = '点右下角 + 发起第一场直播吧',
   });
 
   /// 频道列表。
   final List<AylaLiveCardData> channels;
+
+  /// 空态主文案（web `LiveHall.tsx:32` 内硬编码；**开放给调用方**）。
+  final String emptyTitleLabel;
+
+  /// 空态副文案（web tsx 33；同上）。
+  final String emptyHintLabel;
 
   /// 进入直播间（传频道 id）。
   final ValueChanged<String> onEnter;
@@ -592,7 +586,7 @@ class AylaLiveHall extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Text(
-              '还没有直播间', // tsx 32
+              emptyTitleLabel, // tsx 32
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: AylaFonts.display,
@@ -603,7 +597,7 @@ class AylaLiveHall extends StatelessWidget {
               ),
             ),
             Text(
-              '点右下角 + 发起第一场直播吧', // tsx 33
+              emptyHintLabel, // tsx 33
               textAlign: TextAlign.center,
               style: t.body.copyWith(
                 fontSize: 14, // `.placeholder-desc`

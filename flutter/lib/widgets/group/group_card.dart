@@ -22,6 +22,10 @@
 ///    300ms `--auroraqua-ease-out`，延迟 `staggerDelay(i)` = `min(i*80, 300)`ms；
 ///    reduced-motion 直接可见。
 ///    实现已收敛到公共件 `AylaRevealItem`（`widgets/reveal.dart`，2026-09-20 审查 R7）。
+///
+/// ## 公开面
+/// `AylaGroupSlideKind` · `AylaGroupSlideVoiceRoom` · `AylaGroupCarouselSlide` · `AylaGroupCarousel` · `AylaGroupCard` · `AylaGroupListItem` · `AylaGroupGrid` · `AylaGroupList`
+
 library;
 
 import 'package:flutter/material.dart';

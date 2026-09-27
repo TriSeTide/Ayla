@@ -7,12 +7,7 @@
 /// .create-sheet-overlay { position:fixed; inset:0; z-index:70; center;
 ///   padding: var(--sp-4); background: rgba(70,91,146,.25); }   ← --overlay-dim
 /// .create-sheet-card    { width: min(480px,100%); max-height:80vh; overflow-y:auto;
-///   padding: var(--sp-4); background: var(--glass-bg-strong);
-///   backdrop-filter: var(--glass-filter); border: 1px solid var(--glass-border);
-///   border-radius: var(--radius-panel); box-shadow: var(--glass-shadow-modal); }
-/// 窄屏(≤768): overlay align-items:flex-end + padding 0;
-///   card width 100% + radius 24 24 0 0 + 去掉左右下边框
-///   + padding-bottom calc(sp4 + safe-area) + animation create-sheet-slide-in 250ms
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/base/dialogs.dart` 一节）
 /// ```
 /// **内容**：`.create-sheet-head`（标题 Fredoka 18/600 + 关闭 icon-btn-40）、
 /// `.confirm-dialog-message`（14px / lh 1.6 / `white-space: pre-line`）、
@@ -30,6 +25,10 @@
 /// .async-state-skeleton { width:100%; min-height: 72px; }
 /// ```
 /// 四态：`loading`（骨架）/ `error`（文案 + 「重试」ghost 按钮）/ `empty` / `content`。
+///
+/// ## 公开面
+/// `AylaConfirmDialog` · `AylaAsyncStatus` · `AylaAsyncState` · `AylaModalCard` · `AylaModalOverlay` · `AylaSheetHead`
+
 library;
 
 import 'dart:ui' show ImageFilter;

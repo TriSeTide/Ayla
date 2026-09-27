@@ -4,6 +4,10 @@
 ///
 /// 来源标注约定：`t:xxx`=tokens.css 变量、`d:§x`=design.md 章节。
 /// 组件内一律引用本文件，禁止散落 hex。
+///
+/// ## 公开面
+/// `AylaColors` · `AylaGradients` · `AylaFonts` · `AylaSpacing` · `AylaRadii` · `AylaShadows` · `AylaDurations` · `AylaCurves` · `AylaBreakpoint` · `AylaBreakpoints` · `AylaInset`
+
 library;
 
 import 'package:flutter/animation.dart' show Cubic;

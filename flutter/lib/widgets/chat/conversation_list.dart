@@ -35,6 +35,10 @@
 /// ## 注入面（presence 是运行事实，由页面层给）
 /// [AylaConversationList.isOnline] / [AylaConversationList.statusLabel] 未注入时分别回退
 /// REST 快照 `peer.online` 与 [aylaDisplayStatusOf]（与 web 的 `withLiveStatus` 回退链一致）。
+///
+/// ## 公开面
+/// `AylaConversationList` · 样张 `aylaConversationListSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

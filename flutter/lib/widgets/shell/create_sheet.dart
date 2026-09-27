@@ -1,23 +1,11 @@
 /// CreateSheet —— FAB 创建浮层（`layout/CreateSheet.tsx` 1–61 + `private.css` 185–275）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// tsx:39–44   .create-sheet-overlay { position:fixed; inset:0; z-index:70;
 ///               display:flex; align-items:center; justify-content:center;
 ///               padding: var(--sp-4); background: rgba(70,91,146,.25) }
-///             点遮罩关闭 = `e.target === e.currentTarget`（**点卡内不关**）
-/// tsx:45–49   .create-sheet-card { width:min(480px,100%); max-height:80vh;
-///               overflow-y:auto; padding: var(--sp-4); background: --glass-bg-strong;
-///               backdrop-filter: --glass-filter(blur24 sat1.4); 1px --glass-border;
-///               border-radius: --radius-panel(20); box-shadow: --glass-shadow-modal }
-/// tsx:50–55   .create-sheet-head + .create-sheet-title + button.icon-btn-40(IconClose 20)
-/// tsx:56      {children} 直接跟在 head 之后（无额外容器）
-/// tsx:30–36   ESC → onClose（document keydown）
-/// tsx:47–48   role="dialog" aria-label={title}
-/// css:241–258 窄屏(≤768)：overlay align-items:flex-end + padding 0；
-///               card width:100% / radius 24 24 0 0 / 去左右下边框 /
-///               padding-bottom calc(sp4 + safe-area) / create-sheet-slide-in 250ms
-/// css:270–275 prefers-reduced-motion → animation:none
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/shell/create_sheet.dart` 一节）
 /// ```
 ///
 /// ## 复用（材质与交互一件都不新写）
@@ -47,6 +35,10 @@
 ///   —— 见 `group.css:2134`）。页面层接线时按该顺序插入；
 /// - 同容器的 `GroupCreateDialog`（`.group-create-dialog`，B6 待做）可直接复用本件
 ///   的 head / overlay / card 三件。
+///
+/// ## 公开面
+/// `AylaCreateSheet`
+
 library;
 
 import 'package:flutter/material.dart';

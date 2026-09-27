@@ -1,6 +1,6 @@
 /// 媒体消息渲染（`components/chat/MediaContent.tsx` 的 Flutter 等价）。
 ///
-/// ## 事实源（逐条对照）
+/// ## 事实源
 ///
 /// | 本文件 | web |
 /// |---|---|
@@ -26,6 +26,10 @@
 /// 组件**不拥有**会话状态：descriptor 补拉走 [AylaMediaContent.descriptorFetcher]
 /// （默认 dio 直连后端 `/media/{id}/`），拉回后经 [AylaMediaContent.onDescriptorFetched]
 /// 交回持有方（等价 web `useMessageStore.mergeMedia`），组件自身只做本地投影。
+///
+/// ## 公开面
+/// `AylaMediaContent` · `AylaMediaRetryButton` · 样张 `aylaMediaContentSamples()`
+
 library;
 
 import 'dart:io' show File;

@@ -1,6 +1,6 @@
-/// B6-4：全局覆盖层滚动条（OverlayScrollbar.tsx 311 行 + base.css 385–421）。
+/// 全局覆盖层滚动条（OverlayScrollbar.tsx 311 行 + base.css 385–421）。
 ///
-/// ## 事实源（逐条对应 web）
+/// ## 事实源
 /// ── 常量：THICKNESS **4** / OFFSET **2** / PAD **3** / MIN_VERT **28** / MIN_HORZ **48** /
 /// HIDE_DELAY **600ms** / 窄屏 `max-width: 768px` **完全不显示、不参与计算**
 /// ── 度量：竖条优先（`scrollHeight > clientHeight + 1`），纯横向容器才画底部条；
@@ -15,7 +15,7 @@
 /// （`pointerdown → setPointerCapture`，`pointermove` 把拾取点换算成 `scrollTop/scrollLeft`，
 /// `pointerup/cancel` 结束并按悬停语义重新计时）；窄屏/窗口 resize 时清掉可见态避免几何过期
 ///
-/// ## 与 web 的机制差异（平台语义差，逐条登记）
+/// ## 机制差异
 /// web 是**文档级事件委托**（`document` 的 scroll(capture)/mouseover/mouseout + `window.resize`），
 /// thumb 挂在 `body` 上（React 树之外），用 `getBoundingClientRect` 取视口坐标。Flutter 没有
 /// 文档级事件与 body 挂载，等价做法：
@@ -33,6 +33,10 @@
 ///   文档移除的容器；Flutter 在每次滚动时检查滚动容器的 `ScrollContext` 是否仍挂载
 ///   （`_pruneDetached`），否则失效的 `ScrollPosition` 会在下一次重算时被访问并留下幽灵条。
 /// ⚠️ 因此**不是** web 的「挂一次即可」：页面层要把它包在应用根（`AylaOverlayScrollbar(child: app)`）。
+///
+/// ## 公开面
+/// `AylaOverlayScrollbar` · 样张 `aylaOverlayScrollbarSamples()`
+
 library;
 
 import 'dart:async';

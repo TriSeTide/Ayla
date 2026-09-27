@@ -12,6 +12,10 @@
 /// | [AylaTabBadgeMetrics.serverItem] | group.css 561–575 `.server-item-badge` | min 16×16 / padding 0 4 / pill | Fredoka 11（`line-height: 16px`） | **由调用方绝对定位**（头像左下角 `left:-3 bottom:-3`） |
 ///
 /// 数字 > [max] 显示 `max+`（消息中心红点语义，d:§12.14）。
+///
+/// ## 公开面
+/// `AylaTabBadgeMetrics` · `AylaTabBadgePlacement` · `AylaTabBadge`
+
 library;
 
 import 'package:flutter/material.dart';

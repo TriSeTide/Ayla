@@ -16,6 +16,10 @@
 /// **单字符** ⇒ 选区/删除只能整块命中或完全不动，与 web 的 span 行为一致，
 /// 且不需要自定义删除拦截（Flutter 的 `TextEditingController` 只需维护
 /// 「占位符索引 → (user_id, name)」映射随文本变更迁移）。
+///
+/// ## 公开面
+/// `AylaMentionSpan` · `AylaMentionTextController`
+
 library;
 
 import 'package:flutter/material.dart';

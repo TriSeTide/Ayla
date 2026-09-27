@@ -3,6 +3,10 @@
 /// 事实源：`Ayla/docs/design.md` §3 Hierarchy（大小/字重/行高/字距逐条对应）
 /// 与 `tokens.css` `--font-*`。CJK 一律走 [AylaFonts.cjkFallback] 回退链
 /// （Fredoka/Nunito 只覆盖拉丁与数字，中文由系统圆体承接）。
+///
+/// ## 公开面
+/// `AylaTextStyles`
+
 library;
 
 import 'package:flutter/material.dart';

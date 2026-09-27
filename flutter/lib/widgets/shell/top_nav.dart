@@ -1,7 +1,7 @@
 /// 响应式顶部导航 —— 宽屏 `TopNav` 与窄屏 `NarrowTopBar` **两形态同一组件**，按宽度切换
 /// （web `AppShell.tsx:105–109`：`isNarrow ? <NarrowTopBar/> : <TopNav/>`，判据 `NARROW_QUERY` = `max-width: 768px`）。
 ///
-/// ## 事实源（逐条核对；含「后加载文件覆盖」关系）
+/// ## 事实源
 ///
 /// ### 宽屏（`layout/TopNav.tsx` 1–343 + `shell.css` 162–400 + `auroraqua.css` 全部命中 + `search.css` 365–486）
 /// - `.top-nav` 基础（shell.css:162–178）：`height: 64px`、`gap: sp6`、`padding: 0 sp6`、
@@ -53,6 +53,10 @@
 /// [AylaAvatarHalo]（40 / 36）、[AylaIconButton]（表面图标钮；`square: true` → `radius-input`）、
 /// [AylaTabBadge]（消息未读）、[AylaNavHighlight]（模块共享胶囊）、[AylaPressScale]（按压 + hover 1.02）、
 /// [AylaTextStyles]（`pageTitle` 供 logo / `bodyStrong` 供模块项 / `body` 供 14px 文案 / `microTag` 供组头 / `caption` 供错误行）。
+///
+/// ## 公开面
+/// `AylaTopNavVariant` · `AylaTopNavMenuAction` · `AylaSearchDropGroup` · `AylaTopNav` · 样张 `aylaTopNavSamples()`
+
 library;
 
 import 'dart:async';

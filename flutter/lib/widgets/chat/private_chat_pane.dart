@@ -20,6 +20,10 @@
 /// - `peerOnline` / `peerStatus`（presence）、`peerTyping`（typing 帧）；
 /// - `blocked`（非好友禁发判定由调用方给：它依赖好友关系查询，属数据层）；
 /// - `composer`（调用方构造 `AylaMessageInput`，与 `AylaDanmakuList` 同口径）。
+///
+/// ## 公开面
+/// `AylaPrivateChatPane` · 样张 `aylaPrivateChatPaneSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

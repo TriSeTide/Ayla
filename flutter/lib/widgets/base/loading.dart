@@ -10,6 +10,10 @@
 ///   600 渐变字（120deg indigo→grape，`line-height ≥1.25` 防 background-clip
 ///   裁字）+ spinner-md，无卡片容器、不放文案行
 /// - reduced-motion：循环转圈与骨架脉冲停止，保留静态标识与预留尺寸
+///
+/// ## 公开面
+/// `AylaLoadingSpinner` · `AylaSkeleton` · `AylaFullScreenLoader`
+
 library;
 
 import 'dart:math' as math;

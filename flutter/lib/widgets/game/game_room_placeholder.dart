@@ -1,50 +1,21 @@
-/// B4 boardgame 域第一批（3/3）：进入桌游室后的占位整页壳。
+/// 进入桌游室后的占位整页壳。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// GameRoomPlaceholder.tsx 132–187  结构：head（返回/名字/分享/收藏）+ body（说明 · 人数房主 ·
 ///                                  错误 · 房主控制 · 加入/离开）+ 删除确认弹窗
 /// boardgame.css 136–141   .game-room-placeholder：height 100% · flex column · overflow hidden
-/// boardgame.css 143–153   .game-room-placeholder-head：flex none · align-items center · gap sp3 ·
-///                         padding sp3 sp4 · --glass-bg · **blur(18px) saturate(1.4)** ·
-///                         border-bottom 1px --glass-border（无圆角）
-/// auroraqua.css 402–408   ≥769：:is(…, .game-room-placeholder-head) → 卡片化：
-///                         margin var(--sidebar-gutter) 12 · 1px --glass-border · radius-card 16 ·
-///                         --glass-shadow-compact · backdrop-filter --glass-filter（blur24 sat1.4）
-/// auroraqua.css 335 / 418 入场 auroraqua-panel-from-top（translate 0 -20px + fade，
-///                         --auroraqua-duration 300ms + --auroraqua-ease-out）；两档都有；
-///                         auroraqua 614–645 的 reduced-motion 档关闭动画
-/// boardgame.css 155–163   .game-room-placeholder-name：flex 1 · display 18 · text-primary ·
-///                         ellipsis · nowrap
-/// boardgame.css 165–181   .game-room-placeholder-body：flex 1 · min-height 0 · flex column ·
-///                         align-items center · justify-content **safe center** · gap sp3 ·
-///                         padding sp6 · text-align center · overflow-y auto ·
-///                         overscroll-behavior contain；子项 flex-shrink 0
-/// boardgame.css 183–189   .game-room-owner-controls：flex column · gap sp3 ·
-///                         width min(100%, 680px) · text-align left（**无 align-items**
-///                         ⇒ 子项 stretch：删除键在 web 里是全宽的）
-/// boardgame.css 191–208   .game-room-member-action：flex · align center · wrap · gap sp2 ·
-///                         padding sp2 0；span flex 1 1 120px + overflow-wrap anywhere；
-///                         .btn flex none
-/// boardgame.css 210–219   .game-room-placeholder-desc 14/text-secondary；
-///                         .game-room-placeholder-meta utility 13/text-primary
-/// posts.css 373–376       .post-editor-error：13px · --destructive
-/// tsx 135–143             head：.icon-btn-40 + IconBack(20) · 名字 · ShareButton(label 分享桌游室) ·
-///                         FavoriteButton(compact)
-/// tsx 146–151             正文文案「桌游玩法后续上线，当前为房间框架占位」+
-///                         「{member_count} 人 · 房主 {owner.nickname || owner.username}」
-/// tsx 153–162             isOwner：房主控制 + 成员行（**排除自己**）+
-///                         DirectoryLoadMore + 「删除房间」(.btn-destructive)
-/// tsx 163–176             AylaConfirmDialog(title 删除桌游房间 / message
-///                         「确定删除桌游房间「{name}」？此操作不可撤销。」/ 确认键默认「删除」)
-/// tsx 177–185             isMember ? 「离开房间」(.btn-ghost) : 「加入房间」(.btn-primary)；
-///                         busy 文案「离开中…」/「加入中…」
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/game/game_room_placeholder.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// web 组件内直接调 boardgameApi（join/leave/成员操作/删除）并自持 latestRoom 与竞态守卫；
 /// Flutter 侧按 live/voice 整页壳的既有范式（AylaLiveRoomBody / AylaVoiceRoomBody）：
 /// **权威状态与请求全部注入**，组件只保留纯 UI 状态（删除确认弹窗开关）。
+///
+/// ## 公开面
+/// `AylaGameRoomPlaceholder` · 样张 `aylaGameRoomPlaceholderSamples()`
+
 library;
 
 import 'package:flutter/material.dart';

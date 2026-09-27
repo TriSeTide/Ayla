@@ -1,35 +1,14 @@
-/// live 域最后一批（B2-6）之一：播放器区域三态渲染（`LivePlayer.tsx` 420 行）。
+/// 播放器区域三态渲染（`LivePlayer.tsx` 420 行）。
 ///
-/// ## 事实源（逐条对应 web，禁自由发挥）
+/// ## 事实源
 /// ```
 /// app.css 3517–3525   .live-player：relative · width 100% · **aspect-ratio 16/9** ·
 ///                     background rgba(70,91,146,.12) · radius-card · overflow hidden · 1px --glass-border
 /// app.css 3528–3533   .live-player-video：100%×100% · object-fit contain · background #000
-/// app.css 3535–3553   .live-player-placeholder：absolute inset 0 · column · center · gap sp3 ·
-///                     --text-secondary；`.live-player-degraded` → --warning；`.live-player-error` → --destructive
-/// app.css 3557–3615   .live-player-controls（absolute inset 0 · z 5 · opacity 0 → is-visible 1 ·
-///                     transition --dur-fast；隐藏时整层 pointer-events 穿透）·
-///                     .live-player-btn（32×32 · pill · rgba(70,91,146,.32) · 1px rgba(255,255,255,.28) ·
-///                     #fff · blur(8px) saturate(1.2) · hover .52 · focus-visible --focus-ring）·
-///                     .live-player-refresh（left sp2 / bottom sp2）· .live-player-corner（right sp2 /
-///                     bottom sp2 / gap sp2）
-/// app.css 3618–3636   .live-player-refresh.is-spinning svg → live-refresh-spin 0.6s --ease-out；
-///                     prefers-reduced-motion → animation none
-/// live.css 939–1005   .live-player-fs-input（absolute · left 50% · bottom sp2 · translateX(-50%) ·
-///                     gap sp2 · **width min(320px, 100% - 120px)** · min-height 50 · padding 4 4 4 12 ·
-///                     radius-input · --glass-bg · 1px 亮边 · **--glass-filter（blur24 sat1.4）** ·
-///                     默认穿透，容器可见时才可交互）+ input（flex 1 · **min-height 40** · 透明 ·
-///                     14px · ::placeholder --slate-500）+ `.live-player-fs-send`（**40×40** · `.btn-primary`）
-/// live.css 961–980    .live-player-fs-error（输入框上方 · 玻璃 · 12px/1.5 · 居中 · 可换行）
-/// tsx 24              `AUTO_HIDE_MS = 3000`（显示后 3s 无操作自动隐藏）
-/// tsx 186–363         三态：`srsStatus === null` → 「正在查询直播状态…」/ degraded →
-///                     「直播服务状态未知，请稍后再试」/ idle → 「等待推流信号…」（optimistic live）
-///                     或「主播未开播」/ live + playerError → 「播放失败」+ `btn.btn-glow`「重试」
-/// tsx 365–418         根 div 的 onMouseEnter/onMouseMove/onClick → showControls、onMouseLeave → hideControls
-/// tsx 74–139          全屏弹幕输入（独立 owner：revision 守卫 + busy 守卫 + Enter 发送 + 200 上限）
+/// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_player.dart` 一节）
 /// ```
 ///
-/// ## 与 web 的装配差异（组件不写页面）
+/// ## 机制差异
 /// - **video 元素在 web 由 runtime 持有并在大窗/小窗之间原子迁移**；Flutter 侧由页面把
 ///   `HlsPlaybackController.videoView`（PoC-B 封装层）作为 [AylaLivePlayer.videoView] 注入，
 ///   组件只负责摆位与显隐（控制器生命周期属页面）；
@@ -39,6 +18,10 @@
 /// - **全屏**：web 用 `requestFullscreen()` 让容器进 top layer；Flutter 侧改为**插 root Overlay**
 ///   的全屏呈现（同一控制器、视图在 overlay 里重挂；inline 侧在全屏期间不再挂视频，
 ///   避免平台视图被同时 attach 两次）+ 移动端锁横屏（退出时解锁）。桌面/Web 忽略锁屏。
+///
+/// ## 公开面
+/// `AylaLiveSrsStatus` · `AylaLivePlayer` · 样张 `aylaLivePlayerSamples()`
+
 library;
 
 import 'dart:async';
