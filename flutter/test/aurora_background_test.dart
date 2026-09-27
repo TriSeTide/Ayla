@@ -16,7 +16,6 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -338,6 +337,14 @@ void main() {
   // ------------------------------------------------------------------
   // 5. 纹理与半径
   // ------------------------------------------------------------------
+
+  test('九层绘制顺序：CSS background 列表第一项在最上 ⇒ canvas 必须倒序画', () {
+    final List<AylaAuroraRadialSpec> order = AylaFluidAurora.paintOrder;
+    expect(order.length, 9);
+    // 第一笔 = 列表最后一项（中心暖白光晕，最底层）；正序画会让它盖住四角四色 ⇒ 整片发白
+    expect(order.first, same(AylaFluidAurora.staticLayers.last));
+    expect(order.last, same(AylaFluidAurora.staticLayers.first));
+  });
 
   test('farthest-corner 半径：正方形四角 √2 / 中心 √2÷2 / 非正方形按短边归一', () {
     const Size square = Size(300, 300);

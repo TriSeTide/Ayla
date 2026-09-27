@@ -18,6 +18,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+
 import '../lib/preview/component_gallery.dart';
 import '../lib/theme/preview_theme.dart';
 
@@ -44,6 +45,12 @@ import '../lib/theme/preview_theme.dart';
 /// «saveLayer»。imageFiltered 全 0 ⇒ 背景已经不是逐帧滤镜（烘焙管线生效）。
 const int kMaxLayersPerCategory = 350;
 
+/// ⚠️ 「滚动一屏后需要重绘的 RenderObject 数」这个指标**测不准，已废弃**（2026-09-25 实测）：
+/// `debugNeedsPaint` 在 `SingleChildScrollView` 里反映的是「**未进入视口、因而没被绘制过**的
+/// 节点数」（整列都会 layout、只有视口内的才 paint），与 `RepaintBoundary` 无关 ——
+/// 加边界前后都是 4652。滚动隔离本身仍由 Flutter 机制保证（`RepaintBoundary` 让
+/// `paintContext.paintChild` 只更新 layer offset、不重绘子树），画布每个分区都已加边界。
+
 void main() {
   /// 真实宿主等价环境：MaterialApp 提供 Directionality/Material/Localizations。
   Widget host(Widget child) => MaterialApp(home: previewScope(child));
@@ -55,6 +62,7 @@ void main() {
   }
 
   int countOf(Finder finder) => finder.evaluate().length;
+
 
   testWidgets('画布性能审计：逐分类统计离屏层数量（输出清单 + 预算回归锁）', (
     WidgetTester tester,

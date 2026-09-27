@@ -251,6 +251,11 @@ abstract final class AylaFluidAurora {
   /// 之下没有别的实底 ⇒ 取九层之上仍可透出的 `--ice-100`（design.md §2 Core）。
   static const Color backdrop = AylaColors.ice100;
 
+  /// 九层的**绘制顺序**：CSS background 列表第一项在最上 ⇒ canvas 里要**倒序**画
+  /// （先画列表最后一项 = 最底层）。见 [aylaPaintAuroraRadials]。
+  static List<AylaAuroraRadialSpec> get paintOrder =>
+      staticLayers.reversed.toList(growable: false);
+
   // ------------------------------------------------------------------
   // ② 渐变流层（base.css 57–80）
   // ------------------------------------------------------------------
@@ -432,8 +437,13 @@ int aylaAuroraBakePixels(Size viewport, double dpr) {
 // ======================= 绘制原语（供烘焙管线调用） =======================
 
 /// 九层 `--bg-aurora` radial（tokens.css 28–36，半径按 farthest-corner 动态算）。
+///
+/// ⚠️ **必须按 [AylaFluidAurora.paintOrder] 倒序绘制**：CSS 的 background 列表
+/// **第一项在最上层**，而 canvas 是「后画的盖住先画的」—— 正序画会把第 9 层（中心暖白
+/// 光晕）与 5–8 层（四边隔离白光斑）压到四角四色之上，整片发白
+/// （2026-09-25 用户截图实报：「你是不是给光斑层加了一层全白遮罩」）。
 void aylaPaintAuroraRadials(Canvas canvas, Size size) {
-  for (final AylaAuroraRadialSpec spec in AylaFluidAurora.staticLayers) {
+  for (final AylaAuroraRadialSpec spec in AylaFluidAurora.paintOrder) {
     final Offset center = Offset(
       (spec.alignment.x + 1) / 2 * size.width,
       (spec.alignment.y + 1) / 2 * size.height,

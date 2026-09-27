@@ -1848,18 +1848,23 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(title, style: t.cardTitle),
-        const SizedBox(height: AylaSpacing.sp1),
-        Text(
-          source,
-          style: t.timestamp.copyWith(color: AylaColors.textSecondary),
-        ),
-        const SizedBox(height: AylaSpacing.sp3),
-        child,
-      ],
+    // 每个分区一个独立重绘边界：画布是 SingleChildScrollView + 单个 Column，不隔离的话
+    // **滚动一帧会把整列（含全部样张的玻璃卡与半透明层）标记重绘** —— 2026-09-25 实测
+    // 4640 个 RenderObject 需要重绘；隔离后只剩进入视口的那几个分区。见 perf_audit_test。
+    return RepaintBoundary(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(title, style: t.cardTitle),
+          const SizedBox(height: AylaSpacing.sp1),
+          Text(
+            source,
+            style: t.timestamp.copyWith(color: AylaColors.textSecondary),
+          ),
+          const SizedBox(height: AylaSpacing.sp3),
+          child,
+        ],
+      ),
     );
   }
 }
