@@ -147,6 +147,17 @@ abstract final class AylaGradients {
     AylaColors.glassBorder,
     Color(0x00FFFFFF),
   ];
+
+  /// 扫光带在 `opacity: .5` 下的**等价色**（= [sweep] 每项 alpha ×.5）。
+  ///
+  /// 性能（2026-09-27 §8.17）：三处扫光（玻璃输入/按钮、图标钮、导航胶囊）
+  /// 原先都写成「`Opacity(.5)` 包一层渐变」。扫光带是**单层渐变、内部无
+  /// 重叠** ⇒ 逐色 alpha 与 group opacity 逐像素等价，但省掉一次 `saveLayer`
+  /// —— 扫光是 600ms 内每帧位移的动画，那个层每帧都要重新录制。
+  /// `static final` 只在首次访问时算一次，之后零分配。
+  static final List<Color> sweepHalf = <Color>[
+    for (final Color c in sweep) c.withValues(alpha: c.a * 0.5),
+  ];
 }
 
 /// 毛玻璃滤镜参数（t:--glass-filter = `blur(24px) saturate(1.4)`）。

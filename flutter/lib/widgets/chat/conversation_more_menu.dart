@@ -580,12 +580,10 @@ class _MenuPanelState extends State<_MenuPanel> {
       layered = Stack(
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: r,
-              child: BackdropFilter(
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: r,
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
             ),
           ),
           body,

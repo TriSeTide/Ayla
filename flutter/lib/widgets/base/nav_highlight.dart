@@ -231,10 +231,9 @@ class AylaNavHighlightState extends State<AylaNavHighlight>
                         child: child,
                       );
                     },
-                    child: const Opacity(
-                      opacity: 0.5, // ::after { opacity: .5 }
-                      child: _SweepBand(),
-                    ),
+                    // ::after { opacity: .5 } 已乘进渐变色（性能 2026-09-27
+                    // §8.17：单层渐变无重叠 ⇒ 等价且省一次 saveLayer）。
+                    child: const _SweepBand(),
                   ),
                 ],
               ),
@@ -301,7 +300,7 @@ class _SweepBand extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: cssLinearGradient(
           angleDeg: 90,
-          colors: AylaGradients.sweep,
+          colors: AylaGradients.sweepHalf, // opacity .5 已在色里
         ),
       ),
     );

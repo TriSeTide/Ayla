@@ -22,6 +22,7 @@
 
 library;
 
+import 'dart:ui' as ui;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
@@ -33,14 +34,60 @@ import 'app_theme.dart';
 import 'css_gradient.dart';
 import 'tokens.dart';
 
+/// 毛玻璃质量档 —— **性能旋钮**（默认档不改任何视觉）。
+///
+/// 背景逐帧流动 ⇒ 玻璃卡的 `BackdropFilter` 每帧都要重新采样并高斯模糊背后
+/// 的内容（13 号 §8.5：这是全库最贵的一项）。本枚举给出三个档位：默认保持
+/// web 的一比一观感，另两档是「用户拍板后才用」的性能取舍。
+///
+/// 切换方式：`AylaGlassConfig.quality = AylaGlassQuality.preblurred;` —— 全站
+/// 玻璃件（卡片 / 按钮 / 输入框 / 导航条 / 弹层遮罩）同一次生效，组件不用改。
+enum AylaGlassQuality {
+  /// 真玻璃（**默认**）：`BackdropFilter` 逐帧采样 + blur（+ saturate），
+  /// 与 web 的 `backdrop-filter` 逐像素等价。
+  realBackdrop,
+
+  /// 预模糊：**不装滤镜**，改用 [AylaBackdropSnapshot]（背景静态九层的低频
+  /// 快照）按卡片在屏幕上的位置采样。
+  ///
+  /// 代价（**降档近似，不是等价实现**）：采样的是相位无关的静态层 ⇒ 卡片里
+  /// 看不到流层的动态变化；卡片若在滚动容器里且重绘被 `RepaintBoundary` 挡住，
+  /// 采样会滞留在上一帧位置。
+  /// 收益：整屏玻璃卡从「每帧 N 次高斯模糊」降到「N 次纹理采样」。
+  preblurred,
+
+  /// 实底：连采样都不做，改用不透明玻璃底（web 的 `@supports` 降级路径，
+  /// app.css 的 `rgba(255,250,251,.92)`）。
+  opaque,
+}
+
 /// 毛玻璃运行期配置（性能降级链，05 坑 1 / d:§9）。
 ///
 /// web 端降级条件是「浏览器不支持 `backdrop-filter`」（app.css @supports →
 /// `rgba(255,250,251,0.92)` 实底），Flutter 侧对应「平台/设备不适合逐帧
 /// 离屏模糊」——统一用 .92 不透明实底兜底，保住可读性且不再付模糊代价。
 abstract final class AylaGlassConfig {
-  /// 为 true 时全站玻璃卡改用不透明实底（低端设备/性能告警时手动开启）。
-  static bool useOpaqueFallback = false;
+  /// 当前质量档。**默认 [AylaGlassQuality.realBackdrop]**（与改造前逐像素
+  /// 一致，见 `test/glass_quality_test.dart` 的结构锁）。
+  static AylaGlassQuality quality = AylaGlassQuality.realBackdrop;
+
+  /// 兼容旧 API：等价于 `quality == AylaGlassQuality.opaque`。
+  ///
+  /// 低端设备 / 性能告警时手动开启（置 true）即切到实底档；置回 false 回到
+  /// 真玻璃档。需要「预模糊」档就直接写 [quality]。
+  static bool get useOpaqueFallback => quality == AylaGlassQuality.opaque;
+  static set useOpaqueFallback(bool value) {
+    quality = value ? AylaGlassQuality.opaque : AylaGlassQuality.realBackdrop;
+  }
+
+  /// 是否逐帧 `BackdropFilter`（真玻璃档）。
+  static bool get backdropEnabled => quality == AylaGlassQuality.realBackdrop;
+
+  /// 是否走「预模糊」采样档（不装滤镜，改用背景低频快照）。
+  static bool get preblurEnabled => quality == AylaGlassQuality.preblurred;
+
+  /// 是否还需要「背后内容」层（真玻璃 或 预模糊）。实底档整层不装。
+  static bool get backdropLayerEnabled => quality != AylaGlassQuality.opaque;
 
   /// 依据当前环境解析材料底色（默认 .55 / strong .78；降级 .92）。
   static Color resolveBackground({required bool strong}) {
@@ -67,6 +114,187 @@ abstract final class AylaGlassConfig {
   static ImageFilter blurOnly({required double sigma}) {
     return ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
   }
+}
+
+/// 预模糊档（[AylaGlassQuality.preblurred]）的采样源 —— 背景低频快照。
+///
+/// 由 [AylaAuroraBackground] 在预模糊档下烘焙并登记：一张「静态九层 + 白底」
+/// 的小图（长边 ≤ [maxSide]），坐标系 = 背景自己的盒（[viewport]），
+/// [origin] 是它在全局坐标里的左上角。玻璃卡用 `localToGlobal` 定位后
+/// `drawImageRect` 采样 —— **一次纹理采样**，没有滤镜。
+///
+/// 只在预模糊档被写；默认（真玻璃）档下永远是 null，玻璃卡走
+/// `BackdropFilter`，零额外成本。
+abstract final class AylaBackdropSnapshot {
+  /// 快照长边上限（逻辑像素）。九层 radial 是低频渐变，256 足够 —— 玻璃面
+  /// 上还压着 .55 半透明白底，采样细节本来就被压掉。
+  static const int maxSide = 256;
+
+  static ui.Image? _image;
+  static Size _viewport = Size.zero;
+  static Offset _origin = Offset.zero;
+  static int _revision = 0;
+
+  /// 当前快照（null = 未就绪 ⇒ 玻璃卡不画背后内容，退化为纯透明）。
+  static ui.Image? get image => _image;
+
+  /// 快照覆盖的视口尺寸（逻辑像素）。
+  static Size get viewport => _viewport;
+
+  /// 视口左上角在全局坐标里的位置。
+  static Offset get origin => _origin;
+
+  /// 版本号（每次登记 / 清空 +1）：采样层用它判断是否需要重绘。
+  static int get revision => _revision;
+
+  /// 登记新快照（旧图立即释放）。
+  static void register({
+    required ui.Image image,
+    required Size viewport,
+    required Offset origin,
+  }) {
+    _image?.dispose();
+    _image = image;
+    _viewport = viewport;
+    _origin = origin;
+    _revision++;
+  }
+
+  /// 清空（测试收尾 / 背景卸载）。
+  static void clear() {
+    _image?.dispose();
+    _image = null;
+    _viewport = Size.zero;
+    _origin = Offset.zero;
+    _revision++;
+  }
+}
+
+/// 玻璃卡的「背后内容」层 —— 按 [AylaGlassConfig.quality] 走三条路径。
+///
+/// **所有玻璃件都通过本件装背后内容**（卡片 / 按钮 / 输入框 / 导航条 /
+/// 弹层遮罩），不要各自直接写 `BackdropFilter`：质量档才能一次切换全站，
+/// 这也是 05 §4「单材料 owner」的延续。
+///
+/// 默认档（[AylaGlassQuality.realBackdrop]）的 widget 结构与直接写
+/// `ClipRRect(child: BackdropFilter(...))` 完全一致 ⇒ **零视觉代价**。
+class AylaGlassBackdrop extends StatelessWidget {
+  const AylaGlassBackdrop({
+    super.key,
+    required this.filter,
+    this.radius,
+    this.child,
+  });
+
+  /// 真玻璃档的滤镜（blur / blur+saturate），由 [AylaGlassConfig] 构造。
+  final ImageFilter filter;
+
+  /// 裁剪圆角（对齐 CSS 的 `border-radius` + `overflow`）；null = 不裁。
+  final BorderRadius? radius;
+
+  /// 滤镜层的 child；null = 纯透明 `SizedBox.expand`（只贡献滤镜层）。
+  ///
+  /// 极少数调用点把内容画在滤镜层内（弹层遮罩色、圆形播放键里的图标）——
+  /// 真玻璃档下保持原结构，故透传；预模糊档下它被挪到采样层**之上**。
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (AylaGlassConfig.quality) {
+      case AylaGlassQuality.opaque:
+        // 实底档：面层已换成不透明底（或本来就是半透明遮罩），
+        // 这里不再装任何「背后内容」层。
+        return child ?? const SizedBox.expand();
+      case AylaGlassQuality.preblurred:
+        final Widget sampled = AylaBackdropSampler(radius: radius);
+        if (child == null) return sampled;
+        return Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[Positioned.fill(child: sampled), child!],
+        );
+      case AylaGlassQuality.realBackdrop:
+        final Widget filtered = BackdropFilter(
+          filter: filter,
+          // child 必须是纯透明内容：只贡献滤镜层，不携带颜色。
+          child: child ?? const SizedBox.expand(),
+        );
+        return radius == null
+            ? filtered
+            : ClipRRect(borderRadius: radius!, child: filtered);
+    }
+  }
+}
+
+/// 预模糊档的采样层：把背景低频快照按**本层在屏幕上的矩形**裁一块画出来。
+///
+/// 用 [CustomPaint] 而不是 `Image`：快照是整视口的，必须按位置裁取。
+class AylaBackdropSampler extends StatelessWidget {
+  const AylaBackdropSampler({super.key, this.radius});
+
+  /// 与玻璃面一致的裁剪圆角。
+  final BorderRadius? radius;
+
+  @override
+  Widget build(BuildContext context) {
+    if (AylaBackdropSnapshot.image == null) {
+      // 快照未就绪（背景没烘完 / 当前宿主没有背景）：退化为纯透明，
+      // 不画白板、也不报错。
+      return const SizedBox.expand();
+    }
+    final Widget painter = CustomPaint(
+      painter: _AylaBackdropSnapshotPainter(
+        context,
+        AylaBackdropSnapshot.revision,
+      ),
+    );
+    return radius == null
+        ? painter
+        : ClipRRect(
+            borderRadius: radius!,
+            clipBehavior: Clip.hardEdge,
+            child: painter,
+          );
+  }
+}
+
+/// 把整视口快照按「本层全局矩形」裁取绘制。
+class _AylaBackdropSnapshotPainter extends CustomPainter {
+  _AylaBackdropSnapshotPainter(this.context, this.revision);
+
+  /// 采样层自己的 BuildContext：paint 时用 `findRenderObject` 取全局位置。
+  final BuildContext context;
+
+  /// 采样时刻的快照版本（[AylaBackdropSnapshot.revision]）。
+  final int revision;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ui.Image? image = AylaBackdropSnapshot.image;
+    final Size viewport = AylaBackdropSnapshot.viewport;
+    if (image == null || viewport.isEmpty || size.isEmpty) return;
+    final RenderObject? ro = context.findRenderObject();
+    if (ro is! RenderBox || !ro.hasSize) return;
+    // 本层左上角在全局坐标里的位置（paint 期间只读，不触发 layout）。
+    final Offset topLeft = ro.localToGlobal(Offset.zero);
+    final double sx = image.width / viewport.width;
+    final double sy = image.height / viewport.height;
+    final Rect src = Rect.fromLTWH(
+      (topLeft.dx - AylaBackdropSnapshot.origin.dx) * sx,
+      (topLeft.dy - AylaBackdropSnapshot.origin.dy) * sy,
+      size.width * sx,
+      size.height * sy,
+    );
+    canvas.drawImageRect(
+      image,
+      src,
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.low,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _AylaBackdropSnapshotPainter oldDelegate) =>
+      oldDelegate.revision != revision;
 }
 
 /// 玻璃材料的通用绘制（底色 + 模糊 + 亮边 + 宽软阴影 + 顶沿内高光）。
@@ -249,20 +477,18 @@ class AylaGlassSurface extends StatelessWidget {
               // 且嵌入式场景（如组件画布里的查看器样张）会采样宿主页面造成糊页。
               if (blur > 0)
               Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: radiusValue,
-                  child: BackdropFilter(
-                    filter: ImageFilter.compose(
-                      // 外层：饱和度 1.4（在模糊结果上做，等价 CSS 顺序）
-                      outer: const ColorFilter.matrix(kSaturation14),
-                      // 内层：blur(24px)（t:--glass-filter）
-                      inner: ImageFilter.blur(
-                        sigmaX: blur,
-                        sigmaY: blur,
-                      ),
+                // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）：
+                // 真玻璃档 = BackdropFilter，预模糊档 = 采样，实底档 = 不画。
+                child: AylaGlassBackdrop(
+                  radius: radiusValue,
+                  filter: ImageFilter.compose(
+                    // 外层：饱和度 1.4（在模糊结果上做，等价 CSS 顺序）
+                    outer: const ColorFilter.matrix(kSaturation14),
+                    // 内层：blur(24px)（t:--glass-filter）
+                    inner: ImageFilter.blur(
+                      sigmaX: blur,
+                      sigmaY: blur,
                     ),
-                    // child 必须是纯透明内容：只贡献滤镜层，不携带颜色
-                    child: const SizedBox.expand(),
                   ),
                 ),
               ),
@@ -1094,26 +1320,25 @@ class _GlassButtonState extends State<AylaGlassButton>
           alignment: Alignment.center,
           children: <Widget>[
             // .btn::after 扫光：覆盖整个 padding box；opacity .5，
-            // -120% → +120%（600ms）
+            // -120% → +120%（600ms）。
+            // 性能（2026-09-27 §8.17）：.5 已乘进渐变色（sweepHalf），不再套
+            // 整层 Opacity —— 单层渐变无重叠，两者逐像素等价但省一次 saveLayer。
             if (animate)
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Opacity(
-                    opacity: 0.5,
-                    child: AnimatedBuilder(
-                      animation: _sweepEased,
-                      builder: (BuildContext context, Widget? child) {
-                        return FractionalTranslation(
-                          translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
-                          child: child,
-                        );
-                      },
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: cssLinearGradient(
-                            angleDeg: 90, // linear-gradient(90deg, …)
-                            colors: AylaGradients.sweep,
-                          ),
+                  child: AnimatedBuilder(
+                    animation: _sweepEased,
+                    builder: (BuildContext context, Widget? child) {
+                      return FractionalTranslation(
+                        translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
+                        child: child,
+                      );
+                    },
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: cssLinearGradient(
+                          angleDeg: 90, // linear-gradient(90deg, …)
+                          colors: AylaGradients.sweepHalf,
                         ),
                       ),
                     ),
@@ -1249,14 +1474,12 @@ class _GlassButtonState extends State<AylaGlassButton>
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: rInput,
-              child: BackdropFilter(
-                // auroraqua.css 100–101（`.btn-ghost`）：`backdrop-filter: blur(8px)`
-                // ——**无 saturate**（8px 档三处均为纯 blur；18px/24px 档才带 1.4）。
-                filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: rInput,
+              // auroraqua.css 100–101（`.btn-ghost`）：`backdrop-filter: blur(8px)`
+              // ——**无 saturate**（8px 档三处均为纯 blur；18px/24px 档才带 1.4）。
+              filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
             ),
           ),
           decorated,
@@ -1564,14 +1787,12 @@ class _GlassInputState extends State<AylaGlassInput> {
       children: <Widget>[
         if (!opaque)
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: rInput,
-              child: BackdropFilter(
-                // auroraqua.css 507：`.field { backdrop-filter: var(--glass-filter) }`
-                // = `blur(24px) saturate(1.4)`（tokens.css 76）
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: rInput,
+              // auroraqua.css 507：`.field { backdrop-filter: var(--glass-filter) }`
+              // = `blur(24px) saturate(1.4)`（tokens.css 76）
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
             ),
           ),
         // `:focus → box-shadow: var(--glow-shadow)`（auroraqua.css 513–518）——

@@ -690,12 +690,10 @@ class _BubbleFace extends StatelessWidget {
             //    注意：**无 saturate**（app.css 1131）⇒ 用 blurOnly）
             if (!self && !elysia)
               Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: radius,
-                  child: BackdropFilter(
-                    filter: AylaGlassConfig.blurOnly(sigma: 12),
-                    child: const SizedBox.expand(),
-                  ),
+                // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+                child: AylaGlassBackdrop(
+                  radius: radius,
+                  filter: AylaGlassConfig.blurOnly(sigma: 12),
                 ),
               ),
             // ② 底色层（渐变必须在**独立层**：同层 BoxDecoration 的渐变会盖住 1px 边框）

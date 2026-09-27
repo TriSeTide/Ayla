@@ -336,7 +336,9 @@ class _AylaImageViewerState extends State<AylaImageViewer>
               child: Stack(
                 children: <Widget>[
                   // 全屏才做 backdrop 模糊（嵌入模式会糊掉宿主页，见 embedded 注释）
-                  if (!widget.embedded)
+                  // 全屏查看器背后是**图片**（不是页面背景）⇒ 只在真玻璃档做
+                  // 模糊；预模糊档采样背景快照会串色，退化为纯半透明遮罩。
+                  if (!widget.embedded && AylaGlassConfig.backdropEnabled)
                     Positioned.fill(
                       child: BackdropFilter(
                         filter: AylaGlassConfig.blurOnly(sigma: 8),
@@ -751,10 +753,11 @@ class _ViewerCircleButtonState extends State<_ViewerCircleButton> {
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            // ClipOval 不能由 BorderRadius 表达 ⇒ 外层保留。
             child: ClipOval(
-              child: BackdropFilter(
+              child: AylaGlassBackdrop(
                 filter: AylaGlassConfig.backdropFilter(sigma: widget.blurSigma!),
-                child: const SizedBox.expand(),
               ),
             ),
           ),

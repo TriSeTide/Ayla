@@ -799,7 +799,9 @@ class _PlayBadge extends StatelessWidget {
           boxShadow: hovered ? AylaShadows.glow : AylaShadows.card,
         ),
         child: ClipOval(
-          child: BackdropFilter(
+          // ClipOval 不能由 BorderRadius 表达 ⇒ 外层保留；预模糊档下
+          // AylaGlassBackdrop 会把图标挪到采样层之上。
+          child: AylaGlassBackdrop(
             filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurButton),
             child: const Center(
               child: Icon(Icons.play_arrow_rounded, size: 22, color: AylaColors.indigo700),
@@ -1695,12 +1697,17 @@ class _FileDownloadButtonState extends State<_FileDownloadButton> {
               border: Border.all(color: const Color(0x59465B92)),
               boxShadow: _hovered && widget.enabled ? AylaShadows.glow : null,
             ),
-            child: Opacity(
-              // `:disabled` 语义：不可点时降透明（不含模糊层，安全）
-              opacity: widget.enabled ? 1 : 0.55,
-              child: const Center(
-                child: Icon(Icons.download_rounded,
-                    size: 16, color: AylaColors.indigo700),
+            child: Center(
+              // :disabled 语义：不可点时降透明。性能（2026-09-27 §8.17）：
+              // 单图标、无重叠 ⇒ 把 .55 乘进图标色与整层 Opacity 等价，
+              // 省掉一次 saveLayer。
+              child: Icon(
+                Icons.download_rounded,
+                size: 16,
+                color: widget.enabled
+                    ? AylaColors.indigo700
+                    : AylaColors.indigo700
+                        .withValues(alpha: AylaColors.indigo700.a * 0.55),
               ),
             ),
           ),

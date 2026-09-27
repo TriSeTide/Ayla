@@ -309,12 +309,10 @@ class _AylaVisibilitySelectorState extends State<AylaVisibilitySelector> {
       layered = Stack(
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: r,
-              child: BackdropFilter(
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: r,
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
             ),
           ),
           face,
@@ -416,16 +414,19 @@ class _OptionChipState extends State<_OptionChip> {
               spacing: AylaSpacing.sp2, // gap: var(--sp-2)
               children: <Widget>[
                 AylaCheckbox(checked: widget.checked, locked: widget.locked),
-                Opacity(
-                  // :has(:disabled) → .55；但 .is-locked:has(:checked) → 1
-                  opacity: widget.locked && !widget.checked ? 0.55 : 1,
-                  child: Text(
-                    widget.label,
-                    style: widget.style.label.copyWith(
-                      fontSize: 14, // font-size: 14px
-                      fontWeight: FontWeight.w600, // font-weight: 600
-                      color: fg,
-                    ),
+                Text(
+                  widget.label,
+                  style: widget.style.label.copyWith(
+                    fontSize: 14, // font-size: 14px
+                    fontWeight: FontWeight.w600, // font-weight: 600
+                    // :has(:disabled) → .55；但 .is-locked:has(:checked) → 1。
+                    // 性能（2026-09-27 §8.17）：单行文本无重叠 ⇒ 把 .55 乘进
+                    // 文字色与整层 Opacity 等价（文本抗锯齿是 coverage×color
+                    // over 背景，逐色 alpha 与 group opacity 数学等价），
+                    // 省掉一次 saveLayer。
+                    color: widget.locked && !widget.checked
+                        ? fg.withValues(alpha: fg.a * 0.55)
+                        : fg,
                   ),
                 ),
               ],

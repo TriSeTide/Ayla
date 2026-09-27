@@ -518,13 +518,11 @@ class _AylaModalCardState extends State<AylaModalCard>
       face = Stack(
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: radius,
-              child: BackdropFilter(
-                // `backdrop-filter: blur(24px) saturate(1.4)`
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: radius,
+              // `backdrop-filter: blur(24px) saturate(1.4)`
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurCard),
             ),
           ),
           face,
@@ -658,7 +656,9 @@ class AylaModalOverlay extends StatelessWidget {
       //    糊掉（实测「编辑子群模糊遮罩直接糊掉整个画布」）。web 的
       //    .subgroup-dialog-overlay 是 position: fixed + inset: 0 ⇒ 天然裁剪在视口内。
       mask = ClipRect(
-        child: BackdropFilter(
+        // 遮罩的模糊层同样归质量档 owner：真玻璃 = BackdropFilter；
+        // 预模糊 = 采样背景低频快照（全屏遮罩本来就是压暗，采样足够近似）。
+        child: AylaGlassBackdrop(
           filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
           child: mask,
         ),

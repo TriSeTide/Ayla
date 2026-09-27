@@ -301,19 +301,22 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
   }
 
   /// `.share-bubble-chevron`：8×8 + 右/下 2px 边 + `rotate(-45deg)` + opacity .7。
+  /// 性能（2026-09-27 §8.17）：opacity .7 **乘进描边色**而不是套整层 Opacity ——
+  /// 本件只有两条互不重叠的描边（BoxBorder 在角部按斜接分割、不叠加）⇒ 逐色
+  /// alpha 与 group opacity 逐像素等价，但省掉一次 saveLayer。
   Widget _chevron() {
-    return Opacity(
-      opacity: 0.7,
-      child: Transform.rotate(
-        angle: -math.pi / 4, // -45deg
-        child: Container(
-          width: 8,
-          height: 8,
-          decoration: const BoxDecoration(
-            border: Border(
-              right: BorderSide(color: AylaColors.textSecondary, width: 2),
-              bottom: BorderSide(color: AylaColors.textSecondary, width: 2),
-            ),
+    final Color stroke = AylaColors.textSecondary.withValues(
+      alpha: AylaColors.textSecondary.a * 0.7,
+    );
+    return Transform.rotate(
+      angle: -math.pi / 4, // -45deg
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          border: Border(
+            right: BorderSide(color: stroke, width: 2),
+            bottom: BorderSide(color: stroke, width: 2),
           ),
         ),
       ),

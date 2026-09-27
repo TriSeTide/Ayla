@@ -611,12 +611,10 @@ class _ActivityToggleState extends State<_ActivityToggle> {
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: radius,
-              child: BackdropFilter(
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: radius,
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
             ),
           ),
           box,

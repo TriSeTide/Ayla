@@ -485,7 +485,9 @@ class _AylaCommentComposerState extends State<AylaCommentComposer> {
 
     if (!widget.inert) return slid;
     return ExcludeSemantics(
-      child: IgnorePointer(child: Opacity(opacity: 1, child: slid)),
+      // 性能（2026-09-27 §8.17）：原为 Opacity(opacity: 1, child: slid) ——
+      // alpha 恒为 1 时 RenderOpacity 本就不建层，这个 widget 纯属噪音，删掉。
+      child: IgnorePointer(child: slid),
     );
   }
 

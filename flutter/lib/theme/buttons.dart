@@ -336,23 +336,22 @@ class _AylaIconButtonState extends State<AylaIconButton>
             if (!MediaQuery.disableAnimationsOf(context))
               Positioned.fill(
                 child: IgnorePointer(
-                  child: Opacity(
-                    opacity: 0.5, // `::after { opacity: .5 }`（auroraqua.css:157）
-                    child: AnimatedBuilder(
-                      animation: _sweepEased,
-                      builder: (BuildContext context, Widget? child) {
-                        // `transform: translateX(-120% → 120%)`，600ms --auroraqua-ease
-                        return FractionalTranslation(
-                          translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
-                          child: child,
-                        );
-                      },
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: cssLinearGradient(
-                            angleDeg: 90, // linear-gradient(90deg, …)
-                            colors: AylaGradients.sweep,
-                          ),
+                  // `::after { opacity: .5 }`（auroraqua.css:157）已乘进渐变色
+                  // （性能 2026-09-27 §8.17：单层渐变无重叠，等价且省一次 saveLayer）
+                  child: AnimatedBuilder(
+                    animation: _sweepEased,
+                    builder: (BuildContext context, Widget? child) {
+                      // `transform: translateX(-120% → 120%)`，600ms --auroraqua-ease
+                      return FractionalTranslation(
+                        translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
+                        child: child,
+                      );
+                    },
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: cssLinearGradient(
+                          angleDeg: 90, // linear-gradient(90deg, …)
+                          colors: AylaGradients.sweepHalf,
                         ),
                       ),
                     ),
@@ -369,16 +368,14 @@ class _AylaIconButtonState extends State<AylaIconButton>
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: radius,
-              child: BackdropFilter(
-                // auroraqua.css 124–132（`.icon-btn-40` 等 surface 按钮）：
-                // `backdrop-filter: blur(8px)` —— **只有 blur，没有 saturate**
-                // （与 18px 档的 `.corner-fab`/`.message-fab`
-                //  `blur(18px) saturate(1.4)` 不同，不能统一按 1.4 处理）。
-                filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: radius,
+              // auroraqua.css 124–132（`.icon-btn-40` 等 surface 按钮）：
+              // `backdrop-filter: blur(8px)` —— **只有 blur，没有 saturate**
+              // （与 18px 档的 `.corner-fab`/`.message-fab`
+              //  `blur(18px) saturate(1.4)` 不同，不能统一按 1.4 处理）。
+              filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
             ),
           ),
           box,
@@ -476,15 +473,13 @@ class _AylaCornerFabState extends State<AylaCornerFab> {
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: AylaRadii.pill,
-              child: BackdropFilter(
-                // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
-                // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
-                // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: AylaRadii.pill,
+              // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
+              // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
+              // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
             ),
           ),
           box,
@@ -589,15 +584,13 @@ class AylaMessageFab extends StatelessWidget {
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: AylaRadii.pill,
-              child: BackdropFilter(
-                // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
-                // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
-                // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
-                filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: AylaRadii.pill,
+              // CSS 里 blur 与 saturate(1.4) 成对出现（shell.css 432
+              // `.message-fab` / 704 `.corner-fab`：`blur(18px) saturate(1.4)`）。
+              // 只做 blur 会丢失玻璃的通透鲜艳感——必须两个都做。
+              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
             ),
           ),
           box,
@@ -747,14 +740,12 @@ class _AylaToolButtonState extends State<AylaToolButton> {
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(
-            child: ClipRRect(
-              borderRadius: toolRadius,
-              child: BackdropFilter(
-                // auroraqua.css 110–111（`.composer-tool-btn`）：`blur(8px)`
-                // 无 saturate（见 8px 档三处均为纯 blur）。
-                filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
-                child: const SizedBox.expand(),
-              ),
+            // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+            child: AylaGlassBackdrop(
+              radius: toolRadius,
+              // auroraqua.css 110–111（`.composer-tool-btn`）：`blur(8px)`
+              // 无 saturate（见 8px 档三处均为纯 blur）。
+              filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
             ),
           ),
           box,
@@ -901,12 +892,10 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
     Widget box = Stack(
       children: <Widget>[
         Positioned.fill(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AylaRadii.rSm),
-            child: BackdropFilter(
-              filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
-              child: const SizedBox.expand(),
-            ),
+          // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）。
+          child: AylaGlassBackdrop(
+            radius: BorderRadius.circular(AylaRadii.rSm),
+            filter: AylaGlassConfig.blurOnly(sigma: AylaGlass.blurButton),
           ),
         ),
         // --glass-inset（顶沿 1px 内高光；radius 与卡面一致 = --radius-sm 8）。

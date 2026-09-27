@@ -1112,20 +1112,21 @@ class _RecDotState extends State<_RecDot> with SingleTickerProviderStateMixin {
     final Widget dot = AnimatedBuilder(
       animation: _controller,
       builder: (BuildContext context, Widget? child) {
-        // 0%/100% opacity 1 ↔ 50% opacity .35
+        // 0%/100% opacity 1 ↔ 50% opacity .35（每帧只重建这一层 Opacity）
         final double t = 1 - 0.65 * (1 - (2 * _controller.value - 1).abs());
-        return Opacity(
-          opacity: t,
-          child: Container(
-            width: 10,
-            height: 10,
-            decoration: const BoxDecoration(
-              color: AylaColors.destructive,
-              borderRadius: AylaRadii.pill,
-            ),
-          ),
-        );
+        return Opacity(opacity: t, child: child);
       },
+      // 静态子树（尺寸 / 颜色 / 圆角都是常量）提到 child：**零视觉代价**，
+      // 每帧不再新建 Container 与 BoxDecoration，也不再重跑它的布局
+      //（2026-09-27 §8.17 的 AnimatedBuilder 审计项）。
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: const BoxDecoration(
+          color: AylaColors.destructive,
+          borderRadius: AylaRadii.pill,
+        ),
+      ),
     );
 
     // 录音红点的呼吸是**持续循环动画**（1.2s reverse 循环）：包一层重绘边界，让每帧的
