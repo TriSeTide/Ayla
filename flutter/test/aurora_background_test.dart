@@ -171,16 +171,28 @@ void main() {
     await tester.pumpWidget(host(const AylaAuroraBackground(), size: const Size(w, h)));
     await tester.pump();
 
-    // ② 渐变层：150vmax 正方形，中心 = 视口中心（base.css 61–65）
+    // ② 渐变层：150vmax 正方形，中心 = 视口中心（base.css 61–65）；
+    // 外框另加 2×overscan（模糊扩散预留 —— 不预留会露出硬直边）。
     const double side = 1.5 * w;
-    expect(layerSize(tester, AylaAuroraKeys.gradient), const Size(side, side));
-    expect(layerBox(tester, AylaAuroraKeys.gradient).left, closeTo((w - side) / 2, 1e-9));
-    expect(layerBox(tester, AylaAuroraKeys.gradient).top, closeTo((h - side) / 2, 1e-9));
+    const double gOver = AylaFluidAurora.gradientOverscan;
+    expect(layerSize(tester, AylaAuroraKeys.gradient), Size(side + gOver * 2, side + gOver * 2));
+    expect(
+      layerBox(tester, AylaAuroraKeys.gradient).left,
+      closeTo((w - side) / 2 - gOver, 1e-9),
+    );
+    expect(
+      layerBox(tester, AylaAuroraKeys.gradient).top,
+      closeTo((h - side) / 2 - gOver, 1e-9),
+    );
 
-    // ③ 湍流层：inset -25%（base.css:85）
-    expect(layerSize(tester, AylaAuroraKeys.turbulence), const Size(side, h * 1.5));
-    expect(layerBox(tester, AylaAuroraKeys.turbulence).left, -w * 0.25);
-    expect(layerBox(tester, AylaAuroraKeys.turbulence).top, -h * 0.25);
+    // ③ 湍流层：inset -25%（base.css:85）+ 同款 overscan
+    const double tOver = AylaFluidAurora.turbulenceOverscan;
+    expect(
+      layerSize(tester, AylaAuroraKeys.turbulence),
+      Size(side + tOver * 2, h * 1.5 + tOver * 2),
+    );
+    expect(layerBox(tester, AylaAuroraKeys.turbulence).left, -w * 0.25 - tOver);
+    expect(layerBox(tester, AylaAuroraKeys.turbulence).top, -h * 0.25 - tOver);
 
     // ④ 冰蓝光斑：40vw · top -10% · left 25%（base.css 110–118）
     expect(layerSize(tester, AylaAuroraKeys.blobIce), const Size(w * 0.4, w * 0.4));
@@ -220,9 +232,10 @@ void main() {
       host(const AylaAuroraBackground(), size: const Size(375, 240)),
     );
     await tester.pump();
-    expect(layerSize(tester, AylaAuroraKeys.gradient), const Size(562.5, 562.5));
-    expect(layerBox(tester, AylaAuroraKeys.gradient).left, (375 - 562.5) / 2);
-    expect(layerBox(tester, AylaAuroraKeys.gradient).top, (240 - 562.5) / 2);
+    const double over = AylaFluidAurora.gradientOverscan;
+    expect(layerSize(tester, AylaAuroraKeys.gradient), Size(562.5 + over * 2, 562.5 + over * 2));
+    expect(layerBox(tester, AylaAuroraKeys.gradient).left, (375 - 562.5) / 2 - over);
+    expect(layerBox(tester, AylaAuroraKeys.gradient).top, (240 - 562.5) / 2 - over);
   });
 
   // ------------------------------------------------------------------
@@ -344,6 +357,16 @@ void main() {
     // 第一笔 = 列表最后一项（中心暖白光晕，最底层）；正序画会让它盖住四角四色 ⇒ 整片发白
     expect(order.first, same(AylaFluidAurora.staticLayers.last));
     expect(order.last, same(AylaFluidAurora.staticLayers.first));
+  });
+
+  test('模糊扩散预留：overscan = 3σ（内容居中、外框大一圈）', () {
+    // 不预留 ⇒ saveLayer 把模糊扩散裁在 bounds 内 ⇒ 层边缘是**硬直边**
+    //（2026-09-25 用户实报「背景总是出现裁切边旋转露出来」）。
+    expect(AylaFluidAurora.gradientOverscan, AylaFluidAurora.gradientBlur * 3);
+    expect(AylaFluidAurora.turbulenceOverscan, AylaFluidAurora.turbulenceBlur * 3);
+    expect(AylaFluidAurora.gradientOverscan, greaterThan(0));
+    expect(AylaFluidAurora.turbulenceOverscan, greaterThan(0));
+    // 光斑层内容边缘本就透明（radial 70% 截止）⇒ 不需要预留，避免白花像素预算
   });
 
   test('farthest-corner 半径：正方形四角 √2 / 中心 √2÷2 / 非正方形按短边归一', () {

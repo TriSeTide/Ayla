@@ -181,6 +181,12 @@ abstract final class AylaFluidAurora {
   /// 只作低端设备/省电预留档；见 [AylaAuroraClock]。
   static const Duration frameInterval = kAuroraFrameInterval;
 
+  /// 模糊扩散预留（= 3 × blur σ）：CSS 的 filter 有 filter region（模糊可超出元素盒），
+  /// 而 saveLayer 会把扩散裁在 bounds 内 ⇒ 不预留就露出**硬直边**（用户实报
+  /// 「背景总是出现裁切边旋转露出来」）。层尺寸 +2×overscan、位置 -overscan，中心不变。
+  static const double gradientOverscan = gradientBlur * 3;
+  static const double turbulenceOverscan = turbulenceBlur * 3;
+
   /// 五层烘焙像素总量上限（RGBA 4 字节/像素 ⇒ 6M ≈ 24 MB）。
   /// 由定向测试锁定 —— 谁把层改回 1:1 大纹理，测试就红。
   static const int bakePixelBudget = 6 * 1000 * 1000;
@@ -411,11 +417,15 @@ abstract final class AylaFluidAurora {
 /// 供测试锁定「别把低频层改回 1:1 大纹理」；宽屏档取「宽屏光斑」尺寸
 /// （窄屏 80vw/70vw 的层更小，不会更差）。
 int aylaAuroraBakePixels(Size viewport, double dpr) {
-  int pixelsOf(Size logical, double cap) {
-    final double longest = math.max(logical.width, logical.height);
+  int pixelsOf(Size logical, double cap, [double overscan = 0]) {
+    final Size outer = Size(
+      logical.width + overscan * 2,
+      logical.height + overscan * 2,
+    );
+    final double longest = math.max(outer.width, outer.height);
     final double ratio = math.min(dpr, cap / longest);
-    final int w = math.max(1, (logical.width * ratio).round());
-    final int h = math.max(1, (logical.height * ratio).round());
+    final int w = math.max(1, (outer.width * ratio).round());
+    final int h = math.max(1, (outer.height * ratio).round());
     return w * h;
   }
 
@@ -423,13 +433,18 @@ int aylaAuroraBakePixels(Size viewport, double dpr) {
   final double gradientSide = AylaFluidAurora.gradientVmax / 100 * maxSide;
   final double blobSide = AylaFluidAurora.blobWideDiameter * viewport.width;
   return pixelsOf(viewport, AylaFluidAurora.bakeStaticMaxSide) +
-      pixelsOf(Size(gradientSide, gradientSide), AylaFluidAurora.bakeGradientMaxSide) +
+      pixelsOf(
+        Size(gradientSide, gradientSide),
+        AylaFluidAurora.bakeGradientMaxSide,
+        AylaFluidAurora.gradientOverscan,
+      ) +
       pixelsOf(
         Size(
           viewport.width * (1 + AylaFluidAurora.turbulenceInset * 2),
           viewport.height * (1 + AylaFluidAurora.turbulenceInset * 2),
         ),
         AylaFluidAurora.bakeTurbulenceMaxSide,
+        AylaFluidAurora.turbulenceOverscan,
       ) +
       pixelsOf(Size(blobSide, blobSide), AylaFluidAurora.bakeBlobMaxSide) * 2;
 }
@@ -594,12 +609,15 @@ class _FluidGradientLayer extends StatelessWidget {
     final List<AylaFluidFrame> frames = narrow
         ? AylaFluidAurora.gradientFramesNarrow
         : AylaFluidAurora.gradientFrames;
+    // 模糊扩散预留（见 [AylaFluidAurora.gradientOverscan]）：层尺寸 +2×overscan、
+    // 位置 -overscan，**中心不变** ⇒ 旋转/缩放的基准点不受影响。
+    final double overscan = AylaFluidAurora.gradientOverscan;
     return Positioned(
       // `left/top: 50%` + 负 margin 半尺寸（base.css 61–65）⇒ 层中心恒等于视口中心。
-      left: (viewport.width - side) / 2,
-      top: (viewport.height - side) / 2,
-      width: side,
-      height: side,
+      left: (viewport.width - side) / 2 - overscan,
+      top: (viewport.height - side) / 2 - overscan,
+      width: side + overscan * 2,
+      height: side + overscan * 2,
       child: IgnorePointer(
         child: AnimatedBuilder(
           animation: controller,
@@ -607,6 +625,7 @@ class _FluidGradientLayer extends StatelessWidget {
           child: AylaAuroraBakedLayer(
             size: Size(side, side),
             blurSigma: AylaFluidAurora.gradientBlur,
+            blurOverscan: overscan,
             bakeMaxSide: AylaFluidAurora.bakeGradientMaxSide,
             draw: aylaPaintGradientContent,
           ),
@@ -666,18 +685,21 @@ class _TurbulenceLayerState extends State<_TurbulenceLayer> {
     final double width = widget.viewport.width + dx * 2;
     final double height = widget.viewport.height + dy * 2;
     final ui.Image? tile = _tile;
+    // 同渐变层：预留模糊扩散，否则湍流层的直边会露在视口里。
+    final double overscan = AylaFluidAurora.turbulenceOverscan;
     return Positioned(
       // `inset: -25%`（base.css:85）—— 百分比基准是包含块（视口）。
-      left: -dx,
-      top: -dy,
-      width: width,
-      height: height,
+      left: -dx - overscan,
+      top: -dy - overscan,
+      width: width + overscan * 2,
+      height: height + overscan * 2,
       child: IgnorePointer(
         child: AnimatedBuilder(
           animation: widget.controller,
           child: AylaAuroraBakedLayer(
             size: Size(width, height),
             blurSigma: AylaFluidAurora.turbulenceBlur,
+            blurOverscan: overscan,
             opacity: AylaFluidAurora.turbulenceOpacity,
             bakeMaxSide: AylaFluidAurora.bakeTurbulenceMaxSide,
             revision: tile,

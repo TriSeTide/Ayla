@@ -44,6 +44,7 @@ class AylaAuroraBakedLayer extends StatefulWidget {
     required this.size,
     required this.draw,
     this.blurSigma = 0,
+    this.blurOverscan = 0,
     this.opacity = 1,
     this.bakeMaxSide,
     this.revision,
@@ -57,6 +58,14 @@ class AylaAuroraBakedLayer extends StatefulWidget {
 
   /// `filter: blur(Npx)` 的标准差（CSS Filter Effects 与 [ImageFilter.blur] 同语义）；0 = 不模糊。
   final double blurSigma;
+
+  /// 模糊**向外扩散**要预留的边距（= 3 × [blurSigma]）。
+  ///
+  /// 为什么需要：CSS 的 filter 有 filter region（默认向外扩 10%），模糊结果可以**超出元素盒**；
+  /// 而 [Canvas.saveLayer] 会把内容裁在 bounds 内 ⇒ 边缘扩散被切掉，露出**硬直边**
+  /// （2026-09-25 用户实报：「背景总是出现裁切边旋转露出来」）。预留 overscan 后，烘焙图
+  /// 四周多出空环、内容按原尺寸居中绘制，模糊自然渐隐到透明 —— 与 web 的 filter region 同义。
+  final double blurOverscan;
 
   /// 图层整体不透明度（`opacity: .08` 等）—— 走 [RawImage.opacity] 的 alpha 调制，
   /// 不额外套 [Opacity]（避免再起一层离屏合成）。
@@ -112,19 +121,25 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
     _bakedSize = size;
     _bakedRevision = widget.revision;
 
-    final double longestLogical = math.max(size.width, size.height);
+    // 含 overscan 的**外框**：烘焙图按它出图，内容按 [widget.size] 居中绘制。
+    final Size outer = Size(
+      size.width + widget.blurOverscan * 2,
+      size.height + widget.blurOverscan * 2,
+    );
+    final double longestLogical = math.max(outer.width, outer.height);
     double ratio = MediaQuery.devicePixelRatioOf(context);
     final double cap = math.min(
       widget.bakeMaxSide ?? kMaxAuroraBakeSide,
       kMaxAuroraBakeSide,
     );
     if (longestLogical * ratio > cap) ratio = cap / longestLogical;
-    final int width = math.max(1, (size.width * ratio).round());
-    final int height = math.max(1, (size.height * ratio).round());
+    final int width = math.max(1, (outer.width * ratio).round());
+    final int height = math.max(1, (outer.height * ratio).round());
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);
-    canvas.scale(width / size.width, height / size.height);
+    canvas.scale(width / outer.width, height / outer.height);
+    canvas.translate(widget.blurOverscan, widget.blurOverscan);
     if (widget.blurSigma > 0) {
       canvas.saveLayer(
         Offset.zero & size,
@@ -153,8 +168,10 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
   Widget build(BuildContext context) {
     return RawImage(
       image: _image,
-      width: widget.size.width,
-      height: widget.size.height,
+      // 尺寸含 overscan：调用方的 Positioned 也必须按 size + 2×overscan 布局
+      //（内容仍在中间、中心不变 ⇒ 旋转/缩放的基准点不受影响）。
+      width: widget.size.width + widget.blurOverscan * 2,
+      height: widget.size.height + widget.blurOverscan * 2,
       fit: BoxFit.fill,
       // 烘焙像素 = 逻辑 × DPR ⇒ 常态是 1:1 映射；clamp 到 4096 或系统缩放变化时才
       // 需要重采样，低质量插值足够（内容经 blur 后是低频信号）。
