@@ -141,16 +141,21 @@ class _AylaScrollingTextState extends State<AylaScrollingText>
           );
         }
 
-        return ClipRect(
-          child: AnimatedBuilder(
-            animation: _marquee,
-            builder: (BuildContext context, Widget? child) {
-              return Transform.translate(
-                offset: Offset(_offsetFor(_marquee.value), 0),
-                child: child,
-              );
-            },
-            child: label,
+        // 跑马灯是**持续循环动画**（4–16s 一圈）：包一层重绘边界，让每帧的
+        // markNeedsPaint 止步于此 —— 否则它会一路上传到最近的边界（静态布局里
+        // 就是整页重绘）。2026-09-25 全库审计：动画组件此前**没有一个**边界。
+        return RepaintBoundary(
+          child: ClipRect(
+            child: AnimatedBuilder(
+              animation: _marquee,
+              builder: (BuildContext context, Widget? child) {
+                return Transform.translate(
+                  offset: Offset(_offsetFor(_marquee.value), 0),
+                  child: child,
+                );
+              },
+              child: label,
+            ),
           ),
         );
       },

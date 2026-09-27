@@ -122,6 +122,8 @@ class _AylaScrollingTagsState extends State<AylaScrollingTags>
             ),
             child: content,
           );
+          // 持续循环动画：隔离重绘范围（见 scrolling_text.dart 同处说明）。
+          content = RepaintBoundary(child: content);
         }
 
         // 内层 Row 按内容自然宽度排布，溢出由容器裁剪（对齐 web 的

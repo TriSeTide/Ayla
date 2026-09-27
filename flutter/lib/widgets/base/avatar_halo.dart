@@ -314,7 +314,13 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
       child: halo,
     );
 
-    if (widget.onTap == null) return result;
+    // 呼吸辉光（3.2s 循环）与 hover 着色都在这个组件内部变化：包一层重绘边界，
+    // 让每帧的 markNeedsPaint 止步于此 —— 否则在顶栏/直播间这类**静态布局**里
+    // 会一路上传到最近的边界（即整页重绘）。2026-09-25 全库审计：动画组件此前
+    // **没有一个** RepaintBoundary。
+    final Widget bounded = RepaintBoundary(child: result);
+
+    if (widget.onTap == null) return bounded;
 
     // .avatar-halo-btn：可点击头像，hover brightness(1.06)、focus-visible 辉光环
     return MouseRegion(

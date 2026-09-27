@@ -194,8 +194,11 @@ class _AylaSkeletonState extends State<AylaSkeleton>
       ),
     );
 
-    if (widget.width == null && widget.height == null) return block;
-    return SizedBox(width: widget.width, height: widget.height, child: block);
+    // 骨架脉冲（1.6s 循环）在这里更新透明度：包一层重绘边界，让每帧的
+    // markNeedsPaint 止步于此（否则加载态的整页骨架会每帧牵连整页重绘）。
+    final Widget bounded = RepaintBoundary(child: block);
+    if (widget.width == null && widget.height == null) return bounded;
+    return SizedBox(width: widget.width, height: widget.height, child: bounded);
   }
 }
 
