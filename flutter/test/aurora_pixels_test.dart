@@ -14,10 +14,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/theme/aurora_background.dart';
 import '../lib/theme/aurora_baked_layer.dart';
+import '../lib/theme/aurora_turbulence.dart';
 import '../lib/theme/tokens.dart';
 
 /// 一个 sRGB 三元组。
@@ -270,5 +272,214 @@ void main() {
       );
       expect(d, lessThan(10.0), reason: '烘焙 + 降采样不应改变像素（blur=0 时）');
     }
+  });
+
+  testWidgets('【诊断】渐变流层单独渲染：视口区域必须是「有色」，不能是整片白', (WidgetTester tester) async {
+    // 层 = 150vmax 正方形（1920×1080 视口 ⇒ 2880）；视口在层坐标里是 x∈[480,2400]、y∈[900,1980]。
+    // 逐点手算（farthest-corner，tokens.css 28–36）后与实测比对：
+    //   · 视口左上 (480,900)：距第 1 层中心(0,0) 1020 ⇒ stop 1020/4031=25% ⇒ 冰蓝 alpha≈0.5
+    //   · 视口中心 (1440,1440)：第 9 层（中心暖白）stop 0% ⇒ alpha 1 ⇒ 白（预期）
+    // 若「视口左上」也接近纯白 ⇒ 说明四色层没生效 / 被白盖住 ⇒ 就是用户看到的「白色不透明背景」。
+    const double layer = 2880;
+    const double ratio = 0.5;
+    late Uint8List pixels;
+    await tester.runAsync(() async {
+      final int w = (layer * ratio).round();
+      final ui.PictureRecorder rec = ui.PictureRecorder();
+      final Canvas canvas = Canvas(rec);
+      canvas.scale(ratio);
+      canvas.saveLayer(
+        const Rect.fromLTWH(0, 0, layer, layer),
+        Paint()
+          ..imageFilter = ui.ImageFilter.blur(
+            sigmaX: aylaBakedBlurSigma(40, ratio),
+            sigmaY: aylaBakedBlurSigma(40, ratio),
+          ),
+      );
+      aylaPaintGradientContent(canvas, const Size(layer, layer));
+      canvas.restore();
+      final ui.Picture pic = rec.endRecording();
+      final ui.Image img = await pic.toImage(w, w);
+      final ByteData? data = await img.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
+      pixels = data!.buffer.asUint8List();
+      img.dispose();
+      pic.dispose();
+    });
+
+    _Px at(double lx, double ly) {
+      final int ix = (lx * ratio).round();
+      final int iy = (ly * ratio).round();
+      final int w = (layer * ratio).round();
+      final int i = (iy * w + ix) * 4;
+      return _Px(
+        pixels[i].toDouble(),
+        pixels[i + 1].toDouble(),
+        pixels[i + 2].toDouble(),
+      );
+    }
+
+    debugPrint('流层·视口左上(480,900)  = ' + at(480, 900).toString());
+    debugPrint('流层·视口右上(2400,900) = ' + at(2400, 900).toString());
+    debugPrint('流层·视口左中(480,1440) = ' + at(480, 1440).toString());
+    debugPrint('流层·视口中心(1440,1440)= ' + at(1440, 1440).toString());
+    debugPrint('流层·层左上角(60,60)    = ' + at(60, 60).toString());
+
+    // 视口中心 = 中心暖白光晕 ⇒ 应接近纯白（预期）
+    final _Px center = at(1440, 1440);
+    expect(center.r, greaterThan(230));
+    expect(center.g, greaterThan(225));
+    // 视口左上 = 第 1 层（冰蓝 #BDD4E9 方向）⇒ **必须偏蓝、且 G 明显低于 R**（不是白）
+    final _Px topLeft = at(480, 900);
+    expect(
+      topLeft.b - topLeft.r,
+      greaterThan(8.0),
+      reason: '视口左上应偏冰蓝（#BDD4E9 ⇒ B>G>R），若接近白说明四色层没生效: ' + topLeft.toString(),
+    );
+    // 层角（四色层中心）最浓 ⇒ 必须明显有色
+    final _Px layerCorner = at(60, 60);
+    expect(layerCorner.b - layerCorner.r, greaterThan(15.0));
+  });
+
+  testWidgets('【诊断】静态层 vs 静态+流层叠加：角落应更浓，不该被冲白', (WidgetTester tester) async {
+    const Size vp = Size(1920, 1080);
+    const double layer = 2880; // 150vmax
+    const double ratio = 0.5;
+
+    Future<Uint8List> render(bool withGradient) async {
+      late Uint8List px;
+      await tester.runAsync(() async {
+        final int w = (vp.width * ratio).round();
+        final int h = (vp.height * ratio).round();
+        final ui.PictureRecorder rec = ui.PictureRecorder();
+        final Canvas canvas = Canvas(rec);
+        canvas.scale(ratio);
+        // 白底（base.css: body/#root transparent ⇒ 浏览器默认白）
+        canvas.drawRect(Offset.zero & vp, Paint()..color = const Color(0xFFFFFFFF));
+        // 静态层（html 九层，铺视口）
+        aylaPaintAuroraRadials(canvas, vp);
+        if (withGradient) {
+          // 流层（html::before：150vmax 正方形居中 + blur40）
+          final double left = (vp.width - layer) / 2;
+          final double top = (vp.height - layer) / 2;
+          canvas.save();
+          canvas.translate(left, top);
+          canvas.saveLayer(
+            const Rect.fromLTWH(0, 0, layer, layer),
+            Paint()
+              ..imageFilter = ui.ImageFilter.blur(
+                sigmaX: aylaBakedBlurSigma(40, ratio),
+                sigmaY: aylaBakedBlurSigma(40, ratio),
+              ),
+          );
+          aylaPaintGradientContent(canvas, const Size(layer, layer));
+          canvas.restore();
+          canvas.restore();
+        }
+        final ui.Picture pic = rec.endRecording();
+        final ui.Image img = await pic.toImage(w, h);
+        final ByteData? data = await img.toByteData(
+          format: ui.ImageByteFormat.rawStraightRgba,
+        );
+        px = data!.buffer.asUint8List();
+        img.dispose();
+        pic.dispose();
+      });
+      return px;
+    }
+
+    _Px at(Uint8List px, double x, double y) {
+      final int w = (vp.width * ratio).round();
+      final int ix = (x * ratio).round();
+      final int iy = (y * ratio).round();
+      final int i = (iy * w + ix) * 4;
+      return _Px(
+        px[i].toDouble(),
+        px[i + 1].toDouble(),
+        px[i + 2].toDouble(),
+      );
+    }
+
+    final Uint8List onlyStatic = await render(false);
+    final Uint8List stacked = await render(true);
+    for (final List<Object> pt in <List<Object>>[
+      <Object>['左上', 40.0, 40.0],
+      <Object>['右上', 1880.0, 40.0],
+      <Object>['左下', 40.0, 1040.0],
+      <Object>['右下', 1880.0, 1040.0],
+      <Object>['中心', 960.0, 540.0],
+    ]) {
+      final double x = pt[1] as double;
+      final double y = pt[2] as double;
+      final _Px a = at(onlyStatic, x, y);
+      final _Px b = at(stacked, x, y);
+      final double delta = ((a.r - b.r) + (a.g - b.g) + (a.b - b.b)) / 3;
+      debugPrint(
+        pt[0].toString() + ': 仅静态=' + a.toString() + ' 叠加=' + b.toString() +
+        ' Δ(正=叠加后更暗/更浓, 负=更白)=' + delta.toStringAsFixed(1),
+      );
+    }
+  });
+
+  testWidgets('【诊断】湍流层单独渲染：输出到底是不是「全白」', (WidgetTester tester) async {
+    // 湍流层实现 = 纹理平铺(ImageShader) + blur(60) + opacity .08（tokens.css:43 / base.css 82–95）。
+    // 期望：极淡的彩噪（alpha 很低），**不该是白色**。这里统计 alpha 与 RGB，给出数值。
+    const double layerW = 2880; // 1.5 × 1920
+    const double layerH = 1620; // 1.5 × 1080
+    const double ratio = 0.5;
+    late Uint8List pixels;
+    late bool hasTile;
+    await tester.runAsync(() async {
+      final ui.Image? tile = await AylaTurbulenceTile.image();
+      hasTile = tile != null;
+      final int w = (layerW * ratio).round();
+      final int h = (layerH * ratio).round();
+      final ui.PictureRecorder rec = ui.PictureRecorder();
+      final Canvas canvas = Canvas(rec);
+      canvas.scale(ratio);
+      // 层整体 opacity .08（等价 RawImage.opacity）
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, layerW, layerH),
+        Paint()..color = const Color(0x14000000),
+      );
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, layerW, layerH),
+        Paint()
+          ..imageFilter = ui.ImageFilter.blur(
+            sigmaX: aylaBakedBlurSigma(60, ratio),
+            sigmaY: aylaBakedBlurSigma(60, ratio),
+          ),
+      );
+      aylaPaintTurbulence(canvas, Size(layerW, layerH), tile!);
+      canvas.restore();
+      canvas.restore();
+      final ui.Picture pic = rec.endRecording();
+      final ui.Image img = await pic.toImage(w, h);
+      final ByteData? data = await img.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
+      pixels = data!.buffer.asUint8List();
+      img.dispose();
+      pic.dispose();
+    });
+
+    int sumA = 0;
+    int sumR = 0;
+    int sumG = 0;
+    int sumB = 0;
+    int n = 0;
+    int maxA = 0;
+    for (int i = 0; i < pixels.length; i += 4) {
+      sumR += pixels[i];
+      sumG += pixels[i + 1];
+      sumB += pixels[i + 2];
+      sumA += pixels[i + 3];
+      if (pixels[i + 3] > maxA) maxA = pixels[i + 3];
+      n++;
+    }
+    debugPrint('湍流层: tile=' + hasTile.toString() +
+        ' 均值 RGB=(' + (sumR / n).toStringAsFixed(1) + ', ' +
+        (sumG / n).toStringAsFixed(1) + ', ' + (sumB / n).toStringAsFixed(1) + ')' +
+        ' 均值 alpha=' + (sumA / n).toStringAsFixed(2) + ' 最大 alpha=' + maxA.toString());
+    expect(hasTile, isTrue, reason: '纹理必须能生成');
+    // 极淡：均值 alpha 应该在 0.08×少量 的量级（远小于 255×0.08=20）
+    expect(sumA / n, lessThan(12.0), reason: '湍流层必须是极淡的（opacity .08）');
   });
 }

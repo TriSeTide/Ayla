@@ -195,7 +195,7 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
       // 烘焙未完成（首帧几毫秒）或**失败**：降级为**直接绘制** —— 宁可每帧重画一次内容，
       // 也不能给用户一块白板（RawImage(null) 什么都不画，直接透出兜底底色）。
       // ⚠️ 降级路径**不施加 blur**（那会变成每帧跑滤镜，正是本组件要避免的）；正常路径不受影响。
-      return CustomPaint(
+      final Widget direct = CustomPaint(
         painter: _AylaAuroraDirectPainter(
           widget.draw,
           widget.size,
@@ -206,6 +206,11 @@ class _AylaAuroraBakedLayerState extends State<AylaAuroraBakedLayer> {
           widget.size.height + widget.blurOverscan * 2,
         ),
       );
+      // ⚠️ 降级路径**同样要施加 opacity**：此前漏了 ⇒ 像湍流层（opacity .08）一旦走降级，
+      // 纹理就会以**完全不透明**画出来，在背景上压出一层灰白噪点（用户报「湍流层是全白的」）。
+      return widget.opacity >= 1
+          ? direct
+          : Opacity(opacity: widget.opacity, child: direct);
     }
     return RawImage(
       image: image,

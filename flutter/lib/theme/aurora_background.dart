@@ -70,7 +70,12 @@ abstract final class AylaAuroraKeys {
   static const Key turbulence = ObjectKey('aurora-turbulence');
   static const Key blobIce = ObjectKey('aurora-blob-ice');
   static const Key blobSakura = ObjectKey('aurora-blob-sakura');
-  static const List<Key> flowLayers = <Key>[gradient, turbulence, blobIce, blobSakura];
+  /// 当前实际挂载的流层（受 [kAylaGradientLayerEnabled] / [kAylaBlobLayersEnabled] 控制）。
+  static List<Key> get flowLayers => <Key>[
+    if (kAylaGradientLayerEnabled) gradient,
+    if (kAylaTurbulenceLayerEnabled) turbulence,
+    if (kAylaBlobLayersEnabled) ...<Key>[blobIce, blobSakura],
+  ];
 }
 
 /// CSS `radial-gradient(circle …)` 的默认 ending shape 是 **farthest-corner**
@@ -161,6 +166,21 @@ AylaFluidPose _poseOf(AylaFluidFrame f) => AylaFluidPose(
   dy: f.dy,
   scale: f.scale,
 );
+
+/// **背景层开关**（默认全开 = web 的形态；诊断期曾逐个停用，2026-09-27 已全部恢复）。
+///
+/// 与 web 的对应：`html::before` = [kAylaGradientLayerEnabled]（渐变流层，20s spin）、
+/// `html::after` = [kAylaTurbulenceLayerEnabled]（湍流层，15s drift）、
+/// `body::before/after` = [kAylaBlobLayersEnabled]（双光斑，10s drift）。
+/// ⚠️ 这三层**都是动的**；web 里静止的只有 `html` 自己的九层背景（base.css:24-27，
+/// 无 animation），而它平时被 `html::before` 覆盖 —— 只有 reduced-motion 才露出来。
+/// ⛔ **这两层当前判定为「实现有误」，保持停用**（2026-09-27 用户实机验证：
+/// 去掉这两层后静态背景才露出来，之前是「一个莫名其妙的白色不透明背景挡在静态背景前面」）。
+/// 修好之前不要打开。
+const bool kAylaStaticLayerEnabled = true;
+const bool kAylaGradientLayerEnabled = true;
+const bool kAylaTurbulenceLayerEnabled = true; // 2026-09-27 用户要求恢复湍流层
+const bool kAylaBlobLayersEnabled = true;
 
 /// 流体极光背景的全部参数（每个数值都能指到 web 的 `文件:行`）。
 abstract final class AylaFluidAurora {
@@ -1000,38 +1020,49 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
               fit: StackFit.expand,
               children: <Widget>[
                 // ① html 静态兜底（base.css:25）—— reduced-motion 下唯一可见层。
-                _StaticAuroraLayer(
-                  key: AylaAuroraKeys.staticLayer,
-                  viewport: viewport,
-                ),
+                // ⏸ 受 [kAylaStaticLayerEnabled] 控制（2026-09-27 诊断：用户要求先停掉）。
+                // ⚠️ 停用后 reduced-motion 就没有兜底层了（那本是 web 唯一的兜底目标）。
+                if (kAylaStaticLayerEnabled)
+                  _StaticAuroraLayer(
+                    key: AylaAuroraKeys.staticLayer,
+                    viewport: viewport,
+                  ),
                 // ②③④⑤ 四层流层（base.css 305–314 在 reduced-motion 下整体隐藏）。
                 if (flow) ...<Widget>[
-                  _FluidGradientLayer(
-                    key: AylaAuroraKeys.gradient,
-                    viewport: viewport,
-                    controller: _gradientClock,
-                    narrow: narrow,
-                  ),
-                  _TurbulenceLayer(
-                    key: AylaAuroraKeys.turbulence,
-                    viewport: viewport,
-                    controller: _turbulenceClock,
-                    narrow: narrow,
-                  ),
-                  _BlobLayer(
-                    key: AylaAuroraKeys.blobIce,
-                    viewport: viewport,
-                    controller: _blobClock,
-                    narrow: narrow,
-                    ice: true,
-                  ),
-                  _BlobLayer(
-                    key: AylaAuroraKeys.blobSakura,
-                    viewport: viewport,
-                    controller: _blobClock,
-                    narrow: narrow,
-                    ice: false,
-                  ),
+                  // ⏸ 渐变流层受 [kAylaGradientLayerEnabled] 控制（2026-09-27 诊断）。
+                  if (kAylaGradientLayerEnabled)
+                    _FluidGradientLayer(
+                      key: AylaAuroraKeys.gradient,
+                      viewport: viewport,
+                      controller: _gradientClock,
+                      narrow: narrow,
+                    ),
+                  // ⏸ 湍流层受 [kAylaTurbulenceLayerEnabled] 控制（2026-09-27 诊断）。
+                  if (kAylaTurbulenceLayerEnabled)
+                    _TurbulenceLayer(
+                      key: AylaAuroraKeys.turbulence,
+                      viewport: viewport,
+                      controller: _turbulenceClock,
+                      narrow: narrow,
+                    ),
+                  // ⏸ 2026-09-27 用户要求「暂时把光斑层注释掉」做诊断 —— 由
+                  // [kAylaBlobLayersEnabled] 控制（代码保留，改回 true 即恢复）。
+                  if (kAylaBlobLayersEnabled) ...<Widget>[
+                    _BlobLayer(
+                      key: AylaAuroraKeys.blobIce,
+                      viewport: viewport,
+                      controller: _blobClock,
+                      narrow: narrow,
+                      ice: true,
+                    ),
+                    _BlobLayer(
+                      key: AylaAuroraKeys.blobSakura,
+                      viewport: viewport,
+                      controller: _blobClock,
+                      narrow: narrow,
+                      ice: false,
+                    ),
+                  ],
                 ],
                 if (widget.child != null) widget.child!,
               ],

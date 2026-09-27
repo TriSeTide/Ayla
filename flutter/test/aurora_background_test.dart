@@ -69,7 +69,9 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byKey(AylaAuroraKeys.staticLayer), findsOneWidget);
+    if (kAylaStaticLayerEnabled) {
+      expect(find.byKey(AylaAuroraKeys.staticLayer), findsOneWidget);
+    }
     for (final Key key in AylaAuroraKeys.flowLayers) {
       expect(find.byKey(key), findsOneWidget, reason: key.toString());
     }
@@ -79,7 +81,9 @@ void main() {
   testWidgets('animate: false ⇒ 只剩静态兜底（无流层、无网格）', (WidgetTester tester) async {
     await tester.pumpWidget(host(const AylaAuroraBackground(animate: false)));
     await tester.pump();
-    expect(find.byKey(AylaAuroraKeys.staticLayer), findsOneWidget);
+    if (kAylaStaticLayerEnabled) {
+      expect(find.byKey(AylaAuroraKeys.staticLayer), findsOneWidget);
+    }
     for (final Key key in AylaAuroraKeys.flowLayers) {
       expect(find.byKey(key), findsNothing, reason: key.toString());
     }
@@ -113,8 +117,14 @@ void main() {
   ) async {
     await tester.pumpWidget(host(const AylaAuroraBackground()));
     await tester.pump();
-    // 五层都是烘焙纹理（RawImage），滤镜在**烘焙期**一次性施加。
-    expect(find.byType(RawImage), findsNWidgets(5));
+    // 各层都是烘焙纹理（RawImage），滤镜在**烘焙期**一次性施加。
+    // 数量跟当前挂载的层走（光斑层受 kAylaBlobLayersEnabled 控制）：
+    expect(
+      find.byType(RawImage),
+      findsNWidgets(
+        AylaAuroraKeys.flowLayers.length + (kAylaStaticLayerEnabled ? 1 : 0),
+      ),
+    );
     expect(
       find.descendant(
         of: find.byType(AylaAuroraBackground),
@@ -176,25 +186,37 @@ void main() {
     // 外框另加 2×overscan（模糊扩散预留 —— 不预留会露出硬直边）。
     const double side = 1.5 * w;
     const double gOver = AylaFluidAurora.gradientOverscan;
-    expect(layerSize(tester, AylaAuroraKeys.gradient), Size(side + gOver * 2, side + gOver * 2));
-    expect(
-      layerBox(tester, AylaAuroraKeys.gradient).left,
-      closeTo((w - side) / 2 - gOver, 1e-9),
-    );
-    expect(
-      layerBox(tester, AylaAuroraKeys.gradient).top,
-      closeTo((h - side) / 2 - gOver, 1e-9),
-    );
+    // ⏸ 渐变流层被临时停用（kAylaGradientLayerEnabled）时跳过该层断言。
+    if (kAylaGradientLayerEnabled) {
+      expect(
+        layerSize(tester, AylaAuroraKeys.gradient),
+        Size(side + gOver * 2, side + gOver * 2),
+      );
+      expect(
+        layerBox(tester, AylaAuroraKeys.gradient).left,
+        closeTo((w - side) / 2 - gOver, 1e-9),
+      );
+      expect(
+        layerBox(tester, AylaAuroraKeys.gradient).top,
+        closeTo((h - side) / 2 - gOver, 1e-9),
+      );
+    }
 
     // ③ 湍流层：inset -25%（base.css:85）+ 同款 overscan
     const double tOver = AylaFluidAurora.turbulenceOverscan;
-    expect(
-      layerSize(tester, AylaAuroraKeys.turbulence),
-      Size(side + tOver * 2, h * 1.5 + tOver * 2),
-    );
-    expect(layerBox(tester, AylaAuroraKeys.turbulence).left, -w * 0.25 - tOver);
-    expect(layerBox(tester, AylaAuroraKeys.turbulence).top, -h * 0.25 - tOver);
+    if (kAylaTurbulenceLayerEnabled) {
+      expect(
+        layerSize(tester, AylaAuroraKeys.turbulence),
+        Size(side + tOver * 2, h * 1.5 + tOver * 2),
+      );
+      expect(layerBox(tester, AylaAuroraKeys.turbulence).left, -w * 0.25 - tOver);
+      expect(layerBox(tester, AylaAuroraKeys.turbulence).top, -h * 0.25 - tOver);
+    }
 
+    // ⏸ 光斑层被临时停用（kAylaBlobLayersEnabled）时，几何断言一并跳过；
+    // 恢复开关后自动重新生效。
+    if (!kAylaBlobLayersEnabled) return;
+    // ignore: dead_code
     // ④ 冰蓝光斑：40vw · top -10% · left 25%（base.css 110–118）+ 2×overscan（模糊扩散）
     const double bOver = AylaFluidAurora.blobOverscan;
     expect(
@@ -225,6 +247,7 @@ void main() {
     );
     await tester.pump();
 
+    if (!kAylaBlobLayersEnabled) return;
     const double bOver = AylaFluidAurora.blobOverscan;
     // 冰蓝 80vw · top 25% · left 50%（base.css 212–224）
     expect(
@@ -249,6 +272,7 @@ void main() {
   });
 
   testWidgets('窄屏：渐变层仍取视口最长边（150vmax）且居中', (WidgetTester tester) async {
+    if (!kAylaGradientLayerEnabled) return; // ⏸ 临时停用渐变层时的守卫
     await tester.pumpWidget(
       host(const AylaAuroraBackground(), size: const Size(375, 240)),
     );
@@ -338,8 +362,15 @@ void main() {
   testWidgets('动画确实在跑：pump 1s 后渐变层变换矩阵改变', (WidgetTester tester) async {
     await tester.pumpWidget(host(const AylaAuroraBackground()));
     await tester.pump();
+    // 跟随当前挂载的层：诊断期可能逐层停用 ⇒ 取第一个仍启用的流层（都是每帧变换的持续动画）。
+    final Key? animatedKey = kAylaGradientLayerEnabled
+        ? AylaAuroraKeys.gradient
+        : (kAylaTurbulenceLayerEnabled
+              ? AylaAuroraKeys.turbulence
+              : (kAylaBlobLayersEnabled ? AylaAuroraKeys.blobIce : null));
+    if (animatedKey == null) return;
     final Finder gradientTransform = find.descendant(
-      of: find.byKey(AylaAuroraKeys.gradient),
+      of: find.byKey(animatedKey),
       matching: find.byType(Transform),
     );
     final Matrix4 before = tester.widget<Transform>(gradientTransform.first).transform;
