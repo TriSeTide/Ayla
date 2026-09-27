@@ -50,6 +50,7 @@ import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import '../base/dialogs.dart' show AylaModalCard, AylaModalOverlay;
 import '../base/directory_controls.dart' show AylaCheckbox;
+import '../base/tooltip.dart';
 
 /// 弹窗状态（web SubGroupDialogState：add | edit | null）。
 ///
@@ -277,13 +278,18 @@ class _AylaSubGroupDialogState extends State<AylaSubGroupDialog> {
       spacing: AylaSpacing.sp2, // gap: var(--sp-2)
       children: <Widget>[
         if (_isEdit)
-          AylaGlassButton(
-            label: '删除', // tsx 88
-            variant: AylaGlassButtonVariant.destructive,
-            minWidth: 72, // .subgroup-dialog-actions .btn { min-width: 72px }
-            // disabled = busy || !canDelete；不可删时给出「默认组不可删除」语义
-            onPressed: (widget.busy || !_canDelete) ? null : widget.onDelete,
-            semanticLabel: _canDelete ? '删除' : '默认组不可删除',
+          // web «SubGroupDialog.tsx:86»：«title={canDelete ? undefined : "默认组不可删除"}»
+          // ⇒ AylaTooltip 的 null 透传（可删时完全不提示）
+          AylaTooltip(
+            message: _canDelete ? null : '默认组不可删除',
+            child: AylaGlassButton(
+              label: '删除', // tsx 88
+              variant: AylaGlassButtonVariant.destructive,
+              minWidth: 72, // .subgroup-dialog-actions .btn { min-width: 72px }
+              // disabled = busy || !canDelete；不可删时给出「默认组不可删除」语义
+              onPressed: (widget.busy || !_canDelete) ? null : widget.onDelete,
+              semanticLabel: _canDelete ? '删除' : '默认组不可删除',
+            ),
           ),
         const Spacer(), // .btn-destructive { margin-right: auto }
         AylaGlassButton(

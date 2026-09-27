@@ -96,6 +96,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaTransferOwnerDialog（GroupInfo.tsx 904–1010 + app.css 3894–4005）',
     'AylaGroupRoleChip（group.css 1734–1750 + GroupInfo.tsx 52–56）',
     'AylaGroupInfoProfile（GroupInfo.tsx 461–520 + group.css 1382–1610 / 2235–2240）',
+    'AylaGroupInfoSettingRow / AylaGroupInfoSwitch / AylaGroupInfoSelect / AylaGroupJoinRequests / 成员搜索 / 子群展开（GroupInfo.tsx 531–624/709–718/754 + group.css 1678–1687/1796–2047/2109–2116）',
   ],
   'boardgame · 桌游域': <String>[
     'AylaGamesGrid / AylaGamesGridSkeleton（GamesHubPage.tsx 184–216 + boardgame.css 232–275）',
@@ -108,6 +109,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaProfileCard / AylaProfileIdentity / AylaProfileAvatarActions（ProfilePage.tsx 154–180 + app.css 241–248/2657–2695 + profile.css 14–16/44–52/142–171/584–591/623–625）',
     'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456）',
     '个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）',
+    'AylaStatusChips / AylaProfileSwitch / AylaProfileForm（ProfilePage.tsx 212–305 + app.css 2696–2749 + profile.css 47–51/377–440/593–611 + auth.css 79–87）',
   ],
   'search · 搜索域': <String>[
     'AylaSearchHistoryChips（search.css 11–30 + SearchPage.tsx 362–372）',

@@ -32,6 +32,7 @@ import '../base/avatar_halo.dart';
 import '../shell/create_sheet.dart';
 import '../base/loading.dart' show AylaSkeleton;
 import '../base/overlays.dart';
+import '../base/tooltip.dart';
 
 /// 头像条一次最多渲染几位（tsx 27 `MAX_PREVIEW = 12`，与后端 WS 预览上限一致）。
 const int kAylaLiveViewerPreviewMax = 12;
@@ -171,7 +172,10 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
     //    （已 grep 确认无命中）⇒ 无 hover 1.02、无 active .98、无扫光；
     // 环色用 `--focus-ring`（tokens.css:86 `2px solid #f796ff` = glow-500），
     // 与卡片族的 ice-500 不同档；半径跟自身 radius-input 12。
-    return AylaCardInteraction(
+    // web «LiveViewerStrip.tsx:54»：«title={known ? "查看正在观看的人" : "正在读取在看人数"}»
+    return AylaTooltip(
+      message: known ? '查看正在观看的人' : '正在读取在看人数',
+      child: AylaCardInteraction(
       onTap: _openSheet,
       interactive: false,
       focusRingColor: AylaColors.glow500,
@@ -227,6 +231,7 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
             ),
         );
       },
+      ),
     );
   }
 

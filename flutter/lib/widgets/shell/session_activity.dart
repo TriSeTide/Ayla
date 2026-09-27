@@ -67,6 +67,7 @@ import '../../theme/app_icons.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../base/tooltip.dart';
 
 /// `box-shadow: 0 2px 12px rgba(70,91,146,0.12)`（shell.css 490 球 / 537 把手）。
 ///
@@ -275,6 +276,7 @@ class _AylaSessionActivityIndicatorState
             kind: _ActivityBallKind.voice,
             collapsed: _collapsed,
             reduceMotion: reduceMotion,
+            title: voice.title, // tsx 150
             onPressed: () => widget.onOpenSession?.call(voice),
           ),
         if (live != null)
@@ -282,6 +284,7 @@ class _AylaSessionActivityIndicatorState
             kind: _ActivityBallKind.live,
             collapsed: _collapsed,
             reduceMotion: reduceMotion,
+            title: live.title, // tsx 161
             onPressed: () => widget.onOpenSession?.call(live),
           ),
         _ActivityToggle(
@@ -345,12 +348,18 @@ class _ActivityBall extends StatefulWidget {
     required this.kind,
     required this.collapsed,
     required this.reduceMotion,
+    this.title,
     this.onPressed,
   });
 
   final _ActivityBallKind kind;
   final bool collapsed;
   final bool reduceMotion;
+
+  /// 球的悬停提示（web «SessionActivityIndicator.tsx:150 / 161»：«title={session.title}»，
+  /// 即语音房 / 直播间的名字；**与 aria-label「返回语音房 / 返回直播间」不同**）。
+  final String? title;
+
   final VoidCallback? onPressed;
 
   @override
@@ -457,7 +466,10 @@ class _ActivityBallState extends State<_ActivityBall> {
       // 但要**监听**焦点：`hasFocus` 对后代持有主焦点时为 true ⇒ 可驱动 hover/focus 同款辉光。
       canRequestFocus: false,
       onFocusChange: (bool has) => setState(() => _focused = has),
-      child: AylaPressScale(
+      // web «SessionActivityIndicator.tsx:150 / 161»：球带 «title={session.title}»
+      child: AylaTooltip(
+        message: widget.title,
+        child: AylaPressScale(
         // auroraqua.css:62/80/92 的按钮组 `:is()` **不含** `.session-activity-ball`
         // ⇒ 没有 hover 1.02 / active .98，缩放全部交给上面的 1.08
         hoverScale: false,
@@ -469,6 +481,7 @@ class _ActivityBallState extends State<_ActivityBall> {
           onEnter: (_) => setState(() => _hovered = true),
           onExit: (_) => setState(() => _hovered = false),
           child: animated,
+        ),
         ),
       ),
     );

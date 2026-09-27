@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/tokens.dart';
+import 'tooltip.dart';
 
 /// `.scroll-text` —— 长文本单行 marquee（溢出才滚，未溢出静态）。
 ///
@@ -110,7 +111,11 @@ class _AylaScrollingTextState extends State<AylaScrollingText>
     final TextStyle style = _resolveStyle(context);
     final double scale = MediaQuery.textScalerOf(context).scale(1);
 
-    return LayoutBuilder(
+    // web «title={text}»（ScrollingText.tsx:50）：原生提示的平台等价物 ⇒ AylaTooltip
+    // （全库统一项，见 widgets/base/tooltip.dart）。
+    return AylaTooltip(
+      message: widget.text,
+      child: LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double available = constraints.maxWidth;
         if (available.isFinite && available > 0) {
@@ -158,7 +163,8 @@ class _AylaScrollingTextState extends State<AylaScrollingText>
             ),
           ),
         );
-      },
+        },
+      ),
     );
   }
 }

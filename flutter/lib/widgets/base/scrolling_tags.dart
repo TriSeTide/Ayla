@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 import '../../theme/tokens.dart';
+import 'tooltip.dart';
 
 /// `.scroll-tags` —— 标签横向 marquee（溢出时滚 + **左右 14px 渐隐**）。
 ///
@@ -27,9 +28,16 @@ class AylaScrollingTags extends StatefulWidget {
   const AylaScrollingTags({
     super.key,
     required this.children,
+    this.title,
     this.speed = 24,
     this.fadeWidth = 14, // mask 渐隐 14px（base.css）
   });
+
+  /// 悬停提示（web prop «title»，ScrollingTags.tsx:54 ⇒ 原生 title 属性）。
+  ///
+  /// 调用方按 web 传法给值：直播来源标签传 «visibilityLabels.join("、")»
+  /// （LiveRoomBody.tsx:257 / 325）。null/空 ⇒ 不提示（等价 title={undefined}）。
+  final String? title;
 
   /// 标签（横向排列，间距 sp1）。
   final List<Widget> children;
@@ -92,7 +100,10 @@ class _AylaScrollingTagsState extends State<AylaScrollingTags>
   Widget build(BuildContext context) {
     final bool overflowing = _overflow > 0;
 
-    return LayoutBuilder(
+    // web «title»（ScrollingTags.tsx:54）：原生提示的平台等价物 ⇒ AylaTooltip。
+    return AylaTooltip(
+      message: widget.title,
+      child: LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _measure(c.maxWidth);
@@ -187,7 +198,8 @@ class _AylaScrollingTagsState extends State<AylaScrollingTags>
         }
 
         return clipped;
-      },
+        },
+      ),
     );
   }
 }

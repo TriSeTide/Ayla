@@ -53,6 +53,7 @@ import 'image_viewer.dart';
 import '../base/loading.dart';
 import '../base/overlays.dart';
 import '../base/resource_image.dart';
+import '../base/tooltip.dart';
 
 // ======================= 入口 =======================
 
@@ -1066,7 +1067,10 @@ class _MentionTokenState extends State<_MentionToken> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    // web «MediaContent.tsx:411»：mention 按钮带 «title="@昵称"»（与 aria-label 同值）
+    return AylaTooltip(
+      message: '@${widget.label}',
+      child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Focus(
         onFocusChange: (bool v) => setState(() => _focused = v),
@@ -1108,6 +1112,7 @@ class _MentionTokenState extends State<_MentionToken> {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -1590,7 +1595,9 @@ class _FileCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Tooltip(
+                  // web «MediaContent.tsx:726»：消息文件行的 «span.file-name title={name}»
+                  // ⇒ 本轮统一收敛到 AylaTooltip（此前这里接的是裸 Material Tooltip）
+                  AylaTooltip(
                     message: name,
                     child: Text(
                       name,

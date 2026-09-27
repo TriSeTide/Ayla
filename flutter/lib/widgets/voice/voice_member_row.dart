@@ -38,6 +38,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
+import '../base/tooltip.dart';
 
 /// 语音成员投影 —— web `stores/voice.ts:20–32` `VoiceMemberState` 中本组件消费的字段。
 ///
@@ -343,7 +344,11 @@ class _MeterToggleState extends State<_MeterToggle> {
 
     // `aria-pressed` 与 aria-label 必须落在**同一个**语义节点上（web 是同一个 button）
     // ⇒ 用 MergeSemantics 合并，而不是叠两层 Semantics。
-    return MergeSemantics(
+    // web «VoiceMemberRow.tsx:178 / 189»：两处「一键禁音·恢复」按钮的原生 title
+    // 与各自的 aria-label 同值（自用行 = 一键禁音/一键恢复；远端行 =「{昵称} 静音/恢复声音」）
+    return AylaTooltip(
+      message: widget.semanticLabel,
+      child: MergeSemantics(
       child: Semantics(
         toggled: widget.pressed, // aria-pressed
         child: AylaPressScale(
@@ -374,6 +379,7 @@ class _MeterToggleState extends State<_MeterToggle> {
           ),
         ),
         ),
+      ),
       ),
     );
   }

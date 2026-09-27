@@ -27,6 +27,7 @@ import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 
 import '../../theme/app_icons.dart';
 import '../../theme/tokens.dart';
+import '../base/tooltip.dart';
 
 /// 拖动判定阈值（tsx 25 `DRAG_THRESHOLD = 5`）：位移超过它才算拖动、否则仍是点击。
 const double kLiveMiniDragThreshold = 5;
@@ -182,7 +183,11 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
       top: pos.dy,
       width: _size.width,
       height: _size.height,
-      child: Semantics(
+      // web «LiveMiniPlayer.tsx:195»：«title={mini.channel?.title ?? "直播间"}»
+      // ⇒ AylaTooltip（空标题 ⇒ 透传不提示）
+      child: AylaTooltip(
+        message: widget.channelTitle,
+        child: Semantics(
         button: true,
         label: '返回直播间', // tsx 194
         child: Focus(
@@ -255,6 +260,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

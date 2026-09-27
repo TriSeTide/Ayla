@@ -50,6 +50,7 @@ import 'live_viewers.dart'
     show AylaLiveViewerItem, AylaLiveViewerSheetData, AylaLiveViewerStrip;
 import '../base/primitives.dart' show AylaSourceTag;
 import '../base/share.dart' show AylaShareButton;
+import '../base/tooltip.dart';
 
 /// 直播间数据投影（web `useLiveRoom` + `useDanmaku` + live store 的等价物 —— 全部由页面给出）。
 class AylaLiveRoomData {
@@ -403,14 +404,19 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             ),
           ),
           if (tags.isNotEmpty)
-            // 来源标签：三域统一的共享件 AylaSourceTag
-            Row(
-              spacing: AylaSpacing.sp1,
-              children: <Widget>[
-                // 窄屏只留 1 个标签（web 靠 ScrollingTags 滚动承担；Flutter 侧避免窄屏头部溢出）
-                for (final String tag in tags.take(narrow ? 1 : 2))
-                  AylaSourceTag(tag),
-              ],
+            // 来源标签：三域统一的共享件 AylaSourceTag。
+            // web «LiveRoomBody.tsx:257» 把可见范围列表交给 ScrollingTags 的 «title»（悬停读全列表）；
+            // Flutter 侧头部不用滚动容器（窄屏只留 1–2 个标签）⇒ 用 AylaTooltip 表达同一提示。
+            AylaTooltip(
+              message: tags.join('、'),
+              child: Row(
+                spacing: AylaSpacing.sp1,
+                children: <Widget>[
+                  // 窄屏只留 1 个标签（web 靠 ScrollingTags 滚动承担；Flutter 侧避免窄屏头部溢出）
+                  for (final String tag in tags.take(narrow ? 1 : 2))
+                    AylaSourceTag(tag),
+                ],
+              ),
             ),
           if (channel != null)
             // 头部收藏 = **compact 32×32**（web `FavoriteButton compact`；

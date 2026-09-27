@@ -7,7 +7,7 @@
 /// | [AylaPrivateChatPane] | `PrivateChatPane.tsx:165–253`（头部 + 消息区 + 输入区三段） |
 /// | 外壳 | private.css 8–15（`.private-chat`：`height: 100%` + column + `overflow: hidden`） |
 /// | 头部（窄屏档） | private.css 14–26（`.private-chat-head`：56 高 / padding `sp2 sp4` / gap sp3 / `--glass-bg` + **blur18 sat1.4** + 下边框） |
-/// | 头部（宽屏档） | auroraqua 402–410（≥769 卡片化：1px 边 + radius-card 16 + `--glass-shadow-compact` + `--glass-filter`(blur24 sat1.4)；`margin: var(--sidebar-gutter)` 是**死声明** ⇒ 无外边距，同 §6.39）+ auroraqua 366（`.wide-messages-pane .private-chat-head { margin-left: 0 }`） |
+/// | 头部（宽屏档） | auroraqua 402–410（≥769 卡片化：1px 边 + radius-card 16 + `--glass-shadow-compact` + `--glass-filter`(blur24 sat1.4)；`margin: var(--sidebar-gutter)` = **12px**（`tokens.css:132` 确有定义 —— 2026-09-28 更正原「死声明」误判）⇒ 本件当前未表达该外边距，属待裁决偏离）+ auroraqua 366（`.wide-messages-pane .private-chat-head { margin-left: 0 }`） |
 /// | 标题/状态 | private.css 27–52（`.private-chat-name` 15/700；`.private-chat-status` 12 secondary；**`.is-typing` → `--glow-500`**） |
 /// | 禁发提示 | private.css 54–64（`.private-chat-blocked`：`margin: sp3 sp6` + padding `sp3 sp4` + radius-input + `--warning-soft-bg/--warning-soft-border` + 13 居中） |
 /// | 禁用条件 | tsx 158–163（私聊 + 对端已知 + 好友关系已加载 + 对端不是爱莉 + 非好友） |

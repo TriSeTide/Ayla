@@ -12,12 +12,16 @@
 /// `radius-card 16` + `align-self: stretch` + `max-height: 100%` + `overflow-y: auto`
 /// + `scroll-padding: sp3`；入场关键帧 `auroraqua.css:8–11`（`-20px 0` → `0 0` + 淡入）。
 ///
-/// ## ⚠️ 照实：`margin: var(--sidebar-gutter)` 是**死声明**
-/// 三处都写了 `margin: var(--sidebar-gutter)`，但该变量在 web **全历史未定义**
-/// （`grep -rn 'sidebar-gutter' web/src/styles/*.css` 只有 5 处引用、零定义）
-/// ⇒ 按 CSS 规范属「invalid at computed-value time」，**整条 `margin` 简写作废、回落初始值 0**
-/// ⇒ 侧栏卡实际**没有外边距**。本件照实不加 margin（同 `--glass-bg-hover` 的既有先例，
-/// 见 13 号 §6.21）。
+/// ## ⚠️ 更正（2026-09-28）：`margin: var(--sidebar-gutter)` **不是**死声明
+/// 本节此前写「该变量在 web 全历史未定义 ⇒ `margin` 简写作废、回落 0」——**该结论是错的**
+/// （原判断只 grep 了「引用处」没检查 `:root` 定义）。实际：
+/// `tokens.css:132` 在 `:root`（7–140）内定义 **`--sidebar-gutter: 12px`**，全仓有 17 处
+/// `var(--sidebar-gutter)` 消费（app.css 405/2795/3248、auroraqua 263/351/394/403、
+/// group.css 501/700、live.css 323 …），库内其它件也一直按 12px 在用
+/// （`channel_sidebar.dart:70`、`server_rail.dart:214`、`top_nav.dart:10`、`live_room_body.dart:702`）。
+/// ⇒ 三处侧栏卡在 web 上**确实带 12px 外边距**；本件当前**未表达**这 12px
+/// （沿用原「无 margin」实现）—— 登记为**待用户裁决的偏离**：补 margin 会同时影响四个复用点
+/// （频道 / 语音 / 直播侧栏 + 宽屏消息侧栏），须一起验收后再改。
 ///
 /// ## 为什么抽这一件（2026-09-24 用户点名）
 /// > 「会话列表背景卡片、选中高亮、切换动画等应直接复用 DirectoryFilters 宽屏侧栏」

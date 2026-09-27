@@ -456,13 +456,18 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
               ),
               const SizedBox(width: 8),
               Flexible(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis, // white-space: nowrap + ellipsis
-                  style: t.body.copyWith(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                // web «ShareSheet.tsx:327»：«span.share-sheet-preview-text title={payload.title}»
+                // —— 提示取 **payload.title 原值**（空 ⇒ 不提示），显示文案才是 fallback 的 title
+                child: AylaTooltip(
+                  message: widget.payload.title,
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis, // white-space: nowrap + ellipsis
+                    style: t.body.copyWith(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),

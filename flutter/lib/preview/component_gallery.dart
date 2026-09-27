@@ -79,6 +79,8 @@ import '../widgets/base/directory_result_cards.dart';
 import '../widgets/shell/overlay_scrollbar.dart';
 import '../widgets/base/profile_content_sections.dart';
 import '../widgets/group/group_create_dialog.dart';
+import '../widgets/group/group_info_settings.dart';
+import '../widgets/profile/profile_edit.dart';
 import '../widgets/group/subgroup_dialog.dart';
 import '../widgets/chat/emoji_pack_panel.dart';
 import '../widgets/chat/media_content.dart';
@@ -211,6 +213,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaTransferOwnerDialog',
     'AylaGroupRoleChip',
     'AylaGroupInfoProfile',
+    'AylaGroupInfoSettingRow / AylaGroupInfoSwitch / AylaGroupInfoSelect / AylaGroupJoinRequests',
   ]),
   AylaGalleryCategory('game', 'boardgame · 桌游域', <String>[
     'AylaGamesGrid',
@@ -223,6 +226,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaProfileCard',
     'AylaFavoritesSkeleton',
     '个人主页内容分区', // 2026-09-25 用户指正：本件属 profile 域（早期误放在「群与目录」，当时还没有 profile 分类）
+    'AylaStatusChips / AylaProfileSwitch / AylaProfileForm',
   ]),
   AylaGalleryCategory('search', 'search · 搜索域', <String>[
     'AylaSearchHistoryChips',
@@ -397,6 +401,33 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           '编辑态：群名 input + 群简介 textarea(rows 3) + error + **两键等宽**（保存 / 取消）',
                       child: const _GroupInfoProfileDemo(),
                     ),
+                    // ---------- 群信息**设置面**（B9 批次②：设置行 / 轨道开关 / 加入方式下拉 / 申请审批 / 成员搜索 / 子群展开） ----------
+                    _Section(
+                      title: 'AylaGroupInfoSettingRow / AylaGroupInfoSwitch / AylaGroupInfoSelect / AylaGroupJoinRequests / 成员搜索 / 子群展开（GroupInfo.tsx 531–624/709–718/754 + group.css 1678–1687/1796–2047/2109–2116）',
+                      source:
+                          '① 设置块（.group-info-settings）：column · padding **0 sp3** · radius-input · rgba(157,191,230,.1) 底；'
+                          '行（.group-info-setting-row）= flex · center · space-between · gap sp3 · **min-h 44**；'
+                          '**相邻行**才加 border-top 1px rgba(157,191,230,.22)（兄弟选择器 ⇒ 首行无上边线）；'
+                          'label 14/w600/text-primary · value 13/secondary/nowrap'
+                          '② 轨道开关（.group-info-switch）：整行（同 setting-row）· 轨道 **44×24** pill · --ice-300 底 + '
+                          '**--glass-inset 顶沿内高光** · thumb 18×18 top3 left 3→23 · --surface 底 + 0 1px 3px rgba(70,91,146,.3) · '
+                          '选中轨道转 --pink-500 · **禁用轨道 opacity .6** · :focus-visible = --focus-ring'
+                          '③ 加入方式下拉（.group-info-select-*）：按钮 min-h 32 / padding 4 10 4 14 / pill / 1px rgba(157,191,230,.55) / '
+                          '135deg 渐变（.22/.14 → hover .32/.2）/ indigo-700 13/w700 · chevron 14 rotate 180° · '
+                          '**在 auroraqua 按钮组内**（200ms + hover 1.02 + active .98 + 扫光）· 禁用 opacity .6 · '
+                          '菜单 = right 0 / top 100%+6 / min-w 148 / padding sp1 / radius 16 / glass-bg-strong + blur24 + --glass-shadow · '
+                          '选项 min-h 36 / padding 0 sp3 / radius 8 / 13/w600 / hover rgba(157,191,230,.22) / 选中 grape-700 + check pink-500 · '
+                          '非 public 一律显示「申请加入」，选中判定同 web（缺值按 application）· ⚠️ Flutter 走 root Overlay（溢出子级无命中测试）'
+                          '④ 申请审批（.group-info-requests）：column · gap sp2 · 标题 13/w700「入群申请审批 · 待处理（N）」· '
+                          '行 = flex · center · gap sp2 · padding sp2 sp3 · radius-input · rgba(157,191,230,.1) 底 · '
+                          'name 13/w700 省略 + msg 12/secondary 省略（**message 空则不渲染**）· 两键 min-h 30 / padding 2 12 / '
+                          'font-size 12 / **pill**（同意 primary / 拒绝 ghost，busy ⇒ 双双禁用）· 空态 13/secondary'
+                          '⑤ 成员搜索框（GroupInfo.tsx:754）：就是 .field 档 + placeholder「搜索成员」+ aria-label「搜索群成员」，'
+                          '**web 没有搜索图标**、没有额外包装'
+                          '⑥ 子群展开（.group-info-expand-btn）：整宽 · min-h 36 · margin-top sp2 · 13px · ghost 档 · '
+                          'aria-expanded · 文案「查看更多（N）」/「收起」（N = 总数 − 3，仅 length > 3 才渲染）',
+                      child: const _GroupInfoSettingsDemo(),
+                    ),
                     // ---------- 转让群主弹窗 + 角色标签（群信息域） ----------
                     _Section(
                       title: 'AylaTransferOwnerDialog（GroupInfo.tsx 904–1010 + app.css 3894–4005）',
@@ -443,6 +474,27 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           '昵称 Display 28/600/ls −.3 + `@用户名` Utility 13/ls .3）· 分享键 `margin-left: auto` 推右 · '
                           'avatar-actions：等宽按钮（12px / padding sp1 sp2 / min-h 28）+ hint(12/secondary)/error(12/destructive)，左内距 48（与头像左缘对齐）',
                       child: const _ProfileCardDemo(),
+                    ),
+                    // ---------- 个人主页**编辑面**（B9 批次①：状态胶囊 / 开关行 / 表单装配） ----------
+                    _Section(
+                      title: 'AylaStatusChips / AylaProfileSwitch / AylaProfileForm（ProfilePage.tsx 212–305 + app.css 2696–2749 + profile.css 47–51/377–440/593–611 + auth.css 79–87）',
+                      source:
+                          '① 状态胶囊（.status-chips/.status-chip）：flex-wrap · gap sp2 · 胶囊 padding sp2 sp4 / pill / '
+                          'Display 11 / w500 / ls .8 · 未选中 = ice-300 @16% 底 + indigo-700 字（**profile.css 598–611 覆写 app.css 的粉底**）· '
+                          '选中 = sakura-300 + grape-700 + --glow-shadow（窄屏降 30%）· hover = brightness(1.04) 整颗含文字 · '
+                          '**不在 auroraqua 按钮组** ⇒ 无 hover 1.02 / active .98 / 扫光 · role=radiogroup/radio ⇒ Semantics '
+                          'checked + inMutuallyExclusiveGroup · focus ring = --focus-ring(glow-500) / offset 2'
+                          '② 开关行（.profile-show-content-row/.profile-switch）：row · center · space-between · gap sp3 · '
+                          'label 14/w700 + small 12/w400 secondary · 开关 48×28 pill + 1px --glass-border + --glass-bg-strong'
+                          '（**无 backdrop-filter**）· knob 20×20 top3 left 3→23 · off = ice-300 钮 + 玻璃底 · on = grape-700 钮 + '
+                          'sakura-300 底 + --glow-shadow · web 是 label 转发点击 ⇒ 整行可点 · :focus-visible = --focus-ring'
+                          '③ 表单装配（.profile-form）：column · gap sp4（≥769 单栏 sp3 / 双栏侧栏 sp4）· 行 = 14/w700/ls .2 + gap sp1 · '
+                          '昵称 input / 签名 textarea(rows 3, resize none) 走 .field（文字**继承行样式 14/w700**，非 .field 自声明）· '
+                          '错误行 = .auth-error（13 / destructive / rgba(214,77,110,.1) 底 + .35 边 / role=alert）· '
+                          '动作行 = flex-end · gap sp3：「已保存」13/--success（**仅 saved && !dirty**）+ primary'
+                          '「保存修改 / 保存中…」（disabled = saving || !dirty）+ destructive「退出登录」'
+                          '（min-h 36 / padding 0 sp4 / IconLogout 15）',
+                      child: const _ProfileEditDemo(),
                     ),
                     _Section(
                       title: 'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456）',
@@ -1220,9 +1272,12 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                     ),
                   ),
                   const SizedBox(height: AylaSpacing.sp4),
-                  const SizedBox(
+                  SizedBox(
                     width: 260,
+                    // web `LiveRoomBody.tsx:257 / 325`：只有直播间的可见范围标签传 `title`
+                    //（悬停读完整列表）；其余 ScrollingTags 调用点在 web 上都不带 title。
                     child: AylaScrollingTags(
+                      title: '公开、好友可见、指定群可见、我的收藏、更多标签',
                       children: <Widget>[
                         AylaCapsuleTag('公开'),
                         AylaCapsuleTag('好友可见', tone: AylaCapsuleTone.ice),
@@ -3699,6 +3754,328 @@ class _FavoriteItemDemo extends StatelessWidget {
             width: 420,
             child: AylaFavoriteItem(child: inner('收藏内容（typed 卡）')),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ======================= B9 编辑面样张（2026-09-28） =======================
+
+/// 个人主页编辑面样张：状态胶囊 / 开关行 / 表单装配（含已保存与错误行）。
+class _ProfileEditDemo extends StatelessWidget {
+  const _ProfileEditDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: '在线状态胶囊（role=radiogroup；点击切换 · hover 整颗加亮 1.04）',
+              width: 420,
+              child: const _StatusChipsStage(),
+            ),
+            _Slot(
+              label: '开关行（off / on / 禁用档）· 点整行或点开关都能切换',
+              width: 420,
+              child: const _ProfileSwitchStage(),
+            ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp6),
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: '表单装配 · 默认态（dirty ⇒ 保存键可用）',
+              width: 420,
+              child: const _ProfileFormStage(),
+            ),
+            _Slot(
+              label: '表单装配 · 已保存 + 错误行（saved && !dirty ⇒ 保存键禁用）',
+              width: 420,
+              child: const _ProfileFormStage(saved: true, error: '保存失败，请稍后重试'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 状态胶囊舞台（可交互）。
+class _StatusChipsStage extends StatefulWidget {
+  const _StatusChipsStage();
+
+  @override
+  State<_StatusChipsStage> createState() => _StatusChipsStageState();
+}
+
+class _StatusChipsStageState extends State<_StatusChipsStage> {
+  String _status = 'auto';
+
+  @override
+  Widget build(BuildContext context) {
+    return AylaStatusChips(
+      value: _status,
+      onChanged: (String value) => setState(() => _status = value),
+    );
+  }
+}
+
+/// 开关行舞台（off / on / 禁用三态）。
+class _ProfileSwitchStage extends StatefulWidget {
+  const _ProfileSwitchStage();
+
+  @override
+  State<_ProfileSwitchStage> createState() => _ProfileSwitchStageState();
+}
+
+class _ProfileSwitchStageState extends State<_ProfileSwitchStage> {
+  bool _off = false;
+  bool _on = true;
+
+  static const String _desc =
+      '开启后，他人可在你的主页看到「他的内容」（发帖/直播间/桌游）';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      spacing: AylaSpacing.sp4,
+      children: <Widget>[
+        AylaProfileSwitch(
+          label: '向他人展示内容',
+          description: _desc,
+          value: _off,
+          onChanged: (bool value) => setState(() => _off = value),
+        ),
+        AylaProfileSwitch(
+          label: '向他人展示内容（on 档）',
+          description: _desc,
+          value: _on,
+          onChanged: (bool value) => setState(() => _on = value),
+        ),
+        // web 无禁用档；本档留给调用方（按 button:disabled 语义 opacity .55）
+        const AylaProfileSwitch(
+          label: '向他人展示内容（禁用档）',
+          value: false,
+          onChanged: null,
+        ),
+      ],
+    );
+  }
+}
+
+/// 表单装配舞台（[saved] / [error] 决定已保存提示与错误行）。
+class _ProfileFormStage extends StatefulWidget {
+  const _ProfileFormStage({this.saved = false, this.error});
+
+  final bool saved;
+  final String? error;
+
+  @override
+  State<_ProfileFormStage> createState() => _ProfileFormStageState();
+}
+
+class _ProfileFormStageState extends State<_ProfileFormStage> {
+  final TextEditingController _nickname = TextEditingController(text: '爱莉');
+  final TextEditingController _signature = TextEditingController(
+    text: '今天也想见你',
+  );
+  String _status = 'auto';
+  bool _showContent = false;
+
+  @override
+  void dispose() {
+    _nickname.dispose();
+    _signature.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AylaProfileForm(
+      nicknameController: _nickname,
+      signatureController: _signature,
+      nicknamePlaceholder: 'elysia', // web: placeholder={currentUser.username}
+      status: _status,
+      onStatusChanged: (String value) => setState(() => _status = value),
+      showContent: _showContent,
+      onShowContentChanged: (bool value) => setState(() => _showContent = value),
+      saved: widget.saved,
+      dirty: !widget.saved, // 已保存档 ⇒ 无改动 ⇒ 保存键禁用 +「已保存」
+      error: widget.error,
+      onSave: () {},
+      onLogout: () {},
+    );
+  }
+}
+
+/// 群信息设置面样张：设置块（两档）/ 申请审批（含空态与 busy）/ 成员搜索 / 子群展开。
+class _GroupInfoSettingsDemo extends StatefulWidget {
+  const _GroupInfoSettingsDemo();
+
+  @override
+  State<_GroupInfoSettingsDemo> createState() => _GroupInfoSettingsDemoState();
+}
+
+class _GroupInfoSettingsDemoState extends State<_GroupInfoSettingsDemo> {
+  String? _joinPolicy = 'application';
+  bool _allowUpload = false;
+  bool _busy = false;
+
+  final TextEditingController _memberQuery = TextEditingController();
+
+  static const List<AylaGroupJoinRequest> _requests = <AylaGroupJoinRequest>[
+    AylaGroupJoinRequest(id: 'r1', name: '小雪', message: '想进来一起玩'),
+    AylaGroupJoinRequest(id: 'r2', name: '阿澈'), // message 为空 ⇒ msg 行不渲染
+    AylaGroupJoinRequest(
+      id: 'r3',
+      name: '名字很长的申请人甲乙丙丁戊己庚辛',
+      message: '这是一条很长的申请留言，用来验证单行省略号是否生效',
+    ),
+  ];
+
+  @override
+  void dispose() {
+    _memberQuery.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: '设置块 · owner 档（下拉可展开 · 开关可点 · 行间 1px 分隔线）',
+              width: 420,
+              child: AylaGroupInfoSettingsBox(
+                children: <Widget>[
+                  AylaGroupInfoSettingRow(
+                    label: '加入方式',
+                    trailing: AylaGroupInfoSelect(
+                      value: _joinPolicy,
+                      onChanged: (String value) =>
+                          setState(() => _joinPolicy = value),
+                    ),
+                  ),
+                  AylaGroupInfoSwitch(
+                    label: '成员可上传表情包',
+                    value: _allowUpload,
+                    onChanged: (bool value) =>
+                        setState(() => _allowUpload = value),
+                  ),
+                ],
+              ),
+            ),
+            _Slot(
+              label: '设置块 · 非 owner 档（只读值 + 开关禁用 opacity .6）',
+              width: 420,
+              child: const AylaGroupInfoSettingsBox(
+                children: <Widget>[
+                  AylaGroupInfoSettingRow(label: '加入方式', value: '申请加入'),
+                  AylaGroupInfoSwitch(
+                    label: '成员可上传表情包',
+                    value: true,
+                    onChanged: null,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp6),
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: '入群申请审批（3 条；busy 时两键禁用）',
+              width: 420,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                spacing: AylaSpacing.sp3,
+                children: <Widget>[
+                  AylaGroupJoinRequests(
+                    total: 3,
+                    requests: _requests,
+                    busy: _busy,
+                    onAccept: (AylaGroupJoinRequest request) {},
+                    onReject: (AylaGroupJoinRequest request) {},
+                  ),
+                  AylaGlassButton(
+                    label: _busy ? 'busy = true（点一下复位）' : 'busy = false（点一下置位）',
+                    variant: AylaGlassButtonVariant.ghost,
+                    fontSize: 12,
+                    minHeight: 30,
+                    onPressed: () => setState(() => _busy = !_busy),
+                  ),
+                ],
+              ),
+            ),
+            _Slot(
+              label: '空态 / 加载中 / 加载失败（无申请时的三条文案）',
+              width: 420,
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                spacing: AylaSpacing.sp6,
+                children: <Widget>[
+                  AylaGroupJoinRequests(
+                    total: 0,
+                    requests: <AylaGroupJoinRequest>[],
+                  ),
+                  AylaGroupJoinRequests(
+                    total: 0,
+                    requests: <AylaGroupJoinRequest>[],
+                    loading: true,
+                  ),
+                  AylaGroupJoinRequests(
+                    total: 0,
+                    requests: <AylaGroupJoinRequest>[],
+                    error: true,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp6),
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: '成员搜索框（.field 档 · placeholder「搜索成员」· web 无搜索图标）',
+              width: 420,
+              child: AylaGroupMemberSearchField(controller: _memberQuery),
+            ),
+            _Slot(
+              label: '子群展开（收起「查看更多（2）」/ 展开「收起」；aria-expanded）',
+              width: 420,
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                spacing: AylaSpacing.sp6,
+                children: <Widget>[
+                  AylaGroupSubgroupExpandButton(
+                    hiddenCount: 2,
+                    expanded: false,
+                    onPressed: null,
+                  ),
+                  AylaGroupSubgroupExpandButton(
+                    hiddenCount: 2,
+                    expanded: true,
+                    onPressed: null,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );

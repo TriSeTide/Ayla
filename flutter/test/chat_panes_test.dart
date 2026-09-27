@@ -15,15 +15,20 @@ import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/message_input.dart';
-import '../lib/widgets/messages_tabs.dart';
-import '../lib/widgets/primitives.dart' show AylaNavHighlight;
-import '../lib/widgets/private_chat_pane.dart';
-import '../lib/widgets/request_rows.dart';
-import '../lib/widgets/tab_badge.dart';
+import '../lib/widgets/chat/message_input.dart';
+import '../lib/widgets/chat/messages_tabs.dart';
+import '../lib/widgets/base/primitives.dart' show AylaNavHighlight;
+import '../lib/widgets/chat/private_chat_pane.dart';
+import '../lib/widgets/chat/request_rows.dart';
+import '../lib/widgets/base/tab_badge.dart';
 
 AylaUserPublic _u(String id, String name, {bool online = false}) =>
-    AylaUserPublic(id: id, nickname: name, username: 'user_$id', online: online);
+    AylaUserPublic(
+      id: id,
+      nickname: name,
+      username: 'user_$id',
+      online: online,
+    );
 
 AylaChatMessage _msg(String id, int seq, String sender, String text) =>
     AylaChatMessage(
@@ -74,7 +79,11 @@ void main() {
     test('FriendRequest.fromJson：字段逐条对应；未知 status 保持 null', () {
       final AylaFriendRequest r = AylaFriendRequest.fromJson(<String, dynamic>{
         'id': 7,
-        'from_user': <String, dynamic>{'id': 'u1', 'nickname': '小樱', 'username': 'sakura'},
+        'from_user': <String, dynamic>{
+          'id': 'u1',
+          'nickname': '小樱',
+          'username': 'sakura',
+        },
         'to_user': <String, dynamic>{'id': 'me', 'nickname': '我'},
         'message': '加个好友吧',
         'status': 'pending',
@@ -86,11 +95,13 @@ void main() {
       expect(r.message, '加个好友吧');
       expect(r.status, 'pending');
 
-      final AylaFriendRequest odd = AylaFriendRequest.fromJson(<String, dynamic>{
-        'id': 8,
-        'from_user': <String, dynamic>{'id': 'u2'},
-        'status': 'weird',
-      });
+      final AylaFriendRequest odd = AylaFriendRequest.fromJson(
+        <String, dynamic>{
+          'id': 8,
+          'from_user': <String, dynamic>{'id': 'u2'},
+          'status': 'weird',
+        },
+      );
       expect(odd.status, 'weird', reason: '原样保留，不猜、不归一化');
       expect(odd.toUser, isNull);
     });
@@ -104,21 +115,23 @@ void main() {
       expect(invite.conversationTitle, '桌游小组');
       expect(invite.inviter.displayName, '阿澈');
 
-      final AylaGroupJoinRequest join = AylaGroupJoinRequest.fromJson(<String, dynamic>{
-        'id': 2,
-        'conversation_title': '摄影交流',
-        'applicant': <String, dynamic>{'id': 'u3', 'nickname': '林深'},
-        'message': '想进来学习',
-      });
+      final AylaGroupJoinRequest join = AylaGroupJoinRequest.fromJson(
+        <String, dynamic>{
+          'id': 2,
+          'conversation_title': '摄影交流',
+          'applicant': <String, dynamic>{'id': 'u3', 'nickname': '林深'},
+          'message': '想进来学习',
+        },
+      );
       expect(join.applicant.displayName, '林深');
       expect(join.message, '想进来学习');
 
       final AylaGroupMemberLeaveNotice notice =
           AylaGroupMemberLeaveNotice.fromJson(<String, dynamic>{
-        'id': 3,
-        'conversation_title': '深夜电台群',
-        'member_name': '小林',
-      });
+            'id': 3,
+            'conversation_title': '深夜电台群',
+            'member_name': '小林',
+          });
       expect(notice.conversationTitle, '深夜电台群');
       expect(notice.memberName, '小林');
     });
@@ -142,54 +155,61 @@ void main() {
 
   // ======================= 选项卡 =======================
 
-  testWidgets('选项卡：容器只有 1px 边 + radius 16（无外阴影/无底色）+ margin sp2 / padding sp1', (
+  testWidgets(
+    '选项卡：容器只有 1px 边 + radius 16（无外阴影/无底色）+ margin sp2 / padding sp1',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessagesTabs(
+            value: 'chat',
+            onChange: (_) {},
+            items: const <AylaMessagesTabItem>[
+              AylaMessagesTabItem(key: 'chat', label: '私信'),
+              AylaMessagesTabItem(key: 'friends', label: '好友'),
+            ],
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final Finder box = find
+          .ancestor(
+            of: find.text('私信'),
+            matching: find.byWidgetPredicate(
+              (Widget w) =>
+                  w is Container &&
+                  w.decoration is BoxDecoration &&
+                  (w.decoration! as BoxDecoration).border != null,
+            ),
+          )
+          .first;
+      final Container container = tester.widget<Container>(box);
+      final BoxDecoration deco = container.decoration! as BoxDecoration;
+      expect(
+        (deco.border! as Border).top.color,
+        AylaColors.glassBorder,
+        reason: '1px `--glass-border`',
+      );
+      expect(deco.borderRadius, BorderRadius.circular(AylaRadii.rCard));
+      expect(
+        deco.boxShadow,
+        isNull,
+        reason: 'web 未声明 box-shadow ⇒ 无外阴影（只有 --glass-inset 内高光）',
+      );
+      expect(deco.color, isNull, reason: 'web 未声明 background ⇒ 容器透明，底归胶囊');
+      expect(
+        container.margin,
+        const EdgeInsets.all(AylaSpacing.sp2),
+        reason: 'auroraqua 278 `margin: sp2`',
+      );
+      expect(container.padding, const EdgeInsets.all(AylaSpacing.sp1));
+    },
+  );
+
+  testWidgets('选项卡：等宽（flex: 1 等价）+ 胶囊 = 选中项；切换后胶囊迁移', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
-      host(
-        tester,
-        AylaMessagesTabs(
-          value: 'chat',
-          onChange: (_) {},
-          items: const <AylaMessagesTabItem>[
-            AylaMessagesTabItem(key: 'chat', label: '私信'),
-            AylaMessagesTabItem(key: 'friends', label: '好友'),
-          ],
-        ),
-      ),
-    );
-    await tester.pump(const Duration(milliseconds: 50));
-
-    final Finder box = find
-        .ancestor(
-          of: find.text('私信'),
-          matching: find.byWidgetPredicate(
-            (Widget w) =>
-                w is Container &&
-                w.decoration is BoxDecoration &&
-                (w.decoration! as BoxDecoration).border != null,
-          ),
-        )
-        .first;
-    final Container container = tester.widget<Container>(box);
-    final BoxDecoration deco = container.decoration! as BoxDecoration;
-    expect(
-      (deco.border! as Border).top.color,
-      AylaColors.glassBorder,
-      reason: '1px `--glass-border`',
-    );
-    expect(deco.borderRadius, BorderRadius.circular(AylaRadii.rCard));
-    expect(deco.boxShadow, isNull, reason: 'web 未声明 box-shadow ⇒ 无外阴影（只有 --glass-inset 内高光）');
-    expect(deco.color, isNull, reason: 'web 未声明 background ⇒ 容器透明，底归胶囊');
-    expect(
-      container.margin,
-      const EdgeInsets.all(AylaSpacing.sp2),
-      reason: 'auroraqua 278 `margin: sp2`',
-    );
-    expect(container.padding, const EdgeInsets.all(AylaSpacing.sp1));
-  });
-
-  testWidgets('选项卡：等宽（flex: 1 等价）+ 胶囊 = 选中项；切换后胶囊迁移', (WidgetTester tester) async {
     String value = 'chat';
     late StateSetter setLocal;
     await tester.pumpWidget(
@@ -233,7 +253,9 @@ void main() {
     expect(third.left, greaterThan(first.left), reason: '切换到第三档');
   });
 
-  testWidgets('选项卡：徽标用 AylaTabBadgeMetrics.messages（min 18 / utility 11）', (WidgetTester tester) async {
+  testWidgets('选项卡：徽标用 AylaTabBadgeMetrics.messages（min 18 / utility 11）', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
       host(
         tester,
@@ -253,11 +275,6 @@ void main() {
     expect(badge.metrics, AylaTabBadgeMetrics.messages);
     expect(tester.getSize(find.byType(AylaTabBadge)).height, 18);
   });
-
-  // ⚠️ 2026-09-25：「选项卡窄屏档（竖排 + 宽 260）」用例**已删** —— 该档本来就不存在
-  // （用户实报「消息中心选项卡根本没有这样的窄屏档」）：它对应的 web 规则是
-  // `.messages-page` 的**宽屏消息页版式**（messages.css 211–227，`@media (min-width: 769px)`），
-  // 而 `.wide-messages-sidebar .messages-tabs`（259–263）又把它覆写回横排 ⇒ 组件只有横排一档。
 
   // ======================= 认证面板 =======================
 
@@ -312,10 +329,9 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
     final AylaGlassSurface surface = tester.widget<AylaGlassSurface>(
-      find.ancestor(
-        of: find.text('小樱'),
-        matching: find.byType(AylaGlassSurface),
-      ).first,
+      find
+          .ancestor(of: find.text('小樱'), matching: find.byType(AylaGlassSurface))
+          .first,
     );
     expect(surface.radius, AylaRadii.rInput, reason: 'radius-input 12');
     expect(surface.shadow, AylaShadows.compact);
@@ -327,7 +343,8 @@ void main() {
       host(
         tester,
         AylaRequestsPanel(
-          onFriendAction: (AylaFriendRequest r, bool accept) => calls.add(accept),
+          onFriendAction: (AylaFriendRequest r, bool accept) =>
+              calls.add(accept),
           friendRequests: AylaSocialPage<AylaFriendRequest>(
             items: <AylaFriendRequest>[
               AylaFriendRequest(id: 'f1', fromUser: _u('u1', '小樱')),
@@ -345,9 +362,7 @@ void main() {
   });
 
   testWidgets('认证面板：全空 ⇒ 空态文案', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      host(tester, const AylaRequestsPanel()),
-    );
+    await tester.pumpWidget(host(tester, const AylaRequestsPanel()));
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('暂无待处理认证消息'), findsOneWidget);
   });
@@ -418,15 +433,21 @@ void main() {
     expect(find.text('睡了吗？'), findsOneWidget);
     expect(find.text('发送'), findsOneWidget, reason: '输入区在面板内');
     expect(
-      tester.getSize(
-        find.ancestor(of: find.text('小樱'), matching: find.byType(SizedBox)).first,
-      ).height,
+      tester
+          .getSize(
+            find
+                .ancestor(of: find.text('小樱'), matching: find.byType(SizedBox))
+                .first,
+          )
+          .height,
       AylaPrivateChatPane.headHeight,
       reason: '`.private-chat-head { height: 56px }`',
     );
   });
 
-  testWidgets('私聊面板：typing 时状态行换成「对方正在输入…」并用 glow-500', (WidgetTester tester) async {
+  testWidgets('私聊面板：typing 时状态行换成「对方正在输入…」并用 glow-500', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
       host(
         tester,
@@ -449,10 +470,16 @@ void main() {
     expect(find.text('对方正在输入…'), findsOneWidget);
     expect(find.text('在线'), findsNothing, reason: 'typing 替换状态行（不加高顶栏）');
     final Text status = tester.widget<Text>(find.text('对方正在输入…'));
-    expect(status.style!.color, AylaColors.glow500, reason: '`.is-typing { color: var(--glow-500) }`');
+    expect(
+      status.style!.color,
+      AylaColors.glow500,
+      reason: '`.is-typing { color: var(--glow-500) }`',
+    );
   });
 
-  testWidgets('私聊面板：非好友禁发 ⇒ 提示替换输入区（warning-soft 底）', (WidgetTester tester) async {
+  testWidgets('私聊面板：非好友禁发 ⇒ 提示替换输入区（warning-soft 底）', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
       host(
         tester,
@@ -507,7 +534,9 @@ void main() {
     );
   });
 
-  testWidgets('私聊面板：宽屏头部卡片化（radius 16 + compact 阴影）', (WidgetTester tester) async {
+  testWidgets('私聊面板：宽屏头部卡片化（radius 16 + compact 阴影）', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
       host(
         tester,

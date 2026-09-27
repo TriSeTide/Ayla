@@ -6,7 +6,7 @@
 /// |---|---|
 /// | [AylaMessageInput] | `MessageInput.tsx:329–593`（两形态布局 + 状态行 + 工具键 + 发送键） |
 /// | 外壳（窄屏） | `.composer`：column + gap 8 + padding 12/24/16 + `--glass-bg` + blur18 sat1.4 + 上边框（app.css 1983–1993 / 3206–3209） |
-/// | 外壳（宽屏） | auroraqua.css 347–358：padding **8** + 1px 边 + **radius-card 16** + `--glass-shadow` + blur24 sat1.4（`margin: var(--sidebar-gutter)` 是**死声明** ⇒ 无外边距，同 §6.39） |
+/// | 外壳（宽屏） | auroraqua.css 347–358：padding **8** + 1px 边 + **radius-card 16** + `--glass-shadow` + blur24 sat1.4；`margin: var(--sidebar-gutter)` = **12px**（`tokens.css:132` **确有定义** —— 2026-09-28 更正原「死声明」误判）⇒ 本件当前未表达该 12px 外边距，属待裁决偏离 |
 /// | 引用条 | `.quote-bar`（左 3px `--ice-500` + `rgba(255,250,251,.6)` + radius 12 + label 12/700 + text 13 省略 + 28 圆取消键）（2484–2527） |
 /// | 待发媒体 | `.composer-picked`（44×44 缩略图 / 视频 58 宽 / 文件条 120–180 + 18 圆移除键）（2001–2093） |
 /// | 状态行 | `.composer-uploading`（1995–1998）/ `.composer-error`（2096–2103）/ `.composer-muted-hint` |
@@ -57,6 +57,7 @@ import '../../theme/tokens.dart';
 import 'mention_editor.dart';
 import 'mention_picker.dart';
 import '../base/overlays.dart';
+import '../base/tooltip.dart';
 
 /// 待发媒体项（web `PickedMediaItem`）：本地文件 + 类型（未上传）。
 class AylaPickedMedia {
@@ -810,15 +811,19 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
                         AylaIcon(aylaIconByName('iconFile')!, size: 16),
                         const SizedBox(width: AylaSpacing.sp1),
                         Expanded(
-                          child: Text(
-                            item.file.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontFamily: AylaFonts.body,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AylaColors.indigo700,
+                          // web «MessageInput.tsx:359»：待发文件 «span.picked-file title={p.file.name}»
+                          child: AylaTooltip(
+                            message: item.file.name,
+                            child: Text(
+                              item.file.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: AylaFonts.body,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AylaColors.indigo700,
+                              ),
                             ),
                           ),
                         ),

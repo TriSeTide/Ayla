@@ -13,7 +13,11 @@
 /// - **迟滞取 [AylaTooltipMetrics.wait] = 500ms**：浏览器 `title` 的典型迟滞量级；
 ///   Material 默认 `waitDuration` 为 0 ⇒ 指针一掠过就弹，观感比 web 吵得多。
 /// - **样式保留 Material 默认**（底色/字号/圆角）：web 那份是 OS 绘制、无源码可对齐 ⇒ 不做「凭印象设计」。
-/// - 触屏**长按**同样触发（Material 行为），与桌面 hover 语义一致。
+/// - ⚠️ **触发方式固定为 «TooltipTriggerMode.manual»（2026-09-28 实测修正）**：Material 默认在
+///   android/iOS 是「**长按**触发」⇒ 会**抢走宿主自身的长按手势**（实测：给 «AylaAvatarHalo» 接上后，
+///   «message_bubble_test» 的「长按头像 500ms → 插入 @该用户」直接红）。web 的 «title» 从不由长按触发
+///   ⇒ «manual» 才贴近事实源；**hover 显示不受影响**（hover 由 Tooltip 自己的 MouseRegion 驱动，
+///   与 triggerMode 无关）。
 /// - 键盘可达性：`Tooltip` 自带 `Semantics(tooltip:)`，会并入无障碍名（web 的 `title` 也是可访问名来源）✓。
 ///
 /// ## 公开面
@@ -52,6 +56,8 @@ class AylaTooltip extends StatelessWidget {
       message: text,
       waitDuration: AylaTooltipMetrics.wait,
       showDuration: AylaTooltipMetrics.show,
+      // manual：不跟随 tap/longPress（见文件头「触发方式」条）——否则会抢宿主长按手势
+      triggerMode: TooltipTriggerMode.manual,
       child: child,
     );
   }

@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 import '../../theme/css_gradient.dart';
 import '../../theme/tokens.dart';
 import 'resource_image.dart';
+import 'tooltip.dart';
 
 /// 头像形状。
 enum AylaAvatarCore {
@@ -323,23 +324,29 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     if (widget.onTap == null) return bounded;
 
     // .avatar-halo-btn：可点击头像，hover brightness(1.06)、focus-visible 辉光环
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: _hovered
-            ? ColorFiltered(
-                colorFilter: const ColorFilter.matrix(<double>[
-                  1.06, 0, 0, 0, 0, //
-                  0, 1.06, 0, 0, 0, //
-                  0, 0, 1.06, 0, 0, //
-                  0, 0, 0, 1, 0,
-                ]),
-                child: result,
-              )
-            : result,
+    // web «Avatar.tsx:70»：可点击头像的 button 上带 «title={ariaLabel ?? safeLabel}»
+    // ⇒ AylaTooltip（全库统一项）。不可点击分支（onTap == null）在上一行已提前返回 ——
+    // web 那条走 «aria-hidden» span，不带 title，两侧一致。
+    return AylaTooltip(
+      message: widget.semanticLabel ?? widget.label,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: _hovered
+              ? ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(<double>[
+                    1.06, 0, 0, 0, 0, //
+                    0, 1.06, 0, 0, 0, //
+                    0, 0, 1.06, 0, 0, //
+                    0, 0, 0, 1, 0,
+                  ]),
+                  child: result,
+                )
+              : result,
+        ),
       ),
     );
   }

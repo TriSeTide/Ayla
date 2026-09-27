@@ -1132,7 +1132,16 @@ class AylaGlassButton extends StatefulWidget {
     this.semanticLabel,
     this.glowHover = false,
     this.glowBorderOnHover = false,
+    this.borderRadius,
   });
+
+  /// 圆角覆盖（null ⇒ `.btn { border-radius: var(--radius-input) }` = 12）。
+  ///
+  /// 事实源（逐处）：
+  /// - `.group-info-request .btn { border-radius: var(--radius-pill) }`（group.css 2041–2047）
+  ///   —— 入群申请行的「同意 / 拒绝」；
+  /// - `.group-info-head-action` 同族（group.css 2100–2107）。
+  final double? borderRadius;
 
   /// hover 态改走 **glow 边 + 粉辉光**（web `.post-editor-image-btn:hover
   /// { border-color: var(--glow-500); box-shadow: var(--glow-shadow) }`，
@@ -1301,8 +1310,9 @@ class _GlassButtonState extends State<AylaGlassButton>
         shadow = const <BoxShadow>[]; // `.btn` 基础块未声明 box-shadow
     }
 
-    final BorderRadius rInput =
-        BorderRadius.all(Radius.circular(AylaRadii.rInput));
+    // 圆角：`.btn { border-radius: var(--radius-input) }`，可按调用方覆写（如申请行 pill）
+    final double cornerRadius = widget.borderRadius ?? AylaRadii.rInput;
+    final BorderRadius rInput = BorderRadius.all(Radius.circular(cornerRadius));
 
     // ---- 禁用态：**按颜色降透明度**（裁决）----
     //
@@ -1601,8 +1611,7 @@ class _GlassButtonState extends State<AylaGlassButton>
                 // focus ring：2px 辉光边 + 2px offset（outline-offset）
                 ? Container(
                     decoration: BoxDecoration(
-                      borderRadius:
-                          BorderRadius.circular(AylaRadii.rInput + 2 + 2),
+                      borderRadius: BorderRadius.circular(cornerRadius + 2 + 2),
                       border: Border.all(
                         color: AylaColors.glow500,
                         width: 2,

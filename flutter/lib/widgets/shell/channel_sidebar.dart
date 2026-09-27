@@ -58,6 +58,7 @@ import '../base/primitives.dart';
 import '../base/resource_image.dart';
 import '../base/reveal.dart';
 import '../base/tab_badge.dart';
+import '../base/tooltip.dart';
 
 // ======================= 尺寸常量（逐条对应 web 行号） =======================
 
@@ -1450,6 +1451,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                       inButtonGroup: false, // 笔不在 auroraqua 任何一组 → 无缩放
                       activeState: _editing, // tsx 457：编辑态 is-active
                       semanticLabel: _editing ? '退出编辑' : '编辑',
+                      tooltip: _editing ? '退出编辑' : '编辑', // tsx 457 的 title 与 aria-label 同值
                       glyph: _SidebarGlyphKind.pencil,
                       glyphSize: 14,
                       onTap: () {
@@ -1624,6 +1626,9 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     /// `activeState` ⇒ 只要下拉是展开的，三角键就常驻亮底（实测
     /// 「常态时这里不高亮的」）。
     bool rotated = false,
+
+    /// 悬停提示（web 只有**编辑笔**带 title，见 tsx 457；其余钮不传 ⇒ 不提示）。
+    String? tooltip,
   }) {
     // **钮自己的**身份 —— 同一行的两个钮必须分开判定（web 各有 `:hover`）
     final _Selection selfId = _Selection('overlay', '${sel.kind}:${sel.id}:$slot');
@@ -1661,7 +1666,11 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
       ),
     );
 
-    return MouseRegion(
+    // web «ChannelSidebar.tsx:457»：编辑笔带 «title={editing ? "退出编辑" : "编辑"}»
+    // ⇒ 只由该调用点传 tooltip；＋/三角等钮在 web 上没有 title（保持不提示）。
+    return AylaTooltip(
+      message: tooltip,
+      child: MouseRegion(
       // ① **钮自身**高亮（独立身份）② **行底**联动 —— web 878–881 里任一钮 hover
       // 都会把词条底点亮 .18；按钮级（扫光）仍只认按钮本体，故不设 button。
       onEnter: (_) {
@@ -1687,6 +1696,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               onTap: onTap,
               child: Semantics(button: true, label: semanticLabel, child: face),
             ),
+      ),
     );
   }
 

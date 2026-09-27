@@ -51,6 +51,7 @@ import '../base/directory_controls.dart' show AylaFavoriteButton, AylaFavoriteSt
 import '../base/loading.dart';
 import 'media_content.dart';
 import 'share_bubble.dart';
+import '../base/tooltip.dart';
 
 /// 撤回时限（秒）—— `hooks/useChat.ts:26` `RECALL_SECONDS = 120`，
 /// 与后端 `MESSAGE_RECALL_SECONDS` 对齐。
@@ -899,7 +900,12 @@ class _QuoteStripState extends State<_QuoteStrip> {
         ),
       ),
     );
-    return body;
+    // web «MessageBubble.tsx:341–352»：可点分支 «title="跳转到被引用消息"»、
+    // 不可点分支 «title={quoteText}» —— 两分支同用 .quote-strip 类名。
+    return AylaTooltip(
+      message: widget.onJump != null ? '跳转到被引用消息' : widget.text,
+      child: body,
+    );
   }
 }
 

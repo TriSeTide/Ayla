@@ -50,6 +50,7 @@ import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import 'message_bubble.dart';
 import '../base/reveal.dart';
+import '../base/tooltip.dart';
 
 /// 时间分组间隔（web `GROUP_GAP_MS = 5 * 60 * 1000`）。
 const Duration kAylaMessageGroupGap = Duration(minutes: 5);
@@ -163,6 +164,14 @@ class AylaJumpTag {
         'unread' => '跳转到 $count 条未读消息',
         'mention' => '跳转到 $count 条 @我的消息',
         _ => '跳转到 $count 条回复消息',
+      };
+
+  /// 悬停提示（web «MessageList.tsx:1000»：unread ⇒「未读消息」· mention ⇒「有人 @ 我」·
+  /// 其余 ⇒「有人回复了你」——**与 [label] 的文案不同**，是一组更短的标签）。
+  String get tooltip => switch (kind) {
+        'unread' => '未读消息',
+        'mention' => '有人 @ 我',
+        _ => '有人回复了你',
       };
 }
 
@@ -838,7 +847,10 @@ class _AylaMessageListState extends State<AylaMessageList> {
       children: <Widget>[
         for (int i = 0; i < visible.length; i++) ...<Widget>[
           if (i > 0) const SizedBox(height: AylaSpacing.sp2),
-          Center(
+          // web «MessageList.tsx:1000»：跳转标签按钮带 title（短标签，见 AylaJumpTag.tooltip）
+          AylaTooltip(
+            message: visible[i].tooltip,
+            child: Center(
             child: GestureDetector(
               onTap: () => _handleJumpTag(visible[i]),
               child: Semantics(
@@ -870,6 +882,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ],

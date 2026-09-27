@@ -28,7 +28,12 @@ import 'state/auth_state.dart';
 void main() {
   // 仅 debug：常开语义树（供预览工具读元素；release 下被摇树移除）。
   // 注：widget-preview 宿主目前不支持语义树（2026-09-18 实测），保留以备将来。
+  // ⚠️ SemanticsBinding.instance 只有在 binding 初始化后才可访问：未初始化时取值抛
+  //    "Binding has not yet been initialized"，main 当场中断 → runApp 永不执行 →
+  //    没有首帧 → Windows runner 的 SetNextFrameCallback 不触发 → 窗口创建了却不 Show，
+  //    表现为「进程活着但没有任何页面」。ensureInitialized 幂等，runApp 内部还会再调。
   if (kDebugMode) {
+    WidgetsFlutterBinding.ensureInitialized();
     SemanticsBinding.instance.ensureSemantics();
   }
 
