@@ -23,6 +23,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
   '基元 · 材质 · 排版': <String>[
     'AylaGlassButton（app.css .btn 21–67 / auroraqua.css 54–166）',
     'AylaGlassCard（app.css .glass-card 230–248）',
+    'AylaAuroraBackground（base.css 50–314 五层流体极光背景 + tokens.css 28–63）',
     'AylaGlassInput（app.css .field 70–88 / auroraqua.css 502–523）',
     'AylaAvatarHalo（app.css .avatar-halo 312–380 / base.css halo-breathe）',
     'AylaTabBadge（shell.css .tab-badge 579–593 · home.css .group-badge 302–317 · messages.css .messages-tab-badge 43–55）',

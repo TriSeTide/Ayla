@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
+import '../theme/aurora_background.dart';
 import '../theme/glass.dart';
 import '../theme/sample_media.dart';
 import '../theme/tokens.dart';
@@ -138,6 +139,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaGlassButton',
     'AylaGlassCard',
     'AylaGlassInput',
+    'AylaAuroraBackground',
     'AylaAvatarHalo',
     'AylaTabBadge',
     'AylaRevealItem',
@@ -621,6 +623,24 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   ),
                 ],
               ),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- AylaAuroraBackground（全局五层流体极光背景） ----------
+            _Section(
+              title:
+                  'AylaAuroraBackground（base.css 50–314 五层流体极光背景 + tokens.css 28–63）',
+              source:
+                  '① html 静态兜底 = --bg-aurora 九层 radial（tokens.css 28–36，半径按 farthest-corner 动态换算）· '
+                  '② html::before 渐变流层 = 150vmax 正方形居中 + 96px 网格 + 九层，blur(40px)，'
+                  'fluid-gradient-spin 20s ease-in-out -8s infinite（base.css 57–80）· '
+                  '③ html::after 湍流层 = feTurbulence 480px 平铺 + blur(60px) + opacity .08，'
+                  'fluid-turbulence-drift 15s ease-in-out -5s infinite alternate（82–95）· '
+                  '④⑤ body::before/after 双光斑 = 40vw 圆 + blur(40px) + radial 70% 截止，'
+                  'fluid-blob-drift-a/b 10s ease-in-out infinite alternate（99–128）· '
+                  '窄屏 ≤768：光斑 80vw/70vw 上下分区（alpha .7）+ 渐变 28s / 湍流 21s（211–246）· '
+                  'prefers-reduced-motion ⇒ 四层隐藏、回退静态九层（305–314）',
+              child: aylaAuroraBackgroundSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 

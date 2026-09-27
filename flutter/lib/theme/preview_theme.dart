@@ -58,7 +58,12 @@ Widget previewTheme(Widget child) {
               // 缺兜底时内部 Text 会落到 `DefaultTextStyle.fallback`（双下划线 + 红色，
               // 用户看到的「黄线」）→ 用组件库统一作用域兜底（widgets/overlays.dart）。
               aylaOverlayEntry(
+                // ⚠️ `animate: false`：背景四层流层是**无限循环动画**，会让
+                // widget test 的 `pumpAndSettle()` 永不 settle（框架语义，不是
+                // 视觉偏离）。真实运行（`main.dart` 全局底）与画布样张用默认
+                // `animate: true`；测试要验动画时用固定 `pump(时长)`。
                 builder: (BuildContext context) => AylaAuroraBackground(
+                  animate: false,
                   child: Center(child: child),
                 ),
               ),
