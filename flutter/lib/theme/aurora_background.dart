@@ -253,9 +253,17 @@ abstract final class AylaFluidAurora {
     ),
   ];
 
-  /// 静态兜底底色：web 里 `body`/`#root` 都是 transparent（base.css 29–48），九层
-  /// 之下没有别的实底 ⇒ 取九层之上仍可透出的 `--ice-100`（design.md §2 Core）。
-  static const Color backdrop = AylaColors.ice100;
+  /// 兜底底色 = **白**。
+  ///
+  /// 依据（base.css 29–48 逐条）：`html { background: var(--bg-aurora) fixed }`、
+  /// `body { background: transparent }`、`#root { background: transparent }`
+  /// —— 九层 radial 之下**没有任何实底**，最终落在浏览器的**默认白底**上。
+  ///
+  /// ⚠️ 2026-09-27 纠正：本常量一度被我写成 `--ice-100`（#ECF0F2 冷灰）——那是**没有代码
+  /// 依据的推断**（「九层之上仍可透出的色」），后果是整片背景偏灰偏暗、比 web 闷。
+  /// 像素对账暴露了它：不铺底时右下角 (191,117,152) 与 web 实测 (233,174,209) 对不上，
+  /// **铺白底后一致**。教训：兜底色要**回读 CSS 里有没有实底**，没有就是浏览器默认白。
+  static const Color backdrop = Color(0xFFFFFFFF);
 
   /// 九层的**绘制顺序**：CSS background 列表第一项在最上 ⇒ canvas 里要**倒序**画
   /// （先画列表最后一项 = 最底层）。见 [aylaPaintAuroraRadials]。

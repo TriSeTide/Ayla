@@ -351,6 +351,12 @@ void main() {
   // 5. 纹理与半径
   // ------------------------------------------------------------------
 
+  test('兜底底色是白（base.css：body/#root 都 transparent ⇒ 浏览器默认白底）', () {
+    // 曾经的错：写成 --ice-100（冷灰）⇒ 整片偏灰偏暗。像素对账才暴露（见 13 号 §八）。
+    expect(AylaFluidAurora.backdrop, const Color(0xFFFFFFFF));
+    expect(AylaFluidAurora.backdrop.a, 1.0);
+  });
+
   test('九层绘制顺序：CSS background 列表第一项在最上 ⇒ canvas 必须倒序画', () {
     final List<AylaAuroraRadialSpec> order = AylaFluidAurora.paintOrder;
     expect(order.length, 9);
