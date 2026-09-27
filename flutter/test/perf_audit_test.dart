@@ -20,30 +20,43 @@ import 'package:flutter_test/flutter_test.dart';
 
 
 import '../lib/preview/component_gallery.dart';
+import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 
 /// 单个分类里允许出现的离屏层数上限（超了先看是不是新加了一屏玻璃卡）。
 ///
-/// 2026-09-25 实测基线（画布一次铺开该域全部样张，属**极端**场景而非真实单页）：
+/// 2026-09-27 §8.17 实测基线（画布一次铺开该域全部样张，属**极端**场景而非真实单页）：
 ///
 /// | 分类 | backdrop | imageFiltered | opacity | shaderMask | 合计 |
 /// |---|---|---|---|---|---|
-/// | 基元 · 材质 · 排版 | 9 | 0 | 15 | 1 | 25 |
-/// | Shell · 导航壳与浮层 | 41 | 0 | 45 | 3 | 89 |
-/// | chat · 气泡/列表/输入/面板 | 140 | 0 | 175 | 0 | **315** |
-/// | live · 直播域 | 87 | 0 | 108 | 1 | 196 |
-/// | voice · 语音域 | 57 | 0 | 87 | 2 | 146 |
-/// | posts · 帖子/评论 | 26 | 0 | 30 | 0 | 56 |
-/// | group · 群与目录 | 73 | 0 | 48 | 0 | 121 |
-/// | boardgame · 桌游域 | 31 | 0 | 36 | 0 | 67 |
-/// | profile · 个人主页域 | 20 | 0 | 15 | 0 | 35 |
-/// | search · 搜索域 | 9 | 0 | 5 | 0 | 14 |
-/// | motion · 转场与手势 | 9 | 0 | 19 | 0 | 28 |
-/// | 通用件 · 分享/分页/弹层/资源 | 27 | 0 | 39 | 0 | 66 |
+/// | 基元 · 材质 · 排版 | 14 | 0 | 10 | 1 | 25 |
+/// | Shell · 导航壳与浮层 | 41 | 0 | 19 | 3 | 63 |
+/// | chat · 气泡/列表/输入/面板 | 140 | 0 | 143 | 0 | **283** |
+/// | live · 直播域 | 87 | 0 | 50 | 1 | 138 |
+/// | voice · 语音域 | 57 | 0 | 41 | 2 | 100 |
+/// | posts · 帖子/评论 | 26 | 0 | 21 | 0 | 47 |
+/// | group · 群与目录 | 73 | 0 | 25 | 0 | 98 |
+/// | boardgame · 桌游域 | 31 | 0 | 19 | 0 | 50 |
+/// | profile · 个人主页域 | 20 | 0 | 7 | 0 | 27 |
+/// | search · 搜索域 | 9 | 0 | 1 | 0 | 10 |
+/// | motion · 转场与手势 | 9 | 0 | 8 | 0 | 17 |
+/// | 通用件 · 分享/分页/弹层/资源 | 27 | 0 | 23 | 0 | 50 |
 ///
-/// 两类大头是 **backdrop（玻璃卡）与 opacity（半透明层）**：每个都是一次
+/// **本轮（§8.17）把 opacity 从 622 → 367（−255 层 / −41%）**；除「基元」外 backdrop
+/// 逐分类**一个都没变**（默认档逐像素不变的直接证据）——「基元 +5 backdrop / +1 opacity」
+/// 是本节新增的 `AylaGlassQuality` 三档切换样张自带的。做法是把「静态半透明」与
+/// 「扫光带的 .5」从 `Opacity` widget 换成颜色/渐变的 alpha（无重叠 ⇒ 等价）。
+///
+/// 两类大头仍是 **backdrop（玻璃卡）与 opacity（半透明层）**：每个都是一次
 /// «saveLayer»。imageFiltered 全 0 ⇒ 背景已经不是逐帧滤镜（烘焙管线生效）。
-const int kMaxLayersPerCategory = 350;
+const int kMaxLayersPerCategory = 300;
+
+/// 单个分类里允许出现的 `BackdropFilter` 数上限。
+///
+/// 玻璃卡是**每帧成本最高**的一类（要采样 + 高斯模糊背后内容，背景还在逐帧
+/// 流动）⇒ 单独给它一条更紧的锁：谁在样张里塞一屏玻璃卡，这条先红。
+/// 当前最贵 = chat 140。
+const int kMaxBackdropPerCategory = 150;
 
 /// ⚠️ 「滚动一屏后需要重绘的 RenderObject 数」这个指标**测不准，已废弃**（2026-09-25 实测）：
 /// `debugNeedsPaint` 在 `SingleChildScrollView` 里反映的是「**未进入视口、因而没被绘制过**的
@@ -92,6 +105,13 @@ void main() {
         worst = total;
         worstLabel = label;
       }
+      expect(
+        backdrop,
+        lessThanOrEqualTo(kMaxBackdropPerCategory),
+        reason:
+            '「$label」有 $backdrop 个 BackdropFilter（上限 $kMaxBackdropPerCategory）'
+            '——玻璃卡每帧都要采样 + 模糊背后内容，先看是不是新加了一屏',
+      );
       report.writeln(
         '$label | $backdrop | $imageFiltered | $opacity | $shaderMask | $total',
       );
@@ -113,5 +133,28 @@ void main() {
       ),
       findsNothing,
     );
+  });
+
+  testWidgets('预模糊档：画布全部分类 0 个 BackdropFilter（玻璃件全走质量档 owner）', (
+    WidgetTester tester,
+  ) async {
+    pinCanvas(tester);
+    AylaGlassConfig.quality = AylaGlassQuality.preblurred;
+    addTearDown(() {
+      AylaGlassConfig.quality = AylaGlassQuality.realBackdrop;
+      AylaBackdropSnapshot.clear();
+    });
+    await tester.pumpWidget(host(const ComponentGallery()));
+    await tester.pump();
+
+    final List<String> leaks = <String>[];
+    for (final AylaGalleryCategory category in kGalleryCategories) {
+      await tester.tap(find.text(category.label));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+      final int count = find.byType(BackdropFilter).evaluate().length;
+      if (count > 0) leaks.add('${category.label} ×$count');
+    }
+    expect(leaks, isEmpty, reason: '预模糊档下仍装着 BackdropFilter 的分类：$leaks');
   });
 }

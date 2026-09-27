@@ -184,7 +184,7 @@ void main() {
 
     // ② 渐变层：150vmax 正方形，中心 = 视口中心（base.css 61–65）；
     // 外框另加 2×overscan（模糊扩散预留 —— 不预留会露出硬直边）。
-    const double side = 1.5 * w;
+    final double side = AylaFluidAurora.gradientVmax / 100 * w;
     const double gOver = AylaFluidAurora.gradientOverscan;
     // ⏸ 渐变流层被临时停用（kAylaGradientLayerEnabled）时跳过该层断言。
     if (kAylaGradientLayerEnabled) {
@@ -207,7 +207,7 @@ void main() {
     if (kAylaTurbulenceLayerEnabled) {
       expect(
         layerSize(tester, AylaAuroraKeys.turbulence),
-        Size(side + tOver * 2, h * 1.5 + tOver * 2),
+        Size(w * 1.5 + tOver * 2, h * 1.5 + tOver * 2),
       );
       expect(layerBox(tester, AylaAuroraKeys.turbulence).left, -w * 0.25 - tOver);
       expect(layerBox(tester, AylaAuroraKeys.turbulence).top, -h * 0.25 - tOver);
@@ -278,9 +278,12 @@ void main() {
     );
     await tester.pump();
     const double over = AylaFluidAurora.gradientOverscan;
-    expect(layerSize(tester, AylaAuroraKeys.gradient), Size(562.5 + over * 2, 562.5 + over * 2));
-    expect(layerBox(tester, AylaAuroraKeys.gradient).left, (375 - 562.5) / 2 - over);
-    expect(layerBox(tester, AylaAuroraKeys.gradient).top, (240 - 562.5) / 2 - over);
+    // 150vmax 在 375×240 视口上 = 1.5 × 375 = 562.5（media query 只改动画名/时长，
+    // **不改层尺寸**，见 base.css 239–245）。
+    const double side = 1.5 * 375;
+    expect(layerSize(tester, AylaAuroraKeys.gradient), Size(side + over * 2, side + over * 2));
+    expect(layerBox(tester, AylaAuroraKeys.gradient).left, (375 - side) / 2 - over);
+    expect(layerBox(tester, AylaAuroraKeys.gradient).top, (240 - side) / 2 - over);
   });
 
   // ------------------------------------------------------------------
@@ -354,7 +357,7 @@ void main() {
     expect(AylaFluidAurora.turbulenceOpacity, 0.08);
     expect(AylaFluidAurora.turbulenceTile, 480);
     expect(AylaFluidAurora.gradientBlur, 40);
-    expect(AylaFluidAurora.gradientVmax, 150);
+    expect(AylaFluidAurora.gradientVmax, 150); // base.css:62 `width/height: 150vmax`
     expect(AylaFluidAurora.narrowBreakpoint, 768);
     expect(AylaFluidAurora.staticLayers.length, 9);
   });
@@ -530,5 +533,19 @@ void main() {
     expect(minA, 0);
     // alpha=0 的像素不残留 RGB（预乘存储语义）
     expect(nonZeroRgbAtZeroAlpha, 0);
+
+    // ★ 2026-09-27 新增锁：**必须预乘存储**（本轮「flutter 整体比 web 白」的根因）。
+    // `ui.decodeImageFromPixels(..., PixelFormat.rgba8888)` 的引擎实现用
+    // `kPremul_SkAlphaType` —— 传非预乘数据时 Skia 不会再乘 alpha，整层以
+    // 「未预乘的亮度」参与 src-over 合成 ⇒ alpha 越低抬得越亮，全屏均匀发白。
+    // 预乘的数学约束：每通道 ≤ alpha（因为 sRGB ≤ 1）。
+    int premulViolations = 0;
+    for (int i = 0; i < pixels.length; i += 4) {
+      final int a = pixels[i + 3];
+      if (pixels[i] > a || pixels[i + 1] > a || pixels[i + 2] > a) {
+        premulViolations++;
+      }
+    }
+    expect(premulViolations, 0, reason: '湍流纹理必须是预乘 8bit（每通道 ≤ alpha）');
   });
 }

@@ -38,8 +38,27 @@
 /// - `vw / vmax` 按**组件盒子尺寸**换算（真实运行时盒子 = 视口 ⇒ 与 web 1:1）；
 ///   宽 / 窄档与 web 媒体查询同源，读 `MediaQuery` 宽度。
 /// - `filter: blur(Npx)` 的参数是高斯标准差（CSS 与 `ImageFilter.blur` 同语义）⇒ 照抄。
-/// - 数值一律照抄 web CSS px：项目口径是「Flutter 逻辑像素 ↔ 浏览器 CSS px 在
-///   Windows 125% 缩放下等价」（库内 `AylaGlass.blurCard = 24` 即此口径）。
+/// - 数值一律照抄 web CSS px：**Flutter 逻辑像素 == 浏览器 CSS 像素**。
+///   实测口径（2026-09-27，本机 Windows 125%）：浏览器窗口 1908×910 物理像素、
+///   DPR 1.25 ⇒ **CSS 视口 1526×728**；Flutter 同窗口、DPR 1.25 ⇒ 逻辑视口 1526×728。
+///   两者在**逻辑单位**上完全相同，「×1.25」只出现在「物理像素截图」这一侧的对账换算里
+///   —— 别把 1.25 乘进代码（库内 `AylaGlass.blurCard = 24` 即此口径）。
+///
+/// ## ★ 2026-09-27 逐像素对账与三处修正（用户实报「中间一大片白、看不到四色在转、
+/// 看不到樱粉」）
+/// 对账方法：Playwright 只加载 `tokens.css` + `base.css` + `auroraqua.css` 渲染同一视口，
+/// 用 `document.getAnimations()` 定位到与本地同一相位（`currentTime` 语义 = 负延迟后的
+/// 活动时间 ⇒ 页面加载瞬间即 `-8s`/`-5s` 相位）；两侧都按**设备像素**出图（web：窗口
+/// 1908×910 / DPR 1.25 的截图；本地：逻辑 1526×728 + DPR 1.25 ⇒ 1908×910）后逐像素比对。
+/// 定位到的三处偏差（都可指到 web 行号）：
+///  1. [AylaFluidAurora.gradientVmax] 曾写成 **165**（web `base.css:62` 是 `150vmax`）
+///     ⇒ 四角四色被推离视口，视口内只剩中心暖白 = 「中间一大片白」；
+///  2. `--bg-aurora-grid`（tokens.css 39–40）的 `0–1px` **常量段**被漏掉、且 `0deg`
+///     的相位起点写成了顶边（CSS 的 `0deg` 起点在**底边**）；
+///  3. 湍流纹理落盘成了**非预乘**，与 `decodeImageFromPixels` 的 premul 语义不符
+///     ⇒ 整层以未预乘亮度参与合成，全屏均匀发白（Δ≈13/255，t>0 时最明显）。
+/// 修正后三档全部收敛（平均绝对差，255 制）：宽屏 4 个相位 0.46–0.63、窄屏 0.68–1.06、
+/// reduced-motion 0.67；回归锁见 `test/aurora_pixels_test.dart` 的两个「组件级对账」用例。
 ///
 /// ## 公开面
 /// `AylaAuroraBackground` · `AylaAuroraKeys` · `AylaFluidAurora` · `AylaFluidFrame`
@@ -48,6 +67,7 @@
 
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -56,6 +76,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'aurora_baked_layer.dart';
 import 'aurora_turbulence.dart';
+import 'glass.dart';
 import 'tokens.dart';
 
 /// 图层 key（画布 / 测试定位用；不影响渲染）。
@@ -179,7 +200,7 @@ AylaFluidPose _poseOf(AylaFluidFrame f) => AylaFluidPose(
 /// 修好之前不要打开。
 const bool kAylaStaticLayerEnabled = true;
 const bool kAylaGradientLayerEnabled = true;
-const bool kAylaTurbulenceLayerEnabled = true; // 2026-09-27 用户要求恢复湍流层
+const bool kAylaTurbulenceLayerEnabled = true;
 const bool kAylaBlobLayersEnabled = true;
 
 /// 流体极光背景的全部参数（每个数值都能指到 web 的 `文件:行`）。
@@ -306,7 +327,17 @@ abstract final class AylaFluidAurora {
   // ② 渐变流层（base.css 57–80）
   // ------------------------------------------------------------------
 
-  /// `width/height: 150vmax`（base.css:62–63）。
+  /// `width/height: 150vmax`（base.css 62–63 逐字：`width: 150vmax; height: 150vmax`）。
+  ///
+  /// ⚠️ 2026-09-27 更正：本常量一度写成 **165**（无 web 依据的自由发挥，连注释都自称
+  /// 「150vmax」）。放大 10% 的后果是**两处同时偏**：
+  ///  1. 四角四色被推离视口 ⇒ 视口内只剩第 9 层（中心暖白）与 5–8 层（边中点白）
+  ///     ⇒ 用户实报的「中间一大片白、看不到四色、看不到樱粉」；
+  ///  2. `@keyframes` 里 `translate3d(±4%)` 的百分比基准 = **元素自身尺寸**
+  ///     ⇒ 漂移幅度同步放大 10%。
+  /// 而 web 自己在 base.css 73–77 就论证过 150vmax 不露边：「150vmax 正方形在
+  /// scale(0.8) + 漂移 5% 的极端组合下内切圆 60vmax − 7.5vmax = 52.5vmax ≥ 视口边缘
+  /// 50vmax，旋转任意角度均不露边」⇒ 不存在「放大以防露边」的理由。
   static const double gradientVmax = 150;
 
   /// `filter: blur(40px)`（base.css:72）。
@@ -522,53 +553,56 @@ void aylaPaintAuroraRadials(Canvas canvas, Size size) {
 }
 
 /// 极淡 96px 周期网格（`--bg-aurora-grid`，tokens.css 39–40）。
+///
+/// CSS 原文（两层 `repeating-linear-gradient`，逐字）：
+/// ```css
+/// repeating-linear-gradient(0deg,  rgba(157,191,230,.015) 0 1px, rgba(157,191,230,.008) 3px, transparent 4px 96px),
+/// repeating-linear-gradient(90deg, rgba(157,191,230,.015) 0 1px, rgba(157,191,230,.008) 3px, transparent 4px 96px)
+/// ```
+/// 逐条语义（**照抄，别简化**）：
+///  · 周期 96px，每周期四段：`0–1px` 恒为 .015（**常量段**，不是渐变）、
+///    `1–3px` 线性 .015→.008、`3–4px` 线性 .008→0、`4–96px` 恒为 0；
+///  · `0deg` = **向上** ⇒ 渐变线起点在**底边**，图案相位从底边起算
+///    （写成「从顶边向下」会整体错相 96px 的非整数倍）；
+///  · `90deg` = 向右 ⇒ 起点在左边，相位从左边起算；
+///  · `transparent` = `rgba(0,0,0,0)`（**黑色**透明，不是同色透明）—— 预乘插值下
+///    这是有意义的差异，不能写成 `ice500` 的 0 alpha。
 void aylaPaintAuroraGrid(Canvas canvas, Size size) {
-  // `--bg-aurora-grid` 是两层 repeating-linear-gradient：
-  //   repeating-linear-gradient(0deg,                  // 横线
-  //     rgba(157,191,230,.015) 0 1px,                  //  0–1px  全亮
-  //     rgba(157,191,230,.008) 3px,                    //  1→3px 渐隐到半亮
-  //     transparent 4px 96px)                          //  4–96px 透明（周期 96）
-  //   … 另一层为 90deg 竖线，参数相同。
-  // **不是 1px 实线**：0→1px 全亮、1→3px 线性衰减到 .008、3→4px 再衰减到 0，
-  // 4px 之后到底透明（每 96px 重复）。1px 实线会让网格偏硬、出现摩尔纹。
   const double period = 96;
-  const double fadeEnd = 3; // 半亮位置（1→3px 线性衰减到 .008）
-  const double zeroEnd = 4; // 完全透明位置（3→4px 衰减到 0）
-
-  // stop 比例：0 → .015；1/4 → .008；3/4 → 0（4px 内完成整段渐隐）
-  const List<double> stops = <double>[0, 1 / zeroEnd, fadeEnd / zeroEnd];
+  // 一个周期内的 stop（相对 96px）：0 → 亮 / 1px → 仍亮 / 3px → 半亮 / 4px → 0 / 96px → 0
+  const List<double> stops = <double>[0, 1 / period, 3 / period, 4 / period, 1];
   final List<Color> ramp = <Color>[
-    AylaColors.ice500.withValues(alpha: 0.015),
-    AylaColors.ice500.withValues(alpha: 0.008),
-    AylaColors.ice500.withValues(alpha: 0.0),
+    AylaColors.ice500.withValues(alpha: 0.015), // rgba(157,191,230,.015)
+    AylaColors.ice500.withValues(alpha: 0.015), //   0–1px 常量段
+    AylaColors.ice500.withValues(alpha: 0.008), // rgba(157,191,230,.008) @3px
+    const Color(0x00000000), // transparent @4px
+    const Color(0x00000000), // transparent @96px
   ];
 
-  for (double y = 0; y <= size.height; y += period) {
-    // 横线（0deg）：从 y 向下 4px 渐隐
-    canvas.drawRect(
-      Rect.fromLTWH(0, y, size.width, zeroEnd),
-      Paint()
-        ..shader = ui.Gradient.linear(
-          Offset(0, y),
-          Offset(0, y + zeroEnd),
-          ramp,
-          stops,
-        ),
-    );
-  }
-  for (double x = 0; x <= size.width; x += period) {
-    // 竖线（90deg）：从 x 向右 4px 渐隐
-    canvas.drawRect(
-      Rect.fromLTWH(x, 0, zeroEnd, size.height),
-      Paint()
-        ..shader = ui.Gradient.linear(
-          Offset(x, 0),
-          Offset(x + zeroEnd, 0),
-          ramp,
-          stops,
-        ),
-    );
-  }
+  // 横线（0deg，从底边向上重复）
+  canvas.drawRect(
+    Offset.zero & size,
+    Paint()
+      ..shader = ui.Gradient.linear(
+        Offset(0, size.height),
+        Offset(0, size.height - period),
+        ramp,
+        stops,
+        TileMode.repeated,
+      ),
+  );
+  // 竖线（90deg，从左边向右重复）
+  canvas.drawRect(
+    Offset.zero & size,
+    Paint()
+      ..shader = ui.Gradient.linear(
+        Offset.zero,
+        const Offset(period, 0),
+        ramp,
+        stops,
+        TileMode.repeated,
+      ),
+  );
 }
 
 /// 渐变流层内容 = 九层 radial + 网格（CSS 里网格写在 background 列表**前面** ⇒
@@ -988,6 +1022,72 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
     }
   }
 
+  /// 上次请求烘焙「预模糊快照」的视口尺寸（null = 还没烘过）。
+  Size? _snapshotFor;
+
+  /// 预模糊档专用：把「白底 + 静态九层」烘焙成一张低频小图、登记给玻璃件
+  /// （[AylaBackdropSnapshot]，见 13 号 §8.17）。
+  ///
+  /// **只在 [AylaGlassConfig.preblurEnabled] 时跑** —— 默认的真玻璃档下这里
+  /// 直接 return，一分钱都不花；静态九层本身是低频渐变，256 长边足够。
+  void _maybeBakeBackdropSnapshot(Size viewport) {
+    if (!AylaGlassConfig.preblurEnabled) return;
+    if (viewport.isEmpty) return;
+    if (_snapshotFor == viewport && AylaBackdropSnapshot.image != null) return;
+    _snapshotFor = viewport;
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (!mounted) return;
+      unawaited(_bakeBackdropSnapshot(viewport));
+    });
+  }
+
+  Future<void> _bakeBackdropSnapshot(Size viewport) async {
+    try {
+      final double longest = math.max(viewport.width, viewport.height);
+      if (longest <= 0) return;
+      final double ratio =
+          math.min(1.0, AylaBackdropSnapshot.maxSide / longest);
+      final int width = math.max(1, (viewport.width * ratio).round());
+      final int height = math.max(1, (viewport.height * ratio).round());
+      final ui.PictureRecorder recorder = ui.PictureRecorder();
+      final Canvas canvas = Canvas(
+        recorder,
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+      );
+      canvas
+        ..scale(ratio)
+        ..drawRect(
+          Offset.zero & viewport,
+          Paint()..color = AylaFluidAurora.backdrop,
+        );
+      aylaPaintAuroraRadials(canvas, viewport);
+      final ui.Picture picture = recorder.endRecording();
+      ui.Image image;
+      try {
+        image = await picture.toImage(width, height);
+      } finally {
+        picture.dispose();
+      }
+      if (!mounted) {
+        image.dispose();
+        return;
+      }
+      final RenderObject? ro = context.findRenderObject();
+      final Offset origin = ro is RenderBox && ro.hasSize
+          ? ro.localToGlobal(Offset.zero)
+          : Offset.zero;
+      AylaBackdropSnapshot.register(
+        image: image,
+        viewport: viewport,
+        origin: origin,
+      );
+    } catch (_) {
+      // 快照只是预模糊档的采样源：失败退化为「不画背后内容」，绝不让背景崩
+      // （同 §8.14 的降级纪律）。下次 build 会重试。
+      _snapshotFor = null;
+    }
+  }
+
   @override
   void dispose() {
     _gradientClock.dispose();
@@ -1014,6 +1114,8 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
                 ? constraints.maxHeight
                 : MediaQuery.sizeOf(context).height,
           );
+          // 预模糊档：把静态九层烘成低频快照登记给玻璃件（默认档下是空操作）。
+          _maybeBakeBackdropSnapshot(viewport);
           return DecoratedBox(
             decoration: const BoxDecoration(color: AylaFluidAurora.backdrop),
             child: Stack(

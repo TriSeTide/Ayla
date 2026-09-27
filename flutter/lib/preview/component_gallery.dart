@@ -139,6 +139,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaGlassButton',
     'AylaGlassCard',
     'AylaGlassInput',
+    'AylaGlassQuality',
     'AylaAuroraBackground',
     'AylaAvatarHalo',
     'AylaTabBadge',
@@ -639,8 +640,26 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   '④⑤ body::before/after 双光斑 = 40vw 圆 + blur(40px) + radial 70% 截止，'
                   'fluid-blob-drift-a/b 10s ease-in-out infinite alternate（99–128）· '
                   '窄屏 ≤768：光斑 80vw/70vw 上下分区（alpha .7）+ 渐变 28s / 湍流 21s（211–246）· '
-                  'prefers-reduced-motion ⇒ 四层隐藏、回退静态九层（305–314）',
+                  'prefers-reduced-motion ⇒ 四层隐藏、回退静态九层（305–314）\n'
+                  '★ 2026-09-27 逐像素对账（两侧同按设备像素出图）：宽屏 4 个相位平均绝对差 0.46–0.63 / '
+                  '窄屏 0.68–1.06 / reduced-motion 0.67（255 制）。定位到的三处偏差（流层曾写成 165vmax · '
+                  '网格常量段与 0deg 相位 · 湍流层未预乘）与对账方法见 lib/theme/aurora_background.dart 头部。\n'
+                  '⚠️ 「层分解」四格是小舞台（360×216），只用来判断「哪一层在不在 / 有没有色」；'
+                  '观感一律看 1440×810 的那两档（小舞台的 vmax/blur 比例与真机不同）。',
               child: aylaAuroraBackgroundSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- AylaGlassQuality（毛玻璃质量档，性能旋钮） ----------
+            _Section(
+              title:
+                  'AylaGlassQuality（性能旋钮：真玻璃 / 预模糊 / 实底；13 号 §8.17）',
+              source:
+                  '默认 realBackdrop = 逐帧 backdrop-filter（与 web 逐像素等价）· '
+                  'preblurred = 按屏幕位置采样背景低频快照（无滤镜）· '
+                  'opaque = .92 不透明底（web 的 @supports 降级路径）· '
+                  '切换只改「背后内容层」，材质层与几何一行不动（默认档逐像素未变）',
+              child: const _GlassQualityStage(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
@@ -1905,6 +1924,111 @@ class _Rows extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// 毛玻璃质量档对照（13 号 §8.17）：三档切换，只换「背后内容层」。
+///
+/// ⚠️ `AylaGlassConfig.quality` 是**全局静态旋钮**：本样张在 [dispose] 里恢复
+/// 默认档，避免污染画布其它分区与性能审计基线（perf_audit_test 的层数）。
+class _GlassQualityStage extends StatefulWidget {
+  const _GlassQualityStage();
+
+  @override
+  State<_GlassQualityStage> createState() => _GlassQualityStageState();
+}
+
+class _GlassQualityStageState extends State<_GlassQualityStage> {
+  /// 进入样张时的全局档位 —— 离开时**恢复它**（不是硬编码默认档）。
+  ///
+  /// 硬编码恢复默认档会在宿主本来就跑在非默认档时把档位改回去
+  /// （2026-09-27 实测：`perf_audit_test` 的预模糊档用例遍历到第二个分类就失效
+  /// —— 因为切走分类时本样张被卸载、dispose 把档位重置了）。
+  late final AylaGlassQuality _entryQuality = AylaGlassConfig.quality;
+  late AylaGlassQuality _quality = _entryQuality;
+
+  @override
+  void dispose() {
+    AylaGlassConfig.quality = _entryQuality;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    const List<(AylaGlassQuality, String)> choices =
+        <(AylaGlassQuality, String)>[
+      (AylaGlassQuality.realBackdrop, '真玻璃（默认）'),
+      (AylaGlassQuality.preblurred, '预模糊'),
+      (AylaGlassQuality.opaque, '实底'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _Row(
+          children: <Widget>[
+            for (final (AylaGlassQuality q, String label) in choices)
+              AylaGlassButton(
+                label: label,
+                variant: q == _quality
+                    ? AylaGlassButtonVariant.primary
+                    : AylaGlassButtonVariant.ghost,
+                onPressed: () {
+                  AylaGlassConfig.quality = q;
+                  setState(() => _quality = q);
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp3),
+        // 玻璃要压在**真实背景**上才看得出差别（画布本身是浅色底），而且预模糊档
+        // 的采样源正是背景登记的静态九层快照 —— 画布宿主没有全局背景，样张自带一个
+        // 才看得到「预模糊」的真实效果（否则采样层无源、只剩透明）。
+        SizedBox(
+          height: 220,
+          child: AylaAuroraBackground(
+            animate: false, // 样张不跑流层（画布宿主必须能 settle）
+            child: Padding(
+              padding: const EdgeInsets.all(AylaSpacing.sp4),
+              child: _Row(
+                children: <Widget>[
+                  _Slot(
+                    label: '玻璃卡',
+                    width: 260,
+                    child: AylaGlassCard(child: Text('玻璃卡', style: t.cardTitle)),
+                  ),
+                  _Slot(
+                    label: '玻璃按钮 + 图标钮',
+                    width: 260,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        AylaGlassButton(
+                          label: '主按钮',
+                          variant: AylaGlassButtonVariant.glow,
+                          onPressed: () {},
+                        ),
+                        const SizedBox(height: AylaSpacing.sp2),
+                        AylaIconButton(
+                          icon: AylaIcon(aylaIconByName('iconHeart')!),
+                          semanticLabel: '收藏',
+                          onPressed: () {},
+                        ),
+                      ],
+                    ),
+                  ),
+                  _Slot(
+                    label: '玻璃输入框',
+                    width: 260,
+                    child: const _InputSample(label: '搜索', onGlassBorder: true),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

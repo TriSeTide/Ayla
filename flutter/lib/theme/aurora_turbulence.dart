@@ -25,10 +25,14 @@
 /// - 采样点 = **(x + 1.0) × baseFrequency**（设备像素；Firefox 是 x × freq，差 1 px 相位）；
 /// - `color-interpolation-filters` 初始值 **linearRGB** ⇒ 表格作用在线性光值上，
 ///   最后转 sRGB 输出；
-/// - 实测（headless Chromium 实渲染同一 data URI 逐字节比对）：本算法 Alpha 通道
-///   230394/230400 像素完全一致（其余 6 px 差 1 LSB），整图 RGBA 98.92% 完全一致，
-///   其余差 1–2 LSB（float64 vs float32 管线）。要跟 Firefox 对齐只需把
-///   [AylaTurbulenceSpec.sampleOffset] 改成 0（seed=11 时两家的表数据相同）。
+/// - 实测（headless Chromium 实渲染同一 data URI 逐像素比对，2026-09-27 **重做**）：
+///   纹理 230400 像素中 **97.98% 四通道完全一致**，均值绝对差 R=0.060 / G=0.142 /
+///   B=0.009 / A=0.0000；不一致的部分是 **8bit 预乘往返的量化**（本函数落盘是
+///   premul 8bit，浏览器读回是 unpremul，低 alpha 处除以 alpha 会放大 1 LSB）。
+/// ⚠️ 本文件此前的「98.92% 一致」结论**建立在错误的对比方法上**（当时把
+///   `toByteData(png)` 当作非预乘输出，而它按预乘解释会把颜色整片钳成 255，
+///   掩盖了真实缺陷）——那句结论已作废，以本段的复测数据为准。要跟 Firefox
+///   对齐只需把 [AylaTurbulenceSpec.sampleOffset] 改成 0（seed=11 时两家表数据相同）。
 ///
 /// ## 计算链路（照抄）
 /// 1. feTurbulence：4 通道各自 3 个 octave 的带符号噪声和（振幅 1 / 1/2 / 1/4），
@@ -36,8 +40,9 @@
 /// 2. CT#1：R/G/B 用 3 值 table 折线（8bit LUT，索引来自**非预乘**值）；A 不变；
 /// 3. CT#2：A 用 `[0.35, 0, 0.35]` 重映射（0.5 处为 0、两端 0.35）；R/G/B 不变；
 /// 4. 色彩空间：全程 linearRGB，最后转 sRGB；
-/// 5. 落盘：8bit **预乘**存储 + 四舍五入（Chrome 语义）—— 对外输出**非预乘 sRGB
-///    RGBA8**（等同 canvas.getImageData 读回的字节）。
+/// 5. 落盘：8bit **预乘**存储 + 四舍五入 —— 对外输出就是**预乘 sRGB RGBA8**。
+///    ⚠️ 这不是「顺带」的存储细节，而是必须与 `ui.decodeImageFromPixels` 的
+///    premul 语义对齐（否则整层被抬亮，见 [AylaTurbulenceTile.renderPixels] 注释）。
 ///
 /// ## 性能
 /// 480×480 × 3 octave × 4 通道 ≈ 276 万次 `noise2`：AOT 下 20–60 ms，debug（JIT）下
@@ -243,7 +248,9 @@ abstract final class AylaTurbulenceTile {
   static ui.Image? _image;
   static Future<ui.Image>? _pending;
 
-  /// RGBA8888 像素（**非预乘 sRGB**，等同 canvas 读回的字节）。同步、可测。
+  /// RGBA8888 像素，**预乘 sRGB**（与 `ui.decodeImageFromPixels` 的
+  /// `kPremul_SkAlphaType` 语义一致；浏览器 `getImageData` 读回的是非预乘，
+  /// 对比时需先除以 alpha）。同步、可测。
   static Uint8List pixels() {
     final Uint8List? cached = _pixels;
     if (cached != null) return cached;
@@ -313,33 +320,43 @@ abstract final class AylaTurbulenceTile {
         b = ((b + 1) / 2).clamp(0.0, 1.0);
         a = ((a + 1) / 2).clamp(0.0, 1.0);
 
-        // 2) 落 8bit 表面（Chrome 预乘 + 四舍五入）。
+        // 2) CT#1 的输入：**非预乘**的线性噪声值。
+        //    Skia `SkTableColorFilter` 对 unpremultiplied 值查表（Blink
+        //    `fe_component_transfer.cc` 的 table 走它）⇒ 索引必须是**未乘 alpha** 的值。
+        //
+        // ⚠️ 2026-09-27 更正（本轮像素对账抓出，此前实现有两处错，互相掩盖了）：
+        //    ① 索引写成 `q8(r * a)`（预乘值）—— 与 unpremul 语义不符；
+        //    ② 颜色输出走了一条「× na8 → q8 → ÷ na8」的伪预乘链：`q8()` 内部再乘 255，
+        //       于是 pr 几乎恒被 clamp 成 255，反算又 clamp 回 1 ⇒ **R/G/B 全成 255**，
+        //       只剩 alpha 变化。G 通道 table 动态范围最大（0.69↔0.98），因此偏得最多
+        //       —— 对账实测均值绝对差 R=1.86 / G=4.18 / B=0.16，正是这个顺序。
+        //    两处都修掉：非预乘索引 + 直接输出线性→sRGB 结果。
         final int a8 = AylaTurbulenceSpec.q8(a);
         final int o = (y * n + x) * 4;
-        if (a8 == 0) {
-          continue; // 全 0（Uint8List 初值）
-        }
-        final int r8 = AylaTurbulenceSpec.q8(r * a);
-        final int g8 = AylaTurbulenceSpec.q8(g * a);
-        final int b8 = AylaTurbulenceSpec.q8(b * a);
 
-        // 3) CT#1：R/G/B 用 table 折线（索引来自**非预乘**值）；A 恒等。
-        final int ur = lutR[r8];
-        final int ug = lutG[g8];
-        final int ub = lutB[b8];
-
-        // 4) CT#2：A 用 table；随后整体转 sRGB 并按新 alpha 重新预乘存储。
+        // 3) CT#2：A 用 `[0.35, 0, 0.35]` 重映射（0.5 处为 0、两端 0.35）。
         final int na8 = lutA[a8];
         if (na8 == 0) {
-          continue;
+          continue; // 全 0（Uint8List 初值）
         }
-        // 逐通道展开（热循环里不建临时集合：230k 像素 × 3 通道）。
-        final int pr = AylaTurbulenceSpec.q8(aylaLinearToSrgb(ur / 255.0) * na8);
-        final int pg = AylaTurbulenceSpec.q8(aylaLinearToSrgb(ug / 255.0) * na8);
-        final int pb = AylaTurbulenceSpec.q8(aylaLinearToSrgb(ub / 255.0) * na8);
-        out[o] = ((pr / na8).clamp(0.0, 1.0) * 255.0 + 0.5).floor().clamp(0, 255);
-        out[o + 1] = ((pg / na8).clamp(0.0, 1.0) * 255.0 + 0.5).floor().clamp(0, 255);
-        out[o + 2] = ((pb / na8).clamp(0.0, 1.0) * 255.0 + 0.5).floor().clamp(0, 255);
+        final int ur = lutR[AylaTurbulenceSpec.q8(r)];
+        final int ug = lutG[AylaTurbulenceSpec.q8(g)];
+        final int ub = lutB[AylaTurbulenceSpec.q8(b)];
+
+        // 4) 色彩空间：全程 linearRGB，最后转 sRGB（`color-interpolation-filters`
+        //    初始值 = linearRGB）。
+        //
+        // 5) 落盘 = **预乘 8bit sRGB**（Chrome 的 N32 表面本身就是 pre-multiplied）
+        //    —— 这一点是**硬约束**：`ui.decodeImageFromPixels(..., PixelFormat.rgba8888)`
+        //    的引擎实现用 `kPremul_SkAlphaType`，即它把传入字节**当作已预乘**。
+        //    传非预乘数据时，Skia 不会再乘 alpha，直接参与 src-over 合成 ——
+        //    alpha 越低的像素被抬得越亮。
+        //    （2026-09-27 对账实测：非预乘写法下整层合成后 Δ≈13/255 且呈**全屏均匀**
+        //    分布；改预乘后收敛到 Δ<1，见 test/aurora_background_test.dart 湍流用例。）
+        //    alpha 不参与 gamma。
+        out[o] = AylaTurbulenceSpec.q8(aylaLinearToSrgb(ur / 255.0) * na8 / 255.0);
+        out[o + 1] = AylaTurbulenceSpec.q8(aylaLinearToSrgb(ug / 255.0) * na8 / 255.0);
+        out[o + 2] = AylaTurbulenceSpec.q8(aylaLinearToSrgb(ub / 255.0) * na8 / 255.0);
         out[o + 3] = na8;
       }
     }
@@ -348,6 +365,9 @@ abstract final class AylaTurbulenceTile {
 }
 
 /// 采样某个像素的 R 通道（0..1，测试用：证明生成的是确定性噪声而非常量）。
+///
+/// ⚠️ R 是**预乘**值（≈ sRGB × alpha），不是非预乘颜色 —— 与浏览器
+/// `getImageData` 的读数不同口径，别直接比对。
 double aylaTurbulenceSampleAt(int x, int y) {
   const int n = AylaTurbulenceSpec.size;
   if (x < 0 || y < 0 || x >= n || y >= n) {

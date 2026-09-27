@@ -482,4 +482,115 @@ void main() {
     // 极淡：均值 alpha 应该在 0.08×少量 的量级（远小于 255×0.08=20）
     expect(sumA / n, lessThan(12.0), reason: '湍流层必须是极淡的（opacity .08）');
   });
+
+  // ------------------------------------------------------------------
+  // ★ 组件级全层合成对账（2026-09-27 本轮新增；锁住「flutter 比 web 白」的回归）
+  //
+  // 口径 = 真实运行：逻辑视口 1526×728 + DPR 1.25 ⇒ 输出与浏览器 1908×910
+  // **设备像素**截图同尺度（web 侧实测：窗口 1908×910 物理像素 / DPR 1.25
+  // ⇒ CSS 视口 1526×728；两者的 `150vmax`、`40vw`、blur(40px) 因此在同一
+  // 像素空间里可比）。
+  //
+  // 基准值来自 web 事实源实渲染（Playwright 打开只加载 tokens/base/auroraqua
+  // 三事实源文件的页面 → 定位到与本地同一相位 → 截图 → 逐字节解码采样）。
+  // ------------------------------------------------------------------
+
+  /// 渲染完整 [AylaAuroraBackground] 并按设备像素读回。
+  Future<Uint8List> renderBackground(
+    WidgetTester tester, {
+    required bool animate,
+    Duration advance = Duration.zero,
+  }) async {
+    const Size logical = Size(1526, 728);
+    tester.view.physicalSize = const Size(1908, 910);
+    tester.view.devicePixelRatio = 1.25;
+    addTearDown(tester.view.reset);
+    late Uint8List pixels;
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: MediaQuery(
+          data: const MediaQueryData(size: logical, devicePixelRatio: 1.25),
+          child: RepaintBoundary(
+            key: const Key('aurora-shot'),
+            child: SizedBox.fromSize(
+              size: logical,
+              child: ClipRect(child: AylaAuroraBackground(animate: animate)),
+            ),
+          ),
+        ),
+      ),
+    );
+    // 烘焙是异步的（Picture.toImage）——与真实首帧同条件地等它完成。
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+    });
+    if (advance > Duration.zero) await tester.pump(advance);
+    await tester.pump();
+    await tester.runAsync(() async {
+      final RenderRepaintBoundary boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(const Key('aurora-shot')),
+      );
+      final ui.Image image = await boundary.toImage(pixelRatio: 1.25);
+      final ByteData? data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      pixels = data!.buffer.asUint8List();
+      image.dispose();
+    });
+    return pixels;
+  }
+
+  /// 设备像素坐标采样（输出图 1908×910）。
+  _Px atDevice(Uint8List px, int x, int y) {
+    const int w = 1908;
+    final int i = (y * w + x) * 4;
+    return _Px(px[i].toDouble(), px[i + 1].toDouble(), px[i + 2].toDouble());
+  }
+
+  testWidgets('组件级对账：全层合成 t=5000 与 web 实渲染逐点一致', (WidgetTester tester) async {
+    final Uint8List px = await renderBackground(
+      tester,
+      animate: true,
+      advance: const Duration(seconds: 5),
+    );
+    // web 实测（1908×910 设备像素，t=5000ms 相位）
+    const List<List<int>> cases = <List<int>>[
+      <int>[40, 40, 207, 222, 240],
+      <int>[954, 40, 233, 234, 245],
+      <int>[1868, 40, 228, 200, 225],
+      <int>[40, 455, 216, 227, 241],
+      <int>[954, 455, 250, 247, 250],
+      <int>[1868, 455, 241, 211, 232],
+      <int>[40, 870, 218, 224, 241],
+      <int>[954, 870, 246, 240, 249],
+      <int>[1868, 870, 248, 215, 239],
+      <int>[400, 200, 218, 228, 242],
+      <int>[1500, 700, 248, 227, 243],
+      <int>[700, 600, 243, 217, 250],
+      <int>[1200, 180, 230, 225, 242],
+    ];
+    for (final List<int> c in cases) {
+      near(atDevice(px, c[0], c[1]), c[2], c[3], c[4], '全层(${c[0]},${c[1]})');
+    }
+  });
+
+  testWidgets('组件级对账：reduced-motion（只剩静态九层）与 web 实渲染逐点一致', (
+    WidgetTester tester,
+  ) async {
+    // web：四层伪元素 `display: none`（base.css 305–314）⇒ 只剩 `html` 的九层。
+    final Uint8List px = await renderBackground(tester, animate: false);
+    const List<List<int>> cases = <List<int>>[
+      <int>[40, 40, 192, 213, 234],
+      <int>[954, 40, 239, 240, 246],
+      <int>[1868, 40, 162, 193, 230],
+      <int>[40, 455, 217, 220, 242],
+      <int>[954, 455, 255, 250, 251],
+      <int>[1868, 455, 197, 197, 228],
+      <int>[40, 870, 240, 216, 250],
+      <int>[954, 870, 253, 238, 246],
+      <int>[1868, 870, 230, 177, 211],
+    ];
+    for (final List<int> c in cases) {
+      near(atDevice(px, c[0], c[1]), c[2], c[3], c[4], '仅静态(${c[0]},${c[1]})');
+    }
+  });
 }
