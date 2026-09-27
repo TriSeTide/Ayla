@@ -107,6 +107,7 @@ import '../widgets/group/group_role_chip.dart';
 import '../widgets/group/transfer_owner_dialog.dart';
 import '../widgets/group/group_info_profile.dart';
 import '../widgets/motion/gestures.dart';
+import '../widgets/base/favorite_item.dart';
 
 /// 审核画布宽度（导航 248 + 内容区；高度按所选分类内容收紧，不再是一张 1700 高的大画面）。
 const Size kGallerySize = Size(1800, 1200);
@@ -215,6 +216,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     '桌游室占位整页壳',
   ]),
   AylaGalleryCategory('profile', 'profile · 个人主页域', <String>[
+    'AylaFavoriteItem',
     'AylaProfileCard',
     'AylaFavoritesSkeleton',
     '个人主页内容分区', // 2026-09-25 用户指正：本件属 profile 域（早期误放在「群与目录」，当时还没有 profile 分类）
@@ -418,6 +420,16 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           '骨架：2 张 120 高圆角 12 的骨架卡 + 跨列文案「正在加载桌游室…」（aria-busy）· '
                           'Flutter 无 grid ⇒ LayoutBuilder 算等宽列 + Wrap（与 1fr 等价，机制差异已登记）',
                       child: const _GamesGridDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaFavoriteItem（FavoritesPage.tsx 95 + profile.css 474–487 / 539–541）',
+                      source:
+                          '收藏列表项容器：flex · align-items center · gap sp3 · padding sp3（**≥769 ⇒ sp4**）· '
+                          'radius-input · --glass-bg + 1px 边 + --glass-filter + **--glass-shadow-compact** · '
+                          '过渡 box-shadow / border-color / translate（--auroraqua-duration）· '
+                          '⚠️ `.favorite-item-title/-type/-body` 在 tsx **零使用 ⇒ 死声明**（不复刻）；'
+                          '`-main` 只用于「内容不可用」按钮（由结果卡自身承担）',
+                      child: const _FavoriteItemDemo(),
                     ),
                     // ---------- 个人主页域（资料卡族 + 收藏骨架） ----------
                     _Section(
@@ -3498,6 +3510,47 @@ class _MotionPiecesNote extends StatelessWidget {
               Expanded(child: Text(desc, style: t.body.copyWith(fontSize: 13))),
             ],
           ),
+      ],
+    );
+  }
+}
+
+/// 收藏项容器样张：窄档（padding sp3）与宽档（padding sp4）各一张。
+class _FavoriteItemDemo extends StatelessWidget {
+  const _FavoriteItemDemo();
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    Widget inner(String label) => Container(
+      height: 64,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AylaColors.glassBgStrong,
+        borderRadius: BorderRadius.circular(AylaRadii.rInput),
+        border: Border.all(color: AylaColors.glassBorder),
+      ),
+      child: Text(label, style: t.body),
+    );
+    return Wrap(
+      spacing: AylaSpacing.sp6,
+      runSpacing: AylaSpacing.sp6,
+      crossAxisAlignment: WrapCrossAlignment.start,
+      children: <Widget>[
+        _Slot(
+          label: '窄档（<769：padding sp3）',
+          child: SizedBox(
+            width: 360,
+            child: AylaFavoriteItem(child: inner('收藏内容（typed 卡）')),
+          ),
+        ),
+        _Slot(
+          label: '宽档（≥769：padding sp4）',
+          child: SizedBox(
+            width: 420,
+            child: AylaFavoriteItem(child: inner('收藏内容（typed 卡）')),
+          ),
+        ),
       ],
     );
   }
