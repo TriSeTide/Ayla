@@ -24,6 +24,7 @@ import 'preview/component_gallery.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'theme/app_theme.dart';
+import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
 
 void main() {
@@ -83,7 +84,17 @@ class _AppRootState extends ConsumerState<_AppRoot> {
       // Flutter 的视觉提示而非设计线，debug/release 都会出现。
       // 极光背景交给 Scaffold 的 body 铺满。
       builder: (BuildContext context, Widget? child) {
-        return Scaffold(
+        // ⚠️ 全局滚动条策略，**对齐 web 两处**（2026-09-28 用户截图点名「这个滚动条有问题」）：
+        // ① `base.css:376–383` 全局隐藏原生滚动条（`* { scrollbar-width: none }` +
+        //    `::-webkit-scrollbar { width: 0 }`）⇒ Flutter 侧用 `ScrollConfiguration` 关掉
+        //    Material 自动挂的 `Scrollbar`（否则桌面端每个滚动容器右侧都会露一条粗条）；
+        // ② `App.tsx:55` 在 **App 根部**挂 `<OverlayScrollbar />`（自绘细条 4px；窄屏 ≤768
+        //    完全不显示）⇒ Flutter 侧等价物 = 库内 [AylaOverlayScrollbar]，同样挂**根部单实例**
+        //    （它监听子树里所有 `Scrollable` 的滚动通知）。
+        return ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+          child: AylaOverlayScrollbar(
+            child: Scaffold(
           backgroundColor: Colors.transparent,
           body: AylaAuroraBackground(
             child: Stack(
@@ -106,6 +117,8 @@ class _AppRootState extends ConsumerState<_AppRoot> {
                     ),
                   ),
               ],
+            ),
+          ),
             ),
           ),
         );

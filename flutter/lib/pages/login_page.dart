@@ -28,6 +28,8 @@
 ///   不自行创作）。
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -108,50 +110,62 @@ class _LoginPageState extends State<LoginPage> {
     );
 
     if (wide) {
-      // ⚠️ 宽屏：**左栏不参与滚动**（2026-09-28 用户指出）。
-      // web 事实源 `auth.css:126–148`：`.auth-page` 整页 `overflow-y:auto`，而 `.auth-intro` 是
-      // `align-self: flex-start`（高度 = 内容高）+ `position: sticky; top: 50dvh; translate: 0 -50%`
-      // ⇒ **钉在视口垂直中点、随滚动不动**。
-      // Flutter 无 sticky（库内自建 sticky 是为滚动内容里的吸顶条，这里是更直接的等价形态）：
-      // 左栏移出滚动流、固定居中；**只有右侧表单卡区独立滚动** ⇒ 观感与 web 一致。
-      return Padding(
-        padding: EdgeInsets.symmetric(horizontal: pagePadding.horizontal),
-        child: Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center, // 左栏垂直居中（= sticky 的视觉位置）
+      // ⚠️ 宽屏布局 = web `auth.css:126–148` 的**逐条等价**（2026-09-28 两轮用户反馈后定稿）：
+      //
+      // · `.auth-page { flex-direction: row; justify-content: center; align-items: safe center;
+      //   padding: sp8 sp6; overflow-y: auto }` ⇒ **整页**是滚动容器
+      //   （覆盖层细滚动条因此落在**视口右缘**，而不是卡片右侧 —— 用户截图点名的那条）；
+      // · `.auth-intro { flex: 0 1 420px / ≥1024 460px; align-self: flex-start;
+      //   position: sticky; top: 50dvh; translate: 0 -50% }` ⇒ 左栏**钉在视口垂直中点**、不随滚动；
+      // · `.auth-card { width: min(440px, 100%); margin-block: auto }`；gap `clamp(48px, 6vw, 96px)`。
+      //
+      // Flutter 无 sticky ⇒ 用**两层**表达（视觉等价，且滚动容器仍是整页）：
+      //   ① 滚动层：左栏只留**同宽占位**，真身不在这里；
+      //   ② 固定层：左栏钉在视口垂直中点（`Positioned(top:0,bottom:0)` + `Center`）。
+      final double gap = (viewport.width * 0.06).clamp(48.0, 96.0); // gap: clamp(48px, 6vw, 96px)
+      final double introWidth = viewport.width >= AylaBreakpoints.md ? 460 : 420;
+      return LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints c) {
+          final double available = c.maxWidth - pagePadding.horizontal;
+          final double cardWidth =
+              math.min(440.0, math.max(0.0, available - introWidth - gap));
+          final double contentWidth = introWidth + gap + cardWidth;
+          final double contentLeft =
+              pagePadding.left + (available - contentWidth) / 2;
+          return Stack(
             children: <Widget>[
-              // .auth-intro（≥1024 flex-basis 460；gap clamp(48,6vw,96)）
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
-                ),
-                child: const AylaAuthIntro(),
-              ),
-              SizedBox(
-                width: (viewport.width * 0.06).clamp(48.0, 96.0), // gap: clamp(48px, 6vw, 96px)
-              ),
-              // 表单卡区：只有这一块滚动（= web「整页滚 + 左栏 sticky」的等价形态）
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: viewport.height),
-                // ⚠️ `clipBehavior: Clip.none` **必须给**（2026-09-28 用户实报「卡片阴影裁断」）：
-                // `.auth-card` 的 `--glass-shadow-modal`（`0 20px 60px`，tokens）**画在形状之外**，
-                // 默认 `Clip.hardEdge` 会把它裁成一条硬边（截图可见）。
-                // 滚动区的高度 = 视口高（外层 Center 居中），故不裁也不会溢出视口。
-                child: SingleChildScrollView(
-                  clipBehavior: Clip.none,
-                  padding: EdgeInsets.symmetric(vertical: pagePadding.vertical),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: viewport.height - pagePadding.vertical,
+              // ① 整页滚动（`.auth-page { overflow-y: auto }`）
+              SingleChildScrollView(
+                padding: pagePadding,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: viewport.height - pagePadding.vertical,
+                  ),
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      // `.auth-intro { align-self: flex-start }` 的交叉轴语义
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        SizedBox(width: introWidth), // 左栏占位（真身在 ②）
+                        SizedBox(width: gap),
+                        SizedBox(width: cardWidth, child: card),
+                      ],
                     ),
-                    child: Center(child: card),
                   ),
                 ),
               ),
+              // ② 左栏固定层（sticky `top: 50dvh` + `translate: 0 -50%` 的视觉等价）
+              Positioned(
+                left: contentLeft,
+                top: 0,
+                bottom: 0,
+                width: introWidth,
+                child: const Center(child: AylaAuthIntro()),
+              ),
             ],
-          ),
-        ),
+          );
+        },
       );
     }
 

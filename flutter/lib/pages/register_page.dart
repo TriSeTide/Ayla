@@ -20,6 +20,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -183,45 +184,56 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     final Widget card = _card(wide: wide, compact: compact);
 
     if (wide) {
-      // ⚠️ 宽屏：**左栏不参与滚动**（与 `LoginPage` 同口径，2026-09-28 用户指出）。
-      // web `auth.css:126–148`：`.auth-page` 整页 `overflow-y:auto`，`.auth-intro` 是
-      // `align-self: flex-start`（高度 = 内容高）+ `position: sticky; top: 50dvh; translate: 0 -50%`
-      // ⇒ **钉在视口垂直中点、随滚动不动**。Flutter 侧等价形态：左栏移出滚动流固定居中，
-      // **只有右侧表单卡区独立滚动**。
-      return Padding(
-        padding: EdgeInsets.symmetric(horizontal: pagePadding.horizontal),
-        child: Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
+      // ⚠️ 宽屏布局 = web `auth.css:126–148` 的逐条等价（与 `LoginPage` 同口径）：
+      // `.auth-page { flex-direction: row; justify-content: center; align-items: safe center;
+      //  padding: sp8 sp6; overflow-y: auto }` ⇒ **整页**是滚动容器（细滚动条因此贴视口右缘）；
+      // `.auth-intro { flex: 0 1 420px / ≥1024 460px; align-self: flex-start; position: sticky;
+      //  top: 50dvh; translate: 0 -50% }` ⇒ 左栏钉在视口垂直中点、不随滚动；
+      // `.auth-card { width: min(440px, 100%) }`；gap `clamp(48px, 6vw, 96px)`。
+      // Flutter 无 sticky ⇒ 两层表达：① 滚动层里左栏只留同宽占位；② 固定层渲染真身。
+      final double gap = (viewport.width * 0.06).clamp(48.0, 96.0);
+      final double introWidth = viewport.width >= AylaBreakpoints.md ? 460 : 420;
+      return LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints c) {
+          final double available = c.maxWidth - pagePadding.horizontal;
+          final double cardWidth =
+              math.min(440.0, math.max(0.0, available - introWidth - gap));
+          final double contentWidth = introWidth + gap + cardWidth;
+          final double contentLeft =
+              pagePadding.left + (available - contentWidth) / 2;
+          return Stack(
             children: <Widget>[
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
-                ),
-                child: const AylaAuthIntro(),
-              ),
-              SizedBox(width: (viewport.width * 0.06).clamp(48.0, 96.0)),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: viewport.height),
-                // ⚠️ `clipBehavior: Clip.none` **必须给**（2026-09-28 用户实报「卡片阴影裁断」）：
-                // `.auth-card` 的 `--glass-shadow-modal`（`0 20px 60px`，tokens）**画在形状之外**，
-                // 默认 `Clip.hardEdge` 会把它裁成一条硬边（截图可见）。
-                // 滚动区的高度 = 视口高（外层 Center 居中），故不裁也不会溢出视口。
-                child: SingleChildScrollView(
-                  clipBehavior: Clip.none,
-                  padding: EdgeInsets.symmetric(vertical: pagePadding.vertical),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: viewport.height - pagePadding.vertical,
+              // ① 整页滚动（`.auth-page { overflow-y: auto }`）
+              SingleChildScrollView(
+                padding: pagePadding,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: viewport.height - pagePadding.vertical,
+                  ),
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        SizedBox(width: introWidth), // 左栏占位（真身在 ②）
+                        SizedBox(width: gap),
+                        SizedBox(width: cardWidth, child: card),
+                      ],
                     ),
-                    child: Center(child: card),
                   ),
                 ),
               ),
+              // ② 左栏固定层（sticky 的视觉等价）
+              Positioned(
+                left: contentLeft,
+                top: 0,
+                bottom: 0,
+                width: introWidth,
+                child: const Center(child: AylaAuthIntro()),
+              ),
             ],
-          ),
-        ),
+          );
+        },
       );
     }
 
