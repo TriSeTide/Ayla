@@ -53,3 +53,8 @@ app.*.map.json
 **/*.so
 # Widget Preview related
 .widget_preview/
+
+# Dart/Flutter DevTools 扩展启用状态（本机按用户独立配置，不入库）。
+# 官方说明：提交进版本控制 ⇒ 配置对全项目生效；加入 .gitignore ⇒ 按用户独立。
+# https://docs.flutter.dev/tools/devtools/extensions#configure-extension-enablement-states
+devtools_options.yaml
