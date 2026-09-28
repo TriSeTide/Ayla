@@ -142,6 +142,36 @@ class AylaPagedList<T> extends ChangeNotifier {
   /// 上一次请求使用的游标（用于「游标未推进」的防御性判定）。
   String? _lastCursor;
 
+  /// 本地替换条目（web `updateSocialItems`：处理完一条申请后把它从列表里去掉）。
+  ///
+  /// - `total` 按条目数增减同步（web `Math.max(0, total + items.length - previous.items.length)`）；
+  /// - 只动**已加载投影**，不改变游标与 `hasMore`（下一页仍按原游标取）。
+  void setItems(List<T> items) {
+    final List<T> next = List<T>.unmodifiable(items);
+    if (next.length == _items.length) {
+      bool same = true;
+      for (int i = 0; i < next.length; i++) {
+        if (!identical(next[i], _items[i])) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    }
+    final int total = _total + next.length - _items.length;
+    _items = next;
+    _total = total < 0 ? 0 : total;
+    _notify();
+  }
+
+  /// 按判据移除条目（[setItems] 的常用包装）。
+  void removeWhere(bool Function(T item) test) {
+    setItems(<T>[
+      for (final T item in _items)
+        if (!test(item)) item,
+    ]);
+  }
+
   /// 重取首页（刷新键 / 下拉刷新共用）。
   Future<void> refresh() => load();
 

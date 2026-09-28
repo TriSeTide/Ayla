@@ -201,7 +201,13 @@ class AylaMessageList extends StatefulWidget {
     this.unreadSeqs = const <int>[],
     this.mentionUnreadSeqs = const <int>[],
     this.replyUnreadSeqs = const <int>[],
+    this.onAtBottomChanged,
   });
+
+  /// ⚠️ 2026-09-28 消息域批次补的**纯增量档**（默认 null ⇒ 既有调用点行为不变）：
+  /// 贴底状态变化（含首次挂载的一次上报）。web 用它决定 WS 新消息「即时已读」还是进标签
+  /// （`stores/message.ts:33` 的 `viewerAtBottom`，默认 `?? true`）。
+  final void Function(bool atBottom)? onAtBottomChanged;
 
   /// 消息（**时间升序**；渲染时内部反转）。
   final List<AylaChatMessage> messages;
@@ -269,6 +275,10 @@ class _AylaMessageListState extends State<AylaMessageList> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // 首次挂载上报一次默认值（web 的 `viewerAtBottom[convId] ?? true` 语义）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onAtBottomChanged?.call(_atBottom);
+    });
     _prevIds = widget.messages.map((AylaChatMessage m) => m.id).toList();
     _baselined = true;
   }
@@ -324,11 +334,14 @@ class _AylaMessageListState extends State<AylaMessageList> {
     final bool atBottom = pos.pixels <= kAylaMessageBottomTolerance;
     final bool far = pos.pixels > pos.viewportDimension;
     if (atBottom != _atBottom || far != _farFromBottom) {
+      final bool changedBottom = atBottom != _atBottom;
       setState(() {
         _atBottom = atBottom;
         _farFromBottom = far;
         _tick++;
       });
+      // 贴底状态变化上报（`viewerAtBottom` 投影；首次挂载时也发一次）。
+      if (changedBottom) widget.onAtBottomChanged?.call(atBottom);
     }
     // 触底（顶部 = 更早历史）→ 加载更多
     if (pos.pixels >= pos.maxScrollExtent - 400 && widget.hasMore) {

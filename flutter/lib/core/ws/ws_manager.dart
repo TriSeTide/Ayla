@@ -8,8 +8,16 @@
 /// - manualClose 不重连（登出语义；登出前调用 disconnect）
 /// - chat 重连成功后对已订阅会话补发 resume（web chat.ts resume 帧；M2 接入订阅）
 ///
-/// 事件分发：M0 只挂分发骨架（`onEvent` 回调 + pong 回执静默处理），
-/// 41 个接收 case 的 store 分发留 M2。live/voice 通道 enabled=false 占位（M5/M6）。
+/// 事件分发：M0 只挂分发骨架（`onEvent` 回调 + pong 回执静默处理）；
+/// **chat 通道的 41 个接收 case 由 `core/ws/chat_ws.dart` 的 [AylaChatWsClient] 承接**
+/// （2026-09-28 消息域批次接线）。live/voice 通道 enabled=false 占位（M5/M6）。
+///
+/// ## 2026-09-28 变更（消息域批次）
+/// - `subscribed` 集合的**读写归 owner**（chat_ws）：本类只保存它以便 [WsManager.dispose] 清理；
+/// - `_onOpen` **不再**自动发 `resume`（原实现发的帧**缺 `last_message_seq`**，后端会按 0 补发
+///   全部历史 —— 正是 web `ws/chat.ts:186–195` 记录过的「刷新群聊一口气加载所有历史」根因）。
+///   首连补发 `subscribe` / 重连逐条 `resume` 的语义改由 [WsChannel.onOpen] 钩子交给 owner；
+/// - 新增公开 [WsChannel.send]：owner 需要发 `subscribe` / `resume` 帧，而 `_sendJson` 是私有的。
 library;
 
 import 'dart:async';
@@ -59,14 +67,20 @@ class WsChannel {
   int _attempt = 0;
   bool _manualClosed = false;
 
-  /// chat 已订阅会话 id 集合（重连后据此补发 resume；M2 接入）
+  /// 已订阅会话 id 集合（**由 owner 维护**：chat 通道归 `chat_ws.dart`；
+  /// 本类只在 [WsManager.dispose] 时统一清理）。
   final Set<String> subscribed = <String>{};
 
-  /// 服务端事件分发骨架（41 case 留 M2；收到任一事件不报错）
+  /// 服务端事件分发（chat 的 41 个接收 case 见 `core/ws/chat_ws.dart`）
   void Function(Map<String, dynamic> json)? onEvent;
 
   /// 状态变化通知（页面/壳层观察连接态）
   void Function(WsChannelStatus status)? onStatus;
+
+  /// 连接建立回调（`ready` 完成后触发一次）。
+  ///
+  /// **owner 负责首连 `subscribe` / 重连 `resume` 的区分**（web `ws/chat.ts:171–196`）。
+  void Function()? onOpen;
 
   WsChannel({
     required this.kind,
@@ -123,16 +137,9 @@ class WsChannel {
     _attempt = 0;
     _setStatus(WsChannelStatus.online);
     _startHeartbeat();
-    // 断线重连：对已订阅会话逐条 resume 补发（web chat.ts onopen 语义；
-    // 订阅集合 M2 由 subscribe() 填充）
-    if (subscribed.isNotEmpty) {
-      for (final String cid in subscribed) {
-        _sendJson(<String, dynamic>{
-          'type': 'resume',
-          'conversation_id': cid,
-        });
-      }
-    }
+    // 订阅补发交给 owner（见文件头「2026-09-28 变更」）：本类不知道各会话的
+    // `last_message_seq` 基线，自行发 `resume` 只会让后端按 0 补发全部历史。
+    onOpen?.call();
   }
 
   void _onMessage(dynamic raw) {
@@ -199,7 +206,13 @@ class WsChannel {
     }
   }
 
-  /// 订阅会话（M2 接入：打开会话时增量 subscribe 单个 conv_id）。
+  /// 发送一帧（owner 用：`subscribe` / `resume` / 自定义帧）。
+  ///
+  /// ⚠️ 连接未 OPEN 时 [WebSocketChannel.sink] 会缓冲或丢弃 —— 与 web 的
+  /// `sendJson`（`readyState !== OPEN` 直接不发送）同语义：owner 必须在 `onOpen` 时补发。
+  void send(Map<String, dynamic> json) => _sendJson(json);
+
+  /// 订阅会话（登记 id；帧由 owner 决定发 subscribe 还是 resume）。
   void subscribe(String conversationId) {
     subscribed.add(conversationId);
   }

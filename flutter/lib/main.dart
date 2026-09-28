@@ -23,6 +23,7 @@ import 'core/ws/ws_manager.dart';
 import 'preview/component_gallery.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
+import 'state/chat_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
@@ -46,6 +47,8 @@ void main() {
     onSessionExpired: () {
       AppInit.instance.reset();
       wsManager?.disconnectAll();
+      // 消息域：401 过期与显式登出同一套收尾（清订阅/基线/消息与红点状态）。
+      aylaStopChatWsForContainer(container);
       auth.clear();
       // 回登录由路由守卫接（`app_router.dart` 的 redirect + refreshListenable）
     },

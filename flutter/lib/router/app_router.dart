@@ -26,8 +26,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../layout/app_shell.dart';
+import '../pages/chat_conversation_route.dart';
 import '../pages/favorites_page.dart';
 import '../pages/games_hub_page.dart';
+import '../pages/messages_page.dart';
 import '../pages/home_page.dart';
 import '../pages/my_posts_page.dart';
 import '../pages/live_hub_page.dart';
@@ -172,7 +174,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             ),
           ),
           GoRoute(path: '/games/:roomId', pageBuilder: (c, s) => _pending(path: '/games/:roomId', webSource: 'App.tsx:79 → GamesHubPage（房内占位，第 3 批）')),
-          GoRoute(path: '/messages', pageBuilder: (c, s) => _pending(path: '/messages', webSource: 'App.tsx:80 → MessagesPage')),
+          // 第 4 批：消息域（窄屏三 tab / 宽屏两列）
+          GoRoute(
+            path: '/messages',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                const NoTransitionPage<void>(child: MessagesPage()),
+          ),
           GoRoute(
             path: '/search',
             // ?q= 是搜索的驱动源（web SearchPage.tsx:297–324）；
@@ -216,7 +223,20 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(path: '/group/:id/voice/:voiceChannelId', pageBuilder: (c, s) => _pending(path: '/group/:id/voice/:voiceChannelId', webSource: 'App.tsx:88 → GroupPage')),
           GoRoute(path: '/group/:id/live/:liveChannelId', pageBuilder: (c, s) => _pending(path: '/group/:id/live/:liveChannelId', webSource: 'App.tsx:89 → GroupPage')),
           GoRoute(path: '/group/:id/:scene', pageBuilder: (c, s) => _pending(path: '/group/:id/:scene', webSource: 'App.tsx:90 → GroupPage')),
-          GoRoute(path: '/chat/:conversationId', pageBuilder: (c, s) => _pending(path: '/chat/:conversationId', webSource: 'App.tsx:91 → ChatConversationRoute')),
+          // 第 4 批：会话路由适配（群聊 → /group/:id；私聊 → PrivateChatPage）。
+          // `?msg=&seq=` 是收藏消息的定位参数（web `PrivateChatPage.tsx:28–38`）。
+          GoRoute(
+            path: '/chat/:conversationId',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: ChatConversationRoute(
+                conversationId: s.pathParameters['conversationId'] ?? '',
+                query: s.uri.query.isEmpty ? '' : '?${s.uri.query}',
+                jumpMessageId: s.uri.queryParameters['msg'],
+                jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
+              ),
+            ),
+          ),
         ],
       ),
       // ---- catch-all（`App.tsx:94`）----

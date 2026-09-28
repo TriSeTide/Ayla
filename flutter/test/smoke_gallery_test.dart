@@ -61,6 +61,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     '宽屏消息左列（WideMessagesSidebar.tsx）',
     '快捷消息栏（QuickMessagesSheet.tsx）',
     'AylaImageViewer（ImageViewer.tsx + app.css 1459–1836 + auroraqua.css 55–94）',
+    'AylaMessagesPage / AylaWideMessages / AylaWideMessagesPane（messages.css 9–15 / 207–212 / 236–241 / 281–291 / 324–339 + 83–94 / 63–68 / 199–205）',
   ],
   'live · 直播域': <String>[
     'AylaDanmakuList / AylaDanmakuInput / AylaDanmakuOverlay（components/live/Danmaku{List,Input,Overlay}.tsx 139+180+213 行 + danmakuTracks.ts 55 行 + app.css 3671–3827 + live.css 756–784/860–929/1006–1018 + auroraqua.css 347–359/378–383/390/502–523）',

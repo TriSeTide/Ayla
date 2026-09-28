@@ -99,6 +99,7 @@ import '../widgets/chat/emoji_pack_panel.dart';
 import '../widgets/chat/media_content.dart';
 import '../widgets/chat/message_input.dart';
 import '../widgets/chat/message_list.dart';
+import '../widgets/chat/messages_layout.dart';
 import '../widgets/chat/messages_tabs.dart';
 import '../widgets/base/nav_highlight_list.dart';
 import '../widgets/chat/mention_picker.dart';
@@ -196,6 +197,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     '宽屏消息左列',
     '快捷消息栏',
     'AylaImageViewer',
+    'AylaMessagesPage / AylaWideMessages / AylaWideMessagesPane',
   ]),
   AylaGalleryCategory('live', 'live · 直播域', <String>[
     'AylaDanmakuList',
@@ -946,7 +948,9 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   '滚动区 padding sp3 sp4 gap sp3 + 底部输入区（窄屏整宽页脚 / ≥769 浮动玻璃卡 margin 12 padding sp2）'
                   '· 编辑态三个 background 层 visibility:hidden 等价物（保留状态与滚动位置）· 头/输入区入场 ±20 / 300ms；'
                   '骨架：max-width 680+2×sp4 居中 + padding sp3 sp4 + gap sp3（40 圆形 / 96×16 / 64×12 · 两条正文 14 · 媒体 120 · 评论块 4 条）；'
-                  '空态：placeholder-desc（error ?? 帖子不存在）+ ghost 返回（web 无头无 padding）',
+                  '空态（2026-09-28 用户裁决「修」）：.post-detail-state = 顶栏（返回 + 帖子）+ 居中列'
+                  '（padding sp12 sp6 + gap sp4 取自 .home-state home.css:622–629；整页居中同 .home-wide-empty home.css:673–682）'
+                  '+ 文案（error ?? 帖子不存在）+ ghost 返回',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: aylaPostDetailChromeSamples(),
@@ -1664,6 +1668,21 @@ class _ComponentGalleryState extends State<ComponentGallery> {
               child: aylaQuickMessagesSheetSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- 页面层第 4 批（消息域页面骨架与宽屏右列） ----------
+            _Section(
+              title:
+                  'AylaMessagesPage / AylaWideMessages / AylaWideMessagesPane（messages.css 9–15 / 207–212 / 236–241 / 281–291 / 324–339 + 83–94 / 63–68 / 199–205）',
+              source:
+                  '消息域**页面骨架**（19 号 §7.5 range B 的 B 类「页面内联件」）：'
+                  '窄屏 `.messages-page` = column + `padding-bottom: 68px`（避让悬浮 FAB；Flutter 侧与已交付 HomePage 同口径加安全区）· '
+                  '≥769 = row + `padding-bottom: 0` · `.wide-messages` = row + `overflow: hidden`（/chat/:id 外壳）· '
+                  '`.wide-messages-pane` = `flex: 1` + min-w/h 0，`> .private-chat { flex: 1 }` · '
+                  '`.wide-messages-empty` = 居中两行（placeholder-title 28/600 + placeholder-desc 14）· '
+                  '`.messages-group-title` 15/700 + mb sp2 · `.messages-group` gap sp2 · '
+                  '`.messages-section-hint` 13/1.5 + `margin-top: -sp2` · `.messages-empty` padding sp4 + 13 secondary',
+              child: aylaMessagesLayoutSamples(), // 三档：窄屏页骨架 / 宽屏两列 + 右列空态 / 分组件
+            ),
 
             // ---------- boardgame 域第一批（2026-09-24：B4-1 卡片） ----------
             _Section(

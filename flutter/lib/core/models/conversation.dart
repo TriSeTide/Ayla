@@ -163,8 +163,13 @@ class AylaGroupPresence {
 
 /// 会话摘要（`types.ts:314–353` ConversationListSerializer 字段）。
 ///
-/// 只收 chat 域渲染/判定需要的字段；未列出的后端字段（`unread_seqs` 等
-/// 大批量游标数组）按需再加，避免无消费者的字段膨胀。
+/// 未列出的后端字段按需再加，避免无消费者的字段膨胀。
+///
+/// ## 2026-09-28（消息域批次）新增 4 个未读游标字段
+/// `unread_seqs` / `mention_unread_seqs` / `reply_unread_seqs` / `unread_seqs_complete`
+/// （`types.ts:327–347`）—— 它们是 `stores/chat.ts` 的 `bumpUnread` / `markReadSeqs`
+/// 唯一依赖的投影；WS `message.new` 实时未读增量必须有它们才能与 web 同语义
+/// （只加 `unread_count` 数字会与「可追踪未读序号」两套口径打架）。
 class AylaConversationSummary {
   const AylaConversationSummary({
     required this.id,
@@ -189,6 +194,10 @@ class AylaConversationSummary {
     this.groupPresence,
     this.createdAt,
     this.peer,
+    this.unreadSeqs = const <int>[],
+    this.mentionUnreadSeqs = const <int>[],
+    this.replyUnreadSeqs = const <int>[],
+    this.unreadSeqsComplete,
   });
 
   final String id;
@@ -243,9 +252,77 @@ class AylaConversationSummary {
   /// 私聊对端用户（ConversationListSerializer 补充）。
   final AylaUserPublic? peer;
 
+  /// 未读消息的会话序号集合（`types.ts:342–343`；旧后端缺失 ⇒ 空数组）。
+  final List<int> unreadSeqs;
+
+  /// @ 我未读的消息序号集合（`types.ts:344–345`）。
+  final List<int> mentionUnreadSeqs;
+
+  /// 回复未读的消息序号集合（`types.ts:346–347`）。
+  final List<int> replyUnreadSeqs;
+
+  /// False = 摘要只含计数、省略了递增的未读序号数组（`types.ts:327–328`）；
+  /// null = 后端未给（按 web `toSummary` 的 `?? true` 语义**视为完整**）。
+  final bool? unreadSeqsComplete;
+
   bool get isGroup => type == AylaConversationType.group;
 
   bool get isPrivate => type == AylaConversationType.private;
+
+  /// 合并式拷贝：**null 一律表示「保留旧值」**（与 web `upsertConversation`
+  /// 的「详情接口无 peer ⇒ 不得用 null 覆盖已有对端」同语义）。
+  AylaConversationSummary copyWith({
+    String? title,
+    String? announcement,
+    String? avatar,
+    String? joinPolicy,
+    List<AylaConversationMember>? members,
+    bool? membersComplete,
+    bool? myMuted,
+    AylaConversationMemberRole? myRole,
+    int? memberCount,
+    int? unreadCount,
+    int? lastReadSeq,
+    bool? isPinned,
+    AylaLastMessagePreview? lastMessage,
+    int? mentionUnreadCount,
+    int? postUnreadCount,
+    String? directoryActivityAt,
+    AylaGroupPresence? groupPresence,
+    AylaUserPublic? peer,
+    List<int>? unreadSeqs,
+    List<int>? mentionUnreadSeqs,
+    List<int>? replyUnreadSeqs,
+    bool? unreadSeqsComplete,
+  }) =>
+      AylaConversationSummary(
+        id: id,
+        type: type,
+        title: title ?? this.title,
+        announcement: announcement ?? this.announcement,
+        avatar: avatar ?? this.avatar,
+        joinPolicy: joinPolicy ?? this.joinPolicy,
+        ownerId: ownerId,
+        members: members ?? this.members,
+        membersComplete: membersComplete ?? this.membersComplete,
+        myMuted: myMuted ?? this.myMuted,
+        myRole: myRole ?? this.myRole,
+        memberCount: memberCount ?? this.memberCount,
+        unreadCount: unreadCount ?? this.unreadCount,
+        lastReadSeq: lastReadSeq ?? this.lastReadSeq,
+        isPinned: isPinned ?? this.isPinned,
+        lastMessage: lastMessage ?? this.lastMessage,
+        mentionUnreadCount: mentionUnreadCount ?? this.mentionUnreadCount,
+        postUnreadCount: postUnreadCount ?? this.postUnreadCount,
+        directoryActivityAt: directoryActivityAt ?? this.directoryActivityAt,
+        groupPresence: groupPresence ?? this.groupPresence,
+        createdAt: createdAt,
+        peer: peer ?? this.peer,
+        unreadSeqs: unreadSeqs ?? this.unreadSeqs,
+        mentionUnreadSeqs: mentionUnreadSeqs ?? this.mentionUnreadSeqs,
+        replyUnreadSeqs: replyUnreadSeqs ?? this.replyUnreadSeqs,
+        unreadSeqsComplete: unreadSeqsComplete ?? this.unreadSeqsComplete,
+      );
 
   static AylaConversationSummary? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -274,6 +351,10 @@ class AylaConversationSummary {
       groupPresence: AylaGroupPresence.fromJson(raw['group_presence']),
       createdAt: raw['created_at'] as String?,
       peer: AylaUserPublic.fromJson(raw['peer']),
+      unreadSeqs: _intList(raw['unread_seqs']),
+      mentionUnreadSeqs: _intList(raw['mention_unread_seqs']),
+      replyUnreadSeqs: _intList(raw['reply_unread_seqs']),
+      unreadSeqsComplete: raw['unread_seqs_complete'] as bool?,
     );
   }
 
@@ -284,4 +365,13 @@ class AylaConversationSummary {
         .whereType<AylaConversationSummary>()
         .toList(growable: false);
   }
+}
+
+/// 未读序号数组解析（非 List ⇒ 空数组；非数字项**丢弃**，不猜值）。
+List<int> _intList(Object? raw) {
+  if (raw is! List) return const <int>[];
+  return List<int>.unmodifiable(<int>[
+    for (final Object? item in raw)
+      if (item is num) item.toInt(),
+  ]);
 }

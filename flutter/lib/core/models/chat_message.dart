@@ -359,6 +359,53 @@ class AylaChatMessage {
     );
   }
 
+  /// 合并式拷贝（null = 保留旧值；[resetUploadProgress] 显式清上传进度 ——
+  /// web 的 `setMessageUploadProgress(..., null)` 表达「上传完成」）。
+  AylaChatMessage copyWith({
+    String? id,
+    AylaMessageType? type,
+    String? content,
+    String? mediaId,
+    AylaMediaDescriptor? media,
+    List<AylaMediaSegment>? segments,
+    AylaSharePayload? sharePayload,
+    String? replyTo,
+    int? replyToSeq,
+    bool? readByMe,
+    AylaMessageStatus? status,
+    int? seq,
+    bool? pending,
+    bool? sendFailed,
+    double? uploadProgress,
+    bool resetUploadProgress = false,
+    String? idempotencyKey,
+    List<AylaLocalMediaPreview>? localMedia,
+  }) =>
+      AylaChatMessage(
+        id: id ?? this.id,
+        conversationId: conversationId,
+        senderId: senderId,
+        subgroupId: subgroupId,
+        type: type ?? this.type,
+        content: content ?? this.content,
+        mediaId: mediaId ?? this.mediaId,
+        media: media ?? this.media,
+        segments: segments ?? this.segments,
+        sharePayload: sharePayload ?? this.sharePayload,
+        replyTo: replyTo ?? this.replyTo,
+        replyToSeq: replyToSeq ?? this.replyToSeq,
+        readByMe: readByMe ?? this.readByMe,
+        status: status ?? this.status,
+        seq: seq ?? this.seq,
+        createdAt: createdAt,
+        pending: pending ?? this.pending,
+        sendFailed: sendFailed ?? this.sendFailed,
+        uploadProgress:
+            resetUploadProgress ? null : (uploadProgress ?? this.uploadProgress),
+        idempotencyKey: idempotencyKey ?? this.idempotencyKey,
+        localMedia: localMedia ?? this.localMedia,
+      );
+
   static List<AylaLocalMediaPreview> _localMediaList(Object? raw) {
     if (raw is! List) return const <AylaLocalMediaPreview>[];
     final List<AylaLocalMediaPreview> out = <AylaLocalMediaPreview>[];
@@ -386,4 +433,96 @@ String? _nonEmpty(String? value) {
   if (value == null) return null;
   final String trimmed = value.trim();
   return trimmed.isEmpty ? null : trimmed;
+}
+
+/// ======================= 发送入参（`types.ts:388–405` CreateMessagePayload） =======================
+
+/// 发送用消息段（`types.ts:398–402` 的三档联合）。
+///
+/// 与读侧的 [AylaMediaSegment] **刻意分开**：读侧段带服务端展开的 descriptor / 用户名，
+/// 发送侧只允许 `text` / `image|video + media_id` / `mention + user_id`（web 的服务端硬约束）。
+class AylaOutgoingSegment {
+  const AylaOutgoingSegment._({this.type, this.text, this.mediaId, this.userId});
+
+  /// `{type:'text', text}`。
+  const AylaOutgoingSegment.text(String value) : this._(type: 'text', text: value);
+
+  /// `{type:'image', media_id}`。
+  const AylaOutgoingSegment.image(String mediaId)
+      : this._(type: 'image', mediaId: mediaId);
+
+  /// `{type:'video', media_id}`。
+  const AylaOutgoingSegment.video(String mediaId)
+      : this._(type: 'video', mediaId: mediaId);
+
+  /// `{type:'mention', user_id}`。
+  const AylaOutgoingSegment.mention(String userId)
+      : this._(type: 'mention', userId: userId);
+
+  /// 段类型（`text` / `image` / `video` / `mention`）。
+  final String? type;
+
+  final String? text;
+  final String? mediaId;
+  final String? userId;
+
+  Map<String, dynamic> toJson() => switch (type) {
+        'text' => <String, dynamic>{'type': 'text', 'text': text},
+        'mention' => <String, dynamic>{'type': 'mention', 'user_id': userId},
+        _ => <String, dynamic>{'type': type, 'media_id': mediaId},
+      };
+}
+
+/// `POST /chat/conversations/<id>/messages/` 的请求体（web `CreateMessagePayload`）。
+///
+/// **缺席即缺席**：`media_id` / `subgroup_id` / `segments` / `share_payload` 为 null 时
+/// **不进 body**（与 web 的 `undefined` 同义）；`reply_to` 与 `content` 恒发（web 显式传 `?? null`）。
+class AylaCreateMessagePayload {
+  const AylaCreateMessagePayload({
+    required this.content,
+    this.type,
+    this.replyTo,
+    this.idempotencyKey,
+    this.mediaId,
+    this.subgroupId,
+    this.segments,
+    this.sharePayload,
+  });
+
+  final String content;
+
+  /// 消息类型（null = 不带 `type`，服务端按文本处理）。
+  final AylaMessageType? type;
+
+  /// 被引用消息的**会话内 seq**（web `reply_to: number`）。
+  final int? replyTo;
+
+  /// 幂等键（服务端去重；重试复用同一个）。
+  final String? idempotencyKey;
+
+  /// 单媒体消息的媒体 id（与 [segments] 二选一）。
+  final String? mediaId;
+
+  /// 子群归属（群聊；私聊忽略）。
+  final int? subgroupId;
+
+  /// 结构化段（与 [mediaId] 二选一；至少一个非纯文本段）。
+  final List<AylaOutgoingSegment>? segments;
+
+  /// 分享载荷（`type=share` 必填）。
+  final AylaSharePayload? sharePayload;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        if (type != null) 'type': type!.wire,
+        'content': content,
+        'reply_to': replyTo,
+        if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+        if (mediaId != null) 'media_id': mediaId,
+        if (subgroupId != null) 'subgroup_id': subgroupId,
+        if (segments != null)
+          'segments': <Map<String, dynamic>>[
+            for (final AylaOutgoingSegment seg in segments!) seg.toJson(),
+          ],
+        if (sharePayload != null) 'share_payload': sharePayload!.toJson(),
+      };
 }

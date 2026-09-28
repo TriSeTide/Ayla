@@ -4,6 +4,7 @@
 /// 以及 `openPrivateConversation`；搜索 / 好友列表等随各自页面批次带出。
 library;
 
+import '../models/social_requests.dart' show AylaFriendRequest;
 import '../models/user_public.dart';
 import '../net/dio_client.dart';
 import 'directory_page.dart';
@@ -154,5 +155,69 @@ class AylaUsersApi {
         if (item is Map && AylaUserPublic.fromJson(item['user']) != null)
           AylaUserPublic.fromJson(item['user'])!,
     ];
+  }
+
+  /// GET /friends/?pagination=cursor&limit=&cursor= —— 好友游标页
+  /// （web `api/users.ts:77–79` 的 `listFriendsPage`；`SocialPage<Friendship>`）。
+  ///
+  /// ⚠️ 会话列表里的好友行需要 `items` / `total` / `hasMore` / `loadMore` 全套投影
+  /// ⇒ 本批（消息域）另立游标页版；既有的 [listFriendsPage]（hub 页二次过滤用）保持
+  /// 「只取第一页的 user 集合」语义不变。
+  static Future<AylaDirectoryPage<AylaUserPublic>> listFriendsPageOf({
+    int limit = 30,
+    String? cursor,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>('/friends/', query: query);
+    return AylaDirectoryPage.fromJson<AylaUserPublic>(
+      resp,
+      (Object? raw) =>
+          raw is Map<String, dynamic> ? AylaUserPublic.fromJson(raw['user']) : null,
+    );
+  }
+
+  /// `GET /friends/requests/?pagination=cursor&limit=&direction=received&status=pending`
+  /// —— 待我处理的好友申请（web `stores/social.ts:136`）。
+  static Future<AylaDirectoryPage<AylaFriendRequest>>
+      listFriendRequestsPage({
+    int limit = 30,
+    String? cursor,
+    String direction = 'received',
+    String status = 'pending',
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+      'direction': direction,
+      'status': status,
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>('/friends/requests/', query: query);
+    return AylaDirectoryPage.fromJson<AylaFriendRequest>(
+      resp,
+      (Object? raw) =>
+          raw is Map<String, dynamic> ? AylaFriendRequest.fromJson(raw) : null,
+    );
+  }
+
+  /// `POST /friends/requests/<id>/action/` —— 同意/拒绝好友申请（web `api/users.ts:101–110`）。
+  static Future<void> actionFriendRequest(String requestId, bool accept) async {
+    await DioClient.instance.post<Map<String, dynamic>>(
+      '/friends/requests/${Uri.encodeComponent(requestId)}/action/',
+      body: <String, dynamic>{'action': accept ? 'accept' : 'reject'},
+    );
+  }
+
+  /// `DELETE /friends/<user_id>/` —— 解除好友（web `api/users.ts:112–117`）。
+  static Future<void> deleteFriend(String userId) async {
+    await DioClient.instance.delete<void>(
+      '/friends/${Uri.encodeComponent(userId)}/',
+    );
   }
 }

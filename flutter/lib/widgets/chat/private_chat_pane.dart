@@ -75,6 +75,7 @@ class AylaPrivateChatPane extends StatelessWidget {
     this.blocked = false,
     this.composer,
     this.narrow = false,
+    this.onAtBottomChanged,
   });
 
   /// 会话摘要（null = 尚未加载 ⇒ 头部按「私聊」占位）。
@@ -140,6 +141,10 @@ class AylaPrivateChatPane extends StatelessWidget {
   /// 窄屏档（头部为通栏玻璃条）；宽屏档（≥769）头部**卡片化**。
   final bool narrow;
 
+  /// 贴底状态上报（原样透传给 [AylaMessageList]；web `stores/message.ts:33` 的
+  /// `viewerAtBottom` 投影，WS 新消息据此决定即时已读还是进标签）。
+  final void Function(bool atBottom)? onAtBottomChanged;
+
   /// 头部高度（`.private-chat-head { height: 56px }`）。
   static const double headHeight = 56;
 
@@ -181,6 +186,7 @@ class AylaPrivateChatPane extends StatelessWidget {
             unreadSeqs: unreadSeqs,
             mentionUnreadSeqs: mentionUnreadSeqs,
             replyUnreadSeqs: replyUnreadSeqs,
+            onAtBottomChanged: onAtBottomChanged,
           ),
         ),
         if (blocked)

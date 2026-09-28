@@ -16,11 +16,13 @@
 /// · `LiveMiniPlayer`（`useLiveStore.miniPlayer`）—— 属 live 会话运行时批次；
 /// · `QuickMessagesSheet` 的实际面板内容（私信 / 申请列表）—— 属消息域批次
 ///   （[ShellUiState.quickMessagesOpen] 已就位，Fab 已按它暂停半贴计时）；
-/// · 未读聚合 `messageBadge`（web `useBadgesStore` → `GET /me/badges/`）—— 消息域批次，
-///   第 1 批恒 0（与 web F1 阶段同值），故 MessageFab 的徽标也暂不挂；
+/// · ~~未读聚合 `messageBadge`~~ ✅ **2026-09-28 消息域批次已接线**：`state/badges_state.dart` +
+///   `state/chat_providers.dart`（`GET /me/badges/`；进入即拉 + 纯 WS 事件驱动，**无周期轮询**）；
 /// · `ServerRail` / `ChannelSidebar`：web 的 AppShell **不渲染**它们 —— 它们是宽屏主页
 ///   （`GroupPage` 三列）的内部装配，属第 2 批。
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +32,7 @@ import '../core/app_init.dart';
 import '../core/ws/ws_manager.dart';
 import '../router/shell_config.dart';
 import '../state/auth_state.dart';
+import '../state/chat_providers.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
@@ -56,12 +59,24 @@ class _AppShellState extends ConsumerState<AppShell> {
   /// 顶栏搜索框的受控值。
   String _searchQuery = '';
 
+  @override
+  void initState() {
+    super.initState();
+    // 全站未读聚合：进入即拉 + 纯 WS 事件驱动（web `AppShell.tsx:86–91`，无周期轮询）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(ref.read(badgesProvider).fetch());
+    });
+  }
+
   /// 创建浮层是否打开（`.create-fab` 的落点）。
   bool _createSheetOpen = false;
 
   void _logout() {
     // 顺序对齐 web `useAuth.logout`：断 WS → 清令牌 → appInit.reset（回登录由路由守卫接）。
     wsManager?.disconnectAll();
+    // 消息域：断开 chat 通道 owner 并清空会话/消息/红点/通知状态（各 store 的 reset）。
+    aylaStopChatWs(ref);
     AppInit.instance.reset();
     ref.read(authNotifierProvider.notifier).clear();
   }
@@ -94,8 +109,9 @@ class _AppShellState extends ConsumerState<AppShell> {
         isNarrow && aylaIsPrimaryNavRoute(pathname);
     final ShellUiState shell = ref.watch(shellUiProvider);
     final AuthUser? user = ref.watch(authNotifierProvider).user;
-    // ⚠️ 未读聚合属消息域批次（见文件头「未接线项」）⇒ 第 1 批恒 0。
-    const int messageBadge = 0;
+    // 全站未读聚合（web `AppShell.tsx:93–95`：private_unread + 三路认证，**不含** mention_unread）。
+    // 未取到 ⇒ 0（红点无法表达「未知」；store 侧仍保持 null，见 `state/badges_state.dart`）。
+    final int messageBadge = ref.watch(badgesProvider).messageBadge;
     final bool bottomTabsLeaving = shell.bottomTabsLeaving;
     final bool showBottomTabs = isNarrow && !groupSceneNarrow && !privateChatNarrow;
 

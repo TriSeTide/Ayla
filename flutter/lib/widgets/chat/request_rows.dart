@@ -219,6 +219,10 @@ class AylaNoticeRow extends StatelessWidget {
 }
 
 /// 好友行（`.friend-row`）：可点主体（进会话）+ 「解除好友」。
+///
+/// ⚠️ [avatarSize] 是 2026-09-28 消息域批次补的**纯增量档**（默认 36 ⇒ 既有调用点逐像素不变）：
+/// web 两处同构好友行**头像尺寸不同** —— 宽屏 `WideMessagesSidebar.tsx:241` 用 `size={36}`、
+/// 窄屏 `MessagesPage.tsx:288` 用 `size={40}`；`.friend-row` 其余声明两者完全一致。
 class AylaFriendRow extends StatelessWidget {
   const AylaFriendRow({
     super.key,
@@ -228,6 +232,7 @@ class AylaFriendRow extends StatelessWidget {
     this.onRemove,
     this.online = false,
     this.removing = false,
+    this.avatarSize = 36,
   });
 
   final AylaUserPublic user;
@@ -236,6 +241,9 @@ class AylaFriendRow extends StatelessWidget {
   final VoidCallback? onRemove;
   final bool online;
   final bool removing;
+
+  /// 头像尺寸（`.friend-row-main` 的 `Avatar`；宽屏 36 / 窄屏 40）。
+  final double avatarSize;
 
   @override
   Widget build(BuildContext context) {
@@ -254,7 +262,7 @@ class AylaFriendRow extends StatelessWidget {
                     children: <Widget>[
                       AylaAvatarHalo(
                         label: label,
-                        size: 36,
+                        size: avatarSize,
                         online: online,
                         resourceUrl: user.avatar,
                         onTap: onAvatarTap,
@@ -319,6 +327,8 @@ class AylaRequestsPanel extends StatelessWidget {
     this.inviteNameOf,
     this.joinNameOf,
     this.isOnline,
+    this.joinSectionTitle = '入群申请',
+    this.sectionGap = AylaSpacing.sp3,
   });
 
   /// 持久化退群通知分组。
@@ -356,6 +366,14 @@ class AylaRequestsPanel extends StatelessWidget {
 
   /// 实时在线判定（presence 注入）。
   final bool Function(AylaUserPublic user)? isOnline;
+
+  /// 入群申请分组标题（web 宽屏 `WideMessagesSidebar.tsx:313` = 「入群申请」；
+  /// 窄屏 `MessagesPage.tsx:357` = 「入群申请（群主/管理员）」）——纯增量档，默认 = 宽屏文案。
+  final String joinSectionTitle;
+
+  /// 分组间距（web `.messages-friends { gap: sp3 }` = 宽屏侧栏；
+  /// `.messages-requests { gap: sp4 }` = 窄屏认证 tab）——纯增量档，默认 = sp3。
+  final double sectionGap;
 
   bool get _allEmpty =>
       friendRequests.isEmptyState &&
@@ -458,7 +476,7 @@ class AylaRequestsPanel extends StatelessWidget {
     if (joinRequests.shouldRender) {
       sections.add(
         _section(
-          '入群申请',
+          joinSectionTitle,
           <Widget>[
             for (final AylaGroupJoinRequest r in joinRequests.items)
               AylaRequestRow(
@@ -505,7 +523,7 @@ class AylaRequestsPanel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         for (int i = 0; i < sections.length; i++) ...<Widget>[
-          if (i > 0) const SizedBox(height: AylaSpacing.sp3), // `.messages-friends { gap: sp3 }`
+          if (i > 0) SizedBox(height: sectionGap),
           sections[i],
         ],
       ],
