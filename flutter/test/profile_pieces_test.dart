@@ -130,7 +130,9 @@ void main() {
   });
 
   group('AylaProfileAvatarActions（profile.css 150–171 / 584–591）', () {
-    testWidgets('左内距 48（40 + sp4）+ 三键等宽', (WidgetTester tester) async {
+    testWidgets('左内距 48（40 + sp4）+ 三键按**内容宽**排（文案不省略）', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(
         host(
           AylaProfileAvatarActions(
@@ -145,10 +147,19 @@ void main() {
       final Rect first = tester.getRect(find.text('更换头像'));
       // 左内距 = 40 + sp4 ⇒ 按钮文字左缘 ≥ 48
       expect(first.left, greaterThanOrEqualTo(AylaProfileAvatarActions.indent));
+      // web `.profile-avatar-btn { flex: 1 1 0; padding: var(--sp-1) var(--sp-2);
+      // white-space: nowrap }` + 容器 `display:flex; flex-wrap:wrap`（profile.css 150–161 / 584–591）
+      // ⇒ 按钮**按内容宽**排、**文案不省略**。
+      // 2026-09-28 用户实报「三个按钮文字不全」：此前本件用 `Expanded` 等分槽位，
+      // 在 280–340 宽的侧栏里把每个按钮压到 1/3 ⇒ 文案变成「更…」「隐…」。
+      // 这条锁住「不是等分」：「收藏」两字必须明显窄于「更换头像」四字。
       final double w0 = tester.getSize(find.byType(AylaGlassButton).at(0)).width;
       final double w1 = tester.getSize(find.byType(AylaGlassButton).at(1)).width;
       final double w2 = tester.getSize(find.byType(AylaGlassButton).at(2)).width;
-      expect(w1, closeTo(w0, 0.5));
+      expect(w1, lessThan(w0 - 8), reason: '两字按钮必须比四字按钮窄 ⇒ 不是等分槽位');
+      expect(w2, greaterThanOrEqualTo(w0), reason: '「隐私设置」四字与「更换头像」同宽');
+      // 文案完整性下界：4 汉字 × 12px = 48，加左右 padding（sp2 ×2）
+      expect(w0, greaterThan(48 + 2 * AylaSpacing.sp2));
       expect(w2, closeTo(w0, 0.5));
     });
 

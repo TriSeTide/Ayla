@@ -150,6 +150,29 @@ bool aylaIsNarrowTopBarRoute(String pathname) {
   return false;
 }
 
+/// 面板自编排路由（`AppShell.tsx:61–74` 的 `panelOwned`）—— 整页转场**外层立即归位**，
+/// 避免整页位移覆盖内部滑入动画（design.md §12.9.1）。
+///
+/// 消费者：`theme/page_transitions.dart` 的 [AylaPageTransitionsBuilder]
+/// （放本文件而不是 `layout/app_shell.dart`：它是**路由纯函数**，且 theme 不应反向依赖 layout）。
+bool aylaPanelOwnedPath(String pathname) {
+  return aylaIsGroupScene(pathname) ||
+      aylaIsMessagesRoute(pathname) ||
+      aylaMatches('/live/:id', pathname) ||
+      aylaMatches('/live/start/:channelId', pathname) ||
+      aylaMatches('/voice/:channelId', pathname) ||
+      aylaMatches('/games/:roomId', pathname) ||
+      aylaMatches('/user/:userId', pathname) ||
+      pathname == '/profile' ||
+      pathname == '/favorites' ||
+      pathname == '/search' ||
+      pathname == '/voice' ||
+      pathname == '/live' ||
+      pathname == '/posts' ||
+      pathname == '/games' ||
+      (pathname != '/posts/mine' && aylaMatches('/posts/:postId', pathname));
+}
+
 /// 浮层按钮组显示配置（`CornerFabConfig`）。
 class AylaCornerFabConfig {
   const AylaCornerFabConfig({

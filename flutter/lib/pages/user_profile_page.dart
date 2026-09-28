@@ -38,6 +38,7 @@ import '../theme/tokens.dart';
 import '../widgets/base/avatar_halo.dart';
 import '../widgets/base/loading.dart' show AylaSkeleton;
 import '../widgets/base/profile_content_sections.dart';
+import '../widgets/base/reveal.dart';
 import '../widgets/base/share.dart';
 import '../widgets/profile/profile_card.dart';
 import '../widgets/profile/profile_presence.dart';
@@ -241,12 +242,28 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 builder: (BuildContext context, BoxConstraints c) {
                   final double sideWidth =
                       (c.maxWidth * 0.32).clamp(280.0, 340.0);
+                  // 两列各有面板入场（与 `ProfilePage` 同源：web `auroraqua.css:323–332` 的
+                  // 选择器 `.profile-page-split > .profile-column > :is(.profile-side,.profile-main)`
+                  // 对**两个页面**都生效）—— 左入 −20 / 右入 +20，300ms `--auroraqua-ease-out`。
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     spacing: AylaSpacing.sp3,
                     children: <Widget>[
-                      SizedBox(width: sideWidth, child: body),
-                      Expanded(child: sections),
+                      AylaRevealItem(
+                        offset: const Offset(-20, 0), // auroraqua-sidebar-in
+                        duration: AylaDurations.auroraqua,
+                        curve: AylaCurves.auroraquaEaseOut,
+                        child: SizedBox(width: sideWidth, child: body),
+                      ),
+                      // ⚠️ `Expanded` 必须在外层（parent-data widget 不能包进 `AylaRevealItem`）
+                      Expanded(
+                        child: AylaRevealItem(
+                          offset: const Offset(20, 0), // auroraqua-panel-from-right
+                          duration: AylaDurations.auroraqua,
+                          curve: AylaCurves.auroraquaEaseOut,
+                          child: sections,
+                        ),
+                      ),
                     ],
                   );
                 },

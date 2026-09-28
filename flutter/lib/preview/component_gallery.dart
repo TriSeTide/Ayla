@@ -3539,7 +3539,6 @@ class _ProfileCardDemo extends StatelessWidget {
             error: compact ? '图片过大' : null,
             actions: <Widget>[
               AylaGlassButton(
-                expand: true,
                 label: '更换头像',
                 variant: AylaGlassButtonVariant.ghost,
                 fontSize: 12,
@@ -3551,7 +3550,6 @@ class _ProfileCardDemo extends StatelessWidget {
                 onPressed: () {},
               ),
               AylaGlassButton(
-                expand: true,
                 label: '隐私设置',
                 variant: AylaGlassButtonVariant.ghost,
                 fontSize: 12,
@@ -3564,7 +3562,6 @@ class _ProfileCardDemo extends StatelessWidget {
               ),
               // web：`.profile-favorites-btn` 同盒模型 + **IconHeart 15 前置图标**（文案「我的收藏」）
               AylaGlassButton(
-                expand: true,
                 label: '我的收藏',
                 icon: AylaIcon(aylaIconByName('iconHeart')!, size: 15),
                 variant: AylaGlassButtonVariant.ghost,

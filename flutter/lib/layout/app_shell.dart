@@ -35,32 +35,12 @@ import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../theme/buttons.dart';
 import '../theme/tokens.dart';
-import '../widgets/motion/page_transition.dart';
 import '../widgets/shell/bottom_tabs.dart';
 import '../widgets/shell/create_sheet.dart';
 import '../widgets/shell/fab.dart';
 import '../widgets/shell/session_activity.dart';
 import '../widgets/shell/top_nav.dart';
 
-/// 面板自编排路由（`AppShell.tsx:61–74` 的 `panelOwned`）—— 整页转场外层立即归位，
-/// 避免整页位移覆盖内部滑入动画（design.md §12.9.1）。
-bool aylaPanelOwned(String pathname) {
-  return aylaIsGroupScene(pathname) ||
-      aylaIsMessagesRoute(pathname) ||
-      aylaMatches('/live/:id', pathname) ||
-      aylaMatches('/live/start/:channelId', pathname) ||
-      aylaMatches('/voice/:channelId', pathname) ||
-      aylaMatches('/games/:roomId', pathname) ||
-      aylaMatches('/user/:userId', pathname) ||
-      pathname == '/profile' ||
-      pathname == '/favorites' ||
-      pathname == '/search' ||
-      pathname == '/voice' ||
-      pathname == '/live' ||
-      pathname == '/posts' ||
-      pathname == '/games' ||
-      (pathname != '/posts/mine' && aylaMatches('/posts/:postId', pathname));
-}
 
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key, required this.child});
@@ -177,18 +157,16 @@ class _AppShellState extends ConsumerState<AppShell> {
       topBar = userAvatarFreeTopNav;
     }
 
-    // ---- 内容区（`.app-shell-content` + 页面转场）----
-    final Object pageKey = aylaResolvePageKey(pathname, wideGroupShell: !isNarrow);
-    final Widget content = AylaPageSwap(
-      pageKey: pageKey,
-      builder: (BuildContext context) => AylaPageTransition(
-        key: ValueKey<Object>(pageKey),
-        panelOwned: aylaPanelOwned(pathname),
-        groupScene: aylaMatchGroupId(pathname) != null,
-        searchScene: pathname == '/search',
-        child: widget.child,
-      ),
-    );
+    // ---- 内容区（`.app-shell-content`）----
+    // ⚠️ **转场不在这里做**（2026-09-28 修的第二个根因）：页面转场的唯一 owner 是
+    // `theme/page_transitions.dart` 的 [AylaPageTransitionsBuilder]（Navigator 层）——
+    // 它天然表达 web `AnimatePresence mode="sync"` 的「新旧页并存、各播各的」。
+    // 曾经在这里用 `AylaPageSwap` 保留旧页，结果是：
+    // ① go_router 的 ShellRoute child **就是** shell navigator（key 是
+    //    `GlobalObjectKey(navigatorKey.hashCode)`，靠同一 GlobalKey 复用 Element）⇒
+    //    保留旧页会 `Multiple widgets used the same GlobalKey`；
+    // ② 用 `builder` 时闭包读到的是当前 child ⇒ 旧槽里放的是**新页副本**（截图重影）。
+    final Widget content = widget.child;
 
     final EdgeInsets safe = MediaQuery.paddingOf(context);
     final double fabBottomNarrow = 64 + safe.bottom + 12;

@@ -13,6 +13,19 @@
 /// 参数同源 `auroraquaMotion.ts`：distance 20 / fadeScale .95 / fadeDuration .5 / easeOut [0,0,.58,1] /
 /// easeInOut [.42,0,.58,1] —— 库内已有同值曲线 `AylaCurves.auroraquaEaseOut` / `auroraquaEaseInOut`。
 ///
+/// ## ⚠️ 不要在 AppShell 里用它们做全局路由转场（2026-09-28 血泪）
+///
+/// **全局页面转场的 owner 已改为 `theme/page_transitions.dart` 的
+/// `AylaPageTransitionsBuilder`**（Navigator 层）。本文件这两件保留给：
+/// ① 画布样张（motion 分类的「手势动画」节）；② 需要**自持**叠放转场的局部场景。
+///
+/// 原因（两条都在实测里红过）：
+/// 1. go_router 的 `ShellRoute` 的 `child` **就是** shell navigator，其 key 是
+///    `GlobalObjectKey(navigatorKey.hashCode)` —— 它**故意**用同一个 GlobalKey 让新旧 page
+///    复用同一个 Element；widget 层再保留一份旧页 ⇒ `Multiple widgets used the same GlobalKey`；
+/// 2. 用 `builder` 传内容时闭包读到的是**当前** child ⇒ 旧页槽位里放的是**新页副本**
+///    （用户截图里的「重影」），而不是真正的旧页。
+///
 /// ## 机制差异（登记）
 /// - web 的 **`exit` 由宿主驱动**（`AnimatePresence mode="sync"`：新页挂载后保留旧页 300ms）⇒
 ///   Flutter 无等价物，本文件提供 **[AylaPageSwap]** 作配套宿主（按 key 保旧页 + 淡出），
@@ -201,15 +214,32 @@ class AylaPageSwap extends StatefulWidget {
   const AylaPageSwap({
     super.key,
     required this.pageKey,
-    required this.builder,
+    this.builder,
+    this.child,
     this.duration = AylaPageTransition.exitDuration,
-  });
+  }) : assert(
+         builder != null || child != null,
+         'AylaPageSwap 需要 builder 或 child 之一',
+       );
 
   /// 页面身份（建议传 [aylaResolvePageKey] 的结果）；变化即换页。
   final Object pageKey;
 
+  /// 页面**值**（推荐）：直接传当帧要显示的页面 widget。
+  ///
+  /// ⚠️ **必须用 [child] 而不是 [builder]**（2026-09-28 实测的真 bug）：
+  /// 旧页槽位要保留**上一帧的页面实例**，而 `builder` 是闭包 ——
+  /// 调用方写 `builder: (ctx) => AylaPageTransition(child: widget.child)` 时，
+  /// 闭包里读到的永远是**当前**的 `widget.child`（新的那页）⇒
+  /// **新页被同时渲染进两个槽位**：观感是「旧页淡出时叠着一份一模一样的新页」
+  /// （用户截图里的重影），并直接触发 `Multiple widgets used the same GlobalKey`。
+  /// [child] 是值语义 ⇒ `didUpdateWidget` 里能拿到 `oldWidget.child`（真正的旧页）。
+  final Widget? child;
+
   /// 页面构建器（返回 [AylaPageTransition] / `AylaPrimaryNavPage` 等）。
-  final WidgetBuilder builder;
+  ///
+  /// 仅当调用方能保证「旧页内容不依赖外部可变状态」时使用；否则请用 [child]。
+  final WidgetBuilder? builder;
 
   /// 旧页淡出时长（web 退出 300ms）。
   final Duration duration;
@@ -250,10 +280,12 @@ class _AylaPageSwapState extends State<AylaPageSwap>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pageKey == widget.pageKey) return;
     setState(() {
-      // 旧页定格：用**上一帧的 builder** 重建（元素按 key 复用 ⇒ 淡出期间状态不丢）
+      // 旧页定格：优先取**上一帧的 child 实例**（值语义，真正的旧页）；
+      // 没有 child 时才回落旧 builder（此时调用方须保证 builder 不读外部可变状态）。
       _leaving = KeyedSubtree(
         key: ValueKey<Object?>(oldWidget.pageKey),
-        child: Builder(builder: oldWidget.builder),
+        child: oldWidget.child ??
+            Builder(builder: oldWidget.builder!),
       );
     });
     _c
@@ -271,7 +303,7 @@ class _AylaPageSwapState extends State<AylaPageSwap>
   Widget build(BuildContext context) {
     final Widget current = KeyedSubtree(
       key: ValueKey<Object?>(widget.pageKey),
-      child: Builder(builder: widget.builder),
+      child: widget.child ?? Builder(builder: widget.builder!),
     );
     final Widget? leaving = _leaving;
     // ⚠️ 树形必须**恒定**：早前版本在「无旧页」时直接返回 `current`、有旧页时才套 `Stack`，

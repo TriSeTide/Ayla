@@ -13,7 +13,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/media/media_picker.dart';
 import '../lib/pages/profile_page.dart';
+import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/reveal.dart';
 import '../lib/widgets/profile/profile_card.dart';
 import '../lib/state/auth_state.dart';
 import '../lib/theme/glass.dart';
@@ -106,6 +108,25 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), '改了昵称');
     await tester.pump();
     expect(save().onPressed, isNotNull);
+  });
+
+  testWidgets('宽屏两列各有面板入场（web auroraqua.css:323–332）', (WidgetTester tester) async {
+    await useViewport(tester, const Size(1440, 1000));
+    await tester.pumpWidget(host(const ProfilePage()));
+    await tester.pump();
+    await signIn(tester, user);
+
+    final List<AylaRevealItem> items =
+        tester.widgetList<AylaRevealItem>(find.byType(AylaRevealItem)).toList();
+    expect(items.length, 2, reason: 'profile-side + profile-main 各一条');
+    // `.profile-side` = auroraqua-sidebar-in（左入 −20）
+    expect(items.any((AylaRevealItem i) => i.offset == const Offset(-20, 0)), isTrue);
+    // `.profile-main` = auroraqua-panel-from-right（右入 +20）
+    expect(items.any((AylaRevealItem i) => i.offset == const Offset(20, 0)), isTrue);
+    expect(
+      items.every((AylaRevealItem i) => i.duration == AylaDurations.auroraqua),
+      isTrue,
+    );
   });
 
   testWidgets('窄屏（≤768）：单列自然流（`.profile-side/.profile-main` 都是 display:contents）', (

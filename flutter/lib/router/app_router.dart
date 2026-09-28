@@ -38,6 +38,17 @@ class _AuthRefresh extends ChangeNotifier {
   void bump() => notifyListeners();
 }
 
+/// 未实现页面的路由页 —— **不做任何转场**（`NoTransitionPage`）。
+///
+/// 理由（2026-09-28 用户反馈「没做的页面就别强加动画」）：占位页之间切换时，转场唯一的效果
+/// 就是让两块占位文字**重叠几帧**（残影），既不是 web 的行为、也没有任何信息量。
+/// 等该路由交付真实页面时，把 `pageBuilder` 换回 `builder:` 即可 —— 那时它才走
+/// `AylaPageTransitionsBuilder` 的分档（panelOwned / 群页 / 搜索页 / 普通路由）。
+Page<void> _pending({required String path, required String webSource}) =>
+    NoTransitionPage<void>(
+      child: PendingPage(path: path, webSource: webSource),
+    );
+
 /// 全局路由（唯一实例；会话过期回登录、页面内 `context.go` 都由它承载）。
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
   final _AuthRefresh refresh = _AuthRefresh();
@@ -71,15 +82,21 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
     },
     routes: <RouteBase>[
       // ---- 公开（`App.tsx:57–58`）----
+      // ⚠️ 全部用 `NoTransitionPage`（**不是** `builder:`）：`PageTransitionsBuilder` 只改
+      // **视觉**，route 的 `transitionDuration` 仍是 300ms ⇒ 旧 route 依然在栈上
+      // ⇒ 两页同屏（2026-09-28 用户截图：登录页与注册页叠在一起）。
+      // `NoTransitionPage` 的时长是 **0**，这才是「不叠页」的正解。
       GoRoute(
         path: '/login',
-        builder: (BuildContext context, GoRouterState state) =>
-            LoginRoute(next: state.uri.queryParameters['next']),
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            NoTransitionPage<void>(
+          child: LoginRoute(next: state.uri.queryParameters['next']),
+        ),
       ),
       GoRoute(
         path: '/register',
-        builder: (BuildContext context, GoRouterState state) =>
-            const RegisterPage(),
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            const NoTransitionPage<void>(child: RegisterPage()),
       ),
       // ---- 受保护（`App.tsx:60–92`，壳层由 AppShell 承担）----
       ShellRoute(
@@ -89,7 +106,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(path: '/', redirect: (BuildContext c, GoRouterState s) => '/group'),
           GoRoute(
             path: '/group',
-            builder: (BuildContext c, GoRouterState s) => const PendingPage(
+            pageBuilder: (BuildContext c, GoRouterState s) => _pending(
               path: '/group',
               webSource: 'App.tsx:68 → HomePage',
             ),
@@ -98,50 +115,54 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/home',
             redirect: (BuildContext c, GoRouterState s) => '/group',
           ),
-          GoRoute(path: '/voice', builder: (c, s) => const PendingPage(path: '/voice', webSource: 'App.tsx:70 → VoiceHubPage')),
-          GoRoute(path: '/voice/:channelId', builder: (c, s) => const PendingPage(path: '/voice/:channelId', webSource: 'App.tsx:71 → VoiceHubPage')),
-          GoRoute(path: '/live', builder: (c, s) => const PendingPage(path: '/live', webSource: 'App.tsx:72 → LiveHubPage')),
+          GoRoute(path: '/voice', pageBuilder: (c, s) => _pending(path: '/voice', webSource: 'App.tsx:70 → VoiceHubPage')),
+          GoRoute(path: '/voice/:channelId', pageBuilder: (c, s) => _pending(path: '/voice/:channelId', webSource: 'App.tsx:71 → VoiceHubPage')),
+          GoRoute(path: '/live', pageBuilder: (c, s) => _pending(path: '/live', webSource: 'App.tsx:72 → LiveHubPage')),
           // ⚠️ 段数不同（3 vs 2），与 `/live/:channelId` 不冲突
-          GoRoute(path: '/live/start/:channelId', builder: (c, s) => const PendingPage(path: '/live/start/:channelId', webSource: 'App.tsx:73 → LiveStudioPage')),
-          GoRoute(path: '/live/:channelId', builder: (c, s) => const PendingPage(path: '/live/:channelId', webSource: 'App.tsx:74 → LiveRoomPage')),
-          GoRoute(path: '/posts', builder: (c, s) => const PendingPage(path: '/posts', webSource: 'App.tsx:75 → PostsHubPage')),
+          GoRoute(path: '/live/start/:channelId', pageBuilder: (c, s) => _pending(path: '/live/start/:channelId', webSource: 'App.tsx:73 → LiveStudioPage')),
+          GoRoute(path: '/live/:channelId', pageBuilder: (c, s) => _pending(path: '/live/:channelId', webSource: 'App.tsx:74 → LiveRoomPage')),
+          GoRoute(path: '/posts', pageBuilder: (c, s) => _pending(path: '/posts', webSource: 'App.tsx:75 → PostsHubPage')),
           // ⚠️ **必须排在 `/posts/:postId` 之前**（同为 2 段，go_router 按声明顺序匹配）
-          GoRoute(path: '/posts/mine', builder: (c, s) => const PendingPage(path: '/posts/mine', webSource: 'App.tsx:76 → MinePostsRoute')),
-          GoRoute(path: '/posts/:postId', builder: (c, s) => const PendingPage(path: '/posts/:postId', webSource: 'App.tsx:77 → PostDetailPage')),
-          GoRoute(path: '/games', builder: (c, s) => const PendingPage(path: '/games', webSource: 'App.tsx:78 → GamesHubPage')),
-          GoRoute(path: '/games/:roomId', builder: (c, s) => const PendingPage(path: '/games/:roomId', webSource: 'App.tsx:79 → GamesHubPage')),
-          GoRoute(path: '/messages', builder: (c, s) => const PendingPage(path: '/messages', webSource: 'App.tsx:80 → MessagesPage')),
+          GoRoute(path: '/posts/mine', pageBuilder: (c, s) => _pending(path: '/posts/mine', webSource: 'App.tsx:76 → MinePostsRoute')),
+          GoRoute(path: '/posts/:postId', pageBuilder: (c, s) => _pending(path: '/posts/:postId', webSource: 'App.tsx:77 → PostDetailPage')),
+          GoRoute(path: '/games', pageBuilder: (c, s) => _pending(path: '/games', webSource: 'App.tsx:78 → GamesHubPage')),
+          GoRoute(path: '/games/:roomId', pageBuilder: (c, s) => _pending(path: '/games/:roomId', webSource: 'App.tsx:79 → GamesHubPage')),
+          GoRoute(path: '/messages', pageBuilder: (c, s) => _pending(path: '/messages', webSource: 'App.tsx:80 → MessagesPage')),
           GoRoute(
             path: '/search',
-            builder: (BuildContext c, GoRouterState s) => const PendingPage(
+            pageBuilder: (BuildContext c, GoRouterState s) => _pending(
               path: '/search',
               webSource: 'App.tsx:81 → SearchPage',
             ),
           ),
           GoRoute(
             path: '/profile',
-            builder: (BuildContext c, GoRouterState s) => const ProfilePage(),
+            // 同上：无转场页（时长 0）。页面自己的入场动画（两列 `AylaRevealItem`）不受影响。
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                const NoTransitionPage<void>(child: ProfilePage()),
           ),
           GoRoute(
             path: '/user/:userId',
-            builder: (BuildContext c, GoRouterState s) =>
-                UserProfilePage(userId: s.pathParameters['userId'] ?? ''),
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: UserProfilePage(userId: s.pathParameters['userId'] ?? ''),
+            ),
           ),
           // ⚠️ 3 段 vs `/user/:userId` 的 2 段，天然不冲突
-          GoRoute(path: '/user/:userId/posts', builder: (c, s) => const PendingPage(path: '/user/:userId/posts', webSource: 'App.tsx:84 → UserPostsRoute')),
+          GoRoute(path: '/user/:userId/posts', pageBuilder: (c, s) => _pending(path: '/user/:userId/posts', webSource: 'App.tsx:84 → UserPostsRoute')),
           GoRoute(
             path: '/favorites',
-            builder: (BuildContext c, GoRouterState s) => const PendingPage(
+            pageBuilder: (BuildContext c, GoRouterState s) => _pending(
               path: '/favorites',
               webSource: 'App.tsx:85 → FavoritesPage',
             ),
           ),
-          GoRoute(path: '/group/:id', builder: (c, s) => const PendingPage(path: '/group/:id', webSource: 'App.tsx:86 → GroupPage')),
-          GoRoute(path: '/group/:id/posts/:postId', builder: (c, s) => const PendingPage(path: '/group/:id/posts/:postId', webSource: 'App.tsx:87 → GroupPage')),
-          GoRoute(path: '/group/:id/voice/:voiceChannelId', builder: (c, s) => const PendingPage(path: '/group/:id/voice/:voiceChannelId', webSource: 'App.tsx:88 → GroupPage')),
-          GoRoute(path: '/group/:id/live/:liveChannelId', builder: (c, s) => const PendingPage(path: '/group/:id/live/:liveChannelId', webSource: 'App.tsx:89 → GroupPage')),
-          GoRoute(path: '/group/:id/:scene', builder: (c, s) => const PendingPage(path: '/group/:id/:scene', webSource: 'App.tsx:90 → GroupPage')),
-          GoRoute(path: '/chat/:conversationId', builder: (c, s) => const PendingPage(path: '/chat/:conversationId', webSource: 'App.tsx:91 → ChatConversationRoute')),
+          GoRoute(path: '/group/:id', pageBuilder: (c, s) => _pending(path: '/group/:id', webSource: 'App.tsx:86 → GroupPage')),
+          GoRoute(path: '/group/:id/posts/:postId', pageBuilder: (c, s) => _pending(path: '/group/:id/posts/:postId', webSource: 'App.tsx:87 → GroupPage')),
+          GoRoute(path: '/group/:id/voice/:voiceChannelId', pageBuilder: (c, s) => _pending(path: '/group/:id/voice/:voiceChannelId', webSource: 'App.tsx:88 → GroupPage')),
+          GoRoute(path: '/group/:id/live/:liveChannelId', pageBuilder: (c, s) => _pending(path: '/group/:id/live/:liveChannelId', webSource: 'App.tsx:89 → GroupPage')),
+          GoRoute(path: '/group/:id/:scene', pageBuilder: (c, s) => _pending(path: '/group/:id/:scene', webSource: 'App.tsx:90 → GroupPage')),
+          GoRoute(path: '/chat/:conversationId', pageBuilder: (c, s) => _pending(path: '/chat/:conversationId', webSource: 'App.tsx:91 → ChatConversationRoute')),
         ],
       ),
       // ---- catch-all（`App.tsx:94`）----

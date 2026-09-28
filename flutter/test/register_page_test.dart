@@ -45,6 +45,21 @@ void main() {
     expect(find.text('加入 Ayla'), findsOneWidget);
   });
 
+  testWidgets('宽屏：左栏不在滚动视图内（web sticky 左栏的等价形态）', (WidgetTester tester) async {
+    await useViewport(tester, const Size(1440, 900));
+    await tester.pumpWidget(host(const RegisterPage()));
+    await tester.pump();
+
+    final Finder scroller = find.byType(SingleChildScrollView);
+    expect(scroller, findsOneWidget, reason: '宽屏只有表单卡区在滚');
+    // 品牌介绍区（slogan「~ ~ ~ ~」）**不在**滚动视图内 ⇒ 滚不动
+    expect(
+      find.descendant(of: scroller, matching: find.text('~ ~ ~ ~')),
+      findsNothing,
+      reason: '左栏参与了滚动（web 是 sticky 钉住）',
+    );
+  });
+
   testWidgets('窄屏（≤768）：退回居中单卡，品牌介绍区不渲染', (WidgetTester tester) async {
     await useViewport(tester, const Size(375, 812));
     await tester.pumpWidget(

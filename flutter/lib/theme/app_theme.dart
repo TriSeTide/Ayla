@@ -219,10 +219,71 @@ ThemeData buildAylaTheme() {
     // web 侧 SVG 用 `currentColor` 继承 `body { color: var(--text-primary) }`，此处对齐。
     iconTheme: const IconThemeData(color: AylaColors.textPrimary),
     extensions: <ThemeExtension<AylaTextStyles>>[AylaTextStyles.light],
+    // ⚠️ **当前：路由切换一律「直通」—— 不做任何页面切换动画**
+    // （2026-09-28 用户裁决：「先把所有页面切换动画都删掉，目前只有个人主页页面有动画」）。
+    //
+    // 两条理由，都实测过：
+    // 1. 平台默认转场（Windows/Linux = `FadeUpwardsPageTransitionsBuilder`）会与任何自研转场
+    //    **叠加** ⇒ 位移与白屏时间翻倍；web 侧 React Router 本身不做转场（唯一 owner 是
+    //    `PageTransition.tsx`），所以平台默认必须先让位；
+    // 2. web 的 `AnimatePresence mode="sync"` 语义是「**新旧页并存、各播各的**」⇒ 换页时
+    //    能看见两页内容叠几帧。当前页面绝大多数还是占位页（`PendingPage`），这种重叠
+    //    除了残影没有任何信息量 ⇒ 用户要求先全删。
+    //
+    // 📌 **web 侧通用转场的真实覆盖范围**（逐行核对 `AppShell.tsx:61–74` 的 `panelOwned`）：
+    //    22 条路由里**只有 `/group` 与 `/posts/mine` 两条**会播整页转场；其余全部 `panelOwned`
+    //    （`initial` 即终值 + `duration: 0`）—— 动画由**页面内部**承担（群场景侧栏/面板、
+    //    `/profile` 两列、消息中心的 ConversationTransition…）。详表见 `page_transitions.dart` 文件头。
+    //    这两条在当前 Flutter 侧**都还是占位页** ⇒ 此刻恢复通用转场没有意义。
+    //
+    // ⇒ **换页动画的 owner 交回「页面自己」**：需要入场编排的页面自行挂
+    //    `AylaRevealItem`（范本 = `ProfilePage` / `UserProfilePage` 的两列面板入场，
+    //    事实源 `auroraqua.css:323–332`：`.profile-side` 左入 −20 / `.profile-main` 右入 +20）。
+    //
+    // 📌 **将来要恢复路由级转场时**（页面做齐、且确实需要整页过渡）：
+    //    `theme/page_transitions.dart` 里的 `AylaPageTransitionsBuilder` 已经写好了 web 的
+    //    全部分档（panelOwned / 群页 / 搜索页 / `/login` `/register` 无转场 / reduced），
+    //    把上面六个平台的 builder 换成它即可；注意它必须取代平台默认、不能与之并存。
+    //    影响面：全库 `Navigator.push` / `MaterialPageRoute` **零命中**，弹层一律走 Overlay
+    //    ⇒ 只作用于 go_router 的 Page。
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.android: _AylaNoPageTransition(),
+        TargetPlatform.iOS: _AylaNoPageTransition(),
+        TargetPlatform.macOS: _AylaNoPageTransition(),
+        TargetPlatform.windows: _AylaNoPageTransition(),
+        TargetPlatform.linux: _AylaNoPageTransition(),
+        TargetPlatform.fuchsia: _AylaNoPageTransition(),
+      },
+    ),
     // 全局 focus 环（d:§10：辉光式 focus ring，禁无替代 outline:none）
     splashFactory: NoSplash.splashFactory,
     highlightColor: Colors.transparent,
     hoverColor: Colors.transparent,
     focusColor: Colors.transparent,
   );
+}
+
+
+/// 页面转场**直通**（不改变 child）。
+///
+/// 当前由 [buildAylaTheme] 的 `pageTransitionsTheme` 用在全部平台 —— 见那里的长注释：
+/// 路由切换**不做任何动画**（用户 2026-09-28 裁决），换页动画的 owner 交回「页面自己」
+/// （如 `ProfilePage` 的两列面板入场）。
+///
+/// 它同时承担「**取代平台默认**」的职责：Windows/Linux 默认的 `FadeUpwardsPageTransitionsBuilder`
+/// 会在任何自研转场之上再叠一层位移 + 淡入。
+class _AylaNoPageTransition extends PageTransitionsBuilder {
+  const _AylaNoPageTransition();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return child;
+  }
 }

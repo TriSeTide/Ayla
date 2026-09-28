@@ -188,10 +188,15 @@ class AylaProfileAvatarActions extends StatelessWidget {
     this.error,
   });
 
-  /// 按钮（每个占等宽一格；库内范本 = `AylaGlassButton(variant: ghost, fontSize: 12, minHeight: 28, **expand: true**)`）。
+  /// 按钮（**按内容宽排列 + 可折行**，见 [build] 的说明）。
   ///
-  /// ⚠️ **必须传 `expand: true`**：本件用 `Expanded` 给等宽**槽位**，而按钮内部视觉盒按内容宽度排
-  /// ⇒ 不 expand 时文字/底色会偏向一侧（2026-09-25 用户实测「保存按钮左偏了」）。
+  /// 库内范本 = `AylaGlassButton(variant: ghost, fontSize: 12, minHeight: 28)`。
+  ///
+  /// ⚠️ **不要再传 `expand: true`**（2026-09-28 用户实报「三个按钮文字不全」后订正）：
+  /// web `.profile-avatar-actions` 是 `display:flex; flex-wrap:wrap; gap: var(--sp-1)`
+  /// （`profile.css:584–591`）⇒ 按钮**按内容宽**排在一条可折行的流里；此前本件用
+  /// `Expanded` 给「等宽槽位」，在 280–340 宽的侧栏里把每个按钮压到 1/3 ⇒ 文案被省略成
+  /// 「更…」「隐…」（截图实测）。
   final List<Widget> actions;
 
   /// 预览提示（`.profile-avatar-hint`：12 / secondary）。**web 原文 = 「新头像将在保存后生效」**，
@@ -217,11 +222,14 @@ class AylaProfileAvatarActions extends StatelessWidget {
         spacing: AylaSpacing.sp1,
         children: <Widget>[
           if (actions.isNotEmpty)
-            Row(
-              spacing: AylaSpacing.sp1, // gap: var(--sp-1)
-              children: <Widget>[
-                for (final Widget action in actions) Expanded(child: action),
-              ],
+            // web `.profile-avatar-actions { display: flex; flex-wrap: wrap; align-items: center;
+            // gap: var(--sp-1) }`（`profile.css:584–591`）⇒ **内容宽 + 可折行**，不是等宽槽位。
+            // Flutter 的等价物是 `Wrap`（`Row` + `Expanded` 会按 flex 分配把文字压到省略号）。
+            Wrap(
+              spacing: AylaSpacing.sp1, // gap: var(--sp-1)（4px，web 的收窄值）
+              runSpacing: AylaSpacing.sp1,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: actions,
             ),
           if (hintText != null)
             Text(

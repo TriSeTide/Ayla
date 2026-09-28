@@ -46,6 +46,7 @@ import '../theme/app_icons.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/privacy_sheet.dart';
+import '../widgets/base/reveal.dart';
 import '../widgets/base/profile_content_sections.dart';
 import '../widgets/base/resource_image.dart' show mediaContentUrl;
 import '../widgets/base/share.dart';
@@ -284,9 +285,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             AylaGlassButton(
               label: '更换头像', // tsx 180
               variant: AylaGlassButtonVariant.ghost,
-              fontSize: 12,
+              fontSize: 12, // `.profile-avatar-btn { font-size: 12px }`（profile.css 157）
               minHeight: 28,
-              expand: true, // ⚠️ 必传（等宽槽位；见 AylaProfileAvatarActions 文档）
+              // `.profile-avatar-btn { padding: var(--sp-1) var(--sp-2) }`（profile.css 158）——
+              // web 的「三按钮收窄」就靠这个 + gap sp1，保证文案不折行不省略。
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp2,
+                vertical: AylaSpacing.sp1,
+              ),
+              // ⚠️ **不要** `expand: true`：`AylaProfileAvatarActions` 现在是 web 的
+              // `flex-wrap` 语义（内容宽 + 可折行），expand 会让按钮在 Wrap 里撑满整行。
               onPressed: () => _pickAvatar(),
             ),
             AylaGlassButton(
@@ -294,7 +302,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               variant: AylaGlassButtonVariant.ghost,
               fontSize: 12,
               minHeight: 28,
-              expand: true,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp2,
+                vertical: AylaSpacing.sp1,
+              ),
               onPressed: () => setState(() => _privacyOpen = true),
             ),
             AylaGlassButton(
@@ -303,7 +314,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               variant: AylaGlassButtonVariant.ghost,
               fontSize: 12,
               minHeight: 28,
-              expand: true,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp2,
+                vertical: AylaSpacing.sp1,
+              ),
               onPressed: () => context.go('/favorites'),
             ),
           ],
@@ -370,12 +384,35 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         AylaSpacing.sp3,
                         0,
                       ),
+                      // ⚠️ 两列各有**面板入场动画**（web `auroraqua.css:323–332`，位于
+                      // `@media (min-width: 769px)` 内）：
+                      //   `.… > .profile-side` → `auroraqua-sidebar-in`（**左入 −20**）
+                      //   `.… > .profile-main` → `auroraqua-panel-from-right`（**右入 +20**）
+                      //   均 `var(--auroraqua-duration)`（300ms）+ `--auroraqua-ease-out`；
+                      //   reduced-motion 由 `auroraqua.css:614` 的块关掉 ⇒ `AylaRevealItem` 自己就不播。
+                      // 这正是 `/profile` 在 web 上的真实观感：整页是 panelOwned（不位移），
+                      // 但**两列各自沿方向滑入**（此前漏了 —— 用户当场指出「做了的个人主页反而不给动画」）。
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         spacing: AylaSpacing.sp3, // gap: var(--sp-3)
                         children: <Widget>[
-                          SizedBox(width: sideWidth, child: card),
-                          Expanded(child: sections),
+                          AylaRevealItem(
+                            offset: const Offset(-20, 0), // auroraqua-sidebar-in
+                            duration: AylaDurations.auroraqua,
+                            curve: AylaCurves.auroraquaEaseOut,
+                            child: SizedBox(width: sideWidth, child: card),
+                          ),
+                          // ⚠️ `Expanded` 必须在**外层**：它是 Flex 的 parent-data widget，
+                          // 只能直接挂在 Row 下；包进 `AylaRevealItem` 内部会断言失败
+                          // （`RenderBox was not laid out` / Expanded 找不到 Flex 祖先）。
+                          Expanded(
+                            child: AylaRevealItem(
+                              offset: const Offset(20, 0), // auroraqua-panel-from-right
+                              duration: AylaDurations.auroraqua,
+                              curve: AylaCurves.auroraquaEaseOut,
+                              child: sections,
+                            ),
+                          ),
                         ],
                       ),
                     );

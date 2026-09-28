@@ -182,30 +182,56 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     );
     final Widget card = _card(wide: wide, compact: compact);
 
+    if (wide) {
+      // ⚠️ 宽屏：**左栏不参与滚动**（与 `LoginPage` 同口径，2026-09-28 用户指出）。
+      // web `auth.css:126–148`：`.auth-page` 整页 `overflow-y:auto`，`.auth-intro` 是
+      // `align-self: flex-start`（高度 = 内容高）+ `position: sticky; top: 50dvh; translate: 0 -50%`
+      // ⇒ **钉在视口垂直中点、随滚动不动**。Flutter 侧等价形态：左栏移出滚动流固定居中，
+      // **只有右侧表单卡区独立滚动**。
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: pagePadding.horizontal),
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
+                ),
+                child: const AylaAuthIntro(),
+              ),
+              SizedBox(width: (viewport.width * 0.06).clamp(48.0, 96.0)),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: viewport.height),
+                // ⚠️ `clipBehavior: Clip.none` **必须给**（2026-09-28 用户实报「卡片阴影裁断」）：
+                // `.auth-card` 的 `--glass-shadow-modal`（`0 20px 60px`，tokens）**画在形状之外**，
+                // 默认 `Clip.hardEdge` 会把它裁成一条硬边（截图可见）。
+                // 滚动区的高度 = 视口高（外层 Center 居中），故不裁也不会溢出视口。
+                child: SingleChildScrollView(
+                  clipBehavior: Clip.none,
+                  padding: EdgeInsets.symmetric(vertical: pagePadding.vertical),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: viewport.height - pagePadding.vertical,
+                    ),
+                    child: Center(child: card),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 窄屏（≤768）：`.auth-intro { display: none }` + 整页可滚的居中单卡
     return SingleChildScrollView(
       padding: pagePadding,
       child: ConstrainedBox(
         constraints:
             BoxConstraints(minHeight: viewport.height - pagePadding.vertical),
-        child: Center(
-          child: wide
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth:
-                            viewport.width >= AylaBreakpoints.md ? 460 : 420,
-                      ),
-                      child: const AylaAuthIntro(),
-                    ),
-                    SizedBox(width: (viewport.width * 0.06).clamp(48.0, 96.0)),
-                    card,
-                  ],
-                )
-              : card,
-        ),
+        child: Center(child: card),
       ),
     );
   }

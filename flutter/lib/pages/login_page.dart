@@ -96,53 +96,74 @@ class _LoginPageState extends State<LoginPage> {
       vertical: compact ? AylaSpacing.sp4 : AylaSpacing.sp8,
     );
 
-    // .auth-page：垂直居中且内容高于视口时可滚动（safe center 语义）
+    final Widget card = _AuthCard(
+      compact: compact,
+      wide: wide,
+      username: _username,
+      password: _password,
+      submitting: widget.submitting,
+      errorText: widget.errorText,
+      onSubmit: _submit,
+      onGoRegister: widget.onGoRegister,
+    );
+
+    if (wide) {
+      // ⚠️ 宽屏：**左栏不参与滚动**（2026-09-28 用户指出）。
+      // web 事实源 `auth.css:126–148`：`.auth-page` 整页 `overflow-y:auto`，而 `.auth-intro` 是
+      // `align-self: flex-start`（高度 = 内容高）+ `position: sticky; top: 50dvh; translate: 0 -50%`
+      // ⇒ **钉在视口垂直中点、随滚动不动**。
+      // Flutter 无 sticky（库内自建 sticky 是为滚动内容里的吸顶条，这里是更直接的等价形态）：
+      // 左栏移出滚动流、固定居中；**只有右侧表单卡区独立滚动** ⇒ 观感与 web 一致。
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: pagePadding.horizontal),
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center, // 左栏垂直居中（= sticky 的视觉位置）
+            children: <Widget>[
+              // .auth-intro（≥1024 flex-basis 460；gap clamp(48,6vw,96)）
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
+                ),
+                child: const AylaAuthIntro(),
+              ),
+              SizedBox(
+                width: (viewport.width * 0.06).clamp(48.0, 96.0), // gap: clamp(48px, 6vw, 96px)
+              ),
+              // 表单卡区：只有这一块滚动（= web「整页滚 + 左栏 sticky」的等价形态）
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: viewport.height),
+                // ⚠️ `clipBehavior: Clip.none` **必须给**（2026-09-28 用户实报「卡片阴影裁断」）：
+                // `.auth-card` 的 `--glass-shadow-modal`（`0 20px 60px`，tokens）**画在形状之外**，
+                // 默认 `Clip.hardEdge` 会把它裁成一条硬边（截图可见）。
+                // 滚动区的高度 = 视口高（外层 Center 居中），故不裁也不会溢出视口。
+                child: SingleChildScrollView(
+                  clipBehavior: Clip.none,
+                  padding: EdgeInsets.symmetric(vertical: pagePadding.vertical),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: viewport.height - pagePadding.vertical,
+                    ),
+                    child: Center(child: card),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 窄屏（≤768）：`.auth-intro { display: none }` + 整页可滚的居中单卡
+    // （`.auth-page { overflow-y: auto; align-items: safe center; justify-content: center }`）
     return SingleChildScrollView(
       padding: pagePadding,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           minHeight: viewport.height - pagePadding.vertical,
         ),
-        child: Center(
-          child: wide
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    // .auth-intro（≥1024 flex-basis 460；gap clamp(48,6vw,96)）
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
-                      ),
-                      child: const AylaAuthIntro(),
-                    ),
-                    SizedBox(
-                      width: (viewport.width * 0.06)
-                          .clamp(48.0, 96.0), // gap: clamp(48px, 6vw, 96px)
-                    ),
-                    _AuthCard(
-                      compact: compact,
-                      wide: wide,
-                      username: _username,
-                      password: _password,
-                      submitting: widget.submitting,
-                      errorText: widget.errorText,
-                      onSubmit: _submit,
-                      onGoRegister: widget.onGoRegister,
-                    ),
-                  ],
-                )
-              : _AuthCard(
-                  compact: compact,
-                  wide: wide,
-                  username: _username,
-                  password: _password,
-                  submitting: widget.submitting,
-                  errorText: widget.errorText,
-                  onSubmit: _submit,
-                  onGoRegister: widget.onGoRegister,
-                ),
-        ),
+        child: Center(child: card),
       ),
     );
   }
