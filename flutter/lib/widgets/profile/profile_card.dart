@@ -33,7 +33,7 @@
 ///    —— 三个按钮已按 web 收窄（12px / padding sp1 sp2 / min-h 28），实测一行放得下。
 ///
 /// ## 公开面
-/// `AylaProfileCard` · `AylaProfileIdentity` · `AylaProfileAvatarActions`
+/// `AylaProfileCard` · `AylaProfileSidebarHeight` · `AylaProfileIdentity` · `AylaProfileAvatarActions`
 library;
 
 import 'package:flutter/material.dart';
@@ -45,9 +45,15 @@ import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
 
-/// 资料卡容器（`.solid-card .profile-card`）：玻璃卡 + 内距/间距两档。
+/// 资料卡容器（`.solid-card .profile-card`）：玻璃卡 + 内距/间距两档 + 侧栏铺满档。
 class AylaProfileCard extends StatelessWidget {
-  const AylaProfileCard({super.key, required this.children, this.compact = false});
+  const AylaProfileCard({
+    super.key,
+    required this.children,
+    this.compact = false,
+    this.gap,
+    this.fillHeight = false,
+  });
 
   /// 卡内区块（identity / avatar-actions / 表单 / 签名…由调用方装配）。
   final List<Widget> children;
@@ -55,18 +61,94 @@ class AylaProfileCard extends StatelessWidget {
   /// ≥769 且处于双栏布局时的紧凑档（`padding: sp4; gap: sp4`）。
   final bool compact;
 
+  /// 卡内区块间距；null = 按 [compact] 推导（sp4 / sp6）。
+  ///
+  /// 侧栏模式要传 **sp6**（`profile.css:115–119`：
+  /// `.profile-page-split:has(.profile-main) .profile-side .profile-card { gap: var(--sp-6) }`）
+  /// —— 它与内距（`padding: sp4`）是**两个独立维度**：侧栏档是「sp4 内距 + sp6 间距」，
+  /// 既有的 `compact`（sp4 + sp4）表达不了 ⇒ 单列一个覆盖参数（纯增量，默认 null
+  /// 时既有调用点逐像素不变）。
+  final double? gap;
+
+  /// 铺满父级给的高度，并把多余空间**分配到区块之间**（间隙自适应）。
+  ///
+  /// 表达 web 侧栏档的三条规则之和（`profile.css:114–127`）：
+  /// `.profile-card { flex: 1 0 auto }` + `.profile-form { flex: 1 }` +
+  /// `.profile-actions { margin-top: auto }` ⇒ 卡片被撑到侧栏高、留白落在表单与操作区之间。
+  ///
+  /// 实现：`Column(mainAxisSize: min, mainAxisAlignment: spaceBetween)` ——
+  /// **实测**（`ConstrainedBox(minHeight: X)` 内）会得到 `height = max(内容高, X)`，
+  /// 并把 `max(内容高, X) − 内容高` 平均分配到子项之间；内容本身比 X 高时退化为普通排列。
+  /// ⇒ 调用方只需用 `ConstrainedBox(minHeight: …)` 给出下限（见
+  /// `pages/profile_support.dart` 的 `aylaProfileSidebarScroll`）。
+  ///
+  /// ⚠️ 想让留白**只**落在表单与操作区之间（与 web 逐条一致）时，调用方把
+  /// 「上半区（identity + avatar-actions + form）」包成一个子项、操作区作第二个子项 ——
+  /// 见 `ProfilePage` / `UserProfilePage` 的侧栏装配。
+  final bool fillHeight;
+
   @override
   Widget build(BuildContext context) {
-    return AylaGlassCard(
-      padding: EdgeInsets.all(compact ? AylaSpacing.sp4 : AylaSpacing.sp8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        spacing: compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
-        children: children,
-      ),
+    final EdgeInsets padding = EdgeInsets.all(
+      compact ? AylaSpacing.sp4 : AylaSpacing.sp8,
     );
+    Widget content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment:
+          fillHeight ? MainAxisAlignment.spaceBetween : MainAxisAlignment.start,
+      spacing: gap ?? (compact ? AylaSpacing.sp4 : AylaSpacing.sp6),
+      children: children,
+    );
+
+    if (fillHeight) {
+      // ⚠️ 为什么不能只靠父级的 `ConstrainedBox(minHeight: …)`：
+      // [AylaGlassCard] 的卡面是 `DecoratedBox > Stack`，而 `Stack` 默认
+      // `StackFit.loose` ⇒ 非定位子项拿到的是**放松后**的约束（minHeight 被丢掉）
+      // ⇒ 本 Column 的 `space-between` 无从分配剩余空间。
+      // 实测（2026-09-28）：外层 `ConstrainedBox(minHeight: 976)` 时卡片确为 976 高，
+      // 但本 Column 仍是 525 的内容高。
+      // ⇒ 由侧栏把可用高度经 [AylaProfileSidebarHeight] 显式注入（页面层
+      // `aylaProfileSidebarScroll` 提供；无注入时退化为普通排列，不抛错）。
+      final double? available = AylaProfileSidebarHeight.maybeOf(context);
+      if (available != null) {
+        final double inner =
+            (available - padding.vertical).clamp(0.0, double.infinity);
+        content = ConstrainedBox(
+          constraints: BoxConstraints(minHeight: inner),
+          child: content,
+        );
+      }
+    }
+
+    return AylaGlassCard(padding: padding, child: content);
   }
+}
+
+/// 侧栏可用高度注入（[AylaProfileCard.fillHeight] 的搭档）。
+///
+/// 页面层的 `aylaProfileSidebarScroll` 用它把「侧栏可视高度」传给卡片：
+/// 卡片的父级 `AylaGlassSurface` 内部有 `Stack`（`StackFit.loose`）⇒ 约束被放松，
+/// 卡片拿不到 `minHeight` 也拿不到有界的 `maxHeight`（在滚动视图内为 ∞）
+/// ⇒ 只能由外部显式注入。
+class AylaProfileSidebarHeight extends InheritedWidget {
+  const AylaProfileSidebarHeight({
+    super.key,
+    required this.available,
+    required super.child,
+  });
+
+  /// 侧栏可视高度（已扣除底部呼吸 margin）。
+  final double available;
+
+  /// 读当前注入值（无注入 → null）。
+  static double? maybeOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<AylaProfileSidebarHeight>()
+      ?.available;
+
+  @override
+  bool updateShouldNotify(AylaProfileSidebarHeight oldWidget) =>
+      oldWidget.available != available;
 }
 
 /// 身份行：返回键 + 头像块 + 昵称/用户名 + 右侧分享槽位。

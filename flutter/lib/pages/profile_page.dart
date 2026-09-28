@@ -53,6 +53,7 @@ import '../widgets/base/share.dart';
 import '../widgets/motion/gestures.dart';
 import '../widgets/profile/profile_card.dart';
 import '../widgets/profile/profile_edit.dart';
+import 'profile_support.dart';
 
 /// 在线状态四档（web `STATUS_OPTIONS`，`ProfilePage.tsx:22–27`）。
 const List<({String value, String label})> kAylaProfileStatusOptions =
@@ -261,9 +262,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
 
     final String displayName = user.nickname.isEmpty ? user.username : user.nickname;
-    final Widget card = AylaProfileCard(
-      compact: !isNarrow, // 宽屏档 `.profile-card { padding: sp4; gap: sp4 }`
-      children: <Widget>[
+    // 两档装配（web：窄屏 `.profile-side` 是 `display: contents` ⇒ 单列自然流；
+    // ≥769 是侧栏模式：卡片 `flex: 1 0 auto` 铺满 + `gap: sp6`，留白落在上半区与表单之间）。
+    final List<Widget> upper = <Widget>[
         AylaProfileIdentity(
           displayName: displayName,
           username: user.username,
@@ -325,7 +326,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           hint: _avatarBytes != null ? '新头像将在保存后生效' : null,
           error: _avatarError, // tsx 205–209 `role="alert"`
         ),
-        AylaProfileForm(
+    ];
+    final Widget form = AylaProfileForm(
           nicknameController: _nickname,
           signatureController: _signature,
           status: _status,
@@ -345,10 +347,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           saved: _saved,
           dirty: _dirty(user),
           error: _error,
-        ),
-      ],
-    );
-
+        );
+    final Widget card = isNarrow
+        ? AylaProfileCard(children: <Widget>[...upper, form])
+        : AylaProfileCard(
+            compact: true, // padding: sp4
+            gap: AylaSpacing.sp6, // .profile-side .profile-card { gap: sp6 }
+            fillHeight: true, // flex: 1 0 auto ⇒ 铺满 + 间隙自适应
+            children: <Widget>[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                spacing: AylaSpacing.sp6,
+                children: upper,
+              ),
+              form,
+            ],
+          );
     final Widget sections = AylaProfileContentSections(
       displayName: displayName,
       mine: true,
@@ -372,51 +387,69 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     children: <Widget>[card, sections],
                   ),
                 )
-              // ≥769：`.profile-column` flex row（side `clamp(280,32%,340)` + main 剩余）
-              : LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints c) {
-                    final double sideWidth =
-                        (c.maxWidth * 0.32).clamp(280.0, 340.0);
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(
-                        AylaSpacing.sp3,
-                        AylaSpacing.sp3,
-                        AylaSpacing.sp3,
-                        0,
+              // ≥769：`.profile-page-split:has(.profile-main)` 的**侧栏模式**
+              // （profile.css:57–113）—— 页面根 height 100% + flex column + overflow hidden；
+              // 中间层 flex row + align-items stretch；侧栏 align-self stretch + 自滚动 +
+              // 底部呼吸，内容区 flex:1 独立滚动。**两列各自滚动，页面根不滚**。
+              : Padding(
+                  // padding: var(--sp-3) var(--sp-3) 0
+                  padding: const EdgeInsets.only(
+                    top: AylaSpacing.sp3,
+                    left: AylaSpacing.sp3,
+                    right: AylaSpacing.sp3,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (BuildContext context, BoxConstraints c) {
+                            // 侧栏宽 `clamp(280px, 32%, 340px)`（flex: 0 0 同值）
+                            final double sideWidth =
+                                (c.maxWidth * 0.32).clamp(280.0, 340.0);
+                            return Row(
+                              // align-items: stretch ⇒ 两列等高
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              spacing: AylaSpacing.sp3, // gap: var(--sp-3)
+                              children: <Widget>[
+                                // 两列各有面板入场动画（web `auroraqua.css:323–332`，位于
+                                // `@media (min-width: 769px)` 内）：
+                                //   `.… > .profile-side` → `auroraqua-sidebar-in`（**左入 −20**）
+                                //   `.… > .profile-main` → `auroraqua-panel-from-right`（**右入 +20**）
+                                // 正是 `/profile` 在 web 上的真实观感：整页 panelOwned（不位移），
+                                // 但两列各自沿方向滑入。
+                                AylaRevealItem(
+                                  offset: const Offset(-20, 0),
+                                  duration: AylaDurations.auroraqua,
+                                  curve: AylaCurves.auroraquaEaseOut,
+                                  child: SizedBox(
+                                    width: sideWidth,
+                                    // 侧栏：铺满可用高度 + 自滚动 + 底部呼吸（flex: 1 0 auto）
+                                    child: aylaProfileSidebarScroll(
+                                      availableHeight: c.maxHeight,
+                                      child: card,
+                                    ),
+                                  ),
+                                ),
+                                // ⚠️ `Expanded` 必须在**外层**：它是 Flex 的 parent-data widget，
+                                // 只能直接挂在 Row 下；包进 `AylaRevealItem` 内部会断言失败
+                                // （`RenderBox was not laid out` / Expanded 找不到 Flex 祖先）。
+                                Expanded(
+                                  child: AylaRevealItem(
+                                    offset: const Offset(20, 0),
+                                    duration: AylaDurations.auroraqua,
+                                    curve: AylaCurves.auroraquaEaseOut,
+                                    // 内容区：flex:1 独立滚动 + 阴影绘制带
+                                    child: aylaProfileMainScroll(sections),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ),
-                      // ⚠️ 两列各有**面板入场动画**（web `auroraqua.css:323–332`，位于
-                      // `@media (min-width: 769px)` 内）：
-                      //   `.… > .profile-side` → `auroraqua-sidebar-in`（**左入 −20**）
-                      //   `.… > .profile-main` → `auroraqua-panel-from-right`（**右入 +20**）
-                      //   均 `var(--auroraqua-duration)`（300ms）+ `--auroraqua-ease-out`；
-                      //   reduced-motion 由 `auroraqua.css:614` 的块关掉 ⇒ `AylaRevealItem` 自己就不播。
-                      // 这正是 `/profile` 在 web 上的真实观感：整页是 panelOwned（不位移），
-                      // 但**两列各自沿方向滑入**（此前漏了 —— 用户当场指出「做了的个人主页反而不给动画」）。
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        spacing: AylaSpacing.sp3, // gap: var(--sp-3)
-                        children: <Widget>[
-                          AylaRevealItem(
-                            offset: const Offset(-20, 0), // auroraqua-sidebar-in
-                            duration: AylaDurations.auroraqua,
-                            curve: AylaCurves.auroraquaEaseOut,
-                            child: SizedBox(width: sideWidth, child: card),
-                          ),
-                          // ⚠️ `Expanded` 必须在**外层**：它是 Flex 的 parent-data widget，
-                          // 只能直接挂在 Row 下；包进 `AylaRevealItem` 内部会断言失败
-                          // （`RenderBox was not laid out` / Expanded 找不到 Flex 祖先）。
-                          Expanded(
-                            child: AylaRevealItem(
-                              offset: const Offset(20, 0), // auroraqua-panel-from-right
-                              duration: AylaDurations.auroraqua,
-                              curve: AylaCurves.auroraquaEaseOut,
-                              child: sections,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
           // `createPortal(document.body)` 的等价物：弹层挂在页面最外层 Stack
           if (_privacyOpen)

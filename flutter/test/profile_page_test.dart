@@ -17,6 +17,7 @@ import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/avatar_halo.dart';
 import '../lib/widgets/base/reveal.dart';
 import '../lib/widgets/profile/profile_card.dart';
+import '../lib/widgets/profile/profile_edit.dart' show AylaProfileForm;
 import '../lib/state/auth_state.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
@@ -201,6 +202,92 @@ void main() {
     // 与 web 的 hint 并存（tsx 202–204：选了新头像才出现该提示）
     expect(find.text('新头像将在保存后生效'), findsOneWidget);
   });
+  // ==================== 侧栏模式（web profile.css:57–127） ====================
+
+  testWidgets('侧栏模式：资料卡铺满侧栏高度（flex: 1 0 auto + align-self: stretch）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(1440, 1000));
+    await tester.pumpWidget(host(const ProfilePage()));
+    await tester.pump();
+    await signIn(tester, user);
+
+    final Rect card = tester.getRect(find.byType(AylaProfileCard));
+    final Size colSize = tester.getSize(find.descendant(of: find.byType(AylaProfileCard), matching: find.byType(Column)).first);
+    final Rect identity = tester.getRect(find.byType(AylaProfileIdentity));
+    debugPrint('SIDEBAR card=' + card.toString() + ' col=' + colSize.toString() + ' identityTop=' + identity.top.toString());
+    // 铺满：卡片高度 ≈ 视口高 − 页面 padding-top sp3 − 侧栏底部呼吸 sp3
+    expect(
+      card.height,
+      greaterThan(900),
+      reason: '卡片应被撑到侧栏高（≈1000−12−12），而不是内容高',
+    );
+    expect(card.top, closeTo(AylaSpacing.sp3, 1));
+    expect(card.bottom, greaterThan(970));
+  });
+
+  testWidgets('侧栏模式：卡片 gap = sp6 + fillHeight + compact（profile.css:115–119）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(1440, 1000));
+    await tester.pumpWidget(host(const ProfilePage()));
+    await tester.pump();
+    await signIn(tester, user);
+
+    final AylaProfileCard card =
+        tester.widget<AylaProfileCard>(find.byType(AylaProfileCard));
+    expect(card.compact, isTrue); // .profile-card { padding: sp4 }
+    expect(card.gap, AylaSpacing.sp6); // .profile-side .profile-card { gap: sp6 }
+    expect(card.fillHeight, isTrue); // flex: 1 0 auto ⇒ 间隙自适应
+  });
+
+  testWidgets('侧栏模式：间隙自适应 —— 操作区沉到卡底（.profile-actions { margin-top: auto }）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(1440, 1000));
+    await tester.pumpWidget(host(const ProfilePage()));
+    await tester.pump();
+    await signIn(tester, user);
+
+    final Rect card = tester.getRect(find.byType(AylaProfileCard));
+    final Rect logout = tester.getRect(
+      find.widgetWithText(AylaGlassButton, '退出登录'),
+    );
+    // 卡片被撑高后，多余空间落在「上半区（identity + 头像操作）」与表单之间
+    // ⇒ 表单（含操作区）贴着卡片底部（差距 = 卡片 padding sp4 = 16）
+    final double bottomGap = card.bottom - logout.bottom;
+    debugPrint('SIDEBAR bottomGap=' + bottomGap.toString());
+    expect(
+      bottomGap,
+      lessThanOrEqualTo(AylaSpacing.sp4 + 4), // 实测 18 = 卡片 padding sp4 + 2
+      reason: '操作区应沉到卡底（只剩卡片 padding sp4），不该被空隙顶开',
+    );
+    // 且上方确实有被拉开的空隙（间隙自适应）：头像操作区底边到表单顶边 > sp6
+    final Rect avatarActions = tester.getRect(find.byType(AylaProfileAvatarActions));
+    final Rect form = tester.getRect(find.byType(AylaProfileForm));
+    final double stretched = form.top - avatarActions.bottom;
+    debugPrint('SIDEBAR stretchedGap=' + stretched.toString());
+    expect(
+      stretched,
+      greaterThan(100),
+      reason: '卡片铺满后多余空间应分配到上半区与表单之间（web 的 flex:1 净效果）',
+    );
+  });
+
+  testWidgets('窄屏单列档：卡片不铺满（内容高），且无 fillHeight 档', (WidgetTester tester) async {
+    await useViewport(tester, const Size(375, 812));
+    await tester.pumpWidget(
+      host(const ProfilePage(), viewport: const Size(375, 812)),
+    );
+    await tester.pump();
+    await signIn(tester, user);
+
+    final AylaProfileCard card =
+        tester.widget<AylaProfileCard>(find.byType(AylaProfileCard));
+    expect(card.fillHeight, isFalse); // 单列自然流
+    expect(card.gap, isNull); // 走 compact 推导
+  });
+
 }
 
 /// 选文件替身（避免平台通道）：直接返回构造好的文件。

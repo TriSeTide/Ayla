@@ -42,6 +42,7 @@ import '../widgets/base/reveal.dart';
 import '../widgets/base/share.dart';
 import '../widgets/profile/profile_card.dart';
 import '../widgets/profile/profile_presence.dart';
+import 'profile_support.dart';
 
 class UserProfilePage extends ConsumerStatefulWidget {
   const UserProfilePage({super.key, required this.userId});
@@ -161,6 +162,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     final AylaUserDetail? detail = _detail;
 
     Widget body;
+    // 侧栏模式判定（web：:has(.profile-main) 只在宽屏且对方开启内容展示时匹配）
+    final bool split = !isNarrow && (detail?.showContent ?? false);
     if (_loading) {
       // tsx 104–107：高 96 骨架 + 高 12 / 宽 60% 骨架
       body = AylaProfileCard(
@@ -206,6 +209,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     } else {
       body = AylaProfileCard(
         compact: !isNarrow,
+        // 侧栏模式（split）时 web 的 .profile-card { gap: var(--sp-6) } 覆盖紧凑档的 sp4
+        gap: split ? AylaSpacing.sp6 : null,
         children: <Widget>[
           _identity(detail),
           if (detail.signature != null && detail.signature!.isNotEmpty)
@@ -226,52 +231,82 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       displayName: detail?.user.displayName ?? '',
       postsError: '内容分区（他的发帖 / 直播间 / 桌游）的数据源属后续批次',
     );
-    final bool split = !isNarrow && (detail?.showContent ?? false);
 
-    return Padding(
-      // ≥769：`padding: sp3 sp3 0`（profile.css `.profile-page-split:has(.profile-main)`）
-      padding: EdgeInsets.fromLTRB(
-        AylaSpacing.sp3,
-        AylaSpacing.sp3,
-        AylaSpacing.sp3,
-        0,
-      ),
-      child: SingleChildScrollView(
-        child: split
-            ? LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints c) {
-                  final double sideWidth =
-                      (c.maxWidth * 0.32).clamp(280.0, 340.0);
-                  // 两列各有面板入场（与 `ProfilePage` 同源：web `auroraqua.css:323–332` 的
-                  // 选择器 `.profile-page-split > .profile-column > :is(.profile-side,.profile-main)`
-                  // 对**两个页面**都生效）—— 左入 −20 / 右入 +20，300ms `--auroraqua-ease-out`。
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    spacing: AylaSpacing.sp3,
-                    children: <Widget>[
-                      AylaRevealItem(
-                        offset: const Offset(-20, 0), // auroraqua-sidebar-in
-                        duration: AylaDurations.auroraqua,
-                        curve: AylaCurves.auroraquaEaseOut,
-                        child: SizedBox(width: sideWidth, child: body),
-                      ),
-                      // ⚠️ `Expanded` 必须在外层（parent-data widget 不能包进 `AylaRevealItem`）
-                      Expanded(
-                        child: AylaRevealItem(
-                          offset: const Offset(20, 0), // auroraqua-panel-from-right
-                          duration: AylaDurations.auroraqua,
-                          curve: AylaCurves.auroraquaEaseOut,
-                          child: sections,
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              )
-            : body,
-      ),
-    );
-  }
+    // ⚠️ web 的 UserProfilePage **没有** FullScreenSwipeBack（返回键在身份行内），
+    // ProfilePage 才有 —— 这里保持原结构。
+    // ≥769 + show_content：`.profile-page-split:has(.profile-main)` 的**侧栏模式**
+      // （profile.css:57–113）—— 页面根 height 100% / flex column / padding sp3 sp3 0；
+      // 中间层 flex row + align-items stretch；侧栏 align-self stretch + 自滚动 +
+      // 底部呼吸，内容区 flex:1 独立滚动（两列各自滚动）。
+    return split
+        ? Padding(
+            padding: const EdgeInsets.only(
+              top: AylaSpacing.sp3,
+              left: AylaSpacing.sp3,
+              right: AylaSpacing.sp3,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (BuildContext context, BoxConstraints c) {
+                      final double sideWidth =
+                          (c.maxWidth * 0.32).clamp(280.0, 340.0);
+                      // 两列各有面板入场（与 `ProfilePage` 同源：web
+                      // `auroraqua.css:323–332` 的
+                      // `.profile-page-split > .profile-column > :is(.profile-side,.profile-main)`
+                      // 对**两个页面**都生效）—— 左入 −20 / 右入 +20，300ms。
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        spacing: AylaSpacing.sp3,
+                        children: <Widget>[
+                          AylaRevealItem(
+                            offset: const Offset(-20, 0),
+                            duration: AylaDurations.auroraqua,
+                            curve: AylaCurves.auroraquaEaseOut,
+                            child: SizedBox(
+                              width: sideWidth,
+                              child: aylaProfileSidebarScroll(
+                                availableHeight: c.maxHeight,
+                                child: body,
+                              ),
+                            ),
+                          ),
+                          // ⚠️ `Expanded` 必须在外层（parent-data widget）
+                          Expanded(
+                            child: AylaRevealItem(
+                              offset: const Offset(20, 0),
+                              duration: AylaDurations.auroraqua,
+                              curve: AylaCurves.auroraquaEaseOut,
+                              child: aylaProfileMainScroll(sections),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          )
+        // 单列档（窄屏，或宽屏但对方未开启内容展示）：web
+        // `.profile-page-split > .profile-column:not(:has(.profile-main))`
+        // ⇒ `grid-template-columns: minmax(0, 640px)` + `justify-content: center`
+        // + `.profile-card { align-self: start }`。
+        : SingleChildScrollView(
+            padding: const EdgeInsets.all(AylaSpacing.sp3),
+            // ⚠️ web 是 justify-content: center（**仅主轴水平**）+ align-self: start
+            // ⇒ Flutter 用 Alignment.topCenter，**不能**用 Center（那会双向居中）。
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: body,
+              ),
+            ),
+          );
+}
 
   /// 身份行（tsx 120–145）：返回 · **分享紧跟** · 头像 64 · 昵称/@用户名 · 在线胶囊。
   Widget _identity(AylaUserDetail detail) {
