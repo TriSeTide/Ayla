@@ -2118,6 +2118,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                               '${room.memberCount}',
                               style: TextStyle(
                                 fontFamily: AylaFonts.utility,
+                                fontFamilyFallback: AylaFonts.cjkFallback,
                                 fontSize: 12,
                                 color: AylaColors.textSecondary,
                               ),

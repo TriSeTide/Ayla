@@ -235,7 +235,9 @@ void main() {
     );
     await tester.pump();
 
-    router.go('/voice'); // 未实现 ⇒ NoTransitionPage
+    // ⚠️ 用**仍是占位页**的路由：/voice、/live、/games、/favorites、/search
+    // 已在第二批交付为真实页面，不再是 PendingPage。
+    router.go('/posts'); // 未实现 ⇒ NoTransitionPage
     await tester.pump(); // **只一帧**
     expect(find.text('该页面属后续批次'), findsOneWidget);
     // 没有转场 ⇒ 首帧不该出现「部分透明」的转场层（有转场时整页 opacity 从 0 起）
@@ -277,7 +279,10 @@ void main() {
     // 两个占位页的标题**逐字相同** ⇒ 若新旧页并存，这条会数到 2（正是「叠页」）。
     expect(find.text('该页面属后续批次'), findsOneWidget);
 
-    router.go('/favorites');
+    // ⚠️ 目标路由必须是**仍是占位页**的（见上一条用例的说明）；
+    // 且要避开 `/messages` 这类会让 AppShell 浮层（RefreshFab）触发
+    // ParentDataWidget 冲突断言的路径（与本用例无关的既有问题）。
+    router.go('/posts');
     await tester.pump(); // 首帧
     expect(
       find.text('该页面属后续批次'),

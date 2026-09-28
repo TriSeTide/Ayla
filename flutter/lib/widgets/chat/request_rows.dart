@@ -102,6 +102,7 @@ class AylaRequestRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AylaColors.textPrimary,
@@ -114,6 +115,7 @@ class AylaRequestRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontFamily: AylaFonts.body,
+                      fontFamilyFallback: AylaFonts.cjkFallback,
                       fontSize: 12,
                       color: AylaColors.textSecondary,
                     ),
@@ -182,6 +184,7 @@ class AylaNoticeRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AylaColors.textPrimary,
@@ -193,6 +196,7 @@ class AylaNoticeRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 12,
                     color: AylaColors.textSecondary,
                   ),
@@ -263,6 +267,7 @@ class AylaFriendRow extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontFamily: AylaFonts.body,
+                            fontFamilyFallback: AylaFonts.cjkFallback,
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: AylaColors.textPrimary,
@@ -373,6 +378,7 @@ class AylaRequestsPanel extends StatelessWidget {
               sectionHint!,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 13,
                 height: 1.5,
                 color: AylaColors.textSecondary,
@@ -485,6 +491,7 @@ class AylaRequestsPanel extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               color: AylaColors.textSecondary,
             ),
@@ -516,6 +523,7 @@ class AylaRequestsPanel extends StatelessWidget {
             title,
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 15,
               fontWeight: FontWeight.w700,
               color: AylaColors.textPrimary,
@@ -610,6 +618,7 @@ Widget aylaRequestsPanelSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,

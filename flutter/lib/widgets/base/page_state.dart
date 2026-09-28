@@ -78,6 +78,9 @@ class AylaPlaceholderTitle extends StatelessWidget {
         textAlign: textAlign,
         style: TextStyle(
           fontFamily: AylaFonts.display,
+          // ⚠️ 中文标题（「这个分类还没有语音房」等）必须走 CJK 回退链 —— Fredoka 无中文字形，
+          // 缺 fallback 时中文落到引擎默认字体（2026-09-28 用户实报）。
+          fontFamilyFallback: AylaFonts.cjkFallback,
           fontSize: fontSize,
           fontWeight: FontWeight.w600,
           color: AylaColors.textPrimary,
@@ -116,8 +119,10 @@ class AylaPlaceholderDesc extends StatelessWidget {
       text,
       textAlign: textAlign,
       style: const TextStyle(
-        // 未声明 font-family ⇒ 继承 body（Nunito + CJK 回退链）
+        // 本件显式声明 body（Nunito）+ CJK 回退链：web 侧 `.placeholder-desc` 未声明
+        // font-family ⇒ 继承 body；两侧最终落到同一组字体。
         fontFamily: AylaFonts.body,
+        fontFamilyFallback: AylaFonts.cjkFallback,
         fontSize: 14,
         color: AylaColors.textSecondary,
       ),

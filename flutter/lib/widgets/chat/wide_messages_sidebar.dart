@@ -241,6 +241,7 @@ class _AylaWideMessagesSidebarState extends State<AylaWideMessagesSidebar> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 13,
                 color: AylaColors.textSecondary,
               ),
@@ -366,6 +367,7 @@ Widget aylaWideMessagesSidebarSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,

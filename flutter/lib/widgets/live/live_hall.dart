@@ -115,6 +115,48 @@ class AylaLiveCardData {
           allowedGroupNames: allowedGroupNames,
           groupName: groupName,
         );
+
+  /// 从后端响应解析（web 的卡片投影契约「LiveCardData」，
+  /// `components/cards/cardData.ts:10` = Partial（省略 id 的 LiveChannelDescriptor）+ id/title 必填；
+  /// 字段名对齐 `api/types.ts:1035–1069` 的 LiveChannelDescriptor）。
+  ///
+  /// 缺席语义（与 [AylaPost.fromJson] 同口径，**不造默认值**）：
+  /// - 非 Map / 缺 id / 缺 title / id 为空串 ⇒ 非法 → null（web 类型里前两者必填）；
+  /// - 其余字段缺失即缺失；status / visibility 的未知枚举值 → null（不 fallback）；
+  /// - viewer_count 为 null = **读不到**（presence 存储不可用）⇒ 不渲染角标、不用 0 冒充
+  ///   （`api/live.ts:116–121` 的 503 viewer_presence_unavailable）；
+  /// - cover 的空串归一为 null：web `LiveChannelCard.tsx` 走的是 channel.cover ? … : … 的
+  ///   真值判断（空串 falsy ⇒ 视频图标占位），归一后两侧分支一致。
+  static AylaLiveCardData? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? id = raw['id'];
+    final Object? title = raw['title'];
+    if (id == null || title == null) return null;
+    final String idText = id.toString();
+    if (idText.isEmpty) return null;
+    final String coverText = raw['cover']?.toString() ?? '';
+    return AylaLiveCardData(
+      id: idText,
+      title: title.toString(),
+      cover: coverText.isEmpty ? null : coverText,
+      status: AylaLiveStatus.parse(raw['status']?.toString()),
+      ownerId: raw['owner_id']?.toString() ?? '',
+      ownerNickname: raw['owner_nickname']?.toString(),
+      viewerCount: (raw['viewer_count'] as num?)?.toInt(),
+      visibility: AylaPostVisibility.parse(raw['visibility']?.toString()),
+      allowedGroupNames: _stringList(raw['allowed_group_names']),
+      groupName: raw['group_name']?.toString(),
+    );
+  }
+}
+
+/// string[] 字段解析（三域卡投影共用）：非数组 / 缺省 → 空列表；元素 null 跳过。
+List<String> _stringList(Object? raw) {
+  if (raw is! List) return const <String>[];
+  return <String>[
+    for (final Object? item in raw)
+      if (item != null) item.toString(),
+  ];
 }
 
 /// 人数文本（web `utils/liveViewers.ts formatViewerCount`）：

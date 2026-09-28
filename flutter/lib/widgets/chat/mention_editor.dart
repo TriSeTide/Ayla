@@ -290,6 +290,7 @@ class AylaMentionTextController extends TextEditingController {
           // `cursor: default; pointer-events: none`（输入框内的 token 不可点、不参与交互）
           style: const TextStyle(
             fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 15,
             fontWeight: FontWeight.w700,
             height: 1.45,

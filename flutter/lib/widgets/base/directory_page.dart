@@ -320,6 +320,9 @@ class AylaDirectorySidebarHeader extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontFamily: AylaFonts.display,
+                // ⚠️ 必须带 CJK 回退链（全局约定 app_theme.dart:4）：Fredoka 无中文字形，
+                // 缺 fallback 时中文会落到引擎默认字体（2026-09-28 用户实报）。
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 1.4, // 0.14em × 10px
@@ -332,6 +335,7 @@ class AylaDirectorySidebarHeader extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontFamily: AylaFonts.display,
+              fontFamilyFallback: AylaFonts.cjkFallback, // 「语音房间」等中文标题的字体
               fontSize: 17,
               fontWeight: FontWeight.w700,
               color: AylaColors.textPrimary,
@@ -346,6 +350,7 @@ class AylaDirectorySidebarHeader extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontFamily: AylaFonts.utility,
+                  fontFamilyFallback: AylaFonts.cjkFallback, // 「41 直播间 · 12 在播」
                   fontSize: 12,
                   color: AylaColors.textSecondary,
                 ),

@@ -92,6 +92,44 @@ class AylaVoiceCardData {
           allowedGroupNames: allowedGroupNames,
           groupName: groupName,
         );
+
+  /// 从后端响应解析（web 的卡片投影契约「VoiceCardData」，
+  /// `components/cards/cardData.ts:12` = Partial（省略 id 的 VoiceChannelDescriptor）+ id/name 必填；
+  /// 字段名对齐 `api/types.ts:863–885` 的 VoiceChannelDescriptor）。
+  ///
+  /// 缺席语义（与 [AylaPost.fromJson] 同口径，**不造默认值**）：
+  /// - 非 Map / 缺 id / 缺 name / id 为空串 ⇒ 非法 → null；
+  /// - member_count 缺失或非数字 ⇒ null（tsx 39 是 typeof === "number" 守卫，
+  ///   0 与 null 语义不同：0 是「没人在麦」，null 是「后端没给」）；
+  /// - visibility 未知枚举值 → null（标签随之整体为空，同 cardVisibilityLabels 语义）；
+  /// - mine = 我是否在该频道（列表/详情视图注入，`types.ts:880`）。
+  static AylaVoiceCardData? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? id = raw['id'];
+    final Object? name = raw['name'];
+    if (id == null || name == null) return null;
+    final String idText = id.toString();
+    if (idText.isEmpty) return null;
+    return AylaVoiceCardData(
+      id: idText,
+      name: name.toString(),
+      ownerNickname: raw['owner_nickname']?.toString(),
+      memberCount: (raw['member_count'] as num?)?.toInt(),
+      visibility: AylaPostVisibility.parse(raw['visibility']?.toString()),
+      allowedGroupNames: _stringList(raw['allowed_group_names']),
+      groupName: raw['group_name']?.toString(),
+      mine: raw['mine'] == true,
+    );
+  }
+}
+
+/// string[] 字段解析：非数组 / 缺省 → 空列表；元素 null 跳过。
+List<String> _stringList(Object? raw) {
+  if (raw is! List) return const <String>[];
+  return <String>[
+    for (final Object? item in raw)
+      if (item != null) item.toString(),
+  ];
 }
 
 /// `.voice-channel-card-wrap` + `.voice-channel-card` —— 语音频道卡（`VoiceChannelCard.tsx`）。

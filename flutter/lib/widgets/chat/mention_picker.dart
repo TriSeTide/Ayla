@@ -308,6 +308,7 @@ class _MentionRowState extends State<_MentionRow> {
                       // `.mention-picker-name`：14/600/textPrimary（app.css 2414–2421）
                       style: const TextStyle(
                         fontFamily: AylaFonts.body,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         color: AylaColors.textPrimary,
@@ -337,6 +338,7 @@ class _MentionEmpty extends StatelessWidget {
         textAlign: TextAlign.center,
         style: TextStyle(
           fontFamily: AylaFonts.body,
+          fontFamilyFallback: AylaFonts.cjkFallback,
           fontSize: 13,
           color: AylaColors.textSecondary,
         ),
@@ -560,6 +562,7 @@ Widget aylaMentionPickerSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,

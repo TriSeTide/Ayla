@@ -75,6 +75,7 @@ class AylaGroupInfoSectionTitle extends StatelessWidget {
               title,
               style: const TextStyle(
                 fontFamily: AylaFonts.display,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 17,
                 fontWeight: FontWeight.w500,
                 color: AylaColors.textPrimary,
@@ -143,6 +144,7 @@ class AylaGroupInfoCardHead extends StatelessWidget {
               title,
               style: const TextStyle(
                 fontFamily: AylaFonts.display,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 17,
                 fontWeight: FontWeight.w500,
                 color: AylaColors.textPrimary,
@@ -221,6 +223,7 @@ class _CountPill extends StatelessWidget {
         '$value',
         style: const TextStyle(
           fontFamily: AylaFonts.utility,
+          fontFamilyFallback: AylaFonts.cjkFallback,
           fontSize: 11,
           fontWeight: FontWeight.w500,
           color: AylaColors.indigo700,

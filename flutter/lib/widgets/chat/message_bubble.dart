@@ -385,6 +385,7 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               widget.senderName!,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,
@@ -421,6 +422,7 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
             aylaMessageTimeAgo(msg.createdAt),
             style: const TextStyle(
               fontFamily: AylaFonts.utility,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 12,
               letterSpacing: 0.3,
               color: AylaColors.textSecondary,
@@ -760,6 +762,7 @@ class _BubbleFace extends StatelessWidget {
               child: DefaultTextStyle.merge(
                 style: TextStyle(
                   fontFamily: AylaFonts.body,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 15,
                   height: 1.55,
                   // ⚠️ **有意偏离 web**（实测「对方撤回了一条消息字体过于斜了」）：
@@ -887,6 +890,7 @@ class _QuoteStripState extends State<_QuoteStrip> {
                         softWrap: false,
                         style: const TextStyle(
                           fontFamily: AylaFonts.body,
+                          fontFamilyFallback: AylaFonts.cjkFallback,
                           fontSize: 13,
                           color: AylaColors.indigo700,
                         ),
@@ -937,6 +941,7 @@ class _SendState extends StatelessWidget {
                 '上传中 ${progress.round()}%',
                 style: const TextStyle(
                   fontFamily: AylaFonts.body,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 12,
                   color: AylaColors.textSecondary,
                 ),
@@ -969,6 +974,7 @@ class _SendState extends StatelessWidget {
           '发送失败',
           style: TextStyle(
             fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 12,
             color: AylaColors.destructive,
           ),

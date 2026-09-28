@@ -181,6 +181,7 @@ class AylaConversationList extends StatelessWidget {
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 14,
             color: AylaColors.textSecondary,
           ),
@@ -424,6 +425,7 @@ class _ConversationRowState extends State<_ConversationRow> {
                 // `.conv-item-title`：15/700；置顶转 grape-700（app.css 541–543 / 561–569）
                 style: TextStyle(
                   fontFamily: AylaFonts.body,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: conv.isPinned == true
@@ -472,6 +474,7 @@ class _ConversationRowState extends State<_ConversationRow> {
             text,
             style: TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 11,
               fontWeight: FontWeight.w700,
               height: 1.6,
@@ -495,6 +498,7 @@ class _ConversationRowState extends State<_ConversationRow> {
               '@我',
               style: TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: AylaColors.pink500,
@@ -510,6 +514,7 @@ class _ConversationRowState extends State<_ConversationRow> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               color: AylaColors.textSecondary,
             ),

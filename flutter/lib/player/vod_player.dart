@@ -288,6 +288,7 @@ class _VodControls extends StatelessWidget {
             '${_fmt(state.position)} / ${_fmt(state.duration)}',
             style: const TextStyle(
               fontFamily: AylaFonts.utility,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 11,
               letterSpacing: 0.3,
               color: Color(0xFFFFFAFB),

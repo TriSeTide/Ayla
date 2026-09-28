@@ -103,6 +103,7 @@ class _AylaElysiaEntryState extends State<AylaElysiaEntry> {
                         // `.elysia-entry-name`：Fredoka 15/500 + grape-700（app.css 461–466）
                         style: const TextStyle(
                           fontFamily: AylaFonts.display,
+                          fontFamilyFallback: AylaFonts.cjkFallback,
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                           color: AylaColors.grape700,
@@ -115,6 +116,7 @@ class _AylaElysiaEntryState extends State<AylaElysiaEntry> {
                         // `.elysia-entry-sub`：13 + grape-700 + opacity .8（app.css 468–472）
                         style: const TextStyle(
                           fontFamily: AylaFonts.body,
+                          fontFamilyFallback: AylaFonts.cjkFallback,
                           fontSize: 13,
                           color: AylaColors.grape700,
                         ).copyWith(
@@ -129,6 +131,7 @@ class _AylaElysiaEntryState extends State<AylaElysiaEntry> {
                   '›',
                   style: TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 18,
                     color: AylaColors.grape700,
                   ),

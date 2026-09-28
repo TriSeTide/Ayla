@@ -205,6 +205,7 @@ class AylaPrivateChatPane extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: AylaFonts.body,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 13,
                   color: AylaColors.textPrimary,
                 ),
@@ -272,6 +273,7 @@ class AylaPrivateChatPane extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontFamily: AylaFonts.body,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: AylaColors.textPrimary,
@@ -285,6 +287,7 @@ class AylaPrivateChatPane extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 12,
                     color: peerTyping
                         ? AylaColors.glow500 // `.is-typing { color: var(--glow-500) }`
@@ -401,6 +404,7 @@ Widget aylaPrivateChatPaneSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,

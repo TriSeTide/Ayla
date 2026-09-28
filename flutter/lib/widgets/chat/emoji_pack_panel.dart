@@ -270,6 +270,7 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
             // `.emoji-pack-error { font-size: 12px; color: var(--destructive) }`
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 12,
               color: AylaColors.destructive,
             ),
@@ -298,6 +299,7 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 color: AylaColors.textSecondary,
               ),
@@ -350,6 +352,7 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
             '群表情包',
             style: TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: AylaColors.textPrimary,
@@ -498,6 +501,7 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontFamily: AylaFonts.body,
+                          fontFamilyFallback: AylaFonts.cjkFallback,
                           fontSize: 11,
                           color: AylaColors.textSecondary,
                         ),
@@ -640,6 +644,7 @@ Widget aylaEmojiPackPanelSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,

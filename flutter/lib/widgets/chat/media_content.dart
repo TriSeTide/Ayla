@@ -366,6 +366,7 @@ class _MediaPlaceholder extends StatelessWidget {
                 text,
                 style: TextStyle(
                   fontFamily: AylaFonts.body,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 13,
                   color: failed ? AylaColors.destructive : AylaColors.textSecondary,
                 ),
@@ -430,6 +431,7 @@ class _AylaMediaRetryButtonState extends State<AylaMediaRetryButton> {
               widget.label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: AylaColors.indigo700,
@@ -833,6 +835,7 @@ class _VideoLoadFailed extends StatelessWidget {
             text,
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               color: AylaColors.textSecondary,
             ),
@@ -914,6 +917,7 @@ class _MixedMediaState extends State<_MixedMedia> {
                     seg.text,
                     style: const TextStyle(
                       fontFamily: AylaFonts.body,
+                      fontFamilyFallback: AylaFonts.cjkFallback,
                       fontSize: 15,
                       height: 1.55,
                       color: AylaColors.indigo700,
@@ -1102,6 +1106,7 @@ class _MentionTokenState extends State<_MentionToken> {
                   '@${widget.label}',
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     height: 1.45,
@@ -1290,6 +1295,7 @@ class _VoiceMediaState extends State<_VoiceMedia> {
                 aylaFormatDuration(totalSeconds ?? 0),
                 style: const TextStyle(
                   fontFamily: AylaFonts.utility,
+                  fontFamilyFallback: AylaFonts.cjkFallback,
                   fontSize: 12,
                   letterSpacing: 0.3,
                   color: AylaColors.textSecondary,
@@ -1306,6 +1312,7 @@ class _VoiceMediaState extends State<_VoiceMedia> {
                   '语音播放失败',
                   style: TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 12,
                     color: AylaColors.destructive,
                   ),
@@ -1357,6 +1364,7 @@ class _VoiceMediaState extends State<_VoiceMedia> {
                   textAlign: TextAlign.right,
                   style: const TextStyle(
                     fontFamily: AylaFonts.utility,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 11,
                     letterSpacing: 0.3,
                     color: AylaColors.textSecondary,
@@ -1605,6 +1613,7 @@ class _FileCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontFamily: AylaFonts.body,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         color: AylaColors.indigo700,
@@ -1616,6 +1625,7 @@ class _FileCard extends StatelessWidget {
                       aylaFormatBytes(size!),
                       style: const TextStyle(
                         fontFamily: AylaFonts.utility,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
                         fontSize: 12,
                         color: AylaColors.textSecondary,
                       ),
@@ -1625,6 +1635,7 @@ class _FileCard extends StatelessWidget {
                       '已过期',
                       style: TextStyle(
                         fontFamily: AylaFonts.body,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
                         fontSize: 12,
                         color: AylaColors.destructive,
                       ),
@@ -1634,6 +1645,7 @@ class _FileCard extends StatelessWidget {
                       '附件加载失败',
                       style: TextStyle(
                         fontFamily: AylaFonts.body,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
                         fontSize: 12,
                         color: AylaColors.destructive,
                       ),
@@ -1983,6 +1995,7 @@ class _PreviewLabel extends StatelessWidget {
         text,
         style: const TextStyle(
           fontFamily: AylaFonts.body,
+          fontFamilyFallback: AylaFonts.cjkFallback,
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AylaColors.textSecondary,

@@ -233,6 +233,34 @@ class AylaGameCardData {
           allowedGroupNames: allowedGroupNames,
           groupName: groupName,
         );
+
+  /// 从后端响应解析（web 的卡片投影契约「GameCardData」，
+  /// `components/cards/cardData.ts:11` = Partial（省略 id 的 GameRoom）+ id/name 必填；
+  /// 字段名对齐 `api/types.ts:1333–1352` 的 GameRoom / GameRoomSerializer）。
+  ///
+  /// 缺席语义（与 [AylaPost.fromJson] 同口径，**不造默认值**）：
+  /// - 非 Map / 缺 id / 缺 name / id 为空串 ⇒ 非法 → null；
+  /// - owner 缺省 ⇒ null（tsx:43 不渲染房主行；**不造空用户**）；
+  /// - member_count 缺失或非数字 ⇒ null（tsx:45 是 typeof === "number" 守卫）；
+  /// - status / visibility 未知枚举值 → null（不 fallback）。
+  static AylaGameCardData? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? id = raw['id'];
+    final Object? name = raw['name'];
+    if (id == null || name == null) return null;
+    final String idText = id.toString();
+    if (idText.isEmpty) return null;
+    return AylaGameCardData(
+      id: idText,
+      name: name.toString(),
+      status: AylaGameRoomStatus.parse(raw['status']),
+      owner: AylaUserPublic.fromJson(raw['owner']),
+      memberCount: (raw['member_count'] as num?)?.toInt(),
+      visibility: AylaPostVisibility.parse(raw['visibility']?.toString()),
+      allowedGroupNames: _stringList(raw['allowed_group_names']),
+      groupName: raw['group_name']?.toString(),
+    );
+  }
 }
 
 List<String> _stringList(Object? raw) {

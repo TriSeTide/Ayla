@@ -260,6 +260,7 @@ Widget aylaQuickMessagesSheetSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,
@@ -297,6 +298,7 @@ Widget aylaQuickMessagesSheetSamples() {
           textAlign: TextAlign.center,
           style: const TextStyle(
             fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 13,
             color: AylaColors.textSecondary,
           ),

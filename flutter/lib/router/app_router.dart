@@ -26,11 +26,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../layout/app_shell.dart';
+import '../pages/favorites_page.dart';
+import '../pages/games_hub_page.dart';
+import '../pages/live_hub_page.dart';
 import '../pages/login_route.dart';
 import '../pages/pending_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/register_page.dart';
+import '../pages/search_page.dart';
 import '../pages/user_profile_page.dart';
+import '../pages/voice_hub_page.dart';
 import '../state/auth_state.dart';
 
 /// 认证状态变化 → `GoRouter` 重算守卫的桥（[GoRouter.refreshListenable]）。
@@ -115,24 +120,44 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/home',
             redirect: (BuildContext c, GoRouterState s) => '/group',
           ),
-          GoRoute(path: '/voice', pageBuilder: (c, s) => _pending(path: '/voice', webSource: 'App.tsx:70 → VoiceHubPage')),
-          GoRoute(path: '/voice/:channelId', pageBuilder: (c, s) => _pending(path: '/voice/:channelId', webSource: 'App.tsx:71 → VoiceHubPage')),
-          GoRoute(path: '/live', pageBuilder: (c, s) => _pending(path: '/live', webSource: 'App.tsx:72 → LiveHubPage')),
+          // 第二批：大厅已交付（房内态属第 3 批 —— 见各页文件头的「机制差异」登记）
+          GoRoute(
+            path: '/voice',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: VoiceHubPage(initialType: s.uri.queryParameters['type']),
+            ),
+          ),
+          GoRoute(path: '/voice/:channelId', pageBuilder: (c, s) => _pending(path: '/voice/:channelId', webSource: 'App.tsx:71 → VoiceHubPage（房内态，第 3 批）')),
+          GoRoute(
+            path: '/live',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: LiveHubPage(initialType: s.uri.queryParameters['type']),
+            ),
+          ),
           // ⚠️ 段数不同（3 vs 2），与 `/live/:channelId` 不冲突
           GoRoute(path: '/live/start/:channelId', pageBuilder: (c, s) => _pending(path: '/live/start/:channelId', webSource: 'App.tsx:73 → LiveStudioPage')),
-          GoRoute(path: '/live/:channelId', pageBuilder: (c, s) => _pending(path: '/live/:channelId', webSource: 'App.tsx:74 → LiveRoomPage')),
+          GoRoute(path: '/live/:channelId', pageBuilder: (c, s) => _pending(path: '/live/:channelId', webSource: 'App.tsx:74 → LiveRoomPage（房内态，第 3 批）')),
           GoRoute(path: '/posts', pageBuilder: (c, s) => _pending(path: '/posts', webSource: 'App.tsx:75 → PostsHubPage')),
           // ⚠️ **必须排在 `/posts/:postId` 之前**（同为 2 段，go_router 按声明顺序匹配）
           GoRoute(path: '/posts/mine', pageBuilder: (c, s) => _pending(path: '/posts/mine', webSource: 'App.tsx:76 → MinePostsRoute')),
           GoRoute(path: '/posts/:postId', pageBuilder: (c, s) => _pending(path: '/posts/:postId', webSource: 'App.tsx:77 → PostDetailPage')),
-          GoRoute(path: '/games', pageBuilder: (c, s) => _pending(path: '/games', webSource: 'App.tsx:78 → GamesHubPage')),
-          GoRoute(path: '/games/:roomId', pageBuilder: (c, s) => _pending(path: '/games/:roomId', webSource: 'App.tsx:79 → GamesHubPage')),
+          GoRoute(
+            path: '/games',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: GamesHubPage(initialType: s.uri.queryParameters['type']),
+            ),
+          ),
+          GoRoute(path: '/games/:roomId', pageBuilder: (c, s) => _pending(path: '/games/:roomId', webSource: 'App.tsx:79 → GamesHubPage（房内占位，第 3 批）')),
           GoRoute(path: '/messages', pageBuilder: (c, s) => _pending(path: '/messages', webSource: 'App.tsx:80 → MessagesPage')),
           GoRoute(
             path: '/search',
-            pageBuilder: (BuildContext c, GoRouterState s) => _pending(
-              path: '/search',
-              webSource: 'App.tsx:81 → SearchPage',
+            // ?q= 是搜索的驱动源（web SearchPage.tsx:297–324）；
+            // ?type= 为分类选项卡（同页 URL 同步）
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: SearchPage(
+                initialQuery: s.uri.queryParameters['q'],
+                initialType: s.uri.queryParameters['type'],
+              ),
             ),
           ),
           GoRoute(
@@ -152,9 +177,8 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(path: '/user/:userId/posts', pageBuilder: (c, s) => _pending(path: '/user/:userId/posts', webSource: 'App.tsx:84 → UserPostsRoute')),
           GoRoute(
             path: '/favorites',
-            pageBuilder: (BuildContext c, GoRouterState s) => _pending(
-              path: '/favorites',
-              webSource: 'App.tsx:85 → FavoritesPage',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: FavoritesPage(initialType: s.uri.queryParameters['type']),
             ),
           ),
           GoRoute(path: '/group/:id', pageBuilder: (c, s) => _pending(path: '/group/:id', webSource: 'App.tsx:86 → GroupPage')),

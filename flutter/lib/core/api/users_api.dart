@@ -105,4 +105,29 @@ class AylaUsersApi {
     );
     return resp['id']?.toString() ?? '';
   }
+
+  /// GET /friends/?pagination=cursor&limit= —— 好友列表第一页
+  /// （web `api/users.ts:77–79` 的 `listFriendsPage`；`SocialPage<Friendship>`）。
+  ///
+  /// 只服务于三个 hub 页「好友」分类的前端二次过滤（web 也只取第一页，
+  /// `stores/social.ts:129` 的 `limit: 30`）⇒ 只返回 `Friendship.user`。
+  /// 失败向上抛（调用方 `hub_support.aylaHubFriendIds` 兜底为空集合）。
+  static Future<List<AylaUserPublic>> listFriendsPage({
+    int limit = 30,
+    String? cursor,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>('/friends/', query: query);
+    return <AylaUserPublic>[
+      for (final Object? item
+          in (resp['results'] as List<Object?>? ?? const <Object?>[]))
+        if (item is Map && AylaUserPublic.fromJson(item['user']) != null)
+          AylaUserPublic.fromJson(item['user'])!,
+    ];
+  }
 }

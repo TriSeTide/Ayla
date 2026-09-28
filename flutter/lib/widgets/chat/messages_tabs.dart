@@ -215,6 +215,7 @@ class _MessagesTabState extends State<_MessagesTab> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: AylaFonts.body,
+                            fontFamilyFallback: AylaFonts.cjkFallback,
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: color,
@@ -276,6 +277,7 @@ class _MessagesTabsSampleState extends State<_MessagesTabsSample> {
           label,
           style: const TextStyle(
             fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 12,
             fontWeight: FontWeight.w600,
             color: AylaColors.textSecondary,

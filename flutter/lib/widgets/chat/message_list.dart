@@ -713,6 +713,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.utility,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 letterSpacing: 0.3,
                 color: AylaColors.textSecondary,
@@ -746,6 +747,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
         aylaPokeLabel(m, names, widget.currentUserId, peerName),
         style: const TextStyle(
           fontFamily: AylaFonts.utility,
+          fontFamilyFallback: AylaFonts.cjkFallback,
           fontSize: 13,
           letterSpacing: 0.2,
           color: AylaColors.textSecondary,
@@ -802,6 +804,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
                       '正在加载更早消息',
                       style: TextStyle(
                         fontFamily: AylaFonts.body,
+                        fontFamilyFallback: AylaFonts.cjkFallback,
                         fontSize: 13,
                         color: AylaColors.textSecondary,
                       ),
@@ -829,6 +832,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
         textAlign: TextAlign.center,
         style: TextStyle(
           fontFamily: AylaFonts.body,
+          fontFamilyFallback: AylaFonts.cjkFallback,
           fontSize: 14,
           color: AylaColors.textSecondary,
         ),
@@ -875,6 +879,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
                     visible[i].label,
                     style: const TextStyle(
                       fontFamily: AylaFonts.body,
+                      fontFamilyFallback: AylaFonts.cjkFallback,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: AylaColors.grape700,
@@ -1141,6 +1146,7 @@ Widget aylaMessageListSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,

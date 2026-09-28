@@ -146,6 +146,7 @@ class _SignedVideoState extends State<AylaSignedVideo> {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontFamily: AylaFonts.utility,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 11,
                 color: AylaColors.textSecondary,
               ),
@@ -185,6 +186,7 @@ class _VideoFailed extends StatelessWidget {
               '视频加载失败，点击重试',
               style: TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 11,
                 color: AylaColors.textSecondary,
               ),

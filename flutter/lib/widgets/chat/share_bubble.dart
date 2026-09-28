@@ -251,6 +251,7 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     height: 1.35,
@@ -264,6 +265,7 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 13,
                     color: AylaColors.textSecondary,
                   ),

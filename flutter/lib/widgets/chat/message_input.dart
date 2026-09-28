@@ -622,6 +622,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
             widget.disabledHint!,
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               color: AylaColors.textSecondary,
             ),
@@ -641,6 +642,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
             '语音上传中…',
             style: TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               color: AylaColors.textSecondary,
             ),
@@ -652,6 +654,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
             '正在请求麦克风…',
             style: TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 13,
               color: AylaColors.textSecondary,
             ),
@@ -666,6 +669,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
                   _error!,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 13,
                     color: AylaColors.destructive,
                   ),
@@ -690,6 +694,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
                   rec.error!,
                   style: const TextStyle(
                     fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
                     fontSize: 13,
                     color: AylaColors.destructive,
                   ),
@@ -739,6 +744,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
                         '引用回复',
                         style: TextStyle(
                           fontFamily: AylaFonts.body,
+                          fontFamilyFallback: AylaFonts.cjkFallback,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                           color: AylaColors.textSecondary,
@@ -750,6 +756,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontFamily: AylaFonts.body,
+                          fontFamilyFallback: AylaFonts.cjkFallback,
                           fontSize: 13,
                           color: AylaColors.textPrimary,
                         ),
@@ -820,6 +827,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontFamily: AylaFonts.body,
+                                fontFamilyFallback: AylaFonts.cjkFallback,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: AylaColors.indigo700,
@@ -883,6 +891,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
             '正在录音 ${_formatDuration(rec.elapsed.inMilliseconds / 1000)}',
             style: const TextStyle(
               fontFamily: AylaFonts.body,
+              fontFamilyFallback: AylaFonts.cjkFallback,
               fontSize: 14,
               fontWeight: FontWeight.w600,
               color: AylaColors.destructive,
@@ -1006,6 +1015,7 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
           ),
           textStyle: const TextStyle(
             fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
             fontSize: 15,
             height: 22 / 15, // line-height: 22px
             color: AylaColors.textPrimary,
@@ -1174,6 +1184,7 @@ Widget aylaMessageInputSamples() {
               label,
               style: const TextStyle(
                 fontFamily: AylaFonts.body,
+                fontFamilyFallback: AylaFonts.cjkFallback,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: AylaColors.textSecondary,
