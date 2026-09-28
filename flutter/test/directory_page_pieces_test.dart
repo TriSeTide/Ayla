@@ -28,6 +28,8 @@ import '../lib/theme/buttons.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/directory_page.dart';
+import '../lib/widgets/base/nav_highlight.dart';
+import '../lib/widgets/base/nav_highlight_list.dart';
 import '../lib/widgets/base/profile_and_filters.dart';
 
 void main() {
@@ -422,6 +424,120 @@ void main() {
     final BuildContext context = tester.element(find.byType(AylaDirectoryContent));
     expect(aylaDirectoryIsNarrow(context), isTrue);
     expect(aylaDirectoryListPaddingTop(context), isNull);
+  });
+
+  // ---- 窄屏首 tab 上外边距（`directory-filters.css:98–100`，2026-09-28 修） ----
+  //
+  // web 事实链：`DirectoryFilters.tsx:70–72` 的 DOM 顺序是
+  // `{!narrow && leading} → {decor} → {!narrow && header} → 各 tab`。
+  // 窄屏下 decor **仍进 DOM**（只是 `display:none`，CSS 相邻兄弟选择器照常匹配）、
+  // header 不渲染 ⇒ `.directory-filter-decor + .directory-filter { margin-top: sp1 }`
+  // 命中首 tab；宽屏 decor 与 tab 之间夹着 header ⇒ 不命中。
+  testWidgets('窄屏首 tab：上外边距 4（整条 8+48+8=64，首 tab 比其余项低 2px）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(375, 812));
+    await tester.pumpWidget(host(
+      // 真实宿主形态：窄屏 filters 在 Column 内（宽度 stretch、高度由内容决定，
+      // 等价 web `.directory-filters { flex: none; align-self: stretch }`）。
+      // ⚠️ 不能直接套 SizedBox.expand：那会把高度也拉满（实测读到 812）。
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          filters(
+            narrow: true,
+            decor: AylaDirectoryDecorIcon(icon: aylaIconByName('iconSearch')!),
+          ),
+          const Expanded(child: SizedBox()),
+        ],
+      ),
+      viewport: const Size(375, 812),
+    ));
+    await settle(tester);
+
+    // 接线判据（窄屏 且 调用方传了 decor）
+    expect(
+      tester
+          .widget<AylaNavHighlightList>(find.byType(AylaNavHighlightList))
+          .firstItemTopInset,
+      AylaSpacing.sp1,
+    );
+
+    final Rect container = tester.getRect(find.byType(AylaDirectoryFilters));
+    // padding sp2 上下 + 行高（tab 44 + 首项外边距 4）= 8 + 48 + 8
+    expect(
+      container.height,
+      closeTo(AylaSpacing.sp2 * 2 + 44 + AylaSpacing.sp1, 0.6), // 64
+    );
+
+    final Rect first = tester.getRect(find.text('全部'));
+    final Rect second = tester.getRect(find.text('帖子'));
+    // 首项外边距盒 36 与其余项 32 同按 `align-items: center` 居中 ⇒ 首 tab 低 2px
+    expect(first.center.dy - second.center.dy, closeTo(2, 0.6));
+
+    // 胶囊**不含** margin（web `.auroraqua-nav-highlight { inset: 0 }` 相对 button
+    // 的 padding box）⇒ 高仍是 tab 的 44、顶 = 容器 padding(8) + 4
+    final Rect capsule = tester.getRect(find.byType(AylaNavHighlight));
+    expect(capsule.height, closeTo(44, 0.6));
+    expect(
+      capsule.top - container.top,
+      closeTo(AylaSpacing.sp2 + AylaSpacing.sp1, 0.6),
+    );
+  });
+
+  testWidgets('窄屏未传 decor：无 4px（整条 60，首 tab 与其余项齐平）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(375, 812));
+    await tester.pumpWidget(host(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          filters(narrow: true),
+          const Expanded(child: SizedBox()),
+        ],
+      ),
+      viewport: const Size(375, 812),
+    ));
+    await settle(tester);
+
+    expect(
+      tester
+          .widget<AylaNavHighlightList>(find.byType(AylaNavHighlightList))
+          .firstItemTopInset,
+      0,
+    );
+    final Rect container = tester.getRect(find.byType(AylaDirectoryFilters));
+    expect(container.height, closeTo(AylaSpacing.sp2 * 2 + 44, 0.6)); // 60
+    final Rect first = tester.getRect(find.text('全部'));
+    final Rect second = tester.getRect(find.text('帖子'));
+    expect(first.center.dy - second.center.dy, closeTo(0, 0.6));
+  });
+
+  testWidgets('宽屏：decor 与 tab 之间夹着 header ⇒ 无 4px', (WidgetTester tester) async {
+    await useViewport(tester, const Size(1600, 900));
+    await tester.pumpWidget(host(
+      filters(
+        decor: AylaDirectoryDecorIcon(icon: aylaIconByName('iconSearch')!),
+        header: const AylaDirectorySidebarHeader(
+          kicker: 'Search',
+          title: '搜索分类',
+          stats: '2 项',
+        ),
+      ),
+    ));
+    await settle(tester);
+    // 宽屏：DOM 里 decor 与 tab 之间夹着 header ⇒ 相邻兄弟选择器不命中
+    expect(
+      tester
+          .widget<AylaNavHighlightList>(find.byType(AylaNavHighlightList))
+          .firstItemTopInset,
+      0,
+    );
+    // 几何佐证：垂直 Column + spacing sp2 ⇒ 两项中心距 = tab 高 44 + gap 8
+    final Rect first = tester.getRect(find.text('全部'));
+    final Rect second = tester.getRect(find.text('帖子'));
+    expect(second.center.dy - first.center.dy, closeTo(52, 0.6));
   });
 }
 

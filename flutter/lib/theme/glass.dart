@@ -1438,6 +1438,15 @@ class _GlassButtonState extends State<AylaGlassButton>
                       fit: FlexFit.loose,
                       child: Center(
                         widthFactor: 1,
+                        // ⚠️ heightFactor **必须**给 1：Center（= Align）在缺省
+                        // heightFactor 时会**取满 maxHeight** —— 按钮落在有界松高
+                        // 宿主里时，文字行被撑到宿主高 → Row → Stack → 按钮整体
+                        // 拉高（实测 600 高宿主里按钮 600×106.8）。
+                        // 事实源：web .btn 恒为「内容高 + min-height 40」
+                        // （app.css 的 .btn { min-height: 40px; padding: 0 24px }），
+                        // 没有任何拉伸语义 ⇒ 文字行取内容高，再由 AnimatedContainer
+                        // 的 minHeight 兜底成 40。
+                        heightFactor: 1,
                         child: Text(
                           widget.label,
                           maxLines: 1,
@@ -1463,9 +1472,15 @@ class _GlassButtonState extends State<AylaGlassButton>
     // 用 LayoutBuilder 取真实尺寸 → 生成含正确宽高比的 face
     final Widget face = LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {
-        final double h = c.maxHeight.isFinite && c.maxHeight > 0
-            ? c.maxHeight
-            : widget.minHeight;
+        // 渐变宽高比的**高度基准**（与上面 heightFactor 修复配套）：
+        // web `.btn` 的高恒为「内容高 + min-height 40」——只有父级给**紧**
+        // 高度约束（flex `align-items: stretch`）时按钮才被拉伸。此前直接取
+        // c.maxHeight，把「有界松高宿主」也当成按钮高（宿主 600 ⇒ 宽高比按
+        // w/600 算，而按钮只有 40 高）⇒ 判据必须是「高度紧约束才算拉伸」。
+        final bool stretched = c.minHeight.isFinite &&
+            c.minHeight > 0 &&
+            c.minHeight == c.maxHeight;
+        final double h = stretched ? c.maxHeight : widget.minHeight;
         final double w = c.maxWidth.isFinite && c.maxWidth > 0
             ? c.maxWidth
             : (widget.minWidth ?? h);
@@ -1474,7 +1489,14 @@ class _GlassButtonState extends State<AylaGlassButton>
     );
 
     // ---- 外阴影：不参与裁剪（box-shadow 在元素外侧）----
+    //
+    // ⚠️ `fit: StackFit.passthrough` **必须给**：`Stack` 默认 `StackFit.loose`
+    // 会把约束**放宽**后再传给非 positioned 子项（face），于是「父级给 tight 高度」
+    // （= CSS flex `align-items: stretch` 的等价物，如 `.live-owner-start` 的 60 高槽）
+    // 传不到 face ⇒ 玻璃面只按 `minHeight` 取 40、在 60 高的槽里居中留白。
+    // 加上之后 face 拿到的就是**原约束**：tight 时撑满、松时按内容高 + minHeight。
     Widget decorated = Stack(
+      fit: StackFit.passthrough,
       clipBehavior: Clip.none,
       children: <Widget>[
         // 外阴影**只画形状之外**（2026-09-20 审查 R2：原裸 boxShadow 会把
@@ -1536,6 +1558,8 @@ class _GlassButtonState extends State<AylaGlassButton>
     if (widget.variant == AylaGlassButtonVariant.ghost &&
         !AylaGlassConfig.useOpaqueFallback) {
       decorated = Stack(
+        // 同上：不能让 loose 把 tight 槽位的高度约束吃掉
+        fit: StackFit.passthrough,
         clipBehavior: Clip.none,
         children: <Widget>[
           Positioned.fill(

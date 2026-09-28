@@ -109,9 +109,9 @@
 ///    reduced-motion 时它自己就不播）——web 的 `animation` 无延迟，故 delay: Duration.zero。
 ///    ⚠️ 动效档由 **viewport** 决定（≥769 侧左入 / 主右入；≤768 都下入），与列数是两件事：
 ///    769–1000 虽然单列，动效仍是「左入 + 右入」。
-/// 5. **编辑笔图标自绘**：`PencilIcon` 是 tsx 内联 SVG、不在 icons.tsx（`AylaIcon` 只能画图标表里的）。
-///    库内先例 = `channel_sidebar.dart:2488–2570` 的私有 glyph（同 path，私有件）；本件另写一份
-///    私有 painter，**未**把它提升为公共件（跨组件改动须先经用户裁决，登记为待裁决项）。
+/// 5. **编辑笔图标**：`PencilIcon` 是 tsx 内联 SVG、不在 icons.tsx（`AylaIcon` 只能画图标表里的）
+///    ⇒ 走 `theme/svg_path.dart` 的公共件 `AylaPencilGlyph`（2026-09-28 提升：此前本件与
+///    `channel_sidebar.dart` 各存一份私有 painter，path / 基类属性逐字相同）。
 /// 6. **未读徽标复用 `AylaTabBadge`**：`.group-info-subgroup-badge` 与 `.server-item-badge` 逐条同值
 ///    （min 16 / height 16 / padding 0 4 / pill / --pink-500 / #fffafb / Display 11 / line-height 16px），
 ///    字重 w400 也对（group.css 未声明 font-weight，继承 body 默认 400）⇒ 直接用
@@ -131,10 +131,10 @@
 ///    `excludeSemantics: true`，对齐 web「aria-label 覆盖元素内容」）；**复用件**
 ///    （AylaGlassButton / AylaAvatarHalo）的结构不改，其 label 会与文本合并、头像还带
 ///    「，在线/离线」后缀（avatar_halo.dart:310–316），测试按包含关系断言。
-/// 10. ⚠️ **复用件的既有偏离（登记，未改）**：`group_role_chip.dart:56` 用 `t.timestamp`
-///    ⇒ 角色 chip 实际是 **Space Grotesk**，而 web `.group-info-role` 是
-///    `font-family: var(--font-display)` = Fredoka（group.css 1738）。本件被指定复用该件，
-///    跨组件改动须先经用户裁决 ⇒ 保持现状并在测试里如实断言，作为待裁决项上报。
+/// 10. ✅ **角色 chip 字体族（2026-09-28 已修）**：`group_role_chip.dart` 原用 `t.timestamp`
+///    ⇒ 实际渲染成 **Space Grotesk**，而 web `.group-info-role` 是
+///    `font-family: var(--font-display)` = Fredoka（group.css 1738）⇒ 已改为
+///    Fredoka + 11 + w400 + lh 1.55（其余属性按「未声明即继承 body」逐值对齐）。
 ///
 /// ## 公开面
 /// `AylaGroupInfoLayout` · `AylaGroupSubgroupItem` · `AylaGroupSubgroupList` ·
@@ -716,7 +716,8 @@ class _EditIconButtonState extends State<_EditIconButton> {
                   borderRadius: BorderRadius.circular(AylaRadii.rInput),
                 ),
                 child: Center(
-                  child: _SubgroupPencilGlyph(
+                  // 公共件 `AylaPencilGlyph`（2026-09-28 提升，取代本件私有 painter）
+                  child: AylaPencilGlyph(
                     size: 14, // <svg width="14" height="14">
                     color: _hovered
                         ? AylaColors.textPrimary // :hover 换色（2097）
@@ -732,59 +733,6 @@ class _EditIconButtonState extends State<_EditIconButton> {
   }
 }
 
-/// 子群编辑笔图标（tsx 内联 SVG，**不在 icons.tsx**）。
-///
-/// 事实源 GroupInfo.tsx 1012–1018：
-/// <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-/// strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"> 内含一条 path。
-///
-/// ⚠️ 与 channel_sidebar.dart:2530 的 _SidebarGlyph.pencil **同 path、同为私有件**：本件没有把它
-/// 提升成公共 glyph（那会改动 channel_sidebar，属跨组件改动 ⇒ 登记为待裁决项，见文件头偏离 5）。
-class _SubgroupPencilGlyph extends StatelessWidget {
-  const _SubgroupPencilGlyph({required this.size, required this.color});
-
-  final double size;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: Size.square(size),
-      painter: _SubgroupPencilPainter(d: _pencilPath, color: color),
-    );
-  }
-}
-
-/// GroupInfo.tsx:1015 的 path 原文（与 ChannelSidebar.tsx:624 逐字相同）。
-const String _pencilPath = 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z';
-
-/// 单路径线性 glyph 绘制（按 size / 24 缩放 viewBox，同 icons.tsx 的 base() 属性）。
-class _SubgroupPencilPainter extends CustomPainter {
-  const _SubgroupPencilPainter({required this.d, required this.color});
-
-  final String d;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.save();
-    canvas.scale(size.width / 24, size.height / 24); // viewBox 0 0 24 24
-    canvas.drawPath(
-      aylaParseSvgPath(d),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2 // stroke-width: 2
-        ..strokeCap = StrokeCap.round // stroke-linecap: round
-        ..strokeJoin = StrokeJoin.round // stroke-linejoin: round
-        ..color = color,
-    );
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_SubgroupPencilPainter oldDelegate) =>
-      oldDelegate.d != d || oldDelegate.color != color;
-}
 
 /// ═══════════════════════════ ③ 成员列表 ═══════════════════════════
 

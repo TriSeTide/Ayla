@@ -363,6 +363,14 @@ class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
       selectedIndex: _selectedIndex,
       axis: widget.narrow ? Axis.horizontal : Axis.vertical,
       gap: AylaSpacing.sp2, // gap: sp2
+      // `directory-filters.css:98–100`：`.directory-filter-decor + .directory-filter
+      // { margin-top: var(--sp-1) }` —— 只在**窄屏**命中（DOM 顺序见
+      // `DirectoryFilters.tsx:70–72`：窄屏 decor 仍在 DOM（display:none 不阻止
+      // 相邻兄弟选择器）、header 不渲染；宽屏 decor 与 tab 之间夹着 header）。
+      // 判据用 `decor != null` 而不是「窄屏恒真」：调用方没传 decor 时 web 里
+      // 也没有那个节点，选择器同样不匹配。
+      firstItemTopInset:
+          widget.narrow && widget.decor != null ? AylaSpacing.sp1 : 0,
       scrollController: _scroll,
       semanticLabel: widget.label, // role=tablist 的 aria-label
       // 方向键同时改变选中值（tsx onKeyDown 语义）

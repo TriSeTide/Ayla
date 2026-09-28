@@ -14,6 +14,7 @@ import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import 'checkbox.dart';
 import 'group_chip.dart';
+import 'page_state.dart';
 
 /// 可见性多选值（`AylaVisibilitySelection`，tsx 10–14）。
 ///
@@ -269,13 +270,22 @@ class _AylaVisibilitySelectorState extends State<AylaVisibilitySelector> {
                   ],
                 ),
               ),
-            // 列表 / 空态
+            // 列表 / 空态（`VisibilitySelector.tsx:89`）
             if (!widget.groupsLoading && filtered.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: AylaSpacing.sp1),
-                child: Text(
+                // `.visibility-selector-groups .placeholder-desc
+                // { padding: var(--sp-1) 0 }`（app.css 225–227）：**上下各 4**。
+                // span 是 flex item（容器 `display:flex; flex-direction:column`，
+                // app.css 170–173）⇒ 垂直 padding 参与布局（此前只给了 top，
+                // 容器底边少 4px）。
+                padding: const EdgeInsets.symmetric(vertical: AylaSpacing.sp1),
+                // 字号/色走公共件：`.placeholder-desc { font-size: 14px;
+                // color: var(--text-secondary) }`（shell.css 626–629）——此前用
+                // `t.caption`（13px）偏小一级。
+                // 容器链上无 `text-align` 声明 ⇒ 左对齐（公共件默认居中，故显式给 start）。
+                child: const AylaPlaceholderDesc(
                   '没有匹配的群',
-                  style: t.caption.copyWith(color: AylaColors.textSecondary),
+                  textAlign: TextAlign.start,
                 ),
               )
             else

@@ -325,12 +325,13 @@ void main() {
       final Text chip = tester.widget<Text>(find.text('默认组'));
       expect(chip.style!.fontSize, 11); // 1739
       expect(chip.style!.color, AylaColors.grape700); // 1744
-      // ⚠️ **复用件的既有偏离**：group_role_chip.dart:56 用 t.timestamp（Space Grotesk），
-      // 而 web .group-info-role 是 font-family: var(--font-display) = Fredoka（group.css 1738）。
-      // 本件被指定复用 AylaGroupRoleChip（跨组件改动须先经用户裁决）⇒ 这里如实按现状断言，
-      // 偏离已登记在文件头「有意偏离」与被交付报告里。
-      expect(chip.style!.fontFamily, AylaFonts.utility);
-      expect(chip.style!.fontFamily, isNot(AylaFonts.display));
+      // `.group-info-role { font-family: var(--font-display) }`（group.css 1738）= Fredoka。
+      // 2026-09-28 修正：此前 `group_role_chip.dart` 用 `t.timestamp`（utility，Space Grotesk）
+      // ⇒ 本用例原先**锁住了这个 bug**，已随修复改回 display。
+      expect(chip.style!.fontFamily, AylaFonts.display);
+      expect(chip.style!.fontFamily, isNot(AylaFonts.utility));
+      expect(chip.style!.fontWeight, FontWeight.w400); // 未声明 ⇒ 继承 body
+      expect(chip.style!.height, 1.55); // base.css 32 的 line-height
       final Container box = tester.widget<Container>(
         find
             .ancestor(of: find.text('默认组'), matching: find.byType(Container))

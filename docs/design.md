@@ -316,7 +316,13 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 ## 9. Responsive Behavior
 
 - 断点：480 / 768 / 1024 / 1440
-- ≤768px：侧栏收成抽屉，聊天全屏；辉光阴影强度降 30%（移动端省电省性能）
+- ≤768px：侧栏收成抽屉，聊天全屏。
+  辉光阴影降档**只作用于三处**：`.btn-glow` / `.avatar-halo.is-elysia` / `.elysia-entry:hover`
+  （`web/src/styles/app.css:3195–3199` 的 `@media (max-width: 768px)`，值 `0 0 11px rgba(247,150,255,.32)`，
+  即 16px/.45 的 30% 递减，移动端省电省性能）。
+  `--glow-shadow` 全仓**只在 `tokens.css:73` 定义一次** ⇒ 其余使用辉光的件窄屏不降档。
+  > 2026-09-28 订正：原句写作通用表述「辉光阴影强度降 30%」，与 web 的实际实施范围不符；
+  > 处置口径 = **以 web 为准并订正本文件**（见 skill「design.md 与 web 冲突」通则）。
 - `backdrop-filter` 降级：不支持的浏览器回退 `--glass-bg` → `rgba(255,250,251,0.92)`（加不透明度，保可读）
 - 验证视口：375 / 768 / 1024 / 1440
 

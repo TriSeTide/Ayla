@@ -91,6 +91,7 @@ class AylaNavHighlightList extends StatefulWidget {
     this.scrollPadding = AylaSpacing.sp3,
     this.selectOnKeyNav = true,
     this.semanticLabel,
+    this.firstItemTopInset = 0,
   });
 
   final int itemCount;
@@ -121,6 +122,23 @@ class AylaNavHighlightList extends StatefulWidget {
 
   /// 语义标签（等价 `role=tablist` 的 aria-label）。
   final String? semanticLabel;
+
+  /// **首项上外边距**（px，0 = 无）—— CSS「相邻兄弟外边距」的等价物。
+  ///
+  /// 事实源：`directory-filters.css:98–100`
+  /// `.directory-page .directory-filter-decor + .directory-filter { margin-top: var(--sp-1) }`。
+  /// 该规则在**窄屏**才匹配：`DirectoryFilters.tsx:70–72` 的 DOM 顺序是
+  /// `{!narrow && leading} → {decor} → {!narrow && header} → 各 tab` ⇒
+  /// · 窄屏：decor 仍进 DOM（只是 `display:none`，CSS 相邻兄弟选择器**照常匹配**）
+  ///   且 header 不渲染 ⇒ 首 tab 命中；
+  /// · 宽屏：decor 与 tab 之间夹着 header ⇒ 不命中（且两者之间还有 gap）。
+  ///
+  /// ⚠️ 外边距加在**槽位之外**：槽位 `KeyedSubtree` 是胶囊的测量锚点
+  /// （web 的 `.auroraqua-nav-highlight` 是 button 的 `inset: 0`，**不含 margin**）
+  /// ⇒ 包反了会让胶囊连带变高 4px。加对之后，横向 `Row` 的行高 = 36，
+  /// `align-items: center` 语义下单靠 margin 的首项顶到 4px、其余项居中顶到 2px
+  /// （= web 的「首 tab 下移 2px、整条高 +4」）。
+  final double firstItemTopInset;
 
   @override
   State<AylaNavHighlightList> createState() => AylaNavHighlightListState();
@@ -307,14 +325,31 @@ class AylaNavHighlightListState extends State<AylaNavHighlightList> {
     return KeyEventResult.handled;
   }
 
+  /// 给首个槽位套上 [AylaNavHighlightList.firstItemTopInset] 的上外边距。
+  ///
+  /// **必须在 KeyedSubtree 之外**：槽位矩形是胶囊的测量锚点，而 web 的
+  /// `.auroraqua-nav-highlight { inset: 0 }` 相对 button 的 padding box（不含
+  /// margin）—— 包在里面会让胶囊跟着变高 4px。
+  Widget _withSlotInsets(int index, Widget child) {
+    if (index != 0 || widget.firstItemTopInset <= 0) return child;
+    return Padding(
+      padding: EdgeInsets.only(top: widget.firstItemTopInset),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     _measureCapsule();
 
     final List<Widget> items = <Widget>[
       for (int i = 0; i < widget.itemCount; i++)
-        KeyedSubtree(
-          key: _slotKeys[i],
+        // ⚠️ 首项外边距包在 **KeyedSubtree 之外**（见 firstItemTopInset 文档）：
+        // 槽位是胶囊的测量锚点，margin 必须落在它之外，否则胶囊连带变高。
+        _withSlotInsets(
+          i,
+          KeyedSubtree(
+            key: _slotKeys[i],
           child: Builder(
             builder: (BuildContext context) => widget.itemBuilder(
               context,
@@ -358,6 +393,7 @@ class AylaNavHighlightListState extends State<AylaNavHighlightList> {
                 onKey: (FocusNode n, KeyEvent e) => _onKey(i, n, e),
               ),
             ),
+          ),
           ),
         ),
     ];

@@ -18,13 +18,16 @@
 /// - `tokens.css` / `design.md` §2/§3/§4/§6/§7.3
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../theme/app_icons.dart';
 import '../theme/app_theme.dart';
 import '../theme/aurora_background.dart';
 import '../theme/glass.dart';
 import '../theme/sample_media.dart';
+import '../theme/svg_path.dart' show AylaPencilGlyph;
 import '../theme/tokens.dart';
 import '../widgets/base/avatar_halo.dart';
 import '../widgets/base/avatar_status_badges.dart';
@@ -1206,47 +1209,10 @@ class _ComponentGalleryState extends State<ComponentGallery> {
               title:
                   'AylaRevealItem / AylaRevealScope（base.css .reveal-item · auroraqua.css 8–26 · useListEntryMotion）',
               source:
-                  'opacity 0→1 + 下 20px · 300ms --auroraqua-ease-out · stagger 50ms（cap 300）· reduced-motion 直接到位 · enabled:false 不挂动画',
-              child: _Row(
-                children: <Widget>[
-                  _Slot(
-                    label: '下入 20px · stagger 0/50/100ms',
-                    width: 300,
-                    child: AylaRevealScope(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        spacing: AylaSpacing.sp2,
-                        children: <Widget>[
-                          for (int i = 0; i < 3; i++)
-                            AylaRevealItem(
-                              index: i,
-                              child: Text(
-                                '条目 $i（delay ${i * 50}ms）',
-                                style: t.caption,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  _Slot(
-                    label: '上入 20px（offset 0,-20）',
-                    width: 300,
-                    child: AylaRevealItem(
-                      offset: const Offset(0, -AylaRevealMotion.distance),
-                      child: Text('上入样张', style: t.caption),
-                    ),
-                  ),
-                  _Slot(
-                    label: 'enabled:false（滚动恢复/历史节点）',
-                    width: 300,
-                    child: const AylaRevealItem(
-                      enabled: false,
-                      child: Text('直接显示，不挂动画', style: TextStyle(fontSize: 12)),
-                    ),
-                  ),
-                ],
-              ),
+                  'opacity 0→1 + 下 20px · 300ms --auroraqua-ease-out · stagger 50ms（cap 300）· reduced-motion 直接到位 · enabled:false 不挂动画'
+                  ' · **样张可交互**：点「重播入场」= `AylaRevealScope(replayKey: nonce)` 让四档同时重播（库内既有能力，见 reveal.dart:63；'
+                  '否则只能看静止终态，方向/时长/错峰/降级都无法验收）',
+              child: const _RevealShowcaseDemo(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
@@ -1319,6 +1285,28 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                         ),
                       ],
                     ),
+                  // 内联 glyph 公共件（**不在** icons.tsx 的 47 个里）：铅笔 ——
+                  // 2026-09-28 由 channel_sidebar / group_info_lists 两处私有 painter 提升，
+                  // 事实源 `ChannelSidebar.tsx:621–627` 与 `GroupInfo.tsx:1012–1018`（同 path）。
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const AylaPencilGlyph(size: 18, color: AylaColors.indigo700),
+                      const SizedBox(height: AylaSpacing.sp1),
+                      SizedBox(
+                        width: 110,
+                        child: Text(
+                          'AylaPencilGlyph',
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.timestamp.copyWith(
+                            color: AylaColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -2694,9 +2682,66 @@ class _DialogsDemo extends StatelessWidget {
   }
 }
 
+/// 画布交互样张专用：**合成一次「按下 → 分帧拖动 → 松手」的指针序列**。
+///
+/// 为什么需要它（2026-09-28 用户点名「动画族样张必须能一键重播」）：跟手类组件的
+/// 正确性只存在于「位移随时间的形状」里 ——
+/// · `AylaPullToRefresh` 的**指示器跟手档**（web `y = pull − 52`）；
+/// · `AylaFullScreenSwipeBack` 的阈值判定与未过阈值回弹。
+/// 静止终态看不出这两者，只靠用户手拖又无法「一键重播」。
+///
+/// 机制全部来自框架既有能力（`GestureBinding.handlePointerEvent`），**不动组件 API**。
+/// ⚠️ `timeStamp` 必须给真实帧时间：`VelocityTracker` 按 `event.timeStamp` 求速度，
+/// 默认 `Duration.zero` 会让相邻样本 dt = 0（速度 NaN ⇒ 甩动判定失效）。
+Future<void> aylaSyntheticDrag({
+  required Offset start,
+  required Offset delta,
+  int steps = 12,
+  int pointer = 0x4A1A,
+}) async {
+  final GestureBinding binding = GestureBinding.instance;
+  Duration now() => SchedulerBinding.instance.currentSystemFrameTimeStamp;
+  binding.handlePointerEvent(
+    PointerDownEvent(pointer: pointer, position: start, timeStamp: now()),
+  );
+  for (int i = 1; i <= steps; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    binding.handlePointerEvent(
+      PointerMoveEvent(
+        pointer: pointer,
+        position: start + delta * (i / steps),
+        delta: delta / steps.toDouble(),
+        timeStamp: now(),
+      ),
+    );
+  }
+  await Future<void>.delayed(const Duration(milliseconds: 16));
+  binding.handlePointerEvent(
+    PointerUpEvent(pointer: pointer, position: start + delta, timeStamp: now()),
+  );
+}
+
 /// PullToRefresh / AylaSignedVideo 样张。
-class _InteractionDemo extends StatelessWidget {
+class _InteractionDemo extends StatefulWidget {
   const _InteractionDemo();
+
+  @override
+  State<_InteractionDemo> createState() => _InteractionDemoState();
+}
+
+class _InteractionDemoState extends State<_InteractionDemo> {
+  /// 下拉刷新宿主（合成手势的坐标基准）。
+  final GlobalKey _pullKey = GlobalKey();
+
+  /// 一键重放「按下 → 分帧下拉 110px → 松手」：越过 threshold 64 ⇒ 触发刷新。
+  Future<void> _simulatePull() async {
+    final RenderBox? box =
+        _pullKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final Offset start =
+        box.localToGlobal(Offset.zero) + Offset(box.size.width / 2, 24);
+    await aylaSyntheticDrag(start: start, delta: const Offset(0, 110));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2707,32 +2752,53 @@ class _InteractionDemo extends StatelessWidget {
       children: <Widget>[
         SizedBox(
           width: 375,
-          height: 380,
-          child: AylaPullToRefresh(
-            isAtTop: () => true,
-            onRefresh: () async =>
-                Future<void>.delayed(const Duration(milliseconds: 600)),
-            child: ListView(
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(AylaSpacing.sp3),
-              children: <Widget>[
-                for (int i = 0; i < 6; i++)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: AylaSpacing.sp2),
-                    height: 48,
-                    alignment: Alignment.centerLeft,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AylaSpacing.sp3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AylaColors.glassBg,
-                      borderRadius: BorderRadius.circular(AylaRadii.rInput),
-                      border: Border.all(color: AylaColors.glassBorder),
-                    ),
-                    child: Text('列表项 ${i + 1}（下拉刷新）'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: AylaSpacing.sp2,
+            children: <Widget>[
+              SizedBox(
+                height: 380,
+                child: AylaPullToRefresh(
+                  key: _pullKey,
+                  isAtTop: () => true,
+                  onRefresh: () async =>
+                      Future<void>.delayed(const Duration(milliseconds: 600)),
+                  child: ListView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(AylaSpacing.sp3),
+                    children: <Widget>[
+                      for (int i = 0; i < 6; i++)
+                        Container(
+                          margin:
+                              const EdgeInsets.only(bottom: AylaSpacing.sp2),
+                          height: 48,
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AylaSpacing.sp3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AylaColors.glassBg,
+                            borderRadius:
+                                BorderRadius.circular(AylaRadii.rInput),
+                            border: Border.all(color: AylaColors.glassBorder),
+                          ),
+                          child: Text('列表项 ${i + 1}（下拉刷新）'),
+                        ),
+                    ],
                   ),
-              ],
-            ),
+                ),
+              ),
+              // 跟手档重播（见 `aylaSyntheticDrag` 文档）：不点也能看 —— 直接用
+              // 鼠标/手指在列表上往下拖同样有效；这个键只是把同一段手势**一键重放**。
+              AylaGlassButton(
+                label: '模拟下拉刷新（跟手）',
+                variant: AylaGlassButtonVariant.ghost,
+                minHeight: 28,
+                fontSize: 12,
+                expand: true,
+                onPressed: _simulatePull,
+              ),
+            ],
           ),
         ),
         SizedBox(
@@ -3692,6 +3758,119 @@ class _GroupInfoProfileDemo extends StatelessWidget {
 }
 
 /// 手势动画样张：七张**空白卡片**，各自演示一种转场/手势（点卡片或按钮重播）。
+/// reveal 族样张：**四档 + 一键重播**（2026-09-28 用户点名「动画族样张必须能重播」）。
+///
+/// - **重播机制**用库内既有能力（不发明）：`AylaRevealScope(replayKey: nonce)` ——
+///   scope 把 `replayKey` 的变化转成 `replayTick` 下发给子项，已入场的 [AylaRevealItem]
+///   整批重播一次（`reveal.dart:63 / 104 / 230`）。
+/// - **四槽对齐**：每槽内容放在**同高、顶部对齐**的舞台里 ⇒ 槽内首行文字天然落在
+///   同一条水平线上。此前左槽 3 行、中/右槽各 1 行，而槽内是垂直居中 + `Wrap` 底部
+///   对齐 ⇒ 三槽文字不在同一水平线（用户当场点名）。
+class _RevealShowcaseDemo extends StatefulWidget {
+  const _RevealShowcaseDemo();
+
+  @override
+  State<_RevealShowcaseDemo> createState() => _RevealShowcaseDemoState();
+}
+
+class _RevealShowcaseDemoState extends State<_RevealShowcaseDemo> {
+  /// 重播计数（`replayKey` 变化 ⇒ 四档同时重播）。
+  int _nonce = 0;
+
+  /// 槽内舞台高度：容下 stagger 档的 3 行（3×19.5 + 2×8 ≈ 74.5）。
+  static const double _stageHeight = 78;
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+
+    /// 槽内舞台：**顶部对齐**（四槽内容首行同高）。
+    Widget stage(Widget child) => SizedBox(
+          height: _stageHeight,
+          child: Align(alignment: Alignment.topLeft, child: child),
+        );
+
+    Widget slot(String label, Widget child) => _Slot(
+          label: label,
+          width: 240,
+          child: stage(child),
+        );
+
+    return AylaRevealScope(
+      replayKey: _nonce,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // ⚠️ 用局部 Wrap（`crossAxisAlignment: start`）而不是公共 `_Row`：`_Row`
+          // 是 `WrapCrossAlignment.end`（底部对齐）——四槽的标签行数不同（最后一个
+          // 标签在 240 宽下会折行）⇒ 底部对齐会把内容推到不同高度。
+          Wrap(
+            spacing: AylaSpacing.sp4,
+            runSpacing: AylaSpacing.sp4,
+            crossAxisAlignment: WrapCrossAlignment.start,
+            children: <Widget>[
+              // ① 下入 20px（offset 默认）
+              slot(
+                '① 下入 20px（offset 默认）',
+                AylaRevealItem(child: Text('单条 · 下入', style: t.caption)),
+              ),
+              // ② 下入 + stagger 0 / 50 / 100ms
+              slot(
+                '② stagger 0 / 50 / 100ms',
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: AylaSpacing.sp2,
+                  children: <Widget>[
+                    for (int i = 0; i < 3; i++)
+                      AylaRevealItem(
+                        index: i,
+                        child: Text(
+                          '第 ${i + 1} 条（delay ${i * 50}ms）',
+                          style: t.caption,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // ③ 上入 20px
+              slot(
+                '③ 上入 20px（offset 0,-20）',
+                AylaRevealItem(
+                  offset: const Offset(0, -AylaRevealMotion.distance),
+                  child: Text('单条 · 上入', style: t.caption),
+                ),
+              ),
+              // ④ enabled:false
+              slot(
+                '④ enabled:false（滚动恢复 / 历史节点）',
+                const AylaRevealItem(
+                  enabled: false,
+                  child: Text(
+                    '直接显示，不挂动画',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AylaSpacing.sp3),
+          SizedBox(
+            width: 240,
+            child: AylaGlassButton(
+              label: '重播入场（四档）',
+              variant: AylaGlassButtonVariant.ghost,
+              minHeight: 28,
+              fontSize: 12,
+              expand: true,
+              onPressed: () => setState(() => _nonce++),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MotionShowcaseDemo extends StatefulWidget {
   const _MotionShowcaseDemo();
 
@@ -3707,7 +3886,27 @@ class _MotionShowcaseDemoState extends State<_MotionShowcaseDemo> {
 
   static const List<String> _tabs = <String>['首页', '语音', '直播'];
 
+  int _conv = 0; // 会话转场：identity 递增（每次切换 = 退场 → 进场重播）
+  bool _panels = true; // 会话转场 panels 档（true = 宿主透明，子件自己播）
+
+  /// 右滑返回宿主（合成手势的坐标基准）。
+  final GlobalKey _swipeBackKey = GlobalKey();
+
   void _replay() => setState(() => _nonce++);
+
+  /// 一键重放右滑：`dx ≥ 120` ⇒ 触发 onBack；`dx` 小且慢 ⇒ 200ms 回弹。
+  ///
+  /// ⚠️ 回弹档必须**同时**满足「位移不过阈值」与「速度 < 300px/s」：
+  /// 60px / 24 步 × 16ms = 384ms ⇒ ≈156px/s（若沿用 12 步会到 ≈312px/s，
+  /// 反而被甩动判定接走 —— 这正是「只按位移猜、不看时间形状」会踩的坑）。
+  Future<void> _simulateSwipeBack(double dx, {int steps = 12}) async {
+    final RenderBox? box =
+        _swipeBackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final Offset start =
+        box.localToGlobal(Offset.zero) + Offset(24, box.size.height / 2);
+    await aylaSyntheticDrag(start: start, delta: Offset(dx, 0), steps: steps);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3791,12 +3990,45 @@ class _MotionShowcaseDemoState extends State<_MotionShowcaseDemo> {
         Text('② 右滑返回（阈值 120px 或速度 ≥300px/s；松手未过阈值回弹）', style: t.cardTitle.copyWith(fontSize: 13, fontWeight: FontWeight.w600)),
         SizedBox(
           width: 340,
-          child: AylaFullScreenSwipeBack(
-            onBack: () => setState(() => _backCount++),
-            child: blank(
-              label: '在这一行上向右滑 →',
-              hint: '已触发返回 $_backCount 次',
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: AylaSpacing.sp2,
+            children: <Widget>[
+              AylaFullScreenSwipeBack(
+                key: _swipeBackKey,
+                onBack: () => setState(() => _backCount++),
+                child: blank(
+                  label: '在这一行上向右滑 →',
+                  hint: '已触发返回 $_backCount 次',
+                ),
+              ),
+              // 跟手档重播：也可以直接手滑；这两个键把同一段手势一键重放，
+              // 用来对照「过阈值触发」与「不过阈值回弹」两条路径。
+              Row(
+                spacing: AylaSpacing.sp2,
+                children: <Widget>[
+                  Expanded(
+                    child: AylaGlassButton(
+                      label: '模拟右滑 · 过阈值',
+                      minHeight: 28,
+                      fontSize: 12,
+                      expand: true,
+                      onPressed: () => _simulateSwipeBack(200),
+                    ),
+                  ),
+                  Expanded(
+                    child: AylaGlassButton(
+                      label: '模拟右滑 · 回弹',
+                      variant: AylaGlassButtonVariant.ghost,
+                      minHeight: 28,
+                      fontSize: 12,
+                      expand: true,
+                      onPressed: () => _simulateSwipeBack(60, steps: 24),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
         const SizedBox(height: AylaSpacing.sp2),
@@ -3840,6 +4072,54 @@ class _MotionShowcaseDemoState extends State<_MotionShowcaseDemo> {
                   label: '第 ${_tab + 1} 页 · ${_tabs[_tab]}',
                   hint: '向左滑下一页 / 向右滑上一页', // web `forward = net < 0`：手指左滑 ⇒ 下一项
                   tint: AylaColors.glassBgStrong,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp2),
+        Text(
+          '④ 会话转场（mode="wait"：旧件先退 300ms、退完才挂新件；panels 档切换）',
+          style: t.cardTitle.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        SizedBox(
+          width: 340,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: AylaSpacing.sp2,
+            children: <Widget>[
+              Row(
+                spacing: AylaSpacing.sp2,
+                children: <Widget>[
+                  Expanded(
+                    child: AylaGlassButton(
+                      label: '切换会话',
+                      minHeight: 28,
+                      fontSize: 12,
+                      expand: true,
+                      onPressed: () => setState(() => _conv++),
+                    ),
+                  ),
+                  Expanded(
+                    child: AylaGlassButton(
+                      label: _panels ? 'panels: true' : 'panels: false',
+                      variant: AylaGlassButtonVariant.ghost,
+                      minHeight: 28,
+                      fontSize: 12,
+                      expand: true,
+                      onPressed: () => setState(() => _panels = !_panels),
+                    ),
+                  ),
+                ],
+              ),
+              AylaConversationTransition(
+                identity: '会话 ${_conv + 1}',
+                panels: _panels,
+                builder: (BuildContext context, String id) => blank(
+                  label: id,
+                  hint: _panels
+                      ? '宿主透明（子件自己播）'
+                      : '宿主自播 right +20 → left −20',
                 ),
               ),
             ],

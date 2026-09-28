@@ -21,6 +21,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'tokens.dart';
+
 /// 解析迷你 SVG path。
 ///
 /// ⚠️ 分词必须用「命令字母 | 数字」正则，**不能按空白切分**：SVG path 里数字可以紧凑书写
@@ -155,6 +157,35 @@ class AylaSvgGlyph extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 铅笔 glyph 的 path 原文 —— web 两处内联 SVG **逐字相同**。
+///
+/// - `layout/ChannelSidebar.tsx:621–627`（群名头编辑键，`<svg 14 14>`）；
+/// - `pages/group/GroupInfo.tsx:1012–1018`（子群编辑键，`<svg 14 14>`）。
+/// 两处都不在 `components/icons.tsx` ⇒ 不能走 `AylaIcon`。
+const String kAylaPencilPath = 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z';
+
+/// 内联铅笔 glyph（公共件）。
+///
+/// 2026-09-28 提升：此前 `channel_sidebar.dart` 的 `_SidebarGlyphKind.pencil`
+/// 与 `group_info_lists.dart` 的 `_SubgroupPencilGlyph` 各存一份私有 painter
+/// （path 与基类属性完全一致）—— 两处调用点改为本件，path 只此一份。
+class AylaPencilGlyph extends StatelessWidget {
+  const AylaPencilGlyph({super.key, this.size = 14, this.color});
+
+  /// 绘制边长（web 两处均 `<svg width="14" height="14">`）。
+  final double size;
+
+  /// 颜色；null ⇒ `--text-secondary`（两处调用点共同的静息色）。
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => AylaSvgGlyph(
+        d: kAylaPencilPath,
+        size: size,
+        color: color ?? AylaColors.textSecondary,
+      );
 }
 
 class _AylaSvgGlyphPainter extends CustomPainter {

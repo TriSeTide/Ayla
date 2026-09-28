@@ -101,4 +101,46 @@ void main() {
     final Rect icon = tester.getRect(find.byType(AylaIcon));
     expect(icon.center.dx, closeTo(button.center.dx, 0.5));
   });
+
+  // ---- 有界松高宿主（2026-09-28 修） ----
+  //
+  // 事实源：app.css `.btn { min-height: 40px; padding: 0 24px }` —— `.btn` 的高
+  // 恒为「内容高 + min-height」，web 里没有任何拉伸语义（`.btn` 不在任何
+  // `align-items: stretch` 的 flex 项清单里）。
+  // 反证（修复前）：`Center(widthFactor: 1)` 缺 `heightFactor` ⇒ Center 在交叉轴
+  // **取满 maxHeight** ⇒ 800×600 测试表面里按钮高就是 600（实测 600×106.8）。
+  testWidgets('有界松高宿主：按钮保持内容高 40（不撑满宿主）',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      host(AylaGlassButton(label: '登录', onPressed: () {})),
+    );
+    // host 的 Center 给按钮 loose 约束 (0..800, 0..600)：修复前高度读到 600
+    expect(
+      tester.getSize(find.byType(AylaGlassButton)).height,
+      closeTo(40, 0.5),
+    );
+  });
+
+  testWidgets('紧高宿主（flex stretch 等价）：仍按宿主高拉伸',
+      (WidgetTester tester) async {
+    // 保证修复没有把「父级紧约束高度 ⇒ 按钮跟着拉伸」这条语义一起改掉：
+    // 渐变宽高比的高度基准只在**非紧约束**时才回落 minHeight。
+    await tester.pumpWidget(
+      host(
+        SizedBox(
+          height: 120,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              AylaGlassButton(label: '拉伸', onPressed: () {}),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(
+      tester.getSize(find.byType(AylaGlassButton)).height,
+      closeTo(120, 0.5),
+    );
+  });
 }

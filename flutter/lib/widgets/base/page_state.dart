@@ -93,7 +93,10 @@ class AylaPlaceholderTitle extends StatelessWidget {
 /// `search.css:55–57`（`.search-empty .placeholder-title { font-size: 20px }`，由
 /// [AylaPlaceholderTitle.fontSize] 表达）与 `app.css:225–227`
 /// （`.visibility-selector-groups .placeholder-desc { padding: var(--sp-1) 0 }`，
-/// 属选择器族自身的行内距，由调用方在该族容器上表达，本件不加）。
+/// 属选择器族自身的行内距，由调用方在该族容器上表达，本件不加 ——
+/// `visibility_selector.dart` 自 2026-09-28 起已用
+/// `EdgeInsets.symmetric(vertical: AylaSpacing.sp1)` + `textAlign: TextAlign.start`
+/// 落地该族空态）。
 class AylaPlaceholderDesc extends StatelessWidget {
   const AylaPlaceholderDesc(
     this.text, {

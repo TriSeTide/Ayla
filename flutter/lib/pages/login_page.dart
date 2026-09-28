@@ -114,7 +114,7 @@ class _LoginPageState extends State<LoginPage> {
                       constraints: BoxConstraints(
                         maxWidth: viewport.width >= AylaBreakpoints.md ? 460 : 420,
                       ),
-                      child: const _AuthIntro(),
+                      child: const AylaAuthIntro(),
                     ),
                     SizedBox(
                       width: (viewport.width * 0.06)
@@ -149,8 +149,12 @@ class _LoginPageState extends State<LoginPage> {
 }
 
 /// 左栏品牌介绍区（仅宽屏显示；内容照抄 web 原文含占位文案）。
-class _AuthIntro extends StatelessWidget {
-  const _AuthIntro();
+///
+/// **2026-09-28 提升为可复用件**：`RegisterPage.tsx:92–105` 与 `LoginPage.tsx:38–51`
+/// 是**逐字相同**的一份 DOM（web 两页各写一遍）⇒ Flutter 侧不再复制第二份。
+/// 内部仍用同文件的私有 `_GradientText` / `_IntroFeature`。
+class AylaAuthIntro extends StatelessWidget {
+  const AylaAuthIntro({super.key});
 
   @override
   Widget build(BuildContext context) {

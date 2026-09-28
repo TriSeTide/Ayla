@@ -2523,11 +2523,16 @@ class _SidebarGlyph extends StatelessWidget {
         color: color ?? AylaColors.textSecondary,
       );
     }
+    if (kind == _SidebarGlyphKind.pencil) {
+      // 铅笔已提升为公共件 `AylaPencilGlyph`（2026-09-28）：与
+      // `group_info_lists.dart` 的私有副本合并，path 只此一份（`kAylaPencilPath`）。
+      return AylaPencilGlyph(size: size, color: color);
+    }
     final String d = switch (kind) {
       _SidebarGlyphKind.chevronRight => 'm9 6 6 6-6 6',
       _SidebarGlyphKind.chevronDown => 'm6 9 6 6 6-6',
-      _SidebarGlyphKind.pencil =>
-        'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z',
+      // 已由上面的公共件分支处理（switch 需穷尽，保留空分支）
+      _SidebarGlyphKind.pencil => '',
       _SidebarGlyphKind.plus => '',
     };
     return CustomPaint(
