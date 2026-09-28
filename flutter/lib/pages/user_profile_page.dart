@@ -211,6 +211,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
         compact: !isNarrow,
         // 侧栏模式（split）时 web 的 .profile-card { gap: var(--sp-6) } 覆盖紧凑档的 sp4
         gap: split ? AylaSpacing.sp6 : null,
+        // 侧栏档铺满（web .profile-side .profile-card { flex: 1 0 auto }）
+        fillHeight: split,
         children: <Widget>[
           _identity(detail),
           if (detail.signature != null && detail.signature!.isNotEmpty)

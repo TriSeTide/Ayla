@@ -17,7 +17,8 @@ import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/avatar_halo.dart';
 import '../lib/widgets/base/reveal.dart';
 import '../lib/widgets/profile/profile_card.dart';
-import '../lib/widgets/profile/profile_edit.dart' show AylaProfileForm;
+import '../lib/widgets/profile/profile_edit.dart'
+    show AylaProfileForm, AylaProfileFormRow;
 import '../lib/state/auth_state.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
@@ -277,11 +278,28 @@ void main() {
     // **均匀分布**：两个相邻间隙必须近似相等（2026-09-28 用户实报「要均匀分布一些」）。
     // 若把若干区块先打包成一组的写法回潮，这里会立刻红（空隙会集中成一处）。
     expect((upperGap - stretched).abs(), lessThan(2));
+
+    // **整块上下均匀**（用户第三轮反馈）：表单（AylaProfileForm）也是「可伸展子项」，
+    // 它内部的 4 个间隙与卡片级间隙由同一份多余高度均分 ⇒ 两者应当接近。
+    // 基准间隙不同（卡片级 sp6 = 24 / 表单内 sp4 = 16）⇒ 容忍 8px + 取整误差。
+    final Rect statusRow = tester.getRect(
+      find.widgetWithText(AylaProfileFormRow, '在线状态'),
+    );
+    final Rect nicknameRow = tester.getRect(
+      find.widgetWithText(AylaProfileFormRow, '昵称'),
+    );
+    final double innerGap = nicknameRow.top - statusRow.bottom;
+    debugPrint('SIDEBAR innerGap=' + innerGap.toString());
+    expect(
+      (innerGap - stretched).abs(),
+      lessThan(12),
+      reason: '表单内部间隙应与卡片级间隙同值（整块均匀）',
+    );
     debugPrint('SIDEBAR stretchedGap=' + stretched.toString());
     expect(
       stretched,
-      greaterThan(100),
-      reason: '卡片铺满后多余空间应分配到上半区与表单之间（web 的 flex:1 净效果）',
+      greaterThan(50),
+      reason: '卡片铺满后多余空间应分配到相邻区块之间（用户：整块上下均匀）',
     );
   });
 

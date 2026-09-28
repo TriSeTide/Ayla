@@ -37,6 +37,9 @@
 library;
 
 import 'package:flutter/material.dart';
+// ⚠️ 自定义布局原语（_EvenFillColumn）需要 rendering 的 mixin：
+// ContainerRenderObjectMixin / RenderBoxContainerDefaultsMixin / ContainerBoxParentData。
+import 'package:flutter/rendering.dart';
 
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
@@ -53,6 +56,8 @@ class AylaProfileCard extends StatelessWidget {
     this.compact = false,
     this.gap,
     this.fillHeight = false,
+    this.stretchChildIndex,
+    this.stretchChildInnerGaps = 0,
   });
 
   /// 卡内区块（identity / avatar-actions / 表单 / 签名…由调用方装配）。
@@ -87,33 +92,55 @@ class AylaProfileCard extends StatelessWidget {
   /// （2026-09-28 用户实报「要均匀分布一些」）。
   final bool fillHeight;
 
+  /// 可伸展子项的下标（[fillHeight] 时生效）：它会被撑高，并把多出的高度交给
+  /// [stretchChildInnerGaps] 个**内部**间隙均分。
+  ///
+  /// 用途：让「卡片级间隙」与「某个子件内部的间隙」**同值**分配 —— 侧栏资料卡的表单
+  /// （\`AylaProfileForm\`）内部还有 4 个间隙，只均分卡片级的话多余空间会集中到一处
+  /// （用户 2026-09-28 实报「我说这一整块上下均匀」）。
+  /// ⚠️ 该子件必须自己支持撑高（表单用 \`fillHeight\` 把内部 Column 改成 \`space-between\`）。
+  final int? stretchChildIndex;
+
+  /// 可伸展子项内部的间隙数（表单 = 区块数 − 1 = 4）。
+  final int stretchChildInnerGaps;
+
   @override
   Widget build(BuildContext context) {
     final EdgeInsets padding = EdgeInsets.all(
       compact ? AylaSpacing.sp4 : AylaSpacing.sp8,
     );
-    Widget content = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment:
-          fillHeight ? MainAxisAlignment.spaceBetween : MainAxisAlignment.start,
-      spacing: gap ?? (compact ? AylaSpacing.sp4 : AylaSpacing.sp6),
-      children: children,
-    );
+    final double resolvedGap =
+        gap ?? (compact ? AylaSpacing.sp4 : AylaSpacing.sp6);
+    // 侧栏可用高度由页面注入（见 [AylaProfileSidebarHeight] 的说明）。
+    final double? available =
+        fillHeight ? AylaProfileSidebarHeight.maybeOf(context) : null;
+    final double inner = available == null
+        ? 0
+        : (available - padding.vertical).clamp(0.0, double.infinity);
 
-    if (fillHeight) {
-      // ⚠️ 为什么不能只靠父级的 `ConstrainedBox(minHeight: …)`：
-      // [AylaGlassCard] 的卡面是 `DecoratedBox > Stack`，而 `Stack` 默认
-      // `StackFit.loose` ⇒ 非定位子项拿到的是**放松后**的约束（minHeight 被丢掉）
-      // ⇒ 本 Column 的 `space-between` 无从分配剩余空间。
-      // 实测（2026-09-28）：外层 `ConstrainedBox(minHeight: 976)` 时卡片确为 976 高，
-      // 但本 Column 仍是 525 的内容高。
-      // ⇒ 由侧栏把可用高度经 [AylaProfileSidebarHeight] 显式注入（页面层
-      // `aylaProfileSidebarScroll` 提供；无注入时退化为普通排列，不抛错）。
-      final double? available = AylaProfileSidebarHeight.maybeOf(context);
+    Widget content;
+    if (available != null &&
+        stretchChildIndex != null &&
+        stretchChildInnerGaps > 0) {
+      // 「整块上下均匀」：卡片级间隙与可伸展子件内部间隙**同值**均分
+      content = _EvenFillColumn(
+        available: inner,
+        gap: resolvedGap,
+        stretchIndex: stretchChildIndex!,
+        stretchInnerGaps: stretchChildInnerGaps,
+        children: children,
+      );
+    } else {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: fillHeight
+            ? MainAxisAlignment.spaceBetween
+            : MainAxisAlignment.start,
+        spacing: resolvedGap,
+        children: children,
+      );
       if (available != null) {
-        final double inner =
-            (available - padding.vertical).clamp(0.0, double.infinity);
         content = ConstrainedBox(
           constraints: BoxConstraints(minHeight: inner),
           child: content,
@@ -337,4 +364,218 @@ class AylaProfileAvatarActions extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// 父数据（本布局只用到 offset）。
+class _EvenFillParentData extends ContainerBoxParentData<RenderBox> {}
+
+/// 「上下均匀」列 —— 侧栏资料卡的布局原语（用户 2026-09-28 实报：整块要上下均匀）。
+///
+/// ## 语义
+/// 把「可用高 − 各子项自然高」的**多余高度**，按**间隙总数**均分给：
+/// - 卡片级相邻子项之间的 `n − 1` 个间隙；
+/// - **可伸展子项内部**的 [stretchInnerGaps] 个间隙（该项会被撑高相应的高度）。
+///
+/// 为什么需要它（而不是 `Column + space-between`）：`space-between` 只在**它自己的**
+/// 子项之间分配 —— 表单（`AylaProfileForm`）是一个整体，它内部的 4 个间隙拿不到任何份额
+/// ⇒ 多余空间会全落在一处（用户实报「要上下均匀」）。本布局把表单也拉进同一份分配：
+/// 表单被撑高 `perGap × stretchInnerGaps`，再在它内部用 `space-between` 把这部分均分掉
+/// ⇒ 卡片级间隙与表单内间隙**同值**。
+///
+/// ⚠️ 内容比可用高时（矮窗）`extra = 0` ⇒ 退化为自然高 + 基准间隙（由外层侧栏滚动兜底），
+/// 不会溢出。
+class _EvenFillColumn extends MultiChildRenderObjectWidget {
+  const _EvenFillColumn({
+    required this.available,
+    required this.gap,
+    required this.stretchIndex,
+    required this.stretchInnerGaps,
+    required super.children,
+  });
+
+  /// 卡片内容区的可用高度（由 `AylaProfileSidebarHeight` 注入）。
+  final double available;
+
+  /// 基准间隙（卡片级）。
+  final double gap;
+
+  /// 可伸展子项下标（表单所在位置）。
+  final int stretchIndex;
+
+  /// 可伸展子项内部的间隙数（表单 = 区块数 − 1）。
+  final int stretchInnerGaps;
+
+  @override
+  _RenderEvenFillColumn createRenderObject(BuildContext context) =>
+      _RenderEvenFillColumn(
+        available: available,
+        gap: gap,
+        stretchIndex: stretchIndex,
+        stretchInnerGaps: stretchInnerGaps,
+      );
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderEvenFillColumn renderObject,
+  ) {
+    renderObject
+      ..available = available
+      ..gap = gap
+      ..stretchIndex = stretchIndex
+      ..stretchInnerGaps = stretchInnerGaps;
+  }
+}
+
+class _RenderEvenFillColumn extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _EvenFillParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _EvenFillParentData> {
+  _RenderEvenFillColumn({
+    required double available,
+    required double gap,
+    required int stretchIndex,
+    required int stretchInnerGaps,
+  })  : _available = available,
+        _gap = gap,
+        _stretchIndex = stretchIndex,
+        _stretchInnerGaps = stretchInnerGaps;
+
+  double _available;
+  double get available => _available;
+  set available(double value) {
+    if (_available == value) return;
+    _available = value;
+    markNeedsLayout();
+  }
+
+  double _gap;
+  double get gap => _gap;
+  set gap(double value) {
+    if (_gap == value) return;
+    _gap = value;
+    markNeedsLayout();
+  }
+
+  int _stretchIndex;
+  int get stretchIndex => _stretchIndex;
+  set stretchIndex(int value) {
+    if (_stretchIndex == value) return;
+    _stretchIndex = value;
+    markNeedsLayout();
+  }
+
+  int _stretchInnerGaps;
+  int get stretchInnerGaps => _stretchInnerGaps;
+  set stretchInnerGaps(int value) {
+    if (_stretchInnerGaps == value) return;
+    _stretchInnerGaps = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _EvenFillParentData) {
+      child.parentData = _EvenFillParentData();
+    }
+  }
+
+  List<RenderBox> _children() {
+    final List<RenderBox> kids = <RenderBox>[];
+    RenderBox? child = firstChild;
+    while (child != null) {
+      kids.add(child);
+      child = childAfter(child);
+    }
+    return kids;
+  }
+
+  @override
+  void performLayout() {
+    final double width = constraints.maxWidth;
+    final List<RenderBox> kids = _children();
+    double total = 0;
+    for (final RenderBox kid in kids) {
+      kid.layout(BoxConstraints(maxWidth: width), parentUsesSize: true);
+      total += kid.size.height;
+    }
+    final int cardGaps = kids.length > 1 ? kids.length - 1 : 0;
+    final int gapCount = cardGaps + _stretchInnerGaps;
+    final double natural = total + _gap * cardGaps;
+    final double extra = (available - natural) > 0 ? available - natural : 0;
+    final double perGap = gapCount > 0 ? extra / gapCount : 0;
+    final double cardGap = _gap + perGap;
+    final double stretchExtra = perGap * _stretchInnerGaps;
+
+    double y = 0;
+    for (int i = 0; i < kids.length; i += 1) {
+      final RenderBox kid = kids[i];
+      if (i == _stretchIndex && stretchExtra > 0) {
+        // ⚠️ 用 **minHeight**（不是 tight）：tight 高会让子项内的
+        // `Column(mainAxisSize: min, spaceBetween)` 的 idealSize 等于内容高 ⇒ 分配失效；
+        // minHeight 下子项高度 = max(内容高, minHeight) 且 spaceBetween 正常分配（实测）。
+        kid.layout(
+          BoxConstraints(
+            minWidth: width,
+            maxWidth: width,
+            minHeight: kid.size.height + stretchExtra,
+          ),
+          parentUsesSize: true,
+        );
+      }
+      (kid.parentData! as _EvenFillParentData).offset = Offset(0, y);
+      y += kid.size.height + (i < kids.length - 1 ? cardGap : 0);
+    }
+    size = constraints.constrain(Size(width, y));
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
+
+  double _intrinsicWidth(double height, double Function(RenderBox, double) f) {
+    final List<RenderBox> kids = _children();
+    double extent = 0;
+    for (final RenderBox kid in kids) {
+      extent = extent > f(kid, height) ? extent : f(kid, height);
+    }
+    return extent + (kids.length > 1 ? _gap * (kids.length - 1) : 0);
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) =>
+      _intrinsicWidth(height, (RenderBox c, double h) => c.getMinIntrinsicWidth(h));
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      _intrinsicWidth(height, (RenderBox c, double h) => c.getMaxIntrinsicWidth(h));
+
+  @override
+  double computeMinIntrinsicHeight(double width) {
+    final List<RenderBox> kids = _children();
+    double extent = 0;
+    for (final RenderBox kid in kids) {
+      extent += kid.getMinIntrinsicHeight(width);
+    }
+    return extent + (kids.length > 1 ? _gap * (kids.length - 1) : 0);
+  }
+
+  @override
+  double computeMaxIntrinsicHeight(double width) {
+    final List<RenderBox> kids = _children();
+    double extent = 0;
+    for (final RenderBox kid in kids) {
+      extent += kid.getMaxIntrinsicHeight(width);
+    }
+    return extent + (kids.length > 1 ? _gap * (kids.length - 1) : 0);
+  }
+
+  @override
+  double? computeDistanceToActualBaseline(TextBaseline baseline) =>
+      defaultComputeDistanceToFirstActualBaseline(baseline);
 }

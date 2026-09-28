@@ -466,6 +466,7 @@ class AylaProfileForm extends StatefulWidget {
     this.dirty = true,
     this.error,
     this.spacing = AylaSpacing.sp4,
+    this.fillHeight = false,
   });
 
   /// 昵称输入控制器（web nickname state）。
@@ -531,6 +532,12 @@ class AylaProfileForm extends StatefulWidget {
   /// .profile-form 的 gap：默认 sp4；≥769 单栏档为 sp3（web profile.css 49）。
   final double spacing;
 
+  /// 撑高时把多余空间均分到**内部区块之间**（\`space-between\`）。
+  ///
+  /// 需要父级给出 \`minHeight\`（\`AylaProfileCard.fillHeight\` 的 \`_EvenFillColumn\`
+  /// 会给本件一个 \`minHeight = 自然高 + 内部应得份额\`）；无约束时等价于普通排列。
+  final bool fillHeight;
+
   @override
   State<AylaProfileForm> createState() => _AylaProfileFormState();
 }
@@ -555,6 +562,9 @@ class _AylaProfileFormState extends State<AylaProfileForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: widget.fillHeight
+          ? MainAxisAlignment.spaceBetween
+          : MainAxisAlignment.start,
       spacing: widget.spacing,
       children: <Widget>[
         // ---- 在线状态（div.profile-form-row + .status-chips） ----

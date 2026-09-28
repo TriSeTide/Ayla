@@ -328,6 +328,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ),
     ];
     final Widget form = AylaProfileForm(
+          // 侧栏档由卡片撑高，再把多余空间均分到内部 4 个区块之间（用户要「整块上下均匀」）
+          fillHeight: true,
           nicknameController: _nickname,
           signatureController: _signature,
           status: _status,
@@ -354,6 +356,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             compact: true, // padding: sp4
             gap: AylaSpacing.sp6, // .profile-side .profile-card { gap: sp6 }
             fillHeight: true, // flex: 1 0 auto ⇒ 铺满 + 间隙自适应
+            // 表单内部还有 4 个间隙（5 个区块）⇒ 把它也拉进同一份均分：
+            // 卡片级间隙与表单内间隙取同值（用户 2026-09-28：「我说这一整块上下均匀」）
+            stretchChildIndex: cardChildren.length, // form 紧跟在上半区之后
+            stretchChildInnerGaps: 4,
             // ⚠️ 子项必须**平级**传入：fillHeight 的 space-between 是在**相邻子项之间**均分多余空间 ——
             // 把 identity + avatar-actions 先打包成一组会让空隙集中成一处（用户实报「要均匀分布一些」）。
             children: <Widget>[...cardChildren, form],

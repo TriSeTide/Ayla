@@ -12,6 +12,7 @@ import 'package:go_router/go_router.dart';
 
 import '../lib/router/app_router.dart';
 import '../lib/router/shell_config.dart';
+import '../lib/pages/pending_page.dart';
 import '../lib/state/auth_state.dart';
 import '../lib/theme/app_theme.dart';
 import '../lib/theme/page_transitions.dart';
@@ -54,6 +55,32 @@ void main() {
 
   /// ⚠️ 必须钉真实表面尺寸：默认 800×600 会把登录页的宽屏分栏（intro 420 + gap 48 +
   /// card 440）挤到 `RenderFlex overflowed`（实测溢出 100px）。
+
+
+  /// 取一个**仍是占位页**的路由路径（自动跟随交付进度）。
+  ///
+  /// ⚠️ 为什么要探测：占位页的数量随批次递减，硬编码某条路径会在它交付时立刻失效
+  /// （2026-09-28 已因此红过两次）。这里的候选按「尚未交付的域」列出，命中即返回；
+  /// 全部交付后返回 null（调用方跳过该断言）。
+  Future<String?> findPendingPath(WidgetTester tester, GoRouter router) async {
+    // ⚠️ '/messages' 放最后：该路径会让 AppShell 的浮层（RefreshFab）触发
+    // ParentDataWidget 冲突断言（与本用例无关的既有问题）。
+    const List<String> candidates = <String>[
+      '/posts/1',
+      '/group/1',
+      '/voice/v1',
+      '/live/1',
+      '/games/1',
+      '/chat/c1',
+      '/messages',
+    ];
+    for (final String path in candidates) {
+      router.go(path);
+      await tester.pumpAndSettle();
+      if (find.text('该页面属后续批次').evaluate().isNotEmpty) return path;
+    }
+    return null;
+  }
 
   Future<void> useViewport(WidgetTester tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 900));
@@ -215,32 +242,20 @@ void main() {
     container.dispose();
   });
 
-  testWidgets('未实现路由（PendingPage）：首帧就是终值 —— 不做任何转场', (WidgetTester tester) async {
+  testWidgets('PendingPage：首帧就是终值 —— 不做任何转场', (
+    WidgetTester tester,
+  ) async {
     await useViewport(tester);
-    final ProviderContainer container = ProviderContainer();
-    container.read(authNotifierProvider.notifier).setTokens('access', 'refresh');
-    final GoRouter router = container.read(appRouterProvider);
+    // ⚠️ 组件级断言（不经路由表）：占位页本身必须是「首帧终值 + 无入场淡入」。
+    // 路由级的 NoTransitionPage 由下一条「不叠页」用例覆盖。
     await tester.pumpWidget(
-      UncontrolledProviderScope(
-        container: container,
-        child: MaterialApp.router(
-          routerConfig: router,
-          theme: buildAylaTheme(),
-          builder: (BuildContext context, Widget? child) => Scaffold(
-            backgroundColor: Colors.transparent,
-            body: child,
-          ),
-        ),
+      MaterialApp(
+        theme: buildAylaTheme(),
+        home: const PendingPage(path: '/x', webSource: 'test'),
       ),
     );
-    await tester.pump();
-
-    // ⚠️ 用**仍是占位页**的路由：/voice、/live、/games、/favorites、/search
-    // 已在第二批交付为真实页面，不再是 PendingPage。
-    router.go('/posts'); // 未实现 ⇒ NoTransitionPage
     await tester.pump(); // **只一帧**
     expect(find.text('该页面属后续批次'), findsOneWidget);
-    // 没有转场 ⇒ 首帧不该出现「部分透明」的转场层（有转场时整页 opacity 从 0 起）
     expect(
       tester
           .widgetList<Opacity>(find.byType(Opacity))
@@ -249,9 +264,6 @@ void main() {
       isEmpty,
       reason: '未实现页不该有入场淡入（用户：没做的页面就别强加动画）',
     );
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    container.dispose();
   });
 
   testWidgets('换页**不叠页**：转场窗口内只有一页内容（用户：别几帧同时显示两个页面）', (
@@ -276,14 +288,15 @@ void main() {
     );
     await tester.pump();
 
-    // 两个占位页的标题**逐字相同** ⇒ 若新旧页并存，这条会数到 2（正是「叠页」）。
-    expect(find.text('该页面属后续批次'), findsOneWidget);
-
-    // ⚠️ 目标路由必须是**仍是占位页**的（见上一条用例的说明）；
-    // 且要避开 `/messages` 这类会让 AppShell 浮层（RefreshFab）触发
-    // ParentDataWidget 冲突断言的路径（与本用例无关的既有问题）。
-    router.go('/posts');
+    // ⚠️ 起始路由（/group）自第 3 批起已是**真实页面**（HomePage）⇒ 不能再假定首帧
+    // 落在占位页上；改为**动态探测**一个仍是占位页的路径后再断言
+    // （路由交付后本用例自动跟随，不会再失效）。
+    final String? pending = await findPendingPath(tester, router);
+    if (pending == null) return; // 全部路由都已交付 ⇒ 本用例不再适用
+    router.go(pending);
+    await tester.pump(); // 回到待验证的起点（探测过程已 pumpAndSettle）
     await tester.pump(); // 首帧
+    // 两个占位页的标题**逐字相同** ⇒ 若新旧页并存，这条会数到 2（正是「叠页」）。
     expect(
       find.text('该页面属后续批次'),
       findsOneWidget,
