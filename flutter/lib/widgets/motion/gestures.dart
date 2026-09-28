@@ -188,10 +188,16 @@ class _AylaPanelTransitionState extends State<AylaPanelTransition>
       animation: t,
       builder: (BuildContext context, Widget? child) {
         final double v = reduced ? (widget.show ? 1 : 0) : t.value;
-        // 进场：从 edge 的 ±20 到 0；退场：从 0 到 exitEdge 的 ±20
-        final Offset inOff = _offsetFor(widget.edge) * (1 - v);
-        final Offset outOff = _offsetFor(out) * v;
-        final Offset off = widget.show ? inOff : outOff;
+        // 进场：从 edge 的 ±20 到 0；退场：从 0 到 exitEdge 的 ±20。
+        //
+        // ⚠️ 2026-09-28 修（既有 bug，19 号 §7.5 第三批 C 类第①条）：
+        // 退场原写 `outOff = _offsetFor(out) * v` —— 退场走 `_c.reverse()`，v 由 1 递减，
+        // 于是位移从 **±20 滑回 0**（**先瞬跳 ±20 再滑回**，方向与 web 相反）。
+        // web `auroraquaMotion.ts:49` 的 exit = `{ ...offset(exitEdge), opacity: 0 }`，
+        // 即 center（x 0 / opacity 1）→ exitEdge（x ±20 / opacity 0）⇒ 退场必须乘 **(1 - v)**。
+        // 进场与退场现在是同一条「±20 × (1 - v)」：进场 v 0→1、退场 v 1→0。
+        final Offset off =
+            _offsetFor(widget.show ? widget.edge : out) * (1 - v);
         return Opacity(
           opacity: v,
           child: Transform.translate(offset: off, child: child),
@@ -211,6 +217,7 @@ class AylaConversationTransition extends StatefulWidget {
     super.key,
     required this.identity,
     required this.builder,
+    this.panels = true,
   });
 
   /// 会话身份（web `key={identity}`）。
@@ -218,6 +225,18 @@ class AylaConversationTransition extends StatefulWidget {
 
   /// 内容构建（按当前 identity）。
   final Widget Function(BuildContext context, String identity) builder;
+
+  /// 面板编排档（web `ConversationTransition.tsx:12` 的 `panels`，默认 true）。
+  ///
+  /// - `true`：宿主**透明**（web `auroraquaPanelOrchestration` 三个变体全空）——
+  ///   只做「旧件退完再挂新件」的编排，自身不位移/不淡入；进出场由子件自己播
+  ///   （如 `AylaPrivateChatPane` 的 `panelMotion`）。
+  /// - `false`：宿主**自己播** `panelVariants(reduced, "right", "left")`（tsx:50）——
+  ///   进场 = 右侧 +20 / opacity 0 → center；退场 = center → 左侧 −20 / opacity 0，
+  ///   300ms `easeInOut`；reduced ⇒ 位移 0、时长 0（子件档见 `AylaPanelTransition`）。
+  ///
+  /// 事实源 = `MessagesPage.tsx:190`：`panels={activeChatId != null}` ⇒ **空会话态**这一档走 false。
+  final bool panels;
 
   @override
   State<AylaConversationTransition> createState() =>
@@ -237,6 +256,47 @@ class _AylaConversationTransitionState extends State<AylaConversationTransition>
 
   /// 当前挂载的 identity。
   late String _current = widget.identity;
+
+  /// reduced-motion（web `usePrefersReducedMotion`；首帧依赖解析一次）。
+  bool _reduced = false;
+
+  bool _depsResolved = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_depsResolved) return;
+    _depsResolved = true;
+    _reduced = MediaQuery.disableAnimationsOf(context);
+    if (_reduced) _c.duration = Duration.zero;
+    // panels:false ⇒ 挂载即播进场（web `initial={reduced ? false : "enter"}`，tsx:47）
+    if (!widget.panels && !_reduced) {
+      _c.value = 0;
+      _c.forward();
+    }
+  }
+
+  /// `panels: false` 档：宿主自己套 `panelVariants(reduced, "right", "left")`（tsx:50）。
+  ///
+  /// - 进场（`entering`）：+20 / opacity 0 → center（v 0→1）
+  /// - 退场：center → −20 / opacity 0（v 1→0）
+  /// - reduced：位移 0；进场不淡入（opacity 1）、退场直接 opacity 0（时长 0）
+  Widget _wrapHostPanel(Widget child, {required bool entering}) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (BuildContext context, Widget? c) {
+        final double v = _c.value;
+        final double dx = _reduced
+            ? 0
+            : (entering ? kAylaPanelDistance : -kAylaPanelDistance) * (1 - v);
+        return Opacity(
+          opacity: _reduced ? (entering ? 1 : 0) : v,
+          child: Transform.translate(offset: Offset(dx, 0), child: c),
+        );
+      },
+      child: child,
+    );
+  }
 
   @override
   void initState() {
@@ -278,22 +338,25 @@ class _AylaConversationTransitionState extends State<AylaConversationTransition>
       ),
     );
     final String? leaving = _leaving;
-    if (leaving == null) return active;
+    if (leaving == null) {
+      return widget.panels ? active : _wrapHostPanel(active, entering: true);
+    }
+    final Widget leavingChild = KeyedSubtree(
+      key: ValueKey<String>(leaving),
+      child: Builder(
+        builder: (BuildContext context) => widget.builder(context, leaving),
+      ),
+    );
     // 退出中的旧件：不可点、语义排除（web `inert` + `aria-hidden` + `pointer-events:none`）
     return Stack(
       children: <Widget>[
         ExcludeSemantics(
           child: IgnorePointer(
-            child: FadeTransition(
-              opacity: _c,
-              child: KeyedSubtree(
-                key: ValueKey<String>(leaving),
-                child: Builder(
-                  builder: (BuildContext context) =>
-                      widget.builder(context, leaving),
-                ),
-              ),
-            ),
+            child: widget.panels
+                // panels:true ⇒ 宿主透明（子件自己播）；只有淡出表达退出
+                ? FadeTransition(opacity: _c, child: leavingChild)
+                // panels:false ⇒ center → 左 −20 + 淡出（tsx:50）
+                : _wrapHostPanel(leavingChild, entering: false),
           ),
         ),
       ],

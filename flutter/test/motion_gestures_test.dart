@@ -13,6 +13,10 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/widgets/motion/gestures.dart';
 
+/// reduced 档的子件构建（顶层函数：`MediaQuery` const 宿主里不能用闭包）。
+Widget _reducedBuilder(BuildContext context, String identity) =>
+    const Center(child: Text('空会话'));
+
 void main() {
   Widget host(Widget child, {double width = 360}) => MaterialApp(
     home: previewScope(
@@ -119,6 +123,101 @@ void main() {
       );
       expect(tr.transform.storage[12], closeTo(-kAylaPanelDistance, 0.01));
     });
+
+    testWidgets('退场：位移 0 → +20（web exit = offset(exitEdge)，**不许先瞬跳 ±20 再滑回**）', (
+      WidgetTester tester,
+    ) async {
+      final ValueNotifier<bool> show = ValueNotifier<bool>(true);
+      addTearDown(show.dispose);
+      await tester.pumpWidget(
+        host(
+          ValueListenableBuilder<bool>(
+            valueListenable: show,
+            builder: (BuildContext context, bool v, Widget? _) =>
+                AylaPanelTransition(
+                  show: v,
+                  edge: AylaPanelEdge.right,
+                  child: const SizedBox(height: 50, child: Text('面板')),
+                ),
+          ),
+        ),
+      );
+      await tester.pump(kAylaPanelDuration); // 进场走完
+      await tester.pump();
+
+      double dx() => tester
+          .widget<Transform>(
+            find.descendant(
+              of: find.byType(AylaPanelTransition),
+              matching: find.byType(Transform),
+            ),
+          )
+          .transform
+          .storage[12];
+      double opacity() => tester
+          .widget<Opacity>(
+            find.descendant(
+              of: find.byType(AylaPanelTransition),
+              matching: find.byType(Opacity),
+            ),
+          )
+          .opacity;
+
+      expect(dx(), closeTo(0, 0.01)); // center
+      expect(opacity(), closeTo(1, 0.01));
+
+      show.value = false;
+      await tester.pump(); // 翻转帧（didUpdateWidget ⇒ reverse 刚起步，v 仍 ≈ 1）
+      // ⚠️ 回归锁：旧实现此处是 20*1 = +20（瞬跳），修后是 20*(1-1) = 0
+      expect(
+        dx(),
+        closeTo(0, 1.0),
+        reason: '退场首帧必须还在 center（0），不能瞬跳到 ±20（web auroraquaMotion.ts:49）',
+      );
+
+      await tester.pump(const Duration(milliseconds: 150)); // easeInOut 中点
+      expect(dx(), closeTo(kAylaPanelDistance / 2, 1.0));
+      expect(opacity(), closeTo(0.5, 0.05));
+
+      await tester.pump(const Duration(milliseconds: 200)); // 走完 300ms
+      expect(dx(), closeTo(kAylaPanelDistance, 0.01)); // 停在 exitEdge 的 +20
+      expect(opacity(), closeTo(0, 0.01));
+    });
+
+    testWidgets('退场到相反边：edge=right / exitEdge=left ⇒ 位移 0 → −20', (
+      WidgetTester tester,
+    ) async {
+      final ValueNotifier<bool> show = ValueNotifier<bool>(true);
+      addTearDown(show.dispose);
+      await tester.pumpWidget(
+        host(
+          ValueListenableBuilder<bool>(
+            valueListenable: show,
+            builder: (BuildContext context, bool v, Widget? _) =>
+                AylaPanelTransition(
+                  show: v,
+                  edge: AylaPanelEdge.right,
+                  exitEdge: AylaPanelEdge.left,
+                  child: const SizedBox(height: 50, child: Text('面板')),
+                ),
+          ),
+        ),
+      );
+      await tester.pump(kAylaPanelDuration);
+      await tester.pump();
+
+      show.value = false;
+      await tester.pump();
+      await tester.pump(kAylaPanelDuration);
+      await tester.pump();
+      final Transform tr = tester.widget<Transform>(
+        find.descendant(
+          of: find.byType(AylaPanelTransition),
+          matching: find.byType(Transform),
+        ),
+      );
+      expect(tr.transform.storage[12], closeTo(-kAylaPanelDistance, 0.01));
+    });
   });
 
   group('AylaConversationTransition（AnimatePresence mode="wait" 等价）', () {
@@ -154,6 +253,141 @@ void main() {
       await tester.pumpAndSettle(); // 新件进场也走完
       expect(find.text('会话 c2'), findsOneWidget);
       expect(find.text('会话 c1'), findsNothing);
+    });
+
+    testWidgets('panels:false（空会话态）⇒ 宿主自己播：挂载从 +20/透明进到 center', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          AylaConversationTransition(
+            identity: 'empty',
+            panels: false,
+            builder: (BuildContext context, String identity) =>
+                const Center(child: Text('空会话')),
+          ),
+        ),
+      );
+      await tester.pump(); // 首帧（didChangeDependencies 已 forward(from 0)）
+      Transform tr() => tester.widget<Transform>(
+        find.descendant(
+          of: find.byType(AylaConversationTransition),
+          matching: find.byType(Transform),
+        ),
+      );
+      Opacity op() => tester.widget<Opacity>(
+        find.descendant(
+          of: find.byType(AylaConversationTransition),
+          matching: find.byType(Opacity),
+        ),
+      );
+      expect(tr().transform.storage[12], closeTo(kAylaPanelDistance, 1.0)); // 右 +20
+      expect(op().opacity, closeTo(0, 0.05));
+
+      await tester.pump(kAylaPanelDuration);
+      await tester.pump();
+      expect(tr().transform.storage[12], closeTo(0, 0.01)); // center
+      expect(op().opacity, closeTo(1, 0.01));
+    });
+
+    testWidgets('panels:false ⇒ 旧件退场往左 −20 淡出，退完才挂新件', (
+      WidgetTester tester,
+    ) async {
+      final ValueNotifier<String> id = ValueNotifier<String>('c1');
+      addTearDown(id.dispose);
+      await tester.pumpWidget(
+        host(
+          ValueListenableBuilder<String>(
+            valueListenable: id,
+            builder: (BuildContext context, String v, Widget? _) =>
+                AylaConversationTransition(
+                  identity: v,
+                  panels: false,
+                  builder: (BuildContext context, String identity) =>
+                      Center(child: Text('会话 $identity')),
+                ),
+          ),
+        ),
+      );
+      await tester.pump(kAylaPanelDuration); // 首次进场走完
+      await tester.pump();
+
+      id.value = 'c2';
+      await tester.pump();
+      await tester.pump();
+      // 退出中：旧件在、新件未挂（mode="wait"）
+      expect(find.text('会话 c1'), findsOneWidget);
+      expect(find.text('会话 c2'), findsNothing);
+
+      double dxOf() => tester
+          .widget<Transform>(
+            find.descendant(
+              of: find.byType(AylaConversationTransition),
+              matching: find.byType(Transform),
+            ),
+          )
+          .transform
+          .storage[12];
+      double opOf() => tester
+          .widget<Opacity>(
+            find.descendant(
+              of: find.byType(AylaConversationTransition),
+              matching: find.byType(Opacity),
+            ),
+          )
+          .opacity;
+
+      expect(dxOf(), closeTo(0, 1.0), reason: '退场首帧仍在 center（不瞬跳）');
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(dxOf(), closeTo(-kAylaPanelDistance / 2, 1.5)); // 往左走（−10）
+      expect(opOf(), closeTo(0.5, 0.05));
+      await tester.pump(const Duration(milliseconds: 140)); // t=290，退场接近走完
+      expect(dxOf(), lessThan(-15), reason: '旧件已大幅左移（目标 −20）');
+      expect(opOf(), lessThan(0.2));
+
+      await tester.pumpAndSettle(); // 退完 ⇒ 监听器挂新件并播进场（新件从 +20 进）
+      expect(find.text('会话 c2'), findsOneWidget);
+      expect(find.text('会话 c1'), findsNothing);
+      expect(dxOf(), closeTo(0, 0.01), reason: '新件进场落点为 center');
+    });
+
+    testWidgets('panels:false + reduced-motion ⇒ 位移 0、不淡入（时长 0）', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: previewScope(
+            const MediaQuery(
+              data: MediaQueryData(
+                size: Size(360, 300),
+                disableAnimations: true,
+              ),
+              child: SizedBox(
+                width: 360,
+                height: 300,
+                child: AylaConversationTransition(
+                  identity: 'empty',
+                  panels: false,
+                  builder: _reducedBuilder,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final Transform tr = tester.widget<Transform>(
+        find.descendant(
+          of: find.byType(AylaConversationTransition),
+          matching: find.byType(Transform),
+        ),
+      );
+      final Opacity op = tester.widget<Opacity>(
+        find.descendant(
+          of: find.byType(AylaConversationTransition),
+          matching: find.byType(Opacity),
+        ),
+      );
+      expect(tr.transform.storage[12], 0); // distance = 0（reduced）
+      expect(op.opacity, 1); // enter opacity = reduced ? 1 : 0
     });
   });
 

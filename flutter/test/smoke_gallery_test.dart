@@ -34,6 +34,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'Batch 2 基元（LayoutSwitch / SegmentedTab / CapsuleTag / ScrollingText）',
     'Typography（design.md §3 九级）',
     'AylaTooltip（web `title=` 28 处；提示气泡由浏览器/OS 绘制，无 CSS 可移植）',
+    'AylaSwitch（通用开关 —— group.css 1924–1993 群档 + profile.css 400–434 个人档 + base.css 6–7）',
   ],
   'Shell · 导航壳与浮层': <String>[
     'AylaBottomTabs（layout/BottomTabs.tsx 1–91 + shell.css 77–162）',
@@ -71,7 +72,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaLiveOwnerPanel（components/live/LiveOwnerPanel.tsx 217 行 + app.css 3831–3843 + live.css 168–180/190–269）',
     'AylaLivePlayer（components/live/LivePlayer.tsx 420 行 + app.css 3517–3636 + live.css 939–1005）',
     'AylaLiveMiniPlayer（components/live/LiveMiniPlayer.tsx 228 行 + live.css 1021–1095）',
-    'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760）',
+    'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760 + auroraqua.css 202–211/316–321/437–445）',
   ],
   'voice · 语音域': <String>[
     'AylaVoiceChannelCard / AylaVoiceChannelList / AylaVoiceControls（components/voice/*.tsx 121 行 + app.css 2811–2832 · 2910–2915 · 3099–3120 + voice.css 471–485 · 505–628 · 647–659 · 690–789）',
@@ -85,6 +86,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaMasonryGrid（useMasonryColumns.ts 146 行 + posts.css 607–694 / profile.css 458–545）',
     'AylaPostCard / AylaPostVideoCover（PostCard.tsx + posts.css 9–217 + typed-result-cards.css 5,7）',
     'AylaPostEditor（PostEditor.tsx + posts.css 219–418 + auroraqua.css 105–166）',
+    'AylaGroupPostsComposer（posts.css 933–951/1011–1108 + auroraqua.css 347–368）',
     'AylaCommentList / AylaCommentComposer（CommentList.tsx + CommentComposer.tsx + posts.css 420–583）',
   ],
   'group · 群与目录': <String>[
@@ -97,6 +99,11 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaGroupRoleChip（group.css 1734–1750 + GroupInfo.tsx 52–56）',
     'AylaGroupInfoProfile（GroupInfo.tsx 461–520 + group.css 1382–1610 / 2235–2240）',
     'AylaGroupInfoSettingRow / AylaGroupInfoSwitch / AylaGroupInfoSelect / AylaGroupJoinRequests / 成员搜索 / 子群展开（GroupInfo.tsx 531–624/709–718/754 + group.css 1678–1687/1796–2047/2109–2116）',
+    'AylaGroupInfoSectionTitle / AylaGroupInfoCardHead / AylaGroupInfoDangerActions（GroupInfo.tsx 523–526/628–645/651–663/748–752 + group.css 1610–1675/2050–2107）',
+    'AylaGroupInfoLayout / AylaGroupSubgroupList / AylaGroupMemberList（GroupInfo.tsx 401–405/670–790/1012–1018 + group.css 1421–1459/1461–1465/1690–1732/1752–1787/2062–2128）',
+    'AylaDirectoryPage / AylaDirectoryContent / AylaDirectorySidebarHeader / AylaDirectoryDecorIcon / AylaDirectoryBackButton / AylaPageState（directory-filters.css 2–257 + home.css 620–629 + shell.css 595–629 + 六个目录页 TSX）',
+    'AylaGroupSceneHead / AylaGroupScenePlaceholder（group.css 358–475 + auroraqua.css 336/419/621/637）',
+    'AylaGroupChatSubgroupBar（group.css 152–331 + GroupChat.tsx 334–407）',
   ],
   'boardgame · 桌游域': <String>[
     'AylaGamesGrid / AylaGamesGridSkeleton（GamesHubPage.tsx 184–216 + boardgame.css 232–275）',

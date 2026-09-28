@@ -89,6 +89,7 @@ import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../base/switch.dart';
 
 /// 在线状态选项（web ProfilePage.tsx:22–27 的 STATUS_OPTIONS）。
 class AylaStatusOption {
@@ -296,8 +297,9 @@ class _StatusChipState extends State<_StatusChip> {
 /// 「向他人展示内容」开关行（.profile-show-content-row + .profile-switch，
 /// ProfilePage.tsx:261–278）。
 ///
-/// ⚠️ 与 AylaGroupInfoSwitch（群信息域，44×24 轨道 / ice-300 底 / pink-500 选中）**不是同一件**：
-/// 本件 48×28 · --glass-bg-strong 底 + 1px 亮边 · 选中 sakura-300 + 辉光 · 滑钮 ice-300 → grape-700。
+/// 开关本体已提升为公共件 [AylaSwitch]（regular 档）——本件只负责「标签 + 副标题 + 控件」的整行装配。
+/// 档位差异（与群信息域 AylaGroupInfoSwitch 的 compact 档）：本档 48×28 · --glass-bg-strong 底 +
+/// 1px 亮边 · 选中 sakura-300 + 辉光 · 滑钮 ice-300 → grape-700；两处**共用同一实现**（2026-09-28 收尾轮）。
 class AylaProfileSwitch extends StatefulWidget {
   const AylaProfileSwitch({
     super.key,
@@ -324,131 +326,65 @@ class AylaProfileSwitch extends StatefulWidget {
 }
 
 class _AylaProfileSwitchState extends State<AylaProfileSwitch> {
-  bool _focused = false;
+  bool get _enabled => widget.onChanged != null;
 
   void _toggle() => widget.onChanged?.call(!widget.value);
 
   @override
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
-    final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
-    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final bool enabled = widget.onChanged != null;
-    final Duration dur = reduceMotion ? Duration.zero : AylaDurations.fast;
     final String? description = widget.description;
 
-    // .profile-switch：48×28 · pill · 1px --glass-border · bg --glass-bg-strong（**无模糊**）
-    Widget knobRail = Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        AnimatedContainer(
-          duration: dur,
-          curve: AylaCurves.easeOut,
-          width: 48,
-          height: 28,
-          decoration: BoxDecoration(
-            color: widget.value
-                ? AylaColors.sakura300 // .is-on background
-                : AylaGlassConfig.resolveBackground(strong: true),
-            borderRadius: AylaRadii.pill,
-            border: Border.all(color: AylaColors.glassBorder),
-            boxShadow: widget.value
-                ? (narrow ? AylaShadows.glowNarrow : AylaShadows.glow)
-                : null,
-          ),
-        ),
-        AnimatedPositioned(
-          duration: dur,
-          curve: AylaCurves.easeOut,
-          // .knob：absolute top 3 / left 3 · 20×20；.is-on ⇒ translateX(20) = left 23
-          left: widget.value ? 23 : 3,
-          top: 3,
-          child: AnimatedContainer(
-            duration: dur,
-            curve: AylaCurves.easeOut,
-            width: 20,
-            height: 20,
-            decoration: BoxDecoration(
-              color: widget.value
-                  ? AylaColors.grape700 // .is-on .knob background
-                  : AylaColors.ice300, // .knob background
-              borderRadius: AylaRadii.pill,
-            ),
-          ),
-        ),
-        if (_focused && enabled)
-          Positioned(
-            left: -4,
-            top: -4,
-            right: -4,
-            bottom: -4,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: AylaColors.glow500, width: 2),
-                  borderRadius: BorderRadius.circular(AylaRadii.rPill + 2),
-                ),
-              ),
-            ),
-          ),
-      ],
+    // 开关本体 = 公共件 [AylaSwitch] 的 regular 档（个人档，事实源 profile.css 400–434：
+    // 48×28 / 1px --glass-border / --glass-bg-strong（**无 backdrop-filter**）/
+    // 选中 --sakura-300 + --glow-shadow（**窄屏不降档**：见 switch.dart 的注释与审计依据）/
+    // knob 20 ice-300 → grape-700 /
+    // :focus-visible --focus-ring）。
+    // ⚠️ 1px 边框补偿（用户当场点名的「圆点没上下居中」）：见 switch.dart 库头。
+    final Widget rail = AylaSwitch(
+      value: widget.value,
+      variant: AylaSwitchVariant.regular,
+      // web 是 <label class="profile-form-row profile-show-content-row"> 包住 <button role=switch>
+      // ⇒ 整行转发；本件整行挂手势，本体 ownTap: false（只保留 Focus 键盘）。
+      ownTap: false,
+      semanticLabel: widget.label,
+      onChanged: widget.onChanged,
     );
 
-    if (!enabled) {
-      knobRail = Opacity(opacity: 0.55, child: knobRail); // base.css button:disabled
-    }
-
     // .profile-show-content-row：row · center · space-between · gap sp3
-    return Semantics(
-      toggled: widget.value, // role=switch + aria-checked
-      label: widget.label,
-      child: Focus(
-        onFocusChange: (bool has) => setState(() => _focused = has),
-        onKeyEvent: (FocusNode node, KeyEvent event) {
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
-          final bool activate =
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.space;
-          if (!activate || !enabled) return KeyEventResult.ignored;
-          _toggle();
-          return KeyEventResult.handled;
-        },
-        // label 转发点击：整行可点（本体不另挂手势）
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled ? _toggle : null,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Expanded(
-                // .profile-show-content-label：column · gap 2px · 14 / w700 / --text-primary
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  spacing: 2,
-                  children: <Widget>[
-                    Text(
-                      widget.label,
-                      style: t.label.copyWith(color: AylaColors.textPrimary),
-                    ),
-                    if (description != null)
-                      Text(
-                        description,
-                        // small：12 / w400 / --text-secondary
-                        style: t.label.copyWith(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w400,
-                          color: AylaColors.textSecondary,
-                        ),
-                      ),
-                  ],
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _enabled ? _toggle : null,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Expanded(
+            // .profile-show-content-label：column · gap 2px · 14 / w700 / --text-primary
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              spacing: 2,
+              children: <Widget>[
+                Text(
+                  widget.label,
+                  style: t.label.copyWith(color: AylaColors.textPrimary),
                 ),
-              ),
-              const SizedBox(width: AylaSpacing.sp3), // gap: var(--sp-3)
-              knobRail,
-            ],
+                if (description != null)
+                  Text(
+                    description,
+                    // small：12 / w400 / --text-secondary
+                    style: t.label.copyWith(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                      color: AylaColors.textSecondary,
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
+          const SizedBox(width: AylaSpacing.sp3), // gap: var(--sp-3)
+          rail,
+        ],
       ),
     );
   }

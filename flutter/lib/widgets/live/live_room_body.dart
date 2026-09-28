@@ -5,6 +5,11 @@
 /// tsx 405–435          进房错误态：仍保留**侧栏与弹幕区**（宽屏 + 非 hideRail），
 ///                      主区换 `.live-room-error`（`<p>error</p>` + `.btn.btn-glow`「返回」）
 /// tsx 441–481          **窄屏沉浸式**（isNarrow && !showOwnerPanel）：
+/// tsx 139–151          切台**面板重播**的 target 表（`mediaPanels`）+ hooks/usePanelReplayMotion.ts
+///                      全文（identity 变化 ⇒ WAAPI `opacity 0→1` + `translate ±20→0`，
+///                      300ms `cubic-bezier(0,0,.58,1)`；`!enabled || reduced` 直接 return）
+/// tsx 542–565          `LiveRoomHeader` 的**头部进退场**（`AnimatePresence mode="wait"` +
+///                      `panelVariants(reduced,"top")` + inert / aria-hidden / pointer-events）
 /// …（逐条 CSS 对照 / 层叠推导**原文**见 `docs/flutter/17-组件文件头归档（整理前原文）.md` 的 `widgets/live/live_room_body.dart` 一节）
 /// ```
 ///
@@ -15,6 +20,13 @@
 /// - 侧栏 = 复用 [AylaLiveChannelRail]；弹幕三件 = 复用 [AylaDanmakuList] / [AylaDanmakuInput] /
 ///   [AylaDanmakuOverlay]；观众条 = 复用 [AylaLiveViewerStrip]；控制台 = 复用
 ///   [AylaLiveOwnerPanel] + [AylaLiveStreamAddresses]；头部来源标签 = 复用 **AylaSourceTag** 的滚动容器。
+/// - **切台动效（2026-09-28 补）**：web 上 `has-media-panel-motion` / `is-panel-motion` 只做
+///   **取消 CSS 挂载入场**（auroraqua.css 202–211 · 316–321 · 437–445 全是
+///   `animation: none` / `opacity: 1` / `transform: none`；live.css 零命中）——位移与透明度
+///   全部由 JS owner 持有（面板 = WAAPI `usePanelReplayMotion`，头部 = framer `panelVariants`）。
+///   Flutter 无 CSS 可取消，故等价物 = **直接挂两个 owner**：三块面板走
+///   `AylaRevealScope(replayKey: channelId)` + `AylaRevealItem`（重播入场、不重挂），头部走
+///   `_LiveRoomHeaderSwap`（退出 → 进入串行，见该类头注与 `AylaPanelTransition` 的关系登记）。
 ///
 /// ## 公开面
 /// `AylaLiveRoomData` · `AylaLiveRoomBody` · 样张 `aylaLiveRoomBodySamples()`
@@ -49,8 +61,11 @@ import 'live_studio.dart' show AylaLiveHostAvatar, AylaLiveStreamAddresses;
 import 'live_viewers.dart'
     show AylaLiveViewerItem, AylaLiveViewerSheetData, AylaLiveViewerStrip;
 import '../base/primitives.dart' show AylaSourceTag;
+import '../base/reveal.dart'
+    show AylaRevealItem, AylaRevealMotion, AylaRevealScope;
 import '../base/share.dart' show AylaShareButton;
 import '../base/tooltip.dart';
+import '../motion/gestures.dart' show kAylaPanelDistance, kAylaPanelDuration;
 
 /// 直播间数据投影（web `useLiveRoom` + `useDanmaku` + live store 的等价物 —— 全部由页面给出）。
 class AylaLiveRoomData {
@@ -446,6 +461,30 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     );
   }
 
+  /// 头部槽位（切台时的「退出 → 进入」）。
+  ///
+  /// web 把头部从面板重播里**排除**：`mediaPanels` 三条 target 都不含 `.live-room-head`，
+  /// 头部由 `LiveRoomHeader`（tsx 542–565）在 `AnimatePresence mode="wait"` 下单独编排
+  /// ⇒ Flutter 侧同样两套 owner：[AylaRevealScope] 管三块面板，本件管头部。
+  Widget _headerSwap({required bool narrow}) => _LiveRoomHeaderSwap(
+    identity: widget.channelId,
+    child: _headMaterial(narrow: narrow, child: _head(narrow: narrow)),
+  );
+
+  /// 面板重播包装（web `usePanelReplayMotion` 的 target）：切台时**不重挂**、只重播入场。
+  ///
+  /// [AylaRevealScope] 的 `replayKey` 换成新 channelId ⇒ 已入场项整批重播一次
+  /// （对应 hook 的 `identity` 依赖）；两帧关键帧与 hook 的 WAAPI 完全一致
+  /// （`{opacity:0, translate:±20}` → `{opacity:1, translate:0}`，300ms
+  /// `cubic-bezier(0,0,.58,1)` = `--auroraqua-ease-out`）。[AylaRevealItem] 自带
+  /// reduced-motion 与 `enabled` 开关，对应 hook 的 `if (!enabled || reduced) return;`
+  /// （错误态整支不挂重播 —— 见 [build] 的错误分支：那条路径没有 [AylaRevealScope]）。
+  Widget _replay(Offset offset, Widget child) => AylaRevealItem(
+    offset: offset,
+    delay: Duration.zero, // web 三块同时播（hook 里没有 stagger）
+    child: child,
+  );
+
   /// 侧栏（宽屏常驻 / 窄屏覆盖层共用）。
   Widget _rail({required bool overlay}) => AylaLiveChannelRail(
     channels: widget.channels,
@@ -537,6 +576,7 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     if (_isNarrow && !widget.showOwnerPanel) {
       return _shell(
         modifier: '$modifier has-media-panel-motion',
+        replayKey: widget.channelId,
         children: <Widget>[
           // ⚠️ 头部/滑切/输入框必须装在**一个 Expanded 的纵向列**里再交给外层 Row：
           //    直接作为 Row 的子级会拿到**无界宽度**，列内的 `Expanded` 会报
@@ -545,7 +585,7 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                _headMaterial(narrow: true, child: _head(narrow: true)),
+                _headerSwap(narrow: true),
                 Expanded(
                   child: Padding(
                     // `.live-room-body.is-narrow .live-room-swipe { margin: var(--sp-2) }`
@@ -568,23 +608,37 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
+                            // web target ① `{scene} > .live-room-stage`（edge bottom）
                             // `.live-room-stage`：窄屏 `flex: none` + 四角收 `--radius-input`
                             // （live.css 825–828；播放器自身圆角/边框已由 flat 档去掉）
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(
-                                AylaRadii.rInput,
+                            _replay(
+                              const Offset(0, AylaRevealMotion.distance),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(
+                                  AylaRadii.rInput,
+                                ),
+                                child: _stage(clipRadius: false),
                               ),
-                              child: _stage(clipRadius: false),
                             ),
+                            // web target ② `{scene} > .live-viewer-strip`（edge bottom）
                             // `.live-room-body.is-narrow .live-room-swipe-item > .live-viewer-strip`
                             // `{ margin-top: var(--sp-2) }`（live.css 1187–1191）
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                top: AylaSpacing.sp2,
+                            _replay(
+                              const Offset(0, AylaRevealMotion.distance),
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: AylaSpacing.sp2,
+                                ),
+                                child: _viewerStrip,
                               ),
-                              child: _viewerStrip,
                             ),
-                            Expanded(child: _danmakuList),
+                            // web target ③ `{scene} > .danmaku-wrap`（edge right）
+                            Expanded(
+                              child: _replay(
+                                const Offset(AylaRevealMotion.distance, 0),
+                                _danmakuList,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -601,8 +655,11 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     }
 
     // ---- 宽屏观看 + 开播控制台（tsx 484–538）----
+    // 切台 ⇒ `.live-room-main > .live-room-stage` / `> .live-viewer-strip` / `.live-room-side`
+    // 三块重播入场（web mediaPanels 的宽屏/控制台档选择器）。
     return _shell(
       modifier: '$modifier has-media-panel-motion',
+      replayKey: widget.channelId,
       children: <Widget>[
         if (!_isNarrow && !widget.hideRail) _rail(overlay: false),
         Expanded(
@@ -621,15 +678,22 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             spacing: AylaSpacing.sp3,
             children: <Widget>[
-              if (_isNarrow || !widget.showOwnerPanel)
-                _headMaterial(narrow: _isNarrow, child: _head(narrow: _isNarrow)),
+              // 头部自带进退场（web 把头部从面板重播里**排除**，由 LiveRoomHeader 单独编排）
+              if (_isNarrow || !widget.showOwnerPanel) _headerSwap(narrow: _isNarrow),
               if (!widget.showOwnerPanel) ...<Widget>[
                 // **观看态（宽屏非控制台）**：stage 占住主区剩余高 ⇒ 播放器按 container query
                 // 语义取宽（`.live-room-player-wrap { container-type: size }` +
                 // `.live-player { width: min(100%, 100cqh * 1.7778) }`，live.css 700–760）
                 // ⇒ **侧栏收起/展开只改变宽度，播放器高度不变**（明确）。
-                Expanded(child: _stageFitted()),
-                _viewerStrip,
+                // web target ① `:scope > .live-room-main > .live-room-stage`（edge bottom）
+                Expanded(
+                  child: _replay(
+                    const Offset(0, AylaRevealMotion.distance),
+                    _stageFitted(),
+                  ),
+                ),
+                // web target ② `:scope > .live-room-main > .live-viewer-strip`（edge bottom）
+                _replay(const Offset(0, AylaRevealMotion.distance), _viewerStrip),
               ] else
               Expanded(
                 child: SingleChildScrollView(
@@ -645,8 +709,15 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
                           onSave: widget.onSaveOwner,
                           groups: widget.groups,
                         ),
-                      _stage(clipRadius: true),
-                      _viewerStrip,
+                      // 控制台同样是 `.live-room-main > .live-room-stage` + 观众条（target ①②）
+                      _replay(
+                        const Offset(0, AylaRevealMotion.distance),
+                        _stage(clipRadius: true),
+                      ),
+                      _replay(
+                        const Offset(0, AylaRevealMotion.distance),
+                        _viewerStrip,
+                      ),
                       if (widget.data.channel?.isOwner ?? false)
                         AylaLiveStreamAddresses(
                           rtmpUrl: widget.data.channel!.rtmpUrl,
@@ -661,7 +732,8 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             ),
           ),
         ),
-        _side(),
+        // web target ③ `:scope > .live-room-side`（edge right）
+        _replay(const Offset(AylaRevealMotion.distance, 0), _side()),
       ],
       // 覆盖层必须是 Stack 直接子级（见 _shell 说明）
       overlay: _railOverlay,
@@ -723,12 +795,178 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     required String modifier,
     required List<Widget> children,
     Widget? overlay,
+    Object? replayKey,
   }) {
+    final Widget row = Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    );
     return Stack(
       children: <Widget>[
-        Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+        // 切台 ⇒ `replayKey` 换新 channelId，面板**整批重播入场**
+        // （web `usePanelReplayMotion(String(channelId), mediaPanels, !error)`）。
+        // ⚠️ 只包**内容行**：窄屏列表覆盖层是常驻 owner（`AylaRevealItem` 只在挂载时入场），
+        //    不能跟着切台重播 ⇒ overlay 槽留在 scope 之外。
+        replayKey == null
+            ? row
+            : AylaRevealScope(replayKey: replayKey, child: row),
         ?overlay,
       ],
+    );
+  }
+}
+
+/// 切台时头部「退出 → 进入」（web `LiveRoomHeader`，tsx 541–565）。
+///
+/// ## 事实源
+/// ```
+/// tsx 444–446 / 506–508   <AnimatePresence mode="wait" propagate><LiveRoomHeader key={channelId}>
+/// tsx 546–548             useLayoutEffect → ref.toggleAttribute("inert", !present)
+/// tsx 553–561             aria-hidden={!present} · pointer-events:none · initial={reduced ? false : "enter"}
+/// tsx 561                 variants = panelVariants(reduced, "top")（auroraquaMotion 37–51）
+/// auroraquaMotion 11–19   distance 20 · duration 0.3s · easeInOut [.42,0,.58,1]
+/// auroraquaMotion 45      reduced ⇒ transition { duration: 0 }
+/// ```
+/// `mode="wait"` ⇒ 旧头**先播完 300ms 退出**（期间 inert / aria-hidden / pointer-events:none），
+/// 才挂新头并播入场；两段合计 600ms。退出边 = 进场边（`panelVariants` 默认 `exitEdge = edge`）。
+///
+/// ## 与 [AylaPanelTransition] 的关系（登记；本件不改它）
+/// 位移（±[kAylaPanelDistance]）/ 时长（[kAylaPanelDuration]）/ 缓动
+/// （[AylaCurves.auroraquaEaseInOut]）与 [AylaPanelTransition] 同源 —— 它就是
+/// `panelVariants` 的 Flutter owner，`show: false` 走的正是这条退场曲线。
+/// 本件没有直接复用它只有一个原因：它只持**一支**件的 enter/exit（`show` 驱动），
+/// 而这里要的是**新旧两支件串行**（web 由 `AnimatePresence mode="wait"` 提供）
+/// 与退出期的 inert/aria 语义（web 由 `useIsPresent()` 提供）；它不暴露「已退场」回调，
+/// 串行只能靠外部计时。若将来 [AylaPanelTransition] 带上 `identity`/`onExited` 能力，
+/// 本件可整体替换为它（常量与曲线已对齐，库内不出现第二套配方）。
+class _LiveRoomHeaderSwap extends StatefulWidget {
+  const _LiveRoomHeaderSwap({required this.identity, required this.child});
+
+  /// 头部身份（web `key={channelId}`）：变化 ⇒ 旧头退出，播完再挂新头。
+  final String identity;
+
+  /// 当前 identity 的头部内容。
+  final Widget child;
+
+  @override
+  State<_LiveRoomHeaderSwap> createState() => _LiveRoomHeaderSwapState();
+}
+
+class _LiveRoomHeaderSwapState extends State<_LiveRoomHeaderSwap>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: kAylaPanelDuration,
+    value: 1,
+  );
+
+  /// `easeInOut [.42,0,.58,1]`（`auroraquaRouteTransition`）。
+  late final CurvedAnimation _t = CurvedAnimation(
+    parent: _c,
+    curve: AylaCurves.auroraquaEaseInOut,
+  );
+
+  /// 当前挂在树上的 identity 与它的内容（退出期间仍是**旧**的）。
+  late String _current = widget.identity;
+  late Widget _child = widget.child;
+
+  /// 正在退出的旧头内容（null ⇒ 不在退出中）。
+  ///
+  /// 快照的是**旧 widget 实例**（旧 props）：对应 React 在退出期保留旧 element 的行为
+  /// —— 直接读 `widget.data` 会拿到新频道的数据，退出动画就会「内容已变、只播位移」。
+  Widget? _leavingChild;
+
+  bool _started = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addStatusListener(_onStatus);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    // 首帧挂载即入场（web `initial={reduced ? false : "enter"}`）
+    if (!MediaQuery.disableAnimationsOf(context)) _c.forward(from: 0);
+  }
+
+  void _onStatus(AnimationStatus status) {
+    if (status != AnimationStatus.dismissed ||
+        !mounted ||
+        _leavingChild == null) {
+      return;
+    }
+    // 旧头播完 ⇒ 挂**最新**请求的 identity（快速连切时中间态不挂载）
+    setState(() {
+      _current = widget.identity;
+      _child = widget.child;
+      _leavingChild = null;
+    });
+    _c.forward(from: 0); // 新头入场
+  }
+
+  @override
+  void didUpdateWidget(_LiveRoomHeaderSwap old) {
+    super.didUpdateWidget(old);
+    // identity 未变：内容跟随刷新（不重播）
+    if (old.identity == widget.identity) {
+      if (_leavingChild == null) _child = widget.child;
+      return;
+    }
+    if (!MediaQuery.disableAnimationsOf(context)) {
+      if (_leavingChild != null) return; // 已在退出中 ⇒ 只更新 identity
+      _leavingChild = _child; // 退出期渲染旧头
+      _c.reverse();
+      return;
+    }
+    // reduced-motion：`panelVariants` 过渡 duration 0 + `initial=false` ⇒ 两段都瞬时
+    setState(() {
+      _current = widget.identity;
+      _child = widget.child;
+      _leavingChild = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    _t.dispose();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool reduced = MediaQuery.disableAnimationsOf(context);
+    final Widget? leaving = reduced ? null : _leavingChild;
+    final Widget animated = AnimatedBuilder(
+      animation: _t,
+      builder: (BuildContext context, Widget? child) {
+        // ±20 / 300ms / easeInOut —— 进场与退场共用同一公式（退出边 = 进场边）
+        final double v = reduced ? 1 : _t.value;
+        return Opacity(
+          opacity: v,
+          child: Transform.translate(
+            offset: Offset(0, -kAylaPanelDistance * (1 - v)),
+            child: child,
+          ),
+        );
+      },
+      // key = 已挂载的 identity：退出期保持不动，播完换新 identity ⇒ 新头**重挂**
+      // （web AnimatePresence mode="wait" 是旧件 unmount + 新件 mount，React 状态不残留）
+      child: KeyedSubtree(
+        key: ValueKey<String>(_current),
+        child: leaving ?? _child,
+      ),
+    );
+    if (leaving == null) return animated;
+    // 退出中的旧头：web `inert` + `aria-hidden` + `pointer-events: none`（tsx 547–556）
+    // （Flutter 等价：ExcludeFocus = inert 的不可聚焦 · ExcludeSemantics = aria-hidden ·
+    //  IgnorePointer = pointer-events:none）
+    return ExcludeFocus(
+      child: ExcludeSemantics(child: IgnorePointer(child: animated)),
     );
   }
 }

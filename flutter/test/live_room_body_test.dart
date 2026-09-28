@@ -2,7 +2,9 @@
 ///
 /// 覆盖：宽屏三栏装配（侧栏 / 头部 / stage / 观众条 / 弹幕侧列）/ 侧栏收起与展开键 /
 /// 进房错误态仍保留侧栏与弹幕区 / 窄屏沉浸式（列表覆盖层开关 + 上下滑切台）/ 控制台
-/// （资料栏 + 推流地址，仅 owner）/ hideRail / 飘弹幕层仅在 live 且非 loading 时挂载。
+/// （资料栏 + 推流地址，仅 owner）/ hideRail / 飘弹幕层仅在 live 且非 loading 时挂载 /
+/// **切台动效**（tsx 139–151 的 `mediaPanels` 三 target 重播 + tsx 542–565 的头部
+/// `AnimatePresence mode="wait"` 退出→进入，含 reduced-motion 与错误态关闭）。
 library;
 
 import 'package:flutter/material.dart';
@@ -19,6 +21,8 @@ import '../lib/widgets/live/live_player.dart' show AylaLivePlayer, AylaLiveSrsSt
 import '../lib/widgets/live/live_rail.dart' show AylaLiveChannelRail;
 import '../lib/widgets/live/live_room_body.dart';
 import '../lib/widgets/live/live_studio.dart' show AylaLiveStreamAddresses;
+import '../lib/widgets/base/reveal.dart' show AylaRevealItem, AylaRevealScope;
+import '../lib/widgets/base/share.dart' show AylaShareButton;
 import '../lib/widgets/live/live_viewers.dart' show AylaLiveViewerStrip;
 
 const List<AylaLiveCardData> _channels = <AylaLiveCardData>[
@@ -27,13 +31,15 @@ const List<AylaLiveCardData> _channels = <AylaLiveCardData>[
 ];
 
 AylaLiveChannelSnapshot _channel({
+  String id = 'lc1',
+  String title = '深夜电台 · 爱莉陪你写代码',
   bool isOwner = false,
   String? visibility = 'public',
   String? rtmpUrl,
   String? streamKey,
 }) => AylaLiveChannelSnapshot(
-  id: 'lc1',
-  title: '深夜电台 · 爱莉陪你写代码',
+  id: id,
+  title: title,
   status: AylaLiveStatus.live,
   visibility: visibility,
   ownerNickname: '爱莉',
@@ -47,6 +53,7 @@ void main() {
     WidgetTester tester,
     Widget child, {
     Size viewport = const Size(1200, 800),
+    bool disableAnimations = false,
   }) {
     tester.view.physicalSize = viewport;
     tester.view.devicePixelRatio = 1.0;
@@ -55,7 +62,11 @@ void main() {
       home: previewScope(
         Builder(
           builder: (BuildContext context) => MediaQuery(
-            data: MediaQuery.of(context).copyWith(size: viewport),
+            data: MediaQuery.of(context).copyWith(
+              size: viewport,
+              // web `usePrefersReducedMotion` / Flutter 库内一律读它
+              disableAnimations: disableAnimations,
+            ),
             child: SizedBox.fromSize(size: viewport, child: child),
           ),
         ),
@@ -441,6 +452,255 @@ void main() {
       await settle(tester);
       expect(find.byType(AylaDanmakuOverlay), findsNothing);
       expect(find.text('加载中…'), findsOneWidget); // 头部标题退化为加载中
+    });
+  });
+
+  // ============ 切台动效（tsx 139–151 面板重播 + 542–565 头部进退场） ============
+
+  group('切台动效（usePanelReplayMotion + LiveRoomHeader）', () {
+    Rect stageRect(WidgetTester tester) =>
+        tester.getRect(find.byType(AylaLivePlayer));
+    Rect stripRect(WidgetTester tester) =>
+        tester.getRect(find.byType(AylaLiveViewerStrip));
+    Rect sideRect(WidgetTester tester) => tester.getRect(
+      find.ancestor(
+        of: find.byType(AylaDanmakuList),
+        matching: find.byType(AylaGlassSurface),
+      ),
+    );
+    Rect headRect(WidgetTester tester, String title) => tester.getRect(
+      find.ancestor(
+        of: find.text(title),
+        matching: find.byType(AylaGlassSurface),
+      ),
+    );
+
+    // ⚠️ 推进动画必须「先起 tick、再给时长」：Ticker 在第一帧只记 `_startTime`（elapsed 0），
+    //    一次 `pump(时长)` 只把动画推到起点（本项目已知坑：`pump(时长)` 不是真实时间）。
+    Future<void> advance(WidgetTester tester, Duration d) async {
+      await tester.pump(d);
+      await tester.pump(d);
+    }
+
+    Widget room({
+      required String channelId,
+      required String title,
+      bool narrow = false,
+      VoidCallback? onShare,
+    }) => AylaLiveRoomBody(
+      channelId: channelId,
+      isNarrow: narrow,
+      channels: _channels,
+      onShare: onShare,
+      data: AylaLiveRoomData(
+        channel: _channel(id: channelId, title: title),
+        srsStatus: AylaLiveSrsStatus.live,
+        viewerCount: 12,
+      ),
+      videoView: const SizedBox(),
+    );
+
+    testWidgets('挂载：面板各自从边缘 ±20 入场（stage/strip 下沿 · side 右沿 · 头部上沿）', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(tester, room(channelId: 'lc1', title: '头部标题一')),
+      );
+      await tester.pump(); // 首帧 = 动画起点
+      final Rect stage0 = stageRect(tester);
+      final Rect strip0 = stripRect(tester);
+      final Rect side0 = sideRect(tester);
+      final Rect head0 = headRect(tester, '头部标题一');
+      await tester.pump(const Duration(milliseconds: 400)); // 300ms 播完
+      expect(
+        stageRect(tester).top - stage0.top,
+        closeTo(-20, 1),
+        reason: 'stage 从下沿 +20 归位',
+      );
+      expect(stripRect(tester).top - strip0.top, closeTo(-20, 1));
+      expect(sideRect(tester).left - side0.left, closeTo(-20, 1));
+      expect(
+        headRect(tester, '头部标题一').top - head0.top,
+        closeTo(20, 1),
+        reason: '头部从上沿 −20 归位（panelVariants(reduced,"top")）',
+      );
+    });
+
+    testWidgets('宽屏非错误态：三块面板各挂一层入场壳（mediaPanels 三条 target）', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(tester, room(channelId: 'lc1', title: '头部标题一')),
+      );
+      await settle(tester);
+      expect(find.byType(AylaRevealScope), findsOneWidget);
+      for (final Finder panel in <Finder>[
+        find.byType(AylaLivePlayer), // .live-room-main > .live-room-stage
+        find.byType(AylaLiveViewerStrip), // > .live-viewer-strip
+        find.byType(AylaDanmakuList), // .live-room-side
+      ]) {
+        expect(
+          find.ancestor(of: panel, matching: find.byType(AylaRevealItem)),
+          findsWidgets,
+          reason: '三条 target 各自可重播',
+        );
+      }
+    });
+
+    testWidgets('切台：面板重播（回到 ±20 起点）+ 头部串行「退出→进入」', (WidgetTester tester) async {
+      int shares = 0;
+      String channelId = 'lc1';
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        host(
+          tester,
+          StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              rebuild = setState;
+              return room(
+                channelId: channelId,
+                title: channelId == 'lc1' ? '头部标题一' : '头部标题二',
+                onShare: () => shares += 1,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400)); // 入场播完
+      final Rect stageBase = stageRect(tester);
+      final Rect stripBase = stripRect(tester);
+      final Rect sideBase = sideRect(tester);
+
+      rebuild(() => channelId = 'lc2');
+      await tester.pump(); // 第 1 帧：面板重播起点 + 头部开始退出
+
+      // ① 面板重播：三块都回到各自边缘的 +20 起点
+      expect(stageRect(tester).top - stageBase.top, closeTo(20, 1));
+      expect(stripRect(tester).top - stripBase.top, closeTo(20, 1));
+      expect(sideRect(tester).left - sideBase.left, closeTo(20, 1));
+      // ② mode="wait"：旧头还在，新头尚未挂
+      expect(find.text('头部标题一'), findsOneWidget);
+      expect(find.text('头部标题二'), findsNothing);
+      // ③ 退出期 inert（不可聚焦）+ aria-hidden
+      expect(
+        find.ancestor(
+          of: find.text('头部标题一'),
+          matching: find.byType(ExcludeFocus),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.ancestor(
+          of: find.text('头部标题一'),
+          matching: find.byWidgetPredicate(
+            (Widget w) => w is ExcludeSemantics && w.excluding,
+          ),
+        ),
+        findsWidgets,
+      );
+      // ④ pointer-events:none：退出中的旧头按键点不动
+      await tester.tap(find.byType(AylaShareButton), warnIfMissed: false);
+      await tester.pump();
+      expect(shares, 0, reason: '退出期 pointer-events:none（IgnorePointer）');
+
+      // ⑤ 300ms：旧头退完 → 换新头并从 −20 入场
+      await advance(tester, const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(find.text('头部标题一'), findsNothing);
+      expect(find.text('头部标题二'), findsOneWidget);
+      final Rect newHead0 = headRect(tester, '头部标题二');
+      await advance(tester, const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(headRect(tester, '头部标题二').top - newHead0.top, closeTo(20, 1));
+      // ⑥ 面板同时归位（300ms 重播播完）
+      expect(stripRect(tester).top, closeTo(stripBase.top, 1));
+      expect(sideRect(tester).left, closeTo(sideBase.left, 1));
+      // ⑦ 自证 finder 有区分度：换完之后头部按键是可点的
+      await tester.tap(find.byType(AylaShareButton));
+      await tester.pump();
+      expect(shares, 1);
+    });
+
+    testWidgets('窄屏：stage/strip 从下沿、`.danmaku-wrap` 从右沿重播', (WidgetTester tester) async {
+      String channelId = 'lc1';
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        host(
+          tester,
+          StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              rebuild = setState;
+              return room(
+                channelId: channelId,
+                title: '头部标题一',
+                narrow: true,
+              );
+            },
+          ),
+          viewport: const Size(420, 700),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      final Rect stageBase = stageRect(tester);
+      final Rect stripBase = stripRect(tester);
+      final Rect listBase = tester.getRect(find.byType(AylaDanmakuList));
+
+      rebuild(() => channelId = 'lc2');
+      await tester.pump();
+      expect(stageRect(tester).top - stageBase.top, closeTo(20, 1));
+      expect(stripRect(tester).top - stripBase.top, closeTo(20, 1));
+      expect(
+        tester.getRect(find.byType(AylaDanmakuList)).left - listBase.left,
+        closeTo(20, 1),
+        reason: '窄屏第三块是 `.danmaku-wrap`（edge right），不是 `.live-room-side`',
+      );
+    });
+
+    testWidgets('reduced-motion：切台当帧即终态（面板与头部都不动画）', (WidgetTester tester) async {
+      String channelId = 'lc1';
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        host(
+          tester,
+          StatefulBuilder(
+            builder: (BuildContext context, StateSetter setState) {
+              rebuild = setState;
+              return room(
+                channelId: channelId,
+                title: channelId == 'lc1' ? '头部标题一' : '头部标题二',
+              );
+            },
+          ),
+          disableAnimations: true,
+        ),
+      );
+      await tester.pump();
+      final Rect stripBase = stripRect(tester);
+      final Rect headBase = headRect(tester, '头部标题一');
+      rebuild(() => channelId = 'lc2');
+      await tester.pump();
+      expect(find.text('头部标题二'), findsOneWidget, reason: 'reduced ⇒ 不串行等待旧头退场');
+      expect(find.text('头部标题一'), findsNothing);
+      expect(stripRect(tester).top, closeTo(stripBase.top, 0.5), reason: '面板不重播（hook: reduced ⇒ return）');
+      expect(headRect(tester, '头部标题二').top, closeTo(headBase.top, 0.5));
+    });
+
+    testWidgets('错误态：不挂重播壳（hook 的 enabled = !error）', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: false,
+            channels: _channels,
+            data: const AylaLiveRoomData(error: '进房失败：网络异常'),
+            videoView: null,
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(find.byType(AylaRevealScope), findsNothing);
+      expect(find.byType(AylaRevealItem), findsNothing);
     });
   });
 }

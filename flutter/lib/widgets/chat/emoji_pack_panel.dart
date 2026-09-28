@@ -7,10 +7,25 @@
 /// | [AylaEmojiPackPanel] | `EmojiPackPanel.tsx:158–251`（面板内容） |
 /// | 面板材质/尺寸 | app.css 2186–2204（`.emoji-pack-panel`：glass-bg-strong + `--glass-filter` + 1px 边 + radius 16 + `--glass-shadow` / max-h 280 / padding sp3 / gap sp2） |
 /// | 窄屏档 | app.css 3211–3215（`position: static; max-height: 40vh; box-shadow: none`） |
-/// | 头 / 错误 / 网格 / 格 / 加号 / 删除键 / 空态 | app.css 2206–2323 |
+/// | 头 / 错误 / 网格 / 格 / 加号 / 删除键 | app.css 2206–2323 |
+/// | **分页页脚** | tsx 227–228（`DirectoryLoadMore` 六个传参）→ 复用库内 `<base/directory_load_more.dart>` |
+/// | **空态** | tsx 230–234（五条件 + 两档文案）+ app.css 2318–2323（`padding: var(--sp-3) 0`） |
 /// | 权限兜底 | tsx 61–62（`canUpload = payload ? payload.can_upload : metaLoaded && !metaError && myRole ∈ {owner, admin}`） |
 /// | 上传链 | tsx 99–129（多选 → 跳过非图片提示 → 逐张三步上传 `kind=emoji` → 加入群包 → 刷新） |
 /// | 发送 / 删除 | tsx 135–156（发送后**面板不自动收起**） |
+///
+/// ## 与 web 的取舍登记（2026-09-28，B3 分页接线轮）
+///
+/// 1. **分页页脚已接线**（此前只有数据字段、零 UI 引用）：六个传参逐条对齐 tsx 227–228，
+///    见 `_footer()` 的表；`retainCompletedSpace: false` 决定「无更多/不加载时不渲染页脚」。
+/// 2. **删掉自造的加载圈**：迁移时页脚缺位，用 `AylaLoadingSpinner` 顶过加载反馈；
+///    接线后它与页脚三点**重复**，且 web 面板里没有这个元素（tsx 158–251 无 spinner）⇒ 删除。
+/// 3. **空态条件按 tsx 230 逐字**：原实现多一个自加的 `!_uploading`（web 上传中**也**会显示
+///    空态文案）⇒ 已删；并补上 app.css 2318 的 `padding: sp3 0`（原实现只靠 flex gap 撑）。
+/// 4. **错误文案来源登记（有意偏离）**：web 的 `.emoji-pack-error` 只显示**本地动作错误**
+///    （上传跳过/部分失败、发送、删除），`metaError` / `pages.error` 只进页脚（页脚随即不渲染）。
+///    Flutter 侧把两者也落到同一行（`_error ?? summaryError ?? itemsError`）——信息更完整，
+///    且 `摘要错误：显示错误文案` 用例依赖它；未改回 web 口径，特此登记。
 ///
 /// ## 定位（由调用方持有，登记说明）
 /// web 的 `.emoji-pack-panel` 是 `position: absolute; left/right sp3; bottom: calc(100% + 8px)`
@@ -43,7 +58,7 @@ import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../base/dashed_border.dart';
-import '../base/loading.dart';
+import '../base/directory_load_more.dart';
 import '../base/resource_image.dart';
 
 /// 面板数据面（web：`getGroupEmojiPackSummary` + `usePagedMediaList(listGroupEmojiItemsPage)`）。
@@ -96,6 +111,7 @@ class AylaEmojiPackPanel extends StatefulWidget {
     this.onAddEmoji,
     this.onDeleteEmoji,
     this.onReload,
+    this.onLoadMore,
     this.pickImages,
   });
 
@@ -115,6 +131,13 @@ class AylaEmojiPackPanel extends StatefulWidget {
 
   /// 上传成功后加入群表情包（web `addGroupEmojiItem(convId, mediaId)`）。
   final Future<void> Function(String mediaId)? onAddEmoji;
+
+  /// 分页下一页（web `usePagedMediaList.loadMore`）。
+  ///
+  /// ⚠️ 与 [onReload] 是**两条不同的链路**（tsx 227–228）：页脚的
+  /// `loadMore={metaError ? refresh : pages.loadMore}` —— 摘要失败时页脚按钮重试的是
+  /// **摘要**（refresh），只有摘要正常时才是「加载下一页」。本件按同一规则接线。
+  final Future<void> Function()? onLoadMore;
 
   /// 删除表情（web `deleteGroupEmojiItem(convId, itemId)`）。
   final Future<void> Function(String itemId)? onDeleteEmoji;
@@ -153,8 +176,6 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
   }
 
   bool get _canDelete => widget.data.canDeleteFromPack ?? false;
-
-  bool get _busy => widget.data.itemsLoading || !widget.data.summaryLoaded;
 
   Future<void> _handlePick() async {
     if (_uploading) return;
@@ -256,27 +277,32 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
         ],
         const SizedBox(height: AylaSpacing.sp2),
         Flexible(child: _grid()),
+        // 面板是 `.emoji-pack-panel { display:flex; flex-direction:column; gap: sp2 }`
+        // （app.css 2186–2204）⇒ 页脚与空态**各自**与前一子级相隔 8px；
+        // Flutter 无 flex gap ⇒ 显式补 SizedBox。
+        const SizedBox(height: AylaSpacing.sp2),
+        _footer(),
         if (widget.data.summaryLoaded &&
             widget.data.summaryError == null &&
             !widget.data.itemsLoading &&
             widget.data.itemsError == null &&
-            widget.data.items.isEmpty &&
-            !_uploading) ...<Widget>[
+            widget.data.items.isEmpty) ...<Widget>[
           const SizedBox(height: AylaSpacing.sp2),
-          Text(
-            // tsx 230–234：按上传权限分两档
-            _canUpload ? '还没有表情，点加号上传' : '群内还没有表情包',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: AylaFonts.body,
-              fontSize: 12,
-              color: AylaColors.textSecondary,
+          Padding(
+            // `.emoji-pack-empty { font-size 12; color secondary; text-align center;
+            //  padding: var(--sp-3) 0 }`（app.css 2318–2323）—— 上下各 12
+            padding: const EdgeInsets.symmetric(vertical: AylaSpacing.sp3),
+            child: Text(
+              // tsx 230–234：按上传权限分两档
+              _canUpload ? '还没有表情，点加号上传' : '群内还没有表情包',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: AylaFonts.body,
+                fontSize: 12,
+                color: AylaColors.textSecondary,
+              ),
             ),
           ),
-        ],
-        if (_busy) ...<Widget>[
-          const SizedBox(height: AylaSpacing.sp2),
-          const Center(child: AylaLoadingSpinner(size: 18)),
         ],
       ],
     );
@@ -340,6 +366,35 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
           semanticLabel: '关闭表情面板',
         ),
       ],
+    );
+  }
+
+  /// 分页页脚（tsx 227–228 的 `DirectoryLoadMore` 接线；复用库内 [AylaDirectoryLoadMore]）。
+  ///
+  /// | 本件传参 | 事实源 |
+  /// |---|---|
+  /// | `loading: !summaryLoaded \|\| itemsLoading` | tsx 227 `loading={!metaLoaded \|\| pages.loading}` |
+  /// | `error: summaryError ?? itemsError` | tsx 227 `error={metaError ?? pages.error}` |
+  /// | `hasMore` | `{...pages}` 展开的 `pages.hasMore` |
+  /// | `invalidated: false` | tsx 228 **字面量**（本面板不参与目录失效重拉） |
+  /// | `refresh: onReload` | tsx 228 `refresh={refresh}` |
+  /// | `loadMore: summaryError != null ? onReload : onLoadMore` | tsx 228 `loadMore={metaError ? refresh : pages.loadMore}` |
+  /// | `retainCompletedSpace: false` | tsx 228：`!loading && !hasMore && !invalidated` ⇒ **页脚不渲染** |
+  ///
+  /// ⚠️ `error` 非 null 时 [AylaDirectoryLoadMore] 自身返回 `SizedBox.shrink()`（tsx 29「错误由
+  /// 外层 AsyncState 呈现」）——本件的「外层」就是 `.emoji-pack-error` 那一行（见 [build]）。
+  Widget _footer() {
+    final Future<void> Function() refresh = widget.onReload ?? () async {};
+    final String? metaError = widget.data.summaryError;
+    return AylaDirectoryLoadMore(
+      loading: !widget.data.summaryLoaded || widget.data.itemsLoading,
+      error: metaError ?? widget.data.itemsError,
+      hasMore: widget.data.hasMore,
+      invalidated: false,
+      refresh: refresh,
+      // 摘要失败 ⇒ 页脚按钮重试的是**摘要**（web `loadMore={metaError ? refresh : pages.loadMore}`）
+      loadMore: metaError != null ? refresh : (widget.onLoadMore ?? () async {}),
+      retainCompletedSpace: false,
     );
   }
 
@@ -619,6 +674,23 @@ Widget aylaEmojiPackPanelSamples() {
             summaryLoaded: true,
             items: <AylaEmojiItem>[
               for (int i = 0; i < 5; i++) _previewEmoji('$i'),
+            ],
+          ),
+        ),
+      ),
+      cell(
+        '分页：有下一页（页脚「加载更多」；点它走 onLoadMore）',
+        AylaEmojiPackPanel(
+          myRole: 'member',
+          onClose: () {},
+          onSendEmoji: (_) async {},
+          onLoadMore: () async {},
+          data: AylaEmojiPackData(
+            packId: 'pack-1',
+            summaryLoaded: true,
+            hasMore: true,
+            items: <AylaEmojiItem>[
+              for (int i = 0; i < 5; i++) _previewEmoji('p$i'),
             ],
           ),
         ),

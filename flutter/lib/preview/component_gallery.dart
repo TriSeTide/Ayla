@@ -50,6 +50,7 @@ import '../widgets/posts/post_card.dart';
 import '../widgets/posts/post_editor.dart';
 import '../widgets/base/primitives.dart';
 import '../widgets/base/reveal.dart';
+import '../widgets/base/switch.dart';
 import '../widgets/shell/server_rail.dart';
 import '../widgets/shell/session_activity.dart';
 import '../widgets/base/share.dart';
@@ -75,7 +76,9 @@ import '../widgets/game/game_room_card.dart';
 import '../widgets/game/game_room_create.dart';
 import '../widgets/game/game_room_placeholder.dart';
 import '../widgets/group/group_apply.dart';
+import '../widgets/base/directory_page.dart';
 import '../widgets/base/directory_result_cards.dart';
+import '../widgets/base/page_state.dart';
 import '../widgets/shell/overlay_scrollbar.dart';
 import '../widgets/base/profile_content_sections.dart';
 import '../widgets/group/group_create_dialog.dart';
@@ -109,6 +112,11 @@ import '../widgets/game/games_grid.dart';
 import '../widgets/group/group_role_chip.dart';
 import '../widgets/group/transfer_owner_dialog.dart';
 import '../widgets/group/group_info_profile.dart';
+import '../widgets/group/group_info_manage.dart';
+import '../widgets/group/group_info_lists.dart';
+import '../widgets/group/group_chat_subgroup_bar.dart';
+import '../widgets/group/group_posts_composer.dart';
+import '../widgets/group/group_scene.dart';
 import '../widgets/motion/gestures.dart';
 import '../widgets/base/favorite_item.dart';
 
@@ -151,6 +159,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'Batch 2 基元',
     'Typography',
     'AylaTooltip',
+    'AylaSwitch（通用开关',
   ]),
   AylaGalleryCategory('shell', 'Shell · 导航壳与浮层', <String>[
     'AylaBottomTabs',
@@ -202,6 +211,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaMasonryGrid',
     'AylaPostCard',
     'AylaPostEditor',
+    'AylaGroupPostsComposer',
     'AylaCommentList',
   ]),
   AylaGalleryCategory('group', 'group · 群与目录', <String>[
@@ -210,10 +220,15 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     '群聊申请弹窗',
     '建群对话框',
     '目录结果卡',
+    'AylaDirectoryPage / AylaDirectoryContent',
     'AylaTransferOwnerDialog',
     'AylaGroupRoleChip',
     'AylaGroupInfoProfile',
     'AylaGroupInfoSettingRow / AylaGroupInfoSwitch / AylaGroupInfoSelect / AylaGroupJoinRequests',
+    'AylaGroupSceneHead',
+    'AylaGroupChatSubgroupBar',
+    'AylaGroupInfoSectionTitle',
+    'AylaGroupInfoLayout',
   ]),
   AylaGalleryCategory('game', 'boardgame · 桌游域', <String>[
     'AylaGamesGrid',
@@ -367,7 +382,12 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           '四件的手势语义与常量见上一节样张；本节点名事实源：`panelVariants`（±20 / 300ms easeInOut）· '
                           '`AnimatePresence mode="wait"`（旧件先退再挂新件，退出期 inert + aria-hidden）· '
                           '`useEdgeSwipeBack`（120px / 300px/s / 200ms）· `resolveSwipeCommit`（size/3 优先 + 甩动补充 + 方向锁让位）· '
-                          '`DRAG_ELASTIC .8`。空白卡片即上一节的七张样张。',
+                          '`DRAG_ELASTIC .8`。空白卡片即上一节的七张样张。'
+                          ' · **2026-09-28 收尾轮修既有 bug**：AylaPanelTransition 退场方向（原 `offset × v` 会「先瞬跳 ±20 再滑回」，'
+                          'web `auroraquaMotion.ts:49` 的 exit 是 **center(0) → offset(exitEdge)(±20)**，现按 `±20 × (1 − v)`）；'
+                          '并给 AylaConversationTransition 补 **panels 档**（web ConversationTransition.tsx:12/50；'
+                          '`panels:false` = 空会话态 MessagesPage.tsx:190 ⇒ 宿主自己播 right→left 位移，reduced ⇒ 位移 0/时长 0）。'
+                          '定向测试 `motion_gestures_test.dart` +5（共 18）',
                       child: const _MotionPiecesNote(),
                     ),
                     // ---------- 路由转场（PageTransition + AnimatePresence 等价宿主） ----------
@@ -446,6 +466,36 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           'admin = --ice-300 底 + --indigo-700 字 · **member ⇒ 不渲染**（web 只在 role !== "member" 时出标签）',
                       child: const _RoleChipDemo(),
                     ),
+                    // ---------- 群内场景统一标题栏 + 占位壳（B10：§7.5 pages 域第三批 A 类） ----------
+                    _Section(
+                      title:
+                          'AylaGroupSceneHead / AylaGroupScenePlaceholder（group.css 358–475 + auroraqua.css 336/419/621/637）',
+                      source:
+                          '头部（语音/帖子/桌游共用 3 处）：sticky top 0 · z-index 10 · min-height **72** · padding sp4 · '
+                          '--glass-bg + blur24 sat1.4 + 1px 亮边 + radius 16 + --glass-shadow-compact · copy flex 1 · '
+                          '标题 Display 18/w500/1.25 · 描述 14/1.45/secondary **单行省略** · 尾键 flex none · '
+                          '≤480 align-items flex-start · 入场 auroraqua-panel-from-top（0 −20px → 0，宽窄两段同帧）· '
+                          '**sticky 用自建 paint 阶段定位**（同滚动内容里自然占位 + 按几何平移；机制差异见件头注释）· '
+                          '占位壳：height 100% · column · center · gap sp3 · padding sp6 · 单键直出 / 多键 actions 行（gap sp2 + flex-wrap）· '
+                          '文案逐字取自 GroupVoice/Posts/Games/Live/Info 的调用点',
+                      child: aylaGroupSceneSamples(),
+                    ),
+                    const SizedBox(height: AylaSpacing.sp6),
+                    // ---------- 群聊子群切换条（B10；19 号 §七 7.1 曾误判「已覆盖」的真缺口） ----------
+                    _Section(
+                      title:
+                          'AylaGroupChatSubgroupBar（group.css 152–331 + GroupChat.tsx 334–407）',
+                      source:
+                          '折叠键 48×32（left −8 于 switcher ⇒ 4）· 收起态 = 36×18 上半圆把手（--glass-bg-strong，hover '
+                          'rgba(157,191,230,.35)）· 展开态 = 32 正圆（rgba(255,250,251,.6)，hover .18）+ IconChevronUp/Down 14 · '
+                          'motion y 0/−4 · aria-expanded + aria-label「展开/收起子群选项卡」· title「展开子群/收起子群」· '
+                          '选项卡行 role=tablist「子群切换」· min-height 40 · gap sp2 · 横向滚动 · tab 高 32 / padding 0 sp3 / pill / '
+                          'rgba(255,250,251,.6)，hover .18，选中底**交给容器级胶囊**（复用 AylaNavHighlightList，auroraqua 190–197）· '
+                          '名字 max-w 120 省略 · 未读徽标 pink-500（>99 ⇒ 99+）· 禁言 chip ice-300/indigo-700 10px · '
+                          'hasMore ⇒ 「加载更多子群」/「加载中…」（不参与选中）· 展开/收起 300ms disclosure（reduced ⇒ 0）',
+                      child: aylaGroupChatSubgroupBarSamples(),
+                    ),
+                    const SizedBox(height: AylaSpacing.sp6),
                     // ---------- 桌游网格 + 加载骨架（一级 games-grid 与群内共用） ----------
                     _Section(
                       title: 'AylaGamesGrid / AylaGamesGridSkeleton（GamesHubPage.tsx 184–216 + boardgame.css 232–275）',
@@ -464,6 +514,25 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           '⚠️ `.favorite-item-title/-type/-body` 在 tsx **零使用 ⇒ 死声明**（不复刻）；'
                           '`-main` 只用于「内容不可用」按钮（由结果卡自身承担）',
                       child: const _FavoriteItemDemo(),
+                    ),
+                    // ---------- 目录页族（6 个目录页共用的 A 类跨页复用件：三件套 + 侧栏标题 + 装饰图标 + 返回键 + 页面状态壳） ----------
+                    _Section(
+                      title: 'AylaDirectoryPage / AylaDirectoryContent / AylaDirectorySidebarHeader / AylaDirectoryDecorIcon / AylaDirectoryBackButton / AylaPageState'
+                          '（directory-filters.css 2–257 + home.css 620–629 + shell.css 595–629 + 六个目录页 TSX）',
+                      source:
+                          '① 三件套：.directory-page（height 100% / flex column / overflow hidden / padding sp3 sp3 0，≤768 ⇒ 0）· '
+                          '.directory-body（flex 1 1 0 / row + gap sp3 / min-h 0，≤768 ⇒ column + gap 0）· '
+                          '.directory-content（flex 1 1 0 / overflow-y auto / overscroll-y contain / scrollbar-gutter stable / padding sp2 sp2 sp6；'
+                          '≥769 ⇒ margin −sp3 −sp3 0 + padding sp3 (sp2+sp3) sp6 的 12px 阴影绘制带，≤768 ⇒ padding sp2 sp4 68+safe）'
+                          '② 切分类以 key={scope} 重挂载 ⇒ directory-content-in 300ms var(--auroraqua-ease)（opacity 0 + translateY 12 → 1/0；'
+                          'reduced-motion ⇒ 无动画）· 内容区 role=tabpanel + aria-labelledby + tabIndex=0 · '
+                          '③ 侧栏标题：kicker Display 10/w600/ls .14em/pink-500/.75 + 标题 Display 17/w700 + 统计 Utility 12（窄屏 display:none）· '
+                          '④ 装饰图标：flex none / align-self center / margin 6 auto 2 / pink-500 / opacity .42 / rotate −8° / pointer-events none（窄屏 display:none）· '
+                          '⑤ 返回键 = .icon-btn-40（40×40 玻璃 + IconBack 20 + aria-label 返回；宽屏 leading 槽位）· '
+                          '⑥ AylaPageState = .home-state（column / align center / gap sp4 / padding sp12 sp6）+ .placeholder-title（Display 28/600）+ '
+                          '.placeholder-desc（14/secondary）；收藏页覆盖 padding-top sp3。'
+                          '机制差异：负 margin 用 OverflowBox + Transform.translate 表达（溢出 12px 不参与命中）· scrollbar-gutter 无等价',
+                      child: const _DirectoryPageDemo(),
                     ),
                     // ---------- 个人主页域（资料卡族 + 收藏骨架） ----------
                     _Section(
@@ -845,6 +914,22 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
+            // ---------- 群内帖子底部输入容器（B10：scrim + 两档材质 + 展开贴底） ----------
+            _Section(
+              title:
+                  'AylaGroupPostsComposer（posts.css 933–951/1011–1108 + auroraqua.css 347–368）',
+              source:
+                  '壳件（编辑器复用 AylaPostEditor 的 compact/collapsible + composerShell 档）：'
+                  '窄屏 padding sp2 sp3 sp3 / 仅上边框 / 方角 / blur18 sat1.4 / 无外阴影 · '
+                  '≥769 被 auroraqua 347–359 覆写为**浮动玻璃卡**（margin 12 + margin-left 0 / padding 8 / radius 16 / '
+                  '四边亮边 / --glass-shadow / blur24 sat1.4）· 入场 auroraqua-panel-from-bottom 300ms，'
+                  '展开档换 group-posts-editor-rise 250ms · 遮罩 z45 rgba(70,91,146,.25) 淡入 200ms、点击收起 · '
+                  '展开态 absolute 贴底 + max-height 100%（≥769 calc(100% − 2×12)）+ overflow-y auto · '
+                  '字段被覆写为 padding sp2 sp3 + line-height 22（收起态正文 ⇒ 40 高）',
+              child: aylaGroupPostsComposerSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
             // ---------- 评论族（B5） ----------
             _Section(
               title:
@@ -1101,9 +1186,17 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             const SizedBox(height: AylaSpacing.sp6),
             _Section(
               title:
-                  'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760）',
+                  'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760 + auroraqua.css 202–211/316–321/437–445）',
               source:
-                  '**直播间核心装配（live 域收官件）** · 宽屏三栏 = `.live-rail`（240 侧栏，可收起；收起后展开键回头部）+ `.live-room-main`（头部 + 控制台资料栏 + `.live-room-stage`(播放器 16:9) + 观众条 + 推流地址）+ `.live-room-side`（弹幕列表 + 输入框）· **窄屏沉浸式** = 固定头部 + **视频与弹幕区整体上下滑切台**（dragElastic **0.8**；松手判定：净位移 > **1/3 高**优先，否则同向甩动补充）+ 固定输入框 + 右下列表键打开**覆盖层**（`.live-room-rail-overlay`：`rgba(70,91,146,.25)` 遮罩点关闭 + 右侧 240 侧栏）· **进房错误态仍保留侧栏与弹幕区**（避免卡在只有返回键的死页面）· 头部 = 返回(40×40) + 主播头像(32) + 标题滚动 + **来源标签（共享件 `AylaSourceTag`）** + 收藏(compact) + 转发 + 窄屏列表键 · 控制台（`showOwnerPanel`）头部整行不渲染、改由侧栏承载返回/标题 · **全屏期间冻结 isNarrow**（防锁横屏导致窄↔宽切换、播放器重建黑屏）· 飘弹幕层**仅 `!loading && srsStatus === "live"`** 才挂 · 数据全部由页面注入（`AylaLiveRoomData` + 回调；web 的 `useLiveRoom`/`useDanmaku`/live store 属数据层与运行时）· **样张可交互**：点侧栏切台、收起/展开、窄屏上滑切台、列表覆盖层开关',
+                  '**直播间核心装配（live 域收官件）** · 宽屏三栏 = `.live-rail`（240 侧栏，可收起；收起后展开键回头部）+ `.live-room-main`（头部 + 控制台资料栏 + `.live-room-stage`(播放器 16:9) + 观众条 + 推流地址）+ `.live-room-side`（弹幕列表 + 输入框）· **窄屏沉浸式** = 固定头部 + **视频与弹幕区整体上下滑切台**（dragElastic **0.8**；松手判定：净位移 > **1/3 高**优先，否则同向甩动补充）+ 固定输入框 + 右下列表键打开**覆盖层**（`.live-room-rail-overlay`：`rgba(70,91,146,.25)` 遮罩点关闭 + 右侧 240 侧栏）· **进房错误态仍保留侧栏与弹幕区**（避免卡在只有返回键的死页面）· 头部 = 返回(40×40) + 主播头像(32) + 标题滚动 + **来源标签（共享件 `AylaSourceTag`）** + 收藏(compact) + 转发 + 窄屏列表键 · 控制台（`showOwnerPanel`）头部整行不渲染、改由侧栏承载返回/标题 · **全屏期间冻结 isNarrow**（防锁横屏导致窄↔宽切换、播放器重建黑屏）· 飘弹幕层**仅 `!loading && srsStatus === "live"`** 才挂 · 数据全部由页面注入（`AylaLiveRoomData` + 回调；web 的 `useLiveRoom`/`useDanmaku`/live store 属数据层与运行时）· **样张可交互**：点侧栏切台、收起/展开、窄屏上滑切台、列表覆盖层开关'
+                  ' · **2026-09-28 收尾轮补切台/头部编排动效**（LiveRoomBody.tsx:139–151/443–476/542–565）：'
+                  '① 面板重播 = AylaRevealScope(replayKey: channelId) + 三块 AylaRevealItem（宽屏 stage/viewer-strip edge bottom + '
+                  'side edge right；窄屏 stage/viewer-strip bottom + danmaku-wrap right），位移 ±20 / 300ms；'
+                  '② 头部 = _LiveRoomHeaderSwap（AnimatePresence mode="wait" 串行退出→进入 + inert/aria-hidden/pointer-events:none '
+                  '的 Flutter 等价 ExcludeFocus/ExcludeSemantics/IgnorePointer）；'
+                  '⚠️ is-panel-motion / has-media-panel-motion 在 live.css 零命中，auroraqua.css 三处全是「取消 CSS 挂载入场」'
+                  '⇒ Flutter 直接挂 owner（依据已登记在代码注释）；reduced-motion 与 error 两档按 web 关闭。'
+                  '点侧栏切台 / 窄屏上滑切台即可看动效；⚠️ 玻璃件外整层 Opacity 在 Impeller 下会被拒 ⇒ 若只见滑入不见淡入属已知环境限制（位移腿已按像素对账）',
               child: aylaLiveRoomBodySamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
@@ -1412,7 +1505,11 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   'app.css 2186–2323：面板 max-h 280 + padding sp3 + gap sp2 + glass-bg-strong/blur24 sat1.4/'
                   'radius 16 · 网格 minmax(56px,1fr) gap 8 · 格 aspect 1 / radius 8 / 1px 边 / surface 底 · '
                   'hover 边 --glow-500 + --glow-shadow · 图片 object-fit contain · 加号虚线边 · '
-                  '删除键 18 圆（上右 -5，hover 显示）',
+                  '删除键 18 圆（上右 -5，hover 显示）'
+                  ' · **2026-09-28 收尾轮补分页入口**（EmojiPackPanel.tsx:227–228）：复用 AylaDirectoryLoadMore，'
+                  '六传参逐条对齐（loading=!metaLoaded||pages.loading · error=metaError??pages.error · invalidated=false · '
+                  'loadMore=metaError?refresh:pages.loadMore · retainCompletedSpace=false）⇒ 样张多出「有下一页（页脚加载更多）」一档；'
+                  '空态按 tsx 230 逐字（删掉自加的 !_uploading）+ 补 app.css 2318 的 padding sp3 0；原「自造加载圈」按 1:1 口径删除',
               child: aylaEmojiPackPanelSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
@@ -1604,6 +1701,73 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                 ],
               ),
             ),
+                    // ---------- 通用开关（群档 + 个人档；2026-09-28 收尾轮提升为公共件） ----------
+                    _Section(
+                      title:
+                          'AylaSwitch（通用开关 —— group.css 1924–1993 群档 + profile.css 400–434 个人档 + base.css 6–7）',
+                      source:
+                          '以群信息域 AylaGroupInfoSwitch（44×24 / thumb 18）为正确基准提升；个人档 48×28 / knob 20。'
+                          'compact：--ice-300 底 + **--glass-inset 顶沿内高光** → 选中 --pink-500 · thumb --surface '
+                          '+ 0 1px 3px rgba(70,91,146,.3) · 禁用整轨 **.6** · :focus-visible = --focus-ring（offset 2）；'
+                          'regular：--glass-bg-strong（**无 backdrop-filter**）+ 1px --glass-border → 选中 --sakura-300 '
+                          '+ --glow-shadow · knob --ice-300 → --grape-700 · 禁用 **.55**。'
+                          '⚠️ **1px 边框补偿**（本轮修的 bug：个人档 knob 偏上 1px）：CSS 绝对定位子级的包含块是 '
+                          'padding box（base.css 6–7 全局 box-sizing: border-box ⇒ 48×28 含边框）⇒ top/left 3px 实际距'
+                          '外框 4px（中心 4+10 = 14 = 28/2）；旧实现按外框 3 ⇒ 中心 13。'
+                          '点击语义：web 两处都被 <label> 包住 ⇒ 行装配传 ownTap: false（本体只保留 Focus 键盘），'
+                          '行手势一次点击只切一次（样张第 ③ 行有点击计数）。'
+                          '本节点名四档：compact/regular × off/on，另有禁用、focus 环与行装配档。',
+                      child: aylaSwitchSamples(),
+                    ),
+                    // ---------- 群信息右列 / 管理卡三件（2026-09-28 收尾轮 B2） ----------
+                    _Section(
+                      title:
+                          'AylaGroupInfoSectionTitle / AylaGroupInfoCardHead / AylaGroupInfoDangerActions（GroupInfo.tsx 523–526/628–645/651–663/748–752 + group.css 1610–1675/2050–2107）',
+                      source:
+                          '① 区块标题（.group-info-section-title）：flex · center · gap sp2 · margin-bottom sp3 · '
+                          'font-display 17 / w500 / --text-primary · 前置 svg（web <IconMenu 18>）--text-secondary · '
+                          '文案两档「管理 / 更多」。'
+                          '② 卡头（.group-info-card-head）：flex · center · gap sp2 · margin-bottom sp3；图标 18 恒 '
+                          '--text-secondary；标题 display 17 / w500；计数胶囊（.group-info-count）min-width 20 / height 20 / '
+                          'padding 0 6 / pill / rgba(157,191,230,.32)（--ice-500 @32%）/ --indigo-700 / utility 11 / w500 / '
+                          'line-height 20；在线行（.group-info-online）margin-left auto · gap 5 · 12 / --text-secondary + '
+                          '::before 6×6 --success，文案逐字「已载入成员在线 {N}」；头部动作（.group-info-head-action）'
+                          'margin-left auto · min-h 30 · padding 2 12 · 12px · pill · ghost（web「编辑子群」+ aria-label）。'
+                          '⚠️ 在线行与头部动作都靠 margin-left auto 推右，web 两处调用互斥（子群卡出动作、成员卡出在线）。'
+                          '③ 危险操作（.group-info-danger + .group-info-action-row）：column · gap sp2 · 每行 width 100% / '
+                          'min-height 40 ⇒ AylaGlassButton(minHeight: 40, expand: true)；三档逐字 owner「转让群主」ghost + '
+                          '「解散群聊」destructive / 非 owner「退出群聊」；'
+                          '**逐键 busy/disabled 语义不同（2026-09-28 独立审计更正）**：转让无 disabled、解散只切「解散中…」不禁用、'
+                          '退出切「退出中…」且 disabled = (busyAction !== null)（任意管理动作在途都禁）；回调全空 ⇒ 不渲染。'
+                          '另：区块标题与卡头标题都是 web 的 <h3> ⇒ Semantics(header: true)。',
+                      child: aylaGroupInfoManageSamples(),
+                    ),
+                    // ---------- 群信息右列两卡 + 两列布局三件（2026-09-28 收尾轮 B2） ----------
+                    _Section(
+                      title:
+                          'AylaGroupInfoLayout / AylaGroupSubgroupList / AylaGroupMemberList（GroupInfo.tsx 401–405/670–790/1012–1018 + group.css 1421–1459/1461–1465/1690–1732/1752–1787/2062–2128）',
+                      source:
+                          '① 布局（.group-info-layout）：单列 minmax(0,1fr) + gap sp3（1422–1427）；≥769 两列 clamp(280px,32%,340px) '
+                          'minmax(0,1fr) + gap sp4（1439–1452）；**769–1000 退回单列**（1454–1459）；side/main 各自 flex column + gap + min-width 0；'
+                          '.group-info-main 的 container-type: inline-size（1437）在 Flutter 无等价物 ⇒ LayoutBuilder 算列宽 + InheritedWidget '
+                          '下发「主列 inline-size」供 @container 判据；进场照 auroraqua 324–332/429–434（≥769 侧 −20x / 主 +20x；≤768 都 +20y；reduced 关）；'
+                          'loading = padding sp4 + 三块 height 64 骨架（1461–1465 + tsx 401–405）。'
+                          '② 子群（.group-info-subgroup*）：行 gap sp3 / padding sp2 sp3 / radius-input / transition 180ms + hover ice-500@.14（1690–1710）；'
+                          '名 14-w600-textPrimary 省略；默认组 = AylaGroupRoleChip(owner,「默认组」)；'
+                          '⚠️ 禁言 chip 是 **318–331 与 2062–2067 合并**（前者给 ice-300 底 + 1px 6px + Display + lh 1.4，后者只覆写 11/w700/secondary）'
+                          '⇒ 真实渲染是「灰底胶囊 + 次要色 11 粗体」而非纯文本；未读（>0）复用 AylaTabBadge serverItem 档（min16/h16/pad 0 4/pink-500/#fffafb/Display 11/lh16，'
+                          '与 .server-item-badge 同值 ⇒ 未扩档），>99 显「99+」而 aria-label 用原始计数；编辑键 32×32/radius-input/textSecondary + hover ice-500@.18 + '
+                          '**tsx 内联铅笔 14**（GroupInfo.tsx 1012–1018，不在 icons.tsx ⇒ 私有自绘，与 channel_sidebar 私有件同 path，待裁决）；'
+                          '编辑态两键 flex 1 / min-h 36 / 13px（primary「+ 添加子群」+ ghost「完成」）；空态三档逐字「加载中…/子群加载失败/暂无子群」。'
+                          '③ 成员（.group-info-member*）：头像 AylaAvatarHalo 窄屏 36/宽屏 40 +「查看 X 的个人主页」；「我」chip = 1px 8px/pill/sakura-300@.28/Display 11/grape-700；'
+                          '角色 chip 复用（member 不出）；操作区条件 canManage && 非自己 && 非 owner，≥769 opacity 0、行 hover / :focus-within ⇒ 1'
+                          '（Flutter 用 FocusNode.descendants 判定），窄屏常显；按钮 min-h 30/pad 2 12/12px/pill，busy ⇒ 全禁用 +「移除中…」；'
+                          '**@container ≤420** ⇒ 行换行 + 操作区独占一行右对齐 + opacity 1（容器是主列、卡内距 sp4 ⇒ 判据把卡内距加回 32）；'
+                          '空态三档「加载中…/成员加载失败/没有匹配的成员」。'
+                          '样张铺开：宽屏两列（视口 1440×内容 1120 ⇒ 左 340）/ clamp 下限（800 ⇒ 280）/ 769–1000 单列（视口 900）/ 窄屏单列 375 / '
+                          'loading 档 / 子群 5 档 / 成员 4 档（含 ≤420 换行档与 busy 切换）。',
+                      child: aylaGroupInfoListsSamples(),
+                    ),
                   ],
                 ),
               ),
@@ -4073,6 +4237,187 @@ class _GroupInfoSettingsDemoState extends State<_GroupInfoSettingsDemo> {
                     onPressed: null,
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 目录页族样张（A 类跨页复用件 5 件）。
+///
+/// 宽/窄两档必须覆写 `MediaQuery`（画布宿主恒宽 ⇒ 不覆写只会渲染宽屏档）；
+/// 档内文案逐字取自 web：FavoritesPage.tsx:274–275（空态）·
+/// UserPostsRoute.tsx:60–65（受阻态）· VoiceHubPage.tsx:262–263（加载态）。
+class _DirectoryPageDemo extends StatelessWidget {
+  const _DirectoryPageDemo();
+
+  /// `FavoritesPage.tsx:19–26` 的分类选项（逐字）。
+  static const List<({String key, String label})> _options =
+      <({String key, String label})>[
+    (key: 'all', label: '全部'),
+    (key: 'message', label: '消息'),
+    (key: 'post', label: '帖子'),
+    (key: 'live', label: '直播'),
+    (key: 'voice', label: '语音房'),
+    (key: 'game', label: '桌游房'),
+  ];
+
+  /// `.skeleton`（base.css）最简等价块（不引骨架动画，画布只审布局）。
+  static Widget _skeleton({double height = 96}) => Container(
+    height: height,
+    decoration: BoxDecoration(
+      color: AylaColors.ice100,
+      borderRadius: BorderRadius.circular(AylaRadii.rSm),
+    ),
+  );
+
+  static Widget _stage(
+    BuildContext context, {
+    required bool narrow,
+    required Size size,
+  }) {
+    return SizedBox(
+      width: size.width,
+      height: size.height,
+      child: MediaQuery(
+        data: MediaQuery.of(context).copyWith(size: size),
+        child: AylaDirectoryPage(
+          filters: AylaDirectoryFilters(
+            label: '收藏分类',
+            options: _options,
+            value: 'all',
+            onChange: (String _) {},
+            narrow: narrow,
+            leading: narrow ? null : AylaDirectoryBackButton(onPressed: () {}),
+            decor: narrow
+                ? null
+                : AylaDirectoryDecorIcon(icon: aylaIconByName('iconHeart')!),
+            header: narrow
+                ? null
+                : const AylaDirectorySidebarHeader(
+                    kicker: 'Favorites',
+                    title: '我的收藏',
+                    stats: '12 条收藏',
+                  ),
+          ),
+          content: AylaDirectoryContent(
+            label: '全部',
+            child: const AylaPageState(
+              title: '这个分类还没有收藏',
+              description: '在对应场景点收藏，内容会出现在这里',
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget decor(String name, String label) => Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        AylaDirectoryDecorIcon(icon: aylaIconByName(name)!),
+        const SizedBox(height: AylaSpacing.sp2),
+        Text(
+          label,
+          style: AylaTextStyles.light.timestamp.copyWith(
+            color: AylaColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: '宽屏（≥769）：page padding sp3 sp3 0 · 侧栏 224 + gap sp3 + 内容区剩余宽'
+                  '（绘制带左/右/上各外扩 12，内容位置不变）',
+              child: _stage(context, narrow: false, size: const Size(1400, 560)),
+            ),
+            _Slot(
+              label: '窄屏（≤768）：page padding 0 · 顶栏 + 内容单列（gap 0）· 内容 padding sp2 sp4 (68+safe)',
+              child: _stage(context, narrow: true, size: const Size(420, 560)),
+            ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp6),
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: 'AylaDirectorySidebarHeader：Favorites / 我的收藏 / 12 条收藏'
+                  '（侧栏 224 内；条数为代入值，web 是变量）',
+              width: 224,
+              child: const AylaDirectorySidebarHeader(
+                kicker: 'Favorites',
+                title: '我的收藏',
+                stats: '12 条收藏',
+              ),
+            ),
+            _Slot(
+              label: 'AylaDirectoryDecorIcon：六处调用点图标'
+                  '（size 64 / pink-500 / opacity .42 / rotate −8°；标签 = 各页 kicker）',
+              width: 520,
+              child: Wrap(
+                spacing: AylaSpacing.sp4,
+                runSpacing: AylaSpacing.sp4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  decor('iconSearch', 'Search'),
+                  decor('iconHeart', 'Favorites'),
+                  decor('iconMic', 'Voice'),
+                  decor('iconVideo', 'Live'),
+                  decor('iconPost', 'Posts'),
+                  decor('iconGame', 'Games'),
+                ],
+              ),
+            ),
+            _Slot(
+              label: 'AylaDirectoryBackButton（.directory-filter-back = .icon-btn-40：40×40 + IconBack 20）',
+              width: 200,
+              child: AylaDirectoryBackButton(onPressed: () {}),
+            ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp6),
+        _Row(
+          children: <Widget>[
+            _Slot(
+              label: 'AylaPageState 空态（FavoritesPage.tsx:274–275 逐字）',
+              width: 360,
+              child: const AylaPageState(
+                title: '这个分类还没有收藏',
+                description: '在对应场景点收藏，内容会出现在这里',
+              ),
+            ),
+            _Slot(
+              label: 'AylaPageState 受阻态（UserPostsRoute.tsx:60–65 逐字 · role=alert ⇒ liveRegion）',
+              width: 360,
+              child: AylaPageState(
+                title: '对方未开启内容展示',
+                description: '对方关闭了「向他人展示内容」，暂时无法查看其帖子',
+                liveRegion: true,
+                children: <Widget>[
+                  AylaGlassButton(
+                    label: '返回主页',
+                    variant: AylaGlassButtonVariant.ghost,
+                    onPressed: () {},
+                  ),
+                ],
+              ),
+            ),
+            _Slot(
+              label: 'AylaPageState 加载态（VoiceHubPage.tsx:262–263 逐字 · role=status）',
+              width: 360,
+              child: AylaPageState(
+                liveRegion: true,
+                children: <Widget>[_skeleton(), const Text('正在加载语音房…')],
               ),
             ),
           ],

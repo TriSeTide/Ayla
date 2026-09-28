@@ -2,7 +2,8 @@
 /// `profile.css 47–51 / 377–440 / 593–611» + `auth.css 79–87»。
 ///
 /// 覆盖：状态胶囊（文案顺序 / 选中态色 / 未选中态色 / 点击回调 / radio 语义 / 字体档）·
-/// 开关行（48×28 轨道 · knob 20×20 left 3→23 · 底/钮两档色 · 整行点一次 · 键盘 Space · toggled 语义）·
+/// 开关行（48×28 轨道 · knob 20×20；**含 1px 边框补偿 ⇒ 外框坐标 4→24**，见 switch.dart 库头 ·
+/// 底/钮两档色 · 整行点一次 · 键盘 Space · toggled 语义）·
 /// 表单装配（行文案 / 保存键禁用三条件 / 保存中文案 / 已保存提示条件 / 错误行 liveRegion / 退出键可选）。
 ///
 /// ⚠️ 一态一用例（同用例二次 pumpWidget 换 props 不生效）。
@@ -146,7 +147,7 @@ void main() {
   // ===================== 开关行 =====================
 
   group('AylaProfileSwitch', () {
-    testWidgets('轨道 48×28 · knob 20×20 · off 档 left 3 + ice-300 钮 + 玻璃底', (
+    testWidgets('轨道 48×28 · knob 20×20 · off 档 left 4（含 1px 边框补偿）+ ice-300 钮 + 玻璃底', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(
@@ -178,11 +179,15 @@ void main() {
       final AnimatedPositioned positioned = tester.widget<AnimatedPositioned>(
         find.byType(AnimatedPositioned),
       );
-      expect(positioned.left, 3); // .knob { left: 3px }
-      expect(positioned.top, 3);
+      // ⚠️ CSS .knob { top: 3px; left: 3px } 的包含块是 **padding box**（base.css 6–7 全局
+      // box-sizing: border-box ⇒ 48×28 含 1px 边框）⇒ 距外框 4px。
+      // 旧实现按外框 3 ⇒ knob 中心 13 ≠ 轨道中心 14（圆点偏上 1px，用户当场点名）；
+      // 现按 4 对齐，居中由 test/switch_test.dart 的「knob 中心 vs 轨道中心」断言锁死。
+      expect(positioned.left, 4);
+      expect(positioned.top, 4);
     });
 
-    testWidgets('on 档：knob translateX(20) ⇒ left 23 · 底 sakura-300 + 钮 grape-700 + 辉光', (
+    testWidgets('on 档：knob translateX(20) ⇒ left 24（含 1px 补偿）· 底 sakura-300 + 钮 grape-700 + 辉光', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(
@@ -214,7 +219,7 @@ void main() {
         tester
             .widget<AnimatedPositioned>(find.byType(AnimatedPositioned))
             .left,
-        23,
+        24, // CSS left 3 + translateX(20) + 1px 边框补偿
       );
     });
 

@@ -4,7 +4,9 @@
 ///
 /// 覆盖：权限兜底三档（后端值优先 / 未建包按角色 / 摘要未加载不显示加号）/ 结构（头 + 关闭键 +
 /// 网格列数 auto-fill minmax(56) gap 8 + 格 aspect 1 + 半径 8 + `--surface` 底）/ 空态两档文案 /
-/// 错误态 / 交互（点表情发送且**不关闭面板**、hover 显示删除键、上传链回调与失败文案）。
+/// 错误态 / 交互（点表情发送且**不关闭面板**、hover 显示删除键、上传链回调与失败文案）/
+/// **分页页脚接线（tsx 227–228：loading / error / hasMore / invalidated / refresh / loadMore /
+/// retainCompletedSpace）与空态五条件（tsx 230）**。
 library;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
@@ -19,6 +21,8 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/dashed_border.dart';
+import '../lib/widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
+import '../lib/widgets/base/pagination_footer.dart' show AylaPaginationLoadingDots;
 import '../lib/widgets/chat/emoji_pack_panel.dart';
 import '../lib/widgets/base/resource_image.dart';
 
@@ -364,5 +368,205 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('加载群表情包失败'), findsOneWidget);
+  });
+
+  // ======================= 分页页脚（tsx 227–228 接线） =======================
+
+  group('分页页脚（复用 AylaDirectoryLoadMore）', () {
+    AylaDirectoryLoadMore footerOf(WidgetTester tester) =>
+        tester.widget<AylaDirectoryLoadMore>(find.byType(AylaDirectoryLoadMore));
+
+    testWidgets('摘要未加载 ⇒ loading=true + 页脚三点', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: const AylaEmojiPackData(), // summaryLoaded: false
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(
+        footerOf(tester).loading,
+        isTrue,
+        reason: 'tsx 227：loading = !metaLoaded || pages.loading',
+      );
+      expect(find.byType(AylaPaginationLoadingDots), findsOneWidget);
+    });
+
+    testWidgets('摘要已加载 + 分页加载中 ⇒ loading=true', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: const AylaEmojiPackData(summaryLoaded: true, itemsLoading: true),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(footerOf(tester).loading, isTrue);
+      expect(find.byType(AylaPaginationLoadingDots), findsOneWidget);
+    });
+
+    testWidgets('空闲（已加载 / 无更多 / 无错）⇒ 页脚不渲染（retainCompletedSpace:false）', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: const AylaEmojiPackData(summaryLoaded: true),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(footerOf(tester).retainCompletedSpace, isFalse);
+      expect(find.byType(AylaPaginationLoadingDots), findsNothing);
+      expect(find.text('加载更多'), findsNothing);
+      // 组件本身仍在树上（渲染为空盒子），只是页脚内容为零
+      expect(find.byType(AylaDirectoryLoadMore), findsOneWidget);
+    });
+
+    testWidgets('hasMore ⇒ 「加载更多」按钮；点它走 onLoadMore（不是 refresh）', (
+      WidgetTester tester,
+    ) async {
+      int loads = 0;
+      int reloads = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            onReload: () async => reloads += 1,
+            onLoadMore: () async => loads += 1,
+            data: AylaEmojiPackData(
+              packId: 'p1',
+              summaryLoaded: true,
+              hasMore: true,
+              items: <AylaEmojiItem>[_emoji('a')],
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(footerOf(tester).hasMore, isTrue);
+      await tester.tap(find.text('加载更多'));
+      await tester.pump();
+      expect(loads, 1, reason: 'tsx 228：loadMore = metaError ? refresh : pages.loadMore');
+      expect(reloads, 0);
+    });
+
+    testWidgets('摘要错误 ⇒ error 传页脚（不渲染）+ loadMore 改走 refresh', (
+      WidgetTester tester,
+    ) async {
+      int loads = 0;
+      int reloads = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            onReload: () async => reloads += 1,
+            onLoadMore: () async => loads += 1,
+            data: const AylaEmojiPackData(
+              summaryLoaded: true,
+              summaryError: '加载群表情包失败',
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      final AylaDirectoryLoadMore footer = footerOf(tester);
+      expect(footer.error, '加载群表情包失败', reason: 'tsx 227：error = metaError ?? pages.error');
+      expect(footer.loading, isFalse, reason: '摘要已加载（metaLoaded=true）');
+      // error 非 null ⇒ 组件返回 SizedBox.shrink（tsx 29），页脚内容不渲染
+      expect(find.text('加载更多'), findsNothing);
+      expect(find.byType(AylaPaginationLoadingDots), findsNothing);
+      // 摘要失败时页脚的重试目标是**摘要**
+      await footer.loadMore();
+      expect(reloads, 1);
+      expect(loads, 0);
+    });
+
+    testWidgets('分页错误 ⇒ error = itemsError（页脚不渲染）', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: const AylaEmojiPackData(
+              summaryLoaded: true,
+              itemsError: '加载失败，请重试',
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(footerOf(tester).error, '加载失败，请重试');
+      expect(find.byType(AylaPaginationLoadingDots), findsNothing);
+    });
+
+    testWidgets('invalidated 恒为 false（tsx 228 字面量）', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: AylaEmojiPackData(
+              packId: 'p1',
+              summaryLoaded: true,
+              itemsLoading: true,
+              hasMore: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(footerOf(tester).invalidated, isFalse);
+    });
+
+    testWidgets('空态五条件（tsx 230）：分页加载中不出空态文案', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: const AylaEmojiPackData(summaryLoaded: true, itemsLoading: true),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('还没有表情，点加号上传'), findsNothing, reason: '!pages.loading 是空态条件之一');
+    });
+
+    testWidgets('空态五条件（tsx 230）：分页错误时不出空态文案', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaEmojiPackPanel(
+            myRole: 'owner',
+            onClose: () {},
+            data: const AylaEmojiPackData(
+              summaryLoaded: true,
+              itemsError: '加载失败，请重试',
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('还没有表情，点加号上传'), findsNothing, reason: '!pages.error 是空态条件之一');
+      expect(find.text('加载失败，请重试'), findsOneWidget);
+    });
   });
 }

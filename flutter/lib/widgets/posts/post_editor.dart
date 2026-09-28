@@ -63,6 +63,7 @@ class AylaPostEditor extends StatefulWidget {
     this.groupsLoading = false,
     this.compact = false,
     this.collapsible = false,
+    this.composerShell = false,
     this.expanded,
     this.onExpandedChange,
     this.onPickMedia,
@@ -90,6 +91,23 @@ class AylaPostEditor extends StatefulWidget {
 
   /// 可展开/收起模式（默认收起，点输入框展开）。
   final bool collapsible;
+
+  /// 群内**底部输入容器**内嵌档（`.group-posts-input`，posts.css 1027–1049 的覆写组）。
+  ///
+  /// 外壳（`AylaGroupPostsComposer`）持有输入区内沿 ⇒ 编辑器自身让位，三条覆写：
+  /// - ``.group-posts-input > .post-editor.is-collapsible { padding: 0 }`` ⇒ 外层内边距清零；
+  /// - ``.group-posts-input .field { padding: var(--sp-2) var(--sp-3); line-height: 22px }``
+  ///   ⇒ 字段内沿 8/12 + 行高 22px（标题与正文两个字段都命中）；
+  /// - ``.group-posts-input .post-editor:not(.is-expanded) .post-editor-body { height: 40px }``
+  ///   —— 上面两条已使收起态正文 = 8 + 8 + 22 = 38 < min-height 40 ⇒ 高度恰为 **40**，
+  ///   与 web 逐像素一致（无需另写死高度）。
+  ///
+  /// 登记的两处**未接管**（不改公共件既有行为）：
+  /// ① web 还把编辑器内部 `gap` 从 sp1(4) 覆写为 sp2(8)（posts.css 1030）——
+  ///    本档不动内部间距，差 4px/处；
+  /// ② `.group-posts-input .post-editor-image-btn` 的阴影档（`--glass-shadow-compact`）
+  ///    归 [AylaGlassButton] 的 ghost 档，差 2px 量级。
+  final bool composerShell;
 
   /// 受控展开态（传入后展开/收起完全由外部驱动）。
   final bool? expanded;
@@ -363,13 +381,28 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
       ),
     );
 
+    // 群内底部容器档：字段内沿 sp2 sp3 + 行高 22px（posts.css 1033–1040）
+    final EdgeInsetsGeometry? fieldPadding = widget.composerShell
+        ? const EdgeInsets.symmetric(
+            horizontal: AylaSpacing.sp3,
+            vertical: AylaSpacing.sp2,
+          )
+        : null;
+    final TextStyle fieldText = widget.composerShell
+        ? t.body.copyWith(
+            color: AylaColors.textPrimary,
+            height: 22 / (t.body.fontSize ?? 15), // line-height: 22px
+          )
+        : t.body.copyWith(color: AylaColors.textPrimary);
+
     final Widget titleField = AylaGlassInput(
       controller: _title,
       hintText: '标题（必填）',
       minHeight: 40, // .post-editor-title { min-height: 40px }
       maxLength: 128,
       enabled: !busy,
-      textStyle: t.body.copyWith(color: AylaColors.textPrimary),
+      padding: fieldPadding,
+      textStyle: fieldText,
       semanticLabel: '标题（必填）',
     );
 
@@ -382,7 +415,8 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
       minLines: expanded ? 4 : 1,
       maxLines: expanded ? 4 : 1,
       enabled: !busy,
-      textStyle: t.body.copyWith(color: AylaColors.textPrimary),
+      padding: fieldPadding,
+      textStyle: fieldText,
       semanticLabel: widget.compact ? '发一条帖子' : '正文（必填）',
     );
 
@@ -489,7 +523,14 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
     final Widget extraRegion = !expanded
         ? const SizedBox.shrink()
         : (widget.collapsible
-            ? Expanded(
+            // web：`.post-editor-extra { flex: 1 1 auto; min-height: 0; overflow-y: auto }`（posts.css 253–257）
+            // = **loose**（内容高优先、空间不够才滚动）⇒ Flutter 对应 Flexible(fit: loose)，
+            // 不是 Expanded：tight 会让编辑器件恒取 `max-height: min(90vh,1000px)` 的上限
+            // （实测：群内展开态面板因此恒为 90vh 高，web 是按内容高），
+            // 且在高度无界的宿主里 Expanded 会直接抛
+            // "RenderFlex children have non-zero flex but incoming height constraints are unbounded"。
+            ? Flexible(
+                fit: FlexFit.loose,
                 child: SingleChildScrollView(
                   child: Padding(
                     padding: const EdgeInsets.only(top: AylaSpacing.sp1),
@@ -512,10 +553,16 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
         maxHeight: (widget.collapsible && expanded) ? maxHeightCap : 1000,
       ),
       child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: AylaSpacing.sp3,
-          vertical: widget.collapsible ? AylaSpacing.sp2 : AylaSpacing.sp3,
-        ),
+        // .post-editor.is-collapsible { padding: sp2 sp3 }；群内底部容器覆写为 0
+        // （外壳 .group-posts-input 自己持有 sp2 sp3 sp3 / 宽屏 sp2）
+        padding: widget.composerShell
+            ? EdgeInsets.zero
+            : EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp3,
+                vertical: widget.collapsible
+                    ? AylaSpacing.sp2
+                    : AylaSpacing.sp3,
+              ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
