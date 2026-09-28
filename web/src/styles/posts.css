@@ -706,6 +706,25 @@
   position: relative; /* 编辑面板 absolute 定位的参照：限定在帖子页面内，不覆盖顶部导航/底栏 */
 }
 
+/* 空 / 错态档（PostDetailPage.tsx 空态分支）：顶栏之下占满剩余高度并居中，
+   内距与间距**逐值取自 web 既有空态规范**，不新造数值：
+   - `.home-state`（home.css:622–629）：display flex / column / align-items center /
+     gap: var(--sp-4) / padding: var(--sp-12) var(--sp-6) / text-align: center；
+   - `.home-wide-empty`（home.css:673–682）：整页空态用 flex 撑满 + justify-content: center
+     （此处以 flex: 1 等价 `.post-detail` 的剩余高度）。
+   仅作用于详情页空态；公共 .placeholder-desc / .home-state 不改。 */
+.post-detail-state {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-12) var(--sp-6);
+  text-align: center;
+}
+
 .post-detail-head {
   flex: none;
   display: flex;

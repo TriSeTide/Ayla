@@ -30,8 +30,12 @@
 /// - 骨架 `posts.css:1111–1136` + 内联几何 `PostDetailPage.tsx:410–424`
 ///   （40 圆形 / 96×16 r8 / 64×12 r6 → head；h14 100% / h14 92% / h120 三根；
 ///   评论块 = 12×80 r6 + 13px 88%/76%/82%）；
-/// - 空/错态 `PostDetailPage.tsx:430–438`：`p.placeholder-desc`（error ?? 「帖子不存在」）+
-///   `.btn.btn-ghost`「返回」—— **无头、无 padding**（web 现状，逐条照抄）。
+/// - 空/错态 `PostDetailPage.tsx:430–438`（2026-09-28 用户裁决**修**，不再照抄原 web「无头 + 贴顶无内距」）：
+///   顶栏与加载态同构（返回键 + 「帖子」）⇒ 由本件 [AylaPostDetailChrome] 承担（走 `body`）；
+///   正文档 = 新增 `posts.css` 的 `.post-detail-state`，内距/间距逐值取自 web 既有空态规范
+///   —— `.home-state`（`home.css:622–629`）：`gap: var(--sp-4)` + `padding: var(--sp-12) var(--sp-6)`
+///   + 居中列；`.home-wide-empty`（`home.css:673–682`）：整页 `justify-content: center`；
+///   出口沿用既有 `.btn.btn-ghost`「返回」（结构同 `MyPostsPage.tsx:187` 的错态）。
 ///
 /// ## 与 web 的机制差异（登记）
 /// 1. web 的入场动画 owner 是 CSS（`auroraqua-panel-from-top/bottom`），framer-motion
@@ -56,7 +60,7 @@ import '../../theme/glass.dart'
     show AylaGlassButton, AylaGlassButtonVariant, AylaGlassSurface;
 import '../../theme/tokens.dart';
 import '../base/loading.dart' show AylaSkeleton;
-import '../base/page_state.dart' show AylaPlaceholderDesc;
+import '../base/page_state.dart' show AylaPageState;
 import '../base/reveal.dart' show AylaRevealItem;
 
 /// 详情页壳：玻璃头 + 滚动区 + 底部输入区（编辑态时三者只透出背景）。
@@ -71,7 +75,8 @@ class AylaPostDetailChrome extends StatelessWidget {
     this.composer,
     this.scrollController,
     this.onScrollNotification,
-    required this.children,
+    this.children = const <Widget>[],
+    this.body,
   });
 
   /// 头部标题（`tsx:408/448` 恒「帖子」）。
@@ -98,8 +103,12 @@ class AylaPostDetailChrome extends StatelessWidget {
   /// 滚动通知（评论触底分页用）。
   final bool Function(ScrollNotification notification)? onScrollNotification;
 
-  /// 滚动区内容（详情卡 + 评论列）。
+  /// 滚动区内容（详情卡 + 评论列）；[body] 非空时忽略。
   final List<Widget> children;
+
+  /// 非滚动主体（空 / 错态档 `.post-detail-state`）：顶栏之下自撑满、由调用方给
+  /// [AylaPostDetailEmpty]；该档不是滚动区，故与 [children] 互斥。
+  final Widget? body;
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +172,9 @@ class AylaPostDetailChrome extends StatelessWidget {
       child: head,
     );
 
-    final Widget scroll = NotificationListener<ScrollNotification>(
+    // 主体：默认滚动区（详情卡 + 评论列）；空 / 错态走 [body]（非滚动，自撑满）。
+    final Widget main = body ??
+        NotificationListener<ScrollNotification>(
       onNotification: onScrollNotification ?? (ScrollNotification _) => false,
       child: SingleChildScrollView(
         controller: scrollController,
@@ -182,7 +193,7 @@ class AylaPostDetailChrome extends StatelessWidget {
 
     final List<Widget> column = <Widget>[
       _Background(visible: !editing, child: head),
-      _Background(visible: !editing, expand: true, child: scroll),
+      _Background(visible: !editing, expand: true, child: main),
       if (composer != null)
         _Background(
           visible: !editing,
@@ -389,9 +400,16 @@ class AylaPostDetailSkeleton extends StatelessWidget {
   }
 }
 
-/// 详情空/错态（`PostDetailPage.tsx:430–438`）：`.placeholder-desc` + ghost「返回」。
+/// 详情空 / 错态档（`PostDetailPage.tsx:430–438` 的空态分支）—— `.post-detail-state` 的等价物。
 ///
-/// ⚠️ web 现状：**无头部、无 padding**（文案贴顶左对齐）⇒ 逐条照抄。
+/// **2026-09-28 用户裁决：修**（不再照抄 web 原「无头 + 文案贴顶无内距」）。逐值依据：
+/// - 顶栏不在本件：由 [AylaPostDetailChrome] 的 `body` 装配提供（返回键 + 「帖子」，
+///   与加载态同构，`tsx:404–409`）；
+/// - 正文档 = `.home-state`（`home.css:622–629`）：`padding: sp12 sp6` + `gap: sp4` +
+///   居中列（由 [AylaPageState] 承载，数值与 web 同 token）；
+/// - 整页居中 = `.home-wide-empty`（`home.css:673–682`）的 `justify-content: center`
+///   ⇒ 由 [Center] 表达（`.post-detail-state` 的 `flex: 1` 由 chrome 的 `Expanded` 等价）；
+/// - 出口沿用既有 ghost「返回」（`MyPostsPage.tsx:187` 的错态结构：文案 + 动作）。
 class AylaPostDetailEmpty extends StatelessWidget {
   const AylaPostDetailEmpty({
     super.key,
@@ -407,27 +425,34 @@ class AylaPostDetailEmpty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        AylaPlaceholderDesc(message, textAlign: TextAlign.left),
-        const SizedBox(height: AylaSpacing.sp2),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: AylaGlassButton(
+    return Center(
+      child: AylaPageState(
+        // web 空态 / 错态都带 role（status / alert）⇒ 两者都是 live region。
+        liveRegion: true,
+        description: message,
+        children: <Widget>[
+          AylaGlassButton(
             label: '返回',
             variant: AylaGlassButtonVariant.ghost,
             onPressed: onBack,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-/// 画布样张（骨架 / 空态 / 壳三档）。
+/// 画布样张（骨架 / 空态装配两档）。
+///
+/// 空态样张给的是**装配态**（chrome 顶栏 + `body` 空态档）——需有界高度，`body` 走
+/// `Expanded`；单独渲染 [AylaPostDetailEmpty] 时高度无界、居中无参照。
 List<Widget> aylaPostDetailChromeSamples() => <Widget>[
       const SizedBox(height: 360, child: AylaPostDetailSkeleton()),
-      AylaPostDetailEmpty(message: '帖子不存在', onBack: () {}),
+      SizedBox(
+        height: 360,
+        child: AylaPostDetailChrome(
+          onBack: () {},
+          body: AylaPostDetailEmpty(message: '帖子不存在', onBack: () {}),
+        ),
+      ),
     ];

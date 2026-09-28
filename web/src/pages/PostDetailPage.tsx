@@ -428,12 +428,23 @@ function PostDetailContent({ groupId }: { groupId?: string }) {
   }
 
   if (!post) {
+    // 空/错态：顶栏与加载态同构（返回键 + 标题，见上 404–409），
+    // 正文走 .post-detail-state 空态档（居中 + 既有空态规范的内距，见 posts.css）；
+    // 空态区出口沿用既有 ghost「返回」（结构同 MyPostsPage.tsx:187 的错态）。
     return wrapSwipe(
       <div className="post-detail">
-        <p className="placeholder-desc">{error ?? "帖子不存在"}</p>
-        <button type="button" className="btn btn-ghost" onClick={goBack}>
-          返回
-        </button>
+        <header className="post-detail-head">
+          <button type="button" className="icon-btn-40" onClick={goBack} aria-label="返回">
+            <IconBack width={22} height={22} />
+          </button>
+          <span className="post-detail-title">帖子</span>
+        </header>
+        <div className="post-detail-state" role={error ? "alert" : "status"}>
+          <p className="placeholder-desc">{error ?? "帖子不存在"}</p>
+          <button type="button" className="btn btn-ghost" onClick={goBack}>
+            返回
+          </button>
+        </div>
       </div>,
     );
   }

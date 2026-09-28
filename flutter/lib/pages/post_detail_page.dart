@@ -3,8 +3,10 @@
 /// ## 事实源（逐条）
 /// - tsx 399–428：加载态 = 头部（返回 + 「帖子」）+ `AylaPostDetailSkeleton`
 ///   （**不渲染 composer**）；
-/// - tsx 430–438：空/错态 = `placeholder-desc(error ?? "帖子不存在")` + ghost「返回」
-///   （无头、无 padding —— web 现状，逐条照抄）；
+/// - tsx 430–438：空/错态 —— 2026-09-28 用户裁决**修**（不再照抄原 web「无头 + 贴顶无内距」）：
+///   顶栏与加载态同构（返回键 + 「帖子」），正文交给 chrome 的非滚动主体
+///   `AylaPostDetailEmpty`（`.post-detail-state` 档：内距/间距逐值取自 web 既有空态规范
+///   —— `home.css:622–629` 的 `sp12 sp6` + `sp4`、`home.css:673–682` 的整页居中）；
 /// - tsx 442–495：详情壳（`.post-detail` + 玻璃头 + 返回 + 「帖子」+ 分享 +
 ///   作者操作区「编辑 / 删除」，删除是**就地两态** tsx 486–489）；
 /// - tsx 497–599：全屏编辑面板 ⇒ 件 `AylaPostEditFullscreen`；
@@ -547,13 +549,17 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
     }
 
     if (post == null) {
-      // tsx 430–438
+      // tsx 430–438（2026-09-28 用户裁决「修」）：顶栏与加载态同构（chrome 承担），
+      // 正文 = chrome 的非滚动主体 AylaPostDetailEmpty（.post-detail-state 档）。
       return AylaFullScreenSwipeBack(
         enabled: narrow,
         onBack: _goBack,
-        child: AylaPostDetailEmpty(
-          message: _error ?? '帖子不存在',
+        child: AylaPostDetailChrome(
           onBack: _goBack,
+          body: AylaPostDetailEmpty(
+            message: _error ?? '帖子不存在',
+            onBack: _goBack,
+          ),
         ),
       );
     }

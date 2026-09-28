@@ -18,9 +18,11 @@ import '../lib/pages/my_posts_page.dart';
 import '../lib/pages/post_detail_page.dart';
 import '../lib/widgets/posts/post_detail_chrome.dart';
 import '../lib/pages/posts_hub_page.dart';
+import '../lib/theme/buttons.dart' show AylaIconButton;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/loading.dart' show AylaSkeleton;
+import '../lib/widgets/base/page_state.dart' show AylaPageState;
 import '../lib/widgets/posts/post_page_chrome.dart';
 
 AylaPost _post(
@@ -291,6 +293,71 @@ void main() {
       await _pump(tester, const PostDetailPage(postId: 'abc'));
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('帖子不存在'), findsOneWidget);
+    });
+
+    // 2026-09-28 用户裁决「修」：空/错态补顶栏 + 空态档（不再是「无头 + 文案贴顶」）。
+    // 内距/间距逐值取自 web 既有空态规范：.home-state（home.css:622–629）
+    // = padding sp12 sp6 + gap sp4；整页居中同 .home-wide-empty（home.css:673–682）。
+    testWidgets('空态档：chrome 顶栏 + home-state 内距（sp12 sp6）+ gap sp4 + 整页居中', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        AylaPostDetailChrome(
+          onBack: () {},
+          body: AylaPostDetailEmpty(message: '帖子不存在', onBack: () {}),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // 顶栏与加载态同构（tsx 404–409）：返回键 + 「帖子」
+      expect(find.byType(AylaIconButton), findsOneWidget);
+      expect(find.text('帖子'), findsOneWidget);
+      // 空态文案 + 既有 ghost「返回」出口（MyPostsPage.tsx:187 的错态结构）
+      expect(find.text('帖子不存在'), findsOneWidget);
+      expect(find.text('返回'), findsOneWidget);
+      // 内距 = sp12 / sp6（home.css:627），间距 = sp4（home.css:626）
+      final Iterable<Padding> paddings = tester.widgetList<Padding>(find.byType(Padding));
+      expect(
+        paddings.any(
+          (Padding p) =>
+              p.padding ==
+              const EdgeInsets.symmetric(
+                vertical: AylaSpacing.sp12,
+                horizontal: AylaSpacing.sp6,
+              ),
+        ),
+        isTrue,
+      );
+      final Iterable<Column> columns = tester.widgetList<Column>(find.byType(Column));
+      expect(columns.any((Column c) => c.spacing == AylaSpacing.sp4), isTrue);
+      // 整页居中（home.css:677–678 的 justify-content: center）：空态档外层是一个撑满的 Center
+      final Finder wrapper = find
+          .ancestor(of: find.byType(AylaPageState), matching: find.byType(Center))
+          .first;
+      final Rect box = tester.getRect(wrapper);
+      expect(box.width, 1440); // .post-detail-state 撑满顶栏之下的剩余区域（flex: 1 ⇒ Expanded）
+      expect(
+        tester.getRect(find.byType(AylaPageState)).center.dy,
+        closeTo(box.center.dy, 0.5),
+      );
+    });
+
+    testWidgets('错态档：同一空态档几何，文案取自 error（不落「帖子不存在」兜底）', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        AylaPostDetailChrome(
+          onBack: () {},
+          body: AylaPostDetailEmpty(message: '帖子加载失败', onBack: () {}),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('帖子加载失败'), findsOneWidget);
+      expect(find.text('帖子不存在'), findsNothing);
+      expect(find.byType(AylaPageState), findsOneWidget);
+      expect(find.text('返回'), findsOneWidget);
     });
   });
 
