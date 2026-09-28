@@ -82,9 +82,9 @@ class AylaProfileCard extends StatelessWidget {
   /// ⇒ 调用方只需用 `ConstrainedBox(minHeight: …)` 给出下限（见
   /// `pages/profile_support.dart` 的 `aylaProfileSidebarScroll`）。
   ///
-  /// ⚠️ 想让留白**只**落在表单与操作区之间（与 web 逐条一致）时，调用方把
-  /// 「上半区（identity + avatar-actions + form）」包成一个子项、操作区作第二个子项 ——
-  /// 见 `ProfilePage` / `UserProfilePage` 的侧栏装配。
+  /// ⚠️ 调用方应把**每个区块平级传入**（identity / avatar-actions / form…）：
+  /// 多余空间是在**相邻子项之间**均分的，把若干区块先打包成一组会让空隙集中成一处
+  /// （2026-09-28 用户实报「要均匀分布一些」）。
   final bool fillHeight;
 
   @override

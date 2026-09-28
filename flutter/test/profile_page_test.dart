@@ -263,9 +263,20 @@ void main() {
       reason: '操作区应沉到卡底（只剩卡片 padding sp4），不该被空隙顶开',
     );
     // 且上方确实有被拉开的空隙（间隙自适应）：头像操作区底边到表单顶边 > sp6
+    final Rect identity = tester.getRect(find.byType(AylaProfileIdentity));
     final Rect avatarActions = tester.getRect(find.byType(AylaProfileAvatarActions));
     final Rect form = tester.getRect(find.byType(AylaProfileForm));
     final double stretched = form.top - avatarActions.bottom;
+    final double upperGap = avatarActions.top - identity.bottom;
+    debugPrint(
+      'SIDEBAR gaps upper=' +
+          upperGap.toString() +
+          ' lower=' +
+          stretched.toString(),
+    );
+    // **均匀分布**：两个相邻间隙必须近似相等（2026-09-28 用户实报「要均匀分布一些」）。
+    // 若把若干区块先打包成一组的写法回潮，这里会立刻红（空隙会集中成一处）。
+    expect((upperGap - stretched).abs(), lessThan(2));
     debugPrint('SIDEBAR stretchedGap=' + stretched.toString());
     expect(
       stretched,

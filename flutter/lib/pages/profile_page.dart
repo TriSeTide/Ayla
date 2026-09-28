@@ -264,7 +264,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final String displayName = user.nickname.isEmpty ? user.username : user.nickname;
     // 两档装配（web：窄屏 `.profile-side` 是 `display: contents` ⇒ 单列自然流；
     // ≥769 是侧栏模式：卡片 `flex: 1 0 auto` 铺满 + `gap: sp6`，留白落在上半区与表单之间）。
-    final List<Widget> upper = <Widget>[
+    final List<Widget> cardChildren = <Widget>[
         AylaProfileIdentity(
           displayName: displayName,
           username: user.username,
@@ -349,20 +349,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           error: _error,
         );
     final Widget card = isNarrow
-        ? AylaProfileCard(children: <Widget>[...upper, form])
+        ? AylaProfileCard(children: <Widget>[...cardChildren, form])
         : AylaProfileCard(
             compact: true, // padding: sp4
             gap: AylaSpacing.sp6, // .profile-side .profile-card { gap: sp6 }
             fillHeight: true, // flex: 1 0 auto ⇒ 铺满 + 间隙自适应
-            children: <Widget>[
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                spacing: AylaSpacing.sp6,
-                children: upper,
-              ),
-              form,
-            ],
+            // ⚠️ 子项必须**平级**传入：fillHeight 的 space-between 是在**相邻子项之间**均分多余空间 ——
+            // 把 identity + avatar-actions 先打包成一组会让空隙集中成一处（用户实报「要均匀分布一些」）。
+            children: <Widget>[...cardChildren, form],
           );
     final Widget sections = AylaProfileContentSections(
       displayName: displayName,
