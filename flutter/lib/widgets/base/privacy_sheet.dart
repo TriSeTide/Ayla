@@ -37,10 +37,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show FilteringTextInputFormatter, KeyDownEvent, LogicalKeyboardKey,
-        TextInputFormatter;
+    show KeyDownEvent, LogicalKeyboardKey;
 
 import '../../core/net/dio_client.dart';
+import 'auth_code_row.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -482,7 +482,7 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
               : '你当前绑定的邮箱',
         ),
         if (_error != null) _errorBox(t, _error!),
-        _CodeRow(
+        AylaAuthCodeRow(
           controller: _code,
           placeholder: '6 位验证码',
           buttonLabel: _sendLabel,
@@ -491,7 +491,6 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
               widget.boundEmail.isNotEmpty, // !boundEmail 时禁用
           onSend: () => _sendCodeTo(widget.boundEmail),
           onChanged: () => setState(() {}),
-          style: t,
         ),
         _LabeledField(
           label: '新密码（至少 8 位）',
@@ -524,7 +523,7 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
       children: <Widget>[
         _hint(t, '第一步：验证当前邮箱 ', strong: widget.boundEmail),
         if (_error != null) _errorBox(t, _error!),
-        _CodeRow(
+        AylaAuthCodeRow(
           controller: _curCode,
           placeholder: '6 位验证码',
           buttonLabel: _sendLabel,
@@ -533,7 +532,6 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
           // 必须回传：`下一步` 的 enabled 依赖 `_curCode.text`，
           // 不重建则输入后按钮仍禁用（实测）
           onChanged: () => setState(() {}),
-          style: t,
         ),
         _SubmitButton(
           label: '下一步',
@@ -567,7 +565,7 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
           onChanged: () => setState(() {}),
           style: t,
         ),
-        _CodeRow(
+        AylaAuthCodeRow(
           controller: _newCode,
           placeholder: '新邮箱 6 位验证码',
           buttonLabel: _sendLabel,
@@ -576,7 +574,6 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
               !_sending && _countdown == 0 && _newEmail.text.trim().isNotEmpty,
           onSend: () => _sendCodeTo(_newEmail.text),
           onChanged: () => setState(() {}),
-          style: t,
         ),
         _SubmitButton(
           label: _submitting ? '提交中…' : '确认换绑',
@@ -745,60 +742,6 @@ class _MenuItemState extends State<_MenuItem> {
   }
 }
 
-/// `.auth-code-row` —— 验证码输入 + 发码按钮并排。
-///
-/// **复用组件库**：[AylaGlassInput]（`.field` 输入框）+ [AylaGlassButton]（`.btn-ghost`）。
-/// 本类只负责「并排 + 数值输入约束」的编排，不重复实现输入框/按钮样式。
-class _CodeRow extends StatelessWidget {
-  const _CodeRow({
-    required this.controller,
-    required this.placeholder,
-    required this.buttonLabel,
-    required this.buttonEnabled,
-    required this.onSend,
-    required this.style,
-    this.onChanged,
-  });
-
-  final TextEditingController controller;
-  final String placeholder;
-  final String buttonLabel;
-  final bool buttonEnabled;
-  final VoidCallback onSend;
-  final AylaTextStyles style;
-  final VoidCallback? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      spacing: AylaSpacing.sp2, // `.auth-code-row` 并排
-      children: <Widget>[
-        Expanded(
-          child: AylaGlassInput(
-            controller: controller,
-            hintText: placeholder,
-            minHeight: 44,
-            onGlassBorder: true, // `.auth-card .field` 在卡内用 indigo 描边
-            // `inputMode="numeric"` + `maxLength={6}` + 过滤非数字
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            inputFormatters: <TextInputFormatter>[
-              FilteringTextInputFormatter.digitsOnly,
-            ],
-            onChanged: (_) => onChanged?.call(),
-            textStyle: style.body.copyWith(color: AylaColors.textPrimary),
-          ),
-        ),
-        AylaGlassButton(
-          label: buttonLabel,
-          variant: AylaGlassButtonVariant.ghost,
-          minHeight: 44,
-          onPressed: buttonEnabled ? onSend : null,
-        ),
-      ],
-    );
-  }
-}
 
 /// `.auth-field` 标签 + [AylaGlassInput] 的组合（label 在上、输入框在下）。
 ///

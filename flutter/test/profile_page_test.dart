@@ -4,11 +4,17 @@
 /// 保存与头像上传的网络路径不发请求（无 mock `DioClient`），由后端契约与能力层测试覆盖。
 library;
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/core/media/media_picker.dart';
 import '../lib/pages/profile_page.dart';
+import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/profile/profile_card.dart';
 import '../lib/state/auth_state.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
@@ -116,4 +122,75 @@ void main() {
     expect(identity.left, greaterThan(0));
     expect(find.text('更换头像'), findsOneWidget);
   });
+
+  testWidgets('头像即时预览：未选 ⇒ avatarOverride 为 null（走真实 URL，默认档行为不变）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(1440, 1000));
+    await tester.pumpWidget(host(const ProfilePage()));
+    await tester.pump();
+    await signIn(tester, user);
+
+    final AylaProfileIdentity identity = tester.widget<AylaProfileIdentity>(
+      find.byType(AylaProfileIdentity),
+    );
+    expect(identity.avatarOverride, isNull);
+    expect(
+      tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).previewImage,
+      isNull,
+    );
+  });
+
+  testWidgets('头像即时预览：选文件后 avatarOverride = MemoryImage（web objectURL 等价物）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(1440, 1000));
+    // 1×1 透明 PNG：让 AylaResourceImage 真能解码（否则预览路径会抛解码异常）
+    final Uint8List png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    );
+    AylaMediaPicker.backend = _FakePicker(
+      AylaPickedFile(
+        name: 'avatar.png',
+        size: png.length,
+        mimeType: 'image/png',
+        readBytes: () async => png,
+      ),
+    );
+    addTearDown(() => AylaMediaPicker.backend = const AylaFilePickerBackend());
+
+    await tester.pumpWidget(host(const ProfilePage()));
+    await tester.pump();
+    await signIn(tester, user);
+
+    await tester.tap(find.text('更换头像'));
+    await tester.pumpAndSettle();
+
+    // 组件层：override 已透传到 AylaAvatarHalo.previewImage
+    expect(
+      tester
+          .widget<AylaProfileIdentity>(find.byType(AylaProfileIdentity))
+          .avatarOverride,
+      isA<MemoryImage>(),
+    );
+    expect(
+      tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo)).previewImage,
+      isA<MemoryImage>(),
+    );
+    // 与 web 的 hint 并存（tsx 202–204：选了新头像才出现该提示）
+    expect(find.text('新头像将在保存后生效'), findsOneWidget);
+  });
+}
+
+/// 选文件替身（避免平台通道）：直接返回构造好的文件。
+class _FakePicker implements AylaPickerBackend {
+  _FakePicker(this.file);
+
+  final AylaPickedFile file;
+
+  @override
+  Future<List<AylaPickedFile>> pick({
+    required AylaPickKind kind,
+    bool multiple = false,
+  }) async => <AylaPickedFile>[file];
 }

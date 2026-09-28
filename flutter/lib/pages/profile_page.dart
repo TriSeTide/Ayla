@@ -22,9 +22,9 @@
 ///   （空列表会被读成「真的没有内容」）；数据源接入随后续批次。
 /// · `usePresenceOnline`（自身光环跟随 WS 在线增量）属 presence 接线，本页用 `user.online`；
 /// · **头像即时预览**（web `imageUrl={avatarPreview ?? currentUser.avatar}`，tsx 168）：
-///   [AylaProfileIdentity] 只收 `String? avatarUrl`，本地预览需要 `ImageProvider` 参数
-///   ⇒ 跨组件改动，**未擅动**；本页选了新头像后走 `hint`（「新头像将在保存后生效」，
-///   与 web 同一句文案），保存成功后头像更新。**登记为待裁决偏离**（13 号文档）。
+///   ✅ 2026-09-28 用户裁决后落地 —— [AylaProfileIdentity] 新增可选 `avatarOverride`
+///   （`ImageProvider?`，**默认 null ⇒ 既有调用点行为不变**），本页传 `MemoryImage(本地字节)`；
+///   与 web 的 `hint`（「新头像将在保存后生效」，tsx 202–204）并存，保存成功后换回真实 URL。
 library;
 
 import 'dart:typed_data';
@@ -266,9 +266,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         AylaProfileIdentity(
           displayName: displayName,
           username: user.username,
-          avatarUrl: _avatarBytes != null
-              ? null // 预览走下面的 previewImage 覆盖（见 AylaProfileIdentity 的 imageUrl 语义）
-              : (user.avatar.isEmpty ? null : user.avatar),
+          avatarUrl: user.avatar.isEmpty ? null : user.avatar,
+          // `avatarPreview ?? currentUser.avatar`（tsx 168）：选了新头像就先用本地字节
+          // 即时预览（web 用 objectURL；Flutter 用 MemoryImage），保存成功后换回真实 URL。
+          avatarOverride:
+              _avatarBytes == null ? null : MemoryImage(_avatarBytes!),
           online: user.online,
           onBack: _back,
           share: AylaShareButton(

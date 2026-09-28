@@ -102,9 +102,17 @@ class AylaBottomTabs extends StatefulWidget {
   static const double homeDiscSize = 48;
   static const double homeDiscOffset = 8;
 
-  /// 主页圆盘选中辉光 —— **窄屏降档值**（`shell.css:667` 在 `@media (max-width:768px)` 内：
-  /// `0 0 16px rgba(247,150,255,.32)`，§9「≤768px 辉光降 30%」）。
-  /// 底栏本身只出现在窄屏 → 用降档值，不用全局 `--glow-shadow`。
+  /// 主页圆盘选中辉光 —— **窄屏降档值**。
+  ///
+  /// 依据是**本件自己的窄屏覆写**（不是 `design.md §9` 的通用说法）：
+  /// `shell.css:666–669` 在 `@media (max-width: 768px)`（该块起于 651 行）内把
+  /// `.bottom-tab-home .bottom-tab-link.is-active .bottom-tab-home-disc { box-shadow }`
+  /// 覆写为 `0 0 16px rgba(247,150,255,.32)`，胜过 `shell.css:155–157` 的 `--glow-shadow`（满档）。
+  ///
+  /// ⚠️ 2026-09-28 订正措辞：原注释把依据写成「§9『≤768px 辉光降 30%』」——那是**错误推断**
+  /// （`app.css:3195–3199` 的降档清单只有 `.btn-glow` / `.avatar-halo.is-elysia` / `.elysia-entry:hover`，
+  /// 不含本件）。**值不变**（web 确实降档），但依据必须记在真正的来源行上，
+  /// 免得下一个人按「通用说法」把别的件也一起降档。
   static const List<BoxShadow> homeDiscGlow = <BoxShadow>[
     BoxShadow(color: Color(0x52F796FF), blurRadius: 16),
   ];

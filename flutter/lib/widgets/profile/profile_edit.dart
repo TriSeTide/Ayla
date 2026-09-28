@@ -185,7 +185,8 @@ class _StatusChipState extends State<_StatusChip> {
   @override
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
-    final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
+    // ⚠️ 这里**不再**需要 `narrow`：`.status-chip.active` 的辉光窄屏不降档
+    // （依据 `app.css:2717` + `3195–3199` 的选择器清单，见下方 boxShadow 注释）。
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final bool enabled = widget.onTap != null;
     final bool hovered = _hovered && enabled;
@@ -205,10 +206,13 @@ class _StatusChipState extends State<_StatusChip> {
             ? AylaColors.sakura300 // .status-chip.active background
             : AylaColors.ice300.withValues(alpha: 0.16), // rgba(189,212,233,.16)
         borderRadius: AylaRadii.pill,
-        // .status-chip.active { box-shadow: var(--glow-shadow) }（窄屏降 30%）
-        boxShadow: widget.selected
-            ? (narrow ? AylaShadows.glowNarrow : AylaShadows.glow)
-            : null,
+        // `.status-chip.active { box-shadow: var(--glow-shadow) }`（`app.css:2717`）= **满档**：
+        // ① `app.css:3195–3199` 的 ≤768 降档只列 `.btn-glow` / `.avatar-halo.is-elysia` /
+        //    `.elysia-entry:hover`，**不含 status-chip**；② `profile.css:600–611` 只覆写底/字色与
+        //    transition，**没有** box-shadow。
+        // ⇒ 2026-09-28 订正：删掉 `narrow ? glowNarrow :` 分支（那是对「§9 通用说法」的错误套用），
+        //   恒用满档。
+        boxShadow: widget.selected ? AylaShadows.glow : null,
       ),
       child: Text(
         widget.label,

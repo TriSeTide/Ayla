@@ -28,6 +28,8 @@ import '../theme/aurora_background.dart';
 import '../theme/glass.dart';
 import '../theme/sample_media.dart';
 import '../theme/svg_path.dart' show AylaPencilGlyph;
+import '../widgets/base/auth_code_row.dart' show aylaAuthCodeRowSamples;
+import '../widgets/profile/profile_presence.dart' show aylaProfilePresenceSamples;
 import '../theme/tokens.dart';
 import '../widgets/base/avatar_halo.dart';
 import '../widgets/base/avatar_status_badges.dart';
@@ -245,6 +247,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaFavoritesSkeleton',
     '个人主页内容分区', // 2026-09-25 用户指正：本件属 profile 域（早期误放在「群与目录」，当时还没有 profile 分类）
     'AylaStatusChips / AylaProfileSwitch / AylaProfileForm',
+    'AylaProfilePresence', // 2026-09-28：由 user_profile_page 私有件提升
   ]),
   AylaGalleryCategory('search', 'search · 搜索域', <String>[
     'AylaSearchHistoryChips',
@@ -260,6 +263,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaShareSheet',
     'AylaResourceImage',
     'AylaConfirmDialog',
+    'AylaAuthCodeRow', // 2026-09-28：注册页组装与 privacy_sheet 私有件合并
     'PullToRefresh',
     '分页族',
     'VisibilitySelector',
@@ -1416,6 +1420,16 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
             _Section(
+              title:
+                  'AylaAuthCodeRow（auth.css 89–103 + RegisterPage.tsx 143–155 / PrivacySheet）',
+              source:
+                  '验证码输入 + 发码键并排（gap sp2）· 字段 flex 1 / min-width 0 / 44 高 / 认证描边 /'
+                  ' 数字键盘 + maxLength 6 + 过滤非数字 · 发码键 .btn-ghost 44 高；注册页档再传'
+                  ' `.auth-code-btn` 的 min-width 104 + padding-inline sp3；禁用 / aria-invalid 两档已入样张',
+              child: aylaAuthCodeRowSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+            _Section(
               title: 'VisibilitySelector / 资料卡 / 筛选条 / 隐私设置',
               source:
                   '公开↔好友互斥、群可见独立可叠加 · user-profile-card min(320,85vw)+sp6+modal 阴影 · directory-filters 224 侧栏 · privacy-sheet 60dvh 窄屏 + 两步换绑',
@@ -1646,6 +1660,17 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             source:
                 '两个卡：**群结果卡**（.typed-group-card：玻璃卡 + padding sp4/窄屏 sp3 + radius-card + compact 阴影 + blur24；Avatar 44 + 标题 + meta「N 人 / 公开群聊 / 申请制群聊」12px secondary + 可选入口文案 + action 槽位）· **收藏结果卡**（按 target_type 分派到既有 post/live/voice/game 卡并传 action；**投影缺失 = 内容不可用**（.typed-unavailable-card，按钮 disabled）；message 情形自绘 .typed-message-card：IconMessage 18 + 昵称/「消息」13px + 正文三态（已撤回 / 戳一戳 / blockquote 原文，ice-100 + padding sp3 + radius-input）+ 媒体区独占一行复用 AylaMediaContent（点媒体不跳转），整卡 canOpen 时可点）· .typed-result-card 只是宽度归一 ⇒ Flutter 侧由各卡自身表达，不新造空壳容器 · 附带补档：**live 卡补 action 槽位**（web tsx 56 用它换「取消收藏」直删键）· 样张静态展示四档（群卡 meta 两档 / 消息文本 / 已撤回 / 不可用）',
             child: aylaDirectoryResultCardSamples(),
+          ),
+          const SizedBox(height: AylaSpacing.sp6),
+
+          // ---------- 在线胶囊（2026-09-28：由 user_profile_page 私有件提升） ----------
+          _Section(
+            title:
+                'AylaProfilePresence（profile.css 558–570 + UserProfilePage.tsx 142–144）',
+            source:
+                'padding 2×sp3 · pill · 12/w600 · 静息底 --ice-100 + 字 --text-secondary；'
+                '`.is-online` ⇒ 底 --sakura-300 + 字 --grape-700 · 文案由调用方注入（后端 display_status 兜底）',
+            child: aylaProfilePresenceSamples(),
           ),
           const SizedBox(height: AylaSpacing.sp6),
 

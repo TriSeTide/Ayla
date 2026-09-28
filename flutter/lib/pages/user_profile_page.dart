@@ -17,8 +17,8 @@
 /// 以免把两个页面的 DOM 顺序混成一个（CSS 的靠右槽位与紧跟槽位不是同一件事）。
 ///
 /// ## 未接线 / 待提升（第 1 批登记）
-/// · 在线胶囊按 `profile.css:558–570` 在**本页私有实现**（`_PresenceChip`）——
-///   组件库无 `AylaProfilePresence`（19 号 §7.5 第三批已登记为缺口）⇒ **待提升为公共件**；
+/// · 在线胶囊 ✅ 2026-09-28 用户裁决后已提升为公共件 [AylaProfilePresence]
+///   （`profile.css:558–570`），本页改用公共件（私有 `_PresenceChip` 已删）；
 /// · 分享面板接线属分享域批次（本页只装配分享键）；
 /// · 内容分区数据源同 [ProfilePage]：传 `postsError` 显式失败态；
 /// · `usePresenceOnline` / `useDisplayStatus` 属 presence 接线 ⇒ 本页用后端 `display_status` 兜底。
@@ -40,6 +40,7 @@ import '../widgets/base/loading.dart' show AylaSkeleton;
 import '../widgets/base/profile_content_sections.dart';
 import '../widgets/base/share.dart';
 import '../widgets/profile/profile_card.dart';
+import '../widgets/profile/profile_presence.dart';
 
 class UserProfilePage extends ConsumerStatefulWidget {
   const UserProfilePage({super.key, required this.userId});
@@ -291,7 +292,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             ),
           ],
         ),
-        _PresenceChip(
+        AylaProfilePresence(
           label: user.displayStatus ?? (user.online ? '在线' : '离线'),
           online: user.online,
         ),
@@ -367,37 +368,5 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
           ],
         );
     }
-  }
-}
-
-/// `.profile-presence`（`profile.css:558–570`）—— **本页私有**，待提升为公共
-/// `AylaProfilePresence`（19 号 §7.5 第三批已登记为缺口）。
-class _PresenceChip extends StatelessWidget {
-  const _PresenceChip({required this.label, required this.online});
-
-  final String label;
-  final bool online;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp3,
-        vertical: 2,
-      ),
-      decoration: BoxDecoration(
-        // 在线 ⇒ --sakura-300 + --grape-700；否则 --ice-100 + --text-secondary
-        color: online ? AylaColors.sakura300 : AylaColors.ice100,
-        borderRadius: AylaRadii.pill,
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: online ? AylaColors.grape700 : AylaColors.textSecondary,
-        ),
-      ),
-    );
   }
 }

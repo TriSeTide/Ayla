@@ -79,6 +79,7 @@ class AylaProfileIdentity extends StatelessWidget {
     required this.displayName,
     required this.username,
     this.avatarUrl,
+    this.avatarOverride,
     this.online = false,
     this.onBack,
     this.share,
@@ -104,6 +105,15 @@ class AylaProfileIdentity extends StatelessWidget {
   /// 通常传 `AylaShareButton(size: 40, label: actionLabel)`。
   final Widget? share;
 
+  /// 头像**即时预览**（`ImageProvider`，如 `MemoryImage(本地字节)`）。
+  ///
+  /// 事实源：`ProfilePage.tsx:168` 的 `imageUrl={avatarPreview ?? (currentUser.avatar || null)}`
+  /// —— web 用 `URL.createObjectURL(file)` 的 objectURL 覆盖真实头像；Flutter 侧没有 objectURL，
+  /// 由调用方交一个本地 `ImageProvider`（通常是 `MemoryImage(bytes)`）。
+  ///
+  /// null（默认）⇒ 行为与加该参数之前**逐像素一致**（走 [avatarUrl]）。
+  final ImageProvider? avatarOverride;
+
   /// 头像直径（web `size={64}`）。
   final double avatarSize;
 
@@ -126,6 +136,8 @@ class AylaProfileIdentity extends StatelessWidget {
           size: avatarSize,
           online: online,
           resourceUrl: avatarUrl,
+          // 本地待上传头像优先于真实 URL（web `avatarPreview ?? currentUser.avatar`）
+          previewImage: avatarOverride,
         ),
         const SizedBox(width: AylaSpacing.sp4), // gap: var(--sp-4)
         Expanded(

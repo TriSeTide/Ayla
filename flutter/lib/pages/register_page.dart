@@ -14,20 +14,20 @@
 ///
 /// ## 复用与登记
 /// - 左栏品牌介绍区复用 [AylaAuthIntro]（与登录页同一份 DOM，2026-09-28 提升）；
-/// - ⚠️ **`.auth-code-row` 在 web 是裸类名**（不在组件目录里）；Flutter 侧本页用
-///   [AylaGlassInput] + [AylaGlassButton] 组装 —— 不新增私有 painter/件。
-///   `privacy_sheet.dart` 里另有一份同规格的私有 `_CodeRow`（隐私设置的改密/改邮箱）⇒
-///   **两处同规格、待提升为公共件**（跨组件改动，登记未擅动，见 13 号文档）。
+/// - ✅ **`.auth-code-row` 已提升为公共件 [AylaAuthCodeRow]**（2026-09-28 用户裁决）：
+///   本页与 `privacy_sheet.dart` 原有的私有 `_CodeRow` 合并，注册页档显式传
+///   `.auth-code-btn` 的 `minWidth: 104` + `padding-inline: sp3`。
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter, TextInputFormatter;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/auth_api.dart';
+import '../widgets/base/auth_code_row.dart';
 import '../core/app_init.dart';
 import '../core/net/dio_client.dart';
 import '../core/ws/ws_manager.dart';
@@ -286,39 +286,24 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
               children: <Widget>[
                 Text('邮箱验证码', style: labelStyle), // tsx 141
                 const SizedBox(height: AylaSpacing.sp2),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: AylaGlassInput(
-                        controller: _code,
-                        hintText: '6 位验证码', // tsx 150
-                        enabled: _codeSent, // tsx 152 `disabled={!codeSent}`
-                        invalid: _codeError != null, // tsx 153 aria-invalid
-                        minHeight: 44,
-                        onGlassBorder: true,
-                        keyboardType: TextInputType.number,
-                        maxLength: 6,
-                        inputFormatters: <TextInputFormatter>[
-                          FilteringTextInputFormatter.digitsOnly, // tsx 149 replace(/\D/g,"")
-                        ],
-                        autofillHints: const <String>['one-time-code'],
-                        semanticLabel: '邮箱验证码',
-                      ),
-                    ),
-                    const SizedBox(width: AylaSpacing.sp2), // gap: var(--sp-2)
-                    AylaGlassButton(
-                      label: _codeButtonLabel, // tsx 162–168
-                      variant: AylaGlassButtonVariant.ghost,
-                      minWidth: 104, // .auth-code-btn
-                      minHeight: 44,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AylaSpacing.sp3,
-                      ),
-                      onPressed: (_sendingCode || _countdown > 0)
-                          ? null
-                          : () => unawaited(_sendCode()),
-                    ),
-                  ],
+                // 公共件 `AylaAuthCodeRow`（2026-09-28 用户裁决：与 privacy_sheet 的
+                // 私有 `_CodeRow` 合并；注册页档传 `.auth-code-btn` 的 104 / sp3）
+                AylaAuthCodeRow(
+                  controller: _code,
+                  placeholder: '6 位验证码', // tsx 150
+                  buttonLabel: _codeButtonLabel, // tsx 162–168
+                  buttonEnabled: !(_sendingCode || _countdown > 0),
+                  enabled: _codeSent, // tsx 152 `disabled={!codeSent}`
+                  invalid: _codeError != null, // tsx 153 aria-invalid
+                  autofillHints: const <String>['one-time-code'],
+                  semanticLabel: '邮箱验证码',
+                  buttonMinWidth: 104, // .auth-code-btn
+                  buttonPadding: const EdgeInsets.symmetric(
+                    horizontal: AylaSpacing.sp3,
+                  ),
+                  onSend: () => unawaited(_sendCode()),
+                  // 输入变化需重建：错误提示与提交流程读的是 controller 内容
+                  onChanged: () => setState(() {}),
                 ),
                 if (_codeError != null) ...<Widget>[
                   const SizedBox(height: AylaSpacing.sp2),

@@ -77,8 +77,15 @@ class AylaAvatarHalo extends StatefulWidget {
   /// 可访问性标签（默认 [label] 后附在线状态，双通道语义）。
   final String? semanticLabel;
 
-  /// 预览/样张注入的头像图（透传给内部 `AylaResourceImage.previewImage`）；
-  /// **只用于预览与画布样张**，生产调用点不传。
+  /// 头像**覆盖图**（透传给内部 `AylaResourceImage.previewImage`）。
+  ///
+  /// 两类生产/非生产用途（2026-09-28 订正——原注释写作「只用于预览与画布样张」，
+  /// 那是**过时结论**）：
+  /// ① 画布样张 / 预览注入的静态图；
+  /// ② **本地待上传头像的即时预览** —— `ProfilePage` 选中新头像后用
+  ///    `MemoryImage(bytes)` 覆盖真实头像（web 侧是 `URL.createObjectURL(file)`，见
+  ///    `ProfilePage.tsx:168`；对象 URL 先于上传存在，保存成功后才换成真实 URL）。
+  /// null（默认）⇒ 走 [resourceUrl]。
   final ImageProvider? previewImage;
 
   static const double haloWidth = 2.5;
