@@ -85,12 +85,16 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
   'posts · 帖子 / 评论': <String>[
     'AylaMasonryGrid（useMasonryColumns.ts 146 行 + posts.css 607–694 / profile.css 458–545）',
     'AylaPostCard / AylaPostVideoCover（PostCard.tsx + posts.css 9–217 + typed-result-cards.css 5,7）',
+    'AylaPostsSkeleton / AylaMyPostsHead（posts.css 598–605 / 628–675 + PostsHubPage.tsx 317–322 / MyPostsPage.tsx 180–186）',
+    'AylaPostDetailChrome / AylaPostDetailSkeleton / AylaPostDetailEmpty（posts.css 701–780 / 1111–1136 + PostDetailPage.tsx 399–438）',
+    'AylaPostEditFullscreen（PostDetailPage.tsx 497–599 + posts.css 806–919 / 268–414）',
     'AylaPostEditor（PostEditor.tsx + posts.css 219–418 + auroraqua.css 105–166）',
     'AylaGroupPostsComposer（posts.css 933–951/1011–1108 + auroraqua.css 347–368）',
     'AylaCommentList / AylaCommentComposer（CommentList.tsx + CommentComposer.tsx + posts.css 420–583）',
   ],
   'group · 群与目录': <String>[
     'GroupCard / GroupCarousel（home.css 224–503 + auroraqua 29–52）',
+    'AylaHomeToolbar（home.css 18–30 + HomePage.tsx 163–166）',
     '子群弹窗（SubGroupDialog.tsx 111 行 + group.css 2131–2231）',
     '群聊申请弹窗（GroupApplyDialog.tsx 25–137 行 + search.css 175–296）',
     '建群对话框（GroupCreateDialog.tsx 184 行 + private.css 66–186 / 188–280）',

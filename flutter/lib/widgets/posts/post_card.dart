@@ -144,6 +144,10 @@ class AylaPostCard extends StatefulWidget {
     this.onShare,
     this.previewOnly = false,
     this.action,
+    this.expanded,
+    this.detail = false,
+    this.onOpenMedia,
+    this.timeLabel,
   });
 
   /// 帖子数据。
@@ -181,6 +185,30 @@ class AylaPostCard extends StatefulWidget {
 
   /// 覆盖底排收藏位（web `action?: ReactNode`）。
   final Widget? action;
+
+  /// 正文展开档（web `.post-card-body.is-expanded`）。
+  ///
+  /// `null` = 保持卡片自身的折叠交互（`body.length > 120` 才出现「展开/收起」）；
+  /// `true` = **受控恒展开**（帖子详情页 `PostDetailPage.tsx:637` 恒挂
+  /// `is-expanded`，且**不渲染** `.post-card-fold`）。
+  final bool? expanded;
+
+  /// 详情档底排（`PostDetailPage.tsx:677–683` + `posts.css:745–747`）：
+  /// 只渲染「浏览数 + 收藏键」并**整排右对齐**（`justify-content: flex-end`），
+  /// 不渲染「查看帖子 / 评论数 / 分享」。
+  final bool detail;
+
+  /// 点开媒体（web 详情把每张图/视频包成 `<button>` → ImageViewer，
+  /// `PostDetailPage.tsx:646–651`；目录卡不传 ⇒ 不可点，与 web 同）。
+  ///
+  /// 参数 = **渲染序下标**（与卡片媒体格同序：跳过 media 为 null 的图后再取前 9；
+  /// web 用 `post.images.findIndex(x => x.id === img.id)`，两种取法在
+  /// 「媒体格里的那一格」上恒等 —— 调用方按同一过滤序取媒体即可）。
+  final ValueChanged<int>? onOpenMedia;
+
+  /// 时间文案覆盖（web 详情用绝对时间 `toLocaleString("zh-CN")`，
+  /// `PostDetailPage.tsx:627`；null = 卡片档的相对时间 `aylaPostCardTime`）。
+  final String? timeLabel;
 
   @override
   State<AylaPostCard> createState() => _AylaPostCardState();
@@ -328,7 +356,8 @@ class _AylaPostCardState extends State<AylaPostCard> {
                       children: <Widget>[
                         if (post.createdAt != null)
                           Text(
-                            aylaPostCardTime(post.createdAt),
+                            widget.timeLabel ??
+                                aylaPostCardTime(post.createdAt!),
                             style: const TextStyle(
                               fontFamily: AylaFonts.utility,
                               fontFamilyFallback: AylaFonts.cjkFallback,
@@ -372,8 +401,11 @@ class _AylaPostCardState extends State<AylaPostCard> {
               padding: const EdgeInsets.only(top: AylaSpacing.sp2),
               child: Text(
                 body,
-                maxLines: _expanded ? null : 3,
-                overflow: _expanded ? TextOverflow.clip : TextOverflow.ellipsis,
+                // 详情档受控恒展开（web tsx 637 恒挂 .is-expanded）
+                maxLines: (widget.expanded ?? _expanded) ? null : 3,
+                overflow: (widget.expanded ?? _expanded)
+                    ? TextOverflow.clip
+                    : TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontFamily: AylaFonts.body,
                   fontFamilyFallback: AylaFonts.cjkFallback,
@@ -383,7 +415,8 @@ class _AylaPostCardState extends State<AylaPostCard> {
                 ),
               ),
             ),
-            if (longBody)
+            // 详情档（expanded 非 null）**不渲染**折叠键（web tsx 637 无 .post-card-fold）
+            if (longBody && widget.expanded == null)
               Padding(
                 padding: const EdgeInsets.only(top: AylaSpacing.sp1),
                 child: GestureDetector(
@@ -419,8 +452,13 @@ class _AylaPostCardState extends State<AylaPostCard> {
           AylaSpacing.sp3,
         ),
         child: Row(
+          // 详情档：整排右对齐（posts.css:745–747 的 justify-content: flex-end）
+          mainAxisAlignment:
+              widget.detail ? MainAxisAlignment.end : MainAxisAlignment.start,
           children: <Widget>[
-            GestureDetector(
+            // 详情档不渲染「查看帖子 / 评论数 / 分享」（tsx 677–683 只有浏览数 + 收藏键）
+            if (!widget.detail)
+              GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: widget.onOpen,
               child: const Text(
@@ -433,15 +471,18 @@ class _AylaPostCardState extends State<AylaPostCard> {
                 ),
               ),
             ),
-            if (post.commentCount != null) ...<Widget>[
+            // 详情档不渲染评论数（tsx 677–683）
+            if (!widget.detail && post.commentCount != null) ...<Widget>[
               const SizedBox(width: AylaSpacing.sp4), // gap: var(--sp-4)
               _stat('iconMessage', post.commentCount!),
             ],
             if (post.viewCount != null) ...<Widget>[
-              const SizedBox(width: AylaSpacing.sp4),
+              if (!widget.detail) const SizedBox(width: AylaSpacing.sp4),
               _stat('iconEye', post.viewCount!),
             ],
-            const Spacer(), // .post-card-fav { margin-left: auto }
+            // 详情档没有 Spacer（整排右对齐），改用固定间隔
+            if (!widget.detail) const Spacer(),
+            if (widget.detail) const SizedBox(width: AylaSpacing.sp4),
             if (widget.action != null)
               widget.action!
             else
@@ -453,6 +494,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
                 onToggle: widget.onToggleFavorite,
                 onRetryStatus: widget.onRetryFavoriteStatus,
               ),
+            if (!widget.detail) ...<Widget>[
             const SizedBox(width: AylaSpacing.sp4),
             AylaShareButton(
               // 转发键：**共享件**（裁决 —— web 里收藏键 compact 32×32、
@@ -461,6 +503,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
               label: '分享帖子',
               onPressed: widget.onShare,
             ),
+            ],
           ],
         ),
       ),
@@ -515,11 +558,30 @@ class _AylaPostCardState extends State<AylaPostCard> {
   }
 
   /// .post-card-images：1 图大图（contain / max-h 240）/ 多图 3 列九宫格（gap 4px）。
+  /// 媒体可点包装（web 详情 `PostDetailPage.tsx:646–651`：每格是 `<button>`，
+  /// aria-label 逐字「播放视频」/「查看图片原图」）。
+  ///
+  /// `onOpenMedia` 为 null（目录卡）⇒ 原样返回，与 web 同（目录卡无 button）。
+  Widget _openableMedia(int index, AylaMediaDescriptor media, Widget child) {
+    final ValueChanged<int>? open = widget.onOpenMedia;
+    if (open == null) return child;
+    final bool video = media.kind == AylaMediaKind.video;
+    return Semantics(
+      button: true,
+      label: video ? '播放视频' : '查看图片原图',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => open(index),
+        child: child,
+      ),
+    );
+  }
+
   Widget _mediaGrid(List<AylaMediaDescriptor> mediaList) {
     final List<AylaMediaDescriptor> items = mediaList.take(9).toList();
     if (items.length == 1) {
       final AylaMediaDescriptor m = items.first;
-      final Widget cell = m.kind == AylaMediaKind.video
+      final Widget inner = m.kind == AylaMediaKind.video
           ? AylaPostVideoCover(
               media: m,
               fit: BoxFit.contain,
@@ -531,6 +593,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
               variant: m.thumbnail != null ? MediaVariant.thumb : null,
               fit: BoxFit.contain,
             );
+      final Widget cell = _openableMedia(0, m, inner);
       return Padding(
         padding: const EdgeInsets.only(top: AylaSpacing.sp3), // margin-top: sp3
         child: ConstrainedBox(
@@ -555,7 +618,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
                     aspectRatio: 1, // aspect-ratio: 1/1
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(AylaRadii.rSm),
-                      child: _gridCell(items[idx]),
+                      child: _openableMedia(idx, items[idx], _gridCell(items[idx])),
                     ),
                   )
                 : const SizedBox.shrink(),

@@ -579,7 +579,10 @@ class AylaLiveHall extends StatelessWidget {
     this.revealItems = false,
     this.padding,
     this.favoriteStateBuilder,
+    this.favoriteBusyBuilder,
+    this.favoriteErrorBuilder,
     this.onToggleFavorite,
+    this.onRetryFavoriteStatus,
     this.emptyTitleLabel = '还没有直播间',
     this.emptyHintLabel = '点右下角 + 发起第一场直播吧',
   });
@@ -612,8 +615,23 @@ class AylaLiveHall extends StatelessWidget {
   /// 逐卡收藏状态（页面注入；web 由 `<FavoriteButton>` 自管，Flutter 侧数据层在页面）。
   final AylaFavoriteState Function(AylaLiveCardData channel)? favoriteStateBuilder;
 
+  /// 逐卡收藏请求进行中（`AylaFavoriteButton.busy`；默认 false ⇒ 既有调用点不变）。
+  ///
+  /// **web 依据**：`LiveHall.tsx:39–42` **不传** `action` ⇒ 卡片走
+  /// `LiveChannelCard.tsx:51` 的 `action === undefined` 分支自渲 `<FavoriteButton compact>`，
+  /// 而该组件自带 busy / error / retry 三档语义（`FavoriteButton.tsx` 内部 state）
+  /// ⇒ 大厅的收藏能力是**五档齐全**（state / busy / error / onToggle / onRetry），
+  /// Flutter 侧此前只转发 2/5，本次补齐（总控 2026-09-28 裁决）。
+  final bool Function(AylaLiveCardData channel)? favoriteBusyBuilder;
+
+  /// 逐卡收藏失败文案（`AylaFavoriteButton.actionError`；默认 null）。
+  final String? Function(AylaLiveCardData channel)? favoriteErrorBuilder;
+
   /// 逐卡切换收藏（true = 收藏）。
   final void Function(AylaLiveCardData channel, bool next)? onToggleFavorite;
+
+  /// 逐卡「收藏状态未知/出错 ⇒ 点击重新拉取」（`AylaFavoriteButton.onRetryStatus`；默认 null）。
+  final void Function(AylaLiveCardData channel)? onRetryFavoriteStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -688,9 +706,14 @@ class AylaLiveHall extends StatelessWidget {
                     favoriteState:
                         favoriteStateBuilder?.call(channels[i]) ??
                         AylaFavoriteState.notFavorited,
+                    favoriteBusy: favoriteBusyBuilder?.call(channels[i]) ?? false,
+                    favoriteError: favoriteErrorBuilder?.call(channels[i]),
                     onToggleFavorite: onToggleFavorite == null
                         ? null
                         : (bool next) => onToggleFavorite!(channels[i], next),
+                    onRetryFavoriteStatus: onRetryFavoriteStatus == null
+                        ? null
+                        : () => onRetryFavoriteStatus!(channels[i]),
                     reserveMetaSpace: true, // 网格内等高
                     onEnter: () => onEnter(channels[i].id),
                   ),
@@ -750,6 +773,12 @@ class _LiveHallDemo extends StatefulWidget {
 
 class _LiveHallDemoState extends State<_LiveHallDemo> {
   final Set<String> _favorites = <String>{'lc2'};
+
+  /// 切换中（样例演示 `busy` 档：按钮禁用 + opacity .7）。
+  final Set<String> _busy = <String>{};
+
+  /// 状态查询失败（样例演示 `error` 档：点按钮 = 重新拉取，不是收藏）。
+  final Set<String> _errors = <String>{'lc4'};
   int _enters = 0;
 
   List<AylaLiveCardData> get _channels => const <AylaLiveCardData>[
@@ -802,17 +831,36 @@ class _LiveHallDemoState extends State<_LiveHallDemo> {
             onEnter: (_) => setState(() => _enters += 1),
             padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp4),
             revealItems: false,
-            favoriteStateBuilder: (AylaLiveCardData c) =>
-                _favorites.contains(c.id)
+            favoriteStateBuilder: (AylaLiveCardData c) => _errors.contains(c.id)
+                ? AylaFavoriteState.error
+                : _favorites.contains(c.id)
                 ? AylaFavoriteState.favorited
                 : AylaFavoriteState.notFavorited,
-            onToggleFavorite: (AylaLiveCardData c, bool next) => setState(() {
-              if (next) {
-                _favorites.add(c.id);
-              } else {
-                _favorites.remove(c.id);
-              }
-            }),
+            favoriteBusyBuilder: (AylaLiveCardData c) => _busy.contains(c.id),
+            favoriteErrorBuilder: (AylaLiveCardData c) =>
+                _errors.contains(c.id) ? '收藏状态加载失败' : null,
+            onToggleFavorite: (AylaLiveCardData c, bool next) async {
+              setState(() => _busy.add(c.id));
+              await Future<void>.delayed(const Duration(milliseconds: 400));
+              if (!mounted) return;
+              setState(() {
+                _busy.remove(c.id);
+                if (next) {
+                  _favorites.add(c.id);
+                } else {
+                  _favorites.remove(c.id);
+                }
+              });
+            },
+            onRetryFavoriteStatus: (AylaLiveCardData c) async {
+              setState(() {
+                _busy.add(c.id);
+                _errors.remove(c.id);
+              });
+              await Future<void>.delayed(const Duration(milliseconds: 400));
+              if (!mounted) return;
+              setState(() => _busy.remove(c.id));
+            },
           ),
         ),
         Text(

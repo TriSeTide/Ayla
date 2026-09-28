@@ -16,11 +16,11 @@
 ///
 /// ## 与 web 的机制差异（登记）
 /// - 滚动位置记忆（useScrollRestore）未实现（同语音页登记）；
-/// - **收藏的 busy / error / retry 三档无法注入**：AylaLiveHall 只暴露
-///   favoriteStateBuilder + onToggleFavorite（live_hall.dart:570–574），而
-///   AylaLiveChannelCard 支持 favoriteBusy / favoriteError / onRetryFavoriteStatus ——
-///   已交付件的参数转发缺口，**按纪律登记待裁决**（不擅改公共件）；
-///   实际影响：收藏状态查询失败时点按钮不会重试、切换期间按钮不显示禁用态。
+/// - 收藏五档**全部注入**（2026-09-28 总控裁决落实）：`LiveHall.tsx:39–42` 不传
+///   `action` ⇒ 卡片自渲 `<FavoriteButton compact>`（`LiveChannelCard.tsx:51`），
+///   该组件自带 busy / error / retry 语义 ⇒ 大厅等价能力 = 五档；
+///   `AylaLiveHall` 原有转发缺口已由 `favoriteBusyBuilder` / `favoriteErrorBuilder` /
+///   `onRetryFavoriteStatus` 三个**纯增量**参数补齐（默认 null ⇒ 既有调用点不变）。
 library;
 
 import 'dart:async';
@@ -331,8 +331,15 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
                   onEnter: _enter,
                   favoriteStateBuilder: (AylaLiveCardData channel) =>
                       _favorites.stateOf('live', channel.id),
+                  favoriteBusyBuilder: (AylaLiveCardData channel) =>
+                      _favorites.busyOf('live', channel.id),
+                  favoriteErrorBuilder: (AylaLiveCardData channel) =>
+                      _favorites.actionErrorOf('live', channel.id),
                   onToggleFavorite: (AylaLiveCardData channel, bool next) =>
                       _favorites.toggle('live', channel.id),
+                  // 状态未知/出错 ⇒ 点击重新拉取（FavoriteButton.tsx:35–38）
+                  onRetryFavoriteStatus: (AylaLiveCardData channel) =>
+                      _favorites.load('live', <String>[channel.id], force: true),
                 ),
               ),
             AylaDirectoryLoadMore(

@@ -847,6 +847,82 @@ void main() {
       expect(reveals[7].delay, const Duration(milliseconds: 300)); // cap
     });
 
+    testWidgets('收藏五档全透传：state / busy / error / onToggle / onRetry（总控 2026-09-28 裁决）', (
+      WidgetTester tester,
+    ) async {
+      // web 依据：`LiveHall.tsx:39–42` **不传** `action` ⇒ 卡片走
+      // `LiveChannelCard.tsx:51` 的 `action === undefined` 分支自渲 `<FavoriteButton compact>`，
+      // 该组件自带 busy / error / retry（`FavoriteButton.tsx:14/69/72`）⇒ 大厅能力 = 五档。
+      final List<String> retried = <String>[];
+      final List<String> toggled = <String>[];
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveHall(
+            channels: <AylaLiveCardData>[
+              _channel(id: 'a', title: 'A'),
+              _channel(id: 'b', title: 'B'),
+            ],
+            onEnter: (_) {},
+            favoriteStateBuilder: (AylaLiveCardData c) => c.id == 'a'
+                ? AylaFavoriteState.error // a：状态查询失败
+                : AylaFavoriteState.notFavorited,
+            favoriteBusyBuilder: (AylaLiveCardData c) => c.id == 'b', // b：切换中
+            favoriteErrorBuilder: (AylaLiveCardData c) =>
+                c.id == 'a' ? '收藏状态加载失败' : null,
+            onToggleFavorite: (AylaLiveCardData c, bool _) => toggled.add(c.id),
+            onRetryFavoriteStatus: (AylaLiveCardData c) => retried.add(c.id),
+          ),
+          viewport: const Size(1000, 900),
+        ),
+      );
+      await settle(tester);
+
+      final List<AylaFavoriteButton> buttons = tester
+          .widgetList<AylaFavoriteButton>(find.byType(AylaFavoriteButton))
+          .toList();
+      expect(buttons.length, 2);
+      expect(buttons[0].state, AylaFavoriteState.error);
+      expect(buttons[0].busy, isFalse);
+      expect(buttons[0].actionError, '收藏状态加载失败');
+      expect(buttons[0].onRetryStatus, isNotNull);
+      expect(buttons[1].state, AylaFavoriteState.notFavorited);
+      expect(buttons[1].busy, isTrue); // busy 透传 → 按钮禁用（tsx 69）
+      expect(buttons[1].actionError, isNull);
+
+      // error 档点击 = 重新拉取（不是收藏），且带回**该卡的 id**
+      await tester.tap(find.byType(AylaFavoriteButton).first);
+      await settle(tester);
+      expect(retried, <String>['a']);
+      expect(toggled, isEmpty);
+
+      // busy 档忽略点击（tsx 34）
+      await tester.tap(find.byType(AylaFavoriteButton).last);
+      await settle(tester);
+      expect(toggled, isEmpty);
+    });
+
+    testWidgets('三个新参数默认 null ⇒ 既有调用点逐像素不变（busy false / error null / retry null）', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveHall(channels: <AylaLiveCardData>[_channel()], onEnter: (_) {}),
+        ),
+      );
+      await settle(tester);
+      final AylaFavoriteButton button = tester.widget<AylaFavoriteButton>(
+        find.byType(AylaFavoriteButton),
+      );
+      expect(button.busy, isFalse);
+      expect(button.actionError, isNull);
+      expect(button.onRetryStatus, isNull);
+      expect(button.state, AylaFavoriteState.notFavorited); // 原默认档不变
+      // 无 actionError ⇒ 不渲染 alert 行（FavoriteButton.tsx:76 的 role=alert 在 Flutter 是按钮下方文字）
+      expect(find.text('收藏状态加载失败'), findsNothing);
+    });
+
     testWidgets('空态：两行文案 + 样式（Fredoka 28/600 + 14 secondary + 居中 + padding sp12）', (
       WidgetTester tester,
     ) async {

@@ -133,6 +133,34 @@ class AylaLastMessagePreview {
   }
 }
 
+/// 群状态角标（`types.ts:330` 的 `group_presence`；后端
+/// `apps/chat/serializers.py:567` 的 `ConversationDirectorySerializer.get_group_presence`）。
+///
+/// 语义：**存在性**，与"最近有新内容"（排序）是两套逻辑（`groupActivity.ts:69–72`）：
+/// `live` = 群内有直播**在播**；`voice` = 群内有语音房**有人**；`game` = 群内有桌游房。
+class AylaGroupPresence {
+  const AylaGroupPresence({
+    this.live = false,
+    this.voice = false,
+    this.game = false,
+  });
+
+  final bool live;
+  final bool voice;
+  final bool game;
+
+  /// 解析；非 Map ⇒ null（**缺席就是缺席** —— 调用方据此走"扫描目录"兜底，
+  /// 而不是把它当成"三个都没有"）。
+  static AylaGroupPresence? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    return AylaGroupPresence(
+      live: raw['live'] == true,
+      voice: raw['voice'] == true,
+      game: raw['game'] == true,
+    );
+  }
+}
+
 /// 会话摘要（`types.ts:314–353` ConversationListSerializer 字段）。
 ///
 /// 只收 chat 域渲染/判定需要的字段；未列出的后端字段（`unread_seqs` 等
@@ -157,6 +185,8 @@ class AylaConversationSummary {
     this.lastMessage,
     this.mentionUnreadCount,
     this.postUnreadCount,
+    this.directoryActivityAt,
+    this.groupPresence,
     this.createdAt,
     this.peer,
   });
@@ -201,6 +231,13 @@ class AylaConversationSummary {
   /// 群内未读帖子数（仅群聊非 0）。
   final int? postUnreadCount;
 
+  /// 群最近收到新内容的时间（ISO；目录行的 `directory_activity_at`，
+  /// `types.ts:329` + `stores/chat.ts:145–148` 的 `groupActivityAt` 取值来源）。
+  final String? directoryActivityAt;
+
+  /// 群状态角标（目录行才有；null = 后端未给 ⇒ 调用方扫描目录兜底）。
+  final AylaGroupPresence? groupPresence;
+
   final String? createdAt;
 
   /// 私聊对端用户（ConversationListSerializer 补充）。
@@ -233,6 +270,8 @@ class AylaConversationSummary {
       lastMessage: AylaLastMessagePreview.fromJson(raw['last_message']),
       mentionUnreadCount: (raw['mention_unread_count'] as num?)?.toInt(),
       postUnreadCount: (raw['post_unread_count'] as num?)?.toInt(),
+      directoryActivityAt: raw['directory_activity_at'] as String?,
+      groupPresence: AylaGroupPresence.fromJson(raw['group_presence']),
       createdAt: raw['created_at'] as String?,
       peer: AylaUserPublic.fromJson(raw['peer']),
     );

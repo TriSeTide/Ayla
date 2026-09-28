@@ -52,7 +52,12 @@ import '../widgets/shell/create_sheet.dart';
 import '../widgets/shell/fab.dart';
 import '../widgets/chat/image_viewer.dart';
 import '../widgets/posts/post_card.dart';
+import '../widgets/posts/post_detail_chrome.dart' show aylaPostDetailChromeSamples;
+import '../widgets/posts/post_page_chrome.dart' show aylaPostChromeSamples;
+import '../widgets/group/home_toolbar.dart' show aylaHomeToolbarSamples;
 import '../widgets/posts/post_editor.dart';
+import '../widgets/posts/post_edit_fullscreen.dart'
+    show aylaPostEditFullscreenSamples;
 import '../widgets/base/primitives.dart';
 import '../widgets/base/reveal.dart';
 import '../widgets/base/switch.dart';
@@ -215,12 +220,16 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
   AylaGalleryCategory('posts', 'posts · 帖子 / 评论', <String>[
     'AylaMasonryGrid',
     'AylaPostCard',
+    'AylaPostsSkeleton',
+    'AylaPostDetailChrome',
+    'AylaPostEditFullscreen',
     'AylaPostEditor',
     'AylaGroupPostsComposer',
     'AylaCommentList',
   ]),
   AylaGalleryCategory('group', 'group · 群与目录', <String>[
     'GroupCard / GroupCarousel',
+    'AylaHomeToolbar',
     '子群弹窗',
     '群聊申请弹窗',
     '建群对话框',
@@ -911,6 +920,56 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
+            // ---------- 帖子域页面内联件（第 3 批；19 号 §7.5 range B 的 B 类） ----------
+            _Section(
+              title:
+                  'AylaPostsSkeleton / AylaMyPostsHead（posts.css 598–605 / 628–675 + PostsHubPage.tsx 317–322 / MyPostsPage.tsx 180–186）',
+              source:
+                  '骨架：base padding sp3 sp4 → ≥1025 sp4 sp6 + **grid 两列 column-gap sp3**；'
+                  '≥769 max-width 680 居中、≥1025 1200 居中（hub 页被 directory-filters.css 171–180 归零 ⇒ centered:false）；'
+                  '内联几何：hub 三根 h120（前两根间距 12）、我的两根 h120 无间距 · '
+                  '页头：flex/none + gap sp3 + padding sp2 sp4 + 1px 玻璃底边；≥769 680 居中、≥1025 1200 + 左右 sp6；'
+                  '返回键 IconBack **20**（详情页是 22，勿统一）',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: aylaPostChromeSamples(),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            _Section(
+              title:
+                  'AylaPostDetailChrome / AylaPostDetailSkeleton / AylaPostDetailEmpty（posts.css 701–780 / 1111–1136 + PostDetailPage.tsx 399–438）',
+              source:
+                  '壳：.post-detail 列布局（height100/overflow hidden/relative）+ 玻璃头（gap sp3 + padding sp3 sp4 + blur18 sat1.4 + 1px 底边；'
+                  '≥769 覆写 auroraqua 402–409 = margin 12 + 四边亮边 + radius 16 + compact 阴影 + blur24 sat1.4）+ '
+                  '滚动区 padding sp3 sp4 gap sp3 + 底部输入区（窄屏整宽页脚 / ≥769 浮动玻璃卡 margin 12 padding sp2）'
+                  '· 编辑态三个 background 层 visibility:hidden 等价物（保留状态与滚动位置）· 头/输入区入场 ±20 / 300ms；'
+                  '骨架：max-width 680+2×sp4 居中 + padding sp3 sp4 + gap sp3（40 圆形 / 96×16 / 64×12 · 两条正文 14 · 媒体 120 · 评论块 4 条）；'
+                  '空态：placeholder-desc（error ?? 帖子不存在）+ ghost 返回（web 无头无 padding）',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: aylaPostDetailChromeSamples(),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            _Section(
+              title:
+                  'AylaPostEditFullscreen（PostDetailPage.tsx 497–599 + posts.css 806–919 / 268–414）',
+              source:
+                  'absolute 面板（inset 0 / z50 / 列布局 / 入场 posts.css 812 + keyframes 815–824、reduced 916–918）· '
+                  '头部：取消 icon-btn-40（IconBack 22）+ 标题 Display 18/w600 + btn-primary「重新发布 / 保存中…」（min-width 72）· '
+                  '正文区：padding sp4 + gap sp3 + max-width 680 居中；标题 input.field（maxLength 128）· 正文 textarea min-height 120 · '
+                  '媒体块「图片/视频 n/9」+ 添加键 + 空格壳/缩略图/移除 ×（禁用档随 saving/uploading）· 可见性选择器注入 · '
+                  '两条错误行 role=alert · 保存禁用 = saving || uploading || 正文空（**空标题可提交**，tsx 507）',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: aylaPostEditFullscreenSamples(),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
             // ---------- 发帖编辑器（B5） ----------
             _Section(
               title:
@@ -918,6 +977,19 @@ class _ComponentGalleryState extends State<ComponentGallery> {
               source:
                   '三形态：常规 / 群内 collapsible 收起 / 展开 · padding sp3（collapsible sp2 sp3）· 展开 max-height min(90vh,1000px) · 收起钮 32 圆 · 标题 min-h 40 · 正文 展开 rows4/min-h 64、收起 单行 40 · 媒体块 128 方角（web --radius-md 未定义）、移除钮 28 圆 · 进度条 4px pill pink-500 · 图片/视频钮 glass 亮边 + hover glow（glowHover）· 可见性复用 AylaVisibilitySelector（群内 lockGroup）',
               child: aylaPostEditorSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- 主页页头（第 3 批；19 号 §7.5 range B：home-toolbar/home-title） ----------
+            _Section(
+              title: 'AylaHomeToolbar（home.css 18–30 + HomePage.tsx 163–166）',
+              source:
+                  'padding sp3 sp4 + 两端对齐 · 左标题 Fredoka 28 / w600 / --text-primary（.home-title）· '
+                  '右布局开关（AylaLayoutSwitch，aria-label「主页布局」）· 两档样张：卡片 / 列表',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: aylaHomeToolbarSamples(),
+              ),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 

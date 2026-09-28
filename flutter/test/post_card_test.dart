@@ -452,4 +452,108 @@ void main() {
       expect(find.text('视频'), findsOneWidget);
     });
   });
+
+  group('详情档扩展（PostDetailPage.tsx:637/677–683 + posts.css 745–747）', () {
+    testWidgets('expanded: true → 正文恒展开且不渲染折叠键', (WidgetTester tester) async {
+      final String longBody = '很长的正文' * 40; // > 120 字符 ⇒ 卡片档会折叠
+      await tester.pumpWidget(host(
+        AylaPostCard(
+          post: sample(body: longBody),
+          onOpen: () {},
+          expanded: true,
+        ),
+      ));
+      await tester.pump();
+      expect(find.text('展开'), findsNothing);
+      expect(find.text('收起'), findsNothing);
+      final Text body = tester.widget<Text>(find.text(longBody));
+      expect(body.maxLines, isNull, reason: 'is-expanded ⇒ 不限行数');
+      expect(body.overflow, TextOverflow.clip);
+    });
+
+    testWidgets('expanded 缺省 → 保持卡片档折叠交互', (WidgetTester tester) async {
+      final String longBody = '很长的正文' * 40;
+      await tester.pumpWidget(host(
+        AylaPostCard(post: sample(body: longBody), onOpen: () {}),
+      ));
+      await tester.pump();
+      expect(find.text('展开'), findsOneWidget);
+    });
+
+    testWidgets('timeLabel 覆盖相对时间（详情用绝对时间）', (WidgetTester tester) async {
+      await tester.pumpWidget(host(
+        AylaPostCard(
+          post: sample(),
+          onOpen: () {},
+          timeLabel: '2026/9/28 20:15:00',
+        ),
+      ));
+      await tester.pump();
+      expect(find.text('2026/9/28 20:15:00'), findsOneWidget);
+    });
+
+    testWidgets('detail: true → 底排只留浏览数 + 收藏键，整排右对齐', (WidgetTester tester) async {
+      await tester.pumpWidget(host(
+        Center(
+          child: SizedBox(
+            width: 400,
+            child: AylaPostCard(
+              post: sample(commentCount: 3, viewCount: 12),
+              onOpen: () {},
+              detail: true,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+      expect(find.text('查看帖子'), findsNothing);
+      expect(find.text('12'), findsOneWidget); // 浏览数
+      expect(find.byType(AylaFavoriteButton), findsOneWidget);
+      expect(find.byType(AylaShareButton), findsNothing);
+      final Row row = tester.widget<Row>(
+        find
+            .ancestor(
+              of: find.byType(AylaFavoriteButton),
+              matching: find.byType(Row),
+            )
+            .first,
+      );
+      expect(row.mainAxisAlignment, MainAxisAlignment.end);
+    });
+
+    testWidgets('onOpenMedia：媒体格可点并回传渲染序下标（目录卡不传 ⇒ 不可点）', (
+      WidgetTester tester,
+    ) async {
+      final List<int> opened = <int>[];
+      await tester.pumpWidget(host(
+        Center(
+          child: SizedBox(
+            width: 400,
+            child: AylaPostCard(
+              post: sample(
+                images: <AylaPostImage>[
+                  AylaPostImage(id: 1, media: media('m1')),
+                  AylaPostImage(id: 2, media: media('m2')),
+                ],
+              ),
+              onOpen: () {},
+              onOpenMedia: opened.add,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+      await tester.tap(
+        find
+            .byWidgetPredicate(
+              (Widget w) =>
+                  w is Semantics && w.properties.label == '查看图片原图',
+            )
+            .first,
+      );
+      await tester.pump();
+      expect(opened, <int>[0]);
+    });
+  });
+
 }

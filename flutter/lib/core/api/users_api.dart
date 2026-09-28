@@ -6,6 +6,7 @@ library;
 
 import '../models/user_public.dart';
 import '../net/dio_client.dart';
+import 'directory_page.dart';
 
 /// 好友关系（web `api/types.ts:28` 的 `relation`）。
 enum AylaFriendRelation {
@@ -104,6 +105,30 @@ class AylaUsersApi {
       body: <String, String>{'user_id': userId},
     );
     return resp['id']?.toString() ?? '';
+  }
+
+  /// `GET /users/search/?pagination=cursor&limit=&q=&cursor=` —— 用户搜索分页
+  /// （web `api/users.ts:14–16` 的 `searchUsersPage`；消费点 = 建群弹窗的成员搜索，
+  /// `GroupCreateDialog.tsx:29` 的 `useSocialPage("users", { q })`）。
+  ///
+  /// 响应是 `SocialPage<UserPublic>` ⇒ 复用 [AylaDirectoryPage] 的游标页契约。
+  static Future<AylaDirectoryPage<AylaUserPublic>> searchUsersPage(
+    String q, {
+    int limit = 30,
+    String? cursor,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+      'q': q,
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>('/users/search/', query: query);
+    return AylaDirectoryPage.fromJson<AylaUserPublic>(
+      resp,
+      AylaUserPublic.fromJson,
+    );
   }
 
   /// GET /friends/?pagination=cursor&limit= —— 好友列表第一页

@@ -20,6 +20,7 @@ import '../core/api/live_api.dart' show AylaDirectoryLiveEntry;
 import '../core/api/users_api.dart';
 import '../core/api/voice_api.dart' show AylaDirectoryVoiceEntry;
 import '../core/models/game_room.dart' show AylaGameRoomStatus;
+import '../core/models/post.dart' show AylaPost;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../core/models/visibility.dart' show AylaPostVisibility;
 import '../theme/tokens.dart';
@@ -157,6 +158,78 @@ bool aylaHubMatchLive(
       return entry.isOwner;
     default:
       return true;
+  }
+}
+
+/// 帖子分类 → 后端查询（web `PostsHubPage.tsx:54–60` 的 `TAB_QUERY`）。
+///
+/// 口径（tsx 52–53 注释）：「我的」独立拉 `scope=mine`；公开/好友由**后端**过滤
+/// （不依赖「全部」的分页进度）；热门/全部拉 feed 后**前端**排序/过滤。
+class AylaPostTabQuery {
+  const AylaPostTabQuery({
+    required this.scope,
+    this.visibility,
+    this.friends = false,
+  });
+
+  /// `scope`（`feed` / `mine`；web `PostScope`）。
+  final String scope;
+
+  /// `visibility`（仅公开档传 `public`）。
+  final String? visibility;
+
+  /// `friends=1`（仅好友档传）。
+  final bool friends;
+}
+
+/// 分类 → 后端参数（逐条对齐 tsx 54–60；`all`/`hot` 只传 `scope=feed`）。
+AylaPostTabQuery aylaPostTabQuery(String filter) {
+  switch (filter) {
+    case 'public':
+      return const AylaPostTabQuery(scope: 'feed', visibility: 'public');
+    case 'friends':
+      return const AylaPostTabQuery(scope: 'feed', friends: true);
+    case 'mine':
+      return const AylaPostTabQuery(scope: 'mine');
+    default:
+      return const AylaPostTabQuery(scope: 'feed');
+  }
+}
+
+/// 帖子分类的前端二次过滤 + 热门排序（web `PostsHubPage.tsx:124–129`，逐条）。
+///
+/// - 热门档：**只排序不筛内容**（`view_count` 降序；两侧任一为 null 时按 web 的
+///   `NaN` 比较语义**保持原顺序**，不把 null 当 0 排序）；
+/// - 公开档：`visibility === "public"`；
+/// - 好友档：`author_id ∈ 好友集合`（`author_id` 缺席 ⇒ 不命中，不伪造）；
+/// - 其余（全部 / 我的）：原样返回（我的档后端过滤已完成）。
+List<AylaPost> aylaHubVisiblePosts(
+  List<AylaPost> posts,
+  String filter, {
+  Set<String> friendIds = const <String>{},
+}) {
+  switch (filter) {
+    case 'hot':
+      final List<AylaPost> sorted = List<AylaPost>.of(posts);
+      sorted.sort((AylaPost a, AylaPost b) {
+        final int? av = a.viewCount;
+        final int? bv = b.viewCount;
+        if (av == null || bv == null) return 0; // web: NaN 比较恒 false ⇒ 原序
+        return bv.compareTo(av);
+      });
+      return sorted;
+    case 'public':
+      return <AylaPost>[
+        for (final AylaPost p in posts)
+          if (p.visibility == AylaPostVisibility.public) p,
+      ];
+    case 'friends':
+      return <AylaPost>[
+        for (final AylaPost p in posts)
+          if (p.authorId != null && friendIds.contains(p.authorId)) p,
+      ];
+    default:
+      return posts;
   }
 }
 

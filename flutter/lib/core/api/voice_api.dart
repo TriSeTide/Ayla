@@ -13,9 +13,15 @@ import '../net/dio_client.dart';
 import '../../widgets/voice/voice_channels.dart' show AylaVoiceCardData;
 import 'directory_page.dart';
 
-/// 语音目录条目（卡投影 + 「我的」过滤事实）。
+/// 语音目录条目（卡投影 + 「我的」过滤事实 + 主页「新内容」事实）。
 class AylaDirectoryVoiceEntry {
-  const AylaDirectoryVoiceEntry({required this.card, this.ownerId = ''});
+  const AylaDirectoryVoiceEntry({
+    required this.card,
+    this.ownerId = '',
+    this.createdAt,
+    this.roomName = '',
+    this.allowedGroupIds = const <String>[],
+  });
 
   final AylaVoiceCardData card;
 
@@ -24,6 +30,18 @@ class AylaDirectoryVoiceEntry {
   /// 语音卡投影不承载 owner_id，故在这里保留）。
   final String ownerId;
 
+  /// `created_at`（`types.ts:881`）—— 「新语音房被创建」事件的时间
+  /// （`groupActivity.ts:188`）。
+  final String? createdAt;
+
+  /// `room_name`（`types.ts:866`）—— 房间名兜底：web 取 `c.name || c.room_name`
+  /// （`groupActivity.ts:192`）。
+  final String roomName;
+
+  /// `allowed_group_ids`（`types.ts:877`）—— 白名单可见性判据
+  /// （`groupActivity.ts:70–76` 的 `visibleInGroup`）。
+  final List<String> allowedGroupIds;
+
   static AylaDirectoryVoiceEntry? fromJson(Object? raw) {
     if (raw is! Map) return null;
     final AylaVoiceCardData? card = AylaVoiceCardData.fromJson(raw);
@@ -31,6 +49,13 @@ class AylaDirectoryVoiceEntry {
     return AylaDirectoryVoiceEntry(
       card: card,
       ownerId: raw['owner_id']?.toString() ?? '',
+      createdAt: raw['created_at'] as String?,
+      roomName: raw['room_name']?.toString() ?? '',
+      allowedGroupIds: <String>[
+        for (final Object? id
+            in (raw['allowed_group_ids'] as List<Object?>? ?? const <Object?>[]))
+          if (id != null) id.toString(),
+      ],
     );
   }
 }

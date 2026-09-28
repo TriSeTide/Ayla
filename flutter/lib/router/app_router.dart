@@ -28,9 +28,13 @@ import 'package:go_router/go_router.dart';
 import '../layout/app_shell.dart';
 import '../pages/favorites_page.dart';
 import '../pages/games_hub_page.dart';
+import '../pages/home_page.dart';
+import '../pages/my_posts_page.dart';
 import '../pages/live_hub_page.dart';
 import '../pages/login_route.dart';
 import '../pages/pending_page.dart';
+import '../pages/post_detail_page.dart';
+import '../pages/posts_hub_page.dart';
 import '../pages/profile_page.dart';
 import '../pages/register_page.dart';
 import '../pages/search_page.dart';
@@ -109,12 +113,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             AppShell(child: child),
         routes: <RouteBase>[
           GoRoute(path: '/', redirect: (BuildContext c, GoRouterState s) => '/group'),
+          // 第 3 批：主页（窄屏群卡片/列表双形态；宽屏 = 重定向到最近群
+          // ⇒ /group/:id，见 HomePage 文件头的机制差异 1）
           GoRoute(
             path: '/group',
-            pageBuilder: (BuildContext c, GoRouterState s) => _pending(
-              path: '/group',
-              webSource: 'App.tsx:68 → HomePage',
-            ),
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                const NoTransitionPage<void>(child: HomePage()),
           ),
           GoRoute(
             path: '/home',
@@ -137,10 +141,30 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           // ⚠️ 段数不同（3 vs 2），与 `/live/:channelId` 不冲突
           GoRoute(path: '/live/start/:channelId', pageBuilder: (c, s) => _pending(path: '/live/start/:channelId', webSource: 'App.tsx:73 → LiveStudioPage')),
           GoRoute(path: '/live/:channelId', pageBuilder: (c, s) => _pending(path: '/live/:channelId', webSource: 'App.tsx:74 → LiveRoomPage（房内态，第 3 批）')),
-          GoRoute(path: '/posts', pageBuilder: (c, s) => _pending(path: '/posts', webSource: 'App.tsx:75 → PostsHubPage')),
+          // 第 3 批：帖子域（一级 tab + 我的 + 他人 + 详情）
+          GoRoute(
+            path: '/posts',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: PostsHubPage(initialType: s.uri.queryParameters['type']),
+            ),
+          ),
           // ⚠️ **必须排在 `/posts/:postId` 之前**（同为 2 段，go_router 按声明顺序匹配）
-          GoRoute(path: '/posts/mine', pageBuilder: (c, s) => _pending(path: '/posts/mine', webSource: 'App.tsx:76 → MinePostsRoute')),
-          GoRoute(path: '/posts/:postId', pageBuilder: (c, s) => _pending(path: '/posts/:postId', webSource: 'App.tsx:77 → PostDetailPage')),
+          GoRoute(
+            path: '/posts/mine',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                const NoTransitionPage<void>(child: MyPostsPage()),
+          ),
+          GoRoute(
+            path: '/posts/:postId',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: PostDetailPage(
+                postId: s.pathParameters['postId'] ?? '',
+                from: s.uri.queryParameters['from'],
+              ),
+            ),
+          ),
           GoRoute(
             path: '/games',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
@@ -174,7 +198,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             ),
           ),
           // ⚠️ 3 段 vs `/user/:userId` 的 2 段，天然不冲突
-          GoRoute(path: '/user/:userId/posts', pageBuilder: (c, s) => _pending(path: '/user/:userId/posts', webSource: 'App.tsx:84 → UserPostsRoute')),
+          GoRoute(
+            path: '/user/:userId/posts',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: UserPostsPage(userId: s.pathParameters['userId'] ?? ''),
+            ),
+          ),
           GoRoute(
             path: '/favorites',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
