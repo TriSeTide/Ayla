@@ -12,8 +12,13 @@
 ///   `[data-fixed=true]` —— 脱离流、固定到底部并 `translateY(100%)`（200ms ease-in），
 ///   此时内容区吃满全高。Flutter 用「Column 里撤掉 + Stack 里 `AnimatedSlide` 叠一层」表达。
 ///
+/// ## 窄屏浮动小窗（`AppShell.tsx:131–132`，2026-09-29 接线）
+/// `isNarrow && miniPlayer != null` ⇒ 渲染 `AylaLiveMiniPlayer`（fixed 右下 16 / z 60）。
+/// 状态与语义在 `state/live_state.dart`（`miniPlayer`）与 `pages/live_support.dart`
+/// （`detachView` 进小窗 / `refreshSrsStatus` 结束清位 / `aylaCloseLiveMiniPlayer` 关闭）——
+/// 小窗**只有窄屏渲染**（宽屏不开，web 同一条判据）。
+///
 /// ## 未接线项（第 1 批登记，见 13 号文档）
-/// · `LiveMiniPlayer`（`useLiveStore.miniPlayer`）—— 属 live 会话运行时批次；
 /// · `QuickMessagesSheet` 的实际面板内容（私信 / 申请列表）—— 属消息域批次
 ///   （[ShellUiState.quickMessagesOpen] 已就位，Fab 已按它暂停半贴计时）；
 /// · ~~未读聚合 `messageBadge`~~ ✅ **2026-09-28 消息域批次已接线**：`state/badges_state.dart` +
@@ -30,21 +35,23 @@ import 'package:go_router/go_router.dart';
 
 import '../core/app_init.dart';
 import '../core/ws/ws_manager.dart';
+import '../pages/live_support.dart';
 import '../router/shell_config.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
+import '../state/live_state.dart';
 import '../state/presence_providers.dart';
 import '../state/room_providers.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
-import '../theme/app_theme.dart';
 import '../theme/buttons.dart';
 import '../theme/tokens.dart';
+import '../widgets/live/live_mini_player.dart';
 import '../widgets/shell/bottom_tabs.dart';
-import '../widgets/shell/create_sheet.dart';
 import '../widgets/shell/fab.dart';
 import '../widgets/shell/session_activity.dart';
 import '../widgets/shell/top_nav.dart';
+import 'create_sheet_forms.dart';
 
 
 class AppShell extends ConsumerStatefulWidget {
@@ -98,6 +105,19 @@ class _AppShellState extends ConsumerState<AppShell> {
     }
   }
 
+  /// 创建浮层内容 —— 按 `fabAction.handler` 分支（web `CreateFab.tsx:56–114`）。
+  ///
+  /// **五个 handler 全部接线**：`group` / `voice` / `live` / `post` / `game` 分别对应
+  /// [aylaCreateFormFor] 的五条分支（`layout/create_sheet_forms.dart` —— 分派与测试
+  /// 共用同一事实源）；本方法只负责把「关浮层」的 [close] 传进去。
+  ///
+  /// 未知 handler 由 [aylaCreateFormFor] 显式兜底（占位文案写明 key / handler /
+  /// plannedStep），不静默。
+  Widget _createSheet(AylaFabAction fabAction) {
+    void close() => setState(() => _createSheetOpen = false);
+    return aylaCreateFormFor(fabAction, onClose: close);
+  }
+
   @override
   Widget build(BuildContext context) {
     final String pathname = GoRouterState.of(context).uri.path;
@@ -120,6 +140,10 @@ class _AppShellState extends ConsumerState<AppShell> {
     final int messageBadge = ref.watch(badgesProvider).messageBadge;
     final bool bottomTabsLeaving = shell.bottomTabsLeaving;
     final bool showBottomTabs = isNarrow && !groupSceneNarrow && !privateChatNarrow;
+    // ---- 窄屏浮动小窗（`AppShell.tsx:46 / 131–132`）----
+    // `select` 只在小窗档变化时重建壳层：弹幕/在看人数等高频 notify 不会把整个 shell 拖进重建。
+    final AylaLiveMiniPlayerState? liveMiniPlayer =
+        ref.watch(liveStateProvider.select((AylaLiveState s) => s.miniPlayer));
 
     // ---- 顶栏（`AppShell.tsx:105–109`）----
     final String? narrowVariant = !isNarrow || !aylaIsNarrowTopBarRoute(pathname)
@@ -309,21 +333,60 @@ class _AppShellState extends ConsumerState<AppShell> {
             position: AylaScrollTopFabPosition.narrow,
             stacked: fabAction != null,
           ),
-        // ---- 创建浮层（`.create-fab` 的落点）----
-        if (_createSheetOpen && fabAction != null)
-          AylaCreateSheet(
-            title: fabAction.label,
-            onClose: () => setState(() => _createSheetOpen = false),
-            child: Padding(
-              padding: const EdgeInsets.all(AylaSpacing.sp2),
-              child: Text(
-                '该创建表单属后续批次（web CreateFab.tsx:93–103 · shellConfig.ts:224–261：'
-                '${fabAction.key} / handler=${fabAction.handler ?? '—'} / ${fabAction.plannedStep}）',
-                style: AylaTextStyles.of(context).caption,
-              ),
-            ),
+        // ---- 窄屏浮动小窗（`AppShell.tsx:131–132`）----
+        // 只有窄屏渲染，且 `miniPlayer` 非空才出现（唯一 owner）；层级 z 60 高于底栏 50、
+        // 消息/创建 FAB 40、活动态悬浮球 55，低于弹层遮罩 70+ ⇒ 放在 FAB 之后、浮层之前。
+        // ⚠️ 本件必须是 `Stack` 的**直接子级**：`AylaLiveMiniPlayer` 自身返回 `Positioned`
+        //（等价 web 的 `position: fixed`），外面再包 `Positioned` 会命中“双重 ParentData”。
+        if (isNarrow && liveMiniPlayer != null)
+          _LiveMiniPlayerHost(
+            mini: liveMiniPlayer,
+            onOpenRoom: () => context.go(liveMiniPlayer.sourceRoute),
           ),
+        // ---- 创建浮层（`.create-fab` 的落点）----
+        if (_createSheetOpen && fabAction != null) _createSheet(fabAction),
       ],
+    );
+  }
+}
+
+/// 窄屏浮动小窗宿主（web `AppShell.tsx:131–132`：
+/// `{isNarrow && liveMiniPlayer ? <LiveMiniPlayer /> : null}`）。
+///
+/// - **渲染条件**只由 `AylaLiveState.miniPlayer` 决定（同 web：组件自身读 store），
+///   位置/尺寸/交互全在 `AylaLiveMiniPlayer` 内部（fixed 右下 16 / 168×94 / z 60）；
+/// - 会话（含 `videoView`）来自全局小窗宿主 [aylaMiniPlayerOwner]（唯一 owner）；
+///   本件订阅它的 `notifyListeners`，播放器状态变化时刷新画面；
+/// - **必须是 `Stack` 的直接子级**：`AylaLiveMiniPlayer` 自身返回 `Positioned`（等价 web 的
+///   `position: fixed`）。本件是 StatelessWidget（不产生 RenderObject），`Positioned` 仍会
+///   正确挂到 `Stack` 的 parentData 上；外面再包一层 `Positioned` 才会报双重 ParentData。
+class _LiveMiniPlayerHost extends StatelessWidget {
+  const _LiveMiniPlayerHost({required this.mini, required this.onOpenRoom});
+
+  /// 小窗 UI 投影（`AylaLiveState.miniPlayer`）。
+  final AylaLiveMiniPlayerState mini;
+
+  /// 点击小窗 / Enter / Space → 回直播间（web `navigate(mini.sourceRoute)`）。
+  final VoidCallback onOpenRoom;
+
+  /// 无宿主会话时的空可监听（避免每次 build 新建订阅对象）。
+  static final Listenable _idle = Listenable.merge(const <Listenable>[]);
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaLiveRoomSession? owner = aylaMiniPlayerOwner;
+    return ListenableBuilder(
+      listenable: owner ?? _idle,
+      builder: (BuildContext context, Widget? child) => AylaLiveMiniPlayer(
+        // 同一会话实例的 `videoView`：Flutter 的平台视图不能跨树迁移 ⇒ 由平台实现重建
+        // 渲染面（播放器实例与 HLS 连接不重建，见 `live_support.dart` 文件头的偏离登记）。
+        videoView: owner?.videoView,
+        // web `LiveMiniPlayer.tsx:195` `title={mini.channel?.title ?? "直播间"}`。
+        channelTitle: mini.title,
+        onOpenRoom: onOpenRoom,
+        // 关闭键 = 完整销毁会话（web `LiveMiniPlayer.tsx:93–96`；幂等）。
+        onClose: () => unawaited(aylaCloseLiveMiniPlayer()),
+      ),
     );
   }
 }

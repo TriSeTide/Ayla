@@ -7,6 +7,7 @@
 /// | [currentChannel] / [srsStatus] / [danmaku] / [viewerCount] / [viewers] | `current.*` | 当前直播间四件套 |
 /// | [currentLoading] / [currentError] / [currentPlayerError] | 同名 | 由会话运行时写入 |
 /// | [wsConnection] | `wsConnection` | 弹幕 WS 连接状态 |
+/// | [miniPlayer] | `miniPlayer` | 手机端浮动小窗**UI 投影**（唯一 owner；由运行时显式管理） |
 ///
 /// ## 纪律（web 文件头原话）
 /// - `srsStatus` 优先；null（未查询）时 UI 用乐观 `status` 兜底**并标注**；
@@ -46,6 +47,32 @@ List<AylaLiveDanmaku> normalizeDanmaku(List<AylaLiveDanmaku> list) {
   return deduped;
 }
 
+/// 手机端浮动小窗状态（web `stores/live.ts:36–41` `MiniPlayerState`）。
+///
+/// 会话资源（HLS 播放器 / SRS 判定 / 弹幕 WS / video 视图）由会话运行时
+/// （`pages/live_support.dart` 的 `AylaLiveRoomSession`）持有，这里只放 **UI 投影**；
+/// `null` = 无小窗 —— **唯一 owner，同一时刻至多一个**（web 组件头原话）。
+class AylaLiveMiniPlayerState {
+  const AylaLiveMiniPlayerState({
+    required this.channelId,
+    required this.sourceRoute,
+    this.channel,
+  });
+
+  /// 频道 id（web `channelId: number`）。
+  final String channelId;
+
+  /// 点回直播间时导航的目标路由（web `sourceRoute`：一级直播 `/live/:id`，
+  /// 群内直播为群场景路由 `/group/:id/live`，开播控制台 `/live/start/:id`）。
+  final String sourceRoute;
+
+  /// 频道快照（web `channel: LiveChannelDescriptor | null`）。
+  final AylaLiveChannelSnapshot? channel;
+
+  /// 小窗标题（web `LiveMiniPlayer.tsx:195` `mini.channel?.title ?? "直播间"`）。
+  String get title => channel?.title ?? '直播间';
+}
+
 /// live 全局状态（登录周期内单例；登出时 [reset]）。
 class AylaLiveState extends ChangeNotifier {
   final Map<String, AylaLiveChannelSnapshot> _channels =
@@ -59,6 +86,7 @@ class AylaLiveState extends ChangeNotifier {
   String? _currentError;
   String? _currentPlayerError;
   AylaLiveWsConnection _wsConnection = AylaLiveWsConnection.offline;
+  AylaLiveMiniPlayerState? _miniPlayer;
 
   /// 频道表（房内页/热更新投影；排序归各页 `AylaPagedList`）。
   Map<String, AylaLiveChannelSnapshot> get channels =>
@@ -85,6 +113,9 @@ class AylaLiveState extends ChangeNotifier {
   String? get currentError => _currentError;
   String? get currentPlayerError => _currentPlayerError;
   AylaLiveWsConnection get wsConnection => _wsConnection;
+
+  /// 浮动小窗（null = 无小窗）。**唯一 owner**：同一时刻至多一个。
+  AylaLiveMiniPlayerState? get miniPlayer => _miniPlayer;
 
   // ---------------- 列表投影（web upsertChannel / removeChannel / updateChannelStatus） ----------------
 
@@ -214,7 +245,21 @@ class AylaLiveState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 设置 / 清除浮动小窗（web `stores/live.ts:208` `setMiniPlayer`）。
+  ///
+  /// **整体替换** ⇒ 天然表达「同一时刻至多一个 owner」（不做增量合并）；
+  /// 传 `null` 且当前已是 `null` 时是 no-op（关闭小窗可幂等重入）。
+  void setMiniPlayer(AylaLiveMiniPlayerState? mini) {
+    if (identical(_miniPlayer, mini)) return;
+    _miniPlayer = mini;
+    notifyListeners();
+  }
+
   /// 退房清理：清当前直播间、弹幕与会话 UI 状态（**保留大厅列表**；web `clearCurrent`）。
+  ///
+  /// ⚠️ **不动 [miniPlayer]**：web `stores/live.ts:250` 原话「miniPlayer 由 runtime 显式
+  /// 管理」—— 小窗由会话运行时置位/清理，退房清理不得顺手把它清掉（否则「离开房间页进小窗」
+  /// 会被紧随其后的清状态抹平）。
   void clearCurrent() {
     _currentChannel = null;
     _srsStatus = null;
@@ -228,9 +273,10 @@ class AylaLiveState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 登出/账号切换：全清（web `reset`）。
+  /// 登出/账号切换：全清（web `reset` —— 含 `miniPlayer: null`）。
   void reset() {
     _channels.clear();
+    _miniPlayer = null;
     clearCurrent();
   }
 

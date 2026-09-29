@@ -54,6 +54,10 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
   ShellUiNotifier? _shell;
   AylaLiveRoomSession? _session;
   AylaPagedList<AylaDirectoryLiveEntry>? _directory;
+
+  /// 最后一次 build 的窄屏判定（`dispose` 里读不到 MediaQuery ⇒ 在 build 里记下；
+  /// 视图分离的「窄屏 + 直播中 ⇒ 进小窗」判定要用它，见 [AylaLiveRoomSession.detachView]）。
+  bool _narrow = false;
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
 
@@ -77,6 +81,8 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       liveState: ref.read(liveStateProvider),
       liveWs: ref.read(liveWsProvider),
       chat: ref.read(chatWsProvider),
+      // 点回直播间（小窗主体）的导航目标（web `LiveRoomBody` 的 activityRoute 缺省值）。
+      activityRoute: '/live/${widget.channelId}',
     )..addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) =>
@@ -97,16 +103,18 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
 
   @override
   void dispose() {
-    // ⚠️ 会话销毁排进 microtask：`stop()` 会清 `liveStateProvider`，而本页正是它的
-    // 监听者 —— 在 dispose 内同步 notify 会打到已 defunct 的 element（见
+    // ⚠️ 视图分离排进 microtask：`detachView` 的非小窗路径会清 `liveStateProvider`，
+    // 而本页正是它的监听者 —— 在 dispose 内同步 notify 会打到已 defunct 的 element（见
     // `live_support.dart` 的 `detachView` 注释）。microtask 里 ref 已不可用 ⇒
-    // 先把对象取出来。
+    // 先把对象与窄屏判定取出来。
     _session?.removeListener(_onChanged);
     final AylaLiveRoomSession? session = _session;
+    final bool narrow = _narrow;
     _session = null;
     scheduleMicrotask(() {
-      unawaited(session?.stop());
-      session?.dispose();
+      // 窄屏 + 直播中 ⇒ 会话所有权移交 AppShell 的小窗宿主（播放器不销毁）；
+      // 否则完整销毁并回收会话（web `useLiveRoom` 的 cleanup → `detachView`）。
+      unawaited(session?.detachView(isNarrow: narrow));
     });
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
@@ -146,6 +154,7 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
   Widget build(BuildContext context) {
     if (!_validId) return const SizedBox.shrink();
     final bool narrow = aylaDirectoryIsNarrow(context);
+    _narrow = narrow; // dispose 的视图分离判定（见字段注释）
     final AylaLiveRoomSession? session = _session;
     if (session == null) return const SizedBox.shrink();
     final AylaLiveState live = ref.watch(liveStateProvider);

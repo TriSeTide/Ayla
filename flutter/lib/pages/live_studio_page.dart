@@ -74,6 +74,12 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
   List<({String id, String title})> _groups = const <({String id, String title})>[];
+
+  /// 最后一次 build 的窄屏判定与「主播控制台」判定（`dispose` 里读不到 MediaQuery /
+  /// ref ⇒ 在 build 里记下）。控制台对应 web `useLiveRoom` 的 `isOwnerConsole`
+  /// （`LiveRoomBody.tsx:117` `isOwnerConsole: showOwnerPanel`）—— 该档**不触发小窗**。
+  bool _narrow = false;
+  bool _ownerConsole = true;
   String? _deletingId;
   bool _creating = false;
   String? _actionError;
@@ -98,6 +104,8 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       liveState: ref.read(liveStateProvider),
       liveWs: ref.read(liveWsProvider),
       chat: ref.read(chatWsProvider),
+      // 点回直播间（小窗主体）的导航目标（web `LiveStudioPage.tsx:148`）。
+      activityRoute: '/live/start/${widget.channelId}',
     )..addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
@@ -123,10 +131,15 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     // 已 defunct 的 element —— 见 `live_support.dart` 的 `detachView` 注释）。
     _session?.removeListener(_onChanged);
     final AylaLiveRoomSession? session = _session;
+    final bool narrow = _narrow;
+    final bool ownerConsole = _ownerConsole;
     _session = null;
     scheduleMicrotask(() {
-      unawaited(session?.stop());
-      session?.dispose();
+      // 视图分离：窄屏 + **非**主播控制台 + 直播中 ⇒ 进小窗；控制台档始终完整销毁
+      // （web `useLiveRoom` 的 `isOwnerConsole` 语义，见 `live_support.dart` 的 detachView）。
+      unawaited(
+        session?.detachView(isNarrow: narrow, isOwnerConsole: ownerConsole),
+      );
     });
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
@@ -314,6 +327,8 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     final AylaLiveChannelSnapshot? channel =
         live.currentChannel ?? live.channelOf(widget.channelId);
     final bool isOwner = channel?.isOwner ?? false;
+    _narrow = narrow; // dispose 的视图分离判定（见字段注释）
+    _ownerConsole = isOwner;
     final AylaPagedList<AylaDirectoryLiveEntry>? directory = _directory;
     final bool listEmpty = directory != null &&
         directory.loaded &&

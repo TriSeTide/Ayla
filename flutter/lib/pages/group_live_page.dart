@@ -82,6 +82,9 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
 
   /// 当前直播间 id（null = 空态）。
   int? _currentId;
+  /// 最后一次 build 的窄屏判定（`dispose` 里读不到 MediaQuery ⇒ 在 build 里记下；
+  /// 视图分离的「窄屏 + 直播中 ⇒ 进小窗」判定要用它，见 [AylaLiveRoomSession.detachView]）。
+  bool _narrow = false;
   /// 路由频道详情错误（web tsx 29）。
   String? _detailError;
   bool _creating = false;
@@ -112,10 +115,12 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   void dispose() {
     _session?.removeListener(_onChanged);
     final AylaLiveRoomSession? session = _session;
+    final bool narrow = _narrow;
     _session = null;
     scheduleMicrotask(() {
-      unawaited(session?.stop());
-      session?.dispose();
+      // 窄屏 + 直播中 ⇒ 会话所有权移交 AppShell 的小窗宿主（播放器不销毁）；
+      // 否则完整销毁并回收会话（web `useLiveRoom` 的 cleanup → `detachView`）。
+      unawaited(session?.detachView(isNarrow: narrow));
     });
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
@@ -175,6 +180,8 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       liveState: ref.read(liveStateProvider),
       liveWs: ref.read(liveWsProvider),
       chat: ref.read(chatWsProvider),
+      // 点回直播间（小窗主体）的导航目标 = 群场景路由（web `GroupLive.tsx:178`）。
+      activityRoute: '/group/${widget.groupId}/live',
     )..addListener(_onChanged);
     _session = session;
     setState(() => _currentId = channelId);
@@ -299,9 +306,11 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       for (final AylaDirectoryLiveEntry entry in channels) entry.card,
     ];
 
+    final bool narrow = !(MediaQuery.sizeOf(context).width > 768);
+    _narrow = narrow; // dispose 的视图分离判定（见字段注释）
     return AylaLiveRoomBody(
       channelId: '$channelId',
-      isNarrow: !(MediaQuery.sizeOf(context).width > 768),
+      isNarrow: narrow,
       channels: cards,
       hideRail: true, // 群内子界面无侧栏（web tsx 183）
       onSelect: (String id) {

@@ -13,6 +13,8 @@
 /// 与 web 的模块级单例 store 语义一致；登出时由 [aylaStopRooms] 统一断开与清空。
 library;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/net/dio_client.dart' show DioClient;
@@ -20,6 +22,7 @@ import '../core/ws/live_ws.dart';
 import '../core/ws/room_frames.dart' show AylaRoomDirectoryBridge;
 import '../core/ws/voice_ws.dart';
 import '../core/ws/ws_manager.dart' show WsManager, wsManager;
+import '../pages/live_support.dart' show aylaCloseLiveMiniPlayer;
 import 'auth_state.dart';
 import 'chat_providers.dart' show chatWsProvider, realtimeProvider;
 import 'directory_events.dart';
@@ -110,6 +113,7 @@ AylaVoiceWsClient aylaStartVoiceWs(WidgetRef ref) {
 
 /// 登出 / 401 过期：断开两条房内通道 + 解绑目录帧桥 + 清空房内状态。
 void aylaStopRooms(WidgetRef ref) {
+  aylaStopLiveMiniPlayer();
   ref.read(roomDirectoryBridgeProvider).detach();
   ref.read(voiceWsProvider).disconnect();
   ref.read(liveWsProvider).disconnect();
@@ -120,10 +124,20 @@ void aylaStopRooms(WidgetRef ref) {
 
 /// 同上（`ProviderContainer` 版，`main.dart` 的 `onSessionExpired` 用）。
 void aylaStopRoomsForContainer(ProviderContainer container) {
+  aylaStopLiveMiniPlayer();
   container.read(roomDirectoryBridgeProvider).detach();
   container.read(voiceWsProvider).disconnect();
   container.read(liveWsProvider).disconnect();
   container.read(voiceStateProvider).reset();
   container.read(liveStateProvider).reset();
   container.read(directoryEventsProvider).reset();
+}
+
+/// 登出 / 401 过期：完整销毁窄屏浮动小窗持有的会话（唯一 owner）。
+///
+/// 小窗宿主是**模块级**注册表（`pages/live_support.dart`），AppShell 卸载不会触发任何页面
+/// 的 `dispose` ⇒ 必须在这条统一收口里显式销毁，否则 WS 连接与播放器会越过登录周期存活。
+/// 幂等（无小窗时是 no-op）。
+void aylaStopLiveMiniPlayer() {
+  unawaited(aylaCloseLiveMiniPlayer());
 }

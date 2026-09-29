@@ -334,6 +334,29 @@ class AylaVoiceApi {
     );
   }
 
+  /// `POST /voice/channels/` —— 建频道（web `api/voice.ts:56–62`）。
+  ///
+  /// 载荷逐条对应 web：`{ name, ...(group ? { group } : {}), visibility?,
+  /// allowed_group_ids? }`。空名称由**前端**拦截（`VoiceChannelCreate.tsx:31` 不发请求）
+  /// ⇒ 本层不预检。响应是与 `getVoiceChannel` 同一投影的 `VoiceChannelDescriptor`。
+  static Future<AylaVoiceChannelSnapshot> createVoiceChannel(
+    String name, {
+    String? group,
+    AylaPostVisibility? visibility,
+    List<String>? allowedGroupIds,
+  }) async {
+    final Map<String, dynamic> body = <String, dynamic>{'name': name};
+    if (group != null) body['group'] = group;
+    if (visibility != null) body['visibility'] = visibility.wire;
+    if (allowedGroupIds != null) body['allowed_group_ids'] = allowedGroupIds;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .post<Map<String, dynamic>>('/voice/channels/', body: body);
+    final AylaVoiceChannelSnapshot? channel =
+        AylaVoiceChannelSnapshot.fromJson(resp);
+    if (channel == null) throw const ApiException(0, '建频道响应结构非法');
+    return channel;
+  }
+
   /// `GET /voice/channels/<id>/` —— 详情（含 member_count/mine）。
   ///
   /// web `api/voice.ts:65–69`；房内页在「大厅列表还没返回」时也直接拉详情
