@@ -1,5 +1,8 @@
 /// 个人主页（`/profile` · `/user/:id`）宽屏侧栏模式的页面级装配工具。
 ///
+/// ⚠️ 本文件**只管布局几何**；「内容分区」的三条数据源（直播 / 语音 / 帖子）与跳转目标
+/// 在同目录的 `profile_content_support.dart`（两个页面共用，别混在一起）。
+///
 /// ## 为什么是页面级模块
 /// 两个页面共用 `profile.css` 的 `:has(.profile-main)` 侧栏模式，但 Flutter 侧没有
 /// CSS 的负 margin / `scroll-padding` / `align-self: stretch` 直接等价物 ——

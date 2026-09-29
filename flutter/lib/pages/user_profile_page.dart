@@ -20,7 +20,12 @@
 /// · 在线胶囊 ✅ 2026-09-28 用户裁决后已提升为公共件 [AylaProfilePresence]
 ///   （`profile.css:558–570`），本页改用公共件（私有 `_PresenceChip` 已删）；
 /// · 分享面板接线属分享域批次（本页只装配分享键）；
-/// · 内容分区数据源同 [ProfilePage]：传 `postsError` 显式失败态；
+/// · 内容分区 ✅ **2026-09-29 已接线**（原来传 `postsError` 显式失败态）：三条数据源
+///   （正在直播 / 正在语音 / 他的帖子前 3 条）与四个跳转由 `profile_content_support.dart`
+///   装载，与本人页同源 —— 差异只有 owner（`getUserDetail` 结果）、`mine = false`、
+///   「更多帖子」目标 `/user/<id>/posts`（web tsx:105）；403 静默不展示该卡，
+///   真失败走组件错误态（**不伪造空列表**）。⚠️ 对方 `show_content = false` 时**不装载**
+///   （web tsx:201 的 `user.show_content &&` 守卫）；
 /// · `usePresenceOnline` / `useDisplayStatus` ✅ **2026-09-29 已接线**
 ///   （`state/display_status.dart` + `state/presence_providers.dart`；与 web
 ///   `utils/displayStatus.ts` 同规则：WS 增量优先 / 无记录回退 REST 快照
@@ -48,13 +53,28 @@ import '../widgets/base/reveal.dart';
 import '../widgets/base/share.dart';
 import '../widgets/profile/profile_card.dart';
 import '../widgets/profile/profile_presence.dart';
+import 'profile_content_support.dart';
 import 'profile_support.dart';
 
 class UserProfilePage extends ConsumerStatefulWidget {
-  const UserProfilePage({super.key, required this.userId});
+  const UserProfilePage({
+    super.key,
+    required this.userId,
+    this.debugFetchers = const AylaProfileContentFetchers(),
+    this.debugUserDetail,
+  });
 
   /// 路由参数 `/user/:userId`。
   final String userId;
+
+  /// 测试注入点：内容分区的三条数据源（生产路径不传 ⇒ 真实 API，见
+  /// `profile_content_support.dart`）。
+  @visibleForTesting
+  final AylaProfileContentFetchers debugFetchers;
+
+  /// 测试注入点：覆盖 `GET /users/{id}/` 的取数（生产路径不传 ⇒ [AylaUsersApi.getUserDetail]）。
+  @visibleForTesting
+  final Future<AylaUserDetail> Function(String userId)? debugUserDetail;
 
   @override
   ConsumerState<UserProfilePage> createState() => _UserProfilePageState();
@@ -80,6 +100,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   @override
   void dispose() {
     _revision++; // 让在途请求的结果失效（tsx 60 的 cleanup）
+    _contentLoad?.cancel(); // 内容分区同理（web cleanup 的 cancelled = true）
     super.dispose();
   }
 
@@ -93,7 +114,9 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     });
     try {
       final AylaUserDetail detail =
-          await AylaUsersApi.getUserDetail(widget.userId);
+          await (widget.debugUserDetail ?? AylaUsersApi.getUserDetail)(
+        widget.userId,
+      );
       if (!mounted || revision != _revision) return;
       setState(() {
         _detail = detail;
@@ -122,10 +145,15 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       await AylaUsersApi.createFriendRequest(toUserId: detail.user.id);
       if (!mounted || revision != _revision) return;
       setState(() {
+        // ⚠️ 逐字段带回：`AylaUserDetail` 没有 `copyWith`，漏字段会让签名行消失、
+        // 并让内容分区的装载目标（live/voice room id）变化 ⇒ 无谓重装。
         _detail = AylaUserDetail(
           user: detail.user,
           relation: AylaFriendRelation.pendingSent,
           showContent: detail.showContent,
+          signature: detail.signature,
+          liveRoomId: detail.liveRoomId,
+          voiceRoomId: detail.voiceRoomId,
         );
       });
     } catch (_) {
@@ -153,6 +181,49 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     }
   }
 
+  /// 内容分区装载的状态（三条数据源见 `profile_content_support.dart`）。
+  AylaProfileContentState _content = const AylaProfileContentState();
+  AylaProfileContentLoad? _contentLoad;
+  AylaProfileContentTarget? _contentTarget;
+
+  /// 依赖变化（web `useEffect` 依赖数组，`ProfileContentSections.tsx:103`）才重装。
+  ///
+  /// 目标为 null 的两档：资料未取到（`_loading` / `_error`）与**对方关闭了内容展示**
+  /// —— 后者与 web 一致（tsx:201 的 `user.show_content &&` 守卫）：看不到就不发请求。
+  void _syncContent(AylaProfileContentTarget? target) {
+    if (target == null) {
+      _contentLoad?.cancel();
+      _contentLoad = null;
+      _contentTarget = null;
+      _content = const AylaProfileContentState();
+      return;
+    }
+    if (target == _contentTarget) return;
+    _contentLoad?.cancel();
+    _contentTarget = target;
+    _content = const AylaProfileContentState(); // 重装：先回到初值档（骨架）
+    _contentLoad = aylaLoadProfileContent(
+      target: target,
+      fetchers: widget.debugFetchers,
+      onUpdate: (AylaProfileContentState next) {
+        if (!mounted) return;
+        setState(() => _content = next);
+      },
+    );
+  }
+
+  /// 他人页的装载目标（`owner` = `getUserDetail` 的结果，mine = false ⇒ tsx 91 的
+  /// `{ owner: owner.id }` 口径）。
+  static AylaProfileContentTarget _contentTargetOf(AylaUserDetail detail) =>
+      AylaProfileContentTarget(
+        ownerId: detail.user.id,
+        mine: false,
+        isLive: detail.user.isLive,
+        liveRoomId: detail.liveRoomId,
+        isInVoice: detail.user.isInVoice,
+        voiceRoomId: detail.voiceRoomId,
+      );
+
   void _back() {
     if (context.canPop()) {
       context.pop();
@@ -166,6 +237,10 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     final bool isNarrow =
         AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     final AylaUserDetail? detail = _detail;
+    // 内容分区：只在「资料到手 + 对方开启展示」时装载（web tsx:201 的守卫）。
+    _syncContent(
+      (detail == null || !detail.showContent) ? null : _contentTargetOf(detail),
+    );
 
     Widget body;
     // 侧栏模式判定（web：:has(.profile-main) 只在宽屏且对方开启内容展示时匹配）
@@ -235,9 +310,24 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       );
     }
 
+    // 内容分区：三条真实数据源 + 四个真实跳转（口径见 `profile_content_support.dart`）。
+    // 空列表**只**在真的取到 0 条时出现；失败走组件的错误态（不伪造空列表）。
+    final String ownerId = detail?.user.id ?? widget.userId;
     final Widget sections = AylaProfileContentSections(
       displayName: detail?.user.displayName ?? '',
-      postsError: '内容分区（他的发帖 / 直播间 / 桌游）的数据源属后续批次',
+      // 他人页：mine 恒 false（空态文案「暂无帖子」；帖子取数口径 `owner=<id>`）
+      mine: false,
+      live: _content.live,
+      voice: _content.voice,
+      posts: _content.posts,
+      postsLoading: _content.postsLoading,
+      postsError: _content.error,
+      onOpenLive: (String id) => context.go(aylaProfileLivePath(id)),
+      onOpenVoice: (String id) => context.go(aylaProfileVoicePath(id)),
+      onOpenPost: (String id) => context.go(aylaProfilePostPath(id)),
+      // 他人 ⇒ `/user/<id>/posts`（web tsx:105 的 `postsHref`，走路由参数而非 owner.id）
+      onMorePosts: () =>
+          context.go(aylaProfileMorePostsPath(mine: false, ownerId: ownerId)),
     );
 
     // ⚠️ web 的 UserProfilePage **没有** FullScreenSwipeBack（返回键在身份行内），

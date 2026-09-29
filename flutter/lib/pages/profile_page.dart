@@ -16,10 +16,14 @@
 ///   [AylaProfileContentSections] · [AylaPrivacySheet] · [AylaShareButton] ·
 ///   [AylaFullScreenSwipeBack]（`enabled: isNarrow`，tsx 149）。
 ///
+/// ## 内容分区（2026-09-29 接线；原「数据源属后续批次」的显式失败态已删）
+/// 三条真实数据源（正在直播 / 正在语音 / 我的帖子前 3 条）与四个真实跳转由
+/// `profile_content_support.dart` 装载（`ProfileContentSections.tsx:70–105` 逐条口径）；
+/// 本页只提供 owner（auth store 的 `currentUser`，即 web 的 `owner={currentUser} mine`）
+/// 并注入路由跳转。403（`can_view` 不可见）**静默不展示该卡**；真失败走组件的错误态，
+/// **不伪造空列表**（空列表只能来自真的取到 0 条）。
+///
 /// ## 未接线（第 1 批登记，见 13 号文档）
-/// · **内容三分区的数据源**（我的发帖 / 我的直播间 / 正在玩的桌游）属帖子 / 直播 / 桌游域
-///   ⇒ 本页给 [AylaProfileContentSections] 传 `postsError`（显式失败态），**不伪造空列表**
-///   （空列表会被读成「真的没有内容」）；数据源接入随后续批次。
 /// · `usePresenceOnline`（自身光环跟随 WS 在线增量）属 presence 接线，本页用 `user.online`；
 /// · **头像即时预览**（web `imageUrl={avatarPreview ?? currentUser.avatar}`，tsx 168）：
 ///   ✅ 2026-09-28 用户裁决后落地 —— [AylaProfileIdentity] 新增可选 `avatarOverride`
@@ -53,6 +57,7 @@ import '../widgets/base/share.dart';
 import '../widgets/motion/gestures.dart';
 import '../widgets/profile/profile_card.dart';
 import '../widgets/profile/profile_edit.dart';
+import 'profile_content_support.dart';
 import 'profile_support.dart';
 
 /// 在线状态四档（web `STATUS_OPTIONS`，`ProfilePage.tsx:22–27`）。
@@ -65,7 +70,15 @@ const List<({String value, String label})> kAylaProfileStatusOptions =
 ];
 
 class ProfilePage extends ConsumerStatefulWidget {
-  const ProfilePage({super.key});
+  const ProfilePage({
+    super.key,
+    this.debugFetchers = const AylaProfileContentFetchers(),
+  });
+
+  /// 测试注入点：内容分区的三条数据源（生产路径不传 ⇒ 真实 API，见
+  /// `profile_content_support.dart`）。
+  @visibleForTesting
+  final AylaProfileContentFetchers debugFetchers;
 
   @override
   ConsumerState<ProfilePage> createState() => _ProfilePageState();
@@ -111,6 +124,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   @override
   void dispose() {
+    _contentLoad?.cancel(); // 在途结果作废（web cleanup 的 cancelled = true）
     _nickname.removeListener(_onDraftChanged);
     _signature.removeListener(_onDraftChanged);
     _nickname.dispose();
@@ -172,6 +186,50 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     AppInit.instance.reset();
     ref.read(authNotifierProvider.notifier).clear();
   }
+
+  /// 内容分区装载的状态（三条数据源见 `profile_content_support.dart`）。
+  AylaProfileContentState _content = const AylaProfileContentState();
+  AylaProfileContentLoad? _contentLoad;
+  AylaProfileContentTarget? _contentTarget;
+
+  /// 依赖变化（web `useEffect` 依赖数组，`ProfileContentSections.tsx:103`）才重装；
+  /// owner 缺失（未取到 currentUser）时取消在途装载。
+  ///
+  /// 在 `build` 里调用：与同处的 [_syncFrom] 同一范式（都是「输入变了才动作」的幂等同步），
+  /// 并且装载的首个回调一定在 microtask 之后 ⇒ 不会在 build 期间 setState。
+  void _syncContent(AylaProfileContentTarget? target) {
+    if (target == null) {
+      _contentLoad?.cancel();
+      _contentLoad = null;
+      _contentTarget = null;
+      _content = const AylaProfileContentState();
+      return;
+    }
+    if (target == _contentTarget) return;
+    _contentLoad?.cancel();
+    _contentTarget = target;
+    // 重装：先回到初值档（`postsLoading` 初值 true ⇒ 骨架；直播/语音卡缺席直到取到）
+    _content = const AylaProfileContentState();
+    _contentLoad = aylaLoadProfileContent(
+      target: target,
+      fetchers: widget.debugFetchers,
+      onUpdate: (AylaProfileContentState next) {
+        if (!mounted) return;
+        setState(() => _content = next);
+      },
+    );
+  }
+
+  /// 本人页的装载目标（`owner` = auth store 的 currentUser，mine 口径 tsx 91）。
+  static AylaProfileContentTarget _contentTargetOf(AuthUser user) =>
+      AylaProfileContentTarget(
+        ownerId: user.id,
+        mine: true,
+        isLive: user.isLive,
+        liveRoomId: user.liveRoomId,
+        isInVoice: user.isInVoice,
+        voiceRoomId: user.voiceRoomId,
+      );
 
   /// `onSave`（tsx 106–144）：有本地新头像则**先三步上传**再 PATCH；
   /// 保存成功后**只归一化本次提交的草稿**（期间更新的编辑保持本地）。
@@ -246,6 +304,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final bool isNarrow =
         AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     _syncFrom(user);
+    _syncContent(user == null ? null : _contentTargetOf(user));
 
     // tsx 87–97：没有用户在手上时只出「正在加载个人资料…」卡。
     if (user == null) {
@@ -364,12 +423,22 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             // 把 identity + avatar-actions 先打包成一组会让空隙集中成一处（用户实报「要均匀分布一些」）。
             children: <Widget>[...cardChildren, form],
           );
+    // 内容分区：三条真实数据源 + 四个真实跳转（口径见 `profile_content_support.dart`）。
+    // 空列表**只**在真的取到 0 条时出现；失败走组件的错误态（不伪造空列表）。
     final Widget sections = AylaProfileContentSections(
       displayName: displayName,
       mine: true,
-      // ⚠️ 显式失败态而不是空列表：数据源属后续批次（见文件头登记），
-      // 传空列表会被读成「真的没有内容」。
-      postsError: '内容分区（我的发帖 / 直播间 / 桌游）的数据源属后续批次',
+      live: _content.live,
+      voice: _content.voice,
+      posts: _content.posts,
+      postsLoading: _content.postsLoading,
+      postsError: _content.error,
+      onOpenLive: (String id) => context.go(aylaProfileLivePath(id)),
+      onOpenVoice: (String id) => context.go(aylaProfileVoicePath(id)),
+      onOpenPost: (String id) => context.go(aylaProfilePostPath(id)),
+      // 本人 ⇒ `/posts/mine`（web tsx:105 的 `postsHref`）
+      onMorePosts: () =>
+          context.go(aylaProfileMorePostsPath(mine: true, ownerId: user.id)),
     );
 
     return AylaFullScreenSwipeBack(

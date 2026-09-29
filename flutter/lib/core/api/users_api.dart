@@ -46,6 +46,8 @@ class AylaUserDetail {
     required this.relation,
     required this.showContent,
     this.signature,
+    this.liveRoomId,
+    this.voiceRoomId,
   });
 
   final AylaUserPublic user;
@@ -56,6 +58,15 @@ class AylaUserDetail {
   /// ⚠️ 挂在**本类**而不是 [AylaUserPublic]：后者是「chat 域投影」（只承载聊天渲染与
   /// 在线判定需要的字段，见其文件头）⇒ 不为一个页面去扩它的字段面。
   final String? signature;
+
+  /// `UserPublic.live_room_id`（`types.ts:26`）——正在直播的频道 id（null = 没在播）。
+  ///
+  /// ⚠️ 与 [signature] 同源理由：**不**挂到 [AylaUserPublic] 上。个人主页内容分区用它拉
+  /// 直播间详情（`pages/profile_content_support.dart` 的 `owner.live_room_id` 口径，tsx:73）。
+  final String? liveRoomId;
+
+  /// `UserPublic.voice_room_id`（`types.ts:24`）——正在语音的房间 id（null = 不在语音）。
+  final String? voiceRoomId;
 
   /// `show_content`（对方开启「向他人展示内容」才渲染他的内容分区）。
   final bool showContent;
@@ -69,6 +80,9 @@ class AylaUserDetail {
       relation: AylaFriendRelation.fromJson(json['relation']),
       showContent: json['show_content'] == true,
       signature: json['signature']?.toString(),
+      // 数字 id → 字符串（同 `AuthUser` 与 `AylaUserPublic.id` 的口径；缺失即缺失）。
+      liveRoomId: json['live_room_id']?.toString(),
+      voiceRoomId: json['voice_room_id']?.toString(),
     );
   }
 }
