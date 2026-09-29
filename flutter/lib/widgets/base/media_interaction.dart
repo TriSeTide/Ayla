@@ -446,6 +446,12 @@ class _AylaPullToRefreshState extends State<AylaPullToRefresh>
 
     return Listener(
       // 触摸手势（对应 tsx 的 onTouchStart/Move/End/Cancel）
+      //
+      // web `.pull-to-refresh` 是普通块级 `<div>`：`pointer-events` 默认 auto ⇒
+      // 命中区 = **整个盒子矩形**（含内容未覆盖的透明处，tsx 256–259 的事件就挂在它上面）。
+      // Flutter 的 `deferToChild`（默认）把命中缩到内容实际覆盖处 ⇒ 显式 `opaque`
+      // 复刻同一命中矩形（内容比盒子窄时仍可下拉，与 web 一致）。
+      behavior: HitTestBehavior.opaque,
       onPointerDown: (PointerDownEvent e) {
         if (_refreshing) return;
         _tracker.start(e.position.dy);
@@ -454,15 +460,38 @@ class _AylaPullToRefreshState extends State<AylaPullToRefresh>
       onPointerUp: (PointerUpEvent e) => _tracker.end(e.position.dy),
       onPointerCancel: (_) => _tracker.cancel(),
       child: Stack(
+        // `.pull-to-refresh`（app.css:4010–4013）**没有 overflow 声明** ⇒ 下拉/位移期间
+        // 内容与指示器溢出照常绘制（同文件 4019–4021 注释：「不依赖滚动容器 overflow
+        // 裁剪」，可见性由状态类 + opacity 控制）⇒ Flutter 的 Stack 默认
+        // `Clip.hardEdge` 必须显式关掉才与 web 一致。
+        clipBehavior: Clip.none,
+        // 尺寸来源回到 web 语义：`.pull-refresh-content { position: relative }`
+        // （app.css:4015–4017）**在流内** ⇒ 容器尺寸由内容决定；只有指示器是 absolute
+        // （4022–4035）不参与尺寸。Flutter 等价 = 内容必须是 Stack 的**非 Positioned
+        // 子级**（JSX 253–279 的顺序同样是 indicator 在前、content 在后）。
+        // ⚠️ 事故（2026-09-29 P0）：此前内容也写成 `Positioned.fill` ⇒ 两个直接子级
+        // 全是 Positioned ⇒ `RenderStack` 取 `constraints.biggest`；而六个目录页都把
+        // 本件放进 `SingleChildScrollView`（滚动视口给子级的主轴高度无界）⇒
+        // `'size.isFinite'` 断言 ⇒ 布局中断 ⇒ 帖子/直播/语音/桌游四厅 + 收藏 + 搜索
+        // 的内容区全空（render tree 大片 NEEDS-LAYOUT）。
+        // `loose`（默认，显式写出）：Stack 只做尺寸容器，约束交给下面的块级子级决定。
+        fit: StackFit.loose,
         children: <Widget>[
-          // 内容（随下拉位移；`.pull-refresh-content { position:relative }`）
-          Positioned.fill(
+          // 内容（在流内，承担容器尺寸；随下拉位移；`.pull-refresh-content`）。
+          //
+          // `Align(widthFactor: null, heightFactor: 1.0)` = 块级子元素的 Flutter 等价：
+          // **宽度撑满父可用宽**（内容比容器窄时左对齐，同 block）、**高度由内容决定**。
+          // 两种情况都安全：宽度无界 ⇒ `RenderPositionedBox` 自动退化为内容宽；
+          // 高度无界（滚动视口内）⇒ 高度取内容自然高，永不落到 `constraints.biggest`。
+          Align(
+            alignment: Alignment.topLeft,
+            heightFactor: 1.0,
             child: Transform.translate(
               offset: Offset(0, _offset),
               child: widget.child,
             ),
           ),
-          // 指示器（绝对定位于顶部，随下拉滑入；idle 时 opacity 0）
+          // 指示器（绝对定位覆盖层，不参与尺寸；随下拉滑入；idle 时 opacity 0）
           Positioned(
             top: 0,
             left: 0,
