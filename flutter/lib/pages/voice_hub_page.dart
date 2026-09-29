@@ -398,6 +398,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
         ),
       ),
       content: AylaDirectoryContent(
+        fadeGlass: false,
         controller: _scroll,
         scope: 'voice-hub:$_filter', // web key={scope}（tsx 285）
         label: aylaHubFilterLabel(VoiceHubPage.filters, _filter),

@@ -316,6 +316,7 @@ class AylaGroupInfoLayout extends StatelessWidget {
         // auroraqua-panel-from-bottom（429–434）
         : const Offset(0, AylaRevealMotion.distance);
     return (Widget child) => AylaRevealItem(
+      fadeGlass: false,
       enabled: !MediaQuery.disableAnimationsOf(context), // 614–653：reduced ⇒ animation none
       delay: Duration.zero, // web animation 无 delay（故不用 stagger）
       offset: offset,

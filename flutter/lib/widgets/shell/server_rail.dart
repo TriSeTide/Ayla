@@ -430,6 +430,7 @@ class _AylaServerRailState extends State<AylaServerRail> {
       // panelVariants(reduced, "left")（auroraquaMotion.ts 37–51）：
       // x −20 → 0 + opacity 0 → 1，duration 0.3 easeInOut。
       rail = AylaRevealItem(
+        fadeGlass: false,
         offset: const Offset(-AylaRevealMotion.distance, 0),
         duration: AylaDurations.auroraqua,
         curve: AylaCurves.auroraquaEaseInOut,

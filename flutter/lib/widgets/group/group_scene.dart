@@ -203,6 +203,7 @@ class AylaGroupSceneHead extends StatelessWidget {
     // widget test 里该式为 true（头部整段动画被跳过），而同一棵树里 AylaRevealItem
     // 自己的判定为 false（裸 AylaRevealItem 会正常播放）⇒ 两处口径不一致，改用单一口径。
     return AylaRevealItem(
+      fadeGlass: false,
       offset: const Offset(0, -20), // auroraqua-panel-from-top: 0 −20px → 0,0
       duration: AylaDurations.auroraqua,
       curve: AylaCurves.auroraquaEaseOut,

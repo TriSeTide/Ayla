@@ -310,6 +310,7 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
 
     // ---- 入场（voice.css 325–346 宽屏三分区按边缘入；base.css 463 窄屏统一浮入 20px）----
     Widget reveal(Widget child, Offset offset) => AylaRevealItem(
+          fadeGlass: false,
           offset: wide ? offset : const Offset(0, 20),
           delay: Duration.zero, // web 无 stagger（三块同时）
           child: child,

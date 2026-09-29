@@ -277,6 +277,7 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
         ),
         itemBuilder: (BuildContext context, AylaPost post, int index) =>
             AylaRevealItem(
+          fadeGlass: false,
           delay: AylaRevealMotion.staggerDelay(index, staggerMs: 50),
           child: _card(post),
         ),

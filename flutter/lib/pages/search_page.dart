@@ -354,6 +354,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         ),
       ),
       content: AylaDirectoryContent(
+        fadeGlass: false,
         controller: _scroll,
         scope: _scope, // web key={scope}（tsx 359）
         label: aylaHubFilterLabel(SearchPage.filters, _filter),

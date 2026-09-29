@@ -828,6 +828,7 @@ class _AylaTopNavState extends State<AylaTopNav> {
     // reduced-motion 由 `AylaRevealItem` 内部处理（auroraqua.css:631 亦有开关）。
     // 复用现成件 [AylaRevealItem]（offset 上入 20px = 同一关键帧语义）。
     return AylaRevealItem(
+      fadeGlass: false,
       offset: const Offset(0, -AylaRevealMotion.distance), // `translate: 0 -20px`
       child: _narrowBar(context, items),
     );

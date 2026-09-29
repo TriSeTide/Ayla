@@ -350,6 +350,7 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
           // ⚠️ 切场景（聊天 ⇄ 语音 / 直播 / 帖子 / 桌游）时本页会重挂 ⇒ 动画**重播**，
           // 这正是 web 的 `initial="enter"` 语义（`GroupPage.tsx:327–350` 的 renderScene 换件）。
           child: AylaRevealItem(
+            fadeGlass: false,
             offset: const Offset(AylaRevealMotion.distance, 0), // +20 → 0（right 档）
             duration: AylaDurations.auroraqua, // 300ms
             curve: AylaCurves.auroraquaEaseInOut, // [0.42, 0, 0.58, 1]
@@ -409,6 +410,7 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
             // ⇒ **从下方 20px 上滑 + 淡入**，300ms `--auroraqua-ease-in-out`，宽窄屏同档，
             // reduced-motion 由 [AylaRevealItem] 内部直切。
             AylaRevealItem(
+              fadeGlass: false,
               offset: const Offset(0, AylaRevealMotion.distance), // +20 → 0
               duration: AylaDurations.auroraqua, // 300ms
               curve: AylaCurves.auroraquaEaseInOut, // [0.42, 0, 0.58, 1]

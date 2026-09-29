@@ -480,6 +480,7 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
   /// reduced-motion 与 `enabled` 开关，对应 hook 的 `if (!enabled || reduced) return;`
   /// （错误态整支不挂重播 —— 见 [build] 的错误分支：那条路径没有 [AylaRevealScope]）。
   Widget _replay(Offset offset, Widget child) => AylaRevealItem(
+    fadeGlass: false,
     offset: offset,
     delay: Duration.zero, // web 三块同时播（hook 里没有 stagger）
     child: child,

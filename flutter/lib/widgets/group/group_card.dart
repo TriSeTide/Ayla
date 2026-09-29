@@ -1051,6 +1051,7 @@ class AylaGroupCard extends StatelessWidget {
       ),
     );
     return AylaRevealItem(
+      fadeGlass: false,
       // `delay == null` = 不挂动画（滚动恢复/历史节点直接可见）
       enabled: revealDelay != null,
       delay: revealDelay,
@@ -1330,6 +1331,7 @@ class AylaGroupListItem extends StatelessWidget {
       clipBehavior: Clip.none,
       children: <Widget>[
         AylaRevealItem(
+          fadeGlass: false,
           enabled: revealDelay != null,
           delay: revealDelay,
           child: glass,

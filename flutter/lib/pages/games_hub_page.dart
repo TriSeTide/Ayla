@@ -388,6 +388,7 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
         ),
       ),
       content: AylaDirectoryContent(
+        fadeGlass: false,
         controller: _scroll,
         scope: 'games-hub:$_filter', // web key={scope}（tsx 181）
         label: aylaHubFilterLabel(GamesHubPage.filters, _filter),

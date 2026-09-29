@@ -164,6 +164,7 @@ class AylaDirectoryContent extends StatelessWidget {
     this.controller,
     this.scope,
     this.label,
+    this.fadeGlass = true,
   });
 
   /// 列表/状态内容。
@@ -178,6 +179,13 @@ class AylaDirectoryContent extends StatelessWidget {
 
   /// tabpanel 的可访问名（web `aria-labelledby` 指向选中 tab 的文案）。
   final String? label;
+
+  /// 内容区是否含玻璃（`BackdropFilter`）—— 透传给 [AylaRevealItem.fadeGlass]。
+  ///
+  /// 目录内容区在 web 上就是**卡片列表**（收藏 / 语音 / 直播 / 帖子 / 游戏 / 搜索
+  /// 六页都渲染 `AylaGlassSurface` 卡）⇒ 六个调用点一律显式传 `false`；
+  /// 默认 `true` 只为与本件改造前的行为一致（见 [AylaRevealItem.fadeGlass] 的说明）。
+  final bool fadeGlass;
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +214,7 @@ class AylaDirectoryContent extends StatelessWidget {
 
     // `animation: directory-content-in 300ms var(--auroraqua-ease)`（155 / 158–167）
     viewport = AylaRevealItem(
+      fadeGlass: fadeGlass, // 内容区是卡片列表（含玻璃）⇒ 调用点传 false
       offset: const Offset(0, 12), // translateY(12px)
       duration: AylaDurations.auroraqua, // 300ms
       curve: AylaCurves.auroraqua, // --auroraqua-ease = ease

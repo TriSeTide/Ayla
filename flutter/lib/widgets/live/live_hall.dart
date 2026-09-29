@@ -249,7 +249,7 @@ class AylaLiveChannelCard extends StatelessWidget {
     final Duration? delay = revealDelay;
     final Widget card = _buildWrap(context);
     if (delay == null) return card;
-    return AylaRevealItem(delay: delay, child: card);
+    return AylaRevealItem(fadeGlass: false, delay: delay, child: card);
   }
 
   Widget _buildWrap(BuildContext context) {

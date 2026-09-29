@@ -22,6 +22,66 @@
 /// （见 `group_card.dart` 的 `staggerDelay(i)` 注释）。故 [AylaRevealItem.delay]
 /// 支持显式传入，不强制用本文件的默认步长。
 ///
+/// ## ⚠️ 玻璃子树：不做整层淡入（2026-09-29，Impeller 校验刷屏修复）
+///
+/// web 的 `.reveal-item`（`base.css:483–506`）与 `auroraqua-*-in`（`auroraqua.css:8–26`）
+/// 都是**一条**「opacity 0→1 + 位移」动画。但 Flutter 的 `Opacity` 会推
+/// `OpacityLayer`，而 Impeller **拒绝**把继承不透明度传给 `BackdropFilter` 的 Contents：
+///
+/// ```
+/// [ERROR:flutter/impeller/entity/contents/contents.cc(119)] Break on
+/// 'impeller::ImpellerValidationBreak' to inspect point of failure:
+/// Contents::SetInheritedOpacity should never be called when Contents::CanAcceptOpacity returns false.
+/// ```
+///
+/// 库内对这条拒绝已有两条口径（13 号 §6.2 末条 + §8.19）：
+/// - **禁用态**（`theme/buttons.dart:53–63`、`AylaGlassSurface.dimAlpha`，
+///   `theme/glass.dart:409–421`）⇒ 改「按颜色降透明」——因为 web 的
+///   `opacity: .55` 在 Flutter 侧**根本不生效**（功能 bug）；
+/// - **web 本来就是整层 opacity 的动效**（§8.19 列的 7 处）⇒ 保持整层、接受校验日志。
+///
+/// 本件走**第三条**：入场动画不能砍（`web` 有淡入，页面层依赖它做编排），
+/// 也不改玻璃件（跨组件一致性改动按库规先问用户）⇒ **按调用方声明的档位分流**：
+///
+/// | `fadeGlass` | 渲染 | 与 web 的差异 |
+/// |---|---|---|
+/// | `true`（默认） | `Opacity(t)` + 位移 | **无差异**（逐帧等价 web） |
+/// | `false`（玻璃安全档） | `Opacity(1.0)` + 位移 | **只有位移、没有淡入** |
+///
+/// web 事实源：`base.css:483–506` 的 `.reveal-item` 与 `auroraqua.css:8–26` 的
+/// `auroraqua-*-in` 都是 `opacity: 0 → 1` **加** `translate` 一条动画
+/// ⇒ `fadeGlass: false` 只丢 `opacity` 那一半，位移**保持完整**。
+///
+/// 为什么 `Opacity(1.0)` 就够了（**依据 = 本机 Flutter 3.47.4 的实现，已逐行回读，
+/// 不是旧版印象**）：
+/// - `RenderOpacity.paint`（`rendering/proxy_box.dart:947–953`）：
+///   `if (child == null || _alpha == 0) return;` ⇒ `alpha == 0` **不 paint 子树**
+///   （不会建 `BackdropFilterLayer`）；
+/// - `OpacityLayer.addToScene`（`rendering/layer.dart:2186–2200`）：
+///   只有 `realizedAlpha < 255` 才 `builder.pushOpacity(...)`，`alpha == 255` 走
+///   `builder.pushOffset(...)` ⇒ **不推 opacity** ⇒ 玻璃后代拿不到继承不透明度，
+///   Impeller 校验不触发；视觉上等价「不淡入」。
+///
+/// ⚠️ 库内 `widgets/base/dialogs.dart:565–566` 那句「RenderOpacity 在 alpha == 255 时
+/// 跳过 layer」**与本机 3.47.4 实现不符**（3.47.4 仍会建 `OpacityLayer`，只是
+/// `addToScene` 换成 `pushOffset`）；那处的**结论**（卡内 `BackdropFilter` 不会长期退化）
+/// 仍成立，但依据应以 `layer.dart:2186` 为准。
+///
+/// 分流由调用方的 [AylaRevealItem.fadeGlass] **显式声明**（默认 `true` = 改前行为）：
+/// 子树里出现 `AylaGlassSurface` / `AylaGlassBackdrop` / `AylaGlassButton` /
+/// `AylaSidebarCard` / 裸 `BackdropFilter` ⇒ 必须传 `fadeGlass: false`。
+///
+/// **为什么必须静态声明**（2026-09-29 总控纠偏，勿改回自动探测）：
+/// `BuildContext.visitChildElements()` **在 build 期间被 Flutter 明令禁止**
+/// —— 实测直接抛
+/// `visitChildElements() called during build.`（`create_live_sheet_test` 首例即崩），
+/// 且会连锁污染全仓用例；paint 期又拿不到「本帧要不要推 opacity」的决策权
+/// ⇒ 自动探测在 Flutter 里**没有可用位置**，只能由调用方声明。
+///
+/// 更彻底的做法是让玻璃件自己接收父级 alpha（`dimAlpha` 的动态版，
+/// 或「父级在动画中就跳过 `BackdropFilter`」）——**属跨组件一致性改动，
+/// 按 13 号 §6.2 末条先问用户**，本件不擅自推广。
+///
 /// ## 公开面
 /// `AylaRevealMotion` · `AylaRevealScope` · `AylaRevealScopeState` · `AylaRevealItem`
 
@@ -164,6 +224,7 @@ class AylaRevealItem extends StatefulWidget {
     this.offset = const Offset(0, AylaRevealMotion.distance),
     this.duration = AylaDurations.auroraqua,
     this.curve = AylaCurves.auroraquaEaseOut,
+    this.fadeGlass = true,
   });
 
   /// 内容。
@@ -186,6 +247,23 @@ class AylaRevealItem extends StatefulWidget {
 
   /// 缓动（默认 `--auroraqua-ease-out`）。
   final Curve curve;
+
+  /// 是否对**含玻璃（`BackdropFilter`）的子树**做整层淡入（默认 `true` = 改前行为）。
+  ///
+  /// ⚠️ **子树里出现 `AylaGlassSurface` / `AylaGlassBackdrop` / `AylaGlassButton` /
+  /// `AylaSidebarCard` / 裸 `BackdropFilter` 时必须传 `false`**：Impeller 会拒绝
+  /// 「`Opacity` 祖先 + `BackdropFilter`」组合并刷屏（见文件头「玻璃子树」段）。
+  ///
+  /// - `true`（默认）：整层 `Opacity(t)` + 位移 —— 与 web 的 `.reveal-item` /
+  ///   `auroraqua-*-in`（`base.css:483–506` / `auroraqua.css:8–26`）逐帧一致；
+  /// - `false`（玻璃安全档）：`Opacity` 恒 1.0 + 位移 —— `OpacityLayer.addToScene`
+  ///   在 `alpha == 255` 时走 `pushOffset`（`rendering/layer.dart:2186`），**不推
+  ///   opacity** ⇒ 玻璃后代拿不到继承不透明度，**只有位移、没有淡入**。
+  ///
+  /// 默认值取 `true` 的理由：与改前行为**完全一致**（含玻璃的调用点在本次一并显式
+  /// 声明为 `false`），既不在无声中改变其余调用点的观感，也让「漏声明」表现为
+  /// **可见的刷屏**而不是静默的视觉退化 —— 前者能被日志立刻抓到。
+  final bool fadeGlass;
 
   @override
   State<AylaRevealItem> createState() => _AylaRevealItemState();
@@ -283,7 +361,9 @@ class _AylaRevealItemState extends State<AylaRevealItem>
       builder: (BuildContext context, Widget? child) {
         final double t = widget.curve.transform(_controller.value);
         return Opacity(
-          opacity: t,
+          // 玻璃安全档（fadeGlass: false）：恒 1.0 ⇒ `OpacityLayer.addToScene` 走
+          // `pushOffset`（rendering/layer.dart:2186）⇒ 玻璃后代拿不到继承不透明度。
+          opacity: widget.fadeGlass ? t : 1.0,
           child: Transform.translate(
             offset: Offset(
               widget.offset.dx * (1 - t),

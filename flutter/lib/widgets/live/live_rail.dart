@@ -263,6 +263,7 @@ class _AylaLiveChannelRailState extends State<AylaLiveChannelRail> {
 
     final Widget content = widget.enterFromRight
         ? AylaRevealItem(
+            fadeGlass: false,
             // 窄屏覆盖层：从右入场（auroraqua 202–205 已关掉 CSS 侧的左侧入场动画）
             offset: const Offset(20, 0),
             child: rail,

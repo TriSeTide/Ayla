@@ -232,6 +232,7 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
         ),
       ),
       content: AylaDirectoryContent(
+        fadeGlass: false,
         controller: _scroll,
         scope: 'favorites:$_filter', // web key={scope}（tsx 316）
         label: aylaHubFilterLabel(FavoritesPage.filters, _filter),

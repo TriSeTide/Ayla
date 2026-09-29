@@ -279,6 +279,7 @@ class _AylaGameRoomPlaceholderState extends State<AylaGameRoomPlaceholder> {
 
     // auroraqua-panel-from-top：translate 0 -20px + fade，300ms --auroraqua-ease-out
     return AylaRevealItem(
+      fadeGlass: false,
       enabled: !reduceMotion,
       offset: const Offset(0, -20),
       duration: AylaDurations.auroraqua,

@@ -96,7 +96,7 @@ class AylaGameRoomCard extends StatelessWidget {
     final Widget card = _wrap(context);
     final Duration? delay = revealDelay;
     if (delay == null) return card;
-    return AylaRevealItem(delay: delay, child: card);
+    return AylaRevealItem(fadeGlass: false, delay: delay, child: card);
   }
 
   /// .game-room-card-wrap：卡片 + 右上角收藏键（relative 容器）。

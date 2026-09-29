@@ -575,7 +575,7 @@ class _CardSlot extends StatelessWidget {
     if (!reveal) return child;
     // web：`.voice-channel-card-wrap.reveal-item` + `--reveal-delay`（tsx 25–26），
     // 延迟来自 `staggerDelay(index)`（gap 默认 50ms、cap 300ms）。
-    return AylaRevealItem(index: index, child: child);
+    return AylaRevealItem(fadeGlass: false, index: index, child: child);
   }
 }
 

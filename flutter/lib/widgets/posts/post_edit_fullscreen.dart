@@ -389,6 +389,7 @@ class _AylaPostEditFullscreenState extends State<AylaPostEditFullscreen> {
       explicitChildNodes: true,
       label: '编辑帖子',
       child: AylaRevealItem(
+        fadeGlass: false,
         // animation: post-edit-in var(--dur-fast) var(--ease-out)（812）
         // keyframes 815–824：opacity 0→1 + translateY(8px→0)
         enabled: !reduced, // 915–919：prefers-reduced-motion ⇒ animation: none

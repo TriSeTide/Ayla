@@ -270,6 +270,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                         spacing: AylaSpacing.sp3,
                         children: <Widget>[
                           AylaRevealItem(
+                            fadeGlass: false,
                             offset: const Offset(-20, 0),
                             duration: AylaDurations.auroraqua,
                             curve: AylaCurves.auroraquaEaseOut,
@@ -284,6 +285,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                           // ⚠️ `Expanded` 必须在外层（parent-data widget）
                           Expanded(
                             child: AylaRevealItem(
+                              fadeGlass: false,
                               offset: const Offset(20, 0),
                               duration: AylaDurations.auroraqua,
                               curve: AylaCurves.auroraquaEaseOut,

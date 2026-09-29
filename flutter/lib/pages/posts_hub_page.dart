@@ -262,6 +262,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
                   // 卡片自身只做 hover/active ⇒ 这里用 AylaRevealItem 逐项挂载
                   itemBuilder: (BuildContext context, AylaPost post, int index) =>
                       AylaRevealItem(
+                    fadeGlass: false,
                     delay: AylaRevealMotion.staggerDelay(index, staggerMs: 50),
                     child: _card(post),
                   ),
@@ -285,6 +286,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
         ),
       ),
       content: AylaDirectoryContent(
+        fadeGlass: false,
         controller: _scroll,
         // web key=posts:{account}:{filter}（tsx 314）—— account 维度在 Flutter 由
         // 页面实例隔离（无跨挂载缓存）⇒ scope 取 filter

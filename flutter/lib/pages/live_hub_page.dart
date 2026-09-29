@@ -370,6 +370,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
         ),
       ),
       content: AylaDirectoryContent(
+        fadeGlass: false,
         controller: _scroll,
         scope: 'live-hub:$_filter', // web key={scope}（tsx 140）
         label: aylaHubFilterLabel(LiveHubPage.filters, _filter),

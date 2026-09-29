@@ -394,6 +394,7 @@ class _AylaDirectoryFiltersState extends State<AylaDirectoryFilters> {
     // ═══════════════ 窄屏（≤768）：无圆角顶栏 ═══════════════
     if (widget.narrow) {
       return AylaRevealItem(
+        fadeGlass: false,
         // animation: auroraqua-panel-from-top（0 -20px → 0,0）
         offset: const Offset(0, -20),
         child: AylaGlassSurface(

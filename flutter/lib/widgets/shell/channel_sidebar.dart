@@ -564,6 +564,7 @@ class _AylaChannelSidebarState extends State<AylaChannelSidebar>
         );
       },
       child: AylaRevealItem(
+        fadeGlass: false,
         // ⚠️ **key 必须带 groupId**（2026-09-29 用户第三次实报：「切换群时第二列侧栏只看到
         // 前一个页面的向左淡出，没有后一个群的侧栏淡入」）：
         // web 里面板是 `AnimatePresence` 的**直接子元素**且带 `key={groupId}`

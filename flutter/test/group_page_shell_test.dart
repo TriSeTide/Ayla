@@ -70,6 +70,21 @@ Future<({ProviderContainer container, GoRouter router})> pumpApp(
   return (container: container, router: router);
 }
 
+/// 目标子树所属 `AylaRevealItem` **自己那一层**的 `Opacity` 取值。
+///
+/// `AylaRevealItem` 的结构是 `AnimatedBuilder > Opacity > Transform.translate`
+/// ⇒ reveal 内**第一个** `Opacity` 就是它自己的（内层 `AylaPanelSwap` 等在其之后）。
+double revealLayerOpacity(WidgetTester tester, Finder target) {
+  final Finder item = find
+      .ancestor(of: target, matching: find.byType(AylaRevealItem))
+      .first;
+  return tester
+      .widget<Opacity>(
+        find.descendant(of: item, matching: find.byType(Opacity)).first,
+      )
+      .opacity;
+}
+
 /// 群内容区（`GroupChatPage`）**祖辈**的最小不透明度。
 ///
 /// `1.0` = 内容整体可见；`0` = 内容不在场或被整层淡出。只取祖辈 ⇒ 子件自己的入场动画
@@ -88,23 +103,11 @@ double contentAreaOpacity(WidgetTester tester) {
   return min;
 }
 
-/// 群聊**消息区**（`AylaMessageList`）祖辈的最小不透明度。
-///
-/// `AylaRevealItem` = `Opacity > Transform.translate`，两者都在祖辈 ⇒
-/// `getRect` 读到的已含位移、本函数读到淡入值。
-double messageAreaOpacity(WidgetTester tester) {
-  final Iterable<Element> found = find.byType(AylaMessageList).evaluate();
-  if (found.isEmpty) return 0;
-  double min = 1;
-  found.first.visitAncestorElements((Element a) {
-    final Widget w = a.widget;
-    if (w is FadeTransition) min = math.min(min, w.opacity.value);
-    if (w is Opacity) min = math.min(min, w.opacity);
-    if (w is AnimatedOpacity) min = math.min(min, w.opacity);
-    return true;
-  });
-  return min;
-}
+// ⚠️ 这里原有一个 `messageAreaOpacity()`（取 `AylaMessageList` 祖辈最小不透明度）。
+// 2026-09-29 的 Impeller 修复后，消息区（玻璃子树）的 `AylaRevealItem` 走**玻璃档**、
+// 整层 opacity 恒 1.0（见 `lib/widgets/base/reveal.dart` 文件头）⇒ 该探针恒读 1.0、
+// 失去判据价值，已删除；消息区入场改由**位移**锁住（原 `Opacity > Transform.translate`
+// 里的 `Transform` 仍在，位移判据不受影响）。
 
 void main() {
   group('宽屏：切群保留壳与侧栏（实报 ①）', () {
@@ -235,18 +238,27 @@ void main() {
         matching: find.text('聊天'),
       );
       expect(row, findsOneWidget);
-      double revealOpacity() => tester
-          .widget<Opacity>(
+      // ⚠️ 判据用**位移**、不用 `Opacity`：新面板 `_ChannelSidebarPanel` 自身是玻璃件
+      // （`channel_sidebar.dart:1140` 的 `AylaGlassSurface`）⇒ `AylaRevealItem` 对含
+      // `BackdropFilter` 的子树**不再做整层淡入**（Impeller 会拒绝「`Opacity` 祖先 +
+      // `BackdropFilter`」并刷屏；依据与处置见 `lib/widgets/base/reveal.dart` 文件头）
+      // —— 该子树里的 `Opacity` 恒为 1.0，只有位移还随入场推进。
+      //
+      // 位移与入场进度同源：`offset.dx * (1 − t)`，左入起点 −20 / 终点 0
+      // ⇒ 与原判据等价（`opacity < 0.9` ⇔ `t < 0.9` ⇔ 位移 < −2）。
+      double revealTranslateX() => tester
+          .widget<Transform>(
             find
                 .descendant(
                   of: find
                       .ancestor(of: row, matching: find.byType(AylaRevealItem))
                       .last,
-                  matching: find.byType(Opacity),
+                  matching: find.byType(Transform),
                 )
                 .first,
           )
-          .opacity;
+          .transform
+          .storage[12]; // Matrix4 的平移 x（列主序）
 
       app.router.go('/group/g2');
       // 退场 300ms（旧面板 x −20 + 淡出）走完后再采样：此刻新面板应处于**入场起点**。
@@ -254,12 +266,16 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
       }
       expect(
-        revealOpacity(),
-        lessThan(0.9),
+        revealTranslateX(),
+        lessThan(-2.0),
         reason: '新群侧栏直接到位（没有入场）—— 用户实报「没有后一个群的侧栏淡入」',
       );
       await tester.pumpAndSettle();
-      expect(revealOpacity(), 1.0, reason: '入场应能正常走到终点');
+      expect(
+        revealTranslateX(),
+        moreOrLessEquals(0.0, epsilon: 0.001),
+        reason: '入场应能正常走到终点',
+      );
       expect(tester.takeException(), isNull);
     });
     testWidgets('切群：群内容区**不得整体淡出**（web 宿主变体全空 = 当帧切换）', (
@@ -344,7 +360,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('进场从下方 20px 上滑 + 淡入（GroupChat.tsx:326–333）', (WidgetTester tester) async {
+    testWidgets('进场从下方 20px 上滑（玻璃档只位移不淡入；GroupChat.tsx:326–333）', (WidgetTester tester) async {
       final ({ProviderContainer container, GoRouter router}) app =
           await pumpApp(tester, const Size(1440, 900));
       app.router.go('/group/g1');
@@ -353,17 +369,6 @@ void main() {
 
       expect(find.byType(AylaMessageInput), findsOneWidget);
       final Rect early = tester.getRect(find.byType(AylaMessageInput));
-      // ⚠️ 取**祖辈最小不透明度**：2026-09-29 子群换场轮给输入区又加了一层
-      // `AylaPanelSwap`（静止态 opacity 1）⇒ 「第一个 Opacity 祖先」会读到静止层。
-      double earlyOpacity = 1;
-      for (final Element e in find
-          .ancestor(
-            of: find.byType(AylaMessageInput),
-            matching: find.byType(Opacity),
-          )
-          .evaluate()) {
-        earlyOpacity = math.min(earlyOpacity, (e.widget as Opacity).opacity);
-      }
       await tester.pumpAndSettle();
       final Rect settled = tester.getRect(find.byType(AylaMessageInput));
 
@@ -372,37 +377,56 @@ void main() {
         greaterThan(5),
         reason: '入场首帧应带正下方位移（+20 → 0），实测 ${early.top - settled.top}',
       );
-      expect(earlyOpacity, lessThan(0.9), reason: '入场应从 opacity 0 淡入');
+      // ⚠️ 入场断言由「`opacity` 中间态」改为**位移 + 玻璃档 opacity 恒 1.0**：
+      // 输入区是玻璃（`.composer` → `AylaGlassSurface`）⇒ 调用点传了
+      // `fadeGlass: false`（`group_chat_page.dart` 的输入区 reveal）⇒ 整层 opacity
+      // 恒 1.0、**不推 opacity**（Impeller 拒绝「`Opacity` 祖先 + `BackdropFilter`」并刷屏，
+      // 处置与依据见 `lib/widgets/base/reveal.dart` 文件头）。位移判据（上一行）
+      // 仍然锁住「入场发生了」，本行锁住「玻璃档没在推 opacity」。
+      // 若将来改成「玻璃件自己接收父级 alpha」（13 号 §6.2 末条，需用户裁决），
+      // 这条断言可按当时口径恢复为「中间态 < 0.9」。
+      expect(
+        revealLayerOpacity(tester, find.byType(AylaMessageInput)),
+        1.0,
+        reason: '玻璃子树不得走整层淡入（Impeller 会拒绝并刷屏）',
+      );
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('消息区入场：x +20 → 0 + 淡入，切场景回聊天会重播（GroupChat.tsx:288–294）', (
+    testWidgets('消息区入场：x +20 → 0（玻璃档只位移），切场景回聊天会重播（GroupChat.tsx:288–294）', (
       WidgetTester tester,
     ) async {
       final ({ProviderContainer container, GoRouter router}) app =
           await pumpApp(tester, const Size(1440, 900));
 
-      Future<({double dx, double opacity})> sample() async {
+      Future<double> sampleDx() async {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 16));
         expect(find.byType(AylaMessageList), findsOneWidget);
         final Rect early = tester.getRect(find.byType(AylaMessageList));
-        final double o = messageAreaOpacity(tester);
         await tester.pumpAndSettle();
         final Rect settled = tester.getRect(find.byType(AylaMessageList));
-        return (dx: early.left - settled.left, opacity: o);
+        return early.left - settled.left;
       }
 
       app.router.go('/group/g1'); // 进群（聊天场景）
-      final ({double dx, double opacity}) first = await sample();
-      expect(first.dx, greaterThan(5), reason: '消息区进场应带 +20 右向位移，实测 ${first.dx}');
-      expect(first.opacity, lessThan(0.9), reason: '消息区进场应从 opacity 0 淡入');
+      final double first = await sampleDx();
+      expect(first, greaterThan(5), reason: '消息区进场应带 +20 右向位移，实测 $first');
+      // 消息区同样是玻璃子树（气泡 `.bubble-other` blur12）⇒ `group_chat_page.dart`
+      // 的 reveal 传了 `fadeGlass: false`：整层 opacity 恒 1.0、不推 opacity
+      // （原因见 `lib/widgets/base/reveal.dart` 文件头）。
+      expect(
+        revealLayerOpacity(tester, find.byType(AylaMessageList)),
+        1.0,
+        reason: '玻璃子树不得走整层淡入（Impeller 会拒绝并刷屏）',
+      );
 
       app.router.go('/group/g1/voice'); // 切到语音场景
       await tester.pumpAndSettle();
       app.router.go('/group/g1'); // 切回聊天 ⇒ 应重播
-      final ({double dx, double opacity}) again = await sample();
-      expect(again.dx, greaterThan(5), reason: '切回聊天未重播消息区入场，实测 ${again.dx}');
+      final double again = await sampleDx();
+      expect(again, greaterThan(5), reason: '切回聊天未重播消息区入场，实测 $again');
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('≤768：无外边距（app.css:3206 只改内距）', (WidgetTester tester) async {

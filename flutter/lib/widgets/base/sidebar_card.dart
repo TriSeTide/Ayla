@@ -140,6 +140,7 @@ class AylaSidebarCard extends StatelessWidget {
 
     if (!enter) return card;
     return AylaRevealItem(
+      fadeGlass: false,
       offset: enterOffset,
       duration: enterDuration,
       curve: AylaCurves.auroraquaEaseOut,

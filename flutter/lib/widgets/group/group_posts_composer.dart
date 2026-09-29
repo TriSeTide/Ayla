@@ -280,6 +280,7 @@ class _AylaGroupPostsComposerState extends State<AylaGroupPostsComposer> {
     );
 
     return AylaRevealItem(
+      fadeGlass: false,
       key: ValueKey<bool>(expanded),
       offset: const Offset(0, 20), // translateY(20px) → 0
       duration: expanded

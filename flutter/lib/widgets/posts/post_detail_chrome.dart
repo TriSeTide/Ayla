@@ -165,6 +165,7 @@ class AylaPostDetailChrome extends StatelessWidget {
       );
     }
     head = AylaRevealItem(
+      fadeGlass: false,
       enabled: !reduced,
       offset: const Offset(0, -20), // panel-from-top（0,−20 → 0）
       duration: AylaDurations.auroraqua,
@@ -199,6 +200,7 @@ class AylaPostDetailChrome extends StatelessWidget {
           visible: !editing,
           inert: editing,
           child: AylaRevealItem(
+            fadeGlass: false,
             enabled: !reduced,
             offset: const Offset(0, 20), // panel-from-bottom（0,+20 → 0）
             duration: AylaDurations.auroraqua,

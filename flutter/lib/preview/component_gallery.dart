@@ -4733,6 +4733,7 @@ class _DirectoryPageDemo extends StatelessWidget {
                   ),
           ),
           content: AylaDirectoryContent(
+            fadeGlass: false,
             label: '全部',
             child: const AylaPageState(
               title: '这个分类还没有收藏',

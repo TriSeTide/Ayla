@@ -419,6 +419,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                                 // 正是 `/profile` 在 web 上的真实观感：整页 panelOwned（不位移），
                                 // 但两列各自沿方向滑入。
                                 AylaRevealItem(
+                                  fadeGlass: false,
                                   offset: const Offset(-20, 0),
                                   duration: AylaDurations.auroraqua,
                                   curve: AylaCurves.auroraquaEaseOut,
@@ -436,6 +437,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                                 // （`RenderBox was not laid out` / Expanded 找不到 Flex 祖先）。
                                 Expanded(
                                   child: AylaRevealItem(
+                                    fadeGlass: false,
                                     offset: const Offset(20, 0),
                                     duration: AylaDurations.auroraqua,
                                     curve: AylaCurves.auroraquaEaseOut,
