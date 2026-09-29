@@ -31,6 +31,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/boardgame_api.dart';
+import '../core/models/game_room.dart' show AylaGameRoom;
+import '../state/directory_events.dart';
+import '../state/room_providers.dart';
+import 'game_support.dart';
 import '../core/models/visibility.dart' show AylaPostVisibility;
 import '../state/auth_state.dart';
 import '../state/favorite_status.dart';
@@ -48,10 +52,16 @@ import '../widgets/game/games_grid.dart';
 import 'hub_support.dart';
 
 class GamesHubPage extends ConsumerStatefulWidget {
-  const GamesHubPage({super.key, this.initialType});
+  const GamesHubPage({super.key, this.initialType, this.roomId});
 
   /// ?type=（路由读取；null / 未知值 = 全部）。
   final String? initialType;
+
+  /// 房内态房间 id（路由 `/games/:roomId`；null = 大厅）。
+  ///
+  /// web 的 `/games` 与 `/games/:roomId` **是同一个组件**（`App.tsx:78–79`），
+  /// 由 `useParams().roomId` 分支渲染；Flutter 侧同法（本参数即 `useParams` 的等价物）。
+  final String? roomId;
 
   /// 六个分类（tsx 27–35，逐字）。
   static const List<({String key, String label})> filters =
@@ -82,12 +92,63 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
 
+  /// 目录热更新事件总线（`boardgame.room.*` 帧；见 `state/directory_events.dart`）。
+  AylaDirectoryEvents? _directoryEvents;
+  int _directoryEventRevision = 0;
+
   @override
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
     _start();
     _loadFriends();
+    _registerDirectoryEvents();
+  }
+
+  /// 订阅目录事件（`boardgame.room.deleted` → 移除；`created/updated` → 重取首页）。
+  void _registerDirectoryEvents() {
+    final AylaDirectoryEvents events = ref.read(directoryEventsProvider);
+    _directoryEvents = events;
+    _directoryEventRevision = events.revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      events.addListener(_onDirectoryEvents);
+    });
+  }
+
+  void _onDirectoryEvents() {
+    final AylaDirectoryEvents? events = _directoryEvents;
+    if (events == null || events.revision == _directoryEventRevision) return;
+    _directoryEventRevision = events.revision;
+    final AylaDirectoryEvent? event = events.last;
+    if (event == null || event.kind != AylaDirectoryKind.game) return;
+    final AylaPagedList<AylaDirectoryGameEntry>? pager = _pager;
+    if (pager == null) return;
+    if (event.deleted) {
+      pager.removeWhere(
+        (AylaDirectoryGameEntry entry) => '${entry.room.id}' == event.id,
+      );
+      return;
+    }
+    unawaited(pager.refresh());
+  }
+
+  /// 大厅列表里已知的房间（web tsx 127–129：命中则不重复拉详情）。
+  AylaGameRoom? _knownRoom(String roomId) {
+    final int? id = int.tryParse(roomId);
+    if (id == null) return null;
+    for (final AylaDirectoryGameEntry entry
+        in _pager?.items ?? const <AylaDirectoryGameEntry>[]) {
+      if (entry.room.id == id) return entry.room;
+    }
+    return null;
+  }
+
+  /// 退出房内（离开/删除/返回都汇到这里；web tsx 142–145）。
+  void _exitRoom() {
+    if (!mounted) return;
+    context.go('/games');
+    unawaited(_pager?.refresh() ?? Future<void>.value());
   }
 
   @override
@@ -105,6 +166,8 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
 
   @override
   void dispose() {
+    _directoryEvents?.removeListener(_onDirectoryEvents);
+    _directoryEvents = null;
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
@@ -223,6 +286,16 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 房内态（web tsx 105–164）：大厅的取数与列表保留在下方分支。
+    final String? roomId = widget.roomId;
+    if (roomId != null) {
+      return AylaGameRoomHost(
+        key: ValueKey<String>(roomId),
+        roomId: roomId,
+        initialRoom: _knownRoom(roomId),
+        onExit: _exitRoom,
+      );
+    }
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaPagedList<AylaDirectoryGameEntry>? pager = _pager;
 

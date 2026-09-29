@@ -538,3 +538,79 @@ class _Stage extends StatelessWidget {
     );
   }
 }
+
+/// `live-studio-empty` —— 控制台空态（web `LiveStudioPage.tsx:118–135` +
+/// `live.css:148–159`）。
+///
+/// 逐条：column / center / gap `sp2` / `height 100%` / `padding sp4` /
+/// `text-align center`；标题 = Display **20** + `--text-primary`（web 只声明
+/// `font-family` + `font-size` ⇒ 字重/行高**继承 body**）；描述 = 13 +
+/// `--text-secondary`；按钮 = `.btn.btn-glow`「创建直播间」（复用库内
+/// `AylaGlassButton` 的 glow 档）。
+///
+/// 落在组件层（而不是页面内联）的理由：它是**可被画布样张引用的视觉件**（与
+/// `AylaMyPostsHead` / `AylaPostsSkeleton` 同口径）—— 画布与冒烟测试都从
+/// `lib/widgets/**` 取样张，页面文件不进画布依赖。
+class AylaStudioEmpty extends StatelessWidget {
+  const AylaStudioEmpty({
+    super.key,
+    this.onCreateNewChannel,
+    this.creating = false,
+  });
+
+  final VoidCallback? onCreateNewChannel;
+  final bool creating;
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(AylaSpacing.sp4),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        spacing: AylaSpacing.sp2,
+        children: <Widget>[
+          Text(
+            '暂无直播间',
+            textAlign: TextAlign.center,
+            style: t.cardTitle.copyWith(
+              fontWeight: FontWeight.w400,
+              color: AylaColors.textPrimary,
+            ),
+          ),
+          Text(
+            '创建你的第一个直播间，开始推流吧',
+            textAlign: TextAlign.center,
+            style: t.body.copyWith(
+              fontSize: 13,
+              color: AylaColors.textSecondary,
+            ),
+          ),
+          AylaGlassButton(
+            label: '创建直播间',
+            variant: AylaGlassButtonVariant.glow,
+            onPressed: creating ? null : onCreateNewChannel,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// `AylaStudioEmpty` 样张（画布节用；两档 = 默认 / 创建中）。
+Widget aylaStudioEmptySamples() => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+  mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        SizedBox(
+          height: 260,
+          child: AylaStudioEmpty(onCreateNewChannel: () {}),
+        ),
+        const SizedBox(height: AylaSpacing.sp3),
+        SizedBox(
+          height: 260,
+          child: AylaStudioEmpty(creating: true, onCreateNewChannel: () {}),
+        ),
+      ],
+    );

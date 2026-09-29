@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/models/chat_message.dart';
 import '../lib/core/models/conversation.dart';
 import '../lib/core/ws/chat_ws.dart';
+import '../lib/core/ws/room_frames.dart' show kAylaRoomFramesTurnedOn;
 import '../lib/state/badges_state.dart';
 import '../lib/state/chat_state.dart';
 import '../lib/state/message_state.dart';
@@ -291,18 +292,38 @@ void main() {
       expect(h.sent.first['type'], 'subscribe');
     });
 
-    test('域外帧（23 条）→ 不抛错、不改状态、仍广播给 onFrame', () {
+    test('域外帧（11 条）→ chat 客户端不抛错、不改状态、仍广播给 onFrame', () {
+      // 2026-09-28（房内页批次）订正：原 23 条里 **12 条已转正**（voice.channel.* 4 +
+      // live.channel.* 4 + live.viewers.changed 1 + boardgame.room.* 3），由
+      // `core/ws/room_frames.dart` 的 `AylaRoomDirectoryBridge` 挂 onFrame 承接 ⇒
+      // 本文件只对**仍域外**的 11 条断言（chat 客户端对它们仍是 no-op + 透传）。
       final _Harness h = _Harness();
       final List<String> seen = <String>[];
       h.client.onFrame((Map<String, dynamic> f) => seen.add('${f['type']}'));
-      expect(kAylaChatWsOutOfBatchFrames.length, 23);
+      expect(kAylaChatWsOutOfBatchFrames.length, 11);
       for (final String type in kAylaChatWsOutOfBatchFrames) {
         h.client.debugHandleFrame(<String, dynamic>{
           'type': type,
           'data': <String, dynamic>{},
         });
       }
-      expect(seen.length, 23);
+      expect(seen.length, 11);
+      expect(h.message.buckets, isEmpty);
+      expect(h.notices.notices, isEmpty);
+    });
+
+    test('转正 12 条：chat 客户端不改状态，但**照样广播给 onFrame**（桥的入口）', () {
+      final _Harness h = _Harness();
+      final List<String> seen = <String>[];
+      h.client.onFrame((Map<String, dynamic> f) => seen.add('${f['type']}'));
+      for (final String type in kAylaRoomFramesTurnedOn) {
+        h.client.debugHandleFrame(<String, dynamic>{
+          'type': type,
+          'data': <String, dynamic>{'channel_id': 'v1'},
+        });
+      }
+      expect(kAylaRoomFramesTurnedOn.length, 12);
+      expect(seen.length, 12, reason: '桥靠 onFrame 接帧 ⇒ 必须仍然透传');
       expect(h.message.buckets, isEmpty);
       expect(h.notices.notices, isEmpty);
     });

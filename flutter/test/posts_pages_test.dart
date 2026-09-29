@@ -12,7 +12,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/models/post.dart';
-import '../lib/core/models/visibility.dart';
 import '../lib/pages/hub_support.dart';
 import '../lib/pages/my_posts_page.dart';
 import '../lib/pages/post_detail_page.dart';
@@ -232,7 +231,7 @@ void main() {
           of: find.byType(AylaMyPostsHead),
           matching: find.byWidgetPredicate((Widget w) {
             if (w is! DecoratedBox) return false;
-            final Decoration? d = w.decoration;
+            final Decoration d = w.decoration;
             if (d is! BoxDecoration) return false;
             final BoxBorder? border = d.border;
             if (border is! Border) return false;

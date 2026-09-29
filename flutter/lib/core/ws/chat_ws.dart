@@ -11,17 +11,15 @@
 /// | [onFrame] | `chat.ts:952–955`（页面级监听：typing / 认证消息刷新 / 评论帧） |
 ///
 /// ## 41 个接收 case 的对账（**缺席即缺席**）
-/// 本批（消息域）**实装 18 条**：`message.new` · `message.recall` · `message.poke` · `message.read` ·
-/// `typing` · `history.sync` · `chat.subscribed` · `pong` · `error` · `elysia.reply` ·
-/// `group.request.new` · `group.request.resolved` · `group.invite.new` · `friend.request.new` ·
-/// `friend.request.resolved` · `group.member.left` · `group.created` · `group.joined`。
-///
-/// **其余 23 条**由各自域批次承接（本批**不静默吞掉**——见 [kAylaChatWsOutOfBatchFrames] 的显式登记）：
-/// `subgroup.*`(4) 属群聊子群域 · `voice.channel.*`(4) 属语音域 · `live.channel.*` + `live.viewers.changed`(5)
-/// 属直播域 · `post.*`(4) + `comment.*`(2) 属帖子域 · `boardgame.room.*`(3) 属桌游域 ·
-/// `favorite.changed`(1)：**帖子档**需 posts store（未建）；**其余类型**需一个**跨页共享**的收藏状态缓存 ——
-/// 本库 `AylaFavoriteStatusController` 目前是**每页实例**（`voice_hub_page.dart:77` 等）⇒ 单点广播接不进去，
-/// 两个分支都留到「收藏状态收敛轮」，不在本批留半截接线。
+/// - **消息域批次实装 18 条**：`message.new` · `message.recall` · `message.poke` · `message.read` ·
+///   `typing` · `history.sync` · `chat.subscribed` · `pong` · `error` · `elysia.reply` ·
+///   `group.request.new` · `group.request.resolved` · `group.invite.new` · `friend.request.new` ·
+///   `friend.request.resolved` · `group.member.left` · `group.created` · `group.joined`；
+/// - **房内页批次转正 12 条**（2026-09-28）：`voice.channel.*`(4) · `live.channel.*`(4) ·
+///   `live.viewers.changed`(1) · `boardgame.room.*`(3) —— 由 `core/ws/room_frames.dart` 的
+///   [AylaRoomDirectoryBridge] 承接（挂在本类的 `onFrame` 上；**帧仍然流经 [onFrame] 的监听者**，
+///   页面可另按需订阅）。
+/// - **仍域外 11 条**：见 [kAylaChatWsOutOfBatchFrames] 的显式登记（不静默吞掉）。
 ///
 /// ## 平台差异（登记）
 /// - `isSubgroupMessageConfirmedRead`（子群已读确认）随子群域批次；本批私聊无子群概念 ⇒
@@ -46,30 +44,25 @@ import '../api/chat_api.dart';
 import '../net/dio_client.dart' show ApiException;
 import 'ws_manager.dart';
 
-/// 23 条**不属本批**的接收帧（见文件头对账；显式登记，避免「静默吞掉」被读成已实现）。
+/// **仍不属本批**的接收帧（见文件头对账；显式登记，避免「静默吞掉」被读成已实现）。
+///
+/// 2026-09-28（房内页批次）从原 23 条中**转正 12 条**，由
+/// `core/ws/room_frames.dart` 的 [AylaRoomDirectoryBridge] 承接（语音 4 + 直播 5 + 桌游 3，
+/// 事实源逐个见该文件的对账表），故此处只剩 **11 条**：
+/// `subgroup.*`(4) 属群聊子群域 · `post.*`(4) + `comment.*`(2) 属帖子域 ·
+/// `favorite.changed`(1) 需一个**跨页共享**的收藏状态缓存（库内 `AylaFavoriteStatusController`
+/// 目前是每页实例 ⇒ 单点广播接不进去，属「收藏状态收敛轮」）。
 const List<String> kAylaChatWsOutOfBatchFrames = <String>[
   'subgroup.created',
   'subgroup.updated',
   'subgroup.deleted',
   'subgroup.read',
-  'voice.channel.created',
-  'voice.channel.deleted',
-  'voice.channel.member_count_changed',
-  'voice.channel.updated',
-  'live.channel.created',
-  'live.channel.status.changed',
-  'live.channel.deleted',
-  'live.channel.updated',
-  'live.viewers.changed',
   'post.created',
   'post.deleted',
   'post.updated',
   'post.viewed',
   'comment.created',
   'comment.deleted',
-  'boardgame.room.created',
-  'boardgame.room.deleted',
-  'boardgame.room.updated',
   'favorite.changed',
 ];
 
@@ -487,7 +480,7 @@ class AylaChatWsClient {
       case 'error':
         break; // 连接层回执 / 服务端错误：web 同为 no-op
       default:
-        // 本批之外的 22 条（见 kAylaChatWsOutOfBatchFrames）：显式忽略，不猜测语义。
+        // 仍域外的帧（见 kAylaChatWsOutOfBatchFrames）：显式忽略，不猜测语义。
         break;
     }
     for (final AylaChatFrameHandler handler in _handlers.toList(growable: false)) {

@@ -8,12 +8,17 @@
 ///
 /// ⚠️ web 的 createGameRoom / deleteGameRoom 会 window.dispatchEvent 通知群桌游页
 /// 刷新（api/boardgame.ts:60–64/77–81）—— 那属建房间批次（CreateFab 接线），本轮不带出。
+///
+/// 2026-09-28（房内页批次）纯增量：补出房内占位界面真正需要的四个口
+/// —— 成员分页 / 房主操作 / 删除 / 创建（`api/boardgame.ts:16–20/90–92/73–81/52–65`）。
 library;
 
-import '../models/game_room.dart' show AylaGameCardData, AylaGameRoom;
+import '../models/game_room.dart'
+    show AylaGameCardData, AylaGameRoom, AylaGameRoomMember;
 import '../models/visibility.dart' show AylaPostVisibility;
 import '../net/dio_client.dart';
 import 'directory_page.dart';
+import 'media_page.dart';
 
 /// 桌游目录条目（卡投影 + 房内完整房间 + 「我的」过滤事实）。
 class AylaDirectoryGameEntry {
@@ -104,5 +109,74 @@ class AylaBoardgameApi {
   static Future<void> leaveGameRoom(int roomId) async {
     await DioClient.instance
         .post<Map<String, dynamic>>('/boardgame/rooms/$roomId:leave/');
+  }
+
+  /// `GET /boardgame/rooms/<id>/members/` —— 成员**可见**分页（`limit 20`；房主管理面板用）。
+  ///
+  /// web `api/boardgame.ts:16–20` 的 `listGameRoomMembersPage`（`GameRoomPlaceholder`
+  /// 的 `usePagedMediaList` 数据源）。
+  static Future<AylaMediaCursorPage<AylaGameRoomMember>> listGameRoomMembersPage(
+    int roomId, {
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+      if (cursor != null) 'cursor': cursor,
+    };
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>(
+      '/boardgame/rooms/$roomId/members/',
+      query: query,
+    );
+    final AylaMediaCursorPage<AylaGameRoomMember>? page =
+        AylaMediaCursorPage.parse<AylaGameRoomMember>(
+      resp,
+      AylaGameRoomMember.fromJson,
+    );
+    if (page == null) throw const ApiException(0, '成员分页响应结构非法');
+    return page;
+  }
+
+  /// `POST /boardgame/rooms/<id>/members/<uid>/action/` —— 房主操作（`kick` / `transfer`）。
+  static Future<void> actionGameMember(
+    int roomId,
+    String userId,
+    String action,
+  ) async {
+    await DioClient.instance.post<Map<String, dynamic>>(
+      '/boardgame/rooms/$roomId/members/${Uri.encodeComponent(userId)}/action/',
+      body: <String, dynamic>{'action': action},
+    );
+  }
+
+  /// `DELETE /boardgame/rooms/<id>/` —— 删除（仅房主；web `api/boardgame.ts:73–81`）。
+  static Future<void> deleteGameRoom(int roomId) async {
+    await DioClient.instance
+        .delete<Map<String, dynamic>>('/boardgame/rooms/$roomId/');
+  }
+
+  /// `POST /boardgame/rooms/` —— 创建房间（`GameRoomCreate` 表单的提交口）。
+  ///
+  /// ⚠️ web 侧创建/删除会 `window.dispatchEvent` 通知群桌游页刷新；Flutter 侧群桌游页
+  /// 属群内五场景批次，本层不带该通知（创建方自己刷新自己的列表）。
+  static Future<AylaGameRoom> createGameRoom({
+    required String name,
+    String? group,
+    AylaPostVisibility? visibility,
+    String? gameType,
+    List<String>? allowedGroupIds,
+  }) async {
+    final Map<String, dynamic> body = <String, dynamic>{'name': name};
+    if (group != null) body['group'] = group;
+    if (visibility != null) body['visibility'] = visibility.wire;
+    if (gameType != null) body['game_type'] = gameType;
+    if (allowedGroupIds != null) body['allowed_group_ids'] = allowedGroupIds;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .post<Map<String, dynamic>>('/boardgame/rooms/', body: body);
+    final AylaGameRoom? room = AylaGameRoom.fromJson(resp);
+    if (room == null) throw const ApiException(0, '创建房间响应结构非法');
+    return room;
   }
 }

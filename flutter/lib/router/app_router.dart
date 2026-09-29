@@ -33,6 +33,8 @@ import '../pages/messages_page.dart';
 import '../pages/home_page.dart';
 import '../pages/my_posts_page.dart';
 import '../pages/live_hub_page.dart';
+import '../pages/live_room_page.dart';
+import '../pages/live_studio_page.dart';
 import '../pages/login_route.dart';
 import '../pages/pending_page.dart';
 import '../pages/post_detail_page.dart';
@@ -133,7 +135,17 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: VoiceHubPage(initialType: s.uri.queryParameters['type']),
             ),
           ),
-          GoRoute(path: '/voice/:channelId', pageBuilder: (c, s) => _pending(path: '/voice/:channelId', webSource: 'App.tsx:71 → VoiceHubPage（房内态，第 3 批）')),
+          // ⚠️ 与 `/voice` **同一个组件**（web `App.tsx:70–71`），由 `channelId` 分支渲染；
+          // 房内宿主按 channelId 重建 ⇒ 切房即重建会话（web `lastJoinRouteRef` 的等价物）。
+          GoRoute(
+            path: '/voice/:channelId',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: VoiceHubPage(
+                channelId: s.pathParameters['channelId'],
+              ),
+            ),
+          ),
           GoRoute(
             path: '/live',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
@@ -141,8 +153,24 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             ),
           ),
           // ⚠️ 段数不同（3 vs 2），与 `/live/:channelId` 不冲突
-          GoRoute(path: '/live/start/:channelId', pageBuilder: (c, s) => _pending(path: '/live/start/:channelId', webSource: 'App.tsx:73 → LiveStudioPage')),
-          GoRoute(path: '/live/:channelId', pageBuilder: (c, s) => _pending(path: '/live/:channelId', webSource: 'App.tsx:74 → LiveRoomPage（房内态，第 3 批）')),
+          GoRoute(
+            path: '/live/start/:channelId',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: LiveStudioPage(
+                channelId: s.pathParameters['channelId'] ?? '',
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/live/:channelId',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: LiveRoomPage(
+                channelId: s.pathParameters['channelId'] ?? '',
+              ),
+            ),
+          ),
           // 第 3 批：帖子域（一级 tab + 我的 + 他人 + 详情）
           GoRoute(
             path: '/posts',
@@ -173,7 +201,14 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: GamesHubPage(initialType: s.uri.queryParameters['type']),
             ),
           ),
-          GoRoute(path: '/games/:roomId', pageBuilder: (c, s) => _pending(path: '/games/:roomId', webSource: 'App.tsx:79 → GamesHubPage（房内占位，第 3 批）')),
+          // 房内占位：与 `/games` 同一组件（web `App.tsx:78–79`），由 roomId 分支渲染。
+          GoRoute(
+            path: '/games/:roomId',
+            pageBuilder: (BuildContext c, GoRouterState s) =>
+                NoTransitionPage<void>(
+              child: GamesHubPage(roomId: s.pathParameters['roomId']),
+            ),
+          ),
           // 第 4 批：消息域（窄屏三 tab / 宽屏两列）
           GoRoute(
             path: '/messages',

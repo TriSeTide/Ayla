@@ -47,14 +47,23 @@ import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart';
+import '../state/directory_events.dart';
+import '../state/room_providers.dart';
 import '../widgets/voice/voice_channels.dart';
 import 'hub_support.dart';
+import 'voice_support.dart';
 
 class VoiceHubPage extends ConsumerStatefulWidget {
-  const VoiceHubPage({super.key, this.initialType});
+  const VoiceHubPage({super.key, this.initialType, this.channelId});
 
   /// `?type=`（路由读取；null / 未知值 = 全部）。
   final String? initialType;
+
+  /// 房内态频道 id（路由 `/voice/:channelId`；null = 大厅）。
+  ///
+  /// web 的 `/voice` 与 `/voice/:channelId` **是同一个组件**（`App.tsx:70–71`），
+  /// 由 `useParams().channelId` 分支渲染；Flutter 侧同法（本参数即 `useParams` 的等价物）。
+  final String? channelId;
 
   /// 五个分类（tsx 35–41，逐字）。
   static const List<({String key, String label})> filters =
@@ -83,6 +92,10 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   /// 刷新后整批重播入场（web `replayNonce`）。
   int _replayNonce = 0;
 
+  /// 目录热更新事件总线（`voice.channel.*` 帧；见 `state/directory_events.dart`）。
+  AylaDirectoryEvents? _directoryEvents;
+  int _directoryEventRevision = 0;
+
   /// 当前页注册到 shell 的刷新回调（web useShellStore.registerRefresh）。
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
@@ -93,6 +106,50 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
     _favorites.addListener(_onFavoritesChanged);
     _start();
     _loadFriends();
+    _registerDirectoryEvents();
+  }
+
+  /// 订阅目录事件（web `stores/directory.ts` 的跨页缓存热更新；Flutter 用事件总线）。
+  void _registerDirectoryEvents() {
+    final AylaDirectoryEvents events = ref.read(directoryEventsProvider);
+    _directoryEvents = events;
+    _directoryEventRevision = events.revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      events.addListener(_onDirectoryEvents);
+    });
+  }
+
+  /// 目录事件处理（逐条对应 web `chat.ts` 的 voice.channel.* 分支）：
+  /// 删除 → 从列表移除；人数 → 就地换卡上的人数；其余 → **重取首页**
+  /// （web 是置 `invalidated` 由用户点刷新；Flutter 的 `AylaPagedList.invalidated`
+  /// 目前恒 false、无写入面 ⇒ 直接重取首页，登记为有意偏离）。
+  void _onDirectoryEvents() {
+    final AylaDirectoryEvents? events = _directoryEvents;
+    if (events == null || events.revision == _directoryEventRevision) return;
+    _directoryEventRevision = events.revision;
+    final AylaDirectoryEvent? event = events.last;
+    if (event == null || event.kind != AylaDirectoryKind.voice) return;
+    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    if (pager == null) return;
+    if (event.deleted) {
+      pager.removeWhere(
+        (AylaDirectoryVoiceEntry entry) => entry.card.id == event.id,
+      );
+      return;
+    }
+    final int? count = event.memberCount;
+    if (count != null) {
+      pager.setItems(<AylaDirectoryVoiceEntry>[
+        for (final AylaDirectoryVoiceEntry entry in pager.items)
+          if (entry.card.id == event.id)
+            aylaHubVoiceEntryWithMemberCount(entry, count)
+          else
+            entry,
+      ]);
+      return;
+    }
+    unawaited(pager.refresh());
   }
 
   @override
@@ -112,6 +169,8 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
   @override
   void dispose() {
+    _directoryEvents?.removeListener(_onDirectoryEvents);
+    _directoryEvents = null;
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
@@ -143,6 +202,9 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   }
 
   void _start() {
+    // 房内态下**不取大厅数据**（web tsx 64/73 把 `!routeChannelId` 作为
+    // `useDirectoryPage` / `useSocialPage` 的 enabled 参数）。
+    if (widget.channelId != null) return;
     final String? owner = _filter == 'mine'
         ? ref.read(authNotifierProvider).user?.id
         : null;
@@ -165,6 +227,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   }
 
   Future<void> _loadFriends() async {
+    if (widget.channelId != null) return; // 房内态不拉好友集合（同 web 的 enabled 参数）
     final Set<String> ids = await aylaHubFriendIds();
     if (!mounted || ids.isEmpty) return;
     setState(() => _friendIds = ids);
@@ -240,6 +303,15 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 房内态（web tsx 212–260）：大厅的取数与列表**保留在下方分支**，
+    // 房内视图由 [AylaVoiceRoomHost] 独立装配（key 随频道变化重建 ⇒ 切房即重建会话）。
+    final String? channelId = widget.channelId;
+    if (channelId != null) {
+      return AylaVoiceRoomHost(
+        key: ValueKey<String>(channelId),
+        channelId: channelId,
+      );
+    }
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
     final String? currentUserId = ref.watch(

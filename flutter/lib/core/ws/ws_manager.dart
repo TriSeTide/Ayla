@@ -1,4 +1,5 @@
-/// WS 通道管理器骨架（四通道：chat/presence 先通，live/voice 占位）。
+/// WS 通道管理器骨架（四通道：chat / presence / voice 已接线；live 通道由
+/// `core/ws/live_ws.dart` 的 `AylaLiveWsClient` 自理 —— 见下方各字段注释）。
 ///
 /// 连接语义对照 `web/src/ws/chat.ts` + `ws/presence.ts`：
 /// - 路径 `/ws/chat|presence/?token=<jwt>`（AuthMiddlewareStack，JWT query token）
@@ -260,7 +261,6 @@ class WsManager {
           refreshTokens: refreshTokens ?? _noRefresh,
           connectFactory: connectFactory ?? _defaultConnect,
         ),
-        // 占位：M5（voice 应用层成员事实）/ M6（live 房内帧）接入时 enabled=true
         live = WsChannel(
           kind: WsChannelKind.live,
           path: '/ws/live/',
@@ -270,14 +270,21 @@ class WsManager {
           connectFactory: connectFactory ?? _defaultConnect,
           enabled: false,
         ),
+        // 2026-09-28（房内页批次）：voice 应用层通道**启用**。
+        // 路径与心跳按 web `ws/voice.ts:18 / 63`：`/ws/voice/?token=` + **30s** ping
+        // （原占位写的是 presence 的 25s，与 web 不一致 —— 一并订正）。
+        // ⚠️ **live 通道仍占位**：web 的直播弹幕通道路径是 `/ws/live/<channel_id>/`，
+        // **每频道一连接**（`ws/live.ts:62`），不是本类这种固定路径通道 ⇒ 由
+        // `core/ws/live_ws.dart` 的 `AylaLiveWsClient` 自理（含 4401/4404 关闭码语义，
+        // WsChannel 无此档）。本字段保留给「固定路径的直播类通道」将来使用，
+        // 当前不参与任何链路（不静默冒充已接线）。
         voice = WsChannel(
           kind: WsChannelKind.voice,
           path: '/ws/voice/',
-          heartbeatInterval: kPresenceHeartbeat,
+          heartbeatInterval: kChatHeartbeat,
           tokens: tokens,
           refreshTokens: refreshTokens ?? _noRefresh,
           connectFactory: connectFactory ?? _defaultConnect,
-          enabled: false,
         );
 
   static Future<bool> _noRefresh() async => false;

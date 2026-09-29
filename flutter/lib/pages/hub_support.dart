@@ -24,8 +24,116 @@ import '../core/models/post.dart' show AylaPost;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../core/models/visibility.dart' show AylaPostVisibility;
 import '../theme/tokens.dart';
-import '../widgets/live/live_hall.dart' show AylaLiveStatus;
+import '../widgets/live/live_channel_snapshot.dart';
+import '../widgets/live/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
 import '../widgets/base/loading.dart' show AylaSkeleton;
+import '../widgets/voice/voice_channels.dart' show AylaVoiceCardData;
+
+
+/// 语音目录条目换人数（`voice.channel.member_count_changed` 帧 → 列表卡热更新）。
+///
+/// web 在 `useVoiceStore.patchChannel` 里就地改描述符；Flutter 侧的卡与条目都是
+/// `@immutable`（无 `copyWith`）⇒ 由本纯函数按**逐字段搬运**生成新实例，
+/// 不做近似、不改任何既有值（除人数）。
+AylaDirectoryVoiceEntry aylaHubVoiceEntryWithMemberCount(
+  AylaDirectoryVoiceEntry entry,
+  int memberCount,
+) {
+  final AylaVoiceCardData card = entry.card;
+  return AylaDirectoryVoiceEntry(
+    card: AylaVoiceCardData(
+      id: card.id,
+      name: card.name,
+      ownerNickname: card.ownerNickname,
+      memberCount: memberCount,
+      visibility: card.visibility,
+      allowedGroupNames: card.allowedGroupNames,
+      groupName: card.groupName,
+      mine: card.mine,
+    ),
+    ownerId: entry.ownerId,
+    createdAt: entry.createdAt,
+    roomName: entry.roomName,
+    allowedGroupIds: entry.allowedGroupIds,
+  );
+}
+
+/// 直播目录条目换在看人数（`live.viewers.changed` 帧 → 列表卡热更新）。
+///
+/// web `patchChannels` 就地改 `viewer_count`；同 [aylaHubVoiceEntryWithMemberCount]
+/// 的搬运口径（**人数是瞬态投影，不参与排序**）。
+AylaDirectoryLiveEntry aylaHubLiveEntryWithViewerCount(
+  AylaDirectoryLiveEntry entry,
+  int viewerCount,
+) {
+  final AylaLiveCardData card = entry.card;
+  return AylaDirectoryLiveEntry(
+    card: AylaLiveCardData(
+      id: card.id,
+      title: card.title,
+      cover: card.cover,
+      status: card.status,
+      ownerId: card.ownerId,
+      ownerNickname: card.ownerNickname,
+      viewerCount: viewerCount,
+      visibility: card.visibility,
+      allowedGroupNames: card.allowedGroupNames,
+      groupName: card.groupName,
+    ),
+    ownerId: entry.ownerId,
+    isOwner: entry.isOwner,
+    startedAt: entry.startedAt,
+    allowedGroupIds: entry.allowedGroupIds,
+  );
+}
+
+
+/// 直播快照 → 目录条目（控制台把"当前频道更新/新建"同步进侧栏列表时用）。
+///
+/// web 在 `LiveStudioPage.tsx:41–61` 用 `applyOrdered` + `sortLiveChannels`
+/// 把快照写回侧栏；Flutter 侧的侧栏读同一份 `AylaDirectoryLiveEntry` 投影 ⇒ 需要这条
+/// 反向构造（`sortLiveChannels` 的排序在页面层用 `aylaHubSortLive` 表达）。
+AylaDirectoryLiveEntry aylaHubLiveEntryFromSnapshot(
+  AylaLiveChannelSnapshot channel, {
+  required bool isOwner,
+}) =>
+    AylaDirectoryLiveEntry(
+      card: channel.card,
+      ownerId: channel.ownerId,
+      isOwner: isOwner,
+      startedAt: channel.startedAt,
+      endedAt: channel.endedAt,
+      createdAt: channel.createdAt,
+      allowedGroupIds: channel.allowedGroupIds,
+    );
+
+/// 直播间排序（web `utils/sortChannels.ts` 的 `sortLiveChannels`，逐条照排）：
+/// 1. 在播（`status === "live"`）置顶，按 `started_at` 降序；
+/// 2. 曾播（`started_at != null`）但现在未播 → 按 `ended_at` 降序（**下播不回初始位**）；
+/// 3. 从未开播 → 按 `created_at` 降序。
+///
+/// 排序事实源**全是后端持久字段**（无前端计数器 / 无本地时间戳 bump）⇒ 刷新不丢、多端一致
+/// （web 文件头原话）。字符串比较即 ISO 时间比较（与 web 的 `localeCompare` 同语义）。
+List<AylaDirectoryLiveEntry> aylaHubSortLive(
+  List<AylaDirectoryLiveEntry> items,
+) {
+  final List<AylaDirectoryLiveEntry> sorted =
+      List<AylaDirectoryLiveEntry>.of(items);
+  sorted.sort((AylaDirectoryLiveEntry a, AylaDirectoryLiveEntry b) {
+    final bool aLive = a.card.status == AylaLiveStatus.live;
+    final bool bLive = b.card.status == AylaLiveStatus.live;
+    if (aLive != bLive) return aLive ? -1 : 1;
+    if (aLive) {
+      return (b.startedAt ?? '').compareTo(a.startedAt ?? '');
+    }
+    final bool everA = a.startedAt != null;
+    final bool everB = b.startedAt != null;
+    if (everA != everB) return everA ? -1 : 1;
+    if (everA) return (b.endedAt ?? '').compareTo(a.endedAt ?? '');
+    return (b.createdAt ?? '').compareTo(a.createdAt ?? '');
+  });
+  return sorted;
+}
 
 /// `?type=` → 合法分类键（未知/缺省 → `all`；web `VoiceHubPage.tsx:53` 同）。
 String aylaHubFilterOf(List<({String key, String label})> filters, String? raw) {

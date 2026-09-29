@@ -210,6 +210,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaLivePlayer',
     'AylaLiveMiniPlayer',
     'AylaLiveRoomBody',
+    'AylaStudioEmpty',
   ]),
   AylaGalleryCategory('voice', 'voice · 语音域', <String>[
     'AylaVoiceChannelCard',
@@ -1281,6 +1282,19 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   '⇒ Flutter 直接挂 owner（依据已登记在代码注释）；reduced-motion 与 error 两档按 web 关闭。'
                   '点侧栏切台 / 窄屏上滑切台即可看动效；⚠️ 玻璃件外整层 Opacity 在 Impeller 下会被拒 ⇒ 若只见滑入不见淡入属已知环境限制（位移腿已按像素对账）',
               child: aylaLiveRoomBodySamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- 房内页批次（第 5 批；19 号 §十四）：控制台空态 ----------
+            _Section(
+              title:
+                  'AylaStudioEmpty（live.css 148–159 + LiveStudioPage.tsx 118–135）',
+              source:
+                  'column 居中 + gap sp2 + height 100% + padding sp4 + text-align center · '
+                  '标题 Display **20 / w400**（web 只声明 font-family + font-size ⇒ 字重继承 body）+ --text-primary · '
+                  '描述 13 + --text-secondary · 按钮 = .btn.btn-glow「创建直播间」（库内 AylaGlassButton glow 档）· '
+                  '**两档**：默认 / 创建中（按钮禁用）',
+              child: aylaStudioEmptySamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
 

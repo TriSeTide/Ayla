@@ -71,6 +71,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaLiveHostAvatar / AylaLiveStreamAddresses（同批：主播头像 + 推流地址区）',
     'AylaLiveCreate（components/live/LiveCreate.tsx 189 行 + app.css 3401–3477 + live.css 32–33/164–174 + auroraqua.css 502–531）',
     'AylaLiveOwnerPanel（components/live/LiveOwnerPanel.tsx 217 行 + app.css 3831–3843 + live.css 168–180/190–269）',
+    'AylaStudioEmpty（live.css 148–159 + LiveStudioPage.tsx 118–135）',
     'AylaLivePlayer（components/live/LivePlayer.tsx 420 行 + app.css 3517–3636 + live.css 939–1005）',
     'AylaLiveMiniPlayer（components/live/LiveMiniPlayer.tsx 228 行 + live.css 1021–1095）',
     'AylaLiveRoomBody（components/live/LiveRoomBody.tsx 566 行 + live.css 10–29/520–760 + auroraqua.css 202–211/316–321/437–445）',

@@ -24,6 +24,7 @@ import 'preview/component_gallery.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
+import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
@@ -49,11 +50,17 @@ void main() {
       wsManager?.disconnectAll();
       // 消息域：401 过期与显式登出同一套收尾（清订阅/基线/消息与红点状态）。
       aylaStopChatWsForContainer(container);
+      // 房内域：断开 voice/live 两通道 + 解绑目录帧桥 + 清房内状态。
+      aylaStopRoomsForContainer(container);
       auth.clear();
       // 回登录由路由守卫接（`app_router.dart` 的 redirect + refreshListenable）
     },
   );
   initWsManager(tokens: auth);
+  // 房内域目录帧桥：挂在 chat WS 的 onFrame 上（web `chat.ts` 的 voice.channel.* /
+  // live.* / boardgame.room.* 分支 + `stores/directory.ts` 的创建/删除跟踪）。
+  // 与 chat 连接时机解耦：只登记回调，未连时不消费任何帧。
+  aylaStartRoomFrames(container);
 
   runApp(
     UncontrolledProviderScope(
