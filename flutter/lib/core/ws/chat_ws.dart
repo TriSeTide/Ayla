@@ -19,7 +19,10 @@
 ///   `live.viewers.changed`(1) · `boardgame.room.*`(3) —— 由 `core/ws/room_frames.dart` 的
 ///   [AylaRoomDirectoryBridge] 承接（挂在本类的 `onFrame` 上；**帧仍然流经 [onFrame] 的监听者**，
 ///   页面可另按需订阅）。
-/// - **仍域外 11 条**：见 [kAylaChatWsOutOfBatchFrames] 的显式登记（不静默吞掉）。
+/// - **群聊批次再转正 4 条**（2026-09-29）：`subgroup.created` · `subgroup.updated` ·
+///   `subgroup.deleted` · `subgroup.read` —— 直接投影到 `state/subgroup_state.dart`，
+///   同时 `message.new` 补上子群归属（默认组兜底 / 子群未读 / 精确已读确认）。
+/// - **仍域外 7 条**：见 [kAylaChatWsOutOfBatchFrames] 的显式登记（不静默吞掉）。
 ///
 /// ## 平台差异（登记）
 /// - `isSubgroupMessageConfirmedRead`（子群已读确认）随子群域批次；本批私聊无子群概念 ⇒
@@ -36,9 +39,12 @@ import '../../state/chat_state.dart';
 import '../../state/message_state.dart';
 import '../../state/notices_state.dart';
 import '../../state/realtime_state.dart';
+import '../../state/group_providers.dart' show aylaApplySubgroupReadReceipt;
+import '../../state/subgroup_state.dart';
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
 import '../models/share_payload.dart';
+import '../models/subgroup.dart' show AylaSubGroup;
 import '../models/post.dart' show AylaMediaDescriptor;
 import '../api/chat_api.dart';
 import '../net/dio_client.dart' show ApiException;
@@ -46,17 +52,14 @@ import 'ws_manager.dart';
 
 /// **仍不属本批**的接收帧（见文件头对账；显式登记，避免「静默吞掉」被读成已实现）。
 ///
-/// 2026-09-28（房内页批次）从原 23 条中**转正 12 条**，由
-/// `core/ws/room_frames.dart` 的 [AylaRoomDirectoryBridge] 承接（语音 4 + 直播 5 + 桌游 3，
-/// 事实源逐个见该文件的对账表），故此处只剩 **11 条**：
-/// `subgroup.*`(4) 属群聊子群域 · `post.*`(4) + `comment.*`(2) 属帖子域 ·
-/// `favorite.changed`(1) 需一个**跨页共享**的收藏状态缓存（库内 `AylaFavoriteStatusController`
-/// 目前是每页实例 ⇒ 单点广播接不进去，属「收藏状态收敛轮」）。
+/// - 2026-09-28（房内页批次）从原 23 条中**转正 12 条**，由
+///   `core/ws/room_frames.dart` 的 [AylaRoomDirectoryBridge] 承接（语音 4 + 直播 5 + 桌游 3）；
+/// - 2026-09-29（群聊批次）再**转正 `subgroup.*` 4 条**（[AylaChatWsClient] 直接消费，
+///   投影到 `state/subgroup_state.dart`），故此处只剩 **7 条**：
+///   `post.*`(4) + `comment.*`(2) 属帖子域 ·
+///   `favorite.changed`(1) 需一个**跨页共享**的收藏状态缓存（库内 `AylaFavoriteStatusController`
+///   目前是每页实例 ⇒ 单点广播接不进去，属「收藏状态收敛轮」）。
 const List<String> kAylaChatWsOutOfBatchFrames = <String>[
-  'subgroup.created',
-  'subgroup.updated',
-  'subgroup.deleted',
-  'subgroup.read',
   'post.created',
   'post.deleted',
   'post.updated',
@@ -84,6 +87,7 @@ class AylaChatWsClient {
     required AylaNoticesController notices,
     required AylaBadgesController badges,
     required AylaRealtimeState realtime,
+    required AylaSubGroupState subgroupState,
     required String? Function() currentUserId,
     this.autoReconcile = true,
   })  : _chat = chatState,
@@ -91,10 +95,14 @@ class AylaChatWsClient {
         _notices = notices,
         _badges = badges,
         _realtime = realtime,
+        _subgroups = subgroupState,
         _currentUserId = currentUserId;
 
   final AylaChatState _chat;
   final AylaMessageState _message;
+
+  /// 子群未读/活跃度投影（`subgroup.*` 四条帧 + `message.new` 的子群归属）。
+  final AylaSubGroupState _subgroups;
   final AylaNoticesController _notices;
   final AylaBadgesController _badges;
   final AylaRealtimeState _realtime;
@@ -408,6 +416,64 @@ class AylaChatWsClient {
           _str(data['message_id']),
           _str(data['user_id']),
         );
+      case 'subgroup.created':
+      case 'subgroup.updated': {
+        // web `chat.ts:514–530`：帧只带 id/name/is_default，**不带未读**
+        // ⇒ upsert 时保留本地未读投影（[AylaSubGroupState.upsertSubgroup] 内部保证）。
+        final String convId = _str(data['conversation_id']);
+        final String sgId = _str(data['subgroup_id']);
+        if (convId.isEmpty || sgId.isEmpty) break;
+        _subgroups.upsertSubgroup(
+          convId,
+          AylaSubGroup(
+            id: sgId,
+            conversationId: convId,
+            name: _str(data['name']),
+            isDefault: data['is_default'] == true,
+            unreadCount: _subgroups.unreadOf(convId, sgId),
+            unreadSeqs: _subgroups.unreadSeqsOf(convId, sgId),
+            hasUnreadSeqs: true,
+            createdAt: data['created_at']?.toString(),
+          ),
+        );
+      }
+      case 'subgroup.deleted': {
+        // web `chat.ts:531–545`：删掉后若它正是当前选中子群 → 切回默认组。
+        final String convId = _str(data['conversation_id']);
+        final String sgId = _str(data['subgroup_id']);
+        if (convId.isEmpty || sgId.isEmpty) break;
+        _subgroups.removeSubgroup(convId, sgId);
+        if (_subgroups.activeSubgroupOf(convId) == sgId) {
+          _subgroups.setActiveSubgroup(convId, _defaultSubgroupId(convId));
+        }
+      }
+      case 'subgroup.read': {
+        // 旧帧只有 `marked`、没有 `marked_seqs` ⇒ **无法证明哪些消息已读**，
+        // 绝不据此清空新到的未读（web `chat.ts:543–547` 原话）。
+        final String convId = _str(data['conversation_id']);
+        final String sgId = _str(data['subgroup_id']);
+        final String me = _currentUserId() ?? '';
+        if (me.isNotEmpty && _str(data['user_id']) == me) {
+          final Object? seqs = data['marked_seqs'];
+          if (seqs is List) {
+            aylaApplySubgroupReadReceipt(
+              subgroupState: _subgroups,
+              chatState: _chat,
+              messageState: _message,
+              convId: convId,
+              subgroupId: sgId,
+              markedSeqs: <int>[
+                for (final Object? item in seqs)
+                  if (item is num) item.toInt(),
+              ],
+            );
+          }
+          final AylaConversationSummary? conv = _chat.byId(convId);
+          if (conv != null && conv.unreadSeqsComplete == false) {
+            unawaited(reconcileConversation(convId));
+          }
+        }
+      }
       case 'typing':
         break; // 由页面 onFrame 消费（私聊顶栏「对方正在输入…」）
       case 'history.sync':
@@ -496,6 +562,12 @@ class AylaChatWsClient {
       _subscriptionHeads[convId] ?? 0,
       seq,
     );
+    // 子群归属投影（web `chat.ts:416–423`）：消息没带 `subgroup_id` 时归到**默认组**；
+    // 已读确认按**会话级序号**判断（默认组描述尚未加载时的 legacy null 消息也能识别）。
+    final String? subgroupId = data['subgroup_id']?.toString();
+    final String? projectionId = subgroupId ?? _defaultSubgroupId(convId);
+    final bool confirmedRead =
+        _subgroups.isSubgroupMessageConfirmedRead(convId, seq);
     // 后端 WS 帧的 media 字段是 descriptor 对象（或 null）；兼容历史的裸 media_id 字符串。
     final Object? wsMedia = data['media'];
     final String? wsMediaId = wsMedia is String
@@ -518,12 +590,12 @@ class AylaChatWsClient {
           : null,
       replyTo: data['reply_to']?.toString(),
       replyToSeq: _intOrNull(data['reply_to_seq']),
-      readByMe: false, // 子群已读确认为空 ⇒ 保守 false（服务端回执才是权威）
+      readByMe: confirmedRead, // 服务端确认过的序号才是权威（web 同）
       status: AylaMessageStatus.sent,
       seq: seq,
       createdAt: _str(data['ts']),
       idempotencyKey: data['idempotency_key']?.toString(),
-      subgroupId: data['subgroup_id']?.toString(),
+      subgroupId: subgroupId,
     );
     final String? me = _currentUserId();
     final bool isSelf = me != null && _str(data['sender_id']) == me;
@@ -545,14 +617,28 @@ class AylaChatWsClient {
     final bool isActive = _chat.activeConversationId == convId;
     // 活跃会话还需「滚在底部」才算正在看；翻记录时新消息计入未读（web `chat.ts:453–455`）。
     final bool atBottom = isActive && _message.viewerAtBottom(convId);
-    if (isFromOther && conv != null && conv.isPrivate && atBottom) {
+    // 子群视图：只有消息属于**当前选中子群**才视为「正在看」；否则计入该子群未读
+    // （web `chat.ts:457–463`）。
+    final String? activeSubgroupId = _subgroups.activeSubgroupOf(convId);
+    final bool isActiveSubgroup = subgroupId == null ||
+        activeSubgroupId == null ||
+        activeSubgroupId == subgroupId;
+    if (isFromOther &&
+        conv != null &&
+        conv.isPrivate &&
+        atBottom &&
+        isActiveSubgroup) {
       _message.markReadByMe(convId, msg.id);
       unawaited(
         AylaChatApi.markMessageRead(convId, msg.id, exact: true)
             .then((_) => _badges.fetch())
             .catchError((Object _) {}),
       );
-    } else if (isFromOther) {
+    } else if (isFromOther && !confirmedRead) {
+      // 群聊必须由 MessageList 实际可见的消息**精确确认**；底部状态不等于已看到。
+      if (projectionId != null) {
+        _subgroups.bumpSubgroupUnread(convId, projectionId, seq);
+      }
       _chat.bumpUnread(convId,
           seq: seq, mention: isMention, reply: isReply);
       if (conv == null || conv.isPrivate || isMention) {
@@ -576,6 +662,14 @@ class AylaChatWsClient {
       );
       if (conv.isGroup) _chat.bumpGroupActivity(convId);
     }
+  }
+
+  /// 该会话的默认组 id（本地列表未加载 ⇒ null，**不猜**）。
+  String? _defaultSubgroupId(String convId) {
+    for (final AylaSubGroup sg in _subgroups.subgroupsOf(convId)) {
+      if (sg.isDefault) return sg.id;
+    }
+    return null;
   }
 
   /// `message.poke`（web `chat.ts:558–598`）：独立事件，**不碰未读/红点/已读**。

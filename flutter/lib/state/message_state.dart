@@ -81,6 +81,20 @@ class AylaMessageState extends ChangeNotifier {
   List<String> readBy(String convId, String messageId) =>
       _readMarks[convId]?[messageId] ?? const <String>[];
 
+  /// 子群活跃度投影钩子 —— web `stores/message.ts:97/136/177/326` 的
+  /// `useSubGroupStore.getState().recordMessageActivity(convId, msg.subgroup_id, msg.seq)`。
+  ///
+  /// 由装配层（`state/chat_providers.dart`）接到 [AylaSubGroupState]；
+  /// **未接时是空操作** ⇒ 纯 state 单测与不关心子群的调用方行为不变。
+  void Function(String convId, String? subgroupId, int seq)? onSubgroupActivity;
+
+  /// 「已落库消息推进活跃度」：只有**带子群归属且 seq 为正**的消息参与
+  /// （本地 pending seq=0 不参与排序 —— 与 web 同）。
+  void _recordActivity(String convId, String? subgroupId, int seq) {
+    if (subgroupId == null || seq <= 0) return;
+    onSubgroupActivity?.call(convId, subgroupId, seq);
+  }
+
   /// 插入（同 seq 的非 pending 消息**忽略**）。
   void upsertMessage(String convId, AylaChatMessage msg) {
     final AylaMessageBucket bucket =
@@ -89,6 +103,7 @@ class AylaMessageState extends ChangeNotifier {
       messages: aylaInsertBySeq(bucket.messages, msg),
       lastSeq: bucket.lastSeq > msg.seq ? bucket.lastSeq : msg.seq,
     );
+    _recordActivity(convId, msg.subgroupId, msg.seq);
     notifyListeners();
   }
 
@@ -115,6 +130,7 @@ class AylaMessageState extends ChangeNotifier {
     String idempotencyKey,
     AylaChatMessage serverMsg,
   ) {
+    _recordActivity(convId, serverMsg.subgroupId, serverMsg.seq);
     final AylaMessageBucket? bucket = _buckets[convId];
     if (bucket == null) return;
     final bool localExists = bucket.messages
@@ -151,6 +167,7 @@ class AylaMessageState extends ChangeNotifier {
     String idempotencyKey,
     AylaChatMessage serverMsg,
   ) {
+    _recordActivity(convId, serverMsg.subgroupId, serverMsg.seq);
     final AylaMessageBucket? bucket = _buckets[convId];
     if (bucket == null) return;
     AylaChatMessage? pending;
@@ -266,6 +283,9 @@ class AylaMessageState extends ChangeNotifier {
       hasMore: hasMore,
       lastSeq: lastSeq,
     );
+    for (final AylaChatMessage m in msgs) {
+      _recordActivity(convId, m.subgroupId, m.seq);
+    }
     notifyListeners();
   }
 

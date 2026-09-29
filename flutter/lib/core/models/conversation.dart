@@ -14,6 +14,7 @@
 library;
 
 import 'chat_message.dart' show AylaMessageType;
+import 'subgroup.dart' show AylaGroupApplyData, AylaGroupJoinPolicy;
 import 'user_public.dart';
 
 /// 会话类型（`types.ts:297`）。
@@ -365,6 +366,55 @@ class AylaConversationSummary {
         .whereType<AylaConversationSummary>()
         .toList(growable: false);
   }
+}
+
+/// 群**公开摘要** —— web `api/chat.ts:78–89` 的
+/// `/chat/conversations/<id>/public-summary/` 响应。
+///
+/// 用途只有一个：**路由守卫**（非成员输链接直达时，仍可读到群名与加入方式，
+/// 由守卫卡片渲染申请入口）。因此它**不含**成员、未读、my_role 等成员视角字段 ——
+/// 这些字段缺席就是缺席，不得用本类兜底成 0。
+class AylaConversationPublicSummary {
+  const AylaConversationPublicSummary({
+    required this.id,
+    this.title = '',
+    this.announcement = '',
+    this.joinPolicy,
+    this.avatar = '',
+    this.memberCount = 0,
+  });
+
+  final String id;
+  final String title;
+  final String announcement;
+
+  /// 加入方式；未知 → null（按申请制文案处理，见 `GroupApplyDialog.tsx:15`）。
+  final AylaGroupJoinPolicy? joinPolicy;
+
+  final String avatar;
+  final int memberCount;
+
+  static AylaConversationPublicSummary? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? id = raw['id'];
+    if (id == null) return null;
+    return AylaConversationPublicSummary(
+      id: id.toString(),
+      title: (raw['title'] as String?) ?? '',
+      announcement: (raw['announcement'] as String?) ?? '',
+      joinPolicy: AylaGroupJoinPolicy.parse(raw['join_policy']),
+      avatar: (raw['avatar'] as String?) ?? '',
+      memberCount: (raw['member_count'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// 守卫卡片用的最小群信息（`GroupPage.tsx:398–401` 的 `group={{id,title,join_policy}}`）。
+  AylaGroupApplyData get applyData => AylaGroupApplyData(
+        id: id,
+        title: title,
+        joinPolicy: joinPolicy,
+        avatar: avatar,
+      );
 }
 
 /// 未读序号数组解析（非 List ⇒ 空数组；非数字项**丢弃**，不猜值）。

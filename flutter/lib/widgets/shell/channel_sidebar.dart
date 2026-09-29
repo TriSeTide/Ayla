@@ -202,7 +202,18 @@ abstract final class _SidebarZeroTint {
 
 // ======================= 数据模型 =======================
 
-/// 群内场景（`stores/group.ts` 的 `GroupScene`；tsx 39–45 的顺序）。
+/// 群内场景 —— web `stores/group.ts:14` 的
+/// `GroupScene = "chat" | "live" | "voice" | "posts" | "games" | "info"`。
+///
+/// ⚠️ [info] 的依据（2026-09-29 补，第六批页面层暴露的既有偏差）：
+/// `GroupPage.tsx:61` 的 `VALID_SCENES = new Set([...GROUP_SCENE_ORDER, "info"])`，
+/// 群信息页 `setActiveScene("info")`（`GroupPage.tsx:294–297`）后侧栏拿到的是 `"info"`，
+/// ⇒ `ChannelSidebar.tsx:262` 的 `activeScene === scene.key` 对 **5 行场景全不命中**
+/// （**群信息态侧栏无任何行高亮**）。枚举缺此值时页面层只能退而传 `chat`，
+/// 会让「聊天」行被错误点亮 —— 故补齐为 6 值。
+///
+/// 它**不参与任何既有渲染路径**：`_PanelData.scenes` 仍是 5 行（群信息入口是侧栏头部的
+/// 群名按钮 → `onOpenInfo`，`tsx:527`），顶栏四 tab 与所有 `switch` 都有 `_` 兜底。
 enum AylaGroupScene {
   /// 聊天（含子群下拉）。
   chat,
@@ -218,6 +229,9 @@ enum AylaGroupScene {
 
   /// 桌游（锁定置底）。
   games,
+
+  /// 群信息（`/group/:id/info`）—— **不是侧栏场景行**，只用于表达「当前不在任一场景行上」。
+  info,
 }
 
 /// 子群（`api/types.ts` 416–431 `SubGroup` 的侧栏投影）。
@@ -1430,6 +1444,8 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                 _scrollSceneRowToPin(scene);
               case AylaGroupScene.posts:
               case AylaGroupScene.games:
+              // 群信息不是场景行（场景行列表只有 5 项）—— 分支只为开关穷尽。
+              case AylaGroupScene.info:
                 widget.onSelectScene?.call(scene);
             }
             // 「挂载即命中」：点击选中时胶囊迁到指针所在项，web 该帧 computed style

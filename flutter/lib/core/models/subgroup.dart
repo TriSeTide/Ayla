@@ -15,6 +15,7 @@ class AylaSubGroup {
     required this.unreadCount,
     this.muted,
     this.unreadSeqs = const <int>[],
+    this.hasUnreadSeqs = false,
     this.lastMessageSeq,
     this.createdAt,
   });
@@ -38,6 +39,11 @@ class AylaSubGroup {
   /// 本人视角未读序号（旧后端可缺省）。
   final List<int> unreadSeqs;
 
+  /// `unread_seqs` 键**是否出现在响应里**（缺席 ≠ 空数组 —— web 用
+  /// `sg.unread_seqs != null` 区分「服务端给了权威序号」与「服务端没给」，
+  /// 后者只能退回 `unread_count` 与本地序号数组的较大者，**不能把未知剩余量归零**）。
+  final bool hasUnreadSeqs;
+
   /// 子群最近消息的会话内序号；空子群为 0，旧后端可缺省。
   final int? lastMessageSeq;
 
@@ -58,8 +64,77 @@ class AylaSubGroup {
       muted: muted is bool ? muted : null,
       unreadCount: int.tryParse(raw['unread_count']?.toString() ?? '') ?? 0,
       unreadSeqs: _intList(raw['unread_seqs']),
+      hasUnreadSeqs: raw.containsKey('unread_seqs') &&
+          raw['unread_seqs'] is List,
       lastMessageSeq: lastSeq is int ? lastSeq : int.tryParse(lastSeq?.toString() ?? ''),
       createdAt: raw['created_at']?.toString(),
+    );
+  }
+
+  /// 局部更新（状态层保留未读投影、只换活跃度/名称等字段时用）。
+  AylaSubGroup copyWith({
+    String? name,
+    bool? isDefault,
+    bool? muted,
+    int? unreadCount,
+    List<int>? unreadSeqs,
+    bool? hasUnreadSeqs,
+    int? lastMessageSeq,
+    String? createdAt,
+  }) =>
+      AylaSubGroup(
+        id: id,
+        conversationId: conversationId,
+        name: name ?? this.name,
+        isDefault: isDefault ?? this.isDefault,
+        muted: muted ?? this.muted,
+        unreadCount: unreadCount ?? this.unreadCount,
+        unreadSeqs: unreadSeqs ?? this.unreadSeqs,
+        hasUnreadSeqs: hasUnreadSeqs ?? this.hasUnreadSeqs,
+        lastMessageSeq: lastMessageSeq ?? this.lastMessageSeq,
+        createdAt: createdAt ?? this.createdAt,
+      );
+}
+
+/// 子群**游标页** —— web `api/chat.ts:111–113` 的
+/// `SocialPage<SubGroup> & { default: SubGroup | null }`。
+///
+/// 与 [AylaDirectoryPage] 的差异只有一处：本响应额外带服务端标出的**默认组**
+/// （`default`）—— 页面据此决定「还没有本地选中项」时的首个视图，而不是自己猜。
+class AylaSubgroupPage {
+  const AylaSubgroupPage({
+    this.results = const <AylaSubGroup>[],
+    this.nextCursor,
+    this.hasMore = false,
+    this.total = 0,
+    this.defaultSubgroup,
+  });
+
+  final List<AylaSubGroup> results;
+
+  /// 下一页游标（null = 没有下一页）。
+  final String? nextCursor;
+
+  final bool hasMore;
+
+  /// 服务端截断前总数。
+  final int total;
+
+  /// 服务端标出的默认组（缺字段 = 该页未携带 ⇒ null，**不猜**）。
+  final AylaSubGroup? defaultSubgroup;
+
+  static AylaSubgroupPage fromJson(Object? raw) {
+    if (raw is! Map) return const AylaSubgroupPage();
+    return AylaSubgroupPage(
+      results: <AylaSubGroup>[
+        for (final Object? item
+            in (raw['results'] as List<Object?>? ?? const <Object?>[]))
+          if (AylaSubGroup.fromJson(item) case final AylaSubGroup sg) sg,
+      ],
+      nextCursor: raw['next_cursor']?.toString(),
+      hasMore: raw['has_more'] == true,
+      total: (raw['total'] as num?)?.toInt() ?? 0,
+      defaultSubgroup: AylaSubGroup.fromJson(raw['default']),
     );
   }
 }

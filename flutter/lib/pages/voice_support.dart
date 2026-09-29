@@ -706,10 +706,21 @@ class AylaVoiceSession extends ChangeNotifier {
 /// - 删除确认弹窗：web 走 `createPortal(document.body)`，Flutter 侧按库内惯例由宿主
 ///   `Stack` 顶层承载（`AylaConfirmDialog` 自带遮罩层；同 `game_room_placeholder.dart`）。
 class AylaVoiceRoomHost extends ConsumerStatefulWidget {
-  const AylaVoiceRoomHost({super.key, required this.channelId});
+  const AylaVoiceRoomHost({
+    super.key,
+    required this.channelId,
+    this.backPath = '/voice',
+  });
 
   /// 频道 id（路由 `/voice/:channelId`）。
   final String channelId;
+
+  /// 房内三条退出路径（返回 / 离开频道 / 删除房间后）的落点。
+  ///
+  /// 一级语音 tab = `/voice`（tsx 197–200 / 205–208 / 238–257）；群内语音
+  /// （`GroupVoice.tsx:139–151`）传 `/group/:id/voice`——同一宿主两处复用，
+  /// 避免群内复制一份房内编排。
+  final String backPath;
 
   @override
   ConsumerState<AylaVoiceRoomHost> createState() => _AylaVoiceRoomHostState();
@@ -951,7 +962,7 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       if (!mounted) return;
       ref.read(voiceStateProvider).removeChannel(widget.channelId);
       if (!mounted) return;
-      context.go('/voice');
+      context.go(widget.backPath);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -963,7 +974,7 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
 
   void _onBack() {
     // 顶部返回只离开房间界面，**保留语音连接与全局浮层**（web tsx 197–200）。
-    context.go('/voice');
+    context.go(widget.backPath);
   }
 
   Future<void> _onLeave() async {
@@ -973,7 +984,7 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       // 离开失败静默（web tsx 205–208）
     }
     if (!mounted) return;
-    context.go('/voice');
+    context.go(widget.backPath);
   }
 
   @override

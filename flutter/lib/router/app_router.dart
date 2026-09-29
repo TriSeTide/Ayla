@@ -29,6 +29,7 @@ import '../layout/app_shell.dart';
 import '../pages/chat_conversation_route.dart';
 import '../pages/favorites_page.dart';
 import '../pages/games_hub_page.dart';
+import '../pages/group_page.dart';
 import '../pages/messages_page.dart';
 import '../pages/home_page.dart';
 import '../pages/my_posts_page.dart';
@@ -36,7 +37,6 @@ import '../pages/live_hub_page.dart';
 import '../pages/live_room_page.dart';
 import '../pages/live_studio_page.dart';
 import '../pages/login_route.dart';
-import '../pages/pending_page.dart';
 import '../pages/post_detail_page.dart';
 import '../pages/posts_hub_page.dart';
 import '../pages/profile_page.dart';
@@ -51,16 +51,9 @@ class _AuthRefresh extends ChangeNotifier {
   void bump() => notifyListeners();
 }
 
-/// 未实现页面的路由页 —— **不做任何转场**（`NoTransitionPage`）。
-///
-/// 理由（2026-09-28 用户反馈「没做的页面就别强加动画」）：占位页之间切换时，转场唯一的效果
-/// 就是让两块占位文字**重叠几帧**（残影），既不是 web 的行为、也没有任何信息量。
-/// 等该路由交付真实页面时，把 `pageBuilder` 换回 `builder:` 即可 —— 那时它才走
-/// `AylaPageTransitionsBuilder` 的分档（panelOwned / 群页 / 搜索页 / 普通路由）。
-Page<void> _pending({required String path, required String webSource}) =>
-    NoTransitionPage<void>(
-      child: PendingPage(path: path, webSource: webSource),
-    );
+// ⚠️ 占位页辅助函数 `_pending` 已于第六批删除：五条 `/group/*` 路由都换成了真实页面
+// （`GroupPage`），库内再无占位路由。`pages/pending_page.dart` 保留 —— 它是
+// 「未实现页面」的显式登记件，供后续新增路由时复用（不静默重定向）。
 
 /// 全局路由（唯一实例；会话过期回登录、页面内 `context.go` 都由它承载）。
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
@@ -253,11 +246,60 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: FavoritesPage(initialType: s.uri.queryParameters['type']),
             ),
           ),
-          GoRoute(path: '/group/:id', pageBuilder: (c, s) => _pending(path: '/group/:id', webSource: 'App.tsx:86 → GroupPage')),
-          GoRoute(path: '/group/:id/posts/:postId', pageBuilder: (c, s) => _pending(path: '/group/:id/posts/:postId', webSource: 'App.tsx:87 → GroupPage')),
-          GoRoute(path: '/group/:id/voice/:voiceChannelId', pageBuilder: (c, s) => _pending(path: '/group/:id/voice/:voiceChannelId', webSource: 'App.tsx:88 → GroupPage')),
-          GoRoute(path: '/group/:id/live/:liveChannelId', pageBuilder: (c, s) => _pending(path: '/group/:id/live/:liveChannelId', webSource: 'App.tsx:89 → GroupPage')),
-          GoRoute(path: '/group/:id/:scene', pageBuilder: (c, s) => _pending(path: '/group/:id/:scene', webSource: 'App.tsx:90 → GroupPage')),
+          // 第 6 批：群聊场景容器（web `App.tsx:86–90` 五条路由都指向同一个 GroupPage，
+          // 由 route param 决定场景）。⚠️ 声明顺序：三条带具体尾段的必须在
+          // `/group/:id/:scene` **之前**，否则 `posts` / `voice` / `live` 会被当成 scene 吃掉。
+          // `key: ValueKey(id)` —— 切群时整页重建（目录/子群/语音/直播四条分页状态一起换新；
+          // web 用 effect 重跑表达同一语义）。
+          GoRoute(
+            path: '/group/:id',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: GroupPage(
+                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
+                groupId: s.pathParameters['id'] ?? '',
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/group/:id/posts/:postId',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: GroupPage(
+                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
+                groupId: s.pathParameters['id'] ?? '',
+                postId: s.pathParameters['postId'],
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/group/:id/voice/:voiceChannelId',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: GroupPage(
+                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
+                groupId: s.pathParameters['id'] ?? '',
+                voiceChannelId: s.pathParameters['voiceChannelId'],
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/group/:id/live/:liveChannelId',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: GroupPage(
+                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
+                groupId: s.pathParameters['id'] ?? '',
+                liveChannelId: s.pathParameters['liveChannelId'],
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/group/:id/:scene',
+            pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
+              child: GroupPage(
+                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
+                groupId: s.pathParameters['id'] ?? '',
+                scene: s.pathParameters['scene'],
+              ),
+            ),
+          ),
           // 第 4 批：会话路由适配（群聊 → /group/:id；私聊 → PrivateChatPage）。
           // `?msg=&seq=` 是收藏消息的定位参数（web `PrivateChatPage.tsx:28–38`）。
           GoRoute(

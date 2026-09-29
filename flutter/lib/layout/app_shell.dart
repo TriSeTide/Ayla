@@ -272,15 +272,18 @@ class _AppShellState extends ConsumerState<AppShell> {
             scrollTop: cornerFabs.scrollTop,
             onRefresh: shell.refreshCallback,
           ),
+        // ⚠️ **不要再包一层 Positioned**：`AylaRefreshFab` 的 bottomLeft 档
+        // **自身就返回 `Positioned(left: 32, bottom: 32)`**（`fab.dart` 的
+        // `.corner-fab-refresh.is-bottom-left` 定位）。外层再包一个 Positioned 会让
+        // 同一 RenderObject 收到两份 StackParentData ⇒
+        // `Incorrect use of ParentDataWidget`（2026-09-29 由 router_test 的动态探测
+        // 走到 `/messages`（宽屏 = bottomLeft 档）时抓到；此前探测总在前一条路由
+        // 提前返回而没被触发）。
         if (cornerFabs.refresh &&
             cornerFabs.refreshPosition == AylaRefreshFabPosition.bottomLeft)
-          Positioned(
-            left: 16,
-            bottom: 32,
-            child: AylaRefreshFab(
-              position: AylaRefreshFabPosition.bottomLeft,
-              onRefresh: shell.refreshCallback,
-            ),
+          AylaRefreshFab(
+            position: AylaRefreshFabPosition.bottomLeft,
+            onRefresh: shell.refreshCallback,
           ),
         if (isNarrow && cornerFabs.scrollTop)
           Positioned(

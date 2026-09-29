@@ -31,6 +31,8 @@ import 'dart:math';
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
 import '../models/social_requests.dart';
+import '../models/subgroup.dart'
+    show AylaGroupJoinPolicy, AylaSubGroup, AylaSubgroupPage;
 import '../net/dio_client.dart';
 import 'directory_page.dart';
 
@@ -355,6 +357,33 @@ class AylaChatApi {
     );
   }
 
+  /// `GET /chat/conversations/<id>/join-requests/?pagination=cursor&limit=&cursor=`
+  /// —— 该群的待审批入群申请（web `api/chat.ts:311–313`）。
+  ///
+  /// 消费点 = 群信息页的「入群申请审批 · 待处理（N）」（`GroupInfo.tsx:602–624`）。
+  static Future<AylaDirectoryPage<AylaGroupJoinRequest>>
+      listJoinRequestsPage(
+    String convId, {
+    int limit = 30,
+    String? cursor,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/join-requests/',
+      query: query,
+    );
+    return AylaDirectoryPage.fromJson<AylaGroupJoinRequest>(
+      resp,
+      (Object? raw) =>
+          raw is Map<String, dynamic> ? AylaGroupJoinRequest.fromJson(raw) : null,
+    );
+  }
+
   /// `GET /chat/me/join-requests/?pagination=cursor&limit=&cursor=` —— 待我审批的入群申请（群主/管理员）。
   static Future<AylaDirectoryPage<AylaGroupJoinRequest>>
       listManagedJoinRequestsPage({
@@ -423,6 +452,276 @@ class AylaChatApi {
     await DioClient.instance.post<Map<String, dynamic>>(
       '/chat/join-requests/${Uri.encodeComponent(requestId)}/action/',
       body: <String, dynamic>{'action': accept ? 'accept' : 'reject'},
+    );
+  }
+
+  // ===================== 群域（第六批：GroupPage 五场景）=====================
+  //
+  // 事实源 = web `api/chat.ts` 的群管理段（54 / 78 / 107–158 / 236–292）。
+  // 纪律与其余各段一致：路径逐字、缺席即缺席、未知枚举 → null。
+
+  /// `GET /chat/conversations/<id>/members/?pagination=cursor&limit=&cursor=&q=&exclude_self=`
+  /// —— 成员游标页（web `api/chat.ts:54–57` + `api/social.ts:15–21` 的 `socialQuery`）。
+  ///
+  /// 消费点：群信息页成员卡（可带搜索词 `q`）与「转让群主」候选列表（`exclude_self=1`）。
+  static Future<AylaDirectoryPage<AylaConversationMember>>
+      listConversationMembersPage(
+    String convId, {
+    int limit = 30,
+    String? cursor,
+    String? q,
+    bool excludeSelf = false,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    if (q != null && q.isNotEmpty) query['q'] = q;
+    if (excludeSelf) query['exclude_self'] = '1';
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/members/',
+      query: query,
+    );
+    return AylaDirectoryPage.fromJson<AylaConversationMember>(
+      resp,
+      AylaConversationMember.fromJson,
+    );
+  }
+
+  /// `GET /chat/conversations/<id>/public-summary/` —— 群公开摘要（非成员可读）。
+  ///
+  /// 消费点 = 路由守卫（`GroupPage.tsx:378–392`）：非成员输链接直达时只拿到
+  /// 群名与加入方式，用于渲染申请卡片。
+  static Future<AylaConversationPublicSummary> getConversationPublicSummary(
+    String convId,
+  ) async {
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/public-summary/',
+    );
+    final AylaConversationPublicSummary? summary =
+        AylaConversationPublicSummary.fromJson(resp);
+    if (summary == null) throw const ApiException(0, '群公开摘要格式不合法');
+    return summary;
+  }
+
+  /// `PATCH /chat/conversations/<id>/` —— 改群名 / 公告 / 头像 / 加入方式（管理员）。
+  ///
+  /// `null` 的字段**不进请求体**（web `patchConversation` 的 payload 逐键可选）。
+  static Future<AylaConversationSummary> patchConversation(
+    String convId, {
+    String? title,
+    String? announcement,
+    String? avatar,
+    AylaGroupJoinPolicy? joinPolicy,
+  }) async {
+    final Map<String, dynamic> payload = <String, dynamic>{};
+    if (title != null) payload['title'] = title;
+    if (announcement != null) payload['announcement'] = announcement;
+    if (avatar != null) payload['avatar'] = avatar;
+    if (joinPolicy != null) payload['join_policy'] = joinPolicy.wire;
+    final Map<String, dynamic> resp =
+        await DioClient.instance.patch<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/',
+      body: payload,
+    );
+    final AylaConversationSummary? conv =
+        AylaConversationSummary.fromJson(resp);
+    if (conv == null) throw const ApiException(0, '会话详情格式不合法');
+    return conv;
+  }
+
+  /// `POST /chat/conversations/<id>/transfer-owner/` —— 转让群主（仅群主）。
+  static Future<AylaConversationSummary> transferGroupOwner(
+    String convId,
+    String userId,
+  ) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/transfer-owner/',
+      body: <String, dynamic>{'user_id': userId},
+    );
+    final AylaConversationSummary? conv =
+        AylaConversationSummary.fromJson(resp);
+    if (conv == null) throw const ApiException(0, '会话详情格式不合法');
+    return conv;
+  }
+
+  /// `POST /chat/conversations/<id>/leave/` —— 退出群聊（本人）。
+  static Future<void> leaveGroup(String convId) async {
+    await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/leave/',
+    );
+  }
+
+  /// `DELETE /chat/conversations/<id>/dissolve/` —— 解散群聊（仅群主）。
+  static Future<void> dissolveGroup(String convId) async {
+    await DioClient.instance.delete<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/dissolve/',
+    );
+  }
+
+  /// `PATCH /chat/conversations/<id>/members/<user_id>/role/` —— 设/撤管理员（仅群主）。
+  static Future<AylaConversationSummary> setMemberRole(
+    String convId,
+    String userId,
+    AylaConversationMemberRole role,
+  ) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.patch<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/members/'
+      '${Uri.encodeComponent(userId)}/role/',
+      body: <String, dynamic>{'role': role.wire},
+    );
+    final AylaConversationSummary? conv =
+        AylaConversationSummary.fromJson(resp);
+    if (conv == null) throw const ApiException(0, '会话详情格式不合法');
+    return conv;
+  }
+
+  /// `DELETE /chat/conversations/<id>/members/<user_id>/` —— 移除成员（管理员）。
+  static Future<void> removeMember(String convId, String userId) async {
+    await DioClient.instance.delete<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/members/'
+      '${Uri.encodeComponent(userId)}/',
+    );
+  }
+
+  /* ---------- 群聊子群 ---------- */
+
+  /// `GET /chat/conversations/<id>/subgroups/?pagination=cursor&limit=&cursor=`
+  /// —— 子群游标页（响应额外带 `default`）。
+  static Future<AylaSubgroupPage> listSubgroupsPage(
+    String convId, {
+    int limit = 30,
+    String? cursor,
+  }) async {
+    final Map<String, dynamic> query = <String, dynamic>{
+      'pagination': 'cursor',
+      'limit': '$limit',
+    };
+    if (cursor != null) query['cursor'] = cursor;
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/',
+      query: query,
+    );
+    return AylaSubgroupPage.fromJson(resp);
+  }
+
+  /// `GET /chat/conversations/<id>/subgroups/` —— 子群**裸数组**（web `api/chat.ts:107–109`）。
+  ///
+  /// 消费点 = 分享弹窗的子群惰性加载（`ShareSheet.onLoadSubgroups`）—— 它只要
+  /// 「默认组 + 各子群名」，不需要游标与总数。
+  static Future<List<AylaSubGroup>> listSubgroups(String convId) async {
+    final Object resp = await DioClient.instance.get<Object>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/',
+    );
+    if (resp is! List) return const <AylaSubGroup>[];
+    return <AylaSubGroup>[
+      for (final Object? item in resp)
+        if (AylaSubGroup.fromJson(item) case final AylaSubGroup sg) sg,
+    ];
+  }
+
+  /// `GET /chat/conversations/<id>/subgroups/<sid>/` —— 单个子群（本地未命中时补拉）。
+  static Future<AylaSubGroup> getSubgroup(
+    String convId,
+    String subgroupId,
+  ) async {
+    final Map<String, dynamic> resp = await DioClient.instance
+        .get<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/'
+      '${Uri.encodeComponent(subgroupId)}/',
+    );
+    final AylaSubGroup? sg = AylaSubGroup.fromJson(resp);
+    if (sg == null) throw const ApiException(0, '子群详情格式不合法');
+    return sg;
+  }
+
+  /// `POST /chat/conversations/<id>/subgroups/` —— 创建子群（仅群主/管理员）。
+  static Future<AylaSubGroup> createSubgroup(
+    String convId,
+    String name,
+  ) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/',
+      body: <String, dynamic>{'name': name},
+    );
+    final AylaSubGroup? sg = AylaSubGroup.fromJson(resp);
+    if (sg == null) throw const ApiException(0, '子群详情格式不合法');
+    return sg;
+  }
+
+  /// `PATCH /chat/conversations/<id>/subgroups/<sid>/` —— 改名 / 禁言开关。
+  static Future<AylaSubGroup> updateSubgroup(
+    String convId,
+    String subgroupId, {
+    String? name,
+    bool? muted,
+  }) async {
+    final Map<String, dynamic> payload = <String, dynamic>{};
+    if (name != null) payload['name'] = name;
+    if (muted != null) payload['muted'] = muted;
+    final Map<String, dynamic> resp =
+        await DioClient.instance.patch<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/'
+      '${Uri.encodeComponent(subgroupId)}/',
+      body: payload,
+    );
+    final AylaSubGroup? sg = AylaSubGroup.fromJson(resp);
+    if (sg == null) throw const ApiException(0, '子群详情格式不合法');
+    return sg;
+  }
+
+  /// `DELETE /chat/conversations/<id>/subgroups/<sid>/` —— 删除子群（消息归默认组）。
+  static Future<void> deleteSubgroup(String convId, String subgroupId) async {
+    await DioClient.instance.delete<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/'
+      '${Uri.encodeComponent(subgroupId)}/',
+    );
+  }
+
+  /// `POST /chat/conversations/<id>/subgroups/<sid>/read/` —— 把该子群标已读（本人）。
+  ///
+  /// 响应 `{marked, marked_seqs?}`：**缺席即缺席** —— 旧后端不返回 `marked_seqs`
+  /// 时不伪造序号数组（调用方保留本地未读投影）。
+  static Future<AylaSubgroupReadReceipt> markSubgroupRead(
+    String convId,
+    String subgroupId,
+  ) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/subgroups/'
+      '${Uri.encodeComponent(subgroupId)}/read/',
+    );
+    return AylaSubgroupReadReceipt.fromJson(resp);
+  }
+}
+
+/// 子群标已读的回执（web `api/chat.ts:153–158`）。
+class AylaSubgroupReadReceipt {
+  const AylaSubgroupReadReceipt({this.marked = 0, this.markedSeqs});
+
+  /// 服务端确认标已读的条数。
+  final int marked;
+
+  /// 服务端确认的序号（null = 后端未给该字段）。
+  final List<int>? markedSeqs;
+
+  static AylaSubgroupReadReceipt fromJson(Map<String, dynamic> raw) {
+    final Object? seqs = raw['marked_seqs'];
+    return AylaSubgroupReadReceipt(
+      marked: (raw['marked'] as num?)?.toInt() ?? 0,
+      markedSeqs: seqs is List
+          ? List<int>.unmodifiable(<int>[
+              for (final Object? item in seqs)
+                if (item is num) item.toInt(),
+            ])
+          : null,
     );
   }
 }

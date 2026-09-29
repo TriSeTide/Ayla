@@ -22,6 +22,7 @@ import 'auth_state.dart';
 import 'badges_state.dart';
 import 'chat_drafts.dart';
 import 'chat_state.dart';
+import 'group_providers.dart' show subgroupStateProvider;
 import 'message_state.dart';
 import 'notices_state.dart';
 import 'realtime_state.dart';
@@ -31,8 +32,19 @@ final ChangeNotifierProvider<AylaChatState> chatStateProvider =
     ChangeNotifierProvider<AylaChatState>((Ref ref) => AylaChatState());
 
 /// message 全局状态（按会话分桶的消息缓存）。
+///
+/// 装配时接上**子群活跃度钩子**（web `stores/message.ts:97/136/177/326` 的
+/// `useSubGroupStore.getState().recordMessageActivity(...)`）—— 消息落库即推进
+/// 子群 `last_message_seq`，宽屏侧栏的子群活跃度排序据此即时刷新。
 final ChangeNotifierProvider<AylaMessageState> messageStateProvider =
-    ChangeNotifierProvider<AylaMessageState>((Ref ref) => AylaMessageState());
+    ChangeNotifierProvider<AylaMessageState>((Ref ref) {
+  final AylaMessageState state = AylaMessageState();
+  state.onSubgroupActivity = (String convId, String? subgroupId, int seq) =>
+      ref
+          .read(subgroupStateProvider)
+          .recordMessageActivity(convId, subgroupId, seq);
+  return state;
+});
 
 /// 会话草稿（落盘；见 `state/chat_drafts.dart` 的偏离说明）。
 final ChangeNotifierProvider<AylaChatDraftsController> chatDraftsProvider =
@@ -73,6 +85,7 @@ final Provider<AylaChatWsClient> chatWsProvider = Provider<AylaChatWsClient>(
       notices: ref.watch(noticesProvider),
       badges: ref.watch(badgesProvider),
       realtime: ref.watch(realtimeProvider),
+      subgroupState: ref.watch(subgroupStateProvider),
       currentUserId: () => ref.read(authNotifierProvider).user?.id,
     );
     ref.onDispose(client.disconnect);

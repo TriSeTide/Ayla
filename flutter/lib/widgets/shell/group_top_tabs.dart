@@ -39,26 +39,33 @@ import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
 import 'bottom_tabs.dart'; // 样张里演示「回主页后壳层渲染底栏」
 import '../base/primitives.dart' show AylaNavHighlight;
+import 'channel_sidebar.dart' show AylaGroupScene;
+
+/// 场景枚举的**唯一权威定义**在 `channel_sidebar.dart`（含 `info`，见那里的依据注释）——
+/// 本件只 re-export，避免同一 `GroupScene` 在库内存在两份互不兼容的枚举
+/// （两份同名 enum 会让页面层无法把同一个值同时交给侧栏与顶栏）。
+export 'channel_sidebar.dart' show AylaGroupScene;
 
 /// 群内子场景（web `stores/group` 的 `GroupScene` 去掉聊天：聊天居中于五槽之间的内容区，
 /// 不在顶栏 tab 里）。
 /// ⚠️ [chat] **不在顶栏四 tab 里**：四槽是 语音|直播|帖子|桌游，中央是群头像；
 /// 点群头像是「两级语义」（`GroupPage.tsx:318–324`）：已在聊天 → 打开群信息，否则 → 切回聊天。
 /// 组件把该语义留给父级（`onAvatarClick`），但枚举必须含 chat，父级才能表达「回聊天」。
-enum AylaGroupScene {
-  chat,
-  voice,
-  live,
-  posts,
-  games;
-
-  /// tab 文案（`GroupTopTabs.tsx:21–26` `TABS`）。
+/// 顶栏四 tab 的文案与图标（`GroupTopTabs.tsx:21–26` `TABS`）。
+///
+/// 放在 extension 而不是 enum 上，是因为枚举本体已由 `channel_sidebar.dart` 拥有
+/// （那份还含顶栏用不到的 `info`）。[AylaGroupScene.info] / [AylaGroupScene.chat]
+/// **不出现在四 tab 里**（`chat` 居中于内容区、`info` 由页面路由驱动），
+/// 这里各给一个文案只是为了开关穷尽。
+extension AylaGroupSceneTabMeta on AylaGroupScene {
+  /// tab 文案。
   String get label => switch (this) {
         AylaGroupScene.chat => '聊天',
         AylaGroupScene.voice => '语音',
         AylaGroupScene.live => '直播',
         AylaGroupScene.posts => '帖子',
         AylaGroupScene.games => '桌游',
+        AylaGroupScene.info => '群信息',
       };
 
   /// 图标名。
@@ -68,6 +75,7 @@ enum AylaGroupScene {
         AylaGroupScene.live => 'iconVideo',
         AylaGroupScene.posts => 'iconPost',
         AylaGroupScene.games => 'iconGame',
+        AylaGroupScene.info => 'iconMenu',
       };
 }
 
