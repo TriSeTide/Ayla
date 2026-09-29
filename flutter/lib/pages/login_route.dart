@@ -21,6 +21,7 @@ import '../core/net/dio_client.dart';
 import '../core/ws/ws_manager.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
+import '../state/presence_providers.dart';
 import 'login_page.dart';
 
 class LoginRoute extends ConsumerStatefulWidget {
@@ -67,6 +68,8 @@ class _LoginRouteState extends ConsumerState<LoginRoute> {
       wsManager?.connectAll();
       // chat 通道 owner（`core/ws/chat_ws.dart`）：绑定通道 + 连接 + 登记订阅。
       aylaStartChatWs(ref);
+      // presence 通道 owner（`core/ws/presence_ws.dart`）：绑定通道 + 连接（幂等）。
+      aylaStartPresenceWs(ref);
       unawaited(ref.read(badgesProvider).fetch());
       unawaited(AppInit.instance.run());
       if (!mounted) return;

@@ -33,6 +33,7 @@ import '../core/ws/ws_manager.dart';
 import '../router/shell_config.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
+import '../state/presence_providers.dart';
 import '../state/room_providers.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
@@ -78,6 +79,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     wsManager?.disconnectAll();
     // 消息域：断开 chat 通道 owner 并清空会话/消息/红点/通知状态（各 store 的 reset）。
     aylaStopChatWs(ref);
+    // presence 域：断开通道 owner 并清空在线集合（web `presenceClient.disconnect` 的 reset）。
+    aylaStopPresenceWs(ref);
     // 房内域：解绑目录帧桥 + 断开 voice/live 两通道 + 清房内状态（同 401 过期路径）。
     aylaStopRooms(ref);
     AppInit.instance.reset();

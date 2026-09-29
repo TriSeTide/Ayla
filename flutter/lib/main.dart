@@ -24,6 +24,7 @@ import 'preview/component_gallery.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
+import 'state/presence_providers.dart';
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/shell/overlay_scrollbar.dart';
@@ -52,6 +53,8 @@ void main() {
       aylaStopChatWsForContainer(container);
       // 房内域：断开 voice/live 两通道 + 解绑目录帧桥 + 清房内状态。
       aylaStopRoomsForContainer(container);
+      // presence 域：断开通道 owner + 清空在线集合（web `presenceClient.disconnect` 的 reset）。
+      aylaStopPresenceWsForContainer(container);
       auth.clear();
       // 回登录由路由守卫接（`app_router.dart` 的 redirect + refreshListenable）
     },

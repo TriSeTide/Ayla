@@ -16,9 +16,13 @@
 ///    （`getGroupEmojiPackSummary` / `setGroupEmojiUploadPolicy`，tsx 222–263）；
 ///    Flutter 侧尚无 emoji 域 api（表情包面板已交付，但那是 `emoji` 数据源）⇒
 ///    该行**不渲染**（web 在没有摘要时同样不渲染：`emojiPolicyLoaded` 为 false 才隐藏）。
-/// 2. **在线态取 REST 快照**（`member.user.online`）：presence 通道数据层未建（既有登记），
-///    **不伪造实时在线**。
-/// 3. **「已载入成员在线 N」统计同口径**：只数当前已加载页里 `online == true` 的成员。
+/// 2. **在线态已接 presence**（2026-09-29）：成员数统计 / 成员列表 / 转让弹窗三处
+///    与 web `GroupInfo.tsx:210 / 764 / 971` 用**同一条规则**
+///    `presenceOnline(users, withLiveStatus(statuses, m.user))` ——
+///    WS 增量优先、无记录回退 REST 快照 `user.online`、**隐身强制离线**；
+///    后端 `display_status` 是快照口径，实时事件到达后按该规则覆盖（与 web 一致）。
+/// 3. **「已载入成员在线 N」统计口径不变**：只数**当前已加载页**里判为在线的成员
+///    （web `GroupInfo.tsx:207–213` 同样是 `members.filter(...)` 于已加载页）。
 library;
 
 import 'dart:async';
@@ -41,7 +45,9 @@ import '../core/media/media_picker.dart' show AylaPickedFile;
 import '../state/auth_state.dart' show AuthState, authNotifierProvider;
 import '../state/subgroup_state.dart' show AylaSubGroupState;
 import '../state/chat_providers.dart';
+import '../state/display_status.dart';
 import '../state/group_providers.dart';
+import '../state/presence_providers.dart';
 import '../state/paged_list.dart';
 import '../theme/tokens.dart' show AylaSpacing;
 import '../widgets/base/dialogs.dart' show AylaConfirmDialog;
@@ -380,9 +386,18 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     final List<AylaSubGroup> visibleSubgroups = _showAllSubgroups
         ? subgroupItems
         : subgroupItems.take(kAylaSubgroupPreviewCount).toList(growable: false);
+    // presence 在线态（web `GroupInfo.tsx:74–75` 在**页面级**读 users/statuses，
+    // 全页随 presence 事件重渲染）。
+    final Map<String, String> onlineUsers =
+        ref.watch(presenceStateProvider).users;
+    final Map<String, String> onlineStatuses =
+        ref.watch(presenceStateProvider).statuses;
+    // 页面内成员在线判定（web `GroupInfo.tsx:210 / 764 / 971` 的同一条规则）。
+    bool memberOnline(AylaConversationMember m) =>
+        presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, m.user));
     final int onlineCount = <AylaConversationMember>[
       for (final AylaConversationMember m in members?.items ?? const <AylaConversationMember>[])
-        if (m.user.online) m,
+        if (memberOnline(m)) m,
     ].length;
     final String memberCountLabel =
         '${conv.memberCount == 0 ? (members?.total ?? 0) : conv.memberCount}';
@@ -436,7 +451,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
 
     final Widget manageCard = _buildManageCard(conv, joinRequests);
     final Widget subgroupCard = _buildSubgroupCard(subgroupItems, visibleSubgroups);
-    final Widget memberCard = _buildMemberCard(members, currentUserId);
+    final Widget memberCard =
+        _buildMemberCard(members, currentUserId, memberOnline);
 
     return Stack(
       children: <Widget>[
@@ -456,7 +472,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
                             displayName: m.user.displayName ?? m.user.username ?? '',
                     role: _roleOf(m.role),
                     avatarUrl: (m.user.avatar ?? '').isEmpty ? null : m.user.avatar,
-                    online: m.user.online,
+                    online: memberOnline(m), // tsx 971
                   ),
             ],
             selectedId: null,
@@ -725,9 +741,13 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
   }
 
   /// 成员卡（tsx 747–793）。
+  ///
+  /// [memberOnline] = presence 实时在线判定（web `GroupInfo.tsx:764`；
+  /// 无记录回退 REST 快照 `user.online`、隐身强制离线）。
   Widget _buildMemberCard(
     AylaPagedList<AylaConversationMember>? members,
     String? currentUserId,
+    bool Function(AylaConversationMember) memberOnline,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -738,7 +758,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
           onlineCount: <AylaConversationMember>[
             for (final AylaConversationMember m
                 in members?.items ?? const <AylaConversationMember>[])
-              if (m.user.online) m,
+              if (memberOnline(m)) m, // tsx 207–213 + 752
           ].length,
         ),
         AylaGroupMemberSearchField(
@@ -755,7 +775,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
                 id: m.user.id,
                 name: m.user.displayName ?? m.user.username ?? '',
                 avatarUrl: (m.user.avatar ?? '').isEmpty ? null : m.user.avatar,
-                online: m.user.online,
+                online: memberOnline(m), // tsx 764
                 role: _roleOf(m.role),
                 isSelf: m.user.id == currentUserId,
               ),

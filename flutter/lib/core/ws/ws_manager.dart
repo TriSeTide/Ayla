@@ -11,7 +11,10 @@
 ///
 /// 事件分发：M0 只挂分发骨架（`onEvent` 回调 + pong 回执静默处理）；
 /// **chat 通道的 41 个接收 case 由 `core/ws/chat_ws.dart` 的 [AylaChatWsClient] 承接**
-/// （2026-09-28 消息域批次接线）。live/voice 通道 enabled=false 占位（M5/M6）。
+/// （2026-09-28 消息域批次接线）；**presence 通道的两类帧（`presence.update` /
+/// `presence.status`）由 `core/ws/presence_ws.dart` 的 `AylaPresenceWsClient` 承接**
+/// （2026-09-29 presence 数据层接线）；voice 由 `core/ws/voice_ws.dart` 承接、
+/// live 由 `core/ws/live_ws.dart` 自理（各见下方字段注释）。
 ///
 /// ## 2026-09-28 变更（消息域批次）
 /// - `subscribed` 集合的**读写归 owner**（chat_ws）：本类只保存它以便 [WsManager.dispose] 清理；

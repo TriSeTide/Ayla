@@ -49,6 +49,22 @@ class AylaUserPublic {
     return _nonEmpty(username);
   }
 
+  /// 复制并覆盖模式字段（presence 实时模式覆盖 REST 快照用）。
+  ///
+  /// 等价于 web `utils/displayStatus.ts:63–69` `withLiveStatus` 的 `{ ...user, status }`：
+  /// 其余字段逐一保留（含 [displayStatus] —— 它是后端快照口径，是否采用由调用方决定）。
+  AylaUserPublic withStatus(String? status) => AylaUserPublic(
+        id: id,
+        username: username,
+        nickname: nickname,
+        avatar: avatar,
+        status: status,
+        online: online,
+        displayStatus: displayStatus,
+        isInVoice: isInVoice,
+        isLive: isLive,
+      );
+
   /// 解析；缺 `id` 视为非法 → null。
   static AylaUserPublic? fromJson(Object? raw) {
     if (raw is! Map) return null;

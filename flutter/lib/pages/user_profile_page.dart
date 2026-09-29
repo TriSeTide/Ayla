@@ -21,7 +21,11 @@
 ///   （`profile.css:558–570`），本页改用公共件（私有 `_PresenceChip` 已删）；
 /// · 分享面板接线属分享域批次（本页只装配分享键）；
 /// · 内容分区数据源同 [ProfilePage]：传 `postsError` 显式失败态；
-/// · `usePresenceOnline` / `useDisplayStatus` 属 presence 接线 ⇒ 本页用后端 `display_status` 兜底。
+/// · `usePresenceOnline` / `useDisplayStatus` ✅ **2026-09-29 已接线**
+///   （`state/display_status.dart` + `state/presence_providers.dart`；与 web
+///   `utils/displayStatus.ts` 同规则：WS 增量优先 / 无记录回退 REST 快照
+///   `user.online`·`user.status` / **隐身强制离线**）⇒ 光环与在线胶囊改用实时值，
+///   不再用后端 `display_status` 快照（web 的 `useDisplayStatus` 同样不读该字段）。
 library;
 
 import 'package:flutter/material.dart';
@@ -31,6 +35,8 @@ import 'package:go_router/go_router.dart';
 import '../core/api/users_api.dart';
 import '../core/models/user_public.dart';
 import '../core/net/dio_client.dart';
+import '../state/display_status.dart';
+import '../state/presence_providers.dart';
 import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
 import '../theme/glass.dart';
@@ -314,6 +320,22 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   Widget _identity(AylaUserDetail detail) {
     final AylaUserPublic user = detail.user;
     final String displayName = user.displayName ?? user.username ?? '';
+    // 在线状态（web `UserProfilePage.tsx:32–34`）：presence 实时增量优先，
+    // REST 快照兜底；文案按 `utils/displayStatus.ts` 的规则（隐身强制离线）。
+    final Map<String, String> onlineUsers =
+        ref.watch(presenceStateProvider).users;
+    final Map<String, String> onlineStatuses =
+        ref.watch(presenceStateProvider).statuses;
+    final AylaUserPublic? liveUser = withLiveStatus(onlineStatuses, user);
+    // web `usePresenceOnline(user)`：先套实时模式再判在线。
+    final bool online = presenceOnline(onlineUsers, liveUser);
+    // web `useDisplayStatus(user)`（`displayStatus.ts:92–100`）。
+    final String displayStatus = displayStatusOf(
+      liveUser,
+      // ⚠️ 照 web 逐字对应：`useDisplayStatus` 的第二参是**原始 user**（未套 withLiveStatus）。
+      // `invisible` 档下两种写法文案相同（该档恒「离线」），此处保持原样以免走样。
+      presenceOnline(onlineUsers, user),
+    );
     return Wrap(
       spacing: AylaSpacing.sp2,
       runSpacing: AylaSpacing.sp2,
@@ -332,7 +354,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
         AylaAvatarHalo(
           label: displayName, // tsx 132 `user.nickname || user.username`
           size: 64,
-          online: user.online,
+          online: online, // tsx 134（web `usePresenceOnline`）
           resourceUrl: (user.avatar ?? '').isEmpty ? null : user.avatar,
         ),
         Column(
@@ -347,8 +369,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
           ],
         ),
         AylaProfilePresence(
-          label: user.displayStatus ?? (user.online ? '在线' : '离线'),
-          online: user.online,
+          label: displayStatus, // tsx 143（web `useDisplayStatus`）
+          online: online, // tsx 142 `.is-online`
         ),
       ],
     );
