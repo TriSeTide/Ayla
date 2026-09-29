@@ -8,7 +8,10 @@
 /// ③ `game` 成功后分流导航（`tsx:107–111`）；
 /// ④ `voice` 成功后关浮层（`tsx:80`）+ 新频道写进 voice 状态
 ///    （`VoiceChannelCreate.tsx:44–45`）；
-/// ⑤ 未知 handler 仍走兜底占位（防回归）。
+/// ⑤ 未知 handler 仍走兜底占位（防回归）；
+/// ⑥ 群内场景 FAB 两档（`shellConfig.ts:227–241`，上一轮登记为未覆盖）：
+///    `/group/:id/voice` ⇒ `group-voice`（handler=voice，groupId = `:id`）、
+///    `/group/:id/games` ⇒ `group-game`（handler=game，成功后落 `/group/:id/games`）。
 ///
 /// 数据源替身：四个接线件都带可注入的取数 / 提交参数（默认走真实 api，
 /// widget test 不发网络请求）。
@@ -24,7 +27,8 @@ import '../lib/core/models/post.dart' show AylaPost, AylaPostDraft;
 import '../lib/core/models/visibility.dart' show AylaPostVisibility;
 import '../lib/layout/app_shell.dart';
 import '../lib/layout/create_sheet_forms.dart';
-import '../lib/router/shell_config.dart' show AylaFabAction;
+import '../lib/router/shell_config.dart'
+    show AylaFabAction, aylaResolveFabAction;
 import '../lib/state/auth_state.dart';
 import '../lib/state/room_providers.dart' show voiceStateProvider;
 import '../lib/theme/app_theme.dart';
@@ -67,6 +71,9 @@ void main() {
               '/voice',
               '/posts',
               '/games',
+              // 群内场景（web shellConfig.ts:227–241 的 group-voice / group-game 两档）
+              '/group/:id/voice',
+              '/group/:id/games',
             ])
               GoRoute(
                 path: path,
@@ -387,6 +394,85 @@ void main() {
       contains('vc7'),
       reason: 'VoiceChannelCreate.tsx:44–45 store.setChannels 的等价物',
     );
+  });
+
+  // ===================== ⑥ 群内场景 FAB：group-voice / group-game =====================
+
+  testWidgets('⑥ group-voice：/group/:id/voice 的 FAB ⇒ 群内语音房表单（groupId = :id）', (
+    WidgetTester tester,
+  ) async {
+    await pumpShell(tester, '/group/g1/voice');
+    expect(find.byType(AylaCreateFab), findsOneWidget);
+    expect(
+      tester.widget<AylaCreateFab>(find.byType(AylaCreateFab)).semanticLabel,
+      '创建群内语音房',
+      reason: 'shellConfig.ts:231–232 —— 群内语音场景 handler=voice、label「创建群内语音房」',
+    );
+
+    await openSheet(tester);
+
+    expect(find.text('创建群内语音房'), findsOneWidget);
+    expect(find.byType(AylaCreateSheet), findsOneWidget);
+    expect(
+      tester
+          .widget<AylaVoiceChannelCreate>(find.byType(AylaVoiceChannelCreate))
+          .groupId,
+      'g1',
+      reason: 'shellConfig.ts:231 的 groupId = 路径参数 :id（CreateFab.tsx:80 `group={action.groupId}`）',
+    );
+    expect(find.textContaining('未接线的创建动作'), findsNothing);
+  });
+
+  testWidgets('⑦ group-game：/group/:id/games 的 FAB ⇒ 群内桌游表单 + 成功落 /group/:id/games', (
+    WidgetTester tester,
+  ) async {
+    // 第一段：真实壳层 —— FAB 动作与表单的 groupId 都必须来自路径参数。
+    await pumpShell(tester, '/group/g1/games');
+    expect(
+      tester.widget<AylaCreateFab>(find.byType(AylaCreateFab)).semanticLabel,
+      '创建群内桌游室',
+      reason: 'shellConfig.ts:237–238 —— 群内桌游场景 handler=game、label「创建群内桌游室」',
+    );
+
+    await openSheet(tester);
+
+    expect(find.text('创建群内桌游室'), findsOneWidget);
+    expect(find.byType(AylaCreateSheet), findsOneWidget);
+    expect(
+      tester.widget<AylaGameRoomCreate>(find.byType(AylaGameRoomCreate)).groupId,
+      'g1',
+      reason: 'shellConfig.ts:238 的 groupId = 路径参数 :id（CreateFab.tsx:107 `group={action.groupId}`）',
+    );
+
+    // 第二段：同一 action 源（`aylaResolveFabAction`）喂给可注入替身的表单 ⇒ 成功导航。
+    final AylaFabAction action = aylaResolveFabAction('/group/g1/games')!;
+    expect(action.key, 'group-game');
+    int closed = 0;
+    await pumpForm(
+      tester,
+      form: AylaCreateGameForm(
+        groupId: action.groupId,
+        loadGroups: () async => const <AylaGroupOption>[],
+        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async {},
+        onClose: () => closed += 1,
+      ),
+      markers: <({String path, String marker})>[
+        (path: '/games', marker: 'games'),
+        (path: '/group/:id/games', marker: 'group-games:{id}'),
+      ],
+    );
+
+    await tester.enterText(fieldWithHint('桌游室名称'), '深夜桌游室');
+    await tester.pump();
+    await tester.tap(find.text('创建'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('group-games:g1'),
+      findsOneWidget,
+      reason: 'CreateFab.tsx:110 —— 群内 ⇒ /group/:groupId/games（一级路径 /games 不得命中）',
+    );
+    expect(closed, 1, reason: 'tsx:108 setOpen(false) 在 navigate 之前');
   });
 
   // ===================== ⑤ 未知 handler 兜底（防回归） =====================

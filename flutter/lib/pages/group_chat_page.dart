@@ -363,6 +363,13 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
               mode: AylaPanelSwapMode.tab,
               enabled: messagesReady,
               establishBaseline: establishingSelection,
+              // 玻璃安全档：`AylaMessageList` 子树含玻璃（他人气泡 `.bubble-other`
+              // 的 blur12 / 跳转标签 / 历史加载控件；空列表时反而无玻璃可谈 ——
+              // 空态是纯文本、回底键被 `AnimatedOpacity(0)` 挡住不 paint）——
+              // 整层 opacity 恒 1.0、只位移不淡入 ——
+              // 否则切子群重播时 Impeller 拒绝「Opacity 祖先 + BackdropFilter」并刷屏
+              //（处置与依据见 `widgets/base/reveal.dart` 文件头 + `panel_swap.dart` 的文件头）。
+              fadeGlass: false,
               child: AylaMessageList(
                 messages: visible,
                 currentUserId: me,
@@ -443,6 +450,9 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
                     identity: subgroupSelection,
                     mode: AylaPanelSwapMode.swap,
                     enabled: composerReady,
+                    // 玻璃安全档：`.composer` 顶层恒为 `AylaGlassSurface`
+                    //（`message_input.dart:559/575` 窄宽两分支）⇒ 同上，只位移不淡入。
+                    fadeGlass: false,
                     child: AylaMessageInput(
                       onSubmit: (AylaMessageInputSubmission submission) {
                         _runtime?.send(submission);

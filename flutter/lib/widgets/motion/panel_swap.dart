@@ -17,6 +17,48 @@
 /// - **swap 档** = `usePanelSwapMotion.ts:12–13`：`previous.current = identity` 在 `!enabled`
 ///   **检查之前** ⇒ 基线**始终推进**、没有补播（保住草稿/焦点，只求「原地抖一下」）。
 ///
+/// ## ⚠️ 玻璃子树：不做整层淡入（2026-09-29 · 与 [AylaRevealItem] 同源的 Impeller 刷屏修复）
+///
+/// 两条 hook 都只有**一条**「opacity + 位移」动画（`useTabPanelMotion.ts:35–44` 的
+/// `[{opacity:0, translateX(+20)}, {opacity:1, translateX(0)}]`；`usePanelSwapMotion.ts:26–30`
+/// 的三段 `0 → .5 → 1` 同理）。但 Flutter 的 `Opacity` 会推 `OpacityLayer`，
+/// 而 Impeller **拒绝**把继承不透明度传给 `BackdropFilter` 的 Contents：
+///
+/// ```
+/// [ERROR:flutter/impeller/entity/contents/contents.cc(119)] Break on
+/// 'impeller::ImpellerValidationBreak' to inspect point of failure:
+/// Contents::SetInheritedOpacity should never be called when Contents::CanAcceptOpacity returns false.
+/// ```
+///
+/// 群聊页的两处调用点子树里**都有玻璃** —— 消息区 `AylaMessageList`（他人气泡
+/// `.bubble-other` 的 blur12、跳转标签、历史加载控件）与输入框 `AylaMessageInput`
+/// （`.composer` 顶层恒为 `AylaGlassSurface`，`message_input.dart:559/575` 窄宽两分支都是）——
+/// 故**切子群**（identity 变化 ⇒ 就地重播）时 Impeller 校验刷屏。
+/// ⚠️ 消息区**空列表时反而没有玻璃可谈**：空态 `_empty()` 是纯文本
+/// （`message_list.dart:837–854`）、回底键的玻璃被 `AnimatedOpacity(0)` 挡住不 paint
+/// （`message_list.dart:913–922`）—— 这正是 `panel_swap_glass_safety_test.dart`
+/// 的 tab 档用例改用「一条他人消息」的原因（空列表下断言「不推 opacity」是假绿，首版实测踩到）。
+///
+/// 处置与 [AylaRevealItem.fadeGlass] **完全相同**（完整论证与逐行依据见
+/// `widgets/base/reveal.dart` 文件头「玻璃子树：不做整层淡入」段，本件不重复）：
+///
+/// | [AylaPanelSwap.fadeGlass] | 渲染 | 与 web 的差异 |
+/// |---|---|---|
+/// | `true`（默认） | `Opacity(t)` + 位移 | **无差异**（逐帧等价 web） |
+/// | `false`（玻璃安全档） | `Opacity(1.0)` + 位移 | **只有位移、没有淡入** |
+///
+/// 依据 = 本机 Flutter 3.47.4 实现：`RenderOpacity.paint`
+/// （`rendering/proxy_box.dart:947–953`）+ `OpacityLayer.addToScene`
+/// （`rendering/layer.dart:2186–2200`：只有 `realizedAlpha < 255` 才 `pushOpacity`，
+/// `alpha == 255` 走 `pushOffset`）⇒ `Opacity(1.0)` 不推 opacity、
+/// 玻璃后代拿不到继承不透明度、Impeller 校验不触发。
+///
+/// 分流由**调用方显式声明**（默认 `true` = 改前行为）：子树里出现 `AylaGlassSurface` /
+/// `AylaGlassBackdrop` / `AylaGlassButton` / 裸 `BackdropFilter` ⇒ 必须传
+/// `fadeGlass: false`。**禁止 build 期子树探测**（`BuildContext.visitChildElements()`
+/// 在 build 期间被 Flutter 明令禁止，实测直接抛 `visitChildElements() called during build.`）
+/// —— 理由同 `reveal.dart` 文件头，勿改回自动探测。
+///
 /// ## 公开面
 /// `AylaPanelSwapMode` · `AylaPanelSwap` · `aylaPanelSwapSamples()`
 library;
@@ -45,6 +87,7 @@ class AylaPanelSwap extends StatefulWidget {
     this.mode = AylaPanelSwapMode.tab,
     this.enabled = true,
     this.establishBaseline = false,
+    this.fadeGlass = true,
   });
 
   /// 换场身份（web 的 `selection` / `subgroupSelection`，如 `"<groupId>:<subgroupId>"`）。
@@ -62,6 +105,23 @@ class AylaPanelSwap extends StatefulWidget {
   /// web `useTabPanelMotion.ts:24–27`：本帧只把 [identity] 记为基线、**不播**
   /// （首次选中默认组那一帧不算「变化」）。
   final bool establishBaseline;
+
+  /// 是否对**含玻璃（`BackdropFilter`）的子树**做整层淡入（默认 `true` = 改前行为）。
+  ///
+  /// ⚠️ **子树里出现 `AylaGlassSurface` / `AylaGlassBackdrop` / `AylaGlassButton` /
+  /// `AylaSidebarCard` / 裸 `BackdropFilter` 时必须传 `false`**：Impeller 会拒绝
+  /// 「`Opacity` 祖先 + `BackdropFilter`」组合并刷屏（见文件头「玻璃子树」段）。
+  ///
+  /// - `true`（默认）：整层 `Opacity(t)` + 位移 —— 与 `useTabPanelMotion.ts:35–44` /
+  ///   `usePanelSwapMotion.ts:26–30` 逐帧一致；
+  /// - `false`（玻璃安全档）：`Opacity` 恒 1.0 + 位移 —— `OpacityLayer.addToScene`
+  ///   在 `alpha == 255` 时走 `pushOffset`（`rendering/layer.dart:2186`），**不推
+  ///   opacity** ⇒ 玻璃后代拿不到继承不透明度，**只有位移、没有淡入**。
+  ///
+  /// 默认值取 `true` 的理由与 [AylaRevealItem.fadeGlass] 相同：与改前行为完全一致
+  /// （含玻璃的调用点一并显式声明为 `false`），且「漏声明」表现为**可见的刷屏**，
+  /// 而不是静默的视觉退化。
+  final bool fadeGlass;
 
   /// `AURORAQUA_MOTION.distance` = 20（两档同位移量）。
   static const double distance = 20;
@@ -135,7 +195,9 @@ class _AylaPanelSwapState extends State<AylaPanelSwap>
           // useTabPanelMotion：opacity 0 / x +20 → 1 / 0（easeInOut）
           final double p = AylaCurves.auroraquaEaseInOut.transform(t);
           return Opacity(
-            opacity: p,
+            // 玻璃安全档（fadeGlass: false）：恒 1.0 ⇒ `OpacityLayer.addToScene` 走
+            // `pushOffset`（rendering/layer.dart:2186）⇒ 玻璃后代拿不到继承不透明度。
+            opacity: widget.fadeGlass ? p : 1.0,
             child: Transform.translate(
               offset: Offset(AylaPanelSwap.distance * (1 - p), 0),
               child: child,
@@ -148,7 +210,7 @@ class _AylaPanelSwapState extends State<AylaPanelSwap>
           outbound ? t * 2 : (t - 0.5) * 2,
         );
         return Opacity(
-          opacity: outbound ? 1 - p : p,
+          opacity: widget.fadeGlass ? (outbound ? 1 - p : p) : 1.0,
           child: Transform.translate(
             offset: Offset(0, AylaPanelSwap.distance * (outbound ? p : 1 - p)),
             child: child,
@@ -198,15 +260,19 @@ class _PanelSwapDemoState extends State<_PanelSwapDemo> {
           variant: AylaGlassButtonVariant.ghost,
           onPressed: () => setState(() => _n += 1),
         ),
+        // 样张卡本身是 `AylaGlassSurface`（含玻璃）⇒ 两档都按玻璃安全档渲染，
+        // 否则画布上点「切下一个 identity」会复现 Impeller 刷屏。
         AylaPanelSwap(
           identity: 'sg-$_n',
           mode: AylaPanelSwapMode.tab,
-          child: card('tab 档（消息区）：300ms opacity 0 / x +20 → 1 / 0'),
+          fadeGlass: false,
+          child: card('tab 档（消息区）：300ms 位移 x +20 → 0（玻璃档不淡入）'),
         ),
         AylaPanelSwap(
           identity: 'sg-$_n',
           mode: AylaPanelSwapMode.swap,
-          child: card('swap 档（输入框）：600ms 下移淡出 y +20 后回位淡入'),
+          fadeGlass: false,
+          child: card('swap 档（输入框）：600ms 下移 y +20 后回位（玻璃档不淡入）'),
         ),
       ],
     );
