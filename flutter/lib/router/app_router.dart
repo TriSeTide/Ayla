@@ -249,13 +249,19 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           // 第 6 批：群聊场景容器（web `App.tsx:86–90` 五条路由都指向同一个 GroupPage，
           // 由 route param 决定场景）。⚠️ 声明顺序：三条带具体尾段的必须在
           // `/group/:id/:scene` **之前**，否则 `posts` / `voice` / `live` 会被当成 scene 吃掉。
-          // `key: ValueKey(id)` —— 切群时整页重建（目录/子群/语音/直播四条分页状态一起换新；
-          // web 用 effect 重跑表达同一语义）。
+          //
+          // ⚠️ **五条都不得加 `key: ValueKey(id)`**（2026-09-29 用户实报「切群整个界面重新加载」后移除）：
+          // 它们共用不带 key 的 `NoTransitionPage` ⇒ Navigator 的 `Page.canUpdate`（runtimeType + key）
+          // 为真 ⇒ 原地 update 同一条 route、保留同一棵 Element 树。加 ValueKey 等于换新 route，
+          // GroupPage 的 State 连同 ServerRail / ChannelSidebar 整棵重建、四条分页状态重新拉取。
+          // web 只有**一个** GroupPage 实例、只换 route param：`ServerRail` 常驻；`ChannelSidebar`
+          // 走 `AnimatePresence mode="wait"` 换面板；内容区由 `ConversationTransition
+          // identity="group:<id>"` 编排（`GroupPage.tsx:405–436`）。切群的数据换新落在
+          // `_GroupPageState.didUpdateWidget`（等价 tsx 229–245 的 effect）。
           GoRoute(
             path: '/group/:id',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
               child: GroupPage(
-                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
                 groupId: s.pathParameters['id'] ?? '',
               ),
             ),
@@ -264,7 +270,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/group/:id/posts/:postId',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
               child: GroupPage(
-                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
                 groupId: s.pathParameters['id'] ?? '',
                 postId: s.pathParameters['postId'],
               ),
@@ -274,7 +279,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/group/:id/voice/:voiceChannelId',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
               child: GroupPage(
-                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
                 groupId: s.pathParameters['id'] ?? '',
                 voiceChannelId: s.pathParameters['voiceChannelId'],
               ),
@@ -284,7 +288,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/group/:id/live/:liveChannelId',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
               child: GroupPage(
-                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
                 groupId: s.pathParameters['id'] ?? '',
                 liveChannelId: s.pathParameters['liveChannelId'],
               ),
@@ -294,7 +297,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/group/:id/:scene',
             pageBuilder: (BuildContext c, GoRouterState s) => NoTransitionPage<void>(
               child: GroupPage(
-                key: ValueKey<String>(s.pathParameters['id'] ?? ''),
                 groupId: s.pathParameters['id'] ?? '',
                 scene: s.pathParameters['scene'],
               ),

@@ -2,8 +2,12 @@
 /// 的等价物。
 ///
 /// ## 双形态装配（tsx 405–496）
-/// - **宽屏（>768）**：`ServerRail` + `ChannelSidebar` + `group-content` 三列，
-///   内容区由 [AylaConversationTransition]（`identity = "group:<id>"`，tsx 429–431）编排；
+/// - **宽屏（>768）**：`ServerRail` + `ChannelSidebar` + `group-content` 三列；
+///   内容区 = **换 key 的 `KeyedSubtree`**（`key = "group:<id>"`）—— web 的
+///   `ConversationTransition`（tsx 429–431）在 `panels` 默认档下宿主变体**全为空对象**
+///   （`auroraquaMotion.ts:29` 的 `auroraquaPanelOrchestration`）⇒ 当帧卸载旧 owner /
+///   挂载新 owner，**不做任何淡出**；不要换成 `AylaConversationTransition` 的 wait 编排
+///   （那条路径会给旧件挂 300ms `FadeTransition` 兜底 = 用户实报的「切群闪屏」）；
 /// - **窄屏（≤768）**：`GroupTopTabs`（从原底栏位置连续升至顶部，300ms）+ 场景层；
 ///   壳层在群路由**不出 BottomTabs**（`router/shell_config.dart` 的 `aylaIsGroupScene`），
 ///   与 tsx 的「底栏本体升上去」等价。
@@ -59,7 +63,6 @@ import '../theme/tokens.dart';
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsWide;
 import '../widgets/group/group_create_dialog.dart' show AylaGroupCreateDialog;
 import '../widgets/live/live_hall.dart' show AylaLiveStatus;
-import '../widgets/motion/gestures.dart' show AylaConversationTransition;
 import '../widgets/shell/channel_sidebar.dart';
 import '../widgets/shell/group_top_tabs.dart';
 import '../widgets/shell/server_rail.dart';
@@ -137,9 +140,31 @@ class GroupPage extends ConsumerStatefulWidget {
 
 class _GroupPageState extends ConsumerState<GroupPage> {
   AylaGroupDirectory? _directory;
+
+  // ---- 群级目录：**按群分桶缓存**（web 语义）----
+  // web 的 `useDirectoryPage` / `useSocialPage` 都从**全局 store 的 `records[key]`** 读，
+  // key = `directoryKey(kind, { groupId, … })` / `socialKey(kind, { groupId, … })`
+  // （`stores/directory.ts:83–95`、`stores/social.ts`）⇒ 切群只是**换桶**：旧桶不销毁、
+  // 内容仍在；且 `directory.ts:274` / `social.ts:150` 的
+  // `mode === "initial" && fetchedAt != null && < 60s ⇒ return` 让**切回旧群不重拉**、
+  // 无 loading 闪烁（`ChannelSidebar` 的面板虽然按 `key={groupId}` 重挂，但一挂上就有数据）。
+  //
+  // ⚠️ 曾经的错法（2026-09-29 用户实报「每次切换群，左侧选项卡就刷掉了」的根因）：
+  // 在 `didUpdateWidget` 里对三条分页状态 **dispose + 重建 + 立即 `load()`** ⇒ 每次切群
+  // 都清空重拉；`AylaPagedList.load()` 没有「已加载则跳过」的保护（`paged_list.dart:93`），
+  // 于是面板重挂的那一刻是**空的**，用户看到的就是「选项卡被刷掉」。
+  final Map<String, AylaPagedList<AylaSubGroup>> _subgroupsByGroup =
+      <String, AylaPagedList<AylaSubGroup>>{};
+  final Map<String, AylaPagedList<AylaDirectoryVoiceEntry>> _voiceByGroup =
+      <String, AylaPagedList<AylaDirectoryVoiceEntry>>{};
+  final Map<String, AylaPagedList<AylaDirectoryLiveEntry>> _liveByGroup =
+      <String, AylaPagedList<AylaDirectoryLiveEntry>>{};
+
+  /// 当前群对应的三个桶（切群只换引用，不销毁旧桶）。
   AylaPagedList<AylaSubGroup>? _subgroups;
   AylaPagedList<AylaDirectoryVoiceEntry>? _voice;
   AylaPagedList<AylaDirectoryLiveEntry>? _live;
+
   bool _showGroupCreate = false;
 
   /// 已同步过的 (群, 场景) —— 只在变化时写 store（web tsx 229–245 的 effect）。
@@ -158,14 +183,52 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   @override
   void initState() {
     super.initState();
+    // 会话目录**与群无关**（web `useSocialPage("conversations", { type: "group" })` 的依赖里没有 id）
+    // ⇒ 切群不重建它：ServerRail 的列表、游标与滚动位置因此跨群保留（web 同一实例、只换 props）。
     _directory = AylaGroupDirectory(chatState: ref.read(chatStateProvider))
       ..addListener(_onChanged);
-    _subgroups = AylaPagedList<AylaSubGroup>(
+    _bindGroupLists();
+    // 顶栏从原底栏位置升到顶部（web useEnterGroupAnimation 的「首帧后再进入」）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _entered = true);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant GroupPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 切群：**只换桶**（web `records[key]` 的 key 里含 groupId ⇒ 切群就是换 key）。
+    // 旧桶不销毁、不重拉 ⇒ 切回旧群时面板一挂上就是满内容（无 loading 闪烁）。
+    //
+    // ⚠️ 这条路径存在的前提是路由**不给页面加 `key: ValueKey(id)`**（见 `router/app_router.dart`）
+    // 与分页容器**有「已加载即跳过」保护**；曾经的实现在这里 dispose + 重建 + 立即 load()
+    // ⇒ 每次切群清空重拉 = 用户实报的「左侧选项卡被刷掉」。
+    if (oldWidget.groupId == widget.groupId) return;
+    _bindGroupLists();
+  }
+
+  /// 把当前群的三个桶挂到 [_subgroups] / [_voice] / [_live]（**惰性建桶**）。
+  ///
+  /// 新建的桶立即 `load()`（等价 web `useDirectoryPage` 挂载后的首次 `loadDirectory`）；
+  /// 已在缓存里的桶**不重拉**（等价 `directory.ts:274` / `social.ts:150` 的 60s 防抖 ——
+  /// 那边是 60s 窗口，这边是会话内复用，差异见 `paged_list.dart` 文件头的登记）。
+  void _bindGroupLists() {
+    final String gid = widget.groupId;
+    _subgroups = _subgroupsByGroup.putIfAbsent(
+      gid,
+      () => _createSubgroups(gid)..load(),
+    );
+    _voice = _voiceByGroup.putIfAbsent(gid, () => _createVoice(gid)..load());
+    _live = _liveByGroup.putIfAbsent(gid, () => _createLive(gid)..load());
+  }
+
+  AylaPagedList<AylaSubGroup> _createSubgroups(String gid) {
+    final AylaPagedList<AylaSubGroup> list = AylaPagedList<AylaSubGroup>(
       // `listSubgroupsPage` 的响应多带一个 `default` 字段（[AylaSubgroupPage]）；
       // 本列表只消费 results/游标/总数 ⇒ 这里投影成通用游标页。
       request: (String? cursor) async {
         final AylaSubgroupPage page = await AylaChatApi.listSubgroupsPage(
-          widget.groupId,
+          gid,
           cursor: cursor,
         );
         return AylaDirectoryPage<AylaSubGroup>(
@@ -177,41 +240,52 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       },
       keyOf: (AylaSubGroup sg) => sg.id,
     )..addListener(_onChanged);
-    _voice = AylaPagedList<AylaDirectoryVoiceEntry>(
-      request: (String? cursor) => AylaVoiceApi.listVoiceChannelsPage(
-        cursor: cursor,
-        groupId: widget.groupId,
-      ),
+    // 子群列表落库后同步到状态层（默认组兜底，web tsx 265–272）。
+    // ⚠️ 监听器必须**绑定本桶的 groupId**：非当前群的桶也会在后台完成请求，
+    // 用 `widget.groupId` 会把 A 群的数据写进 B 群（串群）。
+    list.addListener(() => _syncSubgroupsFor(gid, list));
+    return list;
+  }
+
+  AylaPagedList<AylaDirectoryVoiceEntry> _createVoice(String gid) {
+    return AylaPagedList<AylaDirectoryVoiceEntry>(
+      request: (String? cursor) =>
+          AylaVoiceApi.listVoiceChannelsPage(cursor: cursor, groupId: gid),
       keyOf: (AylaDirectoryVoiceEntry e) => e.card.id,
     )..addListener(_onChanged);
-    _live = AylaPagedList<AylaDirectoryLiveEntry>(
-      request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
-        cursor: cursor,
-        groupId: widget.groupId,
-      ),
+  }
+
+  AylaPagedList<AylaDirectoryLiveEntry> _createLive(String gid) {
+    return AylaPagedList<AylaDirectoryLiveEntry>(
+      request: (String? cursor) =>
+          AylaLiveApi.listLiveChannelsPage(cursor: cursor, groupId: gid),
       keyOf: (AylaDirectoryLiveEntry e) => e.card.id,
     )..addListener(_onChanged);
-    // 子群列表落库后同步到状态层（默认组兜底，web tsx 265–272）。
-    _subgroups!.addListener(_syncSubgroups);
-    unawaited(_subgroups!.load());
-    unawaited(_voice!.load());
-    unawaited(_live!.load());
-    // 顶栏从原底栏位置升到顶部（web useEnterGroupAnimation 的「首帧后再进入」）。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _entered = true);
-    });
+  }
+
+  /// 页面销毁才清空全部桶（web 对应 `reset()`：登出/账号切换时清 `records`）。
+  void _disposeGroupLists() {
+    for (final AylaPagedList<AylaSubGroup> list in _subgroupsByGroup.values) {
+      list.dispose();
+    }
+    for (final AylaPagedList<AylaDirectoryVoiceEntry> list in _voiceByGroup.values) {
+      list.dispose();
+    }
+    for (final AylaPagedList<AylaDirectoryLiveEntry> list in _liveByGroup.values) {
+      list.dispose();
+    }
+    _subgroupsByGroup.clear();
+    _voiceByGroup.clear();
+    _liveByGroup.clear();
+    _subgroups = null;
+    _voice = null;
+    _live = null;
   }
 
   @override
   void dispose() {
     _leaveTimer?.cancel();
-    _subgroups?.removeListener(_syncSubgroups);
-    _subgroups?.removeListener(_onChanged);
-    _subgroups?.dispose();
-    _voice?.removeListener(_onChanged);
-    _voice?.dispose();
-    _live?.removeListener(_onChanged);
-    _live?.dispose();
+    _disposeGroupLists();
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
     super.dispose();
@@ -221,20 +295,18 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     if (mounted) setState(() {});
   }
 
-  /// 子群列表 → 状态层（web `GroupPage.tsx:265–283`）：
+  /// 子群桶 → 状态层（web `GroupPage.tsx:265–283`）：
   /// 未选中时取服务端标出的默认组（缺席时退回列表里 `is_default` 的第一项）。
-  void _syncSubgroups() {
-    final AylaPagedList<AylaSubGroup>? pager = _subgroups;
-    if (pager == null || !pager.loaded) return;
+  void _syncSubgroupsFor(String gid, AylaPagedList<AylaSubGroup> pager) {
+    if (!pager.loaded) return;
     final AylaSubGroupState state = ref.read(subgroupStateProvider);
-    if (state.subgroupsOf(widget.groupId).isEmpty &&
-        pager.items.isNotEmpty) {
-      state.setSubgroups(widget.groupId, pager.items);
+    if (state.subgroupsOf(gid).isEmpty && pager.items.isNotEmpty) {
+      state.setSubgroups(gid, pager.items);
     }
-    if (state.activeSubgroupOf(widget.groupId) != null) return;
-    for (final AylaSubGroup sg in state.subgroupsOf(widget.groupId)) {
+    if (state.activeSubgroupOf(gid) != null) return;
+    for (final AylaSubGroup sg in state.subgroupsOf(gid)) {
       if (sg.isDefault) {
-        state.setActiveSubgroup(widget.groupId, sg.id);
+        state.setActiveSubgroup(gid, sg.id);
         return;
       }
     }
@@ -466,13 +538,35 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               onSelectLiveChannel: (int id) => _openLiveChannel('$id'),
               liveDirectory: _channelDirectory(_live),
               postUnread: currentGroup?.postUnreadCount ?? 0,
-              playing: false,
+              // ⚠️ **不要传 `playing: false`**：该参数是 web `useIsPresent()` 的等价物
+              // （`ChannelSidebar.tsx:83–97`：面板退场中才 `inert` = 禁指针 + 排除语义）。
+              // 常驻面板必须为在场态（默认 true）；传 false 会让整列频道侧栏
+              // 永久 `IgnorePointer(ignoring: true)` —— 视觉正常但**完全点不动**
+              // （2026-09-29 用户实报「宽屏第二列根本无法点击」）。
             ),
             Expanded(
-              child: AylaConversationTransition(
-                identity: 'group:${widget.groupId}',
-                builder: (BuildContext context, String identity) =>
-                    _renderScene(contentScene),
+              // ⚠️ **不要用 `AylaConversationTransition` 的 wait 编排**（2026-09-29 用户二次实报
+              // 「切群还是在跳转闪屏」后的收口）：
+              //
+              // web 的 `ConversationTransition(identity="group:<id>", panels=true)`
+              // （`components/motion/ConversationTransition.tsx:12–24`）里，`ConversationOwner` 的变体是
+              // **`auroraquaPanelOrchestration` —— enter / center / exit 三个全是空对象**
+              // （`motion/auroraquaMotion.ts:29`）⇒ `AnimatePresence mode="wait"` 的「等旧件退完」
+              // **当帧即满足**：旧 owner 立即卸载、新 owner 立即挂载，**宿主不做任何淡出/位移**；
+              // 入场只由新 owner 内部各分区自己播（`GroupChat.tsx:283–332` 的 `initial="enter"`）。
+              //
+              // 而 `AylaConversationTransition` 在 `panels: true && childOwnsPanels: false` 档
+              // （= 本页上轮的调用形状）走的是**「宿主整体淡出旧件」的兜底**（`gestures.dart:402–415`）：
+              // 旧件被 `FadeTransition(300ms)` 淡到 0、**期间不挂新件**，300ms 后才换 ⇒ 实测
+              // 内容区出现「0.95 → 0.00 历时 304ms」的淡出段。叠加本页 builder 之前**不消费
+              // identity**（旧槽里渲染的是**新群**内容）⇒ 用户看到的就是「新群内容闪一下 →
+              // 消失 300ms → 又出现」。
+              //
+              // ⇒ Flutter 等价物 = **换 key 的 `KeyedSubtree`**：旧子树与新子树在**同一帧**内
+              // 卸载/挂载（同一时刻只有一个会话 owner，与 web 的净效果一致），无淡出、无空档。
+              child: KeyedSubtree(
+                key: ValueKey<String>('group:${widget.groupId}'),
+                child: _renderScene(contentScene),
               ),
             ),
           ],

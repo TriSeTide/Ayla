@@ -57,6 +57,7 @@ import '../state/badges_state.dart';
 import '../state/chat_drafts.dart';
 import '../state/chat_state.dart';
 import '../state/message_state.dart';
+import '../theme/tokens.dart';
 import '../widgets/chat/message_input.dart'
     show AylaMessageInput, AylaMessageInputSubmission, AylaPickedMedia;
 
@@ -804,6 +805,7 @@ class AylaChatPaneHost extends ConsumerStatefulWidget {
     super.key,
     required this.conversationId,
     this.narrow = false,
+    this.panelMotion = false,
     this.onBack,
     this.externalJump,
   });
@@ -812,6 +814,10 @@ class AylaChatPaneHost extends ConsumerStatefulWidget {
 
   /// 窄屏档（头部通栏 + 工具键下移 + 返回键由调用方给）。
   final bool narrow;
+
+  /// 三区进出场编排（web `PrivateChatPane.tsx:43` 的 `panelMotion`）—— 原样透传给
+  /// [AylaPrivateChatPane]；须与 `AylaConversationTransition(childOwnsPanels: true)` 同传。
+  final bool panelMotion;
 
   /// 返回键（窄屏私聊窗口 → `/messages`；宽屏两列不传）。
   final VoidCallback? onBack;
@@ -875,6 +881,7 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
       elysiaUserId: elysiaId,
       onBack: widget.onBack,
       narrow: widget.narrow,
+      panelMotion: widget.panelMotion,
       hasMore: _runtime.hasMore,
       loading: _runtime.loading,
       onLoadMore: _runtime.loadMore,
@@ -918,6 +925,14 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
             drafts.setDraft(key, serialized),
         onTyping: _runtime.onInput,
         narrow: widget.narrow,
+        // 宽屏浮动输入卡的 12px 外边距（`auroraqua.css:347–359` 在 @media ≥769 内），
+        // 左归零（`.wide-messages-pane .composer`，同块 361–368）。窄屏档忽略该参数。
+        gutter: const EdgeInsets.fromLTRB(
+          0,
+          AylaSpacing.sidebarGutter,
+          AylaSpacing.sidebarGutter,
+          AylaSpacing.sidebarGutter,
+        ),
       ),
     );
   }

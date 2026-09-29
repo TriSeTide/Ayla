@@ -29,8 +29,8 @@
 ///   在新旧之间串行（旧件先播 300ms 退出，再挂新件），快速连切只保留最后一次请求的件。
 ///
 /// ## 公开面
-/// `AylaPanelTransition` · `AylaConversationTransition` · `AylaFullScreenSwipeBack` ·
-/// `AylaPrimaryNavPage` · `aylaResolveSwipeCommit` · 各手势常量
+/// `AylaPanelTransition` · `AylaConversationTransition` · `AylaConversationPresence` ·
+/// `AylaFullScreenSwipeBack` · `AylaPrimaryNavPage` · `aylaResolveSwipeCommit` · 各手势常量
 library;
 
 import 'package:flutter/material.dart';
@@ -208,6 +208,35 @@ class _AylaPanelTransitionState extends State<AylaPanelTransition>
   }
 }
 
+/// 会话面板「在场」信号（web `framer-motion` 的 `useIsPresent()`）。
+///
+/// `AylaConversationTransition` 的 `panels: true` 档是**透明宿主**（web
+/// `auroraquaPanelOrchestration` 三个变体全空）—— 进出场由子件自己播；子件需要知道
+/// 自己处于「在场」（播进场 / 停在 center）还是「退出中」（播退场）。
+///
+/// 读取方式：[of]（无宿主时返回 `true` ⇒ 独立使用子件的场合不会误判为退场）。
+class AylaConversationPresence extends InheritedWidget {
+  const AylaConversationPresence({
+    super.key,
+    required this.present,
+    required super.child,
+  });
+
+  /// 是否在场（web `useIsPresent()`）。
+  final bool present;
+
+  /// 读最近宿主的在场信号（无宿主 ⇒ `true`）。
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<AylaConversationPresence>()
+          ?.present ??
+      true;
+
+  @override
+  bool updateShouldNotify(AylaConversationPresence oldWidget) =>
+      oldWidget.present != present;
+}
+
 /// 会话转场宿主（web `ConversationTransition`，`AnimatePresence mode="wait"` 等价物）。
 ///
 /// [identity] 变化：**旧件先播 300ms 退出**（期间不可点、语义排除），**播完才挂新件**；
@@ -218,6 +247,7 @@ class AylaConversationTransition extends StatefulWidget {
     required this.identity,
     required this.builder,
     this.panels = true,
+    this.childOwnsPanels = false,
   });
 
   /// 会话身份（web `key={identity}`）。
@@ -237,6 +267,18 @@ class AylaConversationTransition extends StatefulWidget {
   ///
   /// 事实源 = `MessagesPage.tsx:190`：`panels={activeChatId != null}` ⇒ **空会话态**这一档走 false。
   final bool panels;
+
+  /// 子件自己持有进出场（`panels: true` 语义的完整版；web `useIsPresent()` + 子件变体传播）。
+  ///
+  /// - `false`（默认）：退出中的旧件由**宿主整体淡出**（`FadeTransition(opacity: _c)`）——
+  ///   对没接面板动效的子件是兜底；
+  /// - `true`：旧件**不整体淡出**，由子件读 [AylaConversationPresence] 后按自己的
+  ///   分区变体播退场（web `.private-chat.chat-motion-panels` 的 `auroraquaPanelOrchestration`
+  ///   宿主透明、三区各自 exit）。宿主只保留 `IgnorePointer` / `ExcludeSemantics`。
+  ///
+  /// ⚠️ 传 `true` 就必须让 builder 里的子件真正消费 [AylaConversationPresence]
+  /// （如 `AylaPrivateChatPane(panelMotion: true)`），否则旧件会瞬移消失。
+  final bool childOwnsPanels;
 
   @override
   State<AylaConversationTransition> createState() =>
@@ -339,7 +381,11 @@ class _AylaConversationTransitionState extends State<AylaConversationTransition>
     );
     final String? leaving = _leaving;
     if (leaving == null) {
-      return widget.panels ? active : _wrapHostPanel(active, entering: true);
+      final Widget live = AylaConversationPresence(
+        present: true,
+        child: active,
+      );
+      return widget.panels ? live : _wrapHostPanel(live, entering: true);
     }
     final Widget leavingChild = KeyedSubtree(
       key: ValueKey<String>(leaving),
@@ -347,16 +393,24 @@ class _AylaConversationTransitionState extends State<AylaConversationTransition>
         builder: (BuildContext context) => widget.builder(context, leaving),
       ),
     );
-    // 退出中的旧件：不可点、语义排除（web `inert` + `aria-hidden` + `pointer-events:none`）
+    // 退出中的旧件：不在场（web `useIsPresent() == false`）⇒ 子件播退场；
+    // 且不可点、语义排除（web `inert` + `aria-hidden` + `pointer-events:none`）。
+    final Widget leavingPresent = AylaConversationPresence(
+      present: false,
+      child: leavingChild,
+    );
     return Stack(
       children: <Widget>[
         ExcludeSemantics(
           child: IgnorePointer(
             child: widget.panels
-                // panels:true ⇒ 宿主透明（子件自己播）；只有淡出表达退出
-                ? FadeTransition(opacity: _c, child: leavingChild)
+                // panels:true + 子件自持 ⇒ 宿主透明，三区各自 exit（web 语义完整版）
+                ? (widget.childOwnsPanels
+                    ? leavingPresent
+                    // panels:true（子件未接面板动效）⇒ 宿主整体淡出兜底
+                    : FadeTransition(opacity: _c, child: leavingPresent))
                 // panels:false ⇒ center → 左 −20 + 淡出（tsx:50）
-                : _wrapHostPanel(leavingChild, entering: false),
+                : _wrapHostPanel(leavingPresent, entering: false),
           ),
         ),
       ],

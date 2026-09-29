@@ -53,7 +53,8 @@ import '../widgets/chat/elysia_entry.dart';
 import '../widgets/chat/messages_layout.dart';
 import '../widgets/chat/messages_tabs.dart';
 import '../widgets/chat/request_rows.dart';
-import '../widgets/motion/gestures.dart' show AylaConversationTransition;
+import '../widgets/motion/gestures.dart'
+    show AylaConversationTransition, AylaPanelEdge, AylaPanelTransition;
 import 'chat_support.dart';
 
 class MessagesPage extends ConsumerStatefulWidget {
@@ -331,9 +332,16 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
             child: AylaConversationTransition(
               identity: 'private:${activeId ?? 'empty'}',
               panels: activeId != null,
+              // 空态档（panels:false）由宿主自己播；有会话档子件自持三区进出场
+              // （web `MessagesPage.tsx:190–192` 的 `panels` + `PrivateChatPane panelMotion`）。
+              childOwnsPanels: activeId != null,
               builder: (BuildContext context, String identity) => activeId == null
                   ? const AylaWideMessagesEmpty()
-                  : AylaChatPaneHost(conversationId: activeId, narrow: false),
+                  : AylaChatPaneHost(
+                      conversationId: activeId,
+                      narrow: false,
+                      panelMotion: true,
+                    ),
             ),
           ),
         ],
@@ -363,11 +371,25 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
       ),
     );
 
-    final Widget body = switch (_tab) {
+    final Widget panel = switch (_tab) {
       'friends' => _friendsTab(),
       'requests' => _requestsTab(),
       _ => _chatTab(entryProfile, elysiaUserId),
     };
+
+    // 选项卡面板**进场**（web `MessagesPage.tsx:63` 的 `useTabPanelMotion` +
+    // `hooks/useTabPanelMotion.ts:23–46`，selector = `:scope > .messages-private,
+    // :scope > .messages-friends`）：新面板 `{opacity:0, x:+20} → {opacity:1, x:0}`，
+    // 300ms `cubic-bezier(.42,0,.58,1)`（= `AylaCurves.auroraquaEaseInOut`，见 `AylaPanelTransition`）；
+    // `prefers-reduced-motion` ⇒ 不播（同 hook 31 行）；**没有退出动画**
+    // —— 旧面板由条件渲染直接卸载（web 无 AnimatePresence）。
+    // key 取 `_tab`：切换时新面板重建 ⇒ 重播进场（面板本就随 tab 换组件，不额外引入重挂载）。
+    final Widget body = AylaPanelTransition(
+      key: ValueKey<String>(_tab),
+      edge: AylaPanelEdge.right,
+      show: true,
+      child: panel,
+    );
 
     // 私信 tab：选项卡固定 + 列表内部滚动（web `.messages-private` 自己 `overflow-y: auto`）；
     // 好友/认证 tab：web 由 `.messages-page` 整体滚动（选项卡随之滚走）⇒ 外层滚动视图。

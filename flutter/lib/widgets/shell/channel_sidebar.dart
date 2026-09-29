@@ -564,6 +564,15 @@ class _AylaChannelSidebarState extends State<AylaChannelSidebar>
         );
       },
       child: AylaRevealItem(
+        // ⚠️ **key 必须带 groupId**（2026-09-29 用户第三次实报：「切换群时第二列侧栏只看到
+        // 前一个页面的向左淡出，没有后一个群的侧栏淡入」）：
+        // web 里面板是 `AnimatePresence` 的**直接子元素**且带 `key={groupId}`
+        // （`ChannelSidebar.tsx:75–77`）⇒ 换群 = **新组件挂载** ⇒ `initial={reduced ? false : "enter"}`
+        // （同文件 93 行）配合 `panelVariants(reduced, "left")`（`auroraquaMotion.ts:37–51`：
+        // `enter = { x: −20, opacity: 0 }` → `center`，300ms easeInOut）**每次换群都重播入场**。
+        // 不给 key 时本件 State 被复用、`_started` 已为 true ⇒ 入场只在**首帧**播一次，
+        // 切群就只剩旧面板的退场、新面板直接闪现（实测：退场段 1→0 之后不透明度**直接跳回 1**）。
+        key: ValueKey<String?>(_data.groupId),
         // 入场：auroraqua-sidebar-in（−20px 0 → 0,0）；≥769px 由 JS 编排
         // （auroraqua 310–313 关掉 CSS 入场）→ 用 panelVariants 的 300ms easeInOut。
         enabled: widget.animateEntrance && !_reduceMotion,

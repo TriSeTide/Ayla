@@ -100,6 +100,7 @@ import '../widgets/chat/media_content.dart';
 import '../widgets/chat/message_input.dart';
 import '../widgets/chat/message_list.dart';
 import '../widgets/chat/messages_layout.dart';
+import '../widgets/motion/panel_swap.dart';
 import '../widgets/chat/messages_tabs.dart';
 import '../widgets/base/nav_highlight_list.dart';
 import '../widgets/chat/mention_picker.dart';
@@ -270,6 +271,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaPageTransition',
     '手势动画（空白卡片模拟）',
     'AylaPanelTransition / AylaConversationTransition / AylaFullScreenSwipeBack / AylaPrimaryNavPage',
+    'AylaPanelSwap',
   ]),
   AylaGalleryCategory('common', '通用件 · 分享 / 分页 / 弹层 / 资源', <String>[
     'AylaShareSheet',
@@ -394,6 +396,17 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                           '横滑判定 净位移 ≥ 宽/3 优先、同向甩动 ≥300px/s 且 ≥40px 补充、方向锁让位（`resolveSwipeCommit`）· '
                           '跟手弹性 .8（`DRAG_ELASTIC`）· 纵向滚动优先由 Flutter 手势竞技场天然等价（机制差异已登记）',
                       child: const _MotionShowcaseDemo(),
+                    ),
+                    _Section(
+                      title: 'AylaPanelSwap（hooks/useTabPanelMotion.ts 1–48 + hooks/usePanelSwapMotion.ts 1–43）',
+                      source:
+                          '两档**就地重播、不重挂子树**（web 原文：`No key, duplicate panel, or remount is introduced`）：'
+                          'tab 档 = 消息区（`GroupChat.tsx:120–125`）300ms `opacity 0 / x +20` → `1 / 0`（easeInOut）；'
+                          'swap 档 = 输入框（`:126`）600ms 双段「下移淡出 y +20 → 回位淡入」，每段 easeOut。'
+                          '基线推进两条 hook **有意不同**：tab 档 not-ready 时**冻结基线**（`:28–31` 的 `if (!ready) return;` 在推进之前）'
+                          '⇒ 之后补播，另有 `establishBaseline`（`:24–27`）跳过首次选中；swap 档基线**始终推进**（`:12–13`）⇒ 不补播。'
+                          '定向测试 `panel_swap_test.dart` 5 条',
+                      child: aylaPanelSwapSamples(), // 可交互：点键切换 identity 看两档重播
                     ),
                     _Section(
                       title: 'AylaPanelTransition / AylaConversationTransition / AylaFullScreenSwipeBack / AylaPrimaryNavPage（auroraquaMotion panel 段 + useSwipeCommit / useEdgeSwipeBack / ConversationTransition / FullScreenSwipeBack / PrimaryNavPage）',
@@ -1614,7 +1627,9 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   '宽屏 auroraqua 347–358 浮卡（padding 8 / radius 16 / glass-shadow）· 工具键 40×40 '
                   'radius 12 玻璃档（auroraqua 105–112）· 编辑器 min-h 40 / max-h 140 / padding 8 12 / lh 22 · '
                   '引用条 2484–2527 · 待发媒体 2001–2093（44/58 缩略图 + 18 圆移除键）· 录音态 2431–2483 · '
-                  '@ 编辑器 = `\\uFFFC` 占位 + 胶囊渲染（web contentEditable 的等价）',
+                  '@ 编辑器 = `\\uFFFC` 占位 + 胶囊渲染（web contentEditable 的等价） · '
+                  '**2026-09-29**：新增 `gutter` 档 = 宽屏 `margin: var(--sidebar-gutter)`（12，auroraqua 347–359）；'
+                  '左归零由**调用方按容器**给（私聊面板 `.wide-messages-pane .composer` 361–368），默认不表达',
               child: aylaMessageInputSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
@@ -1657,7 +1672,10 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   'private.css 8–64 + auroraqua 402–410：头部恒 56 高 / padding sp2 sp4 / gap sp3 · '
                   '窄屏通栏（--glass-bg + blur18 sat1.4 + 下边框）/ 宽屏**卡片化**（1px 边 + radius 16 + '
                   'compact 阴影 + blur24）· 标题 15/700 + 状态 12（**typing → glow-500**）· '
-                  '非好友禁发 `.private-chat-blocked` 替换输入区（warning-soft 底/边）',
+                  '非好友禁发 `.private-chat-blocked` 替换输入区（warning-soft 底/边） · '
+                  '**2026-09-29 收口（用户窄屏/宽屏验收）**：① 宽屏头部补 `margin: var(--sidebar-gutter)` = 12（左归零，'
+                  'auroraqua 402–409 + 361–368）；② 新增 `panelMotion` 三区编排档（head=top / 消息区=right→left / '
+                  '输入区=bottom；tsx:177–242 + auroraquaMotion 37–51）—— 宽屏样张升级为**可交互**（重播进场 / 在场⇄退场切换）',
               child: aylaPrivateChatPaneSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
@@ -1668,7 +1686,10 @@ class _ComponentGalleryState extends State<ComponentGallery> {
               source:
                   'messages.css 243–279：332 玻璃侧栏卡（`AylaSidebarCard`）· 三 tab（私信/好友/认证 + 徽标，'
                   '`AylaMessagesTabs`）· 各 tab 内容区 `flex:1 + min-height:0 + overflow-y:auto` + '
-                  'padding sp2 sp2 sp4（**侧栏自身不滚动**，滚动归内容区 · `scrollable: false`）',
+                  'padding sp2 sp2 sp4（**侧栏自身不滚动**，滚动归内容区 · `scrollable: false`） · '
+                  '**2026-09-29 收口**：`margin: var(--sidebar-gutter)` = 四边 12（messages.css:255，此前只登记未表达）—— '
+                  '由 `AylaSidebarCard.gutter` 表达（默认 0，以免动到目录页 `.directory-filters` 的 `margin: 0 0 sp3`） · '
+                  '**切 tab 会播面板进场**（web `useTabPanelMotion`：新面板自右 +20 淡入 300ms，旧面板瞬时消失）',
               child: aylaWideMessagesSidebarSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
@@ -1678,7 +1699,8 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   'messages.css 343–425：上 30% 遮罩（rgba(70,91,146,.25) 点击关闭）+ 下 70% 面板'
                   '（glass-bg-strong + blur24 sat1.4 + 上边框 + **radius 24 24 0 0** + --glass-shadow-modal + '
                   'slide-in 250ms）· 头部 padding sp3 sp4 + 下边框（tabs padding 0）· ESC 关闭走全局键盘监听 · '
-                  '私信 tab 点会话 → **内联**打开私聊面板（不跳路由）',
+                  '私信 tab 点会话 → **内联**打开私聊面板（不跳路由） · '
+                  '**切 tab / 进内联私聊都播一次面板进场**（web `QuickMessagesSheet.tsx:55`，selection = `activeChatId ?? tab`）',
               child: aylaQuickMessagesSheetSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),

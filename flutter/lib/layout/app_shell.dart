@@ -222,12 +222,16 @@ class _AppShellState extends ConsumerState<AppShell> {
         // ---- 会话活动悬浮球（`AppShell.tsx:130`；无会话时组件自己不渲染）----
         const AylaSessionActivityIndicator(),
         // ---- 窄屏左下角消息入口（`AppShell.tsx:140–146`）----
+        // 图标 **24×24**（两档同值）：`MessageFab.tsx:29`（backHome）/ `:40`（消息）
+        // 都是 `<Icon … width={24} height={24} />`，而 `.message-fab`（shell.css:423–439，
+        // 全仓唯一命中、无 @media 覆写）不含任何 svg 尺寸声明 ⇒ CSS 层不缩放。
+        // 同件的快捷消息档早已按此传 24（fab.dart 的 AylaQuickMessageFab，带同源注释）。
         if (isNarrow && primaryNavNarrow)
           Positioned(
             left: 16,
             bottom: fabBottomNarrow,
             child: AylaMessageFab(
-              icon: AylaIcon(aylaIconByName('iconMessage')!),
+              icon: AylaIcon(aylaIconByName('iconMessage')!, size: 24),
               onPressed: () => context.go('/messages'),
               semanticLabel: '消息',
             ),
@@ -237,7 +241,10 @@ class _AppShellState extends ConsumerState<AppShell> {
             left: 16,
             bottom: fabBottomNarrow,
             child: AylaMessageFab(
-              icon: AylaIcon(aylaIconByName('iconBack')!),
+              // backHome 变体：**IconHome**（`MessageFab.tsx:21–31` —— `if (backHome)` 返回
+              // `<IconHome width={24} height={24} />`，aria-label「返回主页」）。
+              // 原写 iconBack 是 glyph 选错（2026-09-29 用户实报「返回主页图标使用错误」）。
+              icon: AylaIcon(aylaIconByName('iconHome')!, size: 24),
               onPressed: () => context.go('/group'),
               semanticLabel: '返回主页',
             ),
@@ -259,7 +266,9 @@ class _AppShellState extends ConsumerState<AppShell> {
             right: isNarrow ? 16 : 32,
             bottom: isNarrow ? fabBottomNarrow : 32,
             child: AylaCreateFab(
-              icon: AylaIcon(aylaIconByName('iconPlus')!),
+              // 图标 24（`CreateFab.tsx:71` 的 `<IconPlus width={24} height={24} />`；
+              // `.create-fab` 同样无 svg 尺寸覆写）—— 与消息档同源的漏参，一并按 web 收口。
+              icon: AylaIcon(aylaIconByName('iconPlus')!, size: 24),
               semanticLabel: fabAction.label,
               onPressed: () => setState(() => _createSheetOpen = true),
             ),
@@ -285,14 +294,17 @@ class _AppShellState extends ConsumerState<AppShell> {
             position: AylaRefreshFabPosition.bottomLeft,
             onRefresh: shell.refreshCallback,
           ),
+        // ⚠️ **不要再包一层 `Positioned`**：`AylaScrollTopFab` 的 narrow 档**自身就返回
+        // `Positioned`**（`fab.dart:418–428`：`right` 16 / 22（stacked）、`bottom` 64 + safe + 12
+        // （stacked 再 +68）= `shell.css:762–773` 的 `.is-narrow` / `.is-narrow.is-stacked`）。
+        // 外层再包一个 Positioned 会让同一 RenderObject 收到两份 `StackParentData` ⇒
+        // `Incorrect use of ParentDataWidget`：窄屏（≤768）走到 `/group/:id/posts`、
+        // `/group/:id/voice`、`/group/:id/games`（`shellConfig` 的 `aylaNarrowScrollTopPaths`）
+        // 即触发 —— 与上一轮宽屏 `bottomLeft` 的 `AylaRefreshFab` 同一坑，本轮一并收口。
         if (isNarrow && cornerFabs.scrollTop)
-          Positioned(
-            right: AylaScrollTopFab.narrowRight,
-            bottom: AylaScrollTopFab.narrowBottomBase + safe.bottom,
-            child: AylaScrollTopFab(
-              position: AylaScrollTopFabPosition.narrow,
-              stacked: fabAction != null,
-            ),
+          AylaScrollTopFab(
+            position: AylaScrollTopFabPosition.narrow,
+            stacked: fabAction != null,
           ),
         // ---- 创建浮层（`.create-fab` 的落点）----
         if (_createSheetOpen && fabAction != null)

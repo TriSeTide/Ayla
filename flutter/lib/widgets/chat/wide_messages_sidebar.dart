@@ -30,6 +30,7 @@ import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import 'conversation_list.dart';
 import '../base/directory_controls.dart' show AylaDirectoryLoadMore;
+import '../motion/gestures.dart' show AylaPanelEdge, AylaPanelTransition;
 import 'messages_tabs.dart';
 import 'request_rows.dart';
 import '../base/sidebar_card.dart';
@@ -144,6 +145,12 @@ class _AylaWideMessagesSidebarState extends State<AylaWideMessagesSidebar> {
 
     return AylaSidebarCard(
       width: AylaWideMessagesSidebar.sidebarWidth,
+      // `margin: var(--sidebar-gutter)` = **12**（`messages.css:255` 在 `.wide-messages-sidebar`
+      // 自己的规则块里；`--sidebar-gutter: 12px` = `tokens.css:132`）。
+      // ⚠️ 该 12px 此前只登记未表达（19 号 §7.5 的待裁决偏离）；2026-09-29 用户裁决
+      // 「按 web 语义收口」⇒ 由本调用方显式传入（AylaSidebarCard.gutter 默认 0，
+      // 以免影响目录页复用点 `.directory-filters` 的 `margin: 0 0 sp3`）。
+      gutter: const EdgeInsets.all(AylaSpacing.sidebarGutter),
       shadow: AylaShadows.glass, // --glass-shadow
       enterDuration: AylaDurations.enter, // auroraqua-sidebar-in 500ms
       // web 未声明 overflow ⇒ 不自滚动（滚动归各 tab 内容区，tabs 固定）
@@ -168,14 +175,20 @@ class _AylaWideMessagesSidebarState extends State<AylaWideMessagesSidebar> {
   }
 
   Widget _tabBody() {
-    switch (_tab) {
-      case 'friends':
-        return _friendsTab();
-      case 'requests':
-        return _requestsTab();
-      default:
-        return _chatTab();
-    }
+    final Widget panel = switch (_tab) {
+      'friends' => _friendsTab(),
+      'requests' => _requestsTab(),
+      _ => _chatTab(),
+    };
+    // 选项卡面板**进场**（web `WideMessagesSidebar.tsx:77` 的 `useTabPanelMotion`，
+    // selector = `:scope > .messages-private, :scope > .messages-friends`）：
+    // 新面板自右 +20 淡入 300ms `cubic-bezier(.42,0,.58,1)`；reduced ⇒ 不播；无退出动画。
+    return AylaPanelTransition(
+      key: ValueKey<String>(_tab),
+      edge: AylaPanelEdge.right,
+      show: true,
+      child: panel,
+    );
   }
 
   /// 私信 tab（tsx 213–230）。

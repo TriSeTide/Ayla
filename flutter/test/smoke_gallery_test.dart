@@ -134,6 +134,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'AylaPageTransition / AylaPageSwap（PageTransition.tsx 117 行 + AppShell.tsx:113）',
     '手势动画（空白卡片模拟）—— 淡入淡出 · 左上右下四向滑入 · 右滑返回 · 切换选项卡',
     'AylaPanelTransition / AylaConversationTransition / AylaFullScreenSwipeBack / AylaPrimaryNavPage（auroraquaMotion panel 段 + useSwipeCommit / useEdgeSwipeBack / ConversationTransition / FullScreenSwipeBack / PrimaryNavPage）',
+    'AylaPanelSwap（hooks/useTabPanelMotion.ts 1–48 + hooks/usePanelSwapMotion.ts 1–43）',
   ],
   '通用件 · 分享 / 分页 / 弹层 / 资源': <String>[
     'AylaShareSheet / AylaShareButton（ShareSheet.tsx + ShareButton.tsx + share.css 1–275）',

@@ -119,6 +119,7 @@ class AylaMessageInput extends StatefulWidget {
     this.pickVideo,
     this.pickFile,
     this.showEmojiButton = false,
+    this.gutter,
   });
 
   /// 提交（页面层负责上传 + 乐观发送）。
@@ -139,6 +140,16 @@ class AylaMessageInput extends StatefulWidget {
 
   /// 窄屏形态（工具键在输入框下方一行）。
   final bool narrow;
+
+  /// 宽屏外边距（web `auroraqua.css:347–359` 的 `margin: var(--sidebar-gutter)` = **12**，
+  /// `tokens.css:132`；该规则在 `@media (min-width: 769px)` 内）。
+  ///
+  /// **默认 null = 不表达**：本件在私聊与群聊两处共用，两处的左归零点不同 ——
+  /// `.wide-messages-pane .composer { margin-left: 0 }`（auroraqua 361–368）与
+  /// `.group-content > .group-chat > .composer { margin-left: 0 }`（同块 362–363）
+  /// ⇒ 由**调用方**按自己的容器传（私聊面板传 `EdgeInsets.fromLTRB(0, 12, 12, 12)`）。
+  /// 窄屏形态忽略此参数（窄屏 `.composer` 是通栏条，无边距）。
+  final EdgeInsetsGeometry? gutter;
 
   /// 草稿键（会话 + 子群）与初始草稿字符串（`@[user_id]` 序列化格式）。
   final String draftKey;
@@ -569,7 +580,12 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
             child: body,
           );
 
-    return KeyedSubtree(key: _composerKey, child: shell);
+    // 宽屏外边距（`margin: var(--sidebar-gutter)`；窄屏档不适用）
+    final EdgeInsetsGeometry? gutter = widget.narrow ? null : widget.gutter;
+    return KeyedSubtree(
+      key: _composerKey,
+      child: gutter == null ? shell : Padding(padding: gutter, child: shell),
+    );
   }
 
   Widget _wideBody() => _content(

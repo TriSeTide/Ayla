@@ -7,7 +7,8 @@
 /// | [AylaPrivateChatPane] | `PrivateChatPane.tsx:165–253`（头部 + 消息区 + 输入区三段） |
 /// | 外壳 | private.css 8–15（`.private-chat`：`height: 100%` + column + `overflow: hidden`） |
 /// | 头部（窄屏档） | private.css 14–26（`.private-chat-head`：56 高 / padding `sp2 sp4` / gap sp3 / `--glass-bg` + **blur18 sat1.4** + 下边框） |
-/// | 头部（宽屏档） | auroraqua 402–410（≥769 卡片化：1px 边 + radius-card 16 + `--glass-shadow-compact` + `--glass-filter`(blur24 sat1.4)；`margin: var(--sidebar-gutter)` = **12px**（`tokens.css:132` 确有定义 —— 2026-09-28 更正原「死声明」误判）⇒ 本件当前未表达该外边距，属待裁决偏离）+ auroraqua 366（`.wide-messages-pane .private-chat-head { margin-left: 0 }`） |
+/// | 头部（宽屏档） | auroraqua 402–410（≥769 卡片化：1px 边 + radius-card 16 + `--glass-shadow-compact` + `--glass-filter`(blur24 sat1.4)；`margin: var(--sidebar-gutter)` = **12**（`tokens.css:132`））+ auroraqua 361–368（`.wide-messages-pane .private-chat-head { margin-left: 0 }`）—— **2026-09-29 已按 web 表达**（左 0 / 上右下 12） |
+/// | 三区编排 | `PrivateChatPane.tsx:165–253`：宿主 `.private-chat.chat-motion-panels` = 透明编排；`motion.header` = `panelVariants(reduced,"top")`、`.chat-messages-motion` = `("right","left")`、`.chat-composer-motion` = `("bottom")`；`inherit={panelMotion}`、`useIsPresent()` 决定在/退场（见 [panelMotion]） |
 /// | 标题/状态 | private.css 27–52（`.private-chat-name` 15/700；`.private-chat-status` 12 secondary；**`.is-typing` → `--glow-500`**） |
 /// | 禁发提示 | private.css 54–64（`.private-chat-blocked`：`margin: sp3 sp6` + padding `sp3 sp4` + radius-input + `--warning-soft-bg/--warning-soft-border` + 13 居中） |
 /// | 禁用条件 | tsx 158–163（私聊 + 对端已知 + 好友关系已加载 + 对端不是爱莉 + 非好友） |
@@ -36,6 +37,8 @@ import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
+import '../motion/gestures.dart'
+    show AylaConversationPresence, AylaPanelEdge, AylaPanelTransition;
 import 'message_input.dart';
 import 'message_list.dart';
 
@@ -75,6 +78,7 @@ class AylaPrivateChatPane extends StatelessWidget {
     this.blocked = false,
     this.composer,
     this.narrow = false,
+    this.panelMotion = false,
     this.onAtBottomChanged,
   });
 
@@ -141,6 +145,22 @@ class AylaPrivateChatPane extends StatelessWidget {
   /// 窄屏档（头部为通栏玻璃条）；宽屏档（≥769）头部**卡片化**。
   final bool narrow;
 
+  /// 三区进出场编排（web `PrivateChatPane.tsx:43` 的 `panelMotion`，默认 false）。
+  ///
+  /// `true` ⇒ 三区各包一个 [AylaPanelTransition]，各按自己的边进出（web
+  /// `auroraquaMotion.ts:37–51` 的 `panelVariants`）：
+  ///
+  /// | 分区 | 进场边 | 退场边 | web |
+  /// |---|---|---|---|
+  /// | 头部（`.private-chat-head`） | top（y −20） | top | tsx:177–182 |
+  /// | 消息区（`.chat-messages-motion`） | right（x +20） | **left** | tsx:212–217 |
+  /// | 输入区（`.chat-composer-motion`） | bottom（y +20） | bottom | tsx:237–242 |
+  ///
+  /// 300ms `easeInOut`；`prefers-reduced-motion` ⇒ 位移 0 / 时长 0（[AylaPanelTransition] 内处理）。
+  /// 在场/退出由 [AylaConversationPresence] 给（web `useIsPresent()`）⇒ 必须与
+  /// `AylaConversationTransition(childOwnsPanels: true)` 一起使用，否则退场只有宿主淡出。
+  final bool panelMotion;
+
   /// 贴底状态上报（原样透传给 [AylaMessageList]；web `stores/message.ts:33` 的
   /// `viewerAtBottom` 投影，WS 新消息据此决定即时已读还是进标签）。
   final void Function(bool atBottom)? onAtBottomChanged;
@@ -157,69 +177,97 @@ class AylaPrivateChatPane extends StatelessWidget {
             ? (conv.peer?.displayName ?? _nonEmpty(conv.title) ?? '私聊')
             : (_nonEmpty(conv.title) ?? '私聊'));
 
+    // 三区各自持有进出场（web `PrivateChatPane.tsx` 的 `motion.header` /
+    // `.chat-messages-motion` / `.chat-composer-motion` + `inherit={panelMotion}`）；
+    // 在场/退出由 `useIsPresent()` 的等价物 [AylaConversationPresence] 给。
+    final bool present = AylaConversationPresence.of(context);
+
+    /// [panelMotion] 为 true 时把一区包进面板转场（否则原样直通 ⇒ 零行为变化）。
+    Widget panel(AylaPanelEdge edge, AylaPanelEdge exitEdge, Widget child) {
+      if (!panelMotion) return child;
+      return AylaPanelTransition(
+        edge: edge,
+        exitEdge: exitEdge,
+        show: present,
+        child: child,
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.max,
       children: <Widget>[
-        _head(title, conv),
+        // head：top → top（tsx:177–182）
+        panel(AylaPanelEdge.top, AylaPanelEdge.top, _head(title, conv)),
+        // 消息区：right → left（tsx:212–217）
         Expanded(
-          child: AylaMessageList(
-            messages: messages,
-            currentUserId: currentUserId,
-            conversation: conv,
-            elysiaUserId: elysiaUserId,
-            hasMore: hasMore,
-            loading: loading,
-            onLoadMore: onLoadMore,
-            onQuote: onQuote,
-            onRecall: onRecall,
-            onRetry: onRetry,
-            onRemove: onRemove,
-            onCancel: onCancel,
-            onMarkRead: onMarkRead,
-            onMarkConversationRead: onMarkConversationRead,
-            onLoadUntilSeq: onLoadUntilSeq,
-            onPoke: onPoke,
-            onMentionSender: onMentionSender,
-            externalJump: externalJump,
-            onExternalJumpHandled: onExternalJumpHandled,
-            unreadSeqs: unreadSeqs,
-            mentionUnreadSeqs: mentionUnreadSeqs,
-            replyUnreadSeqs: replyUnreadSeqs,
-            onAtBottomChanged: onAtBottomChanged,
+          child: panel(
+            AylaPanelEdge.right,
+            AylaPanelEdge.left,
+            AylaMessageList(
+              messages: messages,
+              currentUserId: currentUserId,
+              conversation: conv,
+              elysiaUserId: elysiaUserId,
+              hasMore: hasMore,
+              loading: loading,
+              onLoadMore: onLoadMore,
+              onQuote: onQuote,
+              onRecall: onRecall,
+              onRetry: onRetry,
+              onRemove: onRemove,
+              onCancel: onCancel,
+              onMarkRead: onMarkRead,
+              onMarkConversationRead: onMarkConversationRead,
+              onLoadUntilSeq: onLoadUntilSeq,
+              onPoke: onPoke,
+              onMentionSender: onMentionSender,
+              externalJump: externalJump,
+              onExternalJumpHandled: onExternalJumpHandled,
+              unreadSeqs: unreadSeqs,
+              mentionUnreadSeqs: mentionUnreadSeqs,
+              replyUnreadSeqs: replyUnreadSeqs,
+              onAtBottomChanged: onAtBottomChanged,
+            ),
           ),
         ),
+        // 输入区：bottom → bottom（tsx:237–242）；禁发提示同属该 motion 分区（tsx:243–246）
         if (blocked)
           // `.private-chat-blocked`（private.css 54–64）
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AylaSpacing.sp6,
-              vertical: AylaSpacing.sp3,
-            ),
-            child: Container(
+          panel(
+            AylaPanelEdge.bottom,
+            AylaPanelEdge.bottom,
+            Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: AylaSpacing.sp4,
+                horizontal: AylaSpacing.sp6,
                 vertical: AylaSpacing.sp3,
               ),
-              decoration: BoxDecoration(
-                color: AylaColors.warningSoftBg,
-                border: Border.all(color: AylaColors.warningSoftBorder),
-                borderRadius: BorderRadius.circular(AylaRadii.rInput),
-              ),
-              child: const Text(
-                '对方已不是你的好友，无法发送消息',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: AylaFonts.body,
-                  fontFamilyFallback: AylaFonts.cjkFallback,
-                  fontSize: 13,
-                  color: AylaColors.textPrimary,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AylaSpacing.sp4,
+                  vertical: AylaSpacing.sp3,
+                ),
+                decoration: BoxDecoration(
+                  color: AylaColors.warningSoftBg,
+                  border: Border.all(color: AylaColors.warningSoftBorder),
+                  borderRadius: BorderRadius.circular(AylaRadii.rInput),
+                ),
+                child: const Text(
+                  '对方已不是你的好友，无法发送消息',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
+                    fontSize: 13,
+                    color: AylaColors.textPrimary,
+                  ),
                 ),
               ),
             ),
           )
+        // 输入区（`AylaMessageInput` 由调用方构造）/ 禁发提示：同一 motion 分区
         else if (composer != null)
-          composer!,
+          panel(AylaPanelEdge.bottom, AylaPanelEdge.bottom, composer!),
       ],
     );
   }
@@ -324,16 +372,27 @@ class AylaPrivateChatPane extends StatelessWidget {
         child: sized,
       );
     }
-    // 宽屏：卡片（1px 边 + radius 16 + compact 阴影 + blur24 sat1.4；无外边距）
-    return AylaGlassSurface(
-      radius: AylaRadii.rCard,
-      blur: AylaGlass.blurCard,
-      shadow: AylaShadows.compact,
-      padding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp4,
-        vertical: AylaSpacing.sp2,
+    // 宽屏：卡片（1px 边 + radius 16 + compact 阴影 + blur24 sat1.4）
+    // + `margin: var(--sidebar-gutter)` = 12（`auroraqua.css:402–409`，**@media ≥769 内**）、
+    //   左归零（`auroraqua.css:361–368` 的 `.wide-messages-pane .private-chat-head`）。
+    //   ⚠️ 12px 此前只登记未表达（19 号 §7.5 待裁决偏离）；2026-09-29 按 web 收口。
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        0,
+        AylaSpacing.sidebarGutter,
+        AylaSpacing.sidebarGutter,
+        AylaSpacing.sidebarGutter,
       ),
-      child: sized,
+      child: AylaGlassSurface(
+        radius: AylaRadii.rCard,
+        blur: AylaGlass.blurCard,
+        shadow: AylaShadows.compact,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AylaSpacing.sp4,
+          vertical: AylaSpacing.sp2,
+        ),
+        child: sized,
+      ),
     );
   }
 }
@@ -377,8 +436,83 @@ AylaConversationSummary _conv() => AylaConversationSummary(
       ),
     );
 
+/// 三区编排样张（可交互）：重播进场 / 在「在场 ⇄ 退场」之间切换。
+///
+/// 为什么给重播键：三区的正确性只存在于「位移随时间的形状」里（[panelMotion] 的
+/// top / right→left / bottom ±20），静止终态看不出来 ⇒ 换 Key 重建面板即可整段重播。
+class _ChatPanelMotionDemo extends StatefulWidget {
+  const _ChatPanelMotionDemo({required this.messages});
+
+  final List<AylaChatMessage> messages;
+
+  @override
+  State<_ChatPanelMotionDemo> createState() => _ChatPanelMotionDemoState();
+}
+
+class _ChatPanelMotionDemoState extends State<_ChatPanelMotionDemo> {
+  int _nonce = 0;
+  bool _present = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Wrap(
+          spacing: AylaSpacing.sp3,
+          runSpacing: AylaSpacing.sp2,
+          children: <Widget>[
+            AylaGlassButton(
+              label: '重播进场',
+              variant: AylaGlassButtonVariant.ghost,
+              onPressed: () => setState(() {
+                _present = true;
+                _nonce++;
+              }),
+            ),
+            AylaGlassButton(
+              label: _present ? '切到退场' : '切到在场',
+              variant: AylaGlassButtonVariant.ghost,
+              onPressed: () => setState(() => _present = !_present),
+            ),
+          ],
+        ),
+        const SizedBox(height: AylaSpacing.sp3),
+        SizedBox(
+          height: 420,
+          child: KeyedSubtree(
+            key: ValueKey<int>(_nonce),
+            child: AylaConversationPresence(
+              present: _present,
+              child: AylaPrivateChatPane(
+                conversation: _conv(),
+                messages: widget.messages,
+                currentUserId: 'me',
+                peerOnline: true,
+                peerStatus: '在线',
+                panelMotion: true,
+                composer: AylaMessageInput(
+                  onSubmit: (_) {},
+                  draftKey: 'pane-motion',
+                  gutter: const EdgeInsets.fromLTRB(
+                    0,
+                    AylaSpacing.sidebarGutter,
+                    AylaSpacing.sidebarGutter,
+                    AylaSpacing.sidebarGutter,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// 私聊面板样张：
-/// 宽屏（头部卡片 + 面板）/ 窄屏（通栏条 + 返回键）/ 非好友禁发态。
+/// 宽屏（头部卡片 + 面板）/ 窄屏（通栏条 + 返回键）/ 非好友禁发态 / 三区编排。
 Widget aylaPrivateChatPaneSamples() {
   aylaEnableSampleMedia();
   final List<AylaChatMessage> messages = <AylaChatMessage>[
@@ -430,22 +564,13 @@ Widget aylaPrivateChatPaneSamples() {
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisSize: MainAxisSize.min,
     children: <Widget>[
+      // 宽屏档 = **可交互**样张（三区编排：进场 head 自顶 −20 / 消息区自右 +20 / 输入区自底 +20；
+      // 退场消息区向左边）。与静态档合并为一个舞台，避免为同一件再加一屏玻璃卡
+      // （画布 chat 分类的 BackdropFilter 预算见 test/perf_audit_test.dart）。
       stage(
-        '宽屏（头部卡片化 + 消息区 + 输入区）',
-        AylaPrivateChatPane(
-          conversation: _conv(),
-          messages: messages,
-          currentUserId: 'me',
-          peerOnline: true,
-          peerStatus: '在线',
-          onMarkRead: (_, __) async {},
-          onMarkConversationRead: (_, __) async {},
-          composer: AylaMessageInput(
-            onSubmit: (_) {},
-            draftKey: 'pane-wide',
-            narrow: false,
-          ),
-        ),
+        '宽屏（头部卡片化 + 消息区 + 输入区；panelMotion 三区编排可重播）',
+        _ChatPanelMotionDemo(messages: messages),
+        height: 480,
       ),
       stage(
         '窄屏（通栏头部 + 返回键 + 工具键下移）',
@@ -475,7 +600,16 @@ Widget aylaPrivateChatPaneSamples() {
           currentUserId: 'me',
           blocked: true,
           peerStatus: '离线',
-          composer: AylaMessageInput(onSubmit: (_) {}, draftKey: 'pane-blocked'),
+          composer: AylaMessageInput(
+            onSubmit: (_) {},
+            draftKey: 'pane-blocked',
+            gutter: const EdgeInsets.fromLTRB(
+              0,
+              AylaSpacing.sidebarGutter,
+              AylaSpacing.sidebarGutter,
+              AylaSpacing.sidebarGutter,
+            ),
+          ),
         ),
         height: 360,
       ),

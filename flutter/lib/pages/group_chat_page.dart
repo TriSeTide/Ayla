@@ -39,9 +39,12 @@ import '../state/chat_providers.dart';
 import '../state/group_providers.dart';
 import '../state/message_state.dart';
 import '../state/subgroup_state.dart';
-import '../theme/tokens.dart' show AylaSpacing;
+import '../theme/tokens.dart' show AylaCurves, AylaDurations, AylaSpacing;
+import '../widgets/base/reveal.dart' show AylaRevealItem, AylaRevealMotion;
 import '../widgets/chat/message_input.dart';
 import '../widgets/chat/message_list.dart' show AylaMessageList;
+import '../widgets/motion/panel_swap.dart'
+    show AylaPanelSwap, AylaPanelSwapMode;
 import '../widgets/group/group_chat_subgroup_bar.dart';
 import 'chat_support.dart';
 
@@ -70,6 +73,10 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
   AylaConversationRuntime? _runtime;
   AylaChatMessage? _quote;
   bool _collapsed = true;
+
+  /// 子群选择的「基线已确立」标志（web `GroupChat.tsx:103–110` 的 `selectionInitialized`）——
+  /// 首次选中默认组那一帧**不算换场**，之后才随子群变化播动画。
+  bool _subgroupSelectionInitialized = false;
   /// 已按某个「群:子群」组合取过历史（避免重复首屏请求）。
   String? _historyOwner;
 
@@ -314,75 +321,151 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
         subgroupState.unreadSeqsOf(groupId, active?.id);
     final Set<int> unreadSet = unreadSeqs.toSet();
 
+    // ---- 子群换场身份与门控（web `GroupChat.tsx:102–126`）----
+    final String? activeSubgroupId = active?.id;
+    // web `subgroupSelection = `${groupId}:${activeSubgroupId ?? "all"}``（tsx:102）。
+    final String subgroupSelection = '$groupId:${activeSubgroupId ?? "all"}';
+    // web `establishingSelection`（tsx:103–110）：**首次**选中默认组那一帧不算「变化」
+    // ⇒ 只记基线、不播（否则每次进群都会白抖一次）。
+    final bool establishingSelection =
+        activeSubgroupId != null && !_subgroupSelectionInitialized;
+    if (activeSubgroupId != null) _subgroupSelectionInitialized = true;
+    // web `useTabPanelMotion` 的 `ready`（tsx:120–123）：缓存命中立即播；未命中等该子群的
+    // 历史真正落入缓存后再播（`hasSelectedMessages || settledHistoryRevision === revision`）。
+    final bool messagesReady = activeSubgroupId != null &&
+        (visible.isNotEmpty || !(bucket?.loading ?? false));
+    // 输入框换场（`usePanelSwapMotion`，tsx:126）：`active && !establishingSelection`。
+    final bool composerReady = activeSubgroupId != null && !establishingSelection;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Expanded(
-          child: AylaMessageList(
-            messages: visible,
-            currentUserId: me,
-            conversation: conv,
-            elysiaUserId: elysiaId,
-            hasMore: bucket?.hasMore ?? false,
-            loading: bucket?.loading ?? false,
-            onLoadMore: _loadMore,
-            onQuote: (AylaChatMessage m) => setState(() => _quote = m),
-            onMarkRead: (AylaChatMessage m, bool exact) async {
-              if (exact) await _markReadExact(m);
-            },
-            onRecall: (AylaChatMessage m) => unawaited(_recall(m)),
-            onRetry: (AylaChatMessage m) => _runtime?.retry(m),
-            onRemove: (AylaChatMessage m) => _runtime?.remove(m),
-            onCancel: (AylaChatMessage m) => _runtime?.cancel(m),
-            onPoke: (String userId) async {
-              try {
-                await AylaChatApi.sendPoke(groupId, userId);
-              } catch (_) {
-                // 戳一戳失败静默（web tsx 254–260）。
-              }
-            },
-            onLoadUntilSeq: (int seq) async =>
-                await _runtime?.loadUntilSeq(seq) ?? false,
-            unreadSeqs: unreadSeqs,
-            mentionUnreadSeqs: <int>[
-              for (final int seq in conv?.mentionUnreadSeqs ?? const <int>[])
-                if (unreadSet.contains(seq)) seq,
-            ],
-            replyUnreadSeqs: <int>[
-              for (final int seq in conv?.replyUnreadSeqs ?? const <int>[])
-                if (unreadSet.contains(seq)) seq,
-            ],
-            onAtBottomChanged: (bool atBottom) =>
-                ref.read(messageStateProvider).setViewerAtBottom(groupId, atBottom),
+          // 消息区入场（web `GroupChat.tsx:288–294`：`motion.div.chat-messages-motion`
+          // + `variants={panelMotion ? panelVariants(reducedMotion, "right", "left") : undefined}`，
+          // `GroupPage.tsx:332` 的 `<GroupChat … panelMotion />` 常开）
+          // ⇒ **进场 x +20 → 0 + 淡入**，300ms `--auroraqua-ease-in-out`；离场 0 → x −20 + 淡出。
+          // 离场在宽屏由「旧件立即卸载 + 新件入场」表达（与 web 的宿主 exit 为空一致），
+          // 窄屏旧场景的淡出由 `group_page.dart` 的 `_AylaSceneFade` 承担。
+          // ⚠️ 切场景（聊天 ⇄ 语音 / 直播 / 帖子 / 桌游）时本页会重挂 ⇒ 动画**重播**，
+          // 这正是 web 的 `initial="enter"` 语义（`GroupPage.tsx:327–350` 的 renderScene 换件）。
+          child: AylaRevealItem(
+            offset: const Offset(AylaRevealMotion.distance, 0), // +20 → 0（right 档）
+            duration: AylaDurations.auroraqua, // 300ms
+            curve: AylaCurves.auroraquaEaseInOut, // [0.42, 0, 0.58, 1]
+            child: AylaPanelSwap(
+              // 子群换场（web GroupChat.tsx:120-125 的 useTabPanelMotion
+              // (subgroupSelection, ":scope > .message-list", ready, establishBaseline)）：
+              // **就地重播** 300ms opacity 0 / x +20 到 1 / 0（easeInOut），
+              // **不重挂**子树：草稿 / 滚动 owner / 消息窗口都不重建。
+              identity: subgroupSelection,
+              mode: AylaPanelSwapMode.tab,
+              enabled: messagesReady,
+              establishBaseline: establishingSelection,
+              child: AylaMessageList(
+                messages: visible,
+                currentUserId: me,
+                conversation: conv,
+                elysiaUserId: elysiaId,
+                hasMore: bucket?.hasMore ?? false,
+                loading: bucket?.loading ?? false,
+                onLoadMore: _loadMore,
+                onQuote: (AylaChatMessage m) => setState(() => _quote = m),
+                onMarkRead: (AylaChatMessage m, bool exact) async {
+                  if (exact) await _markReadExact(m);
+                },
+                onRecall: (AylaChatMessage m) => unawaited(_recall(m)),
+                onRetry: (AylaChatMessage m) => _runtime?.retry(m),
+                onRemove: (AylaChatMessage m) => _runtime?.remove(m),
+                onCancel: (AylaChatMessage m) => _runtime?.cancel(m),
+                onPoke: (String userId) async {
+                  try {
+                    await AylaChatApi.sendPoke(groupId, userId);
+                  } catch (_) {
+                    // 戳一戳失败静默（web tsx 254–260）。
+                  }
+                },
+                onLoadUntilSeq: (int seq) async =>
+                    await _runtime?.loadUntilSeq(seq) ?? false,
+                unreadSeqs: unreadSeqs,
+                mentionUnreadSeqs: <int>[
+                  for (final int seq in conv?.mentionUnreadSeqs ?? const <int>[])
+                    if (unreadSet.contains(seq)) seq,
+                ],
+                replyUnreadSeqs: <int>[
+                  for (final int seq in conv?.replyUnreadSeqs ?? const <int>[])
+                    if (unreadSet.contains(seq)) seq,
+                ],
+                onAtBottomChanged: (bool atBottom) =>
+                    ref.read(messageStateProvider).setViewerAtBottom(groupId, atBottom),
+              ),
+            ),
           ),
         ),
         Stack(
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.only(top: AylaSpacing.sp2),
-              child: AylaMessageInput(
-                onSubmit: (AylaMessageInputSubmission submission) {
-                  _runtime?.send(submission);
-                  if (_quote != null) setState(() => _quote = null);
-                },
-                quote: _quote,
-                onQuoteClear: () => setState(() => _quote = null),
-                members: conv?.members ?? const <AylaConversationMember>[],
-                groupId: groupId,
-                subgroupId: active?.id,
-                disabled: isSubgroupMuted || active == null || myMuted,
-                disabledHint: myMuted
-                    ? '你已被禁言'
-                    : isSubgroupMuted
-                        ? '该子群已禁言，仅群主/管理员可发言'
-                        : null,
-                narrow: narrow,
-                draftKey: groupId,
-                initialDraft: ref.read(chatDraftsProvider).draftFor(groupId),
-                onDraftChanged: (String key, String serialized) =>
-                    ref.read(chatDraftsProvider).setDraft(key, serialized),
+            // 输入区入场（web `GroupChat.tsx:326–332`：`motion.div.group-chat-compose-area`
+            // + `chat-composer-motion` + `variants={panelVariants(reducedMotion, "bottom")}`）
+            // ⇒ **从下方 20px 上滑 + 淡入**，300ms `--auroraqua-ease-in-out`，宽窄屏同档，
+            // reduced-motion 由 [AylaRevealItem] 内部直切。
+            AylaRevealItem(
+              offset: const Offset(0, AylaRevealMotion.distance), // +20 → 0
+              duration: AylaDurations.auroraqua, // 300ms
+              curve: AylaCurves.auroraquaEaseInOut, // [0.42, 0, 0.58, 1]
+              child: Padding(
+                // ≥769：`margin: var(--sidebar-gutter)` + `.group-content .group-chat >
+                // .group-chat-compose-area > .composer { margin-left: 0 }`
+                // （auroraqua.css:346–359 的 `margin` / 361–368 的 `margin-left: 0`）
+                // ⇒ 上/右/下各 12、左 0。
+                // 效果：输入框**底沿与左列侧栏卡片底沿齐平**、右沿离视口 12（不贴底、不贴右），
+                // 左沿与内容列左沿对齐（左列侧栏已自带同一 12 的 gutter）。
+                // ≤768：`.composer` 没有任何 margin（app.css:3206 只改内距）⇒ 保持原内距补偿。
+                //
+                // ⚠️ 并发轮（私聊域）给 `AylaMessageInput` 加了 `gutter` 档（同为这 12px，
+                // 由调用方传）。**本页不使用该档**：它属并发对话的未提交改动，此处保持本页
+                // 自持外边距以免跨任务编译耦合；两处口径已核对为同一组数值
+                // （`fromLTRB(0, 12, 12, 12)`），收口点见 19 号 §16.4 第 3 条。
+                padding: narrow
+                    ? const EdgeInsets.only(top: AylaSpacing.sp2)
+                    : const EdgeInsets.only(
+                        top: AylaSpacing.sidebarGutter,
+                        right: AylaSpacing.sidebarGutter,
+                        bottom: AylaSpacing.sidebarGutter,
+                      ),
+                  child: AylaPanelSwap(
+                    // 输入框子群换场（web `GroupChat.tsx:126` 的
+                    // `usePanelSwapMotion(subgroupSelection, ":scope > .composer",
+                    // `active && !establishingSelection)`）：**同一 DOM 不重挂**
+                    // （保住草稿 / 焦点），就地播 600ms 双段「下移淡出（y +20）→ 回位淡入」，
+                    // 每段 easeOut —— 与消息区的 300ms 单段有意不同。
+                    identity: subgroupSelection,
+                    mode: AylaPanelSwapMode.swap,
+                    enabled: composerReady,
+                    child: AylaMessageInput(
+                      onSubmit: (AylaMessageInputSubmission submission) {
+                        _runtime?.send(submission);
+                        if (_quote != null) setState(() => _quote = null);
+                      },
+                      quote: _quote,
+                      onQuoteClear: () => setState(() => _quote = null),
+                      members: conv?.members ?? const <AylaConversationMember>[],
+                      groupId: groupId,
+                      subgroupId: active?.id,
+                      disabled: isSubgroupMuted || active == null || myMuted,
+                      disabledHint: myMuted
+                          ? '你已被禁言'
+                          : isSubgroupMuted
+                              ? '该子群已禁言，仅群主/管理员可发言'
+                              : null,
+                      narrow: narrow,
+                      draftKey: groupId,
+                      initialDraft: ref.read(chatDraftsProvider).draftFor(groupId),
+                      onDraftChanged: (String key, String serialized) =>
+                          ref.read(chatDraftsProvider).setDraft(key, serialized),
+                    ),
+                  ),
+                ),
               ),
-            ),
             // 子群切换条：窄屏且 >1 个子群（web tsx 334）。
             if (narrow && subgroups.length > 1)
               Positioned(

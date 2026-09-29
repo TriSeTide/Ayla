@@ -12,16 +12,22 @@
 /// `radius-card 16` + `align-self: stretch` + `max-height: 100%` + `overflow-y: auto`
 /// + `scroll-padding: sp3`；入场关键帧 `auroraqua.css:8–11`（`-20px 0` → `0 0` + 淡入）。
 ///
-/// ## ⚠️ 更正（2026-09-28）：`margin: var(--sidebar-gutter)` **不是**死声明
-/// 本节此前写「该变量在 web 全历史未定义 ⇒ `margin` 简写作废、回落 0」——**该结论是错的**
-/// （原判断只 grep 了「引用处」没检查 `:root` 定义）。实际：
-/// `tokens.css:132` 在 `:root`（7–140）内定义 **`--sidebar-gutter: 12px`**，全仓有 17 处
-/// `var(--sidebar-gutter)` 消费（app.css 405/2795/3248、auroraqua 263/351/394/403、
-/// group.css 501/700、live.css 323 …），库内其它件也一直按 12px 在用
-/// （`channel_sidebar.dart:70`、`server_rail.dart:214`、`top_nav.dart:10`、`live_room_body.dart:702`）。
-/// ⇒ 三处侧栏卡在 web 上**确实带 12px 外边距**；本件当前**未表达**这 12px
-/// （沿用原「无 margin」实现）—— 登记为**待用户裁决的偏离**：补 margin 会同时影响四个复用点
-/// （频道 / 语音 / 直播侧栏 + 宽屏消息侧栏），须一起验收后再改。
+/// ## ✅ 12px 外边距（`margin: var(--sidebar-gutter)`）：2026-09-29 按 web 收口
+/// 曾经把该变量判成「死声明」⇒ 本件不表达外边距。**该结论是错的**：
+/// `tokens.css:132` 在 `:root`（7–140）内定义 **`--sidebar-gutter: 12px`**。
+/// 2026-09-29 用户裁决「按 web 语义收口」后，本件提供 [gutter] 档位并由**带四边 12 的复用点显式传入**：
+///
+/// | 复用点 | web | 本件调用方 | 12px |
+/// |---|---|---|---|
+/// | 宽屏消息侧栏 | `messages.css:255` `.wide-messages-sidebar { margin: var(--sidebar-gutter) }` | `AylaWideMessagesSidebar` | ✅ 传 [gutter] |
+/// | 频道侧栏 | `group.css:700` `.channel-sidebar` | `channel_sidebar.dart:1129–1130`（`padding` 表达） | ✅ 早已表达 |
+/// | 直播侧栏 | `live.css:323` `.live-rail` | `live_rail.dart:246`（`margin` 表达） | ✅ 早已表达 |
+/// | 目录页侧栏 | `directory-filters.css:31` `.directory-filters { margin: 0 0 var(--sp-3) }` | `AylaDirectoryFilters` | ➖ web 无左右/上边距（宿主 `.directory-page` 自带 `padding: sp3 sp3 0`）⇒ 保持 0 |
+///
+/// ⚠️ 因此 [gutter] **默认 0**：目录页复用点与 web 的 `0 0 sp3` 一致，不能把 12 做成默认值。
+/// 另：`app.css:2795` 的 `.voice-sidebar` 与 `app.css:405` 的 `.chat-sidebar`、`app.css:3248` 的
+/// `.live-sidebar` 在 web 全仓 `.tsx` **零挂载点**（死 CSS，现行语音大厅走 `.directory-filters`）
+/// ⇒ 不构成 Flutter 侧的复用点。
 ///
 /// ## 为什么抽这一件（2026-09-24 用户点名）
 /// > 「会话列表背景卡片、选中高亮、切换动画等应直接复用 DirectoryFilters 宽屏侧栏」
@@ -46,6 +52,7 @@ class AylaSidebarCard extends StatelessWidget {
     super.key,
     required this.child,
     this.width,
+    this.gutter = EdgeInsets.zero,
     this.shadow = AylaShadows.glass,
     this.padding = const EdgeInsets.all(AylaSpacing.sp3),
     this.scrollController,
@@ -63,6 +70,16 @@ class AylaSidebarCard extends StatelessWidget {
   /// ⚠️ 传了宽度就要**松掉横向紧约束**：`SizedBox(width:)` 走 `constraints.enforce`，
   /// 紧宿主里会被夹回宿主宽（13 号 §五；库内先例 `live_rail.dart`）——本件内部已处理。
   final double? width;
+
+  /// 外边距（`margin: var(--sidebar-gutter)` = **12**，`tokens.css:132`）。
+  ///
+  /// **默认 `EdgeInsets.zero`** —— 目录页复用点（`.directory-filters`）在 web 只有
+  /// `margin: 0 0 var(--sp-3)`（`directory-filters.css:31`）⇒ 只有带四边 12 的复用点显式传
+  /// `EdgeInsets.all(AylaSpacing.sidebarGutter)`（见文件头对照表）。
+  ///
+  /// 表达方式对齐 web 的盒模型：`Padding` 包在卡片外层 ⇒ 竖向仍受父约束（= `align-self: stretch`），
+  /// 卡片高 = 容器高 − 2×gutter。
+  final EdgeInsetsGeometry gutter;
 
   /// 外阴影（侧栏卡：`.chat-sidebar` / `.wide-messages-sidebar` 用 `--glass-shadow`；
   /// `.directory-filters` 用 `--glass-shadow-compact`）。
@@ -113,6 +130,12 @@ class AylaSidebarCard extends StatelessWidget {
         alignment: Alignment.topLeft,
         child: SizedBox(width: width, child: card),
       );
+    }
+
+    // `margin: var(--sidebar-gutter)`（web 是 margin，Flutter 用外层 Padding 表达：
+    // 两者在 box model 上等价 —— 卡片高 = 容器高 − 2×gutter；0 时不建层）。
+    if (gutter != EdgeInsets.zero) {
+      card = Padding(padding: gutter, child: card);
     }
 
     if (!enter) return card;

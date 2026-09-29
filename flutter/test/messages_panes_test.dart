@@ -12,6 +12,7 @@ import '../lib/core/models/user_public.dart';
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
+import '../lib/theme/tokens.dart';
 import '../lib/widgets/chat/messages_tabs.dart';
 import '../lib/widgets/base/dialogs.dart'
     show AylaModalCard, AylaModalOverlay, AylaSheetHead;
@@ -87,6 +88,37 @@ void main() {
       find.byType(SingleChildScrollView),
       findsOneWidget,
       reason: 'tabs 固定 + 内容区独立滚动（web `.wide-messages-sidebar` 无 overflow）',
+    );
+  });
+
+  testWidgets('左列：`margin: var(--sidebar-gutter)` = 四边 12（`messages.css:255`）', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaWideMessagesSidebar(
+          activeId: 'c1',
+          onSelect: (_) {},
+          conversations: <AylaConversationSummary>[_conv('c1', '小樱')],
+        ),
+        viewport: const Size(500, 640),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Rect card = tester.getRect(find.byType(AylaGlassSurface).first);
+    expect(card.left, moreOrLessEquals(12, epsilon: 0.01), reason: '左 12');
+    expect(card.top, moreOrLessEquals(12, epsilon: 0.01), reason: '上 12');
+    expect(
+      card.width,
+      moreOrLessEquals(AylaWideMessagesSidebar.sidebarWidth, epsilon: 0.01),
+      reason: '宽度仍是 332（外边距不吃卡片宽）',
+    );
+    expect(
+      card.height,
+      moreOrLessEquals(640 - 2 * AylaSpacing.sidebarGutter, epsilon: 0.01),
+      reason: '竖向仍受父约束（= web `align-self: stretch`）+ 上下各 12 ⇒ 高 = 容器 − 24',
     );
   });
 

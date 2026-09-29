@@ -34,6 +34,7 @@ import '../base/dialogs.dart' show AylaModalCard, AylaModalOverlay;
 import '../../theme/app_icons.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
+import '../motion/gestures.dart' show AylaPanelEdge, AylaPanelTransition;
 import 'messages_tabs.dart';
 
 /// 快捷消息栏（窄屏非导航页左下角红点按钮触发）。
@@ -228,17 +229,27 @@ class _AylaQuickMessagesSheetState extends State<AylaQuickMessagesSheet> {
 
   /// 内容区（`.quick-messages-chat` / `-private` / `-requests`）。
   Widget _body(bool hasChat) {
-    if (hasChat) {
-      final Widget? pane = widget.privateChatPane;
-      return SizedBox.expand(
-        child: pane ?? const SizedBox.shrink(),
-      );
-    }
-    final Widget? panel =
-        _tab == 'requests' ? widget.requestsPanel : widget.privatePanel;
-    return SingleChildScrollView(
-      padding: EdgeInsets.zero,
-      child: panel ?? const SizedBox.shrink(),
+    // 面板**进场**（web `QuickMessagesSheet.tsx:55` 的 `useTabPanelMotion`，
+    // selection = **`activeChatId ?? tab`**、selector 含 `.quick-messages-chat`）：
+    // 新面板自右 +20 淡入 300ms `cubic-bezier(.42,0,.58,1)`；reduced ⇒ 不播；无退出动画。
+    // ⇒ 切 tab **与**点会话进内联私聊都重播一次进场（web 同）。
+    final String selection = hasChat ? 'chat:${widget.activeChatId}' : _tab;
+    final Widget panel = hasChat
+        ? SizedBox.expand(
+            child: widget.privateChatPane ?? const SizedBox.shrink(),
+          )
+        : SingleChildScrollView(
+            padding: EdgeInsets.zero,
+            child: (_tab == 'requests'
+                    ? widget.requestsPanel
+                    : widget.privatePanel) ??
+                const SizedBox.shrink(),
+          );
+    return AylaPanelTransition(
+      key: ValueKey<String>(selection),
+      edge: AylaPanelEdge.right,
+      show: true,
+      child: panel,
     );
   }
 }
