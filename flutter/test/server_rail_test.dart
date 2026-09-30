@@ -39,6 +39,10 @@ const List<AylaServerRailGroup> kGroups = <AylaServerRailGroup>[
 ];
 
 void main() {
+  // ⚠️ 服务器列入场是**每个 app 会话只播一次**（`kAylaServerRailEntered`，见
+  // `server_rail.dart` 的注释：web 宽屏 `animation: none`、由 motion 按 owner 编排）
+  // ⇒ 用例间必须重置这个模块级标记，否则后面的用例拿不到入场。
+  setUp(() => kAylaServerRailEntered = false);
   String? selected;
   int createTaps = 0;
   String? pinnedId;
@@ -418,6 +422,9 @@ void main() {
   testWidgets('入场：animateEntrance=true → 左入 -20 / 300ms easeInOut', (
     WidgetTester tester,
   ) async {
+    // ⚠️ 入场是**每个 app 会话只播一次**（`kAylaServerRailEntered`）⇒ 用例内显式复位，
+    // 否则同文件前序用例的挂载会把这个标记置位（`setUp` 之外的双保险）。
+    kAylaServerRailEntered = false;
     await tester.pumpWidget(host(animateEntrance: true));
     await tester.pump();
     final AylaRevealItem reveal = tester.widget(find.byType(AylaRevealItem));

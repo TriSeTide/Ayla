@@ -11,14 +11,20 @@
 /// · **debug 专用**：右下角「组件 / 应用」切换（组件画布 = 唯一视觉验收面，`@Preview` 已弃用）。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show SchedulerBinding, FrameTiming;
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/app_init.dart';
 import 'core/net/dio_client.dart';
+import 'state/app_preload.dart';
+import 'state/posts_store.dart' show aylaPostTabCache;
+import 'state/social_store.dart' show aylaSocialStore;
 import 'core/ws/ws_manager.dart';
 import 'preview/component_gallery.dart';
 import 'router/app_router.dart';
@@ -27,8 +33,53 @@ import 'state/chat_providers.dart';
 import 'state/presence_providers.dart';
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
+import 'widgets/base/loading.dart' show AylaFullScreenLoader;
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
+
+/// **实机掉帧探针（仅 debug）** —— 把「哪一帧慢、慢在 build 还是 raster」直接打到控制台。
+///
+/// 为什么需要它：性能整改前几轮只能靠 `flutter test` 的**软件光栅化**做相对对照
+/// （它测不到 GPU、也测不到真机的 AOT/DPR 差异），无法确定实机那一顿到底出在哪条线程。
+/// 这个探针不改任何渲染路径，只订阅 `SchedulerBinding.addTimingsCallback`：
+/// 当某帧的 `totalSpan` ≥ 24ms（明显掉帧）时打印一行，例如
+/// `[AYLA-FRAME] jank total=42.1ms build=31.2ms raster=9.4ms`。
+///
+/// · `build` 大 ⇒ Dart/UI 侧（挂载、布局、绘制记录）—— 时间切片/懒挂载能救；
+/// · `raster` 大 ⇒ GPU 侧（backdrop 模糊、saveLayer）—— 减少玻璃件/缓存能救。
+void _installJankProbe() {
+  // 同时**落盘**（cwd = 工程根 `Ayla/flutter`）：控制台容易被滚掉的日志不算证据，
+  // 文件能让"那一帧到底慢在哪"变成可复现的读数。
+  File? log;
+  try {
+    log = File('ayla_jank.log');
+    log.writeAsStringSync(
+      '--- session ${DateTime.now().toIso8601String()} ---\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+    debugPrint('[AYLA-FRAME] 日志已开启：${log.absolute.path}');
+  } catch (e) {
+    debugPrint('[AYLA-FRAME] 日志文件不可写（只打控制台）：$e');
+  }
+  SchedulerBinding.instance.addTimingsCallback((List<FrameTiming> timings) {
+    for (final FrameTiming t in timings) {
+      final double build = t.buildDuration.inMicroseconds / 1000.0;
+      final double raster = t.rasterDuration.inMicroseconds / 1000.0;
+      final double total = t.totalSpan.inMicroseconds / 1000.0;
+      if (total >= 24.0) {
+        final String line = '[AYLA-FRAME] jank total=${total.toStringAsFixed(1)}ms '
+            'build=${build.toStringAsFixed(1)}ms raster=${raster.toStringAsFixed(1)}ms';
+        debugPrint(line);
+        try {
+          log?.writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+        } catch (_) {
+          // 探针自身绝不拖累渲染。
+        }
+      }
+    }
+  });
+}
 
 void main() {
   // 仅 debug：常开语义树（供调试工具读元素；release 下被摇树移除）。
@@ -39,6 +90,7 @@ void main() {
   if (kDebugMode) {
     WidgetsFlutterBinding.ensureInitialized();
     SemanticsBinding.instance.ensureSemantics();
+    _installJankProbe();
   }
 
   // 逻辑层 wiring：DioClient 单例 ← AuthNotifier（实现 AuthTokenStore 契约）
@@ -48,6 +100,10 @@ void main() {
     tokenStore: auth,
     onSessionExpired: () {
       AppInit.instance.reset();
+      // 帖子页 tab 缓存同步清空（与 app_shell 的登出链同口径；
+      // web `postTabSession` 在 accessToken 清空时失效，`PostsHubPage.tsx:79–86`）。
+      aylaPostTabCache.clear();
+      aylaSocialStore.reset();
       wsManager?.disconnectAll();
       // 消息域：401 过期与显式登出同一套收尾（清订阅/基线/消息与红点状态）。
       aylaStopChatWsForContainer(container);
@@ -60,6 +116,14 @@ void main() {
     },
   );
   initWsManager(tokens: auth);
+  // 预加载接线（web `appInit.ts` 的 `loadCoreData`）：把 state 层的目录 / 帖子
+  // store 装进 `core/app_init.dart` 的门（core 不反向依赖 state）。
+  aylaRegisterCoreDataLoader();
+  // ⚠️ 群主页左侧服务器列读的是 **chatState**（AylaGroupDirectory(chatState: …)，
+  // group_page.dart:188），而预加载灌的是 social store ⇒ 必须在这里把取值器接上，
+  // 预加载完成时才能把会话摘要灌进 chatState
+  //（用户实机：「每次切换到主页选项卡时左侧群头像列表都要加载，这在 web 是不需要的」）。
+  aylaRegisterChatStateResolver(() => container.read(chatStateProvider));
   // 房内域目录帧桥：挂在 chat WS 的 onFrame 上（web `chat.ts` 的 voice.channel.* /
   // live.* / boardgame.room.* 分支 + `stores/directory.ts` 的创建/删除跟踪）。
   // 与 chat 连接时机解耦：只登记回调，未连时不消费任何帧。
@@ -117,6 +181,23 @@ class _AppRootState extends ConsumerState<_AppRoot> {
                 Offstage(
                   offstage: _showGallery,
                   child: child ?? const SizedBox.shrink(),
+                ),
+                // 全屏预加载门（web `App.tsx:48–51`：`appInit.status === "loading"` ⇒
+                // `<FullScreenLoader />`）—— 登录后到核心数据预加载完成前覆盖全屏，
+                // 完成后露出已就绪的页面（不再逐页闪骨架）。
+                // ⚠️ `ListenableBuilder` 不产生 render object ⇒ 其返回的 `Positioned`
+                //    仍是 Stack 的直接 RenderObject 子级（库内既有先例）。
+                ListenableBuilder(
+                  listenable: AppInit.instance,
+                  builder: (BuildContext context, Widget? child) {
+                    if (_showGallery ||
+                        AppInit.instance.status != AppInitStatus.loading) {
+                      return const SizedBox.shrink();
+                    }
+                    return const Positioned.fill(
+                      child: AylaFullScreenLoader(),
+                    );
+                  },
                 ),
                 if (_showGallery) const Positioned.fill(child: ComponentGallery()),
                 if (kDebugMode)

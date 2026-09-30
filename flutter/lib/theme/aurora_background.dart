@@ -1103,8 +1103,7 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
   Widget build(BuildContext context) {
     final bool narrow = _narrow;
     final bool flow = widget.animate && !MediaQuery.disableAnimationsOf(context);
-    return RepaintBoundary(
-      child: LayoutBuilder(
+    return LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           final Size viewport = Size(
             constraints.hasBoundedWidth
@@ -1121,6 +1120,16 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
+                // ⚠️ **背景层独立绘制边界**（2026-09-30，用户实报「原生比 web 还卡」的
+                // 结构性根因）：四层流层是**持续动画**，此前它们与内容 `child` 同级、
+                // 共享页面根那一个 `RepaintBoundary` ⇒ **背景每帧重绘会牵连整棵内容树**
+                //（玻璃滤镜层每帧重录 + 入场动画掉帧）。web 的极光跑在合成层、不影响内容。
+                // 把边界下移到「只包背景层」：背景重绘止于此层，兄弟（内容）不被牵连。
+                // 依据：`glass.dart` 的滤镜层边界注释（2026-09-27 已记录该风险）。
+                RepaintBoundary(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
                 // ① html 静态兜底（base.css:25）—— reduced-motion 下唯一可见层。
                 // ⏸ 受 [kAylaStaticLayerEnabled] 控制（2026-09-27 诊断：用户要求先停掉）。
                 // ⚠️ 停用后 reduced-motion 就没有兜底层了（那本是 web 唯一的兜底目标）。
@@ -1166,12 +1175,24 @@ class _AylaAuroraBackgroundState extends State<AylaAuroraBackground>
                     ),
                   ],
                 ],
-                if (widget.child != null) widget.child!,
+              ],
+                  ),
+                ),
+                // ⚠️ **内容层同样独立**（2026-09-30 量化：仅给背景加边界时，内容层在
+                // 10 帧内仍被 paint **11 次** —— 背景的重绘会经父级牵连兄弟）。
+                // 两侧都加边界后，背景动画与内容互不牵连（= web 的合成层语义：极光在
+                // 自己的层里动，页面内容层不受影响）。
+                // ⚠️ **`BackdropGroup`：全站玻璃件共享一份背景输入**（2026-09-30，查官方
+                // 文档后落地）。官方原文：「Sharing a backdrop filter layer will improve the
+                // performance of **multiple** backdrop filters」。`AylaGlassBackdrop` 已改用
+                // `BackdropFilter.grouped` 并入本组 ⇒ 一次入场里 12+ 张玻璃卡（+ 侧栏 +
+                // 内容区整块）**每帧只捕获一次背景**，而不是每件各捕获一次。
+                if (widget.child != null)
+                  RepaintBoundary(child: BackdropGroup(child: widget.child!)),
               ],
             ),
           );
         },
-      ),
     );
   }
 }

@@ -71,7 +71,12 @@ class _LoginRouteState extends ConsumerState<LoginRoute> {
       // presence 通道 owner（`core/ws/presence_ws.dart`）：绑定通道 + 连接（幂等）。
       aylaStartPresenceWs(ref);
       unawaited(ref.read(badgesProvider).fetch());
-      unawaited(AppInit.instance.run());
+      // userId 进目录 record 的 key 段（web `directoryKey` 读 currentUser.id）。
+      unawaited(
+        AppInit.instance.run(
+          userId: ref.read(authNotifierProvider).user?.id,
+        ),
+      );
       if (!mounted) return;
       context.go(_target);
     } catch (err) {

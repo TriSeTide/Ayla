@@ -33,7 +33,8 @@ import '../../theme/css_gradient.dart';
 import '../../theme/glass.dart';
 import '../../theme/sample_media.dart' show aylaEnableSampleMedia;
 import '../../theme/tokens.dart';
-import '../base/directory_controls.dart' show AylaFavoriteButton, AylaFavoriteState;
+import '../base/directory_controls.dart'
+    show AylaFavoriteButton, AylaFavoriteState;
 import '../base/primitives.dart';
 import '../base/resource_image.dart';
 import '../base/reveal.dart';
@@ -243,7 +244,6 @@ class AylaLiveChannelCard extends StatelessWidget {
   /// 预留会在卡底多出一段空白（web 同样没有）。
   final bool reserveMetaSpace;
 
-
   @override
   Widget build(BuildContext context) {
     final Duration? delay = revealDelay;
@@ -253,8 +253,11 @@ class AylaLiveChannelCard extends StatelessWidget {
   }
 
   Widget _buildWrap(BuildContext context) {
-    final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
-    final Widget? slot = action ??
+    final bool narrow = AylaBreakpoints.isNarrow(
+      MediaQuery.sizeOf(context).width,
+    );
+    final Widget? slot =
+        action ??
         (showActions
             ? AylaFavoriteButton(
                 state: favoriteState,
@@ -274,11 +277,7 @@ class AylaLiveChannelCard extends StatelessWidget {
       children: <Widget>[
         _card(context, narrow),
         if (slot != null)
-          Positioned(
-            top: actionInset,
-            right: actionInset,
-            child: slot,
-          ),
+          Positioned(top: actionInset, right: actionInset, child: slot),
       ],
     );
   }
@@ -364,11 +363,7 @@ class AylaLiveChannelCard extends StatelessWidget {
                         ),
                       )
                     // 有封面：`alt: ''`（装饰图）→ 失败只回退、不提示；铺满 + cover
-                    : AylaResourceImage(
-                        src: cover,
-                        alt: '',
-                        fit: BoxFit.cover,
-                      ),
+                    : AylaResourceImage(src: cover, alt: '', fit: BoxFit.cover),
               ),
               // `.live-card-cover-badge`：top calc(sp1 - 1px) = 3 / left sp1 = 4 / gap sp1
               Positioned(
@@ -471,7 +466,8 @@ class AylaLiveChannelCard extends StatelessWidget {
     final double ownerLine = 13 * 1.4;
     // 标签胶囊高 = 12 × body 行高 + padding 2+2；**向上取整**到整像素，
     // 否则预留高度比真实布局（RenderBox 取整）少 0.4px ⇒ 又会出现亚像素裁切
-    final double tagLine = (12 * (t.body.height ?? 1.55) + 2 + 2).ceilToDouble();
+    final double tagLine = (12 * (t.body.height ?? 1.55) + 2 + 2)
+        .ceilToDouble();
     return math.max(ownerLine, tagLine);
   }
 
@@ -613,7 +609,8 @@ class AylaLiveHall extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
 
   /// 逐卡收藏状态（页面注入；web 由 `<FavoriteButton>` 自管，Flutter 侧数据层在页面）。
-  final AylaFavoriteState Function(AylaLiveCardData channel)? favoriteStateBuilder;
+  final AylaFavoriteState Function(AylaLiveCardData channel)?
+  favoriteStateBuilder;
 
   /// 逐卡收藏请求进行中（`AylaFavoriteButton.busy`；默认 false ⇒ 既有调用点不变）。
   ///
@@ -635,7 +632,9 @@ class AylaLiveHall extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
+    final bool narrow = AylaBreakpoints.isNarrow(
+      MediaQuery.sizeOf(context).width,
+    );
 
     if (channels.isEmpty) {
       final AylaTextStyles t = AylaTextStyles.of(context);
@@ -672,53 +671,56 @@ class AylaLiveHall extends StatelessWidget {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         // `.live-hub` 覆写：≤768 → 2 / ≥769 → 3 / ≥1440 → 4
-        final int columns = narrow
-            ? 2
-            : (constraints.maxWidth >= 1440 ? 4 : 3);
+        final int columns = narrow ? 2 : (constraints.maxWidth >= 1440 ? 4 : 3);
         const double gap = AylaSpacing.sp4; // gap: var(--sp-4)
         final EdgeInsetsGeometry resolved =
             padding ??
-            EdgeInsets.only(top: narrow ? AylaSpacing.sp3 : 0, bottom: narrow ? AylaSpacing.sp3 : 0);
-        final double available =
-            constraints.maxWidth - resolved.horizontal;
+            EdgeInsets.only(
+              top: narrow ? AylaSpacing.sp3 : 0,
+              bottom: narrow ? AylaSpacing.sp3 : 0,
+            );
+        final double available = constraints.maxWidth - resolved.horizontal;
         final double itemWidth = (available - gap * (columns - 1)) / columns;
 
         return Padding(
           padding: resolved,
           // web 是 CSS grid（等宽列、行高随内容；同行 `align-items: stretch`）
           // ⇒ 用 Wrap 表达等宽列 + 内容高（缺 meta 行的卡会比同行略矮，属已知小差）
-          child: Wrap(
-            spacing: gap,
-            runSpacing: gap,
-            children: <Widget>[
-              for (int i = 0; i < channels.length; i += 1)
-                SizedBox(
-                  width: itemWidth,
-                  child: AylaLiveChannelCard(
-                    channel: channels[i],
-                    ownerName: ownerNames[channels[i].ownerId],
-                    isElysia:
-                        elysiaUserId != null &&
-                        channels[i].ownerId == elysiaUserId,
-                    revealDelay: revealItems
-                        ? AylaRevealMotion.staggerDelay(i)
-                        : null,
-                    favoriteState:
-                        favoriteStateBuilder?.call(channels[i]) ??
-                        AylaFavoriteState.notFavorited,
-                    favoriteBusy: favoriteBusyBuilder?.call(channels[i]) ?? false,
-                    favoriteError: favoriteErrorBuilder?.call(channels[i]),
-                    onToggleFavorite: onToggleFavorite == null
-                        ? null
-                        : (bool next) => onToggleFavorite!(channels[i], next),
-                    onRetryFavoriteStatus: onRetryFavoriteStatus == null
-                        ? null
-                        : () => onRetryFavoriteStatus!(channels[i]),
-                    reserveMetaSpace: true, // 网格内等高
-                    onEnter: () => onEnter(channels[i].id),
-                  ),
-                ),
-            ],
+          // ⚠️ **当前不分帧**（2026-09-30 回退，理由同 AylaVoiceChannelList）：
+          // 用户实机「**不是掉帧，是很流畅的，但是好好的动画就是顿了一下，一定是和 web
+          // 实现有差异**」—— 分帧挂载会在**动画进行中**逐帧插入新卡片（每帧一次 setState +
+          // 布局），与动画的每帧重建叠加 = 那一「顿」；web 则是**同一帧**全部拿到
+          // `.reveal-item`，之后不再有结构变化 ⇒ 这里恢复「一次挂载完」（= web 时序）。
+          child: AylaChunkedChildren(
+            itemCount: channels.length,
+            perFrame: 1 << 20,
+            layout: (List<Widget> cards) =>
+                Wrap(spacing: gap, runSpacing: gap, children: cards),
+            builder: (BuildContext context, int i) => SizedBox(
+              width: itemWidth,
+              child: AylaLiveChannelCard(
+                channel: channels[i],
+                ownerName: ownerNames[channels[i].ownerId],
+                isElysia:
+                    elysiaUserId != null && channels[i].ownerId == elysiaUserId,
+                revealDelay: revealItems
+                    ? AylaRevealMotion.staggerDelay(i)
+                    : null,
+                favoriteState:
+                    favoriteStateBuilder?.call(channels[i]) ??
+                    AylaFavoriteState.notFavorited,
+                favoriteBusy: favoriteBusyBuilder?.call(channels[i]) ?? false,
+                favoriteError: favoriteErrorBuilder?.call(channels[i]),
+                onToggleFavorite: onToggleFavorite == null
+                    ? null
+                    : (bool next) => onToggleFavorite!(channels[i], next),
+                onRetryFavoriteStatus: onRetryFavoriteStatus == null
+                    ? null
+                    : () => onRetryFavoriteStatus!(channels[i]),
+                reserveMetaSpace: true, // 网格内等高
+                onEnter: () => onEnter(channels[i].id),
+              ),
+            ),
           ),
         );
       },

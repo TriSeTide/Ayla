@@ -112,8 +112,12 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   }
 
   void _onPagerChanged() {
-    if (!mounted) return;
-    setState(() {});
+    // ⚠️ controller 可能在 **build 期间**通知（panelOwned 路由零时长切换时页面在同一帧挂载
+    // ⇒ initState/didChangeDependencies 阶段就 notifyListeners）⇒ 直接 setState 会抛
+    // "setState() or markNeedsBuild() called during build"。统一挪到帧后（下一帧刷新，等价）。
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (mounted) setState(() {});
+    });
     final AylaPagedList<AylaPost>? pager = _pager;
     if (pager == null) return;
     _favorites.load(

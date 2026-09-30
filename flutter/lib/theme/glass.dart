@@ -22,10 +22,14 @@
 
 library;
 
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+
+import '../widgets/base/reveal.dart' show AylaRevealProgress;
 import 'package:flutter/services.dart' show TextInputFormatter;
 import 'package:flutter/services.dart'
     show KeyDownEvent, LogicalKeyboardKey;
@@ -86,6 +90,14 @@ abstract final class AylaGlassConfig {
   /// 当前质量档。**默认 [AylaGlassQuality.realBackdrop]**（与改造前逐像素
   /// 一致，见 `test/glass_quality_test.dart` 的结构锁）。
   static AylaGlassQuality quality = AylaGlassQuality.realBackdrop;
+
+  /// **背底层纹理缓存总开关**（默认开；见 `_AylaBackdropCache`）。
+  ///
+  /// 打开时，面积 ≥ [kAylaBackdropCacheMinArea] 的玻璃件把背底层冻成纹理并按
+  /// [kAylaBackdropCachePeriod] 错峰刷新（= web「合成层纹理缓存」的等价物）；
+  /// 关闭即回到「每帧重新捕获 + 高斯模糊」的改前行为（零观感差异，只是更慢）。
+  /// 用途：性能对照测试、以及万一某页出现「卡内背景不跟随」时的止血开关。
+  static bool backdropCacheEnabled = true;
 
   /// 兼容旧 API：等价于 `quality == AylaGlassQuality.opaque`。
   ///
@@ -212,6 +224,7 @@ class AylaGlassBackdrop extends StatelessWidget {
     required this.filter,
     this.radius,
     this.child,
+    this.repaintBoundary = true,
   });
 
   /// 真玻璃档的滤镜（blur / blur+saturate），由 [AylaGlassConfig] 构造。
@@ -219,6 +232,16 @@ class AylaGlassBackdrop extends StatelessWidget {
 
   /// 裁剪圆角（对齐 CSS 的 `border-radius` + `overflow`）；null = 不裁。
   final BorderRadius? radius;
+
+  /// 是否为滤镜层挂独立 `RepaintBoundary`（默认 true）。
+  ///
+  /// ⚠️ **`SnapshotWidget` 子树内必须传 false**（2026-09-30 实机「卡片就位时消失」的根因）：
+  /// `_RenderSnapshotWidget._paintAndDetachToImage` 用**独立离屏 `OffsetLayer`** 捕获子树，
+  /// 捕获后 `offsetLayer.dispose()` 会连同**被 detach 进来的 repaint-boundary layer** 一起销毁
+  /// （`snapshot_widget.dart:297–321`）；解冻时该 RenderObject 的 `_needsPaint` 已为 false，
+  /// 重新附加的是**已 dispose 的空 layer** ⇒ 滤镜层不再绘制。
+  /// 快照子树里去掉它没有代价：整卡在 [AylaGlassSurface.build] 已有自己的边界。
+  final bool repaintBoundary;
 
   /// 滤镜层的 child；null = 纯透明 `SizedBox.expand`（只贡献滤镜层）。
   ///
@@ -241,7 +264,14 @@ class AylaGlassBackdrop extends StatelessWidget {
           children: <Widget>[Positioned.fill(child: sampled), child!],
         );
       case AylaGlassQuality.realBackdrop:
-        final Widget filtered = BackdropFilter(
+        // ⚠️ **用 `BackdropFilter.grouped`**（2026-09-30 查官方文档后落地）：
+        // 官方原文 ——「Sharing a backdrop filter layer will improve the performance of
+        // **multiple** backdrop filters」；`grouped` 会自动并入**最近的 `BackdropGroup`**，
+        // 与兄弟/子级 filter **共享同一份背景输入**。
+        // 本应用一次入场有 12+ 张玻璃卡（+ 侧栏 + 内容区），此前**每件各自捕获一次背景**；
+        // 共享后每帧只捕获一次 ⇒ 这是「多玻璃件同屏」的主要成本来源。
+        // 组由 `main.dart` 的 `BackdropGroup` 提供（包裹整个 app 内容）。
+        final Widget filtered = BackdropFilter.grouped(
           filter: filter,
           // child 必须是纯透明内容：只贡献滤镜层，不携带颜色。
           child: child ?? const SizedBox.expand(),
@@ -261,7 +291,8 @@ class AylaGlassBackdrop extends StatelessWidget {
         // 就有的 `BackdropFilterLayer`）。
         // ⚠️ 若背景线把 `aurora_background.dart:1106` 的边界下移到「只包背景层」，
         // 这里就会变成冗余边界 —— 届时可连同本条注释一起评估移除。
-        return RepaintBoundary(child: clipped);
+        // ⚠️ 快照档（`repaintBoundary: false`）必须去掉它：见字段注释（解冻后空白的根因）。
+        return repaintBoundary ? RepaintBoundary(child: clipped) : clipped;
     }
   }
 }
@@ -336,6 +367,227 @@ class _AylaBackdropSnapshotPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _AylaBackdropSnapshotPainter oldDelegate) =>
       oldDelegate.revision != revision;
+}
+
+/// 背底层快照缓存的**最小启用面积**（逻辑像素²）。
+///
+/// 只给**大卡**开（≥ 200×200）：一屏 20 张玻璃卡的逐帧模糊是「什么都掉帧」的结构性
+/// 来源（实测软件光栅化 6 卡 34–37ms、20 卡 129ms，帧帧如此）；按钮 / 输入框 / 徽标
+/// 这类小件单次模糊面积小、收益有限却数量极多（画布 chat 分类就有 140 个
+/// `BackdropFilter`），给它们加捕获开销得不偿失。
+const double kAylaBackdropCacheMinArea = 40000;
+
+/// 背底层快照的**刷新周期**（静止时每张卡按自己的相位错峰重新捕获）。
+///
+/// 依据（`test/tmp_aurora_drift_probe_test.dart`，极光动画开）：卡区域颜色漂移
+/// 250ms 只有 **|Δ|=2.3/255**、500ms 7.0、1s 13.9、2s 23.5
+/// ⇒ 250ms 刷新与逐帧更新**肉眼不可辨**。
+const Duration kAylaBackdropCachePeriod = Duration(milliseconds: 250);
+
+/// **滚动期**的背底层刷新周期（更密，但**不解冻**）。
+///
+/// ⚠️ 为什么不「滚动时解冻、停止后重新冻结」（2026-09-30 实机第四轮）：
+/// 解冻 = 结构切换 ⇒ 停止滚动那一帧要让**屏幕上所有卡**同时重新捕获
+/// （= N 次同步离屏渲染 + N 次模糊）⇒ 若用户正好在那时「滚到底加载更多」，
+/// 新卡入场动画与这一帧尖峰叠在一起 ⇒ 实机「最后一批卡片动画时机不对 + 顿一下」。
+/// 而解冻到重新冻结之间的窗口若走裸背底层（实时模糊），窗口内每帧又是 N 次模糊，更贵。
+/// ⇒ 改为**始终冻结**，只把刷新周期调密：60ms ≈ 16fps，
+/// 600px/s 滚动下卡内背景滞后仅 ~36px（blur 24 之后不可辨）。
+const Duration kAylaBackdropScrollPeriod = Duration(milliseconds: 60);
+
+/// 背底层**纹理缓存** —— web「合成层纹理缓存」在 Flutter 的等价物。
+///
+/// ## 为什么（用户要求「看看 web 为什么不卡」——查证结果）
+/// web 的入场是 WAAPI / CSS **只动 `opacity` + `transform`**
+/// （`useListEntryMotion.ts:74–80`、`base.css:495–499`）——两者都是**合成属性**
+/// ⇒ 元素被提升为合成层，**渲染结果（含 `backdrop-filter` 的高斯模糊）被缓存成纹理**
+/// ⇒ 动画期间**零 backdrop 重算**；动画结束 `animation.cancel()` 撤销提升，但浏览器的
+/// 重新光栅化是惰性、分块、逐元素的。
+/// 更根本的是：**浏览器对 backdrop-filter 的结果本来就有缓存**，只在 backdrop 内容真的
+/// 变化时才重算。
+///
+/// Flutter 的 `BackdropFilter` 语义恰恰相反：**每帧重新捕获身后内容 + 高斯模糊**，
+/// 没有任何跨帧缓存（实测静止的 6 张卡连续 6 帧 34–37ms，一模一样）——
+/// 这就是「原生 app 反而比 web 卡」的结构性来源。
+///
+/// ## 做法
+/// 把**背底层**（只背底层！卡面 / 内容 / 阴影都在快照之外 ⇒ 未读徽标、图片、hover、
+/// 文字更新全部照常实时）冻成纹理：
+/// - **静止**：保持冻结，按 [kAylaBackdropCachePeriod] + 本卡相位**错峰刷新**
+///   （每帧只让 1–2 张卡重新捕获）⇒ 每帧成本 ≈「画一张纹理」；
+/// - **滚动**：卡在屏幕上移动 ⇒ backdrop 采样区域每帧都在变 ⇒ **切回实时模糊**
+///   （结构切换，同 `_RenderSnapshotWidget` 的语义：切走时整个 render object 被丢弃，
+///   不存在「解冻后附加已 dispose layer」的问题）；
+/// - **入场**：沿用 `AylaRevealItem` 下发的 controller（它负责按 index 错峰捕获），
+///   入场结束后**继续用同一个 controller** ⇒ **零成本交接**（纹理不重捕获）。
+///
+/// ## 视觉代价（已量化，可裁决）
+/// 卡内模糊背景的更新率从逐帧降到 4fps：背景动画下 250ms 的颜色漂移是 2.3/255
+/// （肉眼不可辨）；**若用户认为可辨，把 [kAylaBackdropCachePeriod] 调小或把
+/// [kAylaBackdropCacheMinArea] 调大即可关闭本机制**（不涉及任何 CSS 事实源）。
+class _AylaBackdropCache extends StatefulWidget {
+  const _AylaBackdropCache({
+    required this.child,
+    required this.enabled,
+    required this.entryController,
+  });
+
+  /// 背底层（[AylaGlassBackdrop]）。
+  final Widget child;
+
+  /// 面积是否够大（见 [kAylaBackdropCacheMinArea]）。
+  final bool enabled;
+
+  /// 入场期由 `AylaRevealItem` 下发的 controller（非 null = 入场中）。
+  final SnapshotController? entryController;
+
+  @override
+  State<_AylaBackdropCache> createState() => _AylaBackdropCacheState();
+}
+
+class _AylaBackdropCacheState extends State<_AylaBackdropCache> {
+  /// 全局序号 → 本卡**刷新相位**（每张 16ms，8 组一轮 = 0–112ms）
+  /// ⇒ 同屏卡的周期刷新分散在不同帧（每帧只让 1–2 张重新捕获）。
+  ///
+  /// ⚠️ **只用于刷新，不用于「首次接管」**：接管窗口内本卡走的是裸背底层
+  /// （= 每帧全额实时模糊，N 张卡同帧就是 N 次模糊），比「同帧各捕获一次」更贵 ——
+  /// 实测依据见 `tmp_last_batch_probe_test.dart` 的窗口统计。所以接管一律**立即**做，
+  /// 代价是挂载/滚动停止那一帧的集中捕获，换来之后每帧 ≈「画一张纹理」。
+  static int _seq = 0;
+
+  /// 无入场上下文时本卡自己的 controller（恒允许捕获；「解冻」一律靠**结构切换**，
+  /// 不用 `allowSnapshotting = false` —— 后者会 detach + dispose 子树里的
+  /// repaint-boundary layer，真实引擎上解冻帧可能画不出内容）。
+  final SnapshotController _own = SnapshotController(allowSnapshotting: true);
+  late final int _phaseMs = 16 * (_seq++ % 16);
+
+  /// 入场 controller 的延续引用：入场结束后**继续用它**（纹理不重捕获 ⇒ 零成本交接）。
+  ///
+  /// 生命周期安全：`AylaRevealItem` 是本件的**祖先**（列表项 / 侧栏卡），两者同生共死；
+  /// Flutter 的卸载顺序是**先子后父**（`_InactiveElements._unmount` 递归子级后再 unmount 自己）
+  /// ⇒ 本件先释放引用，祖先随后才 dispose controller。
+  SnapshotController? _inherited;
+
+  Timer? _refreshTimer;
+  ScrollPosition? _position;
+  bool _scrolling = false;
+
+  /// 当前有效的快照 controller（null = 不冻结，走实时模糊）。
+  ///
+  /// 入场期用 `AylaRevealItem` 下发的（它已按 index 错峰捕获）；入场结束后**继续用它**
+  /// ⇒ 纹理不重捕获、零成本交接；无入场上下文的卡用自己的 `_own`。
+  SnapshotController? get _active =>
+      widget.entryController ?? _inherited ?? _own;
+
+  /// 生效的 controller（面积不够 ⇒ null ⇒ 实时模糊）。
+  ///
+  /// ⚠️ **滚动中不再解冻**（见 [kAylaBackdropScrollPeriod]）：滚动只加密刷新周期，
+  /// 结构恒定为「冻结」⇒ 没有解冻/重新冻结的尖峰，也没有「窗口内走裸背底层」的高成本。
+  SnapshotController? get _effective => widget.enabled ? _active : null;
+
+  /// 当前刷新周期：滚动期更密（卡在移动，卡内背景需要更快跟随）。
+  Duration get _period =>
+      _scrolling ? kAylaBackdropScrollPeriod : kAylaBackdropCachePeriod;
+
+  @override
+  void initState() {
+    super.initState();
+    _inherited = widget.entryController;
+    _sync();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _bindScrollPosition();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AylaBackdropCache oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.entryController != null) _inherited = widget.entryController;
+    if (oldWidget.entryController != widget.entryController ||
+        oldWidget.enabled != widget.enabled) {
+      _sync();
+    }
+  }
+
+  /// 绑定最近祖先 `ScrollPosition`（滚动 ⇒ 卡在屏幕上移动 ⇒ 实时模糊）。
+  ///
+  /// 用 `visitAncestorElements` 而不是 `NotificationListener`：滚动通知只向上冒泡，
+  /// 位于 `Scrollable` 子树下面的组件收不到（skill 已记录该坑）。
+  void _bindScrollPosition() {
+    ScrollPosition? found;
+    context.visitAncestorElements((Element e) {
+      if (e is StatefulElement && e.state is ScrollableState) {
+        found = (e.state as ScrollableState).position;
+        return false;
+      }
+      return true;
+    });
+    if (identical(found, _position)) return;
+    _position?.isScrollingNotifier.removeListener(_onScrollChanged);
+    _position = found;
+    _position?.isScrollingNotifier.addListener(_onScrollChanged);
+    _onScrollChanged();
+  }
+
+  void _onScrollChanged() {
+    final bool now = _position?.isScrollingNotifier.value ?? false;
+    if (now == _scrolling) return;
+    setState(() => _scrolling = now);
+    _sync();
+  }
+
+  /// 重新排布「冻结 / 刷新」：不冻结、或入场期时停掉刷新定时器。
+  void _sync() {
+    if (_effective == null) {
+      _refreshTimer?.cancel();
+      return;
+    }
+    // ⚠️ **入场期不刷新**：入场由 `AylaRevealItem` 的**错峰捕获**负责，动画中段再插一次
+    // `clear()` 只会多一个尖峰（实测 `tmp_last_batch_probe_test.dart` 第 31 帧 ≈ 512ms）。
+    if (widget.entryController != null) {
+      _refreshTimer?.cancel();
+      return;
+    }
+    _scheduleRefresh();
+  }
+
+  /// 周期刷新：按本卡相位错峰重新捕获（全屏卡分散在不同帧，每帧 1–2 张）。
+  void _scheduleRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer(
+      Duration(milliseconds: _period.inMilliseconds + _phaseMs % 32),
+      () {
+        if (!mounted) return;
+        final SnapshotController? c = _effective;
+        if (c == null) return;
+        c.clear(); // 重新捕获一张
+        _scheduleRefresh();
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _position?.isScrollingNotifier.removeListener(_onScrollChanged);
+    _own.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SnapshotController? c = _effective;
+    if (c == null) return widget.child;
+    return SnapshotWidget(
+      // `permissive`：子树含平台视图时回退为直接渲染（不抛错）。
+      mode: SnapshotMode.permissive,
+      controller: c,
+      child: widget.child,
+    );
+  }
 }
 
 /// 玻璃材料的通用绘制（底色 + 模糊 + 亮边 + 宽软阴影 + 顶沿内高光）。
@@ -422,8 +674,50 @@ class AylaGlassSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 入场进度（`AylaRevealItem(fadeGlass: false)` 经 [AylaRevealProgress] 下发）——
+    // 无入场上下文 ⇒ null ⇒ 与改前**逐帧等价**（零行为变化）。
+    // 入场进度：由 `AylaRevealItem(fadeGlass: false)` 经 [AylaRevealProgress] 下发（已带曲线）。
+    // ⚠️ **不再用 `AnimatedBuilder` 重建卡面**（2026-09-30 实机反馈「还是很卡」的根因）：
+    // 每帧重建会连带 `LayoutBuilder`（内高光）与阴影 `CustomPaint` 重新布局/绘制，
+    // 实机 12+ 张卡同时入场时明显掉帧。改为把进度交给 `FadeTransition`（见 [_buildBody]）——
+    // 它只驱动 `OpacityLayer`，**每帧不重建任何 widget**。
+    // ⚠️ **整卡独立绘制边界**（2026-09-30，纯软件层优化、**零观感变化**）。
+    //
+    // 官方依据（`docs.flutter.dev/tools/devtools/performance` 的 Raster 一节）：
+    // 「slow raster performance is often caused by Dart-level workloads that are difficult
+    // for the GPU, such as unnecessary **saveLayer** calls, **intersecting opacities**,
+    // **clips**, or **shadows**」—— 玻璃卡这四样全占（`BackdropFilter`/`ClipRRect`/
+    // `Opacity`/阴影环）。官方的处置口径是**隔离重绘范围**（`RepaintBoundary` 一节：
+    // 「Isolate widget repaints … isolate repainting to just that subtree」）：
+    // 有了它，邻居变化或父级 `Transform` 变化时整卡作为**独立 layer** 被移动/复用，
+    // 不再把滤镜层、阴影、内容一起拖进重绘。
+    // 代价：每卡多一个 layer（官方原话「creating a new canvas uses additional memory」）。
+    return RepaintBoundary(
+      child: _buildBody(
+        context,
+        AylaRevealProgress.of(context),
+        AylaRevealProgress.snapshotOf(context),
+      ),
+    );
+  }
+
+  /// 按入场进度 [entryT]（0→1）构建卡面。
+  ///
+  /// **淡入用「颜色 × t + 模糊强度 × t」表达，不产生 `OpacityLayer`** ——
+  /// web 的 `.reveal-item`（`base.css:483–506`）是整层 `opacity` 淡入；Flutter 侧若
+  /// 照搬会与玻璃的 `BackdropFilter` 冲突（Impeller 拒绝「Opacity 祖先 + BackdropFilter」，
+  /// 见 `widgets/base/reveal.dart` 文件头），故按颜色/模糊强度等价表达：
+  /// 底色、亮边、顶沿内高光、外阴影全部随 t 淡入，模糊强度同时从 0 升到 [blur]
+  /// （附带收益：入场期间模糊采样更便宜 ⇒ 动画更流畅）。
+  Widget _buildBody(
+    BuildContext context,
+    Animation<double>? entry,
+    SnapshotController? snapshot,
+  ) {
     final bool opaque = AylaGlassConfig.useOpaqueFallback;
     final bool reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    // 禁用态降透明（[dimAlpha]）与入场淡入（[entry]）**分开**：前者按颜色表达（web 的
+    // `:disabled { opacity }` 等价），后者交给 `FadeTransition`（见下方 faceLayer）。
     final double dimA = (dimAlpha ?? 1.0).clamp(0.0, 1.0);
     Color dimColor(Color c) =>
         dimA >= 1.0 ? c : c.withValues(alpha: c.a * dimA);
@@ -514,6 +808,38 @@ class AylaGlassSurface extends StatelessWidget {
     //     模糊层**之上**；
     //  b) CSS 的 box-shadow **只在 border-box 之外绘制**，Flutter 的 BoxShadow
     //     会铺满整个形状（含内部）→ 用 CustomPainter 把内部挖空。
+    // 入场快照档判定 + 背底层（槽位 0 的内容）。
+    //
+    // ⚠️ **快照只包背底层**（2026-09-30 重构；实机「阴影被截断」「就位时消失」两条的根治）：
+    // - `SnapshotWidget` 按 child 边界捕获并裁剪 ⇒ 把含阴影的整卡交给它，会把
+    //   `box-shadow`（画在形状之外）裁成硬边；阴影必须在快照**之外**唯一绘制一次；
+    // - 捕获走**独立离屏 layer**（`snapshot_widget.dart:297–321`）⇒ 子树里的
+    //   repaint-boundary layer 会被 detach + dispose，解冻后可能不再绘制
+    //   ⇒ 快照子树内一律 `repaintBoundary: false`（整卡本身已有自己的边界）；
+    // - 槽位结构与普通档**完全一致**（背底层 / 阴影 / 卡面）⇒ 解冻那一帧
+    //   （`AylaRevealItem` 把 snapshot 传回 null）只有 slot0 换内容，
+    //   卡面与阴影的 element 稳定复用，调用方内容（可能带 State）不会重建。
+    final bool useSnapshot = entry != null && snapshot != null && !opaque;
+    // 非空局部（供 slot0 做类型提升）：Dart 不会把 `useSnapshot` 的成立传导回 `snapshot`。
+    final SnapshotController? frozen = useSnapshot ? snapshot : null;
+    final Widget backdropLayer = AylaGlassBackdrop(
+      radius: radiusValue,
+      // ⚠️ **恒不挂滤镜层边界**：本件会被 [_AylaBackdropCache] 的 `SnapshotWidget` 包住
+      //（捕获用独立离屏 layer ⇒ 子树里的 repaint-boundary layer 会被 detach + dispose）；
+      // 而整卡在 `build` 里已有自己的 `RepaintBoundary`（2026-09-30 第九批），
+      // 背景层也已有独立边界（`aurora_background.dart`）⇒ 这一层边界已是冗余。
+      repaintBoundary: false,
+      filter: ImageFilter.compose(
+        // 外层：饱和度 1.4（在模糊结果上做，等价 CSS 顺序）
+        outer: const ColorFilter.matrix(kSaturation14),
+        // 内层：blur(24px)（t:--glass-filter）
+        inner: ImageFilter.blur(
+          // **恒定**半径（不乘 t）—— 见下方 ① 处注释：随 t 变化会让滤镜层每帧重建。
+          sigmaX: blur,
+          sigmaY: blur,
+        ),
+      ),
+    );
     final Widget glassBody = opaque
         ? face
         : Stack(
@@ -530,28 +856,56 @@ class AylaGlassSurface extends StatelessWidget {
               //    compose 已在多端可用（sky_engine painting.dart:4406）。
               // blur <= 0 → 不建滤镜层：sigma 0 只是白白多一个 saveLayer，
               // 且嵌入式场景（如组件画布里的查看器样张）会采样宿主页面造成糊页。
+              // ⚠️ **滤镜必须恒定**（2026-09-30 实机反馈「原生比 web 还卡」的根因就在这）：
+              // 若让 sigma 随入场进度变化，`BackdropFilter.filter` 每帧都是新值 ⇒
+              // Impeller 每帧重建滤镜层 + 重采样整块背景，比 web 的整层 opacity 贵得多。
+              // web 的 `opacity` 淡入**不改变 blur 半径**（恒 24px，只有整体透明度在变）⇒
+              // 这里同样保持 sigma 恒定，淡入**完全交给颜色**（面层/亮边/内高光/阴影 × t）。
+              // 入场最初不建滤镜层（省一次 saveLayer；此时面层几乎全透明，也避免露出模糊块）。
               if (blur > 0)
               Positioned.fill(
                 // 背后内容层统一走 AylaGlassBackdrop（质量档 owner，§8.17）：
                 // 真玻璃档 = BackdropFilter，预模糊档 = 采样，实底档 = 不画。
-                child: AylaGlassBackdrop(
-                  radius: radiusValue,
-                  filter: ImageFilter.compose(
-                    // 外层：饱和度 1.4（在模糊结果上做，等价 CSS 顺序）
-                    outer: const ColorFilter.matrix(kSaturation14),
-                    // 内层：blur(24px)（t:--glass-filter）
-                    inner: ImageFilter.blur(
-                      sigmaX: blur,
-                      sigmaY: blur,
-                    ),
-                  ),
+                //
+                // ⚠️ **入场快照档**（`AylaRevealProgress.snapshot` 非 null）把这一层
+                // 整层冻成纹理：外层 `Opacity` 作用在**纹理**上 ⇒ 模糊必然跟着淡
+                //（不受 Impeller「拒绝把继承不透明度传给 BackdropFilter」影响 ⇒
+                // 根治实机「动画过程中变色」），且移动的是纹理 ⇒ 不再每帧重采样 + 重模糊
+                //（实测 raster 收益 22×：`test/tmp_snapshot_gain_probe_test.dart`）。
+                //
+                // ⚠️ **背底层纹理缓存**（2026-09-30 第十二批，用户要求「看 web 为什么不卡」）：
+                // `_AylaBackdropCache` 把大卡的背底层冻成纹理并错峰刷新，等价 web 的
+                // **合成层纹理缓存**（web 的入场只动 opacity/transform ⇒ 模糊结果被缓存、
+                // 动画期零重算；Flutter 的 `BackdropFilter` 是每帧重采 + 重模糊）。
+                // 面积阈值由 `LayoutBuilder` 给出：小件（按钮/输入框）不开，避免放大开销。
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints c) {
+                    final bool big = AylaGlassConfig.backdropCacheEnabled &&
+                        c.maxWidth.isFinite &&
+                        c.maxHeight.isFinite &&
+                        c.maxWidth * c.maxHeight >= kAylaBackdropCacheMinArea;
+                    return _AylaBackdropCache(
+                      enabled: big,
+                      // 入场期沿用 `AylaRevealItem` 下发的 controller（错峰捕获在那边）；
+                      // 入场结束后本件继续沿用它 ⇒ 零成本交接，不再有「解冻帧」峰值。
+                      entryController: frozen,
+                      child: backdropLayer,
+                    );
+                  },
                 ),
               ),
               // ② 阴影环（在模糊层之上、卡面之下；只画形状之外）
               if (shadow.isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: shadowTransition == Duration.zero || reduceMotion
+                    // ⚠️ **性能（2026-09-30 实机「侧栏好顿」的另一处来源）**：入场时
+                    // `AylaRevealItem` 的 `Transform` 每帧 `markNeedsPaint`，**同一层内**
+                    // 未加边界的兄弟会跟着重绘 —— 阴影环的 `CustomPaint` 里是
+                    // `Path.combine(difference, …)` 布尔运算，逐帧重算代价很高。
+                    // 它自身只在 [shadowTransition] 时变化 ⇒ 给一个独立边界即可复用 layer
+                    //（父级变换只移动该 layer，不重新绘制）。
+                    child: RepaintBoundary(
+                      child: shadowTransition == Duration.zero || reduceMotion
                         ? CustomPaint(
                             painter: _OuterShadowPainter(
                               radius: radiusValue,
@@ -572,6 +926,7 @@ class AylaGlassSurface extends StatelessWidget {
                               );
                             },
                           ),
+                      ),
                   ),
                 ),
               // ③ 卡面
@@ -579,6 +934,25 @@ class AylaGlassSurface extends StatelessWidget {
             ],
           );
 
+    // 入场淡入：**整块（含玻璃滤镜层）一起淡入** —— 与 web 的 `.reveal-item`
+    //（`base.css:483–506`）和 `auroraqua-*-in`（`auroraqua.css:8–26`）的**整层 opacity**
+    // 逐帧等价。
+    //
+    // ⚠️ **为什么必须连滤镜层一起包**（2026-09-30 实机截图）：「web 端根本就没有这一帧」——
+    // 只包面层时，`t = 0` 面层透明而 `BackdropFilter` 仍在工作 ⇒ 卡片/侧栏位置露出
+    // 一块被模糊的背景（实机表现为大片蓝/粉色块）。
+    //
+    // ⚠️ 代价：`Opacity` 祖先 + `BackdropFilter` 后代会被 Impeller 记一条 **debug** 校验日志
+    //（`Contents::SetInheritedOpacity should never be called when …`）。这是「一比一还原
+    // web 入场」的必要代价 —— web 的 `backdrop-filter` 由浏览器合成层缓存，Flutter 无等价
+    // 机制；release 构建无此日志。性能上 `FadeTransition` 只驱动 `OpacityLayer`，
+    // **不重建任何 widget**（对比按颜色 × t 重建卡面）。
+    // ⚠️ 快照档的完整说明见上方 `useSnapshot` / `backdropLayer`（只冻背底层、
+    // 阴影留在快照之外、槽位与非快照档一致 ⇒ 解冻只换 slot0 的内容）。
+    // ⚠️ **不再自己包一层 `FadeTransition`**（2026-09-30）：淡入统一由外层 `AylaRevealItem`
+    // 的**整层 `Opacity`** 负责（= web 的 `.reveal-item` 语义）。这里再包一层会与它相乘
+    //（t²）⇒ 中间态过白 —— 实机「动画过程中变色」的另一半来源；且多推一个 `OpacityLayer`
+    // 属官方点名的 `intersecting opacities`。
     return glassBody;
   }
 }
@@ -755,7 +1129,13 @@ class _OuterShadowPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _OuterShadowPainter old) =>
-      old.radius != radius || old.shadows != shadows;
+      old.radius != radius ||
+      // ⚠️ **逐项比较**（2026-09-30 纯软件层优化、零观感变化）：
+      // 此前写的是 `old.shadows != shadows` —— `List` 的 `!=` 是**引用比较**，
+      // 而调用方每次 build 都会用 `dimShadows(shadow)` **新建一个 List** ⇒ 父级每次
+      // rebuild 都被判成「变了」并重绘阴影环。官方（DevTools Performance 的 Raster 一节）
+      // 把 `shadows` 列为 raster 线程慢的来源之一。逐项比较后，阴影只在真正变化时重绘。
+      !listEquals(old.shadows, shadows);
 }
 
 /// 两组阴影之间的插值（等价 CSS `transition: box-shadow`）。

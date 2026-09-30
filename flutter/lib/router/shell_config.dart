@@ -123,7 +123,12 @@ bool aylaIsGroupScene(String pathname) =>
       aylaMatches('/group/:id', pathname) ||
       aylaMatches('/group/:id/:scene', pathname) ||
       aylaMatches('/group/:id/posts/:postId', pathname) ||
-      aylaMatches('/group/:id/voice/:voiceChannelId', pathname);
+      aylaMatches('/group/:id/voice/:voiceChannelId', pathname) ||
+      // ⚠️ **2026-10-01 补漏**：群内**直播**场景此前漏在这里 ⇒ 它的 Page key 仍是路径
+      // ⇒ 进出直播 = 换 Page = **整页重建**（用户实报：「跳转进入直播和跳出直播依然是跟刚刚
+      // 一样的」）。对齐 web `App.tsx:89` 的第五条群 Route（element 同样是 GroupPage）
+      // 与 `App.tsx:86–90` 的「5 条 Route 共用一个组件」语义。
+      aylaMatches('/group/:id/live/:liveChannelId', pathname);
 
 /// 帖子详情路由（窄屏底栏下滑离场，评论输入框延迟滑入）。
 bool aylaIsPostDetailRoute(String pathname) =>

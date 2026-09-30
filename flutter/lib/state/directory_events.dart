@@ -4,8 +4,12 @@
 /// ## 为什么需要一条总线
 /// web 有一个跨页的 `stores/directory.ts`（按 `kind+filter` 缓存游标页），
 /// 频道帧到达时直接 patch/移除缓存条目，页面从缓存渲染 ⇒ 天然热更新。
-/// Flutter 侧的目录列表是**每页一个** `AylaPagedList`（第二批定的口径：不预建跨页缓存），
-/// 因此"某个频道被删/改名/改人数"这件事必须由**事件**广播给当前挂着的页面。
+/// Flutter 侧**已按 web 重建该跨页缓存**（`state/directory_store.dart`，2026-09-30：
+/// key 化 record + 60 秒首屏短路 + 在途合并），但**事件仍走本总线广播给页面** ——
+/// 页面收到后调 `AylaDirectoryController.setItems/removeWhere` 改的是 store 里同一条
+/// record（多页共享），因此行为与 web 的「直接 patch 缓存」等价；
+/// 待 WS 增量批次可把 `emitDeleted` / `emitPatched` 直接落到 store（[AylaDirectoryStore]
+/// 的 `invalidated` / `mutationRevision` 字段已预留）。
 ///
 /// ## 语义（与 web 逐条对齐）
 /// | 帧 | 本总线的动作 | 页面动作 |

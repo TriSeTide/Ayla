@@ -45,8 +45,10 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/posts_api.dart';
 import '../core/models/post.dart';
+import '../state/auth_state.dart';
 import '../state/favorite_status.dart';
 import '../state/paged_list.dart';
+import '../state/posts_store.dart' show AylaPostTabCache, aylaPostTabCache;
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
@@ -124,7 +126,10 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     if (notifier != null && callback != null) {
       scheduleMicrotask(() => notifier.unregisterRefresh(callback));
     }
-    _pager?.dispose();
+    // ⚠️ **不 dispose pager**：实例归 [AylaPostTabCache]（web `postTabPages` 跨挂载保留，
+    // `PostsHubPage.tsx:77`）⇒ 再次进入同 tab 命中缓存、不重拉、不闪骨架。
+    _pager?.removeListener(_onPagerChanged);
+    _pager = null;
     _scroll.dispose();
     super.dispose();
   }
@@ -134,8 +139,12 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   }
 
   void _onPagerChanged() {
-    if (!mounted) return;
-    setState(() {});
+    // ⚠️ controller 可能在 **build 期间**通知（panelOwned 路由零时长切换时页面在同一帧挂载
+    // ⇒ initState/didChangeDependencies 阶段就 notifyListeners）⇒ 直接 setState 会抛
+    // "setState() or markNeedsBuild() called during build"。统一挪到帧后（下一帧刷新，等价）。
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (mounted) setState(() {});
+    });
     final AylaPagedList<AylaPost>? pager = _pager;
     if (pager == null) return;
     _favorites.load(
@@ -144,22 +153,50 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     );
   }
 
+  /// tab key（web `PostsHubPage.tsx:97` 的 `posts:{account}:{filter}`）。
+  String _tabKey() => AylaPostTabCache.keyFor(
+        account: ref.read(authNotifierProvider).user?.id ?? 'anonymous',
+        filter: _filter,
+      );
+
+  /// 首页加载（web `loadFirst`，`PostsHubPage.tsx:221–224`）。
+  ///
+  /// 命中 tab 缓存（[AylaPostTabCache]）⇒ **复用同一 pager 实例**（items / cursor /
+  /// loaded 全保留）⇒ 切 tab、详情返回、再次进入都**不闪骨架**；
+  /// 且 `loaded && 距今 < 60 秒`（web `:224`）时**不重拉**。
   void _start() {
-    final AylaPostTabQuery query = aylaPostTabQuery(_filter);
-    final AylaPagedList<AylaPost> pager = AylaPagedList<AylaPost>(
-      request: (String? cursor) => AylaPostsApi.listPosts(
-        scope: query.scope,
-        cursor: cursor,
-        visibility: query.visibility,
-        friends: query.friends,
-      ),
-      keyOf: (AylaPost p) => p.id.toString(),
+    final String key = _tabKey();
+    final AylaPagedList<AylaPost> pager = aylaPostTabCache.acquire(
+      key,
+      create: () {
+        final AylaPostTabQuery query = aylaPostTabQuery(_filter);
+        return AylaPagedList<AylaPost>(
+          // 测试注入点（见 [AylaPostTabCache.requestOverride]）；生产恒走真实 API。
+          request: aylaPostTabCache.requestOverride ??
+              (String? cursor) => AylaPostsApi.listPosts(
+                    scope: query.scope,
+                    cursor: cursor,
+                    visibility: query.visibility,
+                    friends: query.friends,
+                  ),
+          keyOf: (AylaPost p) => p.id.toString(),
+        );
+      },
     );
+    // 同一实例可能已被本页旧实例监听 ⇒ 先移除再挂（幂等，避免重复通知）。
+    pager.removeListener(_onPagerChanged);
     pager.addListener(_onPagerChanged);
-    _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    pager.load();
+    if (!aylaPostTabCache.shouldLoad(key)) return;
+    unawaited(_loadFirst(key, pager));
+  }
+
+  /// 拉首页并在**成功后**打时间戳（web `:200` 的 `updatedAt: Date.now()`；
+  /// 失败不打 ⇒ 下次进入仍会重试）。
+  Future<void> _loadFirst(String key, AylaPagedList<AylaPost> pager) async {
+    await pager.load();
+    if (pager.error == null) aylaPostTabCache.markUpdated(key);
   }
 
   Future<void> _loadFriends() async {
@@ -171,10 +208,8 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   void _registerRefresh() {
     final ShellUiNotifier notifier = ref.read(shellUiProvider.notifier);
     Future<void> callback() async {
-      final AylaPagedList<AylaPost>? pager = _pager;
-      if (pager == null) return;
-      await pager.refresh();
-      if (mounted) setState(() => _replayNonce++);
+      if (!mounted) return;
+      await _refresh();
     }
 
     _shellNotifier = notifier;
@@ -188,7 +223,9 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   Future<void> _refresh() async {
     final AylaPagedList<AylaPost>? pager = _pager;
     if (pager == null) return;
+    final String key = _tabKey();
     await pager.refresh();
+    if (pager.error == null) aylaPostTabCache.markUpdated(key);
     if (mounted) setState(() => _replayNonce++);
   }
 

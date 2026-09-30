@@ -1079,20 +1079,25 @@ class _AylaTopNavState extends State<AylaTopNav> {
 
   /// 入场 `auroraqua-menu-in`（home.css:150–153）：
   /// `opacity 0→1` + `translateY(-8px→0)` + `scale(.95→1)`，300ms `--auroraqua-ease-out`。
+  ///
+  /// ⚠️ **不能再用裸 `Opacity` 包玻璃菜单**（2026-09-30 修「动画过程中变色」，13 号登记项 D）：
+  /// 菜单根是 [AylaGlassSurface]（`--glass-bg-strong` + blur24 sat1.4）⇒ `Opacity` 祖先 +
+  /// `BackdropFilter` 后代会被 Impeller 拒绝传递继承不透明度 ⇒ **模糊保持满强度、
+  /// 只有面层在淡**，中间态色相与稳定态不同（与列表卡片同源，见
+  /// `widgets/base/reveal.dart` 文件头「玻璃子树」段）。
+  /// 改走 [AylaRevealItem] 的玻璃档（`fadeGlass: false`）：它把菜单的**背底层**冻成纹理
+  /// （[AylaGlassSurface] 的 `useSnapshot` 分支），`opacity` 作用在纹理上 ⇒ 模糊跟着一起淡；
+  /// 位移由它自己的 `Transform.translate` 表达、缩放由 [_MenuEntryScale] 用**同一进度**驱动，
+  /// 逐帧与改前的 `TweenAnimationBuilder` 一致（顺序：opacity → translate → scale）。
   Widget _overlayIn({required Widget child}) {
     if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) return child;
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0, end: 1),
+    return AylaRevealItem(
+      fadeGlass: false,
+      // `translateY(-8px → 0)`
+      offset: const Offset(0, -8),
       duration: AylaDurations.auroraqua,
       curve: AylaCurves.auroraquaEaseOut,
-      builder: (BuildContext context, double v, Widget? c) => Opacity(
-        opacity: v,
-        child: Transform.translate(
-          offset: Offset(0, -8 * (1 - v)),
-          child: Transform.scale(scale: 0.95 + 0.05 * v, child: c),
-        ),
-      ),
-      child: child,
+      child: _MenuEntryScale(child: child),
     );
   }
 
@@ -1458,6 +1463,29 @@ class _TopNavDemoState extends State<_TopNavDemo> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// `auroraqua-menu-in` 的 `scale(.95 → 1)` 一段（与位移、淡入共用同一进度）。
+///
+/// 位移与淡入由外层 [AylaRevealItem] 承担（它同时下发 [AylaRevealProgress] 与入场快照）；
+/// 这里只读同一进度做缩放。`child` 走 `AnimatedBuilder` 的缓存参数 ⇒ 每帧只重建
+/// 一个 `Transform`，不重建菜单内容。
+class _MenuEntryScale extends StatelessWidget {
+  const _MenuEntryScale({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final Animation<double>? t = AylaRevealProgress.of(context);
+    if (t == null) return child;
+    return AnimatedBuilder(
+      animation: t,
+      builder: (BuildContext context, Widget? c) =>
+          Transform.scale(scale: 0.95 + 0.05 * t.value, child: c),
+      child: child,
     );
   }
 }

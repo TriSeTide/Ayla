@@ -159,7 +159,12 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       auth.setUser(result.user);
       // web `useAuth.register`：connect 两条 WS + 跑预加载门。
       wsManager?.connectAll();
-      unawaited(AppInit.instance.run());
+      // userId 进目录 record 的 key 段（web `directoryKey` 读 currentUser.id）。
+      unawaited(
+        AppInit.instance.run(
+          userId: ref.read(authNotifierProvider).user?.id,
+        ),
+      );
       if (!mounted) return;
       context.go('/group');
     } catch (err) {

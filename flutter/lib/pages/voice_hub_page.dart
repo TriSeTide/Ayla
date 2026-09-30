@@ -33,10 +33,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/voice_api.dart';
-import '../core/models/visibility.dart' show AylaPostVisibility;
 import '../state/auth_state.dart';
+import '../state/directory_store.dart';
 import '../state/favorite_status.dart';
-import '../state/paged_list.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/tokens.dart';
@@ -52,6 +51,8 @@ import '../state/room_providers.dart';
 import '../widgets/voice/voice_channels.dart';
 import 'hub_support.dart';
 import 'voice_support.dart';
+import '../state/hub_directory_options.dart'
+    show aylaHubDirectoryOptions;
 
 class VoiceHubPage extends ConsumerStatefulWidget {
   const VoiceHubPage({super.key, this.initialType, this.channelId});
@@ -84,7 +85,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
   final ScrollController _scroll = ScrollController();
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
-  AylaPagedList<AylaDirectoryVoiceEntry>? _pager;
+  AylaDirectoryController<AylaDirectoryVoiceEntry>? _pager;
 
   /// 好友 tab 的集合（web `useSocialPage("friends")` 第一页的 user.id）。
   Set<String> _friendIds = const <String>{};
@@ -130,7 +131,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
     _directoryEventRevision = events.revision;
     final AylaDirectoryEvent? event = events.last;
     if (event == null || event.kind != AylaDirectoryKind.voice) return;
-    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
     if (pager == null) return;
     if (event.deleted) {
       pager.removeWhere(
@@ -190,10 +191,14 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   }
 
   void _onPagerChanged() {
-    if (!mounted) return;
-    setState(() {});
+    // ⚠️ controller 可能在 **build 期间**通知（panelOwned 路由零时长切换时页面在同一帧挂载
+    // ⇒ initState/didChangeDependencies 阶段就 notifyListeners）⇒ 直接 setState 会抛
+    // "setState() or markNeedsBuild() called during build"。统一挪到帧后（下一帧刷新，等价）。
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (mounted) setState(() {});
+    });
     // 状态查询只针对当前可见页的目标（web `loadFavoriteStatuses` 的有界查询）。
-    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
     if (pager == null) return;
     _favorites.load(
       'voice',
@@ -208,22 +213,27 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
     final String? owner = _filter == 'mine'
         ? ref.read(authNotifierProvider).user?.id
         : null;
-    final AylaPagedList<AylaDirectoryVoiceEntry> pager =
-        AylaPagedList<AylaDirectoryVoiceEntry>(
-      request: (String? cursor) => AylaVoiceApi.listVoiceChannelsPage(
-        cursor: cursor,
-        owner: owner,
-        friends: _filter == 'friends',
-        occupied: _filter == 'occupied',
-        visibility: _filter == 'public' ? AylaPostVisibility.public : null,
+    // 数据归**共享 store**（web `useDirectoryPage` + `stores/directory.ts`）：
+    // options 进 `directoryKey`（filter 段 ⇒ 每个分类 tab 独立游标/缓存）；
+    // 命中 60 秒缓存 ⇒ 切 tab / 再次进入**不发请求、不闪骨架**（`:274`）。
+    final AylaDirectoryController<AylaDirectoryVoiceEntry> pager =
+        AylaDirectoryController<AylaDirectoryVoiceEntry>(
+      store: aylaDirectoryStore,
+      kind: AylaDirectoryKind.voice,
+      // ⚠️ options 由**共享事实源**构造（`state/hub_directory_options.dart`）：
+      // 它的每个字段都进 `directoryKey`，预加载与页面必须逐字段一致，否则命中不了。
+      options: aylaHubDirectoryOptions(
+        kind: AylaDirectoryKind.voice,
+        filter: _filter,
+        userId: owner,
       ),
-      keyOf: (AylaDirectoryVoiceEntry entry) => entry.card.id,
     );
     pager.addListener(_onPagerChanged);
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    pager.load();
+    // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
+    unawaited(pager.load());
   }
 
   Future<void> _loadFriends() async {
@@ -237,7 +247,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   void _registerRefresh() {
     final ShellUiNotifier notifier = ref.read(shellUiProvider.notifier);
     Future<void> callback() async {
-      final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+      final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
       if (pager == null) return;
       await pager.refresh();
       if (mounted) setState(() => _replayNonce++);
@@ -254,7 +264,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   }
 
   Future<void> _refresh() async {
-    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
     if (pager == null) return;
     await pager.refresh();
     if (mounted) setState(() => _replayNonce++);
@@ -289,7 +299,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
       );
 
   String? _statsLabel() {
-    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
     // web tsx 280–282：判定用的是 directory.loading（不只是首屏）
     if (pager == null || pager.loading) {
       return '… 房间在线 · … 人在聊'; // tsx 281
@@ -313,7 +323,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
       );
     }
     final bool narrow = aylaDirectoryIsNarrow(context);
-    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
     final String? currentUserId = ref.watch(
       authNotifierProvider.select((AuthState s) => s.user?.id),
     );

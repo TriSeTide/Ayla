@@ -32,10 +32,10 @@ import 'package:go_router/go_router.dart';
 import '../core/api/elysia_api.dart';
 import '../core/api/live_api.dart';
 import '../core/api/users_api.dart';
-import '../core/models/visibility.dart' show AylaPostVisibility;
 import '../state/auth_state.dart';
+import '../state/directory_events.dart' show AylaDirectoryKind;
+import '../state/directory_store.dart';
 import '../state/favorite_status.dart';
-import '../state/paged_list.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/tokens.dart';
@@ -47,6 +47,8 @@ import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart';
 import '../widgets/live/live_hall.dart';
 import 'hub_support.dart';
+import '../state/hub_directory_options.dart'
+    show aylaHubDirectoryOptions;
 
 class LiveHubPage extends ConsumerStatefulWidget {
   const LiveHubPage({super.key, this.initialType});
@@ -74,7 +76,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
 
   final ScrollController _scroll = ScrollController();
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
-  AylaPagedList<AylaDirectoryLiveEntry>? _pager;
+  AylaDirectoryController<AylaDirectoryLiveEntry>? _pager;
   Set<String> _friendIds = const <String>{};
   String? _elysiaUserId;
 
@@ -134,9 +136,13 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   }
 
   void _onPagerChanged() {
-    if (!mounted) return;
-    setState(() {});
-    final AylaPagedList<AylaDirectoryLiveEntry>? pager = _pager;
+    // ⚠️ controller 可能在 **build 期间**通知（panelOwned 路由零时长切换时页面在同一帧挂载
+    // ⇒ initState/didChangeDependencies 阶段就 notifyListeners）⇒ 直接 setState 会抛
+    // "setState() or markNeedsBuild() called during build"。统一挪到帧后（下一帧刷新，等价）。
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      if (mounted) setState(() {});
+    });
+    final AylaDirectoryController<AylaDirectoryLiveEntry>? pager = _pager;
     if (pager == null) return;
     _favorites.load(
       'live',
@@ -148,27 +154,27 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   void _start() {
     final String? owner =
         _filter == 'mine' ? ref.read(authNotifierProvider).user?.id : null;
-    final String? status = _filter == 'live'
-        ? 'live'
-        : _filter == 'offline'
-            ? 'offline'
-            : null;
-    final AylaPagedList<AylaDirectoryLiveEntry> pager =
-        AylaPagedList<AylaDirectoryLiveEntry>(
-      request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
-        cursor: cursor,
-        owner: owner,
-        friends: _filter == 'friends',
-        visibility: _filter == 'public' ? AylaPostVisibility.public : null,
-        status: status,
+    // 数据归**共享 store**（web `useDirectoryPage` + `stores/directory.ts`）：
+    // options（含 filter 段）进 `directoryKey` ⇒ 每个分类 tab 独立游标；
+    // 命中 60 秒缓存 ⇒ 切 tab / 再次进入**不发请求、不闪骨架**（`:274`）。
+    final AylaDirectoryController<AylaDirectoryLiveEntry> pager =
+        AylaDirectoryController<AylaDirectoryLiveEntry>(
+      store: aylaDirectoryStore,
+      kind: AylaDirectoryKind.live,
+      // ⚠️ options 由**共享事实源**构造（`state/hub_directory_options.dart`）：
+      // 它的每个字段都进 `directoryKey`，预加载与页面必须逐字段一致，否则命中不了。
+      options: aylaHubDirectoryOptions(
+        kind: AylaDirectoryKind.live,
+        filter: _filter,
+        userId: owner,
       ),
-      keyOf: (AylaDirectoryLiveEntry entry) => entry.card.id,
     );
     pager.addListener(_onPagerChanged);
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    pager.load();
+    // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
+    unawaited(pager.load());
   }
 
   Future<void> _loadFriends() async {
@@ -218,7 +224,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   void _registerRefresh() {
     final ShellUiNotifier notifier = ref.read(shellUiProvider.notifier);
     Future<void> callback() async {
-      final AylaPagedList<AylaDirectoryLiveEntry>? pager = _pager;
+      final AylaDirectoryController<AylaDirectoryLiveEntry>? pager = _pager;
       if (pager == null) return;
       await pager.refresh();
       if (mounted) setState(() => _replayNonce++);
@@ -235,7 +241,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   }
 
   Future<void> _refresh() async {
-    final AylaPagedList<AylaDirectoryLiveEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryLiveEntry>? pager = _pager;
     if (pager == null) return;
     await pager.refresh();
     if (mounted) setState(() => _replayNonce++);
@@ -261,7 +267,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
 
   /// tsx 138：合计直播间数 · 已加载里在播条数。
   String _statsLabel() {
-    final AylaPagedList<AylaDirectoryLiveEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryLiveEntry>? pager = _pager;
     // web tsx 138：判定用的是 loading
     if (pager == null || pager.loading) {
       return '… 直播间 · … 在播';
@@ -277,7 +283,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   @override
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
-    final AylaPagedList<AylaDirectoryLiveEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryLiveEntry>? pager = _pager;
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {

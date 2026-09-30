@@ -54,8 +54,11 @@ import '../core/models/game_room.dart' show AylaGameRoom;
 import '../core/models/post.dart' show AylaPost;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../state/auth_state.dart';
+import '../state/directory_events.dart' show AylaDirectoryKind;
+import '../state/directory_store.dart';
 import '../state/home_prefs.dart';
-import '../state/paged_list.dart';
+import '../state/posts_store.dart';
+import '../state/social_store.dart';
 import '../state/shell_state.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../theme/tokens.dart';
@@ -80,7 +83,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   final ScrollController _scroll = ScrollController();
   final AylaHomePrefsController _prefs = AylaHomePrefsController();
 
-  AylaPagedList<AylaConversationSummary>? _pager;
+  AylaSocialController<AylaConversationSummary>? _pager;
   AylaHomeCatalogs _catalogs = const AylaHomeCatalogs();
   AylaHomeActivityMap? _activity;
   int _replayNonce = 0;
@@ -170,19 +173,20 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _start() {
-    final AylaPagedList<AylaConversationSummary> pager =
-        AylaPagedList<AylaConversationSummary>(
-      request: (String? cursor) => AylaChatApi.listConversationsPage(
-        cursor: cursor,
-        type: 'group',
-      ),
-      keyOf: (AylaConversationSummary c) => c.id,
+    // 数据归**共享 store**（web `useSocialPage("conversations", { type: "group" })`）：
+    // `appInit` 已按 `appInit.ts:35` 预取同一组合 ⇒ 命中 60 秒缓存（`social.ts:150`）
+    // ⇒ `loading == false` ⇒ **主页不显示自己的骨架**（用户实报项）。
+    final AylaSocialController<AylaConversationSummary> pager =
+        AylaSocialController<AylaConversationSummary>(
+      store: aylaSocialStore,
+      kind: AylaSocialKind.conversations,
+      options: const AylaSocialOptions(type: 'group'),
     );
     pager.addListener(_onPagerChanged);
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    pager.load();
+    unawaited(pager.load());
   }
 
   /// 四份目录的第一页（web appInit.ts:41–48 的同一组请求；失败各自兜底为空 ——
@@ -222,42 +226,69 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
+  /// 直播目录第一页 —— **读共享 store 的「全部档」record**（正是 `appInit` 预取的那条，
+  /// `appInit.ts:37` 的 `loadDirectory("live")`）：命中 60 秒缓存 ⇒ **不发请求**
+  /// （`stores/directory.ts:274`）；失败时 store 里是空 items ⇒ 与 web「兜底为空」同。
   Future<Object?> _live() async {
-    try {
-      return (await AylaLiveApi.listLiveChannelsPage()).results;
-    } catch (_) {
-      return null;
-    }
+    // 与 `appInit` 预取**同 key**（`filter: 'all'`）⇒ 命中即不发请求。
+    await aylaDirectoryStore.load(
+      AylaDirectoryKind.live,
+      const AylaDirectoryOptions(filter: 'all'),
+    );
+    return aylaDirectoryStore.itemsAs<AylaDirectoryLiveEntry>(
+      AylaDirectoryKind.live,
+      const AylaDirectoryOptions(filter: 'all'),
+    );
   }
 
+  /// 语音目录第一页 —— 同 [_live]（`appInit.ts:36` 的 `loadDirectory("voice")`）。
   Future<Object?> _voice() async {
-    try {
-      return (await AylaVoiceApi.listVoiceChannelsPage()).results;
-    } catch (_) {
-      return null;
-    }
+    // 与 `appInit` 预取**同 key**（`filter: 'all'`）⇒ 命中即不发请求。
+    await aylaDirectoryStore.load(
+      AylaDirectoryKind.voice,
+      const AylaDirectoryOptions(filter: 'all'),
+    );
+    return aylaDirectoryStore.itemsAs<AylaDirectoryVoiceEntry>(
+      AylaDirectoryKind.voice,
+      const AylaDirectoryOptions(filter: 'all'),
+    );
   }
 
+  /// 桌游目录第一页 —— 同 [_live]（`appInit.ts:39` 的 `loadDirectory("game")`）。
   Future<Object?> _game() async {
-    try {
-      return (await AylaBoardgameApi.listGameRoomsPage()).results;
-    } catch (_) {
-      return null;
-    }
+    // 与 `appInit` 预取**同 key**（`filter: 'all'`）⇒ 命中即不发请求。
+    await aylaDirectoryStore.load(
+      AylaDirectoryKind.game,
+      const AylaDirectoryOptions(filter: 'all'),
+    );
+    return aylaDirectoryStore.itemsAs<AylaDirectoryGameEntry>(
+      AylaDirectoryKind.game,
+      const AylaDirectoryOptions(filter: 'all'),
+    );
   }
 
+  /// 帖子信息流第一页 —— 读共享 [aylaPostsStore]（`appInit.ts:38·42` 的
+  /// `listPosts({scope:"feed", limit:20})` + `setPage`）：新鲜则**不发请求**
+  /// （`isPostsStale`，`stores/posts.ts:146–151`）。
   Future<Object?> _posts() async {
     try {
-      return (await AylaPostsApi.listPosts(limit: 20)).results;
+      if (!aylaPostsStore.loaded || aylaPostsStore.isStale()) {
+        final AylaDirectoryPage<AylaPost> page =
+            await AylaPostsApi.listPosts(scope: 'feed', limit: 20);
+        aylaPostsStore.setScope('feed');
+        aylaPostsStore.setPage(page.results, page.nextCursor, page.hasMore);
+      }
     } catch (_) {
-      return null;
+      // 失败兜底为空 —— web `appInit.ts:43–45`「失败不阻断流程」的同一语义
+      // （主页四份快照各自兜底，任一失败不影响其余三份）。
     }
+    return aylaPostsStore.posts;
   }
 
   void _registerRefresh() {
     final ShellUiNotifier notifier = ref.read(shellUiProvider.notifier);
     Future<void> callback() async {
-      final AylaPagedList<AylaConversationSummary>? pager = _pager;
+      final AylaSocialController<AylaConversationSummary>? pager = _pager;
       if (pager == null) return;
       await pager.refresh();
       await _loadCatalogs();
@@ -273,7 +304,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _refresh() async {
-    final AylaPagedList<AylaConversationSummary>? pager = _pager;
+    final AylaSocialController<AylaConversationSummary>? pager = _pager;
     if (pager == null) return;
     await pager.refresh();
     await _loadCatalogs();
@@ -307,7 +338,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   // ------------------------------------------------------- 宽屏（tsx 124–151）
 
   Widget _buildWide(BuildContext context) {
-    final AylaPagedList<AylaConversationSummary>? pager = _pager;
+    final AylaSocialController<AylaConversationSummary>? pager = _pager;
     final List<AylaConversationSummary> groups = _groups();
     final String? recent = _prefs.recentGroupId;
     final bool recentValid = recent != null &&
@@ -401,7 +432,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   // ------------------------------------------------------- 窄屏（tsx 153–222）
 
   Widget _buildNarrow(BuildContext context) {
-    final AylaPagedList<AylaConversationSummary>? pager = _pager;
+    final AylaSocialController<AylaConversationSummary>? pager = _pager;
     final List<AylaConversationSummary> groups = _groups();
     final AylaHomeActivityMap? activity = _activity;
     final bool loading = (pager == null || pager.loading) && groups.isEmpty;

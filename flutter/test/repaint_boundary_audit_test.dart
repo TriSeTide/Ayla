@@ -206,7 +206,7 @@ void main() {
     await tester.pumpWidget(host(const SizedBox.shrink()));
   });
 
-  testWidgets('量化④（基线）：真实极光背景每帧都重绘它上面的玻璃卡子树（根因在背景侧）', (
+  testWidgets('量化④：真实极光背景下，玻璃卡子树不被背景动画牵连（2026-09-30 修复后）', (
     WidgetTester tester,
   ) async {
     int paints = 0;
@@ -229,12 +229,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     debugPrint('【RepaintBoundary 量化】极光背景 + 玻璃卡：$frames 帧里玻璃卡被 paint $paints 次');
-    // 实测 **10/10 帧**：真实 app 的结构是 `main.dart:84–102` 把整个页面塞进
-    // `AylaAuroraBackground(child: …)`，而背景四层流层与这个 child 同属
-    // `aurora_background.dart:1106` 那一个 `RepaintBoundary` ⇒ 背景每帧变化
-    // 就让整棵内容树重绘。**根因在背景侧（禁改文件）**，修法是把边界下移到
-    // 「只包背景层」或给 child 单独加边界 —— 已写进 13 号 §8.19 并报给背景线。
-    expect(paints, greaterThanOrEqualTo(frames - 1));
+    // **2026-09-30 已修复**：`aurora_background.dart` 的边界下移到「只包背景层」，
+    // 并给内容 `child` 也加了独立边界 —— **两侧都要加**：仅加背景侧时实测内容层
+    // 10 帧仍被 paint 11 次（背景重绘经父级牵连兄弟）。修复后本用例从
+    // 「基线坏（10/10 帧）」变为 **≤1 次**。
+    expect(
+      paints,
+      lessThanOrEqualTo(1),
+      reason: '背景层与内容层各有独立 RepaintBoundary（2026-09-30 修复）',
+    );
     await tester.pumpWidget(host(const SizedBox.shrink()));
     AylaBackdropSnapshot.clear();
   });

@@ -285,8 +285,22 @@ List<AylaServerRailGroup> aylaServerRailGroups({
 class AylaGroupDirectory extends ChangeNotifier {
   AylaGroupDirectory({required AylaChatState chatState}) : _chat = chatState {
     _list.addListener(_forward);
-    unawaited(_list.load());
+    // ⚠️ **有缓存就不请求**（2026-10-01 用户实机：「每次进入主页都要加载群头像侧栏，
+    // 是不是写死了啊」—— 正是这里：构造函数**无条件** `load()`）。
+    // web 的群列表读的是 **social store**，而 `appInit.ts:35` 的
+    // `loadSocial("conversations", { type: "group" })` 已预加载它 ⇒ 命中 60 秒缓存、
+    // **不发请求**（这就是用户说的「web 不需要」）。Flutter 侧改用 `chatState` 的会话摘要
+    //（预加载已灌入，见 `app_preload.dart` 的 `_seedChatStateFromSocial`）当首屏数据源；
+    // 只有它为空（未预加载 / 新登录 / 真的没有群）时才发本页的分页请求。
+    if (_cachedGroups.isEmpty) unawaited(_list.load());
   }
+
+  /// `chatState` 里的群会话（= web 读 social store 的那份缓存）。
+  List<AylaConversationSummary> get _cachedGroups =>
+      <AylaConversationSummary>[
+        for (final AylaConversationSummary c in _chat.conversations)
+          if (c.isGroup) c,
+      ];
 
   final AylaChatState _chat;
   final AylaPagedList<AylaConversationSummary> _list =
@@ -304,7 +318,9 @@ class AylaGroupDirectory extends ChangeNotifier {
 
   bool get loaded => _list.loaded;
 
-  bool get hasMore => _list.hasMore;
+  /// 是否还有更多：本页分页没加载过时**视为可能还有**（缓存只有一页 ⇒ 需要「展开更多」
+  /// 才能拉到后面几页；此前它恒 false 会让入口消失）。
+  bool get hasMore => _list.hasMore || !_list.loaded;
 
   String? get error => _list.error;
 
@@ -316,7 +332,10 @@ class AylaGroupDirectory extends ChangeNotifier {
 
   /// 目录 + 当前群（web tsx 196–203：`selected` 不在已加载页里时补上）。
   List<AylaConversationSummary> groupsWith(String? selectedId) {
-    final List<AylaConversationSummary> loaded = _list.items;
+    // 优先用 chatState 的缓存（= web 读 store）；本页分页有数据时以它为准（已翻页）。
+    final List<AylaConversationSummary> cached = _cachedGroups;
+    final List<AylaConversationSummary> loaded =
+        _list.items.isNotEmpty ? _list.items : cached;
     if (selectedId == null || selectedId.isEmpty) return loaded;
     final AylaConversationSummary? selected = _chat.byId(selectedId);
     if (selected == null ||

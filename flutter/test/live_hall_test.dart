@@ -837,6 +837,11 @@ void main() {
         ),
       );
       await tester.pump();
+      // ⚠️ 列表**按列分帧挂载**（`AylaChunkedChildren`，每帧 columns 张 —— 见
+      // `AylaLiveHall` 的注释：一帧挂载整屏玻璃卡 = UI 线程 282ms）⇒ 首帧只有第一行；
+      // 8 张 / 每帧 3 张 ⇒ 推两帧让全部就位再断言。视觉无差异（stagger delay 期内不可见）。
+      await tester.pump();
+      await tester.pump();
 
       final List<AylaRevealItem> reveals = tester
           .widgetList<AylaRevealItem>(find.byType(AylaRevealItem))

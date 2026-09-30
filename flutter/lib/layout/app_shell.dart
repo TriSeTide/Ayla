@@ -40,6 +40,8 @@ import '../router/shell_config.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
 import '../state/live_state.dart';
+import '../state/posts_store.dart' show aylaPostTabCache;
+import '../state/social_store.dart' show aylaSocialStore;
 import '../state/presence_providers.dart';
 import '../state/room_providers.dart';
 import '../state/shell_state.dart';
@@ -91,6 +93,11 @@ class _AppShellState extends ConsumerState<AppShell> {
     // 房内域：解绑目录帧桥 + 断开 voice/live 两通道 + 清房内状态（同 401 过期路径）。
     aylaStopRooms(ref);
     AppInit.instance.reset();
+    // 帖子页 tab 缓存（web `postTabSession` 机制，`PostsHubPage.tsx:79–86`）：
+    // 账号切换 / 登出清空，避免下一位用户读到上一位的分页快照。
+    aylaPostTabCache.clear();
+    // 社交缓存（会话 / 好友等）同步清空（web `useSocialStore.reset`，`social.ts:45`）。
+    aylaSocialStore.reset();
     ref.read(authNotifierProvider.notifier).clear();
   }
 

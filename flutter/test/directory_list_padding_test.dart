@@ -9,6 +9,7 @@
 /// | `voice.css` | 505–511 | `.voice-hub .voice-channel-list { padding: var(--sp-3) var(--sp-4) }`（基样式） |
 /// | `boardgame.css` | 232–237 | `.games-grid { padding: var(--sp-3) var(--sp-4) }`（基样式） |
 /// | `profile.css` | 452–456 · 458–465 | `.favorites-skeleton` / `.favorites-list` 基样式内距 sp4 / sp3 sp4 |
+/// | `posts.css` | 607–612 · 628–635 · 664–668 | `.posts-feed` / `.posts-skeleton` 基样式 `padding: sp3 sp4`（≤1024）⇒ ≥1025 覆写 `sp4 sp6`（**底部 sp4**；顶部/左右仍被上面的组规则归零） |
 /// | `directory-filters.css` | 185–187 | `.favorites-content .home-state { padding-top: sp3 }`（收藏页空态顶部覆盖） |
 ///
 /// ## 复现数字（1536×824）

@@ -17,12 +17,12 @@ import 'package:flutter/material.dart';
 
 import '../core/api/boardgame_api.dart' show AylaDirectoryGameEntry;
 import '../core/api/live_api.dart' show AylaDirectoryLiveEntry;
-import '../core/api/users_api.dart';
 import '../core/api/voice_api.dart' show AylaDirectoryVoiceEntry;
 import '../core/models/game_room.dart' show AylaGameRoomStatus;
 import '../core/models/post.dart' show AylaPost;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../core/models/visibility.dart' show AylaPostVisibility;
+import '../state/social_store.dart';
 import '../theme/tokens.dart';
 import '../widgets/live/live_channel_snapshot.dart';
 import '../widgets/live/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
@@ -215,9 +215,15 @@ Widget aylaHubSkeletonGrid(
 /// ⚠️ 与 web 同：**只取第一页**（`stores/social.ts:129` 的 `limit: 30`）——
 /// 超过一页的好友不会被前端二次过滤命中；这是 web 的现状（页面层过滤兜底），
 /// 不是本实现的选择。失败 → 空集合（好友 tab 显示空态，不伪造好友关系）。
+/// 数据源改为**共享 store**（web `useSocialPage("friends")` ⇒ `stores/social.ts`）：
+/// 首次取页后 60 秒内（`social.ts:150`）任意页面再问都不发请求；
+/// `appInit` 也会预取同组合。未登录时 store 直返（`social.ts:148`）⇒ 空集合。
 Future<Set<String>> aylaHubFriendIds() async {
+  const AylaSocialOptions options = AylaSocialOptions();
   try {
-    final List<AylaUserPublic> friends = await AylaUsersApi.listFriendsPage();
+    await aylaSocialStore.load(AylaSocialKind.friends, options);
+    final List<AylaUserPublic> friends =
+        aylaSocialStore.itemsAs<AylaUserPublic>(AylaSocialKind.friends, options);
     return <String>{for (final AylaUserPublic user in friends) user.id};
   } catch (_) {
     return const <String>{};

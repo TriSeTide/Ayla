@@ -93,6 +93,9 @@ class AylaServerRailGroup {
 ///
 /// **高度由父约束**（宽屏三列 shell 的一行拉伸；web 同为 flex 行内 flex:none），
 /// 内部列表自持滚动。GroupPage.tsx:409–414 是 web 的装配点。
+/// 本 app 会话内服务器列是否已经播过入场（见 [AylaServerRail] 的 `animateEntrance` 分支）。
+bool kAylaServerRailEntered = false;
+
 class AylaServerRail extends StatefulWidget {
   const AylaServerRail({
     super.key,
@@ -256,9 +259,19 @@ class _AylaServerRailState extends State<AylaServerRail> {
   /// 已测量的选中 id（避免重复 setState）。
   String? _indicatorId;
 
+  /// 本次挂载是否播入场（见 [initState] 的判定）。
+  bool _enter = false;
+
   @override
   void initState() {
     super.initState();
+    // ⚠️ **判定必须放 initState，不能放 build**：build 在一帧内可能跑多次
+    //（LayoutBuilder / 依赖变化）⇒ 放 build 里会在第一次 build 就把模块级标记吃掉，
+    // 结果「首帧」也拿不到入场（实测就是这么红的）。
+    if (widget.animateEntrance && !kAylaServerRailEntered) {
+      kAylaServerRailEntered = true;
+      _enter = true;
+    }
     _syncKeys();
     _scheduleLayoutSync();
   }
@@ -426,7 +439,14 @@ class _AylaServerRailState extends State<AylaServerRail> {
       ),
     );
 
-    if (widget.animateEntrance) {
+    // ⚠️ **每个 app 会话只播一次**（2026-10-01 用户实报：「每次进入主页都要加载群头像侧栏，
+    // 这个动画肯定有问题」）。web 事实源：`auroraqua.css:293` 的 `@media (min-width: 769px)`
+    // 内给 `.server-rail` / `.channel-sidebar` 写了 **`animation: none`**
+    //（原文注释：「宽屏进入/切群由 React motion 按各自 owner 编排，避免叠加 CSS 整列入场」）
+    // ⇒ **只在「进入 / 切群」时播，不是每次渲染**。Flutter 的 `AylaRevealItem` 是
+    //「每次挂载都播」⇒ 切到语音/直播再切回主页，左侧列又滑入一次 = 用户看到的「每次都要加载」。
+    // 服务器列展示的是**全部群**、不随 groupId 变化 ⇒ 这里按「会话内是否已播过」判断。
+    if (_enter) {
       // panelVariants(reduced, "left")（auroraquaMotion.ts 37–51）：
       // x −20 → 0 + opacity 0 → 1，duration 0.3 easeInOut。
       rail = AylaRevealItem(

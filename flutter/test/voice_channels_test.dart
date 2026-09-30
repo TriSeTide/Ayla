@@ -695,6 +695,10 @@ void main() {
         ),
       ),
     );
+    // ⚠️ 列表按行**分帧挂载**（`AylaChunkedChildren`，每帧 1 行 —— 见
+    // `AylaVoiceChannelList` 的注释：一帧挂载 20 张玻璃卡 = UI 282ms）⇒ 首帧只有第一行，
+    // 推一帧让第二行就位再断言（视觉上无差异：卡片在 stagger delay 期内还不可见）。
+    await tester.pump();
     expect(cardBorder(tester, 0), AylaColors.glassBorder);
     expect(cardBorder(tester, 1), AylaColors.indigo700); // 唯一带描边的卡
     expect(cardBorder(tester, 2), AylaColors.glassBorder);

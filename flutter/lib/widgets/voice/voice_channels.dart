@@ -483,49 +483,63 @@ class AylaVoiceChannelList extends StatelessWidget {
               vertical: AylaSpacing.sp3,
             );
 
+    final int rowCount = (channels.length + cols - 1) ~/ cols;
     return Padding(
       padding: pad,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        spacing: AylaSpacing.sp3, // gap: var(--sp-3) = 12
-        children: <Widget>[
-          for (int start = 0; start < channels.length; start += cols)
-            Row(
-              // 同行等高由「卡片预留 owner 行」保证（见 AylaVoiceChannelCard 的说明），
-              // 不用 IntrinsicHeight —— 卡片内的 AylaGlassButton 含 LayoutBuilder，
-              // 而 LayoutBuilder 不支持 intrinsics（会抛 "does not support
-              // returning intrinsic dimensions"）。
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: AylaSpacing.sp3,
-                children: <Widget>[
-                  for (int i = start;
-                      i < channels.length && i < start + cols;
-                      i++)
-                    Expanded(
-                      child: _CardSlot(
-                        index: i,
-                        reveal: revealItems,
-                        child: AylaVoiceChannelCard(
-                          channel: channels[i],
-                          active: channels[i].id == currentChannelId,
-                          joining: joining,
-                          browsing: browsing,
-                          onEnter: () => (onEnterCard ?? _joinById)(channels[i]),
-                          favorite: favoriteBuilder?.call(
-                            context,
-                            channels[i],
-                          ),
-                          action: actionBuilder?.call(context, channels[i]),
-                        ),
-                      ),
+      // ⚠️ **按行分帧挂载**（2026-09-30）：用户实机判断「最后一帧突然出现太多卡」——
+      // 实测一帧挂载 20 张玻璃卡的 UI 线程成本 = 282ms（test/tmp_mount_frame_probe_test.dart），
+      // 分帧后单帧降到 ~1/4。**视觉零差异**：批次时间原点在 AylaRevealScope 里对齐，
+      // 后挂载的项会按「本批已流逝的时间」追赶（见 AylaChunkedChildren / noteBatchMember）。
+      child: AylaChunkedChildren(
+        itemCount: rowCount,
+        // ⚠️ **当前不分帧**（2026-09-30 回退）：用户实机「**不是掉帧，是很流畅的，但是好好的
+        // 动画就是顿了一下，一定是和 web 实现有差异**」—— 分帧挂载会在**动画进行中**逐帧插入
+        // 新卡片（每帧一次 `setState` + 布局），与动画的每帧重建叠加 = 那一「顿」；
+        // 而 web 是**同一帧**全部拿到 `.reveal-item`（之后不再有结构变化）。
+        // ⇒ 这里恢复「一次挂载完」（= web 时序）。分帧能力保留在本件里
+        //（`AylaChunkedChildren` + `perFrame`），需要时把值调小即可。
+        perFrame: 1 << 20,
+        resetKey: channels.isEmpty ? null : channels.first.id,
+        layout: (List<Widget> rows) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          spacing: AylaSpacing.sp3, // gap: var(--sp-3) = 12
+          children: rows,
+        ),
+        builder: (BuildContext context, int row) {
+          final int start = row * cols;
+          return Row(
+            // 同行等高由「卡片预留 owner 行」保证（见 AylaVoiceChannelCard 的说明），
+            // 不用 IntrinsicHeight —— 卡片内的 AylaGlassButton 含 LayoutBuilder，
+            // 而 LayoutBuilder 不支持 intrinsics（会抛 "does not support
+            // returning intrinsic dimensions"）。
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: AylaSpacing.sp3,
+            children: <Widget>[
+              for (int i = start;
+                  i < channels.length && i < start + cols;
+                  i++)
+                Expanded(
+                  child: _CardSlot(
+                    index: i,
+                    reveal: revealItems,
+                    child: AylaVoiceChannelCard(
+                      channel: channels[i],
+                      active: channels[i].id == currentChannelId,
+                      joining: joining,
+                      browsing: browsing,
+                      onEnter: () => (onEnterCard ?? _joinById)(channels[i]),
+                      favorite: favoriteBuilder?.call(context, channels[i]),
+                      action: actionBuilder?.call(context, channels[i]),
                     ),
-                // 最后一行不足 cols 时补空位（网格语义：列宽不拉伸）
-                for (int i = channels.length; i < start + cols; i++)
-                  const Expanded(child: SizedBox.shrink()),
-              ],
-            ),
-        ],
+                  ),
+                ),
+              // 最后一行不足 cols 时补空位（网格语义：列宽不拉伸）
+              for (int i = channels.length; i < start + cols; i++)
+                const Expanded(child: SizedBox.shrink()),
+            ],
+          );
+        },
       ),
     );
   }

@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'page_transitions.dart' show AylaPageTransitionsBuilder;
 import 'tokens.dart';
 
 /// Ayla 九级排版（d:§3）。
@@ -248,12 +249,12 @@ ThemeData buildAylaTheme() {
     //    ⇒ 只作用于 go_router 的 Page。
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
-        TargetPlatform.android: _AylaNoPageTransition(),
-        TargetPlatform.iOS: _AylaNoPageTransition(),
-        TargetPlatform.macOS: _AylaNoPageTransition(),
-        TargetPlatform.windows: _AylaNoPageTransition(),
-        TargetPlatform.linux: _AylaNoPageTransition(),
-        TargetPlatform.fuchsia: _AylaNoPageTransition(),
+        TargetPlatform.android: AylaPageTransitionsBuilder(),
+        TargetPlatform.iOS: AylaPageTransitionsBuilder(),
+        TargetPlatform.macOS: AylaPageTransitionsBuilder(),
+        TargetPlatform.windows: AylaPageTransitionsBuilder(),
+        TargetPlatform.linux: AylaPageTransitionsBuilder(),
+        TargetPlatform.fuchsia: AylaPageTransitionsBuilder(),
       },
     ),
     // 全局 focus 环（d:§10：辉光式 focus ring，禁无替代 outline:none）
@@ -265,25 +266,4 @@ ThemeData buildAylaTheme() {
 }
 
 
-/// 页面转场**直通**（不改变 child）。
-///
-/// 当前由 [buildAylaTheme] 的 `pageTransitionsTheme` 用在全部平台 —— 见那里的长注释：
-/// 路由切换**不做任何动画**（用户 2026-09-28 裁决），换页动画的 owner 交回「页面自己」
-/// （如 `ProfilePage` 的两列面板入场）。
-///
-/// 它同时承担「**取代平台默认**」的职责：Windows/Linux 默认的 `FadeUpwardsPageTransitionsBuilder`
-/// 会在任何自研转场之上再叠一层位移 + 淡入。
-class _AylaNoPageTransition extends PageTransitionsBuilder {
-  const _AylaNoPageTransition();
 
-  @override
-  Widget buildTransitions<T>(
-    PageRoute<T> route,
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    return child;
-  }
-}
