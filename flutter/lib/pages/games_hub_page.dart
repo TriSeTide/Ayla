@@ -301,8 +301,12 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {
-      // tsx 184–193：两张 120 高骨架卡 + 跨列文案（件已交付）
-      content = const AylaGamesGridSkeleton();
+      // tsx 184–193：两张 120 高骨架卡 + 跨列文案（件已交付）。
+      // web 骨架容器同时带 `.games-grid`（tsx 185）⇒ 目录页组规则同样命中：
+      // 左右恒 0（directory-filters.css:171–180）+ ≥769 顶部归零（199–208）。
+      content = AylaGamesGridSkeleton(
+        padding: aylaDirectoryListPadding(context),
+      );
     } else if (pager.error != null && pager.items.isEmpty) {
       content = AylaDirectoryLoadMore(
         loading: pager.loading,
@@ -338,6 +342,11 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
               AylaRevealScope(
                 replayKey: _replayNonce,
                 child: AylaGamesGrid(
+                  // `.games-grid` 基样式是 `padding: sp3 sp4`（boardgame.css:232–237）；
+                  // 目录页组规则再加两条（directory-filters.css）：左右恒 0（171–180，全断点）
+                  // + ≥769 顶部归零（199–208）⇒ 宽屏 (0, 0, 0, sp3) / 窄屏 (0, sp3, 0, sp3)。
+                  // 群内与画布样张不传本参数 ⇒ 保持组件默认（boardgame.css:247–252 另有口径）。
+                  padding: aylaDirectoryListPadding(context),
                   children: <Widget>[
                     for (int i = 0; i < visible.length; i += 1)
                       AylaGameRoomCard(

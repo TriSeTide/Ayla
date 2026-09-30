@@ -426,6 +426,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       // tsx 362–373：只有 !q 且历史非空时才渲染（否则内容区为空）
       if (_history.history.isEmpty) return const SizedBox.shrink();
       return AylaSearchHistoryChips(
+        // .search-history 基样式 padding sp3 sp4 sp3（search.css:11–17）+ 目录页组规则：
+        // 左右**恒 0**（directory-filters.css:171–180，该规则不在媒体查询内）；
+        // 它**不在** 199–208 的顶部归零名单内 ⇒ 顶部保持 sp3（宽窄同值）。
+        padding: aylaDirectoryListPadding(context, zeroTopWhenWide: false),
         history: _history.history,
         query: _q,
         onSelect: _submitQuery,

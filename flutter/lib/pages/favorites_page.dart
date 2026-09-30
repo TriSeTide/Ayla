@@ -9,6 +9,8 @@
 /// - tsx 272–280：空态（title + desc 逐字）· 列表 · 页脚；
 /// - tsx 91–106：列表容器 .favorites-list（窄屏单列 gap sp2 / ≥769 双列 gap sp3、
 ///   上下 padding sp4）；项 = .favorite-item（AylaFavoriteItem 件）+ FavoriteResultCard；
+///   ⚠️ 内距再叠目录页组规则（directory-filters.css:171–180 左右恒 0 + 199–208 ≥769 顶部归零）
+///   —— 由 [aylaDirectoryListPadding] 在调用点表达（原实现左右保留 sp4，2026-09-29 订正）；
 ///   末槽 = .msg-action-btn「取消收藏」（tsx 96–100）；
 /// - tsx 36–67：openTarget 五类跳转（post/live/voice/game/message 带 msg/seq/subgroup 定位参数）；
 /// - tsx 250–259：取消收藏（DELETE 成功后本地收尾，不依赖广播时序）；
@@ -202,15 +204,14 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
     return '$shown 条收藏';
   }
 
-  /// 空态内距：窄屏 = 覆盖顶部 sp3 + 组规则左右归零；宽屏 = 默认左右 sp6。
-  EdgeInsetsGeometry _emptyPadding(bool narrow) => narrow
-      ? const EdgeInsets.only(top: AylaSpacing.sp3, bottom: AylaSpacing.sp12)
-      : const EdgeInsets.fromLTRB(
-          AylaSpacing.sp6,
-          AylaSpacing.sp3,
-          AylaSpacing.sp6,
-          AylaSpacing.sp12,
-        );
+  /// 空态内距（`.favorites-content .home-state`）：基样式上下 sp12（home.css:622–629
+  /// 的 `padding: sp12 sp6`）+ 收藏页顶部覆盖 sp3（directory-filters.css:185–187，
+  /// **不在媒体查询内**）+ 组规则左右归零（171–180，同样全断点）⇒ 宽窄同值
+  /// `(0, sp3, 0, sp12)`（原宽屏档给的左右 sp6 与 171–180 冲突，2026-09-29 按 web 订正）。
+  static const EdgeInsets _emptyPadding = EdgeInsets.only(
+    top: AylaSpacing.sp3,
+    bottom: AylaSpacing.sp12,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -248,14 +249,22 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
 
   Widget _body(bool narrow, AylaPagedList<AylaFavoriteEntry>? pager) {
     if (pager == null || (!pager.loaded && pager.loading)) {
-      return const AylaFavoritesSkeleton(); // tsx 268–271
+      // tsx 268–271；目录页组规则：左右恒 0（directory-filters.css:171–180）+ ≥769 顶部归零
+      // （199–208 的名单含 `.favorites-skeleton`）⇒ 宽屏 (0, 0, 0, sp4) / 窄屏 (0, sp4, 0, sp4)。
+      return AylaFavoritesSkeleton(
+        padding: aylaDirectoryListPadding(
+          context,
+          top: AylaSpacing.sp4,
+          bottom: AylaSpacing.sp4,
+        ),
+      );
     }
     final List<AylaFavoriteEntry> rows = _rows(pager);
     if (rows.isEmpty) {
       return AylaPageState(
         title: '这个分类还没有收藏', // tsx 274
         description: '在对应场景点收藏，内容会出现在这里', // tsx 275
-        padding: _emptyPadding(narrow),
+        padding: _emptyPadding,
       );
     }
     return AylaMasonryGrid<AylaFavoriteEntry>(
@@ -265,13 +274,15 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
       columns: narrow ? 1 : 2, // web: singleColumn ? 1 : 2（tsx 80–85）
       gap: AylaSpacing.sp2, // .favorites-list gap sp2
       masonryGap: AylaSpacing.sp3, // .is-masonry gap sp3
-      padding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp4,
-        vertical: AylaSpacing.sp3,
-      ),
-      masonryPadding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp4,
-        vertical: AylaSpacing.sp4,
+      // 基样式 padding sp3 sp4（profile.css:458–465）+ 目录页组规则：左右恒 0
+      // （directory-filters.css:171–180，全断点）+ ≥769 顶部归零（199–208）
+      // ⇒ 窄屏单列 (0, sp3, 0, sp3)。
+      padding: aylaDirectoryListPadding(context),
+      // ≥769 双列档：基样式上下 sp4（profile.css:524–532 的 .favorites-list.is-masonry，
+      // 0-2-0 的 padding-top 被 0-3-0 的组规则压成 0）⇒ 宽屏 (0, 0, 0, sp4)。
+      masonryPadding: aylaDirectoryListPadding(
+        context,
+        bottom: AylaSpacing.sp4,
       ),
       footer: AylaDirectoryLoadMore(
         loading: pager.loading,

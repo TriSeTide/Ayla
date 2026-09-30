@@ -12,7 +12,9 @@
 /// 8. header 三段文案与字号（10/17/12 + ls 1.4 + opacity .75）；
 /// 9. decor 图标 size 64 + rotate −8° + opacity .42 + 不可命中；
 /// 10. 返回键 40×40 + 图标 20 + `aria-label`；
-/// 11. `aylaDirectoryListPaddingTop`：宽屏 0 / 窄屏 null（组规则 204–208）。
+/// 11. `aylaDirectoryListPaddingTop`：宽屏 0 / 窄屏 null（组规则 204–208）；
+/// 12. ≥769 侧栏槽位底部 **12** 外边距（`margin: 0 0 var(--sp-3)`，31；窄屏覆写 `margin: 0`：230）
+///     —— 卡底边 = 内容区底边 − 12；裸用 `AylaDirectoryFilters`（画布样张）不带该外边距。
 ///
 /// ⚠️ 几何断言前必须等入场动画结束（侧栏 `auroraqua-sidebar-in` 300ms 带 −20px 位移、
 /// 内容区 `directory-content-in` 300ms 带 12px 位移）—— 否则量到的是动画中间帧。
@@ -145,6 +147,72 @@ void main() {
     expect(content.top, 0);
     // 内容位置不变：padding sp3 与 margin −sp3 相抵
     expect(tester.getTopLeft(find.text('第一行')).dy, AylaSpacing.sp3);
+  });
+
+  testWidgets('≥769 侧栏槽位：卡底边 = 内容区底边 − sp3（margin: 0 0 var(--sp-3)，31）', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(1600, 900));
+    final ScrollController inner = ScrollController();
+    addTearDown(inner.dispose);
+    await tester.pumpWidget(host(page(controller: inner)));
+    await settle(tester);
+
+    // 侧栏：`.directory-page .directory-filters { margin: 0 0 var(--sp-3) }`（31）
+    final Rect sidebar = tester.getRect(find.byType(AylaDirectoryFilters));
+    // 内容区：`.directory-content` **无**底部 margin ⇒ 裁剪盒底边落在 body 底边（= 视口底）
+    final Rect content = tester.getRect(scrollerOf(inner));
+
+    expect(content.bottom, 900); // 视口底
+    expect(sidebar.bottom, content.bottom - AylaSpacing.sp3); // 888 = 900 − 12
+    // body 高 = 900 −（`.directory-page` 顶部 padding sp3）= 888 ⇒ 卡高 = body 高 − 12
+    expect(sidebar.height, 900 - AylaSpacing.sp3 * 2); // 876
+    // 只有底部那一条 ⇒ 左右/上边距仍为 0（卡顶边落在 body 顶边）
+    expect(sidebar.top, AylaSpacing.sp3);
+    expect(sidebar.left, AylaSpacing.sp3);
+    expect(sidebar.width, AylaDirectoryFilters.sidebarWidth); // 224，不被槽位 Padding 影响
+  });
+
+  testWidgets('≤768 顶栏：无底部外边距（margin: 0，230）⇒ 顶栏底边 = 内容区顶边', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(460, 700));
+    final ScrollController inner = ScrollController();
+    addTearDown(inner.dispose);
+    await tester.pumpWidget(host(
+      page(narrow: true, controller: inner),
+      viewport: const Size(460, 700),
+    ));
+    await settle(tester);
+
+    final Rect sidebar = tester.getRect(find.byType(AylaDirectoryFilters));
+    final Rect content = tester.getRect(scrollerOf(inner));
+    // 窄屏档 `margin: 0`（230）+ body `gap: 0`（221）⇒ 间距恰为 0（多出 12 即为回归）
+    expect(content.top - sidebar.bottom, 0);
+    expect(sidebar.top, 0); // `.directory-page { padding: 0 }`（220）
+    expect(sidebar.width, 460);
+  });
+
+  testWidgets('裸用 AylaDirectoryFilters（画布样张 3197）：自身不带底部外边距', (
+    WidgetTester tester,
+  ) async {
+    await useViewport(tester, const Size(400, 400));
+    await tester.pumpWidget(host(
+      // ⚠️ 必须经 `Align` 松掉宿主的紧约束：`SizedBox(height:)` 走 `enforce`，
+      // 紧宿主里会被夹回宿主高（同 `AylaSidebarCard.width` 的注释），量不到真值。
+      Align(
+        alignment: Alignment.topCenter,
+        child: SizedBox(height: 340, child: filters()),
+      ),
+      viewport: const Size(400, 400),
+    ));
+    await settle(tester);
+
+    // web 的 `margin: 0 0 sp3` 带 `.directory-page` 后代限定 ⇒ 无宿主时**不生效**
+    // （画布样张 `component_gallery.dart:3197` 就是这种裸用形态）：
+    // 件高 = 宿主给的 340，不因 12px 呼吸空间缩成 328。
+    expect(tester.getSize(find.byType(AylaDirectoryFilters)).height, 340);
+    expect(tester.getRect(find.byType(AylaDirectoryFilters)).bottom, 340);
   });
 
   testWidgets('内容区独立滚动：内层滚 100 不带动外层（真实指针路径）', (WidgetTester tester) async {

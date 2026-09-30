@@ -320,15 +320,14 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {
-      // tsx 288–292：两根骨架（高 64 / 首根 mb 8）· grid 2/3/4 列 · gap sp3 · padding sp3 sp4
+      // tsx 288–292：两根骨架（高 64 / 首根 mb 8）· grid 2/3/4 列 · gap sp3 · padding sp3 sp4。
+      // 目录页组规则把 `.conv-loading` 的左右归零（directory-filters.css:171–180，全断点）；
+      // 它**不在** 199–208 的顶部归零名单内 ⇒ 顶部保持 sp3（zeroTopWhenWide: false）。
       content = aylaHubSkeletonGrid(
         context,
         skeletonHeight: 64,
         gap: AylaSpacing.sp3,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AylaSpacing.sp4,
-          vertical: AylaSpacing.sp3,
-        ),
+        padding: aylaDirectoryListPadding(context, zeroTopWhenWide: false),
       );
     } else if (pager.error != null && pager.items.isEmpty) {
       // tsx 293：错误且无内容 ⇒ 只有页脚（error 时它不渲染）
@@ -361,6 +360,12 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
               AylaRevealScope(
                 replayKey: _replayNonce,
                 child: AylaVoiceChannelList(
+                  // `.voice-hub .voice-channel-list` 基样式是 `padding: sp3 sp4`
+                  // （voice.css:505–511）；目录页组规则再加两条（directory-filters.css）：
+                  // 左右恒 0（171–180，全断点）+ ≥769 顶部归零（199–208）
+                  // ⇒ 宽屏 (0, 0, 0, sp3) / 窄屏 (0, sp3, 0, sp3)。
+                  // 群内与画布样张不传本参数 ⇒ 保持组件默认 sp4/sp3（voice.css:690–695 另有口径）。
+                  padding: aylaDirectoryListPadding(context),
                   channels: <AylaVoiceCardData>[
                     for (final AylaDirectoryVoiceEntry entry in visible)
                       entry.card,

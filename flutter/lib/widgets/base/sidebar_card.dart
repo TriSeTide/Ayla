@@ -22,9 +22,11 @@
 /// | 宽屏消息侧栏 | `messages.css:255` `.wide-messages-sidebar { margin: var(--sidebar-gutter) }` | `AylaWideMessagesSidebar` | ✅ 传 [gutter] |
 /// | 频道侧栏 | `group.css:700` `.channel-sidebar` | `channel_sidebar.dart:1129–1130`（`padding` 表达） | ✅ 早已表达 |
 /// | 直播侧栏 | `live.css:323` `.live-rail` | `live_rail.dart:246`（`margin` 表达） | ✅ 早已表达 |
-/// | 目录页侧栏 | `directory-filters.css:31` `.directory-filters { margin: 0 0 var(--sp-3) }` | `AylaDirectoryFilters` | ➖ web 无左右/上边距（宿主 `.directory-page` 自带 `padding: sp3 sp3 0`）⇒ 保持 0 |
+/// | 目录页侧栏 | `directory-filters.css:31` `.directory-filters { margin: 0 0 var(--sp-3) }` | **`AylaDirectoryPage` 的侧栏槽位**（`directory_page.dart` 宽屏分支 `Padding(bottom: sp3)`） | ✅ 已表达（web 无左右/上边距 —— 宿主 `.directory-page` 自带 `padding: sp3 sp3 0`；窄屏覆写 `margin: 0`：230） |
 ///
-/// ⚠️ 因此 [gutter] **默认 0**：目录页复用点与 web 的 `0 0 sp3` 一致，不能把 12 做成默认值。
+/// ⚠️ 因此 [gutter] **默认 0**：目录页那 12px 是**目录页槽位**的语义（web 选择器带
+/// `.directory-page` 后代限定），由 `AylaDirectoryPage` 的侧栏槽位表达 ⇒ 本件不代传；
+/// 裸用 `AylaDirectoryFilters`（画布样张 `component_gallery.dart:3197`）不带外边距。
 /// 另：`app.css:2795` 的 `.voice-sidebar` 与 `app.css:405` 的 `.chat-sidebar`、`app.css:3248` 的
 /// `.live-sidebar` 在 web 全仓 `.tsx` **零挂载点**（死 CSS，现行语音大厅走 `.directory-filters`）
 /// ⇒ 不构成 Flutter 侧的复用点。
@@ -73,9 +75,10 @@ class AylaSidebarCard extends StatelessWidget {
 
   /// 外边距（`margin: var(--sidebar-gutter)` = **12**，`tokens.css:132`）。
   ///
-  /// **默认 `EdgeInsets.zero`** —— 目录页复用点（`.directory-filters`）在 web 只有
-  /// `margin: 0 0 var(--sp-3)`（`directory-filters.css:31`）⇒ 只有带四边 12 的复用点显式传
-  /// `EdgeInsets.all(AylaSpacing.sidebarGutter)`（见文件头对照表）。
+  /// **默认 `EdgeInsets.zero`** —— 目录页那 12px 由 `AylaDirectoryPage` 的**侧栏槽位**表达
+  /// （web 的 `margin: 0 0 var(--sp-3)` 带 `.directory-page` 后代限定，`directory-filters.css:31`），
+  /// 本件不代传；只有带四边 12 的复用点显式传 `EdgeInsets.all(AylaSpacing.sidebarGutter)`
+  /// （见文件头对照表）。
   ///
   /// 表达方式对齐 web 的盒模型：`Padding` 包在卡片外层 ⇒ 竖向仍受父约束（= `align-self: stretch`），
   /// 卡片高 = 容器高 − 2×gutter。

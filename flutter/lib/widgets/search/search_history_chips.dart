@@ -4,6 +4,8 @@
 /// ```
 /// SearchPage.tsx 362  只在此条件渲染：`!q && history.length > 0`（**有查询词就不显示历史**）
 /// search.css 11–17    .search-history：flex-wrap · gap sp2 · padding sp3 sp4 sp3（12 / 16 / 12）
+/// directory-filters.css 171–180  组规则：该容器的 padding-left/right 归零（**全断点**）
+///                     ⚠️ `.search-history` **不在** 199–208 的顶部归零名单内 ⇒ 顶部保持 sp3
 /// search.css 19–25    .search-chip：padding 4×12 · radius pill · background --ice-100 ·
 ///                     color --text-primary · font-size 13
 /// search.css 27–30    .search-clear：font-size 13 · color --slate-500
@@ -34,6 +36,7 @@ class AylaSearchHistoryChips extends StatelessWidget {
     this.onSelect,
     this.onClear,
     this.clearLabel = '清空',
+    this.padding = inset,
   });
 
   /// 历史词（按 web 顺序展示）。
@@ -51,7 +54,11 @@ class AylaSearchHistoryChips extends StatelessWidget {
   /// 「清空」文案（web 内硬编码；**开放给调用方**）。
   final String clearLabel;
 
-  /// 容器内距（`padding: sp3 sp4 sp3`）。
+  /// 容器内距（默认 [inset] = 基样式 `padding: sp3 sp4 sp3`；搜索页调用点传
+  /// 目录页档 —— 左右恒 0（`directory-filters.css:171–180`）、顶部保持 sp3）。
+  final EdgeInsetsGeometry padding;
+
+  /// 基样式的容器内距（`padding: sp3 sp4 sp3`）—— [padding] 的默认值。
   static const EdgeInsets inset = EdgeInsets.fromLTRB(
     AylaSpacing.sp4,
     AylaSpacing.sp3,
@@ -70,7 +77,7 @@ class AylaSearchHistoryChips extends StatelessWidget {
     if (query.isNotEmpty || history.isEmpty) return const SizedBox.shrink();
     final AylaTextStyles t = AylaTextStyles.of(context);
     return Padding(
-      padding: inset,
+      padding: padding,
       child: Wrap(
         spacing: AylaSpacing.sp2, // gap: var(--sp-2)
         runSpacing: AylaSpacing.sp2,

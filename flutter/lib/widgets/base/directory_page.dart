@@ -10,9 +10,11 @@
 /// |---|---|---|
 /// | `.directory-page:is(.search-page, .favorites-page, .voice-hub, .live-hub, .posts-hub, .games-hub)` | 2–10 | [AylaDirectoryPage]（根：height 100% / flex column / overflow hidden / padding sp3 sp3 0） |
 /// | `.directory-page > .directory-body` | 12–20 | [AylaDirectoryPage] body（flex 1 1 0 / row / gap sp3 / min-height 0） |
+/// | `.directory-page .directory-filters { margin: 0 0 var(--sp-3) }` | 31（窄屏覆写 `margin: 0`：230） | [AylaDirectoryPage] 侧栏槽位底部 **12** 外边距（卡底边比内容区底边高 12） |
 /// | `.directory-page .directory-content` | 145–156 | [AylaDirectoryContent]（flex 1 1 0 / 纵向独立滚动 / padding sp2 sp2 sp6） |
 /// | `keyframes directory-content-in` | 158–167 | [AylaDirectoryContent] 的 [AylaRevealItem]（opacity 0→1 + translateY 12→0 / 300ms） |
 /// | ≥769 负 margin 绘制带 | 189–208 | [AylaDirectoryContent] 外层 _DirectoryContentBleed（绘制带外扩 12 / padding 补偿） |
+/// | 内容区列表容器组规则（左右**恒 0**；≥769 顶部归零） | 171–180 · 199–208 | [aylaDirectoryListPadding]（列表容器内距；Flutter 无后代选择器 ⇒ 由各页调用点显式传） |
 /// | ≤768 档 | 219–247 | 窄屏 padding 0 / column 单列 / content padding sp2 sp4 (68+safe) |
 /// | `.directory-filter-header` / `-kicker` / `-title` / `-stats` | 62–96 | [AylaDirectorySidebarHeader]（窄屏 display:none，241–242） |
 /// | `.directory-filter-decor`（+ 相邻规则） | 46–59 / 98–100 / 241 | [AylaDirectoryDecorIcon]（窄屏 display:none） |
@@ -43,7 +45,8 @@
 /// ## 公开面
 /// `AylaDirectoryPage` · `AylaDirectoryContent` · `AylaDirectorySidebarHeader` ·
 /// `AylaDirectoryDecorIcon` · `AylaDirectoryBackButton` ·
-/// `aylaDirectoryIsNarrow` · `aylaDirectoryIsWide` · `aylaDirectoryListPaddingTop`
+/// `aylaDirectoryIsNarrow` · `aylaDirectoryIsWide` · `aylaDirectoryListPaddingTop` ·
+/// `aylaDirectoryListPadding`
 library;
 
 import 'dart:math' as math;
@@ -68,10 +71,46 @@ bool aylaDirectoryIsWide(BuildContext context) =>
 ///
 /// Flutter 无「后代选择器」⇒ 该规则由**调用方**在列表容器上表达：宽屏返回 `0`，
 /// 窄屏返回 `null`（表示「保持你自己的默认值」，如 `AylaGamesGrid` / `AylaMasonryGrid`
-/// 的默认 `padding` 顶部 sp3）。用法：
-/// `padding: EdgeInsets.fromLTRB(sp4, aylaDirectoryListPaddingTop(context) ?? sp3, sp4, sp3)`
+/// 的默认 `padding` 顶部 sp3）。用法见 [aylaDirectoryListPadding]。
 double? aylaDirectoryListPaddingTop(BuildContext context) =>
     aylaDirectoryIsWide(context) ? 0 : null;
+
+/// 目录页内容区**列表容器**的内距 —— 把 web 的组规则在调用点表达出来。
+///
+/// 事实源（两条规则，一条管左右、一条管顶部）：
+/// - **左右恒 0**：`directory-filters.css:171–180`
+///   `.directory-page .directory-content :is(.search-history, .search-results,
+///   .favorites-list, .favorites-skeleton, .home-state, .home-load-more,
+///   .voice-channel-list, .voice-list-empty, .live-hall-grid, .posts-feed,
+///   .games-grid, .games-grid-loading, .conv-loading, …)` ⇒
+///   `padding-left: 0; padding-right: 0`。该规则**不在任何媒体查询内** ⇒ **窄屏同样归零**。
+/// - **≥769 顶部归零**：`directory-filters.css:199–208` 的同组
+///   `:is(.search-results, .favorites-list, .favorites-skeleton, .voice-channel-list,
+///   .live-hall-grid, .posts-feed, .posts-skeleton, .games-grid)` ⇒ `padding-top: 0`
+///   （让首卡顶边与侧栏玻璃卡顶边对齐）。**不在该名单里的容器**（`.conv-loading`、
+///   `.search-history` 等）顶部保持自身默认 ⇒ 传 [zeroTopWhenWide] = false。
+/// - **底部不动**：web 注释 192「底部呼吸空间不动」⇒ 各列表自身底部内距由 [bottom] 给出
+///   （voice / games / posts 的基样式底部均为 sp3）。
+///
+/// 用法（目录页调用点；**群内场景与画布样张不传**，保持组件自身默认 padding）：
+/// `padding: aylaDirectoryListPadding(context)` —— 宽屏 `(0, 0, 0, sp3)`、
+/// 窄屏 `(0, sp3, 0, sp3)`。
+///
+/// - [top]：窄屏（或 [zeroTopWhenWide] = false 时的全部断点）的顶部内距，默认 sp3
+///   （voice/games/posts 列表基样式的顶部内距）；
+/// - [bottom]：底部内距，默认 sp3（收藏列表双列档传 sp4、骨架传 sp4）；
+/// - [zeroTopWhenWide]：该容器是否在 199–208 的顶部归零名单内。
+EdgeInsets aylaDirectoryListPadding(
+  BuildContext context, {
+  double top = AylaSpacing.sp3,
+  double bottom = AylaSpacing.sp3,
+  bool zeroTopWhenWide = true,
+}) {
+  final double resolvedTop = zeroTopWhenWide
+      ? (aylaDirectoryListPaddingTop(context) ?? top)
+      : top;
+  return EdgeInsets.fromLTRB(0, resolvedTop, 0, bottom);
+}
 
 /// 目录页三件套的根 —— `.directory-page` + `.directory-body`。
 ///
@@ -81,6 +120,8 @@ double? aylaDirectoryListPaddingTop(BuildContext context) =>
 /// - body（`.directory-page > .directory-body`，12–20）：`flex: 1 1 0`（根里唯一子项 ⇒
 ///   [Expanded]）/ `gap: sp3` / `min-height: 0`，**两列方向 = row**（侧栏 + 内容区）；
 ///   窄屏（221）：`flex-direction: column` + `gap: 0`（顶栏 + 内容区单列）。
+/// - 侧栏槽位（31）：`.directory-filters { margin: 0 0 var(--sp-3) }` ⇒ 宽屏时侧栏玻璃卡
+///   底边比内容区底边高 12px（内容区不带）；窄屏档（230）`margin: 0` ⇒ 顶栏不建该层。
 ///
 /// ⚠️ `height: 100%` 要求父级给出**有界高度**（页面层由 AppShell 的固定高度内容区提供）；
 /// 与 web 相同，放进无界高度父级不是本件支持的用法。
@@ -115,7 +156,20 @@ class AylaDirectoryPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             spacing: AylaSpacing.sp3, // gap: var(--sp-3)
             children: <Widget>[
-              filters,
+              // `.directory-page .directory-filters { margin: 0 0 var(--sp-3) }`
+              // （`directory-filters.css:31`）⇒ 侧栏玻璃卡底边比内容区底边高 **12**，
+              // 给内容区滚到底时留出底部呼吸空间（内容区自身不带该 margin）。
+              // 窄屏档（230）覆写为 `margin: 0` ⇒ 该层**只在宽屏分支建**。
+              //
+              // 归属「**目录页槽位**」而非 `AylaDirectoryFilters` 本体：web 选择器带
+              // `.directory-page` 后代限定 ⇒ 裸用（画布样张 `component_gallery.dart:3197`）
+              // 不带外边距，故不在 `AylaDirectoryFilters` / `AylaSidebarCard` 里表达。
+              // 盒模型对齐 CSS：`Padding` 包在卡片外层、横向不受影响，
+              // 纵向仍在 Row 的 `stretch` 紧约束内 ⇒ 卡高 = body 高 − 12。
+              Padding(
+                padding: const EdgeInsets.only(bottom: AylaSpacing.sp3),
+                child: filters,
+              ),
               // ≥769：内容区带「阴影绘制带」外扩（199–208）
               Expanded(child: _DirectoryContentBleed(child: content)),
             ],

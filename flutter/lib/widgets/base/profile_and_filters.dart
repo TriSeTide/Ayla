@@ -239,6 +239,8 @@ class AylaUserProfileCard extends StatelessWidget {
 /// 宽屏 .directory-filters {
 ///   flex column; align-self:stretch; gap: sp2; width:224px; flex:0 0 224px;
 ///   max-height:100%; margin: 0 0 sp3; padding: sp3;
+///     （该 margin 带 `.directory-page` 后代限定 ⇒ 由 AylaDirectoryPage 的侧栏槽位表达，
+///      本件不代传；窄屏档 `directory-filters.css:230` 的 `margin:0` 由槽位只在宽屏分支建层来对齐）
 ///   overflow-y:auto; scroll-padding: sp3; overscroll-behavior: contain;
 ///   1px --glass-border; border-radius: var(--radius-card);   ← 玻璃卡片
 ///   --glass-bg; --glass-filter; --glass-shadow-compact;
