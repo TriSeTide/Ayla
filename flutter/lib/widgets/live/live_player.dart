@@ -259,15 +259,22 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
           child: Stack(
             fit: StackFit.expand,
             children: <Widget>[
-              // 视频（`.live-player-video`：contain + #000 底）；全屏期间 inline 不再挂视频
+              // 视频（`.live-player-video`：width/height 100% + object-fit contain + #000 底）；
+              // 全屏期间 inline 不再挂视频。
+              //
+              // ⚠️ 不要在这里再套 `FittedBox`（2026-10-01 直播黑屏根因）：web 的 `object-fit:
+              // contain` 挂在 `<video>` 元素**自身**（app.css:3528–3533），元素铺满 100%×100%、
+              // 由元素内部做 letterbox，外层没有缩放容器。media_kit 的 `Video` widget 即
+              // `<video>` 等价物，其自带 `fit`（默认 BoxFit.contain）就是 object-fit。
+              // 外层再包 FittedBox 会把无界约束传给 media_kit 内部的 `Stack(fit: expand)`，
+              // 展开出 Infinity 尺寸 → 缩放矩阵算出 NaN → Flutter 每帧报
+              // `TransformLayer is constructed with an invalid matrix.` 且该层不绘制 ⇒ 黑屏
+              // （实测：mpv 侧解码/纹理均正常，rect 已到 1920×1080，唯独此层报错刷屏）。
               if (_showVideo && (!fullscreen || _fullscreen == fullscreen))
                 ColoredBox(
                   color: Colors.black,
-                  child: FittedBox(
-                    fit: BoxFit.contain,
-                    child: widget.videoView ??
-                        const SizedBox(width: 160, height: 90),
-                  ),
+                  child: widget.videoView ??
+                      const SizedBox(width: 160, height: 90),
                 ),
               // 调用方的叠加层（飘弹幕）
               if (widget.children != null) widget.children!,

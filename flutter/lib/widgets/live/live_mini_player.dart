@@ -233,14 +233,15 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
                             ),
                             border: Border.all(color: AylaColors.glassBorder),
                           ),
+                          // video { width/height: 100%; object-fit: contain; background: #000 }
+                          // （live.css:1055–1061）—— contain 由 video 元素自身承担，
+                          // 外层不得再套 FittedBox（同 live_player.dart 的黑屏根因注释：
+                          // 会让 media_kit 内部 Stack 展开出 Infinity ⇒ 无效变换矩阵 ⇒ 不绘制）。
                           child: ColoredBox(
                             color: Colors.black, // video { background: #000 }
-                            child: FittedBox(
-                              fit: BoxFit.contain,
-                              child:
-                                  widget.videoView ??
-                                  const SizedBox(width: 160, height: 90),
-                            ),
+                            child:
+                                widget.videoView ??
+                                const SizedBox(width: 160, height: 90),
                           ),
                         ),
                       ),
