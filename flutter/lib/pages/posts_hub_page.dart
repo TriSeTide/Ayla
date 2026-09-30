@@ -221,13 +221,26 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
       friendIds: _friendIds,
     );
 
+    // `.posts-feed` / `.posts-skeleton` 的目录页档内距（骨架与真实列表用**同一个变量** ⇒ 同口径）：
+    // - 左右恒 0：directory-filters.css:171–180（名单含两者，且**无媒体查询** ⇒ 窄屏同样归零）；
+    // - ≥769 顶部归零：199–208（同名单；基样式 posts.css:607–612 / 628–635 的顶部 sp3
+    //   被压成 0）⇒ 首卡顶边与侧栏玻璃卡顶边对齐；
+    // - 底部保留基样式：≤1024 = sp3，≥1025 基样式覆写为 sp4（posts.css:664–668，
+    //   组规则不覆盖底部；web 注释 192「底部呼吸空间不动」）。
+    final EdgeInsets listPadding = aylaDirectoryListPadding(
+      context,
+      bottom: MediaQuery.sizeOf(context).width >= AylaBreakpoints.lg
+          ? AylaSpacing.sp4
+          : AylaSpacing.sp3,
+    );
+
     Widget content;
     if (pager != null && pager.loading && loaded.isEmpty) {
       // tsx 317–322：三根骨架（前两根间距 12）
-      content = const AylaPostsSkeleton(
+      content = AylaPostsSkeleton(
         // hub 页被目录页组规则归零左右 padding 与限宽（directory-filters.css:171–180）
         centered: false,
-        padding: EdgeInsets.symmetric(vertical: AylaSpacing.sp3),
+        padding: listPadding,
       );
     } else if (loaded.isEmpty) {
       // tsx 323–327
@@ -253,10 +266,9 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
                   itemKey: (AylaPost p) => p.id,
                   memoryKey: 'posts-feed:$_filter', // web tsx 130
                   gap: AylaSpacing.sp3, // .posts-feed gap: sp3
-                  // hub 页水平内距由 .directory-content 统一提供（posts.css 654–656 注释）
-                  padding: const EdgeInsets.symmetric(
-                    vertical: AylaSpacing.sp3,
-                  ),
+                  // hub 页水平内距由 .directory-content 统一提供（posts.css:654–656 注释）；
+                  // 顶部/左右/底部三档见上方 listPadding（与骨架同值）
+                  padding: listPadding,
                   footer: _footer(pager),
                   // 入场动画挂在 .posts-feed-item（posts.css:20 + useListEntryMotion），
                   // 卡片自身只做 hover/active ⇒ 这里用 AylaRevealItem 逐项挂载

@@ -22,10 +22,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/pages/favorites_page.dart';
 import '../lib/pages/games_hub_page.dart';
+import '../lib/pages/my_posts_page.dart';
+import '../lib/pages/posts_hub_page.dart';
 import '../lib/pages/voice_hub_page.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
@@ -34,6 +37,7 @@ import '../lib/widgets/base/loading.dart';
 import '../lib/widgets/base/profile_and_filters.dart';
 import '../lib/widgets/game/games_grid.dart';
 import '../lib/widgets/posts/masonry_grid.dart';
+import '../lib/widgets/posts/post_page_chrome.dart';
 import '../lib/widgets/search/search_history_chips.dart';
 import '../lib/widgets/voice/voice_channels.dart';
 
@@ -71,6 +75,13 @@ void main() {
           ),
         ),
       ),
+    );
+  }
+
+  /// 有界宿主 + Riverpod（真实帖子页在 initState 读 `shellUiProvider`）。
+  Widget hostScoped(Widget child, {Size viewport = wide}) {
+    return ProviderScope(
+      child: host(child, viewport: viewport, disableAnimations: true),
     );
   }
 
@@ -476,6 +487,176 @@ void main() {
       expect(tester.getTopLeft(bar).dx, 256);
       expect(tester.getTopLeft(bar).dy, AylaSpacing.sp3);
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('PostsHubPage：.posts-skeleton 左右 0 / 顶部 0 / 底部 sp4（首卡顶边 = 侧栏顶边）', (
+      WidgetTester tester,
+    ) async {
+      await useViewport(tester, wide);
+      await tester.pumpWidget(hostScoped(const PostsHubPage()));
+      final Finder bar = find.byType(AylaSkeleton).first;
+      expect(tester.getTopLeft(bar).dx, 256); // 未接线时是 272（基样式 sp4）
+      expect(tester.getTopLeft(bar).dy, AylaSpacing.sp3); // 内容区 sp3 + 骨架 0
+      // 骨架内距 = 页面 listPadding（1536 ≥ 1025 ⇒ 底部 sp4：posts.css:664–668）
+      expect(
+        tester.widget<AylaPostsSkeleton>(find.byType(AylaPostsSkeleton)).padding,
+        const EdgeInsets.fromLTRB(0, 0, 0, AylaSpacing.sp4),
+      );
+      // 修复目标：首卡顶边与侧栏玻璃卡顶边对齐（directory-filters.css:199–208）
+      expect(
+        tester.getTopLeft(bar).dy,
+        tester.getTopLeft(find.byType(AylaDirectoryFilters)).dy,
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('PostsHubPage 窄屏：骨架左右 0 / 顶部仍 sp3（顶部归零只在 ≥769）', (
+      WidgetTester tester,
+    ) async {
+      await useViewport(tester, narrow);
+      await tester.pumpWidget(
+        hostScoped(const PostsHubPage(), viewport: narrow),
+      );
+      final Finder bar = find.byType(AylaSkeleton).first;
+      final double contentTop =
+          tester.getRect(find.byType(AylaDirectoryContent)).top;
+      expect(tester.getTopLeft(bar).dx, AylaSpacing.sp4); // 窄屏内容区 padding sp4
+      // 内容区 sp2(8) + 骨架 sp3(12)：顶部未归零
+      expect(
+        tester.getTopLeft(bar).dy - contentTop,
+        AylaSpacing.sp2 + AylaSpacing.sp3,
+      );
+      expect(
+        tester.widget<AylaPostsSkeleton>(find.byType(AylaPostsSkeleton)).padding,
+        const EdgeInsets.fromLTRB(0, AylaSpacing.sp3, 0, AylaSpacing.sp3),
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('MyPostsPage（非目录页）：骨架不被组规则归零（左右仍 sp6 + 1200 居中）', (
+      WidgetTester tester,
+    ) async {
+      await useViewport(tester, wide);
+      await tester.pumpWidget(hostScoped(const MyPostsPage()));
+      final Rect bar = tester.getRect(find.byType(AylaSkeleton).first);
+      // 1536 − 1200 = 336 ⇒ 居中左沿 168；+ 基样式 sp6(24) = 192
+      // （若误接目录页 helper 会是 256 = 内容带左沿）
+      expect(bar.left, 192);
+      expect(bar.left, isNot(256));
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('帖子列表（posts.css 607–612 / 628–635 + 组规则 171–180 / 199–208）', () {
+    /// 与 `posts_hub_page.dart` 的 `listPadding`**逐字相同**的表达式
+    /// （页面里骨架与真实列表**共用该变量**）——与骨架用例合起来锁定
+    /// 「骨架与真实列表同口径」。
+    EdgeInsets listPadding(BuildContext context) => aylaDirectoryListPadding(
+          context,
+          bottom: MediaQuery.sizeOf(context).width >= AylaBreakpoints.lg
+              ? AylaSpacing.sp4
+              : AylaSpacing.sp3,
+        );
+
+    Widget feed() => Builder(
+          builder: (BuildContext context) => AylaMasonryGrid<int>(
+            items: const <int>[0, 1, 2],
+            itemKey: (int v) => v,
+            memoryKey: 'test-posts-feed',
+            gap: AylaSpacing.sp3, // .posts-feed gap: sp3
+            padding: listPadding(context),
+            itemBuilder: (BuildContext context, int v, int index) =>
+                SizedBox(height: 40, child: Text('post-$v')),
+          ),
+        );
+
+    testWidgets('≥769：左右 0 / 顶部 0 ⇒ 首卡顶边 = 侧栏玻璃卡顶边', (
+      WidgetTester tester,
+    ) async {
+      await useViewport(tester, wide);
+      await tester.pumpWidget(
+        host(shell(child: feed()), disableAnimations: true),
+      );
+      await settle(tester);
+
+      final Finder grid = find.byType(AylaMasonryGrid<int>);
+      final Rect list = tester.getRect(grid);
+      expect(list.left, 256);
+      expect(list.width, 1260);
+      final Rect card = tester.getRect(find.text('post-0'));
+      expect(card.left, list.left); // 左右 0
+      expect(card.top, list.top); // 顶部 0
+      expect(list.top, tester.getTopLeft(find.byType(AylaDirectoryFilters)).dy);
+      expect(
+        tester.widget<AylaMasonryGrid<int>>(grid).padding,
+        const EdgeInsets.fromLTRB(0, 0, 0, AylaSpacing.sp4),
+      );
+    });
+
+    testWidgets('769–1024：左右 0 / 顶部 0 / 底部仍 sp3（≥1025 才升 sp4）', (
+      WidgetTester tester,
+    ) async {
+      const Size mid = Size(900, 824);
+      await useViewport(tester, mid);
+      await tester.pumpWidget(
+        host(
+          shell(child: feed()),
+          viewport: mid,
+          disableAnimations: true,
+        ),
+      );
+      await settle(tester);
+
+      final Finder grid = find.byType(AylaMasonryGrid<int>);
+      expect(tester.getRect(grid).left, 256);
+      expect(
+        tester.widget<AylaMasonryGrid<int>>(grid).padding,
+        const EdgeInsets.fromLTRB(0, 0, 0, AylaSpacing.sp3),
+      );
+    });
+
+    testWidgets('≤768：左右仍 0（171–180 无媒体查询）/ 顶部回 sp3', (
+      WidgetTester tester,
+    ) async {
+      await useViewport(tester, narrow);
+      await tester.pumpWidget(
+        host(
+          shell(narrowHost: true, child: feed()),
+          viewport: narrow,
+          disableAnimations: true,
+        ),
+      );
+      await settle(tester);
+
+      final Finder grid = find.byType(AylaMasonryGrid<int>);
+      final Rect list = tester.getRect(grid);
+      expect(list.left, AylaSpacing.sp4); // 内容区自身 padding sp4，列表不再叠加
+      final Rect card = tester.getRect(find.text('post-0'));
+      expect(card.left, list.left);
+      expect(card.top - list.top, AylaSpacing.sp3); // 顶部不归零
+      expect(
+        tester.widget<AylaMasonryGrid<int>>(grid).padding,
+        const EdgeInsets.fromLTRB(0, AylaSpacing.sp3, 0, AylaSpacing.sp3),
+      );
+    });
+
+    testWidgets('非目录上下文：件不传 padding ⇒ 基样式分档不变（未被组规则归零）', (
+      WidgetTester tester,
+    ) async {
+      await useViewport(tester, wide);
+      await tester.pumpWidget(
+        host(
+          const Scaffold(body: AylaPostsSkeleton(centered: false)),
+          disableAnimations: true,
+        ),
+      );
+      await settle(tester);
+
+      // 1536 ≥ 1025 ⇒ posts.css:664–668 的 sp4 sp6（.posts-skeleton 基样式 628–635 的
+      // 顶部 sp3 被 ≥1025 的分档覆写）——组规则只作用于 .directory-page 后代
+      final Rect bar = tester.getRect(find.byType(AylaSkeleton).first);
+      expect(bar.left, AylaSpacing.sp6);
+      expect(bar.top, AylaSpacing.sp4);
     });
   });
 }
