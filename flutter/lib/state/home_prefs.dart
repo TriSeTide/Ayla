@@ -64,6 +64,16 @@ class AylaHomePrefsController extends ChangeNotifier {
   AylaHomeLayout _layout = AylaHomeLayout.card;
   String? _recentGroupId;
   bool _loaded = false;
+
+  /// **读完成**（与 [loaded] 的区别）：[loaded] 在 `load()` 进入时就置位（= 已经开始读），
+  /// 本字段在**读盘返回之后**才置位。
+  ///
+  /// 为什么需要：web 的 `readRecentGroup` 读 localStorage 是**同步**的 ⇒ 首帧
+  /// `recentGroupId` 就是最终值；Flutter 侧异步读盘期间 `recentGroupId` 恒为 null
+  /// ⇒ 主页宽屏会「先按 groups[0] 跳一个群、prefs 到位后再跳到 recent 那个群」
+  /// = 实机「每次点击进入主页都会**跳两次侧栏**」（2026-10-01 用户）。
+  /// 消费方（`home_page.dart` 的宽屏 target 选择）必须等 [ready] 再决定跳哪个群。
+  bool _ready = false;
   bool _disposed = false;
 
   AylaHomeLayout get layout => _layout;
@@ -71,6 +81,9 @@ class AylaHomePrefsController extends ChangeNotifier {
   String? get recentGroupId => _recentGroupId;
 
   bool get loaded => _loaded;
+
+  /// 读盘是否已完成（见 [_ready]）。
+  bool get ready => _ready;
 
   /// 从存储加载一次（重复调用只加载一次；失败静默回落默认值）。
   Future<void> load() async {
@@ -82,11 +95,13 @@ class AylaHomePrefsController extends ChangeNotifier {
       _layout = AylaHomeLayout.parse(stored[layoutKey]);
       final Object? recent = stored[recentGroupKey];
       _recentGroupId = recent is String && recent.isNotEmpty ? recent : null;
+      _ready = true;
       _notify();
     } catch (_) {
       // 存储不可用 → 默认偏好（web readLayout/readRecentGroup 的 catch 同）
       _layout = AylaHomeLayout.card;
       _recentGroupId = null;
+      _ready = true; // 失败也算「读完」：消费方据此落定，不能永远等
       _notify();
     }
   }

@@ -171,6 +171,14 @@ bool aylaPanelOwnedPath(String pathname) {
       pathname == '/profile' ||
       pathname == '/favorites' ||
       pathname == '/search' ||
+      // ⚠️ **2026-10-01 补：主页 `/group`**（用户实机窄屏「进入主页的动画有问题，重合了」）。
+      // 它此前**不在**本名单里 ⇒ 用 `MaterialPage`（300ms 转场）；而**旧页 `/live` 等是
+      // panelOwned ⇒ 被覆盖时 `AylaPageTransitionsBuilder` 直接返回 child（**不退场**）**
+      // ⇒ 旧页停在原位、新页在它上面淡入 = **两页硬叠**（用户看到的「重合」）。
+      // `/group` 与 `/voice` `/live` `/posts` `/games` 同属**顶部导航模块**
+      //（`aylaPrimaryModules` 的第一项）⇒ 应当同档：零时长、同屏只有一页。
+      // ⚠️ 注意 `aylaIsGroupScene` 只匹配 `/group/:id` 系（需要 id），**不含裸 `/group`**。
+      pathname == '/group' ||
       pathname == '/voice' ||
       pathname == '/live' ||
       pathname == '/posts' ||

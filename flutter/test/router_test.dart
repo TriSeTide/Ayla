@@ -203,7 +203,12 @@ void main() {
     expect(aylaPanelOwnedPath('/profile'), isTrue);
     expect(aylaPanelOwnedPath('/favorites'), isTrue);
     expect(aylaPanelOwnedPath('/search'), isTrue);
-    expect(aylaPanelOwnedPath('/group'), isFalse);
+    // ⚠️ 2026-10-01 改为 true（与 /voice /live /posts /games 同档）：用户实机窄屏
+    // 「进入主页的动画有问题，重合了」—— /group 此前用 MaterialPage（300ms），
+    // 而旧页（/live 等 panelOwned）被覆盖时 `AylaPageTransitionsBuilder` 直接返回 child
+    //（**不退场**）⇒ 旧页停在原位、新页在上面淡入 = **两页硬叠**。
+    // /group 与其余四条同属顶部导航模块 ⇒ 零时长、同屏只有一页。
+    expect(aylaPanelOwnedPath('/group'), isTrue);
     expect(aylaPanelOwnedPath('/posts/mine'), isFalse); // 显式排除（见 shell_config 注释）
   });
 

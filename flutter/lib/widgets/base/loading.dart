@@ -20,7 +20,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../theme/aurora_background.dart';
 import '../../theme/css_gradient.dart';
 import '../../theme/tokens.dart';
 
@@ -215,10 +214,15 @@ class AylaFullScreenLoader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ⚠️ **不再自建极光背景**（2026-10-01 用户实机：「登录页刚登录时也好像会串进去其他页面」）。
+    // 本件总挂在宿主的极光背景**之内**（`main.dart` 的全屏门与组件画布都在
+    // `AylaAuroraBackground` 里），再叠一层 `AylaAuroraBackground` 就是**两层极光**：
+    // 两层各自持有 `AnimationController`（相位独立）⇒ 叠加后色相/流向与宿主那层不同
+    // ⇒ 登录后被全屏门盖住的那一瞬看起来像「切到了另一个页面」。
+    // web 的 `.fullscreen-loader`（base.css 515–574）**不自带背景**，只有全局 `.aurora` 一层。
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        const Positioned.fill(child: AylaAuroraBackground()),
         Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
