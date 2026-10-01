@@ -70,6 +70,22 @@ const int kAylaHistoryPageLimit = 50;
 /// 撤回时限（web `useChat.ts:26` `RECALL_SECONDS`，与后端 `MESSAGE_RECALL_SECONDS` 对齐）。
 const int kAylaRecallSeconds = 120;
 
+/// 输入区草稿键 —— web `MessageInput.tsx:90–91`：
+/// `const draftKey = isGroup ? ${convId}:${subgroupId ?? ""} : convId`。
+///
+/// 群聊**每个子群一个独立草稿槽**；[subgroupId] 为 null 时得 `convId:`
+/// （与 web 逐字一致 —— 不是 `convId`，两端不得各自发挥）。
+String aylaSubgroupDraftKey(String conversationId, String? subgroupId) =>
+    '$conversationId:${subgroupId ?? ''}';
+
+/// 子群 id 的 **POST 参数**形态 —— web 四个出口（`useChat.ts:381/448/477` 与 477 同判据）
+/// 都是 `subgroupId != null ? Number(subgroupId) : undefined`：
+/// 非法（非数字）时 `Number()` 得 NaN、`JSON.stringify(NaN)` 得 `null` ⇒ 等价于"不发"，
+/// 因此这里同样**返回 null**（[AylaCreateMessagePayload.toJson] 对 null 是不进 body，
+/// 与 web 的 `undefined` 同义 —— 见 `core/models/chat_message.dart:478` 的「缺席即缺席」）。
+int? aylaSubgroupIdParam(String? subgroupId) =>
+    subgroupId == null ? null : int.tryParse(subgroupId);
+
 /// typing 声明节流 / 停止延迟（web `useTyping.ts:11–12`）。
 const int kAylaTypingDeclareIntervalMs = 2000;
 const int kAylaTypingStopDelayMs = 3000;
@@ -145,7 +161,11 @@ class AylaConversationRuntime extends ChangeNotifier {
         !_peerIsFriend;
   }
 
-  /// 输入区草稿键（web `MessageInput` 的 `draftKey` = 会话 id）。
+  /// 输入区草稿键（web `MessageInput.tsx:91` 的 `draftKey` = 会话 id）。
+  ///
+  /// 私聊恒走 `isGroup === false` 分支（web `PrivateChatPane.tsx:249` 不传 members/groupId）
+  /// ⇒ `draftKey === convId`；群聊的 `convId:subgroupId` 形态在
+  /// `group_chat_page.dart` 由 [aylaSubgroupDraftKey] 表达（本运行时只服务私聊）。
   String get draftKey => conversationId;
 
   /// 当前草稿（`@[user_id]` 序列化格式）。
@@ -312,6 +332,8 @@ class AylaConversationRuntime extends ChangeNotifier {
           seq: 0,
           createdAt: nowIso,
           replyTo: replyTo?.toString(),
+          // web `useChat.ts:348` 乐观态同理（原样传）。
+          subgroupId: submission.subgroupId,
           pending: true,
           uploadProgress: 0,
           idempotencyKey: key,
@@ -337,6 +359,8 @@ class AylaConversationRuntime extends ChangeNotifier {
               replyTo: replyTo,
               idempotencyKey: key,
               mediaId: uploaded.mediaId,
+              // web `useChat.ts:381`（文件分支同判据）。
+              subgroupId: aylaSubgroupIdParam(submission.subgroupId),
             ),
           );
           _message.resolvePendingMessage(
@@ -378,6 +402,8 @@ class AylaConversationRuntime extends ChangeNotifier {
         seq: 0,
         createdAt: nowIso,
         replyTo: replyTo?.toString(),
+        // web `useChat.ts:427` 乐观态 subgroup_id 是**原样传**（POST 才 Number()）。
+        subgroupId: submission.subgroupId,
         pending: true,
         uploadProgress: picked.isEmpty ? null : 0,
         idempotencyKey: key,
@@ -397,6 +423,8 @@ class AylaConversationRuntime extends ChangeNotifier {
               content: text,
               replyTo: replyTo,
               idempotencyKey: key,
+              // web `useChat.ts:448`：`subgroup_id: subgroupId != null ? Number(subgroupId) : undefined`。
+              subgroupId: aylaSubgroupIdParam(submission.subgroupId),
             ),
           );
           _message.resolvePendingMessage(
@@ -448,6 +476,8 @@ class AylaConversationRuntime extends ChangeNotifier {
             replyTo: replyTo,
             idempotencyKey: key,
             segments: segments,
+            // web `useChat.ts:477`（与文本分支同判据）。
+            subgroupId: aylaSubgroupIdParam(submission.subgroupId),
           ),
         );
         _message.resolvePendingMessage(

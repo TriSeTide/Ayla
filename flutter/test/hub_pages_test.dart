@@ -20,6 +20,7 @@ import '../lib/core/models/visibility.dart';
 import '../lib/pages/favorites_page.dart';
 import '../lib/pages/games_hub_page.dart';
 import '../lib/pages/hub_support.dart';
+import '../lib/state/directory_events.dart';
 import '../lib/pages/live_hub_page.dart';
 import '../lib/pages/search_page.dart';
 import '../lib/pages/voice_hub_page.dart';
@@ -102,7 +103,66 @@ Widget _host(Widget child, {Size viewport = const Size(1440, 900)}) {
   );
 }
 
+/// 语音房「有人区置顶」判据（web `sortChannels.ts:32–46`）在侧栏投影处的回归锁 ——
+/// 覆盖 task-5 用户实报的「宽屏第二列侧栏排序依然错误」：
+/// 人数 0 → 1 时该房必须被排到最前（且**数据本身**要先跟着事件更新）。
+void _voiceSortGroup() {
+  group('侧栏语音排序：有人 0→1 时置顶（sortChannels.ts:33–39）', () {
+    AylaDirectoryVoiceEntry entry(String id, {int count = 0}) =>
+        AylaDirectoryVoiceEntry(
+          card: AylaVoiceCardData(id: id, name: id, memberCount: count),
+        );
+
+    test('事件把人数改成 1 后，排序把该房提到最前', () {
+      final List<AylaDirectoryVoiceEntry> before = <AylaDirectoryVoiceEntry>[
+        entry('a', count: 0),
+        entry('b', count: 0),
+      ];
+      // 事件到达（`voice.channel.member_count_changed`）⇒ 纯投影换人数。
+      final ({List<AylaDirectoryVoiceEntry> items, bool refresh}) applied =
+          aylaHubApplyVoiceEvent(
+        before,
+        const AylaDirectoryEvent.patched(AylaDirectoryKind.voice, 'b', 1),
+      );
+      expect(applied.refresh, isFalse);
+      // 排序在投影处表达（`group_page.dart` 的 voiceRooms 槽位）。
+      final List<String> sorted = <String>[
+        for (final AylaDirectoryVoiceEntry e in aylaHubSortVoice(applied.items))
+          e.card.id,
+      ];
+      expect(sorted, <String>['b', 'a'],
+          reason: '有人（member_count > 0）整体置顶（web sortChannels.ts:34–36）');
+    });
+
+    test('全局快照提供时间戳时按 last_occupied_at 降序（web :37–39）', () {
+      final List<AylaDirectoryVoiceEntry> items = <AylaDirectoryVoiceEntry>[
+        entry('old', count: 1),
+        entry('new', count: 2),
+      ];
+      final List<String> sorted = <String>[
+        for (final AylaDirectoryVoiceEntry e in aylaHubSortVoice(
+          items,
+          factsOf: <String, AylaVoiceSortFacts>{
+            'old': const AylaVoiceSortFacts(
+              memberCount: 1,
+              lastOccupiedAt: '2026-09-28T08:00:00Z',
+            ),
+            'new': const AylaVoiceSortFacts(
+              memberCount: 2,
+              lastOccupiedAt: '2026-09-28T09:00:00Z',
+            ),
+          },
+        ))
+          e.card.id,
+      ];
+      expect(sorted, <String>['new', 'old']);
+    });
+  });
+}
+
 void main() {
+  _voiceSortGroup();
+
   group('aylaHubFilterOf / aylaHubFilterLabel', () {
     test('已知分类取原值；未知/缺省 → all', () {
       expect(aylaHubFilterOf(VoiceHubPage.filters, 'occupied'), 'occupied');

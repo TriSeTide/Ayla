@@ -27,9 +27,13 @@ final ChangeNotifierProvider<AylaPresenceState> presenceStateProvider =
 /// presence 通道客户端（单例）。
 final Provider<AylaPresenceWsClient> presenceWsProvider =
     Provider<AylaPresenceWsClient>((Ref ref) {
+  // ⚠️ **用 `read` 而不是 `watch`**（2026-10-02，与 `chatWsProvider` 同一根因家族）：
+  // 两个被依赖的 store 都是高频 notify 的 ⇒ `watch` 会让本 provider 被反复重建，
+  // 每次重建都 `ref.onDispose(client.disconnect)` **把 presence 通道断掉**。
+  // 二者都是长生命周期单例（引用永不变化），连接对象的生命周期必须长于其通知频率。
   final AylaPresenceWsClient client = AylaPresenceWsClient(
-    presence: ref.watch(presenceStateProvider),
-    realtime: ref.watch(realtimeProvider),
+    presence: ref.read(presenceStateProvider),
+    realtime: ref.read(realtimeProvider),
   );
   ref.onDispose(client.disconnect);
   return client;

@@ -50,14 +50,19 @@ import '../core/api/live_api.dart';
 import '../core/api/voice_api.dart';
 import '../core/models/conversation.dart';
 import '../core/models/subgroup.dart';
+import '../state/boardgame_store.dart' show aylaBoardgameStore;
 import '../state/chat_providers.dart' show chatStateProvider;
 import '../state/chat_state.dart' show AylaChatState;
+import '../state/directory_events.dart';
 import '../state/group_providers.dart';
-import '../state/subgroup_state.dart' show AylaSubGroupState;
+import '../state/subgroup_state.dart'
+    show AylaSubGroupState, aylaSortSubgroupsByActivity;
 import '../state/group_state.dart';
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
-import '../state/room_providers.dart' show liveStateProvider, voiceStateProvider;
+import '../state/posts_store.dart' show aylaPostsStore;
+import '../state/room_providers.dart'
+    show directoryEventsProvider, liveStateProvider, voiceStateProvider;
 import '../state/voice_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsWide;
@@ -72,6 +77,9 @@ import 'group_info_page.dart';
 import 'group_live_page.dart';
 import 'group_posts_page.dart';
 import 'group_support.dart';
+import 'hub_support.dart'
+    show aylaHubApplyLiveEvent, aylaHubApplyVoiceEvent, aylaHubSortLive,
+        aylaHubSortVoice, AylaVoiceSortFacts;
 import 'group_voice_page.dart';
 
 /// 下拉回主页阈值与退场时长（web `GroupPage.tsx:64–65`）。
@@ -138,6 +146,21 @@ class GroupPage extends ConsumerStatefulWidget {
   ConsumerState<GroupPage> createState() => _GroupPageState();
 }
 
+/// 子群取页的**测试注入点**（生产恒为 null ⇒ 走真实 @AylaChatApi.listSubgroupsPage@）。
+///
+/// 为什么需要它：@AylaChatApi@ 是纯静态类、没有可替换的请求出口，而本轮修复的
+/// 判据（@default@ 并入 + 落库排序 + 首个 active）**必须**在真实 GroupPage 上
+/// 走一遍才可信 —— 「单元测试绿了但链路是断的」正是上一轮的教训。
+/// 形态与 @AylaDirectoryStore.requestOverride@ / @AylaSocialStore.requestOverride@ 同款。
+@visibleForTesting
+AylaSubgroupsPageLoader? aylaGroupPageSubgroupsLoader;
+
+/// 见 [aylaGroupPageSubgroupsLoader]。
+typedef AylaSubgroupsPageLoader = Future<AylaSubgroupPage> Function(
+  String groupId,
+  String? cursor,
+);
+
 class _GroupPageState extends ConsumerState<GroupPage> {
   AylaGroupDirectory? _directory;
 
@@ -155,6 +178,20 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   // 于是面板重挂的那一刻是**空的**，用户看到的就是「选项卡被刷掉」。
   final Map<String, AylaPagedList<AylaSubGroup>> _subgroupsByGroup =
       <String, AylaPagedList<AylaSubGroup>>{};
+
+  /// 每个群的**服务端默认组**（`listSubgroupsPage` 响应独有的 default 字段）。
+  ///
+  /// ## 为什么单独存（web `GroupPage.tsx:265–270`）
+  /// web 用 `subgroupPage.items.find((item) => item.is_default)` 确立首个 active 子群。
+  /// 该页的 items 是 **social record**，而 social 的落地段会把 `page.default`
+  /// **显式并入** items（`stores/social.ts:174–178`）⇒ 那个 find 必然能找到。
+  ///
+  /// ⚠️ Flutter 侧不能照抄这个 find：本页的子群列表是**页面级 `AylaPagedList`**
+  /// （不落 social record），而 default 是**响应级字段**、会随分页游标消失
+  /// （后端 `views.py:238–247`：游标页的 rows 按 SUBGROUP_ORDER 分页，
+  /// default 在**响应外层**另给）⇒ 必须在首次见到时**存下来**，
+  /// 否则「默认组不落在本页 rows 内」时首个 active 永远确立不了（发送就不带子群）。
+  final Map<String, AylaSubGroup> _defaultSubgroups = <String, AylaSubGroup>{};
   final Map<String, AylaPagedList<AylaDirectoryVoiceEntry>> _voiceByGroup =
       <String, AylaPagedList<AylaDirectoryVoiceEntry>>{};
   final Map<String, AylaPagedList<AylaDirectoryLiveEntry>> _liveByGroup =
@@ -166,6 +203,21 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   AylaPagedList<AylaDirectoryLiveEntry>? _live;
 
   bool _showGroupCreate = false;
+
+  /// 目录热更新事件总线（`voice.channel.*` / `live.channel.*`；见 `state/directory_events.dart`）。
+  ///
+  /// ## 为什么必须有（2026-10-01 用户实报「宽屏第二列侧栏排序依然错误」的第二根因）
+  /// 侧栏的语音/直播列表来自本页的两条**页面级** `AylaPagedList`（[_createVoice] / [_createLive]），
+  /// 它们只在首次 `load()` 时取一次。而 WS 帧桥（`core/ws/room_frames.dart`）确实在广播
+  /// 目录事件 —— `emitPatched(voice, …)`（`:195`）/ `emitPatched(live, …)`（`:229`）、
+  /// `emitDeleted`（`:113/124`）、`emitInvalidated`（`:165/211`）—— 但消费侧此前只有两个
+  /// **一级大厅页**（`voice_hub_page.dart:110–128`、`games_hub_page.dart:106–120`）。
+  /// ⇒ 群页侧栏：语音房有人进出（`member_count_changed`）时**行上的人数与排序都不变**；
+  /// 新开播/下播（`live.channel.status.changed`）时 **LIVE 标记与排序都不变**；
+  /// 新建/删除语音房或直播间时**列表不增不减**。
+  /// ⇒ 光是接排序（[aylaHubSortVoice] / [aylaHubSortLive]）仍然错：**数据先得是新的**。
+  AylaDirectoryEvents? _directoryEvents;
+  int _directoryEventRevision = 0;
 
   /// 已同步过的 (群, 场景) —— 只在变化时写 store（web tsx 229–245 的 effect）。
   String? _syncedGroupId;
@@ -188,6 +240,12 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     _directory = AylaGroupDirectory(chatState: ref.read(chatStateProvider))
       ..addListener(_onChanged);
     _bindGroupLists();
+    // 群排序的两个**实时源**（桌游房表 / 帖子流）不是 Riverpod provider，
+    // 而是模块级 store（与 web 的 zustand store 同层）⇒ 按既有 `_directory` 同款
+    // 用 addListener 订阅（web 是 zustand 订阅，语义等价：变化即重排）。
+    aylaBoardgameStore.addListener(_onChanged);
+    aylaPostsStore.addListener(_onChanged);
+    _registerDirectoryEvents();
     // 顶栏从原底栏位置升到顶部（web useEnterGroupAnimation 的「首帧后再进入」）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _entered = true);
@@ -224,13 +282,18 @@ class _GroupPageState extends ConsumerState<GroupPage> {
 
   AylaPagedList<AylaSubGroup> _createSubgroups(String gid) {
     final AylaPagedList<AylaSubGroup> list = AylaPagedList<AylaSubGroup>(
-      // `listSubgroupsPage` 的响应多带一个 `default` 字段（[AylaSubgroupPage]）；
-      // 本列表只消费 results/游标/总数 ⇒ 这里投影成通用游标页。
+      // `listSubgroupsPage` 的响应多带一个 `default` 字段（[AylaSubgroupPage]）——
+      // 通用游标页装不下它，因此在**本闭包里先取出来存进 [_defaultSubgroups]**
+      // （web `stores/social.ts:174–178` 把它并进 items；本页的子群列表不落 social
+      // record，故等价物是这张表）。
       request: (String? cursor) async {
-        final AylaSubgroupPage page = await AylaChatApi.listSubgroupsPage(
-          gid,
-          cursor: cursor,
-        );
+        final AylaSubgroupsPageLoader? override =
+            aylaGroupPageSubgroupsLoader;
+        final AylaSubgroupPage page = override != null
+            ? await override(gid, cursor)
+            : await AylaChatApi.listSubgroupsPage(gid, cursor: cursor);
+        final AylaSubGroup? fallback = page.defaultSubgroup;
+        if (fallback != null) _defaultSubgroups[gid] = fallback;
         return AylaDirectoryPage<AylaSubGroup>(
           results: page.results,
           nextCursor: page.nextCursor,
@@ -275,6 +338,7 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       list.dispose();
     }
     _subgroupsByGroup.clear();
+    _defaultSubgroups.clear();
     _voiceByGroup.clear();
     _liveByGroup.clear();
     _subgroups = null;
@@ -285,7 +349,11 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   @override
   void dispose() {
     _leaveTimer?.cancel();
+    _directoryEvents?.removeListener(_onDirectoryEvents);
+    _directoryEvents = null;
     _disposeGroupLists();
+    aylaBoardgameStore.removeListener(_onChanged);
+    aylaPostsStore.removeListener(_onChanged);
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
     super.dispose();
@@ -295,15 +363,131 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     if (mounted) setState(() {});
   }
 
+  /// 订阅目录事件总线 —— 照 `pages/voice_hub_page.dart:113–122` 的既有范式
+  /// （`_registerDirectoryEvents` / `_onDirectoryEvents` / dispose 解绑）。
+  void _registerDirectoryEvents() {
+    final AylaDirectoryEvents events = ref.read(directoryEventsProvider);
+    _directoryEvents = events;
+    _directoryEventRevision = events.revision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      events.addListener(_onDirectoryEvents);
+    });
+  }
+
+  /// 目录事件处理 —— 逐条对应 web `ws/chat.ts` 的 `voice.channel.*` / `live.channel.*`
+  /// 分支对目录列表的效应（`voice_hub_page.dart:124–154` 是同一套）：
+  /// - `deleted` ⇒ 从对应桶移除该条（web `items.filter`）；
+  /// - 人数 `patched` ⇒ 就地换该条的人数（`AylaPagedList.setItems`）；
+  /// - 其余（`emitInvalidated`）⇒ **重取首页**（web 是置 `invalidated` 由用户点刷新；
+  ///   照 `voice_hub_page.dart:153` 的 Flutter 口径直接重取，同一处偏离登记）。
+  ///
+  /// ⚠️ **只处理 voice / live**：`game` 不属本页侧栏（群内桌游页自己管，
+  /// web 的侧栏也只有语音房与直播间两条列表）。
+  /// ⚠️ 两条桶都按 groupId 分桶（[`_voiceByGroup`] / [`_liveByGroup`]）——
+  /// 事件里的 id 只说明「哪个房间变了」，**不能**据此判断它属于哪个群 ⇒
+  /// 必须遍历全部桶逐条比对（漏掉非当前群 = 切回旧群时列表仍是旧的）。
+  void _onDirectoryEvents() {
+    final AylaDirectoryEvents? events = _directoryEvents;
+    if (events == null || events.revision == _directoryEventRevision) return;
+    _directoryEventRevision = events.revision;
+    final AylaDirectoryEvent? event = events.last;
+    if (event == null) return;
+    switch (event.kind) {
+      case AylaDirectoryKind.voice:
+        _applyVoiceDirectoryEvent(event);
+      case AylaDirectoryKind.live:
+        _applyLiveDirectoryEvent(event);
+      case AylaDirectoryKind.game:
+        // 侧栏没有桌游列表（web `ChannelSidebar.tsx:124–128` 只有 voice / live
+        // 两条 `useDirectoryPage`）⇒ 不处理，也不假装修好了。
+        break;
+    }
+  }
+
+  void _applyVoiceDirectoryEvent(AylaDirectoryEvent event) {
+    for (final AylaPagedList<AylaDirectoryVoiceEntry> list
+        in _voiceByGroup.values) {
+      if (event.deleted) {
+        list.removeWhere(
+          (AylaDirectoryVoiceEntry entry) => entry.card.id == event.id,
+        );
+        continue;
+      }
+      // 效应判据抽在 hub_support 的纯函数里（可定向测试，见 sort_channels_test）。
+      // web `stores/voice.ts:156–165` 的 `patchChannel`：只改描述符；
+      // 排序由 store 的 `sortVoiceChannels` 承担 ⇒ Flutter 侧排序表达在页面投影处
+      // （见 _buildWide 的 aylaHubSortVoice）。
+      final ({List<AylaDirectoryVoiceEntry> items, bool refresh}) next =
+          aylaHubApplyVoiceEvent(list.items, event);
+      if (next.refresh) {
+        unawaited(list.refresh());
+        continue;
+      }
+      list.setItems(next.items);
+    }
+  }
+
+  void _applyLiveDirectoryEvent(AylaDirectoryEvent event) {
+    for (final AylaPagedList<AylaDirectoryLiveEntry> list
+        in _liveByGroup.values) {
+      if (event.deleted) {
+        list.removeWhere(
+          (AylaDirectoryLiveEntry entry) => entry.card.id == event.id,
+        );
+        continue;
+      }
+      // 同 voice：`live.channel.created` / `.updated` / `.status.changed` ⇒ 重取首页
+      // （新开播/下播/改名都走这条）；`live.viewers.changed` ⇒ 只换在看人数
+      // （web `stores/live.ts:218–224` 的 `patchViewerCount`：瞬态投影、不改排序）。
+      final ({List<AylaDirectoryLiveEntry> items, bool refresh}) next =
+          aylaHubApplyLiveEvent(list.items, event);
+      if (next.refresh) {
+        unawaited(list.refresh());
+        continue;
+      }
+      list.setItems(next.items);
+    }
+  }
+
   /// 子群桶 → 状态层（web `GroupPage.tsx:265–283`）：
   /// 未选中时取服务端标出的默认组（缺席时退回列表里 `is_default` 的第一项）。
+  ///
+  /// ⚠️ 与 web 的**两处必要差异**（都登记，且都被端到端回归锁覆盖）：
+  /// 1. web 的 `subgroupPage.items` 是 social record，**已含** `page.default`
+  ///    （`stores/social.ts:174–178` 并进 items）⇒ `find(is_default)` 必然命中。
+  ///    本页的子群列表是页面级 [AylaPagedList]、`default` 存在 [_defaultSubgroups]
+  ///    ⇒ 这里必须**先把它并进待落盘列表**，否则「默认组不在本页 rows 里」时
+  ///    未读/活跃度会挂到主群 key 上（用户实报「子群接到主群去了」的投影面）。
+  /// 2. web 由 `stores/subgroup.ts` 在**写入侧**保证顺序（`setSubgroups` 保持服务端
+  ///    顺序、默认组在前）；本页服务端 rows 已是 SUBGROUP_ORDER（`views.py:238`），
+  ///    但**默认组是被并进来的**、可能落在尾部 ⇒ 这里按
+  ///    [aylaSortSubgroupsByActivity] 排一遍，判据与 `ChannelSidebar.tsx:137` 一致。
+  ///    （`widgets/shell/channel_sidebar.dart:465–480` 内部还有一套等价排序，
+  ///    两套并存不冲突 —— 排序是幂等的；本文件不改那个件。）
   void _syncSubgroupsFor(String gid, AylaPagedList<AylaSubGroup> pager) {
     if (!pager.loaded) return;
     final AylaSubGroupState state = ref.read(subgroupStateProvider);
     if (state.subgroupsOf(gid).isEmpty && pager.items.isNotEmpty) {
-      state.setSubgroups(gid, pager.items);
+      final AylaSubGroup? fallback = _defaultSubgroups[gid];
+      final bool fallbackMissing = fallback != null &&
+          !pager.items.any((AylaSubGroup sg) => sg.id == fallback.id);
+      state.setSubgroups(
+        gid,
+        aylaSortSubgroupsByActivity(<AylaSubGroup>[
+          if (fallbackMissing) fallback,
+          ...pager.items,
+        ]),
+      );
     }
     if (state.activeSubgroupOf(gid) != null) return;
+    // web tsx 268–269：未选中 ⇒ 用**服务端标出的默认组**确立首个 active。
+    // 先试响应级 default（权威），再退回列表里 `is_default` 的第一项。
+    final AylaSubGroup? fallback = _defaultSubgroups[gid];
+    if (fallback != null) {
+      state.setActiveSubgroup(gid, fallback.id);
+      return;
+    }
     for (final AylaSubGroup sg in state.subgroupsOf(gid)) {
       if (sg.isDefault) {
         state.setActiveSubgroup(gid, sg.id);
@@ -461,6 +645,8 @@ class _GroupPageState extends ConsumerState<GroupPage> {
         lastMessage: c.lastMessage,
         liveChannels: live.channels.values,
         voiceChannels: voice.channels.values,
+        gameRooms: aylaBoardgameStore.rooms,
+        posts: aylaPostsStore.posts,
         groupActivityAt: chat.groupActivityAt,
       ),
     );
@@ -474,6 +660,7 @@ class _GroupPageState extends ConsumerState<GroupPage> {
                 groups: sorted,
                 liveChannels: live.channels.values,
                 voiceChannels: voice.channels.values,
+                gameRooms: aylaBoardgameStore.rooms,
               ),
               currentGroupId: widget.groupId,
               onSelectGroup: (String gid) =>
@@ -511,9 +698,21 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               subgroupDirectory: _channelDirectory(_subgroups),
               // 子群编辑入口 = 群主/管理员（web `ChannelSidebar.tsx:139` 同源）。
               canManageSubgroups: _canManage(currentGroup),
+              // ⚠️ **排序表达在投影处**（不改 `widgets/shell/channel_sidebar.dart` —— 它归
+              // sidebar-dev；组件在 build 里排序会与 `AnimatedPositioned` 的重排动画打架，
+              // 见 task-5 的落点说明）。web 是 store 层排好（`stores/voice.ts:128/147/158`
+              // 每次写都过 `sortVoiceChannels`）⇒ 数据进组件前就是有序的，这里等价。
+              // 排序事实源 `utils/sortChannels.ts:32–46`，判据见 [aylaHubSortVoice]。
+              // 时间戳取自**全局** `voiceState` 的快照（web 同源：`stores/directory.ts:161`
+              // 用 voice store 的描述符替换 record 的同 id 项）。
               voiceRooms: <AylaChannelVoiceRoom>[
-                for (final AylaDirectoryVoiceEntry entry
-                    in _voice?.items ?? const <AylaDirectoryVoiceEntry>[])
+                for (final AylaDirectoryVoiceEntry entry in aylaHubSortVoice(
+                  _voice?.items ?? const <AylaDirectoryVoiceEntry>[],
+                  factsOf: <String, AylaVoiceSortFacts>{
+                    for (final AylaVoiceChannelSnapshot c in voice.channels.values)
+                      c.id: AylaVoiceSortFacts.ofSnapshot(c),
+                  },
+                ))
                   AylaChannelVoiceRoom(
                     id: entry.card.id,
                     name: entry.card.name,
@@ -524,9 +723,14 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               onSelectVoiceChannel: _openVoiceChannel,
               voiceMemberCount: _voiceMemberCount(voice),
               voiceDirectory: _channelDirectory(_voice),
+              // 同 voiceRooms：排序在投影处表达（web store 层排好，`stores/live.ts:152/168/177`）。
+              // 判据 `utils/sortChannels.ts:48–61`（在播 → 曾播 → 从未），
+              // 实现 [aylaHubSortLive]（库内既有件，本页此前未用 ⇒ 开播/下播后不重排）。
               liveRooms: <AylaChannelLiveRoom>[
                 for (final AylaDirectoryLiveEntry entry
-                    in _live?.items ?? const <AylaDirectoryLiveEntry>[])
+                    in aylaHubSortLive(
+                  _live?.items ?? const <AylaDirectoryLiveEntry>[],
+                ))
                   AylaChannelLiveRoom(
                     id: int.tryParse(entry.card.id) ?? 0,
                     title: entry.card.title,

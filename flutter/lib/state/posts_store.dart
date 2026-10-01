@@ -18,13 +18,21 @@
 /// | `reset` | 133–143 | 同（不含 favoriteByPostId，见「未实现」） |
 /// | `isPostsStale(maxAgeMs = 60_000)` | 146–151 | [AylaPostsStore.isStale] / [kAylaPostsFreshWindowMs] |
 ///
+/// ## WS 增量四件套（web 92–131）**已接**（2026-10-01）
+/// `upsertPost` / `removePost` / `markViewedBatch` / `updatePostViewCount` 四条
+/// 由 `core/ws/posts_frames.dart` 的 [AylaPostsFramesBridge]（chat WS 的 `post.*` 帧）
+/// 与页面（浏览上报）共同消费。四条的语义逐条对齐 web：
+/// | web | 行 | 本件 |
+/// |---|---|---|
+/// | `upsertPost`（已存在**原位替换**、不存在**插到列表头部**） | 92–106 | [AylaPostsStore.upsertPost] |
+/// | `removePost`（**不回退排序**） | 108–111 | [AylaPostsStore.removePost] |
+/// | `markViewedBatch`（空 map **早退**；命中项写 `is_viewed=true` + `view_count`） | 113–124 | [AylaPostsStore.markViewedBatch] |
+/// | `updatePostViewCount`（只刷 `view_count`，**不**标已读） | 126–131 | [AylaPostsStore.updatePostViewCount] |
+///
 /// ## 未实现（登记）
 /// 1. **`favoriteByPostId` / `setFavorite` / `loadFavorites`**（web 73–90）—— Flutter 侧
 ///    收藏态由 `state/favorite_status.dart`（`AylaFavoriteStatusController`）承担，
 ///    页面按 `stateOf('post', key)` 取，不在此重复一份事实。
-/// 2. **WS 增量四件套**（`upsertPost` / `removePost` / `markViewedBatch` /
-///    `updatePostViewCount`，web 92–131）—— Flutter 侧帖子 WS 帧分发未接（既有登记），
-///    接入时按这四个方法逐一补齐，不另起语义。
 library;
 
 import 'package:flutter/foundation.dart';
@@ -114,6 +122,71 @@ class AylaPostsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// WS / 目录落地：插入或更新帖子 —— web `upsertPost`（92–106）。
+  ///
+  /// **已存在则原位替换**（保持它在列表中的位置）；**不存在则插入到列表头部**
+  /// （「最新优先」，web 101–104 的注释原话）。
+  ///
+  /// ⚠️ [AylaPost] 是 `const` 全 `final` 的不可变模型（无 `copyWith`）⇒ 这里按
+  /// web 一样**整条替换**（web 也是 `posts.map(p => p.id === post.id ? post : p)`），
+  /// 不做字段级合并 —— 语义与 web 一致（REST 详情才是权威，帧只带简化字段）。
+  void upsertPost(AylaPost post) {
+    final int index = _posts.indexWhere((AylaPost p) => p.id == post.id);
+    if (index >= 0) {
+      final List<AylaPost> next = List<AylaPost>.of(_posts);
+      next[index] = post;
+      _posts = List<AylaPost>.unmodifiable(next);
+    } else {
+      _posts = List<AylaPost>.unmodifiable(<AylaPost>[post, ..._posts]);
+    }
+    notifyListeners();
+  }
+
+  /// WS 推送：从列表移除 —— web `removePost`（108–111）。
+  ///
+  /// **不回退排序**：只从列表里去掉条目，其余顺序不动（web `chat.ts:795` 的注释原话）。
+  void removePost(int postId) {
+    final int length = _posts.length;
+    final List<AylaPost> next = <AylaPost>[
+      for (final AylaPost p in _posts)
+        if (p.id != postId) p,
+    ];
+    if (next.length == length) return;
+    _posts = List<AylaPost>.unmodifiable(next);
+    notifyListeners();
+  }
+
+  /// 浏览上报成功后批量落地（浏览与已读同源）—— web `markViewedBatch`（113–124）。
+  ///
+  /// `updated` = `{post_id(字符串) → 最新 view_count}`；命中项写 `is_viewed = true`
+  /// 并把 `view_count` 覆盖为**最新值**（幂等覆盖，不是累加）。
+  /// **空 map 早退**（web 115–116：`if (ids.size === 0) return state`）——
+  /// 不触发一次无意义的重渲染。
+  void markViewedBatch(Map<String, int> updated) {
+    if (updated.isEmpty) return;
+    final Set<int> ids = <int>{
+      for (final String key in updated.keys)
+        if (int.tryParse(key) case final int id) id,
+    };
+    if (ids.isEmpty) return;
+    _posts = List<AylaPost>.unmodifiable(<AylaPost>[
+      for (final AylaPost p in _posts)
+        if (ids.contains(p.id)) _withViewed(p, updated['${p.id}']) else p,
+    ]);
+    notifyListeners();
+  }
+
+  /// WS `post.viewed`（**他人**浏览）：只刷新 `view_count`，**不**标记本人已读
+  /// —— web `updatePostViewCount`（126–131）。
+  void updatePostViewCount(int postId, int viewCount) {
+    final int index = _posts.indexWhere((AylaPost p) => p.id == postId);
+    if (index < 0) return;
+    final List<AylaPost> next = List<AylaPost>.of(_posts);
+    next[index] = _withViewCount(next[index], viewCount);
+    _posts = List<AylaPost>.unmodifiable(next);
+    notifyListeners();
+  }
+
   /// 数据是否过期（web `isPostsStale`，146–151）。
   bool isStale({int maxAgeMs = kAylaPostsFreshWindowMs}) {
     final int? lastFetched = _lastFetched;
@@ -137,6 +210,56 @@ class AylaPostsStore extends ChangeNotifier {
 /// 模块级单例 —— web `usePostsStore`（`stores/posts.ts:49`）的模块级 store 语义：
 /// `appInit` 预加载与帖子页共用同一实例。
 final AylaPostsStore aylaPostsStore = AylaPostsStore();
+
+/// `is_viewed = true` + `view_count` 覆盖 —— web `markViewedBatch` 的
+/// `{ ...p, is_viewed: true, view_count: updated[String(p.id)] ?? p.view_count }`（118–122）。
+///
+/// ⚠️ [AylaPost] 无 `copyWith`（`core/models/post.dart` 是纯 `const` 模型），
+/// 且模型属**共享领域件**（本轮不动它有意的不可变形态）⇒ 这里在**本文件内**用
+/// 「重建实例」表达；`viewCount` 缺席时保留原值（web 的 `??` 链同义）。
+AylaPost _withViewed(AylaPost post, int? viewCount) => AylaPost(
+      id: post.id,
+      author: post.author,
+      authorId: post.authorId,
+      authorNickname: post.authorNickname,
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      groupId: post.groupId,
+      groupName: post.groupName,
+      allowedGroupIds: post.allowedGroupIds,
+      allowedGroupNames: post.allowedGroupNames,
+      images: post.images,
+      commentCount: post.commentCount,
+      isAuthor: post.isAuthor,
+      viewCount: viewCount ?? post.viewCount,
+      isViewed: true,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+    );
+
+/// 只覆盖 `view_count` —— web `updatePostViewCount` 的
+/// `{ ...p, view_count: viewCount }`（128–130）。
+AylaPost _withViewCount(AylaPost post, int viewCount) => AylaPost(
+      id: post.id,
+      author: post.author,
+      authorId: post.authorId,
+      authorNickname: post.authorNickname,
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      groupId: post.groupId,
+      groupName: post.groupName,
+      allowedGroupIds: post.allowedGroupIds,
+      allowedGroupNames: post.allowedGroupNames,
+      images: post.images,
+      commentCount: post.commentCount,
+      isAuthor: post.isAuthor,
+      viewCount: viewCount,
+      isViewed: post.isViewed,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+    );
 
 /// 帖子页「每 tab 独立分页缓存」—— web `postTabPages`
 /// （`pages/PostsHubPage.tsx:76–87`）的 Flutter 等价物。

@@ -25,15 +25,23 @@ String aylaSubgroupKey(String convId, String? subgroupId) =>
 
 /// 宽屏侧栏投影：默认组固定第一，其余按最近消息降序，并列保持列表原序
 /// —— web `stores/subgroup.ts:19–23` 的 `sortSubgroupsByActivity`。
+///
+/// ⚠️ Dart 的 `List.sort` **不稳定**（web 的 `Array.sort` 稳定）⇒ 必须显式带原索引
+/// 做三级比较，否则并列项顺序漂移（与 `channel_sidebar.dart:463–478` 同一处教训、
+/// 同一判据）。`stores/social.ts:182–184` 落地段排的是同一组键，同样并列保序。
 List<AylaSubGroup> aylaSortSubgroupsByActivity(List<AylaSubGroup> list) {
-  final List<AylaSubGroup> copy = List<AylaSubGroup>.of(list);
-  copy.sort((AylaSubGroup a, AylaSubGroup b) {
-    final int byDefault =
-        (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0);
-    if (byDefault != 0) return byDefault;
-    return (b.lastMessageSeq ?? 0) - (a.lastMessageSeq ?? 0);
-  });
-  return copy;
+  final List<int> order = List<int>.generate(list.length, (int i) => i)
+    ..sort((int a, int b) {
+      final AylaSubGroup x = list[a];
+      final AylaSubGroup y = list[b];
+      final int byDefault =
+          (y.isDefault ? 1 : 0) - (x.isDefault ? 1 : 0);
+      if (byDefault != 0) return byDefault;
+      final int bySeq = (y.lastMessageSeq ?? 0) - (x.lastMessageSeq ?? 0);
+      if (bySeq != 0) return bySeq;
+      return a - b;
+    });
+  return <AylaSubGroup>[for (final int i in order) list[i]];
 }
 
 /// 子群未读/活跃度状态机。

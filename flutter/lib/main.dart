@@ -67,12 +67,20 @@ void _installJankProbe() {
       final double build = t.buildDuration.inMicroseconds / 1000.0;
       final double raster = t.rasterDuration.inMicroseconds / 1000.0;
       final double total = t.totalSpan.inMicroseconds / 1000.0;
+      // ⚠️ **只落盘、不打控制台**（2026-10-01 用户裁决「把那个刷屏去掉，现在应该没用」）：
+      // 本探针在性能整改轮用于定位 build/raster 瓶颈，已完成使命；但它**每帧都可能命中**
+      // （阈值 24ms，实测常态 40–60ms 一帧）⇒ 控制台被 `[AYLA-FRAME]` 彻底淹没，
+      // **flutter run 的连接状态 / 异常 / print 全部看不见**，反而阻断后续调试。
+      // 保留落盘能力（`ayla_jank.log`，按需查），控制台完全静默。
       if (total >= 24.0) {
-        final String line = '[AYLA-FRAME] jank total=${total.toStringAsFixed(1)}ms '
-            'build=${build.toStringAsFixed(1)}ms raster=${raster.toStringAsFixed(1)}ms';
-        debugPrint(line);
         try {
-          log?.writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+          log?.writeAsStringSync(
+            '[AYLA-FRAME] jank total=${total.toStringAsFixed(1)}ms '
+            'build=${build.toStringAsFixed(1)}ms '
+            'raster=${raster.toStringAsFixed(1)}ms\n',
+            mode: FileMode.append,
+            flush: true,
+          );
         } catch (_) {
           // 探针自身绝不拖累渲染。
         }

@@ -24,6 +24,7 @@ import '../lib/pages/hub_support.dart';
 import '../lib/pages/live_room_page.dart';
 import '../lib/pages/live_studio_page.dart';
 import '../lib/pages/voice_hub_page.dart';
+import '../lib/state/boardgame_store.dart';
 import '../lib/state/directory_events.dart';
 import '../lib/state/live_state.dart';
 import '../lib/state/voice_state.dart';
@@ -218,7 +219,7 @@ void main() {
       expect(events.last!.deleted, isFalse);
     });
 
-    test('live.channel.deleted → 状态移除 + 目录删除；boardgame 两档', () {
+    test('live.channel.deleted → 状态移除 + 目录删除', () {
       final AylaLiveState live = AylaLiveState();
       live.upsertChannel(_snapshot('c1'));
       final AylaDirectoryEvents events = AylaDirectoryEvents();
@@ -229,18 +230,58 @@ void main() {
       });
       expect(live.channels, isEmpty);
       expect(events.last!.kind, AylaDirectoryKind.live);
-      bridge.handleFrame(<String, dynamic>{
-        'type': 'boardgame.room.created',
-        'room': <String, dynamic>{'id': '9'},
-      });
-      expect(events.last!.kind, AylaDirectoryKind.game);
-      expect(events.last!.deleted, isFalse);
+    });
+
+    test('boardgame.room.deleted → 全局表移除 + 目录删除事件（web chat.ts:853–855）', () {
+      final AylaBoardgameStore boardgame = AylaBoardgameStore();
+      boardgame.upsertRoom(_room(9));
+      boardgame.upsertRoom(_room(10));
+      final AylaDirectoryEvents events = AylaDirectoryEvents();
+      final AylaRoomDirectoryBridge bridge =
+          _bridge(events: events, boardgame: boardgame);
       bridge.handleFrame(<String, dynamic>{
         'type': 'boardgame.room.deleted',
         'room': <String, dynamic>{'id': '9'},
       });
+      // 全局表移除（**只去条目、不回退其余顺序**）：web `removeRoom`（86–89）。
+      expect(
+        boardgame.rooms.map((AylaGameRoom r) => r.id).toList(),
+        <int>[10],
+      );
       expect(events.last!.deleted, isTrue);
+      expect(events.last!.kind, AylaDirectoryKind.game);
       expect(events.last!.id, '9');
+    });
+
+    test('boardgame.room.created 保留目录失效，另加 REST 详情对账（两条效应并存）', () {
+      // 2026-10-01（排序实时源批次）：web 侧这两个帧有**两条彼此独立**的效应 ——
+      // ① `chat.ts:845–851` 的 `getGameRoom(id).then(upsertRoom).catch(静默)`
+      //    （**帧只是提示**，权威是 REST 详情）⇒ 全局房间表；
+      // ② `stores/directory.ts:220–236` 的帧跟踪 ⇒ 目录缓存失效 / 创建提示。
+      // 本批是「**补**上 ①」而不是「换成 ①」⇒ ② 必须原样保留（目录页靠它给刷新入口）。
+      final AylaDirectoryEvents events = AylaDirectoryEvents();
+      final AylaBoardgameStore boardgame = AylaBoardgameStore();
+      final AylaRoomDirectoryBridge bridge =
+          _bridge(events: events, boardgame: boardgame);
+      bridge.handleFrame(<String, dynamic>{
+        'type': 'boardgame.room.created',
+        'room': <String, dynamic>{'id': 'not-a-number'},
+      });
+      // id 非法 ⇒ ① 直接忽略（不猜语义、不伪造房间）；但 ② 的失效事件照样发
+      //（web 的帧跟踪只看 `frame.room.id` 是否为 null，不看它是不是合法数字）。
+      expect(events.revision, 1);
+      expect(events.last!.kind, AylaDirectoryKind.game);
+      expect(events.last!.deleted, isFalse);
+      expect(boardgame.rooms, isEmpty, reason: '不伪造一条房间');
+
+      // id 缺失 ⇒ 两条都不做（web：`!d || !d.id` 直接 break）。
+      final int base = events.revision;
+      bridge.handleFrame(<String, dynamic>{'type': 'boardgame.room.created'});
+      bridge.handleFrame(<String, dynamic>{
+        'type': 'boardgame.room.created',
+        'room': <String, dynamic>{},
+      });
+      expect(events.revision, base);
     });
 
     test('缺 channel_id 的帧被忽略；未知帧 no-op', () {
@@ -407,14 +448,25 @@ void main() {
 AylaLiveChannelSnapshot _snapshot(String id, {String title = 'T'}) =>
     AylaLiveChannelSnapshot(id: id, title: title);
 
+AylaGameRoom _room(int id) => AylaGameRoom(
+      id: id,
+      name: '房间$id',
+      owner: AylaUserPublic(id: 'u1', nickname: '房主'),
+      ownerId: 'u1',
+      status: AylaGameRoomStatus.waiting,
+      createdAt: '2026-10-01T00:00:00Z',
+    );
+
 AylaRoomDirectoryBridge _bridge({
   AylaVoiceState? voice,
   AylaLiveState? live,
   AylaDirectoryEvents? events,
+  AylaBoardgameStore? boardgame,
 }) =>
     AylaRoomDirectoryBridge(
       voiceState: voice ?? AylaVoiceState(),
       liveState: live ?? AylaLiveState(),
       directory: events ?? AylaDirectoryEvents(),
+      boardgameStore: boardgame ?? AylaBoardgameStore(),
       currentUserId: () => 'u-me',
     );

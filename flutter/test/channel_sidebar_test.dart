@@ -19,7 +19,11 @@ import '../lib/theme/buttons.dart' show AylaPressScale;
 import '../lib/theme/glass.dart' show AylaGlassSurface;
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
+import '../lib/core/models/subgroup.dart' show AylaSubGroup;
+import '../lib/widgets/base/dialogs.dart' show AylaConfirmDialog;
+import '../lib/widgets/group/subgroup_dialog.dart' show AylaSubGroupDialog;
 import '../lib/widgets/shell/channel_sidebar.dart';
+import '../lib/widgets/shell/create_sheet.dart' show AylaCreateSheet;
 import '../lib/widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
 import '../lib/widgets/base/primitives.dart'
     show AylaNavHighlight, AylaNavHighlightState;
@@ -105,6 +109,12 @@ class SidebarHostState {
     this.animateEntrance = false,
     this.playing = true,
     this.height = 620,
+    this.subgroupError,
+    this.voiceError,
+    this.liveError,
+    this.subgroupHasMore = true,
+    this.voiceHasMore = true,
+    this.liveHasMore = true,
   });
 
   String groupId;
@@ -126,6 +136,18 @@ class SidebarHostState {
   bool playing;
   double height;
 
+  /// 目录 error 态注入口（`useDirectoryPage.ts:18` 的短路分支用）。
+  String? subgroupError;
+  String? voiceError;
+  String? liveError;
+
+  /// 目录 hasMore 注入口：`hasMore=false` 时页脚在展开态也**不渲染**
+  /// （tsx 30 的 `retainCompletedSpace=false` 分支）——用于证明触底 owner 是
+  /// **容器**而不是页脚。
+  bool subgroupHasMore;
+  bool voiceHasMore;
+  bool liveHasMore;
+
   void Function(VoidCallback)? _rebuild;
 
   /// 改字段后调用（内部 setState）。
@@ -144,6 +166,22 @@ void main() {
   int loadMoreCalls = 0;
   int refreshCalls = 0;
 
+  // ---- 子群弹窗（task-3）：请求替身计数与「写回」观察点 ----
+  int createSgCalls = 0;
+  int updateSgCalls = 0;
+  int deleteSgCalls = 0;
+  String? lastSgName;
+  bool? lastSgMuted;
+  String? lastDeletedId;
+  int upsertCalls = 0;
+  String? lastActiveSet;
+  int liveFormMounts = 0;
+
+  /// 按目录分别计数（容器级 onScroll 要对两个目录**各自**触发一次）。
+  int subgroupLoadMoreCalls = 0;
+  int voiceLoadMoreCalls = 0;
+  int liveLoadMoreCalls = 0;
+
   setUp(() {
     pickedScene = null;
     pickedSubgroup = null;
@@ -152,6 +190,18 @@ void main() {
     openInfoTaps = 0;
     loadMoreCalls = 0;
     refreshCalls = 0;
+    subgroupLoadMoreCalls = 0;
+    voiceLoadMoreCalls = 0;
+    liveLoadMoreCalls = 0;
+    createSgCalls = 0;
+    updateSgCalls = 0;
+    deleteSgCalls = 0;
+    lastSgName = null;
+    lastSgMuted = null;
+    lastDeletedId = null;
+    upsertCalls = 0;
+    lastActiveSet = null;
+    liveFormMounts = 0;
   });
 
   Widget hostStateful(SidebarHostState st) => MaterialApp(
@@ -179,21 +229,69 @@ void main() {
                 playing: st.playing,
                 subgroupDirectory: AylaChannelDirectory(
                   total: st.subgroupTotal,
-                  hasMore: true,
-                  loadMore: () async => loadMoreCalls++,
+                  error: st.subgroupError,
+                  hasMore: st.subgroupHasMore,
+                  loadMore: () async {
+                    loadMoreCalls++;
+                    subgroupLoadMoreCalls++;
+                  },
                   refresh: () async => refreshCalls++,
                 ),
                 voiceDirectory: AylaChannelDirectory(
                   total: st.voiceTotal,
-                  hasMore: true,
-                  loadMore: () async => loadMoreCalls++,
+                  error: st.voiceError,
+                  hasMore: st.voiceHasMore,
+                  loadMore: () async {
+                    loadMoreCalls++;
+                    voiceLoadMoreCalls++;
+                  },
                   refresh: () async => refreshCalls++,
                 ),
                 liveDirectory: AylaChannelDirectory(
                   total: st.liveTotal,
-                  hasMore: true,
-                  loadMore: () async => loadMoreCalls++,
+                  error: st.liveError,
+                  hasMore: st.liveHasMore,
+                  loadMore: () async {
+                    loadMoreCalls++;
+                    liveLoadMoreCalls++;
+                  },
                   refresh: () async => refreshCalls++,
+                ),
+                // task-3：子群三个请求走注入替身（组件默认走真实 api）
+                createSubgroup: (String convId, String name) async {
+                  createSgCalls++;
+                  lastSgName = name;
+                  return AylaSubGroup(
+                    id: 'new-sg',
+                    conversationId: convId,
+                    name: name,
+                    isDefault: false,
+                    unreadCount: 0,
+                  );
+                },
+                updateSubgroup:
+                    (String convId, String id, {String? name, bool? muted}) async {
+                      updateSgCalls++;
+                      lastSgName = name;
+                      lastSgMuted = muted;
+                      return AylaSubGroup(
+                        id: id,
+                        conversationId: convId,
+                        name: name ?? '',
+                        isDefault: false,
+                        unreadCount: 0,
+                        muted: muted,
+                      );
+                    },
+                deleteSubgroup: (String convId, String id) async {
+                  deleteSgCalls++;
+                  lastDeletedId = id;
+                },
+                subgroupsMutator: AylaChannelSubgroups(
+                  upsert: (String convId, AylaSubGroup sg) => upsertCalls++,
+                  remove: (String convId, String subgroupId) {},
+                  setActive: (String convId, String? subgroupId) =>
+                      lastActiveSet = subgroupId,
                 ),
                 onSelectScene: (AylaGroupScene s) => pickedScene = s,
                 onOpenInfo: () => openInfoTaps++,
@@ -368,6 +466,27 @@ void main() {
       await tapMore(tester, tester.widget<Text>(more.first).data!);
     }
     await scrollTo(tester, 0);
+  }
+
+  /// 清零三个 loadMore 计数器。
+  ///
+  /// ⚠️ 必须在 `expandAll` **之后**调：`tapVisible` 为把「展开更多」按钮滚进视口会
+  /// `jumpTo`，若此时语音/直播**已经展开**且跳到了距底 <240，就会先记一笔
+  /// （实测：expandAll 之后直接断言会多出 1–2 次）。本条测的是「一次到底滚动 ⇒
+  /// 每目录一次」，所以测量起点必须归零。
+  void resetLoadMoreCalls() {
+    loadMoreCalls = 0;
+    subgroupLoadMoreCalls = 0;
+    voiceLoadMoreCalls = 0;
+  }
+
+  /// 从列表视口中心做一次真实拖拽（滚到底用）。
+  ///
+  /// 用 `dragFrom` 而不是 `drag(target)`：视口顶部/底部被三个吸顶/吸底行浮层盖住
+  /// （`tapVisible` 注释里登记的同一现象），从**中部**起拖才能稳定命中滚动视图。
+  Future<void> dragList(WidgetTester tester, double dy) async {
+    await tester.dragFrom(viewportRect(tester).center, Offset(0, dy));
+    await tester.pumpAndSettle();
   }
 
   // ======================= 容器几何 =======================
@@ -1017,8 +1136,268 @@ void main() {
     );
     expect(footer.retainCompletedSpace, isFalse);
 
+    // ⚠️ 断言**点按钮的那一个目录**，不要用全局计数：本用例宿主给三个目录的
+    // `hasMore` 都为 true ⇒ 展开子群（点「展开更多」）那一步把视口滚到了子群
+    // 页脚附近，容器级 onScroll 已为**语音/直播**触发过追加（tsx 532–533 的语义
+    // 就是「各自目录各自判定」）—— 全局计数因此不是 1。
+    // ⚠️ 子群与语音/直播口径**不同**：web 里子群走 `useSocialPage`（无 `onScroll`）
+    // ⇒ 容器级监听不碰它（tsx 531–534 只列 voice/live），子群的触底由**页脚**自己
+    // 承担（`autoLoadMore` 保持默认 true）⇒ 展开过程本身就可能已触发过一次。
+    final int beforeTap = subgroupLoadMoreCalls;
     await tapMore(tester, '加载更多');
-    expect(loadMoreCalls, 1);
+    expect(
+      subgroupLoadMoreCalls,
+      beforeTap + 1,
+      reason: '点页脚按钮必然再追加一次（页脚是子群唯一的自动 + 手动路径）',
+    );
+  });
+
+  // ======================= 容器级 onScroll（tsx 531–534） =======================
+
+  testWidgets('容器级 onScroll：展开态滚到底 → 语音/直播各自恰好一次', (
+    WidgetTester tester,
+  ) async {
+    // web `ChannelSidebar.tsx:531–534` 的 `onScroll` 只调 voice / live 两个目录；
+    // 子群走 `useSocialPage`（**无 onScroll**）⇒ 只有页脚按钮一条路径。
+    await pumpHost(tester, hostStateful(longHost()));
+    await tester.pumpAndSettle();
+    expect(voiceLoadMoreCalls, 0, reason: '未展开时不追加（tsx 532 的 voiceExpanded 守卫）');
+
+    await expandAll(tester);
+    // 长数据必须真的能滚过 240 的触发余量（否则测的是别的东西）。
+    expect(
+      scrollable(tester).position.maxScrollExtent,
+      greaterThan(AylaDirectoryLoadMore.rootMargin + 40),
+    );
+    // ⚠️ 子群与语音/直播口径不同：web 子群走 `useSocialPage`（无 `onScroll`）⇒ 容器级
+    // 监听**不**碰它，它的触底由**页脚**自己承担（`autoLoadMore` 保持默认 true）
+    // ⇒ 展开过程可能已让子群页脚自动追加过，此处不断言它为 0。
+    resetLoadMoreCalls(); // 测量起点归零（展开期间的跳转可能已触发过追加）
+
+    // 口径「**一次滚动 = 一次 onScroll**」：用 `jumpTo` 而不是拖拽 —— 拖拽期间
+    // 每个 pointer move 都会 `setPixels` ⇒ 到底后**每一次** move 都再次满足
+    // 「距底 < 240」并各触发一次（实测拖 -4000 会得到 3 次）。这与 web 一致
+    // （滚动事件同样是每次 move 一次，`onScroll` 逐次判定），所以断言的是
+    // 「一次滚动通知 ⇒ 每目录各一次」；每次 move 的计数属实现细节，另行锁定见下条。
+    await scrollTo(tester, scrollable(tester).position.maxScrollExtent);
+    // 「恰好一次」的判别力就在这两条：容器 handler 每次滚动只调一次，而页脚那条
+    // 已被 `autoLoadMore: false` 关掉 ⇒ 若两路并存，这里会读到 2（footer-dev 实测）。
+    expect(voiceLoadMoreCalls, 1, reason: '语音展开 + 到底 → 追加一次（容器唯一 owner）');
+    expect(liveLoadMoreCalls, 1, reason: '直播展开 + 到底 → 追加一次（容器唯一 owner）');
+    // ⚠️ 全局计数**不能**用来判「子群是否被容器触发」：子群页脚自身的自动加载
+    // （`autoLoadMore` 保持默认 true，见上面裁决）在同一次滚动里也会 +1。
+    // 容器不碰子群这一点由 handler 源码保证（`_onListScroll` 只列 voice/live），
+    // 并由 `subgroupLoadMoreCalls` 在**未展开**时保持 0 侧证（见本文件首条断言）。
+
+    // 离底 > 240 ⇒ 不再追加（`useDirectoryPage.ts:19` 的余量判定）。
+    await scrollTo(tester, 0);
+    expect(scrollable(tester).position.extentAfter, greaterThan(240));
+    expect(voiceLoadMoreCalls, 1, reason: '距底 > 240 ⇒ 语音不再追加');
+    expect(liveLoadMoreCalls, 1, reason: '距底 > 240 ⇒ 直播不再追加');
+  });
+
+  testWidgets('触底 owner 是容器而不是页脚：页脚未渲染（hasMore=false）时仍然追加', (
+    WidgetTester tester,
+  ) async {
+    // ⚠️ **判别性用例**：`retainCompletedSpace=false` + `!loading && !hasMore` ⇒
+    // 页脚整块返回 `SizedBox.shrink()`（tsx 30）。若触底逻辑仍挂在页脚上，
+    // 这条必然为 0；挂在**容器**（tsx 531–534）才为 1。
+    final SidebarHostState st = longHost();
+    st.voiceHasMore = false;
+    st.liveHasMore = false;
+    // 子群页脚同样归零：长数据下它也在展开区（否则会剩下一个 202×80 的页脚）。
+    st.subgroupHasMore = false;
+    await pumpHost(tester, hostStateful(st));
+    await tester.pumpAndSettle();
+    await expandAll(tester);
+
+    // `retainCompletedSpace=false` + `!loading && !hasMore && !invalidated` ⇒
+    // 页脚 `build` 返回 `SizedBox.shrink()`（tsx 30）。⚠️ 子件**仍在树上**
+    // （返回空盒 ≠ 元素不存在）⇒ 断言**高度为 0**（宽度被父级 Column 拉伸属正常）。
+    final Finder footers = find.byType(AylaDirectoryLoadMore);
+    expect(footers, findsWidgets, reason: '空盒仍在树上，只是不占位');
+    for (int i = 0; i < footers.evaluate().length; i++) {
+      expect(
+        tester.getSize(footers.at(i)).height,
+        0.0,
+        reason: '页脚不占位（没有「加载更多」可点）',
+      );
+    }
+    resetLoadMoreCalls();
+
+    await scrollTo(tester, scrollable(tester).position.maxScrollExtent);
+    expect(voiceLoadMoreCalls, 1, reason: '容器级 onScroll 与页脚是否渲染**无关**');
+    expect(liveLoadMoreCalls, 1);
+  });
+
+  testWidgets('容器级 onScroll：error 态不自动追加（useDirectoryPage.ts:18）', (
+    WidgetTester tester,
+  ) async {
+    final SidebarHostState st = longHost();
+    st.voiceError = '加载失败';
+    st.liveError = '加载失败';
+    await pumpHost(tester, hostStateful(st));
+    await tester.pumpAndSettle();
+    await expandAll(tester);
+
+    await dragList(tester, -4000);
+    // hooks:18 —— `records[key].error` 非空时 onScroll 直接 return
+    //（只对**注入了 error 的**两个目录断言；子群未注入 error，其页脚自动追加不受影响）。
+    expect(voiceLoadMoreCalls, 0, reason: 'voice error ⇒ 容器不自动追加');
+    expect(liveLoadMoreCalls, 0, reason: 'live error ⇒ 容器不自动追加');
+  });
+
+  testWidgets('容器级 onScroll：未展开时滚到底不追加（tsx 532–533 的 *Expanded 守卫）', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, hostStateful(longHost()));
+    await tester.pumpAndSettle();
+    await dragList(tester, -4000);
+    expect(voiceLoadMoreCalls, 0, reason: '折叠态只显示前三条 ⇒ 容器不追加语音');
+    expect(liveLoadMoreCalls, 0, reason: '同上（tsx 532–533 的 *Expanded 守卫）');
+  });
+
+  // ======================= 弹窗入口（tsx 273–277 / 441 / 501 / 541–601） =======================
+
+  testWidgets('子群「＋」→ 添加弹窗（add 态）→ 提交走 createSubgroup + upsert', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      await tester.tap(find.bySemanticsLabel('编辑')); // 先进编辑态（tsx 457）
+      await tester.pumpAndSettle();
+      expect(find.byType(AylaSubGroupDialog), findsNothing, reason: '未点 ＋ 前不显示');
+
+      await tester.tap(find.bySemanticsLabel('添加子群')); // tsx 501
+      await tester.pumpAndSettle();
+      expect(find.byType(AylaSubGroupDialog), findsOneWidget, reason: 'tsx 501 开弹窗');
+      // add 态标题（SubGroupDialog.tsx:50）
+      expect(find.text('添加子群'), findsWidgets);
+
+      await tester.enterText(find.byType(TextField).first, '新子群');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确定')); // tsx 103
+      await tester.pumpAndSettle();
+    });
+    expect(createSgCalls, 1, reason: 'add 态走 createSubgroup（tsx 572）');
+    expect(lastSgName, '新子群');
+    expect(upsertCalls, 1, reason: 'tsx 573 handleCreated → upsertSubgroup');
+    expect(find.byType(AylaSubGroupDialog), findsNothing, reason: '成功后 tsx 209 关弹窗');
+  });
+
+  testWidgets('子群编辑笔 → 编辑弹窗（edit 态预填）→ 提交走 updateSubgroup', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      await tester.tap(find.bySemanticsLabel('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('编辑子群 摸鱼')); // tsx 441
+      await tester.pumpAndSettle();
+      expect(find.byType(AylaSubGroupDialog), findsOneWidget);
+      expect(find.text('编辑子群'), findsWidgets, reason: 'edit 态标题（tsx 50）');
+      expect(find.text('禁言该子群'), findsOneWidget, reason: 'edit 态才有禁言行（tsx 64）');
+
+      await tester.tap(find.text('确定'));
+      await tester.pumpAndSettle();
+    });
+    expect(updateSgCalls, 1, reason: 'edit 态走 updateSubgroup（tsx 577）');
+    expect(lastSgName, '摸鱼', reason: '预填当前名（tsx 34）');
+    expect(upsertCalls, 1);
+  });
+
+  testWidgets('编辑弹窗「删除」→ 二次确认文案逐字（tsx 588–601）→ 确认走 deleteSubgroup', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      await tester.tap(find.bySemanticsLabel('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('编辑子群 摸鱼'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('删除')); // tsx 582–584
+      await tester.pumpAndSettle();
+      expect(find.byType(AylaConfirmDialog), findsOneWidget);
+      expect(find.text('删除子群'), findsOneWidget, reason: 'tsx 590 title');
+      expect(
+        find.text('确定删除子群「摸鱼」？该子群的所有聊天记录将永久删除，无法恢复。'),
+        findsOneWidget,
+        reason: 'tsx 591 message 必须逐字',
+      );
+      expect(find.text('删除'), findsWidgets, reason: 'tsx 592 confirmLabel');
+
+      // 确认（确认框里的「删除」是最后一个匹配）
+      await tester.tap(find.text('删除').last);
+      await tester.pumpAndSettle();
+    });
+    expect(deleteSgCalls, 1, reason: 'tsx 222 deleteSubgroup');
+    expect(lastDeletedId, 'sg2');
+    expect(find.byType(AylaConfirmDialog), findsNothing);
+    expect(find.byType(AylaSubGroupDialog), findsNothing, reason: 'tsx 225 同时关两个');
+  });
+
+  testWidgets('删除当前选中的子群 → setActive 回退到默认组（tsx 194–202）', (
+    WidgetTester tester,
+  ) async {
+    // 必须显式让 sg2 成为当前选中项：`SidebarHostState` 的默认是 `subgroupId = 'sg1'`
+    // （= 默认组，删除键被禁用 `canDelete = !isDefault`），删它走不到 fallback 分支。
+    await pumpHost(tester, host(activeSubgroupId: 'sg2'));
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      await tester.tap(find.bySemanticsLabel('编辑'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('编辑子群 摸鱼'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除').last);
+      await tester.pumpAndSettle();
+    });
+    expect(lastActiveSet, 'sg1', reason: 'tsx 200：回退到 is_default 的第一个');
+  });
+
+  testWidgets('语音「＋」→ 创建语音房浮层（tsx 273–277 + 541–545）', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      expect(find.byType(AylaCreateSheet), findsNothing);
+      await tester.tap(find.bySemanticsLabel('创建语音房')); // tsx 274
+      await tester.pumpAndSettle();
+    });
+    expect(find.byType(AylaCreateSheet), findsOneWidget, reason: 'tsx 541 浮层');
+    expect(find.text('创建语音房'), findsWidgets, reason: 'tsx 542 标题');
+  });
+
+  testWidgets('直播「＋」→ 群内开播浮层（tsx 348–352 + 547–556）', (WidgetTester tester) async {
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      await tester.tap(find.bySemanticsLabel('创建直播')); // tsx 349
+      await tester.pumpAndSettle();
+    });
+    expect(find.byType(AylaCreateSheet), findsOneWidget, reason: 'tsx 547 浮层');
+    expect(find.text('群内开播'), findsWidgets, reason: 'tsx 548 标题');
+  });
+
+  testWidgets('弹窗挂在 root Overlay（全屏遮罩，不被 260 宽的侧栏裁切）', (
+    WidgetTester tester,
+  ) async {
+    await pumpHost(tester, host());
+    await tester.pumpAndSettle();
+    await withSemantics(tester, () async {
+      await tester.tap(find.bySemanticsLabel('创建语音房'));
+      await tester.pumpAndSettle();
+    });
+    // `.create-sheet-overlay { position: fixed; inset: 0 }`（private.css:185）
+    // ⇒ 遮罩必须铺满**测试视口**（1000 宽），而不是侧栏卡片（260 宽）。
+    final Size sheet = tester.getSize(find.byType(AylaCreateSheet).first);
+    expect(sheet.width, greaterThan(500), reason: '铺满视口而非侧栏卡');
   });
 
   // ======================= 入场 / 退场 =======================

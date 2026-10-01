@@ -54,23 +54,31 @@ import '../core/models/game_room.dart' show AylaGameRoom;
 import '../core/models/post.dart' show AylaPost;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../state/auth_state.dart';
+import '../state/boardgame_store.dart' show aylaBoardgameStore;
+import '../state/chat_providers.dart' show chatStateProvider;
+import '../state/chat_state.dart' show AylaChatState;
 import '../state/directory_events.dart' show AylaDirectoryKind;
 import '../state/directory_store.dart';
 import '../state/home_prefs.dart';
+import '../state/live_state.dart' show AylaLiveState;
 import '../state/posts_store.dart';
+import '../state/room_providers.dart' show liveStateProvider, voiceStateProvider;
 import '../state/social_store.dart';
 import '../state/shell_state.dart';
+import '../state/voice_state.dart' show AylaVoiceState;
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../theme/tokens.dart';
 import '../widgets/base/avatar_status_badges.dart' show AylaAvatarStatus;
 import '../widgets/base/directory_load_more.dart';
-import '../widgets/base/loading.dart' show AylaLoadingSpinner;
 import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/reveal.dart';
 import '../widgets/group/group_card.dart';
 import '../widgets/group/group_create_dialog.dart' show AylaGroupCreateDialog;
 import '../widgets/group/home_toolbar.dart' show AylaHomeToolbar;
+import '../widgets/live/live_channel_snapshot.dart' show AylaLiveChannelSnapshot;
 import 'home_support.dart';
+import 'hub_support.dart'
+    show aylaHubLiveEntryFromSnapshot, aylaHubVoiceEntryFromSnapshot;
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -115,10 +123,137 @@ class _HomePageState extends ConsumerState<HomePage> {
     _start();
     _prefs.load();
     _loadCatalogs();
+    _bindActivitySources();
+  }
+
+  /// 订阅「群活跃度」的实时源 —— web `useGroupActivityMap`（`groupActivity.ts:159–169`）
+  /// 订阅的四个 store + `chatState.groupActivityAt`，Flutter 侧逐条对应：
+  ///
+  /// | web | 行 | 本页订阅 |
+  /// |---|---|---|
+  /// | `useLiveStore((s) => s.channels)` | 163 | [liveStateProvider] |
+  /// | `useVoiceStore((s) => s.channels)` | 164 | [voiceStateProvider] |
+  /// | `useBoardgameStore((s) => s.rooms)` | 165 | [aylaBoardgameStore]（模块级单例） |
+  /// | `usePostsStore((s) => s.posts)` | 166 | [aylaPostsStore]（模块级单例） |
+  /// | `useChatStore((s) => s.groupActivityAt)` | 169 | [chatStateProvider] |
+  ///
+  /// ⚠️ **只重算本地内存快照**（[_rebuildActivity]），**不调 [_loadCatalogs]** ——
+  /// 后者是**发请求**（web 的 WS 增量同样只改 store、不重发 REST）。
+  /// ⚠️ `voice` / `live` 的 `channels` 增量由 `core/ws/room_frames.dart` 的帧桥维护，
+  /// 目录页取页结果也会经 `aylaDirectoryStore.itemUpsertHooks` 落进同一张表。
+  void _bindActivitySources() {
+    aylaDirectoryStore.addListener(_onActivitySourceChanged);
+    aylaPostsStore.addListener(_onActivitySourceChanged);
+    aylaBoardgameStore.addListener(_onActivitySourceChanged);
+    final AylaVoiceState voice = ref.read(voiceStateProvider);
+    final AylaLiveState live = ref.read(liveStateProvider);
+    final AylaChatState chat = ref.read(chatStateProvider);
+    voice.addListener(_onActivitySourceChanged);
+    live.addListener(_onActivitySourceChanged);
+    chat.addListener(_onActivitySourceChanged);
+    _voiceState = voice;
+    _liveState = live;
+    _chatState = chat;
+  }
+
+  AylaVoiceState? _voiceState;
+  AylaLiveState? _liveState;
+  AylaChatState? _chatState;
+
+  void _onActivitySourceChanged() {
+    if (!mounted) return;
+    _rebuildActivity();
+  }
+
+  /// 重算内存快照（web 的「store 变化 ⇒ 订阅组件重渲染」等价物）。
+  ///
+  /// 数据源 = 四个全局 store 的**当前值**（不是进入页面时抓的那一份）：
+  /// 目录三档从 [aylaDirectoryStore] 的「全部」档 record 取（与 [_live] / [_voice] / [_game]
+  /// 同一 key，见 `app_preload.dart` 的预取）；帖子从 [aylaPostsStore]；
+  /// 桌游房从 [aylaBoardgameStore]。
+  void _rebuildActivity() {
+    if (!mounted) return;
+    setState(() {
+      _catalogs = _catalogsFromStores();
+      _activity = AylaHomeActivityMap(
+        conversations: _pager?.items ?? const <AylaConversationSummary>[],
+        catalogs: _catalogs,
+        groupActivityAt: ref.read(chatStateProvider).groupActivityAt,
+      );
+    });
+    _resolveRecentForWide();
+  }
+
+  /// 四份目录的**当前内存快照**（不发请求；缺档即空列表 —— 不伪造）。
+  ///
+  /// ## 为什么是「目录 record 打底 + 全局 store 覆盖」（而不是二选一）
+  /// web 的活跃度直接读四个全局 store（`groupActivity.ts:163–166`），而目录 record
+  /// 只是那些 store 的一个**查询投影**（`stores/directory.ts:144` 的 `cachedItems` 返回
+  /// store 的数组本身）⇒ 两者在 web 上是**同一份对象**，不存在取舍。
+  /// Flutter 侧目录条目（`AylaDirectoryLiveEntry` / `AylaDirectoryVoiceEntry`）与
+  /// 域快照（`AylaLiveChannelSnapshot` / `AylaVoiceChannelSnapshot`）是**两个投影**：
+  /// - 目录 record 覆盖「页面/预取取到的那些条目」（含 `allowedGroupIds` 等）；
+  /// - 域 store 覆盖「WS 帧桥刚 patch 过的最新描述符」（`room_frames.dart:164/189/210`）。
+  /// ⇒ 按 id 合并：**目录打底、域 store 覆盖同 id 项**。只取其一都会漏：
+  /// 只取目录 ⇒ WS 开播/改人数不触发重排（用户实报的根因）；
+  /// 只取域 store ⇒ 目录页取回的条目（`itemUpsertHooks` 未接 live/voice，见
+  /// `room_providers.dart:111–118` 的登记）在没收到过帧时不存在。
+  AylaHomeCatalogs _catalogsFromStores() {
+    final Map<String, AylaDirectoryLiveEntry> live =
+        <String, AylaDirectoryLiveEntry>{
+      for (final AylaDirectoryLiveEntry e
+          in aylaDirectoryStore.itemsAs<AylaDirectoryLiveEntry>(
+        AylaDirectoryKind.live,
+        const AylaDirectoryOptions(filter: 'all'),
+      ))
+        e.card.id: e,
+    };
+    for (final AylaLiveChannelSnapshot c
+        in _liveState?.channels.values ?? const <AylaLiveChannelSnapshot>[]) {
+      live[c.id] = aylaHubLiveEntryFromSnapshot(c, isOwner: c.isOwner);
+    }
+    final Map<String, AylaDirectoryVoiceEntry> voice =
+        <String, AylaDirectoryVoiceEntry>{
+      for (final AylaDirectoryVoiceEntry e
+          in aylaDirectoryStore.itemsAs<AylaDirectoryVoiceEntry>(
+        AylaDirectoryKind.voice,
+        const AylaDirectoryOptions(filter: 'all'),
+      ))
+        e.card.id: e,
+    };
+    for (final AylaVoiceChannelSnapshot c
+        in _voiceState?.channels.values ?? const <AylaVoiceChannelSnapshot>[]) {
+      voice[c.id] = aylaHubVoiceEntryFromSnapshot(c);
+    }
+    final Map<int, AylaGameRoom> game = <int, AylaGameRoom>{
+      for (final AylaDirectoryGameEntry e
+          in aylaDirectoryStore.itemsAs<AylaDirectoryGameEntry>(
+        AylaDirectoryKind.game,
+        const AylaDirectoryOptions(filter: 'all'),
+      ))
+        e.room.id: e.room,
+      // 域 store 覆盖：桌游的目录落地钩子已注册（`room_providers.dart:148`）⇒ 同源。
+      for (final AylaGameRoom r in aylaBoardgameStore.rooms) r.id: r,
+    };
+    return AylaHomeCatalogs(
+      liveChannels: live.values.toList(growable: false),
+      voiceChannels: voice.values.toList(growable: false),
+      gameRooms: game.values.toList(growable: false),
+      posts: aylaPostsStore.posts,
+    );
   }
 
   @override
   void dispose() {
+    aylaDirectoryStore.removeListener(_onActivitySourceChanged);
+    aylaPostsStore.removeListener(_onActivitySourceChanged);
+    aylaBoardgameStore.removeListener(_onActivitySourceChanged);
+    _voiceState?.removeListener(_onActivitySourceChanged);
+    _liveState?.removeListener(_onActivitySourceChanged);
+    _chatState?.removeListener(_onActivitySourceChanged);
+    _voiceState = null;
+    _liveState = null;
+    _chatState = null;
     _prefs.removeListener(_onPrefsChanged);
     _prefs.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
@@ -139,10 +274,13 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _onPagerChanged() {
     if (!mounted) return;
+    // 与 [_rebuildActivity] 同一条快照路径：会话列表变了也要带上 `groupActivityAt`
+    // （web 的 `useGroupActivityMap` 把两件事复用在同一个返回值里，`groupActivity.ts:169/224`）。
     setState(() {
       _activity = AylaHomeActivityMap(
         conversations: _pager?.items ?? const <AylaConversationSummary>[],
         catalogs: _catalogs,
+        groupActivityAt: ref.read(chatStateProvider).groupActivityAt,
       );
     });
     _resolveRecentForWide();
@@ -186,42 +324,37 @@ class _HomePageState extends ConsumerState<HomePage> {
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
+    // ⚠️ **主动跑一次「最近群」校验**：命中预加载缓存时 `store.load()` 走 60 秒首屏短路
+    //（`social_store.dart:275–279`）——**不发请求、也不 notifyListeners** ⇒ 只挂
+    // `_onPagerChanged` 会让校验永不执行、`_recentResolved` 恒 false ⇒ 宽屏卡在
+    // 「尚未校验」分支。预加载命中正是启动后的常见路径，必须在这里补一次。
+    scheduleMicrotask(_resolveRecentForWide);
     unawaited(pager.load());
   }
 
   /// 四份目录的第一页（web appInit.ts:41–48 的同一组请求；失败各自兜底为空 ——
   /// 与 web「失败不阻断流程」同）。
   Future<void> _loadCatalogs() async {
-    final List<Object?> results = await Future.wait<Object?>(<Future<Object?>>[
+    // 四份目录的第一页（`appInit.ts` 的同一组请求）：它们把 store 灌好；
+    // 快照本身从 store 读（见 [_catalogsFromStores] 的合并口径），
+    // 因此这里**不消费返回值**（旧实现按返回值建快照 ⇒ 请求在途期间到达的 WS 更新
+    // 会被过期响应覆盖）。
+    await Future.wait<Object?>(<Future<Object?>>[
       _live(),
       _voice(),
       _game(),
       _posts(),
     ]);
     if (!mounted) return;
-    final List<AylaDirectoryLiveEntry> live =
-        (results[0] as List<AylaDirectoryLiveEntry>?) ??
-            const <AylaDirectoryLiveEntry>[];
-    final List<AylaDirectoryVoiceEntry> voice =
-        (results[1] as List<AylaDirectoryVoiceEntry>?) ??
-            const <AylaDirectoryVoiceEntry>[];
-    final List<AylaDirectoryGameEntry> game =
-        (results[2] as List<AylaDirectoryGameEntry>?) ??
-            const <AylaDirectoryGameEntry>[];
-    final List<AylaPost> posts =
-        (results[3] as List<AylaPost>?) ?? const <AylaPost>[];
     setState(() {
-      _catalogs = AylaHomeCatalogs(
-        liveChannels: live,
-        voiceChannels: voice,
-        gameRooms: <AylaGameRoom>[
-          for (final AylaDirectoryGameEntry e in game) e.room,
-        ],
-        posts: posts,
-      );
+      // ⚠️ 用**共享 store 的当前值**、不用这四个请求的返回值：
+      // 请求在途期间 WS 可能已经把更新的描述符写进 store（web 的订阅永远读 store，
+      // 不存在「用过期响应覆盖新数据」这条路径）。四份返回值只用来确认请求走完。
+      _catalogs = _catalogsFromStores();
       _activity = AylaHomeActivityMap(
         conversations: _pager?.items ?? const <AylaConversationSummary>[],
         catalogs: _catalogs,
+        groupActivityAt: ref.read(chatStateProvider).groupActivityAt,
       );
     });
   }
@@ -343,18 +476,29 @@ class _HomePageState extends ConsumerState<HomePage> {
     final String? recent = _prefs.recentGroupId;
     final bool recentValid = recent != null &&
         groups.any((AylaConversationSummary g) => g.id == recent);
-    // tsx 128：recentValid → recent；否则已出结果 → resolvedRecent；
-    // 仍在校验（recentGroupId 非空且尚未出结果）⇒ 先不跳；否则第一个群。
-    final String? target = recentValid
-        ? recent
-        : (_recentResolved
-            ? _resolvedRecent
-            : (recent != null
-                ? null
-                : (groups.isEmpty ? null : groups.first.id)));
+    // tsx 128 的原句（逐算子对照，此前这里翻译错了）：
+    //   const target = recentValid
+    //     ? recentGroupId
+    //     : resolvedRecent ?? (recentGroupId && resolvedRecent === undefined ? null : groups[0]?.id);
+    // ⚠️ 关键是 JS 的空值合并：resolvedRecent 校验结果为不可用（null）时，它仍会继续回落
+    // 到 groups[0]。此前写成 Dart 的三元 _recentResolved ? _resolvedRecent : … ⇒ null 就是
+    // null ⇒ 既不跳转也不显示内容，永远停在空态 —— 实机「修错了，你没有跳到首个群」。
+    // 搬运空值合并语义：取值链上任何一段为 null 都继续看下一段；只有明确尚未校验完
+    // 才返回 null（web 用 resolvedRecent === undefined 表达该中间态 → _recentResolved）。
+    //
+    // ⚠️ 决策抽在纯函数里（见 [aylaWideHomeTarget] 的文档与表格）：这段映射错过两次
+    //（「跳两次侧栏」/「没有跳到首个群」），做成纯函数 + 表格单测锁死，避免再翻译错。
+    final String? target = aylaWideHomeTarget(
+      prefsReady: _prefs.ready,
+      recentValid: recentValid,
+      recent: recent,
+      recentResolved: _recentResolved,
+      resolvedRecent: _resolvedRecent,
+      groupIds: <String>[for (final AylaConversationSummary g in groups) g.id],
+    );
 
     if (target != null) {
-      // web 是 <Navigate to={/group/target} replace />：构建期不能跳 ⇒ 首帧后 replace。
+      // web 是 Navigate 到 /group/target（replace）：构建期不能跳 ⇒ 首帧后 replace。
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         context.replace('/group/$target');
@@ -362,28 +506,19 @@ class _HomePageState extends ConsumerState<HomePage> {
       return const SizedBox.shrink();
     }
 
-    // tsx 132–140：跳转前不铺骨架，用轻量加载指示（.home-loading + .home-load-text）
-    if ((pager == null || pager.loading) || (recent != null && !_recentResolved)) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            // tsx 136：`.loading-spinner.loading-spinner--md`
-            const AylaLoadingSpinner(size: 28),
-            const SizedBox(height: AylaSpacing.sp3),
-            Text(
-              '正在加载群聊…', // tsx 137
-              style: TextStyle(
-                fontFamily: AylaFonts.body,
-                fontFamilyFallback: AylaFonts.cjkFallback,
-                fontSize: 13, // base.css:578–586 .home-load-text
-                color: AylaColors.textSecondary,
-                height: 1.4,
-              ),
-            ),
-          ],
-        ),
-      );
+    // prefs 未就绪 ⇒ **不跳转**（避免先跳 groups[0] 再跳 recent 那一下），但**不阻止渲染**：
+    // 存储不可用的宿主（测试 / 无沙盒）永远等不到 ready，卡在这里会让宽屏一直空白。
+    // 此时 static 的 recent 值仍为 null ⇒ 下面自然落到「空态」或「骨架」分支，与改前一致。
+    // ⚠️ **宽屏不铺任何加载件**（2026-10-01 用户实机：「主页加载动画给他删掉，web 从来没有
+    // 这个」）：宽屏主页的职责只有一个 —— **重定向到最近群**（tsx 124–131 的 Navigate 到
+    // /group/target，replace）。
+    // web 上 recentGroupId 读 localStorage **同步**、groups 又来自 appInit 预加载
+    // ⇒ target 首帧就有值 ⇒ **永远走不到下面的 home-loading 分支**，用户从来看不到它。
+    // Flutter 侧 prefs 是异步读盘（getApplicationSupportDirectory + readAsString）
+    // ⇒ 就绪前的这几帧此前会渲染「正在加载群聊…」转圈 = 用户说的那个「从来没见过的东西」。
+    // ⇒ 改为**静默等待**：与 web 的可见行为一致，也不会先跳错群（见上面 target 的 prefsReady 门）。
+    if (groups.isEmpty && (pager == null || pager.loading)) {
+      return const SizedBox.shrink();
     }
 
     // tsx 141–150：.home-wide-empty（home.css 673–682）

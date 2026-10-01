@@ -432,4 +432,118 @@ void main() {
       (field.controller! as AylaMentionTextController).extractBlocks(),
     ), '早  好');
   });
+
+  // ======================= 草稿键隔离与「恢复不回写」 =======================
+
+  // ⚠️ 这两条锁的是本轮修 C 时**顺带发现的真 bug**（不是假设）：
+  // 群聊此前把 @draftKey@ 恒传 @groupId@（@group_chat_page.dart:473@），
+  // 而 web 是 @MessageInput.tsx:91@ 的 @\`\${convId}:\${subgroupId ?? ""}\`@ ⇒
+  // 各子群共用一个草稿槽。改成子群粒度后，@setBlocks@ 恢复草稿会经
+  // @TextEditingController.notifyListeners@ 反过来触发 @onDraftChanged@，
+  // 在 build 期间改 provider ⇒ 实测抛
+  // @Tried to modify a provider while the widget tree was building@。
+  // web 的恢复 effect（@tsx:134–146@）**只读** store，从不 @setDraft@ ⇒
+  // 本件用 @_restoringDraft@ 抑制回写，这两条锁住该语义。
+  group('草稿键隔离（web MessageInput.tsx:91 / 134–146）', () {
+    /// 生产口径的宿主：@draftKey@ 由**父级状态**驱动重建
+    /// （@group_chat_page.dart@ 里是 Riverpod 通知触发的 rebuild）。
+    ///
+    /// ⚠️ 不能写成 @pumpWidget(host(const AylaMessageInput(...)))@：widget 实例
+    /// 相同 ⇒ Flutter 会短路重建、@didUpdateWidget@ 不触发（探针实测：文本停在旧值）。
+    Widget switchHost(
+      ValueNotifier<String> key,
+      List<({String key, String value})> writes,
+    ) =>
+        MaterialApp(
+          home: previewTheme(
+            Builder(
+              builder: (BuildContext context) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(size: const Size(760, 700)),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: SizedBox(
+                    width: 760,
+                    child: ValueListenableBuilder<String>(
+                      valueListenable: key,
+                      builder: (BuildContext c, String k, Widget? _) =>
+                          AylaMessageInput(
+                        onSubmit: (_) {},
+                        draftKey: k,
+                        // 草稿内容直接取 draftKey，便于断言「换了槽就换内容」。
+                        initialDraft: k,
+                        onDraftChanged: (String kk, String v) =>
+                            writes.add((key: kk, value: v)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    testWidgets('切 draftKey ⇒ 载入新键草稿，且**不把恢复内容回写**新键', (
+      WidgetTester tester,
+    ) async {
+      final List<({String key, String value})> writes =
+          <({String key, String value})>[];
+      final ValueNotifier<String> key = ValueNotifier<String>('g1:sg-a');
+      addTearDown(key.dispose);
+
+      // ⚠️ 断言 controller.text 而不是 find.text：编辑器文本由
+      // AylaMentionTextController 持有，controller.text 才是真值（探针实测）。
+      await tester.pumpWidget(switchHost(key, writes));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'g1:sg-a',
+        reason: '初始草稿应还原进编辑器',
+      );
+      writes.clear();
+
+      // 切到另一个子群（模拟 group_chat_page 的 draftKey 变化）
+      key.value = 'g1:sg-b';
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'g1:sg-b',
+        reason: '新子群的草稿应载入（各子群独立草稿槽）',
+      );
+      expect(
+        writes.where((({String key, String value}) w) => w.key == 'g1:sg-b'),
+        isEmpty,
+        reason: '★ 恢复草稿不是用户输入 ⇒ 不得回写（否则 build 期间改 provider）',
+      );
+    });
+
+    testWidgets('用户真实输入仍然回写当前 draftKey', (WidgetTester tester) async {
+      final List<({String key, String value})> writes =
+          <({String key, String value})>[];
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageInput(
+            onSubmit: (_) {},
+            draftKey: 'g1:sg-a',
+            initialDraft: '已有的',
+            onDraftChanged: (String k, String v) =>
+                writes.add((key: k, value: v)),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      writes.clear();
+
+      await tester.enterText(find.byType(TextField), '已有的新内容');
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(
+        writes.map((({String key, String value}) w) => w.key).toSet(),
+        <String>{'g1:sg-a'},
+        reason: '用户输入必须落到**当前**子群的草稿槽',
+      );
+      expect(writes.last.value, contains('新内容'));
+    });
+  });
 }

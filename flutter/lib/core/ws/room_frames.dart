@@ -19,7 +19,8 @@
 /// | `live.channel.status.changed` | `chat.ts:732–750` | 同上；SRS 判定重拉归会话运行时 |
 /// | `live.channel.deleted` | `chat.ts:745–750` | [AylaLiveState.removeChannel] + 目录删除事件 |
 /// | `live.viewers.changed` | `chat.ts:756–768`（**瞬态投影**：不拉 REST、不标失效、不改排序 —— 帧不属于 `live.channel.*` 命名空间） | [AylaLiveState.patchViewerCount] + 目录人数事件 |
-/// | `boardgame.room.created` / `.deleted` / `.updated` | `stores/directory.ts:221–232` | 目录失效 / 删除事件（房间表归各页分页） |
+/// | `boardgame.room.created` / `.updated` | `chat.ts:845–851 / 857–865`（**REST 详情才权威**） | `GET /boardgame/rooms/<id>/` → [AylaBoardgameStore.upsertRoom] + 目录失效 |
+/// | `boardgame.room.deleted` | `chat.ts:853–855`（删除不回退排序） | [AylaBoardgameStore.removeRoom] + 目录删除事件 |
 ///
 /// ## 纪律
 /// - **403/404 一律静默**（web 原话：当前用户不可见或已删除，忽略提示）—— 不把
@@ -30,12 +31,15 @@ library;
 
 import 'dart:async';
 
+import '../../state/boardgame_store.dart';
 import '../../state/directory_events.dart';
 import '../../state/live_state.dart';
-import '../../widgets/live/live_channel_snapshot.dart';
 import '../../state/voice_state.dart';
+import '../../widgets/live/live_channel_snapshot.dart';
+import '../api/boardgame_api.dart';
 import '../api/live_api.dart';
 import '../api/voice_api.dart';
+import '../models/game_room.dart' show AylaGameRoom;
 import '../net/dio_client.dart' show ApiException;
 import 'chat_ws.dart';
 
@@ -64,15 +68,20 @@ class AylaRoomDirectoryBridge {
     required AylaVoiceState voiceState,
     required AylaLiveState liveState,
     required AylaDirectoryEvents directory,
+    required AylaBoardgameStore boardgameStore,
     required String? Function() currentUserId,
   })  : _voice = voiceState,
         _live = liveState,
         _directory = directory,
+        _boardgame = boardgameStore,
         _currentUserId = currentUserId;
 
   final AylaVoiceState _voice;
   final AylaLiveState _live;
   final AylaDirectoryEvents _directory;
+
+  /// 桌游房全局表（web `useBoardgameStore`）—— `boardgame.room.*` 三条帧的落地目标。
+  final AylaBoardgameStore _boardgame;
   final String? Function() _currentUserId;
 
   void Function()? _off;
@@ -117,11 +126,26 @@ class AylaRoomDirectoryBridge {
         _applyViewerCount(frame);
       case 'boardgame.room.created':
       case 'boardgame.room.updated':
-        if (_roomId(frame).isEmpty) return;
+        // web 侧这两个帧有**两条彼此独立**的效应，这里两条都要做：
+        // ① `chat.ts:848–850 / 861–863`：帧只是提示，**REST 详情才是权威**
+        //    （权限过滤由后端做）⇒ 拉 `GET /boardgame/rooms/<id>/` 再 upsert 进全局表；
+        // ② `stores/directory.ts:220–236`：帧跟踪 → 目录缓存的失效/创建提示
+        //    （web 用 `createdIds` 60 秒提示；Flutter 的等价物仍是既有的
+        //    [AylaDirectoryEvents.emitInvalidated]，`createdIds` 侧登记在
+        //    `state/directory_store.dart` 的「未实现 1」）。
+        // ⚠️ 既有行为**原样保留**（本批是「补」不是「换」）：目录页靠 ② 给出刷新入口。
+        final String roomId = _roomId(frame);
+        if (roomId.isEmpty) return;
+        unawaited(_reconcileGameRoom(roomId));
         _directory.emitInvalidated(AylaDirectoryKind.game);
       case 'boardgame.room.deleted':
         final String id = _roomId(frame);
         if (id.isEmpty) return;
+        // web `chat.ts:853–855`：`removeRoom(Number(frame.room_id))` ——
+        // 删除不回退排序；目录删除事件照旧（页面按事件移除条目）。
+        final int? roomId = int.tryParse(id);
+        if (roomId == null) return;
+        _boardgame.removeRoom(roomId);
         _directory.emitDeleted(AylaDirectoryKind.game, id);
       default:
         return;
@@ -203,6 +227,30 @@ class AylaRoomDirectoryBridge {
     if (channelId.isEmpty || count == null) return;
     _live.patchViewerCount(channelId, count);
     _directory.emitPatched(AylaDirectoryKind.live, channelId, count);
+  }
+
+  /// `boardgame.room.created/updated`：拉完整房间对账（web `chat.ts:848–850 / 861–863`）。
+  ///
+  /// ⚠️ 与调用点 ② 的 `emitInvalidated` **互不替代**：本方法只负责「全局房间表」，
+  /// 目录缓存的失效由 web `stores/directory.ts:220–236` 的帧跟踪承担（Flutter 侧
+  /// 仍是既有的目录事件总线）。两条效应都保留 —— 房内页批次建立目录事件时还没有全局表，
+  /// 本轮**补上**全局表，属于「加一条」而不是「换一条」。
+  ///
+  /// 静默档（web `.catch(() => {})` 原话）：当前用户不可见或房间已删除。
+  Future<void> _reconcileGameRoom(String roomId) async {
+    if (roomId.isEmpty) return;
+    final int? id = int.tryParse(roomId);
+    if (id == null) return;
+    final String? actor = _currentUserId();
+    try {
+      final AylaGameRoom room = await AylaBoardgameApi.getGameRoom(id);
+      if (actor != _currentUserId()) return;
+      _boardgame.upsertRoom(room);
+    } on ApiException catch (_) {
+      // 403/404：当前用户不可见或房间已删除 —— 静默（web 同）
+    } catch (_) {
+      // 网络层失败：下一次事件或显式刷新会纠正 —— 静默，不伪造条目
+    }
   }
 
   /// `data.channel_id`（voice / live 两类帧同一位置；`api/types.ts:663–727`）。

@@ -287,6 +287,19 @@ class AylaDirectoryStore extends ChangeNotifier {
     String? cursor,
   )? requestOverride;
 
+  /// 条目落地点钩子（kind → upsert 单条）—— web `stores/directory.ts:310–320`
+  /// 的等价物，**由 state 层注入**（本件是 kind 无关的通用件，不内建任何域的分支）。
+  ///
+  /// web 取页成功后把 `results` 逐条 upsert 回各域 store（`live → useLiveStore` /
+  /// `voice → useVoiceStore` / `game → useBoardgameStore`，313–317 行）——
+  /// 那是「目录页的数据同时是全局 store 的数据源」，群活跃度/存在性角标才能在
+  /// 没打开过对应页时也有数据。
+  ///
+  /// Flutter 侧的对应物 = 本钩子：key = [AylaDirectoryKind]，值 = 单条落地回调。
+  /// **缺席即不落**（未注册的 kind 保持既有行为，不伪造）。
+  final Map<AylaDirectoryKind, void Function(Object item)> itemUpsertHooks =
+      <AylaDirectoryKind, void Function(Object item)>{};
+
   /// 当前时间（毫秒）；**测试注入**以验证 60 秒缓存窗口，默认系统时钟。
   @visibleForTesting
   int Function() nowMillis = aylaDirectoryNowMillis;
@@ -408,6 +421,10 @@ class AylaDirectoryStore extends ChangeNotifier {
         }
         for (final Object item in page.results) {
           merged[_itemKey(item)] = item;
+          // web `stores/directory.ts:310–320`：取页结果逐条 upsert 回各域 store
+          //（`game → useBoardgameStore.upsertRoom` 等）—— 目录页的数据同时是全局
+          // store 的数据源；群活跃度/存在性角标因此不必先打开过对应页。
+          itemUpsertHooks[kind]?.call(item);
         }
         _patch(
           key,

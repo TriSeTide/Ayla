@@ -22,7 +22,11 @@
 /// - **群聊批次再转正 4 条**（2026-09-29）：`subgroup.created` · `subgroup.updated` ·
 ///   `subgroup.deleted` · `subgroup.read` —— 直接投影到 `state/subgroup_state.dart`，
 ///   同时 `message.new` 补上子群归属（默认组兜底 / 子群未读 / 精确已读确认）。
-/// - **仍域外 7 条**：见 [kAylaChatWsOutOfBatchFrames] 的显式登记（不静默吞掉）。
+/// - **排序实时源批次再转正 4 条**（2026-10-01）：`post.created` · `post.updated` ·
+///   `post.deleted` · `post.viewed` —— 由 `core/ws/posts_frames.dart` 的
+///   [AylaPostsFramesBridge] 承接（同 [AylaRoomDirectoryBridge] 的形制），
+///   效应落在帖子 store + 群「新内容」排序。
+/// - **仍域外 3 条**：见 [kAylaChatWsOutOfBatchFrames] 的显式登记（不静默吞掉）。
 ///
 /// ## 平台差异（登记）
 /// - `isSubgroupMessageConfirmedRead`（子群已读确认）随子群域批次；本批私聊无子群概念 ⇒
@@ -55,15 +59,16 @@ import 'ws_manager.dart';
 /// - 2026-09-28（房内页批次）从原 23 条中**转正 12 条**，由
 ///   `core/ws/room_frames.dart` 的 [AylaRoomDirectoryBridge] 承接（语音 4 + 直播 5 + 桌游 3）；
 /// - 2026-09-29（群聊批次）再**转正 `subgroup.*` 4 条**（[AylaChatWsClient] 直接消费，
-///   投影到 `state/subgroup_state.dart`），故此处只剩 **7 条**：
-///   `post.*`(4) + `comment.*`(2) 属帖子域 ·
+///   投影到 `state/subgroup_state.dart`）；
+/// - 2026-10-01（排序实时源批次）再**转正 `post.*` 4 条**，由
+///   `core/ws/posts_frames.dart` 的 [AylaPostsFramesBridge] 承接
+///   （与 [AylaRoomDirectoryBridge] 同形制：挂在 [onFrame] 上，帧**照样流经本类**），
+///   故此处只剩 **3 条**：
+///   `comment.*`(2) 属帖子详情域（web 里该分支本身是 no-op，评论乐观插入由详情页的
+///   `onFrame` 订阅消费）·
 ///   `favorite.changed`(1) 需一个**跨页共享**的收藏状态缓存（库内 `AylaFavoriteStatusController`
 ///   目前是每页实例 ⇒ 单点广播接不进去，属「收藏状态收敛轮」）。
 const List<String> kAylaChatWsOutOfBatchFrames = <String>[
-  'post.created',
-  'post.deleted',
-  'post.updated',
-  'post.viewed',
   'comment.created',
   'comment.deleted',
   'favorite.changed',
@@ -400,6 +405,7 @@ class AylaChatWsClient {
   void _dispatch(Map<String, dynamic> frame) {
     final Object? rawType = frame['type'];
     if (rawType is! String) return;
+
     final Map<String, dynamic> data = frame['data'] is Map
         ? Map<String, dynamic>.from(frame['data'] as Map)
         : const <String, dynamic>{};
@@ -547,6 +553,9 @@ class AylaChatWsClient {
         break; // 连接层回执 / 服务端错误：web 同为 no-op
       default:
         // 仍域外的帧（见 kAylaChatWsOutOfBatchFrames）：显式忽略，不猜测语义。
+        // ⚠️ 已转正的帧（`voice/live/boardgame/post.*`）**同样落到这里** —— 本类对它们
+        // 也是 no-op，真正的消费方是挂在 onFrame 上的两条帧桥（`room_frames.dart` /
+        // `posts_frames.dart`）。不要因为「现在转正了」就在这里加分支。
         break;
     }
     for (final AylaChatFrameHandler handler in _handlers.toList(growable: false)) {

@@ -21,12 +21,15 @@
 ///
 /// ## 与 web 的机制差异（登记）
 /// web 的四份目录数据来自 `appInit.ts` 登录预加载 + ChatWS 增量维护的四个 store
-/// （`live/voice/boardgame/posts`）；Flutter 侧本批**没有 WS 目录 store**
-/// ⇒ 由页面在进入/刷新时并发拉取这四份目录的**第一页**构建快照（`appInit` 的同一组
-/// 请求），并登记两条差异：① 无 WS 实时增量（数据靠刷新更新）；
-/// ② 只有第一页（web 的 store 同样是预加载首页 + WS 增量，故口径等价）。
-/// 此外 web 的 `groupActivityAt` 还会被 WS 的"新内容"事件 bump（`stores/chat.ts:87–90`），
-/// Flutter 侧只取会话目录行自带的 `directory_activity_at`（`stores/chat.ts:145–148`）。
+/// （`live/voice/boardgame/posts`）。
+/// **2026-10-01 更新**（用户实报「窄屏群列表…依然没有热更新排序 ws 接线」）：
+/// ① **已接实时源** —— `home_page.dart` 订阅 `aylaDirectoryStore`（live/voice/game）、
+/// `aylaPostsStore`、`aylaBoardgameStore`、`voiceState`/`liveState` 与 `chatStateProvider`，
+/// 任一变化即重算本类的快照（web `groupActivity.ts:159–169` 的 `useGroupActivityMap`）；
+/// ② `chatState.groupActivityAt`（WS bump，`stores/chat.ts:87–90`）**已接**：
+/// 由 [AylaHomeActivityMap] 的 `groupActivityAt` 入参传入，与会话行的
+/// `directory_activity_at` 取较大值；
+/// ③ 仍只有**第一页**（web 的 store 同样是预加载首页 + WS 增量 ⇒ 口径等价）。
 library;
 
 import 'package:flutter/material.dart';
@@ -103,6 +106,44 @@ int aylaToMs(String? iso) {
 
 /// 是否在「新」窗口内（不早于 `now - window`、不晚于 `now + 1min` 时钟容差；
 /// `groupActivity.ts:65–68`）。
+/// **宽屏主页的重定向目标** —— web `HomePage.tsx:128` 的原句逐算子对照：
+///
+/// ```js
+/// const target = recentValid
+///   ? recentGroupId
+///   : resolvedRecent ?? (recentGroupId && resolvedRecent === undefined ? null : groups[0]?.id);
+/// ```
+///
+/// ⚠️ 这段翻译错过两次（2026-10-01 用户两次实机反馈），故抽成纯函数 + 表格单测锁死：
+/// · 「跳两次侧栏」= 没等 prefs 读盘完成就按 `groups[0]` 跳（web 读 localStorage 是同步的，
+///   本就没有这个中间态）⇒ 由调用方把 `prefsReady` 传进来；
+/// · 「没有跳到首个群」= 把 JS 的空值合并 `resolvedRecent ?? …` 写成了 Dart 三元
+///   `_recentResolved ? _resolvedRecent : …` ⇒ 已校验但取不到时返回 null 而不是回落到
+///   `groups[0]`，页面就永远停在空态。
+///
+/// 取值链（R = resolvedRecent，recent = 上次进过的群）：
+/// | R | recent | 结果 |
+/// |---|---|---|
+/// | 非空 | — | R |
+/// | null（**已校验、不可用**） | 任意 | **groups[0]** |
+/// | 未校验（undefined） | 有值 | null（继续等，避免跳错群再跳一次） |
+/// | 未校验（undefined） | 空 | groups[0] |
+String? aylaWideHomeTarget({
+  required bool prefsReady,
+  required bool recentValid,
+  required String? recent,
+  required bool recentResolved,
+  required String? resolvedRecent,
+  required List<String> groupIds,
+}) {
+  if (!prefsReady) return null; // 读盘未完成：等（否则会先跳 groups[0] 再跳 recent）
+  if (recentValid) return recent;
+  final String? resolved = resolvedRecent;
+  if (resolved != null) return resolved;
+  if (!recentResolved && recent != null) return null; // 尚未校验完 ⇒ 继续等
+  return groupIds.isEmpty ? null : groupIds.first;
+}
+
 bool aylaIsRecent(int ms, int now) {
   if (ms <= 0) return false;
   return ms > now - kAylaNewContentWindowMs && ms < now + 60000;
@@ -205,19 +246,34 @@ class AylaHomeActivityMap {
   AylaHomeActivityMap({
     required List<AylaConversationSummary> conversations,
     AylaHomeCatalogs catalogs = const AylaHomeCatalogs(),
+    Map<String, int> groupActivityAt = const <String, int>{},
   })  : _conversations = conversations,
         _catalogs = catalogs,
         _activityAt = <String, int>{
+          // 会话行自带的 `directory_activity_at`（`stores/chat.ts:145–148` 的取值来源）。
           for (final AylaConversationSummary c in conversations)
             if (c.isGroup && aylaToMs(c.directoryActivityAt) > 0)
               c.id: aylaToMs(c.directoryActivityAt),
-        };
+        } {
+    // `chatState.groupActivityAt`（web `groupActivity.ts:169` 订阅的同一个字段）：
+    // WS 的「新内容」bump（`stores/chat.ts:87–90` / 帖子帧）写在这里。
+    // 两条来源都是**单调时间戳** ⇒ 逐 key 取较大值（会话行的 `directory_activity_at`
+    // 与 WS bump 谁更新谁胜出，不互相覆盖）。
+    for (final MapEntry<String, int> e in groupActivityAt.entries) {
+      final int row = _activityAt[e.key] ?? 0;
+      if (e.value > row) _activityAt[e.key] = e.value;
+    }
+  }
 
   final List<AylaConversationSummary> _conversations;
   final AylaHomeCatalogs _catalogs;
 
-  /// 群「最近收到新内容」的单调时间戳（`stores/chat.ts:145–148` 的
-  /// `groupActivityAt`；Flutter 只从会话目录行取值，无 WS bump —— 见文件头）。
+  /// 群「最近收到新内容」的单调时间戳 —— web `chatState.groupActivityAt`
+  /// （`groupActivity.ts:169/224`）与会话行的 `directory_activity_at`
+  /// （`stores/chat.ts:145–148`）**取较大值**。
+  ///
+  /// 两个来源都是单调前进的：WS 的 bump 只前进（`chat.ts:88–90`），
+  /// 会话行的 `directory_activity_at` 是后端算好的目录投影。
   final Map<String, int> _activityAt;
 
   /// 角标存在性（`groupActivity.ts:116–152`）。

@@ -81,11 +81,21 @@ class AylaMessageInputSubmission {
     required this.blocks,
     required this.picked,
     this.replyToId,
+    this.subgroupId,
   });
 
   final List<AylaDraftBlock> blocks;
   final List<AylaPickedMedia> picked;
   final String? replyToId;
+
+  /// 本条消息归属的子群 id（群聊且已选中子群；私聊 / 未选中 = null）。
+  ///
+  /// ⚠️ 这是 web `MessageInput.tsx:253` 传给 `sendOptimistic` 的**第三个实参**
+  /// （`sendOptimistic(convId, {…}, subgroupId)`）。此前本类**没有**这个字段 ⇒
+  /// 群聊发消息的 POST 恒不带 `subgroup_id` ⇒ 后端落 NULL、消息归默认组/主群
+  /// （用户实报「群子群也是接线错误，接到主群去了」），并且子群活跃度永不被推进
+  /// （`hooks/useChat.ts:448/477` 是 web 的真实出口）。
+  final String? subgroupId;
 
   /// 空提交判定（tsx 248：无文本、无媒体、无 @ ⇒ 不发）。
   bool get isEmpty =>
@@ -198,6 +208,19 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
 
   OverlayEntry? _emojiEntry;
   String? _error;
+
+  /// 程序性写入编辑器（恢复草稿）期间**抑制回写草稿**。
+  ///
+  /// 为什么必须有：@AylaMentionTextController.setBlocks@ 走 @super.value = …@
+  /// ⇒ 触发 [TextEditingController] 的 notifyListeners ⇒ [_onEditorChanged] 会
+  /// 把刚恢复出来的内容**当成用户输入**再写回 [AylaMessageInput.onDraftChanged]。
+  /// 切子群（@draftKey@ 变化）时会写在新键上 ⇒ 在 build 期间改 provider
+  /// （实测 @Tried to modify a provider while the widget tree was building@）。
+  ///
+  /// web 没有这个回环：@MessageInput.tsx:134-146@ 的恢复 effect **只读** store
+  /// （@getDraft(draftKey)@ + @renderBlocksToDOM@），从不 @setDraft@；
+  /// @setDraft@ 只出现在用户输入处理器（@:199/:220/:234@）⇒ 本标志即该语义的等价物。
+  bool _restoringDraft = false;
   bool _mentionOpen = false;
   String _mentionQuery = '';
   bool _emojiOpen = false;
@@ -223,9 +246,14 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
     super.initState();
     _controller.addListener(_onEditorChanged);
     if (widget.initialDraft.isNotEmpty) {
-      _controller.setBlocks(
-        aylaParseBlocks(widget.initialDraft, _nameOf),
-      );
+      _restoringDraft = true;
+      try {
+        _controller.setBlocks(
+          aylaParseBlocks(widget.initialDraft, _nameOf),
+        );
+      } finally {
+        _restoringDraft = false;
+      }
     }
     widget.voiceRecorder?.listenable.addListener(_onVoiceChanged);
   }
@@ -235,7 +263,14 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
     super.didUpdateWidget(old);
     if (old.draftKey != widget.draftKey) {
       // 切换会话/子群 → 恢复草稿并重置面板（tsx 134–146）
-      _controller.setBlocks(aylaParseBlocks(widget.initialDraft, _nameOf));
+      // ⚠️ 恢复期间抑制回写（见 [_restoringDraft]）：否则新键上的草稿写回会在
+      // build 期间触发 provider 通知。
+      _restoringDraft = true;
+      try {
+        _controller.setBlocks(aylaParseBlocks(widget.initialDraft, _nameOf));
+      } finally {
+        _restoringDraft = false;
+      }
       _closeMention();
       _closeEmoji();
       setState(() {
@@ -284,7 +319,10 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
   void _onEditorChanged() {
     if (!mounted) return;
     final List<AylaDraftBlock> blocks = _controller.extractBlocks();
-    widget.onDraftChanged?.call(widget.draftKey, aylaSerializeBlocks(blocks));
+    // 恢复草稿引起的通知**不是用户输入** ⇒ 不回写（web tsx:134–146 只读 store）。
+    if (!_restoringDraft) {
+      widget.onDraftChanged?.call(widget.draftKey, aylaSerializeBlocks(blocks));
+    }
     widget.onTyping?.call();
     final ({int atIndex, String query})? detected =
         _canMention ? _controller.detectMention() : null;
@@ -406,6 +444,9 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
         blocks: blocks,
         picked: List<AylaPickedMedia>.of(_picked),
         replyToId: widget.quote?.id,
+        // web `MessageInput.tsx:253`：subgroupId 由**组件 prop** 原样进入提交体
+        // （调用方传的是 `GroupChat.tsx:317/416 subgroupId={activeSubgroupId}`）。
+        subgroupId: widget.subgroupId,
       ),
     );
     // 发送即清空（消息已进列表），可立即输入下一条

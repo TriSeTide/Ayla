@@ -9,10 +9,13 @@
 /// - 存在性角标 [aylaGroupPresenceOf] = `groupActivity.ts:116–152`。
 ///
 /// ## 与 web 的机制差异（登记）
-/// - **posts / boardgame 两源未接**：web 的活跃度与存在性读 `usePostsStore` /
-///   `useBoardgameStore` 的**跨页全量缓存**；Flutter 侧这两个域只有页面级目录
-///   （`AylaPagedList`，随页面销毁），没有全局 store ⇒ 本页只接
-///   「消息 + 直播 + 语音」三源。缺失时**不伪造**（该群只是不因新帖/新桌游房排前）；
+/// - ~~**posts / boardgame 两源未接**~~ ⇒ **2026-10-01 已接**：web 的活跃度与存在性读
+///   `usePostsStore` / `useBoardgameStore` 的**跨页全量缓存**；
+///   Flutter 侧补上了这两个全局 store（`state/posts_store.dart` 的 WS 增量四件套 +
+///   `state/boardgame_store.dart`），并由 `core/ws/posts_frames.dart` /
+///   `core/ws/room_frames.dart` 两条帧桥维护 ⇒ 五源齐（消息 + 直播 + 语音 + 桌游 + 帖子），
+///   与 web `groupActivity.ts:159–169` 订阅的四个 store + `groupActivityAt` **逐条同源**。
+///   缺失时**仍不伪造**（拿不到数据就是空列表，不编事件）。
 /// - Flutter 的语音频道快照带 `createdAt`（`voice.channel.*` 帧维护），与 web 同源。
 library;
 
@@ -20,13 +23,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../core/api/chat_api.dart';
 import '../core/api/voice_api.dart' show AylaVoiceChannelSnapshot;
 import '../core/models/chat_message.dart' show AylaMessageType;
 import '../core/models/conversation.dart';
+import '../core/models/game_room.dart' show AylaGameRoom;
+import '../core/models/post.dart' show AylaPost;
 import '../state/chat_state.dart';
 import '../state/group_state.dart';
-import '../state/paged_list.dart';
+import '../state/social_store.dart';
 import '../widgets/base/avatar_status_badges.dart' show AylaAvatarStatus;
 import '../widgets/live/live_channel_snapshot.dart' show AylaLiveChannelSnapshot;
 import '../widgets/live/live_hall.dart' show AylaLiveStatus;
@@ -141,15 +145,30 @@ AylaGroupNewEvent? aylaMessageEvent(
   return AylaGroupNewEvent(kind: 'message', at: at, text: '$who：$content');
 }
 
-/// 群活跃度（web `useGroupActivityMap` 的返回函数）。
+/// 取两个人名中可显示的一个（web `displayName`，`groupActivity.ts:79–81`：
+/// `nickname || username || ""`）。
+String _displayName(String? nickname, String? username) {
+  final String nick = nickname ?? '';
+  if (nick.isNotEmpty) return nick;
+  return username ?? '';
+}
+
+/// 群活跃度（web `useGroupActivityMap` 的返回函数，`groupActivity.ts:159–227`）。
 ///
-/// 三源：最后一条消息（含自己发的，**不依赖已读**）+ 新开播 + 新语音房。
-/// 无「当前存在内容」推导的事件但有单调 bump 时，只保留时间戳（事件描述暂缺）。
+/// 五源：最后一条消息（含自己发的，**不依赖已读**）+ 新开播 + 新语音房 +
+/// 新桌游房 + 新帖子；无「当前存在内容」推导的事件但有单调 bump 时，
+/// 只保留时间戳（事件描述暂缺，web 217–223）。
+///
+/// 逐条对应 `groupActivity.ts:171–226`：五源共用同一个 `best`，**取 `at` 最大者**
+/// （web 的 `(!best || at > best.at)` 判据逐字照抄）；窗口判据同为
+/// [_isRecent]（不早于 now-24h、不晚于 now+1min）。
 AylaGroupActivity aylaGroupActivityOf({
   required String groupId,
   required AylaLastMessagePreview? lastMessage,
   required Iterable<AylaLiveChannelSnapshot> liveChannels,
   required Iterable<AylaVoiceChannelSnapshot> voiceChannels,
+  required Iterable<AylaGameRoom> gameRooms,
+  required Iterable<AylaPost> posts,
   required Map<String, int> groupActivityAt,
   int? nowMs,
 }) {
@@ -179,6 +198,33 @@ AylaGroupActivity aylaGroupActivityOf({
       );
     }
   }
+  // 新桌游房被创建：created_at 在窗口内（web 196–205）。
+  for (final AylaGameRoom r in gameRooms) {
+    if (!_visibleInGroup(groupId, r.allowedGroupIds)) continue;
+    final int at = aylaActivityMs(r.createdAt);
+    if (_isRecent(at, now) && (best == null || at > best.at)) {
+      final String owner = _displayName(r.owner.nickname, r.owner.username);
+      best = AylaGroupNewEvent(
+        kind: 'game',
+        at: at,
+        text: '$owner 创建了桌游房 ${r.name}',
+      );
+    }
+  }
+  // 新帖子：created_at 在窗口内且白名单含本群（web 206–215）。
+  for (final AylaPost post in posts) {
+    if (!_visibleInGroup(groupId, post.allowedGroupIds)) continue;
+    final int at = aylaActivityMs(post.createdAt);
+    if (_isRecent(at, now) && (best == null || at > best.at)) {
+      final String author =
+          _displayName(post.author?.nickname, post.author?.username);
+      best = AylaGroupNewEvent(
+        kind: 'post',
+        at: at,
+        text: '$author 发了新帖 ${post.title}',
+      );
+    }
+  }
   final int bumped = groupActivityAt[groupId] ?? 0;
   if (best == null) {
     if (bumped <= 0) return AylaGroupActivity.none;
@@ -190,16 +236,17 @@ AylaGroupActivity aylaGroupActivityOf({
   );
 }
 
-/// 群存在性角标（web `useGroupPresenceMap` 的返回函数）。
+/// 群存在性角标（web `useGroupPresenceMap` 的返回函数，`groupActivity.ts:116–152`）。
 ///
-/// 优先用会话摘要里的 `group_presence` 聚合字段；缺席时从 live/voice 快照推导
-/// （**语音重点 = 「有人」在语音房**，不是「有语音房」）。
-/// 桌游源未接（见文件头偏离）⇒ 该项保持 `null`（未知，不是 false）。
+/// 优先用会话摘要里的 `group_presence` 聚合字段；缺席时从 live/voice/game 三表推导
+/// （**语音重点 = 「有人」在语音房**，不是「有语音房」；**桌游 = 白名单含本群**，
+/// 不看 status —— web 144–149 逐字如此）。
 AylaAvatarStatus aylaGroupPresenceOf({
   required String groupId,
   required AylaGroupPresence? aggregate,
   required Iterable<AylaLiveChannelSnapshot> liveChannels,
   required Iterable<AylaVoiceChannelSnapshot> voiceChannels,
+  required Iterable<AylaGameRoom> gameRooms,
 }) {
   if (aggregate != null) {
     return AylaAvatarStatus(
@@ -224,9 +271,16 @@ AylaAvatarStatus aylaGroupPresenceOf({
       break;
     }
   }
-  // 桌游源未接（见文件头偏离）：与 web 缺 store 时同 —— 该项保持 false，
-  // 而不是把「未知」伪造成 true。
-  return AylaAvatarStatus(live: live, voice: voice);
+  // 桌游：白名单含本群即 true（web 144–149）—— **不看 status**，
+  // 与 live 的 status=live 判据不同（那是「在播」，这是「有房间」）。
+  bool game = false;
+  for (final AylaGameRoom r in gameRooms) {
+    if (_visibleInGroup(groupId, r.allowedGroupIds)) {
+      game = true;
+      break;
+    }
+  }
+  return AylaAvatarStatus(live: live, voice: voice, game: game);
 }
 
 /// 群排序：置顶优先 → 有新内容排前（组内按最近事件时间新→旧）→ 无新内容保持传入顺序
@@ -258,6 +312,7 @@ List<AylaServerRailGroup> aylaServerRailGroups({
   required List<AylaConversationSummary> groups,
   required Iterable<AylaLiveChannelSnapshot> liveChannels,
   required Iterable<AylaVoiceChannelSnapshot> voiceChannels,
+  required Iterable<AylaGameRoom> gameRooms,
 }) =>
     <AylaServerRailGroup>[
       for (final AylaConversationSummary g in groups)
@@ -273,69 +328,96 @@ List<AylaServerRailGroup> aylaServerRailGroups({
             aggregate: g.groupPresence,
             liveChannels: liveChannels,
             voiceChannels: voiceChannels,
+            gameRooms: gameRooms,
           ),
         ),
     ];
 
 /// 群目录控制器 —— web `GroupPage.tsx:92/196–213` 的等价物。
 ///
-/// 取 `type=group` 的会话游标页；与 `chatState` 里的**当前群摘要**合并
-/// （「直达群路由时该群可能不在第一页」），再按活跃度排序。
-/// 目录本身由 [AylaPagedList] 承载（游标推进 / 在途作废 / 失败保留已有内容）。
+/// ## 与 web **同源**（2026-10-01 重写，用户实机「退出登录然后重新登录之后会出 bug，
+/// 群列表不完全显示了」）
+/// web 的群列表是
+/// `const groupPage = useSocialPage("conversations", { type: "group" })`
+/// （`GroupPage.tsx:92`）—— 它**直读 social store 的那一份缓存**，与主页
+/// （`HomePage.tsx` 的同一 `useSocialPage`）**共用同一个 key**，而 `appInit.ts:35` 的
+/// `loadSocial("conversations", { type: "group" })` 已在启动/登录后把它灌好。
+///
+/// ⚠️ 本类此前自建了一条**独立 `AylaPagedList`**（另一套请求、另一套游标）⇒ 与 social store
+/// 是**两套数据**：退出再登录时 social store 已被 `aylaSocialStore.reset()` 清空并由预加载重灌，
+/// 而这条独立分页只在 `chatState` 为空时才发请求、拿到的又只是**第一页** ⇒ 列表不完整、
+/// 且与当前群合并后出现空条目。改成直读 social store 后两者天然同源、同一次预加载。
 class AylaGroupDirectory extends ChangeNotifier {
   AylaGroupDirectory({required AylaChatState chatState}) : _chat = chatState {
-    _list.addListener(_forward);
+    _pager.addListener(_forward);
     // ⚠️ **有缓存就不请求**（2026-10-01 用户实机：「每次进入主页都要加载群头像侧栏，
     // 是不是写死了啊」—— 正是这里：构造函数**无条件** `load()`）。
-    // web 的群列表读的是 **social store**，而 `appInit.ts:35` 的
-    // `loadSocial("conversations", { type: "group" })` 已预加载它 ⇒ 命中 60 秒缓存、
-    // **不发请求**（这就是用户说的「web 不需要」）。Flutter 侧改用 `chatState` 的会话摘要
-    //（预加载已灌入，见 `app_preload.dart` 的 `_seedChatStateFromSocial`）当首屏数据源；
-    // 只有它为空（未预加载 / 新登录 / 真的没有群）时才发本页的分页请求。
-    if (_cachedGroups.isEmpty) unawaited(_list.load());
+    // web 命中 `appInit.ts:35` 预取的那份 store（60 秒新鲜窗口，见 `social_store.dart`）
+    // ⇒ 不发请求。仅在真的没有缓存时才补一次。
+    if (_pager.items.isEmpty) unawaited(_pager.load());
   }
 
-  /// `chatState` 里的群会话（= web 读 social store 的那份缓存）。
-  List<AylaConversationSummary> get _cachedGroups =>
-      <AylaConversationSummary>[
-        for (final AylaConversationSummary c in _chat.conversations)
-          if (c.isGroup) c,
-      ];
-
-  final AylaChatState _chat;
-  final AylaPagedList<AylaConversationSummary> _list =
-      AylaPagedList<AylaConversationSummary>(
-    request: (String? cursor) => AylaChatApi.listConversationsPage(
-      cursor: cursor,
-      type: 'group',
-    ),
-    keyOf: (AylaConversationSummary c) => c.id,
+  /// 与主页/预加载**同 key** 的 social 频道（`GroupPage.tsx:92`）。
+  final AylaSocialController<AylaConversationSummary> _pager =
+      AylaSocialController<AylaConversationSummary>(
+    store: aylaSocialStore,
+    kind: AylaSocialKind.conversations,
+    options: const AylaSocialOptions(type: 'group'),
   );
 
-  List<AylaConversationSummary> get raw => _list.items;
+  final AylaChatState _chat;
 
-  bool get loading => _list.loading;
+  /// 目录条目（web `groupPage.items`）。
+  List<AylaConversationSummary> get raw => _pager.items;
 
-  bool get loaded => _list.loaded;
+  bool get loading => _pager.loading;
 
-  /// 是否还有更多：本页分页没加载过时**视为可能还有**（缓存只有一页 ⇒ 需要「展开更多」
-  /// 才能拉到后面几页；此前它恒 false 会让入口消失）。
-  bool get hasMore => _list.hasMore || !_list.loaded;
+  bool get loaded => _pager.loaded;
 
-  String? get error => _list.error;
+  bool get hasMore => _pager.hasMore;
 
-  bool get invalidated => _list.invalidated;
+  String? get error => _pager.error;
 
-  Future<void> loadMore() => _list.loadMore();
+  /// web `useSocialPage` **恒返回 `invalidated: false`**（`hooks/useSocialPage.ts:24`）。
+  bool get invalidated => false;
 
-  Future<void> refresh() => _list.refresh();
+  Future<void> loadMore() => _pager.loadMore();
 
-  /// 目录 + 当前群（web tsx 196–203：`selected` 不在已加载页里时补上）。
+  Future<void> refresh() => _pager.refresh();
+
+  /// 最近一次 [groupsWith] 因**类型过滤**丢弃的条数（>0 = 本 key 的投影里混入过非群条目）。
+  ///
+  /// 只作诊断上报，不改变返回结果 —— 过滤是 web 的第二道过滤本身，不是兜底。
+  int get filteredOutCount => _filteredOutCount;
+  int _filteredOutCount = 0;
+
+  /// 目录 + 当前群（web tsx 196–203 `groups` 的 `useMemo`：
+  /// `loaded` 不在已加载页里时，把 chatState 里的 `selected` 补到末尾）。
+  ///
+  /// ## 两道类型过滤（2026-10-01 用户实机「群列表排序完全错误」的根因 #1）
+  /// web 的 `groupPage.items` **必然是纯群** —— 请求层就带了类型：
+  /// `GroupPage.tsx:92` 的 `useSocialPage("conversations", { type: "group" })`
+  /// ⇒ 后端 `GET /chat/conversations/?type=group` 只回群
+  ///（Lead 实测：7 个群；不传 type 则 7 群 + 3 个私聊）。
+  ///
+  /// Flutter 侧本类构造时同样传了 `AylaSocialOptions(type: 'group')`、
+  /// store 的 `_matches` 也按 `type` 判（`social_store.dart:645–649`）—— 两道都在，
+  /// **但 `_pager.items` 是「该 key 的已在册投影」**：`reconcileCached` 会把它与
+  /// `chatState.conversations`（**全部会话**，含私聊）对账，凡 `_matches` 判真者**前插**
+  /// （`social_store.dart:607–613`）。任何一条私聊被判真，rail 就会显示它 ——
+  /// 这正是实测现场（后端 `type=group` 只有 7 群，Flutter rail 显示 9 个，
+  /// 多出的 `A`/`2`/`3` 正是那 3 个私聊）。
+  ///
+  /// ⇒ 这里补上 web 的第二道过滤：`HomePage.tsx:64–67` 的
+  /// `conversations.filter((c) => c.type === "group")`。
+  /// 窄屏 `home_page.dart:450–454` 的 `_groups()` 早有同一条 ⇒ 本处对齐后宽窄一致。
   List<AylaConversationSummary> groupsWith(String? selectedId) {
-    // 优先用 chatState 的缓存（= web 读 store）；本页分页有数据时以它为准（已翻页）。
-    final List<AylaConversationSummary> cached = _cachedGroups;
-    final List<AylaConversationSummary> loaded =
-        _list.items.isNotEmpty ? _list.items : cached;
+    final List<AylaConversationSummary> all = _pager.items;
+    final List<AylaConversationSummary> loaded = <AylaConversationSummary>[
+      for (final AylaConversationSummary c in all)
+        if (c.isGroup) c,
+    ];
+    _filteredOutCount = all.length - loaded.length;
     if (selectedId == null || selectedId.isEmpty) return loaded;
     final AylaConversationSummary? selected = _chat.byId(selectedId);
     if (selected == null ||
@@ -350,8 +432,8 @@ class AylaGroupDirectory extends ChangeNotifier {
 
   @override
   void dispose() {
-    _list.removeListener(_forward);
-    _list.dispose();
+    _pager.removeListener(_forward);
+    _pager.dispose();
     super.dispose();
   }
 }

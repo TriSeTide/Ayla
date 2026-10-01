@@ -18,8 +18,16 @@
 /// - 设计：`Ayla/docs/design.md` §12.4；推导表 `Ayla/docs/flutter/16-频道侧栏推导表.md`
 ///
 /// ## 本轮边界（裁决）
-/// - 弹窗接线**不做**（CreateSheet / VoiceChannelCreate / LiveStartSheet /
-///   SubGroupDialog / AylaConfirmDialog 属后续批次）→「＋ / 笔」照 web 渲染、点击暂无副作用；
+/// - 目录**触底追加的 owner = 滚动容器**（对齐 web `ChannelSidebar.tsx:531–534` 的容器级
+///   `onScroll`）：语音/直播在下拉**展开**时由容器监听触发 `loadMore`，页脚只保留
+///   「加载更多」按钮 + `invalidated` 自动 refresh（两处传 `autoLoadMore: false`，
+///   见 [_ChannelSidebarPanelState._onListScroll] 的注释）。
+///   子群走 `useSocialPage`：web 的容器 onScroll **不调**它 ⇒ 子群页脚保留`autoLoadMore`
+///   默认档（即由页脚自己触底），与 web 的「子群只有页脚 observer 一条自动路径」等价。
+/// - 弹窗接线**已做**（2026-10-01）：子群笔/＋（`SubGroupDialog` add/edit）· 删除二次确认
+///   （`ConfirmDialog`）· 语音/直播 ＋（`CreateSheet` 包 `AylaCreateVoiceForm` /
+///   `AylaCreateLiveForm`）四处入口均已接上，挂 root Overlay（web 四个弹层都是
+///   `position: fixed`）；设计器与投递语义见 [AylaChannelSidebarDialogs]。
 /// - `.channel-scene-status` 在 web **零样式**（grep 全目录无命中）→ 语音在麦人数与
 ///   LIVE 是**继承父级样式的裸文本**，不做胶囊；
 /// - 自建 CSS `position: sticky`：三行依次吸顶（chat 0 / voice 44+吸底52 / live 88+吸底8）
@@ -41,6 +49,7 @@
 
 library;
 
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -51,14 +60,42 @@ import '../../theme/app_icons.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/svg_path.dart';
+import '../../core/models/subgroup.dart' show AylaSubGroup;
+import '../../core/net/dio_client.dart' show ApiException;
 import '../../theme/tokens.dart';
+// ⚠️ **层级裁决（Lead，2026-10-01）：允许本件 import `layout/`**。
+//
+// 库内既有约定是「`widgets/` 一律不 import `core/api`」（全仓 0 例外，本件仍守：api 访问
+// 留在 `layout/` 里）。而 web 的这两个创建浮层（tsx 541–556）**内聚**了「本人直播间目录 +
+// 两条导航 + 建频道」/「建语音频道」——把它们拆成页面注入的回调，等于让本列无法独立完成
+// web 已有的接线，或被迫在 widget 里重写一遍取数与排序（**重复事实源**，比一层 import 更糟）。
+// `layout/create_sheet_forms.dart` 正是库里这两条的**既有装配件**（`aylaCreateFormFor` 的同源），
+// 复用它 = 不新增第二份实现。
+//
+// 代价（如实登记）：`widgets/ → layout/` 是**新增的层级反向**（此前只有 `router/ → layout/`）。
+// Dart 允许（无文件级环、analyze 零告警、画布与冒烟全绿），但组件库从此不再自洽于自身。
+// **若将来要收口**：把 `AylaCreateLiveForm` / `AylaCreateVoiceForm` 的**装配**（目录 + 导航）
+// 从 `layout/` 提到 `pages/group_page.dart`（页面组装、widget 只展示），本件改为收两个
+// `Widget? Function(BuildContext)` 槽位 —— 那会改 `group_page.dart` 的装配面，属独立一轮。
+import '../../layout/create_sheet_forms.dart'
+    show
+        AylaCreateLiveForm,
+        AylaCreateVoiceForm,
+        aylaCreateSubgroup,
+        aylaDeleteSubgroup,
+        aylaUpdateSubgroup;
 import '../base/dashed_border.dart';
+import '../base/dialogs.dart' show AylaConfirmDialog;
 import '../base/directory_controls.dart';
+import '../base/overlays.dart' show aylaOverlayEntry;
 import '../base/primitives.dart';
 import '../base/resource_image.dart';
 import '../base/reveal.dart';
 import '../base/tab_badge.dart';
 import '../base/tooltip.dart';
+import '../group/subgroup_dialog.dart'
+    show AylaSubGroupDialog, AylaSubGroupDialogState;
+import 'create_sheet.dart' show AylaCreateSheet;
 
 // ======================= 尺寸常量（逐条对应 web 行号） =======================
 
@@ -263,6 +300,21 @@ class AylaChannelSubgroup {
 
   /// 最近消息序号（`last_message_seq`，排序用）。
   final int lastMessageSeq;
+
+  /// 转成子群弹窗使用的模型（web 侧两者是同一个 `SubGroup` 对象，Flutter 拆成了
+  /// 「侧栏投影」与「接口模型」两层 ⇒ 这里做一次显式转换）。
+  ///
+  /// `conversationId` 留空：web 的 `SubGroupDialog` 只用 `id / name / is_default / muted`
+  /// （`SubGroupDialog.tsx:34–37`），归属群由调用方补齐（见 `_groupIdOf`）。
+  AylaSubGroup toModel() => AylaSubGroup(
+    id: id,
+    conversationId: '',
+    name: name,
+    isDefault: isDefault,
+    muted: muted,
+    unreadCount: unreadCount,
+    lastMessageSeq: lastMessageSeq,
+  );
 }
 
 /// 语音房（`api/types.ts` 863 `VoiceChannelDescriptor` 的侧栏投影）。
@@ -305,6 +357,59 @@ class AylaChannelLiveRoom {
 
   /// `status === "live"`（右上角粉点 + 场景项 LIVE 文本）。
   final bool isLive;
+}
+
+// ======================= 弹窗入口的注入面（tsx 190–251 / 558–601） =======================
+
+/// 建 / 改 / 删子群的请求签名 —— web 在组件内直接调 `chatApi`
+/// （`ChannelSidebar.tsx:572 / 577 / 222`），Flutter 侧沿用库内的**注入范式**：
+/// 默认实现在 `layout/create_sheet_forms.dart`（api 只在那里出现），测试可注入替身。
+typedef AylaChannelCreateSubgroup =
+    Future<AylaSubGroup> Function(String convId, String name);
+typedef AylaChannelUpdateSubgroup =
+    Future<AylaSubGroup> Function(
+      String convId,
+      String subgroupId, {
+      String? name,
+      bool? muted,
+    });
+typedef AylaChannelDeleteSubgroup =
+    Future<void> Function(String convId, String subgroupId);
+
+
+
+
+/// 子群状态写回面 —— web `useSubGroupStore.getState()` 的三个方法
+/// （`ChannelSidebar.tsx:190–202` 的 upsert / remove / setActiveSubgroup）。
+///
+/// 组件**不 import provider**（库内约定：`AylaChannelDirectory` / `AylaChannelSubgroups`
+/// 等状态都由调用方传入）⇒ 由页面把 `subgroupStateProvider` 包成本件注入。
+class AylaChannelSubgroups {
+  const AylaChannelSubgroups({
+    required this.upsert,
+    required this.remove,
+    required this.setActive,
+  });
+
+  /// web `upsertSubgroup(conversation_id, sg)`（tsx 191）。
+  final void Function(String convId, AylaSubGroup sg) upsert;
+
+  /// web `removeSubgroup(convId, subgroupId)`（tsx 195）。
+  final void Function(String convId, String subgroupId) remove;
+
+  /// web `setActiveSubgroup(convId, id)`（tsx 200）。
+  final void Function(String convId, String? subgroupId) setActive;
+
+  static void _noopUpsert(String convId, AylaSubGroup sg) {}
+  static void _noopRemove(String convId, String subgroupId) {}
+  static void _noopSetActive(String convId, String? subgroupId) {}
+
+  /// 无写回接线时的空实现（只在测试 / 样张不带状态层时出现）。
+  static const AylaChannelSubgroups none = AylaChannelSubgroups(
+    upsert: _noopUpsert,
+    remove: _noopRemove,
+    setActive: _noopSetActive,
+  );
 }
 
 /// 目录分页三态（`useDirectoryPage` / `useSocialPage` 的返回值投影）。
@@ -407,6 +512,10 @@ class AylaChannelSidebar extends StatefulWidget {
     this.playing = true,
     this.previewEditing = false,
     this.previewExpanded = false,
+    this.subgroupsMutator = AylaChannelSubgroups.none,
+    this.createSubgroup = aylaCreateSubgroup,
+    this.updateSubgroup = aylaUpdateSubgroup,
+    this.deleteSubgroup = aylaDeleteSubgroup,
   });
 
   /// 当前群 id（`key={groupId}` 驱动面板重挂与切群编排，tsx 71–76）。
@@ -468,6 +577,19 @@ class AylaChannelSidebar extends StatefulWidget {
 
   /// 群内未读帖子数（`post_unread_count`，tsx 131：帖子项粉徽标）。
   final int postUnread;
+
+  /// 子群变更写回（web `useSubGroupStore.getState().upsertSubgroup / removeSubgroup /
+  /// setActiveSubgroup`，tsx 190–202）。默认 [AylaChannelSubgroups.none]。
+  final AylaChannelSubgroups subgroupsMutator;
+
+  /// 建子群（web `chatApi.createSubgroup`，tsx 572）。默认走真实 api；测试可注入替身。
+  final AylaChannelCreateSubgroup createSubgroup;
+
+  /// 改子群（web `chatApi.updateSubgroup`，tsx 577）。默认走真实 api；测试可注入替身。
+  final AylaChannelUpdateSubgroup updateSubgroup;
+
+  /// 删子群（web `chatApi.deleteSubgroup`，tsx 222）。默认走真实 api；测试可注入替身。
+  final AylaChannelDeleteSubgroup deleteSubgroup;
 
   /// 是否播放入场动画（`panelVariants(reduced,"left")`）。
   final bool animateEntrance;
@@ -620,6 +742,10 @@ class _PanelData {
     required this.activeLiveChannelId,
     required this.liveDirectory,
     required this.postUnread,
+    required this.subgroupsMutator,
+    required this.createSubgroup,
+    required this.updateSubgroup,
+    required this.deleteSubgroup,
   });
 
   factory _PanelData.of(AylaChannelSidebar w) => _PanelData(
@@ -637,6 +763,10 @@ class _PanelData {
     activeLiveChannelId: w.activeLiveChannelId,
     liveDirectory: w.liveDirectory,
     postUnread: w.postUnread,
+    subgroupsMutator: w.subgroupsMutator,
+    createSubgroup: w.createSubgroup,
+    updateSubgroup: w.updateSubgroup,
+    deleteSubgroup: w.deleteSubgroup,
   );
 
   final String? groupId;
@@ -653,6 +783,14 @@ class _PanelData {
   final String? activeLiveChannelId;
   final AylaChannelDirectory liveDirectory;
   final int postUnread;
+
+  /// 子群变更写回（透传 [AylaChannelSidebar.subgroupsMutator]）。
+  final AylaChannelSubgroups subgroupsMutator;
+
+  /// 建 / 改 / 删子群 +（透传 [AylaChannelSidebar] 的同名注入点）。
+  final AylaChannelCreateSubgroup createSubgroup;
+  final AylaChannelUpdateSubgroup updateSubgroup;
+  final AylaChannelDeleteSubgroup deleteSubgroup;
 
   /// 场景项展示顺序（tsx 39–45）。
   static const List<({AylaGroupScene scene, String label, String icon})>
@@ -802,6 +940,27 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
   bool _liveOpen = true;
   bool _liveExpanded = false;
 
+  // ---- 弹窗状态（tsx 148–151 / 177 / 182–184） ----
+
+  /// `dialog`：null = 未打开；[AylaSubGroupDialogState] 表达 add / edit 两态（tsx 148）。
+  AylaSubGroupDialogState? _dialog;
+
+  /// `busy`（tsx 149）：请求中 → 弹窗全键禁用 + 遮罩不可关闭。
+  bool _busy = false;
+
+  /// `dialogError`（tsx 150）：`runDialogAction` 的 catch 文案。
+  String? _dialogError;
+
+  /// `confirmDelete`（tsx 151）：删除二次确认的目标子群。
+  AylaSubGroup? _confirmDelete;
+
+  /// `showVoiceCreate`（tsx 177）：语音「＋」浮层。
+  bool _showVoiceCreate = false;
+
+  /// `showLiveCreate`（tsx 182）；`creatingLive` / `liveCreateError`（tsx 183–184）
+  /// 由 [AylaCreateLiveForm] 自持 —— 本列不再重复一份。
+  bool _showLiveCreate = false;
+
   /// 行级 hover（含行内浮层钮）→ **只驱动底色**（group.css 878–881 等）。
   _Selection? _hoveredRow;
 
@@ -840,10 +999,125 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     _scroll.removeListener(_markLayersDirty);
     _scroll.dispose();
     _tracker.dispose();
+    _removeDialogEntry();
     super.dispose();
   }
 
   void _onTick(Duration _) => _markLayersDirty();
+
+  // ---- 弹窗的 root Overlay 宿主（tsx 541–601 的四个 `position: fixed` 弹层） ----
+
+  /// 当前弹窗宿主（一次最多一个 entry；内部按条件叠放各弹窗）。
+  OverlayEntry? _dialogEntry;
+
+  /// 按 web 的四个条件决定是否需要在 Overlay 上挂弹窗。
+  ///
+  /// `widget.playing` 即 web 的 `present`（tsx 541 / 547 / 558 / 588 都写成
+  /// `{present && …}`）—— 面板退场时不显示弹窗。
+  bool get _dialogVisible =>
+      widget.playing &&
+      (_dialog != null ||
+          _confirmDelete != null ||
+          _showVoiceCreate ||
+          _showLiveCreate);
+
+  /// 弹窗状态变更的统一入口：`setState` + 同步 root Overlay 上的宿主。
+  ///
+  /// ⚠️ **不要在 `build` 里排 postFrame 调它**：那会让每次 build 都多一个
+  /// postFrame 回调，`pumpAndSettle` 因此多跑帧 —— 实测会打乱既有用例的
+  /// 滚动时序（task-1 的三条计数回归锁当场变红）。只在状态**真的变化**时同步。
+  void _setDialogState(VoidCallback fn) {
+    setState(fn);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_dialogVisible) {
+        _removeDialogEntry();
+        return;
+      }
+      if (_dialogEntry == null) {
+        _openDialogHost();
+        return;
+      }
+      _dialogEntry?.markNeedsBuild();
+    });
+  }
+
+  void _removeDialogEntry() {
+    _dialogEntry?.remove();
+    _dialogEntry = null;
+  }
+
+  /// 把四个弹窗挂到 **root Overlay** —— web 的它们都是 `position: fixed`
+  /// （`.subgroup-dialog-overlay` `group.css:2131` / `.create-sheet-overlay`
+  /// `private.css:185`）⇒ 相对**视口**定位；库内对 fixed 的既有约定见
+  /// `base/overlays.dart:13–15`，范本 `pages/share_support.dart:135–166`。
+  void _openDialogHost() {
+    if (_dialogEntry != null || !_dialogVisible) return;
+    final OverlayEntry entry = aylaOverlayEntry(
+      builder: (BuildContext ctx) => AylaChannelSidebarDialogs(
+        dialog: _dialog,
+        confirmDelete: _confirmDelete,
+        busy: _busy,
+        error: _dialogError,
+        showVoiceCreate: _showVoiceCreate,
+        showLiveCreate: _showLiveCreate,
+        voiceCreateChild: _buildVoiceCreateForm(),
+        liveCreateChild: _buildLiveCreateForm(),
+        onCloseDialog: () {
+          if (_busy) return; // tsx 564
+          _setDialogState(() {
+            _dialog = null;
+            _dialogError = null;
+          });
+        },
+        onConfirmDialog: _confirmSubgroupDialog,
+        onDeleteDialog: () {
+          final AylaSubGroupDialogState? state = _dialog;
+          // tsx 582–584：只有 edit 态才进二次确认。
+          if (state != null && state.isEdit) {
+            _setDialogState(() => _confirmDelete = state.subgroup);
+          }
+        },
+        onCloseConfirm: () {
+          if (_busy) return; // tsx 595
+          _setDialogState(() {
+            _confirmDelete = null;
+            _dialogError = null;
+          });
+        },
+        onConfirmDelete: () => unawaited(_confirmDeleteSubgroup()),
+        onCloseVoiceCreate: _handleVoiceCreated,
+        onCloseLiveCreate: _closeLiveCreate,
+      ),
+    );
+    _dialogEntry = entry;
+    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：预览/测试宿主
+    // （`preview_theme.dart:55` 的 `Overlay`）可能套在 `MaterialApp` **外面**，
+    // 加 `rootOverlay` 会把弹窗挂到那层 ⇒ entry 的祖先链断在 Overlay，
+    // `FocusScope` 断言失败（实测）。真实 app 里最近的 Overlay 就是
+    // `MaterialApp` Navigator 的那个（= root）。
+    Overlay.of(context).insert(entry);
+  }
+
+  /// web `SubGroupDialog.onConfirm`（tsx 568–581）—— add / edit 走不同请求，
+  /// 成功后统一 `handleCreated`。
+  Future<void> _confirmSubgroupDialog(String name, bool? muted) async {
+    final AylaSubGroupDialogState? state = _dialog;
+    final String? convId = widget.data.groupId;
+    if (state == null || convId == null) return;
+    await _runDialogAction(() async {
+      final AylaSubGroup sg = state.subgroup == null
+          ? await widget.data.createSubgroup(convId, name) // tsx 572
+          : await widget.data.updateSubgroup(
+              convId,
+              state.subgroup!.id, // tsx 577
+              name: name,
+              muted: muted,
+            );
+      if (!mounted) return;
+      _handleCreated(sg);
+    });
+  }
 
   /// 打开 30 帧追踪窗口（≈300ms，覆盖展开/收起等隐式动画）。
   void _startTracking({int frames = 30}) {
@@ -1066,6 +1340,72 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     setState(() => _hoveredButton = s);
   }
 
+  // ---- 容器级 onScroll：展开中的语音/直播目录触底追加（tsx 531–534） ----
+
+  /// 主滚动列的 `onScroll` —— web `ChannelSidebar.tsx:531–534`：
+  ///
+  /// ```tsx
+  /// onScroll={(event) => {
+  ///   if (voiceOpen && voiceExpanded) voiceDirectory.onScroll(event.currentTarget);
+  ///   if (liveOpen && liveExpanded) liveDirectory.onScroll(event.currentTarget);
+  /// }}
+  /// ```
+  ///
+  /// 两段条件与 `useDirectoryPage.onScroll`（`hooks/useDirectoryPage.ts:17–20`）逐条对齐：
+  /// ① **只对语音/直播两行**（子群走 `useSocialPage`，**没有 onScroll** ⇒ 子群只有页脚
+  /// 按钮这一条路径）；② 必须 `*Open && *Expanded` —— **展开态才追加**；
+  /// ③ `records[key].error` 非空 ⇒ **直接 return**（`useDirectoryPage.ts:18`，错误后不自动
+  /// 重试，只能点页脚「加载更多」）；④ 距底 `< 240` ⇒ `loadMore()`（`useDirectoryPage.ts:19`）。
+  ///
+  /// **为什么页脚自己的触底监听必须去掉**：Flutter 的 `Notification` 只向**祖先**冒泡
+  /// （`framework.dart:3507` 的 `_NotificationNode.dispatchNotification` 只往上走
+  /// `parent`），而滚动通知自 `notificationContext` 起泡（`scrollable.dart:604` /
+  /// `scroll_position.dart:1043–1048`）。页脚是**滚动内容的后代**，其 `NotificationListener`
+  /// （`directory_load_more.dart:144`）永远收不到通知 —— 实测探针：祖先监听器 6 次命中 /
+  /// 内容内监听器 0 次。⇒ 那条路径是**死代码**，去掉不损失行为，同时保证同一次滚动
+  /// **只触发一次** loadMore（web 也只有 `onScroll` 一条自动路径；页脚那条
+  /// IntersectionObserver 在 Flutter 无对应者）。
+  ///
+  /// 余量口径：web 用 `scrollHeight − scrollTop − clientHeight < 240`，即 `extentAfter < 240`
+  /// （本仓先例 `my_posts_page.dart:188`）；等价于 `pixels > maxScrollExtent − 240`。
+  ///
+  /// ⚠️ 深度守卫 `n.depth != 0` 不可省：本列内部将来若嵌进更大的滚动视图，**内层**
+  /// 视图的通知会穿过本监听器并被计成「本列触底」（`ViewportElementMixin` 逐层
+  /// `depth + 1`，`scroll_notification.dart:52–59`）。
+  bool _onListScroll(ScrollNotification n) {
+    // `ScrollMetricsNotification` 是「尺寸变化」的兄弟通知（不是滚动）→ 不参与触底判定
+    // （web 的 onScroll 只在滚动时触发）。
+    if (n is! ScrollUpdateNotification && n is! OverscrollNotification) {
+      return false;
+    }
+    if (n.metrics.axis != Axis.vertical) return false;
+    // 只认本列的视图（depth 0）：`ScrollNotification.depth` 经祖先 Viewport 递增。
+    if (n.depth != 0) return false;
+    final _PanelData d = widget.data;
+    // tsx 531–534：两个条件各自独立判定（voice 与 live 互不影响）。
+    if (_voiceOpen && _voiceExpanded) {
+      _maybeLoadMore(d.voiceDirectory, n.metrics);
+    }
+    if (_liveOpen && _liveExpanded) {
+      _maybeLoadMore(d.liveDirectory, n.metrics);
+    }
+    return false;
+  }
+
+  /// 单个目录的触底三元判定（`useDirectoryPage.ts:18–19`）。
+  ///
+  /// `loadMore` 的在途去重由各分页器自己承担（`paged_list.dart:95` 的 `_busy`、
+  /// `directory_store.dart:355–358` 的 `_pending`）—— 与 web `stores/directory.ts:273`
+  /// 同款，本层不重复实现。
+  void _maybeLoadMore(AylaChannelDirectory directory, ScrollMetrics m) {
+    // hooks:18 —— error 非空直接 return（不自动重试）。
+    if (directory.error != null) return;
+    // 复用页脚的触底余量常量：web 两处同为 240（rootMargin `240px 0px`）。
+    if (m.extentAfter < AylaDirectoryLoadMore.rootMargin) {
+      directory.loadMore();
+    }
+  }
+
   /// **只**改浮层钮自身的 hover（不影响行底；行底由 [_setHoveredRow] 管）。
   void _setHoveredOverlay(_Selection? s) {
     if (s == _hoveredOverlay) return;
@@ -1253,42 +1593,164 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     );
   }
 
+  // ---- 弹窗编排（tsx 190–251 / 558–601） ----
+
+
+  /// web `handleCreated`（tsx 190–192）：把新建 / 改名的子群 upsert 进状态层。
+  void _handleCreated(AylaSubGroup sg) {
+    final String convId = _groupIdOf(sg);
+    widget.data.subgroupsMutator.upsert(convId, sg);
+  }
+
+  /// web `handleDeleted`（tsx 194–202）：移除后若当前 active 正是被删的那个，
+  /// 重置为列表里 `is_default` 的第一个（无则 null）。
+  void _handleDeleted(String convId, String subgroupId) {
+    final AylaChannelSubgroups mutator = widget.data.subgroupsMutator;
+    mutator.remove(convId, subgroupId);
+    if (widget.data.activeSubgroupId != subgroupId) return;
+    String? fallback;
+    for (final AylaChannelSubgroup sg in widget.data.subgroups) {
+      if (sg.isDefault) {
+        fallback = sg.id;
+        break;
+      }
+    }
+    mutator.setActive(convId, fallback);
+  }
+
+  /// 子群归属的群 id。
+  ///
+  /// web 用 `sg.conversation_id`（tsx 191）—— `subgroupState` 下 upsert 的返回值里
+  /// 该字段有时为空（`group_info_page.dart:831` 同款兜底），此时退回当前群。
+  String _groupIdOf(AylaSubGroup sg) =>
+      sg.conversationId.isEmpty ? (widget.data.groupId ?? '') : sg.conversationId;
+
+  /// web `runDialogAction`（tsx 204–215）：busy → 执行 → 成功关弹窗 / 失败留错误。
+  ///
+  /// 文案兜底逐字对齐 tsx 211：非 [ApiException] 一律「操作失败」。
+  Future<void> _runDialogAction(Future<void> Function() action) async {
+    _setDialogState(() {
+      _busy = true;
+      _dialogError = null;
+    });
+    try {
+      await action();
+      if (!mounted) return;
+      _setDialogState(() => _dialog = null);
+    } catch (error) {
+      if (!mounted) return;
+      _setDialogState(() => _dialogError = _dialogMessage(error, '操作失败'));
+    } finally {
+      if (mounted) _setDialogState(() => _busy = false);
+    }
+  }
+
+  /// tsx 211 / 227 / 247 的 `e instanceof Error ? e.message : "…"`。
+  String _dialogMessage(Object error, String fallback) =>
+      error is ApiException ? error.message : fallback;
+
+  /// web `confirmDeleteSubgroup`（tsx 217–231）。
+  ///
+  /// ⚠️ 与 tsx 的差异：失败时 web **不**清 `confirmDelete`，Flutter 侧同样保留确认框
+  /// 并把错误落在 `dialogError`（此时弹窗已关，错误由下一次打开的弹窗呈现 —— 与
+  /// `group_info_page.dart:868–874` 的既有处置一致，不新造第三种行为）。
+  Future<void> _confirmDeleteSubgroup() async {
+    final AylaSubGroup? target = _confirmDelete;
+    final String? convId = widget.data.groupId;
+    if (target == null || convId == null) return;
+    _setDialogState(() {
+      _busy = true;
+      _dialogError = null;
+    });
+    try {
+      await widget.data.deleteSubgroup(convId, target.id);
+      if (!mounted) return;
+      _handleDeleted(convId, target.id);
+      _setDialogState(() {
+        _confirmDelete = null;
+        _dialog = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _setDialogState(() => _dialogError = _dialogMessage(error, '删除失败'));
+    } finally {
+      if (mounted) _setDialogState(() => _busy = false);
+    }
+  }
+
+  /// 语音「＋」→ 打开「创建语音房」浮层（tsx 273–277 的 `setShowVoiceCreate(true)`）。
+  void _openVoiceCreate() => _setDialogState(() => _showVoiceCreate = true);
+
+  /// 语音房建好（web `onCreated={() => setShowVoiceCreate(false)}`，tsx 543）。
+  void _handleVoiceCreated() => _setDialogState(() => _showVoiceCreate = false);
+
+  /// 直播「＋」→ 打开「群内开播」浮层（tsx 348–352 的 `setShowLiveCreate(true)`；
+  /// tsx 349 的 `setLiveCreateError(null)` 由 [AylaCreateLiveForm] 自持）。
+  void _openLiveCreate() => _setDialogState(() => _showLiveCreate = true);
+
+  /// 关直播浮层（tsx 235 / 244）。
+  void _closeLiveCreate() => _setDialogState(() => _showLiveCreate = false);
+
+  /// 直播浮层**内容**（外层 [AylaCreateSheet] 由 [AylaChannelSidebarDialogs] 套，
+  /// 对齐 tsx 547–556 的 `CreateSheet title="群内开播"` + `LiveStartSheet`）。
+  ///
+  /// ⚠️ 「本人直播间目录 + 两条导航路径」全部由 [AylaCreateLiveForm] 承担
+  /// （它按 web 语义取 `?owner=<me>` 目录、`createLiveChannel('新直播间', group)`、
+  /// 并跳 `/live/start/:id`）⇒ 本列**不新增参数、不新增视觉、不重复取数**。
+  Widget _buildLiveCreateForm() => AylaCreateLiveForm(
+    groupId: widget.data.groupId, // tsx 549 的 CreateSheet 无 group，取当前群
+    onClose: _closeLiveCreate,
+  );
+
+  /// 语音浮层**内容**（同样由宿主套 `CreateSheet title="创建语音房"`，tsx 541–545）。
+  Widget _buildVoiceCreateForm() => AylaCreateVoiceForm(
+    groupId: widget.data.groupId,
+    onClose: _handleVoiceCreated, // tsx 543 的 onCreated
+  );
+
   // ---- 主滚动列（tsx 531–536） ----
 
   Widget _buildScrollList(_PanelData d, Duration disclosure) {
     // `.channel-sidebar-list { padding: 0 var(--sp-2); overflow-y: auto }`（group.css 728–729）
     // → 滚动视口宽 258 − 2×8 = 242（行/下拉的轨道宽）
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: _SidebarMetrics.listPaddingH,
-      ),
-      child: ScrollConfiguration(
-        // web base.css 372–383 全局隐藏原生滚动条（同 ServerRail 处置）
-        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-        child: SingleChildScrollView(
-          key: _viewportKey,
-          controller: _scroll,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            spacing:
-                _SidebarMetrics.listGap, // `.channel-sidebar-list { gap: 4px }`
-            children: <Widget>[
-              _buildSlot(AylaGroupScene.chat),
-              _buildDropdown(
-                AylaGroupScene.chat,
-                _buildSubgroupsDropdown(d, disclosure),
-              ),
-              _buildSlot(AylaGroupScene.voice),
-              _buildDropdown(
-                AylaGroupScene.voice,
-                _buildVoiceDropdown(d, disclosure),
-              ),
-              _buildSlot(AylaGroupScene.live),
-              _buildDropdown(
-                AylaGroupScene.live,
-                _buildLiveDropdown(d, disclosure),
-              ),
-            ],
+    //
+    // **容器级滚动监听** = web 该元素的 `onScroll`（tsx 531–534）。必须挂在滚动
+    // 视图**之上**（与 web 同为容器级，且只在它挂载、页脚不挂载时也成立）——
+    // 判定与去重口径见 [_onListScroll]。
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onListScroll,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: _SidebarMetrics.listPaddingH,
+        ),
+        child: ScrollConfiguration(
+          // web base.css 372–383 全局隐藏原生滚动条（同 ServerRail 处置）
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+          child: SingleChildScrollView(
+            key: _viewportKey,
+            controller: _scroll,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              spacing:
+                  _SidebarMetrics.listGap, // `.channel-sidebar-list { gap: 4px }`
+              children: <Widget>[
+                _buildSlot(AylaGroupScene.chat),
+                _buildDropdown(
+                  AylaGroupScene.chat,
+                  _buildSubgroupsDropdown(d, disclosure),
+                ),
+                _buildSlot(AylaGroupScene.voice),
+                _buildDropdown(
+                  AylaGroupScene.voice,
+                  _buildVoiceDropdown(d, disclosure),
+                ),
+                _buildSlot(AylaGroupScene.live),
+                _buildDropdown(
+                  AylaGroupScene.live,
+                  _buildLiveDropdown(d, disclosure),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1492,8 +1954,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                       semanticLabel: scene == AylaGroupScene.voice
                           ? '创建语音房'
                           : '创建直播',
-                      // tsx 274 / 349：本轮不接弹窗 → 点击暂无副作用
-                      onTap: () {},
+                      // tsx 274：语音 → `setShowVoiceCreate(true)`（浮层在 tsx 541–545）；
+                      // tsx 349：直播 → `setLiveCreateError(null); setShowLiveCreate(true)`
+                      //（浮层在 tsx 547–556）。
+                      onTap: scene == AylaGroupScene.voice
+                          ? _openVoiceCreate
+                          : _openLiveCreate,
                       glyph: _SidebarGlyphKind.plus,
                       glyphSize: 14,
                     ),
@@ -1770,6 +2236,8 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                   loadMore: d.subgroupDirectory.loadMore,
                   refresh: d.subgroupDirectory.refresh,
                   retainCompletedSpace: false, // 紧凑侧栏不保留空页脚
+                  // ⚠️ 子群走 `useSocialPage`（**无 onScroll**）⇒ 它本来就**不**由容器
+                  // 触发，页脚是唯一自动路径（唯一例外，故保持默认 true）。
                 ),
               ],
             ),
@@ -1790,7 +2258,11 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               count: 0,
               icon: 'iconPlus',
               semanticLabel: '添加子群', // tsx 501 aria-label
-              onTap: () {},
+              // tsx 501：`setDialogError(null); setDialog({ kind: "add" })`
+              onTap: () => _setDialogState(() {
+                _dialogError = null;
+                _dialog = const AylaSubGroupDialogState.add();
+              }),
             ),
         ],
       ),
@@ -1833,7 +2305,11 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                   onExit: (_) => _setHovered(row: null),
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () {}, // 本轮不接弹窗 → 无副作用
+                    // tsx 441：`setDialogError(null); setDialog({ kind: "edit", sg })`
+                    onTap: () => _setDialogState(() {
+                      _dialogError = null;
+                      _dialog = AylaSubGroupDialogState.edit(sg.toModel());
+                    }),
                     child: Semantics(
                       button: true,
                       label: '编辑子群 ${sg.name}',
@@ -1990,6 +2466,13 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               loadMore: d.voiceDirectory.loadMore,
               refresh: d.voiceDirectory.refresh,
               retainCompletedSpace: false,
+              // ⚠️ 触底 owner = 本列**容器级** `onScroll`（`_onListScroll`，对齐
+              // web `ChannelSidebar.tsx:531–534`）⇒ 关掉页脚自己的触底自动加载，
+              // 只留按钮 + `invalidated` 自动 refresh。web 虽有两条并存路径，但靠
+              // store `_pending` 去重（`stores/directory.ts:273`）；侧栏测试里的
+              // `loadMore` 是注入计数回调、绕过该去重 ⇒ 两路并存会让「恰好一次」
+              // 的回归锁失去判别力。
+              autoLoadMore: false,
             ),
         ],
       ),
@@ -2217,6 +2700,8 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               loadMore: d.liveDirectory.loadMore,
               refresh: d.liveDirectory.refresh,
               retainCompletedSpace: false,
+              // ⚠️ 同上：直播的触底 owner 也是容器级 `onScroll`（tsx 533）。
+              autoLoadMore: false,
             ),
         ],
       ),
@@ -2838,6 +3323,124 @@ class _DropdownClipRender extends RenderProxyBox {
       clip,
       super.paint,
       clipBehavior: Clip.hardEdge,
+    );
+  }
+}
+
+// ======================= 侧栏弹窗宿主（tsx 541–601） =======================
+
+/// 把侧栏的四个弹窗挂在 **root Overlay** 上。
+///
+/// ## 为什么必须是 Overlay
+/// web 的四个弹窗都是 `position: fixed`（`.subgroup-dialog-overlay` `group.css:2131`、
+/// `.create-sheet-overlay` `private.css:185`、`.confirm-dialog-overlay`）—— 相对**视口**定位。
+/// Flutter 侧若按普通子树挂载，[AylaModalOverlay] 的 `Positioned.fill` 只能铺满侧栏那
+/// 一条 260 宽的卡片 ⇒ 弹窗既没有全屏遮罩、也被侧栏裁切。库内对 `position: fixed`
+/// 的既有约定就是 root Overlay（`base/overlays.dart:13–15`、范本 `pages/share_support.dart:135–166`、
+/// `widgets/chat/quick_messages_sheet.dart:17`）。
+///
+/// ## 为什么不用 `List<Widget>` 返回
+/// 同一次 `build` 里子群弹窗与删除确认**可以同时存在**（web 是 `{dialog && <SubGroupDialog/>}`
+/// 与 `{confirmDelete && <ConfirmDialog/>}` 两个独立条件，tsx 558 / 588）⇒ 返回列表会让
+/// 调用点没法只插一个 OverlayEntry。改为插**一个** entry、内部按条件叠放两个模态。
+class AylaChannelSidebarDialogs extends StatefulWidget {
+  const AylaChannelSidebarDialogs({
+    super.key,
+    required this.dialog,
+    required this.confirmDelete,
+    required this.busy,
+    required this.error,
+    required this.showVoiceCreate,
+    required this.showLiveCreate,
+    required this.onCloseDialog,
+    required this.onConfirmDialog,
+    required this.onDeleteDialog,
+    required this.onCloseConfirm,
+    required this.onConfirmDelete,
+    required this.onCloseVoiceCreate,
+    required this.voiceCreateChild,
+    required this.liveCreateChild,
+    required this.onCloseLiveCreate,
+  });
+
+  /// 子群弹窗（add / edit）；null = 不显示（tsx 558）。
+  final AylaSubGroupDialogState? dialog;
+
+  /// 删除二次确认的目标（tsx 588）。
+  final AylaSubGroup? confirmDelete;
+
+  final bool busy;
+  final String? error;
+
+  /// 语音「＋」浮层（tsx 541）。
+  final bool showVoiceCreate;
+
+  /// 直播「＋」浮层（tsx 547）。
+  final bool showLiveCreate;
+
+  final VoidCallback onCloseDialog;
+  final void Function(String name, bool? muted) onConfirmDialog;
+  final VoidCallback onDeleteDialog;
+  final VoidCallback onCloseConfirm;
+  final VoidCallback onConfirmDelete;
+  final VoidCallback onCloseVoiceCreate;
+
+  /// 语音表单内容（由侧栏按 `aylaCreateFormFor` 的 voice 分支给出）。
+  final Widget voiceCreateChild;
+
+  /// 直播表单内容（同上，live 分支）。
+  final Widget liveCreateChild;
+
+  final VoidCallback onCloseLiveCreate;
+
+  @override
+  State<AylaChannelSidebarDialogs> createState() =>
+      _AylaChannelSidebarDialogsState();
+}
+
+class _AylaChannelSidebarDialogsState extends State<AylaChannelSidebarDialogs> {
+  /// 语音房的可见性群列表（web `VisibilitySelector.tsx:34` 的
+  /// `useSocialPage("conversations", {type:"group"})`；本列只传 group，故省略该段）。
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: <Widget>[
+        // tsx 541–545：语音「＋」浮层（CreateSheet 标题「创建语音房」）。
+        if (widget.showVoiceCreate)
+          AylaCreateSheet(
+            title: '创建语音房', // tsx 542
+            onClose: widget.onCloseVoiceCreate,
+            child: widget.voiceCreateChild,
+          ),
+        // tsx 547–556：直播「＋」浮层（CreateSheet 标题「群内开播」）。
+        if (widget.showLiveCreate)
+          AylaCreateSheet(
+            title: '群内开播', // tsx 548
+            onClose: widget.onCloseLiveCreate,
+            child: widget.liveCreateChild,
+          ),
+        // tsx 558–586：子群弹窗（add / edit）。
+        if (widget.dialog case final AylaSubGroupDialogState state)
+          AylaSubGroupDialog(
+            state: state,
+            busy: widget.busy,
+            error: widget.error,
+            onClose: widget.onCloseDialog,
+            onConfirm: widget.onConfirmDialog,
+            onDelete: widget.onDeleteDialog,
+          ),
+        // tsx 588–601：删除二次确认（文案逐字，含书名号与句号）。
+        if (widget.confirmDelete case final AylaSubGroup target)
+          AylaConfirmDialog(
+            title: '删除子群', // tsx 590
+            message:
+                '确定删除子群「${target.name}」？该子群的所有聊天记录将永久删除，无法恢复。', // tsx 591
+            confirmLabel: '删除', // tsx 592
+            busy: widget.busy,
+            onConfirm: widget.onConfirmDelete,
+            onClose: widget.onCloseConfirm,
+          ),
+      ],
     );
   }
 }

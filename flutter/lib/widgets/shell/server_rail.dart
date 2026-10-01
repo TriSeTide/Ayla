@@ -280,10 +280,36 @@ class _AylaServerRailState extends State<AylaServerRail> {
   void didUpdateWidget(covariant AylaServerRail oldWidget) {
     super.didUpdateWidget(oldWidget);
     _syncKeys();
+    // ⚠️ **必须按 id 序列比较，不能只比长度**（2026-10-02 用户实报：
+    // 「重新排序后那个导航条没跟上去，还停留在原位置」）。
+    //
+    // 原先的判据是「currentGroupId 变 || groups.length 变」。而**热更新排序**恰好
+    // 两者都不变（还是同一批群、当前群也没变，只是**顺序**变了）
+    // ⇒ 不重测 ⇒ 指示条的 `top` 停留在重排前的旧值 ⇒ 视觉上「条留在原位、
+    // 行已经移走」。
+    //
+    // web 侧不存在这个问题：framer 的 `layoutId`（`AuroraquaNavHighlight` 走
+    // `motion.li layout`）是**按 DOM 实测位置每帧自动迁移**的，不依赖调用方判断
+    // 「是否需要重测」。Flutter 用 `AnimatedPositioned` 手动驱动 ⇒ 必须自己补上
+    // 「顺序变化」这一条。
     if (widget.currentGroupId != oldWidget.currentGroupId ||
-        widget.groups.length != oldWidget.groups.length) {
+        !_sameOrder(widget.groups, oldWidget.groups)) {
       _scheduleLayoutSync();
     }
+  }
+
+  /// 两组群列表的 **id 序列**是否相同（顺序敏感）。
+  ///
+  /// 用于判定「是否需要重测指示条位置」：长度相同但顺序不同的重排也必须重测。
+  static bool _sameOrder(
+    List<AylaServerRailGroup> a,
+    List<AylaServerRailGroup> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i += 1) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
   }
 
   @override

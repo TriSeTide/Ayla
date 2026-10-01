@@ -67,6 +67,7 @@ import '../core/api/users_api.dart' show AylaUsersApi;
 import '../core/api/voice_api.dart' show AylaVoiceApi, AylaVoiceChannelSnapshot;
 import '../core/models/conversation.dart' show AylaConversationSummary;
 import '../core/models/post.dart' show AylaPost, AylaPostDraft;
+import '../core/models/subgroup.dart' show AylaSubGroup;
 import '../core/models/user_public.dart' show AylaUserPublic;
 import '../core/models/visibility.dart' show AylaPostVisibility;
 import '../core/net/dio_client.dart' show ApiException;
@@ -107,6 +108,22 @@ typedef AylaOwnedLivePageRequest =
       String? cursor,
       String? owner,
     );
+
+/// 建子群（web `chatApi.createSubgroup`，`ChannelSidebar.tsx:572`）。
+Future<AylaSubGroup> aylaCreateSubgroup(String convId, String name) =>
+    AylaChatApi.createSubgroup(convId, name);
+
+/// 改子群（web `chatApi.updateSubgroup`，`ChannelSidebar.tsx:577`）。
+Future<AylaSubGroup> aylaUpdateSubgroup(
+  String convId,
+  String subgroupId, {
+  String? name,
+  bool? muted,
+}) => AylaChatApi.updateSubgroup(convId, subgroupId, name: name, muted: muted);
+
+/// 删子群（web `chatApi.deleteSubgroup`，`ChannelSidebar.tsx:222`）。
+Future<void> aylaDeleteSubgroup(String convId, String subgroupId) =>
+    AylaChatApi.deleteSubgroup(convId, subgroupId);
 
 /// 建直播间（web `liveApi.createLiveChannel(title, group)`）。
 typedef AylaCreateLiveChannelFn =

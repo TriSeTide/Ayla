@@ -9,12 +9,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/core/api/directory_page.dart';
+import '../lib/core/models/chat_message.dart' show AylaMessageType;
+import '../lib/core/models/conversation.dart';
+import '../lib/core/models/game_room.dart';
+import '../lib/core/models/post.dart';
+import '../lib/core/models/user_public.dart';
 import '../lib/pages/home_page.dart';
+import '../lib/pages/home_support.dart' show aylaWideHomeTarget;
+import '../lib/state/boardgame_store.dart' show aylaBoardgameStore;
+import '../lib/state/chat_providers.dart' show chatStateProvider;
+import '../lib/state/chat_state.dart' show AylaChatState;
+import '../lib/state/directory_store.dart' show aylaDirectoryStore;
+import '../lib/state/posts_store.dart' show aylaPostsStore;
+import '../lib/state/social_store.dart' show aylaSocialStore;
 import '../lib/state/home_prefs.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
-import '../lib/widgets/base/layout_switch.dart' show AylaLayoutSwitch;
+
 import '../lib/widgets/base/loading.dart' show AylaSkeleton;
+import '../lib/widgets/base/layout_switch.dart' show AylaLayoutSwitch;
 import '../lib/widgets/group/group_card.dart'
     show AylaGroupCard, AylaGroupListItem;
 
@@ -35,6 +49,14 @@ Future<void> _pump(WidgetTester tester, {Size viewport = const Size(420, 900)}) 
   tester.view.physicalSize = viewport;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
+  // ⚠️ 注入已登录身份（2026-10-01）：`AylaSocialStore.isLoading` 在 `userId == null` 时
+  // **恒返回 false**（`social_store.dart:250` 的有意设计 —— 未登录时 `load` 直返，
+  // 若照 web 字面表达 loading 会让页面永远转圈）。而本用例要验的正是 web 的
+  // 「已登录 + 群会话请求在途 + 无数据 ⇒ **SkeletonCards**」（`HomePage.tsx:155/168`）
+  // ⇒ 必须给出真实用户，否则骨架分支结构性不可达（此前依赖旧 `AylaPagedList` 的
+  // 首帧 `loading=true`，换成共享 store 后判定口径变了）。
+  aylaSocialStore.userId = 'u1';
+  addTearDown(() => aylaSocialStore.userId = null);
   // ⚠️ 只 pump 首帧：无网络时请求在**下一个** microtask 就失败，
   // 多 pump 一次就会把首屏骨架推过去（对照 hub_pages_test 同口径）。
   await tester.pumpWidget(_host(const HomePage(), viewport: viewport));
@@ -47,6 +69,59 @@ Future<void> _settleFailure(WidgetTester tester) async {
 }
 
 void main() {
+  // ⚠️ 宽屏重定向目标的**表格锁**：这段 web 语义（HomePage.tsx:128）被翻译错过两次
+  //（「跳两次侧栏」= 没等 prefs ready；「没有跳到首个群」= 把 JS 空值合并写成三元），
+  // 所以它必须有独立于 Widget 的表格测试 —— 逐行对照见 aylaWideHomeTarget 的文档。
+  group('宽屏重定向目标（tsx 128 表格）', () {
+    String? pick({
+      bool prefsReady = true,
+      bool recentValid = false,
+      String? recent,
+      bool recentResolved = true,
+      String? resolvedRecent,
+      List<String> ids = const <String>['a', 'b'],
+    }) =>
+        aylaWideHomeTarget(
+          prefsReady: prefsReady,
+          recentValid: recentValid,
+          recent: recent,
+          recentResolved: recentResolved,
+          resolvedRecent: resolvedRecent,
+          groupIds: ids,
+        );
+
+    test('R 非空 ⇒ R（最近群有效时优先它）', () {
+      expect(pick(resolvedRecent: 'b', recent: 'z'), 'b');
+    });
+
+    test('R 已校验但不可用（null）⇒ 回落 groups[0]（此前错成 null = 停在空态）', () {
+      expect(pick(recentResolved: true, resolvedRecent: null, recent: 'xyz'), 'a');
+      expect(pick(recentResolved: true, resolvedRecent: null, recent: null), 'a');
+    });
+
+    test('R 未校验且 recent 有值 ⇒ null（继续等，避免跳两次）', () {
+      expect(pick(recentResolved: false, recent: 'xyz'), isNull);
+    });
+
+    test('R 未校验且 recent 为空 ⇒ groups[0]', () {
+      expect(pick(recentResolved: false, recent: null), 'a');
+    });
+
+    test('prefs 未读完 ⇒ 一律 null（绝不按 groups[0] 先跳）', () {
+      expect(pick(prefsReady: false), isNull);
+      expect(pick(prefsReady: false, recent: null, recentResolved: false), isNull);
+    });
+
+    test('无群 ⇒ null（落到空态）', () {
+      expect(pick(ids: const <String>[]), isNull);
+      expect(pick(recentResolved: true, resolvedRecent: null, ids: const <String>[]), isNull);
+    });
+
+    test('recentValid 优先于已校验的 R（与 web 三元顺序一致）', () {
+      expect(pick(recentValid: true, recent: 'b', resolvedRecent: 'x'), 'b');
+    });
+  });
+
   group('窄屏首帧（tsx 157–166）', () {
     testWidgets('页头 .home-toolbar：群聊 28/600 + 布局开关', (WidgetTester tester) async {
       await _pump(tester);
@@ -143,6 +218,172 @@ void main() {
     });
   });
 
+  /// 切到**列表布局**：默认档是 card（`.home-grid` 两列网格，两张卡 dy 相同）⇒
+  /// 量不出顺序；列表档是单列 Column，`getTopLeft().dy` 才是顺序判据。
+  Future<void> useListLayout(WidgetTester tester) async {
+    final AylaLayoutSwitch sw =
+        tester.widget<AylaLayoutSwitch>(find.byType(AylaLayoutSwitch));
+    sw.onChanged(false);
+    await tester.pump();
+  }
+  group('窄屏群列表随实时源重排（tsx 73–80 + groupActivity.ts:159–169）', () {
+    /// 一条群会话（带最后一条消息，用于「新消息」事件）。
+    AylaConversationSummary group(String id, {AylaLastMessagePreview? last}) =>
+        AylaConversationSummary(
+          id: id,
+          type: AylaConversationType.group,
+          title: '群 $id',
+          lastMessage: last,
+        );
+
+    AylaLastMessagePreview msg(String at) => AylaLastMessagePreview(
+          type: AylaMessageType.text,
+          content: 'x',
+          senderName: '小樱',
+          createdAt: at,
+        );
+
+    String isoAgo(int ms) => DateTime.now()
+        .subtract(Duration(milliseconds: ms))
+        .toUtc()
+        .toIso8601String();
+
+    setUp(() {
+      aylaPostsStore.reset();
+      aylaBoardgameStore.reset();
+      aylaSocialStore.reset();
+      aylaSocialStore.userId = 'u1';
+      aylaDirectoryStore.reset();
+      aylaDirectoryStore.userId = 'u1';
+    });
+    tearDown(() {
+      aylaSocialStore.requestOverride = null;
+      aylaSocialStore.reset();
+      aylaSocialStore.userId = null;
+      aylaDirectoryStore.reset();
+      aylaDirectoryStore.requestOverride = null;
+      aylaDirectoryStore.userId = null;
+      aylaPostsStore.reset();
+      aylaBoardgameStore.reset();
+    });
+
+    testWidgets('posts store 变化 ⇒ 窄屏列表重排（新帖把该群往前排）', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(420, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      aylaSocialStore.requestOverride = (kind, options, cursor) async =>
+          AylaDirectoryPage<Object>(
+            results: <Object>[group('g1'), group('g2')],
+            total: 2,
+          );
+      aylaDirectoryStore.requestOverride = (kind, options, cursor) async =>
+          const AylaDirectoryPage<Object>();
+
+      await tester.pumpWidget(_host(const HomePage()));
+      await tester.pump(const Duration(milliseconds: 100));
+      await useListLayout(tester);
+      // 初始：两群都无新内容 ⇒ 保持传入顺序（g1 在前）。
+      expect(
+        tester.getTopLeft(find.text('群 g1')).dy <
+            tester.getTopLeft(find.text('群 g2')).dy,
+        isTrue,
+      );
+
+      // 新帖落到 g2（白名单含 g2）⇒ 排序应把 g2 提前。
+      aylaPostsStore.setPage(
+        <AylaPost>[
+          AylaPost(
+            id: 1,
+            title: '新帖',
+            body: '正文',
+            allowedGroupIds: const <String>['g2'],
+            createdAt: isoAgo(60000),
+          ),
+        ],
+        null,
+        false,
+      );
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.text('群 g2')).dy <
+            tester.getTopLeft(find.text('群 g1')).dy,
+        isTrue,
+        reason: '窄屏群列表必须随 posts store 变化重排（web groupActivity.ts:206–215）',
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('boardgame store 变化 ⇒ 窄屏列表重排（新桌游房把该群往前排）', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(420, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      aylaSocialStore.requestOverride = (kind, options, cursor) async =>
+          AylaDirectoryPage<Object>(
+            results: <Object>[group('g1'), group('g2')],
+            total: 2,
+          );
+      aylaDirectoryStore.requestOverride = (kind, options, cursor) async =>
+          const AylaDirectoryPage<Object>();
+
+      await tester.pumpWidget(_host(const HomePage()));
+      await tester.pump(const Duration(milliseconds: 100));
+      await useListLayout(tester);
+      aylaBoardgameStore.upsertRoom(
+        AylaGameRoom(
+          id: 1,
+          name: '桌游房',
+          owner: const AylaUserPublic(id: 'u1', nickname: '小樱'),
+          ownerId: 'u1',
+          status: AylaGameRoomStatus.playing,
+          allowedGroupIds: const <String>['g2'],
+          createdAt: isoAgo(60000),
+        ),
+      );
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.text('群 g2')).dy <
+            tester.getTopLeft(find.text('群 g1')).dy,
+        isTrue,
+        reason: '窄屏群列表必须随 boardgame store 变化重排',
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('chatState.bumpGroupActivity ⇒ 窄屏列表重排（无任何目录事件的群也排前）', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(420, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      aylaSocialStore.requestOverride = (kind, options, cursor) async =>
+          AylaDirectoryPage<Object>(
+            results: <Object>[group('g1'), group('g2')],
+            total: 2,
+          );
+      aylaDirectoryStore.requestOverride = (kind, options, cursor) async =>
+          const AylaDirectoryPage<Object>();
+
+      await tester.pumpWidget(_host(const HomePage()));
+      await tester.pump(const Duration(milliseconds: 100));
+      await useListLayout(tester);
+      // web `stores/chat.ts:85–91` 的 WS bump（`chat_ws` 收到 message.new 时写）。
+      final AylaChatState chat =
+          ProviderScope.containerOf(
+            tester.element(find.byType(HomePage)),
+            listen: false,
+          ).read(chatStateProvider);
+      chat.bumpGroupActivity('g2');
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.text('群 g2')).dy <
+            tester.getTopLeft(find.text('群 g1')).dy,
+        isTrue,
+        reason: '`groupActivityAt` bump 必须驱动重排（web groupActivity.ts:169/224）',
+      );
+      await tester.pumpAndSettle();
+    });
+  });
   group('宽屏（tsx 124–151）', () {
     testWidgets('无群 → .home-wide-empty（还没有加入群聊 + 创建你的第一个群）', (
       WidgetTester tester,

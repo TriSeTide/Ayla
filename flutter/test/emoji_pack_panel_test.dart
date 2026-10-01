@@ -457,9 +457,20 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 50));
       expect(footerOf(tester).hasMore, isTrue);
+      // ⚠️ 断言「**按钮**触发的那一次」必须取**增量**、不能用绝对值：
+      // 本面板在此测试视口下内容不足一屏（页脚天然处于触发区），
+      // `AylaDirectoryLoadMore` 修好触底（2026-10-01：原来那条 NotificationListener 收不到
+      // 只向祖先冒泡的滚动通知 = 死代码，改监听祖先 ScrollPosition）后，页脚会在首帧
+      // **自动** loadMore 一次 —— 这与 web 一致：`EmojiPackPanel.tsx:227` 的页脚自带
+      // `IntersectionObserver{rootMargin:'240px 0px'}`，短面板同样首帧即命中；
+      // web 靠 store 的 `_pending`（`stores/directory.ts:273`）吞掉重复，而本测试注入的是
+      // **计数回调**（绕过 store 去重）⇒ 绝对值必然是「自动 1 次 + 按钮 1 次」。
+      // 取增量才锁得住「点按钮 ⇒ 恰好走一次 loadMore 且不是 refresh」这条判别性语义。
+      final int loadsBeforeTap = loads;
       await tester.tap(find.text('加载更多'));
       await tester.pump();
-      expect(loads, 1, reason: 'tsx 228：loadMore = metaError ? refresh : pages.loadMore');
+      expect(loads - loadsBeforeTap, 1,
+          reason: 'tsx 228：loadMore = metaError ? refresh : pages.loadMore');
       expect(reloads, 0);
     });
 
