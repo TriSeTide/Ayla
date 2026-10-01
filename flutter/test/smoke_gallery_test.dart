@@ -143,6 +143,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     'PullToRefresh / AylaSignedVideo（PullToRefresh.tsx + AylaSignedVideo.tsx）',
     '分页族 / 收藏按钮（DirectoryLoadMore + AylaStablePaginationFooter + FavoriteButton）',
     'AylaAuthCodeRow（auth.css 89–103 + RegisterPage.tsx 143–155 / PrivacySheet）',
+    'AylaAuthOptions（登录表单开关 · 新增功能，web 无对应）',
     'VisibilitySelector / 资料卡 / 筛选条 / 隐私设置',
     '覆盖层滚动条（OverlayScrollbar.tsx 311 行 + base.css 385–421）',
   ],

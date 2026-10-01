@@ -11,6 +11,7 @@
 /// · **debug 专用**：右下角「组件 / 应用」切换（组件画布 = 唯一视觉验收面，`@Preview` 已弃用）。
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -23,14 +24,12 @@ import 'package:go_router/go_router.dart';
 import 'core/app_init.dart';
 import 'core/net/dio_client.dart';
 import 'state/app_preload.dart';
-import 'state/posts_store.dart' show aylaPostTabCache;
-import 'state/social_store.dart' show aylaSocialStore;
+import 'state/auth_bootstrap.dart';
 import 'core/ws/ws_manager.dart';
 import 'preview/component_gallery.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
-import 'state/presence_providers.dart';
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/base/loading.dart' show AylaFullScreenLoader;
@@ -107,19 +106,10 @@ void main() {
   DioClient.instance.init(
     tokenStore: auth,
     onSessionExpired: () {
-      AppInit.instance.reset();
-      // 帖子页 tab 缓存同步清空（与 app_shell 的登出链同口径；
-      // web `postTabSession` 在 accessToken 清空时失效，`PostsHubPage.tsx:79–86`）。
-      aylaPostTabCache.clear();
-      aylaSocialStore.reset();
-      wsManager?.disconnectAll();
-      // 消息域：401 过期与显式登出同一套收尾（清订阅/基线/消息与红点状态）。
-      aylaStopChatWsForContainer(container);
-      // 房内域：断开 voice/live 两通道 + 解绑目录帧桥 + 清房内状态。
-      aylaStopRoomsForContainer(container);
-      // presence 域：断开通道 owner + 清空在线集合（web `presenceClient.disconnect` 的 reset）。
-      aylaStopPresenceWsForContainer(container);
-      auth.clear();
+      // 401 过期收尾：与显式登出**同一套**（断四通道 / 清缓存 / 清令牌），
+      // 定义处 = `state/auth_bootstrap.dart`（两条路径共用一份，避免漂移）。
+      // ⚠️ 不删已保存凭据：用户勾了「记住密码」就应当打开即回填。
+      unawaited(aylaLogoutForContainer(container));
       // 回登录由路由守卫接（`app_router.dart` 的 redirect + refreshListenable）
     },
   );
@@ -136,6 +126,16 @@ void main() {
   // live.* / boardgame.room.* 分支 + `stores/directory.ts` 的创建/删除跟踪）。
   // 与 chat 连接时机解耦：只登记回调，未连时不消费任何帧。
   aylaStartRoomFrames(container);
+
+  // 冷启动自动登录（用户需求 2026-10-01）：勾了「自动登录」时，用安全存储里的账号密码
+  // 跑一次真实 `POST /auth/login/`，成功即走与手动登录**完全相同**的副作用链。
+  //
+  // ⚠️ **刻意不 await**：自动登录要占一次完整往返，等它会把首帧一起卡住；
+  // 登录页由路由守卫立即渲染，用户在页面上**看得见**它自动登录成
+  // （`pages/login_page.dart` 的 `submitting` 档显「登录中…」，状态来自
+  // `state/auth_bootstrap.dart` 的 `aylaAutoLoginInFlight`）。
+  // 成功后令牌落地 → `app_router.dart` 的 redirect 自动把 `/login` 换成目标页。
+  unawaited(aylaRunAutoLogin(container));
 
   runApp(
     UncontrolledProviderScope(

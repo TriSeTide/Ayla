@@ -44,6 +44,7 @@ import '../widgets/group/group_card.dart';
 import '../widgets/base/media_interaction.dart';
 import '../core/media/media_signer.dart';
 import '../core/net/dio_client.dart';
+import '../pages/login_page.dart' show aylaAuthOptionsSamples;
 import '../widgets/base/resource_image.dart';
 import '../widgets/base/loading.dart';
 import '../widgets/shell/channel_sidebar.dart';
@@ -278,6 +279,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
     'AylaResourceImage',
     'AylaConfirmDialog',
     'AylaAuthCodeRow', // 2026-09-28：注册页组装与 privacy_sheet 私有件合并
+    'AylaAuthOptions', // 2026-10-01：登录页「记住密码 / 自动登录」（新增功能，web 无对应）
     'PullToRefresh',
     '分页族',
     'VisibilitySelector',
@@ -1530,6 +1532,23 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   ' 数字键盘 + maxLength 6 + 过滤非数字 · 发码键 .btn-ghost 44 高；注册页档再传'
                   ' `.auth-code-btn` 的 min-width 104 + padding-inline sp3；禁用 / aria-invalid 两档已入样张',
               child: aylaAuthCodeRowSamples(),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+            _Section(
+              title: 'AylaAuthOptions（登录表单开关 · 新增功能，web 无对应）',
+              source:
+                  'web `LoginPage.tsx` 全 95 行**没有**这两个控件 ⇒ 新增件，不是复刻；视觉与交互沿用既有规范：'
+                  '复选框 = AylaCheckbox（16×16 + accent-color，规格源 app.css:161–167 的 '
+                  '.visibility-selector-options input[type=checkbox]；两者根同为 label 内复选框，'
+                  '共用 app.css:117–133 的行规格）· 行 label = AylaTextStyles.label（14 / w700 / ls .2 / '
+                  '--text-primary，等价 auth.css:64–72 的 .auth-field）· 行 min-height 40（app.css:117–133）· '
+                  '行内 gap sp2（.auth-field gap）· 行间距 sp4（.auth-form gap，auth.css:63）· '
+                  'focus 环 = base.css:365–370 的 :focus-visible（outline --focus-ring、offset 2）。'
+                  '联动只写一处：勾「自动登录」⇒ 记住密码同时勾；取消「记住密码」⇒ 自动登录一并取消。'
+                  '⚠️ 记住密码未勾时自动登录行是**禁用视觉**（灰文案 + 未勾）但**仍可点**，点了会把记住密码一并打开。'
+                  '四档静态 + 一档可点联动演示（点了看两个开关是否同时开/关）。'
+                  '⚠️ 本件为纯色/现有件，不含玻璃卡（画布离屏层预算）。',
+              child: aylaAuthOptionsSamples(),
             ),
             const SizedBox(height: AylaSpacing.sp6),
             _Section(

@@ -76,9 +76,9 @@ class AuthApi {
   /// dio 侧的等价物在 [DioClient] 的 401 拦截器里按 `auth/` 前缀豁免。
   static Future<SendEmailCodeResult> sendEmailCode(String email) async {
     final Map<String, dynamic> resp =
-        await DioClient.instance.post<Map<String, dynamic>>(
+        await DioClient.instance.postAuth<Map<String, dynamic>>(
       '/auth/send-email-code/',
-      body: <String, String>{'email': email},
+      body: <String, String>{'email': email}, // web `api/auth.ts:23 noRetry401`
     );
     return SendEmailCodeResult.fromJson(resp);
   }
@@ -101,8 +101,9 @@ class AuthApi {
       'code': code,
     };
     if (nickname != null && nickname.isNotEmpty) body['nickname'] = nickname;
+    // web `api/auth.ts:49 noRetry401`：注册/登录的 401/400 是业务错误，原样展示
     final Map<String, dynamic> resp =
-        await DioClient.instance.post<Map<String, dynamic>>(
+        await DioClient.instance.postAuth<Map<String, dynamic>>(
       '/auth/register/',
       body: body,
     );
@@ -112,8 +113,11 @@ class AuthApi {
   /// POST /auth/login/ —— 登录（测试账号 123/12345678）。
   static Future<TokenPair> login(String username, String password) async {
     final Map<String, dynamic> resp =
-        await DioClient.instance.post<Map<String, dynamic>>(
+        await DioClient.instance.postAuth<Map<String, dynamic>>(
       '/auth/login/',
+      // ⚠️ 与 web `api/auth.ts:58` 逐条一致：**登录的 401 是业务结果**
+      //（账号或密码错误），不得触发「刷新 + 重放」或会话过期登出链 ——
+      // 自动登录用旧口令时尤其明显：否则一次失败会把整条登出链跑一遍。
       body: <String, String>{'username': username, 'password': password},
     );
     return TokenPair.fromJson(resp);
@@ -149,9 +153,16 @@ class AuthApi {
   }
 
   /// GET /me/ —— 当前登录用户信息（含 email）。
-  static Future<AuthUser> me() async {
+  ///
+  /// [accessToken] 用于**冷启动自动登录**：那条链刚拿到令牌、尚未写进 `AuthNotifier`
+  /// 时就要拉一次 `/me/`（见 `state/auth_bootstrap.dart:aylaApplyLoginSession`）。
+  /// 显式带上它可避免"先写令牌再拉"的时序耦合；不传则照旧走全局存取器。
+  static Future<AuthUser> me({String? accessToken}) async {
     final Map<String, dynamic> resp =
-        await DioClient.instance.get<Map<String, dynamic>>('/me/');
+        accessToken == null || accessToken.isEmpty
+            ? await DioClient.instance.get<Map<String, dynamic>>('/me/')
+            : await DioClient.instance
+                .getWithBearer<Map<String, dynamic>>('/me/', accessToken);
     return AuthUser.fromJson(resp);
   }
 

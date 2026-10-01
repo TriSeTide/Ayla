@@ -13,6 +13,13 @@
 /// ⚠️ **有意偏离（用户指示）**：web 的守卫与登录成功都**不带**回跳（`LoginPage.tsx:19/28` 恒
 /// `navigate("/group")`）；Flutter 侧把原目标编码进 `?next=` 并在登录后回原地（见 [LoginRoute]）。
 ///
+/// ## 冷启动自动登录如何进入应用（2026-10-01 新增功能，靠本文件的既有机制成立）
+/// `main.dart` 在 `runApp` 之前触发 `state/auth_bootstrap.dart:aylaRunAutoLogin`
+/// （模块级单飞）；登录令牌落地后 `authNotifierProvider` 翻转 ⇒
+/// 本文件 `appRouterProvider` 里那条 `ref.listen` 已经 `refresh.bump()` ⇒
+/// `redirect` 重算 ⇒ `/login` 上的用户被送进 `/group`（或 `?next=` 目标）。
+/// **本文件不需要任何自动登录接线**：多一条触发点就多一条登录链。
+///
 /// ## 实现差异（登记）
 /// · **声明顺序敏感**：go_router 按声明顺序匹配，React Router 6 按具体度自动排序 ⇒
 ///   `/posts/mine` **必须**排在 `/posts/:postId` 之前（否则 `mine` 被当成 postId）。
@@ -44,6 +51,8 @@ import '../pages/register_page.dart';
 import '../pages/search_page.dart';
 import '../pages/user_profile_page.dart';
 import '../pages/voice_hub_page.dart';
+import '../state/auth_bootstrap.dart'
+    show aylaAutoLoginInFlight, aylaInitialLocation;
 import '../state/auth_state.dart';
 import '../theme/page_transitions.dart' show aylaIsTransitionFreePath;
 import 'shell_config.dart' show aylaIsGroupScene, aylaPanelOwnedPath;
@@ -52,6 +61,7 @@ import 'shell_config.dart' show aylaIsGroupScene, aylaPanelOwnedPath;
 class _AuthRefresh extends ChangeNotifier {
   void bump() => notifyListeners();
 }
+
 
 // ⚠️ 占位页辅助函数 `_pending` 已于第六批删除：五条 `/group/*` 路由都换成了真实页面
 // （`GroupPage`），库内再无占位路由。`pages/pending_page.dart` 保留 —— 它是
@@ -126,7 +136,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
   ref.onDispose(refresh.dispose);
 
   final GoRouter router = GoRouter(
-    initialLocation: '/group',
+    // ⚠️ **首屏落在哪**（2026-10-01 用户需求）：勾了「自动登录」时必须**先到登录页、
+    // 在页面上看见它自己登进去**，而不是静默跳过登录页直接进应用。
+    // 判据 = `state/auth_bootstrap.dart` 的模块级「自动登录在途」位：`main.dart` 在
+    // `runApp` **之前**同步把它置真（首个 await 之前），所以这里读到的一定是本轮的真实状态。
+    // 落点规则本身抽成纯函数 [aylaInitialLocation]（有定向测试，不靠"读代码看起来对"）。
+    initialLocation:
+        aylaInitialLocation(autoLoginInFlight: aylaAutoLoginInFlight.value),
     refreshListenable: refresh,
     redirect: (BuildContext context, GoRouterState state) {
       final bool loggedIn = ref.read(authNotifierProvider).isAuthenticated;

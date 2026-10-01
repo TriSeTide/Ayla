@@ -214,6 +214,26 @@ class DioClient {
   Future<T> post<T>(String path, {Object? body, Map<String, dynamic>? query}) =>
       _request<T>('POST', path, body: body, query: query);
 
+  /// 认证端点专用 POST —— web `api/client.ts:41 noRetry401` 的等价物：
+  /// 401/400 是**业务结果**，原样归一给调用方展示，不触发「刷新 + 重放」，
+  /// 也不会再走一遍会话过期登出链（用户只是打错密码时尤其重要）。
+  ///
+  /// 为什么不并进 [post] 当具名参数：`preview/component_gallery.dart` 的
+  /// `PreviewMediaClient implements DioClient` 是既有公开替身，改既有签名会连带改它
+  /// （跨批次影响面）⇒ 新增方法而不是改老方法。
+  Future<T> postAuth<T>(String path, {Object? body}) =>
+      _request<T>('POST', path, body: body, noRetry401: true);
+
+  /// 带**显式 Bearer** 的 GET。
+  ///
+  /// 用途只有一个：冷启动自动登录刚拿到令牌、还没写进 [AuthTokenStore] 时先拉一次
+  /// `GET /me/`（见 `state/auth_bootstrap.dart:aylaApplyLoginSession` 的顺序说明）。
+  Future<T> getWithBearer<T>(String path, String accessToken) => _request<T>(
+        'GET',
+        path,
+        headers: <String, String>{'Authorization': 'Bearer $accessToken'},
+      );
+
   Future<T> put<T>(String path, {Object? body, Map<String, dynamic>? query}) =>
       _request<T>('PUT', path, body: body, query: query);
 
@@ -227,13 +247,24 @@ class DioClient {
     String path, {
     Object? body,
     Map<String, dynamic>? query,
+    Map<String, String>? headers,
+    bool noRetry401 = false,
   }) async {
     try {
       final Response<dynamic> resp = await dio.request<dynamic>(
         path,
         data: body,
         queryParameters: query,
-        options: Options(method: method),
+        options: Options(
+          method: method,
+          // 请求级头覆盖（例：自动登录刚拿到的令牌尚未进全局存取器时拉 /me/）。
+          headers: headers,
+          // 认证端点（login / register / 发码）的 401/400 是**业务结果**，
+          // 必须原样交给调用方展示（web `api/client.ts:41 noRetry401` 的等价物）；
+          // 否则拦截器会去刷新（多半没有 refresh）、失败后再走一遍
+          // `onSessionExpired` 全套登出 —— 用户只是打错密码，却看到「登录已过期」。
+          extra: noRetry401 ? <String, dynamic>{'noRetry401': true} : null,
+        ),
       );
       return resp.data as T;
     } on DioException catch (e) {

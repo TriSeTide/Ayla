@@ -33,17 +33,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../core/app_init.dart';
-import '../core/ws/ws_manager.dart';
 import '../pages/live_support.dart';
 import '../router/shell_config.dart';
+import '../state/auth_bootstrap.dart';
 import '../state/auth_state.dart';
-import '../state/chat_providers.dart';
+import '../state/chat_providers.dart' show badgesProvider;
 import '../state/live_state.dart';
-import '../state/posts_store.dart' show aylaPostTabCache;
-import '../state/social_store.dart' show aylaSocialStore;
-import '../state/presence_providers.dart';
-import '../state/room_providers.dart';
+import '../state/room_providers.dart' show liveStateProvider;
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
@@ -85,20 +81,13 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   void _logout() {
     // 顺序对齐 web `useAuth.logout`：断 WS → 清令牌 → appInit.reset（回登录由路由守卫接）。
-    wsManager?.disconnectAll();
-    // 消息域：断开 chat 通道 owner 并清空会话/消息/红点/通知状态（各 store 的 reset）。
-    aylaStopChatWs(ref);
-    // presence 域：断开通道 owner 并清空在线集合（web `presenceClient.disconnect` 的 reset）。
-    aylaStopPresenceWs(ref);
-    // 房内域：解绑目录帧桥 + 断开 voice/live 两通道 + 清房内状态（同 401 过期路径）。
-    aylaStopRooms(ref);
-    AppInit.instance.reset();
-    // 帖子页 tab 缓存（web `postTabSession` 机制，`PostsHubPage.tsx:79–86`）：
-    // 账号切换 / 登出清空，避免下一位用户读到上一位的分页快照。
-    aylaPostTabCache.clear();
-    // 社交缓存（会话 / 好友等）同步清空（web `useSocialStore.reset`，`social.ts:45`）。
-    aylaSocialStore.reset();
-    ref.read(authNotifierProvider.notifier).clear();
+    //
+    // ⚠️ 实现已**抽到 `state/auth_bootstrap.dart:aylaLogout`**（2026-10-01）：401 过期路径
+    // （`main.dart` 的 `onSessionExpired`）原本另抄了一份同样的链，两条路径合一份避免漂移。
+    //
+    // ⚠️ **不删已保存凭据**：用户勾了「记住密码」就应当下次打开仍是回填好、可直接点登录的样子；
+    // 想彻底忘记 ⇒ 在登录页取消「记住密码」（`AylaAuthPrefsStore.save(rememberPassword:false)`）。
+    aylaLogout(ref);
   }
 
   void _onMenuSelected(AylaTopNavMenuAction action) {

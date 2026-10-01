@@ -2,11 +2,17 @@
     <!-- PoC 阶段：本地开发需明文 HTTP 访问 SRS(8080)/后端(8100)/WS；正式版应收敛为网络安全配置 -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- 「记住密码 / 自动登录」的凭据存在 Android KeyStore（flutter_secure_storage）。
+         插件 README 明确要求关闭自动备份：Google Drive 备份恢复后只带回加密密文、
+         不回带 KeyStore 里的密钥 ⇒ 读取时抛
+         `java.security.InvalidKeyException: Failed to unwrap key`。
+         关闭备份只影响"换机自动恢复"，App 内数据不受影响。 -->
     <application
         android:label="ayla_flutter"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
