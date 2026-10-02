@@ -38,13 +38,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/auth_api.dart';
-import '../core/app_init.dart';
 import '../core/media/media_picker.dart';
 import '../core/models/media_kind.dart';
 import '../core/media/media_upload.dart';
 import '../core/media/media_validation.dart';
 import '../core/net/dio_client.dart';
-import '../core/ws/ws_manager.dart';
+import '../state/auth_bootstrap.dart' show aylaLogout;
 import '../state/auth_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart';
@@ -182,9 +181,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   void _logout() {
-    wsManager?.disconnectAll();
-    AppInit.instance.reset();
-    ref.read(authNotifierProvider.notifier).clear();
+    // ⚠️ **必须走统一收尾**（2026-10-01 用户实机：「退出登录然后重新登录之后会出 bug，群列表
+    // 不完全显示了」+「重新登录时不出现加载动画」+「左侧群看见他加载之后就变成这样子」）。
+    // 这里此前是**手抄的残缺版**：只断 WS + reset AppInit + 清 token —— 漏了
+    // chatState / socialStore / 目录 / 帖子的清理 ⇒ 退出再登录时旧会话摘要残留在
+    // chatState 里，与本次预取的一页混在一起 ⇒ 群列表不全 + 页脚状态错乱（白色方块）。
+    // web 的登出只有**一条**链（`useAuth.logout` → auth store 订阅者各自 reset），
+    // Flutter 侧同样收敛到 `aylaLogout`（`state/auth_bootstrap.dart`，`app_shell` 也在用）。
+    aylaLogout(ref);
   }
 
   /// 内容分区装载的状态（三条数据源见 `profile_content_support.dart`）。

@@ -21,18 +21,17 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'core/app_init.dart';
 import 'core/net/dio_client.dart';
 import 'state/app_preload.dart';
 import 'state/auth_bootstrap.dart';
 import 'core/ws/ws_manager.dart';
 import 'preview/component_gallery.dart';
+import 'layout/app_gate.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
-import 'widgets/base/loading.dart' show AylaFullScreenLoader;
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
 
@@ -184,30 +183,16 @@ class _AppRootState extends ConsumerState<_AppRoot> {
           body: AylaAuroraBackground(
             child: Stack(
               children: <Widget>[
-                // ⚠️ 用 Offstage 而不是「不挂」：切到画布再切回来时路由状态保活
-                // （否则整棵 router 子树被销毁，退出画布会回到 initialLocation）。
-                Offstage(
-                  offstage: _showGallery,
-                  child: child ?? const SizedBox.shrink(),
+                // 预加载门 × 路由页面的互斥装配（web App.tsx:48–51）——
+                // 见 layout/app_gate.dart 的库文档（含早期 Stack 塌成 0×0 的尺寸陷阱）。
+                // 抽成独立组件是为了能对它做**实绘尺寸**回归（test/app_gate_test.dart）：
+                // 门打开时若 Stack 没设 fit=expand，Offstage 会把 Stack 量成 0×0、
+                // 门被填成 0×0，且只在门该显示时消失 ⇒ 极易漏过。
+                AylaAppGate(
+                  page: child ?? const SizedBox.shrink(),
+                  gallery: const ComponentGallery(),
+                  showGallery: _showGallery,
                 ),
-                // 全屏预加载门（web `App.tsx:48–51`：`appInit.status === "loading"` ⇒
-                // `<FullScreenLoader />`）—— 登录后到核心数据预加载完成前覆盖全屏，
-                // 完成后露出已就绪的页面（不再逐页闪骨架）。
-                // ⚠️ `ListenableBuilder` 不产生 render object ⇒ 其返回的 `Positioned`
-                //    仍是 Stack 的直接 RenderObject 子级（库内既有先例）。
-                ListenableBuilder(
-                  listenable: AppInit.instance,
-                  builder: (BuildContext context, Widget? child) {
-                    if (_showGallery ||
-                        AppInit.instance.status != AppInitStatus.loading) {
-                      return const SizedBox.shrink();
-                    }
-                    return const Positioned.fill(
-                      child: AylaFullScreenLoader(),
-                    );
-                  },
-                ),
-                if (_showGallery) const Positioned.fill(child: ComponentGallery()),
                 if (kDebugMode)
                   Positioned(
                     right: 12,
