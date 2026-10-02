@@ -108,7 +108,11 @@ class AylaGroupResultCard extends StatelessWidget {
         spacing: AylaSpacing.sp3, // gap: var(--sp-3)
         children: <Widget>[
           Expanded(
-            child: GestureDetector(
+            // `.typed-group-main` 是 <button>（DirectoryResultCards.tsx:25）
+            // ⇒ base.css:340 全局 pointer。
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               onTap: onOpen,
               behavior: HitTestBehavior.opaque,
               child: Row(
@@ -170,6 +174,7 @@ class AylaGroupResultCard extends StatelessWidget {
                     ),
                 ],
               ),
+            ),
             ),
           ),
           if (action != null) action!,
@@ -336,7 +341,13 @@ class AylaFavoriteResultCard extends StatelessWidget {
             spacing: AylaSpacing.sp3,
             children: <Widget>[
               Expanded(
-                child: GestureDetector(
+                // `.typed-message-main` 是 <button>（DirectoryResultCards.tsx:92，
+                // canOpen=false 时 disabled）⇒ base.css:340 pointer / 343 not-allowed。
+                child: MouseRegion(
+                  cursor: canOpen
+                      ? SystemMouseCursors.click
+                      : SystemMouseCursors.forbidden,
+                  child: GestureDetector(
                   onTap: canOpen ? onOpen : null,
                   behavior: HitTestBehavior.opaque,
                   child: Column(
@@ -368,6 +379,7 @@ class AylaFavoriteResultCard extends StatelessWidget {
                       else if (!isMedia && msg.content.isNotEmpty)
                         _quote(t, msg.content), // tsx 104
                     ],
+                  ),
                   ),
                 ),
               ),

@@ -384,7 +384,7 @@ class _AylaServerRailState extends State<AylaServerRail> {
   ///
   /// 这两个值当作 CSS left/top 使用 → 包含块是 rail 的 **padding box**，而
   /// getBoundingClientRect 相减得到的是 **border box** 距离 ⇒ 实际渲染位置
-  /// = 该值 + 1px 边框。这里直接换算成**根 Overlay 的绝对坐标**：
+  /// = 该值 + 1px 边框。这里直接换算成**浮层所在那个 Overlay 的绝对坐标**：
   ///
   ///     left = 行右缘 + popGap(2) + 1px 边框
   ///     top  = 行中心 + 1px 边框（随后由 translateY(-50%) 上移半个自身高度）
@@ -392,7 +392,12 @@ class _AylaServerRailState extends State<AylaServerRail> {
     final GlobalKey? itemKey = _itemKeys[id];
     if (itemKey == null) return;
     final RenderBox? item = _boxOf(itemKey);
-    final OverlayState? overlay = Overlay.maybeOf(context, rootOverlay: true);
+    // ⚠️ 与 [_syncPopOverlay] 的插入点**必须是同一个 Overlay**（下面取它的
+    // RenderBox 做坐标换算）：画布/测试宿主（`theme/preview_theme.dart:55`）没有
+    // Navigator ⇒ `rootOverlay: true` 找不到 Overlay 会返回 null，本方法直接
+    // return ⇒ 悬停面板在画布里永远不弹（2026-10-02 同一处修复）。真实 app 里
+    // 最近的 Overlay 就是 MaterialApp Navigator 的那个（= root）⇒ 等价。
+    final OverlayState? overlay = Overlay.maybeOf(context);
     final RenderBox? overlayBox =
         overlay?.context.findRenderObject() as RenderBox?;
     if (item == null || overlayBox == null) return;
@@ -607,7 +612,9 @@ class _AylaServerRailState extends State<AylaServerRail> {
   Widget _item(AylaServerRailGroup g) {
     final bool active = g.id == widget.currentGroupId;
     return MouseRegion(
-      // hover 判定在**整行**（web 的 onMouseEnter 挂在 li.server-item 上）
+      // `.server-item-btn`（group.css:533–537）在 web 是 <button>（ServerRail.tsx）
+      // ⇒ base.css:340 全局 pointer；hover 判定仍在**整行**（onMouseEnter 挂 li.server-item）。
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => _handleItemEnter(g),
       onExit: (_) => _scheduleClose(),
       child: SizedBox(
@@ -827,7 +834,7 @@ class _AylaServerRailState extends State<AylaServerRail> {
       _popEntry = aylaOverlayEntry(
         builder: (BuildContext context) => _buildPopOverlay(),
       );
-      Overlay.of(context, rootOverlay: true).insert(_popEntry!);
+      Overlay.of(context).insert(_popEntry!);
     } else {
       _popEntry!.markNeedsBuild();
     }

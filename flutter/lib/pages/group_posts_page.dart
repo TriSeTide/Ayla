@@ -7,6 +7,8 @@
 /// | 同组件详情往返：`postId` 存在时保留外壳渲染详情 | 358–365 + 382–384 |
 /// | 底部输入框发帖（区别于一级 tab 的 FAB 发帖，R-P2） | 477–493 |
 /// | 刷新后已入场卡片整批重播浮入 | 94–95 + 378–380 |
+/// | 卡片入场（`.posts-feed-item` 外层 `opacity 0→1` + `translateY 20→0`，逐条 stagger） | 378–380 + 419–423 |
+/// | 从详情返回列表：本次首帧不播入场（`skipRevealRestoreKey === scrollRestoreKey`） | 91–93 / 148–153 / 362–365 / 428–430 |
 /// | 加载 / 空态 / 列表三态 + 分页页脚 | 386–447 |
 /// | sticky 场景头 + 「我的帖子」尾键 | 391–397 |
 ///
@@ -34,7 +36,8 @@ import '../theme/app_theme.dart' show AylaTextStyles;
 import '../theme/tokens.dart' show AylaRadii, AylaSpacing;
 import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
 import '../widgets/base/loading.dart' show AylaSkeleton;
-import '../widgets/base/reveal.dart' show AylaRevealScope;
+import '../widgets/base/reveal.dart'
+    show AylaRevealItem, AylaRevealMotion, AylaRevealScope;
 import '../widgets/group/group_posts_composer.dart' show AylaGroupPostsComposer;
 import '../widgets/group/group_scene.dart'
     show AylaGroupSceneHead, AylaGroupScenePlaceholder, AylaGroupSceneStickyHead;
@@ -80,6 +83,16 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   int _replayNonce = 0;
   bool _editorExpanded = false;
 
+  /// 「本次由详情返回」——等价 web 的
+  /// `skipRevealRestoreKey === scrollRestoreKey`（`GroupPosts.tsx:91/149–153/362–365/428–430`）。
+  ///
+  /// web 语义：进入详情时把 `skipRevealRestoreKey` 置为当前滚动恢复键，于是
+  /// `useListEntryMotion` 的 `suppressed` 在**回到列表的首帧**为真（`tsx:378–380`）
+  /// ⇒ 已入场的卡片不重播、直接落终态；刷新完成后（`tsx:148–153`）
+  /// `setSkipRevealRestoreKey(null)` 才放开 —— 即 suppress 持续到下一次刷新完成，
+  /// 期间新卡（含发帖本地插入）同样不播入场。
+  bool _skipRevealOnRestore = false;
+
   String get groupId => widget.groupId;
 
   @override
@@ -88,6 +101,19 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     _favorites.addListener(_onChanged);
     unawaited(_load());
     _registerRefresh();
+  }
+
+  @override
+  void didUpdateWidget(covariant GroupPostsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 路由 `:postId` 出现/消失 = 进/出详情。两个方向都登记（web 的同一守卫有两处：
+    // 进详情时写在卡片 onOpen（tsx 428–430），返回时由 tsx 362–365 的 effect 兜底
+    // —— 后者覆盖「不经卡片、直接改路由」的入口）。
+    // ⚠️ 这两条路径下本 State 被路由原地复用（同型 + 无 key ⇒ `Page.canUpdate` 为真，
+    // 见 `app_router.dart:340–347` 的注释）⇒ 字段跨详情往返保留，正是 suppress 的载体。
+    if (widget.postId != oldWidget.postId) {
+      _skipRevealOnRestore = widget.postId != null || oldWidget.postId != null;
+    }
   }
 
   @override
@@ -111,7 +137,13 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     final ShellUiNotifier notifier = ref.read(shellUiProvider.notifier);
     Future<void> callback() async {
       await _load();
-      if (mounted) setState(() => _replayNonce += 1);
+      if (!mounted) return;
+      // web tsx 148–153：刷新完成后 `setSkipRevealRestoreKey(null)` ⇒ 抑制随之解除；
+      // 重播（replayNonce）不受抑制影响（useListEntryMotion 注释 13–18）。
+      setState(() {
+        _skipRevealOnRestore = false;
+        _replayNonce += 1;
+      });
     }
 
     _shell = notifier;
@@ -157,6 +189,9 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
         _posts = merged.values.toList(growable: false);
         _cursor = page.nextCursor;
         _hasMore = page.hasMore;
+        // web tsx 148–153：列表重新拿到数据后放开「详情返回」的抑制
+        //（`wasLoaded` / `listActive` 两个前置条件在本页恒成立：详情态不走本页 load）。
+        _skipRevealOnRestore = false;
       });
     } catch (error) {
       if (!mounted) return;
@@ -189,6 +224,10 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   }
 
   void _openPost(int id) {
+    // web tsx 426–431：进详情前先写 `setSkipRevealRestoreKey(scrollRestoreKey)` +
+    // `setRevealAfterRefresh(false)`。Flutter 侧由 [didUpdateWidget] 在 `postId`
+    // 出现时登记同一事实（无需 setState：紧接着的路由变化必然重建本页）。
+    _skipRevealOnRestore = true;
     context.go(
       '/group/${Uri.encodeComponent(groupId)}/posts/$id',
     );
@@ -233,30 +272,54 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     } else {
       content = AylaRevealScope(
         replayKey: _replayNonce,
+        // web `GroupPosts.tsx:378–380`：`suppressed = postId != null ||
+        // ((restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh)`
+        // ⇒ 「本次由详情返回」期间**新入场被抑制、已入场项不重播**
+        //（`useListEntryMotion.ts:73`：suppressed 只阻止启动新的入场动画，不取消已开始的）。
+        // Flutter 侧 `postId != null` 时整页换详情、列表被卸载，故只需表达第二个析取项。
+        suppress: _skipRevealOnRestore,
         child: AylaMasonryGrid<AylaPost>(
           items: _posts,
           itemKey: (AylaPost post) => post.id,
           memoryKey: 'group-posts:$groupId',
-          padding: const EdgeInsets.fromLTRB(
-            AylaSpacing.sp4,
-            AylaSpacing.sp3,
-            AylaSpacing.sp4,
-            AylaSpacing.sp3,
-          ),
+          // 卡片留白口径（问题 6 真根因，同 games/voice）：web 群内流是
+          // `.posts-feed.group-posts-feed`，而 `.group-posts-feed { padding: 0 }`
+          // （**posts.css:989–992**，原注释「群内流复用全站帖子列与响应式瀑布流，
+          // 仅由外层滚动区提供 gutter，**避免双重 padding**」）以同特异性按**源码顺序**
+          // 压掉 `.posts-feed` 基样式 `padding: var(--sp-3) var(--sp-4)`（posts.css:607–612）
+          // 与 ≥1025 档 `padding: var(--sp-4) var(--sp-6)`（posts.css:664–668）
+          // ⇒ 瀑布流自身 **padding 0（左右 / 上下全是 0）**。
+          // 左右留白只由外层 `.group-posts-list` 给（posts.css:975–983 的 `sp3 sp4`，
+          // 被 group.css:413–417 的 `.group-page .group-posts-list { padding: var(--sp-4) }`
+          // 0-2-0 换成四向 sp4）—— Flutter 侧即本页 `AylaGroupSceneStickyHead` 的 padding。
+          // 修前这里再叠一层 `sp4` ⇒ **左右各 32**（与群内桌游/语音同一条根因）。
+          padding: EdgeInsets.zero,
+          // 入场动画挂在**每卡外层**（web tsx 419–423 的 `.posts-feed-item` 由
+          // useListEntryMotion 驱动，`tsx:378`），不是卡本体 ⇒ Flutter 侧同款结构。
+          // ⚠️ `fadeGlass: false` 必需：`AylaPostCard` 用 `AylaGlassCard`（玻璃子树），
+          // 整层 Opacity 会被 Impeller 拒绝（`reveal.dart` 文件头「玻璃子树」段）。
+          // 范本：`posts_hub_page.dart:312–317` / `my_posts_page.dart:282–287`。
           itemBuilder: (BuildContext context, AylaPost post, int index) {
             final String key = '${post.id}';
-            return Padding(
-              padding: const EdgeInsets.only(bottom: AylaSpacing.sp3),
-              child: AylaPostCard(
-                post: post,
-                onOpen: () => _openPost(post.id),
-                favoriteState: _favorites.stateOf('post', key),
-                favoriteBusy: _favorites.busyOf('post', key),
-                favoriteError: _favorites.actionErrorOf('post', key),
-                onToggleFavorite: (bool _) =>
-                    unawaited(_favorites.toggle('post', key)),
-                onRetryFavoriteStatus: () =>
-                    unawaited(_favorites.load('post', <String>[key], force: true)),
+            return AylaRevealItem(
+              fadeGlass: false,
+              // `delay = staggerDelay(index) = min(index*50, 300)`
+              //（`useRevealOnEnter.ts:48–49`；gap 50 / cap 300 见 `auroraquaMotion.ts:16`）。
+              delay: AylaRevealMotion.staggerDelay(index, staggerMs: 50),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: AylaSpacing.sp3),
+                child: AylaPostCard(
+                  post: post,
+                  onOpen: () => _openPost(post.id),
+                  favoriteState: _favorites.stateOf('post', key),
+                  favoriteBusy: _favorites.busyOf('post', key),
+                  favoriteError: _favorites.actionErrorOf('post', key),
+                  onToggleFavorite: (bool _) =>
+                      unawaited(_favorites.toggle('post', key)),
+                  onRetryFavoriteStatus: () => unawaited(
+                    _favorites.load('post', <String>[key], force: true),
+                  ),
+                ),
               ),
             );
           },

@@ -5,6 +5,8 @@
 /// ⚠️ 一态一用例（同用例二次 pumpWidget 换 props 不生效）。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -75,6 +77,45 @@ void main() {
       final Rect r0 = tester.getRect(find.text('room-0'));
       expect(r0.left, 16);
       expect(r0.top, 12);
+    });
+  });
+
+  group('网格等高的调用点接线（boardgame.css 232–237 的 grid stretch）', () {
+    test('目录页每张 AylaGameRoomCard 都传 reserveSpace: true（源码接线锁）', () {
+      // web：`.games-grid { display: grid }` 默认 `align-items: stretch`
+      //（`boardgame.css:232–237`）⇒ 同一行卡恒等高。Flutter 侧等价表达 = 件内
+      // `reserveSpace: true`（`game_room_card.dart:85–92` 的说明）。
+      // 这是一条**接线锁**：页面把参数丢了就会在同行混排时重新参差，
+      // 但纯渲染用例抓不到（卡件自身行为没变）⇒ 直接扫调用点源码。
+      final String source =
+          File('lib/pages/games_hub_page.dart').readAsStringSync();
+      const String marker = 'AylaGameRoomCard(';
+      final List<String> args = <String>[];
+      int from = 0;
+      while (true) {
+        final int start = source.indexOf(marker, from);
+        if (start < 0) break;
+        int depth = 0;
+        int i = start + marker.length - 1;
+        for (; i < source.length; i += 1) {
+          final String ch = source[i];
+          if (ch == '(') depth += 1;
+          if (ch == ')') {
+            depth -= 1;
+            if (depth == 0) break;
+          }
+        }
+        args.add(source.substring(start, i + 1));
+        from = i + 1;
+      }
+      expect(args, isNotEmpty, reason: '目录页应当构造 AylaGameRoomCard');
+      for (final String call in args) {
+        expect(
+          call.contains('reserveSpace: true'),
+          isTrue,
+          reason: '网格上下文的桌游卡必须 reserveSpace: true（grid stretch 等价表达）：\n$call',
+        );
+      }
     });
   });
 

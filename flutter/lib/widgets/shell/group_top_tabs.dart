@@ -90,6 +90,9 @@ class AylaGroupTopTabs extends StatefulWidget {
     this.onAvatarClick,
     this.postUnread = 0,
     this.offset = Offset.zero,
+    this.onPullUpdate,
+    this.onPullEnd,
+    this.onPullCancel,
   });
 
   /// 群名（头像文字回退 + `aria-label`）。
@@ -112,6 +115,27 @@ class AylaGroupTopTabs extends StatefulWidget {
 
   /// 父级驱动的位移（入场「从底栏升起」/ 下拉跟手）；本件不自演动画。
   final Offset offset;
+
+  /// 下拉回主页（R-G6）手势：**跟手**（web `useSwipe.onMove`）。
+  ///
+  /// 事实源 `pages/GroupPage.tsx:471` `pullHandlers={pullSwipe.handlers}` →
+  /// `components/group/GroupTopTabs.tsx:62` `<div className="group-top-tabs" ...
+  /// {...pullHandlers}>` —— 手势**只挂在顶栏那一条**上；
+  /// 几何 = `styles/group.css:23–31` + `group.css:33–38 .group-top-nav{height:64px}`
+  /// ⇒ **宽 100% × 高 64px**，内容区不参与起手。
+  ///
+  /// 三个回调默认 null ⇒ 本件不挂 `GestureDetector`，行为与既有完全一致。
+  final void Function(DragUpdateDetails details)? onPullUpdate;
+
+  /// 下拉回主页手势：**松手**（web `useSwipe.onEnd`）。
+  ///
+  /// ⚠️ 判定本身由父级做：web `GroupPage.tsx:157` 是
+  /// `if (e.direction === 'down' && e.dy >= 80) pullToHome()` ——
+  /// **没有「必须仍在向下运动」这一条**（缓慢下拉到 ≥80 后停住再松手同样返回主页）。
+  final void Function(DragEndDetails details)? onPullEnd;
+
+  /// 下拉回主页手势：**取消**（web `useSwipe.onCancel`，`GroupPage.tsx:170–179`：复位 + 回弹）。
+  final VoidCallback? onPullCancel;
 
   /// 条高（`group.css:36` `.group-top-nav { height: 64px }`）。
   static const double barHeight = 64;
@@ -187,11 +211,15 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
     });
   }
 
+  /// 是否挂了任何下拉手势回调（三件缺一不可，任一非 null 即挂手势层）。
+  bool get _hasPullHandlers =>
+      widget.onPullUpdate != null ||
+      widget.onPullEnd != null ||
+      widget.onPullCancel != null;
+
   @override
   Widget build(BuildContext context) {
-    return Transform.translate(
-      offset: widget.offset, // 入场/下拉位移由父级驱动（见文件头「动画」）
-      child: AylaGlassSurface(
+    final Widget surface = AylaGlassSurface(
         blur: AylaGlass.blurNav, // blur(18px) saturate(1.4)（group.css:28）
         // auroraqua 253：`--glass-shadow-compact`（比底栏的 --glass-shadow 更轻）
         shadow: AylaShadows.compact,
@@ -243,6 +271,26 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
             ),
           ),
         ),
+    );
+
+    if (!_hasPullHandlers) {
+      // 三个回调都没传 ⇒ 与既有完全一致（不挂手势层）
+      return Transform.translate(offset: widget.offset, child: surface);
+    }
+    // 下拉回主页（R-G6）：web 把 handlers 展开在 **`.group-top-tabs` 那一条**上
+    // （`components/group/GroupTopTabs.tsx:62` `{...pullHandlers}`），
+    // 几何 = `group.css:23–31` + `group.css:36` `.group-top-nav{height:64px}`
+    // ⇒ 宽 100% × 高 64px，**内容区不参与起手**。
+    // `HitTestBehavior.opaque`：整条（含 tab 之间的空隙）都能起手 —— web 里
+    // 子按钮不拦截父 div 的 touch 监听，等价于「整条命中目标」。
+    return Transform.translate(
+      offset: widget.offset, // 入场/下拉位移由父级驱动（见文件头「动画」）
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragUpdate: widget.onPullUpdate,
+        onVerticalDragEnd: widget.onPullEnd,
+        onVerticalDragCancel: widget.onPullCancel,
+        child: surface,
       ),
     );
   }
@@ -564,11 +612,10 @@ class _GroupTopTabsDemoState extends State<_GroupTopTabsDemo> {
           // ★ 舞台高 = 条高 + 行程：下移满行程时顶栏正好贴底（= web 的
           // `translate: 0 calc(100dvh - 64px - env(safe-area-inset-bottom))` 那一帧）
           height: stageHeight,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onVerticalDragUpdate: _onDragUpdate,
-            onVerticalDragEnd: _onDragEnd,
-            child: DecoratedBox(
+          // ⚠️ 竖直拖动手势**只挂在顶栏条**上（web `GroupPage.tsx:471` →
+          // `GroupTopTabs.tsx:62` 把 `pullHandlers` 展开在 `.group-top-tabs` 那一条）——
+          // 内容区不参与起手。样张按该口径演示：回调传给 `AylaGroupTopTabs`。
+          child: DecoratedBox(
               decoration: BoxDecoration(
                 color: AylaColors.glassBg.withValues(alpha: 0.22),
                 borderRadius: BorderRadius.circular(AylaRadii.rInput),
@@ -623,11 +670,14 @@ class _GroupTopTabsDemoState extends State<_GroupTopTabsDemo> {
                         if (next == AylaGroupScene.posts) _postUnread = 0;
                       }),
                       onAvatarClick: _onAvatarTap,
+                      // 下拉回主页手势：与真实页面同口径**挂在顶栏条上**
+                      // （web `GroupPage.tsx:471` 的 `pullHandlers` → `GroupTopTabs.tsx:62`）
+                      onPullUpdate: _onDragUpdate,
+                      onPullEnd: _onDragEnd,
                     ),
                   ),
                 ],
               ),
-            ),
           ),
         ),
         const SizedBox(height: AylaSpacing.sp2),

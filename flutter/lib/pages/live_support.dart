@@ -37,8 +37,12 @@ library;
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:go_router/go_router.dart';
 
+import '../core/api/elysia_api.dart' show AylaElysiaApi;
 import '../core/api/live_api.dart';
+import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
+import '../core/net/dio_client.dart' show ApiException;
 import '../core/ws/chat_ws.dart';
 import '../core/ws/live_ws.dart';
 import '../player/hls_player.dart';
@@ -46,6 +50,8 @@ import '../player/platforms/hls_platform.dart';
 import '../state/cursor_history.dart';
 import '../state/live_state.dart';
 import '../widgets/live/danmaku.dart' show AylaDanmakuEntry;
+import '../widgets/live/live_viewers.dart'
+    show AylaLiveViewerItem, AylaLiveViewerSheetData;
 import '../widgets/live/live_channel_snapshot.dart';
 import '../widgets/live/live_player.dart' show AylaLiveSrsStatus;
 
@@ -609,4 +615,138 @@ Future<void> aylaCloseLiveMiniPlayer() async {
   if (owner == null) return;
   await owner.stop();
   owner.dispose();
+}
+
+// ======================= 在看名单弹层的数据投影 =======================
+
+/// 名单弹层一次最多渲染多少行（web `LiveViewerSheet.tsx:23–24`：后端已按 200 截断并给
+/// `has_more`，前端不再重复限制）。
+const int kLiveViewerSheetRowCap = 200;
+
+/// 弹层当前的权威投影（页面持有；[AylaLiveViewerSheetData] 本身是纯值）。
+class AylaLiveViewerSheetController extends ChangeNotifier {
+  AylaLiveViewerSheetController({
+    this.fetcher,
+    this.errorMessage,
+    this.elysiaReader,
+  });
+
+  /// 名单读取（null → [AylaLiveApi.getLiveChannelViewers]；测试可注入 fake）。
+  final AylaLiveViewersFetcher? fetcher;
+
+  /// 失败文案的取值口径（web tsx 54–60 的 `reason instanceof Error && reason.message`）。
+  final String Function(Object error)? errorMessage;
+
+  /// 爱莉档案读取（null → [AylaElysiaApi.getProfile]；测试可注入）。
+  final AylaElysiaProfile? Function()? elysiaReader;
+
+  AylaLiveViewerSheetData _value = const AylaLiveViewerSheetData();
+
+  /// 当前投影（`viewers == null` = 骨架态）。
+  AylaLiveViewerSheetData get value => _value;
+
+  bool _loading = false;
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  /// 打开弹层或点「重试」→ 拉一次权威名单（web `LiveViewerSheet.tsx:44–65` 的
+  /// `useEffect(..., [channelId, reloadToken])`）：
+  /// - 拉取前 `setError(null)`，但**保留上一份名单**（`setViewers` 只在成功时调用）；
+  /// - 失败：`reason instanceof Error && reason.message`，否则回落「暂时读不到在看名单」
+  ///   （tsx 54–60）—— **不回落空名单冒充「没人看」**；
+  /// - 成功：`viewers` / `count` / `has_more` 三件一起写（tsx 50–52）。
+  Future<void> load(String channelId) async {
+    if (_loading) return;
+    _loading = true;
+    _value = _value.copyWith(error: null);
+    notifyListeners();
+    try {
+      final AylaLiveViewersResult page =
+          await (fetcher ?? AylaLiveApi.getLiveChannelViewers)(channelId);
+      if (_disposed) return;
+      final List<AylaLiveViewerItem> rows = <AylaLiveViewerItem>[
+        for (final AylaLiveViewer v in page.viewers.take(kLiveViewerSheetRowCap))
+          AylaLiveViewerItem(
+            userId: v.userId,
+            nickname: v.nickname,
+            avatar: v.avatar,
+          ),
+      ];
+      _value = AylaLiveViewerSheetData(
+        viewers: rows,
+        count: page.count,
+        hasMore: page.hasMore,
+        elysiaUserId: _value.elysiaUserId,
+        onRetry: _value.onRetry,
+        onOpenProfile: _value.onOpenProfile,
+      );
+    } catch (error) {
+      // presence 存储不可用（503）/ 403 / 404：**明示读不到**，不回落空名单冒充「没人看」
+      // （web tsx 8–9 的产品口径）。
+      final String message =
+          errorMessage?.call(error) ??
+              (error is ApiException && error.message.isNotEmpty
+                  ? error.message
+                  : '暂时读不到在看名单');
+      _value = _value.copyWith(error: message);
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 补上爱莉标记（web `LiveViewerSheet.tsx:67–79`：`getElysiaProfile()` →
+  /// `profile.enabled ? profile.user.id : null`；**失败静默** —— 名单照常展示，
+  /// 只是不标注爱莉光环）。
+  Future<void> loadElysiaUserId() async {
+    if (_value.elysiaUserId != null) return;
+    try {
+      final AylaElysiaProfile? profile =
+          elysiaReader != null ? elysiaReader!() : await AylaElysiaApi.getProfile();
+      if (profile == null || !profile.enabled || profile.userId == null) return;
+      _value = _value.copyWith(elysiaUserId: profile.userId);
+      notifyListeners();
+    } catch (_) {
+      // 爱莉档案不可用：不标注
+    }
+  }
+
+  /// 打开弹层（`AylaLiveViewerStrip.onOpen` 的接收端）。
+  ///
+  /// 幂等：已经有权威名单或已有错误时**不重复拉**（弹层关掉再开不闪骨架）；
+  /// 点「重试」走 [retry]。`preview`（弹幕 WS 的预览名单）由组件自身打底，
+  /// web `LiveViewerSheet.tsx:81` 的 `rows = viewers ?? (error ? [] : preview)`。
+  void onOpen(String channelId) {
+    if (_value.viewers != null || _value.error != null) return;
+    unawaited(load(channelId));
+    unawaited(loadElysiaUserId());
+  }
+
+  /// 打开弹层时的重试回调（web tsx 97 的「重试」→ `reloadToken + 1`）。
+  VoidCallback retry(String channelId) => () {
+        unawaited(load(channelId));
+      };
+
+  /// 点名单行（web tsx 121–124：`goUserProfile(me, user_id)` + `onClose()`）。
+  ///
+  /// `utils/navigation.ts:24–35`：自己 → `/profile`；他人 → `/user/:id`；
+  /// `targetUserId` 为空 → 不跳。弹层自身负责关闭（见 `AylaLiveViewerSheet._body`）。
+  static void openProfile(
+    BuildContext context, {
+    required String? currentUserId,
+    required String targetUserId,
+  }) {
+    if (targetUserId.isEmpty) return;
+    if (currentUserId != null && currentUserId == targetUserId) {
+      context.go('/profile');
+    } else {
+      context.go('/user/${Uri.encodeComponent(targetUserId)}');
+    }
+  }
 }

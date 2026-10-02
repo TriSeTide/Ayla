@@ -183,6 +183,84 @@ void main() {
       expect(gap, AylaSpacing.sp4 + 34);
     });
 
+    testWidgets('窄屏固定高（narrowHeightFactor）→ 玻璃面撑满 fixedH，不是只画内容高', (
+      WidgetTester tester,
+    ) async {
+      // ⚠️ **2026-10-02 用户实报（问题 11「窄屏弹层变成居中矮条」）**：
+      // `getRect(AylaModalCard)` 曾一直报「高 60vh、贴底」—— 因为它量的是最外层
+      // `ConstrainedBox`。而**玻璃面**（`DecoratedBox` + `ClipRRect`）作为内层
+      // Stack 的非定位子级，拿到的是 loose 约束 ⇒ 只按内容收缩（实机 135px）并停在
+      // 卡片**顶部**，下方整片透明 ⇒ 观感就是「凭空在屏幕中间弹出一个小弹窗」。
+      //
+      // ⇒ 本用例锁的是**面**的矩形（不是卡的外框），它是唯一能暴露该缺陷的可观测量。
+      // 对应产品代码：`AylaModalCard` 的 `if (fixedH != null) face = SizedBox.expand(...)`。
+      setViewport(tester, const Size(375, 812));
+      await tester.pumpWidget(host(
+        AylaCreateSheet(
+          title: '群内开播',
+          onClose: () {},
+          narrowHeightFactor: 0.6, // 窄屏固定 60vh 档
+          scrollable: false,
+          child: sheetBody(),
+        ),
+      ));
+      await settle(tester);
+      final Rect face = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(AylaModalCard),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      expect(
+        face.height,
+        closeTo(812 * 0.6, 0.5),
+        reason: '面必须铺满 fixedH（60vh），否则就是「矮条」缺陷',
+      );
+      expect(face.bottom, closeTo(812, 0.5), reason: '面同样贴底');
+      expect(
+        face.top,
+        closeTo(812 - 812 * 0.6, 0.5),
+        reason: '面顶边 = 卡顶边（面撑满整档，不是贴在卡片内部顶端下坠）',
+      );
+    });
+
+    testWidgets('窄屏上滑幅度 = **卡片自身高度**（private.css:261–268 的 translateY(100%)）', (
+      WidgetTester tester,
+    ) async {
+      // 2026-10-02 订正：此前是 `Offset(0, (1 - v) * 40)`（自认「近似 100% 用 40px 表达」）
+      // ⇒ 40px 在 ≈0.6×视口高的卡上几乎看不见滑动，观感是「凭空在中间弹出」。
+      // web 的 `translateY(100%)` 是**相对卡自身高度** ⇒ Flutter 用 `SlideTransition`
+      // （offset 单位 = 子元素自身尺寸的比例）。
+      setViewport(tester, const Size(375, 812));
+      await tester.pumpWidget(host(sheet()));
+      await tester.pump(); // 首帧
+      // ⚠️ `getRect(AylaModalCard)` 量不到入场位移（SlideTransition 在它**内部**）
+      // ⇒ 用卡片内容（body）的全局矩形，它经过全部祖先变换。
+      final Rect card = tester.getRect(find.byType(AylaModalCard));
+      final double cardHeight = card.height;
+      // 静止时 body 底边 = 卡底 − padding-bottom（sp4）；首帧位移 = 卡高
+      double bodyBottom() => tester.getRect(find.byKey(kSheetBody)).bottom;
+      final double resting = card.bottom - AylaSpacing.sp4;
+      expect(
+        bodyBottom(),
+        closeTo(resting + cardHeight, 1.0),
+        reason: 'translateY(100%) 首帧：位移量 = **卡片自身高度**（不是固定 40px）',
+      );
+      // 中间帧：位移沿 250ms 递减（40px 档几乎不动，卡高档才看得出滑动）
+      await tester.pump(const Duration(milliseconds: 125));
+      final double midShift = bodyBottom() - resting;
+      expect(midShift, greaterThan(0));
+      expect(midShift, lessThan(cardHeight), reason: '中间帧仍在 100%→0 的行程内');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        bodyBottom(),
+        closeTo(resting, 0.5),
+        reason: '终态回到贴底位（translateY(0)）',
+      );
+    });
+
     testWidgets('className 等价档：narrowHeightFactor / scrollable 透传到 AylaModalCard', (
       WidgetTester tester,
     ) async {

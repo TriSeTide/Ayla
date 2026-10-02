@@ -29,8 +29,13 @@
 /// - **仍域外 3 条**：见 [kAylaChatWsOutOfBatchFrames] 的显式登记（不静默吞掉）。
 ///
 /// ## 平台差异（登记）
-/// - `isSubgroupMessageConfirmedRead`（子群已读确认）随子群域批次；本批私聊无子群概念 ⇒
-///   `readByMe` 只由「自己在底部看到」与「服务端已读回执」两处驱动；
+/// - `isSubgroupMessageConfirmedRead`（子群已读确认）已随子群域批次落地，且**不只在**
+///   本条 `message.new` 路径：web 的 `withConfirmedRead`（`stores/message.ts:85–88`）
+///   作用在**每一条入库路径**上（96 / 135 / 176 / 324），Flutter 侧同口径 ——
+///   `state/message_state.dart` 的 `upsertMessage` / `resolvePendingMessage` /
+///   `resolvePendingByKey` / `prependHistory` 都在入库前调用
+///   `_withConfirmedRead`。本处的显式计算仍是必要的：下面的未读分派分支
+///   （`else if (isFromOther && !confirmedRead)`）要读它。
 /// - `subscriptionHeads`（不依赖页面是否加载过历史的补发基线）**已按 web 实现**（`chat.ts:133–134`）。
 library;
 

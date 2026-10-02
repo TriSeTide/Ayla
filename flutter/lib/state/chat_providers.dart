@@ -36,9 +36,12 @@ final ChangeNotifierProvider<AylaChatState> chatStateProvider =
 
 /// message 全局状态（按会话分桶的消息缓存）。
 ///
-/// 装配时接上**子群活跃度钩子**（web `stores/message.ts:97/136/177/326` 的
-/// `useSubGroupStore.getState().recordMessageActivity(...)`）—— 消息落库即推进
-/// 子群 `last_message_seq`，宽屏侧栏的子群活跃度排序据此即时刷新。
+/// 装配时接上两个**子群域钩子**：
+/// - **子群活跃度**（web `stores/message.ts:97/136/177/326` 的
+///   `useSubGroupStore.getState().recordMessageActivity(...)`）—— 消息落库即推进
+///   子群 `last_message_seq`，宽屏侧栏的子群活跃度排序据此即时刷新；
+/// - **逐条已读投影**（web `stores/message.ts:85–88` 的 `withConfirmedRead`，
+///   用于 96 / 135 / 176 / 324 四处入库路径）—— 已确认序号入库即 `readByMe=true`。
 final ChangeNotifierProvider<AylaMessageState> messageStateProvider =
     ChangeNotifierProvider<AylaMessageState>((Ref ref) {
   final AylaMessageState state = AylaMessageState();
@@ -46,6 +49,11 @@ final ChangeNotifierProvider<AylaMessageState> messageStateProvider =
       ref
           .read(subgroupStateProvider)
           .recordMessageActivity(convId, subgroupId, seq);
+  // 入库前的逐条已读投影（web `stores/message.ts:85–88` 的 `withConfirmedRead`）：
+  // websocket 路径自己查过（`chat_ws.dart:579`），REST 历史 / 乐观回包路径靠这一步，
+  // 否则「服务端早已确认过的序号」在历史里读回 `readByMe=false`。
+  state.isConfirmedRead = (String convId, int seq) =>
+      ref.read(subgroupStateProvider).isSubgroupMessageConfirmedRead(convId, seq);
   return state;
 });
 

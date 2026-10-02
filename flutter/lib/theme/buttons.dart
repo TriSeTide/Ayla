@@ -170,9 +170,12 @@ class _AylaPressScaleState extends State<AylaPressScale> {
       child: Focus(
         onFocusChange: (bool has) => setState(() => _focused = has),
         child: MouseRegion(
-          cursor: widget.enabled
+          // base.css:340 `button { cursor: pointer }` / 343 `button:disabled { cursor: not-allowed }`。
+          // Flutter 无 CSS 级联 ⇒ 在**按钮族公共壳**补一次，全库按钮受益。
+          // `onTap == null` 也是禁用语义（AylaPressScale 既有口径）⇒ 归 not-allowed。
+          cursor: (widget.enabled && widget.onTap != null)
               ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
+              : SystemMouseCursors.forbidden,
           onEnter: (_) => setState(() => _hovered = true),
           onExit: (_) => setState(() {
             _hovered = false;
@@ -778,7 +781,22 @@ class AylaMsgActionButton extends StatefulWidget {
     this.semanticLabel,
     this.minWidth,
     this.minHeight,
+    this.sweep = true,
   });
+
+  /// 是否带 **hover 扫光**（默认 **true**）。
+
+  /// 事实源 `auroraqua.css:142–146`：`.msg-action-btn` **在**扫光组的选择器组里
+  /// —— `:is(.btn, .msg-action-btn, .narrow-topbar-more > .icon-btn-40,
+  /// .top-nav-more > .top-nav-icon-btn) { position: relative; overflow: hidden;
+  /// isolation: isolate }` + `:148–159` 的 `::after`（`translateX(-120%)`，
+  /// 600ms `--auroraqua-ease`，色带 `--glass-border`，`opacity: .5`）
+  /// + `:161–166` 的 hover 终态 `translateX(120%)`；
+  /// reduced-motion 档见 `auroraqua.css:675–677`（`display: none`）。
+  ///
+  /// 因是**该处始终带扫光**，默认值为 true（与本库 [AylaIconButton] / [AylaGlassButton]
+  /// 的默认 false 不同：那两处的 web 选择器组只含特定按钮，`msg-action-btn` 是明文在列）。
+  final bool sweep;
 
   /// 胶囊最小宽度（null = 按内容自适应，web `.msg-action-btn` 的原生行为）。
   ///
@@ -808,10 +826,28 @@ class AylaMsgActionButton extends StatefulWidget {
   State<AylaMsgActionButton> createState() => _AylaMsgActionButtonState();
 }
 
-class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
+class _AylaMsgActionButtonState extends State<AylaMsgActionButton>
+    with SingleTickerProviderStateMixin {
   bool _hovered = false;
 
   bool get _enabled => widget.onPressed != null;
+
+  /// 扫光进度（`-120% → +120%`，600ms `--auroraqua-ease`）。
+  /// 与 [AylaIconButton] 的写法一致（`buttons.dart` 的 `_AylaIconButtonState`）。
+  late final AnimationController _sweep = AnimationController(
+    vsync: this,
+    duration: AylaDurations.sweep, // 600ms
+  );
+  late final Animation<double> _sweepEased = CurvedAnimation(
+    parent: _sweep,
+    curve: AylaCurves.auroraqua,
+  );
+
+  @override
+  void dispose() {
+    _sweep.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -919,13 +955,64 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton> {
       child: box,
     );
 
+    // `auroraqua.css:142–146` 让 `.msg-action-btn` 自身 `overflow: hidden` 裁住
+    // `::after { inset: 0; border-radius: inherit }`（:148–159）⇒ 扫光带裁在
+    // radius-sm 圆角内；`z-index: -1`（:188）让光带落在**内容之下**、底与边之上 ——
+    // CSS 里按钮自身没有 `isolation` 之外的堆叠节点，`::after` 的 z-index:-1
+    // 是相对**按钮自身**的局部层叠：垫在文本/图标下面，但仍在按钮背景之上。
+    // 实现与 [AylaIconButton] 的 `sweep` 同构（同为 Stack 的第二个子级 = 画在面层之上）。
+    if (widget.sweep && !AylaGlassConfig.useOpaqueFallback) {
+      box = ClipRRect(
+        borderRadius: BorderRadius.circular(AylaRadii.rSm),
+        child: Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            box,
+            if (!MediaQuery.disableAnimationsOf(context))
+              Positioned.fill(
+                child: IgnorePointer(
+                  // `::after { opacity: .5 }`（auroraqua.css:155）已乘进渐变色
+                  // （性能 2026-09-27 §8.17：单层渐变无重叠，等价且省一次 saveLayer）
+                  child: AnimatedBuilder(
+                    animation: _sweepEased,
+                    builder: (BuildContext context, Widget? child) {
+                      // `transform: translateX(-120% → 120%)`，600ms --auroraqua-ease
+                      return FractionalTranslation(
+                        translation: Offset(-1.2 + _sweepEased.value * 2.4, 0),
+                        child: child,
+                      );
+                    },
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: cssLinearGradient(
+                          angleDeg: 90, // linear-gradient(90deg, …)
+                          colors: AylaGradients.sweepHalf,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
     return AylaPressScale(
       onTap: widget.onPressed,
       enabled: _enabled,
       semanticLabel: widget.semanticLabel ?? widget.label,
       child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        onEnter: (_) {
+          setState(() => _hovered = true);
+          // `:hover::after { translateX(120%) }`（auroraqua.css:161–166）
+          // ——— 仅 `:not(:disabled)` 命中（web 选择器的 `:not(:disabled)`）
+          if (widget.sweep && _enabled) _sweep.forward();
+        },
+        onExit: (_) {
+          setState(() => _hovered = false);
+          if (widget.sweep) _sweep.reverse(); // 移出时 600ms 扫回
+        },
         child: box,
       ),
     );

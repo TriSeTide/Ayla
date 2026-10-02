@@ -43,6 +43,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 
 import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart';
@@ -791,8 +792,50 @@ class AylaSocialController<T> extends ChangeNotifier {
 
   bool _disposed = false;
 
+  /// 本帧的「帧后补发通知」是否已排队（去重：同一帧内的多次 store 变更只补发一次）。
+  bool _postFrameNotifyQueued = false;
+
   void _onStoreChanged() {
     if (_disposed) return;
+    // ⚠️ **store 会在 build 期通知**：AylaSocialStore.load 的**同步段**就 _patch
+    //（[social_store.dart:391] → 同文件 [AylaSocialStore._patch] 的 notifyListeners），
+    // 而任何 initState / didChangeDependencies 里的 load() 都落在这段里。此时若直接向
+    // 订阅者转发，**已挂载但在另一条路由上**的页面的 setState 会被 markNeedsBuild 打醒，
+    // 而它不在当前 build target 的子树里 ⇒ 抛
+    // 「setState() or markNeedsBuild() called during build」。
+    //
+    // 真机日志实锤（2026-10-02，1051 条异常）的完整链路：
+    // _VoiceHubPageState.initState (voice_hub_page.dart:109) → _loadFriends (:241) →
+    // aylaHubFriendIds (hub_support.dart:430) → AylaSocialStore.load (social_store.dart:391) →
+    // _patch (:683) → **本方法** → AylaGroupDirectory._forward (group_support.dart:431) →
+    // _GroupPageState._onChanged (group_page.dart:383) → setState 💥
+    // 异常文本两行与真机完全一致：「The widget ... was: GroupPage」/
+    // 「The widget which was currently being built ... was: Builder」
+    //（_ModalScopeState 把路由页包在 RepaintBoundary > Builder 里）。
+    //
+    // 处置 = 四个 hub 页 _onPagerChanged 的**同一范式**（voice_hub_page.dart:193–200、
+    // games_hub_page.dart:190–196、live_hub_page.dart:138–144、
+    // posts_hub_page.dart:172–178 的「统一挪到帧后」）—— 那四页是**各自**在页面层防住，
+    // 漏掉的正是本层：任意页面 A 的 initState 副作用会经这里打到已挂载的页面 B。
+    // 在公共层一次防住后，AylaGroupDirectory / HomePage / 四个 hub 页都受同一条保护。
+    //
+    // 时机：本方法在 build 期（SchedulerPhase.persistentCallbacks）被调用时注册的
+    // addPostFrameCallback 落在**同一帧**的 postFrameCallbacks 阶段执行 —— 那时
+    // BuildOwner.debugBuilding 已复位、buildScope 已返回 ⇒ setState 合法
+    //（与 _onPagerChanged 的既有实现同为「下一帧刷新」语义）。
+    // 只在 build 期让路：其余时机（事件处理器 / 帧间）保持**同步**通知，与 web 的 zustand
+    // 订阅在 commit 之后同步回调同语义。
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_postFrameNotifyQueued) return;
+      _postFrameNotifyQueued = true;
+      SchedulerBinding.instance.addPostFrameCallback((Duration _) {
+        _postFrameNotifyQueued = false;
+        if (_disposed) return;
+        notifyListeners();
+      });
+      return;
+    }
     notifyListeners();
   }
 

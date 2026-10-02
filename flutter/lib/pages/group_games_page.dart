@@ -187,7 +187,16 @@ class _GroupGamesPageState extends ConsumerState<GroupGamesPage> {
           children: <Widget>[
             AylaRevealScope(
               replayKey: _replayNonce,
+              // 卡片留白口径（问题 6 真根因）：web 群内用的是 **.group-games-grid**
+              // （boardgame.css:254–259）—— 它**没有 padding 声明**（⇒ 0），且**恒 2 列**
+              // （`repeat(2, 1fr)`；boardgame.css:239–243 的四列媒体查询只作用于
+              // `.games-grid`）。左右留白**只由外层** `.group-page .group-games
+              // { padding: var(--sp-4) }`（group.css:411–417，特异性 0-2-0 压过
+              // boardgame.css:247–252 的 `sp3 sp4`）给。
+              // ⇒ 本件默认的 `sp3 sp4` 若再叠一次，群内左右各多 16（实测 32，用户实报）。
               child: AylaGamesGrid(
+                padding: EdgeInsets.zero,
+                columns: 2,
                 children: <Widget>[
                   for (int i = 0; i < pager.items.length; i += 1)
                     AylaGameRoomCard(

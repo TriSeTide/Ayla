@@ -192,7 +192,10 @@ class _AylaConversationMoreMenuState extends State<AylaConversationMoreMenu> {
         },
       ),
     );
-    Overlay.of(context, rootOverlay: true).insert(_entry!);
+    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
+    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
+    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
+    Overlay.of(context).insert(_entry!);
   }
 
   void _closeMenu({bool restoreFocus = false}) {
@@ -344,7 +347,10 @@ class _HoverBuilderState extends State<_HoverBuilder> {
 
   @override
   Widget build(BuildContext context) {
+    // `.conv-more-btn`（app.css:627–634）在 web 是 <button>
+    // ⇒ base.css:340 全局 pointer（该选择器自身无 cursor 声明）。
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: widget.builder(context, _hovered),

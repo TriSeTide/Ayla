@@ -36,6 +36,7 @@ import '../core/app_init.dart';
 import '../core/ws/chat_ws.dart';
 import '../core/ws/presence_ws.dart';
 import '../core/ws/ws_manager.dart';
+import '../widgets/base/scroll_restore.dart' show AylaScrollMemory;
 import 'auth_prefs.dart';
 import 'auth_state.dart';
 import 'chat_providers.dart';
@@ -121,6 +122,9 @@ Future<void> aylaLogoutForContainer(
   // 帖子页 tab 缓存（web `postTabSession` 机制）：账号切换 / 登出清空，
   // 避免下一位用户读到上一位的分页快照。
   aylaPostTabCache.clear();
+  // 滚动位置记忆（web `scrollMemory`）：**用户级**投影，登出必须清 —— 否则下一位用户
+  // 打开同一列表会被恢复成上一位浏览者的位置。
+  AylaScrollMemory.clear();
   aylaSocialStore.reset();
   // 帖子 / 桌游两份全局 store 的清空归 aylaStopRoomsForContainer（与房内设备/状态同一收口，
   // 见 state/room_providers.dart 的 aylaStopPostsFramesForContainer 注释里的账号隔离理由）。
@@ -138,6 +142,7 @@ Future<void> aylaLogoutForContainer(
 void aylaLogout(WidgetRef ref, {bool clearCredentials = false}) {
   AppInit.instance.reset();
   aylaPostTabCache.clear();
+  AylaScrollMemory.clear(); // 同上（容器版）：用户级投影，登出清空。
   aylaSocialStore.reset();
   // 同上（WidgetRef 版）：posts / boardgame store 的清空在 aylaStopRooms 内。
   wsManager?.disconnectAll();

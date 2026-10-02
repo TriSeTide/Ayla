@@ -951,7 +951,9 @@ class AylaGroupCard extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: <Widget>[
                   // 轮播区可点击进群（`.group-card-main { display:block }` + onClick）
-                  GestureDetector(
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: onOpen,
                     child: AylaGroupCarousel(
@@ -959,6 +961,7 @@ class AylaGroupCard extends StatelessWidget {
                       groupName: title,
                       avatarUrl: avatarUrl,
                     ),
+                  ),
                   ),
                   // `.group-card-unread { top: sp3; right: sp3 }`
                   if (unread > 0)
@@ -1039,6 +1042,9 @@ class AylaGroupCard extends StatelessWidget {
     final Widget glass = AylaCardInteraction(
       onTap: onOpen,
       semanticLabel: '进入群聊 $title',
+      // 整卡手型：`.group-card-main`（轮播区）与 `.group-card-foot`（底排 = <button>，
+      // GroupCard.tsx）都是 pointer；两处之间的空白属卡本体，一并取 click。
+      cursor: SystemMouseCursors.click,
       // 材质/阴影环全部走组件库 AylaGlassSurface（2026-09-20 审查 R1：删除本地
       // _GlassCardShell——它与 AylaGlassSurface 是同一份四层结构的复制品）。
       // transition: box-shadow 300ms 由 shadowTransition 表达（auroraqua.css 29–52）。

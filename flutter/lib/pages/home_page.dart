@@ -43,17 +43,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/boardgame_api.dart';
-import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
 import '../core/api/live_api.dart';
 import '../core/api/posts_api.dart';
-import '../core/api/users_api.dart';
 import '../core/api/voice_api.dart';
 import '../core/models/conversation.dart';
 import '../core/models/game_room.dart' show AylaGameRoom;
 import '../core/models/post.dart' show AylaPost;
-import '../core/models/user_public.dart' show AylaUserPublic;
-import '../state/auth_state.dart';
 import '../state/boardgame_store.dart' show aylaBoardgameStore;
 import '../state/chat_providers.dart' show chatStateProvider;
 import '../state/chat_state.dart' show AylaChatState;
@@ -73,7 +69,7 @@ import '../widgets/base/directory_load_more.dart';
 import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/reveal.dart';
 import '../widgets/group/group_card.dart';
-import '../widgets/group/group_create_dialog.dart' show AylaGroupCreateDialog;
+import '../layout/create_sheet_forms.dart' show AylaCreateGroupForm;
 import '../widgets/group/home_toolbar.dart' show AylaHomeToolbar;
 import '../widgets/live/live_channel_snapshot.dart' show AylaLiveChannelSnapshot;
 import 'home_support.dart';
@@ -89,7 +85,14 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   final ScrollController _scroll = ScrollController();
-  final AylaHomePrefsController _prefs = AylaHomePrefsController();
+  /// 主页偏好 = **共享单例** [kAylaHomePrefs]（web `stores/home.ts:60` 的 zustand 单例）。
+  ///
+  /// 2026-10-02 问题 5：原来这里是 `final AylaHomePrefsController _prefs = ...` 的
+  /// **页面私有实例** ⇒ `GroupPage.tsx:233` 那次「每次进群写 recent」在 Flutter 侧无处落地
+  /// （宽屏侧栏切群不经过本页）⇒ 宽屏「回主页」永远跳到旧群。改成单例后
+  /// `group_page.dart` 的 `_syncRoute` 与本页的 `_openGroup` 写的是同一份状态。
+  /// 生命周期与应用同层，**不 dispose**（与 web 的模块级 store 同）。
+  AylaHomePrefsController get _prefs => kAylaHomePrefs;
 
   AylaSocialController<AylaConversationSummary>? _pager;
   AylaHomeCatalogs _catalogs = const AylaHomeCatalogs();
@@ -106,15 +109,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   /// 当前页注册到 shell 的刷新回调（web useShellStore.registerRefresh）。
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
-
-  // ---- 建群弹窗的成员搜索（web GroupCreateDialog.tsx:29 的 useSocialPage("users")）----
-  List<AylaUserPublic> _memberResults = const <AylaUserPublic>[];
-  bool _memberLoading = false;
-  String? _memberError;
-  bool _memberHasMore = false;
-  String? _memberCursor;
-  String _memberQuery = '';
-  int _memberRevision = 0;
 
   @override
   void initState() {
@@ -254,8 +248,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     _voiceState = null;
     _liveState = null;
     _chatState = null;
+    // ⚠️ 只解绑监听，**不 dispose**：[_prefs] 是应用级共享单例（见字段注释）。
     _prefs.removeListener(_onPrefsChanged);
-    _prefs.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
     final Future<void> Function()? callback = _refreshCallback;
     if (notifier != null && callback != null) {
@@ -746,92 +740,28 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  /// 建群弹窗（web `HomePage.tsx:148/220` 的 `<GroupCreateDialog onClose/>`。
+  /// 建群弹窗（web `HomePage.tsx:148/220` 的 `<GroupCreateDialog onClose/>`）。
   ///
-  /// web 由组件内部直接调 chatApi + navigate；Flutter 侧该件按「装配口径」把
-  /// 搜索与建群注入给页面（见 group_create_dialog.dart 文件头）⇒ 这里接上：
-  /// 成员搜索 = web `GroupCreateDialog.tsx:29` 的 `useSocialPage("users", { q })`
-  /// （`GET /users/search/`），建群 = `chatApi.createGroupConversation`，
-  /// 跳转 = `onDone`（成功 → 关闭 + 进群）。
+  /// ## 为什么复用 [AylaCreateGroupForm] 而不是在本页装配（2026-10-02 问题 14）
+  /// 本页原来自己接了一套（成员搜索 + 建群 + 私聊），而 `group_page.dart` 的同一弹窗
+  /// **只传了 `onClose`** ⇒ 那边点「建群」静默无反应（`group_create_dialog.dart:184–185`）。
+  /// 现在两页共用 `layout/create_sheet_forms.dart` 的同一件（它本身就是 web 同一份
+  /// `GroupCreateDialog` 的接线，CreateFab 的 group 分支 `tsx:75–77`），
+  /// 顺带修掉本页原装配的两处**偏离**：
+  ///
+  /// 1. **私聊路径跳到群页**：web `tsx:74` 是 `navigate(\`/chat/${conv.id}\`)`，
+  ///    而 `AylaGroupCreateDialog.onDone` 只回传会话 id、不区分路径
+  ///    （`group_create_dialog.dart:196/221` 同一回调）⇒ 原实现把私聊会话 id 也送进
+  ///    `_openGroup`（`context.go('/group/<私聊 id>')`）。表单件按「最近一次私聊 id」
+  ///    判定路径（`create_sheet_forms.dart:865–880`），两条路径各去各的地方。
+  /// 2. **不落会话列表**：web `tsx:56/72` 两条路径都 `upsertConversation(conv)`，
+  ///    原实现建群后只跳转、新群不在 `chatState` 里 ⇒ 群页首帧群名回落「群聊」。
+  ///    （本页与群页的对话由 `AylaCreateGroupForm` 统一经 `AylaGroupDirectory` /
+  ///    `chatStateProvider` 的既有投影路径补齐。）
   Widget _createGroupDialog() {
-    return AylaGroupCreateDialog(
+    return AylaCreateGroupForm(
       onClose: () => setState(() => _creatingGroup = false),
-      currentUserId: ref.read(authNotifierProvider).user?.id,
-      searchResults: _memberResults,
-      searchLoading: _memberLoading,
-      searchError: _memberError,
-      searchHasMore: _memberHasMore,
-      onSearchChanged: _onMemberSearch,
-      onLoadMoreResults: _loadMembers,
-      onRefreshResults: _refreshMembers,
-      onSubmit: (String title, List<String> memberIds) =>
-          AylaChatApi.createGroupConversation(
-        title: title,
-        memberIds: memberIds,
-      ),
-      onOpenPrivate: (String userId) =>
-          AylaUsersApi.openPrivateConversation(userId),
-      onDone: (String id) {
-        setState(() => _creatingGroup = false);
-        _openGroup(id);
-      },
     );
   }
 
-  Future<void> _refreshMembers() => _loadMembers(refresh: true);
-
-  void _onMemberSearch(String query) {
-    _memberQuery = query;
-    _memberCursor = null;
-    _memberHasMore = false;
-    if (query.isEmpty) {
-      setState(() {
-        _memberResults = const <AylaUserPublic>[];
-        _memberLoading = false;
-        _memberError = null;
-      });
-      return;
-    }
-    _loadMembers(refresh: true);
-  }
-
-  /// 拉取搜索结果（web `stores/social.ts` 的 users kind；失败只置错误文案）。
-  Future<void> _loadMembers({bool refresh = false}) async {
-    if (_memberQuery.isEmpty) return;
-    final int revision = ++_memberRevision;
-    setState(() {
-      _memberLoading = true;
-      if (refresh) _memberError = null;
-    });
-    try {
-      final AylaDirectoryPage<AylaUserPublic> page =
-          await AylaUsersApi.searchUsersPage(
-        _memberQuery,
-        cursor: refresh ? null : _memberCursor,
-      );
-      if (!mounted || revision != _memberRevision) return;
-      final Map<String, AylaUserPublic> merged = <String, AylaUserPublic>{};
-      if (!refresh) {
-        for (final AylaUserPublic u in _memberResults) {
-          merged[u.id] = u;
-        }
-      }
-      for (final AylaUserPublic u in page.results) {
-        merged[u.id] = u;
-      }
-      setState(() {
-        _memberResults = merged.values.toList(growable: false);
-        _memberCursor = page.nextCursor;
-        _memberHasMore = page.hasMore;
-        _memberLoading = false;
-        _memberError = null;
-      });
-    } catch (_) {
-      if (!mounted || revision != _memberRevision) return;
-      setState(() {
-        _memberLoading = false;
-        _memberError = '搜索失败';
-      });
-    }
-  }
 }

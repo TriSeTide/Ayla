@@ -40,6 +40,7 @@ import '../core/models/chat_message.dart' show AylaMessageType;
 import '../core/models/conversation.dart';
 import '../core/models/game_room.dart' show AylaGameRoom, AylaGameRoomStatus;
 import '../core/models/post.dart' show AylaPost, AylaPostImage;
+import '../state/home_prefs.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/avatar_status_badges.dart'
     show AylaAvatarStatus, kShowGameStatus;
@@ -103,6 +104,23 @@ int aylaToMs(String? iso) {
   final DateTime? parsed = DateTime.tryParse(iso);
   return parsed == null ? 0 : parsed.millisecondsSinceEpoch;
 }
+
+/// 主页偏好的**共享单例** —— web `stores/home.ts:60` 的
+/// `export const useHomeStore = create<HomeState>(...)`。
+///
+/// ## 为什么必须是单例（2026-10-02 问题 5 修复）
+/// web 的 `recentGroupId` 住在 zustand 单例里，**任何页面写的都是同一份状态**，
+/// 写点在 `HomePage.tsx:97`（窄屏主页点群卡）与 `GroupPage.tsx:233`
+/// （**每次进群**的 effect：`id` / `effectiveScene` 变化即写）。
+///
+/// Flutter 原来把它挂在 `_HomePageState` 的**实例字段** `_prefs` 上
+/// （`home_page.dart:92`）⇒ 只有「窄屏主页点卡片」一条路径能写，宽屏侧栏切群
+/// （`group_page.dart` 的 `ServerRail.onSelectGroup`）**从不写** ⇒ `recentGroupId`
+/// 永远停在旧值，「回主页」跳错群（用户实报）。
+/// 单例后两个页面共用同一份内存值；落盘语义仍由 [AylaHomePrefsController] 自持。
+///
+/// 生命周期：应用级，与外壳同层；**不 dispose**（与 web 的模块级 store 同）。
+final AylaHomePrefsController kAylaHomePrefs = AylaHomePrefsController();
 
 /// 是否在「新」窗口内（不早于 `now - window`、不晚于 `now + 1min` 时钟容差；
 /// `groupActivity.ts:65–68`）。

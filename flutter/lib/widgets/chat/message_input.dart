@@ -582,7 +582,10 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
       ),
     );
     _emojiEntry = entry;
-    Overlay.of(context, rootOverlay: true).insert(entry);
+    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
+    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
+    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
+    Overlay.of(context).insert(entry);
   }
 
   void _closeEmoji() {
@@ -1104,23 +1107,30 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
     VoidCallback? onTap,
   }) {
     final AylaIconData? data = aylaIconByName(icon);
+    // `.picked-remove`（app.css:2084 声明 cursor: pointer）与 `.quote-bar-cancel`
+    // 在 web 都是 <button> ⇒ base.css:340 全局 pointer；onTap==null 即禁用 ⇒ 343 not-allowed。
     return GestureDetector(
       onTap: onTap,
       child: Semantics(
         button: true,
         label: semanticLabel,
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: AylaColors.surface,
-            shape: BoxShape.circle,
-            border: Border.all(color: AylaColors.glassBorder),
-          ),
-          child: Center(
-            child: data == null
-                ? const SizedBox.shrink()
-                : AylaIcon(data, size: iconSize, color: AylaColors.textSecondary),
+        child: MouseRegion(
+          cursor: onTap == null
+              ? SystemMouseCursors.forbidden
+              : SystemMouseCursors.click,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: AylaColors.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: AylaColors.glassBorder),
+            ),
+            child: Center(
+              child: data == null
+                  ? const SizedBox.shrink()
+                  : AylaIcon(data, size: iconSize, color: AylaColors.textSecondary),
+            ),
           ),
         ),
       ),

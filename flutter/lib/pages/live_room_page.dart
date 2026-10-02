@@ -20,7 +20,9 @@ import 'package:go_router/go_router.dart';
 import '../core/api/live_api.dart';
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../state/auth_state.dart';
-import '../state/chat_providers.dart' show chatWsProvider;
+import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
+import '../state/chat_providers.dart'
+    show chatWsProvider, elysiaProfileProvider;
 import '../state/cursor_history.dart';
 import '../state/favorite_status.dart';
 import '../state/live_state.dart';
@@ -60,6 +62,11 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
   bool _narrow = false;
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
+
+  /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
+  /// 的 `getLiveChannelViewers` + `:67–79` 的 `getElysiaProfile`；Flutter 侧网络层不进
+  /// `lib/widgets` ⇒ 由页面持有、经 [AylaLiveRoomBody.data.viewerSheet] 注入）。
+  AylaLiveViewerSheetController? _viewerSheet;
 
   bool get _validId {
     final int? value = int.tryParse(widget.channelId);
@@ -120,6 +127,9 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     _directory?.dispose();
     _favorites.removeListener(_onChanged);
     _favorites.dispose();
+    _viewerSheet?.removeListener(_onChanged);
+    _viewerSheet?.dispose();
+    _viewerSheet = null;
     _share.dispose();
     scheduleMicrotask(() => _shell?.setBottomTabsLeaving(false));
     super.dispose();
@@ -150,6 +160,18 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     context.replace('/live/$id');
   }
 
+  /// 爱莉档案（web `LiveViewerSheet.tsx:67–79` 的 `getElysiaProfile()`；**失败静默**）。
+  AylaElysiaProfile? _readElysiaProfile() =>
+      ref.read(elysiaProfileProvider).valueOrNull;
+
+  /// 名单弹层的权威数据（web 由弹层自己拉 —— `LiveViewerSheet.tsx:44–79`）。
+  ///
+  /// 懒创建一次（`ref` 只在 build / initState 可用 ⇒ 不在字段初始化里取）。
+  AylaLiveViewerSheetController _viewerSheetOf(String channelId) =>
+      _viewerSheet ??=
+          AylaLiveViewerSheetController(elysiaReader: _readElysiaProfile)
+            ..addListener(_onChanged);
+
   @override
   Widget build(BuildContext context) {
     if (!_validId) return const SizedBox.shrink();
@@ -164,10 +186,16 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     session.syncRealtimeToHistory();
     final AylaCursorHistory<AylaLiveDanmaku>? history = session.history;
 
+    // 名单弹层的权威数据（web 由弹层自身在打开时拉：`LiveViewerSheet.tsx:44–79`）
+    final AylaLiveViewerSheetController viewerSheet =
+        _viewerSheetOf(widget.channelId);
+
     final Widget body = AylaLiveRoomBody(
       channelId: widget.channelId,
       isNarrow: narrow,
       channels: _ordered(),
+      // 弹层打开 → 页面发起同一次拉取（`LiveViewerSheet.tsx:44–65`）
+      onOpenViewerSheet: () => viewerSheet.onOpen(widget.channelId),
       data: AylaLiveRoomData(
         channel: live.currentChannel ?? live.channelOf(widget.channelId),
         srsStatus: live.srsStatus,
@@ -198,6 +226,8 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
                 returnLatest: history.returnLatest,
                 retry: history.retry,
               ),
+        // 权威名单（web 弹层打开时自拉；Flutter 侧由页面持有、经本投影注入）
+        viewerSheet: viewerSheet.value,
       ),
       onSelect: _goTo,
       onBack: () => context.go('/live'),

@@ -104,6 +104,7 @@ import '../widgets/chat/messages_layout.dart';
 import '../widgets/motion/panel_swap.dart';
 import '../widgets/chat/messages_tabs.dart';
 import '../widgets/base/nav_highlight_list.dart';
+import '../widgets/base/overlays.dart' show aylaOverlayEntry;
 import '../widgets/chat/mention_picker.dart';
 import '../widgets/chat/message_bubble.dart';
 import '../widgets/chat/private_chat_pane.dart';
@@ -344,6 +345,15 @@ class _GalleryScope extends InheritedWidget {
 /// 但**不能再把它当成「节点太多触发的 bridge 限制」的证据**去指导别处取舍。
 /// 详见 `Ayla/docs/report/flutter-语义树崩溃-traversalParentIdentifier-根因与修复-2026-10-02.md`。
 ///
+/// ## ⚠️ 画布自带 Overlay（2026-10-02 用户实报「组件库打开会这样子报错」）
+/// 画布在 `main.dart` 的 `MaterialApp.builder` 里与 Navigator（`child`）**同级**
+/// ⇒ 拿不到 Navigator 的 `Overlay`，画布内一切 `Overlay.of` / Material `Tooltip` /
+/// `OverlayPortal` 都在 build 期抛 `No Overlay widget found`（一次打开数百条）。
+/// 本类的根构件因而是 [_GalleryHost]（**同帧**提供一个 `Overlay`）。
+/// **默认分类（「基元 · 材质 · 排版」）就含 `AylaTooltip` 分区**（其标题前缀
+/// `AylaTooltip` 在 `kGalleryCategories` 的 base 组里）⇒ 一打开画布即命中，
+/// 无需切换分类。新增依赖 Overlay 的样张**不需要**各自再加包裹 —— 宿主已兜住。
+///
 /// ⚠️ 分区列表（`_GalleryColumn.children`）的缩进未随外层包装 +2 —— 项目不用 `dart format`，
 /// 避免无关重排 diff。
 class ComponentGallery extends StatefulWidget {
@@ -376,7 +386,8 @@ class _ComponentGalleryState extends State<ComponentGallery> {
     // 画布：启用程序生成的示例图（媒体存储链路未落地；生产默认关闭）
     aylaEnableSampleMedia();
     final AylaTextStyles t = AylaTextStyles.of(context);
-    return ExcludeSemantics(
+    return _GalleryHost(
+      child: ExcludeSemantics(
       child: _GalleryScope(
         selectedId: _selectedId,
         visitedIds: _visited,
@@ -1943,7 +1954,69 @@ class _ComponentGalleryState extends State<ComponentGallery> {
           ],
         ),
       ),
+      ),
     );
+  }
+}
+
+/// 画布**自带的 Overlay 宿主** —— 2026-10-02 修「组件库一打开就刷 No Overlay widget found」。
+///
+/// ## 为什么必须由画布自己提供
+/// 画布在 `main.dart` 的 `MaterialApp.builder` 里与 `child`（= Navigator）**同级**：
+/// ```
+/// MaterialApp.builder
+///  └─ Scaffold ─ Stack
+///      ├─ child   →  Navigator ─ Overlay    ← 应用所有页面的 Overlay 在这里
+///      └─ ComponentGallery                  ← Navigator 是它的**兄弟**，够不到
+/// ```
+/// Navigator 不是画布的祖先 ⇒ 画布子树里按祖先链找 `Overlay` 一律失败，
+/// 框架 `widgets/debug.dart:525–553` 的 `debugCheckHasOverlay` 抛
+/// `No Overlay widget found`（用户 2026-10-02 实报：一次打开数百条）。
+/// 首个命中点是 `widgets/base/tooltip.dart:91` 的 `AylaTooltip` ——
+/// 它包的是 Material `Tooltip`，后者 build 期**无条件**断言
+/// （框架 `widgets/raw_tooltip.dart:865`）。
+/// 同类依赖还有 `OverlayPortal`（菜单 / 下拉 / 选择器）与各件自己的
+/// `Overlay.of(context, rootOverlay: true).insert(...)`。
+///
+/// 回归锁：`test/component_gallery_overlay_test.dart`（修复前 3 条全红）。
+///
+/// ## 为什么补在画布**内部**
+/// - 画布是自成一体的预览宿主（主题 / 极光底 / Localizations 见
+///   `theme/preview_theme.dart`）；由它自己兜住 Overlay 依赖，
+///   就不必反向依赖 `main.dart` 的装配顺序；
+/// - 画布内件插入的浮层**跟随画布裁剪**，不外溢到应用界面。
+///
+/// ## ⚠️ 必须**同帧**提供（2026-10-02 实测）
+/// 不能用「先建子树、再 `addPostFrameCallback` 插 entry」：`Overlay.of` 在
+/// **首帧 build** 就被调用（Tooltip 就是），帧后补必然已经报错。
+/// `Overlay` 的 `initialEntries` 随子树一起挂载 ⇒ 同帧可见。
+///
+/// ## ⚠️ entry 的环境：独立子树
+/// `Overlay` 的每个 entry 是独立子树，其祖先链只到 `Overlay` 为止 ——
+/// 页面里的 `Material` / `DefaultTextStyle` **传不进 entry**。
+/// 缺兜底时 entry 内的 `Text` 落到 `DefaultTextStyle.fallback`
+/// （双下划线 + 红字 = 用户看到的「莫名其妙的黄线」）
+/// ⇒ 走组件库统一入口 [aylaOverlayEntry]（`widgets/base/overlays.dart`）。
+class _GalleryHost extends StatefulWidget {
+  const _GalleryHost({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_GalleryHost> createState() => _GalleryHostState();
+}
+
+class _GalleryHostState extends State<_GalleryHost> {
+  /// ⚠️ entry **只创建一次**，且 builder 恒读 `widget.child`（不捕获首帧实例）：
+  /// [Overlay] 只在 `initState` 采纳 `initialEntries`；若每次 build 新建 entry
+  /// 或把 `child` 闭包捕获进去，切换分类（`setState`）后 entry 会一直渲染**旧**子树。
+  late final OverlayEntry _entry = aylaOverlayEntry(
+    builder: (BuildContext context) => widget.child,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Overlay(initialEntries: <OverlayEntry>[_entry]);
   }
 }
 
@@ -2170,13 +2243,30 @@ class _GalleryColumn extends StatelessWidget {
         if (i + 1 < children.length && _isSectionGap(children[i + 1])) i++;
         continue;
       }
+      // ⚠️ **两种可见性必须共用同一套包装链**（2026-10-02 实测崩溃）：
+      // 原实现「当前分类直接放 child / 非当前套 Offstage + TickerMode」——
+      // 两者结构不同 ⇒ 切分类时 Flutter **销毁并重建**该分区的 Element。
+      // 而分区里的件可能有**已插入的 Overlay entry** 引用着自己的 BuildContext
+      // （例：`AylaServerRail` 的悬停置顶面板 `_popEntry`，见 server_rail.dart:826–841；
+      // 画布 Shell 分区的第二个 rail 用 `hovered: 'g3'` 静态注入 ⇒ 一挂载就插 entry）
+      // ⇒ 重建时 entry 的 builder 撞上「Looking up a deactivated widget's ancestor
+      // is unsafe」，一次打开刷屏。
+      // 现在两条路径**结构完全一致**（KeyedSubtree → Offstage → TickerMode → child），
+      // 只换 Offstage / TickerMode 的参数值 ⇒ Element 原地复用、不 dispose、不重建。
       visible.add(
-        id == scope.selectedId
-            ? child
-            : Offstage(
-                offstage: true,
-                child: TickerMode(enabled: false, child: child),
-              ),
+        KeyedSubtree(
+          // ⚠️ key 用**列表索引**而不是分类 id：同一分类下有多达十几个分区，
+          // 用 id 会 Duplicate keys（实测）。索引在同一份 children 上是稳定身份。
+          key: ValueKey<String>('gallery-section-$i'),
+          child: Offstage(
+            // TickerMode 与 Offstage 同形：非当前分类停表（保活的既有语义不变）
+            offstage: id != scope.selectedId,
+            child: TickerMode(
+              enabled: id == scope.selectedId,
+              child: child,
+            ),
+          ),
+        ),
       );
     }
     // 「未分类」桶自己报数：**映射完整时必须显示 0**（漏映射的分区会落进来，一眼可见）。

@@ -284,10 +284,13 @@ class AylaPrivateChatPane extends StatelessWidget {
       children: <Widget>[
         if (onBack != null) ...<Widget>[
           // `.icon-btn-40`（40×40）
+          // `.icon-btn-40` 是 <button> ⇒ base.css:340 全局 pointer。
           Semantics(
             button: true,
             label: backLabel,
-            child: GestureDetector(
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               key: const ValueKey<String>('private-chat-back'),
               onTap: onBack,
               child: Container(
@@ -302,6 +305,7 @@ class AylaPrivateChatPane extends StatelessWidget {
                   child: AylaIcon(aylaIconByName('iconBack')!, size: 20),
                 ),
               ),
+            ),
             ),
           ),
           const SizedBox(width: AylaSpacing.sp3),

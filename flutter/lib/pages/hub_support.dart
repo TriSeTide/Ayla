@@ -424,6 +424,23 @@ Widget aylaHubSkeletonGrid(
 /// 数据源改为**共享 store**（web `useSocialPage("friends")` ⇒ `stores/social.ts`）：
 /// 首次取页后 60 秒内（`social.ts:150`）任意页面再问都不发请求；
 /// `appInit` 也会预取同组合。未登录时 store 直返（`social.ts:148`）⇒ 空集合。
+///
+/// ⚠️ **调用方不得在 `initState` / `didChangeDependencies` 里直接调用**
+/// （2026-10-02 真机日志实锤的 1051 条 "setState() during build"）：
+/// `aylaSocialStore.load` 的**同步段**（`state/social_store.dart:391`）就会 `_patch` 并
+/// `notifyListeners`；在 build 期发起时，通知会经 `AylaSocialController._onStoreChanged`
+/// → `AylaGroupDirectory._forward`（`pages/group_support.dart:431`）打到**已挂载但不在当前
+/// build 子树里**的页面的裸 `setState`（真机现场是 `_GroupPageState._onChanged`,
+/// `pages/group_page.dart:383`；异常文本的「currently being built」是 `Builder` ——
+/// `_ModalScopeState` 把路由页包在 `RepaintBoundary > Builder` 里）。
+///
+/// 四个 hub 页一律用 `WidgetsBinding.instance.addPostFrameCallback` 延到首帧之后
+/// （`voice_hub_page.dart:109–114`、`games_hub_page.dart:104–110`、
+/// `live_hub_page.dart:99–105`、`posts_hub_page.dart:133–139`）。
+/// 状态层另有兜底（`AylaSocialController._onStoreChanged` 的 build 期让路）——
+/// 两道都在：本函数保证发起端不在 build 期写 store，状态层保证任何遗漏的调用方
+/// 也不会把通知打进 build 期。
+/// 回归锁：`test/setstate_during_build_test.dart`（A/B 端到端 + C 状态层）。
 Future<Set<String>> aylaHubFriendIds() async {
   const AylaSocialOptions options = AylaSocialOptions();
   try {

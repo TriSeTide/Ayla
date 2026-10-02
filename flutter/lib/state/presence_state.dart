@@ -15,6 +15,13 @@
 /// - [replaceAll] 是**全量替换**（REST 批量快照的入口；web 侧同样无生产调用点）；
 /// - 本类**只存事实**（连接态 / 模式字符串）；显示口径（隐身强制离线、auto 跟随实时）
 ///   一律在 `state/display_status.dart`，与 web 的分层一致。
+///
+/// ## 生命周期（2026-10-02 修复）
+/// 本类是 `ChangeNotifierProvider` 持有的可回收对象。**容器销毁期间**通道 owner
+/// （`core/ws/presence_ws.dart` 的 `disconnect`，由 `ref.onDispose` 调用）仍会写它
+/// ⇒ 所有写入与通知都必须在**已回收**时降级为「只改值、不通知」，否则
+/// `ChangeNotifier.notifyListeners` 会抛 "was used after being disposed"。
+/// 守卫见 [isDisposed] / [_notify]；不可通知的字段写入保持与 web store 同值。
 library;
 
 import 'package:flutter/foundation.dart';
@@ -44,7 +51,7 @@ class AylaPresenceState extends ChangeNotifier {
       ..._users,
       userId: status,
     });
-    notifyListeners();
+    _notify();
   }
 
   /// `presence.status` 增量（web `setUserStatus`）：模式原样存
@@ -54,7 +61,7 @@ class AylaPresenceState extends ChangeNotifier {
       ..._statuses,
       userId: status,
     });
-    notifyListeners();
+    _notify();
   }
 
   /// 移除单个用户的连接记录（web `removeUser`；不存在时同样通知一次，语义 = web 的新建对象）。
@@ -62,27 +69,59 @@ class AylaPresenceState extends ChangeNotifier {
     final Map<String, String> next = Map<String, String>.of(_users)
       ..remove(userId);
     _users = Map<String, String>.unmodifiable(next);
-    notifyListeners();
+    _notify();
   }
 
   /// 全量替换在线集合（web `replaceAll`）。
   void replaceAll(Map<String, String> users) {
     _users = Map<String, String>.unmodifiable(users);
-    notifyListeners();
+    _notify();
   }
 
   /// 写连接状态（同值不通知；可观察状态与 web 的 `set` 一致）。
   void setConnection(AylaPresenceConnection connection) {
     if (_connection == connection) return;
     _connection = connection;
-    notifyListeners();
+    _notify();
   }
 
   /// 登出 / 显式断开：全清（web `reset`，`ws/presence.ts:145` 调用）。
+  ///
+  /// **幂等且可安全重入**：容器已回收（见 [isDisposed]）时只改值、不再通知，
+  /// 不再抛 "was used after being disposed"（AGENTS.md §7 的关闭顺序/幂等要求）。
   void reset() {
     _users = const <String, String>{};
     _statuses = const <String, String>{};
     _connection = AylaPresenceConnection.offline;
-    notifyListeners();
+    _notify();
+  }
+
+  // ---------------- 生命周期 ----------------
+
+  bool _disposed = false;
+
+  /// 是否已被 ProviderScope 回收（[dispose] 之后为真）。
+  ///
+  /// 与 `state/live_state.dart`（`isDisposed`，:283–296）、`state/paged_list.dart`
+  /// （`_notify`，:181–190）、`state/badges_state.dart`（:17–51）同一形制。
+  /// 调用方（例如 presence 通道的 `disconnect()`）可据此判断「这个 state 是否还能被写」。
+  bool get isDisposed => _disposed;
+
+  /// 仅在**未被回收**时通知。
+  ///
+  /// 为什么状态层要自己兜这一下（而不是靠调用方）：
+  /// `ChangeNotifier.dispose()` 之后，本对象仍被通道客户端持有时**完全可写**
+  /// （字段赋值不会抛），**只有通知会抛** —— 所以守卫必须落在状态层，
+  /// 否则任何持有者（dispose 回调、迟到的 WS 帧、在途请求）都可能把容器关闭
+  /// 变成一次未捕获异常。**不回滚字段赋值**：与 web store 语义一致，
+  /// 「清空事实」不因为是最后一步就不做，只是不再广播。
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }

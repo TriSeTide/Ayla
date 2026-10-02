@@ -9,6 +9,12 @@
 /// | 连接态 → presence store + realtime | `ws/presence.ts:35 / 53 / 70 / 86`（connecting/online/offline） |
 /// | [disconnect] 的 `reset()` | `ws/presence.ts:133–147`（登出：不重连 + 清 users/statuses/connection） |
 ///
+/// ## 关闭顺序（2026-10-02 修复）
+/// 登出（[disconnect]，容器活着）与容器销毁（[dispose]）是**两条不同语义**：
+/// 前者必须清空 presence/realtime 两处共享状态；后者发生在 provider 图回收期间，
+/// 那两个 store **可能已经先一步被 dispose**（无依赖边 ⇒ Riverpod 不保证顺序），
+/// 再回写就是 "used after being disposed"。故 [dispose] 先移交状态所有权、再断连接。
+///
 /// ## 传输层归属（Flutter 侧差异，登记）
 /// 路径 `/ws/presence/?token=`、**25s 心跳**（`kPresenceHeartbeat`）与指数退避重连
 /// （1s→2s→…→30s）由 `core/ws/ws_manager.dart` 的 `WsChannel` 承担（web 是自己实现）；
@@ -41,6 +47,10 @@ class AylaPresenceWsClient {
   WsChannel? _channel;
   bool _manualClosed = false;
 
+  /// 共享状态所有权是否已交还容器（见 [dispose]）。置位后本类只收连接、不回写。
+  /// 新实例恒为 false（provider 重建会新建 client）。
+  bool _statesReleased = false;
+
   /// 绑定通道（生产 = `wsManager.presence`；测试 = 注入替身）。
   void attach(WsChannel channel) {
     _channel = channel;
@@ -66,14 +76,40 @@ class AylaPresenceWsClient {
   }
 
   /// 显式断开（登出 / 401）：不自动重连，**清空在线集合**（web `disconnect` 的 `reset`）。
+  ///
+  /// **幂等**：连续调用任意次结果相同（`_manualClosed` 置位、清空、写 offline 都是幂等操作）。
   void disconnect() {
     _manualClosed = true;
     _channel?.disconnect();
+    if (_statesReleased) return;
     _presence.reset();
     _realtime.setStatus(
       AylaRealtimeChannel.presence,
       AylaRealtimeConnection.offline,
     );
+  }
+
+  /// **容器销毁**（`presenceWsProvider` 的 `ref.onDispose`）：先移交共享状态所有权，
+  /// 再收连接层资源 —— 本类此后不再回写 [AylaPresenceState] / [AylaRealtimeState]。
+  ///
+  /// ## 为什么必须区分「登出」与「容器销毁」
+  /// 两个被写的 store 都是**长生命周期单例**，且在 provider 之间**没有依赖边**
+  /// （本文件与 `state/presence_providers.dart` 都刻意用 `read` 而不是 `watch` ——
+  /// `watch` 会让通道 owner 随 store 的高频 notify 反复重建、每次都把连接断掉）。
+  /// 没有依赖边 ⇒ Riverpod 的 `ProviderContainer.dispose` **不保证**谁先被回收：
+  /// 实测 order 里 `AylaPresenceState` 会先于本类被 `dispose()`，
+  /// 此时再 `notifyListeners()`（`reset` / `setStatus`）即抛
+  /// "used after being disposed"（2026-10-02 真机验收：`auth_remember_test` 5 条用例）。
+  ///
+  /// 关闭语义因此定为（AGENTS.md §7「关闭必须有顺序」）：
+  /// 1. 断 socket（`WsChannel` 自身的关闭与重连取消）；
+  /// 2. **不再向已随容器销毁移交的 store 回写** —— 容器都在销毁，
+  ///    这两个 store 随后也会消失，晚写一步只有害处没有收益。
+  ///
+  /// 显式登出仍走 [disconnect]：那条路径上容器**活着**，清空三档是必须的。
+  void dispose() {
+    _statesReleased = true;
+    disconnect();
   }
 
   // ---------------- 连接生命周期 ----------------
@@ -96,6 +132,10 @@ class AylaPresenceWsClient {
   }
 
   void _setConnection(AylaPresenceConnection connection) {
+    // 容器销毁中：**不得回写已移交的 store**（见 [dispose]）。
+    // 这条守卫是必需的：`_channel?.disconnect()` 会同步触发 `onStatus(offline)`
+    // → `_onStatus` → 本方法，绕不过 [disconnect] 里的那一处判断。
+    if (_statesReleased) return;
     _presence.setConnection(connection);
     _realtime.setStatus(
       AylaRealtimeChannel.presence,
@@ -110,6 +150,8 @@ class AylaPresenceWsClient {
   // ---------------- 帧分发（web `ws/presence.ts:111–125`） ----------------
 
   void _dispatch(Map<String, dynamic> frame) {
+    // 容器销毁后到达的在途帧：必须丢弃（已移交的 store 不能再被写）。
+    if (_statesReleased) return;
     final Object? rawType = frame['type'];
     if (rawType is! String) return;
     final Object? rawData = frame['data'];
@@ -155,4 +197,8 @@ class AylaPresenceWsClient {
   /// 测试专用：模拟通道状态回调（生产路径是 [attach] 挂上的 `onStatus`）。
   @visibleForTesting
   void debugHandleStatus(WsChannelStatus status) => _onStatus(status);
+
+  /// 测试专用：共享状态所有权是否已交还容器（见 [dispose]）。
+  @visibleForTesting
+  bool get debugStatesReleased => _statesReleased;
 }

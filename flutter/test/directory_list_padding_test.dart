@@ -552,9 +552,12 @@ void main() {
     /// 与 `posts_hub_page.dart` 的 `listPadding`**逐字相同**的表达式
     /// （页面里骨架与真实列表**共用该变量**）——与骨架用例合起来锁定
     /// 「骨架与真实列表同口径」。
+    ///
+    /// ⚠️ 阈值是 web `@media (min-width: 1025px)`（`posts.css:657`）的**原值**，
+    /// 不是 `AylaBreakpoints.lg`（=1440）：后者是目录分栏档，与本条 CSS 无关。
     EdgeInsets listPadding(BuildContext context) => aylaDirectoryListPadding(
           context,
-          bottom: MediaQuery.sizeOf(context).width >= AylaBreakpoints.lg
+          bottom: MediaQuery.sizeOf(context).width >= kAylaPostsWideMinWidth
               ? AylaSpacing.sp4
               : AylaSpacing.sp3,
         );
@@ -610,6 +613,48 @@ void main() {
 
       final Finder grid = find.byType(AylaMasonryGrid<int>);
       expect(tester.getRect(grid).left, 256);
+      expect(
+        tester.widget<AylaMasonryGrid<int>>(grid).padding,
+        const EdgeInsets.fromLTRB(0, 0, 0, AylaSpacing.sp3),
+      );
+    });
+
+    testWidgets('1025–1439：底部升 sp4（posts.css:657 的 (min-width: 1025px)，不是 1440）',
+        (WidgetTester tester) async {
+      // 靶区：1025 ≤ w < 1440。此前误用 AylaBreakpoints.lg(1440) ⇒ 该区间底部只有 sp3（少 4）。
+      const Size justWide = Size(1200, 824); // 落在 1025–1439
+      await useViewport(tester, justWide);
+      await tester.pumpWidget(
+        host(
+          shell(child: feed()),
+          viewport: justWide,
+          disableAnimations: true,
+        ),
+      );
+      await settle(tester);
+
+      final Finder grid = find.byType(AylaMasonryGrid<int>);
+      expect(
+        tester.widget<AylaMasonryGrid<int>>(grid).padding,
+        const EdgeInsets.fromLTRB(0, 0, 0, AylaSpacing.sp4),
+        reason: '≥1025 ⇒ posts.css:664–668 的 padding sp4 sp6（底部 sp4）',
+      );
+    });
+
+    testWidgets('1024 边界：底部仍 sp3（媒体查询是 min-width: 1025，1024 不命中）',
+        (WidgetTester tester) async {
+      const Size at1024 = Size(1024, 824);
+      await useViewport(tester, at1024);
+      await tester.pumpWidget(
+        host(
+          shell(child: feed()),
+          viewport: at1024,
+          disableAnimations: true,
+        ),
+      );
+      await settle(tester);
+
+      final Finder grid = find.byType(AylaMasonryGrid<int>);
       expect(
         tester.widget<AylaMasonryGrid<int>>(grid).padding,
         const EdgeInsets.fromLTRB(0, 0, 0, AylaSpacing.sp3),

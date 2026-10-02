@@ -51,7 +51,8 @@ import '../widgets/live/live_hall.dart' show AylaLiveCardData;
 import '../widgets/live/live_room_body.dart' show AylaLiveRoomBody, AylaLiveRoomData;
 import '../widgets/live/live_viewers.dart' show AylaLiveViewerItem;
 import '../theme/tokens.dart' show AylaRadii;
-import 'live_support.dart' show AylaLiveRoomSession;
+import 'live_support.dart'
+    show AylaLiveRoomSession, AylaLiveViewerSheetController;
 import 'share_support.dart' show aylaOpenShareSheet, AylaShareController;
 
 class GroupLivePage extends ConsumerStatefulWidget {
@@ -79,6 +80,11 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   AylaLiveRoomSession? _session;
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
+
+  /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
+  /// 的 `getLiveChannelViewers` + `:67–79` 的 `getElysiaProfile`；Flutter 侧网络层不进
+  /// `lib/widgets` ⇒ 由页面持有、经 [AylaLiveRoomBody.data.viewerSheet] 注入）。
+  AylaLiveViewerSheetController? _viewerSheet;
 
   /// 当前直播间 id（null = 空态）。
   int? _currentId;
@@ -126,6 +132,9 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     _directory?.dispose();
     _favorites.removeListener(_onChanged);
     _favorites.dispose();
+    _viewerSheet?.removeListener(_onChanged);
+    _viewerSheet?.dispose();
+    _viewerSheet = null;
     _share.dispose();
     super.dispose();
   }
@@ -305,6 +314,9 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     final List<AylaLiveCardData> cards = <AylaLiveCardData>[
       for (final AylaDirectoryLiveEntry entry in channels) entry.card,
     ];
+    // 名单弹层的权威数据（web 由弹层自身在打开时拉：`LiveViewerSheet.tsx:44–79`）
+    final AylaLiveViewerSheetController viewerSheet =
+        _viewerSheetOf('$channelId');
 
     final bool narrow = !(MediaQuery.sizeOf(context).width > 768);
     _narrow = narrow; // dispose 的视图分离判定（见字段注释）
@@ -348,7 +360,11 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
                 returnLatest: history.returnLatest,
                 retry: history.retry,
               ),
+        // 权威名单（web 弹层打开时自拉；Flutter 侧由页面持有、经本投影注入）
+        viewerSheet: viewerSheet.value,
       ),
+      // 弹层打开 → 页面发起同一次拉取（`LiveViewerSheet.tsx:44–65`）
+      onOpenViewerSheet: () => viewerSheet.onOpen('$channelId'),
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
       onSendDanmaku: session.sendDanmaku,
@@ -379,4 +395,10 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       ),
     );
   }
+
+  /// 名单弹层的权威数据（web 由弹层自己拉 —— `LiveViewerSheet.tsx:44–79`）。
+  ///
+  /// 懒创建一次（`ref` 只在 build / initState 可用 ⇒ 不在字段初始化里取）。
+  AylaLiveViewerSheetController _viewerSheetOf(String channelId) =>
+      _viewerSheet ??= AylaLiveViewerSheetController()..addListener(_onChanged);
 }

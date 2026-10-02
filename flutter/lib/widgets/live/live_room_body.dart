@@ -83,6 +83,7 @@ class AylaLiveRoomData {
     this.hasNewBelow = false,
     this.history,
     this.viewerSheet = const AylaLiveViewerSheetData(),
+    this.onOpenViewerSheet,
   });
 
   /// 当前频道描述符（null = 尚未到达）。
@@ -123,6 +124,14 @@ class AylaLiveRoomData {
 
   /// 观众名单弹层的数据投影。
   final AylaLiveViewerSheetData viewerSheet;
+
+  /// 名单弹层**即将打开**（页面借此发起权威名单拉取）。
+  ///
+  /// 事实源：web 由弹层自己在打开时拉（`LiveViewerSheet.tsx:44–79` 的
+  /// `getLiveChannelViewers` + `getElysiaProfile`）；Flutter 的网络层不进 `lib/widgets`
+  /// ⇒ 同一次拉取由页面承接（`live_support.dart` 的 `AylaLiveViewerSheetController`）。
+  /// 默认 null ⇒ 行为不变。
+  final VoidCallback? onOpenViewerSheet;
 }
 
 /// 直播间核心装配（`LiveRoomBody.tsx`）。
@@ -154,6 +163,7 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.onStopLive,
     this.railDirectoryFooter,
     this.groups = const <({String id, String title})>[],
+    this.onOpenViewerSheet,
   });
 
   /// 当前频道 id。
@@ -220,6 +230,10 @@ class AylaLiveRoomBody extends StatefulWidget {
 
   /// 可见范围用的群列表（透传控制台）。
   final List<({String id, String title})> groups;
+
+  /// 名单弹层**即将打开**（等价 web 弹层自身在打开时的拉取，
+  /// `LiveViewerSheet.tsx:44–79`；默认 null ⇒ 不变）。
+  final VoidCallback? onOpenViewerSheet;
 
   @override
   State<AylaLiveRoomBody> createState() => _AylaLiveRoomBodyState();
@@ -310,6 +324,7 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     count: widget.data.viewerCount,
     viewers: widget.data.viewers,
     sheet: widget.data.viewerSheet,
+    onOpen: widget.onOpenViewerSheet,
   );
 
   Widget get _danmakuList => AylaDanmakuList(

@@ -100,6 +100,7 @@ class AylaGroupInfoProfile extends StatefulWidget {
     this.editLabel = '编辑群资料',
     this.saveLabel = '保存',
     this.cancelLabel = '取消',
+    this.actionsRowMarginTop = 0,
     this.share,
   });
 
@@ -189,8 +190,24 @@ class AylaGroupInfoProfile extends StatefulWidget {
   final String saveLabel;
   final String cancelLabel;
 
+  /// 动作行（分享 / 编辑）的**上间距** —— web `.group-info-actions-row` 的
+  /// `margin-top: var(--sp-3)`（`group.css:2235–2240`）。
+  ///
+  /// ⚠️ **默认 0，需由调用方显式传入**：web 的行距是
+  /// 「父级 flex `gap`（窄 sp3 / 宽 sp2，1468–1489）+ 自身 `margin-top` sp3」之和，
+  /// 而本件此前没有这段 margin ⇒ 默认 0 可让「不传」的既有调用点几何**一字不变**
+  /// （内部常量上属于**只增不改**，不影响任何既有断言的取值）。
+  /// 页面级调用点（`group_info_page.dart`）按 web 传 [AylaSpacing.sp3]；
+  /// 修正已在 19 号文档登记。
+  final double actionsRowMarginTop;
+
   /// 分享槽位（web：`ShareButton label="分享群聊"`）。
   final Widget? share;
+
+  /// 动作行锚点（web `.group-info-actions-row`；测试与画布用）。
+  static const Key actionsRowKey = ValueKey<String>(
+    'ayla-group-info-actions-row',
+  );
 
   @override
   State<AylaGroupInfoProfile> createState() => _AylaGroupInfoProfileState();
@@ -442,18 +459,25 @@ class _AylaGroupInfoProfileState extends State<AylaGroupInfoProfile> {
                       ],
                     ),
                   ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  spacing: AylaSpacing.sp3,
-                  children: <Widget>[
-                    if (widget.share != null) widget.share!,
-                    if (widget.canManage)
-                      AylaGlassButton(
-                        label: widget.editLabel,
-                        variant: AylaGlassButtonVariant.ghost,
-                        onPressed: widget.onEdit,
-                      ),
-                  ],
+                Padding(
+                  key: AylaGroupInfoProfile.actionsRowKey,
+                  // `.group-info-actions-row { margin-top: var(--sp-3) }`（2235–2240）
+                  padding: EdgeInsets.only(top: widget.actionsRowMarginTop),
+                  child: Row(
+                    // 行的宽 = 内容宽（父 Column 的 crossAxisAlignment: center ⇒
+                    // 行整体居中）；web 是 flex-start，但列宽由内容决定 ⇒ 净效果相同。
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    spacing: AylaSpacing.sp3, // gap: var(--sp-3)
+                    children: <Widget>[
+                      if (widget.share != null) widget.share!,
+                      if (widget.canManage)
+                        AylaGlassButton(
+                          label: widget.editLabel,
+                          variant: AylaGlassButtonVariant.ghost,
+                          onPressed: widget.onEdit,
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ],

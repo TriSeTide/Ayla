@@ -225,8 +225,15 @@ class _AylaSubGroupDialogState extends State<AylaSubGroupDialog> {
   }
 
   /// .subgroup-dialog-mute：整行可点（web 是 label 包 checkbox）。
+  ///
+  /// group.css:2180–2189 `.subgroup-dialog-mute { … cursor: pointer }`，
+  /// 2191–2195 勾选框同 pointer（两处都在**顶层**，不在 @media 内）。
   Widget _muteRow(AylaTextStyles t) {
-    return GestureDetector(
+    return MouseRegion(
+      cursor: widget.busy
+          ? SystemMouseCursors.forbidden
+          : SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: widget.busy ? null : () => setState(() => _muted = !_muted),
       child: Container(
         padding: const EdgeInsets.all(AylaSpacing.sp3), // padding: var(--sp-3)
@@ -268,6 +275,7 @@ class _AylaSubGroupDialogState extends State<AylaSubGroupDialog> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

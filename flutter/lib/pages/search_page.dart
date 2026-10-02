@@ -14,15 +14,30 @@
 /// - tsx 472–489：用户资料浮层（.user-profile-overlay，search.css:304–312）+ 入群申请弹窗；
 /// - tsx 494–521：ResultGroup（count === 0 整组不渲染；单类视图隐藏组标题）。
 ///
+/// ## 成员事件与实时性（2026-10-02 补齐）
+/// - tsx 242–287：本页在 chat WS 的 `onFrame` 上消费三帧 ——
+///   `group.request.resolved`（`status == accepted` ⇒ 记入「已通过」集合；否则移除）、
+///   `group.joined`（成员关系置真 + 从「已通过」集合移除）、
+///   `group.member.left`（**仅在 `member_id` 是自己时**把成员关系置假）。
+///   实现见 [_SearchPageState._onFrame]；帧载荷见后端
+///   `apps/chat/consumers.py` 与 `ws/chat.ts` 的同名分支。
+/// - tsx 243–251 / 282–284 / 134–142：成员关系是**带版本的用户级事实**，优先于
+///   「更早发出的响应里的 is_member」—— Flutter 侧用 [AylaSearchMembership] 表达
+///   （`revision` 单调递增，`membershipChanges` 语义），见 [_SearchPageState._membership];
+/// - tsx 336–339：`stale` ⇒ 自动重搜（不打扰用户；`!loading && !error` 才触发）。
+///
 /// ## 与 web 的机制差异（登记）
-/// - **WS 成员事件未接线**（tsx 242–287 的 group.request.resolved / group.joined /
-///   group.member.left）：chat WS 帧路由属第 3 批 ⇒ 本轮成员关系只取响应的 is_member；
-/// - groupIsJoined 四级兜底里，第三/四级（当前结果内的 is_member、已加入会话集合）
-///   本轮分别由「响应 is_member」与「空集合」承担 —— chat store 的会话列表属第 3 批；
 /// - tsx 51–65 的 searchPageMemory（跨挂载结果缓存 + 失效）未实现：切页/重进重新搜索；
+///   随之 `withCurrentMembership`（tsx 134–142）**只做「响应落地时套用已知成员事实」
+///   这一档**（缓存那一档无对象可套）；
 /// - 在线判定用 UserPublic.online（后端字段）；presence store 的实时在线属后续批次；
-/// - 滚动位置记忆（useScrollRestore / saveScrollPosition）未实现。
+/// - tsx 346 / 121：切换分类与打开结果**前先显式保存**（`saveScrollPosition(scope, …)`）；
+/// - **滚动位置记忆已接**（2026-10-02）：web `useScrollRestore(scope, pageRef, { ready: results != null })`
+///   （tsx 118）—— Flutter 侧键 = 当前搜索作用域（同 web 的 `scope`），
+///   实现见 `widgets/base/scroll_restore.dart`。
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,9 +45,13 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/search_api.dart';
 import '../core/api/users_api.dart';
+import '../core/models/conversation.dart'
+    show AylaConversationSummary;
 import '../core/models/post.dart' show AylaPost;
 import '../core/models/subgroup.dart' show AylaGroupApplyData;
 import '../state/auth_state.dart';
+import '../state/chat_providers.dart'
+    show chatStateProvider, chatWsProvider;
 import '../state/search_history.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
@@ -41,6 +60,8 @@ import '../widgets/base/dialogs.dart' show AylaModalOverlay;
 import '../widgets/base/directory_page.dart';
 import '../widgets/base/directory_result_cards.dart';
 import '../widgets/base/page_state.dart';
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/base/profile_and_filters.dart'
     show AylaDirectoryFilters, AylaUserProfileCard;
 import '../widgets/game/game_room_card.dart';
@@ -54,6 +75,43 @@ import '../widgets/voice/voice_channels.dart'
     show AylaVoiceCardData, AylaVoiceChannelCard;
 import '../core/models/game_room.dart' show AylaGameCardData;
 import 'hub_support.dart';
+
+/// 成员关系事实表（web `membershipChanges` / `membershipRevision`，tsx 105–106）。
+///
+/// 语义（tsx 243–251 + 134–142）：
+/// - 每条事实带**单调递增的版本号**；响应落地时若版本晚于请求发起时刻，
+///   就用事实覆盖响应里的 `is_member`（「请求途中发生的成员事件优先于更早的响应」）；
+/// - 没有事实时**保持 null**，由 [AylaSearchPageState] 的四级兜底继续往下找
+///   （结果内 is_member → 已加入会话集合）；
+/// - 值变回「与响应一致」时不删事实（web 只在 `is_member !== undefined` 时删缓存项，
+///   `membershipChanges` 本身在 URL effect 里整体清空，见 [_SearchPageState.didUpdateWidget]）。
+class AylaSearchMembership {
+  final Map<String, ({bool member, int revision})> _facts =
+      <String, ({bool member, int revision})>{};
+
+  int _revision = 0;
+
+  /// 当前版本号（请求发起前取一次，落地时比对）。
+  int get revision => _revision;
+
+  /// 记一条事实（tsx 244：`membershipChanges.current.set(id, { member, revision: ++membershipRevision.current })`）。
+  void record(String groupId, bool member) {
+    _facts[groupId] = (member: member, revision: ++_revision);
+  }
+
+  /// 取事实（无 = null）；`since` 为请求发起时的版本 ⇒ **更晚的才优先**。
+  bool? memberOf(String groupId, {int? since}) {
+    final ({bool member, int revision})? fact = _facts[groupId];
+    if (fact == null) return null;
+    if (since != null && fact.revision <= since) return null;
+    return fact.member;
+  }
+
+  /// 清空（web URL effect 的整体复位，tsx 303）。
+  void clear() {
+    _facts.clear();
+  }
+}
 
 /// 六类结果的键（web RESULT_KEYS 的 Dart 侧表达）。
 enum AylaSearchResultKey { users, groups, posts, lives, games, voices }
@@ -121,8 +179,24 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   /// 入群申请弹窗（tsx 114/480–489）。
   AylaSearchGroupItem? _selectedGroup;
 
-  /// 已通过审批的群（tsx 110；WS group.request.resolved 未接线 ⇒ 本轮恒空）。
+  /// 已通过审批的群（tsx 110）：`group.request.resolved(accepted)` 记入、
+  /// `group.joined` 与「拒绝」档移除。
   final Set<String> _acceptedGroupIds = <String>{};
+
+  /// 成员关系事实表（tsx 105–106 / 243–251）。
+  final AylaSearchMembership _membership = AylaSearchMembership();
+
+  /// 结果已过时 ⇒ 自动重搜（tsx 99 / 186 / 250 / 278 / 336–339）。
+  bool _stale = false;
+
+  /// 本次请求发起时的成员事实版本（`membershipAtStart`，tsx 163）。
+  int _membershipAtStart = 0;
+
+  /// chat WS 帧解绑（tsx 286 的 `off`）。
+  void Function()? _frameOff;
+
+  /// 滚动位置恢复（web `useScrollRestore(scope, …)`，tsx 118）。
+  late final AylaScrollRestore _restore;
 
   int _requestId = 0;
 
@@ -134,6 +208,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     super.initState();
     _history.addListener(_onHistoryChanged);
     _history.load();
+    _restore = AylaScrollRestore(
+      key: 'search:$_scope',
+      controller: _scroll,
+      ready: false, // tsx 118：ready = results != null（首帧无结果）
+    )..attach();
+    // tsx 242–287：成员事件（group.request.resolved / group.joined / group.member.left）。
+    _frameOff = ref.read(chatWsProvider).onFrame(_onFrame);
     if (_q.isNotEmpty) _refreshSearch(_q);
   }
 
@@ -144,6 +225,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final String nextFilter =
         aylaHubFilterOf(SearchPage.filters, widget.initialType);
     if (nextQuery == _q && nextFilter == _filter) return;
+    // tsx 121：搜索词/分类变化前先显式保存当前位置（旧 scope 的键）。
+    AylaScrollMemory.save('search:$_scope', _scroll);
     setState(() {
       _q = nextQuery;
       _filter = nextFilter;
@@ -155,20 +238,142 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _selectedGroup = null;
       _selectedUser = null;
       _profileError = null;
+      // tsx 301/303/308：请求序号 +1、成员事实与「已通过」集合整体复位、stale 清掉
+      _membership.clear();
+      _acceptedGroupIds.clear();
+      _stale = false;
     });
+    _restore.update(ready: false); // 新 scope 尚无结果
     if (_q.isNotEmpty) _refreshSearch(_q);
   }
 
   @override
   void dispose() {
+    _frameOff?.call();
+    _frameOff = null;
     _history.removeListener(_onHistoryChanged);
     _history.dispose();
+    _restore.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
   void _onHistoryChanged() {
     if (mounted) setState(() {});
+  }
+
+  // ------------------------------------------------- 成员事件（tsx 242–287）
+
+  /// 三帧成员事件（web `ws/chat.ts` 同名分支 + tsx 242–287）。
+  ///
+  /// ⚠️ 与 web 逐条同一条守卫（tsx 253）：
+  /// `if (!active.current || activeScope.current !== scope || searchScope(q, filter) !== scope) return;`
+  /// —— 非当前作用域的帧一律丢弃（否则切页后旧帧会污染新结果）。
+  void _onFrame(Map<String, dynamic> frame) {
+    final Object? rawType = frame['type'];
+    if (rawType is! String) return;
+    switch (rawType) {
+      case 'group.request.resolved':
+        _onGroupRequestResolved(_dataOf(frame));
+      case 'group.joined':
+        _onGroupJoined(frame);
+      case 'group.member.left':
+        _onGroupMemberLeft(_dataOf(frame));
+      default:
+        return;
+    }
+  }
+
+  Map<String, dynamic> _dataOf(Map<String, dynamic> frame) {
+    final Object? raw = frame['data'];
+    return raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+  }
+
+  /// `group.request.resolved`（tsx 254–269）。
+  void _onGroupRequestResolved(Map<String, dynamic> data) {
+    final String conversationId = data['conversation_id']?.toString() ?? '';
+    if (conversationId.isEmpty) return;
+    final bool accepted = data['status'] == 'accepted';
+    setState(() {
+      if (accepted) {
+        _acceptedGroupIds.add(conversationId);
+      } else {
+        _acceptedGroupIds.remove(conversationId);
+      }
+      // tsx 264–269：有查询词时作废结果 + 置 stale（Flutter 侧无跨挂载缓存 ⇒ 只置 stale，
+      // 由 [_maybeRefreshStale] 自动重搜，同一效果）。
+      if (_q.isNotEmpty) _stale = true;
+    });
+  }
+
+  /// `group.joined`（tsx 270–281）：成员关系置真 + 从「已通过」移除。
+  void _onGroupJoined(Map<String, dynamic> frame) {
+    final Object? rawConv = frame['conversation'];
+    if (rawConv is! Map) return;
+    final String id = rawConv['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    setState(() {
+      _membership.record(id, true);
+      _acceptedGroupIds.remove(id);
+      if (_q.isNotEmpty) _stale = true;
+    });
+  }
+
+  /// `group.member.left`（tsx 282–284）：**仅本人**离开才把成员关系置假。
+  void _onGroupMemberLeft(Map<String, dynamic> data) {
+    final String? me = ref.read(authNotifierProvider).user?.id;
+    if (me == null || me.isEmpty) return;
+    if (data['member_id']?.toString() != me) return;
+    final String conversationId = data['conversation_id']?.toString() ?? '';
+    if (conversationId.isEmpty) return;
+    setState(() => _membership.record(conversationId, false));
+  }
+
+  /// tsx 336–339：`if (stale && q.trim() && !loading && !error) refreshSearch(q);`
+  ///
+  /// 在 build 的帧后回调里求值（Flutter 无 React 的 effect 时机）——调用时先清
+  /// `_stale`，由 `_refreshSearch` 按 `membershipChangedDuringRequest` 决定是否置回，
+  /// 因此「刷新期间再来成员事件 ⇒ 继续刷到稳定」与 web 同，且不会自激循环。
+  void _maybeRefreshStale() {
+    if (!mounted) return;
+    if (!_stale || _q.trim().isEmpty || _loading || _error != null) return;
+    _stale = false;
+    unawaited(_refreshSearch(_q));
+  }
+
+  /// 按已知成员事实覆盖响应里的 `is_member`（tsx 134–142 的 `withCurrentMembership`，
+  /// 只保留「事实」这一档：请求发起前的旧事实不覆盖）。
+  AylaSearchResults _withCurrentMembership(AylaSearchResults response) {
+    final AylaSearchGroup<AylaSearchGroupItem>? groups = response.groups;
+    if (groups == null) return response;
+    return AylaSearchResults(
+      users: response.users,
+      groups: AylaSearchGroup<AylaSearchGroupItem>(
+        items: <AylaSearchGroupItem>[
+          for (final AylaSearchGroupItem g in groups.items)
+            if (_membership.memberOf(g.id, since: _membershipAtStart)
+                case final bool member)
+              AylaSearchGroupItem(
+                id: g.id,
+                title: g.title,
+                isMember: member,
+                avatar: g.avatar,
+                memberCount: g.memberCount,
+                joinPolicy: g.joinPolicy,
+                createdAt: g.createdAt,
+              )
+            else
+              g,
+        ],
+        total: groups.total,
+        nextCursor: groups.nextCursor,
+        hasMore: groups.hasMore,
+      ),
+      posts: response.posts,
+      lives: response.lives,
+      games: response.games,
+      voices: response.voices,
+    );
   }
 
   /// tsx 159–194 + 230–238：重取第一页（替换可见结果），并记录一次搜索历史。
@@ -182,6 +387,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     _history.push(trimmed); // tsx 234
     final String scope = '$trimmed|$_filter';
     final int requestId = ++_requestId;
+    // tsx 163：请求发起时的成员事实版本（请求途中发生的成员事件优先于本响应）。
+    _membershipAtStart = _membership.revision;
     final AylaSearchResultKey? single = SearchPage.typeToKey[_filter];
     setState(() {
       _pageStatus.clear();
@@ -195,13 +402,26 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         limit: single == null ? 3 : 20, // tsx 172
       );
       if (!mounted || requestId != _requestId || scope != _scope) return;
+      // tsx 179：请求途中是否发生过成员事件（版本号被推进）。
+      final bool membershipChangedDuringRequest =
+          _membership.revision > _membershipAtStart;
       setState(() {
-        _results = next;
+        // tsx 180 + 134–142：落地前套用请求途中产生的成员事实。
+        _results = _withCurrentMembership(next);
         _resultsScope = scope;
+        // tsx 186：`setStale(membershipChangedDuringRequest)` —— 请求途中发生过成员事件
+        // 就**保持 stale**，由 [_maybeRefreshStale] 再刷一轮，直到数据稳定
+        //（web 原话 tsx 334–336）；没有成员事件则清掉。
+        _stale = membershipChangedDuringRequest;
       });
+      _restore.update(ready: true); // tsx 118：ready = results != null
     } catch (err) {
       if (!mounted || requestId != _requestId) return;
-      setState(() => _error = err is Exception ? _messageOf(err) : '搜索失败');
+      setState(() {
+        _error = err is Exception ? _messageOf(err) : '搜索失败';
+        // 真实错误停止自动刷新（web 原话，tsx 334–336）——stale 留待用户重试。
+        _stale = false;
+      });
     } finally {
       if (mounted && requestId == _requestId) {
         setState(() => _loading = false);
@@ -235,7 +455,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         throw StateError('搜索续页未推进，请重试或重新搜索');
       }
       setState(() {
-        _results = _mergeGroup(_results, key, incoming);
+        // tsx 211：续页同样套用成员事实（`withCurrentMembership(response, membershipAtStart)[type]`）。
+        final AylaSearchResults patched = _withCurrentMembership(response);
+        final AylaSearchGroup<Object?>? patchedGroup = _groupOf(patched, key);
+        _results = _mergeGroup(
+          _results,
+          key,
+          patchedGroup ?? incoming,
+        );
         _pageStatus[key] = (loading: false, error: null);
       });
     } catch (err) {
@@ -328,14 +555,56 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
   }
 
-  /// tsx 144–148 的成员关系判定（本轮：响应的 is_member 为权威；
-  /// WS 增量与已加入会话集合的空缺见文件头登记）。
-  bool _groupIsJoined(AylaSearchGroupItem group) => group.isMember == true;
+  /// tsx 144–148 的四级兜底（**逐级短路，事实优先于响应**）：
+  /// 1. 成员事实（[AylaSearchMembership]，用户级、带版本）；
+  /// 2. 当前结果内的同 id 条目（`resultRef.current?.groups?.items.find(...)?.is_member`；
+  ///    本页每条结果只渲染一次 ⇒ 与第 3 级同值，保留它的理由是 tsx 159–194 的
+  ///    续页合并路径下结果表可能比传入的条目更新 —— Flutter 侧 `_results` 就是那张表，
+  ///    故这里显式查表而不是直接用 `group.isMember`）；
+  /// 3. 传入条目自身的 `is_member`；
+  /// 4. 已加入会话集合（chat store 的群会话 id；web `joinedConversationIds` tsx 82–85）。
+  ///
+  /// ⚠️ **第 3/4 级之间 web 还有 `group.is_member` 的 undefined 判定**：
+  /// tsx 146 的 `?? group.is_member` 对 `undefined` 会继续往下；
+  /// Flutter 的 [AylaSearchGroupItem.isMember] 已是 `bool?`（undefined ↔ null 同形）⇒ 一致。
+  bool _groupIsJoined(AylaSearchGroupItem group) {
+    final bool? fact = _membership.memberOf(group.id);
+    if (fact != null) return fact;
+    final AylaSearchGroupItem? inResults = _groupInResults(group.id);
+    if (inResults?.isMember != null) return inResults!.isMember!;
+    if (group.isMember != null) return group.isMember!;
+    return _joinedConversationIds.contains(group.id);
+  }
+
+  AylaSearchGroupItem? _groupInResults(String id) {
+    for (final AylaSearchGroupItem item
+        in _results?.groups?.items ?? const <AylaSearchGroupItem>[]) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
+
+  /// 当前用户已加入的群会话 id（web `joinedConversationIds`，tsx 82–85）。
+  Set<String> get _joinedConversationIds => <String>{
+        for (final AylaConversationSummary c
+            in ref.read(chatStateProvider).conversations)
+          if (c.isGroup) c.id,
+      };
 
   @override
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
     final bool wide = !narrow;
+
+    // tsx 118：ready = results != null（当前作用域）。active 恒真 —— 搜索结果区
+    // 与浮层是**同一页**（web 的 pageRef 也只在浮层打开时才可能被遮挡，不卸载）。
+    _restore.update(ready: (_resultsScope == _scope ? _results : null) != null);
+    // tsx 336–339：stale ⇒ 自动重搜（帧后求值，避免 build 中触发请求）。
+    if (_stale) {
+      WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+        _maybeRefreshStale();
+      });
+    }
 
     final Widget page = AylaDirectoryPage(
       filters: AylaDirectoryFilters(
@@ -696,23 +965,23 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  /// 打开帖子详情（路由 /posts/:postId）。
-  void _openPost(AylaPost post) {
-    final String postId = post.id.toString();
-    context.go('/posts/$postId');
+  /// 打开结果前显式保存滚动位置（web `openPath`，tsx 120–123：
+  /// `saveScrollPosition(scope, pageRef.current); navigate(path);`）。
+  void _openPath(String path) {
+    AylaScrollMemory.save('search:$_scope', _scroll);
+    context.go(path);
   }
+
+  /// 打开帖子详情（路由 /posts/:postId）。
+  void _openPost(AylaPost post) => _openPath('/posts/$post.id');
 
   /// 打开桌游房（路由 /games/:roomId）。
-  void _openRoom(String roomId) {
-    final String encoded = Uri.encodeComponent(roomId);
-    context.go('/games/$encoded');
-  }
+  void _openRoom(String roomId) =>
+      _openPath('/games/${Uri.encodeComponent(roomId)}');
 
   /// 打开语音房 / 直播间（路由前缀由调用方给出）。
-  void _openChannel(String prefix, String channelId) {
-    final String encoded = Uri.encodeComponent(channelId);
-    context.go('$prefix/$encoded');
-  }
+  void _openChannel(String prefix, String channelId) =>
+      _openPath('$prefix/${Uri.encodeComponent(channelId)}');
 
   /// tsx 357：加载中 / 无查询词 → 省略号；否则「N 条结果」。
   String _searchStatsLabel() {

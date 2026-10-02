@@ -174,7 +174,12 @@ class _AylaMenuItemState extends State<AylaMenuItem> {
       ),
     );
 
+    // 菜单项在 web 是 <button>（如 `.privacy-menu-item`，profile.css:717 另声明 cursor: pointer）
+    // ⇒ 全局 pointer；disabled ⇒ 343 not-allowed。
     Widget clickable = MouseRegion(
+      cursor: widget.disabled
+          ? SystemMouseCursors.forbidden
+          : SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(

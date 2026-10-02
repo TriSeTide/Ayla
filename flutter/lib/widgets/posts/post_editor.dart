@@ -651,7 +651,13 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
               child: Semantics(
                 button: true,
                 label: '移除媒体',
-                child: GestureDetector(
+                // `.post-editor-image-remove` 是 <button>（posts.css:378–389 cursor: pointer）；
+                // disabled 档（busy）⇒ base.css:343 not-allowed。
+                child: MouseRegion(
+                  cursor: busy
+                      ? SystemMouseCursors.forbidden
+                      : SystemMouseCursors.click,
+                  child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: busy ? null : () => _remove(draft),
                   child: Container(
@@ -672,6 +678,7 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
                         color: AylaColors.textPrimary,
                       ),
                     ),
+                  ),
                   ),
                 ),
               ),

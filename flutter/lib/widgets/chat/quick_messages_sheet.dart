@@ -202,10 +202,13 @@ class _AylaQuickMessagesSheetState extends State<AylaQuickMessagesSheet> {
           ),
           // `.icon-btn-40` 关闭键（`QuickMessagesSheet.tsx 202–204`：`aria-label="关闭快捷消息"`）
           const SizedBox(width: AylaSpacing.sp2),
+          // `.icon-btn-40` 是 <button>（QuickMessagesSheet.tsx 202–204）⇒ base.css:340 全局 pointer。
           Semantics(
             button: true,
             label: '关闭快捷消息',
-            child: GestureDetector(
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               key: const ValueKey<String>('quick-messages-close'),
               onTap: widget.onClose,
               child: Container(
@@ -220,6 +223,7 @@ class _AylaQuickMessagesSheetState extends State<AylaQuickMessagesSheet> {
                   child: AylaIcon(aylaIconByName('iconClose')!, size: 20),
                 ),
               ),
+            ),
             ),
           ),
         ],

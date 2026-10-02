@@ -32,18 +32,37 @@
 ///   可见性多选 → 单值 public > friends > group，tsx 360–364；保存禁用 =
 ///   `savingEdit || editUploading || !body.trim()` —— **空标题可提交**，tsx 507）。
 ///
+/// ## 实时帧（2026-10-02 补齐）
+/// - tsx 219–245 + `hooks/usePostComments.ts:129–134`：本页在 chat WS 的 `onFrame` 上
+///   消费 **`comment.created` / `comment.deleted` / `post.viewed`** 三条帧
+///   （web 的 chat.ts dispatch 对前两条本身 no-op，见 `ws/chat.ts:841–844`）
+///   ⇒ 见 [_PostDetailPageState._onFrame]；
+/// - 帧载荷（后端权威形状，`apps/posts/services.py:484–539 / 197–241`）：
+///   `comment.created {post_id, comment, comment_count}` ·
+///   `comment.deleted {post_id, comment_id, comment_count}` ·
+///   `post.viewed {post_id, view_count, viewer_id, allowed_group_ids}`；
+/// - 帖子的 `post.created/updated/deleted/viewed` 对**帖子 store**
+///   的一档仍由 `core/ws/posts_frames.dart` 承担；本页这一档只是**本地详情 state
+///   的即时对账**（web 两边都在做：store 一份、页面 state 一份，逐条一致）。
+///
 /// ## 机制差异（登记）
-/// 1. **无帖子/评论缓存与 WS 增量**：web 从 `stores/posts` 取 cachedPost 秒开（tsx 109–111），
-///    并监听 `comment.created/comment.deleted/post.viewed`（tsx 219–245）；Flutter 侧
-///    帖子 WS 帧分发未接 ⇒ 每次进入都取详情，评论数与浏览量靠本地操作 + 刷新更新；
+/// 1. **无帖子/评论缓存**：web 从 `stores/posts` 取 cachedPost 秒开（tsx 109–111）、
+///    `usePostComments` 有一份按账号 + 帖子隔离的模块级快照（`usePostComments.ts:20–56`）；
+///    Flutter 侧无这两份缓存 ⇒ 每次进入都取详情与首屏评论（**实时增量已接**，见上）；
 /// 2. **评论列用页面内状态机**（items/cursor/hasMore/loaded/loading/error + revision）：
 ///    web `usePostComments` 需要**本地 insert/remove**（发/删评论后对账）与
 ///    `errorKind`（init / append 两档文案），而 `AylaPagedList` 的 items 只读且只有单一
 ///    error ⇒ 逐条照搬 web 状态机会更保真（登记为偏差）；
-/// 3. **分享弹窗接线未做**（按钮已在头部渲染、点击无动作）—— 同 posts_hub_page 登记；
+/// 3. **分享弹窗已接线**（2026-10-02）：按钮复用 `pages/share_support.dart`
+///    的 [aylaOpenShareSheet]（页面级注入器），payload 走
+///    `AylaSharePayload.post`；覆盖范围见 [aylaPostSharePayloadFor]；
 /// 4. **编辑面板的媒体上传/回收未接线**（13 号 §4.3 既有登记项「媒体/视频接线未完成」）：
 ///    面板只展示既有媒体的缩略图与移除键，新增媒体走 13 号 4.3 的注入点；
-/// 5. 滚动位置记忆（`useScrollRestore`）未实现（与其他页同登记）；
+/// 5. **滚动位置记忆已接**（2026-10-02）：本页滚动键 = `post-comments:<id>`
+///    （web `usePostComments.ts:46` 的 `${account}:post-comments:${postId}`；
+///    account 维度在 Flutter 由**登出清态 + 无跨挂载评论缓存**承担，登记为口径差异）；
+///    两个门与 web 同：`active: present && !loading`、`ready: !loading && commentPage.loaded`
+///    （tsx 135）—— 实现见 `widgets/base/scroll_restore.dart`；
 /// 6. `presenceOnline`（在线用户集合）未接 —— 卡片的在线态回落到帖子内联 `author.online`。
 library;
 
@@ -59,7 +78,10 @@ import '../core/api/posts_api.dart';
 import '../core/media/media_signer.dart' show MediaVariant;
 import '../core/models/conversation.dart';
 import '../core/models/post.dart';
+import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../core/net/dio_client.dart' show ApiException;
+import '../state/auth_state.dart' show authNotifierProvider;
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../state/favorite_status.dart';
 import '../state/shell_state.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
@@ -68,6 +90,7 @@ import '../widgets/base/pagination_footer.dart';
 import '../widgets/base/visibility_selector.dart' show AylaVisibilitySelector, AylaVisibilitySelection;
 import '../widgets/base/resource_image.dart'
     show AylaResourceImage, mediaContentUrl;
+import '../widgets/base/scroll_restore.dart' show AylaScrollRestore;
 import '../widgets/chat/image_viewer.dart';
 import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/posts/comments.dart';
@@ -77,6 +100,36 @@ import '../widgets/posts/post_edit_fullscreen.dart';
 import '../widgets/posts/post_page_chrome.dart' show aylaPostDetailTime;
 import '../widgets/base/share.dart' show AylaShareButton;
 import '../theme/buttons.dart' show AylaMsgActionButton;
+import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
+
+/// 详情页分享负载（web `PostDetailPage.tsx:460–466`）。
+///
+/// 逐条对应 `utils/sharePayload.ts:79–93` 的 `postSharePayload`：
+/// 标题 = `post.title`、摘要 = `post.body` 归一空白后截 24 字、
+/// 群归属 = `post.group`、封面 = **首图 thumbnail**。
+///
+/// ⚠️ 一处**已登记的有意差异**：web 的封面回退链是
+/// `images[0].media.thumbnail || mediaContentUrl(media.media_id)`（tsx 463；
+/// 帖子卡同款见 `PostCard.tsx:149`）；Flutter 侧只传 thumbnail ——
+/// 没有 thumbnail 时封面为 null（`normalizeCover` 只接受 **站内相对路径**，
+/// `sharePayload.ts:8–11`；而 `mediaContentUrl` 产出的是**绝对地址**，
+/// 传进去会被 `normalizeCover` 判为非法而归零）。web 那一档在页面上
+/// 实际同样得到 null（被同一函数丢弃），故行为一致，只是不再多绕一步。
+AylaSharePayload aylaPostSharePayloadFor(AylaPost post) =>
+    AylaSharePayload.post(
+      id: post.id.toString(),
+      title: post.title,
+      body: post.body,
+      group: post.groupId,
+      cover: _postCoverThumbnail(post),
+    );
+
+String? _postCoverThumbnail(AylaPost post) {
+  if (post.images.isEmpty) return null;
+  // 只看首图（web `images[0]`）
+  final String? thumb = post.images.first.media?.thumbnail;
+  return (thumb == null || thumb.isEmpty) ? null : thumb;
+}
 
 class PostDetailPage extends ConsumerStatefulWidget {
   const PostDetailPage({super.key, required this.postId, this.from});
@@ -94,6 +147,15 @@ class PostDetailPage extends ConsumerStatefulWidget {
 class _PostDetailPageState extends ConsumerState<PostDetailPage> {
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final ScrollController _scroll = ScrollController();
+
+  /// 分享目标控制器（web `ShareButton` 自持 `useShareTargets`；Flutter 侧页面持一份）。
+  final AylaShareController _share = AylaShareController();
+
+  /// 滚动位置恢复（web `PostDetailPage.tsx:135`；键与两门见文件头机制差异 5）。
+  late final AylaScrollRestore _restore;
+
+  /// chat WS 帧解绑（tsx 219–245 的 `off`）。
+  void Function()? _frameOff;
 
   AylaPost? _post;
   bool _loading = true;
@@ -144,8 +206,16 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
+    // 滚动恢复：键 = web `usePostComments.ts:46` 的 `post-comments:<id>`。
+    // 控制器在本页生命周期内恒同一实例（详情/评论共用一个滚动容器）⇒ 先 attach。
+    _restore = AylaScrollRestore(
+      key: 'post-comments:${widget.postId}',
+      controller: _scroll,
+    )..attach();
     _load();
     _loadGroups();
+    // tsx 219–245：评论实时推送（comment.created / comment.deleted / post.viewed）。
+    _frameOff = ref.read(chatWsProvider).onFrame(_onFrame);
     // tsx 100–104：群外详情让底栏下滑离场（shell owner）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -157,8 +227,12 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
 
   @override
   void dispose() {
+    _frameOff?.call();
+    _frameOff = null;
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
+    _share.dispose();
+    _restore.dispose();
     _editTitle.dispose();
     _editBody.dispose();
     _scroll.dispose();
@@ -175,6 +249,102 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
 
   void _onFavoritesChanged() {
     if (mounted) setState(() {});
+  }
+
+  // ------------------------------------------------------------ 实时帧（tsx 219–245）
+
+  /// 帖子详情的三条实时帧（web `PostDetailPage.tsx:219–245` + `usePostComments.ts:129–134`）。
+  ///
+  /// | 帧 | web | 本页 |
+  /// |---|---|---|
+  /// | `comment.created` | tsx 222 + hook 131（`post_id` 相符才处理） | 追加评论（按 id 去重）+ 覆盖 `comment_count` |
+  /// | `comment.deleted` | tsx 222–225 + hook 132 | 移除该评论（同时清掉回复目标）+ 覆盖计数 |
+  /// | `post.viewed` | tsx 227–242 | 覆盖 `view_count`；`viewer_id == 本人` 时同步 `is_viewed` |
+  ///
+  /// ⚠️ **有意差异（登记）**：web 的 `comment.created` 对首屏未加载的评论只进
+  /// `upsert` 的 items 合并，**不改分页游标**；Flutter 侧同一档同样只做列表追加。
+  /// 但 web 那边 `comment.created` 的 `comment_count` 是**直接覆盖**（tsx 223），
+  /// 本页同 —— 不用「+1」推算（后端权威计数优先，避免重复计数）。
+  void _onFrame(Map<String, dynamic> frame) {
+    final Object? rawType = frame['type'];
+    if (rawType is! String) return;
+    final Object? rawData = frame['data'];
+    if (rawData is! Map) return;
+    final Map<String, dynamic> data = Map<String, dynamic>.from(rawData);
+    // tsx 222 / 227：…… && Number(frame.data.post_id) === id
+    if (int.tryParse(data['post_id']?.toString() ?? '') != _postId) return;
+    switch (rawType) {
+      case 'comment.created':
+        _applyCommentCreated(data);
+      case 'comment.deleted':
+        _applyCommentDeleted(data);
+      case 'post.viewed':
+        _applyPostViewed(data);
+      default:
+        return;
+    }
+  }
+
+  /// `comment.created`（tsx 222–223 + hook 131）。
+  void _applyCommentCreated(Map<String, dynamic> data) {
+    final int? count = (data['comment_count'] as num?)?.toInt();
+    final AylaPostComment? incoming =
+        AylaPostComment.fromJson(data['comment']);
+    setState(() {
+      final AylaPost? post = _post;
+      if (post != null && count != null) {
+        _post = _copyPost(post, commentCount: count);
+      }
+      if (incoming == null) return;
+      // hook 111：`current.deleted.has(comment.id)` —— 本地已删过的不复活。
+      if (_comments.any((AylaPostComment c) => c.id == incoming.id)) return;
+      _comments = <AylaPostComment>[..._comments, incoming];
+      _commentsReplay += 1;
+    });
+  }
+
+  /// `comment.deleted`（tsx 224 + hook 132）。
+  void _applyCommentDeleted(Map<String, dynamic> data) {
+    final int? commentId =
+        int.tryParse(data['comment_id']?.toString() ?? '');
+    if (commentId == null) return;
+    final int? count = (data['comment_count'] as num?)?.toInt();
+    setState(() {
+      final AylaPost? post = _post;
+      if (post != null && count != null) {
+        _post = _copyPost(post, commentCount: count);
+      }
+      _comments = <AylaPostComment>[
+        for (final AylaPostComment c in _comments)
+          if (c.id != commentId) c,
+      ];
+      // tsx 224：被回复的那条没了 ⇒ 清回复目标
+      if (_replyTarget?.id == commentId) _replyTarget = null;
+    });
+  }
+
+  /// `post.viewed`（tsx 227–242）：
+  /// - `viewer_id` 是本人（多端）⇒ 再同步 `is_viewed`；
+  /// - 他人浏览 ⇒ 只刷 `view_count`。
+  ///
+  /// `view_count` **不去重**（web 原话：幂等覆盖，不受去重影响）。
+  /// ⚠️ 与 `_reportViews` 的 `Math.max` 合并**不同**：这里是帧的权威覆盖
+  /// （tsx 236 直接赋 `d.view_count`）—— 两条路径在 web 上就是两种语义。
+  void _applyPostViewed(Map<String, dynamic> data) {
+    final int? viewCount = (data['view_count'] as num?)?.toInt();
+    if (viewCount == null) return;
+    final String? me = ref.read(authNotifierProvider).user?.id;
+    final String viewer = data['viewer_id']?.toString() ?? '';
+    final bool isMe = me != null && me.isNotEmpty && viewer == me;
+    setState(() {
+      final AylaPost? post = _post;
+      if (post == null) return;
+      _post = _copyPost(
+        post,
+        viewCount: viewCount,
+        isViewed: isMe ? true : null,
+      );
+    });
   }
 
   // ---------------------------------------------------------------- 详情
@@ -353,8 +523,12 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
     });
   }
 
-  /// tsx 605–609：触底追加（**编辑中不触发**；有内容可滚才触发）。
-  bool _onScroll(ScrollNotification n) {
+  /// 滚动通知：触底分页（web 的 `onScroll`）。
+  ///
+  /// ⚠️ 滚动位置记忆**不在这里**写 —— web 由 `useScrollRestore` 自带的
+  /// scroll 监听承担（hook :93–95），Flutter 的等价物是
+  /// `AylaScrollRestore.attach()` 挂的 `ScrollController` 监听（见其文件头差异 1）。
+  bool _onScrollNotification(ScrollNotification n) {
     if (n.metrics.axis != Axis.vertical) return false;
     if (_editing ||
         _commentsError != null ||
@@ -534,6 +708,14 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
   Widget build(BuildContext context) {
     final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     final AylaPost? post = _post;
+    // tsx 135：`useScrollRestore(commentPage.key, scrollRef, { active: present && !loading,
+    // ready: !loading && commentPage.loaded })`
+    // —— present 在 Flutter 由「本页 State 存活」承担（路由换页即 dispose）。
+    final bool present = !_loading && post != null;
+    _restore.update(
+      active: present,
+      ready: present && _commentsLoaded,
+    );
 
     if (_loading && post == null && _postId != null) {
       // tsx 399–428：头部 + 结构化骨架（**不渲染 composer**）
@@ -578,14 +760,19 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
             onBack: _goBack,
             editing: _editing,
             scrollController: _scroll,
-            onScrollNotification: _onScroll,
+            onScrollNotification: _onScrollNotification,
             // 分享按钮：web `tsx:449–455` 用默认 40（`.icon-btn-40`）；
-            // ⚠️ 分享弹窗接线未做 ⇒ 这里给**空回调**（外观与 web 一致、点击无动作），
-            // 不给 null（null 会被件渲染成禁用态，与 web 不符）—— 登记项见文件头差异 3。
+            // 点击 ⇒ 打开分享弹窗（web `ShareButton` 自持；Flutter 侧注入，
+            // 范本 `group_info_page.dart:435–449`）。
             share: AylaShareButton(
               label: '分享帖子',
               size: 40,
-              onPressed: () {},
+              onPressed: () => unawaited(aylaOpenShareSheet(
+                context,
+                payload: aylaPostSharePayloadFor(post),
+                controller: _share,
+                currentUserId: ref.read(authNotifierProvider).user?.id,
+              )),
             ),
             ownerActions: post.isAuthor ? _ownerActions() : null,
             composer: AylaCommentComposer(

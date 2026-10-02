@@ -236,7 +236,11 @@ class _AylaPostCardState extends State<AylaPostCard> {
       groupName: post.groupName,
     );
 
-    final Widget main = GestureDetector(
+    // `.post-card-main { cursor: pointer }`（typed-result-cards.css:6 无条件；
+    // :4 在 `.typed-result-card` 内亦为 pointer）⇒ 主区整体手型。
+    final Widget main = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onOpen,
       child: Padding(
@@ -438,6 +442,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
           ],
         ),
       ),
+      ),
     );
 
     final Widget footer = DecoratedBox(
@@ -458,7 +463,11 @@ class _AylaPostCardState extends State<AylaPostCard> {
           children: <Widget>[
             // 详情档不渲染「查看帖子 / 评论数 / 分享」（tsx 677–683 只有浏览数 + 收藏键）
             if (!widget.detail)
-              GestureDetector(
+              // `.post-card-open` 是 <button>（PostCard.tsx:136）⇒ base.css:340 全局 pointer。
+              // ⚠️ `.post-card-foot` 自身**无** pointer 声明（统计行是 <span>）⇒ 不整排加。
+              MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: widget.onOpen,
               child: const Text(
@@ -470,6 +479,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
                   color: AylaColors.textSecondary,
                 ),
               ),
+            ),
             ),
             // 详情档不渲染评论数（tsx 677–683）
             if (!widget.detail && post.commentCount != null) ...<Widget>[
@@ -566,13 +576,18 @@ class _AylaPostCardState extends State<AylaPostCard> {
     final ValueChanged<int>? open = widget.onOpenMedia;
     if (open == null) return child;
     final bool video = media.kind == AylaMediaKind.video;
+    // 指针按媒体种类分档：`.post-card-img-btn { cursor: zoom-in }`（posts.css:173–177）；
+    // 视频走 `.post-card-video`（非 btn 选择器）⇒ 落在 <button> 上取全局 pointer（base.css:340）。
     return Semantics(
       button: true,
       label: video ? '播放视频' : '查看图片原图',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => open(index),
-        child: child,
+      child: MouseRegion(
+        cursor: video ? SystemMouseCursors.click : SystemMouseCursors.zoomIn,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => open(index),
+          child: child,
+        ),
       ),
     );
   }

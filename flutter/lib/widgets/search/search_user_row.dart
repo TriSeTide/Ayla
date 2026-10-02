@@ -97,8 +97,12 @@ class AylaSearchUserRow extends StatelessWidget {
           const SizedBox(width: AylaSpacing.sp3), // gap: var(--sp-3)
           Expanded(
             // `.search-row-copy`（column · gap sp1 · flex 1 · min-width 0）+
-            // `.search-row-main`（透明按钮：无底/无边、内容左对齐且纵向居中）
-            child: GestureDetector(
+            // `.search-row-main` 是 <button>（SearchPage.tsx:403）⇒ base.css:340 全局 pointer。
+            child: MouseRegion(
+              cursor: onTap == null
+                  ? SystemMouseCursors.forbidden
+                  : SystemMouseCursors.click,
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onTap,
               child: Column(
@@ -126,6 +130,7 @@ class AylaSearchUserRow extends StatelessWidget {
                   ],
                 ],
               ),
+            ),
             ),
           ),
           if (trailing != null) ...<Widget>[

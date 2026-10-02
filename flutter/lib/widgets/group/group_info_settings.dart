@@ -418,7 +418,10 @@ class _AylaGroupInfoSelectState extends State<AylaGroupInfoSelect> {
       ),
     );
     _menuEntry = entry;
-    Overlay.of(context, rootOverlay: true).insert(entry);
+    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
+    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
+    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
+    Overlay.of(context).insert(entry);
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     setState(() => _open = true);
   }

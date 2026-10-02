@@ -1061,8 +1061,23 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         error: _dialogError,
         showVoiceCreate: _showVoiceCreate,
         showLiveCreate: _showLiveCreate,
-        voiceCreateChild: _buildVoiceCreateForm(),
-        liveCreateChild: _buildLiveCreateForm(),
+        // Lazy evaluation (2026-10-02): these two children used to be unconditional
+        // constructor arguments, so opening the subgroup dialog also allocated a
+        // voice/live form widget (ConsumerStatefulWidget in create_sheet_forms.dart;
+        // it never mounts and issues no request, but it is needless allocation and it
+        // freezes the current groupId into the widget instance).
+        // AylaChannelSidebarDialogs.build only inserts the child when its flag is true
+        // (tsx 541 / 547) -> defer evaluation with a Builder, matching the three
+        // independent conditions web renders (tsx 541 / 547 / 558).
+        // Builder instead of `? :`: the ternary needs the field type widened to
+        // Widget?, which would change this widget public constructor contract
+        // (named params may only be added, never changed).
+        voiceCreateChild: Builder(
+          builder: (BuildContext _) => _buildVoiceCreateForm(),
+        ),
+        liveCreateChild: Builder(
+          builder: (BuildContext _) => _buildLiveCreateForm(),
+        ),
         onCloseDialog: () {
           if (_busy) return; // tsx 564
           _setDialogState(() {

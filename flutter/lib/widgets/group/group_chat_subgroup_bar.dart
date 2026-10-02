@@ -597,7 +597,10 @@ class _TabBackgroundState extends State<_TabBackground> {
     final Color color = widget.active
         ? Colors.transparent
         : (_hovered ? const Color(0x2E9DBFE6) : const Color(0x99FFFAFB));
+    // `.group-chat-subgroup-tab` 在 web 是 <button>（GroupChat.tsx）
+    // ⇒ base.css:340 全局 pointer（group.css:173–185 的容器选择器无 cursor 声明）。
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) {
         if (!_hovered) setState(() => _hovered = true);
       },

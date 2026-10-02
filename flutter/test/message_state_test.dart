@@ -102,6 +102,63 @@ void main() {
     expect(bucket.lastSeq, 8);
   });
 
+  // ======================= withConfirmedRead（web message.ts:85–88） =======================
+
+  test('isConfirmedRead 投影：四处入库路径都逐条置 readByMe（web 96/135/176/324）', () {
+    final AylaMessageState m = AylaMessageState();
+    m.openBucket('c1');
+    // 只把 seq 2 视为「服务端已确认已读」（模拟子群已读回执投影）。
+    // 四条路径各用不同 seq（同 seq 会被 insertBySeq 去重，测不到入库）。
+    m.isConfirmedRead = (String convId, int seq) =>
+        convId == 'c1' && <int>{2, 3, 4, 5}.contains(seq);
+
+    m.upsertMessage('c1', _msg('srv-2', seq: 2)); // web message.ts:96
+    expect(m.messagesOf('c1').first.readByMe, isTrue,
+        reason: 'upsertMessage 入库即投影');
+
+    m.resolvePendingByKey('c1', 'k3', _msg('srv-3', seq: 3)); // web message.ts:176
+    expect(
+      m.messagesOf('c1').firstWhere((AylaChatMessage x) => x.id == 'srv-3').readByMe,
+      isTrue,
+      reason: 'resolvePendingByKey 入库即投影',
+    );
+
+    m.addPendingMessage('c1', _msg('local-1', seq: 0, pending: true, key: 'k1'));
+    m.resolvePendingMessage('c1', 'local-1', 'k1', _msg('srv-4', seq: 4)); // web :135
+    expect(
+      m.messagesOf('c1').firstWhere((AylaChatMessage x) => x.id == 'srv-4').readByMe,
+      isTrue,
+      reason: 'resolvePendingMessage 入库即投影',
+    );
+
+    m.prependHistory('c1', <AylaChatMessage>[_msg('hist-5', seq: 5)], hasMore: false); // :324
+    expect(
+      m.messagesOf('c1').firstWhere((AylaChatMessage x) => x.id == 'hist-5').readByMe,
+      isTrue,
+      reason: 'prependHistory 前插即投影（用户实报的路径）',
+    );
+  });
+
+  test('isConfirmedRead：未确认的不伪造已读；未接钩子时是空操作', () {
+    final AylaMessageState m = AylaMessageState();
+    m.openBucket('c1');
+    m.isConfirmedRead = (String convId, int seq) => seq == 5;
+    // seq 3 未确认 ⇒ 保持 null（**不伪造已读**）
+    m.upsertMessage('c1', _msg('x', seq: 3));
+    expect(m.messagesOf('c1').single.readByMe, isNull);
+    // seq 5 已确认 ⇒ 前插即置已读
+    m.prependHistory('c1', <AylaChatMessage>[_msg('y', seq: 5)], hasMore: false);
+    final AylaChatMessage y =
+        m.messagesOf('c1').firstWhere((AylaChatMessage x) => x.id == 'y');
+    expect(y.readByMe, isTrue);
+
+    final AylaMessageState plain = AylaMessageState();
+    plain.openBucket('c1');
+    plain.upsertMessage('c1', _msg('z', seq: 5));
+    expect(plain.messagesOf('c1').single.readByMe, isNull,
+        reason: '未接钩子 ⇒ 空操作（纯 state 行为不变）');
+  });
+
   test('viewerAtBottom 默认 true（web `?? true`）', () {
     final AylaMessageState m = AylaMessageState();
     expect(m.viewerAtBottom('c1'), isTrue);

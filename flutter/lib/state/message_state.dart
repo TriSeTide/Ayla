@@ -9,6 +9,7 @@
 /// | [markMessageFailed] / [setMessageUploadProgress] / [removeMessage] | `message.ts:213–257` |
 /// | [setRecalled] / [markReadByMe] / [markReadByMessage] | `message.ts:276–321` |
 /// | [prependHistory] / [openBucket] / [setLastSeq] | `message.ts:323–389` |
+/// | [isConfirmedRead]（入库前逐条投影已读） | `message.ts:85–88` 的 `withConfirmedRead`，用于 96 / 135 / 176 / 324 四处入库路径 |
 /// | [viewerAtBottom] / [setViewerAtBottom] | `message.ts:391–397`（WS 判断「新消息是否即时已读」） |
 ///
 /// ## 未实现（登记）
@@ -88,6 +89,34 @@ class AylaMessageState extends ChangeNotifier {
   /// **未接时是空操作** ⇒ 纯 state 单测与不关心子群的调用方行为不变。
   void Function(String convId, String? subgroupId, int seq)? onSubgroupActivity;
 
+  /// 「该序号是否已被本人确认已读」的查询钩子 —— web `withConfirmedRead`（`message.ts:85–88`）
+  /// 所使用的 `isSubgroupMessageConfirmedRead`（`subgroup.ts:217–220`）。
+  ///
+  /// **为什么必须在入库时逐条投影**：websocket 路径（`chat_ws.dart:579`）已经查过这个钩子，
+  /// 但 REST 历史（`chat.subscribed` / `before_seq` 分页）与乐观发送回包不走那里 ——
+  /// 漏投影时「服务端早已确认过的序号」会读回 `readByMe=false`，
+  /// 在「屏幕中看到即已读」上线后会放大成无谓的重复精确已读请求。
+  ///
+  /// 由装配层（`state/chat_providers.dart`）接到 [AylaSubGroupState]；
+  /// **未接时是空操作** ⇒ 纯 state 单测与不关心子群的调用方行为不变。
+  ///
+  /// ⚠️ **未接钩子的症状（排障对照）**：已确认序号在历史里读回 `readByMe=false`
+  /// ⇒「服务端早已确认过」的消息再次进入视口时被重复精确已读（见
+  /// `widgets/chat/message_list.dart` 的 `_onMessageVisible`）。
+  /// 生产路径上不存在「未接」的实例：`AylaConversationRuntime` 拿到的正是
+  /// `ref.read(messageStateProvider)`（`pages/chat_support.dart:872`），
+  /// 即装配过钩子的那个单例；只有独立构造 `AylaMessageState()` 的测试
+  /// 才会拿到空操作实例。
+  bool Function(String convId, int seq)? isConfirmedRead;
+
+  /// 入库前的已读投影 —— 逐条对齐 web `withConfirmedRead`（`message.ts:85–88`）：
+  /// `!read_by_me && isSubgroupMessageConfirmedRead(convId, seq)` ⇒ 置 `read_by_me: true`，其余原样返回。
+  AylaChatMessage _withConfirmedRead(String convId, AylaChatMessage msg) {
+    final bool Function(String, int)? confirmed = isConfirmedRead;
+    if (confirmed == null || msg.readByMe == true) return msg;
+    return confirmed(convId, msg.seq) ? msg.copyWith(readByMe: true) : msg;
+  }
+
   /// 「已落库消息推进活跃度」：只有**带子群归属且 seq 为正**的消息参与
   /// （本地 pending seq=0 不参与排序 —— 与 web 同）。
   void _recordActivity(String convId, String? subgroupId, int seq) {
@@ -97,6 +126,8 @@ class AylaMessageState extends ChangeNotifier {
 
   /// 插入（同 seq 的非 pending 消息**忽略**）。
   void upsertMessage(String convId, AylaChatMessage msg) {
+    // web `message.ts:96`：入库前先做逐条已读投影。
+    msg = _withConfirmedRead(convId, msg);
     final AylaMessageBucket bucket =
         _buckets[convId] ?? const AylaMessageBucket();
     _buckets[convId] = bucket.copyWith(
@@ -130,6 +161,8 @@ class AylaMessageState extends ChangeNotifier {
     String idempotencyKey,
     AylaChatMessage serverMsg,
   ) {
+    // web `message.ts:135`：入库前先做逐条已读投影。
+    serverMsg = _withConfirmedRead(convId, serverMsg);
     _recordActivity(convId, serverMsg.subgroupId, serverMsg.seq);
     final AylaMessageBucket? bucket = _buckets[convId];
     if (bucket == null) return;
@@ -167,6 +200,8 @@ class AylaMessageState extends ChangeNotifier {
     String idempotencyKey,
     AylaChatMessage serverMsg,
   ) {
+    // web `message.ts:176`：入库前先做逐条已读投影。
+    serverMsg = _withConfirmedRead(convId, serverMsg);
     _recordActivity(convId, serverMsg.subgroupId, serverMsg.seq);
     final AylaMessageBucket? bucket = _buckets[convId];
     if (bucket == null) return;
@@ -268,6 +303,11 @@ class AylaMessageState extends ChangeNotifier {
     List<AylaChatMessage> msgs, {
     required bool hasMore,
   }) {
+    // web `message.ts:324`：`msgs.map(withConfirmedRead)` —— 前插页里的每一条
+    // 都要先做已读投影，否则已确认序号在历史里读回 `readByMe=false`。
+    msgs = <AylaChatMessage>[
+      for (final AylaChatMessage m in msgs) _withConfirmedRead(convId, m),
+    ];
     final AylaMessageBucket bucket = _buckets[convId] ??
         const AylaMessageBucket();
     List<AylaChatMessage> merged = bucket.messages;

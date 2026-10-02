@@ -225,4 +225,124 @@ void main() {
     final Rect moved = tester.getRect(find.byType(AylaGroupTopTabs));
     expect(moved.top, greaterThan(0));
   });
+
+
+  // ======================= 下拉回主页手势层（R-G6） =======================
+  //
+  // web 事实源：`pages/GroupPage.tsx:471` `pullHandlers={pullSwipe.handlers}` →
+  // `components/group/GroupTopTabs.tsx:62` `<div className="group-top-tabs" … {...pullHandlers}>`
+  // —— 手势只挂在顶栏那一条（`group.css:23–31` + `:36` 高 64）上，内容区不参与起手。
+  // 本件只暴露三个回调，判定（阈值 80 / 方向）由父级做。
+
+  testWidgets('传了回调：在顶栏条内竖直拖动 → onPullUpdate / onPullEnd 收到事件', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(375, 300);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final List<DragUpdateDetails> updates = <DragUpdateDetails>[];
+    final List<DragEndDetails> ends = <DragEndDetails>[];
+    int cancels = 0;
+    await tester.pumpWidget(
+      host(
+        SizedBox(
+          width: 375,
+          child: AylaGroupTopTabs(
+            groupName: '深夜电台',
+            activeScene: AylaGroupScene.voice,
+            onPullUpdate: updates.add,
+            onPullEnd: ends.add,
+            onPullCancel: () => cancels++,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 起手点必须在**条内**（条高 64）——这正是问题 10 的差异点
+    final Rect bar = tester.getRect(find.byType(AylaGroupTopTabs));
+    expect(bar.height, AylaGroupTopTabs.barHeight);
+    final Offset start = Offset(bar.center.dx, bar.top + 20);
+    await tester.dragFrom(start, const Offset(0, 100));
+    await tester.pumpAndSettle();
+
+    expect(updates, isNotEmpty, reason: '顶栏区域内拖动 → onPullUpdate 被调用');
+    expect(ends, hasLength(1), reason: '松手 → onPullEnd 恰好一次');
+    expect(cancels, 0);
+    final double total = updates.fold<double>(
+      0,
+      (double sum, DragUpdateDetails d) => sum + d.delta.dy,
+    );
+    expect(total, closeTo(100, 1.0), reason: '跟手位移 1:1 透传给父级');
+  });
+
+  testWidgets('回调可只给一个：任一非 null 即挂手势层', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(375, 300);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final List<DragEndDetails> ends = <DragEndDetails>[];
+    await tester.pumpWidget(
+      host(
+        SizedBox(
+          width: 375,
+          child: AylaGroupTopTabs(
+            groupName: '深夜电台',
+            activeScene: AylaGroupScene.chat,
+            onPullEnd: ends.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final Rect bar = tester.getRect(find.byType(AylaGroupTopTabs));
+    await tester.dragFrom(
+      Offset(bar.center.dx, bar.top + 20),
+      const Offset(0, 90),
+    );
+    await tester.pumpAndSettle();
+    expect(ends, hasLength(1));
+  });
+
+  testWidgets('不传回调：无 GestureDetector（行为不变），拖动不产生任何回调', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(375, 300);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      host(
+        const SizedBox(
+          width: 375,
+          child: AylaGroupTopTabs(
+            groupName: '深夜电台',
+            activeScene: AylaGroupScene.voice,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // 四个 tab 自身是 AylaPressScale（内含 GestureDetector）⇒ 判据用「竖直拖动手势」：
+    // 三个回调默认 null 时**一个都不能有**。
+    expect(
+      find.descendant(
+        of: find.byType(AylaGroupTopTabs),
+        matching: find.byWidgetPredicate(
+          (Widget w) =>
+              w is GestureDetector &&
+              (w.onVerticalDragUpdate != null ||
+                  w.onVerticalDragEnd != null ||
+                  w.onVerticalDragCancel != null),
+        ),
+      ),
+      findsNothing,
+      reason: '三个回调默认 null ⇒ 不挂手势层（行为与既有完全一致）',
+    );
+    // 条高与触发区宽度不受影响
+    expect(tester.getSize(find.byType(AylaGroupTopTabs)).height, 64);
+    expect(
+      tester.getSize(find.byType(AylaGroupTopTabs)).width,
+      375,
+      reason: '触发区宽 100%（group.css:23–31）',
+    );
+  });
 }

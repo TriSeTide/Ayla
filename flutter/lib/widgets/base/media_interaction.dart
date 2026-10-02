@@ -170,7 +170,10 @@ class _VideoFailed extends StatelessWidget {
       child: Semantics(
         button: true,
         label: '视频加载失败，重试',
-        child: GestureDetector(
+        // 重试键在 web 是 <button>（ResourceImage.tsx:156 同族）⇒ base.css:340 全局 pointer。
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
           onTap: onRetry,
           child: Container(
             // `.resource-image-fallback { min-width:40; min-height:32;
@@ -191,6 +194,7 @@ class _VideoFailed extends StatelessWidget {
                 color: AylaColors.textSecondary,
               ),
             ),
+          ),
           ),
         ),
       ),

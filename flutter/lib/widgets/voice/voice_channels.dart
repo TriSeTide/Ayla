@@ -144,6 +144,7 @@ class AylaVoiceChannelCard extends StatelessWidget {
     this.revealDelay,
     this.action,
     this.favorite,
+    this.reserveOwnerLine = true,
   });
 
   final AylaVoiceCardData channel;
@@ -174,6 +175,22 @@ class AylaVoiceChannelCard extends StatelessWidget {
 
   /// head 行的预留高度 = 收藏键 compact 的 32（`.favorite-toggle.is-compact`）。
   static const double _headMinHeight = 32;
+
+  /// owner 行是否**预留高度**（默认 true = 卡片单独使用时的既有行为）。
+  ///
+  /// web 的同行等高由 CSS grid 的 `align-items: stretch` 保证（`voice.css:505–511`
+  /// 的 `display: grid`），而 `VoiceChannelCard.tsx:37` 那一行是
+  /// `{channel.owner_nickname && …}` —— **没有这一行就不渲染**。
+  /// Flutter 侧不能对含 `AylaGlassButton`（内部 `LayoutBuilder`）的子树用
+  /// `IntrinsicHeight`，故用「预留该行高度」表达 stretch：
+  ///
+  /// - `true`：恒占位（行内**存在** owner ⇒ 该行所有卡等高、foot 对齐）；
+  /// - `false`：不占位（**整行都没有 owner** 时这一行本就不该存在 ——
+  ///   此前无条件下会整批多留一行空白 ≈ 23.25px）。
+  ///
+  /// 由 [AylaVoiceChannelList] 按行判定后逐卡传入（列数已知 ⇒ 行是确定的）；
+  /// 单独使用（搜索结果 / typed-result 卡）保持默认 `true`，与改动前逐像素一致。
+  final bool reserveOwnerLine;
 
   /// tsx 19：`browsing ? "查看" : mine ? "进入" : "加入"`（用于卡片 aria-label）。
   String get _verb => browsing
@@ -258,27 +275,33 @@ class AylaVoiceChannelCard extends StatelessWidget {
             ),
           ],
         ),
-        // ---- owner：非空才渲染（tsx 37），但**保留该行高度** ----
-        // web 的网格是 CSS grid（默认 `align-items: stretch`）⇒ 同一行卡片等高，
-        // 卡内 `margin-top: auto` 再把 foot 压到底；Flutter 侧不能对含
-        // `AylaGlassButton`（内部 `LayoutBuilder`）的子树用 `IntrinsicHeight`
-        // （`LayoutBuilder` 不支持 intrinsics），故改为**预留这一行的高度** ⇒
-        // 同行卡片天然等高、foot 对齐。
-        // ⚠️ 已登记差异：整行都无 owner 时，本实现比 web 多留一行空白（web 那行会更矮）。
-        SizedBox(
-          height: ownerLineHeight,
-          child: channel.ownerNickname == null
-              ? null
-              : Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    channel.ownerNickname!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: metaStyle,
-                  ),
-                ),
-        ),
+        // ---- owner：非空才渲染（tsx 37 的 `{channel.owner_nickname && …}`）----
+        // web 的同行等高来自 CSS grid 的 `align-items: stretch`（`voice.css:505–511`）
+        // —— 是网格把**最矮的卡拉到该行最高**，不是靠预留空行；`tsx 37` 缺 owner 时
+        // 那一行**根本不渲染**。
+        // Flutter 侧不能对含 `AylaGlassButton`（内部 `LayoutBuilder`）的子树用
+        // `IntrinsicHeight`（`LayoutBuilder` 不支持 intrinsics），故按 [reserveOwnerLine] 分流：
+        //   行内存在 owner ⇒ 恒占位（同行等高、foot 对齐）；
+        //   整行都无 owner ⇒ 不占位（与 web 逐像素一致）。
+        //
+        // ⚠️ 有 owner 时**仍然**用 `SizedBox(height: ownerLineHeight)` 定高（不是裸 Align）：
+        // 文本实际行高与推导值有亚像素差，若让它自然定高，同排「有 owner / 无 owner」
+        // 两卡会差 ≈0.4px、破坏 stretch 语义（实测 149.6 vs 150.0）。
+        if (channel.ownerNickname != null)
+          SizedBox(
+            height: ownerLineHeight,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                channel.ownerNickname!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: metaStyle,
+              ),
+            ),
+          )
+        else if (reserveOwnerLine)
+          SizedBox(height: ownerLineHeight),
         // ---- foot：人数（占满剩余）+ 加入钮 / 我在其中 ----
         Row(
           children: <Widget>[
@@ -405,8 +428,10 @@ class _MinePill extends StatelessWidget {
 /// - `.group-voice`：**恒 2 列**（`voice.css:692`，那两条媒体查询只作用于 `.voice-hub`）
 ///   → 传 [columns] = 2。
 ///
-/// 行高语义：CSS 网格的 `grid-auto-rows: auto` ⇒ **同一行等高**（该行最高卡决定），
-/// 卡片 `margin-top: auto` 把 foot 压到底 ⇒ Flutter 侧按行分块 + `IntrinsicHeight` 等价表达。
+/// 行高语义：CSS 网格的 `grid-auto-rows: auto` + `align-items: stretch` ⇒ **同一行等高**
+/// （该行最高卡决定），卡片 `margin-top: auto` 把 foot 压到底。Flutter 侧不能对含
+/// `LayoutBuilder` 的卡用 `IntrinsicHeight` ⇒ 用「该行存在 owner 时恒占位 owner 行 +
+/// head 行 min-height 32」表达 stretch（见 [AylaVoiceChannelCard.reserveOwnerLine]）。
 class AylaVoiceChannelList extends StatelessWidget {
   const AylaVoiceChannelList({
     super.key,
@@ -440,6 +465,13 @@ class AylaVoiceChannelList extends StatelessWidget {
   final int? columns;
 
   /// 网格 padding；null = `.voice-hub` 的 `padding: var(--sp-3) var(--sp-4)`（12 / 16）。
+  ///
+  /// ⚠️ **群内必须显式传 `EdgeInsets.zero`**：`.group-voice .voice-channel-list`
+  /// 把 padding **显式归零**（**`voice.css:690–695` 的 `:694`**，带原注释「避免双重
+  /// padding」）—— 群内左右留白只由外层 `.group-page .group-voice`
+  /// （`group.css:411–417` 的 `sp4`）提供（`group_voice_page.dart` 的
+  /// `fromLTRB(sp4,sp4,sp4,68)`）。不传时吃基样式再叠一层 ⇒ 群内左右各多 16
+  /// （实测 32，2026-10-02 问题 6 已接线）。回归锁：`test/group_scene_padding_test.dart`。
   final EdgeInsetsGeometry? padding;
 
   /// 进房回调（web `onJoin(channel.id)`）。
@@ -508,6 +540,18 @@ class AylaVoiceChannelList extends StatelessWidget {
         ),
         builder: (BuildContext context, int row) {
           final int start = row * cols;
+          // 该行**是否存在** owner（`VoiceChannelCard.tsx:37` 是条件渲染）⇒
+          // 决定这一行要不要为 owner 预留高度（见 [AylaVoiceChannelCard.reserveOwnerLine]）。
+          // 整行都无 owner 时该行所有卡都不占位 = web 的「这行不存在」。
+          bool rowHasOwner = false;
+          for (int i = start;
+              i < channels.length && i < start + cols;
+              i++) {
+            if (channels[i].ownerNickname != null) {
+              rowHasOwner = true;
+              break;
+            }
+          }
           return Row(
             // 同行等高由「卡片预留 owner 行」保证（见 AylaVoiceChannelCard 的说明），
             // 不用 IntrinsicHeight —— 卡片内的 AylaGlassButton 含 LayoutBuilder，
@@ -528,6 +572,8 @@ class AylaVoiceChannelList extends StatelessWidget {
                       active: channels[i].id == currentChannelId,
                       joining: joining,
                       browsing: browsing,
+                      // 同行存在 owner ⇒ 该行所有卡为 owner 行恒占位（stretch 的等价表达）
+                      reserveOwnerLine: rowHasOwner,
                       onEnter: () => (onEnterCard ?? _joinById)(channels[i]),
                       favorite: favoriteBuilder?.call(context, channels[i]),
                       action: actionBuilder?.call(context, channels[i]),

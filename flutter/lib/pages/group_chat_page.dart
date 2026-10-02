@@ -14,6 +14,12 @@
 /// | 历史 403/404 ⇒ 清会话 + 回 `/group` | 228–237 |
 ///
 /// ## 机制差异（登记）
+/// 0. **群表情包键与面板已接**（2026-10-02）：web `MessageInput.tsx:88-89` 的
+///    `isGroup`（群聊才有 members）同时门控 @ 与**群表情包按钮**；面板本身是
+///    `EmojiPackPanel.tsx` 的既有件 [AylaEmojiPackPanel]，数据来自
+///    `api/emoji.ts:33-35 / 37-39`（Flutter 侧 = [AylaEmojiApi]）。
+///    ⚠️ **仅群聊**：私聊输入框（`private_chat_pane.dart` / `chat_support.dart`）
+///    一律不传这两件，对齐 tsx:88-89「私信不显示表情包按钮」。
 /// 1. **群聊发送复用 [AylaConversationRuntime]**（`pages/chat_support.dart`）：web 的
 ///    `useChat.ts` 是全局面函数，Flutter 侧把「乐观插入 → 上传 → 发送 → 原地替换」
 ///    收在运行时类里；群聊**不调它的 `open()`**（那是私聊口径的历史/typing 路径），
@@ -31,16 +37,20 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
+import '../core/api/emoji_api.dart';
 import '../core/models/chat_message.dart';
 import '../core/models/conversation.dart';
+import '../core/models/emoji_item.dart' show AylaEmojiItem;
 import '../core/models/subgroup.dart' show AylaSubGroup;
 import '../state/auth_state.dart' show authNotifierProvider;
 import '../state/chat_providers.dart';
 import '../state/group_providers.dart';
 import '../state/message_state.dart';
+import '../state/paged_list.dart';
 import '../state/subgroup_state.dart';
 import '../theme/tokens.dart' show AylaCurves, AylaDurations, AylaSpacing;
 import '../widgets/base/reveal.dart' show AylaRevealItem, AylaRevealMotion;
+import '../widgets/chat/emoji_pack_panel.dart';
 import '../widgets/chat/message_input.dart';
 import '../widgets/chat/message_list.dart' show AylaMessageList;
 import '../widgets/motion/panel_swap.dart'
@@ -80,6 +90,36 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
   /// 已按某个「群:子群」组合取过历史（避免重复首屏请求）。
   String? _historyOwner;
 
+  // ===================== 群表情包（web EmojiPackPanel + api/emoji.ts）=====================
+
+  /// 包摘要加载中（web EmojiPackPanel.tsx:48-54 的 metadata.loaded 取反）。
+  bool _emojiMetaLoading = false;
+
+  /// 包摘要（null = 未建包 / 加载失败；web metadata.payload）。
+  AylaGroupEmojiPackPayload? _emojiPack;
+
+  /// 摘要错误（null = 无错；web metaError）。404「包未创建」**不进这里**。
+  String? _emojiMetaError;
+
+  /// 摘要作用域（群 + 子群）—— 换子群即重置（web tsx:44/86-93 的 scope 同义）。
+  String? _emojiScope;
+
+  /// 表情项分页（web usePagedMediaList）。
+  AylaPagedList<AylaEmojiItem>? _emojiItems;
+
+  /// 面板数据面。⚠️ **必须是可监听对象**：宽屏档的面板由 [AylaMessageInput] 插在
+  /// **root Overlay** 里（message_input.dart:575-585），本页的 setState **不会**传到那份
+  /// 子树（实测：数据到达后面板仍停在 summaryLoaded=false / items=0；
+  /// 上传后 onReload 刷新也看不见）。用 [ValueNotifier] + [ValueListenableBuilder]
+  /// 让 Overlay 内的那份自己订阅变化 —— 与 web 的 React state 直连 store 同效。
+  final ValueNotifier<AylaEmojiPackData> _emojiData =
+      ValueNotifier<AylaEmojiPackData>(const AylaEmojiPackData());
+
+  /// 表情面板的宿主键。面板的开合状态（web MessageInput.tsx:84 的 `emojiOpen`）由
+  /// [AylaMessageInput] 内部持有；本页只在「换子群」（tsx:143 的 `setEmojiOpen(false)`）
+  /// 与「面板关闭钮」两处换掉这个键，把开合状态归零。
+  Key _composerKey = UniqueKey();
+
   String get groupId => widget.groupId;
 
   AylaSubGroupState get _subgroups => ref.read(subgroupStateProvider);
@@ -107,11 +147,19 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
     final AylaConversationRuntime? runtime = _runtime;
     _runtime = null;
     scheduleMicrotask(() => runtime?.dispose());
+    _emojiItems?.removeListener(_onChanged);
+    _emojiItems?.dispose();
+    _emojiItems = null;
+    _emojiData.dispose();
     super.dispose();
   }
 
   void _onChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // 表情列表（分页/加载态/错误）也挂在面板上 ⇒ 数据面每次变化都同步推送
+    // （宽屏那份在 root Overlay 里，只靠本页 setState 传不到）。
+    _publishEmojiData();
+    setState(() {});
   }
 
   AylaSubGroup? get _activeSubgroup {
@@ -286,6 +334,179 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
     }
   }
 
+  // ===================== 群表情包（web EmojiPackPanel.tsx / api/emoji.ts）=====================
+
+  /// 表情面板的**作用域**：群 + 子群 —— web `EmojiPackPanel.tsx:44` 的
+  /// `scope = group-emoji:${userId}:${convId}`，Flutter 侧无跨实例缓存，
+  /// 同一用户同一群下**再按子群**分（换子群要重新取，见 tsx:88-93 的重置分支）。
+  String _emojiScopeKey(String? subgroupId) => '$groupId:${subgroupId ?? ''}';
+
+  /// 摘要有无错误（web `metaError`）⇒ 上传权限兜底判据之一。
+  bool get _emojiMetaLoaded => !_emojiMetaLoading && _emojiMetaError == null;
+
+  /// 当前用户在群中的角色 —— web `MessageInput.tsx:117-120` 的 `myRole`
+  /// （`groupRole ?? members.find(me).role`）：群聊路由传的是 `activeConv.my_role`。
+  String? get _emojiMyRole {
+    final AylaConversationSummary? conv =
+        ref.read(chatStateProvider).byId(groupId);
+    final AylaConversationMemberRole? role = conv?.myRole;
+    if (role != null) return role.wire;
+    final String? me = ref.read(authNotifierProvider).user?.id;
+    if (me == null) return null;
+    for (final AylaConversationMember m
+        in conv?.members ?? const <AylaConversationMember>[]) {
+      if (m.user.id == me) return m.role?.wire;
+    }
+    return null;
+  }
+
+  /// 换子群 / 首次进入 → 重置面板状态并拉摘要（web tsx:86-93 的 scope 分支）。
+  ///
+  /// 摘要是**子群无关**的（后端 `/emoji/groups/<conv_id>/pack/` 只认群），但仍按
+  /// 「群:子群」重建分页列表 —— 与 web 的 `${scope}:${pack.id}` 分页身份同口径。
+  void _syncEmojiScope(String? subgroupId) {
+    final String scope = _emojiScopeKey(subgroupId);
+    if (_emojiScope == scope) return;
+    _emojiScope = scope;
+    _emojiPack = null;
+    _emojiMetaError = null;
+    _emojiMetaLoading = true;
+    _emojiItems?.removeListener(_onChanged);
+    _emojiItems?.dispose();
+    _emojiItems = AylaPagedList<AylaEmojiItem>(
+      request: (String? cursor) => AylaEmojiApi.listGroupEmojiItemsPage(
+        groupId,
+        cursor: cursor,
+        limit: 30, // web tsx:63 的 `limit: 30`
+      ),
+      keyOf: (AylaEmojiItem item) => item.id,
+    )..addListener(_onChanged);
+    _publishEmojiData(); // 先落空态（换子群立刻反映，不等网络）
+    unawaited(_loadEmojiMeta());
+  }
+
+  /// 把当前投影推给 [_emojiData]（宽屏那份面板靠它更新，见字段注释）。
+  void _publishEmojiData() => _emojiData.value = _buildEmojiData();
+
+  /// 摘要加载（web `EmojiPackPanel.tsx:67-81` / `GroupInfo.tsx:222-242` 的同一分支）：
+  /// **404「包未创建」= 空态**，不是错误；其它错误落 `metaError`。
+  Future<void> _loadEmojiMeta() async {
+    final String? scope = _emojiScope;
+    if (scope == null) return;
+    final AylaGroupEmojiPackLoad load =
+        await AylaEmojiApi.loadGroupEmojiPackSummary(groupId);
+    if (!mounted || _emojiScope != scope) return;
+    setState(() {
+      _emojiMetaLoading = false;
+      _emojiPack = load.payload; // 404 ⇒ null（未建包）
+      _emojiMetaError = load.error;
+    });
+    _publishEmojiData();
+    // web tsx:64：`Boolean(payload)` 才取 items（未建包不请求列表）。
+    if (load.payload != null) {
+      await _emojiItems?.load();
+    }
+  }
+
+  /// 上传/删除后重取摘要 + 刷新列表（web tsx:83-86 的 `refresh`）。
+  Future<void> _reloadEmoji() async {
+    final AylaGroupEmojiPackPayload? before = _emojiPack;
+    await _loadEmojiMeta();
+    if (!mounted) return;
+    // web tsx:85：仅当 pack.id 未变才刷新列表（换包等价于换数据源）。
+    if (_emojiPack?.packId == before?.packId) {
+      await _emojiItems?.load();
+    }
+    _publishEmojiData();
+  }
+
+  /// 「加入群包」（web tsx:115 的 `addGroupEmojiItem(convId, uploaded.media_id)`）。
+  ///
+  /// 媒体已由 [AylaEmojiPackPanel] 内部按 `kind=emoji` 上传完成
+  /// （Flutter 侧 = `AylaMediaActions.pickImages`）。
+  Future<void> _addEmoji(String mediaId) async {
+    await AylaEmojiApi.addGroupEmojiItem(groupId, mediaId);
+  }
+
+  /// 删除群表情（web tsx:149 的 `deleteGroupEmojiItem(convId, item.id)`）。
+  Future<void> _deleteEmoji(String itemId) async {
+    await AylaEmojiApi.deleteGroupEmojiItem(groupId, itemId);
+  }
+
+  /// 「发送表情」（web tsx:135-143 的 `sendMessage(convId, "", {type: emoji, mediaId}, subgroupId)`）。
+  ///
+  /// 复用群聊既有发送链：单媒体 emoji **不进** [AylaConversationRuntime.send]
+  /// （那是「块/待上传媒体」口径），但 POST 出口、幂等键与 `subgroup_id` 判据完全同源
+  /// （[aylaSubgroupIdParam]，与 useChat.ts 其余三个出口同一函数）。
+  /// **不新增消息类型**（tsx:12-13 注释：群表情本质仍是图片/动图消息）。
+  Future<void> _sendEmoji(String mediaId) async {
+    final AylaChatMessage msg = await AylaChatApi.sendMessage(
+      groupId,
+      AylaCreateMessagePayload(
+        type: AylaMessageType.emoji,
+        content: '',
+        mediaId: mediaId,
+        idempotencyKey: aylaNewIdempotencyKey(),
+        subgroupId: aylaSubgroupIdParam(_activeSubgroup?.id),
+      ),
+    );
+    if (!mounted) return;
+    // web useChat.ts:258 的 `upsertMessage`（WS message.new 按 seq 去重，不会重复）。
+    ref.read(messageStateProvider).upsertMessage(groupId, msg);
+  }
+
+  /// 面板数据面投影（[AylaEmojiPackData] 契约由既有件定义）。
+  ///
+  /// ⚠️ 本地动作错误（发送/删除/上传失败）**不进**这里 —— [AylaEmojiPackPanel] 自己
+  /// `setState(_error)` 渲染 `.emoji-pack-error`（与 web tsx:58 同口径）；
+  /// 这里只表达「摘要」与「列表」两条**取数**链路的错误。
+  AylaEmojiPackData _buildEmojiData() => AylaEmojiPackData(
+        packId: _emojiPack?.packId,
+        canUploadFromPack: _emojiPack?.canUpload,
+        canDeleteFromPack: _emojiPack?.canDelete,
+        summaryLoaded: _emojiMetaLoaded,
+        summaryError: _emojiMetaError,
+        items: _emojiItems?.items ?? const <AylaEmojiItem>[],
+        itemsLoading: _emojiItems?.loading ?? false,
+        itemsError: _emojiItems?.error,
+        hasMore: _emojiItems?.hasMore ?? false,
+      );
+
+  /// 输入框内正常流向下展开的**窄屏**面板（web tsx:588-590 在 `.composer` 内）。
+  ///
+  /// ⚠️ 宽屏**不在这里**：`AylaMessageInput` 自己把 [AylaMessageInput.emojiPanel] 插到
+  /// **root Overlay** 的 `Positioned(left: sp3, width: composerWidth - 2*sp3, bottom: 100% + 8)`
+  /// （`message_input.dart:563-586`，对应 app.css 2186-2204 的
+  /// `position: absolute; left/right sp3; bottom: calc(100% + 8px)`）——
+  /// 同一个 [AylaEmojiPackPanel] 装配方式按 [AylaMessageInput.narrow] 切换，与 web 同构。
+  /// 面板（[ValueListenableBuilder] 订阅 [_emojiData] —— 宽屏那份在 root Overlay 里，
+  /// 靠这个通道拿到最新数据；窄屏那份在正常流里，两者行为一致）。
+  Widget _emojiPanel({required bool narrow}) =>
+      ValueListenableBuilder<AylaEmojiPackData>(
+        valueListenable: _emojiData,
+        builder: (BuildContext context, AylaEmojiPackData data, Widget? _) =>
+            AylaEmojiPackPanel(
+          narrow: narrow,
+          myRole: _emojiMyRole,
+          data: data,
+          onClose: _closeEmojiPanel,
+          onReload: _reloadEmoji,
+          onLoadMore: () =>
+              _emojiItems?.load(append: true) ?? Future<void>.value(),
+          onAddEmoji: _addEmoji,
+          onDeleteEmoji: _deleteEmoji,
+          onSendEmoji: _sendEmoji,
+        ),
+      );
+
+  /// 收起面板 —— 面板只负责「关」，开合状态在 [AylaMessageInput] 内部。
+  ///
+  /// 本页通过**换 composer 键**表达 web 的 `setEmojiOpen(false)`
+  /// （tsx:589 面板的 `onClose`）：重建输入框 = 开合状态归零。
+  void _closeEmojiPanel() => setState(() {
+        _composerKey = UniqueKey();
+      });
+
   @override
   Widget build(BuildContext context) {
     ref.watch(messageStateProvider);
@@ -336,6 +557,15 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
         (visible.isNotEmpty || !(bucket?.loading ?? false));
     // 输入框换场（`usePanelSwapMotion`，tsx:126）：`active && !establishingSelection`。
     final bool composerReady = activeSubgroupId != null && !establishingSelection;
+
+    // ---- 群表情包：作用域同步（面板的开合不在这里）----
+    // ⚠️ 换子群时**由输入框自己收起面板**：[AylaMessageInput.didUpdateWidget] 在 draftKey
+    // 变化时调 `_closeEmoji()`（message_input.dart:264-280，对应 web
+    // `MessageInput.tsx:134-146` 的 `setEmojiOpen(false)`）；本页的 draftKey 含子群
+    // （`aylaSubgroupDraftKey`）⇒ 换子群即收起 —— 本页**不需要**、也不应该在这里重建输入框
+    // （在 build 期换 key 会让整棵 composer 子树重挂，属额外副作用）。
+    // 本页只负责换作用域后拉该子群的摘要 / 列表。
+    _syncEmojiScope(activeSubgroupId);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -454,6 +684,19 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
                     //（`message_input.dart:559/575` 窄宽两分支）⇒ 同上，只位移不淡入。
                     fadeGlass: false,
                     child: AylaMessageInput(
+                      // 面板开合状态（`emojiOpen`）在输入框内部持有；换子群需收起时
+                      // 本页换掉这个键（等价 web 的 `setEmojiOpen(false)`）。
+                      key: _composerKey,
+                      // ★ 群表情包键（web `MessageInput.tsx:464-476` 宽屏 /
+                      // `:559-571` 窄屏，两处都是 `{isGroup && (<button
+                      // aria-label="群表情包" onClick={() => setEmojiOpen(v => !v)}>)}`）。
+                      // 群聊必开（本页只服务群聊 ⇒ isGroup 恒 true，tsx:88-89）；
+                      // **私聊输入框一律不传这两件**（tsx:89 注释「私信不显示表情包按钮」）。
+                      showEmojiButton: true,
+                      // 同一个面板实例按 narrow 换装配：窄屏在 composer 内正常流向下展开
+                      // （`message_input.dart:660-663`），宽屏由 AylaMessageInput 插 root
+                      // Overlay 向上弹（`message_input.dart:563-586`）。
+                      emojiPanel: _emojiPanel(narrow: narrow),
                       onSubmit: (AylaMessageInputSubmission submission) {
                         _runtime?.send(submission);
                         if (_quote != null) setState(() => _quote = null);

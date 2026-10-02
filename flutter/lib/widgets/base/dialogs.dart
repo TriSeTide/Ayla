@@ -442,6 +442,19 @@ class _AylaModalCardState extends State<AylaModalCard>
     duration: const Duration(milliseconds: 250), // create-sheet-slide-in 250ms
   );
 
+  /// 窄屏上滑：`translateY(100% → 0)` —— 位移量 = **卡片自身高度**（CSS 的百分比
+  /// 就是相对元素自身），`private.css:261–268` 的 `@keyframes create-sheet-slide-in`。
+  ///
+  /// `SlideTransition` 的 offset 单位正是「子元素自身尺寸的比例」
+  /// （内部走 `FractionalTranslation`）⇒ 与 `translateY(100%)` 精确等价。
+  /// ⚠️ 2026-10-02 订正：此处原为 `Offset(0, (1 - v) * 40)`，注释自认「近似 100%
+  /// （视口高）用 40px 表达」—— 40px 在 ≈400px 高的名单卡上几乎看不见滑动，
+  /// 观感就是「凭空在中间弹出」（用户实报）。
+  late final Animation<Offset> _slideIn = Tween<Offset>(
+    begin: const Offset(0, 1),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _slide, curve: AylaCurves.easeOut));
+
   bool _started = false;
 
   @override
@@ -514,6 +527,21 @@ class _AylaModalCardState extends State<AylaModalCard>
         child: body,
       ),
     );
+    // ⚠️ **窄屏贴底档（fixedH 非空）必须让玻璃面撑满 fixedH**（用户 2026-10-02 实报问题 11）。
+    //
+    // 症状：卡片（[card] 的 ConstrainedBox）确实被撑成 60vh 并贴底，但**玻璃面只画内容高**
+    // （实测 135px）并停在卡片顶部、下方整片透明 ⇒ 观感是「凭空在屏幕中间弹出一个矮弹窗」。
+    //
+    // 原因：`minHeight: fixedH` 只作用于**紧邻的** [face]（作为 Stack 的非定位子级，
+    // 收到的是 loose 约束 ⇒ 按内容收缩）。web 的 `live.css:1323–1326`
+    // `.live-viewer-sheet-card { height: 60vh; max-height: 60vh }` 是**内容盒自身**高 60vh
+    // ⇒ 背景/边框/圆角自然撑满整档。这里用 `SizedBox.expand` 把同一语义表达出来：
+    // 高度走父级给的 tight 约束（= fixedH），宽度同理。
+    //
+    // 宽屏浮卡（`fixedH == null`）不加 ⇒ 仍按内容收缩（既有行为不变）。
+    if (fixedH != null) {
+      face = SizedBox.expand(child: face);
+    }
     if (!opaque) {
       face = Stack(
         children: <Widget>[
@@ -585,18 +613,9 @@ class _AylaModalCardState extends State<AylaModalCard>
         child: card,
       );
     }
-    // 窄屏上滑入场（`@keyframes create-sheet-slide-in`：translateY(100% → 0)，250ms）
-    return AnimatedBuilder(
-      animation: _slide,
-      builder: (BuildContext context, Widget? child) {
-        final double v = AylaCurves.easeOut.transform(_slide.value);
-        return Transform.translate(
-          offset: Offset(0, (1 - v) * 40), // 近似 100%（视口高）用 40px 表达
-          child: child,
-        );
-      },
-      child: card,
-    );
+    // 窄屏上滑入场（`@keyframes create-sheet-slide-in`：`translateY(100%) → 0`，250ms
+    // `--ease-out`，`private.css:261–268`）：位移量是**卡片自身高度**，不是固定像素。
+    return SlideTransition(position: _slideIn, child: card);
   }
 }
 

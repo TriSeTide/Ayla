@@ -502,7 +502,13 @@ class _AylaPostEditFullscreenState extends State<AylaPostEditFullscreen> {
               child: Semantics(
                 button: true,
                 label: '移除媒体', // tsx 574 aria-label="移除媒体"
-                child: GestureDetector(
+                // `.post-editor-image-remove` 是 <button>（posts.css:378–389 cursor: pointer）；
+                // disabled 档（savingEdit / editUploading）⇒ base.css:343 not-allowed。
+                child: MouseRegion(
+                  cursor: busy
+                      ? SystemMouseCursors.forbidden
+                      : SystemMouseCursors.click,
+                  child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   // tsx 575：disabled={savingEdit || editUploading}
                   onTap: (busy || widget.onRemoveMedia == null)
@@ -526,6 +532,7 @@ class _AylaPostEditFullscreenState extends State<AylaPostEditFullscreen> {
                         color: AylaColors.textPrimary, // color: var(--text-primary)（387）
                       ),
                     ),
+                  ),
                   ),
                 ),
               ),

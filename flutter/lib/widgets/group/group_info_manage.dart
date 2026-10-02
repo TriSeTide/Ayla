@@ -54,6 +54,10 @@ class AylaGroupInfoSectionTitle extends StatelessWidget {
   /// 前置图标（web `IconMenu width={18} height={18}`；null ⇒ 不渲染）。
   final AylaIconData? icon;
 
+  /// ⚠️ 本件**恒为** `margin-bottom: var(--sp-3)`（group.css 1618）——web 没有第二档。
+  /// 宿主 `.group-info-manage` 另带 `gap: var(--sp-3)`（1790–1794），flex 的 gap
+  /// **不吸收** margin ⇒ 标题与首个相邻块的间距在 web 上就是 12 + 12 = 24，
+  /// 本页保持同一合成结果（2026-10-02 实测 24）。
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -123,6 +127,15 @@ class AylaGroupInfoCardHead extends StatelessWidget {
   /// 头部动作 aria-label（web `aria-label="编辑子群"`）。
   final String? actionSemanticLabel;
 
+  /// 标题锚点（测试/画布用；页面里「子群」「成员」各一个）。
+  ///
+  /// ⚠️ 不要用 `find.text('子群')`：资料卡的统计格也有同名文案（`GroupInfo.tsx:506`）。
+  static Key titleKey(String title) =>
+      ValueKey<String>('ayla-group-info-card-title-$title');
+
+  /// ⚠️ 本件**恒为** `margin-bottom: var(--sp-3)`（group.css 1630）——web 没有第二档，
+  /// 子群卡与成员卡都用它；卡内其余块间距各自来自 `<p>` 的归零（base.css 316–326）
+  /// 与 `.group-info-expand-btn { margin-top: sp2 }`（group.css 2112），不在这里叠。
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -142,6 +155,7 @@ class AylaGroupInfoCardHead extends StatelessWidget {
             header: true,
             child: Text(
               title,
+              key: titleKey(title),
               style: const TextStyle(
                 fontFamily: AylaFonts.display,
                 fontFamilyFallback: AylaFonts.cjkFallback,

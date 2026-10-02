@@ -25,14 +25,27 @@
 ///    `scrollTop`（含 `overflow-anchor: none`）；Flutter 侧用聊天标准做法把列表反转
 ///    （`offset 0` = 底部）⇒ 历史前插天然不移动视口，无需两阶段锚点状态机；
 /// 3. **视口高度判定用 `ScrollPosition.viewportDimension`**（不是内容 Stack 尺寸，同 §6.39 修正）；
-/// 4. **「可见即已读」用有界近似**：web 用 `IntersectionObserver(threshold 0.6)` 逐条精确判定；
-///    Flutter 无内置等价物 ⇒ 只在**未读区间边界附近**的项挂可见性回报器
-///    （绑祖先 `ScrollPosition` + 矩形求交 ≥ .6，同库内轮播卡手法），滚动停止时上报；
+/// 4. **「可见即已读」= 逐条精确判定（已实现）** —— 订正 2026-10-02：本条旧注释自称
+///    「挂可见性回报器」，但当时全库并不存在该回报器（用户实报「没有实现屏幕中看到即已读」
+///    即此）。现由 `widgets/chat/message_visibility.dart` 的
+///    `AylaMessageVisibilityProbe` 承接，语义对齐 web 的
+///    `IntersectionObserver({root: scrollRef.current, threshold: 0.6})`（tsx 896–922）：
+///    自身矩形 ∩ **真视口**矩形 ≥ `.6`（绑祖先 `ScrollPosition`，同库内轮播卡手法；
+///    **不用 `MediaQuery.size`** —— 那会把「屏内但滚出列表视口」误判为可见）；
+///    观察节点 = 消息行 wrapper（含时间分隔，同 web 的 `[data-message-id]` 节点口径，
+///    tsx 1030–1035 / 1048–1053）；条件过滤与 in-flight 去重见 `_onMessageVisible`；
 /// 5. **跳转标签的方向判定**：目标项已构建时用实测矩形（与 web 同口径）；被回收时按
 ///    「目标 seq 是否大于当前消息尾部」判定（web 有窗口首尾 seq 可比，Flutter 无窗口 ⇒ 有界近似）。
+/// 6. **跳转定位用「滚动逼近」等价 web 的 `setWindowAround`**（2026-10-02 修复，见
+///    [AylaMessageList.jumpToMessage] / `_revealTarget` 的注释）：web 把渲染窗口移到目标
+///    附近（tsx:709–721）后目标进入 DOM；本件无窗口可切 ⇒ 把滚动偏移逼近到目标附近，
+///    让 `ListView.builder` 把目标行建出来。这是差异 1（不做 DOM 窗口化）的**必要补充**：
+///    懒构建让未被构建的行没有 RenderObject，`Scrollable.ensureVisible` 会整段失效。
 ///
 /// ## 公开面
 /// `AylaJumpTag` · `AylaMessageList` · 样张 `aylaMessageListSamples()`
+///
+/// 可见性探针本体在 `message_visibility.dart`（`AylaMessageVisibilityProbe`）。
 
 library;
 
@@ -49,6 +62,7 @@ import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import 'message_bubble.dart';
+import 'message_visibility.dart';
 import '../base/reveal.dart';
 import '../base/tooltip.dart';
 
@@ -60,6 +74,12 @@ const double kAylaMessageBottomTolerance = 40;
 
 /// 跳转高亮时长（`.mention-jump-highlight` 的 `1.6s`）。
 const Duration kAylaMessageJumpHighlight = Duration(milliseconds: 1600);
+
+/// 跳转「把目标带进构建范围」的迭代上限（首猜 + 二分的次数预算）。
+///
+/// web 一次 `setWindowAround` 就能把目标放进 DOM（tsx:709–721），Flutter 侧只能靠
+/// 滚动偏移逼近，故给一个有界预算：正常列表 1–3 次即命中，最坏也只是多几次瞬时 `jumpTo`。
+const int kAylaMessageJumpRevealAttempts = 12;
 
 /// `formatTime`（tsx 49–54）：`YYYY-MM-DD HH:mm`；无效时间返回空串。
 String aylaMessageListTime(String iso) {
@@ -198,6 +218,7 @@ class AylaMessageList extends StatefulWidget {
     this.onLoadUntilSeq,
     this.externalJump,
     this.onExternalJumpHandled,
+    this.scrollOffsetGuess,
     this.unreadSeqs = const <int>[],
     this.mentionUnreadSeqs = const <int>[],
     this.replyUnreadSeqs = const <int>[],
@@ -245,6 +266,13 @@ class AylaMessageList extends StatefulWidget {
 
   /// 外部跳转（收藏消息定位）。
   final ({String messageId, int seq})? externalJump;
+
+  /// 跳转定位的首猜偏移（测试注入；生产不传 ⇒ 由平均行高估算）。
+  ///
+  /// 只影响「命中得快不快」：未命中时 [AylaMessageList] 会用已构建索引区间二分收敛，
+  /// 故注入与不注入的正确性一致 —— 测试借此稳定覆盖收敛路径。
+  @visibleForTesting
+  final double Function(int index, ScrollPosition pos)? scrollOffsetGuess;
   final void Function()? onExternalJumpHandled;
 
   final List<int> unreadSeqs;
@@ -270,6 +298,13 @@ class _AylaMessageListState extends State<AylaMessageList> {
   bool _loadInFlight = false;
   String? _handledJumpKey;
   int _tick = 0; // 方向判定需要随滚动刷新
+
+  /// 精确已读**在途**集合 —— web `pendingReadIdsRef.current`（tsx 907–909）：
+  /// 已发起但尚未落地的消息 id；命中即跳过，落地后移除。
+  ///
+  /// 为什么需要它：可见性探针在滚动 / 尺寸变化时都会重算，同一帧内也可能被多次通知；
+  /// 没有这层去重会让同一条消息重复 POST `{exact:true}`（web 同样只靠这个 ref 兜住）。
+  final Set<String> _pendingReadIds = <String>{};
 
   @override
   void initState() {
@@ -299,6 +334,41 @@ class _AylaMessageListState extends State<AylaMessageList> {
   }
 
   GlobalKey _keyOf(String id) => _keys.putIfAbsent(id, () => GlobalKey());
+
+  /// 单条消息「真的进入视口」—— 对齐 web tsx 902–910 的回调体。
+  ///
+  /// 逐条对照：
+  /// - tsx 904（`intersectionRatio < 0.6` ⇒ continue）：阈值判定在
+  ///   [AylaMessageVisibilityProbe] 内（[kAylaMessageReadVisibleRatio]）；
+  /// - tsx 907（排除）：已读 / 自己发的 / poke / 在途 —— 本条；
+  /// - tsx 908–909（in-flight 去重）：加入 [_pendingReadIds]，`finally` 移除。
+  void _onMessageVisible(AylaChatMessage message) {
+    final String? me = widget.currentUserId;
+    if (message.readByMe == true) return; // tsx 907：`target.read_by_me`
+    if (me != null && message.senderId == me) return; // tsx 907：`sender_id === currentUserId`
+    if (message.type == AylaMessageType.poke) return; // tsx 907：`type !== "poke"`
+    if (_pendingReadIds.contains(message.id)) return; // tsx 907：在途
+    final Future<void> Function(AylaChatMessage, bool)? markRead =
+        widget.onMarkRead;
+    if (markRead == null) return; // tsx 900：`!onMarkRead` ⇒ 不建观察器
+    // 本地未确认消息不参与精确已读：web 的观察集合只遍历 `visibleConfirmed`
+    //（tsx 915 + 229–232：`pending` / `sendFailed` / `seq <= 0` 被排除）。
+    if (message.pending || message.sendFailed || message.seq <= 0) return;
+    _pendingReadIds.add(message.id); // tsx 908
+    // 失败语义对齐 web：成功 ⇒ 服务端回执把 `read_by_me` 置真，本条以后被 tsx 907 的
+    // `target.read_by_me` 天然拦住；失败 ⇒ 标记仍为未读、ref 已清空 ⇒ 下次再进入视口
+    // 重试（web 同）。
+    // 本件显式消费错误：web 的 IO 回调里 promise reject 不影响渲染（tsx 909 只接
+    // `.finally`，没有 `catch`），而 Flutter 的未捕获异步错误会走 `FlutterError.onError`
+    // 并让 widget 测试判失败；同时**不伪造已读**。
+    unawaited(
+      Future<void>.sync(() => markRead(message, true))
+          .then<void>((void _) {}, onError: (Object _) {})
+          .whenComplete(
+            () => _pendingReadIds.remove(message.id), // tsx 909：finally 删除
+          ),
+    );
+  }
 
   /// 差分出「刚到达」的消息（web `justArrivedIds`，用于 frost-rise 入场）。
   void _syncNewMessages(List<AylaChatMessage> previous) {
@@ -362,16 +432,72 @@ class _AylaMessageListState extends State<AylaMessageList> {
 
   // ======================= 跳转 =======================
 
+  /// 跳转到指定消息（web tsx:734–762 `jumpToMessage` + tsx:652–667
+  /// `scrollToMessageAndHighlight`）。
+  ///
+  /// ⚠️ 2026-10-02 修复（用户真机实报「未读跳转标签点击不跳转」）：旧实现只在
+  /// `GlobalKey.currentContext != null` 时才 `Scrollable.ensureVisible`。而本件不做
+  /// DOM 窗口化、靠 `ListView.builder` 懒构建（见文件头差异 1）——**目标不在视口附近时
+  /// 它根本没有 RenderObject ⇒ ensureVisible 被整段跳过 ⇒ 点击零位移**（web 侧对应物是
+  /// tsx:738–740 的 `setWindowAround`：把渲染窗口移到目标附近，目标因此进入 DOM，
+  /// 再由 tsx:861–894 的 layout effect 定位）。Flutter 无窗口可切 ⇒ 用 [_revealTarget]
+  /// 把滚动偏移移到目标附近、让目标行真的被构建，再照旧居中 + 高亮。
   Future<void> jumpToMessage(AylaChatMessage target, String kind) async {
-    GlobalKey key = _keyOf(target.id);
-    if (key.currentContext == null && widget.onLoadUntilSeq != null) {
+    // ⚠️ 2026-10-02 修复（**实报根因的本体**）：旧实现用
+    // `key.currentContext == null && onLoadUntilSeq != null` 作为「需要补页」的判据，
+    // 这是把两个不同的语义混为一谈：
+    //   · `loadUntilSeq` 回答的是「**历史是否已加载**」（web useChat.ts:197 命中缓存即
+    //     true），而 chat_support.dart:279 的 `minSeq <= targetSeq` 分支在「目标 seq
+    //     比已加载最小 seq 还大」时**合理地**返回 false —— 那正是「不需要补页」的正常态，
+    //     却被本件当成「补页失败」，于是直接 return ⇒ 点击零位移。
+    //   · 真正的「目标尚未构建」是懒构建问题（文件头差异 1），web 用 `setWindowAround`
+    //     （tsx:709–721）解决，本件由 [_revealTarget] 承担。
+    // 现在只按 web tsx:741–756 的口径用 `loadUntilSeq`：**目标不在缓存里**才补页，
+    // 且补页失败**不阻断**后续尝试（web 的 `if (!(await loaded)) return;` 之后不再有
+    // 任何兜底；Flutter 侧保留「按 seq 重找 + 构建范围逼近」这条更强的路径）。
+    bool inCache = _indexOf(target.id) >= 0;
+    if (!inCache && widget.onLoadUntilSeq != null) {
       final bool loaded = await widget.onLoadUntilSeq!(target.seq);
-      if (!loaded) return;
       if (!mounted) return;
-      await Future<void>.delayed(Duration.zero);
-      key = _keyOf(target.id);
+      if (!loaded) {
+        debugPrint(
+          '[AylaMessageList] 跳转：onLoadUntilSeq(${target.seq}) 返回 false'
+          '（kind=$kind, id=${target.id}）—— 继续按 seq 兜底定位',
+        );
+      }
+      // 补页写的是**父级的数据源**（store / state），本件的 `widget.messages` 要等父级
+      // 用新数组重建才可见（web 同样要等 props，靠 tsx:861–894 的 layout effect 续跳）
+      // ⇒ 等一帧再重找；父级若同步重建则这一帧就能拿到。
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      inCache = _indexOf(target.id) >= 0;
+      if (!inCache) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        inCache = _indexOf(target.id) >= 0;
+      }
+      if (!inCache) {
+        debugPrint(
+          '[AylaMessageList] 跳转失败：目标 ${target.id}（seq=${target.seq}, kind=$kind）'
+          '不在消息面内（已加载 ${widget.messages.length} 条, hasMore=${widget.hasMore}）',
+        );
+        return;
+      }
     }
     if (!mounted) return;
+    GlobalKey key = _keyOf(target.id);
+    // 目标在缓存里、但尚未被懒构建 ⇒ 先把列表滚到它附近（web 的窗口重定心等价物）。
+    if (key.currentContext == null) {
+      await _revealTarget(target.id);
+      if (!mounted) return;
+      key = _keyOf(target.id);
+      if (key.currentContext == null) {
+        debugPrint(
+          '[AylaMessageList] 跳转失败：目标 ${target.id}（seq=${target.seq}, kind=$kind）'
+          '未能进入构建范围（已加载 ${widget.messages.length} 条, hasMore=${widget.hasMore}）',
+        );
+      }
+    }
     final BuildContext? ctx = key.currentContext;
     if (ctx != null && ctx.mounted) {
       // web：滚动到目标并**居中**（`scrollToMessageAndHighlight`）
@@ -386,6 +512,148 @@ class _AylaMessageListState extends State<AylaMessageList> {
     if (kind != 'unread') {
       await widget.onMarkRead?.call(target, true);
     }
+  }
+
+  /// 目标消息在 [AylaMessageList.messages] 中的下标（找不到 ⇒ -1）。
+  int _indexOf(String id) {
+    for (int i = 0; i < widget.messages.length; i++) {
+      if (widget.messages[i].id == id) return i;
+    }
+    return -1;
+  }
+
+  /// 当前**已构建**的行索引区间（`GlobalKey.currentContext != null` ⇔ 该行有 RenderObject）。
+  ({int minIndex, int maxIndex})? _builtIndexRange() {
+    int? minIndex;
+    int? maxIndex;
+    final List<AylaChatMessage> msgs = widget.messages;
+    for (int i = 0; i < msgs.length; i++) {
+      if (_keys[msgs[i].id]?.currentContext != null) {
+        minIndex = i;
+        break;
+      }
+    }
+    for (int i = msgs.length - 1; i >= 0; i--) {
+      if (_keys[msgs[i].id]?.currentContext != null) {
+        maxIndex = i;
+        break;
+      }
+    }
+    if (minIndex == null || maxIndex == null) return null;
+    return (minIndex: minIndex, maxIndex: maxIndex);
+  }
+
+  /// 偏移估算：按「平均行高 × 距末尾的行数」给首猜（padding 与真实行高的差异由逼近吸收）。
+  double _estimateRowOffset(int index, double high) {
+    final int n = widget.messages.length;
+    if (n <= 1) return 0;
+    final double viewport =
+        _scroll.hasClients ? _scroll.position.viewportDimension : 0;
+    final double avg = (high + viewport) / n;
+    return (n - 1 - index) * avg;
+  }
+
+  /// 滚动到指定偏移；[instant] ⇒ `jumpTo`（等价 web 直接赋值 `scrollTop`，tsx:658）。
+  Future<void> _scrollToOffset(double value, {bool instant = false}) async {
+    if (!_scroll.hasClients) return;
+    final ScrollPosition pos = _scroll.position;
+    final double target = value.clamp(0.0, pos.maxScrollExtent);
+    if (instant || !pos.hasContentDimensions) {
+      _scroll.jumpTo(target);
+    } else {
+      await _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+    // 等一帧布局：懒构建的行要在下一帧才有 RenderObject（web 用 useLayoutEffect
+    // 等提交，tsx:861–894；Flutter 侧用帧栅栏表达同一时序）。
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  /// 把「目标消息」带进构建范围 —— web `setWindowAround`（tsx:709–721）的等价物。
+  ///
+  /// web 把渲染窗口挪到目标附近（目标因此进入 DOM，`findMessageNode` 才找得到）；
+  /// 本件无窗口可切，改为**把滚动偏移移到目标附近**，让 `ListView.builder` 重建到它。
+  ///
+  /// ## 逼近策略（偏移 ↔ 已构建索引在本列表单调）
+  /// 1. **首猜**用 [scrollOffsetGuess]（测试注入）或 [_estimateRowOffset]：平均行高 ×
+  ///    距末尾行数。行高不均时会有偏差，但已能把数量级拉对；
+  /// 2. 之后每次用已探到的「偏移 → 已构建最小索引」点对做**割线插值**（两点线性外推/内插），
+  ///    行高在整个列表上近似线性 ⇒ 通常 1–3 次就命中；
+  /// 3. 同时维护 [low, high] 二分安全区间（由每次探针的索引方向收窄），插值结果始终被它夹住 ——
+  ///    即使插值打歪也退化为二分，**保证有界收敛**（行高极端不均时最坏 [kAylaMessageJumpRevealAttempts] 次）。
+  ///
+  /// 每次探针都用 `jumpTo`（瞬时，对齐 web 对 `scrollTop` 的直接赋值 tsx:658），命中即返回，
+  /// 之后由 [jumpToMessage] 的 `ensureVisible` 完成 300ms 居中 + 高亮。
+  Future<void> _revealTarget(String id) async {
+    final int index = _indexOf(id);
+    if (index < 0 || !_scroll.hasClients) return;
+    final ScrollPosition pos = _scroll.position;
+    double high = pos.maxScrollExtent;
+    if (high <= 0) return;
+    double low = 0;
+    // 已探到的「偏移 → 该偏移下已构建的最小索引」样本（按偏移升序，索引随之单调不增）。
+    final List<({double offset, int minIndex})> probes =
+        <({double offset, int minIndex})>[];
+    double? guess =
+        (widget.scrollOffsetGuess?.call(index, pos) ?? _estimateRowOffset(index, high))
+            .clamp(low, high);
+    for (int attempt = 0; attempt < kAylaMessageJumpRevealAttempts; attempt++) {
+      if (!mounted) return;
+      if (_keyOf(id).currentContext != null) return; // 已进入构建范围
+      final double next =
+          (guess ?? _interpolateOffset(probes, index, low, high, pos.maxScrollExtent))
+              .clamp(low, math.min(high, pos.maxScrollExtent));
+      await _scrollToOffset(next, instant: true);
+      if (!mounted) return;
+      if (_keyOf(id).currentContext != null) return;
+      final ({int minIndex, int maxIndex})? built = _builtIndexRange();
+      if (built == null) return;
+      probes.add((offset: next, minIndex: built.minIndex));
+      // 偏移越大越靠「更早」（reverse 列表）⇒ 目标索引小于已构建最小索引时还要往大调。
+      if (index < built.minIndex) {
+        low = math.max(low, next);
+      } else {
+        high = math.min(high, next);
+      }
+      guess = null; // 首猜之后一律走插值/二分
+      if (high - low <= 1) return;
+    }
+  }
+
+  /// 用已有探针做割线插值，预测「目标索引恰好落在已构建区间内」所需的偏移。
+  ///
+  /// 没有可用样本（探针 < 2，或两次探针的索引相同 ⇒ 斜率无从谈起）时退化为区间二分。
+  /// 返回前统一夹进 [low, high] ⇒ 插值失准时仍是有界二分。
+  double _interpolateOffset(
+    List<({double offset, int minIndex})> probes,
+    int index,
+    double low,
+    double high,
+    double maxExtent,
+  ) {
+    final double mid = (low + high) / 2;
+    if (probes.length < 2) return mid;
+    // 取「索引方向上夹住目标」的一对样本；都在同侧则用相邻两点外推。
+    ({double offset, int minIndex})? below; // minIndex <= index
+    ({double offset, int minIndex})? above; // minIndex >= index
+    for (final ({double offset, int minIndex}) p in probes) {
+      if (p.minIndex <= index) {
+        if (below == null || p.minIndex > below.minIndex) below = p;
+      }
+      if (p.minIndex >= index) {
+        if (above == null || p.minIndex < above.minIndex) above = p;
+      }
+    }
+    final ({double offset, int minIndex}) a = below ?? above!;
+    final ({double offset, int minIndex}) b = above ?? below!;
+    if (a.minIndex == b.minIndex) return mid; // 斜率退化（同一构建窗口）
+    final double t = (index - a.minIndex) / (b.minIndex - a.minIndex);
+    final double predicted = a.offset + t * (b.offset - a.offset);
+    if (!predicted.isFinite) return mid;
+    return predicted.clamp(low, math.min(high, maxExtent));
   }
 
   void _setHighlight(String id) {
@@ -505,21 +773,62 @@ class _AylaMessageListState extends State<AylaMessageList> {
     return 'above';
   }
 
+  /// 未读 / @我 / 回复标签的点击（web tsx:844–859 `handleJumpTag`）。
+  ///
+  /// ⚠️ 2026-10-02 修复（实报「点击未读标签不跳转」的**第二环**）：旧实现要求目标
+  /// **先出现在 `widget.messages` 里**才跳（`_findBySeq` 精确匹配），且补页后只等
+  /// `Future.delayed(Duration.zero)` —— 而父级 `setState` 触发的重建要等到**下一帧**，
+  /// 于是「补页成功但 props 还没刷新」时目标永远找不到 ⇒ 静默 return。
+  /// web 侧不存在这个窗口：`MessageList.tsx:723–732` 的 `findBySeq` 直接读 store 的权威桶
+  /// （`buckets[convId].messages`）而不是本轮渲染的 props，并在 tsx:741–744 显式注明
+  /// 「props 未刷新 ⇒ 保留下一次提交再定位」。Flutter 侧 props 是唯一数据面 ⇒ 等一帧（帧栅栏）
+  /// 再按 seq 重找，等价于 web 的那次提交。
+  ///
+  /// 失败必须可诊断：加载失败 / 补页后目标仍未进入消息面，都留 [debugPrint] 痕迹
+  ///（web 此处静默 `return`，Flutter 侧按验收要求至少可观测）。
   Future<void> _handleJumpTag(AylaJumpTag tag) async {
-    final AylaChatMessage? target = _findBySeq(tag.seq);
+    AylaChatMessage? target = _findBySeq(tag.seq);
     if (target == null) {
-      if (widget.onLoadUntilSeq != null) {
-        final bool loaded = await widget.onLoadUntilSeq!(tag.seq);
-        if (!loaded) return;
-        final AylaChatMessage? loaded2 = _findBySeq(tag.seq);
-        if (loaded2 == null) return;
-        await jumpToMessage(loaded2, tag.kind);
+      final Future<bool> Function(int seq)? load = widget.onLoadUntilSeq;
+      if (load == null) {
+        debugPrint(
+          '[AylaMessageList] 跳转失败：seq=${tag.seq}（kind=${tag.kind}）不在已加载的'
+          ' ${widget.messages.length} 条里，且未注入 onLoadUntilSeq',
+        );
+        return;
       }
-      return;
+      final bool loaded = await load(tag.seq);
+      if (!mounted) return;
+      if (!loaded) {
+        debugPrint(
+          '[AylaMessageList] 跳转失败：加载 seq=${tag.seq}（kind=${tag.kind}）未成功',
+        );
+        return;
+      }
+      // 补页写的是**父级的数据源**（store / state），本件的 `widget.messages` 要等父级
+      // 用新数组重建才可见（web 同样要等 props，靠 tsx:861–894 的 layout effect 续跳）
+      // ⇒ 等一帧再按 seq 重找。
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      target = _findBySeq(tag.seq);
+      // 幂等重试一次：父级若在第一帧之后才提交（如异步 `setState` 落到下一帧），
+      // 这一次能拿到（对齐 web「等下一次 confirmedMessages 提交」）。
+      if (target == null) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        target = _findBySeq(tag.seq);
+      }
+      if (target == null) {
+        debugPrint(
+          '[AylaMessageList] 跳转失败：加载 seq=${tag.seq} 后仍未进入本件消息面'
+          '（已加载 ${widget.messages.length} 条）',
+        );
+        return;
+      }
     }
     await jumpToMessage(target, tag.kind);
     if (tag.kind == 'unread') {
-      // 普通未读标签：批量已读到该 seq，排除特殊未读（tsx 856–880）
+      // 普通未读标签：批量已读到该 seq，排除特殊未读（tsx 854–858）
       final List<String> exclude = <String>[
         for (final int seq in <int>[
           ...widget.mentionUnreadSeqs,
@@ -629,6 +938,10 @@ class _AylaMessageListState extends State<AylaMessageList> {
     );
   }
 
+  /// 单条消息行（web tsx 1024–1053 的 `visibleMessages.map`）。
+  ///
+  /// 外层包 [AylaMessageVisibilityProbe] ⇒ 该行真的进入视口时触发精确已读
+  /// （web 的 `IntersectionObserver`，见文件头「与 web 的差异」4）。
   Widget _row(AylaChatMessage m, bool grouped) {
     final Map<String, String> names = _memberNames;
     final Map<String, ({String? avatar, String label})> avatars =
@@ -695,18 +1008,26 @@ class _AylaMessageListState extends State<AylaMessageList> {
             shareGroupId: _isGroup ? widget.conversation?.id : null,
           );
 
+    // 「屏幕中看到即已读」探针（web 的 IntersectionObserver，tsx 896–922）：
+    // 观察节点 = 本 wrapper —— 与 web 的 `[data-message-id]` 节点同口径
+    //（tsx 1030–1035 / 1048–1053：那个 div 同样把 `.time-divider` 包在里面）。
+    // 条件过滤与 in-flight 去重落在 [_onMessageVisible]。
     return KeyedSubtree(
       key: key,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          if (grouped) _timeDivider(m),
-          if (highlighted)
-            _JumpHighlight(child: inner)
-          else
-            inner,
-        ],
+      child: AylaMessageVisibilityProbe(
+        messageId: m.id,
+        onVisible: () => _onMessageVisible(m),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (grouped) _timeDivider(m),
+            if (highlighted)
+              _JumpHighlight(child: inner)
+            else
+              inner,
+          ],
+        ),
       ),
     );
   }

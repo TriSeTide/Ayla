@@ -8,14 +8,17 @@
 /// | 群头像：选择 → 校验 → 预览 → 保存（三步上传 + PATCH） | 145–176 |
 /// | 管理卡：加入方式（群主可改，自绘下拉）/ 入群申请审批 / 转让 / 解散 / 退出 | 522–645 |
 /// | 右列：子群卡（预览 3 条 + 展开 + 编辑态） / 成员卡（搜索 + 角色 + 操作） | 648–794 |
+/// | **整页滚动容器**（`.group-info`） | 1382–1401（`AylaGroupInfoPageScroll`） |
 /// | 两栏/单列布局与骨架 | 1422–1466（`AylaGroupInfoLayout`） |
 /// | 三个弹窗（转让群主 / 子群编辑 / 危险操作确认） | 797–889 |
 ///
 /// ## 机制差异（登记）
-/// 1. **「成员可上传表情包」开关未接**：web 读 `api/emoji.ts` 的群表情包摘要
-///    （`getGroupEmojiPackSummary` / `setGroupEmojiUploadPolicy`，tsx 222–263）；
-///    Flutter 侧尚无 emoji 域 api（表情包面板已交付，但那是 `emoji` 数据源）⇒
-///    该行**不渲染**（web 在没有摘要时同样不渲染：`emojiPolicyLoaded` 为 false 才隐藏）。
+/// 1. **「成员可上传表情包」开关已接**（2026-10-02）：本行此前登记为「Flutter 侧尚无
+///    emoji 域 api ⇒ 不渲染」，现补齐 `lib/core/api/emoji_api.dart` 后按 web 原样渲染。
+///    事实源：`GroupInfo.tsx:584-599`（`isOwner && emojiPolicyLoaded` 才渲染，
+///    `disabled = busyAction !== null`）+ `:128-130`（两个 state）
+///    + `:222-242`（取摘要：404 ⇒ `allow_member_upload = false` **且置 loaded**，
+///    其它错误 ⇒ `managementError`）+ `:252-263`（PATCH 后回写后端值）。
 /// 2. **在线态已接 presence**（2026-09-29）：成员数统计 / 成员列表 / 转让弹窗三处
 ///    与 web `GroupInfo.tsx:210 / 764 / 971` 用**同一条规则**
 ///    `presenceOnline(users, withLiveStatus(statuses, m.user))` ——
@@ -33,6 +36,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
+import '../core/api/emoji_api.dart';
 import '../core/models/conversation.dart';
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../core/models/social_requests.dart' as api;
@@ -49,6 +53,7 @@ import '../state/display_status.dart';
 import '../state/group_providers.dart';
 import '../state/presence_providers.dart';
 import '../state/paged_list.dart';
+import '../theme/glass.dart' show AylaGlassCard;
 import '../theme/tokens.dart' show AylaSpacing;
 import '../widgets/base/dialogs.dart' show AylaConfirmDialog;
 import '../widgets/base/resource_image.dart' show mediaContentUrl;
@@ -94,6 +99,11 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
   AylaSubGroupDialogState? _subgroupDialog;
   AylaSubGroup? _subgroupDelete;
   bool _transferOpen = false;
+
+  /// 群表情包上传权限（web `GroupInfo.tsx:128-130` 的两个 state）：
+  /// 仅群主可见可改；包未创建（404）按默认 false 且**仍算已加载**（tsx:234-236）。
+  bool _allowMemberUpload = false;
+  bool _emojiPolicyLoaded = false;
   bool _confirmDissolve = false;
   bool _confirmLeave = false;
   AylaConversationMember? _confirmTransfer;
@@ -170,6 +180,9 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     await _members!.load();
     if (!mounted) return;
     if (_canManage) await _loadJoinRequests();
+    // 详情兜底（store 未命中时）：**必须在 _loadEmojiPolicy 之前** ——
+    // `_isOwner` 读的是 `_conv`（store 或 `_detail`），详情未落时它必然 false，
+    // 与 web `GroupInfo.tsx:179-193`「先取详情、再按 isOwner 触发 emoji effect」同序。
     if (_conv == null) {
       try {
         final AylaConversationSummary fresh =
@@ -181,6 +194,9 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
         if (mounted) setState(() => _loadError = error.toString());
       }
     }
+    if (!mounted) return;
+    // 群表情包上传权限（web `GroupInfo.tsx:222-242` 的 effect，仅群主）
+    await _loadEmojiPolicy();
   }
 
   Future<void> _loadJoinRequests() async {
@@ -197,6 +213,49 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     _joinRequests = pager;
     await pager.load();
     if (mounted) setState(() {});
+  }
+
+  /// 群表情包上传权限摘要 —— web `GroupInfo.tsx:222-242` 的等价物。
+  ///
+  /// 口径逐字对齐：
+  /// - 仅群主触发（tsx:223 的 `if (!isOwner) return`）；
+  /// - 404（包未创建）⇒ `allow_member_upload = false` **且置 loaded**（tsx:234-236）；
+  /// - 其它错误 ⇒ 落 `managementError`（tsx:238，文案「表情上传权限加载失败」）且
+  ///   **不置 loaded** ⇒ 该行不渲染（与 web 同：loaded 仍是 false）。
+  Future<void> _loadEmojiPolicy() async {
+    if (!_isOwner) return;
+    final AylaGroupEmojiPackLoad load =
+        await AylaEmojiApi.loadGroupEmojiPackSummary(groupId);
+    if (!mounted) return;
+    setState(() {
+      if (load.error != null) {
+        _managementError = load.error;
+        _emojiPolicyLoaded = false;
+        return;
+      }
+      // payload == null == missing（404）⇒ 默认 false，仍算已加载
+      _allowMemberUpload = load.allowMemberUpload;
+      _emojiPolicyLoaded = true;
+    });
+  }
+
+  /// 切换「成员可上传表情包」—— web `GroupInfo.tsx:252-263`：不清空已加载态，
+  /// 成功用**后端回值**回写、失败落 managementError（busyAction 由 `_busyAction` 表达）。
+  Future<void> _toggleEmojiUploadPolicy(bool value) async {
+    setState(() {
+      _busyAction = 'emoji-policy';
+      _managementError = null;
+    });
+    try {
+      final AylaGroupEmojiPackPayload payload =
+          await AylaEmojiApi.setGroupEmojiUploadPolicy(groupId, value);
+      if (!mounted) return;
+      setState(() => _allowMemberUpload = payload.allowMemberUpload);
+    } catch (error) {
+      if (mounted) setState(() => _managementError = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyAction = null);
+    }
   }
 
   Future<void> _reload() async {
@@ -357,17 +416,21 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     ref.watch(subgroupStateProvider);
     final AylaConversationSummary? conv = _conv;
     if (conv == null) {
-      // tsx 392–408：加载骨架 / 错误态。
-      return AylaGroupInfoLayout(
-        loading: _loadError == null,
-        side: <Widget>[
-          if (_loadError != null)
-            AylaGroupScenePlaceholder(
-              title: '群信息加载失败',
-              description: _loadError,
-            ),
-        ],
-        main: const <Widget>[],
+      // tsx 392–408：加载骨架 / 错误态 —— **同样在 `.group-info` 这层整页容器内**
+      // （tsx 393 的 `<div className="group-info">` 是两条分支的共同外层；
+      // 正常分支的 410–412 是同一层容器 ⇒ 由 [_buildInfo] 的根同款包出）。
+      return AylaGroupInfoPageScroll(
+        child: AylaGroupInfoLayout(
+          loading: _loadError == null,
+          side: <Widget>[
+            if (_loadError != null)
+              AylaGroupScenePlaceholder(
+                title: '群信息加载失败',
+                description: _loadError,
+              ),
+          ],
+          main: const <Widget>[],
+        ),
       );
     }
     return _buildInfo(context, conv);
@@ -432,6 +495,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
       saving: _saving,
       error: _error,
       onEdit: _canManage ? () => setState(() => _editing = true) : null,
+      // `.group-info-actions-row { margin-top: var(--sp-3) }`（group.css 2235–2240）：
+      // 展示态最后一段与动作行之间的 12px —— 资料卡内是 `AylaGroupInfoProfile` 的
+      // 最后一段（统计格自带 border-block），本行紧跟其后。
+      actionsRowMarginTop: AylaSpacing.sp3,
       share: AylaShareButton(
         label: '分享群聊',
         onPressed: () => unawaited(aylaOpenShareSheet(
@@ -456,9 +523,15 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
 
     return Stack(
       children: <Widget>[
-        AylaGroupInfoLayout(
-          side: <Widget>[profile, manageCard],
-          main: <Widget>[subgroupCard, memberCard],
+        // `.group-info`：整页持有滚动（group.css 1382–1401）。
+        // ⚠️ **只有页面内容进这层容器，弹层是它的兄弟**：web 的五个弹层都渲染在
+        // `.group-info` **之外**（tsx 795 闭合 `</div>` 之后才是 797–889 的
+        // TransferOwnerDialog / SubGroupDialog / 确认框）⇒ 它们不随页面滚动。
+        AylaGroupInfoPageScroll(
+          child: AylaGroupInfoLayout(
+            side: <Widget>[profile, manageCard],
+            main: <Widget>[subgroupCard, memberCard],
+          ),
         ),
         if (_transferOpen)
           AylaTransferOwnerDialog(
@@ -566,181 +639,234 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
   }
 
   /// 管理卡（tsx 522–645）。
+  ///
+  /// ## 卡体容器（2026-10-02 修；用户实报「卡片没有应用上」）
+  /// web 是 `<section class="group-info-manage solid-card">`（`GroupInfo.tsx:522`）+
+  /// `.group-info-manage { padding: var(--sp-4); display:flex; flex-direction:column;
+  /// gap: var(--sp-3) }`（`group.css:1677–1682` + `1790–1794`）。
+  /// Flutter 侧原返回**裸 Column**（无卡体、无内距、无块间距）
+  /// ⇒ 卡头与列表直接贴容器内距边。材质与资料卡同源（`.solid-card` 与 `.glass-card`
+  /// 声明逐条相同：`app.css:230–238` vs `241–249`，后者注释原文「保留旧类名兼容页面；
+  /// 材质统一为 Auroraqua 玻璃」）⇒ 统一用 [AylaGlassCard]。
   Widget _buildManageCard(
     AylaConversationSummary conv,
     AylaPagedList<api.AylaGroupJoinRequest>? joinRequests,
   ) {
     final bool publicJoin = conv.joinPolicy == 'public';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        const AylaGroupInfoSectionTitle(title: '管理', icon: null),
-        if (_managementError != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AylaSpacing.sp2),
-            child: Text(_managementError!),
-          ),
-        if (_canManage) ...<Widget>[
-          AylaGroupInfoSettingsBox(
-            children: <Widget>[
-              AylaGroupInfoSettingRow(
-                label: '加入方式',
-                value: _isOwner ? null : (publicJoin ? '公开加入' : '申请加入'),
-                trailing: _isOwner
-                    ? AylaGroupInfoSelect(
-                        value: publicJoin ? 'public' : 'application',
-                        enabled: _busyAction == null,
-                        semanticLabel: '加入方式',
-                        options: const <AylaGroupJoinPolicyOption>[
-                          AylaGroupJoinPolicyOption(
-                            value: 'public',
-                            label: '公开加入',
-                          ),
-                          AylaGroupJoinPolicyOption(
-                            value: 'application',
-                            label: '申请加入',
-                          ),
-                        ],
-                        onChanged: (String next) => unawaited(
-                          _runManagement(
-                            'join-policy',
-                            () => AylaChatApi.patchConversation(
-                              groupId,
-                              joinPolicy: next == 'public'
-                                  ? AylaGroupJoinPolicy.public
-                                  : AylaGroupJoinPolicy.application,
+    return AylaGlassCard(
+      // padding: var(--sp-4)（group.css:1677–1682）
+      padding: const EdgeInsets.all(AylaSpacing.sp4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: AylaSpacing.sp3, // gap: var(--sp-3)（group.css:1790–1794）
+        children: <Widget>[
+          const AylaGroupInfoSectionTitle(title: '管理', icon: null),
+          // ⚠️ 保留原有的 `padding-bottom: sp2`（非 web 值）：web 的 `p.group-info-error`
+          // 因 `base.css:316–326` 把 `p` 归零而**没有**外边距，本轮只补卡体与块间距，
+          // 不为这处既有的 8px 偏差扩大改动面（登记在测试的「不锁」段）。
+          if (_managementError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AylaSpacing.sp2),
+              child: Text(_managementError!),
+            ),
+          if (_canManage) ...<Widget>[
+            AylaGroupInfoSettingsBox(
+              children: <Widget>[
+                AylaGroupInfoSettingRow(
+                  label: '加入方式',
+                  value: _isOwner ? null : (publicJoin ? '公开加入' : '申请加入'),
+                  trailing: _isOwner
+                      ? AylaGroupInfoSelect(
+                          value: publicJoin ? 'public' : 'application',
+                          enabled: _busyAction == null,
+                          semanticLabel: '加入方式',
+                          options: const <AylaGroupJoinPolicyOption>[
+                            AylaGroupJoinPolicyOption(
+                              value: 'public',
+                              label: '公开加入',
+                            ),
+                            AylaGroupJoinPolicyOption(
+                              value: 'application',
+                              label: '申请加入',
+                            ),
+                          ],
+                          onChanged: (String next) => unawaited(
+                            _runManagement(
+                              'join-policy',
+                              () => AylaChatApi.patchConversation(
+                                groupId,
+                                joinPolicy: next == 'public'
+                                    ? AylaGroupJoinPolicy.public
+                                    : AylaGroupJoinPolicy.application,
+                              ),
                             ),
                           ),
-                        ),
-                      )
-                    : null,
-              ),
-            ],
-          ),
-          AylaGroupJoinRequests(
-            total: joinRequests?.total ?? 0,
-            requests: <AylaGroupJoinRequest>[
-              for (final api.AylaGroupJoinRequest r
-                  in joinRequests?.items ?? const <api.AylaGroupJoinRequest>[])
-                AylaGroupJoinRequest(
-                  id: r.id,
-                  name: (r.applicant.nickname ?? '').isEmpty
-                      ? (r.applicant.username ?? '')
-                      : r.applicant.nickname ?? '',
-                  message: r.message,
+                        )
+                      : null,
                 ),
-            ],
-            loading: joinRequests?.loading ?? false,
-            error: joinRequests?.error != null,
-            busy: _busyAction != null,
-            onAccept: (AylaGroupJoinRequest request) => unawaited(
-              _runManagement(
-                'join-${request.id}',
-                () async {
-                  await AylaChatApi.actionJoinRequest(request.id, true);
-                  joinRequests?.removeWhere(
-                    (api.AylaGroupJoinRequest r) => r.id == request.id,
-                  );
-                },
+                // web `GroupInfo.tsx:584-599`：`isOwner && emojiPolicyLoaded` 才渲染；
+                // `disabled = busyAction !== null`（本页 = `_busyAction == null` 才可改）。
+                if (_isOwner && _emojiPolicyLoaded)
+                  AylaGroupInfoSwitch(
+                    label: '成员可上传表情包',
+                    value: _allowMemberUpload,
+                    onChanged: _busyAction == null
+                        ? (bool next) => unawaited(_toggleEmojiUploadPolicy(next))
+                        : null,
+                  ),
+              ],
+            ),
+            AylaGroupJoinRequests(
+              total: joinRequests?.total ?? 0,
+              requests: <AylaGroupJoinRequest>[
+                for (final api.AylaGroupJoinRequest r
+                    in joinRequests?.items ?? const <api.AylaGroupJoinRequest>[])
+                  AylaGroupJoinRequest(
+                    id: r.id,
+                    name: (r.applicant.nickname ?? '').isEmpty
+                        ? (r.applicant.username ?? '')
+                        : r.applicant.nickname ?? '',
+                    message: r.message,
+                  ),
+              ],
+              loading: joinRequests?.loading ?? false,
+              error: joinRequests?.error != null,
+              busy: _busyAction != null,
+              onAccept: (AylaGroupJoinRequest request) => unawaited(
+                _runManagement(
+                  'join-${request.id}',
+                  () async {
+                    await AylaChatApi.actionJoinRequest(request.id, true);
+                    joinRequests?.removeWhere(
+                      (api.AylaGroupJoinRequest r) => r.id == request.id,
+                    );
+                  },
+                ),
+              ),
+              onReject: (AylaGroupJoinRequest request) => unawaited(
+                _runManagement(
+                  'join-${request.id}',
+                  () async {
+                    await AylaChatApi.actionJoinRequest(request.id, false);
+                    joinRequests?.removeWhere(
+                      (api.AylaGroupJoinRequest r) => r.id == request.id,
+                    );
+                  },
+                ),
               ),
             ),
-            onReject: (AylaGroupJoinRequest request) => unawaited(
-              _runManagement(
-                'join-${request.id}',
-                () async {
-                  await AylaChatApi.actionJoinRequest(request.id, false);
-                  joinRequests?.removeWhere(
-                    (api.AylaGroupJoinRequest r) => r.id == request.id,
-                  );
-                },
-              ),
-            ),
+          ],
+          AylaGroupInfoDangerActions(
+            onTransfer: _isOwner ? () => setState(() => _transferOpen = true) : null,
+            onDissolve: _isOwner ? () => setState(() => _confirmDissolve = true) : null,
+            dissolveBusy: _busyAction == 'dissolve',
+            onLeave: !_isOwner ? () => setState(() => _confirmLeave = true) : null,
+            leaveBusy: _busyAction == 'leave',
+            anyActionBusy: _busyAction != null,
           ),
         ],
-        AylaGroupInfoDangerActions(
-          onTransfer: _isOwner ? () => setState(() => _transferOpen = true) : null,
-          onDissolve: _isOwner ? () => setState(() => _confirmDissolve = true) : null,
-          dissolveBusy: _busyAction == 'dissolve',
-          onLeave: !_isOwner ? () => setState(() => _confirmLeave = true) : null,
-          leaveBusy: _busyAction == 'leave',
-          anyActionBusy: _busyAction != null,
-        ),
-      ],
+      ),
     );
   }
 
   /// 子群卡（tsx 650–745）。
+  ///
+  /// ## 卡体容器（2026-10-02 修；用户实报「卡片没有应用上」）
+  /// web = `<section class="group-info-subgroups solid-card">`（`GroupInfo.tsx:650`）
+  /// + `.group-info-subgroups { padding: var(--sp-4) }`（`group.css:1677–1682`）。
+  /// Flutter 侧原返回**裸 Column**（无卡体、无内距）⇒ 卡头直接贴容器内距边。
+  /// ⚠️ 卡内**没有 gap**（web 的 `.group-info-subgroups` 未声明 gap）⇒ 块间距
+  /// 全部来自各件自带的 margin：卡头 `margin-bottom: sp3`（`group.css:1630`）、
+  /// 「查看更多」`margin-top: sp2`（`group.css:2112`）。故卡头保持缺省 sp3。
   Widget _buildSubgroupCard(
     List<AylaSubGroup> items,
     List<AylaSubGroup> visible,
   ) {
     final AylaSubGroupState state = ref.read(subgroupStateProvider);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        AylaGroupInfoCardHead(
-          title: '子群',
-          count: _subgroups?.total ?? items.length,
-          actionLabel: _canManage && !_subgroupEditing ? '编辑子群' : null,
-          actionSemanticLabel: '编辑子群',
-          onAction: _canManage && !_subgroupEditing
-              ? () => setState(() {
-                    _subgroupError = null;
-                    _subgroupEditing = true;
-                  })
-              : null,
-        ),
-        if (_subgroupError != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AylaSpacing.sp2),
-            child: Text(_subgroupError!),
+    return AylaGlassCard(
+      padding: const EdgeInsets.all(AylaSpacing.sp4), // padding: var(--sp-4)
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          AylaGroupInfoCardHead(
+            title: '子群',
+            count: _subgroups?.total ?? items.length,
+            actionLabel: _canManage && !_subgroupEditing ? '编辑子群' : null,
+            actionSemanticLabel: '编辑子群',
+            onAction: _canManage && !_subgroupEditing
+                ? () => setState(() {
+                      _subgroupError = null;
+                      _subgroupEditing = true;
+                    })
+                : null,
           ),
-        AylaGroupSubgroupList(
-          subgroups: <AylaGroupSubgroupItem>[
-            for (final AylaSubGroup sg in visible)
-              AylaGroupSubgroupItem(
-                id: sg.id,
-                name: sg.name,
-                isDefault: sg.isDefault,
-                muted: sg.muted == true,
-                unread: state.unreadOf(groupId, sg.id),
-              ),
-          ],
-          loading: _subgroups?.loading ?? false,
-          error: _subgroups?.error != null,
-          canManage: _canManage,
-          editing: _subgroupEditing,
-          onEdit: (AylaGroupSubgroupItem item) {
-            AylaSubGroup? target;
-            for (final AylaSubGroup sg in items) {
-              if (sg.id == item.id) target = sg;
-            }
-            if (target == null) return;
-            setState(() {
-              _subgroupError = null;
-              _subgroupDialog = AylaSubGroupDialogState.edit(target!);
-            });
-          },
-          onAdd: _canManage
-              ? () => setState(() {
-                    _subgroupError = null;
-                    _subgroupDialog = const AylaSubGroupDialogState.add();
-                  })
-              : null,
-          onDone: () => setState(() => _subgroupEditing = false),
-        ),
-        if (items.length > kAylaSubgroupPreviewCount)
-          AylaGroupSubgroupExpandButton(
-            hiddenCount: items.length - kAylaSubgroupPreviewCount,
-            expanded: _showAllSubgroups,
-            onPressed: () =>
-                setState(() => _showAllSubgroups = !_showAllSubgroups),
+          // ⚠️ 保留原有的 `padding-bottom: sp2`（非 web 值，同上条）；web 的
+          // `p.group-info-error` 因 `p` 归零而没有外边距。
+          if (_subgroupError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AylaSpacing.sp2),
+              child: Text(_subgroupError!),
+            ),
+          AylaGroupSubgroupList(
+            subgroups: <AylaGroupSubgroupItem>[
+              for (final AylaSubGroup sg in visible)
+                AylaGroupSubgroupItem(
+                  id: sg.id,
+                  name: sg.name,
+                  isDefault: sg.isDefault,
+                  muted: sg.muted == true,
+                  unread: state.unreadOf(groupId, sg.id),
+                ),
+            ],
+            loading: _subgroups?.loading ?? false,
+            error: _subgroups?.error != null,
+            canManage: _canManage,
+            editing: _subgroupEditing,
+            onEdit: (AylaGroupSubgroupItem item) {
+              AylaSubGroup? target;
+              for (final AylaSubGroup sg in items) {
+                if (sg.id == item.id) target = sg;
+              }
+              if (target == null) return;
+              setState(() {
+                _subgroupError = null;
+                _subgroupDialog = AylaSubGroupDialogState.edit(target!);
+              });
+            },
+            onAdd: _canManage
+                ? () => setState(() {
+                      _subgroupError = null;
+                      _subgroupDialog = const AylaSubGroupDialogState.add();
+                    })
+                : null,
+            onDone: () => setState(() => _subgroupEditing = false),
           ),
-      ],
+          // `.group-info-expand-btn { margin-top: var(--sp-2) }`（group.css:2109–2116）
+          // —— 由本件的 `padding: top sp2` 表达，是卡内最后一段与它之间的真实间距。
+          if (items.length > kAylaSubgroupPreviewCount)
+            AylaGroupSubgroupExpandButton(
+              hiddenCount: items.length - kAylaSubgroupPreviewCount,
+              expanded: _showAllSubgroups,
+              onPressed: () =>
+                  setState(() => _showAllSubgroups = !_showAllSubgroups),
+            ),
+        ],
+      ),
     );
   }
 
   /// 成员卡（tsx 747–793）。
+  ///
+  /// ## 卡体容器（2026-10-02 修；用户实报「卡片没有应用上」）
+  /// web = `<section class="group-info-members solid-card">`（`GroupInfo.tsx:747`）
+  /// + `.group-info-members { padding: var(--sp-4) }`（`group.css:1677–1682`）。
+  /// Flutter 侧原返回**裸 Column**（无卡体、无内距）⇒ 卡头/搜索框/列表直接贴容器内距边。
+  /// ⚠️ 卡内**没有 gap**（web 未声明 `gap`）⇒ 相邻块的间距**全部来自某一件自己的
+  /// margin（web 每个元素至多被赋一次非零值 ⇒ 不存在叠算）：
+  /// 卡头 `margin-bottom: sp3`（`group.css:1630`）；搜索框 `.field` 既未声明 margin
+  /// （`app.css:70–78`）也不在 `base.css:316–326` 的归零名单里，而**浏览器对 `input`
+  /// 的 UA 样式本就是 `margin: 0`**（Chromium/WebKit 的 html.css）⇒ web 的
+  /// head→搜索框 = **12**、搜索框→首行 = **0**。Flutter 侧逐条同值，不需要补任何内距。
   ///
   /// [memberOnline] = presence 实时在线判定（web `GroupInfo.tsx:764`；
   /// 无记录回退 REST 快照 `user.online`、隐身强制离线）。
@@ -749,64 +875,67 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     String? currentUserId,
     bool Function(AylaConversationMember) memberOnline,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        AylaGroupInfoCardHead(
-          title: '成员',
-          count: members?.total ?? 0,
-          onlineCount: <AylaConversationMember>[
-            for (final AylaConversationMember m
-                in members?.items ?? const <AylaConversationMember>[])
-              if (memberOnline(m)) m, // tsx 207–213 + 752
-          ].length,
-        ),
-        AylaGroupMemberSearchField(
-          controller: _memberQuery,
-          onChanged: (String value) {
-            unawaited(members?.refresh());
-          },
-        ),
-        AylaGroupMemberList(
-          members: <AylaGroupMemberItem>[
-            for (final AylaConversationMember m
-                in members?.items ?? const <AylaConversationMember>[])
-              AylaGroupMemberItem(
-                id: m.user.id,
-                name: m.user.displayName ?? m.user.username ?? '',
-                avatarUrl: (m.user.avatar ?? '').isEmpty ? null : m.user.avatar,
-                online: memberOnline(m), // tsx 764
-                role: _roleOf(m.role),
-                isSelf: m.user.id == currentUserId,
-              ),
-          ],
-          loading: members?.loading ?? false,
-          error: members?.error != null,
-          canManage: _canManage,
-          isOwner: _isOwner,
-          busyAction: _busyAction,
-          onSetRole: (AylaGroupMemberItem item) => unawaited(
-            _runManagement(
-              'role-${item.id}',
-              () => AylaChatApi.setMemberRole(
-                groupId,
-                item.id,
-                item.role == AylaGroupRole.admin
-                    ? AylaConversationMemberRole.member
-                    : AylaConversationMemberRole.admin,
+    return AylaGlassCard(
+      padding: const EdgeInsets.all(AylaSpacing.sp4), // padding: var(--sp-4)
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          AylaGroupInfoCardHead(
+            title: '成员',
+            count: members?.total ?? 0,
+            onlineCount: <AylaConversationMember>[
+              for (final AylaConversationMember m
+                  in members?.items ?? const <AylaConversationMember>[])
+                if (memberOnline(m)) m, // tsx 207–213 + 752
+            ].length,
+          ),
+          AylaGroupMemberSearchField(
+            controller: _memberQuery,
+            onChanged: (String value) {
+              unawaited(members?.refresh());
+            },
+          ),
+          AylaGroupMemberList(
+            members: <AylaGroupMemberItem>[
+              for (final AylaConversationMember m
+                  in members?.items ?? const <AylaConversationMember>[])
+                AylaGroupMemberItem(
+                  id: m.user.id,
+                  name: m.user.displayName ?? m.user.username ?? '',
+                  avatarUrl: (m.user.avatar ?? '').isEmpty ? null : m.user.avatar,
+                  online: memberOnline(m), // tsx 764
+                  role: _roleOf(m.role),
+                  isSelf: m.user.id == currentUserId,
+                ),
+            ],
+            loading: members?.loading ?? false,
+            error: members?.error != null,
+            canManage: _canManage,
+            isOwner: _isOwner,
+            busyAction: _busyAction,
+            onSetRole: (AylaGroupMemberItem item) => unawaited(
+              _runManagement(
+                'role-${item.id}',
+                () => AylaChatApi.setMemberRole(
+                  groupId,
+                  item.id,
+                  item.role == AylaGroupRole.admin
+                      ? AylaConversationMemberRole.member
+                      : AylaConversationMemberRole.admin,
+                ),
               ),
             ),
-          ),
-          onRemove: (AylaGroupMemberItem item) => unawaited(
-            _runManagement(
-              'remove-${item.id}',
-              () => AylaChatApi.removeMember(groupId, item.id),
+            onRemove: (AylaGroupMemberItem item) => unawaited(
+              _runManagement(
+                'remove-${item.id}',
+                () => AylaChatApi.removeMember(groupId, item.id),
+              ),
             ),
+            onOpenProfile: (AylaGroupMemberItem item) =>
+                context.go('/user/${Uri.encodeComponent(item.id)}'),
           ),
-          onOpenProfile: (AylaGroupMemberItem item) =>
-              context.go('/user/${Uri.encodeComponent(item.id)}'),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

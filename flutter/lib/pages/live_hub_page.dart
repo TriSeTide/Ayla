@@ -98,7 +98,11 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
     _start();
-    _loadFriends();
+    // ⚠️ **必须帧后**（详见 [_loadFriends]）：首帧 build 期同步写 social store
+    // 会撞上 GroupPage 的 build 期 setState。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadFriends();
+    });
     _loadElysia();
   }
 
@@ -177,6 +181,16 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
     unawaited(pager.load());
   }
 
+  /// ⚠️ **必须帧后调用**（2026-10-02 修「setState() or markNeedsBuild() called during build」）：
+  /// \`aylaHubFriendIds()\` → \`aylaSocialStore.load()\` 在**首个 await 之前**是同步段
+  /// （\`state/social_store.dart:391\` 的 \`_patch\` → 同步 \`notifyListeners\`）。
+  /// 若在 \`initState\` 直接调，通知会落在**本帧 build 期**：\`AylaSocialController\`
+  /// → \`AylaGroupDirectory._forward\`（\`group_support.dart:431\`）
+  /// → \`GroupPage._onChanged\`（\`group_page.dart:383\` 的裸 \`setState\`）
+  /// ⇒ 用户 \`flutter run\` 首条异常（GroupPage 未挂载时只读 items，不会炸 ⇒ 只在
+  /// 「群壳 + 大厅页」并存时才现形）。与同文件 \`_registerDirectoryEvents\` /
+  /// \`_registerRefresh\` 的既有帧后范式一致。
+  /// 回归锁：\`test/hub_friends_load_phase_test.dart\`。
   Future<void> _loadFriends() async {
     final Set<String> ids = await aylaHubFriendIds();
     if (!mounted || ids.isEmpty) return;

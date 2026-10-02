@@ -693,7 +693,10 @@ class _MenuItemState extends State<_MenuItem> {
 
   @override
   Widget build(BuildContext context) {
+    // `.privacy-menu-item`（profile.css:717 声明 cursor: pointer）是 <button>
+    // ⇒ 全局 pointer（同 base.css:340）。
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(

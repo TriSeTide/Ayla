@@ -11,6 +11,15 @@
 /// 非 autoDispose 的全局 provider：路由切换不重建，与 web 的模块级单例 store 语义一致；
 /// 登出 / 401 由 [aylaStopPresenceWs]（`WidgetRef` 版）与
 /// [aylaStopPresenceWsForContainer]（`ProviderContainer` 版）断开并清空。
+///
+/// ### 关闭顺序（2026-10-02 修复）
+/// 这里有两个**不同**的关闭入口，不能混用：
+/// - **显式登出** ⇒ `client.disconnect()`：容器活着，必须清空 presence 与 realtime 两处状态；
+/// - **容器销毁** ⇒ `client.dispose()`（`ref.onDispose` 上挂的就是它）：provider 图回收期间，
+///   `presenceStateProvider` / `realtimeProvider` **可能已经先被 dispose**
+///   （三个 provider 之间用 `read`、没有依赖边 ⇒ Riverpod 不保证顺序）⇒
+///   再回写就是 "used after being disposed"（实测：`test/auth_remember_test.dart` 5 条用例）。
+///   故 `dispose()` 先移交状态所有权、再断连接；两者都幂等且可重入。
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,7 +44,11 @@ final Provider<AylaPresenceWsClient> presenceWsProvider =
     presence: ref.read(presenceStateProvider),
     realtime: ref.read(realtimeProvider),
   );
-  ref.onDispose(client.disconnect);
+  // 容器销毁 ⇒ [AylaPresenceWsClient.dispose]（**不是** disconnect）：先移交共享状态
+  // 所有权、再断连接。原因见本文件头的「关闭顺序」与 client 的 dispose 文档 ——
+  // 容器销毁期间 presenceState/realtime 两个 store 可能已被回收，回写会抛
+  // "used after being disposed"（2026-10-02 真机验收）。
+  ref.onDispose(client.dispose);
   return client;
 });
 

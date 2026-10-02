@@ -258,6 +258,8 @@ class _LayoutSwitchButton extends StatelessWidget {
         semanticLabel: label,
         onPressChanged: onPressChanged,
         child: MouseRegion(
+          // `.layout-switch-btn` 是 <button>（LayoutSwitch.tsx）⇒ base.css:340 全局 pointer。
+          cursor: SystemMouseCursors.click,
           opaque: true,
           onEnter: (_) => onHoverChanged?.call(true),
           onExit: (_) => onHoverChanged?.call(false),

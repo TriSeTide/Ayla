@@ -137,8 +137,9 @@
 ///    Fredoka + 11 + w400 + lh 1.55（其余属性按「未声明即继承 body」逐值对齐）。
 ///
 /// ## 公开面
-/// `AylaGroupInfoLayout` · `AylaGroupSubgroupItem` · `AylaGroupSubgroupList` ·
-/// `AylaGroupMemberItem` · `AylaGroupMemberList` · `aylaGroupInfoListsSamples`
+/// `AylaGroupInfoLayout` · `AylaGroupInfoPageScroll` · `AylaGroupSubgroupItem` ·
+/// `AylaGroupSubgroupList` · `AylaGroupMemberItem` · `AylaGroupMemberList` ·
+/// `aylaGroupInfoListsSamples`
 library;
 
 import 'dart:math' as math;
@@ -157,6 +158,90 @@ import '../base/reveal.dart';
 import '../base/tab_badge.dart';
 import '../base/tooltip.dart';
 import 'group_role_chip.dart';
+
+/// ═══════════════════════ ⓪ 整页滚动容器（`.group-info`）═══════════════════════
+
+/// 群信息页**整页滚动容器** —— web `.group-info` 的等价物（`group.css:1382–1401`）。
+///
+/// ## 事实源（逐条 web 文件:行）
+/// ```
+/// group.css 1382–1390  .group-info { height: 100%; overflow-y: auto;
+///                                   display: flex; flex-direction: column;
+///                                   gap: var(--sp-3); padding: var(--sp-3); width: 100%; }
+/// group.css 1392       /* 整页持有滚动；列保持自然高度，卡片阴影由外沿留白容纳。 */
+/// group.css 1393–1401  @media (min-width: 769px) {
+///                        .group-info { padding: var(--sp-6) var(--sp-6) var(--sp-8); }
+///                        .group-info-layout { flex: none; }
+///                      }
+/// GroupInfo.tsx 392–408  `!conv` ⇒ 加载骨架 / 错误态**也在这层容器内**返回
+///                        （`<div className="group-info">` 是两条分支的共同外层）；
+///                        正常分支 410–412 同为 `.group-info > .group-info-layout`。
+/// ```
+///
+/// ## 逐条等价说明
+/// 1. `height: 100%` + `overflow-y: auto` ⇒ `SingleChildScrollView`
+///    （其 render object 的 inner constraints 就是 `constraints.widthConstraints()`，
+///    `single_child_scroll_view.dart:455–459` ⇒ **只给宽度、高度松**，
+///    与 web 里 `.group-info-layout` 拿到的「固定宽 + 自然高」逐项相同）。
+/// 2. `padding`：窄屏四边 sp3(12)；≥769 覆写为 `sp6 sp6 sp8`（上/左/右 24、下 32）。
+/// 3. `gap: var(--sp-3)` **不产生额外间距**：`.group-info` 只有 **1 个直接子元素**
+///    （`.group-info-layout`）⇒ flex gap 在单子元素时不生效。故本件只暴露
+///    `padding` / `clipBehavior` / `child`，**不提供 gap 档**，调用方也不得自造。
+/// 4. `display: flex; flex-direction: column` 的净作用是「唯一子元素横向铺满 +
+///    自然高度」（`align-items` 缺省 stretch）——`SingleChildScrollView` 的固有
+///    行为即如此（宽紧高松），无需再包一层 Column。
+/// 5. `clipBehavior` **必须暴露**、默认与 web 相同：
+///    - Flutter 的滚动视图在内容超出时推 `pushClipRect`（`single_child_scroll_view.dart:529–565`）；
+///    - web 的 `.group-info` 只写了 `overflow-y: auto`，但按 CSS Overflow 规范，
+///      `visible` 与 `auto` 不可共存 ⇒ **`overflow-x` 的计算值也是 `auto`**
+///      ⇒ web 同样是「两轴都在 padding box 处裁切」。
+///    所以默认 [Clip.hardEdge] 与 web 逐项一致（`group.css:1392` 的注释也写明
+///    「**卡片阴影由外沿留白容纳**」—— 留白就是 padding 的 sp3/sp6）。
+///    只有确需让内容画到滚动盒之外时才显式传 [Clip.none]。
+/// 6. **不挂滚动条**：web 的滚动条样式来自 `base.css:376` 的全局
+///    `* { scrollbar-width: thin }`，不是 `.group-info` 自己的声明；库内滚动条是
+///    挂在应用根的 [AylaOverlayScrollbar] 单实例（`main.dart:189`），
+///    页面层只需发出滚动通知。
+class AylaGroupInfoPageScroll extends StatelessWidget {
+  const AylaGroupInfoPageScroll({
+    super.key,
+    required this.child,
+    this.clipBehavior = Clip.hardEdge,
+  });
+
+  /// 容器内容（web `.group-info` 的唯一子元素 `.group-info-layout`）。
+  final Widget child;
+
+  /// 滚动裁切档（默认 [Clip.hardEdge] = web `overflow-y: auto` 的纵向裁切）。
+  final Clip clipBehavior;
+
+  /// 断点：与 [AylaGroupInfoLayout] 的列数判定**同一条**（web `min-width: 769px`）。
+  static bool isWide(BuildContext context) =>
+      !AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
+
+  /// 内距（`group.css:1388` 的 `padding: var(--sp-3)` 与 1395 的 ≥769 覆写）。
+  static EdgeInsets paddingFor(BuildContext context) => isWide(context)
+      // padding: var(--sp-6) var(--sp-6) var(--sp-8)  ⇒ 24 / 24 / 24 / 32
+      ? const EdgeInsets.fromLTRB(
+          AylaSpacing.sp6,
+          AylaSpacing.sp6,
+          AylaSpacing.sp6,
+          AylaSpacing.sp8,
+        )
+      // padding: var(--sp-3)  ⇒ 12 / 12 / 12 / 12
+      : const EdgeInsets.all(AylaSpacing.sp3);
+
+  @override
+  Widget build(BuildContext context) {
+    // ⚠️ 这里读的视口与 [AylaGroupInfoLayout] 内那条同源（MediaQuery 视口宽）：
+    // 两处断点必须一致，否则会出现「padding 走宽屏档、列数走窄屏档」的错配。
+    return SingleChildScrollView(
+      padding: paddingFor(context),
+      clipBehavior: clipBehavior,
+      child: child,
+    );
+  }
+}
 
 /// ═══════════════════════════ ① 两列布局 ═══════════════════════════
 
@@ -543,7 +628,10 @@ class _SubgroupRowState extends State<_SubgroupRow> {
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final AylaGroupSubgroupItem sg = widget.subgroup;
+    // 子群行在 web 是 <button>（.subgroup-row 同族；group.css:1902 的
+    // `.group-info-select-option` 亦是 pointer）⇒ 全局 pointer。
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: AnimatedContainer(
@@ -813,9 +901,15 @@ class AylaGroupMemberList extends StatelessWidget {
   /// 点头像进个人主页（web goUserProfile(currentUser?.id, m.user.id)）。
   final void Function(AylaGroupMemberItem member)? onOpenProfile;
 
-  /// 卡片内距（默认 sp4 = .group-info-members { padding: var(--sp-4) }，group.css 1678–1682）。
+  /// 宿主卡的内距（web `.group-info-members { padding: var(--sp-4) }`，group.css 1678–1682）。
   ///
-  /// ⚠️ 只用于 @container 判据的**换算**：容器是列而不是卡（见 [wrapThreshold]）。
+  /// ⚠️ **从不参与绘制** —— 本件不画卡、也不给内容加内距。该值**只**服务
+  /// `@container` 判据的换算（见 [wrapThreshold]）：脱离 [AylaGroupInfoLayout] 宿主时，
+  /// 本件量到的是**卡内可用宽**，而 web 的容器是列 ⇒ 必须把卡内距加回再比 420。
+  ///
+  /// 卡体本身由调用方装配（群详情页 = `AylaGlassCard(padding: EdgeInsets.all(sp4))`，
+  /// 2026-10-02 修「卡片没有应用上」）；该值与页面传入的实际卡内距**必须一致**，
+  /// 否则脱离宿主时的换行档会偏移。
   final double cardPadding;
 
   /// @container (max-width: 420px) 阈值（group.css 1780）。
@@ -1021,7 +1115,9 @@ class _MemberRowState extends State<_MemberRow> {
     ];
     final Widget? actions = widget.showActions ? _actions() : null;
 
+    // 成员行在 web 是 <button>（.group-member-row 同族；GroupInfo.tsx 961–966）⇒ 全局 pointer。
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: Focus(

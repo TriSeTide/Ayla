@@ -25,7 +25,7 @@
 ///   同向甩动 ≥300px/s 且净位移 ≥40px 补充，交叉轴占优让位）；
 ///   位移层 `dragElastic 0.8`（跟手 80%）；
 /// - 场景切换动画：web 的 variants 进/出场**横向位移都是 0**（`GroupPage.tsx:507–511`）
-///   ⇒ 只有**淡出**（旧场景 300ms 淡出、新场景直接显示），由 [_AylaSceneFade] 表达。
+///   ⇒ 只有**淡出**（旧场景 300ms 淡出、新场景直接显示），由 [AylaSceneFade] 表达。
 ///
 /// ## 与 web 的机制差异（登记）
 /// 1. **路由守卫卡片不实现**（用户裁决，见 13 号 B5）：web 在「非成员 + summary 403」时
@@ -33,7 +33,8 @@
 ///    直达未加入群时页面按「加载失败 / 空态」呈现，不做守卫卡。
 /// 2. **场景切换重叠**：web 用 `AnimatePresence mode="sync"` 让新旧场景同帧重叠；
 ///    Flutter 用 [Stack] + 单条淡出曲线表达同一效果（新场景无淡入 —— 与 web 的
-///    `enter/center` 变体一致）。
+///    `enter/center` 变体一致）。**切换期间旧场景的 Element/State 必须原地复用**
+///    （固定槽位 + 恒定包装链，见 [AylaSceneFade]）—— 否则旧场景重播自己的入场动画。
 /// 3. `useTouchAxisGuard`（起步 slop 内压制浏览器垂直滚动接管）无 Flutter 等价需求：
 ///    Flutter 的手势竞技场本身按方向锁定，不存在 `pointercancel` 夺轴问题。
 library;
@@ -66,17 +67,18 @@ import '../state/room_providers.dart'
 import '../state/voice_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsWide;
-import '../widgets/group/group_create_dialog.dart' show AylaGroupCreateDialog;
 import '../widgets/live/live_hall.dart' show AylaLiveStatus;
 import '../widgets/shell/channel_sidebar.dart';
 import '../widgets/shell/group_top_tabs.dart';
 import '../widgets/shell/server_rail.dart';
+import '../layout/create_sheet_forms.dart' show AylaCreateGroupForm;
 import 'group_chat_page.dart';
 import 'group_games_page.dart';
 import 'group_info_page.dart';
 import 'group_live_page.dart';
 import 'group_posts_page.dart';
 import 'group_support.dart';
+import 'home_support.dart' show kAylaHomePrefs;
 import 'hub_support.dart'
     show aylaHubApplyLiveEvent, aylaHubApplyVoiceEvent, aylaHubSortLive,
         aylaHubSortVoice, AylaVoiceSortFacts;
@@ -161,6 +163,24 @@ typedef AylaSubgroupsPageLoader = Future<AylaSubgroupPage> Function(
   String? cursor,
 );
 
+/// 建群表单的**测试注入点**（生产恒为 null ⇒ 走真实 [AylaCreateGroupForm]）。
+///
+/// 为什么需要它：建群是全页唯一一条「弹窗 → 注入的 API → 跳转」的链，而
+/// [AylaCreateGroupForm] 的三个 API 出口（`searchUsers` / `createGroup` /
+/// `openPrivate`）是**构造参数**、由本页内部直接实例化 ⇒ widget test 无法替换网络，
+/// 「宽屏点建群 → 填名 → 提交」这条链就会退化成只测组件、不测接线
+/// （而问题 14 的根因恰恰**在接线**：`group_create_dialog.dart:184–185` 的
+/// `if (submit == null) return;` 静默返回）。
+///
+/// 形态与 [aylaGroupPageSubgroupsLoader] 同款：文件级 `@visibleForTesting` 出口，
+/// 测试注入的仍是**真实** [AylaCreateGroupForm]（只换掉三个 API），
+/// 因此覆盖「GroupPage → 表单 → 提交」全链。
+@visibleForTesting
+AylaGroupPageCreateGroupBuilder? aylaGroupPageCreateGroupBuilder;
+
+/// 见 [aylaGroupPageCreateGroupBuilder]：给定 onClose，返回要挂载的建群弹层。
+typedef AylaGroupPageCreateGroupBuilder = Widget Function(VoidCallback onClose);
+
 class _GroupPageState extends ConsumerState<GroupPage> {
   AylaGroupDirectory? _directory;
 
@@ -227,10 +247,16 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   bool _entered = false;
   bool _leaving = false;
   Timer? _leaveTimer;
+  /// 未过阈值的**回弹动画**进行中（让 `tabsDy` 走 200ms `--ease-out`，而不是瞬时跳回）。
+  bool _resetting = false;
+  Timer? _resetTimer;
   double _pullDy = 0;
   double _pullOpacity = 1;
   double _dragDx = 0;
   double _dragDy = 0;
+  /// 横向**未触发切换**时的回弹动画进行中（200ms `--ease-out`，防跳变）。
+  bool _sceneResetting = false;
+  Timer? _dragResetTimer;
 
   @override
   void initState() {
@@ -349,6 +375,8 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   @override
   void dispose() {
     _leaveTimer?.cancel();
+    _resetTimer?.cancel();
+    _dragResetTimer?.cancel();
     _directoryEvents?.removeListener(_onDirectoryEvents);
     _directoryEvents = null;
     _disposeGroupLists();
@@ -508,6 +536,14 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       final AylaGroupState group = ref.read(groupStateProvider);
       group.setCurrentGroup(widget.groupId);
       group.setActiveScene(effectiveScene);
+      // web tsx 233：`useHomeStore.getState().setRecentGroup(id);`
+      // —— **每次进群都写**（effect 依赖 [id, effectiveScene]；侧栏切群 ⇒ id 变 ⇒ 重写）。
+      // 写的是共享单例 [kAylaHomePrefs]（= web 的 zustand 单例，见 home_support.dart 的说明）：
+      // 宽屏侧栏切群（_buildWide 的 ServerRail.onSelectGroup）**只 context.go**、
+      // 不经过 home_page 的 _openGroup ⇒ 此前 recent 永不更新，宽屏「回主页」跳错群。
+      // 窄屏主页点卡片另有 HomePage.tsx:97 的写点（home_page.dart 的 _openGroup），
+      // 与本行**同源不重复**：两条都是 web 真实存在的写点，写入同一个 key 幂等。
+      kAylaHomePrefs.setRecentGroup(widget.groupId);
       // 非 chat 子场景显式关闭会话（web tsx 241–243：只有真的在聊天窗口里才自动已读）。
       if (effectiveScene != AylaGroupScene.chat &&
           ref.read(chatStateProvider).activeConversationId == widget.groupId) {
@@ -536,10 +572,22 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   }
 
   /// 下拉回主页（web tsx 120–135）：清 store + 退场 250ms 后回 `/group`。
+  ///
+  /// ⚠️ **不得把 `_pullDy` / `_pullOpacity` 归零**（2026-10-03 用户实报）。
+  ///
+  /// 此前这里写的是 `_pullDy = 0; _pullOpacity = 1;` ⇒ 松手后内容区**先瞬间弹回原位**
+  /// （用户截图序列里那一帧「群聊天页面回弹」），再开始播退场动画，观感是「回弹一下才切换」。
+  ///
+  /// 组件库样张 `group_top_tabs.dart:501–520` 的 `_exitToHome` 是**正确口径**：
+  /// > ≥80px 的落点：**顶栏与内容一起继续向下滑出**（250ms `--ease-in`）→ 250ms 后回主页。
+  /// > ⚠️ 偏离 web 的调整（2026-09-20 用户要求）：web `pullToHome()` 写的是 `setPullOffset(0)`
+  /// > —— 顶栏回到原位、内容继续下滑出屏，两者方向相反，观感上顶栏会先往上弹一段。
+  /// > 用户要求 ≥80px 时不要回弹，改为**一起向下滑出**。
+  ///
+  /// ⇒ 保持当前 `_pullDy`（内容已下移的位置）与 `_pullOpacity`，由 `tabsDy = hiddenDy`
+  /// 分支把**顶栏**也一起带下去；内容区随 `Transform.translate(0, _pullDy)` 保持在下移位。
   void _pullToHome() {
     setState(() {
-      _pullDy = 0;
-      _pullOpacity = 1;
       _leaving = true;
     });
     ref.read(groupStateProvider).reset();
@@ -775,16 +823,39 @@ class _GroupPageState extends ConsumerState<GroupPage> {
             ),
           ],
         ),
+        // 建群弹窗（web tsx 433：`{showGroupCreate && <GroupCreateDialog onClose/>}`）。
+        //
+        // ⚠️ **必须接完整接线**（2026-10-02 问题 14）：本件按「装配口径」把成员搜索
+        // （web `GroupCreateDialog.tsx:29` 的 `useSocialPage("users", {q})`）与两条提交
+        // （tsx 46–64 建群 / 66–80 私聊）交给页面注入；只传 `onClose` 时
+        // `group_create_dialog.dart:184–185` 的 `if (submit == null) return;` 会
+        // **静默返回** ⇒ 宽屏点「建群」既不报错也不建群（用户实报）。
+        //
+        // 复用 [AylaCreateGroupForm]（`layout/create_sheet_forms.dart`）而不是复制装配：
+        // 它就是 web 同一份 `GroupCreateDialog` 的接线（CreateFab 的 group 分支
+        // `tsx:75–77`，**不带 CreateSheet 外壳** —— 组件自带弹层），
+        // 内含搜索分页 + 300ms 防抖消费 + 建群/私聊 + 跳转（tsx:57–58 / 73–74）。
         if (_showGroupCreate)
-          Positioned.fill(
-            child: AylaGroupCreateDialog(
-              onClose: () => setState(() => _showGroupCreate = false),
-            ),
-          ),
+          Positioned.fill(child: _buildGroupCreate()),
         if (_directory?.error != null && (_directory?.raw.isEmpty ?? true))
           const SizedBox.shrink(),
       ],
     );
+  }
+
+  /// 建群弹层（web tsx 433：`{showGroupCreate && <GroupCreateDialog onClose/>}`）。
+  ///
+  /// 默认挂真实 [AylaCreateGroupForm]（= web 同一份 `GroupCreateDialog` 的接线：
+  /// 成员搜索 `GroupCreateDialog.tsx:29`、建群 `tsx:46–64`、私聊 `tsx:66–80`、
+  /// 跳转 `tsx:58/74`）；[aylaGroupPageCreateGroupBuilder] 非 null 时用它（测试注入）。
+  Widget _buildGroupCreate() {
+    void close() {
+      if (mounted) setState(() => _showGroupCreate = false);
+    }
+    final AylaGroupPageCreateGroupBuilder? builder =
+        aylaGroupPageCreateGroupBuilder;
+    if (builder != null) return builder(close);
+    return AylaCreateGroupForm(onClose: close);
   }
 
   static bool _canManage(AylaConversationSummary? conv) =>
@@ -860,6 +931,12 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       tabsDy = _pullDy;
       tabsDuration = Duration.zero;
       tabsCurve = Curves.linear;
+    } else if (_resetting) {
+      // 未过阈值 ⇒ 200ms --ease-out 平滑回弹（样张 group_top_tabs.dart:492–496 /
+      // web GroupPage.tsx 的 pullTransition）。**不能瞬时归零**（用户实报跳变）。
+      tabsDy = 0;
+      tabsDuration = const Duration(milliseconds: 200);
+      tabsCurve = Curves.easeOut;
     } else {
       tabsDy = _entered ? 0 : hiddenDy;
       tabsDuration = AylaDurations.auroraqua;
@@ -883,16 +960,32 @@ class _GroupPageState extends ConsumerState<GroupPage> {
             onAvatarClick: () => _onAvatarClick(groupState.activeScene),
             postUnread: currentGroup?.postUnreadCount ?? 0,
             offset: Offset(0, value),
+            // ★ 窄屏「下拉顶部导航栏返回」（用户 2026-10-02 实报：内容区能触发、顶栏反而没反应）。
+            //
+            // web 把 pullHandlers 展开在 **.group-top-tabs 那一条**上
+            // （GroupTopTabs.tsx:62 的 {...pullHandlers}），几何 = 宽 100% x 高 64px
+            // （group.css:23-31 + :36 的 .group-top-nav{height:64px}）
+            // => **触发区就是顶栏这一条，内容区不参与起手**。
+            // 本件 group_top_tabs.dart:280-295 已按此实现（HitTestBehavior.opaque），
+            // 只是此前没接线 => 顶栏下拉无反应。此处补上。
+            onPullUpdate: (DragUpdateDetails details) =>
+                _onPullUpdate(details, reduced),
+            onPullEnd: (DragEndDetails details) =>
+                _onPullEnd(details, reduced),
+            onPullCancel: _resetPull,
           ),
         ),
         Expanded(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onVerticalDragUpdate: (DragUpdateDetails details) =>
-                _onPullUpdate(details, reduced),
-            onVerticalDragEnd: (DragEndDetails details) =>
-                _onPullEnd(details, reduced),
-            onVerticalDragCancel: _resetPull,
+            // ⚠️ **内容区不接下拉**（用户 2026-10-02 实报：整个页面下拉都生效返回手势）。
+            //
+            // web 的 pullHandlers **只展开在 .group-top-tabs 那一条**（GroupTopTabs.tsx:62），
+            // 内容区（.group-content）不参与起手 => 下拉返回**只在顶栏 64px 内触发**。
+            // 本页此前把 onVerticalDrag* 挂在内容区 GestureDetector 上，导致：
+            //   ① 整页下拉都能触发返回（与 web 不符）；
+            //   ② 顶栏反而没反应（回调没接到 AylaGroupTopTabs）。
+            // 现已把下拉接线移到上面的 AylaGroupTopTabs（见其注释），此处只保留**横向**手势。
             onHorizontalDragUpdate: (DragUpdateDetails details) {
               if (reduced || _leaving) return;
               setState(() {
@@ -902,22 +995,63 @@ class _GroupPageState extends ConsumerState<GroupPage> {
             },
             onHorizontalDragEnd: (DragEndDetails details) =>
                 _onSceneDragEnd(details, contentScene, reduced),
-            onHorizontalDragCancel: () => setState(() {
-              _dragDx = 0;
-              _dragDy = 0;
-            }),
+            onHorizontalDragCancel: _resetDrag,
             child: ClipRect(
-              child: Transform.translate(
-                offset: Offset(reduced ? 0 : _dragDx * 0.8, _pullDy),
+              // ★ 纵向位移（退场时「内容区继续向下滑出，与顶栏同向」）：
+              // 组件库样张 `_exitToHome`（group_top_tabs.dart:501–520）的正确口径 ——
+              // 「顶栏与内容**一起**继续向下滑出（250ms --ease-in）→ 250ms 后回主页」，
+              // 并注明「用户要求 ≥80px 时**不要回弹**」（web 原版会让顶栏先往上弹一段）。
+              //
+              // ⚠️ 此前 `_pullToHome` 写 `_pullDy = 0; _pullOpacity = 1;` ⇒ 松手后内容区
+              // **先瞬间弹回原位**再播退场（用户 2026-10-03 截图里那一帧「回弹」）。
+              // 现在：跟手期 = 瞬时（Duration.zero）、退场期 = 250ms 滑到 hiddenDy。
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: _leaving ? hiddenDy : _pullDy),
+                duration: _leaving
+                    ? const Duration(milliseconds: kAylaGroupExitTransitionMs)
+                    : Duration.zero,
+                curve: AylaCurves.easeIn,
+                builder: (
+                  BuildContext context,
+                  double dy,
+                  Widget? child,
+                ) =>
+                    Transform.translate(offset: Offset(0, dy), child: child),
+                child: ClipRect(
+              // ⚠️ 横向位移走 [TweenAnimationBuilder]：
+              // · **跟手中**（`_sceneResetting == false`）→ `Duration.zero`，1:1 跟手；
+              // · **未触发切换的回弹**（`_sceneResetting == true`）→ **200ms --ease-out**；
+              // · **触发切换** → `_goScene` 换场景，`_dragDx` 已瞬时归零 ⇒ 新场景从 0 起（不回弹）。
+              // 此前直接 `Transform.translate(_dragDx)` 且松手瞬时归零 ⇒ 未过阈值时**跳变**
+              // （用户 2026-10-03 实报「不触发页面切换时回弹也不是跳变的」）。
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: reduced ? 0 : _dragDx * 0.8),
+                duration: _sceneResetting
+                    ? const Duration(milliseconds: 200)
+                    : Duration.zero,
+                curve: Curves.easeOut,
+                builder: (
+                  BuildContext context,
+                  double dx,
+                  Widget? child,
+                ) =>
+                    Transform.translate(
+                  // 纵向已由**外层** TweenAnimationBuilder 统一驱动（跟手瞬时 / 退场 250ms）
+                  // ⇒ 这里只负责横向 `dx`。
+                  offset: Offset(dx, 0),
+                  child: child,
+                ),
                 child: Transform.scale(
                   scale: 1 - 0.02 * progress,
                   child: Opacity(
                     opacity: _pullOpacity,
-                    child: _AylaSceneFade(
+                    child: AylaSceneFade(
                       scene: contentScene,
                       builder: _renderScene,
                     ),
                   ),
+                ),
+              ),
                 ),
               ),
             ),
@@ -940,26 +1074,48 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     });
   }
 
-  /// 松手：过阈值且向下 ⇒ 回主页；否则 200ms `--ease-out` 回弹（web tsx 153–169）。
+  /// 松手：位移 ≥80px ⇒ 回主页；否则 **200ms `--ease-out` 平滑回弹**。
+  ///
+  /// ⚠️ **不要加 velocity 判据**（2026-10-03 用户实报「下拉了但内容区最后回弹了」）：
+  /// 组件库样张 `group_top_tabs.dart:485–499` 的口径是 **`_pullY >= _threshold` 单条件**
+  /// （web `GroupPage.tsx` 的 `onEnd` 同样只看 `pullY >= 80`）。
+  /// 此前多写了一个 `velocity > 0` ⇒ **慢慢拉过 80px 后松手（速度为 0 或微负）不回主页**，
+  /// 观感就是「明明拉够了却又弹回去」。
   void _onPullEnd(DragEndDetails details, bool reduced) {
     if (reduced || _leaving) return;
-    final double velocity = details.primaryVelocity ?? 0;
-    if (velocity > 0 && _pullDy >= kAylaGroupPullExitThreshold) {
+    if (_pullDy >= kAylaGroupPullExitThreshold) {
       _pullToHome();
       return;
     }
     _resetPull();
   }
 
+  /// 未过阈值 ⇒ 回弹。
+  ///
+  /// ⚠️ **必须走动画**（同用户 2026-10-03 实报）：此前直接 `_pullDy = 0` **无动画**，
+  /// 内容区从半途位置**瞬时跳回**（跳变）。样张 `group_top_tabs.dart:492–496` 是
+  /// **200ms `--ease-out`**（web `GroupPage.tsx` 的 `pullTransition` 同档）。
+  /// 这里用 `_resetting` 标记让 `tabsDy` 分支走 200ms easeOut，动画结束后复位。
   void _resetPull() {
     if (_pullDy == 0 && _pullOpacity == 1) return;
     setState(() {
+      _resetting = true;
       _pullDy = 0;
       _pullOpacity = 1;
+    });
+    _resetTimer?.cancel();
+    _resetTimer = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) setState(() => _resetting = false);
     });
   }
 
   /// 横滑切场景（web tsx 355–372）：松手判定走 [aylaResolveSwipeCommit]。
+  ///
+  /// ⚠️ **位移归零分两种情形**（2026-10-03 用户实报「滑动结束后上一个页面有跳变回弹」）：
+  /// · **触发切换** ⇒ `_dragDx` **瞬时**归零：新场景已在 `_goScene` 里接管，
+  ///   旧场景的横向位移不能再被动画拖尾（否则会看到它「弹回去」）；
+  /// · **未触发切换** ⇒ 走 **200ms `--ease-out` 动画**回弹，**不是瞬时跳回**。
+  /// 此前两种都走瞬时归零 ⇒ 未过阈值时内容从半途位置瞬间跳回（跳变）。
   void _onSceneDragEnd(
     DragEndDetails details,
     AylaGroupScene contentScene,
@@ -968,22 +1124,49 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     final double width = MediaQuery.sizeOf(context).width;
     final double net = _dragDx;
     final double cross = _dragDy;
-    setState(() {
-      _dragDx = 0;
-      _dragDy = 0;
-    });
-    if (reduced || _leaving) return;
+    if (reduced || _leaving) {
+      setState(() {
+        _dragDx = 0;
+        _dragDy = 0;
+      });
+      return;
+    }
     final int commit = aylaResolveSwipeCommit(
       net: net,
       cross: cross,
       velocity: details.velocity.pixelsPerSecond.dx,
       size: width,
     );
-    if (commit == 0) return;
+    if (commit == 0) {
+      // 未切换 ⇒ 动画回弹（样张 `_onDragEnd` 的 <阈值 分支同档：200ms easeOut）。
+      _resetDrag();
+      return;
+    }
+    // 触发切换 ⇒ 瞬时归零（新场景接管，旧场景不得拖尾）。
+    setState(() {
+      _dragDx = 0;
+      _dragDy = 0;
+    });
     final int base = aylaGroupSceneOrderIndex(contentScene);
     final int next = (base + commit + kAylaGroupSceneOrder.length) %
         kAylaGroupSceneOrder.length;
     _goScene(kAylaGroupSceneOrder[next]);
+  }
+
+  /// 未触发切换时的横向回弹：**200ms `--ease-out`**（`_sceneResetting` 驱动）。
+  ///
+  /// 与下拉回弹同理：**不能瞬时归零**，否则内容区从半途位置跳回（用户实报）。
+  void _resetDrag() {
+    if (_dragDx == 0 && _dragDy == 0) return;
+    setState(() {
+      _sceneResetting = true;
+      _dragDx = 0;
+      _dragDy = 0;
+    });
+    _dragResetTimer?.cancel();
+    _dragResetTimer = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) setState(() => _sceneResetting = false);
+    });
   }
 }
 
@@ -992,20 +1175,29 @@ class _GroupPageState extends ConsumerState<GroupPage> {
 ///
 /// web 的 variants：`enter/center` 都是 `{x:0, opacity:1}`、`exit` 是 `{x:0, opacity:0}`
 /// ⇒ **新场景无淡入、旧场景 300ms 淡出**（横向位移由 drag 层单独拥有，切场景时归零）。
-/// 本件用「保留旧场景一帧 + 淡出」表达：`Stack` 里按 `ValueKey(scene)` 匹配 Element，
-/// 旧场景的 State（会话历史/滚动位置）在淡出期间**继续存活**，动画结束才卸载
-/// —— 与 `AnimatePresence` 保管退出实例同一语义。
-class _AylaSceneFade extends StatefulWidget {
-  const _AylaSceneFade({required this.scene, required this.builder});
+/// 本件用「固定槽位 + 保留旧场景子树淡出」表达：同一场景在切换前后位于**同一 child index**、
+/// 槽位内**包装链恒定**（见 [_AylaSceneFadeState.build] 的说明）⇒ 旧场景的
+/// Element/State（会话历史/滚动位置/入场动画进度）在淡出期间**原地存活**、
+/// 不重建、不重播入场，动画结束才卸载 —— 与 `AnimatePresence` 保管退出实例同一语义。
+///
+/// 公开命名（2026-10-02 问题 7 修复）：本件的判据是「切场景时旧场景的 `initState`
+/// **不得**被再次调用」，只有能注入**可观测的自定义场景组件**才能验证 ⇒ 需要从
+/// 测试直接挂载它。私有类无法在 widget test 里构造（`invalid_use_of_visible_for_testing`
+/// 之外的私名引用根本编译不过）。
+class AylaSceneFade extends StatefulWidget {
+  const AylaSceneFade({super.key, required this.scene, required this.builder});
 
+  /// 当前场景（web 的 `activeScene` 传入 `AnimatePresence` 的那一个）。
   final AylaGroupScene scene;
+
+  /// 场景构建器（GroupPage 传 `_renderScene`）。
   final Widget Function(AylaGroupScene scene) builder;
 
   @override
-  State<_AylaSceneFade> createState() => _AylaSceneFadeState();
+  State<AylaSceneFade> createState() => _AylaSceneFadeState();
 }
 
-class _AylaSceneFadeState extends State<_AylaSceneFade>
+class _AylaSceneFadeState extends State<AylaSceneFade>
     with SingleTickerProviderStateMixin {
   late final AnimationController _fade = AnimationController(
     vsync: this,
@@ -1016,8 +1208,11 @@ class _AylaSceneFadeState extends State<_AylaSceneFade>
   /// 正在退场的旧场景（null = 无）。
   AylaGroupScene? _outgoing;
 
+  /// 淡出代际（见 [didUpdateWidget] 的守卫说明）。
+  int _fadeGeneration = 0;
+
   @override
-  void didUpdateWidget(covariant _AylaSceneFade oldWidget) {
+  void didUpdateWidget(covariant AylaSceneFade oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.scene == widget.scene) return;
     if (MediaQuery.disableAnimationsOf(context)) {
@@ -1026,8 +1221,13 @@ class _AylaSceneFadeState extends State<_AylaSceneFade>
     }
     setState(() => _outgoing = oldWidget.scene);
     _fade.value = 1;
+    // 代际守卫：快速连切（A→B→A，300ms 内）时，前一次的 reverse() 也会 complete，
+    // 若不加守卫会把**后一次**的退场场景提前清掉（场景直接消失、无淡出）。
+    final int generation = ++_fadeGeneration;
     _fade.reverse().whenComplete(() {
-      if (mounted) setState(() => _outgoing = null);
+      if (mounted && generation == _fadeGeneration) {
+        setState(() => _outgoing = null);
+      }
     });
   }
 
@@ -1037,30 +1237,67 @@ class _AylaSceneFadeState extends State<_AylaSceneFade>
     super.dispose();
   }
 
+  /// 每个场景一个**固定槽位**（index = [AylaGroupScene.values] 的序号），
+  /// 且槽位内的**包装链恒定**——这是本件正确性的核心不变量。
+  ///
+  /// ## 根因（2026-10-02 问题 7）
+  /// 旧实现把退场场景包进一层**临时新建的 `FadeTransition`**（外层还叠了
+  /// `ExcludeFocus/ExcludeSemantics/IgnorePointer`）⇒ 旧场景的**父 Element 类型变了**
+  /// ⇒ Flutter 判定「不同 widget」⇒ 旧场景子树**整体重建 Element/State**
+  /// ⇒ 场景页重新 `initState` ⇒ **重播它自己的入场动画**，然后才开始淡出。
+  /// 用户看到的就是「离开的页面又播了一遍入场动画」（本次验收核心）。
+  ///
+  /// ## 修法
+  /// ① **固定槽位**：同一场景在切换前后永远落在同一个 child index（槽位永不移位）；
+  /// ② **同型包装**：每个非空槽位都套**完全相同类型序列**的包装
+  ///   （`FadeTransition → ExcludeFocus → ExcludeSemantics → IgnorePointer → KeyedSubtree`），
+  ///   只在**参数**上区分在场/退场 ⇒ Element 逐层原地复用、State 不重建。
+  ///   直接让 `builder(...)` 上抬一层是**不够的**：当前场景原本不套包装，
+  ///   退场时类型序列会从「1 层」变「5 层」，第 2 层就分叉了。
+  ///
+  /// ## 为什么占位用 [Offstage]
+  /// `Stack(fit: StackFit.expand)` 会给**无定位**子件发 `BoxConstraints.tight(stackSize)`
+  /// ⇒ 裸 `SizedBox.shrink()` 会被强制撑满、变成挡住整个当前场景的命中层；
+  /// [Offstage] 撑满但不绘制、不参与 hit test 与语义。
+  ///
+  /// 语义对照（web `GroupPage.tsx:507–511` 的 variants）：
+  /// · 在场（`enter/center`）= `{x:0, opacity:1}` ⇒ `kAlwaysCompleteAnimation`（恒 1、无淡入）；
+  /// · 退场（`exit`）= `{x:0, opacity:0, 300ms}` ⇒ [_fade] 反向播放。
+  /// 退场期间 `IgnorePointer` + `ExcludeFocus` + `ExcludeSemantics` 与原实现一致
+  /// （web 侧由 `pointerEvents: drag.present ? undefined : "none"` 表达，tsx 520）。
+  Widget _slot(AylaGroupScene scene, {required bool outgoing}) {
+    return FadeTransition(
+      opacity: outgoing ? _fade : kAlwaysCompleteAnimation,
+      child: ExcludeFocus(
+        excluding: outgoing,
+        child: ExcludeSemantics(
+          excluding: outgoing,
+          child: IgnorePointer(
+            ignoring: outgoing,
+            child: KeyedSubtree(
+              key: ValueKey<AylaGroupScene>(scene),
+              child: widget.builder(scene),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AylaGroupScene? outgoing = _outgoing;
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        KeyedSubtree(
-          key: ValueKey<AylaGroupScene>(widget.scene),
-          child: widget.builder(widget.scene),
-        ),
-        if (outgoing != null)
-          FadeTransition(
-            opacity: _fade,
-            child: ExcludeFocus(
-              child: ExcludeSemantics(
-                child: IgnorePointer(
-                  child: KeyedSubtree(
-                    key: ValueKey<AylaGroupScene>(outgoing),
-                    child: widget.builder(outgoing),
-                  ),
-                ),
-              ),
-            ),
-          ),
+        for (final AylaGroupScene scene in AylaGroupScene.values)
+          if (scene == widget.scene)
+            _slot(scene, outgoing: false)
+          else if (scene == outgoing)
+            _slot(scene, outgoing: true)
+          else
+            // 空槽位：占位但保持 index 稳定（[Offstage] 不绘制、不参与命中）。
+            const Offstage(child: SizedBox.shrink()),
       ],
     );
   }

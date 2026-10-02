@@ -27,6 +27,18 @@
 ///    Flutter 侧把两者也落到同一行（`_error ?? summaryError ?? itemsError`）——信息更完整，
 ///    且 `摘要错误：显示错误文案` 用例依赖它；未改回 web 口径，特此登记。
 ///
+/// ## 修复登记（2026-10-02，真机网格溢出）
+///
+/// **5. 失败/加载态的静默裁剪**（真实 bug 修复，非偏离）：真机面板底部三格各报一次
+///    `A RenderFlex overflowed by 17 pixels on the bottom`（红色 `OVERFLOWED BY …` 徽标）。
+///    溢出点**不在面板/网格**，而在格子里的图片失败占位（`resource_image.dart` 的
+///    `_FailedPlaceholder`：fallback + 芯片纵排 72px > 格子 54.5px）——详见 [_cellShell] 的注释。
+///    web 的 `.emoji-pack-item`（`<button>` + `aspect-ratio: 1`）把框外内容**静默裁掉**，
+///    app.css 2265–2271 注释原文即「**56px 小格内不显示重试按钮**」⇒ Flutter 侧用
+///    `ClipRect + OverflowBox`（同 `live/danmaku.dart:506–516` 已登记技法）表达同一结果。
+///    **图片加载链路本身未动**（minio 资源问题按用户口径「暂时不修」）。
+///    回归锁：`test/emoji_pack_panel_overflow_test.dart`（真机 1265.6×682.4 复现 + 宽窄两档 + 高度上限）。
+///
 /// ## 定位（由调用方持有，登记说明）
 /// web 的 `.emoji-pack-panel` 是 `position: absolute; left/right sp3; bottom: calc(100% + 8px)`
 /// ——相对 `.composer`。Flutter 侧**不让组件自己贴定位**：宽屏由调用方把本件放进 composer 的
@@ -179,8 +191,11 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
 
   Future<void> _handlePick() async {
     if (_uploading) return;
-    final Future<AylaMediaPickResult> Function() picker =
-        widget.pickImages ?? () => AylaMediaActions.pickImages(remaining: 99);
+    // ⚠️ 必须走 `pickEmojiImages`（`kind=emoji`），不是 `pickImages`：
+    // web `EmojiPackPanel.tsx:113` 是 `uploadMediaFile(file, "emoji")`，后端
+    // `apps/emoji/services.py:118` 硬校验 kind=emoji（否则 media_type_mismatch）。
+    final Future<AylaMediaPickResult> Function() picker = widget.pickImages ??
+        () => AylaMediaActions.pickEmojiImages(remaining: 99);
     setState(() {
       _uploading = true;
       _uploadProgress = '';
@@ -521,6 +536,33 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
 
   /// `.emoji-pack-item { border 1px --glass-border; background: --surface }`；
   /// hover/focus → 边 `--glow-500` + `--glow-shadow`（app.css 2234–2255）。
+  ///
+  /// ## ⚠️ 失败/加载态的**静默裁剪**（2026-10-02 真机溢出修复）
+  ///
+  /// **真机现象**：面板底部三格下方出现红色 `OVERFLOWED BY 17 PIXELS` 徽标
+  /// （`A RenderFlex overflowed by 17 pixels on the bottom`，三格各一次）。
+  ///
+  /// **根因**（探针逐帧定位，非猜测）：溢出的 RenderFlex **不是面板、也不是网格**，而是
+  /// **格子里的图片失败占位** —— `resource_image.dart:455–503` 的 `_FailedPlaceholder`
+  /// 是纵向 Column = 「fallback 块」+「失败芯片 `.resource-image-fallback { min-height: 32px }`」。
+  /// 探针实测（1265.6×682.4 真机逻辑尺寸）：格 = `BoxConstraints(w=54.5, h=54.5)`，
+  /// 芯片（`font-size: 11` 的「图片加载失败，点击重试」在 54.5 宽里折成 4 行）= **54.5×72**，
+  /// 而 fallback 旧实现（无子件 `ColoredBox`）在纵排的无界高里塌成 **0×0** ⇒
+  /// Column = 72 > 54.5 ⇒ **overflow 17px**（正是用户截图里的红徽标）。
+  ///
+  /// **web 侧同一 DOM 为什么不报错**（以 web 为准）：`ResourceImage.tsx:148–167` 失败态是
+  /// `span.resource-image-failed-wrap { fallback + 芯片 }`，宿主 `.emoji-pack-item` 是
+  /// `<button>` 且 `aspect-ratio: 1`（app.css 2234–2246）——**自身框外的内容被裁掉**
+  /// （与 `live/danmaku.dart:415–422` 已拍板的 `.danmaku-image-open { overflow: hidden }` 同源）：
+  /// `.emoji-pack-img-fallback { width: 100%; height: 100% }`（app.css 2265–2271）铺满整格，
+  /// 其后 72px 高的芯片**整块落在可见区之下 ⇒ 完全不可见**。
+  ///
+  /// **Flutter 等价**：CSS 的静默裁剪在 Flutter 是 `RenderFlex overflow` 报错 ⇒ 用库内已登记的
+  /// 技法（`live/danmaku.dart:506–516` 同款）**`ClipRect + OverflowBox`**：宽度仍取格子的
+  /// 紧约束（55），只放开高度轴让 Column 取自然高，再按 `overflow: hidden` 语义裁掉可见区之外的
+  /// 部分 ⇒ 芯片不可见、fallback 铺满，与 web **同结果**且不报错。
+  /// （**未改** `_FailedPlaceholder` 本身：它在评论/帖子等宿主里高度充裕、
+  /// 「失败芯片可见」是 web 的既定行为，改公共件会波及那些宿主。）
   Widget _cellShell({required bool hovered, required Widget? child}) {
     return AnimatedContainer(
       duration: AylaDurations.fast,
@@ -535,7 +577,18 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AylaRadii.rSm),
-        child: child ?? const _EmojiFallback(),
+        // `.emoji-pack-item`（web 的 `<button>`）对超出格子的内容**静默裁剪**
+        // —— Flutter 侧由 `ClipRect + OverflowBox` 表达，见 [_cellShell] 的注释。
+        child: ClipRect(
+          child: OverflowBox(
+            // web 是普通块流（自上而下）⇒ 溢出部分落在**下方**被裁。
+            alignment: Alignment.topCenter,
+            // 只放开高度轴：Column 取自然高（fallback 55 + 芯片 72）；
+            // 宽度保持格子的紧约束（不放开 ⇒ 芯片仍按格宽折行，与 web 一致）。
+            maxHeight: double.infinity,
+            child: child ?? const _EmojiFallback(),
+          ),
+        ),
       ),
     );
   }
@@ -543,12 +596,21 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
 
 /// `.emoji-pack-img-fallback`（app.css 2265–2271）：撑满 + `--glass-bg`
 /// （**56px 小格内不显示重试**）。
+///
+/// `width: 100%; height: 100%` 的宿主是**正方形**的 `.emoji-pack-item`
+/// （`aspect-ratio: 1`）⇒ Flutter 等价物 = 「撑满宽度且等高的 1:1 盒」。
+/// 不能用 `SizedBox.expand`：失败占位的纵排（`_FailedPlaceholder`）给子件的高度约束是
+/// `0..∞`（无界）⇒ `expand` 会直接断言失败；而旧实现的无子件 `ColoredBox` 在无界高里
+/// 塌成 **0×0**（这正是 2026-10-02 真机溢出的另一半原因，见 [_cellShell]）。
 class _EmojiFallback extends StatelessWidget {
   const _EmojiFallback();
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(color: AylaColors.glassBg);
+    return const AspectRatio(
+      aspectRatio: 1,
+      child: ColoredBox(color: AylaColors.glassBg), // background: var(--glass-bg)
+    );
   }
 }
 

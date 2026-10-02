@@ -268,6 +268,70 @@ void main() {
     expect(withoutFavorite, withFavorite);
   });
 
+  testWidgets(
+      'owner 行按行预留：整行都无 owner ⇒ 不占位（vs 行内有 owner ⇒ 每卡多一行 23.25）',
+      (WidgetTester tester) async {
+    // 事实源：`VoiceChannelCard.tsx:37` 是 `{channel.owner_nickname && …}` ——
+    // **没有这一行就不渲染**；同行等高由 CSS grid 的 `align-items: stretch`
+    //（`voice.css:505–511` 的 `display: grid`）保证，不是靠预留空行。
+    // 此前无条件下 `SizedBox(height: ownerLineHeight)` ⇒ 整批无 owner 时每卡多留一行空白。
+    setViewport(tester, const Size(1000, 700));
+    const AylaVoiceCardData a = AylaVoiceCardData(id: 'a', name: '房 A');
+    const AylaVoiceCardData b = AylaVoiceCardData(id: 'b', name: '房 B');
+    const AylaVoiceCardData withOwner =
+        AylaVoiceCardData(id: 'c', name: '房 C', ownerNickname: '爱莉');
+
+    // ⚠️ 同一用例内**不能二次 `pumpWidget`**（见上方 `stateful` 注释的实测结论：
+    // `previewScope` 的 `Overlay(initialEntries:)` 只在首次创建生效）⇒ 两档放在**同一棵树**里
+    // 对照：两个 1 列列表上下相邻，唯一差别是「有没有 owner」——高度差即 owner 行。
+    await tester.pumpWidget(
+      host(
+        Column(
+          children: <Widget>[
+            AylaVoiceChannelList(
+              channels: const <AylaVoiceCardData>[a, b],
+              columns: 1,
+            ),
+            AylaVoiceChannelList(
+              channels: const <AylaVoiceCardData>[withOwner, b],
+              columns: 1,
+            ),
+          ],
+        ),
+      ),
+    );
+    // 树序：组① = [a(0), b(1)]（都无 owner）；组② = [withOwner(2), b(3)]。
+    final double noOwner = tester.getRect(cardAt(0)).height;
+    final double withOwnerLine = tester.getRect(cardAt(2)).height;
+    expect(noOwner, greaterThan(0));
+    // 多出来的一整行 = 行高（`ownerLineHeight = body.fontSize(15) × body.height(1.55) × 12/15`
+    // = 18.6）+ 该行与上一行之间的列间距 `gap: var(--sp-2)`（8）= 26.6。
+    expect(
+      withOwnerLine - noOwner,
+      allOf(greaterThan(20), lessThan(32)),
+      reason: '有 owner 行 ⇒ 该卡多一行（12 × 1.55 = 18.6）+ 行间距 sp2（8）= 26.6',
+    );
+  });
+
+  testWidgets('owner 行按行预留：行内有 owner ⇒ 同排无 owner 的卡也占位保持等高',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1000, 700));
+    await tester.pumpWidget(
+      host(
+        AylaVoiceChannelList(
+          channels: const <AylaVoiceCardData>[
+            AylaVoiceCardData(id: 'a', name: '无 owner'),
+            AylaVoiceCardData(id: 'b', name: '有 owner', ownerNickname: '爱莉'),
+          ],
+          columns: 2,
+        ),
+      ),
+    );
+    final double first = tester.getRect(cardAt(0)).height;
+    final double second = tester.getRect(cardAt(1)).height;
+    expect(first, second, reason: '同行有 owner ⇒ 该行两卡等高（stretch 等价表达）');
+  });
+
   testWidgets('可见性标签：公开/好友互斥、白名单群名可叠加、group 回落群名、未知→**无标签**',
       (WidgetTester tester) async {
     expect(

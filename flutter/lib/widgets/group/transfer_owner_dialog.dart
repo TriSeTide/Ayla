@@ -385,11 +385,16 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
+    // `.group-transfer-row` 是 <button>（GroupInfo.tsx:961–966）⇒ base.css:340 全局 pointer。
     return Semantics(
       button: true,
       selected: selected, // aria-pressed
       label: '转让给 ${member.displayName}',
-      child: GestureDetector(
+      child: MouseRegion(
+        cursor: onTap == null
+            ? SystemMouseCursors.forbidden
+            : SystemMouseCursors.click,
+        child: GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150), // --dur-fast / --ease-out
@@ -427,6 +432,7 @@ class _Row extends StatelessWidget {
               AylaGroupRoleChip(role: member.role), // member ⇒ 不渲染
             ],
           ),
+        ),
         ),
       ),
     );

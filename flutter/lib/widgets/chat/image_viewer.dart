@@ -791,7 +791,12 @@ class _ViewerCircleButtonState extends State<_ViewerCircleButton> {
       label: widget.label,
       child: Focus(
         onFocusChange: (bool f) => setState(() => _focused = f),
+        // `.image-viewer-nav`（app.css:1792 pointer）与 `.image-viewer-close`
+        // （app.css:1742 pointer）共用本件 ⇒ 有 onPressed 即手型，否则 not-allowed。
         child: MouseRegion(
+          cursor: _enabled
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.forbidden,
           onEnter: (_) => setState(() => _hovered = true),
           onExit: (_) => setState(() {
             _hovered = false;
@@ -1023,7 +1028,10 @@ class _ViewerRetryButtonState extends State<_ViewerRetryButton> {
 
   @override
   Widget build(BuildContext context) {
+    // `.media-retry`（app.css:1919–1928）在 web 是 <button>
+    // ⇒ base.css:340 全局 pointer（该选择器自身无 cursor 声明，故依据在全局规则）。
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(

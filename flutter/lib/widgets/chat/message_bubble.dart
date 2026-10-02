@@ -32,8 +32,10 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 
 import '../../core/media/audio_playback.dart';
 import '../../core/models/chat_message.dart';
@@ -369,7 +371,6 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
             onRetryFavoriteStatus: widget.onRetryFavoriteStatus,
             onQuote: widget.onQuote,
             onRecall: widget.onRecall,
-            onFocusChange: (bool v) => setState(() => _focused = v),
           )
         : null;
 
@@ -435,7 +436,16 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {
         final bool narrow = MediaQuery.sizeOf(context).width <= 768;
-        final double bodyMaxWidth = c.maxWidth * (narrow ? 0.84 : 0.75);
+        // `.msg-body { max-width: 75% }`（app.css:1074）/ 窄屏 84%（app.css:3217–3219）
+        // 的百分比基数是 **`.msg-row` 的 content box** —— `.msg-row` 自身有
+        // `padding: 0 var(--sp-1)`（app.css:1045，= 8px）⇒ 可分配宽 = 行宽 − 8。
+        // 本件 `c` 是 LayoutBuilder 拿到的**整行**约束、`Padding(horizontal: sp1)`
+        // 在它内层 ⇒ 不减这 8px 会让气泡最大宽多出 0.84×8 ≈ 6.7px。
+        final double rowInnerWidth = math.max(
+          0,
+          c.maxWidth - 2 * AylaSpacing.sp1,
+        );
+        final double bodyMaxWidth = rowInnerWidth * (narrow ? 0.84 : 0.75);
         final List<Widget> children = <Widget>[
           if (halo != null) halo,
           if (halo != null) const SizedBox(width: AylaSpacing.sp2),
@@ -469,29 +479,44 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               )
             : row;
 
-        return MouseRegion(
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: AnimatedBuilder(
-            animation: _arrive,
-            builder: (BuildContext context, Widget? child) {
-              if (_arrive.value >= 1.0) return child!;
-              final double t = AylaCurves.easeOut.transform(_arrive.value);
-              // `frost-rise`：opacity 0→1 + translateY 8→0（180ms）
-              // 依据（2026-09-27 收口；13 号 §8.19）：web `@keyframes frost-rise`
-              // （base.css:426–435）作用在**整行** `.msg-row` 上 ⇒ 整层 opacity，
-              // 含气泡自身的 `.bubble-other` blur(12px) 层 ⇒ 保持整层 Opacity。
-              return Opacity(
-                opacity: t,
-                child: Transform.translate(
-                  offset: Offset(0, 8 * (1 - t)),
-                  child: child,
-                ),
-              );
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp1),
-              child: content,
+        // `:focus-within`（app.css:1301–1304 `.msg-row:focus-within .msg-actions`）
+        // 命中**行内任何**可聚焦元素 —— 含气泡内 `.quote-strip` 的 button 分支
+        // （`MessageBubble.tsx:339–347`）。`Focus.onFocusChange` 只在该节点自身
+        // 获得/失去焦点时触发；子节点取得焦点而父节点仍在链上不触发 —— 对布尔
+        // 语义**恰好等价**：子树里任何可聚焦件拿到焦点 ⇒ `_focused = true`，
+        // 焦点离开整行 ⇒ false（`FocusNode.hasFocus` 的「链上任意位置」语义）。
+        // 此前 Focus 只包住操作栏自身 ⇒ 聚焦气泡里的引用键时工具栏不显示。
+        return Focus(
+          onFocusChange: (bool v) => setState(() => _focused = v),
+          child: MouseRegion(
+            // 触屏档整行可点（展开工具栏，见上方 `onToggleActions` 分支）⇒ 手型；
+            // 桌面档行本体不可点，鼠标落在气泡上仍是 arrow（web 同：行无 pointer 声明）。
+            cursor: _touchMode
+                ? SystemMouseCursors.click
+                : MouseCursor.defer,
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
+            child: AnimatedBuilder(
+              animation: _arrive,
+              builder: (BuildContext context, Widget? child) {
+                if (_arrive.value >= 1.0) return child!;
+                final double t = AylaCurves.easeOut.transform(_arrive.value);
+                // `frost-rise`：opacity 0→1 + translateY 8→0（180ms）
+                // 依据（2026-09-27 收口；13 号 §8.19）：web `@keyframes frost-rise`
+                // （base.css:426–435）作用在**整行** `.msg-row` 上 ⇒ 整层 opacity，
+                // 含气泡自身的 `.bubble-other` blur(12px) 层 ⇒ 保持整层 Opacity。
+                return Opacity(
+                  opacity: t,
+                  child: Transform.translate(
+                    offset: Offset(0, 8 * (1 - t)),
+                    child: child,
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp1),
+                child: content,
+              ),
             ),
           ),
         );
@@ -832,10 +857,30 @@ class _QuoteStrip extends StatefulWidget {
 
 class _QuoteStripState extends State<_QuoteStrip> {
   bool _hovered = false;
+  bool _focused = false;
+
+  bool get _clickable => widget.onJump != null;
 
   @override
   Widget build(BuildContext context) {
-    final Widget body = MouseRegion(
+    // web `MessageBubble.tsx:339–347` 的可点分支是**原生 `<button>`** ⇒ 天然进
+    // tab 序列、可聚焦；不可点分支是 `<div>`（`tsx:349–351`）⇒ 不可聚焦。
+    // Flutter 的 `GestureDetector` 不可聚焦 ⇒ 补一层 `Focus`（Enter/Space 触发同
+    // `onJump`），并让 `:hover, :focus-visible → background .65`
+    // （`app.css:1282–1285`）的焦点档也生效。
+    // 焦点也因此被**行级** Focus 捕获（`app.css:1301` 的 `:focus-within`）。
+    final Widget body = Focus(
+      canRequestFocus: _clickable,
+      onFocusChange: (bool has) => setState(() => _focused = has),
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        final bool activate = event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.space;
+        if (!activate || !_clickable) return KeyEventResult.ignored;
+        widget.onJump!();
+        return KeyEventResult.handled;
+      },
+      child: MouseRegion(
       cursor: widget.onJump == null
           ? SystemMouseCursors.basic
           : SystemMouseCursors.click,
@@ -853,8 +898,8 @@ class _QuoteStripState extends State<_QuoteStrip> {
               curve: AylaCurves.easeOut,
               margin: const EdgeInsets.only(bottom: AylaSpacing.sp1),
               decoration: BoxDecoration(
-                // `background: rgba(255,250,251,.45)`；hover/focus → `.65`
-                color: _hovered
+                // `background: rgba(255,250,251,.45)`；hover/focus → `.65`（app.css:1261–1285）
+                color: (_hovered || _focused)
                     ? const Color(0xA6FFFAFB)
                     : const Color(0x73FFFAFB),
                 borderRadius: BorderRadius.circular(AylaRadii.rSm),
@@ -902,6 +947,7 @@ class _QuoteStripState extends State<_QuoteStrip> {
             ),
           ),
         ),
+      ),
       ),
     );
     // web «MessageBubble.tsx:341–352»：可点分支 «title="跳转到被引用消息"»、
@@ -1013,7 +1059,6 @@ class _MsgActions extends StatelessWidget {
     this.onRetryFavoriteStatus,
     this.onQuote,
     this.onRecall,
-    this.onFocusChange,
   });
 
   final AylaChatMessage msg;
@@ -1029,15 +1074,14 @@ class _MsgActions extends StatelessWidget {
   final VoidCallback? onRetryFavoriteStatus;
   final void Function(AylaChatMessage msg)? onQuote;
   final void Function(AylaChatMessage msg)? onRecall;
-  final void Function(bool focused)? onFocusChange;
 
   @override
   Widget build(BuildContext context) {
     // 包装器**恒在**（只翻转可见标志位），否则 Element 重建会让隐式动画直接跳到终值
     // （13 号 §五：A5 会话球「瞬间消失」事故同一根因）。
-    return Focus(
-      onFocusChange: onFocusChange,
-      child: IgnorePointer(
+    // ⚠️ 焦点不在本件：`:focus-within` 的判定已提到**整行**层级
+    // （见 `AylaMessageBubble.build` 的 `Focus`）—— `app.css:1301` 覆盖行内任何可聚焦元素。
+    return IgnorePointer(
         ignoring: !visible,
         child: AnimatedOpacity(
           // `.msg-actions { opacity: 0; pointer-events: none; transition: opacity var(--dur-fast)
@@ -1064,17 +1108,19 @@ class _MsgActions extends StatelessWidget {
                   onToggle: onToggleFavorite,
                   onRetryStatus: onRetryFavoriteStatus,
                 ),
-                // 引用键**恒显示**（web `MessageList.tsx:1082` 的 `onQuote={onQuote}` 恒传
-                // ⇒ 每条消息都有「引用」；明确「每条消息工具栏都有收藏和回复」）。
-                // 未接线（onQuote 为空）时按钮仍可点、只是无副作用 —— 与 A2 的
-                // 「＋/笔点击暂无副作用」同口径，接线属页面层。
-                const SizedBox(width: AylaSpacing.sp1),
-                AylaMsgActionButton(
-                  label: '引用',
-                  semanticLabel: '引用回复',
-                  icon: _actionIcon('iconQuote', 12),
-                  onPressed: () => onQuote?.call(msg),
-                ),
+                // 引用键：web `MessageBubble.tsx:247` `{onQuote && (…)}` ——
+                // **未接线时根本不渲染**（不是渲染一个无副作用的假按钮），
+                // 与 `tsx:258` 的 `{onRecall && (…)}` 同一写法；
+                // 同时 gap 也不出现（`.msg-actions { gap: var(--sp-1) }` 只在有子项时生效）。
+                if (onQuote != null) ...<Widget>[
+                  const SizedBox(width: AylaSpacing.sp1),
+                  AylaMsgActionButton(
+                    label: '引用',
+                    semanticLabel: '引用回复',
+                    icon: _actionIcon('iconQuote', 12),
+                    onPressed: () => onQuote!.call(msg),
+                  ),
+                ],
                 if (showRecall) ...<Widget>[
                   const SizedBox(width: AylaSpacing.sp1),
                   AylaMsgActionButton(
@@ -1088,7 +1134,6 @@ class _MsgActions extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 

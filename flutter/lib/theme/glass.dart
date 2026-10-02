@@ -1220,6 +1220,7 @@ class AylaGlassCard extends StatelessWidget {
     this.interactive = false,
     this.onTap,
     this.semanticLabel,
+    this.cursor,
   });
 
   /// 内容。
@@ -1249,12 +1250,19 @@ class AylaGlassCard extends StatelessWidget {
   /// 可访问性标签。
   final String? semanticLabel;
 
+  /// 鼠标悬停指针（**null = 按 [onTap] 推导**，见 [AylaCardInteraction.cursor]）。
+  ///
+  /// web 的卡片 `cursor: pointer` 逐域声明（typed-result-cards.css:6 / app.css:3300 …），
+  /// 故需要时由调用方显式给定；不传即保持既有行为（有 onTap → click）。
+  final MouseCursor? cursor;
+
   @override
   Widget build(BuildContext context) {
     return AylaCardInteraction(
       interactive: interactive,
       onTap: onTap,
       semanticLabel: semanticLabel,
+      cursor: cursor,
       builder: (BuildContext context, bool hovered) => AylaGlassSurface(
         radius: radius,
         blur: blur,
@@ -1292,6 +1300,7 @@ class AylaCardInteraction extends StatefulWidget {
     this.interactive = true,
     this.focusRingColor,
     this.focusRingRadius = const BorderRadius.all(Radius.circular(AylaRadii.rCard)),
+    this.cursor,
   });
 
   /// 内容构建器（`hovered` 用于切换阴影与其它 hover 态）。
@@ -1324,6 +1333,31 @@ class AylaCardInteraction extends StatefulWidget {
 
   /// 环的内侧圆角（默认 `--radius-card` 16；环自身半径 = 该值 + 2）。
   final BorderRadius focusRingRadius;
+
+  /// 鼠标悬停指针；**null = 按 [onTap] 推导**（可点 → `click`，不可点 → `basic`）。
+  ///
+  /// 事实源：web 的 `cursor: pointer` 是**逐域声明**在卡片选择器上的——
+  /// `typed-result-cards.css:4` / `6`（`.typed-result-card .post-card-main` /
+  /// `.post-card-main`）、`typed-result-cards.css:42`（`.typed-message-card.is-openable`）、
+  /// `typed-result-cards.css:59`（`.typed-result-card .voice-channel-card`）、
+  /// `app.css:3300`（`.live-card`）、`voice.css:538` / `709`
+  /// （`.voice-hub` / `.group-voice .voice-channel-card`）。
+  ///
+  /// ⚠️ **反向也有声明**，即「可点容器里的媒体区要归位」：
+  /// `typed-result-cards.css:43`（`.typed-message-card.is-openable .typed-message-media`）、
+  /// `voice.css:553` / `724`（`[aria-disabled="true"]`）、
+  /// `typed-result-cards.css:74`（同）——这三类都取 `basic` / 由内层覆写，
+  /// 故默认推导是**按可点性**，而不是一律 `click`。
+  final MouseCursor? cursor;
+
+  /// 生效指针（[cursor] 显式传值优先，否则按 [onTap] 推导）。
+  ///
+  /// 显式覆盖用于 web 明确写 `cursor: default` 的反向场景
+  /// （`voice.css:553` / `724`、`typed-result-cards.css:74` 的
+  /// `[aria-disabled="true"]`，`live.css:1266` 的骨架行 `is-skeleton`）。
+  MouseCursor get _resolvedCursor =>
+      cursor ??
+      (onTap != null ? SystemMouseCursors.click : SystemMouseCursors.basic);
 
   @override
   State<AylaCardInteraction> createState() => _AylaCardInteractionState();
@@ -1388,15 +1422,26 @@ class _AylaCardInteractionState extends State<AylaCardInteraction> {
     // 非交互卡：不挂 hover/按压动效；有 onTap 时保持可点击（对齐原 AylaGlassCard
     // interactive=false 的行为）。
     if (!widget.interactive) {
-      if (widget.onTap == null) return widget.builder(context, false);
+      // 静态卡：无 onTap 且未显式指定 cursor 时完全不挂指针层（保持既有行为）。
+      if (widget.onTap == null && widget.cursor == null) {
+        return widget.builder(context, false);
+      }
+      final Widget body = widget.onTap == null
+          ? widget.builder(context, false)
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onTap,
+              child: widget.builder(context, false),
+            );
+      final Widget region = MouseRegion(
+        cursor: widget._resolvedCursor,
+        child: body,
+      );
+      if (widget.onTap == null) return region;
       return Semantics(
         button: true,
         label: widget.semanticLabel,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          child: widget.builder(context, false),
-        ),
+        child: region,
       );
     }
 
@@ -1440,6 +1485,9 @@ class _AylaCardInteractionState extends State<AylaCardInteraction> {
 
     return _withFocus(
       MouseRegion(
+        // 卡片族指针：web 在卡片选择器上逐域声明 `cursor: pointer`
+        // （typed-result-cards.css 4/6/42/59、app.css 3300、voice.css 538/709）
+        cursor: widget._resolvedCursor,
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() {
           _hovered = false;

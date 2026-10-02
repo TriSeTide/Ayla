@@ -394,7 +394,11 @@ class _AylaGroupCreateDialogState extends State<AylaGroupCreateDialog> {
         spacing: AylaSpacing.sp2, // gap: var(--sp-2)
         children: <Widget>[
           Expanded(
-            child: GestureDetector(
+            // web 是 <label class=`group-create-result-check`>（GroupCreateDialog.tsx:147）：
+            // private.css:159–166 声明 cursor: pointer ⇒ 点整行都该是手型。
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               // web 是 label：点整行切换
               onTap: () => _toggleMember(u),
               child: Row(
@@ -415,6 +419,7 @@ class _AylaGroupCreateDialogState extends State<AylaGroupCreateDialog> {
                   ),
                 ],
               ),
+            ),
             ),
           ),
           AylaGlassButton(

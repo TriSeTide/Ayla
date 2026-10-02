@@ -455,7 +455,7 @@ void main() {
     expect(find.text('引用'), findsOneWidget);
   });
 
-  testWidgets('工具栏：每条消息都有收藏键与引用键（引用恒显示，不依赖回调）', (
+  testWidgets('工具栏：传了 onQuote → 收藏键与引用键都在（web tsx 246/247）', (
     WidgetTester tester,
   ) async {
     AylaChatMessage? quoted;
@@ -474,13 +474,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AylaFavoriteButton), findsOneWidget, reason: '收藏键恒在（tsx 246）');
-    expect(find.text('引用'), findsOneWidget, reason: '引用键恒显示（MessageList.tsx:1082 恒传 onQuote）');
+    expect(find.text('引用'), findsOneWidget, reason: '传了 onQuote ⇒ `{onQuote && (…)}` 成立（tsx 247）');
     await tester.tap(find.text('引用'));
     await tester.pump();
     expect(quoted?.id, 'm1');
   });
 
-  testWidgets('未接线（无 onQuote）：引用键仍渲染、点击无副作用', (WidgetTester tester) async {
+  testWidgets('未接线（无 onQuote）：引用键**不渲染**（MessageBubble.tsx:247 的 `{onQuote && (…)}`）', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
       host(
         tester,
@@ -493,9 +495,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('引用'), findsOneWidget);
-    await tester.tap(find.text('引用'));
-    await tester.pump(); // 不抛异常即可（接线属页面层）
+    // 2026-10-02 订正：此前断言「引用键恒显示」，与 web 不符 ——
+    // `components/chat/MessageBubble.tsx:247` 是条件渲染（`{onQuote && (…)}`），
+    // 与 `:258` 的 `{onRecall && (…)}` 同一写法 ⇒ 未接线时不该有假按钮。
+    expect(find.text('引用'), findsNothing);
+    // 收藏键仍恒在（`tsx:246` 无条件渲染）
+    expect(find.byType(AylaFavoriteButton), findsOneWidget);
   });
 
   testWidgets('撤回键：只有自己 120s 内的消息才显示（用户 2026-09-24 明确）', (
@@ -539,13 +544,14 @@ void main() {
           currentUserId: 'me', // 当前用户是 me，发送者是 u1
           senderAvatarLabel: '樱',
           actionsOpen: true,
+          onQuote: (_) {},
           onRecall: (_) {},
         ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('撤回'), findsNothing, reason: '对方消息不可撤回（canRecall 判自己）');
-    expect(find.text('引用'), findsOneWidget);
+    expect(find.text('引用'), findsOneWidget, reason: '传了 onQuote ⇒ 引用键在');
   });
 
   testWidgets('撤回键：自己但超过 120s 不显示', (WidgetTester tester) async {
@@ -808,7 +814,9 @@ void main() {
           .ancestor(of: find.text(longText), matching: find.byType(ConstrainedBox))
           .first,
     );
-    expect(wide.constraints.maxWidth, 800 * 0.75, reason: '宽屏 75%');
+    // ⚠️ 2026-10-02 订正：web 的百分比基数是 **`.msg-row` 的 content box**
+    // （`app.css:1045` 的 `padding: 0 sp1` 已扣掉 8px）⇒ 可分配宽 = 800 − 8。
+    expect(wide.constraints.maxWidth, (800 - 2 * AylaSpacing.sp1) * 0.75, reason: '宽屏 75%');
   });
 
   testWidgets('主体 max-width：窄屏 84%（app.css 3217–3219）', (WidgetTester tester) async {
@@ -828,6 +836,55 @@ void main() {
           .ancestor(of: find.text(longText), matching: find.byType(ConstrainedBox))
           .first,
     );
-    expect(narrow.constraints.maxWidth, 600 * 0.84, reason: '窄屏 84%');
+    // 同上：基数 = 行 content box（600 − 2×sp1）
+    expect(narrow.constraints.maxWidth, (600 - 2 * AylaSpacing.sp1) * 0.84, reason: '窄屏 84%');
+  });
+
+  // ======================= 问题 13 ③：focus-within 覆盖整行 =======================
+  //
+  // web `app.css:1301–1304` `.msg-row:focus-within .msg-actions { opacity: 1;
+  // pointer-events: auto }` —— 命中**行内任何**可聚焦元素，含气泡内 `.quote-strip`
+  // 的 button 分支（`MessageBubble.tsx:339–347`）。Flutter 此前 `Focus` 只包住操作栏
+  // 自身 ⇒ 聚焦引用键时工具栏仍不可见、也点不到（`IgnorePointer(ignoring: true)`）。
+  testWidgets('聚焦气泡内引用键 → 工具栏可见且可点（app.css:1301 :focus-within）', (
+    WidgetTester tester,
+  ) async {
+    int jumps = 0;
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMessageBubble(
+          msg: _msg(),
+          isSelf: false,
+          senderAvatarLabel: '樱',
+          quoteText: '那我先去占个位置',
+          onQuoteJump: (_) => jumps++,
+          onQuote: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 初始：无 hover、无 actionsOpen、无焦点 → 操作栏隐藏（pointer-events: none）
+    IgnorePointer ignoring() => tester.widget<IgnorePointer>(
+          find.ancestor(
+            of: find.byType(AylaFavoriteButton),
+            matching: find.byType(IgnorePointer),
+          ).first,
+        );
+    expect(ignoring().ignoring, isTrue, reason: '初始隐藏态');
+
+    // 把焦点给引用条（web 是可聚焦的原生 button）
+    final FocusNode quoteNode = FocusNode();
+    addTearDown(quoteNode.dispose);
+    final Element quoteEl = tester.element(find.text('那我先去占个位置'));
+    Focus.maybeOf(quoteEl)?.requestFocus();
+    await tester.pumpAndSettle();
+    expect(
+      ignoring().ignoring,
+      isFalse,
+      reason: '聚焦气泡内的引用键 ⇒ `.msg-row:focus-within` 命中 ⇒ 操作栏可见',
+    );
+    expect(find.text('引用'), findsOneWidget);
   });
 }

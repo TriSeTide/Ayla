@@ -469,10 +469,13 @@ class _FailedPlaceholder extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         if (fallback != null) fallback!,
+        // 重试键在 web 是 <button>（ResourceImage.tsx:156）⇒ base.css:340 全局 pointer。
         Semantics(
           button: true,
           label: '图片加载失败，重试',
-          child: GestureDetector(
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
             onTap: onRetry,
             child: Container(
               // min-width: 40px; min-height: 32px; padding: 4px 8px; radius-sm 8
@@ -492,6 +495,7 @@ class _FailedPlaceholder extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ],
     );

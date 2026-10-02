@@ -157,7 +157,12 @@ class _AylaFavoriteButtonState extends State<AylaFavoriteButton> {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final bool highlight = _hovered || _focused || _active;
 
+    // `.favorite-toggle`（app.css:3317–3324 声明 cursor: pointer）是 <button>
+    // ⇒ 全局 pointer；禁用态归 not-allowed（base.css:343）。
     final Widget button = MouseRegion(
+      cursor: _disabled
+          ? SystemMouseCursors.forbidden
+          : SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(

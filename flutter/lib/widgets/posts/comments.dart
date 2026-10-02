@@ -529,7 +529,13 @@ class _AylaCommentComposerState extends State<AylaCommentComposer> {
               child: Semantics(
                 button: true,
                 label: '移除图片（同时从服务器删除）',
-                child: GestureDetector(
+                // `posts.css:533–546 .composer-pending-image button { … cursor: pointer }`
+                // + base.css:343 disabled ⇒ not-allowed。
+                child: MouseRegion(
+                  cursor: busy
+                      ? SystemMouseCursors.forbidden
+                      : SystemMouseCursors.click,
+                  child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: busy ? null : () => unawaited(_remove(draft)),
                   child: Container(
@@ -550,6 +556,7 @@ class _AylaCommentComposerState extends State<AylaCommentComposer> {
                         color: Color(0xFFFFFFFF), // #fff
                       ),
                     ),
+                  ),
                   ),
                 ),
               ),
@@ -874,14 +881,21 @@ class _AylaCommentListState extends State<AylaCommentList> {
         color: destructive ? AylaColors.destructive : AylaColors.textSecondary,
       ),
     );
+    // `.comment-action` 是 <button>（CommentList.tsx:150/154）⇒ base.css:340 全局 pointer；
+    // 删除态 disabled ⇒ base.css:343 not-allowed。
     return Semantics(
       button: true,
       enabled: onTap != null,
       label: label,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Opacity(opacity: onTap == null ? 0.55 : 1, child: text),
+      child: MouseRegion(
+        cursor: onTap == null
+            ? SystemMouseCursors.forbidden
+            : SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Opacity(opacity: onTap == null ? 0.55 : 1, child: text),
+        ),
       ),
     );
   }
@@ -893,10 +907,13 @@ class _AylaCommentListState extends State<AylaCommentList> {
       final String alt = c.body.isEmpty
           ? '评论图片 ${i + 1}'
           : c.body;
+      // `posts.css:492–496 .comment-image-btn { cursor: zoom-in }`（与帖子卡图片同档）。
       return Semantics(
         button: true,
         label: '查看评论图片 ${i + 1}/${imgs.length}',
-        child: GestureDetector(
+        child: MouseRegion(
+          cursor: SystemMouseCursors.zoomIn,
+          child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => widget.onOpenImages?.call(imgs, i, alt),
           child: ClipRect(
@@ -908,6 +925,7 @@ class _AylaCommentListState extends State<AylaCommentList> {
               fit: BoxFit.cover, // object-fit: cover
             ),
           ),
+        ),
         ),
       );
     }

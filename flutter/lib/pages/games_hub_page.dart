@@ -102,7 +102,12 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
     _start();
-    _loadFriends();
+    // ⚠️ **必须帧后**：\`_loadFriends\` 会在首个 await 前同步写 social store
+    // （→ GroupPage._onChanged 的 setState），落在本帧 build 期即抛
+    // "setState() or markNeedsBuild() called during build"（详见 [_loadFriends]）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadFriends();
+    });
     _registerDirectoryEvents();
   }
 
@@ -228,6 +233,16 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
     unawaited(pager.load());
   }
 
+  /// ⚠️ **必须帧后调用**（2026-10-02 修「setState() or markNeedsBuild() called during build」）：
+  /// \`aylaHubFriendIds()\` → \`aylaSocialStore.load()\` 在**首个 await 之前**是同步段
+  /// （\`state/social_store.dart:391\` 的 \`_patch\` → 同步 \`notifyListeners\`）。
+  /// 若在 \`initState\` 直接调，通知会落在**本帧 build 期**：\`AylaSocialController\`
+  /// → \`AylaGroupDirectory._forward\`（\`group_support.dart:431\`）
+  /// → \`GroupPage._onChanged\`（\`group_page.dart:383\` 的裸 \`setState\`）
+  /// ⇒ 用户 \`flutter run\` 首条异常（GroupPage 未挂载时只读 items，不会炸 ⇒ 只在
+  /// 「群壳 + 大厅页」并存时才现形）。与同文件 \`_registerDirectoryEvents\` /
+  /// \`_registerRefresh\` 的既有帧后范式一致。
+  /// 回归锁：\`test/hub_friends_load_phase_test.dart\`。
   Future<void> _loadFriends() async {
     final Set<String> ids = await aylaHubFriendIds();
     if (!mounted || ids.isEmpty) return;
@@ -358,6 +373,17 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
                         room: visible[i].card,
                         onEnter: () => _enter(visible[i].card.id),
                         revealDelay: AylaRevealMotion.staggerDelay(i),
+                        // 网格等高：web `boardgame.css:232–237` 的 `.games-grid { display:grid }`
+                        // 默认 `align-items: stretch` ⇒ 同一行卡片恒等高（网格把最矮的拉到该行最高）。
+                        // Flutter 无 stretch 且卡片内含 LayoutBuilder（不支持 intrinsics，
+                        // 见 `game_room_card.dart:85–92`）⇒ 用件内既有开关 `reserveSpace`
+                        // 让「状态行 / 房主行 / meta 行」恒占位，高度由构造决定。
+                        // ⚠️ 取向差异（登记）：web 是「最矮卡被拉高到该行最高卡」，
+                        // `reserveSpace` 是「每卡固定占满四行」—— 同批都缺行时结果一致；
+                        // 混排（部分卡有状态/房主行）时本档会略高。不得为此引入
+                        // `IntrinsicHeight`（受 `AylaGlassButton` / LayoutBuilder 限制）。
+                        // 搜索页等「单卡使用」场景**不传**（保持 web 的条件渲染，卡底不留空白）。
+                        reserveSpace: true,
                         favoriteState:
                             _favorites.stateOf('game', visible[i].card.id),
                         favoriteBusy: _favorites.busyOf('game', visible[i].card.id),

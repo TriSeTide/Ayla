@@ -245,7 +245,15 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
           children: <Widget>[
             AylaRevealScope(
               replayKey: _replayNonce,
+              // 卡片留白口径（问题 6 真根因）：web 群内用的是
+              // `.group-voice .voice-channel-list`（voice.css:690–695）——
+              // **`padding: 0` 显式归零**（:694）且**恒 2 列**（:692 的 `repeat(2, 1fr)`；
+              // voice.css:647–659 的两条媒体查询只作用于 `.voice-hub`）。
+              // 左右留白只由外层 `.group-page .group-voice`（group.css:411–417 的 `sp4`）给。
+              // ⇒ 不传时吃基样式 `sp3 sp4`，群内左右各多 16（实测 32，用户实报）。
               child: AylaVoiceChannelList(
+                padding: EdgeInsets.zero,
+                columns: 2,
                 channels: <AylaVoiceCardData>[
                   for (final AylaDirectoryVoiceEntry entry in pager.items)
                     entry.card,

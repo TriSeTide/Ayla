@@ -60,6 +60,24 @@ class AylaMediaActions {
         onProgress: onProgress,
       );
 
+  /// 选图并按 **`kind=emoji`** 上传（群表情包面板「加号」）。
+  ///
+  /// ⚠️ 与 [pickImages] 的**唯一差别**是上传 kind：web `EmojiPackPanel.tsx:113` 用的是
+  /// `uploadMediaFile(file, "emoji")`。后端 `apps/emoji/services.py:118` 硬校验
+  /// `media.kind == MediaObject.KIND_EMOJI`，否则 `media_type_mismatch`
+  /// （`apps/media/services.py:391-393` 的注释就是这次实测踩出来的）⇒
+  /// 群表情**必须**以 emoji kind 上传，不能复用图片口径。
+  static Future<AylaMediaPickResult> pickEmojiImages({
+    int remaining = 99,
+    ValueChanged<double?>? onProgress,
+  }) =>
+      _pick(
+        kind: AylaPickKind.image,
+        mediaKind: AylaMediaKind.emoji,
+        remaining: remaining,
+        onProgress: onProgress,
+      );
+
   /// 选媒体（发帖编辑器「图片」钮：多选图片；[remaining] = 9 − 已选）。
   static Future<AylaMediaPickResult> pickMedia({
     required int remaining,

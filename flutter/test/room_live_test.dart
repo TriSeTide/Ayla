@@ -23,6 +23,7 @@ import '../lib/pages/games_hub_page.dart';
 import '../lib/pages/hub_support.dart';
 import '../lib/pages/live_room_page.dart';
 import '../lib/pages/live_studio_page.dart';
+import '../lib/widgets/live/live_room_body.dart' show AylaLiveRoomBody;
 import '../lib/pages/voice_hub_page.dart';
 import '../lib/state/boardgame_store.dart';
 import '../lib/state/directory_events.dart';
@@ -395,6 +396,39 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(_host(const LiveStudioPage(channelId: '7')));
       expect(tester.takeException(), isNull);
+      await tester.pumpAndSettle();
+    });
+
+
+    // ===== 问题 11 附带：权威名单子链接进三个直播页（web 弹层自拉，见 LiveViewerSheet.tsx:44–79）=====
+    testWidgets('LiveRoomPage：名单子链已接线（弹层打开钩子非空 + 投影不是骨架）', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(_host(const LiveRoomPage(channelId: '7')));
+      await tester.pump();
+      final AylaLiveRoomBody body =
+          tester.widget<AylaLiveRoomBody>(find.byType(AylaLiveRoomBody));
+      // 未打开弹层前 `viewerSheet` 仍是骨架（viewers == null）——与 web 一致
+      expect(body.data.viewerSheet.viewers, isNull, reason: '未打开 ⇒ 骨架态');
+      expect(
+        body.onOpenViewerSheet,
+        isNotNull,
+        reason: '页面必须把 onOpen 接到 AylaLiveViewerStrip（否则弹层永远骨架）',
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('LiveStudioPage：名单子链已接线', (WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(_host(const LiveStudioPage(channelId: '7')));
+      await tester.pump();
+      final AylaLiveRoomBody body =
+          tester.widget<AylaLiveRoomBody>(find.byType(AylaLiveRoomBody));
+      expect(body.data.viewerSheet.viewers, isNull);
+      expect(body.onOpenViewerSheet, isNotNull);
       await tester.pumpAndSettle();
     });
 

@@ -16,15 +16,18 @@
 /// 一级桌游页（`GamesHubPage`）的调用点传 `aylaDirectoryListPadding(context)`
 /// —— web 的组规则 `directory-filters.css:171–180`（左右恒 0）与 `199–208`
 /// （≥769 顶部归零）作用在 `.games-grid` / `.games-grid.games-grid-loading`
-/// 两个容器上；**群内（`GroupGames`）与画布样张不传**，保持基样式 `sp3 sp4`。
+/// 两个容器上；画布样张不传，保持基样式 `sp3 sp4`。
 ///
-/// ⚠️ **群内口径核对结果（2026-09-29，只登记未改）**：web 的群内留白由**外层容器**给
-/// —— `.group-page .group-games { padding: var(--sp-4) }`（`group.css:411–415`，
-/// 0-2-0 压过 `boardgame.css:247–252` 的 `sp3 sp4`），内层 `.group-games-grid` 自身
-/// `padding: 0`（`boardgame.css:254–258`）。Flutter 群内页有等价外层
-/// （`group_games_page.dart:218` 的 `EdgeInsets.all(sp4)`），本件默认 `sp4/sp3` 再叠一次
-/// ⇒ 群内左右各多 **16**、上下各多 **12**。另：web 群内**恒 2 列**（`boardgame.css:256`），
-/// 而群内调用点未传 `columns` ⇒ 宽屏走 4 列。两条均属群内页面口径，未在本轮改动。
+/// ✅ **群内口径（2026-10-02 已接线；问题 6 真根因）**：web 的群内留白由**外层容器**给
+/// —— `.group-page .group-games { padding: var(--sp-4) }`（`group.css:411–417`，
+/// 特异性 0-2-0 压过 `boardgame.css:247–252` 的 `sp3 sp4`），内层 `.group-games-grid`
+/// 自身**没有 padding 声明 ⇒ 0**（`boardgame.css:254–259`）。
+/// Flutter 群内页有等价外层（`group_games_page.dart` 的 `EdgeInsets.all(sp4)`），
+/// 故调用点现在**显式**传 `padding: EdgeInsets.zero`：修前本件默认 `sp4/sp3` 再叠一层
+/// ⇒ 群内左右各多 **16**（实测 32，用户实报「卡片左右留空真的没对齐」）。
+/// 另：web 群内**恒 2 列**（`boardgame.css:256` 的 `repeat(2, 1fr)`；`:239–243` 的四列
+/// 媒体查询只作用于 `.games-grid`）⇒ 群内调用点**显式**传 `columns: 2`
+/// （修前未传 ⇒ ≥769 走 4 列）。回归锁：`test/group_scene_padding_test.dart`。
 ///
 /// ## 机制差异（登记）
 /// Flutter 没有 CSS grid ⇒ 用 `LayoutBuilder` 算出等宽列宽（`(可用宽 − 左右内距 − 列间距×(n−1)) / n`）

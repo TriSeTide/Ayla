@@ -13,7 +13,11 @@
 /// - tsx 329：PullToRefresh（isAtTop 读内容区 scrollTop）；
 /// - tsx 330–334：分类空态「这个分类还没有帖子」/「换个分类看看」；
 /// - tsx 336–371：瀑布流 + 页脚（StablePaginationFooter + 三点 / 加载更多 / 重试）；
-/// - tsx 346–353：卡片 onOpen → /posts/:id（进详情前保存滚动位置）。
+/// - tsx 346–353：卡片 onOpen → /posts/:id（**进详情前保存滚动位置**，
+///   `saveScrollPosition(scrollRestoreKey, …)`）⇒ [_PostsHubPageState._openPost]；
+/// - tsx 119：`useScrollRestore(scrollRestoreKey, hubRef, { ready: state.loaded })`
+///   ⇒ [_PostsHubPageState._restore]（键 = 本页 tab key，与 web 的
+///   `posts:{account}:{filter}` 同源；account 维度见文件头机制差异 2）。
 ///
 /// ## 复用
 /// AylaDirectoryPage / AylaDirectoryContent / AylaDirectoryFilters /
@@ -25,8 +29,9 @@
 /// ## 机制差异（登记）
 /// 1. **无 WS 增量**：web 监听 post.created/post.deleted（tsx 232–262）维护列表；
 ///    Flutter 侧帖子 WS 帧分发未接（全库无 comment.*/post.viewed 落点）⇒ 靠刷新更新；
-/// 2. **无跨挂载分页缓存**（web 模块级 postTabPages + 60s 首屏复用）与
-///    **无滚动位置记忆**（useScrollRestore）—— 与其他页同登记；
+/// 2. **跨挂载分页缓存已交付**（[AylaPostTabCache] 即 web 的模块级 postTabPages +
+///    60s 首屏复用）；**滚动位置记忆已接**（2026-10-02，见上）；
+///    account 维度由「无跨账号共享」承担（缓存与滚动记忆都随登出清空）；
 /// 3. **错误通道合并**：web 有 error（列表顶部）与 nextPageError（页脚，且阻止滚动
 ///    自动重试，tsx 273）两条通道；Flutter 的 AylaPagedList 只有一个 error
 ///    ⇒ 统一由页脚呈现（滚动不自动重试的行为由 AylaDirectoryLoadMore 的
@@ -58,11 +63,21 @@ import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/page_state.dart';
 import '../widgets/base/pagination_footer.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/base/reveal.dart';
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/posts/post_card.dart';
 import '../widgets/posts/post_page_chrome.dart';
 import 'hub_support.dart';
+
+/// 帖子流「宽档」阈值 —— 逐字取自 web 的 `@media (min-width: 1025px)`
+/// （`styles/posts.css:657` 的门 + `664–668` 的 `padding: sp4 sp6` / 双列瀑布）。
+///
+/// ⚠️ **不要**用 [AylaBreakpoints.lg]（= 1440）代指本条：1440 是目录分栏档
+///（`directory-filters.css`），与 `.posts-feed` 的媒体查询无关。
+/// 仓内同口径常量：`widgets/posts/masonry_grid.dart:60` 的 `twoColumnMinWidth = 1025`。
+const double kAylaPostsWideMinWidth = 1025;
 
 class PostsHubPage extends ConsumerStatefulWidget {
   const PostsHubPage({super.key, this.initialType});
@@ -88,6 +103,16 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   late String _filter = aylaHubFilterOf(PostsHubPage.filters, widget.initialType);
 
   final ScrollController _scroll = ScrollController();
+
+  /// 滚动位置恢复（web tsx 119 的 `useScrollRestore(scrollRestoreKey, hubRef,
+  /// { ready: state.loaded })`）；键 = 本页 tab key（`posts:{account}:{filter}` 的本地表达）。
+  ///
+  /// ⚠️ 跨 tab 保位置靠 **key 随 filter 变**（web 的 `content key=scope` 重挂载 +
+  /// 每 scope 一条记录）；切 tab 时旧键的记录在 [_onFilterChange] / [didUpdateWidget]
+  /// 里显式保存。
+  late AylaScrollRestore _restore;
+
+  String get _restoreKey => 'posts-feed:$_filter';
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   AylaPagedList<AylaPost>? _pager;
   Set<String> _friendIds = const <String>{};
@@ -100,8 +125,18 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      // tsx 119：`ready: state.loaded`（首帧尚未 loaded ⇒ 不恢复）。
+      ready: false,
+    )..attach();
     _start();
-    _loadFriends();
+    // ⚠️ **必须帧后**（详见 [_loadFriends]）：首帧 build 期同步写 social store
+    // 会撞上 GroupPage 的 build 期 setState。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadFriends();
+    });
   }
 
   @override
@@ -111,8 +146,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
       final String next =
           aylaHubFilterOf(PostsHubPage.filters, widget.initialType);
       if (next != _filter) {
-        setState(() => _filter = next);
-        _start();
+        _switchFilter(next);
       }
     }
   }
@@ -130,6 +164,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     // `PostsHubPage.tsx:77`）⇒ 再次进入同 tab 命中缓存、不重拉、不闪骨架。
     _pager?.removeListener(_onPagerChanged);
     _pager = null;
+    _restore.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -199,6 +234,16 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     if (pager.error == null) aylaPostTabCache.markUpdated(key);
   }
 
+  /// ⚠️ **必须帧后调用**（2026-10-02 修「setState() or markNeedsBuild() called during build」）：
+  /// \`aylaHubFriendIds()\` → \`aylaSocialStore.load()\` 在**首个 await 之前**是同步段
+  /// （\`state/social_store.dart:391\` 的 \`_patch\` → 同步 \`notifyListeners\`）。
+  /// 若在 \`initState\` 直接调，通知会落在**本帧 build 期**：\`AylaSocialController\`
+  /// → \`AylaGroupDirectory._forward\`（\`group_support.dart:431\`）
+  /// → \`GroupPage._onChanged\`（\`group_page.dart:383\` 的裸 \`setState\`）
+  /// ⇒ 用户 \`flutter run\` 首条异常（GroupPage 未挂载时只读 items，不会炸 ⇒ 只在
+  /// 「群壳 + 大厅页」并存时才现形）。与同文件 \`_registerDirectoryEvents\` /
+  /// \`_registerRefresh\` 的既有帧后范式一致。
+  /// 回归锁：\`test/hub_friends_load_phase_test.dart\`。
   Future<void> _loadFriends() async {
     final Set<String> ids = await aylaHubFriendIds();
     if (!mounted || ids.isEmpty) return;
@@ -229,9 +274,20 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     if (mounted) setState(() => _replayNonce++);
   }
 
-  void _onFilterChange(String next) {
+  /// 换分类（web tsx 306 的分档）。**先保存当前键的位置**（同一容器、不同记忆键）。
+  void _switchFilter(String next) {
+    AylaScrollMemory.save(_restoreKey, _scroll);
     setState(() => _filter = next);
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false,
+    )..attach();
     _start();
+  }
+
+  void _onFilterChange(String next) {
+    _switchFilter(next);
     context.replace(next == 'all' ? '/posts' : '/posts?type=$next');
   }
 
@@ -244,14 +300,20 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     return '${pager.total} 条帖子';
   }
 
-  /// tsx 348–352：进详情（滚动位置记忆未实现 ⇒ 只做路由）。
-  void _openPost(int id) => context.go('/posts/$id');
+  /// tsx 346–353：进详情。**先显式保存当前位置**（`saveScrollPosition(scrollRestoreKey,
+  /// hubRef.current)` 在 web 的卡片 onOpen 里同步调用）——不依赖路由退出时序。
+  void _openPost(int id) {
+    AylaScrollMemory.save(_restoreKey, _scroll);
+    context.go('/posts/$id');
+  }
 
   @override
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaPagedList<AylaPost>? pager = _pager;
     final List<AylaPost> loaded = pager?.items ?? const <AylaPost>[];
+    // tsx 119：ready = state.loaded（不只是「有 items」—— web 用的是页状态机的 loaded 位）。
+    _restore.update(ready: pager?.loaded ?? false);
     final List<AylaPost> visible = aylaHubVisiblePosts(
       loaded,
       _filter,
@@ -264,9 +326,14 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     //   被压成 0）⇒ 首卡顶边与侧栏玻璃卡顶边对齐；
     // - 底部保留基样式：≤1024 = sp3，≥1025 基样式覆写为 sp4（posts.css:664–668，
     //   组规则不覆盖底部；web 注释 192「底部呼吸空间不动」）。
+    //
+    // ⚠️ 阈值是 web 的 \`@media (min-width: 1025px)\` 原值（posts.css:657 的门 + 664–668
+    //   的 \`padding: sp4 sp6\`），**不是** [AylaBreakpoints.lg]（=1440 —— 那是
+    //   auroraqua/directory 分栏档，与本条 CSS 无关）。此前误用 lg ⇒ 1025–1439 区间
+    //   底部只有 12（少 1 个 token 档 = sp4−sp3 = 4px）。
     final EdgeInsets listPadding = aylaDirectoryListPadding(
       context,
-      bottom: MediaQuery.sizeOf(context).width >= AylaBreakpoints.lg
+      bottom: MediaQuery.sizeOf(context).width >= kAylaPostsWideMinWidth
           ? AylaSpacing.sp4
           : AylaSpacing.sp3,
     );

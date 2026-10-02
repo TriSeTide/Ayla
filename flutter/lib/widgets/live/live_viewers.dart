@@ -23,6 +23,7 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show SchedulerBinding;
 
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
@@ -82,6 +83,26 @@ class AylaLiveViewerSheetData {
 
   /// 点名单行（web `goUserProfile(me, user_id)`：自己 → 个人页 / 他人 → 用户页）。
   final ValueChanged<AylaLiveViewerItem>? onOpenProfile;
+
+  /// 只替换部分字段（页面侧控制器用；不改既有具名参数与默认值）。
+  AylaLiveViewerSheetData copyWith({
+    List<AylaLiveViewerItem>? viewers,
+    int? count,
+    bool? hasMore,
+    String? error,
+    String? elysiaUserId,
+    VoidCallback? onRetry,
+    ValueChanged<AylaLiveViewerItem>? onOpenProfile,
+  }) =>
+      AylaLiveViewerSheetData(
+        viewers: viewers ?? this.viewers,
+        count: count ?? this.count,
+        hasMore: hasMore ?? this.hasMore,
+        error: error ?? this.error,
+        elysiaUserId: elysiaUserId ?? this.elysiaUserId,
+        onRetry: onRetry ?? this.onRetry,
+        onOpenProfile: onOpenProfile ?? this.onOpenProfile,
+      );
 }
 
 /// `.live-viewer-strip` —— 视频下方的「在看观众条」（`LiveViewerStrip.tsx` 85 行）。
@@ -94,6 +115,7 @@ class AylaLiveViewerStrip extends StatefulWidget {
     required this.count,
     this.viewers = const <AylaLiveViewerItem>[],
     this.sheet = const AylaLiveViewerSheetData(),
+    this.onOpen,
   });
 
   /// 当前在看人数；**null = 未知**（人数位显示 `–`，不写 0 冒充）。
@@ -104,6 +126,14 @@ class AylaLiveViewerStrip extends StatefulWidget {
 
   /// 名单弹层的数据与动作（打开时读取；默认空投影 = 骨架态）。
   final AylaLiveViewerSheetData sheet;
+
+  /// **弹层即将打开**（本件先把 [sheet] 推进弹层子树，随后调用本回调）。
+  ///
+  /// web 的权威名单是**弹层自己在 `useEffect(..., [channelId, reloadToken])` 里拉的**
+  /// （`LiveViewerSheet.tsx:44–65`）⇒ Flutter 侧由页面在这里发起同一次拉取
+  /// （页面持有 [AylaViewerSheetController] 之类按页面注入的读取器）。
+  /// 默认 null ⇒ 行为不变（只有传进来的那份投影）。
+  final VoidCallback? onOpen;
 
   @override
   State<AylaLiveViewerStrip> createState() => _AylaLiveViewerStripState();
@@ -120,7 +150,18 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
   @override
   void didUpdateWidget(covariant AylaLiveViewerStrip old) {
     super.didUpdateWidget(old);
-    _sheetData.value = widget.sheet;
+    // ⚠️ **不能在 build 期直接写 `_sheetData`**：弹层 entry 是插到 root Overlay 的
+    // 独立子树，其 `ValueListenableBuilder` 会被 `markNeedsBuild` 到「正在 build 的树」上
+    // —— 页面（权威名单到达 → setState → 本件重建）恰好走这条路径，实测抛
+    // `setState() or markNeedsBuild() called during build`。
+    // ⇒ 排到帧末转发；弹层未打开时（`_sheetEntry == null`）不必转发 ——
+    // `_openSheet` 打开那一刻会取最新值。
+    if (_sheetEntry == null) return;
+    final AylaLiveViewerSheetData next = widget.sheet;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _sheetEntry == null) return;
+      _sheetData.value = next;
+    });
   }
 
   @override
@@ -133,6 +174,8 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
   void _openSheet() {
     if (_sheetEntry != null) return;
     _sheetData.value = widget.sheet;
+    // 页面在此发起 web `LiveViewerSheet.tsx:44–65` 的那次拉取（异步，先骨架/预览打底）。
+    widget.onOpen?.call();
     final OverlayEntry entry = aylaOverlayEntry(
       builder: (BuildContext ctx) => ValueListenableBuilder<AylaLiveViewerSheetData>(
         valueListenable: _sheetData,
@@ -146,8 +189,11 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
       ),
     );
     _sheetEntry = entry;
-    // 库内统一写法（danmaku.dart 的查看器宿主 / conversation_more_menu）：root overlay 直插
-    Overlay.of(context, rootOverlay: true).insert(entry);
+    // 库内统一写法（danmaku.dart 的查看器宿主 / conversation_more_menu）：挂**最近**的 Overlay
+    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
+    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
+    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
+    Overlay.of(context).insert(entry);
   }
 
   void _closeSheet() {
