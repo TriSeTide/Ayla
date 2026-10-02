@@ -332,8 +332,17 @@ class _GalleryScope extends InheritedWidget {
 /// ## 语义树
 /// 画布整体 `ExcludeSemantics`（2026-09-24 用户实报「启动不了了」后改）：全量构建会产生 **1685 个
 /// 语义节点**，debug 下 `main.dart` 常开语义树（`ensureSemantics`），一次更新 1600+ 节点会让
-/// Windows accessibility bridge 更新失败（`Nodes left pending by the update: 1612`）→
-/// `Lost connection to device`。画布是开发审核面、无语义消费者 ⇒ 整体关掉。
+/// Windows accessibility bridge 更新失败 → `Lost connection to device`。
+/// 画布是开发审核面、无语义消费者 ⇒ 整体关掉。
+///
+/// ⚠️ **2026-10-02 订正**：本条原文把该日志的数字读成「1600+ 个节点」——**不成立**。
+/// `Nodes left pending by the update: 1612` 里的 `1612` 是**单个未决语义节点的 id**，
+/// 不是节点计数：引擎 `ax_tree.cc` 的 `ValidatePendingChangesComplete` 逐 id
+/// `StringPrintf(" %d")` 拼接（数字有几个才是几个）⇒ 该日志是"**某一个**节点被挂空"，
+/// 不是"总量超限"。它由**语义更新不自洽**导致，而不是由节点数量导致。
+/// 所以整体 `ExcludeSemantics` 仍是开发面的合理选择（无语义消费者），
+/// 但**不能再把它当成「节点太多触发的 bridge 限制」的证据**去指导别处取舍。
+/// 详见 `Ayla/docs/report/flutter-语义树崩溃-traversalParentIdentifier-根因与修复-2026-10-02.md`。
 ///
 /// ⚠️ 分区列表（`_GalleryColumn.children`）的缩进未随外层包装 +2 —— 项目不用 `dart format`，
 /// 避免无关重排 diff。
