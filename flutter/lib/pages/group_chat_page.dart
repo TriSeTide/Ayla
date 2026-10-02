@@ -470,8 +470,14 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage> {
                               ? '该子群已禁言，仅群主/管理员可发言'
                               : null,
                       narrow: narrow,
-                      draftKey: groupId,
-                      initialDraft: ref.read(chatDraftsProvider).draftFor(groupId),
+                      // 草稿按**会话 + 子群**隔离 —— web `MessageInput.tsx:90–91`：
+                      // `const draftKey = isGroup ? `${convId}:${subgroupId ?? ""}` : convId`
+                      // （群聊每个子群保留独立草稿）。此前恒传 `groupId` ⇒ 各子群共用一个
+                      // 草稿槽，切子群时草稿串场（同源缺口，本轮一并修）。
+                      draftKey: aylaSubgroupDraftKey(groupId, active?.id),
+                      initialDraft: ref
+                          .read(chatDraftsProvider)
+                          .draftFor(aylaSubgroupDraftKey(groupId, active?.id)),
                       onDraftChanged: (String key, String serialized) =>
                           ref.read(chatDraftsProvider).setDraft(key, serialized),
                     ),

@@ -121,10 +121,19 @@ void main() {
   // 预加载完成时才能把会话摘要灌进 chatState
   //（用户实机：「每次切换到主页选项卡时左侧群头像列表都要加载，这在 web 是不需要的」）。
   aylaRegisterChatStateResolver(() => container.read(chatStateProvider));
+  // 社交缓存订阅（web `ensureSocialTracking`，`stores/social.ts:108–120`）：
+  // chatState.conversations / subgroupState.byGroup 一变，就把新值就地合并进 social record
+  // 的已加载投影（主页群列表 / 宽屏群头像列的数据源）。
+  // ⚠️ **必须启动期建**（web 是 loadSocial 首次调用时懒装配）：WS 帧可能在任何页面取数之前
+  // 到达（chat_ws 已经写 chatState），懒装配会漏掉这批早期帧。
+  aylaStartSocialTracking(container);
   // 房内域目录帧桥：挂在 chat WS 的 onFrame 上（web `chat.ts` 的 voice.channel.* /
   // live.* / boardgame.room.* 分支 + `stores/directory.ts` 的创建/删除跟踪）。
   // 与 chat 连接时机解耦：只登记回调，未连时不消费任何帧。
   aylaStartRoomFrames(container);
+  // 帖子域帧桥（chat WS 的 `post.*` 四条 + 帖子/桌游全局 store 的落地）
+  // —— web `ws/chat.ts:766–840`；同样只登记回调，与 chat 连接时机解耦。
+  aylaStartPostsFrames(container);
 
   // 冷启动自动登录（用户需求 2026-10-01）：勾了「自动登录」时，用安全存储里的账号密码
   // 跑一次真实 `POST /auth/login/`，成功即走与手动登录**完全相同**的副作用链。
