@@ -17,6 +17,35 @@ import '../lib/widgets/motion/gestures.dart';
 Widget _reducedBuilder(BuildContext context, String identity) =>
     const Center(child: Text('空会话'));
 
+/// [AylaPrimaryNavPage] 当前的**显示位移**（沿包装链累加 `Transform` 的 x 平移）。
+///
+/// 与「跟手弹性」用例同一取法：本件的树是
+/// `AnimatedBuilder > Opacity > Transform.translate > GestureDetector > child`，
+/// 只有一层 Transform，累计值即 `dragElastic × 原始位移`。
+double _navDx(WidgetTester tester) {
+  double dx = 0;
+  for (final Transform tr in tester.widgetList<Transform>(
+    find.descendant(
+      of: find.byType(AylaPrimaryNavPage),
+      matching: find.byType(Transform),
+    ),
+  )) {
+    dx += tr.transform.storage[12];
+  }
+  return dx;
+}
+
+/// [AylaPrimaryNavPage] 方向变体进场的**可见度**（最外层 `Opacity` 的值）。
+double _navOpacity(WidgetTester tester) {
+  final Iterable<Opacity> all = tester.widgetList<Opacity>(
+    find.descendant(
+      of: find.byType(AylaPrimaryNavPage),
+      matching: find.byType(Opacity),
+    ),
+  );
+  return all.isEmpty ? 1 : all.first.opacity;
+}
+
 void main() {
   Widget host(Widget child, {double width = 360}) => MaterialApp(
     home: previewScope(
@@ -556,6 +585,97 @@ void main() {
       expect(dx, closeTo(80, 2)); // 100 × 0.8
       await g.up();
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('松手未提交 ⇒ **200ms 动画回弹**（不是瞬时归零；审查 BUG-1）', (
+      WidgetTester tester,
+    ) async {
+      // 事实源：web `PrimaryNavPage.tsx:27–30` 的 `dragConstraints={{0,0}}` +
+      // `dragSnapToOrigin` —— framer-motion 的 constraints 回弹是 **spring 动画**，
+      // 不是瞬时归零；量程取同文件 `AylaFullScreenSwipeBack._onEnd` 的 200ms 回弹
+      // （`gestures.dart:504–512`，web `SPRING_BACK_DURATION` = 0.2s）。
+      //
+      // 修改前实测：松手那一帧位移由 80px 直接塌到 0（跳变），本用例会红。
+      await tester.pumpWidget(
+        host(
+          const AylaPrimaryNavPage(
+            direction: 0,
+            child: SizedBox(
+              height: 200,
+              child: Center(child: Text('一级页')),
+            ),
+          ),
+          width: 360,
+        ),
+      );
+      final TestGesture g = await tester.startGesture(
+        tester.getCenter(find.text('一级页')),
+      );
+      await g.moveBy(const Offset(100, 0));
+      await tester.pump();
+      expect(_navDx(tester), closeTo(80, 2), reason: '跟手：100 × 0.8');
+
+      await g.up();
+      await tester.pump(); // 松手帧：回弹起手（位移仍在起点附近）
+      await tester.pump(const Duration(milliseconds: 100)); // 200ms 的半程
+      final double mid = _navDx(tester);
+      expect(
+        mid,
+        greaterThan(2),
+        reason: '松手后必须是**动画**：半程仍应明显偏离 0（瞬时归零 ⇒ 这里恒为 0）',
+      );
+      expect(
+        mid,
+        lessThan(76),
+        reason: '半程应已明显离开起点（80px）向 0 收敛',
+      );
+
+      await tester.pumpAndSettle();
+      expect(_navDx(tester), closeTo(0, 1), reason: '200ms 走完后归零');
+    });
+
+    testWidgets('direction 不变但 replayKey 变化 ⇒ 重播进场（web key={pathname}；审查 BUG-2）', (
+      WidgetTester tester,
+    ) async {
+      // web `AppShell.tsx:116` 每次都换 `key={pathname}` ⇒ 每次路由变化必播；
+      // Flutter 侧用一个 State 承载 ⇒ 用 `replayKey` 表达同一语义。
+      // 只比较 direction 时，连续两次同方向切换的第二次不会重播（本用例的判据）。
+      //
+      // ⚠️ 驱动方式与本文件其它用例同法：`ValueNotifier` + `ValueListenableBuilder`
+      //（第二次 `pumpWidget` 不会更新 `MaterialApp.home` 已经建立的 route child）。
+      final ValueNotifier<String> key = ValueNotifier<String>('/live');
+      addTearDown(key.dispose);
+      await tester.pumpWidget(
+        host(
+          ValueListenableBuilder<String>(
+            valueListenable: key,
+            builder: (BuildContext context, String v, Widget? _) =>
+                AylaPrimaryNavPage(
+                  direction: 1,
+                  replayKey: v,
+                  child: const SizedBox(
+                    height: 200,
+                    child: Center(child: Text('一级页')),
+                  ),
+                ),
+          ),
+          width: 360,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(_navOpacity(tester), closeTo(1, 0.01));
+
+      // 同方向再切一次（direction 不变），只换 replayKey ⇒ 必须重播（回到 opacity 0 起）
+      key.value = '/posts';
+      await tester.pump();
+      await tester.pump();
+      expect(
+        _navOpacity(tester),
+        lessThan(0.5),
+        reason: '重播判据必须包含 replayKey：否则 direction 相同 ⇒ 停在终态、无动画',
+      );
+      await tester.pumpAndSettle();
+      expect(_navOpacity(tester), closeTo(1, 0.01));
     });
 
     testWidgets('小位移慢拖 ⇒ 不切页', (WidgetTester tester) async {

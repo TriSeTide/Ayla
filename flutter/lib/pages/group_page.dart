@@ -68,8 +68,11 @@ import '../state/voice_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsWide;
 import '../widgets/live/live_hall.dart' show AylaLiveStatus;
-// 横滑跟手弹性 `kAylaDragElastic`（组件库 motion 域共享常量，web `dragElastic` .8）。
-import '../widgets/motion/gestures.dart' show kAylaDragElastic;
+// 组件库 motion 域共享件（web `hooks/useSwipeCommit.ts` + `PrimaryNavPage.tsx:33`）：
+// 横滑跟手弹性 `kAylaDragElastic`（`dragElastic` .8）与松手判定 `aylaResolveSwipeCommit`
+// —— 原先本页抄了一份同名函数（审查 A2），已删除，统一走这里。
+import '../widgets/motion/gestures.dart'
+    show aylaResolveSwipeCommit, kAylaDragElastic;
 import '../widgets/shell/channel_sidebar.dart';
 import '../widgets/shell/group_top_tabs.dart';
 import '../widgets/shell/server_rail.dart';
@@ -90,32 +93,11 @@ import 'group_voice_page.dart';
 const double kAylaGroupPullExitThreshold = 80;
 const int kAylaGroupExitTransitionMs = 250;
 
-/// 甩动阈值（web `hooks/useSwipeCommit.ts:33/36`）。
-const double kAylaSwipeFlickVelocity = 300;
-const double kAylaSwipeMinFlickDistance = 40;
-
-/// 松手切换判定（web `resolveSwipeCommit`，units: px / px·s⁻¹）。
-int aylaResolveSwipeCommit({
-  required double net,
-  required double cross,
-  required double velocity,
-  required double size,
-  double? threshold,
-  double flickVelocity = kAylaSwipeFlickVelocity,
-  double minFlickDistance = kAylaSwipeMinFlickDistance,
-}) {
-  // 方向锁让位：交叉轴净位移占优 ⇒ 本次手势不属于切页。
-  if (cross.abs() >= net.abs()) return 0;
-  final double distance = net.abs();
-  final bool forward = net < 0; // 左滑 → 下一个
-  if (distance >= (threshold ?? size / 3)) return forward ? 1 : -1;
-  if (velocity.abs() >= flickVelocity &&
-      distance >= minFlickDistance &&
-      velocity.sign == net.sign) {
-    return forward ? 1 : -1;
-  }
-  return 0;
-}
+// ⚠️ **甩动阈值与松手判定不在此文件**（2026-10-04 去重，审查报告 A2）：
+// 早前这里整段抄了组件库的 `kAylaSwipeFlickVelocity` / `kAylaSwipeMinFlickDistance`
+// （26 行 `aylaResolveSwipeCommit`）——与 `widgets/motion/gestures.dart:82–104` **逐行等价**
+// （页面版只多两个可覆写参数，而调用点从未传过）。本文件头 `:24` 本就用 `[aylaResolveSwipeCommit]`
+// 方括号引用，说明作者以为它在组件库；下方 import 一并收口到同一事实源。
 
 /// 群场景索引（web `useSceneSwipeDirection.ts:17–19`：`info` 按 `chat` 处理）。
 int aylaGroupSceneOrderIndex(AylaGroupScene scene) {

@@ -30,8 +30,11 @@ import '../lib/pages/group_page.dart'
         GroupPage,
         aylaGroupPageSubgroupsLoader,
         aylaGroupSceneDirection,
-        aylaGroupSceneOrderIndex,
-        aylaResolveSwipeCommit;
+        aylaGroupSceneOrderIndex;
+// `aylaResolveSwipeCommit` 是**组件库**的纯函数（web `hooks/useSwipeCommit.ts:67`）。
+// 2026-10-04 去重（审查 A2）后 `group_page.dart` 不再转出它 ⇒ 本测试改指唯一事实源；
+// 断言逐条不变（页面版与库版逐行等价）。
+import '../lib/widgets/motion/gestures.dart' show aylaResolveSwipeCommit;
 import '../lib/pages/group_support.dart';
 import '../lib/state/chat_state.dart';
 import '../lib/state/group_providers.dart';

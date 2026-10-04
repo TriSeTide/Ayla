@@ -33,6 +33,8 @@
 /// `AylaFullScreenSwipeBack` · `AylaPrimaryNavPage` · `aylaResolveSwipeCommit` · 各手势常量
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../theme/tokens.dart';
@@ -541,6 +543,7 @@ class AylaPrimaryNavPage extends StatefulWidget {
     this.direction = 0,
     this.onNavigate,
     this.enabled = true,
+    this.replayKey = '',
   });
 
   /// 页面内容。
@@ -558,12 +561,30 @@ class AylaPrimaryNavPage extends StatefulWidget {
   /// 是否启用横滑（reduced-motion 关）。
   final bool enabled;
 
+  /// 方向变体的**重播键**：值变化即从 `enter` 重播入场动画（即使 [direction] 不变）。
+  ///
+  /// 事实源：web `AppShell.tsx:116` 的 `<PrimaryNavPage key={pathname} direction …>` ——
+  /// **每次路由变化都重挂实例**（旧实例由 `AnimatePresence` 保管退场），因此每次切换必播；
+  /// 本件是 Flutter 侧的无 key 等价物（壳层不能让外层带 key：`ShellRoute` 的 child 携带
+  /// `GlobalObjectKey(navigatorKey.hashCode)`，换 key 会波及 shell navigator 的 Element 复用）。
+  ///
+  /// 默认空串 = **不启用**（沿用只比较 [direction] 的旧行为，画布样张与既有测试不受影响）；
+  /// 壳层传 `pathname` —— 少了它，连续两次同方向切换（快速连滑两次）
+  /// 第二次 `old.direction == widget.direction` 而不重播（审查报告 **BUG-2**）。
+  final String replayKey;
+
   @override
   State<AylaPrimaryNavPage> createState() => _AylaPrimaryNavPageState();
 }
 
 class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
     with SingleTickerProviderStateMixin {
+  // ⚠️ **两个用途共用这一个控制器**，时长必须同时满足：
+  // ① 方向变体进场（enter → center）= 300ms（web `auroraquaRouteTransition`）；
+  // ② 松手回弹（`_raw` → 0）= 200ms `--ease-out`（web `dragSnapToOrigin` 的 spring 回弹，
+  //    量程与同文件 [AylaFullScreenSwipeBack] 的 200ms 回弹一致）——
+  //    故回弹时用 `animateBack(0, duration: kAylaEdgeSwipeDuration)` **覆写本次时长**，
+  //    而不是把控制器常量改成 200ms（那会把进场动画也改成 200ms，偏离 web）。
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: kAylaPanelDuration,
@@ -571,6 +592,13 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
 
   /// 原始累计位移（判定用；web `info.offset.x`）。
   double _raw = 0;
+
+  /// 本次回弹的**起点位移**（null = 无回弹在途）。
+  ///
+  /// 回弹值由控制器曲线直接求值（而不是给控制器挂一个 setState 监听器）：
+  /// [build] 的 [AnimatedBuilder] 每帧已监听本控制器 ⇒ 曲线推进即触发重绘，
+  /// 松手后**所有中间帧都可观测**（用户此前实报的「跳变回弹」正是因为瞬时归零）。
+  double? _snapBackFrom;
 
   /// 跟手显示位移 = 原始位移 × 弹性（web `dragElastic .8`）。
   double get _dx => _raw * kAylaDragElastic;
@@ -588,13 +616,41 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
   @override
   void didUpdateWidget(AylaPrimaryNavPage old) {
     super.didUpdateWidget(old);
-    if (old.direction != widget.direction) _c.forward(from: 0);
+    // 重播判据 = `direction` 变化 **或** [AylaPrimaryNavPage.replayKey] 变化。
+    // 只看 direction 会漏掉「连续两次同方向切换」（快速连滑两次，审查 BUG-2）；
+    // 壳层传 `replayKey: pathname` 覆盖该情形，未传时行为与旧实现一致。
+    if (old.direction != widget.direction || old.replayKey != widget.replayKey) {
+      // ① 在途回弹让位给换页转场（web `useMotionDrag.ts:33–43`：路由离场时
+      //    `offset.stop()`，不再继续 snap-back）；
+      // ② 时长恢复 300ms（回弹会临时把控制器改成 200ms）。
+      _c.stop();
+      _snapBackFrom = null;
+      _c
+        ..duration = kAylaPanelDuration
+        ..forward(from: 0);
+    }
   }
 
   @override
   void dispose() {
     _c.dispose();
     super.dispose();
+  }
+
+  /// 起手：停掉在途回弹，并把跟手基准对齐到**当前显示位置**。
+  ///
+  /// 事实源：web `useMotionDrag.ts:52–57` —— 「a new pointer down stops this animation
+  /// through Framer's own drag owner before taking over the same motion value」，
+  /// 即再次按下时从回弹的当前帧继续，而不是跳回松手位置。
+  void _onStart(DragStartDetails d) {
+    final double? from = _snapBackFrom;
+    if (from == null) return;
+    final double shown = from * (1 - _c.value); // 回弹当前**原始**量
+    _c.stop();
+    setState(() {
+      _raw = shown;
+      _snapBackFrom = null;
+    });
   }
 
   void _onUpdate(DragUpdateDetails d) {
@@ -611,9 +667,49 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
       velocity: d.velocity.pixelsPerSecond.dx,
       size: width,
     );
-    setState(() => _raw = 0); // 回弹（dragConstraints {0,0}）
+    // ---- 回弹（web `dragConstraints {0,0}` + `dragSnapToOrigin` 的 spring 回弹）----
+    //
+    // ⚠️ **必须是 200ms 动画，不能瞬时归零**（审查 BUG-1）：早前写的是
+    // `setState(() => _raw = 0)` ⇒ 渲染位移 `dragElastic × _raw` 在松手那一帧直接塌回 0，
+    // 观感就是「跳变回弹」—— 用户在 group_page 反复实报过同一现象
+    // （`group_page.dart:1027` 注释：「此前直接 `Transform.translate(_dragDx)` 且松手瞬时
+    //   归零 ⇒ 未过阈值时**跳变**」）。页面侧当时已按同法修好（200ms），本件漏修。
+    //
+    // 范式照抄同文件 [AylaFullScreenSwipeBack] 的 `_onEnd`（`gestures.dart:504–512`）：
+    // **冻结起点 → 控制器 200ms 走完 → 归零**；显示位移 = 曲线值 × [kAylaDragElastic]
+    // （与跟手层同源，回弹量不额外打折）。
+    if (commit == 0) {
+      _snapBackFrom = _raw;
+      _c
+        ..duration = kAylaEdgeSwipeDuration // 200ms（web `SPRING_BACK_DURATION`）
+        ..stop()
+        ..value = 0;
+      unawaited(
+        _c.forward().whenComplete(() {
+          // ⚠️ **两个字段一起清**：只清 `_snapBackFrom` 会让下一次 build 回落到
+          // `_dx = _raw × 弹性`（= 松手值）⇒ 归零的瞬间又跳回起点（实测踩到）。
+          if (mounted) {
+            setState(() {
+              _raw = 0;
+              _snapBackFrom = null;
+            });
+          }
+        }),
+      );
+      return;
+    }
+
+    // ---- 提交：位移交位给换页转场 ----
+    // 新页（= 本 State 的新 child，`ShellRoute` 复用同一 Element）必须**从 0 起**，
+    // 否则 held offset 会把新页也推离中心。web 侧由「每次路由变化重挂一个实例」
+    // （`AppShell.tsx:116` 的 `key={pathname}`：旧实例保留 held offset 淡出、新实例从 0 起）
+    // 天然成立，Flutter 侧只有一个 State ⇒ 必须在换页那一刻归零（登记为结构差异）。
+    setState(() {
+      _raw = 0;
+      _snapBackFrom = null;
+    });
     // web 原样交付：`+1` = **下一项**（手指左滑 / 上滑），`-1` = 上一项
-    if (commit != 0) widget.onNavigate?.call(commit);
+    widget.onNavigate?.call(commit);
   }
 
   @override
@@ -630,10 +726,19 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
         final double v = reduced ? 1 : t.value;
         // directionalVariants：enter = +direction*20 → 0（退出由上一层宿主负责）
         final double dx = widget.direction * kAylaPanelDistance * (1 - v);
+        // 回弹期的显示位移：起点冻结在松手位移上，沿控制器（200ms；与
+        // [AylaFullScreenSwipeBack] 同范式，控制器默认线性）走到 0。
+        //
+        // ⚠️ **必须写在 builder 内**（每帧求值）：写在 `build` 里只会算一次，
+        // 于是「回弹」看起来仍是停住不动（实测：半程位移恒为松手值）。
+        final double? snappingFrom = _snapBackFrom;
+        final double dragDx = snappingFrom == null
+            ? _dx
+            : snappingFrom * kAylaDragElastic * (1 - _c.value);
         return Opacity(
           opacity: v,
           child: Transform.translate(
-            offset: Offset(dx + (on ? _dx : 0), 0),
+            offset: Offset(dx + (on ? dragDx : 0), 0),
             child: child,
           ),
         );
@@ -641,6 +746,7 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
       child: on
           ? GestureDetector(
               behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: _onStart,
               onHorizontalDragUpdate: _onUpdate,
               onHorizontalDragEnd: _onEnd,
               child: widget.child,

@@ -74,6 +74,47 @@ const List<AylaPrimaryModule> aylaPrimaryTabOrder = <AylaPrimaryModule>[
   AylaPrimaryModule.games,
 ];
 
+/// 一级 tab 路由（`usePrimaryNavSwipeDirection.ts:24–26` 的 `isPrimaryTabPath`）：
+/// **精确匹配**（不含子路由：`/live/:channelId`、`/group/:id` 等都不是一级 tab），
+/// `/home` 是 `/group` 的兼容别名（`App.tsx` 重定向）视为主页。
+///
+/// ⇒ 与 [aylaIsPrimaryNavRoute]（允许 `/home`）在既有一级路径上判定一致；
+/// 本函数只是把 web 的**同名单一事实源**补上，供窄屏一级五页横滑判据使用。
+bool aylaIsPrimaryTabPath(String pathname) {
+  if (pathname == '/home') return true;
+  for (final AylaPrimaryModule m in aylaPrimaryTabOrder) {
+    if (m.path == pathname) return true;
+  }
+  return false;
+}
+
+/// pathname 在一级 tab 顺序里的索引；`/home` 归主页索引；非一级页返回 -1。
+/// （`usePrimaryNavSwipeDirection.ts:18–21` 的 `primaryTabIndex`）
+int aylaPrimaryTabIndex(String pathname) {
+  final String normalized = pathname == '/home' ? '/group' : pathname;
+  for (int i = 0; i < aylaPrimaryTabOrder.length; i++) {
+    if (aylaPrimaryTabOrder[i].path == normalized) return i;
+  }
+  return -1;
+}
+
+/// 由 from→to 的索引差求切换方向（`usePrimaryNavSwipeDirection.ts:29–35` 的
+/// `primaryTabDirection`）：
+/// - `1`：新 tab 索引更大（左滑切下一个）—— 新页从右滑入、旧页向左滑出；
+/// - `-1`：新 tab 索引更小（右滑切上一个）—— 新页从左滑入、旧页向右滑出；
+/// - `0`：**任一端不是一级页**（或同页）⇒ 无横向位移，只淡入淡出。
+///
+/// ⚠️ `direction` 与判定的 commit **符号相反**：commit 是「往哪一项走」
+/// （`resolveSwipeCommit` 的 `forward = net < 0` ⇒ 手指左滑 = +1），
+/// direction 是「新页从哪边来」（左滑到下一项 ⇒ 新页从右边来 ⇒ +1）。
+int aylaPrimaryTabDirection(String from, String to) {
+  final int fi = aylaPrimaryTabIndex(from);
+  final int ti = aylaPrimaryTabIndex(to);
+  if (fi < 0 || ti < 0) return 0;
+  final int diff = ti - fi;
+  return diff > 0 ? 1 : (diff < 0 ? -1 : 0);
+}
+
 /// 当前路径归属的一级模块；`/messages` `/search` `/profile` 等无归属返回 null（无高亮）。
 AylaPrimaryModule? aylaResolveModule(String pathname) {
   for (final AylaPrimaryModule m in aylaPrimaryModules) {

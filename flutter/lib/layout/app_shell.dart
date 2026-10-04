@@ -45,6 +45,7 @@ import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
 import '../theme/tokens.dart';
 import '../widgets/live/live_mini_player.dart';
+import '../widgets/motion/gestures.dart' show AylaPrimaryNavPage;
 import '../widgets/shell/bottom_tabs.dart';
 import '../widgets/shell/fab.dart';
 import '../widgets/shell/session_activity.dart';
@@ -65,6 +66,17 @@ class AppShell extends ConsumerStatefulWidget {
 class _AppShellState extends ConsumerState<AppShell> {
   /// 顶栏搜索框的受控值。
   String _searchQuery = '';
+
+  /// 上一次构建的 pathname（窄屏一级 tab 的切换方向由它算出）。
+  String? _prevPathname;
+
+  /// **本次**路由切换的方向（1 / -1 / 0）—— 一级 tab 顺序索引差。
+  ///
+  /// 事实源：web `usePrimaryNavSwipeDirection.ts:42–50` —— 在 render 阶段更新 ref
+  /// （不 setState），挂载首帧为 `0`。Flutter 侧同法在 [build] 里更新：
+  /// 本字段只被同一次 build 的下文读取，即便 AppShell 因其它订阅重建，
+  /// pathname 未变也不会重算（与 web 的 ref 语义一致）。
+  int _navDirection = 0;
 
   @override
   void initState() {
@@ -117,6 +129,14 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   Widget build(BuildContext context) {
     final String pathname = GoRouterState.of(context).uri.path;
+    // ---- 窄屏一级 tab 的切换方向（web `AppShell.tsx:75` + `usePrimaryNavSwipeDirection`）----
+    // 挂载首帧 / 同页重建都不重算；只有 pathname 真的变了才算一次切换。
+    if (_prevPathname != pathname) {
+      final String? prev = _prevPathname;
+      _navDirection =
+          prev == null ? 0 : aylaPrimaryTabDirection(prev, pathname);
+      _prevPathname = pathname;
+    }
     final bool isNarrow =
         AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     final AylaPrimaryModule? moduleKey = aylaResolveModule(pathname);
@@ -210,6 +230,36 @@ class _AppShellState extends ConsumerState<AppShell> {
     // ② 用 `builder` 时闭包读到的是当前 child ⇒ 旧槽里放的是**新页副本**（截图重影）。
     final Widget content = widget.child;
 
+    // ---- 窄屏一级五页横滑（`AppShell.tsx:113–128`：`primaryTabNarrow ? PrimaryNavPage : PageTransition`）----
+    // 逐条对齐：
+    // · 判据 `primaryTabNarrow = isNarrow && isPrimaryTabPath(pathname)`（`AppShell.tsx:60`）；
+    // · `direction` = 一级 tab 顺序索引差（`usePrimaryNavSwipeDirection.ts:29–35`），0 ⇒ 只淡入淡出；
+    // · `onNavigate` 的落点 `(idx + step + len) % len`（`PrimaryNavPage.tsx:71–73`）——
+    //   **与底部 tab 点击同一条路径**（`context.go(path)`，见上方 `bottomTabs()` 的 `onSelect`）；
+    // · 宽屏（含宽屏的既有 PageTransition 路径）**不挂该手势** —— `AppShell.tsx:114` 是二选一分支。
+    //
+    // ⚠️ 与 web 的结构差异（登记）：web 给 `PrimaryNavPage` 传 `key={pathname}` ⇒
+    // 每次切换重挂实例（旧实例由 `AnimatePresence` 保管退场、新实例从 0 起）；
+    // Flutter 侧不能在外层带 key（`ShellRoute` 的 child **就是** shell navigator，
+    // 其 `GlobalObjectKey(navigatorKey.hashCode)` 被故意复用，见 `app_router.dart:93–122`
+    // 与 `theme/page_transitions.dart:21–34`）⇒ 用 `replayKey: pathname` 表达「重播」语义。
+    final bool primaryTabNarrow = isNarrow && aylaIsPrimaryTabPath(pathname);
+    final Widget shellContent = primaryTabNarrow
+        ? AylaPrimaryNavPage(
+            direction: _navDirection,
+            replayKey: pathname,
+            onNavigate: (int step) {
+              final int index = aylaPrimaryTabIndex(pathname);
+              if (index < 0) return;
+              final int count = aylaPrimaryTabOrder.length;
+              context.go(
+                aylaPrimaryTabOrder[(index + step + count) % count].path,
+              );
+            },
+            child: content,
+          )
+        : content;
+
     final EdgeInsets safe = MediaQuery.paddingOf(context);
     final double fabBottomNarrow = 64 + safe.bottom + 12;
 
@@ -223,7 +273,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         Column(
           children: <Widget>[
             if (topBar != null) topBar,
-            Expanded(child: ClipRect(child: content)),
+            Expanded(child: ClipRect(child: shellContent)),
             if (showBottomTabs && !bottomTabsLeaving) bottomTabs(),
           ],
         ),
