@@ -68,6 +68,8 @@ import '../state/voice_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsWide;
 import '../widgets/live/live_hall.dart' show AylaLiveStatus;
+// 横滑跟手弹性 `kAylaDragElastic`（组件库 motion 域共享常量，web `dragElastic` .8）。
+import '../widgets/motion/gestures.dart' show kAylaDragElastic;
 import '../widgets/shell/channel_sidebar.dart';
 import '../widgets/shell/group_top_tabs.dart';
 import '../widgets/shell/server_rail.dart';
@@ -1024,31 +1026,28 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               // · **触发切换** → `_goScene` 换场景，`_dragDx` 已瞬时归零 ⇒ 新场景从 0 起（不回弹）。
               // 此前直接 `Transform.translate(_dragDx)` 且松手瞬时归零 ⇒ 未过阈值时**跳变**
               // （用户 2026-10-03 实报「不触发页面切换时回弹也不是跳变的」）。
-              child: TweenAnimationBuilder<double>(
-                tween: Tween<double>(end: reduced ? 0 : _dragDx * 0.8),
-                duration: _sceneResetting
-                    ? const Duration(milliseconds: 200)
-                    : Duration.zero,
-                curve: Curves.easeOut,
-                builder: (
-                  BuildContext context,
-                  double dx,
-                  Widget? child,
-                ) =>
-                    Transform.translate(
-                  // 纵向已由**外层** TweenAnimationBuilder 统一驱动（跟手瞬时 / 退场 250ms）
-                  // ⇒ 这里只负责横向 `dx`。
-                  offset: Offset(dx, 0),
-                  child: child,
-                ),
-                child: Transform.scale(
-                  scale: 1 - 0.02 * progress,
-                  child: Opacity(
-                    opacity: _pullOpacity,
-                    child: AylaSceneFade(
-                      scene: contentScene,
-                      builder: _renderScene,
-                    ),
+              child: Transform.scale(
+                scale: 1 - 0.02 * progress,
+                child: Opacity(
+                  opacity: _pullOpacity,
+                  // ★ 横滑位移**不再包在这里**（web 两层分离，见 [AylaSceneFade.dragDx]）：
+                  // 由 `AylaSceneFade` 的**每个槽位各自**施加 ⇒
+                  //   · 在场槽位跟手；退场槽位用**冻结值**（保留 held offset，不跳回中心）；
+                  //   · 新旧场景**不共享**一个位移值（`useMotionDrag.ts:12–14`：
+                  //     `values cannot be shared between the outgoing and incoming scene`）。
+                  child: AylaSceneFade(
+                    scene: contentScene,
+                    builder: _renderScene,
+                    dragDx: reduced ? 0 : _dragDx,
+                    // 跟手瞬时；未提交 ⇒ 200ms `--ease-out` 回弹（`dragSnapToOrigin`）。
+                    dragDuration: _sceneResetting
+                        ? const Duration(milliseconds: 200)
+                        : Duration.zero,
+                    elastic: kAylaDragElastic,
+                    // 先冻结（`_outgoingDragDx = widget.dragDx`）再复位 ⇒ 新场景从 0 起。
+                    onDragReset: () {
+                      if (_dragDx != 0) setState(() => _dragDx = 0);
+                    },
                   ),
                 ),
               ),
@@ -1111,11 +1110,26 @@ class _GroupPageState extends ConsumerState<GroupPage> {
 
   /// 横滑切场景（web tsx 355–372）：松手判定走 [aylaResolveSwipeCommit]。
   ///
-  /// ⚠️ **位移归零分两种情形**（2026-10-03 用户实报「滑动结束后上一个页面有跳变回弹」）：
-  /// · **触发切换** ⇒ `_dragDx` **瞬时**归零：新场景已在 `_goScene` 里接管，
-  ///   旧场景的横向位移不能再被动画拖尾（否则会看到它「弹回去」）；
-  /// · **未触发切换** ⇒ 走 **200ms `--ease-out` 动画**回弹，**不是瞬时跳回**。
-  /// 此前两种都走瞬时归零 ⇒ 未过阈值时内容从半途位置瞬间跳回（跳变）。
+  /// ## ⚠️ 关键：触发切换时**保留 `_dragDx`，不归零**（2026-10-03 用户实报修复）
+  ///
+  /// web 的 `GroupSceneSurface`（`GroupPage.tsx:499–538`）把「淡出层」与「位移层」**分成两层**，
+  /// 其文件级注释原文：
+  /// > **Panels enter from their own edges; the drag layer retains the held offset
+  /// >  throughout exit.**
+  ///
+  /// - 外层 `group-scene-inner` 的 `exit` 是 `{ x: 0, opacity: 0 }` ⇒ **x 恒 0**，退场只淡出；
+  /// - 内层 `group-scene-drag` 的 `style={{ x: drag.offset }}` ⇒ **退场期间保留 held offset**
+  ///   （`useMotionDrag.ts:14–17`：`Normal exit releases the gesture but preserves its visible
+  ///    displacement; the route layer can continue from that frame instead of snapping back
+  ///    to center.`）；
+  /// - `dragSnapToOrigin` ⇒ 未提交时才回弹到 0。
+  ///
+  /// ⇒ 所以提交时**绝不能先归零**：那正是用户看到的「滑动结束后上一个页面有跳变回弹」
+  ///   （旧场景被同一个值带着瞬间跳回中心）。
+  ///   正确做法：保留当前位移 → `_goScene` 换场景 → `AylaSceneFade.didUpdateWidget`
+  ///   **冻结**该位移给退场槽位 ⇒ 旧场景停在原处淡出；新场景从 0 起（位移不共享）。
+  ///
+  /// 未提交（`commit == 0`）才走 **200ms `--ease-out`** 回弹（`dragSnapToOrigin` 语义）。
   void _onSceneDragEnd(
     DragEndDetails details,
     AylaGroupScene contentScene,
@@ -1138,15 +1152,14 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       size: width,
     );
     if (commit == 0) {
-      // 未切换 ⇒ 动画回弹（样张 `_onDragEnd` 的 <阈值 分支同档：200ms easeOut）。
+      // 未提交 ⇒ `dragSnapToOrigin`：200ms `--ease-out` 平滑回弹（**不跳变**）。
       _resetDrag();
       return;
     }
-    // 触发切换 ⇒ 瞬时归零（新场景接管，旧场景不得拖尾）。
-    setState(() {
-      _dragDx = 0;
-      _dragDy = 0;
-    });
+    // ★ 提交 ⇒ **保留 `_dragDx`**（web「retains the held offset throughout exit」）。
+    //   只清纵向（纵向由下拉链路单独拥有，与本次切换无关）；
+    //   横向会在下一次拖动开始时被覆盖，故不需在此复位。
+    setState(() => _dragDy = 0);
     final int base = aylaGroupSceneOrderIndex(contentScene);
     final int next = (base + commit + kAylaGroupSceneOrder.length) %
         kAylaGroupSceneOrder.length;
@@ -1185,13 +1198,55 @@ class _GroupPageState extends ConsumerState<GroupPage> {
 /// 测试直接挂载它。私有类无法在 widget test 里构造（`invalid_use_of_visible_for_testing`
 /// 之外的私名引用根本编译不过）。
 class AylaSceneFade extends StatefulWidget {
-  const AylaSceneFade({super.key, required this.scene, required this.builder});
+  const AylaSceneFade({
+    super.key,
+    required this.scene,
+    required this.builder,
+    this.dragDx = 0,
+    this.dragDuration = Duration.zero,
+    this.elastic = 1,
+    this.onDragReset,
+  });
 
   /// 当前场景（web 的 `activeScene` 传入 `AnimatePresence` 的那一个）。
   final AylaGroupScene scene;
 
   /// 场景构建器（GroupPage 传 `_renderScene`）。
   final Widget Function(AylaGroupScene scene) builder;
+
+  /// 横滑位移（**只作用于在场场景**；退场场景用切换那一刻冻结的值）。
+  ///
+  /// ## 事实源（web `GroupPage.tsx:499–538` 的两层结构）
+  /// ```jsx
+  /// // "Panels enter from their own edges; the drag layer retains the held offset
+  /// //  throughout exit."
+  /// <motion.div className="group-scene-inner" variants={variants} …>   // ← 外层：只做 opacity
+  ///   <motion.div className="group-scene-drag" style={{ x: drag.offset }}
+  ///     dragConstraints={SCENE_DRAG_CONSTRAINTS} dragSnapToOrigin …>     // ← 内层：持位移
+  /// ```
+  /// - 外层 `exit` = `{ x: 0, opacity: 0 }` ⇒ **x 恒 0**，退场只淡出；
+  /// - 内层 `style={{ x: drag.offset }}` ⇒ **退场期间保留 held offset**
+  ///   （`useMotionDrag.ts:14–17`：`Normal exit releases the gesture but preserves its
+  ///    visible displacement; the route layer can continue from that frame instead of
+  ///    snapping back to center.`）；
+  /// - `dragSnapToOrigin` ⇒ 未提交时**回弹到 0**。
+  ///
+  /// ⚠️ 两层必须**分离**：此前 `GroupPage` 用**单个**共享 `_dragDx` 包住整个场景栈 ⇒
+  /// 触发切换后新旧场景被同一个值驱动 ⇒ 旧场景在淡出时位移被一起归零
+  /// （用户 2026-10-03 实报「滑动结束后上一个页面有跳变回弹」）。
+  final double dragDx;
+
+  /// 位移变化的时长：跟手期 `Duration.zero`（1:1）；回弹期 200ms `--ease-out`。
+  final Duration dragDuration;
+
+  /// 跟手弹性（web `dragElastic`，`kAylaDragElastic` = .8）。
+  final double elastic;
+
+  /// 切场景并冻结退场位移后回调 ⇒ 宿主把 `_dragDx` 复位（**新场景从 0 起**）。
+  ///
+  /// 时序必须是「**先冻结、后复位**」：若宿主先复位，本件 `didUpdateWidget` 里读到的
+  /// `widget.dragDx` 已是 0 ⇒ 旧场景冻结到 0 ⇒ 仍然跳回中心（本次修复的反例）。
+  final VoidCallback? onDragReset;
 
   @override
   State<AylaSceneFade> createState() => _AylaSceneFadeState();
@@ -1208,6 +1263,10 @@ class _AylaSceneFadeState extends State<AylaSceneFade>
   /// 正在退场的旧场景（null = 无）。
   AylaGroupScene? _outgoing;
 
+  /// 切换那一刻**冻结**的横滑位移 —— 退场槽位用它（web `GroupPage.tsx:499`：
+  /// `the drag layer retains the held offset throughout exit`）。
+  double _outgoingDragDx = 0;
+
   /// 淡出代际（见 [didUpdateWidget] 的守卫说明）。
   int _fadeGeneration = 0;
 
@@ -1217,9 +1276,24 @@ class _AylaSceneFadeState extends State<AylaSceneFade>
     if (oldWidget.scene == widget.scene) return;
     if (MediaQuery.disableAnimationsOf(context)) {
       setState(() => _outgoing = null);
+      _outgoingDragDx = 0;
       return;
     }
     setState(() => _outgoing = oldWidget.scene);
+    // ★ ① 冻结退出那一刻的可见位移给**退场槽位**（web：内层 drag 层在 exit 期间
+    //   **保留** held offset，而不是 snap 回中心 —— 后者就是用户看到的跳变回弹）。
+    _outgoingDragDx = widget.dragDx;
+    // ★ ② 冻结后把**在外**的位移复位为 0 ⇒ **新场景从 0 起**
+    //   （`useMotionDrag.ts:12–14`：`values cannot be shared between the outgoing and
+    //    incoming scene`）。
+    //
+    // ⚠️ **必须排到帧末**：本方法在 `didUpdateWidget` 内（build 阶段），
+    //   此刻调 `setState` 会让宿主二次重建，破坏本件「固定槽位 + 同型包装」的不变量
+    //   （实测：问题 7 的三个回归锁立刻转红 —— 旧场景被重建、initState 重跑）。
+    //   排到帧末则只影响**下一帧**的新场景起始位移，观感无差。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onDragReset?.call();
+    });
     _fade.value = 1;
     // 代际守卫：快速连切（A→B→A，300ms 内）时，前一次的 reverse() 也会 complete，
     // 若不加守卫会把**后一次**的退场场景提前清掉（场景直接消失、无淡出）。
@@ -1227,6 +1301,7 @@ class _AylaSceneFadeState extends State<AylaSceneFade>
     _fade.reverse().whenComplete(() {
       if (mounted && generation == _fadeGeneration) {
         setState(() => _outgoing = null);
+        _outgoingDragDx = 0;
       }
     });
   }
@@ -1266,6 +1341,38 @@ class _AylaSceneFadeState extends State<AylaSceneFade>
   /// 退场期间 `IgnorePointer` + `ExcludeFocus` + `ExcludeSemantics` 与原实现一致
   /// （web 侧由 `pointerEvents: drag.present ? undefined : "none"` 表达，tsx 520）。
   Widget _slot(AylaGroupScene scene, {required bool outgoing}) {
+    // ★ **两层分离**（web `GroupPage.tsx:512–536`）：
+    //   · 外层 = opacity 层（`group-scene-inner`，其 exit 的 `x` 恒 0）；
+    //   · 内层 = 位移层（`group-scene-drag`，`style={{ x: drag.offset }}`）。
+    //
+    // 在场：位移 = 实时 `dragDx`（跟手瞬时 / 未提交时 200ms 回弹 → `dragSnapToOrigin`）。
+    // 退场：位移 = **切换那一刻冻结的值**，此后不再变化
+    //      （`Panels enter from their own edges; the drag layer retains the held offset
+    //        throughout exit.`）⇒ 旧场景淡出时**停在原处**，不会跳回中心。
+    final double dx = outgoing
+        ? _outgoingDragDx * widget.elastic
+        : widget.dragDx * widget.elastic;
+    // ⚠️ **两档必须同型**（本件的核心不变量，见 `_slot` 文档的「同型包装」）：
+    // 早前写成 `outgoing ? Transform.translate(...) : TweenAnimationBuilder(...)`
+    // ⇒ 槽位内的**第一层类型**在切场景时从 A 变 B ⇒ Flutter 判定「不同 widget」
+    // ⇒ 场景子树整体重建 Element/State ⇒ 旧场景 `initState` 重跑（问题 7 复发）。
+    // 实测：`group_home_fixes_test` 的三个回归锁立刻转红。
+    // ⇒ 退场用 `duration: Duration.zero`（冻结值，本就不再变化），保持与在场同型。
+    final Widget dragLayer = TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: dx),
+      duration: outgoing ? Duration.zero : widget.dragDuration,
+      curve: Curves.easeOut,
+      builder: (
+        BuildContext context,
+        double value,
+        Widget? child,
+      ) =>
+          Transform.translate(
+        offset: Offset(value, 0),
+        child: child,
+      ),
+      child: widget.builder(scene),
+    );
     return FadeTransition(
       opacity: outgoing ? _fade : kAlwaysCompleteAnimation,
       child: ExcludeFocus(
@@ -1276,7 +1383,7 @@ class _AylaSceneFadeState extends State<AylaSceneFade>
             ignoring: outgoing,
             child: KeyedSubtree(
               key: ValueKey<AylaGroupScene>(scene),
-              child: widget.builder(scene),
+              child: dragLayer,
             ),
           ),
         ),

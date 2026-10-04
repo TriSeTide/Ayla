@@ -68,6 +68,8 @@ import '../widgets/game/game_room_card.dart';
 import '../widgets/group/group_apply.dart' show AylaGroupApplyDialog;
 import '../widgets/live/live_hall.dart' show AylaLiveChannelCard, AylaLiveCardData;
 import '../widgets/posts/post_card.dart' show AylaPostCard;
+import 'post_detail_page.dart' show aylaPostSharePayloadFor;
+import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 import '../widgets/search/search_history_chips.dart';
 import '../widgets/search/search_result_group.dart';
 import '../widgets/search/search_user_row.dart';
@@ -153,6 +155,8 @@ class SearchPage extends ConsumerStatefulWidget {
 }
 
 class _SearchPageState extends ConsumerState<SearchPage> {
+  /// 分享弹窗控制器（2026-10-03：搜索结果的帖子卡此前没传 `onShare` ⇒ 转发键禁用）。
+  final AylaShareController _share = AylaShareController();
   late String _q = (widget.initialQuery ?? '').trim();
   late String _filter = aylaHubFilterOf(SearchPage.filters, widget.initialType);
 
@@ -255,6 +259,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     _history.dispose();
     _restore.dispose();
     _scroll.dispose();
+    _share.dispose();
     super.dispose();
   }
 
@@ -888,6 +893,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             previewOnly: true, // tsx 431
             action: null,
             onOpen: () => _openPost(post),
+            // ★ 分享键（2026-10-03 补齐）：`post_card.dart:509` 的转发键**恒渲染**
+            // （只要非 detail 档），`onShare == null` ⇒ 共享件判禁用、鼠标变禁止符号。
+            onShare: () => unawaited(aylaOpenShareSheet(
+              context,
+              payload: aylaPostSharePayloadFor(post),
+              controller: _share,
+              currentUserId: ref.read(authNotifierProvider).user?.id,
+            )),
           ),
       ],
     );

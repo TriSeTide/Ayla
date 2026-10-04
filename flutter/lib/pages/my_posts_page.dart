@@ -35,6 +35,8 @@
 ///    —— 见 posts_hub_page.dart 同条登记。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -53,6 +55,8 @@ import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/posts/post_card.dart';
 import '../widgets/posts/post_page_chrome.dart';
+import 'post_detail_page.dart' show aylaPostSharePayloadFor;
+import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 
 class MyPostsPage extends ConsumerStatefulWidget {
   const MyPostsPage({super.key, this.ownerId});
@@ -67,6 +71,10 @@ class MyPostsPage extends ConsumerStatefulWidget {
 class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   final ScrollController _scroll = ScrollController();
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
+
+  /// 分享弹窗控制器（用户 2026-10-03 实报「帖子分享键变禁止」的同类修复：
+  /// 本页同样没传 `onShare` ⇒ `AylaShareButton` 判禁用）。
+  final AylaShareController _share = AylaShareController();
   AylaPagedList<AylaPost>? _pager;
   int _replayNonce = 0;
 
@@ -102,6 +110,7 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   void dispose() {
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
+    _share.dispose();
     _pager?.dispose();
     _scroll.dispose();
     super.dispose();
@@ -312,6 +321,13 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
       onAuthorTap: post.authorId == null
           ? null
           : () => context.go('/user/${post.authorId}'),
+      // ★ 分享键（同 `group_posts_page` 的修复）。
+      onShare: () => unawaited(aylaOpenShareSheet(
+        context,
+        payload: aylaPostSharePayloadFor(post),
+        controller: _share,
+        currentUserId: ref.read(authNotifierProvider).user?.id,
+      )),
     );
   }
 

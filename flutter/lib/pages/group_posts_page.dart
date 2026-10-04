@@ -29,6 +29,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/posts_api.dart';
 import '../core/models/post.dart' show AylaPost, AylaPostDraft;
+import '../state/auth_state.dart' show authNotifierProvider;
 import '../state/favorite_status.dart' show AylaFavoriteStatusController;
 import '../state/shell_state.dart' show ShellUiNotifier, shellUiProvider;
 import '../theme/glass.dart' show AylaGlassButton;
@@ -43,7 +44,8 @@ import '../widgets/group/group_scene.dart'
     show AylaGroupSceneHead, AylaGroupScenePlaceholder, AylaGroupSceneStickyHead;
 import '../widgets/posts/masonry_grid.dart' show AylaMasonryGrid;
 import '../widgets/posts/post_card.dart' show AylaPostCard;
-import 'post_detail_page.dart' show PostDetailPage;
+import 'post_detail_page.dart' show PostDetailPage, aylaPostSharePayloadFor;
+import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 
 /// 每页条数（web tsx 32：`PAGE_SIZE = 20`）。
 const int kAylaGroupPostsPageSize = 20;
@@ -70,6 +72,14 @@ class GroupPostsPage extends ConsumerStatefulWidget {
 
 class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
+
+  /// 分享弹窗控制器（用户 2026-10-03 实报「帖子分享键鼠标悬停直接变禁止」）。
+  ///
+  /// 根因：本页调 `AylaPostCard` 时**没传 `onShare`** ⇒ `AylaShareButton.onPressed == null`
+  /// ⇒ 共享件按 `onPressed == null` 判为禁用（鼠标变禁止符号、点击无效）。
+  /// 范本：`post_detail_page.dart:767–776`（同一个 `aylaOpenShareSheet` +
+  /// `aylaPostSharePayloadFor`，已在本轮为帖子详情接线）。
+  final AylaShareController _share = AylaShareController();
   final ScrollController _scroll = ScrollController();
   ShellUiNotifier? _shell;
   Future<void> Function()? _refreshCallback;
@@ -125,6 +135,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     }
     _favorites.removeListener(_onChanged);
     _favorites.dispose();
+    _share.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -193,6 +204,24 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
         //（`wasLoaded` / `listActive` 两个前置条件在本页恒成立：详情态不走本页 load）。
         _skipRevealOnRestore = false;
       });
+      // ★ 拉取本页帖子的收藏状态（用户 2026-10-03 实报「收藏键无法点击，显示正在加载收藏状态」）。
+      //
+      // 根因：本页此前**只在 `onRetryFavoriteStatus`（重试）里**调 `_favorites.load` ⇒
+      // 卡片一进列表就永远是 `AylaFavoriteState.unknown` ⇒ `AylaFavoriteButton` 按 web
+      // 语义 `disabled = busy || (unknown && !error)` **永久禁用** + 文案停在「正在加载收藏状态」，
+      // 用户观感就是「点不动」。
+      //
+      // 同口径范本：`posts_hub_page.dart:183–188`（分页数据到达后按当前 items 批量查询）、
+      // `my_posts_page` / `favorites_page` 同款。web 亦然（`PostsHubPage` 在列表 ready 后调
+      // `loadFavoriteStatuses`）。
+      //
+      // ⚠️ 放在 `setState` **之后**（`_posts` 已更新）且不需要 `await`：
+      // controller 自己有 60s 新鲜期与在途去重（`favorite_status.dart:133–138`），
+      // 翻页重复调用不会产生多余请求。
+      unawaited(_favorites.load(
+        'post',
+        <String>[for (final AylaPost p in merged.values) '${p.id}'],
+      ));
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error.toString());
@@ -319,6 +348,15 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
                   onRetryFavoriteStatus: () => unawaited(
                     _favorites.load('post', <String>[key], force: true),
                   ),
+                  // ★ 分享键（用户 2026-10-03 实报「鼠标悬停直接变禁止，仍无法点击」）：
+                  // 此前没传 ⇒ `AylaShareButton.onPressed == null` ⇒ 禁用。
+                  // 与帖子详情页同口径（`post_detail_page.dart:767–776`）。
+                  onShare: () => unawaited(aylaOpenShareSheet(
+                    context,
+                    payload: aylaPostSharePayloadFor(post),
+                    controller: _share,
+                    currentUserId: ref.read(authNotifierProvider).user?.id,
+                  )),
                 ),
               ),
             );

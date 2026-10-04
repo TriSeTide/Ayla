@@ -69,6 +69,8 @@ import '../widgets/base/reveal.dart';
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/posts/post_card.dart';
 import '../widgets/posts/post_page_chrome.dart';
+import 'post_detail_page.dart' show aylaPostSharePayloadFor;
+import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 import 'hub_support.dart';
 
 /// 帖子流「宽档」阈值 —— 逐字取自 web 的 `@media (min-width: 1025px)`
@@ -114,6 +116,10 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
 
   String get _restoreKey => 'posts-feed:$_filter';
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
+
+  /// 分享弹窗控制器（2026-10-03：本页文件头原写「分享弹窗接线未做」，现补齐 ——
+  /// 帖子卡转发键此前 `onShare == null` ⇒ 共享件判禁用、鼠标变禁止符号）。
+  final AylaShareController _share = AylaShareController();
   AylaPagedList<AylaPost>? _pager;
   Set<String> _friendIds = const <String>{};
   int _replayNonce = 0;
@@ -155,6 +161,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   void dispose() {
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
+    _share.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
     final Future<void> Function()? callback = _refreshCallback;
     if (notifier != null && callback != null) {
@@ -427,6 +434,13 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
       onAuthorTap: post.authorId == null
           ? null
           : () => context.go('/user/${post.authorId}'),
+      // ★ 分享键（2026-10-03 补齐；与 `post_detail_page.dart:767–776` 同口径）。
+      onShare: () => unawaited(aylaOpenShareSheet(
+        context,
+        payload: aylaPostSharePayloadFor(post),
+        controller: _share,
+        currentUserId: ref.read(authNotifierProvider).user?.id,
+      )),
     );
   }
 
