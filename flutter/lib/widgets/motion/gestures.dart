@@ -578,16 +578,33 @@ class AylaPrimaryNavPage extends StatefulWidget {
 }
 
 class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
-    with SingleTickerProviderStateMixin {
-  // ⚠️ **两个用途共用这一个控制器**，时长必须同时满足：
-  // ① 方向变体进场（enter → center）= 300ms（web `auroraquaRouteTransition`）；
-  // ② 松手回弹（`_raw` → 0）= 200ms `--ease-out`（web `dragSnapToOrigin` 的 spring 回弹，
-  //    量程与同文件 [AylaFullScreenSwipeBack] 的 200ms 回弹一致）——
-  //    故回弹时用 `animateBack(0, duration: kAylaEdgeSwipeDuration)` **覆写本次时长**，
-  //    而不是把控制器常量改成 200ms（那会把进场动画也改成 200ms，偏离 web）。
+    with TickerProviderStateMixin {
+  /// 方向变体进场（enter → center）= 300ms（web `auroraquaRouteTransition`）。
+  ///
+  /// ⚠️ 本控制器**只驱动入场动画**（opacity + `direction × 20` 位移）。
+  /// 松手回弹**不得复用它** —— 见 [_snap] 的说明。
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: kAylaPanelDuration,
+  );
+
+  /// 松手回弹（未提交时 `_raw` → 0）**专用**控制器，200ms。
+  ///
+  /// ## ⚠️ 为什么必须与 [_c] 分开（用户 2026-10-05 实报）
+  /// 早前把回弹也挂在 [_c] 上（`_c..duration = 200ms; ..value = 0; _c.forward()`）：
+  /// 而 [build] 里 `v = t.value` 同时驱动 **opacity** 与 **入场位移**
+  /// ⇒ 回弹把 `_c` 从 0 推到 1 ⇒ **整页透明度 0→1 + 入场位移 20→0 被重播一遍**。
+  /// 用户观感：「滑动未达标准时取消，重新加载了入场动画，不该加载」。
+  ///
+  /// ⇒ 位移与入场**必须是两条独立时间线**。范本 = 群内页面 `group_page.dart:1151–1165`
+  /// 的 `_resetDrag`：`_dragDx` 是纯数值、回弹由**独立的** `TweenAnimationBuilder`（200ms
+  /// `--ease-out`）驱动，**完全不碰入场控制器**。
+  ///
+  /// 曲线用线性（与 [AylaFullScreenSwipeBack] 的既有 200ms 回弹一致；
+  /// web 侧 framer 的 `dragSnapToOrigin` 是 spring，此处取同量程近似 —— 已登记）。
+  late final AnimationController _snap = AnimationController(
+    vsync: this,
+    duration: kAylaEdgeSwipeDuration, // 200ms（web `SPRING_BACK_DURATION`）
   );
 
   /// 原始累计位移（判定用；web `info.offset.x`）。
@@ -621,19 +638,19 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
     // 壳层传 `replayKey: pathname` 覆盖该情形，未传时行为与旧实现一致。
     if (old.direction != widget.direction || old.replayKey != widget.replayKey) {
       // ① 在途回弹让位给换页转场（web `useMotionDrag.ts:33–43`：路由离场时
-      //    `offset.stop()`，不再继续 snap-back）；
-      // ② 时长恢复 300ms（回弹会临时把控制器改成 200ms）。
-      _c.stop();
+      //    `offset.stop()`，不再继续 snap-back）—— 两条时间线各自停，互不影响；
+      // ② 入场动画从 0 重播（`_c` 时长恒为 [kAylaPanelDuration]，回弹不再改它）。
+      _snap.stop();
       _snapBackFrom = null;
-      _c
-        ..duration = kAylaPanelDuration
-        ..forward(from: 0);
+      _c.forward(from: 0);
     }
   }
 
   @override
   void dispose() {
+    // 两条独立时间线各自释放（见 [_snap]）。
     _c.dispose();
+    _snap.dispose();
     super.dispose();
   }
 
@@ -645,8 +662,8 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
   void _onStart(DragStartDetails d) {
     final double? from = _snapBackFrom;
     if (from == null) return;
-    final double shown = from * (1 - _c.value); // 回弹当前**原始**量
-    _c.stop();
+    final double shown = from * (1 - _snap.value); // 回弹当前**原始**量
+    _snap.stop();
     setState(() {
       _raw = shown;
       _snapBackFrom = null;
@@ -679,13 +696,17 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
     // **冻结起点 → 控制器 200ms 走完 → 归零**；显示位移 = 曲线值 × [kAylaDragElastic]
     // （与跟手层同源，回弹量不额外打折）。
     if (commit == 0) {
+      // ⚠️ 用**独立的** [_snap]（不是 [_c]）：复用入场控制器会把整页的
+      //    opacity 与入场位移一起重播（用户 2026-10-05 实报「取消时重新加载了入场动画」）。
       _snapBackFrom = _raw;
-      _c
-        ..duration = kAylaEdgeSwipeDuration // 200ms（web `SPRING_BACK_DURATION`）
+      _snap
         ..stop()
         ..value = 0;
+      // 冻结起点后立刻 setState：让 build 走 `snappingFrom != null` 分支
+      // （否则本帧仍按 `_dx` 画，等于没冻结）。
+      setState(() {});
       unawaited(
-        _c.forward().whenComplete(() {
+        _snap.forward().whenComplete(() {
           // ⚠️ **两个字段一起清**：只清 `_snapBackFrom` 会让下一次 build 回落到
           // `_dx = _raw × 弹性`（= 松手值）⇒ 归零的瞬间又跳回起点（实测踩到）。
           if (mounted) {
@@ -720,21 +741,23 @@ class _AylaPrimaryNavPageState extends State<AylaPrimaryNavPage>
       parent: _c,
       curve: AylaCurves.auroraquaEaseInOut,
     );
+    // ⚠️ **两个控制器一起监听**：`_c` 驱动入场（opacity + direction 位移）、
+    // [_snap] 驱动松手回弹（纯位移）。两者是**独立时间线**（见 [_snap] 的说明）。
     return AnimatedBuilder(
-      animation: t,
+      animation: Listenable.merge(<Listenable>[t, _snap]),
       builder: (BuildContext context, Widget? child) {
         final double v = reduced ? 1 : t.value;
         // directionalVariants：enter = +direction*20 → 0（退出由上一层宿主负责）
         final double dx = widget.direction * kAylaPanelDistance * (1 - v);
-        // 回弹期的显示位移：起点冻结在松手位移上，沿控制器（200ms；与
-        // [AylaFullScreenSwipeBack] 同范式，控制器默认线性）走到 0。
+        // 回弹期的显示位移：起点冻结在松手位移上，沿**专用回弹控制器** [_snap]
+        // （200ms）走到 0 —— **不读 `_c`**，否则会把入场动画一起重播。
         //
         // ⚠️ **必须写在 builder 内**（每帧求值）：写在 `build` 里只会算一次，
         // 于是「回弹」看起来仍是停住不动（实测：半程位移恒为松手值）。
         final double? snappingFrom = _snapBackFrom;
         final double dragDx = snappingFrom == null
             ? _dx
-            : snappingFrom * kAylaDragElastic * (1 - _c.value);
+            : snappingFrom * kAylaDragElastic * (1 - _snap.value);
         return Opacity(
           opacity: v,
           child: Transform.translate(

@@ -634,6 +634,66 @@ void main() {
       expect(_navDx(tester), closeTo(0, 1), reason: '200ms 走完后归零');
     });
 
+testWidgets('取消滑动（未达阈值）⇒ 回弹时**不得重播入场动画**（用户 2026-10-05 实报）', (
+      WidgetTester tester,
+    ) async {
+      // ## 用户原话
+      // > 「窄屏主页五屏切换手势滑动未达切换页面的标准时取消，**重新加载了入场动画**，
+      // >  不该加载，修复这个问题。可以以群内滑动为范本。」
+      //
+      // ## 根因（本用例锁的就是它）
+      // 早前回弹挂在**入场控制器** `_c` 上（`_c..duration = 200ms; ..value = 0; _c.forward()`），
+      // 而 build 里 `v = t.value` 同时驱动 **opacity** 与 **入场位移**
+      // ⇒ 回弹把 `_c` 从 0 推到 1 ⇒ 整页 `opacity 0→1` + 入场位移 `20→0` 被**重播一遍**。
+      // ⇒ 修法：回弹改用**独立控制器** `_snap`（位移与入场两条独立时间线）；
+      //   范本 = 群内页面 `group_page.dart` 的 `_resetDrag`（`_dragDx` 纯数值 + 独立回弹动画）。
+      //
+      // ## 判据
+      // `direction: 0` ⇒ 入场位移恒 0（`0 × 20 × (1-v)`），故只看 **opacity**：
+      // 若回弹复用了 `_c`，半程会看到 `opacity < 1`（从 0 往 1 爬）。
+      // 正确实现下回弹期间 opacity **恒为 1**（入场从未被打断）。
+      await tester.pumpWidget(
+        host(
+          const AylaPrimaryNavPage(
+            direction: 0,
+            child: SizedBox(
+              height: 200,
+              child: Center(child: Text('一级页')),
+            ),
+          ),
+          width: 360,
+        ),
+      );
+      // 入场已完成（direction 0 ⇒ initState 不播），基线 opacity 应为 1
+      expect(_navOpacity(tester), closeTo(1, 0.01), reason: '静止态 opacity 恒 1');
+
+      final TestGesture g = await tester.startGesture(
+        tester.getCenter(find.text('一级页')),
+      );
+      await g.moveBy(const Offset(100, 0)); // 100 < 360/3 = 120 ⇒ 不提交
+      await tester.pump();
+      expect(_navDx(tester), closeTo(80, 2), reason: '跟手：100 × 0.8');
+      expect(_navOpacity(tester), closeTo(1, 0.01), reason: '跟手期不得改 opacity');
+
+      await g.up();
+      // 逐帧扫过整段回弹，opacity 必须**全程为 1**
+      for (int i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 40));
+        expect(
+          _navOpacity(tester),
+          closeTo(1, 0.01),
+          reason: '取消滑动的回弹**不得重播入场动画**（第 ' +
+              (i + 1).toString() +
+              ' 帧 opacity 掉到 ' +
+              _navOpacity(tester).toStringAsFixed(3) +
+              '）——回到订阅前的行为：复用入场控制器会让整页透明度 0→1 重播',
+        );
+      }
+      await tester.pumpAndSettle();
+      expect(_navDx(tester), closeTo(0, 1), reason: '回弹走完后位移归零');
+      expect(_navOpacity(tester), closeTo(1, 0.01), reason: '终态 opacity 仍为 1');
+    });
+
     testWidgets('direction 不变但 replayKey 变化 ⇒ 重播进场（web key={pathname}；审查 BUG-2）', (
       WidgetTester tester,
     ) async {
