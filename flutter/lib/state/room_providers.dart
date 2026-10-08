@@ -18,6 +18,12 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api/boardgame_api.dart' show AylaDirectoryGameEntry;
+import '../core/api/live_api.dart' show AylaDirectoryLiveEntry;
+import '../core/api/voice_api.dart'
+    show AylaDirectoryVoiceEntry, AylaVoiceChannelSnapshot;
+import '../widgets/live/live_channel_snapshot.dart' show AylaLiveChannelSnapshot;
+import '../widgets/voice/voice_channels.dart' show AylaVoiceCardData;
+
 import '../core/net/dio_client.dart' show DioClient;
 import '../core/ws/live_ws.dart';
 import '../core/ws/posts_frames.dart' show AylaPostsFramesBridge;
@@ -26,11 +32,12 @@ import '../core/ws/voice_ws.dart';
 import '../core/ws/ws_manager.dart' show WsManager, wsManager;
 import '../pages/live_support.dart' show aylaCloseLiveMiniPlayer;
 import 'auth_state.dart';
-import 'boardgame_store.dart' show aylaBoardgameStore;
+import 'boardgame_store.dart' show AylaBoardgameStore, aylaBoardgameStore;
 import 'chat_providers.dart'
     show chatStateProvider, chatWsProvider, realtimeProvider;
 import 'directory_events.dart';
 import 'directory_store.dart' show aylaDirectoryStore;
+import 'directory_tracking.dart' show AylaDirectoryTracking;
 import 'live_state.dart';
 import 'posts_store.dart' show aylaPostsStore;
 import 'voice_state.dart';
@@ -43,7 +50,23 @@ final ChangeNotifierProvider<AylaVoiceState> voiceStateProvider =
 final ChangeNotifierProvider<AylaLiveState> liveStateProvider =
     ChangeNotifierProvider<AylaLiveState>((Ref ref) => AylaLiveState());
 
-/// 目录热更新事件总线（频道帧 → 目录页）。
+/// 目录热更新事件总线 —— **已退役**（2026-10-08）。
+///
+/// ## 为什么退役
+/// 它是「帧 → **广播给页面** → 每个页面自己 patch」的旧架构：页面漏订阅就完全没有
+/// 热更新（用户实报的语音房/直播/桌游/帖子列表页 + 群内第 2 列侧栏全都没有），
+/// 且与 web 不符 —— web 的目录接口**是**域 store 的查询投影，帧只落 store，
+/// 页面只读缓存（`stores/directory.ts:143–146 / 205–259`；消息域同理，
+/// `ws/chat.ts:444` + Flutter `core/ws/chat_ws.dart:620`）。
+///
+/// 现架构 = `state/directory_tracking.dart`（store 订阅通路，负责新增/更新/重排/人数）
+/// + `core/ws/room_frames.dart`（帧直连通路，负责 `createdIds` 与删除摘除）。
+///
+/// ⚠️ **本 provider 只为历史测试与兼容档保留**，生产不再消费：
+/// - `roomDirectoryBridgeProvider` 只在**未注入 store** 时把它当兜底出口；
+///   生产恒注入 `aylaDirectoryStore` ⇒ 兜底不生效。
+/// - 新增代码**不得**订阅它（否则又回到「漏订阅就没热更新」）。
+@Deprecated('目录热更新已改为「帧 → store」；请改用 aylaDirectoryStore')
 final ChangeNotifierProvider<AylaDirectoryEvents> directoryEventsProvider =
     ChangeNotifierProvider<AylaDirectoryEvents>(
   (Ref ref) => AylaDirectoryEvents(),
@@ -86,6 +109,10 @@ final Provider<AylaLiveWsClient> liveWsProvider = Provider<AylaLiveWsClient>(
 /// ⚠️ **必须挂上才会生效**：帧从 chat 通道来，桥靠 `chat.onFrame` 接 —— 由
 /// [aylaStartRoomFrames] 在 app 启动时挂一次（web 侧是 `chat.ts` 的模块级单例 +
 /// `ensureDirectoryTracking()`，同样是启动期挂载）。
+///
+/// 桥**直接写目录 store**（`directoryStore:` 注入）—— 与消息域的
+/// `core/ws/chat_ws.dart:620` 的 `_message.upsertMessage(...)` 同型；
+/// 页面只读 store，因此**不存在「页面漏订阅就没有热更新」**这一类缺陷。
 final Provider<AylaRoomDirectoryBridge> roomDirectoryBridgeProvider =
     Provider<AylaRoomDirectoryBridge>((Ref ref) {
   // ⚠️ **依赖必须用 `read` 而不是 `watch`**（2026-10-02，与 `chatWsProvider` 同源的根因修复）：
@@ -103,13 +130,37 @@ final Provider<AylaRoomDirectoryBridge> roomDirectoryBridgeProvider =
   final AylaRoomDirectoryBridge bridge = AylaRoomDirectoryBridge(
     voiceState: ref.read(voiceStateProvider),
     liveState: ref.read(liveStateProvider),
-    directory: ref.read(directoryEventsProvider),
+    // web `stores/directory.ts` 的模块级 `useDirectoryStore`（帧直连通路的落点）。
+    directoryStore: aylaDirectoryStore,
     boardgameStore: aylaBoardgameStore,
     currentUserId: () => container.read(authNotifierProvider).user?.id,
   );
   ref.onDispose(bridge.detach);
   return bridge;
 });
+
+/// 目录缓存的 **store 订阅通路** —— web `ensureDirectoryTracking`
+/// （`stores/directory.ts:205–219`）的等价物（模块级单例，`main.dart` 启动期挂一次）。
+///
+/// 实现见 `state/directory_tracking.dart`（本文件只做 Riverpod 侧的装配）。
+final AylaDirectoryTracking directoryTracking = AylaDirectoryTracking();
+
+/// 启动期装配目录 store 订阅通路（幂等；`main.dart` 与 `aylaStartRoomFrames` 同处调用）。
+void aylaStartDirectoryTracking({
+  required AylaVoiceState voiceState,
+  required AylaLiveState liveState,
+  required AylaBoardgameStore boardgameStore,
+  required String? Function() currentUserId,
+}) => directoryTracking.start(
+  voiceState: voiceState,
+  liveState: liveState,
+  boardgameStore: boardgameStore,
+  currentUserId: currentUserId,
+  store: aylaDirectoryStore,
+);
+
+/// 登出 / 会话过期：停掉订阅通路（web `disposeDirectoryTracking`，`stores/directory.ts:200–204`）。
+void aylaStopDirectoryTracking() => directoryTracking.stop();
 
 /// 桌游目录取页 → 全局 store 的落地钩子（web `stores/directory.ts:313–317`：
 /// `else useBoardgameStore.getState().upsertRoom(item as GameRoom)`）。
@@ -167,16 +218,111 @@ void aylaStartRoomFrames(ProviderContainer container) {
   final AylaRoomDirectoryBridge bridge =
       container.read(roomDirectoryBridgeProvider);
   bridge.attach(container.read(chatWsProvider));
-  // web `stores/directory.ts:310–320`：目录取页结果落地回全局 store（本挂钩子）。
+  _wireDirectoryTracking(
+    voiceState: container.read(voiceStateProvider),
+    liveState: container.read(liveStateProvider),
+    currentUserId: () => container.read(authNotifierProvider).user?.id,
+  );
+}
+
+/// 目录热更新的**共同装配**（两条通路 + 取页落地钩子）—— 三个入口共用一份，
+/// 避免容器版 / WidgetRef 版各写一遍导致漂移。
+void _wireDirectoryTracking({
+  required AylaVoiceState voiceState,
+  required AylaLiveState liveState,
+  required String? Function() currentUserId,
+}) {
+  _registerDirectoryItemHooks(voiceState: voiceState, liveState: liveState);
+  // ★ 目录缓存的 **store 订阅通路**（web `ensureDirectoryTracking`，:205–219）：
+  // 三个域 store 一变就把新旧快照 diff 进目录缓存 ⇒ 所有读缓存的页面自动热更新。
+  // ⚠️ 必须启动期装配（web 同：`loadDirectory` 首次调用时装配）——WS 帧可能在
+  // 任何页面取数之前到达（chat_ws 已经写域 store），懒装配会漏掉这批早期帧。
+  aylaStartDirectoryTracking(
+    voiceState: voiceState,
+    liveState: liveState,
+    boardgameStore: aylaBoardgameStore,
+    currentUserId: currentUserId,
+  );
+}
+
+/// 目录取页结果 → 全局域 store 的落地钩子（web `stores/directory.ts:310–320`）。
+///
+/// web 对**三个 kind** 都 upsert（live / voice / game）；此前 Flutter 只接了 game
+/// （见下一段注释的登记），本轮补齐 voice / live —— 两者的域 store 现在都有完整的
+/// 描述符类型（`AylaVoiceChannelSnapshot` / `AylaLiveChannelSnapshot`），
+/// 投影转换是纯搬运、无字段丢失。
+void _registerDirectoryItemHooks({
+  required AylaVoiceState voiceState,
+  required AylaLiveState liveState,
+}) {
+  aylaDirectoryStore.itemUpsertHooks[AylaDirectoryKind.voice] =
+      (Object item) => _onVoiceDirectoryItem(voiceState, item);
+  aylaDirectoryStore.itemUpsertHooks[AylaDirectoryKind.live] =
+      (Object item) => _onLiveDirectoryItem(liveState, item);
   aylaDirectoryStore.itemUpsertHooks[AylaDirectoryKind.game] =
       _onGameDirectoryItem;
+}
+
+/// 取页结果（voice 条目）→ `voiceState`（web `:315` 的 `upsertChannel`）。
+///
+/// 目录条目 → 快照是**逐字段搬运**（快照的字段是目录条目的超集；
+/// `room_name` / `last_occupied_at` / `last_vacant_at` 各自对位）。
+/// 缺席即缺席（不造默认值）——`ownerNickname` 为 null 时快照也是 null。
+void _onVoiceDirectoryItem(AylaVoiceState state, Object item) {
+  if (item is! AylaDirectoryVoiceEntry) return;
+  final AylaVoiceCardData card = item.card;
+  state.upsertChannel(
+    AylaVoiceChannelSnapshot(
+      id: card.id,
+      name: card.name,
+      roomName: item.roomName,
+      ownerId: item.ownerId,
+      ownerNickname: card.ownerNickname,
+      memberCount: card.memberCount,
+      visibility: card.visibility,
+      allowedGroupNames: card.allowedGroupNames,
+      groupName: card.groupName,
+      mine: card.mine,
+      createdAt: item.createdAt,
+      lastOccupiedAt: item.lastOccupiedAt,
+      lastVacantAt: item.lastVacantAt,
+    ),
+  );
+}
+
+/// 取页结果（live 条目）→ `liveState`（web `:314` 的 `upsertChannel`）。
+void _onLiveDirectoryItem(AylaLiveState state, Object item) {
+  if (item is! AylaDirectoryLiveEntry) return;
+  state.upsertChannel(
+    AylaLiveChannelSnapshot(
+      id: item.card.id,
+      title: item.card.title,
+      description: item.description,
+      cover: item.card.cover,
+      status: item.card.status,
+      ownerId: item.ownerId,
+      ownerNickname: item.card.ownerNickname,
+      isOwner: item.isOwner,
+      visibility: item.card.visibility?.wire,
+      allowedGroupIds: item.allowedGroupIds,
+      groupName: item.card.groupName,
+      allowedGroupNames: item.card.allowedGroupNames,
+      viewerCount: item.card.viewerCount,
+      startedAt: item.startedAt,
+      endedAt: item.endedAt,
+      createdAt: item.createdAt,
+    ),
+  );
 }
 
 /// 同上（`WidgetRef` 版；登录后的收尾/重连路径可再挂一次，幂等）。
 void aylaStartRoomFramesForRef(WidgetRef ref) {
   ref.read(roomDirectoryBridgeProvider).attach(ref.read(chatWsProvider));
-  aylaDirectoryStore.itemUpsertHooks[AylaDirectoryKind.game] =
-      _onGameDirectoryItem;
+  _wireDirectoryTracking(
+    voiceState: ref.read(voiceStateProvider),
+    liveState: ref.read(liveStateProvider),
+    currentUserId: () => ref.read(authNotifierProvider).user?.id,
+  );
 }
 
 /// 登录后启动 voice 通道（web `VoiceHubPage.tsx:144–146` 的 `voiceWS.connect()`）。
@@ -197,9 +343,10 @@ void aylaStopRooms(WidgetRef ref) {
   aylaStopPostsFrames(ref);
   ref.read(voiceWsProvider).disconnect();
   ref.read(liveWsProvider).disconnect();
+  // web `disposeDirectoryTracking`（`stores/directory.ts:200–204`）：退订 + reset。
+  aylaStopDirectoryTracking();
   ref.read(voiceStateProvider).reset();
   ref.read(liveStateProvider).reset();
-  ref.read(directoryEventsProvider).reset();
 }
 
 /// 同上（`ProviderContainer` 版，`main.dart` 的 `onSessionExpired` 用）。
@@ -209,9 +356,10 @@ void aylaStopRoomsForContainer(ProviderContainer container) {
   aylaStopPostsFramesForContainer(container);
   container.read(voiceWsProvider).disconnect();
   container.read(liveWsProvider).disconnect();
+  // 同 [aylaStopRooms]：停订阅通路（web `disposeDirectoryTracking`）。
+  aylaStopDirectoryTracking();
   container.read(voiceStateProvider).reset();
   container.read(liveStateProvider).reset();
-  container.read(directoryEventsProvider).reset();
 }
 
 /// 启动期挂载 posts 帧桥（`main.dart` 调用一次；幂等）。
@@ -238,7 +386,7 @@ void aylaStopPostsFrames(WidgetRef ref) {
   ref.read(postsFramesBridgeProvider).detach();
   aylaPostsStore.reset();
   aylaBoardgameStore.reset();
-  aylaDirectoryStore.itemUpsertHooks.remove(AylaDirectoryKind.game);
+  aylaDirectoryStore.itemUpsertHooks.clear();
 }
 
 /// 同上（`ProviderContainer` 版）。
@@ -254,7 +402,7 @@ void aylaStopPostsFramesForContainer(ProviderContainer container) {
   }
   aylaPostsStore.reset();
   aylaBoardgameStore.reset();
-  aylaDirectoryStore.itemUpsertHooks.remove(AylaDirectoryKind.game);
+  aylaDirectoryStore.itemUpsertHooks.clear();
 }
 
 /// 登出 / 401 过期：完整销毁窄屏浮动小窗持有的会话（唯一 owner）。

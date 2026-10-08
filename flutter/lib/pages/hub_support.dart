@@ -155,6 +155,11 @@ List<AylaDirectoryLiveEntry> aylaHubSortLive(
   return sorted;
 }
 
+/// ⚠️ **已退役**（2026-10-08）：目录热更新已改为「帧 → store」
+/// （`state/directory_tracking.dart` + `core/ws/room_frames.dart`），
+/// 页面**不再**手工 patch 列表 ⇒ 本函数只剩历史测试的调用点。
+/// 新增代码**不要**用它（否则又回到「漏订阅就没有热更新」）。
+///
 /// 目录事件对**已加载语音条目**的就地效应（纯投影）—— web `ws/chat.ts` 的
 /// `voice.channel.*` 分支 + `stores/voice.ts` 的 `upsertChannel/patchChannel/removeChannel`
 /// 三档对「目录列表」的净效果。
@@ -194,7 +199,9 @@ List<AylaDirectoryLiveEntry> aylaHubSortLive(
   );
 }
 
-/// 同上，直播档（web `ws/chat.ts` 的 `live.channel.*` / `live.viewers.changed`）。
+/// ⚠️ **已退役**（2026-10-08；同 [aylaHubApplyVoiceEvent]）。
+///
+/// 直播档（web `ws/chat.ts` 的 `live.channel.*` / `live.viewers.changed`）。
 ///
 /// - `deleted` ⇒ 去掉该条；
 /// - 人数 `patched`（`live.viewers.changed`）⇒ 只换在看人数（web `stores/live.ts:218–224`
@@ -232,16 +239,21 @@ List<AylaDirectoryLiveEntry> aylaHubSortLive(
 /// `last_vacant_at` / `created_at`）。
 ///
 /// ## 为什么单独一个判据类（而不是直接排 `AylaDirectoryVoiceEntry`）
-/// web 的目录条目**就是** `VoiceChannelDescriptor`（含上述四字段）。Flutter 侧分了两层：
-/// - 分页条目 `AylaDirectoryVoiceEntry`（`core/api/voice_api.dart:18–62`）只带
-///   `card.memberCount` 与 `createdAt`；
-/// - **全局**频道快照 `AylaVoiceChannelSnapshot`（同文件 `:71–187`）带全部四字段
-///   （`memberCount` / `lastOccupiedAt` / `lastVacantAt` / `createdAt`），
-///   字段名与 web 逐条对应。
-/// ⇒ 与 web **同源**的做法是：排序读**全局那份**（web `stores/directory.ts:161` 正是
-/// `record.items.map((item) => after.get(String(item.id)) ?? item)` —— 用 voice store 的
-/// 描述符**替换** directory record 的同 id 项，侧栏行在 web 上就是 voice store 那一份）。
-/// 缺席（该 id 不在全局表里）⇒ 按「无历史」档处理，**不伪造时间戳**。
+/// web 的目录条目**就是** `VoiceChannelDescriptor`（含上述四字段）⇒ 直接排即可。
+/// Flutter 侧目录条目与全局快照是两个类型（卡投影 vs 完整描述符），
+/// 排序需要「四列齐备」的视图 ⇒ 本类把两者归一。
+///
+/// ## 2026-10-08 修正（用户实报「语音还给修坏了，本来还好好的」）
+/// 此前本类假设「分页条目只带 `memberCount` + `createdAt`」，于是**只有全局快照**
+/// 能提供 `last_occupied_at` / `last_vacant_at`，调用方（`group_page.dart` 的侧栏）
+/// 就只从 `voiceState.channels` 建 facts ⇒ **不在全局表里的房间**（用户没进过、
+/// 也没有过 WS 帧）落到 [ofEntry] 分支、两列恒 null ⇒ 被判成「从未有人」
+/// ⇒ 整批沉到所有「曾有人、现在没人」（有 `last_vacant_at`）的房间**之下**。
+/// web 不会这样：它的目录条目自带这两列，`sortVoiceChannels` 的
+/// 「变空不回初始位」对**全部**房间都成立。
+///
+/// 现 [AylaDirectoryVoiceEntry] 已按 web 补齐两列（`core/api/voice_api.dart`）⇒
+/// [ofEntry] 与 [ofSnapshot] 对本类**四列等价**，两个工厂可互换。
 @immutable
 class AylaVoiceSortFacts {
   const AylaVoiceSortFacts({
@@ -272,11 +284,26 @@ class AylaVoiceSortFacts {
         createdAt: c.createdAt,
       );
 
-  /// 从分页条目取（**只有** `memberCount` 与 `createdAt` 可用；两个时间戳留 null
-  /// —— 见类文档的字段缺口登记）。
+  /// 从分页条目取 —— **四列齐备**。
+  ///
+  /// ⚠️ 2026-10-08 修正（用户实报「语音还给修坏了，本来还好好的」的根因之一）：
+  /// 此前 `lastOccupiedAt` / `lastVacantAt` 被留成 null，理由是「分页条目不带这两列」
+  /// （见类文档的字段缺口登记）。那个前提**本身就是缺陷**：
+  /// web 的目录条目**就是** `VoiceChannelDescriptor`，`sortVoiceChannels`
+  /// （`utils/sortChannels.ts:32–46`）在目录列表上**永远**读得到 `last_occupied_at` /
+  /// `last_vacant_at` ⇒ 「曾有人、现在没人」的房间按 `last_vacant_at` 倒序排在
+  /// 「从未有人」之前（注释原话：**变空不回初始位**）。
+  ///
+  /// Flutter 侧原先只能从**全局 `voiceState` 快照**取那两列，而全局表只在
+  /// 「用户进过该房 / 该房有过 WS 帧」时才有条目 ⇒ 缺席的房间被判成「从未有人」，
+  /// **整批沉到列表底部**（在有 `last_vacant_at` 的房间之下），与 web 顺序不符。
+  /// 现 [AylaDirectoryVoiceEntry] 已按 web 补齐这两列（`core/api/voice_api.dart`）⇒
+  /// 本工厂直接读条目自带的值，不再有缺口。
   factory AylaVoiceSortFacts.ofEntry(AylaDirectoryVoiceEntry entry) =>
       AylaVoiceSortFacts(
         memberCount: entry.card.memberCount ?? 0,
+        lastOccupiedAt: entry.lastOccupiedAt,
+        lastVacantAt: entry.lastVacantAt,
         createdAt: entry.createdAt,
       );
 }

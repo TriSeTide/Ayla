@@ -334,6 +334,30 @@ class AylaPostTabCache {
   /// 该 tab 当前实例（无则 null）。
   AylaPagedList<AylaPost>? pagerOf(String key) => _pagers[key];
 
+  /// 从**全部 tab** 的已加载投影里摘掉一条帖子 ——
+  /// web `PostsHubPage.tsx:237–241`：
+  /// ```ts
+  /// for (const [key, cached] of postTabPages) {
+  ///   if (!key.startsWith(`posts:${account}:`)) continue;
+  ///   postTabPages.set(key, { ...cached, posts: cached.posts.filter((p) => p.id !== postId) });
+  /// }
+  /// ```
+  /// 「避免切回旧 tab 时复活已删帖」。
+  ///
+  /// ⚠️ 账号维度由「缓存整体随登出清空」（[clear]）承担 —— Flutter 侧不跨账号共享
+  /// 缓存实例（`AylaPostTabCache` 是模块级单例，但 `clear()` 在登出链上调），
+  /// 因此这里不需要 web 的 `startsWith(`posts:${account}:`)` 前缀过滤。
+  /// 快照只动 `items`，**不动游标 / hasMore**（同 web：只重写 posts 字段）。
+  void removeFromAllTabs(int postId) {
+    for (final AylaPagedList<AylaPost> pager in _pagers.values) {
+      if (!pager.items.any((AylaPost p) => p.id == postId)) continue;
+      pager.setItems(<AylaPost>[
+        for (final AylaPost p in pager.items)
+          if (p.id != postId) p,
+      ]);
+    }
+  }
+
   /// 清空（登出 / 会话过期 / 账号切换；web `postTabSession` 机制）。
   void clear() {
     for (final AylaPagedList<AylaPost> pager in _pagers.values) {

@@ -14,6 +14,13 @@
 /// - tsx 150–154：分类空态「这个分类还没有直播间」/「换个分类看看」（h3）；
 /// - tsx 156–161：LiveHall（卡件已交付）。
 ///
+/// ## WS 热更新（2026-10-08 按 web 收口）
+/// 本页**不订阅任何 WS 帧 / 事件总线**：数据来自 [AylaDirectoryStore] 的跨页缓存，
+/// 帧由 `core/ws/room_frames.dart` 落域 store、再由 `state/directory_tracking.dart`
+/// 的 store 订阅通路 patch 进缓存（web `stores/directory.ts:143–146 / 205–219` 的同构）
+/// ⇒ 开播/下播/改名/人数变化/新建/删除**自动反映**。
+/// （改造前本页完全没有订阅 —— 这正是用户实报「直播列表页没有热更新」的根因。）
+///
 /// ## 与 web 的机制差异（登记）
 /// - 滚动位置记忆（useScrollRestore）未实现（同语音页登记）；
 /// - 收藏五档**全部注入**（2026-09-28 总控裁决落实）：`LiveHall.tsx:39–42` 不传
@@ -177,8 +184,16 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
-    unawaited(pager.load());
+    // ⚠️ **必须帧后**（2026-10-08 回归修复）：`AylaDirectoryStore.load` 的同步段
+    // 会立刻通知**全局** store 的全部订阅者（本页 `_pager` 只是其一；
+    // `GroupPage._onChanged` / `HomePage._rebuildActivity` 等裸 `setState` 回调
+    // 也在其中）⇒ 在 build 期发起会抛 "setState() or markNeedsBuild() called
+    // during build"。回归锁：`test/hub_friends_load_phase_test.dart`。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
+      unawaited(pager.load());
+    });
   }
 
   /// ⚠️ **必须帧后调用**（2026-10-02 修「setState() or markNeedsBuild() called during build」）：

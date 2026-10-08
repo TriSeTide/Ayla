@@ -24,6 +24,13 @@
 /// - `useEnterRoomAnimation`（底栏下滑走 + 输入框滑入）随房内批次；
 /// - 滚动位置记忆（`useScrollRestore`/`saveScrollPosition`）尚无 Flutter 等价件 ⇒ 未实现；
 /// - `useListEntryMotion` 的「刷新后整批重播」用 [AylaRevealScope] 的 replayKey 表达。
+///
+/// ## WS 热更新（2026-10-08 按 web 收口）
+/// 本页**不订阅任何 WS 帧 / 事件总线**：数据来自 [AylaDirectoryStore] 的跨页缓存，
+/// 帧由 `core/ws/room_frames.dart` 落域 store、再由 `state/directory_tracking.dart`
+/// 的 store 订阅通路 patch 进缓存（web `stores/directory.ts:143–146 / 205–219` 的同构）
+/// ⇒ 人数变化 / 新建 / 删除 / 重排**自动反映**，无需页面做任何事。
+/// （改造前是「帧 → 事件总线 → 各页自己 patch」，页面漏订阅就没有热更新。）
 library;
 
 import 'dart:async';
@@ -46,8 +53,7 @@ import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart';
-import '../state/directory_events.dart';
-import '../state/room_providers.dart';
+import '../state/directory_events.dart' show AylaDirectoryKind;
 import '../widgets/voice/voice_channels.dart';
 import 'hub_support.dart';
 import 'voice_support.dart';
@@ -93,9 +99,6 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   /// 刷新后整批重播入场（web `replayNonce`）。
   int _replayNonce = 0;
 
-  /// 目录热更新事件总线（`voice.channel.*` 帧；见 `state/directory_events.dart`）。
-  AylaDirectoryEvents? _directoryEvents;
-  int _directoryEventRevision = 0;
 
   /// 当前页注册到 shell 的刷新回调（web useShellStore.registerRefresh）。
   ShellUiNotifier? _shellNotifier;
@@ -112,50 +115,6 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadFriends();
     });
-    _registerDirectoryEvents();
-  }
-
-  /// 订阅目录事件（web `stores/directory.ts` 的跨页缓存热更新；Flutter 用事件总线）。
-  void _registerDirectoryEvents() {
-    final AylaDirectoryEvents events = ref.read(directoryEventsProvider);
-    _directoryEvents = events;
-    _directoryEventRevision = events.revision;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      events.addListener(_onDirectoryEvents);
-    });
-  }
-
-  /// 目录事件处理（逐条对应 web `chat.ts` 的 voice.channel.* 分支）：
-  /// 删除 → 从列表移除；人数 → 就地换卡上的人数；其余 → **重取首页**
-  /// （web 是置 `invalidated` 由用户点刷新；Flutter 的 `AylaPagedList.invalidated`
-  /// 目前恒 false、无写入面 ⇒ 直接重取首页，登记为有意偏离）。
-  void _onDirectoryEvents() {
-    final AylaDirectoryEvents? events = _directoryEvents;
-    if (events == null || events.revision == _directoryEventRevision) return;
-    _directoryEventRevision = events.revision;
-    final AylaDirectoryEvent? event = events.last;
-    if (event == null || event.kind != AylaDirectoryKind.voice) return;
-    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
-    if (pager == null) return;
-    if (event.deleted) {
-      pager.removeWhere(
-        (AylaDirectoryVoiceEntry entry) => entry.card.id == event.id,
-      );
-      return;
-    }
-    final int? count = event.memberCount;
-    if (count != null) {
-      pager.setItems(<AylaDirectoryVoiceEntry>[
-        for (final AylaDirectoryVoiceEntry entry in pager.items)
-          if (entry.card.id == event.id)
-            aylaHubVoiceEntryWithMemberCount(entry, count)
-          else
-            entry,
-      ]);
-      return;
-    }
-    unawaited(pager.refresh());
   }
 
   @override
@@ -175,8 +134,6 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
   @override
   void dispose() {
-    _directoryEvents?.removeListener(_onDirectoryEvents);
-    _directoryEvents = null;
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
@@ -237,8 +194,22 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
-    unawaited(pager.load());
+    // ⚠️ **必须帧后**（2026-10-08 回归修复，与库里既有四处同源）：
+    // `AylaDirectoryStore.load` 的**同步段**（`_patch` ⇒ `notifyListeners`）会立刻
+    // 通知**全局** store 的全部订阅者。本页自己的 `_pager` 只是其一；
+    // 其它已挂载页面（`GroupPage._onChanged` / `HomePage._rebuildActivity` /
+    // 兄弟 hub 页）也订阅着它，而它们的回调是裸 `setState` ⇒ 在 build 期发起会抛
+    // "setState() or markNeedsBuild() called during build"（实测栈：
+    // `AylaDirectoryController._onStoreChanged` → `_GroupPageState._onChanged`）。
+    //
+    // 改造前本页的 `_pager` 是**页面私有** `AylaPagedList`（不碰共享 store）⇒ 无此问题；
+    // 现在按 web 改为读共享目录缓存（`useDirectoryPage`）就落回这条既有纪律。
+    // 回归锁：`test/hub_friends_load_phase_test.dart`（三条）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
+      unawaited(pager.load());
+    });
   }
 
   /// ⚠️ **必须帧后调用**（2026-10-02 修「setState() or markNeedsBuild() called during build」）：

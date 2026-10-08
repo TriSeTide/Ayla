@@ -15,6 +15,12 @@
 ///   「这个分类还没有桌游室」/「换个分类看看」；
 /// - tsx 207–215：AylaGamesGrid + GameRoomCard（卡件已交付）。
 ///
+/// ## WS 热更新（2026-10-08 按 web 收口）
+/// 本页**不订阅任何 WS 帧 / 事件总线**：数据来自 [AylaDirectoryStore] 的跨页缓存，
+/// 帧由 `core/ws/room_frames.dart` 落域 store、再由 `state/directory_tracking.dart`
+/// 的 store 订阅通路 patch 进缓存（web `stores/directory.ts:143–146 / 205–219` 的同构）
+/// ⇒ 建房 / 开桌 / 结束 / 人数变化 / 新建 / 删除**自动反映**。
+///
 /// ## 与 web 的机制差异（登记）
 /// - **房内占位态未做**（tsx 105–164：/games/:roomId 的自动 join + GameRoomPlaceholder）：
 ///   web 的同一组件按 roomId 分支渲染房内；Flutter 侧房内页需要 members 分页
@@ -32,8 +38,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/boardgame_api.dart';
 import '../core/models/game_room.dart' show AylaGameRoom;
-import '../state/directory_events.dart';
-import '../state/room_providers.dart';
+import '../state/directory_events.dart' show AylaDirectoryKind;
 import 'game_support.dart';
 import '../state/auth_state.dart';
 import '../state/directory_store.dart';
@@ -93,9 +98,6 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
 
-  /// 目录热更新事件总线（`boardgame.room.*` 帧；见 `state/directory_events.dart`）。
-  AylaDirectoryEvents? _directoryEvents;
-  int _directoryEventRevision = 0;
 
   @override
   void initState() {
@@ -108,35 +110,6 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadFriends();
     });
-    _registerDirectoryEvents();
-  }
-
-  /// 订阅目录事件（`boardgame.room.deleted` → 移除；`created/updated` → 重取首页）。
-  void _registerDirectoryEvents() {
-    final AylaDirectoryEvents events = ref.read(directoryEventsProvider);
-    _directoryEvents = events;
-    _directoryEventRevision = events.revision;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      events.addListener(_onDirectoryEvents);
-    });
-  }
-
-  void _onDirectoryEvents() {
-    final AylaDirectoryEvents? events = _directoryEvents;
-    if (events == null || events.revision == _directoryEventRevision) return;
-    _directoryEventRevision = events.revision;
-    final AylaDirectoryEvent? event = events.last;
-    if (event == null || event.kind != AylaDirectoryKind.game) return;
-    final AylaDirectoryController<AylaDirectoryGameEntry>? pager = _pager;
-    if (pager == null) return;
-    if (event.deleted) {
-      pager.removeWhere(
-        (AylaDirectoryGameEntry entry) => '${entry.room.id}' == event.id,
-      );
-      return;
-    }
-    unawaited(pager.refresh());
   }
 
   /// 大厅列表里已知的房间（web tsx 127–129：命中则不重复拉详情）。
@@ -172,8 +145,6 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
 
   @override
   void dispose() {
-    _directoryEvents?.removeListener(_onDirectoryEvents);
-    _directoryEvents = null;
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
     final ShellUiNotifier? notifier = _shellNotifier;
@@ -229,8 +200,16 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
     _pager?.dispose();
     _pager = pager;
     _registerRefresh();
-    // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
-    unawaited(pager.load());
+    // ⚠️ **必须帧后**（2026-10-08 回归修复）：`AylaDirectoryStore.load` 的同步段
+    // 会立刻通知**全局** store 的全部订阅者（本页 `_pager` 只是其一；
+    // `GroupPage._onChanged` / `HomePage._rebuildActivity` 等裸 `setState` 回调
+    // 也在其中）⇒ 在 build 期发起会抛 "setState() or markNeedsBuild() called
+    // during build"。回归锁：`test/hub_friends_load_phase_test.dart`。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 幂等：命中缓存即短路（web `loadDirectory` 的 `initial` 语义）。
+      unawaited(pager.load());
+    });
   }
 
   /// ⚠️ **必须帧后调用**（2026-10-02 修「setState() or markNeedsBuild() called during build」）：

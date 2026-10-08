@@ -77,7 +77,7 @@ import '../state/auth_state.dart';
 import '../state/directory_events.dart';
 import '../state/paged_list.dart';
 import '../state/room_providers.dart'
-    show directoryEventsProvider, voiceStateProvider;
+    show directoryEventsProvider, voiceStateProvider; // 事件总线已退役（见 state/directory_events.dart 文件头）
 import '../theme/app_theme.dart' show AylaTextStyles;
 import '../theme/tokens.dart' show AylaSpacing;
 import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;

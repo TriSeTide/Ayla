@@ -38,6 +38,7 @@ class AylaDirectoryLiveEntry {
     this.endedAt,
     this.createdAt,
     this.allowedGroupIds = const <String>[],
+    this.description = '',
   });
 
   final AylaLiveCardData card;
@@ -67,6 +68,18 @@ class AylaDirectoryLiveEntry {
   /// （`groupActivity.ts:70–76` 的 `visibleInGroup`）。
   final List<String> allowedGroupIds;
 
+  /// `description` —— 2026-10-08（目录 WS 热更新轮）纯增量：
+  /// web 的目录 record 条目**就是** `LiveChannelDescriptor`（含本字段），
+  /// 直播快照 [AylaLiveChannelSnapshot] 也带它（`live_channel_snapshot.dart:49`）
+  /// ⇒ [AylaDirectoryLiveEntry.fromSnapshot] 才能做到「逐字段搬运、零丢失」。
+  ///
+  /// ⚠️ 目录**刷新**（[fromJson]）填不到它：后端 `GET /live/channels/` 的列表响应
+  /// 本就不带 `description`（web 同 —— 列表卡也不渲染它）。该字段只由
+  /// [fromSnapshot]（WS 详情对账）填写，并在目录 store 的「同 id 用新描述符替换」
+  /// 路径上带到目录条目；刷新后回到缺席 —— 与 web 一致（web 的 record 条目在
+  /// 刷新合并时同样被 store 里的最新描述符覆盖，`stores/directory.ts:302–306`）。
+  final String description;
+
   static AylaDirectoryLiveEntry? fromJson(Object? raw) {
     if (raw is! Map) return null;
     final AylaLiveCardData? card = AylaLiveCardData.fromJson(raw);
@@ -83,8 +96,30 @@ class AylaDirectoryLiveEntry {
             in (raw['allowed_group_ids'] as List<Object?>? ?? const <Object?>[]))
           if (id != null) id.toString(),
       ],
+      description: raw['description']?.toString() ?? '',
     );
   }
+
+  /// 频道快照（WS 详情对账的落地形态）→ 目录条目 —— **逐字段搬运、不丢任何一列**。
+  ///
+  /// 事实源：`stores/directory.ts:143–146` 的 `cachedItems` —— web 的目录缓存条目
+  /// **就是** `useLiveStore.channels` 里的描述符本身（同一个对象），不是另做一层
+  /// 投影；`updateCachedItems`（:161）随后用 store 里的新描述符**替换** record 的同
+  /// id 项。Flutter 侧目录条目是「卡投影 + 事实」两层 ⇒ 用本工厂做等价替换
+  /// （与 `aylaHubLiveEntryFromSnapshot` 同源同口径，后者保留给控制台侧栏的调用点）。
+  factory AylaDirectoryLiveEntry.fromSnapshot(
+    AylaLiveChannelSnapshot snapshot,
+  ) =>
+      AylaDirectoryLiveEntry(
+        card: snapshot.card,
+        ownerId: snapshot.ownerId,
+        isOwner: snapshot.isOwner,
+        startedAt: snapshot.startedAt,
+        endedAt: snapshot.endedAt,
+        createdAt: snapshot.createdAt,
+        allowedGroupIds: snapshot.allowedGroupIds,
+        description: snapshot.description,
+      );
 }
 
 /// 弹幕行 —— `DanmakuItem`（`api/types.ts:1088–1100`）在 Flutter 侧的投影。

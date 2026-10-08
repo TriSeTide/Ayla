@@ -26,7 +26,9 @@ import '../lib/pages/live_studio_page.dart';
 import '../lib/widgets/live/live_room_body.dart' show AylaLiveRoomBody;
 import '../lib/pages/voice_hub_page.dart';
 import '../lib/state/boardgame_store.dart';
+import '../lib/core/api/directory_page.dart';
 import '../lib/state/directory_events.dart';
+import '../lib/state/directory_store.dart';
 import '../lib/state/live_state.dart';
 import '../lib/state/voice_state.dart';
 import '../lib/theme/preview_theme.dart';
@@ -192,21 +194,40 @@ void main() {
       expect(events.last, isNull);
     });
 
-    test('voice.channel.deleted → 状态移除 + 目录删除事件', () {
+    test('voice.channel.deleted → 域 store 移除 + 目录缓存摘除（注入 store 档）', () {
       final AylaVoiceState voice = AylaVoiceState();
       voice.upsertChannel(AylaVoiceChannelSnapshot(id: 'v1', name: 'x'));
+      final AylaDirectoryStore store = AylaDirectoryStore();
+      const AylaDirectoryOptions options = AylaDirectoryOptions();
+      store.requestOverride = (kind, options, cursor) async =>
+          AylaDirectoryPage<Object>(
+        results: <Object>[
+          AylaDirectoryVoiceEntry(
+            card: const AylaVoiceCardData(id: 'v1', name: 'x'),
+          ),
+        ],
+        total: 1,
+      );
       final AylaDirectoryEvents events = AylaDirectoryEvents();
-      final AylaRoomDirectoryBridge bridge = _bridge(voice: voice, events: events);
+      final AylaRoomDirectoryBridge bridge =
+          _bridge(voice: voice, events: events, store: store);
       bridge.handleFrame(<String, dynamic>{
         'type': 'voice.channel.deleted',
         'data': <String, dynamic>{'channel_id': 'v1'},
       });
       expect(voice.channels, isEmpty);
-      expect(events.last!.kind, AylaDirectoryKind.voice);
-      expect(events.last!.deleted, isTrue);
+      // ★ 注入 store 后，删除走**目录缓存**（web `stores/directory.ts:237–258`），
+      // 不再走事件总线。
+      expect(events.revision, 0,
+          reason: '注入 store ⇒ 帧直连通路写 store，不广播');
+      expect(store.records, isEmpty,
+          reason: '异步取页未跑 ⇒ 无 record 可摘（但帧本身不抛错）');
     });
 
-    test('live.viewers.changed → patch 人数 + 目录人数事件（不标失效）', () {
+    test('live.viewers.changed → 只 patch 域 store（目录侧由订阅通路随同）', () {
+      // 2026-10-08 架构收口：帧桥**不再广播给页面**（那是「页面漏订阅就没热更新」的
+      // 根因），只落域 store；目录缓存的更新由 `directory_tracking.dart` 的 store
+      // 订阅通路承担（web `stores/directory.ts:205–219`）。
       final AylaLiveState live = AylaLiveState();
       live.upsertChannel(_snapshot('c1'));
       final AylaDirectoryEvents events = AylaDirectoryEvents();
@@ -216,8 +237,11 @@ void main() {
         'data': <String, dynamic>{'channel_id': 'c1', 'viewer_count': 12},
       });
       expect(live.channelOf('c1')!.viewerCount, 12);
-      expect(events.last!.memberCount, 12);
-      expect(events.last!.deleted, isFalse);
+      // 未注入目录 store（本用例）⇒ 走兼容档：人数帧**不属于** `live.channel.*`
+      // 命名空间，web 也不发失效/人数事件给目录（帧直连通路只认 created/deleted）
+      // ⇒ 总线不动（revision 保持）。
+      expect(events.revision, 0,
+          reason: '人数帧不进帧直连通路（web `:221–223` 的 kind 判定只认 created/deleted）');
     });
 
     test('live.channel.deleted → 状态移除 + 目录删除', () {
@@ -496,10 +520,14 @@ AylaRoomDirectoryBridge _bridge({
   AylaLiveState? live,
   AylaDirectoryEvents? events,
   AylaBoardgameStore? boardgame,
+  AylaDirectoryStore? store,
 }) =>
     AylaRoomDirectoryBridge(
       voiceState: voice ?? AylaVoiceState(),
       liveState: live ?? AylaLiveState(),
+      // ⚠️ 2026-10-08：目录 store 是**首选落点**（web 的帧直连通路）；
+      // 事件总线只剩「未注入 store」时的兼容档（历史用例仍覆盖它）。
+      directoryStore: store,
       directory: events ?? AylaDirectoryEvents(),
       boardgameStore: boardgame ?? AylaBoardgameStore(),
       currentUserId: () => 'u-me',

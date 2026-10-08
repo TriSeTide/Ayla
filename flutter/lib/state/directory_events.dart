@@ -1,24 +1,30 @@
-/// 目录热更新事件总线 —— web `ws/chat.ts` 的 `voice.channel.*` / `live.channel.*` /
-/// `boardgame.room.*` 三类帧对**目录列表**的效应，Flutter 侧的等价物。
+/// ⚠️ **已退役的事件总线**（2026-10-08）—— 生产不再使用；本文件只为两份历史测试保留。
 ///
-/// ## 为什么需要一条总线
-/// web 有一个跨页的 `stores/directory.ts`（按 `kind+filter` 缓存游标页），
-/// 频道帧到达时直接 patch/移除缓存条目，页面从缓存渲染 ⇒ 天然热更新。
-/// Flutter 侧**已按 web 重建该跨页缓存**（`state/directory_store.dart`，2026-09-30：
-/// key 化 record + 60 秒首屏短路 + 在途合并），但**事件仍走本总线广播给页面** ——
-/// 页面收到后调 `AylaDirectoryController.setItems/removeWhere` 改的是 store 里同一条
-/// record（多页共享），因此行为与 web 的「直接 patch 缓存」等价；
-/// 待 WS 增量批次可把 `emitDeleted` / `emitPatched` 直接落到 store（[AylaDirectoryStore]
-/// 的 `invalidated` / `mutationRevision` 字段已预留）。
+/// ## 为什么退役（用户实报的根因）
+/// 本总线是「**帧 → 广播给页面 → 每个页面自己 patch**」的旧架构：
+/// 页面漏订阅就**完全没有热更新** —— 用户实报的语音房列表页、直播列表页、桌游列表页、
+/// 帖子列表页、群内第 2 列侧栏的直播与语音，正是漏订阅六处；
+/// 即便订阅了，`emitInvalidated` 那档也只是「置失效」，页面照做 `refresh()` 时
+/// 又会撞上 60 秒新鲜期短路 ⇒ 帧到达后列表纹丝不动。
 ///
-/// ## 语义（与 web 逐条对齐）
-/// | 帧 | 本总线的动作 | 页面动作 |
-/// |---|---|---|
-/// | `voice.channel.deleted` / `live.channel.deleted` / `boardgame.room.deleted` | [emitDeleted] | 命中则从列表移除（web `items.filter`） |
-/// | `voice.channel.member_count_changed` | [emitPatched]（人数） | 命中则 patch 人数并重排 |
-/// | `live.viewers.changed` | [emitPatched]（人数） | 同上（**瞬态投影，不参与排序**） |
-/// | `*.created` / `*.updated` / `live.channel.status.changed` | [emitInvalidated] | 置 `invalidated`（页脚给「刷新」入口，不再自动续读旧游标） |
+/// 而 web **没有这条总线**：目录缓存是域 store 的查询投影
+/// （`stores/directory.ts:143–146` 的 `cachedItems`），帧只落域 store
+/// （`ws/chat.ts:667–768 / 845–865`），缓存由 `ensureDirectoryTracking` 的订阅通路
+/// 自动 patch（`stores/directory.ts:148–196 / 205–219`）⇒ **页面零订阅**。
 ///
+/// ## 现架构（与消息域同型）
+/// - 订阅通路：`state/directory_tracking.dart`（负责新增 / 更新 / 重排 / 成员数）；
+/// - 帧直连通路：`core/ws/room_frames.dart` + `AylaDirectoryStore.noteCreated` /
+///   `noteDeleted`（负责 `createdIds` 提示与删除摘除）。
+/// 参照实现：`core/ws/chat_ws.dart:620` 的 `_message.upsertMessage(convId, msg)` ——
+/// 帧处理里**直接调 store 方法**。
+///
+/// ## 现存用途（仅此一处）
+/// `AylaDirectoryEvents` 在 `core/ws/room_frames.dart` 的**兼容档**里仍被使用：
+/// 当帧桥**未注入目录 store** 时（历史测试 / 未装配），`*.created` / `*.deleted`
+/// 帧仍把语义投到总线，避免静默丢事件。生产恒注入 store ⇒ 兼容档不生效。
+///
+/// ⚠️ **不得新增订阅者**（否则又回到「漏订阅就没热更新」）。
 /// ⚠️ **不静默吞掉**：域外帧在本批之外的一律仍按 [kAylaChatWsOutOfBatchFrames] 显式忽略。
 library;
 
@@ -54,7 +60,9 @@ class AylaDirectoryEvent {
   final bool deleted;
 }
 
-/// 目录事件总线（全局单例；页面按需订阅）。
+/// 目录事件总线（**已退役**；见文件头）。
+///
+/// 只在帧桥未注入目录 store 时作为兼容出口被使用 —— **页面不得订阅**。
 class AylaDirectoryEvents extends ChangeNotifier {
   AylaDirectoryEvent? _last;
 

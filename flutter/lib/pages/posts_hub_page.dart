@@ -26,9 +26,23 @@
 /// AylaStablePaginationFooter / AylaPaginationLoadingDots / AylaGlassButton /
 /// AylaRevealScope。
 ///
+/// ## WS 热更新（2026-10-08 按 web 收口）
+/// web 的帖子页在 `PostsHubPage.tsx:232–262` **在页面内** `chatWS.onFrame(...)`：
+/// - `post.deleted` ⇒ 从本 tab 的 `posts` 过滤掉该条，并**同时**从本账号全部 tab
+///   缓存里摘掉（`:234–243`，避免切回旧 tab 时已删帖复活）；
+/// - `post.created` ⇒ 拉 REST 详情后 upsert（`:245–261`，帧只带简化字段）。
+///
+/// Flutter 侧同源实现 = [AylaPostsFramesBridge]（全局，落 [AylaPostsStore]）
+/// **加上**本页对 [AylaPostTabCache] 的摘除（web 的两条效应，见 [_registerFrameTracking]）。
+/// 两条都在 ⇒ 「帖子列表页没有热更新」修复。
+///
+/// ## 为什么本页仍要自己订阅（与目录域不同）
+/// 目录域（voice/live/game）的页面**不订阅**：web 那边目录接口是域 store 的查询投影。
+/// 而帖子一级页读的是**页面私有的 `postTabPages`**（`PostsHubPage.tsx:77/98–101`），
+/// 不是 `usePostsStore` ⇒ web 自己也必须在本页 `onFrame` 里维护它。
+/// 这是 web 的原样结构，不是偏离。
+///
 /// ## 机制差异（登记）
-/// 1. **无 WS 增量**：web 监听 post.created/post.deleted（tsx 232–262）维护列表；
-///    Flutter 侧帖子 WS 帧分发未接（全库无 comment.*/post.viewed 落点）⇒ 靠刷新更新；
 /// 2. **跨挂载分页缓存已交付**（[AylaPostTabCache] 即 web 的模块级 postTabPages +
 ///    60s 首屏复用）；**滚动位置记忆已接**（2026-10-02，见上）；
 ///    account 维度由「无跨账号共享」承担（缓存与滚动记忆都随登出清空）；
@@ -50,7 +64,9 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/posts_api.dart';
 import '../core/models/post.dart';
+import '../core/ws/chat_ws.dart' show AylaChatWsClient;
 import '../state/auth_state.dart';
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../state/favorite_status.dart';
 import '../state/paged_list.dart';
 import '../state/posts_store.dart' show AylaPostTabCache, aylaPostTabCache;
@@ -122,6 +138,9 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   final AylaShareController _share = AylaShareController();
   AylaPagedList<AylaPost>? _pager;
   Set<String> _friendIds = const <String>{};
+
+  /// 本页的贴子帧解绑句柄（web `PostsHubPage.tsx:263–268` 的 cleanup `unsubscribe()`）。
+  void Function()? _offFrames;
   int _replayNonce = 0;
 
   ShellUiNotifier? _shellNotifier;
@@ -143,6 +162,75 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadFriends();
     });
+    _registerFrameTracking();
+  }
+
+  /// 帖子帧的**本页效应** —— web `PostsHubPage.tsx:232–262` 的 `chatWS.onFrame`。
+  ///
+  /// 与全局 [AylaPostsFramesBridge] 的关系（**两条效应，互不替代**）：
+  /// - 全局桥（`core/ws/posts_frames.dart`）= web `ws/chat.ts:766–840` 的那份
+  ///   ⇒ 落 `usePostsStore`（群内帖子 / 主页新内容排序读它）；
+  /// - 本页（这里）= web `PostsHubPage.tsx` 自己那份 ⇒ 维护**本页的 tab 快照**
+  ///   （`postTabPages`，一级页的数据源，不在全局 store 里）。
+  ///
+  /// 逐条对应：
+  /// - `post.deleted`（`:234–243`）：从**本账号全部 tab** 的缓存里过滤该条 + 当前 tab；
+  /// - `post.created`（`:245–261`）：全局桥已经拉 REST 详情并 upsert 进 store，
+  ///   本页只需把 store 里的那条合进当前 tab（等价 web 的 `update(...)`，且避免重复拉详情）。
+  void _registerFrameTracking() {
+    final AylaChatWsClient chat = ref.read(chatWsProvider);
+    _offFrames = chat.onFrame(_onFrame);
+  }
+
+  void _onFrame(Map<String, dynamic> frame) {
+    if (!mounted) return;
+    final Object? type = frame['type'];
+    if (type == 'post.deleted') {
+      final int? postId = int.tryParse(frame['post_id']?.toString() ?? '');
+      if (postId == null) return;
+      // web `:237–241`：本账号**全部 tab** 的缓存都要摘（避免切回旧 tab 复活已删帖）。
+      aylaPostTabCache.removeFromAllTabs(postId);
+      final AylaPagedList<AylaPost>? pager = _pager;
+      if (pager != null && pager.items.any((AylaPost p) => p.id == postId)) {
+        pager.removeWhere((AylaPost p) => p.id == postId);
+      }
+      return;
+    }
+    if (type != 'post.created') return;
+    // web `:246–257`：以权限 REST 详情为权威（帧只带简化字段）。
+    // ⚠️ web 侧这里与 `ws/chat.ts:767–790` 是**两条独立请求**（一条喂 `usePostsStore`、
+    // 一条喂 `postTabPages`）—— 本页照做，不为了省一次往返而改变语义
+    //（详情拉取带权限过滤，是「这条帖子当前用户能不能看见」的权威判据）。
+    final Object? post = frame['post'];
+    final int? postId = post is Map
+        ? int.tryParse(Map<String, dynamic>.from(post)['id']?.toString() ?? '')
+        : null;
+    if (postId == null) return;
+    unawaited(_mergeCreatedPost(postId));
+  }
+
+  /// `post.created` 的 REST 对账（web `:246–261`）：拉详情 → 插到当前 tab 头部
+  /// （已存在则原位替换）。失败静默 —— 帧只作提示，**不伪造/不插入不完整帖子**。
+  Future<void> _mergeCreatedPost(int postId) async {
+    final String actor = ref.read(authNotifierProvider).user?.id ?? '';
+    try {
+      final AylaPost? created = await AylaPostsApi.getPost(postId);
+      if (!mounted) return;
+      // 账号守卫（web 用 `postTabAccount() === account` 同法）：往返期间换账号就丢弃。
+      if ((ref.read(authNotifierProvider).user?.id ?? '') != actor) return;
+      if (created == null) return;
+      final AylaPagedList<AylaPost>? pager = _pager;
+      if (pager == null) return;
+      if (pager.items.any((AylaPost p) => p.id == postId)) return;
+      pager.setItems(<AylaPost>[created, ...pager.items]);
+    } catch (_) {
+      // web `:258–260` 的 `.catch(() => {})`：事件只作提示，失败不伪造。
+    }
+  }
+
+  void _unregisterFrameTracking() {
+    _offFrames?.call();
+    _offFrames = null;
   }
 
   @override
@@ -159,6 +247,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
 
   @override
   void dispose() {
+    _unregisterFrameTracking();
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
     _share.dispose();

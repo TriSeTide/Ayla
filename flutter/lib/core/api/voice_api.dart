@@ -22,6 +22,9 @@ class AylaDirectoryVoiceEntry {
     this.createdAt,
     this.roomName = '',
     this.allowedGroupIds = const <String>[],
+    this.lastOccupiedAt,
+    this.lastVacantAt,
+    this.isOwner = false,
   });
 
   final AylaVoiceCardData card;
@@ -43,6 +46,22 @@ class AylaDirectoryVoiceEntry {
   /// （`groupActivity.ts:70–76` 的 `visibleInGroup`）。
   final List<String> allowedGroupIds;
 
+  /// `last_occupied_at`（`types.ts:878`）—— 「有人区」排序事实。
+  ///
+  /// 2026-10-08（目录 WS 热更新轮）纯增量：web 的目录 record 条目**就是**
+  /// `VoiceChannelDescriptor`（含本字段），`stores/directory.ts:105` 的
+  /// `sortIdentity` 与 `utils/sortChannels.ts:32–46` 的 `sortVoiceChannels`
+  /// 都读它 ⇒ 目录缓存要在 store 内按 web 排序/判重就必须带上这两列
+  /// （既有字段与解析一字未动）。
+  final String? lastOccupiedAt;
+
+  /// `last_vacant_at`（`types.ts:879`）—— 「变空不回初始位」的排序事实。
+  final String? lastVacantAt;
+
+  /// `is_owner` —— web `stores/directory.ts:127` 的 `matchesFilter` 里
+  /// 「我的」档判据（`row.is_owner === true || row.owner_id === currentUser.id`）。
+  final bool isOwner;
+
   static AylaDirectoryVoiceEntry? fromJson(Object? raw) {
     if (raw is! Map) return null;
     final AylaVoiceCardData? card = AylaVoiceCardData.fromJson(raw);
@@ -57,6 +76,9 @@ class AylaDirectoryVoiceEntry {
             in (raw['allowed_group_ids'] as List<Object?>? ?? const <Object?>[]))
           if (id != null) id.toString(),
       ],
+      lastOccupiedAt: raw['last_occupied_at']?.toString(),
+      lastVacantAt: raw['last_vacant_at']?.toString(),
+      isOwner: raw['is_owner'] == true,
     );
   }
 }
