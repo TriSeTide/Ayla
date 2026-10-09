@@ -38,6 +38,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../state/favorite_status.dart';
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -153,7 +154,11 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.onRefreshPlayer,
     this.onSendDanmaku,
     this.onToggleFavorite,
-    this.favoriteState,
+    this.onRetryFavoriteStatus,
+    this.favoriteState = AylaFavoriteState.unknown,
+    this.favoriteTargetType,
+    this.favoriteTargetId,
+    this.favoriteController,
     this.onShare,
     this.videoView,
     this.directoryFooter,
@@ -208,7 +213,36 @@ class AylaLiveRoomBody extends StatefulWidget {
 
   /// 头部收藏 / 转发。
   final ValueChanged<bool>? onToggleFavorite;
-  final bool? favoriteState;
+
+  /// 收藏状态加载失败 → 重新拉取（web `FavoriteButton.tsx:35–38`）。
+  final VoidCallback? onRetryFavoriteStatus;
+
+  /// 收藏状态（**三态 + 错误态**）。
+  ///
+  /// ⚠️ 2026-10-08 修正：原为 `bool?`，而 web `FavoriteButton`
+  /// 的 `state.favoriteId` 是 `undefined | null | number` **三档**
+  /// （`stores/favoriteStatus.ts:1–2`：未知 ≠ 未收藏）。bool 档把
+  /// 「加载中/失败」强行折成「未收藏」⇒ `FavoriteButton.tsx:69` 的
+  /// `disabled={busy || state.loading || (unknown && !state.error)}`
+  /// 在该处**永不生效**：头部会显示一个「看起来能点」的未收藏键（用户实报「样式/行为
+  /// 与别处不一致」）。改回枚举后，unknown 档自动禁用 + 显示「正在加载收藏状态」。
+  /// 默认 `unknown`（不传 = 保持既有「未收藏」渲染的安全超集：见 build 内说明）。
+  final AylaFavoriteState favoriteState;
+
+  // ---- 自给自足档（对齐 web：`LiveRoomBody.tsx:260/328` 只给 targetType/targetId）----
+
+  /// 收藏目标类型（web `targetType`；给定时头部收藏键**自己加载自己**）。
+  ///
+  /// 与 [favoriteTargetId] 同时给出 ⇒ 忽略 [favoriteState]/[onToggleFavorite]/
+  /// [onRetryFavoriteStatus]，由 `AylaFavoriteButton` 自持状态（web 架构）。
+  final String? favoriteTargetType;
+
+  /// 收藏目标 id（web `targetId`）。
+  final String? favoriteTargetId;
+
+  /// 共享收藏控制器（不传 ⇒ 收藏键自建私有实例）。
+  final AylaFavoriteStatusController? favoriteController;
+
   final VoidCallback? onShare;
 
   /// 视频视图（页面注入同一 `HlsPlaybackController.videoView`）。
@@ -449,15 +483,31 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
               ),
             ),
           if (channel != null)
-            // 头部收藏 = **compact 32×32**（web `FavoriteButton compact`；
-            // ⚠️ 别用带文字的 AylaGlassButton——它的横向 padding sp6 会让头部在窄屏溢出，实测 67px）
-            AylaFavoriteButton(
-              state: (widget.favoriteState ?? false)
-                  ? AylaFavoriteState.favorited
-                  : AylaFavoriteState.notFavorited,
-              compact: true,
-              onToggle: (bool next) => widget.onToggleFavorite?.call(next),
-            ),
+            // 头部收藏 = **compact 32×32**（web `FavoriteButton compact`，
+            // `LiveRoomBody.tsx:260 / 328`；⚠️ 别用带文字的 AylaGlassButton——
+            // 它的横向 padding sp6 会让头部在窄屏溢出，实测 67px）。
+            //
+            // 状态档**原样透传三态**（web `tsx:69` 的禁用语义：unknown 且无 error ⇒ 禁用 +
+            // 「正在加载收藏状态」）；2026-10-08 修正前是 `bool?` 把 unknown 折成未收藏。
+            if (widget.favoriteTargetType != null &&
+                widget.favoriteTargetId != null)
+              // **自给自足档**（web 架构）：只给 targetType/targetId，
+              // 状态/加载/切换全部由收藏键自己承担（`FavoriteButton.tsx:20–60`）⇒
+              // 调用方漏接线也不会坏在这里。
+              AylaFavoriteButton(
+                targetType: widget.favoriteTargetType!,
+                targetId: widget.favoriteTargetId!,
+                controller: widget.favoriteController,
+                compact: true,
+              )
+            else
+              // **注入档**（既有调用点零影响）：状态档原样透传三态。
+              AylaFavoriteButton(
+                state: widget.favoriteState,
+                compact: true,
+                onToggle: (bool next) => widget.onToggleFavorite?.call(next),
+                onRetryStatus: widget.onRetryFavoriteStatus,
+              ),
           if (channel != null)
             AylaShareButton(
               label: '分享直播间',
@@ -535,7 +585,12 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     return Positioned.fill(
       child: Stack(
         children: <Widget>[
-          GestureDetector(
+          // 指针：`.live-room-rail-mask`（`LiveRoomBody.tsx:384` + `live.css:472–475`）
+          // 是 `<div>`、**无 cursor 声明** ⇒ 浏览器默认箭头。
+          // Flutter 侧不声明时 `defer` 会继续往外找（命中页面可点件即假显手型）。
+          MouseRegion(
+            cursor: SystemMouseCursors.basic,
+            child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => setState(() => _railOpen = false),
             // ⚠️ 必须 `SizedBox.expand`：无子级的 `ColoredBox` 在 Stack 的 loose 约束下会**塌成 0×0**
@@ -543,6 +598,7 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             child: const SizedBox.expand(
               child: ColoredBox(color: Color(0x40465B92)), // rgba(70,91,146,.25)
             ),
+          ),
           ),
           Align(alignment: Alignment.centerRight, child: _rail(overlay: true)),
         ],

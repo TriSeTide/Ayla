@@ -44,6 +44,8 @@ import '../widgets/group/group_card.dart';
 import '../widgets/base/media_interaction.dart';
 import '../core/media/media_signer.dart';
 import '../core/net/dio_client.dart';
+import '../core/models/chat_message.dart'
+    show AylaChatMessage, AylaMessageStatus, AylaMessageType;
 import '../pages/login_page.dart' show aylaAuthOptionsSamples;
 import '../widgets/base/resource_image.dart';
 import '../widgets/base/loading.dart';
@@ -3120,6 +3122,9 @@ class PreviewMediaClient implements DioClient {
 
 // ======================= B4 剩余素材 =======================
 
+/// 画布用的空回调（分享键的 `onPressed` 不能为 null，否则渲染成禁用档）。
+void _noopShareTap() {}
+
 /// 分页族 + 收藏按钮。
 class _PaginationAndFavoriteDemo extends StatelessWidget {
   const _PaginationAndFavoriteDemo();
@@ -3231,6 +3236,98 @@ class _PaginationAndFavoriteDemo extends StatelessWidget {
               const Text(
                 'FavoriteButton 五态（含 compact 32 圆钮）',
                 style: TextStyle(fontSize: 11),
+              ),
+              const SizedBox(height: 12),
+              // **自给自足档**（2026-10-08 结构性修复；agent 唯一写验收面）。
+              // 与 web 的 `FavoriteButton` 同构：只给 targetType/targetId，
+              // 挂载即 retain + load，**页面无需接线**。
+              // ⚠️ 画布下没有后端 ⇒ 会走到 error 档（显示「重试收藏状态」）；
+              //    这恰恰是「不再永久停在加载中」的可见证据。
+              const Text(
+                '自给自足档（挂载即加载；画布无后端 ⇒ error 档）',
+                style: TextStyle(fontSize: 11),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: AylaSpacing.sp3,
+                runSpacing: AylaSpacing.sp3,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: const <Widget>[
+                  AylaFavoriteButton(targetType: 'post', targetId: 'preview-1'),
+                  AylaFavoriteButton(
+                    targetType: 'live',
+                    targetId: 'preview-2',
+                    compact: true,
+                  ),
+                  // 与分享键并排：web 把它俩写在同一个 `:is()` 组（auroraqua.css:54–94）
+                  // ⇒ hover 1.02 / 按下 .98 必须一致（用户 2026-10-08 实报「样式不统一」）。
+                  AylaShareButton(label: '分享帖子', onPressed: _noopShareTap),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // ---- 2026-10-09 收藏键全链路收尾样张（本 agent 追加段）----
+              // 用户实报「收藏键无法点击，显示正在加载收藏状态」的**可见验收面**：
+              // 消息气泡（web `MessageBubble.tsx:246` 恒渲染自给自足收藏键，
+              // Flutter 侧 `message_list.dart` 不传任何收藏参数 ⇒ 若不默认自给自足
+              // 就会永久停在 `unknown` = 禁用 + 「加载中…」）。
+              //
+              // ⚠️ 画布下**没有后端** ⇒ 这个样张最终落在 error 档
+              // （「重试收藏状态」，**可点击**）。这正是要看的证据：
+              // 「不再永久停在加载中/禁用」。
+              // ⚠️ 只放**一个**气泡、且**不再叠玻璃卡**：画布 group 分类的离屏层预算锁
+              // （`test/perf_audit_test.dart` 的 kMaxBackdropPerCategory = 150）本就接近上限。
+              const Text(
+                '自给自足档 · 消息气泡（挂载即加载；画布无后端 ⇒ 收敛到可点的 error 档）',
+                style: TextStyle(fontSize: 11),
+              ),
+              const SizedBox(height: 6),
+              AylaMessageBubble(
+                msg: AylaChatMessage(
+                  id: 'fav-probe-1',
+                  conversationId: 'conv-1',
+                  senderId: 'user-2',
+                  type: AylaMessageType.text,
+                  content: '收藏键自给自足：挂载即加载（无需页面接线）',
+                  status: AylaMessageStatus.sent,
+                  seq: 1,
+                  createdAt: DateTime.now()
+                      .subtract(const Duration(minutes: 3))
+                      .toUtc()
+                      .toIso8601String(),
+                ),
+                isSelf: false,
+                senderAvatarLabel: '樱',
+                actionsOpen: true, // 展开操作栏（触屏档等价）
+              ),
+              const SizedBox(height: 12),
+              // ---- 2026-10-09 晚：禁用态已删除（用户裁决）----
+              // 用户裁决：「收藏键非得要有个禁用态？删掉得了」。
+              // 三档并排：**unknown/加载中档也可点**（点击 = 拉取状态），
+              // 只有 busy（切换进行中）保留禁用。左键（unknown）鼠标应为 pointer、
+              // 悬停有 1.02 放大，点一下会去拉状态（画布无后端 ⇒ 转 error 档）。
+              const Text(
+                '禁用态已删除：unknown 也可点（点击 = 拉取状态）；仅 busy 保留禁用',
+                style: TextStyle(fontSize: 11),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: AylaSpacing.sp3,
+                runSpacing: AylaSpacing.sp3,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  AylaFavoriteButton(
+                    state: AylaFavoriteState.unknown,
+                    onRetryStatus: _noopShareTap,
+                  ),
+                  AylaFavoriteButton(
+                    state: AylaFavoriteState.notFavorited,
+                    onToggle: (_) {},
+                  ),
+                  AylaFavoriteButton(
+                    state: AylaFavoriteState.favorited,
+                    onToggle: (_) {},
+                  ),
+                ],
               ),
             ],
           ),

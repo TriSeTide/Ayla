@@ -24,6 +24,7 @@ import 'package:go_router/go_router.dart';
 import 'core/net/dio_client.dart';
 import 'state/app_preload.dart';
 import 'state/auth_bootstrap.dart';
+import 'state/favorite_status.dart' show aylaFavoriteResetScope;
 import 'core/ws/ws_manager.dart';
 import 'preview/component_gallery.dart';
 import 'layout/app_gate.dart';
@@ -87,6 +88,20 @@ void _installJankProbe() {
   });
 }
 
+/// 收藏状态的作用域标识 —— web `authScope()`
+/// （`stores/favoriteStatus.ts:28–31`）：
+/// `` `${currentUser?.id ?? "anonymous"}:${accessToken ? "authenticated" : "anonymous"}` ``。
+///
+/// 逐字同源：只有「用户 id」或「是否已认证」变化才算换账号。
+String _favoriteAuthScope(AuthState state) =>
+    '${state.user?.id ?? 'anonymous'}:'
+    '${state.isAuthenticated ? 'authenticated' : 'anonymous'}';
+
+/// 上次同步的收藏作用域（web 的模块级 `scope` 变量，`favoriteStatus.ts:20`）。
+///
+/// null = 尚未建立基线 ⇒ 首次只记录、**不自增代际**（避免启动瞬间白清一次缓存）。
+String? _favoriteAuthScopeLast;
+
 void main() {
   // 仅 debug：常开语义树（供调试工具读元素；release 下被摇树移除）。
   // ⚠️ SemanticsBinding.instance 只有在 binding 初始化后才可访问：未初始化时取值抛
@@ -121,6 +136,32 @@ void main() {
   // 预加载完成时才能把会话摘要灌进 chatState
   //（用户实机：「每次切换到主页选项卡时左侧群头像列表都要加载，这在 web 是不需要的」）。
   aylaRegisterChatStateResolver(() => container.read(chatStateProvider));
+  // 收藏状态的作用域（登录账号）跟踪 —— web `ensureFavoriteScope`
+  // （`stores/favoriteStatus.ts:34–48`）里那条
+  // `useAuthStore.subscribe(() => ensureFavoriteScope())` 的等价物。
+  //
+  // web 在**每次读写前**比对 `authScope()`（`currentUser.id + 是否已认证`），
+  // 变了就 `epoch += 1` 并清空 entries/queue/active ⇒ 在途响应作废、旧账号状态不残留。
+  // Flutter 侧对应 [aylaFavoriteResetScope]；此前**没有任何调用点**（本文件即接线点），
+  // 于是跨登录周期残留旧账号收藏状态、且在途响应不会被丢弃。
+  //
+  // ⚠️ 只在**账号标识真的变化**时自增（`favoriteStatus.ts:36` 的 `if (scope !== next)`）：
+  // 否则每次 build/每帧都多留一代。判据与 web 的 `authScope()` 逐字同源。
+  container.listen<AuthState>(
+    authNotifierProvider,
+    (AuthState? previous, AuthState next) {
+      final String scope = _favoriteAuthScope(next);
+      if (_favoriteAuthScopeLast != null &&
+          _favoriteAuthScopeLast != scope) {
+        aylaFavoriteResetScope();
+      }
+      _favoriteAuthScopeLast = scope;
+    },
+  );
+  _favoriteAuthScopeLast = _favoriteAuthScope(
+    container.read(authNotifierProvider),
+  );
+
   // 社交缓存订阅（web `ensureSocialTracking`，`stores/social.ts:108–120`）：
   // chatState.conversations / subgroupState.byGroup 一变，就把新值就地合并进 social record
   // 的已加载投影（主页群列表 / 宽屏群头像列的数据源）。

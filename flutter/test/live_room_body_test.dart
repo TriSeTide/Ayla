@@ -21,6 +21,8 @@ import '../lib/widgets/live/live_player.dart' show AylaLivePlayer, AylaLiveSrsSt
 import '../lib/widgets/live/live_rail.dart' show AylaLiveChannelRail;
 import '../lib/widgets/live/live_room_body.dart';
 import '../lib/widgets/live/live_studio.dart' show AylaLiveStreamAddresses;
+import '../lib/widgets/base/directory_controls.dart'
+    show AylaFavoriteButton, AylaFavoriteState;
 import '../lib/widgets/base/reveal.dart' show AylaRevealItem, AylaRevealScope;
 import '../lib/widgets/base/share.dart' show AylaShareButton;
 import '../lib/widgets/live/live_viewers.dart' show AylaLiveViewerStrip;
@@ -405,6 +407,152 @@ void main() {
       await up.up();
       await settle(tester);
       expect(selected, <String>['lc2']);
+    });
+  });
+
+  // ============ 头部收藏键状态档（2026-10-08 修正：bool? 吞掉 unknown） ============
+
+  group('头部收藏键三态（web FavoriteButton.tsx:61–75）', () {
+    /// 头部收藏键（compact）。
+    Finder headFavorite() => find.descendant(
+          of: find.byType(AylaLiveRoomBody),
+          matching: find.byType(AylaFavoriteButton),
+        );
+
+    testWidgets('favoriteState 默认 unknown ⇒ 保留三态、但**不再禁用**（2026-10-09 用户裁决）', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: false,
+            channels: _channels,
+            data: AylaLiveRoomData(
+              channel: _channel(),
+              srsStatus: AylaLiveSrsStatus.live,
+            ),
+            // ⚠️ 刻意不传 favoriteState（默认档）
+            videoView: const SizedBox(),
+          ),
+        ),
+      );
+      await settle(tester);
+      final AylaFavoriteButton fav = tester.widget<AylaFavoriteButton>(
+        headFavorite(),
+      );
+      expect(
+        fav.state,
+        AylaFavoriteState.unknown,
+        reason: 'unknown 必须原样透传（2026-10-08 修正前 bool? 会把它折成 notFavorited）',
+      );
+      // 2026-10-09 用户裁决：「收藏键非得要有个禁用态？删掉得了」——
+      // unknown 档保留三态语义（label 仍是「正在加载收藏状态」），但**可点**：
+      // 点击 = 拉取状态，用户可自愈；禁用只剩 busy（切换进行中）。
+      // ⚠️ 子树里 Semantics 有多层（Tooltip / 交互壳 / 本件）⇒ 必须按 label 定位本件那一层，
+      //    不能用 `.first`（实测取到的是 Tooltip 的外层节点，enabled 为 null）。
+      final Semantics semantics = tester.widget<Semantics>(
+        find.descendant(
+          of: headFavorite(),
+          matching: find.byWidgetPredicate(
+            (Widget w) =>
+                w is Semantics && w.properties.label == '正在加载收藏状态',
+          ),
+        ),
+      );
+      expect(semantics.properties.enabled, isTrue, reason: 'unknown 档不再禁用（用户裁决）');
+      expect(semantics.properties.button, isTrue);
+    });
+
+    testWidgets('favoriteState = notFavorited ⇒ 可点（aria「收藏」）', (
+      WidgetTester tester,
+    ) async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: false,
+            channels: _channels,
+            favoriteState: AylaFavoriteState.notFavorited,
+            onToggleFavorite: (bool next) => toggles += 1,
+            data: AylaLiveRoomData(
+              channel: _channel(),
+              srsStatus: AylaLiveSrsStatus.live,
+            ),
+            videoView: const SizedBox(),
+          ),
+        ),
+      );
+      await settle(tester);
+      await tester.tap(headFavorite());
+      await settle(tester);
+      expect(toggles, 1);
+    });
+
+    testWidgets('favoriteState = error ⇒ 可点且走 onRetryFavoriteStatus（不是收藏）', (
+      WidgetTester tester,
+    ) async {
+      int retries = 0;
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: false,
+            channels: _channels,
+            favoriteState: AylaFavoriteState.error,
+            onRetryFavoriteStatus: () => retries += 1,
+            onToggleFavorite: (bool next) => toggles += 1,
+            data: AylaLiveRoomData(
+              channel: _channel(),
+              srsStatus: AylaLiveSrsStatus.live,
+            ),
+            videoView: const SizedBox(),
+          ),
+        ),
+      );
+      await settle(tester);
+      await tester.tap(headFavorite());
+      await settle(tester);
+      expect(retries, 1, reason: 'error 档点击 = 重新拉取状态');
+      expect(toggles, 0, reason: '重试不是收藏');
+    });
+
+    testWidgets('自给自足档（favoriteTargetType+Id）⇒ 收藏键自己持控制器，无需页面接线', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: false,
+            channels: _channels,
+            favoriteTargetType: 'live',
+            favoriteTargetId: 'lc1',
+            data: AylaLiveRoomData(
+              channel: _channel(),
+              srsStatus: AylaLiveSrsStatus.live,
+            ),
+            videoView: const SizedBox(),
+          ),
+        ),
+      );
+      await settle(tester);
+      final AylaFavoriteButton fav = tester.widget<AylaFavoriteButton>(
+        headFavorite(),
+      );
+      expect(fav.targetType, 'live');
+      expect(fav.targetId, 'lc1');
+      expect(
+        fav.controller,
+        isNull,
+        reason: '不传共享控制器 ⇒ 收藏键自建私有实例（web 的模块级 store 等价物）',
+      );
     });
   });
 

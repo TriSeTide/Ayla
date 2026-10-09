@@ -15,6 +15,16 @@
 /// | 离开 → `onLeave`（页面退出 + 刷新大厅） | tsx 142–145 |
 /// | 删除 → 成功回大厅 | `GameRoomPlaceholder.tsx:163–175` |
 /// | 收藏/分享（compact + 「分享桌游室」） | `GameRoomPlaceholder.tsx:130–140` |
+///
+/// ⚠️ **根因 B（2026-10-09 修）**：收藏键此前只支持注入档，而本宿主的
+/// `_favorites.load('game', …)` 写在 `_ensureMembers()` 里 —— 后者**只有房主**
+/// 才会走到（`room.isMember` 分支 + `_applyRoom` 的 `!wasOwner && _isOwner` 判定）
+/// ⇒ **非房主/普通成员进房时收藏状态从未加载**，收藏键永远 `unknown`
+/// （禁用 +「正在加载收藏状态」，用户实报）。
+/// web 侧根本没有这条接线：`GameRoomPlaceholder.tsx:143` 只写
+/// `<FavoriteButton targetType="game" targetId={room.id} compact />`，
+/// 加载由收藏键自己承担（`FavoriteButton.tsx:22` → `useFavoriteStatuses.ts:12–16`）
+/// ⇒ 本次同样改为**自给自足档**，与成员分页逻辑彻底解耦。
 library;
 
 import 'dart:async';
@@ -62,21 +72,50 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
   String? _actionBusyUserId;
   AylaMediaPagedList<AylaGameRoomMember>? _members;
   bool _membersInvalidated = false;
-  final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
+
+  /// 收藏状态控制器 = **库内共享单例**（web `favoriteStatus.ts:17` 的模块级 store）。
+  ///
+  /// ⚠️ 不 dispose：单例跟随进程生命周期（与 web 模块级 store 同），页面卸载只
+  /// `removeListener`。用私有实例会让收藏页的「取消收藏」对账（`applyFavoriteStatus`）
+  /// 写进一个没人读的缓存 —— web 会广播给全部挂载键（`favoriteStatus.ts:50–61`）。
+  final AylaFavoriteStatusController _favorites =
+      aylaSharedFavoriteStatusController;
   final AylaShareController _share = AylaShareController();
+
+  /// 收藏状态键（与 [AylaGameRoomPlaceholder] 的 `favoriteState` 取值**同一口径**）。
+  static String _favKey(AylaGameRoom room) => '${room.id}';
+
+  /// 收藏状态加载（web `GameRoomPlaceholder.tsx:143` 的
+  /// `<FavoriteButton targetType="game" targetId={room.id}/>` ⇒ 键自己 load）。
+  ///
+  /// ⚠️ **根因 B**：此前这行写在 `_ensureMembers()` 里，而后者**只有房主**可达
+  /// （`room.isMember` 分支 + `_applyRoom` 的 `!wasOwner && _isOwner` 判定）
+  /// ⇒ 非房主/普通成员进房时收藏状态从未加载 ⇒ 收藏键永远 `unknown`（禁用）。
+  /// 现在挂在**拿到 room 的所有路径**上，与成员分页彻底解耦。
+  void _ensureFavoriteStatus(AylaGameRoom room) {
+    unawaited(_favorites.load('game', <String>[_favKey(room)]));
+  }
 
   @override
   void initState() {
     super.initState();
     _favorites.addListener(_onChanged);
     _room = widget.initialRoom;
+    // 已知 room（大厅列表带过来的）⇒ 帧后加载。
+    // ⚠️ 必须帧后：`load` 会同步 `notifyListeners`，build 期发会触发
+    // "setState() or markNeedsBuild() called during build"（本项目既有实测）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final AylaGameRoom? room = _room;
+      if (room != null) _ensureFavoriteStatus(room);
+    });
     unawaited(_enter());
   }
 
   @override
   void dispose() {
     _favorites.removeListener(_onChanged);
-    _favorites.dispose();
+    // ⚠️ **不 dispose**：`_favorites` 是库内共享单例（web 模块级 store）。
     _share.dispose();
     _members?.removeListener(_onChanged);
     _members?.dispose();
@@ -104,6 +143,7 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
     }
     if (!mounted) return;
     setState(() => _room = room);
+    _ensureFavoriteStatus(room); // 根因 B：拿到 room 就加载（不分房主/成员）
     if (room.isMember) {
       _ensureMembers();
       return;
@@ -131,7 +171,8 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
     )..addListener(_onChanged);
     _members = pager;
     if (_isOwner(room)) unawaited(pager.reset());
-    _favorites.load('game', <String>['${room.id}']);
+    // ⚠️ 收藏状态**不再**在这里加载（原根因 B：本函数仅房主可达）
+    // ⇒ 见 [_ensureFavoriteStatus]，挂在所有拿到 room 的路径上。
   }
 
   bool _isOwner(AylaGameRoom room) =>
@@ -304,13 +345,16 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
       onLoadMoreMembers: _members?.loadMore,
       onRefreshMembers: _refreshMembers,
       actionBusyUserId: _actionBusyUserId,
-      favoriteState: _favorites.stateOf('game', '${room.id}'),
-      favoriteBusy: _favorites.busyOf('game', '${room.id}'),
-      favoriteError: _favorites.actionErrorOf('game', '${room.id}'),
+      favoriteState: _favorites.stateOf('game', _favKey(room)),
+      favoriteBusy: _favorites.busyOf('game', _favKey(room)),
+      favoriteError: _favorites.actionErrorOf('game', _favKey(room)),
       onToggleFavorite: (bool next) =>
-          unawaited(_favorites.toggle('game', '${room.id}')),
-      onRetryFavoriteStatus: () =>
-          _favorites.load('game', <String>['${room.id}'], force: true),
+          unawaited(_favorites.toggle('game', _favKey(room))),
+      onRetryFavoriteStatus: () => _favorites.load(
+        'game',
+        <String>[_favKey(room)],
+        force: true,
+      ),
     );
 
     return narrow

@@ -143,9 +143,12 @@ void main() {
       expect(got, isFalse);
     });
 
-    testWidgets('加载中（unknown 且无 error）→ disabled，点击无效',
+    testWidgets('加载中（unknown）→ **可点**且点击 = 拉取状态（2026-10-09 用户裁决：删掉禁用态）',
         (WidgetTester tester) async {
-      // tsx 69：`disabled={busy || state.loading || (unknown && !state.error)}`
+      // 用户裁决：「收藏键非得要有个禁用态？删掉得了」——
+      // 任何没被接线的调用点都会永久禁用且用户无法自愈（点不动 ⇒ 永远查不出来）。
+      // ⇒ unknown 档改为可点：点击 = 拉取状态（tsx 35–38 本就有这条语义，
+      //    原本被 `unknown && !state.error` 的 disabled 挡住）。
       int retried = 0;
       bool? toggled;
       await tester.pumpWidget(previewTheme(
@@ -159,8 +162,8 @@ void main() {
       expect(find.text('加载中…'), findsOneWidget);
       await tester.tap(find.text('加载中…'));
       await tester.pump();
-      expect(retried, 0, reason: '加载中不可点');
-      expect(toggled, isNull);
+      expect(retried, 1, reason: 'unknown 档点击 = 重新拉取状态（不是收藏）');
+      expect(toggled, isNull, reason: '拉取状态 ≠ 切换收藏');
     });
 
     testWidgets('error 态 → **可点**且走「重试拉取状态」（tsx 35–38/69）',

@@ -42,6 +42,7 @@ import '../widgets/base/directory_result_cards.dart';
 import '../widgets/base/favorite_item.dart';
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
+import '../widgets/base/reveal.dart' show AylaRevealItem, AylaRevealScope;
 import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/profile/favorites_skeleton.dart';
@@ -73,11 +74,31 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
       aylaHubFilterOf(FavoritesPage.filters, widget.initialType);
 
   final ScrollController _scroll = ScrollController();
-  final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
+
+  /// 收藏状态控制器 = **库内共享单例**（web `favoriteStatus.ts:17` 的模块级 store）。
+  ///
+  /// ⚠️ **根因 C（2026-10-09 修）**：此前是页面私有实例，而本页 `_remove()` 成功后
+  /// 调 `applyFavoriteStatus`（`FavoritesPage.tsx:255` 的
+  /// `usePostsStore.getState().setFavorite(...)` 同源）做对账 ——
+  /// web 写的是**模块级 store** ⇒ 广播给全部挂载的心形键（`favoriteStatus.ts:50–61`）；
+  /// 私有实例则写进一个没人读的缓存 ⇒ **同一目标在别处的收藏键不会跟着变**。
+  /// 单例跟随进程生命周期，本页**不 dispose**（只注销监听）。
+  final AylaFavoriteStatusController _favorites =
+      aylaSharedFavoriteStatusController;
   AylaPagedList<AylaFavoriteEntry>? _pager;
 
   /// 本轮本地已删除的收藏 id（web 的 owner.removed 墓碑）。
   final Set<int> _removed = <int>{};
+
+  /// 刷新重播计数（web `replayNonce`，`FavoritesPage.tsx:156·200`）。
+  ///
+  /// web 的两条刷新重播路径（本页只可能有前者）：
+  /// - **手动刷新**（页脚 `DirectoryLoadMore.refresh`，tsx 279）—— 首屏之后再次
+  ///   `requestPage()` 且 `current.loaded && !append` ⇒ `setReplayNonce(n+1)`
+  ///   （`useListEntryMotion.ts:34–55` 对**已入场**节点整批重播一次浮入）；
+  /// - 自动 stale 重取（tsx 264–266 的 effect）—— 本页没有跨挂载缓存与 WS 对账
+  ///   （文件头已登记差异）⇒ 无这条路径。
+  int _replayNonce = 0;
 
   @override
   void initState() {
@@ -102,7 +123,7 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
   void dispose() {
     _pager?.dispose();
     _scroll.dispose();
-    _favorites.dispose();
+    // ⚠️ **不 dispose**：`_favorites` 是库内共享单例（web 模块级 store）。
     super.dispose();
   }
 
@@ -135,6 +156,20 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
     setState(() => _filter = next);
     _start();
     context.replace(next == 'all' ? '/favorites' : '/favorites?type=$next');
+  }
+
+  /// 手动刷新（页脚 `DirectoryLoadMore.refresh`，`FavoritesPage.tsx:279`）。
+  ///
+  /// 对齐 web `requestPage()` 的重播条件（tsx 197–201）：
+  /// `if (append || current.loaded) { … if (current.loaded && !append) setReplayNonce(n+1) }`
+  /// —— 即**首屏之后的刷新**才让已入场卡片整批重播一次浮入（`useListEntryMotion.ts:34–55`）；
+  /// 首屏（`loaded == false`）不重播，卡片各自按 [AylaRevealItem] 首次入场。
+  Future<void> _refresh() async {
+    final AylaPagedList<AylaFavoriteEntry>? pager = _pager;
+    if (pager == null) return;
+    final bool wasLoaded = pager.loaded;
+    await pager.refresh();
+    if (mounted && wasLoaded) setState(() => _replayNonce++);
   }
 
   /// 取消收藏（tsx 250–259）：成功后本地收尾。
@@ -272,7 +307,10 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
         padding: _emptyPadding,
       );
     }
-    return AylaMasonryGrid<AylaFavoriteEntry>(
+    return AylaRevealScope(
+      // 刷新重播（web `useListEntryMotion` 的 `replayKey = replayNonce`，tsx 82·277）
+      replayKey: _replayNonce,
+      child: AylaMasonryGrid<AylaFavoriteEntry>(
       items: rows,
       itemKey: (AylaFavoriteEntry entry) => entry.card.id,
       memoryKey: 'favorites:$_filter', // web memoryKey（tsx 87）
@@ -296,23 +334,44 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
         invalidated: pager.invalidated,
         // tsx 279：首页失败 → 重取首页
         loadMore: () => pager.error != null && pager.items.isEmpty
-            ? pager.refresh()
+            ? _refresh()
             : pager.loadMore(),
-        refresh: pager.refresh,
+        refresh: _refresh,
       ),
       itemBuilder: (BuildContext context, AylaFavoriteEntry entry, int index) {
-        return AylaFavoriteItem(
-          child: AylaFavoriteResultCard(
-            favorite: entry.card,
-            onOpen: () => _open(entry),
-            senderLabel: entry.messageSenderNickname,
-            action: AylaMsgActionButton(
-              label: '取消收藏', // tsx 99
-              onPressed: () => _remove(entry),
+        // 逐条浮入（web `useListEntryMotion(listRef, ".favorite-item", …)`，
+        // `FavoritesPage.tsx:82` + `useListEntryMotion.ts:68–80`）：
+        // `opacity 0→1` + `translateY(20px→0)`、300ms `ease-out`、
+        // `delay = staggerDelay(index) = min(index*50, 300)`（`useRevealOnEnter.ts`）。
+        //
+        // ⚠️ 用 `index:` 而**不写死 `delay:`** —— [AylaRevealItem] 的首轮入场取
+        // `staggerDelay(index)`，刷新重播则重新从 0 编号（`useListEntryMotion.ts:38–48`
+        // 的 `let index = 0`）；写死 delay 会让重播变成「后半屏同时闪」。
+        //
+        // ⚠️ `fadeGlass: false`：[AylaFavoriteItem] 内含 [AylaGlassSurface]，而
+        // Impeller 拒绝「`Opacity` 祖先 + `BackdropFilter` 后代」（见 reveal.dart 文件头）。
+        //
+        // ⚠️ web 的 `suppressEntry`（`restoring && !resumeEntry`）在 Flutter 侧无对象：
+        // 本页的滚动位置记忆（`useScrollRestore` / `saveScrollPosition`，
+        // `FavoritesPage.tsx:10·157·298·306`）**尚未实现**（本文件头已登记）
+        // ⇒ 没有「恢复命中」这一档，故不传 `enabled`。
+        return AylaRevealItem(
+          fadeGlass: false,
+          index: index,
+          child: AylaFavoriteItem(
+            child: AylaFavoriteResultCard(
+              favorite: entry.card,
+              onOpen: () => _open(entry),
+              senderLabel: entry.messageSenderNickname,
+              action: AylaMsgActionButton(
+                label: '取消收藏', // tsx 99
+                onPressed: () => _remove(entry),
+              ),
             ),
           ),
         );
       },
+      ),
     );
   }
 

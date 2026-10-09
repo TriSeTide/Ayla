@@ -907,9 +907,13 @@ void main() {
       expect(toggled, isEmpty);
     });
 
-    testWidgets('三个新参数默认 null ⇒ 既有调用点逐像素不变（busy false / error null / retry null）', (
+    testWidgets('零接线 ⇒ **默认自给自足**（不再伪造 notFavorited 默认档）', (
       WidgetTester tester,
     ) async {
+      // 2026-10-09 根治：此前零接线时兜底 `favoriteState: notFavorited`
+      // ⇒ ① 已收藏的目标被显示成未收藏（伪造状态）；② 点击走页面回调而页面没接线
+      // ⇒ 点了没反应。web `LiveHall.tsx:39–42` 本就不传 action，由卡片自己加载
+      // （`LiveChannelCard.tsx:51` 的 `action === undefined` 分支）⇒ 默认自给自足。
       await tester.pumpWidget(
         host(
           tester,
@@ -923,8 +927,13 @@ void main() {
       expect(button.busy, isFalse);
       expect(button.actionError, isNull);
       expect(button.onRetryStatus, isNull);
-      expect(button.state, AylaFavoriteState.notFavorited); // 原默认档不变
-      // 无 actionError ⇒ 不渲染 alert 行（FavoriteButton.tsx:76 的 role=alert 在 Flutter 是按钮下方文字）
+      expect(button.state, isNull, reason: '零接线 ⇒ 走自给自足档（state 不由调用方注入）');
+      expect(
+        button.targetType,
+        'live',
+        reason: 'web LiveChannelCard.tsx:51 写死 targetType="live"',
+      );
+      expect(button.targetId, _channel().id, reason: 'targetId 取 channel.id（tsx:51）');
       expect(find.text('收藏状态加载失败'), findsNothing);
     });
 

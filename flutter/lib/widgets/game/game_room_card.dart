@@ -31,6 +31,7 @@ import '../../theme/tokens.dart';
 import '../base/directory_controls.dart' show AylaFavoriteButton, AylaFavoriteState;
 import '../base/primitives.dart';
 import '../base/reveal.dart';
+import '../../state/favorite_status.dart' show AylaFavoriteStatusController;
 
 /// .game-room-card —— 桌游室卡片（GameRoomCard.tsx:15–53）。
 class AylaGameRoomCard extends StatelessWidget {
@@ -41,11 +42,12 @@ class AylaGameRoomCard extends StatelessWidget {
     this.revealDelay,
     this.action,
     this.showFavorite = true,
-    this.favoriteState = AylaFavoriteState.unknown,
+    this.favoriteState,
     this.favoriteBusy = false,
     this.favoriteError,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
+    this.favoriteController,
     this.reserveSpace = false,
   });
 
@@ -67,8 +69,22 @@ class AylaGameRoomCard extends StatelessWidget {
   /// 是否渲染默认收藏键（仅在 [action] 为 null 时生效）。
   final bool showFavorite;
 
-  /// 收藏状态（AylaFavoriteButton 契约）。
-  final AylaFavoriteState favoriteState;
+  /// 收藏状态（**注入档**：非 null 才生效）。
+  ///
+  /// ## ⚠️ 默认 null = **自给自足**（2026-10-09 根治：用户实报「群内桌游收藏键又禁用」）
+  /// web 的 `GameRoomCard.tsx:50` **恒渲染**
+  /// `<FavoriteButton targetType="game" targetId={room.id} compact />`
+  /// （`action === undefined` 时），状态由收藏键自己持有
+  /// （`FavoriteButton.tsx:22` → `useFavoriteStatuses.ts:12–16` 挂载即加载）
+  /// ⇒ **调用方无需任何接线**。
+  ///
+  /// Flutter 侧此前把本件做成**纯注入档**且 `favoriteState` 默认
+  /// `AylaFavoriteState.unknown` ⇒ 任何「忘了传」的调用点（如群内桌游
+  /// `pages/group_games_page.dart:202`）都会永久停在 unknown
+  /// = **禁用 + 「正在加载收藏状态」**，且用户无法通过刷新区分。
+  /// 现在默认走自给自足档（与 web 同构）：不传 `favoriteState`/`onToggleFavorite`
+  /// 就按 `game:<room.id>` 自己加载；既有页面（大厅/搜索/收藏页）显式传值 ⇒ 行为不变。
+  final AylaFavoriteState? favoriteState;
 
   /// 收藏请求进行中。
   final bool favoriteBusy;
@@ -81,6 +97,9 @@ class AylaGameRoomCard extends StatelessWidget {
 
   /// 收藏状态未知/出错时点击 → 重新拉取。
   final VoidCallback? onRetryFavoriteStatus;
+
+  /// 自给自足档的控制器（不传 ⇒ 用库内共享单例，见 `AylaFavoriteButton.controller`）。
+  final AylaFavoriteStatusController? favoriteController;
 
   /// **网格等高**（web 靠 CSS grid 的 align-items: stretch 拉平同行卡片）。
   ///
@@ -104,16 +123,7 @@ class AylaGameRoomCard extends StatelessWidget {
     final Widget face = _face(context);
     final Widget? slot = action ??
         (showFavorite
-            ? AylaFavoriteButton(
-                state: favoriteState,
-                compact: true, // .favorite-toggle.is-compact：32×32、图标 16
-                busy: favoriteBusy,
-                actionError: favoriteError,
-                onToggle: onToggleFavorite,
-                onRetryStatus: onRetryFavoriteStatus,
-                // 卡片内使用：拦截卡片点击（web toggle() 的 stopPropagation）
-                onPressedInsideCard: () {},
-              )
+            ? _favorite()
             : null);
     if (slot == null) return face;
     return Stack(
@@ -125,6 +135,34 @@ class AylaGameRoomCard extends StatelessWidget {
           child: slot,
         ),
       ],
+    );
+  }
+
+  /// 收藏键（web `GameRoomCard.tsx:50` 的 `action === undefined` 分支）。
+  ///
+  /// 调用方给了状态/回调 ⇒ 注入档（大厅/搜索/收藏页既有行为逐像素不变）；
+  /// 都没给 ⇒ **自给自足档**：`targetType="game"`、`targetId=room.id`
+  /// （web 写死的两个值）⇒ 忘接线的调用点（群内桌游）也不会再卡在禁用态。
+  Widget _favorite() {
+    final bool injected = favoriteState != null || onToggleFavorite != null;
+    if (injected) {
+      return AylaFavoriteButton(
+        state: favoriteState ?? AylaFavoriteState.unknown,
+        compact: true, // .favorite-toggle.is-compact：32×32、图标 16
+        busy: favoriteBusy,
+        actionError: favoriteError,
+        onToggle: onToggleFavorite,
+        onRetryStatus: onRetryFavoriteStatus,
+        // 卡片内使用：拦截卡片点击（web toggle() 的 stopPropagation）
+        onPressedInsideCard: () {},
+      );
+    }
+    return AylaFavoriteButton(
+      targetType: 'game',
+      targetId: room.id,
+      controller: favoriteController,
+      compact: true,
+      onPressedInsideCard: () {},
     );
   }
 

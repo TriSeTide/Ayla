@@ -27,6 +27,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/models/visibility.dart';
+import '../../state/favorite_status.dart' show AylaFavoriteStatusController;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/css_gradient.dart';
@@ -186,11 +187,13 @@ class AylaLiveChannelCard extends StatelessWidget {
     this.revealDelay,
     this.showActions = true,
     this.action,
-    this.favoriteState = AylaFavoriteState.unknown,
+    this.favoriteState,
     this.favoriteBusy = false,
     this.favoriteError,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
+    this.favoriteTargetType,
+    this.favoriteController,
     this.reserveMetaSpace = false,
   });
 
@@ -219,8 +222,16 @@ class AylaLiveChannelCard extends StatelessWidget {
   /// `DirectoryResultCards.tsx:56` 就是这么用的）。非 null 时**替换**默认收藏键。
   final Widget? action;
 
-  /// 收藏状态（`AylaFavoriteButton` 契约）。
-  final AylaFavoriteState favoriteState;
+  /// 收藏状态（**注入档**：非 null 才生效；见 [favoriteTargetType] 的自给自足档）。
+  ///
+  /// ## ⚠️ 默认 null = **自给自足**（2026-10-09 根治，与 `AylaGameRoomCard` 同批）
+  /// web 的 `LiveChannelCard.tsx:51` 在 `action === undefined` 时**恒渲染**
+  /// `<FavoriteButton targetType="live" targetId={channel.id} compact />`
+  /// ⇒ 调用方无需任何接线。此前本件默认 `unknown` 且必须由页面注入状态
+  /// ⇒ 任何漏接线的调用点都会永久停在「正在加载收藏状态」禁用态。
+  /// 现在：不传 `favoriteState`/`onToggleFavorite` ⇒ 按 `live:<channel.id>` 自管
+  /// （`favoriteTargetType` 仍可显式指定；不传时默认 `'live'`）。
+  final AylaFavoriteState? favoriteState;
 
   /// 收藏请求进行中。
   final bool favoriteBusy;
@@ -233,6 +244,18 @@ class AylaLiveChannelCard extends StatelessWidget {
 
   /// 收藏状态未知/出错时点击 → 重新拉取。
   final VoidCallback? onRetryFavoriteStatus;
+
+  /// **自给自足档**（web 架构）：非 null ⇒ 收藏键自己 retain + load + toggle
+  /// （`LiveChannelCard.tsx:51`：`action === undefined` 时恒为
+  /// `<FavoriteButton targetType="live" targetId={channel.id} compact />`）。
+  ///
+  /// 传了它之后 [favoriteState] / [favoriteBusy] / [favoriteError] /
+  /// [onToggleFavorite] / [onRetryFavoriteStatus] 全部**不再参与**（收藏目标恒为
+  /// `channel.id` ⇒ 只需给类型）。既有注入档调用点（页面自己 `load`）保持原样。
+  final String? favoriteTargetType;
+
+  /// 收藏控制器（不传 ⇒ 用库内共享单例，见 `AylaFavoriteButton.controller`）。
+  final AylaFavoriteStatusController? favoriteController;
 
   /// **网格等高**。
   ///
@@ -256,17 +279,31 @@ class AylaLiveChannelCard extends StatelessWidget {
     final bool narrow = AylaBreakpoints.isNarrow(
       MediaQuery.sizeOf(context).width,
     );
+    // 三档取向（2026-10-09 根治）：
+    // ① 调用方给了状态/回调/显式类型 ⇒ 注入档或显式自给自足档（既有调用点逐像素不变）；
+    // ② 什么都没给 ⇒ **默认自给自足**（web `LiveChannelCard.tsx:51` 的
+    //    `action === undefined` 分支：`<FavoriteButton targetType="live"
+    //    targetId={channel.id} compact/>`）⇒ 漏接线的调用点也不会卡在禁用态。
+    final bool injected = favoriteState != null || onToggleFavorite != null;
+    final String? selfType = favoriteTargetType ?? (injected ? null : 'live');
     final Widget? slot =
         action ??
         (showActions
-            ? AylaFavoriteButton(
-                state: favoriteState,
-                compact: true, // `.favorite-toggle.is-compact`：32×32、图标 16
-                busy: favoriteBusy,
-                actionError: favoriteError,
-                onToggle: onToggleFavorite,
-                onRetryStatus: onRetryFavoriteStatus,
-              )
+            ? (selfType != null
+                ? AylaFavoriteButton(
+                    targetType: selfType,
+                    targetId: channel.id,
+                    controller: favoriteController,
+                    compact: true, // `.favorite-toggle.is-compact`：32×32、图标 16
+                  )
+                : AylaFavoriteButton(
+                    state: favoriteState ?? AylaFavoriteState.unknown,
+                    compact: true, // `.favorite-toggle.is-compact`：32×32、图标 16
+                    busy: favoriteBusy,
+                    actionError: favoriteError,
+                    onToggle: onToggleFavorite,
+                    onRetryStatus: onRetryFavoriteStatus,
+                  ))
             : null);
     // ≥769：收藏键 top/right = calc(sp4 + sp1) = 20px；窄屏 = sp3 = 12px（app.css 3306–3310）
     final double actionInset = narrow
@@ -579,6 +616,8 @@ class AylaLiveHall extends StatelessWidget {
     this.favoriteErrorBuilder,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
+    this.favoriteTargetType,
+    this.favoriteController,
     this.emptyTitleLabel = '还没有直播间',
     this.emptyHintLabel = '点右下角 + 发起第一场直播吧',
   });
@@ -630,6 +669,17 @@ class AylaLiveHall extends StatelessWidget {
   /// 逐卡「收藏状态未知/出错 ⇒ 点击重新拉取」（`AylaFavoriteButton.onRetryStatus`；默认 null）。
   final void Function(AylaLiveCardData channel)? onRetryFavoriteStatus;
 
+  /// **自给自足档**（web 架构）：非 null ⇒ 每张卡的收藏键自己 retain + load + toggle。
+  ///
+  /// web 依据：`LiveHall.tsx:39–42` **不传** `action` ⇒ `LiveChannelCard.tsx:51` 的
+  /// `action === undefined` 分支自渲 `<FavoriteButton targetType="live" targetId
+  /// ={channel.id} compact />` —— 大厅页面**没有任何收藏接线**。
+  /// 传了本参数后，上面五个注入档 builder/回调全部不再参与（收藏目标恒为 `channel.id`）。
+  final String? favoriteTargetType;
+
+  /// 逐卡收藏控制器（不传 ⇒ 用库内共享单例）。
+  final AylaFavoriteStatusController? favoriteController;
+
   @override
   Widget build(BuildContext context) {
     final bool narrow = AylaBreakpoints.isNarrow(
@@ -667,6 +717,14 @@ class AylaLiveHall extends StatelessWidget {
         ),
       );
     }
+
+    // 本大厅是否有**逐卡收藏接线**（任一 builder/回调非空 ⇒ 注入档；
+    // 全空 ⇒ 默认自给自足，见下方 `favoriteTargetType: 'live'` 的说明）。
+    final bool injectedHallFavorite = favoriteStateBuilder != null ||
+        favoriteBusyBuilder != null ||
+        favoriteErrorBuilder != null ||
+        onToggleFavorite != null ||
+        onRetryFavoriteStatus != null;
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -706,9 +764,14 @@ class AylaLiveHall extends StatelessWidget {
                 revealDelay: revealItems
                     ? AylaRevealMotion.staggerDelay(i)
                     : null,
-                favoriteState:
-                    favoriteStateBuilder?.call(channels[i]) ??
-                    AylaFavoriteState.notFavorited,
+                // ⚠️ 2026-10-09 根治：页面**没给**任何收藏接线时，**不再伪造
+                // `notFavorited`**（那会让「已收藏」的目标显示成未收藏，且点击走
+                // 页面回调而页面没接线 ⇒ 点了没反应）。改为**默认自给自足**：
+                // web `LiveHall.tsx:39–42` 本就不传 action，由卡片自己加载。
+                favoriteState: injectedHallFavorite
+                    ? (favoriteStateBuilder?.call(channels[i]) ??
+                        AylaFavoriteState.notFavorited)
+                    : null,
                 favoriteBusy: favoriteBusyBuilder?.call(channels[i]) ?? false,
                 favoriteError: favoriteErrorBuilder?.call(channels[i]),
                 onToggleFavorite: onToggleFavorite == null
@@ -717,6 +780,10 @@ class AylaLiveHall extends StatelessWidget {
                 onRetryFavoriteStatus: onRetryFavoriteStatus == null
                     ? null
                     : () => onRetryFavoriteStatus!(channels[i]),
+                // 自给自足档（显式指定 或 上面判定为「零接线」时的默认 'live'）
+                favoriteTargetType: favoriteTargetType ??
+                    (injectedHallFavorite ? null : 'live'),
+                favoriteController: favoriteController,
                 reserveMetaSpace: true, // 网格内等高
                 onEnter: () => onEnter(channels[i].id),
               ),

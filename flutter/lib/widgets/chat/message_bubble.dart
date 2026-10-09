@@ -23,8 +23,16 @@
 /// 2. **发送态定位**：web 用 `position:absolute; right:calc(100% + 8px)`；Flutter 用
 ///    `FractionalTranslation(-1, 0)` + 8px 位移表达同一条 CSS（相对**自身**宽度的 100%），
 ///    因此不占布局位、不会压缩气泡；
-/// 3. **收藏键状态**：web `FavoriteButton` 自持状态；Flutter 侧状态在页面层 ⇒
-///    由 [AylaMessageBubble.favoriteState] 等参数注入（与库内 `AylaFavoriteButton` 契约一致）。
+/// 3. **收藏键状态**：web `MessageBubble.tsx:246` **恒渲染**
+///    `<FavoriteButton targetType="message" targetId={message.id} compact />`
+///    —— 状态由收藏键自己持有（`FavoriteButton.tsx:22` 调 `useFavoriteStatuses`，
+///    `hooks/useFavoriteStatuses.ts:12–16` 挂载即 retain+load、卸载 release），
+///    **调用方不传任何收藏参数**。2026-10-09 前 Flutter 侧走「页面注入档」，
+///    而 `message_list.dart` 从未传 `favoriteState` ⇒ 每个气泡都停在 `unknown`
+///    （禁用 +「正在加载收藏状态」，用户实报）⇒ 本次改为**默认自给自足**：
+///    不传 [AylaMessageBubble.favoriteState] / [AylaMessageBubble.onToggleFavorite]
+///    时收藏键自己按 `message:<msg.id>` 起状态；画布样张显式传 `favoriteState`
+///    仍走注入档（零改动）。
 ///
 /// ## 公开面
 /// `AylaMessageBubble` · 样张 `aylaMessageBubbleSamples()`
@@ -51,6 +59,7 @@ import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
 import '../base/directory_controls.dart' show AylaFavoriteButton, AylaFavoriteState;
 import '../base/loading.dart';
+import '../../state/favorite_status.dart' show AylaFavoriteStatusController;
 import 'media_content.dart';
 import 'share_bubble.dart';
 import '../base/tooltip.dart';
@@ -117,11 +126,14 @@ class AylaMessageBubble extends StatefulWidget {
     this.shareGroupId,
     this.currentUserId,
     this.touchMode,
-    this.favoriteState = AylaFavoriteState.unknown,
+    this.favoriteState,
     this.favoriteBusy = false,
     this.favoriteError,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
+    this.favoriteTargetType,
+    this.favoriteTargetId,
+    this.favoriteController,
     this.descriptorFetcher,
     this.onDescriptorFetched,
     this.audioEngineFactory,
@@ -201,11 +213,25 @@ class AylaMessageBubble extends StatefulWidget {
   /// 触屏模式（null = 按平台判定：Android / iOS / fuchsia 视为触屏）。
   final bool? touchMode;
 
-  final AylaFavoriteState favoriteState;
+  /// 收藏状态（**注入档**：非 null ⇒ 由调用方驱动，与 2026-10-09 前逐像素一致）。
+  ///
+  /// null 且 [onToggleFavorite] 也为 null ⇒ **自给自足档**（web 语义，
+  /// `MessageBubble.tsx:246`）：收藏键按 `message:<msg.id>` 自己 retain + load + toggle。
+  final AylaFavoriteState? favoriteState;
+
   final bool favoriteBusy;
   final String? favoriteError;
   final void Function(bool favorited)? onToggleFavorite;
   final VoidCallback? onRetryFavoriteStatus;
+
+  /// 收藏目标类型/id（web `MessageBubble.tsx:246` 恒为 `"message"` + `message.id`）。
+  ///
+  /// 留出覆写口：消息卡在别的上下文（如收藏页的消息卡）可能有自己的目标身份。
+  final String? favoriteTargetType;
+  final String? favoriteTargetId;
+
+  /// 自给自足档的控制器（不传 ⇒ 用库内共享单例）。
+  final AylaFavoriteStatusController? favoriteController;
 
   // ---- 媒体内容注入点（透传给 [AylaMediaContent]，语义见该组件文档）----
   final AylaMediaDescriptorFetcher? descriptorFetcher;
@@ -369,6 +395,9 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
             favoriteError: widget.favoriteError,
             onToggleFavorite: widget.onToggleFavorite,
             onRetryFavoriteStatus: widget.onRetryFavoriteStatus,
+            favoriteTargetType: widget.favoriteTargetType,
+            favoriteTargetId: widget.favoriteTargetId,
+            favoriteController: widget.favoriteController,
             onQuote: widget.onQuote,
             onRecall: widget.onRecall,
           )
@@ -1052,11 +1081,14 @@ class _MsgActions extends StatelessWidget {
     required this.msg,
     required this.visible,
     required this.showRecall,
-    required this.favoriteState,
+    this.favoriteState,
     required this.favoriteBusy,
     this.favoriteError,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
+    this.favoriteTargetType,
+    this.favoriteTargetId,
+    this.favoriteController,
     this.onQuote,
     this.onRecall,
   });
@@ -1067,13 +1099,44 @@ class _MsgActions extends StatelessWidget {
   /// 是否显示「撤回」键（= 自己的消息且在 120s 窗口内，见 [AylaMessageBubble.build]）。
   final bool showRecall;
 
-  final AylaFavoriteState favoriteState;
+  /// 注入档收藏状态；null 且 [onToggleFavorite] 也为 null ⇒ 自给自足档（web 语义）。
+  final AylaFavoriteState? favoriteState;
   final bool favoriteBusy;
   final String? favoriteError;
   final void Function(bool favorited)? onToggleFavorite;
   final VoidCallback? onRetryFavoriteStatus;
+  final String? favoriteTargetType;
+  final String? favoriteTargetId;
+  final AylaFavoriteStatusController? favoriteController;
   final void Function(AylaChatMessage msg)? onQuote;
   final void Function(AylaChatMessage msg)? onRecall;
+
+  /// 收藏键（web `MessageBubble.tsx:246` 的**条件恒真**分支）。
+  ///
+  /// - 调用方给了状态/回调 ⇒ 注入档（画布样张与既有测试逐像素不变）；
+  /// - 都没给 ⇒ **自给自足档**：`targetType="message"`、`targetId=msg.id`
+  ///   （web 写死的两个值），收藏键挂载即 retain + load ⇒ `message_list.dart`
+  ///   **无需任何改动**就得到 web 的行为。
+  Widget get _favorite {
+    final bool injected =
+        favoriteState != null || onToggleFavorite != null;
+    if (injected) {
+      return AylaFavoriteButton(
+        state: favoriteState ?? AylaFavoriteState.unknown,
+        compact: true,
+        busy: favoriteBusy,
+        actionError: favoriteError,
+        onToggle: onToggleFavorite,
+        onRetryStatus: onRetryFavoriteStatus,
+      );
+    }
+    return AylaFavoriteButton(
+      targetType: favoriteTargetType ?? 'message',
+      targetId: favoriteTargetId ?? msg.id,
+      controller: favoriteController,
+      compact: true,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1100,14 +1163,7 @@ class _MsgActions extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                AylaFavoriteButton(
-                  state: favoriteState,
-                  compact: true,
-                  busy: favoriteBusy,
-                  actionError: favoriteError,
-                  onToggle: onToggleFavorite,
-                  onRetryStatus: onRetryFavoriteStatus,
-                ),
+                _favorite,
                 // 引用键：web `MessageBubble.tsx:247` `{onQuote && (…)}` ——
                 // **未接线时根本不渲染**（不是渲染一个无副作用的假按钮），
                 // 与 `tsx:258` 的 `{onRecall && (…)}` 同一写法；
