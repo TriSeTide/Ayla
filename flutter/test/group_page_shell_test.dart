@@ -381,18 +381,32 @@ void main() {
         greaterThan(5),
         reason: '入场首帧应带正下方位移（+20 → 0），实测 ${early.top - settled.top}',
       );
-      // ⚠️ 入场断言由「`opacity` 中间态」改为**位移 + 玻璃档 opacity 恒 1.0**：
-      // 输入区是玻璃（`.composer` → `AylaGlassSurface`）⇒ 调用点传了
-      // `fadeGlass: false`（`group_chat_page.dart` 的输入区 reveal）⇒ 整层 opacity
-      // 恒 1.0、**不推 opacity**（Impeller 拒绝「`Opacity` 祖先 + `BackdropFilter`」并刷屏，
-      // 处置与依据见 `lib/widgets/base/reveal.dart` 文件头）。位移判据（上一行）
-      // 仍然锁住「入场发生了」，本行锁住「玻璃档没在推 opacity」。
+      // ⚠️ 入场断言由「`opacity` 中间态」改为**位移 + 玻璃档不推 opacity**：
+      // 输入区是玻璃（`.composer` → `AylaGlassSurface`）⇒ 页面用**只位移**的
+      // 共享入场轨道（`group_chat_page.dart` 的 `_ComposeEntryTrack`
+      // + 页面自持的 `_composeEntryCurved`），**不挂 `AylaRevealItem`、不推 opacity**
+      //（Impeller 拒绝「`Opacity` 祖先 + `BackdropFilter`」并刷屏，
+      // 处置与依据见 `lib/widgets/base/reveal.dart` 文件头）。
+      // 位移判据（上一行）锁住「入场发生了」，下面锁住「玻璃档没在推 opacity」。
       // 若将来改成「玻璃件自己接收父级 alpha」（13 号 §6.2 末条，需用户裁决），
       // 这条断言可按当时口径恢复为「中间态 < 0.9」。
+      //
+      // 判据 = 输入框的**各级祖先**里不得出现 `opacity < 1.0` 的 `Opacity`
+      //（入场期间采样，此时若走了整层淡入必然 < 1.0）。
+      await tester.pump(); // 回到入场早期再采一次
+      await tester.pump(const Duration(milliseconds: 16));
+      final Iterable<Opacity> glassAncestors = tester.widgetList<Opacity>(
+        find.ancestor(
+          of: find.byType(AylaMessageInput),
+          matching: find.byType(Opacity),
+        ),
+      );
       expect(
-        revealLayerOpacity(tester, find.byType(AylaMessageInput)),
-        1.0,
-        reason: '玻璃子树不得走整层淡入（Impeller 会拒绝并刷屏）',
+        glassAncestors.every((Opacity o) => o.opacity == 1.0),
+        isTrue,
+        reason:
+            '玻璃子树不得走整层淡入（Impeller 会拒绝并刷屏）；'
+            '实测祖先 opacity = ${glassAncestors.map((Opacity o) => o.opacity).toList()}',
       );
       expect(tester.takeException(), isNull);
     });

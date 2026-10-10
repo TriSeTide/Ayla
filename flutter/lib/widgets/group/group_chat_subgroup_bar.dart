@@ -221,7 +221,8 @@ class _AylaGroupChatSubgroupBarState extends State<AylaGroupChatSubgroupBar> {
     final bool collapsed = _collapsed;
     final Duration duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
-        : AylaDurations.auroraqua; // disclosureVariants：300ms easeOut（reduced ⇒ 0）
+        : AylaDurations
+              .auroraqua; // disclosureVariants：300ms easeOut（reduced ⇒ 0）
 
     // 盒高：收起 = 折叠键 32；展开 = 选项卡行 min-height 40（底边恒在输入框上沿）
     return AnimatedContainer(
@@ -245,13 +246,56 @@ class _AylaGroupChatSubgroupBarState extends State<AylaGroupChatSubgroupBar> {
                   duration: duration,
                   curve: AylaCurves.auroraquaEaseOut,
                   opacity: collapsed ? 0 : 1,
-                  child: AnimatedSize(
+                  child: TweenAnimationBuilder<double>(
+                    // ★ 展开/收起 = 选项卡**自下而上滑入 / 向下滑出**
+                    //（用户 2026-10-09 三次强调「是从下往上滑入」「不是你这样裁切展开」）。
+                    //
+                    // web 事实源：`.group-chat-subgroup-panel` 是
+                    // `position: absolute; left:40px; right:calc(-1*sp3); bottom:0`
+                    //（`group.css:163–170`）的 `motion.div`，disclosure 变体动的是它的
+                    // **height**：`open: { height: "auto" }` / `closed: { height: 0 }`，
+                    // 300ms `--auroraqua-ease-out`（`auroraquaMotion.ts:89–95`），
+                    // 内联 `overflow: hidden`（`GroupChat.tsx:364`）。
+                    // 锚点在**下沿**（`bottom: 0`）⇒ 高度变化时**只有上沿在动**，
+                    // 里面的 `.group-chat-subgroup-tabs`（`min-height: 40px`）
+                    // 于是整条**自下而上升起**（收起时原路滑下去），
+                    // 与 `opacity 0↔1` 同步走完 300ms。
+                    //
+                    // ⚠️ 此前两种写法都不对，勿回退：
+                    // · `AnimatedSize(alignment: bottomCenter)` —— 子件被钉在**下沿**、
+                    //   盒子只做裁剪 ⇒ 选项卡「原地被揭开」，**零位移** =
+                    //   用户实报的「你这样裁切展开」；
+                    // · `AnimatedSize(alignment: topCenter)` —— 展开方向对了，但收起时
+                    //   子件被**瞬间**换成 `SizedBox(height: 0)` ⇒ 选项卡立刻消失，
+                    //   没有「滑下去」的过程（web 是 height 40→0 的连续补间）。
+                    //
+                    // 现写法：子件**始终挂着**（高度恒 40），只对盒子的 `heightFactor`
+                    // 0↔1 做隐式补间 —— 与 web 的 height 动画逐帧同义：
+                    // `Align(heightFactor: f, alignment: topCenter)` 把 40px 高的子件
+                    // 对齐到高 `40*f` 的盒内 ⇒ 子件上沿 = 盒上沿 = 下沿 − 40f
+                    // ⇒ f: 0→1 时子件**连续上移 40px**，并被逐步露出（收起反之）。
+                    // `ClipRect` = web 的 `overflow: hidden`（裁掉盒外部分）。
+                    // ⚠️ `begin` 必须与首帧的 `end` 同值：`TweenAnimationBuilder` 只在
+                    // **首次 build** 用 `begin`，之后从**当前值**补间到新的 `end`。
+                    // 若写成固定 `begin: 1`，而本件默认是**收起**（`_collapsed = true`）
+                    // ⇒ 挂载首帧会白播一次 1→0 的「收起」动画（web 无此帧：
+                    // `initial={false}`，tsx:361 ⇒ 首帧直接是 closed 态）。
+                    tween: Tween<double>(begin: collapsed ? 0 : 1, end: collapsed ? 0 : 1),
                     duration: duration,
-                    curve: AylaCurves.auroraquaEaseOut,
-                    alignment: Alignment.bottomCenter,
-                    child: collapsed
-                        ? const SizedBox(width: double.infinity, height: 0)
-                        : _tabsRow(collapsed),
+                    curve: AylaCurves.auroraquaEaseOut, // 300ms easeOut
+                    builder:
+                        (BuildContext context, double f, Widget? child) =>
+                            ClipRect(
+                              child: Align(
+                                // 子件钉在**上沿**：上沿随 heightFactor 上移
+                                alignment: Alignment.topCenter,
+                                heightFactor: f,
+                                child: child,
+                              ),
+                            ),
+                    // 子件挂在 `child` 上：补间期间**不重建**选项卡行
+                    //（横向滚动位置 / hover 态都留在原 State 里）。
+                    child: _tabsRow(collapsed),
                   ),
                 ),
               ),
@@ -299,7 +343,11 @@ class _AylaGroupChatSubgroupBarState extends State<AylaGroupChatSubgroupBar> {
           },
           itemBuilder: (BuildContext context, AylaNavHighlightSlot slot) {
             if (slot.index < widget.subgroups.length) {
-              return _subgroupTab(slot, widget.subgroups[slot.index], collapsed);
+              return _subgroupTab(
+                slot,
+                widget.subgroups[slot.index],
+                collapsed,
+              );
             }
             return _loadMoreTab(slot, collapsed);
           },
@@ -394,45 +442,56 @@ class _AylaGroupChatSubgroupBarState extends State<AylaGroupChatSubgroupBar> {
     required Widget child,
   }) {
     final bool active = slot.active;
-    return Semantics(
-      button: true,
-      selected: selected,
-      enabled: enabled,
-      label: semanticLabel,
-      child: Listener(
-        onPointerDown: (_) => slot.onPressedChanged(true),
-        onPointerUp: (_) => slot.onPressedChanged(false),
-        onPointerCancel: (_) => slot.onPressedChanged(false),
-        child: MouseRegion(
-          cursor: enabled
-              ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
-          onEnter: (_) {
-            slot.onHoverChanged(true);
-            // 扫光由**父级 hover** 驱动（auroraqua 161–166）：只有选中项被指到时直达高亮
-            if (active) slot.onSweep(true);
-          },
-          onExit: (_) {
-            slot.onHoverChanged(false);
-            if (active) slot.onSweep(false);
-          },
-          child: Focus(
-            focusNode: slot.focusNode,
-            canRequestFocus: enabled, // tabIndex={−1} / disabled
-            onKeyEvent: slot.onKey,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: enabled ? slot.onTap : null,
-              child: _TabBackground(
-                // 选中态自身底透明（底由容器级胶囊画）
-                active: active,
-                child: SizedBox(
-                  height: 32, // height: 32px
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AylaSpacing.sp3, // padding: 0 var(--sp-3)
+    // `button:disabled { cursor: not-allowed; opacity: 0.55 }`（base.css:343–346）
+    // —— `.group-chat-subgroup-tab` 在 web 是 `<button>`，两个 `disabled` 来源：
+    //   · 选项卡：`disabled={subgroupsCollapsed}`（GroupChat.tsx:381）
+    //   · 「加载更多子群」：`disabled={subgroupsCollapsed || subgroupPage.loading}`
+    //     （GroupChat.tsx:402）⇒ 加载中那 300ms 内它是**半透明**的 55%，
+    //     不是满不透明（`loading ? "加载中…" : …` 只换文案）。
+    // 折叠态下本条的 `AnimatedOpacity` 已把整行压到 0，故 0.55 只在
+    // 「展开且加载中」这一种可见状态上生效（与被点禁用的视觉一致）。
+    return Opacity(
+      opacity: enabled ? 1 : 0.55,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        enabled: enabled,
+        label: semanticLabel,
+        child: Listener(
+          onPointerDown: (_) => slot.onPressedChanged(true),
+          onPointerUp: (_) => slot.onPressedChanged(false),
+          onPointerCancel: (_) => slot.onPressedChanged(false),
+          child: MouseRegion(
+            cursor: enabled
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.basic,
+            onEnter: (_) {
+              slot.onHoverChanged(true);
+              // 扫光由**父级 hover** 驱动（auroraqua 161–166）：只有选中项被指到时直达高亮
+              if (active) slot.onSweep(true);
+            },
+            onExit: (_) {
+              slot.onHoverChanged(false);
+              if (active) slot.onSweep(false);
+            },
+            child: Focus(
+              focusNode: slot.focusNode,
+              canRequestFocus: enabled, // tabIndex={−1} / disabled
+              onKeyEvent: slot.onKey,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: enabled ? slot.onTap : null,
+                child: _TabBackground(
+                  // 选中态自身底透明（底由容器级胶囊画）
+                  active: active,
+                  child: SizedBox(
+                    height: 32, // height: 32px
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AylaSpacing.sp3, // padding: 0 var(--sp-3)
+                      ),
+                      child: Center(child: child),
                     ),
-                    child: Center(child: child),
                   ),
                 ),
               ),
@@ -518,12 +577,15 @@ class _AylaGroupChatSubgroupBarState extends State<AylaGroupChatSubgroupBar> {
                     width: 36,
                     height: 18,
                     child: AnimatedContainer(
-                      duration: AylaDurations.button, // transition background 200ms
-                      curve: AylaCurves.auroraqua, // var(--auroraqua-ease) = ease
+                      duration:
+                          AylaDurations.button, // transition background 200ms
+                      curve:
+                          AylaCurves.auroraqua, // var(--auroraqua-ease) = ease
                       decoration: BoxDecoration(
                         color: _handleHovered
                             ? const Color(0x599DBFE6) // rgba(157,191,230,.35)
-                            : AylaColors.glassBgStrong, // --glass-bg-strong(.78)
+                            : AylaColors
+                                  .glassBgStrong, // --glass-bg-strong(.78)
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(18),
                         ),
@@ -608,7 +670,8 @@ class _TabBackgroundState extends State<_TabBackground> {
         if (_hovered) setState(() => _hovered = false);
       },
       child: AnimatedContainer(
-        duration: AylaDurations.fast, // transition background 180ms ease-out（tab 档）
+        duration:
+            AylaDurations.fast, // transition background 180ms ease-out（tab 档）
         curve: AylaCurves.easeOut,
         decoration: BoxDecoration(
           color: color,
@@ -619,7 +682,6 @@ class _TabBackgroundState extends State<_TabBackground> {
     );
   }
 }
-
 
 // ======================= 样张 =======================
 
@@ -714,7 +776,14 @@ class _SubgroupBarSamplesState extends State<_SubgroupBarSamples> {
 
   static void _noop(AylaGroupChatSubgroupTab sg) {}
 
-  /// 舞台：375 宽窄屏宿主 + 模拟 .group-chat-compose-area（本件锚在它的上沿）。
+  /// 舞台：窄屏宿主 + 模拟 `.group-chat-compose-area`（本件锚在它的上沿）。
+  ///
+  /// ⚠️ 几何与**生产接线**（`pages/group_chat_page.dart`）保持同构，否则样张会失真：
+  /// · 条锚 `bottom: 0` 贴**输入区上沿**（web `group.css:152–161` 的 `bottom: 100%`）；
+  /// · 输入区**无外边距**（窄屏 `.composer` 无 margin，`app.css:3206` 只改内距）
+  ///   ⇒ 条底与输入区玻璃上沿**零缝**；
+  /// · `clipBehavior: Clip.none`：条入场与输入区同轨（web 同属一个 motion.div），
+  ///   t=0 时整条在盒下沿之外 20px，会被默认的 `Clip.hardEdge` 切掉。
   Widget _stage(String label, AylaGroupChatSubgroupBar bar) {
     return SizedBox(
       width: 420,
@@ -729,10 +798,28 @@ class _SubgroupBarSamplesState extends State<_SubgroupBarSamples> {
               data: MediaQuery.of(ctx).copyWith(size: const Size(375, 812)),
               child: SizedBox(
                 width: 375,
-                child: Stack(
-                  clipBehavior: Clip.none,
+                // 与生产接线（`pages/group_chat_page.dart`）同构：
+                // `Column[消息区(Stack), 输入区]` —— 条挂在**消息区** Stack 内、
+                // 锚 `bottom: 0`，而该 Stack 的下沿**就是**输入区的上沿
+                // ⇒ 把手的平底正好压在输入区玻璃上沿（web `bottom: 100%`）。
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    // 模拟输入区（web .group-chat-compose-area 的高度锚点）
+                    // 消息区（此处只给高度，样张聚焦子群条）
+                    SizedBox(
+                      height: 120,
+                      child: Stack(
+                        // 条入场与输入区同轨、t=0 时越界到盒外 20px ⇒ 必须放开裁剪
+                        clipBehavior: Clip.none,
+                        children: <Widget>[
+                          Positioned(left: 0, right: 0, bottom: 0, child: bar),
+                        ],
+                      ),
+                    ),
+                    // 输入区（web `.group-chat-compose-area` 的高度锚点）。
+                    // 排在条之后 ⇒ **后绘制**（web `.composer` 的 `z-index: 2` > 条的 1）
+                    // ⇒ 条入场时越界的那 20px 被它盖住，视觉即 web 的
+                    // 「从输入区后面升起来」。
                     AylaGlassSurface(
                       radius: AylaRadii.rCard,
                       padding: const EdgeInsets.all(AylaSpacing.sp3),
@@ -743,8 +830,6 @@ class _SubgroupBarSamplesState extends State<_SubgroupBarSamples> {
                         semanticLabel: '发消息（样张模拟输入区）',
                       ),
                     ),
-                    // 子群条：底边贴输入区上沿（web bottom: 100%）
-                    Positioned(left: 0, right: 0, bottom: 72, child: bar),
                   ],
                 ),
               ),

@@ -491,7 +491,7 @@ void main() {
           AylaGroupChatSubgroupTab(id: 'sg-3', name: '长名', unread: 120),
         ];
 
-    testWidgets('收起态：无选项卡 · 把手 48×32 · aria-expanded=false · 点把手回调一次', (
+    testWidgets('收起态：选项卡裁到 0 高（仍在树里）· 把手 48×32 · aria-expanded=false · 点把手回调一次', (
       WidgetTester tester,
     ) async {
       final List<bool> collapsedCalls = <bool>[];
@@ -512,14 +512,51 @@ void main() {
         ),
       );
 
-      // 收起态只有把手：选项卡（含子群名）不渲染
-      expect(find.text('默认组'), findsNothing);
+      // ## 收起态：选项卡**仍在树里**，但被裁到 0 高（web 同）
+      //
+      // 2026-10-09 三次返工修正：原断言是 `findsNothing`（收起 ⇒ 不渲染选项卡），
+      // 那是**旧实现**的形态 —— 但 web 不是这样：`.group-chat-subgroup-panel`
+      // 收起时是 `height: 0` + 内联 `overflow: hidden` + `aria-hidden={collapsed}`
+      // + `pointerEvents: none`（`auroraquaMotion.ts:89–95` 的 disclosure 变体
+      // `closed: { height: 0 }` + `GroupChat.tsx:364` 内联样式 + `:370`），
+      // **子节点始终挂在 DOM 里**（framer-motion 只补间 height）。
+      // 必须如此才能「自下而上滑入 / 向下滑出」—— 先卸载再挂载是滑不动的。
+      // ⇒ 现在锁的是 web 的**三条语义**而不是「有没有渲染」。
+      expect(
+        find.text('默认组'),
+        findsOneWidget,
+        reason: '收起态选项卡仍在树里（web：height:0 + overflow:hidden，节点不卸载）',
+      );
+      // ① 面板被裁到 0 高（= web 的 `height: 0` + `overflow: hidden`）
+      //    判据取**承载 heightFactor 的那个 Align** 的渲染高度：
+      //    ⚠️ 不能用「最近的 ClipRect」—— `SingleChildScrollView` 内部自带一个
+      //    ClipRect（视口 40 高），那会取到 40 而误判（本断言首版踩过）。
+      final Finder panelBox = find
+          .ancestor(
+            of: find.text('默认组'),
+            matching: find.byWidgetPredicate(
+              (Widget w) => w is Align && w.heightFactor != null,
+            ),
+          )
+          .first;
+      expect(
+        tester.getSize(panelBox).height,
+        0,
+        reason: '收起态面板高度必须是 0（web `closed: { height: 0 }`）',
+      );
+      // ② 不接收指针（= web 的 `pointerEvents: none` / 内层 IgnorePointer）
+      // ③ 对无障碍不可见（= web 的 `aria-hidden={collapsed}`）
+      final SemanticsHandle semantics = tester.ensureSemantics();
+      expect(
+        find.bySemanticsLabel('默认组'),
+        findsNothing,
+        reason: '收起态选项卡对 AT 不可见（web aria-hidden={collapsed}）',
+      );
       // 把手 48×32（group.css 201–202）
       final Rect handle = tester.getRect(find.byTooltip('展开子群'));
       expect(handle.width, 48);
       expect(handle.height, 32);
       // aria-expanded=false + aria-label（GroupChat.tsx:348–351）
-      final SemanticsHandle semantics = tester.ensureSemantics();
       final Finder handleIcon = find.descendant(
         of: find.byKey(AylaGroupChatSubgroupBar.collapseHandleKey),
         matching: find.byType(AylaIcon),
