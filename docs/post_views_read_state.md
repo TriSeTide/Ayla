@@ -74,6 +74,23 @@
    覆盖 `services.create_post` 的「group 归属 → 白名单=[group.id]」→ 群帖对群员不可见。
    修复：去掉 default（未传保持 None 走兜底）；`create_post` 对 group 可见但白名单为空直接报错。
 
+## Flutter 客户端实现位置（2026-10-11 补齐）
+
+> 本节登记 Flutter 侧（`Ayla/flutter/`）承载本文契约的**具体位置**，便于两端对账；
+> 语义与上文逐条一致，Unified 口径以本文为准。
+
+| 本文契约 | Flutter 实现 |
+|---|---|
+| 视口上报 `POST /posts/views/`（300ms 去抖批量） | `pages/group_posts_page.dart` 的 `_AylaPostViewProbe` + `_flushViews()`（阈值 0、底部 −5% 缓冲，同 `usePostViewTracking.ts`） |
+| `post.created` 非作者 ⇒ 群 `post_unread_count` +1（30s 幂等） | `core/ws/posts_frames.dart` 的 `_reconcilePost(bumpUnread: true)` |
+| `post.viewed` 本人 ⇒ 已读态 + 群未读 −1（按 postId 30s 去重） | 同文件的 `_applyViewed()` |
+| `adjustPostUnread`（非群不动 / 下限 0） | `state/chat_state.dart` 的 `AylaChatState.adjustPostUnread` |
+| 浏览上报的 **REST 响应不减红点**（红点只走 WS 一条路径） | 同 web：`_flushViews()` 成功后只 `markViewedBatch`，不动 `postUnreadCount` |
+| 群内列表未读跳转标签（↑/↓ N 条） | `pages/group_posts_page.dart` 的 `_unreadSplit()` + 两条 `.message-jump-tags` 覆层（`posts.css:1084–1086`：容器底 − (sp3 + 64)） |
+| 群未读红点显示位置（宽屏侧栏 / ServerRail / 窄屏群卡片 / 帖子 tab） | 既有实现均读会话摘要 `post_unread_count` ⇒ 随本轮的 WS 增减**自动热更新**（无需各自接线） |
+
+回归锁：`test/posts_unread_hot_update_test.dart`（23 例）。
+
 ## 迁移
 
 `posts.0005_post_view_count_postview`：`Post.view_count`（PositiveIntegerField, default 0）+ `PostView` 表。

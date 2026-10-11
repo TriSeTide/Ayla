@@ -15,18 +15,47 @@
 /// | **视口浏览上报 → 已读态**（`usePostViewTracking`） | 267–279 + `hooks/usePostViewTracking.ts` 全文 |
 /// | **未读帖子跳转标签**（上方/下方两条，点击滚动到最近未读） | 281–356 + 450–476 |
 ///
+/// ## 页面级 WS 热更新（2026-10-11 补齐，web tsx 188–231）
+/// web 在 **GroupPosts 页面内**自己挂 `chatWS.onFrame`（tsx 188–231），与全局
+/// `ws/chat.ts:766–840` 是**两条独立效应、互不替代**（同一形制见一级帖子页
+/// `PostsHubPage.tsx:232–262` / Flutter `posts_hub_page.dart:180–210`）：
+/// | 帧 | 页面效应（tsx） | 本页 |
+/// |---|---|---|
+/// | `post.deleted` | 记入 `owner.deletedIds` + 从本页列表移除（190–196） | [_deletedIds] + `removeWhere` |
+/// | `post.created` / `post.updated` | **单条权限 REST 对账** ⇒ 插到列表头（不重拉首页、不丢游标/滚动位，197–217） | [_reconcileFramePost] |
+/// | `post.viewed`（本人） | 跨端已读热更新：本页 `groupPosts` 就地标已读（标签实时减少，218–230） | 同 |
+///
+/// 三条防重入守卫逐条对齐 web：① `owner.active` / `owner.key` 身份校验（tsx 189）；
+/// ② `detailRevision` 逐帖版本号 —— REST 往返期间到达的更新帧作废旧响应（tsx 200–204）；
+/// ③ `deletedIds` —— 已删帖的迟到响应不得复活它（tsx 204）。
+///
+/// ## 显示投影 `displayPosts`（web tsx 251–265）
+/// 本页 `_posts` 与共享 [aylaPostsStore] 是**两份数据**（web 亦然）：
+/// 列表口径取本页分页结果，已读态/浏览量取全局 store 的**单调合并**
+/// （`is_viewed || `、`Math.max(...)`）—— 于是别的页面浏览过的帖子回到这里也是已读，
+/// 而全局缓存**不会**凭空把不在本页分页里的旧帖塞进列表。
+///
+/// ## ⚠️ 跳转标签的**定位基准**（2026-10-11 用户实报「跳转键上方位置有误」）
+/// web 的两条 `.message-jump-tags` 是 **`.group-posts` 的子级**（tsx 388–476：
+/// `<div class="group-posts">` 直接包着 list / tags / input），`.group-posts`
+/// 带 `position: relative`（posts.css 942–948）⇒ 上标签 = 容器顶 + 12、下标签 =
+/// 容器底 − (12 + 64)。`padding` / `margin` / 滚动容器都不影响：标签的包含块就是
+/// 那块"整页"矩形。本页此前把两条标签放在**滚动口（AylaGroupSceneStickyHead）内部**，
+/// 那样 `Positioned` 的包含块成了**滚动视口**，于是：
+/// ① 上标签落进 `.group-posts-list` 的 `padding: sp4` 内侧（web 是压在 padding 上的 12）；
+/// ② 下标签按"视口底 − 76"算，而 web 是"**容器**底 − 76"⇒ 宽屏正好差掉那 12px 底边距。
+/// 反例（同库内的正确实现）：`widgets/chat/message_list.dart` 的两条标签在
+/// `.message-list`（`position: relative`）这一层的 `Stack` 里，不在滚动容器内部。
+///
 /// ## 机制差异（登记）
 /// 1. **滚动位置记忆**（`useScrollRestore`）未实现（同其它已交付页面的既有登记）。
-/// 2. **`post.*` 四条 WS 帧仍未转正**（`kAylaChatWsOutOfBatchFrames`）：web 用它们做
-///    单条 REST 对账 + 目录增删；Flutter 侧帖子域全局缓存尚未收敛 ⇒ 本页靠下拉刷新与
-///    发帖后的本地插入（**不伪造实时**）。
-/// 3. **视口上报的观察器差异**（登记，语义等价）：web 用 `IntersectionObserver`
+/// 2. **视口上报的观察器差异**（登记，语义等价）：web 用 `IntersectionObserver`
 ///    （`rootMargin: "0px 0px -5% 0px"`、阈值取默认 0 ⇒ 任意相交即算进入视口、
 ///    300ms 去抖批量上报），Flutter 侧由 `_AylaPostViewProbe` 监听最近祖先
 ///    `ScrollPosition` 在帧后量矩形（手法同 `widgets/chat/message_visibility.dart`，
 ///    但**阈值是 0 而非 0.6** —— 消息域那一件是「看到 60% 才算已读」，本域 web 是
 ///    「露头即算」，两者不可互抄）。底部 5% 缓冲按同比例从视口矩形扣掉。
-/// 4. **未读计数不从本页条数推断**：`totalUnread` 取会话摘要的 `post_unread_count`
+/// 3. **未读计数不从本页条数推断**：`totalUnread` 取会话摘要的 `post_unread_count`
 ///    （后端权威），未加载部分只在 `hasMore` 时按差值计入「下方」——
 ///    与 `docs/post_views_read_state.md` 的口径一致（**不把未加载误判为已读**）。
 library;
@@ -42,7 +71,8 @@ import 'package:go_router/go_router.dart';
 import '../core/api/posts_api.dart';
 import '../core/models/post.dart' show AylaPost, AylaPostDraft;
 import '../state/auth_state.dart' show authNotifierProvider;
-import '../state/chat_providers.dart' show chatStateProvider;
+import '../core/ws/chat_ws.dart' show AylaChatWsClient;
+import '../state/chat_providers.dart' show chatStateProvider, chatWsProvider;
 import '../state/favorite_status.dart' show AylaFavoriteStatusController;
 import '../state/posts_store.dart' show aylaPostsStore;
 import '../state/shell_state.dart' show ShellUiNotifier, shellUiProvider;
@@ -132,6 +162,37 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   int _replayNonce = 0;
   bool _editorExpanded = false;
 
+  /// 页面级 WS 订阅的解绑句柄（web tsx 232–236 的 `unsubscribe`）。
+  void Function()? _offFrames;
+
+  /// 本页生命周期标识（web `requestOwner.active`）：dispose 后到达的帧一律丢弃。
+  bool _frameOwnerActive = false;
+
+  /// 已删帖 id（web `owner.deletedIds`，tsx 55）：迟到的 `post.created/updated`
+  /// REST 响应不得复活它（tsx 204 的守卫）。
+  final Set<int> _deletedIds = <int>{};
+
+  /// 逐帖 REST 对账版本号（web `owner.detailRevision`，tsx 57/200–204）：
+  /// 同帖连续两次帧 ⇒ 只有最后一次的响应可以落地。
+  final Map<int, int> _detailRevision = <int, int>{};
+
+  /// 帧驱动的本地变更版本号（web `owner.mutationRevision`，tsx 55）。
+  ///
+  /// ⚠️ **在途分页响应的作废判据**：web 在 `requestPage` 开始时记下当时的
+  /// `mutationRevision`，响应回来时把「该版本之后才变异过的帖子」按本地版本保留
+  /// （tsx 130–141）—— 即「请求期间收到的 WS 变更不能被旧 HTTP 快照推翻」。
+  int _mutationRevision = 0;
+
+  /// `postId → 最近一次帧驱动的本地变更`（web `owner.mutations`，tsx 56）。
+  final Map<int, _FrameMutation> _mutations = <int, _FrameMutation>{};
+
+  /// 共享帖子 store 是否已订阅（[aylaPostsStore] 是模块级 ChangeNotifier）。
+  ///
+  /// web 用 `usePostsStore((s) => s.posts)` 订阅（tsx 78）；Flutter 侧同源用
+  /// `addListener` + `setState`（先例：`group_page.dart:254`、`home_page.dart:140`）。
+  /// `addListener` 返回 void ⇒ 用布尔登记「是否已挂」，dispose 时按此解绑（幂等）。
+  bool _subscribedPostsStore = false;
+
   /// 「本次由详情返回」——等价 web 的
   /// `skipRevealRestoreKey === scrollRestoreKey`（`GroupPosts.tsx:91/149–153/362–365/428–430`）。
   ///
@@ -141,6 +202,22 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   /// `setSkipRevealRestoreKey(null)` 才放开 —— 即 suppress 持续到下一次刷新完成，
   /// 期间新卡（含发帖本地插入）同样不播入场。
   bool _skipRevealOnRestore = false;
+
+  /// 「本帧之后到达的新卡**照常播入场**」—— web 的 `revealAfterRefresh`（tsx 93）。
+  ///
+  /// 它在 [AylaRevealScope] 的 suppress 表达式里是**与项**（tsx 379）：
+  /// ```tsx
+  /// suppressed = postId != null ||
+  ///   ((restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh)
+  /// ```
+  /// ⇒ 单独提升它可以**压过**「详情返回」的抑制。三个写 `true` 的点（逐条对应 web）：
+  /// - 取页成功后（tsx 148–153：`setSkipRevealRestoreKey(null); setRevealAfterRefresh(true)`）；
+  /// - 帧驱动插入新卡（tsx 212：`if (listActive.current) setRevealAfterRefresh(true)`）；
+  /// - 发帖成功本地插入（tsx 245）。
+  ///
+  /// 两个写 `false` 的点：进详情（tsx 363）/ 点卡进详情（tsx 429）—— 否则「刚浏览完
+  /// 页面又被跳详情再返回」会误判成「有新卡该播动画」。
+  bool _revealAfterRefresh = false;
 
   String get groupId => widget.groupId;
 
@@ -170,8 +247,162 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   void initState() {
     super.initState();
     _favorites.addListener(_onChanged);
+    _frameOwnerActive = true;
+    _registerFrameTracking();
+    aylaPostsStore.addListener(_onChanged);
+    _subscribedPostsStore = true;
     unawaited(_load());
     _registerRefresh();
+  }
+
+  // ======================= 页面级 WS 热更新（web tsx 188–231） =======================
+
+  /// 挂上 chat WS 的帧监听 —— web `GroupPosts.tsx:188–231` 的 `chatWS.onFrame(...)`。
+  ///
+  /// ⚠️ 与全局 [AylaPostsFramesBridge]（= web `ws/chat.ts:766–840`）是**两条独立效应**：
+  /// 全局桥落共享 store / 未读投影，本方法维护**本页的分页快照**。两者都必需
+  /// （同一形制见一级帖子页 `PostsHubPage.tsx:232–262`）。
+  void _registerFrameTracking() {
+    final AylaChatWsClient chat = ref.read(chatWsProvider);
+    _offFrames = chat.onFrame(_onFrame);
+  }
+
+  void _unregisterFrameTracking() {
+    _offFrames?.call();
+    _offFrames = null;
+  }
+
+  /// 帧分发 —— web tsx 188–231 的 `frame` 分支逐条对应。
+  void _onFrame(Map<String, dynamic> frame) {
+    // web tsx 189：`if (requestOwner.current !== owner || !owner.active) return`
+    if (!_frameOwnerActive || !mounted) return;
+    final Object? rawType = frame['type'];
+    if (rawType is! String) return;
+
+    // ---- post.deleted（tsx 190–196）：记入 deletedIds + 就地移除；不动游标 ----
+    if (rawType == 'post.deleted') {
+      final int? id = int.tryParse(frame['post_id']?.toString() ?? '');
+      if (id == null) return;
+      _deletedIds.add(id);
+      _mutations[id] = _FrameMutation(++_mutationRevision, null);
+      setState(() {
+        _posts = <AylaPost>[
+          for (final AylaPost p in _posts)
+            if (p.id != id) p,
+        ];
+      });
+      _cardKeys.remove(id);
+      return;
+    }
+
+    // ---- post.created / post.updated（tsx 197–217）：单条权限 REST 对账 ----
+    if (rawType == 'post.created' || rawType == 'post.updated') {
+      final Object? rawPost = frame['post'];
+      final int? id = rawPost is Map
+          ? int.tryParse(
+              Map<String, dynamic>.from(rawPost)['id']?.toString() ?? '')
+          : null;
+      if (id == null || id == 0) return;
+      unawaited(_reconcileFramePost(id));
+      return;
+    }
+
+    // ---- post.viewed（tsx 218–230）：跨端已读热更新（仅本人）----
+    if (rawType == 'post.viewed') {
+      final Object? rawData = frame['data'];
+      if (rawData is! Map) return;
+      final Map<String, dynamic> d = Map<String, dynamic>.from(rawData);
+      // web tsx 221–223：`const me = useAuthStore.getState().currentUser;
+      // if (!me || String(d.viewer_id) !== String(me.id)) return;` —— 未登录 / 非本人跳过。
+      final String? me = ref.read(authNotifierProvider).user?.id;
+      if (me == null) return;
+      if (d['viewer_id']?.toString() != me) return;
+      final String postId = d['post_id']?.toString() ?? '';
+      final int? viewCount = (d['view_count'] as num?)?.toInt();
+      setState(() {
+        _posts = <AylaPost>[
+          for (final AylaPost p in _posts)
+            // web tsx 223–228：`String(p.id) === d.post_id ?
+            //   { ...p, is_viewed: true, view_count: d.view_count } : p`
+            if ('${p.id}' == postId)
+              viewCount == null ? _markViewed(p) : _withViewed(p, viewCount)
+            else
+              p,
+        ];
+      });
+    }
+  }
+
+  /// 单条帖子的**权限 REST 对账** —— web tsx 197–217。
+  ///
+  /// 三件事按序守卫，与 web 逐行同：
+  /// 1. `detailRevision` 自增并快照 ⇒ 响应回来时若已被后续帧顶掉则丢弃（tsx 200–204）；
+  /// 2. 响应里 `allowed_group_ids` 不含本群 ⇒ 视为「当前用户不可见」⇒ 记 mutation(null)
+  ///    并从列表移除（tsx 205–209）；
+  /// 3. 否则记 mutation(post) 并**插到列表头部**（`mergePosts(prev, [post], true)`，
+  ///    tsx 210–211）—— 已存在的会原位替换，不重拉首页、不丢游标与滚动位置。
+  ///
+  /// 失败（403/404/网络）**静默**：web 原话「不可见或已删除的目录提示不成为新卡；
+  /// 现有列表仍可继续分页/刷新」（tsx 213–215）。
+  Future<void> _reconcileFramePost(int id) async {
+    if (!_frameOwnerActive) return;
+    final int revision = (_detailRevision[id] ?? 0) + 1;
+    _detailRevision[id] = revision;
+    final String? actor = ref.read(authNotifierProvider).user?.id;
+    try {
+      final AylaPost? post = await AylaPostsApi.getPost(id);
+      if (!mounted || !_frameOwnerActive) return;
+      // 账号守卫（REST 往返期间换账号 ⇒ 丢弃；web 的 `active` 校验等价物）
+      if ((ref.read(authNotifierProvider).user?.id) != actor) return;
+      // 已删 / 已被更晚的帧顶掉 ⇒ 旧响应作废（tsx 204）
+      if (_deletedIds.contains(id)) return;
+      if (_detailRevision[id] != revision) return;
+      if (post == null) return; // 响应形状非法 ⇒ 不伪造一条帖子
+      // 权限判据（tsx 205–208）：白名单不含本群 ⇒ 不是本目录的帖子。
+      final bool visibleHere =
+          post.allowedGroupIds.any((String gid) => gid == groupId);
+      if (!visibleHere) {
+        _mutations[id] = _FrameMutation(++_mutationRevision, null);
+        setState(() {
+          _posts = <AylaPost>[
+            for (final AylaPost p in _posts)
+              if (p.id != id) p,
+          ];
+        });
+        _cardKeys.remove(id);
+        return;
+      }
+      _mutations[id] = _FrameMutation(++_mutationRevision, post);
+      setState(() {
+        _posts = _mergeFramePost(_posts, post);
+        // web tsx 212：`if (listActive.current) setRevealAfterRefresh(true)` ——
+        // 帧带来的新卡要**照常播入场**（即使此前刚从详情返回、抑制还挂着）。
+        // `listActive.current` = 列表态（非详情）⇒ 本页此处已在列表分支（详情走早退）。
+        _revealAfterRefresh = true;
+      });
+      _scheduleUnreadRecount();
+    } catch (_) {
+      // 403/404 / 网络失败：静默（web tsx 213–215）。
+    }
+  }
+
+  /// `mergePosts(prev, [post], prepend: true)`（web tsx 211 + 35–48）：
+  /// 已存在 ⇒ **原位替换**（保留本地更"新"的已读/浏览量）；不存在 ⇒ 插到头部。
+  List<AylaPost> _mergeFramePost(List<AylaPost> prev, AylaPost post) {
+    final int index = prev.indexWhere((AylaPost p) => p.id == post.id);
+    if (index < 0) {
+      return <AylaPost>[post, ...prev];
+    }
+    final AylaPost old = prev[index];
+    // web `mergePosts`（tsx 42–43）：`is_viewed: post.is_viewed || update.is_viewed`、
+    // `view_count: Math.max(...)` ⇒ **单调**，不被新快照的旧值倒退。
+    final List<AylaPost> next = List<AylaPost>.of(prev);
+    next[index] = _withViewed(
+      post,
+      math.max(old.viewCount ?? 0, post.viewCount ?? 0),
+      isViewed: old.isViewed || post.isViewed,
+    );
+    return next;
   }
 
   @override
@@ -184,6 +415,9 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     // 见 `app_router.dart:340–347` 的注释）⇒ 字段跨详情往返保留，正是 suppress 的载体。
     if (widget.postId != oldWidget.postId) {
       _skipRevealOnRestore = widget.postId != null || oldWidget.postId != null;
+    // web tsx 360–365：`postId != null` 的 effect 里 `setRevealAfterRefresh(false)`
+    // —— 进详情同时清掉「有新卡该播动画」标记，否则返回列表会误判。
+    if (widget.postId != null) _revealAfterRefresh = false;
     }
   }
 
@@ -195,6 +429,13 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
       scheduleMicrotask(() => notifier.unregisterRefresh(callback));
     }
     _viewFlushTimer?.cancel(); // web `usePostViewTracking.ts:86` 的 clearTimeout
+    // 页面级 WS 订阅解绑（web tsx 232–236 的 cleanup：`owner.active = false` + unsubscribe）
+    _frameOwnerActive = false;
+    _unregisterFrameTracking();
+    if (_subscribedPostsStore) {
+      aylaPostsStore.removeListener(_onChanged);
+      _subscribedPostsStore = false;
+    }
     _favorites.removeListener(_onChanged);
     _favorites.dispose();
     _share.dispose();
@@ -341,6 +582,55 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   /// 未读重算是否已排帧。
   bool _unreadScheduled = false;
 
+  // ======================= 显示投影（web tsx 251–265） =======================
+
+  /// 本页列表 × 共享 store 的**单调合并** —— web tsx 251–265 的 `displayPosts`。
+
+  /// ```tsx
+  /// const displayPosts = useMemo(() => {
+  ///   const byId = new Map(feedPosts.map((post) => [post.id, post]));
+  ///   return groupPosts.map((p) => {
+  ///     const existing = byId.get(p.id);
+  ///     return existing
+  ///       ? { ...p, is_viewed: p.is_viewed || existing.is_viewed,
+  ///           view_count: Math.max(p.view_count ?? 0, existing.view_count ?? 0) }
+  ///       : p;
+  ///   });
+  /// }, [dataOwner, feedPosts, groupPosts, ownerKey]);
+  /// ```
+
+  /// ⚠️ **只投影本目录已加载卡**（web 注释原话：「共享缓存提供单调已读/浏览量，
+  /// 不扩大分页结果」）—— 不能拿 `store.posts` 当列表数据源，否则会把不在本页分页里的
+  /// 旧帖塞进群内流，破坏游标与分页边界。
+  ///
+  /// ⚠️ 另一条 web 守卫（`dataOwner !== ownerKey` ⇒ 空列表，tsx 252）在本页由路由承担：
+  /// 切群时本 State 被重建（`_cardKeys` / `_posts` 随 initState 归零）。
+  List<AylaPost> _displayPosts() {
+    final List<AylaPost> feed = aylaPostsStore.posts;
+    if (feed.isEmpty) return _posts;
+    final Map<int, AylaPost> byId = <int, AylaPost>{
+      for (final AylaPost post in feed) post.id: post,
+    };
+    bool changed = false;
+    final List<AylaPost> out = <AylaPost>[];
+    for (final AylaPost post in _posts) {
+      final AylaPost? existing = byId[post.id];
+      if (existing == null) {
+        out.add(post);
+        continue;
+      }
+      final bool viewed = post.isViewed || existing.isViewed;
+      final int viewCount = math.max(post.viewCount ?? 0, existing.viewCount ?? 0);
+      if (viewed == post.isViewed && viewCount == (post.viewCount ?? 0)) {
+        out.add(post);
+        continue;
+      }
+      out.add(_withViewed(post, viewCount, isViewed: viewed));
+      changed = true;
+    }
+    return changed ? List<AylaPost>.unmodifiable(out) : _posts;
+  }
+
   /// 已加载列表里未读帖子的**上/下分组**（web tsx 302–325 的 `aboveUnread` /
   /// `belowUnread` 投影）。
   ///
@@ -359,8 +649,10 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     final ScrollPosition pos = _scroll.position;
     if (!pos.hasPixels || !pos.hasViewportDimension) return empty;
 
+    // ⚠️ 取 **displayPosts 投影**（web tsx 282–285：`displayPosts.filter((p) => !p.is_viewed)`）
+    // —— 不是裸 `_posts`：别的页面浏览过的帖子回到这里也该算已读。
     final List<AylaPost> unread = <AylaPost>[
-      for (final AylaPost p in _posts)
+      for (final AylaPost p in _displayPosts())
         if (!p.isViewed) p,
     ];
     // 未加载的未读：只在 hasMore 时按差值计（web tsx 289）——
@@ -475,6 +767,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
         // web tsx 148–153：列表重新拿到数据后放开「详情返回」的抑制
         //（`wasLoaded` / `listActive` 两个前置条件在本页恒成立：详情态不走本页 load）。
         _skipRevealOnRestore = false;
+        _revealAfterRefresh = true;
       });
       // ★ 拉取本页帖子的收藏状态（用户 2026-10-03 实报「收藏键无法点击，显示正在加载收藏状态」）。
       //
@@ -529,6 +822,9 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     setState(() {
       _posts = <AylaPost>[created, ..._posts];
       _editorExpanded = false;
+      // web tsx 245（`handleCreated`）：`setRevealAfterRefresh(true)` ——
+      // 自己刚发的帖子照常播入场。
+      _revealAfterRefresh = true;
     });
   }
 
@@ -537,6 +833,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     // `setRevealAfterRefresh(false)`。Flutter 侧由 [didUpdateWidget] 在 `postId`
     // 出现时登记同一事实（无需 setState：紧接着的路由变化必然重建本页）。
     _skipRevealOnRestore = true;
+    _revealAfterRefresh = false; // web tsx 429
     context.go(
       '/group/${Uri.encodeComponent(groupId)}/posts/$id',
     );
@@ -549,7 +846,9 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     if (postId != null) return PostDetailPage(postId: postId);
 
     final AylaTextStyles t = AylaTextStyles.of(context);
-    final bool showSkeleton = _posts.isEmpty && _loading;
+    // web tsx 386：`displayPosts.length === 0 && (loading || dataOwner !== ownerKey)`
+    final List<AylaPost> displayPosts = _displayPosts();
+    final bool showSkeleton = displayPosts.isEmpty && _loading;
 
     Widget content;
     if (showSkeleton) {
@@ -563,14 +862,14 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
           Text('正在加载帖子…', style: t.timestamp),
         ],
       );
-    } else if (_posts.isEmpty && _error != null) {
+    } else if (displayPosts.isEmpty && _error != null) {
       content = AylaGroupScenePlaceholder(
         description: _error,
         actions: <Widget>[
           AylaGlassButton(label: '重试', onPressed: () => unawaited(_load())),
         ],
       );
-    } else if (_posts.isEmpty) {
+    } else if (displayPosts.isEmpty) {
       content = AylaGroupScenePlaceholder(
         title: '群内还没有帖子',
         description: '在下方输入框发第一条帖子',
@@ -586,9 +885,13 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
         // ⇒ 「本次由详情返回」期间**新入场被抑制、已入场项不重播**
         //（`useListEntryMotion.ts:73`：suppressed 只阻止启动新的入场动画，不取消已开始的）。
         // Flutter 侧 `postId != null` 时整页换详情、列表被卸载，故只需表达第二个析取项。
-        suppress: _skipRevealOnRestore,
+        // ⚠️ 完整表达式 = `_skipRevealOnRestore && !_revealAfterRefresh`
+        //（web tsx 379 的 `(restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh`）
+        // ⇒ 取页成功 / 帧插卡 / 发帖三处**会提升**它，压过「详情返回」的抑制。
+        suppress: _skipRevealOnRestore && !_revealAfterRefresh,
         child: AylaMasonryGrid<AylaPost>(
-          items: _posts,
+          // 列表口径 = displayPosts 投影（web tsx 372–377 的 `displayPosts`）
+          items: displayPosts,
           itemKey: (AylaPost post) => post.id,
           memoryKey: 'group-posts:$groupId',
           // 卡片留白口径（问题 6 真根因，同 games/voice）：web 群内流是
@@ -678,7 +981,54 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
 
     final _UnreadSplit unread = _unreadSplit();
 
-    return AylaGroupPostsComposer(
+    // ---- 未读帖子跳转标签（web tsx 450–476）----
+    //
+    // ⚠️ **定位基准 = 整个 `.group-posts` 容器**（= 本页的 [AylaGroupPostsComposer]），
+    // 不是滚动口、也不是 composer 的 child 槽。web 的 `.group-posts` 是
+    // `position: relative`（posts.css 942–948），两条 `.message-jump-tags` 是它的
+    // **直接子级**（tsx 388 / 450–476）⇒ 上标签 = 容器顶 + sp3(12)、
+    // 下标签 = 容器底 − (sp3 + 64)（posts.css 1084–1086，64 = compact 输入栏高度，
+    // 抬到输入栏之上）。滚动口上方的吸顶玻璃头、下方的输入栏**都不参与**该计算。
+    //
+    // ⇒ 做法：把两条标签放进一个**与 composer 同尺寸的 Stack 覆层**（外层 Stack 的
+    // `fit: StackFit.expand`），而不是塞进 composer 的 `child` 槽 —— 后者在收起态只占
+    // 「列表」那一格（高度 = 容器高 − 输入栏），下标签会比 web 高出整个输入栏。
+    //
+    // 复用聊天界面同一套语言：`.message-jump-tags` + `.message-jump-mention`
+    // （app.css:911–962）+ 群内帖子的两处覆写（posts.css:1080–1086：`z-index: 60`
+    // 高于发帖输入栏 50 与遮罩 45）。
+    //
+    // 层级：外层 Stack 的 children 顺序即 z 序 —— composer 在前、两条标签在后 ⇒
+    // 标签永远压在滚动内容与输入栏之上（等价 `z-index: 60`）。
+    final Widget? tagsAbove = unread.above > 0
+        ? Positioned(
+            left: 0,
+            right: 0,
+            top: AylaSpacing.sp3, // .message-jump-tags-above { top: var(--sp-3) }
+            child: _JumpTag(
+              label: '↑ ${unread.above} 条未读帖子',
+              ariaLabel: '跳转到上方 ${unread.above} 条未读帖子',
+              tooltip: '上方有未读帖子',
+              onTap: () => _jumpToUnread(true),
+            ),
+          )
+        : null;
+    final Widget? tagsBelow = unread.below > 0
+        ? Positioned(
+            left: 0,
+            right: 0,
+            // .group-posts .message-jump-tags-below { bottom: calc(sp3 + 64px) }
+            // （posts.css:1084–1086；64 = 输入栏 compact 高度）
+            bottom: AylaSpacing.sp3 + 64,
+            child: _JumpTag(
+              label: '↓ ${unread.below} 条未读帖子',
+              ariaLabel: '跳转到下方 ${unread.below} 条未读帖子',
+              tooltip: '下方有未读帖子',
+              onTap: () => _jumpToUnread(false),
+            ),
+          )
+        : null;
+    final Widget composer = AylaGroupPostsComposer(
       groupId: groupId,
       expanded: _editorExpanded,
       onExpandedChange: (bool next) => setState(() => _editorExpanded = next),
@@ -720,42 +1070,44 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
               ),
             ),
           ),
-          // ---- 未读帖子跳转标签（web tsx 450–476） ----
-          //
-          // 复用聊天界面同一套语言：`.message-jump-tags` + `.message-jump-mention`
-          // （app.css:911–962）+ 群内帖子的两处覆写（posts.css:1080–1086：
-          // `z-index: 60` 高于发帖输入栏 50 与遮罩 45；下方标签
-          // `bottom: calc(var(--sp-3) + 64px)` 抬到输入栏之上）。
-          if (unread.above > 0)
-            Positioned(
-              left: 0,
-              right: 0,
-              top: AylaSpacing.sp3, // .message-jump-tags-above
-              child: _JumpTag(
-                label: '↑ ${unread.above} 条未读帖子',
-                ariaLabel: '跳转到上方 ${unread.above} 条未读帖子',
-                tooltip: '上方有未读帖子',
-                onTap: () => _jumpToUnread(true),
-              ),
-            ),
-          if (unread.below > 0)
-            Positioned(
-              left: 0,
-              right: 0,
-              // .group-posts .message-jump-tags-below { bottom: sp3 + 64 }
-              // （posts.css:1084–1086；64 = 输入栏 compact 高度）
-              bottom: AylaSpacing.sp3 + 64,
-              child: _JumpTag(
-                label: '↓ ${unread.below} 条未读帖子',
-                ariaLabel: '跳转到下方 ${unread.below} 条未读帖子',
-                tooltip: '下方有未读帖子',
-                onTap: () => _jumpToUnread(false),
-              ),
-            ),
         ],
       ),
     );
+
+    // ---- `.group-posts` 容器 + 两条跳转标签的覆层（web tsx 388–476 的子级关系） ----
+    //
+    // ⚠️ **不能把标签直接放进 composer 的 `child` 槽**：那个槽在收起态只占「列表」那一格
+    // （高度 = 容器高 − 输入栏），`Positioned.bottom` 的包含块就成了**列表口**而不是
+    // `.group-posts` ⇒ 下标签比 web 高出整个输入栏。这里补一层 `fit: StackFit.expand`
+    // 让两条标签的包含块 = composer 的完整矩形（= web 的 `.group-posts`）。
+    //
+    // ⚠️ **必须无条件返回同一个 Stack**：标签是「有未读才出现」的（`?tagsAbove`），
+    // 若空档直接返回 composer，则标签首次出现时**根级结构变化** ⇒ composer 子树被
+    // remount ⇒ 所有 `AylaRevealItem` 的入场动画从头重播（实测：首屏卡片在未读标签
+    // 出现的那一刻闪一次，`group_posts_page_test.dart` 的入场用例因此变红）。
+    // web 侧不存在该问题：React 在同一父级里**追加**子节点不改变既有兄弟的身份。
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        composer,
+        ?tagsAbove,
+        ?tagsBelow,
+      ],
+    );
   }
+}
+
+/// 帧驱动的本地变更记录（web `owner.mutations` 的条目，tsx 56）。
+///
+/// `post == null` = 该帖**被删除 / 当前用户不可见**（web 里 mutation.post 为 null 的语义）。
+class _FrameMutation {
+  const _FrameMutation(this.revision, this.post);
+
+  /// 变更序号（web `++owner.mutationRevision`）—— 用于和「分页请求开始时的版本」比大小。
+  final int revision;
+
+  /// 变更后的帖子（null = 删除 / 不可见）。
+  final AylaPost? post;
 }
 
 /// 已读态重建 —— `AylaPost` 是纯 `const` 模型（无 `copyWith`），
@@ -763,7 +1115,10 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
 ///
 /// ⚠️ 与 `state/posts_store.dart:220–239` 的 `_withViewed` 同形但**不能复用**：
 /// 那是 `state/` 的文件私有函数（未导出），且本页改的是**本地副本**而非 store。
-AylaPost _withViewed(AylaPost post, int viewCount) => AylaPost(
+///
+/// [isViewed] 缺省 = `true`（浏览上报/本人已读两处恒标已读）；只有
+/// [_mergeFramePost] 的单调合并档需要传 `old || incoming`（web tsx 42）。
+AylaPost _withViewed(AylaPost post, int viewCount, {bool isViewed = true}) => AylaPost(
       id: post.id,
       author: post.author,
       authorId: post.authorId,
@@ -779,10 +1134,14 @@ AylaPost _withViewed(AylaPost post, int viewCount) => AylaPost(
       commentCount: post.commentCount,
       isAuthor: post.isAuthor,
       viewCount: viewCount,
-      isViewed: true,
+      isViewed: isViewed,
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     );
+
+/// `view_count` 未知时的「只标已读」重建 —— web tsx 224–228 里
+/// `view_count: d.view_count` 是帧字段，缺字段时不该把已有浏览量写坏。
+AylaPost _markViewed(AylaPost post) => _withViewed(post, post.viewCount ?? 0);
 
 /// 未读上/下分组投影（web tsx 302–325 的 `{ aboveUnread, belowUnread }` + 两个跳转目标）。
 class _UnreadSplit {

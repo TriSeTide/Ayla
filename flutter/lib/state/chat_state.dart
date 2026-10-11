@@ -9,13 +9,21 @@
 /// | [bumpUnread] | `chat.ts:182–216`（seq 驱动的可追踪未读序号投影） |
 /// | [markReadSeqs] / [clearUnread] / [decrementUnread] | `chat.ts:218–258` |
 /// | [setLastMessage] / [setPin] / [removeConversation] | `chat.ts:160–180` |
+/// | [adjustPostUnread] | `chat.ts:260–267`（群未读帖子数增减；非群会话不动，下限 0） |
 /// | [aylaSortPrivateByActivity] | `chat.ts:275–288`（置顶 → 活跃时间 → 稳定原序） |
 ///
 /// ## 未实现（登记）
 /// - `loading` / `error` / `lastFetched`：web 由 `useSocialPage` 写入；Flutter 的列表加载态归
 ///   `AylaPagedList`（`state/paged_list.dart`）⇒ 本类不做第二份加载态；
-/// - `isChatStale(60s)` 的跨页缓存短路：Flutter 无跨页缓存（同 `paged_list.dart` 的登记）；
-/// - `adjustPostUnread`：唯一消费者是帖子域 WS 帧（`ws/chat.ts:784–787`）⇒ 属帖子域批次。
+/// - `isChatStale(60s)` 的跨页缓存短路：Flutter 无跨页缓存（同 `paged_list.dart` 的登记）。
+///
+/// ## `adjustPostUnread` 的消费者（2026-10-11 补齐）
+/// web 里它**只**被帖子域的两条 WS 分支调用：`post.created`（非作者 +1，`chat.ts:779–788`）
+/// 与 `post.viewed`（本人 + 去重后 −1，`chat.ts:826–835`）；
+/// Flutter 侧同源消费方 = `core/ws/posts_frames.dart` 的 [AylaPostsFramesBridge]。
+/// 浏览上报（REST）**不减红点** —— 与 web 同：红点递减只走 WS 一条路径，
+/// 否则同一条浏览会被 REST 响应与群组/本人两条 WS 广播重复递减（web 已修 Bug #3，
+/// 见 `docs/post_views_read_state.md`）。
 library;
 
 import 'package:flutter/foundation.dart';
@@ -269,6 +277,47 @@ class AylaChatState extends ChangeNotifier {
               )
             : c,
     ];
+    notifyListeners();
+  }
+
+  /// 群未读帖子数增减 —— web `adjustPostUnread`（`chat.ts:260–267`）。
+  ///
+  /// ```ts
+  /// adjustPostUnread: (convId, delta) => set((state) => ({
+  ///   conversations: state.conversations.map((c) => {
+  ///     if (c.id !== convId || c.type !== "group") return c;
+  ///     const next = Math.max(0, (c.post_unread_count ?? 0) + delta);
+  ///     return { ...c, post_unread_count: next };
+  ///   }),
+  /// }))
+  /// ```
+  ///
+  /// 逐条对应：① **非群会话不动**（`type !== "group"`）；② 下限 0（`Math.max(0, …)`）；
+  /// ③ 未加载的会话静默不改（map 命中不到就是 no-op —— Flutter 侧同：找不到即早退，
+  /// **不凭空造一条摘要**）。
+  ///
+  /// 消费者是帖子域的 WS 帧桥（见文件头说明）。浏览上报（REST）**不走这里**。
+  void adjustPostUnread(String convId, int delta) {
+    bool changed = false;
+    final List<AylaConversationSummary> next = <AylaConversationSummary>[];
+    for (final AylaConversationSummary c in _conversations) {
+      if (c.id != convId || c.type != AylaConversationType.group) {
+        next.add(c);
+        continue;
+      }
+      // web 用 `?? 0` 兜旧后端缺失字段的情形；Flutter 模型同口径。
+      final int current = c.postUnreadCount ?? 0;
+      final int adjusted = current + delta;
+      final int value = adjusted < 0 ? 0 : adjusted;
+      if (value == current) {
+        next.add(c);
+        continue;
+      }
+      next.add(c.copyWith(postUnreadCount: value));
+      changed = true;
+    }
+    if (!changed) return;
+    _conversations = next;
     notifyListeners();
   }
 
