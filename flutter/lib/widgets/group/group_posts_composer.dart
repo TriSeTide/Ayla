@@ -209,12 +209,18 @@ class _AylaGroupPostsComposerState extends State<AylaGroupPostsComposer> {
       offset: Offset.zero,
       duration: const Duration(milliseconds: 200),
       curve: AylaCurves.easeOut,
-      child: GestureDetector(
+      child: MouseRegion(
+        // 指针：`.group-posts-scrim`（`GroupPosts.tsx:479` + `posts.css:952–957`）
+        // 是只挂 onClick 的 `<div>`、**无 cursor 声明** ⇒ 浏览器默认箭头。
+        // Flutter 侧不声明时 `defer` 会继续往外找（命中页面可点件即假显手型）。
+        cursor: SystemMouseCursors.basic,
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => _setExpanded(false), // onClick ⇒ setEditorExpanded(false)
         child: const ColoredBox(
           color: AylaColors.overlayDim, // rgba(70, 91, 146, .25)
         ),
+      ),
       ),
     );
   }

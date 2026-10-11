@@ -35,7 +35,6 @@ import '../state/auth_state.dart';
 import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../state/chat_providers.dart'
     show chatWsProvider, elysiaProfileProvider;
-import '../state/favorite_status.dart';
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
 import '../state/room_providers.dart';
@@ -43,7 +42,7 @@ import '../state/shell_state.dart';
 import '../theme/app_theme.dart' show AylaTextStyles;
 import '../theme/tokens.dart';
 import '../widgets/base/directory_controls.dart'
-    show AylaFavoriteState, AylaHistoryControlsData;
+    show AylaHistoryControlsData;
 import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsNarrow;
 import '../widgets/base/resource_image.dart' show mediaContentUrl;
@@ -73,7 +72,6 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
   ShellUiNotifier? _shell;
   AylaLiveRoomSession? _session;
   AylaPagedList<AylaDirectoryLiveEntry>? _directory;
-  final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
 
   /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
@@ -105,7 +103,6 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       });
       return;
     }
-    _favorites.addListener(_onChanged);
     _session = AylaLiveRoomSession(
       channelId: widget.channelId,
       liveState: ref.read(liveStateProvider),
@@ -150,8 +147,6 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     });
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
-    _favorites.removeListener(_onChanged);
-    _favorites.dispose();
     _viewerSheet?.removeListener(_onChanged);
     _viewerSheet?.dispose();
     _viewerSheet = null;
@@ -420,11 +415,16 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
       onSendDanmaku: session.sendDanmaku,
-      onToggleFavorite: (bool next) =>
-          unawaited(_favorites.toggle('live', widget.channelId)),
-      // `AylaLiveRoomBody.favoriteState` 是 **bool?**（组件内映射到收藏键的 state 档）。
-      favoriteState: _favorites.stateOf('live', widget.channelId) ==
-          AylaFavoriteState.favorited,
+      // ⚠️ 根因 A（2026-10-08 修）：本页此前**建了页面级 `_favorites` 却从不调 `load`**
+      // ⇒ 头部收藏键永远停在 unknown（禁用 +「正在加载收藏状态」），正是用户实报的
+      // 「部分收藏键仍然无法点击…点刷新键又能点了」（刷新从别的路径把状态带进来）。
+      // web 侧不存在这类接线缺口：`LiveRoomBody.tsx:260/328` 只给
+      // `<FavoriteButton targetType="live" targetId={channel.id} compact />`，
+      // 加载由收藏键自己和 `useFavoriteStatuses.ts:12–16` 承担。
+      // ⇒ Flutter 侧同样改为**自给自足档**：收藏键自己 retain + load + toggle，
+      // 页面级 `_favorites` 已随之删除（web 没有对应的页面级收藏状态）。
+      favoriteTargetType: 'live',
+      favoriteTargetId: widget.channelId,
       onShare: () => unawaited(aylaOpenShareSheet(
         context,
         payload: AylaSharePayload.live(

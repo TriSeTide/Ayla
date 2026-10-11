@@ -1389,10 +1389,16 @@
   width: 100%;
 }
 
-/* 整页持有滚动；列保持自然高度，卡片阴影由外沿留白容纳。 */
+/* 整页持有滚动；列保持自然高度，卡片阴影由外沿留白容纳。
+
+   顶内沿 = var(--sidebar-gutter)（2026-10-09 用户裁决「web 也一起改了」）：
+   此前是 var(--sp-6)=24，而左侧玻璃侧栏是 `margin: var(--sidebar-gutter)`（group.css:700）
+   ⇒ 侧栏卡顶边 = 顶栏底 + 12，内容区首卡顶边 = 顶栏底 + 24，**首卡比侧栏低 12px**，
+   与用户实报的「内容区卡片顶部没对齐左边」同源。两端口径一起改。
+   横向 sp6 / 底部 sp8 不动。 */
 @media (min-width: 769px) {
   .group-info {
-    padding: var(--sp-6) var(--sp-6) var(--sp-8);
+    padding: var(--sidebar-gutter) var(--sp-6) var(--sp-8);
   }
 
   .group-info-layout {

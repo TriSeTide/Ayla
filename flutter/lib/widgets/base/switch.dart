@@ -348,6 +348,19 @@ class _AylaSwitchState extends State<AylaSwitch> {
           child: shell,
         ),
       );
+    } else {
+      // `ownTap: false` = 行装配档（web 的 `<label>` 包控件，整行转发点击）
+      // —— 本体仍要表达自己的指针：`ProfilePage.tsx:266–277` 的 `<button role="switch">`
+      // 与群信息域的同族钮都是 `<button>` ⇒ `base.css:340` pointer / 343 not-allowed。
+      // 不挂时 `MouseCursor.defer` 会越过本体继续往外找（行上的手型/页面可点件），
+      // 禁用本体就会错显手型。⚠️ 本层**不吃指针**（无手势），行上手势照常生效。
+      shell = MouseRegion(
+        opaque: false,
+        cursor: _enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.forbidden,
+        child: shell,
+      );
     }
 
     if (!widget.ownSemantics) return shell;

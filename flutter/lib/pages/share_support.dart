@@ -19,6 +19,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api/chat_api.dart';
 import '../core/models/chat_message.dart'
@@ -26,6 +27,7 @@ import '../core/models/chat_message.dart'
 import '../core/models/conversation.dart';
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../core/models/user_public.dart' show AylaUserPublic;
+import '../state/auth_state.dart' show authNotifierProvider;
 import '../state/paged_list.dart';
 import '../widgets/base/overlays.dart';
 import '../widgets/base/share.dart';
@@ -126,6 +128,25 @@ class AylaShareController extends ChangeNotifier {
         sharePayload: request.payload,
       ),
     );
+  }
+}
+
+/// 从 context 安全读「当前用户 id」（自给自足档用；无 ProviderScope ⇒ null）。
+///
+/// 为什么需要它：`AylaShareButton` 的自给自足档（2026-10-09 用户裁决，对齐 web
+/// `ShareButton.tsx`）由**组件自己**打开弹窗，而弹窗需要 `currentUserId` 才能把
+/// 「私聊自己」显示成「我」（`share.dart` 的 `AylaShareTarget.privateDisplayName`）。
+/// web 侧从 `useAuthStore` 直接读；Flutter 侧等价物是根容器，但
+/// `ProviderScope.containerOf` 在**没有 ProviderScope 的宿主**（组件画布、
+/// 纯 widget 测试的 `MaterialApp(home:)`）会抛 `StateError: No ProviderScope found`
+/// ⇒ 这里显式兜住并返回 null（**不伪造用户**；弹窗照常可用，只是不显示「我」）。
+String? aylaShareCurrentUserIdOf(BuildContext context) {
+  try {
+    final ProviderContainer container =
+        ProviderScope.containerOf(context, listen: false);
+    return container.read(authNotifierProvider).user?.id;
+  } on StateError {
+    return null;
   }
 }
 

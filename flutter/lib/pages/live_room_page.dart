@@ -24,13 +24,12 @@ import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../state/chat_providers.dart'
     show chatWsProvider, elysiaProfileProvider;
 import '../state/cursor_history.dart';
-import '../state/favorite_status.dart';
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
 import '../state/room_providers.dart';
 import '../state/shell_state.dart';
 import '../widgets/base/directory_controls.dart'
-    show AylaFavoriteState, AylaHistoryControlsData;
+    show AylaHistoryControlsData;
 import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsNarrow;
 import '../widgets/live/live_channel_snapshot.dart';
@@ -60,7 +59,6 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
   /// 最后一次 build 的窄屏判定（`dispose` 里读不到 MediaQuery ⇒ 在 build 里记下；
   /// 视图分离的「窄屏 + 直播中 ⇒ 进小窗」判定要用它，见 [AylaLiveRoomSession.detachView]）。
   bool _narrow = false;
-  final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
 
   /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
@@ -82,7 +80,6 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       });
       return;
     }
-    _favorites.addListener(_onChanged);
     _session = AylaLiveRoomSession(
       channelId: widget.channelId,
       liveState: ref.read(liveStateProvider),
@@ -98,7 +95,6 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     )..addListener(_onChanged);
     unawaited(_session!.start());
     unawaited(_directory!.load());
-    _favorites.load('live', <String>[widget.channelId]);
     // shell notifier 必须在 initState 取好：`dispose 里 ref 不可用`
     // （实测 Riverpod 直接抛 “Cannot use ref after the widget was disposed”）。
     _shell = ref.read(shellUiProvider.notifier);
@@ -125,8 +121,6 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     });
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
-    _favorites.removeListener(_onChanged);
-    _favorites.dispose();
     _viewerSheet?.removeListener(_onChanged);
     _viewerSheet?.dispose();
     _viewerSheet = null;
@@ -234,10 +228,12 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
       onSendDanmaku: session.sendDanmaku,
-      onToggleFavorite: (bool next) =>
-          unawaited(_favorites.toggle('live', widget.channelId)),
-      // `AylaLiveRoomBody.favoriteState` 是 **bool?**（组件内映射到收藏键的 state 档）。
-      favoriteState: _isFavorited(),
+      // 自给自足档（web `LiveRoomBody.tsx:260/328`：只给 targetType/targetId）——
+      // 收藏键自己 retain + load + toggle；本页原先把这三个接线都写在页面里
+      // （含 `initState` 的显式 `load`），随结构性修复一并删除 ——
+      // web 的页面层**没有**收藏状态，只有收藏键自带的那一份。
+      favoriteTargetType: 'live',
+      favoriteTargetId: widget.channelId,
       onShare: () => unawaited(aylaOpenShareSheet(
         context,
         payload: AylaSharePayload.live(
@@ -270,9 +266,4 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
           )
         : body;
   }
-
-  /// 是否已收藏（web 收藏键 compact 的 state 档；unknown ⇒ false，与组件内映射一致）。
-  bool _isFavorited() =>
-      _favorites.stateOf('live', widget.channelId) ==
-      AylaFavoriteState.favorited;
 }

@@ -25,8 +25,21 @@ import '../../theme/app_theme.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import '../base/pagination_footer.dart';
+import '../base/reveal.dart';
 
 /// 搜索结果分组：标题（可隐藏）+ 子项 + 三态页脚。
+///
+/// ## 逐条浮入（`useListEntryMotion`，`SearchPage.tsx:119`）
+///
+/// web 的 selector 是
+/// `".search-row, .typed-result-card, .search-group .stable-pagination-footer .btn"`：
+/// - `.search-row`（用户行）与 `.typed-result-card`（群/帖/桌游/语音/直播卡）
+///   ⇒ 由 `search_page.dart` 的六个分组逐项包 [AylaRevealItem] 表达
+///   （Flutter 的列表容器在页面层，件本身不知道下标）；
+/// - `.search-group .stable-pagination-footer .btn`（**组内页脚按钮**）⇒ 本件自持，
+///   下标由调用方经 [footerRevealIndex] 传入（web 的下标是**整棵 root 的 DOM 顺序**，
+///   跨组连续；件这一层算不出全局位次）。
+///   `null` = 不挂（画布样张等无页面上下文的用法）。
 class AylaSearchResultGroup extends StatelessWidget {
   const AylaSearchResultGroup({
     super.key,
@@ -41,6 +54,7 @@ class AylaSearchResultGroup extends StatelessWidget {
     this.moreLabel = '查看更多',
     this.retryLabel = '重试',
     this.loadingLabel = '加载中…',
+    this.footerRevealIndex,
   });
 
   /// 分组名（用于标题与页脚 aria-label）。
@@ -71,6 +85,9 @@ class AylaSearchResultGroup extends StatelessWidget {
   final String moreLabel;
   final String retryLabel;
   final String loadingLabel;
+
+  /// 页脚按钮的逐条浮入下标（web 全局 DOM 顺序位次）；null = 不挂。
+  final int? footerRevealIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -122,14 +139,32 @@ class AylaSearchResultGroup extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: t.caption.copyWith(color: AylaColors.destructive),
                   ),
-                AylaGlassButton(
-                  label: label,
-                  variant: AylaGlassButtonVariant.ghost,
-                  onPressed: loading ? null : onMore,
-                  semanticLabel: message != null
-                      ? '重试加载$title'
-                      : '加载更多$title',
-                ),
+                // web selector 的第三段是 `.search-group .stable-pagination-footer .btn`
+                // —— **只有按钮**参与逐条浮入（`SearchPage.tsx:119`），错误文案不在其中。
+                // 下标（全局 DOM 顺序位次）由调用方经 [footerRevealIndex] 传入；
+                // null ⇒ 不挂（无页面上下文，如画布样张）。
+                if (footerRevealIndex == null)
+                  AylaGlassButton(
+                    label: label,
+                    variant: AylaGlassButtonVariant.ghost,
+                    onPressed: loading ? null : onMore,
+                    semanticLabel: message != null
+                        ? '重试加载$title'
+                        : '加载更多$title',
+                  )
+                else
+                  AylaRevealItem(
+                    fadeGlass: false,
+                    index: footerRevealIndex!,
+                    child: AylaGlassButton(
+                      label: label,
+                      variant: AylaGlassButtonVariant.ghost,
+                      onPressed: loading ? null : onMore,
+                      semanticLabel: message != null
+                          ? '重试加载$title'
+                          : '加载更多$title',
+                    ),
+                  ),
               ],
             ),
           ),

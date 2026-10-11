@@ -269,6 +269,7 @@ class _MoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _HoverBuilder(
+      disabled: busy,
       builder: (BuildContext context, bool hovered) {
         final bool active = hovered || expanded;
         return Semantics(
@@ -334,9 +335,12 @@ class _MoreButton extends StatelessWidget {
 
 /// 悬浮状态构建器（避免为每个按钮写一遍 StatefulWidget）。
 class _HoverBuilder extends StatefulWidget {
-  const _HoverBuilder({required this.builder});
+  const _HoverBuilder({required this.builder, this.disabled = false});
 
   final Widget Function(BuildContext, bool hovered) builder;
+
+  /// 禁用档（web `disabled={busy}` ⇒ `base.css:343 cursor: not-allowed`）。
+  final bool disabled;
 
   @override
   State<_HoverBuilder> createState() => _HoverBuilderState();
@@ -347,10 +351,16 @@ class _HoverBuilderState extends State<_HoverBuilder> {
 
   @override
   Widget build(BuildContext context) {
-    // `.conv-more-btn`（app.css:627–634）在 web 是 <button>
-    // ⇒ base.css:340 全局 pointer（该选择器自身无 cursor 声明）。
+    // `.conv-more-btn`（app.css:627–642）在 web 是 `<button type="button">`
+    // （`ConversationMoreMenu.tsx:124–127`）⇒ `base.css:340` 全局 `cursor: pointer`
+    // （该选择器自身无 cursor 声明）；`disabled={busy}` ⇒ `base.css:343` not-allowed。
+    // ⚠️ `busy` 由 `_MenuTrigger.busy` 决定 —— 该件只在 `_HoverBuilder` 里拿到
+    // hovered，故禁用档由构造方通过 [disabled] 传入（默认 false）。
+    final bool clickable = !widget.disabled;
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
+      cursor: clickable
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.forbidden,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: widget.builder(context, _hovered),
@@ -433,6 +443,12 @@ class _MenuOverlayState extends State<_MenuOverlay> {
     return Stack(
       children: <Widget>[
         // 外点关闭层（覆盖全屏；translucent 让滚动仍可传递）
+        //
+        // 指针（2026-10-09 核查，**刻意不改**）：web 用 document 级 pointerdown 关闭菜单，
+        // 菜单外**没有**任何覆盖元素 ⇒ 落在菜单外的指针保持页面原有 cursor。
+        // Flutter 侧本层不声明 cursor ⇒ `MouseCursor.defer` 会按命中链继续往外找
+        // （下层可点件仍是手型），与 web 同义 —— 故**不加** `basic`：
+        // 它会把下层所有可点件的手型一起抹掉（反向缺陷）。
         Positioned(
           left: 0,
           top: 0,
@@ -607,7 +623,12 @@ class _MenuPanelState extends State<_MenuPanel> {
         }
         return KeyEventResult.ignored;
       },
-      child: GestureDetector(
+      child: MouseRegion(
+        // 面板本体：web `.conv-menu`（app.css:643–661）是 `<div>` 且**无 cursor 声明**
+        // ⇒ 菜单面/分隔空白处是浏览器默认箭头（菜单项各自是 `<button>` ⇒ 手型）。
+        // 显式 `basic` 防止 `defer` 继续往外找（会命中行/卡的手型而假显可点）。
+        cursor: SystemMouseCursors.basic,
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {}, // 面板内点击不冒泡到外点关闭层
         child: Stack(
@@ -656,6 +677,7 @@ class _MenuPanelState extends State<_MenuPanel> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

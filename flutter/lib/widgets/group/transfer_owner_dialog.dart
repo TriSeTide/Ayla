@@ -200,6 +200,15 @@ class _AylaTransferOwnerDialogState extends State<AylaTransferOwnerDialog> {
         color: const Color(0x40465B92), // rgba(70,91,146,.25)
         alignment: Alignment.center,
         padding: const EdgeInsets.all(AylaSpacing.sp4),
+        // ⚠️ **指针缺口（2026-10-09 第 5 轮登记，跨域移交，本处未改）**：
+        // `.group-transfer-overlay`（`GroupInfo.tsx:926` + `app.css:3894–3902`）是只挂
+        // `onClick` 的 `<div>`、**无 cursor 声明** ⇒ web 遮罩上（卡外区域）是浏览器默认箭头。
+        // Flutter 侧本层**没有指针层** ⇒ `MouseCursor.defer` 沿命中链继续往外找，
+        // 落到弹层之下的页面可点件时**假显手型**。
+        // 修法就一行：本 `GestureDetector` 外包
+        // `MouseRegion(cursor: SystemMouseCursors.basic)`。
+        // **未改原因**：`widgets/group/transfer_owner_dialog.dart` 属并行 agent 的
+        // 禁改范围，按纪律登记移交（见 `docs/flutter/13-工作进度与待办.md` §10.1）。
         child: GestureDetector(
           // 点遮罩关闭（busy 时不关）
           onTap: busy ? null : onClose,

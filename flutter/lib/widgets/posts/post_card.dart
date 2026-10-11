@@ -33,8 +33,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/media/media_signer.dart' show MediaVariant;
 import '../../core/models/post.dart';
+import '../../core/models/share_payload.dart' show AylaSharePayload;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
+import '../../state/favorite_status.dart';
 import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
@@ -141,6 +143,9 @@ class AylaPostCard extends StatefulWidget {
     this.favoriteError,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
+    this.favoriteTargetType,
+    this.favoriteTargetId,
+    this.favoriteController,
     this.onShare,
     this.previewOnly = false,
     this.action,
@@ -176,6 +181,21 @@ class AylaPostCard extends StatefulWidget {
 
   /// 收藏状态加载失败 → 重试拉取。
   final VoidCallback? onRetryFavoriteStatus;
+
+  // ---- 自给自足档（对齐 web `PostCard.tsx:145`：只给 targetType/targetId）----
+
+  /// 收藏目标类型（web `targetType="post"`）。
+  ///
+  /// 与 [favoriteTargetId] 同时给出 ⇒ 底排收藏键**自己加载自己**
+  /// （`FavoriteButton.tsx:22` + `useFavoriteStatuses.ts:12–16`），
+  /// 上面四项注入参数被忽略；不传 ⇒ 完全保持既有注入档行为。
+  final String? favoriteTargetType;
+
+  /// 收藏目标 id（web `targetId={post.id}`）。
+  final String? favoriteTargetId;
+
+  /// 共享收藏控制器（不传 ⇒ 收藏键自建私有实例）。
+  final AylaFavoriteStatusController? favoriteController;
 
   /// 分享入口（页面注入：打开 ShareSheet）。
   final VoidCallback? onShare;
@@ -495,6 +515,16 @@ class _AylaPostCardState extends State<AylaPostCard> {
             if (widget.detail) const SizedBox(width: AylaSpacing.sp4),
             if (widget.action != null)
               widget.action!
+            else if (widget.favoriteTargetType != null &&
+                widget.favoriteTargetId != null)
+              // **自给自足档**（web `PostCard.tsx:145`）：收藏键自己 retain + load + toggle
+              // ⇒ 页面漏接线也不会停在「加载中」。
+              AylaFavoriteButton(
+                targetType: widget.favoriteTargetType!,
+                targetId: widget.favoriteTargetId!,
+                controller: widget.favoriteController,
+                compact: true, // compact：32×32 无文字、图标 16
+              )
             else
               AylaFavoriteButton(
                 state: widget.favoriteState,
@@ -511,7 +541,18 @@ class _AylaPostCardState extends State<AylaPostCard> {
               // 转发键 `.icon-btn-40` 40×40，同排却不等大，判为错误 ⇒ 统一取 32×32 +
               // 图标 16，与左侧收藏键同尺寸；`AylaShareButton` 默认即 32）。
               label: '分享帖子',
+              // ★ 自给自足档（**用户 2026-10-09 裁决**，对齐 web）：
+              // web `PostCard.tsx:146–153` 的 `<ShareButton payload={...}/>` **无条件渲染
+              // 且永远可点**（`ShareButton.tsx` 内部自己 createPortal 开 ShareSheet，
+              // 不依赖页面注入）⇒ 本卡把 payload 一并交出去：`onShare` 传了就走旧注入档，
+              // **没传也不会再落到禁用**（此前页面漏传 ⇒ `onPressed == null`
+              // ⇒ `buttons.dart:176–178` 给 forbidden 指针 = 用户实报的「悬停变禁止」）。
               onPressed: widget.onShare,
+              // 惰性构造：**按下那一刻**才算负载。
+              // `AylaSharePayload.post` 会对正文做 `\s+` 正则归一（实测长正文 ≈53µs/次），
+              // 而底排分享键在每张卡、每次 build 都重建 ⇒ 若在这里直接求值，
+              // 50 卡列表每帧多花约 2.6ms。改成闭包后与 web 同为「点开才构造」。
+              payloadBuilder: () => _sharePayload(mediaList),
             ),
             ],
           ],
@@ -540,6 +581,34 @@ class _AylaPostCardState extends State<AylaPostCard> {
           children: <Widget>[main, footer],
         ),
       ),
+    );
+  }
+
+  /// 底排分享键的负载（web `PostCard.tsx:146–153` 的 `postSharePayload(...)` 调用）。
+  ///
+  /// 逐条对齐 web 入参：
+  /// - `id / title / body / group` = 帖子的同名字段（`title`/`body` 在模型里恒非 null，
+  ///   已是空串兜底，等价 web 的 `?? ""`）；
+  /// - **封面回退链**（web 原话）：
+  ///   `mediaList[0]?.media?.thumbnail || (mediaList[0]?.media ? mediaContentUrl(...) : null)`
+  ///   —— 首图有 thumbnail 就用它，否则用 `mediaContentUrl(media_id)`，
+  ///   首图整个缺失则 null。
+  ///   ⚠️ 与帖子详情页 `post_detail_page.dart:118–125` 的 `aylaPostSharePayloadFor`
+  ///   **有意不同**：那里只传 thumbnail（其注释说明「mediaContentUrl 产出绝对地址，
+  ///   会被 normalizeCover 判非法而归零」）；**本卡的 web 事实源确实是这条 || 回退链**
+  ///   （`PostCard.tsx:149`），故照抄。两处的 `normalizeCover` 都会把非 `/` 开头者归零 ⇒
+  ///   兜底串最终同样落到 null，行为与 web 一致。
+  AylaSharePayload _sharePayload(List<AylaMediaDescriptor> mediaList) {
+    final String? cover = mediaList.isEmpty
+        ? null
+        : (mediaList.first.thumbnail ??
+            mediaContentUrl(mediaList.first.mediaId));
+    return AylaSharePayload.post(
+      id: widget.post.id.toString(),
+      title: widget.post.title,
+      body: widget.post.body,
+      group: widget.post.groupId,
+      cover: cover,
     );
   }
 

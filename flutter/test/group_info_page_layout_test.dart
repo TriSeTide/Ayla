@@ -6,7 +6,7 @@
 /// |---|---|---|
 /// | `group.css` | 1382–1390 | `.group-info { height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); width: 100% }` |
 /// | `group.css` | 1392 | 注释原文「整页持有滚动；列保持自然高度，卡片阴影由外沿留白容纳」 |
-/// | `group.css` | 1393–1401 | `@media (min-width: 769px)` ⇒ `padding: var(--sp-6) var(--sp-6) var(--sp-8)`（24/24/24/32）· `.group-info-layout { flex: none }` |
+/// | `group.css` | 1394–1402 | `@media (min-width: 769px)` ⇒ `padding: var(--sidebar-gutter) var(--sp-6) var(--sp-8)`（12/24/24/32）· `.group-info-layout { flex: none }`。⚠️ **顶档是 `--sidebar-gutter` 而非 `--sp-6`**：2026-10-09 用户裁决「web 也一起改了」，让内容区首卡顶边与左侧玻璃侧栏卡（`group.css:700` 的 `margin: var(--sidebar-gutter)`）齐平。修前为 `var(--sp-6)` ⇒ 首卡比侧栏低 12px |
 /// | `GroupInfo.tsx` | 392–408 | `!conv` 的加载骨架 / 错误态**也返回在 `<div class="group-info">` 内** |
 /// | `GroupInfo.tsx` | 410–412 | 正常档 `<div class="group-info"> > <div class="group-info-layout">` |
 /// | `group.css` | 2235–2240 | `.group-info-actions-row { margin-top: var(--sp-3) }`（资料卡内动作行上间距 12） |
@@ -348,7 +348,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('宽屏 ≥769：24 / 24 / 24 / 32（padding: sp6 sp6 sp8）', (
+    testWidgets('宽屏 ≥769：12 / 24 / 24 / 32（padding: gutter sp6 sp8）', (
       WidgetTester tester,
     ) async {
       await pumpPage(tester, kWide);
@@ -358,9 +358,11 @@ void main() {
       );
       expect(
         view.padding,
+        // 顶 = --sidebar-gutter(12)（2026-10-09 用户裁决「web 也一起改了」：
+        // 首卡顶边与左侧玻璃侧栏卡齐平）；横向 sp6 / 底部 sp8 未动。
         const EdgeInsets.fromLTRB(
           AylaSpacing.sp6,
-          AylaSpacing.sp6,
+          AylaSpacing.sidebarGutter,
           AylaSpacing.sp6,
           AylaSpacing.sp8,
         ),
@@ -368,7 +370,7 @@ void main() {
 
       final Rect side = tester.getRect(find.byKey(AylaGroupInfoLayout.sideKey));
       expect(side.left, AylaSpacing.sp6);
-      expect(side.top, AylaSpacing.sp6);
+      expect(side.top, AylaSpacing.sidebarGutter);
       // 右列右沿 = 视口宽 − sp6
       final Rect main = tester.getRect(find.byKey(AylaGroupInfoLayout.mainKey));
       expect(
@@ -409,8 +411,9 @@ void main() {
           );
 
       // 769 是 CSS min-width: 769px 的边界（AylaBreakpoints.isNarrow 是 ≤768）
+      // 宽屏顶档 = --sidebar-gutter(12)（2026-10-09 用户裁决），窄屏 = sp3(12)
       await tester.pumpWidget(probe(769));
-      expect(find.text('${AylaSpacing.sp6}'), findsOneWidget);
+      expect(find.text('${AylaSpacing.sidebarGutter}'), findsOneWidget);
 
       await tester.pumpWidget(probe(768));
       expect(find.text('${AylaSpacing.sp3}'), findsOneWidget);
@@ -435,7 +438,10 @@ void main() {
       final SingleChildScrollView view = tester.widget<SingleChildScrollView>(
         pageScrollView(),
       );
-      expect(view.padding!.resolve(TextDirection.ltr).top, AylaSpacing.sp6);
+      expect(
+        view.padding!.resolve(TextDirection.ltr).top,
+        AylaSpacing.sidebarGutter,
+      );
       // ⚠️ 骨架的 frost-pulse 是无限动画 ⇒ 不能 pumpAndSettle
       expect(tester.takeException(), isNull);
     });
@@ -453,7 +459,10 @@ void main() {
       final SingleChildScrollView view = tester.widget<SingleChildScrollView>(
         pageScrollView(),
       );
-      expect(view.padding!.resolve(TextDirection.ltr).top, AylaSpacing.sp6);
+      expect(
+        view.padding!.resolve(TextDirection.ltr).top,
+        AylaSpacing.sidebarGutter,
+      );
       expect(tester.takeException(), isNull);
     });
 

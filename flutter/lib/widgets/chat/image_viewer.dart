@@ -326,7 +326,12 @@ class _AylaImageViewerState extends State<AylaImageViewer>
           label: _list.length > 1
               ? '图片查看：${_index + 1}/${_list.length}'
               : (widget.alt.isNotEmpty ? '图片查看：$widget.alt' : '图片查看'),
-          child: GestureDetector(
+          child: MouseRegion(
+            // 指针：`.image-viewer`（`app.css:1642–1653`）**无 cursor 声明**、也不是
+            // `<button>` ⇒ 浏览器默认箭头（整层遮罩点空白关闭）。
+            // Flutter 侧不声明时 `defer` 会继续往外找 ⇒ 遮罩上会跟着底下的可点件显示手型。
+            cursor: SystemMouseCursors.basic,
+            child: GestureDetector(
             // 点遮罩空白关闭（stage / 操作条各自 stopPropagation）
             behavior: HitTestBehavior.opaque,
             onTap: widget.onClose,
@@ -354,6 +359,9 @@ class _AylaImageViewerState extends State<AylaImageViewer>
                           const Spacer(),
                           GestureDetector(
                             // .image-viewer-stage：点内容不关闭；多条目时横滑切图
+                            // 指针：`.image-viewer-stage`（`app.css:1666–1671`）**无 cursor 声明**
+                            // ⇒ web 的默认箭头由外层 `.image-viewer` 承担（本层只是吞并点击，
+                            // 图片本体也没写 cursor）。这里继承外层即可 ⇒ **不重复声明**。
                             onTap: () {},
                             onHorizontalDragStart: _canSwipe ? _onDragStart : null,
                             onHorizontalDragUpdate: _canSwipe ? _onDragUpdate : null,
@@ -472,6 +480,7 @@ class _AylaImageViewerState extends State<AylaImageViewer>
               ),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -607,7 +616,15 @@ class _AylaImageViewerState extends State<AylaImageViewer>
             button: true,
             enabled: canSave,
             label: '保存',
-            child: GestureDetector(
+            child: MouseRegion(
+              // `ImageViewer.tsx:485–490` 的 `.image-viewer-save` 是
+              // `<button type="button" disabled={saving || isLocal || !current.media}>`
+              // ⇒ `base.css:340` pointer / `base.css:343` not-allowed
+              //（`app.css:1764–1768` 只写盒模型与图标间距）。
+              cursor: canSave
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.forbidden,
+              child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: canSave ? () => _save() : null,
               child: Opacity(
@@ -633,6 +650,7 @@ class _AylaImageViewerState extends State<AylaImageViewer>
                   ],
                 ),
               ),
+            ),
             ),
           ),
         ],

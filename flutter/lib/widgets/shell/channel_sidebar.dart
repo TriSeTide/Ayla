@@ -87,7 +87,6 @@ import '../../layout/create_sheet_forms.dart'
 import '../base/dashed_border.dart';
 import '../base/dialogs.dart' show AylaConfirmDialog;
 import '../base/directory_controls.dart';
-import '../base/overlays.dart' show aylaOverlayEntry;
 import '../base/primitives.dart';
 import '../base/resource_image.dart';
 import '../base/reveal.dart';
@@ -95,7 +94,7 @@ import '../base/tab_badge.dart';
 import '../base/tooltip.dart';
 import '../group/subgroup_dialog.dart'
     show AylaSubGroupDialog, AylaSubGroupDialogState;
-import 'create_sheet.dart' show AylaCreateSheet;
+import 'create_sheet.dart' show AylaCreateSheet, AylaRootOverlay;
 
 // ======================= 尺寸常量（逐条对应 web 行号） =======================
 
@@ -999,7 +998,6 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     _scroll.removeListener(_markLayersDirty);
     _scroll.dispose();
     _tracker.dispose();
-    _removeDialogEntry();
     super.dispose();
   }
 
@@ -1007,10 +1005,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
 
   // ---- 弹窗的 root Overlay 宿主（tsx 541–601 的四个 `position: fixed` 弹层） ----
 
-  /// 当前弹窗宿主（一次最多一个 entry；内部按条件叠放各弹窗）。
-  OverlayEntry? _dialogEntry;
-
-  /// 按 web 的四个条件决定是否需要在 Overlay 上挂弹窗。
+  /// 按 web 的四个条件决定是否需要在根 Overlay 上挂弹窗。
   ///
   /// `widget.playing` 即 web 的 `present`（tsx 541 / 547 / 558 / 588 都写成
   /// `{present && …}`）—— 面板退场时不显示弹窗。
@@ -1021,98 +1016,62 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
           _showVoiceCreate ||
           _showLiveCreate);
 
-  /// 弹窗状态变更的统一入口：`setState` + 同步 root Overlay 上的宿主。
+  /// 弹窗状态变更的统一入口：`setState`（宿主由 [build] 声明式装配）。
+  void _setDialogState(VoidCallback fn) => setState(fn);
+
+  /// 根 Overlay 上的弹窗宿主（web 四个弹层都是 `createPortal(document.body)`）。
   ///
-  /// ⚠️ **不要在 `build` 里排 postFrame 调它**：那会让每次 build 都多一个
-  /// postFrame 回调，`pumpAndSettle` 因此多跑帧 —— 实测会打乱既有用例的
-  /// 滚动时序（task-1 的三条计数回归锁当场变红）。只在状态**真的变化**时同步。
-  void _setDialogState(VoidCallback fn) {
-    setState(fn);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_dialogVisible) {
-        _removeDialogEntry();
-        return;
+  /// 见 [_openDialogHost] 的注释：挂**根 Overlay**，不是「最近的 Overlay」。
+  Widget _dialogHost() => AylaChannelSidebarDialogs(
+    dialog: _dialog,
+    confirmDelete: _confirmDelete,
+    busy: _busy,
+    error: _dialogError,
+    showVoiceCreate: _showVoiceCreate,
+    showLiveCreate: _showLiveCreate,
+    // Lazy evaluation (2026-10-02): these two children used to be unconditional
+    // constructor arguments, so opening the subgroup dialog also allocated a
+    // voice/live form widget (ConsumerStatefulWidget in create_sheet_forms.dart;
+    // it never mounts and issues no request, but it is needless allocation and it
+    // freezes the current groupId into the widget instance).
+    // AylaChannelSidebarDialogs.build only inserts the child when its flag is true
+    // (tsx 541 / 547) -> defer evaluation with a Builder, matching the three
+    // independent conditions web renders (tsx 541 / 547 / 558).
+    // Builder instead of `? :`: the ternary needs the field type widened to
+    // Widget?, which would change this widget public constructor contract
+    // (named params may only be added, never changed).
+    voiceCreateChild: Builder(
+      builder: (BuildContext _) => _buildVoiceCreateForm(),
+    ),
+    liveCreateChild: Builder(
+      builder: (BuildContext _) => _buildLiveCreateForm(),
+    ),
+    onCloseDialog: () {
+      if (_busy) return; // tsx 564
+      _setDialogState(() {
+        _dialog = null;
+        _dialogError = null;
+      });
+    },
+    onConfirmDialog: _confirmSubgroupDialog,
+    onDeleteDialog: () {
+      final AylaSubGroupDialogState? state = _dialog;
+      // tsx 582–584：只有 edit 态才进二次确认。
+      if (state != null && state.isEdit) {
+        _setDialogState(() => _confirmDelete = state.subgroup);
       }
-      if (_dialogEntry == null) {
-        _openDialogHost();
-        return;
-      }
-      _dialogEntry?.markNeedsBuild();
-    });
-  }
-
-  void _removeDialogEntry() {
-    _dialogEntry?.remove();
-    _dialogEntry = null;
-  }
-
-  /// 把四个弹窗挂到 **root Overlay** —— web 的它们都是 `position: fixed`
-  /// （`.subgroup-dialog-overlay` `group.css:2131` / `.create-sheet-overlay`
-  /// `private.css:185`）⇒ 相对**视口**定位；库内对 fixed 的既有约定见
-  /// `base/overlays.dart:13–15`，范本 `pages/share_support.dart:135–166`。
-  void _openDialogHost() {
-    if (_dialogEntry != null || !_dialogVisible) return;
-    final OverlayEntry entry = aylaOverlayEntry(
-      builder: (BuildContext ctx) => AylaChannelSidebarDialogs(
-        dialog: _dialog,
-        confirmDelete: _confirmDelete,
-        busy: _busy,
-        error: _dialogError,
-        showVoiceCreate: _showVoiceCreate,
-        showLiveCreate: _showLiveCreate,
-        // Lazy evaluation (2026-10-02): these two children used to be unconditional
-        // constructor arguments, so opening the subgroup dialog also allocated a
-        // voice/live form widget (ConsumerStatefulWidget in create_sheet_forms.dart;
-        // it never mounts and issues no request, but it is needless allocation and it
-        // freezes the current groupId into the widget instance).
-        // AylaChannelSidebarDialogs.build only inserts the child when its flag is true
-        // (tsx 541 / 547) -> defer evaluation with a Builder, matching the three
-        // independent conditions web renders (tsx 541 / 547 / 558).
-        // Builder instead of `? :`: the ternary needs the field type widened to
-        // Widget?, which would change this widget public constructor contract
-        // (named params may only be added, never changed).
-        voiceCreateChild: Builder(
-          builder: (BuildContext _) => _buildVoiceCreateForm(),
-        ),
-        liveCreateChild: Builder(
-          builder: (BuildContext _) => _buildLiveCreateForm(),
-        ),
-        onCloseDialog: () {
-          if (_busy) return; // tsx 564
-          _setDialogState(() {
-            _dialog = null;
-            _dialogError = null;
-          });
-        },
-        onConfirmDialog: _confirmSubgroupDialog,
-        onDeleteDialog: () {
-          final AylaSubGroupDialogState? state = _dialog;
-          // tsx 582–584：只有 edit 态才进二次确认。
-          if (state != null && state.isEdit) {
-            _setDialogState(() => _confirmDelete = state.subgroup);
-          }
-        },
-        onCloseConfirm: () {
-          if (_busy) return; // tsx 595
-          _setDialogState(() {
-            _confirmDelete = null;
-            _dialogError = null;
-          });
-        },
-        onConfirmDelete: () => unawaited(_confirmDeleteSubgroup()),
-        onCloseVoiceCreate: _handleVoiceCreated,
-        onCloseLiveCreate: _closeLiveCreate,
-      ),
-    );
-    _dialogEntry = entry;
-    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：预览/测试宿主
-    // （`preview_theme.dart:55` 的 `Overlay`）可能套在 `MaterialApp` **外面**，
-    // 加 `rootOverlay` 会把弹窗挂到那层 ⇒ entry 的祖先链断在 Overlay，
-    // `FocusScope` 断言失败（实测）。真实 app 里最近的 Overlay 就是
-    // `MaterialApp` Navigator 的那个（= root）。
-    Overlay.of(context).insert(entry);
-  }
+    },
+    onCloseConfirm: () {
+      if (_busy) return; // tsx 595
+      _setDialogState(() {
+        _confirmDelete = null;
+        _dialogError = null;
+      });
+    },
+    onConfirmDelete: () => unawaited(_confirmDeleteSubgroup()),
+    onCloseVoiceCreate: _handleVoiceCreated,
+    onCloseLiveCreate: _closeLiveCreate,
+  );
 
   /// web `SubGroupDialog.onConfirm`（tsx 568–581）—— add / edit 走不同请求，
   /// 成功后统一 `handleCreated`。
@@ -1490,7 +1449,10 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     // 字体加载、滚动、展开动画、切选中项都会改变几何。
     _measureCapsule();
 
-    return Padding(
+    // 四个 `position: fixed` 弹层（tsx 541–601）：挂**根 Overlay**，
+    // 与侧栏卡**并列**，不受本卡 backdrop-filter 的 stacking context 约束
+    // （web：`createPortal(…, document.body)`）。
+    final Widget card = Padding(
       // `.channel-sidebar { margin: var(--sidebar-gutter) }`（group.css 700）
       padding: const EdgeInsets.all(_SidebarMetrics.gutter),
       child: AylaGlassSurface(
@@ -1573,12 +1535,25 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
         ),
       ),
     );
+
+    // 弹层宿主：与 [card] 并列（顺序无关 —— overlay child 画在根 Overlay 顶层）。
+    if (!_dialogVisible) return card;
+    return Stack(
+      children: <Widget>[
+        card,
+        AylaRootOverlay(builder: (BuildContext _) => _dialogHost()),
+      ],
+    );
   }
 
   // ---- 群名头（tsx 527–530；group.css 705–721） ----
 
   Widget _buildHead(_PanelData d) {
-    return GestureDetector(
+    return MouseRegion(
+      // `ChannelSidebar.tsx:527` 是 `<button type="button" className="channel-sidebar-head">`
+      // ⇒ `base.css:340` 全局 `button { cursor: pointer }`（`group.css:705–721` 只写盒模型）。
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onOpenInfo,
       child: Padding(
@@ -1604,6 +1579,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
             const _SidebarGlyph(_SidebarGlyphKind.chevronRight, size: 16),
           ],
         ),
+      ),
       ),
     );
   }
@@ -2178,6 +2154,10 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
     return AylaTooltip(
       message: tooltip,
       child: MouseRegion(
+      // 三个槽位（编辑笔 / ＋ / 三角）在 web 都是 `<button>`（tsx 274/349/457 等）
+      // ⇒ `base.css:340` 全局 pointer。`inButtonGroup` 的分支走 `AylaPressScale`
+      // （其公共壳已给 click）；**非按钮组分支**是裸 GestureDetector ⇒ 在此补齐。
+      cursor: SystemMouseCursors.click,
       // ① **钮自身**高亮（独立身份）② **行底**联动 —— web 878–881 里任一钮 hover
       // 都会把词条底点亮 .18；按钮级（扫光）仍只认按钮本体，故不设 button。
       onEnter: (_) {
@@ -2316,6 +2296,10 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               // tsx 440–444：编辑态每行一个笔（`flex: none`，**不是浮层**）
               if (_editing)
                 MouseRegion(
+                  // `ChannelSidebar.tsx:441` 是 `<button type="button" className=
+                  // "channel-subgroup-edit-btn">` ⇒ `base.css:340` 全局 pointer
+                  // （`group.css:1084–1101` 只写盒模型与 hover 底）。
+                  cursor: SystemMouseCursors.click,
                   onEnter: (_) => _setHovered(row: sel),
                   onExit: (_) => _setHovered(row: null),
                   child: GestureDetector(
@@ -2935,7 +2919,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
       child: Semantics(
         button: true,
         label: semanticLabel ?? text,
-        child: GestureDetector(
+        child: MouseRegion(
+          // `ChannelSidebar.tsx:496/501` 的 `.channel-subgroup-more` / `-add` 都是
+          // `<button type="button">` ⇒ `base.css:340` 全局 pointer
+          // （`group.css:1102–1145` 只写盒模型与 hover 底）。
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
           child: AylaDashedBorder(
@@ -2975,6 +2964,7 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
               ),
             ),
           ),
+        ),
         ),
       ),
     );

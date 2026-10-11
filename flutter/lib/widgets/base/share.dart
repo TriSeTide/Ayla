@@ -28,12 +28,21 @@
 
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/models/share_payload.dart';
+// ⚠️ **本件 → pages 的反向依赖**（用户 2026-10-09 裁决明确授权）：
+// 自给自足档要复用 `share_support.dart` 的 [AylaShareController] + [aylaOpenShareSheet]。
+// `share_support.dart` 本身 import 本件（取 [AylaShareSheet]）⇒ 构成**循环 import**
+// ——Dart 允许库级循环（无 C++ 那种声明的先后约束），且两文件都没有会互相依赖的
+// 顶层 lazy 变量（只有类与函数）⇒ 安全。`state/directory_store.dart` → `pages/hub_support.dart`
+// 是库内既有的跨层 import 先例（同一理由：不复制一份实现）。
+import '../../pages/share_support.dart'
+    show AylaShareController, aylaOpenShareSheet, aylaShareCurrentUserIdOf;
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
@@ -857,22 +866,52 @@ class _ShareStateBox extends StatelessWidget {
 
 /// 分享入口按钮（web `ShareButton.tsx`：`icon-btn-40` + IconShare 18）。
 ///
-/// web 版本内部持有 open 状态并 portal 出 [AylaShareSheet]；Flutter 侧按 B5
-/// 「展示型 + 注入」模式只提供入口按钮（[onPressed] 由页面打开弹窗，与
-/// `AylaPostCard.onShare` 同一模式）——弹层需要分页数据与发送回调注入，
-/// 不适合由按钮自持。
+/// ## 两档（**2026-10-09 用户裁决**：对齐 web 改「自给自足」）
+///
+/// | 档 | 条件 | 行为 |
+/// |---|---|---|
+/// | **注入档**（旧路径，保持原样） | `onPressed != null` | 由调用方打开弹窗；`onPressed == null` 且无 `payload` ⇒ 禁用 |
+/// | **自给自足档**（新，= web） | `onPressed == null` 且 `payload != null` | **组件自己**打开 [AylaShareSheet] |
+///
+/// **为什么必须补这一档**（用户实报「帖子分享键鼠标悬停直接变禁止，仍无法点击」）：
+/// web 的 `ShareButton.tsx:16,22–30` 自己 `useState(open)` + `createPortal` 弹出
+/// `ShareSheet`，**不依赖任何页面注入** ⇒ 永远可点；Flutter 侧原先是纯注入式，
+/// 页面漏传 `onShare` 就让按钮落到 `onPressed == null` ⇒
+/// `theme/buttons.dart:176–178` 给 `SystemMouseCursors.forbidden`（鼠标变禁止符号）
+/// 且点击无效。⇒ 凡是从 web 的 `ShareButton` 转写来的调用点都应走自给自足档。
+///
+/// ⚠️ **尺寸不动**（用户裁决）：默认 **32×32 + 图标 16** 是与收藏键 compact 统一的
+/// 有意偏离（web 里 `.favorite-toggle.is-compact` 32 与 `.icon-btn-40` 40 同排不等大，
+/// 被判为 web 自身错误）⇒ 本档不引入 40，也不改默认值。
+///
+/// 控制器口径同 `AylaFavoriteButton`，但**生命周期挂在弹层上**（不是挂在按钮上）：
+/// 不传 `controller` ⇒ 本次打开自建一个，**弹窗关闭时即刻回收**；传了 ⇒ 只借用，
+/// 由调用方负责 dispose。
+///
+/// ⚠️ 为什么不把自建控制器放在本件的 `State` 里 dispose（第一版写法，已改）：
+/// 弹层是 **Overlay 的独立子树**，**比按钮活得久**（按钮随页面/列表卸载，弹层仍在）。
+/// 若控制器随按钮 `dispose()` 回收，弹层就成了「拿着已 dispose 的 controller」——
+/// 实测该形态不抛异常（`ChangeNotifier.removeListener` 允许在 dispose 后调用），
+/// 但 `AylaShareController` 的 `groups/privates` 两个 getter 是
+/// `_x ??= _create(...)` ⇒ dispose 后（`_groups = null`）再读会**偷偷重建**两条
+/// `AylaPagedList`（泄漏，且因 `_started` 已为真而不再加载 ⇒ 弹层永远停在空态）。
+/// 挂在弹层上就没有这个窗口期。
 class AylaShareButton extends StatelessWidget {
   const AylaShareButton({
     super.key,
     this.label = '分享',
     this.onPressed,
     this.size = 32,
+    this.payload,
+    this.payloadBuilder,
+    this.controller,
+    this.currentUserId,
   });
 
   /// 可访问性文案（web `aria-label={label} title={label}`）。
   final String label;
 
-  /// 点击回调（页面打开 [AylaShareSheet]）；null = 禁用。
+  /// 点击回调（页面打开 [AylaShareSheet]）；null 且未给 [payload] = 禁用。
   final VoidCallback? onPressed;
 
   /// 边长。**默认 32 = 与收藏键 compact 同尺寸**。
@@ -883,8 +922,55 @@ class AylaShareButton extends StatelessWidget {
   /// 16px 图标一致）；确实需要复刻 web 40 档的地方显式传 `size: 40`。
   final double size;
 
+  /// 自给自足档的分享负载（web `ShareButton` 的 `payload` prop）。
+  ///
+  /// 给了它（或 [payloadBuilder]）且没给 [onPressed] ⇒ 本件自己打开分享弹窗
+  /// （= web 的 `setOpen(true)`）。
+  final AylaSharePayload? payload;
+
+  /// 自给自足档的**惰性**负载构造（给了 [payload] 时本参数被忽略）。
+  ///
+  /// ⚠️ 为什么要有它（2026-10-09 实测）：`AylaSharePayload.post` 会对正文做
+  /// `replaceAll(RegExp(r'\s+'), ' ')` 归一 —— 实测**长正文（560 字）≈ 53µs/次**，
+  /// 而列表页每次 `build()` 都要为**每张卡**构造一份（50 卡 ≈ 2.6ms/帧）。
+  /// 分享负载只在**用户真的点下去**那一刻才需要 ⇒ 由调用方传闭包，本件按下才求值。
+  ///
+  /// 闭包捕获的是**本次 build 的数据**（与卡片当时显示的一致），与 web 同语义。
+  final AylaSharePayload Function()? payloadBuilder;
+
+  /// 分享目标控制器（自给自足档用；不传 ⇒ 本次打开自建、弹窗关闭时回收）。
+  final AylaShareController? controller;
+
+  /// 当前用户 id（仅用于弹窗内「私聊自己」显示「我」；不传 ⇒ 自动从 auth 读）。
+  final String? currentUserId;
+
+  /// 是否具备自给自足能力（有 [payload] 或 [payloadBuilder]）。
+  bool get _canSelfServe => payload != null || payloadBuilder != null;
+
+  /// 自给自足档：本件自己开弹窗（web `ShareButton.tsx:25` 的 `setOpen(true)`）。
+  void _openSelfServed(BuildContext context) {
+    // 拖到**按下这一刻**才构造负载（见 [payloadBuilder] 的成本说明）。
+    final AylaSharePayload resolved = payload ?? payloadBuilder!();
+    final AylaShareController? shared = controller;
+    final AylaShareController owned = shared ?? AylaShareController();
+    final Future<void> done = aylaOpenShareSheet(
+      context,
+      payload: resolved,
+      controller: owned,
+      currentUserId: currentUserId ?? aylaShareCurrentUserIdOf(context),
+    );
+    // 自建的那个随弹窗关闭回收（借用调用方的**绝不能**由本件 dispose）。
+    if (shared == null) {
+      unawaited(done.whenComplete(owned.dispose));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 注入档优先（向后兼容：其余 agent 正在并行改调用点，签名与语义都不能动）；
+    // 否则有 payload ⇒ 自给自足；两者都无 ⇒ 禁用（保持既有测试锁定的行为）。
+    final VoidCallback? onPressed = this.onPressed ??
+        (_canSelfServe ? () => _openSelfServed(context) : null);
     // web `title={label}`（ShareButton.tsx:29）⇒ 悬停提示与 aria 文案同源
     return AylaTooltip(
       message: label,

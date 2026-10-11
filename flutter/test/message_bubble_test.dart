@@ -9,6 +9,8 @@
 /// 纯函数（timeAgo / canRecall）。
 library;
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -615,7 +617,186 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('晚上一起看直播吗？我这边刚开播。'));
     await tester.pump();
-    expect(toggles, 0, reason: '桌面（hover 能力设备）不挂点行回调（@media (hover:none)）');
+    expect(toggles, 0, reason: '桌面（hover 能力设备）点行不切换（tsx 140 的 `if (!isTouch) return`）');
+  });
+
+  // ============ 触屏判定 = hover **能力**，不是宽度、也不只是平台名 ============
+  //
+  // web 事实源（用户 2026-10-09 实报「窄屏气泡工具栏需要点击才触发，
+  // 而非鼠标悬停显示」的本轮判据）：
+  // - `hooks/useMediaQuery.ts:16`：`HOVER_NONE_QUERY = "(hover: none)"`（**能力查询**）
+  // - `MessageBubble.tsx:133–135`：`const isTouch = useMediaQuery(HOVER_NONE_QUERY)`
+  //   —— 注释原文「触屏判定用 hover 能力……**不用宽度**：iPad 等宽屏触屏也应走
+  //   「点击行展开工具栏」路径」
+  // - `app.css:1307–1312` `@media (hover: hover) { .msg-row:hover .msg-actions … }`
+  // - `app.css:1317–1322` `@media (hover: none) { .msg-row.is-actions-open .msg-actions … }`
+  // ⇒ **与视口宽度完全无关**。下面三条锁：宽度不参与判定、平台名不是唯一判据、
+  //   显式 `touchMode` 仍最高优先。
+
+  testWidgets('★ 窄屏（420）桌面平台：鼠标 hover 仍显示工具栏（宽度不参与判定）', (
+    WidgetTester tester,
+  ) async {
+    // 这条直接否掉「窄屏 ⇒ 改成点击」的误读：web 在窄屏桌面窗口上仍是 hover 档。
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMessageBubble(
+          msg: _msg(),
+          isSelf: false,
+          senderAvatarLabel: '樱',
+          touchMode: false,
+          onToggleActions: () {},
+          onQuote: (_) {},
+        ),
+        viewport: const Size(420, 640), // ≤768
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    bool ignoring() => tester
+        .widget<IgnorePointer>(
+          find
+              .ancestor(
+                of: find.byType(AylaFavoriteButton),
+                matching: find.byType(IgnorePointer),
+              )
+              .first,
+        )
+        .ignoring;
+    expect(ignoring(), isTrue, reason: '初始隐藏（app.css:1295 opacity: 0）');
+
+    final TestGesture g =
+        await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: Offset.zero);
+    addTearDown(g.removePointer);
+    await g.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
+    await tester.pumpAndSettle();
+
+    // `@media (hover: hover)` 分支：hover 即显示，**与宽度无关**。
+    expect(
+      ignoring(),
+      isFalse,
+      reason: '★ 窄屏桌面窗口也走 hover 档（app.css:1307–1312，无宽度条件）',
+    );
+  });
+
+  /// 在**桌面平台**上跑一段断言。
+  ///
+  /// ⚠️ `debugDefaultTargetPlatformOverride` 必须在**用例体内**（`try/finally`）复位：
+  /// `addTearDown` 排在框架的 `_verifyInvariants` **之后**，只靠它会让每个用例
+  /// 都报「a foundation debug variable was changed by the test」（实测）。
+  Future<void> asDesktopPlatform(Future<void> Function() body) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await body();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  }
+
+  testWidgets('★ 触屏指针点行 ⇒ 切换工具栏（能力判定：桌面平台 + touch 指针）', (
+    WidgetTester tester,
+  ) async {
+    // 这条锁本轮修的真实偏离：原实现只按 `Theme.of(context).platform` 判定
+    // ⇒ 触屏 Windows / 平板模式（平台名仍是桌面）在 web 上会报 `hover: none`、
+    //   应走点击路径，Flutter 侧却**完全不挂**点行回调。
+    // ⚠️ `flutter_test` 默认 `TargetPlatform.android`（已属触屏近似档，
+    //    测不出该偏离）⇒ 必须显式把平台置为桌面。
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        Theme.of(tester.element(find.byType(AylaMessageBubble))).platform,
+        TargetPlatform.windows,
+        reason: '前提：平台名是桌面（原实现据此判「非触屏」）',
+      );
+
+      // 用**触摸指针**点行 —— 等价 web 的 `@media (hover: none)` 设备。
+      final TestGesture g = await tester.startGesture(
+        tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')),
+        kind: PointerDeviceKind.touch,
+      );
+      await g.up();
+      await tester.pump();
+
+      expect(
+        toggles,
+        1,
+        reason: '★ 触摸指针 ⇒ 按 web 的 hover 能力判定走点击路径（tsx 133–135 / 140）',
+      );
+    });
+  });
+
+  testWidgets('★ 鼠标点击行 ⇒ **不**切换工具栏（hover 档不接点击，tsx 140）', (
+    WidgetTester tester,
+  ) async {
+    // 同上：必须在桌面平台上测「鼠标不切换」才有意义（android 档本就是触屏路径）。
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.text('晚上一起看直播吗？我这边刚开播。'),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+
+      expect(
+        toggles,
+        0,
+        reason: '★ 鼠标（hover 能力设备）点行不切换 —— `if (!isTouch) return`（tsx 140）',
+      );
+    });
+  });
+
+  testWidgets('★ 显式 touchMode 仍最高优先：false 时触摸指针也不切换', (WidgetTester tester) async {
+    // 保住既有契约：`touchMode: false` 的调用方明确要求关闭点行路径。
+    int toggles = 0;
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMessageBubble(
+          msg: _msg(),
+          isSelf: false,
+          senderAvatarLabel: '樱',
+          touchMode: false,
+          onToggleActions: () => toggles++,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final TestGesture g = await tester.startGesture(
+      tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')),
+      kind: PointerDeviceKind.touch,
+    );
+    await g.up();
+    await tester.pump();
+
+    expect(toggles, 0, reason: '显式档位覆盖能力推断');
   });
 
   // ======================= 头像手势 =======================

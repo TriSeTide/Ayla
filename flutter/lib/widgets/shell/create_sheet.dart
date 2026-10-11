@@ -36,8 +36,15 @@
 /// - 同容器的 `GroupCreateDialog`（`.group-create-dialog`，B6 待做）可直接复用本件
 ///   的 head / overlay / card 三件。
 ///
+/// ## ⚠️ 本件**自身不 portal**（2026-10-09 修正）
+///
+/// web 的 `CreateSheet` 是 `createPortal(…, document.body)`（`CreateSheet.tsx:38 / 58–59`），
+/// 但 Flutter 侧若**每个弹层各开一个 portal**，**同级**弹层的层序就不可控
+/// （实测：侧栏「编辑子群」的二次确认被压在下层、点不中）。
+/// ⇒ portal 收敛为**调用方容器开一个**（[AylaRootOverlay]），弹层按 `Stack` 顺序叠放。
+///
 /// ## 公开面
-/// `AylaCreateSheet`
+/// `AylaCreateSheet` · `AylaRootOverlay`
 
 library;
 
@@ -47,6 +54,57 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import '../../theme/tokens.dart';
 import '../base/dialogs.dart';
 
+/// 把子树挂到 **根 Overlay**（视口级）的通用宿主 —— web `createPortal(…, document.body)`
+/// 的等价物。
+///
+/// ## 为什么需要它（2026-10-09 用户实报「遮罩被顶部导航栏截断」）
+/// AppShell 的装配是 `Column[TopNav, Expanded(内容), …]`（`layout/app_shell.dart`），
+/// 而 go_router 的 `ShellRoute` 把页面放进 **shell navigator 的 Overlay** ——
+/// 那一层 Overlay 的**上边界在顶栏之下**（实测根 Overlay 900 高、shell 层从 y=76 起）。
+/// 于是任何挂在「组件所在那层 Overlay」的 fixed 语义遮罩都只覆盖内容区：
+/// 宽屏实测 `(0,76)–(1526,900)`、侧栏内实测 `(368,76)–(1526,900)`，
+/// 顶栏那一整条不被压暗。
+///
+/// web 的弹层全部 `createPortal(…, document.body)`（`CreateSheet.tsx:38/58–59`、
+/// `SubGroupDialog.tsx:41–42/108–109`、`ConfirmDialog.tsx:52/118`、`ShareSheet.tsx:216`…），
+/// 注释原文写明「调用处（如 ChannelSidebar 的 backdrop-filter 玻璃侧栏）会创建 stacking
+/// context，成为 fixed 后代的 containing block → 弹层被裁剪/束缚在容器内」。
+///
+/// ## 为什么用 [OverlayPortal] 而不是 `Overlay.of(context, rootOverlay: true).insert(entry)`
+/// `OverlayPortal` 的 overlay child **仍是本 widget 的后代子树** ⇒
+/// 主题 / `Localizations` / `Material` / `DefaultTextStyle` 全部照常继承；
+/// 而 `OverlayEntry` 是**独立子树**，祖先链断在 Overlay
+/// （`overlay_host_test.dart` 的既有教训：`FocusScope` 断言失败 / 文本落 fallback）。
+class AylaRootOverlay extends StatefulWidget {
+  const AylaRootOverlay({super.key, required this.builder});
+
+  /// 弹层内容构建器（在根 Overlay 里构建）。
+  final WidgetBuilder builder;
+
+  @override
+  State<AylaRootOverlay> createState() => _AylaRootOverlayState();
+}
+
+class _AylaRootOverlayState extends State<AylaRootOverlay> {
+  final OverlayPortalController _portal = OverlayPortalController();
+
+  @override
+  void initState() {
+    super.initState();
+    _portal.show();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return OverlayPortal(
+      controller: _portal,
+      overlayLocation: OverlayChildLocation.rootOverlay,
+      overlayChildBuilder: widget.builder,
+      child: const SizedBox.shrink(),
+    );
+  }
+}
+
 /// FAB 创建浮层容器（`layout/CreateSheet.tsx`）。
 ///
 /// 只负责「遮罩 + 卡片 + 标题行 + 关闭语义」；`child` 由调用方给出对应场景的创建表单
@@ -55,7 +113,26 @@ import '../base/dialogs.dart';
 ///
 /// **无状态**：web 本件也没有内部状态（仅一条 `useEffect` 挂 ESC 监听），
 /// 开合由调用方的 `open` 状态控制。
-class AylaCreateSheet extends StatelessWidget {
+///
+/// ## ⚠️ 本件**不再自己 portal** —— 由调用方容器开一个（2026-10-09 修正）
+///
+/// web 的 `CreateSheet` 是 `createPortal(…, document.body)`（`CreateSheet.tsx:38 / 58–59`，
+/// 文件头注释原文写明「调用处（如 ChannelSidebar 的 backdrop-filter 玻璃侧栏）会创建
+/// stacking context，成为 fixed 后代的 containing block → 弹层被裁剪/束缚在容器内」）。
+/// Flutter 的等价物 = 遮罩落在**根 Overlay**（视口级）。
+///
+/// 但 portal **不能由每个弹层各开一个**：实测每层各开会让**同级**弹层的层序不可控
+/// —— 侧栏「编辑子群 → 删除二次确认」被压在下层、点不中（`channel_sidebar_test` 变红）。
+/// ⇒ 收敛为**调用方容器开一个** [AylaRootOverlay]，同组弹层按 `Stack` 顺序叠放。
+///
+/// 各宿主现状：
+/// - `layout/app_shell.dart` 的 FAB 链路（语音/直播/发帖/桌游）：
+///   由 `layout/create_sheet_forms.dart` 的 `aylaCreateFormFor` 包 [AylaCreateSheet]，
+///   并在 AppShell 的根 `Stack` 里与顶栏并列 ⇒ 遮罩**本来就铺满视口**（实测
+///   `(0,0)–(1526,900)`），**无需改动**；
+/// - `widgets/shell/channel_sidebar.dart`：由侧栏 `build` 里的 [AylaRootOverlay] 承担；
+/// - 组件画布样张：由画布自身的 `Overlay` 承担。
+class AylaCreateSheet extends StatefulWidget {
   const AylaCreateSheet({
     super.key,
     required this.title,
@@ -91,6 +168,11 @@ class AylaCreateSheet extends StatelessWidget {
   final double narrowRadius;
 
   @override
+  State<AylaCreateSheet> createState() => _AylaCreateSheetState();
+}
+
+class _AylaCreateSheetState extends State<AylaCreateSheet> {
+  @override
   Widget build(BuildContext context) {
     final Size vp = MediaQuery.of(context).size;
     return Shortcuts(
@@ -102,7 +184,7 @@ class AylaCreateSheet extends StatelessWidget {
         actions: <Type, Action<Intent>>{
           DismissIntent: CallbackAction<DismissIntent>(
             onInvoke: (DismissIntent intent) {
-              onClose();
+              widget.onClose();
               return null;
             },
           ),
@@ -114,20 +196,20 @@ class AylaCreateSheet extends StatelessWidget {
             // tsx:47–48 `role="dialog" aria-label={title}`
             scopesRoute: true,
             explicitChildNodes: true,
-            label: title,
+            label: widget.title,
             child: AylaModalOverlay(
               // 点遮罩关闭（卡内点击由 AylaModalOverlay 拦住，等价 tsx:41–43）
-              onDismiss: onClose,
+              onDismiss: widget.onClose,
               // `.create-sheet-overlay { padding: var(--sp-4) }` = 16px
               // ⚠️ 必须显式传：AylaModalOverlay 的默认值是 24（privacy 那一档）
               padding: AylaSpacing.sp4,
               child: AylaModalCard(
                 // `.create-sheet-card { max-height: 80vh }`
-                maxHeight: maxHeight ?? vp.height * 0.8,
-                narrowHeightFactor: narrowHeightFactor,
-                narrowRadius: narrowRadius,
+                maxHeight: widget.maxHeight ?? vp.height * 0.8,
+                narrowHeightFactor: widget.narrowHeightFactor,
+                narrowRadius: widget.narrowRadius,
                 // `.create-sheet-card { overflow-y: auto }`
-                scrollable: scrollable,
+                scrollable: widget.scrollable,
                 // `.create-sheet-card { padding: var(--sp-4) }`
                 // 窄屏 `padding-bottom: calc(var(--sp-4) + env(safe-area-inset-bottom))`
                 padding: EdgeInsets.fromLTRB(
@@ -141,12 +223,12 @@ class AylaCreateSheet extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     AylaSheetHead(
-                      title: title,
-                      onClose: onClose,
+                      title: widget.title,
+                      onClose: widget.onClose,
                       // `CreateSheet.tsx:53`：`<IconClose width={20} height={20} />`
                       closeIconSize: 20,
                     ),
-                    child,
+                    widget.child,
                   ],
                 ),
               ),

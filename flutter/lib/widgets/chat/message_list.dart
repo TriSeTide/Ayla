@@ -1189,7 +1189,12 @@ class _AylaMessageListState extends State<AylaMessageList> {
           AylaTooltip(
             message: visible[i].tooltip,
             child: Center(
-            child: GestureDetector(
+            child: MouseRegion(
+              // `MessageList.tsx:990–1001` 的 `.message-jump-mention` 是
+              // `<motion.button type="button">` ⇒ `base.css:340` 全局 pointer；
+              // `app.css:957` 另有一条同值声明（`.message-jump-mention { cursor: pointer }`）。
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               onTap: () => _handleJumpTag(visible[i]),
               child: Semantics(
                 button: true,
@@ -1223,6 +1228,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
               ),
             ),
             ),
+            ),
           ),
         ],
       ],
@@ -1254,7 +1260,13 @@ class _AylaMessageListState extends State<AylaMessageList> {
           child: Semantics(
             button: true,
             label: '回到底部并恢复实时消息跟随',
-            child: GestureDetector(
+            child: MouseRegion(
+              // `MessageList.tsx:1112–1122` 的 `.message-jump-bottom` 是
+              // `<button type="button">` ⇒ `base.css:340` 全局 pointer；
+              // `app.css:885` 另有一条同值声明（`.message-jump-bottom { cursor: pointer }`）。
+              // 隐藏档（`!is-visible`）由外层 `IgnorePointer` 挡住指针，与本层无关。
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
               onTap: () {
                 if (_scroll.hasClients) {
                   _scroll.animateTo(
@@ -1283,6 +1295,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ),

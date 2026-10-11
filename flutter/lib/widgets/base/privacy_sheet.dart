@@ -286,11 +286,18 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
           child: Stack(
             children: <Widget>[
               // `.privacy-sheet-overlay`（--overlay-dim + 居中 + padding 24）
+              //
+              // 指针：`profile.css:626–635` 的 `.privacy-sheet-overlay` **无 cursor 声明**、
+              // 也不是 `<button>` ⇒ 浏览器默认箭头。Flutter 侧不显式声明时
+              // `MouseCursor.defer` 会继续往外找 ⇒ 遮罩上会跟着底下的 click 区显示手型。
               Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _close,
-                  child: const ColoredBox(color: Color(0x40465B92)),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.basic,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _close,
+                    child: const ColoredBox(color: Color(0x40465B92)),
+                  ),
                 ),
               ),
               // 卡片定位：窄屏贴底 60dvh；宽屏居中
@@ -299,9 +306,15 @@ class _PrivacySheetState extends State<AylaPrivacySheet> {
                   padding: EdgeInsets.all(narrow ? 0 : 24),
                   child: Align(
                     alignment: narrow ? Alignment.bottomCenter : Alignment.center,
-                    child: GestureDetector(
-                      onTap: () {}, // 卡内点击不冒泡到遮罩
-                      child: _buildCard(narrow),
+                    // 卡内点击不冒泡到遮罩（web 的 `.privacy-sheet-card` 无业务 onClick）。
+                    // 指针：卡片选择器本身无 cursor 声明 ⇒ 卡面空白是默认箭头；
+                    // 显式 `basic` 防 `defer` 越过遮罩去命中页面可点件（内层按钮优先）。
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.basic,
+                      child: GestureDetector(
+                        onTap: () {}, // 卡内点击不冒泡到遮罩
+                        child: _buildCard(narrow),
+                      ),
                     ),
                   ),
                 ),

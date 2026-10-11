@@ -346,6 +346,38 @@ void main() {
       expect(tagsHeight, lessThan(30)); // 单行
     });
 
+    testWidgets('自给自足档（favoriteTargetType+Id）⇒ 底排收藏键自己持状态，无需页面接线', (
+      WidgetTester tester,
+    ) async {
+      // web `PostCard.tsx:145` 只写
+      // `<FavoriteButton targetType="post" targetId={post.id} compact/>` ⇒ 加载由收藏键承担。
+      await tester.pumpWidget(
+        host(
+          SizedBox(
+            width: 360,
+            child: AylaPostCard(
+              post: sample(),
+              onOpen: () {},
+              favoriteTargetType: 'post',
+              favoriteTargetId: '9',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final AylaFavoriteButton fav = tester.widget<AylaFavoriteButton>(
+        find.byType(AylaFavoriteButton),
+      );
+      expect(fav.targetType, 'post');
+      expect(fav.targetId, '9');
+      expect(fav.compact, isTrue, reason: '.favorite-toggle.is-compact（app.css:3334–3338）');
+      // 注入档的 state 默认值仍在（不传 targetType 时的既有行为）
+      expect(fav.controller, isNull);
+      // 画布/测试无后端 ⇒ 自动加载失败后落在 error 档（**不是**永久加载中）
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('收藏'), findsNothing);
+    });
+
     testWidgets('分享钮 = 共享件 AylaShareButton（32×32 纯圆，与收藏键 compact 统一）',
         (WidgetTester tester) async {
       await tester.pumpWidget(

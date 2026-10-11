@@ -47,6 +47,7 @@ import '../state/voice_state.dart';
 import '../theme/app_theme.dart' show AylaTextStyles;
 import '../theme/tokens.dart' show AylaSpacing;
 import '../widgets/base/dialogs.dart' show AylaConfirmDialog;
+import '../widgets/shell/create_sheet.dart' show AylaRootOverlay;
 import '../widgets/base/directory_controls.dart' show AylaFavoriteButton;
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsNarrow;
 import '../widgets/base/share.dart' show AylaShareButton;
@@ -1099,17 +1100,16 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
         returnLatest: _chat.returnLatest,
         retry: _chat.retry,
       ),
+      // ⚠️ 根因 A（2026-10-08 修）：本页此前**只在「重试」分支里调 `_favorites.load`**
+      // ⇒ 语音房头部收藏键在正常路径下永远 unknown（禁用 +「加载中…」）。
+      // web `VoiceRoomBody.tsx:278` 只写
+      // `<FavoriteButton targetType="voice" targetId={channelId} compact/>` ⇒
+      // 加载由收藏键自己承担；Flutter 侧同样改为自给自足档。
       favorite: AylaFavoriteButton(
         compact: true,
-        state: _favorites.stateOf('voice', widget.channelId),
-        busy: _favorites.busyOf('voice', widget.channelId),
-        actionError: _favorites.actionErrorOf('voice', widget.channelId),
-        onToggle: (bool next) => _favorites.toggle('voice', widget.channelId),
-        onRetryStatus: () => _favorites.load(
-          'voice',
-          <String>[widget.channelId],
-          force: true,
-        ),
+        targetType: 'voice',
+        targetId: widget.channelId,
+        controller: _favorites,
       ),
       share: AylaShareButton(
         label: '分享语音房',
@@ -1152,6 +1152,13 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       ],
     );
 
+    // ⚠️ 确认框**不放在本页 Stack 里**（2026-10-09 修）：web 的 `ConfirmDialog` 自身
+    // `createPortal(…, document.body)`（`components/ConfirmDialog.tsx:10 / 52 / 118`），
+    // ⇒ 遮罩是 `position: fixed; inset: 0`（`styles/private.css:185` 的
+    // `.create-sheet-overlay`）铺满**整视口**。挂在本页 Stack 里则落在
+    // **shell navigator 的那层 Overlay**（其上边界在顶栏之下，见 `layout/app_shell.dart`
+    // 的 `Column[TopNav, Expanded(内容)]`）⇒ 实测遮罩只有 `(0,76)–(1526,900)`，
+    // 顶栏那一整条不被压暗。改用 [AylaRootOverlay] 挂到根 Overlay。
     final Widget laid = Stack(
       children: <Widget>[
         Column(
@@ -1165,8 +1172,8 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
           ],
         ),
         if (_deleteConfirmOpen)
-          Positioned.fill(
-            child: AylaConfirmDialog(
+          AylaRootOverlay(
+            builder: (BuildContext _) => AylaConfirmDialog(
               title: '删除语音房',
               message: '确定删除语音房「${channel?.displayName ?? ''}」？此操作不可撤销，房间内所有人都会被移出。',
               busy: _busyDeleting,

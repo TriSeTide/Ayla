@@ -219,12 +219,24 @@ class AylaGroupInfoPageScroll extends StatelessWidget {
   static bool isWide(BuildContext context) =>
       !AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
 
-  /// 内距（`group.css:1388` 的 `padding: var(--sp-3)` 与 1395 的 ≥769 覆写）。
+  /// 内距（`group.css:1388` 的 `padding: var(--sp-3)` 与 ≥769 覆写）。
+  ///
+  /// ⚠️ **顶内距 = `--sidebar-gutter`(12)，不是 `--sp-6`(24)**（2026-10-09 **用户裁决**：
+  /// 「web 也一起改了」）。事实源已同步改为 `group.css:1394–1402`
+  /// `padding: var(--sidebar-gutter) var(--sp-6) var(--sp-8)`。
+  ///
+  /// 原因：左侧玻璃侧栏是 `margin: var(--sidebar-gutter)`（`group.css:700`）
+  /// ⇒ 侧栏卡顶边 = 顶栏底 + 12；而内容区首卡顶边 = 顶栏底 + padding-top。
+  /// 原值 24 让首卡比侧栏**低 12px**（实测 88 vs 100）= 用户实报的
+  /// 「内容区卡片顶部没对齐左边」。改为 12 后两者齐平。
+  /// 横向 sp6 / 底部 sp8 **保持不动**（用户只报顶部）。
+  ///
+  /// 窄屏档（≤768）本来就是 `padding: var(--sp-3)` = 12 ⇒ 与侧栏口径同值，无需改。
   static EdgeInsets paddingFor(BuildContext context) => isWide(context)
-      // padding: var(--sp-6) var(--sp-6) var(--sp-8)  ⇒ 24 / 24 / 24 / 32
+      // padding: var(--sidebar-gutter) var(--sp-6) var(--sp-8)  ⇒ 12 / 24 / 24 / 32
       ? const EdgeInsets.fromLTRB(
           AylaSpacing.sp6,
-          AylaSpacing.sp6,
+          AylaSpacing.sidebarGutter,
           AylaSpacing.sp6,
           AylaSpacing.sp8,
         )

@@ -761,9 +761,10 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
             editing: _editing,
             scrollController: _scroll,
             onScrollNotification: _onScrollNotification,
-            // 分享按钮：web `tsx:449–455` 用默认 40（`.icon-btn-40`）；
+            // 分享按钮：web `tsx:460–466` 用默认 40（`.icon-btn-40`，宽高由 `svg 18`
+            // 与 `.icon-btn-40` 自身定尺）；
             // 点击 ⇒ 打开分享弹窗（web `ShareButton` 自持；Flutter 侧注入，
-            // 范本 `group_info_page.dart:435–449`）。
+            // 范本 `group_info_page.dart:502–510`）。
             share: AylaShareButton(
               label: '分享帖子',
               size: 40,
@@ -798,18 +799,15 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
                       _viewerItems = media;
                       _viewerIndex = index;
                     }),
-                    favoriteState:
-                        _favorites.stateOf('post', post.id.toString()),
-                    favoriteBusy: _favorites.busyOf('post', post.id.toString()),
-                    favoriteError:
-                        _favorites.actionErrorOf('post', post.id.toString()),
-                    onToggleFavorite: (bool _) =>
-                        _favorites.toggle('post', post.id.toString()),
-                    onRetryFavoriteStatus: () => _favorites.load(
-                      'post',
-                      <String>[post.id.toString()],
-                      force: true,
-                    ),
+                    // ⚠️ 根因 A（2026-10-08 修）：本页此前**只在「重试」分支里调
+                    // `_favorites.load`**（`post_detail_page.dart` 全文无初始 load）
+                    // ⇒ 非错误路径下详情卡底排收藏键永远停在 unknown（禁用 +「加载中…」）。
+                    // web 侧 `PostDetailPage.tsx:693` 只写
+                    // `<FavoriteButton targetType="post" targetId={post.id} compact/>` ⇒
+                    // 加载由收藏键自己承担；Flutter 侧同样改为自给自足档。
+                    favoriteTargetType: 'post',
+                    favoriteTargetId: post.id.toString(),
+                    favoriteController: _favorites,
                     onAuthorTap: post.authorId == null
                         ? null
                         : () => context.go('/user/${post.authorId}'),

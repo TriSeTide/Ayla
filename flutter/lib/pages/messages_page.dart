@@ -77,6 +77,30 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   String? _activeChatId;
   final ScrollController _privateScroll = ScrollController();
 
+  /// 选项卡行的 **GlobalKey** —— 窄屏两档切换时保住 tabs 行的 Element/State。
+  ///
+  /// ## 为什么必须（用户 2026-10-09 实报「私信卡 ↔ 别的卡切换时高亮跳变」）
+  /// web 三档 tab 的 DOM 结构**完全相同**（`MessagesPage.tsx:206–247`：`.messages-page`
+  /// 的第一子项恒为 tabs 包装行、第二子项恒为面板，差别只在面板的类名
+  /// `.messages-private` / `.messages-friends`）⇒ **切 tab 不重建 tabs 行**，
+  /// `AuroraquaNavHighlight` 的 Framer `layoutId` 因此能连续迁移
+  /// （`AuroraquaNavHighlight.tsx:17` + `auroraquaMotion.ts:26–29`：
+  /// 300ms、`ease: [0, 0, 0.58, 1]`）。
+  ///
+  /// Flutter 侧两档的树位不同（私信档 = `Column` 直挂；好友/认证档 = 外层
+  /// `SingleChildScrollView` 的子项 —— 这段差异本身是**对的**，对应 web 的
+  /// `.messages-private { flex: 1; overflow-y: auto }`「tabs 固定」与
+  /// `.messages-page { overflow-y: auto }`「整页滚、tabs 随滚」两种滚动行为）
+  /// ⇒ 没有 GlobalKey 时 Flutter 判定为「换了父级」而**重建** tabs 行 ⇒
+  /// `AylaNavHighlightList` 的 State 归零、`_capsuleRect == null` ⇒
+  /// **切换首帧胶囊整个消失**，等 postFrame 测量完才瞬现于新位置 = 用户看到的「跳变」。
+  ///
+  /// GlobalKey 的 reparenting 语义（同一帧内旧 Element 进 inactive 表、新位置
+  /// `_retakeInactiveElement` 取回复用）正是为此设计 ⇒ 两档间 Element 与
+  /// State 原地复用，`AnimatedPositioned` 的迁移不中断。
+  /// 回归锁：`test/messages_tabs_highlight_test.dart`。
+  final GlobalKey _tabsRowKey = GlobalKey();
+
   AylaPagedList<AylaConversationSummary>? _conversations;
   AylaPagedList<AylaUserPublic>? _friends;
   AylaPagedList<AylaFriendRequest>? _friendRequests;
@@ -349,7 +373,10 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     }
 
     // tsx 208 的 inline style：flex + space-between + `padding: 0 16px`。
+    // ⚠️ `key: _tabsRowKey` 是**必需**的（见 [_tabsRowKey] 文档）：窄屏两档里本行的
+    // 树位不同，没有它切 tab 时会被判定为「换父级」而重建 ⇒ 胶囊 State 归零 ⇒ 跳变。
     final Widget tabsRow = Padding(
+      key: _tabsRowKey,
       padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp4),
       child: Row(
         children: <Widget>[

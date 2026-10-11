@@ -60,6 +60,7 @@ import '../widgets/base/dialogs.dart' show AylaModalOverlay;
 import '../widgets/base/directory_page.dart';
 import '../widgets/base/directory_result_cards.dart';
 import '../widgets/base/page_state.dart';
+import '../widgets/base/reveal.dart' show AylaRevealItem, AylaRevealScope;
 import '../widgets/base/scroll_restore.dart'
     show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/base/profile_and_filters.dart'
@@ -73,6 +74,7 @@ import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 import '../widgets/search/search_history_chips.dart';
 import '../widgets/search/search_result_group.dart';
 import '../widgets/search/search_user_row.dart';
+import '../widgets/shell/create_sheet.dart' show AylaRootOverlay;
 import '../widgets/voice/voice_channels.dart'
     show AylaVoiceCardData, AylaVoiceChannelCard;
 import '../core/models/game_room.dart' show AylaGameCardData;
@@ -154,6 +156,27 @@ class SearchPage extends ConsumerStatefulWidget {
   ConsumerState<SearchPage> createState() => _SearchPageState();
 }
 
+/// 逐条浮入的**跨组下标记数器**（web `useListEntryMotion.ts:68–80` 的 `let index = 0`）。
+///
+/// web 是在**整棵 pageRef 子树**上按 DOM 顺序给命中 selector 的节点连续编号
+/// （用户行 → 群卡 → 帖卡 → 桌游卡 → 语音卡 → 直播卡 → 各组页脚按钮），
+/// `staggerDelay(index) = min(index*50, 300)` 由此得到（`useRevealOnEnter.ts`）。
+/// Flutter 侧六个分组各自知道自己的项数、却不知道全局位次 ⇒ 用一个按调用顺序
+/// 递增的计数器在 `_body` 的 build 期串起来（build 顺序 = 树顺序 = DOM 顺序）。
+///
+/// ⚠️ **顺序纪律**：每组的页脚按钮排在**本组结果项之后**（web DOM 亦如此），所以
+/// `footerRevealIndex` 用 [offset] 显式带上本组项数；调用点的书写顺序 = 求值顺序
+/// ⇒ 必须写在 `children` 之前（现写法已保证）。
+class _RevealIndex {
+  int _value = 0;
+
+  /// 取号并前进（列表项）。
+  int next() => _value++;
+
+  /// 第 `count` 个位置之后的下标（页脚按钮 = 本组最后一项之后）。
+  int offset(int count) => _value + count;
+}
+
 class _SearchPageState extends ConsumerState<SearchPage> {
   /// 分享弹窗控制器（2026-10-03：搜索结果的帖子卡此前没传 `onShare` ⇒ 转发键禁用）。
   final AylaShareController _share = AylaShareController();
@@ -198,6 +221,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   /// chat WS 帧解绑（tsx 286 的 `off`）。
   void Function()? _frameOff;
+
+  /// 刷新重播计数（web `replayNonce`，`SearchPage.tsx:102`）。
+  ///
+  /// web 只在「已有结果时刷新」递增（tsx 181–185：
+  /// `if (replacingVisible) { setResumeEntry(true); setReplayNonce(n+1) }`）
+  /// ⇒ 已入场结果整批重播一次浮入（`useListEntryMotion.ts:34–55`）；
+  /// 首屏（`replacingVisible == false`）不递增，项各自按 [AylaRevealItem] 首次入场。
+  int _replayNonce = 0;
 
   /// 滚动位置恢复（web `useScrollRestore(scope, …)`，tsx 118）。
   late final AylaScrollRestore _restore;
@@ -395,6 +426,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     // tsx 163：请求发起时的成员事实版本（请求途中发生的成员事件优先于本响应）。
     _membershipAtStart = _membership.revision;
     final AylaSearchResultKey? single = SearchPage.typeToKey[_filter];
+    // tsx 164：`replacingVisible = resultRef.current != null && activeScope.current === key`
+    // —— 「再次搜索同一作用域且已有结果」= 刷新档 ⇒ 完成后整批重播浮入（tsx 181–185）。
+    final bool replacingVisible =
+        _results != null && _resultsScope == scope;
     setState(() {
       _pageStatus.clear();
       _loading = true;
@@ -418,6 +453,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         // 就**保持 stale**，由 [_maybeRefreshStale] 再刷一轮，直到数据稳定
         //（web 原话 tsx 334–336）；没有成员事件则清掉。
         _stale = membershipChangedDuringRequest;
+        // tsx 181–185：已有结果时刷新 ⇒ 已入场结果整批重播一次浮入。
+        //（`setResumeEntry(true)` 是 web 对 `suppressEntry` 的解除，Flutter 侧
+        // 本页尚无滚动恢复抑制档，见文件头登记 ⇒ 只表达重播。）
+        if (replacingVisible) _replayNonce += 1;
       });
       _restore.update(ready: true); // tsx 118：ready = results != null
     } catch (err) {
@@ -638,9 +677,35 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
     final Widget? overlay = _overlay();
     if (overlay == null) return page;
-    // web：浮层是页面根的 fixed 兄弟（tsx 472–489 在 .search-page 内）
+    // ⚠️ **浮层必须挂根 Overlay**（2026-10-09 修「遮罩被顶栏截断」）。
+    //
+    // 修前：`Stack(children: [page, overlay])` —— 遮罩落在**页内**，
+    // 而页面的上边界在顶栏之下（AppShell 是 `Column[TopNav, Expanded(内容), …]`，
+    // go_router 又把页面放进 shell navigator 的那层 Overlay）⇒ 实测
+    //   宽屏 1526×900：顶栏 (0,0)–(1526,76)，遮罩 **(0,76)–(1526,900)** ❌
+    //   窄屏  400×760：顶栏 (0,0)–(400,56)，遮罩 **(0,56)–(400,696)** ❌（上下都被截）
+    // 顶栏（窄屏连底部 tab 那条）不被压暗。
+    //
+    // web 事实源：浮层全部 `createPortal(…, document.body)`，注释原文写明理由
+    // ——「调用处（如 ChannelSidebar 的 backdrop-filter 玻璃侧栏）会创建 stacking
+    // context，成为 fixed 后代的 containing block → 弹层被裁剪/束缚在容器内」
+    // （`ShareSheet.tsx:216`、`GroupApplyDialog` 同族）。本页两个浮层在 web 也都是
+    // portal：用户资料浮层 `SearchPage.tsx:472–478` 的 `.user-profile-overlay`
+    // （`search.css:304–312` 是 `position: fixed; inset: 0`）+ 入群申请弹窗
+    // `SearchPage.tsx:480–489` 的 `<GroupApplyDialog>`（`search.css:180` 同样 fixed）。
+    //
+    // Flutter 等价物 = `AylaRootOverlay`（`OverlayPortal` +
+    // `OverlayChildLocation.rootOverlay`，`widgets/shell/create_sheet.dart`）——
+    // **只复用、不改它本体**（它属并行 agent 的写域）。
+    //
+    // ⚠️ 本页**只需一个** portal：两个浮层在同一时刻最多只有一个（`_overlay()` 的
+    // 分支保证），且它们**不会**与第三个同级弹层叠放 ⇒ 不需要像群信息域那样
+    // 「收敛为调用方一个 portal + Stack 内部排序」的多层编排。
     return Stack(
-      children: <Widget>[page, overlay],
+      children: <Widget>[
+        page,
+        AylaRootOverlay(builder: (BuildContext _) => overlay),
+      ],
     );
   }
 
@@ -699,6 +764,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     if (_q.isEmpty) {
       // tsx 362–373：只有 !q 且历史非空时才渲染（否则内容区为空）
       if (_history.history.isEmpty) return const SizedBox.shrink();
+      // 历史 chips：web 的 `useListEntryMotion` selector 只含
+      // `.search-row, .typed-result-card, .search-group …, .btn`（tsx 119）
+      // —— `.search-chip` / `.search-clear` **不在其中** ⇒ 本分支**不挂** reveal。
       return AylaSearchHistoryChips(
         // .search-history 基样式 padding sp3 sp4 sp3（search.css:11–17）+ 目录页组规则：
         // 左右**恒 0**（directory-filters.css:171–180，该规则不在媒体查询内）；
@@ -752,7 +820,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
 
     if (results != null && results.hasAnyResult) {
-      sections.add(Padding(
+      // web 的逐条浮入 owner 在**页面根**（`useListEntryMotion(pageRef, selector, …)`，
+      // `SearchPage.tsx:119`）—— Flutter 侧 `_body` 即那个 root ⇒ Scope 包在这里，
+      // `replayKey = _replayNonce` 对应 web 的第四参（刷新后整批重播浮入，tsx 184）。
+      //
+      // `revealIndex` 是**跨组连续**的 DOM 顺序位次（见 [_RevealIndex]）。
+      final _RevealIndex revealIndex = _RevealIndex();
+      Widget resultsBlock = Padding(
         // .search-results（search.css:59–66；≥769 时 padding-top 归零）
         padding: EdgeInsets.only(
           top: wide ? 0 : AylaSpacing.sp3,
@@ -763,17 +837,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           mainAxisSize: MainAxisSize.min,
           spacing: AylaSpacing.sp4,
           children: <Widget>[
-            _usersGroup(results, single),
-            _groupsGroup(results, single),
-            _postsGroup(results, single),
-            _gamesGroup(results, single),
-            _voicesGroup(results, single),
-            _livesGroup(results, single),
+            _usersGroup(results, single, revealIndex),
+            _groupsGroup(results, single, revealIndex),
+            _postsGroup(results, single, revealIndex),
+            _gamesGroup(results, single, revealIndex),
+            _voicesGroup(results, single, revealIndex),
+            _livesGroup(results, single, revealIndex),
           ],
         ),
-      ));
+      );
+      sections.add(AylaRevealScope(replayKey: _replayNonce, child: resultsBlock));
     }
-
     if (results != null &&
         !results.hasAnyResult &&
         !_loading &&
@@ -804,7 +878,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _usersGroup(AylaSearchResults results, bool single) {
+  Widget _usersGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
     final AylaSearchGroup<AylaSearchUserItem>? group = results.users;
     final List<AylaSearchUserItem> items =
         group?.items ?? const <AylaSearchUserItem>[];
@@ -817,22 +891,30 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.users]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.users]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.users),
+      footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaSearchUserItem user in items)
-          AylaSearchUserRow(
-            nickname: user.nickname ?? '',
-            username: user.username ?? '',
-            signature: user.signature, // tsx 405：有才渲染
-            avatarUrl: (user.avatar ?? '').isEmpty ? null : user.avatar,
-            online: user.online,
-            onOpenProfile: () => _openUserProfile(user),
-            onTap: () => setState(() => _selectedUser = user),
+          // 逐条浮入：web `useListEntryMotion(pageRef, ".search-row, …", …)`
+          // （`SearchPage.tsx:119`）—— selector 命中 `.search-row`（`tsx 391`）。
+          // `index` 用**全局位次**（web 在整棵 root 上从 0 连续编号）。
+          AylaRevealItem(
+            fadeGlass: false,
+            index: idx.next(),
+            child: AylaSearchUserRow(
+              nickname: user.nickname ?? '',
+              username: user.username ?? '',
+              signature: user.signature, // tsx 405：有才渲染
+              avatarUrl: (user.avatar ?? '').isEmpty ? null : user.avatar,
+              online: user.online,
+              onOpenProfile: () => _openUserProfile(user),
+              onTap: () => setState(() => _selectedUser = user),
+            ),
           ),
       ],
     );
   }
 
-  Widget _groupsGroup(AylaSearchResults results, bool single) {
+  Widget _groupsGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
     final AylaSearchGroup<AylaSearchGroupItem>? group = results.groups;
     final List<AylaSearchGroupItem> items =
         group?.items ?? const <AylaSearchGroupItem>[];
@@ -845,36 +927,42 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.groups]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.groups]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.groups),
+      footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaSearchGroupItem item in items)
-          AylaGroupResultCard(
-            group: AylaGroupResultData(
-              id: item.id,
-              title: item.title,
-              memberCount: item.memberCount,
-              joinPolicy: item.joinPolicy,
-              avatar: item.avatar,
+          // 逐条浮入：selector 命中 `.typed-result-card`（`tsx 417` 的群结果卡外包层）。
+          AylaRevealItem(
+            fadeGlass: false,
+            index: idx.next(),
+            child: AylaGroupResultCard(
+              group: AylaGroupResultData(
+                id: item.id,
+                title: item.title,
+                memberCount: item.memberCount,
+                joinPolicy: item.joinPolicy,
+                avatar: item.avatar,
+              ),
+              // tsx 418：已加入 / 已通过 / 申请入群
+              entryLabel: _groupIsJoined(item)
+                  ? '已加入'
+                  : _acceptedGroupIds.contains(item.id)
+                      ? '已通过'
+                      : '申请入群',
+              onOpen: () {
+                if (_groupIsJoined(item)) {
+                  final String encoded = Uri.encodeComponent(item.id);
+                  context.go('/group/$encoded');
+                } else if (!_acceptedGroupIds.contains(item.id)) {
+                  setState(() => _selectedGroup = item);
+                }
+              },
             ),
-            // tsx 418：已加入 / 已通过 / 申请入群
-            entryLabel: _groupIsJoined(item)
-                ? '已加入'
-                : _acceptedGroupIds.contains(item.id)
-                    ? '已通过'
-                    : '申请入群',
-            onOpen: () {
-              if (_groupIsJoined(item)) {
-                final String encoded = Uri.encodeComponent(item.id);
-                context.go('/group/$encoded');
-              } else if (!_acceptedGroupIds.contains(item.id)) {
-                setState(() => _selectedGroup = item);
-              }
-            },
           ),
       ],
     );
   }
 
-  Widget _postsGroup(AylaSearchResults results, bool single) {
+  Widget _postsGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
     final AylaSearchGroup<AylaPost>? group = results.posts;
     final List<AylaPost> items = group?.items ?? const <AylaPost>[];
     return AylaSearchResultGroup(
@@ -886,27 +974,33 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.posts]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.posts]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.posts),
+      footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaPost post in items)
-          AylaPostCard(
-            post: post,
-            previewOnly: true, // tsx 431
-            action: null,
-            onOpen: () => _openPost(post),
-            // ★ 分享键（2026-10-03 补齐）：`post_card.dart:509` 的转发键**恒渲染**
-            // （只要非 detail 档），`onShare == null` ⇒ 共享件判禁用、鼠标变禁止符号。
-            onShare: () => unawaited(aylaOpenShareSheet(
-              context,
-              payload: aylaPostSharePayloadFor(post),
-              controller: _share,
-              currentUserId: ref.read(authNotifierProvider).user?.id,
-            )),
+          // 逐条浮入：selector 命中 `.typed-result-card`（`tsx 430`）。
+          AylaRevealItem(
+            fadeGlass: false,
+            index: idx.next(),
+            child: AylaPostCard(
+              post: post,
+              previewOnly: true, // tsx 431
+              action: null,
+              onOpen: () => _openPost(post),
+              // ★ 分享键（2026-10-03 补齐）：`post_card.dart:509` 的转发键**恒渲染**
+              // （只要非 detail 档），`onShare == null` ⇒ 共享件判禁用、鼠标变禁止符号。
+              onShare: () => unawaited(aylaOpenShareSheet(
+                context,
+                payload: aylaPostSharePayloadFor(post),
+                controller: _share,
+                currentUserId: ref.read(authNotifierProvider).user?.id,
+              )),
+            ),
           ),
       ],
     );
   }
 
-  Widget _gamesGroup(AylaSearchResults results, bool single) {
+  Widget _gamesGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
     final AylaSearchGroup<AylaGameCardData>? group = results.games;
     final List<AylaGameCardData> items =
         group?.items ?? const <AylaGameCardData>[];
@@ -919,18 +1013,24 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.games]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.games]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.games),
+      footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaGameCardData room in items)
-          AylaGameRoomCard(
-            room: room,
-            showFavorite: false, // tsx 440：action={null}
-            onEnter: () => _openRoom(room.id),
+          // 逐条浮入：selector 命中 `.typed-result-card`（`tsx 439`）。
+          AylaRevealItem(
+            fadeGlass: false,
+            index: idx.next(),
+            child: AylaGameRoomCard(
+              room: room,
+              showFavorite: false, // tsx 440：action={null}
+              onEnter: () => _openRoom(room.id),
+            ),
           ),
       ],
     );
   }
 
-  Widget _voicesGroup(AylaSearchResults results, bool single) {
+  Widget _voicesGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
     final AylaSearchGroup<AylaVoiceCardData>? group = results.voices;
     final List<AylaVoiceCardData> items =
         group?.items ?? const <AylaVoiceCardData>[];
@@ -943,18 +1043,27 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.voices]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.voices]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.voices),
+      footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaVoiceCardData channel in items)
-          AylaVoiceChannelCard(
-            channel: channel,
-            browsing: true, // tsx 448
-            onEnter: () => _openChannel('/voice', channel.id),
+          // 逐条浮入：selector 命中 `.typed-result-card`（`tsx 447`）。
+          // ⚠️ 不传 `AylaVoiceChannelCard.revealDelay`：本页的语义是
+          // 「外层 typed 卡入场的位移」，与 `AylaVoiceChannelList` 那种
+          // 「grid item 自带 reveal-item」不同（`voice.css:518–520` 的注释只针对大厅列表）。
+          AylaRevealItem(
+            fadeGlass: false,
+            index: idx.next(),
+            child: AylaVoiceChannelCard(
+              channel: channel,
+              browsing: true, // tsx 448
+              onEnter: () => _openChannel('/voice', channel.id),
+            ),
           ),
       ],
     );
   }
 
-  Widget _livesGroup(AylaSearchResults results, bool single) {
+  Widget _livesGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
     final AylaSearchGroup<AylaLiveCardData>? group = results.lives;
     final List<AylaLiveCardData> items =
         group?.items ?? const <AylaLiveCardData>[];
@@ -967,12 +1076,18 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.lives]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.lives]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.lives),
+      footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaLiveCardData channel in items)
-          AylaLiveChannelCard(
-            channel: channel,
-            showActions: false, // tsx 455：action={null}
-            onEnter: () => _openChannel('/live', channel.id),
+          // 逐条浮入：selector 命中 `.typed-result-card`（`tsx 454`）。
+          AylaRevealItem(
+            fadeGlass: false,
+            index: idx.next(),
+            child: AylaLiveChannelCard(
+              channel: channel,
+              showActions: false, // tsx 455：action={null}
+              onEnter: () => _openChannel('/live', channel.id),
+            ),
           ),
       ],
     );

@@ -33,6 +33,22 @@
 /// web 的 .subgroup-dialog 未声明 max-height / overflow（内容高时直接溢出屏幕）；
 /// Flutter 侧走 [AylaModalCard] 的默认兜底（80vh + 内部滚动），避免小屏把按钮挤出可视区。
 ///
+/// ## ⚠️ 遮罩挂 **root Overlay**（2026-10-09 用户实报「遮罩被顶部导航栏截断」）
+///
+/// web 用 `createPortal(…, document.body)`（`SubGroupDialog.tsx:41–42 / 108–109`，
+/// 注释原文：「portal 到 body：脱离侧栏/群信息容器的 stacking context
+/// （backdrop-filter 会成为 fixed 后代的 containing block，导致弹窗被容器裁剪）」）。
+/// Flutter 等价 = 遮罩落在**根 Overlay**：组件所在的那层 Overlay 在 AppShell 里
+/// 是 shell navigator 的（上边界在顶栏之下）⇒ 修前实测遮罩 = `(368,76)–(1526,900)`
+/// （宽屏）/ `(0,76)–(1526,900)`（侧栏档），顶栏那一整条不被压暗；
+/// web 的 `.subgroup-dialog-overlay { position: fixed; inset: 0 }`
+/// （`group.css:2131–2133`）恒为整视口。
+///
+/// **本件自身不再开 portal**：portal 由**调用方的容器**统一开一个
+/// （[AylaRootOverlay]，见 `shell/create_sheet.dart`）—— 每个弹层各开一个 portal
+/// 会让**同级**弹层的层序不可控（实测：编辑弹窗的「删除」二次确认被压在下层、
+/// 点不中）。调用方把弹层放进同一个 `AylaRootOverlay` 里，层序就是 `Stack` 顺序。
+///
 /// ## 公开面
 /// `AylaSubGroupDialogState` · `AylaSubGroupDialog` · 样张 `aylaSubGroupDialogSamples()`
 

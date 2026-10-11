@@ -1045,6 +1045,10 @@ class _AylaTopNavState extends State<AylaTopNav> {
       builder: (BuildContext ctx) {
         return Stack(
           children: <Widget>[
+            // 点外部关闭（等价 web document pointerdown —— `TopNav.tsx:66–75` 的
+            // `document.addEventListener("pointerdown", …)`，**没有**遮罩元素）
+            // ⇒ 落在菜单外的指针保持页面原有 cursor；Flutter 侧本层不声明 cursor
+            // ⇒ `defer` 会继续往外找（下层可点件仍是手型），与 web 同义。
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,

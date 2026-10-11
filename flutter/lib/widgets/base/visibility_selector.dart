@@ -472,7 +472,15 @@ class _GroupOption extends StatelessWidget {
       checked: checked,
       enabled: !locked,
       label: title,
-      child: GestureDetector(
+      child: MouseRegion(
+        // `VisibilitySelector.tsx:96` 的 `.visibility-group-option` 是 `<label>`
+        // 包 `<input type="checkbox" disabled={isLockedGroup}>`；
+        // `app.css:200` 给 `.visibility-group-option { cursor: pointer }`、
+        // `app.css:217–219` 给 `.is-locked { cursor: not-allowed }`（逐条照抄）。
+        cursor: locked
+            ? SystemMouseCursors.forbidden // .is-locked → not-allowed
+            : SystemMouseCursors.click, // 基样式 → pointer
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: locked ? null : onChanged,
         child: Container(
@@ -502,6 +510,7 @@ class _GroupOption extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

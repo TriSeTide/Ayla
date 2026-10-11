@@ -285,6 +285,16 @@ class _AylaGroupInfoSwitchState extends State<AylaGroupInfoSwitch> {
     );
 
     // 整行（label 转发点击）
+    //
+    // ⚠️ **指针缺口（2026-10-09 第 5 轮登记，跨域移交，本处未改）**：
+    // `GroupInfo.tsx:585` 的 `<label className="group-info-setting-row group-info-switch">`
+    // 命中 `group.css:1930–1937` 的 `.group-info-switch { cursor: pointer }`
+    // ⇒ web 整行是手型；Flutter 侧本件**没有指针层**，`MouseCursor.defer` 会沿着
+    // 命中链继续往外找（落到外层页面可点件时假显手型、落到空白时是箭头）。
+    // 修法就一行：给本 `ConstrainedBox` 的 child 包
+    // `MouseRegion(cursor: _enabled ? click : forbidden)`。
+    // **未改原因**：`widgets/group/group_info_*.dart` 属并行 agent 的禁改范围，
+    // 按纪律登记移交（见 `docs/flutter/13-工作进度与待办.md` §10.1 的移交清单）。
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 44),
       child: GestureDetector(
@@ -548,6 +558,12 @@ class _SelectMenu extends StatelessWidget {
       child: Stack(
         children: <Widget>[
           // 点外部关闭（web outside-click 语义）
+          //
+          // 指针（2026-10-09 第 5 轮核查结论，**此注释即结论，无需改动**）：
+          // `GroupInfo.tsx:96–104` 用 **document 级 pointerdown** 关闭菜单，
+          // **没有**任何遮罩元素（`group.css` 亦无 overlay 类）⇒ 落在菜单外的指针
+          // 保持页面原有 cursor。Flutter 侧本层不声明 cursor ⇒ `defer` 会按命中链
+          // 继续往外找（下层按钮仍是手型），与 web 同义 —— **刻意不加 basic**。
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,

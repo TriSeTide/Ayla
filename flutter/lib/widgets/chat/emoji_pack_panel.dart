@@ -502,7 +502,15 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
       child: AylaDashedBorder(
         radius: AylaRadii.rSm,
         color: AylaColors.glassBorder,
-        child: GestureDetector(
+        child: MouseRegion(
+          // `EmojiPackPanel.tsx:207–214` 的 `.emoji-pack-add` 是
+          // `<button type="button" disabled={uploading}>` ⇒ `base.css:340` pointer /
+          // `base.css:343` not-allowed；`app.css:2244` 另有 `cursor: pointer`、
+          // `app.css:2279–2282` 另有 `:disabled { cursor: not-allowed }`（同值）。
+          cursor: _uploading
+              ? SystemMouseCursors.forbidden
+              : SystemMouseCursors.click,
+          child: GestureDetector(
           onTap: _uploading ? null : () => _handlePick(),
           child: Semantics(
             button: true,
@@ -529,6 +537,7 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
               ),
             ),
           ),
+        ),
         ),
       ),
     );

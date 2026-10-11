@@ -30,7 +30,6 @@ import 'package:go_router/go_router.dart';
 import '../core/api/live_api.dart'
     show AylaDirectoryLiveEntry, AylaLiveApi, AylaLiveDanmaku, AylaLiveViewer;
 import '../state/cursor_history.dart';
-import '../state/favorite_status.dart';
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
 import '../state/room_providers.dart' show liveStateProvider, liveWsProvider;
@@ -40,7 +39,6 @@ import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../widgets/base/directory_controls.dart' show AylaHistoryControlsData;
 import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
-import '../widgets/base/favorite_button.dart' show AylaFavoriteState;
 import '../widgets/base/loading.dart' show AylaSkeleton;
 import '../widgets/group/group_scene.dart'
     show
@@ -78,7 +76,6 @@ class GroupLivePage extends ConsumerStatefulWidget {
 class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   AylaPagedList<AylaDirectoryLiveEntry>? _directory;
   AylaLiveRoomSession? _session;
-  final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
   final AylaShareController _share = AylaShareController();
 
   /// 在看名单弹层的**权威数据子链**（web 是弹层内部自己拉 —— `LiveViewerSheet.tsx:44–65`
@@ -99,7 +96,6 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   @override
   void initState() {
     super.initState();
-    _favorites.addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
         cursor: cursor,
@@ -130,8 +126,6 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     });
     _directory?.removeListener(_onChanged);
     _directory?.dispose();
-    _favorites.removeListener(_onChanged);
-    _favorites.dispose();
     _viewerSheet?.removeListener(_onChanged);
     _viewerSheet?.dispose();
     _viewerSheet = null;
@@ -195,7 +189,6 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     _session = session;
     setState(() => _currentId = channelId);
     unawaited(session.start());
-    _favorites.load('live', <String>['$channelId']);
   }
 
   Future<void> _createLive() async {
@@ -368,10 +361,10 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
       onSendDanmaku: session.sendDanmaku,
-      favoriteState: _favorites.stateOf('live', '$channelId') ==
-          AylaFavoriteState.favorited,
-      onToggleFavorite: (bool next) =>
-          unawaited(_favorites.toggle('live', '$channelId')),
+      // 自给自足档（web `LiveRoomBody.tsx:260/328`）：收藏键自己加载自己，
+      // 页面不再需要 pre-load（根因 A 的结构性修复）。
+      favoriteTargetType: 'live',
+      favoriteTargetId: '$channelId',
       onShare: () => unawaited(aylaOpenShareSheet(
         context,
         payload: AylaSharePayload.live(

@@ -64,6 +64,7 @@ import '../widgets/group/group_info_settings.dart';
 import '../widgets/group/group_role_chip.dart' show AylaGroupRole;
 import '../widgets/group/subgroup_dialog.dart';
 import '../widgets/group/transfer_owner_dialog.dart';
+import '../widgets/shell/create_sheet.dart' show AylaRootOverlay;
 import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 
 /// 子群卡默认展示条数（web tsx 59：超出由「查看更多」展开）。
@@ -99,6 +100,23 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
   AylaSubGroupDialogState? _subgroupDialog;
   AylaSubGroup? _subgroupDelete;
   bool _transferOpen = false;
+
+  /// 转让弹窗的**独立候选分页**（web `GroupInfo.tsx:922`：
+  /// `useSocialPage("members", { groupId, q: query, excludeSelf: true })`）。
+  ///
+  /// ⚠️ **不得复用成员卡的 `_members`** —— web 是两条独立 record：
+  /// 成员卡 `useSocialPage("members", { groupId, q: memberQuery })`（无 `excludeSelf`），
+  /// 转让弹窗带 `excludeSelf: true` 且 `q` 取自弹窗自己的 `query` state。
+  /// 复用会导致「搜索弹窗时把成员卡也过滤了」+「自己出现在候选里」。
+  AylaPagedList<AylaConversationMember>? _transferMembers;
+
+  /// 转让弹窗内的搜索词（web tsx 917 的 `query` state）。
+  String _transferQuery = '';
+
+  /// 转让弹窗内的选中项（web tsx 918 的 `selected` state）——**与二次确认目标不同**：
+  /// web 里 `selected` 是弹窗内部 state、`confirmAction.member` 是页面 state，
+  /// 二次确认弹出后弹窗**仍在场**（tsx 802 只 `setConfirmAction`，不动 `transferOpen`）。
+  String? _transferSelectedId;
 
   /// 群表情包上传权限（web `GroupInfo.tsx:128-130` 的两个 state）：
   /// 仅群主可见可改；包未创建（404）按默认 false 且**仍算已加载**（tsx:234-236）。
@@ -152,6 +170,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     _subgroups?.dispose();
     _joinRequests?.removeListener(_onChanged);
     _joinRequests?.dispose();
+    _transferMembers?.removeListener(_onChanged);
+    _transferMembers?.dispose();
     _memberQuery.dispose();
     _share.dispose();
     super.dispose();
@@ -264,6 +284,76 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     if (!mounted) return;
     ref.read(chatStateProvider).upsertConversation(fresh);
     setState(() => _detail = fresh);
+  }
+
+  /// 打开转让弹窗：建候选页（web `GroupInfo.tsx:922` 的 `useSocialPage("members",
+  /// { groupId, q: query, excludeSelf: true })`）并取首页。
+  ///
+  /// ⚠️ 候选页**独立于成员卡**（web 是两条 record：成员卡不带 `excludeSelf`）。
+  /// 每次打开都新建（web 的 `TransferOwnerDialog` 由 `{transferOpen && …}` 条件挂载
+  /// ⇒ 内部 `query` / `selected` state 随卸载清空，tsx 797）。
+  Future<void> _openTransfer() async {
+    _transferMembers?.removeListener(_onChanged);
+    _transferMembers?.dispose();
+    final AylaPagedList<AylaConversationMember> pager =
+        AylaPagedList<AylaConversationMember>(
+      request: (String? cursor) => AylaChatApi.listConversationMembersPage(
+        groupId,
+        cursor: cursor,
+        q: _transferQuery,
+        excludeSelf: true, // tsx 922
+      ),
+      keyOf: (AylaConversationMember m) => m.id,
+    )..addListener(_onChanged);
+    setState(() {
+      _transferMembers = pager;
+      _transferOpen = true;
+      _transferSelectedId = null;
+      _transferQuery = '';
+      _managementError = null;
+    });
+    await pager.load();
+    if (mounted) setState(() {});
+  }
+
+  /// 转让弹窗的搜索（web tsx 917/950：`setQuery` ⇒ 候选页 key 变化 ⇒ 重查）。
+  Future<void> _searchTransfer(String value) async {
+    if (_transferQuery == value) return;
+    _transferQuery = value;
+    final AylaPagedList<AylaConversationMember>? pager = _transferMembers;
+    if (pager == null) return;
+    // web 每次输入即换 key 重查（无防抖）；旧选中项保留（web 的 `selected` 是
+    // 组件 state，不随 query 变化清空 —— tsx 918 只在组件挂载时初始化）。
+    await pager.refresh();
+    if (mounted) setState(() {});
+  }
+
+  /// 转让群主（web `GroupInfo.tsx:356–361` 的 `confirmTransfer`）。
+  ///
+  /// 成功路径比 [\_runManagement] **多一步**：web 的 `setTransferOpen(false)`
+  /// 只在接口成功后执行（tsx 357–360 的 await 之后）⇒ 弹窗在在途期间保持在场、
+  /// 两个按钮进入 busy。这里显式复刻该顺序。
+  Future<void> _transfer(AylaConversationMember target) async {
+    setState(() {
+      _busyAction = 'transfer';
+      _managementError = null;
+    });
+    try {
+      await AylaChatApi.transferGroupOwner(groupId, target.user.id);
+      if (!mounted) return;
+      // tsx 359–360：成功后才关弹窗（error 未清 ⇒ 由下方 setState 一并复位）。
+      setState(() {
+        _transferOpen = false;
+        _transferSelectedId = null;
+        _transferQuery = '';
+      });
+      await _reload();
+      await _members?.refresh();
+    } catch (error) {
+      if (mounted) setState(() => _managementError = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyAction = null);
+    }
   }
 
   Future<void> _runManagement(
@@ -521,45 +611,63 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
     final Widget memberCard =
         _buildMemberCard(members, currentUserId, memberOnline);
 
-    return Stack(
-      children: <Widget>[
-        // `.group-info`：整页持有滚动（group.css 1382–1401）。
-        // ⚠️ **只有页面内容进这层容器，弹层是它的兄弟**：web 的五个弹层都渲染在
-        // `.group-info` **之外**（tsx 795 闭合 `</div>` 之后才是 797–889 的
-        // TransferOwnerDialog / SubGroupDialog / 确认框）⇒ 它们不随页面滚动。
-        AylaGroupInfoPageScroll(
-          child: AylaGroupInfoLayout(
-            side: <Widget>[profile, manageCard],
-            main: <Widget>[subgroupCard, memberCard],
-          ),
-        ),
-        if (_transferOpen)
-          AylaTransferOwnerDialog(
+    // web：五个弹层都渲染在 `.group-info` **之外**（tsx 795 闭合 `</div>` 之后才是
+    // 797–889），且全部 `createPortal` 到 `document.body`
+    // （`ConfirmDialog.tsx:52/118`、`SubGroupDialog.tsx:41–42/108–109`）⇒ 遮罩铺满
+    // **整视口**、不随页面滚动、不被任何祖先容器裁剪。
+    //
+    // ⚠️ **2026-10-09 修正**：此前弹层直接放在本页 `Stack` 里 —— 而页面位于
+    // **shell navigator 的 Overlay**（其上边界在顶栏之下），实测遮罩只有
+    // `(368,76)–(1526,900)`，顶栏那一整条不被压暗（用户实报「遮罩被顶部导航栏截断」）。
+    // 现按 web 的 portal 语义挂**根 Overlay**（[AylaRootOverlay]）。
+    final List<Widget> dialogs = <Widget>[
+      if (_transferOpen)
+        AylaTransferOwnerDialog(
+            // web tsx 922–923：候选页带 `excludeSelf: true`，再按 `role !== "owner"` 过滤。
+            // 「排除自己」由**服务端** `exclude_self=1` 承担（tsx 922），
+            // 客户端只做 owner 过滤 ⇒ 与 web 同一口径。
             members: <AylaTransferMember>[
               for (final AylaConversationMember m
-                  in members?.items ?? const <AylaConversationMember>[])
-                if (m.role != AylaConversationMemberRole.owner &&
-                    m.user.id != currentUserId)
+                  in _transferMembers?.items ?? const <AylaConversationMember>[])
+                if (m.role != AylaConversationMemberRole.owner)
                   AylaTransferMember(
                     id: m.user.id,
-                            displayName: m.user.displayName ?? m.user.username ?? '',
+                    displayName: m.user.displayName ?? m.user.username ?? '',
                     role: _roleOf(m.role),
                     avatarUrl: (m.user.avatar ?? '').isEmpty ? null : m.user.avatar,
                     online: memberOnline(m), // tsx 971
                   ),
             ],
-            selectedId: null,
-            query: '',
-            onQueryChanged: (String _) {},
-            onClose: () => setState(() => _transferOpen = false),
+            selectedId: _transferSelectedId,
+            query: _transferQuery,
+            onSelect: (AylaTransferMember m) => setState(() {
+              // web tsx 964：点行 setSelected(m)（单选，可换选）。
+              _transferSelectedId = m.id;
+            }),
+            onQueryChanged: (String value) => unawaited(_searchTransfer(value)),
+            loading: _transferMembers?.loading ?? false,
+            hasMore: _transferMembers?.hasMore ?? false,
+            pageError: _transferMembers?.error,
+            onMore: () => unawaited(_transferMembers?.loadMore() ?? Future<void>.value()),
+            error: _managementError,
+            busy: _busyAction == 'transfer',
+            onClose: () => setState(() {
+              _transferOpen = false;
+              _transferSelectedId = null;
+              _transferQuery = '';
+              _managementError = null;
+            }),
             onConfirm: (AylaTransferMember m) {
+              // web tsx 802：只 `setConfirmAction({kind:"transfer", member})`，
+              // **不动 `transferOpen`** ⇒ 选择弹窗在二次确认期间保持在场（busy 态）。
               AylaConversationMember? target;
               for (final AylaConversationMember item
-                  in members?.items ?? const <AylaConversationMember>[]) {
+                  in _transferMembers?.items ?? const <AylaConversationMember>[]) {
                 if (item.user.id == m.id) target = item;
               }
+              if (target == null) return;
               setState(() {
-                _transferOpen = false;
+                _transferSelectedId = null;
                 _confirmTransfer = target;
               });
             },
@@ -574,10 +682,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
             onConfirm: () {
               final AylaConversationMember target = _confirmTransfer!;
               setState(() => _confirmTransfer = null);
-              unawaited(_runManagement(
-                'transfer',
-                () => AylaChatApi.transferGroupOwner(groupId, target.user.id),
-              ));
+              unawaited(_transfer(target));
             },
             onClose: () => setState(() => _confirmTransfer = null),
           ),
@@ -634,6 +739,21 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
               });
             },
           ),
+    ];
+
+    return Stack(
+      children: <Widget>[
+        // `.group-info`：整页持有滚动（group.css 1382–1401）。只有页面内容进这层容器。
+        AylaGroupInfoPageScroll(
+          child: AylaGroupInfoLayout(
+            side: <Widget>[profile, manageCard],
+            main: <Widget>[subgroupCard, memberCard],
+          ),
+        ),
+        if (dialogs.isNotEmpty)
+          AylaRootOverlay(
+            builder: (BuildContext _) => Stack(children: dialogs),
+          ),
       ],
     );
   }
@@ -660,7 +780,13 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         spacing: AylaSpacing.sp3, // gap: var(--sp-3)（group.css:1790–1794）
         children: <Widget>[
-          const AylaGroupInfoSectionTitle(title: '管理', icon: null),
+          // web `GroupInfo.tsx:523–526`：卡头文案随 `canManage` 切换
+          // （`{canManage ? "管理" : "更多"}`）—— 转让后当前用户降为普通成员，
+          // 标题必须在**同一次刷新**里跟着降级。
+          AylaGroupInfoSectionTitle(
+            title: _canManage ? '管理' : '更多',
+            icon: null,
+          ),
           // ⚠️ 保留原有的 `padding-bottom: sp2`（非 web 值）：web 的 `p.group-info-error`
           // 因 `base.css:316–326` 把 `p` 归零而**没有**外边距，本轮只补卡体与块间距，
           // 不为这处既有的 8px 偏差扩大改动面（登记在测试的「不锁」段）。
@@ -757,7 +883,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
             ),
           ],
           AylaGroupInfoDangerActions(
-            onTransfer: _isOwner ? () => setState(() => _transferOpen = true) : null,
+            onTransfer: _isOwner ? () => unawaited(_openTransfer()) : null,
             onDissolve: _isOwner ? () => setState(() => _confirmDissolve = true) : null,
             dissolveBusy: _busyAction == 'dissolve',
             onLeave: !_isOwner ? () => setState(() => _confirmLeave = true) : null,

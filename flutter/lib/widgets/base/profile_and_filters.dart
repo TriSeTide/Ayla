@@ -646,6 +646,12 @@ class _FilterTabState extends State<_FilterTab> {
           if (f) widget.onFocus();
         },
         child: MouseRegion(
+          // `DirectoryFilters.tsx:73–83` 的频道选项卡是 `<button type="button" role="tab">`
+          // ⇒ `base.css:340` 全局 `button { cursor: pointer }`
+          // （`directory-filters.css:117` 的 `.directory-filter` 另有一条同值声明）。
+          // ⚠️ 本件此前**漏挂** cursor（本区域没有任何祖先 MouseRegion 带声明）⇒
+          // 鼠标悬停在「全部 / 用户 / 群聊…」上不变手指（用户实报场景之一）。
+          cursor: SystemMouseCursors.click,
           onEnter: (_) {
             setState(() => _hovered = true);
             // ⚠️ **本 tab 就是选中项时，直接在此处启动扫光** ——

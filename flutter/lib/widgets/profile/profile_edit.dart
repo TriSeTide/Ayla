@@ -356,7 +356,15 @@ class _AylaProfileSwitchState extends State<AylaProfileSwitch> {
     );
 
     // .profile-show-content-row：row · center · space-between · gap sp3
-    return GestureDetector(
+    return MouseRegion(
+      // 指针（2026-10-09 核查，**刻意不给 click**）：web 的整行是
+      // `<label className="profile-form-row profile-show-content-row">`（`ProfilePage.tsx:261`），
+      // `.profile-form-row`（`app.css:2731–2738`）与本行类（`profile.css:378–383`）
+      // **都没有 cursor 声明** ⇒ 文字区是浏览器默认箭头；手型只出现在内部的
+      // `<button class="profile-switch">`（`profile.css:408` 的 `cursor: pointer`）上，
+      // 由 `AylaSwitch(ownTap: false)` 的常规档 MouseRegion 表达（内层优先）。
+      cursor: SystemMouseCursors.basic,
+      child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: _enabled ? _toggle : null,
       child: Row(
@@ -389,6 +397,7 @@ class _AylaProfileSwitchState extends State<AylaProfileSwitch> {
           const SizedBox(width: AylaSpacing.sp3), // gap: var(--sp-3)
           rail,
         ],
+      ),
       ),
     );
   }
@@ -427,10 +436,20 @@ class AylaProfileFormRow extends StatelessWidget {
         if (onLabelTap == null)
           title
         else
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onLabelTap,
-            child: title,
+          MouseRegion(
+            // 指针（2026-10-09 核查，**刻意不给 click**）：web 的 `ProfilePage.tsx:261`
+            // 是 `<label className="profile-form-row profile-show-content-row">`；
+            // `app.css:2731–2738` 的 `.profile-form-row` 与 `profile.css:378–383` 的
+            // `.profile-show-content-row` **都没有 cursor 声明** ⇒ 标签文字上是浏览器默认箭头
+            //（`<label>` 不是 `<button>`）。Flutter 侧显式 `basic`，防止 `defer`
+            // 继续往外找而假显手型。行内的开关本体由 `AylaSwitch(ownTap: false)`
+            // 自行声明 click（同 web 的 `<button role="switch">`）。
+            cursor: SystemMouseCursors.basic,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onLabelTap,
+              child: title,
+            ),
           ),
         child,
       ],

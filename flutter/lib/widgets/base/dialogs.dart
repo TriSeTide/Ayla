@@ -693,11 +693,21 @@ class AylaModalOverlay extends StatelessWidget {
     return Stack(
       children: <Widget>[
         // 遮罩（`background: var(--overlay-dim)`；子群档另有 blur(3px)）
+        //
+        // 指针：web 的遮罩选择器（`.privacy-sheet-overlay` `profile.css:626–635` /
+        // `.subgroup-dialog-overlay` `group.css` / `.group-apply-overlay` `search.css`）
+        // **没有任何 cursor 声明**，元素也不是 `<button>` ⇒ 浏览器默认箭头。
+        // test/2026-10-09：Flutter 侧此前没挂 MouseRegion ⇒ `MouseCursor.defer` 会把
+        // 命中链继续往外找，落到页面某个 click 区时遮罩上会显示**手型**（反向缺陷）。
+        // 显式声明 `basic` 才能与 web 的「默认箭头」等价。
         Positioned.fill(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onDismiss,
-            child: mask,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.basic,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onDismiss,
+              child: mask,
+            ),
           ),
         ),
         // 定位：窄屏贴底（padding 0）；宽屏居中；[centerBoth] 时两档都居中
@@ -706,9 +716,17 @@ class AylaModalOverlay extends StatelessWidget {
             padding: EdgeInsets.all(centered ? padding : 0),
             child: Align(
               alignment: centered ? Alignment.center : Alignment.bottomCenter,
-              child: GestureDetector(
-                onTap: () {}, // 卡内点击不冒泡到遮罩
-                child: child,
+              // 卡内点击不冒泡到遮罩：**纯事件吞并**（web 的卡内 onClick 无业务动作）。
+              // 指针：web 的弹卡（`.modal-panel` / `.glass-card` 等）**没有 cursor 声明**
+              // ⇒ 卡面空白处是浏览器默认箭头。这里显式 `basic`，避免 `defer` 继续往外
+              // 找（会命中遮罩之下的页面可点件而假显手型）；卡内的按钮/输入各自声明，
+              // 内层优先，不受本层影响。
+              child: MouseRegion(
+                cursor: SystemMouseCursors.basic,
+                child: GestureDetector(
+                  onTap: () {}, // 卡内点击不冒泡到遮罩
+                  child: child,
+                ),
               ),
             ),
           ),
