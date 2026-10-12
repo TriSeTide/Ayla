@@ -6,7 +6,7 @@
  *
  * 本文件锁三条**跨文件结构契约**（Vitest 的 `css: false` 会清空 CSS 模块 ⇒ 按
  * `overlay-scrollbar.test.tsx:7–8` 的既有先例，直接读源码/样式文件断言）：
- *  ① 展开态**没有任何遮罩节点**，也没有 `.group-posts-scrim` 规则残留；
+ *  ① 展开态**没有黑色遮罩**（不铺任何颜色、无淡入关键帧），但**保留点击收起区**
  *  ② 展开态面板底 = `--glass-bg-strong`（.78），与面板内 `.field` 的复合不透明度对齐；
  *     且 ≥769 的 auroraqua 覆写段**必须再声明一次**（同特异性后加载会压掉 posts.css）。
  */
@@ -26,17 +26,24 @@ function stripComments(css: string): string {
 }
 
 describe("群内帖子发帖面板：无遮罩 + 展开态底提档", () => {
-  it("GroupPosts.tsx 不再渲染遮罩节点", () => {
-    // 注释里可以提到历史名称，JSX 里不行。
+  it("GroupPosts.tsx 保留点击收起区（但不再有压暗层）", () => {
     const jsx = groupPostsTsx.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-    expect(jsx).not.toContain("group-posts-scrim");
-    expect(jsx).not.toContain("setEditorExpanded(false)");
+    // 层要留：它是「展开时点击这块区域收起输入框」的载体（用户第二轮反馈）
+    expect(jsx).toContain("group-posts-scrim");
+    expect(jsx).toContain("setEditorExpanded(false)");
   });
 
-  it("posts.css 不再有 .group-posts-scrim 规则与淡入关键帧", () => {
+  it("点击收起区**零绘制**：无 background / 无淡入关键帧，只留定位与层级", () => {
     const css = stripComments(postsCss);
-    expect(css).not.toContain(".group-posts-scrim");
+    const rule = /\.group-posts-scrim\s*\{[^}]*\}/.exec(css);
+    expect(rule, "缺少 .group-posts-scrim（点击收起区）规则").not.toBeNull();
+    // 命中与层级：inset 0 + z-index 45（夹在列表与面板 50 之间）
+    expect(rule![0]).toContain("inset: 0");
+    expect(rule![0]).toContain("z-index: 45");
+    // 零绘制：不得再铺任何颜色
+    expect(rule![0], "不得再给遮罩铺色（用户裁决「直接去掉黑色遮罩」）").not.toContain("background");
     expect(css).not.toContain("group-posts-scrim-in");
+    expect(css).not.toContain("rgba(70, 91, 146, 0.25)");
   });
 
   it("展开态面板底取 --glass-bg-strong（不是 .55 的 --glass-bg），一条声明两档通吃", () => {

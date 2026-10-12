@@ -784,7 +784,7 @@ void main() {
       expect(surface.bottom, 400);
     });
 
-    testWidgets('展开态：**无遮罩** · 面板贴底（z50）· 收起只走右上圆形键', (
+    testWidgets('展开态：**无黑色遮罩但保留点击收起区** · 面板贴底（z50）', (
       WidgetTester tester,
     ) async {
       final List<bool> changes = <bool>[];
@@ -804,24 +804,28 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pump();
 
-      // 无遮罩（2026-10-12 用户裁决；web 侧 `.group-posts-scrim` 已从
-      // GroupPosts.tsx 与 posts.css 一并删除）。
-      expect(scrimFinder(), findsNothing, reason: '展开态不再有任何压暗遮罩');
+      // **无色**：不再有任何压暗绘制（2026-10-12 用户裁决「直接去掉黑色遮罩」）
+      expect(
+        scrimFinder(),
+        findsNothing,
+        reason: '点击收起区必须零绘制（不得再铺 AylaColors.overlayDim）',
+      );
 
       // 面板贴底：bottom: 0（面板盒 = 展开态滚动口）
       final Rect panel = tester.getRect(panelViewport());
       expect(panel.bottom, closeTo(400, 0.5));
-      expect(panel.top, greaterThan(0)); // 面板不再铺满 ⇒ 上方仍是列表
+      expect(panel.top, greaterThan(0)); // 面板不铺满 ⇒ 上方仍是列表
 
-      // 面板**之外**（上方列表区）点击不再收起 —— 遮罩是原「点空白收起」的载体。
+      // **但仍可点收起**（用户第二轮反馈：「展开时点击这块区域应该收起输入框」）
+      // —— 命中层 = 覆盖全容器的无色 GestureDetector（.group-posts-scrim 的语义）。
       await tester.tapAt(Offset(panel.center.dx, panel.top / 2));
       await tester.pump();
-      expect(changes, isEmpty, reason: '无遮罩 ⇒ 面板外点击不再是收起入口');
+      expect(changes, <bool>[false], reason: '面板外点击 ⇒ 收起（层留、色去）');
 
-      // 收起入口 = 面板右上角 32px 圆形键（.post-editor-collapse-btn）
+      // 收起入口之二：面板右上角 32px 圆形键（.post-editor-collapse-btn）
       await tester.tap(find.bySemanticsLabel('收起发帖面板'));
       await tester.pump();
-      expect(changes, <bool>[false]);
+      expect(changes, <bool>[false, false]);
     });
 
     testWidgets('展开态 max-height：窄屏 100% / 宽屏 calc(100% − 2×sidebar-gutter)', (
@@ -931,6 +935,64 @@ void main() {
         );
         await tester.pumpWidget(const SizedBox.shrink());
       }
+    });
+
+    testWidgets('展开/收起不丢焦点与草稿：点输入框展开后光标进正文、收起后内容仍在', (
+      WidgetTester tester,
+    ) async {
+      // 2026-10-12 用户实报：
+      // ① 「flutter 端点击输入框时应该像 web 一样，展开输入框光标应该自动进内容」；
+      // ② 「收起输入框时帖子内容自动进入输入框」。
+      //
+      // 根因：两态的面板位于**不同槽位**（收起 = Column 末子；展开 = Stack 的
+      // Positioned），外层 AylaRevealItem 还带 ValueKey(expanded) 换键重播
+      // ⇒ 整棵子树重挂载，TextEditingController/FocusNode 全部重建。
+      // web 无此问题：<textarea> 是同一 DOM 节点（只改 rows 1↔4），
+      // 标题 input 虽随 expanded 卸载，但内容存 React state ⇒ 草稿照旧。
+      //
+      // 修法 = 给 AylaPostEditor 挂稳定 GlobalKey（元素搬家而非重建）。
+      await tester.pumpWidget(
+        host(composer(expanded: false, controlled: false), width: 375, height: 400),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+
+      // 收起态只有一个可编辑件（正文）
+      expect(find.byType(EditableText), findsOneWidget);
+
+      // ① 点输入框 ⇒ 展开
+      await tester.tap(find.byType(EditableText));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      // 展开态 = [标题, 正文, 群搜索]；**正文必须已持焦点**（web onFocus 语义）
+      final List<EditableText> fields = tester
+          .widgetList<EditableText>(find.byType(EditableText))
+          .toList();
+      expect(fields.length, 3);
+      expect(
+        fields[1].focusNode.hasFocus,
+        isTrue,
+        reason: '展开后光标应自动进正文（此前因重挂载而全部失焦）',
+      );
+
+      // 输入正文草稿
+      await tester.enterText(find.byType(EditableText).at(1), "草稿内容");
+      await tester.pump();
+
+      // ② 收起 ⇒ 草稿必须仍在（同一 State，不重建控制器）
+      await tester.tap(find.bySemanticsLabel("收起发帖面板"));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(find.byType(EditableText), findsOneWidget);
+      final EditableText collapsed =
+          tester.widget<EditableText>(find.byType(EditableText));
+      expect(
+        collapsed.controller.text,
+        "草稿内容",
+        reason: '收起后已输入内容不得清空（此前因重挂载而丢失）',
+      );
     });
   });
 }

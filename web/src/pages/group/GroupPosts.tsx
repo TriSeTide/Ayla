@@ -474,10 +474,22 @@ export function GroupPosts({
           </button>
         </div>
       )}
-      {/* 展开态无遮罩（2026-10-12 用户裁决：「直接去掉黑色遮罩」）——
-          原先的 .group-posts-scrim 是 rgba(70,91,146,.25) 压暗层，在浅色极光底上
-          观感偏暗，且只盖到面板顶边、形成一条「戛然而止」的深色带。
-          收起仍由面板右上角 32px 圆形键（PostEditor 的 collapse-bar）承担。 */}
+      {/* 展开态的**点击收起区**（透明，不铺任何颜色）。
+          语义与原先的 .group-posts-scrim 一致：盖住列表与标题栏、点击 ⇒ 收起。
+          两轮用户反馈共同定型（2026-10-12）：
+          ① 「直接去掉黑色遮罩」—— 该层原先是 rgba(70,91,146,.25) 的压暗层
+             （--overlay-dim，弹窗语义），在浅色极光底上偏暗，且只盖到面板顶边
+             ⇒ 面板上方留下一条「戛然而止」的深色带（实报「遮罩截断」）；
+          ② 「展开时点击这块区域应该收起输入框」—— 所以**层要留、颜色要去**。
+          ⇒ 现在零绘制，只保留点击命中（cursor 仍随浏览器默认箭头，
+             与 web 只挂 onClick 的 <div> 一致）。 */}
+      {editorExpanded && (
+        <div
+          className="group-posts-scrim"
+          onClick={() => setEditorExpanded(false)}
+          aria-hidden="true"
+        />
+      )}
       <div className={`group-posts-input ${editorExpanded ? "is-expanded" : ""}`}>
         <PostEditor
           group={groupId}

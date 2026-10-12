@@ -1035,7 +1035,7 @@ class _ComponentGalleryState extends State<ComponentGallery> {
             ),
             const SizedBox(height: AylaSpacing.sp6),
 
-            // ---------- 群内帖子底部输入容器（B10：两档材质 + 展开贴底；2026-10-12 起无遮罩） ----------
+            // ---------- 群内帖子底部输入容器（B10：两档材质 + 展开贴底；2026-10-12 起遮罩去色留层） ----------
             _Section(
               title:
                   'AylaGroupPostsComposer（posts.css 933–951/1011–1108 + auroraqua.css 347–368）',
@@ -1044,8 +1044,8 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                   '窄屏 padding sp2 sp3 sp3 / 仅上边框 / 方角 / blur18 sat1.4 / 无外阴影 · '
                   '≥769 被 auroraqua 347–359 覆写为**浮动玻璃卡**（margin 12 + margin-left 0 / padding 8 / radius 16 / '
                   '四边亮边 / --glass-shadow / blur24 sat1.4）· 入场 auroraqua-panel-from-bottom 300ms，'
-                  '展开档换 group-posts-editor-rise 250ms · **展开态无遮罩**'
-                  '（2026-10-12 用户裁决删除 scrim，收起走右上 32px 圆形键）· '
+                  '展开档换 group-posts-editor-rise 250ms · **展开态无黑色遮罩**'
+                  '（2026-10-12 去色留层：点击层仍在 ⇒ 点空白或右上 32px 圆形键均可收起）· '
                   '展开态底提档 --glass-bg-strong(.78)、与面板内 .field 的复合观感对齐 · '
                   '展开态 absolute 贴底 + max-height 100%（≥769 calc(100% − 2×12)）+ overflow-y auto · '
                   '字段被覆写为 padding sp2 sp3 + line-height 22（收起态正文 ⇒ 40 高）',
