@@ -49,7 +49,10 @@ void main() {
       )
       .first;
 
-  /// 展开遮罩（rgba(70,91,146,.25)）。
+  /// 展开遮罩的旧选择器（rgba(70,91,146,.25)）。
+  ///
+  /// ⚠️ **2026-10-12 起本件不再有遮罩**（用户裁决「直接去掉黑色遮罩」，web 与
+  /// Flutter 两端同步删除 `.group-posts-scrim`）⇒ 用它断言「不存在」。
   Finder scrimFinder() => find.byWidgetPredicate(
     (Widget w) => w is ColoredBox && w.color == AylaColors.overlayDim,
   );
@@ -781,7 +784,7 @@ void main() {
       expect(surface.bottom, 400);
     });
 
-    testWidgets('展开态：遮罩出现（z45）· 面板贴底（z50）· 点遮罩 ⇒ onExpandedChange(false) 一次', (
+    testWidgets('展开态：**无遮罩** · 面板贴底（z50）· 收起只走右上圆形键', (
       WidgetTester tester,
     ) async {
       final List<bool> changes = <bool>[];
@@ -801,17 +804,22 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pump();
 
-      final Finder scrim = scrimFinder();
-      expect(scrim, findsOneWidget);
-      expect(tester.getRect(scrim), const Rect.fromLTWH(0, 0, 375, 400)); // inset: 0
+      // 无遮罩（2026-10-12 用户裁决；web 侧 `.group-posts-scrim` 已从
+      // GroupPosts.tsx 与 posts.css 一并删除）。
+      expect(scrimFinder(), findsNothing, reason: '展开态不再有任何压暗遮罩');
 
       // 面板贴底：bottom: 0（面板盒 = 展开态滚动口）
       final Rect panel = tester.getRect(panelViewport());
       expect(panel.bottom, closeTo(400, 0.5));
-      expect(panel.top, greaterThan(0)); // 面板之上的压暗带仍是遮罩
+      expect(panel.top, greaterThan(0)); // 面板不再铺满 ⇒ 上方仍是列表
 
-      // 点遮罩：落在面板**之上**的压暗带里（面板盖住遮罩的部分点不到，与 web 一致）
+      // 面板**之外**（上方列表区）点击不再收起 —— 遮罩是原「点空白收起」的载体。
       await tester.tapAt(Offset(panel.center.dx, panel.top / 2));
+      await tester.pump();
+      expect(changes, isEmpty, reason: '无遮罩 ⇒ 面板外点击不再是收起入口');
+
+      // 收起入口 = 面板右上角 32px 圆形键（.post-editor-collapse-btn）
+      await tester.tap(find.bySemanticsLabel('收起发帖面板'));
       await tester.pump();
       expect(changes, <bool>[false]);
     });
@@ -863,29 +871,66 @@ void main() {
       );
     });
 
-    testWidgets('半受控：expanded=null 时内部自持（点输入框展开 ⇒ 出遮罩）', (
+    testWidgets('半受控：expanded=null 时内部自持（点输入框展开 ⇒ 面板贴底、仍无遮罩）', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(
         host(composer(expanded: false, controlled: false), width: 375, height: 400),
       );
-      expect(
-        find.byWidgetPredicate(
-          (Widget w) => w is ColoredBox && w.color == AylaColors.overlayDim,
-        ),
-        findsNothing,
+      // ⚠️ 先放掉入场动画：收起档挂 auroraqua-panel-from-bottom（+20px → 0，300ms）
+      // ⇒ 动画未落定时玻璃面还在 +20 处（实测 bottom=420 而非 400）。
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      // 收起态：面板在流内、贴宿主底（⚠️ 收起态**没有** SingleChildScrollView 外壳
+      // —— 那层只在展开档出现 ⇒ 基准量玻璃面本身）。
+      expect(scrimFinder(), findsNothing);
+      final Finder surfaceFinder = find.descendant(
+        of: find.byType(AylaGroupPostsComposer),
+        matching: find.byType(AylaGlassSurface),
       );
+      final Rect collapsed = tester.getRect(surfaceFinder);
+      expect(collapsed.bottom, closeTo(400, 0.5));
 
-      // 点正文框 ⇒ 编辑器 onFocus 展开 ⇒ 外壳跟随出遮罩
+      // 点正文框 ⇒ 编辑器 onFocus 展开 ⇒ 外壳跟随（面板脱离流、出现滚动口外壳）
       await tester.tap(find.byType(TextField));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(scrimFinder(), findsNothing, reason: '展开同样无遮罩');
+      final Rect expanded = tester.getRect(panelViewport());
+      expect(expanded.bottom, closeTo(400, 0.5));
       expect(
-        find.byWidgetPredicate(
-          (Widget w) => w is ColoredBox && w.color == AylaColors.overlayDim,
-        ),
-        findsOneWidget,
+        expanded.height,
+        greaterThan(collapsed.height),
+        reason: '展开后面板长高（可用高度 = 整个容器）',
       );
+    });
+
+    testWidgets('展开态面板底提档 .78（与面板内 .field 的复合观感对齐，2026-10-12 用户裁决）', (
+      WidgetTester tester,
+    ) async {
+      for (final bool expanded in <bool>[false, true]) {
+        await tester.pumpWidget(
+          host(composer(expanded: expanded), width: 375, height: 400),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump();
+
+        final AylaGlassSurface glass = tester.widget<AylaGlassSurface>(
+          find.descendant(
+            of: find.byType(AylaGroupPostsComposer),
+            matching: find.byType(AylaGlassSurface),
+          ),
+        );
+        expect(
+          glass.strong,
+          expanded,
+          reason: expanded
+              ? '展开态取 --glass-bg-strong(.78)：只有一层 .55 时会把背后的卡片文字透出来'
+              : '收起态保持 --glass-bg(.55)，与输入框原本的透明度一致',
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
     });
   });
 }

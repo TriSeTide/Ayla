@@ -1,18 +1,19 @@
-/// AylaGroupPostsComposer —— 群内帖子的**底部玻璃输入容器 + 展开遮罩 + 展开态贴底**。
+/// AylaGroupPostsComposer —— 群内帖子的**底部玻璃输入容器 + 展开态贴底**。
 ///
 /// 本件是「壳」：编辑器本体一律复用 [AylaPostEditor]（`compact` + `collapsible` +
 /// 半受控 `expanded` + `composerShell`），本文件**不重写编辑器**，只负责
-/// web 上由 GroupPosts.tsx 与 .group-posts-input / .group-posts-scrim 承担的三件事：
-/// ① 输入容器的玻璃材质与两档几何；② 展开遮罩（点击收起）；③ 展开态脱离文档流贴底。
+/// web 上由 GroupPosts.tsx 与 .group-posts-input 承担的两件事：
+/// ① 输入容器的玻璃材质与两档几何；② 展开态脱离文档流贴底。
+///
+/// ⚠️ **展开态没有遮罩**（2026-10-12 用户裁决「直接去掉黑色遮罩」，两端同步）：
+/// 本件此前照搬过 `.group-posts-scrim`（rgba(70,91,146,.25) + 200ms 淡入），
+/// 现已随 web 一并移除，收起只走面板右上角 32px 圆形键。
+/// 原规则已从 `posts.css` 与 `GroupPosts.tsx` 删除 ⇒ 事实源里不再有它。
 ///
 /// ## 事实源（逐条 web 文件:行 → 数值/结构）
 /// ```
 /// posts.css 923–929     .group-posts：height 100% · flex column · overflow hidden · position relative
-/// posts.css 933–939     .group-posts-scrim：**absolute inset 0** · z-index **45** ·
-///                       background rgba(70,91,146,.25) · animation group-posts-scrim-in 200ms
-///                       var(--ease-out)（= cubic-bezier(.22,.61,.36,1)）
-/// posts.css 941–948     关键帧：opacity 0 → 1
-/// posts.css 950–954     reduced-motion ⇒ animation: none
+/// posts.css 933–939     ~~.group-posts-scrim~~ —— **2026-10-12 已删除**（无遮罩；见上）
 /// posts.css 1011–1024   .group-posts-input：flex none · position relative · min-width 0 ·
 ///                       z-index **50** · padding **sp2 sp3 sp3**(8/12/12) · **border-top 1px
 ///                       --glass-border** · background --glass-bg(.55) ·
@@ -43,8 +44,7 @@
 ///                       backdrop-filter **--glass-filter(blur24 sat1.4)**
 /// auroraqua.css 361–368 同段再压：.group-content .group-posts > .group-posts-input
 ///                       ⇒ **margin-left: 0**（左邻侧栏已有 12px 空隙，避免双份）
-/// GroupPosts.tsx 477–483 遮罩**只在 editorExpanded 时渲染**、点击 ⇒ setEditorExpanded(false)、
-///                       aria-hidden="true"
+/// GroupPosts.tsx 476–484 ~~遮罩节点~~ —— **2026-10-12 已删除**（无遮罩）
 /// GroupPosts.tsx 484–493 div.group-posts-input[.is-expanded] 内是
 ///                       PostEditor group={groupId} onCreated compact collapsible
 ///                       expanded={editorExpanded} onExpandedChange={setEditorExpanded}
@@ -56,7 +56,12 @@
 ///    --glass-shadow + blur24 sat1.4（**padding / 边框 / 圆角 / 模糊四者都被换档**）；
 /// 3. auroraqua 364 再把 margin-left 归 0（只在本件位于 .group-content .group-posts 内时命中
 ///    —— 本件的固定位置即该结构 ⇒ 恒命中）；
-/// 4. .group-posts-scrim **只有 posts.css 命中**（auroraqua 无任何 scrim 规则）。
+/// 4. 展开态底（`.group-posts-input.is-expanded`）取 `--glass-bg-strong`(.78)，
+///    **一条声明两档通吃**（posts.css 里那条即可，无需 auroraqua 配合）：
+///    它的特异性是 **0-2-0**，而 ≥769 的 `:is(.composer, .group-posts-input, …)`
+///    取最具体实参 = **0-1-0** ⇒ CSS 级联**特异性优先于源码顺序**（媒体查询不贡献
+///    特异性），故与「posts.css 先加载、auroraqua 后加载」无关。
+///    Flutter 侧等价物 = [AylaGlassSurface] 的 `strong: expanded`（见 `_inputPanel`）。
 ///
 /// ## 公开面
 /// AylaGroupPostsComposer · 样张 aylaGroupPostsComposerSamples()
@@ -179,9 +184,12 @@ class _AylaGroupPostsComposerState extends State<AylaGroupPostsComposer> {
                 ],
               ),
             ),
-            // z-index 45：遮罩（只在展开态渲染；点击收起；aria-hidden ⇒ 不进语义树）
-            if (_expanded)
-              Positioned.fill(child: ExcludeSemantics(child: _scrim())),
+            // ⚠️ **展开态无遮罩**（2026-10-12 用户裁决：「直接去掉黑色遮罩」）。
+            // 原先这里铺一层 `AylaColors.overlayDim`（rgba(70,91,146,.25)）——
+            // 它是「弹窗压暗」语义，在浅色极光底上偏暗；又因为只盖到面板顶边，
+            // 面板上方会留下一条戛然而止的深色带（用户实报「遮罩截断」）。
+            // 收起交互不受影响：面板右上角 32px 圆形收起键（PostEditor collapse-bar）。
+            //
             // z-index 50：展开态贴底（脱离文档流，盖住标题栏与列表）
             if (_expanded)
               Positioned(
@@ -202,29 +210,6 @@ class _AylaGroupPostsComposerState extends State<AylaGroupPostsComposer> {
     );
   }
 
-  /// 展开遮罩（posts.css 933–948）。
-  Widget _scrim() {
-    return AylaRevealItem(
-      // group-posts-scrim-in：opacity 0 → 1，200ms var(--ease-out)（位移为 0，纯淡入）
-      offset: Offset.zero,
-      duration: const Duration(milliseconds: 200),
-      curve: AylaCurves.easeOut,
-      child: MouseRegion(
-        // 指针：`.group-posts-scrim`（`GroupPosts.tsx:479` + `posts.css:952–957`）
-        // 是只挂 onClick 的 `<div>`、**无 cursor 声明** ⇒ 浏览器默认箭头。
-        // Flutter 侧不声明时 `defer` 会继续往外找（命中页面可点件即假显手型）。
-        cursor: SystemMouseCursors.basic,
-        child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _setExpanded(false), // onClick ⇒ setEditorExpanded(false)
-        child: const ColoredBox(
-          color: AylaColors.overlayDim, // rgba(70, 91, 146, .25)
-        ),
-      ),
-      ),
-    );
-  }
-
   /// 输入容器（.group-posts-input，两档材质 + 入场）。
   Widget _inputPanel({required bool wide, required bool expanded}) {
     // 入场：
@@ -241,6 +226,21 @@ class _AylaGroupPostsComposerState extends State<AylaGroupPostsComposer> {
             )
           : EdgeInsets.zero,
       child: AylaGlassSurface(
+        // 展开态底**提高一档**（.55 → .78 = --glass-bg-strong），与用户所称
+        // 「输入框原本的透明度」对齐（2026-10-12 用户裁决：「弹出输入框透明度
+        // 与输入框原本保持一致」）。
+        //
+        // 事实链：面板内的 `.field` 自身也是 .55（`posts.css:1052–1059`），
+        // **叠在面板底上** ⇒ 字段是「两层玻璃」，而 padding 带只有一层：
+        //   · 原状 .55 + .55 ⇒ 字段观感 1−(1−.55)² = **.80**，带仅 **.55**
+        //     ⇒ 落差 25 个百分点，展开后卡片文字会从带里透出（实机截图取证：
+        //     卡片页脚「查看帖子 ○0 👁1」在带内清晰可辨）；
+        //   · 改后 .78 + .55 ⇒ 字段 **.90**，带 **.78** ⇒ 落差 12 个百分点。
+        // ⚠️ 带与字段不可能严格相等（只有面板 = 1 才有解）；把字段背景改透明虽能
+        // 让两者相等，却会抹掉它的白边玻璃井 ⇒ 字段「消失」，故只提带的档。
+        // 仍是既有 token（web 侧同一改动 = posts.css 的 `--glass-bg-strong`），
+        // **不新增任何色值**。
+        strong: expanded,
         // 窄屏无 radius 声明 ⇒ 方角；≥769 ⇒ --radius-card 16
         radiusOverride: wide ? null : BorderRadius.zero,
         radius: AylaRadii.rCard,
@@ -374,8 +374,8 @@ class _GroupPostsComposerSamplesState
                 ),
               ),
               _stage(
-                '窄屏 375 · 展开态（遮罩 z45 + 面板贴底 z50 + 250ms rise；'
-                '点遮罩或右上收起键回收起态）',
+                '窄屏 375 · 展开态（**无遮罩** + 面板贴底 + 250ms rise + 面板底提档 .78；'
+                '右上收起键回收起态）',
                 width: 375,
                 height: 360,
                 composer: AylaGroupPostsComposer(
@@ -406,7 +406,8 @@ class _GroupPostsComposerSamplesState
                 ),
               ),
               _stage(
-                '宽屏 820 · 展开态（max-height calc(100% − 2 × sidebar-gutter)=396）',
+                '宽屏 820 · 展开态（无遮罩 · 面板底 .78 · '
+                'max-height calc(100% − 2 × sidebar-gutter)=396）',
                 width: 820,
                 height: 420,
                 composer: AylaGroupPostsComposer(

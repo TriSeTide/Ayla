@@ -474,13 +474,10 @@ export function GroupPosts({
           </button>
         </div>
       )}
-      {editorExpanded && (
-        <div
-          className="group-posts-scrim"
-          onClick={() => setEditorExpanded(false)}
-          aria-hidden="true"
-        />
-      )}
+      {/* 展开态无遮罩（2026-10-12 用户裁决：「直接去掉黑色遮罩」）——
+          原先的 .group-posts-scrim 是 rgba(70,91,146,.25) 压暗层，在浅色极光底上
+          观感偏暗，且只盖到面板顶边、形成一条「戛然而止」的深色带。
+          收起仍由面板右上角 32px 圆形键（PostEditor 的 collapse-bar）承担。 */}
       <div className={`group-posts-input ${editorExpanded ? "is-expanded" : ""}`}>
         <PostEditor
           group={groupId}

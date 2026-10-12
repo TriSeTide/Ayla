@@ -947,30 +947,11 @@
   position: relative;
 }
 
-/* 展开编辑时的上方遮罩：与输入面板（z50）平级、盖住列表与标题栏（z auto），
-   点击收起。层级夹在 45：面板内容不受遮罩影响 */
-.group-posts-scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 45;
-  background: rgba(70, 91, 146, 0.25);
-  animation: group-posts-scrim-in 200ms var(--ease-out);
-}
-
-@keyframes group-posts-scrim-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .group-posts-scrim {
-    animation: none;
-  }
-}
+/* 展开态**无遮罩**（2026-10-12 用户裁决：「直接去掉黑色遮罩」）。
+   原先的 .group-posts-scrim（rgba(70,91,146,.25) + 200ms 淡入）已在
+   GroupPosts.tsx 与本节一并移除：它在浅色极光底上偏暗，且只盖到面板顶边，
+   在面板上方留下一条戛然而止的深色带（用户实报「遮罩截断」）。
+   收起交互不受影响 —— 面板右上角 32px 圆形收起键（.post-editor-collapse-btn）。 */
 
 .group-posts-list {
   flex: 1;
@@ -1094,6 +1075,30 @@
   bottom: 0;
   max-height: 100%;
   overflow-y: auto;
+  /* 展开态底**提高一档**（.55 → .78 = --glass-bg-strong），与用户看到的
+     「输入框原本的透明度」对齐（2026-10-12 用户裁决）。
+
+     原因：面板内的 .field 自身也是 .55（posts.css 上面的 .group-posts-input .field），
+     **叠在面板底上** ⇒ 字段是「两层玻璃」，而 panel padding 带只有一层：
+       · 原状 面板 .55 + 字段 .55 ⇒ 字段观感 1−(1−.55)² = **.80**，padding 带仅 **.55**
+         ⇒ 落差 **25 个百分点**，展开后大面积浮在卡片之上时 padding 带把卡片文字透出
+         （实机截图取证：卡片页脚「查看帖子 ○0 👁1」在带内清晰可辨）；
+       · 改后 面板 .78 + 字段 .55 ⇒ 字段观感 = **.90**，padding 带 **.78**
+         ⇒ 落差收窄到 **12 个百分点**，且带自身 .78 足以压住背后文字。
+
+     ⚠️ 带与字段**不可能严格相等**：要 1−(1−p)(1−.55) = p 只有 p = 1 一个解。
+     把字段背景改透明虽能让两者相等，却会抹掉字段的白边玻璃井（--glass-border .65
+     落在 .78 浅底上几乎不可见）⇒ 字段「消失」；故保留字段为独立井，只提带的档。
+     仍是既有 token（.78 = --glass-bg-strong），不新增任何色值。
+
+     ⚠️ **本声明单独成立，无需 auroraqua 段配合**（曾误判为需要，已于同日撤回）：
+     `.group-posts-input.is-expanded` = **0-2-0**，而 ≥769 的
+     `:is(.composer, .group-posts-input, …)` 取最具体实参 = **0-1-0**
+     ⇒ CSS 级联是**特异性优先于源码顺序**（媒体查询不贡献特异性），
+     本声明恒胜出 —— 与 posts.css 早于 auroraqua.css 加载无关。
+     已在真实浏览器按 main.tsx 的加载顺序实测：去掉 auroraqua 覆写后
+     expandedBg 仍是 `rgba(255,250,251,0.78)`。 */
+  background: var(--glass-bg-strong);
   /* 弹出动画：从下方浮起 + 淡入（design.md §12.8.1 底部面板入场） */
   animation: group-posts-editor-rise 250ms var(--ease-out);
 }
