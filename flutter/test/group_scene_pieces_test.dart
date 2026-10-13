@@ -994,5 +994,56 @@ void main() {
         reason: '收起后已输入内容不得清空（此前因重挂载而丢失）',
       );
     });
+
+    testWidgets('展开后光标进正文：输入连接已建立（键入直接回显，不靠 enterText）', (
+      WidgetTester tester,
+    ) async {
+      // 2026-10-12 实机：「点击输入框后展开输入框，光标没有聚焦内容区」。
+      //
+      // 根因：AylaPostEditor 的 Column 子级**没有 key**，按位置匹配元素；
+      // 展开时前面插入 collapseBar + titleField ⇒ inputRow 从 index 0 挪到 3
+      // ⇒ 内含的 EditableText 被**整条重建**（EditableTextState 换新实例）
+      // ⇒ 新实例收不到「获得焦点」事件 ⇒ **不建输入连接** ⇒ 光标不闪、键入无回显。
+      //
+      // ⚠️ 为什么必须用 testTextInput.enterText：tester.enterText 内部会
+      // showKeyboard 强制建连，把本缺陷完全掩盖（此前用例全绿而实机不符，
+      // 正是这个原因）。testTextInput.enterText 只往**已建连**的通道发文本，
+      // 连接没建立时文本进不去 ⇒ 去掉 key 立刻变红（已做负向验证）。
+      await tester.pumpWidget(
+        host(composer(expanded: false, controlled: false), width: 375, height: 400),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+
+      // 点输入框 ⇒ 展开（web：textarea onFocus ⇒ updateExpanded(true)）
+      await tester.tap(find.byType(EditableText));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+
+      // 展开态 = [标题, 正文, 群搜索]；正文必须真的持有输入连接
+      expect(find.byType(EditableText), findsNWidgets(3));
+      final EditableText body =
+          tester.widget<EditableText>(find.byType(EditableText).at(1));
+      expect(body.focusNode.hasFocus, isTrue, reason: "展开后正文应持焦点");
+      expect(
+        body.focusNode.hasPrimaryFocus,
+        isTrue,
+        reason: "应为主焦点（否则键盘/输入法不会指向它）",
+      );
+      expect(body.showCursor, isTrue, reason: "光标应可见（不闪 = 没建连）");
+
+      // 直接向已建连的输入通道发文本：未建连 ⇒ 收不到
+      tester.testTextInput.enterText("回显检测");
+      await tester.pump();
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText).at(1))
+            .controller
+            .text,
+        "回显检测",
+        reason: "输入连接未建立时键入不会回显（去掉 Column 子级 key 即为此症状）",
+      );
+    });
   });
 }

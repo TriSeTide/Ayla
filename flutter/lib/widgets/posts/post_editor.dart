@@ -364,6 +364,9 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
 
     // .post-editor-collapse-bar（右对齐 + padding-bottom sp1）+ 32px 圆形收起钮
     final Widget collapseBar = Padding(
+      // 稳定 key（根因见本文件 `inputRow` 处的详细说明）：Column 子级按**位置**匹配 ⇒ 展开时
+      // 前面插入新兄弟会把本行推到后面 ⇒ 错位重建。
+      key: const ValueKey<String>('post-editor-collapse-bar'),
       padding: const EdgeInsets.only(bottom: AylaSpacing.sp1),
       child: Align(
         alignment: Alignment.centerRight,
@@ -396,6 +399,9 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
         : t.body.copyWith(color: AylaColors.textPrimary);
 
     final Widget titleField = AylaGlassInput(
+      // 稳定 key（根因见本文件 `inputRow` 处的详细说明）：Column 子级按**位置**匹配 ⇒ 展开时
+      // 前面插入新兄弟会把本行推到后面 ⇒ 错位重建。
+      key: const ValueKey<String>('post-editor-title'),
       controller: _title,
       hintText: '标题（必填）',
       minHeight: 40, // .post-editor-title { min-height: 40px }
@@ -437,6 +443,16 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
     );
 
     final Widget inputRow = Row(
+      // ⚠️ **稳定 key = 光标不丢的决定性条件**（2026-10-12 实机「点输入框展开后光标没进
+      // 内容区」）：本 Column 的子级按**位置**匹配元素，而展开时前面会插入
+      // collapseBar 与 titleField ⇒ `inputRow` 从 index 0 挪到 3 ⇒ 位置匹配失败
+      // ⇒ 内含的 `EditableText` 被**整条重建**（实测 `EditableTextState` 换新实例、
+      // 但 `FocusNode` 因父 State 保住而仍是同一个）。新实例收不到「获得焦点」事件
+      // ⇒ 不建输入连接、光标不闪（widget 测试里 `enterText` 会强制 `showKeyboard`
+      // 把它掩盖，故此前用例全绿却与实机不符）。
+      // web 无此问题：`<textarea>` 是**同一个 DOM 节点**贯穿两态。
+      // 加 key 后元素跨重建复用 ⇒ `EditableTextState` 保留 ⇒ 与 web 语义等价。
+      key: const ValueKey<String>('post-editor-input-row'),
       crossAxisAlignment: CrossAxisAlignment.end, // align-items: flex-end
       children: <Widget>[
         Expanded(child: bodyField),
