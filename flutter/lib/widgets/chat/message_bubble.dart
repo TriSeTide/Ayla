@@ -17,15 +17,28 @@
 /// | 到达动画 | base.css 426–434 `frost-rise`（+8px 淡入 180ms）+ app.css 1089–1093（reduced-motion 关） |
 ///
 /// ## 与 web 的差异（有意，登记）
-/// 1. **触屏判定**：web 用 `@media (hover: none)`（**能力查询**）决定「点行展开工具栏」
-///    —— `MessageBubble.tsx:133–135` 的 `isTouch = useMediaQuery(HOVER_NONE_QUERY)`，
-///    注释原文明确「**不用宽度**：iPad 等宽屏触屏也应走点击路径」；
-///    Flutter 无该媒体查询 ⇒ **两级近似**（2026-10-09 补第二级）：
-///    ① 平台名（Android / iOS / fuchsia = 触屏，与 `live_player` 的平台分派同一先例）；
-///    ② **当次指针设备**（`PointerDeviceKind.touch/stylus/invertedStylus` ⇒ 判为无 hover
-///       能力）—— 补住①在**触屏 Windows / 平板模式**上的失准（平台名是 `windows`，
+/// 1. **工具栏触发 = 两档**（**2026-10-13 用户定稿；Flutter 有意偏离 web**）：
+///    - **宽屏且有 hover 能力** ⇒ 悬停显示、移开消失（纯悬停，不接点击）；
+///    - **否则**（窄屏 **或** 无 hover 能力的宽屏触屏）⇒ 点气泡行切换。
+///
+///    ⚠️ **本条是单端偏离，不是「对齐 web」。** web 侧**保持原样**（用户 2026-10-13
+///    明确裁决「回退 web，我说对的就是对的」）：web 的判据仍为**纯 hover 能力查询**
+///    —— `MessageBubble.tsx:135` `isTouch = useMediaQuery(HOVER_NONE_QUERY)`、
+///    `app.css:1307–1322` 只有 `@media (hover: hover)` / `@media (hover: none)`，
+///    **无任何宽度条件** ⇒ web 窄屏桌面窗口仍走悬停档。
+///    Flutter 端按用户要求对窄屏走点击档：Windows 端窄窗口是用户的手机形态代理，
+///    而该环境**无法用真实触屏模拟**（用户原话），故判据落到宽度。
+///    发生冲突时**以用户裁决为准**，不回改 web；但不得伪称两端一致。
+///
+///    Flutter 侧对应 `_tapOnly`（见 State 内注释）：
+///    窄屏 = `AylaBreakpoints.isNarrow`（`width <= 768`，与 web `NARROW_QUERY`
+///    的 `(max-width: 768px)` 数值同界，仅**本端**用于工具栏判据）；
+///    「无 hover 能力」无媒体查询可查 ⇒ 两级近似：
+///    ⓐ 平台名（Android / iOS / fuchsia = 触屏，与 `live_player` 的平台分派同一先例）；
+///    ⓑ **当次指针设备**（`PointerDeviceKind.touch/stylus/invertedStylus` ⇒ 判为无 hover
+///       能力）—— 补住 ⓐ 在**触屏 Windows / 平板模式**上的失准（平台名是 `windows`，
 ///       但 web 会报 `hover: none`）。判定发生在 `onTap` 内（事件级），与 web 的
-///       `handleRowClick` 首行 `if (!isTouch) return;`（tsx 140）同构；
+///       `handleRowClick` 首行 `if (!isTouch) return;` 同构；
 ///    另留 [AylaMessageBubble.touchMode] 供页面层**强制覆盖**（优先级最高）；
 /// 2. **发送态定位**：web 用 `position:absolute; right:calc(100% + 8px)`；Flutter 用
 ///    `FractionalTranslation(-1, 0)` + 8px 位移表达同一条 CSS（相对**自身**宽度的 100%），
@@ -218,7 +231,14 @@ class AylaMessageBubble extends StatefulWidget {
   /// 当前登录用户 id（撤回窗口与混排「@我」判定）。
   final String? currentUserId;
 
-  /// 触屏模式（null = 按平台判定：Android / iOS / fuchsia 视为触屏）。
+  /// **强制覆盖**工具栏触发档（优先级最高；null = 按形态自动判定）。
+  ///
+  /// - `true` ⇒ 点击档：悬停不展开、点气泡行切换、行给手型；
+  /// - `false` ⇒ 桌面档：悬停展开、点行不切换（**即使窄屏**也如此）；
+  /// - `null` ⇒ 自动：窄屏 ∨ 触屏平台 ⇒ 点击档（见 `_tapMode`）。
+  ///
+  /// 判据本体在 State 的 `_tapMode`/`_tapOnly`/`_narrow`。⚠️ 自动档比 web 多一条
+  /// **窄屏**判据（web 只查 hover 能力）—— 见文件头「与 web 的差异」第 1 条。
   final bool? touchMode;
 
   /// 收藏状态（**注入档**：非 null ⇒ 由调用方驱动，与 2026-10-09 前逐像素一致）。
@@ -276,35 +296,54 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
   Timer? _singleClickTimer;
   Timer? _longPressTimer;
 
-  bool get _touchMode => widget.touchMode ?? _platformIsTouch(context);
+  /// 点击档：**点气泡行切工具栏**（而非悬停展开）。判据 = 窄屏 **或** 触屏平台。
+  ///
+  /// ⚠️ **本件有意偏离 web**（用户 2026-10-13 裁决「回退 web，我说对的就是对的」）：
+  /// - web 判据 = **纯 hover 能力查询**（`MessageBubble.tsx:135` `HOVER_NONE_QUERY`、
+  ///   `app.css:1307–1322` 只有 `(hover: hover)` / `(hover: none)`，**无宽度条件**）
+  ///   ⇒ web 窄屏桌面窗口**仍走悬停档**；
+  /// - 本件在 [_platformIsTouch] 之外**另外**采信 [_narrow]（`width <= 768`）⇒
+  ///   窄屏一律走点击档。原因：Windows 端窄窗口是用户的手机形态代理，而该环境
+  ///   **无法用真实触屏模拟**（用户原话），窄屏悬停在其体验里等于「不显示」。
+  /// 该偏离已登记于文件头「与 web 的差异」第 1 条；**冲突时以用户裁决为准**。
+  ///
+  /// ✅ **两档互补是结构性保证**：本件只有一个 `_tapMode` 布尔，悬停档取
+  /// `_hovered && !_tapMode` ⇒ 不存在「两条独立媒体查询拼接」可能留下的死区
+  /// （参考教训：CSS 里 `max-width:768px` 与 `min-width:769px` 并非互补 ——
+  /// 小数视口宽 768.5 上两条同时为假。本件用布尔取反天然免疫）。
+  bool get _tapOnly => _narrow || _platformIsTouch(context);
+
+  /// 当前形态是否窄屏（≤768 **含等号**）。
+  bool get _narrow => AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
 
   /// 最近一次指针按下的**设备类型**（`PointerDownEvent.kind`）。
   ///
-  /// 为什么要它（用户 2026-10-09 实报「窄屏气泡工具栏需要点击才触发，
-  /// 而非鼠标悬停显示」的**真实可指认偏离**）：
-  /// web 的判定是 **hover 能力查询**、且**每次点击重新求值** ——
-  /// `MessageBubble.tsx:135` `const isTouch = useMediaQuery(HOVER_NONE_QUERY)`
-  /// （`hooks/useMediaQuery.ts:16` `HOVER_NONE_QUERY = "(hover: none)"`），
-  /// `MessageBubble.tsx:139–144` 的 `handleRowClick` 首行 `if (!isTouch) return;`
-  /// 也是**事件级**判定。同一台设备上「手指点」与「鼠标点」走的本就是不同分支。
+  /// 为什么要它：web 的判定**每次点击重新求值**（`MessageBubble.tsx:139–144` 的
+  /// `handleRowClick` 首行 `if (!isTouch) return;`），
+  /// 同一台设备上「手指点」与「鼠标点」走的本就是不同分支。
   ///
-  /// Flutter 无 `hover` 媒体查询 ⇒ 原实现用 `Theme.of(context).platform` 近似
-  /// （见 [_platformIsTouch]）。该近似在**触屏 Windows / 平板模式**上失准：
-  /// 平台名是 windows ⇒ `_touchMode = false` ⇒ 根本不挂点行回调，
+  /// Flutter 无 `hover` 媒体查询 ⇒ 平台名 + 本字段两级近似（见 [_tapOnly]）：
+  /// 平台名在**触屏 Windows / 平板模式**上失准（平台名是 windows ⇒ 判为「有 hover」），
   /// 而 web 在那种设备上报 `hover: none` ⇒ 应当走点击路径。
-  /// 这里用「最近一次指针设备」补上能力维度 —— 桌面平台收到触摸/触控笔指针时
-  /// 也判为无 hover 输入。
+  /// 桌面平台收到触摸/触控笔指针时也判为无 hover 输入。
   PointerDeviceKind? _lastPointerKind;
 
-  /// 本次点击是否走「点行切换工具栏」（等价 web 的 `if (!isTouch) return;`）。
+  /// **本行**是否走点击档（点行切工具栏、悬停不展开、行给手型）。
   ///
-  /// 优先级：显式 [AylaMessageBubble.touchMode] > 平台近似 > **指针设备能力**。
+  /// 显式 [AylaMessageBubble.touchMode] **最高优先** —— `false` = 调用方明确要求
+  /// 桌面档（窄屏也悬停展开、点行不切换）；未给 ⇒ 按 [_tapOnly]（窄屏 ∨ 触屏平台）。
+  bool get _tapMode => widget.touchMode ?? _tapOnly;
+
+  /// 本次点击是否走「点行切换工具栏」（对应 web 的 `if (!isTouch) return;`）。
+  ///
+  /// 优先级：显式 [AylaMessageBubble.touchMode] > **点击档**（窄屏 ∨ 触屏平台，
+  /// 见 [_tapOnly]）> **当次指针设备能力**。
   /// 显式档位优先是为了保住既有契约（`touchMode: false` 的调用方明确要求
   /// 关闭点行路径，见 `test/message_bubble_test.dart` 的对应用例）。
   bool get _tapTogglesToolbar {
-    final bool? forced = widget.touchMode;
-    if (forced != null) return forced;
-    if (_platformIsTouch(context)) return true;
+    if (_tapMode) return true;
+    // 显式桌面档（`touchMode: false`）不接指针设备维度：调用方已明确要求关闭点行路径。
+    if (widget.touchMode != null) return false;
     return switch (_lastPointerKind) {
       // `PointerDeviceKind.touch` = 手指；stylus / invertedStylus = 触控笔
       //（都没有 hover 能力，与 web `@media (hover: none)` 同义）。
@@ -448,7 +487,13 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
     final Widget? actions = (!recalled && !msg.isSystem)
         ? _MsgActions(
             msg: msg,
-            visible: _hovered || _focused || widget.actionsOpen,
+            // 悬停档只在 **`@media (hover:hover) and (not (max-width:768px))`** 的形态生效
+            // （app.css:1317–1322）：窄屏 与 触屏档一律不因悬停展开，只走点行切换。
+            // `_focused` 两档都留 —— 对应 web `.msg-row:focus-within`
+            // （app.css:1304–1308，**无媒体查询**，键盘聚焦可达性）。
+            visible: (_hovered && !_tapMode) ||
+                _focused ||
+                widget.actionsOpen,
             showRecall: showRecall,
             favoriteState: widget.favoriteState,
             favoriteBusy: widget.favoriteBusy,
@@ -561,33 +606,42 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
 
         // ⚠️ `GestureDetector` **恒在**（只要父级接了 `onToggleActions`）——
         // 与 web 同构：`MessageBubble.tsx:324–328` 的 `onClick={handleRowClick}`
-        // **无条件挂在行上**，是否生效由回调**首行的 `if (!isTouch) return;`**
-        // （tsx 140）在**事件发生时**判定。
-        // 不能在 build 期按 `_touchMode` 决定挂不挂：手势识别器是**指针按下时**
+        // **无条件挂在行上**，是否生效由回调**首行**在**事件发生时**判定。
+        // 不能在 build 期按 `_tapOnly` 决定挂不挂：手势识别器是**指针按下时**
         // 注册进竞技场的，若那一次按下是手指、而本帧还没挂识别器，这一次点击就永远
         // 收不到回调（实测：先判后挂 → `onToggleActions` 调用 0 次）。
+        //
+        // 可点区域必须 = **整行**：web 的 `onClick` 挂在 `.msg-row` 这个 block-level
+        // `display:flex` div 上 ⇒ 它**整个盒子**（全宽 × 内容高，含 `padding: 0 var(--sp-1)`，
+        // app.css:1041–1046）都是点击目标。本件早先两条都漏了（用户 2026-10-13 实报
+        // 「点击区域不对，要有 web 那一整行点击」）：
+        //  ① 手势层必须**包住** `Padding(horizontal: sp1)` —— 旧实现把 Padding 留在手势层
+        //     **外层** ⇒ 行左右各 4px 的 padding 条不可点；
+        //  ② 点击档的 `HitTestBehavior` 必须取 **`opaque`** —— 默认 `deferToChild` 只让
+        //     **被子级覆盖**的位置可命中 ⇒ 气泡上方的空白、头像上方空白、操作栏左侧空白
+        //     全点不动（实测：375 宽行只有 y≈90–118 的窄条能点中）。
+        //  `opaque` 只改「空白处是否命中本层」：气泡内的按钮/引用条仍在命中链更内层、
+        //  在竞技场里照旧胜出 ⇒ 点按钮不会误触发本回调。
+        final Widget paddedRow = Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp1),
+          child: row,
+        );
         final Widget content = widget.onToggleActions != null
-            ? MouseRegion(
-                // 指针（2026-10-09 核查，**刻意不给 click**）：web 的 `.msg-row`
-                // （`MessageBubble.tsx:327` 的 `onClick={handleRowClick}` + `app.css:1041–1046`）
-                // 是 `<div>`，**无 cursor 声明**；且行点击只在**触屏**生效
-                // （tsx 140 `if (!isTouch) return;`）⇒ 鼠标悬停在这块空白上 web 是默认箭头。
-                // 显式 `basic` 防止 `defer` 继续往外找（会命中页面可点件而假显手型）。
-                // 气泡内的按钮/引用条各自有内层声明，不受影响。
-                cursor: SystemMouseCursors.basic,
-                child: GestureDetector(
-                // 触屏无 hover：点行（非交互区）切换工具栏展开（tsx 139–144）。
+            ? GestureDetector(
+                behavior: _tapMode
+                    ? HitTestBehavior.opaque
+                    : HitTestBehavior.deferToChild,
+                // 点击档：点行（非交互区）切换工具栏展开（tsx 139–144）。
                 // 子级按钮各自的手势识别器在竞技场中胜出 ⇒ 点按钮不会误触发本回调。
                 onTap: () {
                   if (!_tapTogglesToolbar) return;
                   widget.onToggleActions!();
                 },
-                child: row,
-              ),
+                child: paddedRow,
               )
-            : row;
+            : paddedRow;
 
-        // `:focus-within`（app.css:1301–1304 `.msg-row:focus-within .msg-actions`）
+        // `:focus-within`（app.css:1304–1308 `.msg-row:focus-within .msg-actions`）
         // 命中**行内任何**可聚焦元素 —— 含气泡内 `.quote-strip` 的 button 分支
         // （`MessageBubble.tsx:339–347`）。`Focus.onFocusChange` 只在该节点自身
         // 获得/失去焦点时触发；子节点取得焦点而父节点仍在链上不触发 —— 对布尔
@@ -597,13 +651,22 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
         return Focus(
           onFocusChange: (bool v) => setState(() => _focused = v),
           child: MouseRegion(
-            // 触屏档整行可点（展开工具栏，见上方 `onToggleActions` 分支）⇒ 手型；
-            // 桌面档行本体不可点，鼠标落在气泡上仍是 arrow（web 同：行无 pointer 声明）。
-            cursor: _touchMode
+            // 无 hover 档（**窄屏** ∨ 触屏）整行可点（点行展开工具栏，见上方
+            // `onToggleActions` 分支）⇒ 手型；
+            // 有 hover 档行本体不可点，鼠标落在气泡上仍是 arrow（web 同：行无 pointer 声明）。
+            cursor: _tapMode
                 ? SystemMouseCursors.click
                 : MouseCursor.defer,
-            onEnter: (_) => setState(() => _hovered = true),
-            onExit: (_) => setState(() => _hovered = false),
+            // 无 hover 档（窄屏 / 触屏）不记悬停：既不改判据，也省掉
+            // 每次划过整行的一次重建（本行子树含玻璃层，重建不便宜）。
+            onEnter: (_) {
+              if (_tapMode || _hovered) return;
+              setState(() => _hovered = true);
+            },
+            onExit: (_) {
+              if (!_hovered) return;
+              setState(() => _hovered = false);
+            },
             child: Listener(
               // 记录**当次指针的设备类型** —— 供 [_tapTogglesToolbar] 在 `onTap`
               // 里按 web 的 `isTouch`（= `@media (hover: none)` 能力查询）判定。
@@ -630,11 +693,9 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
                     ),
                   );
                 },
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: AylaSpacing.sp1),
-                  child: content,
-                ),
+                // 行内距已在 `paddedRow` 里加过（**必须叠在手势层之内**，见上）；
+                // 此处不得再包一层，否则水平内距翻倍（8px）。
+                child: content,
               ),
             ),
           ),
@@ -987,7 +1048,7 @@ class _QuoteStripState extends State<_QuoteStrip> {
     // Flutter 的 `GestureDetector` 不可聚焦 ⇒ 补一层 `Focus`（Enter/Space 触发同
     // `onJump`），并让 `:hover, :focus-visible → background .65`
     // （`app.css:1282–1285`）的焦点档也生效。
-    // 焦点也因此被**行级** Focus 捕获（`app.css:1301` 的 `:focus-within`）。
+    // 焦点也因此被**行级** Focus 捕获（`app.css:1304` 的 `:focus-within`）。
     final Widget body = Focus(
       canRequestFocus: _clickable,
       onFocusChange: (bool has) => setState(() => _focused = has),
@@ -1165,7 +1226,7 @@ class _SendState extends StatelessWidget {
   }
 }
 
-/// 气泡操作栏（`.msg-actions`，app.css 1287–1322）。
+/// 气泡操作栏（`.msg-actions`，app.css 1287–1331）。
 class _MsgActions extends StatelessWidget {
   const _MsgActions({
     required this.msg,
@@ -1233,14 +1294,16 @@ class _MsgActions extends StatelessWidget {
     // 包装器**恒在**（只翻转可见标志位），否则 Element 重建会让隐式动画直接跳到终值
     // （13 号 §五：A5 会话球「瞬间消失」事故同一根因）。
     // ⚠️ 焦点不在本件：`:focus-within` 的判定已提到**整行**层级
-    // （见 `AylaMessageBubble.build` 的 `Focus`）—— `app.css:1301` 覆盖行内任何可聚焦元素。
+    // （见 `AylaMessageBubble.build` 的 `Focus`）—— `app.css:1304` 覆盖行内任何可聚焦元素。
     return IgnorePointer(
         ignoring: !visible,
         child: AnimatedOpacity(
           // `.msg-actions { opacity: 0; pointer-events: none; transition: opacity var(--dur-fast)
-          //   var(--ease-out) }`（app.css:1290–1298）；显示态 → `opacity: 1`：
-          //   `.msg-row:focus-within`（app.css:1301–1304）/ `@media (hover:hover) .msg-row:hover`
-          //   （app.css:1307–1312）/ `@media (hover:none) .msg-row.is-actions-open`（app.css:1317–1322）
+          //   var(--ease-out) }`（app.css:1294–1302）；显示态 → `opacity: 1`：
+          //   `.msg-row:focus-within`（app.css:1304–1308，**无媒体查询**）/
+          //   `@media (hover:hover) and (not (max-width:768px)) .msg-row:hover`（app.css:1317–1322）/
+          //   `@media (hover:none), (max-width:768px) .msg-row.is-actions-open`（app.css:1330–1335）
+          //   ⇒ 后两条**互斥**：窄屏 ∨ 触屏走点击档，只有「宽屏且有 hover」才悬停展开。
           // ⇒ web 是**整层 opacity** ⇒ 保持 AnimatedOpacity。子树里的 AylaMsgActionButton 带
           //   blur(8px)（web 同款：auroraqua.css:122–129 的按钮材质组含 `.msg-action-btn`）
           //   ⇒ 不以颜色 alpha 替代（13 号 §8.19）。

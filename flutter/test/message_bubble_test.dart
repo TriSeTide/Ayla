@@ -84,6 +84,24 @@ void main() {
     );
   }
 
+  /// 在**桌面平台**上跑一段断言。
+  ///
+  /// `flutter_test` 默认平台是 `TargetPlatform.android`（本属「触屏近似档」
+  /// ⇒ 一律走点击档）。凡是要测**悬停档**（宽屏 + 有 hover 能力）或**宽度判据**的
+  /// 用例都必须先切到桌面平台，否则会被平台判据直接命中、测不出那一级。
+  ///
+  /// ⚠️ `debugDefaultTargetPlatformOverride` 必须在**用例体内**（`try/finally`）复位：
+  /// `addTearDown` 排在框架的 `_verifyInvariants` **之后**，只靠它会让每个用例
+  /// 都报「a foundation debug variable was changed by the test」（实测）。
+  Future<void> asDesktopPlatform(Future<void> Function() body) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await body();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  }
+
   // ======================= 纯函数 =======================
 
   group('timeAgo / canRecall（tsx 24–44）', () {
@@ -422,39 +440,46 @@ void main() {
 
   // ======================= 操作栏 =======================
 
-  testWidgets('操作栏：默认 opacity 0 且不可点；hover → 1；actionsOpen → 1', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      host(
-        tester,
-        AylaMessageBubble(
-          msg: _msg(),
-          isSelf: false,
-          senderAvatarLabel: '樱',
-          onQuote: (_) {},
+  testWidgets('操作栏：默认 opacity 0 且不可点；宽屏 hover → 1；actionsOpen → 1', (
+    WidgetTester tester,
+  ) async {
+    // ⚠️ 悬停档要求**宽屏 + 有 hover 能力**，两者都要显式给：
+    // 视口默认 720（≤768 属窄屏档）、平台默认 android（属触屏档）。
+    await asDesktopPlatform(() async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onQuote: (_) {},
+          ),
+          viewport: const Size(900, 420),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    // 隐藏态：包装器**恒在**（只翻转标志位），IgnorePointer 拦住点击
-    expect(find.byType(AylaFavoriteButton), findsOneWidget);
-    expect(tester.widget<IgnorePointer>(find.ancestor(
-      of: find.byType(AylaFavoriteButton),
-      matching: find.byType(IgnorePointer),
-    ).first).ignoring, isTrue);
+      // 隐藏态：包装器**恒在**（只翻转标志位），IgnorePointer 拦住点击
+      expect(find.byType(AylaFavoriteButton), findsOneWidget);
+      expect(tester.widget<IgnorePointer>(find.ancestor(
+        of: find.byType(AylaFavoriteButton),
+        matching: find.byType(IgnorePointer),
+      ).first).ignoring, isTrue);
 
-    // hover → 显示
-    final TestGesture gesture =
-        await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await gesture.addPointer(location: Offset.zero);
-    addTearDown(gesture.removePointer);
-    await gesture.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
-    await tester.pumpAndSettle();
-    expect(tester.widget<IgnorePointer>(find.ancestor(
-      of: find.byType(AylaFavoriteButton),
-      matching: find.byType(IgnorePointer),
-    ).first).ignoring, isFalse);
-    expect(find.text('引用'), findsOneWidget);
+      // hover → 显示
+      final TestGesture gesture =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<IgnorePointer>(find.ancestor(
+        of: find.byType(AylaFavoriteButton),
+        matching: find.byType(IgnorePointer),
+      ).first).ignoring, isFalse);
+      expect(find.text('引用'), findsOneWidget);
+    });
   });
 
   testWidgets('工具栏：传了 onQuote → 收藏键与引用键都在（web tsx 246/247）', (
@@ -597,7 +622,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('晚上一起看直播吗？我这边刚开播。'));
     await tester.pump();
-    expect(toggles, 1, reason: '触屏点行展开工具栏（tsx 139–144）');
+    expect(toggles, 1, reason: '触屏档点行展开工具栏（tsx 139–146）');
   });
 
   testWidgets('桌面模式（touchMode: false）点行不切换工具栏', (WidgetTester tester) async {
@@ -617,91 +642,83 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('晚上一起看直播吗？我这边刚开播。'));
     await tester.pump();
-    expect(toggles, 0, reason: '桌面（hover 能力设备）点行不切换（tsx 140 的 `if (!isTouch) return`）');
-  });
-
-  // ============ 触屏判定 = hover **能力**，不是宽度、也不只是平台名 ============
-  //
-  // web 事实源（用户 2026-10-09 实报「窄屏气泡工具栏需要点击才触发，
-  // 而非鼠标悬停显示」的本轮判据）：
-  // - `hooks/useMediaQuery.ts:16`：`HOVER_NONE_QUERY = "(hover: none)"`（**能力查询**）
-  // - `MessageBubble.tsx:133–135`：`const isTouch = useMediaQuery(HOVER_NONE_QUERY)`
-  //   —— 注释原文「触屏判定用 hover 能力……**不用宽度**：iPad 等宽屏触屏也应走
-  //   「点击行展开工具栏」路径」
-  // - `app.css:1307–1312` `@media (hover: hover) { .msg-row:hover .msg-actions … }`
-  // - `app.css:1317–1322` `@media (hover: none) { .msg-row.is-actions-open .msg-actions … }`
-  // ⇒ **与视口宽度完全无关**。下面三条锁：宽度不参与判定、平台名不是唯一判据、
-  //   显式 `touchMode` 仍最高优先。
-
-  testWidgets('★ 窄屏（420）桌面平台：鼠标 hover 仍显示工具栏（宽度不参与判定）', (
-    WidgetTester tester,
-  ) async {
-    // 这条直接否掉「窄屏 ⇒ 改成点击」的误读：web 在窄屏桌面窗口上仍是 hover 档。
-    await tester.pumpWidget(
-      host(
-        tester,
-        AylaMessageBubble(
-          msg: _msg(),
-          isSelf: false,
-          senderAvatarLabel: '樱',
-          touchMode: false,
-          onToggleActions: () {},
-          onQuote: (_) {},
-        ),
-        viewport: const Size(420, 640), // ≤768
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    bool ignoring() => tester
-        .widget<IgnorePointer>(
-          find
-              .ancestor(
-                of: find.byType(AylaFavoriteButton),
-                matching: find.byType(IgnorePointer),
-              )
-              .first,
-        )
-        .ignoring;
-    expect(ignoring(), isTrue, reason: '初始隐藏（app.css:1295 opacity: 0）');
-
-    final TestGesture g =
-        await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await g.addPointer(location: Offset.zero);
-    addTearDown(g.removePointer);
-    await g.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
-    await tester.pumpAndSettle();
-
-    // `@media (hover: hover)` 分支：hover 即显示，**与宽度无关**。
     expect(
-      ignoring(),
-      isFalse,
-      reason: '★ 窄屏桌面窗口也走 hover 档（app.css:1307–1312，无宽度条件）',
+      toggles,
+      0,
+      reason: '显式桌面档（touchMode: false）点行不切换 —— 调用方明确要求，不用指针维度',
     );
   });
 
-  /// 在**桌面平台**上跑一段断言。
-  ///
-  /// ⚠️ `debugDefaultTargetPlatformOverride` 必须在**用例体内**（`try/finally`）复位：
-  /// `addTearDown` 排在框架的 `_verifyInvariants` **之后**，只靠它会让每个用例
-  /// 都报「a foundation debug variable was changed by the test」（实测）。
-  Future<void> asDesktopPlatform(Future<void> Function() body) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    try {
-      await body();
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
-  }
+  // ============ 工具栏两档触发：宽屏且有 hover ⇒ 悬停；否则 ⇒ 点击 ============
+  //
+  // 契约（**2026-10-13 用户定稿；Flutter 有意偏离 web**）：
+  // - **宽屏且有 hover 能力** ⇒ 悬停显示、移开消失；
+  // - **否则**（窄屏 **或** 无 hover 能力）⇒ 点气泡行切工具栏；
+  // - `:focus-within` ⇒ **两档**都显示（键盘可达性，web `app.css:1301–1304` 同款）。
+  //
+  // ⚠️ **本条是单端偏离，不是「对齐 web」**：web 侧**保持原样**（用户 2026-10-13 裁决
+  // 「回退 web，我说对的就是对的」）—— web 判据仍是**纯 hover 能力查询**
+  // （`MessageBubble.tsx:135` `HOVER_NONE_QUERY`；`app.css:1307–1322` 只有
+  // `@media (hover: hover)` / `@media (hover: none)`，**无宽度条件**）⇒ web 窄屏
+  // 桌面窗口仍走悬停档。Flutter 端按用户要求让窄屏走点击档（Windows 窄窗口是用户的
+  // 手机形态代理，而该环境**无法用真实触屏模拟**）。**冲突时以用户裁决为准。**
+  //
+  // ⚠️ 本区块**推翻**了 2026-10-09 §7.2 的旧结论（当时按 web 的纯能力查询判定
+  // 「窄屏仍走 hover」）；用户再次实报后按窄屏判据定稿，旧说法已在
+  // `docs/flutter/13-工作进度与待办.md` 就地改写，不留两种口径。
 
-  testWidgets('★ 触屏指针点行 ⇒ 切换工具栏（能力判定：桌面平台 + touch 指针）', (
+  testWidgets('★ 窄屏（420）鼠标 hover **不**显示工具栏（宽度参与判定）', (
     WidgetTester tester,
   ) async {
-    // 这条锁本轮修的真实偏离：原实现只按 `Theme.of(context).platform` 判定
-    // ⇒ 触屏 Windows / 平板模式（平台名仍是桌面）在 web 上会报 `hover: none`、
-    //   应走点击路径，Flutter 侧却**完全不挂**点行回调。
-    // ⚠️ `flutter_test` 默认 `TargetPlatform.android`（已属触屏近似档，
-    //    测不出该偏离）⇒ 必须显式把平台置为桌面。
+    // 用户实报的本条：窄屏聊天必须「点击才触发，而非鼠标悬停显示」。
+    // ⚠️ 必须桌面平台：`flutter_test` 默认 android（本属触屏档）⇒ 那样无论宽度如何
+    // 都走点击档、**测不出宽度判据**（负对照实测：把窄屏判据整个取消也照样绿）。
+    await asDesktopPlatform(() async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onToggleActions: () {},
+            onQuote: (_) {},
+          ),
+          viewport: const Size(420, 640), // ≤768 ⇒ 点击档
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      bool ignoring() => tester
+          .widget<IgnorePointer>(
+            find
+                .ancestor(
+                  of: find.byType(AylaFavoriteButton),
+                  matching: find.byType(IgnorePointer),
+                )
+                .first,
+          )
+          .ignoring;
+      expect(ignoring(), isTrue, reason: '初始隐藏（app.css:1299 opacity: 0）');
+
+      final TestGesture g =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.addPointer(location: Offset.zero);
+      addTearDown(g.removePointer);
+      await g.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
+      await tester.pumpAndSettle();
+
+      expect(
+        ignoring(),
+        isTrue,
+        reason: '★ 窄屏悬停**不**展开（app.css:1317 的 not(max-width:768px) 挡在档外）',
+      );
+    });
+  });
+
+  testWidgets('★ 窄屏（420）点行 ⇒ 切换工具栏（鼠标也走点击档）', (WidgetTester tester) async {
+    // 窄屏按手机形态：**鼠标点**也要切换（用户是在 Windows 窄窗口上操作的）。
+    // ⚠️ 必须桌面平台：android 档本就点击档，不切平台测不出「窄屏让鼠标也走点击」。
     await asDesktopPlatform(() async {
       int toggles = 0;
       await tester.pumpWidget(
@@ -713,6 +730,546 @@ void main() {
             senderAvatarLabel: '樱',
             onToggleActions: () => toggles++,
           ),
+          viewport: const Size(420, 640),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.text('晚上一起看直播吗？我这边刚开播。'),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      expect(
+        toggles,
+        1,
+        reason: '★ 窄屏鼠标点行切换（app.css:1330 max-width:768px 档）',
+      );
+    });
+  });
+
+  testWidgets('★ 768 含等号 ⇒ 仍是窄屏档（与 web max-width:768px 逐字对齐）', (
+    WidgetTester tester,
+  ) async {
+    // 边界：768 仍是窄屏档、769 起才是宽屏档。
+    // web `NARROW_QUERY = "(max-width: 768px)"` 含等号（CSS 同）。
+    // ⚠️ 桌面平台：android 档会掩盖宽度判据（见上两条注释）。
+    await asDesktopPlatform(() async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onToggleActions: () {},
+            onQuote: (_) {},
+          ),
+          viewport: const Size(768, 640),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final TestGesture g =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.addPointer(location: Offset.zero);
+      addTearDown(g.removePointer);
+      await g.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<IgnorePointer>(
+              find
+                  .ancestor(
+                    of: find.byType(AylaFavoriteButton),
+                    matching: find.byType(IgnorePointer),
+                  )
+                  .first,
+            )
+            .ignoring,
+        isTrue,
+        reason: '★ 768 = 窄屏档（`AylaBreakpoints.isNarrow` 与 NARROW_QUERY 都含等号）',
+      );
+    });
+  });
+
+  // web 侧初版把悬停档写成 `min-width: 769px`（而非 `not (max-width: 768px)`），
+  // 真实浏览器实测（Playwright）**小数视口宽** 768.5 命中死区：两条媒体查询同时为假
+  // ⇒ 工具栏既不能悬停展开、点击档也不生效 = 彻底打不开（真实桌面视口常为小数：
+  // 滚动条 / 缩放）。Flutter 侧对该死区**结构性免疫** —— 只有一个 `_tapMode` 布尔、
+  // 悬停取 `_hovered && !_tapMode` ⇒ 两档天然互补。下面每个宽度一条用例，
+  // 断言两档**恰好一条可达且方向正确**。
+  //
+  // ⚠️ 必须**一条用例一个宽度**（不能在一个 testWidgets 里循环）：
+  // 循环内反复 pumpWidget + 复用鼠标手势会让 MouseTracker 状态串场，
+  // 实测 767 那次点击会静默丢失（hover=false 且 tap=false 的假死区）。
+  for (final double width in <double>[320, 767, 768, 768.5, 769, 1024, 1440]) {
+    testWidgets('★ 两档互补 @ ${width}px：恰好一条可达路径', (WidgetTester tester) async {
+      await asDesktopPlatform(() async {
+        int toggles = 0;
+        await tester.pumpWidget(
+          host(
+            tester,
+            AylaMessageBubble(
+              msg: _msg(),
+              isSelf: false,
+              senderAvatarLabel: '樱',
+              onToggleActions: () => toggles++,
+              onQuote: (_) {},
+            ),
+            viewport: Size(width, 640),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        bool visible() => !tester
+            .widget<IgnorePointer>(
+              find
+                  .ancestor(
+                    of: find.byType(AylaFavoriteButton),
+                    matching: find.byType(IgnorePointer),
+                  )
+                  .first,
+            )
+            .ignoring;
+        final Offset center =
+            tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。'));
+
+        // 全程用**同一个**鼠标 TestGesture（addPointer → moveTo → down/up → removePointer）：
+        // `tester.tap(kind: mouse)` 只发 PointerDownEvent、**不发 PointerAddedEvent**，
+        // 之后再 `createGesture(mouse).addPointer()` 会让 MouseTracker 抛
+        // 「(event is PointerAddedEvent) == (lastEvent is PointerRemovedEvent)」（实测踩到）。
+        final TestGesture g =
+            await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await g.addPointer(location: Offset.zero);
+        await g.moveTo(center);
+        await tester.pumpAndSettle();
+        // ① 悬停维度（**在按下之前**量：按下会经 `:focus-within` 档把工具栏点亮）
+        final bool hoverOpens = visible();
+
+        // ② 点击维度：同一指针就地按下抬起
+        await g.down(center);
+        await g.up();
+        await tester.pump();
+        final bool tapToggles = toggles == 1;
+
+        await g.removePointer();
+        await tester.pumpAndSettle();
+
+        expect(
+          hoverOpens || tapToggles,
+          isTrue,
+          reason: '★ ${width}px：两档至少一档可达（死区 = 工具栏彻底打不开）',
+        );
+        expect(
+          hoverOpens && tapToggles,
+          isFalse,
+          reason: '★ ${width}px：两档互斥（同时成立会让窄屏 hover 抢先、点击档形同虚设）',
+        );
+        // **方向**断言：光验「互补」不足以证明宽度判据生效 —— 负对照实测：把窄屏判据
+        // 整个取消（`_narrow` 恒 false）后，android 档下所有宽度仍是「点击档」，
+        // 单靠互补断言照样全绿。必须钉住**哪一档**：
+        final bool expectHoverTier = width > 768;
+        expect(
+          hoverOpens,
+          expectHoverTier,
+          reason: '★ ${width}px：宽屏档才悬停展开（宽度判据生效的直接证据）',
+        );
+        expect(
+          tapToggles,
+          !expectHoverTier,
+          reason: '★ ${width}px：窄屏档点行才切换（两档按宽度各自归位）',
+        );
+      });
+    });
+  }
+
+  // ============ 点击档的可点区域 = **整行**（web `.msg-row` 整个盒子） ============
+  //
+  // web 的 `onClick` 挂在 `.msg-row`（block-level `display:flex` div）上 ⇒ 它**整个盒子**
+  // （全宽 × 内容高，含 `padding: 0 var(--sp-1)`，`app.css:1041–1046`）都是点击目标。
+  // 用户 2026-10-13 实报「点击区域不对，要有 web 那一整行点击」，根因两条：
+  //  ① 手势层曾把 `Padding(horizontal: sp1)` 留在**外层** ⇒ 行左右各 4px 不可点；
+  //  ② 点击档 `HitTestBehavior` 曾是默认 `deferToChild` ⇒ 只有**被子级覆盖**的位置可命中
+  //     （实测 375 宽行只有 y≈90–118 的窄条能点中）。
+  //
+  // ⚠️ 每个「空白点」一条用例、且**只 pumpWidget 一次**：同一用例内二次 `pumpWidget`
+  // 同一树位时，`MaterialApp.home` 被已入栈的 Route 持有 ⇒ 新回调**不生效**，
+  // 点击仍打进上一个闭包（实测 a=2 / b=0），会造成「第二次点击丢失」的假象。
+
+  testWidgets('★ 点击档（对方）：手势层含整行（含左右 padding 条）', (
+    WidgetTester tester,
+  ) async {
+    await asDesktopPlatform(() async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(senderId: 'u1'),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () {},
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final Rect gd = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(AylaMessageBubble),
+              matching: find.byType(GestureDetector),
+            )
+            .first,
+      );
+      expect(
+        gd.left,
+        0,
+        reason: '★ 对方：左侧 padding 条须在手势层内（曾在 Padding 外层 ⇒ 不可点）',
+      );
+      expect(gd.right, 420, reason: '★ 对方：右侧 padding 条同样可点');
+      expect(
+        tester.widget<GestureDetector>(find.descendant(
+          of: find.byType(AylaMessageBubble),
+          matching: find.byType(GestureDetector),
+        ).first).behavior,
+        HitTestBehavior.opaque,
+        reason: '★ 对方：点击档须 opaque（默认 deferToChild 只让被覆盖处可命中）',
+      );
+    });
+  });
+
+  testWidgets('★ 点击档（自己）：手势层含整行（含左右 padding 条）', (
+    WidgetTester tester,
+  ) async {
+    await asDesktopPlatform(() async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(senderId: 'me'),
+            isSelf: true,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () {},
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final Rect gd = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(AylaMessageBubble),
+              matching: find.byType(GestureDetector),
+            )
+            .first,
+      );
+      expect(
+        gd.left,
+        0,
+        reason: '★ 自己：左侧 padding 条须在手势层内（曾在 Padding 外层 ⇒ 不可点）',
+      );
+      expect(gd.right, 420, reason: '★ 自己：右侧 padding 条同样可点');
+      expect(
+        tester.widget<GestureDetector>(find.descendant(
+          of: find.byType(AylaMessageBubble),
+          matching: find.byType(GestureDetector),
+        ).first).behavior,
+        HitTestBehavior.opaque,
+        reason: '★ 自己：点击档须 opaque（默认 deferToChild 只让被覆盖处可命中）',
+      );
+    });
+  });
+
+  testWidgets('★ 点击档：空白处可点 —— 左上空白（气泡上方）', (WidgetTester tester) async {
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tapAt(const Offset(2, 4));
+      await tester.pump();
+      expect(
+        toggles,
+        1,
+        reason: '★ 左上空白（气泡上方） 应命中整行手势（web 整行可点）',
+      );
+    });
+  });
+
+  testWidgets('★ 点击档：空白处可点 —— 右上空白', (WidgetTester tester) async {
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tapAt(const Offset(417, 4));
+      await tester.pump();
+      expect(
+        toggles,
+        1,
+        reason: '★ 右上空白 应命中整行手势（web 整行可点）',
+      );
+    });
+  });
+
+  testWidgets('★ 点击档：空白处可点 —— 行正中空白', (WidgetTester tester) async {
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tapAt(const Offset(210, 4));
+      await tester.pump();
+      expect(
+        toggles,
+        1,
+        reason: '★ 行正中空白 应命中整行手势（web 整行可点）',
+      );
+    });
+  });
+
+  testWidgets('★ 点击档：空白处可点 —— 左下空白（头像左侧 padding 条）', (WidgetTester tester) async {
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tapAt(const Offset(2, 197));
+      await tester.pump();
+      expect(
+        toggles,
+        1,
+        reason: '★ 左下空白（头像左侧 padding 条） 应命中整行手势（web 整行可点）',
+      );
+    });
+  });
+
+  testWidgets('★ 点击档：空白处可点 —— 右下角落', (WidgetTester tester) async {
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+          viewport: const Size(420, 200),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tapAt(const Offset(417, 197));
+      await tester.pump();
+      expect(
+        toggles,
+        1,
+        reason: '★ 右下角落 应命中整行手势（web 整行可点）',
+      );
+    });
+  });
+
+  testWidgets('★ 整行 opaque 后：上滑/拖动仍能滚动，且不触发点行切换', (
+    WidgetTester tester,
+  ) async {
+    // ⚠️ `opaque` 让整行参与命中，必须确认没把滚动手势吃掉（真实列表里用户会从
+    // 气泡行**空白处**起手滑动）。`GestureDetector.onTap` 在拖动超过 slop 时本就会
+    // 输给滚动竞技场，此例把该结论钉住。
+    await asDesktopPlatform(() async {
+      // ⚠️ 必须显式设视口：不设则用默认 800×600 物理像素（DPR 3 ⇒ 逻辑仅 266×200），
+      // y=250 会落到屏幕外、拖动拿不到任何手势（首版就因此红）。
+      setViewport(tester, const Size(420, 300));
+      final ScrollController ctl = ScrollController();
+      addTearDown(ctl.dispose);
+      int toggles = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: previewScope(
+            Builder(
+              builder: (BuildContext ctx) => MediaQuery(
+                data: MediaQuery.of(ctx).copyWith(size: const Size(420, 300)),
+                child: SizedBox.fromSize(
+                  size: const Size(420, 300),
+                  child: ListView.builder(
+                    controller: ctl,
+                    itemCount: 20,
+                    itemBuilder: (BuildContext c, int i) => AylaMessageBubble(
+                      msg: _msg(senderId: 'u1', content: 'msg' + i.toString()),
+                      isSelf: false,
+                      currentUserId: 'me',
+                      senderAvatarLabel: '樱',
+                      onToggleActions: () => toggles++,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(ctl.offset, 0);
+
+      // 从整行「空白」处（x=2 贴近左边缘）起手上滑
+      await tester.dragFrom(const Offset(2, 250), const Offset(0, -200));
+      await tester.pumpAndSettle();
+      expect(ctl.offset, greaterThan(0), reason: '★ 整行 opaque 不得吞掉滚动手势');
+      expect(toggles, 0, reason: '★ 拖动（超过 slop）不应触发点行切换');
+    });
+  });
+
+  testWidgets('★ 点击档：气泡内的按钮仍优先（不误触整行回调）', (
+    WidgetTester tester,
+  ) async {
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            currentUserId: 'me',
+            senderAvatarLabel: '樱',
+            actionsOpen: true, // 让引用键真的可见可点
+            onToggleActions: () => toggles++,
+            onQuote: (_) {},
+          ),
+          viewport: const Size(420, 300),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('引用'));
+      await tester.pump();
+      expect(
+        toggles,
+        0,
+        reason: '★ 点操作栏按钮不得触发整行「点行切换」（按钮在命中链内层、竞技场胜出）',
+      );
+    });
+  });
+  testWidgets('★ 769（宽屏档下界）鼠标 hover ⇒ 显示工具栏', (WidgetTester tester) async {
+    // 与上一条互为边界对照：769 起进入悬停档（需宽屏 **且** 有 hover 能力）。
+    await asDesktopPlatform(() async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onToggleActions: () {},
+            onQuote: (_) {},
+          ),
+          viewport: const Size(769, 640),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final TestGesture g =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.addPointer(location: Offset.zero);
+      addTearDown(g.removePointer);
+      await g.moveTo(tester.getCenter(find.text('晚上一起看直播吗？我这边刚开播。')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<IgnorePointer>(
+              find
+                  .ancestor(
+                    of: find.byType(AylaFavoriteButton),
+                    matching: find.byType(IgnorePointer),
+                  )
+                  .first,
+            )
+            .ignoring,
+        isFalse,
+        reason: '★ 769 起是宽屏档 ⇒ 悬停展开（app.css:1317）',
+      );
+    });
+  });
+
+  testWidgets('★ 触屏指针点行 ⇒ 切换工具栏（能力判定：桌面平台 + touch 指针）', (
+    WidgetTester tester,
+  ) async {
+    // 这条锁 2026-10-09 修的真实偏离：原实现只按 `Theme.of(context).platform` 判定
+    // ⇒ 触屏 Windows / 平板模式（平台名仍是桌面）在 web 上会报 `hover: none`、
+    //   应走点击路径，Flutter 侧却**完全不挂**点行回调。
+    // ⚠️ `flutter_test` 默认 `TargetPlatform.android`（已属触屏近似档，
+    //    测不出该偏离）⇒ 必须显式把平台置为桌面。
+    // ⚠️ 还必须给**宽屏**视口：默认 720 属窄屏档，那样本用例会被宽度判据直接命中，
+    //    指针设备维度就测不到了（此用例专测「平台名 + 指针设备」这一级）。
+    await asDesktopPlatform(() async {
+      int toggles = 0;
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaMessageBubble(
+            msg: _msg(),
+            isSelf: false,
+            senderAvatarLabel: '樱',
+            onToggleActions: () => toggles++,
+          ),
+          viewport: const Size(900, 420),
         ),
       );
       await tester.pumpAndSettle();
@@ -734,15 +1291,16 @@ void main() {
       expect(
         toggles,
         1,
-        reason: '★ 触摸指针 ⇒ 按 web 的 hover 能力判定走点击路径（tsx 133–135 / 140）',
+        reason: '★ 宽屏 + 触摸指针 ⇒ 走点击路径（app.css:1330 的 hover:none 档）',
       );
     });
   });
 
-  testWidgets('★ 鼠标点击行 ⇒ **不**切换工具栏（hover 档不接点击，tsx 140）', (
+  testWidgets('★ 宽屏鼠标点击行 ⇒ **不**切换工具栏（悬停档不接点击）', (
     WidgetTester tester,
   ) async {
-    // 同上：必须在桌面平台上测「鼠标不切换」才有意义（android 档本就是触屏路径）。
+    // 同上：必须在桌面平台上测「鼠标不切换」才有意义（android 档本就是触屏路径），
+    // 且必须宽屏（窄屏档鼠标点行是**要**切换的，见前面的窄屏用例）。
     await asDesktopPlatform(() async {
       int toggles = 0;
       await tester.pumpWidget(
@@ -754,6 +1312,7 @@ void main() {
             senderAvatarLabel: '樱',
             onToggleActions: () => toggles++,
           ),
+          viewport: const Size(900, 420),
         ),
       );
       await tester.pumpAndSettle();
@@ -767,13 +1326,16 @@ void main() {
       expect(
         toggles,
         0,
-        reason: '★ 鼠标（hover 能力设备）点行不切换 —— `if (!isTouch) return`（tsx 140）',
+        reason: '★ 宽屏 + 鼠标（有 hover 能力）⇒ 悬停档、点行不切换（app.css:1317）',
       );
     });
   });
 
-  testWidgets('★ 显式 touchMode 仍最高优先：false 时触摸指针也不切换', (WidgetTester tester) async {
-    // 保住既有契约：`touchMode: false` 的调用方明确要求关闭点行路径。
+  testWidgets('★ 显式 touchMode 仍最高优先：false 时窄屏 + 触摸指针也不切换', (
+    WidgetTester tester,
+  ) async {
+    // 保住既有契约：`touchMode: false` 的调用方明确要求关闭点行路径
+    //（**即使窄屏**，也按桌面档：悬停展开、点行不切换）。
     int toggles = 0;
     await tester.pumpWidget(
       host(
@@ -796,7 +1358,7 @@ void main() {
     await g.up();
     await tester.pump();
 
-    expect(toggles, 0, reason: '显式档位覆盖能力推断');
+    expect(toggles, 0, reason: '显式档位覆盖能力推断与宽度判据（`_tapMode` 的最高优先）');
   });
 
   // ======================= 头像手势 =======================
