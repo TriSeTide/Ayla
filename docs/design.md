@@ -217,7 +217,8 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 | 内容 | 16px 玻璃卡片 + 8/32 宽软阴影 + 顶沿内高光 |
 | 浮层 | 强玻璃面板 + 24px blur + 20/60 阴影 |
 | 模态 | `--glass-bg-strong` + 背景压暗 `rgba(70,91,146,0.25)`（`--overlay-dim`） |
-| 沉浸查看器 | 图片查看器等 lightbox：压暗加深至 0.45（`--overlay-dim-strong`）+ blur(8px)，z 在弹窗层之上 |
+| 模态遮罩 | **全站一律无 `backdrop-filter`**（2026-10-14 用户裁决「统一成没有模糊」）：遮罩只做**压暗**（`.18`–`.28`），模糊只属于**卡片本体**的玻璃（`--glass-filter`）。子群弹窗曾是全仓唯一例外（`blur(3px)`），已删除 |
+| 沉浸查看器 | 图片查看器等 lightbox：压暗加深至 0.45（`--overlay-dim-strong`）+ blur(8px)，z 在弹窗层之上（**遮罩模糊的唯一合法场景**，因为它是内容级查看器而非模态） |
 | 辉光 | 原有光环、主 CTA、focus；导航选中态增加同色柔光，保持状态颜色语义 |
 
 ## 7. Motion
@@ -396,6 +397,11 @@ font-family: "Space Grotesk", "PingFang SC", monospace;              /* utility 
 
 ### 12.5 浮动按钮 FAB（两形态）
 
+- ⚠️ **弹层遮罩统一无模糊**（2026-10-14 用户裁决「群内页面添加子群的弹窗有模糊，与语音直播没有模糊不统一的问题，统一成没有模糊」）：
+  全站模态遮罩**只压暗、不模糊** —— `.subgroup-dialog-overlay`（`.18`）· `.create-sheet-overlay` / `.group-create-overlay`（`.25`）· `.group-apply-overlay`（`.28`）· `.privacy-sheet-overlay` · `.share-sheet-overlay` · `.quick-messages-overlay` · `.user-profile-overlay` · `.group-transfer-overlay` **一律无 `backdrop-filter`**。
+  子群弹窗是此前**全仓唯一**带 `blur(3px)` 的遮罩（语音/直播创建浮层走 `CreateSheet`，本就无模糊）⇒ 已删除该声明与 Flutter 侧对应的 `maskBlur: 3`，两侧同步。
+  模糊仍属于**卡片本体**（`--glass-bg-strong` + `--glass-filter`，含 `.subgroup-dialog` 自己）与**沉浸查看器**（lightbox `blur(8px)`）；**不要**把卡片玻璃的模糊误删。
+  回归锁：web `src/vitest/overlay-no-blur.test.tsx`（源码扫描全部 overlay 无 `backdrop-filter`）· Flutter `test/subgroup_dialog_backdrop_density_test.dart`（反向锁：无模糊实测 ~82%，带 `blur(3px)` 仅 7.2%）。
 - CreateFAB（右下，两形态都有）：56px 圆形，主 CTA 样式——`--indigo-700` 实底 + 白色加号线性图标（24px），常驻 `0 2px 12px rgba(70,91,146,0.18)` 浅投影；hover/按下附 `--glow-shadow`（200ms）。窄屏 `right:16px; bottom:底栏高+12px`；宽屏 `right:32px; bottom:32px`
 - MessageFAB（窄屏左下）：56px 圆形玻璃底 `--glass-bg` + blur 18px + 1px `--glass-border`，消息线性图标 `--text-primary`；未读聚合徽标 `--pink-500` 右上角
 - FAB 动作面板：窄屏底部上滑面板 / 宽屏 FAB 上方浮层——`--glass-bg-strong` + blur 18px + 圆角 24px（上沿）/16px（浮层），背景压暗 `rgba(70,91,146,0.25)`；面板项 = 图标 + 文字行（行高 48px）

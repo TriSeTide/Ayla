@@ -627,6 +627,8 @@ class _AylaModalCardState extends State<AylaModalCard>
 /// display:flex; 宽屏 center + padding 24（create 用 sp4）/ privacy 24；
 /// 窄屏 align-items: flex-end + padding 0
 /// ```
+///
+/// 遮罩**默认不模糊**（[maskBlur] = null）：全站弹层统一无模糊（2026-10-14 用户裁决）。
 /// 点遮罩关闭（由 [onDismiss] 处理，busy 时调用方传 null）。
 class AylaModalOverlay extends StatelessWidget {
   const AylaModalOverlay({
@@ -654,7 +656,7 @@ class AylaModalOverlay extends StatelessWidget {
   /// privacy-sheet / share-sheet / confirm-dialog / quick-messages 都是贴底档。
   ///
   /// true = 本域两个弹窗（2026-09-24 用户批准加档）：web 的
-  /// `.subgroup-dialog-overlay`（group.css 2131）与 `.group-apply-overlay`
+  /// `.subgroup-dialog-overlay`（group.css 2136）与 `.group-apply-overlay`
   /// （search.css 180）**全仓没有窄屏媒体查询** ⇒ 窄屏同样居中 + `padding: var(--sp-4)`。
   final bool centerBoth;
 
@@ -664,9 +666,13 @@ class AylaModalOverlay extends StatelessWidget {
   /// 群申请弹窗 **.28**（`search.css:187`）。
   final Color maskColor;
 
-  /// 遮罩模糊半径（px）；null = 不模糊。
+  /// 遮罩模糊半径（px）；null（默认）= 不模糊。
   ///
-  /// 子群弹窗 `backdrop-filter: blur(3px)`（`group.css:2142–2143`）；群申请弹窗无模糊。
+  /// ⚠️ **当前全仓无调用方**（2026-10-14）：唯一使用过它的子群弹窗已按用户裁决
+  /// 「群内添加子群弹窗有模糊，与语音直播没有模糊不统一 ⇒ 统一成没有模糊」去掉
+  /// （web 侧 `.subgroup-dialog-overlay` 的 `backdrop-filter: blur(3px)` 已从
+  /// `group.css` 删除）。保留本参数是因为遮罩模糊是**合法档位**，其余弹层若将来
+  /// 需要可直接传值；**不要**因无人使用就删除（会破坏 [AylaModalOverlay] 的档位完整性）。
   final double? maskBlur;
 
   @override
@@ -680,6 +686,7 @@ class AylaModalOverlay extends StatelessWidget {
       // ⚠️ BackdropFilter **不受布局尺寸限制**：必须自己配 ClipRect，否则会把背后**整块画布**
       //    糊掉（实测「编辑子群模糊遮罩直接糊掉整个画布」）。web 的
       //    .subgroup-dialog-overlay 是 position: fixed + inset: 0 ⇒ 天然裁剪在视口内。
+      //    （裁剪警示保留：maskBlur 档位本身仍可用，将来谁启用都必须带 ClipRect。）
       mask = ClipRect(
         // 遮罩的模糊层同样归质量档 owner：真玻璃 = BackdropFilter；
         // 预模糊 = 采样背景低频快照（全屏遮罩本来就是压暗，采样足够近似）。
@@ -692,7 +699,7 @@ class AylaModalOverlay extends StatelessWidget {
 
     return Stack(
       children: <Widget>[
-        // 遮罩（`background: var(--overlay-dim)`；子群档另有 blur(3px)）
+        // 遮罩（`background: var(--overlay-dim)`；**全站统一无模糊**，2026-10-14）
         //
         // 指针：web 的遮罩选择器（`.privacy-sheet-overlay` `profile.css:626–635` /
         // `.subgroup-dialog-overlay` `group.css` / `.group-apply-overlay` `search.css`）

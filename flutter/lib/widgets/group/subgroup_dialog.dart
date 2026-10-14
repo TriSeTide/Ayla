@@ -3,9 +3,9 @@
 /// ## 事实源
 /// ── SubGroupDialog.tsx 18–110：结构 = overlay > dialog > head + 名称输入 + 禁言开关（仅 edit）
 /// + 错误 + 按钮排
-/// ── group.css 2131–2144：.subgroup-dialog-overlay —— fixed inset · z 60 · flex 居中 ·
-/// padding sp4 · 遮罩 rgba(70,91,146,.18) + backdrop-filter blur(3px)
-/// ── group.css 2146–2159：.subgroup-dialog —— width min(360px, 100%) · flex column ·
+/// ── group.css 2136–2154：.subgroup-dialog-overlay —— fixed inset · z 60 · flex 居中 ·
+/// padding sp4 · 遮罩 rgba(70,91,146,.18)（**无模糊**，2026-10-14 统一）
+/// ── group.css 2156–2169：.subgroup-dialog —— width min(360px, 100%) · flex column ·
 /// gap sp4 · padding sp6 · radius panel 20 · glass-bg-strong · blur24 sat1.4 · 1px 边 ·
 /// glass-shadow-modal
 /// ── group.css 2161–2172：.subgroup-dialog-head —— flex space-between（无 margin-bottom，
@@ -164,10 +164,14 @@ class _AylaSubGroupDialogState extends State<AylaSubGroupDialog> {
       // tsx 42：busy 时遮罩不可关闭
       onDismiss: widget.busy ? null : widget.onClose,
       padding: AylaSpacing.sp4, // .subgroup-dialog-overlay { padding: var(--sp-4) }
-      // 两档都居中（web 无窄屏媒体查询）；遮罩 .18 + blur(3px)
+      // 两档都居中（web 无窄屏媒体查询）
       centerBoth: true,
       maskColor: const Color(0x2E465B92), // rgba(70,91,146,.18)
-      maskBlur: 3,
+      // ⚠️ **不传 maskBlur**：遮罩不带模糊（2026-10-14 用户裁决「群内添加子群弹窗有
+      // 模糊，与语音直播没有模糊不统一 ⇒ 统一成没有模糊」）。本处原传 `3`，
+      // 与 web `group.css` 的 `backdrop-filter: blur(3px)` 一一对应；该规则已随本次
+      // 裁决从 web 删除（它是全仓**唯一**带模糊的遮罩）⇒ 此处同步去掉，恢复
+      // [AylaModalOverlay.maskBlur] 的默认 `null`（= 不模糊），与 create-sheet 系一致。
       child: AylaModalCard(
         cardMaxWidth: 360, // width: min(360px, 100%)
         narrowCentered: true, // 窄屏同形（全圆角 + 四边边框）

@@ -2143,10 +2143,14 @@
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
-  /* 全屏轻遮罩（portal 到 body 后不再被侧栏截断）：低透明度 + 极轻模糊，不割裂页面 */
+  /* 全屏轻遮罩（portal 到 body 后不再被侧栏截断）。
+     ⚠️ **遮罩不带任何模糊**（2026-10-14 用户裁决「群内添加子群弹窗有模糊，与语音直播
+     没有模糊不统一 ⇒ 统一成没有模糊」）：本类原带 `backdrop-filter: blur(3px)`，
+     是本仓**唯一**带模糊的遮罩（全量普查：其余 .create-sheet-overlay /
+     .group-apply-overlay / .privacy-sheet-overlay / .share-sheet-overlay /
+     .quick-messages-overlay / .user-profile-overlay / .group-transfer-overlay
+     全无 backdrop-filter）⇒ 已删除，与全站弹层统一。 */
   background: rgba(70, 91, 146, 0.18);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
 }
 
 .subgroup-dialog {

@@ -3,10 +3,12 @@
 /// ## 事实源（web）
 /// ── `components/group/SubGroupDialog.tsx:41–42`：`createPortal` 到 `document.body`
 ///    （tsx 109）⇒ 弹层相对**视口**定位，不落在侧栏/群信息容器的 stacking context 里；
-/// ── `styles/group.css:2131–2144`：`.subgroup-dialog-overlay` = `position:fixed; inset:0;
-///    z-index:60; padding: var(--sp-4); background: rgba(70,91,146,.18);
-///    backdrop-filter: blur(3px)` —— 半透明轻遮罩，**不是**不透明底；
-/// ── `styles/group.css:2146–2159`：`.subgroup-dialog` 卡片本体（360 宽 / glass-bg-strong）；
+/// ── `styles/group.css:2136–2154`：`.subgroup-dialog-overlay` = `position:fixed; inset:0;
+///    z-index:60; padding: var(--sp-4); background: rgba(70,91,146,.18)` ——
+///    半透明轻遮罩，**不是**不透明底，且**无模糊**（2026-10-14 用户裁决
+///    「群内添加子群弹窗有模糊，与语音直播没有模糊不统一 ⇒ 统一成没有模糊」，
+///    原 `backdrop-filter: blur(3px)` 已删）；
+/// ── `styles/group.css:2156–2169`：`.subgroup-dialog` 卡片本体（360 宽 / glass-bg-strong）；
 /// ── `layout/ChannelSidebar.tsx:558–586`：`{present && dialog && <SubGroupDialog/>}`
 ///    —— 与语音/直播浮层（tsx 541 / 547）是**三个独立条件**，可同时在场。
 ///
@@ -20,12 +22,14 @@
 ///   (d) 取到的是**最近的** Overlay（`channel_sidebar.dart:1094–1099` 的口径），
 ///       真实 app 里即 `MaterialApp` Navigator 那一个。
 ///
-/// ## 已知观感（不在本文件断言，移交用户裁决）
-/// 遮罩的 `backdrop-filter: blur(3px)`（`group.css:2142`）是**逐帧真实模糊**：
+/// ## 已知观感（**2026-10-14 已由用户裁决，不再是待决项**）
+/// 遮罩原带 `backdrop-filter: blur(3px)`（`group.css:2142`）是**逐帧真实模糊**：
 /// 实测侧栏文字锐度 22.5 → **1.0**（关闭 `maskBlur` 后回到 16.9）⇒ 15px 级正文在
-/// 白底玻璃卡上被糊成一片，肉眼即用户所述的「背景全空」。该模糊**是 web 的规格**
-/// （`group.css:2142` 原文 `blur(3px)`），故本文件只锁「背景没消失」，
-/// 不锁「模糊强度」——后者需用户对公共件 `AylaModalOverlay` 的裁决。
+/// 白底玻璃卡上被糊成一片，肉眼即用户所述的「背景全空」。
+/// 用户 2026-10-14 裁决「**统一成没有模糊**」⇒ web `group.css` 的 `backdrop-filter`
+/// 与 Flutter 的 `maskBlur: 3` 两处**同步删除**，锐度回到 16.9 档。
+/// 本文件锁「背景没消失 + 遮罩档位无模糊」；模糊**强度**的量化锁在同目录
+/// `subgroup_dialog_backdrop_density_test.dart`（反向锁：比值须 > 0.60）。
 library;
 
 import 'dart:typed_data';
@@ -119,14 +123,14 @@ void main() {
     await _openAddDialog(tester);
     expect(find.byType(AylaSubGroupDialog), findsOneWidget); // tsx 558
 
-    // `.subgroup-dialog-overlay { position: fixed; inset: 0 }`（group.css:2131–2133）
+    // `.subgroup-dialog-overlay { position: fixed; inset: 0 }`（group.css:2137–2139）
     // ⇒ 遮罩必须铺满**测试视口**（1000 宽），而不是侧栏卡（284 宽）。
     final Size overlay = tester.getSize(find.byType(AylaModalOverlay));
     expect(overlay.width, greaterThan(900), reason: '铺满视口而非侧栏卡');
     expect(overlay.height, 800, reason: 'inset: 0 ⇒ 与视口等高');
   });
 
-  testWidgets('遮罩档位对齐 group.css：rgba(70,91,146,.18) + blur(3px)，非不透明底', (
+  testWidgets('遮罩档位对齐 group.css：rgba(70,91,146,.18) 且**无模糊**，非不透明底', (
     WidgetTester tester,
   ) async {
     await pumpWide(tester);
@@ -135,9 +139,15 @@ void main() {
     final AylaModalOverlay overlay = tester.widget<AylaModalOverlay>(
       find.byType(AylaModalOverlay),
     );
-    expect(overlay.maskColor, const Color(0x2E465B92)); // group.css:2141
+    expect(overlay.maskColor, const Color(0x2E465B92)); // group.css:2153
     expect(overlay.maskColor.a, closeTo(0.18, 0.005));
-    expect(overlay.maskBlur, 3); // group.css:2142–2143
+    // ★ 遮罩**无模糊**（2026-10-14 用户裁决「统一成没有模糊」）：
+    //   null = AylaModalOverlay 默认档 = 不套 BackdropFilter。原值为 3。
+    expect(
+      overlay.maskBlur,
+      isNull,
+      reason: '★ 子群弹窗遮罩不得带模糊（与 create-sheet 等全站弹层统一）',
+    );
     expect(overlay.padding, 16); // padding: var(--sp-4)
     expect(overlay.centerBoth, isTrue, reason: 'web 无窄屏媒体查询 ⇒ 两档都居中');
   });
