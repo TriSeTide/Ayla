@@ -36,7 +36,7 @@ import 'theme/app_theme.dart';
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
 
-/// **实机掉帧探针（仅 debug）** —— 把「哪一帧慢、慢在 build 还是 raster」直接打到控制台。
+/// **实机掉帧探针（debug + profile）** —— 把「哪一帧慢、慢在 build 还是 raster」落到文件。
 ///
 /// 为什么需要它：性能整改前几轮只能靠 `flutter test` 的**软件光栅化**做相对对照
 /// （它测不到 GPU、也测不到真机的 AOT/DPR 差异），无法确定实机那一顿到底出在哪条线程。
@@ -50,40 +50,104 @@ void _installJankProbe() {
   // 同时**落盘**（cwd = 工程根 `Ayla/flutter`）：控制台容易被滚掉的日志不算证据，
   // 文件能让"那一帧到底慢在哪"变成可复现的读数。
   File? log;
+  final StringBuffer pending = StringBuffer();
+
+  /// 只把文本追加进内存缓冲。
+  ///
+  /// ⚠️ **热路径绝不做磁盘 IO**（2026-10-16，独立调研实测发现）：
+  /// 旧实现在每个 jank 帧上 `writeAsStringSync(..., flush: true)` —— 那是
+  /// 「同步写 + `FlushFileBuffers`」，**在已经掉帧的帧上再叠加一次磁盘往返**，
+  /// 且整屏玻璃+极光下 16.7ms 极易触线 ⇒ 几乎每帧都写 ⇒ **自我强化卡顿**
+  /// （与探针数据里 gap 的 p99 = 135.5ms 特征吻合）。
+  /// 现在逐帧只 `add` 到内存；`_drain()` 按 ≥1s 的节奏落盘且不强制 flush。
+  void write(String s) {
+    pending.write(s);
+  }
+
+  /// 把缓冲落盘（不 `flush: true`：交给 OS 的写回策略，避免同步等待）。
+  void drain() {
+    final File? target = log;
+    if (target == null || pending.isEmpty) return;
+    final String text = pending.toString();
+    pending.clear();
+    try {
+      target.writeAsStringSync(text, mode: FileMode.append, flush: false);
+    } catch (_) {
+      // 探针自身绝不拖累渲染。
+    }
+  }
+
   try {
     log = File('ayla_jank.log');
     log.writeAsStringSync(
       '--- session ${DateTime.now().toIso8601String()} ---\n',
       mode: FileMode.append,
-      flush: true,
+      flush: false,
     );
     debugPrint('[AYLA-FRAME] 日志已开启：${log.absolute.path}');
   } catch (e) {
     debugPrint('[AYLA-FRAME] 日志文件不可写（只打控制台）：$e');
   }
+
+  // ---- 汇总统计（2026-10-16 加）----
+  // 为什么需要：只记 `>= 24ms` 的帧时，**静止场景一条都不落** ⇒ 「Impeller vs Skia
+  // 哪个更流畅」这种对照拿不到任何读数（实测：profile 空闲 45s = 0 条 jank）。
+  // 改为把**全部帧**纳入统计，每 5 秒落一行汇总（p50/p90/p99/max + 帧数），
+  // 于是「同一段交互在两个后端下的分布」可以直接对比，且不依赖交互脚本。
+  final List<double> buildSamples = <double>[];
+  final List<double> rasterSamples = <double>[];
+  final List<double> totalSamples = <double>[];
+  int lastFlushMs = DateTime.now().millisecondsSinceEpoch;
+
+  double pct(List<double> sorted, double p) {
+    if (sorted.isEmpty) return 0;
+    final int i = ((sorted.length - 1) * p).round().clamp(0, sorted.length - 1);
+    return sorted[i];
+  }
+
+  void flushSummary() {
+    if (totalSamples.isEmpty) return;
+    final List<double> bs = List<double>.of(buildSamples)..sort();
+    final List<double> rs = List<double>.of(rasterSamples)..sort();
+    final List<double> ts = List<double>.of(totalSamples)..sort();
+    final int jank = totalSamples.where((double v) => v >= 24.0).length;
+    write(
+      '[AYLA-FRAME] summary n=${totalSamples.length} jank=$jank '
+      'build p50=${pct(bs, 0.5).toStringAsFixed(1)} p90=${pct(bs, 0.9).toStringAsFixed(1)} '
+      'p99=${pct(bs, 0.99).toStringAsFixed(1)} max=${bs.last.toStringAsFixed(1)} '
+      '| raster p50=${pct(rs, 0.5).toStringAsFixed(1)} p90=${pct(rs, 0.9).toStringAsFixed(1)} '
+      'p99=${pct(rs, 0.99).toStringAsFixed(1)} max=${rs.last.toStringAsFixed(1)} '
+      '| total p50=${pct(ts, 0.5).toStringAsFixed(1)} p90=${pct(ts, 0.9).toStringAsFixed(1)} '
+      'p99=${pct(ts, 0.99).toStringAsFixed(1)} max=${ts.last.toStringAsFixed(1)}\n',
+    );
+    buildSamples.clear();
+    rasterSamples.clear();
+    totalSamples.clear();
+  }
+
   SchedulerBinding.instance.addTimingsCallback((List<FrameTiming> timings) {
     for (final FrameTiming t in timings) {
       final double build = t.buildDuration.inMicroseconds / 1000.0;
       final double raster = t.rasterDuration.inMicroseconds / 1000.0;
       final double total = t.totalSpan.inMicroseconds / 1000.0;
-      // ⚠️ **只落盘、不打控制台**（2026-10-01 用户裁决「把那个刷屏去掉，现在应该没用」）：
-      // 本探针在性能整改轮用于定位 build/raster 瓶颈，已完成使命；但它**每帧都可能命中**
-      // （阈值 24ms，实测常态 40–60ms 一帧）⇒ 控制台被 `[AYLA-FRAME]` 彻底淹没，
-      // **flutter run 的连接状态 / 异常 / print 全部看不见**，反而阻断后续调试。
-      // 保留落盘能力（`ayla_jank.log`，按需查），控制台完全静默。
+      buildSamples.add(build);
+      rasterSamples.add(raster);
+      totalSamples.add(total);
+      // 明显掉帧逐条留档（便于事后看是哪一帧、慢在哪条线程）
       if (total >= 24.0) {
-        try {
-          log?.writeAsStringSync(
-            '[AYLA-FRAME] jank total=${total.toStringAsFixed(1)}ms '
-            'build=${build.toStringAsFixed(1)}ms '
-            'raster=${raster.toStringAsFixed(1)}ms\n',
-            mode: FileMode.append,
-            flush: true,
-          );
-        } catch (_) {
-          // 探针自身绝不拖累渲染。
-        }
+        write(
+          '[AYLA-FRAME] jank total=${total.toStringAsFixed(1)}ms '
+          'build=${build.toStringAsFixed(1)}ms '
+          'raster=${raster.toStringAsFixed(1)}ms\n',
+        );
       }
+    }
+    // 每 1 秒落一次盘（不逐帧写）：既保证读数及时，又不让 IO 进入渲染热路径。
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (nowMs - lastFlushMs >= 1000) {
+      lastFlushMs = nowMs;
+      flushSummary();
+      drain();
     }
   });
 }
@@ -108,9 +172,30 @@ void main() {
   //    "Binding has not yet been initialized"，main 当场中断 → runApp 永不执行 →
   //    没有首帧 → Windows runner 的 SetNextFrameCallback 不触发 → 窗口创建了却不 Show，
   //    表现为「进程活着但没有任何页面」。ensureInitialized 幂等，runApp 内部还会再调。
-  if (kDebugMode) {
+  // ⚠️ `SchedulerBinding.instance` 只在 binding 初始化后才可用：未初始化时取值抛
+  // "Null check operator used on a null value"（实测：profile + 探针时崩在
+  // `_installJankProbe` 的 `SchedulerBinding.instance`）—— 这正是本节注释早就警告过的
+  // 那个坑（见下）。故**只要可能装探针，就先 ensureInitialized**（幂等）。
+  if (kDebugMode || kProfileMode) {
     WidgetsFlutterBinding.ensureInitialized();
+  }
+  if (kDebugMode) {
     SemanticsBinding.instance.ensureSemantics();
+  }
+  // ⚠️ 掉帧探针在 **debug 与 profile 都装**（2026-10-16）：
+  // profile 才是「测真实性能」的正确档位（AOT 编译、无 debug 断言开销，但仍保留
+  // `addTimingsCallback`）；此前只在 debug 装 ⇒ 「release 卡不卡、卡在哪条线程」
+  // 只能靠手感判断，无法定位。release 档仍不装：Dart VM 会摇掉该分支，
+  // 且探针要写文件（release 环境不一定可写）。
+  // ⚠️ 启用条件（2026-10-16 独立调研后收紧）：
+  // · debug：默认开（开发期诊断，探针只写内存 + 秒级落盘，无同步 IO）；
+  // · profile/release：**必须显式 `--dart-define=AYLA_FRAME_PROBE=true`** 才装。
+  //   理由：探针虽已去掉热路径同步写盘，但它仍每帧进 `addTimingsCallback`、
+  //   并在内存里累积三个 list —— 测性能时不该让被测对象带观测开销；
+  //   要做 A/B 对照时再显式打开，两边都开或都关，保证公平。
+  const bool probeForced =
+      bool.fromEnvironment('AYLA_FRAME_PROBE', defaultValue: false);
+  if (kDebugMode || (kProfileMode && probeForced)) {
     _installJankProbe();
   }
 

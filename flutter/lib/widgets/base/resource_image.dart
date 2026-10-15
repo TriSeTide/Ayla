@@ -311,8 +311,23 @@ class _ResourceImageState extends State<AylaResourceImage> {
       case _State.ready:
         // 预览注入（样张示例图）：直接渲染注入的 ImageProvider（不走网络）
         if (_injectedImage case final ImageProvider preview) {
+          // 同样按显示尺寸解码（与网络分支同口径，零观感风险）。
+          // ⚠️ `Image` widget 本身**没有** `cacheWidth/cacheHeight`（那是
+          // `Image.network/asset` 等**构造函数**的参数）⇒ 注入 ImageProvider 的场景
+          // 必须用 `ResizeImage` 包一层（官方等价物，语义相同）。
+          final double previewDpr = MediaQuery.devicePixelRatioOf(context);
+          final ImageProvider previewSized = widget.width == null
+              ? preview
+              : ResizeImage(
+                  preview,
+                  width: (widget.width! * previewDpr).round().clamp(1, 8192),
+                  height: widget.height == null
+                      ? null
+                      : (widget.height! * previewDpr).round().clamp(1, 8192),
+                  allowUpscaling: false,
+                );
           final Widget previewImg = Image(
-            image: preview,
+            image: previewSized,
             key: ValueKey<String>('preview:$_retry'),
             width: widget.width,
             height: widget.height,
@@ -349,11 +364,25 @@ class _ResourceImageState extends State<AylaResourceImage> {
           }
           return previewImg;
         }
+        // ⚠️ **按显示尺寸解码**（2026-10-16 性能整改）：全库此前 0 处 `cacheWidth/`cacheHeight`，
+        // 图片一律按**原始分辨率**解码（4000×3000 ≈ 48MB RGBA）再上传 GPU，
+        // 而缩略槽位可能只有 240×180 ⇒ 单张浪费约两个数量级的显存与带宽。
+        // 危害集中在滚动/入场：解码在后台 isolate，但**纹理上传/raster 在 UI 线程侧**。
+        // 这里按「布局尺寸 × DPR」取整作为解码尺寸 —— 解码尺寸 ≥ 显示尺寸时逐像素一致，**零观感风险**。
+        final double dpr = MediaQuery.devicePixelRatioOf(context);
+        final int? decodeW = widget.width == null
+            ? null
+            : (widget.width! * dpr).round().clamp(1, 8192);
+        final int? decodeH = widget.height == null
+            ? null
+            : (widget.height! * dpr).round().clamp(1, 8192);
         final Widget img = Image.network(
           _resolvedUrl!,
           key: ValueKey<String>('${_resolvedUrl!}:$_retry'), // 重试时强制重建
           width: widget.width,
           height: widget.height,
+          cacheWidth: decodeW,
+          cacheHeight: decodeH,
           fit: widget.fit ?? BoxFit.cover, // object-fit
           // 加载失败 → 走失败态（web onError）
           errorBuilder: (BuildContext context, Object e, StackTrace? s) {

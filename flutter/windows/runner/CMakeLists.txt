@@ -28,7 +28,25 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTT
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
 
 # Disable Windows macros that collide with C++ standard library functions.
+# Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+
+# ---- 渲染后端开关（2026-10-16）---------------------------------------------
+# AYLA_IMPELLER=OFF（默认）⇒ 用 Skia（用户在 Windows release 实测更流畅：
+# 工程掉帧探针显示瓶颈在 raster 侧，而 Impeller 是 GPU 光栅化后端）。
+# 想构建 Impeller 版：cmake 时传 -DAYLA_IMPELLER=ON，或在 build/windows/x64 下
+# 重跑 cmake。命令行 `--enable-impeller` / `--no-enable-impeller` 可运行时覆盖。
+# 详细依据见 runner/main.cpp 顶部注释。
+option(AYLA_IMPELLER "Build with the Impeller rendering backend" OFF)
+# Prefer the high-performance (discrete) GPU. 2 = high performance, 1 = low power,
+# 0 = engine default. See runner/main.cpp for the rationale.
+set(AYLA_GPU_PREFERENCE "2" CACHE STRING "GPU preference: 0=none, 1=low power, 2=high performance")
+target_compile_definitions(${BINARY_NAME} PRIVATE "AYLA_GPU_PREFERENCE=${AYLA_GPU_PREFERENCE}")
+if(AYLA_IMPELLER)
+  target_compile_definitions(${BINARY_NAME} PRIVATE "AYLA_IMPELLER=1")
+else()
+  target_compile_definitions(${BINARY_NAME} PRIVATE "AYLA_IMPELLER=0")
+endif()
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.

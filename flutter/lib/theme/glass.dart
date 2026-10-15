@@ -451,8 +451,13 @@ class _AylaBackdropCache extends StatefulWidget {
 }
 
 class _AylaBackdropCacheState extends State<_AylaBackdropCache> {
-  /// 全局序号 → 本卡**刷新相位**（每张 16ms，8 组一轮 = 0–112ms）
+  /// 全局序号 → 本卡**刷新相位**（每张 16ms，共 16 组 = 0–240ms）。
   /// ⇒ 同屏卡的周期刷新分散在不同帧（每帧只让 1–2 张重新捕获）。
+  ///
+  /// ⚠️ **2026-10-16 修（相位坍缩）**：本式生成 `16 * (0..15)` = 0,16,…,240（16 个相位），
+  /// 但用法处此前写的是 `_phaseMs % 32` ⇒ 只剩 **0 / 16 两个相位**，
+  /// 12–20 张同屏卡因此挤在 2 个桶里、**每 250ms 集中捕获一次**
+  /// （正是本节注释想避免的尖峰）。用法处已改为按周期取模。
   ///
   /// ⚠️ **只用于刷新，不用于「首次接管」**：接管窗口内本卡走的是裸背底层
   /// （= 每帧全额实时模糊，N 张卡同帧就是 N 次模糊），比「同帧各捕获一次」更贵 ——
@@ -563,7 +568,14 @@ class _AylaBackdropCacheState extends State<_AylaBackdropCache> {
   void _scheduleRefresh() {
     _refreshTimer?.cancel();
     _refreshTimer = Timer(
-      Duration(milliseconds: _period.inMilliseconds + _phaseMs % 32),
+      // ⚠️ **按周期取模**（而非固定的 % 32）：相位范围是 0–240ms，
+      // 而周期是 250ms ⇒ 取模后 0–240 全部落在周期内、16 个相位各差 16ms，
+      // 同屏卡因而真正错峰（此前 `% 32` 把 16 个相位坍缩成 0/16 两个）。
+      // `max(1, …)` 防御周期为 0（除零），常量当前恒 > 0。
+      Duration(
+        milliseconds: _period.inMilliseconds +
+            _phaseMs % (_period.inMilliseconds <= 0 ? 1 : _period.inMilliseconds),
+      ),
       () {
         if (!mounted) return;
         final SnapshotController? c = _effective;
