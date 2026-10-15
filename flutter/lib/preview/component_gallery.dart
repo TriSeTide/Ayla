@@ -562,11 +562,15 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                       child: const _GamesGridDemo(),
                     ),
                     _Section(
-                      title: 'AylaFavoriteItem（FavoritesPage.tsx 95 + profile.css 474–487 / 539–541）',
+                      title: 'AylaFavoriteItem（FavoritesPage.tsx 95 + **typed-result-cards.css 17–20** + auroraqua.css 29–52）',
                       source:
-                          '收藏列表项容器：flex · align-items center · gap sp3 · padding sp3（**≥769 ⇒ sp4**）· '
-                          'radius-input · --glass-bg + 1px 边 + --glass-filter + **--glass-shadow-compact** · '
-                          '过渡 box-shadow / border-color / translate（--auroraqua-duration）· '
+                          '收藏列表项容器 = **纯布局容器**：typed-result-cards.css:17–20（特异性 0-2-0、**无媒体查询**）'
+                          '把 .favorite-item.typed-result-card 的 padding / background / border / backdrop-filter / '
+                          'box-shadow **全部压掉**（profile.css:474 那套玻璃材质与 539 的 padding sp4 均被压掉、实际不生效），'
+                          '**只剩 radius-input 仍生效** ⇒ 玻璃由**内层结果卡**自己画 · '
+                          '卡片族 hover（auroraqua.css:42–43）：translate 0 → **-2px** + --glass-shadow-hover（上浮 2 是**本层**的，'
+                          '内层 voice/live/game 卡也在同一 :is() 组里 ⇒ 各自再上浮 2；post 卡不在组内）· '
+                          'active（47–52）translate 回 0 + scale .99 · reduced-motion（655–674）两者归零 · '
                           '⚠️ `.favorite-item-title/-type/-body` 在 tsx **零使用 ⇒ 死声明**（不复刻）；'
                           '`-main` 只用于「内容不可用」按钮（由结果卡自身承担）',
                       child: const _FavoriteItemDemo(),
@@ -622,8 +626,11 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                       child: const _ProfileEditDemo(),
                     ),
                     _Section(
-                      title: 'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456）',
-                      source: 'padding sp4 · 两条骨架条高 64（首条下方留 8）· role=status aria-label「正在加载收藏」',
+                      title: 'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456 + directory-filters.css 210–217）',
+                      source:
+                          'padding sp4（profile.css:452–456）· 两条骨架条高 64（首条下方留 8）· role=status aria-label「正在加载收藏」· '
+                          '**≥1025 两列**（directory-filters.css:210–217：display grid / repeat(2, minmax(0,1fr)) / align-items start / '
+                          'gap sp3）⇒ 下方两档舞台 = 900（单列纵排）与 1280（并排两列）',
                       child: const _FavoritesSkeletonDemo(),
                     ),
                     // ---------- 搜索域三件（SearchPage 自有件） ----------
@@ -3938,13 +3945,63 @@ class _ProfileCardDemo extends StatelessWidget {
   }
 }
 
-/// 收藏骨架样张。
+/// 收藏骨架样张：两档舞台。
+///
+/// 断点读 `MediaQuery.sizeOf`（`directory-filters.css:210` 的 `@media (min-width:1025px)`）
+/// ⇒ 用 `MediaQuery.copyWith(size:)` 覆写**局部视口**钉住档位（画布宿主窗口尺寸不可控，
+/// 库内既有手法：见 `_CreateSheetDemo._stage`）。
 class _FavoritesSkeletonDemo extends StatelessWidget {
   const _FavoritesSkeletonDemo();
 
+  /// 舞台：固定**宽度** + 覆写局部 MediaQuery 视口（高度按内容自适应）。
+  ///
+  /// ⚠️ **不要给固定高**：单列档的自然高 = padding 16×2 + 64 + 8 + 64 = **168**，
+  /// 骨架本体是 `Column(mainAxisSize.min)`，塞进矮于 168 的盒会 `RenderFlex overflowed`
+  /// （画布遍历用例 `component_gallery_overlay_test` 的「零异常」会直接红）。
+  /// 两列档自然高 = 16×2 + 64 = 96，与单列档并排时由 `Wrap` 的 `start` 对齐、不拉伸。
+  Widget _stage({required Size viewport, required String label}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(label),
+        const SizedBox(height: AylaSpacing.sp2),
+        SizedBox(
+          width: viewport.width,
+          child: Builder(
+            builder: (BuildContext inner) => MediaQuery(
+              data: MediaQuery.of(inner).copyWith(size: viewport),
+              child: const AylaFavoritesSkeleton(
+                padding: kAylaFavoritesSkeletonPadding,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(width: 420, child: AylaFavoritesSkeleton());
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return DefaultTextStyle.merge(
+      style: t.caption,
+      child: Wrap(
+        spacing: AylaSpacing.sp6,
+        runSpacing: AylaSpacing.sp6,
+        crossAxisAlignment: WrapCrossAlignment.start,
+        children: <Widget>[
+          _stage(
+            viewport: const Size(900, 120),
+            label: '900（<1025）：单列纵排 · 两条 64 高 · 首条下方 8',
+          ),
+          _stage(
+            viewport: const Size(1280, 120),
+            label: '1280（≥1025）：两列并排 · gap sp3 · align-items start',
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -4529,7 +4586,11 @@ class _MotionPiecesNote extends StatelessWidget {
   }
 }
 
-/// 收藏项容器样张：窄档（padding sp3）与宽档（padding sp4）各一张。
+/// 收藏项容器样张：两档各一张（材质已归零 ⇒ 两档**尺寸一致**，差别只在容器宽）。
+///
+/// **可交互**：把鼠标移到容器上即可看到卡片族 hover（上浮 2px + `--glass-shadow-hover`）；
+/// 内层卡自带玻璃与 hover ⇒ 悬停时两层各自上浮（与 web 实测一致，见
+/// `widgets/base/favorite_item.dart` 文件头）。
 class _FavoriteItemDemo extends StatelessWidget {
   const _FavoriteItemDemo();
 
@@ -4552,14 +4613,14 @@ class _FavoriteItemDemo extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.start,
       children: <Widget>[
         _Slot(
-          label: '窄档（<769：padding sp3）',
+          label: '窄档 360（材质归零：无底/无边/无阴影/无模糊，padding 0）· 悬停看 hover',
           child: SizedBox(
             width: 360,
             child: AylaFavoriteItem(child: inner('收藏内容（typed 卡）')),
           ),
         ),
         _Slot(
-          label: '宽档（≥769：padding sp4）',
+          label: '宽档 420（与窄档**无尺寸差**：profile.css:539 的 padding sp4 被 17–20 压掉）',
           child: SizedBox(
             width: 420,
             child: AylaFavoriteItem(child: inner('收藏内容（typed 卡）')),

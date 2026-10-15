@@ -195,6 +195,7 @@ class AylaLiveChannelCard extends StatelessWidget {
     this.favoriteTargetType,
     this.favoriteController,
     this.reserveMetaSpace = false,
+    this.typedCardAction = false,
   });
 
   /// 频道数据。
@@ -267,6 +268,27 @@ class AylaLiveChannelCard extends StatelessWidget {
   /// 预留会在卡底多出一段空白（web 同样没有）。
   final bool reserveMetaSpace;
 
+  /// **typed 结果卡档**（收藏页等 `.typed-result-card` 语境）：action 槽落点 8/8。
+  ///
+  /// **web 事实链（三条规则叠加，最后一条才是真正生效的）**：
+  /// 1. `app.css:3306–3310`  `.live-card-wrap > .favorite-toggle { top: var(--sp-3);
+  ///    right: var(--sp-3) }` —— 窄屏 12px（**无媒体查询**）；
+  /// 2. `live.css:635–640`（**在 `@media (min-width: 769px)` 内**）
+  ///    `top/right: calc(var(--sp-4) + var(--sp-1))` —— 宽屏 20px；
+  /// 3. `typed-result-cards.css:13–16`（**特异性 0-3-0 > 0-2-0，且不在任何媒体查询内**）
+  ///    `.typed-result-card :is(.live-card-wrap, .game-room-card-wrap) > .typed-card-remove {
+  ///      position: absolute; top: var(--sp-2); right: var(--sp-2);   /* = 8px */
+  ///      background: var(--glass-bg); backdrop-filter: var(--glass-filter); }`
+  ///    ⇒ 命中时 **8/8**（全断点），且槽自带 `--glass-bg`(.55) + `--glass-filter`(blur24 sat1.4)。
+  ///
+  /// 实测（1440 双列，/favorites 的 live 条目）：action 槽 box `[1346.4, 96, 65.6, 27.2]`、
+  /// item box `[844, 88, 576, 397.1]` ⇒ dx = (844+576)−(1346.4+65.6) = **8.0**、dy = 96−88 = **8.0**；
+  /// 对照 /live 直播大厅：top/right = **20/20**（那里没有 `.typed-result-card` 祖先 ⇒ 不命中第 3 条）。
+  ///
+  /// 默认 `false` ⇒ 直播大厅 / 群内直播等既有调用点**逐像素不变**；
+  /// 由收藏页在传直删键时显式开。
+  final bool typedCardAction;
+
   @override
   Widget build(BuildContext context) {
     final Duration? delay = revealDelay;
@@ -305,10 +327,13 @@ class AylaLiveChannelCard extends StatelessWidget {
                     onRetryStatus: onRetryFavoriteStatus,
                   ))
             : null);
-    // ≥769：收藏键 top/right = calc(sp4 + sp1) = 20px；窄屏 = sp3 = 12px（app.css 3306–3310）
-    final double actionInset = narrow
-        ? AylaSpacing.sp3
-        : AylaSpacing.sp4 + AylaSpacing.sp1;
+    // 三档落点（逐条见 [typedCardAction] 的文档）：
+    // · typed 档（收藏页）=> sp2 = 8（typed-result-cards.css:13–16，全断点）
+    // · 否则 ≥769 => calc(sp4+sp1) = 20（live.css:635–640，在 @media min-width:769 内）
+    // · 否则窄屏 => sp3 = 12（app.css:3306–3310）
+    final double actionInset = typedCardAction
+        ? AylaSpacing.sp2
+        : (narrow ? AylaSpacing.sp3 : AylaSpacing.sp4 + AylaSpacing.sp1);
 
     return Stack(
       children: <Widget>[

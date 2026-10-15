@@ -1,0 +1,103 @@
+{
+  "_comment": "收藏 API 响应的**脱敏快照**（2026-10-15 取自真实后端 /api/v1/favorites/）。",
+  "_why": "关键结构：四条目标的 target.id **全是字符串**（后端 target_cards.py:138 的 card[\"id\"]=str(pk)）；post 的 title 只由 raw_title 提供。AylaPost.fromJson 曾只接受 num ⇒ 帖子卡退化为「内容不可用」。",
+  "results": [
+    {
+      "id": 1000,
+      "user_id": "u-owner",
+      "target_type": "post",
+      "target_id": "106",
+      "target": {
+        "id": "106",
+        "author_id": "u-author",
+        "author_nickname": "作者",
+        "raw_title": "帖子标题",
+        "title": "帖子标题",
+        "body": "正文",
+        "visibility": "public",
+        "group": null,
+        "group_name": null,
+        "allowed_group_ids": [],
+        "allowed_group_names": [],
+        "images": [],
+        "comment_count": 2,
+        "is_author": true,
+        "view_count": 2,
+        "is_viewed": true,
+        "created_at": "2026-01-01T00:00:00+08:00",
+        "updated_at": null
+      }
+    },
+    {
+      "id": 1001,
+      "user_id": "u-owner",
+      "target_type": "live",
+      "target_id": "128",
+      "target": {
+        "id": "128",
+        "title": "直播间",
+        "description": "",
+        "cover": "",
+        "status": "idle",
+        "visibility": "public",
+        "group": null,
+        "group_name": null,
+        "allowed_group_ids": [],
+        "allowed_group_names": [],
+        "owner_id": "u-owner",
+        "owner_nickname": "主播",
+        "is_owner": false,
+        "started_at": null,
+        "ended_at": null,
+        "created_at": "2026-01-01T00:00:00+08:00"
+      }
+    },
+    {
+      "id": 1002,
+      "user_id": "u-owner",
+      "target_type": "voice",
+      "target_id": "12",
+      "target": {
+        "id": "12",
+        "name": "语音房",
+        "owner_id": "u-owner",
+        "owner_nickname": "房主",
+        "member_count": 0,
+        "mine": false,
+        "visibility": "public",
+        "group": null,
+        "group_name": null,
+        "allowed_group_ids": [],
+        "allowed_group_names": [],
+        "last_occupied_at": null,
+        "last_vacant_at": null,
+        "created_at": "2026-01-01T00:00:00+08:00"
+      }
+    },
+    {
+      "id": 1003,
+      "user_id": "u-owner",
+      "target_type": "voice",
+      "target_id": "3",
+      "target": {
+        "id": "3",
+        "name": "语音房",
+        "owner_id": "u-owner",
+        "owner_nickname": "房主",
+        "member_count": 0,
+        "mine": false,
+        "visibility": "public",
+        "group": null,
+        "group_name": null,
+        "allowed_group_ids": [],
+        "allowed_group_names": [],
+        "last_occupied_at": null,
+        "last_vacant_at": null,
+        "created_at": "2026-01-01T00:00:00+08:00"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false,
+  "total": 4
+}

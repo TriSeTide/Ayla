@@ -283,4 +283,107 @@ void main() {
       expect(find.text('进入'), findsOneWidget);
     });
   });
-}
+
+  // ================= 多列接线（Lead 本轮补：宽屏搜索页 CSS columns 等价物） =================
+  //
+  // web 事实链（实测 1440 / 400）：
+  //   · 全部档 `search.css:501–506`：`.search-results { display:block; columns:2; column-gap: sp6 }`
+  //     单元 = 整个 `.search-group`，`margin-bottom: sp4`（search.css:522）⇒ 单元间距 16
+  //   · 单类档 `search.css:508–517`：`.search-group-body { columns:2; column-gap: sp6 }`
+  //     `> * { margin-bottom: sp3 }` + `typed-result-cards.css:134` 的 `gap: sp3`
+  //     ⇒ 单元间距 = 12 + 12 = 24（实测相邻项 y 差 90.6 = 66.6 + 24）
+  //   · gap 恒 12（`typed-result-cards.css:134` 覆写 `search.css:101` 的 sp2，全断点）
+  group('AylaSearchResultGroup —— 多列（search.css:501–517）', () {
+    Widget grouped({required int columnCount, required double itemGap, double width = 1164}) =>
+        MaterialApp(
+          home: previewScope(
+            Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: width,
+                child: AylaSearchResultGroup(
+                  title: '用户',
+                  count: 4,
+                  columnCount: columnCount,
+                  itemGap: itemGap,
+                  children: <Widget>[
+                    for (int i = 0; i < 4; i++)
+                      SizedBox(
+                        key: ValueKey<int>(i),
+                        height: 100,
+                        child: ColoredBox(
+                          color: i.isEven ? Colors.red : Colors.blue,
+                          child: Text('行$i'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+
+    testWidgets('单列档（窄屏 / 全部档组内）：全部纵向排列、间距 = itemGap', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(grouped(columnCount: 1, itemGap: 12));
+      final Rect r0 = tester.getRect(find.byKey(const ValueKey<int>(0)));
+      final Rect r1 = tester.getRect(find.byKey(const ValueKey<int>(1)));
+      expect(r1.left, closeTo(r0.left, 0.01), reason: '单列不换列');
+      expect(r1.top - r0.top, closeTo(112, 0.01), reason: '100 + gap 12');
+    });
+
+    testWidgets('两列档（单类宽屏）：按 CSS columns 切分，列距 24、单元距 24', (
+      WidgetTester tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1300, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(grouped(columnCount: 2, itemGap: 24));
+      final List<Rect> r = <Rect>[
+        for (int i = 0; i < 4; i++) tester.getRect(find.byKey(ValueKey<int>(i))),
+      ];
+      // 4 × 100 / gap24 ⇒ Chrome 实测 2 / 2（见 css_columns_test 的受控实验）
+      expect(r[0].left, closeTo(r[1].left, 0.01));
+      expect(r[2].left, closeTo(r[0].left + (r[0].width + 24), 0.01),
+          reason: '第 2 列起点 = 列宽 + column-gap 24');
+      expect(r[1].top - r[0].top, closeTo(124, 0.01), reason: '100 + itemGap 24');
+      expect(r[2].top, closeTo(r[0].top, 0.01), reason: '两列首项齐平');
+    });
+
+    testWidgets('页脚不参与多列：横跨整组宽度、排在多列体之下', (WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(1300, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+        home: previewScope(
+          Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 1164,
+              child: AylaSearchResultGroup(
+                title: '群聊',
+                count: 4,
+                columnCount: 2,
+                itemGap: 24,
+                hasMore: true,
+                onMore: () {},
+                children: <Widget>[
+                  for (int i = 0; i < 4; i++)
+                    SizedBox(key: ValueKey<int>(i), height: 100),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ));
+      final Rect group = tester.getRect(find.byType(AylaSearchResultGroup));
+      final Rect more = tester.getRect(find.text('查看更多'));
+      // 按钮横向居中于整组（若被塞进某一列，中心会明显偏左）
+      expect(more.center.dx, closeTo(group.center.dx, 1.0),
+          reason: '页脚在 .search-group-body 之外（tsx 507）⇒ 横跨整组');
+      // 且在所有内容项之下
+      final Rect last = tester.getRect(find.byKey(const ValueKey<int>(3)));
+      expect(more.top, greaterThanOrEqualTo(last.bottom));
+    });
+  });}

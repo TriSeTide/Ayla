@@ -149,6 +149,7 @@ class AylaPostCard extends StatefulWidget {
     this.onShare,
     this.previewOnly = false,
     this.action,
+    this.showFavorite = true,
     this.expanded,
     this.detail = false,
     this.onOpenMedia,
@@ -204,7 +205,20 @@ class AylaPostCard extends StatefulWidget {
   final bool previewOnly;
 
   /// 覆盖底排收藏位（web `action?: ReactNode`）。
+  ///
+  /// web 的三档语义（`PostCard.tsx:145` 的 `{action === undefined ? <FavoriteButton …/> : action}`）：
+  /// - `action == null` **且** [showFavorite] 为 true：渲染默认收藏键（信息流 / 帖子大厅）；
+  /// - `action == null` **且** [showFavorite] 为 false：**什么都不渲染**
+  ///   （搜索页 `SearchPage.tsx:431` 的 `action={null}`）；
+  /// - `action` 非 null：渲染该节点（收藏页 `FavoritesPage.tsx:95` 的直删键）。
   final Widget? action;
+
+  /// 是否渲染默认收藏键（仅在 [action] 为 null 时生效）。
+  ///
+  /// **web 依据**：`PostCard.tsx:145` 的 `action === undefined` 分支；
+  /// `null` 走另一支、什么都不画。Dart 无 `undefined`/`null` 两态 => 用本开关补出第二态。
+  /// 默认 `true` = 默认收藏键档（既有调用点行为逐像素不变）。
+  final bool showFavorite;
 
   /// 正文展开档（web `.post-card-body.is-expanded`）。
   ///
@@ -236,6 +250,13 @@ class AylaPostCard extends StatefulWidget {
 
 class _AylaPostCardState extends State<AylaPostCard> {
   bool _expanded = false;
+
+  /// 本卡是否渲染**默认收藏键**（= web 的 `action === undefined` 档）。
+  ///
+  /// 只有这一档在 web 里带 `margin-left: auto` 的右推（`posts.css:205–206`）
+  /// => 底排的 `Spacer` 必须与它同源（见底排注释里的三档实测）。
+  bool get _rendersDefaultFavorite =>
+      widget.action == null && widget.showFavorite && !widget.detail;
 
   @override
   Widget build(BuildContext context) {
@@ -510,11 +531,27 @@ class _AylaPostCardState extends State<AylaPostCard> {
               if (!widget.detail) const SizedBox(width: AylaSpacing.sp4),
               _stat('iconEye', post.viewCount!),
             ],
-            // 详情档没有 Spacer（整排右对齐），改用固定间隔
-            if (!widget.detail) const Spacer(),
+            // ---- 右推（Spacer）只属于「默认收藏键」档 ----
+            //
+            // web 的「右推」**不来自尾排通用规则**，只来自收藏键自身：
+            // `posts.css:205–206` 的 `.post-card-fav { margin-left: auto }`。
+            // 三档实测（1440 / dpr 1，真实浏览器，同一条数据）：
+            //   · `/posts`（action === undefined => 默认收藏键）尾排子项左缘
+            //     272.8 / 336.8 / 380.5 / **727.2(fav)** / 775.2(share) => **右推**（右缘 825.2）
+            //   · `/search?q=1&type=post`（action={null}）=> 272.8 / 336.8 / 380.5 / **421.5(share)**
+            //     => **不右推**（分享键紧随统计行，离右缘约 350px）
+            //   · `/favorites`（action = 直删键）=> … / 380 / **423.3(remove)** / 504.9(share)
+            //     => **不右推**（注入节点没有 auto margin）
+            // => 只有「默认收藏键」档才发 Spacer；`action == null` 与注入节点都不发。
+            // 详情档本就不用 Spacer（整排右对齐 `posts.css:745–747`），改用固定间隔。
+            if (!widget.detail && _rendersDefaultFavorite) const Spacer(),
             if (widget.detail) const SizedBox(width: AylaSpacing.sp4),
             if (widget.action != null)
               widget.action!
+            // web `PostCard.tsx:145` 是 `{action === undefined ? <FavoriteButton …/> : action}`
+            // —— **`action === null` 时什么都不渲染**（不是「渲染一个默认键」）。
+            else if (!widget.showFavorite)
+              const SizedBox.shrink()
             else if (widget.favoriteTargetType != null &&
                 widget.favoriteTargetId != null)
               // **自给自足档**（web `PostCard.tsx:145`）：收藏键自己 retain + load + toggle

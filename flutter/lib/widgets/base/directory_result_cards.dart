@@ -278,6 +278,9 @@ class AylaFavoriteResultCard extends StatelessWidget {
           channel: favorite.live!,
           onEnter: onOpen,
           action: action, // tsx 56（本批给 live 卡补的槽位）
+          // 收藏页的 live 卡在 `.typed-result-card` 内 => 命中
+          // `typed-result-cards.css:13–16` 的域内覆写：槽落点 8/8（而不是 live 大厅的 20/20）。
+          typedCardAction: true,
         ),
       AylaFavoriteTargetType.voice => AylaVoiceChannelCard(
           channel: favorite.voice!,

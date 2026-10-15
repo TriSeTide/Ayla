@@ -5,12 +5,17 @@
 /// - tsx 302–319：目录壳（AylaDirectoryPage 三件套）+ 侧栏槽位
 ///   （leading = .icon-btn-40.directory-filter-back + IconBack 20（tsx 309）；
 ///   decor = IconHeart 64（tsx 310）；header = Favorites / 我的收藏 / 统计行（tsx 311–315））；
-/// - tsx 268–271：加载态 .favorites-skeleton（两条 64 高骨架，首条 mb 8）；
+/// - tsx 268–271：加载态 .favorites-skeleton（两条 64 高骨架，首条 mb 8；
+///   ≥1025 两列并排，见 directory-filters.css:210–217）；
 /// - tsx 272–280：空态（title + desc 逐字）· 列表 · 页脚；
 /// - tsx 91–106：列表容器 .favorites-list（窄屏单列 gap sp2 / ≥769 双列 gap sp3、
 ///   上下 padding sp4）；项 = .favorite-item（AylaFavoriteItem 件）+ FavoriteResultCard；
 ///   ⚠️ 内距再叠目录页组规则（directory-filters.css:171–180 左右恒 0 + 199–208 ≥769 顶部归零）
 ///   —— 由 [aylaDirectoryListPadding] 在调用点表达（原实现左右保留 sp4，2026-09-29 订正）；
+///   ⚠️ **条目层材质归零**：typed-result-cards.css:17–20（特异性 0-2-0、无媒体查询）把
+///   .favorite-item.typed-result-card 的 padding/底/边/模糊/阴影全部压掉，只剩 radius-input
+///   ⇒ 本层只表达 web 卡片族的 hover（auroraqua.css:42–43 上浮 2 + --glass-shadow-hover），
+///      玻璃由内层卡自己画（实现与依据见 widgets/base/favorite_item.dart 文件头）；
 ///   末槽 = .msg-action-btn「取消收藏」（tsx 96–100）；
 /// - tsx 36–67：openTarget 五类跳转（post/live/voice/game/message 带 msg/seq/subgroup 定位参数）；
 /// - tsx 250–259：取消收藏（DELETE 成功后本地收尾，不依赖广播时序）；
@@ -314,15 +319,26 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
       items: rows,
       itemKey: (AylaFavoriteEntry entry) => entry.card.id,
       memoryKey: 'favorites:$_filter', // web memoryKey（tsx 87）
-      columns: narrow ? 1 : 2, // web: singleColumn ? 1 : 2（tsx 80–85）
-      gap: AylaSpacing.sp2, // .favorites-list gap sp2
-      masonryGap: AylaSpacing.sp3, // .is-masonry gap sp3
-      // 基样式 padding sp3 sp4（profile.css:458–465）+ 目录页组规则：左右恒 0
-      // （directory-filters.css:171–180，全断点）+ ≥769 顶部归零（199–208）
-      // ⇒ 窄屏单列 (0, sp3, 0, sp3)。
+      columns: narrow ? 1 : 2, // web: singleColumn ? 1 : 2（tsx 80–85，断点 = max-width:768）
+      // ⚠️ 单列 gap **真正生效的是** profile.css:463（.favorites-list 基样式 gap sp2，
+      // 0-1-0，无媒体查询）；实测单列 400：list gap = 8px。
+      gap: AylaSpacing.sp2,
+      // ⚠️ 双列 gap **真正生效的是** profile.css:529（@media min-width:769 的
+      // .favorites-list.is-masonry { gap: var(--sp-3) }，0-2-0）；实测双列 1440：gap = 12px。
+      masonryGap: AylaSpacing.sp3,
+      // ⚠️ 单列内距 **真正生效的是** 两行的合成：
+      //   profile.css:464 `padding: var(--sp-3) var(--sp-4)`（顶部 sp3、左右 sp4）
+      //   + directory-filters.css:171–180 组规则把左右压成 0（0-3-0 > 0-1-0，**不在媒体查询内**）
+      // ⇒ 窄屏单列 (0, sp3, 0, sp3)（底部 sp3 = profile.css:464 的 sp3，web 注释 192「底部呼吸空间不动」）。
       padding: aylaDirectoryListPadding(context),
-      // ≥769 双列档：基样式上下 sp4（profile.css:524–532 的 .favorites-list.is-masonry，
-      // 0-2-0 的 padding-top 被 0-3-0 的组规则压成 0）⇒ 宽屏 (0, 0, 0, sp4)。
+      // ⚠️ 双列内距 **真正生效的是** 三行合成：
+      //   profile.css:530–531（@media min-width:769：.favorites-list.is-masonry padding-top/bottom = sp4）
+      //   + directory-filters.css:204–207（同媒体查询：组规则 .favorites-list padding-top: 0，
+      //     0-3-0 压 0-2-0）⇒ 顶部 0
+      //   + directory-filters.css:171–180（左右恒 0，0-3-0）
+      // ⇒ 宽屏 (0, 0, 0, sp4)。实测双列 1440：padding 0 0 16px ✓
+      //   （原注释把「上下 sp4」记在 profile.css:524–532，顶部归零记在 199–208，
+      //     行号是同一块但不精确 —— 按 web 原文订正为 530–531 + 204–207。）
       masonryPadding: aylaDirectoryListPadding(
         context,
         bottom: AylaSpacing.sp4,
@@ -348,8 +364,11 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
         // `staggerDelay(index)`，刷新重播则重新从 0 编号（`useListEntryMotion.ts:38–48`
         // 的 `let index = 0`）；写死 delay 会让重播变成「后半屏同时闪」。
         //
-        // ⚠️ `fadeGlass: false`：[AylaFavoriteItem] 内含 [AylaGlassSurface]，而
-        // Impeller 拒绝「`Opacity` 祖先 + `BackdropFilter` 后代」（见 reveal.dart 文件头）。
+        // ⚠️ `fadeGlass: false`：[AylaFavoriteItem] 自身已无玻璃（typed-result-cards.css:17–20
+        // 材质归零），但**内层结果卡**（AylaFavoriteResultCard → AylaPostCard /
+        // AylaVoiceChannelCard / AylaLiveChannelCard / AylaGameRoomCard / typed 消息卡）
+        // 仍各自带 AylaGlassSurface ⇒ 仍属玻璃子树，而 Impeller 拒绝
+        // 「`Opacity` 祖先 + `BackdropFilter` 后代」（见 reveal.dart 文件头）⇒ 该档照旧必需。
         //
         // ⚠️ web 的 `suppressEntry`（`restoring && !resumeEntry`）在 Flutter 侧无对象：
         // 本页的滚动位置记忆（`useScrollRestore` / `saveScrollPosition`，

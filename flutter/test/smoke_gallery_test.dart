@@ -118,9 +118,9 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
     '桌游室占位整页壳（GameRoomPlaceholder.tsx 189 行 + boardgame.css 136–219 + auroraqua.css 335/402–408/418）',
   ],
   'profile · 个人主页域': <String>[
-    'AylaFavoriteItem（FavoritesPage.tsx 95 + profile.css 474–487 / 539–541）',
+    'AylaFavoriteItem（FavoritesPage.tsx 95 + **typed-result-cards.css 17–20** + auroraqua.css 29–52）',
     'AylaProfileCard / AylaProfileIdentity / AylaProfileAvatarActions（ProfilePage.tsx 154–180 + app.css 241–248/2657–2695 + profile.css 14–16/44–52/142–171/584–591/623–625）',
-    'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456）',
+    'AylaFavoritesSkeleton（FavoritesPage.tsx 268–271 + profile.css 452–456 + directory-filters.css 210–217）',
     'AylaProfilePresence（profile.css 558–570 + UserProfilePage.tsx 142–144）',
     '个人主页内容分区（ProfileContentSections.tsx 211 行 + profile.css 174–380）',
     'AylaStatusChips / AylaProfileSwitch / AylaProfileForm（ProfilePage.tsx 212–305 + app.css 2696–2749 + profile.css 47–51/377–440/593–611 + auth.css 79–87）',

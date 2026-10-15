@@ -42,6 +42,7 @@ class AylaSearchUserRow extends StatelessWidget {
     this.onOpenProfile,
     this.onTap,
     this.trailing,
+    this.wide = false,
   });
 
   /// 昵称（空 ⇒ 回退用户名，web `nickname || username`）。
@@ -68,6 +69,21 @@ class AylaSearchUserRow extends StatelessWidget {
   /// 尾部槽位（`.search-row-action`：`margin-left auto` / `--grape-700` / 13px）—— 群行等复用。
   final Widget? trailing;
 
+  /// 宽屏档（≥769）：`min-height: 64px` + `padding: sp3 sp4`。
+  ///
+  /// **web 依据**：`search.css:490–496`（**在 `@media (min-width: 769px)` 内**）：
+  /// ```
+  /// .search-page .search-row {
+  ///   min-height: 64px; min-width: 0; padding: var(--sp-3) var(--sp-4); }
+  /// ```
+  /// 窄屏保持基样式（`search.css:107–119`）的 `padding: sp2 sp3`、无 min-height。
+  /// 实测：1440 时 padding=`12px 16px`、min-height=`64px`（卡高 66.6）；
+  ///       768 时 padding=`8px 12px`、min-height=`auto`。
+  ///
+  /// ⚠️ 该覆写带 `.search-page` 前缀 ⇒ **只作用于搜索页**，故由调用方显式传 `wide`，
+  /// 不由本件按屏宽自动判定（否则其它复用点会被误伤）。
+  final bool wide;
+
   /// 显示名（`nickname || username`）。
   String get displayName => nickname.isEmpty ? username : nickname;
 
@@ -78,10 +94,11 @@ class AylaSearchUserRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final AylaTextStyles t = AylaTextStyles.of(context);
     final String? sub = signature;
-    return AylaGlassSurface(
+    final Widget row = AylaGlassSurface(
       radiusOverride: BorderRadius.circular(AylaRadii.rInput), // border-radius: var(--radius-input)
-      padding: const EdgeInsets.symmetric(
-        horizontal: AylaSpacing.sp3,
+      // ≥769：padding sp3 sp4（search.css:493）；窄屏：sp2 sp3（search.css:111）
+      padding: EdgeInsets.symmetric(
+        horizontal: wide ? AylaSpacing.sp4 : AylaSpacing.sp3,
         vertical: AylaSpacing.sp2,
       ),
       child: Row(
@@ -139,6 +156,13 @@ class AylaSearchUserRow extends StatelessWidget {
           ],
         ],
       ),
+    );
+    // ≥769：`min-height: 64px`（search.css:492，在 @media min-width:769 内）。
+    // 实测卡高 66.6 = 内容 41 + 12×2(padding) —— min-height 64 不改变它，与 CSS 同。
+    if (!wide) return row;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 64),
+      child: row,
     );
   }
 }

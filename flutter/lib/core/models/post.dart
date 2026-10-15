@@ -215,10 +215,16 @@ class AylaPost {
 
   static AylaPost? fromJson(Object? raw) {
     if (raw is! Map) return null;
-    final Object? id = raw['id'];
-    if (id is! num) return null;
+    // ⚠️ **id 必须同时接受数字与字符串**（2026-10-15 用户实报修复）：
+    // REST feed 的 `PostSerializer.id` 是 `IntegerField` ⇒ 数字；
+    // 但**收藏投影** `apps/favorites/target_cards.py:138` 有 `card["id"] = str(target.pk)`
+    // ⇒ 同一实体在收藏页是**字符串**。此前只收 `num` ⇒ 收藏页的帖子卡解析失败返回 null
+    // ⇒ `AylaFavoriteResultData.isAvailable` 为假 ⇒ 渲染「内容不可用」（用户截图：四条全不可用）。
+    // 非法值（非数字字符串 / null）仍返回 null，**不伪造 id**。
+    final int? id = _postId(raw['id']);
+    if (id == null) return null;
     return AylaPost(
-      id: id.toInt(),
+      id: id,
       author: AylaPostAuthor.fromJson(raw['author']),
       authorId: raw['author_id'] as String?,
       authorNickname: raw['author_nickname'] as String?,
@@ -241,6 +247,20 @@ class AylaPost {
       updatedAt: raw['updated_at'] as String?,
     );
   }
+}
+
+/// 帖子 id 归一：数字直取；字符串按十进制解析（后端收藏投影走 `str(pk)`）；
+/// 其余（含非数字字符串、null、负数、0）→ null（**不伪造**）。
+int? _postId(Object? raw) {
+  if (raw is num) {
+    final int v = raw.toInt();
+    return v > 0 ? v : null;
+  }
+  if (raw is String) {
+    final int? v = int.tryParse(raw.trim());
+    return (v != null && v > 0) ? v : null;
+  }
+  return null;
 }
 
 /// 评论（`PostComment`：images[] 图文同发；media_id/media 为旧单图兼容）。

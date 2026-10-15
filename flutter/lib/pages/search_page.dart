@@ -57,6 +57,7 @@ import '../theme/app_icons.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../theme/tokens.dart';
 import '../widgets/base/dialogs.dart' show AylaModalOverlay;
+import '../widgets/base/css_columns.dart';
 import '../widgets/base/directory_page.dart';
 import '../widgets/base/directory_result_cards.dart';
 import '../widgets/base/page_state.dart';
@@ -259,14 +260,41 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final String nextQuery = (widget.initialQuery ?? '').trim();
     final String nextFilter =
         aylaHubFilterOf(SearchPage.filters, widget.initialType);
-    if (nextQuery == _q && nextFilter == _filter) return;
+    // ⚠️ **早退判据必须锚在「上一个 widget 的参数」上，不能锚在本地 state 上**
+    // （2026-10-15 用户实报修复：「除了全部以外的选项卡全都是空白」的根因）。
+    //
+    // 原写法 `if (nextQuery == _q && nextFilter == _filter) return;` 会被
+    // [_onFilterChange] 抢先破坏 —— 它**先** `setState(_filter = next)` **再** `context.replace`：
+    //   1. 点击「用户」⇒ `_filter` 本地已是 'user'；
+    //   2. `context.replace('/search?...&type=user')` ⇒ 本方法被调用；
+    //   3. `nextFilter`('user') == `_filter`('user') ⇒ **return 早退**；
+    //   4. 于是**既不发新请求、也不重置 `_results`/`_resultsScope`**；
+    //   5. `_body` 里 `_resultsScope`('..|all') != `_scope`('..|user') ⇒ `results == null`
+    //      ⇒ **内容区空白**；而侧栏 stats 读的仍是旧 `_results.totalResults`
+    //      ⇒ 显示上一个分类的条数（用户截图：「用户」tab 高亮却写着「42 条结果」而正文空白）。
+    //
+    // 正确判据 = 「路由给的参数是否与本 widget 上一次收到的不同」—— 本地 `_filter` 是
+    // 用户意图的**即时投影**，不能用来判断「URL 是否变过」。
+    final String prevQuery = (oldWidget.initialQuery ?? '').trim();
+    final String prevFilter =
+        aylaHubFilterOf(SearchPage.filters, oldWidget.initialType);
+    if (nextQuery == prevQuery && nextFilter == prevFilter) return;
+    // 本地 state 已经跟上（点击路径）⇒ 补齐剩下的「重置 + 重取」即可，避免重复 setState。
+    if (nextQuery == _q && nextFilter == _filter) {
+      _restore.update(ready: false);
+      if (_q.isNotEmpty) _refreshSearch(_q);
+      return;
+    }
     // tsx 121：搜索词/分类变化前先显式保存当前位置（旧 scope 的键）。
     AylaScrollMemory.save('search:$_scope', _scroll);
     setState(() {
       _q = nextQuery;
       _filter = nextFilter;
+      // ⚠️ 清空结果并**把作用域对齐到新的 scope**：两者必须一起做。
+      // 若只清 `_results` 而 `_resultsScope` 留旧值（原实现把 `_resultsScope` 设成
+      // `_scope`（新值）却没清 `_results`，或反之），就会出现「有 total 却无列表」的半态。
       _results = null;
-      _resultsScope = _scope;
+      _resultsScope = '';
       _loading = false;
       _error = null;
       _pageStatus.clear();
@@ -832,19 +860,47 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           top: wide ? 0 : AylaSpacing.sp3,
           bottom: AylaSpacing.sp4,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          spacing: AylaSpacing.sp4,
-          children: <Widget>[
-            _usersGroup(results, single, revealIndex),
-            _groupsGroup(results, single, revealIndex),
-            _postsGroup(results, single, revealIndex),
-            _gamesGroup(results, single, revealIndex),
-            _voicesGroup(results, single, revealIndex),
-            _livesGroup(results, single, revealIndex),
-          ],
-        ),
+        // ---- 「全部」档宽屏：分组级两列 ----
+        //
+        // web 事实链：`search.css:501–506`（@media min-width:769）给 `.search-results` 加
+        // `display: block; columns: 2; column-gap: sp6`；单元 = 6 个 `.search-group`
+        // （`search.css:519–523` 的 `break-inside: avoid; margin-bottom: sp4`）。
+        // 实测 1440：左列 = 用户/群聊/帖子/桌游室，右列 = 语音房/直播间，列宽 570、列间距 24。
+        //
+        // ⚠️ 单元间距 16 = `margin-bottom: sp4`（`search.css:522`）；≥769 时 `.search-results`
+        //   被覆写为 `display:block` ⇒ 基样式的 `gap: sp4` **失效** ⇒ 只剩 margin 这一份
+        //   （实测分组 y 差 = 301.5 + 16 ≈ 318 ✓）。窄屏档仍走基样式的 `Column + gap sp4`。
+        //
+        // 组间多列**只在「全部」档**：单类档只有一个组，两列会留空列
+        //（web 里单类档由 `.search-content:not([data-search-filter="all"])` 的规则改走组内两列）。
+        // ⚠️ **空分组不得进 children**（2026-10-15 用户实报「内容区顶部留空都多了」的根因）：
+        // web 的 `ResultGroup` 在 `count === 0` 时 **`return null`**（`SearchPage.tsx:503`）
+        // ⇒ 该分组**不产生 DOM 节点**，自然不会占用 flex `gap` / multicol `margin`。
+        //
+        // Flutter 侧若把「空分组」也放进 `children`（哪怕它渲染成 `SizedBox.shrink()`），
+        // 外层 `Column(spacing: sp4)` 与 [AylaCssColumns] 的 `itemGap` **照样给它插间距**
+        // ⇒ **前面有几个空分组，首张卡就被推下几个 16px**（实测：前导空 child 数 = 1/2/3/4/5
+        //   时顶部留空依次为 16/32/48/64/80）。
+        //
+        // 搜索七档的分组顺序是「用户→群聊→帖子→桌游室→语音房→直播间」，于是单类档的偏移量
+        // 正好逐档递增：群聊 +16 · 帖子 +32 · 桌游室 +48 · 语音房 +64 · 直播间 +80
+        // —— 与用户截图里「每个 tab 顶部都多一块、且越靠后越多」完全吻合。
+        //
+        // 判据用 `count != 0`（= `AylaSearchResultGroup` 自己的「整组不渲染」判据），
+        // 保证「进 children 的必然会被渲染出来」，两侧语义一致。
+        child: (single || !wide)
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                spacing: AylaSpacing.sp4, // `.search-results { gap: sp4 }`
+                children: _nonEmptyGroups(results, single, revealIndex, wide),
+              )
+            : AylaCssColumns(
+                columnCount: 2,
+                columnGap: AylaSpacing.sp6, // column-gap: var(--sp-6) = 24
+                itemGap: AylaSpacing.sp4, // `.search-group { margin-bottom: sp4 }` = 16
+                children: _nonEmptyGroups(results, single, revealIndex, wide),
+              ),
       );
       sections.add(AylaRevealScope(replayKey: _replayNonce, child: resultsBlock));
     }
@@ -878,7 +934,41 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _usersGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
+  /// 六个结果分组的**非空**列表（web `ResultGroup` 的 `if (count === 0) return null` 等价物）。
+  ///
+  /// ⚠️ **必须在这里过滤，不能在分组内部返回空件**：外层 `Column(spacing:)` / [AylaCssColumns]
+  /// 会给「零高的 child」照样插间距 ⇒ 空分组会把首张卡往下推（见调用点的详细注释）。
+  ///
+  /// `revealIndex` 的取号**只在真正渲染的分组上推进**（与 web 一致：`useListEntryMotion`
+  /// 是遍历**实际 DOM 节点**连续编号，未渲染的空分组不占号）。
+  List<Widget> _nonEmptyGroups(
+    AylaSearchResults results,
+    bool single,
+    _RevealIndex idx,
+    bool wide,
+  ) {
+    final List<Widget> groups = <Widget>[];
+    if ((results.users?.total ?? 0) != 0) {
+      groups.add(_usersGroup(results, single, idx, wide));
+    }
+    if ((results.groups?.total ?? 0) != 0) {
+      groups.add(_groupsGroup(results, single, idx, wide));
+    }
+    if ((results.posts?.total ?? 0) != 0) {
+      groups.add(_postsGroup(results, single, idx, wide));
+    }
+    if ((results.games?.total ?? 0) != 0) {
+      groups.add(_gamesGroup(results, single, idx, wide));
+    }
+    if ((results.voices?.total ?? 0) != 0) {
+      groups.add(_voicesGroup(results, single, idx, wide));
+    }
+    if ((results.lives?.total ?? 0) != 0) {
+      groups.add(_livesGroup(results, single, idx, wide));
+    }
+    return groups;
+  }
+  Widget _usersGroup(AylaSearchResults results, bool single, _RevealIndex idx, bool wide) {
     final AylaSearchGroup<AylaSearchUserItem>? group = results.users;
     final List<AylaSearchUserItem> items =
         group?.items ?? const <AylaSearchUserItem>[];
@@ -891,6 +981,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.users]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.users]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.users),
+      // 单类视图宽屏档：组内结果项分两列（web `search.css:508–511` 的
+      // `.search-content:not([data-search-filter="all"]) .search-group-body { columns: 2 }`，
+      // 实测项宽 570 = (1164 − 24) / 2、列间距 24）。
+      // ⚠️ 单元间距 24 = `gap: sp3`（typed-result-cards.css:134）与
+      //   `> * { margin-bottom: sp3 }`（search.css:513–517）**叠加**
+      //   （实测相邻项 top 差 90.6 = 66.6 + 24）。
+      // 「全部」档组内仍单列 —— 那是**分组级**多列（见 _body 的 AylaCssColumns）。
+      columnCount: single && wide ? 2 : 1,
+      itemGap: single && wide ? AylaSpacing.sp6 : AylaSpacing.sp3,
       footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaSearchUserItem user in items)
@@ -906,6 +1005,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               signature: user.signature, // tsx 405：有才渲染
               avatarUrl: (user.avatar ?? '').isEmpty ? null : user.avatar,
               online: user.online,
+              // ≥769：min-height 64 + padding sp3 sp4（search.css:490–496，带 .search-page 前缀）
+              wide: wide,
               onOpenProfile: () => _openUserProfile(user),
               onTap: () => setState(() => _selectedUser = user),
             ),
@@ -914,7 +1015,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _groupsGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
+  Widget _groupsGroup(AylaSearchResults results, bool single, _RevealIndex idx, bool wide) {
     final AylaSearchGroup<AylaSearchGroupItem>? group = results.groups;
     final List<AylaSearchGroupItem> items =
         group?.items ?? const <AylaSearchGroupItem>[];
@@ -927,6 +1028,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.groups]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.groups]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.groups),
+      // 单类视图宽屏档：组内结果项分两列（web `search.css:508–511` 的
+      // `.search-content:not([data-search-filter="all"]) .search-group-body { columns: 2 }`，
+      // 实测项宽 570 = (1164 − 24) / 2、列间距 24）。
+      // ⚠️ 单元间距 24 = `gap: sp3`（typed-result-cards.css:134）与
+      //   `> * { margin-bottom: sp3 }`（search.css:513–517）**叠加**
+      //   （实测相邻项 top 差 90.6 = 66.6 + 24）。
+      // 「全部」档组内仍单列 —— 那是**分组级**多列（见 _body 的 AylaCssColumns）。
+      columnCount: single && wide ? 2 : 1,
+      itemGap: single && wide ? AylaSpacing.sp6 : AylaSpacing.sp3,
       footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaSearchGroupItem item in items)
@@ -962,7 +1072,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _postsGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
+  Widget _postsGroup(AylaSearchResults results, bool single, _RevealIndex idx, bool wide) {
     final AylaSearchGroup<AylaPost>? group = results.posts;
     final List<AylaPost> items = group?.items ?? const <AylaPost>[];
     return AylaSearchResultGroup(
@@ -974,6 +1084,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.posts]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.posts]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.posts),
+      // 单类视图宽屏档：组内结果项分两列（web `search.css:508–511` 的
+      // `.search-content:not([data-search-filter="all"]) .search-group-body { columns: 2 }`，
+      // 实测项宽 570 = (1164 − 24) / 2、列间距 24）。
+      // ⚠️ 单元间距 24 = `gap: sp3`（typed-result-cards.css:134）与
+      //   `> * { margin-bottom: sp3 }`（search.css:513–517）**叠加**
+      //   （实测相邻项 top 差 90.6 = 66.6 + 24）。
+      // 「全部」档组内仍单列 —— 那是**分组级**多列（见 _body 的 AylaCssColumns）。
+      columnCount: single && wide ? 2 : 1,
+      itemGap: single && wide ? AylaSpacing.sp6 : AylaSpacing.sp3,
       footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaPost post in items)
@@ -984,7 +1103,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             child: AylaPostCard(
               post: post,
               previewOnly: true, // tsx 431
+              // tsx 431：`action={null}` => **不渲染收藏键**（web `PostCard.tsx:145` 的
+              // `action === undefined ? <FavoriteButton/> : action`；null 走 else 支、什么都不画）。
+              // 实测 /search?q=1&type=post 的 `.favorite-toggle` 数量 = 0（对照 /posts = 1）。
               action: null,
+              showFavorite: false,
               onOpen: () => _openPost(post),
               // ★ 分享键（2026-10-03 补齐）：`post_card.dart:509` 的转发键**恒渲染**
               // （只要非 detail 档），`onShare == null` ⇒ 共享件判禁用、鼠标变禁止符号。
@@ -1000,7 +1123,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _gamesGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
+  Widget _gamesGroup(AylaSearchResults results, bool single, _RevealIndex idx, bool wide) {
     final AylaSearchGroup<AylaGameCardData>? group = results.games;
     final List<AylaGameCardData> items =
         group?.items ?? const <AylaGameCardData>[];
@@ -1013,6 +1136,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.games]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.games]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.games),
+      // 单类视图宽屏档：组内结果项分两列（web `search.css:508–511` 的
+      // `.search-content:not([data-search-filter="all"]) .search-group-body { columns: 2 }`，
+      // 实测项宽 570 = (1164 − 24) / 2、列间距 24）。
+      // ⚠️ 单元间距 24 = `gap: sp3`（typed-result-cards.css:134）与
+      //   `> * { margin-bottom: sp3 }`（search.css:513–517）**叠加**
+      //   （实测相邻项 top 差 90.6 = 66.6 + 24）。
+      // 「全部」档组内仍单列 —— 那是**分组级**多列（见 _body 的 AylaCssColumns）。
+      columnCount: single && wide ? 2 : 1,
+      itemGap: single && wide ? AylaSpacing.sp6 : AylaSpacing.sp3,
       footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaGameCardData room in items)
@@ -1030,7 +1162,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _voicesGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
+  Widget _voicesGroup(AylaSearchResults results, bool single, _RevealIndex idx, bool wide) {
     final AylaSearchGroup<AylaVoiceCardData>? group = results.voices;
     final List<AylaVoiceCardData> items =
         group?.items ?? const <AylaVoiceCardData>[];
@@ -1043,6 +1175,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.voices]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.voices]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.voices),
+      // 单类视图宽屏档：组内结果项分两列（web `search.css:508–511` 的
+      // `.search-content:not([data-search-filter="all"]) .search-group-body { columns: 2 }`，
+      // 实测项宽 570 = (1164 − 24) / 2、列间距 24）。
+      // ⚠️ 单元间距 24 = `gap: sp3`（typed-result-cards.css:134）与
+      //   `> * { margin-bottom: sp3 }`（search.css:513–517）**叠加**
+      //   （实测相邻项 top 差 90.6 = 66.6 + 24）。
+      // 「全部」档组内仍单列 —— 那是**分组级**多列（见 _body 的 AylaCssColumns）。
+      columnCount: single && wide ? 2 : 1,
+      itemGap: single && wide ? AylaSpacing.sp6 : AylaSpacing.sp3,
       footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaVoiceCardData channel in items)
@@ -1063,7 +1204,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _livesGroup(AylaSearchResults results, bool single, _RevealIndex idx) {
+  Widget _livesGroup(AylaSearchResults results, bool single, _RevealIndex idx, bool wide) {
     final AylaSearchGroup<AylaLiveCardData>? group = results.lives;
     final List<AylaLiveCardData> items =
         group?.items ?? const <AylaLiveCardData>[];
@@ -1076,6 +1217,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           _loading || (_pageStatus[AylaSearchResultKey.lives]?.loading ?? false),
       error: _pageStatus[AylaSearchResultKey.lives]?.error,
       onMore: () => _loadMore(AylaSearchResultKey.lives),
+      // 单类视图宽屏档：组内结果项分两列（web `search.css:508–511` 的
+      // `.search-content:not([data-search-filter="all"]) .search-group-body { columns: 2 }`，
+      // 实测项宽 570 = (1164 − 24) / 2、列间距 24）。
+      // ⚠️ 单元间距 24 = `gap: sp3`（typed-result-cards.css:134）与
+      //   `> * { margin-bottom: sp3 }`（search.css:513–517）**叠加**
+      //   （实测相邻项 top 差 90.6 = 66.6 + 24）。
+      // 「全部」档组内仍单列 —— 那是**分组级**多列（见 _body 的 AylaCssColumns）。
+      columnCount: single && wide ? 2 : 1,
+      itemGap: single && wide ? AylaSpacing.sp6 : AylaSpacing.sp3,
       footerRevealIndex: idx.offset(items.length),
       children: <Widget>[
         for (final AylaLiveCardData channel in items)
