@@ -22,6 +22,7 @@ class AylaDirectoryVoiceEntry {
     this.createdAt,
     this.roomName = '',
     this.allowedGroupIds = const <String>[],
+    this.group,
     this.lastOccupiedAt,
     this.lastVacantAt,
     this.isOwner = false,
@@ -45,6 +46,16 @@ class AylaDirectoryVoiceEntry {
   /// `allowed_group_ids`（`types.ts:877`）—— 白名单可见性判据
   /// （`groupActivity.ts:70–76` 的 `visibleInGroup`）。
   final List<String> allowedGroupIds;
+
+  /// `group`（`types.ts:875`，web `VoiceChannelDescriptor.group`）—— 群归属
+  /// （一级 tab 创建为 null；群内创建为该群 id 字符串）。
+  ///
+  /// 消费面：房内分享载荷的 `extra.group_id`（web `VoiceRoomBody.tsx:281–287`
+  /// 的 `group_id: channel.group` → `sharePayload.ts:56`）。
+  ///
+  /// ⚠️ 与 [allowedGroupIds] **不是同一列**：`group` 是「本房归属哪个群」
+  /// （单一 FK），白名单是「哪些群可见」（多对多）。
+  final String? group;
 
   /// `last_occupied_at`（`types.ts:878`）—— 「有人区」排序事实。
   ///
@@ -76,6 +87,7 @@ class AylaDirectoryVoiceEntry {
             in (raw['allowed_group_ids'] as List<Object?>? ?? const <Object?>[]))
           if (id != null) id.toString(),
       ],
+      group: raw['group']?.toString(),
       lastOccupiedAt: raw['last_occupied_at']?.toString(),
       lastVacantAt: raw['last_vacant_at']?.toString(),
       isOwner: raw['is_owner'] == true,

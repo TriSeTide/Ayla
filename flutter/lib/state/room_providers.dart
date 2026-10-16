@@ -268,6 +268,23 @@ void _registerDirectoryItemHooks({
 /// 目录条目 → 快照是**逐字段搬运**（快照的字段是目录条目的超集；
 /// `room_name` / `last_occupied_at` / `last_vacant_at` 各自对位）。
 /// 缺席即缺席（不造默认值）——`ownerNickname` 为 null 时快照也是 null。
+///
+/// ## ⚠️ 字段搬运必须**原子**（2026-10-16 用户实报「群内语音进不去」的根因）
+///
+/// web 的目录条目**就是**域 store 的描述符本身（`stores/directory.ts:143–146`
+/// 的 `cachedItems` 直接返回 `useVoiceStore.channels`；`:310–320` 取页结果逐条
+/// `upsertChannel(item)` 传的是**原对象**）⇒ web 侧**不存在**搬运损失。
+/// Flutter 侧目录条目与域快照是两个类型，这一步是唯一的对齐点 ⇒ 漏一列就会让
+/// 「目录取页」与「域 store」出现**同一房间两套事实**，且受损链路不止一条：
+///
+/// | 漏掉的列 | 受损链路 | web 事实源 |
+/// |---|---|---|
+/// | `allowed_group_ids` | ① 群内房内命中判据恒假 ⇒ 骨架常驻（**进不去房**）；② 群活跃度 `visibleInGroup` 恒假 ⇒ 群不往前排；③ 投影回目录缓存后 `matchesQuery` 判它不属于本群 ⇒ **侧栏语音行整批消失** | `GroupVoice.tsx:123–129` · `groupActivity.ts:70–76` · `stores/directory.ts:110–113` |
+/// | `group` | 分享载荷的 `extra.group_id` 恒 null（web `sharePayload.ts:56`） | `VoiceRoomBody.tsx:281–287` |
+///
+/// `is_owner` 不搬：快照侧承载「我是否在其中」的列是 `mine`，而目录条目的
+/// `isOwner` 是「我是否房主」——两者**不是同一列**（web 的语音 descriptor 只有
+/// `mine`，`is_owner` 仅存在于直播 descriptor，`api/types.ts:1046`）。
 void _onVoiceDirectoryItem(AylaVoiceState state, Object item) {
   if (item is! AylaDirectoryVoiceEntry) return;
   final AylaVoiceCardData card = item.card;
@@ -280,7 +297,10 @@ void _onVoiceDirectoryItem(AylaVoiceState state, Object item) {
       ownerNickname: card.ownerNickname,
       memberCount: card.memberCount,
       visibility: card.visibility,
+      // ★ 白名单：群内可见性 / 群活跃度 / 目录 matchesQuery 三处判据的唯一来源。
+      allowedGroupIds: item.allowedGroupIds,
       allowedGroupNames: card.allowedGroupNames,
+      group: item.group,
       groupName: card.groupName,
       mine: card.mine,
       createdAt: item.createdAt,

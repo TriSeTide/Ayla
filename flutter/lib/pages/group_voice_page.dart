@@ -143,11 +143,24 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
 
   bool _isAtTop() => !_scroll.hasClients || _scroll.position.pixels <= 0;
 
-  /// 直达频道详情补拉（web tsx 88–100）：本地未命中时拉一次，**白名单不含本群则不注入**。
+  /// 直达频道详情补拉（web `GroupVoice.tsx:88–100`）：本地未命中时拉一次，
+  /// **白名单不含本群则不注入**（界面保持加载态、静默）。
+  ///
+  /// ⚠️ 跳过条件必须与 web **逐字同义**：web 写道
+  /// ```tsx
+  /// if (!routeChannelId || channels.some((item) => item.id === routeChannelId
+  ///   && (fromShare || (item.allowed_group_ids ?? []).some((id) => String(id) === String(groupId))))) return;
+  /// ```
+  /// ⇒ 是「**本地已有且本群可见**」才跳过，**不是**「本地存在就跳过」。
+  /// 只判存在会让「存在但白名单不含本群」的频道**永远停在骨架**（补拉被跳过、
+  /// 房内命中判据又为假）—— 这正是用户实报「进不去语音房」的第二条路径。
+  /// （`fromShare` 分支未接，见文件头「机制差异 2」⇒ 一律走严格白名单档。）
   void _ensureRouteChannel() {
     final String? id = widget.routeChannelId;
     if (id == null) return;
-    if (ref.read(voiceStateProvider).channelOf(id) != null) return;
+    final AylaVoiceChannelSnapshot? local =
+        ref.read(voiceStateProvider).channelOf(id);
+    if (local != null && local.allowedGroupIds.contains(widget.groupId)) return;
     unawaited(() async {
       try {
         final AylaVoiceChannelSnapshot channel =
@@ -161,7 +174,10 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
     }());
   }
 
-  /// 房内频道（web tsx 121–129）：必须是本群可见的频道。
+  /// 房内频道（web `GroupVoice.tsx:121–129`）：必须是本群可见的频道。
+  ///
+  /// 这是「进不去房」的唯一命中判据：`allowed_group_ids` 含本群才渲染房内界面，
+  /// 否则一路落到骨架（`routeChannelId != null` 分支）。
   AylaVoiceChannelSnapshot? _roomChannel() {
     final String? id = widget.routeChannelId;
     if (id == null) return null;

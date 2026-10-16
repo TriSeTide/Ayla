@@ -57,6 +57,7 @@ AylaDirectoryVoiceEntry aylaHubVoiceEntryWithMemberCount(
     createdAt: entry.createdAt,
     roomName: entry.roomName,
     allowedGroupIds: entry.allowedGroupIds,
+    group: entry.group,
   );
 }
 

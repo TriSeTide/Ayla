@@ -699,7 +699,12 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               ],
               activeVoiceChannelId: widget.voiceChannelId,
               onSelectVoiceChannel: _openVoiceChannel,
-              voiceMemberCount: _voiceMemberCount(voice),
+              // tsx 127：`const voiceCount = voiceDirectory.totalMemberCount ?? 0;`
+              // —— 取**目录响应的 `total_member_count`**（完整可见目录的成员数），
+              // 不是「已加载这一页的人数之和」，也不是域 store 快照之和。
+              // 后端 `voice/views.py:141–144` 原话：「侧栏人数是完整可见目录的成员数，
+              // 不能把首屏成员和冒充总数」；`null`（存储不可用）⇒ 0（裸文本不渲染）。
+              voiceMemberCount: _voice?.totalMemberCount ?? 0,
               voiceDirectory: _controllerDirectory(_voice),
               // 同 voiceRooms：排序在投影处表达（web store 层排好，`stores/live.ts:152/168/177`）。
               // 判据 `utils/sortChannels.ts:48–61`（在播 → 曾播 → 从未），
@@ -791,14 +796,6 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   static bool _canManage(AylaConversationSummary? conv) =>
       conv?.myRole == AylaConversationMemberRole.owner ||
       conv?.myRole == AylaConversationMemberRole.admin;
-
-  /// 「语音在麦人数」——web 侧栏场景项的状态文本（`ChannelSidebar.tsx:271`）；
-  /// 取**当前群下有人房间**的在麦总数（无人 = 0 ⇒ 不显示裸文本，`voiceMemberCount > 0` 才渲染）。
-  int _voiceMemberCount(AylaVoiceState voice) => voice.channels.values
-      .where((AylaVoiceChannelSnapshot c) =>
-          c.allowedGroupIds.contains(widget.groupId))
-      .fold<int>(0, (int sum, AylaVoiceChannelSnapshot c) =>
-          sum + (c.memberCount ?? 0));
 
   /// 子群桶 → `AylaChannelDirectory`（子群走 `useSocialPage`，仍由**页面级**列表承担）。
   AylaChannelDirectory _channelDirectory<T>(AylaPagedList<T>? pager) {

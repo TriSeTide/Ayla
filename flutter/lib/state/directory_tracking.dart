@@ -193,6 +193,7 @@ class AylaDirectoryTracking {
         createdAt: c.createdAt,
         roomName: c.roomName,
         allowedGroupIds: c.allowedGroupIds,
+        group: c.group,
         lastOccupiedAt: c.lastOccupiedAt,
         lastVacantAt: c.lastVacantAt,
         isOwner: c.mine,
