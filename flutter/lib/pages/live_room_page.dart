@@ -87,6 +87,15 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       chat: ref.read(chatWsProvider),
       // 点回直播间（小窗主体）的导航目标（web `LiveRoomBody` 的 activityRoute 缺省值）。
       activityRoute: '/live/${widget.channelId}',
+      // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
+      // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
+      currentUserId: () => ref.read(authNotifierProvider).user?.id,
+      onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
+          ref.read(authNotifierProvider.notifier).setMediaActivity(
+        kind: kind,
+        active: active,
+        roomId: roomId,
+      ),
     )..addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) =>

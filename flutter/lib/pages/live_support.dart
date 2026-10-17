@@ -47,11 +47,14 @@ import '../core/ws/chat_ws.dart';
 import '../core/ws/live_ws.dart';
 import '../player/hls_player.dart';
 import '../player/platforms/hls_platform.dart';
+import '../state/auth_state.dart' show AylaMediaActivityKind;
 import '../state/cursor_history.dart';
 import '../state/live_state.dart';
+import '../state/session_activity_state.dart';
 import '../widgets/live/danmaku.dart' show AylaDanmakuEntry;
 import '../widgets/live/live_viewers.dart'
     show AylaLiveViewerItem, AylaLiveViewerSheetData;
+import '../widgets/live/live_hall.dart' show AylaLiveStatus;
 import '../widgets/live/live_channel_snapshot.dart';
 import '../widgets/live/live_player.dart' show AylaLiveSrsStatus;
 
@@ -91,9 +94,21 @@ class AylaLiveRoomSession extends ChangeNotifier {
     AylaLiveChannelFetcher? channelFetcher,
     AylaLiveStatusFetcher? statusFetcher,
     AylaLiveViewersFetcher? viewersFetcher,
+    /// 当前用户 id（web `useAuthStore.getState().currentUser?.id`；用于
+    /// `tracksOwnerActivity = channel.owner_id === currentUser.id`）。
+    ///
+    /// 注入式而不是在会话层引 Riverpod：本类被既有测试与画布样张直接构造，
+    /// 且 web 侧读的就是 auth store 的**当前值**（非订阅）。默认 null = 恒不追踪
+    /// ⇒ 不写活动态索引（既有测试因此不受影响，索引也不会被造出来）。
+    String? Function()? currentUserId,
+    /// 媒体活动位写入（web `useAuthStore.getState().setMediaActivity`）。默认 null = 不写。
+    void Function(AylaMediaActivityKind kind, bool active, String? roomId)?
+        onMediaActivity,
   })  : _live = liveState,
         _ws = liveWs,
         _chat = chat,
+        _currentUserId = currentUserId,
+        _onMediaActivity = onMediaActivity,
         activityRoute = activityRoute ?? '/live/$channelId',
         _fetchChannel = channelFetcher ?? AylaLiveApi.getLiveChannel,
         _fetchStatus = statusFetcher ?? AylaLiveApi.getLiveChannelStatus,
@@ -112,6 +127,20 @@ class AylaLiveRoomSession extends ChangeNotifier {
   final AylaLiveState _live;
   final AylaLiveWsClient _ws;
   final AylaChatWsClient? _chat;
+
+  /// 当前用户 id 读取（见构造参数）；null = 不追踪活动态。
+  final String? Function()? _currentUserId;
+
+  /// 媒体活动位写入（见构造参数）；null = 不写。
+  final void Function(AylaMediaActivityKind kind, bool active, String? roomId)?
+      _onMediaActivity;
+
+  /// 活动态索引归属：本会话是否为**频道 owner 的会话**（web `tracksOwnerActivity`）。
+  ///
+  /// web `liveSessionRuntime.ts:243` 在进房详情返回后判定
+  /// `channel.owner_id === useAuthStore.getState().currentUser?.id`，
+  /// **只有主播自己的会话**才 upsert / setStatus / clear 活动态索引（观众不进悬浮球）。
+  bool _tracksOwnerActivity = false;
 
   /// 三个数据读取注入点（默认走 [AylaLiveApi] 的真实端点）。
   final AylaLiveChannelFetcher _fetchChannel;
@@ -246,9 +275,44 @@ class AylaLiveRoomSession extends ChangeNotifier {
       final AylaLiveChannelSnapshot channel = await _fetchChannel(channelId);
       if (!_alive) return;
       store.setCurrentChannel(channel);
+      // 归属判定（web `liveSessionRuntime.ts:243`）：只有**主播自己**的会话维护活动态索引。
+      _tracksOwnerActivity =
+          _currentUserId?.call() != null && channel.ownerId == _currentUserId?.call();
+      // 活动态索引 upsert（web `:244–255`）。`sourceRoute` 的既有分支逐条照抄：
+      // 已经在索引里且是同一频道 ⇒ 沿用**原来的** sourceRoute（用户是从哪个入口进的
+      // 就回哪个入口），否则用本会话的 `activityRoute`（群内直播 = 群场景路由）。
+      if (_tracksOwnerActivity) {
+        final AylaActivityRecord? existing = aylaSessionActivity.liveSession;
+        final String activityTarget = existing != null &&
+                existing.sessionId == channel.id
+            ? existing.sourceRoute
+            : activityRoute;
+        aylaSessionActivity.upsert(
+          AylaActivityRecord(
+            kind: AylaActivityKind.live,
+            sessionId: channel.id,
+            sourceRoute: activityTarget,
+            owner: channel.ownerId,
+            title: channel.title,
+            status: AylaActivityStatus.connecting, // web: status: "connecting"
+            lastError: null,
+          ),
+        );
+      }
       final AylaLiveStatusResult status = await _fetchStatus(channelId);
       if (!_alive) return;
       store.setSrsStatus(status.status);
+      // 活动态索引状态改写（web `:270–277`）：
+      // `status.status === "live" || current.channel?.status === "live" ? "connected" : "ended"`
+      // —— 两个判据是**或**关系（SRS 实时判定与频道描述里的乐观状态，任一为 live 即算接通）。
+      if (_tracksOwnerActivity) {
+        final bool connected = status.status == AylaLiveSrsStatus.live ||
+            store.currentChannel?.status == AylaLiveStatus.live;
+        aylaSessionActivity.setStatus(
+          AylaActivityKind.live,
+          connected ? AylaActivityStatus.connected : AylaActivityStatus.ended,
+        );
+      }
       _ws.connect(channelId);
       // 在看人数权威快照（必须晚于 setCurrentChannel —— setViewers 只认当前直播间）。
       unawaited(refreshViewers());
@@ -258,7 +322,17 @@ class AylaLiveRoomSession extends ChangeNotifier {
       store.setCurrentLoading(false);
     } catch (error) {
       if (!_alive) return;
-      store.setCurrentError(error is Exception ? '$error' : '加载直播间失败');
+      final String message = error is Exception ? '$error' : '加载直播间失败';
+      store.setCurrentError(message);
+      // 活动态索引：进房失败 ⇒ failed + 原因（web `:282–287`）。无该 kind 记录时
+      // `setStatus` 静默返回（web 同款）。
+      if (_tracksOwnerActivity) {
+        aylaSessionActivity.setStatus(
+          AylaActivityKind.live,
+          AylaActivityStatus.failed,
+          lastError: message,
+        );
+      }
       store.setCurrentLoading(false);
     }
   }
@@ -518,6 +592,17 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 同步段必须在 `await` 之前跑完，且 `_disposed` 时不再写共享状态。
   Future<void> stop() async {
     _alive = false;
+    // 活动态索引收尾（web `:351–356`）：
+    // `shouldKeepActivity = tracksOwnerActivity && current.channel?.status === "live"`
+    // —— **直播中**离开控制台保留悬浮球入口；否则清索引（"idle" ⇒ 记录整条置空）。
+    // ⚠️ 必须在下面的 `clearCurrent()` **之前**读 `currentChannel`（那一步会把它清掉）。
+    final bool shouldKeepActivity = _tracksOwnerActivity &&
+        _live.currentChannel?.status == AylaLiveStatus.live;
+    if (_tracksOwnerActivity && !shouldKeepActivity) {
+      _onMediaActivity?.call(AylaMediaActivityKind.live, false, null);
+      aylaSessionActivity.clear(AylaActivityKind.live, AylaActivityStatus.idle);
+    }
+    _tracksOwnerActivity = false;
     _frameOff?.call();
     _frameOff = null;
     _chatOff?.call();

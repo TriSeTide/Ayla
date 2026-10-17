@@ -39,7 +39,9 @@ import '../state/auth_bootstrap.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart' show badgesProvider;
 import '../state/live_state.dart';
-import '../state/room_providers.dart' show liveStateProvider;
+import '../state/room_providers.dart'
+    show liveStateProvider, sessionActivityProvider;
+import '../state/session_activity_state.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
@@ -292,8 +294,6 @@ class _AppShellState extends ConsumerState<AppShell> {
               ),
             ),
           ),
-        // ---- 会话活动悬浮球（`AppShell.tsx:130`；无会话时组件自己不渲染）----
-        const AylaSessionActivityIndicator(),
         // ---- 窄屏左下角消息入口（`AppShell.tsx:140–146`）----
         // 图标 **24×24**（两档同值）：`MessageFab.tsx:29`（backHome）/ `:40`（消息）
         // 都是 `<Icon … width={24} height={24} />`，而 `.message-fab`（shell.css:423–439，
@@ -379,6 +379,19 @@ class _AppShellState extends ConsumerState<AppShell> {
             position: AylaScrollTopFabPosition.narrow,
             stacked: fabAction != null,
           ),
+        // ---- 会话活动悬浮球（`AppShell.tsx:130`；无会话时组件自己不渲染）----
+        // ⚠️ **必须传实参**：本件是「参数注入型」，两个会话为 null 时它自己
+        // `SizedBox.shrink()`（等价 tsx 135 的 `if (!showVoice && !showLive) return null`）
+        // ⇒ 少传一次就等于整个悬浮球在真实运行时**恒不出现**（2026-10 实测的漏接线）。
+        // 判定搬进 [`_SessionActivityHost`]：那里只订阅「活动态档案 + 四个 auth 字段 +
+        // pathname」，索引变化只重建这一件，不波及整棵壳层。
+        //
+        // ⚠️⚠️ **层序不能只按"web 里组件出现的先后"直觉摆**：web 的 z-index 是
+        // FAB 族 40 < 底栏 50 < **悬浮球 55** < 小窗 60（`shell.css:463–465` 的注释原文：
+        // 「高于顶栏常驻层 50（返回直播/语音房入口不被顶栏遮挡），仍低于直播小窗 60」），
+        // 而消息/创建 FAB 只有 40 ⇒ 悬浮球必须排在**两个 FAB 之后**。本 `Stack` 里
+        // 同层按声明顺序叠放，排在它们之前会被 44px 的球（含收起态贴边区）盖住入口。
+        const _SessionActivityHost(),
         // ---- 窄屏浮动小窗（`AppShell.tsx:131–132`）----
         // 只有窄屏渲染，且 `miniPlayer` 非空才出现（唯一 owner）；层级 z 60 高于底栏 50、
         // 消息/创建 FAB 40、活动态悬浮球 55，低于弹层遮罩 70+ ⇒ 放在 FAB 之后、浮层之前。
@@ -394,6 +407,117 @@ class _AppShellState extends ConsumerState<AppShell> {
       ],
     );
   }
+}
+
+/// 跨页面媒体会话悬浮球宿主（web `AppShell.tsx:130` 的 `<SessionActivityIndicator />`）。
+///
+/// ## 为什么要有这一层
+/// web 的组件**自己**读 `useAuthStore` / `useSessionActivityStore` / `useLocation`；
+/// Flutter 侧的组件是「展示型 + 注入」约定（见 `widgets/shell/session_activity.dart` 文件头），
+/// 判定必须由调用方给出。放在壳层的一个**独立子件**里而不是内联进 `build`，是为了让
+/// 「索引变化 ⇒ 重建」的影响面**只有这一件**：整棵 `AppShell` 不该因为进出语音房而重建。
+///
+/// 订阅面 = 活动态档案（[sessionActivityProvider]）＋当前用户的四个媒体字段
+/// （`is_in_voice` / `voice_room_id` / `is_live` / `live_room_id`）＋ pathname。
+/// 前三样是 web 组件自己订阅的同一份事实，第四样是它的 `useLocation()`。
+class _SessionActivityHost extends ConsumerWidget {
+  const _SessionActivityHost();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final String pathname = GoRouterState.of(context).uri.path;
+    // 三个订阅面逐条对齐 tsx：`useAuthStore` 的四个字段（它只读这四个）、
+    // `useSessionActivityStore` 的两条记录、`useLocation()` 的 pathname。
+    final AuthUser? user = ref.watch(authNotifierProvider.select(
+      (AuthState s) => s.user,
+    ));
+    // 活动态索引是模块级单例（普通 `Provider` 只做注入，见 `state/room_providers.dart`）
+    // ⇒ 用 `ListenableBuilder` 订阅，重建范围仅限本件。
+    final AylaSessionActivityStore activity =
+        ref.read(sessionActivityProvider);
+    return ListenableBuilder(
+      listenable: activity,
+      builder: (BuildContext context, Widget? child) {
+        // tsx 34–39：`is_in_voice && voice_room_id != null` ⇒ 取 id（否则整条为空）。
+        final String? voiceId =
+            user != null && user.isInVoice && user.voiceRoomId != null
+                ? user.voiceRoomId
+                : null;
+        final String? liveId =
+            user != null && user.isLive && user.liveRoomId != null
+                ? user.liveRoomId
+                : null;
+        final AylaActivitySession? voice = voiceId == null
+            ? null
+            : _activitySession(
+                record: activity.voiceSession,
+                sessionId: voiceId,
+                fallbackRoute: '/voice/${Uri.encodeComponent(voiceId)}',
+                fallbackTitle: '语音房',
+              );
+        final AylaActivitySession? live = liveId == null
+            ? null
+            : _activitySession(
+                record: activity.liveSession,
+                sessionId: liveId,
+                fallbackRoute: '/live/start/${Uri.encodeComponent(liveId)}',
+                fallbackTitle: '直播间',
+              );
+        // tsx 71–82 的两条隐藏判定：
+        // · 语音球在**语音房自己的路由**上隐藏（群内语音是 `sourceRoute` 那条）；
+        // · 直播球在**对应开播控制台**上隐藏 —— 注意它用 `/live/start/:id` 硬拼，
+        //   而不是 `sourceRoute`（web 原话），所以群内直播进控制台后直播球仍在。
+        final bool onVoiceRoom = voice != null &&
+            (pathname == '/voice/${Uri.encodeComponent(voice.sessionId)}' ||
+                pathname == voice.sourceRoute);
+        final bool onLiveConsole = live != null &&
+            pathname ==
+                '/live/start/${Uri.encodeComponent(live.sessionId)}';
+        // tsx 81–82：`showVoice` / `showLive`（`null` ⇒ 组件少渲染那个球）。
+        final AylaSessionActivityIndicator indicator =
+            AylaSessionActivityIndicator(
+          voice: voice != null && !onVoiceRoom ? voice : null,
+          live: live != null && !onLiveConsole ? live : null,
+          // tsx 148 / 159：`navigate(session.sourceRoute || 兜底路由)` ——
+          // 兜底已在 [_activitySession] 里拼好，这里直接用。
+          onOpenSession: (AylaActivitySession session) =>
+              context.go(session.sourceRoute),
+        );
+        return indicator;
+      },
+    );
+  }
+}
+
+/// 把「会话活动索引的记录」投影成悬浮球要的会话（web `SessionActivityIndicator.tsx:41–68`）。
+///
+/// 逐条复刻 tsx 的三元链：
+/// 1. 索引里已经有该 id 的记录 ⇒ **整条沿用**（title / sourceRoute 都用索引里的真实值）；
+/// 2. 索引缺这条（或 id 对不上）⇒ 现场造兜底投影：`title` 是字面量、`sourceRoute`
+///    是按 id 拼出来的兜底路由（tsx 49 / 63），status 固定 `connected`。
+///
+/// ⚠️ 索引里剩下的 `status` / `lastError` / `owner` / `updatedAt` **到不了 UI** ——
+/// web 的组件只把 `title` / `sourceRoute` / `sessionId` 传下去（tsx 148–161）。
+/// 这是 web 的真实口径，不是这里漏了字段；`AylaActivityRecord` 保留完整字段是为了
+/// 对齐索引自身的状态机语义（详见 `state/session_activity_state.dart` 文件头）。
+AylaActivitySession _activitySession({
+  required AylaActivityRecord? record,
+  required String sessionId,
+  required String fallbackRoute,
+  required String fallbackTitle,
+}) {
+  if (record != null && record.sessionId == sessionId) {
+    return AylaActivitySession(
+      sessionId: record.sessionId,
+      sourceRoute: record.sourceRoute,
+      title: record.title,
+    );
+  }
+  return AylaActivitySession(
+    sessionId: sessionId,
+    sourceRoute: fallbackRoute,
+    title: fallbackTitle,
+  );
 }
 
 /// 窄屏浮动小窗宿主（web `AppShell.tsx:131–132`：

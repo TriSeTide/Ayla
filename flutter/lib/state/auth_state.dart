@@ -9,6 +9,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/net/dio_client.dart';
 
+/// 媒体活动投影（web `stores/auth.ts:32–36` 的 `setMediaActivity` 入参）。
+///
+/// 只做「本地乐观投影」：**不发请求**，只把 `is_in_voice` / `voice_room_id`（或 `is_live` /
+/// `live_room_id`）改掉，下一次 `GET /me/` 会把服务端事实带回来覆盖（web 同款）。
+enum AylaMediaActivityKind { voice, live }
+
 /// 当前登录用户（照 `backend/apps/accounts/serializers.py` UserPublicSerializer + email）。
 class AuthUser {
   final String id;
@@ -65,6 +71,37 @@ class AuthUser {
       email: s(json['email']),
     );
   }
+
+  /// 本地乐观改写媒体活动位（web `setMediaActivity`，`stores/auth.ts:80–91`）。
+  ///
+  /// web 原话：`active ? { is_in_voice: active, voice_room_id: active ? roomId : null }`
+  /// —— 退出时 `roomId` **一并置 null**（不是只翻布尔）。
+  AuthUser withMediaActivity({
+    required AylaMediaActivityKind kind,
+    required bool active,
+    String? roomId,
+  }) =>
+      AuthUser(
+        id: id,
+        username: username,
+        nickname: nickname,
+        avatar: avatar,
+        signature: signature,
+        status: status,
+        online: online,
+        displayStatus: displayStatus,
+        dateJoined: dateJoined,
+        isInVoice: kind == AylaMediaActivityKind.voice ? active : isInVoice,
+        voiceRoomId: kind == AylaMediaActivityKind.voice
+            ? (active ? roomId : null)
+            : voiceRoomId,
+        isLive: kind == AylaMediaActivityKind.live ? active : isLive,
+        liveRoomId: kind == AylaMediaActivityKind.live
+            ? (active ? roomId : null)
+            : liveRoomId,
+        showContent: showContent,
+        email: email,
+      );
 }
 
 /// 认证状态快照。
@@ -111,6 +148,22 @@ class AuthNotifier extends Notifier<AuthState> implements AuthTokenStore {
   /// 设置当前用户（GET /me/ 结果）。
   void setUser(AuthUser user) {
     state = state.copyWith(user: user);
+  }
+
+  /// 本地乐观改写媒体活动位（web `stores/auth.ts:80–91` `setMediaActivity`）。
+  ///
+  /// **未登录（无 user）时静默返回**（web 原话：`if (!state.currentUser) return state`）——
+  /// 会话层在登出竞态里仍可能调用它，不得凭空造出一个用户。
+  void setMediaActivity({
+    required AylaMediaActivityKind kind,
+    required bool active,
+    String? roomId,
+  }) {
+    final AuthUser? user = state.user;
+    if (user == null) return;
+    state = state.copyWith(
+      user: user.withMediaActivity(kind: kind, active: active, roomId: roomId),
+    );
   }
 
   /// 登出：清令牌与用户（web auth store logout；WS 断开由调用方负责）。

@@ -40,6 +40,7 @@ import 'directory_store.dart' show aylaDirectoryStore;
 import 'directory_tracking.dart' show AylaDirectoryTracking;
 import 'live_state.dart';
 import 'posts_store.dart' show aylaPostsStore;
+import 'session_activity_state.dart';
 import 'voice_state.dart';
 
 /// voice 全局状态（成员表 / 当前频道 / 媒体与应用层连接态）。
@@ -49,6 +50,25 @@ final ChangeNotifierProvider<AylaVoiceState> voiceStateProvider =
 /// live 全局状态（当前直播间 / SRS 判定 / 弹幕队列 / 在看人数）。
 final ChangeNotifierProvider<AylaLiveState> liveStateProvider =
     ChangeNotifierProvider<AylaLiveState>((Ref ref) => AylaLiveState());
+
+/// 跨页面会话活动索引（web `stores/sessionActivity.ts`）—— 悬浮球的**唯一数据源**。
+///
+/// ⚠️ 本 provider 返回的就是模块级单例 `aylaSessionActivity` 本体（**不是**新建实例）：
+/// 索引被两条**不持有 ref** 的会话层直接写入（`pages/voice_support.dart` 的
+/// resetLocal / join / leave、`pages/live_support.dart` 的会话生命周期），
+/// 它们写的一定得是壳层读的那一份。与 `aylaMiniPlayerOwner`（模块级小窗注册表）同一口径。
+///
+/// ⚠️ **必须是普通 `Provider`，不能是 `ChangeNotifierProvider`**：
+/// 后者会把 provider 创建的对象**当作自己所有**，容器 dispose 时对单例调 `dispose()`
+/// ⇒ 一旦有第二个容器（测试里的每个 `ProviderContainer`、以及真实运行时的多次挂载）
+/// 再读它，就是 "A AylaSessionActivityStore was used after being disposed"。
+/// 本单例与 `aylaMiniPlayerOwner` 一样**跨容器/跨登录周期存活**，所有者是模块本身。
+///
+/// 订阅方式：调用方 `ref.read(sessionActivityProvider)` 拿到单例后，用
+/// `ListenableBuilder` 订阅（壳层见 `layout/app_shell.dart` 的 `_SessionActivityHost`）——
+/// 这样"索引变化 ⇒ 重建"的范围被限制在那一个子件里，不会波及整棵 AppShell。
+final Provider<AylaSessionActivityStore> sessionActivityProvider =
+    Provider<AylaSessionActivityStore>((Ref ref) => aylaSessionActivity);
 
 /// 目录热更新事件总线 —— **已退役**（2026-10-08）。
 ///
@@ -359,6 +379,11 @@ AylaVoiceWsClient aylaStartVoiceWs(WidgetRef ref) {
 /// 登出 / 401 过期：断开两条房内通道 + 解绑两条帧桥 + 清空房内状态。
 void aylaStopRooms(WidgetRef ref) {
   aylaStopLiveMiniPlayer();
+  // web `stores/auth.ts:139` 的 `useSessionActivityStore.getState().reset()`：
+  // 跨页面悬浮球的索引必须随登出清空，否则下一位登录者会看到上一位的球。
+  // 顺序在 `aylaStopLiveMiniPlayer()` **之后** —— 关闭小窗那条链会先按语义写一次
+  // `clear("live", "idle")`，这里再兜底清空两条（幂等）。
+  aylaSessionActivity.reset();
   ref.read(roomDirectoryBridgeProvider).detach();
   aylaStopPostsFrames(ref);
   ref.read(voiceWsProvider).disconnect();
@@ -372,6 +397,8 @@ void aylaStopRooms(WidgetRef ref) {
 /// 同上（`ProviderContainer` 版，`main.dart` 的 `onSessionExpired` 用）。
 void aylaStopRoomsForContainer(ProviderContainer container) {
   aylaStopLiveMiniPlayer();
+  // 同上（容器版，`main.dart` 的 401 过期路径）。`reset()` 对未登录进程是 no-op。
+  aylaSessionActivity.reset();
   container.read(roomDirectoryBridgeProvider).detach();
   aylaStopPostsFramesForContainer(container);
   container.read(voiceWsProvider).disconnect();

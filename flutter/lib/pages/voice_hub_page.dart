@@ -42,6 +42,8 @@ import 'package:go_router/go_router.dart';
 import '../core/api/voice_api.dart';
 import '../state/auth_state.dart';
 import '../state/directory_store.dart';
+import '../state/room_providers.dart' show voiceStateProvider;
+import '../state/voice_state.dart' show AylaVoiceState;
 import '../state/favorite_status.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
@@ -306,6 +308,9 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
       return AylaVoiceRoomHost(
         key: ValueKey<String>(channelId),
         channelId: channelId,
+        roomRoute: '/voice/${Uri.encodeComponent(channelId)}',
+        // 悬浮球回房路由 = `/voice/:id`（web `useVoiceChannel.ts:258–259`）；
+        // 退出落点仍是列表页 `/voice`（`backPath` 默认值）——两者**不是同一个值**。
       );
     }
     final bool narrow = aylaDirectoryIsNarrow(context);
@@ -313,6 +318,13 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
     final String? currentUserId = ref.watch(
       authNotifierProvider.select((AuthState s) => s.user?.id),
     );
+    // 大厅列表的「当前所在频道」= 卡片 `.active` 蓝边的唯一来源
+    // （web `VoiceHubPage.tsx:303` 的 `currentChannelId={currentChannelId}`）。
+    // ⚠️ 漏传会让大厅里那张「我在其中」的卡**只有 `mine` 的粉边档**、缺 `.active` 的
+    // indigo 描边（`voice_channels.dart` 的 `borderColor = (active || channel.mine)`），
+    // 与 web 的「进过房后能看出是哪一间」不一致。
+    final AylaVoiceState voiceState = ref.watch(voiceStateProvider);
+    final String? currentChannelId = voiceState.currentChannelId;
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {
@@ -367,6 +379,8 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
                       entry.card,
                   ],
                   revealItems: true,
+                  // 卡片 `.active` 蓝边（web tsx 303）：当前所在频道。
+                  currentChannelId: currentChannelId,
                   onJoin: _join,
                   favoriteBuilder: _favoriteSlot,
                 ),

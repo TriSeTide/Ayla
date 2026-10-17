@@ -34,7 +34,8 @@ import '../state/live_state.dart';
 import '../state/paged_list.dart';
 import '../state/room_providers.dart' show liveStateProvider, liveWsProvider;
 import '../state/chat_providers.dart' show chatWsProvider;
-import '../state/auth_state.dart' show AuthState, authNotifierProvider;
+import '../state/auth_state.dart'
+    show AuthState, AylaMediaActivityKind, authNotifierProvider;
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../widgets/base/directory_controls.dart' show AylaHistoryControlsData;
@@ -185,6 +186,15 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       chat: ref.read(chatWsProvider),
       // 点回直播间（小窗主体）的导航目标 = 群场景路由（web `GroupLive.tsx:178`）。
       activityRoute: '/group/${widget.groupId}/live',
+      // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
+      // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
+      currentUserId: () => ref.read(authNotifierProvider).user?.id,
+      onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
+          ref.read(authNotifierProvider.notifier).setMediaActivity(
+        kind: kind,
+        active: active,
+        roomId: roomId,
+      ),
     )..addListener(_onChanged);
     _session = session;
     setState(() => _currentId = channelId);

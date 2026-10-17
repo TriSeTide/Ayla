@@ -37,6 +37,7 @@ import '../state/chat_providers.dart'
     show chatWsProvider, elysiaProfileProvider;
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
+import '../state/session_activity_state.dart';
 import '../state/room_providers.dart';
 import '../state/shell_state.dart';
 import '../theme/app_theme.dart' show AylaTextStyles;
@@ -47,7 +48,7 @@ import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsNarrow;
 import '../widgets/base/resource_image.dart' show mediaContentUrl;
 import '../widgets/live/live_channel_snapshot.dart';
-import '../widgets/live/live_hall.dart' show AylaLiveCardData;
+import '../widgets/live/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
 import '../widgets/live/live_studio.dart' show AylaStudioEmpty;
 import '../widgets/live/live_viewers.dart' show AylaLiveViewerItem;
 import '../widgets/live/live_owner_panel.dart' show AylaLiveOwnerSaveRequest;
@@ -110,6 +111,15 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       chat: ref.read(chatWsProvider),
       // 点回直播间（小窗主体）的导航目标（web `LiveStudioPage.tsx:148`）。
       activityRoute: '/live/start/${widget.channelId}',
+      // 活动态索引的两个注入点（web 读 `useAuthStore.getState()`）：当前用户 id 决定
+      // 「本会话是否为主播自己的会话」（`tracksOwnerActivity`），媒体活动位写在会话启停处。
+      currentUserId: () => ref.read(authNotifierProvider).user?.id,
+      onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
+          ref.read(authNotifierProvider.notifier).setMediaActivity(
+        kind: kind,
+        active: active,
+        roomId: roomId,
+      ),
     )..addListener(_onChanged);
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
       request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
@@ -251,10 +261,46 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       if (!mounted) return;
       ref.read(liveStateProvider).upsertChannel(updated);
       _syncIntoDirectory(updated);
+      _syncLiveActivity(updated);
       unawaited(_session?.refreshSrsStatus(retryUntilLive: true));
     } catch (error) {
       if (!mounted) return;
       setState(() => _actionError = error is Exception ? '$error' : '操作失败');
+    }
+  }
+
+  /// 开播/下播后的活动态同步（web `LiveOwnerPanel.tsx:44–68` 的 `run()`）。
+  ///
+  /// 逐条对齐 web：`active = updated.status === "live"`；
+  /// - 开播 ⇒ 媒体活动位置真 + 索引 upsert（`sourceRoute` **沿用索引里已有的**，
+  ///   否则用 `window.location.pathname`，Flutter 侧即本控制台路由）；
+  /// - 下播 ⇒ 媒体活动位复位 + `clear("live", "idle")`（记录整条置空）。
+  ///
+  /// ⚠️ 这是**独立于** `AylaLiveRoomSession` 的第二条写入路径（web 同构）：
+  /// 控制台的开播键不重建会话，会话的 `tracksOwnerActivity` 分支不覆盖它。
+  void _syncLiveActivity(AylaLiveChannelSnapshot updated) {
+    final bool active = updated.status == AylaLiveStatus.live;
+    ref.read(authNotifierProvider.notifier).setMediaActivity(
+          kind: AylaMediaActivityKind.live,
+          active: active,
+          roomId: active ? updated.id : null,
+        );
+    if (active) {
+      final AylaActivityRecord? current = aylaSessionActivity.liveSession;
+      aylaSessionActivity.upsert(
+        AylaActivityRecord(
+          kind: AylaActivityKind.live,
+          sessionId: updated.id,
+          sourceRoute:
+              current?.sourceRoute ?? '/live/start/${widget.channelId}',
+          owner: updated.ownerId,
+          title: updated.title,
+          status: AylaActivityStatus.connected, // web: status: "connected"
+          lastError: null,
+        ),
+      );
+    } else {
+      aylaSessionActivity.clear(AylaActivityKind.live, AylaActivityStatus.idle);
     }
   }
 
@@ -265,6 +311,7 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       if (!mounted) return;
       ref.read(liveStateProvider).upsertChannel(updated);
       _syncIntoDirectory(updated);
+      _syncLiveActivity(updated);
       unawaited(_session?.refreshSrsStatus());
     } catch (error) {
       if (!mounted) return;

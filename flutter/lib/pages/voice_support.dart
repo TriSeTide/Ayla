@@ -42,6 +42,7 @@ import '../state/cursor_history.dart';
 import '../state/favorite_status.dart';
 import '../state/media_paged_list.dart';
 import '../state/room_providers.dart';
+import '../state/session_activity_state.dart';
 import '../state/shell_state.dart';
 import '../state/voice_state.dart';
 import '../theme/app_theme.dart' show AylaTextStyles;
@@ -221,13 +222,33 @@ class AylaVoiceSession extends ChangeNotifier {
     AylaVoiceSessionRuntime? runtime,
     AylaChatWsClient? chat,
     AylaVoiceMediaEvents? mediaEvents,
+    /// 媒体活动位写入（web `useAuthStore.getState().setMediaActivity(...)`，三处调用）。
+    ///
+    /// **默认 null = 不写**：本类还被画布样张与既有测试直接构造（断言媒体状态机），
+    /// 默认动作必须是"不产生副作用"——那些调用方没有 auth 容器，也没有资格改全局登录态。
+    /// 生产路径由 `_AylaVoiceRoomHostState.initState` 注入 `ref.read(...)` 的闭包。
+    void Function(AylaMediaActivityKind kind, bool active, String? roomId)?
+        onMediaActivity,
+
+    /// 本房间自身的路由 —— 活动态索引的 `sourceRoute`（悬浮球点击的回房目标）。
+    ///
+    /// web 在 upsert 处现读 `window.location.pathname`（`useVoiceChannel.ts:258–259`）：
+    /// 群内语音取 **群场景路由**（`/group/:id/voice`），一级语音取 `/voice/:id`。
+    /// Flutter 的会话层没有 context ⇒ 由页面注入（两个挂载点已各自把
+    /// `backPath` 传进来了 —— 它正是同一份事实）。
+    ///
+    /// **null = 本实例不写活动态索引**（与 [onMediaActivity] 同一纪律：画布样张与既有
+    /// 测试直接构造本类断言媒体状态机，不得污染全局悬浮球）。生产两个挂载点恒传值。
+    String? roomRoute,
   })  : _voice = voiceState,
         _ws = voiceWs,
         _media = media,
         _currentUserId = currentUserId,
         _accessToken = accessToken,
         _runtime = runtime ?? voiceSessionRuntime,
-        _chat = chat {
+        _chat = chat,
+        _onMediaActivity = onMediaActivity,
+        _roomRoute = roomRoute {
     bindMediaEvents(mediaEvents ?? AylaVoiceMediaEvents());
     _chatOff = _chat?.onFrame(_onChatFrame);
     _wsOff = _ws.onFrame(_onVoiceFrame);
@@ -240,6 +261,13 @@ class AylaVoiceSession extends ChangeNotifier {
   final String? Function() _accessToken;
   final AylaVoiceSessionRuntime _runtime;
   final AylaChatWsClient? _chat;
+
+  /// 媒体活动位写入（见构造参数）；null = 本实例不改全局登录态。
+  final void Function(AylaMediaActivityKind kind, bool active, String? roomId)?
+      _onMediaActivity;
+
+  /// 本房间自身路由（见构造参数）；null = 本实例不写活动态索引。
+  final String? _roomRoute;
 
   void Function()? _chatOff;
   void Function()? _wsOff;
@@ -361,6 +389,10 @@ class AylaVoiceSession extends ChangeNotifier {
       await _media.disconnect();
     }
     if (channelId == _voice.currentChannelId) _voice.leaveChannelLocal();
+    // 媒体活动位 + 活动态索引收尾（web useVoiceChannel.ts:96–99）：
+    // `if (channelId === useSessionActivityStore.getState().voiceSession?.sessionId)`
+    // —— **按 id 校验**，别人的/上一次的房间不得被本次收尾误清。
+    _clearVoiceActivity(channelId);
     // 注：web 的 `resetLocal` **不**改 `mine`（只有显式 leave 与 join 的补偿路径改），
     // 这里照 web 保持同口径（列表项的"我在其中"标记由下一次目录刷新收敛）。
   }
@@ -412,6 +444,9 @@ class AylaVoiceSession extends ChangeNotifier {
           if (_currentUserId() != actor) return;
           if (_voice.currentChannelId == id) _voice.leaveChannelLocal();
           _voice.patchChannel(id, mine: false);
+          // 媒体活动位 + 活动态索引：**按 id 校验**后收尾（web :229–234 ——
+          // 这条是"join 补偿路径"的收尾，与 `resetLocal` 同款但独立一份）。
+          _clearVoiceActivity(id, status: AylaActivityStatus.idle);
         }
 
         Future<void> releaseMedia(String id) async {
@@ -434,6 +469,29 @@ class AylaVoiceSession extends ChangeNotifier {
             await releaseMedia(previousChannelId);
             await clearProjection(previousChannelId);
             if (!isCurrent()) return;
+          }
+          // 媒体活动位：**进房成功（REST 已改成员事实）后**才置真（web useVoiceChannel.ts:255–257）。
+          _onMediaActivity?.call(
+            AylaMediaActivityKind.voice,
+            true,
+            int.tryParse(channelId)?.toString(),
+          );
+          // 活动态索引 upsert（web useVoiceChannel.ts:256–262）。
+          // ⚠️ `sourceRoute` 的群内分支：web 原话 `window.location.pathname.startsWith("/group/")`
+          //    ? pathname : \`/voice/:id\` —— Flutter 侧不能在会话层读路由（无 context），
+          //    由页面在构造时注入房间自身的路由（`AylaVoiceRoomHost` 的 `backPath` 就是它）。
+          final String? roomRoute = _roomRoute;
+          if (roomRoute != null) {
+            aylaSessionActivity.upsert(
+              AylaActivityRecord(
+                kind: AylaActivityKind.voice,
+                sessionId: channelId,
+                sourceRoute: roomRoute,
+                owner: _voice.channels[channelId]?.ownerId,
+                title: _voiceChannelTitle(channelId),
+                status: AylaActivityStatus.connecting, // web: status: "connecting"
+              ),
+            );
           }
           _voice.setMedia(AylaVoiceMediaConnection.connecting);
           _runtime.setMediaChannel(channelId);
@@ -480,6 +538,11 @@ class AylaVoiceSession extends ChangeNotifier {
               ),
           ]);
           _voice.patchChannel(channelId, mine: true);
+          // 活动态索引：媒体通道接通后转 connected（web useVoiceChannel.ts:294）。
+          aylaSessionActivity.setStatus(
+            AylaActivityKind.voice,
+            AylaActivityStatus.connected,
+          );
           _startHeartbeat(channelId);
           _ws.subscribe(<String>[channelId]);
           committed = true;
@@ -570,8 +633,39 @@ class AylaVoiceSession extends ChangeNotifier {
       }
       if (_voice.currentChannelId == channelId) _voice.leaveChannelLocal();
       if (_currentUserId() != actor) return;
+      // 媒体活动位 + 活动态索引收尾（web :347–352；此路径的 status 是默认的 "ended"）。
+      _clearVoiceActivity(channelId, status: AylaActivityStatus.ended);
       _voice.patchChannel(channelId, mine: false);
     });
+  }
+
+  /// 语音侧的媒体活动收尾（web `useVoiceChannel` 三处同款判定的唯一实现）。
+  ///
+  /// 判定顺序逐条对齐 web：**先按 id 校验**活动态索引里的会话是不是这一个，
+  /// 是才清媒体位与索引（web 三处都是
+  /// `if (useSessionActivityStore.getState().voiceSession?.sessionId === id)`）。
+  /// 清媒体位放在索引清空**之前**（web 同序：`setMediaActivity(...)` → `clear("voice", ...)`）。
+  ///
+  /// [channelId] 可空：web 的 id 来自
+  /// `expectedChannelId ?? currentChannelId ?? mediaChannel()`，三者都可能为 null；
+  /// JS 的 `null === sessionId` 恒假 ⇒ 这里用 `!=` 比较同一个语义（Dart 的 `String?`
+  /// 相等判定与 JS 的 `===` 对 null 的行为一致）。
+  void _clearVoiceActivity(
+    String? channelId, {
+    AylaActivityStatus status = AylaActivityStatus.ended,
+  }) {
+    if (aylaSessionActivity.voiceSession?.sessionId != channelId) return;
+    _onMediaActivity?.call(AylaMediaActivityKind.voice, false, null);
+    aylaSessionActivity.clear(AylaActivityKind.voice, status);
+  }
+
+  /// 活动态索引的标题（web `useVoiceChannel.ts:260`）：
+  /// `channels.find((channel) => channel.id === channelId)?.name ?? "语音房"`。
+  ///
+  /// 兜底是**字面量「语音房」**（不是频道 id、不是空串）—— web 用它表达"名字还没读到"。
+  String _voiceChannelTitle(String channelId) {
+    final String? name = _voice.channels[channelId]?.name;
+    return (name == null || name.isEmpty) ? '语音房' : name;
   }
 
   /// 静音切换：乐观 UI + 媒体失败回滚（web `toggleMic`）。
@@ -711,6 +805,7 @@ class AylaVoiceRoomHost extends ConsumerStatefulWidget {
     super.key,
     required this.channelId,
     this.backPath = '/voice',
+    this.roomRoute,
   });
 
   /// 频道 id（路由 `/voice/:channelId`）。
@@ -722,6 +817,20 @@ class AylaVoiceRoomHost extends ConsumerStatefulWidget {
   /// （`GroupVoice.tsx:139–151`）传 `/group/:id/voice`——同一宿主两处复用，
   /// 避免群内复制一份房内编排。
   final String backPath;
+
+  /// 悬浮球点击后的**回房路由**（活动态索引的 `sourceRoute`）。
+  ///
+  /// ⚠️ 与 [backPath] **不是同一个值**（2026-10-17 用户实报「列表页看不到语音悬浮球」轮区分）：
+  /// - `backPath` = 房内「返回 / 离开 / 删除」的**退出落点** —— 一级语音是列表页 `/voice`；
+  /// - `roomRoute` = 悬浮球点回来时要**回到的那个房间** —— 一级语音是 `/voice/:id`。
+  ///
+  /// web 的 `sourceRoute` 取的是后者（`useVoiceChannel.ts:258–259`：
+  /// `pathname.startsWith("/group/") ? pathname : `/voice/${channelId}``），
+  /// 此前 Flutter 侧把两者混用同一个 `backPath` ⇒ 一级语音的回房路由成了 `/voice`
+  /// （列表页），点球**回不到房间**。
+  ///
+  /// null = 由 [backPath] 兜底（群内语音两者本来就相同：`/group/:id/voice`）。
+  final String? roomRoute;
 
   @override
   ConsumerState<AylaVoiceRoomHost> createState() => _AylaVoiceRoomHostState();
@@ -765,6 +874,25 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       chat: ref.read(chatWsProvider),
       currentUserId: () => ref.read(authNotifierProvider).user?.id,
       accessToken: () => ref.read(authNotifierProvider).accessToken,
+      // 媒体活动位（web `useAuthStore.getState().setMediaActivity` 的三处调用）
+      // 与活动态索引的回房路由 —— 两条都只在生产装配里注入（会话类默认不写）。
+      //
+      // ⚠️ 闭包里用 `ref.read` 而不是缓存 notifier 字段：本回调只在**会话生命周期
+      // 事件**（join 提交 / 心跳失效 / leave）里被同步调用，那时宿主必定仍挂着
+      // （语音房是整页路由，卸载即会话结束）；且 `ref.read` 每次都是常数时间查表。
+      // 若将来出现"会话活得比宿主久"的场景，这里要改成和 `LiveStudioPage` 一样
+      // 在 initState 缓存 notifier 引用（那里有覆盖层遮蔽后 ref 失效的真实风险）。
+      onMediaActivity: (AylaMediaActivityKind kind, bool active, String? roomId) =>
+          ref.read(authNotifierProvider.notifier).setMediaActivity(
+        kind: kind,
+        active: active,
+        roomId: roomId,
+      ),
+      // web `useVoiceChannel.ts:258–259`：群内语音的 `sourceRoute` 取**群场景路由**，
+      // 一级语音取 `/voice/:id`。
+      // ⚠️ 不能直接用 `backPath`：一级语音的 backPath 是**列表页** `/voice`（退出落点），
+      // 而回房路由必须带频道 id（2026-10-17 修正 —— 混用会让点球回不到房间）。
+      roomRoute: widget.roomRoute ?? widget.backPath,
     )..addListener(_onSessionChanged);
     _share = AylaShareController();
     _chat = AylaCursorHistory<api.AylaVoiceChatMessage>(
