@@ -46,16 +46,27 @@
 
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show LengthLimitingTextInputFormatter, TextInputFormatter;
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/api/chat_api.dart' show AylaChatApi;
+import '../../core/models/conversation.dart'
+    show AylaConversationPublicSummary, AylaConversationSummary;
+import '../../core/models/social_requests.dart' show AylaGroupJoinResult;
 import '../../core/models/subgroup.dart';
+import '../../core/net/dio_client.dart' show ApiException;
+import '../../state/chat_providers.dart' show chatStateProvider;
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart' show AylaIconButton;
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
 import '../base/dialogs.dart' show AylaModalCard, AylaModalOverlay;
+import '../base/overlays.dart' show aylaOverlayEntry;
 
 /// 申请失败时由页面层抛出，表单直接展示其 [message]
 /// （等价 web 的 `e instanceof Error ? e.message : "发送入群申请失败"`，tsx 51）。
@@ -404,6 +415,135 @@ Widget groupApplyHeadCopy(AylaGroupApplyData group, AylaTextStyles t) {
       ),
     ],
   );
+}
+
+// ======================= 自给自足接线（分享卡的群申请守卫） =======================
+
+/// 两态翻译 + 失败抛 [AylaGroupApplyException]（web `GroupApplyDialog.tsx:44–54`）。
+///
+/// 这是 [AylaGroupApplyForm.onSubmit] 的**默认可注入实现**：
+/// - `{status:"accepted", conversation_id}` ⇒ [AylaGroupApplyResult.accepted]（表单 ⇒ onDone ⇒ 跳群）；
+/// - 申请单（待审批）⇒ [AylaGroupApplyResult.pending]（表单转成功态，**不跳转**）；
+/// - 两态都不成立 ⇒ 显式失败（**不伪造成申请成功**）。
+///
+/// 失败文案取后端 `detail` 原文（web `e.message`）；兜底文案由表单自己给。
+Future<AylaGroupApplyResult> aylaSubmitGroupApply(
+  AylaGroupApplyData group,
+  String message,
+) async {
+  final AylaGroupJoinResult result;
+  try {
+    result = await AylaChatApi.applyToGroup(group.id, message: message);
+  } on ApiException catch (e) {
+    throw AylaGroupApplyException(e.message);
+  }
+  if (result.accepted) {
+    return AylaGroupApplyResult.accepted(result.conversationId!);
+  }
+  if (result.request != null) {
+    return const AylaGroupApplyResult.pending();
+  }
+  throw const AylaGroupApplyException('入群申请响应格式不合法');
+}
+
+/// 分享卡的「我已加入该群」自查（web `ShareBubble.tsx:79–85`）：
+/// ```ts
+/// useChatStore.getState().conversations.some((c) => c.id === String(payload.target_id) && c.type === "group")
+/// ```
+///
+/// ## 为什么是「读根容器」而不是注入回调
+/// web 的分享卡**自己**读全局 store（不吃饭 props），Flutter 侧的等价物就是根容器。
+/// 之前那版把它做成 `AylaMessageList` 的注入参数，需要从页面层一路透传 4 层
+/// （页面 → 列表 → 气泡 → 分享卡），而 web 一处都不传 —— 且真正的**弹窗宿主**
+/// 也只能挂在分享卡自己身上（跟 web 一样）。故收口成本函数：
+/// 调用点在 [AylaShareBubble]，无 ProviderScope（组件画布 / 纯 widget 测试）时返回 null
+/// （= 不做守卫，与修前一致，**不凭空造成员关系**）。
+///
+/// 与 [aylaShareCurrentUserIdOf]（`pages/share_support.dart:140`）同一套「自给自足档」口径。
+bool? aylaShareGroupJoinedOf(BuildContext context, String groupId) {
+  try {
+    final ProviderContainer container =
+        ProviderScope.containerOf(context, listen: false);
+    for (final AylaConversationSummary c
+        in container.read(chatStateProvider).conversations) {
+      if (c.id == groupId) return c.isGroup;
+    }
+    return false;
+  } on StateError {
+    return null; // 无 ProviderScope ⇒ 不做守卫
+  }
+}
+
+/// 打开入群申请弹窗（root Overlay；web `createPortal(…, document.body)`）。
+///
+/// ## 为什么必须挂 root Overlay
+/// web 的两处消费点（`SearchPage.tsx:480–489` 与 `ShareBubble.tsx:124–136`）
+/// 都是 portal。分享卡嵌在气泡里，而气泡祖先链上有 `backdrop-filter` 玻璃——
+/// 那会创建 stacking context 并成为 `position: fixed` 后代的 containing block
+/// ⇒ 弹层被裁剪进气泡。Flutter 等价物 = [aylaOverlayEntry]（`widgets/base/overlays.dart`，
+/// 每个 entry 自带 [DefaultTextStyle] 兜底，否则 Overlay 里的 Text 会落到
+/// `DefaultTextStyle.fallback` 的双下划线红字）。
+///
+/// ## 与 web 的一处**登记差异**（public-summary 只在需要时拉）
+/// web 的 `ShareBubble` 直接用分享卡片自带的 `payload.extra.join_policy` 构造弹窗；
+/// Flutter 侧分享卡片同源（[AylaSharePayload]），但**旧消息的 payload 可能没有
+/// join_policy**（老后端产出的分享）⇒ 此时按 web `GroupPage.tsx:382` 的做法补一次
+/// `GET /chat/conversations/<id>/public-summary/`（非成员可读）取权威
+/// `title/join_policy/avatar`。取失败（404/403/网络）⇒ 回退到 payload 里的已知字段，
+/// 并入组策略未知 = 按申请制文案（web `GroupApplyDialog.tsx:15` 注释同口径）。
+///
+/// 返回的 Future 在弹窗关闭后完成（成功加入并跳走后同样完成）。
+Future<void> aylaOpenGroupApplyDialog(
+  BuildContext context, {
+  required AylaGroupApplyData group,
+  required void Function(String conversationId) onJoined,
+}) async {
+  final AylaGroupApplyData resolved = await _resolveApplyGroup(group);
+  if (!context.mounted) return;
+  final Completer<void> done = Completer<void>();
+  late final OverlayEntry entry;
+  void close() {
+    if (entry.mounted) entry.remove();
+    if (!done.isCompleted) done.complete();
+  }
+
+  entry = aylaOverlayEntry(
+    builder: (BuildContext _) => AylaGroupApplyDialog(
+      group: resolved,
+      onClose: close,
+      onSubmit: aylaSubmitGroupApply,
+      onJoined: (String convId) {
+        close();
+        onJoined(convId);
+      },
+    ),
+  );
+  // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主没有 Navigator
+  // ⇒ 会抛 `No Overlay widget found` 刷屏（2026-10-02 用户实报，见 `share_support.dart:167`）。
+  Overlay.of(context).insert(entry);
+  return done.future;
+}
+
+/// 补一次 public-summary 取权威 join_policy；失败回退 [fallback]（见 [aylaOpenGroupApplyDialog]）。
+Future<AylaGroupApplyData> _resolveApplyGroup(
+  AylaGroupApplyData fallback,
+) async {
+  // payload 里已有 join_policy ⇒ 无需再拉（web 直接用 payload，不多打一次请求）。
+  if (fallback.joinPolicy != null) return fallback;
+  try {
+    final AylaConversationPublicSummary summary =
+        await AylaChatApi.getConversationPublicSummary(fallback.id);
+    return AylaGroupApplyData(
+      id: summary.id,
+      title: summary.title.isNotEmpty ? summary.title : fallback.title,
+      joinPolicy: summary.joinPolicy,
+      avatar: summary.avatar.isNotEmpty ? summary.avatar : fallback.avatar,
+    );
+  } catch (_) {
+    // 404/403/网络：非成员也可能真的读不到（群已解散/受限）⇒ 用 payload 已知字段。
+    // 未知 join_policy 走申请制文案与流程（tsx 15），不伪造「公开群」。
+    return fallback;
+  }
 }
 
 // ======================= 样张 =======================

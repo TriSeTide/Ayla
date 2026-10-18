@@ -43,12 +43,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/api/chat_api.dart' show AylaChatApi;
 import '../core/api/search_api.dart';
 import '../core/api/users_api.dart';
 import '../core/models/conversation.dart'
     show AylaConversationSummary;
 import '../core/models/post.dart' show AylaPost;
-import '../core/models/subgroup.dart' show AylaGroupApplyData;
+import '../core/models/social_requests.dart' show AylaGroupJoinResult;
+import '../core/models/subgroup.dart'
+    show AylaGroupApplyData, AylaGroupApplyResult;
+import '../core/net/dio_client.dart' show ApiException;
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart'
     show chatStateProvider, chatWsProvider;
@@ -67,7 +71,8 @@ import '../widgets/base/scroll_restore.dart'
 import '../widgets/base/profile_and_filters.dart'
     show AylaDirectoryFilters, AylaUserProfileCard;
 import '../widgets/game/game_room_card.dart';
-import '../widgets/group/group_apply.dart' show AylaGroupApplyDialog;
+import '../widgets/group/group_apply.dart'
+    show AylaGroupApplyDialog, AylaGroupApplyException;
 import '../widgets/live/live_hall.dart' show AylaLiveChannelCard, AylaLiveCardData;
 import '../widgets/posts/post_card.dart' show AylaPostCard;
 import 'post_detail_page.dart' show aylaPostSharePayloadFor;
@@ -775,7 +780,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           avatar: selectedGroup.avatar,
         ),
         onClose: () => setState(() => _selectedGroup = null),
+        // web 在 `GroupApplyForm` 内直接调 `applyToGroup`（`GroupApplyDialog.tsx:44`）；
+        // Flutter 侧按 B5 的注入口径把这一步留给页面层 —— 本处即那个注入点。
+        // ⚠️ 此前**未传** ⇒ `group_apply.dart:253` 的提交键永久禁用（用户实报「点不动」）。
+        onSubmit: _applyToGroup,
         onJoined: (String conversationId) {
+          // web tsx 486–488：只关弹窗 + 跳群；成员关系由 `group.joined` 帧负责。
           setState(() => _selectedGroup = null);
           final String encoded = Uri.encodeComponent(conversationId);
           context.go('/group/$encoded');
@@ -783,6 +793,36 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       );
     }
     return null;
+  }
+
+  /// 提交入群申请（web `GroupApplyDialog.tsx:44` 的 `applyToGroup(group.id, message)`）。
+  ///
+  /// 两态翻译（tsx 45–49）：
+  /// - `{status:"accepted", conversation_id}` ⇒ [AylaGroupApplyResult.accepted]
+  ///   （表单走 `onDone` ⇒ [onJoined] 跳群）；
+  /// - 申请单（待审批）⇒ [AylaGroupApplyResult.pending]
+  ///   （表单转「申请已发送」成功态，**不跳转**）。
+  ///
+  /// 失败抛 [AylaGroupApplyException]，文案取后端 `detail` 原文（web `e.message`）；
+  /// 兜底「发送入群申请失败」由表单自己给（`group_apply.dart:143`）。
+  /// ⚠️ 两态都不成立（既非 accepted 也没有申请单）⇒ 显式失败，**不伪造成申请成功**。
+  Future<AylaGroupApplyResult> _applyToGroup(
+    AylaGroupApplyData group,
+    String message,
+  ) async {
+    final AylaGroupJoinResult result;
+    try {
+      result = await AylaChatApi.applyToGroup(group.id, message: message);
+    } on ApiException catch (e) {
+      throw AylaGroupApplyException(e.message);
+    }
+    if (result.accepted) {
+      return AylaGroupApplyResult.accepted(result.conversationId!);
+    }
+    if (result.request != null) {
+      return const AylaGroupApplyResult.pending();
+    }
+    throw const AylaGroupApplyException('入群申请响应格式不合法');
   }
 
   Widget _body(bool wide) {

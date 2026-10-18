@@ -10,10 +10,14 @@
 /// | 文案 | `utils/shareRoutes.ts`（[aylaShareTypeLabel] / [aylaShareTargetRoute]） |
 ///
 /// ## 与 web 的差异（有意，登记）
-/// 1. **群申请弹窗**：web 在卡片内嵌 `GroupApplyDialog`（未加入的群 → 不跳转、弹申请）。
-///    `GroupApplyDialog` 属 B5（未开工）⇒ 本件改为注入
-///    [AylaShareBubble.onRequestJoin]，未注入时不做守卫（web 的 store 自查走的是
-///    会话列表，属页面层状态）。
+/// 1. **群申请弹窗**（2026-10-16 **已接线**）。web 在卡片内嵌 `GroupApplyDialog`
+///    （tsx 124–136；未加入的群 → 不跳转、弹申请）。Flutter 侧保留两级注入口：
+///    - [AylaShareBubble.onRequestJoin] 优先（页面层可自定义，例如接自己的弹窗宿主）；
+///    - **未注入时**回退到自给自足档（= web 的原样）：本件自己
+///      [aylaOpenGroupApplyDialog] 打开 [AylaGroupApplyDialog]（root Overlay），
+///      提交走 [aylaSubmitGroupApply]，公开群加入成功后跳群。
+///    唯一**必需的**外部输入仍是 [AylaShareBubble.isGroupJoined]（成员关系在会话列表里，
+///    属页面层状态；未注入 = 不做守卫，与修前一致）。
 /// 2. **存在性检查**：web 点击时异步查各域目录判断群内路径（见 `share_routes.dart`
 ///    文件头）；Flutter 侧默认走静态路由，页面层可注入
 ///    [AylaShareBubble.onResolveTarget] 覆盖。
@@ -27,7 +31,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:go_router/go_router.dart' show GoRouter;
+
 import '../../core/models/chat_message.dart';
+import '../../core/models/subgroup.dart' show AylaGroupApplyData, AylaGroupJoinPolicy;
 import '../../core/models/share_payload.dart';
 import '../../core/models/share_routes.dart';
 import '../../core/media/media_signer.dart';
@@ -37,6 +44,8 @@ import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../base/resource_image.dart';
+import '../group/group_apply.dart'
+    show aylaOpenGroupApplyDialog, aylaShareGroupJoinedOf;
 
 /// 分享来源图标（`ShareBubble.tsx:31–55`）：
 /// group=IconUsers / voice=IconMic / live=IconVideo / post=IconPost /
@@ -138,11 +147,18 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
   Future<void> _handleTap() async {
     if (_resolving) return;
     final AylaSharePayload? payload = _payload;
-    // 群聊分享守卫：未加入的群不能通过分享卡片跳转进入（tsx 77–86）
+    // 群聊分享守卫：未加入的群不能通过分享卡片跳转进入（tsx 77–86）。
+    //
+    // 成员关系取两级（与 web 的同一条判据 `conversations.some(c.id === target && c.type === group)`）：
+    // 1. 注入的 [AylaShareBubble.isGroupJoined]（页面层自定义；也给纯组件测试用）；
+    // 2. 未注入 ⇒ 自查根容器的 chat store（[aylaShareGroupJoinedOf]，= web 的
+    //    `useChatStore.getState()`）。无 ProviderScope ⇒ null ⇒ 不做守卫（与修前一致）。
     if (payload?.shareType == AylaShareType.group) {
-      final bool Function(String)? joined = widget.isGroupJoined;
-      if (joined != null && !joined(payload!.targetId)) {
-        widget.onRequestJoin?.call(payload);
+      final bool? joined =
+          widget.isGroupJoined?.call(payload!.targetId) ??
+              aylaShareGroupJoinedOf(context, payload!.targetId);
+      if (joined == false) {
+        _requestJoin(payload!);
         return;
       }
     }
@@ -157,24 +173,96 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
     }
   }
 
+  /// 未加入的群分享卡被点 ⇒ 弹 GROUP REQUEST（web tsx 124–136 的 `setRequestOpen(true)`）。
+  ///
+  /// 两级注入口（见文件头「与 web 的差异」1）：
+  /// 1. [AylaShareBubble.onRequestJoin] 优先 —— 页面层自定义弹窗宿主时用它；
+  /// 2. 未注入 ⇒ **自给自足档**（= web 原样）：本件自己打开 [AylaGroupApplyDialog]
+  ///    （root Overlay），提交走 [aylaSubmitGroupApply]；公开群加入成功后跳群。
+  ///
+  /// ⚠️ 自给自足档**仍要求** [AylaShareBubble.isGroupJoined] 注入 —— 成员关系在会话列表里，
+  /// 属页面层状态。两者都未注入 ⇒ 不做守卫（与修前行为一致，不凭空造判断）。
+  void _requestJoin(AylaSharePayload payload) {
+    final void Function(AylaSharePayload)? injected = widget.onRequestJoin;
+    if (injected != null) {
+      injected(payload);
+      return;
+    }
+    final AylaGroupJoinPolicy? policy =
+        AylaGroupJoinPolicy.parse(payload.extra?['join_policy']);
+    // 先把打开动作排到本次 tap 的回调之外（同 web 的 setState 语义），
+    // 再用 payload 已知字段起弹窗；缺 join_policy 时 [aylaOpenGroupApplyDialog]
+    // 内部补一次 public-summary（见该函数文档）。
+    aylaOpenGroupApplyDialog(
+      context,
+      group: AylaGroupApplyData(
+        id: payload.targetId,
+        title: payload.title,
+        joinPolicy: policy,
+        avatar: payload.cover,
+      ),
+      onJoined: (String conversationId) {
+        // web 的弹窗缺省 `onJoined` ⇒ GroupApplyDialog 自己 `navigate(`/group/${convId}`)`
+        // （tsx 128–131）。分享卡未注入 onNavigate 时按同一条缺省跳转。
+        final void Function(String route)? navigate = widget.onNavigate;
+        final String route = '/group/${Uri.encodeComponent(conversationId)}';
+        if (navigate != null) {
+          navigate(route);
+          return;
+        }
+        final GoRouter? router = GoRouter.maybeOf(context);
+        router?.go(route);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AylaSharePayload? payload = _payload;
-    return UnconstrainedBox(
-      // 卡片宽度 `width: min(264px, 100%)`：ConstrainedBox(maxWidth:) 在紧父级下会被
-      // `constraints.enforce` 夹回（13 号 §五）⇒ 先松掉横向紧约束。
-      constrainedAxis: Axis.vertical,
+    // ⚠️ **不能用 `UnconstrainedBox`**（2026-10-18 用户实报窄屏分享卡文字溢出，根因在此）：
+    // `UnconstrainedBox(constrainedAxis: vertical)` 虽然能让 `maxWidth:264` 生效，
+    // 但它会给**整棵子树**下发**无界横约束** ⇒ 卡内 `Row` 的 `Expanded` 按内容撑开、
+    // 长无空格 ID（`room_9331…`）直接撑破卡面（Debug 报
+    // `RenderConstraintsTransformBox overflowed by 121 pixels`）。
+    //
+    // 正解：`Align(topLeft)` —— 它把**宽松**（loose）横约束传给子级、
+    // 自身仍占满父级宽（等价 CSS 的 block 容器 + 子元素 `width: min(264px,100%)`），
+    // 子级内部的 `Row/Expanded` 因此拿到**有界**宽度，可正常收窄换行。
+    return Align(
       alignment: Alignment.topLeft,
       child: TweenAnimationBuilder<double>(
         // hover 上浮 1px（web `translateY(-1px)`，transition 200ms ease）
         tween: Tween<double>(begin: 0, end: _hovered ? -1 : 0),
         duration: AylaDurations.button,
         curve: AylaCurves.auroraqua,
-        builder: (BuildContext context, double dy, Widget? child) =>
-            Transform.translate(offset: Offset(0, dy), child: child),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 264),
-          child: AylaPressScale(
+        // ⚠️ **不能用 `child:` 参数承载 LayoutBuilder**（`TweenAnimationBuilder.child`
+        // 会被缓存并在动画期间原样复用 ⇒ `LayoutBuilder` 只在**首次** build 取一次约束，
+        // 窗口/气泡宽度变化后不会重算 —— 实测宽屏下卡片仍按初次的无界约束撑满整行）。
+        // 放进 `builder` 里才会随每帧重建重新测量。
+        builder: (BuildContext context, double dy, Widget? _) => Transform.translate(
+          offset: Offset(0, dy),
+          // ⚠️ **不能用 `Align`**：`Align` 会**尽可能占满父级**（= `Flexible` 给的全部宽度），
+          // 于是外层气泡壳被撑成整行（2026-10-18 实拍：分享卡自身 264 了，但气泡背景仍横贯）。
+          // web 的 `.bubble` 是 `inline-block` 行为 = **按内容收缩** ⇒
+          // 这里用 `Align(widthFactor: 1.0)` 让容器宽 = 子级宽。
+          child: Align(
+            alignment: Alignment.topLeft,
+            widthFactor: 1.0,
+            heightFactor: 1.0,
+            // `.share-bubble-card { width: min(264px, 100%) }`（app.css:1145）。
+            // `width: min(264px, 100%)` 在 CSS 里是**紧宽度**；Flutter 侧必须用
+            // `ConstrainedBox(minWidth: min(264, 可用), maxWidth: min(264, 可用))`
+            // ⇒ 用 `SizedBox` + `LayoutBuilder` 在**同一层**算出紧宽更可靠。
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints c) {
+                final double w = c.maxWidth.isFinite
+                    ? math.min(264.0, c.maxWidth)
+                    : 264.0;
+                // 用 `ConstrainedBox(maxWidth: 264)` 而非 `SizedBox`：与 web
+                // `width: min(264px, 100%)` 同义，且保留测试/后续读 `maxWidth` 的契约。
+                return ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: w),
+                  child: AylaPressScale(
             // `.share-bubble-card` 不在 auroraqua 按钮组：hover 是 -1px 位移（非 1.02），
             // 但 `:active { transform: scale(.98) }` 属实（app.css 1164–1166）且自身
             // transition 就是 200ms ease ⇒ 只开压档。
@@ -201,9 +289,25 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
                 dimAlpha: _disabled ? 0.7 : null,
                 child: Opacity(
                   opacity: _disabled ? 0.7 : 1.0,
-                  child: _body(payload),
+                  // ⚠️ `.share-bubble-card { overflow: hidden }`（app.css:1158）——
+                  // 长无空格串（如 `room_93312df4af194c8...`）在**窄气泡**里会把
+                  // 标题撑出卡片右边界（2026-10-18 用户截图实报：文字溢出卡面、
+                  // 视觉上像"错位"）。web 靠 `overflow:hidden` 裁掉；
+                  // 阴影在 border-box **之外**绘制（CSS 规范），所以这层裁剪不影响卡阴影。
+                  // 半径与 `--radius-input` 一致、比卡面小 1px（边框内侧）。
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(
+                      AylaRadii.rInput - 1,
+                    ),
+                    clipBehavior: Clip.hardEdge,
+                    child: _body(payload),
+                  ),
                 ),
               ),
+            ),
+              ),
+            );
+              },
             ),
           ),
         ),
@@ -214,7 +318,13 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
   Widget _body(AylaSharePayload? payload) {
     final String cover = (payload?.cover ?? '');
     return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 64 - 2 * AylaSpacing.sp2),
+      // 只夹 **maxWidth**（= 卡片内容宽上限），不再重复扣 padding：
+      // 外层已用 `SizedBox(width: min(264, 可用))` 锁住整卡宽，
+      // 而本件是 `AylaGlassSurface(padding: sp2)` 的 child ⇒ 拿到的
+      // 可用宽**已经**是 264 − 2×sp2。此处只作防御性上限（防内容撑破）。
+      constraints: const BoxConstraints(
+        minHeight: 64 - 2 * AylaSpacing.sp2,
+      ),
       child: Row(
         // web `.share-bubble-card { align-items: stretch }` 只让 **meta 列**占满高度
         // （其内部 `justify-content: center` 做垂直居中）；封面有显式 72×72，
@@ -241,9 +351,14 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
           ),
           const SizedBox(width: AylaSpacing.sp3),
           Expanded(
+            // ⚠️ **`crossAxisAlignment: start` + 宽松横约束 ⇒ Column 会按最宽子级撑开**，
+            // 而 `Text` 在「横向无紧约束」时会一路撑到内容宽（长无空格 ID 不断行），
+            // 结果整列溢出卡面（2026-10-18 用户截图 + Debug 黄黑溢出条）。
+            // web 的 `.share-bubble-meta { flex:1; min-width:0 }` 里 `min-width:0` 正是
+            // 让 flex 子项**可以被压窄** ⇒ 这里用 `stretch` 把列宽锁成 Expanded 给的宽。
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
                   _title,

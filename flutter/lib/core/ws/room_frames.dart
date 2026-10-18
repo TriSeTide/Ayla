@@ -46,15 +46,19 @@ library;
 import 'dart:async';
 
 import '../../state/boardgame_store.dart';
+import '../../state/chat_state.dart' show AylaChatState;
 import '../../state/directory_events.dart' show AylaDirectoryEvents, AylaDirectoryKind;
 import '../../state/directory_store.dart' show AylaDirectoryStore;
 import '../../state/live_state.dart';
 import '../../state/voice_state.dart';
 import '../../widgets/live/live_channel_snapshot.dart';
+import '../../widgets/live/live_hall.dart' show AylaLiveStatus;
 import '../api/boardgame_api.dart';
 import '../api/live_api.dart';
 import '../api/voice_api.dart';
 import '../models/game_room.dart' show AylaGameRoom;
+import '../../state/realtime_state.dart' show AylaRealtimeState;
+import 'group_presence.dart' show AylaGroupPresenceReconciler;
 import '../net/dio_client.dart' show ApiException;
 import 'chat_ws.dart';
 
@@ -86,15 +90,40 @@ class AylaRoomDirectoryBridge {
     required String? Function() currentUserId,
     AylaDirectoryEvents? directory,
     AylaDirectoryStore? directoryStore,
+    AylaChatState? chatState,
+    AylaRealtimeState? realtime,
+    AylaGroupPresenceReconciler? groupPresence,
   })  : _voice = voiceState,
         _live = liveState,
         _directory = directory,
         _directoryStore = directoryStore,
         _boardgame = boardgameStore,
-        _currentUserId = currentUserId;
+        _currentUserId = currentUserId,
+        _chat = chatState,
+        _realtime = realtime,
+        _presence = groupPresence;
 
   final AylaVoiceState _voice;
   final AylaLiveState _live;
+
+  /// 会话全局状态（web 的 `useChatStore`）—— **只用于「新内容 → 群往前排」的 bump**
+  /// （web `ws/chat.ts:115–118` 的 `bumpGroups`；三处调用 `:674 / :715–717 / :737–741`）。
+  ///
+  /// ⚠️ 可空：历史测试与「只关心域 store」的调用点不注入 ⇒ 退化为不 bump
+  /// （web 侧那三条 `bumpGroups` 在 chat store 未就绪时同样是空转）。
+  final AylaChatState? _chat;
+
+  /// 连接状态表（web `useRealtimeStore`）—— 群 presence 对账失败时写 failed 档
+  /// （web `chat.ts:373`）；可空 = 不报连接状态（旧测试/纯 store 调用点）。
+  final AylaRealtimeState? _realtime;
+
+  /// 群 presence 对账器（web `chat.ts:335–378` 的 `queueGroupPresence` /
+  /// `refreshGroupPresence`；实现见 `core/ws/group_presence.dart`）。
+  ///
+  /// 注入优先（测试可传假后端）；未注入且注入了 [AylaChatState] ⇒ 懒建一个默认实现
+  /// （与生产同参：chatState + realtime + 当前用户 + 退订回调）。
+  /// **两者都没有** ⇒ 不接（历史测试的「只关心域 store」档）。
+  AylaGroupPresenceReconciler? _presence;
 
   /// 目录 store（web `stores/directory.ts` 的模块级 `useDirectoryStore`）——
   /// `*.created` / `*.deleted` 帧的 `createdIds` / 删除摘除落点。
@@ -149,16 +178,58 @@ class AylaRoomDirectoryBridge {
 
   void Function()? _off;
 
+  /// 挂上的 chat WS（群 presence 对账要调它的 [AylaChatWsClient.unsubscribe]）。
+  AylaChatWsClient? _chatWs;
+
   /// 挂到 chat WS 上（幂等）。
   void attach(AylaChatWsClient chat) {
     _off?.call();
+    _chatWs = chat;
     _off = chat.onFrame(handleFrame);
   }
 
   /// 解绑（登出/测试收尾）。
+  ///
+  /// 同时 [AylaGroupPresenceReconciler.reset]：清掉合并窗口与在飞标记
+  /// （web `chat.ts:968–976` 的 `disconnect()` 同口径），避免登出后仍有
+  /// 定时器在跑、又把结果写进已清空的会话列表。
   void detach() {
     _off?.call();
     _off = null;
+    _chatWs = null;
+    _presence?.reset();
+  }
+
+  /// 群 presence 对账器（懒建；见 [AylaGroupPresenceReconciler]）。
+  ///
+  /// 注入优先；否则**只有**在注入了 [AylaChatState] 时才建默认实现
+  /// （否则没有任何会话可对账，建出来也只是空转）。
+  AylaGroupPresenceReconciler? get _groupPresence {
+    AylaGroupPresenceReconciler? existing = _presence;
+    if (existing != null) return existing;
+    final AylaChatState? chat = _chat;
+    if (chat == null) return null;
+    existing = AylaGroupPresenceReconciler(
+      chatState: chat,
+      realtime: _realtime,
+      currentUserId: _currentUserId,
+      unsubscribe: (String convId) => _chatWs?.unsubscribe(convId),
+    );
+    _presence = existing;
+    return existing;
+  }
+
+  /// 帧到达后的群 presence 失效信号（web `chat.ts:946–948`）。
+  ///
+  /// web 判据逐字：`voice.channel.` / `live.channel.` / `boardgame.room.`
+  /// 三个**命名空间前缀**（因此 `live.viewers.changed` 不触发 —— 它是瞬态投影，
+  /// 不属于 `live.channel.*`）；合并与对账交给对账器（250ms 窗口 + 分批 100）。
+  void _queueGroupPresenceFor(String type) {
+    if (type.startsWith('voice.channel.') ||
+        type.startsWith('live.channel.') ||
+        type.startsWith('boardgame.room.')) {
+      _groupPresence?.queueGroupPresence();
+    }
   }
 
   /// 处理一帧（测试可直接投喂）。
@@ -170,6 +241,15 @@ class AylaRoomDirectoryBridge {
   void handleFrame(Map<String, dynamic> frame) {
     final Object? rawType = frame['type'];
     if (rawType is! String) return;
+    _handleFrameBody(frame, rawType);
+    // web `chat.ts:946–948`：三条房间帧族**之后**登记群 presence 失效信号
+    // —— 位置在 switch 之后、`handlers` 广播之前，且**不因分支内提前 return 而跳过**
+    // （web 的 switch 分支里没有 return，故这里包一层保证同语义）。
+    _queueGroupPresenceFor(rawType);
+  }
+
+  /// [handleFrame] 的分支主体（原实现，逐条不动）。
+  void _handleFrameBody(Map<String, dynamic> frame, String rawType) {
     switch (rawType) {
       case 'voice.channel.created':
         final String id = _channelId(frame);
@@ -177,7 +257,8 @@ class AylaRoomDirectoryBridge {
         // web `stores/directory.ts:228–234`：登记创建提示（60s），
         // 供随后的 `updateCachedItems` 判定「这条新增属于哪些查询」。
         _noteCreated(AylaDirectoryKind.voice, id);
-        unawaited(_reconcileVoiceChannel(id));
+        // web `chat.ts:674`：新语音房创建 ⇒ 可见群卡片往前排（详情确认后 bump）。
+        unawaited(_reconcileVoiceChannel(id, bumpActivity: true));
       case 'voice.channel.updated':
         // 改名/可见性/转让 ⇒ 以权限 REST 详情为权威对账（web `chat.ts:720–727`）。
         // ⚠️ 不登记创建提示：`updated` 不是新增（web 的帧跟踪只认 `.created`/`.deleted`）。
@@ -197,8 +278,17 @@ class AylaRoomDirectoryBridge {
         _noteCreated(AylaDirectoryKind.live, id);
         unawaited(_reconcileLiveChannel(id));
       case 'live.channel.updated':
-      case 'live.channel.status.changed':
+        // web `chat.ts:751–755`：资料编辑 ⇒ 只 reconcile，**不 bump**。
         unawaited(_reconcileLiveChannel(_channelId(frame)));
+      case 'live.channel.status.changed':
+        // web `chat.ts:732–744`：状态变化 ⇒ reconcile；**开播**时（帧 status==live）
+        // 详情确认后再 bump 可见群（下播/结束不回退）。
+        unawaited(
+          _reconcileLiveChannel(
+            _channelId(frame),
+            bumpOnLive: _liveFrameStatusIsLive(frame),
+          ),
+        );
       case 'live.channel.deleted':
         final String id = _channelId(frame);
         if (id.isEmpty) return;
@@ -232,9 +322,30 @@ class AylaRoomDirectoryBridge {
     }
   }
 
+  /// 「新内容 → 可见群往前排」的 bump（web `ws/chat.ts:115–118` 的 `bumpGroups`）。
+  ///
+  /// `visibleGroupIds`（web `:102–112`）= **归属群 ∪ 白名单群**；chatState 未注入时不动作。
+  void _bumpGroups({
+    String? group,
+    Iterable<String> allowedGroupIds = const <String>[],
+  }) {
+    final AylaChatState? chat = _chat;
+    if (chat == null) return;
+    aylaBumpGroups(
+      chat,
+      aylaVisibleGroupIds(group: group, allowedGroupIds: allowedGroupIds),
+    );
+  }
+
   /// `voice.channel.created/updated`：**帧只是提示，REST 详情才是权威**
   /// （权限过滤由后端做，避免把受限频道插进列表；web `chat.ts:667–678` 原话）。
-  Future<void> _reconcileVoiceChannel(String channelId) async {
+  ///
+  /// ⚠️ `bumpGroups` **只在 `.created` 分支**（web `:674` 在 `voice.channel.created` 里，
+  /// `.updated` 分支 `:720–727` 没有）⇒ 由调用方用 [bumpActivity] 显式控制。
+  Future<void> _reconcileVoiceChannel(
+    String channelId, {
+    bool bumpActivity = false,
+  }) async {
     if (channelId.isEmpty) return;
     final String? actor = _currentUserId();
     try {
@@ -244,6 +355,14 @@ class AylaRoomDirectoryBridge {
       // ① 落域 store —— 目录缓存由 store 订阅通路（`directory_tracking.dart`）patch，
       // 这正是 web 的机制（`chat.ts:672` → `stores/directory.ts:211–213`）。
       _voice.upsertChannel(channel);
+      // ② web `chat.ts:674`：新语音房创建 ⇒ 其可见群卡片往前排（单调）。
+      //    只在「REST 详情确认可见」之后 bump —— 权限过滤前的帧可能指向不可见频道。
+      if (bumpActivity) {
+        _bumpGroups(
+          group: channel.group,
+          allowedGroupIds: channel.allowedGroupIds,
+        );
+      }
     } on ApiException catch (_) {
       // 403/404：当前用户不可见或频道已删除 —— 静默（web 同）
     } catch (_) {
@@ -264,6 +383,9 @@ class AylaRoomDirectoryBridge {
     if (channelId.isEmpty) return;
     final int? count = (data['member_count'] as num?)?.toInt();
     if (count == null) return;
+    // web `chat.ts:691–694`：先取**帧到达前**的本地条目与人数，用于「人数增加才 bump」判据。
+    final AylaVoiceChannelSnapshot? prev = _voice.channelOf(channelId);
+    final int prevCount = prev?.memberCount ?? 0;
     final Object? occupied = data['last_occupied_at'];
     final Object? vacant = data['last_vacant_at'];
     final bool frameHasSort = occupied != null || vacant != null;
@@ -276,11 +398,27 @@ class AylaRoomDirectoryBridge {
     if (!frameHasSort) {
       unawaited(_reconcileVoiceChannel(channelId));
     }
+    // web `chat.ts:714–717`：**有人进入（人数增加）⇒ 群卡片往前排**；
+    // 离开/被踢（人数减少）**不回退**。判据用「帧里的新人数 > 帧前的本地人数」。
+    if (count > prevCount && prev != null) {
+      _bumpGroups(
+        group: prev.group,
+        allowedGroupIds: prev.allowedGroupIds,
+      );
+    }
   }
 
   /// `live.channel.created/status.changed/updated`：拉完整详情对账
   /// （web `reconcileLiveChannel`；列表卡/侧栏实时刷新）。
-  Future<void> _reconcileLiveChannel(String channelId) async {
+  ///
+  /// [bumpOnLive]：详情 `status == live` 时才 bump 可见群 —— 对应 web：
+  /// - `live.channel.status.changed` 分支 `chat.ts:732–744`：帧 `status == "live"` 才继续拉详情，
+  ///   且**详情确认** `channel.status == "live"` 后 `bumpGroups`（下播/结束不回退）；
+  /// - `live.channel.created` / `.updated` 分支（`chat.ts:728–731 / :751–755`）**不做 bump**。
+  Future<void> _reconcileLiveChannel(
+    String channelId, {
+    bool bumpOnLive = false,
+  }) async {
     if (channelId.isEmpty) return;
     final String? actor = _currentUserId();
     try {
@@ -289,6 +427,14 @@ class AylaRoomDirectoryBridge {
       if (actor != _currentUserId()) return;
       // ① 落域 store（目录缓存由 store 订阅通路 patch；web `chat.ts:730` + :209）。
       _live.upsertChannel(channel);
+      // ② web `chat.ts:737–741`：开播 ⇒ 拉详情确认可见群后 bump（单调往前排）；
+      //    下播/结束**不回退**（非 live 时什么都不做）。
+      if (bumpOnLive && channel.status == AylaLiveStatus.live) {
+        _bumpGroups(
+          group: channel.group,
+          allowedGroupIds: channel.allowedGroupIds,
+        );
+      }
     } on ApiException catch (_) {
       // 403/404：当前用户不可见或已删除 —— 静默
     } catch (_) {
@@ -330,6 +476,16 @@ class AylaRoomDirectoryBridge {
     } catch (_) {
       // 网络层失败：下一次事件或显式刷新会纠正 —— 静默，不伪造条目
     }
+  }
+
+  /// `live.channel.status.changed` 帧里的 `data.status` 是否为 `live`
+  /// —— web `chat.ts:734` 的 `if (frame.data.status === "live")`。
+  ///
+  /// 缺字段/非字符串 ⇒ false（不猜语义；web 对 `undefined === "live"` 同样为假）。
+  static bool _liveFrameStatusIsLive(Map<String, dynamic> frame) {
+    final Object? raw = frame['data'];
+    if (raw is! Map) return false;
+    return Map<String, dynamic>.from(raw)['status'] == 'live';
   }
 
   /// `data.channel_id`（voice / live 两类帧同一位置；`api/types.ts:663–727`）。

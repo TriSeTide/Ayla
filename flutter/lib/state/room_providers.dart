@@ -30,7 +30,9 @@ import '../core/ws/posts_frames.dart' show AylaPostsFramesBridge;
 import '../core/ws/room_frames.dart' show AylaRoomDirectoryBridge;
 import '../core/ws/voice_ws.dart';
 import '../core/ws/ws_manager.dart' show WsManager, wsManager;
+import '../audio/voice_media.dart' show aylaVoiceMediaTeardown;
 import '../pages/live_support.dart' show aylaCloseLiveMiniPlayer;
+import '../pages/voice_support.dart' show voiceSessionRuntime;
 import 'auth_state.dart';
 import 'boardgame_store.dart' show AylaBoardgameStore, aylaBoardgameStore;
 import 'chat_providers.dart'
@@ -153,6 +155,11 @@ final Provider<AylaRoomDirectoryBridge> roomDirectoryBridgeProvider =
     // web `stores/directory.ts` 的模块级 `useDirectoryStore`（帧直连通路的落点）。
     directoryStore: aylaDirectoryStore,
     boardgameStore: aylaBoardgameStore,
+    // web `useChatStore`（模块级全局 store）—— 「开播/建语音房/有人进房 ⇒ 群往前排」
+    // 的 bump 落点（`ws/chat.ts:115–118 / :674 / :715–717 / :737–741`）。
+    chatState: ref.read(chatStateProvider),
+    // 群 presence 对账的失败档落点（web `useRealtimeStore`；`chat.ts:373`）。
+    realtime: ref.read(realtimeProvider),
     currentUserId: () => container.read(authNotifierProvider).user?.id,
   );
   ref.onDispose(bridge.detach);
@@ -377,7 +384,34 @@ AylaVoiceWsClient aylaStartVoiceWs(WidgetRef ref) {
 }
 
 /// 登出 / 401 过期：断开两条房内通道 + 解绑两条帧桥 + 清空房内状态。
+/// 登出 / 401 过期时的**语音收尾**（幂等；调用方不必再单独处理）。
+///
+/// 逐条对齐 web `stores/auth.ts:125–136` 的 `logout`：
+/// ```ts
+/// voiceSessionRuntime.cancelSelection();      // :127
+/// voiceSessionRuntime.stopHeartbeat();        // :128
+/// voiceSessionRuntime.setMediaChannel(null);  // :129
+/// voiceWS.disconnect();                       // :135（由 aylaStopRooms 的 voiceWsProvider 承担）
+/// void voiceLiveKit.disconnect();             // :136
+/// ```
+///
+/// **2026-10-17 补齐**：此前 Flutter 侧登出只断 `voiceWs`（在 [aylaStopRooms] 内），
+/// 漏了上面四条 ⇒ 登出后：① 语音心跳继续跑（对端看到"还在房里"）；
+/// ② 媒体归属仍指向旧频道（下次进同一频道会误判 `ownsMedia`）；
+/// ③ WebAudio 设备与中继 WS 不释放（换号登录继承上一账号的音频会话）；
+/// ④ 路由选择代际不复位（`selectedChannelId` 残留）。
+///
+/// 顺序与 web 一致：**先 runtime 后媒体**。
+void aylaVoiceRuntimeTeardown() {
+  voiceSessionRuntime.cancelSelection(); // auth.ts:127
+  voiceSessionRuntime.stopHeartbeat(); // auth.ts:128
+  voiceSessionRuntime.setMediaChannel(null); // auth.ts:129
+  aylaVoiceMediaTeardown(); // auth.ts:136（voiceLiveKit.disconnect）
+}
+
 void aylaStopRooms(WidgetRef ref) {
+  // web `stores/auth.ts:126–136` 的语音四项收尾（见 [aylaVoiceRuntimeTeardown]）。
+  aylaVoiceRuntimeTeardown();
   aylaStopLiveMiniPlayer();
   // web `stores/auth.ts:139` 的 `useSessionActivityStore.getState().reset()`：
   // 跨页面悬浮球的索引必须随登出清空，否则下一位登录者会看到上一位的球。
@@ -396,6 +430,8 @@ void aylaStopRooms(WidgetRef ref) {
 
 /// 同上（`ProviderContainer` 版，`main.dart` 的 `onSessionExpired` 用）。
 void aylaStopRoomsForContainer(ProviderContainer container) {
+  // 同 [aylaStopRooms]：web `stores/auth.ts:126–136` 的语音四项收尾。
+  aylaVoiceRuntimeTeardown();
   aylaStopLiveMiniPlayer();
   // 同上（容器版，`main.dart` 的 401 过期路径）。`reset()` 对未登录进程是 no-op。
   aylaSessionActivity.reset();
