@@ -225,6 +225,7 @@ class AylaGlassBackdrop extends StatelessWidget {
     this.radius,
     this.child,
     this.repaintBoundary = true,
+    this.entryController,
   });
 
   /// 真玻璃档的滤镜（blur / blur+saturate），由 [AylaGlassConfig] 构造。
@@ -248,6 +249,13 @@ class AylaGlassBackdrop extends StatelessWidget {
   /// 极少数调用点把内容画在滤镜层内（弹层遮罩色、圆形播放键里的图标）——
   /// 真玻璃档下保持原结构，故透传；预模糊档下它被挪到采样层**之上**。
   final Widget? child;
+
+  /// 入场期由 `AylaRevealItem` 下发的 [SnapshotController]（null = 不在入场中）。
+  ///
+  /// 传给背底层纹理缓存 [_AylaBackdropCache]：入场期沿用它的**错峰捕获**，
+  /// 入场结束后继续用同一个 controller ⇒ 零成本交接（纹理不重捕获、无解冻帧峰值）。
+  /// 无入场上下文时缓存会自建 controller，行为与改前一致（见 [_AylaBackdropCache]）。
+  final SnapshotController? entryController;
 
   @override
   Widget build(BuildContext context) {
@@ -292,7 +300,49 @@ class AylaGlassBackdrop extends StatelessWidget {
         // ⚠️ 若背景线把 `aurora_background.dart:1106` 的边界下移到「只包背景层」，
         // 这里就会变成冗余边界 —— 届时可连同本条注释一起评估移除。
         // ⚠️ 快照档（`repaintBoundary: false`）必须去掉它：见字段注释（解冻后空白的根因）。
-        return repaintBoundary ? RepaintBoundary(child: clipped) : clipped;
+        // ⚠️ **背底层纹理缓存下沉到本件**（2026-10-17，性能 P0）。
+        //
+        // 此前缓存只接在 [AylaGlassSurface] 内部（`:898-912`），而**直接调用本件的
+        // 15 处玻璃件**（别人气泡 / 按钮 / 输入框 / 弹层 / 会话菜单 …）全部落空：
+        // 每个别人气泡 = 一个**每帧实时 blur(12)** 的 `BackdropFilter` 且绕过缓存
+        // （实测 20 条消息列表 = 8 个在屏活 backdrop）。缓存本身的收益早已量化：
+        // 6 卡静止背景 **7.59ms（开）vs 34.47ms（关）**，即 −78%。
+        //
+        // 下沉后「是否需要缓存」只由**本件实际面积**决定（`LayoutBuilder`），与谁调用无关；
+        // 硬约束保持不变：`SnapshotWidget` 子树内必须 `repaintBoundary: false`
+        // （见 [repaintBoundary] 字段注释），因此下面的边界要在缓存**之外**。
+        //
+        // 默认视觉不变：缓存只把「每帧重采样」换成「错峰重采样 + 画纹理」，
+        // 冻结纹理与实时模糊的卡内色差实测 |Δ|max = 4.9/255（既有锁
+        // `reveal_snapshot_motion_test` 的容差 6.0 之内）；且 `backdropCacheEnabled`
+        // 一键回到改前行为。
+        // 顺序很重要：**缓存在内、RepaintBoundary 在外**。
+        // 「快照子树内不得出现 repaint-boundary layer」（上方字段注释的硬约束）
+        // ⇒ 缓存捕获的 `clipped` 必须是不带边界的结构；边界包住整个缓存即可，
+        // 因为缓存自身不产生 repaint-boundary layer（`SnapshotWidget` 是 RenderProxyBox）。
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints c) {
+            final bool cacheable = AylaGlassConfig.backdropCacheEnabled &&
+                c.maxWidth.isFinite &&
+                c.maxHeight.isFinite &&
+                c.maxWidth * c.maxHeight >= kAylaBackdropCacheMinArea;
+            if (!cacheable) {
+              return repaintBoundary
+                  ? RepaintBoundary(child: clipped)
+                  : clipped;
+            }
+            final Widget cached = _AylaBackdropCache(
+              enabled: true,
+              // 入场期沿用 `AylaRevealItem` 下发的 controller（错峰捕获在那边）；
+              // 入场结束后本件继续沿用它 ⇒ 零成本交接，不再有「解冻帧」峰值。
+              entryController: entryController,
+              child: clipped,
+            );
+            return repaintBoundary
+                ? RepaintBoundary(child: cached)
+                : cached;
+          },
+        );
     }
   }
 }
@@ -371,16 +421,26 @@ class _AylaBackdropSnapshotPainter extends CustomPainter {
 
 /// 背底层快照缓存的**最小启用面积**（逻辑像素²）。
 ///
-/// 阈值必须**同时覆盖窄屏卡片**（2026-10-01 用户实机：「不只是语音卡，窄屏都有问题的，
-/// 不要再漏了」）：此前 40000（≥200×200）只放进了宽屏大卡，**窄屏两列卡只有
-/// ~170×150 ≈ 26000** ⇒ 全部落到「无缓存」档 ⇒ 又变成 `Opacity` 罩在实时
-/// `BackdropFilter` 上 ⇒ 实机「动画过程中卡片颜色不对」（正是宽屏靠本缓存修好的那一条）。
-/// 取 20000（≈141×141）：
-/// · 覆盖**窄屏的全部卡片**（两列 / 单列都好）；
-/// · 仍然挡掉按钮（36×36=1296）、输入框（24 0×36≈8640）、徽标一类小件 ——
-///   它们单次模糊面积小、数量极多（画布 chat 分类就有 140 个 `BackdropFilter`），
-///   加捕获开销得不偿失。
-const double kAylaBackdropCacheMinArea = 20000;
+/// ## 2026-10-17（性能 P0）：20000 → **4000**
+///
+/// 缓存此前只接在 [AylaGlassSurface] 内部，导致**直接调用 [AylaGlassBackdrop] 的
+/// 15 处玻璃件全部落空**；其中最贵的是「别人的消息气泡」（`message_bubble.dart:908`，
+/// `blur(12)`）：面积 425×43 ≈ **18275** ⇒ 恰好 **低于旧阈值 20000**，
+/// 于是每条别人的消息都是一个**每帧实时高斯模糊**（实测 20 条消息列表 = 8 个在屏活 backdrop）。
+///
+/// 缓存下沉到 [AylaGlassBackdrop] 后，阈值口径改为「覆盖**有实际面积的玻璃件**：
+/// 气泡 / 输入框，仍然挡掉按钮与徽标」。取 4000（≈64×64）：
+/// · 覆盖别人气泡（425×43≈18275）、输入框（240×36≈8640）、会话行、
+///   弹层 / 菜单卡片 —— 这些是**同屏数量最多**的玻璃件；
+/// · 仍挡掉按钮（36×36=**1296**）与图标钮：单次模糊面积小、数量极多（画布 chat 分类
+///   就有 140 个 `BackdropFilter`），给它们加捕获开销得不偿失（一处屏幕 8–15 个，
+///   每次捕获都是一次同步离屏渲染）。
+/// · 窄屏卡片（~170×150 ≈ 26000，2026-10-01 用户实机报过的档）**继续覆盖**。
+///
+/// ⚠️ 阈值只影响「是否冻结」，不影响任何颜色/圆角/透明度 —— 冻结纹理与实时模糊的
+/// 卡内色差实测 |Δ|max = 4.9/255（`reveal_snapshot_motion_test` 容差 6.0 之内），
+/// 且 `AylaGlassConfig.backdropCacheEnabled = false` 一键回到改前行为。
+const double kAylaBackdropCacheMinArea = 4000;
 
 /// 背底层快照的**刷新周期**（静止时每张卡按自己的相位错峰重新捕获）。
 ///
@@ -542,10 +602,32 @@ class _AylaBackdropCacheState extends State<_AylaBackdropCache> {
     _onScrollChanged();
   }
 
+  /// 滚动状态变化 —— **只调刷新周期，绝不 setState**（2026-10-17 实修）。
+  ///
+  /// ⚠️ **不能用 `setState`**（这里曾写 `setState(() => _scrolling = now)`）：
+  /// `ScrollPosition.isScrollingNotifier` 的通知会在 **layout / 绘制过程中**发出
+  /// （`RenderViewport.performLayout` 期间），此时 setState 会触发「同一帧内重新 build」：
+  ///
+  /// ```
+  /// Build scheduled during frame.
+  /// A _RenderLayoutBuilder was mutated in RenderViewport.performLayout.
+  /// Failed assertion: 'debugNeedsLayout': is not true.   ← 抛在 AylaGlassBackdrop
+  /// ```
+  ///
+  /// 本件位于 [AylaGlassBackdrop] 内部、**外面就是它自己的 `LayoutBuilder`**（性能 P0
+  /// 下沉后的结构）⇒ 这个 setState 会直接突变正在 layout 的 `_RenderLayoutBuilder`。
+  /// 改前 `AylaGlassSurface` 内部也包了缓存，但只有「面积 ≥ 阈值的大卡」才有
+  /// `LayoutBuilder + 缓存`，聊天页气泡全都不在内；下沉后**每个气泡都有**，
+  /// 一滚动就成片触发 ⇒ `message_jump_tag_test` 8/8 全红。
+  ///
+  /// **为什么可以直接去掉**：字段 `_scrolling` 只被 [_period] 读，而 [_period] 只用于
+  /// [_scheduleRefresh] 的 `Timer` 时长 —— **`build` 完全不读它**，所以重建 widget
+  /// 没有任何意义（只是白白触发一次 build）。改成直接赋值后：
+  /// 结构不变、视图不变，只有「下次重捕获的间隔」按新周期重排。
   void _onScrollChanged() {
     final bool now = _position?.isScrollingNotifier.value ?? false;
     if (now == _scrolling) return;
-    setState(() => _scrolling = now);
+    _scrolling = now;
     _sync();
   }
 
@@ -841,11 +923,14 @@ class AylaGlassSurface extends StatelessWidget {
     final SnapshotController? frozen = useSnapshot ? snapshot : null;
     final Widget backdropLayer = AylaGlassBackdrop(
       radius: radiusValue,
-      // ⚠️ **恒不挂滤镜层边界**：本件会被 [_AylaBackdropCache] 的 `SnapshotWidget` 包住
-      //（捕获用独立离屏 layer ⇒ 子树里的 repaint-boundary layer 会被 detach + dispose）；
-      // 而整卡在 `build` 里已有自己的 `RepaintBoundary`（2026-09-30 第九批），
-      // 背景层也已有独立边界（`aurora_background.dart`）⇒ 这一层边界已是冗余。
+      // ⚠️ **恒不挂滤镜层边界**：本件会被背底层纹理缓存 [_AylaBackdropCache] 的
+      // `SnapshotWidget` 包住（捕获用独立离屏 layer ⇒ 子树里的 repaint-boundary layer
+      // 会被 detach + dispose）；而整卡在 `build` 里已有自己的 `RepaintBoundary`
+      //（2026-09-30 第九批），缓存边界也由本件内部挂在快照**之外**。
       repaintBoundary: false,
+      // 2026-10-17（性能 P0）：缓存已下沉进 [AylaGlassBackdrop]，这里只负责把
+      // 入场期的错峰捕获 controller 透传下去 —— 本件不再自己包一层缓存。
+      entryController: frozen,
       filter: ImageFilter.compose(
         // 外层：饱和度 1.4（在模糊结果上做，等价 CSS 顺序）
         outer: const ColorFilter.matrix(kSaturation14),
@@ -894,22 +979,12 @@ class AylaGlassSurface extends StatelessWidget {
                 // `_AylaBackdropCache` 把大卡的背底层冻成纹理并错峰刷新，等价 web 的
                 // **合成层纹理缓存**（web 的入场只动 opacity/transform ⇒ 模糊结果被缓存、
                 // 动画期零重算；Flutter 的 `BackdropFilter` 是每帧重采 + 重模糊）。
-                // 面积阈值由 `LayoutBuilder` 给出：小件（按钮/输入框）不开，避免放大开销。
-                child: LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints c) {
-                    final bool big = AylaGlassConfig.backdropCacheEnabled &&
-                        c.maxWidth.isFinite &&
-                        c.maxHeight.isFinite &&
-                        c.maxWidth * c.maxHeight >= kAylaBackdropCacheMinArea;
-                    return _AylaBackdropCache(
-                      enabled: big,
-                      // 入场期沿用 `AylaRevealItem` 下发的 controller（错峰捕获在那边）；
-                      // 入场结束后本件继续沿用它 ⇒ 零成本交接，不再有「解冻帧」峰值。
-                      entryController: frozen,
-                      child: backdropLayer,
-                    );
-                  },
-                ),
+                //
+                // ⚠️ **2026-10-17（性能 P0）：缓存已下沉进 [AylaGlassBackdrop] 自身** ——
+                // 由它在内部按「本件实际面积」决定是否冻结（阈值
+                // [kAylaBackdropCacheMinArea]）。此处**只传 entryController**，不再包
+                // 第二层缓存（两层 `SnapshotWidget` 会互相打架）。
+                child: backdropLayer,
               ),
               // ② 阴影环（在模糊层之上、卡面之下；只画形状之外）
               if (shadow.isNotEmpty)
