@@ -43,13 +43,16 @@ void main() {
       expect(r1.originalExpired, isFalse);
     });
 
-    test('预签名 URL → 同源 /minio 代理路径', () async {
+    test('预签名 URL → 同源 /minio 代理的绝对地址', () async {
       final c = _FakeClient();
       final s = MediaSigner.instance..attach(c);
       s.invalidate('m2');
       final r = await s.sign('m2');
-      expect(r.url.startsWith('/minio/'), isTrue,
-          reason: 'toSameOriginMinio：绝对 URL 替换为 /minio 前缀');
+      // 2026-10-18：`Image.network`/media_kit 需要绝对 URL，故现在是
+      // `${aylaApiBase()}/minio/...`（不再是裸 `/minio/...` 相对路径）。
+      expect(r.url.contains('/minio/'), isTrue,
+          reason: 'toSameOriginMinio：对象存储 origin 替换为同源 /minio 前缀');
+      expect(r.url.startsWith('http'), isTrue, reason: '必须是绝对地址');
       expect(r.url.contains('minio.local'), isFalse);
     });
 

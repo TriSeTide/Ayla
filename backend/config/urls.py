@@ -15,4 +15,5 @@ urlpatterns = [
     path("api/v1/boardgame/", include("apps.boardgame.urls")),
     path("api/v1/search/", include("apps.search.urls")),
     path("api/v1/favorites/", include("apps.favorites.urls")),
+    path("api/v1/updates/", include("apps.releases.urls")),
 ]

@@ -16,10 +16,11 @@
 /// 换自定义 HttpClientAdapter 显式 `request.contentLength = bytes.length`。
 library;
 
-import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+
+import 'api_endpoint.dart';
 
 /// 统一 API 根路径（后端挂载在 /api/v1/，同 web API_PREFIX）。
 const String kApiPrefix = '/api/v1';
@@ -109,9 +110,9 @@ class DioClient {
 
   String get _baseUrl {
     if (debugBaseUrlOverride.isNotEmpty) return debugBaseUrlOverride;
-    if (kIsWeb) return 'http://127.0.0.1:8100';
-    if (Platform.isAndroid) return 'http://10.0.2.2:8100';
-    return 'http://127.0.0.1:8100';
+    // 唯一推导处见 `core/net/api_endpoint.dart`（release 构建用
+    // `--dart-define=AYLA_API_BASE=<远端 origin>` 指向远端 Ayla 后端）。
+    return aylaApiBase();
   }
 
   /// 401 静默刷新 + 重放一次拦截器（web api/client.ts 语义）。

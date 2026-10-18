@@ -104,6 +104,8 @@ enum AylaTopNavVariant {
 enum AylaTopNavMenuAction {
   profile('个人主页'),
   favorites('我的收藏'),
+  /// 检查客户端更新（2026-10-18 新增；web 原有三项顺序不变，本项插在退出之前）。
+  checkUpdates('检查更新'),
   logout('退出登录');
 
   const AylaTopNavMenuAction(this.label);

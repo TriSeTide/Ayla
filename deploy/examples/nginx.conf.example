@@ -90,6 +90,22 @@ server {
         client_max_body_size 0;
     }
 
+
+    # 客户端更新包与发布清单（Ayla 自更新；只读直出，不走应用服务器）
+    # manifest-<channel>.json 由 scripts/publish_release.py 原子替换；
+    # zip/apk/ipa 与清单同目录树（<channel>/<platform>/<version>+<build>/...）。
+    location /releases/ {
+        alias /usr/share/nginx/releases/;
+        autoindex off;
+        add_header Cache-Control "public, max-age=300";
+        types {
+            application/zip zip;
+            application/vnd.android.package-archive apk;
+            application/octet-stream ipa;
+            application/json json;
+        }
+    }
+
     # SPA 路由回退
     location / {
         try_files $uri $uri/ /index.html;
@@ -184,6 +200,21 @@ server {
         proxy_buffering off;
         proxy_read_timeout 300s;
         client_max_body_size 0;
+    }
+
+    # 客户端更新包与发布清单（Ayla 自更新；只读直出，不走应用服务器）
+    # manifest-<channel>.json 由 scripts/publish_release.py 原子替换；
+    # zip/apk/ipa 与清单同目录树（<channel>/<platform>/<version>+<build>/...）。
+    location /releases/ {
+        alias /usr/share/nginx/releases/;
+        autoindex off;
+        add_header Cache-Control "public, max-age=300";
+        types {
+            application/zip zip;
+            application/vnd.android.package-archive apk;
+            application/octet-stream ipa;
+            application/json json;
+        }
     }
 
     location / {

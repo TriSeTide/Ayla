@@ -26,13 +26,13 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../poc/relay_protocol.dart'
     show kPingIntervalMs, kReconnectBaseMs, kReconnectMaxMs;
+import '../net/api_endpoint.dart';
 import '../net/dio_client.dart';
 
 /// 四通道（web §9：chat 主总线 / presence / live 房内帧 / voice 应用层成员事实）。
@@ -119,9 +119,8 @@ class WsChannel {
     if (!enabled) return;
     _manualClosed = false;
     _setStatus(WsChannelStatus.connecting);
-    final String host = Platform.isAndroid ? '10.0.2.2' : '127.0.0.1';
     final Uri uri = Uri.parse(
-      'ws://$host:8100$path?token=${Uri.encodeComponent(access)}',
+      '${aylaWsBase()}$path?token=${Uri.encodeComponent(access)}',
     );
     try {
       final WebSocketChannel channel = _connectFactory(uri);

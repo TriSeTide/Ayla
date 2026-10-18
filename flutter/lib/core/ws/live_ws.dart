@@ -20,12 +20,12 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
 
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../state/live_state.dart';
+import '../net/api_endpoint.dart';
 /// 心跳间隔（web `ws/live.ts:16` `HEARTBEAT_INTERVAL_MS = 30_000`）。
 const Duration kLiveHeartbeat = Duration(seconds: 30);
 
@@ -100,9 +100,8 @@ class AylaLiveWsClient {
   }
 
   Uri _uri(String channelId, String access) {
-    final String host = Platform.isAndroid ? '10.0.2.2' : '127.0.0.1';
     return Uri.parse(
-      'ws://$host:8100/ws/live/${Uri.encodeComponent(channelId)}/'
+      '${aylaWsBase()}/ws/live/${Uri.encodeComponent(channelId)}/'
       '?token=${Uri.encodeComponent(access)}',
     );
   }

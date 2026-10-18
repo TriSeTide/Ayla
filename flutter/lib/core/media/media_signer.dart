@@ -25,6 +25,7 @@ library;
 
 import 'dart:async';
 
+import '../net/api_endpoint.dart';
 import '../net/dio_client.dart';
 
 /// 签名结果（`SignedMediaResult`）。
@@ -190,10 +191,14 @@ class MediaSigner {
   /// web 把 `https://<minio-host>/...` 替换为 `/minio/...`，由反代统一转发
   /// （数据面同源，规避浏览器跨源限制）。签名基于 Host 计算，代理保持 Host
   /// 一致故校验不受影响。Flutter 侧同样走同源（桌面直连后端）。
+  /// ⚠️ 返回**绝对**同源地址（`${aylaApiBase()}/minio/...`），不能保持 `/minio`
+  /// 相对路径：`Image.network` / media_kit / video_player 按绝对 URL 解析，
+  /// 相对路径在真机上没有可用的 origin（web 由浏览器补全，Flutter 不会）。
   static String _toSameOriginMinio(String presignedUrl) {
-    return presignedUrl.replaceFirst(
+    final String relative = presignedUrl.replaceFirst(
       RegExp(r'^https?://[^/]+', caseSensitive: false),
       '/minio',
     );
+    return '${aylaApiBase()}$relative';
   }
 }

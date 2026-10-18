@@ -50,6 +50,9 @@ import '../state/live_state.dart';
 import '../state/room_providers.dart'
     show liveStateProvider, sessionActivityProvider;
 import '../state/session_activity_state.dart';
+import '../core/update/update_controller.dart'
+    show AylaUpdateCheckResult, AylaUpdateController;
+import '../state/update_providers.dart';
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
@@ -118,8 +121,33 @@ class _AppShellState extends ConsumerState<AppShell> {
         context.go('/profile');
       case AylaTopNavMenuAction.favorites:
         context.go('/favorites');
+      case AylaTopNavMenuAction.checkUpdates:
+        unawaited(_checkForUpdates());
       case AylaTopNavMenuAction.logout:
         _logout();
+    }
+  }
+
+  /// 手动检查客户端更新（「更多」菜单入口；发现新版本时由全局宿主弹窗）。
+  ///
+  /// 与登录后的自动检查共用同一 controller；失败/已是最新用 SnackBar 明确反馈
+  ///（自动检查则静默，不打扰登录流程）。
+  Future<void> _checkForUpdates() async {
+    final AylaUpdateController controller = ref.read(updateControllerProvider);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    try {
+      final AylaUpdateCheckResult result = await controller.checkManually();
+      if (!mounted) return;
+      if (result.hasUpdate) return; // 弹窗由 AylaUpdateHost 渲染
+      final String message = result.failed
+          ? '检查更新失败：${result.error ?? '未知错误'}'
+          : result.degraded
+          ? '更新服务暂不可用，请稍后再试'
+          : '当前已是最新版本';
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('检查更新失败：$error')));
     }
   }
 
@@ -410,6 +438,8 @@ class _AppShellState extends ConsumerState<AppShell> {
             mini: liveMiniPlayer,
             onOpenRoom: () => context.go(liveMiniPlayer.sourceRoute),
           ),
+        // ---- 客户端更新弹窗（登录后自动检查的呈现面；层级高于 FAB/小窗）----
+        const AylaUpdateHost(),
         // ---- 创建浮层（`.create-fab` 的落点）----
         if (_createSheetOpen && fabAction != null) _createSheet(fabAction),
         // ---- 红点快捷消息栏（`AppShell.tsx:158–161`）----

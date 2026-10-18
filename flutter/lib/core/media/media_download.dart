@@ -31,7 +31,7 @@ abstract final class AylaMediaDownload {
     final String target = '${dir.path}${Platform.pathSeparator}$safeName';
     try {
       await DioClient.instance.dio.download(
-        '/media/${Uri.encodeComponent(mediaId)}/content',
+        '$kApiPrefix/media/${Uri.encodeComponent(mediaId)}/content',
         target,
         onReceiveProgress: onProgress,
       );

@@ -351,9 +351,12 @@ void main() {
           onOpen: () {},
         ),
       )));
+      // `mediaContentUrl` 现在是绝对地址（Image/media_kit 需要 origin），但
+      // `normalizeCover` 与 web 同一条规则（只接受站内相对路径）⇒ 绝对地址归 null。
+      // 行为与 web 一致：没有 thumbnail 的帖子分享载荷不带封面。
       expect(
         resolvedPayload(tester, find.byType(AylaShareButton)).cover,
-        '/api/v1/media/m2/content',
+        isNull,
       );
 
       // ③ 无图 ⇒ null

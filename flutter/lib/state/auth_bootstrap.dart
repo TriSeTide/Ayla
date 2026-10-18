@@ -38,6 +38,7 @@ import '../core/ws/presence_ws.dart';
 import '../core/ws/ws_manager.dart';
 import '../widgets/base/scroll_restore.dart' show AylaScrollMemory;
 import 'auth_prefs.dart';
+import 'update_providers.dart';
 import 'auth_state.dart';
 import 'chat_providers.dart';
 import 'presence_providers.dart';
@@ -85,6 +86,10 @@ Future<void> aylaApplyLoginSession(
   unawaited(
     AppInit.instance.run(userId: container.read(authNotifierProvider).user?.id),
   );
+  // 客户端更新检查（2026-10-18 用户需求）：登录成功即检查一次，发现新版本弹窗。
+  // ⚠️ 刻意不 await（更新检查不能拖慢登录/预加载门）；每个进程只自动弹一次
+  //（controller 内部单飞），失败只 debugPrint，不打断登录。
+  unawaited(container.read(updateControllerProvider).checkOnLogin());
 }
 
 /// chat 通道 owner 的容器版启动（= `chat_providers.dart:aylaStartChatWs` 的 WidgetRef 版语义）。

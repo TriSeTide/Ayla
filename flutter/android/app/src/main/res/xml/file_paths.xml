@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 应用内更新：只暴露应用缓存目录（APK 下载落点），不暴露外部存储或任意路径。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="updates" path="updates/" />
+    <cache-path name="cache_root" path="." />
+</paths>

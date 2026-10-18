@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "apps.boardgame",
     "apps.search",
     "apps.favorites",
+    "apps.releases",
 ]
 
 MIDDLEWARE = [
@@ -237,6 +238,19 @@ ELYSIA_BRIDGE_INLINE = env.bool("ELYSIA_BRIDGE_INLINE", default=True)
 # 爱莉 Voice Live observer WS 订阅（事件驱动替代前端 5s/10s 轮询）：
 # 创建/复用通话时启动后台观察线程；测试/禁用时关闭。
 VOICE_OBSERVER_ENABLED = env.bool("VOICE_OBSERVER_ENABLED", default=True)
+
+# ---------- 客户端发布（更新检查） ----------
+# 发布产物与 manifest-<channel>.json 由 Ayla/scripts/publish_release.py 上传到
+# 服务器上的只读发布目录；Django 只读清单，不托管二进制（二进制由 nginx /releases/ 直出）。
+# AYLA_RELEASES_DIR：清单目录（容器内路径，compose 挂载 host 目录，默认只读）。
+# AYLA_RELEASES_PUBLIC_BASE：客户端下载前缀（nginx 的 /releases/ 反代/静态根）。
+AYLA_RELEASES_DIR = env.str(
+    "AYLA_RELEASES_DIR", default=str(BASE_DIR / "runtime" / "releases")
+)
+AYLA_RELEASES_PUBLIC_BASE = env.str("AYLA_RELEASES_PUBLIC_BASE", default="/releases")
+AYLA_RELEASES_MAX_MANIFEST_BYTES = env.int(
+    "AYLA_RELEASES_MAX_MANIFEST_BYTES", default=512 * 1024
+)
 
 # 静态/媒体
 STATIC_URL = "static/"

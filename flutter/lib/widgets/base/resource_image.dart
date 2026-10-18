@@ -34,6 +34,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../../core/media/media_signer.dart';
+import '../../core/net/api_endpoint.dart';
 
 /// 后端 API 前缀（与 `api/client.ts` 的 `API_PREFIX` 一致）。
 const String kApiPrefix = '/api/v1';
@@ -43,22 +44,34 @@ const String kMediaPathPrefix = '$kApiPrefix/media/';
 
 /// 媒体内容路径（web `api/media.ts:12–14` `mediaContentUrl` 同源）。
 String mediaContentUrl(String mediaId) =>
-    '$kApiPrefix/media/${Uri.encodeComponent(mediaId)}/content';
+    aylaAbsoluteApiUrl('$kMediaPathPrefix${Uri.encodeComponent(mediaId)}/content');
 
 /// 媒体相对路径归一（web `api/media.ts:192–196` `resolveMediaPath`）：
 /// 只接受后端媒体路径前缀，其余（外部 URL / 非法路径 / null）一律 null。
 ///
 /// 原为 `danmaku.dart` 的私有实现（弹幕缩略图用），2026-09-24 提升为共享件
 /// （chat 域的媒体波形/缩略图同样需要），口径与 web 一致：**不 fallback**。
-String? aylaResolveMediaPath(String? path) =>
-    (path != null && path.startsWith(kMediaPathPrefix)) ? path : null;
+String? aylaResolveMediaPath(String? path) {
+  if (path == null) return null;
+  if (path.startsWith(kMediaPathPrefix)) return path;
+  // 2026-10-18：mediaContentUrl 现在是绝对地址；同源媒体绝对 URL 归一为路径，
+  // 让调用方仍然走签名链路（而不是把带 token 的裸请求打到 API）。
+  final Uri? uri = Uri.tryParse(path);
+  if (uri != null && uri.hasScheme && uri.path.startsWith(kMediaPathPrefix)) {
+    return uri.path;
+  }
+  return null;
+}
 
 /// 从媒体 URL 提取 media_id（`extractMediaId`）。
 ///
 /// 仅识别 `/api/v1/media/<id>/...` 形式；非媒体路径返回 null（外部资源直接加载）。
 String? extractMediaId(String src) {
-  if (!src.startsWith(kMediaPathPrefix)) return null;
-  final String rest = src.substring(kMediaPathPrefix.length);
+  String path = src;
+  final Uri? uri = Uri.tryParse(src);
+  if (uri != null && uri.hasScheme) path = uri.path;
+  if (!path.startsWith(kMediaPathPrefix)) return null;
+  final String rest = path.substring(kMediaPathPrefix.length);
   final int slash = rest.indexOf('/');
   if (slash <= 0) return null;
   return rest.substring(0, slash);

@@ -31,12 +31,12 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../core/net/api_endpoint.dart';
 import '../poc/relay_protocol.dart';
 
 /// 连续失败达该次数后先续期 token 再重连（web `wsRelayRoom.ts:117` RECONNECT_REFRESH_AFTER）。
@@ -49,9 +49,8 @@ const int kRelayReconnectRefreshAfter = 3;
 /// `/ws/voice/audio/`（与 `core/ws/ws_manager.dart` 的四通道同主机同端口约定：
 /// Android 模拟器 `10.0.2.2` / 桌面 `127.0.0.1`）。
 Uri aylaVoiceRelayUri(String channelId, String token) {
-  final String host = Platform.isAndroid ? '10.0.2.2' : '127.0.0.1';
   return Uri.parse(
-    'ws://$host:8100/ws/voice/audio/?channel=${Uri.encodeComponent(channelId)}'
+    '${aylaWsBase()}/ws/voice/audio/?channel=${Uri.encodeComponent(channelId)}'
     '&token=${Uri.encodeComponent(token)}',
   );
 }
