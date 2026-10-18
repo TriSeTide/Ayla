@@ -29,15 +29,23 @@
 /// | [AylaCreateGameForm] 成功后关浮层 + 跳转 | `CreateFab.tsx:107–111`（有 groupId → 群桌游页；否则 `/games`） |
 /// | 三件共用的可见性群列表 | `VisibilitySelector.tsx:34`（`useSocialPage("conversations", {type:"group"})`） |
 ///
-/// ## live 分支逐条对应
+/// ## live 分支逐条对应（**两个调用点共用一份数据层**）
 /// | 本件 | web |
 /// |---|---|
 /// | [AylaCreateLiveForm.onClose] 在导航前调用 | `CreateFab.tsx:36–39 handleLiveStarted`（`setOpen(false)` → `navigate`） |
 /// | [AylaCreateLiveForm] 的建播（固定标题「新直播间」+ `group`） | `CreateFab.tsx:41–54 handleCreateNewLive` |
 /// | 创建失败文案（不导航、浮层保留） | `CreateFab.tsx:49–51`（`e.message`，否则「创建直播间失败」） |
-/// | 本人直播间目录（`?owner=<me>`，limit 20，游标分页） | `hooks/useOwnedLiveDirectory.ts:14–20` |
+/// | **本人直播间目录 + 选择器**（[AylaOwnedLivePicker]） | `hooks/useOwnedLiveDirectory.ts:14–20` + `LiveStartSheet.tsx` 全文 |
 /// | 目录热更新（`live.channel.*` → 标记失效 + 删除条目） | 同上 `33–40` |
 /// | 选择器外观（intro / 三态 / 列表 / 新建键） | `widgets/live/live_rail.dart` 的 `AylaLiveStartSheet`（`LiveStartSheet.tsx` 86 行） |
+///
+/// ⚠️ **为什么拆成「数据层 + 两个壳」**：web 的 `LiveStartSheet` 有**两个**调用点 ——
+/// `CreateFab.tsx:83–92`（FAB，标题「开始直播」，建播/导航在 CreateFab）与
+/// `pages/group/GroupLive.tsx:153–162 / 185–192`（群内开播，标题「群内开播」，
+/// 建播/导航在 GroupLive 自己身上）。两处的目录数据**完全同一份**
+/// （`useOwnedLiveDirectory`），只有「选中后去哪 / 新建成功后去哪」不同。
+/// ⇒ [AylaOwnedLivePicker] 承担目录 + 外观，`onStart`/`onCreateNew`/`creatingNew`/
+/// `createError` 由调用方给；[AylaCreateLiveForm] 只是 FAB 那一档的壳。
 ///
 /// ## 登记（有意偏离，均有依据）
 /// - web 的 `usePagedMediaList.fetchPage` 带 revision 守卫（列表被并发更新时旧游标续读
@@ -49,7 +57,8 @@
 ///   （人数是瞬态投影，属目录页热更新，不属于本入口）。
 ///
 /// ## 公开面
-/// `AylaCreateLiveForm`
+/// `AylaCreateLiveForm` · `AylaOwnedLivePicker` · `AylaOwnedLivePageRequest` ·
+/// `AylaCreateLiveChannelFn`
 library;
 
 import 'dart:async';
@@ -139,36 +148,51 @@ Future<AylaLiveChannelSnapshot> _defaultCreateLiveChannel(
   String? group,
 }) => AylaLiveApi.createLiveChannel(title, group: group);
 
-/// 「开始直播」浮层内容（web `CreateFab.tsx:83–92` 的 live 分支）。
+/// 「我自己的直播间」选择器 —— web `hooks/useOwnedLiveDirectory.ts`（数据）+
+/// `components/live/LiveStartSheet.tsx`（外观）的 Flutter 等价物。
 ///
-/// 无自有视觉：外观全部来自 [AylaLiveStartSheet]（`LiveStartSheet.tsx`）；
-/// 本件只持有**数据与状态**（目录 / 创建中 / 创建失败）。
-class AylaCreateLiveForm extends ConsumerStatefulWidget {
-  const AylaCreateLiveForm({
+/// ## 为什么抽成独立件（两个调用点共用一份数据层）
+/// web 有**两个**调用点都用 `LiveStartSheet` + `useOwnedLiveDirectory`：
+/// - `layout/CreateFab.tsx:83–92`（FAB 的 live 分支，标题「开始直播」）——
+///   建播/导航由 `CreateFab` 自己持有（`tsx:36–54` ⇒ [AylaCreateLiveForm]）；
+/// - `pages/group/GroupLive.tsx:153–162 / 185–192`（群内开播，标题「群内开播」）——
+///   建播/导航由 `GroupLive` 自己持有（`tsx:90–111`）。
+///
+/// 两处的**数据与状态**完全同一份（本人直播间目录 `?owner=<me>` + `live.channel.*`
+/// 热更新 + 三态 + 失效位），差别只在「选中后去哪 / 新建成功后去哪」。
+/// ⇒ 本件承担数据侧，把 `onStart` / `onCreateNew` / `creatingNew` / `createError`
+/// 全部交给调用方（与 web 的调用方各自持有状态一一对应）。
+class AylaOwnedLivePicker extends ConsumerStatefulWidget {
+  const AylaOwnedLivePicker({
     super.key,
-    required this.onClose,
-    this.groupId,
-    this.listPage = _defaultOwnedLivePage,
-    this.createChannel = _defaultCreateLiveChannel,
+    required this.onStart,
+    required this.onCreateNew,
+    this.creatingNew = false,
+    this.createError,
+    this.listPage,
   });
 
-  /// 关浮层（web `setOpen(false)`）。**导航前**调用（`CreateFab.tsx:37 / 47`）。
-  final VoidCallback onClose;
+  /// 选中一个已有直播间（web `LiveStartSheet.onStart`）。
+  final ValueChanged<AylaLiveCardData> onStart;
 
-  /// 群归属（web `action.groupId`；一级 tab `/live` 恒 null）。
-  final String? groupId;
+  /// 「+ 添加新的直播间」（web `LiveStartSheet.onCreateNew`）。
+  final VoidCallback onCreateNew;
 
-  /// 本人直播间目录分页。默认走真实 api；测试可注入替身。
-  final AylaOwnedLivePageRequest listPage;
+  /// 正在创建（按钮「创建中…」+ 禁用）。
+  final bool creatingNew;
 
-  /// 建直播间。默认走真实 api；测试可注入替身。
-  final AylaCreateLiveChannelFn createChannel;
+  /// 创建失败文案（列表内 `role="alert"`）。
+  final String? createError;
+
+  /// 本人直播间目录分页。null ⇒ 走真实 api；测试可注入替身。
+  final AylaOwnedLivePageRequest? listPage;
 
   @override
-  ConsumerState<AylaCreateLiveForm> createState() => _AylaCreateLiveFormState();
+  ConsumerState<AylaOwnedLivePicker> createState() =>
+      _AylaOwnedLivePickerState();
 }
 
-class _AylaCreateLiveFormState extends ConsumerState<AylaCreateLiveForm> {
+class _AylaOwnedLivePickerState extends ConsumerState<AylaOwnedLivePicker> {
   AylaPagedList<AylaDirectoryLiveEntry>? _directory;
 
   /// 目录热更新事件总线（`live.channel.*` 帧；见 `state/directory_events.dart`）。
@@ -177,12 +201,6 @@ class _AylaCreateLiveFormState extends ConsumerState<AylaCreateLiveForm> {
 
   /// 目录游标失效（web hook 的 `invalidated`）：置位后由页脚自动刷新恢复。
   bool _invalidated = false;
-
-  /// 正在创建（web `creatingLive`：按钮「创建中…」+ 禁用）。
-  bool _creating = false;
-
-  /// 创建失败文案（web `liveCreateError`；null = 无错）。
-  String? _createError;
 
   @override
   void initState() {
@@ -207,7 +225,8 @@ class _AylaCreateLiveFormState extends ConsumerState<AylaCreateLiveForm> {
     final String? owner = ref.read(authNotifierProvider).user?.id;
     final AylaPagedList<AylaDirectoryLiveEntry> directory =
         AylaPagedList<AylaDirectoryLiveEntry>(
-          request: (String? cursor) => widget.listPage(cursor, owner),
+          request: (String? cursor) =>
+              (widget.listPage ?? _defaultOwnedLivePage)(cursor, owner),
           keyOf: (AylaDirectoryLiveEntry entry) => entry.card.id,
         )..addListener(_onDirectoryChanged);
     _directory = directory;
@@ -259,39 +278,6 @@ class _AylaCreateLiveFormState extends ConsumerState<AylaCreateLiveForm> {
     }
   }
 
-  /// 选已有直播间（web `handleLiveStarted`）：关浮层 → 进开播控制台。
-  void _startChannel(AylaLiveCardData channel) {
-    widget.onClose();
-    context.go('/live/start/${channel.id}');
-  }
-
-  /// 新建直播间（web `handleCreateNewLive`）：关浮层 → 进新建频道的开播控制台；
-  /// 失败保留浮层、显示「创建直播间失败：…」，**不导航**。
-  Future<void> _createNew() async {
-    if (_creating) return;
-    setState(() {
-      _creating = true;
-      _createError = null;
-    });
-    try {
-      final AylaLiveChannelSnapshot created = await widget.createChannel(
-        '新直播间', // CreateFab.tsx:46
-        group: widget.groupId,
-      );
-      if (!mounted) return;
-      widget.onClose();
-      context.go('/live/start/${created.id}');
-    } catch (error) {
-      if (!mounted) return;
-      // web tsx:50：`e instanceof Error ? e.message : "创建直播间失败"` ⇒ 非 API 异常回退固定串。
-      setState(
-        () => _createError = error is ApiException ? error.message : '创建直播间失败',
-      );
-    } finally {
-      if (mounted) setState(() => _creating = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final AylaPagedList<AylaDirectoryLiveEntry>? directory = _directory;
@@ -310,10 +296,10 @@ class _AylaCreateLiveFormState extends ConsumerState<AylaCreateLiveForm> {
       error: directory?.error,
       invalidated: _invalidated,
       hasMore: directory?.hasMore ?? false,
-      onStart: _startChannel,
-      onCreateNew: () => unawaited(_createNew()),
-      creatingNew: _creating,
-      createError: _createError,
+      onStart: widget.onStart,
+      onCreateNew: widget.onCreateNew,
+      creatingNew: widget.creatingNew,
+      createError: widget.createError,
       onRetry: () => unawaited(_refresh()),
       // web `<DirectoryLoadMore {...directory} />`（弹层是紧凑列表：retainCompletedSpace 默认 true）。
       directoryFooter: AylaDirectoryLoadMore(
@@ -326,6 +312,90 @@ class _AylaCreateLiveFormState extends ConsumerState<AylaCreateLiveForm> {
       ),
     );
   }
+}
+
+/// 「开始直播」浮层内容（web `CreateFab.tsx:83–92` 的 live 分支）。
+///
+/// 无自有视觉：外观全部来自 [AylaLiveStartSheet]（`LiveStartSheet.tsx`）；
+/// 本件只持有**建播动作与状态**（`creatingLive` / `liveCreateError`），
+/// 目录数据全部来自 [AylaOwnedLivePicker]（web 的 `useOwnedLiveDirectory`）。
+///
+/// 群内开播（`GroupLive.tsx:153–162 / 185–192`）**不用本件** —— 它的建播/导航状态
+/// 在 `GroupLivePage` 自己身上（web tsx 39–41）；两处共用 [AylaOwnedLivePicker]。
+class AylaCreateLiveForm extends StatefulWidget {
+  const AylaCreateLiveForm({
+    super.key,
+    required this.onClose,
+    this.groupId,
+    this.listPage,
+    this.createChannel,
+  });
+
+  /// 关浮层（web `setOpen(false)`）。**导航前**调用（`CreateFab.tsx:37 / 47`）。
+  final VoidCallback onClose;
+
+  /// 群归属（web `action.groupId`；一级 tab `/live` 恒 null）。
+  final String? groupId;
+
+  /// 本人直播间目录分页。null ⇒ 走真实 api；测试可注入替身。
+  final AylaOwnedLivePageRequest? listPage;
+
+  /// 建直播间。null ⇒ 走真实 api；测试可注入替身。
+  final AylaCreateLiveChannelFn? createChannel;
+
+  @override
+  State<AylaCreateLiveForm> createState() => _AylaCreateLiveFormState();
+}
+
+class _AylaCreateLiveFormState extends State<AylaCreateLiveForm> {
+  /// 正在创建（web `creatingLive`：按钮「创建中…」+ 禁用）。
+  bool _creating = false;
+
+  /// 创建失败文案（web `liveCreateError`；null = 无错）。
+  String? _createError;
+
+  /// 选已有直播间（web `handleLiveStarted`）：关浮层 → 进开播控制台。
+  void _startChannel(AylaLiveCardData channel) {
+    widget.onClose();
+    context.go('/live/start/${channel.id}');
+  }
+
+  /// 新建直播间（web `handleCreateNewLive`）：关浮层 → 进新建频道的开播控制台；
+  /// 失败保留浮层、显示「创建直播间失败：…」，**不导航**。
+  Future<void> _createNew() async {
+    if (_creating) return;
+    setState(() {
+      _creating = true;
+      _createError = null;
+    });
+    try {
+      final AylaLiveChannelSnapshot created =
+          await (widget.createChannel ?? _defaultCreateLiveChannel)(
+        '新直播间', // CreateFab.tsx:46
+        group: widget.groupId,
+      );
+      if (!mounted) return;
+      widget.onClose();
+      context.go('/live/start/${created.id}');
+    } catch (error) {
+      if (!mounted) return;
+      // web tsx:50：`e instanceof Error ? e.message : "创建直播间失败"` ⇒ 非 API 异常回退固定串。
+      setState(
+        () => _createError = error is ApiException ? error.message : '创建直播间失败',
+      );
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AylaOwnedLivePicker(
+        listPage: widget.listPage,
+        onStart: _startChannel,
+        onCreateNew: () => unawaited(_createNew()),
+        creatingNew: _creating,
+        createError: _createError,
+      );
 }
 // ===================== 分支分派（纯函数：组件与测试共用同一事实源） =====================
 

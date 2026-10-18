@@ -18,9 +18,16 @@
 /// （`detachView` 进小窗 / `refreshSrsStatus` 结束清位 / `aylaCloseLiveMiniPlayer` 关闭）——
 /// 小窗**只有窄屏渲染**（宽屏不开，web 同一条判据）。
 ///
+/// ## 红点快捷消息栏（`AppShell.tsx:158–161`，2026-10 接线）
+/// 窄屏 + `shell.quickMessagesOpen` ⇒ 渲染 `AylaQuickMessagesHost`（取数 + 两 tab 面板 +
+/// 内联私聊全在 `pages/quick_messages_support.dart`）；关闭回写
+/// `shellUiProvider.setQuickMessagesOpen(false)`。开合由 Fab 触发、状态在全局 store
+/// （**红点归零不关闭** —— web 注释里的 R-QM bug 修复）。
+///
 /// ## 未接线项（第 1 批登记，见 13 号文档）
-/// · `QuickMessagesSheet` 的实际面板内容（私信 / 申请列表）—— 属消息域批次
-///   （[ShellUiState.quickMessagesOpen] 已就位，Fab 已按它暂停半贴计时）；
+/// · ~~`QuickMessagesSheet` 的实际面板内容~~ ✅ **2026-10 已接线**
+///   （`pages/quick_messages_support.dart`：[ShellUiState.quickMessagesOpen] 驱动渲染，
+///   Fab 按它暂停半贴计时 —— 两条链路现已闭环）；
 /// · ~~未读聚合 `messageBadge`~~ ✅ **2026-09-28 消息域批次已接线**：`state/badges_state.dart` +
 ///   `state/chat_providers.dart`（`GET /me/badges/`；进入即拉 + 纯 WS 事件驱动，**无周期轮询**）；
 /// · `ServerRail` / `ChannelSidebar`：web 的 AppShell **不渲染**它们 —— 它们是宽屏主页
@@ -34,6 +41,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../pages/live_support.dart';
+import '../pages/quick_messages_support.dart' show AylaQuickMessagesHost;
 import '../router/shell_config.dart';
 import '../state/auth_bootstrap.dart';
 import '../state/auth_state.dart';
@@ -404,6 +412,22 @@ class _AppShellState extends ConsumerState<AppShell> {
           ),
         // ---- 创建浮层（`.create-fab` 的落点）----
         if (_createSheetOpen && fabAction != null) _createSheet(fabAction),
+        // ---- 红点快捷消息栏（`AppShell.tsx:158–161`）----
+        //
+        // web 原文：`{isNarrow && quickMessagesOpen ? <QuickMessagesSheet
+        // onClose={() => useShellStore.getState().setQuickMessagesOpen(false)} /> : null}`
+        // —— 放在壳层**最后一个**子级（DOM 里也是最后一项），层级 = `.quick-messages-overlay
+        // { position: fixed; inset: 0; z-index: 70 }`（messages.css 343–347），
+        // 与创建浮层同档 70、按 DOM 顺序压在它之后。
+        //
+        // 状态归 `shellUiProvider`（web `stores/shell.ts` 同）：**红点归零不关闭**
+        // （打开会话标已读会让 QuickMessageFab 因 `messageBadge > 0` 被卸载，若 open 在
+        // Fab 内部则面板被连带关掉 —— 这正是 web 注释里写明的 R-QM bug 修复）。
+        if (isNarrow && shell.quickMessagesOpen)
+          AylaQuickMessagesHost(
+            onClose: () =>
+                ref.read(shellUiProvider.notifier).setQuickMessagesOpen(false),
+          ),
       ],
     );
   }

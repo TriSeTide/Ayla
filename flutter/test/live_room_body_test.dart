@@ -24,6 +24,8 @@ import '../lib/widgets/live/live_studio.dart' show AylaLiveStreamAddresses;
 import '../lib/widgets/base/directory_controls.dart'
     show AylaFavoriteButton, AylaFavoriteState;
 import '../lib/widgets/base/reveal.dart' show AylaRevealItem, AylaRevealScope;
+import '../lib/widgets/base/primitives.dart' show AylaSourceTag;
+import '../lib/theme/app_theme.dart' show AylaTextStyles;
 import '../lib/widgets/base/share.dart' show AylaShareButton;
 import '../lib/widgets/live/live_viewers.dart' show AylaLiveViewerStrip;
 
@@ -849,6 +851,94 @@ void main() {
       await settle(tester);
       expect(find.byType(AylaRevealScope), findsNothing);
       expect(find.byType(AylaRevealItem), findsNothing);
+    });
+
+  });
+
+  group('头部来源标签 ch 宽度上限（live.css 三档，2026-10-17 补齐）', () {
+    // web 事实源（逐条）：
+    //   live.css:797  .live-room-head .live-room-source-tags { max-width: 16ch }
+    //   live.css:844  @media (max-width: 768px) { ... { max-width: 10ch } }
+    //   live.css:855  @media (max-width: 480px) { ... { max-width:  8ch } }
+    //   live.css:802  .live-room-source-tags .post-card-tag { max-width: 12ch }
+    // 超长群名：12ch 单标签上限会截断它
+    const String longGroupId = '冰樱研究社的深夜电台爱莉陪你写代码的超长群名称';
+
+    double chOf(WidgetTester tester) {
+      final BuildContext ctx = tester.element(find.byType(AylaLiveRoomBody));
+      return AylaSourceTag.chWidth(AylaTextStyles.of(ctx));
+    }
+
+    Future<void> pumpAt(WidgetTester tester, double width) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: width <= 768,
+            channels: _channels,
+            // 群可见 + 超长群名 ⇒ 标签文案超长（web 用 12ch 截断）
+            data: AylaLiveRoomData(
+              channel: AylaLiveChannelSnapshot(
+                id: 'lc1',
+                title: '深夜电台 · 爱莉陪你写代码',
+                status: AylaLiveStatus.live,
+                visibility: 'group',
+                group: longGroupId,
+                ownerNickname: '爱莉',
+              ),
+            ),
+            videoView: const SizedBox(),
+          ),
+          viewport: Size(width, 800),
+          disableAnimations: true,
+        ),
+      );
+      await settle(tester);
+    }
+
+    test('三档取值：≤480 → 8 / ≤768 → 10 / 否则 16（live.css:797/844/855）', () {
+      expect(aylaLiveRoomSourceTagsMaxCh(480), 8);
+      expect(aylaLiveRoomSourceTagsMaxCh(375), 8);
+      expect(aylaLiveRoomSourceTagsMaxCh(768), 10);
+      expect(aylaLiveRoomSourceTagsMaxCh(600), 10);
+      expect(aylaLiveRoomSourceTagsMaxCh(769), 16);
+      expect(aylaLiveRoomSourceTagsMaxCh(1600), 16);
+    });
+
+    testWidgets('窄屏 375：标签条容器宽 ≤ 8ch（此前无上限 ⇒ 被超长群名撑宽）', (
+      WidgetTester tester,
+    ) async {
+      await pumpAt(tester, 375);
+      final double ch = chOf(tester);
+      final Rect box = tester.getRect(find.byType(AylaSourceTag).first);
+      expect(
+        box.width,
+        lessThanOrEqualTo(ch * 8 + 0.5),
+        reason: '≤480 档：8ch（live.css:855）；实测 ${box.width} vs ${ch * 8}',
+      );
+    });
+
+    testWidgets('窄屏 600：标签条容器宽 ≤ 10ch（live.css:844）', (WidgetTester tester) async {
+      await pumpAt(tester, 600);
+      final double ch = chOf(tester);
+      final Rect box = tester.getRect(find.byType(AylaSourceTag).first);
+      expect(box.width, lessThanOrEqualTo(ch * 10 + 0.5));
+    });
+
+    testWidgets('宽屏 1200：标签条容器宽 ≤ 16ch 且单标签 ≤ 12ch（live.css:797/802）', (
+      WidgetTester tester,
+    ) async {
+      await pumpAt(tester, 1200);
+      final double ch = chOf(tester);
+      final Rect tagBox = tester.getRect(find.byType(AylaSourceTag).first);
+      expect(tagBox.width, lessThanOrEqualTo(ch * 12 + 0.5), reason: '单标签 12ch（live.css:802）');
+      final Rect row = tester.getRect(
+        find
+            .ancestor(of: find.byType(AylaSourceTag).first, matching: find.byType(Row))
+            .first,
+      );
+      expect(row.width, lessThanOrEqualTo(ch * 16 + 0.5), reason: '标签条 16ch（live.css:797）');
     });
   });
 }

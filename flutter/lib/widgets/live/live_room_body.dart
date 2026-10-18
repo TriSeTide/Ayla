@@ -471,15 +471,32 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             // 来源标签：三域统一的共享件 AylaSourceTag。
             // web «LiveRoomBody.tsx:257» 把可见范围列表交给 ScrollingTags 的 «title»（悬停读全列表）；
             // Flutter 侧头部不用滚动容器（窄屏只留 1–2 个标签）⇒ 用 AylaTooltip 表达同一提示。
+            //
+            // ⚠️ **宽度上限**（2026-10-17 补齐，web live.css 三档）：此前只有 «tags.take()» 的
+            // **数量**收敛、没有 **ch 宽度上限** ⇒ 超长群名会把头部撑宽
+            // （web 在 16ch / 10ch / 8ch 三档都会 ellipsis 截断）。见 [aylaLiveRoomSourceTagsMaxCh]。
             AylaTooltip(
               message: tags.join('、'),
-              child: Row(
-                spacing: AylaSpacing.sp1,
-                children: <Widget>[
-                  // 窄屏只留 1 个标签（web 靠 ScrollingTags 滚动承担；Flutter 侧避免窄屏头部溢出）
-                  for (final String tag in tags.take(narrow ? 1 : 2))
-                    AylaSourceTag(tag),
-                ],
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: AylaSourceTag.chWidth(AylaTextStyles.of(context)) *
+                      aylaLiveRoomSourceTagsMaxCh(MediaQuery.sizeOf(context).width),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: AylaSpacing.sp1,
+                  children: <Widget>[
+                    // 窄屏只留 1 个标签（web 靠 ScrollingTags 滚动承担；Flutter 侧避免窄屏头部溢出）
+                    for (final String tag in tags.take(narrow ? 1 : 2))
+                      AylaSourceTag(
+                        tag,
+                        // `.live-room-source-tags .post-card-tag { max-width: 12ch }`（live.css:802–807）
+                        // —— 单个标签的独立上限。
+                        maxWidth:
+                            AylaSourceTag.chWidth(AylaTextStyles.of(context)) * 12,
+                      ),
+                  ],
+                ),
               ),
             ),
           if (channel != null)
@@ -1044,6 +1061,23 @@ class _LiveRoomHeaderSwapState extends State<_LiveRoomHeaderSwap>
 }
 
 /// 频道可见性标签（web `getVisibilityLabels` 的等价；`visibility` 缺失 ⇒ 空）。
+/// 头部来源标签的**容器宽度档**（单位 ch）—— web「三档媒体查询」的逐条对照：
+///
+/// ```
+/// live.css:797   .live-room-head .live-room-source-tags { flex: 0 0 auto; max-width: 16ch; min-width: 0 }
+/// live.css:844   @media (max-width: 768px) { .live-room-head .live-room-source-tags { max-width: 10ch } }
+/// live.css:855   @media (max-width: 480px) { .live-room-head .live-room-source-tags { max-width:  8ch } }
+/// live.css:802   .live-room-source-tags .post-card-tag  { max-width: 12ch; ellipsis; nowrap }
+/// ```
+///
+/// 三档**逐条生效**（窄屏档覆写默认档，480 档再覆写窄屏档），故按
+/// 「视口 ≤480 → 8 / ≤768 → 10 / 其余 → 16」取单一值。
+double aylaLiveRoomSourceTagsMaxCh(double viewportWidth) {
+  if (viewportWidth <= 480) return 8; // live.css:855
+  if (viewportWidth <= 768) return 10; // live.css:844
+  return 16; // live.css:797
+}
+
 List<String> aylaVisibilityLabelsOf(AylaLiveChannelSnapshot channel) {
   final String? visibility = channel.visibility;
   if (visibility == null || visibility.isEmpty) return const <String>[];

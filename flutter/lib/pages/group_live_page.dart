@@ -10,15 +10,21 @@
 /// | 侧栏/上下滑切台只改 `currentId`（不改 URL） | 72–88 |
 /// | 加载 / 错误 / 空态（创建群内直播 + 返回聊天） | 113–165 |
 /// | 房内：`LiveRoomBody`（无 rail、返回=回聊天、输入框直接显示） | 167–195 |
+/// | **「群内开播」浮层**（`CreateSheet title="群内开播"` + `LiveStartSheet` 双分支） | 153–162（空态）+ 185–192（房内） |
+/// | 空态「创建群内直播」⇒ 开浮层（不是直接建台） | 141–144（`setCreateError(null); setShowCreate(true)`） |
+/// | 房内「新建直播间」（`LiveRoomBody.onCreateNewChannel`）⇒ 同一份浮层 | 179–182 |
+/// | 选已有直播间 ⇒ 关浮层 + `/live/start/<id>` | 90–96（`handleLiveStarted`） |
+/// | 新建 ⇒ `createLiveChannel('新直播间', groupId)` + 进控制台；失败保留浮层 | 98–111（`handleCreateNewLive`） |
 ///
 /// ## 机制差异（登记）
-/// 1. **开播入口**：web 用 `LiveStartSheet`（「选一个已有直播间开播 / 新建直播间」双入口，
-///    tsx 153–162）；Flutter 侧该件未建 ⇒ 「创建群内直播」直接走**新建直播间**分支
-///    （= web `handleCreateNewLive`，tsx 98–111：`createLiveChannel('新直播间', groupId)`
-///    后跳开播控制台）。「选已有直播间」入口缺失，已登记。
-/// 2. **`fromShare` 分支未接**（同语音页）：web 带 `location.state.fromShare` 免白名单校验。
-/// 3. **`inputEntered`（无底栏下滑走的进房动画）**：Flutter 的 `AylaLiveRoomBody` 无该档，
+/// 1. **`fromShare` 分支未接**（同语音页）：web 带 `location.state.fromShare` 免白名单校验。
+/// 2. **`inputEntered`（无底栏下滑走的进房动画）**：Flutter 的 `AylaLiveRoomBody` 无该档，
 ///    由壳层决定底栏显隐（群路由本就不出底栏）⇒ 视觉结果一致。
+/// 3. **浮层挂载点**：web 的 `CreateSheet` 是 `createPortal(…, document.body)`（视口级 fixed）；
+///    本页把它放进自己的 `Stack` + `Positioned.fill` —— 群场景的内容区**上边界在群内
+///    顶栏之下**（`GroupPage` 的 `Column[顶栏, Expanded(场景)]`），因此遮罩覆盖的是
+///    场景区而非整视口。这是**既有页面级弹层的同款口径**（`GroupPage` 的建群弹窗也是
+///    `Positioned.fill`），群内子界面没有跨场景浮层叠放 ⇒ 不需要 `AylaRootOverlay`。
 library;
 
 import 'dart:async';
@@ -29,6 +35,10 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/live_api.dart'
     show AylaDirectoryLiveEntry, AylaLiveApi, AylaLiveDanmaku, AylaLiveViewer;
+import '../core/net/dio_client.dart' show ApiException;
+import '../core/api/directory_page.dart' show AylaDirectoryPage;
+import '../layout/create_sheet_forms.dart'
+    show AylaCreateLiveChannelFn, AylaOwnedLivePageRequest, AylaOwnedLivePicker;
 import '../state/cursor_history.dart';
 import '../state/live_state.dart';
 import '../state/paged_list.dart';
@@ -50,9 +60,33 @@ import '../widgets/live/live_hall.dart' show AylaLiveCardData;
 import '../widgets/live/live_room_body.dart' show AylaLiveRoomBody, AylaLiveRoomData;
 import '../widgets/live/live_viewers.dart' show AylaLiveViewerItem;
 import '../theme/tokens.dart' show AylaRadii;
+import '../widgets/shell/create_sheet.dart' show AylaCreateSheet;
 import 'live_support.dart'
     show AylaLiveRoomSession, AylaLiveViewerSheetController;
 import 'share_support.dart' show aylaOpenShareSheet, AylaShareController;
+
+/// **测试注入点**（生产恒为 null ⇒ 走真实 `AylaLiveApi`）。
+///
+/// 为什么需要它们：P0-3 的教训是「组件单测绿了、页面根本没渲染它」——群内开播的两条
+/// 分支（选已有 / 新建）与两处入口（空态 / 房内）都必须在**真实的** [GroupLivePage]
+/// 上走一遍，而本页的三个数据出口（群直播目录 / 本人直播间目录 / 建直播间）都是
+/// 静态 API、无法从外部替换。形态与 `group_page.dart` 的 [aylaGroupPageSubgroupsLoader]
+/// / [aylaGroupPageCreateGroupBuilder] 同款：测试注入的仍是**真实页面**，只换数据出口。
+@visibleForTesting
+AylaGroupLiveDirectoryLoader? aylaGroupLivePageDirectoryLoader;
+
+/// 见 [aylaGroupLivePageDirectoryLoader]：`(groupId, cursor) → 一页群内直播间`。
+@visibleForTesting
+typedef AylaGroupLiveDirectoryLoader = Future<AylaDirectoryPage<AylaDirectoryLiveEntry>>
+    Function(String groupId, String? cursor);
+
+/// 见 [aylaGroupLivePageOwnedLivePage]：`(cursor, owner) → 一页本人直播间`。
+@visibleForTesting
+AylaOwnedLivePageRequest? aylaGroupLivePageOwnedLivePage;
+
+/// 见 [aylaGroupLivePageCreateChannel]：`(title, group) → 新建的直播间`。
+@visibleForTesting
+AylaCreateLiveChannelFn? aylaGroupLivePageCreateChannel;
 
 class GroupLivePage extends ConsumerStatefulWidget {
   const GroupLivePage({
@@ -91,17 +125,26 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   bool _narrow = false;
   /// 路由频道详情错误（web tsx 29）。
   String? _detailError;
+  /// 「群内开播」浮层是否打开（web `GroupLive.tsx:39` 的 `showCreate`）。
+  bool _showCreate = false;
+
+  /// 浮层内「正在建新直播间」（web tsx 40 `creatingNew`）。
   bool _creating = false;
+
+  /// 浮层内「创建失败」文案（web tsx 41 `createError`）。
   String? _createError;
 
   @override
   void initState() {
     super.initState();
     _directory = AylaPagedList<AylaDirectoryLiveEntry>(
-      request: (String? cursor) => AylaLiveApi.listLiveChannelsPage(
-        cursor: cursor,
-        groupId: widget.groupId,
-      ),
+      // 测试注入点见 [aylaGroupLivePageDirectoryLoader]（生产恒 null ⇒ 真实 API）。
+      request: (String? cursor) => aylaGroupLivePageDirectoryLoader != null
+          ? aylaGroupLivePageDirectoryLoader!(widget.groupId, cursor)
+          : AylaLiveApi.listLiveChannelsPage(
+              cursor: cursor,
+              groupId: widget.groupId,
+            ),
       keyOf: (AylaDirectoryLiveEntry entry) => entry.card.id,
     )..addListener(_onChanged);
     unawaited(_directory!.load());
@@ -201,23 +244,69 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     unawaited(session.start());
   }
 
+  /// 选已有直播间开播（web `GroupLive.tsx:90–96` 的 `handleLiveStarted`）：
+  /// 关浮层 → 进开播控制台。
+  void _startChannel(AylaLiveCardData channel) {
+    setState(() => _showCreate = false);
+    context.go('/live/start/${Uri.encodeComponent(channel.id)}');
+  }
+
+  /// 新建直播间并开播（web `GroupLive.tsx:98–111` 的 `handleCreateNewLive`）：
+  /// 群内开播 = `createLiveChannel('新直播间', groupId)`（本群自动勾选，后端兜底落白名单），
+  /// 成功后关浮层 + 进新频道的开播控制台；**失败保留浮层**并显示「创建直播间失败：…」。
   Future<void> _createLive() async {
+    if (_creating) return;
     setState(() {
       _creating = true;
       _createError = null;
     });
     try {
+      // 测试注入点见 [aylaGroupLivePageCreateChannel]（生产恒 null ⇒ 真实 API）。
       final AylaLiveChannelSnapshot created =
-          await AylaLiveApi.createLiveChannel('新直播间', group: widget.groupId);
+          await (aylaGroupLivePageCreateChannel ?? AylaLiveApi.createLiveChannel)(
+        '新直播间', // tsx 103 固定标题
+        group: widget.groupId, // tsx 103 第二个实参（本群自动勾选）
+      );
       if (!mounted) return;
-      context.go('/live/start/${created.id}');
+      setState(() => _showCreate = false);
+      context.go('/live/start/${Uri.encodeComponent(created.id)}');
     } catch (error) {
       if (!mounted) return;
-      setState(() => _createError = error.toString());
+      // web tsx 107：`e instanceof Error ? e.message : "创建直播间失败"` ⇒ 非 API 异常回退固定串。
+      setState(
+        () => _createError = error is ApiException ? error.message : '创建直播间失败',
+      );
     } finally {
       if (mounted) setState(() => _creating = false);
     }
   }
+
+  /// 打开「群内开播」浮层（web tsx 141–144 / 179–182 的 `setCreateError(null); setShowCreate(true)`）。
+  void _openCreate() {
+    setState(() {
+      _createError = null;
+      _showCreate = true;
+    });
+  }
+
+  /// 「群内开播」浮层（web `GroupLive.tsx:153–162` 空态与 `:185–192` 房内**同一份**）：
+  /// `CreateSheet title="群内开播"`（tsx 154 / 186）+ `LiveStartSheet`（选已有 / 新建双分支）。
+  ///
+  /// 外观与目录数据全部复用 [AylaOwnedLivePicker]（= web `LiveStartSheet` +
+  /// `useOwnedLiveDirectory` 的 Flutter 等价物，FAB 的 live 分支同一件）；
+  /// **建播/导航状态在本页自己身上**（web tsx 39–41 的 `creatingNew` / `createError`
+  /// 就在 `GroupLive` 里，不在 `LiveStartSheet` 里）—— 这正是与 FAB 分支的唯一差别。
+  Widget _createSheet() => AylaCreateSheet(
+        title: '群内开播', // tsx 154 / 186
+        onClose: () => setState(() => _showCreate = false),
+        child: AylaOwnedLivePicker(
+          listPage: aylaGroupLivePageOwnedLivePage,
+          onStart: _startChannel,
+          onCreateNew: () => unawaited(_createLive()),
+          creatingNew: _creating,
+          createError: _createError,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -274,31 +363,44 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     }
 
     if (currentId == null) {
-      // tsx 131–165：空态 + 「创建群内直播」（btn-glow）+ 「返回聊天」（ghost）。
-      return AylaGroupScenePlaceholder(
-        title: '群内还没有直播',
-        description: '发起本群的第一场直播吧',
-        actions: <Widget>[
-          AylaGlassButton(
-            label: '创建群内直播',
-            variant: AylaGlassButtonVariant.glow,
-            onPressed: _creating ? null : () => unawaited(_createLive()),
-          ),
-          AylaGlassButton(
-            label: '返回聊天',
-            variant: AylaGlassButtonVariant.ghost,
-            onPressed: widget.onExit,
-          ),
-        ],
+      // tsx 131–165：空态 + 「创建群内直播」（btn-glow）+ 「返回聊天」（ghost）；
+      // 点「创建群内直播」⇒ **开「群内开播」浮层**（tsx 141–144 的
+      // `setCreateError(null); setShowCreate(true)`），不是直接建台。
+      return Stack(
         children: <Widget>[
-          if (_createError != null)
-            Text(_createError!, textAlign: TextAlign.center),
+          Positioned.fill(
+            child: AylaGroupScenePlaceholder(
+              title: '群内还没有直播',
+              description: '发起本群的第一场直播吧',
+              actions: <Widget>[
+                AylaGlassButton(
+                  label: '创建群内直播',
+                  variant: AylaGlassButtonVariant.glow,
+                  onPressed: _openCreate,
+                ),
+                AylaGlassButton(
+                  label: '返回聊天',
+                  variant: AylaGlassButtonVariant.ghost,
+                  onPressed: widget.onExit,
+                ),
+              ],
+            ),
+          ),
+          // tsx 153–162：空态下的 CreateSheet（与房内 185–192 **同一份**）
+          if (_showCreate) Positioned.fill(child: _createSheet()),
         ],
       );
     }
 
     _enterRoom(currentId);
-    return _buildRoom(context, currentId, channels);
+    // tsx 167–195：房内 + 同一份 CreateSheet（185–192；`LiveRoomBody` 的窄屏「打开直播间列表」
+    // 浮层里「新建直播间」会把它打开 —— `onCreateNewChannel`）。
+    return Stack(
+      children: <Widget>[
+        Positioned.fill(child: _buildRoom(context, currentId, channels)),
+        if (_showCreate) Positioned.fill(child: _createSheet()),
+      ],
+    );
   }
 
   Widget _buildRoom(
@@ -368,6 +470,9 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       ),
       // 弹层打开 → 页面发起同一次拉取（`LiveViewerSheet.tsx:44–65`）
       onOpenViewerSheet: () => viewerSheet.onOpen('$channelId'),
+      // 窄屏「打开直播间列表」浮层底部「新建直播间」（web tsx 179–182 的
+      // `onCreateNewChannel={() => { setCreateError(null); setShowCreate(true); }}`）
+      onCreateNewChannel: _openCreate,
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
       onSendDanmaku: session.sendDanmaku,
