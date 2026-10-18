@@ -69,7 +69,8 @@ import '../state/auth_state.dart';
 import '../state/chat_providers.dart' show chatWsProvider;
 import '../state/favorite_status.dart';
 import '../state/paged_list.dart';
-import '../state/posts_store.dart' show AylaPostTabCache, aylaPostTabCache;
+import '../state/posts_store.dart'
+    show AylaPostTabCache, aylaPostTabCache, aylaPostsStore;
 import '../state/shell_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
@@ -85,6 +86,9 @@ import '../widgets/base/reveal.dart';
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/posts/post_card.dart';
 import '../widgets/posts/post_page_chrome.dart';
+// 浏览上报的视口探针 + 两个常量（同一 web 事实源，group_posts 已实现 ⇒ 复用不复制）。
+import 'group_posts_page.dart'
+    show AylaPostViewProbe, kAylaPostViewFlushDelayMs;
 import 'post_detail_page.dart' show aylaPostSharePayloadFor;
 import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 import 'hub_support.dart';
@@ -142,6 +146,22 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   /// 本页的贴子帧解绑句柄（web `PostsHubPage.tsx:263–268` 的 cleanup `unsubscribe()`）。
   void Function()? _offFrames;
   int _replayNonce = 0;
+
+  // ============ 视口浏览上报（web `usePostViewTracking`，`PostsHubPage.tsx:113`） ============
+  //
+  // 2026-10-17 补齐：此前只有 `group_posts_page.dart` 接了（`_AylaPostViewProbe` +
+  // `reportPostViews`），本页与 `my_posts_page.dart` **都没接** ⇒ 在一级帖子流里刷帖
+  // 不产生浏览上报（已读态/浏览量/后端红点递减整条链路都不动）。
+  // 探针逐条复刻 group_posts 那份（同一 web 事实源 `usePostViewTracking.ts:60–88`）。
+
+  /// 待上报的浏览 id（web `usePostViewTracking.ts:32` 的 `pending` Set）。
+  final Set<int> _pendingViews = <int>{};
+
+  /// 300ms 去抖定时器（web `usePostViewTracking.ts:33` 的 `timer`）。
+  Timer? _viewFlushTimer;
+
+  /// 本节浏览上报是否在途（防重入；完成后按 web 语义清空重建）。
+  bool _reportsViews = false;
 
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
@@ -260,6 +280,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     // `PostsHubPage.tsx:77`）⇒ 再次进入同 tab 命中缓存、不重拉、不闪骨架。
     _pager?.removeListener(_onPagerChanged);
     _pager = null;
+    _viewFlushTimer?.cancel(); // web `usePostViewTracking.ts:86` 的 clearTimeout
     _restore.dispose();
     _scroll.dispose();
     super.dispose();
@@ -403,6 +424,57 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     context.go('/posts/$id');
   }
 
+  // ======================= 视口浏览上报（浏览与已读同源） =======================
+
+  /// 某帖进入视口（web `usePostViewTracking.ts:64–67` 的 `pending.add(id)` + `schedule()`）。
+  ///
+  /// 作者自己的帖子后端天然跳过（`record_post_views` 对 `owner=user` 是 no-op），
+  /// web 的 hook **不做作者过滤** ⇒ 这里同样不过滤，保持同一口径。
+  void _onPostVisible(AylaPost post) {
+    if (_pendingViews.contains(post.id)) return;
+    _pendingViews.add(post.id);
+    _scheduleViewFlush();
+  }
+
+  /// 排一次去抖 flush（web `usePostViewTracking.ts:56–58` 的 `schedule`）。
+  void _scheduleViewFlush() {
+    _viewFlushTimer ??= Timer(
+      const Duration(milliseconds: kAylaPostViewFlushDelayMs),
+      () {
+        _viewFlushTimer = null;
+        unawaited(_flushViews());
+      },
+    );
+  }
+
+  /// 批量上报（web `usePostViewTracking.ts:35–54` 的 `flush`）。
+  ///
+  /// 成功后写共享 store（web `usePostsStore.markViewedBatch`）**并**同步本页分页
+  /// 副本 —— web 的 `onViewed` 回调（`PostsHubPage.tsx:113` 传的是
+  /// `markViewedBatch` 的 store 版；本页列表读 `_pager.items`，不与 store 同源
+  /// ⇒ 必须同时刷新本地，否则没有卡片的已读态变化）。
+  /// 失败：不伪造已读，下次进入视口再触发（web 同）。
+  Future<void> _flushViews() async {
+    if (_reportsViews) {
+      _scheduleViewFlush();
+      return;
+    }
+    final List<int> ids = _pendingViews.toList(growable: false);
+    if (ids.isEmpty) return;
+    _pendingViews.clear();
+    _reportsViews = true;
+    try {
+      final Map<String, int> updated = await AylaPostsApi.reportPostViews(ids);
+      if (!mounted || updated.isEmpty) return;
+      aylaPostsStore.markViewedBatch(updated);
+      setState(() {});
+    } catch (_) {
+      // 上报失败：不标已读（web `usePostViewTracking.ts:51–53` 同）。
+    } finally {
+      _reportsViews = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
@@ -476,7 +548,14 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
                       AylaRevealItem(
                     fadeGlass: false,
                     delay: AylaRevealMotion.staggerDelay(index, staggerMs: 50),
-                    child: _card(post),
+                    // 视口浏览上报（web `usePostViewTracking` 挂在 `[data-post-id]`，
+                    // 即 tsx 113 的 `.posts-feed-item`）⇒ 探针挂同层、在 reveal 内层
+                    // （理由同 `group_posts_page.dart:960` 的注释：reveal 有 translateY，
+                    // 探针在外层会按未位移的布局位判定）。
+                    child: AylaPostViewProbe(
+                      onVisible: () => _onPostVisible(post),
+                      child: _card(post),
+                    ),
                   ),
                 ),
               ),

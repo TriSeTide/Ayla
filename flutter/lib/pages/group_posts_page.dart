@@ -51,7 +51,7 @@
 /// 1. **滚动位置记忆**（`useScrollRestore`）未实现（同其它已交付页面的既有登记）。
 /// 2. **视口上报的观察器差异**（登记，语义等价）：web 用 `IntersectionObserver`
 ///    （`rootMargin: "0px 0px -5% 0px"`、阈值取默认 0 ⇒ 任意相交即算进入视口、
-///    300ms 去抖批量上报），Flutter 侧由 `_AylaPostViewProbe` 监听最近祖先
+///    300ms 去抖批量上报），Flutter 侧由 `AylaPostViewProbe` 监听最近祖先
 ///    `ScrollPosition` 在帧后量矩形（手法同 `widgets/chat/message_visibility.dart`，
 ///    但**阈值是 0 而非 0.6** —— 消息域那一件是「看到 60% 才算已读」，本域 web 是
 ///    「露头即算」，两者不可互抄）。底部 5% 缓冲按同比例从视口矩形扣掉。
@@ -85,6 +85,8 @@ import '../widgets/base/loading.dart' show AylaSkeleton;
 import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/reveal.dart'
     show AylaRevealItem, AylaRevealMotion, AylaRevealScope;
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/base/tooltip.dart' show AylaTooltip;
 import '../widgets/group/group_posts_composer.dart' show AylaGroupPostsComposer;
 import '../widgets/group/group_scene.dart'
@@ -221,6 +223,18 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
 
   String get groupId => widget.groupId;
 
+  /// 滚动位置恢复（web `useScrollRestore(scrollRestoreKey, listRef,
+  /// { active: postId == null, ready: displayPosts.length > 0 })`，`GroupPosts.tsx:366–369`）。
+  /// 键 = web 的 `scrollRestoreKey`（tsx 88）= `ownerKey`（tsx 73）
+  /// = `${userId}:group-posts:${groupId}` —— 按登录人 + 群隔离。
+  late AylaScrollRestore _restore;
+
+  /// 滚动恢复键（web `ownerKey`，`GroupPosts.tsx:73`）。
+  String get _restoreKey {
+    final String user = ref.read(authNotifierProvider).user?.id ?? 'anonymous';
+    return '$user:group-posts:$groupId';
+  }
+
   /// 会话摘要里的群未读帖子数（web tsx 286–288 的 `totalUnread`，后端权威）。
   int get _totalUnread =>
       ref.watch(chatStateProvider).byId(groupId)?.postUnreadCount ?? 0;
@@ -251,6 +265,13 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     _registerFrameTracking();
     aylaPostsStore.addListener(_onChanged);
     _subscribedPostsStore = true;
+    // tsx 366–369：`active: postId == null`（进详情时列表容器不渲染）。
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      active: widget.postId == null,
+      ready: false,
+    )..attach();
     unawaited(_load());
     _registerRefresh();
   }
@@ -418,6 +439,8 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     // web tsx 360–365：`postId != null` 的 effect 里 `setRevealAfterRefresh(false)`
     // —— 进详情同时清掉「有新卡该播动画」标记，否则返回列表会误判。
     if (widget.postId != null) _revealAfterRefresh = false;
+    // tsx 366–369 的 `active` 门随 postId 变（进详情 = false，返回 = true）。
+    _restore.update(active: widget.postId == null);
     }
   }
 
@@ -439,6 +462,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     _favorites.removeListener(_onChanged);
     _favorites.dispose();
     _share.dispose();
+    _restore.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -834,6 +858,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     // 出现时登记同一事实（无需 setState：紧接着的路由变化必然重建本页）。
     _skipRevealOnRestore = true;
     _revealAfterRefresh = false; // web tsx 429
+    AylaScrollMemory.save(_restoreKey, _scroll); // web tsx 430
     context.go(
       '/group/${Uri.encodeComponent(groupId)}/posts/$id',
     );
@@ -849,6 +874,8 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     // web tsx 386：`displayPosts.length === 0 && (loading || dataOwner !== ownerKey)`
     final List<AylaPost> displayPosts = _displayPosts();
     final bool showSkeleton = displayPosts.isEmpty && _loading;
+    // tsx 366–369：`ready: displayPosts.length > 0`。
+    _restore.update(ready: displayPosts.isNotEmpty);
 
     Widget content;
     if (showSkeleton) {
@@ -888,7 +915,11 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
         // ⚠️ 完整表达式 = `_skipRevealOnRestore && !_revealAfterRefresh`
         //（web tsx 379 的 `(restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh`）
         // ⇒ 取页成功 / 帧插卡 / 发帖三处**会提升**它，压过「详情返回」的抑制。
-        suppress: _skipRevealOnRestore && !_revealAfterRefresh,
+        // 2026-10-17：补上第一项 `restoring`（web tsx 379 的完整表达式
+        // `(restoring || skipRevealRestoreKey === scrollRestoreKey) && !revealAfterRefresh`）；
+        // 此前只有第二项 —— `useScrollRestore` 的等价物缺失时该项恒假。
+        suppress:
+            (_restore.restoring || _skipRevealOnRestore) && !_revealAfterRefresh,
         child: AylaMasonryGrid<AylaPost>(
           // 列表口径 = displayPosts 投影（web tsx 372–377 的 `displayPosts`）
           items: displayPosts,
@@ -926,7 +957,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
                 // 即 tsx 419–423 的 `.posts-feed-item`）⇒ Flutter 侧同层挂探针。
                 // ⚠️ 探针必须在 `AylaRevealItem` **内层**：入场动画有 translateY(20→0)，
                 // 若探针在外层会按「未位移的布局位」判定，首屏可能把尚未落位的卡算作可见。
-                child: _AylaPostViewProbe(
+                child: AylaPostViewProbe(
                   key: anchor,
                   onVisible: () => _onPostVisible(post),
                   child: AylaPostCard(
@@ -1249,8 +1280,16 @@ class _JumpTag extends StatelessWidget {
 /// 1. 首帧布局后量一次（对应 `observe()` 后立刻投递的初始 entry）；
 /// 2. 祖先 [ScrollPosition] 每次 notify 后量一次；
 /// 3. 只在**上升沿**（不可见 → 可见）回调 —— 持续可见不重复回调（IO 的「跨越阈值」语义）。
-class _AylaPostViewProbe extends StatefulWidget {
-  const _AylaPostViewProbe({super.key, required this.child, this.onVisible});
+/// **公开件（2026-10-17 起）**：原本是本页私有的 `_AylaPostViewProbe`。帖子域另两页
+/// （`posts_hub_page.dart` / `my_posts_page.dart`）的 web 同源 hook
+/// （`PostsHubPage.tsx:113` / `MyPostsPage.tsx:68` 都调 `usePostViewTracking`）**此前没接**
+/// ⇒ 这两页刷帖不产生浏览上报（红屏/已读不同步）。三页共用同一探针 ⇒ 去下划线转为
+/// 公开类，由另两页 import 复用（**不复制第二份**）。
+///
+/// ⚠️ 待裁决：更合适的归属是 `lib/widgets/posts/post_view_probe.dart`，但该路径不在
+/// 本次任务 writeScopes 内；先留在本文件（三处消费点同源，无重复实现）。
+class AylaPostViewProbe extends StatefulWidget {
+  const AylaPostViewProbe({super.key, required this.child, this.onVisible});
 
   final Widget child;
 
@@ -1258,10 +1297,10 @@ class _AylaPostViewProbe extends StatefulWidget {
   final VoidCallback? onVisible;
 
   @override
-  State<_AylaPostViewProbe> createState() => _AylaPostViewProbeState();
+  State<AylaPostViewProbe> createState() => _AylaPostViewProbeState();
 }
 
-class _AylaPostViewProbeState extends State<_AylaPostViewProbe> {
+class _AylaPostViewProbeState extends State<AylaPostViewProbe> {
   ScrollPosition? _position;
   bool _queued = false;
   bool _visible = false;

@@ -415,8 +415,12 @@ abstract final class AylaBreakpoints {
   /// 形态判定只有两态：≤768 窄屏（BottomTabs 系）/ >768 宽屏（TopNav 系）
   static bool isNarrow(double width) => width <= sm;
 
-  /// ≥1024 帖子流双列瀑布（d:§12.18）
-  static bool isWideMasonry(double width) => width >= md;
+  /// ≥1025 帖子流双列瀑布（d:§12.18）。
+  ///
+  /// ⚠️ 是 **1025 不是 1024**：web 三处媒体查询都写 `@media (min-width: 1025px)`
+  /// （`posts.css:657/998`、`directory-filters.css:210`），此前这里用 `md`(=1024)
+  /// 会在 1024 这一档错列（2026-10-17 按 web 订正）。
+  static bool isWideMasonry(double width) => width >= md + 1;
 }
 
 /// `--glass-inset`（`inset 0 1px 0 rgba(255,255,255,.5)`）的 Flutter 等价物。

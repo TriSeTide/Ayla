@@ -51,6 +51,8 @@ import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart';
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/game/game_room_card.dart';
 import '../widgets/game/games_grid.dart';
 import 'hub_support.dart';
@@ -98,11 +100,23 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
 
+  /// 滚动位置恢复（web `useScrollRestore(scope, hubRef, { ready: !loading || rooms.length > 0 })`，
+  /// `GamesHubPage.tsx:83`）。
+  ///
+  /// 键 = web 的 `scope`（`GamesHubPage.tsx:45`）：`games-hub:${filter}`。
+  late AylaScrollRestore _restore;
+
+  String get _restoreKey => 'games-hub:$_filter';
 
   @override
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false, // 首帧尚无列表
+    )..attach();
     _start();
     // ⚠️ **必须帧后**：\`_loadFriends\` 会在首个 await 前同步写 social store
     // （→ GroupPage._onChanged 的 setState），落在本帧 build 期即抛
@@ -137,7 +151,14 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
       final String next =
           aylaHubFilterOf(GamesHubPage.filters, widget.initialType);
       if (next != _filter) {
+        AylaScrollMemory.save(_restoreKey, _scroll);
         setState(() => _filter = next);
+        _restore.dispose();
+        _restore = AylaScrollRestore(
+          key: _restoreKey,
+          controller: _scroll,
+          ready: false,
+        )..attach();
         _start();
       }
     }
@@ -154,6 +175,7 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
       // 否则触发 Riverpod 的「生命周期内修改 provider」断言。
       scheduleMicrotask(() => notifier.unregisterRefresh(callback));
     }
+    _restore.dispose();
     _pager?.dispose();
     _scroll.dispose();
     super.dispose();
@@ -255,7 +277,16 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
   }
 
   void _onFilterChange(String next) {
+    if (next == _filter) return;
+    // tsx 172：切分类前先保存**当前键**的位置。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     setState(() => _filter = next);
+    _restore.dispose();
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false,
+    )..attach();
     _start();
     context.replace(next == 'all' ? '/games' : '/games?type=$next');
   }
@@ -297,6 +328,11 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
     }
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaDirectoryController<AylaDirectoryGameEntry>? pager = _pager;
+    // tsx 83：`ready: !loading || rooms.length > 0`（不是 web 的 loaded 位——本页用
+    // 「不再 loading 或已有卡」表达，语义相同：只要有可滚内容就恢复）。
+    _restore.update(
+      ready: !(pager?.loading ?? true) || (pager?.items.isNotEmpty ?? false),
+    );
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {
@@ -351,7 +387,13 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
                       AylaGameRoomCard(
                         room: visible[i].card,
                         onEnter: () => _enter(visible[i].card.id),
-                        revealDelay: AylaRevealMotion.staggerDelay(i),
+                        // web `useListEntryMotion(hubRef, ".game-room-card-wrap", restoring, replayNonce)`
+                        // （`GamesHubPage.tsx:84`）：`restoring`（命中滚动记忆）时**整批禁入场**，
+                        // 否则从详情返回会看到列表再次从下方浮一次。Flutter 侧
+                        // `AylaGameRoomCard` 以「`revealDelay == null` ⇒ 不挂 AylaRevealItem」
+                        // 表达同一语义（`game_room_card.dart:115–118`）。
+                        revealDelay:
+                            _restore.restoring ? null : AylaRevealMotion.staggerDelay(i),
                         // 网格等高：web `boardgame.css:232–237` 的 `.games-grid { display:grid }`
                         // 默认 `align-items: stretch` ⇒ 同一行卡片恒等高（网格把最矮的拉到该行最高）。
                         // Flutter 无 stretch 且卡片内含 LayoutBuilder（不支持 intrinsics，
@@ -420,6 +462,11 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
 
   /// 进房（tsx 105–112：navigate('/games/:roomId')）。房内态属第 3 批，此处只做路由。
   void _enter(String roomId) {
+    // web 的卡片 onEnter 前没有显式 save（`GamesHubPage.tsx:212` 直接
+    // `enterRoom(r)`），滚动记忆由 scroll 监听实时写入；Flutter 侧监听同样实时
+    // （`AylaScrollRestore._onScroll`），但**路由退出可能晚于最后一次滚动回调**
+    // ⇒ 这里按本仓既有范式（`posts_hub_page.dart:402`）显式再存一次，语义等价、更稳。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     final String encoded = Uri.encodeComponent(roomId);
     context.go('/games/$encoded');
   }

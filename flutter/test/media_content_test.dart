@@ -18,6 +18,7 @@ import '../lib/core/media/media_signer.dart';
 import '../lib/core/models/chat_message.dart';
 import '../lib/core/models/media_kind.dart';
 import '../lib/core/models/post.dart' show AylaMediaDescriptor;
+import '../lib/theme/app_icons.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
@@ -72,6 +73,13 @@ AylaChatMessage _msg({
       status: AylaMessageStatus.sent,
       seq: 1,
       createdAt: '2026-09-24T10:00:00Z',
+    );
+
+/// 按 lucide 名找图标（E4.1：媒体域图标全量换 lucide 后，测试不再能靠
+/// `find.byIcon(Icons.xxx)` 定位 —— 用 [AylaIcon.icon] 的 name 断言）。
+Finder _iconNamed(String name) => find.byWidgetPredicate(
+      (Widget w) => w is AylaIcon && w.icon.name == name,
+      description: 'AylaIcon(name: $name)',
     );
 
 class _FakeAudioEngine implements AylaAudioEngine {
@@ -238,7 +246,7 @@ void main() {
     // 播放键徽标 48×48（`.video-play-badge`，app.css 1423–1439）
     final Finder badge = find
         .ancestor(
-          of: find.byIcon(Icons.play_arrow_rounded),
+          of: _iconNamed('iconPlay'),
           matching: find.byType(AnimatedContainer),
         )
         .first;
@@ -396,13 +404,13 @@ void main() {
     expect(find.text('0:12'), findsNWidgets(2), reason: 'formatDuration（descriptor duration）');
 
     // 播第一条
-    await tester.tap(find.byIcon(Icons.play_arrow_rounded).first);
+    await tester.tap(_iconNamed('iconPlay').first);
     await tester.pump(const Duration(milliseconds: 50));
     expect(a.plays, 1);
     expect(a.opened, isTrue);
 
     // 播第二条 → 抢占：第一条被停
-    await tester.tap(find.byIcon(Icons.play_arrow_rounded).first);
+    await tester.tap(_iconNamed('iconPlay').first);
     await tester.pump(const Duration(milliseconds: 50));
     expect(b.plays, 1);
     expect(a.pauses, greaterThanOrEqualTo(1), reason: '全局同时只播一条（mediaPlayback.ts）');
@@ -422,10 +430,92 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await tester.tap(_iconNamed('iconPlay'));
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('语音播放失败'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+  });
+
+
+  testWidgets('E4.1／媒体域图标全量走 lucide（禁回退 Material Icons）', (
+    WidgetTester tester,
+  ) async {
+    // web 事实源：MediaContent.tsx:249/632/634/645/651/723/735/748/751 全部用
+    // components/icons.tsx 的 IconPlay / IconPause / IconMic / IconFile / IconDownload。
+    // Flutter 侧此前这 5 处是 Material Icons（play_arrow_rounded / mic_none_rounded /
+    // insert_drive_file_outlined / download_rounded），2026-10-17 按 web 收敛到 AylaIcon。
+
+    // ① 视频封面播放键（22）→ iconPlay
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMediaContent(
+          msg: _msg(
+            type: AylaMessageType.video,
+            media: _media(
+              id: 'mv',
+              kind: AylaMediaKind.video,
+              mime: 'video/mp4',
+              width: 640,
+              height: 480,
+              thumbnail: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    final AylaIcon coverPlay = tester.widget<AylaIcon>(_iconNamed('iconPlay'));
+    expect(coverPlay.size, 22, reason: 'MediaContent.tsx:249 <IconPlay width={22} />');
+    expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
+
+    // ② 语音波形降级 mic（18）→ iconMic
+    // ⚠️ 先卸载上一棵树：同一 testWidgets 内连续 pumpWidget 同类型 StatefulWidget
+    // 会复用 State（`_media` 不重算）⇒ 图像仍停在上一分支。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMediaContent(
+          msg: _msg(
+            type: AylaMessageType.voice,
+            media: _media(
+              id: 'mv2',
+              kind: AylaMediaKind.voice,
+              duration: 8,
+              waveform: false,
+            ),
+          ),
+          audioEngineFactory: () => _FakeAudioEngine(),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(_iconNamed('iconMic'), findsOneWidget, reason: 'MediaContent.tsx:645/651');
+    expect(find.byIcon(Icons.mic_none_rounded), findsNothing);
+
+    // ③ 文件卡图标（20）→ iconFile
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMediaContent(
+          msg: _msg(
+            type: AylaMessageType.file,
+            content: 'q3-report.pdf',
+            media: _media(
+              id: 'mf',
+              kind: AylaMediaKind.file,
+              mime: 'application/pdf',
+              size: 128000,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(_iconNamed('iconFile'), findsWidgets, reason: 'MediaContent.tsx:723/828');
+    expect(find.byIcon(Icons.insert_drive_file_outlined), findsNothing);
   });
 
   // ======================= 图文混排 =======================

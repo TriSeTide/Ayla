@@ -21,6 +21,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'platforms/vod_platform.dart';
+import '../theme/app_icons.dart';
 import '../theme/tokens.dart';
 
 /// 播放器可观测状态（两端统一投影）。
@@ -341,8 +342,10 @@ class _PlayPauseButtonState extends State<_PlayPauseButton> {
               boxShadow: _hovered ? AylaShadows.glow : null,
             ),
             child: Center(
-              child: Icon(
-                widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              // 播放/暂停用库内 lucide 图标（«app_icons_data.dart» 的 iconPlay/iconPause，
+              // 与 web «icons.tsx» 的 IconPlay/IconPause 同源）；此前是 Material 实心三角。
+              child: AylaIcon(
+                aylaIconByName(widget.playing ? 'iconPause' : 'iconPlay')!,
                 size: 20,
                 color: const Color(0xFFFFFAFB),
               ),

@@ -47,14 +47,20 @@ import '../core/models/post.dart';
 import '../state/auth_state.dart';
 import '../state/favorite_status.dart';
 import '../state/paged_list.dart';
+import '../state/posts_store.dart' show aylaPostsStore;
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../theme/tokens.dart';
 import '../widgets/base/page_state.dart';
 import '../widgets/base/reveal.dart';
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/posts/post_card.dart';
 import '../widgets/posts/post_page_chrome.dart';
+// 浏览上报的视口探针 + 常量（同一 web 事实源，group_posts 已实现 ⇒ 复用不复制）。
+import 'group_posts_page.dart'
+    show AylaPostViewProbe, kAylaPostViewFlushDelayMs;
 import 'post_detail_page.dart' show aylaPostSharePayloadFor;
 import 'share_support.dart' show AylaShareController, aylaOpenShareSheet;
 
@@ -78,6 +84,19 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   AylaPagedList<AylaPost>? _pager;
   int _replayNonce = 0;
 
+  // ============ 视口浏览上报（web `usePostViewTracking`，`MyPostsPage.tsx:68`） ============
+  // 2026-10-17 补齐：此前只有 `group_posts_page.dart` 接了 ⇒ 本页刷帖不产生浏览上报。
+  // 探针 = 同一个 [AylaPostViewProbe]（group_posts 已交付，不复制第二份）。
+
+  /// 待上报的浏览 id（web `usePostViewTracking.ts:32`）。
+  final Set<int> _pendingViews = <int>{};
+
+  /// 300ms 去抖定时器（web `usePostViewTracking.ts:33`）。
+  Timer? _viewFlushTimer;
+
+  /// 上报是否在途（防重入）。
+  bool _reportsViews = false;
+
   /// 他人模式的昵称（tsx 161；失败 → null ⇒ 标题退化为「帖子」）。
   String? _ownerName;
 
@@ -87,10 +106,27 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
     return owner == ref.read(authNotifierProvider).user?.id;
   }
 
+  /// 滚动位置恢复（web `useScrollRestore(scrollRestoreKey, hubRef,
+  /// { active: present && userStateReady, ready: userStateReady && visiblePosts.length > 0 })`，
+  /// `MyPostsPage.tsx:74–79`）。
+  ///
+  /// 键（tsx 74）= `user-posts:${ownerId}`；**按目标用户隔离**（自己的帖子 vs 别人的
+  /// 帖子互不复用），与瀑布流列分配记忆同一个键（tsx 82）。
+  late AylaScrollRestore _restore;
+
+  /// 目标用户键：路由 `/posts/mine` 传 null ⇒ 用当前登录人；否则用 `ownerId`。
+  String get _restoreKey =>
+      'user-posts:${widget.ownerId ?? ref.read(authNotifierProvider).user?.id ?? 'mine'}';
+
   @override
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false, // 首帧尚无列表
+    )..attach();
     _start();
     _loadOwnerName();
   }
@@ -99,8 +135,16 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   void didUpdateWidget(covariant MyPostsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.ownerId != oldWidget.ownerId) {
-      // tsx 132–146：换目标时重置全部状态后重拉
+      // tsx 132–146：换目标时重置全部状态后重拉。滚动键随 ownerId 变 ⇒ 换控制器
+      // （保留旧键记录，web 同：`useScrollRestore` 的 deps 含 key）。
+      AylaScrollMemory.save(_restoreKey, _scroll);
       setState(() => _ownerName = null);
+      _restore.dispose();
+      _restore = AylaScrollRestore(
+        key: _restoreKey,
+        controller: _scroll,
+        ready: false,
+      )..attach();
       _start();
       _loadOwnerName();
     }
@@ -110,7 +154,9 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   void dispose() {
     _favorites.removeListener(_onFavoritesChanged);
     _favorites.dispose();
+    _viewFlushTimer?.cancel(); // web `usePostViewTracking.ts:86` 的 clearTimeout
     _share.dispose();
+    _restore.dispose();
     _pager?.dispose();
     _scroll.dispose();
     super.dispose();
@@ -177,7 +223,54 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
 
   /// tsx 202–203：进详情并带上来源（`?from=mine|user`）。
   void _openPost(int id) {
+    // tsx 202：`saveScrollPosition(scrollRestoreKey, hubRef.current)`。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     context.go('/posts/$id?from=${_mine ? 'mine' : 'user'}');
+  }
+
+  // ======================= 视口浏览上报（浏览与已读同源） =======================
+
+  /// 某帖进入视口（web `usePostViewTracking.ts:64–67`）。
+  void _onPostVisible(AylaPost post) {
+    if (_pendingViews.contains(post.id)) return;
+    _pendingViews.add(post.id);
+    _scheduleViewFlush();
+  }
+
+  /// 排一次去抖 flush（web `usePostViewTracking.ts:56–58`）。
+  void _scheduleViewFlush() {
+    _viewFlushTimer ??= Timer(
+      const Duration(milliseconds: kAylaPostViewFlushDelayMs),
+      () {
+        _viewFlushTimer = null;
+        unawaited(_flushViews());
+      },
+    );
+  }
+
+  /// 批量上报（web `usePostViewTracking.ts:35–54` 的 `flush`）。
+  ///
+  /// 成功后写共享 store（web `usePostsStore.markViewedBatch`）并重建本页（本页列表读
+  /// `_pager.items`，与 store 不同源 ⇒ 需 setState 让卡片已读态刷新）。
+  Future<void> _flushViews() async {
+    if (_reportsViews) {
+      _scheduleViewFlush();
+      return;
+    }
+    final List<int> ids = _pendingViews.toList(growable: false);
+    if (ids.isEmpty) return;
+    _pendingViews.clear();
+    _reportsViews = true;
+    try {
+      final Map<String, int> updated = await AylaPostsApi.reportPostViews(ids);
+      if (!mounted || updated.isEmpty) return;
+      aylaPostsStore.markViewedBatch(updated);
+      setState(() {});
+    } catch (_) {
+      // 上报失败：不伪造已读（web `usePostViewTracking.ts:51–53` 同）。
+    } finally {
+      _reportsViews = false;
+    }
   }
 
   /// tsx 173–178：触底追加（**error 时不自动追加** —— 必须点页脚重试）。
@@ -209,6 +302,9 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
     final String title = _mine
         ? '我的帖子'
         : (_ownerName != null ? '$_ownerName的帖子' : '帖子');
+    // tsx 74–79：`active: present && userStateReady`（本页列表常驻 ⇒ active 恒 true）、
+    // `ready: userStateReady && visiblePosts.length > 0`。
+    _restore.update(ready: posts.isNotEmpty);
 
     Widget body;
     if (loading) {
@@ -288,11 +384,19 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
           horizontal: lg ? AylaSpacing.sp6 : AylaSpacing.sp4,
           vertical: lg ? AylaSpacing.sp4 : AylaSpacing.sp3,
         ),
+        // web `useListEntryMotion(hubRef, ".posts-feed-item", restoring && !resumeEntry)`
+        // （`MyPostsPage.tsx:83`）：恢复命中时整批禁入场。
         itemBuilder: (BuildContext context, AylaPost post, int index) =>
             AylaRevealItem(
           fadeGlass: false,
+          enabled: !_restore.restoring,
           delay: AylaRevealMotion.staggerDelay(index, staggerMs: 50),
-          child: _card(post),
+          // 视口浏览上报（web `usePostViewTracking` 挂在 `[data-post-id]`，tsx 68）——
+          // 探针在 reveal 内层（reveal 有 translateY，外层会按未位移的布局位判定）。
+          child: AylaPostViewProbe(
+            onVisible: () => _onPostVisible(post),
+            child: _card(post),
+          ),
         ),
       ),
     );

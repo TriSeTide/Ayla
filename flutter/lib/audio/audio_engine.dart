@@ -198,10 +198,20 @@ class AylaAudioEngine {
     try {
       _recorder = AudioRecorder();
       final Stream<List<int>> stream = await _recorder!.startStream(
+        // 采前处理三项（AEC / NS / AGC）—— web 事实源 `wsRelayRoom.ts:492–494`：
+        // `echoCancellation: true, noiseSuppression: true, autoGainControl: true`
+        // （浏览器 `getUserMedia` 的约束，三项全开）。
+        // Flutter 侧 `record` 6.x 的等价字段是 `RecordConfig.echoCancel /
+        // noiseSuppress / autoGain`（`record_platform_interface-1.6.0/lib/src/types/
+        // record_config.dart:45/50/55`，默认全 false ⇒ **必须显式开**）。
+        // 2026-10-17 补齐：此前三项一项未传 ⇒ 语音房互听有回声/底噪、远讲音量偏小。
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
           sampleRate: kSampleRate,
           numChannels: 1,
+          echoCancel: true, // wsRelayRoom.ts:492
+          noiseSuppress: true, // wsRelayRoom.ts:493
+          autoGain: true, // wsRelayRoom.ts:494
         ),
       );
       _log('录音流已开（48k mono pcm16）');

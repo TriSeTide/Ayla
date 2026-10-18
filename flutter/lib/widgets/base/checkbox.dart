@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../theme/app_icons.dart';
 import '../../theme/tokens.dart';
 
 /// 复选框（native `input[type=checkbox]` + `accent-color: var(--glow-500)` 的等价自绘件）。
@@ -51,7 +52,13 @@ class AylaCheckbox extends StatelessWidget {
           ),
         ),
         child: checked
-            ? Icon(Icons.check, size: size * 0.75, color: Colors.white)
+            // 勾用库内 lucide «iconCheck»（web 端是 native checkbox 的浏览器勾形；
+            // 全库统一走线性图标族，不再用 Material «Icons.check» 的粗笔勾）。
+            ? AylaIcon(
+                aylaIconByName('iconCheck')!,
+                size: size * 0.75,
+                color: Colors.white,
+              )
             : null,
       ),
     );

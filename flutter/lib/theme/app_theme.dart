@@ -207,10 +207,22 @@ ThemeData buildAylaTheme() {
   );
 
   return base.copyWith(
-    textTheme: base.textTheme.apply(
-      bodyColor: AylaColors.textPrimary,
-      displayColor: AylaColors.textPrimary,
-    ),
+    // ⚠️ **必须显式应用字体族**（2026-10-18 用户实报「字体错误的不止一处」的根因）：
+    // 此前这里只 `apply` 了**颜色**（bodyColor/displayColor），没给字体族 ——
+    // 于是所有**未显式写 `fontFamily`** 的 `Text`（如 `TextButton` 内的裸 `Text('加载更早消息')`）
+    // 全部落到 Material 默认的 Roboto / 平台字体，且**不带 CJK 回退链**，
+    // 视觉上与本库另一套 Fredoka/Nunito 完全不同（用户截图：历史加载按钮、分享卡标题等）。
+    //
+    // 修法 = 与 web 的 `body { font-family: var(--font-body) }` 对齐：把 body 族 + CJK 回退
+    // 写进 **全局 textTheme 的每一个样式**，这样任何"忘了写字体"的 Text 也会继承到正字。
+    // 仍推荐显式用 `AylaTextStyles.of(context)`（字号/字重逐级不同），此处只兜底字体族。
+    textTheme: base.textTheme
+        .apply(
+          bodyColor: AylaColors.textPrimary,
+          displayColor: AylaColors.textPrimary,
+          fontFamily: AylaFonts.body,
+          fontFamilyFallback: AylaFonts.cjkFallback,
+        ),
     // ⚠️ **必须显式设置 `iconTheme`**：SDK 的 `ThemeData` 在缺省时会兜底注入
     // `IconThemeData(color: kDefaultIconDarkColor)`（= `Color(0xDD000000)`，肉眼即纯黑，
     // theme_data.dart:526），而 `Theme` 会把它注入整棵树（theme.dart:147）。
@@ -228,14 +240,15 @@ ThemeData buildAylaTheme() {
     //    **叠加** ⇒ 位移与白屏时间翻倍；web 侧 React Router 本身不做转场（唯一 owner 是
     //    `PageTransition.tsx`），所以平台默认必须先让位；
     // 2. web 的 `AnimatePresence mode="sync"` 语义是「**新旧页并存、各播各的**」⇒ 换页时
-    //    能看见两页内容叠几帧。当前页面绝大多数还是占位页（`PendingPage`），这种重叠
-    //    除了残影没有任何信息量 ⇒ 用户要求先全删。
+    //    能看见两页内容叠几帧。（2026-10-17 订正：此前写「当前页面绝大多数还是占位页
+    //    PendingPage」已过时 —— 24 条路由全是真实页面。）用户当时要求先全删。
     //
     // 📌 **web 侧通用转场的真实覆盖范围**（逐行核对 `AppShell.tsx:61–74` 的 `panelOwned`）：
     //    22 条路由里**只有 `/group` 与 `/posts/mine` 两条**会播整页转场；其余全部 `panelOwned`
     //    （`initial` 即终值 + `duration: 0`）—— 动画由**页面内部**承担（群场景侧栏/面板、
     //    `/profile` 两列、消息中心的 ConversationTransition…）。详表见 `page_transitions.dart` 文件头。
-    //    这两条在当前 Flutter 侧**都还是占位页** ⇒ 此刻恢复通用转场没有意义。
+    //    （2026-10-17 订正：此前写「这两条在 Flutter 侧都还是占位页」已过时 —— /group 与
+    //    /posts/mine 均已交付真实页面；但换页动画 owner 仍按用户裁决留在页面自己。）
     //
     // ⇒ **换页动画的 owner 交回「页面自己」**：需要入场编排的页面自行挂
     //    `AylaRevealItem`（范本 = `ProfilePage` / `UserProfilePage` 的两列面板入场，

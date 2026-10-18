@@ -22,7 +22,21 @@ const int kFrameSamples = 960;
 /// 每帧 PCM16 字节数（960 样本 * 2 字节）
 const int kFrameBytes = kFrameSamples * 2;
 
-/// 编码码率（wsRelayRoom.ts encoder.configure bitrate: 32000）
+/// 编码码率 —— **文档常量，当前不在代码里生效**（2026-10-17 核查结论）。
+///
+/// web 事实源：`wsRelayRoom.ts:516` 的 `encoder.configure({ bitrate: 32000 })`。
+///
+/// Flutter 侧**无法**设置该值，原因是所选库的 API 边界（不是遗漏）：
+/// - 本工程用 `SimpleOpusEncoder`（`opus_codec_dart` 3.0.5，`opus_dart_encoder.dart:33`），
+///   公开面只有 `encode / encodeFloat / destroy`，**没有码率入口**；
+/// - 底层 `opus_encoder_ctl(OPUS_SET_BITRATE_REQUEST=4002, …)` 确实被包到了
+///   `BufferedOpusEncoder.encoderCtl({request, value})`（同文件 :290–293），
+///   但那是另一条编码路径（自带 native 输入/输出缓冲，要手工管 `inputBuffer` /
+///   `inputBufferIndex`），换过去要重写整个 `_onPcmChunk` 编码链；收益仅
+///   「32000 vs libopus VOIP 自选（≈20–40kbps @48k mono）」，与本轮风险不成比例。
+/// ⇒ 保留为**文档常量**：数值仍是 web 权威值，供将来换编码路径时直接用；
+/// **不要**误以为它在生效（`grep kOpusBitrate` 只应命中本文件）。
+/// 实际码率由 libopus `Application.voip` 模式按输入自选（`audio_engine.dart:143`）。
 const int kOpusBitrate = 32000;
 
 /// 说话判定迟滞阈值（wsRelayRoom.ts SPEAKING_ON/SPEAKING_OFF；

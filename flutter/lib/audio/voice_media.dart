@@ -203,3 +203,23 @@ AylaVoiceMedia aylaVoiceMedia([AylaVoiceMediaEvents? events]) {
 /// 测试专用：替换/清空全局单例。
 @visibleForTesting
 void debugSetVoiceMedia(AylaVoiceMedia? media) => _voiceMedia = media;
+
+/// 登出 / 401 过期时的**语音媒体收尾**（幂等）。
+///
+/// 对应 web `stores/auth.ts:136` 的 `void voiceLiveKit.disconnect()`：登出必须断开语音
+/// 媒体（WebAudio 设备、中继 WS、编解码器），否则下一位登录者会继承上一位的音频会话。
+///
+/// 与 [AylaVoiceMedia.disconnect] 的差别（有意）：
+/// - `disconnect()` 是**房间级**语义（"离开当前频道、仍可复用实例"，web 同名）；
+/// - 本函数是**账号级**收尾：连单例一起放掉（`_voiceMedia = null`），下一次
+///   [aylaVoiceMedia] 会新建一份干净实例 —— 与 web 登出后 `voiceLiveKit` 重新 `connect`
+///   的观感一致，且能保证事件回调不泄漏到已登出的会话。
+///
+/// **不阻塞调用方**：登出路径不等待音频设备释放（web 也是 `void` 调用）。
+void aylaVoiceMediaTeardown() {
+  final AylaVoiceMedia? media = _voiceMedia;
+  _voiceMedia = null;
+  if (media == null) return;
+  // 不 await：登出是同步路径；dispose 内部幂等且自带错误吞并（见其实现）。
+  unawaited(media.dispose());
+}

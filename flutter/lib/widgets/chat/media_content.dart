@@ -46,6 +46,7 @@ import '../../core/models/media_kind.dart';
 import '../../core/models/post.dart' show AylaMediaDescriptor;
 import '../../core/net/dio_client.dart';
 import '../../player/vod_player.dart';
+import '../../theme/app_icons.dart';
 import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
@@ -806,8 +807,14 @@ class _PlayBadge extends StatelessWidget {
           // AylaGlassBackdrop 会把图标挪到采样层之上。
           child: AylaGlassBackdrop(
             filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurButton),
-            child: const Center(
-              child: Icon(Icons.play_arrow_rounded, size: 22, color: AylaColors.indigo700),
+            // web «MediaContent.tsx:249» 的 «<IconPlay width={22} height={22} />»
+            // （lucide 描边三角）——此前用 Material 实心三角占位。
+            child: Center(
+              child: AylaIcon(
+                aylaIconByName('iconPlay')!,
+                size: 22,
+                color: AylaColors.indigo700,
+              ),
             ),
           ),
         ),
@@ -1433,8 +1440,9 @@ class _VoicePlayButtonState extends State<_VoicePlayButton> {
     if (widget.loading) {
       return const AylaSkeleton(width: 14, height: 14, radius: 4);
     }
-    return Icon(
-      widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+    // web «MediaContent.tsx:632/634»：«IconPause 16» / «IconPlay 16»（lucide）。
+    return AylaIcon(
+      aylaIconByName(widget.playing ? 'iconPause' : 'iconPlay')!,
       size: 16,
       color: const Color(0xFFFFFAFB),
     );
@@ -1447,10 +1455,15 @@ class _VoiceWaveFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(
-      color: Color(0x149DBFE6),
+    // web «MediaContent.tsx:645/651»：«IconMic width={18} height={18} />»（lucide）。
+    return ColoredBox(
+      color: const Color(0x149DBFE6),
       child: Center(
-        child: Icon(Icons.mic_none_rounded, size: 18, color: AylaColors.textSecondary),
+        child: AylaIcon(
+          aylaIconByName('iconMic')!,
+          size: 18,
+          color: AylaColors.textSecondary,
+        ),
       ),
     );
   }
@@ -1592,9 +1605,13 @@ class _FileCard extends StatelessWidget {
                 color: AylaColors.ice100,
                 borderRadius: BorderRadius.circular(AylaRadii.rInput),
               ),
-              child: const Center(
-                child: Icon(Icons.insert_drive_file_outlined,
-                    size: 20, color: AylaColors.indigo700),
+              // web «MediaContent.tsx:723/828»：«IconFile width={20} height={20} />»（lucide）。
+              child: Center(
+                child: AylaIcon(
+                  aylaIconByName('iconFile')!,
+                  size: 20,
+                  color: AylaColors.indigo700,
+                ),
               ),
             ),
             const SizedBox(width: AylaSpacing.sp3),
@@ -1720,8 +1737,9 @@ class _FileDownloadButtonState extends State<_FileDownloadButton> {
               // :disabled 语义：不可点时降透明。性能（2026-09-27 §8.17）：
               // 单图标、无重叠 ⇒ 把 .55 乘进图标色与整层 Opacity 等价，
               // 省掉一次 saveLayer。
-              child: Icon(
-                Icons.download_rounded,
+              // web «MediaContent.tsx:735/748/751»：«IconDownload width={16} height={16} />»（lucide）。
+              child: AylaIcon(
+                aylaIconByName('iconDownload')!,
                 size: 16,
                 color: widget.enabled
                     ? AylaColors.indigo700

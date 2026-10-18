@@ -7,6 +7,8 @@
 ///    错误静默（web 的错误态只影响页脚）。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,10 +24,13 @@ import '../lib/pages/games_hub_page.dart';
 import '../lib/pages/hub_support.dart';
 import '../lib/state/directory_events.dart';
 import '../lib/pages/live_hub_page.dart';
+import '../lib/pages/group_posts_page.dart' show AylaPostViewProbe;
 import '../lib/pages/search_page.dart';
 import '../lib/pages/voice_hub_page.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/widgets/base/loading.dart' show AylaSkeleton;
+import '../lib/widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../lib/widgets/game/games_grid.dart';
 import '../lib/widgets/live/live_hall.dart';
 import '../lib/widgets/profile/favorites_skeleton.dart';
@@ -103,6 +108,151 @@ Widget _host(Widget child, {Size viewport = const Size(1440, 900)}) {
   );
 }
 
+
+/// 【E1】滚动位置恢复接线（web `useScrollRestore`，2026-10-17 补齐 6 页）
+///
+/// 之前：`lib/widgets/base/scroll_restore.dart` 件已存在，但除 posts_hub / search /
+/// post_detail 三页外**其余 6 页都没接** ⇒ 进详情再返回时列表回到顶部。
+/// 本组锁两件事：① 键字符串与 web `scope` 逐字一致；② 记忆命中后页面不把记录覆盖成 0。
+void _scrollRestoreGroup() {
+  group('E1 滚动恢复（useScrollRestore.ts:48–105）—— 6 页接线', () {
+    setUp(AylaScrollMemory.clear);
+    tearDown(AylaScrollMemory.clear);
+
+    /// 逐页源码里的键字面量（= web scope 的 Flutter 表达）。
+    ///
+    /// 用**源码字符串**断言而不实例化页面：六页各自要 ProviderScope + 网络替身，
+    /// 而键是纯字符串契约 —— 读文件锁最稳，也不依赖任何 mock。
+    /// web 事实源见各组注释。
+    test('键与 web scope 逐字一致（6 页）', () {
+      const Map<String, String> cases = <String, String>{
+        // GamesHubPage.tsx:45  const scope = `games-hub:${filter}`;
+        'games_hub_page.dart': r'games-hub:$_filter',
+        // LiveHubPage.tsx:42   const scope = `live-hub:${filter}`;
+        'live_hub_page.dart': r'live-hub:$_filter',
+        // VoiceHubPage.tsx:54  const scope = `voice-hub:${filter}`;
+        'voice_hub_page.dart': r'voice-hub:$_filter',
+        // FavoritesPage.tsx:295 const scope = `favorites:${favoriteAccount()}:${filter}`;
+        'favorites_page.dart': r'favorites:$user:$_filter',
+        // MyPostsPage.tsx:74   const scrollRestoreKey = `user-posts:${ownerId}`;
+        'my_posts_page.dart': 'user-posts:',
+        // GroupPosts.tsx:73/88 const ownerKey = `${userId}:group-posts:${groupId}`;
+        'group_posts_page.dart': r':group-posts:$groupId',
+      };
+      for (final MapEntry<String, String> e in cases.entries) {
+        final String src = File('lib/pages/${e.key}').readAsStringSync();
+        expect(
+          src,
+          contains(e.value),
+          reason: '${e.key} 的滚动键必须逐字等于 web scope（${e.value}）',
+        );
+        // 同时必须真的用了恢复控制器（防「键在、没接」）
+        expect(src, contains('AylaScrollRestore('), reason: '${e.key} 必须实例化 AylaScrollRestore');
+        expect(src, contains('AylaScrollMemory.save('), reason: '${e.key} 必须在入口显式 saveScrollPosition');
+        expect(src, contains('_restore.update('), reason: '${e.key} 必须在 build 里表达 ready 门');
+      }
+    });
+
+    test('记忆命中：restoring 为真、且不把记录清零（useScrollRestore.ts:65–73）', () {
+      AylaScrollMemory.put('probe-key', 96);
+      final ScrollController controller = ScrollController();
+      addTearDown(controller.dispose);
+      final AylaScrollRestore restore = AylaScrollRestore(
+        key: 'probe-key',
+        controller: controller,
+        ready: false,
+      )..attach();
+      addTearDown(restore.dispose);
+      // ready=false 时：命中过（restoring 真）但**不**落位（tsx 69 的 `!ready` 早退）
+      expect(restore.restoring, isTrue);
+      expect(restore.hasSavedPosition, isTrue);
+      expect(AylaScrollMemory.get('probe-key'), 96, reason: '首帧不得覆盖记忆');
+      // ready 转真后仍不写回（无附件时 jumpTo 会被跳过）
+      restore.update(ready: true);
+      expect(AylaScrollMemory.get('probe-key'), 96);
+    });
+  });
+}
+
+/// 【E2】帖子视口浏览上报接线（web `usePostViewTracking`，2026-10-17 补齐 2 页）
+///
+/// 之前：只有 `group_posts_page.dart` 接了探针 + `reportPostViews`；
+/// `posts_hub_page.dart`（`PostsHubPage.tsx:113`）与 `my_posts_page.dart`
+/// （`MyPostsPage.tsx:68`）**都没接** ⇒ 这两页刷帖不产生浏览上报。
+void _postViewTrackingGroup() {
+  group('E2 帖子视口浏览上报（usePostViewTracking.ts:24–88）—— 2 页接线', () {
+    test('三页共用同一个探针 + 同一个 flush 窗口常量（不复制第二份）', () {
+      final String group =
+          File('lib/pages/group_posts_page.dart').readAsStringSync();
+      // 探针是本页定义的公开件（group_posts 是唯一实现）
+      expect(group, contains('class AylaPostViewProbe extends StatefulWidget'));
+      expect(group, contains('const int kAylaPostViewFlushDelayMs = 300'),
+          reason: 'FLUSH_DELAY_MS = 300（usePostViewTracking.ts:22）');
+
+      for (final String page in <String>[
+        'posts_hub_page.dart', // PostsHubPage.tsx:113
+        'my_posts_page.dart', //  MyPostsPage.tsx:68
+      ]) {
+        final String src = File('lib/pages/$page').readAsStringSync();
+        // 必须 import 复用，而不是各自复制一份
+        expect(
+          src,
+          contains('show AylaPostViewProbe, kAylaPostViewFlushDelayMs'),
+          reason: '$page 必须复用 group_posts 的探针与常量',
+        );
+        // 四处接线缺一不可：探针挂载 / 进视口回调 / 去抖 / 上报
+        expect(src, contains('AylaPostViewProbe('),
+            reason: '$page 必须挂探针');
+        expect(src, contains('_onPostVisible('),
+            reason: '$page 必须有进视口回调');
+        expect(src, contains('kAylaPostViewFlushDelayMs'),
+            reason: '$page 必须用 300ms 去抖');
+        expect(src, contains('AylaPostsApi.reportPostViews('),
+            reason: '$page 必须真的上报');
+        // 页面卸载要取消定时器（web :86 clearTimeout）
+        expect(src, contains('_viewFlushTimer?.cancel()'),
+            reason: '$page 卸载必须取消去抖定时器');
+      }
+    });
+
+    testWidgets('探针：真进视口才回调，且只在上升沿触发一次（IO 语义）', (
+      WidgetTester tester,
+    ) async {
+      int calls = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              children: <Widget>[
+                const SizedBox(height: 2000),
+                AylaPostViewProbe(
+                  onVisible: () => calls += 1,
+                  child: const SizedBox(height: 100, width: 100),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(calls, 0, reason: '首屏在 2000px 之外 ⇒ 不可见、不回调');
+
+      // 滚到它可见
+      await tester.drag(find.byType(ListView), const Offset(0, -2100));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(calls, 1, reason: '进入视口 → 回调一次');
+
+      // 继续小幅滚动（仍可见）⇒ 不重复回调
+      await tester.drag(find.byType(ListView), const Offset(0, -20));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(calls, 1, reason: '持续可见不重复回调（只在跨越阈值时触发）');
+    });
+  });
+}
+
 /// 语音房「有人区置顶」判据（web `sortChannels.ts:32–46`）在侧栏投影处的回归锁 ——
 /// 覆盖 task-5 用户实报的「宽屏第二列侧栏排序依然错误」：
 /// 人数 0 → 1 时该房必须被排到最前（且**数据本身**要先跟着事件更新）。
@@ -161,6 +311,8 @@ void _voiceSortGroup() {
 }
 
 void main() {
+  _scrollRestoreGroup();
+  _postViewTrackingGroup();
   _voiceSortGroup();
 
   group('aylaHubFilterOf / aylaHubFilterLabel', () {

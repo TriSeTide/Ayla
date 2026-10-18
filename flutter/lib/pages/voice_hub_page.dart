@@ -55,6 +55,8 @@ import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart';
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../state/directory_events.dart' show AylaDirectoryKind;
 import '../widgets/voice/voice_channels.dart';
 import 'hub_support.dart';
@@ -106,10 +108,22 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
 
+  /// 滚动位置恢复（web `useScrollRestore(scope, hubRef,
+  /// { ready: !channelsLoading || directory.items.length > 0 })`，`VoiceHubPage.tsx:88`）。
+  /// 键 = web `scope`（tsx 54）：`voice-hub:${filter}`。
+  late AylaScrollRestore _restore;
+
+  String get _restoreKey => 'voice-hub:$_filter';
+
   @override
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false, // 首帧尚无列表
+    )..attach();
     _start();
     // ⚠️ **必须帧后**：\`_loadFriends\` 会在首个 await 前同步写 social store
     // （→ GroupPage._onChanged 的 setState），落在本帧 build 期即抛
@@ -128,7 +142,14 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
         widget.initialType,
       );
       if (next != _filter) {
+        AylaScrollMemory.save(_restoreKey, _scroll);
         setState(() => _filter = next);
+        _restore.dispose();
+        _restore = AylaScrollRestore(
+          key: _restoreKey,
+          controller: _scroll,
+          ready: false,
+        )..attach();
         _start();
       }
     }
@@ -145,6 +166,7 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
       // 否则触发 Riverpod 的「生命周期内修改 provider」断言。
       scheduleMicrotask(() => notifier.unregisterRefresh(callback));
     }
+    _restore.dispose();
     _pager?.dispose();
     _scroll.dispose();
     super.dispose();
@@ -259,7 +281,16 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   }
 
   void _onFilterChange(String next) {
+    if (next == _filter) return;
+    // tsx 272：切分类前保存**当前键**的位置。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     setState(() => _filter = next);
+    _restore.dispose();
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false,
+    )..attach();
     _start();
     // tsx 271–274：切 tab 改写 URL（replace，不污染历史栈）。
     context.replace(next == 'all' ? '/voice' : '/voice?type=$next');
@@ -301,6 +332,10 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
   @override
   Widget build(BuildContext context) {
+    // tsx 88：`ready: !channelsLoading || directory.items.length > 0`。
+    _restore.update(
+      ready: !(_pager?.loading ?? true) || (_pager?.items.isNotEmpty ?? false),
+    );
     // 房内态（web tsx 212–260）：大厅的取数与列表**保留在下方分支**，
     // 房内视图由 [AylaVoiceRoomHost] 独立装配（key 随频道变化重建 ⇒ 切房即重建会话）。
     final String? channelId = widget.channelId;
@@ -378,7 +413,9 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
                     for (final AylaDirectoryVoiceEntry entry in visible)
                       entry.card,
                   ],
-                  revealItems: true,
+                  // web `useListEntryMotion(hubRef, ".voice-channel-card-wrap", restoring, replayNonce)`
+                  // （`VoiceHubPage.tsx:89`）：恢复命中时整批禁入场。
+                  revealItems: !_restore.restoring,
                   // 卡片 `.active` 蓝边（web tsx 303）：当前所在频道。
                   currentChannelId: currentChannelId,
                   onJoin: _join,
@@ -426,6 +463,8 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
 
   /// 进房（tsx 160–165：navigate('/voice/:id')）。房内页属第 3 批，此处只做路由。
   void _join(String channelId) {
+    // 显式再存一次滚动位置（同 games_hub / live_hub 的说明）。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     context.go('/voice/${Uri.encodeComponent(channelId)}');
   }
 

@@ -87,7 +87,7 @@ class AylaPageTransitionsBuilder extends PageTransitionsBuilder {
     // ⚠️ **无名路由一律直通**：go_router 在初始帧 / 重定向帧会给出 `settings.name == null`
     // （实测），此时既判不出 panelOwned 也判不出群页/搜索页 —— 与其猜一个档位，
     // 不如不动画（宁可少一段动画，也不给错误的路由强加位移）。
-    // 未实现页（`PendingPage`）走 `NoTransitionPage`，根本不会进到这里。
+    // 注：`PendingPage` 现已无路由引用（24 条路由全是真实页面），本函数不会再收到它。
     if (name == null || name.isEmpty) return child;
     // 登录 / 注册：无转场（web 顶层 Route，不在 AppShell 内）⇒ 左侧品牌区**完全不动**
     if (aylaIsTransitionFreePath(name)) return child;

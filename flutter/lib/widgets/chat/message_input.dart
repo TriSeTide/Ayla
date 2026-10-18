@@ -933,8 +933,16 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
     if (isVideo) {
       // web 用 `<video preload=metadata muted>` 首帧；Flutter 侧本地视频首帧需播放器
       // ⇒ 用文件图标占位（登记：视频待发缩略图不做首帧，见文件头差异说明）
-      return const Center(
-        child: Icon(Icons.movie_outlined, size: 18, color: AylaColors.indigo700),
+      // ⚠️ **不是** web 原样：web «MessageInput.tsx:357-366» 用 «<video preload="metadata" muted>»
+      // 抽首帧 + «.picked-play ▶» 角标；Flutter 侧本地视频首帧要起播放器（成本高，已在
+      // 文件头登记该偏离）⇒ 这里用**视频图标**占位。图标取 lucide «IconVideo»
+      // （与 web 同一图标族；此前是 Material «Icons.movie_outlined» 的胶片形状）。
+      return Center(
+        child: AylaIcon(
+          aylaIconByName('iconVideo')!,
+          size: 18,
+          color: AylaColors.indigo700,
+        ),
       );
     }
     return Image.file(File(path), fit: BoxFit.cover);

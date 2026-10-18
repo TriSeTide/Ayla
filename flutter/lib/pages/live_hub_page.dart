@@ -52,6 +52,8 @@ import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart';
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/live/live_hall.dart';
 import 'hub_support.dart';
 import '../state/hub_directory_options.dart'
@@ -100,10 +102,21 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   ShellUiNotifier? _shellNotifier;
   Future<void> Function()? _refreshCallback;
 
+  /// 滚动位置恢复（web `useScrollRestore(scope, hubRef, { ready: !loading || channels.length > 0 })`，
+  /// `LiveHubPage.tsx:76`）。键 = web `scope`（tsx 42）：`live-hub:${filter}`。
+  late AylaScrollRestore _restore;
+
+  String get _restoreKey => 'live-hub:$_filter';
+
   @override
   void initState() {
     super.initState();
     _favorites.addListener(_onFavoritesChanged);
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false, // 首帧尚无列表
+    )..attach();
     _start();
     // ⚠️ **必须帧后**（详见 [_loadFriends]）：首帧 build 期同步写 social store
     // 会撞上 GroupPage 的 build 期 setState。
@@ -120,7 +133,14 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
       final String next =
           aylaHubFilterOf(LiveHubPage.filters, widget.initialType);
       if (next != _filter) {
+        AylaScrollMemory.save(_restoreKey, _scroll);
         setState(() => _filter = next);
+        _restore.dispose();
+        _restore = AylaScrollRestore(
+          key: _restoreKey,
+          controller: _scroll,
+          ready: false,
+        )..attach();
         _start();
       }
     }
@@ -137,6 +157,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
       // 否则触发 Riverpod 的「生命周期内修改 provider」断言。
       scheduleMicrotask(() => notifier.unregisterRefresh(callback));
     }
+    _restore.dispose();
     _pager?.dispose();
     _scroll.dispose();
     super.dispose();
@@ -277,7 +298,16 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   }
 
   void _onFilterChange(String next) {
+    if (next == _filter) return;
+    // tsx 131：切分类前保存**当前键**的位置。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     setState(() => _filter = next);
+    _restore.dispose();
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false,
+    )..attach();
     _start();
     context.replace(next == 'all' ? '/live' : '/live?type=$next');
   }
@@ -313,6 +343,10 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaDirectoryController<AylaDirectoryLiveEntry>? pager = _pager;
+    // tsx 76：`ready: !loading || channels.length > 0`。
+    _restore.update(
+      ready: !(pager?.loading ?? true) || (pager?.items.isNotEmpty ?? false),
+    );
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {
@@ -362,7 +396,9 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
                   ],
                   elysiaUserId: _elysiaUserId,
                   ownerNames: _ownerNames,
-                  revealItems: true,
+                  // web `useListEntryMotion(hubRef, ".live-card-wrap", restoring, replayNonce)`
+                  // （`LiveHubPage.tsx:77`）：恢复命中时整批禁入场。
+                  revealItems: !_restore.restoring,
                   onEnter: _enter,
                   favoriteStateBuilder: (AylaLiveCardData channel) =>
                       _favorites.stateOf('live', channel.id),
@@ -418,6 +454,8 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
 
   /// 进直播间（tsx 160：navigate('/live/:id')）。房内页属第 3 批，此处只做路由。
   void _enter(String channelId) {
+    // 显式再存一次（同 games_hub 的说明；本仓 posts_hub/group_posts 既有范式）。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     final String encoded = Uri.encodeComponent(channelId);
     context.go('/live/$encoded');
   }

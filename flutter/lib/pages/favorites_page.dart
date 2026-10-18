@@ -36,6 +36,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/favorites_api.dart';
 import '../core/models/chat_message.dart' show AylaChatMessage;
+import '../state/auth_state.dart' show authNotifierProvider;
 import '../state/favorite_status.dart';
 import '../state/paged_list.dart';
 import '../theme/app_icons.dart';
@@ -48,6 +49,8 @@ import '../widgets/base/favorite_item.dart';
 import '../widgets/base/page_state.dart';
 import '../widgets/base/profile_and_filters.dart' show AylaDirectoryFilters;
 import '../widgets/base/reveal.dart' show AylaRevealItem, AylaRevealScope;
+import '../widgets/base/scroll_restore.dart'
+    show AylaScrollMemory, AylaScrollRestore;
 import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/profile/favorites_skeleton.dart';
@@ -105,9 +108,39 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
   ///   （文件头已登记差异）⇒ 无这条路径。
   int _replayNonce = 0;
 
+  /// 滚动位置恢复控制器（web `useScrollRestore(scope, pageRef, { ready: state.loaded })`，
+  /// `FavoritesPage.tsx:157`）。
+  ///
+  /// **键 = web 的 `scope`**（`FavoritesPage.tsx:295`）：
+  /// ```
+  /// const scope = `favorites:${favoriteAccount()}:${filter}`;
+  /// function favoriteAccount() {
+  ///   return `${currentUser?.id ?? "anonymous"}:${favoriteSession}`;
+  /// }
+  /// ```
+  /// `favoriteSession` 是**登出时自增**的会话代号（`FavoritesPage.tsx:123–127`），
+  /// 用于让上一次登录的滚动记录失效。Flutter 侧的等价物 = [authState] 的
+  /// user id + 一个随登出自增的计数；这里直接用 user id，并在登出时由
+  /// `auth_bootstrap` 的 `AylaScrollMemory.clear()` 统一清空（同 web 的
+  /// `clearScrollMemory()`）。**因此无需再复制 session 计数器**。
+  late AylaScrollRestore _restore;
+
+  /// 滚动记忆键 —— 与 web `scope` 同构（`favorites:{user}:{filter}`）。
+  String get _restoreKey {
+    final String user =
+        ref.read(authNotifierProvider).user?.id ?? 'anonymous';
+    return 'favorites:$user:$_filter';
+  }
+
   @override
   void initState() {
     super.initState();
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      // tsx 157：`ready: state.loaded`（首帧尚未 loaded ⇒ 不恢复）。
+      ready: false,
+    )..attach();
     _start();
   }
 
@@ -126,6 +159,7 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
 
   @override
   void dispose() {
+    _restore.dispose();
     _pager?.dispose();
     _scroll.dispose();
     // ⚠️ **不 dispose**：`_favorites` 是库内共享单例（web 模块级 store）。
@@ -158,7 +192,17 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
   }
 
   void _onFilterChange(String next) {
+    if (next == _filter) return;
+    // tsx 306：切分类前先显式保存**当前键**的位置（web 的 `saveScrollPosition(scope, pageRef.current)`）。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     setState(() => _filter = next);
+    // 换键重建控制器（web 的 `useScrollRestore(scope, …)` 的 deps 含 key）。
+    _restore.dispose();
+    _restore = AylaScrollRestore(
+      key: _restoreKey,
+      controller: _scroll,
+      ready: false, // 新分类尚未 loaded
+    )..attach();
     _start();
     context.replace(next == 'all' ? '/favorites' : '/favorites?type=$next');
   }
@@ -196,6 +240,9 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
 
   /// 打开原内容（tsx 36–67 的 openTarget 五类）。
   void _open(AylaFavoriteEntry entry) {
+    // tsx 298：`onOpen` 里 `saveScrollPosition(scope, pageRef.current)` —— 以用户
+    // 点击瞬间的位置为权威记录，不依赖路由退出时序。
+    AylaScrollMemory.save(_restoreKey, _scroll);
     switch (entry.card.targetType) {
       case AylaFavoriteTargetType.post:
         _goWithId('/posts', entry.targetId);
@@ -262,6 +309,8 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaPagedList<AylaFavoriteEntry>? pager = _pager;
+    // tsx 157：`ready: state.loaded`（web 用页状态机的 loaded 位，不只是「有 items」）。
+    _restore.update(ready: pager?.loaded ?? false);
     final Widget page = AylaDirectoryPage(
       filters: AylaDirectoryFilters(
         label: '收藏分类',
@@ -318,7 +367,12 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
       child: AylaMasonryGrid<AylaFavoriteEntry>(
       items: rows,
       itemKey: (AylaFavoriteEntry entry) => entry.card.id,
-      memoryKey: 'favorites:$_filter', // web memoryKey（tsx 87）
+      // web memoryKey（tsx 87）= `favorites:${favorites[0].user_id}:${filter}`（**条目所有者**）。
+      // Flutter 侧 `AylaFavoriteResultData` 无 `user_id` 字段（`favorites_api.dart:45` 只留 card/
+      // targetId/createdAt/发送者昵称）⇒ 用「当前登录人」代替。差异仅在「同一浏览器切号后
+      // 看别人的收藏」这一场景：web 会按所有者分桶，Flutter 按登录人分桶。
+      // 已登记为待裁决（见任务汇报）；对单账号使用无影响。
+      memoryKey: 'favorites:$_filter',
       columns: narrow ? 1 : 2, // web: singleColumn ? 1 : 2（tsx 80–85，断点 = max-width:768）
       // ⚠️ 单列 gap **真正生效的是** profile.css:463（.favorites-list 基样式 gap sp2，
       // 0-1-0，无媒体查询）；实测单列 400：list gap = 8px。
@@ -370,13 +424,13 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
         // 仍各自带 AylaGlassSurface ⇒ 仍属玻璃子树，而 Impeller 拒绝
         // 「`Opacity` 祖先 + `BackdropFilter` 后代」（见 reveal.dart 文件头）⇒ 该档照旧必需。
         //
-        // ⚠️ web 的 `suppressEntry`（`restoring && !resumeEntry`）在 Flutter 侧无对象：
-        // 本页的滚动位置记忆（`useScrollRestore` / `saveScrollPosition`，
-        // `FavoritesPage.tsx:10·157·298·306`）**尚未实现**（本文件头已登记）
-        // ⇒ 没有「恢复命中」这一档，故不传 `enabled`。
+        // web 的 `suppressEntry`（`restoring && !resumeEntry`，`FavoritesPage.tsx:82`）：
+        // 从详情返回且命中滚动记忆时**不重播入场**（否则用户会看到列表从下方再浮一次）。
+        // 2026-10-17：`useScrollRestore` 等价物已接（见 [_restore]），此处按 web 表达。
         return AylaRevealItem(
           fadeGlass: false,
           index: index,
+          enabled: !_restore.restoring,
           child: AylaFavoriteItem(
             child: AylaFavoriteResultCard(
               favorite: entry.card,

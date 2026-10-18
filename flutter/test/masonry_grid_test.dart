@@ -17,6 +17,10 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/posts/masonry_grid.dart';
 
+String _kProbe(Object o) => o.toString();
+Widget _bProbe(BuildContext c, Object o, int i) => const SizedBox.shrink();
+
+
 void main() {
   setUp(aylaClearMasonryMemory);
   tearDown(aylaClearMasonryMemory);
@@ -265,4 +269,35 @@ void main() {
       greaterThan(600),
     ); // 跨两列
   });
+  // ======================= E4.3 断点常量（web min-width: 1025px） =======================
+  //
+  // web 三处媒体查询都写 `@media (min-width: 1025px)`：
+  //   posts.css:657 / posts.css:998 / directory-filters.css:210
+  // ⇒ 「1025 起双列」，1024 这一档**必须仍是单列**。
+  // 2026-10-17 订正前 `AylaBreakpoints.isWideMasonry` 用 `md`(=1024) ⇒ 1024 错列。
+  group('E4.3 isWideMasonry：1025 起始（posts.css:657/998、directory-filters.css:210）', () {
+    test('1024 不宽、1025 才宽（差 1 是 web 的原文语义，不是笔误）', () {
+      expect(AylaBreakpoints.isWideMasonry(1024), isFalse,
+          reason: '1024 在 web 是单列（min-width:1025 不含 1024）');
+      expect(AylaBreakpoints.isWideMasonry(1025), isTrue);
+      expect(AylaBreakpoints.isWideMasonry(1439), isTrue);
+      expect(AylaBreakpoints.isWideMasonry(1440), isTrue);
+      expect(AylaBreakpoints.isWideMasonry(1023), isFalse);
+    });
+
+    test('与 AylaMasonryGrid 的 twoColumnMinWidth 默认值一致（同一 web 门）', () {
+      // 件的默认值必须与断点函数同源，否则「函数说双列、件还是单列」
+      final AylaMasonryGrid<Object> grid = AylaMasonryGrid<Object>(
+        items: const <Object>[],
+        itemKey: _kProbe,
+        itemBuilder: _bProbe,
+      );
+      expect(grid.twoColumnMinWidth, 1025);
+      // 两处必须是同一个门：1024 用函数判为单列，件也不会开双列
+      expect(AylaBreakpoints.isWideMasonry(grid.twoColumnMinWidth - 1), isFalse);
+      expect(AylaBreakpoints.isWideMasonry(grid.twoColumnMinWidth), isTrue);
+    });
+  });
+
+
 }
