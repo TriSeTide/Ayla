@@ -58,6 +58,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/conversation.dart';
 import '../../core/models/user_public.dart';
 import '../../theme/app_icons.dart';
+import '../../theme/app_theme.dart' show AylaTextStyles;
 import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
@@ -909,7 +910,17 @@ class _AylaMessageListState extends State<AylaMessageList> {
           child: ListView.builder(
             controller: _scroll,
             reverse: true, // 见文件头差异 2：前插历史不移动视口
-            padding: const EdgeInsets.all(AylaSpacing.sp6), // `.message-scroll`
+            // `.message-scroll { padding: var(--sp-6) }`（app.css:810–816）
+            // ⚠️ 窄屏被 **app.css:3202–3204 的 @media(max-width:768px)** 覆写成
+            // `padding: var(--sp-4) var(--sp-3)`（上下 16 / 左右 12）——
+            // 此前这里恒用 all(sp6)=24，窄屏两侧各多 12px ⇒ 气泡可用宽变窄、
+            // 分享卡标题被挤压换行（2026-10-18 用户截图实报窄屏气泡布局）。
+            padding: AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width)
+                ? const EdgeInsets.symmetric(
+                    horizontal: AylaSpacing.sp3,
+                    vertical: AylaSpacing.sp4,
+                  )
+                : const EdgeInsets.all(AylaSpacing.sp6), // `.message-scroll`
             itemCount: rows.length,
             itemBuilder: (BuildContext context, int index) =>
                 rows[rows.length - 1 - index],
@@ -1146,10 +1157,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
                   ],
                 ),
               )
-            : TextButton(
-                onPressed: () => _requestOlder(),
-                child: const Text('加载更早消息'),
-              ),
+            : _LoadMoreButton(onPressed: _requestOlder),
       ),
     );
   }
@@ -1570,4 +1578,83 @@ Widget aylaMessageListSamples() {
       ),
     ],
   );
+}
+
+/// `.load-more-btn` —— 顶部历史控制的「加载更早消息」键（app.css:836–849 逐条）。
+///
+/// **为什么不用 Material `TextButton`**（2026-10-18 用户实报「字体错误」）：
+/// `TextButton` 的 `child` 是裸 `Text` 时，字体来自 `Theme.textTheme.labelLarge`；
+/// 本库 `textTheme` 此前**只 apply 了颜色没给字体族** ⇒ 该按钮落到 Roboto/系统字体，
+/// 与全站 Fredoka/Nunito 完全不同（用户截图里的「加载更早消息」）。
+/// 即便现在全局 textTheme 已兜底字体（见 `app_theme.dart`），这里仍按 web **逐条显式**实现，
+/// 因为 web 的 `.load-more-btn` 是**自定义 pill 按钮**而非 Material 按钮：
+/// min-height 40 / font-size 13 / text-secondary / padding sp2 sp4 / radius pill /
+/// hover（非 disabled）→ 玻璃底 + textPrimary。
+class _LoadMoreButton extends StatelessWidget {
+  const _LoadMoreButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+    return _LoadMoreHoverButton(
+      onPressed: onPressed,
+      textStyle: t.body.copyWith(
+        fontSize: 13,
+        color: AylaColors.textSecondary,
+      ),
+    );
+  }
+}
+
+/// hover 换色（web `:hover:not(:disabled)`）。
+class _LoadMoreHoverButton extends StatefulWidget {
+  const _LoadMoreHoverButton({required this.onPressed, required this.textStyle});
+
+  final VoidCallback onPressed;
+  final TextStyle textStyle;
+
+  @override
+  State<_LoadMoreHoverButton> createState() => _LoadMoreHoverButtonState();
+}
+
+class _LoadMoreHoverButtonState extends State<_LoadMoreHoverButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            // `.load-more-btn`: min-height 40 / padding sp2 sp4 / radius pill
+            constraints: const BoxConstraints(minHeight: 40),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AylaSpacing.sp4,
+              vertical: AylaSpacing.sp2,
+            ),
+            decoration: BoxDecoration(
+              color: _hovered ? AylaColors.glassBg : null,
+              borderRadius: BorderRadius.circular(AylaRadii.rPill),
+            ),
+            child: Text(
+              '加载更早消息',
+              style: widget.textStyle.copyWith(
+                color: _hovered
+                    ? AylaColors.textPrimary
+                    : AylaColors.textSecondary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
