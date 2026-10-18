@@ -44,6 +44,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../../state/badges_state.dart';
+import '../../state/favorite_status.dart' show aylaFavoriteApplyChanged;
 import '../../state/chat_state.dart';
 import '../../state/message_state.dart';
 import '../../state/notices_state.dart';
@@ -68,15 +69,16 @@ import 'ws_manager.dart';
 /// - 2026-10-01（排序实时源批次）再**转正 `post.*` 4 条**，由
 ///   `core/ws/posts_frames.dart` 的 [AylaPostsFramesBridge] 承接
 ///   （与 [AylaRoomDirectoryBridge] 同形制：挂在 [onFrame] 上，帧**照样流经本类**），
-///   故此处只剩 **3 条**：
+///   故此处只剩 **2 条**：
 ///   `comment.*`(2) 属帖子详情域（web 里该分支本身是 no-op，评论乐观插入由详情页的
-///   `onFrame` 订阅消费）·
-///   `favorite.changed`(1) 需一个**跨页共享**的收藏状态缓存（库内 `AylaFavoriteStatusController`
-///   目前是每页实例 ⇒ 单点广播接不进去，属「收藏状态收敛轮」）。
+///   `onFrame` 订阅消费）。
+///
+/// ⚠️ **`favorite.changed` 已于 2026-10-16 转正**（原登记「需跨页共享缓存，属收藏状态收敛轮」）：
+/// `state/favorite_status.dart` 的 [aylaFavoriteApplyChanged] 会把增量广播给**全部**
+/// 已注册的控制器实例（等价 web 模块级 store 的一次写入），本类直接消费（见 [_onFavoriteChanged]）。
 const List<String> kAylaChatWsOutOfBatchFrames = <String>[
   'comment.created',
   'comment.deleted',
-  'favorite.changed',
 ];
 
 /// `subscribe` 帧单批上限（web `chat.ts:193/256` 的 100 一组）。
@@ -88,6 +90,32 @@ const int kAylaChatRegistrationMaxMs = 60000;
 
 /// 接收帧处理器（供页面监听 typing / 认证消息刷新等）。
 typedef AylaChatFrameHandler = void Function(Map<String, dynamic> frame);
+
+/// 从「归属群 + 白名单群」提取该内容可见的群 id 集合（bump 排序用；去重、过滤空值）
+/// —— web `ws/chat.ts:102–112` 的 `visibleGroupIds`。
+///
+/// web 的入参是 `{ group?: string | null; allowed_group_ids?: string[] | null }`
+/// （voice/live 描述符的公共形状）；Dart 侧用命名参数逐字段对应，
+/// 空串与 null 一律不算（web 的 `if (id != null)` + `if (descriptor.group)`）。
+List<String> aylaVisibleGroupIds({
+  String? group,
+  Iterable<String> allowedGroupIds = const <String>[],
+}) {
+  final Set<String> ids = <String>{};
+  if (group != null && group.isNotEmpty) ids.add(group);
+  for (final String id in allowedGroupIds) {
+    if (id.isNotEmpty) ids.add(id);
+  }
+  return ids.toList(growable: false);
+}
+
+/// bump 一段可见群 id 的「最近收到新内容」时间戳（单调，往前排）
+/// —— web `ws/chat.ts:114–118` 的 `bumpGroups`。
+void aylaBumpGroups(AylaChatState chat, Iterable<String> ids) {
+  for (final String id in ids) {
+    chat.bumpGroupActivity(id);
+  }
+}
 
 /// chat 通道客户端（单例语义由 [aylaChatWs] 承担；测试可直接 new）。
 class AylaChatWsClient {
@@ -422,11 +450,7 @@ class AylaChatWsClient {
       case 'message.poke':
         _onMessagePoke(data);
       case 'message.read':
-        _message.markReadByMessage(
-          _str(data['conversation_id']),
-          _str(data['message_id']),
-          _str(data['user_id']),
-        );
+        _onMessageRead(data);
       case 'subgroup.created':
       case 'subgroup.updated': {
         // web `chat.ts:514–530`：帧只带 id/name/is_default，**不带未读**
@@ -553,6 +577,8 @@ class AylaChatWsClient {
         }
       case 'elysia.reply':
         _onElysiaReply(data);
+      case 'favorite.changed':
+        _onFavoriteChanged(data);
       case 'pong':
       case 'error':
         break; // 连接层回执 / 服务端错误：web 同为 no-op
@@ -678,6 +704,32 @@ class AylaChatWsClient {
     }
   }
 
+  /// `message.read`（web `chat.ts:599–607`）。
+  ///
+  /// 两件事（web 逐条）：
+  /// ① `message.markReadByMessage(conv_id, message_id, user_id)` —— 对端已读回执投影；
+  /// ② **本人读**且该会话摘要的未读序号投影不完整（`unread_seqs_complete === false`）时
+  ///    `reconcileConversation(conv_id)` —— 旧后端只给计数不给序号数组时，本地没法按
+  ///    序号精确移除已读，只能拉一次权威摘要把计数收敛（web 原话）。
+  ///
+  /// ⚠️ ① 对**任何** user_id 都执行（含本人：其他端已读后本端也要同步）；② 只在「本人 +
+  /// 序号不全」时执行 —— 序号完整的摘要本地已能精确推算，不必多打一次 REST。
+  void _onMessageRead(Map<String, dynamic> data) {
+    final String convId = _str(data['conversation_id']);
+    final String userId = _str(data['user_id']);
+    _message.markReadByMessage(
+      convId,
+      _str(data['message_id']),
+      userId,
+    );
+    final String? me = _currentUserId();
+    if (me == null || userId != me) return;
+    final AylaConversationSummary? conv = _chat.byId(convId);
+    if (conv != null && conv.unreadSeqsComplete == false) {
+      unawaited(reconcileConversation(convId));
+    }
+  }
+
   /// 该会话的默认组 id（本地列表未加载 ⇒ null，**不猜**）。
   String? _defaultSubgroupId(String convId) {
     for (final AylaSubGroup sg in _subgroups.subgroupsOf(convId)) {
@@ -775,6 +827,34 @@ class AylaChatWsClient {
         unawaited(_badges.fetch());
       }
     }
+  }
+
+  /// `favorite.changed`（web `ws/chat.ts:866–884`）。
+  ///
+  /// web 两档：
+  /// - `target_type === "post"` ⇒ `usePostsStore.setFavorite(target_id, action==="added" ? favorite_id : null)`
+  ///   （`stores/posts.ts:73–81`：写 `favoriteByPostId` + **同时** `applyFavoriteStatus`）；
+  /// - 其余类型（live / voice / game / message）⇒ `applyFavoriteChanged(...)`
+  ///   （`components/FavoriteButton.tsx:10–12` → 模块级收藏状态缓存）。
+  ///
+  /// Flutter 侧**只走一条**：两种目标类型最终都归到收藏状态机
+  /// （`state/favorite_status.dart`）—— `posts_store.dart:33–35` 已登记
+  /// 「不做 `favoriteByPostId`，收藏态由 `AylaFavoriteStatusController` 承担」，
+  /// 因此 post 也走 [aylaFavoriteApplyChanged]。**与 web 的差异**仅在内部缓存载体
+  /// （web 的 posts store 有第二份 `favoriteByPostId`，Flutter 没有），对外可观测行为一致：
+  /// 同一目标的收藏键在两端都会被广播到。
+  ///
+  /// 帧结构（`api/types.ts`）：`data = { target_type, target_id, action, favorite_id }`。
+  /// 取消收藏时后端不带 `favorite_id`（或带 null）⇒ 写 null。
+  void _onFavoriteChanged(Map<String, dynamic> data) {
+    final String targetType = _str(data['target_type']);
+    final String targetId = _str(data['target_id']);
+    // 缺 type/id ⇒ 直接忽略（不猜语义；web 对 undefined 也是空写）。
+    if (targetType.isEmpty || targetId.isEmpty) return;
+    final int? favoriteId = data['action'] == 'added'
+        ? _intOrNull(data['favorite_id'])
+        : null;
+    aylaFavoriteApplyChanged(targetType, targetId, favoriteId);
   }
 
   /// 会话列表预览的发送者显示名（web `chat.ts:86–99`）。

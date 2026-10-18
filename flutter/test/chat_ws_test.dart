@@ -16,6 +16,8 @@ import '../lib/core/ws/posts_frames.dart' show kAylaPostsFramesTurnedOn;
 import '../lib/core/ws/room_frames.dart' show kAylaRoomFramesTurnedOn;
 import '../lib/state/badges_state.dart';
 import '../lib/state/chat_state.dart';
+import '../lib/state/favorite_status.dart'
+    show AylaFavoriteStatusController;
 import '../lib/state/message_state.dart';
 import '../lib/state/notices_state.dart';
 import '../lib/state/realtime_state.dart';
@@ -296,27 +298,97 @@ void main() {
       expect(h.sent.first['type'], 'subscribe');
     });
 
-    test('域外帧（3 条）→ chat 客户端不抛错、不改状态、仍广播给 onFrame', () {
+    test('域外帧（2 条）→ chat 客户端不抛错、不改状态、仍广播给 onFrame', () {
       // 2026-09-28（房内页批次）订正：原 23 条里 **12 条已转正**（voice.channel.* 4 +
       // live.channel.* 4 + live.viewers.changed 1 + boardgame.room.* 3），由
       // `core/ws/room_frames.dart` 的 `AylaRoomDirectoryBridge` 挂 onFrame 承接；
       // 2026-09-29（群聊批次）再转正 **subgroup.*** 4 条（子群状态直接消费）；
       // 2026-10-01（排序实时源批次）再转正 **post.*** 4 条，由
-      // `core/ws/posts_frames.dart` 的 `AylaPostsFramesBridge` 挂 onFrame 承接
-      // ⇒ 本文件只对**仍域外**的 3 条断言（chat 客户端对它们仍是 no-op + 透传）。
+      // `core/ws/posts_frames.dart` 的 `AylaPostsFramesBridge` 挂 onFrame 承接；
+      // 2026-10-16（本批）再转正 **favorite.changed** 1 条（`aylaFavoriteApplyChanged`
+      // 广播给全部已注册控制器）⇒ 本文件只对**仍域外**的 2 条断言（no-op + 透传）。
       final _Harness h = _Harness();
       final List<String> seen = <String>[];
       h.client.onFrame((Map<String, dynamic> f) => seen.add('${f['type']}'));
-      expect(kAylaChatWsOutOfBatchFrames.length, 3);
+      expect(kAylaChatWsOutOfBatchFrames.length, 2);
       for (final String type in kAylaChatWsOutOfBatchFrames) {
         h.client.debugHandleFrame(<String, dynamic>{
           'type': type,
           'data': <String, dynamic>{},
         });
       }
-      expect(seen.length, 3);
+      expect(seen.length, 2);
       expect(h.message.buckets, isEmpty);
       expect(h.notices.notices, isEmpty);
+    });
+
+    test('转正 favorite.changed：广播到**全部**已注册控制器（web chat.ts:866–884）', () {
+      // web：`applyFavoriteChanged(type, id, favoriteId)` 写**模块级唯一 store** ⇒
+      // 所有挂载的收藏键立刻看到。Flutter 侧控制器可有多个实例（页面各自 new）
+      // ⇒ `aylaFavoriteApplyChanged` 必须对**每一个**已注册实例各写一次。
+      final _Harness h = _Harness();
+      final AylaFavoriteStatusController a = AylaFavoriteStatusController();
+      final AylaFavoriteStatusController b = AylaFavoriteStatusController();
+      addTearDown(a.dispose);
+      addTearDown(b.dispose);
+
+      h.client.debugHandleFrame(<String, dynamic>{
+        'type': 'favorite.changed',
+        'data': <String, dynamic>{
+          'target_type': 'post',
+          'target_id': '7',
+          'action': 'added',
+          'favorite_id': 99,
+        },
+      });
+      expect(a.favoriteIdOf('post', '7'), 99, reason: '实例 a 收到增量');
+      expect(b.favoriteIdOf('post', '7'), 99, reason: '实例 b 同样收到（广播）');
+
+      // 取消收藏：不写 favorite_id ⇒ null
+      h.client.debugHandleFrame(<String, dynamic>{
+        'type': 'favorite.changed',
+        'data': <String, dynamic>{
+          'target_type': 'post',
+          'target_id': '7',
+          'action': 'removed',
+        },
+      });
+      expect(a.favoriteIdOf('post', '7'), isNull);
+      expect(b.favoriteIdOf('post', '7'), isNull);
+    });
+
+    test('favorite.changed 缺 target_type / target_id ⇒ 忽略、不崩（不猜语义）', () {
+      final _Harness h = _Harness();
+      final AylaFavoriteStatusController c = AylaFavoriteStatusController();
+      addTearDown(c.dispose);
+      h.client.debugHandleFrame(<String, dynamic>{
+        'type': 'favorite.changed',
+        'data': <String, dynamic>{'target_type': 'post'},
+      });
+      h.client.debugHandleFrame(<String, dynamic>{
+        'type': 'favorite.changed',
+        'data': <String, dynamic>{'target_id': '7'},
+      });
+      // 两条都不该写入任何键。
+      expect(c.favoriteIdOf('post', '7'), isNull);
+      expect(c.favoriteIdOf('', '7'), isNull);
+      expect(c.favoriteIdOf('post', ''), isNull);
+    });
+
+    test('favorite.changed added 但 favorite_id 非数字 ⇒ 写 null（不伪造 id）', () {
+      final _Harness h = _Harness();
+      final AylaFavoriteStatusController c = AylaFavoriteStatusController();
+      addTearDown(c.dispose);
+      h.client.debugHandleFrame(<String, dynamic>{
+        'type': 'favorite.changed',
+        'data': <String, dynamic>{
+          'target_type': 'live',
+          'target_id': 'l1',
+          'action': 'added',
+          'favorite_id': 'not-a-number',
+        },
+      });
+      expect(c.favoriteIdOf('live', 'l1'), isNull);
     });
 
     test('转正 4 条 post.*：chat 客户端不改状态，但**照样广播给 onFrame**（桥的入口）', () {

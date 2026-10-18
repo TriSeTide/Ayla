@@ -78,10 +78,77 @@ bool aylaMessageInSubgroup(
   return msg.subgroupId == subgroupId;
 }
 
+/// 深链目标子群是否与**当前选中子群**匹配 —— web `MessageList.tsx:791–796`
+/// 的 `subgroupMatches`：
+/// ```ts
+/// const subgroupMatches = subgroupId == null
+///   ? externalJump.subgroupId == null
+///   : externalJump.subgroupId != null
+///     ? subgroupId === externalJump.subgroupId
+///     : isDefaultSubgroup;
+/// ```
+///
+/// 参数口径：
+/// - [activeSubgroupId]：当前选中子群（null = 还没选）；
+/// - [activeIsDefault]：当前选中项是否默认组；
+/// - [jumpSubgroupId]：深链目标子群（null/空 = 目标在默认组）。
+///
+/// ⚠️ web 里 `subgroupId == null` 那一档是**私聊**（无子群概念）。群聊视图里
+/// `subgroupId` 恒非 null（默认组也是一个具体子群 id）⇒ Flutter 侧把「未选中」
+/// 也归到 `isDefaultSubgroup` 档（与「默认组视图」同义），避免默认组跳转因
+/// active 尚未落定而永远不匹配。
+bool aylaGroupJumpSubgroupMatches({
+  required String? activeSubgroupId,
+  required bool activeIsDefault,
+  required String? jumpSubgroupId,
+}) {
+  if (activeSubgroupId == null) return activeIsDefault;
+  final bool hasTarget = jumpSubgroupId != null && jumpSubgroupId.isNotEmpty;
+  if (!hasTarget) return activeIsDefault;
+  return activeSubgroupId == jumpSubgroupId;
+}
+
+/// 深链应切换到的子群 id —— web `GroupChat.tsx:87–101`：
+/// - 目标带 `subgroup` 且该子群**存在**且不是当前选择 ⇒ 切过去；
+/// - 目标不带 `subgroup` ⇒ 切到**默认组**（`find(is_default)`）；
+/// - 其余（子群已删 / 已是当前 / 找不到默认组）⇒ 返回 null，**保持当前视图**
+///   （web 原话：「子群已删除时保持当前视图（跳转自然失败）」）。
+String? aylaGroupJumpTargetSubgroupId({
+  required String? jumpSubgroupId,
+  required String? activeSubgroupId,
+  required Iterable<({String id, bool isDefault})> subgroups,
+}) {
+  final bool hasTarget = jumpSubgroupId != null && jumpSubgroupId.isNotEmpty;
+  if (hasTarget) {
+    final bool exists =
+        subgroups.any((({String id, bool isDefault}) sg) => sg.id == jumpSubgroupId);
+    if (!exists || activeSubgroupId == jumpSubgroupId) return null;
+    return jumpSubgroupId;
+  }
+  for (final ({String id, bool isDefault}) sg in subgroups) {
+    if (sg.isDefault) return sg.id == activeSubgroupId ? null : sg.id;
+  }
+  return null;
+}
+
 class GroupChatPage extends ConsumerStatefulWidget {
-  const GroupChatPage({super.key, required this.groupId});
+  const GroupChatPage({
+    super.key,
+    required this.groupId,
+    this.jumpMessageId,
+    this.jumpSeq,
+    this.jumpSubgroupId,
+  });
 
   final String groupId;
+
+  /// 收藏消息定位（web `GroupChat.tsx:72–86` 的 `?msg=&seq=&subgroup=`）。
+  ///
+  /// - [jumpMessageId] / [jumpSeq]：目标消息（seq 用于「不在缓存时按 seq 翻页加载」）；
+  /// - [jumpSubgroupId]：目标所属子群（null = 默认组，web `:96–99` 的口径）。
+  final String? jumpMessageId;
+  final int? jumpSeq;
+  final String? jumpSubgroupId;
 
   @override
   ConsumerState<GroupChatPage> createState() => _GroupChatPageState();
@@ -292,6 +359,101 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
       }
     }());
     await _loadHistory(subgroup: _activeSubgroup);
+  }
+
+  // ==================== 收藏消息定位（web `GroupChat.tsx:72–101`） ====================
+
+  /// 本次深链是否已消费（web `jumpMsg` 是 URL 参数 ⇒ 页面重进才重算；
+  /// Flutter 侧页面在群内切场景时不重建 ⇒ 用一次性标记，避免每次 setState 重跳）。
+  bool _externalJumpApplied = false;
+
+  /// 本帧是否已排过程序化深链（[_maybeApplyExternalJump] 的去重位）。
+  bool _externalJumpScheduled = false;
+
+  /// 解析 web `GroupChat.tsx:78–86` 的 `externalJump`，并完成**子群切换**这一步。
+  ///
+  /// web 三段（`tsx:87–101`）：
+  /// 1. `if (!jumpMsg) return;` —— 没有 msg 参数 ⇒ 什么都不做；
+  /// 2. `subgroup != null` ⇒ 该子群**存在**且不是当前子群时才切（子群已删则保持当前视图，
+  ///    跳转自然失败）；
+  /// 3. `subgroup == null` ⇒ 切到**默认组**（`find(is_default)`）。
+  ///
+  /// ## 触发时机：**子群列表到位之后**（不是 initState 一挂载就跑）
+  /// web 的这段是 `useEffect(..., [activeSubgroupId, groupId, jumpMsg, jumpSubgroup,
+  /// subgroupPage.items, subgroups])` —— 依赖里就有子群列表 ⇒ **数据到了 effect 才跑**。
+  /// Flutter 侧子群列表同样是异步加载（`subgroupPage.load()`）；initState 挂载当帧
+  /// 一定还没到。⇒ 由 [build] 期的 [_maybeApplyExternalJump] 在「列表非空且未消费」时
+  /// 排一次帧后执行，等价于 web 的 effect 依赖变化。
+  ///
+  /// 切子群会重新拉该子群历史（`_loadHistory`），新历史到达后由
+  /// [AylaMessageList.externalJump] 完成滚动定位 + 粉框高亮（web 同：子群切换
+  /// 重挂载 MessageList，新实例重新处理跳转）。
+  Future<void> _applyExternalJump() async {
+    if (_externalJumpApplied) return;
+    final String? jumpMsg = widget.jumpMessageId;
+    if (jumpMsg == null || jumpMsg.isEmpty) return;
+    final AylaSubGroupState state = _subgroups;
+    final List<AylaSubGroup> list = state.subgroupsOf(groupId);
+    // 列表尚未加载 ⇒ **不消费**（等下一帧重试；消费早了就永远跳不了）。
+    if (list.isEmpty) return;
+    _externalJumpApplied = true;
+    final String? target = aylaGroupJumpTargetSubgroupId(
+      jumpSubgroupId: widget.jumpSubgroupId,
+      activeSubgroupId: state.activeSubgroupOf(groupId),
+      subgroups: <({String id, bool isDefault})>[
+        for (final AylaSubGroup sg in list)
+          (id: sg.id, isDefault: sg.isDefault),
+      ],
+    );
+    if (target == null) return;
+    state.setActiveSubgroup(groupId, target);
+    AylaSubGroup? picked;
+    for (final AylaSubGroup sg in list) {
+      if (sg.id == target) picked = sg;
+    }
+    await _loadHistory(subgroup: picked);
+    if (mounted) setState(() {});
+  }
+
+  /// build 期驱动的深链入口 —— 等价 web 那个**依赖子群列表**的 effect。
+  ///
+  /// 只在「有深链 && 尚未消费 && 子群列表已到位」时排一次帧后执行；
+  /// 排过之后本 build 周期内不再重复排（`_externalJumpScheduled` 去重）。
+  ///
+  /// ⚠️ 必须**帧后**：`_applyExternalJump` 会 `setActiveSubgroup` / `setState`，
+  /// build 期同步调用会抛 `setState() during build`。
+  void _maybeApplyExternalJump(List<AylaSubGroup> list) {
+    if (_externalJumpApplied || _externalJumpScheduled) return;
+    final String? jumpMsg = widget.jumpMessageId;
+    if (jumpMsg == null || jumpMsg.isEmpty) return;
+    if (list.isEmpty) return;
+    _externalJumpScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _externalJumpScheduled = false;
+      if (!mounted) return;
+      unawaited(_applyExternalJump());
+    });
+  }
+
+  /// 传给 [AylaMessageList] 的外部跳转请求（null = 无跳转）。
+  ///
+  /// **只在目标子群已选中时才有值** —— 对齐 web `MessageList.tsx:791–796` 的
+  /// `subgroupMatches` 门控（子群不匹配时 `return`，等父级切换后再由新实例处理）。
+  ({String messageId, int seq})? get _externalJump {
+    final String? jumpMsg = widget.jumpMessageId;
+    if (jumpMsg == null || jumpMsg.isEmpty) return null;
+    final String? activeId = _subgroups.activeSubgroupOf(groupId);
+    AylaSubGroup? active;
+    for (final AylaSubGroup sg in _subgroups.subgroupsOf(groupId)) {
+      if (sg.id == activeId) active = sg;
+    }
+    final bool matches = aylaGroupJumpSubgroupMatches(
+      activeSubgroupId: activeId,
+      activeIsDefault: active?.isDefault ?? false,
+      jumpSubgroupId: widget.jumpSubgroupId,
+    );
+    if (!matches) return null;
+    return (messageId: jumpMsg, seq: widget.jumpSeq ?? 0);
   }
 
   Future<void> _loadMembers() async {
@@ -647,6 +809,9 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
           m,
     ];
     final List<AylaSubGroup> subgroups = subgroupState.subgroupsOf(groupId);
+    // 收藏消息深链：子群列表到位后才动作（web `GroupChat.tsx:87–101` 的 effect 依赖
+    // `subgroupPage.items` ⇒ 数据到了才跑）。这里只**排**一次帧后任务，不改 build 结果。
+    _maybeApplyExternalJump(subgroups);
     // `subgroupPage.total` —— **分页总数**（web `useSocialPage.ts:22` 的 `record.total`），
     // 与当前页条数是两个量（见 [_subgroupPage]）。渲染条件要用 `Math.max` 取两者较大值。
     final int subgroupTotal = _subgroupPage?.total ?? 0;
@@ -809,6 +974,9 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
                       onAtBottomChanged: (bool atBottom) => ref
                           .read(messageStateProvider)
                           .setViewerAtBottom(groupId, atBottom),
+                      // 收藏消息定位（web `MessageList.tsx:184 / :785–818` 的 `externalJump`）。
+                      // 目标子群未选中时为 null（web 的 `subgroupMatches` 门控）。
+                      externalJump: _externalJump,
                     ),
                   ),
                 ),

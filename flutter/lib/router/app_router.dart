@@ -24,8 +24,8 @@
 /// · **声明顺序敏感**：go_router 按声明顺序匹配，React Router 6 按具体度自动排序 ⇒
 ///   `/posts/mine` **必须**排在 `/posts/:postId` 之前（否则 `mine` 被当成 postId）。
 ///   其余同级路径段数不同，天然不冲突（已在下方注释标注）。
-/// · **未实现页面**：第 1 批只交付 Register / Profile / UserProfile / Favorites / Search + 登录接线；
-///   其余路由指向 [PendingPage]（显式登记，不静默重定向）。
+/// · **无未实现页面**（2026-10-17 订正：此前这里写「其余路由指向 PendingPage」，已过时）：
+///   24 条 Route **全部指向真实页面**，`pages/pending_page.dart` 已无任何路由引用（仅作登记件保留）。
 library;
 
 import 'package:flutter/material.dart';
@@ -120,6 +120,7 @@ Page<void> aylaRoutePage({
   }
   return MaterialPage<void>(key: pageKey, child: child);
 }
+
 
 /// 全局路由（唯一实例；会话过期回登录、页面内 `context.go` 都由它承载）。
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
@@ -349,7 +350,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
             path: '/group/:id',
             pageBuilder: (BuildContext c, GoRouterState s) => aylaRoutePage(
               state: s,
-              child: GroupPage(groupId: s.pathParameters['id'] ?? ''),
+              child: GroupPage(
+                groupId: s.pathParameters['id'] ?? '',
+                jumpMessageId: s.uri.queryParameters['msg'],
+                jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
+                jumpSubgroupId: s.uri.queryParameters['subgroup'],
+              ),
             ),
           ),
           GoRoute(
@@ -359,6 +365,9 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
                 postId: s.pathParameters['postId'],
+                jumpMessageId: s.uri.queryParameters['msg'],
+                jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
+                jumpSubgroupId: s.uri.queryParameters['subgroup'],
               ),
             ),
           ),
@@ -369,6 +378,9 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
                 voiceChannelId: s.pathParameters['voiceChannelId'],
+                jumpMessageId: s.uri.queryParameters['msg'],
+                jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
+                jumpSubgroupId: s.uri.queryParameters['subgroup'],
               ),
             ),
           ),
@@ -379,6 +391,9 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
                 liveChannelId: s.pathParameters['liveChannelId'],
+                jumpMessageId: s.uri.queryParameters['msg'],
+                jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
+                jumpSubgroupId: s.uri.queryParameters['subgroup'],
               ),
             ),
           ),
@@ -389,6 +404,9 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
                 scene: s.pathParameters['scene'],
+                jumpMessageId: s.uri.queryParameters['msg'],
+                jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
+                jumpSubgroupId: s.uri.queryParameters['subgroup'],
               ),
             ),
           ),

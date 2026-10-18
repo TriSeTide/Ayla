@@ -514,4 +514,75 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+  group('E3 场景切换可逐级回退（web GroupPage.tsx:286–292 的 navigate）', () {
+    testWidgets('点场景入栈：PopScope 拦截返回 → 回上一场景（同场景重复点不叠加）', (
+      WidgetTester tester,
+    ) async {
+      final ({ProviderContainer container, GoRouter router}) app =
+          await pumpApp(tester, const Size(1440, 900));
+      app.router.go('/group/g1');
+      await tester.pumpAndSettle();
+
+      Future<void> tapRow(String label, String expectPath) async {
+        final Finder row = find.descendant(
+          of: find.byType(AylaChannelSidebar),
+          matching: find.text(label),
+        );
+        await tester.tap(row.first, warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(
+          app.router.routerDelegate.currentConfiguration.uri.toString(),
+          expectPath,
+        );
+      }
+
+      // chat → voice → posts（栈 = [chat, voice]）
+      await tapRow('语音', '/group/g1/voice');
+      await tapRow('帖子', '/group/g1/posts');
+
+      // 同一场景重复点：URL 不变、栈不叠加（规则 1）
+      await tapRow('帖子', '/group/g1/posts');
+
+      // 断言 PopScope 存在且栈非空时 canPop=false（拦截系统返回）。
+      final Finder popScopes =
+          find.byWidgetPredicate((Widget w) => w is PopScope);
+      expect(popScopes, findsWidgets, reason: 'GroupPage 必须挂 PopScope');
+      final dynamic scope = tester.widget(popScopes.first);
+      expect(scope.canPop, isFalse, reason: '栈非空 ⇒ 必须拦截系统返回');
+
+      // 直接驱动 PopScope 的拦截回调 = 系统返回被拦截时的等价路径
+      // （handlePopRoute 在本壳层返回 false：路由自己接管了 pop，属另一条链路）。
+      dynamic current = tester.widget(popScopes.first);
+      current.onPopInvokedWithResult(false, null);
+      await tester.pumpAndSettle();
+      expect(
+        app.router.routerDelegate.currentConfiguration.uri.toString(),
+        '/group/g1/voice',
+        reason: '第一次回退 → voice（栈最后一个）',
+      );
+
+      current = tester.widget(popScopes.first);
+      current.onPopInvokedWithResult(false, null);
+      await tester.pumpAndSettle();
+      expect(
+        app.router.routerDelegate.currentConfiguration.uri.toString(),
+        '/group/g1',
+        reason: '第二次回退 → chat（/group/:id）',
+      );
+
+      // 栈空 ⇒ canPop 放行（交给路由退出群）
+      final dynamic after = tester.widget(popScopes.first);
+      expect(after.canPop, isTrue, reason: '栈空 ⇒ 不拦截，系统返回退出群');
+      expect(tester.takeException(), isNull);
+    });
+
+    test('备注：不做 context.push 的原因（同 Page key 会抛 Navigator 断言）', () {
+      // 群页 5 条路由共用 kAylaGroupShellPageKey（app_router.dart:91）——
+      // 这是「切场景不重建整页」的前提。实测同 key 下 push 必抛
+      // `!keyReservation.contains(key)` ⇒ 改用 go + PopScope + 场景历史栈。
+      // 本用例是**文档锁**：若将来有人改回 push，会在这里看到原因。
+      expect(kAylaGroupShellPageKey.toString(), contains('ayla-group-shell-page'));
+    });
+  });
+
 }

@@ -86,6 +86,30 @@ void aylaFavoriteResetScope() {
   aylaFavoriteScopeListenable.value = _favoriteScopeEpoch;
 }
 
+/// **WS `favorite.changed` 的模块级广播** —— web `components/FavoriteButton.tsx:10–12`
+/// 的 `applyFavoriteChanged(type, id, favoriteId)`（→ `stores/favoriteStatus.ts:76–79`
+/// 的 `applyFavoriteStatus`）。
+///
+/// ## 为什么是「广播给全部实例」而不是只写一个单例
+/// web 的收藏状态**只有一份**（模块级 `useFavoriteStatusStore`）⇒ 一次写入天然
+/// 被所有挂载的收藏键看到。Flutter 侧允许存在多个控制器实例（部分页面各自 new
+/// 了一份 `_favorites`）⇒ 必须对 [_registry] 里每一个未 dispose 的实例各写一次，
+/// 才等价于 web 的「所有挂载的收藏按钮都更新」。
+///
+/// 帧里 `action == "added"` 传 `favorite_id`，否则传 `null`（取消收藏）——
+/// 由调用方（`core/ws/chat_ws.dart` 的 `favorite.changed` 分支）按 web
+/// `ws/chat.ts:866–884` 的口径解析后传入。
+void aylaFavoriteApplyChanged(
+  String targetType,
+  String targetId,
+  int? favoriteId,
+) {
+  for (final AylaFavoriteStatusController controller
+      in List<AylaFavoriteStatusController>.of(_registry)) {
+    controller.apply(targetType, targetId, favoriteId);
+  }
+}
+
 /// 单个目标的收藏状态。
 class AylaFavoriteEntryStatus {
   const AylaFavoriteEntryStatus({
