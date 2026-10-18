@@ -393,7 +393,11 @@ def deploy_backend(host, remote_repo, deploy_dir):
         [
             "set -euo pipefail",
             "cd %s" % deploy_dir,
-            "docker build -f %s/backend/Dockerfile -t ayla-backend:latest %s/backend" % (remote_repo, remote_repo),
+            # 线上 Docker daemon 配置了 HTTP 代理 127.0.0.1:7890；代理未运行时
+            # docker build 拉不到基础镜像，容器内 pip 也没有网络。用已有镜像作基础
+            # （BASE_IMAGE 构建参数）+ host 网络让 pip 走宿主机，是实测可用的离线路径。
+            "docker build --network=host --build-arg BASE_IMAGE=ayla-backend:pre-20260916 "
+            "-f %s/backend/Dockerfile -t ayla-backend:latest %s/backend" % (remote_repo, remote_repo),
             "docker compose up -d --no-deps backend",
             "sleep 5",
             "docker ps --filter name=ayla-backend --format '{{.Names}} {{.Status}}'",
