@@ -24,6 +24,9 @@ class VideoPlayerHls implements HlsPlatformPlayer {
   @override
   void Function(String detail)? onFatal;
 
+  @override
+  void Function(Duration position)? onPosition;
+
   VideoPlayerController? _controller;
   bool _stalled = false;
   Duration _lastPosition = Duration.zero;
@@ -64,6 +67,8 @@ class VideoPlayerHls implements HlsPlatformPlayer {
       }
       if (pos != _lastPosition) {
         _lastPosition = pos;
+        // 位置前进 = 真的出画面（ExoPlayer/AVPlayer 同样会在缓冲时保持 playing）。
+        onPosition?.call(pos);
         onResume?.call();
       }
     }

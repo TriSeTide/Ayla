@@ -12,6 +12,7 @@ library;
 
 import '../../core/models/visibility.dart'
     show AylaPostVisibility, aylaVisibilityLabels;
+import '../../core/net/live_play_url.dart' show aylaNormalizeLivePlayUrl;
 import 'live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
 
 /// 直播间频道快照（字段名对齐 web `api/types.ts` 的 `LiveChannelDescriptor`）。
@@ -138,8 +139,10 @@ class AylaLiveChannelSnapshot {
       groupName: raw['group_name']?.toString(),
       rtmpUrl: raw['rtmp_url']?.toString(),
       streamKey: raw['stream_key']?.toString(),
-      flvUrl: raw['flv_url']?.toString(),
-      hlsUrl: raw['hls_url']?.toString(),
+      // 播放地址归一：后端下发的是独立拉流入口的绝对地址，原生播放器在部分网络
+      // 与该端口的 TLS 握手会被重置 ⇒ 收敛到 API 同源（详见 live_play_url.dart）。
+      flvUrl: _playUrl(raw['flv_url']),
+      hlsUrl: _playUrl(raw['hls_url']),
       viewerCount: (raw['viewer_count'] as num?)?.toInt(),
       startedAt: raw['started_at']?.toString(),
       endedAt: raw['ended_at']?.toString(),
@@ -175,6 +178,13 @@ class AylaLiveChannelSnapshot {
         endedAt: endedAt,
         createdAt: createdAt,
       );
+
+  /// 播放地址（`hls_url` / `flv_url`）归一；缺席/空串 ⇒ null。
+  static String? _playUrl(Object? raw) {
+    final String? text = raw?.toString();
+    if (text == null || text.isEmpty) return null;
+    return aylaNormalizeLivePlayUrl(text);
+  }
 
   /// JSON 字符串数组（缺席 ⇒ 空数组；不造占位项 —— 与库内 4 处 `_stringList` 同口径）。
   static List<String> _stringList(Object? raw) => <String>[

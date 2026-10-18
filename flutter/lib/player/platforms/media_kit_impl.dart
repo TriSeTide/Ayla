@@ -28,6 +28,9 @@ class MediaKitHls implements HlsPlatformPlayer {
   @override
   void Function(String detail)? onFatal;
 
+  @override
+  void Function(Duration position)? onPosition;
+
   Player? _player;
   VideoController? _videoController;
   final List<StreamSubscription> _subs = [];
@@ -56,6 +59,9 @@ class MediaKitHls implements HlsPlatformPlayer {
     _subs.add(p.stream.error.listen((e) {
       onFatal?.call(e);
     }));
+    // 位置前进 = 真的出画面（mpv 在「连上但没数据」时 playing 也为 true，
+    // 不能只靠 playing 判定 —— 见 hls_player.dart 的 kMaxAutoRebuilds 注释）。
+    _subs.add(p.stream.position.listen((pos) => onPosition?.call(pos)));
 
     onStateChange?.call(HlsState.loading);
     await p.open(Media(url), play: true);
@@ -86,7 +92,10 @@ class MediaKitHls implements HlsPlatformPlayer {
   Widget? buildView() {
     final vc = _videoController;
     if (vc == null) return null;
-    return Video(controller: vc);
+    // `controls: NoVideoControls` **必须显式传**：media_kit 默认挂 AdaptiveVideoControls，
+    // 会在画面之上叠一层自带控制条 + 缓冲时的大号白色进度圈（用户截图里那个白色 U 形圈），
+    // 与 Ayla 自己的悬浮控件重复。web 的 <video> 不带 controls，这里同样只交出画面。
+    return Video(controller: vc, controls: NoVideoControls);
   }
 
   @override

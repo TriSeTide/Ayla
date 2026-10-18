@@ -43,6 +43,7 @@ import '../core/api/elysia_api.dart' show AylaElysiaApi;
 import '../core/api/live_api.dart';
 import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../core/net/dio_client.dart' show ApiException;
+import '../core/net/live_play_url.dart' show aylaNormalizeLivePlayUrl;
 import '../core/ws/chat_ws.dart';
 import '../core/ws/live_ws.dart';
 import '../player/hls_player.dart';
@@ -435,8 +436,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 挂载播放器（幂等：同 URL 不重建，见 `hls_player.dart` 的 attach 幂等）。
   Future<void> _attachPlayer() async {
     final AylaLiveChannelSnapshot? channel = _live.currentChannel;
-    final String? url = channel?.hlsUrl;
-    if (url == null || url.isEmpty) return;
+    final String? raw = channel?.hlsUrl;
+    if (raw == null || raw.isEmpty) return;
+    // 播放地址归一到 API 同源（快照层已归一；这里再兜一次，防注入快照绕过）。
+    // 背景见 `core/net/live_play_url.dart`：后端下发的独立拉流入口在部分网络下
+    // TLS 握手被中间设备重置 ⇒ 原生播放器黑屏（web 走浏览器栈不受影响）。
+    final String url = aylaNormalizeLivePlayUrl(raw);
     _live.setCurrentPlayerError(null);
     _playerAttached = true;
     await _player.attach(url);
@@ -453,11 +458,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 播放失败重试（web `retryPlayer` = 重建播放器）。
   Future<void> retryPlayer() async {
     _live.setCurrentPlayerError(null);
-    final String? url = _live.currentChannel?.hlsUrl;
-    if (url == null || url.isEmpty) return;
+    final String? raw = _live.currentChannel?.hlsUrl;
+    if (raw == null || raw.isEmpty) return;
+    final String url = aylaNormalizeLivePlayUrl(raw);
     _playerAttached = true;
-    await _player.destroy();
-    await _player.attach(url);
+    // 用人手重试路径（`retry` 会重置自动重建计数；否则封顶后手动重试也会立刻报错）。
+    await _player.retry(url);
     if (!_disposed) notifyListeners();
   }
 

@@ -44,6 +44,9 @@ class _FakePlatformPlayer implements HlsPlatformPlayer {
   void Function(String detail)? onFatal;
 
   @override
+  void Function(Duration position)? onPosition;
+
+  @override
   Future<void> attach(String url) async {}
   @override
   Future<void> play() async {}
