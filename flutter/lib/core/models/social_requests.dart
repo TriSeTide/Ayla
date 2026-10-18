@@ -121,6 +121,48 @@ class AylaGroupJoinRequest {
       );
 }
 
+/// 申请入群的结果（web `api/chat.ts:269` 的 `GroupJoinResponse`）。
+///
+/// 两态二选一（后端 `JoinRequestCreateView` 的响应体）：
+/// - `status == "accepted"` ⇒ 公开群直接加入成功，带 `conversation_id`；
+/// - 否则是一条 [AylaGroupJoinRequest] ⇒ 申请制，等待群主/管理员审批。
+class AylaGroupJoinResult {
+  const AylaGroupJoinResult({
+    this.status,
+    this.conversationId,
+    this.request,
+  });
+
+  /// `accepted` = 已直接加入；其余（`pending` 等）为待审批。
+  final String? status;
+
+  /// 直接加入时的会话 id（仅 `accepted` 有）。
+  final String? conversationId;
+
+  /// 申请制时返回的申请单（含 id / 状态）。
+  final AylaGroupJoinRequest? request;
+
+  /// 是否已直接入群（web：`("status" in response && response.status === "accepted")`）。
+  bool get accepted => status == 'accepted' && conversationId != null;
+
+  /// 响应里**至少**能解析出一态；两态都没有 ⇒ 数据异常（调用方显式失败，不伪造）。
+  bool get isValid => accepted || request != null;
+
+  factory AylaGroupJoinResult.fromJson(Map<String, dynamic> json) {
+    final String? status = json['status'] as String?;
+    final String? conversationId = json['conversation_id'] == null
+        ? null
+        : '${json['conversation_id']}';
+    // 区分两态：带 status==accepted 的走成功态；否则若形如申请单（有 id）则解析之。
+    final bool isRequest = json['id'] != null && status != 'accepted';
+    return AylaGroupJoinResult(
+      status: status,
+      conversationId: conversationId,
+      request: isRequest ? AylaGroupJoinRequest.fromJson(json) : null,
+    );
+  }
+}
+
 /// 持久化退群通知（`GroupMemberLeaveNotice`）。
 class AylaGroupMemberLeaveNotice {
   const AylaGroupMemberLeaveNotice({

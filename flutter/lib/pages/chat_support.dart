@@ -55,7 +55,14 @@ import '../core/models/user_public.dart';
 import '../core/ws/chat_ws.dart';
 import '../state/badges_state.dart';
 import '../state/chat_drafts.dart';
-import '../state/chat_state.dart';
+import '../state/chat_state.dart'
+    show
+        AylaChatState,
+        aylaApplyPinToProjection,
+        aylaRemoveFromProjection,
+        aylaSortPrivateByActivity,
+        aylaToggleConversationPin,
+        aylaHideConversation;
 import '../state/message_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/chat/message_input.dart'
@@ -1001,6 +1008,11 @@ class _AylaWideMessagesSidebarHostState
   AylaPagedList<AylaGroupMemberLeaveNotice>? _leaveNotices;
   String? _removingFriendId;
   String? _busyId;
+
+  /// ⋯ 菜单（置顶/删除）请求在途 —— web 的 busy 是每个菜单实例的局部队列
+  /// （`ConversationMoreMenu.tsx:43`），Flutter 侧会话列表的菜单档位是整列表
+  /// 一个（`AylaConversationList.menuBusy` 既定契约）⇒ 页面级一个布尔。
+  bool _menuBusy = false;
   void Function()? _frameOff;
 
   @override
@@ -1122,6 +1134,57 @@ class _AylaWideMessagesSidebarHostState
     }
   }
 
+  /// 置顶 / 取消置顶（web `ConversationMoreMenu.tsx:91–103`）。
+  ///
+  /// 两步式与失败静默收在 `state/chat_state.dart` 的 [aylaToggleConversationPin]；
+  /// 本宿主额外把结果写回**自己的分页投影**（页面私有 `AylaPagedList`，
+  /// 不挂 `AylaSocialTracking` 的对账链 —— 见该函数注释）。
+  Future<void> _togglePin(AylaConversationSummary conv, bool pinned) async {
+    if (_menuBusy) return;
+    setState(() => _menuBusy = true);
+    try {
+      final bool ok = await aylaToggleConversationPin(
+        ref.read(chatStateProvider),
+        conv.id,
+        pinned,
+      );
+      if (!ok || !mounted) return;
+      _conversations?.setItems(
+        aylaApplyPinToProjection(
+          _conversations?.items ?? const <AylaConversationSummary>[],
+          conv.id,
+          pinned,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _menuBusy = false);
+    }
+  }
+
+  /// 删除（隐藏）会话（web `ConversationMoreMenu.tsx:110–120` 的 `doDelete`）。
+  ///
+  /// 二次确认在 [AylaConversationMoreMenu] 内部（同 web `ConfirmDialog`）；
+  /// 本方法只做「请求成功 ⇒ 本地移除」，失败静默。
+  Future<void> _deleteConversation(AylaConversationSummary conv) async {
+    if (_menuBusy) return;
+    setState(() => _menuBusy = true);
+    try {
+      final bool ok = await aylaHideConversation(
+        ref.read(chatStateProvider),
+        conv.id,
+      );
+      if (!ok || !mounted) return;
+      _conversations?.setItems(
+        aylaRemoveFromProjection(
+          _conversations?.items ?? const <AylaConversationSummary>[],
+          conv.id,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _menuBusy = false);
+    }
+  }
+
   Future<void> _openUserChat(String userId) async {
     if (userId.isEmpty) return;
     try {
@@ -1185,6 +1248,15 @@ class _AylaWideMessagesSidebarHostState
         pinnedOf: (AylaConversationSummary c) => c.isPinned ?? false,
       ),
       conversationsPage: _pageOf(_conversations),
+      // ⋯ 菜单两项 —— web `WideMessagesSidebar.tsx:221` 的
+      // `<ConversationList … />`（列表内部 `ConversationList.tsx:158` 渲染
+      // `<ConversationMoreMenu conversation={conv} />`，默认 showDelete=true）。
+      // 宽屏左列与窄屏 /messages 是同一份列表组件 ⇒ 语义完全一致：
+      // 成功才更新本地状态、失败静默；二次确认在菜单组件内部。
+      onTogglePin: _togglePin,
+      onDelete: _deleteConversation,
+      menuBusy: _menuBusy,
+
       elysiaEntry: entryProfile == null
           ? null
           : AylaElysiaEntry(

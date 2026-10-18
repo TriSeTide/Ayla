@@ -123,6 +123,51 @@ class AuthApi {
     return TokenPair.fromJson(resp);
   }
 
+  /// POST /auth/change-password/ —— 改密（JWT：邮箱验证码 + 新密码）。
+  ///
+  /// web `api/auth.ts:28–33` —— body 就两个键 `{code, new_password}`，
+  /// 响应 `{detail}`（后端 `ChangePasswordView`）。401/400 是业务结果，
+  /// 走 [DioClient.postAuth]（与 web 的 `noRetry401` 同义，见 `api/auth.ts:30`）。
+  static Future<String> changePassword({
+    required String code,
+    required String newPassword,
+  }) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.postAuth<Map<String, dynamic>>(
+      '/auth/change-password/',
+      body: <String, dynamic>{
+        // web `types.ts:57–60` `ChangePasswordPayload { code; new_password }`
+        'code': code,
+        'new_password': newPassword,
+      },
+    );
+    return resp['detail']?.toString() ?? '';
+  }
+
+  /// POST /auth/change-email/ —— 换绑邮箱（JWT：当前邮箱码 + 新邮箱 + 新邮箱码）。
+  ///
+  /// web `api/auth.ts:36–41` —— body 三个键 `{current_code, new_email, new_code}`，
+  /// 响应 `{detail, email}`。⚠️ 未绑定邮箱时 `current_code` 照传空串
+  /// （web `PrivacySheet.tsx:137` `boundEmail ? curCode.trim() : ""`）。
+  static Future<String> changeEmail({
+    required String currentCode,
+    required String newEmail,
+    required String newCode,
+  }) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.postAuth<Map<String, dynamic>>(
+      '/auth/change-email/',
+      body: <String, dynamic>{
+        // web `types.ts:63–67` `ChangeEmailPayload`
+        'current_code': currentCode,
+        'new_email': newEmail,
+        'new_code': newCode,
+      },
+    );
+    // 后端回 `email` = 换绑后的新邮箱（UI 用它刷新 AuthUser，见 profile_page）。
+    return resp['email']?.toString() ?? newEmail;
+  }
+
   /// PATCH /me/profile/ —— 昵称 / 签名 / 在线状态 / 展示开关 / 头像
   /// （web `api/auth.ts:77–82`：`ProfileUpdatePayload` → `UserPublic`）。
   ///

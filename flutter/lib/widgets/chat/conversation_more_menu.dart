@@ -58,6 +58,7 @@ import 'package:flutter/services.dart'
 import '../../theme/app_icons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../base/dialogs.dart' show AylaConfirmDialog;
 import '../base/menu_item.dart';
 import '../base/overlays.dart';
 
@@ -82,8 +83,22 @@ class AylaConversation {
 /// `.conv-more` —— 更多按钮 + 弹出菜单。
 ///
 /// [onTogglePin] 收到新值（true = 置顶）。
-/// [onDelete] 仅当 [showDelete] 为 true 时提供；web 侧先弹 AylaConfirmDialog 确认，
-/// 确认流程由调用方负责（弹层批次实现）。
+/// [onDelete] 仅当 [showDelete] 为 true 时提供。
+///
+/// ## 删除的二次确认在**本件内部**完成（2026-10-15 补齐，P0-2）
+/// web `ConversationMoreMenu.tsx:105–120`：点「删除会话」只做
+/// `closeMenu(); setConfirmDeleteOpen(true)`，确认后 `doDelete` 才发起请求
+/// `hideConversation(id).then(() => removeConversation(id))`。
+/// 此前 Flutter 侧把确认留给调用方（注释原文「确认流程由调用方负责」），
+/// 但四个挂载点实际上都没做 ⇒ 点一下就直删。现改为与 web 同构：
+/// 菜单项 → [AylaConfirmDialog]（`ConfirmDialog.tsx` 同款文案与语义）→ [onDelete]。
+///
+/// 确认层的挂法与菜单本身一致（`aylaOverlayEntry` + `Overlay.of(context)`）：
+/// 本件在会话行的 `Stack` 里是 `Positioned`，弹层若留在自身子树会被行的
+/// 圆角/裁剪与层叠上下文困住。**与菜单不会并存**——点「删除会话」时先
+/// `_closeMenu()` 移除菜单 entry，再插确认 entry ⇒ 不存在同级层序竞争
+/// （`create_sheet.dart:129–136` 那条「每层各开一个 portal 会层序不可控」的
+/// 教训针对的是**并存**场景，本处不适用）。
 class AylaConversationMoreMenu extends StatefulWidget {
   const AylaConversationMoreMenu({
     super.key,
@@ -147,18 +162,62 @@ class _AylaConversationMoreMenuState extends State<AylaConversationMoreMenu> {
   OverlayEntry? _entry;
   bool _open = false;
 
+  /// 删除确认层的 Overlay entry（web `confirmDeleteOpen` 的开合，tsx 44/105–120）。
+  ///
+  /// Flutter 侧用 entry 的在否表达「确认层是否打开」（web 的布尔由
+  /// `{confirmDeleteOpen && <ConfirmDialog …/>}` 条件渲染表达，语义等价）；
+  /// 因此不额外存一份 bool 状态 —— 两份状态必然有不同步的路径。
+  OverlayEntry? _confirmEntry;
+
   /// 触发按钮与面板的全局矩形（面板内容测量用）。
   Rect? _anchorRect;
 
   @override
   void dispose() {
     _removeEntry();
+    _removeConfirmEntry();
     super.dispose();
   }
 
   void _removeEntry() {
     _entry?.remove();
     _entry = null;
+  }
+
+  void _removeConfirmEntry() {
+    _confirmEntry?.remove();
+    _confirmEntry = null;
+  }
+
+  /// 打开删除确认层（web `handleDelete` → `setConfirmDeleteOpen(true)`）。
+  void _openConfirmDelete() {
+    if (_confirmEntry != null) return;
+    _confirmEntry = aylaOverlayEntry(
+      builder: (BuildContext context) => AylaConfirmDialog(
+        // ConfirmDialog.tsx:112–113 / ConversationMoreMenu.tsx:206–213 原文
+        title: '删除会话',
+        message: '删除会话「${widget.conversation.title}」？\n'
+            '消息记录会保留，对方再发消息时会话将重新出现。',
+        // web `doDelete`（tsx 110–120）：先 setConfirmDeleteOpen(false)，
+        // 再 `hideConversation(id).then(() => removeConversation(id))`，
+        // 失败静默（`.catch(() => {})`，由调用方 [onDelete] 承担）。
+        onConfirm: () {
+          _closeConfirmDelete();
+          widget.onDelete?.call();
+        },
+        // web `onClose`（tsx 214）：关闭确认后把焦点还给触发按钮。
+        onClose: () {
+          _closeConfirmDelete();
+          _focusTrigger();
+        },
+      ),
+    );
+    Overlay.of(context).insert(_confirmEntry!);
+  }
+
+  /// 关闭删除确认层（web `setConfirmDeleteOpen(false)`）。
+  void _closeConfirmDelete() {
+    _removeConfirmEntry();
   }
 
   void _openMenu({bool last = false}) {
@@ -187,8 +246,10 @@ class _AylaConversationMoreMenuState extends State<AylaConversationMoreMenu> {
           widget.onTogglePin?.call(!widget.conversation.isPinned);
         },
         onDelete: () {
+          // web `handleDelete`（tsx 105–108）：只 closeMenu() + 打开确认，
+          // **不直接删除**；真正发请求在 doDelete（确认后）。
           _closeMenu();
-          widget.onDelete?.call();
+          _openConfirmDelete();
         },
       ),
     );
@@ -407,6 +468,47 @@ class _MenuOverlayState extends State<_MenuOverlay> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
   }
 
+  /// 首帧的**估算**左上 x（真实值在 [_measure] 里算）：右对齐锚点并按视口夹取。
+  ///
+  /// 用菜单的最小宽度（152，`.conv-menu { min-width }`）估算即可 —— 这一帧是
+  /// `Opacity(0)` 不可见的，只要不跑到视口外让 `Positioned` 撑出滚动范围就行。
+  double _estLeft(BuildContext context) {
+    final double maxLeft =
+        (MediaQuery.of(context).size.width - AylaConversationMoreMenu.menuMinWidth -
+                AylaConversationMoreMenu.menuEdge)
+            .clamp(AylaConversationMoreMenu.menuEdge, 1e9);
+    // 与 [_measure] 同坐标系（Overlay 局部），否则首帧会整体跳 76px。
+    return (_anchorInOverlay.right - AylaConversationMoreMenu.menuMinWidth)
+        .clamp(AylaConversationMoreMenu.menuEdge, maxLeft);
+  }
+
+  /// 首帧的**估算**左上 y：默认贴锚点下方（与 tsx「下方放不下才向上」同一起点）。
+  double get _estTop =>
+      _anchorInOverlay.bottom + AylaConversationMoreMenu.menuGap;
+
+  /// 锚点矩形从**全局坐标**换算到**本 Overlay 的局部坐标**。
+  ///
+  /// ⚠️ **这是「菜单不紧贴 ⋯ 按钮」的真正根因**（2026-10-18 用户三张截图 + 像素反推）：
+  /// `_anchorRect` 来自 `anchor.localToGlobal()` ⇒ 原点是 **RenderView 左上角（窗口原点）**；
+  /// 而 `Positioned(left/top)` 的参照是 **本 Overlay 的 Stack 左上角**。
+  /// 本 App 的 Overlay **不是**从窗口原点开始 —— 它挂在 `AppShell` 内容区，
+  /// 顶部被 TopNav（64）+ 外边距（12）= **76px** 占掉。
+  ///
+  /// 实测反推（用户第二张截图）：锚点 `bottom`≈371 + 20 + gap6 = 397；
+  /// 菜单实际出现在 y≈474 ⇒ **差值 76**，与「TopNav 64 + 上边距 12」完全吻合。
+  /// web 之所以没这问题：菜单是 `position: fixed`，参照系恒为窗口，
+  /// 而 `getBoundingClientRect()` 也是窗口坐标 ⇒ 天然一致。
+  ///
+  /// 修法：取本 Overlay 自己的 `RenderBox` 原点做差 ⇒ 与 web 的 fixed 语义等价，
+  /// 且**对任何挂载层级都成立**（不写死 76，避免 TopNav 高度/边距改动后再次错位）。
+  Rect get _anchorInOverlay {
+    final Rect global = widget.anchorRect;
+    final RenderObject? self = context.findRenderObject();
+    if (self is! RenderBox || !self.hasSize) return global;
+    final Offset origin = self.localToGlobal(Offset.zero);
+    return global.shift(-origin);
+  }
+
   void _measure() {
     if (!mounted) return;
     final RenderBox? panel = widget.panelKey.currentContext?.findRenderObject()
@@ -414,7 +516,7 @@ class _MenuOverlayState extends State<_MenuOverlay> {
     if (panel == null) return;
 
     final Size vp = MediaQuery.of(context).size;
-    final Rect a = widget.anchorRect;
+    final Rect a = _anchorInOverlay;
     final Size ms = panel.size;
 
     const double gap = AylaConversationMoreMenu.menuGap; // 6
@@ -440,7 +542,15 @@ class _MenuOverlayState extends State<_MenuOverlay> {
   @override
   Widget build(BuildContext context) {
     final Size vp = MediaQuery.of(context).size;
+    // ⚠️ **必须 `fit: StackFit.expand`**（2026-10-18 用户实报「置顶菜单没像 web 一样紧贴」）：
+    // web 的菜单是 `position: fixed` + `left/top` 取自 `getBoundingClientRect()`
+    // ⇒ 坐标原点恒为**窗口左上角**。
+    // Flutter 侧 `Stack` 默认 `StackFit.loose` ⇒ 当子级全是 `Positioned` 时，
+    // Stack 会**收缩到子级包围盒**，于是 `Positioned(left: _pos.dx)` 的参照系
+    // 不再是屏幕原点（面板被整体平移，视觉上"漂"在卡片中部而不是贴着 ⋯ 按钮）。
+    // `expand` 让 Stack 占满 Overlay（= 全屏），与 `position: fixed` 同语义。
     return Stack(
+      fit: StackFit.expand,
       children: <Widget>[
         // 外点关闭层（覆盖全屏；translucent 让滚动仍可传递）
         //
@@ -460,20 +570,52 @@ class _MenuOverlayState extends State<_MenuOverlay> {
             child: const SizedBox.expand(),
           ),
         ),
-        if (_pos != null)
-          Positioned(
-            left: _pos!.dx,
-            top: _pos!.dy,
-            child: _MenuPanel(
-              key: widget.panelKey,
-              showDelete: widget.showDelete,
-              busy: widget.busy,
-              pinned: widget.pinned,
-              onDismiss: widget.onDismiss,
-              onTogglePin: widget.onTogglePin,
-              onDelete: widget.onDelete,
+        // ⚠️ **面板必须常驻渲染**，不能写成 `if (_pos != null)`（2026-10-15 修复）。
+        //
+        // 原实现是「测出位置才渲染面板」，但位置恰恰要靠**面板的真实尺寸**才能算
+        // （[_measure] 读 `panelKey.currentContext` 的 RenderBox）⇒ 面板不渲染就量不到
+        // ⇒ `_pos` 永远是 null ⇒ 面板永远不出现。用户点「⋯」只看到外层关闭层，
+        // 菜单项（置顶 / 删除会话）一个都不出现 —— 这正是 P0-1 / P0-2 在真机上
+        // 「点了没反应」的第一道断点（web 无此问题：portal 的菜单用
+        // `useLayoutEffect` 量真实 DOM）。
+        //
+        // 现在的做法：首帧先按**估算位置**渲染（右对齐窗口 + 锚点下方），
+        // 用 `Opacity(0)` + `IgnorePointer` 藏这一帧；[_measure] 拿到真实尺寸后
+        // setState 到精确位置并转可见 ⇒ 无闪烁、无误命中。
+        Positioned(
+          left: _pos?.dx ?? _estLeft(context),
+          top: _pos?.dy ?? _estTop,
+          child: Opacity(
+            opacity: _pos == null ? 0 : 1,
+            child: IgnorePointer(
+              ignoring: _pos == null,
+              // ⚠️ **必须给宽度**：`Positioned(left:, top:)` 只定位不给约束 ⇒ 子件拿到
+              // 的是无界宽度（`BoxConstraints()`）⇒ 面板里的 `Column(crossAxisAlignment:
+              // stretch)` 会被迫按无限宽布局而抛
+              // `BoxConstraints forces an infinite width`（实测）。
+              //
+              // 取值 = `.conv-menu { min-width: 152px }`：本菜单只有两项、文案最长
+              // 「取消置顶」4 字 14px ⇒ 内容宽（图标 16 + gap 8 + 文字 + padding 24）
+              // 恒 < 152 ⇒ web 的实际盒宽恒等于 152（`width: auto` 被 min-width 顶住）。
+              // 视口过窄时按 `max-width: calc(100vw - 16px)` 收窄。
+              child: SizedBox(
+                width: (AylaConversationMoreMenu.menuMinWidth).clamp(
+                  0,
+                  vp.width - AylaConversationMoreMenu.menuEdge * 2,
+                ),
+                child: _MenuPanel(
+                key: widget.panelKey,
+                showDelete: widget.showDelete,
+                busy: widget.busy,
+                pinned: widget.pinned,
+                onDismiss: widget.onDismiss,
+                  onTogglePin: widget.onTogglePin,
+                  onDelete: widget.onDelete,
+                ),
+              ),
             ),
           ),
+        ),
       ],
     );
   }

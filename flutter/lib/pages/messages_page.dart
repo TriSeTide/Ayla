@@ -41,7 +41,14 @@ import '../core/models/social_requests.dart';
 import '../core/models/user_public.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
-import '../state/chat_state.dart';
+import '../state/chat_state.dart'
+    show
+        AylaChatState,
+        aylaApplyPinToProjection,
+        aylaRemoveFromProjection,
+        aylaSortPrivateByActivity,
+        aylaToggleConversationPin,
+        aylaHideConversation;
 import '../state/notices_state.dart';
 import '../state/paged_list.dart';
 import '../state/shell_state.dart';
@@ -322,6 +329,65 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     context.go('/user/${Uri.encodeComponent(user.id)}');
   }
 
+  /// 本页 ⋯ 菜单的请求在途标记（web 是 `ConversationMoreMenu` 的局部 `busy`）。
+  ///
+  /// web 的 busy 是**每个菜单实例自己的**状态（`tsx 43` `useState(false)`）；
+  /// Flutter 的 [AylaConversationList.menuBusy] 是整列表一个档位
+  /// （组件库既定契约，见 `conversation_list.dart:156–160`）⇒ 用页面级一个布尔表达，
+  /// 效果是「在途期间所有行的菜单项都禁用」，比 web 略宽但不会误触。
+  bool _menuBusy = false;
+
+  /// 置顶 / 取消置顶（web `ConversationMoreMenu.tsx:91–103` 的 `handleTogglePin`）。
+  ///
+  /// 两步式与失败静默都收在 `state/chat_state.dart` 的 [aylaToggleConversationPin]；
+  /// 本页额外要把结果写回**自己的分页投影**（页面私有 [AylaPagedList]，不挂
+  /// `AylaSocialTracking` 的对账链 —— 详见该函数的注释）。
+  Future<void> _togglePin(AylaConversationSummary conv, bool pinned) async {
+    if (_menuBusy) return;
+    setState(() => _menuBusy = true);
+    try {
+      final bool ok = await aylaToggleConversationPin(
+        ref.read(chatStateProvider),
+        conv.id,
+        pinned,
+      );
+      if (!ok || !mounted) return;
+      _conversations?.setItems(
+        aylaApplyPinToProjection(
+          _conversations?.items ?? const <AylaConversationSummary>[],
+          conv.id,
+          pinned,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _menuBusy = false);
+    }
+  }
+
+  /// 删除（隐藏）会话（web `ConversationMoreMenu.tsx:110–120` 的 `doDelete`）。
+  ///
+  /// 二次确认在 [AylaConversationMoreMenu] 内部完成（同 web `ConfirmDialog`）；
+  /// 本方法只负责「请求成功 ⇒ 本地移除」，失败静默。
+  Future<void> _deleteConversation(AylaConversationSummary conv) async {
+    if (_menuBusy) return;
+    setState(() => _menuBusy = true);
+    try {
+      final bool ok = await aylaHideConversation(
+        ref.read(chatStateProvider),
+        conv.id,
+      );
+      if (!ok || !mounted) return;
+      _conversations?.setItems(
+        aylaRemoveFromProjection(
+          _conversations?.items ?? const <AylaConversationSummary>[],
+          conv.id,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _menuBusy = false);
+    }
+  }
+
   List<AylaConversationSummary> _sortedPrivate() =>
       aylaSortPrivateByActivity<AylaConversationSummary>(
         _conversations?.items ?? const <AylaConversationSummary>[],
@@ -466,6 +532,14 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               onSelect: (String id) => context.go('/chat/${Uri.encodeComponent(id)}'),
               revealItems: !(pager?.loading ?? false),
               onAvatarTap: _goUserProfile,
+              // ⋯ 菜单两项 —— web `ConversationList.tsx:158`
+              // `<ConversationMoreMenu conversation={conv} />`（默认 showDelete=true），
+              // 组件内直连 `togglePinConversation` / `hideConversation`。
+              // Flutter 侧组件库不碰网络 ⇒ 由本页注入（[AylaConversationList.onTogglePin] /
+              // [AylaConversationList.onDelete] 的既定契约）。
+              onTogglePin: _togglePin,
+              onDelete: _deleteConversation,
+              menuBusy: _menuBusy,
             ),
             if (pager != null)
               AylaDirectoryLoadMore(

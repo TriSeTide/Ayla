@@ -301,6 +301,50 @@ class AylaChatApi {
     );
   }
 
+  /// `POST /chat/conversations/<id>/pin/` —— 置顶 / 取消置顶会话（本人视图）。
+  ///
+  /// web `api/chat.ts:192–201`。响应 `{ pinned, detail }`；置顶状态同时由
+  /// WS 的会话摘要与本地 `AylaChatState.setPin` 表达（`chat_state.dart`）。
+  static Future<bool> togglePinConversation(
+    String convId, {
+    required bool pinned,
+  }) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/pin/',
+      body: <String, dynamic>{'pinned': pinned},
+    );
+    return resp['pinned'] as bool? ?? pinned;
+  }
+
+  /// `POST /chat/conversations/<id>/hide/` —— 从本人列表删除（隐藏）会话，不删消息。
+  ///
+  /// web `api/chat.ts:203–209`。响应 `{ detail, hidden }`。
+  static Future<bool> hideConversation(String convId) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/hide/',
+    );
+    return resp['hidden'] as bool? ?? true;
+  }
+
+  /// `POST /chat/conversations/<id>/join-requests/` —— 申请加入群聊 / 公开群直接加入。
+  ///
+  /// web `api/chat.ts:269–273` `applyToGroup`。响应两态：
+  /// `{ status: "accepted", conversation_id }`（公开群直接进）或
+  /// 一条 `AylaGroupJoinRequest`（申请制，等待审批）。
+  static Future<AylaGroupJoinResult> applyToGroup(
+    String convId, {
+    String message = '',
+  }) async {
+    final Map<String, dynamic> resp =
+        await DioClient.instance.post<Map<String, dynamic>>(
+      '/chat/conversations/${Uri.encodeComponent(convId)}/join-requests/',
+      body: <String, dynamic>{'message': message},
+    );
+    return AylaGroupJoinResult.fromJson(resp);
+  }
+
   /// `POST /chat/conversations/<id>/messages/<mid>/read/` —— 标已读（`exact` = 精确一条）。
   static Future<AylaMessageReadReceipt> markMessageRead(
     String convId,

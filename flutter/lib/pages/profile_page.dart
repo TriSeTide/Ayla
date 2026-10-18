@@ -527,10 +527,43 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   ),
                 ),
           // `createPortal(document.body)` 的等价物：弹层挂在页面最外层 Stack
+          //
+          // ## API 注入（P1-9 接线，2026-10-15）
+          // web `PrivacySheet.tsx:15–16 / 114 / 222` 在**组件内直连** `api/auth.ts` 的三个
+          // 函数（`sendEmailCode` / `changePassword` / `changeEmail`）；Flutter 侧组件库的
+          // 既定边界是「组件不碰网络」，这一层由页面注入（同 `register_page.dart:109` 的用法）。
+          // 三条逐一对应 `api/auth.ts:12–41`：
+          // · `sendEmailCode({email})`（改密发码 / 换绑两步发码共用）；
+          // · `changePassword({code, new_password})`；
+          // · `changeEmail({current_code, new_email, new_code})` —— `current_code` 的空串分支
+          //   由 [AylaPrivacySheet] 自己判（`boundEmail.isNotEmpty`），这里只透传。
           if (_privacyOpen)
             AylaPrivacySheet(
               onClose: () => setState(() => _privacyOpen = false),
               boundEmail: user.email,
+              sendEmailCode: (String email) async {
+                await AuthApi.sendEmailCode(email);
+              },
+              changePassword: ({
+                required String code,
+                required String newPassword,
+              }) async {
+                await AuthApi.changePassword(
+                  code: code,
+                  newPassword: newPassword,
+                );
+              },
+              changeEmail: ({
+                required String currentCode,
+                required String newEmail,
+                required String newCode,
+              }) async {
+                await AuthApi.changeEmail(
+                  currentCode: currentCode,
+                  newEmail: newEmail,
+                  newCode: newCode,
+                );
+              },
             ),
         ],
       ),

@@ -53,7 +53,8 @@ import '../core/models/conversation.dart';
 import '../core/models/subgroup.dart';
 import '../state/boardgame_store.dart' show aylaBoardgameStore;
 import '../state/chat_providers.dart' show chatStateProvider;
-import '../state/chat_state.dart' show AylaChatState;
+import '../state/chat_state.dart'
+    show AylaChatState, aylaToggleConversationPin;
 import '../state/directory_events.dart';
 import '../state/group_providers.dart';
 import '../state/subgroup_state.dart'
@@ -120,6 +121,9 @@ class GroupPage extends ConsumerStatefulWidget {
     this.postId,
     this.voiceChannelId,
     this.liveChannelId,
+    this.jumpMessageId,
+    this.jumpSeq,
+    this.jumpSubgroupId,
   });
 
   final String groupId;
@@ -127,6 +131,17 @@ class GroupPage extends ConsumerStatefulWidget {
   final String? postId;
   final String? voiceChannelId;
   final String? liveChannelId;
+
+  /// 收藏消息定位的三个 query 参数（web `GroupChat.tsx:72–86` 的
+  /// `?msg=<messageId>&seq=<seq>&subgroup=<子群id>`）。
+  ///
+  /// web 用 `useSearchParams()` 直接读 URL；Flutter 侧路由层把 query 解析后
+  /// 作为**构造参数**下传（`router/app_router.dart` 的 5 条 `/group/*` 路由）——
+  /// 理由同 `?type=` / `?from=` 的既有形态：页面拿不到自身 query，且
+  /// `GoRouterState` 只在 pageBuilder 里可用。
+  final String? jumpMessageId;
+  final int? jumpSeq;
+  final String? jumpSubgroupId;
 
   @override
   ConsumerState<GroupPage> createState() => _GroupPageState();
@@ -271,6 +286,8 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     // 与分页容器**有「已加载即跳过」保护**；曾经的实现在这里 dispose + 重建 + 立即 load()
     // ⇒ 每次切群清空重拉 = 用户实报的「左侧选项卡被刷掉」。
     if (oldWidget.groupId == widget.groupId) return;
+    // 换群 ⇒ 场景历史清空（web 换群后返回栈里是别的群，不跨群回退；见 [_sceneHistory] 规则 2）。
+    _sceneHistory.clear();
     _bindGroupLists();
   }
 
@@ -481,11 +498,49 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     });
   }
 
+  /// 场景历史栈（安卓返回键逐级回退，web `navigate` 的 push 语义）
+  ///
+  /// ## 为什么不做 `context.push`（2026-10-17 实测结论）
+  /// web 的 `goScene`（`GroupPage.tsx:286–292`）用 `navigate(…)` = **push** ⇒ 安卓返回键
+  /// 逐级回退。Flutter 侧的直接等价物是 `context.push`，但群页 **5 条路由共用同一个
+  /// Page key**（`router/app_router.dart:91` 的 `kAylaGroupShellPageKey`，让切场景不重建整页
+  /// —— 对应 web「5 条 Route 的 element 是同一个 GroupPage 组件」）。
+  /// **实测**：同 key 下 `push` 必抛 Navigator 断言
+  /// `!keyReservation.contains(key)`（两条 route 抢同一个 Page key），路由原地不动。
+  ///
+  /// ## 采用的等价实现
+  /// 保留 `go`（URL 回显 + 单实例不变），另维护**本页的场景历史栈**，并用 [PopScope]
+  /// 拦截系统返回：栈里有上一场景 ⇒ 回上一场景；栈空 ⇒ 放行（交给路由，即退出群）。
+  /// 语义与 web `navigate` 的「可逐级回退」等价，且**不破坏**单实例前提。
+  ///
+  /// 栈规则（逐条对齐 web `navigate` 的行为）：
+  /// 1. 与栈顶相同 ⇒ 不入栈（同一场景重复点不叠加历史）；
+  /// 2. 换群 ⇒ 整个栈清空（web 换群后返回栈里是别的群的 URL，本页不跨群回退）；
+  /// 3. 下拉回主页 / 退出 ⇒ 清空。
+  final List<AylaGroupScene> _sceneHistory = <AylaGroupScene>[];
+
+  /// 当前场景是否可回退（供 [PopScope].canPop 判定）。
+  bool get _canPopScene => _sceneHistory.isNotEmpty;
+
   /// 切场景：store + URL 回显（web tsx 286–292）。
   void _goScene(AylaGroupScene next) {
+    // 记录上一场景（供返回键逐级回退）；同场景重复点不叠加（见 [_sceneHistory]）。
+    final AylaGroupScene current = ref.read(groupStateProvider).activeScene;
+    // 只记录「真正离开的那个场景」；同场景重复点不入栈（规则 1）。
+    if (current != next) _sceneHistory.add(current);
     ref.read(groupStateProvider).setActiveScene(next);
     final String id = Uri.encodeComponent(widget.groupId);
     context.go(next == AylaGroupScene.chat ? '/group/$id' : '/group/$id/${next.name}');
+  }
+
+  /// 场景回退（安卓返回键 / 手势返回）：回上一场景；栈空 ⇒ false（交给路由退出群）。
+  bool _popScene() {
+    if (_sceneHistory.isEmpty) return false;
+    final AylaGroupScene prev = _sceneHistory.removeLast();
+    ref.read(groupStateProvider).setActiveScene(prev);
+    final String id = Uri.encodeComponent(widget.groupId);
+    context.go(prev == AylaGroupScene.chat ? '/group/$id' : '/group/$id/${prev.name}');
+    return true;
   }
 
   /// 打开群信息（web tsx 294–297）。
@@ -520,6 +575,7 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       _leaving = true;
     });
     ref.read(groupStateProvider).reset();
+    _sceneHistory.clear(); // 回主页 ⇒ 场景历史作废（规则 3）
     _leaveTimer?.cancel();
     _leaveTimer = Timer(
       const Duration(milliseconds: kAylaGroupExitTransitionMs),
@@ -534,7 +590,13 @@ class _GroupPageState extends ConsumerState<GroupPage> {
       case AylaGroupScene.info:
         return GroupInfoPage(groupId: widget.groupId);
       case AylaGroupScene.chat:
-        return GroupChatPage(groupId: widget.groupId);
+        return GroupChatPage(
+          groupId: widget.groupId,
+          // 收藏消息定位（web `GroupChat.tsx:72–86` 的 `?msg=&seq=&subgroup=`）。
+          jumpMessageId: widget.jumpMessageId,
+          jumpSeq: widget.jumpSeq,
+          jumpSubgroupId: widget.jumpSubgroupId,
+        );
       case AylaGroupScene.live:
         return GroupLivePage(
           groupId: widget.groupId,
@@ -583,18 +645,28 @@ class _GroupPageState extends ConsumerState<GroupPage> {
         chat.byId(widget.groupId);
     final String groupName = currentGroup?.title ?? '群聊';
 
-    if (isNarrow) {
-      return _buildNarrow(context, groupState, contentScene, groupName, currentGroup);
-    }
-    return _buildWide(
-      context,
-      chat,
-      subgroups,
-      voice,
-      live,
-      contentScene,
-      groupName,
-      currentGroup,
+    final Widget body = isNarrow
+        ? _buildNarrow(context, groupState, contentScene, groupName, currentGroup)
+        : _buildWide(
+            context,
+            chat,
+            subgroups,
+            voice,
+            live,
+            contentScene,
+            groupName,
+            currentGroup,
+          );
+    // 安卓返回键 / 系统手势返回：栈里有上一场景 ⇒ 回上一场景（等价 web `navigate` 的逐级回退）；
+    // 栈空 ⇒ 放行（退出群，由路由接管）。见 [_sceneHistory] 的完整推导。
+    return PopScope(
+      // 只有「有上一场景」时才拦截；无栈时 canPop=true ⇒ 系统默认行为（退出群）。
+      canPop: !_canPopScene,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) return; // 已由系统处理（栈空分支）
+        _popScene();
+      },
+      child: body,
     );
   }
 
@@ -649,6 +721,16 @@ class _GroupPageState extends ConsumerState<GroupPage> {
               error: _directory?.error,
               hasMore: _directory?.hasMore ?? false,
               invalidated: _directory?.invalidated ?? false,
+              // 置顶 / 取消置顶（web `ServerRail.tsx:75–85` 的 `handleTogglePin`）。
+              //
+              // 两步式：`togglePinConversation(id, next).then(() => setPin(id, next))`，
+              // 失败静默 —— 三段语义全部收在 [aylaToggleConversationPin] 里
+              // （`state/chat_state.dart`），这里只把 **P1-1 的同一份实现**接上，
+              // 不在页面里重抄一遍 .then/.catch。
+              // `AylaServerRail` 侧 `:442–455` 已经负责 busy 态与「回调为 null 时不动作」，
+              // 且它自己 catch 了异常（web 的静默语义在组件里已有第二道保障）。
+              onTogglePin: (String id, bool pinned) =>
+                  aylaToggleConversationPin(chat, id, pinned),
             ),
             AylaChannelSidebar(
               groupId: widget.groupId,

@@ -9,6 +9,7 @@
 /// | [bumpUnread] | `chat.ts:182–216`（seq 驱动的可追踪未读序号投影） |
 /// | [markReadSeqs] / [clearUnread] / [decrementUnread] | `chat.ts:218–258` |
 /// | [setLastMessage] / [setPin] / [removeConversation] | `chat.ts:160–180` |
+/// | [aylaToggleConversationPin] / [aylaHideConversation] | `ConversationMoreMenu.tsx:91–120` + `ServerRail.tsx:75–85` |
 /// | [adjustPostUnread] | `chat.ts:260–267`（群未读帖子数增减；非群会话不动，下限 0） |
 /// | [aylaSortPrivateByActivity] | `chat.ts:275–288`（置顶 → 活跃时间 → 稳定原序） |
 ///
@@ -28,6 +29,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../core/api/chat_api.dart';
 import '../core/models/conversation.dart';
 
 /// 会话列表状态（会话摘要缓存 + 未读投影 + 活跃排序）。
@@ -436,3 +438,103 @@ List<T> aylaSortPrivateByActivity<T extends Object>(
   });
   return copy;
 }
+
+// ======================= 会话置顶 / 删除的两步式动作 =======================
+
+/// 置顶 / 取消置顶（web `ConversationMoreMenu.tsx:91–103` 与 `ServerRail.tsx:75–85`）。
+///
+/// ## 为什么放在这里（而不是各页面各写一遍）
+/// web 的两处调用点是**同一段代码复制两次**：
+/// ```ts
+/// chatApi.togglePinConversation(id, next)
+///   .then(() => useChatStore.getState().setPin(id, next))
+///   .catch(() => { /* 置顶失败静默 */ });
+/// ```
+/// 语义三条，必须逐条照抄：
+/// 1. **成功才更新**（`.then` 里才 setPin）—— 不能先乐观改；
+/// 2. **失败静默**：不弹错、不回滚、不重抛（调用方不该再包一层 try/catch）；
+/// 3. 置顶态由 WS 的会话摘要与会话详情各自再来一次（`upsertConversation`），
+///    本方法只负责本人视图的即时反映。
+///
+/// 返回 `bool`：是否成功更新了本地状态。**仅**给定向测试与可观测性用，
+/// 生产调用点不必消费（web 的 Promise 也没有被消费）。
+///
+/// [chatState] 传 null 时退化为「不更新任何本地状态」——但生产路径**恒传**
+/// 当前 provider 实例；null 分支只为让本函数在无 store 的纯函数测试里可用。
+Future<bool> aylaToggleConversationPin(
+  AylaChatState? chatState,
+  String convId,
+  bool pinned,
+) async {
+  try {
+    await AylaChatApi.togglePinConversation(convId, pinned: pinned);
+  } catch (_) {
+    // ConversationMoreMenu.tsx:99–101 / ServerRail.tsx:80–84：置顶失败**静默**。
+    return false;
+  }
+  chatState?.setPin(convId, pinned);
+  return true;
+}
+
+/// 从本人列表删除（隐藏）会话（web `ConversationMoreMenu.tsx:110–120`）。
+///
+/// ## 语义（逐条照 web `doDelete`）
+/// ```ts
+/// chatApi.hideConversation(id)
+///   .then(() => useChatStore.getState().removeConversation(id))
+///   .catch(() => { /* 删除会话失败静默 */ });
+/// ```
+/// 1. **成功才移除**（不能先本地移除）；
+/// 2. **失败静默**（web 原文注释「删除会话失败静默」）；
+/// 3. 只动 `chatState`；列表投影（social record / 分页器）由
+///    `AylaSocialTracking` 的 `reconcileCached` 自动跟随（web 同一条链：
+///    `useChatStore.subscribe → reconcileCached`，见 `stores/social.ts:114–116`）。
+///
+/// 注意：本方法**不做二次确认**——确认是 UI 层的事（[AylaConversationMoreMenu]
+/// 内部按 `ConversationMoreMenu.tsx:105–120` 弹 [AylaConfirmDialog]）。
+Future<bool> aylaHideConversation(
+  AylaChatState? chatState,
+  String convId,
+) async {
+  try {
+    await AylaChatApi.hideConversation(convId);
+  } catch (_) {
+    // ConversationMoreMenu.tsx:117–119：删除会话失败**静默**。
+    return false;
+  }
+  chatState?.removeConversation(convId);
+  return true;
+}
+
+/// 把置顶态写回**页面本地的分页投影**（Flutter 侧特有的一步，web 不需要）。
+///
+/// ## 为什么 Flutter 要多这一步
+/// web 的会话列表读的就是**被对账的那份 social record**：
+/// `setPin` 改 `useChatStore.conversations` ⇒ `ensureSocialTracking` 的
+/// `useChatStore.subscribe`（`stores/social.ts:114–116`）⇒ `reconcileCached`
+/// 用新实例替换同 id 条目 ⇒ 列表跟着变。
+/// Flutter 侧 `/messages` 页（含宽屏左列宿主）持有的是**页面私有**
+/// [AylaPagedList]（见 `messages_page.dart:104` 的登记），不在那条对账链上
+/// ⇒ 只调 [aylaToggleConversationPin] 会让「置顶态在 store 里改了、屏幕上的行没变」。
+/// 本函数就是这一页的 `reconcileCached` 等价物：按 id 就地替换成带新 isPinned 的实例。
+///
+/// 主页 / 群页**不需要**它：那两处读的是共享 social record，自动跟随。
+List<AylaConversationSummary> aylaApplyPinToProjection(
+  List<AylaConversationSummary> items,
+  String convId,
+  bool pinned,
+) =>
+    <AylaConversationSummary>[
+      for (final AylaConversationSummary c in items)
+        c.id == convId ? c.copyWith(isPinned: pinned) : c,
+    ];
+
+/// 从页面本地分页投影里移除一条（[aylaApplyPinToProjection] 的删除版）。
+List<AylaConversationSummary> aylaRemoveFromProjection(
+  List<AylaConversationSummary> items,
+  String convId,
+) =>
+    <AylaConversationSummary>[
+      for (final AylaConversationSummary c in items)
+        if (c.id != convId) c,
+    ];

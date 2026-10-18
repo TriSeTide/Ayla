@@ -52,7 +52,8 @@ import '../core/models/game_room.dart' show AylaGameRoom;
 import '../core/models/post.dart' show AylaPost;
 import '../state/boardgame_store.dart' show aylaBoardgameStore;
 import '../state/chat_providers.dart' show chatStateProvider;
-import '../state/chat_state.dart' show AylaChatState;
+import '../state/chat_state.dart'
+    show AylaChatState, aylaToggleConversationPin;
 import '../state/directory_events.dart' show AylaDirectoryKind;
 import '../state/directory_store.dart';
 import '../state/home_prefs.dart';
@@ -713,6 +714,13 @@ class _HomePageState extends ConsumerState<HomePage> {
       isPinned: g.isPinned ?? false,
       revealDelay: AylaRevealMotion.staggerDelay(index, staggerMs: 80),
       onOpen: () => _openGroup(g.id),
+      // 置顶 / 取消置顶 —— web `GroupCard.tsx:66–69` 内嵌
+      // `<ConversationMoreMenu conversation={{id,title,is_pinned}} showDelete={false} />`，
+      // 菜单里的 `handleTogglePin`（`ConversationMoreMenu.tsx:91–103`）走
+      // `togglePinConversation → setPin`、失败静默。
+      // 群卡片**不提供删除**（同处 `showDelete={false}`）⇒ 只接 onTogglePin。
+      onTogglePin: (bool next) =>
+          aylaToggleConversationPin(ref.read(chatStateProvider), g.id, next),
     );
   }
 
@@ -737,6 +745,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       isPinned: g.isPinned ?? false,
       revealDelay: AylaRevealMotion.staggerDelay(index, staggerMs: 80),
       onOpen: () => _openGroup(g.id),
+      // 同 [_card]：`GroupListItem.tsx:63–66` 复用 ConversationMoreMenu（showDelete=false）。
+      onTogglePin: (bool next) =>
+          aylaToggleConversationPin(ref.read(chatStateProvider), g.id, next),
     );
   }
 
