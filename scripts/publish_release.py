@@ -12,7 +12,7 @@ all             build -> publish -> deploy-backend
 --------
 AYLA_RELEASE_HOST   默认 ayerelysia（~/.ssh/config 别名）
 AYLA_RELEASE_ROOT   默认 ~/Elysia/ayla-deploy/releases
-AYLA_REMOTE_REPO    默认 ~/Elysium/Elysium/Ayla
+AYLA_REMOTE_REPO    默认 ~/Elysia/Elysium/Ayla
 AYLA_DEPLOY_DIR     默认 ~/Elysia/ayla-deploy
 AYLA_API_BASE       默认 https://s.ayla.trise.top:26211
 AYLA_UPDATE_CHANNEL 默认 stable
@@ -38,7 +38,7 @@ DIST_DIR = FLUTTER_DIR / "dist" / "release"
 MANIFEST_VERSION = 1
 DEFAULT_HOST = os.environ.get("AYLA_RELEASE_HOST", "ayerelysia")
 DEFAULT_ROOT = os.environ.get("AYLA_RELEASE_ROOT", "~/Elysia/ayla-deploy/releases")
-DEFAULT_REMOTE_REPO = os.environ.get("AYLA_REMOTE_REPO", "~/Elysium/Elysium/Ayla")
+DEFAULT_REMOTE_REPO = os.environ.get("AYLA_REMOTE_REPO", "~/Elysia/Elysium/Ayla")
 DEFAULT_DEPLOY_DIR = os.environ.get("AYLA_DEPLOY_DIR", "~/Elysia/ayla-deploy")
 DEFAULT_API_BASE = os.environ.get("AYLA_API_BASE", "https://s.ayla.trise.top:26211")
 DEFAULT_CHANNEL = os.environ.get("AYLA_UPDATE_CHANNEL", "stable")
@@ -62,6 +62,10 @@ def run(cmd, *, cwd=None, capture=False):
         parts,
         cwd=str(cwd) if cwd else None,
         text=True,
+        # Windows 控制台默认 GBK；Python 3.15 前 text=True 会按 locale 解码，遇到
+        # UTF-8 的远端输出直接崩。显式固定 UTF-8 + replace，保证诊断信息不丢失。
+        encoding="utf-8",
+        errors="replace",
         capture_output=capture,
         check=False,
     )
@@ -257,6 +261,8 @@ def fetch_remote_manifest(host, remote_root, channel):
         ["ssh", host, f"test -f {remote_manifest}"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if probe.returncode != 0:
@@ -325,8 +331,23 @@ def publish(host, remote_root, channel, version, build, notes, mandatory,
     print("[publish] %s -> %s/manifest-%s.json" % (release["release_id"], remote_root, channel))
 
 
+def _resolve_local_repo():
+    """确定要发布的本地仓库：优先 Ayla 子模块，否则当前目录（独立 clone）。"""
+    candidate = ROOT / "Ayla"
+    if (candidate / ".git").exists():
+        return candidate
+    return ROOT
+
+
 def deploy_backend(host, remote_repo, deploy_dir):
-    local_head = run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture=True).stdout.strip()
+    """用 git bundle 把本地 Ayla 后端源码快进到服务器并重建镜像。
+
+    服务器 `~/Elysia/Elysium/Ayla` 是 Ayla 子模块工作树；父仓库 Elysium 在服务器上
+    有独立未提交修改且与线上分叉，因此本命令只更新 **Ayla 后端仓库**（后端镜像的
+    build context 就是该目录），不改父仓库指针，避免破坏服务器上正在运行的 Elysium。
+    """
+    repo_dir = _resolve_local_repo()
+    local_head = run(["git", "rev-parse", "HEAD"], cwd=repo_dir, capture=True).stdout.strip()
     remote_head = ssh(host, f"cd {remote_repo} && git rev-parse HEAD", capture=True).stdout.strip()
     if not remote_head:
         raise ReleaseError("无法读取服务器 Ayla HEAD")
@@ -335,34 +356,48 @@ def deploy_backend(host, remote_repo, deploy_dir):
     else:
         ancestor = subprocess.run(
             ["git", "merge-base", "--is-ancestor", remote_head, local_head],
-            cwd=str(ROOT),
+            cwd=str(repo_dir),
             check=False,
         ).returncode == 0
         if not ancestor:
             raise ReleaseError("服务器 Ayla 与本地不是快进关系；拒绝覆盖，请人工合并")
         bundle_path = Path(tempfile.gettempdir()) / ("ayla-backend-%s.bundle" % local_head[:10])
         remote_bundle = "/tmp/%s" % bundle_path.name
+        # ⚠️ `A..B`（两个 40 位 sha）在部分 Git for Windows 版本会被判成
+        # “empty bundle”（实测 2.56.0.windows.2 复现；`A..HEAD` 正常）。
+        # 先建临时 ref 指向远端 HEAD，再用 `refs/.../base..HEAD` 表达同一区间。
+        base_ref = "refs/ayla-publish/base"
+        run(["git", "update-ref", base_ref, remote_head], cwd=repo_dir)
         try:
-            run(["git", "bundle", "create", str(bundle_path), f"{remote_head}..{local_head}"], cwd=ROOT)
+            run(["git", "bundle", "create", str(bundle_path), f"{base_ref}..HEAD"], cwd=repo_dir)
             scp(host, bundle_path, remote_bundle)
-            remote_script = (
-                "set -euo pipefail\n"
-                f"cd {remote_repo}\n"
-                f"git bundle verify {remote_bundle}\n"
-                f"git fetch {remote_bundle} {local_head}:refs/ayla/incoming\n"
-                "git merge --ff-only refs/ayla/incoming\n"
-                "git log -1 --oneline\n"
+            remote_script = "\n".join(
+                [
+                    "set -euo pipefail",
+                    "cd %s" % remote_repo,
+                    "git bundle verify %s" % remote_bundle,
+                    "git fetch %s %s:refs/ayla/incoming" % (remote_bundle, local_head),
+                    "git merge --ff-only refs/ayla/incoming",
+                    "git log -1 --oneline",
+                ]
             )
             ssh(host, remote_script)
         finally:
             bundle_path.unlink(missing_ok=True)
-    rebuild = (
-        "set -euo pipefail\n"
-        f"cd {deploy_dir}\n"
-        f"docker build -f backend/Dockerfile -t ayla-backend:latest {remote_repo}/backend\n"
-        "docker compose up -d --no-deps backend\n"
-        "sleep 3\n"
-        "docker ps --filter name=ayla-backend --format '{{.Names}} {{.Status}}'\n"
+            subprocess.run(
+                ["git", "update-ref", "-d", base_ref],
+                cwd=str(repo_dir),
+                check=False,
+            )
+    rebuild = "\n".join(
+        [
+            "set -euo pipefail",
+            "cd %s" % deploy_dir,
+            "docker build -f %s/backend/Dockerfile -t ayla-backend:latest %s/backend" % (remote_repo, remote_repo),
+            "docker compose up -d --no-deps backend",
+            "sleep 5",
+            "docker ps --filter name=ayla-backend --format '{{.Names}} {{.Status}}'",
+        ]
     )
     ssh(host, rebuild)
     print("[deploy-backend] 后端已重建并重启")
