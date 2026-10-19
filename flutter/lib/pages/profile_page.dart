@@ -48,6 +48,7 @@ import '../state/auth_state.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
+import '../widgets/base/safe_area.dart' show aylaTopInset;
 import '../widgets/base/privacy_sheet.dart';
 import '../widgets/base/reveal.dart';
 import '../widgets/base/profile_content_sections.dart';
@@ -453,7 +454,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           isNarrow
               // ≤768：`.profile-side` / `.profile-main` 均 `display: contents` ⇒ 单列自然流
               ? SingleChildScrollView(
-                  padding: const EdgeInsets.all(AylaSpacing.sp3),
+                  // 顶部额外让出状态栏（2026-10-19）：本页是**卡片式滚动页**，内容不自带材质，
+                  // 状态栏高度直接加在滚动容器的顶部内距上即可（不需要并入卡片材质 ——
+                  // 卡片本身是圆角实心卡，不与屏幕顶边相接）。
+                  // 用户实拍里这条被状态栏压住，是因为 sp3(12) 小于状态栏高度（约 24–48）。
+                  padding: EdgeInsets.fromLTRB(
+                    AylaSpacing.sp3,
+                    AylaSpacing.sp3 + aylaTopInset(context),
+                    AylaSpacing.sp3,
+                    AylaSpacing.sp3,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     spacing: AylaSpacing.sp4,

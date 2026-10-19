@@ -62,6 +62,7 @@ import 'live_studio.dart' show AylaLiveHostAvatar, AylaLiveStreamAddresses;
 import 'live_viewers.dart'
     show AylaLiveViewerItem, AylaLiveViewerSheetData, AylaLiveViewerStrip;
 import '../base/primitives.dart' show AylaSourceTag;
+import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/reveal.dart'
     show AylaRevealItem, AylaRevealMotion, AylaRevealScope;
 import '../base/share.dart' show AylaShareButton;
@@ -387,16 +388,33 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
   ///   `gap sp2`（贴顶铺满，无圆角）。
   Widget _headMaterial({required bool narrow, required Widget child}) {
     if (narrow) {
+      // ## 状态栏让位放在**材质内部**（2026-10-19 用户实拍「割裂感」的修复）
+      //
+      // 直播间/开播控制台是沉浸路由（壳层不出顶栏），头部就是屏幕最上面那一条。
+      // 之前在外层插裸 `SizedBox(height: 状态栏)` ⇒ 那条带子**没有材质**，露出的是
+      // 页面底下的极光背景，与紧邻的玻璃头之间形成明显色带（用户描述为割裂感），
+      // 且因为外层已占位、这里又有一份 padding，上下间距看起来翻倍。
+      //
+      // 正确做法（与群顶栏一致）：把状态栏高度作为材质的**第一个子件**，`glassBg`
+      // 与底边线因此向上延伸覆盖状态栏区域，与头部连成一片。
       return Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AylaSpacing.sp3,
-          vertical: AylaSpacing.sp2,
-        ),
         decoration: const BoxDecoration(
           color: AylaColors.glassBg,
           border: Border(bottom: BorderSide(color: AylaColors.glassBorder)),
         ),
-        child: child,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const AylaTopInsetGap(),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp3,
+                vertical: AylaSpacing.sp2,
+              ),
+              child: child,
+            ),
+          ],
+        ),
       );
     }
     // ⚠️ margin：auroraqua 402 给 `margin: 12`（0-1-0），但 live.css 689–691 的
@@ -684,9 +702,9 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
                 // ⇒ `env(safe-area-inset-top)` 恒为 0，安全区由浏览器外壳代劳；Flutter 是边到边
                 // 窗口，没有那层外壳，故必须 App 自己让。
                 //
-                // 取 `viewPadding` 而非 `padding`：视频全屏切换/键盘弹出不该让头部跳动。
-                if (MediaQuery.viewPaddingOf(context).top > 0)
-                  SizedBox(height: MediaQuery.viewPaddingOf(context).top),
+                // ⚠️ 状态栏让位由 `_headMaterial` 在**玻璃材质内部**承载（见该方法注释），
+                // 这里**不要**再插裸 `SizedBox` —— 那会在玻璃头之上叠一条空心带，
+                // 既露出极光底色又白占高度（用户实拍反馈「割裂感」+ 间距翻倍）。
                 _headerSwap(narrow: true),
                 Expanded(
                   child: Padding(
@@ -796,12 +814,7 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                // 状态栏留白（2026-10-19 实机复验发现）：开播控制台走直播间路由族，
-                // 壳层因「直播要顶到边」把它排除在兜底之外 ⇒ 必须自己补。
-                // 观看态在 `_isNarrow && !showOwnerPanel` 分支里补过（另一处），
-                // 控制台是独立分支，此前漏了 ⇒ 实机看到返回键被状态栏时间压住。
-                if (MediaQuery.viewPaddingOf(context).top > 0)
-                  SizedBox(height: MediaQuery.viewPaddingOf(context).top),
+                // 状态栏让位同样由 `_headMaterial` 在材质内部承载（不要插裸 SizedBox）。
                 _headerSwap(narrow: true),
                 Expanded(
                   child: SingleChildScrollView(

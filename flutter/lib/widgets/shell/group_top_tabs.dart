@@ -36,6 +36,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/avatar_halo.dart';
 import 'bottom_tabs.dart'; // 样张里演示「回主页后壳层渲染底栏」
 import '../base/primitives.dart' show AylaNavHighlight;
@@ -229,7 +230,18 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
         borderOverride:
             const Border(bottom: BorderSide(color: AylaColors.glassBorder)),
         padding: EdgeInsets.zero,
-        child: SizedBox(
+        // ## 顶部安全区（2026-10-19，用户认可的做法）
+        // 状态栏高度放在**玻璃材质内部**（作为 Column 的第一个子件）——
+        // 磨砂底与底边线因此向上延伸覆盖状态栏区域，与顶栏连成一片。
+        //
+        // ❌ 不要在外层加 `SizedBox(height: top)`：那会让状态栏区露出页面底下的
+        //    极光背景，与玻璃顶栏之间出现一条色带（用户实拍称之为「割裂感」）。
+        // 详见 `widgets/base/safe_area.dart` 的库文档。
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const AylaTopInsetGap(),
+            SizedBox(
           height: AylaGroupTopTabs.barHeight,
           child: Padding(
             padding: const EdgeInsets.symmetric(
@@ -270,6 +282,8 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
               ],
             ),
           ),
+            ),
+          ],
         ),
     );
 

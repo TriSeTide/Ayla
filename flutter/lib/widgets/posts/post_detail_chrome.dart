@@ -60,6 +60,7 @@ import '../../theme/glass.dart'
     show AylaGlassButton, AylaGlassButtonVariant, AylaGlassSurface;
 import '../../theme/tokens.dart';
 import '../base/loading.dart' show AylaSkeleton;
+import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/page_state.dart' show AylaPageState;
 import '../base/reveal.dart' show AylaRevealItem;
 
@@ -150,6 +151,9 @@ class AylaPostDetailChrome extends StatelessWidget {
         ),
       );
     } else {
+      // 窄屏：状态栏高度放在**玻璃材质内部**（不能是外层裸留白 —— 否则状态栏区
+      // 露出页面底下的极光背景，与玻璃头之间出现一条色带，用户称之为「割裂感」）。
+      // 详见 `widgets/base/safe_area.dart` 的库文档。
       head = DecoratedBox(
         decoration: BoxDecoration(
           border: Border(
@@ -160,7 +164,13 @@ class AylaPostDetailChrome extends StatelessWidget {
           blur: 18, // blur(18px) saturate(1.4)
           radius: 0,
           shadow: const <BoxShadow>[], // 窄屏无外阴影（只有 border-bottom）
-          child: head,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const AylaTopInsetGap(),
+              head,
+            ],
+          ),
         ),
       );
     }

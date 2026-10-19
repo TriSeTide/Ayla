@@ -788,7 +788,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           // web tsx 486–488：只关弹窗 + 跳群；成员关系由 `group.joined` 帧负责。
           setState(() => _selectedGroup = null);
           final String encoded = Uri.encodeComponent(conversationId);
-          context.push('/group/$encoded');
+          // ⚠️ **群路由必须用 `go`，不能用 `push`**：群页 5 条路由共用同一个
+          // `kAylaGroupShellPageKey`（`router/app_router.dart:91`，为的是切场景不重建整页），
+          // 同 key 下 push 会抛 `!keyReservation.contains(key)` 断言 ⇒ **红屏崩溃**
+          // （2026-10-19 实机复现）。群内的逐级返回由 `GroupPage` 的 PopScope +
+          // 场景历史栈承担（`_popScene`），不依赖路由栈。
+          context.go('/group/$encoded');
         },
       );
     }
@@ -1101,7 +1106,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               onOpen: () {
                 if (_groupIsJoined(item)) {
                   final String encoded = Uri.encodeComponent(item.id);
-                  context.push('/group/$encoded');
+                  context.go('/group/$encoded');
                 } else if (!_acceptedGroupIds.contains(item.id)) {
                   setState(() => _selectedGroup = item);
                 }

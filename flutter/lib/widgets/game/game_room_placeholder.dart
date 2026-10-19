@@ -32,6 +32,7 @@ import '../base/dialogs.dart' show AylaConfirmDialog;
 import '../base/directory_controls.dart'
     show AylaDirectoryLoadMore, AylaFavoriteButton, AylaFavoriteState;
 import '../base/reveal.dart';
+import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/share.dart' show AylaShareButton;
 
 /// .game-room-placeholder —— 进入桌游室后的占位界面（GameRoomPlaceholder.tsx）。
@@ -254,11 +255,23 @@ class _AylaGameRoomPlaceholderState extends State<AylaGameRoomPlaceholder> {
         ),
         blur: AylaGlass.blurNav,
         shadow: const <BoxShadow>[],
-        padding: const EdgeInsets.symmetric(
-          horizontal: AylaSpacing.sp4,
-          vertical: AylaSpacing.sp3,
+        padding: EdgeInsets.zero, // 内距改由下方 Column 承载（状态栏占位需要吃进材质）
+        // 窄屏：状态栏高度放在**玻璃材质内部**，让磨砂底与顶栏连成一片。
+        // 不能是外层裸留白 —— 否则状态栏区露出极光背景，与玻璃头之间出现色带。
+        // 详见 `widgets/base/safe_area.dart` 的库文档。
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const AylaTopInsetGap(),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp4,
+                vertical: AylaSpacing.sp3,
+              ),
+              child: sized,
+            ),
+          ],
         ),
-        child: sized,
       );
     } else {
       // ≥769：卡片化（margin --sidebar-gutter 12 + radius 16 + compact 阴影 + blur24 sat1.4）

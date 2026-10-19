@@ -36,6 +36,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/directory_controls.dart';
 import '../base/primitives.dart';
 import '../base/resource_image.dart';
@@ -438,9 +439,18 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
           ? Border.all(color: AylaColors.glassBorder)
           : const Border(bottom: BorderSide(color: AylaColors.glassBorder)),
       padding: const EdgeInsets.all(AylaSpacing.sp3), // padding: var(--sp-3)
-      child: Row(
-        spacing: AylaSpacing.sp3, // gap: var(--sp-3)
-        children: children,
+      // 窄屏：状态栏高度放在**玻璃材质内部**（顶部），让磨砂底与顶栏连成一片。
+      // 不能是外层裸留白 —— 否则状态栏区露出极光背景，与玻璃头之间出现色带。
+      // 详见 `widgets/base/safe_area.dart` 的库文档。宽屏无状态栏遮挡，占位恒 0。
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (!wide) const AylaTopInsetGap(),
+          Row(
+            spacing: AylaSpacing.sp3, // gap: var(--sp-3)
+            children: children,
+          ),
+        ],
       ),
     );
   }

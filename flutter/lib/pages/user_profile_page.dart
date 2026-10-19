@@ -46,6 +46,7 @@ import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
 import '../theme/glass.dart';
 import '../theme/tokens.dart';
+import '../widgets/base/safe_area.dart' show aylaTopInset;
 import '../widgets/base/avatar_halo.dart';
 import '../widgets/base/loading.dart' show AylaSkeleton;
 import '../widgets/base/profile_content_sections.dart';
@@ -395,7 +396,14 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
         // ⇒ `grid-template-columns: minmax(0, 640px)` + `justify-content: center`
         // + `.profile-card { align-self: start }`。
         : SingleChildScrollView(
-            padding: const EdgeInsets.all(AylaSpacing.sp3),
+            // 顶部额外让出状态栏（2026-10-19）—— 同 `profile_page.dart`：卡片式滚动页，
+            // 状态栏高度加在滚动容器顶部内距（sp3 的 12 不足以避开 24–48 的状态栏）。
+            padding: EdgeInsets.fromLTRB(
+              AylaSpacing.sp3,
+              AylaSpacing.sp3 + aylaTopInset(context),
+              AylaSpacing.sp3,
+              AylaSpacing.sp3,
+            ),
             // ⚠️ web 是 justify-content: center（**仅主轴水平**）+ align-self: start
             // ⇒ Flutter 用 Alignment.topCenter，**不能**用 Center（那会双向居中）。
             child: Align(

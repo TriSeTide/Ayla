@@ -37,6 +37,7 @@ import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
+import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../motion/gestures.dart'
     show AylaConversationPresence, AylaPanelEdge, AylaPanelTransition;
 import 'message_input.dart';
@@ -369,11 +370,23 @@ class AylaPrivateChatPane extends StatelessWidget {
         ),
         blur: AylaGlass.blurNav,
         shadow: const <BoxShadow>[],
-        padding: const EdgeInsets.symmetric(
-          horizontal: AylaSpacing.sp4,
-          vertical: AylaSpacing.sp2,
+        padding: EdgeInsets.zero, // 内距改由下方 Column 承载（状态栏占位要吃进材质）
+        // 窄屏：状态栏高度放在**玻璃材质内部**，让磨砂底与顶栏连成一片。
+        // 不能是外层裸留白 —— 否则状态栏区露出极光背景，与玻璃头之间出现色带。
+        // 详见 `widgets/base/safe_area.dart` 的库文档。
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const AylaTopInsetGap(),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AylaSpacing.sp4,
+                vertical: AylaSpacing.sp2,
+              ),
+              child: sized,
+            ),
+          ],
         ),
-        child: sized,
       );
     }
     // 宽屏：卡片（1px 边 + radius 16 + compact 阴影 + blur24 sat1.4）
