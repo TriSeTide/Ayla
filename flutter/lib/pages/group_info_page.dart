@@ -570,7 +570,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
       avatarNarrowSize: 76,
       avatarWideSize: 92,
       canManage: _canManage,
-      onBack: () => context.go('/group/${Uri.encodeComponent(groupId)}'),
+      // 返回：能回退就 pop（群信息由群页 push），栈底回群聊。
+      onBack: () => context.canPop()
+          ? context.pop()
+          : context.go('/group/${Uri.encodeComponent(groupId)}'),
       onChangeAvatar: _canManage ? () => unawaited(_pickAvatar()) : null,
       avatarPreview: _avatarPreview,
       avatarSaving: _avatarSaving,
@@ -1058,7 +1061,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
               ),
             ),
             onOpenProfile: (AylaGroupMemberItem item) =>
-                context.go('/user/${Uri.encodeComponent(item.id)}'),
+                context.push('/user/${Uri.encodeComponent(item.id)}'),
           ),
         ],
       ),

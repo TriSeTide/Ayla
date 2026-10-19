@@ -248,7 +248,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   /// 关浮层 → 进开播控制台。
   void _startChannel(AylaLiveCardData channel) {
     setState(() => _showCreate = false);
-    context.go('/live/start/${Uri.encodeComponent(channel.id)}');
+    context.push('/live/start/${Uri.encodeComponent(channel.id)}');
   }
 
   /// 新建直播间并开播（web `GroupLive.tsx:98–111` 的 `handleCreateNewLive`）：
@@ -269,7 +269,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       );
       if (!mounted) return;
       setState(() => _showCreate = false);
-      context.go('/live/start/${Uri.encodeComponent(created.id)}');
+      context.push('/live/start/${Uri.encodeComponent(created.id)}');
     } catch (error) {
       if (!mounted) return;
       // web tsx 107：`e instanceof Error ? e.message : "创建直播间失败"` ⇒ 非 API 异常回退固定串。

@@ -837,7 +837,26 @@ class _AylaTopNavState extends State<AylaTopNav> {
   }
 
   /// 窄屏条本体：无圆角 + 仅底部 1px 边（home.css:34–48）⇒ 复用 [AylaGlassSurface] + override。
+  ///
+  /// ## 顶部安全区（2026-10-19 用户实报「顶部没有避开手机任务栏」）
+  ///
+  /// **web 侧不需要这条 padding，但原因不在 CSS**：`index.html:5` 的 viewport 是
+  /// `width=device-width, initial-scale=1.0` —— **没有** `viewport-fit=cover` ⇒
+  /// `env(safe-area-inset-top)` 在 web 上**恒为 0**，浏览器把页面排在状态栏/地址栏之下，
+  /// 安全区由浏览器外壳代劳（`auth.css:217` 那处 `max(sp4, env(safe-area-inset-top))`
+  /// 因此也永远取 sp4）。
+  ///
+  /// Flutter 的窗口是**边到边**的（Android edge-to-edge / iOS 全屏），没有那层浏览器外壳
+  /// ⇒ 状态栏高度必须由 App 自己让出来，否则时间/信号图标会直接压在顶栏头像与标题上
+  /// （实测截图：`7:34` 与 `5G` 盖住「群聊」标题）。
+  ///
+  /// 取值口径与 web 的意图一致 —— `max(设计值, 安全区)`：
+  /// 竖屏普通状态栏 ⇒ 用 [AylaTopNav.narrowHeight] 原高（视觉不变）；
+  /// 刘海屏/灵动岛/横屏短边 ⇒ 让出 `viewPadding.top`（可能大于 0），内容整体下移。
+  /// ⚠️ 用 `viewPadding` 而不是 `padding`：后者会被键盘/系统 UI 的 `viewInsets` 联动，
+  /// 顶栏不该因为键盘弹出而跳动。
   Widget _narrowBar(BuildContext context, List<Widget> items) {
+    final double statusBar = MediaQuery.viewPaddingOf(context).top;
     return AylaGlassSurface(
       blur: AylaGlass.blurNav,
       shadow: const <BoxShadow>[], // 窄屏条未声明阴影
@@ -846,19 +865,27 @@ class _AylaTopNavState extends State<AylaTopNav> {
         bottom: BorderSide(color: AylaColors.glassBorder),
       ),
       padding: EdgeInsets.zero,
-      child: SizedBox(
-        height: AylaTopNav.narrowHeight,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp4),
-          child: Row(
-            children: <Widget>[
-              for (int i = 0; i < items.length; i++) ...<Widget>[
-                if (i > 0) const SizedBox(width: AylaSpacing.sp3), // gap: sp3
-                items[i],
-              ],
-            ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          // 状态栏占位：只占高、不画任何东西（玻璃材质由下面的条本体承担，
+          // 让安全区与顶栏共用同一块磨砂底，避免出现"透明横带 + 玻璃条"的断色）。
+          if (statusBar > 0) SizedBox(height: statusBar),
+          SizedBox(
+            height: AylaTopNav.narrowHeight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp4),
+              child: Row(
+                children: <Widget>[
+                  for (int i = 0; i < items.length; i++) ...<Widget>[
+                    if (i > 0) const SizedBox(width: AylaSpacing.sp3), // gap: sp3
+                    items[i],
+                  ],
+                ],
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

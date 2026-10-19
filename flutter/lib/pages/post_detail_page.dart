@@ -810,7 +810,7 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
                     favoriteController: _favorites,
                     onAuthorTap: post.authorId == null
                         ? null
-                        : () => context.go('/user/${post.authorId}'),
+                        : () => context.push('/user/${post.authorId}'),
                   ),
                 ),
               ),
@@ -973,7 +973,7 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
             },
             onAuthorTap: (AylaPostComment c) {
               final String? id = c.authorId ?? c.author?.id;
-              if (id != null) context.go('/user/$id');
+              if (id != null) context.push('/user/$id');
             },
           ),
         AylaStablePaginationFooter(child: Center(child: footer)),

@@ -52,7 +52,7 @@ import '../pages/search_page.dart';
 import '../pages/user_profile_page.dart';
 import '../pages/voice_hub_page.dart';
 import '../state/auth_bootstrap.dart'
-    show aylaAutoLoginInFlight, aylaInitialLocation;
+    show aylaAutoLoginInFlight, aylaInitialLocation, aylaSessionRestoreInFlight;
 import '../state/auth_state.dart';
 import '../theme/page_transitions.dart' show aylaIsTransitionFreePath;
 import 'shell_config.dart' show aylaIsGroupScene, aylaPanelOwnedPath;
@@ -142,8 +142,11 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
     // 判据 = `state/auth_bootstrap.dart` 的模块级「自动登录在途」位：`main.dart` 在
     // `runApp` **之前**同步把它置真（首个 await 之前），所以这里读到的一定是本轮的真实状态。
     // 落点规则本身抽成纯函数 [aylaInitialLocation]（有定向测试，不靠"读代码看起来对"）。
-    initialLocation:
-        aylaInitialLocation(autoLoginInFlight: aylaAutoLoginInFlight.value),
+    initialLocation: aylaInitialLocation(
+      autoLoginInFlight: aylaAutoLoginInFlight.value,
+      // 静默续期在途（2026-10-19）：同样落 `/login`，但登录页显示启动态而非表单。
+      sessionRestoreInFlight: aylaSessionRestoreInFlight.value,
+    ),
     refreshListenable: refresh,
     redirect: (BuildContext context, GoRouterState state) {
       final bool loggedIn = ref.read(authNotifierProvider).isAuthenticated;

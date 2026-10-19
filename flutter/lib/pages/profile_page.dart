@@ -382,7 +382,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 horizontal: AylaSpacing.sp2,
                 vertical: AylaSpacing.sp1,
               ),
-              onPressed: () => context.go('/favorites'),
+              onPressed: () => context.push('/favorites'),
             ),
           ],
           // tsx 202–204：选了新头像才出现该提示。
@@ -437,12 +437,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       posts: _content.posts,
       postsLoading: _content.postsLoading,
       postsError: _content.error,
-      onOpenLive: (String id) => context.go(aylaProfileLivePath(id)),
-      onOpenVoice: (String id) => context.go(aylaProfileVoicePath(id)),
-      onOpenPost: (String id) => context.go(aylaProfilePostPath(id)),
+      onOpenLive: (String id) => context.push(aylaProfileLivePath(id)),
+      onOpenVoice: (String id) => context.push(aylaProfileVoicePath(id)),
+      onOpenPost: (String id) => context.push(aylaProfilePostPath(id)),
       // 本人 ⇒ `/posts/mine`（web tsx:105 的 `postsHref`）
       onMorePosts: () =>
-          context.go(aylaProfileMorePostsPath(mine: true, ownerId: user.id)),
+          context.push(aylaProfileMorePostsPath(mine: true, ownerId: user.id)),
     );
 
     return AylaFullScreenSwipeBack(

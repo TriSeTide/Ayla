@@ -837,7 +837,7 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
     if (currentUserId != null && currentUserId == targetUserId) {
       context.go('/profile');
     } else {
-      context.go('/user/${Uri.encodeComponent(targetUserId)}');
+      context.push('/user/${Uri.encodeComponent(targetUserId)}');
     }
   }
 }

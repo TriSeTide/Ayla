@@ -936,7 +936,7 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
       onPoke: (String userId) => unawaited(_runtime.poke(userId)),
       onAvatarTap: peer == null
           ? null
-          : () => context.go('/user/${Uri.encodeComponent(peer.id)}'),
+          : () => context.push('/user/${Uri.encodeComponent(peer.id)}'),
       unreadSeqs: conv?.unreadSeqs ?? const <int>[],
       mentionUnreadSeqs: conv?.mentionUnreadSeqs ?? const <int>[],
       replyUnreadSeqs: conv?.replyUnreadSeqs ?? const <int>[],
@@ -1269,7 +1269,7 @@ class _AylaWideMessagesSidebarHostState
       friendsLoading: _friends?.loading ?? false,
       onOpenUserChat: _openUserChat,
       onAvatarTap: (AylaUserPublic user) =>
-          context.go('/user/${Uri.encodeComponent(user.id)}'),
+          context.push('/user/${Uri.encodeComponent(user.id)}'),
       onRemoveFriend: _removeFriend,
       removingFriendId: _removingFriendId,
       requestBadge: ref.watch(badgesProvider).requestBadge,

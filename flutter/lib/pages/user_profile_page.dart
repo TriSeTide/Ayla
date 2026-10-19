@@ -173,7 +173,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       final String conversationId =
           await AylaUsersApi.openPrivateConversation(detail.user.id);
       if (!mounted || revision != _revision) return;
-      if (conversationId.isNotEmpty) context.go('/chat/$conversationId');
+      if (conversationId.isNotEmpty) context.push('/chat/$conversationId');
     } catch (_) {
       // 失败静默（web 同）
     } finally {
@@ -322,12 +322,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       posts: _content.posts,
       postsLoading: _content.postsLoading,
       postsError: _content.error,
-      onOpenLive: (String id) => context.go(aylaProfileLivePath(id)),
-      onOpenVoice: (String id) => context.go(aylaProfileVoicePath(id)),
-      onOpenPost: (String id) => context.go(aylaProfilePostPath(id)),
+      onOpenLive: (String id) => context.push(aylaProfileLivePath(id)),
+      onOpenVoice: (String id) => context.push(aylaProfileVoicePath(id)),
+      onOpenPost: (String id) => context.push(aylaProfilePostPath(id)),
       // 他人 ⇒ `/user/<id>/posts`（web tsx:105 的 `postsHref`，走路由参数而非 owner.id）
       onMorePosts: () =>
-          context.go(aylaProfileMorePostsPath(mine: false, ownerId: ownerId)),
+          context.push(aylaProfileMorePostsPath(mine: false, ownerId: ownerId)),
     );
 
     // ⚠️ web 的 UserProfilePage **没有** FullScreenSwipeBack（返回键在身份行内），

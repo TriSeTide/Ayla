@@ -486,7 +486,7 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       )),
       videoView: session.videoView,
       onOpenProfile: (AylaLiveViewerItem item) =>
-          context.go('/user/${Uri.encodeComponent(item.userId)}'),
+          context.push('/user/${Uri.encodeComponent(item.userId)}'),
       onSaveOwner: _saveOwner,
       onStartLive: _startLive,
       onStopLive: _stopLive,

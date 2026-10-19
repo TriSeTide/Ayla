@@ -25,6 +25,7 @@ import '../core/api/auth_api.dart';
 import '../core/net/dio_client.dart';
 import '../state/auth_bootstrap.dart';
 import '../state/auth_prefs.dart';
+import '../widgets/base/loading.dart' show AylaFullScreenLoader;
 import 'login_page.dart';
 
 class LoginRoute extends ConsumerStatefulWidget {
@@ -57,6 +58,13 @@ class _LoginRouteState extends ConsumerState<LoginRoute> {
   /// 「登录中…」= 任一路径在途（web 只有手动路径；自动登录是新增功能，反馈面沿用同一档）。
   bool get _busy => _manualSubmitting || _autoSubmitting;
 
+  /// **静默恢复中**（2026-10-19）：冷启动拿着 refresh 令牌续期，还没出结果。
+  ///
+  /// 与 [_busy] 分开：那个是「用户在等登录完成」，这个是「App 在确认你已经登录着」。
+  /// 两者视觉上都表现为加载态，但后者**不该**让用户看到登录表单（否则会闪一下、
+  /// 让人误以为被登出了）。语义见 `state/auth_bootstrap.dart` 的 `aylaSessionRestoreInFlight`。
+  bool _restoring = false;
+
   @override
   void initState() {
     super.initState();
@@ -64,18 +72,28 @@ class _LoginRouteState extends ConsumerState<LoginRoute> {
     // ⇒ 初值直接取模块级状态，再订阅变化（结束后按钮回到「登录」可点）。
     _autoSubmitting = aylaAutoLoginInFlight.value;
     aylaAutoLoginInFlight.addListener(_onAutoLoginChanged);
+    // 静默续期可能**先于本页挂载**就在跑（`main.dart` 在 runApp 前触发）。
+    _restoring = aylaSessionRestoreInFlight.value;
+    aylaSessionRestoreInFlight.addListener(_onRestoreChanged);
     unawaited(_loadSavedCredentials());
   }
 
   @override
   void dispose() {
     aylaAutoLoginInFlight.removeListener(_onAutoLoginChanged);
+    aylaSessionRestoreInFlight.removeListener(_onRestoreChanged);
     super.dispose();
   }
 
   void _onAutoLoginChanged() {
     if (!mounted) return;
     setState(() => _autoSubmitting = aylaAutoLoginInFlight.value);
+  }
+
+  /// 静默续期结束（成功由路由守卫换页；失败则回到可正常填写的表单）。
+  void _onRestoreChanged() {
+    if (!mounted) return;
+    setState(() => _restoring = aylaSessionRestoreInFlight.value);
   }
 
   /// 读取已保存的凭据与开关（「记住密码」的回填面）。
@@ -166,6 +184,15 @@ class _LoginRouteState extends ConsumerState<LoginRoute> {
 
   @override
   Widget build(BuildContext context) {
+    // ## 静默恢复中：显示启动态，**不渲染表单**（2026-10-19）
+    //
+    // 冷启动拿着 refresh 令牌续期时，首屏按 `aylaInitialLocation` 落在 `/login`
+    // （见 state/auth_bootstrap.dart 里"为什么不落 /group"的推导）。此时若直接渲染表单，
+    // 用户会看到登录框闪一下、随后"自动"跳进应用 —— 误以为被登出过一次。
+    //
+    // 视觉用与预加载门同族的 `AylaFullScreenLoader`（极光底 + 品牌字 + 转圈）：
+    // 那是"App 在启动"的既有语言，复用比新造一个更不易与其他加载态冲突。
+    if (_restoring) return const AylaFullScreenLoader();
     return LoginPage(
       onSubmit: _submit,
       errorText: _error,

@@ -468,6 +468,7 @@ class _GamesHubPageState extends ConsumerState<GamesHubPage> {
     // ⇒ 这里按本仓既有范式（`posts_hub_page.dart:402`）显式再存一次，语义等价、更稳。
     AylaScrollMemory.save(_restoreKey, _scroll);
     final String encoded = Uri.encodeComponent(roomId);
-    context.go('/games/$encoded');
+    // 大厅 → 房内：**push**。
+    context.push('/games/$encoded');
   }
 }

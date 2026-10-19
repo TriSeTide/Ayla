@@ -217,6 +217,64 @@ class AylaAuthPrefsStore {
   }
 }
 
+/// 「会话恢复」专用：refresh 令牌的安全存储（2026-10-19 新增）。
+///
+/// ## 为什么单独一个类
+/// 与 [AylaAuthPrefsStore]（明文口令，供「自动登录」重放登录请求）**语义不同**：
+/// 这里存的是 **JWT refresh token**，用途是 web `stores/auth.ts:106 restoreSession()` 的等价物 ——
+/// 冷启动时用 refresh 续期拿 access，**不需要**重新输入口令。
+///
+/// ## 与 web 的差异（登记）
+/// - web 存 `sessionStorage`（**关标签页即失效**，只在刷新页面时救场）；
+/// - Flutter 是原生 App，没有"标签页"概念，用户预期是「切后台/被杀进程后回来还在」。
+///   ⇒ 存平台安全存储、**跨进程存活**，直到用户登出或 refresh 过期（后端默认 7 天）。
+///   这是有意的语义加强，不是照抄：web 的 sessionStorage 是浏览器限制下的妥协。
+///
+/// ## 失败语义
+/// 存储不可用一律静默回落"未保存"（不抛、不阻断启动），原因留在 [lastError]。
+class AylaSessionTokenStore {
+  AylaSessionTokenStore({AylaSecureStore? store})
+      : _store = store ?? const AylaFlutterSecureStore();
+
+  /// refresh 令牌键。
+  static const String keyRefreshToken = 'ayla.auth.refresh_token';
+
+  final AylaSecureStore _store;
+
+  /// 读取已保存的 refresh 令牌（null = 未保存 / 读取失败）。
+  Future<String?> read() async {
+    try {
+      final String? value = await _store.read(keyRefreshToken);
+      if (value == null || value.isEmpty) return null;
+      return value;
+    } catch (err) {
+      debugPrint('[AylaAuth] refresh 令牌读取失败（按未保存处理）：$err');
+      return null;
+    }
+  }
+
+  /// 保存 refresh 令牌（幂等）。
+  Future<void> write(String refreshToken) async {
+    if (refreshToken.isEmpty) {
+      await clear();
+      return;
+    }
+    try {
+      await _store.write(keyRefreshToken, refreshToken);
+    } catch (err) {
+      debugPrint('[AylaAuth] refresh 令牌写入失败（本次不持久化）：$err');
+    }
+  }
+
+  /// 清除（登出 / refresh 失效）。
+  Future<void> clear() async {
+    try {
+      await _store.delete(keyRefreshToken);
+    } catch (err) {
+      debugPrint('[AylaAuth] refresh 令牌删除失败：$err');
+    }
+  }
+}
 /// [AylaAuthPrefs.empty] 的带错误版本（`copyWith` 在本件只为一处服务，不开放公开 copyWith）。
 extension on AylaAuthPrefs {
   AylaAuthPrefs copyWithError(String error) => AylaAuthPrefs(

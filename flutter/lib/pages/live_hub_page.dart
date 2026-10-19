@@ -457,6 +457,7 @@ class _LiveHubPageState extends ConsumerState<LiveHubPage> {
     // 显式再存一次（同 games_hub 的说明；本仓 posts_hub/group_posts 既有范式）。
     AylaScrollMemory.save(_restoreKey, _scroll);
     final String encoded = Uri.encodeComponent(channelId);
-    context.go('/live/$encoded');
+    // 列表 → 直播间：**push**（web `LiveHubPage.tsx:160` 的 navigate 是 push 语义）。
+    context.push('/live/$encoded');
   }
 }

@@ -233,7 +233,8 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
         viewerSheet: viewerSheet.value,
       ),
       onSelect: _goTo,
-      onBack: () => context.go('/live'),
+      // 返回：能回退就 pop（进房是 push），栈底回大厅。
+      onBack: () => context.canPop() ? context.pop() : context.go('/live'),
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
       onSendDanmaku: session.sendDanmaku,
@@ -257,7 +258,7 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       )),
       videoView: session.videoView,
       onOpenProfile: (AylaLiveViewerItem item) =>
-          context.go('/user/${Uri.encodeComponent(item.userId)}'),
+          context.push('/user/${Uri.encodeComponent(item.userId)}'),
       directoryFooter: AylaDirectoryLoadMore(
         loading: _directory?.loading ?? false,
         error: _directory?.error,
@@ -270,7 +271,9 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
 
     return narrow
         ? AylaFullScreenSwipeBack(
-            onBack: () => context.go('/live'),
+            // 返回：能回退就 pop（进房是 push），栈底回大厅。
+            onBack: () =>
+                context.canPop() ? context.pop() : context.go('/live'),
             child: body,
           )
         : body;

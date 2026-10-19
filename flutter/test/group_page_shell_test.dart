@@ -570,10 +570,28 @@ void main() {
         reason: '第二次回退 → chat（/group/:id）',
       );
 
-      // 栈空 ⇒ canPop 放行（交给路由退出群）
+      // ---- 栈空之后的行为（2026-10-19 订正）----
+      //
+      // **旧断言**：`canPop == true`（放行给系统 ⇒ 退出群）。
+      // **为什么改了**：用户实报「手机端返回键直接退出应用」。群页在栈空时若把 pop
+      // 放行给系统，而路由栈里又没有上一页（冷启动 deep-link 直达 `/group/:id`），
+      // Android 就会把 Activity 弹掉 —— 直接回桌面。web 不会有这个后果（浏览器里
+      // 没有上一页时最多什么都不做，标签页不会关）。
+      //
+      // **现在的三级兜底**（group_page.dart 的 PopScope）：
+      //   ① 有场景历史 ⇒ 回上一场景；② 栈空但路由栈有上一页 ⇒ pop；
+      //   ③ 都没有 ⇒ `go('/group')` 回群列表。**永远不把 pop 放行给系统。**
       final dynamic after = tester.widget(popScopes.first);
-      expect(after.canPop, isTrue, reason: '栈空 ⇒ 不拦截，系统返回退出群');
+      expect(
+        after.canPop,
+        isFalse,
+        reason: '栈空也必须拦截：放行给系统会退出应用（用户实报的缺陷）',
+      );
       expect(tester.takeException(), isNull);
+      // ⚠️ 不在这里触发第三次返回：本测试壳只挂了 `/group/:id*` 系列路由，**没有**
+      // `/group` 这一条 ⇒ 三级兜底的 `go('/group')` 在壳里无处可去（会抛路由异常）。
+      // 「栈空 ⇒ 回群列表而非退出应用」这条由 mobile_reported_fixes_test.dart 的
+      // 纯函数/接线契约锁，以及真机验收覆盖；本用例只锁「绝不放行系统 pop」这个前提。
     });
 
     test('备注：不做 context.push 的原因（同 Page key 会抛 Navigator 断言）', () {

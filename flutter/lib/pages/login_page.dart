@@ -224,9 +224,29 @@ class _LoginPageState extends State<LoginPage> {
     final bool compact =
         viewport.width <= 480 || viewport.height <= 700; // 窄/短屏收紧
 
-    final EdgeInsets pagePadding = EdgeInsets.symmetric(
-      horizontal: compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
-      vertical: compact ? AylaSpacing.sp4 : AylaSpacing.sp8,
+    // ## 顶部/底部安全区（2026-10-19 用户实报「顶部没有避开手机任务栏」）
+    //
+    // 逐条对齐 web `auth.css:217–218`（**只在** `@media (max-width:480px), (max-height:700px)`
+    // 的 compact 档里声明，不是全局）：
+    //   ```css
+    //   padding: max(var(--sp-4), env(safe-area-inset-top))
+    //            var(--sp-4)
+    //            max(var(--sp-4), env(safe-area-inset-bottom));
+    //   ```
+    // ⇒ **竖边取 max(设计值, 安全区)**，横边仍是 sp4。
+    //
+    // ⚠️ 为什么 Flutter 侧要显式做而 web 不生效：`index.html:5` 的 viewport 没有
+    // `viewport-fit=cover` ⇒ web 上 `env(safe-area-inset-*)` **恒为 0**（那行 CSS 实际总是取 sp4）；
+    // Flutter 是边到边窗口，没有浏览器外壳代劳 ⇒ 必须真的把安全区让出来。
+    // 用 `viewPadding` 而非 `padding`：键盘弹出时（`viewInsets`）不应该把卡片挤动。
+    final EdgeInsets safe = MediaQuery.viewPaddingOf(context);
+    final double vPad = compact ? AylaSpacing.sp4 : AylaSpacing.sp8;
+    final EdgeInsets pagePadding = EdgeInsets.fromLTRB(
+      compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
+      // `max(设计值, 安全区)` —— 与 web 的 `max()` 同语义（刘海屏/横屏短边才让位）。
+      vPad > safe.top ? vPad : safe.top,
+      compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
+      vPad > safe.bottom ? vPad : safe.bottom,
     );
 
     final Widget card = _AuthCard(

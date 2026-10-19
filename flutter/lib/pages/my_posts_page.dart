@@ -225,7 +225,7 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
   void _openPost(int id) {
     // tsx 202：`saveScrollPosition(scrollRestoreKey, hubRef.current)`。
     AylaScrollMemory.save(_restoreKey, _scroll);
-    context.go('/posts/$id?from=${_mine ? 'mine' : 'user'}');
+    context.push('/posts/$id?from=${_mine ? 'mine' : 'user'}');
   }
 
   // ======================= 视口浏览上报（浏览与已读同源） =======================
@@ -424,7 +424,7 @@ class _MyPostsPageState extends ConsumerState<MyPostsPage> {
           _favorites.load('post', <String>[key], force: true),
       onAuthorTap: post.authorId == null
           ? null
-          : () => context.go('/user/${post.authorId}'),
+          : () => context.push('/user/${post.authorId}'),
       // ★ 分享键（同 `group_posts_page` 的修复）。
       onShare: () => unawaited(aylaOpenShareSheet(
         context,

@@ -1091,7 +1091,20 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       if (!mounted) return;
       ref.read(voiceStateProvider).removeChannel(widget.channelId);
       if (!mounted) return;
+      // 返回：能回退就 pop（进房是 push），栈底回 backPath。
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          if (context.canPop()) {
+      context.pop();
+    } else {
       context.go(widget.backPath);
+    }
+        }
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1103,7 +1116,11 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
 
   void _onBack() {
     // 顶部返回只离开房间界面，**保留语音连接与全局浮层**（web tsx 197–200）。
-    context.go(widget.backPath);
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(widget.backPath);
+    }
   }
 
   Future<void> _onLeave() async {
@@ -1113,7 +1130,11 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       // 离开失败静默（web tsx 205–208）
     }
     if (!mounted) return;
-    context.go(widget.backPath);
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(widget.backPath);
+    }
   }
 
   @override

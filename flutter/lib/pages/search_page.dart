@@ -586,7 +586,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       context.go('/profile');
     } else {
       final String encoded = Uri.encodeComponent(user.id);
-      context.go('/user/$encoded');
+      context.push('/user/$encoded');
     }
   }
 
@@ -620,7 +620,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       if (!mounted) return;
       if (conversationId.isNotEmpty) {
         final String encoded = Uri.encodeComponent(conversationId);
-        context.go('/chat/$encoded');
+        context.push('/chat/$encoded');
       }
     } catch (err) {
       if (mounted) {
@@ -788,7 +788,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           // web tsx 486–488：只关弹窗 + 跳群；成员关系由 `group.joined` 帧负责。
           setState(() => _selectedGroup = null);
           final String encoded = Uri.encodeComponent(conversationId);
-          context.go('/group/$encoded');
+          context.push('/group/$encoded');
         },
       );
     }
@@ -1101,7 +1101,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               onOpen: () {
                 if (_groupIsJoined(item)) {
                   final String encoded = Uri.encodeComponent(item.id);
-                  context.go('/group/$encoded');
+                  context.push('/group/$encoded');
                 } else if (!_acceptedGroupIds.contains(item.id)) {
                   setState(() => _selectedGroup = item);
                 }

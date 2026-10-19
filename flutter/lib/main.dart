@@ -261,15 +261,22 @@ void main() {
   // —— web `ws/chat.ts:766–840`；同样只登记回调，与 chat 连接时机解耦。
   aylaStartPostsFrames(container);
 
-  // 冷启动自动登录（用户需求 2026-10-01）：勾了「自动登录」时，用安全存储里的账号密码
-  // 跑一次真实 `POST /auth/login/`，成功即走与手动登录**完全相同**的副作用链。
+  // ---- 冷启动会话恢复 + 自动登录（一条启动链，2026-10-19 重构）----
   //
-  // ⚠️ **刻意不 await**：自动登录要占一次完整往返，等它会把首帧一起卡住；
-  // 登录页由路由守卫立即渲染，用户在页面上**看得见**它自动登录成
-  // （`pages/login_page.dart` 的 `submitting` 档显「登录中…」，状态来自
-  // `state/auth_bootstrap.dart` 的 `aylaAutoLoginInFlight`）。
+  // 用户实报「手机端切后台重登」：Android 在内存紧张时会杀掉进程，回到前台是**冷启动**。
+  // 之前只有「自动登录」一条路（用明文口令重放 `/auth/login/`），没勾开关的人会被踢
+  // 回登录页 —— 哪怕 refresh 令牌还完全有效。现在补上 web `main.tsx:36 restoreSession()`
+  // 的等价物，两条路**串成一条链**，按优先级依次尝试：
+  //
+  //   ① refresh 静默续期（快、无 UI 闪烁；不依赖任何用户开关，web 同款无条件路径）；
+  //   ② 勾了「自动登录」⇒ 用明文口令重放登录（让用户在登录页**看见**它在登）；
+  //   ③ 都失败 ⇒ 停在登录页（守卫把人留在 `/login`）。
+  //
+  // ⚠️ 顺序不能并行：并行会发出两次登录链（两个 /auth/login/ 或 refresh + login 竞争），
+  // 正是 [aylaApplyLoginSession] 注释里担心的重复副作用。
+  // ⚠️ 也**不能 await 在 runApp 之前**：那会把首帧一起卡住（登录页应当立刻出现）。
   // 成功后令牌落地 → `app_router.dart` 的 redirect 自动把 `/login` 换成目标页。
-  unawaited(aylaRunAutoLogin(container));
+  unawaited(aylaBootstrapSession(container));
 
   runApp(
     UncontrolledProviderScope(

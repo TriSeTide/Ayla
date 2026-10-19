@@ -275,7 +275,8 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
                     entry.card,
                 ],
                 revealItems: true,
-                onJoin: (String channelId) => context.go(
+                // 进群内语音房：**push**（返回回本页）。
+                onJoin: (String channelId) => context.push(
                   '/group/${Uri.encodeComponent(widget.groupId)}/voice/'
                   '${Uri.encodeComponent(channelId)}',
                 ),

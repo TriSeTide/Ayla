@@ -182,9 +182,15 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     final Size viewport = MediaQuery.sizeOf(context);
     final bool wide = viewport.width > AylaBreakpoints.sm;
     final bool compact = viewport.width <= 480 || viewport.height <= 700;
-    final EdgeInsets pagePadding = EdgeInsets.symmetric(
-      horizontal: compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
-      vertical: compact ? AylaSpacing.sp4 : AylaSpacing.sp8,
+    // 顶部/底部安全区：口径与 `LoginPage` 完全一致（web 两页共用 `.auth-page` 的
+    // `auth.css:217–218` `max(sp4, env(safe-area-inset-*))`），详见 login_page.dart 同处注释。
+    final EdgeInsets safe = MediaQuery.viewPaddingOf(context);
+    final double vPad = compact ? AylaSpacing.sp4 : AylaSpacing.sp8;
+    final EdgeInsets pagePadding = EdgeInsets.fromLTRB(
+      compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
+      vPad > safe.top ? vPad : safe.top,
+      compact ? AylaSpacing.sp4 : AylaSpacing.sp6,
+      vPad > safe.bottom ? vPad : safe.bottom,
     );
     final Widget card = _card(wide: wide, compact: compact);
 

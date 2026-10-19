@@ -217,7 +217,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       searchQuery: _searchQuery,
       onSearchChanged: (String v) => setState(() => _searchQuery = v),
       onSearchSubmitted: (String q) =>
-          context.go('/search?q=${Uri.encodeComponent(q)}'),
+          context.push('/search?q=${Uri.encodeComponent(q)}'),
       onSearchCleared: () => setState(() => _searchQuery = ''),
       onAvatarTap: () => context.go('/profile'),
       onMessagesTap: () => context.go('/messages'),
@@ -232,7 +232,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         searchQuery: _searchQuery,
         onSearchChanged: (String v) => setState(() => _searchQuery = v),
         onSearchSubmitted: (String q) =>
-            context.go('/search?q=${Uri.encodeComponent(q)}'),
+            context.push('/search?q=${Uri.encodeComponent(q)}'),
         onSearchCleared: () => setState(() => _searchQuery = ''),
         onMenuSelected: _onMenuSelected,
         onBack: () => context.pop(),
@@ -250,7 +250,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         userAvatarUrl: user?.avatar,
         userOnline: user?.online ?? false,
         onAvatarTap: () => context.go('/profile'),
-        onSearchFieldTap: () => context.go('/search'),
+        onSearchFieldTap: () => context.push('/search'),
         onMenuSelected: _onMenuSelected,
       );
     } else if (!isNarrow) {

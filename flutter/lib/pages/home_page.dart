@@ -450,7 +450,9 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _openGroup(String id) {
     _prefs.setRecentGroup(id);
-    context.go('/group/$id');
+    // 列表 → 群聊：**push**（web `HomePage.tsx:98` 的 navigate 是 push 语义 ⇒ 返回回本列表）。
+    // 此前用 `go` 会替换当前页，手机端按返回直接退出应用（2026-10-19 用户实报「返回键直接退出」）。
+    context.push('/group/$id');
   }
 
   void _openCreateGroup() => setState(() => _creatingGroup = true);
@@ -617,7 +619,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 AylaGlassButton(
                   label: '搜索发现群',
                   variant: AylaGlassButtonVariant.ghost,
-                  onPressed: () => context.go('/search'),
+                  onPressed: () => context.push('/search'),
                 ),
               ],
             ),

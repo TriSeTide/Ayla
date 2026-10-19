@@ -421,7 +421,8 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
   /// hubRef.current)` 在 web 的卡片 onOpen 里同步调用）——不依赖路由退出时序。
   void _openPost(int id) {
     AylaScrollMemory.save(_restoreKey, _scroll);
-    context.go('/posts/$id');
+    // 列表 → 帖子详情：**push**（web `PostsHubPage.tsx:346–353` 的 navigate 是 push 语义）。
+    context.push('/posts/$id');
   }
 
   // ======================= 视口浏览上报（浏览与已读同源） =======================
@@ -601,7 +602,7 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
           _favorites.load('post', <String>[key], force: true),
       onAuthorTap: post.authorId == null
           ? null
-          : () => context.go('/user/${post.authorId}'),
+          : () => context.push('/user/${post.authorId}'),
       // ★ 分享键（2026-10-03 补齐；与 `post_detail_page.dart:767–776` 同口径）。
       onShare: () => unawaited(aylaOpenShareSheet(
         context,

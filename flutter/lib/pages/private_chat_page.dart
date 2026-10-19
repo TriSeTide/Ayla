@@ -50,7 +50,8 @@ class PrivateChatPage extends ConsumerWidget {
     if (narrow) {
       return AylaFullScreenSwipeBack(
         enabled: true,
-        onBack: () => context.go('/messages'),
+        // 返回：能回退就 pop（进私聊是 push），栈底回消息中心。
+        onBack: () => context.canPop() ? context.pop() : context.go('/messages'),
         // `panels` 默认 true = 宿主透明；`childOwnsPanels` 让三区自己播退场
         // （web `PrivateChatPane.tsx:172–175` 的 `useIsPresent()` 语义），
         // `panelMotion: true` 对齐 tsx:50（窄屏同样传 panelMotion）。
@@ -61,7 +62,9 @@ class PrivateChatPage extends ConsumerWidget {
             conversationId: conversationId,
             narrow: true,
             panelMotion: true,
-            onBack: () => context.go('/messages'),
+            // 返回：能回退就 pop（进私聊是 push），栈底回消息中心。
+            onBack: () =>
+                context.canPop() ? context.pop() : context.go('/messages'),
             externalJump: externalJump,
           ),
         ),
@@ -73,7 +76,7 @@ class PrivateChatPage extends ConsumerWidget {
         AylaWideMessagesSidebarHost(
           activeId: conversationId,
           onSelect: (String id) =>
-              context.go('/chat/${Uri.encodeComponent(id)}'),
+              context.push('/chat/${Uri.encodeComponent(id)}'),
         ),
         AylaWideMessagesPane(
           child: AylaConversationTransition(

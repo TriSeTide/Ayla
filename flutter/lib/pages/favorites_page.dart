@@ -272,10 +272,10 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
         final String encodedConversation =
             Uri.encodeComponent(msg.conversationId);
         if (params.isEmpty) {
-          context.go('/chat/$encodedConversation');
+          context.push('/chat/$encodedConversation');
         } else {
           final String qs = params.join('&');
-          context.go('/chat/$encodedConversation?$qs');
+          context.push('/chat/$encodedConversation?$qs');
         }
     }
   }

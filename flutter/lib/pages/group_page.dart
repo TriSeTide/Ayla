@@ -519,8 +519,6 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   /// 3. 下拉回主页 / 退出 ⇒ 清空。
   final List<AylaGroupScene> _sceneHistory = <AylaGroupScene>[];
 
-  /// 当前场景是否可回退（供 [PopScope].canPop 判定）。
-  bool get _canPopScene => _sceneHistory.isNotEmpty;
 
   /// 切场景：store + URL 回显（web tsx 286–292）。
   void _goScene(AylaGroupScene next) {
@@ -657,14 +655,24 @@ class _GroupPageState extends ConsumerState<GroupPage> {
             groupName,
             currentGroup,
           );
-    // 安卓返回键 / 系统手势返回：栈里有上一场景 ⇒ 回上一场景（等价 web `navigate` 的逐级回退）；
-    // 栈空 ⇒ 放行（退出群，由路由接管）。见 [_sceneHistory] 的完整推导。
+    // 安卓返回键 / 系统手势返回：按 web `navigate` 的逐级回退语义分三层处理。
+    //
+    // ① 本页有场景历史（chat → voice/info/posts …）⇒ 回上一场景；
+    // ② 场景栈空、但**路由栈里有上一页**（从主页列表 push 进来）⇒ pop 回上一页；
+    // ③ 都没有（冷启动 deep-link 直达某群）⇒ 回群列表 `/group`，**不能**让系统默认 pop
+    //    落到空栈后退出应用 —— 这正是用户实报的「返回键直接退出」的第二种形态。
+    //
+    // 因此 `canPop` 恒为 false：三种情况全部由本页显式处理，绝不让系统把 Activity 弹掉。
     return PopScope(
-      // 只有「有上一场景」时才拦截；无栈时 canPop=true ⇒ 系统默认行为（退出群）。
-      canPop: !_canPopScene,
+      canPop: false,
       onPopInvokedWithResult: (bool didPop, Object? result) {
-        if (didPop) return; // 已由系统处理（栈空分支）
-        _popScene();
+        if (didPop) return;
+        if (_popScene()) return; // ①
+        if (context.canPop()) {
+          context.pop(); // ②
+          return;
+        }
+        context.go('/group'); // ③
       },
       child: body,
     );

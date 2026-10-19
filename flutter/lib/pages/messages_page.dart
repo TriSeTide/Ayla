@@ -316,7 +316,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
       final String convId = await AylaUsersApi.openPrivateConversation(userId);
       if (!mounted || convId.isEmpty) return;
       if (AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width)) {
-        context.go('/chat/${Uri.encodeComponent(convId)}');
+        // 消息列表 → 私聊：**push**（返回回消息列表）。
+        context.push('/chat/${Uri.encodeComponent(convId)}');
       } else {
         setState(() => _activeChatId = convId);
       }
@@ -326,7 +327,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   }
 
   void _goUserProfile(AylaUserPublic user) {
-    context.go('/user/${Uri.encodeComponent(user.id)}');
+    // 消息列表 → 他人主页：**push**。
+    context.push('/user/${Uri.encodeComponent(user.id)}');
   }
 
   /// 本页 ⋯ 菜单的请求在途标记（web 是 `ConversationMoreMenu` 的局部 `busy`）。
@@ -529,7 +531,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               conversations: _sortedPrivate(),
               activeId: null,
               elysiaUserId: elysiaUserId,
-              onSelect: (String id) => context.go('/chat/${Uri.encodeComponent(id)}'),
+              onSelect: (String id) => context.push('/chat/${Uri.encodeComponent(id)}'),
               revealItems: !(pager?.loading ?? false),
               onAvatarTap: _goUserProfile,
               // ⋯ 菜单两项 —— web `ConversationList.tsx:158`

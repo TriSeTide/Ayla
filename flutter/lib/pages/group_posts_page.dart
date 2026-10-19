@@ -859,7 +859,8 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     _skipRevealOnRestore = true;
     _revealAfterRefresh = false; // web tsx 429
     AylaScrollMemory.save(_restoreKey, _scroll); // web tsx 430
-    context.go(
+    // 群帖列表 → 帖子详情：**push**（web tsx 426–431 的 navigate 是 push 语义）。
+    context.push(
       '/group/${Uri.encodeComponent(groupId)}/posts/$id',
     );
   }
@@ -1094,7 +1095,7 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
                   description: '浏览本群的最新动态',
                   trailing: AylaGlassButton(
                     label: '我的帖子',
-                    onPressed: () => context.go('/posts/mine'),
+                    onPressed: () => context.push('/posts/mine'),
                   ),
                 ),
                 child: scrollArea,

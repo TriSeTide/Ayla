@@ -196,9 +196,29 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     setState(() => _fullscreen = true);
     widget.onFullscreenChanged?.call(true);
     _lockLandscape();
-    final OverlayEntry entry = (widget.overlayHostBuilder ?? aylaOverlayEntry)(
-      _buildFullscreen(),
-    );
+    // ⚠️⚠️ **这里曾有一个运行期崩溃，是「手机端直播无法全屏」的真正根因**（2026-10-19）：
+    //
+    // 旧写法 `(widget.overlayHostBuilder ?? aylaOverlayEntry)(_buildFullscreen())`
+    // 把 overlay 构造函数当成 `(Widget child) => OverlayEntry` 直接调用。
+    // 但 [aylaOverlayEntry] 的真实签名是具名参数：
+    //     OverlayEntry aylaOverlayEntry({required WidgetBuilder builder})
+    // ⇒ 传位置参数必然抛 `NoSuchMethodError: Closure call with mismatched arguments:`
+    // `function 'aylaOverlayEntry' ... Found: aylaOverlayEntry({required (BuildContext) => Widget builder})`
+    // ⇒ **点全屏键只会抛异常，全屏层永远插不进去**。web 没有这个问题（它走
+    // `requestFullscreen()` 原生 API），所以这个缺陷只在 Flutter 侧存在，而且因为
+    // 异常被手势回调吞掉、UI 毫无反馈，很容易被误判成"功能没做"。
+    //
+    // 现在两条路径各自按自己的签名构造，不再混用：
+    // · 注入了 [overlayHostBuilder] ⇒ 调用方负责（测试/画布用它替换宿主）；
+    // · 未注入 ⇒ 用库内 [aylaOverlayEntry] 的**具名 builder** 形式（自动套文本作用域，
+    //   否则 overlay 子树的 Text 会落到 `DefaultTextStyle.fallback` 的红/黄双下划线）。
+    final Widget fullscreen = _buildFullscreen();
+    final OverlayEntry Function(Widget child)? custom = widget.overlayHostBuilder;
+    final OverlayEntry entry = custom != null
+        ? custom(fullscreen)
+        : aylaOverlayEntry(
+            builder: (BuildContext ctx) => fullscreen,
+          );
     _fsEntry = entry;
     // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
     // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
@@ -273,7 +293,20 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
               // 展开出 Infinity 尺寸 → 缩放矩阵算出 NaN → Flutter 每帧报
               // `TransformLayer is constructed with an invalid matrix.` 且该层不绘制 ⇒ 黑屏
               // （实测：mpv 侧解码/纹理均正常，rect 已到 1920×1080，唯独此层报错刷屏）。
-              if (_showVideo && (!fullscreen || _fullscreen == fullscreen))
+              // ⚠️ **同一时刻只允许挂一处**（对齐 web 的「video 元素原子迁移」语义）。
+              //
+              // web 的 video 元素由 liveSessionRuntime **唯一持有**，挂在 fixed 暂存容器里
+              // 跟随播放器容器位移（LivePlayer.tsx:183–219 的 video.style.display 切换），
+              // 页面/全屏里都**没有**第二个 video 元素。Flutter 侧的平台视图（VideoPlayer
+              // 的 Texture / media_kit 的 Video）不做跨树迁移，只能「这边卸、那边挂」。
+              //
+              // 判据因此是 **fullscreen == _fullscreen**：
+              // · inline 调用（形参 false）+ 未全屏（_fullscreen == false）⇒ 挂 ✅
+              // · inline 调用（形参 false）+ 全屏中（_fullscreen == true）⇒ **不挂**（关键：
+              //   旧写法 !fullscreen 恒真，导致 inline 侧在全屏期间仍持有同一个 controller，
+              //   与 overlay 里的那份重复 attach ⇒ 手机端点全屏后画面黑掉/卡住）；
+              // · 全屏宿主（形参 true）+ 全屏中 ⇒ 挂 ✅。
+              if (_showVideo && fullscreen == _fullscreen)
                 ColoredBox(
                   color: Colors.black,
                   child: widget.videoView ??

@@ -674,6 +674,19 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
+                // ## 顶部安全区（2026-10-19 用户实报「顶部没有避开手机任务栏」）
+                //
+                // 直播间是**沉浸式**路由（`bottomTabsLeaving` ⇒ 底栏滑走、壳层不出 TopBar），
+                // 头部就是屏幕最上面那一条 ⇒ 必须自己让出状态栏，否则时间/信号图标压在
+                // 返回键与标题上（实测截图：`7:38` 盖住直播间标题 `567`）。
+                //
+                // web 没有对应 CSS 不是遗漏：`index.html:5` 的 viewport 无 `viewport-fit=cover`
+                // ⇒ `env(safe-area-inset-top)` 恒为 0，安全区由浏览器外壳代劳；Flutter 是边到边
+                // 窗口，没有那层外壳，故必须 App 自己让。
+                //
+                // 取 `viewPadding` 而非 `padding`：视频全屏切换/键盘弹出不该让头部跳动。
+                if (MediaQuery.viewPaddingOf(context).top > 0)
+                  SizedBox(height: MediaQuery.viewPaddingOf(context).top),
                 _headerSwap(narrow: true),
                 Expanded(
                   child: Padding(

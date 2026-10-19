@@ -33,6 +33,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api/auth_api.dart';
 import '../core/app_init.dart';
+import '../core/net/dio_client.dart' show DioClient;
 import '../core/ws/chat_ws.dart';
 import '../core/ws/presence_ws.dart';
 import '../core/ws/ws_manager.dart';
@@ -50,11 +51,37 @@ import 'social_store.dart' show aylaSocialStore;
 final Provider<AylaAuthPrefsStore> authPrefsStoreProvider =
     Provider<AylaAuthPrefsStore>((Ref ref) => AylaAuthPrefsStore());
 
+/// **会话恢复用的 refresh 令牌仓库**（2026-10-19，对齐 web `stores/auth.ts:106 restoreSession`）。
+///
+/// 与 [authPrefsStoreProvider] 分开：这里是**令牌**（长期、跨进程），
+/// 那里是**明文口令与开关**（供「自动登录」重放登录请求，见 auth_prefs.dart 文件头）。
+/// 两条路径互不依赖 —— 用户可以只记住密码不自动登录，也可以两者都不勾但仍靠 refresh 续期。
+final Provider<AylaSessionTokenStore> sessionTokenStoreProvider =
+    Provider<AylaSessionTokenStore>((Ref ref) => AylaSessionTokenStore());
+
 /// **自动登录进行中**（login 页据此显示「登录中…」，让用户看得见它在自动登录）。
 ///
 /// 模块级 `ValueNotifier` 而不是 provider：它跨 `main` 与 widget 两侧，
 /// 且只有「进行中/结束」两态（web 无对应物，属新增功能的反馈面）。
 final ValueNotifier<bool> aylaAutoLoginInFlight = ValueNotifier<bool>(false);
+
+/// **冷启动会话恢复进行中**（2026-10-19；决定首屏落点用）。
+///
+/// ## 为什么需要它（与 `aylaAutoLoginInFlight` 分开）
+/// 静默续期**不该**让用户看见登录页 —— 那正是它与「自动登录」的区别：
+/// 前者是「你本来就登录着，恢复一下」，后者是「用户要看它登进去」。
+/// 但首屏落点必须在 `runApp` **之前**确定（`app_router.dart:146` 的 `initialLocation`），
+/// 而此时网络往返还没回来 ⇒ 用一个同步可读的"在途"位让首屏先落在
+/// 一个**中性的启动页**（`/group` 之外的空白档），等结果出来再由守卫落位。
+///
+/// ## 三态语义
+/// - `true`：续期在途 ⇒ 首屏落在登录页但**不渲染表单**（显示启动态，避免一闪）；
+/// - 结束时若成功 ⇒ 守卫立刻把 `/login` 换成 `/group`；
+/// - 结束时若失败 ⇒ 登录页正常渲染（用户手动登录）。
+///
+/// ⚠️ 与 `aylaAutoLoginInFlight` **互斥使用**：同一时刻只会有其中一条路径在跑
+/// （[aylaBootstrapSession] 串行化，见其文档）。
+final ValueNotifier<bool> aylaSessionRestoreInFlight = ValueNotifier<bool>(false);
 
 /// 登录成功后的**全部副作用**（web `useAuth.login` 链 + 本项目的预加载门）。
 ///
@@ -77,6 +104,15 @@ Future<void> aylaApplyLoginSession(
   final AuthUser me = user ?? await AuthApi.me(accessToken: pair.access);
   auth.setTokens(pair.access, pair.refresh);
   auth.setUser(me);
+  // 落盘 refresh 令牌（**会话恢复**用；2026-10-19）。
+  //
+  // 与「记住密码」是两件事：那个存明文口令（供自动登录重放 /auth/login/），
+  // 这里存 JWT refresh（供 [aylaRestoreSession] 静默续期）。后者不依赖用户勾任何开关 ——
+  // web 也是无条件把 refresh 写进 sessionStorage（`stores/auth.ts:54`）。
+  final String? refresh = pair.refresh;
+  if (refresh != null && refresh.isNotEmpty) {
+    unawaited(container.read(sessionTokenStoreProvider).write(refresh));
+  }
   // web `useAuth.login`：connect 两条 WS（`connectAll` 幂等）+ 跑预加载门。
   wsManager?.connectAll();
   _startChatWs(container);
@@ -138,6 +174,9 @@ Future<void> aylaLogoutForContainer(
   aylaStopRoomsForContainer(container);
   aylaStopPresenceWsForContainer(container);
   container.read(authNotifierProvider.notifier).clear();
+  // 会话恢复用的 refresh 令牌：登出**总是**清（它代表"这次会话"，不是用户偏好）；
+  // 「记住密码 / 自动登录」那 4 个键只受 clearCredentials 控制（见上方文档）。
+  await container.read(sessionTokenStoreProvider).clear();
   if (clearCredentials) {
     await container.read(authPrefsStoreProvider).clear();
   }
@@ -155,6 +194,8 @@ void aylaLogout(WidgetRef ref, {bool clearCredentials = false}) {
   aylaStopRooms(ref);
   aylaStopPresenceWs(ref);
   ref.read(authNotifierProvider.notifier).clear();
+  // 同上（容器版）：refresh 令牌登出即清。
+  unawaited(ref.read(sessionTokenStoreProvider).clear());
   if (clearCredentials) {
     unawaited(ref.read(authPrefsStoreProvider).clear());
   }
@@ -162,13 +203,23 @@ void aylaLogout(WidgetRef ref, {bool clearCredentials = false}) {
 
 /// 冷启动的**首屏落点**（纯函数，便于锁定）。
 ///
-/// 用户口径：「勾了自动登录 ⇒ 每次打开 App **到登录页面、然后看见他自动登录**」
-/// ⇒ 自动登录在途时首屏必须是 `/login`，**不能**静默跳过登录页直接进应用。
+/// ## 两条在途路径（2026-10-19 起）
+/// - `autoLoginInFlight`：勾了「自动登录」⇒ 用户口径是「到登录页、**看见**它自动登录」
+///   ⇒ 首屏**必须**是 `/login`，不能静默跳过登录页；
+/// - `sessionRestoreInFlight`：静默续期 ⇒ 用户本来就没打算看登录页
+///   ⇒ 首屏同样落 `/login`（中途成功由守卫换成 `/group`），但登录页会显示启动态
+///   而**不渲染表单**（见 `pages/login_route.dart` 的 `_restoring` 档），避免表单闪一下。
 ///
-/// 没开自动登录时该位同样会短暂为真（读安全存储那一小段），落到 `/login` 与既有行为等价：
-/// 未登录访问 `/group` 本来就会被守卫送回登录页（冷启动没有 deep-link，不缺 `?next=`）。
-String aylaInitialLocation({required bool autoLoginInFlight}) =>
-    autoLoginInFlight ? '/login' : '/group';
+/// ## 为什么不落 `/group` 再重定向
+/// 落 `/group` ⇒ 守卫立刻判定「未登录」⇒ 跳到 `/login?next=/group` ⇒ 续期成功后又跳回
+/// `/group`。用户会看到一次完整的登录页闪现 + 地址栏式跳转，比现在直接停在启动态差。
+/// 而落 `/login` 时守卫本就不会再重定向（已是公开页），续期成功后由 `refreshListenable`
+/// 触发一次 `redirect` 换成 `/group`，干净。
+String aylaInitialLocation({
+  required bool autoLoginInFlight,
+  bool sessionRestoreInFlight = false,
+}) =>
+    autoLoginInFlight || sessionRestoreInFlight ? '/login' : '/group';
 
 /// 冷启动自动登录的**最小可见时长**。
 ///
@@ -181,6 +232,36 @@ String aylaInitialLocation({required bool autoLoginInFlight}) =>
 /// 数值刻意取小（一帧 ≈16.7ms；400ms 是"看得清"与"不拖沓"的折中），调它只改这一个常量。
 const Duration kAutoLoginVisibleDwell = Duration(milliseconds: 400);
 
+/// **冷启动会话引导链**（2026-10-19 新增，`main.dart` 唯一调用点）。
+///
+/// ## 为什么要有这一层
+/// 之前只有 [aylaRunAutoLogin] 一条路，两条路径各自有单飞位、各自发请求，
+/// 并行调用会变成「refresh 与 login 同时打」，产生重复的登录副作用链。
+/// 这里把优先级串行化，语义与 web 一致：**先静默续期，失败才轮到显式登录**。
+///
+/// ## 顺序与时序（逐条对齐 web `main.tsx:30–45`）
+/// 1. `restoreSession()`：有 refresh ⇒ 续期 + 拉 `/me/` + 建连（web 同）；
+/// 2. 续期不可用（没令牌 / 已过期）⇒ 若用户勾了「自动登录」，重放 `/auth/login/`；
+/// 3. 两条都不成 ⇒ 停在登录页（不报错弹窗：冷启动没登录是正常状态，不是故障）。
+///
+/// ## 与 web 的差异（登记，有意）
+/// web 的 `restoreSession` 失败会 `logout()` 并停在登录页；Flutter 额外多一条
+/// 「自动登录」分支 —— 这是用户 2026-10-01 明确要求的增量功能（web 无对应），
+/// 因此本函数是 web 那条链的**超集**，不是取代。
+Future<void> aylaBootstrapSession(ProviderContainer container) async {
+  final AylaSessionRestoreOutcome restored =
+      await aylaRestoreSession(container);
+  if (restored == AylaSessionRestoreOutcome.success ||
+      restored == AylaSessionRestoreOutcome.alreadySignedIn) {
+    // 静默续期已把人送回应用 ⇒ **不再**跑自动登录（避免第二次登录链）。
+    // 但仍要让登录页的「自动登录中…」档位落回 false（它没被触发过，本就是 false）。
+    return;
+  }
+  // 走到这里 = 没有可用会话（noToken / failed）⇒ 尝试用户勾选的自动登录。
+  // [aylaRunAutoLogin] 内部会自行判定「没勾 ⇒ skipped」，不需要这里再读一遍偏好。
+  final AylaAutoLoginOutcome outcome = await aylaRunAutoLogin(container);
+  debugPrint('[AylaAuth] 冷启动引导完成：restore=$restored autoLogin=$outcome');
+}
 /// 冷启动自动登录结果（调用方据此决定是否提示用户）。
 enum AylaAutoLoginOutcome {
   /// 未满足条件（没勾自动登录，或没有完整凭据）⇒ 什么都不做。
@@ -194,6 +275,121 @@ enum AylaAutoLoginOutcome {
 
   /// 尝试过但失败（网络 / 口令已改 / 后端拒绝）⇒ 登录页显示错误，用户手动输入即可。
   failed,
+}
+
+/// 会话恢复结果（调用方据此决定提示与首屏落点）。
+enum AylaSessionRestoreOutcome {
+  /// 没有存过 refresh 令牌 ⇒ 未登录，正常走登录页。
+  noToken,
+
+  /// 已有有效会话（本进程内已登录）⇒ 不重复恢复。
+  alreadySignedIn,
+
+  /// refresh 续期成功 + `GET /me/` 成功 ⇒ 直接进应用。
+  success,
+
+  /// refresh 过期 / 被吊销 / 网络失败 ⇒ 清掉存的那串，回登录页。
+  failed,
+}
+
+/// **冷启动会话恢复**（web `main.tsx:36` 的 `restoreSession()` 等价物，2026-10-19 新增）。
+///
+/// ## 要解决的问题
+/// 用户实报「手机端切后台重登」：Android 在内存紧张时会杀掉进程，回到前台是**冷启动**；
+/// 而 Flutter 侧此前只有 `aylaRunAutoLogin`（用**明文口令**重放 `/auth/login/`），
+/// 没勾「自动登录」的用户就会被踢回登录页 —— 哪怕 refresh 令牌还完全有效。
+///
+/// ## 与自动登录的分工（两条路径，按用户开关分流）
+/// - 勾了「自动登录」⇒ [aylaRunAutoLogin]（可见地重放登录，用户当场看见它在登）；
+/// - 没勾 / 自动登录不可用但存了 refresh ⇒ **本函数**静默续期，静默进应用。
+/// 两者都能覆盖「切后台被回收」；区别只是要不要让用户看见过程。
+///
+/// ## 与 web 的差异（登记）
+/// web 存 `sessionStorage`（关标签页失效），Flutter 存平台安全存储、跨进程存活 ——
+/// 原生 App 用户对「切回来还在」的预期强于网页，这是有意的语义加强。
+///
+/// ## 失败语义（工程纪律：失败必须可观测、不得伪装成功）
+/// - refresh 无效 / 网络失败 ⇒ 清掉已存令牌（避免每次启动都拿一串死令牌重试），
+///   返回 [AylaSessionRestoreOutcome.failed]，由路由守卫把人送回登录页；
+/// - **不删除**「记住密码 / 自动登录」那 4 个键：那是用户偏好，与令牌无关。
+Future<AylaSessionRestoreOutcome> aylaRestoreSession(
+  ProviderContainer container,
+) async {
+  final AuthNotifier auth = container.read(authNotifierProvider.notifier);
+  if (container.read(authNotifierProvider).isAuthenticated) {
+    return AylaSessionRestoreOutcome.alreadySignedIn;
+  }
+  final AylaSessionTokenStore tokens =
+      container.read(sessionTokenStoreProvider);
+  // 读存储没有网络往返，很快；但「有令牌」才置在途位 —— 没令牌时首屏直接落登录页，
+  // 不该让用户多看一眼启动态。
+  final String? refresh = await tokens.read();
+  if (refresh == null || refresh.isEmpty) {
+    return AylaSessionRestoreOutcome.noToken;
+  }
+  // 从这里开始是真实网络往返 ⇒ 置在途位（首屏据此显示启动态而非登录表单）。
+  aylaSessionRestoreInFlight.value = true;
+  try {
+    return await _restoreSessionWithToken(container, auth, tokens, refresh);
+  } finally {
+    // ⚠️ 必须复位：这条位跨 `main`/widget 两侧、且只在「有令牌」时被置真 ——
+    // 漏复位会让首屏永远停在启动态（用户看到无限转圈）。用 finally 保证
+    // 成功、失败、异常三条路径都复位。
+    aylaSessionRestoreInFlight.value = false;
+  }
+}
+
+/// 续期 + 拉用户 + 建连的实际实现（由 [aylaRestoreSession] 在置好在途位后调用）。
+///
+/// 拆出来只为让上面的 `try/finally` 干净：成功/失败的所有分支都在本函数内返回，
+/// 在途位由调用方统一复位，不需要在每个 `return` 前重复写一遍（容易漏）。
+Future<AylaSessionRestoreOutcome> _restoreSessionWithToken(
+  ProviderContainer container,
+  AuthNotifier auth,
+  AylaSessionTokenStore tokens,
+  String refresh,
+) async {
+  // ⚠️ 先把 refresh 交给 DioClient 的令牌存取器：
+  // `refreshAccessToken()` 只认 `AuthTokenStore.refreshToken`（见 `core/net/dio_client.dart:184`）。
+  // 恢复阶段的 access 是空的，这里只写 refresh（access 由续期结果填）。
+  auth.setTokens('', refresh);
+  try {
+    final bool ok = await DioClient.instance.refreshAccessToken();
+    if (!ok) {
+      debugPrint('[AylaAuth] 会话恢复失败：refresh 续期被拒绝');
+      await tokens.clear();
+      auth.clear();
+      return AylaSessionRestoreOutcome.failed;
+    }
+    final AuthState afterRefresh = container.read(authNotifierProvider);
+    final String? access = afterRefresh.accessToken;
+    final String? rotated = afterRefresh.refreshToken;
+    if (access == null || access.isEmpty) {
+      await tokens.clear();
+      auth.clear();
+      return AylaSessionRestoreOutcome.failed;
+    }
+    // ROTATE_REFRESH_TOKENS=True ⇒ refresh 会轮换，必须把新的那串写回存储，
+    // 否则下次启动拿旧（已作废）令牌 ⇒ 必然 401（web `stores/auth.ts:113` 同款注释）。
+    if (rotated != null && rotated.isNotEmpty && rotated != refresh) {
+      await tokens.write(rotated);
+    }
+    // 拉当前用户（与登录链同一步：`?next=` 回跳与路由守卫都依赖 user 落地）。
+    final AuthUser me = await AuthApi.me(accessToken: access);
+    auth.setUser(me);
+    // 与手动登录**完全相同**的副作用链（WS / 预加载门 / 未读 / 更新检查）。
+    wsManager?.connectAll();
+    _startChatWs(container);
+    _startPresenceWs(container);
+    unawaited(container.read(badgesProvider).fetch());
+    unawaited(AppInit.instance.run(userId: me.id));
+    return AylaSessionRestoreOutcome.success;
+  } catch (err) {
+    debugPrint('[AylaAuth] 会话恢复失败：$err');
+    await tokens.clear();
+    auth.clear();
+    return AylaSessionRestoreOutcome.failed;
+  }
 }
 
 /// 模块级单飞位：同一进程内自动登录**只可能跑一次**。

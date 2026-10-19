@@ -465,7 +465,8 @@ class _VoiceHubPageState extends ConsumerState<VoiceHubPage> {
   void _join(String channelId) {
     // 显式再存一次滚动位置（同 games_hub / live_hub 的说明）。
     AylaScrollMemory.save(_restoreKey, _scroll);
-    context.go('/voice/${Uri.encodeComponent(channelId)}');
+    // 大厅 → 语音房：**push**（web VoiceHubPage 的 navigate 是 push 语义）。
+    context.push('/voice/${Uri.encodeComponent(channelId)}');
   }
 
   /// voice 卡的 head 槽位（web 默认渲染 `<FavoriteButton compact/>`）。

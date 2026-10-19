@@ -314,7 +314,8 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
       room: room,
       narrow: narrow,
       currentUserId: selfId,
-      onBack: () => context.go('/games'),
+      // 返回：能回退就 pop（进房是 push），栈底回大厅。
+      onBack: () => context.canPop() ? context.pop() : context.go('/games'),
       onShare: () => unawaited(aylaOpenShareSheet(
         context,
         payload: AylaSharePayload.boardgame(
@@ -359,7 +360,8 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
 
     return narrow
         ? AylaFullScreenSwipeBack(
-            onBack: () => context.go('/games'),
+            // 返回：能回退就 pop（进房是 push），栈底回大厅。
+      onBack: () => context.canPop() ? context.pop() : context.go('/games'),
             child: body,
           )
         : body;

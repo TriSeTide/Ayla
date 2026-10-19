@@ -357,7 +357,7 @@ class _AylaCreateLiveFormState extends State<AylaCreateLiveForm> {
   /// 选已有直播间（web `handleLiveStarted`）：关浮层 → 进开播控制台。
   void _startChannel(AylaLiveCardData channel) {
     widget.onClose();
-    context.go('/live/start/${channel.id}');
+    context.push('/live/start/${channel.id}');
   }
 
   /// 新建直播间（web `handleCreateNewLive`）：关浮层 → 进新建频道的开播控制台；
@@ -376,7 +376,7 @@ class _AylaCreateLiveFormState extends State<AylaCreateLiveForm> {
       );
       if (!mounted) return;
       widget.onClose();
-      context.go('/live/start/${created.id}');
+      context.push('/live/start/${created.id}');
     } catch (error) {
       if (!mounted) return;
       // web tsx:50：`e instanceof Error ? e.message : "创建直播间失败"` ⇒ 非 API 异常回退固定串。
