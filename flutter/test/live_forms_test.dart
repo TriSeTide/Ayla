@@ -554,7 +554,22 @@ void main() {
       expect(savePill.bottom, moreOrLessEquals(cover.bottom, epsilon: 0.5));
     });
 
-    testWidgets('窄屏（≤768）→ 布局不变 + **三列下沿对齐**（用户 2026-09-22）', (WidgetTester tester) async {
+    // ⚠️ **2026-10-19 按 web 重写**（用户实报「窄屏开播页面大量布局错误」）。
+    //
+    // **旧断言锁的是错的行为**：它要求「布局不变 + 三列下沿对齐 + 封面 128×72 + 按钮 96 竖排」，
+    // 那是当时（2026-09-22）按「三列平铺」拍板的实现，**与 web 不符**：
+    // web 在 `@media (max-width:768px)`（live.css:247–253）明确是
+    // ```css
+    // .live-owner-settings { flex-wrap: wrap; }        /* 会换行 */
+    // .live-cover-picker   { width: 88px; }           /* 88 不是 128 */
+    // .live-owner-start    { flex-basis: 100%; }      /* 按钮组**整行独占** */
+    // .live-owner-start-btn{ flex: 1; }               /* 两键等分 */
+    // ```
+    // ⇒ 窄屏是**三行**：① 封面 88 + 字段列；② 开播/保存等分整行；③ 可见范围块。
+    // 用户看到「大量布局错误」正是因为旧实现把按钮挤进第三列（420 屏上溢出/被裁）。
+    testWidgets('窄屏（≤768）→ 按 web 换行：封面 88 + 字段列，按钮组独占整行', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(
         host(
           tester,
@@ -563,7 +578,7 @@ void main() {
         ),
       );
       await settle(tester);
-      final Rect cover = tester.getRect(find.byType(AspectRatio).first);
+
       final Rect titleField = tester.getRect(find.byType(TextField).first);
       final Rect descField = tester.getRect(find.byType(TextField).at(1));
       final Rect startPill = tester.getRect(
@@ -582,20 +597,35 @@ void main() {
             )
             .first,
       );
-      // 布局不变：封面 | 字段成列（两框上下排）| 两键竖排
+
+      // ① 字段列：标题在上、介绍在下（`flex-direction: column`）
       expect(descField.top, greaterThan(titleField.top));
-      expect(savePill.top, greaterThan(startPill.top));
-      // 三列下沿对齐（行高 72 = 字段列自然高；封面按 16:9 配到 128 × 72）
-      expect(cover.height, closeTo(72, 0.5));
-      expect(cover.width, closeTo(72 * 16 / 9, 0.5));
-      expect(cover.bottom, moreOrLessEquals(descField.bottom, epsilon: 0.5));
-      expect(cover.bottom, moreOrLessEquals(savePill.bottom, epsilon: 0.5));
-      expect(descField.bottom, moreOrLessEquals(savePill.bottom, epsilon: 0.5));
-      // 窄屏字段仍是 web 的 min-height 32（用户要求「仅宽屏」加高）
+
+      // ② 按钮组**换行到字段列下方**（`flex-basis: 100%`）⇒ 两键在**同一行**
+      expect(
+        savePill.top,
+        moreOrLessEquals(startPill.top, epsilon: 1),
+        reason: '窄屏两键应同行（按钮组独占整行），不是竖排',
+      );
+
+      // ③ 按钮组在字段列之下（换行的事实证据）
+      expect(
+        startPill.top,
+        greaterThan(descField.bottom - 1),
+        reason: '按钮组应换到字段列下方（flex-wrap: wrap）',
+      );
+
+      // ④ 两键等分整行（`flex: 1`）—— 旧实现是固定 96，420 屏上明显过窄
+      expect(startPill.width, greaterThan(120), reason: '开播键等分整行');
+      expect(savePill.width, greaterThan(120), reason: '保存键等分整行');
+      expect(
+        (startPill.width - savePill.width).abs(),
+        lessThan(2),
+        reason: '两键等分（flex: 1 ⇒ 同宽）',
+      );
+
+      // ⑤ 窄屏字段仍是 web 的 min-height 32（用户要求「仅宽屏」加高）
       expect(titleField.height, closeTo(32, 0.5));
-      // 按钮列恒定 96 宽（`.live-owner-start { min-width: 96px }` 的实值）
-      expect(startPill.width, closeTo(96, 0.5));
-      expect(savePill.width, closeTo(96, 0.5));
     });
   });
 }

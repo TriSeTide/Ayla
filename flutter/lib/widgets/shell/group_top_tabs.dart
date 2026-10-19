@@ -229,25 +229,7 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
         borderOverride:
             const Border(bottom: BorderSide(color: AylaColors.glassBorder)),
         padding: EdgeInsets.zero,
-        // ## 顶部安全区（2026-10-19 用户实报「顶部没有避开手机任务栏」）
-        //
-        // 群页是**沉浸式**路由（壳层不出 BottomTabs、也不出 NarrowTopBar），
-        // 群顶栏就是屏幕最上面那一条 ⇒ 必须自己让出状态栏，否则时间/信号图标直接
-        // 压在群名与场景 tab 上（实测截图：`7:34` 盖住「群聊」）。
-        //
-        // web 侧没有这条 CSS，不是遗漏：`index.html:5` 的 viewport **没有**
-        // `viewport-fit=cover` ⇒ `env(safe-area-inset-top)` 恒为 0，安全区由浏览器外壳代劳。
-        // Flutter 窗口是边到边的，没有那层外壳，必须 App 自己让。
-        //
-        // 只占高、不画东西：玻璃材质由外层 `AylaGlassSurface` 承担，安全区与顶栏
-        // 共用同一块磨砂底（避免"透明横带 + 玻璃条"的断色）。
-        // 用 `viewPadding` 而非 `padding`：顶栏不该因键盘弹出而跳动。
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            if (MediaQuery.viewPaddingOf(context).top > 0)
-              SizedBox(height: MediaQuery.viewPaddingOf(context).top),
-            SizedBox(
+        child: SizedBox(
           height: AylaGroupTopTabs.barHeight,
           child: Padding(
             padding: const EdgeInsets.symmetric(
@@ -288,8 +270,6 @@ class _AylaGroupTopTabsState extends State<AylaGroupTopTabs> {
               ],
             ),
           ),
-            ),
-          ],
         ),
     );
 

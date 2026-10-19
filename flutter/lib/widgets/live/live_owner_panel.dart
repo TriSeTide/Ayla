@@ -277,17 +277,53 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
   /// **窄屏（≤768）保持原堆叠**：160 宽的封面在 420 视口里会把字段挤没。
   Widget _settings({required bool narrow}) {
     if (narrow) {
-      // 窄屏：布局不变（封面 | 字段成列 | 两键竖排），但三列**下沿对齐** ——
-      // 行高 = 字段列自然高（标题 32 + `gap sp2` 8 + 介绍 32 = 72，web 原间距不动）；
-      // 封面按 16:9 等比配到该高（宽 = 72 × 16 ÷ 9 = 128）；按钮列用 `spaceBetween`
-      // 吸收 4px 差值（开播顶、保存底）⇒ 三列下沿同在 72。
-      return Row(
-        spacing: AylaSpacing.sp2,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      // ## 窄屏档：按 web 重做（2026-10-19 用户实报「窄屏开播页面大量布局错误」）
+      //
+      // ### web 的真实规则（live.css:247–253，`@media (max-width:768px)`）
+      // ```css
+      // .live-owner-settings { flex-wrap: wrap; gap: var(--sp-2); }
+      // .live-cover-picker   { width: 88px; }
+      // .live-owner-fields   { flex: 1 1 calc(100% - 88px - var(--sp-2));
+      //                        flex-direction: column; gap: var(--sp-2); }
+      // .live-title-input, .live-desc-input { width: 100%; flex: none; }
+      // .live-owner-start    { flex-direction: row; justify-content: stretch;
+      //                        min-width: 0; flex-basis: 100%; }   ← **整行独占**
+      // .live-owner-start-btn{ flex: 1; }
+      // ```
+      // ⇒ 窄屏是**三行**：
+      //   ① 封面(88) + 字段列（标题/介绍竖排，占剩余宽）；
+      //   ② **开播/下播 + 保存 换行独占整行**（`flex-basis: 100%`），两键等分；
+      //   ③ 底部可见范围块。
+      //
+      // ### 之前错在哪
+      // Flutter 侧此前把窄屏做成「封面 128 + 字段列 + 按钮列 96 三列平铺」，并把按钮
+      // 挤在第三列 ⇒ 420 宽的屏上：字段列只剩 ~180 宽、两个 96 键竖排溢出/被裁，
+      // 与 web 的「按钮换行占满整行」完全不是一回事（这正是用户看到的布局错误）。
+      //
+      // ### 实现
+      // 用 `Wrap` + 显式宽度表达 `flex-wrap`：封面固定 88，字段列吃剩余宽；
+      // 按钮组按 `flex-basis: 100%` 语义另起一行、内部两键 `Expanded` 等分。
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: AylaSpacing.sp2, // gap: var(--sp-2)
         children: <Widget>[
-          _coverPicker(narrow: true),
-          Expanded(child: _fieldsStacked()),
-          _startColumn(),
+          // 第一行：封面 88 + 字段列（标题/介绍竖排）
+          Row(
+            spacing: AylaSpacing.sp2,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _coverPicker(narrow: true), // 88 宽（live.css:249）
+              Expanded(child: _fieldsStacked()), // flex:1 1 calc(100% - 88 - sp2)
+            ],
+          ),
+          // 第二行：开播/下播 + 保存，等分整行（`flex-basis: 100%` + 两键 flex:1）
+          Row(
+            spacing: AylaSpacing.sp2,
+            children: <Widget>[
+              Expanded(child: _startButton()),
+              Expanded(child: _saveButton(minHeight: _narrowKeyHeight)),
+            ],
+          ),
         ],
       );
     }
@@ -356,11 +392,19 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
   /// 宽/中屏封面宽度：按 **16:9 反推** —— 行高 112 ⇒ 宽 = 112 × 16 ÷ 9 ≈ 199.1（与整行等高）。
   static const double _coverWidthWide = _wideFieldHeight * 16 / 9;
 
-  /// 窄屏（≤768）行高 = 字段列自然高：标题 32 + `gap sp2` 8 + 介绍 32 = **72**（间距取 web 原值）。
-  static const double _narrowRowHeight = 32 + AylaSpacing.sp2 + 32;
+  /// 窄屏封面宽度 —— **88**。
+  ///
+  /// 事实源：`live.css:249` 在 `@media (max-width:768px)` 内把 `.live-cover-picker`
+  /// 从宽屏的 96 覆写为 `width: 88px`（2026-10-19 按 web 订正）。
+  /// 此前按「与字段列下沿齐平的 16:9 反推」取 128，是**自由发挥**：web 窄屏就是固定 88，
+  /// 高度由 `aspect-ratio: 16/9` 决定，不与字段列对齐。
+  static const double _coverWidthNarrow = 88;
 
-  /// 窄屏封面宽度：同样按 16:9 反推（72 × 16 ÷ 9 = 128），底沿与其余两列齐平。
-  static const double _coverWidthNarrow = _narrowRowHeight * 16 / 9;
+  /// 窄屏按钮行高（开播/下播 + 保存等分整行）。
+  ///
+  /// web 没有给窄屏按钮单独定高（`.btn` 的 `min-height: 40` 生效）⇒ 这里取 40，
+  /// 与 `AylaGlassButton` 默认 minHeight 一致，两键等高。
+  static const double _narrowKeyHeight = 40;
 
   /// `.live-cover-picker`（live.css 173–175；按钮组成员 ⇒ hover 1.02 / active .98）。
   Widget _coverPicker({required bool narrow}) {
@@ -571,20 +615,6 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
     onPressed: (_saving || _busy) ? null : () => unawaited(_save()),
   );
 
-  /// 窄屏档的右列：开播 + 保存竖排（96 宽；web ≤768 的 `flex-direction: column` 档）。
-  ///
-  /// 固定高 = [_narrowRowHeight]（= 字段列自然高 72），`spaceBetween` ⇒ **开播贴顶、保存贴底**
-  /// （两者下沿与封面 / 字段列齐平；web 的 `gap sp1` 保留为最小间距）。
-  Widget _startColumn() => SizedBox(
-    width: _keyWidth,
-    height: _narrowRowHeight,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      spacing: AylaSpacing.sp1, // gap: var(--sp-1)
-      children: <Widget>[_startButton(), _saveButton()],
-    ),
-  );
 
   /// `.live-owner-visibility`（live.css 179–187 + ≤768 padding sp2）。
   Widget _visibilityBlock({required bool narrow}) {

@@ -256,6 +256,31 @@ class _AppShellState extends ConsumerState<AppShell> {
     } else if (!isNarrow) {
       topBar = userAvatarFreeTopNav;
     }
+    // ## 顶部安全区兜底（2026-10-19 用户实报「还有很多页面顶栏没有退避任务栏」）
+    //
+    // ### 为什么放在壳层而不是逐页改
+    // 原生窗口是**边到边**的：整棵 UI 从 `y=0`（状态栏底下）开始画。
+    // 出顶栏的页面由顶栏自己让位（`AylaTopNav` 窄屏那条已处理）；
+    // **不出顶栏的沉浸路由**（帖子详情 / 私聊 / 语音房 / 桌游房 / 个人主页 / 用户主页 /
+    // 开播控制台 / 搜索 / 收藏 …）内容直接顶到屏幕最上 ⇒ 时间、信号、电量压在页面自绘的
+    // 头部上。逐页补必然漏（本轮实测就漏了 6+ 个页面），且新增页面还会再漏。
+    // ⇒ **唯一 owner = 壳层**：对「本次没有渲染顶栏」的窄屏路由，在内容区顶部补一个
+    //    与状态栏等高的留白。这条规则天然覆盖所有现有与将来的页面。
+    //
+    // ### 与 web 的关系
+    // web 侧不写这条不是遗漏：`index.html:5` 的 viewport 没有 `viewport-fit=cover`
+    // ⇒ `env(safe-area-inset-top)` 恒为 0，浏览器外壳把页面排在状态栏下面。
+    // Flutter 没有那层外壳，必须自己让 —— 语义等价于浏览器外壳，不是新增设计。
+    //
+    // ### 边界
+    // · **只有窄屏**：宽屏（桌面/Pad 横屏）没有状态栏遮挡问题；
+    // · **只有 topBar == null**：有顶栏时顶栏自己已让位，再补一次会双倍留白；
+    // · **直播间除外**：它是全屏沉浸（视频顶到边），且 `AylaLiveRoomBody` 的窄屏分支
+    //   已在头部内自己补了状态栏留白（`live_room_body.dart:688`）—— 壳层再补会把视频
+    //   往下挤、露出黑边。
+    final bool shellTopInset = isNarrow &&
+        topBar == null &&
+        !aylaIsLiveRoomRoute(pathname);
 
     // ---- 内容区（`.app-shell-content`）----
     // ⚠️ **转场不在这里做**（2026-09-28 修的第二个根因）：页面转场的唯一 owner 是
@@ -311,6 +336,11 @@ class _AppShellState extends ConsumerState<AppShell> {
         Column(
           children: <Widget>[
             if (topBar != null) topBar,
+            // 无顶栏的窄屏沉浸路由：壳层统一补状态栏留白（见上方 shellTopInset 的推导）。
+            // ⚠️ 必须放在 `Expanded` **之前**：留白吃的是壳层高度，不是页面内部布局 ——
+            //    放进去会让页面以为视口变矮，但自己又不知道为何，滚动位置会算错。
+            if (shellTopInset)
+              SizedBox(height: MediaQuery.viewPaddingOf(context).top),
             Expanded(child: ClipRect(child: shellContent)),
             if (showBottomTabs && !bottomTabsLeaving) bottomTabs(),
           ],

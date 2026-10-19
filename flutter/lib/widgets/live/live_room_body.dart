@@ -756,6 +756,136 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
       );
     }
 
+    // ---- 窄屏开播控制台（`is-studio.is-narrow`，2026-10-19 按 web 重做）----
+    //
+    // ## 之前错在哪（用户实报「窄屏开播页面大量布局错误」）
+    // Flutter 侧此前把窄屏控制台**当成宽屏三列**渲染：`Row[ Expanded(主区), _side() ]`，
+    // 其中 `_side()` 是**固定 340 宽**的弹幕卡。在 ≤768 的屏上（逻辑宽约 360–430），
+    // 340 宽的侧栏 + 主区必然挤压/溢出；而 web 在窄屏**根本不做三列**。
+    //
+    // ## web 的真实结构（live.css:242–246，`@media (max-width:768px)`）
+    // ```css
+    // .live-room-body.is-studio.is-narrow { overflow-y: auto; }        /* 整页纵向滚动 */
+    // ... .live-room-main  { flex: none; min-height: 0; overflow: visible; } /* 主区不再 flex:1 */
+    // ... .live-room-side  { position: static; width: auto; height: auto;  /* 侧栏落进内容流 */
+    //                        flex: none; min-height: min(38vh, 280px);
+    //                        margin: 0 sp3 sp3; border-left: none;
+    //                        border-top: 1px solid --glass-border;
+    //                        border-radius: --radius-card; box-shadow: --card-shadow; }
+    // ```
+    // ⇒ 窄屏是**单列纵向滚动**：头部(sticky) → 资料栏 → 视频 → 观众条 → 推流地址 → 弹幕卡。
+    //    侧栏不再是右侧固定列，而是流底的一张卡（`min-height: min(38vh,280px)`）。
+    //
+    // ## 头部 sticky（live.css:665–670）
+    // `.live-room-body.is-studio.is-narrow .live-room-head { margin: -sp3 -sp3 0;
+    //   position: sticky; top: 0; z-index: 20; }`
+    // ⇒ 主区 padding(sp3) 内负 margin 突破贴顶铺满，并吸顶不随滚动。
+    if (_isNarrow && widget.showOwnerPanel) {
+      return _shell(
+        modifier: modifier,
+        replayKey: widget.channelId,
+        children: <Widget>[
+          // ---- 结构：头部**吸顶** + 下方整页滚动（live.css:665–670 的等价物）----
+          //
+          // web 是 `position: sticky; top: 0; z-index: 20`（在同一个滚动容器里吸顶）。
+          // Flutter 侧用「外层 Column 固定头部 + Expanded 滚动内容」表达同一语义：
+          // 视觉、滚动行为都与 sticky 等价，且不必把整页改成 sliver 结构（改动面最小）。
+          //
+          // ⚠️ 头部**不能**参与 `_replay`：吸顶层若带位移动画，滚动中会持续抖动。
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                // 状态栏留白（2026-10-19 实机复验发现）：开播控制台走直播间路由族，
+                // 壳层因「直播要顶到边」把它排除在兜底之外 ⇒ 必须自己补。
+                // 观看态在 `_isNarrow && !showOwnerPanel` 分支里补过（另一处），
+                // 控制台是独立分支，此前漏了 ⇒ 实机看到返回键被状态栏时间压住。
+                if (MediaQuery.viewPaddingOf(context).top > 0)
+                  SizedBox(height: MediaQuery.viewPaddingOf(context).top),
+                _headerSwap(narrow: true),
+                Expanded(
+                  child: SingleChildScrollView(
+                    // `overflow-y: auto`（live.css:243）：内容整页滚动。
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                  Padding(
+                    // `.live-room-main { padding: sp4 }` 的窄屏档（app.css 3486–3493
+                    // + live.css 681–687 只覆盖宽屏）⇒ 窄屏主区内边距仍是 sp4 的窄屏近似 sp3。
+                    padding: const EdgeInsets.all(AylaSpacing.sp3),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      spacing: AylaSpacing.sp3,
+                      children: <Widget>[
+                        if (widget.data.channel?.isOwner ?? false)
+                          AylaLiveOwnerPanel(
+                            channel: widget.data.channel!,
+                            onStart: widget.onStartLive,
+                            onStop: widget.onStopLive,
+                            onSave: widget.onSaveOwner,
+                            groups: widget.groups,
+                          ),
+                        // `.live-room-stage`（`is-studio` 档 `flex: none`，live.css:162）
+                        _replay(
+                          const Offset(0, AylaRevealMotion.distance),
+                          _stage(clipRadius: true),
+                        ),
+                        _replay(
+                          const Offset(0, AylaRevealMotion.distance),
+                          _viewerStrip,
+                        ),
+                        if (widget.data.channel?.isOwner ?? false)
+                          AylaLiveStreamAddresses(
+                            rtmpUrl: widget.data.channel!.rtmpUrl,
+                            streamKey: widget.data.channel!.streamKey,
+                            flvUrl: widget.data.channel!.flvUrl,
+                          ),
+                      ],
+                    ),
+                  ),
+                  // ---- 弹幕侧栏：落进内容流底部（不再是右侧 340 固定列）----
+                  //
+                  // ⚠️ **两条规则叠加，后者赢**（写实现前必须按生效值来，不能只看第一条）：
+                  // · live.css:245（`@media max-width:768px` 靠前处）给的是
+                  //   `position: static; width: auto; min-height: min(38vh,280px);
+                  //    margin: 0 sp3 sp3; border-radius: --radius-card; box-shadow: --card-shadow;`
+                  // · live.css:545–551（**同一选择器、后出现的 @media 块**）把它覆写为
+                  //   `height/min-height/max-height: 240px; margin: 0; border-radius: 0;
+                  //    box-shadow: none;`
+                  // ⇒ **实渲染 = 固定 240 高、方角、无阴影、无边距**（贴屏宽）。
+                  // （这正是 skill 里记过的「第二条 @media 陷阱」：只看第一条会做错。）
+                  SizedBox(
+                    height: 240,
+                    child: AylaGlassSurface(
+                      radiusOverride: BorderRadius.zero, // border-radius: 0
+                      blur: AylaGlass.blurNav, // background: --glass-bg + blur18
+                      shadow: const <BoxShadow>[], // box-shadow: none
+                      borderOverride: const Border(
+                        top: BorderSide(color: AylaColors.glassBorder), // border-top 保留
+                      ),
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Expanded(child: _danmakuList),
+                          _danmakuInput,
+                        ],
+                      ),
+                    ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        overlay: _railOverlay,
+      );
+    }
+
     // ---- 宽屏观看 + 开播控制台（tsx 484–538）----
     // 切台 ⇒ `.live-room-main > .live-room-stage` / `> .live-viewer-strip` / `.live-room-side`
     // 三块重播入场（web mediaPanels 的宽屏/控制台档选择器）。

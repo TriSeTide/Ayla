@@ -56,25 +56,77 @@ class AylaLoadingSpinner extends StatelessWidget {
                 border: Border.all(color: track, width: stroke),
               ),
             )
-          : TweenAnimationBuilder<double>(
-              tween: Tween<double>(begin: 0, end: 1),
-              duration: AylaDurations.spin,
-              curve: Curves.linear,
-              builder: (BuildContext context, double t, Widget? child) {
-                return CustomPaint(
-                  painter: _SpinnerPainter(
-                    progress: t,
-                    track: track,
-                    top: top,
-                    stroke: stroke,
-                  ),
-                );
-              },
+          // ⚠️ **必须是无限循环**（2026-10-19 用户实报「转了一圈就停了」）。
+          //
+          // 旧写法是 `TweenAnimationBuilder(tween: Tween(0→1), duration: spin)`：
+          // **它只播一次就停在终值**（终值与起始值视觉等价 ⇒ 看起来"转一圈后冻住"）。
+          // CSS 的 `animation: spin 800ms linear infinite` 是循环的 ⇒ 这里换成
+          // 自带 `repeat()` 的 `AnimationController`（_SpinnerTicker）。
+          : _SpinnerTicker(
+              size: size,
+              track: track,
+              top: top,
+              stroke: stroke,
             ),
     );
   }
 }
 
+
+/// 无限循环旋转的转圈本体（`animation: spin 800ms linear infinite` 的等价物）。
+///
+/// ## 为什么单独一个 StatefulWidget
+/// 之前用 `TweenAnimationBuilder` 实现，**它只播一次**（播完停在 `end`）——
+/// 而终值 `1` 与起始 `0` 在画面上等价（整圈），于是表现为「转一圈就冻住」，
+/// 用户 2026-10-19 实报「转了一圈他就停了不接着转了」。
+///
+/// `AnimationController` + `repeat()` 才对应 CSS 的 `infinite`。
+/// `vsync` 走 `SingleTickerProviderStateMixin`：页面不在前台时自动暂停，不白烧帧。
+class _SpinnerTicker extends StatefulWidget {
+  const _SpinnerTicker({
+    required this.size,
+    required this.track,
+    required this.top,
+    required this.stroke,
+  });
+
+  final double size;
+  final Color track;
+  final Color top;
+  final double stroke;
+
+  @override
+  State<_SpinnerTicker> createState() => _SpinnerTickerState();
+}
+
+class _SpinnerTickerState extends State<_SpinnerTicker>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: AylaDurations.spin, // 800ms linear（base.css 522）
+  )..repeat(); // ← 关键：无限循环，不是单次
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (BuildContext context, Widget? child) => CustomPaint(
+        painter: _SpinnerPainter(
+          progress: _c.value,
+          track: widget.track,
+          top: widget.top,
+          stroke: widget.stroke,
+        ),
+      ),
+    );
+  }
+}
 class _SpinnerPainter extends CustomPainter {
   const _SpinnerPainter({
     required this.progress,

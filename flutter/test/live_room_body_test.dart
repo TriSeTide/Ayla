@@ -16,7 +16,8 @@ import '../lib/widgets/live/danmaku.dart'
     show AylaDanmakuEntry, AylaDanmakuInput, AylaDanmakuList, AylaDanmakuOverlay;
 import '../lib/widgets/live/live_channel_snapshot.dart';
 import '../lib/widgets/live/live_hall.dart' show AylaLiveCardData, AylaLiveStatus;
-import '../lib/widgets/live/live_owner_panel.dart' show AylaLiveOwnerPanel;
+import '../lib/widgets/live/live_owner_panel.dart'
+    show AylaLiveOwnerPanel, AylaLiveOwnerSaveRequest;
 import '../lib/widgets/live/live_player.dart' show AylaLivePlayer, AylaLiveSrsStatus;
 import '../lib/widgets/live/live_rail.dart' show AylaLiveChannelRail;
 import '../lib/widgets/live/live_room_body.dart';
@@ -291,6 +292,56 @@ void main() {
     });
   });
 
+  // ⚠️ **新增 2026-10-19**：窄屏开播控制台（`is-narrow && showOwnerPanel`）此前**没有任何测试覆盖**
+  // —— 这正是它能长期带着布局错误上线的原因（旧实现把窄屏当宽屏三列渲染）。
+  group('窄屏开播控制台（is-studio.is-narrow，live.css:242–246 / 545–551 / 665–670）', () {
+    testWidgets('单列纵向：头部在上、内容可滚、弹幕卡在流底且固定 240 高', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLiveRoomBody(
+            channelId: 'lc1',
+            isNarrow: true,
+            showOwnerPanel: true,
+            channels: _channels,
+            data: AylaLiveRoomData(
+              channel: _channel(isOwner: true),
+              srsStatus: AylaLiveSrsStatus.live,
+              viewerCount: 3,
+            ),
+            videoView: const SizedBox(),
+            onStartLive: () async {},
+            onStopLive: () async {},
+            onSaveOwner: (AylaLiveOwnerSaveRequest r) async {},
+          ),
+          viewport: const Size(420, 800),
+        ),
+      );
+      await settle(tester);
+
+      // ① web 窄屏控制台**不做三列**：不渲染右侧频道侧栏（那是宽屏档）
+      expect(
+        find.byType(AylaLiveChannelRail),
+        findsNothing,
+        reason: '窄屏控制台是单列，不渲染宽屏侧栏',
+      );
+
+      // ② 整页纵向滚动（live.css:243 `overflow-y: auto`）
+      expect(
+        find.byType(SingleChildScrollView),
+        findsWidgets,
+        reason: '窄屏控制台必须可纵向滚动（内容含资料栏+视频+地址卡+弹幕）',
+      );
+
+      // ③ 资料栏（AylaLiveOwnerPanel）在流内
+      expect(find.byType(AylaLiveOwnerPanel), findsOneWidget);
+
+      // ④ 推流地址卡在流内（`showOwnerPanel && is_owner`）
+      expect(find.byType(AylaLiveStreamAddresses), findsOneWidget);
+    });
+  });
   group('窄屏沉浸式（tsx 441–481）', () {
     testWidgets('列表键 → 覆盖层（遮罩 + 侧栏）；点遮罩关闭', (WidgetTester tester) async {
       await tester.pumpWidget(
