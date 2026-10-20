@@ -86,16 +86,37 @@ class AylaPagedList<T> extends ChangeNotifier {
   /// 语音目录的成员总数（null = 后端未给 / 非语音目录）。
   int? get totalMemberCount => _totalMemberCount;
 
+  /// 首屏请求在途期间由 WS 帧**新增**的条目（按 key 去重）。
+  ///
+  /// ⚠️ **2026-10-20 修复（普查 A 指出的伴生风险）**：web 在首屏响应回来时
+  /// **保留请求期间新收到的 WS 帖子**（`PostsHubPage.tsx:195–199` 原话
+  /// 「请求期间新收到的WS帖子保留」），而本类此前是**整体替换** ⇒ 期间的帧新增被抹掉。
+  ///
+  /// 语义与 web 一致：
+  /// - 只保留**不在本次响应里**、且**不在请求前快照里**（`_knownBeforeRequest`）的条目；
+  /// - 顺序：实时条目在前、响应条目在后（同 web 的 `[...realtime, ...incoming]`）；
+  /// - 只在首屏（非 append）生效；append 本来就做合并。
+  final Map<String, T> _realtimeDuringRequest = <String, T>{};
+
+  /// 发起首屏请求前的条目 key 快照（用于区分「帧新增」与「本来就有」）。
+  Set<String> _knownBeforeRequest = <String>{};
+
   /// 取页。[append] = true 走下一页，否则重取首页。
   ///
   /// - 追加前置条件：必须有 `hasMore` 且 `nextCursor` 非空，且当前无在途请求；
-  /// - 重取首页：使在途请求作废（revision 递增）后发起，结果回来后整体替换。
+  /// - 重取首页：使在途请求作废（revision 递增）后发起，结果回来后**保留在途期间
+  ///   由 WS 帧新增的条目**（同 web），再做替换。
   Future<void> load({bool append = false}) async {
     if (_disposed) return;
     if (append && (_busy || !_hasMore || _nextCursor == null)) return;
     if (append && _nextCursor == _lastCursor) return;
     final String? cursor = append ? _nextCursor : null;
     final int revision = ++_revision;
+    if (!append) {
+      // 首屏：记录「请求前已知的 key」并清空实时暂存（新一轮开始）。
+      _knownBeforeRequest = <String>{for (final T item in _items) keyOf(item)};
+      _realtimeDuringRequest.clear();
+    }
     _busy = true;
     _loading = true;
     _error = null;
@@ -116,11 +137,19 @@ class AylaPagedList<T> extends ChangeNotifier {
         for (final T item in _items) {
           merged[keyOf(item)] = item;
         }
+      } else {
+        // ★ 首屏：**先**放实时新增（web `[...realtime, ...incoming]` 的顺序），
+        // 再放响应（响应里同 id 的覆盖实时条目 —— 服务端数据更权威）。
+        for (final MapEntry<String, T> e in _realtimeDuringRequest.entries) {
+          final bool inPage = page.results.any((T item) => keyOf(item) == e.key);
+          if (!inPage) merged[e.key] = e.value;
+        }
       }
       for (final T item in page.results) {
         merged[keyOf(item)] = item;
       }
       _items = merged.values.toList(growable: false);
+      if (!append) _realtimeDuringRequest.clear();
       _nextCursor = page.nextCursor;
       _hasMore = page.hasMore;
       _total = page.total;
@@ -159,6 +188,21 @@ class AylaPagedList<T> extends ChangeNotifier {
       if (same) return;
     }
     final int total = _total + next.length - _items.length;
+    // 首屏请求在途时，把「本次新增的条目」记进实时暂存 —— 响应回来合并时会被保留
+    //（同 web「请求期间新收到的 WS 帖子保留」，见 [_realtimeDuringRequest]）。
+    if (_busy && _knownBeforeRequest.isNotEmpty) {
+      for (final T item in next) {
+        final String key = keyOf(item);
+        if (!_knownBeforeRequest.contains(key)) {
+          _realtimeDuringRequest[key] = item;
+        }
+      }
+      for (final String key in _realtimeDuringRequest.keys.toList()) {
+        if (!next.any((T item) => keyOf(item) == key)) {
+          _realtimeDuringRequest.remove(key);
+        }
+      }
+    }
     _items = next;
     _total = total < 0 ? 0 : total;
     _notify();

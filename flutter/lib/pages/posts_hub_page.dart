@@ -468,6 +468,22 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
       final Map<String, int> updated = await AylaPostsApi.reportPostViews(ids);
       if (!mounted || updated.isEmpty) return;
       aylaPostsStore.markViewedBatch(updated);
+      // ⚠️ **2026-10-20 全量普查修复（P1-1）**：上面两行方法注释早就写明
+      // 「必须同时刷新本地，否则没有卡片的已读态变化」，但实现只写了 store +
+      // setState ⇒ 本页渲染的是 `_pager.items`（tab 快照），浏览数/已读态
+      // **在本页不涨**。就地写回快照（与 `group_posts_page.dart:536–541` 同法）。
+      final AylaPagedList<AylaPost>? pager = _pager;
+      if (pager != null) {
+        // `updated` 的 key 是**字符串**（接口返回 `{postId: viewCount}`，JSON key 天然是
+        // String）⇒ 用 `'${p.id}'` 取，不能直接用 int。
+        final List<AylaPost> next = <AylaPost>[
+          for (final AylaPost p in pager.items)
+            updated['${p.id}'] != null
+                ? _withViewed(p, updated['${p.id}']!)
+                : p,
+        ];
+        pager.setItems(next);
+      }
       setState(() {});
     } catch (_) {
       // 上报失败：不标已读（web `usePostViewTracking.ts:51–53` 同）。
@@ -633,3 +649,30 @@ class _PostsHubPageState extends ConsumerState<PostsHubPage> {
     );
   }
 }
+
+/// 把「已浏览」与新的浏览数写回一条帖子（web `usePostViewTracking` 的 onViewed 投影）。
+///
+/// 与 `group_posts_page.dart` 的 `_withViewed`（:1153–1172）逐字段同源；
+/// 之所以各页一份：它只是**模型投影**，且 `AylaPost` 没有 `copyWith`。
+/// 若将来给模型加 `copyWith`，两处可合并。
+AylaPost _withViewed(AylaPost post, int viewCount, {bool isViewed = true}) =>
+    AylaPost(
+      id: post.id,
+      author: post.author,
+      authorId: post.authorId,
+      authorNickname: post.authorNickname,
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      groupId: post.groupId,
+      groupName: post.groupName,
+      allowedGroupIds: post.allowedGroupIds,
+      allowedGroupNames: post.allowedGroupNames,
+      images: post.images,
+      commentCount: post.commentCount,
+      isAuthor: post.isAuthor,
+      viewCount: viewCount,
+      isViewed: isViewed,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+    );

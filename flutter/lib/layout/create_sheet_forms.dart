@@ -84,12 +84,12 @@ import '../core/net/dio_client.dart' show ApiException;
 import '../pages/hub_support.dart' show aylaHubSortLive;
 import '../router/shell_config.dart' show AylaFabAction;
 import '../state/auth_state.dart';
+import '../state/chat_providers.dart' show chatStateProvider;
 import '../state/boardgame_store.dart' show aylaBoardgameStore;
 import '../state/directory_events.dart';
-import '../state/directory_store.dart' show aylaDirectoryStore;
-import '../state/paged_list.dart';
-import '../state/room_providers.dart'
-    show directoryEventsProvider, voiceStateProvider; // 事件总线已退役（见 state/directory_events.dart 文件头）
+import '../state/directory_store.dart'
+    show aylaDirectoryStore, AylaDirectoryController, AylaDirectoryOptions;
+import '../state/room_providers.dart' show voiceStateProvider;
 import '../theme/app_theme.dart' show AylaTextStyles;
 import '../theme/tokens.dart' show AylaSpacing;
 import '../widgets/base/directory_load_more.dart' show AylaDirectoryLoadMore;
@@ -141,6 +141,14 @@ Future<void> aylaDeleteSubgroup(String convId, String subgroupId) =>
 typedef AylaCreateLiveChannelFn =
     Future<AylaLiveChannelSnapshot> Function(String title, {String? group});
 
+/// 「我自己的直播间」取页的**默认实现**（web `useOwnedLiveDirectory` 的分页出口）。
+///
+/// ⚠️ 2026-10-20（G-7）：`AylaOwnedLivePicker` 已改为读共享目录缓存，取页由
+/// `AylaDirectoryStore` 统一承担（它的 live 分支就是调这个 API，参数同形），
+/// 因此本函数当前**不再被 picker 直接使用**；保留它是因为：
+/// ① [AylaOwnedLivePageRequest] 这个公开注入类型仍以此签名为准（测试/调用方按它写）；
+/// ② 生产取页的实际路径仍在 `AylaDirectoryStore._request` 的 live 分支。
+// ignore: unused_element
 Future<AylaDirectoryPage<AylaDirectoryLiveEntry>> _defaultOwnedLivePage(
   String? cursor,
   String? owner,
@@ -196,94 +204,72 @@ class AylaOwnedLivePicker extends ConsumerStatefulWidget {
 }
 
 class _AylaOwnedLivePickerState extends ConsumerState<AylaOwnedLivePicker> {
-  AylaPagedList<AylaDirectoryLiveEntry>? _directory;
+  /// 「我自己的直播间」目录 —— **读共享目录缓存**（web `useOwnedLiveDirectory` +
+  /// `useDirectoryPage("live", { owner: me })`，两者都是共享 store 投影）。
+  ///
+  /// ⚠️ **2026-10-20 全量普查修复（G-7）**：原实现有两处缺陷：
+  /// ① 用页面私有 `AylaPagedList`（不读共享 store）；
+  /// ② 订阅的是 **`directoryEventsProvider` 已退役的总线**（`state/directory_events.dart`
+  ///    文件头已声明退役；帧桥在注入了 store 时**不再 emit**）⇒ **死订阅**。
+  ///
+  /// ⇒ FAB「开始直播」与群内开播浮层的「我的直播间」列表对 `live.channel.*` 帧**零反应**
+  /// （新建/改名/开播/删除都不变）。换成共享 controller 后与 web 同构。
+  AylaDirectoryController<AylaDirectoryLiveEntry>? _directory;
 
-  /// 目录热更新事件总线（`live.channel.*` 帧；见 `state/directory_events.dart`）。
-  AylaDirectoryEvents? _directoryEvents;
-  int _directoryEventRevision = 0;
-
-  /// 目录游标失效（web hook 的 `invalidated`）：置位后由页脚自动刷新恢复。
-  bool _invalidated = false;
+  /// 目录游标失效（web hook 的 `invalidated`，由 controller 直接提供）。
+  bool get _invalidated => _directory?.invalidated ?? false;
 
   @override
   void initState() {
     super.initState();
     _startDirectory();
-    _registerDirectoryEvents();
   }
 
   @override
   void dispose() {
-    _directoryEvents?.removeListener(_onDirectoryEvents);
-    _directoryEvents = null;
     _directory?.removeListener(_onDirectoryChanged);
     _directory?.dispose();
     _directory = null;
     super.dispose();
   }
 
-  /// 建目录并首次取页（web `usePagedMediaList(key, fetchPage, Boolean(owner))`：
-  /// **owner 为空时不发请求**，浮层保持「无列表 + 新建键」）。
+  /// 建目录并首次取页（web `useOwnedLiveDirectory`：**owner 为空时不发请求**）。
   void _startDirectory() {
     final String? owner = ref.read(authNotifierProvider).user?.id;
-    final AylaPagedList<AylaDirectoryLiveEntry> directory =
-        AylaPagedList<AylaDirectoryLiveEntry>(
-          request: (String? cursor) =>
-              (widget.listPage ?? _defaultOwnedLivePage)(cursor, owner),
-          keyOf: (AylaDirectoryLiveEntry entry) => entry.card.id,
-        )..addListener(_onDirectoryChanged);
+    // ⚠️ 本 picker 的 [AylaOwnedLivePicker.listPage] 注入点**已随 D-档数据源改造下线**：
+    // 取页现在统一由 `AylaDirectoryStore` 承担（web `useOwnedLiveDirectory` 也是读共享 store）。
+    // 需要替换数据出口的测试请直接设 `aylaDirectoryStore.requestOverride`
+    //（`@visibleForTesting`，测试内可用 —— 与 `group_live_create_sheet_test.dart` 同法）。
+    final AylaDirectoryController<AylaDirectoryLiveEntry> directory =
+        AylaDirectoryController<AylaDirectoryLiveEntry>(
+      store: aylaDirectoryStore,
+      kind: AylaDirectoryKind.live,
+      // owner 为空 ⇒ 不取数（浮层保持「无列表 + 新建键」，与 web 的 enabled 参数同义）。
+      enabled: owner != null && owner.isNotEmpty,
+      options: AylaDirectoryOptions(owner: owner),
+    )..addListener(_onDirectoryChanged);
     _directory = directory;
-    if (owner != null && owner.isNotEmpty) unawaited(directory.load());
+    if (owner != null && owner.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(directory.load());
+      });
+    }
   }
 
   void _onDirectoryChanged() {
     if (mounted) setState(() {});
   }
 
-  /// 订阅目录事件（web hook `33–40` 的 `chatWS.onFrame`）：`live.channel.*` 帧
-  /// ⇒ 标记失效（页脚自动刷新）+ 删除帧就地移除条目。
-  void _registerDirectoryEvents() {
-    final AylaDirectoryEvents events = ref.read(directoryEventsProvider);
-    _directoryEvents = events;
-    _directoryEventRevision = events.revision;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      events.addListener(_onDirectoryEvents);
-    });
-  }
-
-  void _onDirectoryEvents() {
-    if (!mounted) return;
-    final AylaDirectoryEvents? events = _directoryEvents;
-    if (events == null || events.revision == _directoryEventRevision) return;
-    _directoryEventRevision = events.revision;
-    final AylaDirectoryEvent? event = events.last;
-    if (event == null || event.kind != AylaDirectoryKind.live) return;
-    // 人数帧（`live.viewers.changed`）不属于 `live.channel.` 命名空间 ⇒ web 不置失效。
-    if (event.memberCount != null) return;
-    if (event.deleted) {
-      _directory?.removeWhere(
-        (AylaDirectoryLiveEntry entry) => entry.card.id == event.id,
-      );
-    }
-    setState(() => _invalidated = true);
-  }
-
-  /// 重取首页；期间无新事件时清失效位（web hook `42–47 refreshPage` 的 revision 守卫）。
+  /// 重取首页（web hook `refreshPage`；失效位由 store 维护，刷新成功后自然清）。
   Future<void> _refresh() async {
-    final AylaPagedList<AylaDirectoryLiveEntry>? directory = _directory;
-    if (directory == null) return;
-    final int revision = _directoryEventRevision;
-    await directory.refresh();
-    if (!mounted) return;
-    if (_directoryEventRevision == revision) {
-      setState(() => _invalidated = false);
-    }
+    await _directory?.refresh();
   }
 
   @override
   Widget build(BuildContext context) {
-    final AylaPagedList<AylaDirectoryLiveEntry>? directory = _directory;
+    final AylaDirectoryController<AylaDirectoryLiveEntry>? directory =
+        _directory;
     return AylaLiveStartSheet(
       // 排序 = web `sortLiveChannels`（在播 > 曾播 > 从未），事实源全是后端持久字段。
       channels: directory == null
@@ -959,12 +945,39 @@ class _AylaCreateGroupFormState extends ConsumerState<AylaCreateGroupForm> {
   void _onDone(String conversationId) {
     final bool isPrivate = conversationId == _privateConversationId;
     _privateConversationId = null;
+    // ⚠️ **2026-10-20 全量普查修复（R6）**：web 在建群/私聊成功后**立即**
+    // `upsertConversation(conv)`（`GroupCreateDialog.tsx:56` 原话「立即更新会话列表，
+    // 让左侧栏 ServerRail 显示新群」）——Flutter 侧此前漏了这一步 ⇒ 新群要等
+    // 下一次会话列表刷新才出现，期间侧栏/群壳显示占位「群聊」。
+    //
+    // 这里用「按 id 对账」补上：建群返回的响应可能不含完整摘要，
+    // 因此拉一次权威摘要再 upsert（与 WS 帧的 REST 对账同法）；
+    // 失败静默 —— 侧栏的下一次列表刷新会兜底，不伪造半截摘要。
+    _seedConversation(conversationId);
     widget.onClose(); // tsx:57 / 73
     context.go(
       isPrivate
           ? '/chat/${Uri.encodeComponent(conversationId)}'
           : '/group/${Uri.encodeComponent(conversationId)}',
     );
+  }
+
+  /// 新建会话摘要入 `chatState`（web `upsertConversation`，`GroupCreateDialog.tsx:56`）。
+  ///
+  /// 账号守卫：往返期间换账号就丢弃（与各处 REST 对账同法）。
+  void _seedConversation(String conversationId) {
+    final String actor = ref.read(authNotifierProvider).user?.id ?? '';
+    unawaited(() async {
+      try {
+        final AylaConversationSummary conv =
+            await AylaChatApi.getConversationSummary(conversationId);
+        if (!mounted) return;
+        if ((ref.read(authNotifierProvider).user?.id ?? '') != actor) return;
+        ref.read(chatStateProvider).upsertConversation(conv);
+      } catch (_) {
+        // 静默：侧栏的下一次列表刷新会兜底，不伪造摘要。
+      }
+    }());
   }
 
   @override

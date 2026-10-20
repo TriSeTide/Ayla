@@ -252,8 +252,17 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     );
   }
 
+  /// 认证类帧（好友申请/群邀请/入群申请/成员离开）到达后的**相关列表重取**。
+  ///
+  /// ⚠️ **2026-10-20 全量普查修复（R1）**：web 的 `loadFriendsTab` 刷**五路**
+  /// （`MessagesPage.tsx:87–90`：`friendsPage` + 申请/邀请/入群/离开四路），
+  /// Flutter 此前只刷了后四路、**漏掉好友列表** ⇒ 别人加你好友后，好友 tab 不更新。
+  ///
+  /// 注意：好友列表**首次挂载后永不刷新**的问题也一并由这里承担 ——
+  /// 任何认证帧到达都会带上 `_friends`（若已建）一起刷。
   void _loadRequestsTab() {
     _ensureRequestsTab();
+    unawaited(_friends?.refresh());
     unawaited(_friendRequests?.refresh());
     unawaited(_invites?.refresh());
     unawaited(_joinRequests?.refresh());

@@ -91,6 +91,22 @@ class AylaDirectoryTracking {
         (Object d) => d is AylaLiveChannelSnapshot ? AylaDirectoryLiveEntry.fromSnapshot(d) : d;
     store.descriptorAdapters[AylaDirectoryKind.game] =
         (Object d) => d is AylaGameRoom ? _gameEntryOf(d) : d;
+    // ⚠️ **2026-10-20 全量普查修复（G-2）**：把 web 的 `cachedItems(kind)`
+    // （`stores/directory.ts:143–146`）注入进来。
+    //
+    // 它被 store 的取页路径用在两处（`directory_store.dart:723 / 758`）：
+    // - `descriptorsAtStart`（web `:279`）：请求发起时各条目的描述符快照；
+    // - `latestDescriptors`（web `:302–306`）：**请求返回时 store 里的最新描述符
+    //   优先于本页响应**（「请求开始之后到达的任意新对象都比这一页更新」）。
+    //
+    // 修复前这个 Map **全仓无注入点** ⇒ 两处恒为空 ⇒ 刷新时可能用**旧 REST 页**
+    // 覆盖掉 WS 刚到达的新描述符（人数/状态在界面上回跳）。
+    //
+    // 这里注入「域 store 当前快照」的三个投影（与 `_projectXxx` 同一份口径，
+    // 因此类型与 record 里的目录条目一致）。
+    store.cachedItemsGetter[AylaDirectoryKind.voice] = _projectVoice;
+    store.cachedItemsGetter[AylaDirectoryKind.live] = _projectLive;
+    store.cachedItemsGetter[AylaDirectoryKind.game] = _projectGame;
     _lastVoice = _projectVoice();
     _lastLive = _projectLive();
     _lastGame = _projectGame();

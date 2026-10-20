@@ -61,6 +61,12 @@ import '../state/chat_state.dart' show AylaChatState, aylaSortPrivateByActivity;
 import '../state/notices_state.dart'
     show AylaRealtimeNotice, AylaRealtimeNoticeKind;
 import '../state/paged_list.dart';
+import '../state/social_store.dart'
+    show
+        AylaSocialController,
+        AylaSocialKind,
+        AylaSocialOptions,
+        aylaSocialStore;
 import '../widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
 import '../widgets/chat/conversation_list.dart' show AylaConversationList;
 import '../widgets/chat/elysia_entry.dart' show AylaElysiaEntry;
@@ -84,7 +90,13 @@ class AylaQuickMessagesHost extends ConsumerStatefulWidget {
 }
 
 class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
-  AylaPagedList<AylaConversationSummary>? _conversations;
+  /// 私信会话列表 —— **读共享 social store**（web `QuickMessagesSheet` 的
+  /// `useSocialPage("conversations", { type: "private" })`）。
+  ///
+  /// ⚠️ **2026-10-20 全量普查修复（R2'）**：与 `messages_page` / `chat_support` 同病根 ——
+  /// 原实现用页面私有 `AylaPagedList` 快照 ⇒ 面板打开期间收到的新私信**不会出现**
+  /// （不显示新消息、不出预览、不涨未读）。这是 D1 漏修的第三个点。
+  AylaSocialController<AylaConversationSummary>? _conversations;
   AylaPagedList<AylaFriendRequest>? _friendRequests;
   AylaPagedList<AylaGroupInvite>? _invites;
   AylaPagedList<AylaGroupJoinRequest>? _joinRequests;
@@ -99,13 +111,9 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
   void initState() {
     super.initState();
     // 私信会话（web tsx 42：`useSocialPage("conversations", { type: "private" })`，恒开）。
-    _conversations = _pager<AylaConversationSummary>(
-      (String? cursor) => AylaChatApi.listConversationsPage(
-        limit: 30,
-        cursor: cursor,
-        type: 'private',
-      ),
-      (AylaConversationSummary c) => c.id,
+    // ⇒ 共享 social store 的私有 record（web `useSocialPage`，见字段注释）。
+    _conversations = _socialPager<AylaConversationSummary>(
+      const AylaSocialOptions(type: 'private'),
     );
     // 认证四路**懒加载**：web tsx 44–51 的 `useSocialPage(kind, {}, tab === "requests")`
     // 只在认证 tab 打开时取数（切 tab 触发 `_ensureRequests`）；徽标来自 badgesProvider，不依赖它们。
@@ -122,12 +130,27 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
   @override
   void dispose() {
     _frameOff?.call();
+    _conversations?.removeListener(_onPagerChanged);
     _conversations?.dispose();
     _friendRequests?.dispose();
     _invites?.dispose();
     _joinRequests?.dispose();
     _leaveNotices?.dispose();
     super.dispose();
+  }
+
+  /// 共享 social store 的分页控制器（web `useSocialPage`）。
+  ///
+  /// 与 [_pager] 的差别正是 R2' 的修复点：数据归**全局 store**，本面板只是读投影
+  /// ⇒ `message.new` → chatState → `AylaSocialTracking` 回写 → store 通知 → 重建。
+  AylaSocialController<T> _socialPager<T>(AylaSocialOptions options) {
+    final AylaSocialController<T> controller = AylaSocialController<T>(
+      store: aylaSocialStore,
+      kind: AylaSocialKind.conversations,
+      options: options,
+    )..addListener(_onPagerChanged);
+    unawaited(controller.load());
+    return controller;
   }
 
   AylaPagedList<T> _pager<T>(
@@ -285,7 +308,7 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
   /// 快捷栏是**单页**（无 `/chat/:id` 路由），点会话/爱莉**内联**打开；
   /// 头像一律不可点（tsx 227 的 `disableAvatarNav`）。
   Widget _privatePanel(AylaElysiaProfile? entryProfile) {
-    final AylaPagedList<AylaConversationSummary>? pager = _conversations;
+    final AylaSocialController<AylaConversationSummary>? pager = _conversations;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[

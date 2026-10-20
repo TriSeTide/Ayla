@@ -30,11 +30,14 @@
 ///   本页 memoryKey 用 favorites 加当前分类键（web 版还含 user_id）。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/favorites_api.dart';
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../core/models/chat_message.dart' show AylaChatMessage;
 import '../state/auth_state.dart' show authNotifierProvider;
 import '../state/favorite_status.dart';
@@ -98,6 +101,16 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
   /// 本轮本地已删除的收藏 id（web 的 owner.removed 墓碑）。
   final Set<int> _removed = <int>{};
 
+  /// `favorite.changed` 帧解绑句柄（web `FavoritesPage.tsx:235–248` 的 `useEffect` 订阅）。
+  ///
+  /// ⚠️ **2026-10-20 全量普查修复（R2）**：本页此前**完全没有**订阅 chat WS ——
+  /// 用户在别处收藏一条内容，本页不出现；在别处取消收藏，本页残留。
+  /// web 的做法（`tsx:235–248`）：
+  /// - `action === "removed"` ⇒ 从本地列表就地移除该 `favorite_id`；
+  /// - 否则（added）⇒ 把本账号全部 tab 标 `stale` + 当前视图标 `stale`，
+  ///   由自动 stale 重取把新条目拉回来（**不直接插入**：新收藏的完整字段只有服务端有）。
+  void Function()? _frameOff;
+
   /// 刷新重播计数（web `replayNonce`，`FavoritesPage.tsx:156·200`）。
   ///
   /// web 的两条刷新重播路径（本页只可能有前者）：
@@ -142,7 +155,61 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
       ready: false,
     )..attach();
     _start();
+    _registerFrameTracking();
   }
+
+  /// 挂 `favorite.changed` 监听（web `FavoritesPage.tsx:235–248`）。
+  void _registerFrameTracking() {
+    _frameOff = ref.read(chatWsProvider).onFrame(_onFrame);
+  }
+
+  /// 帧分发 —— 逐条对应 web `FavoritesPage.tsx:236–248`。
+  void _onFrame(Map<String, dynamic> frame) {
+    if (!mounted) return;
+    if (frame['type'] != 'favorite.changed') return;
+    final Object? raw = frame['data'];
+    if (raw is! Map) return;
+    final Map<String, dynamic> data = Map<String, dynamic>.from(raw);
+    final int? favoriteId = int.tryParse(data['favorite_id']?.toString() ?? '');
+    if (favoriteId == null) return;
+    final AylaPagedList<AylaFavoriteEntry>? pager = _pager;
+    if (pager == null) return;
+    if (data['action'] == 'removed') {
+      // tsx:239 `removeLocal(favorite_id, target_type)`：就地移除（不改游标）。
+      _removed.add(favoriteId);
+      pager.removeWhere(
+        (AylaFavoriteEntry e) => e.card.id == favoriteId,
+      );
+      return;
+    }
+    // tsx:240–247：新增收藏 ⇒ 标 stale 后由自动重取拉回首页
+    //（新收藏的完整字段只有服务端有，不本地伪造条目）。
+    if (!mounted) return;
+    setState(() => _stale = true);
+    unawaited(_refreshIfStale());
+  }
+
+  /// 「有新收藏待拉取」标记（web 的 `state.stale`）。
+  bool _stale = false;
+
+  /// 自动 stale 重取（web `FavoritesPage.tsx:264–266` 的 effect）。
+  ///
+  /// 保证同一时刻至多一次在飞；失败则保留 stale 标记，下次手动刷新仍会补。
+  Future<void> _refreshIfStale() async {
+    if (!_stale || _refreshing) return;
+    final AylaPagedList<AylaFavoriteEntry>? pager = _pager;
+    if (pager == null) return;
+    _refreshing = true;
+    try {
+      await pager.refresh();
+      if (mounted && pager.error == null) setState(() => _stale = false);
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  /// stale 重取是否在飞（防止帧风暴打爆请求）。
+  bool _refreshing = false;
 
   @override
   void didUpdateWidget(covariant FavoritesPage oldWidget) {
@@ -159,6 +226,8 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
 
   @override
   void dispose() {
+    _frameOff?.call();
+    _frameOff = null;
     _restore.dispose();
     _pager?.dispose();
     _scroll.dispose();

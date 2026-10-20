@@ -29,6 +29,7 @@ import 'package:go_router/go_router.dart';
 import '../lib/core/api/directory_page.dart' show AylaDirectoryPage;
 import '../lib/core/api/live_api.dart' show AylaDirectoryLiveEntry;
 import '../lib/core/net/dio_client.dart' show ApiException;
+import '../lib/layout/create_sheet_forms.dart' show AylaOwnedLivePageRequest;
 import '../lib/pages/group_live_page.dart';
 import '../lib/state/auth_state.dart';
 import '../lib/state/directory_events.dart' show AylaDirectoryKind;
@@ -122,7 +123,25 @@ void main() {
       AylaDirectoryOptions options,
       String? cursor,
     ) async {
-      if (kind != AylaDirectoryKind.live || options.groupId != 'g1') {
+      if (kind != AylaDirectoryKind.live) {
+        return _page<Object>(<Object>[]);
+      }
+      // 群内直播目录（options.groupId == g1）走注入的 loader；
+      // 「我的直播间」目录（options.owner != null，供「群内开播」浮层的选择器用）
+      // 走 ownedLivePage —— 两者现在都是**同一个共享 store** 的不同 record。
+      if (options.owner != null) {
+        final AylaOwnedLivePageRequest? owned = aylaGroupLivePageOwnedLivePage;
+        if (owned == null) return _page<Object>(<Object>[]);
+        final AylaDirectoryPage<AylaDirectoryLiveEntry> page =
+            await owned(cursor, options.owner);
+        return AylaDirectoryPage<Object>(
+          results: page.results.cast<Object>(),
+          total: page.total,
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor,
+        );
+      }
+      if (options.groupId != 'g1') {
         return _page<Object>(<Object>[]);
       }
       final AylaGroupLiveDirectoryLoader? loader =

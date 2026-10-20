@@ -42,8 +42,11 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../../state/chat_state.dart';
-import '../../state/posts_store.dart' show AylaPostsStore;
+import '../../state/posts_store.dart'
+    show AylaPostTabCache, AylaPostsStore;
 import '../api/posts_api.dart';
 import '../models/post.dart' show AylaPost;
 import '../net/dio_client.dart' show ApiException;
@@ -73,14 +76,34 @@ class AylaPostsFramesBridge {
     required AylaChatState chatState,
     required String? Function() currentUserId,
     int Function()? now,
+    AylaPostTabCache? postTabCache,
   })  : _posts = postsStore,
         _chat = chatState,
         _currentUserId = currentUserId,
-        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
+        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
+        _postTabCache = postTabCache;
 
   final AylaPostsStore _posts;
   final AylaChatState _chat;
   final String? Function() _currentUserId;
+
+  /// **一级帖子页的 tab 分页快照缓存**（web 模块级 `postTabPages`，`PostsHubPage.tsx:77`）。
+  ///
+  /// ⚠️ **2026-10-20 全量普查修复 —— 用户实报「群外发帖刷不出来、群内可以」的根因**。
+  ///
+  /// 这份缓存与 [AylaPostsStore] 是**两份不同的数据**：
+  /// - [AylaPostsStore]：全局信息流（群内帖子页 / 主页活动源读它）—— 本桥**早已**维护；
+  /// - [AylaPostTabCache]：**一级帖子页**的 tab 分页快照（不在全局 store 里）——
+  ///   修复前**只有页面自己**挂在 `chat.onFrame` 上的监听会更新它。
+  ///
+  /// 页面一被导航走（发帖后 `context.go` 跳详情页、切到别的 tab……），那个监听就
+  /// `unregister` ⇒ 期间到达的 `post.created` **全部丢失**；返回列表时又命中
+  /// `shouldLoad` 的 60 秒新鲜窗口 ⇒ **不重拉** ⇒ 新帖不出现。
+  ///
+  /// web 侧同病（`chatWS.onFrame` 同样在 `useEffect` 里、随卸载解绑）——
+  /// 按要求在 Flutter 侧**补上全局写法**（比 web 更正确）：帧桥持有缓存引用，
+  /// 页面挂不挂载都能维护它。
+  final AylaPostTabCache? _postTabCache;
 
   /// 时钟注入口（测试用；生产恒为 `DateTime.now`）。
   final int Function() _now;
@@ -122,6 +145,9 @@ class AylaPostsFramesBridge {
         final int? postId = _postIdOf(frame, fromPost: false);
         if (postId == null) return;
         _posts.removePost(postId);
+        // 一级帖子页的 tab 快照同步摘除（web `PostsHubPage.tsx:237–241` 的
+        // `removeFromAllTabs`；页面未挂载时同样要摘，否则切回旧 tab 会复活已删帖）。
+        _postTabCache?.removeFromAllTabs(postId);
       case 'post.viewed':
         _applyViewed(frame);
       default:
@@ -150,6 +176,10 @@ class AylaPostsFramesBridge {
       if (post == null) return;
       _posts.upsertPost(post);
       _bumpGroups(_visibleGroupIds(post));
+      // 一级帖子页的 tab 快照同步合并（web `PostsHubPage.tsx:245–261` 的 `update(...)`：
+      // 已存在则原位替换、不存在则插到头部）。**关键**：这里在帧桥做，
+      // 页面挂不挂载都生效 —— 修复前只有页面级监听会做，导航期间到达的帧会丢。
+      _mergeIntoPostTabs(post);
       if (!bumpUnread) return;
       // ---- 群未读帖子数 +1（web 779–788）----
       // 作者自己发的帖子天然已读 ⇒ 不计（`docs/post_views_read_state.md`）。
@@ -170,6 +200,19 @@ class AylaPostsFramesBridge {
     } catch (_) {
       // 网络层失败：下一次事件或显式刷新会纠正 —— 静默，不伪造条目
     }
+  }
+
+  /// 测试入口：直接驱动「合并进 tab 快照」这一步（等价 `post.created` 的 REST 对账成功后的落点）。
+  @visibleForTesting
+  void mergePostIntoTabsForTest(AylaPost post) => _mergeIntoPostTabs(post);
+
+  /// 把一条帖子合并进一级帖子页的 tab 快照（web `PostsHubPage.tsx:245–261`）。
+  ///
+  /// 未注入缓存（单元测试/极端装配）时静默跳过 —— 不伪造，也不因此中断后面的未读逻辑。
+  void _mergeIntoPostTabs(AylaPost post) {
+    // 传当前用户：帧桥负责按 tab 口径过滤（「我的」档只收自己的、
+    // 「好友」档不在本层判、`public` 档看 visibility）—— 见 mergeIntoAllTabs 注释。
+    _postTabCache?.mergeIntoAllTabs(post, currentUserId: _currentUserId());
   }
 
   /// `post.viewed`（web `chat.ts:814–839`）：

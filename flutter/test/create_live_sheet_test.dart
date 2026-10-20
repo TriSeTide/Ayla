@@ -26,6 +26,9 @@ import '../lib/core/net/dio_client.dart' show ApiException;
 import '../lib/layout/app_shell.dart';
 import '../lib/layout/create_sheet_forms.dart';
 import '../lib/state/auth_state.dart';
+import '../lib/state/directory_events.dart' show AylaDirectoryKind;
+import '../lib/state/directory_store.dart'
+    show aylaDirectoryStore, AylaDirectoryOptions;
 import '../lib/theme/app_theme.dart';
 import '../lib/theme/buttons.dart' show AylaCreateFab;
 import '../lib/theme/glass.dart' show AylaGlassButton;
@@ -136,6 +139,33 @@ void main() {
     container.read(authNotifierProvider.notifier)
       ..setTokens('access', 'refresh')
       ..setUser(_me);
+    // ⚠️ **2026-10-20（G-7）**：`AylaOwnedLivePicker` 的数据源已从
+    // 「页面私有 AylaPagedList + listPage 回调」改为 **读共享目录缓存**
+    // （web `useOwnedLiveDirectory` 同构）⇒ 取页由 `AylaDirectoryStore` 承担。
+    // 因此测试的数据出口注入点随之改为 store 的 `requestOverride`
+    //（`@visibleForTesting`，测试内可用），只接管 live + 本 owner 的那档。
+    aylaDirectoryStore.userId = _me.id;
+    aylaDirectoryStore.requestOverride = (
+      AylaDirectoryKind kind,
+      AylaDirectoryOptions options,
+      String? cursor,
+    ) async {
+      if (kind != AylaDirectoryKind.live) {
+        return const AylaDirectoryPage<Object>(results: <Object>[], total: 0);
+      }
+      final AylaDirectoryPage<AylaDirectoryLiveEntry> page =
+          await listPage(cursor, options.owner);
+      return AylaDirectoryPage<Object>(
+        results: page.results.cast<Object>(),
+        total: page.total,
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      );
+    };
+    addTearDown(() {
+      aylaDirectoryStore.requestOverride = null;
+      aylaDirectoryStore.reset();
+    });
     final VoidCallback close = onClose ?? () {};
     Future<AylaLiveChannelSnapshot> unused(
       String title, {
@@ -152,7 +182,6 @@ void main() {
             child: AylaCreateLiveForm(
               groupId: groupId,
               onClose: close,
-              listPage: listPage,
               createChannel: createChannel ?? unused,
             ),
           ),

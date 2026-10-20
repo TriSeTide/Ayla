@@ -38,6 +38,7 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../core/models/post.dart' show AylaPost;
+import '../core/models/visibility.dart' show AylaPostVisibility;
 import 'paged_list.dart' show AylaPageRequest, AylaPagedList;
 
 /// 信息流缓存窗口（web `isPostsStale` 默认 `60_000`，`stores/posts.ts:147`）。
@@ -355,6 +356,72 @@ class AylaPostTabCache {
         for (final AylaPost p in pager.items)
           if (p.id != postId) p,
       ]);
+    }
+  }
+
+  /// 把一条帖子**合并进全部已加载 tab 的投影** —— 已存在则原位替换、不存在则插到头部
+  /// （web `PostsHubPage.tsx:245–261` 的 `update(...)`，语义逐条同源）。
+  ///
+  /// ## 为什么需要（2026-10-20 全量普查修复）
+  /// 用户实报「群外（一级）发帖后新帖不刷出来，但群内帖子页可以」。
+  /// 根因：一级页的分页快照在这份缓存里，而**只有页面自己的 `chat.onFrame`** 会写它
+  /// （`posts_hub_page.dart:_onFrame`）；页面一被导航走（发帖后跳详情页）监听就解绑
+  /// ⇒ 期间的 `post.created` 丢失 + 返回时命中 60 秒窗口不重拉。
+  ///
+  /// ⇒ 由**全局帧桥**（`core/ws/posts_frames.dart`）在页面之外维护，页面挂不挂载都生效。
+  ///
+  /// 与 [removeFromAllTabs] 对称：
+  /// - 只动 `items`，**不动游标 / hasMore / updatedAt**（同 web：只重写 posts 字段）；
+  /// - 已存在 ⇒ 原位替换（保持位置，不改排序）；不存在 ⇒ 头部插入（web 的 `[post, ...]`）。
+  void mergeIntoAllTabs(AylaPost post, {String? currentUserId}) {
+    // ⚠️ **必须按 tab 口径过滤**（2026-10-20 普查 A 指出的伴生风险，已修）：
+    // 各 tab 的 record 是**不同的后端查询**（`scope=feed/mine`、`visibility`、`friends`），
+    // 一条新帖不一定属于每个 tab。例如「我的」档是 `scope=mine`（后端按作者过滤），
+    // 若把别人的帖子也插进去就会污染该 tab。
+    //
+    // 这里按 key 里的 filter 段做**保守**判定：
+    // - `mine` 档：只收作者 === 当前用户的；
+    // - `public` 档：只收 visibility === public 的（其余档交给后端二次取页纠正）；
+    // - `friends` 档：无法在此判断好友关系 ⇒ **不收**（等下次取页，宁缺不脏）；
+    // - `all` / `hot` 档：全收。
+    for (final MapEntry<String, AylaPagedList<AylaPost>> entry
+        in _pagers.entries) {
+      final AylaPagedList<AylaPost> pager = entry.value;
+      if (!_tabAcceptsPost(entry.key, post, currentUserId)) continue;
+      final int index = pager.items.indexWhere((AylaPost p) => p.id == post.id);
+      if (index >= 0) {
+        // 原位替换（**不重排** —— 保持用户当前看到的顺序）。
+        final List<AylaPost> next = List<AylaPost>.of(pager.items);
+        next[index] = post;
+        pager.setItems(next);
+      } else if (pager.loaded) {
+        // 只往**已加载过**的 tab 里插入：从未拉过首页的 tab 若被塞一条，
+        // 会与随后的首屏结果重复/错序（web 侧同样只在已有状态上 update）。
+        pager.setItems(<AylaPost>[post, ...pager.items]);
+      }
+    }
+  }
+
+  /// 该 tab（按 key 的 filter 段）是否应该收下这条帖子。
+  ///
+  /// key 形如 `posts:{account}:{filter}` —— 取最后一段作 filter。
+  static bool _tabAcceptsPost(
+    String key,
+    AylaPost post,
+    String? currentUserId,
+  ) {
+    final int at = key.lastIndexOf(':');
+    final String filter = at >= 0 ? key.substring(at + 1) : 'all';
+    switch (filter) {
+      case 'mine':
+        return currentUserId != null && post.authorId == currentUserId;
+      case 'public':
+        return post.visibility == AylaPostVisibility.public;
+      case 'friends':
+        // 好友关系不在本层可知 ⇒ 保守不收（等下次取页由后端判定）。
+        return false;
+      default:
+        return true;
     }
   }
 

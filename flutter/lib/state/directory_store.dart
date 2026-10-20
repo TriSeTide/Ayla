@@ -523,6 +523,23 @@ class AylaDirectoryStore extends ChangeNotifier {
           for (final Object item in record.items)
             if (!filtered.any((Object c) => _itemKey(c) == _itemKey(item))) item,
         ];
+        // ⚠️ **2026-10-20 全量普查修复（G-1）：分类状态从 false→true 也算「新增」。**
+        //
+        // 原判据（与 web `stores/directory.ts:166–171` 逐字同源）只认两件事：
+        //   ① `_createdIds` 创建提示（**只有 *.created 帧登记**）；
+        //   ② `_matchesQuery` 的**查询维度** false→true（只含 groupId / onlyLive）。
+        // ⇒ 「一个**已存在**的房从 0 人变 N 人」这个最常见场景：
+        //   它不在 occupied 档 items 里、没有创建提示、查询维度也没变
+        //   ⇒ **added 为空**；且 `membershipChanged=false` ⇒ **连 invalidated 都不置**，
+        //   页脚的自动刷新兜底也不触发。
+        //
+        // 这条机制打中 **5 个状态档**：语音 occupied、直播 live/offline、
+        // 桌游 waiting/playing。用户实报的「进了一个语音房，『有人』选项卡
+        // 依然没有实时刷出这个房间」正是它。
+        //
+        // **有意偏离 web**：`_matchesFilter` 的语义就是「该条目是否属于本分类」，
+        // 从「不属于」变「属于」在语义上就是**新增进本档**。web 只在 total 里用它，
+        // 导致 items 与 total 不一致（total 涨了、列表却没这条）—— 那是 web 的缺陷。
         final List<Object> added = _mergingPage
             ? const <Object>[]
             : <Object>[
@@ -532,7 +549,10 @@ class AylaDirectoryStore extends ChangeNotifier {
                       _matchesQueryOf(record, item) &&
                       (_createdIds[kind]!.containsKey(_itemKey(item)) ||
                           (before[_itemKey(item)] != null &&
-                              !_matchesQueryOf(record, before[_itemKey(item)]!))))
+                              !_matchesQueryOf(record, before[_itemKey(item)]!)) ||
+                          (before[_itemKey(item)] != null &&
+                              !_matchesFilterOf(record,
+                                  before[_itemKey(item)]!, currentUserId))))
                     after[_itemKey(item)]!,
               ];
         final bool membershipChanged =

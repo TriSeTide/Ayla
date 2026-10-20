@@ -93,6 +93,8 @@ class AylaRoomDirectoryBridge {
     AylaChatState? chatState,
     AylaRealtimeState? realtime,
     AylaGroupPresenceReconciler? groupPresence,
+    Future<AylaVoiceChannelSnapshot> Function(String channelId)?
+        voiceChannelLoader,
   })  : _voice = voiceState,
         _live = liveState,
         _directory = directory,
@@ -101,10 +103,16 @@ class AylaRoomDirectoryBridge {
         _currentUserId = currentUserId,
         _chat = chatState,
         _realtime = realtime,
-        _presence = groupPresence;
+        _presence = groupPresence,
+        _voiceChannelLoader = voiceChannelLoader;
 
   final AylaVoiceState _voice;
   final AylaLiveState _live;
+
+  /// 语音房详情取数（`GET /voice/channels/<id>/`）—— 生产恒 null ⇒ 走真实 API；
+  /// **测试注入点**（回归锁要验证「REST 对账真的被调用」而不打网络）。
+  final Future<AylaVoiceChannelSnapshot> Function(String channelId)?
+      _voiceChannelLoader;
 
   /// 会话全局状态（web 的 `useChatStore`）—— **只用于「新内容 → 群往前排」的 bump**
   /// （web `ws/chat.ts:115–118` 的 `bumpGroups`；三处调用 `:674 / :715–717 / :737–741`）。
@@ -349,8 +357,12 @@ class AylaRoomDirectoryBridge {
     if (channelId.isEmpty) return;
     final String? actor = _currentUserId();
     try {
-      final AylaVoiceChannelSnapshot channel =
-          await AylaVoiceApi.getVoiceChannel(channelId);
+      // 注入优先（测试验证「对账确实被调用」）；生产恒 null ⇒ 真实 REST。
+      final Future<AylaVoiceChannelSnapshot> Function(String)? loader =
+          _voiceChannelLoader;
+      final AylaVoiceChannelSnapshot channel = loader != null
+          ? await loader(channelId)
+          : await AylaVoiceApi.getVoiceChannel(channelId);
       if (actor != _currentUserId()) return;
       // ① 落域 store —— 目录缓存由 store 订阅通路（`directory_tracking.dart`）patch，
       // 这正是 web 的机制（`chat.ts:672` → `stores/directory.ts:211–213`）。
@@ -389,13 +401,27 @@ class AylaRoomDirectoryBridge {
     final Object? occupied = data['last_occupied_at'];
     final Object? vacant = data['last_vacant_at'];
     final bool frameHasSort = occupied != null || vacant != null;
+    // ⚠️ **必须区分「patch 生效」与「本就没有这条」**（2026-10-20 全量普查修复）。
+    //
+    // `patchChannel` 的语义是「只改已加载的条目」——`prev == null` 时直接 return
+    // （`voice_state.dart:180–181`）。而 `frameHasSort == true` 时旧实现**不做 REST 对账**
+    // ⇒ 该频道若从未被目录页灌进域 store（用户没打开过它的列表），
+    // **整帧被静默丢弃**：人数不更新、目录缓存无 diff、「有人」选项卡永远看不到它。
+    //
+    // 这正是用户实报「进了一个语音房，语音页面的『有人』选项卡依然没有实时刷出这个房间」
+    // 的根因。**web 侧存在同样的缺陷**（`ws/chat.ts:685–719` 的 `patchChannel` 同样是
+    // 「只在已存在时改」+ `frameHasSort` 时不对账），按要求一并在此补上（比 web 更正确）。
+    //
+    // 判据：帧到达前本地**没有**这个频道 ⇒ 必须 REST 对账把权威描述符拉进来
+    // （`upsertChannel` 走的是「不存在则追加」，与 patch 的「只改已有」互补）。
+    final bool needsReconcile = prev == null || !frameHasSort;
     _voice.patchChannel(
       channelId,
       memberCount: count,
       lastOccupiedAt: occupied?.toString(),
       lastVacantAt: vacant?.toString(),
     );
-    if (!frameHasSort) {
+    if (needsReconcile) {
       unawaited(_reconcileVoiceChannel(channelId));
     }
     // web `chat.ts:714–717`：**有人进入（人数增加）⇒ 群卡片往前排**；

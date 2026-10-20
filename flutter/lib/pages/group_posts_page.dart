@@ -753,9 +753,21 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     });
   }
 
+  /// 合并时用「本地帧变更」压过 REST 结果（web `GroupPosts.tsx:131` 的 `mutations.get(id)`）。
+  ///
+  /// 若该帖在本次会话里收到过 `post.updated` 帧（`_mutations[id].post != null`），
+  /// 就以帧里的版本为准；否则原样返回 REST 条目。
+  AylaPost _localMutationWins(AylaPost incoming) {
+    final _FrameMutation? m = _mutations[incoming.id];
+    final AylaPost? local = m?.post;
+    return local ?? incoming;
+  }
+
   /// 取一页（`append` = 追加下一页）。
   Future<void> _load({bool append = false}) async {
     if (append && (_loadingMore || !_hasMore || _cursor == null)) return;
+    // ★ 请求发起时的本地变更序号（web `GroupPosts.tsx:140` 的 `mutationRevision` 判据）。
+    final int mutationAtStart = _mutationRevision;
     setState(() {
       if (append) {
         _loadingMore = true;
@@ -780,10 +792,32 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
         });
         return;
       }
-      final Map<String, AylaPost> merged = <String, AylaPost>{
-        if (append) for (final AylaPost p in _posts) '${p.id}': p,
-        for (final AylaPost p in page.results) '${p.id}': p,
-      };
+      // ★ **墓碑 + 本地变更优先**（2026-10-20 全量普查修复 P2-1）。
+      //
+      // 此前 `_deletedIds` / `_mutations` 只在帧分支里**写**，`_load` 的合并处从不读 ⇒
+      // ① 在 `post.deleted` 之前发出的 REST 响应会把**已删帖复活**；
+      // ② 早于 WS 帧的旧响应会把**刚更新的帖子内容覆盖回去**。
+      // web `GroupPosts.tsx:128/131/140` 正是在合并处消费这两个集合。
+      final Map<String, AylaPost> merged = <String, AylaPost>{};
+      if (append) {
+        for (final AylaPost p in _posts) {
+          if (_deletedIds.contains(p.id)) continue;
+          merged['${p.id}'] = _localMutationWins(p);
+        }
+      } else {
+        // 首屏：保留「本次请求期间被帧改过」的本地版本（web 的 `preserved`）。
+        for (final AylaPost p in _posts) {
+          if (_deletedIds.contains(p.id)) continue;
+          final _FrameMutation? m = _mutations[p.id];
+          if (m != null && m.revision > mutationAtStart) {
+            merged['${p.id}'] = p;
+          }
+        }
+      }
+      for (final AylaPost p in page.results) {
+        if (_deletedIds.contains(p.id)) continue;
+        merged['${p.id}'] = _localMutationWins(p);
+      }
       setState(() {
         _posts = merged.values.toList(growable: false);
         _cursor = page.nextCursor;

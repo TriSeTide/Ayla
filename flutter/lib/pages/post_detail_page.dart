@@ -174,6 +174,21 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
   int _commentsReplay = 0;
   AylaPostComment? _replyTarget;
 
+  /// **已删评论墓碑**（web `usePostComments` 的 `current.deleted`，
+  /// `usePostComments.ts:92 / 111`）。
+  ///
+  /// ⚠️ **2026-10-20 全量普查修复（P2-3）**：此前只做了「收到 deleted 帧就从本地列表移除」，
+  /// 但**没有墓碑** ⇒ 一个仍在途/稍后触发的 `_loadComments` REST 响应会把那条**已删评论
+  /// 又插回来**（web 用 `deleted` 集合在合并处过滤，正是防这个）。
+  final Set<int> _deletedComments = <int>{};
+
+  /// **评论本地变更序号**（web 的 `current.changed` + `mutation`，`usePostComments.ts:96–99`）。
+  ///
+  /// 用于「旧响应不覆盖新内容」：请求发起时记下 `mutationAtStart`，响应回来时
+  /// 只保留**该请求开始之后被本地改过**的条目。
+  int _commentsMutation = 0;
+  final Map<int, int> _commentChangedAt = <int, int>{};
+
   // ---- 编辑态（tsx 121–133）----
   bool _editing = false;
   bool _saving = false;
@@ -298,6 +313,7 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
       if (incoming == null) return;
       // hook 111：`current.deleted.has(comment.id)` —— 本地已删过的不复活。
       if (_comments.any((AylaPostComment c) => c.id == incoming.id)) return;
+      if (_deletedComments.contains(incoming.id)) return;
       _comments = <AylaPostComment>[..._comments, incoming];
       _commentsReplay += 1;
     });
@@ -310,6 +326,10 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
     if (commentId == null) return;
     final int? count = (data['comment_count'] as num?)?.toInt();
     setState(() {
+      // ★ 墓碑（web `usePostComments.ts:92` 的 `deleted.add`）：记下 id，
+      // 后续任何 REST 合并都要过滤掉它，否则已删评论会被旧响应复活。
+      _deletedComments.add(commentId);
+      _commentChangedAt[commentId] = ++_commentsMutation;
       final AylaPost? post = _post;
       if (post != null && count != null) {
         _post = _copyPost(post, commentCount: count);
@@ -436,6 +456,8 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
     if (id == null || _commentsLoading) return;
     if (append && !_commentsHasMore) return;
     final int rev = ++_commentsRev;
+    // ★ 记录请求发起时的变更序号（web `mutationAtStart`，`usePostComments.ts:99`）。
+    final int mutationAtStart = _commentsMutation;
     setState(() {
       _commentsLoading = true;
       _commentsError = null;
@@ -451,10 +473,25 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
       final Map<String, AylaPostComment> merged = <String, AylaPostComment>{};
       if (append) {
         for (final AylaPostComment c in _comments) {
+          // 墓碑过滤（web `rows.filter(item => !current.deleted.has(item.id))`）。
+          if (_deletedComments.contains(c.id)) continue;
           merged[c.id.toString()] = c;
+        }
+      } else {
+        // 首屏：保留「请求发起之后被本地改过」的条目（web 的 `preserved`，
+        // `usePostComments.ts:96–97`）—— 否则一个早于 WS 帧的 REST 快照会把
+        // 刚更新的评论内容覆盖回旧版本。
+        for (final AylaPostComment c in _comments) {
+          if (_deletedComments.contains(c.id)) continue;
+          final int? changedAt = _commentChangedAt[c.id];
+          if (changedAt != null && changedAt > mutationAtStart) {
+            merged[c.id.toString()] = c;
+          }
         }
       }
       for (final AylaPostComment c in page.results) {
+        // 墓碑过滤（新到达的结果里也不能复活已删评论）。
+        if (_deletedComments.contains(c.id)) continue;
         merged[c.id.toString()] = c;
       }
       setState(() {

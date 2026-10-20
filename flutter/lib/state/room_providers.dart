@@ -41,7 +41,7 @@ import 'directory_events.dart';
 import 'directory_store.dart' show aylaDirectoryStore;
 import 'directory_tracking.dart' show AylaDirectoryTracking;
 import 'live_state.dart';
-import 'posts_store.dart' show aylaPostsStore;
+import 'posts_store.dart' show aylaPostTabCache, aylaPostsStore;
 import 'session_activity_state.dart';
 import 'voice_state.dart';
 
@@ -232,6 +232,9 @@ final Provider<AylaPostsFramesBridge> postsFramesBridgeProvider =
     postsStore: aylaPostsStore,
     chatState: ref.read(chatStateProvider),
     currentUserId: () => container.read(authNotifierProvider).user?.id,
+    // 一级帖子页的分页快照缓存（web 模块级 `postTabPages`）—— 由帧桥在**页面之外**
+    // 维护，页面被导航走期间的 `post.created` 不会再丢（2026-10-20 全量普查修复）。
+    postTabCache: aylaPostTabCache,
   );
   ref.onDispose(bridge.detach);
   return bridge;

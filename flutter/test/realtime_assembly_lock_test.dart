@@ -21,6 +21,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/api/boardgame_api.dart' show AylaDirectoryGameEntry;
 import '../lib/core/api/directory_page.dart' show AylaDirectoryPage;
+import '../lib/core/api/voice_api.dart'
+    show AylaDirectoryVoiceEntry, AylaVoiceChannelSnapshot;
+import '../lib/widgets/voice/voice_channels.dart' show AylaVoiceCardData;
 import '../lib/core/net/dio_client.dart' show AuthTokenStore;
 import '../lib/core/ws/room_frames.dart';
 import '../lib/core/ws/ws_manager.dart';
@@ -38,13 +41,12 @@ import '../lib/core/models/conversation.dart'
         AylaConversationSummary,
         AylaConversationType,
         AylaLastMessagePreview;
-import '../lib/core/models/chat_message.dart' show AylaMessageType;
-import '../lib/core/models/conversation.dart'
-    show
-        AylaConversationSummary,
-        AylaConversationType,
-        AylaLastMessagePreview;
 import '../lib/core/models/game_room.dart' show AylaGameCardData, AylaGameRoom;
+import '../lib/core/models/post.dart' show AylaPost;
+import '../lib/core/ws/posts_frames.dart' show AylaPostsFramesBridge;
+import '../lib/state/paged_list.dart' show AylaPagedList;
+import '../lib/state/posts_store.dart'
+    show AylaPostTabCache, AylaPostsStore;
 import '../lib/core/models/user_public.dart' show AylaUserPublic;
 import '../lib/state/social_store.dart'
     show
@@ -54,14 +56,22 @@ import '../lib/state/social_store.dart'
         AylaSocialStore,
         AylaSocialTracking;
 import '../lib/state/subgroup_state.dart' show AylaSubGroupState;
-import '../lib/state/social_store.dart'
-    show
-        AylaSocialController,
-        AylaSocialKind,
-        AylaSocialOptions,
-        AylaSocialStore,
-        AylaSocialTracking;
-import '../lib/state/subgroup_state.dart' show AylaSubGroupState;
+
+/// 快照 → 目录条目（与 production 的 `directory_tracking.dart` 投影同口径）。
+AylaDirectoryVoiceEntry _voiceEntryOf(AylaVoiceChannelSnapshot c) =>
+    AylaDirectoryVoiceEntry(
+      card: AylaVoiceCardData(
+        id: c.id,
+        name: c.name,
+        memberCount: c.memberCount,
+      ),
+      ownerId: c.ownerId,
+      isOwner: c.mine,
+      allowedGroupIds: c.allowedGroupIds,
+      createdAt: c.createdAt,
+      lastOccupiedAt: c.lastOccupiedAt,
+      lastVacantAt: c.lastVacantAt,
+    );
 
 AylaGameRoom _room(int id, {String name = 'room'}) => AylaGameRoom(
       id: id,
@@ -70,6 +80,23 @@ AylaGameRoom _room(int id, {String name = 'room'}) => AylaGameRoom(
       ownerId: 'u1',
       status: null,
       allowedGroupIds: const <String>['g1'],
+      createdAt: '2026-10-01T00:00:00Z',
+    );
+
+/// 构造一条帖子（各测试共用；字段只取断言需要的）。
+AylaPost _post(
+  int id, {
+  String title = '帖子',
+  String body = '正文',
+  String authorId = 'u2',
+  List<String> allowedGroupIds = const <String>[],
+}) =>
+    AylaPost(
+      id: id,
+      title: title,
+      body: body,
+      authorId: authorId,
+      allowedGroupIds: allowedGroupIds,
       createdAt: '2026-10-01T00:00:00Z',
     );
 
@@ -322,6 +349,201 @@ void main() {
         '在吗',
         reason: 'D1：message.new 后列表必须自动出现新消息预览'
             '（旧实现读页面私有快照 ⇒ 恒 null）',
+      );
+    });
+  });
+
+  group('P1 — 一级帖子页：帧桥必须在页面之外维护 tab 快照', () {
+    test('页面被导航走期间到达的 post.created 仍进入 tab 缓存，返回后立即可见', () async {
+      // 用户实报：「群外发帖刷不出来、群内可以」。
+      // 根因：tab 缓存只有页面级 chat.onFrame 会写；页面被导航走就解绑，
+      // 期间 post.created 丢失；返回时又命中 60s 窗口不重拉。
+      final AylaPostTabCache cache = AylaPostTabCache();
+      // ⚠️ 只由 cache 负责释放 pager（cache.clear 会 dispose 它）——
+      // 再单独 addTearDown(pager.dispose) 会双 dispose。
+      addTearDown(cache.clear);
+      final AylaPagedList<AylaPost> pager = AylaPagedList<AylaPost>(
+        request: (String? cursor) async => const AylaDirectoryPage<AylaPost>(
+          results: <AylaPost>[],
+          total: 0,
+        ),
+        keyOf: (AylaPost p) => p.id.toString(),
+      );
+      const String key = 'posts:u1:all';
+      cache.acquire(key, create: () => pager);
+      await pager.load();
+      cache.markUpdated(key);
+      expect(pager.items, isEmpty, reason: '前置：该 tab 首屏为空');
+
+      // 帧桥（页面未挂载，模拟用户停在详情页）
+      final AylaPostsFramesBridge bridge = AylaPostsFramesBridge(
+        postsStore: AylaPostsStore(),
+        chatState: AylaChatState(),
+        currentUserId: () => 'u1',
+        postTabCache: cache,
+      );
+      bridge.mergePostIntoTabsForTest(_post(99));
+
+      expect(
+        cache.pagerOf(key)!.items.map((AylaPost p) => p.id),
+        <int>[99],
+        reason: 'P1：页面未挂载时帧桥也必须把新帖合进 tab 快照'
+            '（修复前只有页面级监听会做 ⇒ 导航期间丢失）',
+      );
+    });
+
+    test('post.deleted 在页面未挂载时也要从全部 tab 摘除', () {
+      final AylaPostTabCache cache = AylaPostTabCache();
+      addTearDown(cache.clear); // cache.clear 负责 dispose pager（勿再单独 dispose）
+      final AylaPagedList<AylaPost> pager = AylaPagedList<AylaPost>(
+        request: (String? cursor) async => const AylaDirectoryPage<AylaPost>(
+          results: <AylaPost>[],
+          total: 0,
+        ),
+        keyOf: (AylaPost p) => p.id.toString(),
+      );
+      cache.acquire('posts:u1:all', create: () => pager);
+      pager.setItems(<AylaPost>[_post(1), _post(2)]);
+
+      final AylaPostsFramesBridge bridge = AylaPostsFramesBridge(
+        postsStore: AylaPostsStore(),
+        chatState: AylaChatState(),
+        currentUserId: () => 'u1',
+        postTabCache: cache,
+      );
+      bridge.handleFrame(<String, dynamic>{
+        'type': 'post.deleted',
+        'post_id': 1,
+      });
+
+      expect(
+        cache.pagerOf('posts:u1:all')!.items.map((AylaPost p) => p.id),
+        <int>[2],
+        reason: 'P1：删除帧必须同步摘除 tab 快照（避免切回旧 tab 复活已删帖）',
+      );
+    });
+  });
+
+  group('P2 — 语音房人数帧：本地没有该频道时必须 REST 对账', () {
+    test('帧携带 last_occupied_at 且频道不在域 store ⇒ 仍必须 upsert 进列表', () async {
+      // 用户实报：「进了一个语音房，语音页面的『有人』选项卡依然没有实时刷出」。
+      // 旧实现：frameHasSort=true ⇒ 不 REST 对账；patchChannel 因 prev==null 直接 return
+      // ⇒ 整帧丢弃，目录缓存无 diff，「有人」档永远看不到它。
+      final AylaVoiceState voice = AylaVoiceState();
+      final AylaDirectoryStore store = AylaDirectoryStore();
+      addTearDown(() => store.requestOverride = null);
+      store.userId = 'u1';
+
+      int reconcileCalls = 0;
+      final AylaRoomDirectoryBridge bridge = AylaRoomDirectoryBridge(
+        voiceState: voice,
+        liveState: AylaLiveState(),
+        boardgameStore: AylaBoardgameStore(),
+        chatState: AylaChatState(),
+        realtime: AylaRealtimeState(),
+        currentUserId: () => 'u1',
+        directoryStore: store,
+        voiceChannelLoader: (String id) async {
+          reconcileCalls += 1;
+          return AylaVoiceChannelSnapshot(
+            id: id,
+            name: 'v-' + id,
+            memberCount: 1,
+            lastOccupiedAt: '2026-10-20T03:10:08Z',
+            allowedGroupIds: const <String>['g1'],
+          );
+        },
+      );
+      expect(voice.channelOf('85'), isNull, reason: '前置：本地没有这个频道');
+
+      bridge.handleFrame(<String, dynamic>{
+        'type': 'voice.channel.member_count_changed',
+        'data': <String, dynamic>{
+          'channel_id': '85',
+          'member_count': 1,
+          'last_occupied_at': '2026-10-20T03:10:08Z',
+          'last_vacant_at': null,
+        },
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(
+        reconcileCalls,
+        1,
+        reason: 'P2：本地无该频道时必须拉 REST 详情（旧实现因 frameHasSort=true 而不拉）',
+      );
+      expect(
+        voice.channelOf('85'),
+        isNotNull,
+        reason: 'P2：对账后该频道必须进域 store（「有人」选项卡据此渲染）',
+      );
+    });
+  });
+
+  group('G-1 — 状态类选项卡：条件由 false 变 true 也必须并入 items', () {
+    test('语音「有人」档：房从 0 人变 1 人 ⇒ 必须出现在该档列表里', () async {
+      // 用户实报：「进了一个语音房，语音页面的『有人』选项卡依然没有实时刷出这个房间」。
+      // 第一道断点（P2：帧被 patchChannel 早退丢弃）修完后，还有第二道：
+      // updateCachedItems 的 added 只认 createdIds 或「查询维度」false→true，
+      // 不含分类 filter 维度 ⇒ 「已存在的房从 0 人变 N 人」永远不会并入 occupied 档。
+      // 本锁锁住修复：分类归属 false→true 也算新增。
+      final AylaDirectoryStore store = AylaDirectoryStore();
+      addTearDown(() => store.requestOverride = null);
+      store.userId = 'u1';
+      const AylaDirectoryOptions occupiedOptions =
+          AylaDirectoryOptions(filter: 'occupied');
+
+      // 该档首屏为空（0 人的房不在「有人」档里）。
+      store.requestOverride = (
+        AylaDirectoryKind kind,
+        AylaDirectoryOptions options,
+        String? cursor,
+      ) async =>
+          const AylaDirectoryPage<Object>(results: <Object>[], total: 0);
+      await store.load(AylaDirectoryKind.voice, occupiedOptions);
+      expect(
+        store.itemsAs<AylaDirectoryVoiceEntry>(
+          AylaDirectoryKind.voice,
+          occupiedOptions,
+        ),
+        isEmpty,
+        reason: '前置：「有人」档首屏为空',
+      );
+
+      // 域 store 里该房从 0 人 → 1 人（= member_count_changed 帧 + REST 对账后的效果）。
+      final AylaVoiceChannelSnapshot empty = AylaVoiceChannelSnapshot(
+        id: 'v1',
+        name: 'v1',
+        memberCount: 0,
+      );
+      store.updateCachedItems(
+        AylaDirectoryKind.voice,
+        <Object>[_voiceEntryOf(empty)],
+        const <Object>[],
+        currentUserId: 'u1',
+      );
+      final AylaVoiceChannelSnapshot busy = AylaVoiceChannelSnapshot(
+        id: 'v1',
+        name: 'v1',
+        memberCount: 1,
+      );
+      store.updateCachedItems(
+        AylaDirectoryKind.voice,
+        <Object>[_voiceEntryOf(busy)],
+        <Object>[_voiceEntryOf(empty)],
+        currentUserId: 'u1',
+      );
+
+      expect(
+        store
+            .itemsAs<AylaDirectoryVoiceEntry>(
+              AylaDirectoryKind.voice,
+              occupiedOptions,
+            )
+            .map((AylaDirectoryVoiceEntry e) => e.card.id),
+        <String>['v1'],
+        reason: 'G-1：房从 0 人变 1 人必须并入「有人」档'
+            '（修复前 added 判据不含分类维度 ⇒ 永不并入、连 invalidated 都不置）',
       );
     });
   });

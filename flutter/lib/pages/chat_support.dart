@@ -1042,6 +1042,10 @@ class _AylaWideMessagesSidebarHostState
       _frameOff = ref.read(chatWsProvider).onFrame((Map<String, dynamic> frame) {
         final Object? type = frame['type'];
         if (type is String && aylaIsAuthRefreshFrame(type)) {
+          // ⚠️ **2026-10-20 全量普查修复（R1）**：web 的 `WideMessagesSidebar` 刷**五路**
+          // （好友 + 申请/邀请/入群/离开，`MessagesPage.tsx:87–90` 同源），
+          // Flutter 此前漏了好友列表 ⇒ 别人加你好友后宽屏左列不更新。
+          unawaited(_friends?.refresh());
           unawaited(_friendRequests?.refresh());
           unawaited(_invites?.refresh());
           unawaited(_joinRequests?.refresh());
