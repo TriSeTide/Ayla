@@ -23,7 +23,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import '../lib/core/api/voice_api.dart' show AylaVoiceChannelSnapshot;
+import '../lib/core/models/game_room.dart' show AylaGameRoom, AylaGameRoomStatus;
 import '../lib/core/models/post.dart' show AylaPost, AylaPostDraft;
+import '../lib/core/models/user_public.dart' show AylaUserPublic;
 import '../lib/core/models/visibility.dart' show AylaPostVisibility;
 import '../lib/layout/app_shell.dart';
 import '../lib/layout/create_sheet_forms.dart';
@@ -301,7 +303,14 @@ void main() {
       tester,
       form: AylaCreateGameForm(
         loadGroups: () async => const <AylaGroupOption>[],
-        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async {},
+        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async =>
+            AylaGameRoom(
+              id: 1,
+              name: request.name,
+              owner: const AylaUserPublic(id: 'u1'),
+              ownerId: 'u1',
+              status: AylaGameRoomStatus.waiting,
+            ),
         onClose: () => closed += 1,
       ),
       markers: <({String path, String marker})>[
@@ -333,7 +342,14 @@ void main() {
       form: AylaCreateGameForm(
         groupId: 'g1',
         loadGroups: () async => const <AylaGroupOption>[],
-        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async {},
+        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async =>
+            AylaGameRoom(
+              id: 1,
+              name: request.name,
+              owner: const AylaUserPublic(id: 'u1'),
+              ownerId: 'u1',
+              status: AylaGameRoomStatus.waiting,
+            ),
         onClose: () => closed += 1,
       ),
       markers: <({String path, String marker})>[
@@ -453,7 +469,14 @@ void main() {
       form: AylaCreateGameForm(
         groupId: action.groupId,
         loadGroups: () async => const <AylaGroupOption>[],
-        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async {},
+        createRoom: (AylaGameRoomCreateRequest request, {String? group}) async =>
+            AylaGameRoom(
+              id: 1,
+              name: request.name,
+              owner: const AylaUserPublic(id: 'u1'),
+              ownerId: 'u1',
+              status: AylaGameRoomStatus.waiting,
+            ),
         onClose: () => closed += 1,
       ),
       markers: <({String path, String marker})>[

@@ -31,6 +31,9 @@ import '../lib/core/api/live_api.dart' show AylaDirectoryLiveEntry;
 import '../lib/core/net/dio_client.dart' show ApiException;
 import '../lib/pages/group_live_page.dart';
 import '../lib/state/auth_state.dart';
+import '../lib/state/directory_events.dart' show AylaDirectoryKind;
+import '../lib/state/directory_store.dart'
+    show aylaDirectoryStore, AylaDirectoryOptions;
 import '../lib/theme/app_theme.dart';
 import '../lib/theme/glass.dart' show AylaGlassButton;
 import '../lib/widgets/live/live_channel_snapshot.dart'
@@ -59,11 +62,23 @@ const AuthUser _me = AuthUser(
   email: '',
 );
 
-AylaDirectoryLiveEntry _entry(String id, String title) =>
+/// 群内直播条目。
+///
+/// ⚠️ `allowedGroupIds` **必须含 `g1`**：本页现在读共享目录缓存，
+/// `AylaDirectoryStore._matchesQueryOf` 会按 `record.options.groupId` 过滤
+/// （`directory_store.dart:—` 的「groupId != null ⇒ 必须命中 allowedGroupIds」）——
+/// 不带白名单的条目会被判为「不属于本群」而不入列（这是**正确**的语义，
+/// 旧版页面私有 PagedList 没有这层过滤，故此前用裸 `_entry` 也能通过）。
+AylaDirectoryLiveEntry _entry(
+  String id,
+  String title, {
+  List<String> allowedGroupIds = const <String>['g1'],
+}) =>
     AylaDirectoryLiveEntry(
       card: AylaLiveCardData(id: id, title: title),
       ownerId: 'u-me',
       isOwner: true,
+      allowedGroupIds: allowedGroupIds,
       createdAt: '2026-01-01T00:00:00.000Z',
     );
 
@@ -96,6 +111,36 @@ void main() {
     container.read(authNotifierProvider.notifier)
       ..setTokens('access', 'refresh')
       ..setUser(_me);
+    // ⚠️ **群内直播目录已改为「读共享目录缓存」**（2026-10-20 热更新审计 R2：
+    // web `GroupLive.tsx:27` 的 `useDirectoryPage("live", {groupId})`）。
+    // 取页从此由 `AylaDirectoryStore` 统一承担 ⇒ 测试的数据出口注入点也要跟着
+    // 换成 store 的 `requestOverride`（`@visibleForTesting`，测试内可用），
+    // 只替换「live + 本群」这一个 kind，其余 kind 直接返回空页。
+    aylaDirectoryStore.userId = _me.id;
+    aylaDirectoryStore.requestOverride = (
+      AylaDirectoryKind kind,
+      AylaDirectoryOptions options,
+      String? cursor,
+    ) async {
+      if (kind != AylaDirectoryKind.live || options.groupId != 'g1') {
+        return _page<Object>(<Object>[]);
+      }
+      final AylaGroupLiveDirectoryLoader? loader =
+          aylaGroupLivePageDirectoryLoader;
+      if (loader == null) return _page<Object>(<Object>[]);
+      final AylaDirectoryPage<AylaDirectoryLiveEntry> page =
+          await loader('g1', cursor);
+      return AylaDirectoryPage<Object>(
+        results: page.results.cast<Object>(),
+        total: page.total,
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      );
+    };
+    addTearDown(() {
+      aylaDirectoryStore.requestOverride = null;
+      aylaDirectoryStore.reset();
+    });
     final GoRouter router = GoRouter(
       initialLocation: '/group/g1/live',
       routes: <RouteBase>[
@@ -268,11 +313,12 @@ void main() {
         ]);
     await pumpGroupLive(tester);
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(
       find.byType(AylaLiveRoomBody),
       findsOneWidget,
-      reason: 'tsx 167–184 —— 群内直播直接进该群第一个直播间',
+      reason: 'tsx 167-184 group live direct enter first room',
     );
     final AylaLiveRoomBody body =
         tester.widget<AylaLiveRoomBody>(find.byType(AylaLiveRoomBody));

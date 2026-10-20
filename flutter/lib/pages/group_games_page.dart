@@ -24,7 +24,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api/boardgame_api.dart';
 import '../core/models/game_room.dart' show AylaGameRoom;
-import '../state/paged_list.dart';
+import '../state/directory_events.dart' show AylaDirectoryKind;
+import '../state/directory_store.dart'
+    show aylaDirectoryStore, AylaDirectoryController, AylaDirectoryOptions;
 import '../state/shell_state.dart' show ShellUiNotifier, shellUiProvider;
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
 import '../theme/tokens.dart' show AylaSpacing;
@@ -55,7 +57,12 @@ class GroupGamesPage extends ConsumerStatefulWidget {
 }
 
 class _GroupGamesPageState extends ConsumerState<GroupGamesPage> {
-  AylaPagedList<AylaDirectoryGameEntry>? _pager;
+  /// 群内桌游目录 —— **读共享目录缓存**（web `GroupGames.tsx:20` 的
+  /// `useDirectoryPage("game", {groupId})`），不是页面私有分页。
+  ///
+  /// ⚠️ **2026-10-20 热更新审计 R2 修复**：原实现用私有 `AylaPagedList`，
+  /// `boardgame.room.*` 帧落 store 后本页毫无反应 ⇒ 群内桌游列表只能手动刷新。
+  AylaDirectoryController<AylaDirectoryGameEntry>? _pager;
   final ScrollController _scroll = ScrollController();
   ShellUiNotifier? _shell;
   Future<void> Function()? _refreshCallback;
@@ -68,14 +75,7 @@ class _GroupGamesPageState extends ConsumerState<GroupGamesPage> {
   @override
   void initState() {
     super.initState();
-    _pager = AylaPagedList<AylaDirectoryGameEntry>(
-      request: (String? cursor) => AylaBoardgameApi.listGameRoomsPage(
-        cursor: cursor,
-        groupId: widget.groupId,
-      ),
-      keyOf: (AylaDirectoryGameEntry entry) => entry.card.id,
-    )..addListener(_onChanged);
-    unawaited(_pager!.load());
+    _bindDirectoryController();
     _registerRefresh();
   }
 
@@ -96,6 +96,24 @@ class _GroupGamesPageState extends ConsumerState<GroupGamesPage> {
     if (mounted) setState(() {});
   }
 
+  /// 绑定群桌游目录 controller（web `GroupGames.tsx:20`，options 只有 `{groupId}`）。
+  ///
+  /// ⚠️ **必须帧后 `load()`**（库里既有五处同源纪律，见 `group_page.dart:316–352`）。
+  void _bindDirectoryController() {
+    final AylaDirectoryController<AylaDirectoryGameEntry> controller =
+        AylaDirectoryController<AylaDirectoryGameEntry>(
+      store: aylaDirectoryStore,
+      kind: AylaDirectoryKind.game,
+      options: AylaDirectoryOptions(groupId: widget.groupId),
+    )..addListener(_onChanged);
+    _pager?.removeListener(_onChanged);
+    _pager?.dispose();
+    _pager = controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(controller.load());
+    });
+  }
 
   void _registerRefresh() {
     final ShellUiNotifier notifier = ref.read(shellUiProvider.notifier);
@@ -143,7 +161,7 @@ class _GroupGamesPageState extends ConsumerState<GroupGamesPage> {
       );
     }
 
-    final AylaPagedList<AylaDirectoryGameEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryGameEntry>? pager = _pager;
 
     Widget content;
     if (pager == null || (!pager.loaded && pager.loading)) {

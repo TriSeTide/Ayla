@@ -29,6 +29,7 @@ import '../lib/pages/group_voice_page.dart';
 import '../lib/core/api/directory_page.dart' show AylaDirectoryPage;
 import '../lib/pages/post_detail_page.dart';
 import '../lib/pages/posts_hub_page.dart' show PostsHubPage;
+import '../lib/state/directory_store.dart' show aylaDirectoryStore;
 import '../lib/state/posts_store.dart' show aylaPostTabCache;
 import '../lib/pages/search_page.dart';
 import '../lib/state/auth_state.dart';
@@ -132,19 +133,32 @@ Map<String, dynamic> _postJson(int id, {String title = '帖子', String body = '
       'created_at': '2026-10-01T00:00:00Z',
     };
 
+/// 群内桌游房。
+///
+/// ⚠️ `allowed_group_ids` **必须含 `g1`**：群内页现在读共享目录缓存
+/// （`AylaDirectoryStore._matchesQueryOf` 按 `record.options.groupId` 过滤），
+/// 白名单不含本群的条目会被判为「不属于本群」而不入列 —— 这是**正确**语义，
+/// 旧版页面私有 `AylaPagedList` 没有这层过滤。
 Map<String, dynamic> _roomJson(String id, String name) => <String, dynamic>{
-      'id': id,
+      // ⚠️ `id` 必须是**数字**：`AylaGameRoom.id` 是 `int`，`fromJson` 用
+      // `int.tryParse` 解析；传 'r1' 会得 0 ⇒ 目录主键（`itemKeyOf` 取 `room.id`）
+      // 全部撞成 '0'、两条被去重成一条（实测：cards=1 而非 2）。
+      // 旧版页面私有 PagedList 用 `entry.card.id`（字符串）做 key ⇒ 掩盖了这个差异。
+      'id': int.parse(id.replaceFirst('r', '')),
       'name': name,
       'owner': <String, dynamic>{'id': 'u1', 'nickname': '房主'},
       'owner_id': 'u1',
       'status': 'waiting',
+      'allowed_group_ids': <String>['g1'],
       'created_at': '2026-10-01T00:00:00Z',
     };
 
+/// 群内语音房（`allowed_group_ids` 同上：必须含本群，否则被目录过滤条件剔除）。
 Map<String, dynamic> _voiceJson(String id, String name) => <String, dynamic>{
       'id': id,
       'name': name,
       'member_count': 1,
+      'allowed_group_ids': <String>['g1'],
       'created_at': '2026-10-01T00:00:00Z',
     };
 

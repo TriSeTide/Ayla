@@ -52,6 +52,12 @@ import '../state/chat_state.dart'
 import '../state/notices_state.dart';
 import '../state/paged_list.dart';
 import '../state/shell_state.dart';
+import '../state/social_store.dart'
+    show
+        AylaSocialController,
+        AylaSocialKind,
+        AylaSocialOptions,
+        aylaSocialStore;
 import '../theme/tokens.dart';
 import '../widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
 import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
@@ -108,7 +114,21 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   /// 回归锁：`test/messages_tabs_highlight_test.dart`。
   final GlobalKey _tabsRowKey = GlobalKey();
 
-  AylaPagedList<AylaConversationSummary>? _conversations;
+  /// 私信会话列表 —— **读共享 social store**（web `MessagesPage.tsx:50–51` 的
+  /// `useSocialPage("conversations", { type: "private" })`）。
+  ///
+  /// ⚠️ **2026-10-20 热更新审计 A 的 D1 修复（头号根因）**：原实现用页面私有
+  /// `AylaPagedList` 快照，且本页 `onFrame`（:140–144）只处理认证刷新帧、
+  /// **完全不理会 `message.new`** ⇒ WS 帧到达后 `chatState`/`messageState` 都更新了
+  /// （未读、预览、活跃度），但**列表渲染的是另一份数据** ⇒ 界面纹丝不动：
+  /// 不显示新消息、不出预览、不涨未读、不重排。这正是用户实报「别人发的内容不出现」，
+  /// 也是宽屏消息左列（`chat_support.dart`）的同一个病根。
+  ///
+  /// web 等价链路：`message.new` → `useChatStore.setLastMessage/bumpUnread` →
+  /// `social.ts` 的会话投影双写 → `useSocialPage` 读的 record 变 → 重渲染。
+  /// 换成 [AylaSocialController] 后本页与 web 同构（`AylaSocialTracking` 负责把
+  /// chatState 变化回写进 social record，见 `state/chat_providers.dart:aylaStartSocialTracking`）。
+  AylaSocialController<AylaConversationSummary>? _conversations;
   AylaPagedList<AylaUserPublic>? _friends;
   AylaPagedList<AylaFriendRequest>? _friendRequests;
   AylaPagedList<AylaGroupInvite>? _invites;
@@ -126,13 +146,9 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   void initState() {
     super.initState();
     // 私信会话（web tsx 50：`useSocialPage("conversations", { type: "private" })`，恒开）。
-    _conversations = _pager<AylaConversationSummary>(
-      (String? cursor) => AylaChatApi.listConversationsPage(
-        limit: 30,
-        cursor: cursor,
-        type: 'private',
-      ),
-      (AylaConversationSummary c) => c.id,
+    // ⇒ 共享 social store 的私有 record（**不是**页面私有分页快照，见字段注释）。
+    _conversations = _socialPager<AylaConversationSummary>(
+      const AylaSocialOptions(type: 'private'),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -154,6 +170,9 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     if (notifier != null && callback != null) {
       scheduleMicrotask(() => notifier.unregisterRefresh(callback));
     }
+    // social controller 与 paged list 的释放方式不同：前者要同时摘监听，
+    // 否则 store 会继续向已 dispose 的 controller 通知（`_disposed` 已守卫，但监听应显式摘）。
+    _conversations?.removeListener(_onPagerChanged);
     _conversations?.dispose();
     _friends?.dispose();
     _friendRequests?.dispose();
@@ -175,6 +194,23 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     pager.addListener(_onPagerChanged);
     unawaited(pager.load());
     return pager;
+  }
+
+  /// 共享 social store 的分页控制器（web `useSocialPage`，`hooks/useSocialPage.ts:8–25`）。
+  ///
+  /// 与 [_pager] 的差别正是 D1 的修复点：数据归**全局 store**（`aylaSocialStore`），
+  /// 页面只是它的**读投影**；WS 帧 → chatState/messageState → `AylaSocialTracking`
+  /// 回写 social record → store `notifyListeners` → 本 controller 转发 → 页面重建。
+  /// ⇒ 新消息、预览、未读、活跃度排序**全部自动热更新**（与 web 同一条链）。
+  AylaSocialController<T> _socialPager<T>(AylaSocialOptions options) {
+    final AylaSocialController<T> controller =
+        AylaSocialController<T>(
+      store: aylaSocialStore,
+      kind: AylaSocialKind.conversations,
+      options: options,
+    )..addListener(_onPagerChanged);
+    unawaited(controller.load());
+    return controller;
   }
 
   void _onPagerChanged() {
@@ -512,7 +548,7 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
 
   /// 私信 tab（tsx 246–270）。
   Widget _chatTab(AylaElysiaProfile? entryProfile, String? elysiaUserId) {
-    final AylaPagedList<AylaConversationSummary>? pager = _conversations;
+    final AylaSocialController<AylaConversationSummary>? pager = _conversations;
     return AylaPullToRefresh(
       isAtTop: _isPrivateAtTop,
       onRefresh: _refreshConversations,

@@ -117,6 +117,23 @@ Future<void> aylaApplyLoginSession(
   wsManager?.connectAll();
   _startChatWs(container);
   _startPresenceWs(container);
+  // ⚠️ **登录后重装三条帧桥 / 目录订阅通路**（2026-10-20 热更新审计 R1）。
+  //
+  // 为什么必须在这里补：这三条通路在 `main.dart` 启动期装配一次
+  //（`aylaStartSocialTracking` / `aylaStartRoomFrames` / `aylaStartPostsFrames`），
+  // 而登出与 401 过期会把它们**全部拆除**（`aylaStopRooms*` 的 `detach()` /
+  // `aylaStopDirectoryTracking()` / `aylaDirectoryStore.itemUpsertHooks.clear()`）。
+  // 重装函数 `*ForRef` 原本**全仓零调用** ⇒ 「登出/401 → 再登录」之后，
+  // 语音/直播/桌游/帖子的 WS 帧**从此再无消费者**（帧到了、没人处理），
+  // 取页结果也不再落回域 store，直到重启 App。
+  //
+  // web 侧不存在这个缺口：那些监听是模块级单例注册（`stores/directory.ts:205–259`
+  // 的 `ensureDirectoryTracking`、`ws/chat.ts` 的模块级单例），`logout` 只
+  // `reset()` store 数据、**不注销监听**。本处补的就是这个等价语义。
+  //
+  // 幂等：三条 `attach` / `start` 内部都先拆后挂（`_off?.call()` / `stop()`），
+  // 重复登录不会叠加监听。
+  _restartRealtimeBridges(container);
   unawaited(container.read(badgesProvider).fetch());
   // userId 进目录 record 的 key 段（web `directoryKey` 读 currentUser.id）。
   unawaited(
@@ -145,6 +162,32 @@ void _startPresenceWs(ProviderContainer container) {
   final WsManager? manager = wsManager;
   if (manager != null) client.attach(manager.presence);
   client.connect();
+}
+
+/// 登录后**重装**三条实时通路（帧桥 ×2 + 目录订阅通路 + 社交缓存订阅）。
+///
+/// ## 为什么需要（2026-10-20 热更新审计 R1，头号根因）
+/// 这四条通路的装配点只有 `main.dart` 启动期一处；而登出 / 401 过期会把它们**全部拆除**：
+/// - `aylaStopRooms*` → `roomDirectoryBridgeProvider.detach()`（语音/直播/桌游帧桥）
+/// - `aylaStopPostsFrames*` → `postsFramesBridgeProvider.detach()` + `itemUpsertHooks.clear()`
+/// - `aylaStopDirectoryTracking()` → 三个域 store 的 `removeListener`
+///
+/// 而登录链此前**只**连 chat/presence，不重装这四条 ⇒ 「登出/401 → 再登录」之后
+/// WS 帧到达但**没有任何消费者**，列表只能靠手动刷新/重进页面，直到重启 App。
+///
+/// web 侧没有这个缺口：`ensureDirectoryTracking`（`stores/directory.ts:205–259`）与
+/// `ws/chat.ts` 的模块级单例监听在 `logout` 时**不注销**，只 `reset()` store 数据。
+/// 本函数补的就是这个等价语义（拆除时清数据、重装时重新挂监听）。
+///
+/// 幂等：四个 `attach` / `start` 内部都先拆后挂。
+void _restartRealtimeBridges(ProviderContainer container) {
+  // ① 社交缓存订阅（web `ensureSocialTracking`）。
+  aylaStartSocialTracking(container);
+  // ② 房内域帧桥（voice.channel.* / live.* / boardgame.room.*）+ 目录订阅通路
+  //   + 取页落地钩子（`_wireDirectoryTracking` 里一并注册）。
+  aylaStartRoomFrames(container);
+  // ③ 帖子域帧桥（post.created / deleted / updated / viewed）。
+  aylaStartPostsFrames(container);
 }
 
 /// 登出收尾（[ProviderContainer] 版）—— `main.dart` 的 401 过期与 widget 侧登出共用。

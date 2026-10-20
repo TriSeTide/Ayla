@@ -75,6 +75,7 @@ import '../core/api/posts_api.dart' show AylaPostsApi;
 import '../core/api/users_api.dart' show AylaUsersApi;
 import '../core/api/voice_api.dart' show AylaVoiceApi, AylaVoiceChannelSnapshot;
 import '../core/models/conversation.dart' show AylaConversationSummary;
+import '../core/models/game_room.dart' show AylaGameRoom;
 import '../core/models/post.dart' show AylaPost, AylaPostDraft;
 import '../core/models/subgroup.dart' show AylaSubGroup;
 import '../core/models/user_public.dart' show AylaUserPublic;
@@ -83,7 +84,9 @@ import '../core/net/dio_client.dart' show ApiException;
 import '../pages/hub_support.dart' show aylaHubSortLive;
 import '../router/shell_config.dart' show AylaFabAction;
 import '../state/auth_state.dart';
+import '../state/boardgame_store.dart' show aylaBoardgameStore;
 import '../state/directory_events.dart';
+import '../state/directory_store.dart' show aylaDirectoryStore;
 import '../state/paged_list.dart';
 import '../state/room_providers.dart'
     show directoryEventsProvider, voiceStateProvider; // 事件总线已退役（见 state/directory_events.dart 文件头）
@@ -695,22 +698,28 @@ class _AylaCreatePostFormState extends ConsumerState<AylaCreatePostForm>
 // ===================== game：建桌游室（web tsx:104–114） =====================
 
 /// 建桌游室（web `api/boardgame.ts:52` 的 `createGameRoom`）。
-typedef AylaCreateGameRoomFn = Future<void> Function(
+///
+/// ⚠️ **返回新建房间**（2026-10-20 热更新审计 R4）：web `boardgame.ts:60–63` 在拿到响应后
+/// `window.dispatchEvent(new CustomEvent("boardgame:room-created", {detail: room}))`，
+/// 由 `GroupGames.tsx:49–56` 监听后 `load()` 重取 ⇒ **自建房间必定立刻出现在列表**。
+/// 原先本 typedef 是 `Future<void>`、把响应体**丢弃**，于是 Flutter 侧「建完桌游房回到列表
+/// 看不到新房」只能等一次手动刷新。改为返回实体后由 [_AylaCreateGameFormState._submit]
+/// 就地落 store（等价 web 的「事件 → 重取」）。
+typedef AylaCreateGameRoomFn = Future<AylaGameRoom> Function(
   AylaGameRoomCreateRequest request, {
   String? group,
 });
 
-Future<void> _defaultCreateGameRoom(
+Future<AylaGameRoom> _defaultCreateGameRoom(
   AylaGameRoomCreateRequest request, {
   String? group,
-}) async {
-  await AylaBoardgameApi.createGameRoom(
-    name: request.name,
-    group: group,
-    visibility: request.visibility,
-    allowedGroupIds: request.allowedGroupIds,
-  );
-}
+}) =>
+    AylaBoardgameApi.createGameRoom(
+      name: request.name,
+      group: group,
+      visibility: request.visibility,
+      allowedGroupIds: request.allowedGroupIds,
+    );
 
 /// 建桌游室浮层内容（web `CreateFab.tsx:104–114` 的 game 分支）。
 class AylaCreateGameForm extends ConsumerStatefulWidget
@@ -743,12 +752,21 @@ class AylaCreateGameForm extends ConsumerStatefulWidget
 class _AylaCreateGameFormState extends ConsumerState<AylaCreateGameForm>
     with _AylaCreateFormGroupList {
   Future<void> _submit(AylaGameRoomCreateRequest request) async {
+    final AylaGameRoom room;
     try {
-      await widget.createRoom(request, group: widget.groupId);
+      room = await widget.createRoom(request, group: widget.groupId);
     } on ApiException catch (error) {
       // web `GameRoomCreate.tsx:47`：`e instanceof Error ? e.message : "创建失败"`。
       throw AylaGameRoomCreateException(error.message);
     }
+    // 自建房间**立刻落地**（2026-10-20 审计 R4；web 等价物见 [AylaCreateGameRoomFn] 文档）：
+    //  ① 全局房间表（Web 的域 store 由 WS 帧填，但自建时 WS 回环有往返延迟、
+    //     且若帧桥未装配就完全不更新）⇒ 先本地 upsert 保证「建完就能看见」；
+    //  ② 目录缓存的创建提示（web `stores/directory.ts:228–234` 的 `createdIds`）⇒
+    //     随后的取页/diff 能把这条新增并进各档 record，而不是当成「未知条目」。
+    if (!mounted) return;
+    aylaBoardgameStore.upsertRoom(room);
+    aylaDirectoryStore.noteCreated(AylaDirectoryKind.game, '${room.id}');
   }
 
   /// 成功：关浮层 + 跳转（web `tsx:107–111`）。

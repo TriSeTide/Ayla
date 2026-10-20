@@ -107,8 +107,29 @@ class WsChannel {
   }
 
   /// 登录后调用（web presence.connect 语义）。
+  ///
+  /// ⚠️ **幂等**（2026-10-20 热更新审计 A 的 D2）：登录链是
+  /// `wsManager.connectAll()`（`auth_bootstrap.dart:117`）**紧接着**
+  /// `client.connect()`（`:118` → `_startChatWs` → `WsChannel.connect()`），
+  /// 同一个通道会被 `connect()` 两次。此前没有任何守卫 ⇒ 第二次
+  /// `_connectFactory(uri)` 会**再开一条 socket** 并覆盖 `_channel`/`_sub`，
+  /// 而旧 `_sub` 从未 cancel ⇒ **泄漏一条活连接**（服务端看到两条、
+  /// 心跳/重连各自独立、旧连接上的帧仍会进 `_onMessage`）。
+  ///
+  /// 守卫口径与 presence 的同名方法一致（`presence_ws.dart:69–74`）：
+  /// 已 connecting / online 就**不重开**，直接把当前状态回报给 owner
+  /// （`onStatus` 的回调语义是「状态变化通知」，重放一次幂等）。
+  ///
+  /// 注意：**显式重连**（断线后 `_scheduleReconnect`、以及登出再登录）走的是
+  /// [connectWithToken] —— 那里**不加**守卫（重连必须真的重建 socket）。
   void connect() {
     if (!enabled) return;
+    if (_status == WsChannelStatus.connecting ||
+        _status == WsChannelStatus.online) {
+      // 幂等：socket 已由 wsManager 的 connectAll 开好，只同步状态。
+      onStatus?.call(_status);
+      return;
+    }
     final String? access = _tokens.accessToken;
     if (access == null || access.isEmpty) return;
     connectWithToken(access);

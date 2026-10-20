@@ -40,6 +40,12 @@ import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
 import '../state/notices_state.dart';
 import '../state/paged_list.dart';
+import '../state/social_store.dart'
+    show
+        AylaSocialController,
+        AylaSocialKind,
+        AylaSocialOptions,
+        aylaSocialStore;
 import '../widgets/chat/conversation_list.dart';
 import '../widgets/chat/elysia_entry.dart';
 import '../widgets/chat/private_chat_pane.dart';
@@ -1000,7 +1006,14 @@ class AylaWideMessagesSidebarHost extends ConsumerStatefulWidget {
 
 class _AylaWideMessagesSidebarHostState
     extends ConsumerState<AylaWideMessagesSidebarHost> {
-  AylaPagedList<AylaConversationSummary>? _conversations;
+  /// 私信会话列表 —— **读共享 social store**（web `WideMessagesSidebar.tsx:53–54`
+  /// 的 `useSocialPage("conversations", { type: "private" })`）。
+  ///
+  /// ⚠️ **2026-10-20 热更新审计 A 的 D1 修复**：与窄屏 `messages_page.dart` 同病根 ——
+  /// 原实现用页面私有 `AylaPagedList` 快照，而本宿主 `onFrame`（下方 initState 内）
+  /// 只处理认证刷新帧、**不理会 `message.new`** ⇒ WS 帧到了左列也不动
+  /// （不显示新消息/预览/未读/排序）。换共享 store 后与 web 同构。
+  AylaSocialController<AylaConversationSummary>? _conversations;
   AylaPagedList<AylaUserPublic>? _friends;
   AylaPagedList<AylaFriendRequest>? _friendRequests;
   AylaPagedList<AylaGroupInvite>? _invites;
@@ -1018,13 +1031,9 @@ class _AylaWideMessagesSidebarHostState
   @override
   void initState() {
     super.initState();
-    _conversations = _pager<AylaConversationSummary>(
-      (String? cursor) => AylaChatApi.listConversationsPage(
-        limit: 30,
-        cursor: cursor,
-        type: 'private',
-      ),
-      (AylaConversationSummary c) => c.id,
+    // ⇒ 共享 social store 的私有 record（web `useSocialPage`，见字段注释）。
+    _conversations = _socialPager<AylaConversationSummary>(
+      const AylaSocialOptions(type: 'private'),
     );
     // ⚠️ 好友/认证四路**懒加载**：web `WideMessagesSidebar.tsx:55–64` 的 `useSocialPage(kind, {}, tab === ...)`
     // 只在对应 tab 打开时取数（切 tab 触发 `onTabChanged` ⇒ 这里即时建分页器）。
@@ -1045,6 +1054,7 @@ class _AylaWideMessagesSidebarHostState
   @override
   void dispose() {
     _frameOff?.call();
+    _conversations?.removeListener(_onChanged);
     _conversations?.dispose();
     _friends?.dispose();
     _friendRequests?.dispose();
@@ -1065,6 +1075,22 @@ class _AylaWideMessagesSidebarHostState
     pager.addListener(_onChanged);
     unawaited(pager.load());
     return pager;
+  }
+
+  /// 共享 social store 的分页控制器（web `useSocialPage`，`hooks/useSocialPage.ts:8–25`）。
+  ///
+  /// 与 [_pager] 的差别正是 D1 的修复点：数据归**全局 store**（`aylaSocialStore`），
+  /// 本组件只是读投影 ⇒ `message.new` → chatState → `AylaSocialTracking` 回写
+  /// social record → store 通知 → 本 controller → 重建，全链路自动热更新。
+  AylaSocialController<T> _socialPager<T>(AylaSocialOptions options) {
+    final AylaSocialController<T> controller =
+        AylaSocialController<T>(
+      store: aylaSocialStore,
+      kind: AylaSocialKind.conversations,
+      options: options,
+    )..addListener(_onChanged);
+    unawaited(controller.load());
+    return controller;
   }
 
   void _onChanged() {
@@ -1113,6 +1139,21 @@ class _AylaWideMessagesSidebarHostState
       hasMore: pager.hasMore,
       loadMore: pager.loadMore,
       refresh: pager.refresh,
+    );
+  }
+
+  /// 同 [_pageOf]，入参是共享 store 的 controller（公开 getter 与 PagedList 同名）。
+  AylaSocialPage<T>? _socialPageOf<T>(
+    AylaSocialController<T>? controller,
+  ) {
+    if (controller == null) return null;
+    return AylaSocialPage<T>(
+      items: controller.items,
+      loading: controller.loading,
+      error: controller.error,
+      hasMore: controller.hasMore,
+      loadMore: controller.loadMore,
+      refresh: controller.refresh,
     );
   }
 
@@ -1247,7 +1288,7 @@ class _AylaWideMessagesSidebarHostState
         idOf: (AylaConversationSummary c) => c.id,
         pinnedOf: (AylaConversationSummary c) => c.isPinned ?? false,
       ),
-      conversationsPage: _pageOf(_conversations),
+      conversationsPage: _socialPageOf(_conversations),
       // ⋯ 菜单两项 —— web `WideMessagesSidebar.tsx:221` 的
       // `<ConversationList … />`（列表内部 `ConversationList.tsx:158` 渲染
       // `<ConversationMoreMenu conversation={conv} />`，默认 showDelete=true）。

@@ -30,7 +30,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/voice_api.dart';
-import '../state/paged_list.dart';
+import '../state/directory_store.dart'
+    show aylaDirectoryStore, AylaDirectoryController, AylaDirectoryOptions;
+import '../state/directory_events.dart' show AylaDirectoryKind;
 import '../state/room_providers.dart' show voiceStateProvider;
 import '../state/shell_state.dart' show ShellUiNotifier, shellUiProvider;
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
@@ -71,7 +73,16 @@ class GroupVoicePage extends ConsumerStatefulWidget {
 }
 
 class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
-  AylaPagedList<AylaDirectoryVoiceEntry>? _pager;
+  /// 群内语音目录 —— **读共享目录缓存**（web `GroupVoice.tsx:40` 的
+  /// `useDirectoryPage("voice", {groupId})`），不是页面私有分页。
+  ///
+  /// ⚠️ **2026-10-20 热更新审计 R2 修复**：原实现用私有 `AylaPagedList`，
+  /// 只在 `initState` 取一次 + 自己的分页回调，**完全不读 `AylaDirectoryStore`**
+  /// ⇒ 目录帧（`voice.channel.created/updated/deleted/member_count_changed`）
+  /// 落库后本页毫无反应，表现为「群内语音列表必须手动刷新/重进页面」。
+  /// 换成共享缓存后，帧 → 域 store → `updateCachedItems` → 本 controller 通知 → 重建，
+  /// 与群外大厅页 / 宽屏侧栏走**同一条通路**（web 三处也是同一个 store 投影）。
+  AylaDirectoryController<AylaDirectoryVoiceEntry>? _pager;
   final ScrollController _scroll = ScrollController();
   ShellUiNotifier? _shell;
   Future<void> Function()? _refreshCallback;
@@ -80,15 +91,7 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
   @override
   void initState() {
     super.initState();
-    _pager = AylaPagedList<AylaDirectoryVoiceEntry>(
-      request: (String? cursor) => AylaVoiceApi.listVoiceChannelsPage(
-        cursor: cursor,
-        groupId: widget.groupId,
-      ),
-      keyOf: (AylaDirectoryVoiceEntry entry) => entry.card.id,
-    )..addListener(_onChanged);
-    // 房内态不取大厅数据（web tsx 40 的 enabled 参数）。
-    if (widget.routeChannelId == null) unawaited(_pager!.load());
+    _bindDirectoryController();
     _registerRefresh();
     _ensureRouteChannel();
   }
@@ -97,9 +100,7 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
   void didUpdateWidget(covariant GroupVoicePage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.routeChannelId != widget.routeChannelId) {
-      if (widget.routeChannelId == null && !(_pager?.loaded ?? false)) {
-        unawaited(_pager?.load());
-      }
+      if (widget.routeChannelId == null) unawaited(_pager?.load());
       _ensureRouteChannel();
     }
   }
@@ -119,6 +120,30 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
 
   void _onChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// 绑定群语音目录 controller（web `GroupVoice.tsx:40`，options 只有 `{groupId}`）。
+  ///
+  /// ⚠️ **必须帧后 `load()`**（库里既有五处同源纪律，见 `group_page.dart:316–352`）：
+  /// `AylaDirectoryStore.load` 的同步段会立刻 `notifyListeners` 全局 store，
+  /// 而其它已挂载页面（HomePage / GroupPage）的监听是裸 `setState` ⇒ 在 build 期发起会抛
+  /// "setState() or markNeedsBuild() called during build"。
+  void _bindDirectoryController() {
+    final AylaDirectoryController<AylaDirectoryVoiceEntry> pager =
+        AylaDirectoryController<AylaDirectoryVoiceEntry>(
+      store: aylaDirectoryStore,
+      kind: AylaDirectoryKind.voice,
+      // 房内态不取大厅数据（web tsx 40 的 enabled 参数）。
+      enabled: widget.routeChannelId == null,
+      options: AylaDirectoryOptions(groupId: widget.groupId),
+    )..addListener(_onChanged);
+    _pager?.removeListener(_onChanged);
+    _pager?.dispose();
+    _pager = pager;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(pager.load());
+    });
   }
 
   void _registerRefresh() {
@@ -216,7 +241,7 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
   }
 
   Widget _buildList(BuildContext context) {
-    final AylaPagedList<AylaDirectoryVoiceEntry>? pager = _pager;
+    final AylaDirectoryController<AylaDirectoryVoiceEntry>? pager = _pager;
     final AylaTextStyles t = AylaTextStyles.of(context);
 
     Widget content;

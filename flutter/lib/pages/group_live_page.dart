@@ -41,7 +41,9 @@ import '../layout/create_sheet_forms.dart'
     show AylaCreateLiveChannelFn, AylaOwnedLivePageRequest, AylaOwnedLivePicker;
 import '../state/cursor_history.dart';
 import '../state/live_state.dart';
-import '../state/paged_list.dart';
+import '../state/directory_events.dart' show AylaDirectoryKind;
+import '../state/directory_store.dart'
+    show aylaDirectoryStore, AylaDirectoryController, AylaDirectoryOptions;
 import '../state/room_providers.dart' show liveStateProvider, liveWsProvider;
 import '../state/chat_providers.dart' show chatWsProvider;
 import '../state/auth_state.dart'
@@ -109,7 +111,13 @@ class GroupLivePage extends ConsumerStatefulWidget {
 }
 
 class _GroupLivePageState extends ConsumerState<GroupLivePage> {
-  AylaPagedList<AylaDirectoryLiveEntry>? _directory;
+  /// 群内直播目录 —— **读共享目录缓存**（web `GroupLive.tsx:27` 的
+  /// `useDirectoryPage("live", {groupId})`），不是页面私有分页。
+  ///
+  /// ⚠️ **2026-10-20 热更新审计 R2 修复**：原实现用私有 `AylaPagedList`，
+  /// `live.channel.*` 帧落 store 后本页毫无反应 ⇒ 群内直播列表只能手动刷新。
+  /// 换共享缓存后与群外大厅 / 宽屏侧栏走同一条通路（web 三处同一投影）。
+  AylaDirectoryController<AylaDirectoryLiveEntry>? _directory;
   AylaLiveRoomSession? _session;
   final AylaShareController _share = AylaShareController();
 
@@ -137,17 +145,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   @override
   void initState() {
     super.initState();
-    _directory = AylaPagedList<AylaDirectoryLiveEntry>(
-      // 测试注入点见 [aylaGroupLivePageDirectoryLoader]（生产恒 null ⇒ 真实 API）。
-      request: (String? cursor) => aylaGroupLivePageDirectoryLoader != null
-          ? aylaGroupLivePageDirectoryLoader!(widget.groupId, cursor)
-          : AylaLiveApi.listLiveChannelsPage(
-              cursor: cursor,
-              groupId: widget.groupId,
-            ),
-      keyOf: (AylaDirectoryLiveEntry entry) => entry.card.id,
-    )..addListener(_onChanged);
-    unawaited(_directory!.load());
+    _bindDirectoryController();
     _syncRouteChannel();
   }
 
@@ -179,6 +177,28 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
 
   void _onChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// 绑定群直播目录 controller（web `GroupLive.tsx:27`，options 只有 `{groupId}`）。
+  ///
+  /// ⚠️ **必须帧后 `load()`**（库里既有五处同源纪律，见 `group_page.dart:316–352`）：
+  /// `AylaDirectoryStore.load` 的同步段会立刻 `notifyListeners` 全局 store，
+  /// 其它已挂载页面的监听是裸 `setState` ⇒ build 期发起会抛
+  /// "setState() or markNeedsBuild() called during build"。
+  void _bindDirectoryController() {
+    final AylaDirectoryController<AylaDirectoryLiveEntry> controller =
+        AylaDirectoryController<AylaDirectoryLiveEntry>(
+      store: aylaDirectoryStore,
+      kind: AylaDirectoryKind.live,
+      options: AylaDirectoryOptions(groupId: widget.groupId),
+    )..addListener(_onChanged);
+    _directory?.removeListener(_onChanged);
+    _directory?.dispose();
+    _directory = controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(controller.load());
+    });
   }
 
   bool _visibleInGroup(AylaLiveChannelSnapshot item) =>
@@ -310,7 +330,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
 
   @override
   Widget build(BuildContext context) {
-    final AylaPagedList<AylaDirectoryLiveEntry>? directory = _directory;
+    final AylaDirectoryController<AylaDirectoryLiveEntry>? directory = _directory;
     final List<AylaDirectoryLiveEntry> channels =
         directory?.items ?? const <AylaDirectoryLiveEntry>[];
     final String? error = _detailError ?? directory?.error;

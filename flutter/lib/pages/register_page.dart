@@ -29,10 +29,8 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/auth_api.dart';
 import '../widgets/base/auth_code_row.dart';
-import '../core/app_init.dart';
 import '../core/net/dio_client.dart';
-import '../core/ws/ws_manager.dart';
-import '../state/auth_state.dart';
+import '../state/auth_bootstrap.dart' show aylaApplyLoginSession;
 import '../theme/app_theme.dart';
 import '../theme/css_gradient.dart';
 import '../theme/glass.dart';
@@ -154,16 +152,26 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         nickname: _nickname.text.trim(),
         code: _code.text.trim(),
       );
-      final AuthNotifier auth = ref.read(authNotifierProvider.notifier);
-      auth.setTokens(result.access, result.refresh);
-      auth.setUser(result.user);
-      // web `useAuth.register`：connect 两条 WS + 跑预加载门。
-      wsManager?.connectAll();
-      // userId 进目录 record 的 key 段（web `directoryKey` 读 currentUser.id）。
-      unawaited(
-        AppInit.instance.run(
-          userId: ref.read(authNotifierProvider).user?.id,
-        ),
+      // ⚠️ **走统一的登录副作用链**（2026-10-20 热更新审计 A 的 D3）：
+      //
+      // 原实现只做 `setTokens + setUser + wsManager.connectAll()` —— **从不 attach
+      // chat 通路的 owner**（`AylaChatWsClient.attach` 才是设置 `onEvent/onOpen` 的
+      // 唯一处，`chat_ws.dart:183–188`）⇒ 注册完直接进应用时 **chat 帧一个都收不到**
+      // （不订阅、不 resume、不派发），直到下次登录或冷启动才恢复。
+      //
+      // `aylaApplyLoginSession` 是登录 / 冷启动自动登录 / 会话恢复**共用**的那一份
+      //（`state/auth_bootstrap.dart:95`），逐条包含：拉 /me/、写令牌、connectAll、
+      // chat/presence owner attach+connect、徽标、预加载门、**以及三条帧桥的重装**。
+      // 注册成功与登录成功在服务端契约上等价（都返回 access/refresh/user），
+      // 因此复用同一条链 —— 不再在这里维护第二份、必然漂移的副作��清单。
+      // 先取容器再 await（避免 `use_build_context_synchronously`）。
+      if (!mounted) return;
+      final ProviderContainer container =
+          ProviderScope.containerOf(context, listen: false);
+      await aylaApplyLoginSession(
+        container,
+        TokenPair(access: result.access, refresh: result.refresh),
+        user: result.user,
       );
       if (!mounted) return;
       context.go('/group');

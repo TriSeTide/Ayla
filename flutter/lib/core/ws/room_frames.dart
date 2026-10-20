@@ -495,11 +495,28 @@ class AylaRoomDirectoryBridge {
     return Map<String, dynamic>.from(raw)['channel_id']?.toString() ?? '';
   }
 
+  /// 桌游帧的 room id —— **三种真实形状**都要认（web `chat.ts:845/854/857` 的取值处）：
+  ///
+  /// 1. `boardgame.room.created/updated`：**顶层** `{type, room_id, room:{id,...}}`
+  ///    （后端 `boardgame/services.py:113–127` 的 `_boardgame_event`）⇒ 读 `frame.room.id`；
+  /// 2. `boardgame.room.deleted`：**顶层只有 `room_id`**（同源 `_boardgame_event(room_id,
+  ///    "boardgame.room.deleted")` 不传 room）⇒ web 读 `frame.room_id`（`chat.ts:854`）；
+  /// 3. 兼容 `{type, data:{room_id}}` 包装（历史/测试喂过的形状）。
+  ///
+  /// ⚠️ **2026-10-20 修复**：原实现只有 1、3 两档，**漏了 2** ⇒ 真实的删除帧
+  /// （顶层 `room_id`、无 `room`、无 `data`）取到空串、在调用点被 `if (id.isEmpty) return`
+  /// 静默丢弃（`room_frames.dart:312–313`）⇒ 桌游房删除后列表不热更新。
+  /// 既有测试 `room_live_test.dart:267–270` 喂的是 `room:{id}` 假帧，掩盖了该缺陷。
   static String _roomId(Map<String, dynamic> frame) {
     final Object? raw = frame['room'];
     if (raw is Map) {
-      return Map<String, dynamic>.from(raw)['id']?.toString() ?? '';
+      final String fromRoom =
+          Map<String, dynamic>.from(raw)['id']?.toString() ?? '';
+      if (fromRoom.isNotEmpty) return fromRoom;
     }
+    // 顶层 room_id（删除帧的唯一字段；web `chat.ts:854` 读的正是它）。
+    final String top = frame['room_id']?.toString() ?? '';
+    if (top.isNotEmpty) return top;
     final Object? data = frame['data'];
     if (data is Map) {
       return Map<String, dynamic>.from(data)['room_id']?.toString() ?? '';
