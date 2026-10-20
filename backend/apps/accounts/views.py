@@ -51,6 +51,36 @@ def _broadcast_presence_status(user) -> None:
         logger.exception("presence.status broadcast failed for user=%s", user.id)
 
 
+def _broadcast_user_updated(user) -> None:
+    """向全局 presence 组广播「资料变更」（`user.updated` 帧）。
+
+    普查 W3 修复：此前用户改昵称/头像/签名**没有任何广播** ⇒ 他人主页、群成员列表、
+    搜索结果里的昵称/头像全部停留在旧值，直到下一次 REST。
+
+    投递面刻意收窄：只带**公开可展示字段**（昵称/头像/签名），不带 email 等隐私数据
+    （与 `UserPublicSerializer` 同口径）。前端据此就地 patch 已加载的用户对象。
+    """
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            "presence",
+            {
+                "type": "user.updated",
+                "user_id": str(user.id),
+                "nickname": user.nickname or "",
+                "avatar": user.avatar or "",
+                "signature": user.signature or "",
+            },
+        )
+    except Exception:
+        logger.exception("user.updated broadcast failed for user=%s", user.id)
+
+
 # ---------- 注册 / 令牌 ----------
 
 class SendEmailCodeView(APIView):
@@ -187,6 +217,13 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         # 状态模式变化 → 向全局 presence 组广播 presence.status（前端实时更新所有显示点）
         if "status" in serializer.validated_data and instance.status != old_status:
             _broadcast_presence_status(instance)
+        # 普查 W3 修复：公开资料（昵称/头像/签名）变更也要广播，否则他人主页 /
+        # 群成员列表 / 搜索结果里的展示信息停留在旧值。
+        if any(
+            field in serializer.validated_data
+            for field in ("nickname", "avatar", "signature")
+        ):
+            _broadcast_user_updated(instance)
         return Response(
             UserPublicSerializer(instance, context={"request": request}).data
         )

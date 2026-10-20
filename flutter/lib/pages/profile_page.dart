@@ -31,6 +31,7 @@
 ///   与 web 的 `hint`（「新头像将在保存后生效」，tsx 202–204）并存，保存成功后换回真实 URL。
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -41,6 +42,7 @@ import '../core/api/auth_api.dart';
 import '../core/media/media_picker.dart';
 import '../core/models/media_kind.dart';
 import '../core/media/media_upload.dart';
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../core/media/media_validation.dart';
 import '../core/net/dio_client.dart';
 import '../state/auth_bootstrap.dart' show aylaLogout;
@@ -112,6 +114,32 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     // 改完文本不会 rebuild，「已保存」会错误地停在屏幕上（`saved && !dirty` 才显示）。
     _nickname.addListener(_onDraftChanged);
     _signature.addListener(_onDraftChanged);
+    _registerFrameTracking();
+  }
+
+  /// 帧监听解绑句柄（普查 W7 修复：本页帖子卡在别处发帖后不更新）。
+  void Function()? _frameOff;
+
+  /// 本人页的帖子卡实时性（普查 W7 修复 —— **web 自身漏实现**）。
+  ///
+  /// web `ProfileContentSections.tsx:88–103` 的 deps 不含任何 posts store
+  /// ⇒ 用户在别处（一级页 / 群内页）发帖后回到个人页，3 条帖子卡与「N 条」徽标仍是旧的。
+  /// 现在本页订阅帖子帧，收到后重取自己的帖子列表。
+  void _registerFrameTracking() {
+    _frameOff = ref.read(chatWsProvider).onFrame(_onFrame);
+  }
+
+  void _onFrame(Map<String, dynamic> frame) {
+    if (!mounted) return;
+    final Object? type = frame['type'];
+    if (type is! String) return;
+    switch (type) {
+      case 'post.created':
+      case 'post.deleted':
+      case 'post.updated':
+        final AylaProfileContentLoad? load = _contentLoad;
+        if (load != null) unawaited(load.refreshPosts());
+    }
   }
 
   void _onDraftChanged() {
@@ -124,6 +152,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   @override
   void dispose() {
+    _frameOff?.call();
+    _frameOff = null;
     _contentLoad?.cancel(); // 在途结果作废（web cleanup 的 cancelled = true）
     _nickname.removeListener(_onDraftChanged);
     _signature.removeListener(_onDraftChanged);

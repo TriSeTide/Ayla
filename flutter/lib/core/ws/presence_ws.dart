@@ -178,6 +178,19 @@ class AylaPresenceWsClient {
       if (userId != null && status is String) {
         _presence.setUserStatus(userId, status);
       }
+    } else if (rawType == 'user.updated') {
+      // 普查 W3 修复：公开资料（昵称/头像/签名）变更广播。
+      // 后端此前**没有任何广播** ⇒ 他人主页 / 群成员列表 / 搜索结果里的展示信息
+      // 停留在旧值，直到下一次 REST。
+      final String? userId = _userIdOf(data);
+      if (userId != null) {
+        _presence.applyUserProfile(
+          userId,
+          nickname: data?['nickname'] as String?,
+          avatar: data?['avatar'] as String?,
+          signature: data?['signature'] as String?,
+        );
+      }
     }
   }
 

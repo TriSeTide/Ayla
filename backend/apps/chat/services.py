@@ -861,9 +861,15 @@ def leave_group(conversation, user):
 
 
 def dissolve_group(conversation, actor):
-    """解散群聊，仅群主可执行。"""
+    """解散群聊，仅群主可执行。
+
+    普查 W6 修复：删除**之前**先广播 `conversation.dissolved`
+    —— 此前直接 delete、零广播 ⇒ 其他成员的会话列表/搜索结果/正在看的群页全部残留，
+    点开 404。
+    """
     if user_role_in(actor, conversation) != ConversationMember.ROLE_OWNER:
         raise PermissionError("仅群主可解散群聊")
+    broadcast_conversation_dissolved(conversation)
     conversation.delete()
 
 
@@ -1382,3 +1388,165 @@ async def abroadcast_group_joined(conversation, user_id):
         )
     except Exception:
         logger.exception("Failed to broadcast group.joined to user %s", user_id)
+
+
+# ---------- 2026-10-20 补齐：群信息 / 成员 / 解散 / 审批 的实时广播 ----------
+#
+# 背景（全量普查 W2/W4/W5/W6）：这些变更此前**只有 REST、没有任何 WS 广播**，
+# 导致「别人改了群名/踢了人/解散了群，其他成员的界面停留在旧状态，直到下次刷新」。
+# 用户在本次任务中明确要求「web 漏实现的也补上」，故新增以下帧。
+#
+# 统一形制：`{type, data:{...}}`（与 message.new 等既有会话级帧一致），
+# 由 ChatConsumer 转发给 `chat_conv_<id>` 组内的全部在线成员。
+
+
+def _safe_member_count(conv):
+    """成员数的**安全读取**（同步上下文可用；异步上下文返回 None）。
+
+    ⚠️ 为什么必须包一层：这些广播函数既会被**同步视图**调用（Django 同步栈，
+    `conv.members.count()` 没问题），也会被**异步 consumer/服务**调用
+    （ASGI 事件循环里 Django 会抛 `SynchronousOnlyOperation`）。
+    成员数只是**展示提示**，取不到时返回 None（客户端保留自己的本地值），
+    绝不为了一个计数把整条广播搞崩 —— 这是工程硬约束（失败不得破坏主路径）。
+    """
+    try:
+        return conv.members.count()
+    except Exception:  # noqa: BLE001 - 含 SynchronousOnlyOperation
+        return None
+
+
+def _conversation_summary(conv) -> dict:
+    """会话摘要中最小的「元数据」子集（不含成员/未读，客户端据此就地 patch）。"""
+    return {
+        "id": str(conv.id),
+        "type": conv.type,
+        "title": conv.title,
+        "announcement": conv.announcement or "",
+        "avatar": conv.avatar or "",
+        "join_policy": conv.join_policy,
+        "owner_id": str(conv.owner_id) if conv.owner_id else None,
+        "member_count": _safe_member_count(conv),
+    }
+
+
+def broadcast_conversation_updated(conv) -> None:
+    """群资料变更（标题 / 公告 / 头像 / 入群策略 / 转让）后广播给全体成员。
+
+    对应普查 W2：此前 `ConversationDetailView.patch` 只 `conv.save()`、无广播
+    ⇒ 群壳标题、侧栏群名、会话列表、搜索结果全部停留旧值。
+    """
+    _group_send_sync(
+        conv.id,
+        {"type": "conversation.updated", "data": {"conversation": _conversation_summary(conv)}},
+    )
+
+
+async def abroadcast_conversation_updated(conv) -> None:
+    """`broadcast_conversation_updated` 的异步版本（WS/测试用）。"""
+    await _group_send_async(
+        conv.id,
+        {"type": "conversation.updated", "data": {"conversation": _conversation_summary(conv)}},
+    )
+
+
+def broadcast_conversation_members_changed(conv, *, action, member_id=None, member_name="", role=None) -> None:
+    """群成员变更（加入 / 踢出 / 主动退出 / 角色变更 / 转让）后广播。
+
+    对应普查 W4：此前踢人（`MemberRemoveView`）、改角色（`MemberRoleView`）**零广播**，
+    `leave_group` 只给 owner/admin 发 `group.member.left`，且**不更新 member_count**
+    ⇒ 群信息页成员列表、群名片人数、角色标签全部不实时；被踢者甚至不知道自己被踢。
+    """
+    _group_send_sync(
+        conv.id,
+        {
+            "type": "conversation.members.changed",
+            "data": {
+                "conversation_id": str(conv.id),
+                "action": action,  # joined / left / removed / role_changed / owner_changed
+                "member_id": str(member_id) if member_id else None,
+                "member_name": member_name or "",
+                "role": role,
+                "member_count": _safe_member_count(conv),
+            },
+        },
+    )
+
+
+async def abroadcast_conversation_members_changed(conv, *, action, member_id=None, member_name="", role=None) -> None:
+    """`broadcast_conversation_members_changed` 的异步版本。"""
+    await _group_send_async(
+        conv.id,
+        {
+            "type": "conversation.members.changed",
+            "data": {
+                "conversation_id": str(conv.id),
+                "action": action,
+                "member_id": str(member_id) if member_id else None,
+                "member_name": member_name or "",
+                "role": role,
+                "member_count": _safe_member_count(conv),
+            },
+        },
+    )
+
+
+def broadcast_conversation_dissolved(conv) -> None:
+    """群解散前广播（成员列表与「正在看这个群」的页面据此退出/移除）。
+
+    对应普查 W6：此前 `dissolve_group` 直接 `conversation.delete()`、零广播
+    ⇒ 其他成员的会话列表/搜索结果/正在看的群页全部残留，点开 404。
+    """
+    _group_send_sync(
+        conv.id,
+        {
+            "type": "conversation.dissolved",
+            "data": {"conversation_id": str(conv.id), "title": conv.title},
+        },
+    )
+
+
+async def abroadcast_conversation_dissolved(conv) -> None:
+    """`broadcast_conversation_dissolved` 的异步版本。"""
+    await _group_send_async(
+        conv.id,
+        {
+            "type": "conversation.dissolved",
+            "data": {"conversation_id": str(conv.id), "title": conv.title},
+        },
+    )
+
+
+def broadcast_join_request_resolved(admin_ids, *, request_id, conversation_id, conversation_title, applicant_name, status_value) -> None:
+    """入群申请被处理后，通知**其余管理员**移除该条。
+
+    对应普查 W5：此前只有 `broadcast_group_request_resolved`（发给申请人），
+    管理员侧无帧 ⇒ 多管理员场景下 A 处理完的申请仍留在 B 的列表里。
+    """
+    for admin_id in admin_ids:
+        _user_group_send_sync(
+            admin_id,
+            {
+                "type": "join_request.resolved",
+                "request_id": str(request_id),
+                "conversation_id": str(conversation_id),
+                "conversation_title": conversation_title,
+                "applicant_name": applicant_name,
+                "status": status_value,
+            },
+        )
+
+
+async def abroadcast_join_request_resolved(admin_ids, *, request_id, conversation_id, conversation_title, applicant_name, status_value) -> None:
+    """`broadcast_join_request_resolved` 的异步版本。"""
+    for admin_id in admin_ids:
+        await _user_group_send_async(
+            admin_id,
+            {
+                "type": "join_request.resolved",
+                "request_id": str(request_id),
+                "conversation_id": str(conversation_id),
+                "conversation_title": conversation_title,
+                "applicant_name": applicant_name,
+                "status": status_value,
+            },
+        )

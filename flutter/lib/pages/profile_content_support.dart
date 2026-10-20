@@ -282,6 +282,27 @@ class AylaProfileContentLoad {
   /// **不推进状态**：作废后到达的结果既不写状态也不回调（等价 web 的 `if (cancelled) return`）。
   void cancel() => _cancelled = true;
 
+  /// 单源重取：帖子（普查 W7 修复用）。
+  ///
+  /// 背景：web `ProfileContentSections.tsx:88–103` 的 deps 里**不含任何 posts store**
+  /// ⇒ 用户在别处发帖后回个人页，3 条帖子卡与「N 条」徽标都是旧的。
+  /// Flutter 侧补上：页面在收到 `post.created` / `post.deleted` / `post.updated` 帧时
+  /// 调本方法重取该 owner 的帖子列表（比 web 更正确，属用户要求的「web 漏实现也补上」）。
+  Future<void> refreshPosts() async {
+    if (_cancelled) return;
+    await _loadPosts();
+  }
+
+  /// 单源重取：直播 / 语音状态（普查 W9 修复用）。
+  ///
+  /// 背景：web `UserProfilePage.tsx:45` 的 `getUserDetail` 结果只装载一次，
+  /// `ProfileContentSections` 的 deps 里 `owner.is_live` 永远不变 ⇒ 对方开播后其主页
+  /// 不出现「正在直播」卡。补上后由页面在 `live/voice.channel.*` 帧到达时按需重取。
+  Future<void> refreshMedia() async {
+    if (_cancelled) return;
+    await Future.wait(<Future<void>>[_loadLive(), _loadVoice()]);
+  }
+
   void _emit(AylaProfileContentState next) {
     if (_cancelled) return;
     _state = next;

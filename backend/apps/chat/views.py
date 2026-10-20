@@ -454,6 +454,9 @@ class ConversationDetailView(APIView):
             update_fields.append("avatar")
         if update_fields:
             conv.save(update_fields=update_fields)
+            # 普查 W2 修复：群资料变更必须广播给全体成员
+            #（此前只 save ⇒ 其他成员的群壳标题/侧栏群名/会话列表/搜索结果全部停留旧值）。
+            services.broadcast_conversation_updated(conv)
         return Response(ConversationSerializer(conv, context={"request": request}).data)
 
 
@@ -794,7 +797,16 @@ class MemberRemoveView(APIView):
         if member.role in (ConversationMember.ROLE_OWNER, ConversationMember.ROLE_ADMIN):
             if not services.user_role_in(request.user, conv) == ConversationMember.ROLE_OWNER:
                 return _forbidden("不能移除管理员/群主")
+        removed_name = member.user.nickname or member.user.username
         member.delete()
+        # 普查 W4 修复：踢人此前**零广播** ⇒ 群信息页成员列表/群名片人数不实时，
+        # 被踢者甚至不知道自己被踢（还停留在群里）。
+        services.broadcast_conversation_members_changed(
+            conv,
+            action="removed",
+            member_id=user_id,
+            member_name=removed_name,
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -821,6 +833,14 @@ class MemberRoleView(APIView):
         member.role = role
         member.save(update_fields=["role"])
         conv.refresh_from_db()
+        # 普查 W4 修复：改角色此前零广播 ⇒ 其他成员的成员列表角色标签不更新。
+        services.broadcast_conversation_members_changed(
+            conv,
+            action="role_changed",
+            member_id=user_id,
+            member_name=member.user.nickname or member.user.username,
+            role=role,
+        )
         return Response(ConversationSerializer(conv, context={"request": request}).data)
 
 
@@ -1058,6 +1078,28 @@ class GroupJoinRequestActionView(APIView):
             status=req.status,
             handled_by_id=request.user.id,
             handled_at=req.handled_at,
+        )
+        # 普查 W5 修复：**其余管理员**的待审列表也要移除该条。
+        # 此前只有发给申请人的那一份广播 ⇒ 多管理员场景下 A 处理完的申请仍留在 B 的列表里。
+        other_admin_ids = [
+            str(mid)
+            for mid in ConversationMember.objects.filter(
+                conversation=req.conversation,
+                role__in=[
+                    ConversationMember.ROLE_OWNER,
+                    ConversationMember.ROLE_ADMIN,
+                ],
+            )
+            .exclude(user_id=request.user.id)
+            .values_list("user_id", flat=True)
+        ]
+        services.broadcast_join_request_resolved(
+            other_admin_ids,
+            request_id=req.id,
+            conversation_id=req.conversation_id,
+            conversation_title=req.conversation.title,
+            applicant_name=getattr(req.applicant, "nickname", "") or "",
+            status_value=req.status,
         )
         return Response(
             GroupJoinRequestSerializer(req, context={"request": request}).data

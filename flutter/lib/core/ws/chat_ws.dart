@@ -439,9 +439,20 @@ class AylaChatWsClient {
     final Object? rawType = frame['type'];
     if (rawType is! String) return;
 
+    // 帧体分两种形状（后端如此，历史原因，不是缺陷）：
+    // ① **会话级帧**（message.new / voice.channel.* / post.* …）：
+    //    `{type, data:{...}}` ⇒ 取 data 子对象；
+    // ② **用户级通知帧**（group.request.new / group.invite.new /
+    //    friend.request.new / group.member.left / join_request.resolved …）：
+    //    **扁平** `{type, request_id, conversation_title, ...}`（见
+    //    `services._user_group_send_sync` 的载荷）⇒ 字段直接在顶层。
+    //
+    // ⚠️ 2026-10-20 修复：此前**只**取 `frame['data']`，扁平帧会拿到空 Map
+    // ⇒ 所有通知类 case（:522 起的六条）读到的字段恒为 null，只能靠兜底文案
+    // 「有人/群聊」显示 —— 用户永远看不到真实申请人/群名。
     final Map<String, dynamic> data = frame['data'] is Map
         ? Map<String, dynamic>.from(frame['data'] as Map)
-        : const <String, dynamic>{};
+        : frame;
     switch (rawType) {
       case 'message.new':
         _onMessageNew(data);
@@ -577,6 +588,14 @@ class AylaChatWsClient {
         }
       case 'elysia.reply':
         _onElysiaReply(data);
+      case 'conversation.updated':
+        _onConversationUpdated(data);
+      case 'conversation.members.changed':
+        _onConversationMembersChanged(data);
+      case 'conversation.dissolved':
+        _onConversationDissolved(data);
+      case 'join_request.resolved':
+        _onJoinRequestResolved(data);
       case 'favorite.changed':
         _onFavoriteChanged(data);
       case 'pong':
@@ -846,6 +865,93 @@ class AylaChatWsClient {
   ///
   /// 帧结构（`api/types.ts`）：`data = { target_type, target_id, action, favorite_id }`。
   /// 取消收藏时后端不带 `favorite_id`（或带 null）⇒ 写 null。
+  // ---------- 2026-10-20 补齐：群资料 / 成员 / 解散 / 审批（普查 W2/W4/W5/W6）----------
+
+  /// `conversation.updated`（群资料变更：标题/公告/头像/入群策略/转让）。
+  ///
+  /// 后端此前**只 save 不广播** ⇒ 群壳标题、侧栏群名、会话列表、搜索结果全部停留旧值。
+  /// 现在服务端会在 PATCH 后广播，客户端按 id 就地 patch 已加载的会话摘要。
+  void _onConversationUpdated(Map<String, dynamic> data) {
+    final Object? raw = data['conversation'];
+    if (raw is! Map) return;
+    final Map<String, dynamic> conv = Map<String, dynamic>.from(raw);
+    final String id = _str(conv['id']);
+    if (id.isEmpty) return;
+    final AylaConversationSummary? existing = _chat.byId(id);
+    // 未加载过这个会话 ⇒ 不凭空造（列表会在下次取页时拿到完整摘要）。
+    if (existing == null) return;
+    _chat.upsertConversation(_conversationWithMetadata(existing, conv));
+  }
+
+  /// `conversation.members.changed`（加入/踢出/退出/角色变更/转让）。
+  ///
+  /// 后端此前踢人、改角色**零广播**，`leave_group` 也只发给 owner/admin 且不更新人数
+  /// ⇒ 群信息页成员列表、群名片人数、角色标签全部不实时；被踢者不知道自己被踢。
+  void _onConversationMembersChanged(Map<String, dynamic> data) {
+    final String convId = _str(data['conversation_id']);
+    if (convId.isEmpty) return;
+    final AylaConversationSummary? existing = _chat.byId(convId);
+    if (existing != null) {
+      final Object? count = data['member_count'];
+      if (count is num) {
+        _chat.upsertConversation(existing.copyWith(memberCount: count.toInt()));
+      }
+    }
+    // 被踢/退出的是**本人** ⇒ 该会话要从列表移除，并退订。
+    final String? me = _currentUserId();
+    final String memberId = _str(data['member_id']);
+    final String action = _str(data['action']);
+    if (me != null &&
+        memberId == me &&
+        (action == 'left' || action == 'removed')) {
+      _chat.removeConversation(convId);
+      unsubscribe(convId);
+    }
+    // 群信息页/成员列表的权威数据由页面自行 REST 对账（这里只做摘要层投影）。
+  }
+
+  /// `conversation.dissolved`（群解散）。
+  ///
+  /// 后端此前直接 `conversation.delete()`、零广播 ⇒ 其他成员的会话列表、搜索结果、
+  /// 正在看的群页全部残留，点开 404。
+  void _onConversationDissolved(Map<String, dynamic> data) {
+    final String convId = _str(data['conversation_id']);
+    if (convId.isEmpty) return;
+    _chat.removeConversation(convId);
+    unsubscribe(convId);
+  }
+
+  /// `join_request.resolved`（入群申请已被**其他管理员**处理）。
+  ///
+  /// 后端此前只通知申请人 ⇒ 多管理员场景下 A 处理完的申请仍留在 B 的列表里。
+  void _onJoinRequestResolved(Map<String, dynamic> data) {
+    // 本类的职责边界：只把「有一条申请被处理了」作为失效信号广播给页面级监听
+    //（与 web `noticeStore` 同口径）；具体列表刷新由消息中心的 onFrame 承担。
+    _notices.push(
+      kind: AylaRealtimeNoticeKind.groupRequestResolved,
+      title: '入群申请已处理',
+      detail:
+          '${_strOr(data['conversation_title'], '群聊')}：${_strOr(data['applicant_name'], '有人')} 的申请已${data['status'] == 'accepted' ? '通过' : '拒绝'}',
+    );
+    unawaited(_badges.fetch());
+  }
+
+  /// 把 `conversation.updated` 帧里的元数据合进已有摘要（只覆盖帧里给出的字段）。
+  static AylaConversationSummary _conversationWithMetadata(
+    AylaConversationSummary existing,
+    Map<String, dynamic> conv,
+  ) {
+    // 注：`ownerId` 不在 `copyWith` 的可变字段里（转让群主后由 REST 对账纠正，
+    // 不在此处就地改写 —— 转让同时会触发 `conversation.members.changed`）。
+    return existing.copyWith(
+      title: conv['title']?.toString(),
+      announcement: conv['announcement']?.toString(),
+      avatar: conv['avatar']?.toString(),
+      memberCount:
+          conv['member_count'] is num ? (conv['member_count'] as num).toInt() : null,
+    );
+  }
+
   void _onFavoriteChanged(Map<String, dynamic> data) {
     final String targetType = _str(data['target_type']);
     final String targetId = _str(data['target_id']);

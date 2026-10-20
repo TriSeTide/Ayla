@@ -41,6 +41,45 @@ class AylaPresenceState extends ChangeNotifier {
   /// `user_id → 状态模式`（不可变视图）。
   Map<String, String> get statuses => _statuses;
 
+  /// `user_id → 公开资料覆盖`（昵称/头像/签名）。
+  ///
+  /// 普查 W3 修复：后端此前对资料变更**零广播** ⇒ 他人主页 / 群成员列表 / 搜索结果
+  /// 里的展示信息停留在旧值。现在 `user.updated` 帧到达后写进这里；各显示点按
+  /// [profileOf] 取「帧带来的最新值」，缺省则回落到各自的 REST 快照。
+  ///
+  /// 只存**公开可展示字段**（与后端 `_broadcast_user_updated` 的投递面一致，
+  /// 不含 email 等隐私数据）。
+  Map<String, AylaUserProfilePatch> _profiles =
+      const <String, AylaUserProfilePatch>{};
+
+  /// 已收到的资料覆盖（不可变视图）。
+  Map<String, AylaUserProfilePatch> get profiles => _profiles;
+
+  /// 取某用户的资料覆盖（无则 null）。
+  AylaUserProfilePatch? profileOf(String userId) => _profiles[userId];
+
+  /// `user.updated` 增量：合并一条资料覆盖（只覆盖帧里给出的字段）。
+  void applyUserProfile(
+    String userId, {
+    String? nickname,
+    String? avatar,
+    String? signature,
+  }) {
+    final AylaUserProfilePatch previous =
+        _profiles[userId] ?? const AylaUserProfilePatch();
+    _profiles = Map<String, AylaUserProfilePatch>.unmodifiable(
+      <String, AylaUserProfilePatch>{
+        ..._profiles,
+        userId: previous.merge(
+          nickname: nickname,
+          avatar: avatar,
+          signature: signature,
+        ),
+      },
+    );
+    _notify();
+  }
+
   /// 本通道连接状态。
   AylaPresenceConnection get connection => _connection;
 
@@ -124,4 +163,33 @@ class AylaPresenceState extends ChangeNotifier {
     _disposed = true;
     super.dispose();
   }
+}
+
+/// 一个用户的**资料覆盖**（`user.updated` 帧带来的公开字段）。
+///
+/// 语义：**只覆盖帧里给出的字段**（null = 未给出 ⇒ 保留上一次的值 / 回落到 REST）。
+/// 刻意不保存 userId / status 等其它字段 —— 本类只承担「展示信息的最新值」。
+@immutable
+class AylaUserProfilePatch {
+  const AylaUserProfilePatch({
+    this.nickname,
+    this.avatar,
+    this.signature,
+  });
+
+  final String? nickname;
+  final String? avatar;
+  final String? signature;
+
+  /// 合并新的一条（null 字段不覆盖旧值）。
+  AylaUserProfilePatch merge({
+    String? nickname,
+    String? avatar,
+    String? signature,
+  }) =>
+      AylaUserProfilePatch(
+        nickname: nickname ?? this.nickname,
+        avatar: avatar ?? this.avatar,
+        signature: signature ?? this.signature,
+      );
 }

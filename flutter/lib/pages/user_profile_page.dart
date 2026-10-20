@@ -33,11 +33,14 @@
 ///   不再用后端 `display_status` 快照（web 的 `useDisplayStatus` 同样不读该字段）。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/users_api.dart';
+import '../state/chat_providers.dart' show chatWsProvider;
 import '../core/models/user_public.dart';
 import '../core/net/dio_client.dart';
 import '../state/display_status.dart';
@@ -92,17 +95,57 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   /// 装载版本（tsx 36 `loadRevision`）：卸载或重新加载后丢弃在途结果。
   int _revision = 0;
 
+  /// 帧监听解绑句柄（普查 W9 / W7 修复）。
+  void Function()? _frameOff;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _registerFrameTracking();
   }
 
   @override
   void dispose() {
+    _frameOff?.call();
+    _frameOff = null;
     _revision++; // 让在途请求的结果失效（tsx 60 的 cleanup）
     _contentLoad?.cancel(); // 内容分区同理（web cleanup 的 cancelled = true）
     super.dispose();
+  }
+
+  /// 他人主页的实时性（普查 W7/W9 修复 —— **web 自身漏实现**，按用户要求补上）。
+  ///
+  /// web 的两处缺口（`ProfileContentSections.tsx:88–103` 的 deps 不含 posts store；
+  /// `UserProfilePage.tsx:45` 的 `getUserDetail` 只装载一次）：
+  /// - 对方发帖/删帖 ⇒ 本页「帖子」卡与「N 条」徽标不更新（W7）；
+  /// - 对方开播 / 进语音房 ⇒ 不出现「正在直播」卡（W9）。
+  void _registerFrameTracking() {
+    _frameOff = ref.read(chatWsProvider).onFrame(_onFrame);
+  }
+
+  void _onFrame(Map<String, dynamic> frame) {
+    if (!mounted) return;
+    final Object? type = frame['type'];
+    if (type is! String) return;
+    switch (type) {
+      case 'post.created':
+      case 'post.deleted':
+      case 'post.updated':
+        // 帖子帧不带可靠的 author 判据 ⇒ 直接重取本页 owner 的帖子列表；
+        // 数据源自身有权限过滤，失败静默（不伪造）。
+        final AylaProfileContentLoad? load = _contentLoad;
+        if (load != null) unawaited(load.refreshPosts());
+      case 'live.channel.status.changed':
+      case 'live.channel.updated':
+      case 'live.channel.deleted':
+      case 'voice.channel.member_count_changed':
+      case 'voice.channel.updated':
+      case 'voice.channel.deleted':
+        // 直播/语音状态变化 ⇒ 重取媒体卡（内部只在 owner 确实在播/在房时才请求）。
+        final AylaProfileContentLoad? load = _contentLoad;
+        if (load != null) unawaited(load.refreshMedia());
+    }
   }
 
   Future<void> _load() async {

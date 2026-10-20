@@ -687,3 +687,21 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def group_joined(self, event):
         """接收群加入推送并转发给 WebSocket 客户端。"""
         await self.send_json(event)
+
+    # ---------- 2026-10-20 补齐：群资料 / 成员 / 解散 / 审批（普查 W2/W4/W5/W6） ----------
+
+    async def conversation_updated(self, event):
+        """群资料变更（标题/公告/头像/入群策略）→ 转发（广播函数已带 data 包装）。"""
+        await self.send_json(event)
+
+    async def conversation_members_changed(self, event):
+        """群成员变更（加入/踢出/退出/角色变更）→ 转发。"""
+        await self.send_json(event)
+
+    async def conversation_dissolved(self, event):
+        """群解散 → 转发（客户端据此从列表移除并退出该群页面）。"""
+        await self.send_json(event)
+
+    async def join_request_resolved(self, event):
+        """入群申请已被（其他）管理员处理 → 转发给管理员移除该条。"""
+        await self.send_json(event)
