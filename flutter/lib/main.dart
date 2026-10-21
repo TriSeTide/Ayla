@@ -22,6 +22,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/media/media_cache.dart';
+import 'core/media/media_signer.dart';
+import 'core/media/media_upload.dart';
 import 'core/net/dio_client.dart';
 import 'state/app_preload.dart';
 import 'state/auth_bootstrap.dart';
@@ -214,6 +216,15 @@ void main() {
     },
   );
   initWsManager(tokens: auth);
+  // ===== 媒体链路接线（2026-10-21 修复）=====
+  // 此前 `MediaSigner` / `AylaMediaUploader` / `AylaMediaPicker` 三者的 `attach()`
+  // **全项目零调用**（只有组件画布 preview 注入过替身）⇒ 生产运行时：
+  //   · 上传抛 StateError「AylaMediaUploader 未注入 DioClient」→ 气泡恒显「发送失败」；
+  //   · 查看抛 StateError「MediaSigner 未注入 DioClient」→ 所有签名媒体加载失败。
+  // 表现与「完全没接对象存储」一致（用户实报：无法上传、也无法查看）。
+  // 三者与 DioClient 同为进程级单例，必须在 DioClient.init 之后、首帧之前接上。
+  MediaSigner.instance.attach(DioClient.instance);
+  AylaMediaUploader.instance.attach(DioClient.instance);
   // 本地媒体缓存（漫游缓存）启动预热：解析缓存根 + 探测可写性（不可写则降级到
   // 应用支持目录并记日志）+ 清理上次崩溃残留的 `.tmp`。
   // 语义见 `docs/architecture/flutter-local-media-cache.md` §3.2 / §6；

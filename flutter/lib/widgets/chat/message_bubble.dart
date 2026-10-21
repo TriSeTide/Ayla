@@ -508,7 +508,16 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
           )
         : null;
 
-    final Widget body = Column(
+    // ⚠️ **气泡宽度 = 内容宽**（2026-10-21 用户实报「气泡太长了」）。
+    //
+    // `Column` 的交叉轴默认按约束**撑满**（crossAxisAlignment.start/end 只是对齐，
+    // 不改变自身宽）⇒ 外层 `ConstrainedBox(maxWidth: 75%)` 下它会取满 75%，
+    // 于是撤回态/分享卡等窄内容消息的气泡背景横贯整行。
+    //
+    // 修法：用 `Row(mainAxisSize: MainAxisSize.min)` 包一层 —— Row 的主轴尺寸 min
+    // 表示「按子级宽收缩」，而 Column 在 Row 里拿到的是 loose 约束，会按内容取宽。
+    // （`IntrinsicWidth` 曾试过，会在语义树重建时触发 `parentDataDirty` 断言，不可用。）
+    final Widget innerColumn = Column(
       crossAxisAlignment:
           widget.isSelf ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -567,6 +576,15 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
       ],
     );
 
+    // Row(mainAxisSize.min) = 主轴按子级收缩 ⇒ 整块 body 宽 = Column 内最宽的
+    // 那个子级（通常是气泡本身），而非父级给的上限。Column 在其中拿到 loose
+    // 横约束 ⇒ 会按内容取宽（这正是 web `.bubble` 行内块的收缩语义）。
+    final Widget body = Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[Flexible(child: innerColumn)],
+    );
+
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {
         final bool narrow = AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
@@ -586,7 +604,25 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
           Flexible(
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: bodyMaxWidth),
-              child: body,
+              // ⚠️ **气泡按内容收缩**（2026-10-21 用户实报「气泡太长了」）：
+              //
+              // web `.msg-bubble-wrap { max-width:100% }` 里的 `.bubble` 是收缩容器
+              // ⇒ 宽度 = 内容 + padding。Flutter 侧 `ConstrainedBox` 只给**上限**，
+              // 其内 `Column` 在 Row 的 loose 约束下会取「最大子宽」——而 `Text` /
+              // 分享卡在 loose 约束里也会拉到 maxWidth ⇒ 撤回态、分享卡等窄内容消息
+              // 的气泡横贯整行（截图实证）。
+              //
+              // `Align(widthFactor: 1.0)` 让本节点宽度 = 子级宽度（shrink-to-fit），
+              // 等价 CSS 的收缩行为；且它只是**布局选择**，不参与 intrinsic 计算，
+              // 不会触发 `IntrinsicWidth` 那类 `parentDataDirty` 断言。
+              child: Align(
+                alignment: widget.isSelf
+                    ? Alignment.centerRight
+                    : Alignment.centerLeft,
+                widthFactor: 1.0,
+                heightFactor: 1.0,
+                child: body,
+              ),
             ),
           ),
           if (actions != null) const SizedBox(width: AylaSpacing.sp2),
@@ -877,6 +913,18 @@ class _BubbleFace extends StatelessWidget {
       bottomLeft: Radius.circular(self ? AylaRadii.rBubble : 6),
     );
 
+    // ⚠️ **气泡必须按内容收缩，不能撑满可用宽**（2026-10-21 用户实报「气泡太长了」）。
+    //
+    // web `.bubble` 是**行内块**（`display:block` 但父级 `.msg-bubble-wrap` 为
+    // `max-width:100%` 的收缩容器）⇒ 宽度 = 内容 + padding。Flutter 侧此前只有
+    // `ConstrainedBox(maxWidth: 75%)` 这层**上限**，而外层 `Row` 给的 loose 约束下
+    // `Column` 会取「最大子宽」—— 但 `Text`/分享卡在 loose 约束里也会拉到 maxWidth，
+    // 导致撤回态、分享卡等**内容很窄的消息气泡横贯整行**（截图实证）。
+    //
+    // 修法：用 `IntrinsicWidth` 让 Column 按**内容固有宽**收缩（等价 CSS 行内块的
+    // shrink-to-fit）。注意它只影响「宽度方向的选择」，媒体气泡仍由自身尺寸决定
+    // （AylaMediaContent 内部是固定尺寸，固有宽即其尺寸）；文本仍受外层 maxWidth 约束
+    // 而正常换行。
     final Widget content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,

@@ -264,11 +264,17 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
     // 长无空格 ID（`room_9331…`）直接撑破卡面（Debug 报
     // `RenderConstraintsTransformBox overflowed by 121 pixels`）。
     //
-    // 正解：`Align(topLeft)` —— 它把**宽松**（loose）横约束传给子级、
-    // 自身仍占满父级宽（等价 CSS 的 block 容器 + 子元素 `width: min(264px,100%)`），
+    // 正解：`Align(topLeft)` —— 它把**宽松**（loose）横约束传给子级，
     // 子级内部的 `Row/Expanded` 因此拿到**有界**宽度，可正常收窄换行。
+    //
+    // ⚠️ **必须带 `widthFactor: 1.0`**（2026-10-21 用户二次实报「还是这样」的根因）：
+    // 裸 `Align` 会「尽可能占满父级」⇒ 它本身就把外层气泡壳撑成整行，
+    // 内层那个 `Align(widthFactor:1)` 只决定**卡片**宽度、管不到这一层容器。
+    // 带上 widthFactor 后本节点宽 = 子级宽（= min(264, 可用)）⇒ 气泡壳随之收缩，
+    // 等价 web `.bubble` 的 inline-block 收缩语义。
     return Align(
       alignment: Alignment.topLeft,
+      widthFactor: 1.0,
       child: TweenAnimationBuilder<double>(
         // hover 上浮 1px（web `translateY(-1px)`，transition 200ms ease）
         tween: Tween<double>(begin: 0, end: _hovered ? -1 : 0),
