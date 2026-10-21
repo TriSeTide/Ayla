@@ -576,14 +576,7 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
       ],
     );
 
-    // Row(mainAxisSize.min) = 主轴按子级收缩 ⇒ 整块 body 宽 = Column 内最宽的
-    // 那个子级（通常是气泡本身），而非父级给的上限。Column 在其中拿到 loose
-    // 横约束 ⇒ 会按内容取宽（这正是 web `.bubble` 行内块的收缩语义）。
-    final Widget body = Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[Flexible(child: innerColumn)],
-    );
+    final Widget body = innerColumn;
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {

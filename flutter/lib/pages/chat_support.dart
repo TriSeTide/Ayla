@@ -52,7 +52,8 @@ import '../widgets/chat/private_chat_pane.dart';
 import '../widgets/chat/request_rows.dart';
 import '../widgets/chat/wide_messages_sidebar.dart';
 import '../core/media/media_picker.dart' show AylaPickedFile;
-import '../core/media/media_upload.dart' show AylaMediaUploader;
+import '../core/media/media_upload.dart' show AylaMediaUploader, AylaUploadResult;
+import '../core/media/voice_recorder.dart' show AylaRecordVoiceRecorder;
 import '../core/models/chat_message.dart';
 import '../core/models/conversation.dart';
 import '../core/models/media_kind.dart' show AylaMediaKind;
@@ -786,6 +787,51 @@ class AylaConversationRuntime extends ChangeNotifier {
     return AylaUploadOutcome(mediaId: result.mediaId);
   }
 
+  // ---------------- 语音 / 文件下载（页面层能力） ----------------
+
+  /// 上传语音录音 → media_id（web `uploadMediaFile(file, "voice")`）。
+  /// 供 `AylaMessageInput.onUploadVoice` 注入；失败由输入框侧显示并可重试。
+  Future<String> uploadVoice(AylaPickedFile file) async {
+    final Uint8List bytes = await file.readBytes();
+    final AylaUploadResult result =
+        await AylaMediaUploader.instance.uploadBytes(
+      bytes: bytes,
+      kind: AylaMediaKind.voice,
+      mimeType: file.mimeType,
+    );
+    return result.mediaId;
+  }
+
+  /// 发送语音消息（web `sendMessage(convId, "", { type: voice, mediaId, ... })`）。
+  /// 供 `AylaMessageInput.onSendVoice` 注入。
+  Future<void> sendVoice({
+    required String mediaId,
+    int? replyTo,
+    required String idempotencyKey,
+  }) async {
+    final AylaChatMessage serverMsg = await AylaChatApi.sendMessage(
+      conversationId,
+      AylaCreateMessagePayload(
+        type: AylaMessageType.voice,
+        content: '',
+        mediaId: mediaId,
+        replyTo: replyTo,
+        idempotencyKey: idempotencyKey,
+      ),
+    );
+    _message.upsertMessage(conversationId, serverMsg);
+  }
+
+  /// 文件下载完成后的提示（web 用浏览器原生下载，Flutter 需自报结果）。
+  /// 供 `AylaMessageContent.onDownloaded` 注入。
+  void notifyDownloaded(String savedPath) {
+    debugPrint('[FILE] 已保存：$savedPath');
+  }
+
+  /// 文件保存失败提示（web 由浏览器处理；Flutter 侧交给调用方展示）。
+  void notifySaveError(String detail) {
+    debugPrint('[FILE] 保存失败：$detail');
+  }
   static AylaPickedMedia? _firstOfKind(
     List<AylaPickedMedia> picked,
     AylaMediaKind kind,
@@ -875,6 +921,11 @@ class AylaChatPaneHost extends ConsumerStatefulWidget {
 class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
   late final AylaConversationRuntime _runtime;
   AylaChatMessage? _quote;
+
+  /// 语音录制器（web `useVoiceRecorder` 的等价物）。
+  /// 2026-10-21：此前**没有任何实例** ⇒ 输入框 voiceRecorder 传 null ⇒ 录音入口
+  /// 不渲染、即使渲染也无法发送（见本文件 composer 处注释）。
+  final AylaRecordVoiceRecorder _voiceRecorder = AylaRecordVoiceRecorder();
 
   @override
   void initState() {
@@ -967,6 +1018,13 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
         onDraftChanged: (String key, String serialized) =>
             drafts.setDraft(key, serialized),
         onTyping: _runtime.onInput,
+        // 语音：录音器 + 上传 + 发送（web MessageInput.tsx:264-293 的三件套）。
+        // 2026-10-21 用户实报「语音无法发送」——此前本页**未注入这三件**：
+        // 输入框 _sendVoice 首行是 if (upload == null || send == null) return;
+        // 直接静默返回；录音按钮也不渲染（voiceRecorder null = 隐藏入口）。
+        voiceRecorder: _voiceRecorder,
+        onUploadVoice: _runtime.uploadVoice,
+        onSendVoice: _runtime.sendVoice,
         narrow: widget.narrow,
         // 宽屏浮动输入卡的 12px 外边距（`auroraqua.css:347–359` 在 @media ≥769 内），
         // 左归零（`.wide-messages-pane .composer`，同块 361–368）。窄屏档忽略该参数。

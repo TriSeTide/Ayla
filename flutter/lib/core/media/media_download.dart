@@ -1,75 +1,76 @@
 /// 媒体文件下载（web `MediaContent.tsx` `FileMedia` 的 `<a href download>` 等价）。
 ///
 /// ## 事实源
-/// - web：`<a className="file-download" href={signedUrl} download={name}>` —— 浏览器原生
-///   下载（签名 URL + `download` 属性，数据面同源）；
-/// - Flutter 侧没有原生下载 UI ⇒ 用 dio 带鉴权拉 `/media/{id}/content` 落到**下载目录**
-///   （移动端落应用文档目录），返回落盘路径交给调用方提示。
+/// - web：`<a className="file-download" href={signedUrl} download={name}>` —— 浏览器
+///   负责「弹保存位置 + 写盘」；
+/// - Flutter 侧没有浏览器，等价能力是 `FilePicker.saveFile`：
+///   桌面弹**系统保存对话框**、移动端走 SAF / 文件 App（无需额外权限）。
+///
+/// ## 取字节顺序（与图片查看器一致）
+/// 1. 本地漫游缓存命中 → 直接读本地文件（云端过期也能保存）；
+/// 2. 未命中 → 带 Bearer 的 `/media/{id}/content`（附件不走预签名直连，
+///    与 web 的 `apiRequestBlob(mediaContentUrl(id))` 同路径）。
 ///
 /// 纪律：失败必须抛错（不伪造成功），由 UI 显示「附件加载失败」+ 重试。
 library;
 
 import 'dart:io';
+import 'dart:typed_data' show Uint8List;
 
 import 'package:dio/dio.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart' show FilePicker;
 
-import '../net/dio_client.dart';
+import '../models/media_kind.dart' show AylaMediaKind;
+import '../net/dio_client.dart' show ApiException, DioClient, kApiPrefix;
+import 'media_cache.dart' show AylaMediaCache;
 
 /// 媒体文件下载器。
 abstract final class AylaMediaDownload {
-  /// 下载并落盘，返回保存路径。
+  /// 下载并**保存到用户选择的位置**。
   ///
-  /// [onProgress]：`(已接收字节, 总字节)`；总字节未知时传 null。
-  static Future<String> save({
+  /// 返回保存路径；用户取消对话框返回 null。
+  static Future<String?> save({
     required String mediaId,
     required String fileName,
     void Function(int received, int? total)? onProgress,
   }) async {
-    final Directory dir = await _targetDirectory();
-    final String safeName = _safeFileName(fileName);
-    final String target = '${dir.path}${Platform.pathSeparator}$safeName';
+    final Uint8List bytes = await readBytes(mediaId, onProgress: onProgress);
+    if (bytes.isEmpty) {
+      throw ApiException(0, '附件下载失败（内容为空）');
+    }
+    final Uri? saved = await FilePicker.saveFile(
+      fileName: _safeFileName(fileName),
+      bytes: bytes,
+      dialogTitle: '保存文件',
+    );
+    return saved?.toFilePath();
+  }
+
+  /// 读取媒体原始字节（缓存优先，未命中走鉴权 content 端点）。
+  static Future<Uint8List> readBytes(
+    String mediaId, {
+    void Function(int received, int? total)? onProgress,
+  }) async {
+    final File? cached = await AylaMediaCache.instance.lookup(
+      mediaId,
+      kind: AylaMediaKind.file,
+    );
+    if (cached != null) return cached.readAsBytes();
     try {
-      await DioClient.instance.dio.download(
+      final Response<List<int>> resp =
+          await DioClient.instance.dio.get<List<int>>(
         '$kApiPrefix/media/${Uri.encodeComponent(mediaId)}/content',
-        target,
+        options: Options(responseType: ResponseType.bytes),
         onReceiveProgress: onProgress,
       );
-      return target;
+      final List<int>? data = resp.data;
+      return data == null ? Uint8List(0) : Uint8List.fromList(data);
     } on DioException catch (e) {
       throw ApiException(
         e.response?.statusCode ?? 0,
         '附件下载失败（${e.response?.statusCode ?? e.type.name}）',
       );
     }
-  }
-
-  /// 把**本地漫游缓存**里的文件复制到下载目录，返回保存路径。
-  ///
-  /// 缓存命中时走这条路：不再发起网络请求，直接从本地副本另存
-  /// （用户裁决 D3：本地有就永远可用，云端过期不影响）。
-  /// 源文件名可能已被缓存层重命名，这里按调用方给的展示名重命名。
-  static Future<String> copyLocalToDownloadDir({
-    required File source,
-    required String fileName,
-  }) async {
-    final Directory dir = await _targetDirectory();
-    final String safeName = _safeFileName(fileName);
-    final String target =
-        '${dir.path}${Platform.pathSeparator}$safeName';
-    if (source.absolute.path == File(target).absolute.path) return target;
-    await source.copy(target);
-    return target;
-  }
-
-  /// 下载目录：桌面 = 系统下载目录；移动端 = 应用文档目录
-  /// （Android 上写系统下载目录需要额外权限与 MediaStore 流程，属页面层接线项）。
-  static Future<Directory> _targetDirectory() async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      return getApplicationDocumentsDirectory();
-    }
-    final Directory? downloads = await getDownloadsDirectory();
-    return downloads ?? await getApplicationDocumentsDirectory();
   }
 
   /// 文件名净化（去掉路径分隔符与 Windows 非法字符，防路径穿越）。

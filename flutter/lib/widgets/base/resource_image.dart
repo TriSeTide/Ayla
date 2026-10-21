@@ -264,6 +264,7 @@ class _ResourceImageState extends State<AylaResourceImage> {
     _notifyState();
 
     final String? mediaId = extractMediaId(widget.src);
+    debugPrint('[IMG-DBG] src=${widget.src} mediaId=$mediaId');
     if (mediaId == null) {
       // 外部资源 / 非媒体路径：直接加载（不缓存）
       if (!mounted) return;
@@ -286,6 +287,7 @@ class _ResourceImageState extends State<AylaResourceImage> {
           : AylaMediaCacheVariant.original,
     );
     if (!mounted) return;
+    debugPrint('[IMG-DBG] cached=${cached?.path}');
     if (cached != null) {
       setState(() {
         _cachedFile = cached;
@@ -301,6 +303,7 @@ class _ResourceImageState extends State<AylaResourceImage> {
       final SignedMediaResult r =
           await MediaSigner.instance.sign(mediaId, variant: widget.variant);
       if (!mounted) return;
+      debugPrint('[IMG-DBG] signed url=${r.url}');
       setState(() {
         _resolvedUrl = r.url;
         _originalExpired = r.originalExpired;

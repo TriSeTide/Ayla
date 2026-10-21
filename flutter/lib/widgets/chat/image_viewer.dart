@@ -35,13 +35,14 @@
 
 library;
 
-import 'dart:io' show Directory, File, Platform;
+import 'dart:async' show unawaited;
+import 'dart:io' show File;
+import 'dart:typed_data' show Uint8List;
 
-import 'package:dio/dio.dart' show Dio;
+import 'package:dio/dio.dart' show Dio, Options, Response, ResponseType;
+import 'package:file_picker/file_picker.dart' show FilePicker;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
-import 'package:path_provider/path_provider.dart'
-    show getApplicationDocumentsDirectory, getDownloadsDirectory;
 
 import '../../core/media/media_cache.dart' show AylaMediaCache;
 import '../../core/media/media_signer.dart'
@@ -141,6 +142,21 @@ class _AylaImageViewerState extends State<AylaImageViewer>
     duration: const Duration(milliseconds: 250),
   );
 
+  @override
+  void initState() {
+    super.initState();
+    // ⚠️ **必须在这里把 _slide 置 1**（2026-10-21 用户实报「查看器里图片就是不显示」的根因）。
+    //
+    // `_slide` 初值是 0，只有 `_go()`（左右切换）里才会 `forward(from: 0)`。
+    // 而 `_slideIn()` 用 `Opacity(opacity: v)` 包住整个条目 —— 首次打开时没有
+    // `_go()` 调用 ⇒ v 恒为 0 ⇒ **图片以完全透明渲染**：布局占了尺寸、能点到、
+    // 但肉眼一片空白，且不会走 errorBuilder（不是加载失败）。
+    //
+    // 语义上这是对的：首屏不该有滑入动画（条目本来就在原位），直接置 1；
+    // 仅「切换条目」才从 0 滑入（见 `_go`）。
+    _slide.value = 1;
+  }
+
   /// 条目/初始序号变化时重新同步（查看器通常每次打开重建，但状态复用也要正确）。
   @override
   void didUpdateWidget(AylaImageViewer oldWidget) {
@@ -229,8 +245,16 @@ class _AylaImageViewerState extends State<AylaImageViewer>
     return 0;
   }
 
-  /// web `downloadMedia`：签名 URL + 原生下载（零内存流式写盘）。
-  /// Flutter 用 dio 直连签名 URL 写文件（**不附加 Authorization**——预签名自带鉴权）。
+  /// 保存到用户选择的位置（web `downloadMedia` 的原生等价）。
+  ///
+  /// 平台差异（对齐各自习惯，不用「悄悄写进下载目录」那种无反馈做法）：
+  /// - **桌面（Windows/macOS/Linux）**：`FilePicker.saveFile` 弹**系统保存对话框**
+  ///   让用户选路径 —— 等价 web 的 `a[download]`（浏览器自己弹保存位置）；
+  /// - **移动端（Android/iOS）**：`saveFile` 直接落到应用可见的文件位置
+  ///   （Android 走 SAF 授权、iOS 走文件 App），无需额外权限。
+  ///
+  /// 取字节顺序：本地漫游缓存 → 缓存层下载（签名 URL）→ 裸签名下载兜底。
+  /// 用户取消对话框时静默返回（不报错）。
   Future<void> _save() async {
     final AylaMediaDescriptor? media = _current.media;
     if (media == null || _saving) return;
@@ -240,33 +264,23 @@ class _AylaImageViewerState extends State<AylaImageViewer>
       _saveExpired = false;
     });
     try {
-      // ① 本地漫游缓存优先：命中直接复制到下载目录，不走网络；
-      //    本地有就永远能保存，云端过期不影响（用户裁决 D3）。
-      final File? cached = await AylaMediaCache.instance.lookup(
-        media.mediaId,
-        kind: media.kind ?? AylaMediaKind.image,
-        mimeType: media.mimeType,
-      );
-      if (cached != null) {
-        final Directory? downloads = await getDownloadsDirectory();
-        final Directory dir =
-            downloads ?? await getApplicationDocumentsDirectory();
-        final String path =
-            dir.path + Platform.pathSeparator + _downloadName(media);
-        await cached.copy(path);
-        if (mounted) setState(() => _saving = false);
-        return;
+      final Uint8List bytes = await _readMediaBytes(media);
+      if (bytes.isEmpty) {
+        throw StateError('empty media bytes');
       }
-      final SignedMediaResult signed =
-          await MediaSigner.instance.sign(media.mediaId);
-      final Directory? downloads = await getDownloadsDirectory();
-      final Directory dir =
-          downloads ?? await getApplicationDocumentsDirectory();
-      final String path =
-          dir.path + Platform.pathSeparator + _downloadName(media);
-      await Dio().download(signed.url, path);
-      if (mounted) setState(() => _saving = false);
+      final String fileName = _downloadName(media);
+      // 收尾回调：用户取消时返回 null（不视为失败）。
+      final Uri? saved = await FilePicker.saveFile(
+        fileName: fileName,
+        bytes: bytes,
+        mimeType: media.mimeType ?? 'application/octet-stream',
+        dialogTitle: '保存媒体',
+      );
+      debugPrint('[SAVE-DBG] saveFile -> $saved');
+      if (!mounted) return;
+      setState(() => _saving = false);
     } catch (error) {
+      debugPrint('[SAVE-DBG] FAILED: $error');
       if (!mounted) return;
       setState(() {
         _saving = false;
@@ -274,6 +288,34 @@ class _AylaImageViewerState extends State<AylaImageViewer>
         _saveExpired = error is MediaExpiredError;
       });
     }
+  }
+
+  /// 取媒体原始字节：本地缓存优先，未命中经缓存层下载，最后裸签名兜底。
+  Future<Uint8List> _readMediaBytes(AylaMediaDescriptor media) async {
+    final File? cached = await AylaMediaCache.instance.lookup(
+      media.mediaId,
+      kind: media.kind ?? AylaMediaKind.image,
+      mimeType: media.mimeType,
+    );
+    if (cached != null) return cached.readAsBytes();
+
+    final File? fetched = await AylaMediaCache.instance.fetchAndStore(
+      mediaId: media.mediaId,
+      kind: media.kind ?? AylaMediaKind.image,
+      mimeType: media.mimeType,
+    );
+    if (fetched != null) return fetched.readAsBytes();
+
+    // 兜底：缓存层失败（如磁盘不可写）时直接经签名 URL 取字节。
+    final SignedMediaResult signed =
+        await MediaSigner.instance.sign(media.mediaId);
+    final Response<List<int>> resp =
+        await Dio().get<List<int>>(
+      signed.url,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    final List<int>? data = resp.data;
+    return data == null ? Uint8List(0) : Uint8List.fromList(data);
   }
 
   /// 下载文件名（web：`ayla-image|ayla-video-<id 前 8 位>.<mime 扩展名>`）。
@@ -549,13 +591,24 @@ class _AylaImageViewerState extends State<AylaImageViewer>
     return _mediaFrame(
       maxW,
       maxH,
-      child: AylaResourceImage(
-        src: mediaContentUrl(media.mediaId),
-        alt: item.alt.isEmpty ? '图片原图' : item.alt,
-        fit: BoxFit.contain,
-        expiredBadge: true, // 原图已过期 → 角标（web expiredBadge）
-        fallback: _fallbackBox('图片加载失败'),
-      ),
+      // ⚠️ `width/height` 必须显式给（2026-10-21 用户实报「图片也没有正常显示」）：
+      // web `.image-viewer-img { width:auto; height:auto; max-width:min(92vw,1200px);
+      // max-height:82vh; object-fit:contain }` 是靠 `<img>` 的**固有尺寸**参与布局。
+      // Flutter 的 `AylaResourceImage` 内部是 `Image.network`：不传 width/height 时
+      // 它在 `ConstrainedBox(maxWidth,maxHeight)` 的 loose 约束下会**塌到 0×0**
+      // （解码前 RenderImage 无固有尺寸 ⇒ 取 constraints.smallest），表现为查看器
+      // 里一片空白。这里把上限尺寸作为**紧约束**给进去，`BoxFit.contain` 负责
+      // 按比例缩放（等价 object-fit: contain）。
+      // ⚠️ 关键：`AylaResourceImage` 在 **loading 态**返回 `_LoadingPlaceholder`，
+      // 它的 width/height 取自组件自身的 `width`/`height` 参数；**不传就是 null**
+      // ⇒ 占位容器塌成 0×0；而加载完成后的 `Image.network` 同样没有尺寸参数，
+      // 在 `ConstrainedBox` 的 loose 约束下也取 `constraints.smallest` ⇒ **0×0**。
+      // 这就是「查看器里图片一片空白」的确切原因（不是没加载，是加载了但画成 0 像素）。
+      //
+      // 修法：把上限尺寸作为**紧约束**通过组件自身的 width/height 传进去 ——
+      // 组件内部会用它做 `Image.network(width:, height:, fit: BoxFit.contain)`，
+      // 等价 web 的 `width:auto; height:auto; max-width; max-height; object-fit:contain`。
+      child: AylaViewerImage(mediaId: media.mediaId, maxW: maxW, maxH: maxH),
     );
   }
 
@@ -1203,4 +1256,157 @@ Widget aylaImageViewerSamples() {
       ],
     ),
   );
+}
+
+/// 查看器专用图片（自足实现，不走 [AylaResourceImage]）。
+///
+/// 为什么单独写一个：查看器需要「按容器上限**自适应收缩**、不留白边」的确定性
+/// 行为，而 [AylaResourceImage] 是文档流组件（按 intrinsic 尺寸、可塌缩），两者
+/// 布局语义不同。2026-10-21 用户两次实报「查看器里图片不显示 / 有白边」。
+///
+/// ## 布局（对齐 web `.image-viewer-img`）
+/// web: `width:auto; height:auto; max-width:min(92vw,1200px); max-height:82vh;
+///       object-fit:contain`
+/// ⇒ 图片按**固有宽高比**缩到上限内，容器贴合图片（无留白）。
+///
+/// Flutter 等价做法：`Image` 只给 **max 约束**（不给 width/height 紧约束），
+/// 解码前用 `frameBuilder` 占位；解码后 `Image` 按固有尺寸参与布局，
+/// 再被外层 `ConstrainedBox` 夹到上限内 ⇒ 自动收缩、比例不变、无白边。
+///
+/// ## 数据来源
+/// 1. 本地漫游缓存命中 → `Image.file`（最快，且云端过期也能看）；
+/// 2. 未命中 → `:sign` 预签名 URL → `Image.network`，成功后静默落盘；
+/// 3. 过期/失败 → 可见文案（不再是空白，便于定位）。
+class AylaViewerImage extends StatefulWidget {
+  const AylaViewerImage({
+    super.key,
+    required this.mediaId,
+    required this.maxW,
+    required this.maxH,
+  });
+
+  final String mediaId;
+  final double maxW;
+  final double maxH;
+
+  @override
+  State<AylaViewerImage> createState() => _AylaViewerImageState();
+}
+
+class _AylaViewerImageState extends State<AylaViewerImage> {
+  String? _url;
+  File? _file;
+  bool _failed = false;
+  bool _expired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(AylaViewerImage old) {
+    super.didUpdateWidget(old);
+    if (old.mediaId != widget.mediaId) _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _url = null;
+      _file = null;
+      _failed = false;
+      _expired = false;
+    });
+    try {
+      final File? cached = await AylaMediaCache.instance.lookup(
+        widget.mediaId,
+        kind: AylaMediaKind.image,
+      );
+      if (!mounted) return;
+      if (cached != null) {
+        setState(() => _file = cached);
+        return;
+      }
+      final SignedMediaResult signed =
+          await MediaSigner.instance.sign(widget.mediaId);
+      if (!mounted) return;
+      setState(() => _url = signed.url);
+      unawaited(
+        AylaMediaCache.instance
+            .fetchAndStore(
+              mediaId: widget.mediaId,
+              kind: AylaMediaKind.image,
+            )
+            .catchError((Object _) => null),
+      );
+    } on MediaExpiredError {
+      if (!mounted) return;
+      setState(() => _expired = true);
+    } catch (e) {
+      debugPrint('[VIEWER-IMG] load failed: $e');
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_expired) return _placeholder('媒体已过期');
+    if (_failed) return _placeholder('图片加载失败');
+
+    final File? file = _file;
+    final String? url = _url;
+    if (file == null && url == null) return _placeholder('加载中…');
+
+    // ⚠️ **只给上限、不给紧尺寸**：见类文档「布局」一节。
+    // 解码前 `Image` 无固有尺寸 ⇒ 用 frameBuilder 占住上限框（避免跳动）；
+    // 解码后按图片固有尺寸参与布局，外层 ConstrainedBox 夹到上限 ⇒ 无白边。
+    final Widget raw = file != null
+        ? Image.file(
+            file,
+            key: ValueKey<String>('vfile:${file.path}'),
+            fit: BoxFit.contain,
+            errorBuilder: (BuildContext c, Object e, StackTrace? s) {
+              debugPrint('[VIEWER-IMG] file decode failed: $e');
+              return _placeholder('图片加载失败');
+            },
+          )
+        : Image.network(
+            url!,
+            key: ValueKey<String>('vnet:$url'),
+            fit: BoxFit.contain,
+            errorBuilder: (BuildContext c, Object e, StackTrace? s) {
+              debugPrint('[VIEWER-IMG] network decode failed: $e');
+              return _placeholder('图片加载失败');
+            },
+          );
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: widget.maxW,
+        maxHeight: widget.maxH,
+      ),
+      child: raw,
+    );
+  }
+
+  /// 占位（加载中/失败/过期）：固定在上限框内居中，保证不跳动。
+  Widget _placeholder(String text) {
+    return SizedBox(
+      width: widget.maxW,
+      height: widget.maxH,
+      child: Center(
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontFamily: AylaFonts.body,
+            fontFamilyFallback: AylaFonts.cjkFallback,
+            fontSize: 14,
+            color: AylaColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
 }

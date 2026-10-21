@@ -1655,28 +1655,16 @@ class _FileMediaState extends State<_FileMedia> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      // 本地漫游缓存优先：命中直接复制到下载目录，不再走网络。
-      final File? cached = await AylaMediaCache.instance.lookup(
-        widget.media.mediaId,
-        kind: AylaMediaKind.file,
-        mimeType: widget.media.mimeType,
-      );
-      if (!mounted) return;
-      if (cached != null) {
-        final String path = await AylaMediaDownload.copyLocalToDownloadDir(
-          source: cached,
-          fileName: _name,
-        );
-        if (!mounted) return;
-        widget.onDownloaded?.call(path);
-        return;
-      }
-      final String path = await AylaMediaDownload.save(
+      // 统一走 `AylaMediaDownload.save`：内部已实现「缓存优先 → 鉴权下载」，
+      // 并弹**系统保存对话框**（桌面）/ SAF（移动端）—— 等价 web 的 `<a download>`。
+      // 2026-10-21 用户实报「文件发送后无法下载」：此前页面层根本没传
+      // `onDownloaded`（回调为空），且旧实现只静默写下载目录、无任何 UI 反馈。
+      final String? path = await AylaMediaDownload.save(
         mediaId: widget.media.mediaId,
         fileName: _name,
       );
       if (!mounted) return;
-      widget.onDownloaded?.call(path);
+      if (path != null) widget.onDownloaded?.call(path);
     } catch (e) {
       if (!mounted) return;
       setState(() => _failed = true);
@@ -1919,9 +1907,27 @@ class _MediaViewerHost {
       ),
     );
     _entry = entry;
-    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
-    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
-    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
+    _insertOnRootOverlay(context, entry);
+  }
+
+  /// 把查看器插到**根 Overlay**（覆盖整个窗口，含顶部导航栏）。
+  ///
+  /// 2026-10-21 用户实报「查看图片时顶部导航栏没被遮住」：此前用
+  /// `Overlay.of(context)`（**最近**的 Overlay）。聊天页的最近 Overlay 是
+  /// 消息区那一层（`Scaffold` 内的 body 区），它**不含**顶部导航栏 ⇒ 查看器
+  /// 只铺满内容区、导航栏浮在上面。web 用 `createPortal(document.body)` 铺满视口，
+  /// 对应 Flutter 的 **rootOverlay**。
+  ///
+  /// 为什么早先注释说「不要 rootOverlay」：画布/测试宿主（`preview_theme.dart:55`）
+  /// 没有 Navigator ⇒ `rootOverlay: true` 会抛 `No Overlay widget found`。
+  /// 这里改成「优先 rootOverlay，宿主不可用时退回最近 Overlay」：
+  /// 生产恒走 root（正确），画布/测试退回最近层（不抛异常）。
+  void _insertOnRootOverlay(BuildContext context, OverlayEntry entry) {
+    final OverlayState? root = Overlay.maybeOf(context, rootOverlay: true);
+    if (root != null) {
+      root.insert(entry);
+      return;
+    }
     Overlay.of(context).insert(entry);
   }
 
@@ -1941,10 +1947,7 @@ class _MediaViewerHost {
       ),
     );
     _entry = entry;
-    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
-    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
-    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
-    Overlay.of(context).insert(entry);
+    _insertOnRootOverlay(context, entry);
   }
 
   void close() {
