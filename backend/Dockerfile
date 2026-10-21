@@ -12,9 +12,25 @@ WORKDIR /app
 
 # 依赖层（pyproject 变更才重建）
 COPY pyproject.toml ./
-RUN pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple .
+# ⚠️ 关键：装完依赖后必须删掉 site-packages 里的 apps/ 与 config/ 源码副本。
+#
+# pyproject 的 [tool.setuptools.packages.find] include = ["apps*", "config*"]，
+# 所以 `pip install .` 会把本工程源码以**构建当时的快照**实体复制到
+#   /usr/local/lib/python3.11/site-packages/apps/
+# 而 site-packages 在 sys.path 中排在 /app 之前 ⇒ 它会**遮蔽**下面 COPY 进 /app 的
+# 当前源码。后果：源码层更新后运行的实际仍是旧代码，且本层命中 Docker 缓存时
+# 长期不重建。
+#
+# 2026-10-21 排查实证：media 过期修复部署并重建镜像后，运行时仍加载
+#   /usr/local/lib/python3.11/site-packages/apps/media/...（10-18 旧快照），
+# /app/apps/ 下的新代码从未被执行。
+#
+# 删除范围只含本工程包（不碰第三方 dist-info/egg-info，避免破坏依赖元数据）。
+RUN pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple . \
+ && rm -rf /usr/local/lib/python3.11/site-packages/apps \
+           /usr/local/lib/python3.11/site-packages/config
 
-# 源码层
+# 源码层（**必须**晚于依赖层，保证 /app 下是当前代码）
 COPY apps ./apps
 COPY config ./config
 COPY manage.py ./
