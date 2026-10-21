@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import '../lib/core/media/media_cache.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/net/dio_client.dart';
 import '../lib/widgets/base/dialogs.dart';
@@ -198,8 +199,14 @@ void signerDegradationTests() {
   setUp(() {
     MediaSigner.instance.detach();
     MediaSigner.instance.attach(_FakeSignerClient());
+    // 关掉本地媒体缓存：widget 测试跑在 FakeAsync 下，真实磁盘 IO 的 future
+    // 不会被推进 ⇒ 缓存查询会让图片卡在 loading，拿不到签名降级/过期态。
+    AylaMediaCache.instance.enabledForTest = false;
   });
-  tearDown(() => MediaSigner.instance.detach());
+  tearDown(() {
+    MediaSigner.instance.detach();
+    AylaMediaCache.instance.enabledForTest = true;
+  });
 
   testWidgets('原图已过期（阶段 1）→ 显示「原图已过期」角标',
       (WidgetTester tester) async {

@@ -9,8 +9,10 @@
 
 --expire-chat-media：聊天媒体分级过期（docs/architecture/media-storage-expiration.md）：
 - 候选 = created_at 超该 kind 有效 TTL 且未完全过期（expired_at 为 null）且 status=READY；
-- 保护集合 = 全量扫描五类永久保留引用（PostImage/EmojiItem/Comment 两种形态/
-  Conversation.avatar），被任一保护类引用的媒体永不过期；
+- 保护集合 = 全量扫描七类永久保留引用（A1-A7：PostImage/EmojiItem/Comment 两种形态/
+  Conversation.avatar/User.avatar/LiveChannel.cover，见
+  docs/architecture/media-retention-boundaries.md §3），被任一保护类引用的媒体永不过期；
+- 表情包（kind=emoji）显式跳过，永不过期（边界文档 §6.1 Q1）；
 - 可过期 = 候选 - 保护（含无任何引用的孤儿媒体）；
 - 图片两级：阶段 1（7 天）删 storage_path（original）标记 original_expired_at；
   阶段 2（30 天）删 thumbnail/waveform 标记 expired_at；
@@ -30,17 +32,43 @@ from apps.media.models import MediaObject, MediaUploadSession
 
 logger = logging.getLogger(__name__)
 
-# Conversation.avatar 存的是 /api/v1/media/{id}/content 形式 URL，解析出 media_id 再比对
+# 头像/封面类字段（Conversation.avatar / User.avatar / LiveChannel.cover）存的是
+# /api/v1/media/{id}/content 形式 URL，解析出 media_id 再比对。
 _AVATAR_MEDIA_RE = re.compile(r"/api/v1/media/([^/]+)/content")
 
 
+def _collect_content_url_media_ids(model, field: str, protected: set[str]) -> None:
+    """扫描某个 model 的 content URL 字段，把解析出的 media_id 并入 protected。
+
+    A5（User.avatar）/ A6（Conversation.avatar）/ A7（LiveChannel.cover）共用同一
+    引用形态；新增同类引用时复用本函数，避免又漏一类（边界文档 §8 约束 2）。
+    """
+    # 全量扫描（不得分页截断：漏判 = 资产被删），但用 iterator 分块取，
+    # 避免用户表/会话表较大时把整列一次性读进内存。
+    values = model.objects.exclude(**{field: ""}).values_list(field, flat=True)
+    for url in values.iterator(chunk_size=2000):
+        match = _AVATAR_MEDIA_RE.search(url or "")
+        if match:
+            protected.add(match.group(1))
+
+
 def _protected_media_ids() -> set[str]:
-    """全量扫描五类永久保留引用，返回被引用的 media_id 集合。
+    """全量扫描七类资产引用（A1-A7），返回被引用的 media_id 集合。
 
     漏判会导致资产类媒体被误删——这是本方案最高风险点，必须全量扫描。
+
+    引用清单（唯一事实源 docs/architecture/media-retention-boundaries.md §3）：
+    - A1 PostImage.media（FK）；A2 EmojiItem.media（FK）；
+    - A3 Comment.media_id（字符串）；A4 Comment.images（JSON 数组）；
+    - A5 User.avatar、A6 Conversation.avatar、A7 LiveChannel.cover（content URL）。
+
+    注意：E1-E4（Message / Danmaku / VoiceChatMessage）是「可过期」聊天类，
+    **不得**加入本集合（边界文档 §4）。
     """
+    from apps.accounts.models import User
     from apps.chat.models import Conversation
     from apps.emoji.models import EmojiItem
+    from apps.live.models import LiveChannel
     from apps.posts.models import Comment, PostImage
 
     protected: set[str] = set()
@@ -55,11 +83,10 @@ def _protected_media_ids() -> set[str]:
         for mid in images or []:
             if mid:
                 protected.add(str(mid))
-    # Conversation.avatar：解析 content URL 提取 media_id
-    for url in Conversation.objects.exclude(avatar="").values_list("avatar", flat=True):
-        match = _AVATAR_MEDIA_RE.search(url or "")
-        if match:
-            protected.add(match.group(1))
+    # 头像/封面类 content URL 引用（A5/A6/A7）：解析 URL 提取 media_id
+    _collect_content_url_media_ids(User, "avatar", protected)  # A5 用户头像
+    _collect_content_url_media_ids(Conversation, "avatar", protected)  # A6 群头像
+    _collect_content_url_media_ids(LiveChannel, "cover", protected)  # A7 直播间封面
     return protected
 
 
@@ -144,9 +171,15 @@ class Command(BaseCommand):
             return
 
         protected = _protected_media_ids()
-        stage1_count = stage2_count = 0
+        stage1_count = stage2_count = emoji_skipped = 0
         for media in candidates:
             if media.media_id in protected:
+                continue
+            # 表情包永不过期（边界文档 §6.1 Q1）：必须显式跳过，不能依赖
+            # 「不在 single_ttls 表里所以恰好被跳过」的隐式行为——否则下次重构
+            # TTL 表时，kind=emoji 会被当成单级媒体 7 天删除。
+            if media.kind == MediaObject.KIND_EMOJI:
+                emoji_skipped += 1
                 continue
             if media.kind == MediaObject.KIND_IMAGE:
                 stage1_count, stage2_count = self._expire_image(
@@ -163,7 +196,8 @@ class Command(BaseCommand):
                     stage2_count += 1
         self.stdout.write(
             f"[media] 聊天媒体过期完成：阶段1 {stage1_count} 个，阶段2 {stage2_count} 个"
-            f"（保护 {len(protected)} 个引用，候选 {len(candidates)} 个）"
+            f"（保护 {len(protected)} 个引用，候选 {len(candidates)} 个，"
+            f"表情包跳过 {emoji_skipped} 个）"
         )
 
     def _expire_image(self, media, now, store, no_delete, original_ttl, full_ttl,

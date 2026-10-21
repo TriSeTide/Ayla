@@ -107,7 +107,12 @@ def can_delete_group_item(user, pack: EmojiPack) -> bool:
 
 
 def add_item(user, pack: EmojiPack, media: MediaObject, tag: str = "") -> EmojiItem:
-    """收藏表情：media 必须 kind=emoji 且 ready，且调用方对其有访问权。
+    """收藏表情：media 必须 kind=emoji、ready、原图完好，且调用方对其有访问权。
+
+    EmojiItem 是资产引用 A2（永久保留），因此必须原图完好：已进入过期阶段
+    （`original_expired_at` / `expired_at` 非空）的媒体不得收藏，抛
+    ValueError("media_expired")（410 语义，调用方提示重新上传原图）——
+    见 docs/architecture/media-retention-boundaries.md §6.2 Q2。
 
     返回 (item, created)；重复收藏由 DB unique 约束兜底幂等返回既有。
     """
@@ -119,6 +124,8 @@ def add_item(user, pack: EmojiPack, media: MediaObject, tag: str = "") -> EmojiI
         raise ValueError("media_type_mismatch")
     if media.status != MediaObject.STATUS_READY:
         raise ValueError("media_not_ready")
+    if media.original_expired_at is not None or media.expired_at is not None:
+        raise ValueError("media_expired")
     if not can_access_media(user, media):
         raise PermissionError("无权访问该媒体")
     # 幂等：重复收藏返回既有 item（先查重，避免依赖 IntegrityError 污染外层事务）

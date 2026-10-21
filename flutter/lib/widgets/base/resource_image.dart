@@ -2,10 +2,17 @@
 ///
 /// ## 事实源
 ///
-/// **加载路径**
-/// - 内部媒体（src 以 `/api/v1/media/` 开头）→ 提取 `media_id` → 走签名链路
-///   （[MediaSigner]）：短时签名 URL ＋ 两级过期降级；
-/// - 外部资源 / 非媒体路径 → **直接加载**（不签名）。
+/// **加载路径（2026-10-21 起：本地缓存优先）**
+/// - 内部媒体（src 以 `/api/v1/media/` 开头）→ 提取 `media_id`：
+///   1. **先查本地漫游缓存**（[AylaMediaCache]）：命中直接用 `Image.file`，
+///      **不发任何网络请求**——这正是「看过就一直能看」的落地，云端 7/30 天
+///      过期不影响本地已有内容（见 `docs/architecture/flutter-local-media-cache.md`）；
+///   2. 未命中 → 走签名链路（[MediaSigner]）：短时签名 URL ＋ 两级过期降级；
+///      远程加载**成功后静默落盘**（加载即存，不提示用户）；
+/// - 外部资源 / 非媒体路径 → **直接加载**（不签名、不缓存）。
+///
+/// **本地命中优先于过期判定**：即使云端已返回 410（对象已删），只要本地有文件
+/// 就正常渲染，**不显示「已过期」占位**（用户裁决 D3：能看到图永远比看不到好）。
 ///
 /// **decorative 语义（关键）**：`alt == ""` 表示装饰图（头像、行封面）。
 /// web 对装饰图在**失败/过期**时**只渲染 `fallback`、不显示任何提示**
@@ -28,12 +35,17 @@
 
 library;
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
+import '../../core/media/media_cache.dart';
 import '../../core/media/media_signer.dart';
+import '../../core/models/media_kind.dart';
 import '../../core/net/api_endpoint.dart';
 
 /// 后端 API 前缀（与 `api/client.ts` 的 `API_PREFIX` 一致）。
@@ -173,6 +185,12 @@ enum _State { loading, ready, failed, expired }
 class _ResourceImageState extends State<AylaResourceImage> {
   _State _state = _State.loading;
   String? _resolvedUrl;
+
+  /// 本地漫游缓存命中的文件（非 null 时**优先于** [_resolvedUrl] 渲染）。
+  ///
+  /// 语义见 `docs/architecture/flutter-local-media-cache.md`：本地有就永远能看，
+  /// 云端是否过期不影响。
+  File? _cachedFile;
   bool _originalExpired = false;
 
   /// 重试计数（web 用 `key={`${resolvedSrc}:${retry}`}` 强制重建 `<img>`）。
@@ -240,16 +258,39 @@ class _ResourceImageState extends State<AylaResourceImage> {
     setState(() {
       _state = _State.loading;
       _resolvedUrl = null;
+      _cachedFile = null;
       _originalExpired = false;
     });
     _notifyState();
 
     final String? mediaId = extractMediaId(widget.src);
     if (mediaId == null) {
-      // 外部资源 / 非媒体路径：直接加载
+      // 外部资源 / 非媒体路径：直接加载（不缓存）
       if (!mounted) return;
       setState(() {
         _resolvedUrl = widget.src;
+        _state = _State.ready;
+      });
+      _notifyState();
+      return;
+    }
+
+    // ① 本地漫游缓存优先：命中直接渲染本地文件，**不发任何网络请求**
+    //    （连签名都不签）。本地有就永远能看，云端过期不影响（用户裁决 D3）。
+    //    thumb 变体不缓存（D1），此调用会直接返回 null。
+    final File? cached = await AylaMediaCache.instance.lookup(
+      mediaId,
+      kind: _cacheKindFor(widget.src),
+      variant: widget.variant == MediaVariant.thumb
+          ? AylaMediaCacheVariant.thumb
+          : AylaMediaCacheVariant.original,
+    );
+    if (!mounted) return;
+    if (cached != null) {
+      setState(() {
+        _cachedFile = cached;
+        _resolvedUrl = null;
+        _originalExpired = false;
         _state = _State.ready;
       });
       _notifyState();
@@ -266,8 +307,21 @@ class _ResourceImageState extends State<AylaResourceImage> {
         _state = _State.ready;
       });
       _notifyState();
+      // ② 加载即存（用户裁决 D4）：签名成功且**原图仍完好**时静默落盘。
+      //    不 await、不提示——缓存是增强项，失败不影响本次显示。
+      //    阶段 1（originalExpired）不缓存：那是缩略图，不是原图（D1）。
+      if (!r.originalExpired && widget.variant != MediaVariant.thumb) {
+        unawaited(
+          AylaMediaCache.instance
+              .fetchAndStore(
+                mediaId: mediaId,
+                kind: _cacheKindFor(widget.src),
+              )
+              .catchError((Object _) => null),
+        );
+      }
     } on MediaExpiredError {
-      // 完全过期：媒体已永久删除，重试无意义 → 占位不裂图
+      // 完全过期且本地没有：占位不裂图（重试无意义）
       if (!mounted) return;
       setState(() => _state = _State.expired);
       _notifyState();
@@ -277,6 +331,11 @@ class _ResourceImageState extends State<AylaResourceImage> {
       _notifyState();
     }
   }
+
+  /// 由媒体路径推断缓存分类（用于分桶目录的 kind 层）。
+  ///
+  /// 图片组件只承载 image / emoji 两类；其余 kind 不会走到这里。
+  AylaMediaKind _cacheKindFor(String src) => AylaMediaKind.image;
 
   /// 重试（web `retryImage`：失效缓存 + 重建 `<img>`）。
   void _retryLoad() {
@@ -389,7 +448,45 @@ class _ResourceImageState extends State<AylaResourceImage> {
         final int? decodeH = widget.height == null
             ? null
             : (widget.height! * dpr).round().clamp(1, 8192);
-        final Widget img = Image.network(
+        // 本地漫游缓存命中 → Image.file（不再走网络）；否则 Image.network。
+        // key 区分本地/远程，避免同一媒体在两种来源间切换时复用错误的解码缓存。
+        final Widget img = _cachedFile != null
+            ? Image.file(
+                _cachedFile!,
+                key: ValueKey<String>('file:${_cachedFile!.path}:$_retry'),
+                width: widget.width,
+                height: widget.height,
+                cacheWidth: decodeW,
+                cacheHeight: decodeH,
+                fit: widget.fit ?? BoxFit.cover,
+                errorBuilder: (BuildContext context, Object e, StackTrace? s) {
+                  // 本地文件损坏/被外部删除 → 当作未命中，重走远程链路一次
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted || _state == _State.failed) return;
+                    _cachedFile = null;
+                    _load();
+                  });
+                  return widget.fallback ?? const SizedBox.shrink();
+                },
+                frameBuilder: (
+                  BuildContext context,
+                  Widget child,
+                  int? frame,
+                  bool wasSync,
+                ) {
+                  if (wasSync || frame != null) return child;
+                  if (_decorative) {
+                    return widget.fallback ?? const SizedBox.shrink();
+                  }
+                  return widget.reserveSpaceWhileLoading
+                      ? _LoadingPlaceholder(
+                          width: widget.width,
+                          height: widget.height,
+                        )
+                      : const SizedBox.shrink();
+                },
+              )
+            : Image.network(
           _resolvedUrl!,
           key: ValueKey<String>('${_resolvedUrl!}:$_retry'), // 重试时强制重建
           width: widget.width,

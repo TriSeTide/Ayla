@@ -8,6 +8,12 @@
 
 图片校验语义与 chat.CreateMessageSerializer 一致：media 存在 + READY + kind=image +
 调用方有访问权；越权走 PermissionDenied（403），与 400 类校验错误区分。
+
+**资产类额外约束**（A1 PostImage / A3-A4 Comment，见
+docs/architecture/media-retention-boundaries.md §6.2 Q2）：媒体必须原图完好——
+`original_expired_at` 与 `expired_at` 均为空，否则返回 `media_expired`（410 语义，
+前端提示重新上传原图）。已进入过期阶段的媒体不得再固化为永久资产。
+聊天类（E1-E4）不加此约束：聊天本就允许发送即将过期的媒体。
 """
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
@@ -230,6 +236,10 @@ class CreatePostSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"images": "media_not_found"})
             if media.status != MediaObject.STATUS_READY:
                 raise serializers.ValidationError({"images": "media_not_ready"})
+            # 资产引用必须原图完好（边界文档 §6.2 Q2）：阶段 1（原图已删）或完全
+            # 过期（对象全删）的媒体不得再固化为永久资产，须重新上传原图。
+            if media.original_expired_at is not None or media.expired_at is not None:
+                raise serializers.ValidationError({"images": "media_expired"})
             if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_VIDEO):
                 raise serializers.ValidationError({"images": "media_type_mismatch"})
             if user is not None and not can_access_media(user, media):
@@ -286,6 +296,9 @@ class UpdatePostSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"images": "media_not_found"})
             if media.status != MediaObject.STATUS_READY:
                 raise serializers.ValidationError({"images": "media_not_ready"})
+            # 资产引用必须原图完好（边界文档 §6.2 Q2）：过期媒体须重新上传原图。
+            if media.original_expired_at is not None or media.expired_at is not None:
+                raise serializers.ValidationError({"images": "media_expired"})
             if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_VIDEO):
                 raise serializers.ValidationError({"images": "media_type_mismatch"})
             if user is not None and not can_access_media(user, media):
@@ -340,6 +353,9 @@ class CreateCommentSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"media_id": "media_not_found"})
             if media.status != MediaObject.STATUS_READY:
                 raise serializers.ValidationError({"media_id": "media_not_ready"})
+            # 资产引用必须原图完好（边界文档 §6.2 Q2）：过期媒体须重新上传原图。
+            if media.original_expired_at is not None or media.expired_at is not None:
+                raise serializers.ValidationError({"media_id": "media_expired"})
             if media.kind not in (MediaObject.KIND_IMAGE, MediaObject.KIND_VIDEO):
                 raise serializers.ValidationError({"media_id": "media_type_mismatch"})
             # 越权是授权问题 → 403，与 400 类校验错误区分（同 CreateMessageSerializer）

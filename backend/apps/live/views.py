@@ -83,7 +83,13 @@ def _bad_request(msg):
 
 
 def _validate_cover(user, value: str) -> str | None:
-    """封面只允许引用当前用户可访问的已完成图片媒体。"""
+    """封面只允许引用当前用户可访问的、原图完好的已完成图片媒体。
+
+    直播间封面是资产引用 A7（永久保留），因此必须原图完好：已进入过期阶段
+    （阶段 1 原图已删 / 完全过期对象已删）的媒体不得用作封面，返回
+    ``media_expired``（410 语义，调用方提示重新上传原图）—— 见
+    docs/architecture/media-retention-boundaries.md §6.2 Q2。
+    """
     value = (value or "").strip()
     if not value:
         return None
@@ -95,6 +101,8 @@ def _validate_cover(user, value: str) -> str | None:
         return "封面媒体不存在或尚未准备好"
     if media.kind != MediaObject.KIND_IMAGE:
         return "封面必须是图片"
+    if media.original_expired_at is not None or media.expired_at is not None:
+        return "media_expired"
     if not can_access_media(user, media):
         return "无权使用该媒体作为封面"
     return None

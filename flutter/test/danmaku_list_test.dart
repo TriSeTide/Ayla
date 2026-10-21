@@ -12,6 +12,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/core/media/media_cache.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/models/media_kind.dart';
 import '../lib/core/models/post.dart' show AylaMediaDescriptor;
@@ -57,10 +58,14 @@ void main() {
   setUp(() {
     aylaDisableSampleMedia();
     MediaSigner.instance.detach(); // 隔离：不触真实签名（失败态即由此产生）
+    // 关掉本地媒体缓存：widget 测试跑在 FakeAsync 下，真实磁盘 IO 的 future
+    // 不会被推进，缓存查询会让图片卡在 loading 态、拿不到"确定性失败态"。
+    AylaMediaCache.instance.enabledForTest = false;
   });
   tearDown(() {
     aylaDisableSampleMedia();
     MediaSigner.instance.detach();
+    AylaMediaCache.instance.enabledForTest = true;
   });
 
   /// 视口显式钉死（默认测试窗口是 800×600 物理 / DPR 3 ⇒ 逻辑仅 266×200，

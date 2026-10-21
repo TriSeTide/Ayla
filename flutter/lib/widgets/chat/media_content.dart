@@ -32,12 +32,14 @@
 
 library;
 
+import 'dart:async';
 import 'dart:io' show File;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../core/media/audio_playback.dart';
+import '../../core/media/media_cache.dart';
 import '../../core/media/media_download.dart';
 import '../../core/media/media_signer.dart';
 import '../../core/media/media_validation.dart';
@@ -668,6 +670,22 @@ class _VideoFrameState extends State<_VideoFrame> {
 
   Future<void> _signOriginal(AylaMediaDescriptor media) async {
     try {
+      // ① 本地漫游缓存优先：命中就直接用本地文件当视频源，不发网络请求；
+      //    本地有就永远能看，云端过期不影响（用户裁决 D3）。
+      final File? cached = await AylaMediaCache.instance.lookup(
+        media.mediaId,
+        kind: AylaMediaKind.video,
+        mimeType: media.mimeType,
+      );
+      if (!mounted) return;
+      if (cached != null) {
+        setState(() {
+          _videoSrc = cached.path;
+          _failed = false;
+          _expired = false;
+        });
+        return;
+      }
       final SignedMediaResult result =
           await MediaSigner.instance.sign(media.mediaId);
       if (!mounted) return;
@@ -675,6 +693,18 @@ class _VideoFrameState extends State<_VideoFrame> {
         _videoSrc = result.url;
         _failed = false;
       });
+      // ② 加载即存（D4）：静默落盘，失败不影响播放。阶段1（缩略图）不缓存。
+      if (!result.originalExpired) {
+        unawaited(
+          AylaMediaCache.instance
+              .fetchAndStore(
+                mediaId: media.mediaId,
+                kind: AylaMediaKind.video,
+                mimeType: media.mimeType,
+              )
+              .catchError((Object _) => null),
+        );
+      }
     } on MediaExpiredError {
       if (!mounted) return;
       setState(() => _expired = true);
@@ -1154,6 +1184,11 @@ class _VoiceMediaState extends State<_VoiceMedia> {
   bool _pending = false;
   bool _disposed = false;
 
+  /// 云端已完全过期且本地无缓存 → 渲染「已过期」占位（不显示重试）。
+  ///
+  /// 本地漫游缓存有内容时**不会**置位：看过就一直能播放（用户裁决 D3）。
+  bool _expired = false;
+
   /// 总时长：descriptor 为准；波形/metadata 派生失败时由音频 metadata 兜底（tsx 495–496）。
   Duration? _metaDuration;
 
@@ -1204,13 +1239,51 @@ class _VoiceMediaState extends State<_VoiceMedia> {
     };
     _engine = engine;
     try {
-      await engine.open(
-        AylaAudioSource.media(widget.media.mediaId).url,
-        headers: AylaAudioSource.media(widget.media.mediaId).headers,
+      // ① 本地漫游缓存优先（docs/architecture/flutter-local-media-cache.md）：
+      //    命中则直接播放本地文件，不发网络请求；
+      //    未命中 → 走签名 URL 远程播放，并静默落盘（加载即存）。
+      final File? cached = await AylaMediaCache.instance.lookup(
+        widget.media.mediaId,
+        kind: AylaMediaKind.voice,
+        mimeType: widget.media.mimeType,
       );
       if (_disposed || !mounted) return null;
-      setState(() => _loading = false);
+      if (cached != null) {
+        await engine.open(cached.path);
+        if (_disposed || !mounted) return null;
+        setState(() {
+          _loading = false;
+          _expired = false;
+        });
+        return engine;
+      }
+      final AylaAudioSource source =
+          AylaAudioSource.media(widget.media.mediaId);
+      await engine.open(source.url, headers: source.headers);
+      if (_disposed || !mounted) return null;
+      setState(() {
+        _loading = false;
+        _expired = false;
+      });
+      // ② 加载即存（D4）：不 await、不提示，失败不影响播放
+      unawaited(
+        AylaMediaCache.instance
+            .fetchAndStore(
+              mediaId: widget.media.mediaId,
+              kind: AylaMediaKind.voice,
+              mimeType: widget.media.mimeType,
+            )
+            .catchError((Object _) => null),
+      );
       return engine;
+    } on MediaExpiredError {
+      // 云端已完全过期且本地没有 → 「已过期」占位（不显示重试）
+      if (!mounted) return null;
+      setState(() {
+        _loading = false;
+        _expired = true;
+      });
+      return null;
     } catch (e) {
       if (!mounted) return null;
       setState(() {
@@ -1310,7 +1383,31 @@ class _VoiceMediaState extends State<_VoiceMedia> {
               ),
             ],
           ),
-          if (_state.error != null) ...<Widget>[
+          // 云端已完全过期且本地无缓存 → 「已过期」占位（不裂图、不重试）。
+          // 本地漫游缓存命中时不会走到这里（看过就一直能播）。
+          if (_expired) ...<Widget>[
+            const SizedBox(height: AylaSpacing.sp2),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(
+                  Icons.schedule_outlined,
+                  size: 14,
+                  color: AylaColors.textSecondary,
+                ),
+                const SizedBox(width: AylaSpacing.sp1),
+                Text(
+                  '已过期',
+                  style: TextStyle(
+                    fontFamily: AylaFonts.body,
+                    fontFamilyFallback: AylaFonts.cjkFallback,
+                    fontSize: 12,
+                    color: AylaColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ] else if (_state.error != null) ...<Widget>[
             const SizedBox(height: AylaSpacing.sp2),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -1517,9 +1614,34 @@ class _FileMediaState extends State<_FileMedia> {
       _expired = false;
     });
     try {
+      // ① 本地漫游缓存优先：命中则无需签名（离线也能下载/打开）；
+      //    本地有就永远可用，云端过期不影响（用户裁决 D3）。
+      final File? cached = await AylaMediaCache.instance.lookup(
+        widget.media.mediaId,
+        kind: AylaMediaKind.file,
+        mimeType: widget.media.mimeType,
+      );
+      if (!mounted || seq != _signSeq) return;
+      if (cached != null) {
+        setState(() {
+          _ready = true;
+          _expired = false;
+        });
+        return;
+      }
       await MediaSigner.instance.sign(widget.media.mediaId);
       if (!mounted || seq != _signSeq) return;
       setState(() => _ready = true);
+      // ② 加载即存（D4）：签完就静默预取落盘，之后可直接从本地打开。
+      unawaited(
+        AylaMediaCache.instance
+            .fetchAndStore(
+              mediaId: widget.media.mediaId,
+              kind: AylaMediaKind.file,
+              mimeType: widget.media.mimeType,
+            )
+            .catchError((Object _) => null),
+      );
     } on MediaExpiredError {
       if (!mounted || seq != _signSeq) return;
       setState(() => _expired = true);
@@ -1533,6 +1655,22 @@ class _FileMediaState extends State<_FileMedia> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
+      // 本地漫游缓存优先：命中直接复制到下载目录，不再走网络。
+      final File? cached = await AylaMediaCache.instance.lookup(
+        widget.media.mediaId,
+        kind: AylaMediaKind.file,
+        mimeType: widget.media.mimeType,
+      );
+      if (!mounted) return;
+      if (cached != null) {
+        final String path = await AylaMediaDownload.copyLocalToDownloadDir(
+          source: cached,
+          fileName: _name,
+        );
+        if (!mounted) return;
+        widget.onDownloaded?.call(path);
+        return;
+      }
       final String path = await AylaMediaDownload.save(
         mediaId: widget.media.mediaId,
         fileName: _name,

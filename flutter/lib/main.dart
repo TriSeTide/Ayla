@@ -21,6 +21,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/media/media_cache.dart';
 import 'core/net/dio_client.dart';
 import 'state/app_preload.dart';
 import 'state/auth_bootstrap.dart';
@@ -213,6 +214,12 @@ void main() {
     },
   );
   initWsManager(tokens: auth);
+  // 本地媒体缓存（漫游缓存）启动预热：解析缓存根 + 探测可写性（不可写则降级到
+  // 应用支持目录并记日志）+ 清理上次崩溃残留的 `.tmp`。
+  // 语义见 `docs/architecture/flutter-local-media-cache.md` §3.2 / §6；
+  // **不 await**：缓存是增强项，绝不能拖慢首帧（媒体真正被请求时也会 lazy 再走一遍，
+  // 两条路径由 `ensureReady()` 的幂等 future 收敛，不会重复探测）。
+  unawaited(AylaMediaCache.instance.ensureReady());
   // 预加载接线（web `appInit.ts` 的 `loadCoreData`）：把 state 层的目录 / 帖子
   // store 装进 `core/app_init.dart` 的门（core 不反向依赖 state）。
   aylaRegisterCoreDataLoader();

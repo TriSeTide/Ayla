@@ -337,7 +337,18 @@ class MediaContentView(APIView):
 
         store = storage.get_storage()
         key = media.storage_path
-        size = store.head(key)
+        # 阶段 1/2 过期或竞态下对象已不存在：head 抛异常（S3 ClientError /
+        # FakeStorage KeyError）。必须兜底为 404，不能让它冒成 HTTP 500 ——
+        # 前端语音等走本端点的媒体会把 500 表现成「播放失败」而非「已过期」
+        # （调查报告 §4.6）。此处不泄露对象是否存在以外的信息。
+        try:
+            size = store.head(key)
+        except Exception:
+            logger.info("media content unavailable: %s", media.media_id)
+            return Response(
+                {"detail": "media_content_unavailable"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         etag = f'"{media.content_hash}"'
         
         # 304 Not Modified 支持：客户端提供 If-None-Match 且匹配 ETag

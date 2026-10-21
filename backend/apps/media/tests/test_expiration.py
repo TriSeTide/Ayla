@@ -3,6 +3,8 @@
 覆盖：
 - 7/30 天边界（恰好超期 vs 未到）；
 - 五类保护引用（PostImage/EmojiItem/Comment 两种形态/Conversation.avatar）超期不删；
+  ——A5 User.avatar / A7 LiveChannel.cover、E3/E4 可过期类、Q1 表情包、
+  Q2 资产校验拒绝过期媒体、/content 404 兜底见 test_retention_boundaries.py；
 - 聊天类引用（Message.media_id / segments）与孤儿按两级流程删；
 - 幂等重跑、DB 记录保留、配置禁用；
 - :sign 端点对过期媒体返回 410 引导前端降级。

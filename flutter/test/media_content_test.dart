@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/core/media/audio_playback.dart';
+import '../lib/core/media/media_cache.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/models/chat_message.dart';
 import '../lib/core/models/media_kind.dart';
@@ -130,11 +131,15 @@ void main() {
     aylaEnableSampleMedia();
     AylaAudioClaims.reset();
     MediaSigner.instance.detach();
+    // 关掉本地媒体缓存：FakeAsync 下真实磁盘 IO 的 future 不会被推进，
+    // 缓存查询会让组件卡在 loading / 影响语音引擎打开的时序断言。
+    AylaMediaCache.instance.enabledForTest = false;
   });
   tearDown(() {
     aylaDisableSampleMedia();
     AylaAudioClaims.reset();
     MediaSigner.instance.detach();
+    AylaMediaCache.instance.enabledForTest = true;
   });
 
   void setViewport(WidgetTester tester, Size size) {

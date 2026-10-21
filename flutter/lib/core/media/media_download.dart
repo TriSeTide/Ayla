@@ -44,6 +44,24 @@ abstract final class AylaMediaDownload {
     }
   }
 
+  /// 把**本地漫游缓存**里的文件复制到下载目录，返回保存路径。
+  ///
+  /// 缓存命中时走这条路：不再发起网络请求，直接从本地副本另存
+  /// （用户裁决 D3：本地有就永远可用，云端过期不影响）。
+  /// 源文件名可能已被缓存层重命名，这里按调用方给的展示名重命名。
+  static Future<String> copyLocalToDownloadDir({
+    required File source,
+    required String fileName,
+  }) async {
+    final Directory dir = await _targetDirectory();
+    final String safeName = _safeFileName(fileName);
+    final String target =
+        '${dir.path}${Platform.pathSeparator}$safeName';
+    if (source.absolute.path == File(target).absolute.path) return target;
+    await source.copy(target);
+    return target;
+  }
+
   /// 下载目录：桌面 = 系统下载目录；移动端 = 应用文档目录
   /// （Android 上写系统下载目录需要额外权限与 MediaStore 流程，属页面层接线项）。
   static Future<Directory> _targetDirectory() async {

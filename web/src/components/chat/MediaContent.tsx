@@ -26,7 +26,7 @@ import {
   resolveMediaPath,
   warmUpVideoElement,
 } from "../../api/media";
-import { apiRequestBlob, API_PREFIX } from "../../api/client";
+import { apiRequestBlob, API_PREFIX, ApiError } from "../../api/client";
 import type { ChatMessage, MediaDescriptor, MediaSegment } from "../../api/types";
 import { useMessageStore } from "../../stores/message";
 import { useAuthStore } from "../../stores/auth";
@@ -492,6 +492,8 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
   const [playing, setPlaying] = useState(false);
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [audioError, setAudioError] = useState(false);
+  /** 语音本体已过期（单级 7 天删除 / content 端点 404 兜底）：占位，不提供重试 */
+  const [expired, setExpired] = useState(false);
   /** 总时长：descriptor 为准；波形派生失败（null）时由音频 metadata 兜底 */
   const [duration, setDuration] = useState<number | null>(media.duration ?? null);
   const [current, setCurrent] = useState(0);
@@ -517,6 +519,7 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
   }, []);
 
   const ensureAudio = async (): Promise<HTMLAudioElement | null> => {
+    if (expired) return null;
     if (audioRef.current) return audioRef.current;
     const revision = ++loadRevision.current;
     setLoadingAudio(true);
@@ -543,8 +546,17 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
       });
       audioRef.current = audio;
       return audio;
-    } catch {
-      if (mountedRef.current && revision === loadRevision.current) setAudioError(true);
+    } catch (err) {
+      if (mountedRef.current && revision === loadRevision.current) {
+        // 语音单级过期（7 天删全部对象）：content 端点 404（media_content_unavailable）
+        // 或 410 → 显示「已过期」占位，不再给重试（重试必然失败）。
+        // 其余错误才是可重试的播放失败。
+        if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+          setExpired(true);
+        } else {
+          setAudioError(true);
+        }
+      }
       return null;
     } finally {
       if (mountedRef.current && revision === loadRevision.current) setLoadingAudio(false);
@@ -615,6 +627,17 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
 
   const total = duration != null && duration > 0 ? duration : null;
   const seekable = audioRef.current != null && total != null;
+
+  // 语音本体已过期（单级 7 天删除全部对象）：终端状态占位，不裂图、不给重试。
+  // 复用图片/文件的「已过期」占位样式（.resource-image-expired，灰底中性色），
+  // 与图片阶段 2 / 文件过期保持同一视觉与语义。
+  if (expired) {
+    return (
+      <span className="resource-image-expired" role="status" aria-label="语音已过期">
+        已过期
+      </span>
+    );
+  }
 
   return (
     <div className="voice-card">

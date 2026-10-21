@@ -609,10 +609,15 @@ def parse_avatar_media_id(url: str) -> str | None:
 
 
 def validate_avatar_url(user, url: str) -> str | None:
-    """校验头像 content URL（用户头像/群头像共用）。
+    """校验头像 content URL（用户头像 A5 / 群头像 A6 共用）。
 
     空串允许（表示清除头像）；否则必须是 /api/v1/media/<id>/content 格式、
-    对应媒体存在且为图片、且请求者有访问权。返回错误文案，合法返回 None。
+    对应媒体存在且为图片、原图完好（未进入任何过期阶段）、且请求者有访问权。
+    返回错误文案，合法返回 None。
+
+    头像属资产引用，必须原图完好（docs/architecture/media-retention-boundaries.md
+    §6.2 Q2）：阶段 1（原图已删）或完全过期（对象已删）的媒体不得固化成头像，
+    否则会形成「永久保留却永远裂图」的死记录。用户须重新上传原图。
     """
     url = (url or "").strip()
     if not url:
@@ -625,6 +630,8 @@ def validate_avatar_url(user, url: str) -> str | None:
         return "头像媒体不存在"
     if media.kind != MediaObject.KIND_IMAGE:
         return "头像必须是图片"
+    if media.original_expired_at is not None or media.expired_at is not None:
+        return "media_expired"
     if user is not None and not can_access_media(user, media):
         return "无权使用该媒体作为头像"
     return None

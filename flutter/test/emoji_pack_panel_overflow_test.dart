@@ -36,6 +36,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/core/media/media_cache.dart';
 import '../lib/core/media/media_signer.dart';
 import '../lib/core/media/voice_recorder.dart';
 import '../lib/core/models/conversation.dart';
@@ -90,8 +91,14 @@ void main() {
   setUp(() {
     // 没有 DioClient ⇒ 签名必然失败 ⇒ 图片确定性进入失败态（真机 minio 不可用同态）。
     MediaSigner.instance.detach();
+    // 关掉本地媒体缓存：widget 测试跑在 FakeAsync 下，真实磁盘 IO 的 future
+    // 不会被推进，缓存查询会让图片卡在 loading 态、拿不到"确定性失败态"。
+    AylaMediaCache.instance.enabledForTest = false;
   });
-  tearDown(MediaSigner.instance.detach);
+  tearDown(() {
+    MediaSigner.instance.detach();
+    AylaMediaCache.instance.enabledForTest = true;
+  });
 
   /// 真实宿主：消息区在上（[Expanded]）、composer 贴底 —— 与
   /// `group_chat_page.dart:570–686` 的 `Column[Expanded(消息区), Padding(composer)]` 同构。

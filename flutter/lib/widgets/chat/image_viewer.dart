@@ -43,6 +43,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:path_provider/path_provider.dart'
     show getApplicationDocumentsDirectory, getDownloadsDirectory;
 
+import '../../core/media/media_cache.dart' show AylaMediaCache;
 import '../../core/media/media_signer.dart'
     show MediaExpiredError, MediaSigner, MediaVariant, SignedMediaResult;
 import '../../core/models/post.dart';
@@ -239,6 +240,23 @@ class _AylaImageViewerState extends State<AylaImageViewer>
       _saveExpired = false;
     });
     try {
+      // ① 本地漫游缓存优先：命中直接复制到下载目录，不走网络；
+      //    本地有就永远能保存，云端过期不影响（用户裁决 D3）。
+      final File? cached = await AylaMediaCache.instance.lookup(
+        media.mediaId,
+        kind: media.kind ?? AylaMediaKind.image,
+        mimeType: media.mimeType,
+      );
+      if (cached != null) {
+        final Directory? downloads = await getDownloadsDirectory();
+        final Directory dir =
+            downloads ?? await getApplicationDocumentsDirectory();
+        final String path =
+            dir.path + Platform.pathSeparator + _downloadName(media);
+        await cached.copy(path);
+        if (mounted) setState(() => _saving = false);
+        return;
+      }
       final SignedMediaResult signed =
           await MediaSigner.instance.sign(media.mediaId);
       final Directory? downloads = await getDownloadsDirectory();
