@@ -241,6 +241,7 @@ class AylaFavoriteResultCard extends StatelessWidget {
     this.onDescriptorFetched,
     this.currentUserId,
     this.senderLabel,
+    this.onAuthorTap,
   });
 
   final AylaFavoriteResultData favorite;
@@ -264,6 +265,17 @@ class AylaFavoriteResultCard extends StatelessWidget {
   /// 不在这里伪造默认昵称。
   final String? senderLabel;
 
+  /// 帖卡**作者头像**点击（web `PostCard.tsx:70–79` 的
+  /// `Avatar onClick={(e) => { e.stopPropagation(); goUserProfile(currentUserId, author.id) }}`）。
+  ///
+  /// web 的 `FavoriteResultCard`（`DirectoryResultCards.tsx:53`）收藏卡用的就是**同一个**
+  /// `PostCard`：它只多传 `onOpen / action / previewOnly`，**头像点击行为原样保留** ⇒
+  /// 本组件也必须把该槽位透传下去（此前漏传 ⇒ 收藏页帖卡头像不可点，其它列表页可点）。
+  ///
+  /// null = 不可点（web `author?.id ? … : undefined`；作者 id 缺失即不可点）；
+  /// 跳转目标（自己 → `/profile` / 他人 → `/user/:id`）由调用方决定（页面层持导航）。
+  final VoidCallback? onAuthorTap;
+
   @override
   Widget build(BuildContext context) {
     if (!favorite.isAvailable) return _unavailable(context); // tsx 46–48
@@ -273,6 +285,9 @@ class AylaFavoriteResultCard extends StatelessWidget {
           previewOnly: true, // tsx 53
           onOpen: onOpen,
           action: action,
+          // tsx 53 只多传 onOpen/action/previewOnly ⇒ 头像点击行为与信息流帖卡一致
+          //（web PostCard.tsx:70–79 的 goUserProfile）。
+          onAuthorTap: onAuthorTap,
         ),
       AylaFavoriteTargetType.live => AylaLiveChannelCard(
           channel: favorite.live!,

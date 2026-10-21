@@ -124,6 +124,7 @@ class AylaVoiceChannelPanel extends StatefulWidget {
     this.onLeave,
     this.onRejoin,
     this.onMemberAction,
+    this.onOpenProfile,
   });
 
   /// 频道名（head 左侧）。
@@ -180,6 +181,11 @@ class AylaVoiceChannelPanel extends StatefulWidget {
   /// 房主操作（页面层调 API + 成功刷新）；抛异常 = 失败（面板静默，tsx 108–110）。
   final Future<void> Function(String userId, AylaVoiceMemberAction action)?
       onMemberAction;
+
+  /// 点成员头像 → 个人主页（web `VoiceMemberRow.tsx:143–149` 的
+  /// `onClick={() => goUserProfile(currentUserId, member.user_id)}`）。
+  /// 参数 = 成员 user_id；null ⇒ 头像不可点（web 无该回调的调用面一致）。
+  final ValueChanged<String>? onOpenProfile;
 
   /// `.voice-list-empty` 文案（tsx 123）。
   static const String emptyText = '当前还没有成员';
@@ -261,6 +267,11 @@ class _AylaVoiceChannelPanelState extends State<AylaVoiceChannelPanel> {
             onLocalVolumeChange: widget.onLocalVolumeChange,
             onToggleMic: widget.onToggleMic,
             onToggleMemberMuted: widget.onToggleMemberMuted,
+            // web `VoiceMemberRow.tsx:143–149`：头像 onClick → goUserProfile(me, member.user_id)。
+            // 逐行按成员 id 转发（页面层决定自己 → /profile、他人 → /user/:id）。
+            onOpenProfile: widget.onOpenProfile == null
+                ? null
+                : () => widget.onOpenProfile!(m.member.userId),
           ),
           // tsx 139：房主且**不是自己**才有操作行
           if (widget.isOwner && m.member.userId != widget.selfUserId)
@@ -465,6 +476,8 @@ class _VoicePanelDemoState extends State<_VoicePanelDemo> {
             : _locallyMuted.add(id);
       }),
       onLeave: () {},
+      // 画布档：可点但无导航（样张无 GoRouter；web VoiceMemberRow.tsx:143–149）
+      onOpenProfile: (String _) {},
       onMemberAction: (String id, AylaVoiceMemberAction action) async {
         await Future<void>.delayed(const Duration(milliseconds: 600));
         setState(() => _kickCount++);

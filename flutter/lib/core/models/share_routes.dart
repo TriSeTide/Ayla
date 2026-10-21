@@ -13,9 +13,15 @@
 /// （`groupEntryIds`：voice / live / post / boardgame 四个 API，`scope=group:<id>`）
 /// 判断目标是否在该群有条目，命中 → 群内路径，未命中/失败 → 群外路径。
 ///
-/// Flutter 侧目录 API 属**页面层接线**，`lib/widgets` 不发起业务请求 ⇒ 默认走
-/// **静态路由**（本文件 [aylaShareTargetRoute]，与 web 的 `shareTargetRoute` 同一条
-/// 路由表：群聊上下文即群内路径）；页面层可注入 `onResolveTarget` 覆盖成异步存在性检查。
+/// **2026-10-21 订正**：异步存在性检查**已接线**，落在 `core/api/share_resolve.dart`
+/// 的 [aylaResolveShareTarget]（= web `resolveShareTarget` 的 Dart 等价物：
+/// 群上下文先查 voice/live/posts/boardgame 群内目录，命中 → 群内，否则/异常 → 群外）。
+/// `share_bubble.dart` 在未注入 `onResolveTarget` 时默认走它。
+///
+/// 本文件的 [aylaShareTargetRoute] 仍是**路由表**的唯一事实源（= web 的
+/// `inGroupRoute` / `outRoute` + `shareTargetRoute`），被上面那条异步路径复用；
+/// 它本身不做存在性检查（群聊上下文即群内路径）—— 那是 web `shareTargetRoute`
+/// （`shareRoutes.ts:132–140`，静态展示用）的语义，不是点击路径的语义。
 library;
 
 import 'share_payload.dart';

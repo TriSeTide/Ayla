@@ -18,9 +18,14 @@
 ///      提交走 [aylaSubmitGroupApply]，公开群加入成功后跳群。
 ///    唯一**必需的**外部输入仍是 [AylaShareBubble.isGroupJoined]（成员关系在会话列表里，
 ///    属页面层状态；未注入 = 不做守卫，与修前一致）。
-/// 2. **存在性检查**：web 点击时异步查各域目录判断群内路径（见 `share_routes.dart`
-///    文件头）；Flutter 侧默认走静态路由，页面层可注入
-///    [AylaShareBubble.onResolveTarget] 覆盖。
+/// 2. **存在性检查（2026-10-21 已接线）**：web 点击时异步查各域目录判断群内路径
+///    （`shareRoutes.ts:86–129`）。Flutter 侧**默认已走同一档**：[aylaResolveShareTarget]
+///    （`core/api/share_resolve.dart`）在群上下文里先查 voice/live/posts/boardgame
+///    群内目录，命中 → 群内路由，未命中/异常 → 群外路由。页面层仍可注入
+///    [AylaShareBubble.onResolveTarget] 覆盖（测试/特殊宿主用）。
+/// 3. **fromShare 承载方式**：web 用 React Router 的 `location.state`；Flutter 路由是
+///    URL 字符串 ⇒ 跳转目标追加 `?fromShare=1`，由 `app_router.dart` 的五条
+///    `/group/*` 路由读出来下传 `GroupPage.fromShare`（群语音/直播页据此免白名单）。
 ///
 /// ## 公开面
 /// `AylaShareTypeIcon` · `AylaShareBubble` · 样张 `aylaShareBubbleSamples()`
@@ -33,6 +38,8 @@ import 'package:flutter/material.dart';
 
 import 'package:go_router/go_router.dart' show GoRouter;
 
+import '../../core/api/share_resolve.dart'
+    show aylaResolveShareTarget, aylaShareRouteWithFromShare;
 import '../../core/models/chat_message.dart';
 import '../../core/models/subgroup.dart' show AylaGroupApplyData, AylaGroupJoinPolicy;
 import '../../core/models/share_payload.dart';
@@ -101,11 +108,19 @@ class AylaShareBubble extends StatefulWidget {
   /// 未加入的群分享 → 申请弹窗（页面层接线 B5 `GroupApplyDialog`）。
   final void Function(AylaSharePayload payload)? onRequestJoin;
 
-  /// 跳转（web `navigate(route, { state: { fromShare: true } })`）；
-  /// 导航属页面层，未注入时卡片仍可点但无副作用。
+  /// 跳转（web `navigate(route, { state: { fromShare: true } })`，`ShareBubble.tsx:90`）。
+  ///
+  /// 未注入时**默认自导航**（`GoRouter.maybeOf(context)`）：
+  /// · 目标以 `/group/` 开头 ⇒ `router.go`（群页五条路由共用固定 Page key
+  ///   `kAylaGroupShellPageKey`，`push` 会触发 Navigator 断言红屏 —— 见
+  ///   `router/app_router.dart:91` 的说明）；
+  /// · 其余 ⇒ `router.push`（可返回上一页，与 web 的 history push 同义）。
+  ///
+  /// 注：回调拿到的 route **已带 `?fromShare=1`**（web 的 `state.fromShare` 等价物）。
   final void Function(String route)? onNavigate;
 
-  /// 覆盖默认分流解析（web `resolveShareTarget` 的异步存在性检查）。
+  /// 覆盖默认分流解析（web `resolveShareTarget` 的异步存在性检查，
+  /// `shareRoutes.ts:118–129`）。未注入 ⇒ [aylaResolveShareTarget]。
   final Future<String?> Function(AylaSharePayload? payload, String? groupId)?
       onResolveTarget;
 
@@ -164,13 +179,37 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
     }
     setState(() => _resolving = true);
     try {
+      // web `resolveShareTarget`（tsx 89）：群上下文先查群内目录，命中走群内；
+      // 未命中 / 查询失败保守回落群外。未注入时用 [aylaResolveShareTarget]。
       final String? route = widget.onResolveTarget != null
           ? await widget.onResolveTarget!(payload, widget.groupId)
-          : aylaShareTargetRoute(payload, widget.groupId);
-      if (route != null) widget.onNavigate?.call(route);
+          : await aylaResolveShareTarget(payload, widget.groupId);
+      if (route != null) _navigate(aylaShareRouteWithFromShare(route));
     } finally {
       if (mounted) setState(() => _resolving = false);
     }
+  }
+
+  /// 跳转落地（web tsx 90 的 `navigate(route, { state: { fromShare: true } })`）。
+  ///
+  /// 注入口优先；未注入 ⇒ 自导航：
+  /// · `/group/` 开头 ⇒ `go`（五条群路由共用固定 Page key，push 会触发
+  ///   Navigator 断言 —— `app_router.dart:91` / `aylaRoutePage` 的说明）；
+  /// · 其余 ⇒ `push`（与 web 的 history push 同义，可返回）。
+  /// 无 GoRouter（纯组件测试 / 弹窗宿主）⇒ 静默 no-op（web `navigateTo` 同款）。
+  void _navigate(String route) {
+    final void Function(String route)? injected = widget.onNavigate;
+    if (injected != null) {
+      injected(route);
+      return;
+    }
+    final GoRouter? router = GoRouter.maybeOf(context);
+    if (router == null) return;
+    if (route.startsWith('/group/')) {
+      router.go(route);
+      return;
+    }
+    router.push(route);
   }
 
   /// 未加入的群分享卡被点 ⇒ 弹 GROUP REQUEST（web tsx 124–136 的 `setRequestOpen(true)`）。

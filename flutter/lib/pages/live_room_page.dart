@@ -259,6 +259,21 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       videoView: session.videoView,
       onOpenProfile: (AylaLiveViewerItem item) =>
           context.push('/user/${Uri.encodeComponent(item.userId)}'),
+      // 头像导航（web `DanmakuList.tsx:52–58` 弹幕发送者 + `LiveHostAvatar.tsx:44–49` 主播）：
+      // 语义 = `utils/navigation.ts:24–35` 的 goUserProfile（自己 → /profile，
+      // 他人 → /user/:id，空 id 不跳）—— 直接复用名单弹层已实现的同一静态方法。
+      onOpenSenderProfile: (String userId) =>
+          AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId,
+            targetUserId: userId,
+          ),
+      onOpenHostProfile: (String ownerId) =>
+          AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId,
+            targetUserId: ownerId,
+          ),
       directoryFooter: AylaDirectoryLoadMore(
         loading: _directory?.loading ?? false,
         error: _directory?.error,

@@ -1154,6 +1154,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               action: null,
               showFavorite: false,
               onOpen: () => _openPost(post),
+              // 作者头像 → 个人主页（web `PostCard.tsx:70–79` 的
+              // `goUserProfile(currentUserId, author.id)`；`utils/navigation.ts:24–35`：
+              // 自己 → /profile、他人 → /user/:id，作者 id 缺失 ⇒ null（头像不可点）。
+              // 此前本页搜索结果帖卡未接 ⇒ 头像不可点。
+              onAuthorTap: _authorTap(post),
               // ★ 分享键（2026-10-03 补齐）：`post_card.dart:509` 的转发键**恒渲染**
               // （只要非 detail 档），`onShare == null` ⇒ 共享件判禁用、鼠标变禁止符号。
               onShare: () => unawaited(aylaOpenShareSheet(
@@ -1293,6 +1298,23 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   void _openPath(String path) {
     AylaScrollMemory.save('search:$_scope', _scroll);
     context.go(path);
+  }
+
+  /// 帖子卡作者头像的点击目标（web `PostCard.tsx:70–79` 的
+  /// `goUserProfile(currentUserId, author.id)`；`utils/navigation.ts:24–35`：
+  /// 自己 → `/profile`，他人 → `/user/:id`，作者 id 缺失 ⇒ null = 头像不可点）。
+  VoidCallback? _authorTap(AylaPost post) {
+    final String? authorId = post.authorId;
+    if (authorId == null || authorId.isEmpty) return null;
+    return () {
+      final String? me = ref.read(authNotifierProvider).user?.id;
+      if (me != null && me == authorId) {
+        // 搜索页的跳转口径是 `go`（见 _openPath），个人页同档。
+        context.go('/profile');
+      } else {
+        context.push('/user/${Uri.encodeComponent(authorId)}');
+      }
+    };
   }
 
   /// 打开帖子详情（路由 /posts/:postId）。

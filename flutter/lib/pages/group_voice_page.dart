@@ -17,10 +17,11 @@
 ///    web 的 `VoiceRoomBody` 自带「加入/静音/音量/成员/房内聊天/删除确认」全部逻辑，
 ///    Flutter 侧这些在宿主里（`pages/voice_support.dart` 文件头有逐条对账），
 ///    群内只需换退出落点 ⇒ 不再复制一份。
-/// 2. **`fromShare` 分支未接**：web 从分享消息点进时带 `location.state.fromShare`
-///    以**免白名单校验**（tsx 36–38 / 94–96）。Flutter 侧路由不带 state ⇒ 一律走
-///    严格白名单路径（即 web 的默认分支）；从分享进入他群语音房时页面保持加载态
-///    （**不伪造可见**）。
+/// 2. **`fromShare` 已接（2026-10-21）**：web 从分享消息点进时带
+///    `location.state.fromShare` 以**免白名单校验**（`GroupVoice.tsx:25` + 判据
+///    `:90` / `:96` / `:127`）。Flutter 路由无 state ⇒ 分享卡把 `?fromShare=1` 写进 URL，
+///    由 `app_router.dart` 读出 → `GroupPage.fromShare` → 本页 [fromShare]。
+///    判据与 web 逐条同义：`fromShare || allowedGroupIds.contains(groupId)`。
 library;
 
 import 'dart:async';
@@ -57,6 +58,7 @@ class GroupVoicePage extends ConsumerStatefulWidget {
     super.key,
     required this.groupId,
     this.routeChannelId,
+    this.fromShare = false,
     this.onExit,
   });
 
@@ -64,6 +66,10 @@ class GroupVoicePage extends ConsumerStatefulWidget {
 
   /// 路由 `:voiceChannelId`（存在 ⇒ 房内分支）。
   final String? routeChannelId;
+
+  /// 「从分享消息点进来」（web `location.state.fromShare`，`GroupVoice.tsx:25`）
+  /// ⇒ 免白名单校验（判据见 tsx `:90` / `:96` / `:127`）。
+  final bool fromShare;
 
   /// 「返回聊天」（空态键；web tsx 225–227）。
   final VoidCallback? onExit;
@@ -88,9 +94,28 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
   Future<void> Function()? _refreshCallback;
   int _replayNonce = 0;
 
+  /// **粘性 fromShare**（web `location.state.fromShare` 在这一次进群会话内的生命周期）。
+  ///
+  /// ## 为什么 State 要自己记（2026-10-21 边界修复）
+  /// web 的 `fromShare` 读的是 `useLocation().state`：React Router 的 state 挂在**这一条
+  /// history entry** 上，`GroupVoice` 组件自身不重挂就不会丢。Flutter 侧把它搬到了
+  /// URL query（`?fromShare=1`），而**本页的 State 会在 URL 变化时被复用** ——
+  /// `GroupPage` 的五个场景槽位由 [AylaSceneFade] 保管（切场景不重挂 `initState`），
+  /// 且 `_goScene` / `_popScene` 用 `context.go('/group/<id>/<scene>')` **不带 query**
+  /// ⇒ 切走再切回时 `widget.fromShare` 会翻回 false ⇒ `_roomChannel()` 变 null ⇒
+  /// 从分享进入的房间被踢回骨架。
+  ///
+  /// 语义上与 web 对齐：**一次进群会话内 fromShare 一旦为真就保持为真**，
+  /// 直到换群（[didUpdateWidget] 里 groupId 变化）才重置。
+  bool _stickyFromShare = false;
+
+  /// 生效的 fromShare（构造参数 or 本会话内粘住的）。
+  bool get _fromShare => _stickyFromShare || widget.fromShare;
+
   @override
   void initState() {
     super.initState();
+    _stickyFromShare = widget.fromShare;
     _bindDirectoryController();
     _registerRefresh();
     _ensureRouteChannel();
@@ -99,8 +124,20 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
   @override
   void didUpdateWidget(covariant GroupVoicePage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 换群 ⇒ 这是**另一次**进群会话，粘性标记重置（web 换群也是新的 history entry）。
+    if (oldWidget.groupId != widget.groupId) {
+      _stickyFromShare = widget.fromShare;
+    } else if (widget.fromShare) {
+      // 同群内 URL 丢了 query（切场景/返回键回退）⇒ 沿用本会话已粘住的 true。
+      _stickyFromShare = true;
+    }
     if (oldWidget.routeChannelId != widget.routeChannelId) {
       if (widget.routeChannelId == null) unawaited(_pager?.load());
+      _ensureRouteChannel();
+    }
+    // 换群不换频道时也要重新校验（粘性标记已按新群重置）。
+    if (oldWidget.groupId != widget.groupId &&
+        oldWidget.routeChannelId == widget.routeChannelId) {
       _ensureRouteChannel();
     }
   }
@@ -179,19 +216,21 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
   /// ⇒ 是「**本地已有且本群可见**」才跳过，**不是**「本地存在就跳过」。
   /// 只判存在会让「存在但白名单不含本群」的频道**永远停在骨架**（补拉被跳过、
   /// 房内命中判据又为假）—— 这正是用户实报「进不去语音房」的第二条路径。
-  /// （`fromShare` 分支未接，见文件头「机制差异 2」⇒ 一律走严格白名单档。）
+  /// 判据与 web 逐条同义：`fromShare || allowedGroupIds.contains(groupId)`
+  /// （`GroupVoice.tsx:90`；从分享进入免校验，见文件头「机制差异 2」）。
   void _ensureRouteChannel() {
     final String? id = widget.routeChannelId;
     if (id == null) return;
     final AylaVoiceChannelSnapshot? local =
         ref.read(voiceStateProvider).channelOf(id);
-    if (local != null && local.allowedGroupIds.contains(widget.groupId)) return;
+    if (local != null && _visibleInGroup(local)) return;
     unawaited(() async {
       try {
         final AylaVoiceChannelSnapshot channel =
             await AylaVoiceApi.getVoiceChannel(id);
         if (!mounted) return;
-        if (!channel.allowedGroupIds.contains(widget.groupId)) return;
+        // tsx 96：`if (!fromShare && !allowed.contains(groupId)) return;`
+        if (!_visibleInGroup(channel)) return;
         ref.read(voiceStateProvider).upsertChannel(channel);
       } catch (_) {
         // 拉不到：界面保持加载态（**不伪造房间**）。
@@ -199,17 +238,25 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
     }());
   }
 
+  /// 本群可见判据（web `GroupVoice.tsx:90/96/127` 的同一表达式）：
+  /// `fromShare || (channel.allowed_group_ids ?? []).some(id => String(id) === groupId)`。
+  ///
+  /// 分享进入（`fromShare`）免白名单 —— 任何人点进分享目标都能看到
+  /// （`shareRoutes.ts:15` 的注释「对 fromShare 免白名单校验」）。
+  bool _visibleInGroup(AylaVoiceChannelSnapshot channel) =>
+      _fromShare || channel.allowedGroupIds.contains(widget.groupId);
+
   /// 房内频道（web `GroupVoice.tsx:121–129`）：必须是本群可见的频道。
   ///
-  /// 这是「进不去房」的唯一命中判据：`allowed_group_ids` 含本群才渲染房内界面，
-  /// 否则一路落到骨架（`routeChannelId != null` 分支）。
+  /// 这是「进不去房」的唯一命中判据：`allowed_group_ids` 含本群（或 fromShare）
+  /// 才渲染房内界面，否则一路落到骨架（`routeChannelId != null` 分支）。
   AylaVoiceChannelSnapshot? _roomChannel() {
     final String? id = widget.routeChannelId;
     if (id == null) return null;
     final AylaVoiceChannelSnapshot? channel =
         ref.watch(voiceStateProvider).channelOf(id);
     if (channel == null) return null;
-    if (!channel.allowedGroupIds.contains(widget.groupId)) return null;
+    if (!_visibleInGroup(channel)) return null;
     return channel;
   }
 

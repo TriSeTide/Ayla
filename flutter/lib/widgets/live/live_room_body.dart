@@ -164,6 +164,8 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.videoView,
     this.directoryFooter,
     this.onOpenProfile,
+    this.onOpenSenderProfile,
+    this.onOpenHostProfile,
     this.onSaveOwner,
     this.onStartLive,
     this.onStopLive,
@@ -255,6 +257,22 @@ class AylaLiveRoomBody extends StatefulWidget {
 
   /// 观众行跳个人主页。
   final ValueChanged<AylaLiveViewerItem>? onOpenProfile;
+
+  /// 点弹幕发送者头像 → 个人主页（web `DanmakuList.tsx:52–58` 的
+  /// `onClick={() => goUserProfile(null, item.sender.user_id)}`；参数 = senderUserId）。
+  /// null ⇒ 头像不可点（web 无回调的调用面同样不可点）。
+  ///
+  /// 跳转口径由页面按 `utils/navigation.ts:24–35` 实现（自己 → /profile、
+  /// 他人 → /user/:id）：web 这里传的 currentUserId 是 null ⇒ 恒走 /user/:id，
+  /// 再由 UserProfilePage 的 self 守卫跳回 /profile；Flutter 侧页面拿到 me
+  /// 后直接分派，落点一致、少一次中转。
+  final ValueChanged<String>? onOpenSenderProfile;
+
+  /// 点主播头像 → 主播个人主页（web `LiveHostAvatar.tsx:44–49` 的
+  /// `onClick={() => ownerId && goUserProfile(null, ownerId)}`；参数 = ownerId）。
+  /// null ⇒ 头像不可点。窄屏/宽屏两个头部共用本回调（web tsx 240 / 310 同一组件）。
+  /// `ownerId &&` 的短路语义由本组件保留：ownerId 为空时**不**发回调。
+  final ValueChanged<String>? onOpenHostProfile;
 
   /// 控制台：保存资料 / 开播 / 下播。
   final Future<AylaLiveChannelSnapshot?> Function(
@@ -366,6 +384,9 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     items: widget.data.danmaku,
     hasNewBelow: widget.data.hasNewBelow,
     history: widget.data.history,
+    // web `DanmakuList.tsx:52–58`：弹幕发送者头像 onClick → goUserProfile(null, user_id)。
+    // 页面未注入 ⇒ null（头像不可点，与 web 无回调面一致）。
+    onOpenSenderProfile: widget.onOpenSenderProfile,
   );
 
   Widget get _danmakuInput => AylaDanmakuInput(
@@ -471,6 +492,16 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
             hostNickname: channel.ownerNickname,
             ownerNickname: channel.ownerNickname,
             size: 32,
+            // web `LiveHostAvatar.tsx:44–49`：onClick → goUserProfile(null, ownerId)，
+            // ownerId 来自频道描述符（`AylaLiveChannelSnapshot.ownerId`）；
+            // 页面未注入或 ownerId 为空 ⇒ 不可点（web 的 `ownerId && …` 同义）。
+            onOpenProfile: widget.onOpenHostProfile == null
+                ? null
+                : () {
+                    final String ownerId = channel.ownerId;
+                    if (ownerId.isEmpty) return;
+                    widget.onOpenHostProfile!(ownerId);
+                  },
           ),
         if (!widget.showOwnerPanel) ...<Widget>[
           Expanded(
@@ -1281,12 +1312,19 @@ Widget aylaLiveRoomBodySamples() {
               title: '深夜电台 · 爱莉陪你写代码',
               status: AylaLiveStatus.live,
               visibility: 'public',
+              // 画布样张：给 ownerId 才能验「主播头像可点」（web LiveHostAvatar.tsx:44–49）
+              ownerId: 'u-elysia',
               ownerNickname: '爱莉',
             ),
             srsStatus: AylaLiveSrsStatus.live,
             viewerCount: 12,
             danmaku: const <AylaDanmakuEntry>[
-              AylaDanmakuEntry(id: 'd1', senderNickname: '小樱', content: '来了来了'),
+              AylaDanmakuEntry(
+                id: 'd1',
+                senderNickname: '小樱',
+                senderUserId: 'u-sakura',
+                content: '来了来了',
+              ),
             ],
           ),
           videoView: const ColoredBox(
@@ -1294,6 +1332,9 @@ Widget aylaLiveRoomBodySamples() {
             child: SizedBox(width: 160, height: 90),
           ),
           onSendDanmaku: (String content, String? mediaId) async => true,
+          // 画布档：可点但无导航（样张无 GoRouter；与 danmaku.dart 样张同写法）
+          onOpenSenderProfile: (String _) {},
+          onOpenHostProfile: (String _) {},
         ),
       ),
       const SizedBox(height: AylaSpacing.sp6),

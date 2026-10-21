@@ -36,6 +36,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+// ⚠️ 必须带前缀：`widgets/base/directory_page.dart` 里也有一个同名的
+// `AylaDirectoryPage`（目录页**壳组件**），与本文件的「分页响应」是两回事。
+import '../core/api/directory_page.dart' as api show AylaDirectoryPage;
 import '../core/api/favorites_api.dart';
 import '../state/chat_providers.dart' show chatWsProvider;
 import '../core/models/chat_message.dart' show AylaChatMessage;
@@ -58,6 +61,25 @@ import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/posts/masonry_grid.dart';
 import '../widgets/profile/favorites_skeleton.dart';
 import 'hub_support.dart';
+
+/// 收藏取页的**测试注入点**（生产恒为 null ⇒ 走真实 [AylaFavoritesApi.listFavoritesPage]）。
+///
+/// 为什么需要：本轮要锁的行为全在**页面层接线**上 ——
+/// ① `_goWithId` 必须是 push（历史栈留上一页）、② 帖卡头像必须注入 `goUserProfile`
+/// 等价物（[`_goUserProfile`]）、③ 消息卡的 `msg/seq/subgroup` 拼装规则。这些只有把**真实**
+/// [FavoritesPage] 挂进真实 GoRouter 才验得到；而它一挂载就会走
+/// `_start()` → `AylaFavoritesApi`（纯静态类，无可替换的请求出口）⇒ widget test
+/// 里必然是真网络。本注入点只换掉「取一页」这一跳，页面其余逻辑（点击、导航、
+/// 拼参、渲染）全部保持真实。
+///
+/// 形态与 `pages/group_page.dart:156` 的 [aylaGroupPageSubgroupsLoader] 同款：
+/// 文件级 `@visibleForTesting` 出口，生产路径从不赋值。
+@visibleForTesting
+AylaFavoritesPageLoader? aylaFavoritesPageLoader;
+
+/// 见 [aylaFavoritesPageLoader]：给 cursor，返回一页收藏。
+typedef AylaFavoritesPageLoader = Future<api.AylaDirectoryPage<AylaFavoriteEntry>>
+    Function(String? cursor);
 
 class FavoritesPage extends ConsumerStatefulWidget {
   const FavoritesPage({super.key, this.initialType});
@@ -247,10 +269,14 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
   void _start() {
     final AylaPagedList<AylaFavoriteEntry> pager =
         AylaPagedList<AylaFavoriteEntry>(
-      request: (String? cursor) => AylaFavoritesApi.listFavoritesPage(
-        type: _filter == 'all' ? null : _filter,
-        cursor: cursor,
-      ),
+      // 生产路径：`type`（"all" ⇒ 不传）+ 游标（web tsx 187：`type: filter === "all" ? undefined : filter`）。
+      // 测试注入点只替换「取一页」这一跳，其余页面行为保持真实（见 [aylaFavoritesPageLoader]）。
+      request: (String? cursor) => aylaFavoritesPageLoader != null
+          ? aylaFavoritesPageLoader!(cursor)
+          : AylaFavoritesApi.listFavoritesPage(
+              type: _filter == 'all' ? null : _filter,
+              cursor: cursor,
+            ),
       keyOf: (AylaFavoriteEntry entry) => entry.card.id.toString(),
     );
     pager.addListener(_onPagerChanged);
@@ -504,6 +530,13 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
             child: AylaFavoriteResultCard(
               favorite: entry.card,
               onOpen: () => _open(entry),
+              // 帖卡**作者头像**点击（web `PostCard.tsx:70–79`）：
+              // 收藏页的帖卡就是信息流那**同一个** PostCard（`DirectoryResultCards.tsx:53`
+              // 只多传 onOpen/action/previewOnly，头像行为原样保留）
+              // ⇒ 必须注入 `goUserProfile` 等价物（`utils/navigation.ts:24–35`）。
+              // 作者 id 缺失时 [AylaPostCard] 的 `author == null ? null : …`
+              // （`post_card.dart:359`）自动置不可点，与 web 一致。
+              onAuthorTap: () => _goUserProfile(entry.card.post?.author?.id),
               senderLabel: entry.messageSenderNickname,
               action: AylaMsgActionButton(
                 label: '取消收藏', // tsx 99
@@ -517,10 +550,53 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
     );
   }
 
+  /// 头像点击跳个人主页 —— web `utils/navigation.ts:24–35` 的 `goUserProfile`：
+  /// ```ts
+  /// export function goUserProfile(currentUserId, targetUserId) {
+  ///   if (!targetUserId) return;
+  ///   if (currentUserId && String(currentUserId) === String(targetUserId)) {
+  ///     navigateTo("/profile");
+  ///   } else {
+  ///     navigateTo(\`/user/\${encodeURIComponent(targetUserId)}\`);
+  ///   }
+  /// }
+  /// ```
+  /// 三条与 web 逐条对齐：
+  /// - **目标 id 缺失 ⇒ 什么都不做**（不猜、不跳自己主页）；
+  /// - **自己 → `/profile`**（当前用户从 [authNotifierProvider] 取，本页是 ConsumerState）；
+  /// - **他人 → `/user/:id`**（id 按 web 的 `encodeURIComponent` 口径转义）。
+  ///
+  /// 导航用 `push`：web 的 `navigateTo` 最终就是 `navigate(...)`（push 语义，可返回）。
+  /// 收藏页只走这一条作者跳转路径（voice/live/game/message 四类卡没有作者头像）。
+  void _goUserProfile(String? targetUserId) {
+    final String target = (targetUserId ?? '').trim();
+    if (target.isEmpty) return; // web `if (!targetUserId) return;`
+    final String? me = ref.read(authNotifierProvider).user?.id;
+    if (me != null && me == target) {
+      context.push('/profile');
+      return;
+    }
+    context.push('/user/${Uri.encodeComponent(target)}');
+  }
+
   /// 按 id 跳转（路径前缀由调用方给出）。
+  ///
+  /// **push 语义**（2026-10-21 订正）：web `FavoritesPage.tsx:36–67` 的 `openTarget`
+  /// 用的是 `useNavigate()` 返回的 `navigate`（`tsx:285`）—— React Router 里
+  /// `navigate(to)` 默认是 **push**（追加历史栈，浏览器返回键可回收藏页），
+  /// 只有 `navigate(to, { replace: true })` 才是替换。
+  ///
+  /// 此前这里用 `context.go`（**替换**当前路由）⇒ 从收藏页进详情后返回键直接退出，
+  /// 与 web 的「返回上一页（收藏页）」不符。四条目标路由（/posts/:postId、
+  /// /live/:channelId、/voice/:channelId、/games/:roomId）的 pageBuilder 都走
+  /// [aylaRoutePage]，其 key = `ValueKey(路径)`（`app_router.dart:113–121`）——
+  /// 按路径构造、各路径互不相同，**不是固定 key** ⇒ push 后新页与旧页 key 不同，
+  /// Navigator 正常叠层（固定 key 只有群页五条共用的 `kAylaGroupShellPageKey`，
+  /// 收藏页不直接 push 群页：消息卡走 /chat/:id，由 `ChatConversationRoute` 用
+  /// `context.go` 再重定向到 /group，见 `chat_conversation_route.dart:109–117`）。
   void _goWithId(String prefix, String targetId) {
     final String encoded = Uri.encodeComponent(targetId);
-    context.go('$prefix/$encoded');
+    context.push('$prefix/$encoded');
   }
 
   void _back() {

@@ -256,6 +256,14 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
   /// 与「面板关闭钮」两处换掉这个键，把开合状态归零。
   Key _composerKey = UniqueKey();
 
+  /// 输入框的**公开控制器**（web `GroupChat.tsx:249-251` 的 `inputRef`）。
+  ///
+  /// 长按消息头像 → 输入框插入 @ 的唯一通路：`AylaMessageList.onMentionSender`
+  /// → `_input.insertMention(id, name)` → `AylaMessageInput` 的 State。
+  /// 输入框因换子群被换 key 重建时，控制器由新 State 自动重新 attach
+  /// （见 `widgets/chat/message_input.dart` 的 `AylaMessageInputController`）。
+  final AylaMessageInputController _input = AylaMessageInputController();
+
   String get groupId => widget.groupId;
 
   AylaSubGroupState get _subgroups => ref.read(subgroupStateProvider);
@@ -958,6 +966,19 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
                           // 戳一戳失败静默（web tsx 254–260）。
                         }
                       },
+                      // 长按消息头像 500ms → 在输入框插入 @该成员
+                      // （web `GroupChat.tsx:249-251` 的 `handleMentionUser`
+                      // → `inputRef.current?.insertMention(userId, name)`）。
+                      //
+                      // ⚠️ 只在本页（群聊）传：私聊页面不传 ⇒ 气泡的 `_canMention`
+                      // 为假，长按无效果（web 私聊同样没有该入口，
+                      // `MessageList.tsx:1068` 原样透传父级、私聊父级未传）。
+                      // 名字回退「群成员」与 web 同款（tsx 250 的 `name || "群成员"`）。
+                      onMentionSender: (String userId, String name) =>
+                          _input.insertMention(
+                        userId,
+                        name.isEmpty ? '群成员' : name,
+                      ),
                       onLoadUntilSeq: (int seq) async =>
                           await _runtime?.loadUntilSeq(seq) ?? false,
                       unreadSeqs: unreadSeqs,
@@ -1130,6 +1151,8 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
                 // 面板开合状态（`emojiOpen`）在输入框内部持有；换子群需收起时
                 // 本页换掉这个键（等价 web 的 `setEmojiOpen(false)`）。
                 key: _composerKey,
+                // 长按头像 @ 的命令通道（web `inputRef`，见 [_input] 的注释）。
+                controller: _input,
                 // ★ 群表情包键（web `MessageInput.tsx:464-476` 宽屏 /
                 // `:559-571` 窄屏，两处都是 `{isGroup && (<button
                 // aria-label="群表情包" onClick={() => setEmojiOpen(v => !v)}>)}`）。

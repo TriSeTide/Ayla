@@ -17,7 +17,11 @@
 /// | 新建 ⇒ `createLiveChannel('新直播间', groupId)` + 进控制台；失败保留浮层 | 98–111（`handleCreateNewLive`） |
 ///
 /// ## 机制差异（登记）
-/// 1. **`fromShare` 分支未接**（同语音页）：web 带 `location.state.fromShare` 免白名单校验。
+/// 1. **`fromShare` 已接（2026-10-21，同语音页）**：web 从分享消息点进时带
+///    `location.state.fromShare`（`GroupLive.tsx:25`）⇒ 免白名单校验（判据
+///    `:36` 的 `useState` 初值与 `:49` 的详情补拉）。Flutter 路由无 state
+///    ⇒ 分享卡写 URL `?fromShare=1` → `app_router.dart` → `GroupPage.fromShare`
+///    → 本页 [fromShare]，判据 `fromShare || allowedGroupIds.contains(groupId)`。
 /// 2. **`inputEntered`（无底栏下滑走的进房动画）**：Flutter 的 `AylaLiveRoomBody` 无该档，
 ///    由壳层决定底栏显隐（群路由本就不出底栏）⇒ 视觉结果一致。
 /// 3. **浮层挂载点**：web 的 `CreateSheet` 是 `createPortal(…, document.body)`（视口级 fixed）；
@@ -95,6 +99,7 @@ class GroupLivePage extends ConsumerStatefulWidget {
     super.key,
     required this.groupId,
     this.routeChannelId,
+    this.fromShare = false,
     this.onExit,
   });
 
@@ -102,6 +107,10 @@ class GroupLivePage extends ConsumerStatefulWidget {
 
   /// 路由 `:liveChannelId`（存在 ⇒ 优先进入该直播间）。
   final String? routeChannelId;
+
+  /// 「从分享消息点进来」（web `location.state.fromShare`，`GroupLive.tsx:25`）
+  /// ⇒ 免白名单校验（判据见 tsx `:36` 初值 / `:49` 详情补拉）。
+  final bool fromShare;
 
   /// 「返回聊天」（tsx 148–150 / 187 的 onExit）。
   final VoidCallback? onExit;
@@ -111,6 +120,22 @@ class GroupLivePage extends ConsumerStatefulWidget {
 }
 
 class _GroupLivePageState extends ConsumerState<GroupLivePage> {
+  /// **粘性 fromShare**（web `location.state.fromShare` 在这一次进群会话内的生命周期）。
+  ///
+  /// ## 为什么 State 要自己记（2026-10-21 边界修复，与群语音页同款）
+  /// web 的 fromShare 读 `useLocation().state`，React Router 的 state 挂在**这一条
+  /// history entry** 上，组件不重挂就不会丢。Flutter 侧搬到了 URL query
+  /// （`?fromShare=1`），而本页 State 会在 URL 变化时被复用 —— `GroupPage` 的场景槽位
+  /// 由 `AylaSceneFade` 保管（切场景不重挂 initState），`_goScene` / `_popScene` 用
+  /// `context.go('/group/<id>/<scene>')` **不带 query** ⇒ 切走再切回时
+  /// `widget.fromShare` 翻回 false ⇒ 详情补拉按白名单判 ⇒ 房间被踢成错误态。
+  ///
+  /// 语义：**一次进群会话内 fromShare 一旦为真就保持为真**，直到换群才重置。
+  bool _stickyFromShare = false;
+
+  /// 生效的 fromShare（构造参数 or 本会话内粘住的）。
+  bool get _fromShare => _stickyFromShare || widget.fromShare;
+
   /// 群内直播目录 —— **读共享目录缓存**（web `GroupLive.tsx:27` 的
   /// `useDirectoryPage("live", {groupId})`），不是页面私有分页。
   ///
@@ -145,6 +170,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   @override
   void initState() {
     super.initState();
+    _stickyFromShare = widget.fromShare;
     _bindDirectoryController();
     _syncRouteChannel();
   }
@@ -152,7 +178,18 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
   @override
   void didUpdateWidget(covariant GroupLivePage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 换群 ⇒ 另一次进群会话，粘性标记重置；同群内 URL 丢 query ⇒ 沿用已粘住的 true。
+    if (oldWidget.groupId != widget.groupId) {
+      _stickyFromShare = widget.fromShare;
+    } else if (widget.fromShare) {
+      _stickyFromShare = true;
+    }
     if (oldWidget.routeChannelId != widget.routeChannelId) _syncRouteChannel();
+    // 换群不换频道时也要重新校验（粘性标记已按新群重置）。
+    if (oldWidget.groupId != widget.groupId &&
+        oldWidget.routeChannelId == widget.routeChannelId) {
+      _syncRouteChannel();
+    }
   }
 
   @override
@@ -201,8 +238,13 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     });
   }
 
+  /// 本群可见判据（web `GroupLive.tsx:36/49` 的同一表达式）：
+  /// `fromShare || (item.allowed_group_ids ?? []).some(id => String(id) === groupId)`。
+  ///
+  /// 分享进入（`fromShare`）免白名单 —— 任何人点进分享目标都能看到
+  /// （`shareRoutes.ts:15`「对 fromShare 免白名单校验」）。
   bool _visibleInGroup(AylaLiveChannelSnapshot item) =>
-      item.allowedGroupIds.contains(widget.groupId);
+      _fromShare || item.allowedGroupIds.contains(widget.groupId);
 
   /// 路由频道 → 详情补拉 + 白名单校验（web tsx 43–59）。
   void _syncRouteChannel() {
@@ -490,6 +532,22 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       ),
       // 弹层打开 → 页面发起同一次拉取（`LiveViewerSheet.tsx:44–65`）
       onOpenViewerSheet: () => viewerSheet.onOpen('$channelId'),
+      // 头像导航（web `DanmakuList.tsx:52–58` 弹幕发送者 / `LiveHostAvatar.tsx:44–49` 主播）：
+      // 语义 = `utils/navigation.ts:24–35` 的 goUserProfile（自己 → /profile，
+      // 他人 → /user/:id，空 id 不跳）—— 复用名单弹层已实现的同一静态方法。
+      // 群内直播与一级直播间共用同一个 `LiveRoomBody`（web GroupLive.tsx:169 同）。
+      onOpenSenderProfile: (String userId) =>
+          AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId.isEmpty ? null : selfId,
+            targetUserId: userId,
+          ),
+      onOpenHostProfile: (String ownerId) =>
+          AylaLiveViewerSheetController.openProfile(
+            context,
+            currentUserId: selfId.isEmpty ? null : selfId,
+            targetUserId: ownerId,
+          ),
       // 窄屏「打开直播间列表」浮层底部「新建直播间」（web tsx 179–182 的
       // `onCreateNewChannel={() => { setCreateError(null); setShowCreate(true); }}`）
       onCreateNewChannel: _openCreate,

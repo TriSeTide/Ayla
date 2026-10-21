@@ -256,7 +256,7 @@ void main() {
 
   // ======================= 交互 =======================
 
-  testWidgets('点击 → 跳转（静态路由：群外 /live/9）', (WidgetTester tester) async {
+  testWidgets('点击 → 跳转（群外 /live/9 + fromShare=1）', (WidgetTester tester) async {
     String? route;
     await tester.pumpWidget(
       host(
@@ -272,10 +272,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.text('今晚一起看星星'));
     await tester.pump();
-    expect(route, '/live/9');
+
+    // 2026-10-21：跳转目标追加 `?fromShare=1`（web `navigate(route, { state: { fromShare: true } })`，
+    // `ShareBubble.tsx:90`；Flutter 无 route state ⇒ 用 query 承载，见
+    // `core/api/share_resolve.dart` 的 `aylaShareRouteWithFromShare`）。
+    expect(route, '/live/9?fromShare=1');
   });
 
-  testWidgets('群聊上下文 + 未注入异步解析 → 群内路径（静态路由）', (WidgetTester tester) async {
+  testWidgets('群聊上下文 + 未注入异步解析 → 查群内目录失败 ⇒ 保守回落群外', (
+    WidgetTester tester,
+  ) async {
     String? route;
     await tester.pumpWidget(
       host(
@@ -291,8 +297,14 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.text('设计想法'));
-    await tester.pump();
-    expect(route, '/group/g1/posts/p2');
+    // 未注入 onResolveTarget ⇒ 默认走 `aylaResolveShareTarget`（web `resolveShareTarget`，
+    // `shareRoutes.ts:118–129`）：群上下文**先查群内目录**。本宿主无网络 ⇒ 查询抛错
+    // ⇒ web 的 `catch { return new Set() }`（`shareRoutes.ts:109–111`）保守回落**群外**。
+    // （2026-10-21 语义订正：旧版此处是「未注入 = 静态群内路径」，与 web 不一致。）
+    for (int i = 0; i < 6; i += 1) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(route, '/posts/p2?fromShare=1');
   });
 
   testWidgets('注入 onResolveTarget → 用异步解析结果（web resolveShareTarget 等价）', (
@@ -315,7 +327,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.text('今晚一起看星星'));
     await tester.pump();
-    expect(route, '/live/9', reason: '存在性检查未命中 → 群外路径');
+    // 注入的解析结果原样使用，**只追加 fromShare=1**（web 的 state.fromShare 等价物）。
+    expect(route, '/live/9?fromShare=1', reason: '存在性检查未命中 → 群外路径');
   });
 
   testWidgets('未加入的群分享 → 弹申请（onRequestJoin）且不跳转', (WidgetTester tester) async {

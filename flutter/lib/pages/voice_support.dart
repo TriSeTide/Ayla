@@ -1043,6 +1043,18 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
     if (_chat.append(message)) setState(() {});
   }
 
+  /// 头像点击目标 —— web `utils/navigation.ts:24–35` 的 `goUserProfile`
+  /// （`VoiceMemberRow.tsx:143–149` 的调用方）：自己 → `/profile`，
+  /// 他人 → `/user/:id`（encode），空 id 不跳。
+  void _openUserProfile(String userId, String? currentUserId) {
+    if (userId.isEmpty) return;
+    if (currentUserId != null && currentUserId == userId) {
+      context.go('/profile');
+    } else {
+      context.push('/user/${Uri.encodeComponent(userId)}');
+    }
+  }
+
   /// 成员行投影：分页描述符 + 当前状态表的媒体/音量事实（web `VoiceChannelPanel.tsx:61–64`）。
   AylaVoicePanelMember _rowOf(String userId) {
     final AylaVoiceMemberState? state =
@@ -1203,6 +1215,10 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
         final AylaVoiceMemberState? m = voice.memberOf(userId);
         if (m != null) _session.setMemberLocallyMuted(userId, !m.locallyMuted);
       },
+      // 成员头像 → 个人主页（web `VoiceMemberRow.tsx:143–149`：
+      // `onClick={() => goUserProfile(currentUserId, member.user_id)}`）。
+      // 语义 = `utils/navigation.ts:24–35`：自己 → /profile，他人 → /user/:id，空 id 不跳。
+      onOpenProfile: (String userId) => _openUserProfile(userId, selfId),
       onLeave: () => unawaited(_onLeave()),
       onRejoin: () => unawaited(_session.rejoin()),
       onMemberAction: isOwner

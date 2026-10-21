@@ -53,6 +53,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart' show GoRouter;
 
 import '../../core/models/chat_message.dart';
 import '../../core/models/conversation.dart';
@@ -298,6 +299,11 @@ class _AylaMessageListState extends State<AylaMessageList> {
   bool _baselined = false;
   bool _loadInFlight = false;
   String? _handledJumpKey;
+
+  /// 外部跳转的「按 seq 补页」是否在飞 —— web `jumpLoadRef.current`（tsx:804–815）：
+  /// 同一个补页请求只发一次，落地后清位（成功/失败都清，失败下次重建再试）。
+  bool _jumpLoadInFlight = false;
+
   int _tick = 0; // 方向判定需要随滚动刷新
 
   /// 精确已读**在途**集合 —— web `pendingReadIdsRef.current`（tsx 907–909）：
@@ -317,6 +323,19 @@ class _AylaMessageListState extends State<AylaMessageList> {
     });
     _prevIds = widget.messages.map((AylaChatMessage m) => m.id).toList();
     _baselined = true;
+    // ⚠️ 首屏挂载时也要处理一次外部跳转 —— web 是 `useEffect`（tsx:785–818，**提交后**
+    // 立即跑一次，依赖变化再跑）。本件此前只在 didUpdateWidget（父级重建）里调 ⇒
+    // **首次挂载时目标已在消息面内**（或目标不在面内、要靠 onLoadUntilSeq 补页）的
+    // 收藏消息跳转永远不触发（用户从收藏页进群聊时页面正是首次挂载）。
+    //
+    // ⚠️ 必须**帧后**：`_handleExternalJump` 在目标缺失时会同步进入
+    // `onLoadUntilSeq` 的同步段（`AylaConversationRuntime.loadUntilSeq` →
+    // `loadMore()` 的第一个 await 之前会 `messageState.setLoading`）⇒ 在
+    // initState/首帧构建期改状态会抛 `setState() during build`。web 的 useEffect
+    // 本来就在 commit 之后，帧后调用是同一时序。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _handleExternalJump();
+    });
   }
 
   @override
@@ -670,11 +689,52 @@ class _AylaMessageListState extends State<AylaMessageList> {
     if (jump == null) return;
     final String key = '${widget.conversation?.id ?? ''}:${jump.messageId}:${jump.seq}';
     if (_handledJumpKey == key) return;
-    final AylaChatMessage? target = widget.messages
-        .cast<AylaChatMessage?>()
-        .firstWhere((AylaChatMessage? m) => m?.id == jump.messageId,
-            orElse: () => null);
-    if (target == null) return;
+    // web tsx:797 `confirmedMessages.find(m => m.id === externalJump.messageId) ?? findBySeq(externalJump.seq)`
+    // —— **先按 id、再按 seq**。收藏消息的定位参数 `msg`（消息 id）来自收藏投影，
+    // 而消息面只保证「已加载窗口」里的条目；只要 `seq` 落在窗口内，按 seq 仍能命中。
+    final AylaChatMessage? target = _findJumpTarget(jump.messageId, jump.seq);
+    if (target != null) {
+      _applyExternalJump(key, target);
+      return;
+    }
+    // web tsx:803–817：目标不在已加载面内 ⇒ `externalJump.seq > 0 && onLoadUntilSeq`
+    // 时**先按 seq 补页**，补页成功后按 seq 再找一次，命中才 jumpToMessage
+    // （`jumpLoadRef.current` 保证同一请求只发一次，见 [_jumpLoadInFlight]）。
+    if (jump.seq <= 0 || widget.onLoadUntilSeq == null) return;
+    if (_jumpLoadInFlight) return;
+    _jumpLoadInFlight = true;
+    unawaited(() async {
+      try {
+        final bool loaded = await widget.onLoadUntilSeq!(jump.seq);
+        if (!mounted || !loaded) return;
+        // 补页写的是**父级数据源**（store/state）⇒ 本件的 `widget.messages` 要等父级
+        // 用新数组重建才可见；等一帧再找（与 [jumpToMessage] 同一帧栅栏手法）。
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        if (_handledJumpKey == key) return;
+        final AylaChatMessage? loadedTarget =
+            _findJumpTarget(jump.messageId, jump.seq);
+        if (loadedTarget != null) _applyExternalJump(key, loadedTarget);
+      } finally {
+        _jumpLoadInFlight = false;
+      }
+    }());
+  }
+
+  /// 外部跳转目标：**先按 id、再按 seq**（web tsx:797）。
+  ///
+  /// seq ≤ 0 表示「无 seq 可用」（web 的 `externalJump.seq` 默认 0）⇒ 不做 seq 兜底，
+  /// 避免把「第 0 条」当成目标。
+  AylaChatMessage? _findJumpTarget(String messageId, int seq) {
+    for (final AylaChatMessage m in widget.messages) {
+      if (m.id == messageId) return m;
+    }
+    if (seq > 0) return _findBySeq(seq);
+    return null;
+  }
+
+  /// 命中目标后的收尾：登记「已处理」+ 帧后滚动定位 + 高亮（web tsx:798–801）。
+  void _applyExternalJump(String key, AylaChatMessage target) {
     _handledJumpKey = key;
     widget.onExternalJumpHandled?.call();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -845,6 +905,28 @@ class _AylaMessageListState extends State<AylaMessageList> {
 
   bool get _isGroup => widget.conversation?.type == AylaConversationType.group;
 
+  /// 头像单击 → 个人主页（web `utils/navigation.ts:25-35` 的 `goUserProfile`）。
+  ///
+  /// · 目标 = 当前用户 ⇒ `/profile`（`navigateTo("/profile")`，tsx 30-32）；
+  /// · 否则 ⇒ `/user/<encodeURIComponent(userId)>`（tsx 33）。
+  ///
+  /// 两者都走 `push`（web `navigateTo` 是 history push，可返回上一页）。
+  /// 目标 id 空缺 ⇒ 不跳（web `if (!targetUserId) return`，tsx 29）；
+  /// 无 GoRouter（纯组件测试宿主）⇒ 静默 no-op（web 未注册 bridge 时同款，
+  /// `navigation.ts:21-22` 的 `navigateFn?.(path)`）。
+  void _goUserProfile(String? targetUserId) {
+    final String? target = targetUserId;
+    if (target == null || target.isEmpty) return;
+    final GoRouter? router = GoRouter.maybeOf(context);
+    if (router == null) return;
+    final String? me = widget.currentUserId;
+    if (me != null && me == target) {
+      router.push('/profile');
+      return;
+    }
+    router.push('/user/${Uri.encodeComponent(target)}');
+  }
+
   Map<String, String> get _memberNames {
     final Map<String, String> map = <String, String>{};
     for (final AylaConversationMember m
@@ -977,6 +1059,16 @@ class _AylaMessageListState extends State<AylaMessageList> {
             senderAvatarUrl: avatars[m.senderId]?.avatar,
             senderAvatarLabel: avatars[m.senderId]?.label,
             currentUserId: widget.currentUserId,
+            // 头像单击 → 个人主页（web `MessageList.tsx:1067` 的
+            // `onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}`；
+            // 判据见 `utils/navigation.ts:25-35`：自己 → `/profile`，
+            // 他人 → `/user/<encodeURIComponent(id)>`）。
+            //
+            // 导航在本件内部完成（**不给页面加参数**）：本滚动区已持有
+            // [currentUserId]，气泡只回调「被点的正是这条消息的发送者」。单击/双击/
+            // 长按三档的去抖在气泡里（`message_bubble.dart` 的 `_onSenderTap`：
+            // 250ms 延迟、双击取消挂起单击、长按后抑制 click），本处只负责「到了就跳」。
+            onSenderClick: () => _goUserProfile(m.senderId),
             actionsOpen: _activeActionsId == m.id,
             onToggleActions: () => setState(() {
               _activeActionsId = _activeActionsId == m.id ? null : m.id;

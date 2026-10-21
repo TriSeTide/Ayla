@@ -886,6 +886,22 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     });
   }
 
+  /// 帖子卡作者头像的点击目标（web `PostCard.tsx:70–79` 的
+  /// `goUserProfile(currentUserId, author.id)`；`utils/navigation.ts:24–35`：
+  /// 自己 → `/profile`，他人 → `/user/:id`，目标 id 为空 ⇒ 不跳（= null 回调、头像不可点））。
+  VoidCallback? _authorTap(AylaPost post) {
+    final String? authorId = post.authorId;
+    if (authorId == null || authorId.isEmpty) return null;
+    return () {
+      final String? me = ref.read(authNotifierProvider).user?.id;
+      if (me != null && me == authorId) {
+        context.go('/profile');
+      } else {
+        context.push('/user/${Uri.encodeComponent(authorId)}');
+      }
+    };
+  }
+
   void _openPost(int id) {
     // web tsx 426–431：进详情前先写 `setSkipRevealRestoreKey(scrollRestoreKey)` +
     // `setRevealAfterRefresh(false)`。Flutter 侧由 [didUpdateWidget] 在 `postId`
@@ -1006,6 +1022,10 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
                     onRetryFavoriteStatus: () => unawaited(
                       _favorites.load('post', <String>[key], force: true),
                     ),
+                    // 作者头像 → 个人主页（web `PostCard.tsx:70–79` 的
+                    // `goUserProfile(currentUserId, author.id)`；自己 → /profile、他人 → /user/:id）。
+                    // 此前本页未接 ⇒ 头像不可点（群内帖子页缺这一处，其余帖子面已接）。
+                    onAuthorTap: _authorTap(post),
                     // ★ 分享键（用户 2026-10-03 实报「鼠标悬停直接变禁止，仍无法点击」）：
                     // 此前没传 ⇒ `AylaShareButton.onPressed == null` ⇒ 禁用。
                     // 与帖子详情页同口径（`post_detail_page.dart:767–776`）。

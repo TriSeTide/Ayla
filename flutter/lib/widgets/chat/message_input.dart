@@ -104,6 +104,68 @@ class AylaMessageInputSubmission {
       !aylaBlocksHasMention(blocks);
 }
 
+/// 消息输入区的**公开控制器**（web `MessageInput` 的 `ref` 暴露面，
+/// `GroupChat.tsx:250` 的 `inputRef.current?.insertMention(userId, name)`）。
+///
+/// ## 为什么需要它（2026-10-21 长按头像 @ 接线）
+/// web 里长按头像 → 输入框插入 @ 的链路是：`MessageList` 把 `onMentionSender` 交给
+/// `GroupChat`（`GroupChat.tsx:249-251`），后者调 `inputRef.current?.insertMention(...)`
+/// —— 即**页面持有一个 ref、直接命令输入框**。
+/// Flutter 侧 `_AylaMessageInputState.insertMention` 存在但是**私有 State 方法**，
+/// 页面拿不到 ⇒ 长按头像完全没反应（组件已实现、生产链路没接线）。
+/// 本类就是那个 ref 的等价物：页面 `final AylaMessageInputController _input =
+/// AylaMessageInputController();` → 传给 `AylaMessageInput.controller` → 长按回调里
+/// `_input.insertMention(id, name)`。
+///
+/// ## 生命周期（attach / detach）
+/// 控制器与 State 是**弱绑定**：State 在 `initState` attach、`dispose` detach；
+/// 控制器自身可长期持有（页面级），输入框因换子群被换 key 重建时自动重新 attach。
+/// 未 attach 期间调用 `insertMention` 是**静默 no-op**（与 web 的
+/// `inputRef.current?.` 可选链同义 —— 输入框没挂载时什么也不发生）。
+/// 一个控制器同时只能挂一个输入框（后 attach 覆盖前者，与 React ref 语义一致）。
+class AylaMessageInputController {
+  /// 当前挂载者的身份（输入框 State 实例本身；只用于判「解绑的是不是自己」）。
+  ///
+  /// 用 `Object` 而不是 State 的具体类型：控制器是**公开 API**，
+  /// 不应把 `_AylaMessageInputState` 这个私有类型暴露出去（analyzer
+  /// `library_private_types_in_public_api`），且调用方本来也不需要它。
+  Object? _owner;
+
+  /// 挂载者提供的插入实现（`(userId, name) => ...`）。
+  void Function(String userId, String name)? _insert;
+
+  /// 当前是否已挂载到某个输入框（测试/调试可读；页面逻辑不需要它）。
+  bool get isAttached => _insert != null;
+
+  /// 由 [AylaMessageInput] 的 State 调用（**不要手工调**）。
+  ///
+  /// [owner] 传 State 自身（只用于身份比对）；[insert] 是该 State 的插入实现。
+  void attach(Object owner, void Function(String userId, String name) insert) {
+    _owner = owner;
+    _insert = insert;
+  }
+
+  /// 由 [AylaMessageInput] 的 State 在 `dispose` 调用（**不要手工调**）。
+  ///
+  /// 只有「仍是当前挂载者」才解绑 —— 防旧 State 的 dispose 把新 State 的绑定抹掉
+  /// （换 key 重建时新旧会在同一帧内先后 attach / dispose）。
+  void detach(Object owner) {
+    if (!identical(_owner, owner)) return;
+    _owner = null;
+    _insert = null;
+  }
+
+  /// 在光标处插入一个 @Token（web `insertMentionToken`，`GroupChat.tsx:250`）。
+  ///
+  /// 与「输入 @ 后选成员」的同名路径（`_selectMention`）不同：本路径**不依赖**
+  /// 光标前已有 `@query`，直接在光标处插占位符（`mention_editor.dart` 的
+  /// `insertMentionToken`）。插入后按 web 同款回写草稿（`onDraftChanged`）。
+  /// 未挂载时静默 no-op（web `inputRef.current?.` 可选链）。
+  void insertMention(String userId, String name) {
+    _insert?.call(userId, name);
+  }
+}
+
 /// 消息输入区。
 class AylaMessageInput extends StatefulWidget {
   const AylaMessageInput({
@@ -130,6 +192,7 @@ class AylaMessageInput extends StatefulWidget {
     this.pickFile,
     this.showEmojiButton = false,
     this.gutter,
+    this.controller,
   });
 
   /// 提交（页面层负责上传 + 乐观发送）。
@@ -195,6 +258,13 @@ class AylaMessageInput extends StatefulWidget {
   /// 是否显示群表情包键（web：`isGroup`）。
   final bool showEmojiButton;
 
+  /// 外部命令通道（web `MessageInput` 的 ref，见 [AylaMessageInputController]）。
+  ///
+  /// 生产上只有**群聊页**传（长按消息头像 → 插入 @，`GroupChat.tsx:249-251`）；
+  /// 私聊不传 —— web 私聊也没有该入口（私聊 `MessageList` 未注入 `onMentionSender`，
+  /// `MessageList.tsx:1068` 原样透传父级 ⇒ 气泡侧 `canMention` 为假）。
+  final AylaMessageInputController? controller;
+
   @override
   State<AylaMessageInput> createState() => _AylaMessageInputState();
 }
@@ -244,6 +314,9 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
   @override
   void initState() {
     super.initState();
+    // 控制器绑定（web 的 ref 语义，见 [AylaMessageInputController]）：
+    // 页面持有控制器、输入框在这里把自己挂上去。
+    widget.controller?.attach(this, insertMention);
     _controller.addListener(_onEditorChanged);
     if (widget.initialDraft.isNotEmpty) {
       _restoringDraft = true;
@@ -261,6 +334,11 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
   @override
   void didUpdateWidget(covariant AylaMessageInput old) {
     super.didUpdateWidget(old);
+    // 换控制器（罕见：同一输入框换宿主）⇒ 先解绑旧的、再绑定新的。
+    if (!identical(old.controller, widget.controller)) {
+      old.controller?.detach(this);
+      widget.controller?.attach(this, insertMention);
+    }
     if (old.draftKey != widget.draftKey) {
       // 切换会话/子群 → 恢复草稿并重置面板（tsx 134–146）
       // ⚠️ 恢复期间抑制回写（见 [_restoringDraft]）：否则新键上的草稿写回会在
@@ -286,6 +364,8 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
 
   @override
   void dispose() {
+    // 先解绑（防页面在 dispose 之后还拿着控制器调 insertMention —— 那时 setState 会抛）。
+    widget.controller?.detach(this);
     _controller.removeListener(_onEditorChanged);
     widget.voiceRecorder?.listenable.removeListener(_onVoiceChanged);
     _ownRecorder?.listenable.removeListener(_onVoiceChanged);

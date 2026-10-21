@@ -122,6 +122,21 @@ Page<void> aylaRoutePage({
 }
 
 
+/// 群路由的 `fromShare` 判定（web `location.state.fromShare` 的 Flutter 等价物）。
+///
+/// 事实源：
+/// · `components/chat/ShareBubble.tsx:90` —— 分享卡跳转携带 `state: { fromShare: true }`；
+/// · `pages/group/GroupVoice.tsx:25` 与 `pages/group/GroupLive.tsx:25` —— 这两页读
+///   `(useLocation().state as { fromShare?: boolean } | null)?.fromShare === true`，
+///   据此**免白名单校验**（`GroupVoice.tsx:90/96/127`、`GroupLive.tsx:36/49`）。
+///
+/// Flutter 的路由没有 React Router 的 `state` ⇒ 分享卡把同一事实写进 URL
+/// `?fromShare=1`（`core/api/share_resolve.dart` 的 [aylaShareRouteWithFromShare]），
+/// 由这里读出来下传 `GroupPage.fromShare`。只认 `'1'`（与 web 的 `=== true` 同为窄判据，
+/// 不做「有参即真」的放宽）。
+bool _fromShareOf(GoRouterState s) =>
+    s.uri.queryParameters['fromShare'] == '1';
+
 /// 全局路由（唯一实例；会话过期回登录、页面内 `context.go` 都由它承载）。
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
   final _AuthRefresh refresh = _AuthRefresh();
@@ -355,6 +370,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               state: s,
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
+                fromShare: _fromShareOf(s),
                 jumpMessageId: s.uri.queryParameters['msg'],
                 jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
                 jumpSubgroupId: s.uri.queryParameters['subgroup'],
@@ -367,6 +383,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               state: s,
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
+                fromShare: _fromShareOf(s),
                 postId: s.pathParameters['postId'],
                 jumpMessageId: s.uri.queryParameters['msg'],
                 jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
@@ -380,6 +397,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               state: s,
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
+                fromShare: _fromShareOf(s),
                 voiceChannelId: s.pathParameters['voiceChannelId'],
                 jumpMessageId: s.uri.queryParameters['msg'],
                 jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
@@ -393,6 +411,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               state: s,
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
+                fromShare: _fromShareOf(s),
                 liveChannelId: s.pathParameters['liveChannelId'],
                 jumpMessageId: s.uri.queryParameters['msg'],
                 jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),
@@ -406,6 +425,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
               state: s,
               child: GroupPage(
                 groupId: s.pathParameters['id'] ?? '',
+                fromShare: _fromShareOf(s),
                 scene: s.pathParameters['scene'],
                 jumpMessageId: s.uri.queryParameters['msg'],
                 jumpSeq: int.tryParse(s.uri.queryParameters['seq'] ?? ''),

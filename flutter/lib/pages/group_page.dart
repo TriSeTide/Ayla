@@ -117,6 +117,7 @@ class GroupPage extends ConsumerStatefulWidget {
   const GroupPage({
     super.key,
     required this.groupId,
+    this.fromShare = false,
     this.scene,
     this.postId,
     this.voiceChannelId,
@@ -142,6 +143,15 @@ class GroupPage extends ConsumerStatefulWidget {
   final String? jumpMessageId;
   final int? jumpSeq;
   final String? jumpSubgroupId;
+
+  /// 「从分享消息点进来」（web `location.state.fromShare`，`GroupVoice.tsx:25` /
+  /// `GroupLive.tsx:25`）。
+  ///
+  /// 事实源：`ShareBubble.tsx:90` 的 `navigate(route, { state: { fromShare: true } })`
+  /// ⇒ 群内场景**免白名单校验**（`GroupVoice.tsx:90/96/127`、`GroupLive.tsx:36/49`）。
+  /// Flutter 路由无 state ⇒ 由 `app_router.dart` 从 URL `?fromShare=1` 读出后下传
+  /// （见该文件 `_fromShareOf`）。默认 false = web 的「state 为 null」档。
+  final bool fromShare;
 
   @override
   ConsumerState<GroupPage> createState() => _GroupPageState();
@@ -599,12 +609,16 @@ class _GroupPageState extends ConsumerState<GroupPage> {
         return GroupLivePage(
           groupId: widget.groupId,
           routeChannelId: widget.liveChannelId,
+          // 分享进入免白名单（web GroupLive.tsx:25 的 location.state.fromShare）。
+          fromShare: widget.fromShare,
           onExit: () => _goScene(AylaGroupScene.chat),
         );
       case AylaGroupScene.voice:
         return GroupVoicePage(
           groupId: widget.groupId,
           routeChannelId: widget.voiceChannelId,
+          // 分享进入免白名单（web GroupVoice.tsx:25 的 location.state.fromShare）。
+          fromShare: widget.fromShare,
           onExit: () => _goScene(AylaGroupScene.chat),
         );
       case AylaGroupScene.posts:
