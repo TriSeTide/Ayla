@@ -898,16 +898,33 @@ class _AylaMsgActionButtonState extends State<AylaMsgActionButton>
       child: Opacity(
         // 内容层（图标/文字）不含模糊 ⇒ 可单独降透明（web 的整层 .55 观感）
         opacity: dim,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        // ⚠️ 内容用 **Wrap**（不是 Row）：web 的 `.msg-action-btn` 是
+        // `display:inline-block`（base.css 的 button 规则 + app.css:1324–1333），
+        // 图标与文字是**行内级盒子** —— 挤不下时文字会**掉到图标下一行**继续折行，
+        // 而不是把盒子撑住（实测 375 档：`.msg-action-btn` 57.6x27.2 → 33.6x60.8，
+        // 即宽度压到「图标块 16px」而文字整体换行）。
+        //
+        // 用 `Row` 时这两者是**主轴相加**关系（min-content = 图标 + 一个字的宽），
+        // 永远压不到 16px，也就无法与 web 同宽；`Wrap` 的 min-content 取**子项最大**
+        // （RenderWrap.computeMinIntrinsicWidth），与 CSS 行内盒的行盒语义一致。
+        //
+        // 图标的外侧 4px 用 **padding 放在图标自己身上**（等价 CSS 里 svg 的
+        // `margin-right: 4px` 属于它自己的行内盒子），这样 min-content 才含这 4px：
+        // web 实测 `.msg-action-btn` 的 min-content = 16(图标盒) + 16(padding) + 2(border)
+        // = 33.6，本件同一算式。
+        child: Wrap(
+          spacing: 0,
+          runSpacing: 0,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            if (widget.icon != null) ...<Widget>[
-              IconTheme(
-                data: IconThemeData(color: fg, size: 11),
-                child: widget.icon!,
+            if (widget.icon != null)
+              Padding(
+                padding: const EdgeInsets.only(right: AylaSpacing.sp1),
+                child: IconTheme(
+                  data: IconThemeData(color: fg, size: 11),
+                  child: widget.icon!,
+                ),
               ),
-              const SizedBox(width: AylaSpacing.sp1),
-            ],
             Text(
               widget.label,
               style: t.caption.copyWith(

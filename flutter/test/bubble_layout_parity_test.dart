@@ -28,6 +28,7 @@ import '../lib/theme/preview_theme.dart';
 import '../lib/theme/sample_media.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/css_flex_row.dart';
 import '../lib/widgets/base/resource_image.dart';
 import '../lib/widgets/chat/message_bubble.dart';
 
@@ -326,7 +327,7 @@ void main() {
     final Finder actBtn = find.byType(AylaMsgActionButton);
     expect(actBtn, findsWidgets, reason: '自己行且 120s 内 ⇒ 工具栏应渲染');
     final Rect actions = tester.getRect(
-        find.ancestor(of: actBtn.first, matching: find.byType(Row)).first);
+        find.ancestor(of: actBtn.first, matching: find.byType(AylaCssFlexRow)).first);
     final Rect bubble = bubbleRect(tester, 'OK');
     expect(actions.right, lessThanOrEqualTo(bubble.left + 1),
         reason: '★ 自己的工具栏在气泡**左侧**（.msg-row.self row-reverse，app.css:1069–1071）');
@@ -352,17 +353,16 @@ void main() {
       const Size(375, 700),
     );
     final Rect bubble = bubbleRect(tester, _kLong);
-    // web 实测（375 档）：
-    //  · self-long（渲染 收藏+引用+撤回）= 182
-    //  · self-long（不渲染操作栏）= 288.11
-    // Flutter 当前 = 158/-306…，差值 24px 来自 **web 的 `.msg-actions` 会按
-    // `flex-shrink:1` 收缩、而 Flutter 的 Row 子项不收缩**（详见
-    // `message_bubble.dart` 内「有意保留 actions 不参与收缩」的登记段）。
-    // 该差异**已在下方负数对照用例中显式登记**，此处只锁「与 web 同档位下不超过上限、
-    // 且不溢出」，用宽区间表达而不是伪装成精确一致。
-    expect(bubble.width, closeTo(158, 6),
-        reason: '★ 窄屏长消息气泡宽（Flutter 实测档；与 web 的 24px 差异已登记为'
-            ' flex-shrink 语义差异）');
+    // web 实测（375 档，`tool/web_bubble_measure.html` + Playwright）：
+    //  · self-long（渲染 收藏+引用+撤回）= **183**
+    //  · self-long（不渲染操作栏）= 288.29
+    // `.msg-actions` 被 `flex-shrink:1` 压到 107.2（3 键各 33.6 + gap 4×2）。
+    //
+    // 2026-10-22 补：Flutter 侧改走自写的 [AylaCssFlexRow]（CSS flex-shrink
+    // 语义）后，本档实测 **182.80**（Δ 0.20，来自文本测量差）—— 该用例原来锁的
+    // 158 是「不收缩」时代的旧基线，随实现更新为与 web 同值。
+    expect(bubble.width, closeTo(183, 2),
+        reason: '★ 窄屏长消息气泡宽须与 web 同值（flex-shrink 语义已对齐）');
     expect(bubble.width, lessThan(rowInnerLimit(tester, 375, 0.84) + 1),
         reason: '★ 不得超过 84% 上限（app.css:3217–3219）');
     expect(tester.takeException(), isNull,

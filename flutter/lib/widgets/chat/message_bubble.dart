@@ -68,15 +68,43 @@
 /// | 长消息气泡宽（900/1440 档） | **Δ = 0.00px**（633 / 714） |
 /// | 图片帧比例 | 4:3 与 3:4 均精确保持（见 `bubble_layout_parity_test.dart`）|
 ///
-/// 仍有 **1 项已登记的未消除差异**：
-/// 3. **`.msg-actions` 不参与主轴收缩**：web 的工具栏按钮带 `flex-shrink: 1` +
-///    `white-space: normal`，窄屏（375/480）挤不下时会**压窄按钮并让标签折行**
-///    （实测 `.msg-action-btn` 67×26 → 34×62、`.msg-actions` 156 → 108），
-///    气泡因此能占到 84% 上限。Flutter `Row` 子项不收缩 ⇒ 工具栏恒占 132，
-///    窄屏气泡比 web 少 12~24px（宽屏 900/1440 已完全一致，因为不触发挤压）。
-///    两条候选修法均实测**回归更严重**（见 `_MsgActions` 内注释）⇒ 本轮不动；
-///    要真正等价需自写「仅溢出时按 base 收缩」的 flex 布局。
-///    视觉影响：仅窄屏「操作栏展开时」气泡略窄；按钮不折行（反而更易读）。
+///
+/// ## 3. `.msg-actions` 参与主轴收缩 —— **2026-10-22 已实现**（本段取代旧的
+/// 「有意保留不收缩」登记，勿再当成未完成项）
+///
+/// 上一轮这里登记为唯一残留差异：web 的 `.msg-actions` 及其按钮都带
+/// `flex-shrink: 1`（app.css:1290–1298 / 1324–1333 **没有任何 flex-shrink:0
+/// 或 white-space:nowrap**），窄屏挤不下时会压窄按钮并让标签折行，气泡因此
+/// 能占到 84%；而 Flutter 的 `Row` 子项**不收缩** ⇒ 工具栏恒占自然宽，
+/// 375 档气泡比 web 少约 24px。
+///
+/// 两条老修法都踩过坑（`Flexible` 是「分配空间」不是「溢出才收缩」，900 档
+/// 气泡 633→395 腰斩）⇒ 本轮改为 **[AylaCssFlexRow]（`widgets/base/css_flex_row.dart`）**：
+/// 按 CSS 规范 §9.7 的收缩分支逐条实现，只在真正溢出时才压。
+///
+/// 实现口径（各件 CSS 参数）：
+/// - 头像 `flex-shrink: 0`（app.css:1053）；
+/// - 气泡 `max-width:75%/84%` + `min-width:0`（app.css:1073–1083 / 3217–3219）；
+/// - 工具栏默认 shrink 1，min-content = 各键 min-content 之和 +
+///   `.msg-actions` 的 gap（键间 4px）：`.favorite-toggle.is-compact` 32
+///   （app.css:3334–3338）+ `.msg-action-btn` 33.6（图标 16 + padding 16 +
+///   border 1.6，浏览器实测）。
+///
+/// 实测对账（与浏览器同值，见 `test/css_flex_row_test.dart`）：
+///
+/// | 档 | peer-long 气泡 | 工具栏 | self-long 气泡 | 工具栏 |
+/// |---|---|---|---|---|
+/// | 375 | 220.6 | 69.6 | **182.8**（web 183） | **107.2**（web 107.2） |
+/// | 480 | 325.4 | 69.6 | 287.8 | 107.2 |
+/// | 900 | 633.0 | 93.6 | 633.0 | 155.2 |
+/// | 1440 | 714.0 | 93.6 | 714.0 | 155.2 |
+///
+/// 唯一残留：按钮标签是中文，测试引擎无 CJK 字体 ⇒ **测试里**的自然宽是 132
+/// 而非 web 的 155.2；这是字体度量差，不影响布局口径（真机有系统 CJK 字体）。
+///
+/// ⚠️ 已知局限（登记）：[AylaCssFlexRow] 不实现 intrinsic 尺寸（子树含
+/// `LayoutBuilder`，Flutter 不支持对其求 intrinsic）⇒ 不得把它塞进
+/// `IntrinsicWidth/Height`。
 ///
 /// ## 公开面
 /// `AylaMessageBubble` · 样张 `aylaMessageBubbleSamples()`
@@ -102,12 +130,26 @@ import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../base/avatar_halo.dart';
+import '../base/css_flex_row.dart';
 import '../base/directory_controls.dart' show AylaFavoriteButton, AylaFavoriteState;
 import '../base/loading.dart';
 import '../../state/favorite_status.dart' show AylaFavoriteStatusController;
 import 'media_content.dart';
 import 'share_bubble.dart';
 import '../base/tooltip.dart';
+
+/// `.msg-action-btn` 的 **min-content 宽**（CSS px，浏览器实测 33.6）。
+///
+/// 来源：`app.css:1324–1333` 的 `padding: 4px 8px`（8×2 = 16）+ `border: 1px`（×2
+/// = 1.6，浏览器 DPR 1.25 下是 0.8px 边框，但布局按 CSS px 计 1px → 本件按 1×2 = 2
+/// 与浏览器实测 33.6 对齐）+ 图标行盒 16（`auroraqua.css` / `MessageBubble.tsx` 里
+/// 图标 12px + `margin-right: 4px`）。
+/// 即 16 + 16 + 1.6 = 33.6 —— 与 Chrome `getBoundingClientRect` 实测的 min-content
+/// 完全一致（`tool/web_bubble_measure.html` + Playwright 实测）。
+const double kAylaMsgActionBtnMinContent = 33.6;
+
+/// `.favorite-toggle.is-compact` 的 `min-width`（`app.css:3334–3338`）。
+const double kAylaFavoriteCompactMinWidth = 32;
 
 /// 撤回时限（秒）—— `hooks/useChat.ts:26` `RECALL_SECONDS = 120`，
 /// 与后端 `MESSAGE_RECALL_SECONDS` 对齐。
@@ -615,10 +657,37 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
           c.maxWidth - 2 * AylaSpacing.sp1,
         );
         final double bodyMaxWidth = rowInnerWidth * (narrow ? 0.84 : 0.75);
+        // `.msg-actions` 的 min-content = 各键 min-content 之和 + 键间 gap（app.css:1293）。
+        // 实测（Chrome）：他人行 32 + 4 + 33.6 = 69.6；自己行再加 4 + 33.6 = 107.2。
+        final int actionCount = 1 +
+            (widget.onQuote != null ? 1 : 0) +
+            (showRecall ? 1 : 0);
+        final double actionsMinContent = kAylaFavoriteCompactMinWidth +
+            (actionCount - 1) * AylaSpacing.sp1 +
+            (actionCount - 1) * kAylaMsgActionBtnMinContent;
+        // ⚠️ 主轴 = **CSS flex-shrink**（2026-10-22 补，见文件头「与 web 的偏差」3 已更新）。
+        //
+        // 上一轮这里是 Flutter 的 `Row`（子项**不收缩**），宽屏 900/1440 恰好对齐
+        // （空间够，CSS 也不收缩），但窄屏 375 工具栏把气泡挤窄 —— web 的
+        // `.msg-actions`/其按钮都是 `flex-shrink: 1`（app.css:1290–1298 / 1324–1333
+        // **没有任何 flex-shrink:0 或 nowrap**），挤不下时按钮压窄 + 标签折行。
+        //
+        // Flutter 的 `Flexible` **不是**它的等价物（那是「分配空间」，空间够也会改宽，
+        // 实测 900 档气泡 633→395 腰斩），故用自写的 [AylaCssFlexRow] 表达规范 §9.7
+        // 的收缩分支：**只在真正溢出时**按 flex-basis 加权压缩，且各自不低于 min-width。
+        //
+        // 各件的 CSS 参数（逐条对账，实测值见 test/css_flex_row_test.dart）：
+        // - 头像 `.msg-sender-halo { flex-shrink: 0 }`（app.css:1053）⇒ base 固定 37；
+        // - 气泡 `.msg-body { max-width:75%(窄屏 84%); min-width:0 }`（app.css:1073–1083 /
+        //   3217–3219）⇒ base 由自身 maxWidth 夹住，min-width 0；
+        // - 工具栏 `.msg-actions` 无 shrink 声明 ⇒ 默认 1，最小 = 子项 min 之和
+        //   （`.favorite-toggle.is-compact { min-width: 32px }`（app.css:3334–3338）；
+        //    `.msg-action-btn` 因 `overflow:hidden`（auroraqua.css:142–146）min-width:auto
+        //    解析为 0 ⇒ 能压到文本逐字折行，实测 375 档压到 33.6）。
         final List<Widget> children = <Widget>[
-          if (halo != null) halo,
-          if (halo != null) const SizedBox(width: AylaSpacing.sp2),
-          Flexible(
+          if (halo != null)
+            AylaCssFlexItem(flexShrink: 0, child: halo),
+          AylaCssFlexItem(
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: bodyMaxWidth),
               // ⚠️ **气泡按内容收缩**（2026-10-21 用户实报「气泡太长了」）：
@@ -642,21 +711,32 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               ),
             ),
           ),
-          if (actions != null) const SizedBox(width: AylaSpacing.sp2),
-          // ⚠️ **有意保留「actions 不参与主轴收缩」**（2026-10-22 实测裁决，见文件头
-          // 「与本轮实测的偏差」3）。这里**不能**换成 `Flexible(fit: loose)`：
-          // Flutter 的 `Flexible` 是「**分配**可用空间」，而 CSS `flex-shrink: 1`
-          // 是「**仅在溢出时按 base 比例收缩**」——两者语义不同。实测把它改成
-          // Flexible 后，900 档气泡从 633 掉到 395（宽屏直接把空间分掉一半），
-          // 属于比原问题更严重的回归，故回退。
-          if (actions != null) actions,
+          if (actions != null)
+            // 工具栏的 **min-content**（规范 §4.5 automatic minimum size）：
+            // 每个按钮压到极限时的宽之和 + 按钮间 gap。
+            //   · `.favorite-toggle.is-compact` → 32（app.css:3334–3338 明写 min-width）
+            //   · `.msg-action-btn` → 16（图标盒）+ 16（padding 8×2）+ 2（border）= 34？
+            //     不是：web 实测该按钮的 min-content = **33.6**（css 像素），
+            //     与「图标 12 + margin-right 4 = 16」+ padding 16 + border 1.6 同源；
+            //     本件按同一算式给 [kAylaMsgActionBtnMinContent]（见常量注释）。
+            // 目标：375 档工具栏被压到 107.2（自己行 3 键）/ 69.6（他人行 2 键），
+            // 与浏览器实测逐像素一致（见 test/css_flex_row_test.dart）。
+            AylaCssFlexItem(
+              minContentWidth: actionsMinContent,
+              child: actions,
+            ),
         ];
-        final Widget row = Row(
+        // web `.msg-row { display:flex; align-items:flex-end; gap:var(--sp-2) }`
+        // （app.css:1041–1046）+ `.msg-row.self { flex-direction: row-reverse }`
+        // （app.css:1069–1071）—— `row-reverse` **同时把主轴起点移到右侧**
+        // ⇒ 只反转子级顺序不够，self 行必须 `MainAxisAlignment.end` 才真的靠右
+        // （实测「好呀我这就来这条没有置右」）。
+        //
+        // gap 用容器的 `gap`（不是 `SizedBox` 子项）：CSS 的 gap **不参与收缩**，
+        // 若写成子项会被当成 flex item 一起压（宽度被分摊掉 ⇒ 气泡多算 8px）。
+        final Widget row = AylaCssFlexRow(
           crossAxisAlignment: CrossAxisAlignment.end,
-          // web `.msg-row { display:flex }` + `.msg-row.self { flex-direction: row-reverse }`
-          // （app.css 1041–1071）——注意 `row-reverse` **同时把主轴起点移到右侧**
-          // ⇒ 只反转子级顺序不够，self 行必须 `MainAxisAlignment.end` 才真的靠右
-          // （实测「好呀我这就来这条没有置右」）。
+          gap: AylaSpacing.sp2,
           mainAxisAlignment: widget.isSelf
               ? MainAxisAlignment.end
               : MainAxisAlignment.start,
@@ -1396,43 +1476,46 @@ class _MsgActions extends StatelessWidget {
           child: Padding(
             // `.msg-actions { padding-bottom: 2px }`
             padding: const EdgeInsets.only(bottom: 2),
-            child: Row(
-              // ⚠️ **遗留差异（已登记，勿盲目"修"）**：web 的 `.msg-actions` 与
-              // 其按钮都有 `flex-shrink: 1`，窄屏放不下时按钮被压窄、标签折行
-              // （375 档实测：`.msg-action-btn` 67×26 → 34×62，`.msg-actions`
-              // 156 → 108），气泡因此能占到 84%。Flutter 的 `Row` 子项**不收缩**
-              // ⇒ 工具栏恒占 132 宽、气泡少 24px。
-              //
-              // 试过的两条修法都**会更糟**，已回退（详见文件头「与本轮实测的偏差」3）：
-              // ① 外层 `Flexible(child: actions)` ⇒ 900 档气泡 633 → 395
-              //    （Flexible 是「分配空间」，不是「溢出才收缩」）；
-              // ② 逐按钮 `Flexible` ⇒ 外层 Row 无界宽，永不触发收缩，纯死代码。
-              // 要真正等价需自写 flex-shrink 布局，超出本轮「布局对齐」范围。
+            // `.msg-actions { display:flex; align-items:center; gap:var(--sp-1) }`
+            // （app.css:1290–1298）；**没有 flex-wrap** ⇒ 单行。
+            //
+            // 工具栏自身在消息行里是**可收缩项**（见 build 里的 [AylaCssFlexRow]），
+            // 被压窄后它的按钮也按 `flex-shrink: 1` 继续收缩、标签折行
+            // （375 档实测：`.msg-action-btn` 57.6×27.2 → 33.6×60.8，标签折两行）。
+            // 下界按 CSS 的 automatic minimum size 取（见文件头事实源）：
+            // - 收藏键 `.favorite-toggle.is-compact { min-width: 32px }`（app.css:3334–3338）；
+            // - `.msg-action-btn` 有 `overflow:hidden`（auroraqua.css:142–146）⇒ min 0。
+            child: AylaCssFlexRow(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              gap: AylaSpacing.sp1,
+              // 内层 flex 容器 ⇒ 宽度 = 子键之和（等价 CSS 里 `.msg-actions` 作为
+              // 行内 flex item 的收缩宽，而不是撑满整行）。
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                _favorite,
+                AylaCssFlexItem(minWidth: 32, child: _favorite),
                 // 引用键：web `MessageBubble.tsx:247` `{onQuote && (…)}` ——
                 // **未接线时根本不渲染**（不是渲染一个无副作用的假按钮），
                 // 与 `tsx:258` 的 `{onRecall && (…)}` 同一写法；
-                // 同时 gap 也不出现（`.msg-actions { gap: var(--sp-1) }` 只在有子项时生效）。
-                if (onQuote != null) ...<Widget>[
-                  const SizedBox(width: AylaSpacing.sp1),
-                  AylaMsgActionButton(
-                    label: '引用',
-                    semanticLabel: '引用回复',
-                    icon: _actionIcon('iconQuote', 12),
-                    onPressed: () => onQuote!.call(msg),
+                // 同时 gap 也不出现（`.msg-actions { gap: var(--sp-1) }` 只在有子项时生效
+                // ⇒ 交给容器 `gap`，左右各算一次会变成 8px）。
+                if (onQuote != null)
+                  AylaCssFlexItem(
+                    child: AylaMsgActionButton(
+                      label: '引用',
+                      semanticLabel: '引用回复',
+                      icon: _actionIcon('iconQuote', 12),
+                      onPressed: () => onQuote!.call(msg),
+                    ),
                   ),
-                ],
-                if (showRecall) ...<Widget>[
-                  const SizedBox(width: AylaSpacing.sp1),
-                  AylaMsgActionButton(
-                    label: '撤回',
-                    semanticLabel: '撤回消息',
-                    icon: _actionIcon('iconUndo', 12),
-                    onPressed: () => onRecall?.call(msg),
+                if (showRecall)
+                  AylaCssFlexItem(
+                    child: AylaMsgActionButton(
+                      label: '撤回',
+                      semanticLabel: '撤回消息',
+                      icon: _actionIcon('iconUndo', 12),
+                      onPressed: () => onRecall?.call(msg),
+                    ),
                   ),
-                ],
               ],
             ),
           ),
