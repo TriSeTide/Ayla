@@ -190,6 +190,7 @@ const List<AylaGalleryCategory> kGalleryCategories = <AylaGalleryCategory>[
   AylaGalleryCategory('chat', 'chat · 气泡 / 列表 / 输入 / 面板', <String>[
     '聊天消息气泡',
     '媒体消息族',
+    '气泡内媒体宽度',
     '分享卡 / 爱莉入口卡',
     '会话列表',
     '@ 成员选择器',
@@ -1614,6 +1615,22 @@ class _ComponentGalleryState extends State<ComponentGallery> {
                 width: 760,
                 height: 1180,
                 child: aylaMediaContentSamples(),
+              ),
+            ),
+            const SizedBox(height: AylaSpacing.sp6),
+
+            // ---------- 气泡内媒体宽度（fit-content 两趟布局，2026-10-22 二轮） ----------
+            _Section(
+              title: '气泡内媒体宽度（fit-content / flex:1 两档语义）',
+              source:
+                  'app.css 1073–1083（.msg-body max 75%/84% + align-items:flex-start = fit-content）· '
+                  '1521–1557（.voice-card min-w 240 / .voice-wave flex:1 + height 36）· '
+                  '1568–1581（.voice-seek flex:1）· 1839–1897（.file-card 240–320 / .file-info flex:1）'
+                  ' —— 判据：语音卡是 min-width 撑开的**窄卡**（≈266），不是 75% 上限（714）',
+              child: SizedBox(
+                width: 760,
+                height: 720,
+                child: aylaBubbleMediaWidthSamples(),
               ),
             ),
             const SizedBox(height: AylaSpacing.sp6),

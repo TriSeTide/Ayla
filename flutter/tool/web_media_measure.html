@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Ayla 媒体气泡对账台</title>
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/tokens.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/base.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/app.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/auroraqua.css">
+<style>
+/* 与 Flutter 侧加载**同一批 TTF** ⇒ 字体度量一致，差异只剩布局。 */
+@font-face { font-family: "Nunito"; font-weight: 400; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_400Regular.ttf"); }
+@font-face { font-family: "Nunito"; font-weight: 600; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_600SemiBold.ttf"); }
+@font-face { font-family: "Nunito"; font-weight: 700; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_700Bold.ttf"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 400; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/SpaceGrotesk_400Regular.ttf"); }
+@font-face { font-family: "Fredoka"; font-weight: 500; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Fredoka_500Medium.ttf"); }
+html, body { margin: 0; padding: 0; background: #ECF0F2; }
+.A { width: 12px; height: 12px; display: inline-block; vertical-align: -2px; margin-right: 4px; }
+svg.A { stroke: currentColor; fill: none; stroke-width: 2; }
+</style>
+</head>
+<body>
+<div class="message-scroll" id="scroll"><div class="message-column" id="col"></div></div>
+<script>
+/* 与 MediaContent.tsx 同构的媒体 DOM。图片/波形用 data-URI SVG 提供**真实固有尺寸**，
+   因为 CSS 的 max-content 依赖图片固有宽高比。 */
+const WAVE = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="120"><rect width="480" height="120" fill="#9DBFE6"/></svg>');
+const img = (w, h) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><rect width="' + w + '" height="' + h + '" fill="#BDD4E9"/></svg>');
+
+const halo = '<span class="msg-sender-halo"><span class="avatar-halo"><span class="avatar-core avatar-core-user" style="width:32px;height:32px;font-size:13px">x</span></span></span>';
+function actions(self) {
+  let acts = '<button type="button" class="favorite-toggle is-compact"><svg class="A" width="16" height="16"></svg></button>';
+  acts += '<button type="button" class="msg-action-btn"><svg class="A"></svg>引用</button>';
+  if (self) acts += '<button type="button" class="msg-action-btn"><svg class="A"></svg>撤回</button>';
+  return '<div class="msg-actions">' + acts + '</div>';
+}
+
+/* ---- 各类媒体内容（与 MediaContent.tsx 逐分支同构） ---- */
+function voiceContent(noWave) {
+  const wave = noWave
+    ? '<span class="voice-wave" style="display:grid;place-items:center"><svg width="18" height="18"></svg></span>'
+    : '<img class="voice-wave" src="' + WAVE + '" alt="语音波形">';
+  return '<div class="voice-card">' +
+    '<div class="voice-card-main">' +
+      '<button type="button" class="voice-play"><svg class="A" width="16" height="16"></svg></button>' +
+      wave +
+      '<span class="voice-duration">0:12</span>' +
+    '</div>' +
+    '<div class="voice-seek-row">' +
+      '<input type="range" class="voice-seek" min="0" max="12" step="0.1" value="0" disabled>' +
+      '<span class="voice-cur">0:00</span>' +
+    '</div>' +
+  '</div>';
+}
+/* mediaFrameStyle（MediaContent.tsx:86–97）：scale = min(320/w, 320/h, 1) */
+function imageContent(w, h) {
+  const scale = Math.min(320 / w, 320 / h, 1);
+  const dw = Math.round(w * scale), dh = Math.round(h * scale);
+  return '<div class="media-frame media-frame-image" style="width:' + dw + 'px;max-width:100%;aspect-ratio:' + dw + '/' + dh + '">' +
+    '<button type="button" class="media-frame-open"><img class="media-image" src="' + img(dw, dh) + '" alt="图片"></button></div>';
+}
+function emojiContent() {
+  return '<div class="media-frame media-frame-image" style="width:96px;max-width:100%;aspect-ratio:1/1">' +
+    '<button type="button" class="media-frame-open"><img class="media-emoji" src="' + img(96, 96) + '" alt="表情"></button></div>';
+}
+function videoContent(w, h) {
+  const scale = Math.min(320 / w, 320 / h, 1);
+  const dw = Math.round(w * scale), dh = Math.round(h * scale);
+  return '<div class="media-frame media-frame-video" style="width:' + dw + 'px;max-width:100%;aspect-ratio:' + dw + '/' + dh + '">' +
+    '<img class="media-video" src="' + img(dw, dh) + '" alt="">' +
+    '<span class="video-play-badge"><svg class="A" width="22" height="22"></svg></span></div>';
+}
+function fileContent() {
+  return '<div class="file-card">' +
+    '<span class="file-icon"><svg class="A" width="20" height="20"></svg></span>' +
+    '<div class="file-info"><span class="file-name">设计规范-千禧冰樱.pdf</span><span class="file-size">2.3 MB</span></div>' +
+    '<button type="button" class="file-download"><svg class="A" width="18" height="18"></svg></button>' +
+  '</div>';
+}
+function shareContent() {
+  return '<button type="button" class="share-bubble-card">' +
+    '<span class="share-bubble-cover-fallback"><svg class="A" width="24" height="24"></svg></span>' +
+    '<span class="share-bubble-meta">' +
+      '<span class="share-bubble-title">Ayla 设计规范</span>' +
+      '<span class="share-bubble-sub">群聊 · 12 人</span>' +
+    '</span>' +
+    '<span class="share-bubble-chevron" aria-hidden="true"></span>' +
+  '</button>';
+}
+function mixedContent() {
+  /* .mixed-flow：text 段 + 180 方块图（app.css:1934–1979） */
+  return '<div class="mixed-flow">' +
+    '<span class="mixed-text">今天的素材，你看下这版：</span>' +
+    '<button type="button" class="media-frame-open mixed-img">' +
+      '<img class="mixed-img-media" src="' + img(180, 180) + '" alt="图片"></button>' +
+  '</div>';
+}
+
+const CASES = [
+  { id: 'voice-peer', content: voiceContent(false) },
+  { id: 'voice-self', self: true, content: voiceContent(false) },
+  { id: 'voice-nowave', content: voiceContent(true) },
+  { id: 'image-640x480', content: imageContent(640, 480) },
+  { id: 'image-480x640', content: imageContent(480, 640) },
+  { id: 'image-100x100', content: imageContent(100, 100) },
+  { id: 'emoji', content: emojiContent() },
+  { id: 'video-1280x720', content: videoContent(1280, 720) },
+  { id: 'file', content: fileContent() },
+  { id: 'share', content: shareContent() },
+  { id: 'mixed', content: mixedContent() },
+];
+
+function row(c) {
+  const self = !!c.self;
+  const cls = self ? 'bubble bubble-self bubble-media' : 'bubble bubble-other bubble-media';
+  const meta = '<div class="bubble-meta"><span class="bubble-time">刚刚</span></div>';
+  return '<div class="msg-row ' + (self ? 'self' : 'peer') + '">' + halo +
+    '<div class="msg-body">' +
+      '<div class="msg-bubble-wrap"><div class="' + cls + '">' + c.content + '</div></div>' + meta +
+    '</div>' + actions(self) + '</div>';
+}
+document.getElementById('col').innerHTML =
+  CASES.map(c => '<div data-case="' + c.id + '">' + row(c) + '</div>').join('');
+
+const R = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+  return { l: +b.left.toFixed(2), r: +b.right.toFixed(2), w: +b.width.toFixed(2), h: +b.height.toFixed(2) }; };
+
+window.__measure = () => {
+  const out = [];
+  for (const c of CASES) {
+    const holder = document.querySelector('[data-case="' + c.id + '"]');
+    const q = (s) => holder.querySelector(s);
+    out.push({
+      id: c.id,
+      row: R(q('.msg-row')),
+      body: R(q('.msg-body')),
+      bubble: R(q('.bubble')),
+      actions: R(q('.msg-actions')),
+      card: R(q('.voice-card, .media-frame, .file-card, .share-bubble-card, .mixed-flow')),
+      wave: R(q('.voice-wave')),
+      seek: R(q('.voice-seek')),
+      cur: R(q('.voice-cur')),
+      play: R(q('.voice-play')),
+      dur: R(q('.voice-duration')),
+      fileInfo: R(q('.file-info')),
+    });
+  }
+  return out;
+};
+
+/* 去掉 .message-column 的 960 上限 + 超大视口 ⇒ 量到的就是 CSS 的 max-content
+   （shrink-to-fit = min(max-content, available)；available 足够大时即 max-content）。 */
+window.__maxContent = () => {
+  const style = document.createElement('style');
+  style.textContent = '.message-column{max-width:none !important}';
+  document.head.appendChild(style);
+  const res = window.__measure();
+  style.remove();
+  return res;
+};
+
+window.__ready = async () => {
+  await document.fonts.ready;
+  await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
+  return document.images.length;
+};
+document.fonts.ready.then(() => { document.title = 'ready'; });
+</script>
+</body>
+</html>

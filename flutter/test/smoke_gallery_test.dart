@@ -49,6 +49,7 @@ const Map<String, List<String>> kExpectedSections = <String, List<String>>{
   'chat · 气泡 / 列表 / 输入 / 面板': <String>[
     '聊天消息气泡（MessageBubble.tsx）',
     '媒体消息族（MediaContent.tsx）',
+    '气泡内媒体宽度（fit-content / flex:1 两档语义）',
     '分享卡 / 爱莉入口卡（ShareBubble.tsx + ElysiaEntry.tsx）',
     '会话列表（ConversationList.tsx）',
     '@ 成员选择器（MentionPicker.tsx）',

@@ -52,11 +52,51 @@ import '../../theme/app_icons.dart';
 import '../../theme/glass.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
+import '../base/fit_content.dart';
 import 'image_viewer.dart';
 import '../base/loading.dart';
 import '../base/overlays.dart';
 import '../base/resource_image.dart';
 import '../base/tooltip.dart';
+
+// =================== 语音卡的 max-content 常量 ===================
+//
+// 为什么需要显式的「自然宽」常量（2026-10-22 二轮，真机实报「语音气泡撑满整行」）：
+// CSS 的 `flex:1` 项在 intrinsic 趟贡献的是**自身 max-content**，Flutter 的
+// `Expanded` 在无界主轴下无定义（`RenderFlex` 会断言
+// 「children have non-zero flex but incoming width constraints are unbounded」）。
+// ⇒ 这几个常量把「浏览器实际取到的 max-content」写死，由 [AylaInlineSize] 使用
+// （见 widgets/base/fit_content.dart）。
+// 数值全部来自 Chrome 实测 / 后端常量推导，**不得估计**。
+
+/// `.voice-wave` 的高度（app.css:1551–1557 `height: 36px`）。
+const double kAylaVoiceWaveHeight = 36;
+
+/// 有波形时 `.voice-wave` 的 **max-content** 宽。
+///
+/// 推导（可逐条验证）：
+/// - 波形 PNG 固有尺寸恒为 **480×120** —— 后端
+///   `Ayla/backend/apps/media/derivatives.py:22–23` 的
+///   `WAVEFORM_WIDTH = 480` / `WAVEFORM_HEIGHT = 120`；
+/// - `.voice-wave` 被 `height: 36px` 定高（app.css:1554）⇒ 保持固有比例时
+///   max-content 宽 = 36 × 480 ÷ 120 = **144**；
+/// - Chrome 实测 `.voice-wave` 宽 **144**（`.voice-card-main` 232.19
+///   = 40 + 12 + 144 + 12 + 24.19），与本式一致。
+const double kAylaVoiceWaveNaturalWidth = 144;
+
+/// 无波形时 `.voice-wave` 的 max-content 宽。
+///
+/// web 降级分支（`MediaContent.tsx:645–651`）是 `.voice-wave` 的 `<span>`
+/// 里放 18×18 图标 ⇒ 内容宽 18（`display:grid; place-items:center`）。
+const double kAylaVoiceWaveFallbackWidth = 18;
+
+/// `.voice-seek`（range input）的 max-content 宽。
+///
+/// web `.voice-seek { flex:1; min-width:0; appearance:none; height:14px }`
+/// （app.css:1574–1581）⇒ 无界档取 UA 给 range 的固有宽。Chrome 实测：
+/// `appearance:none` 的 `input[type=range]` 在 `width:max-content` 下为 **135**；
+/// 进度整行 = 135 + 8（gap）+ 34（`.voice-cur{min-width:34}`）= **177**（实测 177）。
+const double kAylaVoiceSeekNaturalWidth = 135;
 
 // ======================= 入口 =======================
 
@@ -1336,8 +1376,28 @@ class _VoiceMediaState extends State<_VoiceMedia> {
     final double currentSeconds = _state.position.inMilliseconds / 1000;
     final bool seekable = _engine != null && totalSeconds != null;
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 240),
+    // ⚠️ `.voice-card`（app.css:1521–1527）是 `display:flex; flex-direction:column`
+    // 的块级 flex 容器 ⇒ 宽度 = max-content（被自身 `min-width:240px` 托底，
+    // 被外层 `.msg-body` 的 75%/84% 上限约束）。Flutter 侧同构：
+    //  - 外层 `Container(minWidth:240)` = `.voice-card{min-width:240}`；
+    //  - **列内两行都必须收缩到内容宽**（块级 flex 容器按内容收缩）。
+    //
+    // 🔴 2026-10-22 二轮回归根因（真机截图：语音气泡撑满整行约 84%）：
+    // 主行原本是 `Row`（默认 `MainAxisSize.max`）+ `Expanded(波形)`。
+    // 外层消息行用 [AylaCssFlexRow] 的**无界主轴测量**实现 CSS 的
+    // `flex-basis:auto`（= max-content）⇒ 这里 `Row` 拿到的 `maxWidth` 是
+    // `.msg-body` 的 75%/84% 上限 ⇒ 行宽 = 上限 ⇒ 语音卡被拉成整行。
+    // CSS 里 `.voice-wave{flex:1}` 在 max-content 度量下按**自身内容宽**参与，
+    // 不会把上限当内容宽 ⇒ 本件必须显式表达（见 [AylaInlineSize]）。
+    //
+    // 此外整体必须 **fit-content**（= [AylaFitContent]）：CSS 里 `.voice-card`
+    // 作为 `.bubble`（块级）的子级，宽度由 `.bubble` 的 fit-content 决定，
+    // 而 `.bubble` 由 `.msg-bubble-wrap` 的 flex 项语义决定 ⇒ 三层都是
+    // 「先算 max-content、再被 75% 夹住」。Flutter 的 `Align(widthFactor:1)`
+    // 只有一趟（用已被夹过的约束布局）⇒ 内部 `Row` 把上限当内容宽。
+    return AylaFitContent(
+      minWidth: 240, // .voice-card { min-width: 240px }（app.css:1525）
+      child: Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AylaSpacing.sp3,
         vertical: AylaSpacing.sp2,
@@ -1347,6 +1407,7 @@ class _VoiceMediaState extends State<_VoiceMedia> {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               _VoicePlayButton(
                 loading: _loading,
@@ -1354,20 +1415,33 @@ class _VoiceMediaState extends State<_VoiceMedia> {
                 onTap: () => _toggle(),
               ),
               const SizedBox(width: AylaSpacing.sp3),
-              Expanded(
-                child: SizedBox(
-                  height: 36,
-                  child: wave == null
-                      ? const _VoiceWaveFallback()
-                      : ClipRRect(
-                          borderRadius: BorderRadius.circular(AylaRadii.rSm),
-                          child: AylaResourceImage(
-                            src: wave,
-                            alt: '语音波形',
-                            fit: BoxFit.fill,
-                            fallback: const _VoiceWaveFallback(),
+              // `.voice-wave { flex: 1; min-width: 0; height: 36px; object-fit: fill }`
+              // （app.css:1551–1557）。`flex:1` 的「有界 ⇒ 占满剩余」与
+              // 「无界 ⇒ 按自身内容宽」两档语义见 [AylaInlineSize]。
+              // ⚠️ `.voice-wave` 还有 `min-width: 0`（app.css:1553）⇒ 有界档**可以被压窄**
+              // （375 档浏览器实测被压到 127.81）。故必须包在 `Flexible(fit: loose)` 里：
+              // 无界档 `RenderFlex` 不给弹性 ⇒ 走 [AylaInlineSize] 的 max-content 分支；
+              // 有界档拿到「剩余空间」的 loose 约束 ⇒ 占满或按需压窄，与 CSS 同解。
+              Flexible(
+                fit: FlexFit.loose,
+                child: AylaInlineSize(
+                  minWidth: wave == null
+                      ? kAylaVoiceWaveFallbackWidth
+                      : kAylaVoiceWaveNaturalWidth,
+                  child: SizedBox(
+                    height: kAylaVoiceWaveHeight,
+                    child: wave == null
+                        ? const _VoiceWaveFallback()
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(AylaRadii.rSm),
+                            child: AylaResourceImage(
+                              src: wave,
+                              alt: '语音波形',
+                              fit: BoxFit.fill,
+                              fallback: const _VoiceWaveFallback(),
+                            ),
                           ),
-                        ),
+                  ),
                 ),
               ),
               const SizedBox(width: AylaSpacing.sp3),
@@ -1430,11 +1504,19 @@ class _VoiceMediaState extends State<_VoiceMedia> {
             ),
           ],
           const SizedBox(height: AylaSpacing.sp1),
+          // `.voice-seek-row { display:flex; align-items:center; gap:var(--sp-2) }`
+          // （app.css:1568–1572）+ `.voice-seek { flex:1; min-width:0 }`（1574–1580）
+          // —— 与主行同构：必须 `MainAxisSize.min` + 无界档的 max-content
+          // （Chrome 实测 range 无界宽 135，整行 135 + 8 + 34 = 177）。
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Expanded(
+              Flexible(
+                fit: FlexFit.loose,
+                child: AylaInlineSize(
+                minWidth: kAylaVoiceSeekNaturalWidth,
                 child: SliderTheme(
-                  data: SliderThemeData(
+                    data: SliderThemeData(
                     trackHeight: 4,
                     activeTrackColor: seekable
                         ? AylaColors.indigo700
@@ -1459,6 +1541,7 @@ class _VoiceMediaState extends State<_VoiceMedia> {
                         '语音播放进度 ${v.round()} 秒',
                   ),
                 ),
+                ),
               ),
               const SizedBox(width: AylaSpacing.sp2),
               SizedBox(
@@ -1478,6 +1561,7 @@ class _VoiceMediaState extends State<_VoiceMedia> {
             ],
           ),
         ],
+      ),
       ),
     );
   }
@@ -1718,11 +1802,22 @@ class _FileCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 240, maxWidth: 320),
+    // `.file-card { min-width:240px; max-width:320px; display:flex; gap:sp3;
+    //              padding:sp3 }`（app.css:1839–1846）+ `.file-info { flex:1;
+    //              min-width:0 }`（1859–1866）。
+    //
+    // 🔴 与语音卡同一根因（2026-10-22 二轮）：行内 `.file-info` 是 `flex:1`，
+    // Flutter 侧写成 `Expanded` ⇒ 在消息行的**无界主轴测量**下把
+    // `.msg-body` 的 75% 上限当内容宽 ⇒ 文件卡被拉满（实测 328，web 276.73）。
+    // ⇒ 整卡必须 fit-content（[AylaFitContent]），行内 `flex:1` 项走
+    // [AylaInlineSize]（无界时取自身的 max-content = 0 ⇒ 由 min-width:240 托底）。
+    return AylaFitContent(
+      minWidth: 240, // .file-card { min-width: 240px }（app.css:1843）
+      maxWidth: 320, // .file-card { max-width: 320px }（app.css:1844）
       child: Padding(
         padding: const EdgeInsets.all(AylaSpacing.sp3),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Container(
               width: 40,
@@ -1741,7 +1836,12 @@ class _FileCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AylaSpacing.sp3),
-            Expanded(
+            // `.file-info { flex:1; min-width:0 }`（app.css:1859–1866）——
+            // 「有界占满 / 无界取自身内容宽」两档语义见 [AylaInlineNaturalSize]
+            // （内容宽是动态的：文件名长度）。
+            Flexible(
+              fit: FlexFit.loose,
+              child: AylaInlineNaturalSize(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -1794,6 +1894,7 @@ class _FileCard extends StatelessWidget {
                       ),
                     ),
                 ],
+              ),
               ),
             ),
             const SizedBox(width: AylaSpacing.sp3),
@@ -2005,6 +2106,183 @@ AylaChatMessage _previewMessage({
       seq: 1,
       createdAt: '2026-09-24T10:00:00Z',
     );
+
+/// 样张用的最小气泡壳（模拟 `.msg-body → .bubble.bubble-media` 的 fit-content 链）。
+///
+/// 只做**宽度语义**（fit-content + 媒体气泡的 padding），不复制 message_bubble.dart
+/// 的材质/工具栏 —— 样张要看的是「媒体卡的自然宽」，不是气泡外观
+/// （外观在「聊天消息气泡」那节）。这样也避免 media_content ↔ message_bubble
+/// 的循环 import。
+class _PreviewBubble extends StatelessWidget {
+  const _PreviewBubble({required this.msg});
+
+  final AylaChatMessage msg;
+
+  @override
+  Widget build(BuildContext context) {
+    // `.msg-body { max-width: 75%; align-items: flex-start }` 的等价：
+    // 外层给 75% 的**松**约束，内层按内容收缩。
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints c) {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: c.maxWidth * 0.75),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AylaColors.glassOpaqueFallbackSoft,
+                  borderRadius: BorderRadius.circular(AylaRadii.rBubble),
+                  border: Border.all(color: AylaColors.glassBorder),
+                ),
+                child: Padding(
+                  // `.bubble-media { padding: var(--sp-1) }`（app.css:1514–1518）
+                  padding: const EdgeInsets.all(AylaSpacing.sp1),
+                  child: AylaMediaContent(msg: msg),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 气泡内媒体宽度的样张（2026-10-22 二轮，fit-content 两趟布局的验收面）。
+///
+/// 演示的是**整条消息气泡**（不是裸媒体件），因为本轮修的是「媒体卡在
+/// `.msg-body` 的 fit-content 链里被撑满」这件事 —— 单看媒体件看不出差异。
+///
+/// 看什么（对照 web 的 `message-scroll` → `message-column` 几何）：
+/// 1. **语音**（有波形）气泡应是 ≈266 的**窄卡**，**不是**撑满整行 / 75% 上限
+///    （web `.voice-card{min-width:240}`，`tool/web_media_expected.json` 1440 档 266.19）；
+/// 2. **语音**（无波形）≈250；
+/// 3. **图片 640×480** ≈330（= 320 + padding）、**480×640** ≈250、**100×100** ≈110
+///    —— 宽度随图片比例变化，且小图不放大（`mediaFrameStyle`，tsx 86–97）；
+/// 4. **表情** ≈106（96 固定）；**视频 1280×720** ≈330；**文件** ≈277；
+/// 5. 全部都不应触及行的右边缘（即不是 714 的 75% 上限）。
+Widget aylaBubbleMediaWidthSamples() {
+  aylaEnableSampleMedia();
+  final AylaMediaDescriptor voice = _previewDescriptor(
+    id: 'w-voice',
+    kind: AylaMediaKind.voice,
+    mime: 'audio/ogg',
+    duration: 12,
+    waveform: true,
+    size: 96000,
+  );
+  final AylaMediaDescriptor voiceNoWave = _previewDescriptor(
+    id: 'w-voice2',
+    kind: AylaMediaKind.voice,
+    mime: 'audio/ogg',
+    duration: 8,
+    size: 64000,
+  );
+  final AylaMediaDescriptor image1 = _previewDescriptor(
+    id: 'w-img1',
+    kind: AylaMediaKind.image,
+    width: 640,
+    height: 480,
+    thumbnail: true,
+  );
+  final AylaMediaDescriptor image2 = _previewDescriptor(
+    id: 'w-img2',
+    kind: AylaMediaKind.image,
+    width: 480,
+    height: 640,
+    thumbnail: true,
+  );
+  final AylaMediaDescriptor image3 = _previewDescriptor(
+    id: 'w-img3',
+    kind: AylaMediaKind.image,
+    width: 100,
+    height: 100,
+    thumbnail: true,
+  );
+  final AylaMediaDescriptor file = _previewDescriptor(
+    id: 'w-file',
+    kind: AylaMediaKind.file,
+    mime: 'application/pdf',
+    size: 2411724,
+  );
+
+  Widget label(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: AylaSpacing.sp1),
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontFamily: AylaFonts.utility,
+            fontFamilyFallback: AylaFonts.cjkFallback,
+            fontSize: 11,
+            color: AylaColors.textSecondary,
+          ),
+        ),
+      );
+
+  return SingleChildScrollView(
+    padding: const EdgeInsets.all(AylaSpacing.sp4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        label('语音（有波形）→ web 266.19 · 窄卡，不得撑满整行'),
+        _PreviewBubble(
+          msg: _previewMessage(
+            id: 'wb1',
+            type: AylaMessageType.voice,
+            media: voice,
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp4),
+        label('语音（无波形）→ web 250'),
+        _PreviewBubble(
+          msg: _previewMessage(
+            id: 'wb2',
+            type: AylaMessageType.voice,
+            media: voiceNoWave,
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp4),
+        label('图片 640×480 → web 330（按比例，不放大）'),
+        _PreviewBubble(
+          msg: _previewMessage(
+            id: 'wb3',
+            type: AylaMessageType.image,
+            media: image1,
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp4),
+        label('图片 480×640 → web 250（竖图）'),
+        _PreviewBubble(
+          msg: _previewMessage(
+            id: 'wb4',
+            type: AylaMessageType.image,
+            media: image2,
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp4),
+        label('图片 100×100 → web 110（小图不放大）'),
+        _PreviewBubble(
+          msg: _previewMessage(
+            id: 'wb5',
+            type: AylaMessageType.image,
+            media: image3,
+          ),
+        ),
+        const SizedBox(height: AylaSpacing.sp4),
+        label('文件 → web 276.73（.file-card 240–320）'),
+        _PreviewBubble(
+          msg: _previewMessage(
+            id: 'wb6',
+            type: AylaMessageType.file,
+            media: file,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
 /// 媒体族样张。
 ///

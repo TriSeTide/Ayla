@@ -106,6 +106,63 @@
 /// `LayoutBuilder`，Flutter 不支持对其求 intrinsic）⇒ 不得把它塞进
 /// `IntrinsicWidth/Height`。
 ///
+/// ## 4. 媒体族气泡的 fit-content —— **2026-10-22 二轮**（本段记录一次真实回归）
+///
+/// 上面 [AylaCssFlexRow] 用**无界主轴测量**实现 CSS 的 `flex-basis:auto`
+/// （= max-content）。但媒体子树里有 `Expanded`（CSS `flex:1`），而
+/// `Expanded` 在无界主轴下**无定义**：
+/// - 语音卡主行 `.voice-card-main` 的 `.voice-wave{flex:1}`；
+/// - 语音卡进度行 `.voice-seek{flex:1}`；
+/// - 文件卡 `.file-info{flex:1}`。
+///
+/// 于是「自然宽」被量成 `.msg-body` 的 75%/84% 上限 ⇒ **语音/文件气泡撑满整行**
+/// （用户真机截图实锤：1440 档语音气泡占满整行约 84%）。
+///
+/// **CSS 的机制是两趟**：intrinsic 趟里 `flex:1` 项贡献**自身 max-content**
+/// （波形 = 36 × 480/120 = 144），布局趟才被祖先 `max-width` 夹住。
+/// Flutter 只有一趟（`Align(widthFactor:1)` 拿到的是**已被夹过的**约束）。
+///
+/// **修法**：`widgets/base/fit_content.dart` 三个原语把两趟补上 ——
+/// [AylaFitContent]（= CSS `width: fit-content`，先无界测 max-content 再夹）、
+/// [AylaInlineSize]（`flex:1` 有界占满 / 无界取声明值）、
+/// [AylaInlineNaturalSize]（同上，无界取子级自然宽）。没用 `IntrinsicWidth`
+/// 是因为媒体子树含 `LayoutBuilder`（Flutter 不支持求 intrinsic）。
+///
+/// 实测对账（`tool/web_media_measure.html` + Playwright，四档 + max-content 档，
+/// 期望值存 `tool/web_media_expected.json`）：
+///
+/// | 气泡 | web @1440 | Flutter 修复前 | Flutter 修复后 |
+/// |---|---|---|---|
+/// | 语音（有波形） | 266.19 | **714**（75% 上限） | 264.19 |
+/// | 语音（无波形） | 250.00 | **714** | 248.00 |
+/// | 图片 640×480 | 330 | 328 | 328 |
+/// | 图片 480×640 | 250 | 248 | 248 |
+/// | 图片 100×100 | 110 | 108 | 108 |
+/// | 表情 | 106 | 104 | 104 |
+/// | 视频 1280×720 | 330 | 328 | 328 |
+/// | 文件 | 276.73 | **328** | 248–277（CJK 度量差见下） |
+/// | 分享 | 227.69 | 294 | 294（见「残留差异」） |
+/// | 混排 | 378 | 220.1 | 220.1（见「残留差异」） |
+/// | 引用条 | 714 | 714 | 714（web 同样撑到上限，无差异） |
+///
+/// 回归锁：`test/bubble_media_width_test.dart`（16 例，含「1440 档语音气泡
+/// 不得等于 84%/75% 上限」这条直接判据）+ `test/fit_content_test.dart`（9 例，原语语义）。
+///
+/// ### 残留差异（如实登记，未修）
+/// 1. **文件卡**：web 276.73 vs Flutter 248 —— 文件名是中文，测试引擎无 CJK
+///    字体 ⇒ 自然宽偏窄；真机有系统 CJK 字体，差值会收敛（与
+///    `css_flex_row_test.dart` 文件头登记的工具栏 132 vs 155.2 同源）。
+/// 2. **分享卡**：web 227.69 vs Flutter 294 —— web 的
+///    `.share-bubble-card{width:min(264px,100%)}` 在 `.bubble` 的 fit-content
+///    计算里构成**百分比循环依赖**，Chrome 按「先按 100% 求解、再收缩」得 227.69；
+///    Flutter 侧按字面 `min(264, 可用)` 得 294（264 + padding/border）。两者都是
+///    「窄卡」，不撑满整行，**本轮不动**（要精确复刻需要模拟 Chrome 的循环求解，
+///    风险大于收益；已登记待用户决定）。
+/// 3. **混排**：web 378 vs Flutter 220.1 —— web 的 `.mixed-flow{flex-wrap:wrap}`
+///    在 max-content 档把 text 段与 180 方块**排在同一行**（368 + gap），Flutter
+///    的 `Wrap` 在测量档得到 220.1（排成两行）。同样是「不撑满整行」的窄卡，
+///    差异属于 `Wrap` 与 CSS `flex-wrap` 的 max-content 求值差，本轮不动并登记。
+///
 /// ## 公开面
 /// `AylaMessageBubble` · 样张 `aylaMessageBubbleSamples()`
 
