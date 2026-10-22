@@ -182,12 +182,21 @@ S3_REGION = env.str("S3_REGION", default="us-east-1")
 S3_PUBLIC = env.bool("S3_PUBLIC", default=False)  # 私密媒体，不得进入共享缓存
 S3_STORAGE_BACKEND = env.str("S3_STORAGE_BACKEND", default="s3")
 
-# 分类型大小上限（字节）；0 = 不设上限（图片/语音/视频按产品要求放开，file/emoji 仍受限）。
+# 分类型大小上限（字节）；0 = 不设上限。
+#
+# 与 web 端口径对齐（`web/src/api/media.ts`）：
+# - 图片 / 语音 / 视频 / **表情包** 均**不设上限**（web `validateImageFile` 只校验
+#   类型与非空，不校验大小；表情包走的就是这条路径）；
+# - 仅「任意文件」有 50MB 上限（web `FILE_MAX_BYTES`，一并对齐）。
+#
+# 2026-10-22 修正：此前 emoji 单独限 5MB，导致**动图表情**（GIF/WebP 动图常
+# 3~10MB）建会话就被 413 拒绝，表现为「群表情包无法上传动图」。web 端从未有
+# 这个限制，属于两端口径漂移，此处按 web 对齐。
 MEDIA_MAX_IMAGE_BYTES = env.int("MEDIA_MAX_IMAGE_BYTES", default=0)
 MEDIA_MAX_VOICE_BYTES = env.int("MEDIA_MAX_VOICE_BYTES", default=0)
 MEDIA_MAX_VIDEO_BYTES = env.int("MEDIA_MAX_VIDEO_BYTES", default=0)
 MEDIA_MAX_FILE_BYTES = env.int("MEDIA_MAX_FILE_BYTES", default=50 * 1024 * 1024)
-MEDIA_MAX_EMOJI_BYTES = env.int("MEDIA_MAX_EMOJI_BYTES", default=5 * 1024 * 1024)
+MEDIA_MAX_EMOJI_BYTES = env.int("MEDIA_MAX_EMOJI_BYTES", default=0)
 
 # 媒体二进制走 PUT request.body；Django 默认 DATA_UPLOAD_MAX_MEMORY_SIZE=2.5MB
 # 会在读取大请求体时直接抛 RequestDataTooBig，必须解除才能支持大图/长语音。
