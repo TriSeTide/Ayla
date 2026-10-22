@@ -221,6 +221,29 @@ def _sniff_isobmff_video(data: bytes) -> bool:
     }
 
 
+def _sniff_isobmff_audio(data: bytes) -> bool:
+    """识别 ISOBMFF 容器**音频**（M4A / MP4 音轨）。
+
+    Flutter 的 `record` 包在 Windows/Android 上默认输出 `audio/mp4`（.m4a），
+    与 MP4 视频共用 `ftyp` 结构但 brand 集合不同：
+
+    - 纯音频：`M4A ` / `M4B ` / `mp42` / `isom`（后者也常用于 m4a）
+    - 带音轨的 mp4：`mp41` / `mp42` / `isom` / `dash`
+
+    2026-10-22 用户实报「语音发送 400 media_integrity_failed」根因即此：
+    `_SNIFFERS` 的 voice 分支只认 WAV/MP3/Ogg/FLAC/WebM，**没有 ISO-BMFF**，
+    而 Flutter 录出来的正是 m4a ⇒ 必然被判完整性失败。
+    """
+    if len(data) < 12 or data[4:8] != b"ftyp":
+        return False
+    brand = data[8:12]
+    return brand in {
+        b"M4A ", b"M4B ", b"M4P ",
+        b"mp41", b"mp42", b"isom", b"iso2",
+        b"dash", b"3gp4", b"3gp5", b"3gp6",
+    }
+
+
 def _sniff_svg(data: bytes) -> bool:
     """识别 SVG（XML 文本）：BOM/空白后以 <?xml 或 <svg 开头，或前缀含 <svg 元素。"""
     text = data.lstrip(b"\xef\xbb\xbf \t\r\n")[:512]
@@ -245,6 +268,10 @@ def _sniff_kind(data: bytes, declared_kind: str) -> bool:
         _sniff_isobmff_video(data) or data.startswith(b"\x1a\x45\xdf\xa3")
     ):
         # 视频：ISOBMFF（MP4/MOV/M4V/3GP）或 EBML（WebM/MKV）
+        return True
+    if declared_kind == MediaObject.KIND_VOICE and _sniff_isobmff_audio(data):
+        # 语音：ISO-BMFF 音频（M4A/MP4 音轨）—— Flutter record 包默认输出格式。
+        # 其余格式（WAV/MP3/Ogg/FLAC/WebM）继续走下方 _SNIFFERS 表。
         return True
     for _kind, magic, _mime in _SNIFFERS:
         if _kind == declared_kind and data.startswith(magic):
