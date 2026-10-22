@@ -193,6 +193,9 @@ class _ResourceImageState extends State<AylaResourceImage> {
   File? _cachedFile;
   bool _originalExpired = false;
 
+  /// 是否已因「本地缓存文件解码失败」回退过一次（防无限递归，见 errorBuilder）。
+  bool _fellBackFromCache = false;
+
   /// 重试计数（web 用 `key={`${resolvedSrc}:${retry}`}` 强制重建 `<img>`）。
   int _retry = 0;
 
@@ -229,6 +232,8 @@ class _ResourceImageState extends State<AylaResourceImage> {
     if (old.src != widget.src ||
         old.variant != widget.variant ||
         !identical(old.previewImage, widget.previewImage)) {
+      // 换图 ⇒ 允许新的回退机会（防递归守卫只在同一张图的加载周期内有效）
+      _fellBackFromCache = false;
       _load();
     }
   }
@@ -260,11 +265,24 @@ class _ResourceImageState extends State<AylaResourceImage> {
       _resolvedUrl = null;
       _cachedFile = null;
       _originalExpired = false;
+      // ⚠️ **不在这里重置** _fellBackFromCache：本方法会被 errorBuilder 递归调用，
+      // 在这里清零等于把守卫拆掉（死循环复现）。守卫只在 didUpdateWidget
+      // （src/variant 变化，即用户切到另一张图）与 _retryLoad（用户点重试）时重置。
     });
     _notifyState();
 
+    // ⚠️ 空 src 直接判失败，**绝不能**走下面的 ready 分支（2026-10-22 卡死根因）：
+    // 空串会让 Image.network('') 立刻报错 → errorBuilder → setState(failed)
+    // → 若外层再触发重建，就形成「load → 空 URL → 报错 → load」死循环，
+    // 表现为进入私聊页后 UI 线程被吃满、应用卡死闪退。
+    if (widget.src.trim().isEmpty) {
+      if (!mounted) return;
+      setState(() => _state = _State.failed);
+      _notifyState();
+      return;
+    }
+
     final String? mediaId = extractMediaId(widget.src);
-    debugPrint('[IMG-DBG] src=${widget.src} mediaId=$mediaId');
     if (mediaId == null) {
       // 外部资源 / 非媒体路径：直接加载（不缓存）
       if (!mounted) return;
@@ -287,7 +305,6 @@ class _ResourceImageState extends State<AylaResourceImage> {
           : AylaMediaCacheVariant.original,
     );
     if (!mounted) return;
-    debugPrint('[IMG-DBG] cached=${cached?.path}');
     if (cached != null) {
       setState(() {
         _cachedFile = cached;
@@ -303,7 +320,6 @@ class _ResourceImageState extends State<AylaResourceImage> {
       final SignedMediaResult r =
           await MediaSigner.instance.sign(mediaId, variant: widget.variant);
       if (!mounted) return;
-      debugPrint('[IMG-DBG] signed url=${r.url}');
       setState(() {
         _resolvedUrl = r.url;
         _originalExpired = r.originalExpired;
@@ -344,6 +360,8 @@ class _ResourceImageState extends State<AylaResourceImage> {
   void _retryLoad() {
     final String? mediaId = extractMediaId(widget.src);
     if (mediaId != null) MediaSigner.instance.invalidate(mediaId);
+    // 用户主动重试 ⇒ 重新给一次「缓存失败回退远程」的机会
+    _fellBackFromCache = false;
     setState(() => _retry++);
     _load();
   }
@@ -463,12 +481,17 @@ class _ResourceImageState extends State<AylaResourceImage> {
                 cacheHeight: decodeH,
                 fit: widget.fit ?? BoxFit.cover,
                 errorBuilder: (BuildContext context, Object e, StackTrace? s) {
-                  // 本地文件损坏/被外部删除 → 当作未命中，重走远程链路一次
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (!mounted || _state == _State.failed) return;
-                    _cachedFile = null;
-                    _load();
-                  });
+                  // 本地文件损坏/被外部删除 → 当作未命中，重走远程链路**一次**。
+                  // ⚠️ 必须带 _fellBackFromCache 守卫：否则「缓存文件坏 → 清空 →
+                  //   _load 又命中同一缓存 → 再坏」会无限递归（2026-10-22 卡死根因之一）。
+                  if (!_fellBackFromCache) {
+                    _fellBackFromCache = true;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      _cachedFile = null;
+                      _load();
+                    });
+                  }
                   return widget.fallback ?? const SizedBox.shrink();
                 },
                 frameBuilder: (

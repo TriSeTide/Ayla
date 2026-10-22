@@ -29,7 +29,7 @@ library;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show ValueChanged;
+import 'package:flutter/foundation.dart' show ValueChanged, debugPrint;
 
 import '../models/media_kind.dart';
 import '../models/post.dart'
@@ -218,8 +218,12 @@ class AylaMediaActions {
             path: path,
           );
         }
-      } catch (_) {
-        // 单张失败 → 计数交回组件（web `failedFiles.length`），不阻断其余文件
+      } catch (e, st) {
+        // 单张失败 → 计数交回组件（web failedFiles.length），不阻断其余文件。
+        // ⚠️ 必须留日志（2026-10-22）：此前是 catch (_) { failed++; } —— 异常被**完全
+        // 吞掉**，用户只看到「部分表情上传失败」，排查时无从下手。
+        debugPrint("[MEDIA-PICK] 上传失败 file=${file.name} mime=${file.mimeType} kind=${mediaKind.name} err=$e");
+        debugPrint('$st');
         failed++;
       }
     }

@@ -64,6 +64,8 @@ import '../widgets/chat/message_list.dart' show AylaMessageList;
 import '../widgets/motion/panel_swap.dart'
     show AylaPanelSwap, AylaPanelSwapMode;
 import '../widgets/group/group_chat_subgroup_bar.dart';
+import '../core/media/media_picker.dart' show AylaPickedFile;
+import '../core/media/voice_recorder.dart' show AylaRecordVoiceRecorder;
 import 'chat_support.dart';
 
 /// 消息是否属于某子群视图（web `useChat.ts:69–78` 的 `messageInSubgroup`）——
@@ -159,6 +161,39 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
   AylaConversationRuntime? _runtime;
   AylaChatMessage? _quote;
   bool _collapsed = true;
+
+  /// 语音录制器（web `useVoiceRecorder` 的等价物）。
+  ///
+  /// 2026-10-22 用户实报「群聊里语音仍无法发送」：此前**群聊页没有任何录音器
+  /// 实例**，composer 的 voiceRecorder / onUploadVoice / onSendVoice 三件套全缺
+  /// ⇒ 录音入口不渲染；即便渲染，输入框 `_sendVoice` 首行
+  /// `if (upload == null || send == null) return;` 也会直接静默返回。
+  /// （2026-10-21 那轮只补了**私聊页** chat_support.dart，漏了本页。）
+  final AylaRecordVoiceRecorder _voiceRecorder = AylaRecordVoiceRecorder();
+
+  /// 语音上传 → media_id（委托给 runtime，与私聊页同一实现）。
+  Future<String> _uploadVoice(AylaPickedFile file) async {
+    final AylaConversationRuntime? rt = _runtime;
+    if (rt == null) throw StateError('会话未就绪');
+    return rt.uploadVoice(file);
+  }
+
+  /// 发送语音消息（委托给 runtime）。
+  Future<void> _sendVoice({
+    required String mediaId,
+    int? replyTo,
+    required String idempotencyKey,
+  }) async {
+    final AylaConversationRuntime? rt = _runtime;
+    if (rt == null) throw StateError('会话未就绪');
+    await rt.sendVoice(
+      mediaId: mediaId,
+      replyTo: replyTo,
+      idempotencyKey: idempotencyKey,
+    );
+    // 发送成功后清引用（web useChat 同语义）
+    if (mounted && _quote != null) setState(() => _quote = null);
+  }
 
   // ============ 输入区入场：**唯一的**动画时钟（子群条与输入框共用） ============
 
@@ -1178,6 +1213,11 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
                     : isSubgroupMuted
                     ? '该子群已禁言，仅群主/管理员可发言'
                     : null,
+                // 语音：录音器 + 上传 + 发送（web MessageInput.tsx:264-293）。
+                // 与私聊页同一套注入（chat_support.dart 的 composer 处有同样注释）。
+                voiceRecorder: _voiceRecorder,
+                onUploadVoice: _uploadVoice,
+                onSendVoice: _sendVoice,
                 narrow: narrow,
                 // 草稿按**会话 + 子群**隔离 —— web `MessageInput.tsx:90–91`：
                 // `const draftKey = isGroup ? `${convId}:${subgroupId ?? ""}` : convId`
