@@ -153,6 +153,8 @@ class _GroupGamesPageState extends ConsumerState<GroupGamesPage> {
       return AylaGameRoomHost(
         key: ValueKey<String>(roomId),
         roomId: roomId,
+        // 群内：状态栏由群顶栏覆盖着色 ⇒ 房内头部不再让位。
+        inGroup: true,
         initialRoom: _roomOf(roomId),
         onExit: () {
           setState(() => _currentRoomId = null);

@@ -148,6 +148,7 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.onBack,
     this.showOwnerPanel = false,
     this.hideRail = false,
+    this.topInset = true,
     this.onDeleteChannel,
     this.onCreateNewChannel,
     this.deletingChannelId,
@@ -197,6 +198,20 @@ class AylaLiveRoomBody extends StatefulWidget {
 
   /// 隐藏宽屏频道封面侧栏（群内直播：侧栏已移到左侧 ChannelSidebar）。
   final bool hideRail;
+
+  /// 头部是否自己让出**顶部状态栏**（默认 true）。
+  ///
+  /// ## 为什么需要这个开关（2026-10-19 用户实拍「群内多出一条空白带」）
+  /// 本件有两条进入路径，**状态栏归属不同**：
+  ///
+  /// · **独立直播间/开播控制台**（`/live/:id`、`/live/start/:id`）—— 沉浸式，
+  ///   壳层不出顶栏 ⇒ 头部必须自己让出状态栏 ⇒ `topInset: true`（默认）；
+  /// · **群内直播**（`/group/:id/live/:cid`）—— 群页自己渲染了 `AylaGroupTopTabs`，
+  ///   **状态栏已经由群顶栏覆盖并着色** ⇒ 这里再让一次就会在群顶栏与直播头部之间
+  ///   多出一条空白色带（用户截图里红框那条）⇒ `topInset: false`。
+  ///
+  /// ⇒ 群内调用点必须显式传 `false`（`pages/group_live_page.dart`）。
+  final bool topInset;
 
   /// 侧栏每项删除直播间（仅控制台提供）。
   final ValueChanged<String>? onDeleteChannel;
@@ -426,7 +441,9 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const AylaTopInsetGap(),
+            // 群内（`topInset: false`）不占位：状态栏已由群顶栏覆盖着色，
+            // 再让一次会在群顶栏与本头部之间多出一条空白色带。
+            if (widget.topInset) const AylaTopInsetGap(),
             Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: AylaSpacing.sp3,

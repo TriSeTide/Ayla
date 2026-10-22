@@ -806,7 +806,15 @@ class AylaVoiceRoomHost extends ConsumerStatefulWidget {
     required this.channelId,
     this.backPath = '/voice',
     this.roomRoute,
+    this.inGroup = false,
   });
+
+  /// 是否**群内**语音（`/group/:id/voice/:cid`，2026-10-19 新增）。
+  ///
+  /// 群页已渲染 `AylaGroupTopTabs`，**状态栏由群顶栏覆盖着色** ⇒ 房内头部不应再让位，
+  /// 否则群顶栏与房内头部之间会多出一条空白色带。
+  /// 一级语音 tab（`/voice/:id`）没有群顶栏，必须自己让 ⇒ 默认 false。
+  final bool inGroup;
 
   /// 频道 id（路由 `/voice/:channelId`）。
   final String channelId;
@@ -1289,6 +1297,8 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       onDeleteChannel: isOwner ? () => setState(() => _deleteConfirmOpen = true) : null,
       onSendText: _sendChat,
       onSendImage: _sendChatImage,
+      // 群内：不让状态栏（群顶栏已覆盖着色，再让会多出一条空白色带）。
+      topInset: !widget.inGroup,
       // 面板材质归属档由**房间体**按断点算好（宽屏材质在 `.voice-room-voice-card`、
       // 窄屏归 `.voice-panel`）⇒ 直接用它的入参，不再自行判定一遍。
       voicePanelBuilder: buildPanel,

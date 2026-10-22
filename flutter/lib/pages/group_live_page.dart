@@ -492,6 +492,9 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
       isNarrow: narrow,
       channels: cards,
       hideRail: true, // 群内子界面无侧栏（web tsx 183）
+      // 群内**不让状态栏**：群页已渲染 `AylaGroupTopTabs`，状态栏由它覆盖着色；
+      // 直播头部再让一次会在群顶栏与头部之间多出一条空白色带（用户实拍红框那条）。
+      topInset: false,
       onSelect: (String id) {
         final int? next = int.tryParse(id);
         if (next != null) _enterRoom(next);

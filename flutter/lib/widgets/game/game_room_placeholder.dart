@@ -59,6 +59,7 @@ class AylaGameRoomPlaceholder extends StatefulWidget {
     this.membersHasMore = false,
     this.membersInvalidated = false,
     this.onLoadMoreMembers,
+    this.topInset = true,
     this.onRefreshMembers,
     this.actionBusyUserId,
     this.favoriteState = AylaFavoriteState.unknown,
@@ -127,6 +128,13 @@ class AylaGameRoomPlaceholder extends StatefulWidget {
 
   /// 成员列表在加载期间被更新（web membersInvalidated）。
   final bool membersInvalidated;
+
+  /// 窄屏头部是否自己让出**顶部状态栏**（默认 true）。
+  ///
+  /// 群内桌游房（`/group/:id/games`）传 `false`：群页已渲染 `AylaGroupTopTabs`，
+  /// 状态栏由群顶栏覆盖着色，这里再让一次会在两者之间多出一条空白色带
+  /// （2026-10-19 用户实拍）。
+  final bool topInset;
 
   /// 加载更多成员。
   final Future<void> Function()? onLoadMoreMembers;
@@ -262,7 +270,8 @@ class _AylaGameRoomPlaceholderState extends State<AylaGameRoomPlaceholder> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const AylaTopInsetGap(),
+            // 群内（topInset: false）不占位：状态栏已由群顶栏覆盖着色。
+            if (widget.topInset) const AylaTopInsetGap(),
             Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: AylaSpacing.sp4,

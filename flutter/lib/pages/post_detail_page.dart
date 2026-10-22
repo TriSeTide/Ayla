@@ -132,7 +132,18 @@ String? _postCoverThumbnail(AylaPost post) {
 }
 
 class PostDetailPage extends ConsumerStatefulWidget {
-  const PostDetailPage({super.key, required this.postId, this.from});
+  const PostDetailPage({
+    super.key,
+    required this.postId,
+    this.from,
+    this.inGroup = false,
+  });
+
+  /// 是否**群内**帖子详情（2026-10-19 新增）。
+  ///
+  /// 群页已渲染 `AylaGroupTopTabs`，状态栏由群顶栏覆盖着色 ⇒ 详情页的头部不应再让位，
+  /// 否则群顶栏与帖子头部之间会多出一条空白色带。一级帖子列表进来的不受影响。
+  final bool inGroup;
 
   /// 路径参数 :postId（web `Number(postId)`；非数字 ⇒ 空/错态）。
   final String postId;
@@ -761,6 +772,8 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
         onBack: _goBack,
         child: AylaPostDetailChrome(
           onBack: _goBack,
+          // 群内不让状态栏（群顶栏已覆盖着色）
+          topInset: !widget.inGroup,
           // 加载态不渲染 composer（tsx 399–428）；骨架在滚动区内
           children: const <Widget>[AylaPostDetailSkeleton()],
         ),
@@ -775,6 +788,7 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
         onBack: _goBack,
         child: AylaPostDetailChrome(
           onBack: _goBack,
+          topInset: !widget.inGroup,
           body: AylaPostDetailEmpty(
             message: _error ?? '帖子不存在',
             onBack: _goBack,
@@ -795,6 +809,7 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
         children: <Widget>[
           AylaPostDetailChrome(
             onBack: _goBack,
+            topInset: !widget.inGroup,
             editing: _editing,
             scrollController: _scroll,
             onScrollNotification: _onScrollNotification,

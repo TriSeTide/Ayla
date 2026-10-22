@@ -909,8 +909,12 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     _skipRevealOnRestore = true;
     _revealAfterRefresh = false; // web tsx 429
     AylaScrollMemory.save(_restoreKey, _scroll); // web tsx 430
-    // 群帖列表 → 帖子详情：**push**（web tsx 426–431 的 navigate 是 push 语义）。
-    context.push(
+    // ⚠️ **群路由必须用 `go`，不能用 `push`**（2026-10-19 实机红屏）：
+    // `/group/:id/posts/:pid` 属群页 5 条路由之一，与当前页**共用**
+    // `kAylaGroupShellPageKey` ⇒ push 会让同一 Page key 出现两次 ⇒
+    // 抛 `!keyReservation.contains(key)` 断言。
+    // 详情往返由本页 `didUpdateWidget` 的 `postId` 分支承担（保留外壳），不依赖路由栈。
+    context.go(
       '/group/${Uri.encodeComponent(groupId)}/posts/$id',
     );
   }
@@ -919,7 +923,10 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
   Widget build(BuildContext context) {
     // 详情往返：保留外壳（web tsx 382–384 与 477 之后的输入区）。
     final String? postId = widget.postId;
-    if (postId != null) return PostDetailPage(postId: postId);
+    // 群内帖子详情：不让状态栏（群顶栏已覆盖着色，否则两者之间多出一条空白色带）。
+    if (postId != null) {
+      return PostDetailPage(postId: postId, inGroup: true);
+    }
 
     final AylaTextStyles t = AylaTextStyles.of(context);
     // web tsx 386：`displayPosts.length === 0 && (loading || dataOwner !== ownerKey)`

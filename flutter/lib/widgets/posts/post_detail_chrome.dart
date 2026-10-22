@@ -78,7 +78,15 @@ class AylaPostDetailChrome extends StatelessWidget {
     this.onScrollNotification,
     this.children = const <Widget>[],
     this.body,
+    this.topInset = true,
   });
+
+  /// 窄屏头部是否自己让出**顶部状态栏**（默认 true）。
+  ///
+  /// 群内帖子详情（`/group/:id/posts/:pid`）传 `false`：群页已渲染 `AylaGroupTopTabs`，
+  /// 状态栏由群顶栏覆盖着色，这里再让一次会在两者之间多出一条空白色带
+  /// （2026-10-19 用户实拍）。
+  final bool topInset;
 
   /// 头部标题（`tsx:408/448` 恒「帖子」）。
   final String title;
@@ -167,7 +175,7 @@ class AylaPostDetailChrome extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const AylaTopInsetGap(),
+              if (topInset) const AylaTopInsetGap(),
               head,
             ],
           ),

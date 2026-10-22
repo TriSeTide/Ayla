@@ -268,6 +268,8 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
         key: ValueKey<String>(room.id),
         channelId: room.id,
         backPath: '/group/${Uri.encodeComponent(widget.groupId)}/voice',
+        // 群内：状态栏由群顶栏覆盖着色 ⇒ 房内头部不再让位（否则多出一条空白色带）。
+        inGroup: true,
       );
     }
     // 路由给了频道但还没就绪（web tsx 201–203）：骨架 + 「正在加载语音房…」。
@@ -347,8 +349,11 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
                     entry.card,
                 ],
                 revealItems: true,
-                // 进群内语音房：**push**（返回回本页）。
-                onJoin: (String channelId) => context.push(
+                // ⚠️ **群路由必须用 `go`，不能用 `push`**（2026-10-19 实机红屏）：
+                // 群页 5 条路由共用同一个 `kAylaGroupShellPageKey`（为的是切场景不重建整页），
+                // 同一 Page key 被压栈两次 ⇒ 抛 `!keyReservation.contains(key)` 断言。
+                // 群内逐级返回由 `GroupPage` 的 PopScope + 场景历史栈承担，不依赖路由栈。
+                onJoin: (String channelId) => context.go(
                   '/group/${Uri.encodeComponent(widget.groupId)}/voice/'
                   '${Uri.encodeComponent(channelId)}',
                 ),

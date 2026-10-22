@@ -111,7 +111,15 @@ class AylaVoiceRoomBody extends StatefulWidget {
     this.onDeleteChannel,
     this.onSendText,
     this.onSendImage,
+    this.topInset = true,
   });
+
+  /// 头部是否自己让出**顶部状态栏**（默认 true）。
+  ///
+  /// 群内语音（`/group/:id/voice/:cid`）传 `false`：群页已渲染 `AylaGroupTopTabs`，
+  /// 状态栏由群顶栏覆盖着色，房内头部再让一次会在两者之间多出一条空白色带
+  /// （2026-10-19 用户实拍）。
+  final bool topInset;
 
   /// 频道名（head 中央标题）。
   final String channelName;
@@ -445,7 +453,7 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (!wide) const AylaTopInsetGap(),
+          if (!wide && widget.topInset) const AylaTopInsetGap(),
           Row(
             spacing: AylaSpacing.sp3, // gap: var(--sp-3)
             children: children,

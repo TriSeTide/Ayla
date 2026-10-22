@@ -50,7 +50,14 @@ class AylaGameRoomHost extends ConsumerStatefulWidget {
     required this.roomId,
     this.initialRoom,
     this.onExit,
+    this.inGroup = false,
   });
+
+  /// 是否**群内**桌游房（`/group/:id/games`，2026-10-19 新增）。
+  ///
+  /// 群页已渲染 `AylaGroupTopTabs`，状态栏由群顶栏覆盖着色 ⇒ 房内头部不应再让位，
+  /// 否则两者之间会多出一条空白色带。
+  final bool inGroup;
 
   /// 房间 id（路由 `/games/:roomId`）。
   final String roomId;
