@@ -361,6 +361,9 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
     _subgroupPage = null;
     _emojiData.dispose();
     _composeEntry.dispose();
+    // ⚠️ 必须关闭录音器（2026-10-22）：`record` 持有平台音频设备句柄，
+    // 不 close 会在 Android 上泄漏；反复进出群聊 → 句柄耗尽 → 卡顿/闪退。
+    unawaited(_voiceRecorder.close());
     super.dispose();
   }
 

@@ -948,6 +948,11 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
   void dispose() {
     _runtime.removeListener(_onRuntimeChanged);
     _runtime.dispose();
+    // ⚠️ 必须关闭录音器（2026-10-22）：`record` 包持有平台音频设备句柄，
+    // 不 close 会在 Android 上泄漏麦克风/录音器资源。反复进出私聊页 →
+    // 句柄耗尽 → 后续 new AudioRecorder()/start() 抛平台异常，表现为卡顿与闪退。
+    // 注意 close() 是 `Future`，dispose 里不 await（Fire-and-forget，内部已 try/catch）。
+    unawaited(_voiceRecorder.close());
     super.dispose();
   }
 
