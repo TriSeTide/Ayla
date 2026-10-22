@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/tokens.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/base.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/app.css">
+<link rel="stylesheet" href="file:///E:/Elysium-AyerElysia/Elysium/Ayla/web/src/styles/auroraqua.css">
+<style>
+/* 与 Flutter 侧加载**同一批 TTF** ⇒ 字体度量完全一致，差异只剩布局。
+   正文用拉丁字母（Nunito 全覆盖）⇒ 排除 CJK 回退字体差异。 */
+@font-face { font-family: "Nunito"; font-weight: 400; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_400Regular.ttf"); }
+@font-face { font-family: "Nunito"; font-weight: 600; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_600SemiBold.ttf"); }
+@font-face { font-family: "Nunito"; font-weight: 700; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Nunito_700Bold.ttf"); }
+@font-face { font-family: "Space Grotesk"; font-weight: 400; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/SpaceGrotesk_400Regular.ttf"); }
+@font-face { font-family: "Fredoka"; font-weight: 500; src: url("file:///E:/Elysium-AyerElysia/Elysium/Ayla/flutter/assets/fonts/Fredoka_500Medium.ttf"); }
+html, body { margin: 0; padding: 0; background: #ECF0F2; }
+.A { width: 12px; height: 12px; display: inline-block; vertical-align: -2px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div class="message-scroll" id="scroll"><div class="message-column" id="col"></div></div>
+<script>
+const SHORT = 'Hi';
+const LONG = 'This is a fairly long message used to measure the max bubble width so we can check whether the 75 percent cap is applied against the right base box.';
+const QUOTE = 'A quoted message that is quite long too, long enough that it has to be truncated with an ellipsis rather than wrapping.';
+const CASES = [
+  { id: 'peer-short', self: false, text: SHORT },
+  { id: 'peer-long', self: false, text: LONG },
+  { id: 'self-short', self: true, text: 'OK' },
+  { id: 'self-long', self: true, text: LONG },
+  { id: 'peer-long-noact', self: false, text: LONG, noActions: true },
+  { id: 'self-long-noact', self: true, text: LONG, noActions: true },
+  { id: 'peer-quote', self: false, text: 'hm', quote: true },
+  { id: 'elysia-short', self: false, text: 'Here~', elysia: true },
+];
+const halo = '<span class="msg-sender-halo"><span class="avatar-halo"><span class="avatar-core avatar-core-user" style="width:32px;height:32px;font-size:13px">x</span></span></span>';
+function row(c) {
+  const self = !!c.self;
+  let acts = '<button type="button" class="favorite-toggle is-compact"><svg class="A" width="16" height="16"></svg></button>';
+  acts += '<button type="button" class="msg-action-btn"><svg class="A"></svg>引用</button>';
+  if (self) acts += '<button type="button" class="msg-action-btn"><svg class="A"></svg>撤回</button>';
+  const actions = c.noActions ? '' : '<div class="msg-actions">' + acts + '</div>';
+  const quote = c.quote ? '<div class="quote-strip" title="x">' + QUOTE + '</div>' : '';
+  const meta = '<div class="bubble-meta"><span class="bubble-time">刚刚</span></div>';
+  const cls = self ? 'bubble bubble-self' : (c.elysia ? 'bubble bubble-elysia' : 'bubble bubble-other');
+  return '<div class="msg-row ' + (self ? 'self' : 'peer') + '">' + halo +
+    '<div class="msg-body">' +
+      '<div class="msg-bubble-wrap"><div class="' + cls + '">' + quote + c.text + '</div></div>' + meta +
+    '</div>' + actions + '</div>';
+}
+document.getElementById('col').innerHTML = CASES.map(c => '<div data-case="' + c.id + '">' + row(c) + '</div>').join('');
+window.__measure = function () {
+  const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect();
+    return { l: +r.left.toFixed(2), r: +r.right.toFixed(2), w: +r.width.toFixed(2), h: +r.height.toFixed(2) }; };
+  const out = [];
+  for (const c of CASES) {
+    const holder = document.querySelector('[data-case="' + c.id + '"]');
+    const q = (s) => holder.querySelector(s);
+    const act = q('.msg-actions');
+    out.push({
+      id: c.id,
+      row: rect(q('.msg-row')),
+      halo: rect(q('.msg-sender-halo')),
+      body: rect(q('.msg-body')),
+      bubble: rect(q('.bubble')),
+      actions: rect(act),
+      actionsBtnCount: act ? act.children.length : 0,
+      meta: rect(q('.bubble-meta')),
+    });
+  }
+  return out;
+};
+document.fonts.ready.then(() => { document.title = 'ready'; });
+</script>
+</body>
+</html>

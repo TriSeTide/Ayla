@@ -54,6 +54,30 @@
 ///    时收藏键自己按 `message:<msg.id>` 起状态；画布样张显式传 `favoriteState`
 ///    仍走注入档（零改动）。
 ///
+/// ## 与本轮实测的偏差（2026-10-22 对账后登记，勿当成未完成项）
+///
+/// 对账方法：`tool/web_bubble_measure.html` 用 `file://` 加载 web 四份 CSS +
+/// 与 `MessageBubble.tsx` 同构的 DOM，字体换成与 Flutter 侧**同一批 TTF**，
+/// Playwright 读 `getBoundingClientRect()`；Flutter 侧量同构 widget 树。
+/// 期望值存 `tool/web_bubble_expected.json`。四档实测结论：
+///
+/// | 项 | 结果 |
+/// |---|---|
+/// | 短消息气泡宽（peer/elysia，带边框） | **Δ = −0.02px**（44.91 vs 44.89） |
+/// | 无边框档（self） | **Δ = −0.01px**（48.89 vs 48.88） |
+/// | 长消息气泡宽（900/1440 档） | **Δ = 0.00px**（633 / 714） |
+/// | 图片帧比例 | 4:3 与 3:4 均精确保持（见 `bubble_layout_parity_test.dart`）|
+///
+/// 仍有 **1 项已登记的未消除差异**：
+/// 3. **`.msg-actions` 不参与主轴收缩**：web 的工具栏按钮带 `flex-shrink: 1` +
+///    `white-space: normal`，窄屏（375/480）挤不下时会**压窄按钮并让标签折行**
+///    （实测 `.msg-action-btn` 67×26 → 34×62、`.msg-actions` 156 → 108），
+///    气泡因此能占到 84% 上限。Flutter `Row` 子项不收缩 ⇒ 工具栏恒占 132，
+///    窄屏气泡比 web 少 12~24px（宽屏 900/1440 已完全一致，因为不触发挤压）。
+///    两条候选修法均实测**回归更严重**（见 `_MsgActions` 内注释）⇒ 本轮不动；
+///    要真正等价需自写「仅溢出时按 base 收缩」的 flex 布局。
+///    视觉影响：仅窄屏「操作栏展开时」气泡略窄；按钮不折行（反而更易读）。
+///
 /// ## 公开面
 /// `AylaMessageBubble` · 样张 `aylaMessageBubbleSamples()`
 
@@ -619,6 +643,12 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
             ),
           ),
           if (actions != null) const SizedBox(width: AylaSpacing.sp2),
+          // ⚠️ **有意保留「actions 不参与主轴收缩」**（2026-10-22 实测裁决，见文件头
+          // 「与本轮实测的偏差」3）。这里**不能**换成 `Flexible(fit: loose)`：
+          // Flutter 的 `Flexible` 是「**分配**可用空间」，而 CSS `flex-shrink: 1`
+          // 是「**仅在溢出时按 base 比例收缩**」——两者语义不同。实测把它改成
+          // Flexible 后，900 档气泡从 633 掉到 395（宽屏直接把空间分掉一半），
+          // 属于比原问题更严重的回归，故回退。
           if (actions != null) actions,
         ];
         final Widget row = Row(
@@ -998,13 +1028,25 @@ class _BubbleFace extends StatelessWidget {
                 ),
               ),
             // ④ 内容（`.bubble { padding: 10px 14px }`；媒体气泡 `padding: sp1`）
+            //
+            // 🔴 **带边框的两档必须把 1px 边框计入内距**（2026-10-22 对账实测）。
+            // web 是 `box-sizing: border-box`（base.css:7）⇒ `.bubble-other` /
+            // `.bubble-elysia` 的 `border: 1px`（app.css:1124 / 1133）加在 **padding 之外**，
+            // 外框宽 = 文本 + padding(14×2) + border(1×2)。
+            // Flutter 的 `BoxDecoration.border` 画在**尺寸内**（本层 Stack 的
+            // `Positioned.fill` 边框层与内容层同尺寸）⇒ 边框压在内距边缘、不撑大外框
+            // ⇒ 每个带边框气泡比 web 窄 2px、文本比 web 靠外 1px。
+            // 实测（900 档，字体已对齐）：peer-short web 44.91 / Flutter 42.89（−2.02）、
+            // elysia-short web 71.66 / Flutter 69.65（−2.01）；**无边框**的 self 档
+            // web 48.89 / Flutter 48.88（−0.01，仅文本测量差）⇒ 差值来源就是这 1px 边框。
+            // 故带边框档内距取 padding + 1（水平 15 / 垂直 11），与 border-box 同解。
             Padding(
               padding: isMedia
                   ? const EdgeInsets.all(AylaSpacing.sp1)
-                  : const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
+                  : (self
+                      // `.bubble-self` 无 border（app.css:1114–1118）⇒ 保持 10/14
+                      ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+                      : const EdgeInsets.symmetric(horizontal: 15, vertical: 11)),
               child: DefaultTextStyle.merge(
                 style: TextStyle(
                   fontFamily: AylaFonts.body,
@@ -1355,6 +1397,17 @@ class _MsgActions extends StatelessWidget {
             // `.msg-actions { padding-bottom: 2px }`
             padding: const EdgeInsets.only(bottom: 2),
             child: Row(
+              // ⚠️ **遗留差异（已登记，勿盲目"修"）**：web 的 `.msg-actions` 与
+              // 其按钮都有 `flex-shrink: 1`，窄屏放不下时按钮被压窄、标签折行
+              // （375 档实测：`.msg-action-btn` 67×26 → 34×62，`.msg-actions`
+              // 156 → 108），气泡因此能占到 84%。Flutter 的 `Row` 子项**不收缩**
+              // ⇒ 工具栏恒占 132 宽、气泡少 24px。
+              //
+              // 试过的两条修法都**会更糟**，已回退（详见文件头「与本轮实测的偏差」3）：
+              // ① 外层 `Flexible(child: actions)` ⇒ 900 档气泡 633 → 395
+              //    （Flexible 是「分配空间」，不是「溢出才收缩」）；
+              // ② 逐按钮 `Flexible` ⇒ 外层 Row 无界宽，永不触发收缩，纯死代码。
+              // 要真正等价需自写 flex-shrink 布局，超出本轮「布局对齐」范围。
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 _favorite,

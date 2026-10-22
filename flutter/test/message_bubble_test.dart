@@ -177,12 +177,18 @@ void main() {
     expect(halo.online, isTrue);
     expect(find.text('小樱'), findsOneWidget);
 
-    // 气泡：padding 10/14（量文本相对气泡裁剪层的位移）
+    // 气泡：padding 10/14 + **1px 边框计入内距** = 垂直 11 / 水平 15。
+    // web `.bubble { padding: 10px 14px }`（app.css:1106）+ 这是他人消息
+    // `.bubble-other { border: 1px solid var(--glass-border) }`（app.css:1133），
+    // 而 web 全局 `box-sizing: border-box`（base.css:7）⇒ 边框加在 padding **之外**，
+    // 外框 = 文本 + 14×2 + 1×2。Flutter 的 BoxDecoration.border 画在尺寸**内**，
+    // 故内距须补上这 1px，外框才与 web 等宽（2026-10-22 对账实测：
+    // web peer-short 44.91 / 修正前 Flutter 42.89，修正后 44.89）。
     final Rect text = tester.getRect(find.text('晚上一起看直播吗？我这边刚开播。'));
     final ClipRRect bubble = tester.widget<ClipRRect>(find.byType(ClipRRect).first);
     final Rect bubbleRect = tester.getRect(find.byType(ClipRRect).first);
-    expect(text.left - bubbleRect.left, 14, reason: 'padding 左右 14（app.css 1106）');
-    expect(bubbleRect.bottom - text.bottom, 10, reason: 'padding 上下 10（app.css 1106）');
+    expect(text.left - bubbleRect.left, 15, reason: 'padding 左右 14 + border 1（app.css 1106/1133 + base.css:7 border-box）');
+    expect(bubbleRect.bottom - text.bottom, 11, reason: 'padding 上下 10 + border 1');
 
     // 圆角：他人消息 `18 18 18 6`（左下 6）
     final BorderRadius radius = bubble.borderRadius as BorderRadius;

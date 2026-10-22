@@ -409,16 +409,25 @@ class _ResourceImageState extends State<AylaResourceImage> {
           // `Image.network/asset` 等**构造函数**的参数）⇒ 注入 ImageProvider 的场景
           // 必须用 `ResizeImage` 包一层（官方等价物，语义相同）。
           final double previewDpr = MediaQuery.devicePixelRatioOf(context);
-          final ImageProvider previewSized = widget.width == null
-              ? preview
-              : ResizeImage(
-                  preview,
-                  width: (widget.width! * previewDpr).round().clamp(1, 8192),
-                  height: widget.height == null
-                      ? null
-                      : (widget.height! * previewDpr).round().clamp(1, 8192),
-                  allowUpscaling: false,
-                );
+          // 🔴 同上面主链路的 exact 陷阱：`ResizeImage` 的默认 policy 就是 exact
+          // （image_provider.dart:838–851，两个都传 = BoxFit.fill）⇒ **也只传长边**。
+          final ImageProvider previewSized;
+          if (widget.width == null && widget.height == null) {
+            previewSized = preview;
+          } else {
+            final bool useW = widget.height == null ||
+                (widget.width != null && widget.width! >= widget.height!);
+            previewSized = ResizeImage(
+              preview,
+              width: useW && widget.width != null
+                  ? (widget.width! * previewDpr).round().clamp(1, 8192)
+                  : null,
+              height: !useW && widget.height != null
+                  ? (widget.height! * previewDpr).round().clamp(1, 8192)
+                  : null,
+              allowUpscaling: false,
+            );
+          }
           final Widget previewImg = Image(
             image: previewSized,
             key: ValueKey<String>('preview:$_retry'),
@@ -462,13 +471,40 @@ class _ResourceImageState extends State<AylaResourceImage> {
         // 而缩略槽位可能只有 240×180 ⇒ 单张浪费约两个数量级的显存与带宽。
         // 危害集中在滚动/入场：解码在后台 isolate，但**纹理上传/raster 在 UI 线程侧**。
         // 这里按「布局尺寸 × DPR」取整作为解码尺寸 —— 解码尺寸 ≥ 显示尺寸时逐像素一致，**零观感风险**。
+        //
+        // 🔴 **只传一个维度**（2026-10-22 修用户实报「图片被拉伸」）：
+        // `Image.network/file` 的 `cacheWidth` + `cacheHeight` 最终走
+        // `ImageProvider.resizeIfNeeded`（flutter/lib/src/painting/image_provider.dart:1306–1315），
+        // 它**不传 policy** ⇒ 落回 `ResizeImagePolicy.exact`。exact 的文档原话
+        // （同文件 :838–851）：
+        //   "If width and height are both non-null, the output image will have the
+        //    specified width and height **regardless of whether it matches the source
+        //    image's intrinsic aspect ratio**. This case is **similar to BoxFit.fill**."
+        // ⇒ 两个都传会把**解码缓冲**压成显示框的宽高比，出图阶段再 `BoxFit.cover`
+        //   也救不回来（源像素比例已经错）= 「图片被拉伸」的真实机制。
+        // 只传一个维度时 exact 退化为 `fitWidth`/`fitHeight`（同文件 :847–851 明确）：
+        // **保持原始宽高比**，同时仍把另一条边的像素量压到显示尺寸 ⇒ 性能整改不回退。
+        // 选哪一维：取**长边**（限制长边即可决定缩放比；限制短边会让长边仍按原始
+        // 分辨率解码，白花内存）。
         final double dpr = MediaQuery.devicePixelRatioOf(context);
-        final int? decodeW = widget.width == null
-            ? null
-            : (widget.width! * dpr).round().clamp(1, 8192);
-        final int? decodeH = widget.height == null
-            ? null
-            : (widget.height! * dpr).round().clamp(1, 8192);
+        final int? decodeW;
+        final int? decodeH;
+        if (widget.width == null && widget.height == null) {
+          decodeW = null;
+          decodeH = null;
+        } else if (widget.height == null) {
+          decodeW = (widget.width! * dpr).round().clamp(1, 8192);
+          decodeH = null;
+        } else if (widget.width == null) {
+          decodeW = null;
+          decodeH = (widget.height! * dpr).round().clamp(1, 8192);
+        } else if (widget.width! >= widget.height!) {
+          decodeW = (widget.width! * dpr).round().clamp(1, 8192);
+          decodeH = null;
+        } else {
+          decodeW = null;
+          decodeH = (widget.height! * dpr).round().clamp(1, 8192);
+        }
         // 本地漫游缓存命中 → Image.file（不再走网络）；否则 Image.network。
         // key 区分本地/远程，避免同一媒体在两种来源间切换时复用错误的解码缓存。
         final Widget img = _cachedFile != null
