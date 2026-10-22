@@ -93,15 +93,18 @@ class TestUploadValidation:
         )
         assert resp.status_code == 400
 
-    def test_upload_exceeds_max_bytes(self, auth_client):
-        # emoji 未放开上限，超限仍 413（保护未变更类别的契约）
+    def test_emoji_kind_not_capped(self, auth_client):
+        # emoji 已放开上限（2026-10-22），与 web validateImageFile 口径一致：
+        # web 只校验类型与非空、从不校验大小；表情包走的就是这条路径。
+        # 动图（GIF/WebP 动图）普遍 3~10MB，旧的 5MB 上限会让它们建会话即 413。
         client, _ = auth_client(username="up_v2")
         resp = client.post(
             "/api/v1/media/uploads",
-            {"kind": "emoji", "expected_size": 999 * 1024 * 1024, "mime_type": "image/png"},
+            {"kind": "emoji", "expected_size": 999 * 1024 * 1024, "mime_type": "image/gif"},
             format="json",
         )
-        assert resp.status_code == 413
+        assert resp.status_code == 201
+        assert resp.json()["max_bytes"] is None  # None = 该 kind 不设上限
 
     def test_file_kind_still_capped(self, auth_client):
         # file 类别保留 50MB 上限：图片/语音放开不影响其他类别

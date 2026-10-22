@@ -20,6 +20,7 @@ import logging
 import time
 import uuid
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.db import transaction
@@ -618,21 +619,57 @@ def self_generate_thumbnail_from_file(media: MediaObject, fileobj, store) -> Non
 
 # ---------- 访问控制（工程硬约束，步骤文件 5.3） ----------
 
-def parse_avatar_media_id(url: str) -> str | None:
-    """从头像 content URL（/api/v1/media/<media_id>/content）解析 media_id。
+_MEDIA_CONTENT_PATH_PREFIX = "/api/v1/media/"
 
-    非该格式返回 None。头像只接受内部媒体地址（禁止把外部 URL 当头像引用）。
+
+def canonical_asset_media_path(url: str) -> str | None:
+    """把资产类媒体引用归一为站内规范路径 /api/v1/media/<media_id>/content。
+
+    两种输入形态都接受，且返回同一个规范路径：
+    - 相对路径：web 与历史数据的规范形态，也是 DB 中应当保存的形态；
+    - 绝对 URL：Flutter 客户端的 mediaContentUrl 产出
+      （https://<host>/api/v1/media/<id>/content），剥掉 scheme+host 后按路径解析。
+
+    绝对 URL 只取 path：scheme/host 不参与判定，因此即便指向外部域名，被记录
+    下来的也永远是站内相对路径，不会引入外部引用。
+
+    其余形态一律返回 None（非法后缀、裸 media_id、外部地址、带查询串/片段）。
     """
     if not url:
         return None
-    prefix = "/api/v1/media/"
-    if not url.startswith(prefix):
+    raw = url.strip()
+    if not raw:
         return None
-    rest = url[len(prefix):]
+    parsed = urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        # 绝对（或 scheme-relative）URL：严格只认路径，查询串/片段视为非法形态
+        if parsed.query or parsed.fragment:
+            return None
+        path = parsed.path
+    else:
+        if "?" in raw or "#" in raw:
+            return None
+        path = raw
+    if not path.startswith(_MEDIA_CONTENT_PATH_PREFIX):
+        return None
+    rest = path[len(_MEDIA_CONTENT_PATH_PREFIX):]
     media_id, sep, suffix = rest.partition("/")
     if not sep or not media_id or suffix != "content":
         return None
-    return media_id
+    return f"{_MEDIA_CONTENT_PATH_PREFIX}{media_id}/content"
+
+
+def parse_avatar_media_id(url: str) -> str | None:
+    """从资产 content URL 解析 media_id（用户头像 / 群头像 / 直播间封面共用）。
+
+    /api/v1/media/<media_id>/content 与绝对 URL 形态都接受（见
+    [canonical_asset_media_path]）；其余返回 None —— 资产字段只接受内部媒体
+    地址，禁止把外部 URL 当头像/封面引用。
+    """
+    canonical = canonical_asset_media_path(url)
+    if canonical is None:
+        return None
+    return canonical[len(_MEDIA_CONTENT_PATH_PREFIX):].partition("/")[0]
 
 
 def validate_avatar_url(user, url: str) -> str | None:
