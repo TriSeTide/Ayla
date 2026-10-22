@@ -576,6 +576,19 @@ class AylaSocialStore extends ChangeNotifier {
       // 其余 kind 的条目 id 语义不同（friendship 走 `user.id`），不在此处兜底。
       return;
     }
+    // ⚠️⚠️ **对账自身也必须置 _merging**（2026-10-22 卡死根因，Stack overflow）：
+    //
+    // 本方法内部会 `_patch` → `notifyListeners()`，而 AylaSocialController 的
+    // `_onStoreChanged` 会把变更回灌给订阅者页面 → 页面更新 chatState →
+    // `AylaSocialTracking.onChat` → **再次** `reconcileCached` ⇒ 无限递归，
+    // 最终 Stack overflow 把 UI 线程打死（窗口「未响应」）。
+    //
+    // 此前只有「分页取页回流」那段（:433-461）设了 _merging，**对账路径漏了**
+    // （web 的 merging 是模块级布尔 + 在更外层设置，所以那边天然覆盖）。
+    // 这里用 try/finally 包住，保证异常时也能复位。
+    final bool prevMerging = _merging;
+    _merging = true;
+    try {
     final Map<String, Object> before = <String, Object>{
       for (final Object item in old) itemKey(item): item,
     };
@@ -625,6 +638,11 @@ class AylaSocialStore extends ChangeNotifier {
           mutationRevision: record.mutationRevision + 1,
         ),
       );
+    }
+    } finally {
+      // 复位到调用前的状态（而不是硬置 false）：若外层本来就在 merging 里，
+      // 提前结束会破坏外层的护栏语义。
+      _merging = prevMerging;
     }
   }
 

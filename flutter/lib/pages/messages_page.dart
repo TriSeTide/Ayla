@@ -213,13 +213,41 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     return controller;
   }
 
+  /// 本次回灌是否正在进行（重入保护，见 [_onPagerChanged] 说明）。
+  bool _forwardingToChat = false;
+
+  /// 上一次回灌进 chatState 的会话快照（id → 摘要，用于 identical 去重）。
+  Map<String, AylaConversationSummary> _forwarded =
+      <String, AylaConversationSummary>{};
+
   void _onPagerChanged() {
     if (!mounted) return;
     // 会话摘要进 chat store（web `stores/social.ts:172` 的 reconcile）：私聊面板读的就是这份缓存。
-    final AylaChatState chat = ref.read(chatStateProvider);
-    for (final AylaConversationSummary c
-        in _conversations?.items ?? const <AylaConversationSummary>[]) {
-      chat.upsertConversation(c);
+    //
+    // ⚠️⚠️ **必须逐项去重 + 重入保护**（2026-10-22 卡死根因，Stack overflow）：
+    // `upsertConversation` 每次都会 `notifyListeners()`，而 chatState 的监听者
+    // `AylaSocialTracking.onChat` 会调 `store.reconcileCached` → `_patch` →
+    // store.notifyListeners → 本 controller 再触发本方法 ⇒ **无限回环**，
+    // 最终把 UI 线程打死（窗口标题「(未响应)」）。
+    //
+    // 双保险：1) 重入标志；2) identical 去重（只回灌变化的会话，避免
+    // 「全量重新 upsert → 必然全量 notify」的放大效应）。
+    if (_forwardingToChat) return;
+    _forwardingToChat = true;
+    try {
+      final AylaChatState chat = ref.read(chatStateProvider);
+      final List<AylaConversationSummary> items =
+          _conversations?.items ?? const <AylaConversationSummary>[];
+      final Map<String, AylaConversationSummary> prev = _forwarded;
+      for (final AylaConversationSummary c in items) {
+        if (identical(prev[c.id], c)) continue;
+        chat.upsertConversation(c);
+      }
+      _forwarded = <String, AylaConversationSummary>{
+        for (final AylaConversationSummary c in items) c.id: c,
+      };
+    } finally {
+      _forwardingToChat = false;
     }
     setState(() {});
   }
