@@ -378,6 +378,25 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     }
   }
 
+  /// 返回键（web `LiveStudioPage.tsx:145` 的 `onBack={() => navigate(-1)}`）。
+  ///
+  /// ⚠️ **不得裸 `context.pop()`**（2026-10 收口）：`navigate(-1)` 在没有历史时是 no-op，
+  /// 而 `GoRouter.pop()` 在栈底会抛 `GoError: There is nothing to pop`
+  ///（`go_router-14.8.1/lib/src/delegate.dart:98–104`）—— 而本回调跑在按钮/手势里，
+  /// 异常被吞掉 ⇒ 键看起来完全没反应。开播台可从「创建直播间」直接落进来
+  /// （`_createChannel` 末尾 `context.replace('/live/start/${created.id}')`，**替换**当前路由
+  /// ⇒ 栈只有一层），也可以从直播大厅 push 进来 ⇒ 两种栈深都要能正确返回。
+  ///
+  /// 栈底兜底 `/live`（直播大厅）：与同域 `live_room_page.dart:237 / :289–291` 一字不差
+  /// （观看态返回键的同一口径），本页是直播域的页面，不回一级主页。
+  void _back() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/live');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_validId) return const SizedBox.shrink();
@@ -455,7 +474,8 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
               ),
       ),
       onSelect: _goTo,
-      onBack: () => context.pop(),
+      // 返回：能回退就 pop，栈底回直播大厅（见 [_back]）。
+      onBack: _back,
       onDeleteChannel: isOwner ? (String id) => unawaited(_deleteChannel(id)) : null,
       onCreateNewChannel: isOwner ? () => unawaited(_createChannel()) : null,
       deletingChannelId: _deletingId,
@@ -532,7 +552,7 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     );
 
     return narrow
-        ? AylaFullScreenSwipeBack(onBack: () => context.pop(), child: content)
+        ? AylaFullScreenSwipeBack(onBack: _back, child: content)
         : content;
   }
 }

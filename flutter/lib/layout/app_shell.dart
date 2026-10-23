@@ -40,6 +40,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../pages/group_page.dart' show AylaGroupBackHandler, aylaGroupBackHandler;
 import '../pages/live_support.dart';
 import '../pages/quick_messages_support.dart' show AylaQuickMessagesHost;
 import '../router/shell_config.dart';
@@ -63,6 +64,7 @@ import '../widgets/shell/bottom_tabs.dart';
 import '../widgets/shell/fab.dart';
 import '../widgets/shell/session_activity.dart';
 import '../widgets/shell/top_nav.dart';
+import 'app_back.dart';
 import 'create_sheet_forms.dart';
 
 
@@ -125,6 +127,31 @@ class _AppShellState extends ConsumerState<AppShell> {
         unawaited(_checkForUpdates());
       case AylaTopNavMenuAction.logout:
         _logout();
+    }
+  }
+
+  /// 窄屏顶栏返回键（search / favorites 两档共用）—— web `NarrowTopBar.tsx:69–78` 的
+  /// `onClick={() => navigate(-1)}` 的等价物。
+  ///
+  /// ## 为什么不能裸 `context.pop()`（2026-10 用户实报「收藏页左上角返回键无法点击」）
+  /// web 的 `navigate(-1)` 是**浏览器历史回退**：没有历史时它是 no-op，界面上永远不出错。
+  /// Flutter 侧的等价物必须显式判栈：`GoRouter.of(context).pop()` 在栈底会
+  /// **抛 `GoError: There is nothing to pop`**（`go_router-14.8.1/lib/src/delegate.dart:98–104`），
+  /// 而本回调是在按钮的手势里调用的 ⇒ 异常被吞掉、界面**完全没反应**。
+  ///
+  /// 触发路径就是「更多」菜单：`_onMenuSelected` 的收藏档走 `context.go('/favorites')`
+  /// （**替换**当前路由，web `NarrowTopBar.tsx:116` 的 `navigate("/favorites")` 同理 ——
+  /// 从一级页进收藏页时栈只有一层）⇒ 一点返回就抛。
+  ///
+  /// ## 口径 = 库内既有的「能回退就回退，栈底回一级主页」
+  /// 与 `favorites_page.dart:602` / `search_page.dart:1338` / `profile_page.dart:614`
+  /// 三处一字不差（宽屏目录返回键、搜索页返回、个人页返回）。`/group` 是窄屏一级主页
+  /// （`shell_config.dart:182` 的 `aylaIsNarrowTopBarRoute` 首个路径）。
+  void _narrowBack() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/group');
     }
   }
 
@@ -235,13 +262,16 @@ class _AppShellState extends ConsumerState<AppShell> {
             context.push('/search?q=${Uri.encodeComponent(q)}'),
         onSearchCleared: () => setState(() => _searchQuery = ''),
         onMenuSelected: _onMenuSelected,
-        onBack: () => context.pop(),
+        onBack: _narrowBack,
       );
     } else if (isNarrow && narrowVariant == 'favorites') {
       topBar = AylaTopNav(
         variant: AylaTopNavVariant.favorites,
         onMenuSelected: _onMenuSelected,
-        onBack: () => context.pop(),
+        // ⚠️ **不得裸 `context.pop()`**：从「更多」菜单 `go('/favorites')` 进来时栈只有一层，
+        // 裸 pop 抛 `GoError: There is nothing to pop` 且被手势吞掉 ⇒ 键看起来没反应
+        //（2026-10 用户实报）。判栈逻辑统一在 [_narrowBack]。
+        onBack: _narrowBack,
       );
     } else if (isNarrow && narrowVariant == 'default') {
       topBar = AylaTopNav(
@@ -307,7 +337,31 @@ class _AppShellState extends ConsumerState<AppShell> {
           onSelect: (AylaPrimaryModule m) => context.go(m.path),
         );
 
-    return Stack(
+    // ---- 系统返回键（2026-10-20）----
+    //
+    // 挂在这里而不是 main.dart 的 MaterialApp.builder：`BackButtonListener` 内部是
+    // `Router.of(context)`，builder 的 context 在 Router **之外** ⇒ 会抛
+    // `Router operation requested with a context that does not include a Router`。
+    // AppShell 是 `ShellRoute.builder` 的返回，天然是 Router 的后代（实测）。
+    //
+    // 机制链、修复前的实测读数（任何页面按返回都直接 SystemNavigator.pop 退出）
+    // 与本件的分档判据全部写在 `layout/app_back.dart` 的文件头。
+    return AylaBackButtonHost(
+      pathname: pathname,
+      canPop: context.canPop(),
+      onGoHome: () => context.go(kAylaHomePath),
+      // 群页的三级兜底必须由活着的那一个 GroupPage State 执行（场景历史栈是它的私有
+      // 状态）；它挂载时把处理器登记到模块级 [aylaGroupBackHandler]。
+      onGroupBack: () async {
+        final AylaGroupBackHandler? handler = aylaGroupBackHandler;
+        if (handler == null) {
+          // 群页尚未挂好（切页瞬间）⇒ 保守回群列表，绝不交回系统（会退出 App）。
+          context.go(kAylaHomePath);
+          return true;
+        }
+        return handler();
+      },
+      child: Stack(
       children: <Widget>[
         Column(
           children: <Widget>[
@@ -460,6 +514,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                 ref.read(shellUiProvider.notifier).setQuickMessagesOpen(false),
           ),
       ],
+      ),
     );
   }
 }

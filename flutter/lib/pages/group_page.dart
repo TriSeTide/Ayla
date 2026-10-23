@@ -284,6 +284,8 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _entered = true);
     });
+    // 返回键接管登记（见文件末 [aylaGroupBackHandler] 的机制说明）。
+    aylaGroupBackHandler = _handleSystemBack;
   }
 
   @override
@@ -417,6 +419,16 @@ class _GroupPageState extends ConsumerState<GroupPage> {
 
   @override
   void dispose() {
+    // 注销本页登记。
+    //
+    // 为什么不能做「引用守卫」（`identical(handler, _handleSystemBack)` 再清）：
+    // 每次 `_handleSystemBack` 求值都会产生一个**新的闭包实例**，`identical` 永远为假
+    // ⇒ 那样写等于永不注销。这里用「只要还有登记就清空」—— 正确性由路由保证：
+    // 5 条群路由共用 `kAylaGroupShellPageKey`（`router/app_router.dart:91`），
+    // Navigator 复用同一条 route ⇒ 同一时刻**最多一个** GroupPage State，
+    // 且新页的 initState 总在旧页 dispose **之前**跑不到（切群是同实例 didUpdateWidget，
+    // 不重建 State）。⇒ 不存在「旧页清掉新页登记」的窗口。
+    if (aylaGroupBackHandler != null) aylaGroupBackHandler = null;
     _leaveTimer?.cancel();
     _resetTimer?.cancel();
     _dragResetTimer?.cancel();
@@ -548,6 +560,29 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     ref.read(groupStateProvider).setActiveScene(prev);
     final String id = Uri.encodeComponent(widget.groupId);
     context.go(prev == AylaGroupScene.chat ? '/group/$id' : '/group/$id/${prev.name}');
+    return true;
+  }
+
+  /// 系统返回键的**权威处理**（由 `layout/app_back.dart` 的 AylaBackButtonHost 调用）。
+  ///
+  /// 返回 **true = 本次已处理**（不再落到系统 `SystemNavigator.pop`）。
+  ///
+  /// 三级兜底与 [build] 里 PopScope 的 `onPopInvokedWithResult` **同一套优先级**
+  /// （那边因为机制原因在真机上收不到返回键，见文件末 [aylaGroupBackHandler]）：
+  /// ① 本页有场景历史 ⇒ 回上一场景；
+  /// ② 否则若路由栈有上一页 ⇒ pop 回上一页；
+  /// ③ 都没有（冷启动 deep-link 直达某群）⇒ 回群列表 `/group`。
+  ///
+  /// **绝不返回 false** —— 那是「交回系统」，而系统在栈底会把 App 关掉，
+  /// 正是用户实报的「手机返回键直接退出应用」。
+  Future<bool> _handleSystemBack() async {
+    if (!mounted) return true;
+    if (_popScene()) return true; // ①
+    if (context.canPop()) {
+      context.pop(); // ②
+      return true;
+    }
+    context.go('/group'); // ③
     return true;
   }
 
@@ -1457,3 +1492,32 @@ class _AylaSceneFadeState extends State<AylaSceneFade>
     );
   }
 }
+
+
+// ======================= 返回键接管（2026-10-20）=======================
+
+/// 群页对返回键的**注册表**（唯一 owner = 当前挂载的 GroupPage）。
+///
+/// ## 为什么需要它
+/// `GroupPage` 的三级兜底写在 `PopScope(canPop: false, ...)` 里（见 build 末尾），
+/// 但 2026-10-20 实测证明**那个 PopScope 在真机上从未触发过**：
+/// go_router 的 `backButtonDispatcher` 回调只走**顶层** Navigator 的 `maybePop()`
+/// （`go_router-14.8.1/lib/src/delegate.dart:57–77`），而群页 PopScope 挂在
+/// **shell 内层** Navigator 的 route 上 ⇒ 顶层 `canPop()` 为 false 时直接返回 false，
+/// 根本进不到内层 ⇒ `onPopInvokedWithResult` 一次都不执行，系统随后
+/// `SystemNavigator.pop()` 把 App 关掉。
+///
+/// ⇒ 返回键改由 `layout/app_back.dart` 的 AylaBackButtonHost 在 Router 层接住；
+/// 它需要「群页场景栈回退」这个动作，而该动作必须由**活着的那一个 GroupPage State**
+/// 提供（场景历史栈 `_sceneHistory` 与 groupId 都是它的私有状态）。
+/// 本文件级的注册表就是这条单向通道：GroupPage 挂载时登记、卸载时注销。
+///
+/// 与 web 的关系：web 没有这一层（浏览器返回键 = 历史回退，`GroupPage.tsx:286–292`
+/// 的 `navigate` 天然产生历史）。这是 Flutter 侧**必须自己补**的等价物。
+typedef AylaGroupBackHandler = Future<bool> Function();
+
+/// 当前挂载的群页回退处理器（null = 不在群页）。
+///
+/// ⚠️ 只能是**单实例**：路由保证同一时刻最多一个 GroupPage（5 条群路由共用
+/// `kAylaGroupShellPageKey`，见 `router/app_router.dart:91`）。
+AylaGroupBackHandler? aylaGroupBackHandler;

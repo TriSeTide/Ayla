@@ -16,6 +16,7 @@ import '../../core/media/media_signer.dart';
 import '../../theme/glass.dart';
 import '../../theme/svg_path.dart';
 import '../../theme/tokens.dart';
+import 'fit_content.dart' show AylaInlineNaturalSize;
 import 'loading.dart';
 
 // ======================= AylaSignedVideo =======================
@@ -483,16 +484,41 @@ class _AylaPullToRefreshState extends State<AylaPullToRefresh>
         children: <Widget>[
           // 内容（在流内，承担容器尺寸；随下拉位移；`.pull-refresh-content`）。
           //
-          // `Align(widthFactor: null, heightFactor: 1.0)` = 块级子元素的 Flutter 等价：
-          // **宽度撑满父可用宽**（内容比容器窄时左对齐，同 block）、**高度由内容决定**。
-          // 两种情况都安全：宽度无界 ⇒ `RenderPositionedBox` 自动退化为内容宽；
-          // 高度无界（滚动视口内）⇒ 高度取内容自然高，永不落到 `constraints.biggest`。
+          // ## 宽度语义（2026-10-20 订正 —— 上一版注释写错了）
+          //
+          // ⚠️ **订正**：上一版此处写「`Align(widthFactor: null, heightFactor: 1.0)` =
+          // 块级子元素的 Flutter 等价：**宽度撑满父可用宽**」—— **实测不成立**。
+          // 源码依据：`Align` → `RenderPositionedBox._layoutChild` 只把约束**透传并放宽**
+          // 给子级（`child!.layout(constraints.loosen(), parentUsesSize: true)`），
+          // 自身尺寸走 `constraints.constrain(Size(
+          //   shrinkWrapWidth ? child.width * widthFactor : double.infinity, …))`，
+          // 而 `shrinkWrapWidth = _widthFactor != null || constraints.maxWidth == Infinity`
+          // （`flutter/lib/src/rendering/shifted_box.dart:461–473`）。
+          // ⇒ 父宽**有界**且 `widthFactor: null` 时，**Align 自身**撑满父宽，但子级拿到的
+          // 是 `loosen()`（`minWidth: 0`）⇒ 内容若不自撑就**只占内容宽并贴左**。
+          // 真发现场（400 宽视口 / 群内帖子空态）：占位壳宽 245.8、标题中心 x=138.875，
+          // 而屏幕中心是 200 —— 用户实报「群内无帖子左右不居中」。
+          // web 无此问题：`.pull-refresh-content { position: relative }`
+          // （app.css:4015–4017）是**块级 div**，`width: auto` 在块级格式化上下文里吃掉
+          // 父宽（CSS 2.1 §10.3.3），子级拿到的不是 `loosen()`。
+          //
+          // ⇒ 正确的 Flutter 等价 = `AylaInlineNaturalSize`
+          // （`widgets/base/fit_content.dart`，即 CSS 块级 `width:auto` / `flex:1` 的两趟语义）：
+          //   · 宽度**有界** ⇒ **tight** 宽 = `constraints.maxWidth`（块级 fill-available）；
+          //   · 宽度**无界**（横向滚动容器内）⇒ 用无界主轴布局一次、取子级自然宽
+          //     （= CSS intrinsic 趟的 max-content；不会把 `infinity` 传给子级）。
+          //
+          // 外层 `Align(heightFactor: 1.0)` **保留**：它给出「高度由内容决定」的语义
+          // （`shrinkWrapHeight = heightFactor != null` ⇒ 高度取子级自然高，绝不落
+          // `constraints.biggest`）—— 这是 2026-09-29 P0（滚动视口内 `size.isFinite`
+          // 断言 ⇒ 六个目录页内容区全空）的修复，**不可回退**。
           Align(
             alignment: Alignment.topLeft,
             heightFactor: 1.0,
             child: Transform.translate(
               offset: Offset(0, _offset),
-              child: widget.child,
+              // 块级宽度语义（有界撑满 / 无界取自然宽）；高度方向原样透传约束。
+              child: AylaInlineNaturalSize(child: widget.child),
             ),
           ),
           // 指示器（绝对定位覆盖层，不参与尺寸；随下拉滑入；idle 时 opacity 0）
