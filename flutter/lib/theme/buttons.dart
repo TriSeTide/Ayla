@@ -662,6 +662,7 @@ class AylaToolButton extends StatefulWidget {
     this.onPressed,
     this.danger = false,
     this.semanticLabel,
+    this.width,
   });
 
   final Widget icon;
@@ -671,6 +672,14 @@ class AylaToolButton extends StatefulWidget {
   final bool danger;
 
   final String? semanticLabel;
+
+  /// 宽度覆盖（null = 基样式 `width: 40px`）。
+  ///
+  /// 事实源：`auroraqua.css:456–473` 的 `@media (max-width: 900px)` ——
+  /// `.composer-tools-narrow > .composer-tool-btn` 被改成
+  /// **`width: 100%`（占满所在 grid 列）、`min-width: 0`、`height: 40px`**。
+  /// ⇒ 窄屏工具行是「等分列」而不是固定的 40px 圆钮，必须由调用方把列宽算好传进来。
+  final double? width;
 
   @override
   State<AylaToolButton> createState() => _AylaToolButtonState();
@@ -705,7 +714,8 @@ class _AylaToolButtonState extends State<AylaToolButton> {
       // 声明同特异性，但它后加载 ⇒ 实际生效值）→ [AylaDurations.button] + [AylaCurves.auroraqua]。
       duration: AylaDurations.button,
       curve: AylaCurves.auroraqua,
-      width: 40,
+      // `width: 40px` 基样式（app.css:2110）；窄屏等分档由 [width] 覆写为列宽。
+      width: widget.width ?? 40,
       height: 40,
       decoration: BoxDecoration(
         color: _dimDisabled(background, _enabled),

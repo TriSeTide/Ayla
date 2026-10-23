@@ -13,7 +13,7 @@
 /// | 工具键 | `.composer-tool-btn`：40×40 / **radius 12**（auroraqua 105–112 覆写 pill）/ `--glass-bg` + 1px 边 + compact 阴影 + blur8；hover → 边 `--glow-500` + `--glow-shadow` → 复用 [AylaToolButton] |
 /// | 编辑器 | `.field.composer-input.composer-editor`：min-h 40 / max-h 140 / padding 8/12 / line-height 22（2131–2165） |
 /// | 发送键 | `.btn.btn-primary.composer-send`（宽屏带「发送」，窄屏只图标）（2166–2168） |
-/// | 窄屏工具行 | `.composer-tools-narrow`：等宽占满整行（图片/语音/表情/文件）（2171–2185） |
+/// | 窄屏工具行 | `.composer-tools-narrow`：**≤900px 起是等分 grid**（`grid-auto-columns: minmax(0,1fr)` + `gap sp2` + `padding 0`，按钮 `width:100%`/`height:40`）—— 列数 = 实际按钮数：群聊 4（+表情）、私聊 3。基样式 `justify-content: space-between; padding: 0 sp1`（app.css 2171–2181）在 ≤900px 被 grid 完全接管（auroraqua.css 456–473） |
 /// | 录音态 | `.voice-recording-hint`（红点 10 呼吸 + 「正在录音 m:ss」）+ `.composer-voice-stop`（destructive 档）/`.composer-voice-cancel`（2431–2483） |
 /// | @ / 表情面板 | `MentionPicker`（anchor = 编辑器）/ `EmojiPackPanel`（宽屏贴 composer 上方、窄屏向下展开） |
 ///
@@ -1120,13 +1120,74 @@ class _AylaMessageInputState extends State<AylaMessageInput> {
         ],
       );
     }
-    // `.composer-tools-narrow { justify-content: space-between; padding: 0 sp1 }`
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AylaSpacing.sp1),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: buttons,
-      ),
+    // ---- 窄屏工具行：**等分列**（web `@media (max-width: 900px)` 的 grid）----
+    //
+    // 事实源 `auroraqua.css:456–473`（选择器 `.composer-tools-narrow`，块注释原文
+    // 「One column per actual tool: four in groups, three in private chat.」）：
+    // ```css
+    // @media (max-width: 900px) {
+    //   .composer-tools-narrow, .composer-row > .composer-tools {
+    //     display: grid;
+    //     grid-auto-flow: column;
+    //     grid-auto-columns: minmax(0, 1fr);   /* ← 每列等宽、可收缩 */
+    //     gap: var(--sp-2);                    /* ← 8 */
+    //     padding: 0;                          /* ← 压掉基样式 sp1 */
+    //   }
+    //   .composer-tools-narrow > .composer-tool-btn, … {
+    //     width: 100%;                          /* ← 按钮占满所在列 */
+    //     min-width: 0;
+    //     height: 40px;
+    //   }
+    // }
+    // ```
+    //
+    // ⚠️ **笔数不写死**：注释明写「四个（群）/ 三个（私聊）」—— 群聊有表情键、私聊没有
+    // （`tsx:559–571` 的 `isGroup &&` 判据已由 [showEmojiButton] 表达）⇒ 列数 = 实际按钮数，
+    // 与 web 的 `grid-auto-flow: column` 同一语义。
+    //
+    // ⚠️ **不是 `sp1` 内距 + `spaceBetween`**（改前实现）：那会让 40px 固定钮在宽窄之间
+    // 撑出巨缝（实测 375 档 gap 61 / 900 档 gap 236），与 web 的「等分铺满」完全不同。
+    //
+    // 列宽公式（CSS grid `minmax(0,1fr)` 的直接等价）：
+    //   usable = 工具行可用宽 − gap × (n−1)
+    //   col    = usable / n
+    // 用 [LayoutBuilder] 取真实可用宽（外层 `.composer` 已给左右 sp3 内距，
+    // 与 web 窄屏 `.composer { padding: sp2 sp3 sp3 }`（app.css:3206–3209）一致）。
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints c) {
+        final int n = buttons.length;
+        // 可用宽无界（极端宿主）⇒ 退回固定 40，不让 `infinity` 传进按钮。
+        if (!c.maxWidth.isFinite || n == 0) {
+          return Row(mainAxisSize: MainAxisSize.min, children: buttons);
+        }
+        final double usable =
+            c.maxWidth - AylaSpacing.sp2 * (n - 1);
+        final double col = usable <= 0 ? 0 : usable / n;
+        return Row(
+          children: <Widget>[
+            for (int i = 0; i < n; i++) ...<Widget>[
+              if (i > 0) const SizedBox(width: AylaSpacing.sp2), // gap: var(--sp-2)
+              // `width: 100%` 等价：列宽 tight；高度恒 40（web 同）。
+              SizedBox(width: col, child: _withToolWidth(buttons[i], col)),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  /// 把 [AylaToolButton] 的宽度改成等分列宽（web `width: 100%`）。
+  ///
+  /// 只在窄屏等分档用；非 [AylaToolButton]（理论上不会出现）原样返回。
+  Widget _withToolWidth(Widget button, double width) {
+    if (button is! AylaToolButton) return button;
+    return AylaToolButton(
+      key: button.key,
+      icon: button.icon,
+      onPressed: button.onPressed,
+      danger: button.danger,
+      semanticLabel: button.semanticLabel,
+      width: width,
     );
   }
 
@@ -1389,8 +1450,12 @@ Widget aylaMessageInputSamples() {
           ),
         ),
       ),
+      // 窄屏工具行**两档并列**（2026-10-24 用户实报「要像 web 那样均匀分布」）：
+      // 群聊 4 键（含表情）/ 私聊 3 键（无表情）—— web 块注释原文
+      // 「One column per actual tool: four in groups, three in private chat.」
+      // （auroraqua.css:456–473）。两格都按 375 宽渲染，可直接看出「等分铺满」。
       cell(
-        '窄屏（工具键在输入框下方一行，space-between）',
+        '窄屏 · 群聊 4 键（图片/语音/表情/文件）—— 等分铺满，gap 8，左右贴 12',
         Align(
           alignment: Alignment.topLeft,
           widthFactor: 1,
@@ -1399,11 +1464,26 @@ Widget aylaMessageInputSamples() {
             child: AylaMessageInput(
               onSubmit: (_) {},
               narrow: true,
-              draftKey: 'preview-narrow',
+              draftKey: 'preview-narrow-group',
               groupId: 'g1',
               showEmojiButton: true,
               emojiPanel: const SizedBox.shrink(),
               members: <AylaConversationMember>[_previewMember('u1', '小樱')],
+            ),
+          ),
+        ),
+      ),
+      cell(
+        '窄屏 · 私聊 3 键（无表情包键）—— 列数随实际按钮数变，仍铺满',
+        Align(
+          alignment: Alignment.topLeft,
+          widthFactor: 1,
+          child: SizedBox(
+            width: 375,
+            child: AylaMessageInput(
+              onSubmit: (_) {},
+              narrow: true,
+              draftKey: 'preview-narrow-private',
             ),
           ),
         ),
