@@ -51,6 +51,10 @@ app.*.map.json
 **/*.o
 **/*.a
 **/*.so
+# 第三方 fork 的 Gradle 本地工程目录（`android/build` 只含 reports/problems，
+# 是 AGP 的临时诊断产物；根 .gitignore 的 `/build/` 只锚定仓库根，
+# `dist/` 也不覆盖这里 ⇒ 曾长期以未跟踪状态挂在 `git status` 里）。
+**/third_party/**/android/build/
 # Widget Preview related
 .widget_preview/
 
