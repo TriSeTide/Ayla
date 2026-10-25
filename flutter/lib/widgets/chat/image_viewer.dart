@@ -1037,6 +1037,10 @@ class _ViewerVideoState extends State<_ViewerVideo> {
         mediaId: widget.media.mediaId,
         controls: true, // 查看器显示控制条
         ariaLabel: '视频',
+        // **用户裁决 2026-10-23**：视频「点击播放才存」。
+        // 走到这里 = 用户已点开大图、播放器正在创建 ⇒ 这就是「点击播放」的时刻，
+        // 此时才落盘视频本体（气泡内 _VideoFrameState 已不再自动落盘）。
+        cacheable: true,
       ),
     );
   }
@@ -1319,6 +1323,17 @@ class _AylaViewerImageState extends State<AylaViewerImage> {
       _expired = false;
     });
     try {
+      // ① 只认**原图**（2026-10-23 用户改版）。
+      //
+      //    用户原话：「看到了图片是保存缩略图，**只有点开图片后**才取代刚保存的
+      //    缩略图保存原图」。⇒ 查看器正是「点开」的那一刻：
+      //    - 有原图命中 ⇒ 直接用；
+      //    - **只有缩略图命中 ⇒ 不能停在这里**（那还是那张糊的小图），
+      //      要继续走签名取原图，成功后用原图**取代**缩略图（[fetchAndStore]
+      //      会写到 `<id>.<ext>`，与 `<id>.thumb.<ext>` 互不覆盖）。
+      //
+      //    ⚠️ **不要**用 `lookupForDisplay`：那会在只有 thumb 时直接返回 thumb，
+      //    用户点开大图却还是缩略图 —— 正是本轮要修的语义。
       final File? cached = await AylaMediaCache.instance.lookup(
         widget.mediaId,
         kind: AylaMediaKind.image,
@@ -1332,14 +1347,19 @@ class _AylaViewerImageState extends State<AylaViewerImage> {
           await MediaSigner.instance.sign(widget.mediaId);
       if (!mounted) return;
       setState(() => _url = signed.url);
-      unawaited(
-        AylaMediaCache.instance
-            .fetchAndStore(
-              mediaId: widget.mediaId,
-              kind: AylaMediaKind.image,
-            )
-            .catchError((Object _) => null),
-      );
+      // ② 点开大图 ⇒ 存原图（用户 2026-10-23 明确要求）。
+      //    阶段 1（原图已删）时签名给的本来就是 thumb URL ⇒ 按 original 落盘会被
+      //    拒（云端没有原图，不冒充），这里直接跳过省一次无效判断。
+      if (!signed.originalExpired) {
+        unawaited(
+          AylaMediaCache.instance
+              .fetchAndStore(
+                mediaId: widget.mediaId,
+                kind: AylaMediaKind.image,
+              )
+              .catchError((Object _) => null),
+        );
+      }
     } on MediaExpiredError {
       if (!mounted) return;
       setState(() => _expired = true);

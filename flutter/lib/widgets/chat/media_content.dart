@@ -580,6 +580,11 @@ class _ImageMediaState extends State<_ImageMedia> {
                     variant: useThumb ? MediaVariant.thumb : null,
                     expiredBadge: !useThumb,
                     fallback: const AylaSkeleton(),
+                    // 用户裁决 2026-10-23：**表情消息**（isEmoji）的媒体是
+                    // **永久资产 A2**（表情包，MinIO 永不删）=> 不落本地缓存。
+                    // 聊天里的普通图片走 E1（7/30 天过期）=> 保持缓存。
+                    // 同一组件两个分支语义相反，别一刀切。
+                    cacheable: !widget.isEmoji,
                   ),
                 ),
               ),
@@ -733,18 +738,21 @@ class _VideoFrameState extends State<_VideoFrame> {
         _videoSrc = result.url;
         _failed = false;
       });
-      // ② 加载即存（D4）：静默落盘，失败不影响播放。阶段1（缩略图）不缓存。
-      if (!result.originalExpired) {
-        unawaited(
-          AylaMediaCache.instance
-              .fetchAndStore(
-                mediaId: media.mediaId,
-                kind: AylaMediaKind.video,
-                mimeType: media.mimeType,
-              )
-              .catchError((Object _) => null),
-        );
-      }
+      // ② **不落盘**（用户裁决 2026-10-23：视频改成「点击播放才存」）。
+      //
+      //    用户原话：「视频改成『点击播放才存』，但视频首帧缩略图是看见就存」。
+      //
+      //    旧代码（D4「加载即存」）在**签完 original 就**把整片视频下载落盘 ——
+      //    只要消息进视口就吃掉几十 MB 带宽与磁盘，而用户从没点过播放。
+      //
+      //    本方法只在「没有首帧海报」时被调用（见 [_resolveSource]），目的是
+      //    **给气泡取一帧画面**，不是播放 ⇒ 不该落盘。
+      //
+      //    真正的落盘时机：用户点开查看器播放（`image_viewer.dart` 的
+      //    `_ViewerVideo` → `AylaSignedVideo(cacheable: true)`）。
+      //
+      //    ✅ 首帧缩略图（poster）不受影响：`_buildContent` 的 `_hasPoster` 分支
+      //    走 `AylaResourceImage(cacheable: 默认 true)` ⇒「看见就存 thumb」照旧。
     } on MediaExpiredError {
       if (!mounted) return;
       setState(() => _expired = true);
@@ -1305,7 +1313,16 @@ class _VoiceMediaState extends State<_VoiceMedia> {
         _loading = false;
         _expired = false;
       });
-      // ② 加载即存（D4）：不 await、不提示，失败不影响播放
+      // ② 落盘（**2026-10-23 用户改版**）：语音**点击播放才存**，不点击不存。
+      //
+      //    用户原话：「语音则是点击语音即保存本地，不点击不保存」。
+      //
+      //    本方法 [_ensureEngine] **只由 [_toggle]（播放键/重试键）调用** ⇒
+      //    走到这里就代表用户已经点了播放，落盘时机正确。
+      //    仍然不 await、不提示：缓存是增强项，失败不影响本次播放。
+      //
+      //    ⚠️ **不要**把它挪回 build / initState（旧 D4「加载即存」的写法）：
+      //    那会让每条语音一进视口就下载整条音频，与用户明确裁决冲突。
       unawaited(
         AylaMediaCache.instance
             .fetchAndStore(
@@ -1716,16 +1733,21 @@ class _FileMediaState extends State<_FileMedia> {
       await MediaSigner.instance.sign(widget.media.mediaId);
       if (!mounted || seq != _signSeq) return;
       setState(() => _ready = true);
-      // ② 加载即存（D4）：签完就静默预取落盘，之后可直接从本地打开。
-      unawaited(
-        AylaMediaCache.instance
-            .fetchAndStore(
-              mediaId: widget.media.mediaId,
-              kind: AylaMediaKind.file,
-              mimeType: widget.media.mimeType,
-            )
-            .catchError((Object _) => null),
-      );
+      // ② **不落盘**（**2026-10-23 用户改版**）。
+      //
+      //    用户原话：「前面我说的看见媒体消息直接保存，这一点**不包括保存文件消息**，
+      //    文件消息需要手动点击保存才保存到本地」。
+      //
+      //    ⇒ 这里**故意什么都不做**。旧代码（D4「加载即存」）签完就
+      //    `fetchAndStore(kind: file)` 静默把整个附件下载落盘 —— 一份 50MB 的
+      //    附件只要被扫到就吃满磁盘与带宽，且用户从没点过「保存」。
+      //
+      //    真正的落盘时机只有一个：用户点「保存」按钮
+      //    → [_download] → `AylaMediaDownload.save`（系统保存对话框）。
+      //    那条路径经 `AylaMediaDownload.readBytes` 读字节，**本方法不参与**。
+      //
+      //    ⚠️ **不要**恢复自动预取：文件是三类媒体里唯一「用户明确要求手动保存」
+      //    的类型（图片/语音/视频都有各自的自动或点击落盘规则）。
     } on MediaExpiredError {
       if (!mounted || seq != _signSeq) return;
       setState(() => _expired = true);

@@ -25,16 +25,36 @@
 /// media-cache/
 /// └── <kind>/                    image | voice | video | file | emoji
 ///     └── <media_id 前 2 位>/     00 .. ff（256 桶）
-///         └── <media_id>.<ext>    原始对象（只缓存 original，不缓存 thumb）
+///         ├── <media_id>.<ext>        原图/原音频/原视频/原文件（original）
+///         └── <media_id>.thumb.<ext>  缩略图派生（thumb，见下）
 /// ```
 ///
-/// 例：`media-cache/image/5d/5db02e1571464f91bce21bdda1245125.jpg`
+/// 例：
+/// ```
+/// media-cache/image/5d/5db02e1571464f91bce21bdda1245125.jpg        ← 原图
+/// media-cache/image/5d/5db02e1571464f91bce21bdda1245125.thumb.jpg  ← 缩略图
+/// ```
 ///
 /// 理由：
 /// - 按 `kind` 分第一层 ⇒ 后续「只清视频」这类按类型清理/统计可直接做；
 /// - 按 `media_id` 前 2 位分第二层 ⇒ media_id 是 uuid4 hex，前 2 位均匀分布，
 ///   天然 256 桶，单目录文件数远小于 256，避开目录遍历退化与资源管理器卡顿；
 /// - 文件名就是 media_id（幂等、可反查），扩展名由 `mime_type` 推导，缺失时 `.bin`。
+///
+/// ### thumb 与 original 共存（2026-10-23 用户改版）
+///
+/// **旧规则（2026-10-21 D1）**：只缓存 original，不缓存 thumb ⇒ thumb 与 original
+/// 共用 `<media_id>.<ext>` 一个路径，靠「thumb 不落盘」避免撞车。
+///
+/// **新规则（2026-10-23 用户改版）**：图片「看见先存缩略图、点开大图才用原图取代
+/// 缩略图」⇒ 两者必须**同时存在且互不覆盖**。用**文件名后缀**区分（而不是子目录）：
+/// - 两种形态落在**同一个分桶目录**里 ⇒ [AylaMediaCache] 的「扫分桶找命中」逻辑
+///   只需按前缀 + 形态过滤，两种形态并存时**不会互相挡住**；
+/// - 后缀 `.thumb` 在扩展名**之前**（`<id>.thumb.jpg`）⇒ 扩展名仍在末尾，
+///   按扩展名判断「能不能直接 Image.file / 播放」的逻辑不受影响；
+/// - **老版本兼容**：老版本只有 `<media_id>.<ext>`（无 `.thumb` 段）⇒ 新代码按
+///   original 命中，无需迁移；只有 thumb 的新数据也不会被误认成 original
+///   （[aylaIsThumbCacheFileName]）。
 library;
 
 import 'dart:io';
@@ -49,6 +69,20 @@ const String kMediaCacheDirName = 'media-cache';
 
 /// Windows 下 exe 同级的资源目录名。
 const String kMediaCacheWindowsDataDirName = 'data';
+
+/// 缩略图文件名里插入的段（`<media_id>.thumb.<ext>`）。
+///
+/// 放**扩展名之前**：扩展名仍在末尾 ⇒ 任何按扩展名判断「能否 Image.file / 播放」
+/// 的逻辑不受影响；同时与 original 的 `<media_id>.<ext>` **永不撞名**。
+const String kMediaCacheThumbInfix = '.thumb';
+
+/// 判断某个缓存文件名是不是**缩略图**形态（`<media_id>.thumb.<ext>`）。
+///
+/// 供「扫分桶找命中」区分两种形态；老版本的 `<media_id>.<ext>` 恒返回 false
+/// （= original），因此**无需迁移**。
+bool aylaIsThumbCacheFileName(String fileName) =>
+    fileName.contains('$kMediaCacheThumbInfix.') &&
+    !fileName.endsWith('$kMediaCacheThumbInfix.tmp');
 
 /// 缓存根来源（诊断/日志用）。
 enum AylaMediaCacheRootSource {
@@ -113,14 +147,18 @@ class AylaMediaCacheLayout {
     return '$root/${kind.wire}/${aylaMediaShardOf(safe)}';
   }
 
-  /// 完整落盘路径：`media-cache/<kind>/<shard>/<media_id>.<ext>`。
+  /// 完整落盘路径：`media-cache/<kind>/<shard>/<media_id>[.thumb].<ext>`。
   ///
   /// [extension] 传 `.jpg` 或 `jpg` 均可；null 时按 [mimeType] 推导，再不行 `.bin`。
+  ///
+  /// [isThumb] 为 true 时在文件名里插入 `.thumb` 段（见库文档「thumb 与 original
+  /// 共存」）—— 两种形态因此**永远不撞路径**，可以同时存在。
   String pathFor(
     AylaMediaKind kind,
     String mediaId, {
     String? mimeType,
     String? extension,
+    bool isThumb = false,
   }) {
     final String safe = aylaSafeMediaId(mediaId);
     // 扩展名优先级：显式 extension > mimeType 推导 > **按 kind 的默认扩展名**。
@@ -130,7 +168,8 @@ class AylaMediaCacheLayout {
       extension ??
           aylaMediaExtensionForMimeOrKind(mimeType, kind),
     );
-    return '${dirFor(kind, safe)}/$safe$ext';
+    final String middle = isThumb ? kMediaCacheThumbInfix : '';
+    return '${dirFor(kind, safe)}/$safe$middle$ext';
   }
 
   @override

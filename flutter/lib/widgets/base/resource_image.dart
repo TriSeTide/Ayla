@@ -2,14 +2,21 @@
 ///
 /// ## 事实源
 ///
-/// **加载路径（2026-10-21 起：本地缓存优先）**
+/// **加载路径（2026-10-21 起：本地缓存优先；2026-10-23 改落盘形态）**
 /// - 内部媒体（src 以 `/api/v1/media/` 开头）→ 提取 `media_id`：
 ///   1. **先查本地漫游缓存**（[AylaMediaCache]）：命中直接用 `Image.file`，
 ///      **不发任何网络请求**——这正是「看过就一直能看」的落地，云端 7/30 天
-///      过期不影响本地已有内容（见 `docs/architecture/flutter-local-media-cache.md`）；
+///      过期不影响本地已有内容（见 `docs/architecture/flutter-local-media-cache.md`）。
+///      **有原图用原图、只有缩略图用缩略图**（[AylaMediaCache.lookupForDisplay]）；
 ///   2. 未命中 → 走签名链路（[MediaSigner]）：短时签名 URL ＋ 两级过期降级；
-///      远程加载**成功后静默落盘**（加载即存，不提示用户）；
+///      远程加载**成功后静默落盘**——但 **2026-10-23 用户改版后存的是缩略图**
+///      （`variant: thumb`），**不再存原图**。用户原话：
+///      「看到了图片是保存缩略图，只有点开图片后才取代刚保存的缩略图保存原图」
+///      ⇒ 原图落盘在查看器（`image_viewer.dart`），不在本组件。
 /// - 外部资源 / 非媒体路径 → **直接加载**（不签名、不缓存）。
+///
+/// ⚠️ **别再改回「看见就存原图」**：那会让每张瞥一眼的图都拉满原图带宽与磁盘，
+/// 且与用户的「先缩略图、点开才原图」明确冲突（2026-10-23 拍板）。
 ///
 /// **本地命中优先于过期判定**：即使云端已返回 410（对象已删），只要本地有文件
 /// 就正常渲染，**不显示「已过期」占位**（用户裁决 D3：能看到图永远比看不到好）。
@@ -125,6 +132,7 @@ class AylaResourceImage extends StatefulWidget {
     this.previewImage,
     this.ignoreSampleMedia = false,
     this.onStateChanged,
+    this.cacheable = true,
   });
 
   /// 图片地址（可为 `/api/v1/media/<id>/content` 或外部 URL）。
@@ -174,6 +182,27 @@ class AylaResourceImage extends StatefulWidget {
   /// 去重后**排到帧后**回调（首帧的 loading 与 `didUpdateWidget` 里的重载都发生在
   /// build 期，直接回调会让宿主在 build 中 setState）。不传 = 行为与从前完全一致。
   final ValueChanged<AylaResourceImageState>? onStateChanged;
+
+  /// 这张图对应的媒体**会不会被云端清理** ⇒ 要不要落本地缓存。
+  ///
+  /// **核心判据（用户裁决 2026-10-23）**：本地漫游缓存存在的意义只是**对抗云端
+  /// 过期**（云端删了原图，本地还能看）。所以：
+  /// - **会过期**（聊天图/视频/语音/文件/弹幕图/语音房图）⇒ `true`（默认，落盘）；
+  /// - **永久资产**（MinIO 永不删）⇒ `false`（**不落盘**，缓存纯属白占磁盘+带宽）。
+  ///
+  /// 永久资产 = `docs/architecture/media-retention-boundaries.md` §3 的 A1–A7：
+  /// 帖子配图（A1）· 表情包（A2）· 帖子评论图（A3/A4）· 用户头像（A5）·
+  /// 群头像（A6）· 直播间封面（A7）。
+  ///
+  /// **同一个组件、不同场景语义不同**，别一刀切：
+  /// - 聊天里的图片是 E1（过期）⇒ 缓存；
+  /// - 帖子里/评论里/表情包里的同类图片是 A1/A2/A3 ⇒ 不缓存；
+  /// - 聊天视频的**首帧海报**是视频封面（跟着视频走，过期）⇒ 缓存；
+  /// - 帖子编辑器里的**视频海报**是帖子附件（A1 永久）⇒ 不缓存。
+  ///
+  /// `false` 时**只跳过本地缓存**（不 lookup 也不落盘），签名与网络显示**照常** ——
+  /// 不缓存不等于不显示。
+  final bool cacheable;
 
   @override
   State<AylaResourceImage> createState() => _ResourceImageState();
@@ -294,16 +323,35 @@ class _ResourceImageState extends State<AylaResourceImage> {
       return;
     }
 
+    // ⓪ **永久资产不碰本地缓存**（用户裁决 2026-10-23）。
+    //
+    //    本地缓存的唯一价值是对抗云端过期；永久资产（帖图/表情包/头像/封面，
+    //    即 retention-boundaries §3 的 A1–A7）永远不会被清理 ⇒ 落盘纯属白占
+    //    磁盘与带宽。这里**只跳过缓存**，下面的签名 + 网络显示**照常走**
+    //    （不缓存 ≠ 不显示）。
+    final bool useCache = widget.cacheable;
+
     // ① 本地漫游缓存优先：命中直接渲染本地文件，**不发任何网络请求**
     //    （连签名都不签）。本地有就永远能看，云端过期不影响（用户裁决 D3）。
-    //    thumb 变体不缓存（D1），此调用会直接返回 null。
-    final File? cached = await AylaMediaCache.instance.lookup(
-      mediaId,
-      kind: _cacheKindFor(widget.src),
-      variant: widget.variant == MediaVariant.thumb
-          ? AylaMediaCacheVariant.thumb
-          : AylaMediaCacheVariant.original,
-    );
+    //
+    // 2026-10-23 用户改版：**原图与缩略图都能落盘**（旧 D1「不缓存 thumb」作废）。
+    // 展示时「有原图就用原图，只有缩略图就用缩略图」⇒ 走 [lookupForDisplay]。
+    // 调用方明确要 thumb 时（`variant: thumb`，如贴纸/分享卡封面）只认 thumb：
+    // 那是「就要这张小图」的语义，拿原图反而浪费解码。
+    final bool wantThumb = widget.variant == MediaVariant.thumb;
+    final File? cached = !useCache
+        ? null
+        : wantThumb
+            ? await AylaMediaCache.instance.lookup(
+                mediaId,
+                kind: _cacheKindFor(widget.src),
+                variant: AylaMediaCacheVariant.thumb,
+              )
+            : (await AylaMediaCache.instance.lookupForDisplay(
+                mediaId,
+                kind: _cacheKindFor(widget.src),
+              ))
+                  ?.file;
     if (!mounted) return;
     if (cached != null) {
       setState(() {
@@ -326,15 +374,27 @@ class _ResourceImageState extends State<AylaResourceImage> {
         _state = _State.ready;
       });
       _notifyState();
-      // ② 加载即存（用户裁决 D4）：签名成功且**原图仍完好**时静默落盘。
-      //    不 await、不提示——缓存是增强项，失败不影响本次显示。
-      //    阶段 1（originalExpired）不缓存：那是缩略图，不是原图（D1）。
-      if (!r.originalExpired && widget.variant != MediaVariant.thumb) {
+      // ② 落盘（**2026-10-23 用户改版**，取代旧的 D4「加载即存原图」）：
+      //
+      //    用户原话：「看到了图片是保存缩略图，只有点开图片后才取代刚保存的
+      //    缩略图保存原图」。⇒ **气泡内看见只存 thumb**，原图由查看器
+      //    （`image_viewer.dart`）在用户点开大图时再存。
+      //
+      //    `variant: thumb` 的调用点（贴纸/分享卡封面）：本来要的就是这张小图，
+      //    直接按 thumb 存（r.url 就是缩略图 URL；原图过期与否无关）。
+      //    其余调用点：要 thumb。但**原图已过期（阶段 1）时签名给的本来就是
+      //    thumb URL** ⇒ 也按 thumb 存（这正是用户要的「云端删了原图，本地留缩略图」）。
+      //
+      //    不 await、不提示 —— 缓存是增强项，失败不影响本次显示。
+      //
+      //    ⚠️ [AylaResourceImage.cacheable] 为 false（永久资产）时**不落盘**。
+      if (useCache) {
         unawaited(
           AylaMediaCache.instance
               .fetchAndStore(
                 mediaId: mediaId,
                 kind: _cacheKindFor(widget.src),
+                variant: AylaMediaCacheVariant.thumb,
               )
               .catchError((Object _) => null),
         );

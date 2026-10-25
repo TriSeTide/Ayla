@@ -336,26 +336,139 @@ void main() {
       expect(await cache.lookup(id, kind: AylaMediaKind.file), isNotNull);
     });
 
-    test('thumb 不缓存（D1）：lookup 恒 null，storeBytes 拒绝写入', () async {
+    // ================================================================
+    // thumb / original 共存（**2026-10-23 用户改版**，取代旧的 D1「不缓存 thumb」）
+    // ================================================================
+    //
+    // 用户原话：「看到了图片是保存缩略图，只有点开图片后才取代刚保存的缩略图
+    // 保存原图」。⇒ 两种形态都要能落盘、能命中，且**互不覆盖**。
+
+    test('★ thumb 可落盘，且与 original **各占一个文件**（互不覆盖）', () async {
       final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
       const String id = 'aabbccddeeff00112233445566778899';
-      final File? stored = await cache.storeBytes(
+
+      // 先存 thumb（= 气泡内「看见」）
+      final File? thumb = await cache.storeBytes(
+        mediaId: id,
+        kind: AylaMediaKind.image,
+        bytes: <int>[1, 1, 1],
+        mimeType: 'image/jpeg',
+        variant: AylaMediaCacheVariant.thumb,
+      );
+      expect(thumb, isNotNull, reason: '2026-10-23 起 thumb 必须能落盘');
+      expect(thumb!.path.replaceAll('\\', '/'),
+          endsWith('data/media-cache/image/aa/$id.thumb.jpg'),
+          reason: '★ thumb 走 <id>.thumb.<ext>（扩展名仍在末尾）');
+
+      // 再存 original（= 点开大图）
+      final File? original = await cache.storeBytes(
+        mediaId: id,
+        kind: AylaMediaKind.image,
+        bytes: <int>[2, 2, 2, 2],
+        mimeType: 'image/jpeg',
+      );
+      expect(original, isNotNull);
+      expect(original!.path.replaceAll('\\', '/'),
+          endsWith('data/media-cache/image/aa/$id.jpg'));
+
+      // 两者共存，互不覆盖（内容与大小都要各自保留）
+      final AylaMediaCacheLayout layout = await cache.ensureReady();
+      final List<File> files = await _allFiles(Directory(layout.root));
+      expect(files.length, 2, reason: '★ thumb 与 original 必须同时存在');
+      expect(await thumb.length(), 3, reason: '★ thumb 未被 original 覆盖');
+      expect(await original.length(), 4, reason: '★ original 未被 thumb 覆盖');
+    });
+
+    test('★ lookup 按形态精确返回：要原图不给 thumb，要 thumb 不给原图', () async {
+      final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
+      const String id = 'bbccddeeff0011223344556677889900';
+      await cache.storeBytes(
         mediaId: id,
         kind: AylaMediaKind.image,
         bytes: <int>[1],
         mimeType: 'image/jpeg',
         variant: AylaMediaCacheVariant.thumb,
       );
-      expect(stored, isNull);
+
+      // 只有 thumb 时：要 original ⇒ 未命中
+      expect(await cache.lookup(id, kind: AylaMediaKind.image), isNull,
+          reason: '★ 不得把 .thumb 那份当原图返回');
       expect(
         await cache.lookup(id,
             kind: AylaMediaKind.image,
             variant: AylaMediaCacheVariant.thumb),
-        isNull,
+        isNotNull,
       );
+
+      // 补上 original 后：两种形态各自命中，且路径不同
+      final File original = (await cache.storeBytes(
+        mediaId: id,
+        kind: AylaMediaKind.image,
+        bytes: <int>[2, 2],
+        mimeType: 'image/jpeg',
+      ))!;
+      final File thumb = (await cache.lookup(id,
+          kind: AylaMediaKind.image,
+          variant: AylaMediaCacheVariant.thumb))!;
+      expect(original.path, isNot(thumb.path));
+      expect(await original.length(), 2);
+      expect(await thumb.length(), 1);
+    });
+
+    test('★ lookupForDisplay 优先原图、退而求其次 thumb（并标明形态）', () async {
+      final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
+      const String id = 'ccddeeff001122334455667788990011';
+
+      // 都没有 ⇒ null
+      expect(await cache.lookupForDisplay(id, kind: AylaMediaKind.image), isNull);
+
+      // 只有 thumb ⇒ 返回 thumb 且 isThumb=true
+      await cache.storeBytes(
+        mediaId: id,
+        kind: AylaMediaKind.image,
+        bytes: <int>[1],
+        mimeType: 'image/jpeg',
+        variant: AylaMediaCacheVariant.thumb,
+      );
+      final AylaMediaCacheHit? thumbHit =
+          await cache.lookupForDisplay(id, kind: AylaMediaKind.image);
+      expect(thumbHit, isNotNull);
+      expect(thumbHit!.isThumb, isTrue, reason: '★ 只有 thumb 时必须自曝形态');
+
+      // 补上 original ⇒ 改为返回 original 且 isThumb=false
+      final File original = (await cache.storeBytes(
+        mediaId: id,
+        kind: AylaMediaKind.image,
+        bytes: <int>[2, 2, 2],
+        mimeType: 'image/jpeg',
+      ))!;
+      final AylaMediaCacheHit? originalHit =
+          await cache.lookupForDisplay(id, kind: AylaMediaKind.image);
+      expect(originalHit, isNotNull);
+      expect(originalHit!.isThumb, isFalse,
+          reason: '★ 有原图时必须优先原图（用户的「取代缩略图」）');
+      expect(originalHit.file.path, original.path);
+    });
+
+    test('★ 老版本兼容：只有 <id>.<ext> 的老文件按 original 命中，无需迁移', () async {
+      final AylaMediaCache cache = AylaMediaCache(platform: windowsPlatform);
+      const String id = 'ddeeff00112233445566778899001122';
       final AylaMediaCacheLayout layout = await cache.ensureReady();
-      expect(await _allFiles(Directory(layout.root)), isEmpty,
-          reason: 'thumb 不得落盘');
+      // 手工造一个「老版本留下的」文件（没有 .thumb 段）
+      final File legacy = File(layout.pathFor(
+        AylaMediaKind.image,
+        id,
+        mimeType: 'image/jpeg',
+      ));
+      await legacy.parent.create(recursive: true);
+      await legacy.writeAsBytes(<int>[9, 9, 9, 9, 9]);
+
+      final File? hit = await cache.lookup(id, kind: AylaMediaKind.image);
+      expect(hit, isNotNull, reason: '★ 老版本文件必须仍能命中（不迁移）');
+      expect(await hit!.length(), 5);
+      final AylaMediaCacheHit? display =
+          await cache.lookupForDisplay(id, kind: AylaMediaKind.image);
+      expect(display!.isThumb, isFalse, reason: '★ 老文件 = original');
     });
 
     test('空 id / 非法 id 不缓存（不伪造身份、不串内容）', () async {
@@ -572,7 +685,8 @@ void main() {
   });
 
   group('fetchAndStore 语义', () {
-    test('原图已过期（签名降级 thumb）→ 返回 null 且不落盘（D1）', () async {
+    test('★ 原图已过期：要 original ⇒ 不落盘（不冒充）；要 thumb ⇒ 正常落盘（2026-10-23）',
+        () async {
       final _FakeSigner signer = _FakeSigner(originalExpired: true);
       final _FakeDownloader downloader = _FakeDownloader(<int>[1, 2, 3]);
       final AylaMediaCache cache = AylaMediaCache(
@@ -582,12 +696,29 @@ void main() {
       );
       const String id = 'eeee5555ffff66667777888899990000';
 
-      final File? result = await cache.fetchAndStore(
+      // ① 要原图：云端只剩缩略图 ⇒ 不落盘（把 thumb 字节命名成原图是不诚实的）
+      final File? asOriginal = await cache.fetchAndStore(
           mediaId: id, kind: AylaMediaKind.image, mimeType: 'image/jpeg');
-      expect(result, isNull, reason: '只有 thumb 可签时不得冒充原图落盘');
-      expect(downloader.calls, 0, reason: '既然不缓存就没必要下载 thumb');
+      expect(asOriginal, isNull, reason: '只有 thumb 可签时不得冒充原图落盘');
+      expect(downloader.calls, 0, reason: '既然不落盘就没必要下载');
+
+      // ② 要缩略图：**正常落盘**（2026-10-23 用户改版：缩略图本来就该存）
+      final File? asThumb = await cache.fetchAndStore(
+        mediaId: id,
+        kind: AylaMediaKind.image,
+        mimeType: 'image/jpeg',
+        variant: AylaMediaCacheVariant.thumb,
+      );
+      expect(asThumb, isNotNull, reason: '★ 缩略图必须能落盘（新规则）');
+      expect(asThumb!.path.replaceAll('\\', '/'), contains('.thumb.'));
+      expect(downloader.calls, 1);
+
+      // 只有 thumb 那一份，没有冒充出来的 original
       final AylaMediaCacheLayout layout = await cache.ensureReady();
-      expect(await _allFiles(Directory(layout.root)), isEmpty);
+      final List<File> files = await _allFiles(Directory(layout.root));
+      expect(files.length, 1);
+      expect(await cache.lookup(id, kind: AylaMediaKind.image), isNull,
+          reason: '★ 不得出现「假原图」');
     });
 
     test('签名抛 MediaExpiredError → 原样向上抛（调用方显示已过期）', () async {
