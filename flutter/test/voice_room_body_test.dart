@@ -130,7 +130,7 @@ void main() {
     expect(find.text('在语音房内聊天'), findsOneWidget); // composer 常驻
   });
 
-  testWidgets('窄屏（≤768）：无 padding；chat head 不渲染；开关可见；上下堆叠',
+  testWidgets('窄屏（≤768）：voice card 四边内缩 16；chat head 不渲染；开关可见；上下堆叠',
       (WidgetTester tester) async {
     setViewport(tester, const Size(420, 700));
     await tester.pumpWidget(host(
@@ -147,6 +147,32 @@ void main() {
       tester.getRect(find.byKey(_panelKey)).bottom,
       lessThanOrEqualTo(tester.getRect(find.text('在语音房内聊天')).top),
     );
+
+    // 中部内容区留白（2026-10-23 用户实报「窄屏中部内容区上下左右不留空」）。
+    //
+    // 事实源：`.voice-room-voice-card { margin: var(--sp-4) }`（voice.css:23-30，
+    // **默认断点**、无媒体查询）。唯一重置点 `margin: 0` 在
+    // `@media (min-width: 769px)`（voice.css:372-375）内 ⇒ **窄屏必须是 16px 外边距**。
+    // 此前窄屏分支返回裸 `ColoredBox` ⇒ 面板贴边。
+    //
+    // 几何判据（用 panel 实测矩形，不只看组件存在）：
+    // 左/右：`.voice-room-body` 窄屏无 padding ⇒ 左右各恰好 16；
+    // 下：与聊天卡（composer）上沿之间 >= 16；上：不贴屏幕顶边。
+    final Rect panel = tester.getRect(find.byKey(_panelKey));
+    const double sp4 = 16; // tokens.css:100 --sp-4
+    expect(panel.left, closeTo(sp4, 0.5), reason: '窄屏 voice-card 左边距 = sp4');
+    expect(
+      panel.right,
+      closeTo(420 - sp4, 0.5),
+      reason: '窄屏 voice-card 右边距 = sp4',
+    );
+    final Rect composer = tester.getRect(find.text('在语音房内聊天'));
+    expect(
+      composer.top - panel.bottom,
+      greaterThanOrEqualTo(sp4 - 0.5),
+      reason: '窄屏 voice-card 与聊天卡之间 >= sp4',
+    );
+    expect(panel.top, greaterThan(0), reason: '窄屏 voice-card 顶部不得贴屏幕顶边');
   });
 
   testWidgets('chat head 材质：**透明底** + 仅下边框（auroraqua 593–599 清零 voice.css 的 --glass-bg）',

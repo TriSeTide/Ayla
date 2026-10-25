@@ -463,14 +463,29 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
     );
   }
 
-  /// section.voice-room-voice-card（宽屏自带材质 + padding sp4；窄屏透明、材质归面板）。
+  /// section.voice-room-voice-card（宽屏自带材质 + padding sp4；窄屏透明 + **margin sp4**）。
   Widget _buildVoiceCard(bool wide) {
     final Widget panel = widget.voicePanelBuilder(!wide);
     if (!wide) {
-      // 窄屏：`.voice-room-voice-card` 透明（auroraqua.css 584–589），材质在 `.voice-panel`
-      return ColoredBox(
-        color: const Color(0x00000000),
-        child: panel,
+      // 窄屏：`.voice-room-voice-card` 透明（auroraqua.css 584–589），材质在 `.voice-panel`；
+      // **但保留它自己的 `margin: var(--sp-4)`**（voice.css 23-30，默认断点、无媒体查询）。
+      //
+      // 这一条曾被整条漏掉（2026-10-23 用户实报「群内群外语音房窄屏界面中部内容区
+      // 上下左右不留空」）：voice.css 里该 margin 只在 `@media (min-width: 769px)` 的
+      // 372-375 行被改成 `margin: 0; padding: var(--sp-4)` ⇒ 窄屏是 16px 外边距，
+      // 宽屏才是 0 外边距 + 16 内边距。当时只实现宽屏档，窄屏返回裸 ColoredBox
+      // ⇒ 四边各少 16px（宽 32 / 高 32）。
+      //
+      // 等价表达：CSS margin 在 flex 子项上的占位语义 = 布局空白 ⇒ Flutter 用 Padding
+      //（本件在 Expanded 槽内，四边内缩与 margin 同效）。
+      // 不能改 `_buildLayout` 的 spacing：web 窄屏 `.voice-room-layout` 的 gap 确实是 0
+      //（只有 >=769 的 354 行才给 16）。也不给 chat card 加：它是通栏条（voice.css 55-66）。
+      return Padding(
+        padding: const EdgeInsets.all(AylaSpacing.sp4), // voice.css 29 margin: var(--sp-4)
+        child: ColoredBox(
+          color: const Color(0x00000000),
+          child: panel,
+        ),
       );
     }
     return AylaGlassSurface(
@@ -1062,7 +1077,8 @@ class _VoiceRoomBodyDemoState extends State<_VoiceRoomBodyDemo> {
         ),
         _stage(
           const Size(420, 700),
-          '窄屏 420（≤768）：无 padding；head 只有下边框；卡片上下堆叠；'
+          '窄屏 420（≤768）：body 无 padding、voice card 四边 margin sp4=16；'
+          'head 只有下边框；卡片上下堆叠；'
           '聊天 = 底部输入卡 + 上方浮层（点右下 ▲ 展开，浮层 300 高、只有上两角圆角）',
           _body(owner: false),
         ),

@@ -137,6 +137,7 @@ class PostDetailPage extends ConsumerStatefulWidget {
     required this.postId,
     this.from,
     this.inGroup = false,
+    this.fromGroupId,
   });
 
   /// 是否**群内**帖子详情（2026-10-19 新增）。
@@ -150,6 +151,16 @@ class PostDetailPage extends ConsumerStatefulWidget {
 
   /// `?from=mine|user`（进详情前列表页写入的来源，用于返回）。
   final String? from;
+
+  /// 群内详情所属的群 id（**返回落点用**）。
+  ///
+  /// 事实源 = web PostDetailPage.tsx:70–74：
+  /// fromGroup ? returnTo = /group/:id/posts : fromMine ? /posts/mine : /posts。
+  /// 群内详情**没有**独立的返回按钮（返回由群顶栏/系统返回键承担，见
+  /// group_page.dart 的 _popToSceneRoot），但本页仍有一条栈底兜底
+  ///（[_goBack]，用于「非群内直接打开详情」形态）—— 群内若走它，此前会跳到
+  /// 一级 /posts 帖子大厅（2026-10-23 返回键修复）。
+  final String? fromGroupId;
 
   @override
   ConsumerState<PostDetailPage> createState() => _PostDetailPageState();
@@ -708,6 +719,8 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
       alt: '帖子图片',
       variant: media.thumbnail != null ? MediaVariant.thumb : null,
       fit: BoxFit.cover,
+      // 帖子配图 = 永久资产 A1（用户裁决 2026-10-23）⇒ 不落本地缓存
+      cacheable: false,
     );
   }
 
@@ -725,6 +738,14 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
   void _goBack() {
     if (context.canPop()) {
       context.pop();
+      return;
+    }
+    // 群内详情 ⇒ 回**群内帖子列表**（web PostDetailPage.tsx:70–74 的第一档）。
+    // 此前缺这一档 ⇒ 群内按返回跳出群到一级 /posts（2026-10-23 用户实报
+    //「返回键不是回上一级」）。
+    final String? groupId = widget.fromGroupId;
+    if (groupId != null && groupId.isNotEmpty) {
+      context.go('/group/${Uri.encodeComponent(groupId)}/posts');
       return;
     }
     context.go(widget.from == 'mine' ? '/posts/mine' : '/posts');

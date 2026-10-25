@@ -27,7 +27,15 @@ import 'package:go_router/go_router.dart';
 import '../lib/core/api/directory_page.dart' show AylaDirectoryPage;
 import '../lib/core/api/favorites_api.dart' show AylaFavoriteEntry;
 import '../lib/layout/app_back.dart'
-    show AylaExitConfirm, AylaBackAction, aylaBackActionFor, kAylaExitHintText;
+    show
+        AylaExitConfirm,
+        AylaBackAction,
+        aylaBackActionFor,
+        aylaClearEntryOrigin,
+        aylaEntryOriginForTest,
+        aylaRememberEntryOrigin,
+        kAylaExitHintText,
+        takeEntryOrigin;
 import '../lib/pages/favorites_page.dart' show aylaFavoritesPageLoader;
 import '../lib/pages/group_page.dart' show GroupPage;
 import '../lib/router/app_router.dart';
@@ -91,6 +99,12 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null);
   });
+
+  /// 「进入来源」用例的公共起点：确保从空状态开始（模块级单例跨用例存活）。
+  void setUpEntryOrigin() {
+    aylaClearEntryOrigin();
+    expect(aylaEntryOriginForTest, isNull, reason: '用例起点必须是空来源');
+  }
 
   bool sysPopped() => platformCalls.contains('SystemNavigator.pop');
 
@@ -306,10 +320,15 @@ void main() {
       );
     });
 
-    testWidgets('群场景深链直达（场景栈空、路由栈空）按返回 ⇒ 回群列表', (
+    testWidgets('群场景深链直达（场景栈空、路由栈空）按返回 ⇒ 先回本群聊天场景', (
       WidgetTester tester,
     ) async {
       // 冷启动 deep-link 形态：没有场景历史、路由栈只有一层 ⇒ 三级兜底第 ③ 档。
+      //
+      // ⚠️ 断言在 2026-10-23 被**订正**（用户实报「返回键是返回到主页而不是上一级」）：
+      // 第 ③ 档此前无条件 go('/group')，于是深链直达 /group/g1/voice 时**第一下
+      // 返回就回主页**。人还在某个群场景的根上时，「上一级」是本群聊天场景
+      //（/group/:id），不是群列表主页 —— 只有已经在群聊天根上才回 /group。
       final ({ProviderContainer container, GoRouter router}) app =
           await pumpApp(tester, const Size(400, 800));
       app.router.go('/group/g1/voice');
@@ -319,12 +338,18 @@ void main() {
       await pressBack(tester);
       while (tester.takeException() != null) {}
 
-      expect(sysPopped(), isFalse);
+      expect(sysPopped(), isFalse, reason: '绝不交回系统（那会退出 App）');
       expect(
         pathOf(app.router),
-        '/group',
-        reason: '都没有 ⇒ 回群列表，绝不交回系统（那会退出 App）',
+        '/group/g1',
+        reason: '在语音场景根 ⇒ 回到本群聊天场景，而不是一步跳到群列表主页',
       );
+
+      // 再按一次（已在群聊天根）⇒ 这时才回群列表。
+      await pressBack(tester);
+      while (tester.takeException() != null) {}
+      expect(sysPopped(), isFalse);
+      expect(pathOf(app.router), '/group');
     });
   });
 
@@ -332,7 +357,7 @@ void main() {
   // 纯函数契约（不依赖 widget 树，锁死分档判据）
   // ==========================================================================
   group('⑥ 分档纯函数与退出确认状态机', () {
-    test('aylaBackActionFor：四档优先级', () {
+    test('aylaBackActionFor：五档优先级', () {
       // 能 pop ⇒ 交回框架
       expect(
         aylaBackActionFor(canPop: true, pathname: '/favorites'),
@@ -362,7 +387,37 @@ void main() {
         aylaBackActionFor(canPop: true, pathname: '/group/g1/voice/v1'),
         AylaBackAction.groupScene,
       );
-      // 二级页 ⇒ 回主页
+      // ★ 栈空但有「进入来源」⇒ 回上一级，**不是**回主页
+      //（2026-10-23 用户实报「返回键是返回到主页而不是上一级」）。
+      expect(
+        aylaBackActionFor(
+          canPop: false,
+          pathname: '/favorites',
+          hasEntryOrigin: true,
+        ),
+        AylaBackAction.popEntryOrigin,
+        reason: '记得从哪进来 ⇒ 先回那一级（web navigate(-1) 等价）',
+      );
+      // 但**能 pop 时来源让位给真历史**（不要让记忆压过路由栈）。
+      expect(
+        aylaBackActionFor(
+          canPop: true,
+          pathname: '/favorites',
+          hasEntryOrigin: true,
+        ),
+        AylaBackAction.popRoute,
+        reason: '路由栈是真的历史 ⇒ 优先于来源记忆',
+      );
+      // 群场景仍最优先（场景栈与路由栈无关，见上方注释）。
+      expect(
+        aylaBackActionFor(
+          canPop: false,
+          pathname: '/group/g1',
+          hasEntryOrigin: true,
+        ),
+        AylaBackAction.groupScene,
+      );
+      // 二级页且**无来源** ⇒ 回主页（旧行为，保留）
       expect(
         aylaBackActionFor(canPop: false, pathname: '/favorites'),
         AylaBackAction.goHome,
@@ -381,6 +436,55 @@ void main() {
         AylaBackAction.homeExit,
         reason: '/home 是 /group 的兼容别名（shell_config.dart:84）',
       );
+    });
+
+    // ========================================================================
+    // 「进入来源」记忆（返回键第 ③ 档的兜底依据）
+    // ========================================================================
+    //
+    // 2026-10-23 用户实报「返回键是返回到主页而不是上一级」。web 的返回键是浏览器
+    // 历史回退（navigate(-1)），Flutter 侧的 context.go 不建历史、而群路由
+    // 又**不能 push**（共用 Page key，实测红屏）⇒ 栈空时会直接回主页。
+    // ⇒ 用一层极薄的「上一级页面」记忆复刻 navigate(-1)，本组锁它的语义边界。
+    test('来源记忆：只记一层、消费即失效、不回到自己', () {
+      setUpEntryOrigin();
+      // 后写覆盖前写（只保留一层，不是历史栈）
+      aylaRememberEntryOrigin('/posts');
+      aylaRememberEntryOrigin('/group');
+      expect(aylaEntryOriginForTest, '/group');
+
+      // 消费一次即失效
+      expect(takeEntryOrigin('/favorites'), '/group');
+      expect(aylaEntryOriginForTest, isNull);
+      expect(takeEntryOrigin('/favorites'), isNull, reason: '已消费 ⇒ 不再回退');
+
+      // 回到自己 ⇒ 丢弃（否则点进去又回原处，形成死循环）
+      aylaRememberEntryOrigin('/favorites');
+      expect(takeEntryOrigin('/favorites'), isNull);
+
+      setUpEntryOrigin();
+    });
+
+    test('来源记忆：拒绝登录页与非绝对路径（不得把认证流程当上一级）', () {
+      setUpEntryOrigin();
+      aylaRememberEntryOrigin('/login');
+      expect(aylaEntryOriginForTest, isNull, reason: '登录页不作为返回目标');
+      aylaRememberEntryOrigin('/register');
+      expect(aylaEntryOriginForTest, isNull, reason: '注册页不作为返回目标');
+      aylaRememberEntryOrigin('group/g1');
+      expect(aylaEntryOriginForTest, isNull, reason: '只接受应用内绝对路径');
+      aylaRememberEntryOrigin(null);
+      expect(aylaEntryOriginForTest, isNull);
+      aylaRememberEntryOrigin('');
+      expect(aylaEntryOriginForTest, isNull);
+      setUpEntryOrigin();
+    });
+
+    test('来源记忆：回主页 / 登出时清空（不跨一级页与登录周期残留）', () {
+      setUpEntryOrigin();
+      aylaRememberEntryOrigin('/favorites');
+      aylaClearEntryOrigin();
+      expect(aylaEntryOriginForTest, isNull);
     });
 
     test('AylaExitConfirm：窗口内第二次为真、过期后重新计数', () {

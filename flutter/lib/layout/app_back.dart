@@ -64,6 +64,64 @@ const Duration kAylaExitConfirmWindow = Duration(seconds: 2);
 /// 一级主页路由（窄屏返回键的收敛点）。
 const String kAylaHomePath = '/group';
 
+/// 「进入过的上一级页面」记忆（返回键第 ③ 档的兜底依据）。
+///
+/// ## 为什么需要它（2026-10-23 用户实报「返回键回主页而不是上一级」）
+/// web 的返回键是**浏览器历史回退**：navigate(-1) 回上一页，无论那一页是从哪来的。
+/// Flutter 侧没有等价物（context.go 是替换、不建栈），而 group 路由**又不能 push**
+///（5 条路由共用同一个 Page key，实测 push 必抛 !keyReservation.contains(key)
+/// —— 见 no_group_push_test.dart 与 router/app_router.dart:113–121）。
+///
+/// ⇒ 用一层**极薄的「上一级页面」记忆**复刻 navigate(-1) 的语义：
+/// 从列表页进入群/详情时把来源路径记下来，返回键在「路由栈空」时优先回那里，
+/// 而不是无条件 go('/group')。
+///
+/// ## 边界（刻意保守）
+/// - **只记一层**（不是历史栈）：后一次进入覆盖前一次，避免出现与浏览器历史不符的
+///   「回退到很久以前的页面」；
+/// - 只在**路由栈空**时才使用（有栈时 context.pop() 才是真历史，优先）；
+/// - 记录值只能是**本应用内的绝对路径**，且**不得是登录页 / 当前页自身**；
+/// - 消费一次即失效（[takeEntryOrigin]），避免「离开后又被上一次的来源带回去」。
+String? _aylaEntryOrigin;
+
+/// 记录「从哪个页面进入下一级」（返回键兜底用）。传 null/空 ⇒ 清空。
+void aylaRememberEntryOrigin(String? path) {
+  if (path == null || path.isEmpty) {
+    _aylaEntryOrigin = null;
+    return;
+  }
+  // 只接受应用内绝对路径；登录/注册页不作为返回目标（它们是认证流程的一部分）。
+  if (!path.startsWith('/')) return;
+  if (path == '/login' || path == '/register') return;
+  _aylaEntryOrigin = path;
+}
+
+/// 读取并**消费**上次记录的来源（null = 没有可用的来源）。
+String? takeEntryOrigin(String currentPath) {
+  final String? origin = _aylaEntryOrigin;
+  _aylaEntryOrigin = null;
+  if (origin == null) return null;
+  // 回到自己会形成死循环（点进去又回到原处）⇒ 丢弃。
+  if (origin == currentPath) return null;
+  return origin;
+}
+
+/// 清空来源记忆（登出 / 回主页时调用，避免跨登录周期或跨一级页残留）。
+void aylaClearEntryOrigin() => _aylaEntryOrigin = null;
+
+/// 当前是否记得「从哪进来」（**只读、不消费**）。
+///
+/// 返回键宿主用它决定走 [AylaBackAction.popEntryOrigin] 档；真正的取值与消费
+/// 由 [takeEntryOrigin] 在命中该档后完成 —— 分两步是为了让判据函数保持无副作用
+///（[aylaBackActionFor] 是纯函数契约，不在里面改状态）。
+bool get hasEntryOrigin => _aylaEntryOrigin != null;
+
+/// 测试用：当前记录的来源（只读，不消费）。
+///
+/// ⚠️ 仅供测试断言；**生产代码不得使用**（用 [hasEntryOrigin] / [takeEntryOrigin]）。
+@visibleForTesting
+String? get aylaEntryOriginForTest => _aylaEntryOrigin;
+
 /// 一级主页的兼容别名（`app_router.dart` 把 `/home` 重定向到 `/group`，见 `shell_config.dart:84`）。
 const String kAylaHomeAliasPath = '/home';
 
@@ -117,6 +175,9 @@ enum AylaBackAction {
   /// 群场景（`GroupPage` 承担返回）⇒ 交回框架，由本件复刻它的三级兜底。
   groupScene,
 
+  /// 路由栈空、但记得「从哪进来」⇒ 回那一级（web `navigate(-1)` 的等价物）。
+  popEntryOrigin,
+
   /// 不在主页 ⇒ 回一级主页 `context.go('/group')`。
   goHome,
 
@@ -143,10 +204,17 @@ enum AylaBackAction {
 AylaBackAction aylaBackActionFor({
   required bool canPop,
   required String pathname,
+  bool hasEntryOrigin = false,
 }) {
   // 群场景：5 条群路由都由 `GroupPage` 承担（见 `group_page.dart` 的 `_handleSystemBack`）。
   if (_isGroupScene(pathname)) return AylaBackAction.groupScene;
   if (canPop) return AylaBackAction.popRoute;
+  // 路由栈空但有「进入来源」⇒ 回上一级（web navigate(-1) 的等价物），**不是**回主页。
+  //
+  // 2026-10-23 用户实报「返回键是返回到主页而不是上一级」：栈空时此前直接 goHome，
+  // 于是「主页 → 收藏 → 返回」这类路径会先回主页而不是回上一级。
+  // 只有在**也没有来源**时才收敛到一级主页。
+  if (hasEntryOrigin) return AylaBackAction.popEntryOrigin;
   if (pathname != kAylaHomePath && pathname != kAylaHomeAliasPath) {
     return AylaBackAction.goHome;
   }
@@ -177,6 +245,7 @@ class AylaBackButtonHost extends StatefulWidget {
     required this.canPop,
     required this.onGoHome,
     required this.onGroupBack,
+    this.onGoToOrigin,
     this.exit = aylaSystemExit,
     this.showHint,
   });
@@ -192,6 +261,11 @@ class AylaBackButtonHost extends StatefulWidget {
 
   /// 回一级主页（由调用方 `context.go('/group')` —— 需要 BuildContext，故注入）。
   final VoidCallback onGoHome;
+
+  /// 回「上一级页面」（由调用方 `context.go(origin)` 实现 —— 同样需要 BuildContext）。
+  ///
+  /// 只在**路由栈空**且记得进入来源时调用（见 [AylaBackAction.popEntryOrigin]）。
+  final ValueChanged<String>? onGoToOrigin;
 
   /// 群场景回退（由调用方注入 `GroupPage` 的同一套三级兜底）。
   ///
@@ -235,9 +309,13 @@ class _AylaBackButtonHostState extends State<AylaBackButtonHost> {
   }
 
   Future<bool> _handle() async {
+    // 「有进入来源」= 栈空时也能回上一级（aylaBackActionFor 的 popEntryOrigin 档）。
+    // 只看**存在性**，真正取值与消费在下面分支里做（避免判据函数有副作用）。
+    final bool hasOrigin = !widget.canPop && hasEntryOrigin;
     switch (aylaBackActionFor(
       canPop: widget.canPop,
       pathname: widget.pathname,
+      hasEntryOrigin: hasOrigin,
     )) {
       case AylaBackAction.popRoute:
         // 交回 go_router 自己 pop（不重复实现）。
@@ -246,8 +324,21 @@ class _AylaBackButtonHostState extends State<AylaBackButtonHost> {
         // 群页的三级兜底在本件复刻（页面自己的 PopScope 到不了，见文件头第 3 条）。
         // 由调用方注入 —— 它拿着 GroupPage 的场景历史栈与 groupId。
         return widget.onGroupBack();
+      case AylaBackAction.popEntryOrigin:
+        // 回上一级（web navigate(-1)）。消费一次即失效，避免重复回退。
+        _confirm.reset();
+        final String? target = takeEntryOrigin(widget.pathname);
+        final ValueChanged<String>? goTo = widget.onGoToOrigin;
+        if (target == null || goTo == null) {
+          // 来源已被消费 / 未接线 ⇒ 收敛到一级主页（与旧行为一致）。
+          widget.onGoHome();
+          return true;
+        }
+        goTo(target);
+        return true;
       case AylaBackAction.goHome:
         _confirm.reset();
+        aylaClearEntryOrigin();
         widget.onGoHome();
         return true;
       case AylaBackAction.homeExit:

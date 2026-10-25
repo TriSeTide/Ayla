@@ -60,6 +60,7 @@ class GroupVoicePage extends ConsumerStatefulWidget {
     this.routeChannelId,
     this.fromShare = false,
     this.onExit,
+    this.onOpenChannel,
   });
 
   final String groupId;
@@ -73,6 +74,17 @@ class GroupVoicePage extends ConsumerStatefulWidget {
 
   /// 「返回聊天」（空态键；web tsx 225–227）。
   final VoidCallback? onExit;
+
+  /// 「列表 → 进房」跳转（**由 GroupPage 注入**，它会先记一条场景历史再 go）。
+  ///
+  /// ## 为什么不能在本页自己 context.go（2026-10-23 返回键修复）
+  /// 群内 5 条路由共用同一个 Page key ⇒ 不能 context.push（会红屏，
+  /// 见 no_group_push_test.dart）；而单纯 context.go **不产生历史层**
+  /// ⇒ 返回键会跳过「语音房列表」直接回上一个场景/主页（用户实报）。
+  /// 场景历史的唯一 owner 是 GroupPage._sceneHistory ⇒ 本页只上报意图。
+  ///
+  /// null（未注入，例如画布样张 / 单测）⇒ 退回本页自建 context.go（行为与从前一致）。
+  final void Function(String channelId)? onOpenChannel;
 
   @override
   ConsumerState<GroupVoicePage> createState() => _GroupVoicePageState();
@@ -353,10 +365,19 @@ class _GroupVoicePageState extends ConsumerState<GroupVoicePage> {
                 // 群页 5 条路由共用同一个 `kAylaGroupShellPageKey`（为的是切场景不重建整页），
                 // 同一 Page key 被压栈两次 ⇒ 抛 `!keyReservation.contains(key)` 断言。
                 // 群内逐级返回由 `GroupPage` 的 PopScope + 场景历史栈承担，不依赖路由栈。
-                onJoin: (String channelId) => context.go(
-                  '/group/${Uri.encodeComponent(widget.groupId)}/voice/'
-                  '${Uri.encodeComponent(channelId)}',
-                ),
+                // 进房：优先交回 GroupPage（它会先记场景历史再 go ⇒ 返回键回列表）；
+                // 未注入时保持原行为（单测 / 画布样张）。
+                onJoin: (String channelId) {
+                  final void Function(String)? open = widget.onOpenChannel;
+                  if (open != null) {
+                    open(channelId);
+                    return;
+                  }
+                  context.go(
+                    '/group/${Uri.encodeComponent(widget.groupId)}/voice/'
+                    '${Uri.encodeComponent(channelId)}',
+                  );
+                },
               ),
             ),
             AylaDirectoryLoadMore(

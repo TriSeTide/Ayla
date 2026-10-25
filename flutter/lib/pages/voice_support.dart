@@ -1057,7 +1057,9 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
   void _openUserProfile(String userId, String? currentUserId) {
     if (userId.isEmpty) return;
     if (currentUserId != null && currentUserId == userId) {
-      context.go('/profile');
+      // web goUserProfile 的 navigateTo('/profile') = **push** ⇒ 返回回原页面
+      //（2026-10-23 返回键修复：go 会替换掉语音房 ⇒ 返回直接回主页）。
+      context.push('/profile');
     } else {
       context.push('/user/${Uri.encodeComponent(userId)}');
     }
@@ -1112,18 +1114,14 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       ref.read(voiceStateProvider).removeChannel(widget.channelId);
       if (!mounted) return;
       // 返回：能回退就 pop（进房是 push），栈底回 backPath。
+      //
+      // ⚠️ 此前这里是**三层嵌套的同一个 if**（2026-10-23 清理）：三个分支的条件与
+      // 动作完全相同，纯属复制粘贴产物 —— 行为虽对，但读起来像有三级兜底，
+      // 会误导后续改动。收敛成与 [_onBack] / [_onLeave] 完全一致的单一形态。
       if (context.canPop()) {
         context.pop();
       } else {
-        if (context.canPop()) {
-          context.pop();
-        } else {
-          if (context.canPop()) {
-      context.pop();
-    } else {
-      context.go(widget.backPath);
-    }
-        }
+        context.go(widget.backPath);
       }
     } catch (error) {
       if (!mounted) return;

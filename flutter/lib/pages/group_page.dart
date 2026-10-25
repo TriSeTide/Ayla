@@ -563,6 +563,70 @@ class _GroupPageState extends ConsumerState<GroupPage> {
     return true;
   }
 
+  /// 记一次「从场景根进入下一级」的历史（**只入栈、不导航**）。
+  ///
+  /// ## 为什么需要它（2026-10-23 用户实报「返回键回到主页而不是上一级」的根因之一）
+  /// [_sceneHistory] 此前**只有 [_goScene] 会写**。而群内有四条「进下一级」的路径
+  /// 直接 context.go 到子路由、**从不入栈**：
+  ///
+  /// | 触发点 | 目标 |
+  /// |---|---|
+  /// | GroupVoicePage 点语音房卡 | /group/:id/voice/:cid |
+  /// | 宽屏侧栏点语音房行（[_openVoiceChannel]） | 同上 |
+  /// | 宽屏侧栏点直播间行（[_openLiveChannel]） | /group/:id/live/:cid |
+  /// | GroupPostsPage 点帖子卡 | /group/:id/posts/:pid |
+  ///
+  /// 后果：进房/进详情后按返回，[_popScene] 拿到的是**更早的**场景（甚至空栈）
+  /// ⇒ 第一下跳过列表、第二下直接 go('/group') 回主页 —— 正是用户描述的现象。
+  ///
+  /// ## web 侧为什么没有这个问题
+  /// web 的这些跳转都是 navigate(...)（**push**，GroupVoice.tsx:114–119 /
+  /// GroupPosts.tsx:426–432 / GroupPage.tsx:300–315），浏览器历史里天然多一层
+  /// ⇒ 返回键 = navigate(-1) 回列表。Flutter 侧群路由**共用同一个 Page key**
+  /// 不能 push（见 kAylaGroupShellPageKey 与 no_group_push_test.dart）
+  /// ⇒ 必须用「场景历史栈」复刻同一层历史，本方法就是那个写入点。
+  ///
+  /// 规则（与 [_goScene] 的规则 1 同源）：**与栈顶相同则不重复入栈**
+  ///（在同一场景内反复切换房间不叠加历史，返回一次即回列表）。
+  void _rememberScene(AylaGroupScene scene) {
+    if (_sceneHistory.isNotEmpty && _sceneHistory.last == scene) return;
+    _sceneHistory.add(scene);
+  }
+
+  /// 当前是否停在「场景根之下的一级」（房内 / 帖子详情）。
+  ///
+  /// 对应路由形态：/group/:id/voice/:cid、/group/:id/live/:cid、/group/:id/posts/:pid。
+  bool get _isBelowSceneRoot =>
+      widget.postId != null ||
+      widget.voiceChannelId != null ||
+      widget.liveChannelId != null;
+
+  /// 回**当前场景的根**（房内/详情 ⇒ 对应列表页）。
+  ///
+  /// 这一档覆盖「场景历史栈为空」但人仍停在子路由的情况 —— 典型是
+  /// **冷启动 deep-link 直达某个房间/帖子**（分享链接、通知）。此时栈空，
+  /// 若不先回列表就会一步掉到 /group 主页（用户实报的第二种形态）。
+  ///
+  /// 与 web 对齐：房间「返回」按钮写的就是 navigate('/group/:id/voice')
+  ///（GroupVoice.tsx:141），帖子详情同理回列表。
+  bool _popToSceneRoot() {
+    if (!_isBelowSceneRoot) return false;
+    final String id = Uri.encodeComponent(widget.groupId);
+    // 子路由所属场景 = 当前 route 决定的场景（aylaGroupSceneFromRoute 在 build 里
+    // 已按 postId > voiceChannelId > liveChannelId 的优先级算过，这里同口径）。
+    final AylaGroupScene scene = aylaGroupSceneFromRoute(
+      scene: widget.scene,
+      postId: widget.postId,
+      voiceChannelId: widget.voiceChannelId,
+      liveChannelId: widget.liveChannelId,
+    );
+    ref.read(groupStateProvider).setActiveScene(scene);
+    context.go(scene == AylaGroupScene.chat
+        ? '/group/$id'
+        : '/group/$id/${scene.name}');
+    return true;
+  }
+
   /// 系统返回键的**权威处理**（由 `layout/app_back.dart` 的 AylaBackButtonHost 调用）。
   ///
   /// 返回 **true = 本次已处理**（不再落到系统 `SystemNavigator.pop`）。
@@ -577,12 +641,36 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   /// 正是用户实报的「手机返回键直接退出应用」。
   Future<bool> _handleSystemBack() async {
     if (!mounted) return true;
-    if (_popScene()) return true; // ①
+    // ⓪ **先回本场景的根**（房内 / 帖子详情 ⇒ 对应列表）。
+    //
+    // 这一档必须排在场景历史栈之前：进房/进详情**不改变场景**（voice 还是 voice），
+    // 所以场景栈里那条记录是「上一个场景」而不是「列表」——
+    // 先取栈就会跳过列表直接换场景（用户实报「不是回上一级」）。
+    // 与 web 一致：web 的返回键是历史回退，栈顶就是列表页那条 history entry。
+    if (_popToSceneRoot()) return true;
+    if (_popScene()) return true; // ①②
     if (context.canPop()) {
-      context.pop(); // ②
+      context.pop();
       return true;
     }
-    context.go('/group'); // ③
+    // ③ 都没有 ⇒ 收敛。
+    //
+    // ⚠️ 不能在**任何**群内位置都直接 go('/group')（2026-10-23 用户实报
+    // 「返回键是返回到主页而不是上一级」）：人还在某个群场景的根上时，
+    // 「上一级」是**这个群的聊天场景**（/group/:id），不是群列表主页。
+    // 例：冷启动直达 /group/g1/voice（分享链接）⇒ 返回=语音列表 ⇒ 再返回
+    // 应回群聊天 /group/g1，而不是直接跳回 /group。
+    //
+    // 与 web 的差异（登记）：web 冷启动直达时浏览器历史里没有群聊天那条，
+    // navigate(-1) 会离开站点；Flutter 作为原生客户端不能让用户「退出应用」，
+    // 故收敛到群壳 —— 语义上就是「退回本群的上一级」。
+    final AylaGroupScene scene = ref.read(groupStateProvider).activeScene;
+    if (scene != AylaGroupScene.chat) {
+      ref.read(groupStateProvider).setActiveScene(AylaGroupScene.chat);
+      context.go('/group/${Uri.encodeComponent(widget.groupId)}');
+      return true;
+    }
+    context.go('/group'); // 仅在群聊天场景根 ⇒ 回群列表
     return true;
   }
 
@@ -655,12 +743,23 @@ class _GroupPageState extends ConsumerState<GroupPage> {
           // 分享进入免白名单（web GroupVoice.tsx:25 的 location.state.fromShare）。
           fromShare: widget.fromShare,
           onExit: () => _goScene(AylaGroupScene.chat),
+          // 列表 → 进房：先记场景历史再 go（web 是 push，见 [_rememberScene]）。
+          onOpenChannel: (String channelId) => _openGroupChild(
+            '/group/${Uri.encodeComponent(widget.groupId)}/voice/'
+            '${Uri.encodeComponent(channelId)}',
+            AylaGroupScene.voice,
+          ),
         );
       case AylaGroupScene.posts:
         return GroupPostsPage(
           groupId: widget.groupId,
           postId: widget.postId,
           onExit: () => _goScene(AylaGroupScene.chat),
+          // 列表 → 帖子详情：同上（web GroupPosts.tsx:426-432 的 navigate = push）。
+          onOpenPost: (int postId) => _openGroupChild(
+            '/group/${Uri.encodeComponent(widget.groupId)}/posts/$postId',
+            AylaGroupScene.posts,
+          ),
         );
       case AylaGroupScene.games:
         return GroupGamesPage(
@@ -704,24 +803,21 @@ class _GroupPageState extends ConsumerState<GroupPage> {
             groupName,
             currentGroup,
           );
-    // 安卓返回键 / 系统手势返回：按 web `navigate` 的逐级回退语义分三层处理。
+    // 安卓返回键 / 系统手势返回：按 web `navigate` 的逐级回退语义分档处理。
     //
-    // ① 本页有场景历史（chat → voice/info/posts …）⇒ 回上一场景；
-    // ② 场景栈空、但**路由栈里有上一页**（从主页列表 push 进来）⇒ pop 回上一页；
-    // ③ 都没有（冷启动 deep-link 直达某群）⇒ 回群列表 `/group`，**不能**让系统默认 pop
-    //    落到空栈后退出应用 —— 这正是用户实报的「返回键直接退出」的第二种形态。
+    // ⚠️ **本 PopScope 在真机上收不到返回键**（2026-10-20 实测机制链见
+    // `layout/app_back.dart` 文件头第 3 条：go_router 只 pop **顶层** Navigator，
+    // 而本页挂在 shell 内层 ⇒ `onPopInvokedWithResult` 一次都不执行）。
+    // 权威实现是 [_handleSystemBack]（由 `AylaBackButtonHost` 调用）。
     //
-    // 因此 `canPop` 恒为 false：三种情况全部由本页显式处理，绝不让系统把 Activity 弹掉。
+    // 这里**保留同一套分档**而不是删掉：① 万一将来 go_router 改回把返回键交给内层，
+    // 这条兜底仍然正确；② 两份逻辑若不一致，后来者会照抄错的那一份。
+    // ⇒ 判据顺序与 [_handleSystemBack] **逐档同源**，改动时两边必须同步。
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (bool didPop, Object? result) {
         if (didPop) return;
-        if (_popScene()) return; // ①
-        if (context.canPop()) {
-          context.pop(); // ②
-          return;
-        }
-        context.go('/group'); // ③
+        unawaited(_handleSystemBack());
       },
       child: body,
     );
@@ -969,6 +1065,10 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   }
 
   void _openVoiceChannel(String channelId) {
+    // 记一次「从场景根进下一级」的历史（web 是 navigate push，见 [_rememberScene]）：
+    // 否则返回键会跳过列表直接回主页。
+    final AylaGroupScene current = ref.read(groupStateProvider).activeScene;
+    if (current != AylaGroupScene.voice) _rememberScene(current);
     ref.read(groupStateProvider).setActiveScene(AylaGroupScene.voice);
     context.go(
       '/group/${Uri.encodeComponent(widget.groupId)}/voice/'
@@ -977,11 +1077,27 @@ class _GroupPageState extends ConsumerState<GroupPage> {
   }
 
   void _openLiveChannel(String channelId) {
+    final AylaGroupScene current = ref.read(groupStateProvider).activeScene;
+    if (current != AylaGroupScene.live) _rememberScene(current);
     ref.read(groupStateProvider).setActiveScene(AylaGroupScene.live);
     context.go(
       '/group/${Uri.encodeComponent(widget.groupId)}/live/'
       '${Uri.encodeComponent(channelId)}',
     );
+  }
+
+  /// 群内「列表 → 房内 / 详情」的统一跳转入口（**先记历史再 go**）。
+  ///
+  /// 由两个场景页通过注入回调调用（[GroupVoicePage.onOpenChannel] /
+  /// [GroupPostsPage.onOpenPost]）—— 它们自己不能 push（群路由共用 Page key），
+  /// 也不该各自维护一份场景历史（唯一 owner 是本页的 _sceneHistory）。
+  ///
+  /// [scene] = 目标子路由所属场景（voice / live / posts）。
+  void _openGroupChild(String path, AylaGroupScene scene) {
+    final AylaGroupScene current = ref.read(groupStateProvider).activeScene;
+    if (current != scene) _rememberScene(current);
+    ref.read(groupStateProvider).setActiveScene(scene);
+    context.go(path);
   }
 
   // ======================= 窄屏（tsx 438–496）=======================

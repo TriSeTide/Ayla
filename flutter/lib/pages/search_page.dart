@@ -56,6 +56,7 @@ import '../core/net/dio_client.dart' show ApiException;
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart'
     show chatStateProvider, chatWsProvider;
+import '../layout/app_back.dart' show aylaRememberEntryOrigin;
 import '../state/search_history.dart';
 import '../theme/app_icons.dart';
 import '../theme/glass.dart' show AylaGlassButton, AylaGlassButtonVariant;
@@ -583,7 +584,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   void _openUserProfile(AylaSearchUserItem user) {
     final String? me = ref.read(authNotifierProvider).user?.id;
     if (me != null && me == user.id) {
-      context.go('/profile');
+      // web utils/navigation.ts:24–35 goUserProfile 走 navigateTo（= navigate，
+      // **push** 语义）⇒ 个人页返回回搜索页，而不是回一级主页。
+      context.push('/profile');
     } else {
       final String encoded = Uri.encodeComponent(user.id);
       context.push('/user/$encoded');
@@ -758,6 +761,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           avatarUrl:
               (selectedUser.avatar ?? '').isEmpty ? null : selectedUser.avatar,
           online: selectedUser.online,
+          // 传 id ⇒ 资料浮层头像自订阅 presence（web `UserProfileCard.tsx:20/52`
+          // 的 `usePresenceOnline(user)`）。此前只有 selectedUser.online（REST 快照）。
+          userId: selectedUser.id,
           error: _profileError,
           friendBusy: _profileBusy == 'friend',
           chatBusy: _profileBusy == 'chat',
@@ -1050,6 +1056,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               signature: user.signature, // tsx 405：有才渲染
               avatarUrl: (user.avatar ?? '').isEmpty ? null : user.avatar,
               online: user.online,
+              // 传 id ⇒ 行头像自订阅 presence（web `SearchPage.tsx:392–396`）。
+              userId: user.id,
               // ≥769：min-height 64 + padding sp3 sp4（search.css:490–496，带 .search-page 前缀）
               wide: wide,
               onOpenProfile: () => _openUserProfile(user),
@@ -1297,6 +1305,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   /// `saveScrollPosition(scope, pageRef.current); navigate(path);`）。
   void _openPath(String path) {
     AylaScrollMemory.save('search:$_scope', _scroll);
+    // 记住来源（web `SearchPage.tsx:120–123` 的 `navigate(path)` 是 **push** ⇒
+    // 详情返回回**搜索页**）。
+    // `/group` 目标仍必须用 go（群路由共用 Page key，push 实测必红屏），
+    // 但两档都记来源 ⇒ 返回键在路由栈空时能回搜索页而不是主页
+    //（用户 2026-10-23 实报「返回键是返回到主页而不是上一级」）。
+    aylaRememberEntryOrigin(
+      _scope.isEmpty ? '/search' : '/search?q=${Uri.encodeQueryComponent(_scope)}',
+    );
     context.go(path);
   }
 
@@ -1309,8 +1325,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     return () {
       final String? me = ref.read(authNotifierProvider).user?.id;
       if (me != null && me == authorId) {
-        // 搜索页的跳转口径是 `go`（见 _openPath），个人页同档。
-        context.go('/profile');
+        // web utils/navigation.ts:24–35 goUserProfile 是 navigate（**push**）
+        // ⇒ 返回回搜索页（旧注释「搜索页跳转口径是 go」对结果卡片成立，
+        // 对**头像**不成立：web 的 goUserProfile 从不 replace）。
+        context.push('/profile');
       } else {
         context.push('/user/${Uri.encodeComponent(authorId)}');
       }

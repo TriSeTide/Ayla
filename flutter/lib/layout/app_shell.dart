@@ -241,6 +241,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       userName: user?.nickname ?? '',
       userAvatarUrl: user?.avatar,
       userOnline: user?.online ?? false,
+      // 传 id ⇒ 顶栏头像自订阅 presence。
+      // 此前只传 userOnline（REST 快照）⇒ 自己上下线/切隐身时顶栏光环不动。
+      userId: user?.id,
       searchQuery: _searchQuery,
       onSearchChanged: (String v) => setState(() => _searchQuery = v),
       onSearchSubmitted: (String q) =>
@@ -279,6 +282,8 @@ class _AppShellState extends ConsumerState<AppShell> {
         userName: user?.nickname ?? '',
         userAvatarUrl: user?.avatar,
         userOnline: user?.online ?? false,
+        // 窄屏同宽屏：传 id 让头像自订阅 presence。
+        userId: user?.id,
         onAvatarTap: () => context.go('/profile'),
         onSearchFieldTap: () => context.push('/search'),
         onMenuSelected: _onMenuSelected,
@@ -349,7 +354,13 @@ class _AppShellState extends ConsumerState<AppShell> {
     return AylaBackButtonHost(
       pathname: pathname,
       canPop: context.canPop(),
-      onGoHome: () => context.go(kAylaHomePath),
+      onGoHome: () {
+        aylaClearEntryOrigin();
+        context.go(kAylaHomePath);
+      },
+      // 回「上一级页面」（路由栈空且记得来源时）—— web navigate(-1) 的等价物。
+      // 不在这里 clear：takeEntryOrigin 已消费过本次来源。
+      onGoToOrigin: (String origin) => context.go(origin),
       // 群页的三级兜底必须由活着的那一个 GroupPage State 执行（场景历史栈是它的私有
       // 状态）；它挂载时把处理器登记到模块级 [aylaGroupBackHandler]。
       onGroupBack: () async {

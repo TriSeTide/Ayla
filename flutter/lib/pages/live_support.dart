@@ -835,7 +835,9 @@ class AylaLiveViewerSheetController extends ChangeNotifier {
   }) {
     if (targetUserId.isEmpty) return;
     if (currentUserId != null && currentUserId == targetUserId) {
-      context.go('/profile');
+      // web goUserProfile 的 navigateTo('/profile') = **push** ⇒ 返回回原页面
+      //（2026-10-23 返回键修复：go 会替换掉直播间 ⇒ 返回直接回主页）。
+      context.push('/profile');
     } else {
       context.push('/user/${Uri.encodeComponent(targetUserId)}');
     }

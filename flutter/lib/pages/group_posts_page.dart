@@ -111,6 +111,7 @@ class GroupPostsPage extends ConsumerStatefulWidget {
     required this.groupId,
     this.postId,
     this.onExit,
+    this.onOpenPost,
   });
 
   final String groupId;
@@ -120,6 +121,17 @@ class GroupPostsPage extends ConsumerStatefulWidget {
 
   /// 「返回聊天」（空态键；web tsx 409–411）。
   final VoidCallback? onExit;
+
+  /// 「列表 → 帖子详情」跳转（**由 GroupPage 注入**，它会先记场景历史再 go）。
+  ///
+  /// ## 为什么不自己 context.go（2026-10-23 返回键修复）
+  /// 群内 5 条路由共用同一个 Page key ⇒ 不能 context.push（会红屏，
+  /// 见 no_group_push_test.dart）；而裸 go **不产生历史层**
+  /// ⇒ 返回键会跳过「帖子列表」直接回上个场景/主页（用户实报「不是回上一级」）。
+  /// 场景历史的唯一 owner 是 GroupPage._sceneHistory ⇒ 本页只上报意图。
+  ///
+  /// null（未注入）⇒ 退回本页自建 context.go（行为与从前一致）。
+  final void Function(int postId)? onOpenPost;
 
   @override
   ConsumerState<GroupPostsPage> createState() => _GroupPostsPageState();
@@ -914,6 +926,13 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     // `kAylaGroupShellPageKey` ⇒ push 会让同一 Page key 出现两次 ⇒
     // 抛 `!keyReservation.contains(key)` 断言。
     // 详情往返由本页 `didUpdateWidget` 的 `postId` 分支承担（保留外壳），不依赖路由栈。
+    // 交回 GroupPage 注入的 [GroupPostsPage.onOpenPost]：它先记一条场景历史再 go，
+    // 与 web GroupPosts.tsx:426–432 的 navigate（push）等价（2026-10-23 返回键修复）。
+    final void Function(int)? open = widget.onOpenPost;
+    if (open != null) {
+      open(id);
+      return;
+    }
     context.go(
       '/group/${Uri.encodeComponent(groupId)}/posts/$id',
     );
@@ -925,7 +944,14 @@ class _GroupPostsPageState extends ConsumerState<GroupPostsPage> {
     final String? postId = widget.postId;
     // 群内帖子详情：不让状态栏（群顶栏已覆盖着色，否则两者之间多出一条空白色带）。
     if (postId != null) {
-      return PostDetailPage(postId: postId, inGroup: true);
+      return PostDetailPage(
+        postId: postId,
+        inGroup: true,
+        // 返回落点 = **群内帖子列表**（web PostDetailPage.tsx:70–74 的
+        // returnTo = /group/:id/posts）。此前不传 ⇒ 详情页的栈底兜底写成
+        // /posts（一级帖子大厅）⇒ 群内按返回会跳出群（2026-10-23 返回键修复）。
+        fromGroupId: groupId,
+      );
     }
 
     final AylaTextStyles t = AylaTextStyles.of(context);

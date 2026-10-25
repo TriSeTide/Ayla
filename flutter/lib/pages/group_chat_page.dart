@@ -389,22 +389,56 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
     ref.read(chatStateProvider).openConversation(groupId);
     ref.read(messageStateProvider).openBucket(groupId);
     ref.read(chatWsProvider).subscribe(<String>[groupId]);
-    final AylaConversationSummary? conv = ref
-        .read(chatStateProvider)
-        .byId(groupId);
-    if (conv == null || conv.membersComplete != true) {
-      unawaited(_loadMembers());
-    }
-    unawaited(() async {
-      try {
-        final AylaConversationSummary fresh =
-            await AylaChatApi.getConversationMetadata(groupId);
-        if (mounted) ref.read(chatStateProvider).upsertConversation(fresh);
-      } catch (_) {
-        // 拉不到：沿用目录摘要（不阻断聊天）。
-      }
-    }());
+    // ⚠️ **metadata 必须先落库，再合并成员页码**（2026-10-23 用户实报
+    // 「手机端群聊界面不显示别人的头像，私信没这个问题」的真根因）。
+    //
+    // 现场：_loadMembers 与 getConversationMetadata 并发跑。_loadMembers 结束时
+    // 要求 byId(groupId) != null 才写成员；而 getConversationMetadata 的响应是
+    // members 为空 + members_complete=false 的目录档。
+    // 两条路径的完成顺序一旦反过来（手机慢网下极常见：成员页比 metadata 快）：
+    //   ① 成员页先回 ⇒ chatState 里还没有这个群 ⇒ current == null ⇒ **成员被丢弃**；
+    //   ② 之后 metadata 才 upsert（members 空 + members_complete=false）；
+    //   ③ _loadMembers 已跑完、没有第二次机会 ⇒ conv.members 永远为空
+    //      ⇒ 气泡拿不到 senderAvatarUrl/senderAvatarLabel ⇒ **别人的头像昵称全不显示**
+    //（自己的消息本来就不画头像，所以看起来像「只有别人没有」）。
+    //
+    // 私信没有此问题：私聊 metadata 走 ConversationMetadataSerializer 的 members[:2]
+    //（后端 get_members 对非群返回完整对端），成员内联在响应里。
+    // web 侧也没此问题：GroupChat.tsx:159–194 的成员 effect **依赖
+    // activeConv?.members_complete**，metadata upsert 后该依赖变化 ⇒ effect 重跑。
+    //
+    // Flutter 侧照 web 的依赖语义串行化：成员合并挂在 metadata 之后，
+    // 但仍与历史加载**并发**（web 三个 effect 也是并发的，不能把首屏拖慢）。
+    final Future<void> metadata = _loadConversationMetadata();
+    unawaited(metadata.then((_) => _ensureMembersLoaded()));
     await _loadHistory(subgroup: _activeSubgroup);
+  }
+
+  /// 拉会话 metadata 并落 chatState（web `GroupChat.tsx:149–158` 的第一个 effect）。
+  ///
+  /// 失败不阻断聊天：沿用目录摘要（列表页已经灌进 chatState 的那份）。
+  Future<void> _loadConversationMetadata() async {
+    try {
+      final AylaConversationSummary fresh =
+          await AylaChatApi.getConversationMetadata(groupId);
+      if (!mounted) return;
+      ref.read(chatStateProvider).upsertConversation(fresh);
+    } catch (_) {
+      // 拉不到：沿用目录摘要（不阻断聊天）。
+    }
+  }
+
+  /// 群成员全量合并（web `GroupChat.tsx:159–194` 的第二个 effect）。
+  ///
+  /// 群聊发送者头像/昵称依赖完整成员表：metadata 有意排除 members
+  ///（后端 ConversationMetadataSerializer.get_members 对群返回空数组），会话目录同样为空
+  /// ⇒ 必须全量拉成员页并合并进 conversation.members。
+  /// members_complete == true 后不再重复拉取（web 同）；失败只缺头像/昵称，不阻断聊天。
+  Future<void> _ensureMembersLoaded() async {
+    final AylaConversationSummary? current =
+        ref.read(chatStateProvider).byId(groupId);
+    if (current != null && current.membersComplete == true) return;
+    await _loadMembers();
   }
 
   // ==================== 收藏消息定位（web `GroupChat.tsx:72–101`） ====================
@@ -524,7 +558,13 @@ class _GroupChatPageState extends ConsumerState<GroupChatPage>
     final AylaConversationSummary? current = ref
         .read(chatStateProvider)
         .byId(groupId);
-    if (current == null) return;
+    if (current == null) {
+      // 群摘要不在 chatState ⇒ **不写**：成员是摘要的一个字段，凭空造一条摘要会让
+      // 群名/角色/未读全变空值（比缺头像更糟）。
+      // 这条分支曾是竞态主因；现在 [_bootstrap] 把本函数挂在 metadata 之后调用
+      // ⇒ 正常路径下 current 必然存在。留这条守卫给「metadata 也失败」的极端情况。
+      return;
+    }
     ref
         .read(chatStateProvider)
         .upsertConversation(

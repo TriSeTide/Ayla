@@ -70,6 +70,7 @@ import '../widgets/base/directory_load_more.dart';
 import '../widgets/base/media_interaction.dart' show AylaPullToRefresh;
 import '../widgets/base/reveal.dart';
 import '../widgets/group/group_card.dart';
+import '../layout/app_back.dart' show aylaRememberEntryOrigin;
 import '../layout/create_sheet_forms.dart' show AylaCreateGroupForm;
 import '../widgets/group/home_toolbar.dart' show AylaHomeToolbar;
 import '../widgets/live/live_channel_snapshot.dart' show AylaLiveChannelSnapshot;
@@ -450,8 +451,15 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _openGroup(String id) {
     _prefs.setRecentGroup(id);
-    // 列表 → 群聊：**push**（web `HomePage.tsx:98` 的 navigate 是 push 语义 ⇒ 返回回本列表）。
-    // 此前用 `go` 会替换当前页，手机端按返回直接退出应用（2026-10-19 用户实报「返回键直接退出」）。
+    // 列表 → 群聊：web `HomePage.tsx:98` 的 `navigate` 是 **push** ⇒ 返回回本列表。
+    //
+    // ⚠️ Flutter 侧**不能**照搬 `context.push`（2026-10-23 实测）：
+    // 群路由 5 条共用 `kAylaGroupShellPageKey`，push 会让同一 Page key 压栈两次 ⇒
+    // `!keyReservation.contains(key)` 断言红屏（见 `no_group_push_test.dart`）。
+    // ⇒ 用 `go` + **记下来源路径**：`GroupPage` 的返回键在场景栈/路由栈都空时
+    // 会优先回这个来源（`layout/app_back.dart` 的 `takeEntryOrigin`），
+    // 与 web 的「返回回列表」同效。
+    aylaRememberEntryOrigin('/group');
     context.go('/group/$id');
   }
 
