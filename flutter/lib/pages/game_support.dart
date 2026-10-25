@@ -321,6 +321,10 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
       room: room,
       narrow: narrow,
       currentUserId: selfId,
+      // 群内：状态栏由群顶栏 AylaGroupTopTabs 覆盖着色 ⇒ 房内头部不再让位，
+      // 否则群顶栏与房内头部之间会多出一条空白色带（2026-10-19 用户两次实拍）。
+      // ⚠️ 本参数此前**只加在 Host 上却没透传给组件** ⇒ 群内空白带一直在（本轮修）。
+      topInset: !widget.inGroup,
       // 返回：能回退就 pop（进房是 push），栈底回大厅。
       onBack: () => context.canPop() ? context.pop() : context.go('/games'),
       onShare: () => unawaited(aylaOpenShareSheet(
