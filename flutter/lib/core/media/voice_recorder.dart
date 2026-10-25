@@ -23,7 +23,8 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show ChangeNotifier, Listenable;
+import 'package:flutter/foundation.dart'
+    show ChangeNotifier, Listenable, debugPrint;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -250,7 +251,22 @@ class AylaRecordVoiceRecorder extends ChangeNotifier implements AylaVoiceRecorde
   Future<void> close() async {
     _ticker?.cancel();
     _ticker = null;
-    await _recorder.dispose();
+    // ⚠️ **必须吞掉插件异常**（2026-10-23 实测回归）：
+    //
+    // `_recorder.dispose()` 走 record 包的原生通道
+    // （`com.llfbandit.record/messages`）。在 **widget 测试 / 组件画布**里没有该
+    // 插件的原生实现 ⇒ 抛 `MissingPluginException`。页面 `dispose()` 里是
+    // `unawaited(_voiceRecorder.close())`（不该 await，否则拖慢卸载）⇒ 异常逃逸到
+    // Zone 变成 unhandled error，直接让**任何渲染含输入框的测试**随机变红
+    // （实测 group_chat_avatars / group_back_navigation / tmp_back_audit 共 5 例）。
+    //
+    // 语义上也应静默：close 是「尽力释放」，插件缺失时没有资源需要释放。
+    // 真机句柄泄漏由 start()/stop() 路径的报错覆盖，不靠 close 发现。
+    try {
+      await _recorder.dispose();
+    } catch (e) {
+      debugPrint('[AylaVoiceRecorder] dispose 失败（忽略）: $e');
+    }
     super.dispose();
   }
 }
