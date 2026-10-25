@@ -518,6 +518,8 @@ class _AylaCommentComposerState extends State<AylaCommentComposer> {
                       ? MediaVariant.thumb
                       : null,
                   fit: BoxFit.cover,
+                  // 评论图 = 永久资产 A3/A4（用户裁决 2026-10-23）⇒ 不落本地缓存
+                  cacheable: false,
                 ),
               ),
             ),
@@ -944,6 +946,8 @@ class _AylaCommentListState extends State<AylaCommentList> {
               variant: media.thumbnail != null ? MediaVariant.thumb : null,
               alt: '',
               fit: BoxFit.cover, // object-fit: cover
+              // 评论图 = 永久资产 A3/A4（用户裁决 2026-10-23）⇒ 不落本地缓存
+              cacheable: false,
             ),
           ),
         ),

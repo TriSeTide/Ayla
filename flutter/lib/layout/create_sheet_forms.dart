@@ -104,6 +104,7 @@ import '../widgets/live/live_channel_snapshot.dart'
     show AylaLiveChannelSnapshot;
 import '../widgets/live/live_hall.dart' show AylaLiveCardData;
 import '../widgets/live/live_rail.dart' show AylaLiveStartSheet;
+import '../core/media/media_actions.dart' show AylaMediaActions;
 import '../widgets/posts/post_editor.dart' show AylaPostEditor;
 import '../widgets/shell/create_sheet.dart' show AylaCreateSheet;
 import '../widgets/voice/voice_channel_create.dart'
@@ -678,6 +679,23 @@ class _AylaCreatePostFormState extends ConsumerState<AylaCreatePostForm>
         groups: createFormGroups,
         groupsLoading: createFormGroupsLoading,
         onSubmit: _submit,
+        // 媒体三层（web `PostEditor.tsx:103–146` `uploadFiles` + `deleteMedia`）：
+        // 之前这里**只给了 onSubmit**，图片/视频钮因 `onPickMedia == null` 恒不可点
+        // （`post_editor.dart:526`）⇒ 用户实报「帖子发图按钮没反应」。
+        // web 侧这三件事由组件自己调 `uploadMediaFile` / `deleteMedia`；Flutter 侧
+        // 组件只认注入 ⇒ 页面按 `core/media/media_actions.dart` 的组合动作接线。
+        onPickMedia: (int remaining, ValueChanged<double?> onProgress) =>
+            AylaMediaActions.pickMedia(
+              remaining: remaining,
+              onProgress: onProgress,
+            ),
+        onRemoveMedia: AylaMediaActions.removeDraft,
+        // 重试 = **重新打开选择器**（web `PostEditor.tsx:256–268` 的
+        // `uploadFiles(failedFiles)` 语义是重跑本次选择，不是自动重传已丢的文件；
+        // `AylaMediaPickResult` 不携带原始文件，见 `core/models/post.dart:393–408`）。
+        onRetryFailedMedia: () => AylaMediaActions.pickMedia(
+          remaining: AylaMediaActions.maxPostMedia,
+        ),
       );
 }
 

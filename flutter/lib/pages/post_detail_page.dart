@@ -75,6 +75,7 @@ import 'package:go_router/go_router.dart';
 import '../core/api/chat_api.dart';
 import '../core/api/directory_page.dart';
 import '../core/api/posts_api.dart';
+import '../core/media/media_actions.dart' show AylaMediaActions;
 import '../core/media/media_signer.dart' show MediaVariant;
 import '../core/models/conversation.dart';
 import '../core/models/post.dart';
@@ -855,6 +856,20 @@ class _PostDetailPageState extends ConsumerState<PostDetailPage> {
               onReplyClear: () => setState(() => _replyTarget = null),
               inputEntered: true,
               inert: _editing,
+              // 评论图片三层（web `CommentComposer.tsx:105–133` `uploadFiles` +
+              // `deleteMedia`）：之前未注入 ⇒ 图片钮恒不可点（`comments.dart:411`）
+              // ⇒ 用户实报「帖子评论发图按钮没反应」。按 `core/media/media_actions.dart` 接线。
+              onPickImages: (int remaining, ValueChanged<double?> onProgress) =>
+                  AylaMediaActions.pickImages(
+                    remaining: remaining,
+                    onProgress: onProgress,
+                  ),
+              onRemoveImage: AylaMediaActions.removeDraft,
+              // 重试 = 重开选择器（web `CommentComposer.tsx:158–165` 同一语义；
+              // `AylaMediaPickResult` 不携带原始文件，无法自动重传）。
+              onRetryFailedImages: () => AylaMediaActions.pickImages(
+                remaining: AylaCommentComposer.maxImages,
+              ),
             ),
             children: <Widget>[
               Center(

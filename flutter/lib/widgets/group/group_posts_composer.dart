@@ -78,6 +78,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/media/media_actions.dart' show AylaMediaActions;
 import '../../core/models/post.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass.dart';
@@ -324,9 +325,20 @@ class _AylaGroupPostsComposerState extends State<AylaGroupPostsComposer> {
             composerShell: true, // posts.css 1027–1049 的覆写组（内沿归外壳）
             expanded: _expanded,
             onExpandedChange: _setExpanded,
-            onPickMedia: widget.onPickMedia,
-            onRetryFailedMedia: widget.onRetryFailedMedia,
-            onRemoveMedia: widget.onRemoveMedia,
+            // 未注入 ⇒ 落到库内组合动作（web `GroupPosts.tsx` 的编辑器同样自带
+            // `uploadMediaFile`/`deleteMedia`，不需要调用方接线）。
+            // 之前这三项 null 原样透传 ⇒ 群内发帖图片钮恒不可点。
+            onPickMedia: widget.onPickMedia ??
+                (int remaining, ValueChanged<double?> onProgress) =>
+                    AylaMediaActions.pickMedia(
+                      remaining: remaining,
+                      onProgress: onProgress,
+                    ),
+            onRetryFailedMedia: widget.onRetryFailedMedia ??
+                () => AylaMediaActions.pickMedia(
+                      remaining: AylaMediaActions.maxPostMedia,
+                    ),
+            onRemoveMedia: widget.onRemoveMedia ?? AylaMediaActions.removeDraft,
             initialTitle: widget.initialTitle,
             initialBody: widget.initialBody,
             initialImages: widget.initialImages,
