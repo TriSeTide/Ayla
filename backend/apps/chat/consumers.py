@@ -505,6 +505,42 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def conversation_view_changed(self, event):
+        """本人多端同步：会话置顶/隐藏变化 → 转发（用户级组，只到本人其它端）。"""
+        await self.send_json(
+            {
+                "type": "conversation.view.changed",
+                "data": {
+                    "conversation_id": event["conversation_id"],
+                    "pinned": event.get("pinned"),
+                    "hidden": event.get("hidden"),
+                },
+            }
+        )
+
+    async def friend_added(self, event):
+        """好友关系建立（双向通知）→ 转发。"""
+        await self.send_json(
+            {
+                "type": "friend.added",
+                "data": {
+                    "friend_id": event["friend_id"],
+                    "nickname": event.get("nickname", ""),
+                    "username": event.get("username", ""),
+                    "avatar": event.get("avatar", ""),
+                },
+            }
+        )
+
+    async def friend_removed(self, event):
+        """好友关系解除（双向通知）→ 转发。"""
+        await self.send_json(
+            {
+                "type": "friend.removed",
+                "data": {"friend_id": event["friend_id"]},
+            }
+        )
+
     # ---------- 语音房创建/删除推送 ----------
 
     async def voice_channel_created(self, event):

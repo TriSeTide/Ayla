@@ -961,6 +961,10 @@ class ConversationPinView(APIView):
             is_pinned = services.toggle_pin(request.user, conv, pinned)
         except PermissionError as exc:
             return _forbidden(str(exc))
+        # 补齐：置顶是**本人视图**字段，同账号多端要同步（A 端置顶，B 端也该重排）。
+        services.broadcast_conversation_view_changed(
+            request.user.id, conversation_id=conv.id, pinned=is_pinned
+        )
         return Response({"pinned": is_pinned, "detail": "已置顶" if is_pinned else "已取消置顶"})
 
 
@@ -979,6 +983,10 @@ class ConversationHideView(APIView):
         if not services.user_can_access(request.user, conv):
             return _forbidden()
         services.hide_conversation(request.user, conv)
+        # 补齐：隐藏同样是本人视图，同账号多端要同步（其它端也该消失）。
+        services.broadcast_conversation_view_changed(
+            request.user.id, conversation_id=conv.id, hidden=True
+        )
         return Response({"detail": "会话已隐藏", "hidden": True})
 
 

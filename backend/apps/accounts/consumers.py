@@ -110,6 +110,18 @@ class PresenceConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def elysia_profile_updated(self, event):
+        """爱莉 profile 变更（绑定用户/启用位）→ 广播给所有在线用户。"""
+        await self.send_json(
+            {
+                "type": "elysia.profile.updated",
+                "data": {
+                    "user_id": event.get("user_id"),
+                    "enabled": event.get("enabled"),
+                },
+            }
+        )
+
     async def user_updated(self, event):
         """公开资料变更广播（普查 W3：昵称/头像/签名，PATCH /me/profile/ 时发出）。"""
         await self.send_json(

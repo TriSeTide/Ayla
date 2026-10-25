@@ -85,6 +85,10 @@ class ElysiaProfileView(APIView):
         )
         ser.is_valid(raise_exception=True)
         profile = ser.save()
+        # 补齐：爱莉头像/昵称/启用状态变化后，所有显示她的地方都应更新。
+        from .services import broadcast_elysia_profile_updated
+
+        broadcast_elysia_profile_updated(profile)
         return Response(
             ElysiaProfileSerializer(profile, context={"request": request}).data
         )

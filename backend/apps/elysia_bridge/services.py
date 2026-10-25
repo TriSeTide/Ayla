@@ -1242,3 +1242,37 @@ __all__ = [
     "send_voice_text",
     "voice_call_transcripts",
 ]
+
+
+# ---------- 2026-10-25 补齐：爱莉 profile 变更广播 ----------
+#
+# 背景（用户规则：符合常理的热更新都要有）：爱莉的头像 / 昵称 / 启用状态变化后，
+# 所有显示她的地方（会话列表的爱莉入口、私聊顶栏、语音面板、主页爱莉卡）都应更新。
+# 此前只有 REST，改完要刷新才看到。
+
+
+def broadcast_elysia_profile_updated(profile) -> None:
+    """爱莉 profile 变更 → 广播给**所有在线用户**（presence 组，全站可见的事实）。
+
+    投递面刻意收窄：只带公开展示字段（绑定 user_id / 启用位），
+    不带 stream_id / 凭据等运维信息。
+    """
+    from channels.layers import get_channel_layer
+
+    if get_channel_layer() is None:
+        return
+    try:
+        from asgiref.sync import async_to_sync
+
+        async_to_sync(get_channel_layer().group_send)(
+            "presence",
+            {
+                "type": "elysia.profile.updated",
+                "user_id": str(profile.user_id) if profile.user_id else None,
+                "enabled": bool(getattr(profile, "enabled", False)),
+            },
+        )
+    except Exception:  # noqa: BLE001 - 广播失败不阻断保存
+        import logging
+
+        logging.getLogger(__name__).exception("elysia.profile.updated broadcast failed")

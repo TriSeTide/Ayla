@@ -480,7 +480,10 @@ class FriendRequestActionView(APIView):
             detail, resp_status = "已拒绝", "rejected"
 
         # 处理结果推给发起方（用户级广播，事务外；前端据此实时刷新）
-        from apps.chat.services import broadcast_friend_request_resolved
+        from apps.chat.services import (
+            broadcast_friend_request_resolved,
+            broadcast_friendship_changed,
+        )
 
         broadcast_friend_request_resolved(
             req.from_user_id,
@@ -488,6 +491,10 @@ class FriendRequestActionView(APIView):
             status=req.status,
             handled_at=req.handled_at,
         )
+        # 补齐（用户规则：符合常理的热更新都要有）：加好友成功后**双方**
+        # 的好友列表 / 好友数都要立刻更新 —— 此前只通知了申请人一侧。
+        if action == "accept":
+            broadcast_friendship_changed(request.user, req.from_user, action="added")
         return Response({"detail": detail, "status": resp_status})
 
 
@@ -501,4 +508,12 @@ class FriendDeleteView(APIView):
         ).delete()
         if deleted[0] == 0:
             return Response({"detail": "不是好友"}, status=status.HTTP_404_NOT_FOUND)
+        # 补齐（用户规则：符合常理的热更新都要有）：删好友此前**零广播** ⇒
+        # 对方的友列表 / 好友数 / 搜索里的「已是好友」标记都不会实时更新。
+        # 双向删除 ⇒ 双方都要通知。
+        from apps.chat.services import broadcast_friendship_changed
+
+        peer = User.objects.filter(pk=user_id).first()
+        if peer is not None:
+            broadcast_friendship_changed(request.user, peer, action="removed")
         return Response(status=status.HTTP_204_NO_CONTENT)

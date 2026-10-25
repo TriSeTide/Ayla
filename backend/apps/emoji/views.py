@@ -296,6 +296,11 @@ class GroupEmojiItemCreateView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # 补齐（用户规则：符合常理的热更新都要有）：群表情包是群成员共享的，
+        # 添加后其他成员的群表情包面板应立刻看到。
+        from apps.chat.services import broadcast_group_emoji_changed
+
+        broadcast_group_emoji_changed(conv.pk, action="added", item_id=item.pk)
         return Response(
             EmojiItemSerializer(item).data,
             status=STATUS_CREATED if created else status.HTTP_200_OK,
@@ -324,6 +329,10 @@ class GroupEmojiItemDeleteView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # 补齐：删除群表情包同样要广播（其他成员面板应立刻消失）。
+        from apps.chat.services import broadcast_group_emoji_changed
+
+        broadcast_group_emoji_changed(conv.pk, action="removed", item_id=item_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

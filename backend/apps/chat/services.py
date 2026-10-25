@@ -1560,3 +1560,111 @@ async def abroadcast_join_request_resolved(admin_ids, *, request_id, conversatio
                 "status": status_value,
             },
         )
+
+
+# ---------- 2026-10-25 补齐：好友关系变更广播 ----------
+#
+# 背景（用户规则：「只要符合人正常思维逻辑里该有的热更新，都要加上」）：
+# 此前**加好友成功**只给申请人发 friend.request.resolved、**删好友零广播**
+# ⇒ 双方的好友列表 / 好友数 / 搜索结果里的"已是好友"标记都不会实时更新，
+# 必须手动刷新才看到。这明显不符合常理（好友关系是双方都该立刻知道的）。
+
+
+def broadcast_friend_added(user_id, *, friend_id, friend_nickname="", friend_username="", friend_avatar="") -> None:
+    """通知某人「你多了一个好友」（双方各发一次，用户级组）。"""
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "friend.added",
+            "friend_id": str(friend_id),
+            "nickname": friend_nickname or "",
+            "username": friend_username or "",
+            "avatar": friend_avatar or "",
+        },
+    )
+
+
+def broadcast_friend_removed(user_id, *, friend_id) -> None:
+    """通知某人「某好友已把你删除/你已被删除」（双向删除，双方各发一次）。"""
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "friend.removed",
+            "friend_id": str(friend_id),
+        },
+    )
+
+
+def broadcast_friendship_changed(user, friend, *, action: str) -> None:
+    """好友关系变更的**双向**广播（action = added / removed）。
+
+    双方都收：A 加 B 为好友 ⇒ A 与 B 的好友列表都要出现；A 删 B ⇒ 双方都要消失。
+    """
+    nickname = getattr(friend, "nickname", "") or ""
+    username = getattr(friend, "username", "") or ""
+    avatar = getattr(friend, "avatar", "") or ""
+    if action == "added":
+        broadcast_friend_added(
+            user.id,
+            friend_id=friend.id,
+            friend_nickname=nickname,
+            friend_username=username,
+            friend_avatar=avatar,
+        )
+        broadcast_friend_added(
+            friend.id,
+            friend_id=user.id,
+            friend_nickname=getattr(user, "nickname", "") or "",
+            friend_username=getattr(user, "username", "") or "",
+            friend_avatar=getattr(user, "avatar", "") or "",
+        )
+    else:
+        broadcast_friend_removed(user.id, friend_id=friend.id)
+        broadcast_friend_removed(friend.id, friend_id=user.id)
+
+
+
+# ---------- 2026-10-25 补齐：群表情包变更广播 ----------
+#
+# 背景（用户规则：符合常理的热更新都要有）：群表情包是**群成员共享**的，
+# 此前某人添加/删除表情包后，其他成员的群表情包面板不会更新，要重开才看到。
+
+
+def broadcast_group_emoji_changed(conversation_id, *, action: str, item_id=None) -> None:
+    """群表情包增删后广播给会话组成员（action = added / removed）。"""
+    _group_send_sync(
+        conversation_id,
+        {
+            "type": "emoji.group.changed",
+            "data": {
+                "conversation_id": str(conversation_id),
+                "action": action,
+                "item_id": str(item_id) if item_id is not None else None,
+            },
+        },
+    )
+
+
+
+# ---------- 2026-10-25 补齐：本人多端视图变更广播 ----------
+#
+# 背景（用户规则：符合常理的热更新都要有）：置顶/取消置顶、隐藏会话都是
+# **本人视图**字段（ConversationMember.is_pinned / hidden）。同一账号在多端登录时，
+# A 端置顶后 B 端的会话列表不会重排、A 端隐藏后 B 端仍显示 —— 明显不符常理。
+# 这里复用用户级组给**本人其它端**同步。
+
+
+def broadcast_conversation_view_changed(user_id, *, conversation_id, pinned=None, hidden=None) -> None:
+    """本人多端同步：会话置顶/隐藏状态变化。
+
+    只发给**本人**（用户级组），不涉及其它成员 —— 这两个字段本就是每人一份的视图。
+    """
+    _user_group_send_sync(
+        user_id,
+        {
+            "type": "conversation.view.changed",
+            "conversation_id": str(conversation_id),
+            "pinned": pinned,
+            "hidden": hidden,
+        },
+    )
