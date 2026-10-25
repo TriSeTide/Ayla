@@ -53,6 +53,7 @@ class AylaLiveHostAvatar extends StatelessWidget {
     this.ownerNickname,
     this.avatarUrl,
     this.online = false,
+    this.userId,
     this.size = 36,
     this.onOpenProfile,
   });
@@ -71,6 +72,9 @@ class AylaLiveHostAvatar extends StatelessWidget {
 
   /// 是否在线（页面按 presence 判定：隐身恒离线）。
   final bool online;
+
+  /// 主播 user id ⇒ 头像自订阅 presence（web LiveHostAvatar.tsx:41）。
+  final String? userId;
 
   /// 头像边长（tsx 18 `size = 36`）。
   final double size;
@@ -97,6 +101,7 @@ class AylaLiveHostAvatar extends StatelessWidget {
       label: name,
       size: size,
       online: online,
+      userId: userId,
       resourceUrl: (avatarUrl == null || avatarUrl!.isEmpty) ? null : avatarUrl,
       onTap: onOpenProfile,
       // tsx 50：`ariaLabel={`查看主播 ${label} 的个人主页`}`

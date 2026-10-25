@@ -497,7 +497,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
         AylaAvatarHalo(
           label: displayName, // tsx 132 `user.nickname || user.username`
           size: 64,
-          online: online, // tsx 134（web `usePresenceOnline`）
+          online: online,
+          user: user, // tsx 134（web `usePresenceOnline`）
           resourceUrl: (user.avatar ?? '').isEmpty ? null : user.avatar,
         ),
         Column(

@@ -196,6 +196,7 @@ class AylaVoiceMemberRow extends StatelessWidget {
           label: name,
           size: 32, // tsx 145：`size={32}`
           online: online,
+          userId: member.userId,
           core: isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
           resourceUrl: avatarUrl,
           onTap: onOpenProfile,

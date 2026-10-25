@@ -24,7 +24,12 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/user_public.dart' show AylaUserPublic;
+import '../../state/display_status.dart' show presenceOnline, withLiveStatus;
+import '../../state/presence_providers.dart' show presenceStateProvider;
+import '../../state/presence_state.dart' show AylaPresenceState;
 import '../../theme/css_gradient.dart';
 import '../../theme/tokens.dart';
 import 'resource_image.dart';
@@ -49,12 +54,30 @@ class AylaAvatarHalo extends StatefulWidget {
     required this.label,
     this.size = 40,
     this.online = false,
+    this.user,
+    this.userId,
     this.core = AylaAvatarCore.user,
     this.resourceUrl,
     this.onTap,
     this.semanticLabel,
     this.previewImage,
   });
+
+  /// **【推荐】给了 `user` 就自订阅 presence 实时在线态**（web `usePresenceOnline`）。
+  ///
+  /// ⚠️ **2026-10-20 修复（用户实报「所有页面头像在线状态不热更新」）**：
+  /// 本组件的 `online` 是**不可变构造参数**，37 个使用点里绝大多数传的是
+  /// REST 快照字段或硬编码 `true` ⇒ presence 帧到达后头像光环**永不变化**。
+  /// web 的等价物是 `usePresenceOnline(user)`（`utils/displayStatus.ts:75–81`）：
+  /// 订阅 `usePresenceStore` 后实时求值。
+  final AylaUserPublic? user;
+
+  /// **【最轻量】只给 userId 也能订阅**（无需完整 [AylaUserPublic]）。
+  ///
+  /// 适用场景：列表条目只有 id/名字（群成员、弹幕发送者、会话 peer）。
+  /// store 有该 id 记录 ⇒ 按记录（WS 权威）；无记录 ⇒ 回退 [online]。
+  /// 与 [user] 的关系：给了 [user] 优先它（能正确处理 `invisible` 隐身）。
+  final String? userId;
 
   /// 头像内容文字（无图时的首字/名字；有图时作语义标签）。
   final String label;
@@ -96,6 +119,49 @@ class AylaAvatarHalo extends StatefulWidget {
 
 class _AvatarHaloState extends State<AylaAvatarHalo>
     with SingleTickerProviderStateMixin {
+  /// 生效的在线态（给定 store 的**纯求值**）。
+  ///
+  /// web \`usePresenceOnline(user)\` 的等价物（\`utils/displayStatus.ts:75–81\`）：
+  /// store 已知状态优先（WS 增量权威），无记录回退 REST 快照。
+  ///
+  /// 没给 [AylaAvatarHalo.user] / [AylaAvatarHalo.userId] 时用调用方给的静态 \`online\`
+  /// （纯展示/画布样张语义不变）。
+  bool _computeOnline(AylaPresenceState? presence) {
+    final AylaUserPublic? user = widget.user;
+    final String? userId = widget.userId;
+    if (user == null && userId == null) return widget.online;
+    if (presence == null) return widget.online;
+    if (user != null) {
+      return presenceOnline(
+        presence.users,
+        withLiveStatus(presence.statuses, user),
+      );
+    }
+    final String? known = presence.users[userId];
+    if (known != null) return known == 'online';
+    return widget.online;
+  }
+
+  /// 当前 presence store（**无 ProviderScope ⇒ null**）。
+  ///
+  /// ⚠️ 刻意用 \`listen: false\` 只「取一次引用」——**真正的订阅交给 ListenableBuilder**。
+  /// 普查 D §8.2 实测：\`containerOf(listen: true)\` 只依赖 \`UncontrolledProviderScope\`
+  /// 这个 InheritedWidget，其 \`updateShouldNotify\` 是 \`container != oldWidget.container\`
+  /// （riverpod \`framework.dart:287–289\`），而 container 是长生命周期单例、
+  /// **永不更换 ⇒ 永不重建**；\`container.read()\` 也不建立 provider 监听
+  /// （\`container.dart:238–242\`）⇒ 那样写「参数传了但光环照旧冻」，是最容易
+  /// 误判成已修的陷阱。这里改为直接监听 ChangeNotifier 本体。
+  AylaPresenceState? _presenceOrNull() {
+    try {
+      return ProviderScope.containerOf(context, listen: false)
+          .read(presenceStateProvider);
+    } on StateError {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 爱莉呼吸（3.2s ease-in-out 循环）：0 ↔ π 正弦驱动两层辉光。
   late final AnimationController _breathe = AnimationController(
     vsync: this,
@@ -107,8 +173,13 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     super.didChangeDependencies();
     // MediaQuery 依赖只能在 didChangeDependencies 之后读取（initState 里
     // 读取会触发 framework 断言）。
+    _syncBreathe(_computeOnline(_presenceOrNull()));
+  }
+
+  /// 按**当前**在线态启停爱莉呼吸动画（离线/静态语义下不呼吸）。
+  void _syncBreathe(bool online) {
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final bool shouldBreathe = widget.online &&
+    final bool shouldBreathe = online &&
         widget.core == AylaAvatarCore.elysia &&
         !reduceMotion;
     if (shouldBreathe && !_breathe.isAnimating) {
@@ -136,6 +207,29 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
 
   @override
   Widget build(BuildContext context) {
+    // presence 实时订阅：**只对给了 user/userId 的头像生效**（纯展示/画布走原路径）。
+    // 用 ListenableBuilder 监听 ChangeNotifier 本体 —— 这是唯一真正会触发重建的写法。
+    if (widget.user != null || widget.userId != null) {
+      final AylaPresenceState? presence = _presenceOrNull();
+      if (presence != null) {
+        // ⚠️ **必须用 ListenableBuilder 监听 ChangeNotifier 本体**。
+        // 用 `container.read(...)` 直接求值**不会**建立监听（见 _presenceOrNull 注释），
+        // 那样写「参数传了但光环照旧冻」——回归锁 test/avatar_presence_test.dart 正是锁这个。
+        return ListenableBuilder(
+          listenable: presence,
+          builder: (BuildContext _, Widget? __) =>
+              _buildBody(context, _computeOnline(presence)),
+        );
+      }
+      // 无 ProviderScope（画布/纯 widget 测试）⇒ 回落静态值。
+    }
+    return _buildBody(context, widget.online);
+  }
+
+  /// 真正的 build 体（[online] 是**已求值**的在线态）。
+  Widget _buildBody(BuildContext context, bool online) {
+    // 在线态可能在 presence 帧到达后变化（ListenableBuilder 重建）⇒ 同步呼吸动画。
+    _syncBreathe(online);
     final double size = widget.size;
     // 光环底色：CSS `conic-gradient(from 210deg, #9DBFE6, #F9B0FF,
     // #F796FF, #9DBFE6)`（t:--ring-online）的 Flutter 等价。
@@ -148,7 +242,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     //   CSS:  ice@210°(7点)  sakura@330°(11点)  glow@90°(3点)  ice@210°
     //   Fla:  glow@0°(3点)   ice@120°(7点)      sakura@240°(11点)
     // → colors = [glow, ice, sakura, glow]（首尾同色，环闭合无缝）。
-    final Gradient ringGradient = widget.online
+    final Gradient ringGradient = online
         ? const SweepGradient(
             startAngle: 0,
             endAngle: math.pi * 2,
@@ -256,7 +350,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     );
 
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final bool breathe = widget.online &&
+    final bool breathe = online &&
         widget.core == AylaAvatarCore.elysia &&
         !reduceMotion;
 
@@ -300,7 +394,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
           shape: BoxShape.circle,
           gradient: ringGradient,
           // reduced-motion：静态 0 0 8px rgba(247,150,255,.5)
-          boxShadow: widget.online &&
+          boxShadow: online &&
                   widget.core == AylaAvatarCore.elysia
               ? const <BoxShadow>[
                   BoxShadow(
@@ -314,7 +408,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
       );
     }
 
-    final String stateLabel = widget.online ? '在线' : '离线';
+    final String stateLabel = online ? '在线' : '离线';
     final Widget result = Semantics(
       image: true,
       label:

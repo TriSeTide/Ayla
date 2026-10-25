@@ -394,6 +394,8 @@ class _ConversationRowState extends State<_ConversationRow> {
       label: title,
       size: 40,
       online: isPrivate ? online : false,
+      // 传 peer 让头像自订阅 presence 实时在线态（web ConversationList.tsx:85）。
+      user: isPrivate ? peer : null,
       core: isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
       resourceUrl: isPrivate ? peer?.avatar : _nonEmpty(conv.avatar),
       onTap: tappable && target != null ? () => widget.onAvatarTap!(target) : null,

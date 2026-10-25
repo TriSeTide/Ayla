@@ -296,6 +296,8 @@ class _MentionRowState extends State<_MentionRow> {
                     label: name,
                     size: 32,
                     online: online,
+                    // 传 user 让头像自订阅 presence。
+                    user: user,
                     resourceUrl: user.avatar,
                     core: AylaAvatarCore.user,
                   ),

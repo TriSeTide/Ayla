@@ -883,6 +883,15 @@ class GroupOwnerTransferView(APIView):
             return _not_found("目标成员不存在")
         except (PermissionError, ValueError) as exc:
             return _forbidden(str(exc))
+        # 普查 E 修复：转让群主后广播成员变更（事务已提交、位置正确）。
+        # 此前转让**零广播** ⇒ 其他成员的成员列表角色标签、群主标识都不更新。
+        services.broadcast_conversation_members_changed(
+            conv,
+            action="owner_changed",
+            member_id=target_id,
+            role=ConversationMember.ROLE_OWNER,
+        )
+        services.broadcast_conversation_updated(conv)
         return Response(ConversationSerializer(conv, context={"request": request}).data)
 
 
@@ -1067,6 +1076,13 @@ class GroupJoinRequestActionView(APIView):
             services.accept_join_request(req, request.user)
             # 通知新成员群加入成功
             services.broadcast_group_joined(req.conversation, req.applicant_id)
+            # 普查 E 修复：**全体成员**的成员列表/人数要更新（此前只有新成员自己知道）。
+            services.broadcast_conversation_members_changed(
+                req.conversation,
+                action="joined",
+                member_id=req.applicant_id,
+                member_name=getattr(req.applicant, "nickname", "") or "",
+            )
         else:
             services.reject_join_request(req, request.user)
         # 审批成功后通知申请人（用户级广播，事务外）

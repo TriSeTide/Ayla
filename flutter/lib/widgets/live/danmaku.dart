@@ -360,6 +360,9 @@ class _DanmakuRow extends StatelessWidget {
           label: item.senderNickname,
           size: 20, // tsx 54 `size={20}`（光环外径 = 20 + 2.5×2）
           online: item.senderOnline,
+          // 普查 D 修复（恒灰）：senderOnline 是死参（3 个页面调用点全不传）
+          // ⇒ 改传 id，由头像按 presence store 判在线。
+          userId: item.senderUserId,
           resourceUrl: item.senderAvatarUrl.isEmpty ? null : item.senderAvatarUrl,
           semanticLabel: '查看 ${item.senderNickname} 的个人主页', // tsx 58 aria-label
           onTap: openProfile == null

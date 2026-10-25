@@ -178,6 +178,7 @@ import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 import '../../core/media/audio_playback.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/media_kind.dart';
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../core/models/post.dart' show AylaMediaDescriptor;
 import '../../core/models/share_payload.dart';
 import '../../player/vod_player.dart';
@@ -254,6 +255,8 @@ class AylaMessageBubble extends StatefulWidget {
     this.senderAvatarUrl,
     this.senderAvatarLabel,
     this.senderOnline = false,
+    this.senderUser,
+    this.senderUserId,
     this.onSenderClick,
     this.onMentionSender,
     this.onPokeSender,
@@ -310,6 +313,12 @@ class AylaMessageBubble extends StatefulWidget {
 
   /// 发送者实时在线（光环）。
   final bool senderOnline;
+
+  /// 发送者完整用户对象 ⇒ 头像自订阅 presence（web MessageBubble.tsx:130–132,235）。
+  final AylaUserPublic? senderUser;
+
+  /// 发送者 id（最轻量入口；群聊里发送者常无完整用户对象）。
+  final String? senderUserId;
 
   /// 头像单击（延迟双击窗口后触发）→ 个人主页。
   final VoidCallback? onSenderClick;
@@ -593,6 +602,8 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               label: widget.senderAvatarLabel ?? widget.senderName ?? '发送者',
               size: 32,
               online: widget.senderOnline,
+              user: widget.senderUser,
+              userId: widget.senderUserId,
               resourceUrl: widget.senderAvatarUrl,
               onTap: _onSenderTap,
               semanticLabel: widget.senderName ?? '发送者个人主页',

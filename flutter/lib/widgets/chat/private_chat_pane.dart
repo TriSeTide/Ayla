@@ -315,6 +315,8 @@ class AylaPrivateChatPane extends StatelessWidget {
           label: title,
           size: 36,
           online: peerOnline,
+          // 传 peer 让头像自订阅 presence（web PrivateChatPane.tsx:154）。
+          user: conv?.peer,
           core: isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
           resourceUrl: conv?.peer?.avatar,
           onTap: avatarTappable ? onAvatarTap : null,

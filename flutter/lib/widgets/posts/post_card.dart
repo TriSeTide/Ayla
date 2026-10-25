@@ -355,6 +355,7 @@ class _AylaPostCardState extends State<AylaPostCard> {
                     label: authorName,
                     size: 36,
                     online: authorOnline,
+                    userId: author?.id,
                     resourceUrl: author?.avatar,
                     onTap: author == null ? null : widget.onAuthorTap,
                     semanticLabel: '查看 $authorName 的个人主页',

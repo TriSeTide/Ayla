@@ -1058,6 +1058,9 @@ class _AylaMessageListState extends State<AylaMessageList> {
                 _isGroup && !isSelf ? names[m.senderId] : null,
             senderAvatarUrl: avatars[m.senderId]?.avatar,
             senderAvatarLabel: avatars[m.senderId]?.label,
+            // 普查 D 修复（恒灰）：传球者 id 让气泡头像自订阅 presence。
+            // 该组件本身只收 senderOnline（REST 快照，且此处根本没传）⇒ 永远灰。
+            senderUserId: m.senderId,
             currentUserId: widget.currentUserId,
             // 头像单击 → 个人主页（web `MessageList.tsx:1067` 的
             // `onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}`；

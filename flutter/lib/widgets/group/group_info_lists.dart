@@ -1098,6 +1098,8 @@ class _MemberRowState extends State<_MemberRow> {
         label: m.name,
         size: widget.viewport <= 768 ? 36 : 40, // NARROW_QUERY (max-width: 768px)
         online: m.online,
+        // 传 userId 让头像自订阅 presence。
+        userId: m.id,
         resourceUrl: m.avatarUrl,
         semanticLabel: '查看 ${m.name} 的个人主页', // ariaLabel
         onTap: widget.onOpenProfile == null

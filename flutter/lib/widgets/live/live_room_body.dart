@@ -44,6 +44,8 @@ import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../../core/media/media_actions.dart' show AylaMediaActions;
+import '../../core/media/media_picker.dart' show AylaPickedFile;
 import 'danmaku.dart'
     show
         AylaDanmakuEntry,
@@ -155,6 +157,8 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.onRetryPlayer,
     this.onRefreshPlayer,
     this.onSendDanmaku,
+    this.onPickDanmakuImage,
+    this.onUploadDanmakuImage,
     this.onToggleFavorite,
     this.onRetryFavoriteStatus,
     this.favoriteState = AylaFavoriteState.unknown,
@@ -228,6 +232,25 @@ class AylaLiveRoomBody extends StatefulWidget {
 
   /// 发送弹幕（全屏输入框也走它）；第二参 = 图片 mediaId（null = 纯文本）。
   final Future<bool> Function(String content, String? mediaId)? onSendDanmaku;
+
+  /// 选一张弹幕图片（页面注入：`AylaMediaActions.pickImage`）。
+  ///
+  /// web 事实源 `DanmakuInput.tsx:129–135`：图片钮点开 hidden `<input type=file>`
+  /// 取**单张**文件；Flutter 无该控件 ⇒ 由页面注入选择动作。null = 回落到库内
+  /// 组合动作（见 `_danmakuInput`）。
+  ///
+  /// 注意组件在回调为 null 时**不禁用**图片钮（`danmaku.dart:879` 的 `_disabled`
+  /// 只含 sending/working），回调缺失只会表现为「点得动但没反应」——见本件接线兜底。
+  final Future<AylaPickedFile?> Function()? onPickDanmakuImage;
+
+  /// 上传该图片 → `media_id`（页面注入：`AylaMediaActions.uploadImage`）。
+  ///
+  /// web 事实源 `DanmakuInput.tsx:90–98`：先 `uploadMediaFile` 拿 `media_id`，再
+  /// `sendImage` 发送。两个回调**分开**是 web 的既有语义（重试不重开选择器）。
+  final Future<String> Function(
+    AylaPickedFile file,
+    ValueChanged<double?> onProgress,
+  )? onUploadDanmakuImage;
 
   /// 头部收藏 / 转发。
   final ValueChanged<bool>? onToggleFavorite;
@@ -412,6 +435,17 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     sending: widget.data.sending,
     error: widget.data.sendError,
     onSend: widget.onSendDanmaku ?? (String _, String? _) async => false,
+    // 图片三层（web `DanmakuInput.tsx:129–145`：hidden `<input type=file>` + `sendImage`）：
+    // 选与传**分两步**（web 既有语义：上传失败重传同一份文件、发送失败复用 media_id，
+    // 见 `core/media/media_actions.dart:121–155`）。与 web 的差别仅在承载形态：
+    // web 的 hidden input 归组件自己，Flutter 无该控件 ⇒ 组件以两个回调表达同一编排。
+    //
+    // 默认走库内组合动作（与 `live_create.dart:144–147` 选封面同一先例）：
+    // 「能选能传能发」是本件的既有契约，接线不该由每个调用页面各自重复。
+    onPickImage: widget.onPickDanmakuImage ?? AylaMediaActions.pickImage,
+    onUploadImage: widget.onUploadDanmakuImage ??
+        (AylaPickedFile file, ValueChanged<double?> onProgress) =>
+            AylaMediaActions.uploadImage(file, onProgress: onProgress),
   );
 
   /// 头部**容器材质**（实测「顶栏漏了背景」）。
@@ -506,6 +540,8 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
           ),
         if (!widget.showOwnerPanel && channel != null)
           AylaLiveHostAvatar(
+            // 普查 D 修复（恒灰）：此前既不传 online 也不传 userId ⇒ 主播头像永远灰。
+            userId: channel.ownerId,
             hostNickname: channel.ownerNickname,
             ownerNickname: channel.ownerNickname,
             size: 32,

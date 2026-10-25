@@ -424,6 +424,7 @@ class _Row extends StatelessWidget {
                 label: member.displayName,
                 size: 36,
                 online: member.online,
+                userId: member.id,
                 resourceUrl: member.avatarUrl,
               ),
               Expanded(

@@ -159,11 +159,82 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage> {
       },
       keyOf: (AylaSubGroup sg) => sg.id,
     )..addListener(_onChanged);
+    _registerFrameTracking();
     unawaited(_bootstrap());
+  }
+
+  /// 帧监听解绑句柄（2026-10-20 全量普查修复）。
+  void Function()? _frameOff;
+
+  /// 群详情页的实时性 —— **用户实报「群详情入群申请等不热更新」的修复**。
+  ///
+  /// 修复前本页**零帧订阅**：只有本端操作后才会 refresh，别人发起入群申请 /
+  /// 被处理 / 成员进出 / 角色变更 / 群资料变更**完全感知不到**。
+  ///
+  /// 逐帧对应（服务端已具备这些广播）：
+  /// - group.request.new / group.request.resolved / join_request.resolved
+  ///   ⇒ 入群申请列表重取（管理员视角）；
+  /// - conversation.members.changed ⇒ 成员列表 + 摘要重取；
+  /// - conversation.updated ⇒ 群资料（_conv 读 chatState）；
+  /// - conversation.dissolved ⇒ 本群已解散，退回上一页。
+  ///
+  /// 纪律：只做**列表重取**，不本地伪造条目（成员/申请的权威字段只有 REST 有）。
+  void _registerFrameTracking() {
+    _frameOff = ref.read(chatWsProvider).onFrame(_onFrame);
+  }
+
+  void _onFrame(Map<String, dynamic> frame) {
+    if (!mounted) return;
+    final Object? rawType = frame['type'];
+    if (rawType is! String) return;
+    switch (rawType) {
+      case 'group.request.new':
+      case 'group.request.resolved':
+      case 'join_request.resolved':
+        // 入群申请列表（用户实报点名的场景）。
+        final p = _joinRequests;
+        if (p != null) unawaited(p.refresh());
+      case 'conversation.members.changed':
+        final Object? data = frame['data'];
+        final String convId = data is Map
+            ? (data['conversation_id']?.toString() ?? '')
+            : '';
+        if (convId.isNotEmpty && convId != groupId) return;
+        final m = _members;
+        if (m != null) unawaited(m.refresh());
+        unawaited(_refreshDetail());
+      case 'conversation.updated':
+        final Object? data = frame['data'];
+        final Object? conv = data is Map ? data['conversation'] : null;
+        final String convId = conv is Map ? (conv['id']?.toString() ?? '') : '';
+        if (convId.isNotEmpty && convId != groupId) return;
+        unawaited(_refreshDetail());
+      case 'conversation.dissolved':
+        final Object? data = frame['data'];
+        final String convId = data is Map
+            ? (data['conversation_id']?.toString() ?? '')
+            : '';
+        if (convId != groupId) return;
+        if (mounted) context.pop();
+    }
+  }
+
+  /// 重新拉群详情并写回 store（帧到达后的权威对账；失败静默）。
+  Future<void> _refreshDetail() async {
+    try {
+      final fresh = await AylaChatApi.getConversationMetadata(groupId);
+      if (!mounted) return;
+      ref.read(chatStateProvider).upsertConversation(fresh);
+      setState(() => _detail = fresh);
+    } catch (_) {
+      // 403/404 或网络失败：保留现有展示，不伪造。
+    }
   }
 
   @override
   void dispose() {
+    _frameOff?.call();
+    _frameOff = null;
     _members?.removeListener(_onChanged);
     _members?.dispose();
     _subgroups?.removeListener(_onChanged);

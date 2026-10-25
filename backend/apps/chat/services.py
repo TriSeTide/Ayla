@@ -849,6 +849,7 @@ def leave_group(conversation, user):
         notice = GroupMemberLeaveNotice.objects.create(
             recipient_id=recipient_id, conversation=conversation, member_name=getattr(user, "nickname", "") or user.username
         )
+    member_name = getattr(user, "nickname", "") or user.username
     member.delete()
     for recipient_id in recipients:
         broadcast_group_member_left(
@@ -856,8 +857,17 @@ def leave_group(conversation, user):
             conversation_id=conversation.id,
             conversation_title=conversation.title,
             member_id=user.id,
-            member_name=getattr(user, "nickname", "") or user.username,
+            member_name=member_name,
         )
+    # 普查 E 修复：**全体成员**都要收到成员变更。
+    # 此前只给 owner/admin 发 `group.member.left` ⇒ 普通成员的成员列表与
+    # 群名片人数在别人退群时不会更新。
+    broadcast_conversation_members_changed(
+        conversation,
+        action="left",
+        member_id=user.id,
+        member_name=member_name,
+    )
 
 
 def dissolve_group(conversation, actor):

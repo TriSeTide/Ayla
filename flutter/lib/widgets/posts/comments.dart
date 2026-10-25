@@ -39,6 +39,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/media/media_actions.dart' show AylaMediaActions;
 import '../../core/media/media_signer.dart' show MediaVariant;
 import '../../core/models/post.dart';
 import '../../core/net/dio_client.dart' show ApiException;
@@ -703,6 +704,18 @@ class _AylaCommentListState extends State<AylaCommentList> {
     }
   }
 
+  /// 默认选图动作（web `CommentList.tsx` 内嵌 composer 由页面注入
+  /// `uploadMediaFile(file, "image")`；Flutter 侧组件库只认注入）。
+  ///
+  /// 列表被页面以 `hideComposer: true` 使用时不会走到这里（详情页固定 composer
+  /// 自带接线）；本默认值服务于直接内嵌 composer 的调用点，避免「列表有输入框
+  /// 但图片钮永远不可点」的同一类缺口。
+  static Future<AylaMediaPickResult> _defaultPickImages(
+    int remaining,
+    ValueChanged<double?> onProgress,
+  ) =>
+      AylaMediaActions.pickImages(remaining: remaining, onProgress: onProgress);
+
   @override
   Widget build(BuildContext context) {
     final Map<int, AylaPostComment> byId = <int, AylaPostComment>{
@@ -737,9 +750,16 @@ class _AylaCommentListState extends State<AylaCommentList> {
               onSend: widget.onSend,
               replyTarget: widget.replyTarget,
               onReplyClear: widget.onReplyClear,
-              onPickImages: widget.onPickImages,
-              onRemoveImage: widget.onRemoveImage,
-              onRetryFailedImages: widget.onRetryFailedImages,
+              // 未注入 ⇒ 落到库内组合动作（web `CommentComposer.tsx:105–133`
+              // 自己调 `uploadMediaFile`/`deleteMedia`，不需要调用方接线）；
+              // 之前这里把 null 原样透传 ⇒ 内嵌在列表里的图片钮恒不可点。
+              onPickImages: widget.onPickImages ?? _defaultPickImages,
+              onRemoveImage:
+                  widget.onRemoveImage ?? AylaMediaActions.removeDraft,
+              onRetryFailedImages: widget.onRetryFailedImages ??
+                  () => AylaMediaActions.pickImages(
+                        remaining: AylaCommentComposer.maxImages,
+                      ),
             ),
         ],
       ),
@@ -780,6 +800,7 @@ class _AylaCommentListState extends State<AylaCommentList> {
                 label: name,
                 size: 32, // Avatar size={32}
                 online: widget.isAuthorOnline?.call(c) ?? false,
+                userId: author?.id,
                 resourceUrl: author?.avatar,
                 onTap: author == null
                     ? null
