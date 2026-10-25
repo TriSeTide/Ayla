@@ -150,6 +150,7 @@ class AylaTopNav extends StatefulWidget {
     this.userName = '',
     this.userAvatarUrl,
     this.userOnline = true,
+    this.userId,
     this.variant = AylaTopNavVariant.home,
     this.favoritesTitle = '我的收藏',
     this.searchQuery = '',
@@ -181,8 +182,21 @@ class AylaTopNav extends StatefulWidget {
   /// 头像 URL（null = 文字头像）。
   final String? userAvatarUrl;
 
-  /// 在线状态（光环）。
+  /// 在线状态（光环）——**静态兜底**（REST 快照）。
   final bool userOnline;
+
+  /// 当前登录用户 id ⇒ 顶栏头像**自订阅 presence**。
+  ///
+  /// web 对照：`TopNav.tsx:138` / `NarrowTopBar.tsx:183` 都是
+  /// `presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, currentUser))`
+  /// —— 即**订阅 store 后求值**，不是拿快照。
+  ///
+  /// ⚠️ 2026-10-25 补齐：此前只有 [userOnline] 这个**不可变构造参数**，
+  /// 而 `_AppShellState` 传的是 `user?.online ?? false`（REST 快照）
+  /// ⇒ presence 帧到达后顶栏光环**永远不变**（用户实报「所有页面头像在线状态不热更新」）。
+  /// 传 id 后由 `AylaAvatarHalo` 内部订阅 presence（`avatar_halo.dart` 的
+  /// `ListenableBuilder` 路径，回归锁 `test/avatar_presence_test.dart`）。
+  final String? userId;
 
   /// 窄屏形态。
   final AylaTopNavVariant variant;
@@ -384,6 +398,8 @@ class _AylaTopNavState extends State<AylaTopNav> {
                   label: widget.userName,
                   size: 40,
                   online: widget.userOnline,
+                  // 传 id ⇒ 头像自订阅 presence（此前只有静态 userOnline 快照）。
+                  userId: widget.userId,
                   resourceUrl: widget.userAvatarUrl,
                   onTap: widget.onAvatarTap,
                   semanticLabel: '个人主页',
@@ -814,6 +830,8 @@ class _AylaTopNavState extends State<AylaTopNav> {
             label: widget.userName,
             size: 36, // `NarrowTopBar.tsx:182` size={36}
             online: widget.userOnline,
+            // 传 id ⇒ 头像自订阅 presence（同宽屏档）。
+            userId: widget.userId,
             resourceUrl: widget.userAvatarUrl,
             onTap: widget.onAvatarTap,
             semanticLabel: '个人主页',

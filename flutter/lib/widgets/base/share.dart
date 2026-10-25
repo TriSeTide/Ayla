@@ -658,7 +658,8 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
       semanticLabel: '分享给 $name',
       child: Row(
         children: <Widget>[
-          _rowAvatar(conv.peerAvatarUrl, name),
+          // 私聊对端是**具体用户** ⇒ 传 id 让头像自订阅 presence（群行不传）。
+          _rowAvatar(conv.peerAvatarUrl, name, userId: conv.peerId),
           const SizedBox(width: 12),
           Expanded(child: _rowMain(t, name, conv.unreadCount)),
         ],
@@ -666,9 +667,17 @@ class _AylaShareSheetState extends State<AylaShareSheet> {
     );
   }
 
-  /// 行头像（web `<Avatar size={32}>`；分享列表不传 online → 离线灰环）。
-  Widget _rowAvatar(String? url, String label) {
-    return AylaAvatarHalo(label: label, size: 32, resourceUrl: url);
+  /// 行头像（web `<Avatar size={32}>`；群行不传 online → 离线灰环）。
+  ///
+  /// [userId] 只在**私聊行**传（对端是具体某个用户 ⇒ 该显示 TA 的实时在线态）；
+  /// 群行的头像是群头像（不是人）⇒ 保持静态灰环，与 web `ShareSheet.tsx:154` 一致。
+  Widget _rowAvatar(String? url, String label, {String? userId}) {
+    return AylaAvatarHalo(
+      label: label,
+      size: 32,
+      userId: userId,
+      resourceUrl: url,
+    );
   }
 
   /// `.share-sheet-row-main`：flex1 + min-width0 + gap 8（标题可省略，未读紧随）。

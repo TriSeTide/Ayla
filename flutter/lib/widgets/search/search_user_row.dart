@@ -39,6 +39,7 @@ class AylaSearchUserRow extends StatelessWidget {
     this.signature,
     this.avatarUrl,
     this.online = false,
+    this.userId,
     this.onOpenProfile,
     this.onTap,
     this.trailing,
@@ -57,8 +58,18 @@ class AylaSearchUserRow extends StatelessWidget {
   /// 头像资源地址。
   final String? avatarUrl;
 
-  /// 在线状态（web `presenceOnline(...)`）。
+  /// 在线状态——**静态兜底**（REST 快照）。
   final bool online;
+
+  /// 用户 id ⇒ 头像**自订阅 presence**。
+  ///
+  /// web 对照：`SearchPage.tsx:392–396` 的
+  /// `Avatar(online={presenceOnline(onlineUsers, withLiveStatus(onlineStatuses, u))})`
+  /// —— 订阅求值。
+  ///
+  /// ⚠️ 2026-10-25 补齐：此前只有 `online` 标量，而页面传 `user.online`（REST 快照）
+  /// ⇒ 搜索结果里的在线光环不随 presence 帧变化。
+  final String? userId;
 
   /// 点头像：去 TA 的个人主页（web `goUserProfile`）。
   final VoidCallback? onOpenProfile;
@@ -107,6 +118,8 @@ class AylaSearchUserRow extends StatelessWidget {
             label: displayName,
             size: avatarSize,
             online: online,
+            // 传 id ⇒ 头像自订阅 presence（此前只有静态 online 快照）。
+            userId: userId,
             resourceUrl: avatarUrl,
             onTap: onOpenProfile,
             semanticLabel: '查看 $displayName 的个人主页',

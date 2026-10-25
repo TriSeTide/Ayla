@@ -57,6 +57,7 @@ class AylaUserProfileCard extends StatelessWidget {
     this.signature,
     this.avatarUrl,
     this.online = false,
+    this.userId,
     this.displayStatus,
     this.error,
     this.friendBusy = false,
@@ -78,8 +79,17 @@ class AylaUserProfileCard extends StatelessWidget {
   /// 头像 URL。
   final String? avatarUrl;
 
-  /// 是否在线（驱动光环）。
+  /// 是否在线（驱动光环）——**静态兜底**（REST 快照）。
   final bool online;
+
+  /// 用户 id ⇒ 头像**自订阅 presence**。
+  ///
+  /// web 对照：`UserProfileCard.tsx:20` 的 `usePresenceOnline(user)`
+  /// （:52 传给 `<Avatar online={online}>`）—— 订阅求值。
+  ///
+  /// ⚠️ 2026-10-25 补齐：此前只收 `online` 标量，而 `SearchPage` 传
+  /// `selectedUser.online`（REST 快照）⇒ 资料浮层里的光环不随 presence 帧变化。
+  final String? userId;
 
   /// 展示状态文案（`useDisplayStatus`：在线/离线/群内活跃等）。
   final String? displayStatus;
@@ -122,6 +132,8 @@ class AylaUserProfileCard extends StatelessWidget {
                 label: name,
                 size: 56, // <Avatar size={56} online={online} />
                 online: online,
+                // 传 id ⇒ 头像自订阅 presence（此前只有静态 online 快照）。
+                userId: userId,
                 resourceUrl: avatarUrl,
               ),
               Text(

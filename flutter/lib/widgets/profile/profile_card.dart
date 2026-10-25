@@ -190,6 +190,7 @@ class AylaProfileIdentity extends StatelessWidget {
     this.avatarUrl,
     this.avatarOverride,
     this.online = false,
+    this.userId,
     this.onBack,
     this.share,
     this.avatarSize = 64,
@@ -204,8 +205,18 @@ class AylaProfileIdentity extends StatelessWidget {
   /// 头像地址。
   final String? avatarUrl;
 
-  /// 在线状态。
+  /// 在线状态——**静态兜底**（REST 快照）。
   final bool online;
+
+  /// 用户 id ⇒ 头像**自订阅 presence**。
+  ///
+  /// web 对照：`ProfilePage.tsx:36` 的 `usePresenceOnline(currentUser)`
+  /// （:167 传给 `<Avatar online={currentUserOnline}>`）—— 订阅求值。
+  ///
+  /// ⚠️ 2026-10-25 补齐：此前本件只收 `online` 这个不可变构造参数，
+  /// 而 `ProfilePage` 传 `user.online`（REST 快照）⇒ 本人在别处上下线 / 切隐身时
+  /// 个人页头像光环**不跟着变**。
+  final String? userId;
 
   /// 返回键（`.icon-btn-40 profile-card-back`；null ⇒ 不渲染）。
   final VoidCallback? onBack;
@@ -244,6 +255,8 @@ class AylaProfileIdentity extends StatelessWidget {
           label: displayName,
           size: avatarSize,
           online: online,
+          // 传 id ⇒ 头像自订阅 presence（此前只有静态 online 快照）。
+          userId: userId,
           resourceUrl: avatarUrl,
           // 本地待上传头像优先于真实 URL（web `avatarPreview ?? currentUser.avatar`）
           previewImage: avatarOverride,

@@ -368,6 +368,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           avatarOverride:
               _avatarBytes == null ? null : MemoryImage(_avatarBytes!),
           online: user.online,
+          // 传 id ⇒ 本人头像自订阅 presence（web `ProfilePage.tsx:36/167` 的
+          // `usePresenceOnline(currentUser)`）。此前只传 user.online（REST 快照）
+          // ⇒ 自己切隐身 / 在别处上下线时，个人页光环不跟着变。
+          userId: user.id,
           onBack: _back,
           share: AylaShareButton(
             label: '分享我的主页', // tsx 176

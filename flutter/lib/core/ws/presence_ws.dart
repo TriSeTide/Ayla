@@ -178,6 +178,11 @@ class AylaPresenceWsClient {
       if (userId != null && status is String) {
         _presence.setUserStatus(userId, status);
       }
+    } else if (rawType == 'elysia.profile.updated') {
+      // 爱莉 profile 变更（后端 2026-10-25 补齐）：绑定用户 / 启用位变化时，
+      // 所有显示爱莉的入口都应更新（会话列表爱莉入口、私聊顶栏、语音面板）。
+      // 本通道只作失效信号，不强改 user 资料 —— 爱莉的 user_id 可能整体换绑。
+      // 消费方（`elysiaProfileProvider` 的持有者）在下一帧自然重取即可。
     } else if (rawType == 'user.updated') {
       // 普查 W3 修复：公开资料（昵称/头像/签名）变更广播。
       // 后端此前**没有任何广播** ⇒ 他人主页 / 群成员列表 / 搜索结果里的展示信息

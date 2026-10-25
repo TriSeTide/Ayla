@@ -569,6 +569,40 @@ class AylaChatWsClient {
               '你的好友申请${data['status'] == 'accepted' ? '已通过' : '已拒绝'}',
         );
         unawaited(_badges.fetch());
+      case 'conversation.view.changed':
+        // 本人多端同步：置顶/隐藏变化（后端 2026-10-25 补齐）。
+        // 置顶 ⇒ 会话列表重排；隐藏 ⇒ 从本端列表移除。
+        final String convId = _str(frame['conversation_id']);
+        if (convId.isEmpty) break;
+        final Object? pinnedRaw = frame['pinned'];
+        final Object? hiddenRaw = frame['hidden'];
+        if (hiddenRaw == true) {
+          _chat.removeConversation(convId);
+          unsubscribe(convId);
+        } else if (pinnedRaw is bool) {
+          final AylaConversationSummary? existing = _chat.byId(convId);
+          if (existing != null) {
+            _chat.upsertConversation(existing.copyWith(isPinned: pinnedRaw));
+          }
+        }
+      case 'emoji.group.changed':
+        // 群表情包变更（后端 2026-10-25 补齐）：本类不持有表情包状态，
+        // 只作为失效信号透传给页面级监听（面板据此重取）。
+        break;
+      case 'friend.added':
+      case 'friend.removed':
+        // 2026-10-25 补齐：好友关系变更（双向广播）。此前加好友只通知申请人、
+        // 删好友零广播 ⇒ 双方好友列表/好友数/搜索里的「已是好友」都不实时。
+        // 本类只做「失效信号 + 徽标刷新」，具体列表由页面/社交 record 层重取
+        //（与 web 同口径：帧是提示，REST 才是权威）。
+        _notices.push(
+          kind: AylaRealtimeNoticeKind.friendRequestResolved,
+          title: rawType == 'friend.added' ? '新好友' : '好友关系解除',
+          detail: rawType == 'friend.added'
+              ? '${_strOr(data['nickname'], _strOr(data['username'], '有人'))} 成为了你的好友'
+              : '一位好友已从你的列表中移除',
+        );
+        unawaited(_badges.fetch());
       case 'group.member.left':
         _notices.push(
           kind: AylaRealtimeNoticeKind.groupMemberLeft,
