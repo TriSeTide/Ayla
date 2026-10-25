@@ -201,6 +201,39 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
     if (mounted) context.go('/games');
   }
 
+  /// 顶部「返回」键 / 全屏右滑的**统一落点**。
+  ///
+  /// ## 群内必须回群内列表（2026-10-23 用户实报）
+  /// 群内桌游房（`/group/:id/games` 场景下进房）此前两处回调都写死：
+  /// ```dart
+  /// onBack: () => context.canPop() ? context.pop() : context.go('/games')
+  /// ```
+  /// ⇒ **绕过了宿主的 [onExit]**，于是群内进房后按返回直接跳到**群外桌游大厅**
+  /// `/games`（用户原话：「还是返回到群外桌游列表」）。
+  ///
+  /// 正确语义按 web `GroupGames.tsx:66–78`：房内 `onBack={() => setCurrent(null)}`
+  /// —— 只清本地 state、**回群内桌游列表**（URL 都不变）。
+  /// Flutter 侧等价物就是 [GroupGamesPage] 传进来的 `onExit`
+  ///（它做 `_currentRoomId = null` + 刷新列表）。
+  ///
+  /// 群外仍保持原行为：能 pop 就 pop（进房是 push），栈底回大厅 —— 与
+  /// `games_hub_page` / `live_room_page` 等既有页面的口径一致。
+  void _back() {
+    // 群内（或任何显式给了 onExit 的宿主）⇒ 交回宿主决定落点。
+    // 这一档必须排在最前：群内进房**不产生路由栈**（/group/:id/games 的房内态
+    // 是页面私有 state，不是子路由）⇒ context.canPop() 的判断在这里没有意义。
+    final VoidCallback? onExit = widget.onExit;
+    if (onExit != null) {
+      onExit();
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.go('/games');
+  }
+
   Future<void> _join() async {
     final AylaGameRoom? room = _room;
     if (room == null || _busy) return;
@@ -325,8 +358,8 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
       // 否则群顶栏与房内头部之间会多出一条空白色带（2026-10-19 用户两次实拍）。
       // ⚠️ 本参数此前**只加在 Host 上却没透传给组件** ⇒ 群内空白带一直在（本轮修）。
       topInset: !widget.inGroup,
-      // 返回：能回退就 pop（进房是 push），栈底回大厅。
-      onBack: () => context.canPop() ? context.pop() : context.go('/games'),
+      // 返回：见 [_back]（群内回群内桌游列表，群外才回桌游大厅）。
+      onBack: _back,
       onShare: () => unawaited(aylaOpenShareSheet(
         context,
         payload: AylaSharePayload.boardgame(
@@ -371,8 +404,8 @@ class _AylaGameRoomHostState extends ConsumerState<AylaGameRoomHost> {
 
     return narrow
         ? AylaFullScreenSwipeBack(
-            // 返回：能回退就 pop（进房是 push），栈底回大厅。
-      onBack: () => context.canPop() ? context.pop() : context.go('/games'),
+            // 返回（全屏右滑）：与顶部返回键**同一落点**，见 [_back]。
+            onBack: _back,
             child: body,
           )
         : body;
