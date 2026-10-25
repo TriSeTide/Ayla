@@ -100,6 +100,10 @@ class AylaPostVideoCover extends StatelessWidget {
         alt: '',
         variant: MediaVariant.thumb,
         fit: fit,
+        // 用户裁决 2026-10-23：帖子配图是**永久资产**（A1，MinIO 永不删）
+        // ⇒ 不落本地缓存（本地缓存只为对抗云端过期，永久资产没这风险）。
+        // 事实源：docs/architecture/media-retention-boundaries.md §3 A1。
+        cacheable: false,
       );
     }
     if (placeholder) {
@@ -714,6 +718,8 @@ class _AylaPostCardState extends State<AylaPostCard> {
               alt: '帖子图片',
               variant: m.thumbnail != null ? MediaVariant.thumb : null,
               fit: BoxFit.contain,
+              // 帖子配图 = 永久资产 A1（用户裁决 2026-10-23）⇒ 不落本地缓存
+              cacheable: false,
             );
       final Widget cell = _openableMedia(0, m, inner);
       return Padding(
@@ -801,6 +807,8 @@ class _AylaPostCardState extends State<AylaPostCard> {
       alt: '帖子图片',
       variant: m.thumbnail != null ? MediaVariant.thumb : null,
       fit: BoxFit.cover, // object-fit: cover
+      // 帖子配图 = 永久资产 A1（用户裁决 2026-10-23）⇒ 不落本地缓存
+      cacheable: false,
     );
   }
 }

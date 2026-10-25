@@ -624,6 +624,10 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
         alt: '',
         variant: MediaVariant.thumb,
         fit: BoxFit.cover,
+        // 帖子编辑器里的**视频海报帧**属帖子附件（永久资产 A1，用户裁决
+        // 2026-10-23）⇒ 不落本地缓存。
+        // ⚠️ 与**聊天**视频的首帧海报不同：那个跟着视频（7 天过期）走 ⇒ 要缓存。
+        cacheable: false,
       );
     } else if (isVideo) {
       preview = _mediaFallback(draft);
@@ -642,6 +646,8 @@ class _AylaPostEditorState extends State<AylaPostEditor> {
         variant: MediaVariant.thumb,
         fit: BoxFit.cover,
         fallback: _mediaFallback(draft),
+        // 上传后暂存的帖子图（永久资产 A1，用户裁决 2026-10-23）⇒ 不落本地缓存
+        cacheable: false,
       );
     }
 

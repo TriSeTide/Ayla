@@ -284,7 +284,13 @@ class AylaProfileContentSections extends StatelessWidget {
               width: 88,
               height: 50,
               child: (data.cover ?? '').isNotEmpty
-                  ? AylaResourceImage(src: data.cover!, alt: '', fit: BoxFit.cover)
+                  // 直播间封面 = **永久资产 A7**（用户裁决 2026-10-23）⇒ 不落本地缓存
+                  ? AylaResourceImage(
+                      src: data.cover!,
+                      alt: '',
+                      fit: BoxFit.cover,
+                      cacheable: false,
+                    )
                   : ColoredBox(
                       color: AylaColors.ice100,
                       child: Center(

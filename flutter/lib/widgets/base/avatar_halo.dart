@@ -318,6 +318,9 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
                     alt: '',
                     fit: BoxFit.cover,
                     previewImage: widget.previewImage,
+                    // 头像 = **永久资产 A5（用户）/ A6（群）**（用户裁决 2026-10-23）
+                    // ⇒ 不落本地缓存。事实源：retention-boundaries §3 A5/A6。
+                    cacheable: false,
                     fallback: Center(
                       child: Text(
                         widget.label.isEmpty

@@ -425,7 +425,13 @@ class AylaLiveChannelCard extends StatelessWidget {
                         ),
                       )
                     // 有封面：`alt: ''`（装饰图）→ 失败只回退、不提示；铺满 + cover
-                    : AylaResourceImage(src: cover, alt: '', fit: BoxFit.cover),
+                    // 直播间封面 = **永久资产 A7**（用户裁决 2026-10-23）⇒ 不落本地缓存
+                    : AylaResourceImage(
+                        src: cover,
+                        alt: '',
+                        fit: BoxFit.cover,
+                        cacheable: false,
+                      ),
               ),
               // `.live-card-cover-badge`：top calc(sp1 - 1px) = 3 / left sp1 = 4 / gap sp1
               Positioned(

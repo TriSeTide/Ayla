@@ -636,7 +636,13 @@ class _LiveContent extends StatelessWidget {
           // 2026-09-20 审查 R5：改用组件库 AylaResourceImage（web 同一位置就是
           // AylaResourceImage，GroupCarousel.tsx:42）。原 _CarouselImage 用
           // Image.network → 绕过签名/缓存/过期重签链路（401 破图）。
-          AylaResourceImage(src: cover, fit: BoxFit.cover), // alt="" ⇒ decorative
+          // slide.cover = **直播封面（永久资产 A7）**（用户裁决 2026-10-23）
+          // ⇒ 不落本地缓存
+          AylaResourceImage(
+            src: cover,
+            fit: BoxFit.cover,
+            cacheable: false,
+          ), // alt="" ⇒ decorative
           _Caption(text: '${slide.host} 在直播 ${slide.title}'),
         ],
       );
@@ -674,7 +680,13 @@ class _PostContent extends StatelessWidget {
       children: <Widget>[
         if (image != null)
           // 同上（GroupCarousel.tsx:53）
-          AylaResourceImage(src: image, fit: BoxFit.cover) // alt="" ⇒ decorative
+          // slide.image = **帖子图（永久资产 A1）**（用户裁决 2026-10-23）
+          // ⇒ 不落本地缓存
+          AylaResourceImage(
+            src: image,
+            fit: BoxFit.cover,
+            cacheable: false,
+          ) // alt="" ⇒ decorative
         else
           const _PostFallback(),
         if (slide.hasUnread)

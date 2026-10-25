@@ -541,6 +541,9 @@ class _RailItemState extends State<_RailItem> {
                           src: cover,
                           alt: '',
                           fit: BoxFit.cover,
+                          // 直播间封面 = **永久资产 A7**（用户裁决 2026-10-23）
+                          // ⇒ 不落本地缓存
+                          cacheable: false,
                           // 装饰图：失败只回退图标（tsx 125 `fallback={<IconVideo 18/>}`）
                           fallback: Center(
                             child: AylaIcon(

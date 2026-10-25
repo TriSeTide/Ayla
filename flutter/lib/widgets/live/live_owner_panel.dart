@@ -443,6 +443,9 @@ class _AylaLiveOwnerPanelState extends State<AylaLiveOwnerPanel> {
                         src: preview,
                         alt: '当前直播间封面', // tsx 127
                         fit: BoxFit.cover,
+                        // 直播间封面 = **永久资产 A7**（用户裁决 2026-10-23）
+                        // ⇒ 不落本地缓存
+                        cacheable: false,
                       ),
               ),
             ),

@@ -1432,6 +1432,11 @@ class _FlyAvatarState extends State<_FlyAvatar> {
           height: 20,
           fit: BoxFit.cover, // object-fit: cover
           fallback: null,
+          // 弹幕飘屏**发送者头像** = 用户头像（**永久资产 A5**，用户裁决
+          // 2026-10-23）=> 不落本地缓存。
+          // ⚠️ 与本文件 :468 的**弹幕图片**（E3，7 天过期）语义相反 ——
+          // 那张要保持可缓存，别搞反。
+          cacheable: false,
           onStateChanged: (AylaResourceImageState state) {
             if (mounted) setState(() => _state = state);
           },

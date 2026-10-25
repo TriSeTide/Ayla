@@ -8,11 +8,14 @@
 
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/media/media_cache.dart';
 import '../../core/media/media_signer.dart';
+import '../../core/models/media_kind.dart';
 import '../../theme/glass.dart';
 import '../../theme/svg_path.dart';
 import '../../theme/tokens.dart';
@@ -46,6 +49,7 @@ class AylaSignedVideo extends StatefulWidget {
     this.controls = false,
     this.ariaLabel,
     this.aspectRatio = 16 / 9,
+    this.cacheable = false,
   });
 
   /// 媒体 id（用于签发 original 视频 URL）。
@@ -59,6 +63,20 @@ class AylaSignedVideo extends StatefulWidget {
 
   /// 占位宽高比（视频未就绪时）。
   final double aspectRatio;
+
+  /// 组件挂载后是否**落盘视频本体**（默认 **false**）。
+  ///
+  /// **用户裁决 2026-10-23**：「视频改成『点击播放才存』」。
+  /// 本件的 initState 就签 original 并挂播放器 => 它被创建即等于「用户要看/要播」：
+  /// - **查看器里播放**（image_viewer.dart 的 _ViewerVideo）=> 传 true：
+  ///   用户已经点开大图要看了，落盘合理（下次直接本地播放，云端过期也能看）。
+  /// - **列表/卡片里的首帧预览**（post_card.dart 的 AylaPostVideoCover 降级分支）
+  ///   => 保持默认 false：那只是「在信息流里看一眼封面」，不是播放意图。
+  ///
+  /// 注意：真正的「视频本体不因进视口而落盘」靠的是**气泡内不再自动
+  /// fetchAndStore**（media_content.dart 的 _VideoFrameState）；
+  /// 本开关只决定「播放器被创建时要不要顺手落盘」。
+  final bool cacheable;
 
   @override
   State<AylaSignedVideo> createState() => _SignedVideoState();
@@ -98,6 +116,22 @@ class _SignedVideoState extends State<AylaSignedVideo> {
         _src = '${r.url}#t=0.1';
         _state = _VideoState.ready;
       });
+      // 落盘视频本体（**用户裁决 2026-10-23**：视频「点击播放才存」）。
+      //
+      // [cacheable] 只有「用户已点开查看器要播」的调用点才传 true（见字段文档）；
+      // 列表里的首帧预览保持 false —— 那只是看一眼封面，不是播放意图。
+      //
+      // 不 await、不提示：缓存是增强项，失败不影响播放。
+      if (widget.cacheable && !r.originalExpired) {
+        unawaited(
+          AylaMediaCache.instance
+              .fetchAndStore(
+                mediaId: widget.mediaId,
+                kind: AylaMediaKind.video,
+              )
+              .catchError((Object _) => null),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() => _state = _VideoState.failed);

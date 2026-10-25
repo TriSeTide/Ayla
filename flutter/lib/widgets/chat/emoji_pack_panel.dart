@@ -473,6 +473,11 @@ class _AylaEmojiPackPanelState extends State<AylaEmojiPackPanel> {
                           alt: '群表情',
                           fit: BoxFit.contain, // `.emoji-pack-item img { object-fit: contain }`
                           fallback: const _EmojiFallback(),
+                          // 表情包 = **永久资产 A2**（用户裁决 2026-10-23 原话：
+                          // 「表情包不存本地啊，你没有意识到表情包是永久资产吗，
+                          // 是 minio 永久保存不会过期的资产」）⇒ 不落本地缓存。
+                          // 事实源：docs/architecture/media-retention-boundaries.md §3 A2 / §6.1。
+                          cacheable: false,
                         ),
                 ),
               ),

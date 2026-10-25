@@ -390,6 +390,11 @@ class _AylaShareBubbleState extends State<AylaShareBubble> {
                       fit: BoxFit.cover,
                       variant: MediaVariant.thumb,
                       fallback: _coverFallback(payload),
+                      // 分享卡封面 = **群头像（永久资产 A6）**（用户裁决 2026-10-23）
+                      // —— AylaSharePayload.cover 来自 _normalizeCover(avatar)
+                      // => 不落本地缓存。判据是「会不会被 MinIO 清理」，
+                      // 不是「在哪个界面显示」（它在聊天气泡里也一样不缓存）。
+                      cacheable: false,
                     )
                   : _coverFallback(payload),
             ),

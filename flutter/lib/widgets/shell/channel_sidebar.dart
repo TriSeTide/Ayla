@@ -2792,9 +2792,12 @@ class _ChannelSidebarPanelState extends State<_ChannelSidebarPanel>
                 // 内容区 = border-box 内缩 1px（CSS border 占布局，Flutter 不占）
                 padding: const EdgeInsets.all(_SidebarMetrics.borderWidth),
                 child: hasCover
+                    // 直播间封面 = **永久资产 A7**（用户裁决 2026-10-23）
+                    // ⇒ 不落本地缓存
                     ? AylaResourceImage(
                         src: room.cover!,
                         fit: BoxFit.cover,
+                        cacheable: false,
                         fallback: Center(
                           child: AylaIcon(
                             _iconVideo,
