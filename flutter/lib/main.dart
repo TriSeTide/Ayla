@@ -35,6 +35,10 @@ import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
 import 'state/chat_state.dart' show aylaRegisterChatStateCurrentUserId;
+import 'pages/live_support.dart'
+    show
+        aylaPauseLiveViewingForBackground,
+        aylaResumeLiveViewingFromBackground;
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/shell/overlay_scrollbar.dart';
@@ -321,9 +325,50 @@ class _AppRoot extends ConsumerStatefulWidget {
   ConsumerState<_AppRoot> createState() => _AppRootState();
 }
 
-class _AppRootState extends ConsumerState<_AppRoot> {
+class _AppRootState extends ConsumerState<_AppRoot>
+    with WidgetsBindingObserver {
   /// 组件画布舞台（唯一视觉验收面）。
   bool _showGallery = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// App 前后台切换 ⇒ 直播观看登记的开/关（2026-10-26 用户实报补齐）。
+  ///
+  /// ## 为什么必须做（实测定位）
+  /// 用户报「手机退出直播间后，电脑仍看到手机账号在观看」。线上 redis 显示
+  /// 该观众的活跃分**持续刷新** ⇒ 心跳仍在跑 ⇒ **WS 没断**；而实测「连接一断，
+  /// 后端立刻把它移出在看名单」（连上→断开，`zrange` 从 [me] 变 []）。
+  ///
+  /// 根因：全仓**没有任何 App 生命周期处理**。手机「退出直播间」后若 App 进
+  /// 后台/锁屏，页面虽 dispose 但进程常驻、系统允许连接存活 ⇒ 别人一直看到你
+  /// 在观看。PC 上关页面即断，所以只有手机方向出问题。
+  ///
+  /// 语义：**进后台 = 离开观看**（停心跳、退出名单）；回前台且在直播场景则续上。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        unawaited(aylaPauseLiveViewingForBackground());
+      case AppLifecycleState.resumed:
+        unawaited(aylaResumeLiveViewingFromBackground());
+      case AppLifecycleState.inactive:
+        // 短暂失焦（来电/通知横幅/切控制中心）不算离开，**不动**。
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

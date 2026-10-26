@@ -707,6 +707,26 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// ⚠️ **清状态是同步的**、只有播放器销毁是异步：dispose 之后 `_live` 可能已被
   /// ProviderScope 回收（实测 "A AylaLiveState was used after being disposed"）⇒
   /// 同步段必须在 `await` 之前跑完，且 `_disposed` 时不再写共享状态。
+  /// 进入后台：**只断开弹幕 WS**（= 退出在看名单 + 停心跳），保留会话与播放器。
+  ///
+  /// 与 [stop] 的区别：本方法**不**清 store、不销毁播放器、不释放小窗所有权 ——
+  /// 回前台由 [resumeViewerPresence] 续上，用户无感（web 无此概念，属按常理补齐）。
+  void pauseViewerPresence() {
+    if (!_alive) return;
+    _backgroundPaused = true;
+    _ws.disconnect();
+  }
+
+  /// 回到前台：重新连上弹幕 WS（重新登记在看、恢复心跳）。
+  void resumeViewerPresence() {
+    if (!_alive || !_backgroundPaused) return;
+    _backgroundPaused = false;
+    _ws.connect(channelId);
+    unawaited(refreshViewers());
+  }
+
+  /// 是否因 App 进后台而暂停了观看登记（[resumeViewerPresence] 的守卫）。
+  bool _backgroundPaused = false;
   Future<void> stop() async {
     _alive = false;
     // 活动态索引收尾（web `:351–356`）：
@@ -822,6 +842,41 @@ AylaLiveRoomSession? _activeViewSession;
 /// AppShell 只用它取 `videoView` 与订阅播放器状态；**渲染条件只认
 /// [AylaLiveState.miniPlayer] 非空**（web `AppShell.tsx:131–132`）。
 AylaLiveRoomSession? get aylaMiniPlayerOwner => _miniPlayerOwner;
+
+
+/// App 进入后台时的直播观看收口（web 无对应实现 —— 这是**按常理补齐**）。
+///
+/// ## 为什么需要（2026-10-26 用户实报）
+/// 「手机退出直播间后，电脑仍看到手机账号在观看；但电脑退出，手机立刻看不到」。
+/// 实测定位（线上 redis）：残留观众的活跃分**仍在刷新** ⇒ 心跳还在跑 ⇒
+/// **WS 连接根本没断**。而 `disconnect` 触发时后端会立刻移除观众（已实测：
+/// 连上→断开，`zrange` 从 [me] 变 []）。
+///
+/// 根因：Flutter 侧**没有任何 App 生命周期处理**（全仓无 `WidgetsBindingObserver`）。
+/// 手机用户「退出直播间」后若 App 进后台/锁屏，页面虽已 dispose，但进程常驻、
+/// 系统允许连接继续存活到被杀为止；PC 上关页面即断。
+///
+/// ## 语义选择
+/// 进入后台 ⇒ 视为**离开观看**（停心跳、退出在看名单、断开 WS）。
+/// 回到前台且仍在直播间 ⇒ 页面自身会重新 `start()`；若在**小窗**则重连继续播。
+/// 这样「别人看你」永远反映真实前台观看状态。
+Future<void> aylaPauseLiveViewingForBackground() async {
+  final AylaLiveRoomSession? active = _activeViewSession;
+  final AylaLiveRoomSession? mini = _miniPlayerOwner;
+  // 只断 WS（退出在看名单、停心跳），**不销毁会话**：回前台可无缝续上。
+  for (final AylaLiveRoomSession? s in <AylaLiveRoomSession?>[active, mini]) {
+    s?.pauseViewerPresence();
+  }
+}
+
+/// App 回到前台时的恢复（与 [aylaPauseLiveViewingForBackground] 配对）。
+Future<void> aylaResumeLiveViewingFromBackground() async {
+  final AylaLiveRoomSession? active = _activeViewSession;
+  final AylaLiveRoomSession? mini = _miniPlayerOwner;
+  for (final AylaLiveRoomSession? s in <AylaLiveRoomSession?>[active, mini]) {
+    s?.resumeViewerPresence();
+  }
+}
 
 /// 关闭小窗并**完整销毁**会话（web `LiveMiniPlayer.tsx:93–96` →
 /// `liveSessionRuntime.leave()`：hls → WS → 清 store → 活动态；含 `setMiniPlayer(null)`）。
