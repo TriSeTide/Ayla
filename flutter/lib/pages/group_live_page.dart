@@ -473,6 +473,15 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     final AylaLiveRoomSession? session = _session;
     if (session == null) return const SizedBox.shrink();
     final AylaLiveState live = ref.watch(liveStateProvider);
+    // ⚠️ **群内直播此前漏了这一步**（与一级直播间/开播控制台不一致）：
+    // `danmakuEntries()` 读的是历史窗口（`_history?.items ?? store`），而历史窗口
+    // 只在 `syncRealtimeToHistory()` 里被 WS 帧喂 ⇒ 不调它，**群内直播的实时弹幕
+    // 永远不出现**（web `GroupLive.tsx` 复用 `useDanmaku`，同一份 hook 自带该同步）。
+    session.syncRealtimeToHistory();
+    // 消费「贴底」请求：本帧布局完成后才滚（同 `live_room_page.dart`）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) session.pumpScroll();
+    });
     // 弹幕历史由会话自己持有（`AylaLiveRoomSession.history`，与一级直播间同源）。
     final AylaCursorHistory<AylaLiveDanmaku>? history = session.history;
     final String selfId = ref.watch(
@@ -519,6 +528,10 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
         sending: session.sending,
         sendError: session.sendError,
         hasNewBelow: history?.hasNewer ?? false,
+        // 贴底跟随 + 滚动上报 + 「有新弹幕 ↓」（与一级直播间同源接线）。
+        danmakuController: session.danmakuScroll,
+        onDanmakuScroll: session.handleDanmakuScroll,
+        onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom()),
         history: history == null
             ? null
             : AylaHistoryControlsData(

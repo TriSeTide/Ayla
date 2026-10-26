@@ -85,6 +85,9 @@ class AylaLiveRoomData {
     this.sending = false,
     this.sendError,
     this.hasNewBelow = false,
+    this.danmakuController,
+    this.onDanmakuScroll,
+    this.onScrollToBottom,
     this.history,
     this.viewerSheet = const AylaLiveViewerSheetData(),
     this.onOpenViewerSheet,
@@ -122,6 +125,24 @@ class AylaLiveRoomData {
 
   /// 列表下方有新弹幕（显示「新弹幕」提示）。
   final bool hasNewBelow;
+
+  /// 弹幕列表滚动控制器（web `useCursorHistory` 的 `listRef`）。
+  ///
+  /// ⚠️ **2026-10-26 用户实报「发送大图/动图弹幕后新弹幕刷新不出来，必须重进直播间」**：
+  /// 会话层 [AylaCursorHistory.pendingScrollToBottom] 只置位、无人消费 ⇒ 列表不跟随底部；
+  /// 图片弹幕行（96×64 + 昵称）比文字行高，连续几条就把可见区顶满 ⇒ 看起来像「卡住」。
+  /// 由页面注入会话持有的控制器（`live_support.dart` 的 `danmakuScroll`），
+  /// 与 web 的 `listRef` 同一语义。null ⇒ 外部无法接管滚动（画布/样张）。
+  final ScrollController? danmakuController;
+
+  /// 滚动上报（web `useCursorHistory.ts:159–164` 的 `handleScroll`）。
+  /// null ⇒ 不判定「是否仍在底部」（保持跟随，等价于不知道就不打断）。
+  final VoidCallback? onDanmakuScroll;
+
+  /// 点「有新弹幕 ↓」= web `useDanmaku.ts:63–69` 的 `scrollToBottom`。
+  /// null ⇒ 提示仍显示但点击无效（**不再允许这种状态**：页面必须接线）。
+  final VoidCallback? onScrollToBottom;
+
 
   /// 历史分页状态（复用 `AylaHistoryControlsData`）。
   final AylaHistoryControlsData? history;
@@ -421,6 +442,13 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
   Widget get _danmakuList => AylaDanmakuList(
     items: widget.data.danmaku,
     hasNewBelow: widget.data.hasNewBelow,
+    // 贴底跟随 + 「有新弹幕 ↓」两档（web `useCursorHistory` 的 listRef/handleScroll/
+    // scrollToBottom 三件的落点）。此前三件**全部未接线**：`AylaCursorHistory`
+    // 的 `pendingScrollToBottom` 无消费方、`onUserScroll` 为空 ⇒ `following` 恒 true
+    // 但没人真去滚；`hasNewer` 锁存后再也没法回最新。
+    controller: widget.data.danmakuController,
+    onUserScroll: widget.data.onDanmakuScroll,
+    onScrollToBottom: widget.data.onScrollToBottom,
     history: widget.data.history,
     // web `DanmakuList.tsx:52–58`：弹幕发送者头像 onClick → goUserProfile(null, user_id)。
     // 页面未注入 ⇒ null（头像不可点，与 web 无回调面一致）。

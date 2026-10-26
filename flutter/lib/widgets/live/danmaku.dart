@@ -17,6 +17,33 @@
 ///   组件持有 attempt（文件 + mediaId），重试语义与 web 一致；
 /// - 弹幕列表的 listRef（web 用于跳底）→ 页面注入 `ScrollController`。
 ///
+/// ## 与 web 的**有意偏离**：弹幕图片一律走 thumb 变体 + 按显示尺寸解码
+///
+/// ### web 的做法（事实源）
+/// - `DanmakuList.tsx:72–78`：`<ResourceImage src={resolveMediaPath(media.thumbnail) ?? mediaContentUrl(media_id)} />`
+///   —— **不传 `variant`**，也无 width/height（尺寸全由 `.danmaku-image` 的 CSS 定 96×64）；
+/// - `DanmakuOverlay.tsx:192–198`：飘层同样不传 width/height，只传 `variant="thumb"`；
+/// - `ResourceImage.tsx:173–185`：最终就是一个 `<img loading="lazy">`。
+///
+/// ### 为什么 Flutter 不能照抄
+/// 浏览器 `<img>` 是**原生渐进解码 + HTTP 缓存**：解码后的位图由渲染引擎按**布局尺寸**
+/// 分配缓存槽位，一张 4000×3000 的原图在 96×64 的槽位里不会整幅留在 Flutter 侧的纹理里；
+/// 而 Flutter 的 `Image.network` **默认按原始分辨率完整解码**（`cacheWidth/cacheHeight`
+/// 都为空时）—— 4000×3000 ≈ 48MB RGBA，动图还会逐帧解码，**光栅线程/UI 线程被打满**，
+/// 表现为「发完一张大图（动图）后弹幕列表不再刷新，要退出房间重进才恢复」（用户实报）。
+///
+/// ### 本文件的落地口径
+/// 1. 列表槽位（96×64）与飘层槽位（72×36）**一律传 width/height**
+///    ⇒ `AylaResourceImage` 走 `resource_image.dart:549–567` 的「按显示尺寸取长边解码」；
+/// 2. 两处**一律传 `variant: MediaVariant.thumb`**
+///    ⇒ 签名走 `POST /media/<id>:sign {variant:"thumb"}`，拿缩略图派生
+///    （后端 `apps/media/services.py:548–592`：720px 上限、动图保留动画但封顶 64 帧）；
+///    **原图只在点开查看器（`AylaImageViewer`）时才取**，与「先缩略图、点开才原图」的既有裁决一致。
+/// 3. ⚠️ **不要复用 `widgets/chat/media_content.dart:538–539` 的「GIF 走原图保动画」策略**：
+///    那是**聊天气泡**的语义（气泡里 GIF 动起来是内容本身，且气泡尺寸随图放大）。
+///    弹幕的 96×64 / 72×36 槽位里放一张会动的原图既看不出动效，又会把 UI 拖死 ——
+///    槽位语义是「缩略预览 + 点击看大图」，故**动图也走 thumb**（web 的飘层本来就传 thumb）。
+///
 /// ## 公开面
 /// `AylaDanmakuEntry` · `AylaDanmakuList` · `AylaDanmakuInputMaterial` · `AylaDanmakuInput` · `AylaDanmakuOverlay` · 样张 `aylaDanmakuSamples()`
 
@@ -98,8 +125,27 @@ class AylaDanmakuEntry {
 /// 本文件保留同名局部别名，既有调用点不变。
 String? _resolveMediaPath(String? path) => aylaResolveMediaPath(path);
 
+/// 列表图片槽位（`.danmaku-image`：app.css 3741–3747 `width: 96px; height: 64px`）。
+///
+/// 这两个常量同时是**解码尺寸的来源**（乘 DPR 后只取长边，见
+/// `resource_image.dart:549–567`）——不传的话就会按原图分辨率完整解码，
+/// 详见文件头的「与 web 的有意偏离」。
+const double kDanmakuImageWidth = 96;
+const double kDanmakuImageHeight = 64;
+
+/// 飘弹幕图片槽位（`.danmaku-fly-img`：live.css 906–929 `72×36`）。
+const double kDanmakuFlyImageWidth = 72;
+const double kDanmakuFlyImageHeight = 36;
+
 /// 列表图源 = `resolveMediaPath(media.thumbnail) ?? mediaContentUrl(media_id)`
 /// （tsx 73）。
+///
+/// ⚠️ 保留 web 的 fallback（没有缩略图路径时指向原图内容端点），因为：
+/// - 后端只有在 `thumbnail_path` 缺失时才返回 `thumbnail: null`（`media/serializers.py:47–50`），
+///   此时原图就是唯一可显示资源，落成「已过期/失败」占位反而看不到图；
+/// - 但**它不再意味着按原图解码**：调用点一律带 `variant: thumb`
+///   （缩略图就绪 → 服务器直接 404，由 `AylaResourceImage` 转失败态；
+///   缩略图未就绪 → 拿原图但**只按 96×64 解码**），见文件头。
 String? _listImageSrc(AylaDanmakuEntry item) {
   final String? path = _resolveMediaPath(item.media?.thumbnail);
   if (path != null) return path;
@@ -469,10 +515,22 @@ class _DanmakuImageButtonState extends State<_DanmakuImageButton> {
       key: ValueKey<String>('danmaku-image:$_retry'),
       src: widget.src,
       alt: widget.alt,
+      // 🔴 显式给显示尺寸 ⇒ AylaResourceImage 按 96×64×DPR 的长边解码
+      //    （resource_image.dart:549–567）。**不传 = 按原图分辨率完整解码**：
+      //    一张 4000×3000 的 GIF 会一次性解成 ~48MB RGBA 并逐帧重解，
+      //    光栅线程被打满 ⇒ 弹幕列表不再刷新（用户实报）。
+      width: kDanmakuImageWidth, // .danmaku-image width: 96px
+      height: kDanmakuImageHeight, // .danmaku-image height: 64px
+      // 🔴 thumb 变体：96×64 的槽位没有任何理由拉原图（后端缩略图 720px 上限，
+      //    动图也保留动画）。原图只在点开查看器时取 —— 见文件头「与 web 的有意偏离」。
+      variant: MediaVariant.thumb,
       fit: BoxFit.cover, // `.danmaku-image { object-fit: cover }`
       // 加载骨架由本组件按 web 的 `fallback` 画（见类注释）；失败芯片保持被裁
       reserveSpaceWhileLoading: false,
-      fallback: const AylaSkeleton(width: 96, height: 64),
+      fallback: const AylaSkeleton(
+        width: kDanmakuImageWidth,
+        height: kDanmakuImageHeight,
+      ),
       onStateChanged: (AylaResourceImageState state) {
         if (mounted) setState(() => _state = state);
       },
@@ -503,8 +561,8 @@ class _DanmakuImageButtonState extends State<_DanmakuImageButton> {
           onTap: failed ? _retryLoad : widget.onOpen,
           child: SizedBox(
             // `.danmaku-image-open { width: 96px; height: 64px; overflow: hidden }`
-            width: 96,
-            height: 64,
+            width: kDanmakuImageWidth,
+            height: kDanmakuImageHeight,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(AylaRadii.rSm), // --radius-sm
               child: Stack(
@@ -525,7 +583,10 @@ class _DanmakuImageButtonState extends State<_DanmakuImageButton> {
                   // 内建加载占位是平底块 ⇒ 这里按 web 画。
                   if (_state == AylaResourceImageState.loading)
                     const Positioned.fill(
-                      child: AylaSkeleton(width: 96, height: 64),
+                      child: AylaSkeleton(
+                        width: kDanmakuImageWidth,
+                        height: kDanmakuImageHeight,
+                      ),
                     ),
                 ],
               ),
@@ -1434,7 +1495,7 @@ class _FlyAvatarState extends State<_FlyAvatar> {
           fallback: null,
           // 弹幕飘屏**发送者头像** = 用户头像（**永久资产 A5**，用户裁决
           // 2026-10-23）=> 不落本地缓存。
-          // ⚠️ 与本文件 :468 的**弹幕图片**（E3，7 天过期）语义相反 ——
+          // ⚠️ 与本文件 :514 的**弹幕图片**（E3，7 天过期）语义相反 ——
           // 那张要保持可缓存，别搞反。
           cacheable: false,
           onStateChanged: (AylaResourceImageState state) {
@@ -1465,8 +1526,11 @@ class _FlyImageButtonState extends State<_FlyImageButton> {
     Widget image = AylaResourceImage(
       src: widget.src,
       alt: '',
-      width: 72, // `.danmaku-fly-img { width: 72px; height: 36px }`
-      height: 36,
+      // 飘层槽位 72×36（`.danmaku-fly-img { width: 72px; height: 36px }` /
+      // live.css 906–929）—— 显式传尺寸才会按显示尺寸解码（同列表侧，
+      // 见文件头「与 web 的有意偏离」）；动图在飘层更不该取原图。
+      width: kDanmakuFlyImageWidth,
+      height: kDanmakuFlyImageHeight,
       fit: BoxFit.cover,
       variant: MediaVariant.thumb, // tsx 196 `variant="thumb"`
       fallback: null,
@@ -1494,8 +1558,8 @@ class _FlyImageButtonState extends State<_FlyImageButton> {
         behavior: HitTestBehavior.opaque,
         onTap: widget.onOpen,
         child: Container(
-          width: 72,
-          height: 36,
+          width: kDanmakuFlyImageWidth,
+          height: kDanmakuFlyImageHeight,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AylaRadii.rSm),
             border: Border.all(

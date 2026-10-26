@@ -19,7 +19,9 @@
 /// ## 未接线 / 待提升（第 1 批登记）
 /// · 在线胶囊 ✅ 2026-09-28 用户裁决后已提升为公共件 [AylaProfilePresence]
 ///   （`profile.css:558–570`），本页改用公共件（私有 `_PresenceChip` 已删）；
-/// · 分享面板接线属分享域批次（本页只装配分享键）；
+/// · 分享键 ✅ **2026-10-26 已接线**：改走 [AylaShareButton] 的**自给自足档**
+///   （`payloadBuilder` + 不传 `onPressed`），与 web `ShareButton.tsx:21–33` 的
+///   「自己开弹窗、不依赖页面注入」同构 —— 原为 `onPressed: () {}` 空实现（点了没反应）；
 /// · 内容分区 ✅ **2026-09-29 已接线**（原来传 `postsError` 显式失败态）：三条数据源
 ///   （正在直播 / 正在语音 / 他的帖子前 3 条）与四个跳转由 `profile_content_support.dart`
 ///   装载，与本人页同源 —— 差异只有 owner（`getUserDetail` 结果）、`mine = false`、
@@ -41,6 +43,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/api/users_api.dart';
 import '../state/chat_providers.dart' show chatWsProvider;
+import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../core/models/user_public.dart';
 import '../core/net/dio_client.dart';
 import '../state/display_status.dart';
@@ -489,10 +492,20 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
           semanticLabel: '返回',
           onPressed: _back,
         ),
+        // ★ 自给自足档（= web `UserProfilePage.tsx:129` 的
+        // `<ShareButton payload={userSharePayload(user)} label="分享用户" ... />`）：
+        // web `ShareButton.tsx:21–33` 自己 `useState(open)` + `createPortal` 弹
+        // `ShareSheet`，**不依赖页面注入** ⇒ 永远可点。本页原写 `onPressed: () {}`
+        // （空实现）⇒ 点了没反应。现改传 `payloadBuilder`（惰性，按下才求值）。
         AylaShareButton(
           label: '分享用户', // tsx 129
           size: 40,
-          onPressed: () {}, // 分享面板接线属分享域批次
+          payloadBuilder: () => AylaSharePayload.user(
+            id: user.id,
+            nickname: user.nickname,
+            username: user.username,
+            avatar: user.avatar,
+          ),
         ),
         AylaAvatarHalo(
           label: displayName, // tsx 132 `user.nickname || user.username`

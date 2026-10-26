@@ -187,6 +187,11 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       authNotifierProvider.select((AuthState s) => s.user?.id),
     );
     session.syncRealtimeToHistory();
+    // 消费会话层的「贴底」请求：必须等**本帧布局完成**（新弹幕已在 items 里，
+    // 但 maxScrollExtent 要下一次布局才更新）—— 见 `AylaLiveRoomSession.pumpScroll`。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) session.pumpScroll();
+    });
     final AylaCursorHistory<AylaLiveDanmaku>? history = session.history;
 
     // 名单弹层的权威数据（web 由弹层自身在打开时拉：`LiveViewerSheet.tsx:44–79`）
@@ -218,6 +223,12 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
         sending: session.sending,
         sendError: session.sendError,
         hasNewBelow: history?.hasNewer ?? false,
+        // 贴底跟随 + 滚动上报 + 「有新弹幕 ↓」（web `useCursorHistory` 的
+        // listRef / handleScroll / scrollToBottom 三件）。此前三件全未接线 ⇒
+        // 新弹幕进了窗口但列表不动（2026-10-26 用户实报「大图弹幕后刷新不出来」）。
+        danmakuController: session.danmakuScroll,
+        onDanmakuScroll: session.handleDanmakuScroll,
+        onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom()),
         history: history == null
             ? null
             : AylaHistoryControlsData(

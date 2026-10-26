@@ -34,6 +34,7 @@ import 'layout/app_gate.dart';
 import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
+import 'state/chat_state.dart' show aylaRegisterChatStateCurrentUserId;
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/shell/overlay_scrollbar.dart';
@@ -239,6 +240,14 @@ void main() {
   // 预加载完成时才能把会话摘要灌进 chatState
   //（用户实机：「每次切换到主页选项卡时左侧群头像列表都要加载，这在 web 是不需要的」）。
   aylaRegisterChatStateResolver(() => container.read(chatStateProvider));
+  // 「当前用户 id」注入（web `useAuthStore.getState().currentUser?.id` 的等价物）：
+  // `chat_state.dart` 的 `_normalize` 推导私聊 peer 时必须能**排除自己**
+  // （web `stores/chat.ts:129–133` 的 `members.find(m => m.user.id !== me)`）。
+  // 不注入 ⇒ 退化为取 members 首条 ⇒ 后端把本人排在首位的会话（实测真库 15/30）
+  // 会把 peer 误判成自己，顶栏头像/昵称跟着错。state 层不依赖 Riverpod ⇒ 用注入。
+  aylaRegisterChatStateCurrentUserId(
+    () => container.read(authNotifierProvider).user?.id,
+  );
   // 收藏状态的作用域（登录账号）跟踪 —— web `ensureFavoriteScope`
   // （`stores/favoriteStatus.ts:34–48`）里那条
   // `useAuthStore.subscribe(() => ensureFavoriteScope())` 的等价物。

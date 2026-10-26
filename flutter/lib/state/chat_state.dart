@@ -32,6 +32,22 @@ import 'package:flutter/foundation.dart';
 import '../core/api/chat_api.dart';
 import '../core/models/conversation.dart';
 
+/// 「当前登录用户 id」的注入点（web `useAuthStore.getState().currentUser?.id`）。
+///
+/// ## 为什么用注入而不是直接读 Riverpod
+/// 本文件是**纯 ChangeNotifier**（文件头已登记：state 层不依赖 Riverpod，
+/// 「provider 与 state 分开」是既有约定，见 `chat_providers.dart:4–6`）。
+/// web 的 `stores/chat.ts:130` 直接 `useAuthStore.getState()` —— 模块级单例天然可读；
+/// Flutter 侧用同构写法：启动期由 `main.dart`（以及测试）赋一个同步取值器。
+///
+/// 未注入 ⇒ 私聊 peer 推导退回「取 members 首条」（修复前行为），不抛、不崩。
+String? Function()? aylaChatStateCurrentUserId;
+
+/// 接线（`main.dart` 启动期调一次；测试可各自覆盖并复原）。
+void aylaRegisterChatStateCurrentUserId(String? Function()? resolver) {
+  aylaChatStateCurrentUserId = resolver;
+}
+
 /// 会话列表状态（会话摘要缓存 + 未读投影 + 活跃排序）。
 class AylaChatState extends ChangeNotifier {
   List<AylaConversationSummary> _conversations =
@@ -349,9 +365,45 @@ class AylaChatState extends ChangeNotifier {
   // ---- 内部 ----
 
   /// 归一（web `toSummary`）：`peer` 缺失时按 members 推导对端。
+  ///
+  /// ## 2026-10-25 修复（用户实报「私信界面头像不显示」的第二根因）
+  ///
+  /// 原实现取 `members.first.user`，**漏了「排除自己」**。web 事实源
+  /// `stores/chat.ts:129–133`：
+  /// ```ts
+  /// const me = useAuthStore.getState().currentUser?.id;
+  /// const peerMember = normalized.members.find((m) => m.user.id !== me) ?? normalized.members[0];
+  /// if (peerMember) normalized.peer = peerMember.user;
+  /// ```
+  ///
+  /// 为什么这条会真的发生：`ConversationMetadataSerializer`（后端
+  /// `apps/chat/serializers.py:514–535`）**对私聊也不给 `peer` 字段**
+  /// （`ConversationListSerializer` 才给），而 `GET /chat/conversations/<id>/?metadata=1`
+  /// 走的正是前者 ⇒ 私聊详情响应必然无 `peer` ⇒ 必然落到本函数推导。
+  /// 成员表是 `obj.members.select_related("user")[:2]`（无 `order_by`），
+  /// 实测真库 30 个「私聊会话 × 成员视角」组合里 **15 个的 `members[0]` 就是自己**
+  /// （conv 1 / 2 / 3 / 7 等）⇒ 对端被写成自己，顶栏头像/昵称变成「自己」，
+  /// 自己没设头像时就是空串 ⇒ 文字首字回退。
+  ///
+  /// 更糟的是**这个错值会粘住**：下方 `upsertConversation` 合并时写
+  /// `peer: prev.peer`（`copyWith` 的 null 语义是「保留旧值」）⇒ 一旦先用
+  /// `metadata=1` 的错误推导写进 store，之后正确的目录摘要（带真 peer）也**覆盖不回来**。
+  ///
+  /// `me` 从 [aylaChatStateCurrentUserId] 取（模块级注入，与 web 的
+  /// `useAuthStore.getState()` 同构；state 层不直接依赖 Riverpod）。
+  /// 未注入（组件测试 / 画布）⇒ 回退 `members.first`，行为与修复前一致。
   AylaConversationSummary _normalize(AylaConversationSummary conv) {
-    if (conv.peer != null || !conv.isPrivate || conv.members.isEmpty) return conv;
-    return conv.copyWith(peer: conv.members.first.user);
+    if (conv.peer != null || !conv.isPrivate) return conv;
+    if (conv.members.isEmpty) return conv;
+    final String? me = aylaChatStateCurrentUserId?.call();
+    final AylaConversationMember peerMember = me == null
+        ? conv.members.first
+        : conv.members.firstWhere(
+            (AylaConversationMember m) => m.user.id != me,
+            // web 的 "?? normalized.members[0]"：全是自己（脏数据）时仍取首条，不造 null
+            orElse: () => conv.members.first,
+          );
+    return conv.copyWith(peer: peerMember.user);
   }
 
   static List<AylaConversationSummary> _sorted(List<AylaConversationSummary> list) {

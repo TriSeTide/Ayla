@@ -22,6 +22,28 @@
 ///   直接透传给面板，而 Flutter 侧面板参数更多（成员/分页/音量回调…），故改用 builder 槽，
 ///   避免本组件重复声明两套注入面。
 ///
+/// ## 有意偏离 web（两处，均已登记）
+///
+/// ### ① 房内聊天图片**可点开**大图（用户实报裁决，2026-10-24）
+///
+/// web 的房内聊天图**没有点击行为**：`VoiceRoomBody.tsx:192–200` 只渲染
+/// `<ResourceImage src=… className="voice-room-chat-image" />`，**没有 onClick**、
+/// 也没有 `ImageViewer`（对比同仓库的聊天域 `MediaContent.tsx:140`、弹幕
+/// `DanmakuList.tsx:131` 都挂了 `<ImageViewer>`）。
+/// 用户实报「语音房里的图片点不开」，裁决为**在 Flutter 侧补上**：
+/// 点击 → 库内既有 [AylaImageViewer]（与弹幕图片完全同一交互/保存能力）。
+/// 除「可点」外的一切（120×80 / radius-sm / object-fit cover / 图源解析）与 web 逐值一致。
+///
+/// ### ② 窄屏聊天浮层的**命中语义**（不是视觉，见 [_NarrowChatOverlay]）
+///
+/// 视觉与 web 一比一（`--glass-bg-strong` + blur18 sat1.4 + 上两角 radius 16 +
+/// `0 -4px 16px rgba(70,91,146,.12)` + 240ms + translateY(12px)），
+/// 但**实现手段必须偏离**：web 用 CSS absolute（浏览器按绘制后几何命中），
+/// Flutter 的 `OverflowBox` 溢出部分**永远收不到指针**（`RenderBox.hitTest` 先判
+/// `_size.contains(position)`）⇒ 浮层改挂在**语音卡槽的 Stack** 里
+/// （`Positioned(bottom: 0, height: 300)`，槽底边 = 聊天卡顶边 ⇒ 与 `bottom: 100%`
+/// 几何重合，且祖先盒覆盖那 300px）—— 完整推导见 [_NarrowChatOverlay]。
+///
 /// ## 公开面
 /// `AylaVoiceChatMessage` · `AylaVoiceChatHistory` · `AylaVoiceRoomBody` · `AylaVoiceChatSendException` · 样张 `aylaVoiceRoomBodySamples()`
 
@@ -36,12 +58,16 @@ import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../../core/models/media_kind.dart' show AylaMediaKind;
+import '../../core/models/post.dart' show AylaMediaDescriptor;
+import '../base/overlays.dart' show aylaOverlayEntry;
 import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/directory_controls.dart';
 import '../base/primitives.dart';
 import '../base/resource_image.dart';
 import '../base/reveal.dart';
 import '../base/share.dart' show AylaShareButton;
+import '../chat/image_viewer.dart' show AylaImageViewer;
 
 /// 房内聊天消息投影（web `voice.chat.message` 帧 / `listVoiceChatMessagesPage` 的 item）。
 class AylaVoiceChatMessage {
@@ -52,6 +78,7 @@ class AylaVoiceChatMessage {
     this.content = '',
     this.mediaId,
     this.thumbnailUrl,
+    this.media,
   });
 
   final String id;
@@ -70,6 +97,12 @@ class AylaVoiceChatMessage {
 
   /// 缩略图 URL（web `resolveMediaPath(media.thumbnail) ?? mediaContentUrl(media_id)`）。
   final String? thumbnailUrl;
+
+  /// 媒体描述符（点开大图查看器用；null = 调用方未给 ⇒ 由 [mediaId] 兜底构造）。
+  ///
+  /// web 侧房内聊天图**不可点**（`VoiceRoomBody.tsx:192–200` 的 `ResourceImage`
+  /// 没有 onClick）—— 见文件头「有意偏离」段。
+  final AylaMediaDescriptor? media;
 }
 
 /// 房内聊天历史（web `useCursorHistory` 投影，逐字段对应 [AylaHistoryControls]）。
@@ -194,6 +227,9 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
   final TextEditingController _draft = TextEditingController();
   final ScrollController _listScroll = ScrollController();
 
+  /// 房内聊天图片的大图查看器宿主（见 [_openImage]）。
+  final _VoiceChatViewerHost _viewer = _VoiceChatViewerHost();
+
   /// tsx 80/153：草稿 revision（发送期间用户又改动 ⇒ 不清空）。
   int _draftRevision = 0;
 
@@ -300,9 +336,26 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
 
   @override
   void dispose() {
+    _viewer.close();
     _draft.dispose();
     _listScroll.dispose();
     super.dispose();
+  }
+
+  /// 点开房内聊天图片（**有意偏离 web**，见文件头「有意偏离 · 房内聊天图片可点开」）。
+  void _openImage(AylaVoiceChatMessage m) {
+    final String? mediaId = m.mediaId;
+    if (mediaId == null) return;
+    _viewer.open(
+      context,
+      m.media ??
+          AylaMediaDescriptor(
+            mediaId: mediaId,
+            kind: AylaMediaKind.image,
+            thumbnail: m.thumbnailUrl,
+          ),
+      m.content.isEmpty ? '房内聊天图片' : m.content,
+    );
   }
 
   bool get _busy => _sending || _uploading;
@@ -350,10 +403,33 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
   /// `.voice-room-layout`：窄屏 flex column；宽屏 grid 两列（+ `@container` 655 单列两行）。
   Widget _buildLayout(bool wide, List<Widget> children) {
     if (!wide) {
+      // 窄屏：语音卡槽 Expanded + 聊天输入卡列。
+      // 聊天浮层 `position: absolute; bottom: 100%` 挂在**语音卡槽的 Stack** 里：
+      // 该槽底边 = 聊天卡顶边（二者在 Column 里相邻、gap 0），所以
+      // `Positioned(left:0, right:0, bottom:0) + 300 高` 与 CSS 的
+      // `bottom: 100%` 几何完全重合，而**祖先盒覆盖了那 300px**
+      // ⇒ 浮层内部可正常命中（OverflowBox 的根因见 [_buildNarrowOverlay]）。
+      // `Clip.none`：浮层只在本槽内部（底边对齐、向上 300 高，槽本身更高），
+      // 不会越出槽；仍然显式给 none，避免未来槽变矮时被硬裁。
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Expanded(child: children.first),
+          Expanded(
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                Positioned.fill(child: children.first),
+                if (children.length > 1 && widget.channelId != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: AylaVoiceRoomBody.narrowChatListHeight,
+                    child: _buildNarrowOverlay(context),
+                  ),
+              ],
+            ),
+          ),
           if (children.length > 1) children[1],
         ],
       );
@@ -498,11 +574,11 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
     );
   }
 
-  /// section.voice-room-chat-card（窄屏 = 底部输入卡 + 上方浮层；宽屏 = 卡内常驻列表）。
-  Widget _buildChatCard(BuildContext context, bool wide) {
-    final AylaTextStyles t = AylaTextStyles.of(context);
-
-    final Widget list = SingleChildScrollView(
+  /// `.voice-room-chat-list`（滚动容器 = 历史控件 + 消息行，voice.css 285–293）。
+  ///
+  /// 两档共用：宽屏放进卡片内常驻，窄屏装进浮层（[`_NarrowChatOverlay`]）。
+  Widget _buildChatList(BuildContext context) {
+    return SingleChildScrollView(
       controller: _listScroll,
       padding: const EdgeInsets.all(AylaSpacing.sp3),
       child: Column(
@@ -523,6 +599,31 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
         ],
       ),
     );
+  }
+
+  /// 窄屏浮层（`.voice-room-chat-card > .voice-room-chat-list`，voice.css 72–105）。
+  ///
+  /// ⚠️ **浮层不能挂在聊天卡内部**（这是 2026-10-24「点击穿透」修复的关键）：
+  /// `RenderBox.hitTest` 先判 `_size.contains(position)`（`rendering/box.dart:2952`），
+  /// 且**每个祖先盒都要包含该点**才会继续往下走。浮层向上溢出聊天卡 300px，
+  /// 落在**语音卡那个 Expanded 槽**的矩形里 —— 若浮层是聊天卡的后代，
+  /// 命中在聊天卡这一层就被截断（点不到），再叠加 `OverflowBox` 零高盒
+  /// 就等于完全不可命中 = 用户看到的「穿透」。
+  /// ⇒ 由 [`_buildLayout`] 把它 `Positioned` 在**语音卡槽**的 `bottom: 0`
+  /// （该槽底边 = 聊天卡顶边 ⇒ 视觉上就是 CSS `bottom: 100%`），祖先盒与绘制盒一致。
+  Widget _buildNarrowOverlay(BuildContext context) {
+    return _NarrowChatOverlay(
+      expanded: _chatExpanded,
+      height: AylaVoiceRoomBody.narrowChatListHeight,
+      child: _buildChatList(context),
+    );
+  }
+
+  /// section.voice-room-chat-card（窄屏 = 底部输入卡 + 上方浮层；宽屏 = 卡内常驻列表）。
+  Widget _buildChatCard(BuildContext context, bool wide) {
+    final AylaTextStyles t = AylaTextStyles.of(context);
+
+    final Widget list = _buildChatList(context);
 
     final Widget composer = Container(
       // `.voice-room-composer { flex: none }`；其 `.composer-row` 见 voice.css 126–133
@@ -577,13 +678,8 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
       children: <Widget>[
-        // 窄屏：浮层锚点在**卡片顶部**（`bottom: 100%`），故放在最前面（零高、不参与布局）
-        if (!wide)
-          _NarrowChatOverlay(
-            expanded: _chatExpanded,
-            height: AylaVoiceRoomBody.narrowChatListHeight,
-            child: list,
-          ),
+        // 窄屏浮层**不在这里**：它向上溢出聊天卡 300px，必须挂在
+        // 「语音卡槽」那一层才可命中（见 [_buildNarrowOverlay] 的注释）。
         // `.voice-room-chat-card-head { display: none }`（窄屏）⇒ 只在宽屏渲染
         if (wide)
           Container(
@@ -626,7 +722,7 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
               ],
             ),
           ),
-        // 列表：宽屏 = 常驻并吃掉剩余高度；窄屏已作为浮层挂在顶部锚点
+        // 列表：宽屏 = 常驻并吃掉剩余高度；窄屏作为浮层挂在语音卡槽（见 _buildLayout）
         if (wide) Expanded(child: list),
         if (_error != null)
           Padding(
@@ -742,16 +838,9 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
           ),
         ),
         if (m.mediaId != null && m.thumbnailUrl != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AylaRadii.rSm),
-            child: SizedBox(
-              width: 120, // `.voice-room-chat-image { width: 120px; max-height: 80px }`
-              height: 80,
-              child: AylaResourceImage(
-                src: m.thumbnailUrl!,
-                fit: BoxFit.cover, // `.voice-room-chat-image { object-fit: cover }`
-              ),
-            ),
+          _VoiceChatImageButton(
+            message: m,
+            onOpen: () => _openImage(m),
           ),
         if (m.content != '图片') // tsx 201：发图时后端写的占位文案不重复渲染
           Text(
@@ -874,7 +963,111 @@ class _HoverableChatToggleState extends State<_HoverableChatToggle> {
   }
 }
 
+/// 房内聊天图片（`.voice-room-chat-image`：120×80 · `object-fit: cover` · radius-sm）。
+///
+/// web 里这只是一张 `<ResourceImage>`，**没有 onClick**（`VoiceRoomBody.tsx:192–200`）
+/// ⇒ 房内聊天图在 web 上点不开。Flutter 侧按用户实报补了「点开大图」
+/// （见文件头「有意偏离」），尺寸/圆角/裁切与 web 逐值一致。
+class _VoiceChatImageButton extends StatelessWidget {
+  const _VoiceChatImageButton({required this.message, required this.onOpen});
+
+  final AylaVoiceChatMessage message;
+
+  /// 点开大图（宿主在 [AylaVoiceRoomBody] 的 State 内，见 `_openImage`）。
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '查看房内聊天图片',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.zoomIn, // 同聊天域媒体（`media_content.dart`）
+        child: GestureDetector(
+          // 图片加载中/失败态是空装饰盒，不加 opaque 会穿透到背后的浮层/列表
+          behavior: HitTestBehavior.opaque,
+          onTap: onOpen,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AylaRadii.rSm),
+            child: SizedBox(
+              width: 120, // `.voice-room-chat-image { width: 120px; max-height: 80px }`
+              height: 80,
+              child: AylaResourceImage(
+                src: message.thumbnailUrl!,
+                alt: message.content.isEmpty ? '房内聊天图片' : message.content,
+                fit: BoxFit.cover, // `.voice-room-chat-image { object-fit: cover }`
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 房内聊天图片的大图查看器宿主。
+///
+/// 与 `widgets/live/danmaku.dart` 的 `_DanmakuViewerHost` 同一写法：
+/// web 的 `<ImageViewer>` 是 `position: fixed; inset: 0`（`app.css:1459+`）
+/// ⇒ 全屏、不被祖先 `overflow: hidden` 裁剪；Flutter 没有 portal，组件又常被
+/// 嵌进卡片内 ⇒ 一律插到 **Overlay**（库内统一入口 [aylaOverlayEntry]，自动带
+/// 文本作用域兜底）。用「最近」的 Overlay 而不是 `rootOverlay: true`：
+/// 画布/测试宿主没有 Navigator，`rootOverlay` 会抛 `No Overlay widget found`。
+class _VoiceChatViewerHost {
+  OverlayEntry? _entry;
+
+  void open(BuildContext context, AylaMediaDescriptor media, String alt) {
+    close();
+    final OverlayEntry entry = aylaOverlayEntry(
+      builder: (BuildContext ctx) => AylaImageViewer(
+        media: media,
+        alt: alt,
+        onClose: close,
+      ),
+    );
+    _entry = entry;
+    Overlay.of(context).insert(entry);
+  }
+
+  void close() {
+    _entry?.remove();
+    _entry = null;
+  }
+}
+
 /// 窄屏聊天列表浮层：绝对定位在输入卡**上方**（`bottom: 100%`），h300，进出 240ms。
+///
+/// ## ⚠️ 为什么不能用 `SizedBox(height: 0) + OverflowBox`（2026-10-24 用户实报「弹窗穿透」的根因）
+///
+/// 旧实现用零高盒子 + `OverflowBox(alignment: bottomCenter)` 把 300 高的浮层
+/// **溢出绘制**到卡片上方。视觉上能看到，但 **Flutter 的命中测试只走布局矩形**：
+/// `RenderBox.hitTest` 首行是 `if (_size!.contains(position))`（`rendering/box.dart:2952`），
+/// 零高盒子的 `size` 不含任何向上 300px 的点 ⇒ 浮层内部的图片/文字**一律点不到**，
+/// 点击继续下沉到浮层背后的页面 = 用户说的「穿透」。
+/// （实测探针：点浮层中心 `overlayTaps=0`、背后 counter `behindTaps=1`。）
+///
+/// web 没有这个问题：`.voice-room-chat-list` 是 `position: absolute; bottom: 100%`
+/// （`voice.css:72–105`），父 `.voice-room-chat-card` 是 `position: relative` 的
+/// **流内元素**（`voice.css:55–65`）⇒ absolute 子元素**仍在卡片盒内、按绘制后几何参与
+/// 浏览器命中测试**。CSS 的 `pointer-events: none/auto` 也由浏览器按几何判定。
+///
+/// ## Flutter 等价实现 = 把它 `Positioned` 在**语音卡槽**的 `bottom: 0`
+///
+/// 关键约束（Flutter 命中测试的真实规则，2026-10-24 实测 + 回读
+/// `rendering/box.dart:2952` `if (_size!.contains(position))`）：
+/// **从根到浮层的每一个祖先 RenderBox 都必须包含该点**，否则命中在该层即被截断。
+/// 聊天卡是流内的 `Column`（高度 = 卡片自身），它上方 300px 不在其 `size` 内 ⇒
+/// **浮层只要还是聊天卡的后代就永远点不到**（无论用 OverflowBox 还是自定义 RenderBox）。
+///
+/// 所以浮层由 [`_buildLayout`] 挂在**语音卡槽的 Stack** 里：
+/// 该槽底边 = 聊天卡顶边（Column 内相邻、gap 0）⇒ `Positioned(bottom: 0, height: 300)`
+/// 与 CSS `bottom: 100%` 的**绘制几何完全重合**，而槽的 `size` 覆盖那 300px
+/// ⇒ 祖先链上每一层都包含该点，浮层内部（含图片）正常参与命中。
+///
+/// 另外两个错误等价物（都已实测排除，别再走回去）：
+/// - `SizedBox(height:0) + OverflowBox`：盒子 `size` 零高，溢出部分**永久**不可命中；
+/// - 自定义 RenderBox 在卡片内向上 `paint`/`hitTest`：自身能命中，但**父 Column 不包含该点**
+///   ⇒ `RenderBox.hitTest` 在 Column 那层就返回 false，等于白做。
 class _NarrowChatOverlay extends StatelessWidget {
   const _NarrowChatOverlay({
     required this.expanded,
@@ -890,61 +1083,52 @@ class _NarrowChatOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
     final Duration d = reduceMotion ? Duration.zero : AylaDurations.panel; // 240ms
-    // ⚠️ 用 `SizedBox(height: 0)` + `OverflowBox(alignment: bottomCenter)` 表达
-    // `position: absolute; bottom: 100%`：零高占位锚在卡片**顶部**，浮层向上溢出绘制
-    // （不用 `Stack`：它在竖向无界父级里会直接报「requires bounded constraints」）。
-    return SizedBox(
-      height: 0,
-      child: OverflowBox(
-        alignment: Alignment.bottomCenter,
-        minHeight: height,
-        maxHeight: height,
-        child: IgnorePointer(
-          ignoring: !expanded,
-          child: ExcludeSemantics(
-            excluding: !expanded,
-            child: AnimatedOpacity(
-              // 依据（2026-09-27 收口；13 号 §8.19）：web 是**整层 opacity** ——
-              //   `.voice-room-chat-card > .voice-room-chat-list { opacity: 0;
-              //   transform: translateY(12px); visibility: hidden; pointer-events: none;
-              //   transition: opacity/transform/visibility var(--dur-panel) }`（voice.css:72–99）；
-              //   展开态 `.is-expanded > … { opacity: 1; translateY(0); visibility: visible;
-              //   pointer-events: auto }`（voice.css:100–105）。
-              //   该浮层自身是 `--glass-bg-strong` + `backdrop-filter: blur(18px) saturate(1.4)`
-              //   （voice.css:84–86）⇒ 保持整层（不以颜色 alpha 替代）。
-              opacity: expanded ? 1 : 0,
-              duration: d,
-              curve: AylaCurves.easeOut,
-              child: TweenAnimationBuilder<double>(
-                // `transform: translateY(12px)` → 0（voice.css 108/118）
-                tween: Tween<double>(end: expanded ? 0 : 12),
-                duration: d,
-                curve: AylaCurves.easeOut,
-                builder: (BuildContext context, double dy, Widget? c) =>
-                    Transform.translate(offset: Offset(0, dy), child: c),
-                child: SizedBox(
-                  height: height,
-                  child: AylaGlassSurface(
-                    // --glass-bg-strong + blur18 sat1.4 + 只有上两角 radius 16 +
-                    // `box-shadow: 0 -4px 16px rgba(70,91,146,.12)`（voice.css 92–100）
-                    strong: true,
-                    blur: AylaGlass.blurNav,
-                    radiusOverride: const BorderRadius.only(
-                      topLeft: Radius.circular(AylaRadii.rCard),
-                      topRight: Radius.circular(AylaRadii.rCard),
-                    ),
-                    shadow: const <BoxShadow>[
-                      BoxShadow(
-                        color: Color(0x1F465B92),
-                        blurRadius: 16,
-                        offset: Offset(0, -4),
-                      ),
-                    ],
-                    borderOverride: Border.all(color: AylaColors.glassBorder),
-                    padding: EdgeInsets.zero,
-                    child: child,
-                  ),
+    return IgnorePointer(
+      // `pointer-events: none`（voice.css:93）→ 展开态 105 行恢复 auto。
+      // 收起态**必须**零命中且不拦截背后点击（不只是视觉透明）。
+      ignoring: !expanded,
+      child: ExcludeSemantics(
+        excluding: !expanded,
+        child: AnimatedOpacity(
+          // 依据（2026-09-27 收口；13 号 §8.19）：web 是**整层 opacity** ——
+          //   `.voice-room-chat-card > .voice-room-chat-list { opacity: 0;
+          //   transform: translateY(12px); visibility: hidden; pointer-events: none;
+          //   transition: opacity/transform/visibility var(--dur-panel) }`（voice.css:72–99）；
+          //   展开态 `.is-expanded > … { opacity: 1; translateY(0); visibility: visible;
+          //   pointer-events: auto }`（voice.css:100–105）。
+          //   该浮层自身是 `--glass-bg-strong` + `backdrop-filter: blur(18px) saturate(1.4)`
+          //   （voice.css:84–86）⇒ 保持整层（不以颜色 alpha 替代）。
+          opacity: expanded ? 1 : 0,
+          duration: d,
+          curve: AylaCurves.easeOut,
+          child: TweenAnimationBuilder<double>(
+            // `transform: translateY(12px)` → 0（voice.css 108/118）
+            tween: Tween<double>(end: expanded ? 0 : 12),
+            duration: d,
+            curve: AylaCurves.easeOut,
+            builder: (BuildContext context, double dy, Widget? c) =>
+                Transform.translate(offset: Offset(0, dy), child: c),
+            child: SizedBox(
+              height: height,
+              child: AylaGlassSurface(
+                // --glass-bg-strong + blur18 sat1.4 + 只有上两角 radius 16 +
+                // `box-shadow: 0 -4px 16px rgba(70,91,146,.12)`（voice.css 92–100）
+                strong: true,
+                blur: AylaGlass.blurNav,
+                radiusOverride: const BorderRadius.only(
+                  topLeft: Radius.circular(AylaRadii.rCard),
+                  topRight: Radius.circular(AylaRadii.rCard),
                 ),
+                shadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x1F465B92),
+                    blurRadius: 16,
+                    offset: Offset(0, -4),
+                  ),
+                ],
+                borderOverride: Border.all(color: AylaColors.glassBorder),
+                padding: EdgeInsets.zero,
+                child: child,
               ),
             ),
           ),

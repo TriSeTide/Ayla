@@ -24,7 +24,12 @@
 /// **不伪造空列表**（空列表只能来自真的取到 0 条）。
 ///
 /// ## 未接线（第 1 批登记，见 13 号文档）
-/// · `usePresenceOnline`（自身光环跟随 WS 在线增量）属 presence 接线，本页用 `user.online`；
+/// · `usePresenceOnline`（自身光环跟随 WS 在线增量）属 presence 接线 —— ✅ 2026-10-25
+///   已接线（[AylaProfileIdentity] 传 `userId` ⇒ 头像自订阅 presence）；
+/// · 分享面板 ✅ **2026-10-26 已接线**：分享键改走 [AylaShareButton] 的自给自足档
+///   （`payloadBuilder: () => AylaSharePayload.user(...)` + 不传 `onPressed`），
+///   与 web `ProfilePage.tsx:176` 的 `<ShareButton payload={userSharePayload(currentUser)}>`
+///   同构 —— 原为 `onPressed: () {}` 空实现（用户实报「点了没反应」）；
 /// · **头像即时预览**（web `imageUrl={avatarPreview ?? currentUser.avatar}`，tsx 168）：
 ///   ✅ 2026-09-28 用户裁决后落地 —— [AylaProfileIdentity] 新增可选 `avatarOverride`
 ///   （`ImageProvider?`，**默认 null ⇒ 既有调用点行为不变**），本页传 `MemoryImage(本地字节)`；
@@ -41,6 +46,7 @@ import 'package:go_router/go_router.dart';
 import '../core/api/auth_api.dart';
 import '../core/media/media_picker.dart';
 import '../core/models/media_kind.dart';
+import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../core/media/media_upload.dart';
 import '../state/chat_providers.dart' show chatWsProvider;
 import '../core/media/media_validation.dart';
@@ -373,10 +379,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           // ⇒ 自己切隐身 / 在别处上下线时，个人页光环不跟着变。
           userId: user.id,
           onBack: _back,
+          // ★ 自给自足档（= web `ProfilePage.tsx:176` 的
+          // `<ShareButton payload={userSharePayload(currentUser)} ... />`）：
+          // web `ShareButton.tsx:21–33` 自己 `useState(open)` + `createPortal` 弹
+          // `ShareSheet`，**不依赖页面注入** ⇒ 永远可点。本页原写 `onPressed: () {}`
+          // （空实现）⇒ 点了没反应（用户实报）。现改传 `payloadBuilder`：
+          // `AylaShareButton` 在不传 `onPressed` 时自己走 `aylaOpenShareSheet`
+          // （`widgets/base/share.dart` 的 `_openSelfServed`）。用惰性构造而非 `payload`，
+          // 避免每次 build 都造一次负载（同 `post_card.dart:597` 的口径）。
           share: AylaShareButton(
             label: '分享我的主页', // tsx 176
             size: 40, // `.icon-btn-40 profile-card-share`
-            onPressed: () {}, // 分享面板接线属分享域批次（见文件头登记）
+            payloadBuilder: () => AylaSharePayload.user(
+              id: user.id,
+              nickname: user.nickname,
+              username: user.username,
+              avatar: user.avatar,
+            ),
           ),
         ),
         AylaProfileAvatarActions(

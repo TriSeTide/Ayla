@@ -8,6 +8,7 @@
 /// join / leave / heartbeat / members / messages / 爱莉 voice-calls 等随房内页批次带出。
 library;
 
+import '../models/post.dart' show AylaMediaDescriptor;
 import '../models/visibility.dart' show AylaPostVisibility;
 import '../net/dio_client.dart';
 import '../../widgets/voice/voice_channels.dart' show AylaVoiceCardData;
@@ -264,6 +265,7 @@ class AylaVoiceChatMessage {
     this.content = '',
     this.mediaId,
     this.thumbnailUrl,
+    this.media,
     this.createdAt = '',
   });
 
@@ -277,6 +279,13 @@ class AylaVoiceChatMessage {
 
   /// 缩略图 URL（web `resolveMediaPath(media.thumbnail) ?? mediaContentUrl(media_id)`）。
   final String? thumbnailUrl;
+
+  /// 媒体描述符（web `message.media`；null = 该条不带图 / 后端未给 descriptor）。
+  ///
+  /// 房内聊天图片点开大图时用（`widgets/voice/voice_room_body.dart` 的
+  /// `_openImage`）：查看器需要 mediaId + kind + mime 才能走原图签名与「保存」，
+  /// 只有 thumbnailUrl 是不够的。
+  final AylaMediaDescriptor? media;
   final String createdAt;
 
   static AylaVoiceChatMessage? fromJson(Object? raw) {
@@ -296,6 +305,7 @@ class AylaVoiceChatMessage {
       content: raw['content']?.toString() ?? '',
       mediaId: raw['media_id']?.toString(),
       thumbnailUrl: media == null ? null : media['thumbnail']?.toString(),
+      media: AylaMediaDescriptor.fromJson(media),
       createdAt: raw['created_at']?.toString() ?? '',
     );
   }

@@ -91,7 +91,10 @@ class AylaAvatarHalo extends StatefulWidget {
   /// 底色/字色形态（爱莉专属 [AylaAvatarCore.elysia]）。
   final AylaAvatarCore core;
 
-  /// 头像图片 URL（带签名媒体需走 AylaResourceImage，暂用网络图；null = 文字首字）。
+  /// 头像图片 URL（带签名媒体需走 AylaResourceImage）。
+  ///
+  /// **null 与空串等价** —— 都表示「没有头像图」⇒ 走文字首字档。
+  /// 见 [_AvatarHaloState._avatarSrc]：组件内统一归一，调用点无需各自 `_nonEmpty`。
   final String? resourceUrl;
 
   /// 点击回调（.avatar-halo-btn：可点击头像，hover brightness 1.06）。
@@ -226,6 +229,34 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     return _buildBody(context, widget.online);
   }
 
+  /// 生效的头像图 URL：**空串按 null 处理**（没有头像图）。
+  ///
+  /// ## 2026-10-25 修复（用户实报「私信界面头像不显示」的第一根因）
+  ///
+  /// 此前本组件用 `widget.resourceUrl == null` 判「有没有图」（`:281` / `:299`），
+  /// 但**后端对没有头像的用户返回的是空串，不是 null**：
+  /// `apps/accounts/models.py:33` 是 `avatar = CharField(blank=True, default="")`，
+  /// 序列化走 `UserPublicSerializer`（`apps/accounts/serializers.py:12–38`）原样透出；
+  /// Flutter 侧 `AylaUserPublic.avatar` 也保持 `String?`（`user_public.dart:79`
+  /// `raw['avatar'] as String?`）⇒ 空串一路传到本组件。
+  ///
+  /// 空串命中「有图」分支 ⇒ `AylaResourceImage(src: '')` ⇒
+  /// `resource_image.dart:307` 的 `if (src.trim().isEmpty)` 直接判 failed ⇒
+  /// **装饰图（alt: ''）只渲染 fallback**（`:445`）⇒ 视觉上就是文字首字。
+  /// 也就是说：**「没头像」这种正常情况走的是「图片加载失败」的路径**，
+  /// 在多徽标光环里还会白白走一遍 loading → failed 的状态机。
+  ///
+  /// web 事实源 `components/Avatar.tsx:46`：`imageUrl ? <ResourceImage …/> : safeLabel.slice(0,1)`
+  /// —— JS 的假值判断把 `''` 与 `null` 一视同仁，走**文字分支**。
+  ///
+  /// 修在**组件内**而不是各调用点：全库 31 个光环使用点都可能从后端拿到空串
+  /// （气泡发送者头像、会话列表、成员表、弹幕、评论…），逐点补 `_nonEmpty` 必漏。
+  String? get _avatarSrc {
+    final String? raw = widget.resourceUrl;
+    if (raw == null) return null;
+    return raw.trim().isEmpty ? null : raw;
+  }
+
   /// 真正的 build 体（[online] 是**已求值**的在线态）。
   Widget _buildBody(BuildContext context, bool online) {
     // 在线态可能在 presence 帧到达后变化（ListenableBuilder 重建）⇒ 同步呼吸动画。
@@ -270,6 +301,8 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         coreColor = AylaColors.grape700;
     }
 
+    final String? avatarSrc = _avatarSrc;
+
     final Widget core = ClipOval(
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -277,8 +310,8 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         ),
         child: Center(
           child: Text(
-            // 无图时取名字首字（web Avatar 组件同语义）
-            widget.resourceUrl == null && widget.label.isNotEmpty
+            // 无图时取名字首字（web Avatar 组件同语义）；空串与 null 同样算「无图」
+            avatarSrc == null && widget.label.isNotEmpty
                 ? widget.label.characters.first
                 : '',
             style: TextStyle(
@@ -296,7 +329,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     );
 
     // 无图时 core 撑满本体；有图时图在上、字在下（语义层）
-    final Widget coreLayer = widget.resourceUrl == null
+    final Widget coreLayer = avatarSrc == null
         ? core
         : Stack(
             fit: StackFit.expand,
@@ -314,7 +347,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
                         cssLinearGradient(angleDeg: 135, colors: coreColors),
                   ),
                   child: AylaResourceImage(
-                    src: widget.resourceUrl!,
+                    src: avatarSrc,
                     alt: '',
                     fit: BoxFit.cover,
                     previewImage: widget.previewImage,

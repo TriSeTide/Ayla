@@ -1260,6 +1260,7 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
             content: m.content,
             mediaId: m.mediaId,
             thumbnailUrl: m.thumbnailUrl,
+            media: m.media,
           ),
       ],
       history: AylaVoiceChatHistory(

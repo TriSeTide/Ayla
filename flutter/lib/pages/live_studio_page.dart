@@ -421,6 +421,10 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         directory.items.isEmpty;
 
     session.syncRealtimeToHistory();
+    // 消费会话层的「贴底」请求（见 `AylaLiveRoomSession.pumpScroll` 的根因说明）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) session.pumpScroll();
+    });
 
     if (listEmpty) {
       return AylaStudioEmpty(
@@ -461,6 +465,9 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         sending: session.sending,
         sendError: session.sendError,
         hasNewBelow: session.history?.hasNewer ?? false,
+        danmakuController: session.danmakuScroll,
+        onDanmakuScroll: session.handleDanmakuScroll,
+        onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom()),
         history: session.history == null
             ? null
             : AylaHistoryControlsData(
