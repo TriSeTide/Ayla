@@ -23,6 +23,7 @@ library;
 import 'media_kind.dart';
 import 'post.dart' show AylaMediaDescriptor;
 import 'share_payload.dart';
+import 'user_public.dart' show AylaUserPublic;
 
 /// 消息类型（`types.ts:138–139`）。
 enum AylaMessageType {
@@ -211,6 +212,7 @@ class AylaChatMessage {
     required this.status,
     required this.seq,
     required this.createdAt,
+    this.sender,
     this.subgroupId,
     this.mediaId,
     this.media,
@@ -229,6 +231,13 @@ class AylaChatMessage {
   final String id;
   final String conversationId;
   final String senderId;
+
+  /// 发送者公开资料快照（2026-10-26 新增；旧服务端为 null）。
+  ///
+  /// 为什么需要：此前昵称/头像只能从 `conversation.members` 反查，**成员退群后**
+  /// 就不在成员表里 ⇒ 历史消息头像失去名字来源（曾退化成占位字）。带上快照后，
+  /// 退群成员的头像与未退群时**完全一致**（有图显示图、无图显示名字首字）。
+  final AylaUserPublic? sender;
 
   /// 群聊子群归属（子群功能；null = 旧消息/默认组语义）。
   final String? subgroupId;
@@ -338,6 +347,8 @@ class AylaChatMessage {
       id: id,
       conversationId: convId,
       senderId: senderId,
+      // 发送者快照（2026-10-26）：退群成员的历史消息头像靠它还原昵称/头像。
+      sender: AylaUserPublic.fromJson(raw['sender']),
       subgroupId: raw['subgroup_id'] as String?,
       type: AylaMessageType.parse(raw['type'] as String?),
       content: (raw['content'] as String?) ?? '',

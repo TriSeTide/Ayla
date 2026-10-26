@@ -936,6 +936,10 @@ class _AylaMessageListState extends State<AylaMessageList> {
     return map;
   }
 
+  /// 头像 URL 归一：空串按「无头像」处理（后端可能回空串表示未设置）。
+  String? _nonEmptyAvatar(String? url) =>
+      (url == null || url.isEmpty) ? null : url;
+
   Map<String, ({String? avatar, String label})> get _memberAvatars {
     final Map<String, ({String? avatar, String label})> map =
         <String, ({String? avatar, String label})>{};
@@ -1069,15 +1073,21 @@ class _AylaMessageListState extends State<AylaMessageList> {
             isElysia: widget.elysiaUserId != null &&
                 m.senderId == widget.elysiaUserId,
             justArrived: justArrived,
-            senderName:
-                _isGroup && !isSelf ? names[m.senderId] : null,
-            senderAvatarUrl: avatars[m.senderId]?.avatar,
-            // label 回退链的**第一选**：成员表的 displayName；成员表没有时由气泡
-            // 回退到 senderName（群聊已传）/ '发送者' ⇒ 头像不会因成员表缺失而不渲染。
-            senderAvatarLabel: avatars[m.senderId]?.label,
+            // ⚠️ **2026-10-26 修复（退群成员头像）**：昵称/头像的**首选来源是消息
+            // 自带的 `sender` 快照**（后端 `MessageSerializer.sender`），成员表只作
+            // 旧数据兜底 —— 成员退群后就不在 `conversation.members` 里，仅靠成员表
+            // 会让历史消息头像失去名字来源（曾退化成占位字）。
+            senderName: _isGroup && !isSelf
+                ? (m.sender?.displayName ??
+                    names[m.senderId])
+                : null,
+            senderAvatarUrl:
+                _nonEmptyAvatar(m.sender?.avatar) ?? avatars[m.senderId]?.avatar,
+            senderAvatarLabel: m.sender?.displayName ?? avatars[m.senderId]?.label,
             // 传**完整用户对象**（不只是 id）：头像据此同时拿到
             // ① presence 实时在线光环；② `user.updated` 的资料覆盖（换头像/昵称跟手）。
-            senderUser: users[m.senderId],
+            // 消息自带快照优先（退群也有），成员表兜底。
+            senderUser: m.sender ?? users[m.senderId],
             senderUserId: m.senderId,
             currentUserId: widget.currentUserId,
             // 头像单击 → 个人主页（web `MessageList.tsx:1067` 的

@@ -476,7 +476,9 @@ class MessageView(APIView):
             return _not_found("会话不存在")
         if not services.user_can_access(request.user, conv):
             return _forbidden()
-        qs = conv.messages.all()
+        # `select_related("sender")`：`MessageSerializer.sender` 每条消息取一次发送者
+        # 快照（2026-10-26 起），不加会 N+1。
+        qs = conv.messages.select_related("sender", "reply_to").all()
         # 子群过滤：subgroup_id 缺省 = 全部消息（旧客户端兼容）；
         # 默认组额外包含 subgroup 为 null 的旧消息（子群功能上线前的群聊本体）。
         subgroup_id = request.query_params.get("subgroup_id")

@@ -188,6 +188,15 @@ class MessageSerializer(serializers.ModelSerializer):
     segments = serializers.SerializerMethodField()
     # 分享载荷（type=share 消息；其他类型为 null）
     share_payload = serializers.SerializerMethodField()
+    # 发送者公开资料快照（2026-10-26 补齐）。
+    #
+    # 为什么必须带：此前消息只有 `sender_id`，昵称/头像靠前端从
+    # `conversation.members` 反查。**成员退群后就不在成员表里** ⇒ 前端拿不到名字，
+    # 头像只能显示占位（曾误显示「发」字）。带上快照后，历史消息的头像/昵称在
+    # 发送者退群后仍正常显示（有图显示图、无图显示名字首字）。
+    #
+    # 只带**公开可展示字段**（与 `UserPublicSerializer` 同口径），不含 email 等隐私。
+    sender = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -195,6 +204,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "id",
             "conversation_id",
             "sender_id",
+            "sender",
             "subgroup_id",
             "type",
             "content",
@@ -217,6 +227,21 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_reply_to_seq(self, obj):
         """被引用消息的会话序号，供窗口化消息按 before_seq 定位。"""
         return obj.reply_to.seq if obj.reply_to_id and obj.reply_to else None
+
+    def get_sender(self, obj):
+        """发送者公开资料快照（昵称/头像/在线态）。
+
+        ⚠️ **2026-10-26 用户实报修复**：群成员退群后，他的历史消息头像会失去
+        昵称/头像来源（前端原本从 `conversation.members` 反查，退群即查不到）。
+        这里直接带快照 ⇒ **退群成员的头像与未退群时完全一致**（有图显示图、
+        无图显示名字首字），在线光环也可由前端按 `sender.id` 实时求值。
+
+        性能：调用方应 `select_related("sender")`；未加也只多一次查询/页。
+        """
+        sender = getattr(obj, "sender", None)
+        if sender is None:
+            return None
+        return UserPublicSerializer(sender, context=self.context).data
 
     def get_read_by_me(self, obj):
         """当前用户是否已对该消息留下已读回执。"""

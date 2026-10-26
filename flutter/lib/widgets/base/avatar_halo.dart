@@ -272,13 +272,14 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     super.dispose();
   }
 
-  /// 头像本体内的内容（名字首字 / 人形图标）。
+  /// 头像本体内的内容：**有图显示图（由调用方渲染），无图取名字首字**。
   ///
-  /// 统一口径（2026-10-26 用户裁决）：
-  /// - 有名字 ⇒ 取首字（web 同）；
-  /// - **没名字 ⇒ 人形图标 `Icons.person`**（正常默认头像观感），**不再显示「?」**。
+  /// 口径（2026-10-26 用户澄清）：「正常头像就是有图片显示图片、没图片显示首字」。
+  /// 所以「名字取不到」这件事**要在数据层解决**（消息自带 `sender` 快照），
+  /// 而不是在这里用人形图标/问号遮掉 —— 那种兜底会让画面看起来像「异常头像」。
   ///
-  /// 光环/在线态由 `_computeOnline` 独立决定，**与本方法无关** —— 无名不影响光环。
+  /// 仅当快照也没有（老服务端 + 已退群）时才落到空文字 + 光环，属极少数边缘情况。
+  /// 光环/在线态由 `_computeOnline` 独立决定，与本方法无关。
   Widget _coreChild({
     required String effectiveLabel,
     required Color coreColor,
@@ -297,12 +298,9 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         ),
       );
     }
-    // 无名 ⇒ 人形图标。尺寸与字身同量级（0.42 字 → 0.52 图标），视觉重心居中。
-    return Icon(
-      Icons.person,
-      size: (size * 0.52).roundToDouble(),
-      color: coreColor,
-    );
+    // 无名字（极罕见：老服务端无 sender 快照 + 成员已退群）⇒ 空文字，只留光环。
+    // 正常路径下名字来自消息自带快照，一定会走到上面的首字分支。
+    return const SizedBox.shrink();
   }
   @override
   Widget build(BuildContext context) {

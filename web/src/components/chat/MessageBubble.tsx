@@ -112,9 +112,14 @@ export function MessageBubble({
 }) {
   const recalled = message.status === "recalled";
   const isMedia = MEDIA_TYPES.has(message.type);
-  // 发送者实时在线（光环）：懒加载发送者资料（缓存），presence store 实时判定
+  // 发送者实时在线（光环）/ 昵称 / 头像的来源，优先级：
+  //   ① **消息自带的 `sender` 快照**（2026-10-26 新增）—— 退群成员也一定有，
+  //      这是「退群后头像与未退群完全一致」的关键；
+  //   ② 本地用户缓存（`getCachedUser`）；
+  //   ③ 远程懒拉（`ensureUser`，老服务端没有快照时的兜底）。
   const [senderUser, setSenderUser] = useState<UserPublic | null>(() =>
-    message.sender_id ? getCachedUser(message.sender_id) : null,
+    message.sender ??
+    (message.sender_id ? getCachedUser(message.sender_id) : null),
   );
   useEffect(() => {
     if (!message.sender_id || senderUser) return;
@@ -215,10 +220,16 @@ export function MessageBubble({
         ? "bubble bubble-elysia"
         : "bubble bubble-other";
 
-  // 发送者头像：只要有发送者信息就显示（无头像图时 Avatar 回退首字符光环），
+  // 发送者头像：**只要知道发送者是谁就显示**（无头像图时 Avatar 回退名字首字 + 光环），
   // 撤销/系统消息不显示；己方在气泡右侧、对方在气泡左侧（msg-row flex 布局）。
+  //
+  // ⚠️ **2026-10-26 修复**：旧判据要求 `senderAvatarLabel != null || senderAvatar != null`，
+  // 而这两个值原本只能从 `conversation.members` 拿到 —— **成员退群后双双为 null**
+  // ⇒ 整个头像不渲染。加了 `message.sender_id` 判据后，退群成员的头像也照常显示。
   const showSenderHalo =
-    !recalled && message.type !== "system" && (senderAvatarLabel != null || senderAvatar != null);
+    !recalled &&
+    message.type !== "system" &&
+    (message.sender_id != null || senderAvatarLabel != null || senderAvatar != null);
 
   const senderHalo = showSenderHalo ? (
     <span

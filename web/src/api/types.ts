@@ -248,6 +248,15 @@ export interface ChatMessage {
   id: string;
   conversation_id: string;
   sender_id: string;
+  /**
+   * 发送者公开资料快照（2026-10-26 新增；旧服务端可缺省）。
+   *
+   * 此前昵称/头像只能从 `conversation.members` 反查，**成员退群后**就不在成员表里
+   * ⇒ 历史消息头像失去名字来源（会退化成占位）。带上快照后，退群成员的头像与
+   * 未退群时**完全一致**（有图显示图、无图显示名字首字），在线光环按 `sender.id`
+   * 实时求值。
+   */
+  sender?: UserPublic | null;
   /** 群聊子群归属（子群功能；null = 旧消息/默认组语义，旧服务端可缺省） */
   subgroup_id?: string | null;
   type: MessageType;

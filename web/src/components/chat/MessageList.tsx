@@ -1061,9 +1061,31 @@ export function MessageList({
                   isSelf={isSelf}
                   isElysia={elysiaUserId != null && m.sender_id === elysiaUserId}
                   justArrived={justArrivedIds.has(m.id)}
-                  senderName={isGroup && !isSelf ? (memberNames.get(m.sender_id) ?? null) : null}
-                  senderAvatar={memberAvatars.get(m.sender_id)?.avatar ?? null}
-                  senderAvatarLabel={memberAvatars.get(m.sender_id)?.label ?? null}
+                  // ⚠️ **2026-10-26 修复（退群成员头像）**：此前只从 `conversation.members`
+                  // 反查昵称/头像，**成员退群后就不在成员表里** ⇒ 历史消息头像失去名字
+                  // 来源（曾退化成一个占位字）。改为**优先用消息自带的 `sender` 快照**
+                  // （后端 `MessageSerializer.sender`），成员表仅作旧数据兜底。
+                  senderName={
+                    isGroup && !isSelf
+                      ? (m.sender?.nickname ||
+                        m.sender?.username ||
+                        memberNames.get(m.sender_id) ||
+                        null)
+                      : null
+                  }
+                  senderAvatar={
+                    (m.sender?.avatar ||
+                      memberAvatars.get(m.sender_id)?.avatar) ??
+                    null
+                  }
+                  senderAvatarLabel={
+                    (m.sender?.nickname ||
+                      m.sender?.username ||
+                      memberAvatars.get(m.sender_id)?.label) ??
+                    null
+                  }
+                  // 注：`sender` 快照由 MessageBubble 自己从 `message.sender` 读
+                  //（它已有 senderUser 状态用于在线判定），无需在此透传。
                   onSenderClick={() => goUserProfile(currentUserId, m.sender_id)}
                   onMentionSender={onMentionSender}
                   onPokeSender={
