@@ -174,6 +174,10 @@ String formatGroupCount(int n) => n > 99 ? '99+' : '$n';
 
 // ======================= 轮播 =======================
 
+/// 「进视口才启动轮播」的可见比例阈值（web `GroupCarousel.tsx:114` 的
+/// `new IntersectionObserver(…, { threshold: 0.1 })`）。
+const double kAylaCarouselVisibleRatio = 0.1;
+
 /// `.group-carousel` —— 4:3 状态轮播。
 ///
 /// **1:1 对照 `GroupCarousel.tsx` + home.css 337–503**：
@@ -224,7 +228,7 @@ class AylaGroupCarousel extends StatefulWidget {
 class _AylaGroupCarouselState extends State<AylaGroupCarousel> {
   int _index = 0;
 
-  /// 是否在视口内（IntersectionObserver 等价：见 [_checkVisible]）。
+  /// 是否在视口内（IntersectionObserver 等价：见 [_measureVisible]）。
   bool _visible = false;
 
   /// 可见性判定用的 key（测量自身在视口中的位置）。
@@ -240,12 +244,15 @@ class _AylaGroupCarouselState extends State<AylaGroupCarousel> {
   /// 祖先 [ScrollPosition]（`ViewportOffset extends ChangeNotifier`）。
   ScrollPosition? _scrollPosition;
 
+  /// 本帧是否已排可见性测量（同一帧多次触发只量一次）。
+  bool _measureQueued = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bindScrollPosition();
-      _checkVisible();
+      _scheduleMeasure();
     });
   }
 
@@ -253,6 +260,7 @@ class _AylaGroupCarouselState extends State<AylaGroupCarousel> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _bindScrollPosition();
+    _scheduleMeasure();
   }
 
   /// 绑定最近的祖先滚动位置（首次进树 / 依赖变化时）。
@@ -267,38 +275,63 @@ class _AylaGroupCarouselState extends State<AylaGroupCarousel> {
       return true;
     });
     if (identical(found, _scrollPosition)) return;
-    _scrollPosition?.removeListener(_checkVisible);
+    _scrollPosition?.removeListener(_scheduleMeasure);
     _scrollPosition = found;
-    _scrollPosition?.addListener(_checkVisible);
+    _scrollPosition?.addListener(_scheduleMeasure);
   }
 
   @override
   void dispose() {
-    _scrollPosition?.removeListener(_checkVisible);
+    _scrollPosition?.removeListener(_scheduleMeasure);
     super.dispose();
+  }
+
+  /// 排到**本帧 layout 之后**再测量（[`_measureQueued`] 去重）。
+  ///
+  /// ⚠️ **必须在帧末量**：`_viewportKey` 挂在 `LayoutBuilder` 的子树里
+  /// （`build` 下方），它的 `RenderBox` 是**布局阶段**才产生的；在 build 期或
+  /// `initState` 那一发 post-frame 早期读 `currentContext` 会拿到 null。
+  /// 口径与 `widgets/chat/message_visibility.dart` 的 [AylaMessageVisibilityProbe]
+  /// 一致（同一套「IO 等价物」手法，那边也是 post-frame 量）。
+  void _scheduleMeasure() {
+    if (!mounted || _measureQueued) return;
+    _measureQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureQueued = false;
+      _measureVisible();
+    });
   }
 
   /// **自实现「进视口才启动」**（web 用 `IntersectionObserver{threshold:0.1}`）。
   ///
-  /// Flutter 无内置等价物（不引新依赖）：取自身全局矩形与所在视口求交，
-  /// 交集面积 ≥ 自身面积 10% 即视为可见。滚动或布局变化后重新判定。
-  void _checkVisible() {
+  /// Flutter 无内置等价物（不引新依赖）：取自身全局矩形与**所在视口**求交，
+  /// 交集面积 ÷ 自身面积 ≥ 0.1 即视为可见（= IO 的 `intersectionRatio`）。
+  ///
+  /// 视口口径 = [RenderAbstractViewport] 找到的 viewport 渲染盒的全局矩形
+  /// （web 的 `root: scrollRef.current`），**不是** `MediaQuery.size`：
+  /// 后者在「卡片还在屏幕内、但已滚出列表视口」时会误判成可见。
+  void _measureVisible() {
     if (!mounted) return;
     final BuildContext? ctx = _viewportKey.currentContext;
+    // 帧末测量时若仍拿不到渲染盒（例如本次根本没被布局：`!hasItems` 的空态分支
+    // 或宿主把它放在不布局的位置）⇒ 不判可见，保持上一状态。
     if (ctx == null) return;
-    final RenderBox? box = ctx.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
+    final RenderObject? object = ctx.findRenderObject();
+    if (object is! RenderBox || !object.hasSize) return;
 
-    final RenderObject? vp = RenderAbstractViewport.maybeOf(box);
-    final Rect self = box.localToGlobal(Offset.zero) & box.size;
-    final Size screen = MediaQuery.of(context).size;
-    final Rect viewport = vp == null ? Offset.zero & screen : Offset.zero & screen;
-    final Rect overlap = self.intersect(viewport);
-    final double area = overlap.width <= 0 || overlap.height <= 0
-        ? 0
-        : overlap.width * overlap.height;
+    final Rect self = object.localToGlobal(Offset.zero) & object.size;
+    final RenderObject? viewport = RenderAbstractViewport.maybeOf(object);
+    final Rect viewportRect = viewport is RenderBox && viewport.hasSize
+        ? viewport.localToGlobal(Offset.zero) & viewport.size
+        // 没有祖先 viewport（被挂到非滚动宿主上）⇒ 退回整个屏幕，
+        // 与 web「root 缺省 = viewport」同语义。
+        : Offset.zero & MediaQuery.of(context).size;
+    final Rect overlap = self.intersect(viewportRect);
     final double own = self.width * self.height;
-    final bool visible = own > 0 && area / own >= 0.1; // threshold: 0.1
+    final double ratio = own <= 0 || overlap.width <= 0 || overlap.height <= 0
+        ? 0
+        : (overlap.width * overlap.height) / own;
+    final bool visible = ratio >= kAylaCarouselVisibleRatio;
     if (visible != _visible) {
       setState(() => _visible = visible);
     }
@@ -338,6 +371,38 @@ class _AylaGroupCarouselState extends State<AylaGroupCarousel> {
     }
 
     final int safeIndex = _index % widget.slides.length;
+    // ⚠️⚠️ **每次渲染都排一发帧末测量 —— 这一行是「切页回来不滚动」的修复点**
+    // （用户 2026-10 实报：「刚进入 app 的时候是正常的，但是切换其他页面再切换回主页
+    // 群聊就不再滚动了」）。
+    //
+    // 根因链（实测日志确认，不是推断）：
+    // ① 离开本页时壳层路由**卸载整棵子树**（`_AylaGroupCarouselState.dispose` 只跑一次）；
+    // ② 切回来是**全新的 State**，`_visible` 回到初始值 `false`；
+    // ③ `initState` / `didChangeDependencies` 排的**第一发** post-frame 测量在
+    //    「重新挂进树的那一帧」量不到（实测 `_viewportKey.currentContext == null`
+    //    ——它在 `LayoutBuilder` 的 builder 里，是**布局阶段**才产生的节点）；
+    // ④ 之后**既没有滚动、也没有路由参数变化** ⇒ 祖先 [ScrollPosition] 不再 notify
+    //    ⇒ 再没有第二次判定机会 ⇒ `shouldRun` 恒 false ⇒ 节拍器永不启动。
+    // 这正是「首次进入正常、切页回来不动」这个不对称的全部原因：首次进入时
+    // 主页数据是异步到达的（`setState` 重建一次，恰好补上第二发测量），而回来时
+    // 数据命中缓存、**只渲染一帧** ⇒ 没有人再叫醒它。
+    //
+    // web 没有这个问题：`IntersectionObserver`（`GroupCarousel.tsx:104–118`）是
+    // **全局观察**，元素重新插入文档即投递一次初始 entry，与谁触发的布局无关。
+    // ⇒ Flutter 侧的对等做法 = **只要本体真的渲染出来了就在帧末量一次**
+    // （此处 `hasItems` 已成立、`_viewportKey` 也已挂上）。量到值不变时
+    // [`_measureVisible`] 不 setState ⇒ 两帧内收敛，不会自激。
+    //
+    // **顺带救回的两条同类路径**（独立审计确认，同样是「卡已挂载但此刻不可见、
+    // 恢复时没有滚动通知」⇒ 旧实现只有一次判定机会）：
+    // · `layout/app_gate.dart:59` 的 `Offstage`（启动引导期间整棵路由页 offstage）；
+    // · `preview/component_gallery.dart:2289–2292` 的 `Offstage` + `TickerMode(false)`
+    //   保活（切回该分类时同样没有滚动通知）。
+    //
+    // ⚠️ **不自激的前提 = 卡片高度固定**：网格档由 `AylaGroupGrid` 用
+    // `SizedBox(width: colW, height: cardH)` 钉死（列宽精确算高），列表档每行等高，
+    // ⇒ 可见比不会在 0.1 上下抖动。若将来改成「内容自适应高度」，需要重新评估这条。
+    _scheduleMeasure();
     // 轮播节拍：可见 + 多项 + 非 reduced-motion 才转（tsx 121–127）
     final bool shouldRun = _visible && !reduceMotion && widget.slides.length > 1;
 
