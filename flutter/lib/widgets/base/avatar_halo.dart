@@ -29,7 +29,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../state/display_status.dart' show presenceOnline, withLiveStatus;
 import '../../state/presence_providers.dart' show presenceStateProvider;
-import '../../state/presence_state.dart' show AylaPresenceState;
+import '../../state/presence_state.dart'
+    show AylaPresenceState, AylaUserProfilePatch;
 import '../../theme/css_gradient.dart';
 import '../../theme/tokens.dart';
 import 'resource_image.dart';
@@ -63,13 +64,20 @@ class AylaAvatarHalo extends StatefulWidget {
     this.previewImage,
   });
 
-  /// **【推荐】给了 `user` 就自订阅 presence 实时在线态**（web `usePresenceOnline`）。
+  /// **【推荐】给了 `user` 就自订阅 presence 实时在线态 + 实时资料覆盖**。
   ///
   /// ⚠️ **2026-10-20 修复（用户实报「所有页面头像在线状态不热更新」）**：
   /// 本组件的 `online` 是**不可变构造参数**，37 个使用点里绝大多数传的是
   /// REST 快照字段或硬编码 `true` ⇒ presence 帧到达后头像光环**永不变化**。
   /// web 的等价物是 `usePresenceOnline(user)`（`utils/displayStatus.ts:75–81`）：
   /// 订阅 `usePresenceStore` 后实时求值。
+  ///
+  /// ⚠️ **2026-10-26 扩展（用户实报「换头像不热更新」）**：给了身份（[user] 或
+  /// [userId]）之后，**头像图片 URL / 昵称文字**也一并取实时值 ——
+  /// 优先 `AylaPresenceState.profileOf(id)`（`user.updated` 帧写入的资料覆盖），
+  /// 无覆盖字段时回退本组件的 [resourceUrl] / [label]。
+  /// web 侧该帧不存在（web `Avatar` 完全靠调用点重渲染），所以这是 Flutter
+  /// 补齐后端已广播能力的一处**主动扩展**。
   final AylaUserPublic? user;
 
   /// **【最轻量】只给 userId 也能订阅**（无需完整 [AylaUserPublic]）。
@@ -77,6 +85,9 @@ class AylaAvatarHalo extends StatefulWidget {
   /// 适用场景：列表条目只有 id/名字（群成员、弹幕发送者、会话 peer）。
   /// store 有该 id 记录 ⇒ 按记录（WS 权威）；无记录 ⇒ 回退 [online]。
   /// 与 [user] 的关系：给了 [user] 优先它（能正确处理 `invisible` 隐身）。
+  ///
+  /// **同时启用资料覆盖**：`user.updated` 帧带来的新头像 URL / 新昵称会覆盖
+  /// [resourceUrl] / [label]（见 [user] 的说明）。
   final String? userId;
 
   /// 头像内容文字（无图时的首字/名字；有图时作语义标签）。
@@ -143,6 +154,59 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     final String? known = presence.users[userId];
     if (known != null) return known == 'online';
     return widget.online;
+  }
+
+  /// 本头像的**身份 id**（用于取资料覆盖）：优先 [AylaAvatarHalo.user] 的 id。
+  String? get _identityId => widget.user?.id ?? widget.userId;
+
+  /// `user.updated` 帧带来的资料覆盖（无身份 / 无覆盖 / 无 scope ⇒ null）。
+  ///
+  /// 这是「换头像不热更新」的修复点：帧把新头像写进 `AylaPresenceState._profiles`，
+  /// 但**此前全仓零处读它** ⇒ 头像永远是构造时的 REST 快照。
+  AylaUserProfilePatch? _profilePatch(AylaPresenceState? presence) {
+    final String? id = _identityId;
+    if (id == null || presence == null) return null;
+    return presence.profileOf(id);
+  }
+
+  /// 生效的**昵称/标签**：覆盖层有非空 nickname 就用它，否则回退构造参数 [AylaAvatarHalo.label]。
+  ///
+  /// 与 web 的差异：web 的 `Avatar` 只收调用方算好的 label；后端 `user.updated`
+  /// 在 web 侧没有消费者（该帧是 Flutter 轮次才补的后端能力）⇒ 这里由组件兜住，
+  /// 免去逐调用点改 `label`。
+  String _effectiveLabel(AylaUserProfilePatch? patch) {
+    final String? nick = patch?.nickname;
+    if (nick != null && nick.trim().isNotEmpty) return nick;
+    return widget.label;
+  }
+
+  /// 生效的**头像图 URL**：覆盖层有非空 avatar 就用它，否则回退 [AylaAvatarHalo.resourceUrl]。
+  String? _effectiveResourceUrl(AylaUserProfilePatch? patch) {
+    final String? live = patch?.avatar;
+    if (live != null) {
+      // 后端「清空头像」会广播空串 ⇒ **以空串为权威**（真的没头像了），
+      // 不能回退旧 URL，否则用户删掉头像后别人仍看到旧图。
+      return live;
+    }
+    return widget.resourceUrl;
+  }
+
+  /// **仅测试用**：暴露「当前生效的头像 URL」供回归锁断言。
+  ///
+  /// 为什么需要：`resourceUrl` 是调用方的**静态参数**（构造后不变），真正决定画面
+  /// 的是 `_effectiveResourceUrl(patch)` —— 它叠加了 `user.updated` 的资料覆盖。
+  /// 回归锁必须断言**生效值**，否则测不出「store 存了但没人读」那个历史缺陷。
+  @visibleForTesting
+  String? get debugEffectiveResourceUrl {
+    final AylaPresenceState? presence = _presenceOrNull();
+    return _effectiveResourceUrl(_profilePatch(presence));
+  }
+
+  /// **仅测试用**：暴露「当前生效的展示名」（昵称随 `user.updated` 覆盖）。
+  @visibleForTesting
+  String get debugEffectiveLabel {
+    final AylaPresenceState? presence = _presenceOrNull();
+    return _effectiveLabel(_profilePatch(presence));
   }
 
   /// 当前 presence store（**无 ProviderScope ⇒ null**）。
@@ -218,10 +282,18 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         // ⚠️ **必须用 ListenableBuilder 监听 ChangeNotifier 本体**。
         // 用 `container.read(...)` 直接求值**不会**建立监听（见 _presenceOrNull 注释），
         // 那样写「参数传了但光环照旧冻」——回归锁 test/avatar_presence_test.dart 正是锁这个。
+        //
+        // 同一个 listener 同时驱动三件事，都随帧重建：
+        // ① 光环颜色（presence.update / presence.status）；
+        // ② 头像图 URL（user.updated → profileOf）；
+        // ③ 昵称/语义标签（user.updated → profileOf）。
         return ListenableBuilder(
           listenable: presence,
-          builder: (BuildContext _, Widget? __) =>
-              _buildBody(context, _computeOnline(presence)),
+          builder: (BuildContext _, Widget? __) => _buildBody(
+            context,
+            _computeOnline(presence),
+            patch: _profilePatch(presence),
+          ),
         );
       }
       // 无 ProviderScope（画布/纯 widget 测试）⇒ 回落静态值。
@@ -251,14 +323,20 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
   ///
   /// 修在**组件内**而不是各调用点：全库 31 个光环使用点都可能从后端拿到空串
   /// （气泡发送者头像、会话列表、成员表、弹幕、评论…），逐点补 `_nonEmpty` 必漏。
-  String? get _avatarSrc {
-    final String? raw = widget.resourceUrl;
+  String? _avatarSrcOf(AylaUserProfilePatch? patch) {
+    final String? raw = _effectiveResourceUrl(patch);
     if (raw == null) return null;
     return raw.trim().isEmpty ? null : raw;
   }
 
   /// 真正的 build 体（[online] 是**已求值**的在线态）。
-  Widget _buildBody(BuildContext context, bool online) {
+  ///
+  /// [patch] 是 `user.updated` 带来的资料覆盖（null = 无覆盖，全走构造参数）。
+  Widget _buildBody(
+    BuildContext context,
+    bool online, {
+    AylaUserProfilePatch? patch,
+  }) {
     // 在线态可能在 presence 帧到达后变化（ListenableBuilder 重建）⇒ 同步呼吸动画。
     _syncBreathe(online);
     final double size = widget.size;
@@ -301,7 +379,9 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         coreColor = AylaColors.grape700;
     }
 
-    final String? avatarSrc = _avatarSrc;
+    final String? avatarSrc = _avatarSrcOf(patch);
+    // 昵称也可能被 user.updated 覆盖（换昵称同样要热更新）。
+    final String effectiveLabel = _effectiveLabel(patch);
 
     final Widget core = ClipOval(
       child: DecoratedBox(
@@ -311,8 +391,8 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         child: Center(
           child: Text(
             // 无图时取名字首字（web Avatar 组件同语义）；空串与 null 同样算「无图」
-            avatarSrc == null && widget.label.isNotEmpty
-                ? widget.label.characters.first
+            avatarSrc == null && effectiveLabel.isNotEmpty
+                ? effectiveLabel.characters.first
                 : '',
             style: TextStyle(
               fontFamily: AylaFonts.display,
@@ -356,9 +436,9 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
                     cacheable: false,
                     fallback: Center(
                       child: Text(
-                        widget.label.isEmpty
+                        effectiveLabel.isEmpty
                             ? '?'
-                            : widget.label.characters.first,
+                            : effectiveLabel.characters.first,
                         style: TextStyle(
                           fontFamily: AylaFonts.display,
                           fontFamilyFallback: AylaFonts.cjkFallback,
@@ -445,10 +525,11 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     }
 
     final String stateLabel = online ? '在线' : '离线';
+    // 语义标签也要跟着覆盖后的昵称走（否则读屏仍是旧名字）。
     final Widget result = Semantics(
       image: true,
       label:
-          '${widget.semanticLabel ?? widget.label}，$stateLabel', // 光环+文字双通道
+          '${widget.semanticLabel ?? effectiveLabel}，$stateLabel', // 光环+文字双通道
       child: halo,
     );
 
@@ -465,7 +546,7 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     // ⇒ AylaTooltip（全库统一项）。不可点击分支（onTap == null）在上一行已提前返回 ——
     // web 那条走 «aria-hidden» span，不带 title，两侧一致。
     return AylaTooltip(
-      message: widget.semanticLabel ?? widget.label,
+      message: widget.semanticLabel ?? effectiveLabel,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),

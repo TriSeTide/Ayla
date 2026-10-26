@@ -263,6 +263,9 @@ class _AylaLiveViewerStripState extends State<AylaLiveViewerStrip> {
                               size: 26, // tsx 64：`size={26}`
                               // tsx 66：预览头像恒 `online`（这份名单就是「正在看」的人）
                               online: true,
+                              // 仍是**具体某个用户** ⇒ 传 id 让 `user.updated`
+                              // 覆盖换头像后的 URL（名单来自 REST 快照，会过期）。
+                              userId: viewer.userId,
                               resourceUrl: viewer.avatar.isEmpty
                                   ? null
                                   : viewer.avatar,
@@ -567,6 +570,8 @@ class _ViewerRowState extends State<_ViewerRow> {
                   size: 36, // tsx 115：`size={36}`
                   online: true,
                   core: widget.isElysia ? AylaAvatarCore.elysia : AylaAvatarCore.user,
+                  // 同观看条：具体用户 ⇒ 传 id 让换头像热更新。
+                  userId: widget.viewer.userId,
                   resourceUrl: widget.viewer.avatar.isEmpty
                       ? null
                       : widget.viewer.avatar,

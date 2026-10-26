@@ -10,8 +10,13 @@
 ///
 /// ## 机制差异
 /// - `LiveHostAvatar` 在 web 里是**数据壳**（`ensureUser` 懒拉 + 缓存）：昵称/头像/在线全部
-///   由页面注入（网络层不进 `lib/widgets`）；label 回退链与 aria 文案是**组件语义**，照实现；
-/// - `ensureUser` 的懒拉、`goUserProfile` 的跳转由页面持（[AylaLiveHostAvatar.onOpenProfile]）；
+///   由页面注入；label 回退链与 aria 文案是**组件语义**，照实现；
+/// - ⚠️ **2026-10-26 订正**：此前 Flutter 侧把 `ensureUser` 的懒拉完全推给页面，
+///   而**三个直播页面都没有拉**（频道描述符里只有 `owner_id` + `owner_nickname`，
+///   **没有 `owner_avatar`**）⇒ 主播头像**永远不显示图片**（用户实报「直播标题栏甚至
+///   根本没有显示头像图片」）。现改由本组件自己懒拉（走 `AylaUserDirectory.ensure`，
+///   与 web `ensureUser` 同为**单飞 + 缓存 + 失败静默**）；页面仍可注入 `avatarUrl` 覆盖；
+/// - `goUserProfile` 的跳转仍由页面持（[AylaLiveHostAvatar.onOpenProfile]）；
 /// - 复制走 `Clipboard.setData`（web 是 `navigator.clipboard.writeText`），可注入替身便于测试。
 ///
 /// ## 公开面
@@ -24,6 +29,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
+import '../../core/api/users_api.dart' show AylaUserDirectory;
+import '../../core/models/user_public.dart' show AylaUserPublic;
 import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
@@ -45,7 +52,13 @@ String obsServerFromRtmpUrl(String rtmpUrl) {
 ///
 /// label 回退链：`host.nickname || host.username || owner_nickname || '主播'`；
 /// 在线由页面按 presence 规则算好（`status === "invisible"` → 恒离线）。
-class AylaLiveHostAvatar extends StatelessWidget {
+///
+/// ## 资料懒拉（web `LiveHostAvatar.tsx:24–48` 的 `ensureUser`）
+/// 只给 [userId] 时本组件自己 `AylaUserDirectory.ensure(userId)` 拉昵称 + **头像 URL**。
+/// 频道描述符**没有 `owner_avatar`**（只有 `owner_id` / `owner_nickname`），
+/// 不懒拉就永远没有图片 —— 这正是用户实报「直播标题栏完全没有头像图片」的根因。
+/// 调用方显式给的 [hostNickname] / [avatarUrl] **优先**（页面已有资料时不再多打一次请求）。
+class AylaLiveHostAvatar extends StatefulWidget {
   const AylaLiveHostAvatar({
     super.key,
     this.hostNickname,
@@ -83,9 +96,11 @@ class AylaLiveHostAvatar extends StatelessWidget {
   final VoidCallback? onOpenProfile;
 
   /// label 回退链（tsx 40）。
-  String get label {
+  String labelOf(AylaUserPublic? host) {
     for (final String? candidate in <String?>[
       hostNickname,
+      host?.nickname,
+      host?.username,
       hostUsername,
       ownerNickname,
     ]) {
@@ -95,15 +110,75 @@ class AylaLiveHostAvatar extends StatelessWidget {
   }
 
   @override
+  State<AylaLiveHostAvatar> createState() => _AylaLiveHostAvatarState();
+}
+
+class _AylaLiveHostAvatarState extends State<AylaLiveHostAvatar> {
+  /// 懒拉到的资料（web `const [host, setHost] = useState(getCachedUser(ownerId))`）。
+  AylaUserPublic? _host;
+
+  /// 已发起过的懒拉（防同一 id 反复请求；与 web `if (!ownerId || host) return` 同效）。
+  bool _requested = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _seedFromCache();
+    _ensure();
+  }
+
+  @override
+  void didUpdateWidget(covariant AylaLiveHostAvatar old) {
+    super.didUpdateWidget(old);
+    if (old.userId != widget.userId) {
+      _host = null;
+      _requested = false;
+      _seedFromCache();
+      _ensure();
+    }
+  }
+
+  /// 缓存命中则同步填（web `getCachedUser` 保证渲染无闪烁）。
+  void _seedFromCache() {
+    final String id = widget.userId ?? '';
+    if (id.isEmpty) return;
+    final AylaUserPublic? cached = AylaUserDirectory.cached(id);
+    if (cached != null) _host = cached;
+  }
+
+  /// 懒拉（web `LiveHostAvatar.tsx:28–38` 的 `ensureUser` effect）。
+  ///
+  /// 只在「有 id」且「调用方没给头像/昵称」时才拉 —— 页面已给资料就不发多余请求。
+  void _ensure() {
+    final String id = widget.userId ?? '';
+    if (id.isEmpty || _requested) return;
+    final bool hasAvatar = (widget.avatarUrl ?? '').isNotEmpty;
+    final bool hasName = (widget.hostNickname ?? '').isNotEmpty;
+    if (hasAvatar && hasName) return;
+    _requested = true;
+    AylaUserDirectory.ensure(id).then((AylaUserPublic? user) {
+      if (!mounted || user == null) return;
+      setState(() => _host = user);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final String name = label;
+    final AylaUserPublic? host = _host;
+    final String name = widget.labelOf(host);
+    // 头像 URL：调用方显式给的优先；否则用懒拉到的（web 只有后者）。
+    final String? explicit = widget.avatarUrl;
+    final String? src = (explicit != null && explicit.isNotEmpty)
+        ? explicit
+        : ((host?.avatar ?? '').isEmpty ? null : host!.avatar);
     return AylaAvatarHalo(
       label: name,
-      size: size,
-      online: online,
-      userId: userId,
-      resourceUrl: (avatarUrl == null || avatarUrl!.isEmpty) ? null : avatarUrl,
-      onTap: onOpenProfile,
+      size: widget.size,
+      online: widget.online,
+      // 传 id ⇒ 光环实时 + `user.updated` 的资料覆盖（换头像/换昵称也跟手）。
+      userId: widget.userId,
+      resourceUrl: src,
+      onTap: widget.onOpenProfile,
       // tsx 50：`ariaLabel={`查看主播 ${label} 的个人主页`}`
       semanticLabel: '查看主播 $name 的个人主页',
     );

@@ -13,6 +13,13 @@
 ///
 /// 这正是「遗漏能长期存在」的根因：**没有任何测试断言「presence 帧到达后
 /// 头像光环真的变了」**。本文件补上这条断言。
+///
+/// ## 2026-10-26 扩展：资料（头像图 / 昵称）热更新锁
+/// 用户第三次实报「换头像不热更新」。当时 `user.updated` 帧 → `presence_ws` →
+/// `AylaPresenceState.applyUserProfile` 全都通了，**但全仓零处读 `profileOf()`**
+/// ⇒ 头像图片始终是构造参数 `resourceUrl` 的那一份（永不更新）。
+/// 现由 `AylaAvatarHalo` 在给了身份（`user` / `userId`）时读覆盖层，
+/// 本文件新增断言锁住「**帧到达后渲染出的图 URL 真的换**」。
 library;
 
 import 'package:flutter/material.dart';
@@ -22,6 +29,7 @@ import 'package:flutter_test/flutter_test.dart';
 import '../lib/core/models/user_public.dart' show AylaUserPublic;
 import '../lib/state/presence_providers.dart' show presenceStateProvider;
 import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/resource_image.dart' show AylaResourceImage;
 
 const AylaUserPublic _user = AylaUserPublic(
   id: 'u2',
@@ -128,5 +136,154 @@ void main() {
     );
     await tester.pump();
     expect(tester.takeException(), isNull, reason: '无 scope 必须降级而不是抛异常');
+  });
+
+  // ============ 2026-10-26 新增：资料（头像图片）热更新锁 ============
+
+  /// 读「渲染出的头像图 URL」（null = 走文字首字档，即没有图）。
+  String? renderedAvatarSrc(WidgetTester tester) {
+    final Iterable<AylaResourceImage> imgs =
+        tester.widgetList<AylaResourceImage>(find.byType(AylaResourceImage));
+    return imgs.isEmpty ? null : imgs.first.src;
+  }
+
+  /// 包一层带 scope 的宿主（资料帧测试专用）。
+  Widget scoped(ProviderContainer c, Widget child) => UncontrolledProviderScope(
+        container: c,
+        child: MaterialApp(home: Scaffold(body: child)),
+      );
+
+  testWidgets('★ user.updated ⇒ 头像**图片 URL** 真的换（user 形态）', (
+    WidgetTester tester,
+  ) async {
+    final ProviderContainer c = ProviderContainer();
+    addTearDown(c.dispose);
+    const AylaUserPublic user = AylaUserPublic(
+      id: 'u2',
+      username: 'xixi',
+      nickname: '汐汐',
+      avatar: 'https://old/avatar.png',
+      online: true,
+    );
+    await tester.pumpWidget(
+      scoped(
+        c,
+        const AylaAvatarHalo(
+          label: '汐汐',
+          size: 40,
+          user: user,
+          resourceUrl: 'https://old/avatar.png',
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(renderedAvatarSrc(tester), 'https://old/avatar.png',
+        reason: '前置：渲染的是构造参数那份旧 URL');
+
+    // ★ 模拟后端 `user.updated` 帧（WS 落 store 的正是这条路径）
+    c.read(presenceStateProvider).applyUserProfile(
+      'u2',
+      nickname: '汐汐',
+      avatar: 'https://new/avatar.png',
+      signature: '',
+    );
+    await tester.pump();
+
+    expect(
+      renderedAvatarSrc(tester),
+      'https://new/avatar.png',
+      reason: '★ 换头像帧到达后，渲染出的图 URL 必须真的换 —— '
+          '这条断言正是过去缺失的那条（零处读 profileOf 时这里会红）',
+    );
+  });
+
+  testWidgets('★ user.updated ⇒ 头像图片真的换（userId 形态）', (
+    WidgetTester tester,
+  ) async {
+    final ProviderContainer c = ProviderContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      scoped(
+        c,
+        const AylaAvatarHalo(
+          label: '汐汐',
+          size: 40,
+          userId: 'u2',
+          resourceUrl: 'https://old/avatar.png',
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(renderedAvatarSrc(tester), 'https://old/avatar.png');
+
+    c.read(presenceStateProvider).applyUserProfile('u2', avatar: 'https://new2/a.png');
+    await tester.pump();
+    expect(renderedAvatarSrc(tester), 'https://new2/a.png',
+        reason: '只有 id 的头像（列表条目）也必须跟手');
+  });
+
+  testWidgets('★ user.updated 换昵称 ⇒ 文字首字/语义标签跟着变', (
+    WidgetTester tester,
+  ) async {
+    final ProviderContainer c = ProviderContainer();
+    addTearDown(c.dispose);
+    // 无头像图 ⇒ 走文字首字档，可直接断言昵称变化
+    await tester.pumpWidget(
+      scoped(c, const AylaAvatarHalo(label: '旧名', size: 40, userId: 'u2')),
+    );
+    await tester.pump();
+    expect(find.text('旧'), findsOneWidget, reason: '前置：首字来自构造参数 label');
+
+    c.read(presenceStateProvider).applyUserProfile('u2', nickname: '新名');
+    await tester.pump();
+    expect(find.text('新'), findsOneWidget, reason: '换昵称帧到达后首字也要换');
+  });
+
+  testWidgets('★ 清空头像（空串）⇒ 以空串为权威，不回落旧 URL', (
+    WidgetTester tester,
+  ) async {
+    final ProviderContainer c = ProviderContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      scoped(
+        c,
+        const AylaAvatarHalo(
+          label: '汐汐',
+          size: 40,
+          userId: 'u2',
+          resourceUrl: 'https://old/a.png',
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(renderedAvatarSrc(tester), 'https://old/a.png');
+
+    // 后端「删除头像」广播空串
+    c.read(presenceStateProvider).applyUserProfile('u2', avatar: '');
+    await tester.pump();
+    expect(renderedAvatarSrc(tester), isNull,
+        reason: '空串 = 真的没头像 ⇒ 走首字档，不能回退旧图（否则删头像对别人无效）');
+  });
+
+  testWidgets('★ 静态档不回归：群头像（无身份）不受 user.updated 影响', (
+    WidgetTester tester,
+  ) async {
+    final ProviderContainer c = ProviderContainer();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(
+      scoped(
+        c,
+        const AylaAvatarHalo(
+          label: '群',
+          size: 40,
+          resourceUrl: 'https://group/avatar.png',
+        ),
+      ),
+    );
+    await tester.pump();
+    c.read(presenceStateProvider).applyUserProfile('u2', avatar: 'https://new/a.png');
+    await tester.pump();
+    expect(renderedAvatarSrc(tester), 'https://group/avatar.png',
+        reason: '群头像不是「某个人」，不能被用户资料帧改掉');
   });
 }

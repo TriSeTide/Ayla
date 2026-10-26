@@ -6,10 +6,13 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../lib/core/api/users_api.dart' show AylaUserDirectory;
+import '../lib/core/models/user_public.dart' show AylaUserPublic;
 import '../lib/theme/glass.dart';
 import '../lib/theme/preview_theme.dart';
 import '../lib/theme/tokens.dart';
 import '../lib/widgets/base/avatar_halo.dart';
+import '../lib/widgets/base/resource_image.dart' show AylaResourceImage;
 import '../lib/widgets/live/live_studio.dart';
 
 void main() {
@@ -365,6 +368,95 @@ void main() {
       setLocal(() => narrow = false);
       await settle(tester);
       expect(rowNow().crossAxisAlignment, CrossAxisAlignment.center);
+    });
+  });
+
+  // ============ 2026-10-26 新增：主播头像图片懒拉（用户实报③）============
+  //
+  // 频道描述符只有 `owner_id` / `owner_nickname`，**没有 owner_avatar**
+  // ⇒ 必须像 web `LiveHostAvatar.tsx:28-38` 那样 `ensureUser(ownerId)` 懒拉，
+  // 否则「直播标题栏完全没有头像图片」（用户原话）。
+  group('主播头像图片懒拉（web ensureUser 等价物）', () {
+    setUp(AylaUserDirectory.clearCache);
+
+    String? renderedSrc(WidgetTester tester) {
+      final Iterable<AylaResourceImage> imgs =
+          tester.widgetList<AylaResourceImage>(find.byType(AylaResourceImage));
+      return imgs.isEmpty ? null : imgs.first.src;
+    }
+
+    testWidgets('无 avatarUrl 时：缓存命中 ⇒ 立即用缓存里的头像',
+        (WidgetTester tester) async {
+      AylaUserDirectory.put(const AylaUserPublic(
+        id: 'owner-1',
+        nickname: '爱莉',
+        avatar: 'https://cdn/lazy.png',
+      ));
+      await tester.pumpWidget(
+        host(
+          tester,
+          const AylaLiveHostAvatar(userId: 'owner-1', ownerNickname: '频道昵称'),
+        ),
+      );
+      await settle(tester);
+      expect(
+        renderedSrc(tester),
+        'https://cdn/lazy.png',
+        reason: '★ 不懒拉就永远只有首字 —— 这正是用户实报的「根本没有头像图片」',
+      );
+    });
+
+    testWidgets('显式 avatarUrl 优先于懒拉缓存', (WidgetTester tester) async {
+      AylaUserDirectory.put(const AylaUserPublic(
+        id: 'owner-2',
+        nickname: '爱莉',
+        avatar: 'https://cdn/cached.png',
+      ));
+      await tester.pumpWidget(
+        host(
+          tester,
+          const AylaLiveHostAvatar(
+            userId: 'owner-2',
+            hostNickname: '爱莉',
+            avatarUrl: 'https://cdn/explicit.png',
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(renderedSrc(tester), 'https://cdn/explicit.png',
+          reason: '调用方给的优先');
+    });
+
+    testWidgets('拉不到资料 ⇒ 回退首字，不伪造图也不崩', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        host(
+          tester,
+          const AylaLiveHostAvatar(userId: 'missing', ownerNickname: '频道昵称'),
+        ),
+      );
+      await settle(tester);
+      expect(renderedSrc(tester), isNull, reason: '没有图就走文字首字档');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('nickname 回退链：懒拉到的 nickname 优先于 ownerNickname',
+        (WidgetTester tester) async {
+      AylaUserDirectory.put(const AylaUserPublic(
+        id: 'owner-3',
+        nickname: '爱莉本人',
+        avatar: 'https://cdn/a.png',
+      ));
+      await tester.pumpWidget(
+        host(
+          tester,
+          const AylaLiveHostAvatar(userId: 'owner-3', ownerNickname: '频道昵称'),
+        ),
+      );
+      await settle(tester);
+      // 断言 label（图加载失败时组件渲染的是首字，故不断言完整文案）。
+      final AylaAvatarHalo halo =
+          tester.widget<AylaAvatarHalo>(find.byType(AylaAvatarHalo));
+      expect(halo.label, '爱莉本人', reason: 'web tsx:40 的 host.nickname 优先');
     });
   });
 }

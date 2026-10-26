@@ -87,6 +87,60 @@ class AylaUserDetail {
   }
 }
 
+/// 用户公开资料的**懒拉缓存**（web `api/users.ts:25–66` 的 `ensureUser` 等价物）。
+///
+/// ## 为什么需要它（2026-10-26，用户实报「直播标题栏完全没有头像图片」）
+/// web 的 `LiveHostAvatar.tsx:24–48` 只拿到 `ownerId` + `owner_nickname`，
+/// **头像 URL 靠 `ensureUser(ownerId)` 懒拉**（频道描述符里根本没有 `owner_avatar`）。
+/// Flutter 侧此前没有这个能力 ⇒ `AylaLiveHostAvatar` 从来收不到 `avatarUrl`
+/// ⇒ 主播头像**永远是首字光环**。
+///
+/// 与 web 逐条对齐：
+/// - 命中缓存同步返回（web `getCachedUser`，渲染层无闪烁）；
+/// - 并发去重：同一 id 只发一次请求（web `pending` Map）；
+/// - 失败返回 null **不抛错**（渲染层回退首字符，web `.catch(() => null)`）。
+class AylaUserDirectory {
+  AylaUserDirectory._();
+
+  static final Map<String, AylaUserPublic> _cache = <String, AylaUserPublic>{};
+  static final Map<String, Future<AylaUserPublic?>> _pending =
+      <String, Future<AylaUserPublic?>>{};
+
+  /// 已缓存则同步返回（无则 null）。
+  static AylaUserPublic? cached(String userId) => _cache[userId];
+
+  /// 把已有资料写入缓存（来自会话成员等现成数据源，避免重复请求）。
+  static void put(AylaUserPublic user) => _cache[user.id] = user;
+
+  /// 按 id 懒拉公开资料并缓存；失败/未命中返回 null（**不抛错**）。
+  static Future<AylaUserPublic?> ensure(String userId) {
+    if (userId.isEmpty) return Future<AylaUserPublic?>.value();
+    final AylaUserPublic? hit = _cache[userId];
+    if (hit != null) return Future<AylaUserPublic?>.value(hit);
+    final Future<AylaUserPublic?>? inFlight = _pending[userId];
+    if (inFlight != null) return inFlight;
+    final Future<AylaUserPublic?> task =
+        AylaUsersApi.getUserDetail(userId).then<AylaUserPublic?>
+      ((AylaUserDetail detail) {
+        _cache[detail.user.id] = detail.user;
+        return detail.user;
+      }).catchError((Object _) {
+        // 懒拉失败静默（web `ensureUser` 的 `.catch(() => null)`）。
+        return null;
+      }).whenComplete(() {
+        _pending.remove(userId);
+      });
+    _pending[userId] = task;
+    return task;
+  }
+
+  /// 测试用：清空缓存（web `_clearUserCache`）。
+  static void clearCache() {
+    _cache.clear();
+    _pending.clear();
+  }
+}
+
 class AylaUsersApi {
   const AylaUsersApi._();
 

@@ -949,6 +949,20 @@ class _AylaMessageListState extends State<AylaMessageList> {
     return map;
   }
 
+  /// 发送者 id → **完整用户对象**（给气泡头像自订阅 presence + 资料覆盖）。
+  ///
+  /// ⚠️ 2026-10-26：此前只传 `avatar` / `label` 两个字符串（REST 快照），
+  /// 气泡拿到的永远是成员表那一份 ⇒ 换头像 / 上线下线都不跟手。
+  /// 传完整对象后，`AylaAvatarHalo` 内部按 id 订阅 presence 并套 `user.updated` 覆盖层。
+  Map<String, AylaUserPublic> get _memberUsers {
+    final Map<String, AylaUserPublic> map = <String, AylaUserPublic>{};
+    for (final AylaConversationMember m
+        in widget.conversation?.members ?? const <AylaConversationMember>[]) {
+      map[m.user.id] = m.user;
+    }
+    return map;
+  }
+
   /// 引用预览表（tsx 379–391）。
   Map<String, String> get _quotePreview {
     final Map<String, String> map = <String, String>{};
@@ -1039,6 +1053,7 @@ class _AylaMessageListState extends State<AylaMessageList> {
     final Map<String, String> names = _memberNames;
     final Map<String, ({String? avatar, String label})> avatars =
         _memberAvatars;
+    final Map<String, AylaUserPublic> users = _memberUsers;
     final bool isSelf = m.senderId == widget.currentUserId;
     final String peerName = widget.conversation?.peer?.displayName ?? '';
     final GlobalKey key = _keyOf(m.id);
@@ -1057,9 +1072,12 @@ class _AylaMessageListState extends State<AylaMessageList> {
             senderName:
                 _isGroup && !isSelf ? names[m.senderId] : null,
             senderAvatarUrl: avatars[m.senderId]?.avatar,
+            // label 回退链的**第一选**：成员表的 displayName；成员表没有时由气泡
+            // 回退到 senderName（群聊已传）/ '发送者' ⇒ 头像不会因成员表缺失而不渲染。
             senderAvatarLabel: avatars[m.senderId]?.label,
-            // 普查 D 修复（恒灰）：传球者 id 让气泡头像自订阅 presence。
-            // 该组件本身只收 senderOnline（REST 快照，且此处根本没传）⇒ 永远灰。
+            // 传**完整用户对象**（不只是 id）：头像据此同时拿到
+            // ① presence 实时在线光环；② `user.updated` 的资料覆盖（换头像/昵称跟手）。
+            senderUser: users[m.senderId],
             senderUserId: m.senderId,
             currentUserId: widget.currentUserId,
             // 头像单击 → 个人主页（web `MessageList.tsx:1067` 的

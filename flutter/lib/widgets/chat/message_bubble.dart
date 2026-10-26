@@ -568,9 +568,23 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
   Widget build(BuildContext context) {
     final AylaChatMessage msg = widget.msg;
     final bool recalled = msg.recalled;
+    // ⚠️ **2026-10-26 修复（用户实报「群聊页面头像光环显示错误状态」的真正根因）**：
+    // 此前判据是 `senderAvatarLabel != null || senderAvatarUrl != null`，
+    // 而这两个值都来自 `message_list.dart` 的 `_memberAvatars`
+    // （= `conversation.members`，一份 **REST 快照**）。两种常见情形下它们都是 null：
+    //   ① 成员表**尚未加载**（冷启动直链进群 / 手机慢网）；
+    //   ② 发送者**不在成员表**里（历史消息的已退群用户）。
+    // ⇒ **整个头像不渲染**（不是颜色错，是根本没头像）——用户看到的就是「光环状态错误」。
+    //
+    // 现在：**只要知道发送者是谁（senderUserId / senderUser）就画头像**，
+    // 文字回退链 `senderAvatarLabel → senderName → '发送者'`（与 halo 内部一致），
+    // 图片 URL 由 resourceUrl + presence 的 `user.updated` 覆盖层共同决定。
+    final String? senderId = widget.senderUserId ?? widget.senderUser?.id;
     final bool showSenderHalo = !recalled &&
         !msg.isSystem &&
-        (widget.senderAvatarLabel != null || widget.senderAvatarUrl != null);
+        (senderId != null ||
+            widget.senderAvatarLabel != null ||
+            widget.senderAvatarUrl != null);
 
     final Widget? halo = showSenderHalo
         ? MouseRegion(
