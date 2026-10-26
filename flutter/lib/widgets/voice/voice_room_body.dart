@@ -63,6 +63,9 @@ import '../../core/models/post.dart' show AylaMediaDescriptor;
 import '../base/overlays.dart' show aylaOverlayEntry;
 import '../base/safe_area.dart' show AylaTopInsetGap;
 import '../base/directory_controls.dart';
+// 40px 容差与滚动绑定**同源**（web useCursorHistory.ts:161 的同一条式子），
+// 避免组件与页面各写一份魔数。
+import '../base/history_scroll_binding.dart' show kAylaHistoryBottomSlack;
 import '../base/primitives.dart';
 import '../base/resource_image.dart';
 import '../base/reveal.dart';
@@ -115,6 +118,7 @@ class AylaVoiceChatHistory {
     this.loadOlder,
     this.returnLatest,
     this.retry,
+    this.setFollowing,
   });
 
   final bool loading;
@@ -124,6 +128,12 @@ class AylaVoiceChatHistory {
   final Future<void> Function()? loadOlder;
   final Future<void> Function()? returnLatest;
   final Future<void> Function()? retry;
+
+  /// 列表滚动上报（web `onScroll={history.handleScroll}`，`VoiceRoomBody.tsx:187`）；
+  /// 参数 = 是否仍在底部。页面层直接转 `_chat.setFollowing`。
+  ///
+  /// null ⇒ 不产生跟随判定（既有调用点 / 画布档零影响）。
+  final ValueChanged<bool>? setFollowing;
 }
 
 /// `.voice-room-body` —— 语音房整页（进房态）。
@@ -138,6 +148,7 @@ class AylaVoiceRoomBody extends StatefulWidget {
     this.visibilityLabels = const <String>[],
     this.messages = const <AylaVoiceChatMessage>[],
     this.history = const AylaVoiceChatHistory(),
+    this.chatListScroll,
     this.favorite,
     this.share,
     this.onBack,
@@ -177,6 +188,27 @@ class AylaVoiceRoomBody extends StatefulWidget {
 
   /// 历史分页状态。
   final AylaVoiceChatHistory history;
+
+  /// 房内聊天列表的滚动控制器（**可选注入**；null = 组件自建自管，既有调用零影响）。
+  ///
+  /// ## web 依据
+  /// web 的滚动容器**归数据 hook 所有**：`useCursorHistory` 自己持有
+  /// `listRef`（`useCursorHistory.ts:54`），页面把同一个 ref 交给列表
+  /// （`VoiceRoomBody.tsx:97` `const chatListRef = history.listRef;` →
+  /// `tsx:187` `ref={chatListRef}`）⇒ hook 能在 items 变化时直接写
+  /// `list.scrollTop = list.scrollHeight`（`useCursorHistory.ts:67–78`）。
+  ///
+  /// Flutter 侧数据与滚动容器分居两处（[AylaCursorHistory] 只有数据），
+  /// 想让「新消息贴底」有消费方，**页面必须拿到列表的 `ScrollController`**
+  /// —— 与 web 的 `listRef` 同构。此前组件自己 `new ScrollController()`
+  /// （`_ownScroll`）⇒ 页面拿不到 ⇒ `pendingScrollToBottom` 全仓零消费方
+  /// （用户实报「语音房聊天老是新消息不自动滚底」的直接根因）。
+  ///
+  /// 注入后的绑定由页面持有（`widgets/base/history_scroll_binding.dart`）：
+  /// 它监听该控制器 ⇒ 用户手势与程序 jump 两种像素变化都会走一次
+  /// 「距底 < 40 继续跟随」判定（等价 web `onScroll={history.handleScroll}`，
+  /// `tsx:187` / `useCursorHistory.ts:160–164`）。
+  final ScrollController? chatListScroll;
 
   /// 收藏键槽（页面层给 `AylaFavoriteButton(compact: true, …)`）。
   final Widget? favorite;
@@ -225,7 +257,13 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
   final Set<String> _seenIds = <String>{};
 
   final TextEditingController _draft = TextEditingController();
-  final ScrollController _listScroll = ScrollController();
+
+  /// 组件**自管**的控制器（`widget.chatListScroll == null` 时才有值）。
+  /// 默认档与改动前逐字节等价：仍然是 `initState` 新建、`dispose` 释放。
+  final ScrollController _ownScroll = ScrollController();
+
+  /// 实际挂在列表上的控制器（web `history.listRef` 的等价归属）。
+  ScrollController get _listScroll => widget.chatListScroll ?? _ownScroll;
 
   /// 房内聊天图片的大图查看器宿主（见 [_openImage]）。
   final _VoiceChatViewerHost _viewer = _VoiceChatViewerHost();
@@ -241,6 +279,9 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
   String get _chatOwner => 'voice-chat:${widget.selfUserId ?? ''}:${widget.channelId ?? ''}';
   String _ownerOfLastBuild = '';
 
+  /// 当前挂着 [_onListScroll] 的控制器（换控制器时先摘掉旧的）。
+  ScrollController? _reporterOf;
+
   @override
   void initState() {
     super.initState();
@@ -249,11 +290,17 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
     for (final AylaVoiceChatMessage m in widget.messages) {
       _seenIds.add(m.id);
     }
+    // web tsx 187 `onScroll={history.handleScroll}`：列表自带滚动上报，
+    // 挂载即生效（无需等 build）。
+    _attachScrollReporter(_listScroll);
   }
 
   @override
   void didUpdateWidget(AylaVoiceRoomBody oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 控制器换了实例（页面重建 / 换房）⇒ 上报必须跟着换；
+    // 漏挂会让新房的 following 恒为旧值（web 每次渲染都把 onScroll 绑在当前节点上）。
+    _resubscribeScrollReporter();
     // tsx 101–107：chatOwner（换人/换房）变化 ⇒ 清空 seenIds / 未读 / 错误 / busy
     if (_chatOwner != _ownerOfLastBuild) {
       _ownerOfLastBuild = _chatOwner;
@@ -264,6 +311,10 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
       _error = null;
       _sending = false;
       _uploading = false;
+      // 注入的控制器换了（换房/换 owner）⇒ 滚动上报必须挂到新控制器上：
+      // 上边提前 return 会跳过下面的重挂，新房就会退化成「恒跟随」
+      // （web 每次 `onScroll` 都绑在当前那个 listRef 上，天然没有这个缺口）。
+      _resubscribeScrollReporter();
       return;
     }
     // tsx 123–132：消息列表里出现**新 id** ⇒ 「聊天栏收起、且非自己发送」才累加未读；
@@ -277,6 +328,53 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
     while (_seenIds.length > AylaVoiceRoomBody.seenIdsCap) {
       _seenIds.remove(_seenIds.first);
     }
+  }
+
+  /// 把「用户滚动 → 历史窗口跟随判定」挂到**当前生效的控制器**上。
+  ///
+  /// web 的事实源是列表自己的 `onScroll={history.handleScroll}`
+  /// （`VoiceRoomBody.tsx:187` → `useCursorHistory.ts:160–164`）：
+  /// `following = scrollHeight - scrollTop - clientHeight < 40 && !hasNewer`。
+  ///
+  /// ⚠️ **为什么它是兜底而不是首选**：页面若注入了控制器，首选消费者是
+  /// `AylaHistoryScrollBinding`（它自己 `addListener` 到同一个控制器）。
+  /// 但「组件被单独使用」（画布 / 定向测试）时没有 binding ⇒ 需要本方法补齐
+  /// 同一语义；两者都幂等（`setFollowing` 只写一个 bool），同时存在不冲突。
+  void _attachScrollReporter(ScrollController controller) {
+    if (identical(_reporterOf, controller)) return;
+    _reporterOf?.removeListener(_onListScroll);
+    _reporterOf = controller;
+    controller.addListener(_onListScroll);
+  }
+
+  void _resubscribeScrollReporter() {
+    if (!mounted) return;
+    _attachScrollReporter(_listScroll);
+  }
+
+  /// 列表滚动上报（web `handleScroll`：距底 < 40 才继续跟随）。
+  ///
+  /// 手势与程序 `jumpTo` 都会触发 —— 与 web 完全一致（DOM 里两者都发 scroll 事件，
+  /// `useCursorHistory.ts:160–164` 不区分来源）。
+  ///
+  /// ⚠️ **窗口已脱挂（`hasNewer`，即「返回最新消息」按钮亮着）时不上报**：
+  /// web 是同一条式子里的 `&& !stateRef.current.hasNewer`；而 Flutter
+  /// `AylaCursorHistory.setFollowing` 自身先 `if (_hasNewer) return;`（`cursor_history.dart:314–317`）
+  /// 挡掉后半段 ⇒ 若这里再把 `atBottom=true` 送进去，**只看滚动位置**就会把
+  /// `following` 翻回 true：用户停在底部读历史时来一条新消息，就会被直接顶进窗口并
+  /// 强行拉到底（web 明确不会：脱挂期间新内容只亮按钮，不跳位）。
+  /// 这里补前置判断，把 web 那条 `&& !hasNewer` 补全。
+  void _onListScroll() {
+    if (!_listScroll.hasClients) return;
+    final ScrollPosition p = _listScroll.position;
+    if (!p.hasContentDimensions) return;
+    if (widget.history.hasNewer) return;
+    final bool atBottom =
+        p.maxScrollExtent - p.pixels < kAylaHistoryBottomSlack;
+    // 唯一的跟随 owner = 页面的 `AylaHistoryScrollBinding`（它已监听同一个控制器）；
+    // 组件这里**不自己判**，只把像素事实转成 web 的 `handleScroll` 语义交出去。
+    // setFollowing 为 null（画布 / 既有调用）⇒ 无副作用。
+    widget.history.setFollowing?.call(atBottom);
   }
 
   void _toggleChat() {
@@ -338,7 +436,13 @@ class _AylaVoiceRoomBodyState extends State<AylaVoiceRoomBody> {
   void dispose() {
     _viewer.close();
     _draft.dispose();
-    _listScroll.dispose();
+    // 只摘自己的监听、**只释放自管**的控制器：注入的属于页面（与 web
+    // `listRef` 归 hook 所有同构），组件释放它会让页面的 binding 失控。
+    if (_reporterOf != null) {
+      _reporterOf!.removeListener(_onListScroll);
+      _reporterOf = null;
+    }
+    _ownScroll.dispose();
     super.dispose();
   }
 

@@ -51,6 +51,9 @@ import '../widgets/base/dialogs.dart' show AylaConfirmDialog;
 import '../widgets/shell/create_sheet.dart' show AylaRootOverlay;
 import '../widgets/base/directory_controls.dart' show AylaFavoriteButton;
 import '../widgets/base/directory_page.dart' show aylaDirectoryIsNarrow;
+// 历史窗口 ↔ 滚动控制器的绑定（web `hooks/useCursorHistory.ts` 自带的
+// `listRef` + `useLayoutEffect` 贴底的 Flutter 等价物；见该文件头）。
+import '../widgets/base/history_scroll_binding.dart';
 import '../widgets/base/share.dart' show AylaShareButton;
 import '../widgets/motion/gestures.dart' show AylaFullScreenSwipeBack;
 import '../widgets/voice/voice_channel_panel.dart';
@@ -848,6 +851,16 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
   late final AylaVoiceSession _session;
   late final AylaMediaPagedList<AylaVoiceMemberDescriptor> _members;
   late final AylaCursorHistory<api.AylaVoiceChatMessage> _chat;
+
+  /// 房内聊天列表的滚动控制器 —— **归页面所有**（web `history.listRef` 同构）。
+  ///
+  /// 组件自己 new 出来的控制器页面拿不到，`pendingScrollToBottom` 就没有消费方
+  /// （用户实报「语音房聊天老是新消息不自动滚底」的直接根因）；控制器上移后由
+  /// [_chatScroll] 绑定消费。
+  final ScrollController _chatScroll = ScrollController();
+
+  /// 历史窗口 ↔ 滚动控制器绑定（贴底跟随 + 「距底 < 40 继续跟随」）。
+  late final AylaHistoryScrollBinding<api.AylaVoiceChatMessage> _chatScrollBinding;
   late final AylaShareController _share;
   final AylaFavoriteStatusController _favorites = AylaFavoriteStatusController();
 
@@ -914,6 +927,13 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       idOf: (api.AylaVoiceChatMessage m) => m.id,
       createdAtOf: (api.AylaVoiceChatMessage m) => m.createdAt,
     )..addListener(_onChanged);
+    // 贴底跟随的唯一 owner（web `useCursorHistory` 的 `listRef` + `pendingScroll`）：
+    // 历史窗口一 notify 就排帧消费 `pendingScrollToBottom`，并在列表尚未挂载时
+    // **保留**请求（不吞）—— `_bootstrap()` 的 `reset()` 早于首帧也不丢。
+    _chatScrollBinding = AylaHistoryScrollBinding<api.AylaVoiceChatMessage>(
+      history: _chat,
+      controller: _chatScroll,
+    )..bind();
     _members = AylaMediaPagedList<AylaVoiceMemberDescriptor>(
       scope: 'voice-members:${selfId ?? ''}:${widget.channelId}',
       request: (String? cursor) => AylaVoiceApi.listVoiceChannelMembersPage(
@@ -945,6 +965,10 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
     _session.removeListener(_onSessionChanged);
     _session.dispose();
     _chat.removeListener(_onChanged);
+    // ⚠️ 先解绑（它会从 _chat / _chatScroll 上摘监听），再释放两者；
+    // 顺序反了会在已 dispose 的 ChangeNotifier 上 removeListener。
+    _chatScrollBinding.dispose();
+    _chatScroll.dispose();
     _chat.dispose();
     _members.removeListener(_onChanged);
     _members.dispose();
@@ -1269,9 +1293,20 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
         hasMore: _chat.hasMore,
         hasNewer: _chat.hasNewer,
         loadOlder: _chat.loadOlder,
+        // web `returnLatest`：成功读回最新页才算数（失败保留原页，
+        // `useCursorHistory.ts:112–117`）。Flutter `_load(older:false)` 成功后
+        // 已同时做三件：`hasNewer` 归零（`cursor_history.dart:248` 的
+        // `_invalidationRevision != revision`）、`following = true`（241 行）、
+        // `pendingScrollToBottom = true`（242 行）⇒ 绑定会自动贴底，无需页面补收尾。
         returnLatest: _chat.returnLatest,
         retry: _chat.retry,
+        // web `onScroll={history.handleScroll}`（tsx 187）→ `setFollowing`：
+        // 距底 < 40 继续跟随，上翻即停（useCursorHistory.ts:160–164）。
+        setFollowing: _chat.setFollowing,
       ),
+      // web `VoiceRoomBody.tsx:97` `const chatListRef = history.listRef`：
+      // 滚动容器与历史窗口同属一处 ⇒ 控制器由页面注入。
+      chatListScroll: _chatScroll,
       // ⚠️ 根因 A（2026-10-08 修）：本页此前**只在「重试」分支里调 `_favorites.load`**
       // ⇒ 语音房头部收藏键在正常路径下永远 unknown（禁用 +「加载中…」）。
       // web `VoiceRoomBody.tsx:278` 只写

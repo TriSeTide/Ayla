@@ -595,6 +595,71 @@ void main() {
     expect(older, 1);
   });
 
+  // ======================= 聊天列表滚动控制器（可选注入） =======================
+
+  testWidgets('chatListScroll 可选：注入 ⇒ 列表用的就是它；不注入 ⇒ 组件自建仍可滚动',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    final ScrollController injected = ScrollController();
+    addTearDown(injected.dispose);
+
+    // 消息足够多，撑出滚动高度（宽屏列表吃掉剩余高度）
+    final List<AylaVoiceChatMessage> many = <AylaVoiceChatMessage>[
+      for (int i = 0; i < 60; i++)
+        AylaVoiceChatMessage(
+            id: 'm$i', senderNickname: '爱莉', content: '第 $i 条消息'),
+    ];
+
+    await tester.pumpWidget(host(AylaVoiceRoomBody(
+      channelName: '深夜电台',
+      channelId: 'v1',
+      selfUserId: 'self',
+      messages: many,
+      chatListScroll: injected,
+      onBack: () {},
+      voicePanelBuilder: (bool ownMaterial) => const SizedBox(key: _panelKey),
+    )));
+    await settle(tester);
+
+    // 注入的控制器必须挂到了列表上（web `VoiceRoomBody.tsx:97` 的 listRef 同构）
+    // —— 页面拿不到 controllers 就没法消费 pendingScrollToBottom，
+    // 这正是「新消息不自动滚底」的根因。
+    expect(injected.hasClients, isTrue,
+        reason: '注入的控制器必须是列表真正的滚动容器');
+    expect(injected.position.maxScrollExtent, greaterThan(0.0));
+    injected.jumpTo(0);
+    await settle(tester);
+    expect(injected.position.pixels, 0.0);
+  });
+
+  testWidgets('不注入 chatListScroll（默认档）⇒ 组件自管控制器，行为与改动前一致',
+      (WidgetTester tester) async {
+    setViewport(tester, const Size(1200, 700));
+    await tester.pumpWidget(host(AylaVoiceRoomBody(
+      channelName: '深夜电台',
+      channelId: 'v1',
+      selfUserId: 'self',
+      messages: <AylaVoiceChatMessage>[
+        for (int i = 0; i < 60; i++)
+          AylaVoiceChatMessage(
+              id: 'm$i', senderNickname: '爱莉', content: '第 $i 条消息'),
+      ],
+      onBack: () {},
+      voicePanelBuilder: (bool ownMaterial) => const SizedBox(key: _panelKey),
+    )));
+    await settle(tester);
+
+    // 组件自带控制器（不可见），列表照旧渲染且可滚动
+    final Scrollable scrollable = tester.widget<Scrollable>(
+      find.descendant(
+        of: find.byType(AylaVoiceRoomBody),
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    expect(scrollable.controller, isNotNull,
+        reason: '默认档仍由组件自己提供控制器（纯增量，不改变既有语义）');
+    expect(scrollable.controller!.position.maxScrollExtent, greaterThan(0.0));
+  });
   // ======================= 浮层 / 入场 =======================
 
   testWidgets('窄屏浮层：收起时不可见且不接收指针；展开后高度 300（voice.css 78–124）',
