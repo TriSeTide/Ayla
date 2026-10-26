@@ -21,6 +21,30 @@ const MEDIA_PATH_PREFIX = `${API_PREFIX}/media/`;
  * 现改为两种形态都能提取：相对前缀走快路径，绝对 URL 用**路径段**再兜一次。
  * 只认 `/api/v1/media/<id>` 这一段，避免把任意外部图床误判成内部媒体。
  */
+/// 服务端内部对象存储地址（`S3_ENDPOINT_URL`）——浏览器**不可达**。
+const INTERNAL_STORAGE_PREFIX = /^https?:\/\/127\.0\.0\.1:9000/i;
+
+/**
+ * 把预签名 URL 的**内网 host** 换成浏览器可达的同源前缀。
+ *
+ * ⚠️ **2026-10-27 修复（用户实报「所有图片都不显示」）**：
+ * 媒体走**预签名直连**，后端 `presign_get` 生成的是
+ * `http://127.0.0.1:9000/...`（`S3_ENDPOINT_URL` 的 host）——浏览器连不上。
+ *
+ * **关键：只能在客户端换 host，不能在服务端换。**
+ * 预签名 URL 的 `SignedHeaders=host` ⇒ host 是签名的一部分。而 nginx 的
+ * `/minio/` 反代会把 `Host` 头**固定改回 `127.0.0.1:9000`**（nginx.conf:83），
+ * 所以只要把 URL 的 scheme+host 换成公网前缀、**保留原始 path 与 query（签名）**，
+ * 到 MinIO 那里 Host 仍是 127.0.0.1:9000 ⇒ 验签通过。
+ *
+ * 实测：同一签名 URL 走 `https://<host>/minio/...` 返回 200（85,547 字节）。
+ */
+function toBrowserReachableUrl(url: string): string {
+  if (!INTERNAL_STORAGE_PREFIX.test(url)) return url;
+  // 保留 `/minio` 前缀 + 原始 path/query（签名在此，绝不能动）。
+  return `/minio${url.replace(INTERNAL_STORAGE_PREFIX, "")}`;
+}
+
 function extractMediaId(src: string): string | null {
   if (src.startsWith(MEDIA_PATH_PREFIX)) {
     const match = src.match(/\/media\/([^/]+)\//);
@@ -121,7 +145,7 @@ export function ResourceImage({
 
     if (!mediaId) {
       // 外部资源 / 非媒体路径直接使用
-      setResolvedSrc(src);
+      setResolvedSrc(toBrowserReachableUrl(src));
       return () => {
         cancelled = true;
       };
@@ -131,7 +155,7 @@ export function ResourceImage({
     void getSignedMediaUrlState(mediaId, variant)
       .then((result) => {
         if (!cancelled) {
-          setResolvedSrc(result.url);
+          setResolvedSrc(toBrowserReachableUrl(result.url));
           setOriginalExpired(result.originalExpired);
         }
       })
