@@ -429,10 +429,10 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
     bool senderOnlineOf(String userId) =>
         presenceOnline(presence.users, AylaUserPublic(id: userId));
     session.syncRealtimeToHistory();
-    // 消费会话层的「贴底」请求（见 `AylaLiveRoomSession.pumpScroll` 的根因说明）。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) session.pumpScroll();
-    });
+    // ⚠️ 这里**不再**排帧贴底：消费 `pendingScrollToBottom` 的唯一 owner 是会话内的
+    // `AylaHistoryScrollBinding`（见 `live_support.dart` 的 `danmakuScroll` 注释）。
+    // 旧写法 `addPostFrameCallback(pumpScroll)` 有两个真错：① 页面不重建就没有下一次；
+    // ② `pumpScroll` 先消费后判 `hasClients` ⇒ 列表未挂载时请求被吞（「永不滚底」根因）。
 
     if (listEmpty) {
       return AylaStudioEmpty(
@@ -474,7 +474,7 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         sendError: session.sendError,
         hasNewBelow: session.history?.hasNewer ?? false,
         danmakuController: session.danmakuScroll,
-        onDanmakuScroll: session.handleDanmakuScroll,
+        // `onDanmakuScroll` 不再需要：`AylaHistoryScrollBinding` 已直接监听同一个控制器。
         onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom()),
         history: session.history == null
             ? null

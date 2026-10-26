@@ -19,11 +19,24 @@
 ///    （web `GroupLive.tsx` 复用同一份 `useDanmaku` hook，天然没有该缺口）。
 ///
 /// ## 本文件锁什么
-/// ① 会话层：`pumpScroll` 真的把列表滚到底（消费置位 + 幂等）；
-/// ② 会话层：`handleDanmakuScroll` 距底<40 才继续跟随（上翻即停跟随）；
+/// ## 2026-10-26 第二轮（用户复报「还是不自动滚底」）
+/// 根因升级为**消费时机**问题：
+/// - 旧 `pumpScroll()` **先** `consumeScrollToBottom()` **再**判 `danmakuScroll.hasClients`
+///   ⇒ 进房时列表尚未挂载（loading / 播放器占位）就把贴底请求吃掉，之后无人再触发
+///   ⇒ 「永远不自动滚底，退出重进才好」；
+/// - 且消费挂在**三个页面各自的 build post-frame** 上 ⇒ 页面不重建就没有下一次；
+/// - `scrollDanmakuToBottom()` 的脱挂分支在 `returnLatest()` 后立刻 `jumpTo(max)`，
+///   但此刻本帧布局还是旧高度 ⇒ 跳旧 max（「点了返回最新没反应」）。
+/// ⇒ 现在统一交给 `AylaHistoryScrollBinding`（`widgets/base/history_scroll_binding.dart`）：
+/// 列表未挂载时**保留** pending、贴底后连跟几帧覆盖「旧高度」窗口。
+///
+/// ## 本文件锁什么
+/// ① 会话层：新弹幕 append 后列表真的滚到底（web listRef 语义）；
+/// ② 会话层：距底<40 继续跟随、上翻即停（web `handleScroll`）；
 /// ③ 会话层：`scrollDanmakuToBottom` 未脱挂时直接贴底并重新跟随；
-/// ④ 装配层：三个直播页面都把 controller / onUserScroll / onScrollToBottom 接上；
-/// ⑤ 端到端：图片弹幕帧到达后进入历史窗口（媒体描述符完整）。
+/// ④ 装配层：三个直播页面接线正确，且**不得**再有已废弃的 `pumpScroll` / `onDanmakuScroll`；
+/// ⑤ 端到端：图片弹幕帧到达后进入历史窗口（媒体描述符完整）；
+/// ⑥ **列表尚未挂载时收到 append，挂载后必须自动贴底**（本轮核心回归锁）。
 library;
 
 import 'dart:io';
@@ -135,15 +148,15 @@ Widget _host(AylaLiveRoomSession session, List<AylaDanmakuEntry> items) => Mater
           child: AylaDanmakuList(
             items: items,
             controller: session.danmakuScroll,
-            onUserScroll: session.handleDanmakuScroll,
+            onUserScroll: null,
             onScrollToBottom: () {},
           ),
         ),
       ),
     );
 void main() {
-  group('① 会话层：pumpScroll 真的贴底', () {
-    testWidgets('新弹幕 append 后 pumpScroll 把列表滚到底（web listRef 语义）',
+  group('① 会话层：新弹幕 append 后绑定把列表滚到底', () {
+    testWidgets('新弹幕 append 后列表真的贴底（web listRef 语义）',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(400, 500);
       tester.view.devicePixelRatio = 1.0;
@@ -180,7 +193,7 @@ void main() {
       ));
 
       await tester.pump();
-      session.pumpScroll();
+      // binding 在 history.notify 时已排 postFrame 消费 => pump 一次就贴底
       await tester.pump();
 
       expect(
@@ -191,12 +204,11 @@ void main() {
 
       // 幂等：置位已消费，再 pump 不应再改滚动位置
       final double before = position.pixels;
-      session.pumpScroll();
       await tester.pump();
       expect(position.pixels, moreOrLessEquals(before, epsilon: 0.5));
     });
 
-    testWidgets('未置位（没有新弹幕）时 pumpScroll 不动滚动位置',
+    testWidgets('没有新弹幕时不会无端改滚动位置',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(400, 500);
       tester.view.devicePixelRatio = 1.0;
@@ -217,14 +229,14 @@ void main() {
       session.danmakuScroll.jumpTo(30);
       await tester.pump();
       final double before = session.danmakuScroll.position.pixels;
-      session.pumpScroll();
+      await tester.pump();
       await tester.pump();
       expect(session.danmakuScroll.position.pixels,
           moreOrLessEquals(before, epsilon: 0.5));
     });
   });
 
-  group('② 会话层：handleDanmakuScroll 的跟随判定（距底 < 40）', () {
+  group('② 会话层：following 的跟随判定（距底 < 40，web handleScroll）', () {
     testWidgets('贴底 ⇒ 继续跟随；滚远 ⇒ 停跟随', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(400, 500);
       tester.view.devicePixelRatio = 1.0;
@@ -245,12 +257,10 @@ void main() {
       final ScrollPosition position = session.danmakuScroll.position;
       session.danmakuScroll.jumpTo(position.maxScrollExtent);
       await tester.pump();
-      session.handleDanmakuScroll();
       expect(session.history!.following, isTrue, reason: '贴底 ⇒ 跟随');
 
       session.danmakuScroll.jumpTo(0);
       await tester.pump();
-      session.handleDanmakuScroll();
       expect(session.history!.following, isFalse, reason: '滚远（>40）⇒ 停跟随');
     });
   });
@@ -274,16 +284,21 @@ void main() {
       await tester.pumpAndSettle();
 
       final ScrollPosition position = session.danmakuScroll.position;
+      // 确定性前提：先明确落到底（初值常数 0 时 jumpTo(0) 是 no-op、不会发滚动通知，
+      // 那样本条就会「因为没通知」而假绿）。
+      session.danmakuScroll.jumpTo(position.maxScrollExtent);
+      await tester.pump();
       session.danmakuScroll.jumpTo(0);
       await tester.pump();
-      session.handleDanmakuScroll();
-      expect(session.history!.following, isFalse);
+      expect(session.history!.following, isFalse, reason: '上翻 ⇒ 停跟随');
 
       await session.scrollDanmakuToBottom();
       await tester.pump();
+      await tester.pump();
       expect(position.pixels,
-          moreOrLessEquals(position.maxScrollExtent, epsilon: 0.5));
-      expect(session.history!.following, isTrue);
+          moreOrLessEquals(position.maxScrollExtent, epsilon: 0.5),
+          reason: '未脱挂 ⇒ 直接贴底（web useDanmaku scrollToBottom 的第二档）');
+      expect(session.history!.following, isTrue, reason: '贴底后恢复跟随');
     });
   });
 
@@ -297,6 +312,8 @@ void main() {
       }
     }
 
+    String readText(String path) => _read(path);
+
     test('live_room_page / live_studio_page / group_live_page 三页全接', () {
       const List<String> pages = <String>[
         'lib/pages/live_room_page.dart',
@@ -304,12 +321,22 @@ void main() {
         'lib/pages/group_live_page.dart',
       ];
       for (final String page in pages) {
+        final String text = readText(page);
         expectWired(page, <String>[
           'danmakuController: session.danmakuScroll',
-          'onDanmakuScroll: session.handleDanmakuScroll',
           'onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom())',
-          'session.pumpScroll()',
         ]);
+        // ⚠️ 反向断言：页面**不得**再自己排帧消费贴底（唯一 owner = 会话内的
+        // `AylaHistoryScrollBinding`）。旧的 `addPostFrameCallback(pumpScroll)`
+        // 有两个真错：① 页面不重建就没有下一次；② `pumpScroll` 先消费后判
+        // `hasClients` ⇒ 列表未挂载时请求被吞（「永不滚底」的直接根因）。
+        for (final String banned in <String>[
+          'session.pumpScroll()',
+          'onDanmakuScroll:',
+        ]) {
+          expect(text.contains(banned), isFalse,
+              reason: page + ' 仍留有已废弃接线：' + banned);
+        }
       }
     });
 
@@ -363,6 +390,56 @@ void main() {
       expect(image.mediaId, 'm-big');
       expect(image.media?.mimeType, 'image/gif');
       expect(image.media?.thumbnail, '/api/v1/media/m-big/thumbnail');
+    });
+  });
+
+  // ======================= ⑥ 本轮核心回归锁 =======================
+
+  group('⑥ 列表尚未挂载时收到 append ⇒ 挂载后必须自动贴底（「永不滚底」根因）', () {
+    testWidgets('session.start() 后列表还没挂载：append 的贴底请求不被吞，挂载即贴底',
+        (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(400, 500);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final AylaLiveState live = AylaLiveState();
+      final AylaLiveRoomSession session = _session(live);
+      addTearDown(session.dispose);
+      // start() 里 await Future.delayed(Duration.zero)：fake clock 下必须 runAsync
+      await tester.runAsync(() => session.start());
+      await tester.pump();
+
+      final AylaCursorHistory<AylaLiveDanmaku>? history = session.history;
+      expect(history, isNotNull);
+
+      // ---- 关键：此刻**列表还没挂载**（没有 AylaDanmakuList 在树上）----
+      expect(session.danmakuScroll.hasClients, isFalse,
+          reason: '前提：列表尚未挂载（否则本用例复现不了旧根因）');
+      history!.setFollowing(true);
+      history.append(const AylaLiveDanmaku(
+        id: 'boot1',
+        createdAt: '2026-10-26T10:00:01Z',
+        content: '进房首屏',
+      ));
+      await tester.pump();
+      await tester.pump();
+      // ⚠️ 旧实现（`pumpScroll`）在这一步已经把 pending 消费掉了（先消费后判
+      // `hasClients`）⇒ 下面挂载后永远贴不上底。本断言锁住「不许吞」。
+      expect(history.pendingScrollToBottom, isTrue,
+          reason: '列表未挂载时不得消费 pendingScrollToBottom（这是「永不滚底」的根因）');
+
+      // ---- 列表挂载（足够多的条目撑出可滚高度）----
+      await tester.pumpWidget(_host(session, _many()));
+      await tester.pumpAndSettle();
+
+      final ScrollPosition position = session.danmakuScroll.position;
+      expect(position.maxScrollExtent, greaterThan(0.0),
+          reason: '列表必须可滚（否则本用例无意义）');
+      expect(position.pixels,
+          moreOrLessEquals(position.maxScrollExtent, epsilon: 0.5),
+          reason: '挂载后必须消费掉进房期间的贴底请求并滚到底');
+      expect(history.pendingScrollToBottom, isFalse,
+          reason: '消费后必须清位（避免每帧重复跳）');
     });
   });
 }

@@ -120,7 +120,7 @@ Widget _host(AylaLiveRoomSession s, List<AylaDanmakuEntry> items) => MaterialApp
           child: AylaDanmakuList(
             items: items,
             controller: s.danmakuScroll,
-            onUserScroll: s.handleDanmakuScroll,
+            onUserScroll: null,
             onScrollToBottom: () {},
           ),
         ),
@@ -213,9 +213,12 @@ void main() {
       final ScrollPosition position = session.danmakuScroll.position;
       expect(position.maxScrollExtent, greaterThan(0.0));
 
+      // binding 已监听同一个控制器；确定性前提：先落到底再上翻
+      // （初值常数 0 时 jumpTo(0) 是 no-op、不会发滚动通知）。
+      session.danmakuScroll.jumpTo(position.maxScrollExtent);
+      await tester.pump();
       session.danmakuScroll.jumpTo(0);
       await tester.pump();
-      session.handleDanmakuScroll();
       expect(session.history!.following, isFalse, reason: '上翻后应停跟随');
 
       // 点「有新弹幕」/「返回最新」的实际落点（页面接的就是这个方法）。

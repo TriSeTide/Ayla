@@ -50,6 +50,8 @@ import '../player/hls_player.dart';
 import '../player/platforms/hls_platform.dart';
 import '../state/auth_state.dart' show AylaMediaActivityKind;
 import '../state/cursor_history.dart';
+import '../widgets/base/history_scroll_binding.dart'
+    show AylaHistoryScrollBinding;
 import '../state/live_state.dart';
 import '../state/session_activity_state.dart';
 import '../widgets/live/danmaku.dart' show AylaDanmakuEntry;
@@ -67,10 +69,6 @@ const int kLiveSrsRetryMax = 3;
 
 /// 进房快照写入的预览上限（web `LIVE_VIEWER_PREVIEW` = 12）。
 const int kLiveViewerPreview = 12;
-
-/// 「仍在底部」的容差（web `useCursorHistory.ts:161`：
-/// `scrollHeight - scrollTop - clientHeight < 40`）。
-const double kAylaFollowBottomSlack = 40;
 
 /// 频道详情读取（注入点；默认 [AylaLiveApi.getLiveChannel]）。
 typedef AylaLiveChannelFetcher = Future<AylaLiveChannelSnapshot> Function(
@@ -233,79 +231,68 @@ class AylaLiveRoomSession extends ChangeNotifier {
   }
 
   /// 弹幕列表滚动控制器（页面注入给 [AylaDanmakuList.controller]）。
-
-
   ///
-  /// ## 为什么需要它（2026-10-26 用户实报「发送大图/动图弹幕后列表刷新不出来，
-  /// 必须重进直播间才看得到新弹幕」的**真实根因**）
+  /// ## 为什么需要它（2026-10-26 用户实报「直播间弹幕新消息不自动滚底」+
+  /// 「返回底部和有新消息的跳转不工作」）
   ///
-  /// 数据层三段（WS 帧 → store → history）实测都是通的（会话级探针验证过）。
-  /// 断在**渲染层的贴底跟随**：
-  /// 1. web 由 `useCursorHistory` 自己持 `listRef`，并在 `useLayoutEffect` 里把
-  ///    `list.scrollTop = list.scrollHeight`（`useCursorHistory.ts:66–79`）；
-  ///    Flutter 侧 [AylaCursorHistory.pendingScrollToBottom] **只置位、全仓无消费方**
-  ///    ⇒ 新弹幕进入窗口后列表**永远停在原位**。
-  /// 2. 图片弹幕行（96×64 缩略图 + 昵称）比一行纯文字高得多：连续几条就能把可见区
-  ///    顶满 ⇒ 视觉上「卡住不动」；退出重进会重建列表并贴底 ⇒ 看起来像「重进才刷新」。
-  /// 3. 「有新弹幕 ↓」提示走 `history.hasNewer`，而它是**锁存位**
-  ///    （`cursor_history.dart:296` 只在 !following 或已置位时保持）；页面又没接
-  ///    [AylaDanmakuList.onScrollToBottom]，一旦上翻过就再也回不到最新。
+  /// web 的 `useCursorHistory` **同时持有数据与滚动容器**（`listRef`），并在
+  /// `useLayoutEffect` 里消费 `pendingScroll` 贴底（`useCursorHistory.ts:67–78`）；
+  /// 滚动时用 `handleScroll` 维护 `following`（同文件 159–164）。
   ///
-  /// ⇒ 本控制器是上述缺口的唯一 owner：页面把它交给 [AylaDanmakuList.controller]，
-  /// 并在每帧后用 [pumpScroll] 消费置位；滚动上报走 [handleDanmakuScroll]。
+  /// Flutter 侧 [AylaCursorHistory] 只有数据（`pendingScrollToBottom` 只置位）⇒
+  /// 消费端必须由 owner 提供。此前这里是**手写的 `pumpScroll()`**，有两个真错：
+  /// 1. **先 `consumeScrollToBottom()` 再判 `hasClients`** —— 列表尚未挂载
+  ///    （进房 loading / 播放器占位）时请求被**吞掉**，之后没有任何东西再触发
+  ///    ⇒ 表现为「永远不自动滚底，退出重进才好」；
+  /// 2. 消费时机挂在**页面 build 的 post-frame**（三个页面各写一份）—— 页面不重建
+  ///    就没有下一次消费；且 `returnLatest()` 返回时本帧布局还是旧高度，
+  ///    立刻 `jumpTo(max)` 跳的是旧 max ⇒ 「点了返回最新没反应」。
+  ///
+  /// ⇒ 现在统一交给 [AylaHistoryScrollBinding]（唯一 owner，见该文件头）：
+  /// 它监听 history + controller，列表未挂载时**保留** pending，贴底后连跟几帧
+  /// 覆盖「旧高度」窗口。页面不再需要 `addPostFrameCallback(pumpScroll)`。
   final ScrollController danmakuScroll = ScrollController();
 
-  /// 消费「贴底」请求（web `useCursorHistory.ts:66–79` 的 `useLayoutEffect`）。
-  ///
-  /// 必须在**首帧布局之后**调用（页面用 `addPostFrameCallback`）：
-  /// `position.maxScrollExtent` 只有布局完成才准；新弹幕刚 append、列表还没重建时
-  /// 算出来的 max 仍是旧值。
-  ///
-  /// 只实现「贴底」一档：web 的**上翻续读锚点恢复**（同文件 `anchor` 分支）在本项目
-  /// 没有消费方（弹幕列表只有「贴底跟随」与「有新弹幕 ↓」两档），故不伪造锚点语义。
-  void pumpScroll() {
-    if (!_alive) return;
+  /// 弹幕历史窗口 ↔ 滚动控制器的绑定（web `useCursorHistory` 的 listRef 三件套）。
+  AylaHistoryScrollBinding<AylaLiveDanmaku>? _scrollBinding;
+
+  /// 建 history 后立刻绑定（见 [start]）；重复调用幂等。
+  void _bindScroll() {
     final AylaCursorHistory<AylaLiveDanmaku>? history = _history;
     if (history == null) return;
-    // 用户上翻期间**不打断**（web 同：新弹幕只亮提示，不抢滚动位置）。
-    if (!history.consumeScrollToBottom()) return;
-    if (!danmakuScroll.hasClients) return;
-    danmakuScroll.jumpTo(danmakuScroll.position.maxScrollExtent);
+    _scrollBinding ??= AylaHistoryScrollBinding<AylaLiveDanmaku>(
+      history: history,
+      controller: danmakuScroll,
+    )..bind();
   }
 
-  /// 滚动上报（web `useCursorHistory.ts:159–164` 的 `handleScroll`）：
-  /// 距底 < 40 且窗口未脱挂 ⇒ 继续跟随；否则停跟随（新弹幕只亮「有新弹幕 ↓」）。
-  void handleDanmakuScroll() {
-    final AylaCursorHistory<AylaLiveDanmaku>? history = _history;
-    if (history == null) return;
-    if (!danmakuScroll.hasClients) return;
-    final ScrollPosition position = danmakuScroll.position;
-    final bool atBottom =
-        position.maxScrollExtent - position.pixels < kAylaFollowBottomSlack;
-    history.setFollowing(atBottom);
+  /// 卸载绑定（[dispose] 用；控制器本身也归会话，一并释放）。
+  void _unbindScroll() {
+    _scrollBinding?.dispose();
+    _scrollBinding = null;
   }
 
-  /// 点「有新弹幕 ↓」= web `useDanmaku.ts:63–69` 的 `scrollToBottom`：
+  /// 点「有新弹幕 ↓」= web `useDanmaku.ts:62–67` 的 `scrollToBottom`：
   /// 有更新（窗口脱挂）⇒ 重新读最新一页；否则直接贴底 + 重新跟随。
   Future<void> scrollDanmakuToBottom() async {
     final AylaCursorHistory<AylaLiveDanmaku>? history = _history;
     if (history == null) return;
     if (history.hasNewer) {
-      // 窗口已脱挂：重新读最新一页（成功后 hasNewer 清除、items 替换、并会 notify）。
+      // 窗口已脱挂：重新读最新一页（成功后 hasNewer 清除、items 替换，
+      // 且 `_load(older:false)` 会置 `pendingScrollToBottom`）。
       final bool ok = await history.returnLatest();
       if (!ok || !_alive) return;
-      // ⚠️ 读完必须**主动贴一次底**：`returnLatest` 会置 `pendingScrollToBottom`，
-      // 但页面此刻还没重建、`pumpScroll` 也要等下一帧 ⇒ 这里先消费掉，
-      // 避免用户点完「返回最新」后仍停在旧位置（实报「点击无法跳转出未刷出的弹幕」）。
-      pumpScroll();
-      return;
     }
-    if (danmakuScroll.hasClients) {
-      danmakuScroll.jumpTo(danmakuScroll.position.maxScrollExtent);
-    }
-    handleDanmakuScroll();
+    // ⚠️ 不能在 `returnLatest()` 后立刻手算 `jumpTo(max)`：此刻 items 已换但
+    // **本帧布局仍是旧高度** ⇒ 跳到旧 max、新内容留在视口下方
+    // （用户实报「点了『有新弹幕』还是停在旧位置」）。
+    // `jumpToBottom()` 内部会连跟 [kAylaHistorySettleFrames] 帧，覆盖这个窗口。
+    _scrollBinding?.jumpToBottom();
   }
 
+  /// 列表是否**当前**贴底（web `useCursorHistory.ts:159–164`）。
+  /// 未挂载/未布局 ⇒ `false`（不伪造）。
+  bool get danmakuAtBottom => _scrollBinding?.isAtBottom ?? false;
   bool get sending => _sending;
   String? get sendError => _sendError;
 
@@ -345,6 +332,11 @@ class AylaLiveRoomSession extends ChangeNotifier {
     // ⚠️ **必须**把历史窗口的通知转发到会话本体（本文件 [_relayHistory] 的根因说明）。
     // 漏这一步 ⇒ 数据更新但页面不重绘 ⇒ 「新弹幕不刷」「点返回最新没反应」两个实报。
     _relayHistory();
+    // 绑定滚动控制器：此后「新弹幕贴底」由 binding 独占消费（web useCursorHistory 的
+    // listRef + useLayoutEffect 同构）。⚠️ 必须在 reset() **之前**绑定 ——
+    // reset() 会先置 pendingScrollToBottom（首屏贴底），binding 若晚建就错过那一次
+    // （虽然 binding.bind() 会补排一次消费，但先绑语义更直白）。
+    _bindScroll();
     unawaited(_history!.reset());
 
     // 弹幕 / 在看人数帧 → 状态（web `liveSessionRuntime.ts:194–216`）。
@@ -781,6 +773,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    // 先解绑（它会从 history / danmakuScroll 上摘监听），再释放控制器 ——
+    // 顺序反了会在已 dispose 的 ChangeNotifier 上 removeListener。
+    _unbindScroll();
     // 滚动控制器随**会话实例**终结：`stop()` 可重入（小窗让位后会再 start），
     // 只有 `dispose()` 是终态 —— 在 stop() 里 dispose 会让复用的会话拿到已销毁的控制器。
     danmakuScroll.dispose();

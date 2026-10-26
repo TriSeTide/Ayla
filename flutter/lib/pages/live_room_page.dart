@@ -199,11 +199,10 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     bool senderOnlineOf(String userId) =>
         presenceOnline(presence.users, AylaUserPublic(id: userId));
     session.syncRealtimeToHistory();
-    // 消费会话层的「贴底」请求：必须等**本帧布局完成**（新弹幕已在 items 里，
-    // 但 maxScrollExtent 要下一次布局才更新）—— 见 `AylaLiveRoomSession.pumpScroll`。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) session.pumpScroll();
-    });
+    // ⚠️ 这里**不再**排帧贴底：消费 `pendingScrollToBottom` 的唯一 owner 是会话内的
+    // `AylaHistoryScrollBinding`（见 `live_support.dart` 的 `danmakuScroll` 注释）。
+    // 旧写法 `addPostFrameCallback(pumpScroll)` 有两个真错：① 页面不重建就没有下一次；
+    // ② `pumpScroll` 先消费后判 `hasClients` ⇒ 列表未挂载时请求被吞（「永不滚底」根因）。
     final AylaCursorHistory<AylaLiveDanmaku>? history = session.history;
 
     // 名单弹层的权威数据（web 由弹层自身在打开时拉：`LiveViewerSheet.tsx:44–79`）
@@ -239,7 +238,8 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
         // listRef / handleScroll / scrollToBottom 三件）。此前三件全未接线 ⇒
         // 新弹幕进了窗口但列表不动（2026-10-26 用户实报「大图弹幕后刷新不出来」）。
         danmakuController: session.danmakuScroll,
-        onDanmakuScroll: session.handleDanmakuScroll,
+        // `onDanmakuScroll` 不再需要：`AylaHistoryScrollBinding` 已直接监听同一个
+        // `danmakuScroll`（web `useCursorHistory` 自己持 listRef ⇒ 天然同源）。
         onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom()),
         history: history == null
             ? null

@@ -486,10 +486,8 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     bool senderOnlineOf(String userId) =>
         presenceOnline(presence.users, AylaUserPublic(id: userId));
     session.syncRealtimeToHistory();
-    // 消费「贴底」请求：本帧布局完成后才滚（同 `live_room_page.dart`）。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) session.pumpScroll();
-    });
+    // ⚠️ 这里**不再**排帧贴底：唯一 owner 是会话内的 `AylaHistoryScrollBinding`
+    // （见 `live_support.dart` 的 `danmakuScroll` 注释）。
     // 弹幕历史由会话自己持有（`AylaLiveRoomSession.history`，与一级直播间同源）。
     final AylaCursorHistory<AylaLiveDanmaku>? history = session.history;
     final String selfId = ref.watch(
@@ -538,7 +536,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
         hasNewBelow: history?.hasNewer ?? false,
         // 贴底跟随 + 滚动上报 + 「有新弹幕 ↓」（与一级直播间同源接线）。
         danmakuController: session.danmakuScroll,
-        onDanmakuScroll: session.handleDanmakuScroll,
+        // `onDanmakuScroll` 不再需要：`AylaHistoryScrollBinding` 已直接监听同一个控制器。
         onScrollToBottom: () => unawaited(session.scrollDanmakuToBottom()),
         history: history == null
             ? null
