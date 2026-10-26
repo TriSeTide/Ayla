@@ -114,9 +114,24 @@ Future<void> aylaApplyLoginSession(
     unawaited(container.read(sessionTokenStoreProvider).write(refresh));
   }
   // web `useAuth.login`：connect 两条 WS（`connectAll` 幂等）+ 跑预加载门。
-  wsManager?.connectAll();
+  //
+  // ⚠️ **2026-10-26 修复（用户实报「发弹幕后自己的头像仍显示不在线」）**：
+  // **attach 必须先于 connectAll**。原因：
+  // - `connectAll()` 会让四个通道**立刻开始建连**（异步）；
+  // - 后端 `PresenceConsumer.connect()` 在 accept 后**同步下发两条帧**：
+  //   `presence.self` + `presence.update(status=online)`（实测确认）；
+  // - 而 `_startPresenceWs` 里的 `client.attach(channel)` 才把 `channel.onEvent`
+  //   接上 `_dispatch`。
+  //
+  // 旧顺序是「先把门打开、再装收件箱」⇒ 若 socket 在 attach 之前就绪（本机/局域网
+  // 几乎必然），那两条帧到达时 `onEvent` 仍是 null ⇒ **被静默丢弃** ⇒
+  // `presence.users` 里永远没有「自己」⇒ `presenceOnline` 回退 REST 快照
+  // `user.online`（登录那一刻的值，通常 false）⇒ **自己头像永远灰**。
+  //
+  // 反过来先 attach 再连，`onEvent` 已就位，建连帧不会丢。
   _startChatWs(container);
   _startPresenceWs(container);
+  wsManager?.connectAll();
   // ⚠️ **登录后重装三条帧桥 / 目录订阅通路**（2026-10-20 热更新审计 R1）。
   //
   // 为什么必须在这里补：这三条通路在 `main.dart` 启动期装配一次
@@ -421,9 +436,12 @@ Future<AylaSessionRestoreOutcome> _restoreSessionWithToken(
     final AuthUser me = await AuthApi.me(accessToken: access);
     auth.setUser(me);
     // 与手动登录**完全相同**的副作用链（WS / 预加载门 / 未读 / 更新检查）。
-    wsManager?.connectAll();
+    // ⚠️ attach 必须先于 connectAll（同 [aylaApplyLoginSession] 的说明）：
+    // 建连帧（`presence.self` / `presence.update(online)`）在 accept 后立刻下发，
+    // 若 `onEvent` 还没接上就会被静默丢弃 ⇒ 自己的 presence 记录永远缺失。
     _startChatWs(container);
     _startPresenceWs(container);
+    wsManager?.connectAll();
     unawaited(container.read(badgesProvider).fetch());
     unawaited(AppInit.instance.run(userId: me.id));
     return AylaSessionRestoreOutcome.success;

@@ -178,6 +178,21 @@ class AylaPresenceWsClient {
       if (userId != null && status is String) {
         _presence.setUserStatus(userId, status);
       }
+    } else if (rawType == 'presence.self') {
+      // ⚠️ **2026-10-26 修复（用户实报「发弹幕后自己的头像仍显示不在线」）**：
+      //
+      // 后端 `presence` 组的 `presence.update` **不会发给发送者自己**
+      // （Channels group_send 的既定语义）—— 自己那条走的是 `presence.self`。
+      // 而 `presence.self` 此前**全仓零消费**（web 也只记了 id、没写 store）
+      // ⇒ `presence.users` 里永远没有「自己」⇒ `presenceOnline` 回退 REST 快照
+      // `user.online`（登录那一刻的值，通常 false）⇒ **自己头像永远灰**。
+      //
+      // 语义：能连上 presence 通道即说明自己在线。隐身的「对外离线」由
+      // `display_status.dart` 的 `invisible` 规则兜住，不依赖这里。
+      final String? selfId = _userIdOf(data);
+      if (selfId != null && selfId.isNotEmpty) {
+        _presence.setUser(selfId, 'online');
+      }
     } else if (rawType == 'elysia.profile.updated') {
       // 爱莉 profile 变更（后端 2026-10-25 补齐）：绑定用户 / 启用位变化时，
       // 所有显示爱莉的入口都应更新（会话列表爱莉入口、私聊顶栏、语音面板）。
