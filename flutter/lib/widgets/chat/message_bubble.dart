@@ -613,14 +613,24 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
             onLongPressCancel: _clearLongPress,
             onLongPressUp: _clearLongPress,
             child: AylaAvatarHalo(
-              label: widget.senderAvatarLabel ?? widget.senderName ?? '发送者',
+              // ⚠️ **2026-10-26 修复（用户实报「群成员退出后头像变成『发』字」）**：
+              // 旧回退链是 `senderAvatarLabel ?? senderName ?? '发送者'`。群成员退出后
+              // 他不在 `conversation.members` 里 ⇒ label/name **双双为 null** ⇒ 落到
+              // 字面量「发送者」⇒ 头像取首字 → **「发」**。
+              //
+              // web 口径（`Avatar.tsx:37`）：`label?.trim() || "?"` —— 没有名字就显示
+              // **问号**，而不是拿一个语义占位词去取首字。这里对齐 web（空串触发同一档）。
+              label: widget.senderAvatarLabel ?? widget.senderName ?? '',
               size: 32,
               online: widget.senderOnline,
               user: widget.senderUser,
               userId: widget.senderUserId,
               resourceUrl: widget.senderAvatarUrl,
               onTap: _onSenderTap,
-              semanticLabel: widget.senderName ?? '发送者个人主页',
+              // 语义标签同样不能编造「发送者个人主页」——没有名字时只表达「打开该用户主页」。
+              semanticLabel: widget.senderName == null
+                  ? '打开该用户主页'
+                  : '${widget.senderName} 的个人主页',
             ),
           ),
           )

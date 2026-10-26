@@ -390,9 +390,14 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
         ),
         child: Center(
           child: Text(
-            // 无图时取名字首字（web Avatar 组件同语义）；空串与 null 同样算「无图」
-            avatarSrc == null && effectiveLabel.isNotEmpty
-                ? effectiveLabel.characters.first
+            // 无图时取名字首字（web `Avatar.tsx:37` 同语义：`label?.trim() || "?"`）。
+            // ⚠️ **2026-10-26 修复**：旧版空 label 渲染成空串，而 web 是 `"?"`
+            // ——两处分支不一致（下方有图 fallback 早就用了 '?'）。群成员退出后
+            // 名字取不到时，这里会留一个**纯空圆圈**，与 web 不符。统一为 '?'。
+            avatarSrc == null
+                ? (effectiveLabel.isEmpty
+                    ? '?'
+                    : effectiveLabel.characters.first)
                 : '',
             style: TextStyle(
               fontFamily: AylaFonts.display,

@@ -182,9 +182,14 @@ class AylaAudioEngine {
   void _startLevelTick() {
     _levelTick?.cancel();
     _levelTick = Timer.periodic(kRemoteLevelTick, (_) {
+      // ⚠️ **2026-10-26 性能修复**：`_relay.slotIdentity` 是 **getter**，
+      // 每次访问都会 `Map.unmodifiable` 造一份**新副本**（`relay_client.dart:141`）。
+      // 旧写法在循环**内**逐 slot 访问 ⇒ 房间 N 人就复制 N 次整表（每 100ms 一次）
+      // ⇒ 语音房人多时抖动/掉电平。提到循环外只取一次。
+      final Map<int, String> identities = _relay.slotIdentity;
       final Map<String, double> snapshot = <String, double>{};
       for (final MapEntry<int, double> e in _remotePeak.entries) {
-        final String? identity = _relay.slotIdentity[e.key];
+        final String? identity = identities[e.key];
         if (identity == null || identity.isEmpty) continue;
         snapshot[identity] = e.value.clamp(0.0, 1.0);
       }

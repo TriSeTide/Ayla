@@ -89,6 +89,16 @@ class AylaVoiceSelfState {
 
 /// `.voice-member-row` —— 单个语音成员行（`VoiceMemberRow.tsx:141–218`）。
 class AylaVoiceMemberRow extends StatelessWidget {
+  /// **仅测试用**：暴露电平映射口径（`level → 跳动条百分比`），
+  /// 供回归锁断言「电平变化 ⇒ 条宽变化」，不必依赖私有 `_VoiceVolumeMeter`。
+  ///
+  /// 事实源：web `VoiceMemberRow.tsx:56–63`（`DISPLAY_EXP = 0.4`）。
+  @visibleForTesting
+  static int debugLevelPercent(double level) {
+    final double clamped = level.clamp(0.0, 1.0);
+    return (math.min(1, math.pow(clamped, 0.4)) * 100).round();
+  }
+
   /// 可见文案（web 原文「在频道中」；**开放给调用方**，默认值 = web 文案）。
   final String actionLabel;
   const AylaVoiceMemberRow({
