@@ -202,7 +202,39 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 弹幕历史窗口（页面装配 [AylaHistoryControlsData] 用）。
   AylaCursorHistory<AylaLiveDanmaku>? get history => _history;
 
+  /// 弹幕历史窗口的变更是否已转发给本会话的监听者（幂等守卫）。
+  bool _historyRelayed = false;
+
+  /// 把 [AylaCursorHistory] 的通知**转发到会话本体**。
+  ///
+  /// ## 为什么必须转发（2026-10-26 第二轮实报的真正根因）
+  /// 用户复报「还是刷不出来，而且**已经出现『有新弹幕』和『返回最新消息』，
+  /// 点它们却完全没反应**」—— 这条现象直接锁定根因：
+  ///
+  /// `AylaCursorHistory` 是 `ChangeNotifier`，`returnLatest()` / `append()` 都会
+  /// `notifyListeners()`，**但三个直播页面全都没有 `addListener` 它**
+  /// （页面只监听 `_session` / `_directory` / `_viewerSheet`）。
+  /// ⇒ 数据确实更新了，**却没有任何人触发重绘** ⇒ 界面永远停在旧快照上：
+  /// 1. 新弹幕 append 后列表不动（`hasNewer` 还亮起，因为那一次 notify 也没人接）；
+  /// 2. 点「返回最新消息」→ `returnLatest()` 成功、`items` 已替换、`hasNewer` 已清，
+  ///    **但页面不重建** ⇒ 视觉上「点了没反应」，且提示条因为不重绘而仍挂在那里。
+  ///
+  /// 转发到会话本体即可：页面本来就 `_session.addListener(_onChanged)`，
+  /// 一处转发同时喂饱三个页面（一级直播间 / 开播控制台 / 群内直播）。
+  void _relayHistory() {
+    final AylaCursorHistory<AylaLiveDanmaku>? history = _history;
+    if (history == null || _historyRelayed) return;
+    _historyRelayed = true;
+    history.addListener(_onHistoryChanged);
+  }
+
+  void _onHistoryChanged() {
+    if (!_disposed) notifyListeners();
+  }
+
   /// 弹幕列表滚动控制器（页面注入给 [AylaDanmakuList.controller]）。
+
+
   ///
   /// ## 为什么需要它（2026-10-26 用户实报「发送大图/动图弹幕后列表刷新不出来，
   /// 必须重进直播间才看得到新弹幕」的**真实根因**）
@@ -259,7 +291,13 @@ class AylaLiveRoomSession extends ChangeNotifier {
     final AylaCursorHistory<AylaLiveDanmaku>? history = _history;
     if (history == null) return;
     if (history.hasNewer) {
-      await history.returnLatest();
+      // 窗口已脱挂：重新读最新一页（成功后 hasNewer 清除、items 替换、并会 notify）。
+      final bool ok = await history.returnLatest();
+      if (!ok || !_alive) return;
+      // ⚠️ 读完必须**主动贴一次底**：`returnLatest` 会置 `pendingScrollToBottom`，
+      // 但页面此刻还没重建、`pumpScroll` 也要等下一帧 ⇒ 这里先消费掉，
+      // 避免用户点完「返回最新」后仍停在旧位置（实报「点击无法跳转出未刷出的弹幕」）。
+      pumpScroll();
       return;
     }
     if (danmakuScroll.hasClients) {
@@ -304,6 +342,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
       idOf: (AylaLiveDanmaku item) => item.id,
       createdAtOf: (AylaLiveDanmaku item) => item.createdAt,
     );
+    // ⚠️ **必须**把历史窗口的通知转发到会话本体（本文件 [_relayHistory] 的根因说明）。
+    // 漏这一步 ⇒ 数据更新但页面不重绘 ⇒ 「新弹幕不刷」「点返回最新没反应」两个实报。
+    _relayHistory();
     unawaited(_history!.reset());
 
     // 弹幕 / 在看人数帧 → 状态（web `liveSessionRuntime.ts:194–216`）。
@@ -689,6 +730,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
     _ws.disconnect();
     _clearSrsRetry();
     _playerAttached = false;
+    _history?.removeListener(_onHistoryChanged);
+    _historyRelayed = false;
     _history?.dispose();
     _history = null;
     _renderedFrameIds.clear();
@@ -729,7 +772,16 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 映射写在页面层（不在 `AylaLiveDanmaku` 上开 `toEntry`）：数据投影在 `core/api`、
   /// 展示投影 `AylaDanmakuEntry` 在 `widgets/live` ⇒ 由页面做跨层映射，
   /// 避免 `core/api` 反向依赖渲染类型。
-  List<AylaDanmakuEntry> danmakuEntries({bool senderOnline = false}) {
+  /// [senderOnlineOf]：弹幕发送者的**实时**在线判定（页面注入 presence 求值器）。
+  ///
+  /// ⚠️ 2026-10-26 第二轮实报修复：此前签名是 `bool senderOnline = false` 且
+  /// **三个页面都不传** ⇒ 所有弹幕头像恒为灰环（用户原话「头像的在线光环也不是
+  /// 正常显示在线的」）。web 口径 `DanmakuList.tsx:40–46` 是逐条用 presence store
+  /// 实时求值（`presenceOnline(users, withLiveStatus(statuses, senderUser))`），
+  /// 不是一个静态 bool ⇒ 改为按 userId 求值的注入点。
+  List<AylaDanmakuEntry> danmakuEntries({
+    bool Function(String userId)? senderOnlineOf,
+  }) {
     final List<AylaLiveDanmaku> source = _history?.items ?? _live.danmaku;
     return <AylaDanmakuEntry>[
       for (final AylaLiveDanmaku item in source)
@@ -738,7 +790,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
           senderNickname: item.senderNickname,
           senderUserId: item.senderUserId,
           senderAvatarUrl: item.senderAvatar,
-          senderOnline: senderOnline,
+          senderOnline:
+              senderOnlineOf?.call(item.senderUserId) ?? false,
           content: item.content,
           mediaId: item.mediaId,
           media: item.media,

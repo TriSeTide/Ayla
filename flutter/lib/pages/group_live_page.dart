@@ -44,6 +44,10 @@ import '../core/api/directory_page.dart' show AylaDirectoryPage;
 import '../layout/create_sheet_forms.dart'
     show AylaCreateLiveChannelFn, AylaOwnedLivePageRequest, AylaOwnedLivePicker;
 import '../state/cursor_history.dart';
+import '../state/display_status.dart' show presenceOnline;
+import '../core/models/user_public.dart' show AylaUserPublic;
+import '../state/presence_providers.dart' show presenceStateProvider;
+import '../state/presence_state.dart' show AylaPresenceState;
 import '../state/live_state.dart';
 import '../state/directory_events.dart' show AylaDirectoryKind;
 import '../state/directory_store.dart'
@@ -477,6 +481,10 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
     // `danmakuEntries()` 读的是历史窗口（`_history?.items ?? store`），而历史窗口
     // 只在 `syncRealtimeToHistory()` 里被 WS 帧喂 ⇒ 不调它，**群内直播的实时弹幕
     // 永远不出现**（web `GroupLive.tsx` 复用 `useDanmaku`，同一份 hook 自带该同步）。
+    // 弹幕头像实时在线（同 `live_room_page.dart`；web DanmakuList.tsx:40–46）。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
+    bool senderOnlineOf(String userId) =>
+        presenceOnline(presence.users, AylaUserPublic(id: userId));
     session.syncRealtimeToHistory();
     // 消费「贴底」请求：本帧布局完成后才滚（同 `live_room_page.dart`）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -524,7 +532,7 @@ class _GroupLivePageState extends ConsumerState<GroupLivePage> {
               avatar: viewer.avatar,
             ),
         ],
-        danmaku: session.danmakuEntries(),
+        danmaku: session.danmakuEntries(senderOnlineOf: senderOnlineOf),
         sending: session.sending,
         sendError: session.sendError,
         hasNewBelow: history?.hasNewer ?? false,

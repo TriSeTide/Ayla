@@ -20,7 +20,11 @@ import 'package:go_router/go_router.dart';
 import '../core/api/live_api.dart';
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../state/auth_state.dart';
+import '../state/display_status.dart' show presenceOnline;
 import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
+import '../core/models/user_public.dart' show AylaUserPublic;
+import '../state/presence_providers.dart' show presenceStateProvider;
+import '../state/presence_state.dart' show AylaPresenceState;
 import '../state/chat_providers.dart'
     show chatWsProvider, elysiaProfileProvider;
 import '../state/cursor_history.dart';
@@ -186,6 +190,14 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
     final String? selfId = ref.watch(
       authNotifierProvider.select((AuthState s) => s.user?.id),
     );
+    // 弹幕头像的**实时在线**判定（web `DanmakuList.tsx:40–46` 的
+    // `presenceOnline(users, withLiveStatus(statuses, senderUser))`）。
+    // 实报「头像的在线光环也不是正常显示在线的」：此前页面不传 `senderOnline` ⇒
+    // `danmakuEntries()` 的默认 false 让所有弹幕头像恒灰环。
+    // presence store 在 Riverpod 域 ⇒ 页面 watch 后把纯取值器注给会话。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
+    bool senderOnlineOf(String userId) =>
+        presenceOnline(presence.users, AylaUserPublic(id: userId));
     session.syncRealtimeToHistory();
     // 消费会话层的「贴底」请求：必须等**本帧布局完成**（新弹幕已在 items 里，
     // 但 maxScrollExtent 要下一次布局才更新）—— 见 `AylaLiveRoomSession.pumpScroll`。
@@ -219,7 +231,7 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
               avatar: viewer.avatar,
             ),
         ],
-        danmaku: session.danmakuEntries(),
+        danmaku: session.danmakuEntries(senderOnlineOf: senderOnlineOf),
         sending: session.sending,
         sendError: session.sendError,
         hasNewBelow: history?.hasNewer ?? false,

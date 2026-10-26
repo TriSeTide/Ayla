@@ -32,7 +32,11 @@ import '../core/media/media_actions.dart' show AylaMediaActions;
 import '../core/models/conversation.dart' show AylaConversationSummary;
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../state/auth_state.dart';
+import '../state/display_status.dart' show presenceOnline;
 import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
+import '../core/models/user_public.dart' show AylaUserPublic;
+import '../state/presence_providers.dart' show presenceStateProvider;
+import '../state/presence_state.dart' show AylaPresenceState;
 import '../state/chat_providers.dart'
     show chatWsProvider, elysiaProfileProvider;
 import '../state/live_state.dart';
@@ -420,6 +424,10 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         !directory.hasMore &&
         directory.items.isEmpty;
 
+    // 弹幕头像实时在线（同 `live_room_page.dart` 的说明；web DanmakuList.tsx:40–46）。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
+    bool senderOnlineOf(String userId) =>
+        presenceOnline(presence.users, AylaUserPublic(id: userId));
     session.syncRealtimeToHistory();
     // 消费会话层的「贴底」请求（见 `AylaLiveRoomSession.pumpScroll` 的根因说明）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -461,7 +469,7 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
         ],
         // 权威名单（web 弹层打开时自拉；Flutter 侧由页面持有、经本投影注入）
         viewerSheet: viewerSheet.value,
-        danmaku: session.danmakuEntries(),
+        danmaku: session.danmakuEntries(senderOnlineOf: senderOnlineOf),
         sending: session.sending,
         sendError: session.sendError,
         hasNewBelow: session.history?.hasNewer ?? false,
