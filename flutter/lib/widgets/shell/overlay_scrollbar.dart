@@ -15,6 +15,18 @@
 /// （`pointerdown → setPointerCapture`，`pointermove` 把拾取点换算成 `scrollTop/scrollLeft`，
 /// `pointerup/cancel` 结束并按悬停语义重新计时）；窄屏/窗口 resize 时清掉可见态避免几何过期
 ///
+/// ## 反向列表（`reverse: true`）—— Flutter 相对 web 的**语义差**
+/// web 的 `el.scrollTop / el.scrollLeft` **永远以视觉起点为 0**（DOM 语义：竖 0 = 顶、
+/// 横 0 = 左），所以 OverlayScrollbar.tsx 的 `top = scrollTop / (scrollHeight − track) × maxTop`
+/// （tsx 172 / 186）天然就是「从视觉起点起算」，tsx 侧**不需要**任何反向处理。
+/// Flutter 不同：`ScrollPosition.pixels` 的 **0 点由 `axisDirection` 决定** ——
+/// `AxisDirection.up` / `left`（`ListView(reverse: true)` 产生的方向）下 0 在**视觉末端**
+/// （底部 / 右端）⇒ 同一比值会被画成镜像，整条滚反。
+/// ⚠️ 判据必须用 `axisDirection`，**不能**用 `axis`：`AxisDirection.up` 的 `axis` 仍是
+/// `Axis.vertical`。归一口径：先把 `pixels` 折成「距视觉起点」的比例 `f`，再套 web 公式；
+/// 拖拽反算（`递进比例 → pixels`）同样镜像（tsx 133 / 139 的正比映射在反向时取 `1 − f`）。
+/// 差异**只在共享件内消化**，调用点与 `reverse` 语义都不改。
+///
 /// ## 机制差异
 /// web 是**文档级事件委托**（`document` 的 scroll(capture)/mouseover/mouseout + `window.resize`），
 /// thumb 挂在 `body` 上（React 树之外），用 `getBoundingClientRect` 取视口坐标。Flutter 没有
@@ -96,6 +108,20 @@ class AylaOverlayScrollbar extends StatefulWidget {
   @override
   State<AylaOverlayScrollbar> createState() => _AylaOverlayScrollbarState();
 }
+
+/// 该滚动位置的 `pixels` **0 点是否在视觉末端**（即 `reverse: true` 产生的方向）。
+///
+/// web 无此概念：DOM 的 `scrollTop`/`scrollLeft` 恒以视觉起点为 0（OverlayScrollbar.tsx
+/// 全程直接用 `el.scrollTop / (el.scrollHeight − track)`，tsx 172 / 186）。
+/// Flutter 的 0 点由 [ScrollPosition.axisDirection] 决定：
+/// - `AxisDirection.down` / `AxisDirection.right` ⇒ 0 = 视觉起点（顶 / 左），与 web 同义；
+/// - `AxisDirection.up` / `AxisDirection.left` ⇒ 0 = 视觉末端（底 / 右）⇒ 位置与拖拽都要镜像。
+///
+/// ⚠️ **不能**用 `axis` 判断：`AxisDirection.up` 的 `axis` 依旧是 `Axis.vertical`
+/// （`AylaMessageList` 的 `ListView.builder(reverse: true)`，message_list.dart:1012）。
+bool _isReversed(ScrollPosition p) =>
+    p.axisDirection == AxisDirection.up ||
+    p.axisDirection == AxisDirection.left;
 
 /// 单个滚动容器的 thumb 状态（web 的 `WeakMap<Element, thumb>` + 三个 Set 的等价）。
 class _ThumbState {
@@ -214,9 +240,15 @@ class _AylaOverlayScrollbarState extends State<AylaOverlayScrollbar> {
                 .roundToDouble()
                 .clamp(AylaOverlayScrollbar.minHorz, double.infinity);
     final double maxOffset = track - visual;
+    // web tsx 172 / 186：位置只取「已滚比例」，本身不含方向语义，值域 [0, 1]。
+    final double progress = p.pixels / p.maxScrollExtent;
+    // 反向列表（`reverse: true` ⇒ axisDirection.up/left）：`pixels = 0` 在**视觉末端**，
+    // 同一比例必须取补，否则 thumb 整体镜像（宽屏群聊「滚反了」的根因）。
+    // 正向列表 `_isReversed == false` ⇒ `fraction === progress`，与 web 逐位一致。
+    final double fraction = _isReversed(p) ? 1 - progress : progress;
     final double pos = maxOffset <= 0
         ? 0
-        : (p.pixels / p.maxScrollExtent * maxOffset).roundToDouble();
+        : (fraction * maxOffset).roundToDouble();
 
     t.rect = vertical
         ? Rect.fromLTWH(
@@ -409,7 +441,12 @@ class _AylaOverlayScrollbarState extends State<AylaOverlayScrollbar> {
     // 曾经漏掉「抓取时的条起点」这一项，退化成 `位移 + PAD` ⇒ 一拖就从轨道起点重新算，
     // 表现为「抓着中间的条一拖就跳到顶部附近」（2026-09-25 由 overlay_scrollbar_test 实测抓出）。
     final double moved = (_grabBarTop + (raw - _grabOffset)).clamp(0.0, maxOffset);
-    t.position.jumpTo(moved / maxOffset * t.position.maxScrollExtent);
+    // web tsx 133 / 139 是正比映射 `scroll = (top / maxTop) × maxScroll`；
+    // 反向列表须把「距视觉起点的比例」折回「距视觉末端的 pixels」，否则拖拽方向与
+    // thumb 移动方向相反 —— 滚条位置修好了、拖起来却还是反的。
+    final double fraction = moved / maxOffset;
+    final double progress = _isReversed(t.position) ? 1 - fraction : fraction;
+    t.position.jumpTo(progress * t.position.maxScrollExtent);
     _update(t);
   }
 

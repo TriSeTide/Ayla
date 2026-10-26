@@ -12,6 +12,11 @@
 /// · 拖拽换算（tsx 110–152）：`top = 抓取时的条起点 + 指针位移`，两端夹紧；
 /// · 机制差异（tsx 89–94 / 229–234）：容器失效后清掉 thumb、其它容器滚动时统一重算
 ///   （Flutter 没有 document 级 scroll，等价物是「收到任意滚动通知即重算其余活跃容器」）；
+/// · **反向列表**（`reverse: true` ⇒ `axisDirection.up`/`left`）：Flutter 的 `pixels` 0 点在
+///   **视觉末端**（底/右），而 web 的 `scrollTop`/`scrollLeft` 恒以**视觉起点**为 0
+///   （tsx 172/186 直接拿它算位置）⇒ 本件必须按 `axisDirection` 归一：`pixels=0` ⇒ 条贴视觉末端、
+///   `pixels=max` ⇒ 条贴视觉起点；拖拽反算同步镜像（tsx 133/139 的正比映射取补）。
+///   这条差异源自 `AylaMessageList` 的 `ListView.builder(reverse: true)`（message_list.dart:1012）。
 /// · 其余：窄屏 ≤768 完全不显示（tsx 42/64 + base.css 412–415）、`enabled: false` 透传、
 ///   内容不可滚不出条（tsx 161–166）、reduced-motion 无过渡（base.css 417–419）、
 ///   零占位（不挤占内容宽度）。
@@ -79,10 +84,14 @@ void main() {
     Axis axis = Axis.vertical,
     int items = 40,
     double itemExtent = 50,
+    bool reverse = false,
   }) {
     return ListView.builder(
       controller: controller,
       scrollDirection: axis,
+      // `reverse: true` 是 AylaMessageList 的锚定手段（message_list.dart:1012）：
+      // 让 `pixels` 的 0 点落在**视觉末端**，本组用例锁这条语义差的归一。
+      reverse: reverse,
       itemExtent: itemExtent,
       itemCount: items,
       padding: EdgeInsets.zero,
@@ -622,6 +631,172 @@ void main() {
 
     expect(controller.position.maxScrollExtent, 0);
     expect(thumb(), findsNothing);
+  });
+
+  // ============ 反向列表（`reverse: true` ⇒ axisDirection.up/left）============
+
+  /// web 侧无此分支：`scrollTop`/`scrollLeft` **恒以视觉起点为 0**（tsx 172 / 186 直接拿它
+  /// 算位置），所以 OverlayScrollbar.tsx 不需要任何反向处理。Flutter 的 `pixels` 0 点由
+  /// `axisDirection` 决定：`up`/`left` ⇒ 0 在视觉末端（底/右）。
+  /// 本组用例锁住「归一后与正向列表同义」：`pixels = 0` 条贴视觉末端、
+  /// `pixels = max` 条贴视觉起点，且中间位置的首项公式与 web 完全一致。
+  group('反向列表（reverse: true / axisDirection.up·left）', () {
+    testWidgets('竖向反列表：pixels=0 ⇒ 贴视觉底；pixels=max ⇒ 贴视觉顶（与正向列表对照）',
+        (WidgetTester tester) async {
+      pinView(tester);
+      final ScrollController controller = ScrollController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(shell(list(controller: controller, reverse: true)));
+      await tester.pump();
+
+      // 自检测试前提：与正向用例同一套度量（40 × 50 / 视口 320）
+      expect(controller.position.viewportDimension, 320);
+      expect(controller.position.maxScrollExtent, 1680);
+      // 前提：确实是反向方向（`reverse: true` ⇒ up，而非靠 axis 猜测）
+      expect(controller.position.axis, Axis.vertical);
+      expect(controller.position.axisDirection, AxisDirection.up);
+
+      final Rect host = hostRect(tester);
+
+      // ① 先滚到中间：jumpTo(0) 在已处于 0 时是 no-op，不派发滚动通知 ⇒ 条不会建出来
+      controller.jumpTo(840);
+      await tester.pump();
+      // 首项公式与正向一致：max(28, round(320²/2000)) = 51；
+      // 中间位置取补后同样是「已滚一半」⇒ 与正向用例同一落点 135
+      final double len = expectedLen(track: 320, scrollSize: 2000);
+      expect(len, 51);
+      final Rect mid = tester.getRect(bar());
+      expect(mid.top, closeTo(host.top + 135, 0.001));
+      expect(mid.height, closeTo(51, 0.001));
+
+      // ② pixels = 0 **就是视觉底部**（reverse 的锚定语义）⇒ 条必须贴底
+      controller.jumpTo(0);
+      await tester.pump();
+      expect(controller.position.pixels, 0);
+      final Rect atZero = tester.getRect(bar());
+      expect(atZero.top, closeTo(host.top + 269, 0.001)); // 320 − 51
+      expect(atZero.bottom, closeTo(host.bottom, 0.001)); // 贴视觉底
+
+      // ③ pixels = maxScrollExtent **是视觉顶部** ⇒ 条必须贴顶
+      controller.jumpTo(1680);
+      await tester.pump();
+      expect(controller.position.pixels, 1680);
+      final Rect atMax = tester.getRect(bar());
+      expect(atMax.top, closeTo(host.top, 0.001)); // 贴视觉顶
+      expect(atMax.bottom, closeTo(host.top + 51, 0.001));
+      // 镜像不是「同一条停住」：两端位置必须真的相差 269
+      expect((atMax.top - atZero.top).abs(), closeTo(269, 0.001));
+    });
+
+    // 对照基准 = 正向列表同一组 pixels 的落点（web 语义，tsx 172）：
+    // pixels 0 ⇒ 顶 0 · 中点 ⇒ 135 · max ⇒ 底 269。正列表这三条由上文
+    // 「滚动出条」「两端夹紧」两条用例锁死，本条把同一组数值搬到反向列表上取补。
+    // ⚠️ 两条用例分开跑是刻意的：同一 testWidgets 里二次 pumpWidget 换
+    //    `previewScope` 会拿不到新的 ScrollPosition（实测：'not attached'）。
+    testWidgets('对照：反向列表的落点 = 正向列表落点的补（0↔269、135 不变）',
+        (WidgetTester tester) async {
+      pinView(tester);
+      final ScrollController controller = ScrollController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(shell(list(controller: controller, reverse: true)));
+      await tester.pump();
+
+      final Rect host = hostRect(tester);
+      final double max = controller.position.maxScrollExtent;
+      expect(max, 1680); // 与正向用例同一套度量
+
+      controller.jumpTo(max / 2); // 先让条建出来（jumpTo(0) 在 0 时是 no-op）
+      await tester.pump();
+      expect(tester.getRect(bar()).top - host.top, closeTo(135, 0.001));
+
+      controller.jumpTo(0);
+      await tester.pump();
+      // 正向列表此处是 0（贴顶）；反向列表必须取补 ⇒ 269（贴底）
+      expect(tester.getRect(bar()).top - host.top, closeTo(269, 0.001));
+
+      controller.jumpTo(max);
+      await tester.pump();
+      // 正向列表此处是 269（贴底）；反向列表必须取补 ⇒ 0（贴顶）
+      expect(tester.getRect(bar()).top - host.top, closeTo(0, 0.001));
+    });
+
+    testWidgets('横向反列表（axisDirection.left）：pixels=0 ⇒ 贴视觉右端；max ⇒ 贴左端',
+        (WidgetTester tester) async {
+      pinView(tester);
+      final ScrollController controller = ScrollController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        shell(
+          list(
+            controller: controller,
+            axis: Axis.horizontal,
+            items: 40,
+            itemExtent: 80,
+            reverse: true,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(controller.position.viewportDimension, 420);
+      expect(controller.position.maxScrollExtent, 2780);
+      expect(controller.position.axis, Axis.horizontal);
+      expect(controller.position.axisDirection, AxisDirection.left);
+
+      final Rect host = hostRect(tester);
+      final double len = expectedLen(track: 420, scrollSize: 3200, vertical: false);
+      expect(len, 55);
+      const double maxLeft = 420 - 55; // 365
+
+      controller.jumpTo(1390); // 先让条建出来
+      await tester.pump();
+      controller.jumpTo(0); // 视觉右端
+      await tester.pump();
+      final Rect atZero = tester.getRect(bar());
+      expect(atZero.left, closeTo(host.left + maxLeft, 0.001));
+      expect(atZero.right, closeTo(host.right, 0.001));
+
+      controller.jumpTo(2780); // 视觉左端
+      await tester.pump();
+      expect(tester.getRect(bar()).left, closeTo(host.left, 0.001));
+    });
+
+    testWidgets('拖拽同步镜像：反向列表里条往下拖 ⇒ 内容朝视觉下方（pixels 减小）',
+        (WidgetTester tester) async {
+      pinView(tester);
+      final ScrollController controller = ScrollController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(shell(list(controller: controller, reverse: true)));
+      await tester.pump();
+
+      controller.jumpTo(840); // 条起点 135（与正向用例同落点）
+      await tester.pump();
+
+      final TestGesture gesture = await grabThumb(tester);
+      await gesture.moveBy(const Offset(0, 60)); // 条下移 60 ⇒ 起点 195
+      await tester.pump();
+
+      // web tsx 133 的正比映射在反向列表取补：
+      // fraction = 195/269 ⇒ pixels = (1 − 195/269) × 1680 = 462.156…
+      // ⚠️ 若漏掉镜像，这里会得到 1217.84（= 正向列表同一手势的值）⇒ 拖拽方向与位置相反。
+      expect(controller.position.pixels, closeTo(462.1561338289963, 0.01));
+      expect(
+        tester.getRect(bar()).top,
+        closeTo(hostRect(tester).top + 195, 0.001),
+      );
+      await gesture.up();
+      await tester.pump();
+
+      // 拖到视觉顶 ⇒ pixels 归 max（不是 0）
+      controller.jumpTo(840);
+      await tester.pump();
+      final TestGesture up = await grabThumb(tester);
+      await up.moveBy(const Offset(0, -500));
+      await tester.pump();
+      expect(controller.position.pixels, 1680);
+      await up.up();
+      await tester.pump();
+    });
   });
 
   // ======================= 机制差异（platform semantics）=======================
