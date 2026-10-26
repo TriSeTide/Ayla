@@ -95,6 +95,11 @@ class AylaAudioEngine {
 
   /// 远端实时音量累积（slot → 峰值），每 tick 输出一次全量快照。
   final Map<int, double> _remotePeak = <int, double>{};
+
+  /// 本地麦克风最近峰值（web `wsRelayRoom.ts:456` 的 `localPeak`）。
+  ///
+  /// 由采集帧更新、由 [_startLevelTick] 采样并衰减 ⇒ 与远端同一节奏输出。
+  double _localPeak = 0;
   Timer? _levelTick;
 
   /// 统计。
@@ -178,23 +183,39 @@ class AylaAudioEngine {
   void setRemoteVolume(String userId, double volume) =>
       _relay.setRemoteVolume(userId, volume);
 
-  /// 远端成员实时音量快照（web 的 `onRemoteAudioLevels` 输出）。
+  /// 电平衰减系数（web `wsRelayRoom.ts:461/470` 的 `*= 0.6`）。
+  ///
+  /// ⚠️ **这是「波动感」的核心**，不是性能细节：峰值被采样后逐 tick 衰减，形成
+  /// 自然起伏；若直接归零（旧实现 `_remotePeak.clear()`），只会在**恰好有音频帧**
+  /// 的那一 tick 闪现一下就归 0 ⇒ 视觉上「完全不跳」。
+  static const double _kLevelDecay = 0.6;
+
+  /// 远端成员实时音量快照 + 本地电平（web `wsRelayRoom.ts:455–471` 的 100ms tick）。
   void _startLevelTick() {
     _levelTick?.cancel();
     _levelTick = Timer.periodic(kRemoteLevelTick, (_) {
-      // ⚠️ **2026-10-26 性能修复**：`_relay.slotIdentity` 是 **getter**，
-      // 每次访问都会 `Map.unmodifiable` 造一份**新副本**（`relay_client.dart:141`）。
-      // 旧写法在循环**内**逐 slot 访问 ⇒ 房间 N 人就复制 N 次整表（每 100ms 一次）
-      // ⇒ 语音房人多时抖动/掉电平。提到循环外只取一次。
+      // ⚠️ `_relay.slotIdentity` 是 **getter**，每次访问 `Map.unmodifiable` 造新副本
+      //（`relay_client.dart:141`）⇒ 循环内逐 slot 取会复制 N 次整表。提到循环外。
       final Map<int, String> identities = _relay.slotIdentity;
       final Map<String, double> snapshot = <String, double>{};
       for (final MapEntry<int, double> e in _remotePeak.entries) {
+        if (e.key == _relay.mySlot) continue; // web `if (slot === mySlot) continue`
         final String? identity = identities[e.key];
         if (identity == null || identity.isEmpty) continue;
         snapshot[identity] = e.value.clamp(0.0, 1.0);
+        // web：采样后衰减（不是清零）——下一 tick 起按 0.6 倍回落。
+        _remotePeak[e.key] = (e.value * _kLevelDecay).clamp(0.0, 1.0);
       }
-      _remotePeak.clear();
+      // 已不再出现在 `_remotePeak` 里的 slot 自然收不到值 ⇒ 上层按「缺失 = 0」处理
+      //（`setRemoteAudioLevels` 对快照里没有的成员归 0），无需在这里 clear。
       _events.onRemoteAudioLevels?.call(snapshot);
+
+      // 本地电平：未开麦恒 0（契约：未开麦连续回调 0），开麦用最近峰值并衰减。
+      // web `wsRelayRoom.ts:458–463`。旧实现直接转发原始 peak（无衰减、无开麦门控）
+      // ⇒ 未开麦时也会残留旧值，开麦时跳动生硬。
+      final double local = _micEnabled ? _localPeak : 0;
+      _events.onLocalLevel?.call(local.clamp(0.0, 1.0));
+      _localPeak *= _kLevelDecay;
     });
   }
 
@@ -269,7 +290,13 @@ class AylaAudioEngine {
       final double a = (samples[i] / 32768.0).abs();
       if (a > peak) peak = a;
     }
-    _events.onLocalLevel?.call(peak.clamp(0.0, 1.0));
+    // ⚠️ **2026-10-26 修复（用户实报「听得见声音但音频条完全不跳动」）**：
+    // web 的口径是「**记录峰值 → 100ms tick 统一衰减上报**」
+    //（`wsRelayRoom.ts:458–463`：`events.onLocalAudioLevel(micEnabled ? localPeak : 0)`
+    //  然后 `localPeak *= 0.6`）。这里此前是**每帧直接上报原始 peak**（无衰减、
+    // 无开麦门控），且与 tick 里的远端快照不同步 ⇒ 视觉上条子几乎不动。
+    // 改为只记录峰值，由 [_startLevelTick] 统一衰减输出（与远端同一节奏）。
+    if (peak > _localPeak) _localPeak = peak;
     final bool nowSpeaking = _speaking ? peak > kSpeakingOff : peak > kSpeakingOn;
     if (nowSpeaking != _speaking) {
       _speaking = nowSpeaking;

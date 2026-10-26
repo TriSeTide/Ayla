@@ -50,4 +50,41 @@ void main() {
       expect(a, greaterThan(0));
     });
   });
+
+  group('电平衰减（web wsRelayRoom.ts:461/470 的 *= 0.6）', () {
+    /// 复刻 tick 的衰减语义：采样 → 上报 → 乘 0.6 回落。
+    List<double> simulate(List<double> peaks) {
+      const double decay = 0.6;
+      double cur = 0;
+      final List<double> out = <double>[];
+      for (final double p in peaks) {
+        if (p > cur) cur = p;
+        out.add(cur);
+        cur *= decay;
+      }
+      return out;
+    }
+
+    test('★ 有峰值后逐 tick 衰减，而不是立刻归零（这是「波动感」的来源）', () {
+      final List<double> out = simulate(<double>[0.8, 0, 0, 0]);
+      expect(out[0], 0.8, reason: '第一 tick 采样到峰值');
+      expect(out[1], closeTo(0.48, 1e-9), reason: '衰减 0.6 倍，不是 0');
+      expect(out[2], closeTo(0.288, 1e-9));
+      expect(out[3], closeTo(0.1728, 1e-9));
+      expect(out[1], greaterThan(0), reason: '★ 直接归零会让条子「完全不跳」');
+    });
+
+    test('★ 连续峰值时取较大者（不会因衰减丢失更大音量）', () {
+      final List<double> out = simulate(<double>[0.3, 0.9, 0.1]);
+      expect(out[1], 0.9);
+    });
+
+    test('★ 静音静置后最终趋近 0（不会永久残留）', () {
+      double cur = 1.0;
+      for (int i = 0; i < 20; i += 1) {
+        cur *= 0.6;
+      }
+      expect(cur, lessThan(0.001));
+    });
+  });
 }
