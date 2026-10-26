@@ -181,16 +181,22 @@ S3_BUCKET = env.str("S3_BUCKET", default="elysia-media")
 S3_REGION = env.str("S3_REGION", default="us-east-1")
 S3_PUBLIC = env.bool("S3_PUBLIC", default=False)  # 私密媒体，不得进入共享缓存
 S3_STORAGE_BACKEND = env.str("S3_STORAGE_BACKEND", default="s3")
-# 预签名 URL 的**对外基址**（浏览器可访问的地址）。
+# 预签名 URL 的对外基址（**生产必须留空**，见下）。
 #
-# ⚠️ **2026-10-27 修复（用户实报「手机端上传的图片在 web 不显示」）**：
-# `S3_ENDPOINT_URL` 是**服务端内部**访问 MinIO 的地址（`http://127.0.0.1:9000`）。
-# `presign_get` 直接用该 host 生成 URL ⇒ 返回 `http://127.0.0.1:9000/...` ⇒
-# **浏览器根本连不上** ⇒ 所有头像/图片白板（媒体走预签名直连，不经过应用服务器）。
+# 背景：`S3_ENDPOINT_URL` 是服务端访问 MinIO 的内部地址（`http://127.0.0.1:9000`），
+# 而 `presign_get` 直接用它生成 URL ⇒ 浏览器拿到的是连不上的内网地址。
 #
-# 设为公网同源前缀（如 `https://<host>/minio`，nginx 把 `/minio/` 反代到 MinIO）
-# 后，签发时会把这个前缀替换掉内网 host；签名串（query 里的密钥）不受影响。
-# 留空 = 不改写（本地开发直连 MinIO 时保持原行为）。
+# ⚠️⚠️ **2026-10-27 实测踩坑（已回滚）：服务端改 host 会让所有图片全挂。**
+# 预签名 URL 的 `SignedHeaders=host` ⇒ **host 是签名的一部分**。在服务端把 URL
+# 换成公网 host 后，到 MinIO 时 Host 不匹配 ⇒ 验签失败 403 ⇒ 图片全挂。
+#
+# ✅ 正确做法在**客户端**：nginx 的 `/minio/` 反代会把 Host 头固定改回
+# `127.0.0.1:9000`（见 nginx.conf:83），因此前端只需把 URL 的 scheme+host 换成
+# `/minio` 前缀、**保留原 path 与 query（签名）**，验签即可通过。
+# 实现见 `web/src/components/ResourceImage.tsx` 的 `toBrowserReachableUrl()`。
+#
+# 本开关仅为特殊拓扑预留；生产留空时完全不改写（`_rewrite_to_public_endpoint`
+# 原样返回），无副作用。
 S3_PUBLIC_ENDPOINT = env.str("S3_PUBLIC_ENDPOINT", default="")
 
 # 分类型大小上限（字节）；0 = 不设上限。
