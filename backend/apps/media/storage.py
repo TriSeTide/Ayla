@@ -72,6 +72,27 @@ class ObjectStorage:
         raise NotImplementedError
 
 
+def _rewrite_to_public_endpoint(url: str) -> str:
+    """把预签名 URL 的 host 改写为浏览器可达的 `S3_PUBLIC_ENDPOINT`。
+
+    未配置（空串）⇒ 原样返回（本地开发直连 MinIO 不受影响）。
+    替换 `scheme://host[:port]`，并**保留 base 自带的路径前缀**（如 `/minio`），
+    再接上原始 URL 的 path；query（含签名）保持原样（签名与 host 无关）。
+    """
+    base = getattr(settings, "S3_PUBLIC_ENDPOINT", "") or ""
+    if not base:
+        return url
+    from urllib.parse import urlsplit, urlunsplit
+
+    src = urlsplit(url)
+    dst = urlsplit(base.rstrip("/"))
+    # ⚠️ base 可能带路径前缀（`https://host/minio`）—— 必须拼回 path，
+    # 否则 `/minio` 会被丢掉（实测：nginx 的 /minio/ 反代因此 404）。
+    prefix = dst.path.rstrip("/")
+    path = (prefix + src.path) if prefix else src.path
+    return urlunsplit((dst.scheme, dst.netloc, path, src.query, src.fragment))
+
+
 class S3Storage(ObjectStorage):
     """boto3 同步实现（MinIO 兼容，endpoint_url 指向本地 MinIO）。"""
 
@@ -201,12 +222,20 @@ class S3Storage(ObjectStorage):
         <img>/<video> 直连对象存储后，Range 请求（preload=metadata、拖动 seek）
         由对象存储原生处理——播放流量完全不经过应用服务器（与直传对称，
         应用服务器只承担信令与鉴权决策）。
+
+        ⚠️ **2026-10-27 修复（用户实报「手机端上传的图片在 web 不显示」）**：
+        生成的 URL 带的是 `endpoint_url` 的 host —— 那是**服务端内部**地址
+        （如 `http://127.0.0.1:9000`），浏览器连不上 ⇒ 图片白板。
+        若配置了 `S3_PUBLIC_ENDPOINT`（浏览器可达的同源前缀，如
+        `https://<host>/minio`），则把 scheme+host（+可选 path 前缀）替换掉；
+        **query 里的签名串不动**（签名只覆盖 key/expires，与 host 无关）。
         """
-        return self._client.generate_presigned_url(
+        url = self._client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": key},
             ExpiresIn=expires_seconds,
         )
+        return _rewrite_to_public_endpoint(url)
 
     def exists(self, key):
         try:

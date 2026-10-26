@@ -181,6 +181,17 @@ S3_BUCKET = env.str("S3_BUCKET", default="elysia-media")
 S3_REGION = env.str("S3_REGION", default="us-east-1")
 S3_PUBLIC = env.bool("S3_PUBLIC", default=False)  # 私密媒体，不得进入共享缓存
 S3_STORAGE_BACKEND = env.str("S3_STORAGE_BACKEND", default="s3")
+# 预签名 URL 的**对外基址**（浏览器可访问的地址）。
+#
+# ⚠️ **2026-10-27 修复（用户实报「手机端上传的图片在 web 不显示」）**：
+# `S3_ENDPOINT_URL` 是**服务端内部**访问 MinIO 的地址（`http://127.0.0.1:9000`）。
+# `presign_get` 直接用该 host 生成 URL ⇒ 返回 `http://127.0.0.1:9000/...` ⇒
+# **浏览器根本连不上** ⇒ 所有头像/图片白板（媒体走预签名直连，不经过应用服务器）。
+#
+# 设为公网同源前缀（如 `https://<host>/minio`，nginx 把 `/minio/` 反代到 MinIO）
+# 后，签发时会把这个前缀替换掉内网 host；签名串（query 里的密钥）不受影响。
+# 留空 = 不改写（本地开发直连 MinIO 时保持原行为）。
+S3_PUBLIC_ENDPOINT = env.str("S3_PUBLIC_ENDPOINT", default="")
 
 # 分类型大小上限（字节）；0 = 不设上限。
 #
