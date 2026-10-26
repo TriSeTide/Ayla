@@ -30,12 +30,13 @@ void main() {
     expect(avatarLabel('樱', '小樱'), '樱');
   });
 
-  test('★ 空串 label 时头像应回退 「?」（对齐 web Avatar.tsx:37）', () {
-    // 头像组件的取字规则：空 ⇒ ?；否则取首字。
-    String initial(String label) => label.isEmpty ? '?' : label.characters.first;
-    expect(initial(''), '?');
+  test('★ 空 label ⇒ 渲染人形图标（2026-10-26 用户裁决：不要问号头像）', () {
+    // 头像组件口径：空 ⇒ 人形图标；否则取首字。
+    String? initial(String label) =>
+        label.isEmpty ? null : label.characters.first; // null = 用人形图标
+    expect(initial(''), isNull, reason: '★ 无名不显示问号，改用人形图标');
     expect(initial('小樱'), '小');
-    expect(initial('发送者'), '发', reason: '这正是修复前用户看到的字');
+    expect(initial('发送者'), '发', reason: '这正是当初误显示的字，源头上不会再出现');
   });
 
   group('退群成员头像：仍可点击进主页（用户 2026-10-26 追问）', () {

@@ -272,6 +272,38 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
     super.dispose();
   }
 
+  /// 头像本体内的内容（名字首字 / 人形图标）。
+  ///
+  /// 统一口径（2026-10-26 用户裁决）：
+  /// - 有名字 ⇒ 取首字（web 同）；
+  /// - **没名字 ⇒ 人形图标 `Icons.person`**（正常默认头像观感），**不再显示「?」**。
+  ///
+  /// 光环/在线态由 `_computeOnline` 独立决定，**与本方法无关** —— 无名不影响光环。
+  Widget _coreChild({
+    required String effectiveLabel,
+    required Color coreColor,
+    required double size,
+  }) {
+    if (effectiveLabel.isNotEmpty) {
+      return Text(
+        effectiveLabel.characters.first,
+        style: TextStyle(
+          fontFamily: AylaFonts.display,
+          fontFamilyFallback: AylaFonts.cjkFallback,
+          fontWeight: FontWeight.w500,
+          // web `Avatar.tsx:38`：`Math.round(size * 0.42)`（JS 已取整 px）。
+          fontSize: (size * 0.42).roundToDouble(),
+          color: coreColor,
+        ),
+      );
+    }
+    // 无名 ⇒ 人形图标。尺寸与字身同量级（0.42 字 → 0.52 图标），视觉重心居中。
+    return Icon(
+      Icons.person,
+      size: (size * 0.52).roundToDouble(),
+      color: coreColor,
+    );
+  }
   @override
   Widget build(BuildContext context) {
     // presence 实时订阅：**只对给了 user/userId 的头像生效**（纯展示/画布走原路径）。
@@ -389,26 +421,13 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
           gradient: cssLinearGradient(angleDeg: 135, colors: coreColors),
         ),
         child: Center(
-          child: Text(
-            // 无图时取名字首字（web `Avatar.tsx:37` 同语义：`label?.trim() || "?"`）。
-            // ⚠️ **2026-10-26 修复**：旧版空 label 渲染成空串，而 web 是 `"?"`
-            // ——两处分支不一致（下方有图 fallback 早就用了 '?'）。群成员退出后
-            // 名字取不到时，这里会留一个**纯空圆圈**，与 web 不符。统一为 '?'。
-            avatarSrc == null
-                ? (effectiveLabel.isEmpty
-                    ? '?'
-                    : effectiveLabel.characters.first)
-                : '',
-            style: TextStyle(
-              fontFamily: AylaFonts.display,
-              fontFamilyFallback: AylaFonts.cjkFallback,
-              fontWeight: FontWeight.w500,
-              // web `Avatar.tsx` 38 行：`const fontSize = Math.round(size * 0.42)`
-              // —— JS 侧已**取整为整数 px**，故这里也要 round（size 40 → 17）。
-              fontSize: (size * 0.42).roundToDouble(),
-              color: coreColor,
-            ),
-          ),
+          // ⚠️ **2026-10-26 用户裁决**：名字取不到时**不显示「?」**，而是用**人形图标**
+          // 兜底 —— 视觉上就是一个正常的默认头像。
+          //
+          // 有意偏离 web（`Avatar.tsx:37` 是 `label?.trim() || "?"`）：问号在界面上像
+          // 「出错了」，而默认人形头像是通行形态。光环（在线/离线）逻辑**完全不受影响**
+          // —— 它由 `_computeOnline` 独立决定，与有没有名字无关。
+          child: _coreChild(effectiveLabel: effectiveLabel, coreColor: coreColor, size: size),
         ),
       ),
     );
@@ -439,19 +458,13 @@ class _AvatarHaloState extends State<AylaAvatarHalo>
                     // 头像 = **永久资产 A5（用户）/ A6（群）**（用户裁决 2026-10-23）
                     // ⇒ 不落本地缓存。事实源：retention-boundaries §3 A5/A6。
                     cacheable: false,
+                    // 图片加载失败时的兜底：与无图分支**同一口径**（有名字取首字、
+                    // 无名用人形图标），见 [_coreChild]。
                     fallback: Center(
-                      child: Text(
-                        effectiveLabel.isEmpty
-                            ? '?'
-                            : effectiveLabel.characters.first,
-                        style: TextStyle(
-                          fontFamily: AylaFonts.display,
-                          fontFamilyFallback: AylaFonts.cjkFallback,
-                          fontWeight: FontWeight.w500,
-                          // 同 web `Math.round(size * 0.42)`（取整 px）
-                          fontSize: (size * 0.42).roundToDouble(),
-                          color: coreColor,
-                        ),
+                      child: _coreChild(
+                        effectiveLabel: effectiveLabel,
+                        coreColor: coreColor,
+                        size: size,
                       ),
                     ),
                   ),

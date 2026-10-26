@@ -618,8 +618,9 @@ class _AylaMessageBubbleState extends State<AylaMessageBubble>
               // 他不在 `conversation.members` 里 ⇒ label/name **双双为 null** ⇒ 落到
               // 字面量「发送者」⇒ 头像取首字 → **「发」**。
               //
-              // web 口径（`Avatar.tsx:37`）：`label?.trim() || "?"` —— 没有名字就显示
-              // **问号**，而不是拿一个语义占位词去取首字。这里对齐 web（空串触发同一档）。
+              // 这里传**空串**（不编造占位词）⇒ `AylaAvatarHalo` 的空名分支会渲染
+              // **人形图标**（正常默认头像观感，2026-10-26 用户裁决：不要问号头像），
+              // 而光环/在线态由 presence 独立求值，**不受有无名字影响**。
               label: widget.senderAvatarLabel ?? widget.senderName ?? '',
               size: 32,
               online: widget.senderOnline,
