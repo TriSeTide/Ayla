@@ -559,4 +559,164 @@ void main() {
     }
     expect(pinkish, 0, reason: '高亮行内部不得被填成实心粉（只允许形状之外有环）');
   });
+
+  // ======================= 2026-10-26 按 web 逐条对账新增 =======================
+
+  testWidgets('回底键：**瞬时**贴底（web MessageList.tsx:115–118 scrollTop = scrollHeight）', (
+    WidgetTester tester,
+  ) async {
+    // web 的回底是「实时跟随动作」⇒ 一次性赋值、不做平滑动画（原文注释见 tsx:116–117）。
+    // 本件 reverse:true ⇒ 等价于 jumpTo(0)。此前误用 300ms animateTo。
+    final DateTime base = DateTime(2026, 9, 24, 21, 0);
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMessageList(
+          messages: <AylaChatMessage>[
+            for (int i = 0; i < 20; i++)
+              _msg(
+                id: 'm$i',
+                seq: i + 1,
+                senderId: i.isEven ? 'u1' : 'me',
+                content: '第 $i 行消息内容，用于撑高列表',
+                at: base.add(Duration(minutes: i)),
+              ),
+          ],
+          conversation: _conv(),
+          currentUserId: 'me',
+        ),
+        viewport: const Size(720, 360),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final Finder jumpBtn = find.byKey(const ValueKey<String>('message-jump-bottom'));
+    await tester.drag(find.byType(ListView), const Offset(0, 900));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<AnimatedOpacity>(jumpBtn).opacity, 1);
+
+    await tester.tap(jumpBtn);
+    // ⚠️ **只 pump 一帧**：瞬时跳转必须在这一帧内完成。
+    // 若实现回退到 animateTo(300ms)，这里 pixels 仍 > 0 ⇒ 本断言会红。
+    await tester.pump();
+    final ScrollableState after =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+    expect(after.position.pixels, 0,
+        reason: 'web scrollToBottom 是瞬时赋值；不得有 300ms 平滑动画（MessageList.tsx:115–118）');
+  });
+
+  testWidgets('尾部内容变高后仍贴底（web ResizeObserver 的机制差异 —— reverse 列表天然满足）', (
+    WidgetTester tester,
+  ) async {
+    // ## web 需要 ResizeObserver，Flutter 的 reverse 列表**天然满足**
+    // web `MessageList.tsx:540-570`：
+    //   const stickToBottom = () => { if (atBottomRef.current && !hasHiddenTailRef.current)
+    //     scrollToBottom(element); };
+    //   observer = new ResizeObserver(stickToBottom); observer.observe(element);
+    //   element.addEventListener("load", onLoad, true);  // 图片 onload => rAF(stickToBottom)
+    // 原文注释：「图片等媒体异步加载会撑高内容，导致滚动条偏离底部；仅逻辑贴底时持续跟随」。
+    // 成因：web 的 `.message-scroll` 是**正向**滚动容器，内容在视觉**下方**增长 ⇒ 视口不动 ⇒ 离底。
+    //
+    // 本件 `reverse: true`（文件头差异 2）的布局是**自下而上**、视口锚在 `pixels = 0`（视觉底部）：
+    // 末尾内容变高是往**上**长，底部锚点不动 ⇒ 天然永远贴底 ⇒ **不复制** ResizeObserver
+    // （照抄会在帧后回调里反复标脏 layout，实测触发框架断言
+    //  `'!childSemantics.renderObject._needsLayout': is not true`）。
+    // 本用例锁住「用户实报的图文消息脱底在 Flutter 侧不会发生」。
+    final DateTime base = DateTime(2026, 9, 24, 21, 0);
+    late StateSetter setLocal;
+    List<AylaChatMessage> messages = <AylaChatMessage>[
+      for (int i = 0; i < 20; i++)
+        _msg(
+          id: 'm$i',
+          seq: i + 1,
+          senderId: 'u1',
+          content: '第 $i 行消息内容，用于撑高列表',
+          at: base.add(Duration(minutes: i)),
+        ),
+    ];
+    await tester.pumpWidget(
+      host(
+        tester,
+        StatefulBuilder(
+          builder: (BuildContext context, StateSetter setter) {
+            setLocal = setter;
+            return AylaMessageList(
+              messages: messages,
+              conversation: _conv(),
+              currentUserId: 'me',
+            );
+          },
+        ),
+        viewport: const Size(720, 400),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final ScrollableState scrollable =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+    expect(scrollable.position.pixels, 0, reason: '初始贴底');
+
+    // 追加一条**很高的**消息（等价「图片消息加载完成把内容撑高」）
+    setLocal(() {
+      messages = <AylaChatMessage>[
+        ...messages,
+        _msg(
+          id: 'big',
+          seq: 999,
+          senderId: 'u1',
+          content: List<String>.filled(30, '这是一条很高的消息，用来模拟图片撑高').join('\n'),
+          at: base.add(const Duration(minutes: 30)),
+        ),
+      ];
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(scrollable.position.pixels, 0,
+        reason: '尾部内容变高后必须仍贴底（reverse 列表锚定底部；web 靠 ResizeObserver 补）');
+  });
+
+  testWidgets('跳转定位：目标落在视口中心（web scrollToMessageAndHighlight 居中）', (
+    WidgetTester tester,
+  ) async {
+    // web MessageList.tsx:652–667：
+    //   element.scrollTop += nodeRect.top - elRect.top - element.clientHeight / 2;
+    // ⇒ 目标**顶边**落在视口中心。本件 reverse 列表按同一语义换算（见 _centerOn）。
+    final DateTime base = DateTime(2026, 9, 24, 21, 0);
+    await tester.pumpWidget(
+      host(
+        tester,
+        AylaMessageList(
+          messages: <AylaChatMessage>[
+            for (int i = 0; i < 40; i++)
+              _msg(
+                id: 'm$i',
+                seq: i + 1,
+                senderId: 'u1',
+                content: '第 $i 行',
+                at: base.add(Duration(minutes: i)),
+              ),
+          ],
+          conversation: _conv(group: false),
+          currentUserId: 'me',
+          unreadSeqs: const <int>[20],
+          onMarkRead: (_, __) async {},
+          onMarkConversationRead: (_, __) async {},
+        ),
+        viewport: const Size(720, 600),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('1 条新消息'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    final Rect listRect = tester.getRect(find.byType(ListView));
+    final double center = listRect.top + listRect.height / 2;
+    final Rect targetRect = tester.getRect(find.text('第 19 行'));
+    // 目标**顶边**应落在视口中心附近（web 语义；留 ±24px 容差覆盖行内 padding）
+    expect((targetRect.top - center).abs(), lessThan(24),
+        reason: '跳转后目标顶边应落在视口中心（web scrollTop += nodeTop - elTop - clientHeight/2）');
+  });
 }

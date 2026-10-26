@@ -40,7 +40,14 @@
 ///    [AylaMessageList.jumpToMessage] / `_revealTarget` 的注释）：web 把渲染窗口移到目标
 ///    附近（tsx:709–721）后目标进入 DOM；本件无窗口可切 ⇒ 把滚动偏移逼近到目标附近，
 ///    让 `ListView.builder` 把目标行建出来。这是差异 1（不做 DOM 窗口化）的**必要补充**：
-///    懒构建让未被构建的行没有 RenderObject，`Scrollable.ensureVisible` 会整段失效。
+///    懒构建让未被构建的行没有 RenderObject，`Scrollable.ensureVisible` 会整段失效。/// 7. **「媒体异步撑高后贴底」不需要 ResizeObserver**（2026-10-26 实测登记）：
+///    web `MessageList.tsx:540–570` 用 `ResizeObserver(stickToBottom)` + `load` 捕获
+///    补 scrollTop，因为它的 `.message-scroll` 是**正向**滚动容器（内容在视觉下方增长 ⇒
+///    视口不动 ⇒ 离底）。本件 `reverse: true` 的布局是**自下而上**、视口锚在 `pixels = 0`
+///    （视觉底部）：末尾内容变高是往**上**长的，底部锚点不动 ⇒ **天然永远贴底**。
+///    照抄会在帧后回调里反复标脏 layout，实测触发框架断言
+///    `'!childSemantics.renderObject._needsLayout': is not true` ⇒ 明确**不复制**。
+///    回归锁见 `test/message_list_test.dart` 的「度量变化后仍贴底」。
 ///
 /// ## 公开面
 /// `AylaJumpTag` · `AylaMessageList` · 样张 `aylaMessageListSamples()`
@@ -520,18 +527,52 @@ class _AylaMessageListState extends State<AylaMessageList> {
     }
     final BuildContext? ctx = key.currentContext;
     if (ctx != null && ctx.mounted) {
-      // web：滚动到目标并**居中**（`scrollToMessageAndHighlight`）
-      await Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      // 滚动到目标并**居中** —— web `MessageList.tsx:652–667` 的
+      // `scrollToMessageAndHighlight`：
+      // ```ts
+      // const elRect = element.getBoundingClientRect();
+      // const nodeRect = node.getBoundingClientRect();
+      // element.scrollTop += nodeRect.top - elRect.top - element.clientHeight / 2;
+      // ```
+      // ⇒ **瞬时**赋值、无动画。订正为同一语义（此前用 300ms ensureVisible，
+      // 与 web 不符）：见 [_centerOn] 的符号推导。
+      _centerOn(ctx);
     }
     _setHighlight(target.id);
     if (kind != 'unread') {
       await widget.onMarkRead?.call(target, true);
     }
+  }
+
+  /// 把目标行**瞬时**居中（web `scrollToMessageAndHighlight`，`MessageList.tsx:652–667`）。
+  ///
+  /// ## 为什么不能继续用 `Scrollable.ensureVisible(duration: 300ms)`
+  /// web 是 `element.scrollTop += nodeRect.top - elRect.top - clientHeight / 2` ——
+  /// **一次性赋值、无缓动**。它算的是「滚动容器顶边 → 节点顶边」的差，
+  /// 减半个视口高 ⇒ 节点**顶边**落在视口中心（不是节点中心）。照抄即可。
+  ///
+  /// ## reverse 列表的符号推导（本件特有，必须写清否则必错）
+  /// 正向列表：`scrollTop += (nodeTop − elTop) − clientHeight / 2`（nodeTop 越大 ⇒ 往下滚越多）。
+  /// 本件 `reverse: true`：pixels 越大视野越往**视觉上方**（更早）走，
+  /// 而 `nodeTop − elTop` 仍是「节点在屏幕上的位置」⇒ 要让节点上移
+  /// （`nodeTop − elTop` 变小），pixels 必须**变大** ⇒ 补偿量取反。
+  void _centerOn(BuildContext ctx) {
+    if (!_scroll.hasClients) return;
+    final ScrollPosition pos = _scroll.position;
+    final RenderObject? box = ctx.findRenderObject();
+    final RenderObject? viewport =
+        pos.context.storageContext.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    if (viewport is! RenderBox || !viewport.hasSize) return;
+    final double nodeTop = box.localToGlobal(Offset.zero).dy;
+    final double elTop = viewport.localToGlobal(Offset.zero).dy;
+    // 正向列表的补偿量（web 原式）；reverse 列表符号取反。
+    final double webDelta = (nodeTop - elTop) - pos.viewportDimension / 2;
+    final double target =
+        (pos.pixels - webDelta).clamp(0.0, pos.maxScrollExtent);
+    if ((pos.pixels - target).abs() < 0.5) return;
+    pos.jumpTo(target);
+    setState(() => _tick++);
   }
 
   /// 目标消息在 [AylaMessageList.messages] 中的下标（找不到 ⇒ -1）。
@@ -1007,6 +1048,25 @@ class _AylaMessageListState extends State<AylaMessageList> {
     return Stack(
       children: <Widget>[
         Positioned.fill(
+          // ## 「媒体异步撑高后继续贴底」—— web 有 ResizeObserver，本件**不需要**
+          //
+          // web `MessageList.tsx:540-570`：
+          //   const stickToBottom = () => { if (atBottomRef.current && !hasHiddenTailRef.current)
+          //     scrollToBottom(element); };
+          //   const observer = new ResizeObserver(stickToBottom); observer.observe(element);
+          //   element.addEventListener("load", onLoad, true);   // 图片 onload → rAF(stickToBottom)
+          // 原文注释：「图片等媒体异步加载会撑高内容，导致滚动条偏离底部；仅逻辑贴底时持续跟随」。
+          //
+          // ⚠️ **这是 web 正向列表的补丁，不能照抄到本件**（2026-10-26 实测）：
+          // web 的 `.message-scroll` 是普通正向滚动容器，内容在**尾部**（视觉下方）增长 ⇒
+          // 视口不动 ⇒ 离底，所以要手工补 scrollTop。
+          // 本件 `reverse: true` 的布局是**自下而上**、视口锚在 `pixels = 0`（视觉底部）：
+          // 末尾内容变高是往**上**长的，底部锚点不动 ⇒ **天然永远贴底**。
+          // 照抄（在 ScrollMetricsNotification 的帧后回调里 jumpTo）反而会在同一帧内
+          // 反复标记 layout 脏，触发框架断言
+          // `'!childSemantics.renderObject._needsLayout': is not true`（实测复现）。
+          // ⇒ 差异登记在文件头「与 web 的差异」第 7 条；回归锁见
+          // `test/message_list_test.dart` 的「度量变化后仍贴底」。
           child: ListView.builder(
             controller: _scroll,
             reverse: true, // 见文件头差异 2：前插历史不移动视口
@@ -1398,14 +1458,14 @@ class _AylaMessageListState extends State<AylaMessageList> {
               // 隐藏档（`!is-visible`）由外层 `IgnorePointer` 挡住指针，与本层无关。
               cursor: SystemMouseCursors.click,
               child: GestureDetector(
+              // 回底 = **瞬时**跳转，不做平滑动画 —— web `MessageList.tsx:115–118`：
+              // `function scrollToBottom(element) { element.scrollTop = element.scrollHeight; }`，
+              // 原文注释「聊天回底是实时跟随动作，不做长距离平滑动画」。
+              // 本件是 `reverse: true`（文件头差异 2）⇒ pixels=0 即视觉底部
+              // ⇒ 等价于 web 的 `scrollTop = scrollHeight`。
+              // （2026-10-26 按 web 逐条对账订正：此前误用 300ms 缓动。）
               onTap: () {
-                if (_scroll.hasClients) {
-                  _scroll.animateTo(
-                    0,
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                  );
-                }
+                if (_scroll.hasClients) _scroll.jumpTo(0);
               },
               // `.message-jump-bottom { background: var(--glass-bg-strong);
               // backdrop-filter: blur(18px) saturate(1.4) }`（app.css:868–893）——
