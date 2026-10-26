@@ -437,4 +437,78 @@ void main() {
     expect(second.top, moreOrLessEquals(rowB.top, epsilon: 0.5));
     expect(second.top, greaterThan(first.top));
   });
+
+  // ==========================================================================
+  // 2026-10-25 追加：在线/离线**标签**的实时性（用户实报「私信界面在线离线标签
+  // 没有热更新」）。
+  //
+  // 这条锁的必要性：列表的在线态有两条独立来源 ——
+  // - 头像光环（AylaAvatarHalo，已由 avatar_presence_test 锁）；
+  // - **文字标签**（这里）。此前 `isOnline`/`statusLabel` 两个注入位**没人传**，
+  //   组件回退 `peer.online`（REST 快照）⇒ 标签永不更新。
+  // 修法是页面注入实时求值；本锁证明「注入值真的决定渲染」。
+  // ==========================================================================
+  testWidgets('★ 在线/离线标签随实时值变化（不是 REST 快照）', (
+    WidgetTester tester,
+  ) async {
+    setViewport(tester, const Size(360, 480));
+    // 快照里 peer 是**离线**的（模拟 REST 旧值）。
+    final AylaConversationSummary conv = _conv(online: false, status: 'auto');
+
+    // 用 ValueNotifier 驱动真实重建 —— 等价于生产里
+    // `ref.watch(presenceStateProvider)` 触发的 build。
+    final ValueNotifier<({bool online, String status})> live =
+        ValueNotifier<({bool online, String status})>(
+      (online: false, status: 'auto'),
+    );
+    addTearDown(live.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: previewTheme(
+          ValueListenableBuilder<({bool online, String status})>(
+            valueListenable: live,
+            builder: (BuildContext _, ({bool online, String status}) v, Widget? __) =>
+                Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 360,
+                height: 480,
+                child: AylaConversationList(
+                  conversations: <AylaConversationSummary>[conv],
+                  activeId: null,
+                  isOnline: (AylaUserPublic? _) => v.online,
+                  statusLabel: (AylaUserPublic? _, bool online) =>
+                      aylaDisplayStatusOf(v.status, online),
+                  onSelect: (_) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('离线'), findsOneWidget, reason: '初始：实时离线');
+
+    // ★ presence.update(online) 帧到达 ⇒ 页面重算 ⇒ 重新注入。
+    live.value = (online: true, status: 'auto');
+    await tester.pump();
+    expect(
+      find.text('在线'),
+      findsOneWidget,
+      reason: '★ presence 上线后标签必须变「在线」—— 过去恒为「离线」',
+    );
+    expect(find.text('离线'), findsNothing, reason: '旧文案必须消失（不是叠加）');
+
+    // ★ presence.status(dnd) ⇒ 「勿扰」（状态模式也要实时）
+    live.value = (online: true, status: 'dnd');
+    await tester.pump();
+    expect(find.text('勿扰'), findsOneWidget, reason: '★ 状态模式也要实时');
+
+    // 回到离线
+    live.value = (online: false, status: 'auto');
+    await tester.pump();
+    expect(find.text('离线'), findsOneWidget);
+  });
 }

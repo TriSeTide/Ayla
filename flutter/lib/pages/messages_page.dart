@@ -41,6 +41,10 @@ import '../core/models/social_requests.dart';
 import '../core/models/user_public.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
+import '../state/display_status.dart'
+    show presenceOnline, presenceStatus, withLiveStatus;
+import '../state/presence_providers.dart' show presenceStateProvider;
+import '../state/presence_state.dart' show AylaPresenceState;
 import '../state/chat_state.dart'
     show
         AylaChatState,
@@ -480,6 +484,12 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
         (profile != null && profile.enabled) ? profile : null;
     final String? elysiaUserId = profile?.userId;
     final int requestBadge = ref.watch(badgesProvider).requestBadge;
+    // ⚠️ **在线态必须实时**（2026-10-25 用户实报「私信界面在线离线标签没有
+    // 热更新」）。此前列表注入的是 `(u) => u.online` —— 那是 REST 快照
+    // （`final bool`，登录时定死）⇒ presence 帧到达后会话行的在线点/文案不动。
+    //
+    // web 等价物 `ConversationList.tsx:85` 的 `presenceOnline(usePresenceStore…)`：
+    // 订阅在各使用点内（宽屏侧栏宿主与本页申请面板各自 watch）。
 
     // 宽屏：左列的五路取数与三路动作由 `AylaWideMessagesSidebarHost` 承担（web 是组件自己取数）；
     // 窄屏才有本页内联的好友/认证处理逻辑（`.messages-friends` 版式与侧栏不同，无法共用一件）。
@@ -586,6 +596,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
   /// 私信 tab（tsx 246–270）。
   Widget _chatTab(AylaElysiaProfile? entryProfile, String? elysiaUserId) {
     final AylaSocialController<AylaConversationSummary>? pager = _conversations;
+    // presence 在 build 期取一次（回调里不能 ref.watch）。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
     return AylaPullToRefresh(
       isAtTop: _isPrivateAtTop,
       onRefresh: _refreshConversations,
@@ -604,6 +616,18 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
               conversations: _sortedPrivate(),
               activeId: null,
               elysiaUserId: elysiaUserId,
+              // 在线态实时（用户实报私信在线/离线标签不热更新）。
+              // 不传则组件回退 `peer.online`（REST 快照）⇒ 永不更新。
+              isOnline: (AylaUserPublic? u) => presenceOnline(
+                presence.users,
+                withLiveStatus(presence.statuses, u),
+              ),
+              // 状态模式（勿扰/离开/隐身）同样要实时：`peer.status` 是 REST
+              // 快照，不注入 `statusLabel` 的话切勿扰后列表文案不动。
+              statusLabel: (AylaUserPublic? u, bool online) => aylaDisplayStatusOf(
+                presenceStatus(presence.statuses, u),
+                online,
+              ),
               onSelect: (String id) => context.push('/chat/${Uri.encodeComponent(id)}'),
               revealItems: !(pager?.loading ?? false),
               onAvatarTap: _goUserProfile,
@@ -712,6 +736,8 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     final List<AylaRealtimeNotice> leaveNotices = ref
         .watch(noticesProvider)
         .ofKind(AylaRealtimeNoticeKind.groupMemberLeft);
+    // 申请/好友行里的在线点也要实时（同页面其余处，见 build 里的说明）。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
     return AylaRequestsPanel(
       leaveNotices: _pageOf(_leaveNotices) ??
           const AylaSocialPage<AylaGroupMemberLeaveNotice>(),
@@ -733,7 +759,11 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
       joinSectionTitle: narrow ? '入群申请（群主/管理员）' : '入群申请',
       sectionGap: narrow ? AylaSpacing.sp4 : AylaSpacing.sp3,
       busyId: _busyRequestId,
-      isOnline: (AylaUserPublic u) => u.online,
+      // 实时在线判定（web `presenceOnline(onlineUsers, withLiveStatus(statuses, u))`）。
+      isOnline: (AylaUserPublic u) => presenceOnline(
+        presence.users,
+        withLiveStatus(presence.statuses, u),
+      ),
       onDismissLeaveNotice: (String id) {
         unawaited(() async {
           try {

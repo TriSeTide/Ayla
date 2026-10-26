@@ -38,7 +38,11 @@ import '../core/models/elysia_profile.dart';
 import '../core/models/social_requests.dart';
 import '../state/auth_state.dart';
 import '../state/chat_providers.dart';
+import '../state/display_status.dart'
+    show presenceOnline, presenceStatus, withLiveStatus;
 import '../state/notices_state.dart';
+import '../state/presence_providers.dart' show presenceStateProvider;
+import '../state/presence_state.dart' show AylaPresenceState;
 import '../state/paged_list.dart';
 import '../state/social_store.dart'
     show
@@ -967,7 +971,23 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
     ref.watch(chatStateProvider);
     final AylaConversationSummary? conv = _runtime.conversation;
     final AylaUserPublic? peer = conv?.peer;
-    final bool online = peer?.online ?? false;
+    // ⚠️ **在线/离线文案必须实时**（2026-10-25 用户实报「私信界面在线离线标签
+    // 没有热更新」）。此前 `online = peer.online` 读的是**REST 快照**（登录/进房
+    // 那一刻的值，`final bool` 不可变）⇒ presence 帧到达后标签纹丝不动。
+    //
+    // web 等价物 `useDisplayStatus(peer)`（`utils/displayStatus.ts:92–101`）：
+    // 订阅 `usePresenceStore` 后 **实时求值** —— `presenceOnline(users, peer)`
+    // 与 `withLiveStatus(statuses, peer)` 两条都要走，缺一条就会「在线态实时了
+    // 但勿扰/离开/隐身不实时」。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
+    final bool online = presenceOnline(
+      presence.users,
+      withLiveStatus(presence.statuses, peer),
+    );
+    final String peerDisplayStatus = aylaDisplayStatusOf(
+      presenceStatus(presence.statuses, peer),
+      online,
+    );
     final AylaChatDraftsController drafts = ref.read(chatDraftsProvider);
     final String? me = ref.watch(authNotifierProvider).user?.id;
     final String? elysiaId =
@@ -1003,7 +1023,7 @@ class _AylaChatPaneHostState extends ConsumerState<AylaChatPaneHost> {
       mentionUnreadSeqs: conv?.mentionUnreadSeqs ?? const <int>[],
       replyUnreadSeqs: conv?.replyUnreadSeqs ?? const <int>[],
       peerOnline: online,
-      peerStatus: aylaDisplayStatusOf(peer?.status, online),
+      peerStatus: peerDisplayStatus,
       peerTyping: _runtime.typingActive,
       blocked: _runtime.blocked,
       externalJump: widget.externalJump,
@@ -1345,10 +1365,24 @@ class _AylaWideMessagesSidebarHostState
                 refresh: friendPager.refresh,
               );
 
+    // ⚠️ **会话行的在线态必须实时**（2026-10-25 用户实报私信在线/离线标签
+    // 不热更新）。`AylaWideMessagesSidebar` 支持 `isOnline` 注入，但此前**没人传**
+    // ⇒ 落到 `AylaConversationList` 的默认回退 `peer.online`（REST 快照）⇒ 永不更新。
+    // web 等价物 `ConversationList.tsx:85` 的 `presenceOnline(usePresenceStore…)`。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
     return AylaWideMessagesSidebar(
       activeId: widget.activeId,
       onSelect: widget.onSelect,
       onTabChanged: _ensureTab,
+      isOnline: (AylaUserPublic? u) => presenceOnline(
+        presence.users,
+        withLiveStatus(presence.statuses, u),
+      ),
+      // 状态模式（勿扰/离开/隐身）也要实时（`peer.status` 是 REST 快照）。
+      statusLabel: (AylaUserPublic? u, bool online) => aylaDisplayStatusOf(
+        presenceStatus(presence.statuses, u),
+        online,
+      ),
       conversations: aylaSortPrivateByActivity<AylaConversationSummary>(
         _conversations?.items ?? const <AylaConversationSummary>[],
         ref.watch(chatStateProvider).conversationActivityAt,

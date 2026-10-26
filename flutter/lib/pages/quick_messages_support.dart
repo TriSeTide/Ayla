@@ -58,6 +58,10 @@ import '../state/chat_providers.dart'
         elysiaProfileProvider,
         noticesProvider;
 import '../state/chat_state.dart' show AylaChatState, aylaSortPrivateByActivity;
+import '../state/display_status.dart'
+    show presenceOnline, presenceStatus, withLiveStatus;
+import '../state/presence_providers.dart' show presenceStateProvider;
+import '../state/presence_state.dart' show AylaPresenceState;
 import '../state/notices_state.dart'
     show AylaRealtimeNotice, AylaRealtimeNoticeKind;
 import '../state/paged_list.dart';
@@ -68,7 +72,8 @@ import '../state/social_store.dart'
         AylaSocialOptions,
         aylaSocialStore;
 import '../widgets/base/directory_controls.dart' show AylaDirectoryLoadMore;
-import '../widgets/chat/conversation_list.dart' show AylaConversationList;
+import '../widgets/chat/conversation_list.dart'
+    show AylaConversationList, aylaDisplayStatusOf;
 import '../widgets/chat/elysia_entry.dart' show AylaElysiaEntry;
 import '../widgets/chat/quick_messages_sheet.dart' show AylaQuickMessagesSheet;
 import '../widgets/chat/request_rows.dart' show AylaNoticeRow, AylaRequestsPanel;
@@ -309,6 +314,8 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
   /// 头像一律不可点（tsx 227 的 `disableAvatarNav`）。
   Widget _privatePanel(AylaElysiaProfile? entryProfile) {
     final AylaSocialController<AylaConversationSummary>? pager = _conversations;
+    // 在线态实时（用户实报私信在线/离线标签不热更新；快捷栏与消息页同一份列表）。
+    final AylaPresenceState presence = ref.watch(presenceStateProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -320,6 +327,14 @@ class _AylaQuickMessagesHostState extends ConsumerState<AylaQuickMessagesHost> {
           ),
         AylaConversationList(
           conversations: _sortedPrivate(),
+          isOnline: (AylaUserPublic? u) => presenceOnline(
+            presence.users,
+            withLiveStatus(presence.statuses, u),
+          ),
+          statusLabel: (AylaUserPublic? u, bool online) => aylaDisplayStatusOf(
+            presenceStatus(presence.statuses, u),
+            online,
+          ),
           activeId: null, // web tsx 224：`activeId={null}`（进入会话由内联面板表达）
           elysiaUserId: entryProfile?.userId,
           disableAvatarNav: true, // tsx 227
