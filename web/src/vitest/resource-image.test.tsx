@@ -47,6 +47,38 @@ describe("ResourceImage", () => {
     expect(mockedSign).not.toHaveBeenCalled();
   });
 
+  // ⚠️ **2026-10-27 回归锁（用户实报「手机端上传的图片在 web 不显示」）**：
+  //
+  // 根因：库里存在**绝对 URL 形态**的内部媒体（Flutter `mediaContentUrl` 返回
+  // `https://<host>/api/v1/media/<id>/content`）。旧 `extractMediaId` 只认相对
+  // 路径 ⇒ 绝对 URL 被判为「外部资源」⇒ **跳过签名** ⇒ 裸地址直连 ⇒ 后端要求
+  // 鉴权 ⇒ 401 ⇒ 图片白板。
+  //
+  // 因此绝对 URL 形态的内部媒体**必须**走签名，不能被当成外部图床。
+  it("★ 绝对 URL 形态的内部媒体同样走签名（手机端上传的图片）", async () => {
+    mockedSign.mockResolvedValue({
+      url: "/api/v1/media/abs-1/content?uid=u&exp=9&sig=s",
+      originalExpired: false,
+    });
+    const { container } = render(
+      <ResourceImage
+        src="https://s.ayla.trise.top:26211/api/v1/media/abs-1/content"
+        alt=""
+        fallback="头像"
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector("img")).toHaveAttribute(
+        "src",
+        "/api/v1/media/abs-1/content?uid=u&exp=9&sig=s",
+      ),
+    );
+    expect(
+      mockedSign,
+      "★ 绝对 URL 的内部媒体必须签名，否则 401 白板",
+    ).toHaveBeenCalledWith("abs-1", undefined);
+  });
+
   it("图片卡片复用外层原生按钮重试，成功后恢复打开动作，不产生嵌套按钮", async () => {
     mockedSign.mockRejectedValueOnce(new Error("签名失败")).mockResolvedValueOnce({ url: "/signed-image.png", originalExpired: false });
     const open = vi.fn();

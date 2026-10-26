@@ -9,10 +9,25 @@ import {
 
 const MEDIA_PATH_PREFIX = `${API_PREFIX}/media/`;
 
-/** 从媒体 URL 提取 media_id；非媒体路径返回 null（外部资源直接加载） */
+/**
+ * 从媒体 URL 提取 media_id；非媒体路径返回 null（外部资源直接加载）。
+ *
+ * ⚠️ **2026-10-27 修复（用户实报「web 端群头像和别人头像图片全都加载不出来」）**：
+ * 旧实现只认**相对路径**（`/api/v1/media/...`）。但库里存在**绝对 URL** 形态的
+ * 头像（`https://<host>/api/v1/media/<id>/content`，早期上传链路写入）。
+ * 绝对 URL 不匹配 ⇒ 返回 null ⇒ **跳过签名** ⇒ 把裸地址交给 `<img>` ⇒
+ * 后端要求鉴权 ⇒ **401** ⇒ 头像白板。
+ *
+ * 现改为两种形态都能提取：相对前缀走快路径，绝对 URL 用**路径段**再兜一次。
+ * 只认 `/api/v1/media/<id>` 这一段，避免把任意外部图床误判成内部媒体。
+ */
 function extractMediaId(src: string): string | null {
   if (src.startsWith(MEDIA_PATH_PREFIX)) {
     const match = src.match(/\/media\/([^/]+)\//);
+    return match ? match[1] : null;
+  }
+  if (/^https?:\/\//i.test(src)) {
+    const match = src.match(/\/api\/v1\/media\/([^/?#]+)(?:\/|$)/);
     return match ? match[1] : null;
   }
   return null;
