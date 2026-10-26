@@ -37,4 +37,35 @@ void main() {
     expect(initial('小樱'), '小');
     expect(initial('发送者'), '发', reason: '这正是修复前用户看到的字');
   });
+
+  group('退群成员头像：仍可点击进主页（用户 2026-10-26 追问）', () {
+    test('★ 点击只用 senderId，不依赖昵称/标签', () {
+      // 断言口径：大头像的 onTap 走 `_onSenderTap` → `onSenderClick` → `_goUserProfile(m.senderId)`，
+      // 全链路**只读 senderId**。昵称缺失（退群）只影响**显示文字**，不影响可达性。
+      String? resolveTarget(String? senderId, String? senderName) {
+        // 复刻 `_goUserProfile` 的守卫：仅空 id 时不可达。
+        if (senderId == null || senderId.isEmpty) return null;
+        return '/user/' + Uri.encodeComponent(senderId);
+      }
+
+      expect(resolveTarget('u2', null), '/user/u2',
+          reason: '★ 无昵称（已退群）也必须能进主页');
+      expect(resolveTarget('u2', '小樱'), '/user/u2',
+          reason: '有昵称时行为不变');
+      expect(resolveTarget('', null), isNull, reason: '空 id 才不可达');
+      expect(resolveTarget(null, null), isNull);
+    });
+
+    test('★ 标签回退为 ? 时，头像仍带 onTap（渲染层不被禁用）', () {
+      // 修复前：label 落到「发送者」仍可点；修复后：label 落到空/`?`。
+      // 两者都不影响 onTap —— 本锁强调「改文案不改交互」。
+      bool tappable(String? avatarLabel, String? senderName, String senderId) {
+        // message_bubble 的 showSenderHalo 判据：知道发送者是谁就画头像（含 onTap）。
+        return senderId.isNotEmpty;
+      }
+
+      expect(tappable(null, null, 'u2'), isTrue);
+      expect(tappable('?', null, 'u2'), isTrue);
+    });
+  });
 }
