@@ -1090,9 +1090,17 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
   }
 
   /// 成员行投影：分页描述符 + 当前状态表的媒体/音量事实（web `VoiceChannelPanel.tsx:61–64`）。
-  AylaVoicePanelMember _rowOf(String userId) {
-    final AylaVoiceMemberState? state =
-        ref.read(voiceStateProvider).memberOf(userId);
+  /// 构造面板成员行。
+  ///
+  /// ⚠️ **2026-10-26 修复（用户实报「语音还是不跳动」）**：`voice` 由**调用方**
+  /// 以 `ref.watch` 取得后传入 —— 本方法此前内部用 `ref.read(voiceStateProvider)`，
+  /// 而它处在 **build 调用链**上：`ref.read` 不建立订阅 ⇒ 音频电平
+  /// （`setRemoteAudioLevels` 每 100ms notify）到达后**页面根本不重建** ⇒
+  /// 成员行的 `audioLevel` 永远停在初始 0 ⇒ 音量条**完全不跳**。
+  ///
+  /// 这是「听得见声音但条子不动」的直接原因：音频链路正常，只是 UI 没订阅。
+  AylaVoicePanelMember _rowOf(AylaVoiceState voice, String userId) {
+    final AylaVoiceMemberState? state = voice.memberOf(userId);
     final AylaUserPublic? profile = _profiles[userId];
     return AylaVoicePanelMember(
       member: state?.toMember() ?? AylaVoiceMember(userId: userId),
@@ -1217,10 +1225,10 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       channelName: channel?.displayName ?? '语音房',
       members: <AylaVoicePanelMember>[
         for (final AylaVoiceMemberDescriptor m in _members.items)
-          _rowOf(m.userId),
+          _rowOf(voice, m.userId),
       ],
       selfUserId: selfId,
-      selfMember: selfId == null ? null : _rowOf(selfId),
+      selfMember: selfId == null ? null : _rowOf(voice, selfId),
       // ⚠️ 用 `valueOrNull`：无网络时该 FutureProvider 处于 AsyncError，
       // `.value` 会**抛出**（实测 LateInitializationError 冒到 build）。
       elysiaUserId: ref.watch(elysiaProfileProvider).valueOrNull?.userId,
