@@ -14,6 +14,15 @@
 /// ⚠️ 必须用**样本精度**推进（不是整帧）：1024/960 = 1.0667 帧/回调，
 /// 若按整帧记账会长期每回调少 0.0667 帧 = 62.5ms/秒 的假性流失，
 /// 把健康实现误判成"持续欠载"。
+///
+/// ## 适用范围变更（task-5 LiveKit 接入，2026-10-27）
+/// 同 ~voice_audio_jitter_test.dart~：ws_relay 路径（~audio_engine.dart~ +
+/// ~lib/poc/relay_protocol.dart~）按任务要求**保留为回滚实现**，本文件的 7 例闭环
+/// 仿真仍然锁定**活代码**，故保留；LiveKit 路径不经过这套抖动缓冲（SDK 自带
+/// ~jitter buffer~），其契约锁在 ~test/livekit_voice_backend_test.dart~。
+///
+/// 保留价值：这 7 例是仓库里唯一定量化「补零时长」的资产（样本精度 + 虚拟设备
+/// 1024 帧/回调）；日后若要量化 LiveKit 的断续，用同一方法学另写脚本，不要改这里。
 library;
 
 import 'dart:math' as math;

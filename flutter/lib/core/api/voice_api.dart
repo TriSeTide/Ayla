@@ -8,6 +8,7 @@
 /// join / leave / heartbeat / members / messages / 爱莉 voice-calls 等随房内页批次带出。
 library;
 
+import '../../audio/voice_media_config.dart' show AylaVoiceMediaConfig;
 import '../models/post.dart' show AylaMediaDescriptor;
 import '../models/visibility.dart' show AylaPostVisibility;
 import '../net/dio_client.dart';
@@ -311,17 +312,25 @@ class AylaVoiceChatMessage {
   }
 }
 
-/// `POST join/` 回执（`VoiceJoinResult`，`api/types.ts:909–913`）。
+/// `POST join/` 回执（`VoiceJoinResult`，`api/types.ts:909–913` + `media` 旁路字段）。
 class AylaVoiceJoinResult {
   const AylaVoiceJoinResult({
     required this.channelId,
     required this.roomName,
     required this.joined,
+    this.media,
   });
 
   final String channelId;
   final String roomName;
   final bool joined;
+
+  /// 媒体面配置（后端 `media` 旁路字段，见 `apps/voice/media_config.py`）。
+  ///
+  /// **双下发**：`transport` 是服务端建议值，`livekit` 与 `ws_relay` 同时给
+  /// ⇒ 客户端可在 LiveKit 连接失败时**原地降级**到中继（不回后端、不发版）。
+  /// 老后端不返回该字段 ⇒ null（按 WS 中继处理，与今日行为一致）。
+  final AylaVoiceMediaConfig? media;
 
   static AylaVoiceJoinResult? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -329,6 +338,7 @@ class AylaVoiceJoinResult {
       channelId: raw['channel_id']?.toString() ?? '',
       roomName: raw['room_name']?.toString() ?? '',
       joined: raw['joined'] == true,
+      media: AylaVoiceMediaConfig.fromJson(raw['media']),
     );
   }
 }

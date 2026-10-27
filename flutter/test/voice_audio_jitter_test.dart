@@ -13,6 +13,20 @@
 /// 1. **水位纯函数**逐档覆盖（起播 / 稳态 / 欠载 / 积压 / 追赶 / 恢复）；
 /// 2. **接线锁**：常量必须真被 audio_engine 引用（死常量就是本 bug 的成因），
 ///    以及 CPU 热路径上不许再出现每帧 malloc / 每帧 O(n) 搬运。
+///
+/// ## 适用范围变更（task-5 LiveKit 接入，2026-10-27）
+/// 本轮把媒体面默认实现扩成**双后端**（LiveKit | ws_relay，见
+/// ~lib/audio/voice_media.dart~）。按任务硬性要求，**ws_relay 整条路径一行未删**
+/// （~audio_engine.dart~ / ~relay_client.dart~ 是回滚路径），因此本文件锁定的
+/// ~audio_engine.dart~ 仍是**活的生产代码**（~VOICE_MEDIA_TRANSPORT=ws_relay~ 时
+/// 全量生效），断言继续有效，**未删除、未放宽**。
+///
+/// 这里显式登记两点，避免下一个 agent 误解：
+/// 1. 本文件的 38 例只覆盖 **ws_relay 回滚路径**的抖动缓冲；LiveKit 路径的
+///    抖动/丢包恢复由 SDK（~jitter buffer~ + ~RED~）负责，对应契约锁见
+///    ~test/livekit_voice_backend_test.dart~（含「DTX 必须关闭」一条）；
+/// 2. ~docs/flutter/38~ §六那次事故的**认知**（欠载阈值必须 ≥ 一次设备回调消耗量）
+///    已固化在 ~kUnderrunFloorSec~ 的注释与本文件的用例里，不随引擎退役而失效。
 library;
 
 import 'dart:io';

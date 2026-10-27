@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- LiveKit 语音媒体（livekit_client 会显式申请麦克风）；缺该键 iOS 会直接拒绝
+	     采集且不给系统提示。文案按用途陈述，不承诺上传/留存。 -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Ayla 需要使用麦克风，以便你在语音频道中与他人通话。</string>
 </dict>
 </plist>

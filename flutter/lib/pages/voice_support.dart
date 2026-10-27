@@ -470,7 +470,10 @@ class AylaVoiceSession extends ChangeNotifier {
 
         try {
           // REST 先改成员事实；即使随后被取代，也必须补偿**那一个**频道。
-          await AylaVoiceApi.joinVoiceChannel(channelId);
+          // 回执里带 `media` 旁路字段（服务端裁决 transport + 双下发两种配置）：
+          // 连接时按它选后端，LiveKit 失败可在**原地**降级到中继。
+          final AylaVoiceJoinResult joinResult =
+              await AylaVoiceApi.joinVoiceChannel(channelId);
           joined = true;
           if (!isCurrent()) return;
           if (previousChannelId != null && previousChannelId != channelId) {
@@ -512,7 +515,15 @@ class AylaVoiceSession extends ChangeNotifier {
           if (mediaToken == null) {
             throw StateError('登录状态失效，请重新登录');
           }
-          await _media.connect(channelId, mediaToken);
+          // 媒体通道：按服务端下发的 media 配置选传输（livekit | ws_relay），
+          // LiveKit 连接失败**原地降级**到 ws_relay（web `useVoiceChannel.ts:266–275`）。
+          // `selfUserId` 只用于 identity 纪律诊断（后端 identity 必须是裸 user.pk）。
+          await _media.connectWithMedia(
+            channelId,
+            mediaToken,
+            joinResult.media,
+            selfUserId: _currentUserId(),
+          );
           if (!isCurrent()) return;
           await _media.startAudio();
           if (!isCurrent()) return;

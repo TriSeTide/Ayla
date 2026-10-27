@@ -39,7 +39,16 @@ add_definitions(-DUNICODE -D_UNICODE)
 # of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
-  target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
+  # 第三方插件（flutter_webrtc / connectivity_plus 等）源码含非 ASCII 字符，
+  # 在 zh-CN 代码页(936)下 MSVC 报 C4819；本工程 /WX 会把该警告升级为错误，
+  # 导致 flutter build windows 直接失败（实测 8 处 C2220）。
+  # 这里统一加 /utf-8 消除编码告警，并且**只对本工程 target 启用 /WX**：
+  # 插件同样会调用本函数，若对它们也开 /WX，任何上游插件的 warning 都会
+  # 打断构建（本函数上方注释也明确建议不要把通用要求加在这里）。
+  target_compile_options(${TARGET} PRIVATE /utf-8 /W4 /wd"4100")
+  if("${TARGET}" STREQUAL "${CMAKE_PROJECT_NAME}")
+    target_compile_options(${TARGET} PRIVATE /WX)
+  endif()
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
