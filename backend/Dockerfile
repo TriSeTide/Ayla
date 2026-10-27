@@ -26,7 +26,11 @@ COPY pyproject.toml ./
 # /app/apps/ 下的新代码从未被执行。
 #
 # 删除范围只含本工程包（不碰第三方 dist-info/egg-info，避免破坏依赖元数据）。
-RUN pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple . \
+# 镜像源：清华源从 2026-10-27 起在构建容器内不可用（pip 报
+# "Could not find a version that satisfies the requirement setuptools>=68
+#  (from versions: none)"，实测同一镜像内阿里云可正常拉取）。
+# 该源只影响构建期，不影响运行时；换源是为了让 docker build 不被卡死。
+RUN pip install --index-url https://mirrors.aliyun.com/pypi/simple . \
  && rm -rf /usr/local/lib/python3.11/site-packages/apps \
            /usr/local/lib/python3.11/site-packages/config
 
