@@ -32,13 +32,19 @@ void main() {
   // 起播水位必须真的比一帧厚；否则这个「抖动缓冲」不存在。
   const double start = kJitterStartSec;
   const double target = kJitterTargetSec;
-  const double underrun = kJitterAheadTargetSec;
+  // ⚠️ 欠载判据是 kUnderrunFloorSec（一次设备回调的 2 倍），
+  // **不是** kJitterAheadTargetSec（那是 web 的排播前瞻量，2026-10-27 事故）。
+  const double underrun = kUnderrunFloorSec;
   const double reset = kJitterResetAtSec;
 
-  group('水位常量自检（web wsRelayRoom.ts:313 的 0.02 / 0.4 为锚）', () {
-    test('欠载阈值 = web 的一帧 lead（20ms）', () {
+  group('水位常量自检（web 0.02 / 0.4 为锚点；欠载判据独立推导）', () {
+    test('前瞻量锚点 = web 的一帧 lead（20ms），但它**不作欠载判据**', () {
       expect(kJitterAheadTargetSec, 0.02,
-          reason: 'web `at < now + 0.02` 的 0.02 是权威值，不许漂移');
+          reason: 'web `at < now + 0.02` 的 0.02 是权威锚点，不许漂移');
+      // 2026-10-27 事故订正：这条锚点曾被直接当成 FIFO 欠载阈值，
+      // 导致 bufferFrames=1024 下每次回调都误判欠载 ⇒ 成段静音。
+      expect(kUnderrunFloorSec, isNot(equals(kJitterAheadTargetSec)),
+          reason: '欠载判据必须独立于 web 的排播前瞻量');
     });
 
     test('积压阈值 = web 的 400ms', () {
@@ -49,8 +55,8 @@ void main() {
     test('★ 起播水位必须 ≥ 3 帧（60ms）——否则等于没有抖动缓冲', () {
       expect(start, greaterThanOrEqualTo(3 * _frameSec),
           reason: '2 帧连丢就会欠载，frp 抖动下依然断续');
-      expect(start, lessThanOrEqualTo(0.1),
-          reason: '起播垫超过 100ms 会明显拖慢对话节奏');
+      expect(start, lessThanOrEqualTo(0.12),
+          reason: '起播垫超过 ~120ms 会明显拖慢对话节奏');
     });
 
     test('★ 稳态目标必须夹在欠载阈值与积压阈值之间，且留有余量', () {
@@ -86,27 +92,35 @@ void main() {
       expect(r.catchingUp, isFalse);
     });
 
-    test('第 2 帧仍不够 60ms ⇒ 继续预缓冲', () {
-      // 已有 1 帧在预缓冲；再加本帧 = 40ms < 60ms
+    test('第 2 帧仍不够起播水位 ⇒ 继续预缓冲', () {
+      // 已攒 1 帧；再加本帧 = 40ms < kJitterStartSec
       expect(d(0, _frameSec).action, JitterAction.prebuffer);
     });
 
-    test('★ 攒满 60ms（3 帧）⇒ 一次性 flush 起播', () {
-      final JitterDecision r = d(0, 2 * _frameSec);
+    test('★ 攒满 kJitterStartSec ⇒ 一次性 flush 起播', () {
+      // 2026-10-27 订正：旧断言写死「2 帧 + 本帧 = 60ms ⇒ flush」，
+      // 而 60ms 起播在服务端实测的双峰到达（75% 帧挤在 <10ms、15% 在
+      // 40–50ms 空档）下仍会周期性见底 ⇒ 起播水位已提到 kJitterStartSec。
+      final double needSec = kJitterStartSec - _frameSec + 1e-9;
+      final JitterDecision r = d(0, needSec);
       expect(r.action, JitterAction.flush);
       expect(r.playing, isTrue);
       expect(r.catchingUp, isFalse);
     });
 
     test('设备 FIFO 已有存量也计入水位（不是只看预缓冲）', () {
-      // FIFO 40ms + 本帧 20ms = 60ms ⇒ 直接起播
-      expect(d(2 * _frameSec, 0).action, JitterAction.flush);
+      final double needSec = kJitterStartSec - _frameSec + 1e-9;
+      expect(d(needSec, 0).action, JitterAction.flush);
     });
 
-    test('★ 起播后不会因为「只有一帧」就立刻停（欠载阈值 20ms）', () {
-      final JitterDecision r = d(_frameSec, 0, playing: true);
+    test('★ 起播后不会因为「只有一帧」就立刻停（欠载下限 ≥ 单次回调消耗量）', () {
+      // 2026-10-27 订正：旧断言锁的是「20ms 提前量就该继续播」——
+      // 而那正是事故根因：bufferFrames=1024 时一次回调要吃掉 21.3ms，
+      // 20ms 的「提前量」根本不够一次回调 ⇒ 每次回调后都判欠载 ⇒ 成段静音。
+      // 正确语义：深度 ≥ kUnderrunFloorSec 就继续播。
+      final JitterDecision r = d(kUnderrunFloorSec + 1e-9, 0, playing: true);
       expect(r.action, JitterAction.play,
-          reason: '刚好 20ms 提前量应当继续播，否则每帧都停');
+          reason: '达到欠载下限（≥ 一次回调消耗量）就应当继续播');
     });
   });
 
@@ -149,7 +163,7 @@ void main() {
       expect(r.playing, isFalse);
     });
 
-    test('★ 欠载后要重新攒到 60ms 才复播（不是攒一帧就播）', () {
+    test('★ 欠载后要重新攒到起播水位才复播（不是攒一帧就播）', () {
       // 欠载后第 1 帧
       JitterDecision r = decideJitterFrame(
         fifoDepthSec: 0,
@@ -168,10 +182,10 @@ void main() {
         catchingUp: false,
       );
       expect(r.action, JitterAction.prebuffer);
-      // 第 3 帧（已攒 2 帧）⇒ 60ms，复播
+      // 攒够 kJitterStartSec 才复播（2026-10-27：水位已从 60ms 提到 100ms）
       r = decideJitterFrame(
         fifoDepthSec: 0,
-        pendingSec: 2 * _frameSec,
+        pendingSec: kJitterStartSec - _frameSec + 1e-9,
         frameSec: _frameSec,
         playing: false,
         catchingUp: false,
@@ -197,7 +211,12 @@ void main() {
     });
 
     test('★ 追赶期间持续丢帧，直到 FIFO 下探到稳态目标', () {
-      for (final double depth in <double>[0.35, 0.2, 0.1, 0.05]) {
+      for (final double depth in <double>[
+        0.35,
+        0.2,
+        kJitterTargetSec * 2,
+        kJitterTargetSec * 1.5,
+      ]) {
         final JitterDecision r = decideJitterFrame(
           fifoDepthSec: depth,
           pendingSec: 0,

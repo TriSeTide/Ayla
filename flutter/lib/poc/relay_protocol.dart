@@ -102,16 +102,18 @@ const int kPingIntervalMs = 25000;
 // 浏览器那套是**带前瞻的调度器**（WebAudio 按 playHead 排播），本身就是抖动
 // 缓冲；Flutter 侧没有调度器，只能靠 miniaudio FIFO 自己垫，所以不能照搬
 // 「1 帧 lead」，必须显式垫到 [kJitterStartSec]。语义映射：
-//   web `at < now + 0.02`（顺延）  ⇒ 本文件 [kJitterAheadTargetSec] = 欠载判定
+//   web `at < now + 0.02`（顺延）  ⇒ 本文件 [kJitterAheadTargetSec]（仅语义锚点，
+//                                    **不是**欠载判据，见 [kUnderrunFloorSec]）
 //   web `at > now + 0.4`（重置追赶）⇒ 本文件 [kJitterResetAtSec] = 高水位
-//   web 无对应（调度器自带）        ⇒ 本文件 [kJitterStartSec] / [kJitterTargetSec]
+//   web 无对应（调度器自带）        ⇒ 本文件 [kJitterStartSec] / [kUnderrunFloorSec] /
+//                                    [kJitterTargetSec]
 // ---------------------------------------------------------------------------
 
 /// 单帧 lead（秒）—— web `wsRelayRoom.ts:313` 的 `at < now + 0.02`。
 ///
-/// Flutter 侧语义：设备 FIFO 深度低于「一帧」就等于**没有提前量**，下一次
-/// data_callback 必然补零（`third_party/flutter_miniaudio/src/miniaudio_bridge.c:162`），
-/// 即欠载。故它就是欠载判定阈值。
+/// ⚠️ **这个值在 web 里是「排播前瞻量」，不是 FIFO 欠载判据**（2026-10-27 事故，
+/// 见下文 [kUnderrunFloorSec]）。保留它是为了「与 web 同源」的语义锚点，
+/// 供 [kJitterTargetSec] 推导用；**不要拿它直接当欠载阈值**。
 const double kJitterAheadTargetSec = 0.02;
 
 /// 断流 / 积压重置阈值（秒）—— web `wsRelayRoom.ts:313` 的 `at > now + 0.4`。
@@ -125,15 +127,60 @@ const double kJitterResetAtSec = 0.4;
 
 /// 起播水位（秒）—— Flutter 侧新增（web 由调度器隐式保证）。
 ///
-/// 60ms = 3 帧：覆盖「连续丢 2 帧」或「一次 20~40ms 的 TCP/frp 抖动 + Dart
-/// GC 停顿」；再大就明显增加对话延迟，再小则 frp 抖动下仍会欠载。
-const double kJitterStartSec = 0.06;
+/// **必须 > [kUnderrunFloorSec]**，否则「刚起播就判欠载」照样死锁。
+///
+/// 取 100ms：服务端实测帧到达间隔为**双峰**（75% 挤在 <10ms 内成簇到达，
+/// 15% 落在 40–50ms 的空档，见 `docs/flutter/38` §六）。要吞掉一次
+/// 40–50ms 的空档 + 一次 21.3ms 的设备回调，稳态深度至少要 ~72ms，
+/// 起播再多留一拍 ⇒ 100ms。
+///
+/// 代价：对话延迟增加约 100ms（对方开口到你听到）。这是**可感知但可接受**的
+/// 通话延迟量级；换来的是不再成段断音。若用户反馈延迟偏大，先确认不再断续，
+/// 再考虑 90ms（不要低于 [kUnderrunFloorSec] 的 2 倍）。
+const double kJitterStartSec = 0.10;
+
+/// 设备一次 data_callback 要拿走的时长（秒）——**欠载判据的真正基准**。
+///
+/// ## 2026-10-27 事故（必读，别再用 web 的 20ms 当阈值）
+///
+/// 本文件第一版把 `kJitterAheadTargetSec`（web 的 20ms 前瞻量）直接当成
+/// 「FIFO 低于它就欠载」的判据。**这是错的**，而且在 `bufferFrames=1024` 下
+/// 是**致命**的：
+///
+///   FIFO 深度 < 30ms  时写一帧(20ms) → 深度最多 50ms
+///   设备回调一次吃掉 1024 帧 = **21.3ms** → 深度掉到 28.7ms…
+///
+/// 只要某次回调后深度跌破 20ms，`decideJitterFrame` 就判欠载 → `playing=false`
+/// → 之后**每帧都只进预缓冲、不写设备** → 而设备继续把 FIFO 抽空 →
+/// 起播条件 `fifoDepth + pending >= 60ms` 里 `fifoDepth` 恒 0，只能靠 pending…
+/// 但 pending 里攒的是「未来的帧」，设备此刻正在播静音 ⇒ 听觉上是
+/// **周期性长时间静音**（实测仿真：2 秒内静音 2005ms）。
+///
+/// 用户的原始描述「不像是一直在连着声听的」正是这个特征：
+/// **不是咔哒，是成段的断**。
+///
+/// ## 正确判据
+///
+/// push 模型下欠载的唯一标准是「**下一次回调取不出一整个缓冲周期**」：
+///
+///   FIFO 深度 < 一次回调的消耗量 + 安全余量
+///
+/// 设备周期在 [kPlaybackBufferFrames]；这里留一拍余量（再多一次回调的
+/// 容错）作为 [kUnderrunFloorSec]。
+const double kJitterCallbackSec = kPlaybackBufferFrames / kSampleRate;
+
+/// 欠载下限（秒）= 一次设备回调消耗量 × 2（吃一拍、留一拍）。
+///
+/// BUF=1024 时 = 42.7ms。**必须 ≥ [kJitterCallbackSec]**，否则每次回调都
+/// 会重新触发欠载判定（回归锁 `voice_audio_jitter_test.dart` 的
+/// 「回调周期 vs 欠载阈值」一组钉死了这条）。
+const double kUnderrunFloorSec = kJitterCallbackSec * 2;
 
 /// 稳态目标深度（秒）—— 追赶时下探到该值以下才算「已排空」。
 ///
-/// 比欠载阈值 [kJitterAheadTargetSec] 留 10ms 余量：若追赶到恰好 20ms 就
-/// 重新起播，一次调度抖动又会立刻欠载，形成「抖—停—抖」循环。
-const double kJitterTargetSec = 0.03;
+/// 必须高于 [kUnderrunFloorSec]，否则退出追赶后立刻又判欠载，形成
+/// 「抖—停—抖」循环。留约半拍余量。
+const double kJitterTargetSec = kUnderrunFloorSec * 1.5;
 
 /// 抖动缓冲对单帧的处置动作。
 enum JitterAction {
@@ -229,8 +276,14 @@ JitterDecision decideJitterFrame({
     );
   }
 
-  // ④ 稳态：FIFO 浅于一帧 lead ⇒ 欠载，退回预缓冲重新攒水位。
-  if (fifoDepthSec < kJitterAheadTargetSec) {
+  // ④ 稳态：FIFO 浅到「下一次回调取不出一整个缓冲周期」才算欠载。
+  //
+  // ⚠️ **判据是 kUnderrunFloorSec，不是 kJitterAheadTargetSec**（2026-10-27 事故）：
+  // 后者是 web 的排播前瞻量（20ms），在 push-FIFO 模型里低于一次设备回调的
+  // 消耗量（bufferFrames=1024 ⇒ 21.3ms）⇒ 每次回调后都被判欠载 ⇒ playing 恒
+  // false ⇒ 只预缓冲不写设备 ⇒ **成段静音**。
+  // 详见 [kUnderrunFloorSec] 的注释与 docs/flutter/38 §六。
+  if (fifoDepthSec < kUnderrunFloorSec) {
     return JitterDecision(
       action: JitterAction.prebuffer,
       playing: false,

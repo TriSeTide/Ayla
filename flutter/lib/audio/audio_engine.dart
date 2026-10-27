@@ -22,8 +22,13 @@
 ///
 /// 现在改成：**设备 FIFO 是唯一缓冲源**，由 [decideJitterFrame]（纯函数，
 /// 定义在 `lib/poc/relay_protocol.dart`）按水位决定 prebuffer / flush / play / drop。
-/// 水位常量：起播 [kJitterStartSec]=60ms、稳态目标 [kJitterTargetSec]=30ms、
-/// 欠载判定 [kJitterAheadTargetSec]=20ms、积压丢弃 [kJitterResetAtSec]=400ms。
+/// 水位常量：起播 [kJitterStartSec]=100ms、稳态目标 [kJitterTargetSec]（= 欠载下限×1.5）、
+/// **欠载下限 [kUnderrunFloorSec] = 一次设备回调消耗量 × 2**、积压丢弃 [kJitterResetAtSec]=400ms。
+///
+/// ⚠️ **欠载判据不能用 web 的 20ms**（2026-10-27 事故，见 [kUnderrunFloorSec] 注释与
+/// `docs/flutter/38` §六）：设备一次 data_callback 要吃掉 [kPlaybackBufferFrames] 帧 =
+/// 21.3ms，比 20ms 还多 ⇒ 稳态必然被判欠载 ⇒ 只预缓冲不写设备 ⇒ **成段静音**。
+/// 用户描述「不像是一直在连着声听的」正是这个特征。
 ///
 /// ## 语义（对齐 `wsRelayRoom.ts`）
 /// - **仅 speaking 时发帧**（峰值迟滞 [kSpeakingOn] / [kSpeakingOff]）；静音不发帧
