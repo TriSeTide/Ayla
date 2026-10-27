@@ -1,12 +1,17 @@
 /**
  * 语音媒体层薄封装（M5-3 §3.4 / §4.3）：连接/静音/音量/远端轨道/事件归一。
  *
- * 依赖倒置：VoiceLiveKitClient 只依赖 LiveKitRoomLike 接口；真实实现由
- * createWsRelayRoom()（WS 音频中继，见 wsRelayRoom.ts）给出，测试注入 fake。
+ * 依赖倒置：VoiceLiveKitClient 只依赖 LiveKitRoomLike 接口；两个真实实现
+ * （createLiveKitRoom / createWsRelayRoom）由工厂按服务端下发的 transport 选择，
+ * 测试注入 fake —— 本文件是**唯一**同时认识两种传输的地方，页面/组件/store 不感知。
  *
- * 传输（2026-09-12 起）：**只有 WS 音频中继**。frp 穿透下 UDP 源地址被改写，
- * WebRTC/TURN 媒体面不可用；LiveKit 已整体退役（服务端 + livekit-client 依赖 +
- * VITE_VOICE_TRANSPORT 回滚开关全部移除）。
+ * 传输（2026-10-27 起）：**两条并存，服务端裁决 + 客户端原地降级**
+ * - `livekit`：LiveKit 单 UDP 端口媒体面（实测 1/3/5 人 ICE=connected，candidate 为
+ *   udp prflx，RTP 持续流动）。信令 `wss://…/livekit`，音量/指令走 REST 与 voice.state。
+ * - `ws_relay`：WS 音频中继（Opus over WebSocket over TCP），**回滚路径**，一行未改。
+ *
+ * join 响应同时下发两种配置 ⇒ LiveKit 连接失败可**原地降级**到 ws_relay（一次连接尝试，
+ * 不等发版、不回后端），降级不触发 leave/（媒体断线 ≠ 离开频道）。
  *
  * 语义边界（M5-3 §4.3）：
  * - 轨道 mute 是媒体事实；voice.state 的 muted/unmuted 是应用层成员事实——两者不混用，
@@ -15,6 +20,8 @@
  * - 媒体断线 ≠ 离开频道：断线只映射为 failed，由用户决定重进。
  * - token 纪律：token 只作为 connect 入参传递，不打日志、不缓存。
  */
+import type { VoiceMediaConfig } from "../api/types";
+import { createLiveKitRoom } from "./livekitRoom";
 import { createWsRelayRoom } from "./wsRelayRoom";
 
 
@@ -65,11 +72,37 @@ export interface LiveKitRoomLike {
 
 /* ================= 封装客户端 ================= */
 
+/** 媒体传输（与后端 VOICE_MEDIA_TRANSPORT / join 的 media.transport 同字面量） */
+export type VoiceTransport = "livekit" | "ws_relay";
+
 type RoomFactory = (events: LiveKitEvents) => Promise<LiveKitRoomLike> | LiveKitRoomLike;
 
-/** 缺省 Room 工厂：WS 音频中继（LiveKit 已退役，无回滚分支） */
-function defaultRoomFactory(): RoomFactory {
-  return createWsRelayRoom;
+/**
+ * 缺省 Room 工厂：按传输选择实现（**默认 ws_relay**，与后端默认值一致）。
+ *
+ * 这是 web 侧接 LiveKit 的全部接入点：8 方法 / 7 回调的契约不变，
+ * 上层（useVoiceChannel / store / 组件）完全无感。
+ */
+function defaultRoomFactory(transport: VoiceTransport): RoomFactory {
+  return transport === "livekit" ? createLiveKitRoom : createWsRelayRoom;
+}
+
+/**
+ * 脱敏：SDK 的原始错误消息可能夹带 token / 长凭据（JWTs 形如三段 base64url）。
+ * AGENTS.md §9 要求日志不得泄露凭据，因此这里把长 token 形状的片段替换掉。
+ */
+function redact(text: string): string {
+  return text
+    .replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "<redacted-jwt>")
+    .replace(/([?&](?:access_token|token|key|secret)=)[^&\s]+/gi, "$1<redacted>")
+    .slice(0, 200);
+}
+
+/** 降级日志（结构化、便于判断"是否真的切成功了"；不含 token） */
+function logTransportFallback(reason: unknown): void {
+  const detail = redact(reason instanceof Error ? reason.message : String(reason));
+  // 只记一句，不打印栈：降级是预期路径，不是崩溃
+  console.warn(`[voice] transport_fallback from=livekit to=ws_relay reason=${detail}`);
 }
 
 interface RoomOwner {
@@ -88,10 +121,74 @@ export class VoiceLiveKitClient {
   private generation = 0;
   private events: LiveKitEvents = {};
   private roomFactory: RoomFactory | null = null;
+  /** 本次连接实际使用的传输（降级后为 ws_relay；供排障与续签判断） */
+  private transport: VoiceTransport = "ws_relay";
+  /** 最近一次 connect 的媒体配置（livekit 失败时据此原地降级到 ws_relay） */
+  private media: VoiceMediaConfig | null = null;
 
-  /** 测试/替换用：注入 Room 工厂；缺省用真实 createWsRelayRoom */
+  /** 测试/替换用：注入 Room 工厂；缺省按 transport 选 createLiveKitRoom/createWsRelayRoom */
   setRoomFactory(factory: RoomFactory | null) {
     this.roomFactory = factory;
+  }
+
+  /** 本次连接实际使用的传输（降级后读回 ws_relay） */
+  getTransport(): VoiceTransport {
+    return this.transport;
+  }
+
+  /**
+   * 按服务端下发的媒体配置连接。
+   *
+   * - `transport === "livekit"` 且配置完整 → 走 LiveKit；**连接失败原地降级**到
+   *   `media.ws_relay.url`（服务端双下发，无需二次请求）；
+   * - 其它情况 → 走 WS 中继（与旧行为逐字节一致）。
+   * - 降级**不触发 leave/**：媒体断线 ≠ 离开频道（client.ts 既有契约）。
+   */
+  async connectWithMedia(
+    media: VoiceMediaConfig | null | undefined,
+    accessToken: string,
+    /** 老后端不返回 media 时的回滚地址（= voiceDirectWsUrl(channelId)） */
+    fallbackRelayUrl?: string,
+  ): Promise<void> {
+    const token = accessToken;
+    if (!token) throw new Error("登录状态失效，请重新登录");
+    const relayUrl = media?.ws_relay?.url ?? fallbackRelayUrl ?? "";
+    const livekit = media?.livekit ?? null;
+    const wantLiveKit = media?.transport === "livekit" && !!livekit?.url && !!livekit?.token;
+
+    if (!wantLiveKit) {
+      if (!relayUrl) throw new Error("语音媒体配置缺失");
+      this.media = media ?? null;
+      this.transport = "ws_relay";
+      await this.connect(relayUrl, token);
+      return;
+    }
+
+    this.media = media ?? null;
+    this.transport = "livekit";
+    try {
+      await this.connect(livekit!.url, livekit!.token);
+    } catch (error) {
+      // 取消（用户切频道/离开）不是降级场景：原样向上抛，由调用方识别 AbortError
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      if (!relayUrl) throw error; // 没有回滚路径：保持原错误（上层 show failed）
+      logTransportFallback(error);
+      this.transport = "ws_relay";
+      await this.connect(relayUrl, token);
+    }
+  }
+
+  /**
+   * 长时通话续签：媒体 token 临期时重新取一份（TTL 由后端 LIVEKIT_TOKEN_TTL_SECONDS 决定）。
+   * 仅 livekit 传输需要；ws_relay 由中继自己在重连前刷新 access token。
+   */
+  setMedia(media: VoiceMediaConfig | null | undefined) {
+    this.media = media ?? null;
+  }
+
+  /** 最近一次连接的媒体配置（续签判断用；不含副作用） */
+  getMedia(): VoiceMediaConfig | null {
+    return this.media;
   }
 
   setEvents(events: LiveKitEvents) {
@@ -113,7 +210,7 @@ export class VoiceLiveKitClient {
     };
     this.owner = owner;
     previous?.cancel();
-    const factory = this.roomFactory ?? defaultRoomFactory();
+    const factory = this.roomFactory ?? defaultRoomFactory(this.transport);
     const events = this.guardedEvents(owner, this.events);
     const connectOwned = async () => {
       try {

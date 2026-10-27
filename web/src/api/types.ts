@@ -916,11 +916,54 @@ export interface VoiceChatMessage {
   created_at: string;
 }
 
-/** POST /voice/channels/<id>/join/ 返回（成员落表确认；媒体凭据已随 LiveKit 退役移除） */
+/**
+ * 语音媒体传输方式（服务端裁决）：LiveKit 单 UDP 端口媒体面，或 WS 音频中继（回滚路径）。
+ * 客户端不猜：`transport` 由后端下发，连接失败时按 `ws_relay` 原地降级。
+ */
+export type VoiceMediaTransport = "livekit" | "ws_relay";
+
+/** LiveKit 媒体凭据（join 与 media-token 端点同一套形状） */
+export interface VoiceLiveKitMediaConfig {
+  /** 信令地址（wss://…/livekit） */
+  url: string;
+  /** 媒体 token（identity = 裸 user pk）；只作 connect 入参，不打日志、不缓存 */
+  token: string;
+  /** 有效期（秒） */
+  ttl?: number;
+  expires_at?: string;
+  room_name?: string;
+  identity?: string;
+}
+
+/** WS 音频中继媒体配置 */
+export interface VoiceWsRelayMediaConfig {
+  /** 完整 ws/音频 地址（含 channel 查询参数） */
+  url: string;
+}
+
+/**
+ * join / media-token 响应的 media 旁路字段。
+ * 两种配置**同时下发**（各自可为 null），让客户端在 livekit 连接失败时原地降级，
+ * 不必再回后端要一次配置（回滚速度 = 一次连接尝试，而不是一次发版）。
+ */
+export interface VoiceMediaConfig {
+  transport: VoiceMediaTransport;
+  livekit?: VoiceLiveKitMediaConfig | null;
+  ws_relay?: VoiceWsRelayMediaConfig | null;
+}
+
+/** POST /voice/channels/<id>/join/ 返回（成员落表确认 + 媒体配置旁路） */
 export interface VoiceJoinResult {
   channel_id: string;
   room_name: string;
   joined: boolean;
+  /** 媒体配置；老后端不返回该字段时按 WS 中继（回滚路径）处理 */
+  media?: VoiceMediaConfig | null;
+}
+
+/** POST /voice/channels/<id>/media-token/ 返回（长时通话续签；与 join 的 media 同形） */
+export interface VoiceMediaTokenResult {
+  media: VoiceMediaConfig;
 }
 
 /* ---------- 爱莉语音编排（对齐 elysia_bridge/views.py ElysiaVoiceCall*） ---------- */

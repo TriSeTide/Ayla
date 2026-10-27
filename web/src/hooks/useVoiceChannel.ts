@@ -241,7 +241,7 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
           try {
             // REST changes membership. Wait for its receipt even if superseded, then
             // compensate that exact channel before the next queued selection can join.
-            await voiceApi.joinVoiceChannel(channelId);
+            const joinResult = await voiceApi.joinVoiceChannel(channelId);
             joined = true;
             if (!isCurrent()) return;
             if (previousChannelId && previousChannelId !== channelId) {
@@ -263,10 +263,16 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
             });
             useVoiceStore.getState().setLivekit("connecting");
             voiceSessionRuntime.setMediaChannel(channelId);
-            // 媒体通道：WS 音频中继（LiveKit 已退役，无回滚分支）。
+            // 媒体通道：按服务端下发的 media 配置选传输（livekit | ws_relay）。
+            // 双下发 ⇒ LiveKit 连接失败原地降级到 ws_relay，不回后端、不发版；
+            // 老后端不返回 media 时回落到同源中继地址（与旧行为逐字节一致）。
             const mediaToken = useAuthStore.getState().accessToken;
             if (!mediaToken) throw new Error("登录状态失效，请重新登录");
-            await voiceLiveKit.connect(voiceDirectWsUrl(channelId), mediaToken);
+            await voiceLiveKit.connectWithMedia(
+              joinResult?.media ?? null,
+              mediaToken,
+              voiceDirectWsUrl(channelId),
+            );
             if (!isCurrent()) return;
             await voiceLiveKit.startAudio().catch(() => {});
             if (!isCurrent()) return;

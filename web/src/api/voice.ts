@@ -25,6 +25,7 @@ import type {
   VoiceChannelMemberDescriptor,
   VoiceChatMessage,
   VoiceJoinResult,
+  VoiceMediaTokenResult,
 } from "./types";
 
 /* ---------- 频道 REST ---------- */
@@ -78,11 +79,25 @@ export function renameVoiceChannel(channelId: string, name: string) {
 
 /**
  * POST /voice/channels/<id>/join/ —— 加入频道（成员落表，幂等）。
- * 媒体走 WS 音频中继，直连地址由前端本地推导，无需服务端下发凭据。
+ *
+ * 响应带 `media` 旁路字段：服务端裁决 transport（livekit | ws_relay），并**同时下发**
+ * 两种配置，使客户端可在 LiveKit 连接失败时原地降级到 WS 中继而无需二次请求。
+ * 本层只做类型透传，不解析/不缓存 token。
  */
 export function joinVoiceChannel(channelId: string) {
   return apiRequest<VoiceJoinResult>(
     `/voice/channels/${encodeURIComponent(channelId)}/join/`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * POST /voice/channels/<id>/media-token/ —— 续签媒体 token（长时通话用）。
+ * 响应 `media` 与 join 同一套形状；调用方按 media.livekit.ttl 提前续签。
+ */
+export function fetchVoiceMediaToken(channelId: string) {
+  return apiRequest<VoiceMediaTokenResult>(
+    `/voice/channels/${encodeURIComponent(channelId)}/media-token/`,
     { method: "POST" },
   );
 }

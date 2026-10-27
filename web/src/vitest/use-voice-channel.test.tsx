@@ -268,6 +268,105 @@ describe("useVoiceChannel", () => {
     expect(useVoiceStore.getState().currentChannelId).toBeNull();
   });
 
+  it("join 按 media 配置选传输：transport=livekit 用 livekit 的 url/token", async () => {
+    stubFetch({
+      "POST /voice/channels/ch1/join/": () =>
+        jsonResponse({
+          ...JOIN_OK,
+          media: {
+            transport: "livekit",
+            livekit: { url: "wss://frp-one.com:26211/livekit", token: "media-token", ttl: 600 },
+            ws_relay: { url: "https://relay/ws/voice/audio/?channel=ch1" },
+          },
+        }),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
+        jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
+      "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
+      "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
+    });
+    const room = fakeRoom();
+    voiceLiveKit.setRoomFactory(() => room);
+    const { result } = renderHook(() => useVoiceChannel());
+    await act(async () => {
+      await result.current.join("ch1");
+    });
+    // 媒体 token（不是 access token）与合作方地址原样传递
+    expect(room.connect).toHaveBeenCalledWith("wss://frp-one.com:26211/livekit", "media-token");
+    expect(useVoiceStore.getState().currentChannelId).toBe("ch1");
+    await act(async () => {
+      await result.current.leave();
+    });
+  });
+
+  it("⚠️livekit 连接失败 → 原地降级到 ws_relay，**不**触发 leave/", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubFetch({
+      "POST /voice/channels/ch1/join/": () =>
+        jsonResponse({
+          ...JOIN_OK,
+          media: {
+            transport: "livekit",
+            livekit: { url: "wss://frp-one.com:26211/livekit", token: "media-token" },
+            ws_relay: { url: "https://relay/ws/voice/audio/?channel=ch1" },
+          },
+        }),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
+        jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
+      "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
+      "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
+    });
+    const lives: Array<{ connect: ReturnType<typeof vi.fn> }> = [];
+    let call = 0;
+    voiceLiveKit.setRoomFactory(() => {
+      call += 1;
+      const room =
+        call === 1
+          ? fakeRoom({ connect: vi.fn().mockRejectedValue(new Error("ice failed")) })
+          : fakeRoom();
+      lives.push(room as unknown as { connect: ReturnType<typeof vi.fn> });
+      return room;
+    });
+    const { result } = renderHook(() => useVoiceChannel());
+    await act(async () => {
+      await result.current.join("ch1");
+    });
+
+    // 第二次连接用的是 server 下发的 ws_relay 地址
+    expect(lives).toHaveLength(2);
+    expect(lives[1].connect).toHaveBeenCalledWith("https://relay/ws/voice/audio/?channel=ch1", "acc");
+    // 降级 ≠ 离开频道：成员状态保留、不调 leave/
+    expect(useVoiceStore.getState().currentChannelId).toBe("ch1");
+    expect(calledWith("POST", "/leave/")).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("transport_fallback"));
+
+    await act(async () => {
+      await result.current.leave();
+    });
+    warn.mockRestore();
+  });
+
+  it("老后端 join 不返回 media → 回落到同源中继地址（向后兼容）", async () => {
+    stubFetch({
+      "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
+      "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
+        jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
+      "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
+      "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
+    });
+    const room = fakeRoom();
+    voiceLiveKit.setRoomFactory(() => room);
+    const { result } = renderHook(() => useVoiceChannel());
+    await act(async () => {
+      await result.current.join("ch1");
+    });
+    const [url, token] = (room.connect as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
+    expect(url).toContain("/ws/voice/audio/?channel=ch1");
+    expect(token).toBe("acc");
+    await act(async () => {
+      await result.current.leave();
+    });
+  });
+
   it("toggleMic 乐观 UI + SDK 失败回滚", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),

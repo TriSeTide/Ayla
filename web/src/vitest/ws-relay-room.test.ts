@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuthStore } from "../stores/auth";
-import { createWsRelayRoom, voiceDirectWsUrl } from "../livekit/wsRelayRoom";
+import { createWsRelayRoom, voiceDirectWsUrl, VOICE_DIRECT_WS_BASE } from "../livekit/wsRelayRoom";
 import type { LiveKitEvents, LiveKitState } from "../livekit/client";
 
 vi.mock("../api/client", () => ({ refreshAccessToken: vi.fn(async () => true) }));
@@ -247,11 +247,15 @@ describe("wsRelayRoom", () => {
     vi.restoreAllMocks();
   });
 
-  it("直连地址带上 channel 且指向 frp 直连端口", () => {
+  it("直连地址带上 channel，入口随 VOICE_DIRECT_WS_BASE（默认 sakura 26211 独立隧道）", () => {
     const url = voiceDirectWsUrl("42");
     expect(url).toContain("/ws/voice/audio/?channel=42");
-    expect(url).toContain("7881");
-    expect(url).not.toContain("ayla.trise.top"); // 不再经 CF
+    // 入口由 VOICE_DIRECT_WS_BASE 决定：生产是 sakura 26211 独立隧道，
+    // 本地 dev 可用 VITE_VOICE_DIRECT_WS 覆盖（web/.env.local → 同源 vite 代理）。
+    // 旧断言写死 "7881 / 不含 ayla.trise.top"，在 2155d07（语音链路统一到 sakura）
+    // 之后已失效——这里对齐真实契约，避免本地 .env.local 存在与否都判红。
+    expect(url.startsWith(VOICE_DIRECT_WS_BASE)).toBe(true);
+    expect(url).not.toContain("live.trise.top:7881"); // volx 7881 已停用
   });
 
   it("缺 WebCodecs 时给出明确错误（而非深处的 TypeError）", async () => {
