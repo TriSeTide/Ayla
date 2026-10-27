@@ -1,6 +1,7 @@
 """房间音频总线（audio_relay）契约测试。
 
-覆盖：slot 分配/复用、转发裁决（speaking + muted）、Top-K 上限、房间回收。
+覆盖：slot 分配/复用、转发裁决（**仅 muted**，2026-10-27 起 speaking 不参与）、
+Top-K 作为观测量、房间回收。
 
 刻意不依赖 pytest-asyncio —— 用同步用例包 `asyncio.run`，这样无论测试环境有没有装
 asyncio 插件都能跑。本模块是纯内存状态（无 DB、无 channel layer），所以也不需要
@@ -58,19 +59,33 @@ def test_slot_is_reused_after_leave():
     assert c.slot != b.slot
 
 
-def test_relay_requires_speaking_flag():
+def test_relay_does_not_depend_on_speaking_flag():
+    """2026-10-27 设计缺陷修复：音频转发**不得**以 speaking 为门控。
+
+    旧用例 `test_relay_requires_speaking_flag` 断言「未标记 speaking ⇒ 不转发、
+    标记后 ⇒ 转发、取消标记 ⇒ 又不转发」。那正是用户实报的「有声音才连上去，
+    声音小了就跟断了一样」的根因：人说话的正常停顿/句尾降调/换气都会让峰值
+    跌破阈值 ⇒ 停止发帧 ⇒ 服务端丢弃 ⇒ 对端只收到有声片段。
+
+    speaking 是**纯 UI 事实**（成员行高亮），不参与媒体裁决。
+    """
+
     async def main():
         a, _ = await audio_relay.join(CH, "cn_a", "alice")
-        assert await audio_relay.may_relay(CH, "cn_a") is None
+        # 刚进房、从未说过话 ⇒ 音频照样要转发
+        fresh = await audio_relay.may_relay(CH, "cn_a")
         await audio_relay.set_speaking(CH, "cn_a", True)
-        allowed = await audio_relay.may_relay(CH, "cn_a")
+        talking = await audio_relay.may_relay(CH, "cn_a")
+        # 说完一句、停止说话 ⇒ 仍要转发（否则对方就听不到环境音与停顿）
         await audio_relay.set_speaking(CH, "cn_a", False)
-        return a.slot, allowed, await audio_relay.may_relay(CH, "cn_a")
+        silent = await audio_relay.may_relay(CH, "cn_a")
+        return a.slot, fresh, talking, silent
 
-    slot, allowed, after = _run(main())
+    slot, fresh, talking, silent = _run(main())
 
-    assert allowed == slot
-    assert after is None
+    assert fresh == slot, "未说过话也必须转发（否则对方永远听不到第一声之前的声音）"
+    assert talking == slot
+    assert silent == slot, "说完了也必须继续转发（这是本次修复的核心）"
 
 
 def test_mute_blocks_relay_and_clears_speaking():
@@ -88,8 +103,30 @@ def test_mute_blocks_relay_and_clears_speaking():
     assert relayed is None
 
 
-def test_top_k_caps_concurrent_forwarding():
-    """8 个人同时说话，只放行 MAX_ACTIVE_SPEAKERS 个 —— 这是下行带宽的兜底。"""
+def test_top_k_is_observational_not_a_relay_gate():
+    """Top-K（active_slots）已降级为**观测量**，不再参与转发裁决。
+
+    旧用例断言「8 人同时说话只放行 MAX_ACTIVE_SPEAKERS 个」——那是把「谁在说话」
+    当成下行裁剪依据，同样会让其余人的声音整体消失。经实测持续转发每人仅 ~2 KB/s、
+    20 人房间总吞吐 ~6.3 Mbps，远低于隧道上限 ⇒ 带宽兜底的前提不成立。
+    """
+
+    async def main():
+        for i in range(8):
+            await audio_relay.join(CH, f"cn_{i}", f"u{i}")
+            await audio_relay.set_speaking(CH, f"cn_{i}", True)
+        room = audio_relay._ROOMS[CH]
+        # 观测量仍按 Top-K 截断（供 stats/运维看并发说话数）
+        active = room.active_slots()
+        # 但转发裁决对每个成员都必须放行
+        relayed = [await audio_relay.may_relay(CH, f"cn_{i}") for i in range(8)]
+        return active, relayed, audio_relay.MAX_ACTIVE_SPEAKERS
+
+    active, relayed, cap = _run(main())
+
+    assert len(active) == cap, "观测量仍按 Top-K 截断"
+    assert all(r is not None for r in relayed), "转发裁决不得因 Top-K 丢人"
+    assert len(relayed) == 8
 
     async def main():
         for i in range(8):

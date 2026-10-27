@@ -31,8 +31,10 @@
 /// 用户描述「不像是一直在连着声听的」正是这个特征。
 ///
 /// ## 语义（对齐 `wsRelayRoom.ts`）
-/// - **仅 speaking 时发帧**（峰值迟滞 [kSpeakingOn] / [kSpeakingOff]）；静音不发帧
-///   （服务端只转发 speaking 连接的音频）；
+/// - **音频帧持续发送**（2026-10-27 设计缺陷修复）；`speaking`（峰值迟滞
+///   [kSpeakingOn] / [kSpeakingOff]）**只用于上报 UI 事实**（成员行高亮），
+///   **不再门控发帧**。旧实现「仅 speaking 时发帧」会让说话的正常停顿、句尾降调、
+///   换气全部变成静音空洞，听感是「有声音才连上去，声音小了就断」（用户实报）。
 /// - 静音（`setMicrophoneEnabled(false)`）**完全释放麦克风设备**（隐私：熄灭硬件指示灯），
 ///   并先发 `mute{on:true}` 事实（web 同序）；
 /// - 本地发送增益 0~2（web `setLocalVolume`，UI 的 0~100 映射为 `volume / 50`）——
@@ -405,7 +407,29 @@ class AylaAudioEngine {
     _captureCount -= kFrameBytes;
   }
 
-  /// 编码并发送 [_encodeSamples] 这一帧（增益 / 说话判定后仍仅 speaking 时发）。
+  /// 编码并发送 [_encodeSamples] 这一帧。
+  ///
+  /// ## 2026-10-27 设计缺陷修复（用户实报「有声音才连上去，声音小了就跟断了一样」）
+  ///
+  /// 旧实现把 `speaking`（一个**UI 提示**概念：谁在说话，用于成员行高亮）
+  /// 当成**媒体传输门控**：
+  ///
+  /// ```dart
+  /// if (!nowSpeaking) return;   // ← 峰值低于 0.02 就整帧不发
+  /// ```
+  ///
+  /// 后果：人说话的正常停顿、句尾降调、换气、轻辅音，峰值都会跌破 0.02 ⇒
+  /// **停止发帧** ⇒ 服务端 `may_relay` 因 `not member.speaking` 丢弃 ⇒
+  /// 对端只收到「有声音的那几段」⇒ 听感正是「**有声音才连上去，声音小了就断**」。
+  ///
+  /// 这是设计错误，不是调阈值能解决的（把阈值调到 0 等于永不判定说话，
+  /// 成员行高亮就废了）。正确做法是**两件事解耦**：
+  /// - `speaking` 只上报 UI 事实（阈值迟滞不变，仍在峰值上判断）；
+  /// - **音频帧持续发送**，与说话状态无关。
+  ///
+  /// 带宽代价（实测估算）：静音帧在 libopus VOIP VBR 下仅 ~25 字节，
+  /// 持续发送每人约 2 KB/s（峰值 3.9 KB/s），20 人房间服务器总吞吐 ~6.3 Mbps，
+  /// 远低于樱花隧道 24 Mibit/s。**带宽不是阻碍**，见 `docs/flutter/39`。
   void _processFrame() {
     final Int16List samples = _encodeSamples;
 
@@ -436,7 +460,10 @@ class AylaAudioEngine {
       _relay.sendControl('speaking', on: nowSpeaking);
       _events.onSpeakingChanged?.call(nowSpeaking);
     }
-    if (!nowSpeaking) return; // 静音不发帧（对齐 web：带宽由客户端兜一层）
+    // ⚠️ **不要在这里按 speaking 门控发帧**（2026-10-27 设计缺陷修复）：
+    // `nowSpeaking` 只用于上报 UI 事实与计费级 speaking 控制帧；
+    // 音频流**必须持续发送**，否则对端只能收到「有声片段」，听感就是成段断音。
+    // 详见 [_processFrame] 的文档注释与 docs/flutter/39。
 
     final BufferedOpusEncoder? enc = _encoder;
     if (enc == null) return;

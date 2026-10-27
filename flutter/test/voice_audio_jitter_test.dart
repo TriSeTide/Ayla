@@ -28,6 +28,18 @@ const double _frameSec = kFrameMs / 1000.0;
 /// 读源码（接线锁用）。
 String _src(String relative) => File(relative).readAsStringSync();
 
+/// 剥掉 `//` 行注释（保留下标对齐无关性：只用于 contains 判断）。
+///
+/// 用于「源码里不许再出现某段代码」这类锁：文档注释里常引用旧代码作反例，
+/// 不剥注释会把反例当成违规（2026-10-27 实测假红一次）。
+String _stripLineComments(String src) => src
+    .split('\n')
+    .map((String line) {
+      final int i = line.indexOf('//');
+      return i < 0 ? line : line.substring(0, i);
+    })
+    .join('\n');
+
 void main() {
   // 起播水位必须真的比一帧厚；否则这个「抖动缓冲」不存在。
   const double start = kJitterStartSec;
@@ -465,9 +477,18 @@ void main() {
       expect(kFrameBytes, 1920);
     });
 
-    test('★ 仍只在 speaking 时发帧（静音不发，带宽与 web 一致）', () {
-      final String engine = _src('lib/audio/audio_engine.dart');
-      expect(engine, contains('if (!nowSpeaking) return;'));
+    test('★★ 音频帧必须**持续发送**，不得以 speaking 门控（2026-10-27 设计缺陷修复）', () {
+      // ⚠️ 必须剥掉注释再判：本文件的文档注释里**故意保留**了旧代码片段
+      // `if (!nowSpeaking) return;` 作为反例说明（见 _processFrame 的 docstring），
+      // 直接 contains 会命中注释而假红（实测踩过）。
+      final String engine = _stripLineComments(_src('lib/audio/audio_engine.dart'));
+      // 旧锁断言 `if (!nowSpeaking) return;` 存在 —— 那正是缺陷本身：
+      // 人说话的停顿/句尾降调/换气都会跌破阈值 ⇒ 停发 ⇒ 对端只收到有声片段，
+      // 听感「有声音才连上去，声音小了就跟断了一样」（用户实报）。
+      expect(engine, isNot(contains('if (!nowSpeaking) return;')),
+          reason: 'speaking 是 UI 事实，不能当媒体门控');
+      // speaking 仍要上报（成员行高亮依赖它）
+      expect(engine, contains("sendControl('speaking'"));
     });
 
     test('★ decode 输入仍是「整包字节」（BufferedOpusDecoder 契约）', () {

@@ -167,7 +167,12 @@ async def test_second_member_sees_roster_and_broadcast(auth_client, transactiona
 @pytest.mark.django_db
 @pytest.mark.asyncio
 async def test_audio_forwarded_with_slot_prefix_and_n_minus_one(auth_client, transactional_db):
-    """只有 speaking 且未静音的音频才转发；接收端拿到 [1B slot]+负载；发送者不自收。"""
+    """音频**持续转发**（不依赖 speaking）；接收端拿到 [1B slot]+负载；发送者不自收。
+
+    2026-10-27 设计缺陷修复：旧用例先断言「未标记 speaking ⇒ 丢弃」，再把标记
+    speaking 当成转发前置条件。那正是用户实报「有声音才连上去，声音小了就跟断了
+    一样」的根因 —— speaking 是 UI 事实，不是媒体门控。
+    """
     user_a = await _mk_user(auth_client)
     user_b = await _mk_user(auth_client, username="audio_b2")
     ch = await _make_channel(user_a, room_name="room_audio_fwd")
@@ -185,11 +190,12 @@ async def test_audio_forwarded_with_slot_prefix_and_n_minus_one(auth_client, tra
 
     payload = bytes(range(20))
 
-    # 未标记 speaking → 丢弃
+    # 未说过话 → 照样转发（否则对方永远听不到第一声之前的声音）
     await comm_b.send_to(bytes_data=payload)
-    assert await comm_a.receive_nothing(timeout=0.3)
+    first = await comm_a.receive_from(timeout=2)
+    assert isinstance(first, bytes), "未标记 speaking 也必须转发（2026-10-27 修复）"
 
-    # 标记 speaking 后 → 转发
+    # 标记 speaking 只是 UI 广播，不影响是否转发
     await comm_b.send_to(text_data='{"type": "speaking", "on": true}')
     speaking = await comm_a.receive_json_from(timeout=2)
     assert speaking["type"] == "speaking" and speaking["on"] is True

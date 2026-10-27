@@ -9,12 +9,16 @@
   3. 这是"服务端混音"（方案 b）的严格子集 —— 将来若上行带宽不够，
      只需在本模块里插入混音，consumer/协议/前端管线都不用改
 
-转发策略
---------
-- 只有 `speaking=True` 的连接发的音频才会被转发（客户端用 AudioWorklet 算音量上报，
-  服务端只做裁决，不做 DSP）
-- 同时说话的人超过 `MAX_ACTIVE_SPEAKERS` 时，只转发最近开始说话的前 K 个
-  —— 这就是 Top-K 转发，用来给下行带宽兜底
+转发策略（2026-10-27 修正）
+------------------------
+- **音频持续转发**：只要成员在房间里且没有闭麦，收到的每一帧都原样转给其他人。
+  ~~只有 `speaking=True` 的连接发的音频才会被转发~~ —— **此条已废止**：
+  `speaking` 是 UI 提示（谁在说话），不是媒体门控。用它门控会导致人说话的正常停顿、
+  句尾降调、换气全部被丢弃，听感是「有声音才连上去，声音小了就断」（用户实报）。
+- `muted`（用户主动闭麦）仍然是硬门控：隐私边界不可绕。
+- Top-K（`MAX_ACTIVE_SPEAKERS` / `active_slots()`）**降级为观测量**，不再参与转发裁决；
+  目录注释里"用来给下行带宽兜底"的前提（带宽不够）经实测不成立——持续转发静态帧仅
+  ~25 字节/帧、每人 ~2 KB/s。详见 `Ayla/docs/flutter/39`。
 
 进程内状态（已知限制，务必知情）
 --------------------------------
@@ -170,15 +174,31 @@ async def set_muted(channel_id: int, channel_name: str, muted: bool) -> Member |
 
 
 async def may_relay(channel_id: int, channel_name: str) -> int | None:
-    """判断这条连接的音频是否应该被转发；是则返回它的 slot，否则 None。"""
+    """判断这条连接的音频是否应该被转发；是则返回它的 slot，否则 None。
+
+    2026-10-27 设计缺陷修复（用户实报「有声音才连上去，声音小了就跟断了一样」）
+    ---------------------------------------------------------------------
+    旧实现在这里同时用 `member.speaking` 与 `active_slots()`（Top-K）做门控 ⇒
+    静音/轻声帧被**服务端丢弃** ⇒ 对端只收到「有声片段」。
+
+    现在只保留两个**媒体事实**门控：
+      · `member is None` —— 不在房间里（协议非法）；
+      · `member.muted`     —— 用户主动闭麦（隐私边界，不可绕）。
+
+    `speaking` 降级为**纯 UI 事实**（谁在说话，用于成员行高亮），不再参与转发裁决。
+    带宽实测：静音帧在 libopus VBR 下约 25 字节，持续转发每人 ~2 KB/s，
+    20 人房间服务器总吞吐 ~6.3 Mbps，远低于隧道上限（详见 docs/flutter/39）。
+
+    Top-K（`active_slots`）保留为 `stats()` 的观测量；仅当将来房间规模
+    超出带宽预算时才重新启用为下行兜底（届时应改为按订阅者能力裁剪，
+    而不是按「谁在说话」裁剪，否则同样会让静音段消失）。
+    """
     async with _LOCK:
         room = _ROOMS.get(int(channel_id))
         if room is None:
             return None
         member = room.members.get(channel_name)
-        if member is None or member.muted or not member.speaking:
-            return None
-        if member.slot not in room.active_slots():
+        if member is None or member.muted:
             return None
         return member.slot
 

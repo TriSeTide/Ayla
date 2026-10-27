@@ -364,7 +364,10 @@ class AylaRelayClient {
     }
   }
 
-  /// 发送一个 opus 包（仅 connected + 开麦时发送，静音不发帧）。
+  /// 发送一个 opus 包（仅 connected + 开麦时发送）。
+  ///
+  /// ⚠️ 2026-10-27 起**不再按 speaking 门控**：开麦就持续发帧。
+  /// 旧实现静音即停发，导致对端只能收到有声片段（用户实报「有声音才连上去」）。
   void sendOpus(Uint8List opus) {
     final WebSocketChannel? ws = _ws;
     if (ws == null || !_handshaken || !_micEnabled) return;
