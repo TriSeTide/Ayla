@@ -26,11 +26,29 @@ import type { LiveKitEvents, LiveKitRoomLike, RemoteAudioTrackLike, RemotePartic
 /* ================= 传输通道 ================= */
 
 /**
- * 直连通道：volx frps 的 TCP 7881 → 本机 nginx 443（TLS）→ 中继。
- * live.trise.top 灰云 A → 47.108.85.223，国内直连低延迟，不经 CF。
- * 需要有效证书（现有 LE SAN 覆盖 live.trise.top，12-10 到期前须把续签切 dns_cf）。
+ * 语音中继入口 —— **与网页同源**（樱花 frp 26211 → 本机 nginx 443 → daphne 中继）。
+ *
+ * ## 2026-10-27 迁移（原 volx 7881 已停用）
+ *
+ * 原实现走朋友 frp 专线 `live.trise.top:7881`。迁移原因（均为实测）：
+ *
+ * 1. **延迟**：sakura 26211 的 TCP 建连中位 ~28ms，volx 7881 ~47ms（5 次取样）；
+ *    ICMP 到 volx 平均 36ms。语音端到端预算 150ms，省下的 ~19ms 直接体现在对话手感。
+ * 2. **tcpMux 队头阻塞**：volx 的 frpc 开了 `tcpMux=true`，语音与 ssh / RTMP 推流 /
+ *    HLS 拉流**共用同一条 TCP 连接** ⇒ 任一流有突发，语音就跟着排队；
+ *    观察到的 `rcv_ooopack 34688`、`dsack_dups 3477` 说明该连接频繁乱序/重传，
+ *    恢复后积压数据集中释放 ⇒ 听感是「断几秒后爆发式回放」。
+ *    sakura 那条是**独立隧道**，不受这些流量影响。
+ * 3. **带宽不是问题**：Opus 20ms 单帧约 80 字节、50 帧/秒 = **32 kbps**；
+ *    sakura 限速 24 Mibit/s 是它的 750 倍，语音占用是零头。
+ *
+ * 与网页同源还有一个好处：省一次 TLS 握手、证书与 CORS 全部沿用网页那套。
+ *
+ * 本地开发仍可用 `VITE_VOICE_DIRECT_WS` 覆盖（vite 反代到 daphne 8100）。
  */
-export const VOICE_DIRECT_WS_BASE = ((import.meta.env as Record<string, string | undefined>)?.VITE_VOICE_DIRECT_WS) ?? "wss://live.trise.top:7881";
+export const VOICE_DIRECT_WS_BASE =
+  ((import.meta.env as Record<string, string | undefined>)?.VITE_VOICE_DIRECT_WS) ??
+  "wss://s.ayla.trise.top:26211";
 
 export function voiceDirectWsUrl(channelId: string): string {
   return `${VOICE_DIRECT_WS_BASE}/ws/voice/audio/?channel=${encodeURIComponent(channelId)}`;

@@ -42,12 +42,21 @@ import '../poc/relay_protocol.dart';
 /// 连续失败达该次数后先续期 token 再重连（web `wsRelayRoom.ts:117` RECONNECT_REFRESH_AFTER）。
 const int kRelayReconnectRefreshAfter = 3;
 
-/// 中继连接地址（web `wsRelayRoom.ts:35–37` 的 `voiceDirectWsUrl`）。
+/// 中继连接地址 —— **与 API/网页同源**（`AYLA_API_BASE` 推导）。
 ///
-/// web 走 `VITE_VOICE_DIRECT_WS`（生产 = `wss://live.trise.top:7881`；本地 = vite 的
-/// `wss://127.0.0.1:5173` 反代到 8100）。Flutter 侧没有反代，直连后端 daphne 的
-/// `/ws/voice/audio/`（与 `core/ws/ws_manager.dart` 的四通道同主机同端口约定：
-/// Android 模拟器 `10.0.2.2` / 桌面 `127.0.0.1`）。
+/// ## 2026-10-27 与 web 统一（原 volx 7881 已停用）
+///
+/// 两端此前走**两条不同链路**：web 走朋友 frp 专线 `live.trise.top:7881`，
+/// Flutter 走樱花 frp `s.ayla.trise.top:26211`。现统一为**樱花**，理由见
+/// `web/src/livekit/wsRelayRoom.ts` 的同段注释（实测延迟低 ~19ms、
+/// 独立隧道不受 tcpMux 队头阻塞、带宽 32kbps 远低于限速）。
+///
+/// Flutter 侧无需硬编码入口：release 构建注入
+/// `--dart-define=AYLA_API_BASE=https://s.ayla.trise.top:26211`，
+/// 本函数由 [aylaWsBase] 推导出 `wss://s.ayla.trise.top:26211`；
+/// 本地开发仍是 `127.0.0.1:8100` / Android 模拟器 `10.0.2.2:8100`。
+///
+/// ⚠️ **不要在这里再写死域名** —— 入口唯一事实源是 `core/net/api_endpoint.dart`。
 Uri aylaVoiceRelayUri(String channelId, String token) {
   return Uri.parse(
     '${aylaWsBase()}/ws/voice/audio/?channel=${Uri.encodeComponent(channelId)}'

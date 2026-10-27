@@ -242,6 +242,28 @@ MA_BRIDGE_EXPORT uint64_t ma_bridge_get_frames_consumed(void) {
     return g_frames_consumed;
 }
 
+/* 2026-10-27 实时语音：丢弃 FIFO 中所有未播样本。
+ *
+ * 做法：让 write_pos 追平 read_pos（等价清空队列），而不是 memset ——
+ * 避免与 data_callback 争用同一块内存的读写。read_pos 由 native 写，
+ * 这里只读它；write_pos 由 Dart 写，这里写它。两者都已是原子 int*。
+ * 返回被丢弃的样本数（诊断用）。 */
+MA_BRIDGE_EXPORT int32_t ma_bridge_flush_fifo(void) {
+    if (g_fifo == NULL || g_read_pos == NULL || g_write_pos == NULL) return 0;
+    int read = *g_read_pos;
+    int write = *g_write_pos;
+    int pending;
+    if (write >= read) {
+        pending = write - read;
+    } else {
+        pending = g_fifo_capacity - read + write;
+    }
+    __sync_synchronize();
+    *g_write_pos = read;  /* 队列清空 */
+    __sync_synchronize();
+    return (int32_t)pending;
+}
+
 MA_BRIDGE_EXPORT int32_t ma_bridge_get_fifo_available(void) {
     if (!g_read_pos || !g_write_pos) return 0;
     int r = *g_read_pos;

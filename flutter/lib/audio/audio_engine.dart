@@ -157,6 +157,9 @@ class AylaAudioEngine {
 
   /// 播放侧统计（诊断；`_log` 用，不参与控制流）。
   int _jitterDroppedFrames = 0;
+
+  /// 累计被「过期回收」丢弃的设备 FIFO 样本数（诊断）。
+  int _staleFramesFlushedSamples = 0;
   int _jitterUnderruns = 0;
 
   /// 说话状态与迟滞。
@@ -602,7 +605,22 @@ class AylaAudioEngine {
         _pushPending(sampleCount);
       case JitterAction.drop:
         _jitterDroppedFrames++;
-        if (d.catchingUp) _jitterPending.clear();
+        // 2026-10-27 **过期帧回收**（用户实报「恢复连接时爆发式听见这段时间所有帧」）：
+        //
+        // 之前只清 Dart 侧 pending，**设备 FIFO 里的积压从不清理** ⇒ 链路把帧
+        // 排队后集中送达时，FIFO 里已经囤了几秒音频，设备会把它们**照单全播**
+        // ⇒ 听感是「把刚才断的那几秒补播一遍」。这正是用户描述的症状。
+        //
+        // 现在：判定过期（待播总量 > kStaleDropSec）时，
+        //   ① 清空 Dart 侧预缓冲；
+        //   ② 调 fork 新增的 flushFifo() **真正丢弃设备 FIFO 里未播的样本**。
+        // 宁可一次短暂静音，也不补播过期音频 —— 实时语音的标准语义。
+        _jitterPending.clear();
+        final int flushed = p.flushFifo();
+        if (flushed > 0) {
+          _staleFramesFlushedSamples += flushed;
+          _log('丢弃过期积压 ${(flushed / kSampleRate * 1000).round()}ms');
+        }
       case JitterAction.flush:
         _pushPending(sampleCount);
         for (final Int16List chunk in _jitterPending) {
@@ -682,6 +700,11 @@ class AylaAudioEngine {
 
   /// 诊断用：累计欠载次数（进入预缓冲的次数）。
   int get debugJitterUnderruns => _jitterUnderruns;
+
+  /// 诊断用：累计被「过期回收」丢弃的设备 FIFO 样本数。
+  ///
+  /// > 0 说明链路发生过批量积压（帧排队后集中到达），否则应为 0。
+  int get debugStaleFlushedSamples => _staleFramesFlushedSamples;
 
   Future<void> dispose() async {
     _levelTick?.cancel();

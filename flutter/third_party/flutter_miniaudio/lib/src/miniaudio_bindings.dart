@@ -54,6 +54,10 @@ typedef MaBridgeGetFramesConsumedDart = int Function();
 typedef MaBridgeGetFifoAvailableNative = Int32 Function();
 typedef MaBridgeGetFifoAvailableDart = int Function();
 
+/// 丢弃 FIFO 中所有未播样本（2026-10-27 实时语音：过期帧回收）。
+typedef MaBridgeFlushFifoNative = Int32 Function();
+typedef MaBridgeFlushFifoDart = int Function();
+
 typedef MaBridgeSetLogEnabledNative = Void Function(Int32 enabled);
 typedef MaBridgeSetLogEnabledDart = void Function(int enabled);
 
@@ -418,6 +422,9 @@ class MiniaudioBindings {
   late final MaBridgeStopDart stop;
   late final MaBridgeGetFramesConsumedDart getFramesConsumed;
   late final MaBridgeGetFifoAvailableDart getFifoAvailable;
+
+  /// 丢弃 FIFO 中所有未播样本，返回丢弃的样本数。
+  late final MaBridgeFlushFifoDart flushFifo;
   late final MaBridgeSetLogEnabledDart setLogEnabled;
   late final MaBridgeSetVolumeDart setVolume;
   late final MaBridgeGetDeviceSampleRateDart getDeviceSampleRate;
@@ -542,6 +549,8 @@ class MiniaudioBindings {
         MaBridgeGetFramesConsumedDart>('ma_bridge_get_frames_consumed');
     getFifoAvailable = _lib.lookupFunction<MaBridgeGetFifoAvailableNative,
         MaBridgeGetFifoAvailableDart>('ma_bridge_get_fifo_available');
+    flushFifo = _lib.lookupFunction<MaBridgeFlushFifoNative,
+        MaBridgeFlushFifoDart>('ma_bridge_flush_fifo');
     setLogEnabled = _lib.lookupFunction<MaBridgeSetLogEnabledNative,
         MaBridgeSetLogEnabledDart>('ma_bridge_set_log_enabled');
     setVolume =

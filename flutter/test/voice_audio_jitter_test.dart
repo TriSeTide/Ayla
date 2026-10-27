@@ -149,7 +149,11 @@ void main() {
       expect(r.playing, isTrue);
     });
 
-    test('FIFO 深 399ms（差一点到高水位）⇒ 仍然 play，不误杀', () {
+    test('FIFO 深 399ms ⇒ 已过期，必须 drop + 进入追赶（2026-10-27 语义变更）', () {
+      // ⚠️ 旧断言是「399ms 仍然 play，不误杀」—— 那在**只看 FIFO 高水位**的模型里成立，
+      // 但用户实报「恢复连接时爆发式听见这段时间所有帧」证明：399ms 的积压播出去
+      // 就是「补播 0.4 秒前的声音」。实时语音里这已经是**过期音频**，必须丢弃。
+      // 现语义：待播总量 > kStaleDropSec(200ms) ⇒ 丢弃并进入追赶（catchingUp）。
       final JitterDecision r = decideJitterFrame(
         fifoDepthSec: 0.399,
         pendingSec: 0,
@@ -157,7 +161,9 @@ void main() {
         playing: true,
         catchingUp: false,
       );
-      expect(r.action, JitterAction.play);
+      expect(r.action, JitterAction.drop,
+          reason: '399ms 待播 = 过期音频，播放它等于补播 0.4 秒前的话');
+      expect(r.catchingUp, isTrue, reason: '要进入追赶，持续丢弃直到水位回落');
     });
   });
 
@@ -696,8 +702,11 @@ void main() {
       }
       expect(catching, isTrue, reason: '积压过深必须进入追赶状态');
       expect(drops, greaterThan(0), reason: '必须真的丢帧，否则延迟追不回来');
-      expect(fifo / kSampleRate, greaterThanOrEqualTo(kJitterResetAtSec),
-          reason: '触发点就是 400ms 高水位');
+      // ⚠️ 2026-10-27 语义变更：触发点从「FIFO 400ms 高水位」改为「待播总量 200ms」
+      // （kStaleDropSec）。旧断言写的 400ms 已不成立 —— 现在更早介入，
+      // 目的就是不让积压长到 400ms 才处理（那已经是 0.4 秒的过期音频）。
+      expect(fifo / kSampleRate, greaterThanOrEqualTo(kStaleDropSec),
+          reason: '积分段应至少累积到过期阈值 kStaleDropSec 才触发');
 
       // 设备开始放：追赶期间持续丢帧，直到 FIFO 下探到稳态目标以下
       int guard = 0;

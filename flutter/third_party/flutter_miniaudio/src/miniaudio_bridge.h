@@ -72,6 +72,20 @@ MA_BRIDGE_EXPORT uint64_t ma_bridge_get_frames_consumed(void);
  */
 MA_BRIDGE_EXPORT int32_t ma_bridge_get_fifo_available(void);
 
+/**
+ * Discard all pending audio in the FIFO (2026-10-27).
+ *
+ * 实时语音专用：当链路发生批量积压（帧排队后集中到达），必须丢弃已过期的
+ * 待播数据，否则会把几秒前的声音「补播」一遍（用户实报「恢复时爆发式回放」）。
+ *
+ * 实现是**把 read_pos 追平 write_pos**（不是 memset）—— 直接丢弃未播样本，
+ * 且与 data_callback 的并发安全（read_pos 只由 native 写、write_pos 由 Dart 写，
+ * 这里只动 write_pos 让它等于 read_pos，等价于「队列清空」）。
+ *
+ * @return 被丢弃的样本数（诊断用）
+ */
+MA_BRIDGE_EXPORT int32_t ma_bridge_flush_fifo(void);
+
 // Advanced Controls
 MA_BRIDGE_EXPORT void ma_bridge_set_volume(float volume); // 0.0 to 1.0 (or higher for gain)
 MA_BRIDGE_EXPORT void ma_bridge_set_log_enabled(int enabled);

@@ -182,6 +182,44 @@ const double kUnderrunFloorSec = kJitterCallbackSec * 2;
 /// 「抖—停—抖」循环。留约半拍余量。
 const double kJitterTargetSec = kUnderrunFloorSec * 1.5;
 
+// ---------------------------------------------------------------------------
+// 过期帧丢弃（2026-10-27 新增）
+//
+// ## 为什么必须有
+//
+// 用户实测观察：「断连期间的上传音频帧是**上传了的**。因为收音这一端在恢复连接时
+// 听到的声音会**爆发式**短时间听见这段时间的所有音频帧」。
+//
+// 这是实时语音的经典故障：链路（frp tcpMux / 限速通道 / TCP 重传）把帧排队后
+// 集中释放，接收端**照单全收地播**，于是把 3 秒前的对话「补播」一遍。
+// 实时语音里，**迟到超过一两百毫秒的帧已经没有价值** —— 播放它只会拖慢当前对话。
+//
+// 正确做法（所有实时语音的标准）：**丢弃过期的帧，宁可短暂静音**。
+//
+// ## 判据
+//
+// 不看单帧间隔（正常抖动也会有 40–50ms 间隔），而看**连续积压**：
+// 只有当「设备 FIFO + 预缓冲 + 本帧」的总时长超过 [kStaleDropSec] 时，
+// 才认定发生了批量积压，丢弃最旧的待播数据、把总延迟拉回 [kJitterTargetSec]。
+//
+// 这样：正常抖动（几十毫秒）完全不触发；真实批量积压（几百毫秒以上）才会被裁剪。
+// ---------------------------------------------------------------------------
+
+/// 允许的最大待播时长（秒）—— 超过即判定「帧已过期」。
+///
+/// 200ms 的取舍：
+/// - 低于 150ms 会把正常网络抖动也判成过期，造成不必要的静音；
+/// - 高于 300ms 时，丢弃后听众已经明显感到「刚才那句没听见」，
+///   而且爆发回放更容易被察觉；
+/// - 200ms 覆盖 RTT 44–47ms（含一次重传重排）仍有余量。
+const double kStaleDropSec = 0.2;
+
+/// 过期裁剪的目标水位（秒）—— 丢弃后保留的待播时长。
+///
+/// 复用 [kJitterTargetSec]（= 欠载下限 × 1.5 ≈ 64ms）：
+/// 裁剪到刚好够设备跑一拍再多一点，避免裁完立刻又欠载。
+double get kStaleTrimToSec => kJitterTargetSec;
+
 /// 抖动缓冲对单帧的处置动作。
 enum JitterAction {
   /// 缓冲不足：本帧先压入 Dart 侧预缓冲，**暂不写设备**（避免设备回调补零）。
@@ -242,6 +280,25 @@ JitterDecision decideJitterFrame({
   required bool playing,
   required bool catchingUp,
 }) {
+  // ⓿ **过期帧裁剪**（2026-10-27）：待播总量超过 [kStaleDropSec] ⇒ 链路已发生
+  // 批量积压（帧排队后集中到达），此时继续播会把几秒前的声音「补播」一遍。
+  // 丢弃过量待播数据、把水位拉回 [kStaleTrimToSec]，宁可一次短暂静音。
+  //
+  // ⚠️ 必须在追赶判定之前：积压表现可能是「深 FIFO」也可能是「pending 很长」，
+  // 两者都要裁；否则 pending 很长时下面的高水位分支看不到（它只看 FIFO）。
+  final double totalBacklogSec = fifoDepthSec + pendingSec;
+  if (totalBacklogSec > kStaleDropSec) {
+    // 判定为「积压追赶」而不是静默丢一帧：
+    //   · catchingUp=true ⇒ 调用方会持续 drop 直到水位降到 kStaleTrimToSec，
+    //     并在这期间清空设备 FIFO（audio_engine 的 drop 分支）；
+    //   · 若只丢一帧，下一帧积压仍在，会反复触发、且 FIFO 里的旧数据照样播出。
+    return JitterDecision(
+      action: JitterAction.drop,
+      playing: false,
+      catchingUp: true,
+      fifoDepthSec: fifoDepthSec,
+    );
+  }
   // ① 追赶中：一直丢，直到 FIFO 下探到稳态目标水位 —— 然后交出控制权，
   //    本帧仍然丢掉，让下一次决策从预缓冲重新起播（不在深积压上叠写）。
   if (catchingUp) {

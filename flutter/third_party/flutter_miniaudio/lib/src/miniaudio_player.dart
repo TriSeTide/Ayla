@@ -320,6 +320,16 @@ class MiniaudioPlayer {
     return actualSamples ~/ channels;
   }
 
+  /// 丢弃设备 FIFO 中所有**未播**样本，返回丢弃的样本数。
+  ///
+  /// 实时语音用：链路批量积压后，已过期的待播数据必须丢弃，
+  /// 否则会「补播」几秒前的声音（用户实报的「恢复时爆发式回放」）。
+  /// 语义等价于浏览器的 `AudioContext.close()` 前丢弃未播队列。
+  int flushFifo() {
+    if (!_initialized) return 0;
+    return _bindings?.flushFifo() ?? 0;
+  }
+
   int get framesConsumed => _bindings?.getFramesConsumed() ?? 0;
   int get fifoAvailable => _bindings?.getFifoAvailable() ?? 0;
   int get fifoAvailableFrames => fifoAvailable ~/ channels;
