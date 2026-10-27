@@ -315,7 +315,7 @@ describe("wsRelayRoom", () => {
     expect(room.remoteParticipants()[0].identity).toBe("u2");
   });
 
-  it("开麦：申请设备 + mute off；峰值驱动 speaking 控制与上行帧；关麦释放设备", async () => {
+  it("开麦：申请设备 + mute off；峰值驱动 speaking 控制；**音频帧持续上行**；关麦释放设备", async () => {
     const { room, sock } = await makeConnectedRoom();
 
     await room.setMicrophoneEnabled(true);
@@ -330,9 +330,19 @@ describe("wsRelayRoom", () => {
     const up = sock.sent.at(-1)!;
     expect(up).toBeInstanceOf(Uint8Array);
     expect(Array.from(up as Uint8Array)).toEqual([9, 9, 9]);
-    // 安静帧 → speaking off，不发帧
+    // 安静帧 → speaking off（仅 UI 事实）但**仍要发帧**
+    //
+    // 2026-10-27 设计缺陷修复：旧断言只验「speaking off 控制帧」就结束，
+    // 隐含了「安静帧不发上行」的错误设计。用户实报「有声音才连上去，
+    // 声音小了就跟断了一样」正源于此 —— 说话的停顿/句尾/换气峰值都会
+    // 跌破 SPEAKING_OFF(0.012)，停发后对端就只剩有声片段。
+    // 现在：speaking 照旧上报，但**音频帧持续发送**。
+    const beforeQuiet = sock.sent.length;
     worklet.port.onmessage?.({ data: { pcm: new Float32Array(960), peak: 0.001 } });
     expect(lastText(sock)).toMatchObject({ type: "speaking", on: false });
+    const quietUp = sock.sent.at(-1)!;
+    expect(quietUp).toBeInstanceOf(Uint8Array);
+    expect(sock.sent.length).toBeGreaterThan(beforeQuiet);
 
     // 关麦：先发媒体事实再释放设备（对端立即看到静音，麦克风灯熄灭）
     await room.setMicrophoneEnabled(false);

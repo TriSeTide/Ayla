@@ -527,7 +527,13 @@ export async function createWsRelayRoom(events: LiveKitEvents): Promise<LiveKitR
         speakingSent = speaking;
         sendControl({ type: "speaking", on: speaking });
       }
-      if (!speaking) return; // 静音不发帧：带宽由客户端先兜一层
+      // ⚠️ **不要按 speaking 门控发帧**（2026-10-27 设计缺陷修复，与 Flutter 侧同款）：
+      // speaking 是 UI 事实（成员行「谁在说话」高亮），不是媒体传输开关。
+      // 旧实现 `if (!speaking) return;` 会让说话的正常停顿、句尾降调、换气、
+      // 轻辅音（峰值 < SPEAKING_OFF=0.012）全部变成静音空洞，对端听感是
+      // 「有声音才连上去，声音小了就断」（用户实报「两个端都卡」）。
+      // 带宽代价可忽略：静音帧在 Opus VBR 下约 25 字节，持续发送每人 ~2 KB/s。
+      // 详见 Ayla/docs/flutter/39-语音持续播放-speaking门控设计缺陷.md
       const ad = new codecs.AudioData({
         format: "f32-planar",
         sampleRate: SAMPLE_RATE,

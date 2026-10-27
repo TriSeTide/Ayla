@@ -19,7 +19,7 @@
 | **为什么表现成「有声才连、小声就断」** | 人说话的正常停顿 / 句尾降调 / 换气 / 轻辅音，峰值都会跌破 0.02 ⇒ 客户端**停止发帧** ⇒ 服务端**丢弃** ⇒ 对端缓冲耗尽 ⇒ 静音，声音回来再从零重建缓冲 |
 | **为什么「会断连」** | 长时间静音后服务端把该 slot 移出 active_slots，恢复有延迟；且客户端 speaking 状态反复翻转 |
 | **为什么 web 也一样** | wsRelayRoom.ts:530 是同一句 if (!speaking) return; —— **同款设计缺陷**，所以两端都卡 |
-| **修复** | speaking 只上报 UI 事实；**音频帧持续发送**。muted（主动闭麦）仍是硬门控 |
+| **修复** | speaking 只上报 UI 事实；**音频帧持续发送**。muted（主动闭麦）仍是硬门控。**三端全覆盖：Flutter + 服务端 + web** |
 | **带宽** | 不是阻碍：持续发送每人约 2 KB/s（峰值 3.9 KB/s），20 人房间服务器总吞吐 ~6.3 Mbps，远低于樱花隧道 24 Mibit/s |
 | **状态** | ✅ 双侧已改 + 测试订正 + 变异验证 |
 
@@ -74,7 +74,22 @@ if (nowSpeaking != _speaking) {
 // 继续编码发送，与 nowSpeaking 无关
 ```
 
-### 2.2 服务端（backend/apps/voice/audio_relay.py）
+### 2.2 web（web/src/livekit/wsRelayRoom.ts）
+
+```ts
+// 修复前（:530）
+if (!speaking) return; // 静音不发帧：带宽由客户端先兜一层
+
+// 修复后：speaking 照旧 sendControl 上报，但不阻断上行
+const ad = new codecs.AudioData({ ... });
+encoder.encode(ad);
+```
+
+回归锁：`ws-relay-room.test.ts` 的「开麦」用例原断言在安静帧后只验 `speaking off`
+控制帧（隐含「不发上行」的错误设计）；现改为同时断言**安静帧仍产生二进制上行**。
+变异验证：把 `if (!speaking) return;` 加回去 ⇒ 该用例立即变红（`expected '{"type":"speaking","on":false}' to be an instance of Uint8Array`）；恢复 ⇒ 绿。
+
+### 2.3 服务端（backend/apps/voice/audio_relay.py）
 
 ```python
 # may_relay() 修复后：只保留媒体事实
@@ -146,7 +161,7 @@ N 人房间（持续模式，服务器总吞吐）：
 
 | # | 事项 | 说明 |
 |---|---|---|
-| 1 | **web 端同样需要修** | wsRelayRoom.ts:530 与 :526 是同款门控。本轮按用户要求先修 Flutter + 服务端；web 侧改法完全一致 |
+| 1 | ~~web 端同样需要修~~ | **✅ 已修**（2026-10-27 追加）：wsRelayRoom.ts 的 `if (!speaking) return;` 已移除，改为持续上行；测试 `ws-relay-room.test.ts` 已订正并做变异验证 |
 | 2 | 未实机验证 | 音频必须完整重启；按预览纪律 agent 不跑 flutter run |
 | 3 | 服务端需重启 | audio_relay.py 改动需重建 backend 镜像（publish_release.py deploy-backend） |
 | 4 | Top-K 观测量 | active_slots() 保留但不再门控；将来房间规模超带宽预算时应改为「按订阅者能力裁剪」而非「按谁在说话裁剪」 |
