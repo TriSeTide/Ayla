@@ -252,7 +252,17 @@ class AylaVoiceSession extends ChangeNotifier {
         _chat = chat,
         _onMediaActivity = onMediaActivity,
         _roomRoute = roomRoute {
-    bindMediaEvents(mediaEvents ?? AylaVoiceMediaEvents());
+    // ⚠️ 必须绑**媒体实例自己的**事件容器（默认分支）。
+    //
+    // 2026-10-26 用户实报「听得见声音但音量条完全不跳」的**真正根因**（上一轮
+    // 只补了 `ref.watch` 订阅，不充分）：这里此前是 `mediaEvents ?? AylaVoiceMediaEvents()`
+    // —— 新建的孤儿对象。而 [AylaVoiceMedia] 的回调转发在**构造体里**就绑定到
+    // 它自己的那份 `_events` 上（`voice_media.dart` 的 `engineCallbacks.onRemoteAudioLevels`
+    // → `_events.onRemoteAudioLevels?.call(...)`），引擎每 100ms 打的是**那一份**。
+    // ⇒ 本会话把回调挂到没人调用的对象上：`setRemoteAudioLevels` / `setLocalAudioLevel` /
+    // `setMedia` 全部永不触发，媒体链路本身正常（所以照样能听见声音）。
+    // 测试守卫见 `test/voice_audio_level_wiring_test.dart`。
+    bindMediaEvents(mediaEvents ?? _media.events);
     _chatOff = _chat?.onFrame(_onChatFrame);
     _wsOff = _ws.onFrame(_onVoiceFrame);
   }
@@ -1191,17 +1201,55 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
   Widget build(BuildContext context) {
     final bool narrow = aylaDirectoryIsNarrow(context);
     final AylaTextStyles t = AylaTextStyles.of(context);
-    final AylaVoiceState voice = ref.watch(voiceStateProvider);
+    // ---- 窄订阅（2026-10-26）----
+    // 不再 `ref.watch(voiceStateProvider)` 整个 store（10Hz 电平 notify 会把整页 +
+    // `AylaVoiceRoomBody`（1419 行）+ 整棵成员面板一起重建，与音频采集/解码挤在
+    // 同一个 isolate 上）：改为按**本页渲染真正依赖的字段**逐个 `select` 订阅，
+    // 电平字段交给面板内的 [ListenableBuilder]（见 `buildPanel`）。
+    // **语义与视觉不变** —— 列在下面的就是本页全部依赖；新增读字段时必须同时加订阅。
+    final AylaVoiceState voice = ref.read(voiceStateProvider);
+
+    /// 一个字段 → 订阅表达式。
+    ///
+    /// `AylaVoiceChannelSnapshot` **没有** `==`/`hashCode`，`select` 拿它做相等
+    /// 判断会恒不相等（等于没订阅、每帧都重建）⇒ 只在 `channels[本房]` 的**身份**
+    /// 变化（upsert/patch/remove 都会换新实例）时重建；字段值取的是最新的那个实例。
+    final AylaVoiceChannelSnapshot? channel = ref.watch(
+      voiceStateProvider.select(
+        (AylaVoiceState s) => s.channelOf(widget.channelId),
+      ),
+    );
     final String? selfId = ref.watch(
       authNotifierProvider.select((AuthState s) => s.user?.id),
     );
-    final AylaVoiceChannelSnapshot? channel = voice.channelOf(widget.channelId);
+    // 自己是否已在存成员表里（web `VoiceChannelPanel.tsx:96–100` 的 `selfInStore`）
+    // —— 依赖成员表的**身份集合**（joined/left），不依赖电平。
+    final bool selfInStore = selfId != null &&
+        ref.watch(
+          voiceStateProvider.select(
+            (AylaVoiceState s) => s.memberOf(selfId) != null,
+          ),
+        );
+    // 媒体断线（`voice.media === failed`）：参与「重新加入」按钮，必须在订阅里。
+    final bool rejoin = ref.watch(
+      voiceStateProvider.select(
+        (AylaVoiceState s) => s.media == AylaVoiceMediaConnection.failed,
+      ),
+    );
+    // ★ 电平**不**在本页订阅（2026-10-26 收敛轮）：`audioLevel` / `localAudioLevel`
+    // 每 100ms 就可能变一次，它们只被成员面板消费 ⇒ 由 `buildPanel` 的
+    // [ListenableBuilder] 单独重绘那一棵子树（web 侧 zustand 的 selector 也是
+    // 只重渲染成员行）。本页（页头 / 房间体 / 聊天列表）完全不参与 10Hz 重绘。
+    // 本 build 里**没有任何**地方读电平字段 —— 若将来要读，必须走同样的窄订阅，
+    // 否则电平变化不会再唤醒本页。
     final bool isOwner = channel != null && channel.ownerId == selfId;
-    final bool rejoin = voice.media == AylaVoiceMediaConnection.failed;
     final String? sessionError = _session.error;
-
+    // 爱莉的 user id（成员行头像光环判定；web `VoiceChannelPanel.tsx` 从 presence store 读）。
+    // ⚠️ 必须**在这里**（build 期）watch：本值随后被 [ListenableBuilder] 的 builder 捕获使用，
+    // 而那条路径由 10Hz notify 在 build 之外触发 —— 在回调里 `ref.watch` 会晚注册依赖。
+    final String? elysiaUserId =
+        ref.watch(elysiaProfileProvider).valueOrNull?.userId;
     // 自己出现在对账里而分页第一页还没有 ⇒ 刷新一次（web `VoiceChannelPanel.tsx:96–100`）。
-    final bool selfInStore = selfId != null && voice.memberOf(selfId) != null;
     if (selfInStore && _members.loaded && !_refreshedForSelf) {
       _refreshedForSelf = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1216,12 +1264,22 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       if (mounted) _ensureProfiles(visibleIds);
     });
 
-    final int? memberCount = voice.currentChannelId == widget.channelId
-        ? voice.members.length
-        : (_members.loaded ? _members.total : null);
+    // 人数：只订阅**个数**（int，天然去抖）—— 电平变化不会改成员数，不会触发这里。
+    final int? memberCount = ref.watch(
+      voiceStateProvider.select(
+        (AylaVoiceState s) => s.currentChannelId == widget.channelId
+            ? s.members.length
+            : null,
+      ),
+    );
+    final int? displayCount = memberCount ?? (_members.loaded ? _members.total : null);
 
     // 面板构造 = 局部函数：材质归属档由房间体传入（见下方 voicePanelBuilder 的注释）。
-    Widget buildPanel(bool ownMaterial) => AylaVoiceChannelPanel(
+    //
+    // ⚠️ **这里是电平唯一的重绘面**（2026-10-26 窄订阅轮）：[ListenableBuilder] 只包
+    // 成员面板这一棵子树（与 web 的 zustand selector 只重渲染成员行同粒度）——
+    // 页头 / 房间体 / 聊天列表都不再跟 10Hz 电平抖动。
+    Widget buildPanelContent(bool ownMaterial) => AylaVoiceChannelPanel(
       channelName: channel?.displayName ?? '语音房',
       members: <AylaVoicePanelMember>[
         for (final AylaVoiceMemberDescriptor m in _members.items)
@@ -1229,10 +1287,10 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
       ],
       selfUserId: selfId,
       selfMember: selfId == null ? null : _rowOf(voice, selfId),
-      // ⚠️ 用 `valueOrNull`：无网络时该 FutureProvider 处于 AsyncError，
-      // `.value` 会**抛出**（实测 LateInitializationError 冒到 build）。
-      elysiaUserId: ref.watch(elysiaProfileProvider).valueOrNull?.userId,
-      count: memberCount,
+      // 值在 build 期取好（`valueOrNull`：无网络时该 FutureProvider 处于 AsyncError，
+      // `.value` 会**抛出** —— 实测 LateInitializationError 冒到 build）。
+      elysiaUserId: elysiaUserId,
+      count: displayCount,
       isOwner: isOwner,
       self: voice.selfState(),
       page: AylaVoiceMembersPage(
@@ -1267,6 +1325,17 @@ class _AylaVoiceRoomHostState extends ConsumerState<AylaVoiceRoomHost> {
             }
           : null,
     );
+
+    /// 面板 = [ListenableBuilder] 订阅 `voiceState`（**只有成员面板重建**）。
+    ///
+    /// 订阅的是整个 `AylaVoiceState` 的 notify —— 与 web 面板内部
+    /// `useVoiceStore(...)` 的粒度一致：成员表（含每一行的 `audioLevel`）任一变化
+    /// 都重画面板；但**页头 / 房间体 / 聊天列表不参与**，10Hz 电平不会带着
+    /// `AylaVoiceRoomBody`（1419 行）一起重建。
+    Widget buildPanel(bool ownMaterial) => ListenableBuilder(
+          listenable: voice,
+          builder: (BuildContext _, Widget? __) => buildPanelContent(ownMaterial),
+        );
 
     final AylaSharePayload sharePayload = AylaSharePayload.voice(
       id: widget.channelId,

@@ -196,8 +196,16 @@ class AylaRelayClient {
       (dynamic data) {
         if (data is String) {
           _handleText(data, completer);
+        } else if (data is Uint8List) {
+          // ⚠️ `web_socket_channel` 3.x 的二进制帧**本来就是 Uint8List**
+          //（`adapter_web_socket_channel.dart:86–87` 把 `BinaryDataReceived.data`
+          // 原样塞进 stream；上游 `io_web_socket.dart:64` 已做过唯一一次
+          // `Uint8List.fromList`）。这里此前又包了一层 `Uint8List.fromList`
+          // ⇒ 每帧多一次整包拷贝，白送给 GC。直接透传。
+          // 握手期不该出现二进制帧：仅握手完成后处理。
+          if (_handshaken) _handleBinary(data);
         } else if (data is List<int>) {
-          // 握手期不该出现二进制帧：仅握手完成后处理
+          // 兜底（其他 channel 实现可能给 List<int>）：只在必要时拷一次。
           if (_handshaken) _handleBinary(Uint8List.fromList(data));
         }
       },
@@ -287,10 +295,16 @@ class AylaRelayClient {
   }
 
   void _handleBinary(Uint8List bytes) {
+    // 最少 = 1 字节 slot + 1 字节 opus 包（最短 opus 包也不止 1 字节，
+    // 但这里只做长度下界防御，具体合法性交给解码器）。
     if (bytes.length < 2) return;
     final int slot = bytes[0];
-    final Uint8List opus = Uint8List.fromList(bytes.sublist(1));
-    _events.onAudio?.call(slot, opus);
+    // ⚠️ 旧实现是「sublist 出子区间再 fromList」：**两次**全帧拷贝，
+    // 每 20ms 一次。
+    // 改成「一次拷贝到一个刚好的定长缓冲」：`sublistView` 是**视图**（零拷贝），
+    // 由 `fromList` 落成一份新内存 —— 只有 1 次拷贝，且拿到的
+    // Uint8List 不别名原始帧（下游会立刻解码，但保持「独立缓冲」语义更安全）。
+    _events.onAudio?.call(slot, Uint8List.fromList(Uint8List.sublistView(bytes, 1)));
   }
 
   void _handleSocketClosed() {

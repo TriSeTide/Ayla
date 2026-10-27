@@ -82,11 +82,26 @@ class AylaVoiceMedia {
 
   final AylaVoiceMediaEvents _events;
 
+  /// 本实例的事件容器（中继/引擎的回调**构造时已接进这一份**）。
+  ///
+  /// ⚠️ **会话层必须绑这一份**（2026-10-26 用户实报「听得见声音但音量条恒 0」的根因）：
+  /// 构造体把 [RelayCallbacks] / [AudioEngineCallbacks] 逐条转发到 [_events]，而
+  /// 引擎每 100ms 就调一次 `_events.onRemoteAudioLevels?.call(snapshot)`。
+  /// 若调用方另建一个 [AylaVoiceMediaEvents] 去 `bindMediaEvents`，那个对象
+  /// **永远不会被任何东西调用** ⇒ 音频电平/静音/状态事实全部丢失，只有声音照旧
+  /// （媒体链路本身是好的）⇒ 条子恒 0。
+  AylaVoiceMediaEvents get events => _events;
+
   late final AylaRelayClient _relay;
   late final AylaAudioEngine _engine;
 
-  /// token 续期钩子（由 `main` 注入；默认返回 null —— **不伪造续期成功**）。
-  Future<String?> Function() _freshToken = () async => null;
+  /// token 续期钩子（默认继承模块级 `_voiceMediaTokenRefresher`，见 [setTokenRefresher]）。
+  /// 未注入时返回 null —— **不伪造续期成功**。
+  Future<String?> Function() _freshToken =
+      _voiceMediaTokenRefresher ?? () async => null;
+
+  /// 见 [debugHasTokenRefresher]（构造时若模块级已有注入则视为已注入）。
+  bool _hasTokenRefresher = _voiceMediaTokenRefresher != null;
 
   int _generation = 0;
   bool _engineReady = false;
@@ -109,9 +124,22 @@ class AylaVoiceMedia {
   bool get debugMiniaudioReady => _engine.debugMiniaudioReady;
 
   /// 注入 token 续期（`main` 在 `DioClient` init 之后调用一次）。
+  ///
+  /// ⚠️ 同时写进**模块级** `_voiceMediaTokenRefresher`：登出会
+  /// [aylaVoiceMediaTeardown] 把单例置空，下次 [aylaVoiceMedia] 新建的实例必须
+  /// 继承同一个续期实现 —— 否则「登出再登录」之后中继又退回「恒返回 null」，
+  /// 且再没有人会去补注入（`main` 每个进程只跑一次）。
   void setTokenRefresher(Future<String?> Function() refresher) {
     _freshToken = refresher;
+    _voiceMediaTokenRefresher = refresher;
+    _hasTokenRefresher = true;
   }
+
+  /// 诊断：是否已注入 token 续期实现。
+  ///
+  /// `false` = 中继连续失败达阈值后**只能沿用旧 token**（token 过期就永远续不上）。
+  /// 生产由 `main` 注入一次；本 getter 是接线回归锁的可观测面。
+  bool get debugHasTokenRefresher => _hasTokenRefresher;
 
   /// 连接频道（web `voiceLiveKit.connect(wsUrl, token)`）。
   ///
@@ -187,6 +215,10 @@ class AylaVoiceMedia {
   @visibleForTesting
   AylaRelayClient get debugRelay => _relay;
 }
+
+/// 进程级 token 续期实现（由 `main` 注入一次；**跨单例重建存活**，见
+/// [AylaVoiceMedia.setTokenRefresher]）。null = 尚未注入（不伪造续期成功）。
+Future<String?> Function()? _voiceMediaTokenRefresher;
 
 /// 全局单例（web `client.ts` 的 `voiceLiveKit`；房间同时只有一个媒体会话）。
 AylaVoiceMedia? _voiceMedia;

@@ -24,6 +24,7 @@ import 'package:go_router/go_router.dart';
 import 'core/media/media_cache.dart';
 import 'core/media/media_signer.dart';
 import 'core/media/media_upload.dart';
+import 'audio/voice_media.dart' show aylaVoiceMedia;
 import 'core/net/dio_client.dart';
 import 'state/app_preload.dart';
 import 'state/auth_bootstrap.dart';
@@ -230,6 +231,21 @@ void main() {
   // 三者与 DioClient 同为进程级单例，必须在 DioClient.init 之后、首帧之前接上。
   MediaSigner.instance.attach(DioClient.instance);
   AylaMediaUploader.instance.attach(DioClient.instance);
+  // ===== 语音中继 token 续期接线（2026-10-26）=====
+  // `AylaVoiceMedia.setTokenRefresher` 此前**全仓 0 调用** ⇒ 中继连续失败达
+  // `kRelayReconnectRefreshAfter`(3) 次后的续期钩子一直是默认的「返回 null」，
+  // 即 token 过期导致的断连永远拿旧值重连、永远续不上（web 侧
+  // `wsRelayRoom.ts:688–693` 是 `refreshAccessToken()` + 取最新 store 值）。
+  //
+  // ⚠️ 必须排在 `DioClient.instance.init(...)`（本函数上方）**之后**：续期闭包
+  // 体内读的是 `DioClient.instance.refreshAccessToken()` 与 `instance.accessToken`，
+  // init 之后 `_tokens` 才被接上（init 前调用会拿到恒 null 的令牌存取件）。
+  // 语义对齐 web：先静默续期，**成功才取最新 access token**；续期失败返回 null
+  // ——中继随即沿用旧 token 重连（【不伪造续期成功】，见 setTokenRefresher 注释）。
+  aylaVoiceMedia().setTokenRefresher(() async {
+    final bool ok = await DioClient.instance.refreshAccessToken();
+    return ok ? DioClient.instance.accessToken : null;
+  });
   // 本地媒体缓存（漫游缓存）启动预热：解析缓存根 + 探测可写性（不可写则降级到
   // 应用支持目录并记日志）+ 清理上次崩溃残留的 `.tmp`。
   // 语义见 `docs/architecture/flutter-local-media-cache.md` §3.2 / §6；
