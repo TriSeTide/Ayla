@@ -189,7 +189,9 @@ turn:
 
 ```text
 浏览器 / Flutter
-  |  (1) 信令  wss://frp-one.com:26211/livekit    <- TCP，含 WebSocket Upgrade
+  |  (1) 信令  wss://s.ayla.trise.top:26211/livekit  <- TCP，含 WebSocket Upgrade
+  |        （⚠️ 不要用 frp-one.com 当信令域名：证书 SAN 只有 *.trise.top，
+  |          浏览器会因证书不匹配拒绝 wss 握手。frp-one.com 只是隧道节点地址。）
   v
 樱花 frps (frp-one.com = 218.65.97.108)  隧道 29680036
   |- proxy .Ayla    : 公网 26211/tcp -> 本机 127.0.0.1:443   (nginx)
@@ -213,7 +215,7 @@ udp_port_align.py  监听 127.0.0.1:7882 -> 上游 172.28.112.155:27882（每客
 
 | 环节 | 地址 | 协议 | 证据 |
 |---|---|---|---|
-| 公网信令 | `wss://frp-one.com:26211/livekit` | TCP/443（frps 26211） | `nginx/nginx.conf:127-143`；`getent hosts frp-one.com` = 218.65.97.108 |
+| 公网信令 | `wss://s.ayla.trise.top:26211/livekit` | TCP/443（frps 26211） | `nginx/nginx.conf:131-143`（443 块）+ 8080 块同名 location；证书 SAN `*.trise.top` |
 | 樱花隧道（网页/信令） | 公网 26211 → `127.0.0.1:443` | TCP | `frpc-sakura.log`：`[e75**1e6.Ayla] connect to local service [tcp://127.0.0.1:443]` |
 | nginx 反代 | `127.0.0.1:443` `location /livekit/` → `http://127.0.0.1:7880/` | HTTP/WS | `nginx.conf:131-143`（`proxy_buffering off`、read/send timeout 86400s） |
 | LiveKit 信令 | `127.0.0.1:7880` | TCP | `livekit.yaml: port: 7880`；`ss -tln` 见 `*:7880` |
@@ -224,10 +226,93 @@ udp_port_align.py  监听 127.0.0.1:7882 -> 上游 172.28.112.155:27882（每客
 
 > **信令为什么带 `/livekit` 前缀**：LiveKit 自己挂在根路径（`/rtc`），nginx 用
 > `proxy_pass http://127.0.0.1:7880/` 的**尾部斜杠**剥掉前缀。所以
-> `settings.LIVEKIT_WS_URL` 必须是 `wss://frp-one.com:26211/livekit`（末尾不带斜杠）；
+> `settings.LIVEKIT_WS_URL` 必须是 `wss://s.ayla.trise.top:26211/livekit`（末尾不带斜杠）；
+> **不能用 `frp-one.com`**：证书 SAN 是 `*.trise.top`，域名不匹配会让浏览器拒绝 wss 握手。
 > `backend/config/settings.py:302` 已写明该约束。
 
 ---
+
+
+### 3.2 生产部署实参（2026-10-27 首次上线，改地址请对照本节）
+
+> 这一节是「部署地址」的唯一事实源。踩过的坑按序号列出，每条都对应一次真实故障。
+
+#### (1) 公网入口对照表
+
+| 用途 | 正确地址 | 不要用 |
+|---|---|---|
+| 网页 / API / 信令 | `https://s.ayla.trise.top:26211` | `frp-one.com`（证书不匹配）、`ayla.trise.top`（CF 入口，非标端口不通） |
+| LiveKit 信令 | `wss://s.ayla.trise.top:26211/livekit` | `wss://frp-one.com:26211/livekit` |
+| 媒体（ICE） | `218.65.97.108:27882/udp`（LiveKit 自己通告，无需配置） | — |
+
+证书 SAN 实测：`DNS:*.trise.top, DNS:s.ayla.trise.top, DNS:trise.top`。
+**`frp-one.com` 不在 SAN 内** ⇒ 浏览器用它连 wss 会 TLS 校验失败，信令直接建立不了。
+`frp-one.com` 只是樱花隧道节点的域名（解析到 218.65.97.108），不是对外的应用域名。
+
+#### (2) 后端 `backend/.env` 必须项
+
+```ini
+VOICE_MEDIA_TRANSPORT=livekit                                  # 回滚改 ws_relay
+VOICE_RELAY_WS_BASE=wss://s.ayla.trise.top:26211                # 中继回滚路径的绝对地址
+LIVEKIT_API_KEY=ayla-livekit
+LIVEKIT_API_SECRET=<必须与 livekit.yaml 的 keys 完全一致>        # ★ 见 (3)
+LIVEKIT_WS_URL=wss://s.ayla.trise.top:26211/livekit
+LIVEKIT_TOKEN_TTL_SECONDS=600
+```
+
+⚠️ 改完 `.env` 必须 `docker compose up -d --no-deps backend`；
+**`docker restart` 不会重读 env_file**（手册同款提醒）。
+
+#### (3) ★ 密钥一致性（最隐蔽的一个坑，本次实际踩到）
+
+`livekit.yaml` 的 `keys:` 与 `backend/.env` 的 `LIVEKIT_API_SECRET` **必须是同一个值**。
+本次上线时 `.env` 里还是退役配置留下的旧密钥，而 `livekit.yaml` 是新生成的 ——
+后端签出的 token 会被 LiveKit 全部拒绝，表现为**信令能连、ICE 一直不连通**，
+而且日志里只有 `401 invalid authorization token`，很容易误判成 ICE 问题。
+
+校验命令（不打印明文）：
+```bash
+Y=$(grep -oP "(?<=ayla-livekit: ).*" ~/Elysia/ayla-deploy/livekit.yaml | tr -d "[:space:]")
+E=$(grep -oP "(?<=^LIVEKIT_API_SECRET=).*" ~/Elysia/ayla-deploy/backend/.env | tr -d "[:space:]")
+[ "$Y" = "$E" ] && echo "secret 一致" || echo "★ 不一致，必须修"
+```
+
+#### (4) nginx 两个 server 块都要有 `location /livekit/`
+
+| 块 | 服务对象 | 缺了会怎样 |
+|---|---|---|
+| `listen 127.0.0.1:443 ssl` | 樱花入口（`s.ayla.trise.top:26211`） | 信令 404 / 落到 SPA |
+| `listen 127.0.0.1:8080` | Cloudflare 回源（`ayla.trise.top`） | `/livekit/` 落到 SPA 兜底返回 `index.html`，WebSocket 握手必失败 |
+
+两步验证（响应体必须是 `OK` 两字节，**不是 HTML**）：
+```bash
+printf "443  => "; curl -sk https://127.0.0.1/livekit/ | head -c 20; echo
+printf "8080 => "; curl -s  http://127.0.0.1:8080/livekit/ | head -c 20; echo
+```
+
+#### (5) 上线后验收（顺序固定）
+
+```bash
+# ① 后端下发的 media 是否指向正确地址、token 是否裸 pk
+curl -s -X POST "https://s.ayla.trise.top:26211/api/v1/voice/channels/1/join/" \
+  -H "Authorization: Bearer <access>" -H 'Content-Type: application/json' -d '{}' \
+  | python3 -m json.tool | grep -E 'transport|url|identity|room_name'
+# 期望 transport=livekit、url=wss://s.ayla.trise.top:26211/livekit、identity 为裸数字 id
+
+# ② 用该 token 真正建一次 WebRTC（harness）
+node run.mjs --url wss://s.ayla.trise.top:26211/livekit --token <token> --room <room>
+# 期望 ICE=connected、selected pair 为 udp prflx -> 218.65.97.108:27882
+```
+
+#### (6) 真实上线记录（2026-10-27）
+
+| 项 | 值 |
+|---|---|
+| 后端镜像 | `ayla-backend:latest`（重建，含 `livekit-api`） |
+| 容器 | `ayla-backend` 已 `up -d --no-deps` 重建并加载新 env |
+| Web | `index-BrrM8zkj.js`（本地 vite 构建 → tar → 服务器 `web/dist` 原地替换） |
+| 实测 | 生产 token 建联成功：ICE=connected、udp prflx→218.65.97.108:27882、RTT 38ms、建连 558ms |
+| 客户端发版 | stable `1.0.29+31`（Windows x64 + Android universal） |
 
 ## 4. ★ 三条实测约束（最容易踩的坑）
 
@@ -574,7 +659,7 @@ ss -uln | grep 27882
 #   期望：172.28.112.155:27882 等网卡地址；出现 127.0.0.1:27882 说明看错了进程
 
 # (3) 信令通、候选端口正确
-curl -sS -o /dev/null -w '%{http_code}\n' https://frp-one.com:26211/livekit/rtc/validate
+curl -sS -o /dev/null -w '%{http_code}\n' https://s.ayla.trise.top:26211/livekit/rtc/validate
 docker logs ayla-livekit --since 10m 2>&1 | grep -o 'udp4 host [0-9.]*:[0-9]*' | sort -u
 #   期望：只有 218.65.97.108:27882
 
@@ -650,12 +735,12 @@ $ journalctl -t livekit-udp-align --no-pager -o short-iso | tail -5
 ```bash
 cd Ayla/.workbuddy/evidence/livekit-udp/webrtc/probe
 # api-secret 从服务器 ~/Elysia/ayla-deploy/livekit.yaml 的 keys 段取（不入库）
-node run.mjs --url wss://frp-one.com:26211/livekit \
+node run.mjs --url wss://s.ayla.trise.top:26211/livekit \
   --api-key ayla-livekit --api-secret <secret> \
   --room "ayla-probe-$(date +%s)" --clients 3 --duration 25000 --out ../out/repro-3
 
 # 长时 + 丢包统计（§1.4 的复现条件）：5 人 300 s，逐区间统计
-node run.mjs --url wss://frp-one.com:26211/livekit \
+node run.mjs --url wss://s.ayla.trise.top:26211/livekit \
   --api-key ayla-livekit --api-secret <secret> \
   --room "ayla-probe-$(date +%s)" --clients 5 --duration 300000 --sample-ms 3000 \
   --out ../out/repro-5-long
