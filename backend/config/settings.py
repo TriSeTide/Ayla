@@ -283,9 +283,29 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # ---------- 语音频道（M4-5） ----------
-# 媒体层：WS 音频中继（Opus over WebSocket over TCP）。
-# 历史：曾用自托管 LiveKit SFU；因 frp 穿透改写 UDP 源地址导致 WebRTC/TURN 媒体面
-# 不可用，于 2026-09-12 整体退役（服务/依赖/媒体凭据签发全部移除）。
+# 媒体层 = 双路（`VOICE_MEDIA_TRANSPORT` 是**唯一全局回滚开关**，改环境变量+重启即生效，
+# 不需要发版、不需要重建客户端）：
+#   - `livekit`  ：自托管 LiveKit SFU，单 UDP 端口（rtc.udp_port 27882）经樱花 frp 穿透。
+#                   2026-10-27 实测通过（1/3/5 人 ICE=connected / UDP / RTP 流动）。
+#   - `ws_relay`：WS 音频中继（Opus over WebSocket over TCP），**回滚路径**，
+#                   实现见 apps/voice/audio_consumer.py（本开关不动它一行）。
+# ⚠️ 2026-09-12 的退役结论"frp 改写 UDP 源地址 ⇒ WebRTC 不可用"**已实测证伪**，
+#    详见 docs/operations/livekit-单udp端口方案.md；当时的真实原因见该文档。
+VOICE_MEDIA_TRANSPORT = env.str("VOICE_MEDIA_TRANSPORT", default="ws_relay")
+# WS 中继对外基址（wss://host[:port]）。**默认留空**：留空时下发的 ws_relay.url 是
+# 站内相对路径 `/ws/voice/audio/?channel=<id>`，web 与 API 同源、由 Vite/nginx 的
+# `/ws` 代理转发即正确；Flutter 由 AYLA_API_BASE 自行推导。仅当中继与 API 不同源时
+# 才需显式设置（如 wss://s.ayla.trise.top:26211）。
+VOICE_RELAY_WS_BASE = env.str("VOICE_RELAY_WS_BASE", default="")
+# LiveKit 信令与 token 签发（仅 VOICE_MEDIA_TRANSPORT=livekit 时使用）。
+# key/secret 由 LiveKit Server 生成，走本机 .env，**严禁提交仓库**。
+# LIVEKIT_WS_URL 必须带 /livekit 路径前缀（nginx 反代到 livekit 7880 时剥前缀）。
+LIVEKIT_API_KEY = env.str("LIVEKIT_API_KEY", default="")
+LIVEKIT_API_SECRET = env.str("LIVEKIT_API_SECRET", default="")
+LIVEKIT_WS_URL = env.str("LIVEKIT_WS_URL", default="")
+# 媒体 token TTL（秒）。须覆盖一次通话的最长时长：LiveKit token 到期不会自动续，
+# 客户端应在 `reconnecting` 前用 POST .../media-token/ 换票。
+LIVEKIT_TOKEN_TTL_SECONDS = env.int("LIVEKIT_TOKEN_TTL_SECONDS", default=600)
 # presence 心跳超时：超过该秒数未心跳的成员被标记离开（后台任务 owner，见 apps/voice/services.py）
 VOICE_MEMBER_TIMEOUT_SECONDS = env.int("VOICE_MEMBER_TIMEOUT_SECONDS", default=120)
 

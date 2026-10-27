@@ -20,8 +20,11 @@ dependencies = [
     "pymysql>=1.1",
     "boto3>=1.34",  # M4-3 对象存储（MinIO/S3 兼容）
     "Pillow>=10.0",  # M4-3 缩略图/波形派生
-    # M4-5 语音：LiveKit 官方 Python SDK（签发 AccessToken/VideoGrants）
-    # 语音媒体走 WS 音频中继（Opus over WebSocket over TCP），无 LiveKit 依赖
+    # M4-5 语音：LiveKit 官方 Python SDK（签发 AccessToken/VideoGrants）。
+    # 媒体面 = LiveKit 单 UDP 端口（VOICE_MEDIA_TRANSPORT=livekit）；
+    # WS 音频中继保留为回滚路径（不依赖本包，故 livekit-api 缺失也能跑 ws_relay）。
+    # 显式上限：v2 有破坏性变更，不跟随大版本。
+    "livekit-api>=1.2,<2.0",
 ]
 
 [build-system]

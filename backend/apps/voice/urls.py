@@ -16,6 +16,11 @@ urlpatterns = [
         name="voice-channel-join",
     ),
     path(
+        "channels/<int:channel_id>/media-token/",
+        views.ChannelMediaTokenView.as_view(),
+        name="voice-channel-media-token",
+    ),
+    path(
         "channels/<int:channel_id>/leave/",
         views.ChannelLeaveView.as_view(),
         name="voice-channel-leave",

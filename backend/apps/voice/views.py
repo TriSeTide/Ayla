@@ -29,7 +29,7 @@ from apps.media.models import MediaObject
 from apps.media.services import can_access_media
 from apps.media.serializers import MediaObjectSerializer
 
-from . import services
+from . import media_config, services
 from .models import VoiceChannel, VoiceChannelMember, VoiceChatMessage
 from .serializers import VoiceChannelMemberSerializer, VoiceChannelSerializer
 from .services import (
@@ -264,10 +264,20 @@ class ChannelDetailView(APIView):
 
 
 class ChannelJoinView(APIView):
-    """POST /api/v1/voice/channels/<id>/join/ —— 加入 + 落成员表 + 广播。
+    """POST /api/v1/voice/channels/<id>/join/ —— 加入 + 落成员表 + 广播 + 媒体配置。
 
-    媒体层已随 LiveKit 退役改走 WS 音频中继：直连地址由前端本地推导
-    （见 web/src/livekit/wsRelayRoom.ts），服务端不再签发媒体凭据。
+    响应保留既有三字段（`test_channel_api.py` 锁死：无顶层 `token`/`ws_url`），
+    另加**旁路字段 `media`** 下发媒体面配置（见 apps/voice/media_config.py）：
+    ```
+    "media": {
+      "transport": "livekit" | "ws_relay",     # 服务端建议值
+      "livekit":  {"url","token","ttl","expires_at","room_name","identity"} | null,
+      "ws_relay": {"url": "..."} | null         # 恒下发（回滚路径）
+    }
+    ```
+    两种配置同时下发，客户端在 livekit 连接失败时可直接按已到手的 `ws_relay`
+    原地降级，不必回后端再要一次配置（回滚速度 = 一次连接尝试）。
+    开关 `VOICE_MEDIA_TRANSPORT` 设回 `ws_relay` 即全网回滚，无需发版。
     """
 
     permission_classes = [IsAuthenticated]
@@ -284,9 +294,44 @@ class ChannelJoinView(APIView):
                 "channel_id": str(ch.id),
                 "room_name": ch.room_name,
                 "joined": True,
+                "media": media_config.media_payload(request.user, ch),
             },
             status=status.HTTP_200_OK,
         )
+
+
+class ChannelMediaTokenView(APIView):
+    """POST /api/v1/voice/channels/<id>/media-token/ —— 签发/续签媒体访问凭据。
+
+    与 `ChannelJoinView` 权限语义同源（`can_join`：媒体准入 = 进房准入），但**不落
+    成员表、不广播**——它只解决"token 到期换票"（LiveKit 的 token 过期不会自动续），
+    调用方应当已经加入频道。
+
+    请求体为空（`{}`）：房间与身份全部由服务端裁决，客户端**不能**指定要进哪个房间，
+    防止越权拿到他人房间的 token（历史 `livekit.py` 即此口径）。
+
+    响应体是 join 的 `media` 同一形状（`{"media": {...}}`），**字段名不叫 `token`**：
+    `test_channel_api.py` 锁了顶层无 `token` 的契约，token 只能包在 `media.livekit` 里。
+
+    失败语义：401 未登录 / 403 无权加入 / 404 频道不存在 / 503 媒体未配置。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, channel_id):
+        ch = _get_channel_or_404(channel_id)
+        if ch is None:
+            return _not_found()
+        if not can_join(request.user, ch):
+            return _forbidden("无权加入该语音频道")
+        media = media_config.media_payload(request.user, ch)
+        if media["transport"] != media_config.TRANSPORT_LIVEKIT or not media["livekit"]:
+            # 显式失败，绝不签发裸 token，也不假装"续签成功"（M4-5 §10.1）
+            return Response(
+                {"detail": "语音媒体未配置"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"media": media}, status=status.HTTP_200_OK)
 
 
 class ChannelLeaveView(APIView):
