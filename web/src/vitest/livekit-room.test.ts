@@ -559,3 +559,34 @@ describe("VoiceLiveKitClient.connectWithMedia", () => {
     await expect(client.connectWithMedia(null, "access")).rejects.toThrow(/媒体配置缺失/);
   });
 });
+
+describe("VoiceLiveKitClient.setRemoteVolume（成员级本地禁音）", () => {
+  it("房间实现了 setRemoteVolume → 委托给它（重新开麦也不会被绕过）", async () => {
+    const client = new VoiceLiveKitClient();
+    const setRemoteVolume = vi.fn();
+    const room = fakeRoom({ setRemoteVolume });
+    client.setRoomFactory(() => room);
+    await client.connectWithMedia(LIVEKIT_MEDIA, "a");
+
+    client.setRemoteVolume("u1", 0);
+    client.setRemoteVolume("u1", 2); // 超出 0~1 必须夹紧
+
+    expect(setRemoteVolume).toHaveBeenNthCalledWith(1, "u1", 0);
+    expect(setRemoteVolume).toHaveBeenNthCalledWith(2, "u1", 1);
+  });
+
+  it("房间没实现 setRemoteVolume → 回退逐轨道施加（向后兼容）", async () => {
+    const client = new VoiceLiveKitClient();
+    const setVolume = vi.fn();
+    const room = fakeRoom({
+      remoteParticipants: vi.fn().mockReturnValue([
+        { identity: "u1", audioTracks: [{ setVolume }] },
+      ]),
+    });
+    client.setRoomFactory(() => room);
+    await client.connectWithMedia(LIVEKIT_MEDIA, "a");
+
+    client.setRemoteVolume("u1", 0.3);
+    expect(setVolume).toHaveBeenCalledWith(0.3);
+  });
+});

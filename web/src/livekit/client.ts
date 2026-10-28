@@ -68,6 +68,14 @@ export interface LiveKitRoomLike {
   /** 本地麦克风音量 0~2（1 = 原始音量；改变自己说话别人听到的响度） */
   setLocalVolume(volume: number): Promise<void>;
   getLocalVolume(): number;
+  /**
+   * 远端成员本地播放音量 0~1（0 = 本地禁音）。
+   *
+   * 可选实现：**由房间自己记住该值**，并在该成员重新发布轨道（重新开麦）时
+   * 自动重新施加。不实现时上层只能对"当前已存在的轨道"生效——
+   * 对方重新开麦会产生新轨道，静音就被静默绕过（用户实报 2026-10-28）。
+   */
+  setRemoteVolume?(identity: string, volume: number): void;
 }
 
 /* ================= 封装客户端 ================= */
@@ -307,6 +315,11 @@ export class VoiceLiveKitClient {
     const room = owner?.room;
     if (!owner || !room) return;
     const clamped = Math.max(0, Math.min(1, volume));
+    // 优先交给房间：它把该值记在 identity 上，等对方重新开麦（新轨道）时再施加一次。
+    if (typeof room.setRemoteVolume === "function") {
+      room.setRemoteVolume(identity, clamped);
+      return;
+    }
     for (const p of room.remoteParticipants()) {
       if (p.identity !== identity) continue;
       for (const track of p.audioTracks) {

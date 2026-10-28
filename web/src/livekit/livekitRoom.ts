@@ -202,6 +202,17 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
   let localAnalyser: { getLevel(): number } | null = null;
   const remoteAnalysers = new Map<string, { getLevel(): number; cleanup(): Promise<void> }>();
 
+  /**
+   * 远端成员本地播放音量（identity -> 0~1）。
+   *
+   * 为什么要自己记：LiveKit 只有轨道级 setVolume（RemoteAudioTrack.setVolume），
+   * 而对方"重新开麦"在我们的关麦语义里是 unpublish 后重新 publish => 新轨道，
+   * 音量回到默认 1，本地静音就被静默绕过（用户实报 2026-10-28：
+   * 「收音方明明关掉了放音方的声音，放音方重新开麦又能听见了」）。
+   * 记住值 + 在 TrackSubscribed 里重新施加，才能让"本地禁音"是成员级事实。
+   */
+  const remoteVolumes = new Map<string, number>();
+
   let levelTimer: number | null = null;
 
   /* ---- 本地麦克风音量（发送响度） ---- */
@@ -537,6 +548,15 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
       // 元素竞态 → 忽略
     }
     ensureRemoteAnalyser(participant.identity, publication);
+    // 成员级本地音量（含 0 = 本地禁音）：新轨道必须继承，否则重新开麦会绕过静音。
+    const storedVolume = remoteVolumes.get(participant.identity);
+    if (storedVolume !== undefined) {
+      try {
+        (track as unknown as RemoteAudioTrackLike).setVolume(storedVolume);
+      } catch {
+        // 轨道已销毁 -> 忽略
+      }
+    }
   };
 
   const onTrackUnsubscribed = (
@@ -646,10 +666,33 @@ export async function createLiveKitRoom(events: LiveKitEvents): Promise<LiveKitR
           .filter((track): track is NonNullable<typeof track> => track != null)
           .map((track) => ({
             setVolume(volume: number) {
-              (track as unknown as RemoteAudioTrackLike).setVolume(Math.max(0, Math.min(1, volume)));
+              const clamped = Math.max(0, Math.min(1, volume));
+              remoteVolumes.set(participant.identity, clamped);
+              (track as unknown as RemoteAudioTrackLike).setVolume(clamped);
             },
           })),
       }));
+    },
+
+    /**
+     * 远端成员本地播放音量（0~1）。**记在 identity 上**，
+     * 等对方重新发布轨道时由 onTrackSubscribed 再施加一次。
+     * 这样"本地禁音"是成员级事实，不会被对方重新开麦绕过。
+     */
+    setRemoteVolume(identity: string, volume: number): void {
+      const clamped = Math.max(0, Math.min(1, volume));
+      remoteVolumes.set(identity, clamped);
+      const participant = room.remoteParticipants.get(identity);
+      if (!participant) return;
+      for (const publication of participant.audioTrackPublications.values()) {
+        const track = publication.track;
+        if (!track) continue;
+        try {
+          (track as unknown as RemoteAudioTrackLike).setVolume(clamped);
+        } catch {
+          // 轨道已销毁 -> 忽略
+        }
+      }
     },
 
     async startAudio() {
