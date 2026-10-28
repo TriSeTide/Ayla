@@ -42,15 +42,74 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
+// ⚠️ `Helper`（含 vendor 补丁的 selectAudioOutputDetailed）只由 flutter_webrtc 导出，
+// livekit_client 没有 re-export 它 —— 所以这里必须显式 import 那个包。
+import 'package:flutter_webrtc/flutter_webrtc.dart' show Helper;
 import 'package:livekit_client/livekit_client.dart' as lk;
 
+import '../core/media/android_audio_route.dart';
 import '../core/media/windows_audio_device.dart';
 
 import 'livekit_voice_backend.dart';
 
 /// 注册生产房间工厂（由 `AylaVoiceMedia` 在构造时调用一次；幂等）。
+///
+/// 顺带做一件**必须发生在任何 Room 连接之前**的事：把 Android 的 WebRTC 初始化参数
+/// 指定为**媒体播放**语义（见 [ensureAndroidMediaWebRtcInit]）。
 void aylaInstallLiveKitRoomBuilder() {
   AylaLiveKitRoomBuilder.install(() async => AylaLiveKitSdkRoom());
+  unawaited(ensureAndroidMediaWebRtcInit());
+}
+
+/// 音频会话选项：**媒体播放**语义（不是通话）。
+///
+/// 用户实报（2026-10-28）：手机端听感/音量档是「通话」形态，要求改成媒体播放。
+/// `AudioSessionOptions.mediaPlayback` = Android audioMode normal + usage media +
+/// streamType music（媒体音量档，非通话音量档），iOS 对应 playback 类目。
+/// 采集侧仍显式开 AEC/NS/AGC（见 `AylaLiveKitSdkRoom._captureOptions`），
+/// 离开通话模式不会失去回声消除（libwebrtc 软件 AEC）。
+const lk.AudioSessionOptions kAylaMediaAudioSessionOptions =
+    lk.AudioSessionOptions.mediaPlayback();
+
+/// 是否已发起 Android WebRTC 初始化（只发一次：ADM 初始化是**一次性**的）。
+bool _androidMediaInitStarted = false;
+
+/// 初始化去重 future（并发调用合流成一次真正的 `WebRTC.initialize`）。
+final Future<void> _androidMediaInitLocked = () async {
+  await lk.LiveKitClient.initialize(
+    initialAudioSessionOptions: kAylaMediaAudioSessionOptions,
+  );
+  debugPrint('[lk] Android WebRTC 已按媒体播放语义初始化: playout usage=USAGE_MEDIA');
+}();
+
+/// 让 Android 的 WebRTC **音频设备模块（ADM）** 以媒体播放语义建轨（幂等，只生效一次）。
+///
+/// ## 为什么必须在这里、而不是运行期（2026-10-29 实测定案）
+/// 用户实报「手机端是通话音量（音量键调的是通话音量）」。逐层验证结论：
+/// · `AudioManager.setAudioSessionOptions(mediaPlayback)` 只改**会话**（mode/焦点/外放），
+///   改不了**已经建好的播放轨**；
+/// · WebRTC 的播放 AudioTrack 属性在 ADM 初始化时就固定了：flutter_webrtc 的
+///   MethodCallHandlerImpl 只有拿到 `androidAudioConfiguration` 才会把 usage/content
+///   传给 JavaAudioDeviceModule，否则用默认的 USAGE_VOICE_COMMUNICATION；
+/// · 实测证据（模拟器 dumpsys audio）：修之前播放轨一直是
+///   usage=USAGE_VOICE_COMMUNICATION content=CONTENT_TYPE_SPEECH sampleRate=8000，
+///   按音量键改的是 STREAM_VOICE_CALL 而不是 STREAM_MUSIC；
+/// · 该参数只在 WebRTC.initialize 时生效一次，而 livekit_client 为此提供了
+///   LiveKitClient.initialize 的 initialAudioSessionOptions 入口（其注释明说
+///   "before WebRTC creates its audio device module"）。
+///
+/// 所以：**在构造第一个 Room 之前**初始化一次。非 Android 平台直接返回（桌面端的
+/// 音频设备由系统路由决定，见 [_alignAudioRoute]）。
+Future<void> ensureAndroidMediaWebRtcInit() async {
+  if (_androidMediaInitStarted) return;
+  if (!AylaAndroidAudioRoute.supported) return;
+  _androidMediaInitStarted = true;
+  try {
+    await _androidMediaInitLocked;
+  } catch (error) {
+    // 初始化失败不能阻断语音（退回默认通话语义 + 原生路由兜底），但必须留痕。
+    debugPrint('[lk] Android WebRTC 媒体初始化失败（退回通话语义）: $error');
+  }
 }
 
 /// LiveKit SDK 房间实现（一个实例 = 一次连接生命周期）。
@@ -87,14 +146,9 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     defaultAudioPublishOptions: _publishOptions,
   );
 
-  /// 音频会话：**媒体播放**语义（不是通话）。
-  ///
-  /// 用户实报（2026-10-28）：手机端听感/音量档是「通话」形态，要求改成媒体播放。
-  /// `AudioSessionOptions.mediaPlayback` = Android audioMode normal + usage media +
-  /// streamType music（媒体音量档，非通话音量档），iOS 对应 playback 类目。
-  /// 采集侧仍显式开 AEC/NS/AGC（见 [_captureOptions]），离开通话模式不会失去回声消除。
+  /// 音频会话：**媒体播放**语义（不是通话）。见顶层 [kAylaMediaAudioSessionOptions]。
   static const lk.AudioSessionOptions _audioSessionOptions =
-      lk.AudioSessionOptions.mediaPlayback();
+      kAylaMediaAudioSessionOptions;
 
   /// 应用音频会话（幂等）。桌面平台没有音频会话概念 ⇒ 异常按"不支持"处理并留日志。
   Future<void> _applyAudioSession() async {
@@ -154,12 +208,26 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
   Future<void> connect(String url, String token) async {
     // 音频会话必须先于连接生效：SDK 在本机建 PeerConnection 时就绑定 AudioAttributes。
     await _applyAudioSession();
-    // Windows：**必须在 connect 之前**选定输出端点 —— WebRTC 的音频设备模块在
-    // 首次 startPlayout 时才按"当时选定的设备"初始化；连接后再切不会迁移已经在跑的
-    // 播放流（实测：连接后切设备返回 success 但音频仍留在原端点）。
-    await _alignAudioRoute();
+    // Windows 输出端点：connect **前后各一次**，两次都必须有。
+    //
+    // · connect 前那次：建立「用户意图」基线（也是 macOS/Android 上唯一有效的时机）；
+    // · connect 后那次（force）：**真正生效的那次**。实测 ADM 的 Windows playout
+    //   通道要等首次 startPlayout 才打开，而它按当时的系统「默认通信设备」初始化，
+    //   会把 connect 前设好的设备覆盖掉。所以只做前一次 = 声音留在通信设备上，
+    //   正是用户实报的「音频条在跳、耳机没声音」。
+    // 排障开关（默认关闭）：跳过 Windows 输出端点切换，用于 A/B 定位「切换是否
+    // 影响采集/播放」。生产不传该 define。
+    if (!const bool.fromEnvironment('AYLA_SKIP_ROUTE_ALIGN')) {
+      await _alignAudioRoute();
+    }
     await _room.connect(url, token);
+    if (!const bool.fromEnvironment('AYLA_SKIP_ROUTE_ALIGN')) {
+      await _alignAudioRoute(force: true);
+    }
     _alignAudioRouteAfterConnect();
+    // Android：连接后把系统音频会话压回「媒体」语义。SDK 在连接过程中会重施
+    // 通话策略（MODE_IN_COMMUNICATION），必须在这之后再压一次。
+    await _applyAndroidMediaRoute('connect');
     _startLevelTimer();
     _startRemoteLevelTimer();
     _startDebugStatsTimer();
@@ -174,6 +242,7 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     _stopLevelTimer();
     _stopRemoteLevelTimer();
     _stopDebugStatsTimer();
+    _routeAlignedForPlayback = false;
     await _releaseMicrophone();
     await _cancelListeners();
     try {
@@ -210,6 +279,11 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     final lk.LocalParticipant? local = _room.localParticipant;
     if (local == null) throw StateError('LiveKit 未连接');
 
+    // Windows：显式选定**系统默认采集设备**再建轨。
+    // 不指定时 flutter_webrtc 会硬选 ADM 枚举下标 0 —— 那可能是虚拟回环设备
+    // （本机是「内部 AUX 输入 (Steam Streaming Speakers)」，永远静音），
+    // 于是开麦后发出去的全是静音。见 third_party/flutter_webrtc 的采集补丁。
+    await _alignAudioInput();
     final lk.LocalAudioTrack track =
         await lk.LocalAudioTrack.create(_captureOptions);
     try {
@@ -235,6 +309,12 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
       _micPublication = publication;
       _measuredLocalLevel = null;
       _startLevelTimer();
+      // 发布之后**不强制**重切（force=false）：只在端点真的变了时对齐。
+      // 原因：强制切会触发 libwebrtc 的 Stop/Init/Start playout，每开一次麦就静音一下；
+      // 真正必须强制的时机是「connect 完成后」与「首次有远端音频在播后」，见那两处。
+      await _alignAudioRoute();
+      // 开麦后 SDK 可能重建音频会话（重新绑定 AudioAttributes）⇒ 再压一次。
+      await _applyAndroidMediaRoute('publish');
       if (kDebugMode) {
         debugPrint('[lk] 麦克风已发布 sid=${publication.sid} '
             'trackSid=${track.sid}');
@@ -406,24 +486,134 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     }
   }
 
-  /// 连接前校正输出端点（Windows：跟随系统"默认设备"）。
-  Future<void> _alignAudioRoute() async {
-    if (AylaWindowsAudioDevice.supported) {
-      try {
-        final AylaAudioEndpoint? out = await AylaWindowsAudioDevice.defaultEndpoint();
-        if (out == null) {
-          debugPrint('[lk] 未取到系统默认输出设备，保持 WebRTC 默认');
-        } else {
-          await lk.Hardware.instance.selectAudioOutput(
-            lk.MediaDevice(out.id, out.name, 'audiooutput', null),
-          );
-          debugPrint('[lk] 输出设备已切到系统默认: ${out.name}');
-        }
-      } catch (error) {
-        // 设备可能不在 WebRTC 的枚举集里（如休眠中的蓝牙耳机）——不是致命错误。
-        debugPrint('[lk] 切换输出设备失败: $error');
+  /// 实际生效的输出端点（最近一次切换回执里的 ADM 名；null = 未知）。
+  String? _playoutDeviceName;
+
+  /// 是否已在「有远端音频在播」之后校正过一次输出端点（每次连接只做一次）。
+  bool _routeAlignedForPlayback = false;
+
+  /// 选定采集设备（Windows：跟随系统默认**通信**采集端点 —— Windows 的"麦克风"）。
+  ///
+  /// 为什么必须显式选：不指定时 flutter_webrtc 的 GetUserMedia 会
+  /// `SetRecordingDevice(0)`，而 ADM 的枚举下标 0 可能是**虚拟回环设备**
+  /// （本机实测 = 「内部 AUX 输入 (Steam Streaming Speakers)」，永远静音）。
+  /// 用户 2026-10-29 实报「电脑/手机开麦对方听不到、web 开麦能听到」，
+  /// 根因正是这一条（web 走浏览器自己的选麦逻辑，只有原生端踩到）。
+  /// 采不到设备时保持 ADM 默认（不 throw：开麦不能因为选设备失败而失败）。
+  Future<void> _alignAudioInput() async {
+    if (!AylaWindowsAudioDevice.supported) return;
+    if (_captureDeviceId != null) return;
+    try {
+      final AylaAudioEndpoint? mic =
+          await AylaWindowsAudioDevice.defaultEndpoint(
+        capture: true,
+        role: 1,
+      );
+      if (mic == null) {
+        debugPrint('[lk] 未取到系统默认采集设备，交给 ADM 默认');
+        return;
       }
+      await lk.Hardware.instance.selectAudioInput(
+        lk.MediaDevice(mic.id, mic.name, 'audioinput', null),
+      );
+      _captureDeviceId = mic.id;
+      debugPrint('[lk] 采集设备已切到系统默认麦克风: ${mic.name}');
+    } catch (error) {
+      // 设备可能不在 WebRTC 的枚举集里 —— 不是致命错误，交给 ADM 默认。
+      debugPrint('[lk] 切换采集设备失败（用 ADM 默认）: $error');
     }
+  }
+
+  /// 已选定的采集设备 id（避免每次开麦都重复选）。
+  String? _captureDeviceId;
+
+  /// 校正输出端点（Windows：跟随系统「默认**多媒体**设备」而不是「默认通信设备」）。
+  ///
+  /// ## 为什么必须能被重复调用（2026-10-28 用户实报后的关键修正）
+  /// 只在 `connect()` 之前切一次是不够的，实测有三条会让它前功尽弃：
+  /// 1. WebRTC 的播放设备模块在**首次 startPlayout** 时才真正打开设备 —— 那时
+  ///    订阅还没发生；之后 PeerConnection 重新协商（远端开麦 / 重连）可能重建
+  ///    ADM 的 playout 通道；
+  /// 2. Windows 上「默认设备」与「默认通信设备」可以是**两个不同的物理端点**，
+  ///    蓝牙耳机插拔/休眠切换后必须重新对齐；
+  /// 3. 切换在 libwebrtc 里是异步 PostTask，失败是静默的（返回 0 不代表成功）。
+  ///
+  /// 所以：**connect 之后**与**首次订阅到远端音频之后**各强制切一次（[force] = true），
+  /// 并把**内核回执**打进日志（vendor 补丁的 `selectAudioOutputDetailed` 会返回
+  /// index / matchedById / setResult / devices）。
+  Future<void> _alignAudioRoute({bool force = false}) async {
+    if (!AylaWindowsAudioDevice.supported) return;
+    try {
+      final ({AylaAudioEndpoint? communications, AylaAudioEndpoint? multimedia})
+          ends = await AylaWindowsAudioDevice.defaultEndpoints();
+      final AylaAudioEndpoint? target = ends.multimedia ?? ends.communications;
+      if (target == null) {
+        debugPrint('[lk] 未取到系统默认输出设备，保持 WebRTC 默认');
+        return;
+      }
+      if (kDebugMode) {
+        debugPrint('[lk] 输出端点 多媒体=${ends.multimedia?.name ?? '-'} '
+            '通信=${ends.communications?.name ?? '-'}');
+      }
+      // ⚠️ **这里绝不能因为上次已经切过同名设备就跳过**（2026-10-29 实测定案）：
+      //
+      // 实测三组 CoreAudio 峰值（远端 440Hz 在播时读端点峰值）：
+      // · 生产路径（connect 前切到耳机，守卫挡掉后续切换）→ 通信端点 0.4401、耳机 0.0001；
+      // · connect 之后强制切到耳机 → 用户当场听到声音；
+      // · connect 之后强制切到虚拟声卡 VB-Audio → VB-Audio 0.3557、通信端点 0。
+      //
+      // 即：切换动作本身有效，但 connect 之前设的那次不生效——ADM 的 Windows playout
+      // 通道是在首次 startPlayout 时才按当时（= 系统默认通信设备）打开的，把 connect 前
+      // 那次 SetPlayoutDevice 覆盖掉了。所以「已经切过」推不出「当前正在往那个设备播」：
+      // 必须在 playout 真正起来之后**再切一次**。
+      //
+      // 代价：重复切会触发 libwebrtc 的 Stop/Init/Start playout（极短静音），因此这条
+      // 只在 force（连接完成 / 首次有远端音频）或端点真的变了时才执行；普通开麦关麦不触发。
+      final bool sameAsLast =
+          _playoutDeviceName != null && _playoutDeviceName == target.name;
+      if (sameAsLast && !force) return;
+      Map<String, dynamic> receipt = <String, dynamic>{};
+      try {
+        receipt = await Helper.selectAudioOutputDetailed(target.id);
+      } catch (error) {
+        debugPrint('[lk] 详细切换不可用，退回普通 selectAudioOutput: $error');
+      }
+      if (receipt.isEmpty) {
+        await lk.Hardware.instance.selectAudioOutput(
+          lk.MediaDevice(target.id, target.name, 'audiooutput', null),
+        );
+        _playoutDeviceName = target.name;
+        debugPrint('[lk] 输出设备已切到系统默认: ${target.name}（无内核回执）');
+        return;
+      }
+      _playoutDeviceName = (receipt['name'] ?? target.name).toString();
+      debugPrint('[lk] 输出设备切换回执 index=${receipt['index']} '
+          'name=${receipt['name']} matchedById=${receipt['matchedById']} '
+          'setResult=${receipt['setResult']} '
+          'count=${receipt['playoutDeviceCount']} '
+          'devices=[${receipt['devices']}]');
+    } catch (error) {
+      // 设备可能不在 WebRTC 的枚举集里（如休眠中的蓝牙耳机）——不是致命错误。
+      debugPrint('[lk] 切换输出设备失败: $error');
+    }
+  }
+
+  /// Android 媒体音频路由（幂等；非 Android 或失败返回 false，**绝不抛**）。
+  ///
+  /// 为什么 Dart 侧 `AudioSessionOptions.mediaPlayback` 不够：它只改**会话策略**，
+  /// 而 WebRTC ADM 的播放 AudioTrack 在 initialize 时已按 USAGE_VOICE_COMMUNICATION
+  /// 建好，音量键因此仍落在 STREAM_VOICE_CALL 上（`dumpsys audio` 可见）。
+  /// 原生兜底见 `core/media/android_audio_route.dart`。
+  Future<void> _applyAndroidMediaRoute(String stage) async {
+    final bool applied = await aylaApplyAndroidMediaRoute();
+    if (!kDebugMode) return;
+    if (!applied && !AylaAndroidAudioRoute.supported) return;
+    final AylaAndroidMediaRouteState? state = AylaAndroidAudioRoute.lastState;
+    debugPrint('[lk] android 媒体音频路由 stage=$stage applied=$applied '
+        'mode=${state?.mode ?? '-'} focus=${state?.focusGranted} '
+        'speaker=${state?.speakerOn} headset=${state?.headset} '
+        'musicVol=${state?.streamMusicVolume} '
+        'voiceCallVol=${state?.streamVoiceCallVolume}');
   }
 
   /// 连接后再压一次移动端的媒体会话（SDK 在连接过程中可能重施通话策略）。
@@ -559,6 +749,13 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
         // 「订阅没发生（网络/协商）」与「订阅了但放不出来（平台音频栈）」的唯一线索。
         // 2026-10-28 用户实报「手机说话电脑听不到」，需要这条日志定位。
         debugPrint('[livekit] 远端音频已订阅 identity=${event.participant.identity}');
+        // 第一次真正有远端音频之后必须再校一次输出端点：ADM 的 playout 设备是在
+        // **首次真正播放**时才打开的，那一刻才决定声音从哪个物理端点出来。
+        // 用户实报「音频条在跳、耳机没声音」正是这一步缺失（声音留在通信设备上）。
+        if (!_routeAlignedForPlayback) {
+          _routeAlignedForPlayback = true;
+          unawaited(_alignAudioRoute(force: true));
+        }
         _emit(AylaRoomEventKind.trackSubscribed,
             identity: event.participant.identity);
       }))

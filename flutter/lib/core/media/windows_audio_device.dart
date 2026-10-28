@@ -48,10 +48,32 @@ class AylaWindowsAudioDevice {
       if (raw == null) return null;
       final String id = (raw['id'] ?? '').toString();
       if (id.isEmpty) return null;
-      return (id: id, name: (raw['name'] ?? '').toString());
+      return (
+        id: id,
+        name: (raw['name'] ?? '').toString(),
+      );
     } catch (_) {
       // 原生通道不可用（如非 Windows 误调）不是错误路径。
       return null;
     }
+  }
+
+  /// 同时取**娱乐/多媒体**（用户日常听声音的）与**通信**两个默认端点。
+  ///
+  /// 为什么两个都要：Windows 上这两个角色可以指向**不同物理端点**，而 WebRTC
+  /// 默认跟随「通信设备」。语音房的正确行为是跟随**多媒体**设备，但排障时必须
+  /// 能同时看到两者，才能判定「声音到底从哪个端点出来」（配合 CoreAudio 峰值表）。
+  static Future<
+      ({
+        AylaAudioEndpoint? multimedia,
+        AylaAudioEndpoint? communications,
+      })> defaultEndpoints() async {
+    final List<AylaAudioEndpoint?> both = await Future.wait(
+      <Future<AylaAudioEndpoint?>>[
+        defaultEndpoint(role: 1),
+        defaultEndpoint(role: 2),
+      ],
+    );
+    return (multimedia: both[0], communications: both[1]);
   }
 }

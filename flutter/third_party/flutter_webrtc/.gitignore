@@ -1,0 +1,10 @@
+
+# ---- Ayla vendor 补充（本地 fork，见 README-AYLA.md）----
+# libwebrtc 预编译二进制（约 29MB）由 third_party/CMakeLists.txt 在 configure 时
+# 从 webrtc-sdk release 下载并按 libwebrtc_version.ini 校验，**不入库**：
+#   同步 vendor 到新机器后，第一次 flutter build windows 会自动下载。
+third_party/libwebrtc/
+third_party/downloads/
+.dart_tool/
+example/build/
+build/

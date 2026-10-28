@@ -345,12 +345,11 @@ packages:
     source: sdk
     version: "0.0.0"
   flutter_webrtc:
-    dependency: transitive
+    dependency: "direct main"
     description:
-      name: flutter_webrtc
-      sha256: b98ef03376401e54ff87fc78907b38e562b15ca8424aba589c263eddc3c1ecf9
-      url: "https://pub.flutter-io.cn"
-    source: hosted
+      path: "third_party/flutter_webrtc"
+      relative: true
+    source: path
     version: "1.6.3"
   go_router:
     dependency: "direct main"

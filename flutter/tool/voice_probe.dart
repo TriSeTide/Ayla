@@ -29,6 +29,8 @@ import 'package:ayla_flutter/core/api/voice_api.dart';
 import 'package:ayla_flutter/core/net/dio_client.dart';
 // ignore: depend_on_referenced_packages
 import 'package:logging/logging.dart' show hierarchicalLoggingEnabled;
+// ignore: depend_on_referenced_packages
+import 'package:flutter_webrtc/flutter_webrtc.dart' show Helper;
 import 'package:livekit_client/livekit_client.dart'
     show
         AudioManager,
@@ -235,18 +237,38 @@ class _ProbeAppState extends State<_ProbeApp> {
       }
       await vm.startAudio();
       _log('startAudio done');
-      // 实验：列出输出设备并尝试切换（验证 flutter_webrtc 在 Windows 上是否支持）
+      // 排查用：`--dart-define=VOICE_FORCE_OUT=<label 片段>` 在连接后强制切到指定输出设备。
+      // 目的：判定 selectAudioOutput 在这套 libwebrtc 上到底能不能迁移**运行中**的播放流
+      // （生产路径跟随系统默认多媒体设备；这里只做对照实验，不进生产）。
+      const String forceOut = String.fromEnvironment('VOICE_FORCE_OUT');
+      if (forceOut.isNotEmpty) {
+        final List<MediaDevice> outs = await Hardware.instance.audioOutputs();
+        MediaDevice? target;
+        for (final MediaDevice d in outs) {
+          if (d.label.contains(forceOut)) {
+            target = d;
+            break;
+          }
+        }
+        if (target == null) {
+          _log('FORCE_OUT 未找到含 [$forceOut] 的设备');
+        } else {
+          final Map<String, dynamic> receipt =
+              await Helper.selectAudioOutputDetailed(target.deviceId);
+          _log('FORCE_OUT -> ${target.label} receipt=$receipt');
+        }
+      }
+      // 只枚举、**不切换**：生产路径的输出端点选择由适配层 `_alignAudioRoute`
+      // 负责（它会在 connect 后 / 发布后 / 首次订阅后各校一次并打内核回执）。
+      // 这里曾经做过一次「强制切到 outs.first」的实验，会把适配层的对齐结果覆盖掉，
+      // 于是「日志说切了、声音没动」永远无法复现 —— 已移除（2026-10-28）。
       try {
         final List<MediaDevice> outs = await Hardware.instance.audioOutputs();
         for (final MediaDevice d in outs) {
           _log('输出设备: id=${d.deviceId} label=${d.label}');
         }
-        if (outs.isNotEmpty) {
-          await Hardware.instance.selectAudioOutput(outs.first);
-          _log('已尝试切换到 ${outs.first.label}');
-        }
       } catch (e) {
-        _log('输出设备枚举/切换失败: $e');
+        _log('输出设备枚举失败: $e');
       }
       await vm.setMicrophoneEnabled(true);
       _micOn = true;
