@@ -226,11 +226,11 @@ Ayla/
 - 迷你小窗（窄屏 App 内）：video 原子移动不重建（liveSessionRuntime 全局单例唯一持有）；桌面端保留原生 PiP
 - 全屏：容器 requestFullscreen + 窄屏锁横屏 `screen.orientation.lock("landscape")`；iOS Safari 走 `webkitEnterFullscreen()` 原生视频全屏
 
-### 10.2 语音：媒体面双路（LiveKit 单 UDP 端口 = 现网 | WS 音频中继 = 回滚路径）
+### 10.2 语音：LiveKit 单 UDP 端口（2026-10-28 起唯一媒体面，WS 中继已删除）
 
 **LiveKit 基础设施已于 2026-10-27 重新部署并实测通过**（容器 `ayla-livekit` 在跑、单 UDP 端口方案 1/3/5 人 ICE=connected + RTP 流动；是否作为默认媒体面由后端 `VOICE_MEDIA_TRANSPORT` 决定）：2026-09-12 那次退役的根因「frp 穿透下 UDP 源地址被改写、WebRTC/TURN 媒体面不可用」**已被实测证伪**——1/3/5 人全部 ICE=connected、selected pair 是 `udp prflx`（详见 [livekit-单udp端口方案](../operations/livekit-单udp端口方案.md) §1.1 与 §8）。真实原因当时是配置模式（`port_range_*` vs `udp_port`）、`node_ip` 广播内网 IP 与 frpc 实例争用，与 frp 的 UDP 能力无关。
 
-现网媒体面由后端 `VOICE_MEDIA_TRANSPORT` 决定（`livekit` | `ws_relay`，默认 `ws_relay`；**改环境变量即回滚，无需发版**）。下文记录的是 WS 音频中继这条**仍然保留、未删一行**的回滚路径：
+**2026-10-28 起媒体面只有 LiveKit**：WS 音频中继（`wsRelayRoom.ts` / `relay_client.dart` / 后端 `audio_consumer.py`）与其回退路径已整体删除，不再有 `VOICE_MEDIA_TRANSPORT` 开关。下文保留的是**中继时期的实现记录**（仅作历史参考，代码已不存在）：
 
 - **格式**：48kHz 单声道 Opus；采集 AudioWorklet（PCM Float32）→ WebCodecs `AudioEncoder`（opus）→ WS 二进制帧上行；接收 WS 帧 → WebCodecs `AudioDecoder` → AudioContext 播放
 - **控制帧**：服务器分配 slot，成员进出/轨道 mute 事件

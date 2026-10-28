@@ -147,7 +147,7 @@ ICE 本身全程稳定，不是 ICE 断开
 
 ### 2.1 为什么从 WS/TCP 换回 UDP
 
-| 问题 | WS 音频中继（现状 / 回滚路径） | LiveKit UDP（本方案） |
+| 问题 | WS 音频中继（**已于 2026-10-28 删除**） | LiveKit UDP（现网唯一媒体面） |
 |---|---|---|
 | 传输语义 | Opus 帧跑在 **TCP** 上，丢包只能靠重传补齐 | UDP + Opus FEC/RED + jitter buffer，丢包由编码层吸收 |
 | 队头阻塞 | 语音与 ssh / RTMP 推流 / HLS 拉流共用**同一条 frp mux TCP**（`~/frp/frpc.toml` 的 `transport.tcpMux = true`），任一条突发即顶住语音；`docs/flutter/37` §5.6 已把它列为观察点并实测 mux RTT ~44ms + 重传 | 媒体走独立 UDP 通道，与 TCP 隧道完全解耦 |
@@ -252,8 +252,7 @@ udp_port_align.py  监听 127.0.0.1:7882 -> 上游 172.28.112.155:27882（每客
 #### (2) 后端 `backend/.env` 必须项
 
 ```ini
-VOICE_MEDIA_TRANSPORT=livekit                                  # 回滚改 ws_relay
-VOICE_RELAY_WS_BASE=wss://s.ayla.trise.top:26211                # 中继回滚路径的绝对地址
+# 2026-10-28：不再有 VOICE_MEDIA_TRANSPORT / VOICE_RELAY_WS_BASE（中继与回退已删除）
 LIVEKIT_API_KEY=ayla-livekit
 LIVEKIT_API_SECRET=<必须与 livekit.yaml 的 keys 完全一致>        # ★ 见 (3)
 LIVEKIT_WS_URL=wss://s.ayla.trise.top:26211/livekit
@@ -567,11 +566,11 @@ frp 的 UDP 代理在本方案里**工作正常**（§1.1、§7）。
 
 | # | 文件 | 改写后的行号 | 原句（误判） | 改写成了什么 |
 |---|---|---|---|---|
-| 1 | [`docs/flutter/01-web现状盘点.md`](../flutter/01-web现状盘点.md) | **:229**（标题）/:231（正文）/:233（补充） | 「LiveKit 已整体退役（2026-09-12 起）：frp 穿透下 UDP 源地址被改写，WebRTC/TURN 媒体面不可用 → 唯一传输为 WS 音频中继」 | ① :229 标题改为「语音：媒体面双路（LiveKit 单 UDP 端口 = 现网 \| WS 音频中继 = 回滚路径）」；② :231 改为「**LiveKit 基础设施已于 2026-10-27 重新部署并实测通过**…那次退役的根因**已被实测证伪**」；③ :233 新增一段「现网由 `VOICE_MEDIA_TRANSPORT` 决定，下文为回滚路径」 |
-| 2 | [`docs/服务器半容器化部署方案.md`](../服务器半容器化部署方案.md) | **:275-279** | 「LiveKit 已于 2026-09-12 整体退役（UDP 源地址被 frp 改写，WebRTC/TURN 不可用），改走 ws 音频中继。LIVEKIT_* 变量不再使用」 | 改为「媒体面 = LiveKit 单 UDP 端口（公网 218.65.97.108:27882/udp，信令 wss://frp-one.com:26211/livekit），2026-10-27 实测通过」+「退役结论已证伪」+「回滚 = `VOICE_MEDIA_TRANSPORT=ws_relay`」+「仅 livekit 路需要 `LIVEKIT_*`」 |
+| 1 | [`docs/flutter/01-web现状盘点.md`](../flutter/01-web现状盘点.md) | **:229**（标题）/:231（正文）/:233（补充） | 「LiveKit 已整体退役（2026-09-12 起）：frp 穿透下 UDP 源地址被改写，WebRTC/TURN 媒体面不可用 → 唯一传输为 WS 音频中继」 | ① :229 标题改为「语音：媒体面双路（LiveKit 单 UDP 端口 = 现网 \| WS 音频中继 = 回滚路径）」；② :231 改为「**LiveKit 基础设施已于 2026-10-27 重新部署并实测通过**…那次退役的根因**已被实测证伪**」；③ :233 新增一段「现网媒体面为 LiveKit（2026-10-28 起中继已删除）」 |
+| 2 | [`docs/服务器半容器化部署方案.md`](../服务器半容器化部署方案.md) | **:275-279** | 「LiveKit 已于 2026-09-12 整体退役（UDP 源地址被 frp 改写，WebRTC/TURN 不可用），改走 ws 音频中继。LIVEKIT_* 变量不再使用」 | 改为「媒体面 = LiveKit 单 UDP 端口（公网 218.65.97.108:27882/udp，信令 wss://frp-one.com:26211/livekit），2026-10-27 实测通过」+「退役结论已证伪」+「2026-10-28 起中继与回退已删除，只剩 LiveKit」 |
 | 3 | [`docs/flutter/02-复刻评估与方案.md`](../flutter/02-复刻评估与方案.md) | **:183** | 「备选：降级为服务端转码 WebRTC 直连（frp 限制下不可行——web 端已退役 LiveKit 的教训要尊重）」 | 改为「备选：直接接 LiveKit WebRTC——frp **已实测可承载**…」，并注明旧的「frp 限制下不可行」是 2026-09-12 的误判（同文档 §8） |
 | 4 | [`docs/flutter/04-审计结论.md`](../flutter/04-审计结论.md) | **:43** | 「LiveKit 退役属实（全 src 无 livekit-client import，wsRelayRoom.ts:2『替代 livekit-client』）」 | 拆成两件事并分别定性：**①「当时全 src 无 livekit-client import」是审计时点的事实，仍成立**；**②「退役根因 = frp 改写 UDP 源地址」是误判，已证伪** |
-| 5 | [`docs/flutter/05-实施提示.md`](../flutter/05-实施提示.md) | **:4** | 「语音=WS 音频中继 48kHz 单声道 Opus（LiveKit 已退役）」 | 改为「语音=媒体面双路（`VOICE_MEDIA_TRANSPORT`：livekit 走单 UDP 端口 27882 / ws_relay 走 WS 音频中继…默认 ws_relay，且它是回滚路径）」，并注明退役结论已证伪 |
+| 5 | [`docs/flutter/05-实施提示.md`](../flutter/05-实施提示.md) | **:4** | 「语音=WS 音频中继 48kHz 单声道 Opus（LiveKit 已退役）」 | 改为「语音=LiveKit 单 UDP 端口媒体面（27882），2026-10-28 起中继与回退已删除」，并注明退役结论已证伪 |
 
 > 五处均为**就地改写原句**，没有新增「另说」段落。复核方式：
 > `grep -rn '源地址' Ayla/docs` —— 命中项应当只有 ① 本文（含本表引用的旧句原文）、
@@ -588,49 +587,36 @@ frp 的 UDP 代理在本方案里**工作正常**（§1.1、§7）。
 
 ---
 
-## 9. 回滚方式
+## 9. 撤销与回退（2026-10-28：中继已删除，不再有传输开关）
 
-**唯一全局开关：`VOICE_MEDIA_TRANSPORT=ws_relay`**（`backend/config/settings.py:294`，
-**默认值就是 `ws_relay`**；改环境变量 + 重启 backend 即生效，**不需要发版、不需要重建客户端**）。
+**运行时回滚开关已不存在。** 用户 2026-10-28 明确要求：WS 中继性能不好，
+**不保留实现、不保留回退**。因此：
 
-```bash
-# 服务器：~/Elysia/ayla-deploy/backend/.env（或部署环境变量）
-VOICE_MEDIA_TRANSPORT=ws_relay
-docker restart ayla-backend
-```
+- 后端不再有 `VOICE_MEDIA_TRANSPORT` / `VOICE_RELAY_WS_BASE`（`config/settings.py` 已删）；
+- 媒体面只有 LiveKit：join 下发 `media.livekit`，缺失时客户端**显式报错**（不猜地址、不降级）；
+- 已整体删除：`web/src/livekit/wsRelayRoom.ts`、`flutter/lib/audio/relay_client.dart`、
+  `flutter/lib/audio/audio_engine.dart`、`backend/apps/voice/audio_consumer.py`、
+  `backend/apps/voice/audio_relay.py` 与 `ws/voice/audio/` 路由。
 
-| 回滚对象 | 动作 | 说明 |
-|---|---|---|
-| 媒体传输 | 上面那一个环境变量 | 客户端从 join 响应读到 `media.transport=ws_relay`，改走 WS 中继 |
-| 客户端（web） | 无需改动 | `web/src/livekit/wsRelayRoom.ts` **一行未改**，仍是完整实现 |
-| 客户端（Flutter） | 无需改动 | `flutter/lib/audio/relay_client.dart` + `audio_engine.dart` 保留 |
-| 服务端中继 | 无需改动 | `apps/voice/routing.py`、`audio_consumer.py`、`audio_relay.py` 未改 |
-| 基础设施 | `docker stop ayla-livekit` + 从 crontab 移除 `run_align.sh` | 停掉容器与中继，避免空跑 |
+要回到旧行为只能**回退代码版本**（不是改环境变量）：
 
-> **什么情况下应该回滚**：不是「ICE 连不上」（那按 §4.3 重启即可），而是
-> **§1.4 的残留丢包在可接受时间内治不好**——单实例修复后仍有 6.9%–8.4%，
-> 实际听感可能仍不如 WS 中继（后者靠 TCP 重传隐藏丢包，代价是队头阻塞）。
-> 回滚成本极低（一个环境变量），**不需要**因此重新评估架构。
+| 回退对象 | 动作 |
+|---|---|
+| 后端 | 检出中继删除前的提交，重建镜像：`docker build -f backend/Dockerfile -t ayla-backend:latest backend/` + `compose up -d --no-deps backend` |
+| web | 用对应版本的 dist 覆盖 `~/Elysia/ayla-deploy/web/dist` |
+| Flutter | 安装 1.0.31 及更早版本客户端 |
 
-**双下发语义**（`backend/apps/voice/media_config.py:81-99`）：
-join / media-token 响应**同时**给出 `media.livekit` 与 `media.ws_relay`，`transport` 只是
-服务端**建议值**。客户端在 `transport=livekit` 但连接失败时，应直接用已到手的
-`media.ws_relay.url` **原地降级**（一次重试，不回后端），且**不得**因此调用 `leave/`
-（媒体断线 ≠ 离开频道，`client.ts:15` 的既有契约）。
+> 媒体面不可用时**正确处置是修 LiveKit，而不是回滚**：ICE 连不上按 §5 的三条实测约束
+> 逐条查（`udp_port` 必须等于公网入口端口、中继上游必须写网卡 IP、中继重启后必须
+> 重启 `ayla-livekit`）。
 
-> **回滚的已知限制**：WS 中继的 `_ROOMS` 是**进程内**状态（`audio_relay.py:23-28`），
-> 不能横向扩展。回滚时 backend 必须保持单 worker。
-
----
-
-
-## 9. 2026-10-28 真机问题本地复现与诊断（音频链路）
+## 10. 2026-10-28 真机问题本地复现与诊断（音频链路）
 
 > 起因：用户真机联测反馈「电脑→手机断断续续、手机→电脑完全没声音、音频条不灵敏、
 > 静音被对方重新开麦绕过、手机端像通话不像媒体播放」。
 > 本节记录**本地双端复现**（Windows 桌面 + Android 模拟器，均连生产后端）得到的实测数据。
 
-### 9.1 复现方法（可重复执行）
+### 10.1 复现方法（可重复执行）
 
 `flutter/tool/voice_probe.dart` 是**不经 UI** 的调试入口：登录 → join → 连 LiveKit → 开麦。
 两端用不同账号（本机建了 `probe2`），否则会因 identity 相同被 LiveKit 踢。
@@ -653,7 +639,7 @@ flutter run -d emulator-5554 -t tool/voice_probe.dart \
 两端每 3 秒打印一行 RTP 统计（`[lk] LOCAL tx ...` / `[lk] REMOTE <id> rx ...`），
 这是区分「没订阅 / 没收到包 / 收到但解不出声 / 解出来但播放栈不出声」的唯一手段。
 
-### 9.2 实测结论（同一会议，两个客户端同时在线 ~6 分钟）
+### 10.2 实测结论（同一会议，两个客户端同时在线 ~6 分钟）
 
 | 方向 | 收包 | 丢包 | 隐藏帧(concealedSamples) | 结论 |
 |---|---|---|---|---|
@@ -665,7 +651,7 @@ Windows 侧日志交替出现 `ping timeout`、`HandshakeException: Connection t
 `PEER_CONNECTION_DISCONNECTED`；服务端 nginx 无错误（WS 全部 101），
 LiveKit 侧记录 `PEER_CONNECTION_DISCONNECTED`。
 
-### 9.3 由此确定的三个真实缺陷（已修）
+### 10.3 由此确定的三个真实缺陷（已修）
 
 1. **音频条不灵敏**：原实现读 `Participant.audioLevel`（服务端 speaker 电平，~1.5s 粒度）。
    改为读 `RemoteAudioTrack.getReceiverStats()` 的 `totalAudioEnergy` /
@@ -679,7 +665,7 @@ LiveKit 侧记录 `PEER_CONNECTION_DISCONNECTED`。
 另外补了一个**发布重试**：Windows 实测出现 `TrackPublishException: Failed to publish track`，
 发生在连接正在 resume 的瞬间；原实现直接抛错 ⇒ 整场没有麦克风。现在重试一次（间隔 800ms）。
 
-### 9.4 尚未解决：需要网络侧处理
+### 10.4 尚未解决：需要网络侧处理
 
 - **隧道单方向丢包 3.4% + 6.8% 隐藏帧**（Windows→Android 方向）。此前多轮测量公网基线为 0%，
   服务器↔NTP 基线为 0%，丢包发生在樱花隧道内部，且带队列成分。
@@ -687,7 +673,7 @@ LiveKit 侧记录 `PEER_CONNECTION_DISCONNECTED`。
 - **Windows 客户端信令频繁重连**（`ping timeout`）。Android 同隧道 0 次重连，说明与客户端栈/本机网络栈相关；
   待进一步定位（下一步：关掉本机 Clash TUN 做对照）。
 
-### 9.5 排查纪律（复用）
+### 10.5 排查纪律（复用）
 
 - 不要只看「音频条在动」判断有声：旧电平来自服务端 speaker 事件，与本地播放无关；
   现在用收包侧统计才能区分故障层次。
@@ -695,7 +681,7 @@ LiveKit 侧记录 `PEER_CONNECTION_DISCONNECTED`。
   表现为「连接正常但声音一直断」。复现/测试必须用不同账号。
 - 给 `flutter run` 打开 LiveKit 全量日志（`setLoggingLevel(kALL)`）会每秒刷上千行，
   **反过来把 ICE 刷到超时**；排查时用 kWARNING，需要细节再临时开。
-### 9.6 ★ Windows 端「听不到远端声音」的真正原因：播到了默认通信设备
+### 10.6 ★ Windows 端「听不到远端声音」的真正原因：播到了默认通信设备
 
 **现象**：手机说话，Windows 端音频条在动、RTP 统计显示收包正常，但完全听不到。
 
@@ -738,9 +724,9 @@ Windows 11：设置 → 系统 → 声音 → 全部声音设备/更多声音设
 
 
 
-## 10. 运维手册
+## 11. 运维手册
 
-### 10.1 组件与启停
+### 11.1 组件与启停
 
 | 组件 | 启停 | 备注 |
 |---|---|---|
@@ -753,7 +739,7 @@ Windows 11：设置 → 系统 → 声音 → 全部声音设备/更多声音设
 OCI label 为 `v1.13.6`（`docker inspect ayla-livekit --format '{{json .Config.Labels}}'`）——
 同一 major 下的实际补丁版本。
 
-### 10.2 每次改动的标准动作（顺序不能反）
+### 11.2 每次改动的标准动作（顺序不能反）
 
 1. 改 `livekit.yaml`；
 2. `docker restart ayla-livekit`；
@@ -761,7 +747,7 @@ OCI label 为 `v1.13.6`（`docker inspect ayla-livekit --format '{{json .Config.
 4. 按 §10.3 逐项验证；
 5. 用 harness 复测（§10.4）。
 
-### 10.3 排障检查表
+### 11.3 排障检查表
 
 ```bash
 # (1) 中继在听、上游是网卡 IP（不能是 127.0.0.1）
@@ -794,7 +780,7 @@ grep -c 'proxy conflict' ~/sakurafrp/frpc-sakura.log      # 期望：0
 | 候选是 `218.65.97.108:7882` 或内网 IP | `udp_port` / `node_ip` 写错（§5） | 按 §5.1 修正 |
 | 信令 502/404 | nginx `/livekit/` 块与 `port: 7880` 不一致 | 查 `nginx.conf:127-143` + `ss -tln \| grep 7880` |
 | 日志出现 `proxy conflict` | 有第二个 frpc 抢同一隧道 | 只留 `keepalive.sh` 管的那一个；确认 `sakurafrp-udp/guard.sh` **已停** |
-| media-token 返回 503 | backend 侧 `LIVEKIT_*` 未配齐，或 `VOICE_MEDIA_TRANSPORT` 仍是 `ws_relay` | 用 `media_config.configured_transport()` 与 `.env` 对齐 |
+| media-token 返回 503 | backend 侧 `LIVEKIT_*` 未配齐（2026-10-28 起无传输开关，媒体面只有 LiveKit） | 对齐 `.env` 与 `livekit.yaml`（key/secret/url 三件套） |
 
 #### 10.3.1 ⚠️ 已复现的运维缺陷：中继被反复拉起，每次都连带重启 LiveKit
 
@@ -845,7 +831,7 @@ $ journalctl -t livekit-udp-align --no-pager -o short-iso | tail -5
 > `116.153.47.201:8088` ESTAB、写同一份日志）；21:59 CST 复查**已降为 1 个**（PID 2539922）。
 > `proxy conflict` 计数 0。收敛判据仍是 `pgrep -cf 'frpc -f' = 1`。
 
-### 10.4 用 harness 复测
+### 11.4 用 harness 复测
 
 ```bash
 cd Ayla/.workbuddy/evidence/livekit-udp/webrtc/probe
@@ -870,7 +856,7 @@ node run.mjs --url wss://s.ayla.trise.top:26211/livekit \
 2. **必须同时看逐区间丢包率**（`intervals` / `totalPkts` / `lost` / `per-interval loss%`），
    因为 ICE 通不代表通话能听（§1.4）——只看 ICE 会得出「全绿」的错误结论。
 
-### 10.5 已知未覆盖项（不要当成已验证）
+### 11.5 已知未覆盖项（不要当成已验证）
 
 | 项 | 状态 |
 |---|---|
@@ -886,7 +872,7 @@ node run.mjs --url wss://s.ayla.trise.top:26211/livekit \
 
 ---
 
-## 11. 引用与相关文档
+## 12. 引用与相关文档
 
 | 文档 | 本文引用了什么 |
 |---|---|
@@ -899,7 +885,7 @@ node run.mjs --url wss://s.ayla.trise.top:26211/livekit \
 | `Ayla/.workbuddy/evidence/livekit-udp/webrtc/RESULTS.md` | 本文 §1.1 / §1.2 / **§1.4 丢包** / §7 的原始实测数据与判定方法学（其 §5 为丢包分析、§4 为三条运维陷阱） |
 | `Ayla/.workbuddy/evidence/livekit-udp/udp_port_align.py` / `run_align.sh` | 中继设计说明与三条踩坑注释（本文 §4 的事实来源） |
 
-### 11.1 speaking 门控的落地检查点（继承自 39 号文档）
+### 12.1 speaking 门控的落地检查点（继承自 39 号文档）
 
 切到 LiveKit 后，**必须**在 code review 里逐条确认：
 
