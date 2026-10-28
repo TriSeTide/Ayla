@@ -41,7 +41,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:livekit_client/livekit_client.dart' as lk;
 
 import 'livekit_voice_backend.dart';
@@ -99,9 +99,14 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     try {
       final lk.AudioManager manager = lk.AudioManager.instance;
       await manager.setAudioSessionOptions(_audioSessionOptions);
-      if (manager.canSwitchSpeakerphone) {
+      final bool canSwitch = manager.canSwitchSpeakerphone;
+      if (canSwitch) {
         // 移动端媒体播放语义：优先外放（不是听筒）。
         await manager.setSpeakerOutputPreferred(true, force: true);
+      }
+      if (kDebugMode) {
+        debugPrint('[lk] 音频会话已设为 mediaPlayback canSwitchSpeaker=$canSwitch '
+            'speakerPreferred=${manager.isSpeakerOutputPreferred}');
       }
     } catch (error) {
       debugPrint('[livekit] 音频会话设置失败（平台可能不支持）：$error');
@@ -135,6 +140,9 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
   Timer? _remoteLevelTimer;
   bool _remoteLevelBusy = false;
 
+  /// 诊断统计定时器（仅 debug 构建）：每 3s 打印本地发送侧 + 远端接收侧 RTP 统计。
+  Timer? _debugStatsTimer;
+
   /* ---------------- AylaVoiceRoomLike ---------------- */
 
   @override
@@ -147,6 +155,10 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     await _room.connect(url, token);
     _startLevelTimer();
     _startRemoteLevelTimer();
+    _startDebugStatsTimer();
+    if (kDebugMode) {
+      debugPrint('[lk] CONNECTED url=$url identity=${_room.localParticipant?.identity}');
+    }
   }
 
   @override
@@ -154,6 +166,7 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     if (_disposed) return;
     _stopLevelTimer();
     _stopRemoteLevelTimer();
+    _stopDebugStatsTimer();
     await _releaseMicrophone();
     await _cancelListeners();
     try {
@@ -193,12 +206,32 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     final lk.LocalAudioTrack track =
         await lk.LocalAudioTrack.create(_captureOptions);
     try {
-      final lk.LocalTrackPublication<lk.LocalAudioTrack> publication =
-          await local.publishAudioTrack(track, publishOptions: _publishOptions);
+      // 发布可能因为「连接正在重连 / 重协商」而失败（实测 Windows 上出现过
+      // TrackPublishException: Failed to publish track，随后整场都没有麦克风）。
+      // 重试一次、间隔 800ms —— 这正好跨过 LiveKit 的一次 resume。
+      lk.LocalTrackPublication<lk.LocalAudioTrack>? publication;
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          publication = await local.publishAudioTrack(track,
+              publishOptions: _publishOptions);
+          break;
+        } catch (error) {
+          if (attempt == 1) rethrow;
+          debugPrint('[lk] 发布麦克风失败，800ms 后重试: $error');
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+        }
+      }
+      if (publication == null) {
+        throw StateError('麦克风发布失败');
+      }
       _micTrack = track;
       _micPublication = publication;
       _measuredLocalLevel = null;
       _startLevelTimer();
+      if (kDebugMode) {
+        debugPrint('[lk] 麦克风已发布 sid=${publication.sid} '
+            'trackSid=${track.sid}');
+      }
     } catch (error) {
       // 发布失败必须把已采集的设备放掉（不留下占用麦克风的孤儿轨）
       try {
@@ -221,6 +254,9 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     final lk.LocalAudioTrack? track = _micTrack;
     final lk.LocalTrackPublication<lk.LocalAudioTrack>? publication =
         _micPublication;
+    if (kDebugMode && _micPublication != null) {
+      debugPrint('[lk] 关麦（释放设备）sid=${_micPublication?.sid}');
+    }
     _micTrack = null;
     _micPublication = null;
     _measuredLocalLevel = null;
@@ -295,9 +331,71 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
         } else {
           if (publication.subscribed) await publication.unsubscribe();
         }
+        if (kDebugMode) {
+          debugPrint('[lk] 远端本地播放 $identity enabled=$enabled '
+              'sub=${publication.subscribed}');
+        }
       } catch (_) {
         // 订阅状态竞态（刚加入/刚离开）：下一次连接事件会再对齐
       }
+    }
+  }
+
+  /* ---------------- 诊断：RTP 统计（仅 debug） ---------------- */
+
+  void _startDebugStatsTimer() {
+    if (!kDebugMode) return;
+    if (_debugStatsTimer != null) return;
+    _debugStatsTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      unawaited(_dumpAudioStats());
+    });
+  }
+
+  void _stopDebugStatsTimer() {
+    _debugStatsTimer?.cancel();
+    _debugStatsTimer = null;
+  }
+
+  /// 每 3s 打印一次本地发送侧与每个远端接收侧的真实 RTP 统计。
+  ///
+  /// 为什么必须看这个（用户 2026-10-28 实报「手机说话电脑完全听不到、但音频条在动」）：
+  /// 只有 getStats 能区分三种完全不同的故障：
+  /// 1. `sub=false` 或 `track=null`  → **根本没订阅**（协商/订阅问题）
+  /// 2. `pkts` 不涨                    → **包没到**（网络/加密/协商）
+  /// 3. `pkts` 涨但 `energy` 不涨      → 到达但**解码出静音**
+  /// 4. `pkts`/`energy` 都涨却没声音  → **平台播放栈**没输出（最终手段：换播放通路）
+  Future<void> _dumpAudioStats() async {
+    if (_disposed) return;
+    try {
+      final lk.LocalAudioTrack? loc = _micTrack;
+      if (loc != null) {
+        final s = await loc.getSenderStats();
+        debugPrint('[lk] LOCAL tx pkts=${s?.packetsSent} bytes=${s?.bytesSent} '
+            'level=${s?.audioSourceStats?.audioLevel} '
+            'energy=${s?.audioSourceStats?.totalAudioEnergy}');
+      } else {
+        debugPrint('[lk] LOCAL tx 未开麦');
+      }
+      if (_room.remoteParticipants.isEmpty) {
+        debugPrint('[lk] REMOTE 无其他成员');
+      }
+      for (final MapEntry<String, lk.RemoteParticipant> e
+          in _room.remoteParticipants.entries) {
+        for (final lk.RemoteTrackPublication<lk.RemoteAudioTrack> pub
+            in e.value.audioTrackPublications) {
+          final lk.RemoteAudioTrack? t = pub.track;
+          debugPrint('[lk] REMOTE ${e.key} sub=${pub.subscribed} '
+              'pubMuted=${pub.muted} track=${t != null}');
+          if (t == null) continue;
+          final st = await t.getReceiverStats();
+          debugPrint('[lk] REMOTE ${e.key} rx pkts=${st?.packetsReceived} '
+              'bytes=${st?.bytesReceived} energy=${st?.totalAudioEnergy} '
+              'dur=${st?.totalSamplesDuration} lost=${st?.packetsLost} '
+              'concealed=${st?.concealedSamples} jitter=${st?.jitter}');
+        }
+      }
+    } catch (err) {
+      debugPrint('[lk] 统计采集失败: $err');
     }
   }
 

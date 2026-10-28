@@ -442,7 +442,9 @@ class AylaVoiceMedia {
   /// 脱敏：SDK 原始错误可能夹带 token（JWT 形如三段 base64url），日志不得泄露凭据
   /// （AGENTS.md §9）。
   static String _redact(Object error) {
-    final String text = error.toString().replaceAllMapped(
+    // LiveKit 自带的 `WebSocketException` 没有覆写 toString ⇒ 只打出来是
+    // 「Instance of 'WebSocketException'」，排查时等于没有信息。这里补上类型。
+    final String text = '${error.runtimeType}: ${error.toString()}'.replaceAllMapped(
           RegExp(r'[A-Za-z0-9_-]{20,}.[A-Za-z0-9_-]{10,}.[A-Za-z0-9_-]{10,}'),
           (Match match) => '<redacted-jwt>',
         ).replaceAllMapped(

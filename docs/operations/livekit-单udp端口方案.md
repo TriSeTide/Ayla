@@ -623,6 +623,79 @@ join / media-token 响应**同时**给出 `media.livekit` 与 `media.ws_relay`�
 
 ---
 
+
+## 9. 2026-10-28 真机问题本地复现与诊断（音频链路）
+
+> 起因：用户真机联测反馈「电脑→手机断断续续、手机→电脑完全没声音、音频条不灵敏、
+> 静音被对方重新开麦绕过、手机端像通话不像媒体播放」。
+> 本节记录**本地双端复现**（Windows 桌面 + Android 模拟器，均连生产后端）得到的实测数据。
+
+### 9.1 复现方法（可重复执行）
+
+`flutter/tool/voice_probe.dart` 是**不经 UI** 的调试入口：登录 → join → 连 LiveKit → 开麦。
+两端用不同账号（本机建了 `probe2`），否则会因 identity 相同被 LiveKit 踢。
+
+```bash
+# 端 A（Windows）
+flutter run -d windows -t tool/voice_probe.dart \
+  --dart-define=VOICE_USER=test --dart-define=VOICE_PASS=12345678 \
+  --dart-define=VOICE_CHANNEL=1 \
+  --dart-define=AYLA_API_BASE=https://s.ayla.trise.top:26211
+
+# 端 B（Android 模拟器；必须带 skip 参数，本仓库 Gradle 8.12 < Flutter 要求的 8.14）
+flutter run -d emulator-5554 -t tool/voice_probe.dart \
+  --android-skip-build-dependency-validation \
+  --dart-define=VOICE_USER=probe2 --dart-define=VOICE_PASS=12345678 \
+  --dart-define=VOICE_CHANNEL=1 \
+  --dart-define=AYLA_API_BASE=https://s.ayla.trise.top:26211
+```
+
+两端每 3 秒打印一行 RTP 统计（`[lk] LOCAL tx ...` / `[lk] REMOTE <id> rx ...`），
+这是区分「没订阅 / 没收到包 / 收到但解不出声 / 解出来但播放栈不出声」的唯一手段。
+
+### 9.2 实测结论（同一会议，两个客户端同时在线 ~6 分钟）
+
+| 方向 | 收包 | 丢包 | 隐藏帧(concealedSamples) | 结论 |
+|---|---|---|---|---|
+| Windows → Android | 16388 | **564 (~3.4%)** | 1,116,183 (~23s / 6.8%) | **持续卡顿的来源** |
+| Android → Windows | 16891 | 1 | 66,763 (~1.4s / 0.4%) | 干净 |
+
+信令稳定性（同一时段）：**Windows 重连 24 次，Android 0 次**。
+Windows 侧日志交替出现 `ping timeout`、`HandshakeException: Connection terminated during handshake`、
+`PEER_CONNECTION_DISCONNECTED`；服务端 nginx 无错误（WS 全部 101），
+LiveKit 侧记录 `PEER_CONNECTION_DISCONNECTED`。
+
+### 9.3 由此确定的三个真实缺陷（已修）
+
+1. **音频条不灵敏**：原实现读 `Participant.audioLevel`（服务端 speaker 电平，~1.5s 粒度）。
+   改为读 `RemoteAudioTrack.getReceiverStats()` 的 `totalAudioEnergy` /
+   `totalSamplesDuration` 增量算 RMS（`sqrt(ΔE/ΔD)`，200ms 一拍）。
+   本地实测电平已能跟随真实语音（0.2~0.75 连续变化）。
+2. **本地静音被「对方重新开麦」绕过**：关麦语义是 unpublish ⇒ 对方再开麦是新 publication，
+   SDK autoSubscribe 会订阅回来；原实现没有记住成员级音量。
+   已改为按 identity 记忆并在 `TrackSubscribed` 重新施加（web 与 Flutter 同步修）。
+3. **手机端是通话语义**：改用 `AudioSessionOptions.mediaPlayback` + 移动端强制外放。
+
+另外补了一个**发布重试**：Windows 实测出现 `TrackPublishException: Failed to publish track`，
+发生在连接正在 resume 的瞬间；原实现直接抛错 ⇒ 整场没有麦克风。现在重试一次（间隔 800ms）。
+
+### 9.4 尚未解决：需要网络侧处理
+
+- **隧道单方向丢包 3.4% + 6.8% 隐藏帧**（Windows→Android 方向）。此前多轮测量公网基线为 0%，
+  服务器↔NTP 基线为 0%，丢包发生在樱花隧道内部，且带队列成分。
+  客户端已用 32 kbps + RED + 关 DTX，参数侧没有余量；**要根治必须换网络路径**（公网 IP 直连或换隧道节点）。
+- **Windows 客户端信令频繁重连**（`ping timeout`）。Android 同隧道 0 次重连，说明与客户端栈/本机网络栈相关；
+  待进一步定位（下一步：关掉本机 Clash TUN 做对照）。
+
+### 9.5 排查纪律（复用）
+
+- 不要只看「音频条在动」判断有声：旧电平来自服务端 speaker 事件，与本地播放无关；
+  现在用收包侧统计才能区分故障层次。
+- 同一账号在两个客户端同时进同一房间会被 LiveKit 以 `DUPLICATE_IDENTITY` 互踢，
+  表现为「连接正常但声音一直断」。复现/测试必须用不同账号。
+- 给 `flutter run` 打开 LiveKit 全量日志（`setLoggingLevel(kALL)`）会每秒刷上千行，
+  **反过来把 ICE 刷到超时**；排查时用 kWARNING，需要细节再临时开。
+
 ## 10. 运维手册
 
 ### 10.1 组件与启停
