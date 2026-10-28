@@ -708,7 +708,25 @@ class AylaVoiceSession extends ChangeNotifier {
       //
       // 位置很关键：必须在媒体操作成功之后发，否则媒体失败回滚时会把错的
       // 状态广播出去（catch 分支不补发，天然避免）。
-      _broadcastMicState(channelId, next);
+      //
+      // ⚠️ `next` 是 **micEnabled**（开麦=true），而 `voice.state` 的 state 字段表达的是
+      // **muted**（静音=true）——两者语义相反，必须取反。这里曾经直接传 `next`，
+      // 导致「麦克风图标是开、副行却显示已静音」的对调（用户 2026-10-29 截图指出）。
+      _broadcastMicState(channelId, !next);
+      // 本机自行的副行也要立刻对：`setMicEnabled` 只改媒体事实 `micEnabled`，
+      // 不改成员表里的 `muted`；不在这里补一次，自己关麦后副行仍显示「在频道中」
+      // （要等其他端的 voice.state 回声才纠正，本机甚至会一直没有回声）。
+      final String? selfId = _currentUserId();
+      if (selfId != null && _voice.currentChannelId == channelId) {
+        _voice.applyVoiceState(
+          channelId,
+          selfId,
+          next
+              ? AylaVoiceMemberEventState.unmuted
+              : AylaVoiceMemberEventState.muted,
+          DateTime.now().toIso8601String(),
+        );
+      }
     } catch (error) {
       if (_voice.currentChannelId != channelId ||
           !_runtime.isRevisionCurrent(revision)) {

@@ -370,7 +370,21 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
       // 静音事实交给服务端广播。此前 muted/unmuted 只由各端从 LiveKit 的
       // TrackMuted/TrackUnmuted 本地合成、服务端从不广播 ⇒ 换端登录 / 重进房间的人
       // 看不到别人当前是否静音。位置必须在成功之后，否则回滚会把错状态广播出去。
-      voiceWS.sendJson({ type: "voice.mute", channel_id: channelId, muted: next });
+      // ⚠️ `next` 是 **micEnabled**（开麦=true），而 `voice.state` 的 state 表达的是
+      // **muted**（静音=true）——语义相反，必须取反。此前直接传 next，
+      // 导致「图标是开、副行却写已静音」的对调（用户 2026-10-29 截图指出）。
+      voiceWS.sendJson({ type: "voice.mute", channel_id: channelId, muted: !next });
+      // 本机自身的副行也要立刻对：`setMicEnabled` 只改 micEnabled，不改成员表 muted；
+      // 不在这里补一次，自己关麦后副行仍显示「在频道中」（等不到可靠回声）。
+      const selfId = useAuthStore.getState().currentUser?.id;
+      if (selfId) {
+        useVoiceStore.getState().applyVoiceState(
+          channelId,
+          selfId,
+          next ? "unmuted" : "muted",
+          new Date().toISOString(),
+        );
+      }
     } catch (e) {
       if (useVoiceStore.getState().currentChannelId !== channelId || !voiceSessionRuntime.isRevisionCurrent(revision)) return;
       store.setMicEnabled(!next); // 回滚
