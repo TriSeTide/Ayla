@@ -20,7 +20,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:ayla_flutter/audio/relay_client.dart' show RelayState;
+import 'package:ayla_flutter/audio/voice_state.dart' show RelayState;
 import 'package:ayla_flutter/audio/livekit_room_adapter.dart' show aylaInstallLiveKitRoomBuilder, AylaLiveKitSdkRoom;
 import 'package:ayla_flutter/audio/livekit_voice_backend.dart';
 import 'package:ayla_flutter/audio/voice_media_config.dart' show AylaVoiceLiveKitConfig, AylaVoiceMediaConfig;
