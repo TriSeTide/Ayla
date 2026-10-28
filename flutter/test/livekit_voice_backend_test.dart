@@ -22,7 +22,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../lib/audio/livekit_voice_backend.dart';
-import '../lib/audio/relay_client.dart' show RelayState;
+import '../lib/audio/voice_state.dart' show RelayState;
 import 'fixtures/fake_livekit_room.dart';
 
 /// 剥掉行注释（文档注释里的反例说明不算违规 —— 同类锁曾踩过假红）。

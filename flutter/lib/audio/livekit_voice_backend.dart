@@ -50,7 +50,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'relay_client.dart' show RelayState;
+import 'voice_state.dart' show RelayState;
 
 /// 房间事件种类（适配层归一化后的最小集；与 [AylaVoiceMediaEvents] 逐条对应）。
 enum AylaRoomEventKind {

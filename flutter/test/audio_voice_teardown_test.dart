@@ -14,50 +14,36 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  group('E5.1 采集三项（wsRelayRoom.ts:492–494）', () {
-    test('RecordConfig 必须显式开 echoCancel / noiseSuppress / autoGain', () {
+  group('E5.1 采集三项（web wsRelayRoom.ts:492–494 的等价要求）', () {
+    test('AudioCaptureOptions 必须显式开 回声消除 / 降噪 / 自动增益', () {
       final String src =
-          File('lib/audio/audio_engine.dart').readAsStringSync();
-      // record 6.x 的 RecordConfig 三项默认全 false（record_platform_interface
-      // 1.6.0 record_config.dart:45/50/55）⇒ 不写就是关的，必须显式出现。
-      expect(src, contains('echoCancel: true'),
-          reason: 'wsRelayRoom.ts:492 echoCancellation: true');
-      expect(src, contains('noiseSuppress: true'),
-          reason: 'wsRelayRoom.ts:493 noiseSuppression: true');
-      expect(src, contains('autoGain: true'),
-          reason: 'wsRelayRoom.ts:494 autoGainControl: true');
-      // 三项必须出现在同一个 RecordConfig 里（不能只是别处的注释）
-      final int start = src.indexOf('const RecordConfig(');
-      expect(start, greaterThan(0), reason: '必须显式构造 RecordConfig');
+          File('lib/audio/livekit_room_adapter.dart').readAsStringSync();
+      final int start = src.indexOf('AudioCaptureOptions(');
+      expect(start, greaterThan(0), reason: '必须显式构造 AudioCaptureOptions');
       final int end = src.indexOf(');', start);
       final String block = src.substring(start, end);
-      expect(block, contains('echoCancel: true'));
-      expect(block, contains('noiseSuppress: true'));
-      expect(block, contains('autoGain: true'));
-      expect(block, contains('AudioEncoder.pcm16bits'));
-      expect(block, contains('sampleRate: kSampleRate'));
+      expect(block, contains('echoCancellation: true'),
+          reason: 'wsRelayRoom.ts:492 echoCancellation: true');
+      expect(block, contains('noiseSuppression: true'),
+          reason: 'wsRelayRoom.ts:493 noiseSuppression: true');
+      expect(block, contains('autoGainControl: true'),
+          reason: 'wsRelayRoom.ts:494 autoGainControl: true');
     });
   });
 
-  group('E5.2 Opus 码率能力边界（wsRelayRoom.ts:516 bitrate:32000）', () {
-    test('kOpusBitrate 必须标注为「不生效的文档常量」且确实是 32000', () {
-      final String src = File('lib/poc/relay_protocol.dart').readAsStringSync();
-      expect(src, contains('const int kOpusBitrate = 32000;'),
-          reason: '数值仍须等于 web 的 bitrate: 32000');
-      // 必须写明为什么不生效（否则后续 agent 会以为设了）
-      expect(src, contains('文档常量'));
-      expect(src, contains('SimpleOpusEncoder'));
-      expect(src, contains('encoderCtl'));
-      // 全库只有这一处定义（死常量不许散落）
-      final Iterable<File> libs = Directory('lib')
-          .listSync(recursive: true)
-          .whereType<File>()
-          .where((File f) => f.path.endsWith('.dart'));
-      int defs = 0;
-      for (final File f in libs) {
-        if (f.readAsStringSync().contains('kOpusBitrate =')) defs += 1;
-      }
-      expect(defs, 1, reason: 'kOpusBitrate 只允许有一处定义');
+  group('E5.2 发布参数（web wsRelayRoom.ts:516 bitrate:32000）', () {
+    test('AudioPublishOptions 必须是 32kbps + 关 DTX + 开 RED', () {
+      final String src =
+          File('lib/audio/livekit_room_adapter.dart').readAsStringSync();
+      final int start = src.indexOf('AudioPublishOptions(');
+      expect(start, greaterThan(0), reason: '必须显式构造 AudioPublishOptions');
+      final int end = src.indexOf(');', start);
+      final String block = src.substring(start, end);
+      expect(block, contains('maxBitrate: 32000'),
+          reason: '与 web 的 bitrate: 32000 对齐');
+      expect(block, contains('dtx: false'),
+          reason: 'DTX 会在安静段完全停发 = doc 39 的听感缺陷');
+      expect(block, contains('red: true'), reason: 'RED 冗余抗丢包');
     });
   });
 
@@ -96,7 +82,7 @@ void main() {
       final int end = src.indexOf('\n}', start);
       final String body = src.substring(start, end);
       expect(body, contains('_voiceMedia = null'), reason: '必须放弃单例');
-      expect(body, contains('dispose()'), reason: '必须释放引擎与中继');
+      expect(body, contains('dispose()'), reason: '必须释放房间与麦克风设备');
     });
   });
 }

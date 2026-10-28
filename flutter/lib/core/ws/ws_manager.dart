@@ -30,10 +30,16 @@ import 'dart:convert';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../../poc/relay_protocol.dart'
-    show kPingIntervalMs, kReconnectBaseMs, kReconnectMaxMs;
 import '../net/api_endpoint.dart';
 import '../net/dio_client.dart';
+
+/// WS 通道心跳间隔（原在 `poc/relay_protocol.dart`；该文件已随中继实现删除，
+/// 这三个常量与中继协议无关，是通用 WS 通道参数）。
+const int kPingIntervalMs = 15000;
+/// 重连退避起点（ms）。
+const int kReconnectBaseMs = 1000;
+/// 重连退避上限（ms）。
+const int kReconnectMaxMs = 30000;
 
 /// 四通道（web §9：chat 主总线 / presence / live 房内帧 / voice 应用层成员事实）。
 enum WsChannelKind { chat, presence, live, voice }

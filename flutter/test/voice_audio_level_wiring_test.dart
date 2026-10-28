@@ -250,26 +250,6 @@ void main() {
     }
   });
 
-  test('★D token 续期实现在「登出 → 单例重建」后仍然有效', () {
-    // 登出会 aylaVoiceMediaTeardown() 把单例置空；main 每进程只注入一次
-    // ⇒ 新建的实例必须继承同一个续期实现，否则重新登录后中继又退回「恒返回 null」。
-    debugSetVoiceMedia(null);
-    int calls = 0;
-    aylaVoiceMedia().setTokenRefresher(() async {
-      calls += 1;
-      return 'fresh-token';
-    });
-    aylaVoiceMediaTeardown(); // 模拟登出
-    final AylaVoiceMedia rebuilt = aylaVoiceMedia();
-    addTearDown(() {
-      debugSetVoiceMedia(null);
-    });
-    expect(rebuilt, isNotNull);
-    // 读到的是重建后的实例，且不需要再次注入就能拿到续期实现。
-    expect(rebuilt.debugHasTokenRefresher, isTrue,
-        reason: '★ 单例重建后必须继承模块级续期实现（否则登出再登录后中继续不上 token）');
-    expect(calls, 0, reason: '前置：尚未触发续期');
-  });
 
   testWidgets('B 生产宿主挂载后：媒体事件 → store → 成员行子树（含窄订阅重绘）',
       (WidgetTester tester) async {
