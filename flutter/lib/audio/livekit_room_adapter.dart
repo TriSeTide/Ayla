@@ -44,6 +44,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:livekit_client/livekit_client.dart' as lk;
 
+import '../core/media/windows_audio_device.dart';
+
 import 'livekit_voice_backend.dart';
 
 /// 注册生产房间工厂（由 `AylaVoiceMedia` 在构造时调用一次；幂等）。
@@ -152,7 +154,12 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
   Future<void> connect(String url, String token) async {
     // 音频会话必须先于连接生效：SDK 在本机建 PeerConnection 时就绑定 AudioAttributes。
     await _applyAudioSession();
+    // Windows：**必须在 connect 之前**选定输出端点 —— WebRTC 的音频设备模块在
+    // 首次 startPlayout 时才按"当时选定的设备"初始化；连接后再切不会迁移已经在跑的
+    // 播放流（实测：连接后切设备返回 success 但音频仍留在原端点）。
+    await _alignAudioRoute();
     await _room.connect(url, token);
+    _alignAudioRouteAfterConnect();
     _startLevelTimer();
     _startRemoteLevelTimer();
     _startDebugStatsTimer();
@@ -397,6 +404,32 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     } catch (err) {
       debugPrint('[lk] 统计采集失败: $err');
     }
+  }
+
+  /// 连接前校正输出端点（Windows：跟随系统"默认设备"）。
+  Future<void> _alignAudioRoute() async {
+    if (AylaWindowsAudioDevice.supported) {
+      try {
+        final AylaAudioEndpoint? out = await AylaWindowsAudioDevice.defaultEndpoint();
+        if (out == null) {
+          debugPrint('[lk] 未取到系统默认输出设备，保持 WebRTC 默认');
+        } else {
+          await lk.Hardware.instance.selectAudioOutput(
+            lk.MediaDevice(out.id, out.name, 'audiooutput', null),
+          );
+          debugPrint('[lk] 输出设备已切到系统默认: ${out.name}');
+        }
+      } catch (error) {
+        // 设备可能不在 WebRTC 的枚举集里（如休眠中的蓝牙耳机）——不是致命错误。
+        debugPrint('[lk] 切换输出设备失败: $error');
+      }
+    }
+  }
+
+  /// 连接后再压一次移动端的媒体会话（SDK 在连接过程中可能重施通话策略）。
+  void _alignAudioRouteAfterConnect() {
+    if (AylaWindowsAudioDevice.supported) return;
+    unawaited(_applyAudioSession());
   }
 
   /* ---------------- 远端电平（收包侧实测） ---------------- */

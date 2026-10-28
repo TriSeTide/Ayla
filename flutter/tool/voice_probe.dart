@@ -115,6 +115,28 @@ class _ProbeAppState extends State<_ProbeApp> {
 
   Future<void> _run() async {
     try {
+      if (const bool.fromEnvironment('VOICE_DEVICE_ONLY')) {
+        // 只枚举音频设备（不需要连房间）：确认 flutter_webrtc 在 Windows 上
+        // 给出的 label / deviceId 形态，用于「跟随系统默认设备」。
+        hierarchicalLoggingEnabled = true;
+        try {
+          final List<MediaDevice> outs = await Hardware.instance.audioOutputs();
+          _log('输出设备数量=${outs.length}');
+          for (int i = 0; i < outs.length; i++) {
+            final MediaDevice d = outs[i];
+            _log('OUT[$i] id=${d.deviceId} label=${d.label}');
+          }
+          final List<MediaDevice> ins = await Hardware.instance.audioInputs();
+          _log('输入设备数量=${ins.length}');
+          for (int i = 0; i < ins.length; i++) {
+            _log('IN[$i] id=${ins[i].deviceId} label=${ins[i].label}');
+          }
+        } catch (e) {
+          _log('枚举失败: $e');
+        }
+        return;
+      }
+
       if (const bool.fromEnvironment('VOICE_MODE_ONLY')) {
         // 只验证「音频会话是否真的把 Android 切成媒体播放」：不连 LiveKit。
         hierarchicalLoggingEnabled = true;
@@ -176,6 +198,31 @@ class _ProbeAppState extends State<_ProbeApp> {
       );
       _backend = vm;
       final AylaVoiceLiveKitConfig lk = media!.livekit!;
+      // 判别实验：强制把输出切到指定 label 的设备，验证 selectAudioOutput 是否真的生效。
+      const String outLabel = String.fromEnvironment('VOICE_OUT_LABEL');
+      if (outLabel.isNotEmpty) {
+        final List<MediaDevice> outs = await Hardware.instance.audioOutputs();
+        _log('输出设备共 ' + outs.length.toString() + ' 个');
+        for (final MediaDevice d in outs) {
+          _log('  OUT id=' + d.deviceId + ' label=' + d.label);
+        }
+        MediaDevice? target;
+        for (final MediaDevice d in outs) {
+          if (d.label.contains(outLabel)) { target = d; break; }
+        }
+        if (target == null) {
+          _log('未找到 label 含 [' + outLabel + '] 的设备');
+        } else {
+          _log('准备切到 [' + target.label + '] id=' + target.deviceId);
+          try {
+            await Hardware.instance.selectAudioOutput(target);
+            _log('selectAudioOutput 返回成功');
+          } catch (e) {
+            _log('selectAudioOutput 抛异常: ' + e.toString());
+          }
+        }
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
       _log('尝试 LiveKit url=${lk.url} identity=${lk.identity}');
       try {
         await vm.connect(lk.url, lk.token);
