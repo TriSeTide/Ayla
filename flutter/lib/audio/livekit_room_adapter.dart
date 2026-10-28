@@ -20,13 +20,28 @@
 /// ## 电平（Flutter 无 WebAudio AnalyserNode 的等价物）
 /// - 本地：`LocalAudioTrack.getSenderStats().audioSourceStats.audioLevel`（media-source
 ///   统计，200ms 刷新；失败则回退 `localParticipant.audioLevel`）；
-/// - 远端：`RemoteParticipant.audioLevel`（LiveKit 服务端 speaker 电平，
-///   粒度比 web 的 AnalyserNode 粗 —— 已登记为已知差异）。
+/// - 远端：`RemoteAudioTrack.getReceiverStats()` 的 `totalAudioEnergy` /
+///   `totalSamplesDuration` **增量**算 RMS（200ms 一拍），与 web 的 AnalyserNode
+///   同为「收包侧实测」；平台不给这两个字段时回退 `RemoteParticipant.audioLevel`。
+///   ⚠️ 之前直接用 `Participant.audioLevel`（服务端 speaker 电平，~1.5s 粒度）——
+///   用户实报「音频条跳动不灵敏」就是它造成的，2026-10-28 改为收包侧统计。
+///
+/// ## 音频会话（2026-10-28）
+/// 用 `AudioManager` 显式声明**媒体播放**语义（`AudioSessionOptions.mediaPlayback`），
+/// 不再是通话语义：媒体音量档 + 外放路由。采集侧仍显式开 AEC/NS/AGC
+/// （[`_captureOptions`]），离开通话模式不会失去回声消除（libwebrtc 软件 AEC）。
 library;
+
+// livekit_client 2.13.2 把整个音频会话 API（AudioManager / AudioSessionOptions /
+// AndroidAudioSessionConfiguration）标为 `@experimental`，但我们**需要**它来把手机端
+// 从「通话语义」改成「媒体播放语义」（用户 2026-10-28 明确要求）。
+// 该 API 一旦在升级后变动，analyzer 会先报 undefined_* —— 不会静默降级。
+// ignore_for_file: experimental_member_use
 
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:livekit_client/livekit_client.dart' as lk;
 
 import 'livekit_voice_backend.dart';
@@ -70,6 +85,29 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     defaultAudioPublishOptions: _publishOptions,
   );
 
+  /// 音频会话：**媒体播放**语义（不是通话）。
+  ///
+  /// 用户实报（2026-10-28）：手机端听感/音量档是「通话」形态，要求改成媒体播放。
+  /// `AudioSessionOptions.mediaPlayback` = Android audioMode normal + usage media +
+  /// streamType music（媒体音量档，非通话音量档），iOS 对应 playback 类目。
+  /// 采集侧仍显式开 AEC/NS/AGC（见 [_captureOptions]），离开通话模式不会失去回声消除。
+  static const lk.AudioSessionOptions _audioSessionOptions =
+      lk.AudioSessionOptions.mediaPlayback();
+
+  /// 应用音频会话（幂等）。桌面平台没有音频会话概念 ⇒ 异常按"不支持"处理并留日志。
+  Future<void> _applyAudioSession() async {
+    try {
+      final lk.AudioManager manager = lk.AudioManager.instance;
+      await manager.setAudioSessionOptions(_audioSessionOptions);
+      if (manager.canSwitchSpeakerphone) {
+        // 移动端媒体播放语义：优先外放（不是听筒）。
+        await manager.setSpeakerOutputPreferred(true, force: true);
+      }
+    } catch (error) {
+      debugPrint('[livekit] 音频会话设置失败（平台可能不支持）：$error');
+    }
+  }
+
   late final lk.Room _room;
   final StreamController<AylaRoomEvent> _events =
       StreamController<AylaRoomEvent>.broadcast();
@@ -87,6 +125,16 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
   /// 本地电平实测值（[getSenderStats] 200ms 刷新；null = 尚无实测）。
   double? _measuredLocalLevel;
 
+  /// 远端电平实测值（收包侧统计；缺项时回退 Participant.audioLevel）。
+  final Map<String, double> _measuredRemoteLevels = <String, double>{};
+
+  /// 远端 totalAudioEnergy / totalSamplesDuration 的上一拍基线（算增量用）。
+  final Map<String, num> _remotePrevEnergy = <String, num>{};
+  final Map<String, num> _remotePrevDuration = <String, num>{};
+
+  Timer? _remoteLevelTimer;
+  bool _remoteLevelBusy = false;
+
   /* ---------------- AylaVoiceRoomLike ---------------- */
 
   @override
@@ -94,14 +142,18 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
 
   @override
   Future<void> connect(String url, String token) async {
+    // 音频会话必须先于连接生效：SDK 在本机建 PeerConnection 时就绑定 AudioAttributes。
+    await _applyAudioSession();
     await _room.connect(url, token);
     _startLevelTimer();
+    _startRemoteLevelTimer();
   }
 
   @override
   Future<void> disconnect() async {
     if (_disposed) return;
     _stopLevelTimer();
+    _stopRemoteLevelTimer();
     await _releaseMicrophone();
     await _cancelListeners();
     try {
@@ -215,6 +267,9 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
     final lk.RemoteParticipant? participant =
         _room.remoteParticipants[identity];
     if (participant == null) return 0;
+    // 收包侧实测优先（灵敏）；平台不给统计时才回退服务端 speaker 电平（~1.5s）。
+    final double? measured = _measuredRemoteLevels[identity];
+    if (measured != null) return measured;
     final double raw = participant.audioLevel;
     return raw.isFinite ? math.max(0.0, math.min(1.0, raw)) : 0;
   }
@@ -243,6 +298,83 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
       } catch (_) {
         // 订阅状态竞态（刚加入/刚离开）：下一次连接事件会再对齐
       }
+    }
+  }
+
+  /* ---------------- 远端电平（收包侧实测） ---------------- */
+
+  void _startRemoteLevelTimer() {
+    if (_remoteLevelTimer != null) return;
+    _remoteLevelTimer =
+        Timer.periodic(const Duration(milliseconds: 200), (_) {
+      unawaited(_refreshRemoteLevels());
+    });
+  }
+
+  void _stopRemoteLevelTimer() {
+    _remoteLevelTimer?.cancel();
+    _remoteLevelTimer = null;
+    _remoteLevelBusy = false;
+    _measuredRemoteLevels.clear();
+    _remotePrevEnergy.clear();
+    _remotePrevDuration.clear();
+  }
+
+  /// 远端电平：用**收包侧统计**算 RMS。
+  ///
+  /// 公式：`level = sqrt(dTotalAudioEnergy / dTotalSamplesDuration)`
+  /// （WebRTC 规范里 totalAudioEnergy 是样本平方和，故 sqrt(能量/时长) 即 RMS 幅度）。
+  /// 200ms 一拍、单飞不并发；平台不给字段时跳过（`remoteAudioLevel` 会回退）。
+  Future<void> _refreshRemoteLevels() async {
+    if (_remoteLevelBusy || _disposed) return;
+    _remoteLevelBusy = true;
+    final Set<String> alive = <String>{};
+    try {
+      for (final MapEntry<String, lk.RemoteParticipant> entry
+          in _room.remoteParticipants.entries) {
+        final String identity = entry.key;
+        for (final lk.RemoteTrackPublication<lk.RemoteAudioTrack> publication
+            in entry.value.audioTrackPublications) {
+          if (!publication.subscribed) continue;
+          final lk.RemoteAudioTrack? track = publication.track;
+          if (track == null) continue;
+          final stats = await track.getReceiverStats();
+          final num? energy = stats?.totalAudioEnergy;
+          final num? duration = stats?.totalSamplesDuration;
+          if (energy == null || duration == null) continue;
+          final num? prevEnergy = _remotePrevEnergy[identity];
+          final num? prevDuration = _remotePrevDuration[identity];
+          _remotePrevEnergy[identity] = energy;
+          _remotePrevDuration[identity] = duration;
+          alive.add(identity);
+          if (prevEnergy == null || prevDuration == null) break;
+          final num dEnergy = energy - prevEnergy;
+          final num dDuration = duration - prevDuration;
+          if (dDuration <= 0 || dEnergy < 0) break;
+          final double rms =
+              math.sqrt((dEnergy / dDuration).toDouble());
+          // 语音 RMS 经验值 0.01–0.3；×3.2 映射到条子观感（与 web 的开方放大同量级）。
+          final double level = math.max(0.0, math.min(1.0, rms * 3.2));
+          if (level > 0.01 && !_measuredRemoteLevels.containsKey(identity)) {
+            // 首帧非静音：说明收包侧统计可用（这条日志用于确认"电平不灵敏"已修好）
+            debugPrint('[livekit] 远端电平实测可用 identity=$identity level=$level');
+          }
+          _measuredRemoteLevels[identity] = level;
+          break;
+        }
+      }
+    } catch (_) {
+      // 统计不可用不是错误路径：保留上一拍，下一拍再试
+    } finally {
+      for (final String identity
+          in _measuredRemoteLevels.keys.toList(growable: false)) {
+        if (!alive.contains(identity)) {
+          _measuredRemoteLevels.remove(identity);
+          _remotePrevEnergy.remove(identity);
+          _remotePrevDuration.remove(identity);
+        }
+      }
+      _remoteLevelBusy = false;
     }
   }
 
@@ -284,6 +416,25 @@ class AylaLiveKitSdkRoom implements AylaVoiceRoomLike {
         if (event.publication.kind != lk.TrackType.AUDIO) return;
         _emit(AylaRoomEventKind.trackUnmuted,
             identity: event.participant.identity, muted: false);
+      }))
+      // 对方「重新开麦」在我们语义里是**新建 publication**（关麦 = unpublish）。
+      // SDK autoSubscribe 会把它订阅回来 ⇒ 本地静音会被静默绕过
+      // （用户实报 2026-10-28：「收音方关掉了放音方声音，放音方重新开麦又能听见」）。
+      // 这里补一个订阅事件，交给后端按已记录的本地音量重新对齐。
+      ..add(listener.on<lk.TrackSubscribedEvent>((event) {
+        if (_isLocalParticipant(event.participant)) return;
+        if (event.track.kind != lk.TrackType.AUDIO) return;
+        // 排查用：远端音频「是否真的订阅上了」是区分
+        // 「订阅没发生（网络/协商）」与「订阅了但放不出来（平台音频栈）」的唯一线索。
+        // 2026-10-28 用户实报「手机说话电脑听不到」，需要这条日志定位。
+        debugPrint('[livekit] 远端音频已订阅 identity=${event.participant.identity}');
+        _emit(AylaRoomEventKind.trackSubscribed,
+            identity: event.participant.identity);
+      }))
+      ..add(listener.on<lk.TrackUnsubscribedEvent>((event) {
+        if (_isLocalParticipant(event.participant)) return;
+        if (event.track.kind != lk.TrackType.AUDIO) return;
+        debugPrint('[livekit] 远端音频已退订 identity=${event.participant.identity}');
       }));
   }
 

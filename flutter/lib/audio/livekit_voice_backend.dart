@@ -62,6 +62,11 @@ enum AylaRoomEventKind {
   participantLeft,
   trackMuted,
   trackUnmuted,
+
+  /// 远端音频轨道被（重新）订阅。用于「对方重新开麦后仍保持本地静音」——
+  /// 我们的关麦语义是 unpublish，对方再开麦就是新 publication，
+  /// SDK autoSubscribe 会订阅回来，必须按已记录的本地音量重新对齐。
+  trackSubscribed,
 }
 
 /// 归一化房间事件。
@@ -352,6 +357,13 @@ class AylaLiveKitVoiceBackend {
         _emitTrackMuted(event.identity, true);
       case AylaRoomEventKind.trackUnmuted:
         _emitTrackMuted(event.identity, false);
+      case AylaRoomEventKind.trackSubscribed:
+        final String? identity = event.identity;
+        if (identity != null && identity.isNotEmpty) {
+          // 已记录 0 ⇒ 继续退订；否则恢复订阅（默认 1.0）。
+          final double volume = _remoteVolumes[identity] ?? 1.0;
+          unawaited(_applyRemoteVolume(identity, volume > 0));
+        }
     }
   }
 

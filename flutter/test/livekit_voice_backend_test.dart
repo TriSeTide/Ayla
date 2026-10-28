@@ -243,4 +243,38 @@ void main() {
           reason: 'SDK 2.13.2 无 per-track 音量 API ⇒ 必须明说，不许静默无操作');
     });
   });
+
+  group('本地禁音是成员级事实（对方重新开麦不得绕过）', () {
+    test('trackSubscribed 到达后按已记录音量重新对齐', () async {
+      final FakeLiveKitRoom room = FakeLiveKitRoom();
+      final _Recorder rec = _Recorder();
+      final AylaLiveKitVoiceBackend backend = _backend(room, rec);
+      addTearDown(backend.dispose);
+
+      await backend.connect('wss://livekit.example/livekit', 'token');
+      room.remotes = <String>['u1', 'u2'];
+
+      // 本地把 u1 静音（0 档 = 退订）
+      backend.setRemoteVolume('u1', 0);
+      await _flushEvents();
+      expect(room.remoteAudioToggles.last, ('u1', false),
+          reason: '0 档 = 本地禁音（SDK 无 per-track 音量，只能退订）');
+
+      // 对方重新开麦 = 新 publication 被 SDK 自动订阅 -> 必须重新施加禁音
+      room.remoteAudioToggles.clear();
+      room.emit(AylaRoomEventKind.trackSubscribed, identity: 'u1');
+      await _flushEvents();
+      expect(room.remoteAudioToggles, contains(('u1', false)),
+          reason: '用户实报：收音方关掉放音方声音后，放音方重新开麦又能听见');
+
+      // 未静音的成员：新轨道应保持订阅（enabled = true）
+      backend.setRemoteVolume('u2', 0.8);
+      await _flushEvents();
+      room.remoteAudioToggles.clear();
+      room.emit(AylaRoomEventKind.trackSubscribed, identity: 'u2');
+      await _flushEvents();
+      expect(room.remoteAudioToggles, contains(('u2', true)),
+          reason: '未静音成员不应被误退订');
+    });
+  });
 }
