@@ -916,12 +916,6 @@ export interface VoiceChatMessage {
   created_at: string;
 }
 
-/**
- * 语音媒体传输方式（服务端裁决）：LiveKit 单 UDP 端口媒体面，或 WS 音频中继（回滚路径）。
- * 客户端不猜：`transport` 由后端下发，连接失败时按 `ws_relay` 原地降级。
- */
-export type VoiceMediaTransport = "livekit" | "ws_relay";
-
 /** LiveKit 媒体凭据（join 与 media-token 端点同一套形状） */
 export interface VoiceLiveKitMediaConfig {
   /** 信令地址（wss://…/livekit） */
@@ -935,21 +929,14 @@ export interface VoiceLiveKitMediaConfig {
   identity?: string;
 }
 
-/** WS 音频中继媒体配置 */
-export interface VoiceWsRelayMediaConfig {
-  /** 完整 ws/音频 地址（含 channel 查询参数） */
-  url: string;
-}
-
 /**
  * join / media-token 响应的 media 旁路字段。
- * 两种配置**同时下发**（各自可为 null），让客户端在 livekit 连接失败时原地降级，
- * 不必再回后端要一次配置（回滚速度 = 一次连接尝试，而不是一次发版）。
+ *
+ * 2026-10-28 起**只有 LiveKit 一种媒体面**：ws_relay 中继与其回退路径已整体删除。
+ * 客户端不猜地址、不降级：`media.livekit` 缺失即显式失败。
  */
 export interface VoiceMediaConfig {
-  transport: VoiceMediaTransport;
   livekit?: VoiceLiveKitMediaConfig | null;
-  ws_relay?: VoiceWsRelayMediaConfig | null;
 }
 
 /** POST /voice/channels/<id>/join/ 返回（成员落表确认 + 媒体配置旁路） */

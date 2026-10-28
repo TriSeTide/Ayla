@@ -22,7 +22,6 @@
  */
 import type { VoiceMediaConfig } from "../api/types";
 import { createLiveKitRoom } from "./livekitRoom";
-import { createWsRelayRoom } from "./wsRelayRoom";
 
 
 /** LiveKit 连接状态（与 voice store 对齐） */
@@ -80,38 +79,18 @@ export interface LiveKitRoomLike {
 
 /* ================= 封装客户端 ================= */
 
-/** 媒体传输（与后端 VOICE_MEDIA_TRANSPORT / join 的 media.transport 同字面量） */
-export type VoiceTransport = "livekit" | "ws_relay";
-
 type RoomFactory = (events: LiveKitEvents) => Promise<LiveKitRoomLike> | LiveKitRoomLike;
 
 /**
- * 缺省 Room 工厂：按传输选择实现（**默认 ws_relay**，与后端默认值一致）。
+ * 缺省 Room 工厂：**只有 LiveKit 一种实现**（ws_relay 中继已于 2026-10-28 删除）。
  *
  * 这是 web 侧接 LiveKit 的全部接入点：8 方法 / 7 回调的契约不变，
  * 上层（useVoiceChannel / store / 组件）完全无感。
  */
-function defaultRoomFactory(transport: VoiceTransport): RoomFactory {
-  return transport === "livekit" ? createLiveKitRoom : createWsRelayRoom;
+function defaultRoomFactory(): RoomFactory {
+  return createLiveKitRoom;
 }
 
-/**
- * 脱敏：SDK 的原始错误消息可能夹带 token / 长凭据（JWTs 形如三段 base64url）。
- * AGENTS.md §9 要求日志不得泄露凭据，因此这里把长 token 形状的片段替换掉。
- */
-function redact(text: string): string {
-  return text
-    .replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "<redacted-jwt>")
-    .replace(/([?&](?:access_token|token|key|secret)=)[^&\s]+/gi, "$1<redacted>")
-    .slice(0, 200);
-}
-
-/** 降级日志（结构化、便于判断"是否真的切成功了"；不含 token） */
-function logTransportFallback(reason: unknown): void {
-  const detail = redact(reason instanceof Error ? reason.message : String(reason));
-  // 只记一句，不打印栈：降级是预期路径，不是崩溃
-  console.warn(`[voice] transport_fallback from=livekit to=ws_relay reason=${detail}`);
-}
 
 interface RoomOwner {
   generation: number;
@@ -129,61 +108,32 @@ export class VoiceLiveKitClient {
   private generation = 0;
   private events: LiveKitEvents = {};
   private roomFactory: RoomFactory | null = null;
-  /** 本次连接实际使用的传输（降级后为 ws_relay；供排障与续签判断） */
-  private transport: VoiceTransport = "ws_relay";
-  /** 最近一次 connect 的媒体配置（livekit 失败时据此原地降级到 ws_relay） */
+  /** 最近一次 connect 的媒体配置（不含副作用；持久化/诊断用） */
   private media: VoiceMediaConfig | null = null;
 
-  /** 测试/替换用：注入 Room 工厂；缺省按 transport 选 createLiveKitRoom/createWsRelayRoom */
+  /** 测试/替换用：注入 Room 工厂；缺省用 createLiveKitRoom */
   setRoomFactory(factory: RoomFactory | null) {
     this.roomFactory = factory;
-  }
-
-  /** 本次连接实际使用的传输（降级后读回 ws_relay） */
-  getTransport(): VoiceTransport {
-    return this.transport;
   }
 
   /**
    * 按服务端下发的媒体配置连接。
    *
-   * - `transport === "livekit"` 且配置完整 → 走 LiveKit；**连接失败原地降级**到
-   *   `media.ws_relay.url`（服务端双下发，无需二次请求）；
-   * - 其它情况 → 走 WS 中继（与旧行为逐字节一致）。
-   * - 降级**不触发 leave/**：媒体断线 ≠ 离开频道（client.ts 既有契约）。
+   * 只接受后端下发的 `media.livekit`：缺失即显式失败（2026-10-28 起不再回退中继）。
+   * 连接失败原样上抛，由调用方把状态置 failed；媒体断线 ≠ 离开频道。
    */
   async connectWithMedia(
     media: VoiceMediaConfig | null | undefined,
     accessToken: string,
-    /** 老后端不返回 media 时的回滚地址（= voiceDirectWsUrl(channelId)） */
-    fallbackRelayUrl?: string,
   ): Promise<void> {
-    const token = accessToken;
-    if (!token) throw new Error("登录状态失效，请重新登录");
-    const relayUrl = media?.ws_relay?.url ?? fallbackRelayUrl ?? "";
+    if (!accessToken) throw new Error("登录状态失效，请重新登录");
     const livekit = media?.livekit ?? null;
-    const wantLiveKit = media?.transport === "livekit" && !!livekit?.url && !!livekit?.token;
-
-    if (!wantLiveKit) {
-      if (!relayUrl) throw new Error("语音媒体配置缺失");
-      this.media = media ?? null;
-      this.transport = "ws_relay";
-      await this.connect(relayUrl, token);
-      return;
+    if (!livekit?.url || !livekit?.token) {
+      // 后端未下发可用的 media.livekit ⇒ 显式失败（不再回退中继，也不猜地址）
+      throw new Error("语音媒体配置缺失（后端未下发 media.livekit）");
     }
-
     this.media = media ?? null;
-    this.transport = "livekit";
-    try {
-      await this.connect(livekit!.url, livekit!.token);
-    } catch (error) {
-      // 取消（用户切频道/离开）不是降级场景：原样向上抛，由调用方识别 AbortError
-      if (error instanceof DOMException && error.name === "AbortError") throw error;
-      if (!relayUrl) throw error; // 没有回滚路径：保持原错误（上层 show failed）
-      logTransportFallback(error);
-      this.transport = "ws_relay";
-      await this.connect(relayUrl, token);
-    }
+    await this.connect(livekit.url, livekit.token);
   }
 
   /**
@@ -218,7 +168,7 @@ export class VoiceLiveKitClient {
     };
     this.owner = owner;
     previous?.cancel();
-    const factory = this.roomFactory ?? defaultRoomFactory(this.transport);
+    const factory = this.roomFactory ?? defaultRoomFactory();
     const events = this.guardedEvents(owner, this.events);
     const connectOwned = async () => {
       try {

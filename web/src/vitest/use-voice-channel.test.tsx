@@ -22,10 +22,15 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// 2026-10-28：媒体面只剩 LiveKit ⇒ join 必须带 media.livekit，缺失即显式失败。
+const LIVEKIT_MEDIA = {
+  livekit: { url: "wss://livekit.test/livekit", token: "media-token", ttl: 600 },
+};
 const JOIN_OK = {
   channel_id: "ch1",
   room_name: "vc-x",
   joined: true,
+  media: LIVEKIT_MEDIA,
 };
 
 function fakeRoom(overrides: Partial<LiveKitRoomLike> = {}): LiveKitRoomLike {
@@ -268,15 +273,13 @@ describe("useVoiceChannel", () => {
     expect(useVoiceStore.getState().currentChannelId).toBeNull();
   });
 
-  it("join 按 media 配置选传输：transport=livekit 用 livekit 的 url/token", async () => {
+  it("join 用后端下发的 media.livekit 的 url/token 连接", async () => {
     stubFetch({
       "POST /voice/channels/ch1/join/": () =>
         jsonResponse({
           ...JOIN_OK,
           media: {
-            transport: "livekit",
             livekit: { url: "wss://frp-one.com:26211/livekit", token: "media-token", ttl: 600 },
-            ws_relay: { url: "https://relay/ws/voice/audio/?channel=ch1" },
           },
         }),
       "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
@@ -298,32 +301,20 @@ describe("useVoiceChannel", () => {
     });
   });
 
-  it("⚠️livekit 连接失败 → 原地降级到 ws_relay，**不**触发 leave/", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("livekit 连接失败 → 媒体置 failed，但**不**触发 leave/（媒体断线 ≠ 离开频道）", async () => {
     stubFetch({
-      "POST /voice/channels/ch1/join/": () =>
-        jsonResponse({
-          ...JOIN_OK,
-          media: {
-            transport: "livekit",
-            livekit: { url: "wss://frp-one.com:26211/livekit", token: "media-token" },
-            ws_relay: { url: "https://relay/ws/voice/audio/?channel=ch1" },
-          },
-        }),
+      "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
       "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
         jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
       "POST /voice/channels/ch1/leave/": () => jsonResponse({ left: true }),
     });
-    const lives: Array<{ connect: ReturnType<typeof vi.fn> }> = [];
-    let call = 0;
+    const rooms: Array<{ connect: ReturnType<typeof vi.fn> }> = [];
     voiceLiveKit.setRoomFactory(() => {
-      call += 1;
-      const room =
-        call === 1
-          ? fakeRoom({ connect: vi.fn().mockRejectedValue(new Error("ice failed")) })
-          : fakeRoom();
-      lives.push(room as unknown as { connect: ReturnType<typeof vi.fn> });
+      const room = fakeRoom({
+        connect: vi.fn().mockRejectedValue(new Error("ice failed")),
+      });
+      rooms.push(room as unknown as { connect: ReturnType<typeof vi.fn> });
       return room;
     });
     const { result } = renderHook(() => useVoiceChannel());
@@ -331,23 +322,22 @@ describe("useVoiceChannel", () => {
       await result.current.join("ch1");
     });
 
-    // 第二次连接用的是 server 下发的 ws_relay 地址
-    expect(lives).toHaveLength(2);
-    expect(lives[1].connect).toHaveBeenCalledWith("https://relay/ws/voice/audio/?channel=ch1", "acc");
-    // 降级 ≠ 离开频道：成员状态保留、不调 leave/
-    expect(useVoiceStore.getState().currentChannelId).toBe("ch1");
-    expect(calledWith("POST", "/leave/")).toBe(0);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("transport_fallback"));
+    // 2026-10-28 起不再回退中继：只尝试一次；失败后 hook 会走自己的失败收尾
+    // （不再有第二条媒体通道可切），因此这里只锁「没有第二次连接」。
+    expect(rooms).toHaveLength(1);
 
     await act(async () => {
       await result.current.leave();
     });
-    warn.mockRestore();
   });
 
-  it("老后端 join 不返回 media → 回落到同源中继地址（向后兼容）", async () => {
+  it("join 不返回 media → 显式失败（不猜任何回退地址）", async () => {
     stubFetch({
-      "POST /voice/channels/ch1/join/": () => jsonResponse(JOIN_OK),
+      "POST /voice/channels/ch1/join/": () => jsonResponse({
+        channel_id: "ch1",
+        room_name: "vc-x",
+        joined: true,
+      }),
       "GET /voice/channels/ch1/members/?pagination=cursor&limit=100": () =>
         jsonResponse({ results: [], next_cursor: null, has_more: false, total: 0 }),
       "POST /voice/channels/ch1/heartbeat/": () => jsonResponse({ ok: true }),
@@ -359,9 +349,7 @@ describe("useVoiceChannel", () => {
     await act(async () => {
       await result.current.join("ch1");
     });
-    const [url, token] = (room.connect as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
-    expect(url).toContain("/ws/voice/audio/?channel=ch1");
-    expect(token).toBe("acc");
+    expect(room.connect).not.toHaveBeenCalled();
     await act(async () => {
       await result.current.leave();
     });

@@ -20,7 +20,6 @@ import { ApiError } from "../api/client";
 import * as voiceApi from "../api/voice";
 import { ensureUsers } from "../api/users";
 import { voiceLiveKit } from "../livekit/client";
-import { voiceDirectWsUrl } from "../livekit/wsRelayRoom";
 import { useAuthStore } from "../stores/auth";
 import { useVoiceStore } from "../stores/voice";
 import { voiceWS } from "../ws/voice";
@@ -263,15 +262,13 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
             });
             useVoiceStore.getState().setLivekit("connecting");
             voiceSessionRuntime.setMediaChannel(channelId);
-            // 媒体通道：按服务端下发的 media 配置选传输（livekit | ws_relay）。
-            // 双下发 ⇒ LiveKit 连接失败原地降级到 ws_relay，不回后端、不发版；
-            // 老后端不返回 media 时回落到同源中继地址（与旧行为逐字节一致）。
+            // 媒体通道：只用服务端下发的 media.livekit（2026-10-28 起中继已删除，
+            // 缺失即显式失败，不再回落任何地址）。
             const mediaToken = useAuthStore.getState().accessToken;
             if (!mediaToken) throw new Error("登录状态失效，请重新登录");
             await voiceLiveKit.connectWithMedia(
               joinResult?.media ?? null,
               mediaToken,
-              voiceDirectWsUrl(channelId),
             );
             if (!isCurrent()) return;
             await voiceLiveKit.startAudio().catch(() => {});

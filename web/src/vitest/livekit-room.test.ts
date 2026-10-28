@@ -430,133 +430,53 @@ function fakeRoom(overrides: Partial<LiveKitRoomLike> = {}): LiveKitRoomLike & {
   return Object.assign(base, overrides) as unknown as ReturnType<typeof fakeRoom>;
 }
 
+// 2026-10-28：ws_relay 中继与原地降级已整体删除 ⇒ media 只剩 livekit 一份配置。
 const LIVEKIT_MEDIA = {
-  transport: "livekit" as const,
   livekit: { url: "wss://lk/livekit", token: "lk-token", ttl: 600 },
-  ws_relay: { url: "wss://relay/ws/voice/audio/?channel=1" },
 };
 
-describe("VoiceLiveKitClient.connectWithMedia", () => {
-  it("transport=ws_relay → 直接用中继地址（与旧行为一致）", async () => {
-    const client = new VoiceLiveKitClient();
-    const room = fakeRoom();
-    const factory = vi.fn().mockResolvedValue(room);
-    client.setRoomFactory(factory);
-    await client.connectWithMedia(
-      { transport: "ws_relay", livekit: null, ws_relay: { url: "wss://relay/a" } },
-      "access",
-      "wss://relay/fallback",
-    );
-    expect(room.connect).toHaveBeenCalledWith("wss://relay/a", "access");
-    expect(client.getTransport()).toBe("ws_relay");
-  });
-
-  it("transport=livekit → 用 livekit 的 url/token", async () => {
+describe("VoiceLiveKitClient.connectWithMedia（LiveKit only）", () => {
+  it("配置完整 → 用后端给的 url/token 连接", async () => {
     const client = new VoiceLiveKitClient();
     const room = fakeRoom();
     client.setRoomFactory(() => room);
     await client.connectWithMedia(LIVEKIT_MEDIA, "access");
     expect(room.connect).toHaveBeenCalledWith("wss://lk/livekit", "lk-token");
-    expect(client.getTransport()).toBe("livekit");
   });
 
-  it("⚠️livekit 连接失败 → **原地降级**到 ws_relay（不 throw、不回后端）", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("media 缺失 → 显式失败（不再回退中继）", async () => {
     const client = new VoiceLiveKitClient();
-    const livekitRoom = fakeRoom({ connect: vi.fn().mockRejectedValue(new Error("ice failed")) });
-    const relayRoom = fakeRoom();
-    const factory = vi.fn().mockResolvedValueOnce(livekitRoom).mockResolvedValueOnce(relayRoom);
-    client.setRoomFactory(factory);
-
-    await expect(client.connectWithMedia(LIVEKIT_MEDIA, "access")).resolves.toBeUndefined();
-    expect(relayRoom.connect).toHaveBeenCalledWith("wss://relay/ws/voice/audio/?channel=1", "access");
-    expect(client.getTransport()).toBe("ws_relay");
-    // 失败的房间必须被清理，不能留着占设备
-    expect(livekitRoom.disconnect).toHaveBeenCalled();
-    // 结构化日志，便于判断"是否真的切成功了"（不含 token）
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("transport_fallback"));
-    expect(String(warn.mock.calls[0][0])).not.toContain("lk-token");
-    warn.mockRestore();
+    const room = fakeRoom();
+    client.setRoomFactory(() => room);
+    await expect(client.connectWithMedia(null, "access")).rejects.toThrow(/media\.livekit/);
+    expect(room.connect).not.toHaveBeenCalled();
   });
 
-  it("降级日志脱敏：token/凭据不得进日志", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("livekit 配置不完整 → 显式失败（不造半套配置）", async () => {
     const client = new VoiceLiveKitClient();
-    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJlLXZhbHVl";
-    const err = new Error(`connect failed token=${jwt} &secret=abcdef123456`);
-    const livekitRoom = fakeRoom({ connect: vi.fn().mockRejectedValue(err) });
-    // 降级目标必须是一个能连上的房间：否则第二次 connect 会再次抛出 token 错误，
-    // 测到的就不是"脱敏"而是"未捕获异常"（原用例的 factory 恒返回失败房间，属用例缺陷）。
-    const relayRoom = fakeRoom();
-    let call = 0;
-    client.setRoomFactory(() => {
-      call += 1;
-      return call === 1 ? livekitRoom : relayRoom;
-    });
-    await client.connectWithMedia(
-      { transport: "livekit", livekit: { url: "wss://lk", token: "t" }, ws_relay: { url: "wss://relay/x" } },
-      "a",
-    );
-    const logged = String(warn.mock.calls[0]?.[0] ?? "");
-    expect(logged).toContain("transport_fallback");
-    expect(logged).not.toContain(jwt);
-    expect(logged).not.toContain("abcdef123456");
-    warn.mockRestore();
-  });
-
-  it("livekit 失败且没有 ws_relay 回滚地址 → 原样抛错（交由上层 failed）", async () => {
-    const client = new VoiceLiveKitClient();
-    const livekitRoom = fakeRoom({ connect: vi.fn().mockRejectedValue(new Error("ice failed")) });
-    client.setRoomFactory(() => livekitRoom);
+    const room = fakeRoom();
+    client.setRoomFactory(() => room);
     await expect(
-      client.connectWithMedia({ transport: "livekit", livekit: { url: "wss://lk", token: "t" }, ws_relay: null }, "a"),
-    ).rejects.toThrow("ice failed");
+      client.connectWithMedia({ livekit: null }, "access"),
+    ).rejects.toThrow(/media\.livekit/);
+    expect(room.connect).not.toHaveBeenCalled();
   });
 
-  it("取消（AbortError）不触发降级：切频道/离开不是传输故障", async () => {
+  it("连接失败 → 原样上抛，不换传输、不重试", async () => {
+    const client = new VoiceLiveKitClient();
+    const factory = vi.fn().mockResolvedValue(
+      fakeRoom({ connect: vi.fn().mockRejectedValue(new Error("ice failed")) }),
+    );
+    client.setRoomFactory(factory);
+    await expect(client.connectWithMedia(LIVEKIT_MEDIA, "access")).rejects.toThrow(/ice failed/);
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("取消（AbortError）原样上抛：切频道/离开不是传输故障", async () => {
     const client = new VoiceLiveKitClient();
     const abort = new DOMException("cancelled", "AbortError");
-    const livekitRoom = fakeRoom({ connect: vi.fn().mockRejectedValue(abort) });
-    const relayFactory = vi.fn().mockResolvedValue(fakeRoom());
-    let call = 0;
-    client.setRoomFactory(() => {
-      call += 1;
-      return call === 1 ? livekitRoom : relayFactory();
-    });
+    client.setRoomFactory(() => fakeRoom({ connect: vi.fn().mockRejectedValue(abort) }));
     await expect(client.connectWithMedia(LIVEKIT_MEDIA, "a")).rejects.toThrow(/cancelled/);
-    expect(relayFactory).not.toHaveBeenCalled();
-  });
-
-  it("老后端不返回 media → 用调用方给的 fallback 中继地址（向后兼容）", async () => {
-    const client = new VoiceLiveKitClient();
-    const room = fakeRoom();
-    client.setRoomFactory(() => room);
-    await client.connectWithMedia(null, "access", "wss://relay/legacy?channel=9");
-    expect(room.connect).toHaveBeenCalledWith("wss://relay/legacy?channel=9", "access");
-  });
-
-  it("transport=livekit 但配置不完整（livekit=null）→ 走中继，不发半套配置", async () => {
-    const client = new VoiceLiveKitClient();
-    const room = fakeRoom();
-    client.setRoomFactory(() => room);
-    await client.connectWithMedia(
-      { transport: "livekit", livekit: null, ws_relay: { url: "wss://relay/x" } },
-      "access",
-    );
-    expect(room.connect).toHaveBeenCalledWith("wss://relay/x", "access");
-  });
-
-  it("缺 token 时直接抛（不发起任何连接）", async () => {
-    const client = new VoiceLiveKitClient();
-    const factory = vi.fn();
-    client.setRoomFactory(factory);
-    await expect(client.connectWithMedia(LIVEKIT_MEDIA, "")).rejects.toThrow(/登录状态失效/);
-    expect(factory).not.toHaveBeenCalled();
-  });
-
-  it("媒体配置缺失且无回滚地址 → 明确报错", async () => {
-    const client = new VoiceLiveKitClient();
-    await expect(client.connectWithMedia(null, "access")).rejects.toThrow(/媒体配置缺失/);
   });
 });
 

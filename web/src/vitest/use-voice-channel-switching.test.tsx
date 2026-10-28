@@ -44,7 +44,21 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const member = (channelId: string) => ({ id: 1, user_id: `member-${channelId}`, joined_at: "t", last_seen_at: "t" });
-const joinResult = (channelId: string) => ({ channel_id: channelId, room_name: channelId, joined: true });
+// 2026-10-28：媒体面只剩 LiveKit。url 里保留 `channel=<id>` 以便既有断言（按 url 区分房间）
+// 继续有效，同时逼真地模拟后端下发的 media.livekit。
+const joinResult = (channelId: string) => ({
+  channel_id: channelId,
+  room_name: channelId,
+  joined: true,
+  media: {
+    livekit: {
+      url: `wss://livekit.test/channel=${channelId}`,
+      token: `media-token-${channelId}`,
+      ttl: 600,
+      room_name: channelId,
+    },
+  },
+});
 function room(overrides: Partial<LiveKitRoomLike> = {}): LiveKitRoomLike {
   return {
     connect: vi.fn().mockResolvedValue(undefined), disconnect: vi.fn().mockResolvedValue(undefined),
@@ -87,8 +101,8 @@ describe("latest selected voice session", () => {
   it.each(["join", "members", "connect", "previous-leave"] as const)("A → B → C while A's %s waits only commits C", async (stage) => {
     const reached = deferred<void>();
     const gate = deferred<void>();
-    // WS 中继传输下 connect 入参 = (relayWsUrl(channelId), 访问令牌)；
-    // 房间身份以 url 里的 channel 区分（token 恒为访问令牌，不再随房间变化）
+    // LiveKit 传输下 connect 入参 = (media.livekit.url, media.livekit.token)；
+    // 房间身份以 url 里的 channel= 区分。
     const media: Array<{ url: string; room: LiveKitRoomLike }> = [];
     voiceLiveKit.setRoomFactory(() => {
       const owned = room({ connect: vi.fn(async (url) => {
