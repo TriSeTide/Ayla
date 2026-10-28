@@ -701,6 +701,14 @@ class AylaVoiceSession extends ChangeNotifier {
     _voice.setMicEnabled(next);
     try {
       await _media.setMicrophoneEnabled(next);
+      // 静音态上报（2026-10-29）：媒体开关**成功之后**，把"自己的"静音事实广播给
+      // 同频道其他人。此前 muted/unmuted 只由各端从 LiveKit 的 TrackMuted/
+      // TrackUnmuted 本地合成、服务端从不广播 ⇒ 换端登录 / 重进房间的人永远
+      // 看不到别人当前是否静音（跨端静音态不同步，用户实报项之一）。
+      //
+      // 位置很关键：必须在媒体操作成功之后发，否则媒体失败回滚时会把错的
+      // 状态广播出去（catch 分支不补发，天然避免）。
+      _broadcastMicState(channelId, next);
     } catch (error) {
       if (_voice.currentChannelId != channelId ||
           !_runtime.isRevisionCurrent(revision)) {
@@ -710,6 +718,25 @@ class AylaVoiceSession extends ChangeNotifier {
       _setError(
         error is Exception ? '切换麦克风失败：$error' : '切换麦克风失败',
       );
+    }
+  }
+
+  /// 把**自己的**静音态上报给服务端（由服务端广播成 `voice.state muted/unmuted`）。
+  ///
+  /// 只发帧、不改本地状态：本地成员表已由乐观更新写好；服务端回来的
+  /// `voice.state` 会走 [_onVoiceFrame] 既有路径（幂等覆盖）。
+  ///
+  /// **不同步等待、失败不抛**：静音上报是辅助事实，不能因为它失败就回滚已经成功
+  /// 的媒体操作（否则用户会看到"麦开了又关"）。
+  void _broadcastMicState(String channelId, bool muted) {
+    try {
+      _ws.send(<String, dynamic>{
+        'type': 'voice.mute',
+        'channel_id': channelId,
+        'muted': muted,
+      });
+    } catch (error) {
+      debugPrint('[voice] 静音态上报失败（不影响媒体）: $error');
     }
   }
 

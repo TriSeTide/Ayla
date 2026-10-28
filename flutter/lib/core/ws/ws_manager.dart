@@ -33,9 +33,13 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../net/api_endpoint.dart';
 import '../net/dio_client.dart';
 
-/// WS 通道心跳间隔（原在 `poc/relay_protocol.dart`；该文件已随中继实现删除，
-/// 这三个常量与中继协议无关，是通用 WS 通道参数）。
-const int kPingIntervalMs = 15000;
+/// WS 通道心跳间隔。
+///
+/// ⚠️ **必须与 web 侧 `ws/presence.ts` 的 25s 同值**（原定义在已删除的
+/// `poc/relay_protocol.dart`，值为 25000）。2026-10-28 内联时误写成 15000，
+/// 导致 voice/presence 通道心跳与服务端不匹配，成员进出/静音/在线光环等
+/// WS 热更新异常——已改回 25000。
+const int kPingIntervalMs = 25000;
 /// 重连退避起点（ms）。
 const int kReconnectBaseMs = 1000;
 /// 重连退避上限（ms）。

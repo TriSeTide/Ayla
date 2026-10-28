@@ -220,6 +220,29 @@ def join_channel(channel: VoiceChannel, user) -> VoiceChannelMember:
     return member
 
 
+def _apply_member_left(channel: VoiceChannel, user) -> None:
+    """成员离场收尾（**正常 leave 与超时清理共用同一条路径**）。
+
+    顺序契约（两条路径必须逐帧一致，客户端只认这里的帧序列）：
+    1. 清 User 的跨页活动标记（is_in_voice / voice_room_id，仅在仍指向本频道时）；
+    2. 广播 `voice.state left` —— 客户端（Flutter voice_support.dart / web
+       VoiceChannelPanel）靠这一帧移除成员行；
+    3. 若频道因此变空 → 落库「最近变空」排序投影（_mark_vacant_if_empty）；
+    4. 广播目录人数刷新 `voice.channel.member_count_changed`。
+
+    超时清理之所以复用本函数、而不是自己拼帧：帧形态一变客户端就白做（成员行不消失）。
+    """
+    if user.voice_room_id == channel.id:
+        user.is_in_voice = False
+        user.voice_room_id = None
+        user.save(update_fields=["is_in_voice", "voice_room_id"])
+    broadcast_voice_state(channel, user, "left")
+    # 离开的是最后一人 → 频道变空，先落库「最近变空」排序投影，再广播（帧携带最新值）
+    _mark_vacant_if_empty(channel)
+    # 有人离开 → 目录人数实时刷新
+    broadcast_channel_member_count(channel)
+
+
 def leave_channel(channel: VoiceChannel, user) -> None:
     """离开频道。
 
@@ -236,15 +259,7 @@ def leave_channel(channel: VoiceChannel, user) -> None:
         # 保持调用方实例的 owner 与数据库一致，避免同链上后续判断用旧值。
         channel.owner_id = locked.owner_id
     if deleted:
-        if user.voice_room_id == channel.id:
-            user.is_in_voice = False
-            user.voice_room_id = None
-            user.save(update_fields=["is_in_voice", "voice_room_id"])
-        broadcast_voice_state(channel, user, "left")
-        # 离开的是最后一人 → 频道变空，先落库「最近变空」排序投影，再广播（帧携带最新值）
-        _mark_vacant_if_empty(channel)
-        # 有人离开 → 目录人数实时刷新
-        broadcast_channel_member_count(channel)
+        _apply_member_left(channel, user)
 
 
 def heartbeat_channel(channel: VoiceChannel, user) -> None:
@@ -257,29 +272,61 @@ def heartbeat_channel(channel: VoiceChannel, user) -> None:
     broadcast_voice_state(channel, user, "heartbeat")
 
 
-def mark_stale_members_left(channel: VoiceChannel, timeout_seconds: int | None = None) -> int:
+def resolve_stale_timeout(timeout_seconds: int | None = None) -> int:
+    """解析超时秒数：显式参数优先，否则取 settings.VOICE_MEMBER_TIMEOUT_SECONDS。"""
+    if timeout_seconds is not None:
+        return int(timeout_seconds)
+    return int(settings.VOICE_MEMBER_TIMEOUT_SECONDS)
+
+
+def find_stale_members(
+    channel: VoiceChannel, timeout_seconds: int | None = None
+) -> list[tuple[VoiceChannelMember, float]]:
+    """列出该频道已超时未心跳的成员（只读，不删除不广播）。
+
+    返回 [(member, 已静默秒数)]，按 last_seen_at 升序（最久没动静的在前）。
+
+    判定口径：**严格** `last_seen_at < now - timeout`。恰好等于阈值按"未超时"处理
+    （保守：宁可多留一轮，也不误踢刚心跳的成员——下一轮 cron 会再判一次）。
+    """
+    timeout = resolve_stale_timeout(timeout_seconds)
+    now = timezone.now()
+    cutoff = now - timezone.timedelta(seconds=timeout)
+    members = list(
+        VoiceChannelMember.objects.select_related("user")
+        .filter(channel=channel, last_seen_at__lt=cutoff)
+        .order_by("last_seen_at")
+    )
+    return [(member, (now - member.last_seen_at).total_seconds()) for member in members]
+
+
+def mark_stale_members_left(
+    channel: VoiceChannel, timeout_seconds: int | None = None
+) -> int:
     """后台任务：把超过超时未心跳的成员标记离开（删除成员记录）+ 广播 voice.state left。
 
     返回清理的成员数。timeout 默认取 settings.VOICE_MEMBER_TIMEOUT_SECONDS。
+
+    幂等：已清理的成员不复存在，重复执行返回 0 且不重复广播。
+
+    广播路径与正常 leave **完全一致**（都走 `_apply_member_left`）：先 `voice.state left`
+    （客户端据此移除成员行），再按需落库排序投影并广播人数刷新。
     """
-    timeout = timeout_seconds if timeout_seconds is not None else settings.VOICE_MEMBER_TIMEOUT_SECONDS
-    cutoff = timezone.now() - timezone.timedelta(seconds=timeout)
-    stale = list(
-        VoiceChannelMember.objects.filter(channel=channel, last_seen_at__lt=cutoff)
-    )
-    for member in stale:
-        member.delete()
-        if member.user.voice_room_id == channel.id:
-            member.user.is_in_voice = False
-            member.user.voice_room_id = None
-            member.user.save(update_fields=["is_in_voice", "voice_room_id"])
-        broadcast_voice_state(channel, member.user, "left")
-    if stale:
-        # 清理的是最后一批 → 频道变空，先落库「最近变空」排序投影，再广播（帧携带最新值）
-        _mark_vacant_if_empty(channel)
-        # 超时清理后目录人数实时刷新
-        broadcast_channel_member_count(channel)
+    stale = find_stale_members(channel, timeout_seconds)
+    for member, _silent_seconds in stale:
+        reap_stale_member(channel, member)
     return len(stale)
+
+
+def reap_stale_member(channel: VoiceChannel, member: VoiceChannelMember) -> None:
+    """清理单个超时成员（删成员关系 + 走与正常 leave 相同的收尾/广播路径）。
+
+    拆成独立函数是为了让 management command 能先打印明细再逐个执行，
+    同时保证"清理"与"leave"共用**同一实现**（不出现第二套帧构造）。
+    """
+    user = member.user
+    member.delete()
+    _apply_member_left(channel, user)
 
 
 # ---------- voice.state 广播 ----------
@@ -291,6 +338,28 @@ def _voice_state_event(channel: VoiceChannel, user, state: str) -> dict:
             "channel_id": str(channel.id),
             "user_id": str(user.id),
             "state": state,
+            "ts": timezone.now().isoformat(),
+        },
+    }
+
+
+def mute_event(channel_id, user, muted: bool) -> dict:
+    """构造「某人静音态变化」的 voice.state 广播事件（2026-10-29 新增）。
+
+    形态与既有的 joined/left **完全一致**（type=voice.state, data 四字段），
+    只把 `state` 换成 muted/unmuted —— 这样 Flutter `voice_support.dart` 与
+    web `useVoiceChannel.ts` 既有的 voice.state 处理路径**无需改结构**即可消费，
+    不会引入第二套事件形状。
+
+    只由 WS 消费者在「客户端上报自己的静音态」时调用：静音态是**媒体事实的
+    应用层投影**，服务端不做语义裁决，只负责在频道内广播。
+    """
+    return {
+        "type": "voice.state",
+        "data": {
+            "channel_id": str(channel_id),
+            "user_id": str(user.id),
+            "state": "muted" if muted else "unmuted",
             "ts": timezone.now().isoformat(),
         },
     }

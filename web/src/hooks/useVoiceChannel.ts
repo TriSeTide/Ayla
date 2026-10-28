@@ -366,6 +366,11 @@ export function useVoiceChannel(selectedChannelId?: string | null) {
     store.setMicEnabled(next); // 乐观
     try {
       await voiceLiveKit.setMicrophoneEnabled(next);
+      // 静音态上报（2026-10-29，与 Flutter 侧同款）：媒体开关**成功之后**把自己的
+      // 静音事实交给服务端广播。此前 muted/unmuted 只由各端从 LiveKit 的
+      // TrackMuted/TrackUnmuted 本地合成、服务端从不广播 ⇒ 换端登录 / 重进房间的人
+      // 看不到别人当前是否静音。位置必须在成功之后，否则回滚会把错状态广播出去。
+      voiceWS.sendJson({ type: "voice.mute", channel_id: channelId, muted: next });
     } catch (e) {
       if (useVoiceStore.getState().currentChannelId !== channelId || !voiceSessionRuntime.isRevisionCurrent(revision)) return;
       store.setMicEnabled(!next); // 回滚
