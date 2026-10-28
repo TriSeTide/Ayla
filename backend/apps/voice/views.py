@@ -269,15 +269,11 @@ class ChannelJoinView(APIView):
     响应保留既有三字段（`test_channel_api.py` 锁死：无顶层 `token`/`ws_url`），
     另加**旁路字段 `media`** 下发媒体面配置（见 apps/voice/media_config.py）：
     ```
-    "media": {
-      "transport": "livekit" | "ws_relay",     # 服务端建议值
-      "livekit":  {"url","token","ttl","expires_at","room_name","identity"} | null,
-      "ws_relay": {"url": "..."} | null         # 恒下发（回滚路径）
-    }
+    "media": {"livekit": {"url","token","ttl","expires_at","room_name","identity"}}
     ```
-    两种配置同时下发，客户端在 livekit 连接失败时可直接按已到手的 `ws_relay`
-    原地降级，不必回后端再要一次配置（回滚速度 = 一次连接尝试）。
-    开关 `VOICE_MEDIA_TRANSPORT` 设回 `ws_relay` 即全网回滚，无需发版。
+    2026-10-28 起媒体面**只有 LiveKit**（中继与回退路径已删除）：LiveKit 未配置时
+    `media.livekit` 为 None，客户端显式报错（不猜地址、不回退）；本接口本身
+    仍正常返回，因为 join 还负责落成员表与广播。
     """
 
     permission_classes = [IsAuthenticated]
@@ -294,6 +290,8 @@ class ChannelJoinView(APIView):
                 "channel_id": str(ch.id),
                 "room_name": ch.room_name,
                 "joined": True,
+                # 媒体面不可用时 livekit=None（客户端显式报错，不降级）；
+                # 成员表与广播仍然生效。
                 "media": media_config.media_payload(request.user, ch),
             },
             status=status.HTTP_200_OK,
@@ -324,14 +322,11 @@ class ChannelMediaTokenView(APIView):
             return _not_found()
         if not can_join(request.user, ch):
             return _forbidden("无权加入该语音频道")
-        media = media_config.media_payload(request.user, ch)
-        if media["transport"] != media_config.TRANSPORT_LIVEKIT or not media["livekit"]:
-            # 显式失败，绝不签发裸 token，也不假装"续签成功"（M4-5 §10.1）
-            return Response(
-                {"detail": "语音媒体未配置"},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        return Response({"media": media}, status=status.HTTP_200_OK)
+        # 该端点唯一职责是发媒体凭据：未配置/签发失败即 503（显式失败，不签发裸 token）。
+        return Response(
+            {"media": media_config.require_media_payload(request.user, ch)},
+            status=status.HTTP_200_OK,
+        )
 
 
 class ChannelLeaveView(APIView):

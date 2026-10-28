@@ -36,12 +36,8 @@ ELYSIA_BRIDGE_INLINE = False
 # 测试环境不启动 Voice Live observer 后台线程（避免 ensure 调用连接真实 Elysium）
 VOICE_OBSERVER_ENABLED = False
 
-# 测试环境媒体面固定回滚路径（ws_relay），并强制清空 LIVEKIT_*：
-# 本机 backend/.env 可能配了真实密钥，测试不得把它们读进来。
-# livekit 分支由用例用 pytest.mark.django_db + monkeypatch 显式打开
-# （见 apps/voice/tests/test_media_token.py）。
-VOICE_MEDIA_TRANSPORT = "ws_relay"
-VOICE_RELAY_WS_BASE = ""
+# 测试环境强制清空 LIVEKIT_*：本机 backend/.env 可能配了真实密钥，测试不得读进来。
+# livekit 配置由用例用 override_settings 显式打开（见 apps/voice/tests/test_media_token.py）。
 LIVEKIT_API_KEY = ""
 LIVEKIT_API_SECRET = ""
 LIVEKIT_WS_URL = ""

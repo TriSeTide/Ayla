@@ -2,7 +2,7 @@
 LiveKit 集成（M4-5 §2.3）—— 签发媒体访问 token。
 
 - 依赖 `livekit-api`（Python 官方 SDK，签发 `AccessToken` + `VideoGrants`）；
-- **identity 必须是应用内裸 `str(user.pk)`**：`audio_consumer.py:93-95` 明确
+- **identity 必须是应用内裸 `str(user.pk)`**：历史中继消费者 `audio_consumer.py:93-95` 明确
   "identity = 应用 user_id（裸 id，与 LiveKit 时代契约一致）：前端成员表 / 音量调节 /
   说话指示都以 user_id 为 key，用 username 会导致全部失配"。被 9746c6b 删掉的旧实现
   签的是 `f"user_{user.id}"`，**绝不能照抄**——那会让 `members[identity]` 全部失配；
@@ -84,7 +84,7 @@ def issue_token(user, room_name: str, *, ttl_seconds: int | None = None) -> Issu
         raise ValueError("LIVEKIT_TOKEN_TTL_SECONDS 必须为正整数")
 
     # 延迟导入：未启用 LiveKit 的部署不因缺少 livekit-api 而在启动期失败
-    # （VOICE_MEDIA_TRANSPORT=ws_relay 是合法生产形态，见 media_config）。
+    # （2026-10-28 起媒体面只有 LiveKit，未配置即显式 503，见 media_config）。
     from livekit import api
 
     identity = str(user.pk)

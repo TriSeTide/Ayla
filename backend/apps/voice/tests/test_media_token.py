@@ -5,7 +5,7 @@
 2. **identity 必须是裸 `str(user.pk)`**（`audio_consumer.py:93-95` 契约；被删的旧
    `livekit.py` 签的是 `f"user_{user.id}"`，绝不能照抄）；
 3. 响应字段不叫 `token`（`test_channel_api.py:42-43` 锁死顶层无 token/ws_url）；
-4. `VOICE_MEDIA_TRANSPORT` 开关两种取值下的下发形态（同时下发 livekit + ws_relay）；
+4. media 只下发 `livekit`（中继与回退路径 2026-10-28 已删除，未配置即 503）；
 5. 两处 env 模板（`backend/.env.example` 与 `deploy/examples/backend.env.example`）
    的 LIVEKIT_* 都是"注释形态"，且键集合一致。
 """
@@ -19,7 +19,7 @@ import pytest
 from django.test import override_settings
 
 from apps.voice import livekit, media_config
-from apps.voice.models import VoiceChannel
+from apps.voice.models import VoiceChannel, VoiceChannelMember
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 AYLA_ROOT = BACKEND_ROOT.parent
@@ -157,154 +157,71 @@ def test_media_token_forbidden_when_cannot_join(auth_client):
 
 @pytest.mark.django_db
 def test_media_token_503_when_livekit_not_configured(auth_client):
-    """transport=livekit 但 key/secret/url 缺失 → 503 显式失败，不签发裸 token。"""
-    client, user = auth_client(username="media_503")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_media_503", owner=user)
-    with override_settings(
-        VOICE_MEDIA_TRANSPORT="livekit",
-        LIVEKIT_API_KEY="",
-        LIVEKIT_API_SECRET="",
-        LIVEKIT_WS_URL="",
-    ):
-        resp = client.post(f"/api/v1/voice/channels/{ch.id}/media-token/")
-    assert resp.status_code == 503, resp.content
-    assert resp.json()["detail"] == "语音媒体未配置"
-    assert "token" not in resp.json()
+    """LIVEKIT_* 缺失 → 503 显式失败，不签发裸 token（不回退中继）。"""
+    client, user = auth_client(username="media_token_unconfigured")
+    ch = VoiceChannel.objects.create(name="vc-u", room_name="room_vc_u", owner=user)
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/media-token/", {}, format="json")
+    assert resp.status_code == 503
 
 
 @pytest.mark.django_db
-def test_media_token_503_when_transport_is_ws_relay(auth_client):
-    """开关在回滚路径时不签发 token（客户端此时本来就不该调本端点）。"""
-    client, user = auth_client(username="media_503_relay")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_media_503r", owner=user)
-    with override_settings(VOICE_MEDIA_TRANSPORT="ws_relay", **CONFIGURED):
-        resp = client.post(f"/api/v1/voice/channels/{ch.id}/media-token/")
-    assert resp.status_code == 503, resp.content
-
-
-@pytest.mark.django_db
-def test_media_token_returns_media_shape(auth_client):
-    """200 时字段包在 media 里（顶层**不叫** token），identity 是裸 pk。"""
-    client, user = auth_client(username="media_200")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_media_200", owner=user)
-    with override_settings(VOICE_MEDIA_TRANSPORT="livekit", **CONFIGURED):
-        resp = client.post(f"/api/v1/voice/channels/{ch.id}/media-token/")
-
+def test_media_token_returns_livekit_only_media_shape(auth_client):
+    """配置齐全 → {"media": {"livekit": {...}}}；不含 transport / ws_relay。"""
+    client, user = auth_client(username="media_token_shape")
+    ch = VoiceChannel.objects.create(name="vc-s", room_name="room_vc_s", owner=user)
+    with override_settings(**CONFIGURED):
+        resp = client.post(f"/api/v1/voice/channels/{ch.id}/media-token/", {}, format="json")
     assert resp.status_code == 200, resp.content
-    data = resp.json()
-    # ★ 契约：顶层没有 token / ws_url（test_channel_api.py 的同一套断言）
-    assert "token" not in data
-    assert "ws_url" not in data
-
-    media = data["media"]
-    assert media["transport"] == "livekit"
-    lk = media["livekit"]
-    assert lk["url"] == "wss://frp-one.com:26211/livekit"
-    assert lk["room_name"] == "room_media_200"
-    assert lk["identity"] == str(user.pk)
-    assert lk["ttl"] == 600
-    assert isinstance(lk["expires_at"], str) and "T" in lk["expires_at"]
-    assert _decode_jwt_payload(lk["token"])["sub"] == str(user.pk)
-    # 双下发：即使走 livekit，ws_relay 也照给（客户端原地降级的依据）
-    assert media["ws_relay"]["url"].endswith(
-        f"/ws/voice/audio/?channel={ch.id}"
-    )
-
-
-# ---------------------------------------------------------------- join 的 media 旁路
+    body = resp.json()
+    # 顶层只有 media（既有契约：无顶层 token / ws_url）
+    assert set(body) == {"media"}
+    media = body["media"]
+    # 中继配置与 transport 字段已彻底移除
+    assert set(media) == {"livekit"}
+    livekit_payload = media["livekit"]
+    assert set(livekit_payload) == {
+        "url", "token", "ttl", "expires_at", "room_name", "identity",
+    }
+    assert livekit_payload["url"] == CONFIGURED["LIVEKIT_WS_URL"]
+    assert livekit_payload["identity"] == str(user.pk)
+    assert livekit_payload["room_name"] == ch.room_name
 
 
 @pytest.mark.django_db
-def test_join_media_defaults_to_ws_relay(auth_client):
-    """默认（回滚态）：transport=ws_relay，livekit=null，ws_relay 恒下发。"""
-    client, user = auth_client(username="join_media_default")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_join_default", owner=user)
-
-    resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
-    assert resp.status_code == 200, resp.content
-    data = resp.json()
-    # 既有契约一字不改
-    assert data["room_name"] == "room_join_default"
-    assert data["joined"] is True
-    assert "token" not in data
-    assert "ws_url" not in data
-
-    media = data["media"]
-    assert media["transport"] == "ws_relay"
-    assert media["livekit"] is None
-    assert media["ws_relay"]["url"].endswith(f"/ws/voice/audio/?channel={ch.id}")
-
-
-@pytest.mark.django_db
-def test_join_delivers_both_transports_when_livekit_enabled(auth_client):
-    """开关=livekit 时**两种配置同时下发**，客户端失败可原地降级。"""
-    client, user = auth_client(username="join_media_lk")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_join_lk", owner=user)
-
-    with override_settings(VOICE_MEDIA_TRANSPORT="livekit", **CONFIGURED):
-        resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
-
+def test_join_delivers_livekit_only(auth_client):
+    """join 的 media 同样只有 livekit（不再双下发）。"""
+    client, user = auth_client(username="join_media_shape")
+    ch = VoiceChannel.objects.create(name="vc-j", room_name="room_vc_j", owner=user)
+    with override_settings(**CONFIGURED):
+        resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/", {}, format="json")
     assert resp.status_code == 200, resp.content
     media = resp.json()["media"]
-    assert media["transport"] == "livekit"
-    assert media["livekit"]["url"] == "wss://frp-one.com:26211/livekit"
-    assert media["livekit"]["identity"] == str(user.pk)
-    assert media["ws_relay"]["url"].endswith(f"/ws/voice/audio/?channel={ch.id}")
+    assert set(media) == {"livekit"}
+    assert media["livekit"]["url"] == CONFIGURED["LIVEKIT_WS_URL"]
 
 
 @pytest.mark.django_db
-def test_join_falls_back_when_livekit_enabled_but_unconfigured(auth_client):
-    """开关指向 livekit 但配置不全 → 显式回落中继，不下发坏配置。"""
-    client, user = auth_client(username="join_media_fallback")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_join_fb", owner=user)
-
-    with override_settings(
-        VOICE_MEDIA_TRANSPORT="livekit",
-        LIVEKIT_API_KEY="",
-        LIVEKIT_API_SECRET="",
-        LIVEKIT_WS_URL="",
-    ):
-        resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/")
-
-    media = resp.json()["media"]
-    assert media["transport"] == "ws_relay"
-    assert media["livekit"] is None
+def test_join_ok_with_null_livekit_when_unconfigured(auth_client):
+    """媒体面不可用 ⇒ join 仍 200（成员表/广播照旧），但 media.livekit=null。"""
+    client, user = auth_client(username="join_unconfigured")
+    ch = VoiceChannel.objects.create(name="vc-n", room_name="room_vc_n", owner=user)
+    resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/", {}, format="json")
+    assert resp.status_code == 200, resp.content
+    assert resp.json()["media"] == {"livekit": None}
+    assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
 
 
 @pytest.mark.django_db
-def test_join_lands_member_even_when_media_unconfigured(auth_client):
-    """媒体不可用不得阻断 join（加入是成员事实，媒体面是旁路）。"""
-    client, user = auth_client(username="join_media_member")
-    ch = VoiceChannel.objects.create(name="房", room_name="room_join_mem", owner=user)
-    with override_settings(VOICE_MEDIA_TRANSPORT="livekit", LIVEKIT_API_KEY="",
-                           LIVEKIT_API_SECRET="", LIVEKIT_WS_URL=""):
-        client.post(f"/api/v1/voice/channels/{ch.id}/join/")
-    assert ch.members.filter(user=user).exists()
-
-
-# ---------------------------------------------------------------- 开关与地址
-
-
-def test_transport_switch_rejects_invalid_value():
-    """环境变量写错 → 安全侧回落 ws_relay（不静默镜像错误配置）。"""
-    with override_settings(VOICE_MEDIA_TRANSPORT="webrtc"):
-        assert media_config.configured_transport() == "ws_relay"
-    with override_settings(VOICE_MEDIA_TRANSPORT="LIVEKIT"):
-        assert media_config.configured_transport() == "livekit"
-    with override_settings(VOICE_MEDIA_TRANSPORT=None):
-        assert media_config.configured_transport() == "ws_relay"
-
-
-def test_relay_url_uses_configured_base():
-    """VOICE_RELAY_WS_BASE 非空时给出绝对地址；留空时是站内相对路径。"""
-    with override_settings(VOICE_RELAY_WS_BASE=""):
-        assert media_config.relay_ws_url(7) == "/ws/voice/audio/?channel=7"
-    with override_settings(VOICE_RELAY_WS_BASE="wss://s.ayla.trise.top:26211/"):
-        assert (
-            media_config.relay_ws_url(7)
-            == "wss://s.ayla.trise.top:26211/ws/voice/audio/?channel=7"
-        )
-
+def test_join_still_succeeds_without_media_payload_after_member_landed(auth_client):
+    """配置齐全时 join 返回三字段 + media，且成员确实落表。"""
+    client, user = auth_client(username="join_ok")
+    ch = VoiceChannel.objects.create(name="vc-ok", room_name="room_vc_ok", owner=user)
+    with override_settings(**CONFIGURED):
+        resp = client.post(f"/api/v1/voice/channels/{ch.id}/join/", {}, format="json")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"channel_id", "room_name", "joined", "media"}
+    assert VoiceChannelMember.objects.filter(channel=ch, user=user).exists()
 
 # ---------------------------------------------------------------- env 模板一致性
 
@@ -314,8 +231,9 @@ def test_backend_env_example_has_no_live_livekit_lines():
     live = _live_env_keys(BACKEND_ROOT / ".env.example")
     live_livekit = {k for k in live if k.startswith("LIVEKIT_")}
     assert live_livekit == set(), f"仍有活配置：{sorted(live_livekit)}"
-    # 回滚开关必须是显式值，且默认 ws_relay
-    assert "VOICE_MEDIA_TRANSPORT" in live
+    # 2026-10-28 起不再有传输开关/中继基址（整体删除，不留回退）
+    assert "VOICE_MEDIA_TRANSPORT" not in live
+    assert "VOICE_RELAY_WS_BASE" not in live
 
 
 def test_env_templates_declare_same_livekit_keys():
