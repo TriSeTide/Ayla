@@ -14,6 +14,8 @@
 /// 该文件在 tool/ 下，不属于 app 产物，仅调试用。
 library;
 
+// ignore_for_file: experimental_member_use
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -27,7 +29,15 @@ import 'package:ayla_flutter/core/api/voice_api.dart';
 import 'package:ayla_flutter/core/net/dio_client.dart';
 // ignore: depend_on_referenced_packages
 import 'package:logging/logging.dart' show hierarchicalLoggingEnabled;
-import 'package:livekit_client/livekit_client.dart' show LoggerLevel, logger, setLoggingLevel;
+import 'package:livekit_client/livekit_client.dart'
+    show
+        AudioManager,
+        AudioSessionOptions,
+        Hardware,
+        LoggerLevel,
+        MediaDevice,
+        logger,
+        setLoggingLevel;
 
 class _MemTokenStore implements AuthTokenStore {
   String? _access;
@@ -89,8 +99,34 @@ class _ProbeAppState extends State<_ProbeApp> {
     unawaited(_run());
   }
 
+  Future<TokenPair> _loginWithRetry() async {
+    Object? last;
+    for (int attempt = 1; attempt <= 4; attempt++) {
+      try {
+        return await AuthApi.login(_kUser, _kPass);
+      } catch (error) {
+        last = error;
+        _log('login 第 $attempt 次失败: $error');
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+    throw last ?? StateError('login failed');
+  }
+
   Future<void> _run() async {
     try {
+      if (const bool.fromEnvironment('VOICE_MODE_ONLY')) {
+        // 只验证「音频会话是否真的把 Android 切成媒体播放」：不连 LiveKit。
+        hierarchicalLoggingEnabled = true;
+        final AudioManager mgr = AudioManager.instance;
+        await mgr.setAudioSessionOptions(const AudioSessionOptions.mediaPlayback());
+        if (mgr.canSwitchSpeakerphone) {
+          await mgr.setSpeakerOutputPreferred(true, force: true);
+        }
+        _log('MODE_ONLY: mediaPlayback 已应用 canSwitch=${mgr.canSwitchSpeakerphone} '
+            'speakerPreferred=${mgr.isSpeakerOutputPreferred}');
+        return;
+      }
       DioClient.instance.init(
         tokenStore: _store,
         onSessionExpired: () => _log('session expired'),
@@ -104,9 +140,11 @@ class _ProbeAppState extends State<_ProbeApp> {
         _log('lksdk[${record.level.name}] ${record.message}');
       });
       _log('login user=$_kUser ...');
-      final TokenPair pair = await AuthApi.login(_kUser, _kPass);
+      // 本机网络经 TUN，偶发 connectionTimeout（实测 3 次里 1~2 次），重试 3 次。
+      TokenPair pair = await _loginWithRetry();
       _store.setTokens(pair.access, pair.refresh);
       _log('login ok accessLen=${pair.access.length}');
+
 
       final AylaVoiceJoinResult join = await AylaVoiceApi.joinVoiceChannel(_kChannel);
       final AylaVoiceMediaConfig? media = join.media;
@@ -150,6 +188,19 @@ class _ProbeAppState extends State<_ProbeApp> {
       }
       await vm.startAudio();
       _log('startAudio done');
+      // 实验：列出输出设备并尝试切换（验证 flutter_webrtc 在 Windows 上是否支持）
+      try {
+        final List<MediaDevice> outs = await Hardware.instance.audioOutputs();
+        for (final MediaDevice d in outs) {
+          _log('输出设备: id=${d.deviceId} label=${d.label}');
+        }
+        if (outs.isNotEmpty) {
+          await Hardware.instance.selectAudioOutput(outs.first);
+          _log('已尝试切换到 ${outs.first.label}');
+        }
+      } catch (e) {
+        _log('输出设备枚举/切换失败: $e');
+      }
       await vm.setMicrophoneEnabled(true);
       _micOn = true;
       _log('mic ON');
