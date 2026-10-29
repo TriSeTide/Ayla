@@ -71,6 +71,15 @@ class ObjectStorage:
     def delete(self, key: str) -> None:
         raise NotImplementedError
 
+    def list_keys(self, prefix: str = "") -> list[str]:
+        """列举桶内全部对象 key（可按前缀过滤）。
+
+        供存储一致性审计（`manage.py media_audit`）对账使用。
+        **不参与任何业务读写路径**：媒体读写永远按已知 key 精确操作，绝不依赖
+        列举（大桶上列举是 O(n)，且会把运维路径变成性能瓶颈）。
+        """
+        raise NotImplementedError
+
 
 def _rewrite_to_public_endpoint(url: str) -> str:
     """把预签名 URL 的 host 改写为浏览器可达的 `S3_PUBLIC_ENDPOINT`。
@@ -250,6 +259,18 @@ class S3Storage(ObjectStorage):
         except Exception as exc:
             logger.warning("delete %s failed: %s", key, exc)
 
+    def list_keys(self, prefix: str = "") -> list[str]:
+        """列举桶内全部对象 key（分页，只取 key 不取元数据）。"""
+        keys: list[str] = []
+        paginator = self._client.get_paginator("list_objects_v2")
+        kwargs = {"Bucket": self._bucket}
+        if prefix:
+            kwargs["Prefix"] = prefix
+        for page in paginator.paginate(**kwargs):
+            for obj in page.get("Contents") or []:
+                keys.append(obj["Key"])
+        return keys
+
 
 class FakeStorage(ObjectStorage):
     """内存字典实现，供测试注入，不依赖真实 MinIO。"""
@@ -340,6 +361,9 @@ class FakeStorage(ObjectStorage):
     def delete(self, key):
         self._data.pop(key, None)
         self._meta.pop(key, None)
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        return [k for k in self._data if k.startswith(prefix)]
 
 
 _instance = None
