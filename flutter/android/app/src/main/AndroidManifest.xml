@@ -11,6 +11,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 语音/直播会话「脱离应用」后的**系统层悬浮球**（悬浮球=task-5）。
+         SYSTEM_ALERT_WINDOW 是特殊权限：没有运行时弹窗，只能跳
+         Settings.ACTION_MANAGE_OVERLAY_PERMISSION 让用户自己打开。
+         未授权时原生侧返回 "permissionRequired"，Dart 侧弹明确引导（不静默失败）。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- 悬浮球需要前台服务把进程钉住（叠加层随进程消失）。
+         用 mediaPlayback 而不是 dataSync：现有下载服务的 dataSync 在 Android 15 有
+         6 小时/24 小时上限，且语义不同（语音/直播会话本身就是媒体播放）。
+         Android 14+ 必须同时声明这条配套权限，否则 startForeground 抛
+         MissingForegroundServiceTypeException。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <!-- 「记住密码 / 自动登录」的凭据存在 Android KeyStore（flutter_secure_storage）。
          插件 README 明确要求关闭自动备份：Google Drive 备份恢复后只带回加密密文、
          不回带 KeyStore 里的密钥 ⇒ 读取时抛
@@ -30,6 +41,8 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:windowSoftInputMode="adjustResize">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
@@ -61,6 +74,12 @@
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="dataSync"
+            android:exported="false" />
+        <!-- 语音/直播会话「脱离应用」悬浮球的保活服务（悬浮球=task-5）。
+             mediaPlayback 是会话本身的语义；exported=false：只有本应用能启停。 -->
+        <service
+            android:name=".AylaFloatingBallService"
+            android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

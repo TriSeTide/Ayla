@@ -1,7 +1,18 @@
 package com.ayla.ayla_flutter
 
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+// PictureInPictureUiState 只在 API 33+ 存在：不能用普通 import（minSdk 更低时
+// 类校验/混淆阶段会找不到符号），故在 onPictureInPictureUiStateChanged 里用全限定名。
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
@@ -10,10 +21,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
+import android.util.Rational
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -60,7 +74,54 @@ class MainActivity : FlutterActivity() {
 
     private val audioRouteChannelName = "ayla/audio_route"
 
+    /** 直播「脱离应用」（Android PiP）通道名 —— 与 Dart 侧 `kAylaPipChannel` 逐字一致。 */
+    private val livePipChannelName = "ayla/live_pip"
+
+    /** PiP 通道句柄（回调 `onPipChanged` / `onBallTap` / `onBallClosed` 用）。 */
+    private var livePipChannel: MethodChannel? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // ======================= Android PiP（直播脱离应用）状态 =======================
+
+    /**
+     * Dart 侧当前是否有**正在进行的直播会话**（由 [setSessionActive] 维护）。
+     *
+     * 只有它为 true 时才武装自动进 PiP，否则用户在任意页面按 Home 都会弹出 PiP —— 那是错的。
+     * ⚠️ 进入 PiP 的**唯一**判据是本标志 + 当前在 RESUMED，不参与任何内容/认知判断。
+     */
+    private var liveSessionActive = false
+
+    /** 系统是否处于 PiP 中（[onPictureInPictureModeChanged] 维护）。 */
+    private var inPipMode = false
+
+    /**
+     * API 35+ 的「正在转场到 PiP」预信号（[onPictureInPictureUiStateChanged] 维护）。
+     *
+     * 用于让 Flutter 侧**提前**把 UI 切成纯视频树（否则转场动画里会看到整屏 App UI 缩下去）。
+     */
+    private var transitioningToPip = false
+
+    /** 上一次回传给 Dart 的「需要纯视频树」状态（去抖，避免每帧重复 invoke）。 */
+    private var pipUiActiveLast = false
+
+    /** Activity 是否处于 RESUMED（自己维护，避免依赖 embedding 的 LifecycleOwner 形态）。 */
+    private var activityResumed = false
+
+    /** 上一次设置的 PiP 比例；null = 尚未设置过（重复设置同一比例是无意义的系统调用）。 */
+    private var pipAspect: Rational? = null
+
+    /** 最近一次 Dart 传来的 sourceRectHint（视频在屏幕上的位置）。 */
+    private var pipSourceRect: Rect? = null
+
+    /** Android 12+ PiP 菜单里的「关闭直播」动作广播接收器（动态注册，需在 onDestroy 注销）。 */
+    private var pipActionReceiver: BroadcastReceiver? = null
+
+    /** 「关闭直播」动作的请求码（PendingIntent 身份）。 */
+    private val pipCloseActionRequestCode = 4310
+
+    /** 「关闭直播」广播 action（本包私有；接收器 NOT_EXPORTED 注册）。 */
+    private val pipCloseAction = "com.ayla.ayla_flutter.action.PIP_CLOSE"
 
     /** 媒体焦点监听器（必须持有强引用，否则会被 GC 后失去回调）。 */
     private var mediaFocusListener: AudioManager.OnAudioFocusChangeListener? = null
@@ -115,6 +176,47 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // ===== 直播「脱离应用」：Android Picture-in-Picture =====
+        // 契约见 Dart 侧 lib/core/platform/detached_live.dart（**唯一** Dart↔原生契约）。
+        // 本通道只做「呈现形态」的工程约束（窗口/系统状态），不参与任何内容或认知判断。
+        livePipChannel =
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, livePipChannelName)
+                .also { channel ->
+                    channel.setMethodCallHandler { call, result ->
+                        try {
+                            when (call.method) {
+                                "isSupported" -> result.success(isPipSupported())
+                                "isInPip" -> result.success(inPipMode)
+                                "enterPip" -> result.success(enterPip(call))
+                                "setSessionActive" -> {
+                                    setSessionActive(call.argument<Boolean>("active") == true)
+                                    result.success(null)
+                                }
+                                "openOverlaySettings" -> result.success(openOverlaySettings())
+                                // ===== 系统层悬浮球（语音/直播会话脱离应用，悬浮球=task-5）=====
+                                // 返回字符串语义与 Dart 侧 AylaDetachedBallResult 逐字对齐：
+                                // "shown" / "permissionRequired" / "unsupported" / "failed"。
+                                // 未授权时**必须**给 permissionRequired（不静默失败）。
+                                "showBall" -> result.success(showBall(call))
+                                "hideBall" -> {
+                                    floatingBall.hide()
+                                    result.success(null)
+                                }
+                                else -> result.notImplemented()
+                            }
+                        } catch (error: Exception) {
+                            Log.w(TAG, "live_pip ${call.method} failed: ${error.message}", error)
+                            // 契约要求「不抛异常、返回明确的降级结果」：失败一律给 false/null，
+                            // 让上层回落到 App 内小窗。
+                            when (call.method) {
+                                "isSupported", "isInPip", "enterPip", "openOverlaySettings" ->
+                                    result.success(false)
+                                "showBall" -> result.success("failed")
+                                else -> result.success(null)
+                            }
+                        }
+                    }
+                }
     }
 
     /**
@@ -343,8 +445,414 @@ class MainActivity : FlutterActivity() {
         else -> "MODE_$mode"
     }
 
+
+    // ======================= Android PiP 实现 =======================
+
+    /**
+     * 本设备/本 Activity 是否**真的**能进 PiP。
+     *
+     * 判据只有两条工程事实：系统特性 [PackageManager.FEATURE_PICTURE_IN_PICTURE] 存在，
+     * 且 [Build.VERSION] ≥ O（PiP 从 API 26 起才有）。低内存设备可能关闭该特性 ⇒ 必须运行时探测，
+     * 不能只看 Manifest 声明。
+     */
+    private fun isPipSupported(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+    }
+
+    /**
+     * 用户手势触发进入 PiP（通道 `enterPip`）。
+     *
+     * ⚠️ 官方约束：`enterPictureInPictureMode()` 要求 Activity 处于 **RESUMED**，
+     * 否则抛 `IllegalStateException`。所以本方法**只能由 UI 手势**调用（小窗上的脱离键）；
+     * 「按 Home 自动进 PiP」走 [onUserLeaveHint] / setAutoEnterEnabled，不经过这里。
+     *
+     * 返回值语义（Dart 侧据此决定是否回落到 App 内小窗）：
+     * true = 已进入或本来就在 PiP；false = 不支持 / 不在前台 / 系统拒绝。
+     */
+    private fun enterPip(call: MethodCall): Boolean {
+        if (!isPipSupported()) return false
+        if (inPipMode) return true
+        if (isFinishing || isDestroyed) return false
+        // 必须在 RESUMED：非前台调用系统必抛 IllegalStateException（契约文件头已登记该约束）。
+        if (!activityResumed) {
+            Log.w(TAG, "enterPip rejected: activity not resumed")
+            return false
+        }
+        readPipRect(call)
+        rememberAspect(
+            call.argument<Int>("aspectX") ?: 16,
+            call.argument<Int>("aspectY") ?: 9,
+        )
+        val params = buildPipParams() ?: return false
+        return try {
+            enterPictureInPictureMode(params)
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "enterPictureInPictureMode failed: ${error.message}")
+            false
+        } catch (error: RuntimeException) {
+            // 部分 OEM 在比例不合法时抛 RuntimeException（契约已要求 clamp 1:2.39–2.39:1）。
+            Log.w(TAG, "enterPictureInPictureMode runtime failed: ${error.message}")
+            false
+        }
+    }
+
+    /**
+     * 直播会话活跃态（通道 `setSessionActive`）。
+     *
+     * 它只回答一个问题：「现在按 Home 该不该自动进 PiP」。为 true 时在 RESUMED 期间
+     * 预先武装 setAutoEnterEnabled（API 31+），低版本由 [onUserLeaveHint] 兜底。
+     * 关掉时必须**立刻**撤销武装，否则用户在别的页面按 Home 会误进 PiP。
+     */
+    private fun setSessionActive(active: Boolean) {
+        val changed = liveSessionActive != active
+        liveSessionActive = active
+        if (!active) {
+            // 撤销武装 + 清 sourceRectHint（下一次直播重新给）。
+            pipSourceRect = null
+        }
+        // ⚠️ **撤销必须尽力而为地立即生效**，不能只看 resumed：
+        // 会话可能在 Activity 非前台时结束（PiP 里点关闭、页面被销毁）——
+        // 若这时跳过 setPictureInPictureParams，系统里仍留着 autoEnterEnabled=true，
+        // 用户下次按 Home 会**误进** PiP。所以这里无条件尝试一次（失败只记日志，
+        // 下一条 onResume 的 armAutoEnter 会按当时的 liveSessionActive 再校正）。
+        if (!active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                setPictureInPictureParams(
+                    PictureInPictureParams.Builder().setAutoEnterEnabled(false).build(),
+                )
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "disarmAutoEnter failed: ${error.message}")
+            }
+        }
+        if (changed) armAutoEnter()
+    }
+
+    /**
+     * 按「是否在直播中 + 是否已在 PiP 里」武装/撤销自动进入。
+     *
+     * API 31+ 只能通过 setPictureInPictureParams 的 setAutoEnterEnabled 表达「按 Home 自动进」；
+     * 设置动作本身要求 Activity 在前台，故 [onResume] 与 [setSessionActive] 都要调一次。
+     */
+    private fun armAutoEnter() {
+        if (!isPipSupported()) return
+        if (inPipMode) return
+        // 系统尚未把窗口交给前台时设置参数会抛 IllegalStateException：非 RESUMED 直接跳过，
+        // onResume 会补上（这也是「必须在前台武装」的落地方式）。
+        if (!activityResumed) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return // <31 由 onUserLeaveHint 兜底
+        val params = buildPipParams() ?: return
+        try {
+            setPictureInPictureParams(params)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "armAutoEnter failed: ${error.message}")
+        }
+    }
+
+    /** 解析 Dart 传来的 sourceRectHint（视频在屏幕上的位置）；缺字段则清空。 */
+    private fun readPipRect(call: MethodCall) {
+        val x = call.argument<Int>("x")
+        val y = call.argument<Int>("y")
+        val w = call.argument<Int>("w")
+        val h = call.argument<Int>("h")
+        pipSourceRect = if (x != null && y != null && w != null && h != null && w > 0 && h > 0) {
+            Rect(x, y, x + w, y + h)
+        } else {
+            null
+        }
+    }
+
+    /**
+     * 组装 PiP 参数：比例（已 clamp）+ sourceRectHint + 自动进入标志 + 「关闭直播」动作。
+     *
+     * 比例必须落在 1:2.39 ~ 2.39:1：部分 OEM 对越界比例抛
+     * `RationalNotMatchingAndroidRequirementsException`（契约文件头已登记）。
+     */
+    private fun buildPipParams(): PictureInPictureParams? {
+        if (!isPipSupported()) return null
+        return try {
+            val builder = PictureInPictureParams.Builder()
+            pipAspect?.let { builder.setAspectRatio(it) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                pipSourceRect?.let { rect ->
+                    if (!rect.isEmpty) builder.setSourceRectHint(rect)
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                builder.setAutoEnterEnabled(liveSessionActive)
+                // 转场更顺（12+）：从 sourceRectHint 长出小窗，而不是硬切。
+                builder.setSeamlessResizeEnabled(true)
+            }
+            pipCloseRemoteAction()?.let { builder.setActions(listOf(it)) }
+            builder.build()
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "buildPipParams failed: ${error.message}")
+            null
+        }
+    }
+
+    /** 把宽高比 clamp 进系统可接受区间并缓存（幂等：同一个 Rational 不重复设置）。 */
+    private fun rememberAspect(aspectX: Int, aspectY: Int) {
+        if (aspectX <= 0 || aspectY <= 0) return
+        val min = 1.0 / 2.39
+        val max = 2.39
+        val raw = aspectX.toDouble() / aspectY.toDouble()
+        val clamped = raw.coerceIn(min, max)
+        val next = Rational((clamped * 1000).toInt(), 1000)
+        if (pipAspect != next) pipAspect = next
+    }
+
+    /**
+     * Android 12+ PiP 菜单里的「关闭直播」动作。
+     *
+     * ⚠️ 本工程**没有可用的 drawable 图标资源**，而 RemoteAction 必须带 Icon ⇒ 用代码画的
+     * 自绘 Icon（不往仓库里塞二进制资源；契约/任务书的明确要求）。
+     * 低版本（<31）没有 PiP 菜单，直接返回 null。
+     */
+    private fun pipCloseRemoteAction(): RemoteAction? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        val receiver = pipActionReceiver ?: return null
+        val icon = closeActionIcon() ?: return null
+        val intent = Intent(pipCloseAction).setPackage(packageName)
+        val pending = PendingIntent.getBroadcast(
+            this,
+            pipCloseActionRequestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return try {
+            RemoteAction(icon, "关闭直播", "关闭直播", pending)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "RemoteAction failed: ${error.message}")
+            null
+        }
+    }
+
+    /** 用 ShapeDrawable 画一个「×」图标（无需 drawable 资源）。 */
+    private fun closeActionIcon(): Icon? {
+        return try {
+            val size = 48
+            val bitmap = android.graphics.Bitmap.createBitmap(
+                size,
+                size,
+                android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            val canvas = android.graphics.Canvas(bitmap)
+            val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                strokeWidth = 5f
+                strokeCap = android.graphics.Paint.Cap.ROUND
+            }
+            val pad = 12f
+            canvas.drawLine(pad, pad, size - pad, size - pad, paint)
+            canvas.drawLine(size - pad, pad, pad, size - pad, paint)
+            Icon.createWithBitmap(bitmap)
+        } catch (error: Exception) {
+            Log.w(TAG, "closeActionIcon failed: ${error.message}")
+            null
+        }
+    }
+
+    /** 动态注册「关闭直播」动作的接收器（NOT_EXPORTED：不暴露给其它应用）。 */
+    private fun registerPipActionReceiver() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        if (pipActionReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != pipCloseAction) return
+                // 用户点「关闭直播」= 关闭整个 PiP 呈现：先通知 Dart（会话据此回落到 App 内小窗/
+                // 或结束观看），再退出 PiP 回前台。
+                livePipChannel?.invokeMethod("onPipChanged", false)
+                liveSessionActive = false
+                if (inPipMode) {
+                    try {
+                        moveTaskToBack(false)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "moveTaskToBack failed: ${error.message}")
+                    }
+                }
+            }
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(receiver, IntentFilter(pipCloseAction), Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(receiver, IntentFilter(pipCloseAction))
+            }
+            pipActionReceiver = receiver
+        } catch (error: Exception) {
+            Log.w(TAG, "registerPipActionReceiver failed: ${error.message}")
+        }
+    }
+
+    private fun unregisterPipActionReceiver() {
+        val receiver = pipActionReceiver ?: return
+        pipActionReceiver = null
+        try {
+            unregisterReceiver(receiver)
+        } catch (error: Exception) {
+            Log.w(TAG, "unregisterPipActionReceiver failed: ${error.message}")
+        }
+    }
+
+    /**
+     * 跳「显示在其他应用上层」授权页（通道 `openOverlaySettings`）。
+     *
+     * 悬浮球（task-5）是唯一消费方，但通道归本任务建 ⇒ 这里给**真实**实现（不做假）。
+     * 无运行时弹窗，只能跳设置；返回 true = 已跳转（**不**代表用户已授权）。
+     */
+    private fun openOverlaySettings(): Boolean = floatingBall.openOverlaySettings()
+
+    // ======================= 系统层悬浮球（语音/直播会话脱离应用）=======================
+
+    /**
+     * 悬浮球控制器（懒创建；**单实例**，重复 `showBall` 复用同一个球）。
+     *
+     * 回调语义：
+     * - `onBallTap` → 原生回调 Dart `onBallTap{kind, sourceRoute}`（Dart 侧 `context.go` 回房）；
+     * - `onBallClosed` → 原生回调 Dart `onBallClosed`（Dart 侧复位「已脱离」标志）。
+     * 两者都只是**导航投影**，不参与任何内容或认知判断。
+     */
+    private val floatingBall: AylaFloatingBallController by lazy {
+        AylaFloatingBallController(
+            applicationContext,
+            onBallTap = { kind, sourceRoute ->
+                mainHandler.post {
+                    livePipChannel?.invokeMethod(
+                        "onBallTap",
+                        mapOf("kind" to kind, "sourceRoute" to sourceRoute),
+                    )
+                }
+            },
+            onBallClosed = {
+                mainHandler.post { livePipChannel?.invokeMethod("onBallClosed", null) }
+            },
+        )
+    }
+
+    /**
+     * 通道 `showBall`：让悬浮球脱离应用（压在其他 App 之上）。
+     *
+     * 参数 `{kind, sessionId, title, sourceRoute}`；返回值见 [AylaFloatingBallController.show]。
+     * 幂等：已有球时只更新配色/内容，不重复 addView。
+     */
+    private fun showBall(call: MethodCall): String =
+        floatingBall.show(
+            kind = call.argument<String>("kind") ?: AylaFloatingBallController.KIND_VOICE,
+            sessionId = call.argument<String>("sessionId") ?: "",
+            title = call.argument<String>("title") ?: "",
+            sourceRoute = call.argument<String>("sourceRoute") ?: "",
+        )
+
+    /**
+     * PiP 形态变化（系统回调）。
+     *
+     * 回传两件事给 Dart：
+     * - `onPipChanged(bool)`：是否在 PiP 里（Dart 侧据此把小窗 UI 切成纯视频树、并保证
+     *   PiP 期间仍算「观看人」）；
+     * - 纯视频树判据 [pipUiActive]：API 35+ 会在真正进入前先给 isTransitioningToPip 预信号，
+     *   提前隐藏 App 的返回键/弹幕输入框，转场动画才好看。
+     */
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPipMode = isInPictureInPictureMode
+        if (!isInPictureInPictureMode) transitioningToPip = false
+        notifyPipUiState(force = true)
+        Log.i(TAG, "pip mode changed: inPip=$isInPictureInPictureMode")
+    }
+
+    /**
+     * API 33+：PiP UI 状态回调（`isTransitioningToPip` 是 API 35 才有的属性）。
+     *
+     * 提前把「纯视频树」信号发给 Dart：官方语义是转场动画开始前就能隐藏 App 的返回键/
+     * 弹幕输入框，缩放动画里便不会出现整屏 App UI。
+     * 参数类型用全限定名 —— `PictureInPictureUiState` 类本身只存在于 API 33+。
+     */
+    override fun onPictureInPictureUiStateChanged(
+        pipState: android.app.PictureInPictureUiState,
+    ) {
+        super.onPictureInPictureUiStateChanged(pipState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            transitioningToPip = pipState.isTransitioningToPip
+            notifyPipUiState()
+        }
+    }
+
+    /** 「是否应当渲染纯视频树」= 已在 PiP 内，或（API 35+）正在转场进 PiP。 */
+    private fun pipUiActive(): Boolean = inPipMode || transitioningToPip
+
+    /**
+     * 把 PiP 形态回传给 Dart（去抖：状态没变就不重复 invoke；[force] 绕过去抖用于模式切换）。
+     *
+     * ⚠️ 回调方法名必须与 Dart `AylaDetachedLiveEvents._handle` 的 `onPipChanged` 逐字一致。
+     */
+    private fun notifyPipUiState(force: Boolean = false) {
+        val active = pipUiActive()
+        if (!force && active == pipUiActiveLast) return
+        pipUiActiveLast = active
+        livePipChannel?.invokeMethod("onPipChanged", active)
+    }
+
+    /**
+     * API 26–30 的「按 Home 自动进 PiP」兜底（31+ 由 setAutoEnterEnabled 承担）。
+     *
+     * 只有 [liveSessionActive] 为 true（Dart 明确说「正在直播」）时才动作 —— 否则用户在任意
+     * 页面按 Home 都会弹 PiP。
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+        if (!liveSessionActive || inPipMode || !isPipSupported()) return
+        val params = buildPipParams() ?: return
+        try {
+            enterPictureInPictureMode(params)
+        } catch (error: IllegalStateException) {
+            Log.w(TAG, "onUserLeaveHint enterPip failed: ${error.message}")
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "onUserLeaveHint enterPip runtime failed: ${error.message}")
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activityResumed = true
+        // 兜底复位转场标志：API 35 的 isTransitioningToPip 可能因为用户取消 / 系统中断
+        // 而停在 true（我们随后没收到 onPictureInPictureModeChanged(true)）。
+        // 不复位 ⇒ Dart 侧会永久停在「纯视频树」档，App 回到前台也是残缺 UI。
+        if (!inPipMode && transitioningToPip) {
+            transitioningToPip = false
+            notifyPipUiState(force = true)
+        }
+        registerPipActionReceiver()
+        // 回前台后重新武装（setPictureInPictureParams 要求在前台；进后台时系统会丢弃）。
+        armAutoEnter()
+    }
+
+    override fun onPause() {
+        activityResumed = false
+        // ⚠️ 这里**故意不**撤销 setAutoEnterEnabled：
+        //   · 自动进入只在这一屏「被 Home 键离开」时触发，从别的 App 回来不会把我们拽进 PiP；
+        //   · 而 onPause 的时机与 PiP 转场重叠（API 31–34 没有 isTransitioningToPip 预信号），
+        //     此时改参数会把正在生成的 PiP 窗口打断。
+        // ⇒ 自动进入的唯一开关就是 [liveSessionActive]（由 Dart 侧的 setSessionActive 维护）。
+        super.onPause()
+    }
+
     override fun onDestroy() {
         abandonMediaFocus()
+        unregisterPipActionReceiver()
+        // 会话随 Activity 一起没了：撤销武装并如实把状态回给 Dart（避免「退出后仍算在 PiP」）。
+        liveSessionActive = false
+        inPipMode = false
+        transitioningToPip = false
+        // 悬浮球**不在这里 hide**：它存在的意义就是「App 界面没了、球还在」。
+        // 真正的清理点是 Dart 侧会话结束（`aylaHideDetachedBall`）与长按关球（onBallClosed）。
+        // 只把通道句柄置空，避免已经销毁的 messenger 被回调（controller 内部有 null 检查）。
+        livePipChannel = null
         super.onDestroy()
     }
 

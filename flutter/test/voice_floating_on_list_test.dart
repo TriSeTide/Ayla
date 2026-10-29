@@ -139,12 +139,33 @@ void main() {
       );
 
   /// 球图标在树上的数量（语音球 = iconMic，直播球 = iconVideo，把手不是图标）。
+  ///
+  /// 2026-10-31 收窄：悬浮球组新增了「脱离应用」键
+  /// （`AylaSessionActivityIndicator.detachKey`，task-5），它自身也是 `AylaIcon`
+  /// （`iconPip`）—— 若按「组件内全部 AylaIcon」计数，一个语音球会被数成 2。
+  /// 本 helper 的语义一直是「**每个球**一个图标」（用例 reason 原文：
+  /// 「一个语音球图标」/「两个球各有一个图标」），故排除脱离键子树：
+  /// 断言口径不变，仍能锁住「少渲染 / 多渲染球」。
+  /// 脱离键本身由 `test/session_activity_detach_test.dart` 单独覆盖。
   int iconCount(WidgetTester tester) => find
       .descendant(
         of: find.byType(AylaSessionActivityIndicator),
         matching: find.byType(AylaIcon),
       )
       .evaluate()
+      .where((Element element) {
+        // 排除落在脱离键子树里的图标。
+        bool insideDetach = false;
+        element.visitAncestorElements((Element ancestor) {
+          if (ancestor.widget.key ==
+              AylaSessionActivityIndicator.detachKey) {
+            insideDetach = true;
+            return false;
+          }
+          return true;
+        });
+        return !insideDetach;
+      })
       .length;
 
   group('语音列表页 /voice 的悬浮球（用户实报）', () {

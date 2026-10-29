@@ -36,6 +36,8 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
@@ -44,6 +46,7 @@ import '../core/api/live_api.dart';
 import '../core/models/elysia_profile.dart' show AylaElysiaProfile;
 import '../core/net/dio_client.dart' show ApiException;
 import '../core/net/live_play_url.dart' show aylaNormalizeLivePlayUrl;
+import '../core/platform/detached_live.dart';
 import '../core/ws/chat_ws.dart';
 import '../core/ws/live_ws.dart';
 import '../player/hls_player.dart';
@@ -85,6 +88,41 @@ typedef AylaLiveViewersFetcher = Future<AylaLiveViewersResult> Function(
   String channelId,
 );
 
+/// 「进入脱离态」的平台动作签名（默认实现 = [aylaEnterDetachedLive]）。
+typedef AylaDetachedEnterFn = Future<bool> Function({
+  required String channelId,
+  required String title,
+  String? playUrl,
+  Rect? videoRect,
+});
+
+/// 「关闭脱离呈现」的平台动作签名（默认实现 = [aylaCloseDetachedLive]）。
+typedef AylaDetachedCloseFn = Future<void> Function();
+
+/// 「同步是否在直播中」的平台动作签名（默认实现 = [aylaSetLivePipSessionActive]）。
+typedef AylaDetachedSessionActiveFn = Future<void> Function(bool active);
+
+/// 「当前是否在系统画中画里」的探测签名（默认实现 = [aylaIsInLivePip]）。
+typedef AylaDetachedInPipFn = Future<bool> Function();
+
+/// 直播「脱离应用」的三个平台动作（**唯一**默认实现 = `core/platform/detached_live.dart`）。
+///
+/// 抽出这一层的唯一理由是**可测**：会话语义（何时进/出脱离态、何时必须撤销原生武装）
+/// 必须能用假实现断言，而不是真的去调 MethodChannel。生产代码不要注入别的实现。
+class AylaDetachedLivePresenter {
+  const AylaDetachedLivePresenter({
+    this.enter = aylaEnterDetachedLive,
+    this.close = aylaCloseDetachedLive,
+    this.setSessionActive = aylaSetLivePipSessionActive,
+    this.isInPip = aylaIsInLivePip,
+  });
+
+  final AylaDetachedEnterFn enter;
+  final AylaDetachedCloseFn close;
+  final AylaDetachedSessionActiveFn setSessionActive;
+  final AylaDetachedInPipFn isInPip;
+}
+
 /// 直播会话 owner（页面级；见文件头「与 web 的结构差异」）。
 class AylaLiveRoomSession extends ChangeNotifier {
   AylaLiveRoomSession({
@@ -107,7 +145,10 @@ class AylaLiveRoomSession extends ChangeNotifier {
     /// 媒体活动位写入（web `useAuthStore.getState().setMediaActivity`）。默认 null = 不写。
     void Function(AylaMediaActivityKind kind, bool active, String? roomId)?
         onMediaActivity,
-  })  : _live = liveState,
+    /// 「脱离应用」的平台动作（默认走真实通道；测试注入假实现）。
+    AylaDetachedLivePresenter detached = const AylaDetachedLivePresenter(),
+  })  : _detachedPresenter = detached,
+        _live = liveState,
         _ws = liveWs,
         _chat = chat,
         _currentUserId = currentUserId,
@@ -137,6 +178,9 @@ class AylaLiveRoomSession extends ChangeNotifier {
   /// 媒体活动位写入（见构造参数）；null = 不写。
   final void Function(AylaMediaActivityKind kind, bool active, String? roomId)?
       _onMediaActivity;
+
+  /// 「脱离应用」的平台动作（见构造参数）。
+  final AylaDetachedLivePresenter _detachedPresenter;
 
   /// 活动态索引归属：本会话是否为**频道 owner 的会话**（web `tracksOwnerActivity`）。
   ///
@@ -406,6 +450,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
       final AylaLiveStatusResult status = await _fetchStatus(channelId);
       if (!_alive) return;
       store.setSrsStatus(status.status);
+      // 「开播即武装」：把在播事实同步给原生，API 31+ 才能按 Home 自动进画中画。
+      await _syncPipSessionActive();
       // 活动态索引状态改写（web `:270–277`）：
       // `status.status === "live" || current.channel?.status === "live" ? "connected" : "ended"`
       // —— 两个判据是**或**关系（SRS 实时判定与频道描述里的乐观状态，任一为 live 即算接通）。
@@ -479,6 +525,8 @@ class AylaLiveRoomSession extends ChangeNotifier {
       final AylaLiveStatusResult status = await _fetchStatus(channelId);
       if (!_alive) return;
       _live.setSrsStatus(status.status);
+      // 实时判定变了 ⇒ 同步原生「按 Home 是否该自动进画中画」（幂等；非 Android 平台 no-op）。
+      await _syncPipSessionActive();
       // 小窗模式下直播结束 → **自动关闭小窗**（完整销毁，避免小窗挂着已结束的流）。
       // 逐条对照 web `liveSessionRuntime.ts:533–537`：`if (miniPlayer && status !== "live") leave()`。
       // 判定用「本会话是否即小窗宿主」（Flutter 侧 owner 的唯一性由 [aylaMiniPlayerOwner] 保证）。
@@ -614,6 +662,207 @@ class AylaLiveRoomSession extends ChangeNotifier {
     }
   }
 
+  // ==================== 脱离应用（Android PiP / Windows 独立小窗）====================
+
+  /// 是否已进入「脱离应用」的呈现态（原生已接管画面）。
+  bool _detached = false;
+  bool get detached => _detached;
+
+  /// 是否值得让**原生侧**武装「按 Home 自动进画中画」。
+  ///
+  /// 判据与 web/Flutter 的「在播」语义同源：会话存活 + SRS 判定为 live。
+  /// 不用 `_playerAttached` 作判据 —— 播放器可能因黑屏自愈重建，而观看登记不该跟着抖。
+  bool get _wantsAutoPip => _alive && _live.srsStatus == AylaLiveSrsStatus.live;
+
+  /// 把「是否在直播中」同步给原生（幂等；Dart 侧非 Android 平台自动 no-op）。
+  ///
+  /// ⚠️ **漏传 false 是这个特性唯一的失败模式**：原生若一直武装着
+  /// `setAutoEnterEnabled`，用户在任何页面按 Home 都会弹出画中画。
+  /// 因此 [stop]/[dispose] 两条路径都必须调用 [clearDetachedPresentation]。
+  Future<void> _syncPipSessionActive() async {
+    await _detachedPresenter.setSessionActive(_wantsAutoPip);
+  }
+
+  /// 请求进入「脱离应用」的呈现（小窗上的脱离键 / 会话菜单的入口都会走这里）。
+  ///
+  /// - Android：进系统画中画。**必须由用户手势调用**（`enterPictureInPictureMode()`
+  ///   只在 Activity RESUMED 时可用，从生命周期回调里调必抛 IllegalStateException）；
+  /// - Windows：打开独立置顶小窗（task-4 的原生实现）。
+  ///
+  /// 返回 true = 原生已接管；false = 本平台不支持 / 原生失败 ⇒ **调用方必须回落到
+  /// App 内小窗**，不能静默什么都不做。
+  ///
+  /// ⚠️ 这里**不销毁会话**：脱离态下弹幕 WS / HLS 继续跑（Android PiP 是同一 Activity、
+  /// 同一 engine），所以「小窗观看直播也算观看人」天然成立。
+  /// [videoRect]：视频画面在屏幕上的全局矩形（小窗自己知道自己画在哪，比页面注入更准）。
+  /// 传 null 时退回 [attachVideoRectProvider] 注入的读取器，仍为 null 则由原生自己猜转场起点。
+  Future<bool> enterDetachedPresentation({Rect? videoRect}) async {
+    if (!_alive) return false;
+    if (_detached) return true; // 幂等：已经在脱离态
+    // 独立窗口的生命周期只存在于 Windows（第二引擎那个窗口）。
+    // Android PiP 是**同一 Activity 同一 engine**，系统不会给「窗口关闭」事件 ——
+    // 订阅了也永远收不到，但订阅本身会多一条流引用，故只在桌面订阅。
+    final bool secondWindow = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.windows;
+    if (secondWindow) _bindDetachedWindowLifecycle();
+    final bool ok = await _detachedPresenter.enter(
+      channelId: channelId,
+      title: _live.currentChannel?.title ?? '直播间',
+      // 归一后的 HLS 地址（带鉴权 query）：Windows 的第二个 engine 没有登录态，
+      // 只能靠 URL 自证；Android 侧当前用不到，但同一个契约入口必须给它。
+      playUrl: _detachedPlayUrl(),
+      videoRect: videoRect ?? detachedVideoRect(),
+    );
+    if (ok) {
+      _detached = true;
+      // ⚠️ **只有 Windows 需要停主窗口那一路播放**：那边是第二个 Flutter engine +
+      // 第二个 HLS 播放器，不停就会两路音频叠在一起（独立小窗旁边还能听见主窗口回声）。
+      //
+      // ❌ **Android 绝对不能停**：PiP 显示的就是**本 Activity 本 engine** 的这张画面，
+      // 一旦把 `_player.destroy()` 掉，画中画里就是一个纯黑窗口（功能表面成功、实际全黑）。
+      // 这也是「PiP 里继续算观看人」的前提：同一路 HLS / 同一条弹幕 WS 原样继续跑。
+      if (secondWindow) await _suspendMainPlayerForDetached();
+      // 原生已接管：把「在播」事实再同步一次（进入 PiP 后 onResume 不会再走一遍武装）。
+      await _syncPipSessionActive();
+      if (!_disposed) notifyListeners();
+    }
+    return ok;
+  }
+
+  /// 关闭「脱离应用」的呈现（回到 App 内小窗）。幂等。
+  ///
+  /// Android 的 PiP 只能由系统收起（用户点 × / 上滑消失），这里只复位本会话的投影；
+  /// Windows 会真的关掉那个独立窗口。**不销毁会话**。
+  Future<void> closeDetachedPresentation() async {
+    if (!_detached) return;
+    _detached = false;
+    await _detachedPresenter.close();
+    // ⚠️ **不能只 close 就走**：原生侧「被 Dart 要求关闭」的那条路径**故意不回调**
+    // `onLiveWindowClosed`（关窗是 Dart 自己发起的，回传只会绕一圈）。
+    // 于是 [_resumeMainPlayerAfterDetached] 就没人调 —— 主窗口这一路播放器会一直停在
+    // 被挂起的状态，直到会话结束都是黑屏。所以这里必须自己把交接做完。
+    if (_alive) await _resumeMainPlayerAfterDetached();
+    if (!_disposed) notifyListeners();
+  }
+
+  /// 彻底撤销「脱离应用」相关的原生状态（[stop] / [dispose] 的收尾，幂等）。
+  ///
+  /// 两件事都必须做：① 会话结束 ⇒ 原生**必须**撤销自动进 PiP 的武装；
+  /// ② 若仍在脱离态，关掉那个呈现（Windows 的独立窗口 / 复位 PiP 投影）。
+  Future<void> clearDetachedPresentation() async {
+    _detached = false;
+    await _detachedPresenter.setSessionActive(false);
+    await _detachedPresenter.close();
+    // 与 [closeDetachedPresentation] 同理：原生不会回 `onLiveWindowClosed`，
+    // 若不复位「已挂起」标志，下一次 [enterDetachedPresentation] 会带着错的基线
+    // 去判断「要不要恢复」，恢复路径就永远不被触发（会话重启后第一次脱离即黑屏）。
+    _resetDetachedWindowBridge();
+  }
+
+  // ---- Windows 独立窗口 ↔ 主窗口的画面所有权移交 -----------------------------
+
+  /// 是否已挂上「独立窗口关闭」的监听（幂等）。
+  bool _detachedLifecycleBound = false;
+
+  /// 主窗口这一路播放器是否被「脱离态」主动停掉（用于回来时精确恢复）。
+  bool _playerSuspendedForDetached = false;
+
+  StreamSubscription<AylaDetachedLiveEvent>? _detachedEventsSub;
+
+  /// 监听原生事件里的窗口生命周期（只消费 `liveWindowClosed`）。
+  void _bindDetachedWindowLifecycle() {
+    if (_detachedLifecycleBound) return;
+    _detachedLifecycleBound = true;
+    _detachedEventsSub = AylaDetachedLiveEvents.instance.stream
+        .listen(_onDetachedLiveEvent);
+  }
+
+  void _onDetachedLiveEvent(AylaDetachedLiveEvent event) {
+    if (event.kind != AylaDetachedLiveEventKind.liveWindowClosed) return;
+    if (_disposed) return;
+    _onDetachedWindowClosed();
+  }
+
+  /// 独立直播窗口没了（用户关掉 / 点画面回主窗口）⇒ 主窗口重新接管画面。
+  ///
+  /// **不销毁会话**（弹幕 WS / 观看登记一直在跑）；页面已卸载时顺带登记 App 内小窗。
+  void _onDetachedWindowClosed() {
+    final bool wasDetached = _detached;
+    _detached = false;
+    if (_alive) {
+      unawaited(_resumeMainPlayerAfterDetached());
+      // 「回到 App 内小窗」复用既有路径。只在**页面已经卸载**时登记小窗投影：
+      // 用户就站在直播间页里时画面由页面自己的 videoView 接管，再挂一层小窗
+      // 投影会多出一个盖在页面上的浮层。
+      if (wasDetached && !identical(_activeViewSession, this)) {
+        _enterMiniPlayer();
+      }
+    }
+    if (!_disposed) notifyListeners();
+  }
+
+  /// 停掉主窗口这一路播放（Windows 进入脱离态时）。
+  ///
+  /// 只动播放器，不动 `_alive` / WS / 历史窗口 ⇒ 在看名单与心跳不受影响。
+  Future<void> _suspendMainPlayerForDetached() async {
+    // App 内小窗的投影也要收起：独立窗口已经在放同一路直播，主窗口再挂一个
+    // 黑框小窗只会挡视线（而且它的 videoView 随下面的 destroy 变 null）。
+    if (_ownsMiniPlayer) {
+      _miniPlayerOwner = null;
+      if (!_live.isDisposed) _live.setMiniPlayer(null);
+    }
+    if (!_playerAttached) return;
+    _playerSuspendedForDetached = true;
+    _playerAttached = false;
+    await _player.destroy();
+  }
+
+  /// 独立窗口关闭后重新接管（只在确实被 [enterDetachedPresentation] 停过时才重建）。
+  ///
+  /// 幂等：没挂起过就什么都不做（Android PiP 路径根本不会进入这里 ——
+  /// 那边 `_suspendMainPlayerForDetached()` 从不被调用，标志恒为 false）。
+  Future<void> _resumeMainPlayerAfterDetached() async {
+    if (!_playerSuspendedForDetached) return;
+    _playerSuspendedForDetached = false;
+    if (!_alive || _playerAttached) return;
+    if (_live.currentPlayerError != null) return;
+    await _attachPlayer();
+  }
+
+  /// 复位「独立窗口」的桥接状态（终止路径调用；随会话一起作废）。
+  ///
+  /// ⚠️ 标志不清会让复用同一会话的下一次脱离带着错的基线：
+  /// `_playerSuspendedForDetached` 残留 true ⇒ 下次进脱离态时
+  /// `_suspendMainPlayerForDetached` 的 `_playerAttached` 判定与恢复路径互相打架。
+  void _resetDetachedWindowBridge() {
+    _playerSuspendedForDetached = false;
+    _detachedEventsSub?.cancel();
+    _detachedEventsSub = null;
+    _detachedLifecycleBound = false;
+  }
+
+  /// 传给原生小窗的播放入口（归一后；无地址时 null）。
+  String? _detachedPlayUrl() {
+    final String? raw = _live.currentChannel?.hlsUrl;
+    if (raw == null || raw.isEmpty) return null;
+    return aylaNormalizeLivePlayUrl(raw);
+  }
+
+  /// 视频画面在**屏幕上的全局矩形**（Android 的 `sourceRectHint`：转场动画从画面处
+  /// 长出来，不传的话系统会自己猜、动画很难看）。
+  ///
+  /// 拿不到就返回 null（契约允许），由调用方通过 [attachVideoRectProvider] 注入；
+  /// 会话层自己不持有 RenderObject，也不去 `context.findRenderObject()`。
+  Rect? detachedVideoRect() => _videoRectProvider?.call();
+
+  /// 视频 global rect 的取值器（页面注入；null = 未知，原生自己猜转场起点）。
+  Rect? Function()? _videoRectProvider;
+
+  /// 注入视频 global rect 读取器（幂等；页面在首帧后接上）。
+  void attachVideoRectProvider(Rect? Function() provider) {
+    _videoRectProvider = provider;
+  }
+
   /// 本会话当前是否为小窗宿主（唯一 owner 判定）。
   bool get _ownsMiniPlayer => identical(_miniPlayerOwner, this);
 
@@ -719,6 +968,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
 
   /// 是否因 App 进后台而暂停了观看登记（[resumeViewerPresence] 的守卫）。
   bool _backgroundPaused = false;
+
+  /// 对外只读投影：[pauseViewerPresence] 是否真的生效过。
+  ///
+  /// 供 UI/测试断言「现在算不算在看」。PiP 守卫（[aylaHandleLiveViewingLifecycle]）
+  /// 的正确性就落在它身上：人在画中画里看直播时，本值必须保持 false。
+  bool get backgroundPaused => _backgroundPaused;
   Future<void> stop() async {
     _alive = false;
     // 活动态索引收尾（web `:351–356`）：
@@ -765,6 +1020,10 @@ class AylaLiveRoomSession extends ChangeNotifier {
       if (ownsMiniPlayer) _live.setMiniPlayer(null);
     }
     if (!_disposed) notifyListeners();
+    // 会话结束 ⇒ **必须**撤销原生的「按 Home 自动进画中画」武装，否则用户在任何页面
+    // 按 Home 都会误进 PiP（这是本特性唯一的失败模式）；顺带关掉仍挂着的脱离呈现。
+    // 放在 destroy 之前：clearDetachedPresentation 独立于播放器，顺序不影响语义。
+    await clearDetachedPresentation();
     await _player.destroy();
   }
 
@@ -773,6 +1032,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    // 原生事件订阅随会话终结（它引用 this，漏摘会让已 dispose 的会话继续收事件）。
+    unawaited(_detachedEventsSub?.cancel() ?? Future<void>.value());
+    _detachedEventsSub = null;
+    // 兜底：异常路径可能绕过 [stop]（例如页面直接 dispose），原生武装不能因此漏撤销。
+    // 不阻塞 UI；[clearDetachedPresentation] 内部幂等。
+    unawaited(clearDetachedPresentation());
     // 先解绑（它会从 history / danmakuScroll 上摘监听），再释放控制器 ——
     // 顺序反了会在已 dispose 的 ChangeNotifier 上 removeListener。
     _unbindScroll();
@@ -838,6 +1103,55 @@ AylaLiveRoomSession? _activeViewSession;
 /// [AylaLiveState.miniPlayer] 非空**（web `AppShell.tsx:131–132`）。
 AylaLiveRoomSession? get aylaMiniPlayerOwner => _miniPlayerOwner;
 
+
+/// App 生命周期 → 直播观看登记的收口（`main.dart` 的 `didChangeAppLifecycleState` 只转发到这里）。
+///
+/// ## 语义（逐条，勿凭印象改）
+/// | 生命周期档 | 行为 |
+/// |---|---|
+/// | `resumed` | 续上观看登记（重连弹幕 WS、重拉在看人数） |
+/// | `paused` / `hidden` / `detached` | **先问原生是否在画中画**：在 PiP 里 ⇒ **什么都不做**（仍算在看人）；否则暂停观看登记 |
+/// | `inactive` | 不动（来电/通知横幅/切控制中心都只是短暂失焦） |
+///
+/// ## 为什么需要 PiP 守卫（用户明确要求「小窗观看直播时也算作观看人」）
+/// Android 进画中画后引擎只给 `inactive`（不会 `paused`），所以 WS 本来就不会断；
+/// 但 **stashed PiP / 部分 OEM 会真的走到 paused** ⇒ 若照旧执行「进后台 = 离开观看」，
+/// PiP 里看直播的观众会被后端移出在看名单（正是用户实报过的同类问题）。
+/// 所以这里必须先问原生 [AylaDetachedLivePresenter.isInPip] 再决定。
+///
+/// 通道不存在（Windows / iOS / 单元测试环境）时 `aylaIsInLivePip()` 恒 false
+/// ⇒ 行为与改动前**完全一致**，没有任何回归面。
+Future<void> aylaHandleLiveViewingLifecycle(
+  AppLifecycleState state, {
+  AylaDetachedLivePresenter detached = const AylaDetachedLivePresenter(),
+}) async {
+  switch (state) {
+    case AppLifecycleState.resumed:
+      await aylaResumeLiveViewingFromBackground();
+    case AppLifecycleState.paused:
+    case AppLifecycleState.hidden:
+    case AppLifecycleState.detached:
+      if (await _livePipGuardSaysStillWatching(detached)) return;
+      await aylaPauseLiveViewingForBackground();
+    case AppLifecycleState.inactive:
+      // 短暂失焦不算离开，**不动**。
+      break;
+  }
+}
+
+/// 画中画守卫：true = 人还在 PiP 里看 ⇒ 不许退观看。
+///
+/// 探测本身不抛异常（契约保证），这里再兜一层 —— 生命周期回调里崩掉会连带断掉整条
+/// 前后台收口，代价远大于「多停一次心跳」。
+Future<bool> _livePipGuardSaysStillWatching(
+  AylaDetachedLivePresenter detached,
+) async {
+  try {
+    return await detached.isInPip();
+  } catch (_) {
+    return false;
+  }
+}
 
 /// App 进入后台时的直播观看收口（web 无对应实现 —— 这是**按常理补齐**）。
 ///
