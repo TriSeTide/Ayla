@@ -238,7 +238,18 @@ class Command(BaseCommand):
                     self._delete_all_objects(media, store, no_delete, stage="单级")
                     if not no_delete:
                         media.expired_at = now
-                        media.save(update_fields=["expired_at"])
+                        # 同阶段 2：对象已删 ⇒ DB 不再声明它们
+                        media.storage_path = ""
+                        media.thumbnail_path = ""
+                        media.waveform_path = ""
+                        media.save(
+                            update_fields=[
+                                "expired_at",
+                                "storage_path",
+                                "thumbnail_path",
+                                "waveform_path",
+                            ]
+                        )
                     stage2_count += 1
         self.stdout.write(
             f"[media] 聊天媒体过期完成：阶段1 {stage1_count} 个，阶段2 {stage2_count} 个"
@@ -260,16 +271,25 @@ class Command(BaseCommand):
         if full_ttl > 0 and media.created_at < now - timedelta(days=full_ttl):
             self._delete_all_objects(media, store, no_delete, stage="阶段2")
             if not no_delete:
-                update_fields = ["expired_at"]
+                # 三个 *_path 一并置空：DB 只声明「确实存在的对象」（见 media_audit）
+                update_fields = ["expired_at", "storage_path", "thumbnail_path", "waveform_path"]
                 if media.original_expired_at is None:
                     media.original_expired_at = now
                     update_fields.append("original_expired_at")
                 media.expired_at = now
+                media.storage_path = ""
+                media.thumbnail_path = ""
+                media.waveform_path = ""
                 media.save(update_fields=update_fields)
             stage2_count += 1
             return stage1_count, stage2_count
         # 阶段 1：删原对象（图片=原图 / 视频=视频本体），保留 thumbnail 封面
         # （original_expired_at 非空 = 已执行，幂等跳过）。
+        #
+        # ⚠️ 删完后必须把 storage_path **置空**：DB 的 *_path 是「对象存在」的权威
+        # 声明，阶段 1 的语义恰恰是「原对象已不存在」。不置空的话媒体审计
+        # （manage.py media_audit）会把每一次**正常**过期都报成「缺失」，护栏立刻
+        # 变成噪音（2026-10-29 实测踩到）。阶段 2 同理见 _delete_all_objects。
         if original_ttl > 0 and media.created_at < now - timedelta(days=original_ttl):
             if media.original_expired_at is None:
                 if media.storage_path and store.exists(media.storage_path):
@@ -280,12 +300,18 @@ class Command(BaseCommand):
                         store.delete(media.storage_path)
                 if not no_delete:
                     media.original_expired_at = now
-                    media.save(update_fields=["original_expired_at"])
+                    media.storage_path = ""
+                    media.save(update_fields=["original_expired_at", "storage_path"])
                 stage1_count += 1
         return stage1_count, stage2_count
 
     def _delete_all_objects(self, media, store, no_delete: bool, stage: str) -> None:
-        """删除媒体全部对象（original + thumbnail + waveform），逐 key 输出日志。"""
+        """删除媒体全部对象（original + thumbnail + waveform），逐 key 输出日志。
+
+        **只删对象，不改 DB**（DB 标记由调用方负责）。调用方（阶段 2 / 单级）
+        必须在标记 `expired_at` 的同时把三个 *_path 置空 —— 否则 DB 会继续声明
+        已被删除的对象，媒体审计每次都会报「缺失」（2026-10-29 事故修复时暴露）。
+        """
         for key in (media.storage_path, media.thumbnail_path, media.waveform_path):
             if key and store.exists(key):
                 self.stdout.write(f"[media] 过期 {media.media_id} {stage} 删除 {key}")

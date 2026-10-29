@@ -713,3 +713,80 @@ class TestDescriptorExpiryProjection:
         body = r.json()
         assert body["original_expired"] is True
         assert body["expired"] is False
+
+@pytest.mark.django_db
+class TestExpiryKeepsAuditClean:
+    """过期后 DB 必须不再声明已被删除的对象。
+
+    背景（2026-10-29）：`cleanup_media` 原实现只删对象、不清 `*_path`，
+    导致 `manage.py media_audit` 把每一次**正常**过期都报成「缺失」——
+    护栏一旦天天喊狼来了就等于没有护栏。
+    """
+
+    def _audit_code(self):
+        from io import StringIO
+
+        out = StringIO()
+        code = 0
+        try:
+            call_command("media_audit", stdout=out, stderr=StringIO())
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+        return code, out.getvalue()
+
+    @staticmethod
+    def _hex(name: str) -> str:
+        """media_id 必须是 32 位小写 hex（真实形态），否则审计会判非标准 key。"""
+        import hashlib
+
+        return hashlib.md5(name.encode()).hexdigest()
+
+    def test_stage1_clears_storage_path(self, user_factory):
+        user = user_factory(username="ck1")
+        media = _mk_media(user, self._hex("ck-stage1"), days_ago=8)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.original_expired_at is not None
+        assert media.storage_path == "", "阶段 1 删了原对象就必须清空 storage_path"
+        assert media.thumbnail_path, "阶段 1 保留缩略图，path 不清"
+        code, out = self._audit_code()
+        assert code == 0, out
+
+    def test_stage2_clears_all_paths(self, user_factory):
+        user = user_factory(username="ck2")
+        media = _mk_media(user, self._hex("ck-stage2"), days_ago=31)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.expired_at is not None
+        assert media.storage_path == ""
+        assert media.thumbnail_path == ""
+        assert media.waveform_path == ""
+        code, out = self._audit_code()
+        assert code == 0, out
+
+    def test_single_stage_clears_all_paths(self, user_factory):
+        user = user_factory(username="ck3")
+        media = _mk_media(user, self._hex("ck-voice"), kind="voice", days_ago=8)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.expired_at is not None
+        assert media.storage_path == ""
+        assert media.thumbnail_path == ""
+        code, out = self._audit_code()
+        assert code == 0, out
+
+    def test_protected_media_paths_kept(self, user_factory):
+        """被资产引用的媒体不过期 ⇒ path 一个字都不能动。"""
+        from apps.posts.models import Post, PostImage
+
+        user = user_factory(username="ck4")
+        media = _mk_media(user, self._hex("ck-asset"), days_ago=40)
+        PostImage.objects.create(
+            post=Post.objects.create(owner=user, title="t", body="b"),
+            media=media, order=0,
+        )
+        _run_expire()
+        media.refresh_from_db()
+        assert media.storage_path
+        assert media.thumbnail_path
+        assert media.expired_at is None
