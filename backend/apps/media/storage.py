@@ -3,12 +3,18 @@
 
 - `ObjectStorage`：抽象接口；`S3Storage`：boto3 实现；`FakeStorage`：内存实现供测试。
 - `get_storage()`：按 settings 返回单例后端；测试用 override_settings 或 monkeypatch 注入 FakeStorage。
-- key 规划（步骤文件 4.1）：
+- **key 契约（唯一事实源：docs/architecture/media-storage-contract.md）**：
   - `tmp/{upload_id}`：未 complete 的临时对象；
   - `media/{kind}/{media_id}/original`：正式对象；
-  - `media/{kind}/{media_id}/thumbnail`：缩略图派生产物；
-  - `media/{kind}/{media_id}/waveform`：波形派生产物。
+  - `media/{kind}/{media_id}/thumbnail`：缩略图派生产物（图片缩略图 / 视频海报帧）；
+  - `media/{kind}/{media_id}/waveform`：波形派生产物（仅语音）。
+  其中 `kind ∈ {image,voice,video,file,emoji}`、`media_id` 是 **32 位小写 hex**。
+  **除此之外的 key 形态一律非法**，由 `manage.py media_audit` 对账检出。
   只存对象存储 key，绝对路径/宿主机路径永不入库、永不外发。
+
+- **禁止在业务路径列举桶**：读写一律按已知 key 精确操作。列举只允许出现在
+  一致性审计（`list_keys`）里 —— 大桶上列举是 O(n)，且会让结构漂移从
+  「立刻报错」退化成「越跑越慢」。
 """
 import io
 import logging
