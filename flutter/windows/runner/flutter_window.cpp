@@ -10,9 +10,17 @@
 
 namespace {
 
-// Posted by AylaLiveWindowHost when the detached live window disappeared
+// Posted by AylaLiveWindowHost when a detached overlay window disappeared
 // without Dart asking for it (user clicked it away / closed it natively).
 constexpr UINT kDetachedLiveWindowClosedMessage = WM_APP + 1;
+
+// Posted by AylaLiveWindowHost when the user clicked the detached floating
+// ball (the overlay window stays open; the MAIN engine owns routing).
+constexpr UINT kDetachedBallTapMessage = WM_APP + 2;
+
+// Posted by AylaLiveWindowHost when the detached floating-ball window closed
+// without Dart asking for it.
+constexpr UINT kDetachedBallClosedMessage = WM_APP + 3;
 
 // DWMWA_WINDOW_CORNER_PREFERENCE (Windows 11 22H2+, SDK 10.0.22621+).
 // Redefined here so the runner still compiles against an older SDK header.
@@ -127,8 +135,8 @@ bool FlutterWindow::OnCreate() {
 
         if (method == "openLiveWindow") {
           if (live_window_host_ == nullptr) {
-            live_window_host_ =
-                std::make_unique<AylaLiveWindowHost>(GetHandle());
+            live_window_host_ = std::make_unique<AylaLiveWindowHost>(
+                GetHandle(), AylaOverlayKind::kLiveMini);
           }
           const bool opened = live_window_host_->Show(
               read_string("channelId"), read_string("title"),
@@ -146,14 +154,51 @@ bool FlutterWindow::OnCreate() {
           result->Success(flutter::EncodableValue(std::monostate{}));
           return;
         }
-        if (method == "showBall") {
-          // The detached FLOATING BALL is a separate feature; this runner only
-          // implements the live window. Answer with an explicit "unsupported"
-          // (never throw) so the Dart side can degrade visibly.
-          result->Success(flutter::EncodableValue("unsupported"));
+        if (method == "showBall" || method == "updateBall") {
+          // Detached FLOATING BALL: the SAME AylaSessionActivityIndicator the
+          // app used to draw in its own overlay, now hosted by a transparent
+          // always-on-top popup window with a second engine.
+          //
+          // "payload" is the serialised AylaOverlayPayload
+          // (lib/widgets/shell/overlay_window_app.dart) - the second engine has
+          // no auth / WS / router, so the MAIN engine pushes the projection.
+          const std::string payload = read_string("payload");
+          if (ball_window_host_ == nullptr) {
+            ball_window_host_ = std::make_unique<AylaLiveWindowHost>(
+                GetHandle(), AylaOverlayKind::kActivityBall);
+          }
+          const bool ok = method == "showBall"
+                              ? ball_window_host_->ShowBall(payload)
+                              : ball_window_host_->UpdateBall(payload);
+          result->Success(flutter::EncodableValue(ok ? "shown" : "failed"));
           return;
         }
         if (method == "hideBall") {
+          if (ball_window_host_ != nullptr) {
+            // Dart-initiated: no onBallClosed round-trip (the caller knows).
+            ball_window_host_->RequestClose();
+          }
+          result->Success(flutter::EncodableValue(std::monostate{}));
+          return;
+        }
+        if (method == "setWindowFullscreen") {
+          // The Dart side tells us explicitly whether the MAIN window is in
+          // window-level fullscreen (window_manager.setFullScreen). See
+          // FlutterWindow::SyncFullscreenWindowState for why the geometric
+          // inference alone is not reliable enough.
+          bool fullscreen = false;
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args != nullptr) {
+            auto it = args->find(flutter::EncodableValue("fullscreen"));
+            if (it != args->end()) {
+              const auto* value = std::get_if<bool>(&it->second);
+              if (value != nullptr) {
+                fullscreen = *value;
+              }
+            }
+          }
+          fullscreen_hint_ = fullscreen;
+          SyncFullscreenWindowState(GetHandle());
           result->Success(flutter::EncodableValue(std::monostate{}));
           return;
         }
@@ -181,6 +226,10 @@ void FlutterWindow::OnDestroy() {
   if (live_window_host_ != nullptr) {
     live_window_host_->Close(false);
     live_window_host_.reset();
+  }
+  if (ball_window_host_ != nullptr) {
+    ball_window_host_->Close(false);
+    ball_window_host_.reset();
   }
   desktop_window_channel_.reset();
   if (flutter_controller_) {
@@ -217,6 +266,34 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         ::ShowWindow(hwnd, SW_RESTORE);
       }
       ::SetForegroundWindow(hwnd);
+      break;
+    case kDetachedBallTapMessage: {
+      // The user clicked the detached floating ball. The overlay window stays
+      // open (they may well come back to it); the MAIN engine navigates.
+      std::string kind;
+      std::string route;
+      if (ball_window_host_ != nullptr &&
+          ball_window_host_->TakePendingBallTap(&kind, &route)) {
+        if (desktop_window_channel_ != nullptr) {
+          desktop_window_channel_->InvokeMethod(
+              "onBallTap",
+              std::make_unique<flutter::EncodableValue>(
+                  flutter::EncodableMap{
+                      {flutter::EncodableValue("kind"),
+                       flutter::EncodableValue(kind)},
+                      {flutter::EncodableValue("sourceRoute"),
+                       flutter::EncodableValue(route)},
+                  }));
+        }
+      }
+      break;
+    }
+    case kDetachedBallClosedMessage:
+      // The detached floating ball is gone. Tell Dart so the host can re-create
+      // it on the next session change instead of believing it is still shown.
+      if (desktop_window_channel_ != nullptr) {
+        desktop_window_channel_->InvokeMethod("onBallClosed", nullptr);
+      }
       break;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
@@ -269,13 +346,65 @@ void FlutterWindow::SyncFullscreenWindowState(HWND window) {
 
   // "Covers the monitor" alone is not enough: a *maximized* window also fills
   // rcMonitor on a monitor whose taskbar auto-hides (rcWork == rcMonitor).
-  // window_manager's fullscreen path is the one that strips WS_THICKFRAME
-  // (SetFullScreen -> SetWindowLongPtr with ~(WS_THICKFRAME | WS_MAXIMIZEBOX)),
-  // so requiring the missing thick frame tells the two apart exactly.
+  //
+  // Two independent signals, and the explicit one wins while it is set:
+  //
+  //  1. **Geometric inference** (below): window_manager's fullscreen path
+  //     strips WS_THICKFRAME (SetFullScreen -> SetWindowLongPtr with
+  //     ~(WS_THICKFRAME | WS_MAXIMIZEBOX)), so "covers the monitor AND has no
+  //     thick frame" identifies fullscreen exactly - PROVIDED the plugin
+  //     actually took that branch. It does not when it is entered from a
+  //     MAXIMIZED window on old window_manager builds, which is precisely the
+  //     "maximized + click fullscreen = nothing happens" bug.
+  //
+  //  2. **Explicit hint** from Dart: AylaDesktopWindowController.setFullScreen
+  //     pushes setWindowFullscreen(true/false) around the window_manager call,
+  //     because the Dart side is the one that knows it asked for fullscreen.
+  //
+  // The hint is only trusted while the geometry agrees with it (a fullscreen
+  // hint on a window that does not cover its monitor is stale: the user may
+  // have dragged/resized it, or the call failed). It is cleared as soon as the
+  // geometry agrees, so it can never stick around and mislabel a maximized
+  // window.
   const bool frameless =
       (::GetWindowLong(window, GWL_STYLE) & WS_THICKFRAME) == 0;
 
-  const bool is_fullscreen = covers_monitor && frameless;
+  // Second, independent geometric signal: in real fullscreen the CLIENT area is
+  // the whole window (WM_NCCALCSIZE returns 0 after window_manager's
+  // SetAsFrameless), whereas a maximized window still has a caption/border band
+  // => client < window. This does not depend on guessing the plugin's
+  // is_frameless_ bookkeeping, so it catches the "maximized + fullscreen did
+  // nothing" case correctly: that window is NOT visually fullscreen.
+  RECT client{};
+  ::GetClientRect(window, &client);
+  const bool client_fills_window =
+      (frame.right - frame.left) - (client.right - client.left) <= 2 &&
+      (frame.bottom - frame.top) - (client.bottom - client.top) <= 2;
+
+  const bool geometric_fullscreen =
+      covers_monitor && (frameless || client_fills_window);
+
+  bool is_fullscreen = geometric_fullscreen;
+  if (fullscreen_hint_.has_value()) {
+    if (*fullscreen_hint_ == covers_monitor) {
+      // Hint and geometry agree (either "fullscreen and covering" or "not
+      // fullscreen and not covering") => consume the hint.
+      is_fullscreen = *fullscreen_hint_;
+      fullscreen_hint_.reset();
+    } else if (!covers_monitor) {
+      // "not fullscreen" hint on a window that does not cover the monitor:
+      // the exit is complete, nothing left to wait for.
+      fullscreen_hint_.reset();
+    }
+    // Otherwise: "fullscreen" hint while the window does not cover its monitor
+    // yet (window_manager is still mid-flight) => keep the hint, stay
+    // not-fullscreen for now and re-evaluate on the next WM_SIZE.
+  }
+
+  ApplyFullscreenState(window, is_fullscreen);
+}
+
+void FlutterWindow::ApplyFullscreenState(HWND window, bool is_fullscreen) {
   SetFullscreen(is_fullscreen);
 
   // Win11 rounds every app window's corners; in fullscreen that leaves the

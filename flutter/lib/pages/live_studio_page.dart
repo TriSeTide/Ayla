@@ -21,6 +21,7 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -29,6 +30,7 @@ import '../core/api/chat_api.dart' show AylaChatApi;
 import '../core/api/directory_page.dart' show AylaDirectoryPage;
 import '../core/api/live_api.dart';
 import '../core/media/media_actions.dart' show AylaMediaActions;
+import '../core/platform/detached_live.dart' show aylaDetachedLivePlatformSupported;
 import '../core/models/conversation.dart' show AylaConversationSummary;
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../state/auth_state.dart';
@@ -496,6 +498,11 @@ class _LiveStudioPageState extends ConsumerState<LiveStudioPage> {
       deletingChannelId: _deletingId,
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
+      // 「小窗」键：只在桌面端渲染（同 `live_room_page.dart` 的说明）。
+      onEnterMiniPlayer: aylaDetachedLivePlatformSupported &&
+              defaultTargetPlatform == TargetPlatform.windows
+          ? () => unawaited(session.enterDetachedPresentation())
+          : null,
       onSendDanmaku: session.sendDanmaku,
       // ⚠️ 根因 A（2026-10-08 修）：本页此前**建了页面级 `_favorites` 却从不调 `load`**
       // ⇒ 头部收藏键永远停在 unknown（禁用 +「正在加载收藏状态」），正是用户实报的

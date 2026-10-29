@@ -368,68 +368,7 @@ void main() {
       expect(session.alive, isTrue);
     });
 
-    testWidgets('小窗上有「脱离应用」键（关闭键左侧 24×24）：点击 → onDetach', (
-      WidgetTester tester,
-    ) async {
-      int detaches = 0;
-      const Size vp = Size(420, 700);
-      tester.view.physicalSize = vp;
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      Widget host(Widget child) => MaterialApp(
-        home: previewScope(
-          Builder(
-            builder: (BuildContext context) => MediaQuery(
-              data: MediaQuery.of(context).copyWith(size: vp),
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: SizedBox.fromSize(size: vp, child: child),
-              ),
-            ),
-          ),
-        ),
-      );
-
-      Finder byLabel(String label) => find.byWidgetPredicate(
-        (Widget w) => w is Semantics && w.properties.label == label,
-      );
-
-      await tester.pumpWidget(
-        host(
-          Stack(
-            children: <Widget>[
-              AylaLiveMiniPlayer(
-                videoView: const SizedBox(),
-                onClose: () {},
-                onDetach: () => detaches += 1,
-              ),
-            ],
-          ),
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
-      final Rect mini = tester.getRect(find.byType(AylaLiveMiniPlayer));
-      final Rect detach = tester.getRect(byLabel('脱离应用'));
-      final Rect close = tester.getRect(byLabel('关闭小窗'));
-
-      expect(detach.width, 24, reason: '两个键同规格 24×24 玻璃圆钮');
-      expect(detach.height, 24);
-      expect(
-        detach.right,
-        lessThanOrEqualTo(close.left),
-        reason: '脱离键在关闭键左侧且不重叠（mini=$mini）',
-      );
-
-      await tester.tap(byLabel('脱离应用'));
-      await tester.pump();
-      expect(detaches, 1);
-
-    });
-
-    testWidgets('detachEnabled=false ⇒ 不渲染脱离键（平台不支持时由调用方关掉）', (
+    testWidgets('小窗只有「关闭」一个键（脱离按钮已被用户否决，2026-10-31）', (
       WidgetTester tester,
     ) async {
       const Size vp = Size(420, 700);
@@ -453,10 +392,7 @@ void main() {
                     size: vp,
                     child: const Stack(
                       children: <Widget>[
-                        AylaLiveMiniPlayer(
-                          videoView: SizedBox(),
-                          detachEnabled: false,
-                        ),
+                        AylaLiveMiniPlayer(videoView: SizedBox()),
                       ],
                     ),
                   ),
@@ -469,8 +405,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
+      // 用户原话：「我要的不是加这个脱离按钮」「不要造轮子」
+      // ⇒ 小窗上只留原有的关闭键，**不得**再出现第二个键。
+      expect(byLabel('关闭小窗'), findsOneWidget);
       expect(byLabel('脱离应用'), findsNothing);
-      expect(byLabel('关闭小窗'), findsOneWidget, reason: '关闭键不受影响');
     });
   });
 }

@@ -247,11 +247,17 @@ enum AylaDetachedBallResult {
 /// Windows：独立置顶小窗。
 ///
 /// 幂等：重复调用是同一件事（原生侧复用已有窗口）。
+/// [payload] 是主引擎已经算好的**整组投影**（`AylaOverlayPayload.encode()`）。
+///
+/// 为什么不让原生侧自己拼：窗口外浮层要显示的是「当前有哪些会话」，那份判定
+/// （auth 的四个媒体字段 + 活动态索引 + 隐藏档）全在主引擎里；第二引擎没有
+/// 登录态与 store，原生更不可能知道。所以 Dart 侧序列化、原生只透传。
 Future<AylaDetachedBallResult> aylaShowDetachedBall({
   required String kind,
   required String sessionId,
   required String title,
   required String sourceRoute,
+  String? payload,
 }) async {
   if (!aylaDetachedBallPlatformSupported) {
     return AylaDetachedBallResult.unsupported;
@@ -261,6 +267,7 @@ Future<AylaDetachedBallResult> aylaShowDetachedBall({
     'sessionId': sessionId,
     'title': title,
     'sourceRoute': sourceRoute,
+    if (payload != null) 'payload': payload,
   };
   try {
     final String? result = defaultTargetPlatform == TargetPlatform.windows
@@ -291,6 +298,55 @@ Future<void> aylaHideDetachedBall() async {
     // 原生未实现：静默（这是「隐藏」，静默安全）
   } on PlatformException {
     // 同上
+  }
+}
+
+/// 把**新的会话集合**推给已经打开的悬浮球窗口（不新建窗口）。
+///
+/// 返回 true = 已送达；false = 当前没有脱离态窗口（调用方应改走
+/// [aylaShowDetachedBall] 重新创建）。原生未实现时也返回 false（不抛）。
+///
+/// 幂等：同一份 payload 重复推送只是同一件事（组件侧 setState 一次）。
+Future<bool> aylaUpdateDetachedBall({required String payload}) async {
+  if (!aylaDetachedBallPlatformSupported) return false;
+  try {
+    final String? result = defaultTargetPlatform == TargetPlatform.windows
+        ? await _desktopChannel.invokeMethod<String>('updateBall', <String, Object?>{
+            'payload': payload,
+          })
+        : null;
+    return result == 'shown';
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
+/// 告诉原生侧「主窗口是否处在窗口级全屏」（桌面平台；其它平台 no-op）。
+///
+/// ## 为什么需要显式告知（2026-10-31 用户实报「最大化时点全屏完全没全屏成功」）
+/// 原生侧原本只能**逆向推断**：`窗口矩形 ≈ 显示器 rcMonitor` 且 `WS_THICKFRAME 被剥掉`
+/// ⇒ 判为全屏。但 window_manager 0.5.2 的 `SetFullScreen` 只在
+/// `!g_maximized_before_fullscreen` 时才调 `SetAsFrameless()`；从最大化进全屏会跳过它
+/// ⇒ 那条判据在**真正全屏的窗口**上为假 ⇒ Win11 圆角没关、`is_fullscreen_` 没置位
+/// ⇒ `WM_DPICHANGED` 继续把窗口挪回窗口化矩形（看起来像「全屏没生效」）。
+///
+/// Dart 侧**知道**自己刚调过 `setFullScreen(true/false)`，直接告诉原生比反推可靠。
+/// 原生侧把它当**提示**用：只有几何也同意时才采纳，采纳后立刻清除（不会卡住）。
+///
+/// 幂等；非桌面平台 no-op；原生未实现时静默（这是状态同步，不是用户动作）。
+Future<void> aylaSetWindowFullscreen(bool fullscreen) async {
+  if (!aylaDetachedLivePlatformSupported) return;
+  if (defaultTargetPlatform != TargetPlatform.windows) return;
+  try {
+    await _desktopChannel.invokeMethod<void>('setWindowFullscreen', <String, Object?>{
+      'fullscreen': fullscreen,
+    });
+  } on MissingPluginException {
+    // 原生未实现：静默（原生侧还有几何推断兜底）。
+  } on PlatformException {
+    // 同上。
   }
 }
 

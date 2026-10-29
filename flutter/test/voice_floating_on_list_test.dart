@@ -19,8 +19,16 @@
 /// ③ 群内语音的 `sourceRoute`（`/group/:id/voice`）不影响列表页显示；
 /// ④ **语音 + 直播同时进行**（用户账号真实状态：`is_in_voice=true` 且 `is_live=true`）
 ///    ⇒ **两个球都要渲染**（此前无任何测试覆盖这个组合）。
+///
+/// ## ⚠️ 2026-10-31 平台分流（用户改需求）
+/// 用户要求「应用内不再存在任何浮层，取而代之的是**创建时就脱离应用**的悬浮窗」。
+/// ⇒ Windows / Android 上 `AppShell` 不再渲染应用内球，改为推给窗口外浮层。
+/// 本文件的「应用内渲染」断言因此只对 iOS / Web 成立；Windows/Android 上这些用例
+/// 由 `skip` 跳过（窗口外浮层的正确性见 `test/overlay_window_root_test.dart`）。
 library;
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -58,6 +66,36 @@ AuthUser _user({
       showContent: true,
       email: '',
     );
+
+/// 当前平台是否走「窗口外浮层」（Windows / Android）⇒ 应用内不再渲染球。
+///
+/// 与 `AppShell._SessionActivityHostState.build` 的 `detachedBall` 判据同源：
+/// 这两个平台有跨应用浮窗 API，应用内那一份被移出窗口；iOS / Web 没有 ⇒ 仍在应用内渲染。
+bool get _detachedPlatform =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.android);
+
+/// 把一条「应用内渲染」用例钉在 **iOS 平台**上跑。
+///
+/// ## 为什么不能 `skip: _detachedPlatform`
+/// 那会把 6 条断言**直接丢掉**（本机跑测试的宿主平台是 Windows ⇒ 全跳）。
+/// 但「应用内球组的显示/隐藏判定」（tsx 71–82 那套）是**跨平台共用**的逻辑，
+/// 只是宿主不同 —— 丢掉它等于放弃对 `_activitySession` / `showVoice` / `showLive`
+/// 的回归保护。
+///
+/// iOS 是**没有**跨应用浮窗 API 的平台（见 `detached_live.dart` 文件头），
+/// 那里仍然走应用内渲染 ⇒ 用它当宿主，断言口径与旧版**完全一致**；
+/// Windows / Android 的「应用内零浮层 + 推 showBall」由
+/// `test/detached_overlay_wiring_test.dart` 单独锁住。
+Future<void> _onInAppPlatform(Future<void> Function() body) async {
+  debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+  try {
+    await body();
+  } finally {
+    debugDefaultTargetPlatformOverride = null;
+  }
+}
 
 void main() {
   // `aylaSessionActivity` 是模块级单例（web zustand store 同款），跨用例存活 ⇒ 前后复位。
@@ -140,36 +178,32 @@ void main() {
 
   /// 球图标在树上的数量（语音球 = iconMic，直播球 = iconVideo，把手不是图标）。
   ///
-  /// 2026-10-31 收窄：悬浮球组新增了「脱离应用」键
-  /// （`AylaSessionActivityIndicator.detachKey`，task-5），它自身也是 `AylaIcon`
-  /// （`iconPip`）—— 若按「组件内全部 AylaIcon」计数，一个语音球会被数成 2。
-  /// 本 helper 的语义一直是「**每个球**一个图标」（用例 reason 原文：
-  /// 「一个语音球图标」/「两个球各有一个图标」），故排除脱离键子树：
-  /// 断言口径不变，仍能锁住「少渲染 / 多渲染球」。
-  /// 脱离键本身由 `test/session_activity_detach_test.dart` 单独覆盖。
+  /// 组件内只有「两个球 + 一个把手」，把手是文本字形不是 [AylaIcon]
+  /// ⇒ 直接数 `AylaIcon` 就是球数（2026-10-31：脱离键已随用户否决被删除，
+  /// 此处恢复成原来的简单计数）。
   int iconCount(WidgetTester tester) => find
       .descendant(
         of: find.byType(AylaSessionActivityIndicator),
         matching: find.byType(AylaIcon),
       )
       .evaluate()
-      .where((Element element) {
-        // 排除落在脱离键子树里的图标。
-        bool insideDetach = false;
-        element.visitAncestorElements((Element ancestor) {
-          if (ancestor.widget.key ==
-              AylaSessionActivityIndicator.detachKey) {
-            insideDetach = true;
-            return false;
-          }
-          return true;
-        });
-        return !insideDetach;
-      })
       .length;
 
+  // ⚠️ 2026-10-31 语义变更：用户要求「应用内不再存在任何浮层，取而代之的是**创建时就脱离应用**的
+  // 悬浮窗」⇒ Windows / Android 上 `AppShell` **不再渲染** `AylaSessionActivityIndicator`，
+  // 改为把会话投影推给窗口外浮层（`aylaShowDetachedBall` / `aylaUpdateDetachedBall`）。
+  //
+  // 本组用例断言的是「应用内渲染球」的**显示/隐藏判定**（tsx 71–82），
+  // 那是跨平台共用的逻辑，只是宿主不同 ⇒ 一律钉在 **iOS 平台**跑
+  // （`_onInAppPlatform`，见文件头）：iOS 无跨应用浮窗 API，仍走应用内渲染，
+  // 断言口径与旧版完全一致。**不能**用 `skip:` —— 那会把 6 条断言直接丢掉。
+  // Windows / Android 的「应用内零浮层 + 推 showBall」由
+  // `test/detached_overlay_wiring_test.dart` 单独锁住。
+  // 窗口外浮层本身的正确性由 `test/overlay_window_root_test.dart` 覆盖（第二引擎里 build
+  // 同一份 `AylaSessionActivityIndicator`，含「无会话零渲染」「点球不抛」）。
   group('语音列表页 /voice 的悬浮球（用户实报）', () {
     testWidgets('★ 在语音 + 停在列表页 ⇒ 语音球必须显示', (WidgetTester tester) async {
+      await _onInAppPlatform(() async {
       await pumpShell(
         tester,
         '/voice',
@@ -184,10 +218,11 @@ void main() {
             '"/voice/:id" 与 sourceRoute；列表页 "/voice" 两者都不等于 ⇒ showVoice 为真',
       );
       expect(iconCount(tester), 1, reason: '一个语音球图标');
+      });
     });
 
-    testWidgets('房内页 /voice/54 ⇒ 语音球隐藏（tsx 71–74 正例，防回归）',
-        (WidgetTester tester) async {
+    testWidgets('房内页 /voice/54 ⇒ 语音球隐藏（tsx 71–74 正例，防回归）', (WidgetTester tester) async {
+      await _onInAppPlatform(() async {
       await pumpShell(
         tester,
         '/voice/54',
@@ -197,9 +232,11 @@ void main() {
 
       expect(indicator(tester).voice, isNull);
       expect(iconCount(tester), 0);
+      });
     });
 
     testWidgets('群内语音的 sourceRoute 不影响列表页显示', (WidgetTester tester) async {
+      await _onInAppPlatform(() async {
       await pumpShell(
         tester,
         '/voice',
@@ -210,10 +247,11 @@ void main() {
       final AylaActivitySession? voice = indicator(tester).voice;
       expect(voice, isNotNull);
       expect(voice!.sourceRoute, '/group/g1/voice', reason: '回房目标是群场景');
+      });
     });
 
-    testWidgets('★ 语音 + 直播同时进行 ⇒ **两个球都渲染**（用户账号真实状态）',
-        (WidgetTester tester) async {
+    testWidgets('★ 语音 + 直播同时进行 ⇒ **两个球都渲染**（用户账号真实状态）', (WidgetTester tester) async {
+      await _onInAppPlatform(() async {
       // 真实数据：xixi 账号 is_in_voice=true room=54 且 is_live=true live=76。
       await pumpShell(
         tester,
@@ -234,10 +272,11 @@ void main() {
         2,
         reason: '★ 两个球各有一个图标（此前无任何用例覆盖这个组合）',
       );
+      });
     });
 
-    testWidgets('★ 回房路由必须是 /voice/:id —— 不是列表页 /voice（用户点球回不到房间）',
-        (WidgetTester tester) async {
+    testWidgets('★ 回房路由必须是 /voice/:id —— 不是列表页 /voice（用户点球回不到房间）', (WidgetTester tester) async {
+      await _onInAppPlatform(() async {
       // 索引未写入时走兜底投影（tsx 49）；房内宿主 upsert 时写入的是带 id 的那条。
       await pumpShell(
         tester,
@@ -253,9 +292,11 @@ void main() {
         reason: '★ web useVoiceChannel.ts:258–259：一级语音的 sourceRoute = /voice/:channelId；'
             '若误用退出落点 backPath（/voice）⇒ 点球回到列表页而不是房间',
       );
+      });
     });
 
     testWidgets('索引缺该 id ⇒ 兜底路由同样带 id（tsx 49）', (WidgetTester tester) async {
+      await _onInAppPlatform(() async {
       await pumpShell(
         tester,
         '/voice',
@@ -264,6 +305,7 @@ void main() {
       );
 
       expect(indicator(tester).voice!.sourceRoute, '/voice/54');
+      });
     });
   });
 }

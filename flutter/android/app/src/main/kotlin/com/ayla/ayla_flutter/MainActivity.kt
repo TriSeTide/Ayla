@@ -77,7 +77,7 @@ class MainActivity : FlutterActivity() {
     /** 直播「脱离应用」（Android PiP）通道名 —— 与 Dart 侧 `kAylaPipChannel` 逐字一致。 */
     private val livePipChannelName = "ayla/live_pip"
 
-    /** PiP 通道句柄（回调 `onPipChanged` / `onBallTap` / `onBallClosed` 用）。 */
+    /** PiP 通道句柄（回调 `onPipChanged` / `onBallTap` 用）。 */
     private var livePipChannel: MethodChannel? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -193,13 +193,19 @@ class MainActivity : FlutterActivity() {
                                     result.success(null)
                                 }
                                 "openOverlaySettings" -> result.success(openOverlaySettings())
-                                // ===== 系统层悬浮球（语音/直播会话脱离应用，悬浮球=task-5）=====
+                                // ===== 系统层悬浮球（语音/直播会话脱离应用）=====
                                 // 返回字符串语义与 Dart 侧 AylaDetachedBallResult 逐字对齐：
                                 // "shown" / "permissionRequired" / "unsupported" / "failed"。
                                 // 未授权时**必须**给 permissionRequired（不静默失败）。
+                                //
+                                // ⚠️ 2026-10-31 重做：球不再由原生 Canvas 手绘（用户判定
+                                // 「丑得要命」），改由第二 FlutterEngine + FlutterView 在
+                                // 叠加层里 build **同一份** AylaSessionActivityIndicator
+                                // （见 OverlayFlutterHost.kt）。
                                 "showBall" -> result.success(showBall(call))
+                                "updateBall" -> result.success(updateBall(call))
                                 "hideBall" -> {
-                                    floatingBall.hide()
+                                    overlayBall.hide()
                                     result.success(null)
                                 }
                                 else -> result.notImplemented()
@@ -211,7 +217,10 @@ class MainActivity : FlutterActivity() {
                             when (call.method) {
                                 "isSupported", "isInPip", "enterPip", "openOverlaySettings" ->
                                     result.success(false)
-                                "showBall" -> result.success("failed")
+                                "showBall" -> result.success(
+                                    AylaFloatingBallController.RESULT_FAILED,
+                                )
+                                "updateBall" -> result.success(false)
                                 else -> result.success(null)
                             }
                         }
@@ -702,20 +711,27 @@ class MainActivity : FlutterActivity() {
      * 悬浮球（task-5）是唯一消费方，但通道归本任务建 ⇒ 这里给**真实**实现（不做假）。
      * 无运行时弹窗，只能跳设置；返回 true = 已跳转（**不**代表用户已授权）。
      */
-    private fun openOverlaySettings(): Boolean = floatingBall.openOverlaySettings()
+    private fun openOverlaySettings(): Boolean =
+        AylaFloatingBallController.openOverlaySettings(this)
 
     // ======================= 系统层悬浮球（语音/直播会话脱离应用）=======================
 
     /**
-     * 悬浮球控制器（懒创建；**单实例**，重复 `showBall` 复用同一个球）。
+     * 叠加层宿主（懒创建；**单实例**，重复 `showBall` 复用同一个窗口 + 同一个引擎）。
+     *
+     * ## 它是什么
+     * 第二 FlutterEngine + FlutterView 塞进 `WindowManager` 的
+     * `TYPE_APPLICATION_OVERLAY` 窗口，里面 build **同一份**
+     * `AylaSessionActivityIndicator`（`lib/widgets/shell/session_activity.dart`）。
+     * **原生侧一行绘制代码都没有** —— 上一版手绘圆球被用户判定「丑得要命」，
+     * 这一版换的只是**宿主窗口**，widget 树是同一份代码。
      *
      * 回调语义：
-     * - `onBallTap` → 原生回调 Dart `onBallTap{kind, sourceRoute}`（Dart 侧 `context.go` 回房）；
-     * - `onBallClosed` → 原生回调 Dart `onBallClosed`（Dart 侧复位「已脱离」标志）。
-     * 两者都只是**导航投影**，不参与任何内容或认知判断。
+     * - `onBallTap` → 原生回调 Dart `onBallTap{kind, sourceRoute}`（Dart 侧 `context.go` 回房）。
+     * 只是**导航投影**，不参与任何内容或认知判断。
      */
-    private val floatingBall: AylaFloatingBallController by lazy {
-        AylaFloatingBallController(
+    private val overlayBall: AylaOverlayFlutterHost by lazy {
+        AylaOverlayFlutterHost(
             applicationContext,
             onBallTap = { kind, sourceRoute ->
                 mainHandler.post {
@@ -725,25 +741,28 @@ class MainActivity : FlutterActivity() {
                     )
                 }
             },
-            onBallClosed = {
-                mainHandler.post { livePipChannel?.invokeMethod("onBallClosed", null) }
-            },
         )
     }
 
     /**
      * 通道 `showBall`：让悬浮球脱离应用（压在其他 App 之上）。
      *
-     * 参数 `{kind, sessionId, title, sourceRoute}`；返回值见 [AylaFloatingBallController.show]。
-     * 幂等：已有球时只更新配色/内容，不重复 addView。
+     * 参数 `{kind, sessionId, title, sourceRoute, payload}`。
+     * [payload] 是主引擎算好的**整组投影**（`AylaOverlayPayload.encode()` 的 JSON 串）——
+     * 第二引擎没有登录态 / store，会话集合只能由主引擎推过来。
+     * 返回值见 [AylaOverlayFlutterHost.show]。
+     * 幂等：已有窗口时只更新投影，不重复 addView / 不重建引擎。
      */
     private fun showBall(call: MethodCall): String =
-        floatingBall.show(
-            kind = call.argument<String>("kind") ?: AylaFloatingBallController.KIND_VOICE,
-            sessionId = call.argument<String>("sessionId") ?: "",
-            title = call.argument<String>("title") ?: "",
-            sourceRoute = call.argument<String>("sourceRoute") ?: "",
-        )
+        overlayBall.show(call.argument<String>("payload"))
+
+    /**
+     * 通道 `updateBall`：只更新投影（窗口已开时不重建 engine）。
+     *
+     * 返回 true = 已送达；false = 当前没有窗口（Dart 侧据此改走 `showBall` 重开）。
+     */
+    private fun updateBall(call: MethodCall): Boolean =
+        overlayBall.update(call.argument<String>("payload"))
 
     /**
      * PiP 形态变化（系统回调）。
@@ -850,8 +869,9 @@ class MainActivity : FlutterActivity() {
         inPipMode = false
         transitioningToPip = false
         // 悬浮球**不在这里 hide**：它存在的意义就是「App 界面没了、球还在」。
-        // 真正的清理点是 Dart 侧会话结束（`aylaHideDetachedBall`）与长按关球（onBallClosed）。
-        // 只把通道句柄置空，避免已经销毁的 messenger 被回调（controller 内部有 null 检查）。
+        // 真正的清理点是 Dart 侧会话结束（`aylaHideDetachedBall`，经 Activity 重建后的
+        // 新通道实例送达）与用户从系统层关掉它（`onBallClosed`）。
+        // 只把通道句柄置空，避免已经销毁的 messenger 被回调。
         livePipChannel = null
         super.onDestroy()
     }

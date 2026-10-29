@@ -177,6 +177,7 @@ class AylaLiveRoomBody extends StatefulWidget {
     this.deletingChannelId,
     this.onRetryPlayer,
     this.onRefreshPlayer,
+    this.onEnterMiniPlayer,
     this.onSendDanmaku,
     this.onPickDanmakuImage,
     this.onUploadDanmakuImage,
@@ -250,6 +251,13 @@ class AylaLiveRoomBody extends StatefulWidget {
   /// 播放重试 / 跳最新。
   final VoidCallback? onRetryPlayer;
   final VoidCallback? onRefreshPlayer;
+
+  /// 「小窗」键（把直播变成**应用窗口之外**的悬浮小窗）。
+  ///
+  /// **null = 不渲染该键**：移动端走既有的「退出直播间自动续小窗」路径，
+  /// 只有桌面端才需要显式按钮（用户原话：「电脑需要点按钮使直播变为悬浮小窗，
+  /// 但手机退出直播间自动续直播悬浮小窗」）。
+  final VoidCallback? onEnterMiniPlayer;
 
   /// 发送弹幕（全屏输入框也走它）；第二参 = 图片 mediaId（null = 纯文本）。
   final Future<bool> Function(String content, String? mediaId)? onSendDanmaku;
@@ -413,6 +421,8 @@ class _AylaLiveRoomBodyState extends State<AylaLiveRoomBody> {
     videoView: widget.videoView,
     onRetry: widget.onRetryPlayer,
     onRefresh: widget.onRefreshPlayer,
+    // 「小窗」键（桌面端才有；null ⇒ 不渲染，移动端走「退出页面自动续」）。
+    onEnterMiniPlayer: widget.onEnterMiniPlayer,
     onSendDanmaku: widget.onSendDanmaku == null
         ? null
         : (String content) => widget.onSendDanmaku!(content, null),

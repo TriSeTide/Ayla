@@ -31,6 +31,7 @@
 /// ⑬ 置真写入 roomId；⑭ 置假**连 roomId 一并清 null**；⑮ 未登录时静默返回。
 library;
 
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -201,6 +202,27 @@ void main() {
   });
 
   group('壳层接线（AppShell.tsx:130 + SessionActivityIndicator.tsx:34–82）', () {
+    /// 在「iOS 平台」下跑一段测试体，**并在体内复位** `debugDefaultTargetPlatformOverride`。
+    ///
+    /// 为什么必须体内复位：flutter_test 在**测试体结束后、tearDown 之前**就断言
+    /// 「foundation 调试变量已复位」（`_verifyInvariants`）⇒ 用 `tearDown` / `addTearDown`
+    /// 复位都会晚一步、被判成「测试改了调试变量」。
+    ///
+    /// 为什么要伪装平台：Windows / Android 上悬浮球**不再在应用内渲染**
+    /// （用户要求「应用内不再存在任何浮层」，渲染宿主搬到了窗口外第二引擎的透明叠加层）。
+    /// 本组用例锁的是**壳层投影逻辑**（取哪条记录 / 兜底 title+route / 在哪些路由上隐藏），
+    /// 那份逻辑与平台无关，只是渲染点不同；iOS 是「无跨应用悬浮能力 ⇒ 保留应用内渲染」
+    /// 的档位，正好用它验证投影本身。窗口外那条链路由 `live_mini_player_host_test.dart`
+    /// 与原生侧覆盖。
+    Future<void> onIosPlatform(Future<void> Function() body) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await body();
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    }
+
     /// 壳层宿主：自建最小 GoRouter（不 import 整张路由表，同 `app_shell_fabs_test.dart`）。
     ///
     /// 返回 [ProviderContainer] 以便用例直接改写 auth / 索引（等价 web 的
@@ -211,6 +233,14 @@ void main() {
       AuthUser? user,
       void Function(ProviderContainer c)? seed,
     }) async {
+      // ⚠️ **必须把平台伪装成 iOS**（2026-10-31）：
+      // Windows / Android 上悬浮球**不再在应用内渲染**（用户要求「应用内不再存在任何浮层」，
+      // 渲染宿主搬到了窗口外第二引擎的透明叠加层，见 `app_shell.dart` 的 `_SessionActivityHost`）。
+      // 而本组用例锁的是**壳层投影逻辑**（voice/live 取哪条记录、兜底 title/route、
+      // 在哪些路由上隐藏）—— 那份逻辑与平台无关，只是渲染点不同。
+      // iOS 是「无跨应用悬浮能力 ⇒ 保留应用内渲染」的档位，正好用它验证投影本身。
+      // 窗口外那条链路由 `live_mini_player_host_test.dart` / `session_activity_detach_test.dart`
+      // 与原生侧覆盖。
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -274,12 +304,13 @@ void main() {
       return container;
     }
 
+
     AylaSessionActivityIndicator indicator(WidgetTester tester) =>
         tester.widget<AylaSessionActivityIndicator>(
           find.byType(AylaSessionActivityIndicator),
         );
 
-    testWidgets('① 不在任何会话 ⇒ 两个参数都为 null（零渲染）', (WidgetTester tester) async {
+    testWidgets('① 不在任何会话 ⇒ 两个参数都为 null（零渲染）', (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(tester, '/group', user: _user());
 
       expect(indicator(tester).voice, isNull);
@@ -289,10 +320,10 @@ void main() {
         Size.zero,
         reason: 'tsx 135：两球都无 ⇒ return null（Flutter 用 0×0 表达）',
       );
-    });
+    }));
 
     testWidgets('② 在语音且不在房内路由 ⇒ 语音球取**索引里的** title / sourceRoute',
-        (WidgetTester tester) async {
+        (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/group',
@@ -312,10 +343,10 @@ void main() {
       expect(voice.title, '深夜电台', reason: 'tsx 42–53：id 命中 ⇒ 整条沿用索引记录');
       expect(voice.sourceRoute, '/group/g1/voice');
       expect(indicator(tester).live, isNull);
-    });
+    }));
 
     testWidgets('③ 索引缺该 id ⇒ 兜底投影（title「语音房」+ /voice/:id）',
-        (WidgetTester tester) async {
+        (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/group',
@@ -326,9 +357,9 @@ void main() {
       expect(voice, isNotNull, reason: '索引还没写入时也必须显示球（tsx 44–53 的兜底分支）');
       expect(voice!.title, '语音房', reason: 'tsx 49 的字面量');
       expect(voice.sourceRoute, '/voice/5');
-    });
+    }));
 
-    testWidgets('④ 直播兜底投影：title「直播间」+ /live/start/:id', (WidgetTester tester) async {
+    testWidgets('④ 直播兜底投影：title「直播间」+ /live/start/:id', (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/group',
@@ -339,10 +370,10 @@ void main() {
       expect(live, isNotNull);
       expect(live!.title, '直播间', reason: 'tsx 63 的字面量');
       expect(live.sourceRoute, '/live/start/9');
-    });
+    }));
 
     testWidgets('⑤ 在语音房自己的路由上 ⇒ 语音球隐藏（tsx 71–74）',
-        (WidgetTester tester) async {
+        (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/voice/5',
@@ -350,9 +381,9 @@ void main() {
       );
 
       expect(indicator(tester).voice, isNull);
-    });
+    }));
 
-    testWidgets('⑥ 群内语音：pathname == sourceRoute ⇒ 同样隐藏', (WidgetTester tester) async {
+    testWidgets('⑥ 群内语音：pathname == sourceRoute ⇒ 同样隐藏', (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/group/g1/voice',
@@ -367,10 +398,10 @@ void main() {
       );
 
       expect(indicator(tester).voice, isNull);
-    });
+    }));
 
     testWidgets('⑦ 直播球只在开播控制台隐藏；普通直播间里仍显示（tsx 76–79）',
-        (WidgetTester tester) async {
+        (WidgetTester tester) async => onIosPlatform(() async {
       await pumpShell(
         tester,
         '/live/start/9',
@@ -388,9 +419,9 @@ void main() {
         isNotNull,
         reason: 'web 原话：进入任何普通直播间都必须显示',
       );
-    });
+    }));
 
-    testWidgets('⑧ 点球的回调按 sourceRoute 导航', (WidgetTester tester) async {
+    testWidgets('⑧ 点球的回调按 sourceRoute 导航', (WidgetTester tester) async => onIosPlatform(() async {
       final ProviderContainer container = await pumpShell(
         tester,
         '/group',
@@ -414,6 +445,6 @@ void main() {
       // 导航后已进房 ⇒ 球按 ⑤ 的判据自行隐藏，闭环。
       expect(container.read(authNotifierProvider).user!.voiceRoomId, '5');
       expect(indicator(tester).voice, isNull);
-    });
+    }));
   });
 }

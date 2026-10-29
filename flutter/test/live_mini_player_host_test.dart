@@ -1,9 +1,10 @@
-/// 窄屏浮动小窗宿主（`AppShell.tsx:131–132`）+ 小窗运行时语义（`liveSessionRuntime.ts:299–317 / 533–537`）。
+/// 直播小窗宿主 + 小窗运行时语义（`liveSessionRuntime.ts:299–317 / 533–537`）。
 ///
-/// ## 覆盖（6 条，逐条对齐 web）
-/// ① 窄屏 + `miniPlayer` 非空 ⇒ 渲染 `AylaLiveMiniPlayer`；**宽屏同状态不渲染**
-///    （web 只在 `AppShell.tsx:132` 的 `isNarrow` 分支渲染）；
-/// ② `miniPlayer == null` ⇒ 不渲染；
+/// ## 覆盖（6 条）
+/// ① **应用内不再渲染 `AylaLiveMiniPlayer`**（2026-10-31 用户要求：浮层只在窗口外）：
+///    `miniPlayer` 非空时壳层**零尺寸**（渲染宿主在第二引擎的独立置顶窗口里，
+///    见 `lib/widgets/live/live_window_surface.dart`）；
+/// ② `miniPlayer == null` ⇒ 同样零尺寸；
 /// ③ 窄屏离开直播间页（直播中）⇒ 置位（web `detachView` 的窄屏判定）；
 /// ④ 小窗模式下直播结束 ⇒ 清位 + 完整销毁（web `:533–537`）；
 /// ⑤ 关闭小窗 ⇒ 清位且**幂等**（web `LiveMiniPlayer.tsx:93–96`）；
@@ -157,21 +158,22 @@ Future<void> _pumpShell(
 }
 
 void main() {
-  group('窄屏浮动小窗宿主（AppShell.tsx:46 / 131–132）', () {
-    testWidgets('① 窄屏 + miniPlayer 非空 ⇒ 渲染小窗', (WidgetTester tester) async {
+  group('小窗渲染宿主已搬到窗口外（2026-10-31 用户要求：应用内不再有任何浮层）', () {
+    testWidgets('① 窄屏 + miniPlayer 非空 ⇒ 应用内**零渲染**（浮层在窗口外）', (
+      WidgetTester tester,
+    ) async {
       await _pumpShell(tester, viewport: const Size(375, 812), mini: _mini);
 
-      expect(find.byType(AylaLiveMiniPlayer), findsOneWidget);
       expect(
-        tester
-            .widget<AylaLiveMiniPlayer>(find.byType(AylaLiveMiniPlayer))
-            .channelTitle,
-        '深夜电台',
-        reason: 'LiveMiniPlayer.tsx:195 —— title = mini.channel?.title ?? "直播间"',
+        find.byType(AylaLiveMiniPlayer),
+        findsNothing,
+        reason: '用户原话：不会存在直播小窗浮层，取而代之的是创建时就脱离应用的悬浮窗',
       );
+      // 宿主仍在（它是「窗口外小窗的开关」），只是零尺寸。
+      expect(find.byType(SizedBox), findsWidgets);
     });
 
-    testWidgets('① 宽屏同状态 ⇒ **不**渲染小窗（web 只在 isNarrow 渲染）', (
+    testWidgets('① 宽屏同状态 ⇒ 同样零渲染（窗口外宿主与视口宽度无关）', (
       WidgetTester tester,
     ) async {
       await _pumpShell(tester, viewport: const Size(1440, 900), mini: _mini);

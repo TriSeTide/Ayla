@@ -12,11 +12,20 @@
 ///   `[data-fixed=true]` —— 脱离流、固定到底部并 `translateY(100%)`（200ms ease-in），
 ///   此时内容区吃满全高。Flutter 用「Column 里撤掉 + Stack 里 `AnimatedSlide` 叠一层」表达。
 ///
-/// ## 窄屏浮动小窗（`AppShell.tsx:131–132`，2026-09-29 接线）
-/// `isNarrow && miniPlayer != null` ⇒ 渲染 `AylaLiveMiniPlayer`（fixed 右下 16 / z 60）。
-/// 状态与语义在 `state/live_state.dart`（`miniPlayer`）与 `pages/live_support.dart`
-/// （`detachView` 进小窗 / `refreshSrsStatus` 结束清位 / `aylaCloseLiveMiniPlayer` 关闭）——
-/// 小窗**只有窄屏渲染**（宽屏不开，web 同一条判据）。
+/// ## 浮动小窗 / 悬浮球**都不在应用内渲染了**（2026-10-31 用户明确要求）
+/// 用户原话：「应用内不会再存在任何浮层，不再存在原本那个悬浮球浮层，也不会存在直播小窗浮层，
+/// 取而代之的是创建时就脱离应用的、显示在其他应用之上的悬浮窗，外观和交互完全没有区别」。
+///
+/// ⇒ 两个浮层的**渲染宿主**都搬到了第二个 engine 的独立窗口
+/// （`windows/runner/live_window.cpp` + `lib/widgets/shell/overlay_window_app.dart` +
+/// `lib/widgets/live/live_window_surface.dart`），widget 树仍是同一份代码。
+/// 本文件只保留**数据投影**：
+/// - 悬浮球：[_SessionActivityHost] 算出「当前有哪些会话」⇒ 推给窗口外悬浮球窗口；
+/// - 直播小窗：[_LiveMiniPlayerHost] 不再 build `AylaLiveMiniPlayer`，而是把
+///   `miniPlayer` 投影成窗口外小窗的开关（`openLiveWindow`）。
+///
+/// 平台不支持（iOS / Web / 未实现的原生）时这两个宿主**什么都不渲染** ——
+/// 用户的要求是"不要应用内浮层"，所以这里**不再**回落到 App 内浮层。
 ///
 /// ## 红点快捷消息栏（`AppShell.tsx:158–161`，2026-10 接线）
 /// 窄屏 + `shell.quickMessagesOpen` ⇒ 渲染 `AylaQuickMessagesHost`（取数 + 两 tab 面板 +
@@ -36,13 +45,12 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../pages/group_page.dart' show AylaGroupBackHandler, aylaGroupBackHandler;
-import '../pages/live_support.dart';
 import '../pages/quick_messages_support.dart' show AylaQuickMessagesHost;
 import '../router/shell_config.dart';
 import '../state/auth_bootstrap.dart';
@@ -62,11 +70,12 @@ import '../theme/app_icons.dart';
 import '../theme/buttons.dart';
 import '../theme/tokens.dart';
 import '../widgets/base/dialogs.dart' show AylaConfirmDialog;
-import '../widgets/live/live_mini_player.dart';
 import '../widgets/motion/gestures.dart' show AylaPrimaryNavPage;
 import '../widgets/shell/bottom_tabs.dart';
 import '../widgets/shell/fab.dart';
 import '../widgets/shell/create_sheet.dart' show AylaRootOverlay;
+import '../widgets/shell/overlay_window_app.dart'
+    show AylaOverlayKind, AylaOverlayPayload;
 import '../widgets/shell/session_activity.dart';
 import '../widgets/shell/top_nav.dart';
 import 'app_back.dart';
@@ -499,16 +508,26 @@ class _AppShellState extends ConsumerState<AppShell> {
         // 而消息/创建 FAB 只有 40 ⇒ 悬浮球必须排在**两个 FAB 之后**。本 `Stack` 里
         // 同层按声明顺序叠放，排在它们之前会被 44px 的球（含收起态贴边区）盖住入口。
         const _SessionActivityHost(),
-        // ---- 窄屏浮动小窗（`AppShell.tsx:131–132`）----
-        // 只有窄屏渲染，且 `miniPlayer` 非空才出现（唯一 owner）；层级 z 60 高于底栏 50、
-        // 消息/创建 FAB 40、活动态悬浮球 55，低于弹层遮罩 70+ ⇒ 放在 FAB 之后、浮层之前。
-        // ⚠️ 本件必须是 `Stack` 的**直接子级**：`AylaLiveMiniPlayer` 自身返回 `Positioned`
-        //（等价 web 的 `position: fixed`），外面再包 `Positioned` 会命中“双重 ParentData”。
-        if (isNarrow && liveMiniPlayer != null)
-          _LiveMiniPlayerHost(
-            mini: liveMiniPlayer,
-            onOpenRoom: () => context.go(liveMiniPlayer.sourceRoute),
-          ),
+        // ---- 直播小窗（**窗口外**，2026-10-31 起不再在应用内渲染）----
+        // 用户原话：「不会存在直播小窗浮层，取而代之的是创建时就脱离应用的悬浮窗」。
+        // 所以这里只保留**数据投影**：`miniPlayer` 出现 ⇒ 打开窗口外小窗；
+        // 消失 ⇒ 关掉它。widget 本体仍是同一份 `AylaLiveMiniPlayer`（跑在第二引擎里）。
+        //
+        // ## 平台分工（能力边界，如实登记）
+        // - **Windows**：`aylaEnterDetachedLive` 走 `openLiveWindow` ⇒ 第二引擎 + 置顶透明窗，
+        //   里面 build 同一份 `AylaLiveMiniPlayer`（含 media_kit 那一路 HLS）。
+        // - **Android**：第二引擎**不注册任何插件**（见 `OverlayFlutterHost.kt` 文件头），
+        //   放不了 media_kit 视频面；Android 的「视频离开应用」由**既有 Android PiP** 承担
+        //   （`enterPip`，系统原生画中画）。此时本件拿到 `ok=false` ⇒ 不打开窗口外小窗，
+        //   但**会话与观看登记继续**（PiP 是同一 Activity 同一 engine）。
+        //   叠加层那边仍然显示**同一个悬浮球组**（含直播球，点一下回房）——
+        //   这是用户「用现有悬浮球」那条需求的直接实现。
+        //
+        // 无渲染子级 ⇒ 本件不占 `Stack` 的任何位置（也不再有 z 60 的层序问题）。
+        _LiveMiniPlayerHost(
+          mini: liveMiniPlayer,
+          onOpenRoom: () => context.go(liveMiniPlayer!.sourceRoute),
+        ),
         // ---- 客户端更新弹窗（登录后自动检查的呈现面；层级高于 FAB/小窗）----
         const AylaUpdateHost(),
         // ---- 创建浮层（`.create-fab` 的落点）----
@@ -554,36 +573,46 @@ class _SessionActivityHost extends ConsumerStatefulWidget {
       _SessionActivityHostState();
 }
 
-/// 悬浮球宿主的可变面（2026-10-31 新增「脱离应用」后从 [ConsumerWidget] 升级）。
+/// 悬浮球宿主的可变面（2026-10-31 起是「窗口外浮层的同步器」）。
+///
+/// ## 用户定稿（逐字）
+/// 「**不要造轮子！用现有的悬浮球和直播小窗**」
+/// 「悬浮球不应该重新做一个出来，而是直接原来的浮层悬浮球直接扔出应用窗口外」
+/// 「应用内不会再存在任何浮层……取而代之的是创建时就脱离应用的、显示在其他应用之上的
+/// 悬浮窗，外观和交互完全没有区别」
+///
+/// ⇒ 本件**不再**在应用内渲染球组，也**没有**任何「脱离」按钮：
+/// 它只做一件事 —— 把「当前有哪些会话」算成 [AylaOverlayPayload] 推给
+/// **第二个引擎的叠加层**（Windows：置顶透明窗；Android：TYPE_APPLICATION_OVERLAY）。
 ///
 /// 三个状态位：
-/// - [_detachedKind]：哪个会话已脱离到系统层（null = 没脱离）——驱动脱离键高亮；
+/// - [_ballWindowOpen]：系统层浮层当前是否已打开（以原生回执为准，不用「推过」猜）；
 /// - [_overlayGuideOpen]：Android 未授予「显示在其他应用上层」时的引导弹层；
-/// - [_busy]：正在等平台返回（防连点重复发通道调用）。
+/// - [_busy]：正在等平台返回（防重入 —— `showBall` 会建第二引擎，很慢）。
 ///
 /// **离开 App 后仍要能点回会话** ⇒ 监听 [AylaDetachedLiveEvents]：
-/// `ballTap` → `context.go(sourceRoute)`；`ballClosed` → 清零「已脱离」。
+/// `ballTap` → `context.go(sourceRoute)`；`ballClosed` → 复位「已打开」认知。
 class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
-  /// 已脱离到系统层的会话种类（null = 未脱离）。
-  AylaActivityKind? _detachedKind;
-
-  /// 是否正在等通道返回（防连点）。
-  bool _busy = false;
-
-  /// Android 权限引导弹层（第一次点脱离键时出现，见 task-5 研究结论 1）。
-  bool _overlayGuideOpen = false;
-
   /// 原生事件订阅（`ballTap` / `ballClosed`）。
   StreamSubscription<AylaDetachedLiveEvent>? _events;
 
-  /// 上一轮同步时**仍在进行**的会话集合（用于「活动态消失 ⇒ 自动收起系统球」）。
-  final Set<AylaActivityKind> _seen = <AylaActivityKind>{};
-
-  /// 上一轮同步时用户的媒体活动字段（[didChangeDependencies] 的变更判据）。
+  /// 上一次推给窗口外悬浮球的 payload（null = 还没推过）。
   ///
-  /// 用记录（record）而不是直接比较 `user`：任何与媒体无关的字段变化（昵称 / 在线态 /
-  /// 头像）都会让 `user` 变成新对象，不该触发收起判断。
-  (bool, String?, bool, String?)? _lastMedia;
+  /// 用它做**去重**：`build` 会因为活动态索引 / auth 字段的任意变化重跑，
+  /// 而通道往返是有成本的（序列化 + 跨引擎消息），只在投影真的变了才推。
+  String? _lastPushedBallPayload;
+
+  /// 窗口外悬浮球当前是否已打开（原生回执为准）。
+  ///
+  /// **不能**用「上次推成功」当已打开：用户可能从系统层把它关掉了
+  /// （`onBallClosed`），或者根本没开成（平台不支持 / 原生失败）。
+  bool _ballWindowOpen = false;
+
+  /// 正在等通道返回（防连点 / 防重入）。
+  bool _busy = false;
+
+  /// Android 未授予「显示在其他应用上层」时的引导弹层。
+  bool _overlayGuideOpen = false;
 
   @override
   void initState() {
@@ -591,43 +620,14 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
     _events = AylaDetachedLiveEvents.instance.stream.listen(_onDetachedEvent);
   }
 
-  /// 会话结束 ⇒ 自动收起系统层悬浮球（幂等：原生侧无球时是空操作）。
-  ///
-  /// 放在 [didChangeDependencies] 而不是 [build]：① 这里可以安全 `setState`；
-  /// ② `ref.watch` 已在 build 里登记了同一依赖，不额外增加重建面。
-  /// **只认 auth 的四个媒体字段**（会话是否真的还在进行），不认「本页是否隐藏该球」——
-  /// 用户正待在语音房里时球按 tsx 隐藏，但系统层悬浮球不该因此消失。
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final AuthUser? user = ref.read(authNotifierProvider).user;
-    final (bool, String?, bool, String?) next = (
-      user?.isInVoice ?? false,
-      user?.voiceRoomId,
-      user?.isLive ?? false,
-      user?.liveRoomId,
-    );
-    if (next == _lastMedia) return;
-    _lastMedia = next;
-    final Set<AylaActivityKind> present = <AylaActivityKind>{
-      if (next.$1 && next.$2 != null) AylaActivityKind.voice,
-      if (next.$3 && next.$4 != null) AylaActivityKind.live,
-    };
-    final Set<AylaActivityKind> gone =
-        _seen.where((AylaActivityKind k) => !present.contains(k)).toSet();
-    _seen
-      ..clear()
-      ..addAll(present);
-    if (gone.isEmpty) return;
-    if (_detachedKind != null && gone.contains(_detachedKind)) {
-      setState(() => _detachedKind = null);
-      unawaited(aylaHideDetachedBall());
-    }
-  }
-
   @override
   void dispose() {
     unawaited(_events?.cancel());
+    // 壳层卸载（登出 / 应用退出）⇒ 别把悬浮球窗口留在桌面上。
+    if (_ballWindowOpen) {
+      _ballWindowOpen = false;
+      unawaited(aylaHideDetachedBall());
+    }
     super.dispose();
   }
 
@@ -639,8 +639,11 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
         final String route = event.sourceRoute;
         if (route.isNotEmpty && mounted) context.go(route);
       case AylaDetachedLiveEventKind.ballClosed:
-        // 用户从系统层关掉了球（Android 通知栏「关闭」/ Windows 关窗）⇒ 复位，键回未脱离态。
-        if (mounted) setState(() => _detachedKind = null);
+        // 用户从系统层关掉了球（Android 通知栏「关闭」/ Windows 关窗）⇒ 清掉
+        // 「窗口外悬浮球已打开」的本地认知，下一次会话变化要能重开它
+        // （否则 Windows 上用户关掉球以后它就再也不出现了）。
+        _ballWindowOpen = false;
+        _lastPushedBallPayload = null;
       case AylaDetachedLiveEventKind.pipChanged:
       case AylaDetachedLiveEventKind.liveWindowClosed:
         // PiP / 独立直播窗归 task-2 / task-4；本件不消费。
@@ -648,45 +651,65 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
     }
   }
 
-  /// 点脱离键：把当前会话交给系统层（Android 叠加窗 / Windows 置顶小窗）。
-  Future<void> _onDetach(AylaActivitySession session) async {
-    // 已脱离 ⇒ 再点是「取消」。
-    if (_detachedKind != null) {
-      setState(() => _detachedKind = null);
-      await aylaHideDetachedBall();
+  /// 把「当前有哪些会话」推给**窗口外**的悬浮球窗口（Windows / Android 的唯一渲染宿主）。
+  ///
+  /// 语义 = 「同步」而不是「开关」：
+  /// - 有会话且窗口没开 ⇒ `showBall`（原生负责建窗 + 建第二引擎）；
+  /// - 有会话且窗口已开 ⇒ `updateBall`（只推新投影，不重建窗口）；
+  /// - 无会话且窗口已开 ⇒ `hideBall`（会话都结束了，浮层没有存在意义）；
+  /// - 无会话且窗口没开 ⇒ 什么都不做。
+  Future<void> _syncDetachedBall(AylaOverlayPayload payload) async {
+    if (!aylaDetachedBallPlatformSupported) return;
+    final String encoded = payload.encode();
+    if (payload.hasAnySession) {
+      if (_ballWindowOpen) {
+        if (encoded == _lastPushedBallPayload) return;
+        _lastPushedBallPayload = encoded;
+        final bool delivered = await aylaUpdateDetachedBall(payload: encoded);
+        if (!delivered) {
+          // 窗口在推送途中被用户关掉了（原生侧 onBallClosed 可能还没到）：
+          // 直接重开，避免「球永远不再出现」。
+          _ballWindowOpen = false;
+          _lastPushedBallPayload = null;
+        }
+        return;
+      }
+      if (_busy) return;
+      _busy = true;
+      final bool liveFirst = payload.liveSessionId.isNotEmpty;
+      final AylaDetachedBallResult result = await aylaShowDetachedBall(
+        kind: liveFirst
+            ? AylaActivityKind.live.name
+            : AylaActivityKind.voice.name,
+        sessionId: liveFirst ? payload.liveSessionId : payload.voiceSessionId,
+        title: liveFirst ? payload.liveTitle : payload.voiceTitle,
+        sourceRoute: liveFirst ? payload.liveRoute : payload.voiceRoute,
+        payload: encoded,
+      );
+      _busy = false;
+      if (!mounted) return;
+      if (result == AylaDetachedBallResult.shown) {
+        _ballWindowOpen = true;
+        _lastPushedBallPayload = encoded;
+        return;
+      }
+      // 没开成：明确告知（不静默），并把去重基线清掉，下一次变化还会再试。
+      _lastPushedBallPayload = null;
+      if (result == AylaDetachedBallResult.permissionRequired) {
+        // Android 未授予「显示在其他应用上层」：弹明确引导（Windows 不会走到这里）。
+        // ⚠️ 去重：未授权时 `_ballWindowOpen` 恒为 false，每次会话变化都会重试
+        // ⇒ 不判重会把引导弹层刷成无限循环。
+        if (!_overlayGuideOpen) setState(() => _overlayGuideOpen = true);
+      } else if (result == AylaDetachedBallResult.failed) {
+        _toast('窗口外悬浮球打开失败，请稍后重试。');
+      }
       return;
     }
-    // 不支持的平台（iOS / Web）：**明确告知**，不静默（task-5 研究结论的口径）。
-    if (!aylaDetachedBallPlatformSupported) {
-      _toast('当前平台不支持「脱离应用」悬浮球，已留在应用内。');
-      return;
-    }
-    if (_busy) return;
-    _busy = true;
-    final AylaDetachedBallResult result = await aylaShowDetachedBall(
-      kind: session.kind.name,
-      sessionId: session.sessionId,
-      title: session.title,
-      sourceRoute: session.sourceRoute,
-    );
-    _busy = false;
-    if (!mounted) return;
-    switch (result) {
-      case AylaDetachedBallResult.shown:
-        setState(() => _detachedKind = session.kind);
-      case AylaDetachedBallResult.permissionRequired:
-        // 首次使用：弹明确引导 →「去设置」跳系统页（用户可能在设置页直接返回，
-        // 所以回来后再点一次才可能真正出球）。
-        setState(() => _overlayGuideOpen = true);
-      case AylaDetachedBallResult.unsupported:
-        _toast(
-          defaultTargetPlatform == TargetPlatform.windows
-              ? '电脑端悬浮球暂不可用（依赖独立置顶窗口能力），请使用 App 内悬浮球。'
-              : '当前平台不支持「脱离应用」悬浮球。',
-        );
-      case AylaDetachedBallResult.failed:
-        _toast('悬浮球脱离失败，请稍后重试。');
-    }
+    // 没有会话了。
+    if (!_ballWindowOpen) return;
+    _ballWindowOpen = false;
+    _lastPushedBallPayload = null;
+    await aylaHideDetachedBall();
   }
 
   void _toast(String message) {
@@ -726,7 +749,6 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
                 sessionId: voiceId,
                 fallbackRoute: '/voice/${Uri.encodeComponent(voiceId)}',
                 fallbackTitle: '语音房',
-                kind: AylaActivityKind.voice,
               );
         final AylaActivitySession? live = liveId == null
             ? null
@@ -735,7 +757,6 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
                 sessionId: liveId,
                 fallbackRoute: '/live/start/${Uri.encodeComponent(liveId)}',
                 fallbackTitle: '直播间',
-                kind: AylaActivityKind.live,
               );
         // tsx 71–82 的两条隐藏判定：
         // · 语音球在**语音房自己的路由**上隐藏（群内语音是 `sourceRoute` 那条）；
@@ -753,19 +774,53 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
         final AylaActivitySession? shownLive =
             live != null && !onLiveConsole ? live : null;
 
-        // 脱离键只在这两种「本页确实看得到一个球」的档位上出现：
-        // 组件的 `onDetach` 只给**页面层确实有会话**时接线；
-        // 进入语音房 / 开播控制台（球按 tsx 隐藏）时仍可脱离 —— 此时本页看不到球，
-        // 键自然也不出现，但进后台再回主页就能看到高亮态（宿主状态是壳层的）。
+        // ---- 窗口外悬浮球（Windows + Android）----
+        //
+        // 用户原话：「应用内不会再存在任何浮层，不再存在原本那个悬浮球浮层……
+        // 取而代之的是创建时就脱离应用的、显示在其他应用之上的悬浮窗，
+        // 外观和交互完全没有区别」。
+        //
+        // 所以这两个平台上**不再**在应用内 build `AylaSessionActivityIndicator`：
+        // 同一份组件改由第二个引擎在**透明叠加层**里 build
+        // - Windows：`windows/runner/live_window.cpp`（WS_EX_TOPMOST + 逐像素透明）
+        // - Android：`OverlayFlutterHost.kt`（TYPE_APPLICATION_OVERLAY + TRANSLUCENT）
+        // 两边都走 `widgets/shell/overlay_window_app.dart` 的同一棵树。
+        // 本件只负责算「该显示哪些球」并推过去。
+        //
+        // iOS / Web 保持原样在应用内渲染 —— 它们**没有任何**跨应用悬浮窗口 API
+        // （iOS 无系统 API；Web 更无），这是能力边界，不伪装成已实现。
+        final bool detachedBall = !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.windows ||
+                defaultTargetPlatform == TargetPlatform.android) &&
+            aylaDetachedBallPlatformSupported;
+        if (detachedBall) {
+          // 推的**不是** `shownVoice` / `shownLive`，而是完整的 `voice` / `live`：
+          // 窗口外悬浮球是常驻浮层，不该跟着「本页是否隐藏该球」闪烁
+          // （用户进语音房时应用内那一份按 tsx 隐藏，但系统层上的球不该消失）。
+          final AylaOverlayPayload payload = AylaOverlayPayload(
+            kind: AylaOverlayKind.activityBall,
+            voiceKind: voice?.kind.name ?? '',
+            voiceSessionId: voice?.sessionId ?? '',
+            voiceTitle: voice?.title ?? '',
+            voiceRoute: voice?.sourceRoute ?? '',
+            liveKind: live?.kind.name ?? '',
+            liveSessionId: live?.sessionId ?? '',
+            liveTitle: live?.title ?? '',
+            liveRoute: live?.sourceRoute ?? '',
+          );
+          // ⚠️ 必须在**构建之外**发通道调用：`showBall` 会建第二个 engine，
+          // 在 build 里 await 会卡住首帧。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            unawaited(_syncDetachedBall(payload));
+          });
+        }
+
+        // 应用内那一份：Windows / Android 上**不渲染**（渲染宿主在窗口外）。
         final AylaSessionActivityIndicator indicator =
             AylaSessionActivityIndicator(
           voice: shownVoice,
           live: shownLive,
-          // 平台不支持 ⇒ 不接线（组件据此不渲染脱离键，视觉与旧版完全一致）。
-          onDetach:
-              aylaDetachedBallPlatformSupported ? _onDetach : null,
-          detached: _detachedKind != null &&
-              (shownVoice != null || shownLive != null),
           // tsx 148 / 159：`navigate(session.sourceRoute || 兜底路由)` ——
           // 兜底已在 [_activitySession] 里拼好，这里直接用。
           onOpenSession: (AylaActivitySession session) =>
@@ -773,10 +828,11 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
         );
         return Stack(
           children: <Widget>[
-            indicator,
-            // Android「显示在其他应用上层」授权引导（复用库内确认弹层 + 根 Overlay：
+            if (!detachedBall) indicator,
+            // Android「显示在其他应用上层」授权引导（**没有运行时弹窗**，只能跳系统设置页
+            // ⇒ 必须给明确引导，不能静默失败）。复用库内确认弹层 + 根 Overlay：
             // 遮罩要铺满整视口，挂在壳层 Stack 里会被顶栏挡住 —— 与 `voice_support.dart:1496`
-            // 同一条实测结论）。
+            // 同一条实测结论。
             if (_overlayGuideOpen)
               AylaRootOverlay(
                 builder: (BuildContext _) => AylaConfirmDialog(
@@ -800,7 +856,6 @@ class _SessionActivityHostState extends ConsumerState<_SessionActivityHost> {
     );
   }
 }
-
 /// 把「会话活动索引的记录」投影成悬浮球要的会话（web `SessionActivityIndicator.tsx:41–68`）。
 ///
 /// 逐条复刻 tsx 的三元链：
@@ -817,71 +872,138 @@ AylaActivitySession _activitySession({
   required String sessionId,
   required String fallbackRoute,
   required String fallbackTitle,
-  required AylaActivityKind kind,
 }) {
   if (record != null && record.sessionId == sessionId) {
     return AylaActivitySession(
       sessionId: record.sessionId,
       sourceRoute: record.sourceRoute,
       title: record.title,
-      kind: kind,
     );
   }
   return AylaActivitySession(
     sessionId: sessionId,
     sourceRoute: fallbackRoute,
     title: fallbackTitle,
-    kind: kind,
   );
 }
 
-/// 窄屏浮动小窗宿主（web `AppShell.tsx:131–132`：
-/// `{isNarrow && liveMiniPlayer ? <LiveMiniPlayer /> : null}`）。
+/// 直播小窗宿主 —— **窗口外小窗的开关**（2026-10-31 起不再在应用内渲染）。
 ///
-/// - **渲染条件**只由 `AylaLiveState.miniPlayer` 决定（同 web：组件自身读 store），
-///   位置/尺寸/交互全在 `AylaLiveMiniPlayer` 内部（fixed 右下 16 / 168×94 / z 60）；
-/// - 会话（含 `videoView`）来自全局小窗宿主 [aylaMiniPlayerOwner]（唯一 owner）；
-///   本件订阅它的 `notifyListeners`，播放器状态变化时刷新画面；
-/// - **必须是 `Stack` 的直接子级**：`AylaLiveMiniPlayer` 自身返回 `Positioned`（等价 web 的
-///   `position: fixed`）。本件是 StatelessWidget（不产生 RenderObject），`Positioned` 仍会
-///   正确挂到 `Stack` 的 parentData 上；外面再包一层 `Positioned` 才会报双重 ParentData。
-class _LiveMiniPlayerHost extends StatelessWidget {
+/// ## 为什么不再 build `AylaLiveMiniPlayer`
+/// 用户原话：「不会存在直播小窗浮层，取而代之的是创建时就脱离应用的、显示在其他应用之上的
+/// 悬浮窗，外观和交互完全没有区别」。
+/// ⇒ widget 树搬到第二个 engine（`widgets/live/live_window_surface.dart` 的
+/// `AylaDetachedMiniPlayerHost`，build 的仍是**同一个** `AylaLiveMiniPlayer`），
+/// 本件退化成「`miniPlayer` 出现 ⇒ 打开窗口外小窗；消失 ⇒ 关掉它」的**同步器**。
+///
+/// ## 为什么仍然是个 widget（而不是一个纯监听器）
+/// 它天然挂在 `AppShell` 的 `build` 里 ⇒ 能在「`miniPlayer` 变化」这一刻拿到最新的
+/// `mini`，不需要额外的全局注册表；并且它**返回零尺寸**（`SizedBox.shrink`），
+/// 不参与 `Stack` 的层序（应用内不再有任何浮层）。
+///
+/// ## 同步语义
+/// - `mini != null` 且窗口没开 ⇒ `openLiveWindow`（带归一后的 HLS 地址 + 标题）；
+/// - `mini != null` 且窗口已开 ⇒ 只更新标题/地址（切台）；
+/// - `mini == null` 且窗口已开 ⇒ `closeLiveWindow`。
+///
+/// 原生侧「用户关掉小窗」会回 `onLiveWindowClosed` ⇒ 清掉本地认知，
+/// 下一次 `miniPlayer` 变化还能重开（不会「关一次就再也不出现」）。
+class _LiveMiniPlayerHost extends StatefulWidget {
   const _LiveMiniPlayerHost({required this.mini, required this.onOpenRoom});
 
-  /// 小窗 UI 投影（`AylaLiveState.miniPlayer`）。
-  final AylaLiveMiniPlayerState mini;
+  /// 小窗 UI 投影（`AylaLiveState.miniPlayer`）；null = 没有小窗。
+  final AylaLiveMiniPlayerState? mini;
 
-  /// 点击小窗 / Enter / Space → 回直播间（web `navigate(mini.sourceRoute)`）。
+  /// 点小窗主体 → 回直播间（由原生侧 `activateMain` 触发）。
   final VoidCallback onOpenRoom;
 
-  /// 无宿主会话时的空可监听（避免每次 build 新建订阅对象）。
-  static final Listenable _idle = Listenable.merge(const <Listenable>[]);
+  @override
+  State<_LiveMiniPlayerHost> createState() => _LiveMiniPlayerHostState();
+}
+
+class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
+  /// 窗口外小窗当前是否已打开（以原生回执为准）。
+  bool _open = false;
+
+  /// 正在打开 / 关闭中（防重入：`show` 会建第二个 engine，很慢）。
+  bool _busy = false;
+
+  /// 上一次成功打开时的频道 id / 播放地址（切台或换地址才需要重开窗口）。
+  String? _openedChannelId;
+  String? _openedUrl;
+
+  /// 原生事件订阅（`liveWindowClosed`）。
+  StreamSubscription<AylaDetachedLiveEvent>? _events;
+
+  @override
+  void initState() {
+    super.initState();
+    _events = AylaDetachedLiveEvents.instance.stream.listen(
+      (AylaDetachedLiveEvent e) {
+        if (e.kind != AylaDetachedLiveEventKind.liveWindowClosed) return;
+        // 用户关掉了窗口外小窗 ⇒ 清本地认知。**不销毁会话**：会话归
+        // `live_support.dart` 管（它自己也收到这条事件去重新接管画面）。
+        _open = false;
+        _openedChannelId = null;
+        _openedUrl = null;
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_events?.cancel());
+    if (_open) {
+      _open = false;
+      unawaited(aylaCloseDetachedLive());
+    }
+    super.dispose();
+  }
+
+  /// 把「该不该有窗口外小窗」同步给原生（幂等；只在真的变化时才发通道调用）。
+  Future<void> _sync() async {
+    if (_busy) return;
+    final AylaLiveMiniPlayerState? mini = widget.mini;
+    if (mini == null) {
+      if (!_open) return;
+      _busy = true;
+      _open = false;
+      _openedChannelId = null;
+      _openedUrl = null;
+      await aylaCloseDetachedLive();
+      _busy = false;
+      return;
+    }
+    // 平台不支持（iOS / Web / 原生未实现）：明确降级 —— 应用内不再有浮层，
+    // 所以这里什么都不做（不静默伪装成「已脱离」，也不偷偷把 App 内小窗加回来）。
+    if (!aylaDetachedLivePlatformSupported) return;
+    final String? url = mini.channel?.hlsUrl ?? mini.channel?.flvUrl;
+    final String channelId = mini.channelId;
+    if (_open && _openedChannelId == channelId && _openedUrl == url) {
+      return; // 同一个频道、同一路地址：不需要任何动作。
+    }
+    _busy = true;
+    final bool ok = await aylaEnterDetachedLive(
+      channelId: channelId,
+      title: mini.title,
+      playUrl: url,
+    );
+    _busy = false;
+    if (!mounted) return;
+    _open = ok;
+    _openedChannelId = ok ? channelId : null;
+    _openedUrl = ok ? url : null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final AylaLiveRoomSession? owner = aylaMiniPlayerOwner;
-    return ListenableBuilder(
-      listenable: owner ?? _idle,
-      builder: (BuildContext context, Widget? child) => AylaLiveMiniPlayer(
-        // 同一会话实例的 `videoView`：Flutter 的平台视图不能跨树迁移 ⇒ 由平台实现重建
-        // 渲染面（播放器实例与 HLS 连接不重建，见 `live_support.dart` 文件头的偏离登记）。
-        videoView: owner?.videoView,
-        // web `LiveMiniPlayer.tsx:195` `title={mini.channel?.title ?? "直播间"}`。
-        channelTitle: mini.title,
-        onOpenRoom: onOpenRoom,
-        // 关闭键 = 完整销毁会话（web `LiveMiniPlayer.tsx:93–96`；幂等）。
-        onClose: () => unawaited(aylaCloseLiveMiniPlayer()),
-        // ---- 「脱离应用」键（2026-10-31；键位与视觉在 `live_mini_player.dart` 内部）----
-        // 会话层不持有 ref，脱离入口挂在 `AylaLiveRoomSession` 上（它内部走
-        // `core/platform/detached_live.dart`，Android 原生 PiP / Windows 独立置顶窗）。
-        // `owner == null`（小窗状态还在、宿主会话已销毁的瞬态）⇒ 不给回调 = 键禁用可得，
-        // 不会出现「能点但点了没反应」。
-        onDetach: owner == null
-            ? null
-            : () => unawaited(owner.enterDetachedPresentation()),
-        // 平台不支持（iOS / Web）时把键降级为不可用（组件按该参数隐藏/禁用）。
-        detachEnabled: aylaDetachedLivePlatformSupported,
-      ),
-    );
+    // 通道调用必须在构建之外：`openLiveWindow` 会建第二个 engine，
+    // 在 build 里 await 会卡住首帧。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_sync());
+    });
+    // 应用内不再渲染任何浮层 ⇒ 零尺寸（不占 `Stack` 的位置）。
+    return const SizedBox.shrink();
   }
 }

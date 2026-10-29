@@ -13,11 +13,13 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/api/live_api.dart';
+import '../core/platform/detached_live.dart' show aylaDetachedLivePlatformSupported;
 import '../core/models/share_payload.dart' show AylaSharePayload;
 import '../state/auth_state.dart';
 import '../state/display_status.dart' show presenceOnline;
@@ -260,6 +262,12 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       onBack: () => context.canPop() ? context.pop() : context.go('/live'),
       onRetryPlayer: () => unawaited(session.retryPlayer()),
       onRefreshPlayer: () => unawaited(session.refreshPlayer()),
+      // 「小窗」键：只在桌面端渲染 —— 用户原话「电脑需要点按钮使直播变为悬浮小窗，
+      // 但手机退出直播间自动续直播悬浮小窗」⇒ 移动端保持既有的自动续接路径。
+      onEnterMiniPlayer: aylaDetachedLivePlatformSupported &&
+              defaultTargetPlatform == TargetPlatform.windows
+          ? () => unawaited(session.enterDetachedPresentation())
+          : null,
       onSendDanmaku: session.sendDanmaku,
       // 自给自足档（web `LiveRoomBody.tsx:260/328`：只给 targetType/targetId）——
       // 收藏键自己 retain + load + toggle；本页原先把这三个接线都写在页面里

@@ -53,22 +53,16 @@
 /// 两球的 `title={session.title}`（浏览器原生 tooltip）属全库 `Tooltip` 统一项
 /// （`13-工作进度与待办.md` §4.2：一次补齐、别只给单个组件加）→ 本件不加。
 ///
-/// ## 「脱离应用」（系统层悬浮球，2026-10-31）
-/// 用户要求「手机电脑语音直播浮层悬浮球（默认在右上角的那个）也要脱离应用」——
-/// 展开态在把手左侧多一个 28×44 玻璃键，点它把当前会话交给平台层（Android
-/// `SYSTEM_ALERT_WINDOW` 叠加层 / Windows 置顶小窗），App 进后台后球仍在。
+/// ## 「脱离应用」怎么发生（2026-10-31 用户定稿）
+/// 「**应用内不会再存在任何浮层**……取而代之的是创建时就脱离应用的、显示在其他应用之上的
+/// 悬浮窗，外观和交互完全没有区别」——所以本件**没有**任何「脱离」按钮：
+/// 它只在 App 内被用到（组件画布样张），真实运行时的浮层宿主在
+/// `lib/main.dart` 的 `aylaOverlayWindowMain`（第二引擎 + 原生叠加层），
+/// 那里 build 的是**同一份** [AylaSessionActivityIndicator]。
 ///
-/// **仍是参数注入**：本件只 `widget.onDetach?.call(session)`，**不碰平台通道**
-/// （通道调用、权限引导弹层、事件监听全部在 `layout/app_shell.dart` 的宿主里）。
-/// 键位选「展开态左端」而不是长按把手，理由：
-/// - 长按与既有的「拖动把手」是同一手势族（§拖动 5px 阈值），会互相裁掉；
-/// - 收起态整组只剩把手可见，此时加键等于改写收起几何（本件明确不改视觉规格）；
-/// - 展开态左端与既有球同排同高，零布局改动（只是多一个 `gap`）。
-/// 没有会话（`voice`/`live` 均 null）⇒ 按 tsx 135 整组零渲染，本键也不出现。
-///
-/// **已脱离**（[detached]）时键仍是同一位置/尺寸（避免根 widget 类型变化重建子树、
-/// 吃掉球收起动画），只翻高亮：底色换成对应会话的球色（`.is-voice` / `.is-live`），
-/// 语义标签换成「取消脱离」，再点一次取消。
+/// 用户原话：「**不要造轮子！用现有的悬浮球和直播小窗**」「悬浮球不应该重新做一个出来，
+/// 而是直接原来的浮层悬浮球直接扔出应用窗口外」⇒ 本件的视觉与交互**一个字都不用改**，
+/// 换的只是宿主窗口。
 ///
 /// ## 公开面
 /// `AylaActivitySession` · `AylaSessionActivityIndicator` · 样张 `aylaSessionActivitySamples()`
@@ -112,10 +106,11 @@ class AylaActivitySession {
 
   /// 会话种类（`state/session_activity_state.dart` 的同名枚举；同一份事实，不另造）。
   ///
-  /// 消费点只有 [AylaSessionActivityIndicator.onDetach] —— 原生侧 `showBall` 的 `kind`
-  /// 参数（'voice' / 'live'）与 Windows 独立小窗的语义都靠它区分。
-  /// 默认 `voice` 是**为兼容既有构造点**（测试 / 样张），不影响渲染：
-  /// 球的种类仍由它在 [AylaSessionActivityIndicator.voice] / `.live` 里的位置决定。
+  /// 消费点**只有**「窗口外浮层」的数据投影
+  /// （`layout/app_shell.dart` → `AylaOverlayPayload.voiceKind/liveKind`，
+  ///  原生侧 `showBall` 的 `kind` 参数靠它区分语音/直播）。
+  /// **不影响渲染**：球的种类仍由它在 [AylaSessionActivityIndicator.voice] /
+  /// `.live` 里的位置决定。
   final AylaActivityKind kind;
 
   /// 会话 id（web `sessionId`）——供调用方识别是哪个会话（本组件自身不读）。
@@ -135,8 +130,7 @@ class AylaSessionActivityIndicator extends StatefulWidget {
     this.voice,
     this.live,
     this.onOpenSession,
-    this.onDetach,
-    this.detached = false,
+    this.onTopChanged,
   });
 
   /// 进行中的语音会话；**null = 不渲染语音球**（等价 web `showVoice === false`）。
@@ -148,15 +142,16 @@ class AylaSessionActivityIndicator extends StatefulWidget {
   /// 点击悬浮球：回传该会话（等价 web `navigate(session.sourceRoute)`，路由由页面层决定）。
   final ValueChanged<AylaActivitySession>? onOpenSession;
 
-  /// 「脱离应用」：把该会话交给系统层悬浮球（**参数注入**，见文件头）。
+  /// 拖动把手后**新的 top 值**（null = 不回传，应用内使用时的默认行为）。
   ///
-  /// null ⇒ 不渲染脱离键（平台不支持 / 未接线时与旧行为完全一致）。
-  final ValueChanged<AylaActivitySession>? onDetach;
-
-  /// 当前是否**已有**会话脱离到系统层（由宿主按原生事件维护）。
-  ///
-  /// 只影响脱离键的高亮与语义标签，**不改几何**（见文件头）。
-  final bool detached;
+  /// ## 为什么需要它（2026-10-31，窗口外浮层）
+  /// 本组件的拖动改的是 `Positioned.top` —— 也就是**宿主视口内的坐标**。
+  /// 应用内使用时宿主就是整屏，这样没问题。
+  /// 但**窗口外浮层**的宿主是一个只有 176×132 的小窗口（贴着屏幕右上角），
+  /// 球被拖到 top > 132 就会掉出窗口被裁掉 ⇒「交互完全一致」不成立。
+  /// ⇒ 由宿主订阅本回调，**把窗口本身跟着球一起移动**（原生 `SetWindowPos`），
+  /// 组件内部的拖动逻辑一行不用改。
+  final ValueChanged<double>? onTopChanged;
 
   /// tsx `const DRAG_THRESHOLD = 5`：pointer 位移超过该值视为拖动而非点击（px）。
   static const double dragThreshold = 5;
@@ -182,13 +177,6 @@ class AylaSessionActivityIndicator extends StatefulWidget {
   /// `.session-activity-toggle { width: 28px; height: 44px }`。
   static const double toggleWidth = 28;
   static const double toggleHeight = 44;
-
-  /// 「脱离应用」键（展开态左端；与把手同一 28×44 玻璃规格，见文件头）。
-  static const double detachWidth = toggleWidth;
-  static const double detachHeight = toggleHeight;
-
-  /// 「脱离应用」键的稳定 [Key]（测试定位用；不影响视觉与语义）。
-  static const Key detachKey = ValueKey<String>('session-activity-detach');
 
   /// `.session-activity-group { gap: var(--sp-2) }` = 8。
   static const double gap = AylaSpacing.sp2;
@@ -225,10 +213,6 @@ class _AylaSessionActivityIndicatorState
 
   /// 拖动结束后置 true，让随后触发的合成 click 只消费标记、不切换收起态（tsx 32）。
   bool _suppressClick = false;
-
-  /// 「脱离应用」键的 hover / focus 态（只驱动它自己的高亮，与球/把手互不影响）。
-  bool _detachHovered = false;
-  bool _detachFocused = false;
 
   bool _isNarrow(BuildContext context) =>
       AylaBreakpoints.isNarrow(MediaQuery.sizeOf(context).width);
@@ -284,6 +268,8 @@ class _AylaSessionActivityIndicatorState
       maxTop,
     );
     setState(() => _topPx = nextTop);
+    // 窗口外浮层靠这个回调把**宿主窗口**跟着移动（应用内使用时不接线）。
+    widget.onTopChanged?.call(nextTop);
   }
 
   void _onPointerUp() {
@@ -320,22 +306,6 @@ class _AylaSessionActivityIndicatorState
       crossAxisAlignment: CrossAxisAlignment.center, // align-items: center
       spacing: AylaSessionActivityIndicator.gap, // gap: var(--sp-2)
       children: <Widget>[
-        // ---- 「脱离应用」键（本轮新增；不在 tsx 里，见文件头「脱离应用」）----
-        // 放在展开态**左端**：与两球同排同高，整组几何只多一个 gap，不改既有视觉规格。
-        // 收起态它随整组一起右移出屏（与两球同一条 transform），不需要单独隐藏逻辑。
-        if (widget.onDetach != null)
-          _DetachKey(
-            key: AylaSessionActivityIndicator.detachKey,
-            active: widget.detached,
-            // 一个键带整组：两球并存时以**直播**为准（视频脱离才是这个需求的主场景，
-            // 且 Android PiP / Windows 置顶小窗本来就是视频面）；只有语音时带语音。
-            kind: live != null ? _ActivityBallKind.live : _ActivityBallKind.voice,
-            onPressed: () => widget.onDetach!(live ?? voice!),
-            hovered: _detachHovered,
-            focused: _detachFocused,
-            onHoverChanged: (bool v) => setState(() => _detachHovered = v),
-            onFocusChanged: (bool v) => setState(() => _detachFocused = v),
-          ),
         // JSX 顺序（tsx 144–178）：语音球 → 直播球 → 把手
         if (voice != null)
           _ActivityBall(
@@ -568,128 +538,6 @@ class _ActivityBallState extends State<_ActivityBall> {
   }
 }
 
-// ======================= 脱离应用键 =======================
-
-/// 「脱离应用」键 —— 展开态左端的 28×44 玻璃键（见文件头「脱离应用」）。
-///
-/// **不在 web 里**（web 无跨应用悬浮能力）：视觉规格**完全复用**既有把手那一档
-/// （`shell.css:529–567`：28×44 / `--glass-bg-strong` / 1px `--glass-border` / pill 圆角 /
-/// `0 2px 12px rgba(70,91,146,.12)` / 背板 `blur(18px) saturate(1.4)`），
-/// 只把字形换成库内既有的 `iconPip`（`app_icons_data.dart:243`）——
-/// 与「在既有玻璃圆钮旁新增一个键」的库内先例同口径：**不新造图标、不新造材质、不新造动效**。
-///
-/// [active] = 已有会话脱离到系统层：底色换对应会话的球色（`.is-voice --sakura-100` /
-/// `.is-live --ice-300`）、字形换对应前景色（`--grape-700` / `--indigo-700`）、
-/// 语义标签换「取消脱离应用」；再点一次取消。几何在两个状态下**完全相同**。
-class _DetachKey extends StatelessWidget {
-  const _DetachKey({
-    super.key,
-    required this.active,
-    required this.kind,
-    required this.onPressed,
-    required this.hovered,
-    required this.focused,
-    required this.onHoverChanged,
-    required this.onFocusChanged,
-  });
-
-  /// 已有会话脱离到系统层（高亮态）。
-  final bool active;
-
-  /// 该键当前代表的会话种类（决定高亮配色）。
-  final _ActivityBallKind kind;
-
-  final VoidCallback onPressed;
-  final bool hovered;
-  final bool focused;
-  final ValueChanged<bool> onHoverChanged;
-  final ValueChanged<bool> onFocusChanged;
-
-  /// `:hover, :focus-visible` 共用一组规则（与把手同口径）。
-  bool get _lit => hovered || focused;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool live = kind == _ActivityBallKind.live;
-    // 高亮态取会话球的同源配色（shell.css 519–527）；常态与把手一致。
-    final Color foreground = active
-        ? (live ? AylaColors.indigo700 : AylaColors.grape700)
-        : (_lit ? AylaColors.textPrimary : AylaColors.textSecondary);
-    // 与把手同一条「`--glass-bg-hover` 未定义 ⇒ hover 实渲染为透明」的判断
-    // （见 `_ActivityToggleState.build` 与文件头第 1 条拍板）：零透明写**同色相**，
-    // 避免 Flutter 的逐通道 `Color.lerp` 中途闪中灰。
-    final Color background = active
-        ? (live ? AylaColors.ice300 : AylaColors.sakura100)
-        : (_lit
-            ? AylaColors.glassBgStrong.withValues(alpha: 0)
-            : AylaColors.glassBgStrong);
-    final BorderRadius radius = AylaRadii.pill;
-
-    Widget box = AnimatedContainer(
-      // 与把手同一条过渡（auroraqua 按钮组 200ms `--auroraqua-ease`）
-      duration: AylaDurations.button,
-      curve: AylaCurves.auroraqua,
-      width: AylaSessionActivityIndicator.detachWidth,
-      height: AylaSessionActivityIndicator.detachHeight,
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: radius,
-        border: Border.all(color: AylaColors.glassBorder),
-      ),
-      child: Center(
-        child: AylaIcon(
-          aylaIconByName('iconPip')!,
-          size: 16,
-          color: foreground,
-        ),
-      ),
-    );
-
-    // 同一个 `0 2px 12px rgba(70,91,146,.12)`（shell.css 537）；本键 hover 不换阴影。
-    box = Stack(
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        Positioned.fill(
-          child: AylaGlassShadow.ring(radius: radius, shadows: _kActivityShadow),
-        ),
-        box,
-      ],
-    );
-
-    // 背板模糊：与把手同一档（`--glass-bg-strong` 是半透明，必须保留）。
-    if (!AylaGlassConfig.useOpaqueFallback) {
-      box = Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          Positioned.fill(
-            child: AylaGlassBackdrop(
-              radius: radius,
-              filter: AylaGlassConfig.backdropFilter(sigma: AylaGlass.blurNav),
-            ),
-          ),
-          box,
-        ],
-      );
-    }
-
-    return Focus(
-      // 本体不参与 tab 遍历（焦点环由 AylaPressScale 的节点承担），但要监听焦点。
-      canRequestFocus: false,
-      onFocusChange: onFocusChanged,
-      child: AylaPressScale(
-        // 在 auroraqua 按钮组内 ⇒ 200ms + hover 1.02 + active .98 + 焦点环
-        onTap: onPressed,
-        semanticLabel: active ? '取消脱离应用' : '脱离应用（系统悬浮球）',
-        child: MouseRegion(
-          onEnter: (_) => onHoverChanged(true),
-          onExit: (_) => onHoverChanged(false),
-          child: box,
-        ),
-      ),
-    );
-  }
-}
-
 // ======================= 收起把手 =======================
 
 /// `.session-activity-toggle` —— 28×44 玻璃把手（`shell.css:529–567`）。
@@ -871,9 +719,7 @@ class _ActivityToggleState extends State<_ActivityToggle> {
 /// - 两个舞台（宽屏 / 窄屏）各自是一块「模拟页面」+ 本组件；
 ///   点把手 → 看整组右移贴边、两球滑出淡隐；再点把手恢复；按住把手上下拖可移动整组 top；
 /// - 右侧两个开关模拟「语音 / 直播会话进出」→ 看 `null` 时零渲染（web `showVoice/showLive`）；
-/// - 点球 → 计数 + 显示回传的 `sourceRoute`（页面层接线前用回调代替 `navigate`）；
-/// - 点左端脱离键 → 计数 + 显示回传的会话（再点取消）——样张只演示**回调与高亮**，
-///   真机上真正压到系统层需要 `SYSTEM_ALERT_WINDOW` 授权，由 `layout/app_shell.dart` 接线。
+/// - 点球 → 计数 + 显示回传的 `sourceRoute`（页面层接线前用回调代替 `navigate`）。
 Widget aylaSessionActivitySamples() => const _SessionActivityDemo();
 
 class _SessionActivityDemo extends StatefulWidget {
@@ -888,8 +734,6 @@ class _SessionActivityDemoState extends State<_SessionActivityDemo> {
   bool _liveOn = true;
   int _openCount = 0;
   String _lastRoute = '—';
-  bool _detached = false;
-  int _detachCount = 0;
 
   static const AylaActivitySession _voice = AylaActivitySession(
     sessionId: '5',
@@ -900,20 +744,13 @@ class _SessionActivityDemoState extends State<_SessionActivityDemo> {
     sessionId: '9',
     sourceRoute: '/live/start/9',
     title: '直播间', // tsx 63
-    kind: AylaActivityKind.live,
   );
 
   Widget _indicator() => AylaSessionActivityIndicator(
         voice: _voiceOn ? _voice : null,
         live: _liveOn ? _live : null,
-        detached: _detached,
         onOpenSession: (AylaActivitySession s) => setState(() {
           _openCount++;
-          _lastRoute = s.sourceRoute;
-        }),
-        onDetach: (AylaActivitySession s) => setState(() {
-          _detachCount++;
-          _detached = !_detached;
           _lastRoute = s.sourceRoute;
         }),
       );
@@ -957,10 +794,6 @@ class _SessionActivityDemoState extends State<_SessionActivityDemo> {
               ),
               Text(
                 '点球回调 $_openCount 次 · 目标路由 $_lastRoute',
-                style: const TextStyle(fontSize: 11),
-              ),
-              Text(
-                '脱离键点击 $_detachCount 次 · 已脱离：${_detached ? '是' : '否'}',
                 style: const TextStyle(fontSize: 11),
               ),
             ],

@@ -51,6 +51,8 @@ import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
 import 'widgets/live/live_player.dart' show aylaUsesDesktopFullscreen;
 import 'widgets/live/live_window_surface.dart' show AylaDetachedLiveWindowApp;
+import 'widgets/shell/overlay_window_app.dart'
+    show AylaOverlayBallWindowApp, AylaOverlayPayload;
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
 
@@ -419,30 +421,131 @@ void main() {
 /// `lib/widgets/live/live_window_surface.dart` 文件头的「有意差异 3」。
 /// 这一路 HLS 与主窗口那一路互不相干；观看登记（心跳 / 在看名单）仍由
 /// **主窗口**的会话继续跑（用户要求「小窗观看也算观看人」）。
+///
+/// ## Android 的 `aylaOverlayWindowMain`（2026-10-31）
+/// Android 侧**也**用这个入口：`OverlayFlutterHost.kt` 的第二引擎指定
+/// `DartEntrypoint(ENTRYPOINT = "aylaOverlayWindowMain")`，参数由原生侧直接给出
+/// （`DartEntrypointArgs` 是 `List<String>`，装一条 JSON）。
+/// 两个入口共用同一套「kind 分流 + payload 解析」逻辑，故 Android 那个是**薄包装**。
 @pragma('vm:entry-point')
 void aylaLiveWindowMain(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
   String? playUrl;
   String? title;
+  // "liveMini"（默认）| "activityBall" —— 见 live_window.cpp 的 AylaOverlayKind。
+  String kind = 'liveMini';
+  AylaOverlayPayload? overlayPayload;
   if (args.isNotEmpty) {
     try {
       final Object? decoded = jsonDecode(args.first);
       if (decoded is Map) {
+        final Object? rawKind = decoded['kind'];
+        if (rawKind is String && rawKind.isNotEmpty) kind = rawKind;
         final Object? rawUrl = decoded['playUrl'];
         final Object? rawTitle = decoded['title'];
         if (rawUrl is String && rawUrl.isNotEmpty) playUrl = rawUrl;
         if (rawTitle is String && rawTitle.isNotEmpty) title = rawTitle;
+        // activityBall：payload 是**已经解析过的对象**（不是字符串），
+        // 因为原生侧是把它拼进同一条 JSON 里的（见 live_window.cpp 的 ShowBall）。
+        final Object? rawPayload = decoded['payload'];
+        if (rawPayload is Map<String, dynamic>) {
+          overlayPayload = AylaOverlayPayload.fromJson(rawPayload);
+        }
       }
     } catch (error) {
-      // 参数不是合法 JSON（例如手工调试时）：退化成纯黑小窗，不崩。
+      // 参数不是合法 JSON（例如手工调试时）：退化成空浮层，不崩。
       debugPrint('[AYLA-LIVE-WINDOW] entrypoint 参数解析失败：$error');
     }
+  }
+  if (kind == 'activityBall') {
+    // 窗口外悬浮球：**同一份** AylaSessionActivityIndicator（见 overlay_window_app.dart）。
+    runApp(_aylaOverlayWindowRoot(initialPayload: overlayPayload));
+    return;
   }
   runApp(
     AylaDetachedLiveWindowApp(
       initialUrl: playUrl,
       initialTitle: title,
     ),
+  );
+}
+
+/// Android 系统叠加层的 Dart 入口（**第二引擎**；原生侧见
+/// `android/app/src/main/kotlin/com/ayla/ayla_flutter/OverlayFlutterHost.kt`）。
+///
+/// ## 为什么和 `aylaLiveWindowMain` 分开
+/// 两个平台的原生 API 形态不同：
+/// - Windows：`FlutterDesktopEngineProperties.dart_entrypoint` 只能给**函数名字符串**，
+///   参数走 `set_dart_entrypoint_arguments({json})`；
+/// - Android：`DartExecutor.DartEntrypoint(bundlePath, functionName)` +
+///   `FlutterEngineGroup.Options.setDartEntrypointArgs(List<String>)`，
+///   参数是**字符串列表**（原生侧塞一条 JSON 进去）。
+///
+/// 入口函数必须是**和 `main()` 同一个 Dart 库**里的顶层函数，并且带
+/// `@pragma('vm:entry-point')`，否则 AOT/release 会被摇树删掉
+/// （debug 能编译通过、release 直接崩 —— 这类入口最常见的坑）。
+///
+/// ## 这一棵树里**没有**什么
+/// 没有 ProviderScope / router / Dio / WS / 登录态 —— 第二引擎是另一个 isolate，
+/// 任何全局依赖要么第二次跑起来、要么拿不到数据。会话集合由主引擎序列化成
+/// `AylaOverlayPayload` 推过来（`ballPayload` 通道）。
+///
+/// ## 视觉
+/// **只 build 现有组件**：`AylaOverlayBallWindowApp` → `AylaOverlayWindowApp` →
+/// `AylaSessionActivityIndicator`（App 内那个悬浮球组的**同一份** widget 代码）。
+/// 用户原话：「不要造轮子！用现有的悬浮球」「外观和交互完全没有区别」。
+@pragma('vm:entry-point')
+void aylaOverlayWindowMain(List<String> args) {
+  WidgetsFlutterBinding.ensureInitialized();
+  AylaOverlayPayload? payload;
+  if (args.isNotEmpty) {
+    try {
+      final Object? decoded = jsonDecode(args.first);
+      if (decoded is Map<String, dynamic>) {
+        // 两种参数形态都接受（与 Windows 侧 `aylaLiveWindowMain` 同一套解析）：
+        // ① `{"kind":"activityBall","payload":{...}}` —— Windows 原生拼好的整条；
+        // ② `{"payload":"{...}"}` —— payload 本身是**字符串**时（原生只做透传）。
+        final Object? rawPayload = decoded['payload'];
+        if (rawPayload is Map<String, dynamic>) {
+          payload = AylaOverlayPayload.fromJson(rawPayload);
+        } else if (rawPayload is String) {
+          payload = AylaOverlayPayload.tryDecode(rawPayload);
+        }
+      }
+    } catch (error) {
+      // 参数不是合法 JSON（手工调试）：退化成「无会话」的浮层，不崩。
+      debugPrint('[AYLA-OVERLAY-WINDOW] entrypoint 参数解析失败：$error');
+    }
+  }
+  runApp(_aylaOverlayWindowRoot(initialPayload: payload));
+}
+
+/// 第二引擎里**浮层**那棵树的根（Windows 的 activityBall 与 Android 叠加层共用）。
+///
+/// ## 为什么必须是 `MaterialApp`，不能只套 `Theme`
+/// 之前的写法是 `aylaOverlayWindowScope(child: ...)` = `Theme(data: buildAylaTheme(), child: ...)`，
+/// 那样第二引擎**首帧就崩**（2026-10-31 用 `flutter test` 实测到三条断言，逐条列出）：
+/// 1. `No Directionality widget found. Stack widgets require a Directionality widget
+///    ancestor to resolve the 'alignment' argument.` —— `AylaOverlayWindowApp` 里的
+///    `Material`/`Stack` 要读文本方向；
+/// 2. `No MediaQuery widget found` —— 组件的断点 / 拖动 clamp / 安全区全读
+///    `MediaQuery.sizeOf` / `paddingOf`；
+/// 3. `No Overlay widget found. RawTooltip widgets require an Overlay widget ancestor`
+///    —— 球的 `title` 走 `AylaTooltip` → `RawTooltip`，它要一个 `Overlay` 来挂提示层。
+///
+/// `MaterialApp` 一次给齐这四样（Directionality / MediaQuery / Overlay / Navigator），
+/// 与主引擎的 `MaterialApp.router` 同一档，所以「外观完全一致」也才有依据。
+///
+/// `color: Colors.transparent` 是必须的：宿主窗口是**透明**的
+/// （Android `PixelFormat.TRANSLUCENT` / Windows 逐像素透明），
+/// 不透明底色会把球的圆角、辉光、半透明玻璃背板全糊成一个方块。
+Widget _aylaOverlayWindowRoot({AylaOverlayPayload? initialPayload}) {
+  return MaterialApp(
+    debugShowCheckedModeBanner: false,
+    // 透明底：浮层窗口本身无边框/透明，背景必须让出来。
+    color: Colors.transparent,
+    theme: buildAylaTheme(),
+    home: AylaOverlayBallWindowApp(initialPayload: initialPayload),
   );
 }
 

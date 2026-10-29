@@ -53,8 +53,6 @@ class AylaLiveMiniPlayer extends StatefulWidget {
     this.channelTitle,
     this.onOpenRoom,
     this.onClose,
-    this.onDetach,
-    this.detachEnabled = true,
   });
 
   /// 视频视图（页面注入同一播放器 ⇒ HLS 不断流）。
@@ -68,16 +66,6 @@ class AylaLiveMiniPlayer extends StatefulWidget {
 
   /// 右上关闭键 → 完整销毁会话（tsx 93–96）。
   final VoidCallback? onClose;
-
-  /// 「脱离应用」键（关闭键左侧）→ 进入系统画中画 / 独立置顶小窗。
-  ///
-  /// 为什么需要它：用户要求「手机端直播小窗要脱离应用，使 app 在后台时也能悬浮看直播」。
-  /// 纯 Dart 做不到 ⇒ 交给 [AylaLiveRoomSession.enterDetachedPresentation]（平台通道）。
-  /// 本组件**不碰 MethodChannel**：能力由调用方以参数注入（与 `onClose` 同规矩）。
-  final VoidCallback? onDetach;
-
-  /// 是否显示脱离键（平台不支持 / 非 Android-Windows 时由调用方传 false）。
-  final bool detachEnabled;
 
   @override
   State<AylaLiveMiniPlayer> createState() => _AylaLiveMiniPlayerState();
@@ -279,27 +267,11 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
                     Positioned(
                       top: -10,
                       right: -10,
-                      child: _MiniIconButton(
+                      child: _MiniCloseButton(
                         hovered: _hovered,
                         onPressed: widget.onClose,
-                        iconName: 'iconClose',
-                        semanticsLabel: '关闭小窗', // tsx 217
                       ),
                     ),
-                    // 「脱离应用」键：关闭键**左侧**（间距 4 = 36 = 24 + 4 + 8 外偏移）。
-                    // 为什么叠在右上角外侧而不是压进画面：小窗本体只有 168×94，压进去会挡画面；
-                    // 与关闭键同一排也符合「同一族操作聚在一起」的既有布局。
-                    if (widget.detachEnabled)
-                      Positioned(
-                        top: -10,
-                        right: 18, // 24（关闭键）+ 4（间距）- 10（关闭键外偏移）
-                        child: _MiniIconButton(
-                          hovered: _hovered,
-                          onPressed: widget.onDetach,
-                          iconName: 'iconPip',
-                          semanticsLabel: '脱离应用',
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -312,33 +284,18 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   }
 }
 
-/// `.live-mini-player-close` 同款样式：24×24 玻璃圆钮（白图标 14）。
-///
-/// 关闭键与「脱离应用」键共用本件 —— 两个键的视觉规格**逐字相同**
-///（hover `rgba(70,91,146,.52)` / 常态 `rgba(70,91,146,.32)` / 边框 `#FFFFFF47` /
-/// focus `glow500` 2px），只有图标与语义标签不同，故用参数区分而不是复制一份组件。
-class _MiniIconButton extends StatefulWidget {
-  const _MiniIconButton({
-    required this.hovered,
-    required this.onPressed,
-    required this.iconName,
-    required this.semanticsLabel,
-  });
+/// `.live-mini-player-close`：24×24 玻璃圆钮（白图标 14）。
+class _MiniCloseButton extends StatefulWidget {
+  const _MiniCloseButton({required this.hovered, required this.onPressed});
 
   final bool hovered;
   final VoidCallback? onPressed;
 
-  /// 库内图标名（[aylaIconByName]）；不存在时该键不渲染图标（不自己造 icon）。
-  final String iconName;
-
-  /// 无障碍/测试定位标签。
-  final String semanticsLabel;
-
   @override
-  State<_MiniIconButton> createState() => _MiniIconButtonState();
+  State<_MiniCloseButton> createState() => _MiniCloseButtonState();
 }
 
-class _MiniIconButtonState extends State<_MiniIconButton> {
+class _MiniCloseButtonState extends State<_MiniCloseButton> {
   bool _hovered = false;
   bool _focused = false;
 
@@ -346,7 +303,7 @@ class _MiniIconButtonState extends State<_MiniIconButton> {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: widget.semanticsLabel,
+      label: '关闭小窗', // tsx 217
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),
@@ -372,14 +329,11 @@ class _MiniIconButtonState extends State<_MiniIconButton> {
                 ),
               ),
               alignment: Alignment.center,
-              child: switch (aylaIconByName(widget.iconName)) {
-                final AylaIconData icon => AylaIcon(
-                  icon,
-                  size: 14, // tsx 224
-                  color: Colors.white,
-                ),
-                null => const SizedBox.shrink(),
-              },
+              child: AylaIcon(
+                aylaIconByName('iconClose')!,
+                size: 14, // tsx 224
+                color: Colors.white,
+              ),
             ),
           ),
         ),

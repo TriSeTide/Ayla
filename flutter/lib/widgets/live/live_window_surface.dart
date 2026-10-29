@@ -1,4 +1,3 @@
-
 /// 电脑端「脱离应用」的独立直播小窗 —— **第二引擎那棵树**的界面外壳。
 ///
 /// ## 这不是普通的 App 内组件
@@ -7,26 +6,34 @@
 /// `WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS` + `WS_EX_TOPMOST | WS_EX_TOOLWINDOW`
 /// ⇒ 无标题栏、恒置顶、**不进 Alt-Tab / 任务栏**，主窗口最小化后仍然可见。
 ///
-/// ## 事实源（不自由发挥）
-/// 视觉全部来自 App 内已有的小窗本体，逐条对照：
-/// - `web/src/styles/live.css:1021–1090`（`.live-mini-player` / `-video-wrap` / `-close`）；
-/// - Flutter 侧同源实现 `lib/widgets/live/live_mini_player.dart` 的
-///   `_AylaMiniCloseButton`（24×24 玻璃圆钮 · 白描边 `0x47FFFFFF` ·
-///   底色 `0x52465B92` / hover `0x85465B92` · 图标 `iconClose` 14px）；
+/// ## 用户需求（2026-10-31 明确，务必照做）
+/// 「直播小窗也是同样的，要直接用现有的直播小窗让他脱离应用，不要加按钮单独重做一个」
+/// ⇒ 本文件**不画任何自己的视觉**：小窗本体就是 App 内那一个
+/// [AylaLiveMiniPlayer]（同一份代码、同样的 168×94 圆角玻璃卡、同样外侧的
+/// 关闭/脱离键位、同样的 hover/focus 配方），这里只负责：
+/// 1. 把 `media_kit` 的播放面作为 `videoView` 注进去（第二引擎自己那一路 HLS）；
+/// 2. 给它一块**恰好等于小窗本体**的窗口（`MediaQuery` 视口按 194×120 报，
+///    于是组件默认落点 = (10,10)、168×94 刚好居中留出 10px 给"外侧"键位）；
+/// 3. 把「点小窗 / 点关闭」接回宿主窗口（跨引擎没有 router）。
+///
+/// ## 为什么窗口要透明（2026-10-31）
+/// `AylaLiveMiniPlayer` 的关闭键/脱离键在卡片**外侧**（`top/right: -10`，
+/// `clipBehavior: Clip.none`）。宿主窗口若是纯黑不透明，那 10px 会变成黑边。
+/// 所以 `live_window.cpp` 对两种浮层都开了逐像素透明
+/// （`DwmExtendFrameIntoClientArea` + `ACCENT_ENABLE_TRANSPARENTGRADIENT`）。
 ///
 /// ## 与 App 内小窗的**有意差异**（登记）
-/// 1. 关闭键在**画面内部**右上角（内缩 6），不是 web 的外侧 -10：
-///    宿主窗口是 `WS_POPUP`（无外扩面积），放外侧会被窗口裁掉一半。
-/// 2. 整块画面可点 = 「回主窗口」：等价于 web 小窗「点主体 navigate(sourceRoute)」，
-///    但跨引擎没有 router，只能回传原生（`activateMain`），由主窗口侧
-///    `AylaDetachedLiveEvents.liveWindowClosed` 接回 **App 内小窗**（不销毁会话）。
-/// 3. **不**挂 `AylaAuroraBackground` / ProviderScope / router / Dio / WS：这个引擎
-///    只负责「黑底 + 一路 HLS + 两个键」，任何全局依赖都可能第二次跑起来（或拿不到数据）。
+/// 1. 不挂 `AylaAuroraBackground` / ProviderScope / router / Dio / WS：这个引擎
+///    只负责「一路 HLS + 小窗本体」，任何全局依赖都可能第二次跑起来（或拿不到数据）。
 ///    播放地址由主窗口在打开时一次性传入（`openLiveWindow.playUrl`，已归一 + 带鉴权 query）。
+/// 2. 不再有「脱离应用」键：它**本身已经**脱离应用，再给一个同样的键是重复语义
+///    （用户 2026-10-31 明确要求删掉那个键，组件侧已不再有该参数）。
+/// 3. 拖动/双指缩放在独立窗口里只能移动**窗口内**的位置（改不了宿主窗口几何），
+///    这是已知限制：组件原样复用优先于为它加一个「脱离态专用」分支。
 ///
 /// ## 公开面
-/// `AylaDetachedLiveWindowApp`（小窗根 widget）· `AylaDetachedLiveWindowSurface`（纯视图，
-/// 便于样张与测试注入假画面）
+/// `AylaDetachedLiveWindowApp`（第二引擎的 runApp 目标）· `AylaDetachedWindowChannel`
+/// （内层通道）· 样张 `aylaDetachedLiveWindowSamples()`
 library;
 
 import 'dart:async';
@@ -36,21 +43,33 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import '../../theme/app_icons.dart';
 import '../../theme/tokens.dart';
+import 'live_mini_player.dart' show AylaLiveMiniPlayer, kLiveMiniHeight, kLiveMiniWidth;
 
 /// 宿主窗口 ↔ 第二引擎的私有通道（`live_window.cpp` 的
 /// `AylaLiveWindowHost::CreateChannel` 逐字一致；**不是**给主引擎用的那条）。
 const String kAylaDetachedWindowInnerChannel = 'ayla/desktop_window';
 
-/// 关闭键尺寸（web `.live-mini-player-close` = 24×24）。
-const double kAylaDetachedCloseSize = 24;
+/// 卡片外侧键位需要的留白（`AylaLiveMiniPlayer` 的关闭键在 `top/right: -10`）。
+const double kAylaDetachedMiniInset = 10;
 
-/// 关闭键在画面内的内缩（见文件头「有意差异 1」）。
-const double kAylaDetachedCloseInset = 6;
+/// 宿主窗口的逻辑尺寸 = 小窗本体 + 四周各 [kAylaDetachedMiniInset]。
+///
+/// ⚠️ 必须与 `windows/runner/live_window.cpp` 的 `kLiveWindowWidth/Height` 一致
+/// （那里按 DPI 放大成物理像素；Flutter 侧看到的逻辑尺寸就是这个值）。
+const double kAylaDetachedMiniWindowWidth =
+    kLiveMiniWidth + kAylaDetachedMiniInset * 2;
+const double kAylaDetachedMiniWindowHeight =
+    kLiveMiniHeight + kAylaDetachedMiniInset * 2;
 
-/// 关闭键图标尺寸（web tsx 224 行 = 14）。
-const double kAylaDetachedCloseIconSize = 14;
+/// 报给 [AylaLiveMiniPlayer] 的**视口**尺寸。
+///
+/// 组件按 `viewport.width - 168 - 16` 算默认 left ⇒ 要让落点正好等于
+/// [kAylaDetachedMiniInset]，视口必须比窗口再大 16px。
+const Size kAylaDetachedMiniViewport = Size(
+  kAylaDetachedMiniWindowWidth + 16,
+  kAylaDetachedMiniWindowHeight + 16,
+);
 
 /// 独立直播小窗的根 widget（第二引擎的 `runApp` 目标）。
 class AylaDetachedLiveWindowApp extends StatefulWidget {
@@ -68,7 +87,7 @@ class AylaDetachedLiveWindowApp extends StatefulWidget {
   /// 若平台→Dart 那条消息在极端时序下丢了，这里仍然能起播）。
   final String? initialUrl;
 
-  /// 同上：初始标题（只用于语义标签）。
+  /// 同上：初始标题（小窗的 title / 语义标签）。
   final String? initialTitle;
 
   @override
@@ -82,7 +101,7 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
   Player? _player;
   VideoController? _videoController;
   String? _status = '连接中…';
-  String _title = '直播小窗';
+  String _title = '直播间';
   bool _disposed = false;
 
   /// 已经在播的地址（入口参数与宿主 `play` 指令会各来一次，必须幂等）。
@@ -99,7 +118,7 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     // handler 注册（平台→Dart 的消息在 handler 未挂时会被丢弃）。
     _channel.setHandler((String url, String title) {
       if (_disposed) return;
-      _title = title.isEmpty ? _title : title;
+      setState(() => _title = title.isEmpty ? _title : title);
       unawaited(_open(url));
     });
     final String? initialUrl = widget.initialUrl;
@@ -108,7 +127,7 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
       // 「同 URL 不重建」守卫吃掉）。
       unawaited(Future<void>.microtask(() => _open(initialUrl)));
     }
-    // 第一帧出图后再告诉宿主：窗口先黑底出现，不会白闪。
+    // 第一帧出图后再告诉宿主：窗口先透明出现，不会白闪。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_disposed) return;
       unawaited(_channel.ready());
@@ -120,7 +139,7 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
   ///
   /// ⚠️ 这里**只**依赖 `package:media_kit`（FFI，无平台通道）与
   /// `package:media_kit_video`（第二个引擎里已单独注册）。不碰
-  /// shared_preferences / flutter_secure_storage / Dio / WS —— 见文件头第 3 条。
+  /// shared_preferences / flutter_secure_storage / Dio / WS —— 见文件头第 1 条。
   Future<void> _open(String url) async {
     if (url.isEmpty) {
       if (!_disposed) setState(() => _status = '无播放地址');
@@ -178,183 +197,107 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
   @override
   Widget build(BuildContext context) {
     final VideoController? controller = _videoController;
+    // 播放面：与 App 内同一个用法（只交画面、不叠 media_kit 控制条、不申请唤醒锁
+    // —— 第二个引擎只注册了 media_kit_video）。
+    final Widget video = controller == null
+        ? const ColoredBox(color: Colors.black)
+        : Video(
+            controller: controller,
+            controls: NoVideoControls,
+            wakelock: false,
+            fit: BoxFit.contain,
+            fill: Colors.black,
+          );
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      color: Colors.black,
-      home: AylaDetachedLiveWindowSurface(
+      // 透明底：宿主窗口逐像素透明，卡片之外的 10px 必须透出桌面。
+      color: Colors.transparent,
+      home: AylaDetachedMiniPlayerHost(
+        videoView: video,
         title: _title,
         statusText: _status,
-        video: controller == null
-            ? null
-            : Video(
-                controller: controller,
-                controls: NoVideoControls,
-                // 第二个引擎不申请唤醒锁（那要过 wakelock_plus 的平台通道，
-                // 而这个引擎只注册了 media_kit_video）。
-                wakelock: false,
-                // 与 App 内一致：只交画面，不叠 media_kit 自带的控制条。
-                fit: BoxFit.contain,
-                fill: Colors.black,
-              ),
+        onOpenRoom: () => unawaited(_channel.activateMain()),
         onClose: () => unawaited(_channel.close()),
-        onActivateMain: () => unawaited(_channel.activateMain()),
       ),
     );
   }
 }
 
-/// 独立直播小窗的纯视图层（可注入假画面，用于样张 / 单测）。
+/// 独立小窗的**宿主外壳**：只给 [AylaLiveMiniPlayer] 摆位（纯复用，不重画）。
 ///
-/// 视觉 = 黑底铺满 + 画面 + 右上 24×24 玻璃圆钮关闭键。
-class AylaDetachedLiveWindowSurface extends StatefulWidget {
-  const AylaDetachedLiveWindowSurface({
+/// 视口用 [kAylaDetachedMiniViewport] 覆写 ⇒ 组件默认落点 (10,10)，
+/// 168×94 的卡片 + 外侧键位正好落在 [kAylaDetachedMiniWindowWidth] ×
+/// [kAylaDetachedMiniWindowHeight] 的宿主窗口内。
+class AylaDetachedMiniPlayerHost extends StatelessWidget {
+  const AylaDetachedMiniPlayerHost({
     super.key,
-    this.video,
+    this.videoView,
     this.title,
-    this.onClose,
-    this.onActivateMain,
     this.statusText,
+    this.onOpenRoom,
+    this.onClose,
   });
 
-  /// 视频画面（`media_kit` 的 `Video` 或任何 widget；null = 纯黑）。
-  final Widget? video;
+  /// 视频画面（`media_kit` 的 `Video`）。
+  final Widget? videoView;
 
-  /// 频道标题（窗口无标题栏 ⇒ 不渲染；保留给语义标签）。
+  /// 频道标题（小窗 title / 语义标签）。
   final String? title;
 
-  /// 关闭键（内层通道 `close`）。
-  final VoidCallback? onClose;
-
-  /// 点画面主体（内层通道 `activateMain`：回主窗口）。
-  final VoidCallback? onActivateMain;
-
-  /// 画面未就绪时的状态文案（连接中 / 失败）。
+  /// 画面未就绪时的状态文案（连接中 / 失败）——覆盖在画面上居中显示。
   final String? statusText;
 
-  @override
-  State<AylaDetachedLiveWindowSurface> createState() =>
-      _AylaDetachedLiveWindowSurfaceState();
-}
+  /// 点小窗主体 = 回主窗口。
+  final VoidCallback? onOpenRoom;
 
-class _AylaDetachedLiveWindowSurfaceState
-    extends State<AylaDetachedLiveWindowSurface> {
-  bool _closeHovered = false;
-  bool _closeFocused = false;
+  /// 关闭键 = 关掉独立小窗（会话本身不销毁）。
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Semantics(
-        label: widget.title ?? '直播小窗',
-        child: Stack(
-          fit: StackFit.expand,
-          children: <Widget>[
-            // 画面主体：可点 ⇒ 回主窗口（见文件头「有意差异 2」）。
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: widget.onActivateMain,
-              child: ColoredBox(
-                color: Colors.black,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    if (widget.video != null)
-                      Center(
-                        child: AspectRatio(
-                          aspectRatio: 16 / 9,
-                          child: widget.video!,
-                        ),
-                      ),
-                    if (widget.statusText != null)
-                      Center(
-                        child: Text(
-                          widget.statusText!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xCCFFFFFF),
-                            decoration: TextDecoration.none,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            // 关闭键：内缩 6 摆在画面右上（见文件头「有意差异 1」）。
-            Positioned(
-              top: kAylaDetachedCloseInset,
-              right: kAylaDetachedCloseInset,
-              child: _AylaDetachedCloseButton(
-                hovered: _closeHovered,
-                focused: _closeFocused,
-                onHover: (bool has) => setState(() => _closeHovered = has),
-                onFocus: (bool has) => setState(() => _closeFocused = has),
-                onPressed: widget.onClose,
-              ),
-            ),
-          ],
-        ),
+    final String? status = statusText;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        size: kAylaDetachedMiniViewport,
+        padding: EdgeInsets.zero,
+        viewPadding: EdgeInsets.zero,
+        viewInsets: EdgeInsets.zero,
       ),
-    );
-  }
-}
-
-/// 24×24 玻璃圆钮关闭键（与 `live_mini_player.dart` 的 `_AylaMiniCloseButton` 同配方）。
-class _AylaDetachedCloseButton extends StatelessWidget {
-  const _AylaDetachedCloseButton({
-    required this.hovered,
-    required this.focused,
-    required this.onHover,
-    required this.onFocus,
-    required this.onPressed,
-  });
-
-  final bool hovered;
-  final bool focused;
-  final ValueChanged<bool> onHover;
-  final ValueChanged<bool> onFocus;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: '关闭直播小窗',
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => onHover(true),
-        onExit: (_) => onHover(false),
-        child: Focus(
-          onFocusChange: onFocus,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onPressed,
-            child: Container(
-              width: kAylaDetachedCloseSize,
-              height: kAylaDetachedCloseSize,
-              decoration: BoxDecoration(
-                // hover rgba(70,91,146,.52) / 常态 rgba(70,91,146,.32)
-                color: hovered
-                    ? const Color(0x85465B92)
-                    : const Color(0x52465B92),
-                borderRadius: AylaRadii.pill,
-                border: Border.all(
-                  color: focused
-                      ? AylaColors.glow500
-                      : const Color(0x47FFFFFF),
-                  width: focused ? 2 : 1,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: <Widget>[
+            // 现有组件原样（返回 Positioned ⇒ 必须是 Stack 的直接子级）。
+            AylaLiveMiniPlayer(
+              videoView: videoView,
+              channelTitle: title,
+              onOpenRoom: onOpenRoom,
+              onClose: onClose,
+            ),
+            if (status != null)
+              // 状态文案只是**叠加**在画面之上的一行字，不改小窗本体。
+              Positioned(
+                left: kAylaDetachedMiniInset,
+                top: kAylaDetachedMiniInset,
+                width: kLiveMiniWidth,
+                height: kLiveMiniHeight,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Text(
+                      status,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xCCFFFFFF),
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              alignment: Alignment.center,
-              child: AylaIcon(
-                aylaIconByName('iconClose')!,
-                size: kAylaDetachedCloseIconSize,
-                color: Colors.white,
-              ),
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -363,8 +306,8 @@ class _AylaDetachedCloseButton extends StatelessWidget {
 
 /// 第二引擎 → 宿主窗口的**内层**通道（方向与主引擎的 `ayla/desktop_window` 相反）。
 ///
-/// 由第二引擎发起的 `ready` / `close` / `activateMain` 由 `live_window.cpp` 处理；
-/// 宿主发来的 `play`{url,title} 由 [setHandler] 接住。
+/// 由第二引擎发起的 `ready` / `close` / `activateMain` / `ballTap` 由
+/// `live_window.cpp` 处理；宿主发来的 `play` / `ballPayload` 由对应 setter 接住。
 class AylaDetachedWindowChannel {
   AylaDetachedWindowChannel({MethodChannel? channel})
     : _channel =
@@ -383,7 +326,7 @@ class AylaDetachedWindowChannel {
     }
   }
 
-  /// 关闭窗口（不产生 `onLiveWindowClosed`：Dart 侧已经知道是它自己关的）。
+  /// 关闭窗口（不产生关闭回调：Dart 侧已经知道是它自己关的）。
   Future<void> close() async {
     try {
       await _channel.invokeMethod<bool>('close');
@@ -405,7 +348,21 @@ class AylaDetachedWindowChannel {
     }
   }
 
-  /// 注册宿主 → 本引擎的指令回调（目前只有 `play`）。
+  /// 点了悬浮球（宿主把 (kind, sourceRoute) 转给主引擎；本窗口不关闭）。
+  Future<void> ballTap({required String kind, required String sourceRoute}) async {
+    try {
+      await _channel.invokeMethod<bool>('ballTap', <String, Object?>{
+        'kind': kind,
+        'sourceRoute': sourceRoute,
+      });
+    } on MissingPluginException {
+      // 静默。
+    } on PlatformException {
+      // 静默。
+    }
+  }
+
+  /// 注册宿主 → 本引擎的指令回调（`play` / `ballPayload`）。
   void setHandler(void Function(String url, String title) onPlay) {
     _channel.setMethodCallHandler((MethodCall call) async {
       if (call.method != 'play') return null;
@@ -427,6 +384,10 @@ class AylaDetachedWindowChannel {
 // ======================= 画布样张 =======================
 
 /// 独立小窗样张（画布验收面）：有画面 / 加载中两档。
+///
+/// 舞台尺寸 = 宿主窗口的逻辑尺寸（[kAylaDetachedMiniWindowWidth] ×
+/// [kAylaDetachedMiniWindowHeight]），背景刻意画成「桌面色」——
+/// 透明窗口里这部分应当完全看不见。
 Widget aylaDetachedLiveWindowSamples() {
   Widget stage(String label, Widget child) {
     return Column(
@@ -434,40 +395,49 @@ Widget aylaDetachedLiveWindowSamples() {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         SizedBox(
-          width: 360,
-          height: 202,
-          child: ClipRect(child: child),
+          width: kAylaDetachedMiniWindowWidth,
+          height: kAylaDetachedMiniWindowHeight,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AylaColors.surface,
+              borderRadius: BorderRadius.circular(AylaRadii.rCard),
+            ),
+            child: child,
+          ),
         ),
         const SizedBox(height: AylaSpacing.sp1),
         SizedBox(
-          width: 360,
+          width: kAylaDetachedMiniWindowWidth,
           child: Text(label, style: const TextStyle(fontSize: 11)),
         ),
       ],
     );
   }
 
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+  return Wrap(
+    spacing: AylaSpacing.sp6,
+    runSpacing: AylaSpacing.sp6,
+    crossAxisAlignment: WrapCrossAlignment.start,
     children: <Widget>[
       stage(
-        '脱离应用的直播小窗 · 有画面（360×202 = 16:9 · 宿主 WS_POPUP 无边框 · '
-        '关闭键 24×24 内缩 6）',
-        AylaDetachedLiveWindowSurface(
+        '脱离应用的直播小窗 · 有画面（现有 AylaLiveMiniPlayer 原样 · 168×94 · '
+        '宿主窗口 ${kAylaDetachedMiniWindowWidth.toInt()}×'
+        '${kAylaDetachedMiniWindowHeight.toInt()} 透明，四周各 10px 留给外侧键位）',
+        AylaDetachedMiniPlayerHost(
           title: '深夜电台 · 爱莉陪你写代码',
-          video: const ColoredBox(color: Color(0xFF2A3550)),
+          videoView: const ColoredBox(color: Color(0xFF2A3550)),
+          onOpenRoom: () {},
           onClose: () {},
-          onActivateMain: () {},
         ),
       ),
       const SizedBox(height: AylaSpacing.sp6),
       stage(
-        '同一小窗 · 加载中（画面未就绪时的状态文案）',
-        AylaDetachedLiveWindowSurface(
+        '同一小窗 · 加载中（画面未就绪时的状态文案叠在画面上）',
+        const AylaDetachedMiniPlayerHost(
           title: '深夜电台',
           statusText: '连接中…',
-          onClose: () {},
-          onActivateMain: () {},
+          onOpenRoom: null,
+          onClose: null,
         ),
       ),
     ],
