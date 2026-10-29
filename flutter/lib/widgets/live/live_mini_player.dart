@@ -53,6 +53,8 @@ class AylaLiveMiniPlayer extends StatefulWidget {
     this.channelTitle,
     this.onOpenRoom,
     this.onClose,
+    this.onDetach,
+    this.detachEnabled = true,
   });
 
   /// 视频视图（页面注入同一播放器 ⇒ HLS 不断流）。
@@ -66,6 +68,16 @@ class AylaLiveMiniPlayer extends StatefulWidget {
 
   /// 右上关闭键 → 完整销毁会话（tsx 93–96）。
   final VoidCallback? onClose;
+
+  /// 「脱离应用」键（关闭键左侧）→ 进入系统画中画 / 独立置顶小窗。
+  ///
+  /// 为什么需要它：用户要求「手机端直播小窗要脱离应用，使 app 在后台时也能悬浮看直播」。
+  /// 纯 Dart 做不到 ⇒ 交给 [AylaLiveRoomSession.enterDetachedPresentation]（平台通道）。
+  /// 本组件**不碰 MethodChannel**：能力由调用方以参数注入（与 `onClose` 同规矩）。
+  final VoidCallback? onDetach;
+
+  /// 是否显示脱离键（平台不支持 / 非 Android-Windows 时由调用方传 false）。
+  final bool detachEnabled;
 
   @override
   State<AylaLiveMiniPlayer> createState() => _AylaLiveMiniPlayerState();
@@ -82,8 +94,11 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   Offset _dragStart = Offset.zero;
   Offset _dragStartPos = Offset.zero;
 
-  /// 双指缩放会话（tsx 61–67）：初始距离 + 初始尺寸/右下角锚点。
-  double? _pinchDistance;
+  /// 双指缩放会话（tsx 61–67）：**起点尺寸 + 起点右下角锚点**。
+  ///
+  /// ⚠️ 曾有一个 _pinchDistance（初始指距）字段：它用 localFocalPoint.distance
+  /// 冒充指距 —— 那是**中点相对左上角的距离**，不是两指间距，导致缩放方向反了。
+  /// 现在比例完全由 ScaleUpdateDetails.scale 提供，不再需要自己维护基准距离。
   Size? _pinchSize;
   Offset? _pinchBottomRight;
 
@@ -100,7 +115,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
       // 第二根手指落下 → 进入缩放（取消拖动，tsx 109–121）
       _dragActive = false;
       final Offset current = _pos ?? _defaultPos(viewport);
-      _pinchDistance = null; // 首次 move 时以当时的指距为基准
+      // 缩放基准 = **手势起点的尺寸与右下角**；比例由 details.scale 给（见 _onScaleUpdate）。
       _pinchSize = _size;
       _pinchBottomRight = current + Offset(_size.width, _size.height);
       return;
@@ -113,14 +128,28 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
 
   void _onScaleUpdate(ScaleUpdateDetails details, Size viewport) {
     if (details.pointerCount >= 2) {
-      // 双指缩放：右下角锚定、保持 16:9、clamp 120–320（tsx 137–152）
-      final double dist = details.localFocalPoint.distance; // 缩放中的指距近似
-      _pinchDistance ??= dist <= 0 ? 1 : dist;
+      // 双指缩放：右下角锚定、保持 16:9、clamp 120–320（tsx 137–152）。
+      //
+      // ⚠️⚠️ **比例必须用 details.scale，不能自己算指距**（2026-10 用户实报缩放反了的根因）。
+      //
+      // 旧写法把 details.localFocalPoint.distance 当指距：那是**双指中点相对控件左上角
+      // 的距离**，不是两指之间的距离。后果（三条都是可复现的）：
+      //   ① 中点离左上角越远 ⇒ 数值越大 ⇒ 被当成放大，与捏合方向**无关**；
+      //      双指在控件右下角捏合时数值本来就大 ⇒ 松开反而变大、张开反而变小（反了）；
+      //   ② 中点靠近左上角时数值趋 0 ⇒ scale 抖动甚至爆掉；
+      //   ③ 上下平移中点也会改这个数值 ⇒ 张合与拖动互相污染。
+      //
+      // ScaleUpdateDetails.scale 是框架算好的**相对手势起点**的缩放比：
+      //   缩放识别器 scale = _currentSpan / _initialSpan
+      //   （scale.dart 的 _pointerScaleFactor；span = 各指到焦点的平均偏离 ≈ 半指距），
+      //   且每次 pointer 增减都会 _reconfigure() 重置基准 —— 正是我们要的语义。
+      // 配合 _pinchSize（起点尺寸）即得绝对尺寸，**不能累乘**（scale 已含全程比例）。
       final Size base = _pinchSize ?? _size;
       final Offset anchor =
-          _pinchBottomRight ?? _pos ?? _defaultPos(viewport) +
-              Offset(_size.width, _size.height);
-      final double scale = dist <= 0 ? 1 : dist / _pinchDistance!;
+          _pinchBottomRight ??
+          (_pos ?? _defaultPos(viewport)) + Offset(_size.width, _size.height);
+      final double rawScale = details.scale;
+      final double scale = rawScale.isFinite && rawScale > 0 ? rawScale : 1;
       final double w = (base.width * scale).clamp(
         kLiveMiniMinWidth,
         kLiveMiniMaxWidth,
@@ -158,7 +187,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
 
   void _onScaleEnd(ScaleEndDetails details) {
     if (details.pointerCount < 2) {
-      _pinchDistance = null;
+      // 手指减到单指 ⇒ 本次缩放会话结束（下次双指会重新记起点）。
       _pinchSize = null;
       _pinchBottomRight = null;
     }
@@ -250,11 +279,27 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
                     Positioned(
                       top: -10,
                       right: -10,
-                      child: _MiniCloseButton(
+                      child: _MiniIconButton(
                         hovered: _hovered,
                         onPressed: widget.onClose,
+                        iconName: 'iconClose',
+                        semanticsLabel: '关闭小窗', // tsx 217
                       ),
                     ),
+                    // 「脱离应用」键：关闭键**左侧**（间距 4 = 36 = 24 + 4 + 8 外偏移）。
+                    // 为什么叠在右上角外侧而不是压进画面：小窗本体只有 168×94，压进去会挡画面；
+                    // 与关闭键同一排也符合「同一族操作聚在一起」的既有布局。
+                    if (widget.detachEnabled)
+                      Positioned(
+                        top: -10,
+                        right: 18, // 24（关闭键）+ 4（间距）- 10（关闭键外偏移）
+                        child: _MiniIconButton(
+                          hovered: _hovered,
+                          onPressed: widget.onDetach,
+                          iconName: 'iconPip',
+                          semanticsLabel: '脱离应用',
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -267,18 +312,33 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   }
 }
 
-/// `.live-mini-player-close`：24×24 玻璃圆钮（白图标 14）。
-class _MiniCloseButton extends StatefulWidget {
-  const _MiniCloseButton({required this.hovered, required this.onPressed});
+/// `.live-mini-player-close` 同款样式：24×24 玻璃圆钮（白图标 14）。
+///
+/// 关闭键与「脱离应用」键共用本件 —— 两个键的视觉规格**逐字相同**
+///（hover `rgba(70,91,146,.52)` / 常态 `rgba(70,91,146,.32)` / 边框 `#FFFFFF47` /
+/// focus `glow500` 2px），只有图标与语义标签不同，故用参数区分而不是复制一份组件。
+class _MiniIconButton extends StatefulWidget {
+  const _MiniIconButton({
+    required this.hovered,
+    required this.onPressed,
+    required this.iconName,
+    required this.semanticsLabel,
+  });
 
   final bool hovered;
   final VoidCallback? onPressed;
 
+  /// 库内图标名（[aylaIconByName]）；不存在时该键不渲染图标（不自己造 icon）。
+  final String iconName;
+
+  /// 无障碍/测试定位标签。
+  final String semanticsLabel;
+
   @override
-  State<_MiniCloseButton> createState() => _MiniCloseButtonState();
+  State<_MiniIconButton> createState() => _MiniIconButtonState();
 }
 
-class _MiniCloseButtonState extends State<_MiniCloseButton> {
+class _MiniIconButtonState extends State<_MiniIconButton> {
   bool _hovered = false;
   bool _focused = false;
 
@@ -286,7 +346,7 @@ class _MiniCloseButtonState extends State<_MiniCloseButton> {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '关闭小窗', // tsx 217
+      label: widget.semanticsLabel,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),
@@ -312,11 +372,14 @@ class _MiniCloseButtonState extends State<_MiniCloseButton> {
                 ),
               ),
               alignment: Alignment.center,
-              child: AylaIcon(
-                aylaIconByName('iconClose')!,
-                size: 14, // tsx 224
-                color: Colors.white,
-              ),
+              child: switch (aylaIconByName(widget.iconName)) {
+                final AylaIconData icon => AylaIcon(
+                  icon,
+                  size: 14, // tsx 224
+                  color: Colors.white,
+                ),
+                null => const SizedBox.shrink(),
+              },
             ),
           ),
         ),
