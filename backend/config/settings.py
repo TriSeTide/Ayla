@@ -224,16 +224,32 @@ MEDIA_TMP_TTL_SECONDS = env.int("MEDIA_TMP_TTL_SECONDS", default=600)
 MEDIA_THUMB_MAX = env.int("MEDIA_THUMB_MAX", default=320)
 
 # 聊天媒体过期 TTL（天，docs/architecture/media-storage-expiration.md）：
-# - 图片两级：MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS 删原图留缩略图（默认 7 天）、
-#   MEDIA_CHAT_IMAGE_FULL_TTL_DAYS 完全过期删派生对象（默认 30 天）；
-# - 语音/文件/视频单级：无缩略图阶段，到期直接删除全部对象（默认 7 天）；
-# - <=0 表示禁用对应阶段；IMAGE FULL < ORIGINAL 时清理命令报配置错误（显式失败）。
-# 资产类媒体（帖子配图/表情包/评论/群头像）由清理命令保护集合豁免，不受此配置影响。
+# - **两级**（image / video）：ORIGINAL 阶段删原对象、保留派生封面
+#   （图片 = thumbnail 缩略图；视频 = thumbnail 海报帧），FULL 阶段删全部对象；
+# - **单级**（voice / file）：无派生封面，到期直接删除全部对象（默认 7 天）；
+# - <=0 表示禁用对应阶段；FULL < ORIGINAL 时清理命令报配置错误（显式失败）。
+# 资产类媒体（帖子配图/表情包/评论/群头像/直播封面）由清理命令保护集合豁免，
+# 不受此配置影响。
+#
+# 2026-10-29 变更（用户拍板）：**video 由单级改为两级** —— 视频本体 7 天过期，
+# 但首帧海报帧与图片缩略图同寿命（30 天），使聊天里 7 天后仍能看到封面而不是灰块。
+# 旧的 MEDIA_CHAT_VIDEO_TTL_DAYS 保留为「视频原片过期天数」的兼容别名（默认 7）。
 MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS = env.int("MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS", default=7)
 MEDIA_CHAT_IMAGE_FULL_TTL_DAYS = env.int("MEDIA_CHAT_IMAGE_FULL_TTL_DAYS", default=30)
 MEDIA_CHAT_VOICE_TTL_DAYS = env.int("MEDIA_CHAT_VOICE_TTL_DAYS", default=7)
 MEDIA_CHAT_FILE_TTL_DAYS = env.int("MEDIA_CHAT_FILE_TTL_DAYS", default=7)
+# 视频原片（original）过期天数：与图片阶段 1 同义。
 MEDIA_CHAT_VIDEO_TTL_DAYS = env.int("MEDIA_CHAT_VIDEO_TTL_DAYS", default=7)
+# 视频海报帧（thumbnail）过期天数：与图片阶段 2 同义（默认 30 天）。
+# 缺省值回落到 MEDIA_CHAT_IMAGE_FULL_TTL_DAYS，保持「封面与缩略图同寿命」。
+MEDIA_CHAT_VIDEO_FULL_TTL_DAYS = env.int(
+    "MEDIA_CHAT_VIDEO_FULL_TTL_DAYS", default=MEDIA_CHAT_IMAGE_FULL_TTL_DAYS
+)
+
+# 卡死兜底：媒体 status=processing 超过该小时数仍未就绪，视为失败并纳入过期流程。
+# 背景：过期候选集原本硬要求 status=READY，导致派生/complete 中途崩溃留下的
+# processing 行**永远不会过期**（永久占用对象存储）。<=0 表示禁用该兜底。
+MEDIA_PROCESSING_STALE_HOURS = env.int("MEDIA_PROCESSING_STALE_HOURS", default=24)
 
 # 大文件上传的本地中转临时目录（PUT 接收 / complete 校验的过路文件，传完即删）。
 # 必须指向空间充足的数据盘：默认系统 Temp 在 C 盘，2.9G 视频上传峰值会在

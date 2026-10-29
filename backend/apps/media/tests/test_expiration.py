@@ -296,6 +296,9 @@ class TestConfigDisabled:
             MEDIA_CHAT_VOICE_TTL_DAYS=0,
             MEDIA_CHAT_FILE_TTL_DAYS=0,
             MEDIA_CHAT_VIDEO_TTL_DAYS=0,
+            # 2026-10-29：video 改两级后新增 FULL 阶段；两者都置 0 才是「全禁用」。
+            MEDIA_CHAT_VIDEO_FULL_TTL_DAYS=0,
+            MEDIA_PROCESSING_STALE_HOURS=0,
         ):
             out = _run_expire()
         media.refresh_from_db()
@@ -374,15 +377,48 @@ class TestSingleStageKinds:
         assert media.expired_at is not None
         assert storage.get_storage().exists(media.storage_path) is False
 
-    def test_video_expires_directly(self, user_factory):
-        """视频 7 天直接删除：original + 海报帧（thumbnail）全删。"""
+    def test_video_stage1_keeps_poster(self, user_factory):
+        """视频 7 天：只删视频本体，**保留首帧海报帧**（2026-10-29 用户拍板两级）。
+
+        旧行为是单级（连海报一起删），导致聊天里 7 天后视频变灰块；
+        现在海报帧与图片缩略图同寿命（30 天），7 天后仍能显示封面。
+        """
         user = user_factory(username="exp_v3")
         media = self._mk_single(user, "exp-v3", "video", days_ago=8)
         _run_expire()
         media.refresh_from_db()
+        assert media.original_expired_at is not None
+        assert media.expired_at is None  # 未到 30 天，阶段 2 不执行
+        assert storage.get_storage().exists(media.storage_path) is False
+        assert storage.get_storage().exists(media.thumbnail_path) is True
+
+    def test_video_stage2_deletes_all(self, user_factory):
+        """视频 30 天：完全过期，海报帧一并删除，DB 标记 expired_at。"""
+        user = user_factory(username="exp_v3b")
+        media = self._mk_single(user, "exp-v3b", "video", days_ago=31)
+        _run_expire()
+        media.refresh_from_db()
         assert media.expired_at is not None
+        assert media.original_expired_at is not None
         assert storage.get_storage().exists(media.storage_path) is False
         assert storage.get_storage().exists(media.thumbnail_path) is False
+
+    def test_video_two_stage_boundary(self, user_factory):
+        """视频边界：6.95 天不动；7 天只删本体；30 天全删。"""
+        user = user_factory(username="exp_v3c")
+        m6 = self._mk_single(user, "exp-v3c-6d", "video", days_ago=6.95)
+        m7 = self._mk_single(user, "exp-v3c-7d", "video", days_ago=7)
+        m30 = self._mk_single(user, "exp-v3c-30d", "video", days_ago=30)
+        _run_expire()
+        for m in (m6, m7, m30):
+            m.refresh_from_db()
+        assert m6.original_expired_at is None and m6.expired_at is None
+        assert storage.get_storage().exists(m6.storage_path) is True
+        assert m7.original_expired_at is not None and m7.expired_at is None
+        assert storage.get_storage().exists(m7.thumbnail_path) is True
+        assert m30.expired_at is not None
+        assert storage.get_storage().exists(m30.storage_path) is False
+        assert storage.get_storage().exists(m30.thumbnail_path) is False
 
     def test_single_kind_boundary(self, user_factory):
         """单级媒体边界：恰好 7 天前 → 过期；6 天 23 小时 → 不过期。"""
@@ -465,3 +501,215 @@ class TestSignExpired:
         )
         assert r.status_code == 200
         assert r.json()["url"].startswith("http://fake-storage/")
+
+@pytest.mark.django_db
+class TestVideoTwoStageSemantics:
+    """视频两级过期的端到端语义（2026-10-29 用户拍板）。
+
+    阶段 1（7 天）：视频本体删掉，**首帧海报帧保留** ⇒ :sign original 返回
+    410 original_expired，:sign thumb 仍可签 ⇒ 前端显示封面 + 「视频已过期」角标。
+    阶段 2（30 天）：海报帧也删 ⇒ 两端一律 410 media_expired。
+    """
+
+    def test_sign_after_stage1_keeps_poster_signable(self, auth_client):
+        client, user = auth_client(username="exp_vs1")
+        media = _mk_media(user, "exp-vs1", kind="video", days_ago=8)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.original_expired_at is not None
+        assert media.expired_at is None
+
+        # 视频本体已不可签
+        r = client.post(f"/api/v1/media/{media.media_id}:sign", format="json")
+        assert r.status_code == 410
+        assert r.json()["detail"] == "original_expired"
+
+        # 海报帧仍可签（气泡/查看器显示封面）
+        r = client.post(
+            f"/api/v1/media/{media.media_id}:sign",
+            {"variant": "thumb"},
+            format="json",
+        )
+        assert r.status_code == 200
+        assert r.json()["url"]
+
+    def test_sign_after_stage2_all_gone(self, auth_client):
+        client, user = auth_client(username="exp_vs2")
+        media = _mk_media(user, "exp-vs2", kind="video", days_ago=31)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.expired_at is not None
+        for body in (None, {"variant": "thumb"}):
+            r = client.post(
+                f"/api/v1/media/{media.media_id}:sign",
+                body,
+                format="json",
+            )
+            assert r.status_code == 410
+            assert r.json()["detail"] == "media_expired"
+
+
+@pytest.mark.django_db
+class TestProcessingStaleFallback:
+    """processing 卡死兜底：超过 MEDIA_PROCESSING_STALE_HOURS 转 failed 并纳入过期。"""
+
+    def _mk_processing(self, user, media_id, kind="image", hours_ago=48):
+        media = MediaObject.objects.create(
+            media_id=media_id,
+            owner=user,
+            kind=kind,
+            content_hash=f"h-{media_id}",
+            mime_type="image/png",
+            size=100,
+            storage_path=storage.original_key(kind, media_id),
+            status=MediaObject.STATUS_PROCESSING,
+        )
+        storage.get_storage().put(media.storage_path, make_png_bytes(), "image/png")
+        MediaObject.objects.filter(pk=media.pk).update(
+            created_at=NOW - timedelta(hours=hours_ago)
+        )
+        media.refresh_from_db()
+        return media
+
+    def test_stale_processing_becomes_failed_then_expires(self, user_factory):
+        user = user_factory(username="exp_p1")
+        media = self._mk_processing(user, "exp-p1", hours_ago=48)
+        _run_expire()
+        media.refresh_from_db()
+        # 卡死 → failed → 纳入过期（40 天？这里 created_at 只回拨 48h，不够 TTL）
+        assert media.status == MediaObject.STATUS_FAILED
+        assert media.expired_at is None  # 未到 7 天 TTL，只转状态
+
+    def test_old_processing_is_fully_expired(self, user_factory):
+        user = user_factory(username="exp_p2")
+        media = self._mk_processing(user, "exp-p2", hours_ago=24 * 40)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.status == MediaObject.STATUS_FAILED
+        assert media.expired_at is not None
+        assert storage.get_storage().exists(media.storage_path) is False
+
+    def test_fresh_processing_untouched(self, user_factory):
+        user = user_factory(username="exp_p3")
+        media = self._mk_processing(user, "exp-p3", hours_ago=1)
+        _run_expire()
+        media.refresh_from_db()
+        assert media.status == MediaObject.STATUS_PROCESSING
+        assert storage.get_storage().exists(media.storage_path) is True
+
+    def test_no_delete_preview_keeps_processing(self, user_factory):
+        from io import StringIO
+
+        user = user_factory(username="exp_p4")
+        media = self._mk_processing(user, "exp-p4", hours_ago=48)
+        out = StringIO()
+        call_command("cleanup_media", "--expire-chat-media", "--no-delete", stdout=out)
+        media.refresh_from_db()
+        assert media.status == MediaObject.STATUS_PROCESSING
+        assert "卡死兜底" in out.getvalue()
+
+    def test_disabled_when_zero(self, user_factory):
+        user = user_factory(username="exp_p5")
+        media = self._mk_processing(user, "exp-p5", hours_ago=24 * 40)
+        with override_settings(MEDIA_PROCESSING_STALE_HOURS=0):
+            _run_expire()
+        media.refresh_from_db()
+        assert media.status == MediaObject.STATUS_PROCESSING
+        assert media.expired_at is None
+
+@pytest.mark.django_db
+class TestWaveformVariant:
+    """:sign variant=waveform（2026-10-29 新增）。
+
+    背景：web 的语音条把 `/media/{id}/waveform` 交给 ResourceImage，后者只按
+    media_id 签 original ⇒ <img> 拿到音频字节、解码失败 ⇒ 波形图永远显示不出来。
+    """
+
+    def test_waveform_variant_signs_waveform_key(self, auth_client):
+        from apps.media import storage as st
+
+        client, user = auth_client(username="exp_wf1")
+        media = _mk_media(user, "exp-wf1", kind="voice")
+        media.waveform_path = st.waveform_key("voice", media.media_id)
+        st.get_storage().put(media.waveform_path, make_png_bytes(), "image/png")
+        media.save(update_fields=["waveform_path"])
+
+        r = client.post(
+            f"/api/v1/media/{media.media_id}:sign",
+            {"variant": "waveform"},
+            format="json",
+        )
+        assert r.status_code == 200
+        assert "waveform" in r.json()["url"]
+
+    def test_waveform_missing_returns_404_not_expired(self, auth_client):
+        client, user = auth_client(username="exp_wf2")
+        media = _mk_media(user, "exp-wf2", kind="voice")
+        r = client.post(
+            f"/api/v1/media/{media.media_id}:sign",
+            {"variant": "waveform"},
+            format="json",
+        )
+        assert r.status_code == 404
+        assert r.json()["detail"] == "waveform_not_ready"
+
+    def test_waveform_after_full_expire_returns_410(self, auth_client):
+        client, user = auth_client(username="exp_wf3")
+        media = _mk_media(user, "exp-wf3", kind="voice")
+        _run_expire()  # 语音单级：created_at 未回拨 → 不过期
+        MediaObject.objects.filter(pk=media.pk).update(
+            expired_at=NOW - timedelta(days=1)
+        )
+        r = client.post(
+            f"/api/v1/media/{media.media_id}:sign",
+            {"variant": "waveform"},
+            format="json",
+        )
+        assert r.status_code == 410
+        assert r.json()["detail"] == "media_expired"
+
+@pytest.mark.django_db
+class TestDescriptorExpiryProjection:
+    """descriptor 的 original_expired / expired 投影（2026-10-29 新增）。
+
+    客户端据此**不发请求**就能判断过期状态：
+    · expired=true → 直接占位，省掉一次必然 410 的 :sign；
+    · original_expired=true → 直接按缩略图/海报渲染 + 「原图/视频已过期」角标。
+    """
+
+    def test_fresh_media_flags_false(self, auth_client):
+        client, user = auth_client(username="exp_desc1")
+        media = _mk_media(user, "exp-desc1")
+        r = client.get(f"/api/v1/media/{media.media_id}/")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["expired"] is False
+        assert body["original_expired"] is False
+
+    def test_stage1_sets_original_expired_only(self, auth_client):
+        client, user = auth_client(username="exp_desc2")
+        media = _mk_media(user, "exp-desc2", days_ago=8)
+        _run_expire()
+        r = client.get(f"/api/v1/media/{media.media_id}/")
+        body = r.json()
+        assert body["original_expired"] is True
+        assert body["expired"] is False
+
+    def test_stage2_sets_both(self, auth_client):
+        client, user = auth_client(username="exp_desc3")
+        media = _mk_media(user, "exp-desc3", days_ago=31)
+        _run_expire()
+        r = client.get(f"/api/v1/media/{media.media_id}/")
+        body = r.json()
+        assert body["expired"] is True
+        assert body["original_expired"] is True
+
+    def test_video_stage1_keeps_expired_false(self, auth_client):
+        """视频阶段 1：本体已删但海报帧仍在 ⇒ expired 必须仍为 False。"""
+        client, user = auth_client(username="exp_desc4")
+        media = _mk_media(user, "exp-desc4", kind="video", days_ago=8)
+        _run_expire()
+        r = client.get(f"/api/v1/media/{media.media_id}/")
+        body = r.json()
+        assert body["original_expired"] is True
+        assert body["expired"] is False

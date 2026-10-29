@@ -135,34 +135,79 @@ class Command(BaseCommand):
         """聊天媒体过期（幂等可重跑）。
 
         按 kind 分派（docs/architecture/media-storage-expiration.md）：
-        - image：两级——ORIGINAL_TTL 删原图留缩略图、FULL_TTL 完全过期；
-        - voice/file/video：单级——TTL 到期直接删除全部对象（无缩略图阶段）。
+        - **两级**（image / video）：ORIGINAL_TTL 删原对象、保留派生封面
+          （图片=缩略图；视频=首帧海报帧），FULL_TTL 删全部对象完全过期；
+        - **单级**（voice / file）：TTL 到期直接删除全部对象（无派生封面）。
+
+        2026-10-29 变更（用户拍板）：video 由单级改为两级 —— 视频本体 7 天过期，
+        海报帧与图片缩略图同寿命（30 天），聊天里 7 天后仍显示封面而非灰块。
+
+        另含**卡死兜底**：status=processing 超过 MEDIA_PROCESSING_STALE_HOURS
+        仍未就绪的媒体先转 failed 再纳入过期，避免中途崩溃的行永久占存储。
         """
-        image_original_ttl = int(getattr(settings, "MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS", 7))
-        image_full_ttl = int(getattr(settings, "MEDIA_CHAT_IMAGE_FULL_TTL_DAYS", 30))
+        two_stage = {
+            MediaObject.KIND_IMAGE: (
+                int(getattr(settings, "MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS", 7)),
+                int(getattr(settings, "MEDIA_CHAT_IMAGE_FULL_TTL_DAYS", 30)),
+            ),
+            MediaObject.KIND_VIDEO: (
+                int(getattr(settings, "MEDIA_CHAT_VIDEO_TTL_DAYS", 7)),
+                int(
+                    getattr(
+                        settings,
+                        "MEDIA_CHAT_VIDEO_FULL_TTL_DAYS",
+                        getattr(settings, "MEDIA_CHAT_IMAGE_FULL_TTL_DAYS", 30),
+                    )
+                ),
+            ),
+        }
         single_ttls = {
             MediaObject.KIND_VOICE: int(getattr(settings, "MEDIA_CHAT_VOICE_TTL_DAYS", 7)),
             MediaObject.KIND_FILE: int(getattr(settings, "MEDIA_CHAT_FILE_TTL_DAYS", 7)),
-            MediaObject.KIND_VIDEO: int(getattr(settings, "MEDIA_CHAT_VIDEO_TTL_DAYS", 7)),
         }
-        if image_full_ttl > 0 and image_original_ttl > 0 and image_full_ttl < image_original_ttl:
-            raise CommandError(
-                f"MEDIA_CHAT_IMAGE_FULL_TTL_DAYS({image_full_ttl}) < "
-                f"MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS({image_original_ttl})，配置错误"
-            )
+        # 配置校验：两级媒体的 FULL 必须 >= ORIGINAL（否则阶段 2 先于阶段 1 触发，
+        # 等于没有两级窗口，属显式配置错误而非静默容忍）。
+        for kind, (original_ttl, full_ttl) in two_stage.items():
+            if full_ttl > 0 and original_ttl > 0 and full_ttl < original_ttl:
+                raise CommandError(
+                    f"{kind}: FULL_TTL_DAYS({full_ttl}) < ORIGINAL_TTL_DAYS({original_ttl})，"
+                    "配置错误"
+                )
         effective_ttls = [
-            t for t in [image_original_ttl, image_full_ttl, *single_ttls.values()] if t > 0
-        ]
+            t
+            for pair in two_stage.values()
+            for t in pair
+            if t > 0
+        ] + [t for t in single_ttls.values() if t > 0]
         if not effective_ttls:
             self.stdout.write("[media] 聊天媒体过期均已禁用（TTL<=0），无动作")
             return
 
-        # 候选：created_at 超任一有效 TTL 且未完全过期（expired_at 为 null）且就绪
+        # 卡死兜底：processing 超时先转 failed（--no-delete 时只统计不落库）
+        stale_hours = int(getattr(settings, "MEDIA_PROCESSING_STALE_HOURS", 24))
+        stale_failed = 0
+        if stale_hours > 0:
+            stale_qs = MediaObject.objects.filter(
+                status=MediaObject.STATUS_PROCESSING,
+                created_at__lt=now - timedelta(hours=stale_hours),
+                expired_at__isnull=True,
+            )
+            stale_failed = stale_qs.count()
+            if stale_failed and not no_delete:
+                stale_qs.update(status=MediaObject.STATUS_FAILED)
+            if stale_failed:
+                self.stdout.write(
+                    f"[media] 卡死兜底：{stale_failed} 个 processing 超过 {stale_hours}h"
+                    f"{'（预览，未落库）' if no_delete else ' 已转 failed'}"
+                )
+
+        # 候选：created_at 超任一有效 TTL、未完全过期（expired_at 为 null），
+        # 且（已就绪 或 卡死转失败的）。failed 不参与正常流程，只承接上面的兜底。
         oldest_ttl = min(effective_ttls)
         candidates = list(
             MediaObject.objects.filter(
                 created_at__lt=now - timedelta(days=oldest_ttl),
-                status=MediaObject.STATUS_READY,
+                status__in=(MediaObject.STATUS_READY, MediaObject.STATUS_FAILED),
                 expired_at__isnull=True,
             )
         )
@@ -181,10 +226,11 @@ class Command(BaseCommand):
             if media.kind == MediaObject.KIND_EMOJI:
                 emoji_skipped += 1
                 continue
-            if media.kind == MediaObject.KIND_IMAGE:
-                stage1_count, stage2_count = self._expire_image(
+            if media.kind in two_stage:
+                original_ttl, full_ttl = two_stage[media.kind]
+                stage1_count, stage2_count = self._expire_two_stage(
                     media, now, store, no_delete,
-                    image_original_ttl, image_full_ttl, stage1_count, stage2_count,
+                    original_ttl, full_ttl, stage1_count, stage2_count,
                 )
             else:
                 ttl = single_ttls.get(media.kind, 0)
@@ -197,14 +243,19 @@ class Command(BaseCommand):
         self.stdout.write(
             f"[media] 聊天媒体过期完成：阶段1 {stage1_count} 个，阶段2 {stage2_count} 个"
             f"（保护 {len(protected)} 个引用，候选 {len(candidates)} 个，"
-            f"表情包跳过 {emoji_skipped} 个）"
+            f"表情包跳过 {emoji_skipped} 个，卡死兜底 {stale_failed} 个）"
         )
 
-    def _expire_image(self, media, now, store, no_delete, original_ttl, full_ttl,
-                      stage1_count, stage2_count):
-        """图片两级过期：阶段 1 删原图留缩略图；阶段 2 完全过期删全部对象。"""
+    def _expire_two_stage(self, media, now, store, no_delete, original_ttl, full_ttl,
+                          stage1_count, stage2_count):
+        """两级过期（image / video 共用）：阶段 1 删原对象留封面；阶段 2 全删。
+
+        - 图片：阶段 1 删 original、保留 thumbnail（缩略图）；
+        - 视频：阶段 1 删 original（视频本体）、保留 thumbnail（首帧海报帧）；
+          waveform 只有语音才有，两级媒体上恒为空，一并由阶段 2 兜底删除。
+        """
         # 阶段 2 优先判定：完全过期（超 FULL_TTL）→ 删全部对象（含未删的
-        # original），标记 expired_at；original_expired_at 未标记时一并标记
+        # original 与封面），标记 expired_at；original_expired_at 未标记时一并标记
         # （保留已标记的首次阶段 1 时间，审计可追溯）。
         if full_ttl > 0 and media.created_at < now - timedelta(days=full_ttl):
             self._delete_all_objects(media, store, no_delete, stage="阶段2")
@@ -217,12 +268,13 @@ class Command(BaseCommand):
                 media.save(update_fields=update_fields)
             stage2_count += 1
             return stage1_count, stage2_count
-        # 阶段 1：删原图，留缩略图/波形（original_expired_at 非空 = 已执行，幂等跳过）
+        # 阶段 1：删原对象（图片=原图 / 视频=视频本体），保留 thumbnail 封面
+        # （original_expired_at 非空 = 已执行，幂等跳过）。
         if original_ttl > 0 and media.created_at < now - timedelta(days=original_ttl):
             if media.original_expired_at is None:
                 if media.storage_path and store.exists(media.storage_path):
                     self.stdout.write(
-                        f"[media] 过期 {media.media_id} 阶段1 删除原图 {media.storage_path}"
+                        f"[media] 过期 {media.media_id} 阶段1 删除原对象 {media.storage_path}"
                     )
                     if not no_delete:
                         store.delete(media.storage_path)

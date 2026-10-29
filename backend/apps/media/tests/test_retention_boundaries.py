@@ -367,11 +367,18 @@ class TestContentEndpointObjectMissing:
         r = client.get(f"/api/v1/media/{media.media_id}/content")
         assert r.status_code == 200
 
-    def test_voice_like_media_expired_returns_404_not_500(self, auth_client):
-        """语音单级过期后（对象全删）走 content 端点：404 而非 500。"""
+    def test_voice_like_media_expired_returns_410_not_500(self, auth_client):
+        """语音单级过期后（对象全删）走 content 端点：**410** 而非 500/404。
+
+        2026-10-29 契约统一（用户拍板）：已知过期的媒体一律 410 `media_expired`，
+        与 `:sign` 端点同语义 —— 前端只按状态码判定「已过期」。
+        未标记过期但对象缺失（运维态）仍返回 404 `media_content_unavailable`
+        （见 test_content_missing_object_returns_404）。
+        """
         client, user = auth_client(username="ret_ct_voice")
         media = _mk_media(user, "ret-ct-voice", kind="voice")
         _mark_expired(media, stage=2)
         storage.get_storage().delete(media.storage_path)
         r = client.get(f"/api/v1/media/{media.media_id}/content")
-        assert r.status_code == 404
+        assert r.status_code == 410
+        assert r.json()["detail"] == "media_expired"

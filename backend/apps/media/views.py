@@ -205,9 +205,11 @@ class MediaDeleteView(APIView):
         if media.owner_id != request.user.id:
             return Response({"detail": "仅上传者可删除"}, status=status.HTTP_403_FORBIDDEN)
         store = storage.get_storage()
-        store.delete(media.storage_path)
-        if media.thumbnail_path:
-            store.delete(media.thumbnail_path)
+        # 三个 key 全删：voice 的 waveform 曾是漏网（2026-10-29 修正）——
+        # 只删 original+thumbnail 会在对象存储里留下无主波形图。
+        for key in (media.storage_path, media.thumbnail_path, media.waveform_path):
+            if key:
+                store.delete(key)
         media.delete()
         return Response({"deleted": True}, status=status.HTTP_200_OK)
 
@@ -264,9 +266,24 @@ class MediaSignView(APIView):
         if not services.can_access_media(request.user, media):
             return Response({"detail": "无权访问"}, status=status.HTTP_403_FORBIDDEN)
         expires = services.MEDIA_VIEW_URL_TTL_SECONDS
-        # variant=thumb → 缩略图派生（气泡用，几 KB~百 KB）；默认 original（查看器/保存）
+        # variant=thumb → 缩略图派生（气泡用，几 KB~百 KB）；
+        # variant=waveform → 语音波形图（PNG 派生）；默认 original（查看器/保存）。
+        #
+        # 2026-10-29 补 waveform 变体：此前 web 的语音条把 `/media/{id}/waveform`
+        # 交给 ResourceImage，后者只按 media_id 签 **original** ⇒ <img> 拿到的是
+        # 音频字节、解码失败 ⇒ 波形图永远显示不出来（回退成麦克风图标）。
         variant = (request.data.get("variant") or request.query_params.get("variant") or "").strip()
-        if variant == "thumb":
+        if variant == "waveform":
+            if media.expired_at is not None:
+                return Response(
+                    {"detail": "media_expired"}, status=status.HTTP_410_GONE
+                )
+            if not media.waveform_path:
+                return Response(
+                    {"detail": "waveform_not_ready"}, status=status.HTTP_404_NOT_FOUND
+                )
+            url = storage.get_storage().presign_get(media.waveform_path, expires)
+        elif variant == "thumb":
             # 完全过期（阶段 2 / 单级媒体）：派生对象已删，410 引导前端显示「已过期」占位
             if media.expired_at is not None:
                 return Response(
@@ -338,13 +355,22 @@ class MediaContentView(APIView):
         store = storage.get_storage()
         key = media.storage_path
         # 阶段 1/2 过期或竞态下对象已不存在：head 抛异常（S3 ClientError /
-        # FakeStorage KeyError）。必须兜底为 404，不能让它冒成 HTTP 500 ——
-        # 前端语音等走本端点的媒体会把 500 表现成「播放失败」而非「已过期」
-        # （调查报告 §4.6）。此处不泄露对象是否存在以外的信息。
+        # FakeStorage KeyError）。必须兜底，不能让它冒成 HTTP 500。
+        #
+        # 2026-10-29 契约统一（用户拍板）：**已知过期**的媒体返回 410
+        # `media_expired`，与 `:sign` 端点保持同一语义 —— 前端（web/Flutter）
+        # 只按状态码判定「已过期」，两端口径不一致会让语音条显示成
+        # 「播放失败」而不是「已过期」。仅当 DB 未标记过期但对象确实缺失
+        # （人工删桶 / 版本化 delete marker 等运维态）才保留 404。
         try:
             size = store.head(key)
         except Exception:
             logger.info("media content unavailable: %s", media.media_id)
+            if media.original_expired_at is not None or media.expired_at is not None:
+                return Response(
+                    {"detail": "media_expired"},
+                    status=status.HTTP_410_GONE,
+                )
             return Response(
                 {"detail": "media_content_unavailable"},
                 status=status.HTTP_404_NOT_FOUND,
