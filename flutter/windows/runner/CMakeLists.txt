@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "audio_default_device.cc"
   "flutter_window.cpp"
+  "live_window.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -57,6 +58,12 @@ target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # endpoint query used by "ayla/audio_default_device".
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "propsys.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+# Detached live window: its second engine registers ONLY the vendored
+# media_kit_video plugin (see live_window.cpp + third_party/media_kit_video/
+# README-AYLA.md), so the runner needs that plugin's public header on its
+# include path.
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}/../third_party/media_kit_video/windows/include")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
