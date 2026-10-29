@@ -307,13 +307,29 @@ class _LiveRoomPageState extends ConsumerState<LiveRoomPage> {
       ),
     );
 
-    return narrow
-        ? AylaFullScreenSwipeBack(
-            // 返回：能回退就 pop（进房是 push），栈底回大厅。
-            onBack: () =>
-                context.canPop() ? context.pop() : context.go('/live'),
-            child: body,
-          )
-        : body;
+    // ⚠️⚠️ **必须是「恒包一层 + enabled 开关」，不能写成 narrow ? 包 : 不包**
+    // —— 这是手机端「点全屏 ⇒ 横屏显示直播间页面 ⇒ 又回到竖屏」的**根因**（2026-10 实测）。
+    //
+    // 失败链（widget test 已复现：旋转前后 identical(state) 为 false）：
+    //   ① 点全屏 ⇒ AylaLivePlayer 插 root Overlay 并 setPreferredOrientations(landscape)；
+    //   ② 系统旋转 ⇒ MediaQuery 宽 > 768 ⇒ narrow 翻成 false；
+    //   ③ 三元表达式在这一帧返回**类型不同的 Widget**（AylaFullScreenSwipeBack → body）
+    //      ⇒ Flutter 无法复用 Element，**整棵 subtree 被销毁重建**；
+    //   ④ _AylaLivePlayerState.dispose ⇒ _fsEntry.remove() + _unlockOrientation()
+    //      ⇒ 全屏层被摘掉、屏幕解锁回竖屏 ⇒ 用户看到的正是「横屏一瞬 + 直播间页面 + 回竖屏」。
+    //
+    // web 侧不存在该缺陷：LiveRoomPage.tsx:66–75 是
+    //   <FullScreenSwipeBack onBack enabled={isNarrow}><LiveRoomBody/></FullScreenSwipeBack>
+    // —— **恒挂载**，只切 enabled（useEdgeSwipeBack 内部按它决定是否挂手势）
+    // ⇒ React 始终复用同一个组件实例，旋转只改 props、不换类型。
+    // Flutter 侧照抄同一形状即可：AylaFullScreenSwipeBack 的 build 在 !enabled 时
+    // 直接返回 Transform.translate（等价无包裹），**语义与 web 完全一致**。
+    return AylaFullScreenSwipeBack(
+      // enabled={isNarrow}（tsx 66）：宽屏不挂右滑返回手势。
+      enabled: narrow,
+      // 返回：能回退就 pop（进房是 push），栈底回大厅。
+      onBack: () => context.canPop() ? context.pop() : context.go('/live'),
+      child: body,
+    );
   }
 }

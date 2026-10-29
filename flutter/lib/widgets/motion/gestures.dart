@@ -522,12 +522,26 @@ class _AylaFullScreenSwipeBackState extends State<AylaFullScreenSwipeBack>
       offset: Offset(_dx, 0),
       child: widget.child,
     );
-    if (!on) return content;
+    // ⚠️⚠️ **返回的 widget 类型必须在 enabled 两档之间保持不变**（2026-10 根因）。
+    //
+    // 旧写法是 if (!on) return content; —— 禁用档返回 Transform、启用档返回
+    // GestureDetector。看起来等价，但**类型不同 ⇒ Flutter 无法复用 Element ⇒ 整个
+    // 子树被销毁重建**。而 enabled 会在运行期翻转（窄↔宽），于是：
+    //
+    //   手机点全屏 ⇒ 锁横屏 ⇒ MediaQuery 宽 > 768 ⇒ enabled 翻 false
+    //   ⇒ 本件换成 Transform ⇒ 子树的 AylaLivePlayer/AylaLiveRoomBody 全部 dispose
+    //   ⇒ _fsEntry.remove() + _unlockOrientation() ⇒ 全屏层消失、屏幕解锁回竖屏
+    //   ⇒ 用户实报「点全屏后横屏显示的是直播间页面，然后又回到竖屏」。
+    //
+    // web 侧不会：FullScreenSwipeBack.tsx:36–43 的 <motion.div> **恒在**，
+    // enabled 只进 useEdgeSwipeBack、决定 handlers 是否生效（DOM 结构不变）。
+    // Flutter 侧照抄：恒挂 GestureDetector，禁用时把回调置 null（等价 handlers 失效），
+    // 并把 hitTest 行为退回 deferToChild（禁用时不该吞掉整块区域的命中）。
     return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onHorizontalDragStart: _onStart,
-      onHorizontalDragUpdate: _onUpdate,
-      onHorizontalDragEnd: _onEnd,
+      behavior: on ? HitTestBehavior.translucent : HitTestBehavior.deferToChild,
+      onHorizontalDragStart: on ? _onStart : null,
+      onHorizontalDragUpdate: on ? _onUpdate : null,
+      onHorizontalDragEnd: on ? _onEnd : null,
       child: content,
     );
   }
