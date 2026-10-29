@@ -34,6 +34,8 @@ class AylaMediaDescriptor {
     this.duration,
     this.thumbnail,
     this.waveform,
+    this.originalExpired = false,
+    this.expired = false,
     this.createdAt,
   });
 
@@ -58,6 +60,15 @@ class AylaMediaDescriptor {
   /// 波形相对路径（voice；无则 null）。
   final String? waveform;
 
+  /// 原对象是否已删（图片阶段 1 / 视频阶段 1 → 只剩缩略图/海报帧）。
+  ///
+  /// 2026-10-29 新增（后端 descriptor `original_expired`）：客户端据此直接按缩略图
+  /// 渲染 + 「原图已过期」角标，**不白跑一次 :sign**。
+  final bool originalExpired;
+
+  /// 是否已完全过期（所有对象已删 → 直接占位，连 :sign 都不用发）。
+  final bool expired;
+
   final String? createdAt;
 
   static AylaMediaDescriptor? fromJson(Object? raw) {
@@ -75,6 +86,10 @@ class AylaMediaDescriptor {
       duration: (raw['duration'] as num?)?.toDouble(),
       thumbnail: raw['thumbnail'] as String?,
       waveform: raw['waveform'] as String?,
+      // 缺失按「未过期」处理：旧后端/旧缓存数据没有这两个字段，
+      // 走原来的「签名时由 410 判定」路径，行为不变。
+      originalExpired: raw['original_expired'] == true,
+      expired: raw['expired'] == true,
       createdAt: raw['created_at'] as String?,
     );
   }

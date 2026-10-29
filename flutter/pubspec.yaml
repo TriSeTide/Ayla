@@ -41,7 +41,15 @@ dependencies:
   # PoC-B 前 mpv 已成功下载并校验（build/windows/x64/，MD5 a832ef24），恢复启用。
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
+  # ⚠️ 只有 **Windows** 的 media_kit 运行库。Android/iOS 上没有 libmpv，
+  # 因此移动端的音频**不能**走 media_kit（2026-10 用户实报「手机端无法播放语音」
+  # 的根因）——移动端语音内核见下面 just_audio。
   media_kit_libs_windows_video: ^1.0.11
+  # 移动端（Android/iOS）语音播放内核：底层是系统原生播放器
+  # （ExoPlayer / AVPlayer），原生支持 m4a/AAC 与 HTTP Range 流式，
+  # 且 AudioSource.uri(headers:) 能透传 Authorization（语音要鉴权）。
+  # 平台分派见 lib/core/media/audio_playback.dart 的 createAylaAudioEngine()。
+  just_audio: ^0.10.5
   path_provider: ^2.1.5
   ffi: ^2.2.0
 
@@ -62,6 +70,7 @@ dependencies:
   # Helper.selectAudioOutputDetailed 拿回设备切换的内核回执。
   # 版本由下面 dependency_overrides 指到 third_party/flutter_webrtc。
   flutter_webrtc: ^1.6.3
+  flutter_foreground_task: ^11.0.3
   # 图标：线性 SVG 风格（05 纪律 6：禁止 emoji 当功能图标）。
   # 不用 lucide_icons pub 包：0.257.0 的 LucideIconData extends IconData 在
   # Flutter 3.47 上编译失败（IconData 已是 final class，实测构建中断）；

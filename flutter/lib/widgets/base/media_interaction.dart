@@ -9,12 +9,15 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show File;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../core/media/media_cache.dart';
+import '../../core/media/media_download_queue.dart';
 import '../../core/media/media_signer.dart';
+import '../../player/vod_player.dart' show AylaVodVideo;
 import '../../core/models/media_kind.dart';
 import '../../theme/glass.dart';
 import '../../theme/svg_path.dart';
@@ -50,7 +53,11 @@ class AylaSignedVideo extends StatefulWidget {
     this.ariaLabel,
     this.aspectRatio = 16 / 9,
     this.cacheable = false,
+    this.mimeType,
   });
+
+  /// 媒体 MIME（可选，决定落盘扩展名；视频通常是 `video/mp4`）。
+  final String? mimeType;
 
   /// 媒体 id（用于签发 original 视频 URL）。
   final String mediaId;
@@ -106,6 +113,29 @@ class _SignedVideoState extends State<AylaSignedVideo> {
       _src = null;
     });
     try {
+      // ⓪ 本地漫游缓存优先（用户目标 §5：「如果资产未过期但已保存，也要走本地
+      //    文件查看，省流」）。命中则**连签名都不发**，云端过期也不影响播放。
+      //
+      // ⚠️ 只在缓存布局**已解析**时查询：
+      //   · 生产：`main.dart` 启动即 `unawaited(ensureReady())`，首帧前通常已就绪；
+      //   · widget 测试：没有 path_provider 平台实现，`ensureReady()` 的 Future
+      //     永远不会完成 —— 若无条件 await，状态机会**永久停在 loading**，
+      //     失败/重试分支全部不可达（2026-10-29 实测踩到）。
+      //   跳过只影响「冷启动后第一条视频」是否走本地，后续均命中缓存。
+      if (AylaMediaCache.instance.layout != null) {
+        final File? cached = await AylaMediaCache.instance.lookup(
+          widget.mediaId,
+          kind: AylaMediaKind.video,
+        );
+        if (!mounted) return;
+        if (cached != null) {
+          setState(() {
+            _src = cached.path; // 本地文件路径，不带 `#t=0.1` 片段
+            _state = _VideoState.ready;
+          });
+          return;
+        }
+      }
       // 必须签发 **original**（不是 thumbnail）：thumbnail 是 JPEG 静帧，
       // 作为 video src 会导致无源可播（tsx 注释 7–11 明确警告）。
       final SignedMediaResult r =
@@ -123,13 +153,16 @@ class _SignedVideoState extends State<AylaSignedVideo> {
       //
       // 不 await、不提示：缓存是增强项，失败不影响播放。
       if (widget.cacheable && !r.originalExpired) {
+        // 走**持久下载队列**（2026-10-29 用户拍板）：视频本体 7 天就过期，
+        // 用户点开查看器即视为「要留一份」，失败最多重试 3 次、被杀后启动续跑。
         unawaited(
-          AylaMediaCache.instance
-              .fetchAndStore(
+          AylaMediaDownloadQueue.instance
+              .enqueue(
                 mediaId: widget.mediaId,
                 kind: AylaMediaKind.video,
+                mimeType: widget.mimeType,
               )
-              .catchError((Object _) => null),
+              .catchError((Object _) {}),
         );
       }
     } catch (_) {
@@ -165,29 +198,30 @@ class _SignedVideoState extends State<AylaSignedVideo> {
     }
   }
 
-  /// 播放器（video_player 接入点）。
+  /// 真实播放器（2026-10-29 接通）。
   ///
-  /// 当前未引依赖 → 渲染带 `#t=0.1` 的源信息占位，保证**状态机与契约可验证**。
+  /// 此前这里是**占位实现**（只渲染一行「视频源已签发」文案），导致：
+  /// · 查看器里的视频根本播不了；
+  /// · 「点开视频自动存视频」的落盘点挂在 [AylaSignedVideo.cacheable] 上，
+  ///   而它从不播放 ⇒ 用户看不到任何反馈，等同于功能缺失。
+  ///
+  /// 现改为复用库内既有播放面 [AylaVodVideo]（Windows = media_kit/mpv，
+  /// Android/iOS = video_player），**不另造第二条视频路径**。
+  ///
+  /// 播放源：本地漫游缓存命中优先（见 [_sign] 的 [_localFile]）；否则用签名 URL。
   Widget _buildPlayer(String src) {
     return AspectRatio(
       aspectRatio: widget.aspectRatio,
-      child: Semantics(
-        label: widget.ariaLabel,
-        child: ColoredBox(
-          color: AylaColors.ice100, // 未播放时的中性底
-          child: Center(
-            child: Text(
-              '视频源已签发\nmuted=${!widget.controls}  controls=${widget.controls}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: AylaFonts.utility,
-                fontFamilyFallback: AylaFonts.cjkFallback,
-                fontSize: 11,
-                color: AylaColors.textSecondary,
-              ),
-            ),
-          ),
-        ),
+      // `#t=0.1` 只对 <video> 元素生效（跳过首帧黑场），本地文件路径不要带
+      // 片段标识符，否则部分内核会解析失败。
+      child: AylaVodVideo(
+        key: ValueKey<String>(src),
+        src: src,
+        controls: widget.controls,
+        autoPlay: widget.controls,
+        muted: !widget.controls,
+        fit: BoxFit.contain,
+        semanticLabel: widget.ariaLabel,
       ),
     );
   }

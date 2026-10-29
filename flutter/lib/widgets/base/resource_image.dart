@@ -51,6 +51,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/sample_media.dart';
 import '../../theme/tokens.dart';
 import '../../core/media/media_cache.dart';
+import '../../core/media/media_download_queue.dart';
 import '../../core/media/media_signer.dart';
 import '../../core/models/media_kind.dart';
 import '../../core/net/api_endpoint.dart';
@@ -133,7 +134,18 @@ class AylaResourceImage extends StatefulWidget {
     this.ignoreSampleMedia = false,
     this.onStateChanged,
     this.cacheable = true,
+    this.mediaMimeType,
+    this.knownExpired = false,
   });
+
+  /// descriptor 已知「完全过期」：直接走过期占位，**不白跑一次必然 410 的 :sign**
+  /// （后端 descriptor 投影 `expired`，2026-10-29）。
+  final bool knownExpired;
+
+  /// 媒体 MIME（可选）：只用于**落盘扩展名推导**（缓存文件名
+  /// `<id>.thumb.<ext>`）。不传时按 kind 兜底（image → .jpg），
+  /// 对 PNG/WebP/GIF 会记成错扩展名 —— 传了更准确。
+  final String? mediaMimeType;
 
   /// 图片地址（可为 `/api/v1/media/<id>/content` 或外部 URL）。
   final String src;
@@ -331,6 +343,10 @@ class _ResourceImageState extends State<AylaResourceImage> {
     //    （不缓存 ≠ 不显示）。
     final bool useCache = widget.cacheable;
 
+    // descriptor 已知完全过期 ⇒ 直接过期态（连缓存都不用查：本地没有才叫过期，
+    // 但本地有的话上面 ⓪/① 的 lookup 已经 return 了 —— 所以这里要在 lookup 前
+    // 判一次「有本地就还能看」。见下方 cacheFirst 分支顺序）。
+
     // ① 本地漫游缓存优先：命中直接渲染本地文件，**不发任何网络请求**
     //    （连签名都不签）。本地有就永远能看，云端过期不影响（用户裁决 D3）。
     //
@@ -364,6 +380,14 @@ class _ResourceImageState extends State<AylaResourceImage> {
       return;
     }
 
+    // ② descriptor 已知「完全过期」且本地**没有**（上面已 return）⇒ 一定看不到。
+    //    直接占位，省一次必然 410 的 :sign（2026-10-29 后端 descriptor 投影）。
+    if (widget.knownExpired) {
+      setState(() => _state = _State.expired);
+      _notifyState();
+      return;
+    }
+
     try {
       final SignedMediaResult r =
           await MediaSigner.instance.sign(mediaId, variant: widget.variant);
@@ -389,14 +413,21 @@ class _ResourceImageState extends State<AylaResourceImage> {
       //
       //    ⚠️ [AylaResourceImage.cacheable] 为 false（永久资产）时**不落盘**。
       if (useCache) {
+        // 走**持久下载队列**（2026-10-29 用户拍板）：任务先落盘再执行，
+        // 失败最多重试 3 次，app 被杀后下次启动自动续跑 —— 旧实现是
+        // `unawaited(fetchAndStore().catchError(→null))`，页面滚走或进程退出
+        // 就永久丢失该次落盘意图，于是「7 天后云端删了、本地也没存下」。
         unawaited(
-          AylaMediaCache.instance
-              .fetchAndStore(
+          AylaMediaDownloadQueue.instance
+              .enqueue(
                 mediaId: mediaId,
                 kind: _cacheKindFor(widget.src),
                 variant: AylaMediaCacheVariant.thumb,
+                // mime 决定落盘扩展名；缺省会按 kind 兜底（image → .jpg），
+                // 对 PNG/WebP/GIF 会记成错扩展名，本地解码可能失败。
+                mimeType: widget.mediaMimeType,
               )
-              .catchError((Object _) => null),
+              .catchError((Object _) {}),
         );
       }
     } on MediaExpiredError {

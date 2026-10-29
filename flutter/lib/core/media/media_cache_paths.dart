@@ -89,8 +89,17 @@ enum AylaMediaCacheRootSource {
   /// Windows：`<exe 目录>/data/media-cache`（首选）。
   executableData,
 
-  /// `getApplicationSupportDirectory()/media-cache`（移动端首选 / Windows 降级）。
+  /// `getApplicationSupportDirectory()/media-cache`（Windows 降级 / 移动端兜底）。
   applicationSupport,
+
+  /// Android：`<外部存储>/Android/data/<包名>/files/media-cache`
+  /// （用户拍板 2026-10-29「手机端保存在经典的 Android/data」）。
+  ///
+  /// 为什么不用 `getExternalStorageDirectory()` 直接拼：该 API 返回
+  /// `/storage/emulated/0/Android/data/<pkg>/files`，但部分 ROM 会返回
+  /// 应用专属的其它挂载点；我们只**校验路径形态**（含 `/Android/data/`），
+  /// 形态不符或不可写即降级到 [applicationSupport]，绝不猜路径。
+  androidExternalData,
 }
 
 /// 平台能力抽象 —— **测试注入点**。
@@ -106,6 +115,11 @@ abstract interface class AylaMediaCachePlatform {
 
   /// 应用支持目录（`getApplicationSupportDirectory()`）。
   Future<Directory> applicationSupportDirectory();
+
+  /// Android 外部存储上的应用专属目录（`getExternalStorageDirectory()`）。
+  ///
+  /// 仅 Android 有值；其它平台返回 null（调用方据此走各自分支）。
+  Future<Directory?> externalStorageDirectory();
 }
 
 /// 生产实现：直连 `dart:io` 与 `path_provider`。
@@ -121,6 +135,17 @@ class AylaIoMediaCachePlatform implements AylaMediaCachePlatform {
   @override
   Future<Directory> applicationSupportDirectory() =>
       getApplicationSupportDirectory();
+
+  @override
+  Future<Directory?> externalStorageDirectory() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      return await getExternalStorageDirectory();
+    } catch (error) {
+      debugPrint('[AylaMediaCache] getExternalStorageDirectory 失败：$error');
+      return null;
+    }
+  }
 }
 
 /// 解析后的缓存布局。
@@ -208,7 +233,48 @@ Future<AylaMediaCacheLayout> aylaResolveMediaCacheLayout({
       degraded: true,
     );
   }
-  // Android / iOS（以及桌面 Linux/macOS）：应用私有目录，无需探测写权限
+  // Android：优先外部存储的 `Android/data/<包名>/files/media-cache`
+  // （用户拍板 2026-10-29「手机端保存在经典的 Android/data」）。
+  //
+  // 校验三件事，任一不满足即降级到应用支持目录（绝不猜路径）：
+  //   1. 平台给了外部目录（部分 ROM / 已卸载的 SD 卡返回 null）；
+  //   2. 路径形态确实是 `/Android/data/`（防止厂商 ROM 把应用专属目录
+  //      映射到别处，此时"Android/data"对用户毫无意义）；
+  //   3. 目录可写（外部存储可能被拔出、只读挂载或配额耗尽）。
+  if (platform.targetPlatform == TargetPlatform.android) {
+    final Directory? external = await platform.externalStorageDirectory();
+    if (external != null) {
+      final String normalized = external.path.replaceAll('\\', '/');
+      if (normalized.contains('/Android/data/')) {
+        final String primary = _join(normalized, kMediaCacheDirName);
+        if (await aylaProbeDirectoryWritable(Directory(primary))) {
+          return AylaMediaCacheLayout(
+            root: primary,
+            source: AylaMediaCacheRootSource.androidExternalData,
+            degraded: false,
+          );
+        }
+        debugPrint(
+          '[AylaMediaCache] Android 外部存储不可写（$primary）——降级到应用支持目录',
+        );
+      } else {
+        debugPrint(
+          '[AylaMediaCache] 外部目录形态不是 /Android/data/（$normalized）'
+          '——降级到应用支持目录',
+        );
+      }
+    }
+    final Directory support = await platform.applicationSupportDirectory();
+    final String fallbackRoot = _join(support.path, kMediaCacheDirName);
+    await _ensureDirectoryQuietly(fallbackRoot);
+    return AylaMediaCacheLayout(
+      root: fallbackRoot,
+      source: AylaMediaCacheRootSource.applicationSupport,
+      degraded: true,
+    );
+  }
+
+  // iOS（以及桌面 Linux/macOS）：应用私有目录，无需探测写权限
   //（仍要建目录：首次使用时目录可能尚不存在，create 幂等且失败由写入链记日志）。
   final Directory support = await platform.applicationSupportDirectory();
   final String root = _join(support.path, kMediaCacheDirName);

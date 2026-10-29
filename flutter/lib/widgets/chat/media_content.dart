@@ -41,6 +41,7 @@ import 'package:flutter/material.dart';
 import '../../core/media/audio_playback.dart';
 import '../../core/media/media_cache.dart';
 import '../../core/media/media_download.dart';
+import '../../core/media/media_download_queue.dart';
 import '../../core/media/media_signer.dart';
 import '../../core/media/media_validation.dart';
 import '../../core/models/chat_message.dart';
@@ -585,6 +586,10 @@ class _ImageMediaState extends State<_ImageMedia> {
                     // 聊天里的普通图片走 E1（7/30 天过期）=> 保持缓存。
                     // 同一组件两个分支语义相反，别一刀切。
                     cacheable: !widget.isEmoji,
+                    // 落盘扩展名按真实 mime 推导（PNG/WebP/GIF 不要记成 .jpg）
+                    mediaMimeType: media.mimeType,
+                    // descriptor 已知完全过期 ⇒ 直接占位，省一次必然 410 的 :sign
+                    knownExpired: media.expired,
                   ),
                 ),
               ),
@@ -707,6 +712,19 @@ class _VideoFrameState extends State<_VideoFrame> {
     final AylaMediaDescriptor? media = widget.media;
     if (media == null) {
       setState(() => _failed = true);
+      return;
+    }
+    // ④ descriptor 已告诉我们「完全过期」⇒ 直接占位，**不白跑一次 :sign**
+    //    （2026-10-29 新增 descriptor.expired 投影）。
+    if (media.expired) {
+      setState(() => _expired = true);
+      return;
+    }
+    // ⑤ 阶段 1（视频本体已删、只剩海报帧）：
+    //    · 有海报 → 直接渲染海报 + 「视频已过期」角标（下方 _buildContent 的海报分支）；
+    //    · 无海报 → 没有任何可显示对象 ⇒ 过期占位（不签 original，必然 410）。
+    if (media.originalExpired) {
+      if (!_hasPoster) setState(() => _expired = true);
       return;
     }
     if (_hasPoster) return;
@@ -837,13 +855,29 @@ class _VideoFrameState extends State<_VideoFrame> {
     if (media == null) return null;
     // 海报帧封面直连秒出（`object-fit: cover` 由 .media-video 提供）
     if (_hasPoster) {
-      return AylaResourceImage(
+      final Widget poster = AylaResourceImage(
         src: media.thumbnail!,
         alt: '',
         fit: BoxFit.cover,
         variant: MediaVariant.thumb,
         fallback: const AylaSkeleton(),
       );
+      // 阶段 1（视频本体已删、只剩海报帧）：与图片「原图已过期」对齐，
+      // 叠加「视频已过期」角标，且播放键不再出现（点开只会得到一张静帧）。
+      if (media.originalExpired) {
+        return Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            poster,
+            const Positioned(
+              top: 6,
+              right: 6,
+              child: _VideoExpiredBadge(),
+            ),
+          ],
+        );
+      }
+      return poster;
     }
     final String? src = _videoSrc;
     if (src == null) return null;
@@ -852,6 +886,38 @@ class _VideoFrameState extends State<_VideoFrame> {
       src: src,
       fit: BoxFit.cover,
       playerFactory: widget.vodPlayerFactory,
+    );
+  }
+}
+
+/// 「视频已过期」角标（阶段 1：本体已删、海报帧仍在）。
+///
+/// 视觉对齐图片的 `.resource-image-expired-badge`（玻璃胶囊 + 次要文字色），
+/// 用同一个 `AylaColors.textSecondary` / `AylaRadii` 令牌，不另造样式。
+class _VideoExpiredBadge extends StatelessWidget {
+  const _VideoExpiredBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '视频已过期',
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AylaSpacing.sp6,
+          vertical: AylaSpacing.sp2,
+        ),
+        decoration: BoxDecoration(
+          color: AylaColors.glassBgStrong,
+          borderRadius: BorderRadius.circular(AylaRadii.rPill),
+        ),
+        child: const Text(
+          '视频已过期',
+          style: TextStyle(
+            fontSize: 11,
+            color: AylaColors.textSecondary,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1323,14 +1389,16 @@ class _VoiceMediaState extends State<_VoiceMedia> {
       //
       //    ⚠️ **不要**把它挪回 build / initState（旧 D4「加载即存」的写法）：
       //    那会让每条语音一进视口就下载整条音频，与用户明确裁决冲突。
+      // 走**持久下载队列**（2026-10-29 用户拍板）：任务先落盘，失败最多重试 3 次，
+      // app 被杀后下次启动自动续跑。落盘时机不变（仍然是「点击播放才存」）。
       unawaited(
-        AylaMediaCache.instance
-            .fetchAndStore(
+        AylaMediaDownloadQueue.instance
+            .enqueue(
               mediaId: widget.media.mediaId,
               kind: AylaMediaKind.voice,
               mimeType: widget.media.mimeType,
             )
-            .catchError((Object _) => null),
+            .catchError((Object _) {}),
       );
       return engine;
     } on MediaExpiredError {

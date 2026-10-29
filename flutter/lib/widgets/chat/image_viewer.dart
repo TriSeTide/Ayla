@@ -45,6 +45,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 
 import '../../core/media/media_cache.dart' show AylaMediaCache;
+import '../../core/media/media_download_queue.dart';
 import '../../core/media/media_signer.dart'
     show MediaExpiredError, MediaSigner, MediaVariant, SignedMediaResult;
 import '../../core/models/post.dart';
@@ -608,7 +609,14 @@ class _AylaImageViewerState extends State<AylaImageViewer>
       // 修法：把上限尺寸作为**紧约束**通过组件自身的 width/height 传进去 ——
       // 组件内部会用它做 `Image.network(width:, height:, fit: BoxFit.contain)`，
       // 等价 web 的 `width:auto; height:auto; max-width; max-height; object-fit:contain`。
-      child: AylaViewerImage(mediaId: media.mediaId, maxW: maxW, maxH: maxH),
+      child: AylaViewerImage(
+        mediaId: media.mediaId,
+        maxW: maxW,
+        maxH: maxH,
+        // descriptor 已知完全过期 ⇒ 免一次必然 410 的 :sign（2026-10-29）
+        knownExpired: media.expired,
+        mimeType: media.mimeType,
+      ),
     );
   }
 
@@ -1041,6 +1049,8 @@ class _ViewerVideoState extends State<_ViewerVideo> {
         // 走到这里 = 用户已点开大图、播放器正在创建 ⇒ 这就是「点击播放」的时刻，
         // 此时才落盘视频本体（气泡内 _VideoFrameState 已不再自动落盘）。
         cacheable: true,
+        // 落盘扩展名按真实 mime（video/mp4 → .mp4，quicktime → .mov）
+        mimeType: widget.media.mimeType,
       ),
     );
   }
@@ -1287,11 +1297,21 @@ class AylaViewerImage extends StatefulWidget {
     required this.mediaId,
     required this.maxW,
     required this.maxH,
+    this.knownExpired = false,
+    this.mimeType,
   });
+
+  /// 媒体 MIME（可选，决定落盘扩展名；不传按 kind 兜底 image → .jpg）。
+  final String? mimeType;
 
   final String mediaId;
   final double maxW;
   final double maxH;
+
+  /// descriptor 已知「完全过期」（2026-10-29）：调用方传 true 可**省掉一次
+  /// 必然 410 的 :sign 往返**，直接渲染「已过期」占位。
+  /// 不传 = 旧行为（签名时由 410 判定），向后兼容。
+  final bool knownExpired;
 
   @override
   State<AylaViewerImage> createState() => _AylaViewerImageState();
@@ -1312,7 +1332,10 @@ class _AylaViewerImageState extends State<AylaViewerImage> {
   @override
   void didUpdateWidget(AylaViewerImage old) {
     super.didUpdateWidget(old);
-    if (old.mediaId != widget.mediaId) _load();
+    if (old.mediaId != widget.mediaId ||
+        old.knownExpired != widget.knownExpired) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -1343,6 +1366,12 @@ class _AylaViewerImageState extends State<AylaViewerImage> {
         setState(() => _file = cached);
         return;
       }
+      // ①b 先看 descriptor 的过期投影（2026-10-29）：已完全过期就没必要再签一次
+      //     （必然 410），直接进「已过期」态；这省掉一次无效往返。
+      if (widget.knownExpired) {
+        setState(() => _expired = true);
+        return;
+      }
       final SignedMediaResult signed =
           await MediaSigner.instance.sign(widget.mediaId);
       if (!mounted) return;
@@ -1351,13 +1380,16 @@ class _AylaViewerImageState extends State<AylaViewerImage> {
       //    阶段 1（原图已删）时签名给的本来就是 thumb URL ⇒ 按 original 落盘会被
       //    拒（云端没有原图，不冒充），这里直接跳过省一次无效判断。
       if (!signed.originalExpired) {
+        // 走**持久下载队列**（2026-10-29）：原图 7 天就过期，点开大图即视为
+        // 「要留一份」，失败最多重试 3 次、app 被杀后下次启动续跑。
         unawaited(
-          AylaMediaCache.instance
-              .fetchAndStore(
+          AylaMediaDownloadQueue.instance
+              .enqueue(
                 mediaId: widget.mediaId,
                 kind: AylaMediaKind.image,
+                mimeType: widget.mimeType,
               )
-              .catchError((Object _) => null),
+              .catchError((Object _) {}),
         );
       }
     } on MediaExpiredError {

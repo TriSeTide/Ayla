@@ -22,6 +22,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/media/media_cache.dart';
+import 'core/media/media_download_keepalive.dart';
+import 'core/media/media_download_queue.dart';
 import 'core/media/media_signer.dart';
 import 'core/media/media_upload.dart';
 import 'core/net/dio_client.dart';
@@ -246,6 +248,16 @@ void main() {
   // **不 await**：缓存是增强项，绝不能拖慢首帧（媒体真正被请求时也会 lazy 再走一遍，
   // 两条路径由 `ensureReady()` 的幂等 future 收敛，不会重复探测）。
   unawaited(AylaMediaCache.instance.ensureReady());
+  // 持久下载队列启动续跑（2026-10-29 用户拍板）：
+  // 「如果有下载任务仍未完成，但 app 清后台退出了下载失败了，该下载任务仍然保留，
+  //   下次 app 启动时再次自动重新开始执行该下载任务。最多重试三次。」
+  // 队列文件在缓存根同级，进程重启后 running 任务会恢复成 pending 重跑。
+  // 同样不 await：不能拖慢首帧，且队列内部有并发上限与有界退避。
+  // 后台保活接线（Android 前台服务）：队列有活就起、空了就停。
+  // iOS/Windows 无「后台」概念，[AylaDownloadKeepAlive] 内部直接 no-op。
+  AylaMediaDownloadQueue.instance.keepAliveSync =
+      AylaDownloadKeepAlive.instance.syncWithQueue;
+  unawaited(AylaMediaDownloadQueue.instance.resumeOnStartup());
   // 预加载接线（web `appInit.ts` 的 `loadCoreData`）：把 state 层的目录 / 帖子
   // store 装进 `core/app_init.dart` 的门（core 不反向依赖 state）。
   aylaRegisterCoreDataLoader();

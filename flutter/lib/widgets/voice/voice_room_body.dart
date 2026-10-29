@@ -58,6 +58,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/buttons.dart';
 import '../../theme/glass.dart';
 import '../../theme/tokens.dart';
+import '../../core/media/media_signer.dart' show MediaVariant;
 import '../../core/models/media_kind.dart' show AylaMediaKind;
 import '../../core/models/post.dart' show AylaMediaDescriptor;
 import '../base/overlays.dart' show aylaOverlayEntry;
@@ -1100,6 +1101,10 @@ class _VoiceChatImageButton extends StatelessWidget {
                 src: message.thumbnailUrl!,
                 alt: message.content.isEmpty ? '房内聊天图片' : message.content,
                 fit: BoxFit.cover, // `.voice-room-chat-image { object-fit: cover }`
+                // src 是 thumbnail 派生路径 ⇒ 必须按 thumb 变体签（否则白拉原图）。
+                // 语音房聊天图片属 E4 类「可过期」（7 天删原图 / 30 天全删），
+                // 所以保持默认 cacheable（会落本地）。
+                variant: MediaVariant.thumb,
               ),
             ),
           ),

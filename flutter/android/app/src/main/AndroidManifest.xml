@@ -5,6 +5,12 @@
     <!-- 应用内更新：下载 APK 后需要切到系统安装器（Android 8+ 还需用户授予
          「安装未知来源应用」权限；不授予时客户端会退化为打开下载页）。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 后台下载保活（flutter_foreground_task）：聊天媒体 7 天就在云端过期，
+         用户要求「app 后台运行时也保持下载」。dataSync 类型的前台服务在
+         Android 8+ 常驻通知栏，Android 14+ 必须同时声明 FOREGROUND_SERVICE_DATA_SYNC。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- 「记住密码 / 自动登录」的凭据存在 Android KeyStore（flutter_secure_storage）。
          插件 README 明确要求关闭自动备份：Google Drive 备份恢复后只带回加密密文、
          不回带 KeyStore 里的密钥 ⇒ 读取时抛
@@ -50,6 +56,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- 后台下载保活：flutter_foreground_task 的前台服务（插件 README 要求
+             名字一字不改）。dataSync 对应「后台同步下载」语义。 -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

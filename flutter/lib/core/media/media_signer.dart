@@ -162,7 +162,13 @@ class MediaSigner {
           );
           return SignedMediaResult(url: url, originalExpired: true);
         } on ApiException catch (thumbErr) {
-          // thumb 410 = 完全过期；404 = 无缩略图（文件/语音等）
+          // 走到这里 = **original 已返回 410 original_expired**（本媒体确已进入
+          // 阶段 1）。此时 thumb 也拿不到（410 完全过期 / 404 无派生封面）
+          // ⇒ 已无可显示对象，判「已过期」准确。
+          //
+          // 2026-10-29 修正：只有这条**降级分支**里的 404 算过期；直接请求
+          // variant=thumb 收到 404（thumbnail_not_ready）属「还没生成好」，
+          // 必须可重试（见下方通用 404 处理）。
           _cache.remove(cacheKey);
           if (thumbErr.status == 410 || thumbErr.status == 404) {
             throw const MediaExpiredError();
@@ -170,7 +176,10 @@ class MediaSigner {
           rethrow;
         }
       }
-      // 失败清缓存允许下次重试
+      // 404 = 派生封面尚未就绪（后端 thumbnail_not_ready）或该 kind 无封面。
+      // 2026-10-29 修正：**不等于过期** —— 旧实现把 404 当 MediaExpiredError，
+      // 导致「缩略图还没生成好」被显示成「已过期」且不给重试。
+      // 失败清缓存允许下次重试。
       _cache.remove(cacheKey);
       rethrow;
     } catch (_) {

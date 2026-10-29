@@ -33,6 +33,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api/auth_api.dart';
 import '../core/app_init.dart';
+import '../core/media/media_signer.dart' show MediaSigner;
 import '../core/net/dio_client.dart' show DioClient;
 import '../core/ws/chat_ws.dart';
 import '../core/ws/presence_ws.dart';
@@ -232,6 +233,12 @@ Future<void> aylaLogoutForContainer(
   aylaStopRoomsForContainer(container);
   aylaStopPresenceWsForContainer(container);
   container.read(authNotifierProvider.notifier).clear();
+  // 签名 URL 内存缓存：**必须清**（2026-10-29 补）。
+  // `MediaSigner.detach()` 的注释早就要求「登出必须调用」，但此前生产代码零调用
+  // ⇒ 旧账号签名 URL 残留内存，跨账号登录后最多在 expires_at 之前继续复用（403）。
+  // 注意：**不清磁盘漫游缓存** —— 那是跨账号共享的媒体字节（用户裁决 D5），
+  // 与「谁的签名票据」是两件事。
+  MediaSigner.instance.detach();
   // 会话恢复用的 refresh 令牌：登出**总是**清（它代表"这次会话"，不是用户偏好）；
   // 「记住密码 / 自动登录」那 4 个键只受 clearCredentials 控制（见上方文档）。
   await container.read(sessionTokenStoreProvider).clear();
@@ -252,6 +259,8 @@ void aylaLogout(WidgetRef ref, {bool clearCredentials = false}) {
   aylaStopRooms(ref);
   aylaStopPresenceWs(ref);
   ref.read(authNotifierProvider.notifier).clear();
+  // 同上（容器版）：签名 URL 内存缓存登出即清（磁盘漫游缓存不清）。
+  MediaSigner.instance.detach();
   // 同上（容器版）：refresh 令牌登出即清。
   unawaited(ref.read(sessionTokenStoreProvider).clear());
   if (clearCredentials) {
