@@ -9,10 +9,37 @@
 | 项 | 状态 | 证据 |
 |---|---|---|
 | 过期算法（图片/视频两级、语音/文件单级、A1–A7 保护、emoji 跳过） | ✅ 代码就绪 | `apps/media/management/commands/cleanup_media.py` |
-| **调度** | ❌ **没有**（仓库与生产都是手动命令） | 见 §2 |
-| **MinIO 版本化** | ⚠️ Enabled ⇒ `delete()` 只写 delete marker，**不释放磁盘** | 见 §3 |
+| **每日调度** | ✅ 已装（04:30 `cleanup_media`） | 见 §4 |
+| **每日一致性审计** | ✅ 已装（05:00 `media_audit`，退出码非 0 即告警） | 见 §4.1 |
+| **MinIO 版本化** | ✅ **已 suspend**（2026-10-29）⇒ `delete()` 真删真释放 | 见 §3 |
 
-因此：**只要没人跑命令、或桶还是版本化，聊天媒体就永远不过期，磁盘只增不减。**
+**2026-10-29 起这套机制是活的**：每日自动过期 + 每日对账。
+历史上它「代码就绪但从未生效」（零调度 + 版本化吞掉删除），现已纠正。
+
+## 4.1 一致性审计（media_audit）—— 出事时唯一能第一时间发现的机制
+
+2026-10-29 事故的教训：手工 `mc rm --versions --dangerous` 把整个 media/ 前缀
+删空，而系统**没有任何机制能发现**（cleanup 只看 DB，/content 到访问才 404）。
+现在每日 05:00 跑一次对账：
+
+```bash
+docker exec ayla-backend python manage.py media_audit
+```
+
+| 退出码 | 含义 |
+|---|---|
+| 0 | DB 与对象存储完全一致，key 结构合规 |
+| 1 | 发现缺失 / 孤儿 / 非标准 key |
+| 2 | 后端不支持列举（配置错了） |
+
+报告三类问题：
+- **缺失**：DB 声明了 key、对象不存在，且该媒体未完全过期 ⇒ **用户会看到「已过期」且不可恢复**，需立即从客户端缓存/备份抢救；
+- **孤儿**：对象存在但无 DB 引用 ⇒ 白占磁盘，`--prune-orphans --no-dry-run` 可清；
+- **非标准 key**：违反 `docs/architecture/media-storage-contract.md` 的结构契约。**
+
+⚠️ 该命令的正确性依赖一条不变量：**DB 的 `*_path` 只声明「确实存在的对象」**。
+所以 `cleanup_media` 删对象时必须同时把对应 path 置空（2026-10-29 已修，
+见 `test_expiration.py::TestExpiryKeepsAuditClean`）。
 
 ## 2. 手动执行（先预览，后执行）
 
@@ -99,3 +126,16 @@ docker exec ayla-backend python manage.py shell -c "from apps.media.models impor
 | 停止 cron | `crontab -e` 删除对应行 |
 | 恢复版本化 | `mc version enable local/elysia-media`（历史版本已清的不可恢复） |
 | 客户端退回旧缓存目录 | 回滚安装包即可；旧目录文件保留不删，不冲突 |
+## 6. 禁止操作（2026-10-29 事故后的硬性规定）
+
+| 禁止 | 原因 |
+|---|---|
+| `mc rm --recursive --versions --force --dangerous <bucket>/media/` | **版本化 suspend 后，`--versions` 会物理删除包含当前对象在内的所有版本**。当日即因此清空整个 media 前缀，51 条媒体丢失，仅从客户端缓存抢救回 42 条。 |
+| 对 `media/` 前缀做任何递归删除 | 正式媒体只能由 `cleanup_media` 按 DB 记录逐 key 删除。 |
+| 手工改 `storage_path` / `thumbnail_path` / `waveform_path` | 会与对象存储永久错位，且 `media_audit` 会持续报缺陷。 |
+| 在 `media_audit` 报「缺失」时直接清 DB 记录 | 先把对象找回来（客户端漫游缓存 / 备份），确认真丢了再改状态。 |
+
+**正确的历史版本回收方式**：只针对 `tmp/`（无 DB 引用）；正式媒体目录先跑
+`media_audit --verbose` 确认目标是孤儿，再 `--prune-orphans --no-dry-run`。
+
+完整契约见 `docs/architecture/media-storage-contract.md`。
