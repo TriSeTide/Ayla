@@ -185,6 +185,22 @@ String _favoriteAuthScope(AuthState state) =>
 String? _favoriteAuthScopeLast;
 
 void main() {
+  // ⚠️⚠️ **必须在任何 Binding.instance / MethodChannel 使用之前无条件初始化**
+  // （2026-10-31 实报「手机端更新后一点 App 直接白屏」的根因，release-only）。
+  //
+  // 旧写法把它包在 `if (kDebugMode || kProfileMode)` 里，靠下面 `aylaUsesDesktopFullscreen()`
+  // 分支补一次 —— 但那条分支**只对 Windows/macOS/Linux 为真**，Android/iOS 走不到。
+  // 于是 Android release 档出现这条致命链：
+  //   ① binding 未初始化；
+  //   ② 后面 `AylaDetachedLiveEvents.instance.bind()` 调 `MethodChannel.setMethodCallHandler`
+  //      ⇒ `ServicesBinding.instance` 断言失败 ⇒ **main() 当场抛出**；
+  //   ③ `runApp` 永不执行 ⇒ 没有首帧 ⇒ 用户看到的是纯白屏（进程活着、无任何页面）。
+  // debug/profile 档因为上面那个 if 成立而正常 —— 这正是「测试全绿、真机白屏」的原因：
+  // 单元测试自己会初始化 binding，`flutter build apk --debug` 也是 debug 档。
+  //
+  // `ensureInitialized()` 幂等，runApp 内部还会再调；这里无条件调用没有副作用，
+  // 且同时满足后续所有「取 Binding.instance」的前置条件。
+  WidgetsFlutterBinding.ensureInitialized();
   // 仅 debug：常开语义树（供调试工具读元素；release 下被摇树移除）。
   // ⚠️ SemanticsBinding.instance 只有在 binding 初始化后才可访问：未初始化时取值抛
   //    "Binding has not yet been initialized"，main 当场中断 → runApp 永不执行 →
@@ -192,11 +208,10 @@ void main() {
   //    表现为「进程活着但没有任何页面」。ensureInitialized 幂等，runApp 内部还会再调。
   // ⚠️ `SchedulerBinding.instance` 只在 binding 初始化后才可用：未初始化时取值抛
   // "Null check operator used on a null value"（实测：profile + 探针时崩在
-  // `_installJankProbe` 的 `SchedulerBinding.instance`）—— 这正是本节注释早就警告过的
-  // 那个坑（见下）。故**只要可能装探针，就先 ensureInitialized**（幂等）。
-  if (kDebugMode || kProfileMode) {
-    WidgetsFlutterBinding.ensureInitialized();
-  }
+  // `_installJankProbe` 的 `SchedulerBinding.instance`）。
+  // 该前置条件已由**函数开头那次无条件 `ensureInitialized()`** 满足（2026-10-31 起）——
+  // 旧写法在这里再按 `kDebugMode || kProfileMode` 补一次，正是「release 档漏初始化」
+  // 的来源，已删除（重复调用虽幂等，但保留它会掩盖同类缺陷）。
   if (kDebugMode) {
     SemanticsBinding.instance.ensureSemantics();
   }
@@ -210,11 +225,10 @@ void main() {
   // ⚠️ 放在这里（binding 已初始化 + 首帧之前）的约束：
   // · 必须在 `WidgetsFlutterBinding.ensureInitialized()` **之后** —— 原生侧要
   //   `registrar->GetView()->GetNativeWindow()`，view 不存在时会崩；
-  // · release 档上面那个 `if (kDebugMode || kProfileMode)` 不成立 ⇒ 这里补一次
-  //   `ensureInitialized()`（幂等，runApp 内部还会再调）保证 binding 就绪；
+  // · binding 已由函数开头那次**无条件** `ensureInitialized()` 就绪（2026-10-31 起）——
+  //   旧写法在这里再补一次，正是「Android release 白屏」缺陷的成因（条件为假 ⇒ 不补）；
   // · 只对 window_manager 真正支持的桌面平台调用；Android/iOS 完全不碰这条通道。
   if (aylaUsesDesktopFullscreen()) {
-    WidgetsFlutterBinding.ensureInitialized();
     unawaited(
       windowManager.ensureInitialized().catchError((
         Object error,

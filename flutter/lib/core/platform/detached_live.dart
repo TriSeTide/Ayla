@@ -381,8 +381,20 @@ class AylaDetachedLiveEvents {
   void bind() {
     if (_bound) return;
     _bound = true;
-    _pipChannel.setMethodCallHandler(_handle);
-    _desktopChannel.setMethodCallHandler(_handle);
+    // ⚠️⚠️ **绝不能让绑定失败拖死启动**（2026-10-31 实报「手机端一点 App 直接白屏」）。
+    //
+    // `MethodChannel.setMethodCallHandler` 内部取 `ServicesBinding.instance`；binding 未
+    // 初始化时抛断言 ⇒ 若这里不拦，异常会一路冒到 `main()` ⇒ `runApp` 永不执行 ⇒ 白屏。
+    // 调用方（main.dart）已改为无条件 `ensureInitialized()`，但**防御仍留在这里**：
+    // 「脱离应用」是可选增强能力，它绑不上只该退化成「没有原生事件」，
+    // 不该让用户连 App 都进不去。
+    try {
+      _pipChannel.setMethodCallHandler(_handle);
+      _desktopChannel.setMethodCallHandler(_handle);
+    } catch (error) {
+      _bound = false;
+      debugPrint('[AYLA-DETACHED] 原生事件绑定失败（降级为无原生事件）：$error');
+    }
   }
 
   Future<Object?> _handle(MethodCall call) async {
