@@ -188,6 +188,20 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
 
     case WM_DPICHANGED: {
+      // Fullscreen hand-off (see SetFullscreen): the suggested rectangle is the
+      // *windowed* frame for the new scale factor, so applying it would yank a
+      // fullscreen window off the monitor it is covering (the owner, i.e.
+      // window_manager, is the one that resizes for fullscreen). Just let the
+      // child view follow the new size and consume the message.
+      if (is_fullscreen_) {
+        RECT rect = GetClientArea();
+        if (child_content_ != nullptr) {
+          MoveWindow(child_content_, rect.left, rect.top,
+                     rect.right - rect.left, rect.bottom - rect.top, TRUE);
+        }
+        return 0;
+      }
+
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;
       LONG newHeight = newRectSize->bottom - newRectSize->top;
@@ -261,6 +275,10 @@ HWND Win32Window::GetHandle() {
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetFullscreen(bool is_fullscreen) {
+  is_fullscreen_ = is_fullscreen;
 }
 
 bool Win32Window::OnCreate() {

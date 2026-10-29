@@ -9,9 +9,16 @@
 ///   ① `DioClient.instance.init`：注入 AuthNotifier 令牌存取 + 会话过期回调；
 ///   ② `initWsManager`：四通道 WS 管理器；
 /// · **debug 专用**：右下角「组件 / 应用」切换（组件画布 = 唯一视觉验收面，`@Preview` 已弃用）。
+///
+/// ## 第二个 Dart entrypoint：`aylaLiveWindowMain`（2026-10-30）
+/// 电脑端直播「脱离应用」的独立置顶小窗跑在**第二个 Flutter engine** 里
+/// （原生侧见 `windows/runner/live_window.cpp`）。自定义 entrypoint 必须是
+/// **与 `main()` 同一个库**里的顶层函数，并带 `@pragma('vm:entry-point')`
+/// 才不会被 AOT 摇掉 —— 所以它放在本文件，不在单独的文件里。
 library;
 
 import 'dart:async';
+import 'dart:convert' show jsonDecode;
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -20,8 +27,10 @@ import 'package:flutter/scheduler.dart' show SchedulerBinding, FrameTiming;
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:window_manager/window_manager.dart' show windowManager;
 
 import 'core/media/media_cache.dart';
+import 'core/platform/detached_live.dart';
 import 'core/media/media_download_keepalive.dart';
 import 'core/media/media_download_queue.dart';
 import 'core/media/media_signer.dart';
@@ -37,12 +46,11 @@ import 'router/app_router.dart';
 import 'state/auth_state.dart';
 import 'state/chat_providers.dart';
 import 'state/chat_state.dart' show aylaRegisterChatStateCurrentUserId;
-import 'pages/live_support.dart'
-    show
-        aylaPauseLiveViewingForBackground,
-        aylaResumeLiveViewingFromBackground;
+import 'pages/live_support.dart' show aylaHandleLiveViewingLifecycle;
 import 'state/room_providers.dart';
 import 'theme/app_theme.dart';
+import 'widgets/live/live_player.dart' show aylaUsesDesktopFullscreen;
+import 'widgets/live/live_window_surface.dart' show AylaDetachedLiveWindowApp;
 import 'widgets/shell/overlay_scrollbar.dart';
 import 'theme/aurora_background.dart';
 
@@ -192,6 +200,33 @@ void main() {
   if (kDebugMode) {
     SemanticsBinding.instance.ensureSemantics();
   }
+  // ===== 桌面窗口控制器（直播真·全屏的前置）=====
+  // `window_manager` 的 `ensureInitialized()` 在原生侧做一件**必须**的事：
+  // `native_window = GetAncestor(GetView()->GetNativeWindow(), GA_ROOT)`
+  // （window_manager_plugin.cpp 的 "ensureInitialized" 分支）—— 也就是把插件持有的
+  // HWND 从 Flutter view 提升到**顶层窗口**。不调用它 ⇒ 后续 `setFullScreen`
+  // 拿到的是 nullptr/子窗口 ⇒ 全屏操作静默无效（正是用户看到的「App 窗口内黑一下」）。
+  //
+  // ⚠️ 放在这里（binding 已初始化 + 首帧之前）的约束：
+  // · 必须在 `WidgetsFlutterBinding.ensureInitialized()` **之后** —— 原生侧要
+  //   `registrar->GetView()->GetNativeWindow()`，view 不存在时会崩；
+  // · release 档上面那个 `if (kDebugMode || kProfileMode)` 不成立 ⇒ 这里补一次
+  //   `ensureInitialized()`（幂等，runApp 内部还会再调）保证 binding 就绪；
+  // · 只对 window_manager 真正支持的桌面平台调用；Android/iOS 完全不碰这条通道。
+  if (aylaUsesDesktopFullscreen()) {
+    WidgetsFlutterBinding.ensureInitialized();
+    unawaited(
+      windowManager.ensureInitialized().catchError((
+        Object error,
+        StackTrace stack,
+      ) {
+        // 窗口控制失败不能拦住启动：直播全屏会退化成「只有 Overlay 内容层」。
+        debugPrint(
+          '[AYLA-WINDOW] windowManager.ensureInitialized 失败：$error\n$stack',
+        );
+      }),
+    );
+  }
   // ⚠️ 掉帧探针在 **debug 与 profile 都装**（2026-10-16）：
   // profile 才是「测真实性能」的正确档位（AOT 编译、无 debug 断言开销，但仍保留
   // `addTimingsCallback`）；此前只在 debug 装 ⇒ 「release 卡不卡、卡在哪条线程」
@@ -314,6 +349,12 @@ void main() {
   // —— web `ws/chat.ts:766–840`；同样只登记回调，与 chat 连接时机解耦。
   aylaStartPostsFrames(container);
 
+  // ===== 直播「脱离应用」事件绑定（Android PiP / Windows 独立小窗 / 悬浮球）=====
+  // 原生 → Dart 的单一入口（契约见 lib/core/platform/detached_live.dart）。
+  // `bind()` 幂等；它只挂 MethodCallHandler、**不发**任何平台调用 ⇒ 首帧前挂上安全。
+  // 必须早于页面订阅：PiP 进出事件可能在任意页面建立监听之前就到达，晚绑会丢事件。
+  AylaDetachedLiveEvents.instance.bind();
+
   // ---- 冷启动会话恢复 + 自动登录（一条启动链，2026-10-19 重构）----
   //
   // 用户实报「手机端切后台重登」：Android 在内存紧张时会杀掉进程，回到前台是**冷启动**。
@@ -335,6 +376,58 @@ void main() {
     UncontrolledProviderScope(
       container: container,
       child: const _AppRoot(),
+    ),
+  );
+}
+
+// =============================================================================
+// 第二个 Dart entrypoint：电脑端直播「脱离应用」的独立置顶小窗
+// =============================================================================
+
+/// 独立直播小窗的 Dart 入口（**第二引擎**；原生侧见
+/// `windows/runner/live_window.cpp` 的 `AylaLiveWindowHost::Show`）。
+///
+/// ## 为什么必须写在这里
+/// `FlutterDesktopEngineProperties.dart_entrypoint` 要求自定义 entrypoint 是
+/// **和 `main()` 同一个 Dart 库**里的顶层函数，并且必须带
+/// `@pragma('vm:entry-point')`，否则 AOT/release 会被摇树删掉（debug 下也能
+/// 编译通过、release 直接 crash —— 这是这类入口最常见的坑）。
+///
+/// ## 参数
+/// 原生侧通过 `set_dart_entrypoint_arguments({json})` 传一条 JSON：
+/// `{"playUrl": "...", "title": "...", "channelId": "..."}`。
+/// 「只认 playUrl」是有意的：第二引擎**没有登录态**（不要在这里读
+/// shared_preferences / flutter_secure_storage，会 channel-error），
+/// 播放地址由主窗口带鉴权 query 传进来（已过 `aylaNormalizeLivePlayUrl` 归一）。
+///
+/// ## 这一棵树里**没有什么**
+/// 没有 ProviderScope / router / Dio / WS / 极光背景 —— 见
+/// `lib/widgets/live/live_window_surface.dart` 文件头的「有意差异 3」。
+/// 这一路 HLS 与主窗口那一路互不相干；观看登记（心跳 / 在看名单）仍由
+/// **主窗口**的会话继续跑（用户要求「小窗观看也算观看人」）。
+@pragma('vm:entry-point')
+void aylaLiveWindowMain(List<String> args) {
+  WidgetsFlutterBinding.ensureInitialized();
+  String? playUrl;
+  String? title;
+  if (args.isNotEmpty) {
+    try {
+      final Object? decoded = jsonDecode(args.first);
+      if (decoded is Map) {
+        final Object? rawUrl = decoded['playUrl'];
+        final Object? rawTitle = decoded['title'];
+        if (rawUrl is String && rawUrl.isNotEmpty) playUrl = rawUrl;
+        if (rawTitle is String && rawTitle.isNotEmpty) title = rawTitle;
+      }
+    } catch (error) {
+      // 参数不是合法 JSON（例如手工调试时）：退化成纯黑小窗，不崩。
+      debugPrint('[AYLA-LIVE-WINDOW] entrypoint 参数解析失败：$error');
+    }
+  }
+  runApp(
+    AylaDetachedLiveWindowApp(
+      initialUrl: playUrl,
+      initialTitle: title,
     ),
   );
 }
@@ -376,20 +469,17 @@ class _AppRootState extends ConsumerState<_AppRoot>
   /// 在观看。PC 上关页面即断，所以只有手机方向出问题。
   ///
   /// 语义：**进后台 = 离开观看**（停心跳、退出名单）；回前台且在直播场景则续上。
+  ///
+  /// ⚠️ 2026-10-30 增补：**Android 画中画里仍算在看**（见
+  /// [aylaHandleLiveViewingLifecycle]，实现在 `pages/live_support.dart`）。
+  ///
+  /// 判定逻辑**不放在这里**：本文件无法被单元测试直接驱动（`main()` 会拉起
+  /// ProviderContainer / Dio / WS）。把语义落在会话层，这里只做「观察者转发」——
+  /// 于是「PiP 里不算离开观看」这条用户要求有真实的定向测试（`test/live_pip_lifecycle_test.dart`）。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    switch (state) {
-      case AppLifecycleState.paused:
-      case AppLifecycleState.detached:
-      case AppLifecycleState.hidden:
-        unawaited(aylaPauseLiveViewingForBackground());
-      case AppLifecycleState.resumed:
-        unawaited(aylaResumeLiveViewingFromBackground());
-      case AppLifecycleState.inactive:
-        // 短暂失焦（来电/通知横幅/切控制中心）不算离开，**不动**。
-        break;
-    }
+    unawaited(aylaHandleLiveViewingLifecycle(state));
   }
 
   @override

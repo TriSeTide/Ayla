@@ -52,6 +52,18 @@ class Win32Window {
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
 
+  // Marks the window as being in (exclusive, cover-the-monitor) fullscreen.
+  //
+  // Why the base window needs to know: WM_DPICHANGED below unconditionally
+  // repositions the window to the rectangle Windows suggests, which is the
+  // *windowed* frame for the new DPI. Dragging a fullscreen window onto a
+  // monitor with a different scale factor therefore snaps it back out of
+  // fullscreen. With this flag set, that repositioning is skipped.
+  //
+  // window_manager (the plugin that owns the actual fullscreen HWND state)
+  // calls into this through FlutterWindow::OnFullscreenChanged.
+  void SetFullscreen(bool is_fullscreen);
+
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
 
@@ -91,6 +103,10 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+
+  // True while the window covers a whole monitor without a frame (see
+  // SetFullscreen above).
+  bool is_fullscreen_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

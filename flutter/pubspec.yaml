@@ -71,6 +71,11 @@ dependencies:
   # 版本由下面 dependency_overrides 指到 third_party/flutter_webrtc。
   flutter_webrtc: ^1.6.3
   flutter_foreground_task: ^11.0.3
+  # 桌面端**真·全屏**（直播全屏键）：纯 HWND 变换（SetWindowLong style/WS_POPUP +
+  # SetWindowPos 覆盖整块显示器），同一个 Flutter engine，不新建窗口。
+  # 选它而不是自己写 Win32 全屏：本仓库 Windows runner 已有 NCCALCSIZE/frame 计算，
+  # 两套 owner 会互相抢边框重算 ⇒ 进出全屏闪烁（研究结论，见 live_player.dart 注释）。
+  window_manager: ^0.5.2
   # 图标：线性 SVG 风格（05 纪律 6：禁止 emoji 当功能图标）。
   # 不用 lucide_icons pub 包：0.257.0 的 LucideIconData extends IconData 在
   # Flutter 3.47 上编译失败（IconData 已是 final class，实测构建中断）；
@@ -98,9 +103,18 @@ dev_dependencies:
 # 枚举顺序）。用户实报「日志打印已切到耳机，声音仍在扬声器」就是被这个黑箱卡住的。
 # 该 vendor 补丁只**增加诊断回执**，不改变切换语义；升级 flutter_webrtc 时
 # 必须把 common/cpp/src/flutter_media_stream.cc 的 SelectAudioOutput 补丁重新打上。
+# media_kit_video 的 vendor 补丁：Windows 上「直播小窗脱离应用」需要**第二个
+# Flutter engine**，而 media_kit_video 2.0.1 的 windows 插件有进程级单例
+# `static MediaKitVideoPlugin* instance_` —— 第二个 engine 注册插件会覆盖它，
+# 于是静态 WindowProcDelegate 把 kMainThreadTaskMessage 派给错误的引擎，
+# **主窗口**的 VideoController.create() 永久挂起（上游 media-kit#1383，OPEN）
+# ⇒ 主窗口直播黑屏。补丁把 instance_ 换成 std::unordered_map<HWND, ...>。
+# 详见 third_party/media_kit_video/README-AYLA.md。
 dependency_overrides:
   flutter_webrtc:
     path: third_party/flutter_webrtc
+  media_kit_video:
+    path: third_party/media_kit_video
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

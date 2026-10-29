@@ -15,9 +15,15 @@
 /// - **画中画按钮不实现**：web 走浏览器 PiP API（`requestPictureInPicture` /
 ///   `webkitSetPresentationMode`），Flutter 端无等价物；窄屏本来就 `hidePipButton`，
 ///   手机端小窗由 [AylaLiveMiniPlayer] 承担 ⇒ 本件不渲染 PiP 键（登记为有意偏离）；
-/// - **全屏**：web 用 `requestFullscreen()` 让容器进 top layer；Flutter 侧改为**插 root Overlay**
-///   的全屏呈现（同一控制器、视图在 overlay 里重挂；inline 侧在全屏期间不再挂视频，
-///   避免平台视图被同时 attach 两次）+ 移动端锁横屏（退出时解锁）。桌面/Web 忽略锁屏。
+/// - **全屏**：web 用 `requestFullscreen()` 让容器进 top layer；Flutter 侧分两层：
+///   ① **内容层** = 插 root Overlay 的全屏呈现（同一控制器、视图在 overlay 里重挂；
+///      inline 侧在全屏期间不再挂视频，避免平台视图被同时 attach 两次）；
+///   ② **窗口层**（仅桌面平台）= `window_manager.setFullScreen` 让**窗口本身**跳出应用边框，
+///      覆盖整块显示器、无标题栏/任务栏 —— 这是 web `requestFullscreen()` 真正对应的行为，
+///      只做 ① 时用户看到的是「App 窗口内黑一下」（2026-10 实报）。
+///      进入/退出都是 `Win32Window` 的 HWND 变换，**不新建窗口、不新建 engine**；
+///      退出时追加 `setTitleBarStyle(normal)` 复位 frameless（见
+///      [AylaDesktopWindowController.restoreTitleBar]）。移动端仍走 ① + 锁横屏。
 ///
 /// ## 公开面
 /// `AylaLiveSrsStatus` · `AylaLivePlayer` · 样张 `aylaLivePlayerSamples()`
@@ -26,9 +32,12 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show DeviceOrientation, LogicalKeyboardKey, SystemChrome;
+import 'package:window_manager/window_manager.dart';
 
 import '../../theme/app_icons.dart';
 import '../../theme/app_theme.dart';
@@ -47,6 +56,70 @@ const Duration kLivePlayerAutoHide = Duration(milliseconds: 3000);
 const Duration kLivePlayerSpin = Duration(milliseconds: 600);
 const Duration kLivePlayerSpinReset = Duration(milliseconds: 650);
 
+/// 桌面窗口控制（真·全屏）—— 可注入，便于测试断言「ESC 退出必须还原窗口」。
+///
+/// 为什么抽成接口而不是直接调 `windowManager`（生产环境的实现就是它）：
+/// 组件测试跑在 **Windows 本机**，`defaultTargetPlatform == TargetPlatform.windows`
+/// 天然成立 ⇒ 若直接调真实通道，每次进/退全屏都会打进 `window_manager` 的
+/// MethodChannel（flutter_test 下无 handler ⇒ `MissingPluginException` 噪声）。
+/// 注入替身后既能覆盖「真全屏路径」，又不碰插件。
+abstract class AylaDesktopWindowController {
+  const AylaDesktopWindowController();
+
+  /// 进入 / 退出窗口级全屏（覆盖整块显示器、无标题栏、无任务栏）。
+  Future<void> setFullScreen(bool fullscreen);
+
+  /// 还原窗口边框样式。
+  ///
+  /// ⚠️ **退出全屏后必须追加调用**（window_manager 0.5.2 `window_manager.cpp`
+  /// `SetFullScreen` 的真实缺陷）：它只在「退出全屏时窗口**不是**最大化」的分支里
+  /// 才把 `title_bar_style_` / `is_frameless_` 复位到进全屏前的值
+  /// （`if (::IsZoomed(mainWindow))` 的 else 分支）；而「最大化状态下进全屏」会让
+  /// 进全屏那一步先 `SetAsFrameless()` 把 `is_frameless_` 置真，
+  /// 退出时走的是 IsZoomed 分支 ⇒ **永久留在 frameless**（标题栏再也不回来）。
+  /// `setTitleBarStyle(TitleBarStyle.normal)` 是唯一能把这两者都复位的入口。
+  Future<void> restoreTitleBar();
+}
+
+/// 生产实现：`window_manager`（纯 HWND 变换，同一个 engine，不新建窗口）。
+///
+/// 选它而不是自写 Win32 全屏：本仓库 runner 的 `Win32Window` 已经承担
+/// WM_NCCALCSIZE / 客户区计算，再挂一套 frameless 的 NCCALCSIZE owner 会互相抢
+/// 边框重算 ⇒ 进出全屏闪烁（研究结论）。
+class _AylaWindowManagerController extends AylaDesktopWindowController {
+  const _AylaWindowManagerController();
+
+  @override
+  Future<void> setFullScreen(bool fullscreen) =>
+      windowManager.setFullScreen(fullscreen);
+
+  @override
+  Future<void> restoreTitleBar() =>
+      windowManager.setTitleBarStyle(TitleBarStyle.normal);
+}
+
+/// 本件是否走「窗口级真·全屏」。
+///
+/// 只对 `window_manager` 真正支持的桌面平台为真（Windows / macOS / Linux）；
+/// 移动端（Android / iOS）保持既有「root Overlay + 锁横屏」不变。
+/// Web 上没有窗口概念 ⇒ 排除。
+bool aylaUsesDesktopFullscreen({
+  TargetPlatform? platform,
+  bool isWeb = kIsWeb,
+}) {
+  if (isWeb) return false;
+  switch (platform ?? defaultTargetPlatform) {
+    case TargetPlatform.windows:
+    case TargetPlatform.macOS:
+    case TargetPlatform.linux:
+      return true;
+    case TargetPlatform.android:
+    case TargetPlatform.iOS:
+    case TargetPlatform.fuchsia:
+      return false;
+  }
+}
+
 /// 播放器区域三态渲染（`LivePlayer.tsx`）。
 class AylaLivePlayer extends StatefulWidget {
   const AylaLivePlayer({
@@ -63,6 +136,8 @@ class AylaLivePlayer extends StatefulWidget {
     this.children,
     this.overlayHostBuilder,
     this.onFullscreenChanged,
+    this.desktopWindow,
+    this.desktopFullscreen,
     this.flat = false,
   });
 
@@ -103,6 +178,13 @@ class AylaLivePlayer extends StatefulWidget {
   /// 防锁横屏导致窄↔宽切换、播放器重建黑屏 —— tsx 96–111）。
   final ValueChanged<bool>? onFullscreenChanged;
 
+  /// 桌面窗口控制器（默认 = `window_manager`；测试注入替身，见
+  /// [AylaDesktopWindowController]）。
+  final AylaDesktopWindowController? desktopWindow;
+
+  /// 是否走窗口级真·全屏；null = 按 [aylaUsesDesktopFullscreen] 依当前平台判定。
+  final bool? desktopFullscreen;
+
   /// **扁平档**：圆角与边框交给外层 stage 裁剪（web `.live-room-swipe-item .live-player
   /// { border-radius: 0; border: none }`，live.css 747–751）——窄屏沉浸式用，
   /// 由 `.live-room-stage` 统一收 `--radius-input` 圆角（live.css 825–828）。
@@ -119,9 +201,17 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   Timer? _hideTimer;
   Timer? _spinTimer;
   OverlayEntry? _fsEntry;
+  bool _desktopFsActive = false;
 
   bool get _showVideo =>
       widget.srsStatus == AylaLiveSrsStatus.live && widget.playerError == null;
+
+  /// 是否走窗口级真·全屏（桌面平台）。
+  bool get _desktopFullscreen =>
+      widget.desktopFullscreen ?? aylaUsesDesktopFullscreen();
+
+  AylaDesktopWindowController get _window =>
+      widget.desktopWindow ?? const _AylaWindowManagerController();
 
   @override
   void dispose() {
@@ -129,8 +219,38 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     _spinTimer?.cancel();
     _fsEntry?.remove();
     _fsEntry = null;
+    // 用户在全屏中直接离开页面 ⇒ 窗口必须还原，否则整个 App 卡在无边框全屏。
+    // 不 await：dispose 不能等异步；实现内部是 HWND 变换，异常只打日志不上抛。
+    if (_desktopFsActive) {
+      _desktopFsActive = false;
+      unawaited(_applyDesktopFullscreen(false));
+    }
     _unlockOrientation();
     super.dispose();
+  }
+
+  /// 窗口级全屏的进入/退出（桌面平台）。
+  ///
+  /// 顺序与理由：
+  /// 1. 进全屏：先 `setFullScreen(true)` —— window_manager 会自己保存窗口状态；
+  /// 2. 退全屏：`setFullScreen(false)` **之后追加** `restoreTitleBar()`，
+  ///    否则「最大化状态进全屏」会永久留在 frameless（见
+  ///    [AylaDesktopWindowController.restoreTitleBar] 的缺陷说明）；
+  /// 3. 两条路径都 try/catch：窗口控制失败绝不能让播放器状态机卡死
+  ///    （否则全屏层已插、窗口没进 —— 用户看到「黑一下」且退不回去）。
+  Future<void> _applyDesktopFullscreen(bool fullscreen) async {
+    final AylaDesktopWindowController window = _window;
+    try {
+      await window.setFullScreen(fullscreen);
+    } on Object catch (error, stack) {
+      debugPrint('[AYLA-FULLSCREEN] setFullScreen($fullscreen) 失败：$error\n$stack');
+    }
+    if (fullscreen) return;
+    try {
+      await window.restoreTitleBar();
+    } on Object catch (error, stack) {
+      debugPrint('[AYLA-FULLSCREEN] restoreTitleBar 失败：$error\n$stack');
+    }
   }
 
   // ---- 悬浮按钮显隐 + 3s 无操作自动隐藏（tsx 243–261）----
@@ -196,6 +316,12 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
     setState(() => _fullscreen = true);
     widget.onFullscreenChanged?.call(true);
     _lockLandscape();
+    // **桌面端真·全屏**：窗口本身跳出应用边框（覆盖整块显示器、无标题栏/任务栏）。
+    // 移动端这一步是 no-op，仍是原来的「root Overlay + 锁横屏」。
+    if (_desktopFullscreen) {
+      _desktopFsActive = true;
+      unawaited(_applyDesktopFullscreen(true));
+    }
     // ⚠️⚠️ **这里曾有一个运行期崩溃，是「手机端直播无法全屏」的真正根因**（2026-10-19）：
     //
     // 旧写法 `(widget.overlayHostBuilder ?? aylaOverlayEntry)(_buildFullscreen())`
@@ -229,6 +355,11 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   void _exitFullscreen() {
     _fsEntry?.remove();
     _fsEntry = null;
+    // 先还原窗口（含 frameless 复位），再解方向锁 —— 顺序固定，便于测试断言。
+    if (_desktopFsActive) {
+      _desktopFsActive = false;
+      unawaited(_applyDesktopFullscreen(false));
+    }
     _unlockOrientation();
     widget.onFullscreenChanged?.call(false);
     if (mounted) setState(() => _fullscreen = false);
@@ -545,23 +676,32 @@ class _LivePlayerFullscreenHost extends StatelessWidget {
         },
         child: FocusScope(
           autofocus: true,
-          child: ColoredBox(
-            color: Colors.black,
-            child: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                child,
-                // 退出键（右上，与悬浮控件同风格；全屏里也要能退出）
-                Positioned(
-                  top: AylaSpacing.sp2,
-                  right: AylaSpacing.sp2,
-                  child: _PlayerButton(
-                    icon: aylaIconByName('iconClose')!,
-                    label: '退出全屏',
-                    onPressed: onExit,
+          // ⚠️ 兜底（桌面真·全屏必需）：窗口被 window_manager 改成全屏后，
+          // 若此时窗口本身还没拿到前台焦点，FocusScope 的 autofocus 请求可能被拒 ⇒
+          // 子树里没有任何可聚焦节点 ⇒ 按键事件停在 root scope，而 [Shortcuts]
+          // 在这层（root 之下）收不到 ⇒ **ESC 退出失效、用户被锁在全屏里**。
+          // 这里显式给一个 autofocus 的 Focus，保证全屏子树内始终有焦点归属。
+          // 快捷键本身的映射仍是上面 Shortcuts + Actions（Escape → DismissIntent）。
+          child: Focus(
+            autofocus: true,
+            child: ColoredBox(
+              color: Colors.black,
+              child: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  child,
+                  // 退出键（右上，与悬浮控件同风格；全屏里也要能退出）
+                  Positioned(
+                    top: AylaSpacing.sp2,
+                    right: AylaSpacing.sp2,
+                    child: _PlayerButton(
+                      icon: aylaIconByName('iconClose')!,
+                      label: '退出全屏',
+                      onPressed: onExit,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
