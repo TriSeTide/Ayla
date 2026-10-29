@@ -32,9 +32,20 @@ import '../lib/widgets/base/overlays.dart';
 
 /// 可注入的窗口控制替身：只记录调用，不做任何 HWND 操作。
 class _FakeDesktopWindow extends AylaDesktopWindowController {
-  _FakeDesktopWindow();
+  _FakeDesktopWindow({this.maximized = false});
+
+  /// 初始是否最大化（用于验证「进全屏前必须先解除最大化」）。
+  final bool maximized;
 
   final List<String> calls = <String>[];
+
+  @override
+  Future<bool> isMaximized() async => maximized;
+
+  @override
+  Future<void> unmaximize() async {
+    calls.add('unmaximize');
+  }
 
   @override
   Future<void> setFullScreen(bool fullscreen) async {
@@ -178,6 +189,57 @@ void main() {
       expect(byLabel('退出全屏'), findsNothing);
     });
 
+    testWidgets('窗口最大化时进全屏：必须**先解除最大化**（2026-10-31 实报根因）', (
+      WidgetTester tester,
+    ) async {
+      // window_manager 0.5.2 只在「进全屏前不是最大化」时才调 SetAsFrameless()
+      // （真正剥掉非客户区的那一步）；从最大化进全屏会跳过它 ⇒ 窗口拉满显示器
+      // 但仍带标题栏 ⇒ 用户看到「完全没全屏成功」。故必须先 unmaximize。
+      final _FakeDesktopWindow window = _FakeDesktopWindow(maximized: true);
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLivePlayer(
+            srsStatus: AylaLiveSrsStatus.live,
+            desktopWindow: window,
+            desktopFullscreen: true,
+            overlayHostBuilder: (Widget child) =>
+                aylaOverlayEntry(builder: (BuildContext ctx) => child),
+          ),
+        ),
+      );
+      await settle(tester);
+      await enterFullscreen(tester);
+
+      expect(
+        window.calls,
+        <String>['unmaximize', 'setFullScreen(true)'],
+        reason: '最大化状态进全屏必须先 unmaximize，否则 window_manager 跳过 SetAsFrameless'
+            ' ⇒ 窗口带标题栏、看起来完全没全屏',
+      );
+    });
+
+    testWidgets('窗口非最大化时进全屏：**不要**多调 unmaximize（避免无谓的窗口抖动）', (
+      WidgetTester tester,
+    ) async {
+      final _FakeDesktopWindow window = _FakeDesktopWindow(maximized: false);
+      await tester.pumpWidget(
+        host(
+          tester,
+          AylaLivePlayer(
+            srsStatus: AylaLiveSrsStatus.live,
+            desktopWindow: window,
+            desktopFullscreen: true,
+            overlayHostBuilder: (Widget child) =>
+                aylaOverlayEntry(builder: (BuildContext ctx) => child),
+          ),
+        ),
+      );
+      await settle(tester);
+      await enterFullscreen(tester);
+
+      expect(window.calls, <String>['setFullScreen(true)']);
+    });
     testWidgets('ESC 退出同样走完整还原链（用户最常见的退出方式）', (WidgetTester tester) async {
       final _FakeDesktopWindow window = _FakeDesktopWindow();
       await tester.pumpWidget(
@@ -300,6 +362,14 @@ void main() {
 
 /// 每次窗口调用都抛异常的替身（验证异常路径不会把播放器锁死在全屏）。
 class _ThrowingDesktopWindow extends AylaDesktopWindowController {
+  @override
+  Future<bool> isMaximized() async => false;
+
+  @override
+  Future<void> unmaximize() async {
+    throw StateError('boom');
+  }
+
   @override
   Future<void> setFullScreen(bool fullscreen) async {
     throw StateError('boom');

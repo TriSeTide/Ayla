@@ -66,7 +66,37 @@ const Duration kLivePlayerSpinReset = Duration(milliseconds: 650);
 abstract class AylaDesktopWindowController {
   const AylaDesktopWindowController();
 
+  /// 窗口当前是否最大化。
+  ///
+  /// ⚠️ 这个查询存在的唯一理由见 [setFullScreen] 的说明：window_manager 在
+  /// 「最大化状态进全屏」这条路径上有缺陷，必须**先解除最大化**再进全屏。
+  Future<bool> isMaximized();
+
+  /// 解除最大化（还原到普通窗口尺寸）。
+  Future<void> unmaximize();
+
   /// 进入 / 退出窗口级全屏（覆盖整块显示器、无标题栏、无任务栏）。
+  ///
+  /// ## ⚠️⚠️ 实现必须遵守：进全屏前先解除最大化（2026-10-31 用户实报根因）
+  ///
+  /// 用户原话：「窗口最大化时点全屏按钮 = **完全没全屏成功**；窗口窗口化时点全屏
+  /// = 全屏成功但顶部导航栏没被覆盖」。前者就是下面这条缺陷：
+  ///
+  /// window_manager 0.5.2 `SetFullScreen`（windows/window_manager.cpp）在进全屏时：
+  /// ```cpp
+  /// if (!g_maximized_before_fullscreen) {
+  ///   SetAsFrameless();                      // ← 只在「进全屏前不是最大化」时才剥边框
+  /// }
+  /// ::SetWindowLongPtr(GWL_STYLE, style & ~(WS_THICKFRAME | WS_MAXIMIZEBOX));
+  /// ```
+  /// 而 `SetAsFrameless()` 才是真正让 `WM_NCCALCSIZE` 返回 0（客户区=整窗）的那一步。
+  /// 于是**从最大化进全屏**时它被跳过 ⇒ 窗口虽然被 SetWindowPos 拉到 rcMonitor，
+  /// 但仍保留非客户区（标题栏/边框）⇒ 看起来「根本没全屏」。
+  ///
+  /// 对策：进全屏前若 `isMaximized()` 为真，先 `unmaximize()` —— 这样
+  /// `g_maximized_before_fullscreen` 变成 false，window_manager 就会走正确分支。
+  /// （window_manager 自己在 `waitUntilReadyToShow` 里也是这个顺序：
+  ///  `if (await isMaximized()) await unmaximize();`）
   Future<void> setFullScreen(bool fullscreen);
 
   /// 还原窗口边框样式。
@@ -88,6 +118,12 @@ abstract class AylaDesktopWindowController {
 /// 边框重算 ⇒ 进出全屏闪烁（研究结论）。
 class _AylaWindowManagerController extends AylaDesktopWindowController {
   const _AylaWindowManagerController();
+
+  @override
+  Future<bool> isMaximized() => windowManager.isMaximized();
+
+  @override
+  Future<void> unmaximize() => windowManager.unmaximize();
 
   @override
   Future<void> setFullScreen(bool fullscreen) =>
@@ -136,6 +172,7 @@ class AylaLivePlayer extends StatefulWidget {
     this.children,
     this.overlayHostBuilder,
     this.onFullscreenChanged,
+    this.onEnterMiniPlayer,
     this.desktopWindow,
     this.desktopFullscreen,
     this.flat = false,
@@ -177,6 +214,17 @@ class AylaLivePlayer extends StatefulWidget {
   /// 全屏状态变化（web 由 `document.fullscreenchange` 通知 `LiveRoomBody` 冻结 isNarrow，
   /// 防锁横屏导致窄↔宽切换、播放器重建黑屏 —— tsx 96–111）。
   final ValueChanged<bool>? onFullscreenChanged;
+
+  /// 「小窗」键：把直播变成**应用窗口之外**的悬浮小窗（2026-10-31 用户需求）。
+  ///
+  /// ## 为什么在播放器上，而不是像 web 那样由 `AppShell` 自动渲染
+  /// web 的 `LiveMiniPlayer` 是「离开直播间页面 ⇒ 自动出现」（`detachView` 判定窄屏 + 直播中）。
+  /// 但**电脑端**用户要的是显式操作：
+  /// > 「电脑需要点按钮使直播变为悬浮小窗，但手机退出直播间自动续直播悬浮小窗」
+  /// ⇒ 桌面端由本键触发；移动端仍走既有的「退出页面自动续」路径（不渲染本键）。
+  ///
+  /// **null = 不渲染该键**（移动端 / 测试 / 平台不支持时）。
+  final VoidCallback? onEnterMiniPlayer;
 
   /// 桌面窗口控制器（默认 = `window_manager`；测试注入替身，见
   /// [AylaDesktopWindowController]）。
@@ -232,14 +280,28 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
   /// 窗口级全屏的进入/退出（桌面平台）。
   ///
   /// 顺序与理由：
-  /// 1. 进全屏：先 `setFullScreen(true)` —— window_manager 会自己保存窗口状态；
-  /// 2. 退全屏：`setFullScreen(false)` **之后追加** `restoreTitleBar()`，
+  /// 1. **进全屏前先解除最大化**（`unmaximize`）—— 这是 2026-10-31 用户实报
+  ///    「窗口最大化时点全屏完全没成功」的根因：window_manager 只在
+  ///    `!g_maximized_before_fullscreen` 时才调 `SetAsFrameless()`（真正剥掉非客户区
+  ///    的那一步），从最大化进全屏会跳过它 ⇒ 窗口拉满显示器但仍带标题栏。
+  ///    详见 [AylaDesktopWindowController.setFullScreen] 的注释。
+  /// 2. 再 `setFullScreen(true)` —— 此时 window_manager 走正确分支。
+  /// 3. 退全屏：`setFullScreen(false)` **之后追加** `restoreTitleBar()`，
   ///    否则「最大化状态进全屏」会永久留在 frameless（见
-  ///    [AylaDesktopWindowController.restoreTitleBar] 的缺陷说明）；
-  /// 3. 两条路径都 try/catch：窗口控制失败绝不能让播放器状态机卡死
+  ///    [AylaDesktopWindowController.restoreTitleBar] 的缺陷说明）。
+  /// 4. 每步都独立 try/catch：窗口控制失败绝不能让播放器状态机卡死
   ///    （否则全屏层已插、窗口没进 —— 用户看到「黑一下」且退不回去）。
   Future<void> _applyDesktopFullscreen(bool fullscreen) async {
     final AylaDesktopWindowController window = _window;
+    if (fullscreen) {
+      try {
+        if (await window.isMaximized()) {
+          await window.unmaximize();
+        }
+      } on Object catch (error, stack) {
+        debugPrint('[AYLA-FULLSCREEN] unmaximize 失败：$error\n$stack');
+      }
+    }
     try {
       await window.setFullScreen(fullscreen);
     } on Object catch (error, stack) {
@@ -346,10 +408,28 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
             builder: (BuildContext ctx) => fullscreen,
           );
     _fsEntry = entry;
-    // ⚠️ 用**最近**的 Overlay，不要 `rootOverlay: true`：画布/测试宿主
-    // （`theme/preview_theme.dart:55` 那层）没有 Navigator ⇒ 会抛
-    // `No Overlay widget found` 刷屏（用户 2026-10-02 实报）。真实 app 里最近的就是 root ⇒ 等价。
-    Overlay.of(context).insert(entry);
+    // ⚠️⚠️ **必须插根 Overlay，不能用最近的那个**（2026-10-31 用户实报「全屏后顶部导航栏
+    // 仍露在外面」的根因）。
+    //
+    // 本工程的路由是 `ShellRoute`：`AppShell` 里是
+    //   Column[ TopNav, Expanded(ClipRect(shell navigator)), BottomTabs ]
+    // 而**页面**跑在 shell navigator 的 Overlay 里。于是：
+    // · `Overlay.of(context)`（最近的那个）= shell navigator 的 Overlay ⇒ 全屏层被塞进
+    //   `Expanded(ClipRect(...))` 内部 ⇒ **TopNav 与底栏永远压在它上面**，
+    //   ClipRect 还会把溢出部分裁掉 ⇒ 看起来就是「App 内一块黑，不是全屏」；
+    // · `rootOverlay: true` = Navigator 的根 Overlay（`MaterialApp.builder` 那层之下、
+    //   在 TopNav 之上）⇒ 才是真正的整窗覆盖。
+    //
+    // 旧注释担心的「画布/测试宿主没有 Navigator ⇒ 抛 No Overlay」仍然成立，故保留
+    // try/catch 回落：拿不到根 Overlay 就退回最近的那个（画布/单测场景），
+    // 真实 App 里根 Overlay 一定存在 ⇒ 走的是正确路径。
+    OverlayState? root;
+    try {
+      root = Overlay.of(context, rootOverlay: true);
+    } catch (_) {
+      root = null;
+    }
+    (root ?? Overlay.of(context)).insert(entry);
   }
 
   void _exitFullscreen() {
@@ -480,7 +560,20 @@ class _AylaLivePlayerState extends State<AylaLivePlayer> {
               child: Row(
                 spacing: AylaSpacing.sp2, // `.live-player-corner { gap: var(--sp-2) }`
                 children: <Widget>[
-                  // ⚠️ 画中画键不实现（浏览器 PiP 无 Flutter 等价物；窄屏 web 本来就隐藏）
+                  // 「小窗」键：把直播变成**应用窗口之外**的悬浮小窗。
+                  //
+                  // 只在**桌面端**渲染（`onEnterMiniPlayer != null` 由页面按平台决定）：
+                  // 用户原话「电脑需要点按钮使直播变为悬浮小窗，但手机退出直播间自动续
+                  // 直播悬浮小窗」⇒ 移动端走 `detachView` 的自动续接，不渲染本键。
+                  //
+                  // 图标沿用库内已有的 `iconPip`（`app_icons_data.dart:243`）——
+                  // web 端这一位就是画中画键（`LivePlayer.tsx` 的 IconPip），语义同源。
+                  if (widget.onEnterMiniPlayer != null)
+                    _btn(
+                      icon: aylaIconByName('iconPip')!,
+                      label: '小窗',
+                      onPressed: widget.onEnterMiniPlayer!,
+                    ),
                   _btn(
                     icon: aylaIconByName('iconFullscreen')!,
                     label: '全屏',
