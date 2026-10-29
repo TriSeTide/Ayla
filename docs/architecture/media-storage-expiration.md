@@ -9,7 +9,8 @@
 Ayla 媒体（图片/视频/语音/文件）全部存 MinIO（bucket `elysia-media`），当前无任何过期机制，正式媒体永久累积。经讨论确定：
 
 - **普通文本消息**（MySQL）：永久保留，零回收（年增量 ~GB 级，无压力）；
-- **聊天媒体**（MinIO）：按 kind 分级过期——图片两级（7 天删原图留缩略图、30 天完全过期），语音/文件/视频单级（7 天直接删除）；
+- **聊天媒体**（MinIO）：按 kind 分级过期——**图片与视频两级**（7 天删原对象留封面、30 天完全过期），**语音/文件单级**（7 天直接删除）；
+> 2026-10-29 用户拍板修订：视频由单级改两级（视频本体 7 天过期，首帧海报帧与图片缩略图同寿命 30 天）。
 - **资产类媒体**（帖子配图/表情包/评论/群头像等）：永久保留；
 - **不设空间硬上限**（不做 bucket quota 硬拒）。
 
@@ -24,14 +25,15 @@ Ayla 媒体（图片/视频/语音/文件）全部存 MinIO（bucket `elysia-med
 | 永久保留 | 帖子评论 `Comment.media_id` / `Comment.images`（JSON） | 帖子内容 |
 | 永久保留 | 群头像 `Conversation.avatar`（content URL 字符串） | 群设置 |
 | 可过期（图片，两级） | 聊天消息 `Message.media_id` / `Message.segments`（JSON） | 7 天删原图留缩略图、30 天完全过期 |
-| 可过期（语音/文件/视频，单级） | 聊天消息 `Message.media_id` / `Message.segments`（JSON） | 7 天直接删除（无缩略图阶段） |
-| 可过期（语音/文件/视频，单级） | 直播弹幕 `Danmaku.media_id` | 7 天直接删除 |
-| 可过期（语音/文件/视频，单级） | 语音房消息 `VoiceChatMessage.media_id` | 7 天直接删除 |
+| 可过期（**视频，两级**） | 聊天消息 `Message.media_id` / `Message.segments`（JSON） | 7 天删本体留海报帧、30 天完全过期 |
+| 可过期（语音/文件，单级） | 聊天消息 `Message.media_id` | 7 天直接删除 |
+| 可过期（图片，两级） | 直播弹幕 `Danmaku.media_id` | 7 天删原图留缩略图、30 天完全过期 |
+| 可过期（图片，两级） | 语音房消息 `VoiceChatMessage.media_id` | 7 天删原图留缩略图、30 天完全过期 |
 | 可过期 | 无任何引用的孤儿媒体 | 按 kind 对应策略 |
 
 > 弹幕/语音房消息归入可过期类：与聊天消息语义一致（瞬态对话），量小但策略统一。
 > 如需调整（如弹幕永久），改判定集合即可，不影响机制。
-> 语音/文件/视频无缩略图阶段（语音波形、视频海报帧随本体一并删除），
+> 语音/文件无派生封面阶段（语音波形随本体一并删除）；**视频海报帧不随本体删除**，与图片缩略图同寿命（2026-10-29）。
 > 到期即完全过期；图片有缩略图，故保留两级窗口。
 
 ## 3. 判定规则
@@ -79,7 +81,17 @@ Ayla 媒体（图片/视频/语音/文件）全部存 MinIO（bucket `elysia-med
 - DB 记录 `expired_at = now`（**记录保留，不删行**）；
 - 前端效果：显示"已过期"占位。
 
-### 语音/文件/视频：单级（默认 7 天）
+### 视频：两级（2026-10-29 用户拍板，取代单级）
+
+- **阶段 1（7 天）**：删**视频本体**（`storage_path`），**保留首帧海报帧**
+  （`thumbnail_path`，由客户端 `POST /media/{id}:poster` 回传）；
+  标记 `original_expired_at`。前端效果：气泡/查看器显示封面 + 「视频已过期」角标，不可播放。
+- **阶段 2（30 天）**：删海报帧与其余派生对象，标记 `expired_at`；前端显示「已过期」占位。
+- 配置：`MEDIA_CHAT_VIDEO_TTL_DAYS`（默认 7）/ `MEDIA_CHAT_VIDEO_FULL_TTL_DAYS`
+  （默认回落 `MEDIA_CHAT_IMAGE_FULL_TTL_DAYS`=30）。海报帧与图片缩略图同寿命，
+  避免聊天里 7 天后视频位置变成灰块。
+
+### 语音/文件：单级（默认 7 天）
 
 - 到期直接删除全部对象（`storage_path` + `thumbnail_path` + `waveform_path`）；
 - DB 记录 `expired_at = now`（**记录保留，不删行**；`original_expired_at` 保持 null）；
@@ -110,7 +122,7 @@ expired_at = models.DateTimeField("完全过期时间", null=True, blank=True)
 # 图片：两级
 MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS = env.int("MEDIA_CHAT_IMAGE_ORIGINAL_TTL_DAYS", default=7)
 MEDIA_CHAT_IMAGE_FULL_TTL_DAYS = env.int("MEDIA_CHAT_IMAGE_FULL_TTL_DAYS", default=30)
-# 语音/文件/视频：单级
+# 语音/文件：单级（视频已改两级，见上方 §4）
 MEDIA_CHAT_VOICE_TTL_DAYS = env.int("MEDIA_CHAT_VOICE_TTL_DAYS", default=7)
 MEDIA_CHAT_FILE_TTL_DAYS = env.int("MEDIA_CHAT_FILE_TTL_DAYS", default=7)
 MEDIA_CHAT_VIDEO_TTL_DAYS = env.int("MEDIA_CHAT_VIDEO_TTL_DAYS", default=7)
@@ -128,6 +140,9 @@ MEDIA_CHAT_VIDEO_TTL_DAYS = env.int("MEDIA_CHAT_VIDEO_TTL_DAYS", default=7)
 - 输出：每个删除动作一行日志（key、media_id、阶段），汇总统计；
 - 遵循项目纪律：**不引入后台调度**，由运维手动/计划任务执行；
 - 执行前 `--no-delete` 可预览（与现有参数一致）。
+- **运行现状（2026-10-29 代码+生产核对）**：生产上既无任何调度、也无一次执行痕迹（宿主机 crontab / systemd timer / 容器内 cron 全无 `cleanup_media`，`docker logs` 0 条 `[media]`，`media_objects` 的 `original_expired_at`/`expired_at` 100% 为 NULL）⇒ **本机制目前处于「代码就绪但从未生效」状态**。
+  另有一条前置阻塞：桶已启用版本化，`S3Storage.delete()` 不带 `VersionId` ⇒ 删除只产生 delete marker，**即使执行本命令也不会释放磁盘**。
+  证据与预演名单见 `docs/report/MinIO与本地媒体机制-代码级事实核对-2026-10-29.md` §4.5 / §7。
 
 ## 8. 前端配合
 
@@ -141,7 +156,7 @@ MEDIA_CHAT_VIDEO_TTL_DAYS = env.int("MEDIA_CHAT_VIDEO_TTL_DAYS", default=7)
 
 - thumbnail 也 404（或单级媒体 original 410）→ 聊天气泡显示"已过期"占位（灰底 + 文字），不裂图；
 - 查看器（图片/视频大图）同样处理；
-- 语音/文件/视频无缩略图降级阶段：到期直接"已过期"。
+- 语音/文件无派封面降级阶段：到期直接"已过期"；视频阶段 1 显示海报帧 + 「视频已过期」角标。
 
 ### 8.3 资产类不受影响
 
@@ -153,7 +168,8 @@ MEDIA_CHAT_VIDEO_TTL_DAYS = env.int("MEDIA_CHAT_VIDEO_TTL_DAYS", default=7)
 
 1. **7 天边界**：图片 created_at 恰好 7 天前 → 阶段 1 过期；6 天 23 小时 → 不过期；
 2. **30 天边界**：图片恰好 30 天前 → 完全过期；29 天 23 小时 → 仅阶段 1；
-3. **单级边界**：语音/文件/视频恰好 7 天前 → 直接删除；6 天 23 小时 → 不过期；
+3. **单级边界**：语音/文件恰好 7 天前 → 直接删除；6 天 23 小时 → 不过期；
+3b. **视频两级边界**：7 天 → 只删本体留海报；30 天 → 全删；
 4. **保护类不删**：被 PostImage / EmojiItem / Comment（media_id 与 images 两种形态）/ Conversation.avatar 引用的媒体，即使超期也不删（含单级媒体）；
 5. **聊天类过期**：仅被 Message.media_id / segments 引用的媒体按 kind 对应流程删；
 6. **孤儿过期**：无引用媒体按 kind 对应流程删；

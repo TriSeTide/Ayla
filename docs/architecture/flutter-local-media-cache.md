@@ -45,7 +45,7 @@
 |---|---|---|
 | 图片 | ① 气泡内**看见**（`AylaResourceImage` 渲染）② 点开**大图**（`image_viewer`） | ① **thumb** ② **original** |
 | 语音 | **点击播放**才存；不点击不存 | original |
-| 视频 | 加载即存（D4 不变） | original |
+| 视频 | **点开查看器**才存（气泡只签 URL 取首帧，**不落盘**；2026-10-29 代码核对修正：D4「加载即存」已废止） | original |
 | **文件** | **永不自动存**；只有用户点「保存」按钮（系统保存对话框）才落盘 | — |
 
 旧 D1 的理由是「把 thumb 字节冒充原图会污染『本地有 = 原图有』的语义」。
@@ -57,7 +57,13 @@
 | 平台 | 根目录 | 依据 |
 |---|---|---|
 | **Windows** | `<exe所在目录>/data/media-cache/` | 用户实测绿色包解压在 `E:\ayla-windows-x64-1.0.1+2`，同级有 `data/` |
-| **Android / iOS** | `getApplicationSupportDirectory()/media-cache/` | 应用私有目录，无需额外权限 |
+| **Android** | `<外部存储>/Android/data/<包名>/files/media-cache/`（2026-10-29 用户拍板；拿不到或不可写则**降级**到应用支持目录，日志带 `已降级`） | 用户要求「手机端保存在经典的 Android/data」，路径对用户可见、可拷 |
+| **iOS** | `getApplicationSupportDirectory()/media-cache/` | 应用私有目录，无需额外权限 |
+
+> Android 的三道校验（`media_cache_paths.dart:aylaResolveMediaCacheLayout`）：
+> ① `getExternalStorageDirectory()` 非空；② 路径形态确实含 `/Android/data/`
+> （部分 ROM 会映射到别处，此时「Android/data」对用户毫无意义）；
+> ③ 目录可写。任一不满足即降级，**绝不猜路径**。
 
 ### 3.1 Windows 的 data/ 目录复用风险（重要）
 
@@ -196,6 +202,29 @@ lookup(mediaId, variant: original)      ← 只认原图
 | **本地媒体缓存** | **磁盘** | **永久** | **原始字节** |
 
 三者不冲突：本地缓存是**最外层**，命中后连签名都不需要。
+
+## 8.1 落盘调度：持久下载队列（2026-10-29 用户拍板）
+
+组件层的 `unawaited(fetchAndStore(...).catchError(→null))` 有致命缺陷：
+**页面滚走组件就卸载、进程一退就全丢**，失败完全无感 —— 于是「7 天后云端删了、
+本地也没存下」的媒体会永久变成「已过期」。
+
+现在所有落盘意图统一走 `core/media/media_download_queue.dart`：
+
+| 特性 | 实现 |
+|---|---|
+| 先落盘再执行 | 任务写 `<媒体缓存根同级>/download-queue.json`（原子写 `.tmp`→rename）后才开始下载 |
+| 重启续跑 | 启动时 `resumeOnStartup()`：上次 `running` 的任务恢复成 `pending` 重跑 |
+| 最多重试 | `maxAttempts = 3`（有界退避 2s/4s） |
+| 过期不重试 | 云端 410 且本地没有 ⇒ 直接判 `failed`（`lastError=media_expired`），不浪费重试 |
+| 并发上限 | 默认 2，避免一次进视口几十个请求打满带宽 |
+| 后台保活 | Android 起前台服务（通知栏「Ayla 正在缓存媒体」）；见 `media_download_keepalive.dart` |
+
+**平台边界（如实声明）**：
+- **Android**：前台服务 + 下次启动续跑，因此「app 后台也保持下载」成立；
+- **iOS**：**做不到常驻后台下载**（系统限制）。策略 = 前台持续 + 进入后台尽力续传 +
+  **下次启动立刻续跑**（与用户要求一致）；
+- **Windows**：进程活着就继续，关掉下次启动续跑。
 
 ## 9. 不做的事
 
