@@ -71,6 +71,8 @@ function DanmakuItem({
           >
             <ResourceImage
               src={resolveMediaPath(item.media.thumbnail) ?? mediaContentUrl(item.media_id)}
+              /* 同上（2026-10-29）：thumbnail 路径必须按 thumb 变体签。 */
+              variant={item.media.thumbnail ? "thumb" : undefined}
               alt={item.content || "弹幕图片"}
               className="danmaku-image"
               loading="lazy"

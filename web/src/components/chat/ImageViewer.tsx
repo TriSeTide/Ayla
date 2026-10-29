@@ -444,6 +444,8 @@ export function ImageViewer({
                 className="image-viewer-img"
                 loading="eager"
                 expiredBadge
+                /* descriptor 已知完全过期 ⇒ 直接占位，省一次必然 410 的 :sign */
+                knownExpired={current.media.expired === true}
                 fallback={<span className="image-viewer-fallback">图片加载失败</span>}
               />
             ) : (

@@ -80,6 +80,7 @@ export function ResourceImage({
   fallback,
   variant,
   expiredBadge = false,
+  knownExpired = false,
 }: {
   src: string;
   alt: string;
@@ -90,10 +91,16 @@ export function ResourceImage({
   loading?: "eager" | "lazy";
   onReady?: () => void;
   fallback?: ReactNode;
-  /** 签发变体："thumb" = 缩略图（气泡用）；缺省 = 原图（查看器/保存） */
-  variant?: "thumb";
+  /** 签发变体："thumb" = 缩略图（气泡用）；"waveform" = 语音波形图；
+   *  缺省 = 原图（查看器/保存）。2026-10-29 补 waveform：此前语音条把
+   *  `/media/{id}/waveform` 交给本组件，只会签 original ⇒ <img> 拿到音频字节
+   *  ⇒ 波形图永远显示不出来。 */
+  variant?: "thumb" | "waveform";
   /** 原图已过期（阶段 1 降级）时叠加「原图已过期」角标（聊天场景） */
   expiredBadge?: boolean;
+  /** descriptor 已知「完全过期」：直接占位，**不白跑一次必然 410 的 :sign**。
+   *  2026-10-29 新增（后端 descriptor 投影 `expired`）。 */
+  knownExpired?: boolean;
 }) {
   const mediaId = extractMediaId(src);
   // Empty alt marks decorative images (avatars/row covers). Their containing
@@ -152,6 +159,13 @@ export function ResourceImage({
     }
 
     setResolvedSrc(null);
+    // 已知完全过期 ⇒ 不发请求（签名必然 410）
+    if (knownExpired) {
+      setExpired(true);
+      return () => {
+        cancelled = true;
+      };
+    }
     void getSignedMediaUrlState(mediaId, variant)
       .then((result) => {
         if (!cancelled) {
@@ -172,7 +186,7 @@ export function ResourceImage({
     return () => {
       cancelled = true;
     };
-  }, [src, mediaId, variant, retry]);
+  }, [src, mediaId, variant, retry, knownExpired]);
 
   if (expired) {
     // 「已过期」占位（灰底 + 文字）：与「加载失败重试」区分，媒体已永久删除

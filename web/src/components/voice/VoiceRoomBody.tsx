@@ -192,6 +192,10 @@ export function VoiceRoomBody({
           {message.media_id && message.media && (
             <ResourceImage
               src={resolveMediaPath(message.media.thumbnail) ?? mediaContentUrl(message.media_id)}
+              /* 2026-10-29 修正：src 是 thumbnail 派生路径时必须显式传 variant="thumb"，
+                 否则签名按 original 走 ⇒ 白拉原图（浪费带宽，且与「气泡用缩略图」的
+                 设计意图不一致）。 */
+              variant={message.media.thumbnail ? "thumb" : undefined}
               alt={message.content || "房内聊天图片"}
               className="voice-room-chat-image"
               loading="lazy"

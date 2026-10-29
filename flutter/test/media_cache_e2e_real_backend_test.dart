@@ -37,6 +37,8 @@ class _FixedPlatform implements AylaMediaCachePlatform {
   String get executablePath => '${_root.path}/app/ayla_flutter.exe';
   @override
   Future<Directory> applicationSupportDirectory() async => _root;
+  @override
+  Future<Directory?> externalStorageDirectory() async => null;
 }
 
 class _FixedTokens implements AuthTokenStore {

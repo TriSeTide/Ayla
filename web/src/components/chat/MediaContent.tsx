@@ -133,6 +133,8 @@ function ImageMedia({
             fallback={<span className="skeleton media-frame-skeleton" />}
             variant={src.includes("/thumbnail") ? "thumb" : undefined}
             expiredBadge={!src.includes("/thumbnail")}
+            /* descriptor 已知完全过期 ⇒ 直接「已过期」占位，不白跑 :sign（必然 410） */
+            knownExpired={media.expired === true}
           />
         </button>
       </div>
@@ -198,6 +200,18 @@ function VideoFrame({
     setExpired(false);
     if (!media) {
       setFailed(true);
+      return;
+    }
+    // descriptor 已知状态（2026-10-29）：省掉必然 410 的 :sign 往返。
+    // · 完全过期 → 直接占位；
+    // · 阶段 1（本体已删）且无海报可降级 → 占位；有海报则走海报分支（下方渲染，
+    //   并由海报 ResourceImage 叠加「视频已过期」角标）。
+    if (media.expired === true) {
+      setExpired(true);
+      return;
+    }
+    if (media.original_expired === true && !hasPoster) {
+      setExpired(true);
       return;
     }
     if (hasPoster) return;
@@ -296,9 +310,18 @@ function VideoFrame({
             alt=""
             className="media-video"
             loading="lazy"
+            knownExpired={media.expired === true}
             fallback={<span className="skeleton media-frame-skeleton" />}
           />
-          {playBadge}
+          {/* 阶段 1（视频本体已删、只剩海报帧）：叠加「视频已过期」角标、
+              不再显示播放键（点开只能看到一张静帧）。2026-10-29。 */}
+          {media.original_expired === true ? (
+            <span className="resource-image-expired-badge" aria-label="视频已过期">
+              视频已过期
+            </span>
+          ) : (
+            playBadge
+          )}
         </button>
       ) : videoSrc ? (
         <button
@@ -439,6 +462,7 @@ function MixedMedia({ msg }: { msg: ChatMessage }) {
                     fallback={<span className="skeleton media-frame-skeleton" />}
                     variant={hasThumb ? "thumb" : undefined}
                     expiredBadge={!hasThumb}
+                    knownExpired={seg.media?.expired === true}
                   />
                 ) : local ? (
                   <img src={local.url} alt="图片" className="mixed-img-media" />
@@ -661,6 +685,7 @@ function VoiceMedia({ media }: { media: MediaDescriptor }) {
           <ResourceImage
             src={wave}
             alt="语音波形"
+            variant="waveform"
             className="voice-wave"
             loading="lazy"
             fallback={

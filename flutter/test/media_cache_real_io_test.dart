@@ -25,6 +25,9 @@ class _RealPlatform implements AylaMediaCachePlatform {
 
   @override
   Future<Directory> applicationSupportDirectory() async => _supportDir!;
+
+  @override
+  Future<Directory?> externalStorageDirectory() async => null;
 }
 
 void main() {

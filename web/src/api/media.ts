@@ -56,7 +56,7 @@ const signedUrlCache = new Map<string, SignedUrlEntry>();
  */
 export async function getSignedMediaUrlState(
   mediaId: string,
-  variant?: "thumb",
+  variant?: "thumb" | "waveform",
 ): Promise<SignedMediaResult> {
   const cacheKey = variant ? `${mediaId}|${variant}` : mediaId;
   const cached = signedUrlCache.get(cacheKey);
@@ -78,7 +78,8 @@ export async function getSignedMediaUrlState(
     } catch (err) {
       if (err instanceof ApiError && err.status === 410) {
         if (variant) {
-          // thumb 变体 410 = 完全过期（图片阶段 2 / 单级媒体），派生对象已删
+          // thumb 变体 410 = 完全过期（图片阶段 2 / 单级媒体），派生对象已删。
+          // （404 = thumbnail_not_ready 不走这里，见下方通用 404 处理）
           throw new MediaExpiredError();
         }
         // original 变体 410 = 原图已删（图片阶段 1）→ 自动降级 thumb，避免无效签名往返
@@ -92,15 +93,27 @@ export async function getSignedMediaUrlState(
           signedUrlCache.set(cacheKey, { url, expiresAt: thumb.expires_at, originalExpired: true });
           return { url, originalExpired: true };
         } catch (thumbErr) {
-          // thumb 410 = 完全过期；404 = 无缩略图（文件/语音等）→ 原图过期即不可用
-          if (thumbErr instanceof ApiError && (thumbErr.status === 410 || thumbErr.status === 404)) {
+          // 走到这里 = **original 已返回 410 original_expired**，即本媒体确已进入
+          // 阶段 1（原对象被清理）。此时 thumb 也拿不到（410 完全过期 / 404 无派生
+          // 封面）⇒ 已经没有任何可显示的对象，判「已过期」是准确的。
+          //
+          // 2026-10-29 修正：只有这条**降级分支**里的 404 才算过期；直接请求
+          // variant=thumb 收到 404（thumbnail_not_ready）属于「还没生成好」，
+          // 必须可重试，不能显示「已过期」（见下方 variant 分支）。
+          if (
+            thumbErr instanceof ApiError &&
+            (thumbErr.status === 410 || thumbErr.status === 404)
+          ) {
             throw new MediaExpiredError();
           }
           signedUrlCache.delete(cacheKey);
           throw thumbErr;
         }
       }
-      // 失败清缓存允许下次重试
+      // 404 = 派生封面尚未就绪（后端 thumbnail_not_ready）或该 kind 无封面。
+      // 2026-10-29 修正：**不等于过期** —— 旧实现把 404 当 MediaExpiredError，
+      // 导致「缩略图还没生成好」被显示成「已过期」且不给重试。这里原样抛出，
+      // 调用方按「加载失败，点击重试」处理（ResourceImage 的 failed 分支）。
       signedUrlCache.delete(cacheKey);
       throw err;
     }
@@ -117,7 +130,7 @@ export async function getSignedMediaUrlState(
  */
 export async function getSignedMediaUrl(
   mediaId: string,
-  variant?: "thumb",
+  variant?: "thumb" | "waveform",
 ): Promise<string> {
   const result = await getSignedMediaUrlState(mediaId, variant);
   return result.url;

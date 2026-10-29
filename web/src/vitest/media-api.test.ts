@@ -309,6 +309,19 @@ describe("getSignedMediaUrlState 聊天媒体两级过期降级", () => {
     await expect(getSignedMediaUrlState("exp-4", "thumb")).rejects.toBeInstanceOf(MediaExpiredError);
   });
 
+  it("thumb 变体 404（thumbnail_not_ready）→ **不是**已过期，抛普通错误", async () => {
+    // 2026-10-29 修正：旧实现把 404 与 410 一并当 MediaExpiredError，导致
+    // 「缩略图尚未生成」被显示成「已过期」。404 必须走「加载失败可重试」。
+    vi.spyOn(client, "apiRequest").mockRejectedValueOnce(
+      new client.ApiError(404, "thumbnail_not_ready"),
+    );
+    const { getSignedMediaUrlState, invalidateSignedMediaUrl, MediaExpiredError } = await import("../api/media");
+    invalidateSignedMediaUrl("exp-4b");
+    await expect(getSignedMediaUrlState("exp-4b", "thumb")).rejects.not.toBeInstanceOf(
+      MediaExpiredError,
+    );
+  });
+
   it("正常 original 签发 → { url, originalExpired: false }", async () => {
     vi.spyOn(client, "apiRequest")
       .mockResolvedValueOnce({ url: "http://minio.local/orig?sig=1", expires_at: 9999999999 });

@@ -29,6 +29,7 @@ class _FakePlatform implements AylaMediaCachePlatform {
     required this.targetPlatform,
     required this.exeDir,
     required this.supportDir,
+    this.externalDir,
   });
 
   @override
@@ -36,6 +37,13 @@ class _FakePlatform implements AylaMediaCachePlatform {
 
   final String exeDir;
   final String supportDir;
+
+  /// Android 外部存储目录（null = 该平台没有 / 取不到）。
+  final String? externalDir;
+
+  @override
+  Future<Directory?> externalStorageDirectory() async =>
+      externalDir == null ? null : Directory(externalDir!);
 
   @override
   String get executablePath {
@@ -150,7 +158,50 @@ void main() {
       expect(await appSo.exists(), isTrue, reason: '探测不得动 data/ 里的运行时资源');
     });
 
-    test('Android/iOS：根 = <ApplicationSupport>/media-cache（不探测、不降级）', () async {
+    test('Android：根 = <外部存储>/Android/data/<pkg>/files/media-cache', () async {
+      // 用户拍板 2026-10-29：「手机端保存在经典的 Android/data」。
+      final String external =
+          '${tempRoot.path}/external/Android/data/top.trise.ayla/files'
+              .replaceAll('\\', '/');
+      await Directory(external).create(recursive: true);
+      final _FakePlatform androidWithExternal = _FakePlatform(
+        targetPlatform: TargetPlatform.android,
+        exeDir: '/nonexistent',
+        supportDir: '${tempRoot.path}/support-android2',
+        externalDir: external,
+      );
+
+      final AylaMediaCacheLayout layout =
+          await aylaResolveMediaCacheLayout(platform: androidWithExternal);
+
+      expect(
+        layout.root.replaceAll('\\', '/'),
+        '$external/media-cache',
+      );
+      expect(layout.source, AylaMediaCacheRootSource.androidExternalData);
+      expect(layout.degraded, isFalse);
+      expect(await Directory(layout.root).exists(), isTrue);
+    });
+
+    test('Android：外部目录形态不是 /Android/data/ → 降级 ApplicationSupport', () async {
+      final String weird =
+          '${tempRoot.path}/weird-mount/appfiles'.replaceAll('\\', '/');
+      await Directory(weird).create(recursive: true);
+      final _FakePlatform p = _FakePlatform(
+        targetPlatform: TargetPlatform.android,
+        exeDir: '/nonexistent',
+        supportDir: '${tempRoot.path}/support-android3',
+        externalDir: weird,
+      );
+
+      final AylaMediaCacheLayout layout =
+          await aylaResolveMediaCacheLayout(platform: p);
+
+      expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
+      expect(layout.degraded, isTrue);
+    });
+
+    test('Android：拿不到外部存储 → 降级 ApplicationSupport（degraded）', () async {
       final AylaMediaCacheLayout layout =
           await aylaResolveMediaCacheLayout(platform: mobilePlatform);
 
@@ -159,8 +210,25 @@ void main() {
         '${mobilePlatform.supportDir}/media-cache'.replaceAll('\\', '/'),
       );
       expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
+      expect(layout.degraded, isTrue, reason: 'Android 拿不到 Android/data 必须标记降级');
+      expect(await Directory(layout.root).exists(), isTrue);
+    });
+
+    test('iOS：根 = <ApplicationSupport>/media-cache（不探测、不降级）', () async {
+      final _FakePlatform ios = _FakePlatform(
+        targetPlatform: TargetPlatform.iOS,
+        exeDir: '/nonexistent',
+        supportDir: '${tempRoot.path}/support-ios',
+      );
+      final AylaMediaCacheLayout layout =
+          await aylaResolveMediaCacheLayout(platform: ios);
+
+      expect(
+        layout.root.replaceAll('\\', '/'),
+        '${ios.supportDir}/media-cache'.replaceAll('\\', '/'),
+      );
+      expect(layout.source, AylaMediaCacheRootSource.applicationSupport);
       expect(layout.degraded, isFalse);
-      // 目录已在探测阶段/后续使用前建好
       expect(await Directory(layout.root).exists(), isTrue);
     });
 

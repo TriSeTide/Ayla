@@ -237,6 +237,9 @@ void main() {
         ),
       ));
       await tester.pump(); // 触发 _sign
+      // 2026-10-29：_sign 现在**先查本地漫游缓存**（命中则根本不签名，省流），
+      // 多了一跳异步 ⇒ 失败态要多泵一帧才稳定。
+      await tester.pump();
       await tester.pump();
       // MediaSigner 未注入 → 异常 → failed 态
       expect(find.text('视频加载失败，点击重试'), findsOneWidget);
@@ -251,11 +254,13 @@ void main() {
       ));
       await tester.pump();
       await tester.pump();
+      await tester.pump(); // 同上：本地缓存查询多吃一帧
       expect(find.text('视频加载失败，点击重试'), findsOneWidget);
       // 点重试 → 重新签发。注意：未注入 client 时 `_sign()` **同步抛错**
       // （无 await 点），loading 帧不会渲染——这是刻意的 fail-fast，
       // 故这里断言「重试后仍为失败态且提示保留」，而非中间 loading 帧。
       await tester.tap(find.text('视频加载失败，点击重试'));
+      await tester.pump();
       await tester.pump();
       await tester.pump();
       expect(find.text('视频加载失败，点击重试'), findsOneWidget,

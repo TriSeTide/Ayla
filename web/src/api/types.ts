@@ -200,6 +200,14 @@ export interface MediaDescriptor {
   thumbnail: string | null;
   /** 相对路径 /api/v1/media/{id}/waveform（无波形则 null） */
   waveform: string | null;
+  /**
+   * 原对象是否已删（图片阶段 1 / 视频阶段 1 → 只剩缩略图/海报帧）。
+   * 2026-10-29 新增：客户端据此直接按缩略图渲染 + 「原图已过期」角标，
+   * **不白跑一次 :sign**。
+   */
+  original_expired?: boolean;
+  /** 是否已完全过期（所有对象已删 → 直接显示占位，连 :sign 都不用发）。 */
+  expired?: boolean;
   /** ISO 时间 */
   created_at: string;
 }
