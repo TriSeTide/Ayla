@@ -44,7 +44,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../theme/tokens.dart';
-import 'live_mini_player.dart' show AylaLiveMiniPlayer, kLiveMiniHeight, kLiveMiniWidth;
+import 'live_mini_player.dart'
+    show
+        AylaLiveMiniPlayer,
+        kLiveCloseInset,
+        kLiveDetachedMiniDefaultWidth,
+        kLiveMiniHeight,
+        kLiveMiniWidth;
 
 /// 宿主窗口 ↔ 第二引擎的私有通道（`live_window.cpp` 的
 /// `AylaLiveWindowHost::CreateChannel` 逐字一致；**不是**给主引擎用的那条）。
@@ -219,6 +225,7 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
         statusText: _status,
         onOpenRoom: () => unawaited(_channel.activateMain()),
         onClose: () => unawaited(_channel.close()),
+        onHitRectChanged: (Rect r) => unawaited(_channel.setHitRect(r)),
       ),
     );
   }
@@ -229,7 +236,7 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
 /// 视口用 [kAylaDetachedMiniViewport] 覆写 ⇒ 组件默认落点 (10,10)，
 /// 168×94 的卡片 + 外侧键位正好落在 [kAylaDetachedMiniWindowWidth] ×
 /// [kAylaDetachedMiniWindowHeight] 的宿主窗口内。
-class AylaDetachedMiniPlayerHost extends StatelessWidget {
+class AylaDetachedMiniPlayerHost extends StatefulWidget {
   const AylaDetachedMiniPlayerHost({
     super.key,
     this.videoView,
@@ -237,6 +244,7 @@ class AylaDetachedMiniPlayerHost extends StatelessWidget {
     this.statusText,
     this.onOpenRoom,
     this.onClose,
+    this.onHitRectChanged,
   });
 
   /// 视频画面（`media_kit` 的 `Video`）。
@@ -251,15 +259,130 @@ class AylaDetachedMiniPlayerHost extends StatelessWidget {
   /// 点小窗主体 = 回主窗口。
   final VoidCallback? onOpenRoom;
 
+  /// 小窗矩形变化（视口逻辑坐标）。宿主据此切换窗口的点击穿透。
+  final ValueChanged<Rect>? onHitRectChanged;
+
   /// 关闭键 = 关掉独立小窗（会话本身不销毁）。
   final VoidCallback? onClose;
 
   @override
+  State<AylaDetachedMiniPlayerHost> createState() =>
+      _AylaDetachedMiniPlayerHostState();
+}
+
+class _AylaDetachedMiniPlayerHostState
+    extends State<AylaDetachedMiniPlayerHost> {
+  final GlobalKey _cardKey = GlobalKey();
+  final GlobalKey _closeKey = GlobalKey();
+  Rect? _lastRect;
+
+  /// 量出小窗的**真实**屏幕矩形并上报（宿主据此切换点击穿透）。
+  ///
+  /// 用 `RenderBox` 而不是自己算位置：小窗可以被拖到任意位置，
+  /// 位置真值只有渲染树知道。
+  void _scheduleReport() {
+    void report() {
+      if (!mounted) return;
+      final Rect? rect = _clickableRect();
+      if (rect == null || rect == _lastRect) return;
+      _lastRect = rect;
+      widget.onHitRectChanged?.call(rect);
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => report());
+
+    // ⚠️ The card moves/resizes INSIDE the widget (`setState` in
+    // AylaLiveMiniPlayer), so this host does NOT rebuild while the user drags or
+    // scroll-zooms. Reporting only from build() therefore leaves the native side
+    // with a stale rect, and its click-through timer keeps treating the live
+    // card as empty space: after a drag the window becomes unclickable
+    // (cannot zoom, cannot click through to the room, cannot close).
+    //
+    // Poll the geometry on a short frame-driven loop instead - a handful of
+    // cheap measurements, and it stops as soon as the rect settles.
+    _pumpUntilStable(6);
+  }
+
+  /// Re-measures the card for [frames] consecutive frames after a change.
+  int _pumpGeneration = 0;
+
+  /// 卡片在视口里的**可点击矩形**（= 卡片本体 + 关闭键外溢）。
+  ///
+  /// 关闭键画在卡片外侧（`Positioned(top/right: -kLiveCloseInset)` + `Clip.none`），
+  /// 不含在 RenderBox.size 里；窗口外浮层按这个矩形裁 region，不补外溢就会把
+  /// 按钮裁掉（用户实报「关闭键只剩左下四分之一能点」）。
+  Rect? _clickableRect() {
+    final RenderObject? ro = _cardKey.currentContext?.findRenderObject();
+    if (ro is! RenderBox || !ro.hasSize) return null;
+    final Rect card = ro.localToGlobal(Offset.zero) & ro.size;
+
+    // Measure the close button DIRECTLY instead of adding a guessed offset.
+    // It is painted outside the card (Clip.none), so the card's RenderBox does
+    // not contain it, and every hand-derived overhang was a few pixels short
+    // (the button kept getting clipped on its right edge).
+
+    final RenderObject? cr = _closeKey.currentContext?.findRenderObject();
+    if (cr is RenderBox && cr.hasSize) {
+      final Rect close = cr.localToGlobal(Offset.zero) & cr.size;
+      final Rect merged = card.expandToInclude(close);
+      return merged;
+    }
+    // Fallback: the widget is not mounted yet, use the documented overhang.
+    return Rect.fromLTRB(
+      card.left,
+      card.top - kLiveCloseInset,
+      card.right + kLiveCloseInset,
+      card.bottom,
+    );
+  }
+
+  void _pumpUntilStable(int frames) {
+    final int generation = ++_pumpGeneration;
+    void step(Duration _) {
+      if (!mounted || generation != _pumpGeneration) return;
+      final Rect? rect = _clickableRect();
+      if (rect != null && rect != _lastRect) {
+        _lastRect = rect;
+        widget.onHitRectChanged?.call(rect);
+      }
+      if (frames > 1) {
+        WidgetsBinding.instance.addPostFrameCallback(step);
+        WidgetsBinding.instance.scheduleFrame();
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback(step);
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 首帧后开始连续测量（原先是放在 build 里触发，去掉 Builder 之后搬到这）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scheduleReport();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant AylaDetachedMiniPlayerHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scheduleReport();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final String? status = statusText;
+    final String? status = widget.statusText;
+    // The host window now covers the WHOLE work area (so the card can be
+    // dragged to any screen position). Report the real viewport, not the card's
+    // design size: `AylaLiveMiniPlayer` clamps its drag to the viewport, and with
+    // the old 194x120 value it could only move inside the card itself.
+    final Size realViewport = MediaQuery.sizeOf(context);
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
-        size: kAylaDetachedMiniViewport,
+        size: realViewport,
         padding: EdgeInsets.zero,
         viewPadding: EdgeInsets.zero,
         viewInsets: EdgeInsets.zero,
@@ -269,12 +392,25 @@ class AylaDetachedMiniPlayerHost extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.none,
           children: <Widget>[
-            // 现有组件原样（返回 Positioned ⇒ 必须是 Stack 的直接子级）。
+            // ⚠️ 必须是 Stack 的**直接**子级。
+            //
+            // `AylaLiveMiniPlayer` 返回的是 `Positioned`，只有当它是 Stack 的直接
+            // 子级时才真正参与 Stack 的定位；之前这里套了一层 `Builder(...)`，
+            // Positioned 就变成了 Builder 的子节点 —— 它的 offset 不再相对 Stack，
+            // 卡片的实际渲染框与量出来的矩形不一致，而关闭键（画在卡片外侧）
+            // 因此被裁掉一截、只有一部分能点。
             AylaLiveMiniPlayer(
-              videoView: videoView,
-              channelTitle: title,
-              onOpenRoom: onOpenRoom,
-              onClose: onClose,
+              cardKey: _cardKey,
+              closeButtonKey: _closeKey,
+              // 浮层场景用更大的默认尺寸（168×94 在桌面上偏小）。
+              initialSize: const Size(
+                kLiveDetachedMiniDefaultWidth,
+                kLiveDetachedMiniDefaultWidth * 9 / 16,
+              ),
+              videoView: widget.videoView,
+              channelTitle: widget.title,
+              onOpenRoom: widget.onOpenRoom,
+              onClose: widget.onClose,
             ),
             if (status != null)
               // 状态文案只是**叠加**在画面之上的一行字，不改小窗本体。
@@ -326,6 +462,30 @@ class AylaDetachedWindowChannel {
     }
   }
 
+  /// 上报小窗本体在视口里的**精确矩形**（逻辑 px）。
+  ///
+  /// 宿主窗口铺满整个工作区（为了能拖到任意位置），因此窗口本身必须对
+  /// 鼠标透明 —— 只有小窗所在的那块要接住点击。原生按这个矩形做
+  /// `WS_EX_TRANSPARENT` 切换，和悬浮球是同一套机制。
+  Future<void> setHitRect(Rect? rect) async {
+    try {
+      await _channel.invokeMethod<bool>('setHitRect', <String, Object?>{
+        'rect': rect == null
+            ? null
+            : <String, Object?>{
+                'left': rect.left,
+                'top': rect.top,
+                'right': rect.right,
+                'bottom': rect.bottom,
+              },
+      });
+    } on MissingPluginException {
+      // 宿主未实现（画布 / 单测）：静默。
+    } on PlatformException {
+      // 同上。
+    }
+  }
+
   /// 关闭窗口（不产生关闭回调：Dart 侧已经知道是它自己关的）。
   Future<void> close() async {
     try {
@@ -349,7 +509,10 @@ class AylaDetachedWindowChannel {
   }
 
   /// 点了悬浮球（宿主把 (kind, sourceRoute) 转给主引擎；本窗口不关闭）。
-  Future<void> ballTap({required String kind, required String sourceRoute}) async {
+  Future<void> ballTap({
+    required String kind,
+    required String sourceRoute,
+  }) async {
     try {
       await _channel.invokeMethod<bool>('ballTap', <String, Object?>{
         'kind': kind,

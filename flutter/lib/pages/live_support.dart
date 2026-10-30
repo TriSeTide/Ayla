@@ -752,7 +752,15 @@ class AylaLiveRoomSession extends ChangeNotifier {
   Future<void> clearDetachedPresentation() async {
     _detached = false;
     await _detachedPresenter.setSessionActive(false);
-    await _detachedPresenter.close();
+    // ⚠️ 不再关闭「窗口外直播小窗」。
+    //
+    // 用户定稿：「应用内退出直播间不应该退出小窗」—— 小窗要一直播到用户
+    // 亲自点它自己的关闭键为止。这里曾经无条件 close()，于是每次退出直播间
+    // 都会连带把小窗关掉（会话 stop ⇒ clearDetachedPresentation ⇒ close）。
+    //
+    // 关闭时机只剩两个：用户点小窗的关闭键（原生回 `liveWindowClosed`），
+    // 或宿主进程结束。Android PiP 仍由系统自己收起，[setSessionActive] 已
+    // 撤销自动进 PiP 的武装，不需要额外关窗。
     // 与 [closeDetachedPresentation] 同理：原生不会回 `onLiveWindowClosed`，
     // 若不复位「已挂起」标志，下一次 [enterDetachedPresentation] 会带着错的基线
     // 去判断「要不要恢复」，恢复路径就永远不被触发（会话重启后第一次脱离即黑屏）。

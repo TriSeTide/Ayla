@@ -36,6 +36,25 @@ constexpr const wchar_t kBallWindowClass[] = L"AYLA_DETACHED_BALL_WINDOW";
 constexpr int kLiveWindowWidth = 194;
 constexpr int kLiveWindowHeight = 120;
 
+/// Height of the INVISIBLE drag band along the top edge of the live mini window
+/// (logical px). Small on purpose: the hosted widget's close button sits in that
+/// area, so the band is carved around it (see WM_NCHITTEST).
+constexpr double kLiveDragBandLogicalPx = 6.0;
+
+/// The hosted widget's close button: 24x24, positioned at top/right = -10
+/// (live_mini_player.dart), so inside the client area it covers y in [0, 14).
+constexpr double kLiveCloseSize = 24.0;
+constexpr double kLiveCloseInset = 10.0;
+
+/// Width of the draggable frame around the live mini window (logical px).
+constexpr double kLiveDragEdgeLogicalPx = 8.0;
+
+/// Padding added to the mini window's window REGION, in logical px.
+///
+/// Must cover the close button, which the widget draws OUTSIDE the card
+/// (top/right = -10) plus its 24px box, otherwise SetWindowRgn clips it away.
+constexpr double kLiveRegionPadLogicalPx = 28.0;
+
 // ---- Floating-ball window geometry (Flutter LOGICAL pixels) ----------------
 //
 // The window hosts the UNCHANGED AylaSessionActivityIndicator, and that widget
@@ -286,7 +305,10 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   }
   const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   const double scale = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
-  const int window_width = static_cast<int>(logical_width * scale);
+  int window_width = static_cast<int>(logical_width * scale);
+  // The Flutter view reports its size in LOGICAL px; when the window is enlarged
+  // to the whole work area this must follow, or the widget lays out against a
+  // stale width and the card ends up positioned off-screen.
   logical_width_ = logical_width;
 
   int window_x = 0;
@@ -298,15 +320,33 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
     window_height = work_area.bottom - work_area.top;
     window_x = work_area.right - window_width;
     window_y = work_area.top;
+    if (kind_ != AylaOverlayKind::kActivityBall) {
+      // The live mini window needs the FULL work area (both axes): its card must
+      // be draggable to any screen position, which requires the canvas to be the
+      // whole screen. The ball only needs the height (it is pinned right).
+      int full_width = work_area.right - work_area.left;
+      window_x = work_area.left;
+      window_width = full_width;
+      // The widget lays out against the CLIENT area, so report the enlarged
+      // width in logical px (otherwise the card is positioned for a 194px
+      // canvas and never appears where the user drops it).
+      logical_width_ = static_cast<int>(static_cast<double>(full_width) / scale);
+    }
   } else {
     window_height = static_cast<int>(logical_height * scale);
   }
 
-  if (align_top_right) {
-    // The floating ball lives at the top-right corner of the work area. Its
-    // right edge coincides with the work-area right edge because the widget
-    // itself keeps a 24px inset and slides the last 24px right when collapsed
-    // (that is what "the handle sticks to the screen edge" means in-app).
+  // ⚠️ When the window already fills the work area, the position is fixed and
+  // must NOT be recomputed: the "anchor to bottom-right with a margin" formula
+  // below turns into a NEGATIVE offset for a full-width window
+  // (work_area.right - full_width - margin = -margin), which pushed the window
+  // to (-24,-24). That shifted the client origin and every rect Flutter measured
+  // (localToGlobal) no longer matched SetWindowRgn's client space - the close
+  // button ended up outside the window region and was clipped.
+  if (fill_work_area_height) {
+    // Already positioned at the work-area origin above; leave it alone.
+  } else if (align_top_right) {
+    // The floating ball lives at the top-right corner of the work area.
     window_x = work_area.right - window_width;
     window_y = work_area.top;
   } else {
@@ -322,9 +362,25 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   // WS_EX_TOOLWINDOW    : keeps it out of Alt-Tab and the taskbar.
   // WS_EX_NOACTIVATE    : (ball only) clicking the overlay must not steal focus
   //                       from whatever the user is typing in.
+  // WS_EX_LAYERED is for the BALL only (see the branch below).
+  //
+  // The live mini window deliberately does NOT use it: layered windows are
+  // composited through a DWM redirection surface, and for a 400px-wide VIDEO
+  // that path visibly softens the picture (user report: "the mini window looks
+  // blurrier than the main window"). The mini window instead gets its
+  // click-through from SetWindowRgn (ApplyMiniWindowRegion), which needs no
+  // layering at all.
   DWORD ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
   if (kind_ == AylaOverlayKind::kActivityBall) {
-    ex_style |= WS_EX_NOACTIVATE;
+    // WS_EX_LAYERED is set ONCE here and never toggled again.
+    //
+    // It is required for WS_EX_TRANSPARENT to actually reroute input to other
+    // processes, and adding/removing it at runtime makes DWM rebuild this
+    // window's redirection surface - which showed up as the overlay flashing
+    // black whenever the click-through state flipped (maximizing a browser is
+    // the most reliable way to force that rebuild). Keeping it permanently and
+    // toggling only WS_EX_TRANSPARENT avoids the rebuild entirely.
+    ex_style |= WS_EX_NOACTIVATE | WS_EX_LAYERED;
   }
   window_handle_ = ::CreateWindowExW(
       ex_style, class_name, L"", WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
@@ -343,6 +399,12 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   if (transparent) {
     EnablePerPixelTransparency(window_handle_);
   }
+  // A layered window is INVISIBLE until either SetLayeredWindowAttributes or
+  // UpdateLayeredWindow is called. Full opacity keeps the visuals identical; the
+  // flag itself only exists so WS_EX_TRANSPARENT can reroute input.
+  //
+  // Applies to both kinds now: the mini window needs the same click-through.
+  ::SetLayeredWindowAttributes(window_handle_, 0, 255, LWA_ALPHA);
 
   // ---- second engine -------------------------------------------------------
   flutter::DartProject project(L"data");
@@ -390,12 +452,14 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   ::ShowWindow(window_handle_, SW_SHOWNOACTIVATE);
   controller_->ForceRedraw();
 
-  if (kind_ == AylaOverlayKind::kActivityBall) {
-    // The window is click-through until Flutter reports the button rects; poll
-    // the cursor so a transparent window can become interactive again (while
-    // transparent it receives no mouse messages at all).
-    ::SetTimer(window_handle_, kHitRectsTimerId, 16, nullptr);
-  }
+  // BOTH overlay kinds cover far more than their content (the ball is a
+  // full-height strip, the mini window the whole work area), so both need the
+  // cursor polled against the rects Flutter measured.
+  //
+  // The timer is mandatory, not a refinement: while the window is click-through
+  // it receives no mouse messages at all, so nothing inside it can notice the
+  // cursor coming back.
+  ::SetTimer(window_handle_, kHitRectsTimerId, 16, nullptr);
 
 
   // NOTE: playback / the first payload are handed over by the "ready" call
@@ -429,9 +493,19 @@ bool AylaLiveWindowHost::Show(const std::string& channel_id,
           << "\",\"title\":\"" << JsonEscape(title) << "\",\"channelId\":\""
           << JsonEscape(channel_id) << "\"}";
 
+  // The window must COVER THE WHOLE WORK AREA, not just the card:
+  // the mini player has to be draggable to any screen position, and the only
+  // way to do that without moving the window itself is to give it a
+  // screen-sized canvas and let the widget position the card inside it
+  // (same design as the floating ball).
+  //
+  // Click-through then works exactly like the ball: Flutter reports the card's
+  // visible rect, the native timer flips WS_EX_TRANSPARENT when the cursor is
+  // outside it.
   return CreateWindowAndEngine(payload.str(), kLiveWindowWidth,
                                kLiveWindowHeight, /*transparent=*/true,
-                               /*align_top_right=*/false);
+                               /*align_top_right=*/false,
+                               /*fill_work_area_height=*/true);
 }
 
 bool AylaLiveWindowHost::ShowBall(const std::string& payload_json) {
@@ -543,6 +617,41 @@ void AylaLiveWindowHost::CreateChannel() {
           // side already knows, so no close callback.
           result->Success(flutter::EncodableValue(true));
           RequestClose();
+          return;
+        }
+        if (method == "setHitRect") {
+          // The live mini window also covers the whole work area (so the card can
+          // be dragged anywhere), so only the card itself may accept the mouse.
+          // Flutter measures it with RenderBox and sends the exact rect here;
+          // the same 16 ms timer used by the ball evaluates it.
+          ball_hit_rects_.clear();
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args != nullptr) {
+            auto it = args->find(flutter::EncodableValue("rect"));
+            if (it != args->end()) {
+              const auto* m = std::get_if<flutter::EncodableMap>(&it->second);
+              if (m != nullptr) {
+                auto num = [m](const char* key) -> double {
+                  auto f = m->find(flutter::EncodableValue(key));
+                  if (f == m->end()) return 0.0;
+                  if (const auto* d = std::get_if<double>(&f->second)) return *d;
+                  if (const auto* i = std::get_if<int32_t>(&f->second))
+                    return static_cast<double>(*i);
+                  if (const auto* l = std::get_if<int64_t>(&f->second))
+                    return static_cast<double>(*l);
+                  return 0.0;
+                };
+                RECT r = {};
+                r.left = static_cast<LONG>(num("left"));
+                r.top = static_cast<LONG>(num("top"));
+                r.right = static_cast<LONG>(num("right"));
+                r.bottom = static_cast<LONG>(num("bottom"));
+                ball_hit_rects_.push_back(r);
+              }
+            }
+          }
+          TickHitRects();
+          result->Success(flutter::EncodableValue(true));
           return;
         }
         if (method == "activateMain") {
@@ -684,7 +793,10 @@ void AylaLiveWindowHost::TearDown() {
 ///     and could never notice the cursor coming back. A timer polls the cursor
 ///     against the rects Flutter measured (see TickHitRects).
 void AylaLiveWindowHost::SetBallInteractive(bool interactive) {
-  if (window_handle_ == nullptr || kind_ != AylaOverlayKind::kActivityBall) {
+  // Applies to BOTH overlay kinds: the ball window and the live mini window are
+  // now the same shape of problem - a window much larger than its content, where
+  // only the content must accept the mouse.
+  if (window_handle_ == nullptr) {
     return;
   }
   if (interactive == ball_interactive_) {
@@ -692,15 +804,18 @@ void AylaLiveWindowHost::SetBallInteractive(bool interactive) {
   }
   ball_interactive_ = interactive;
 
+  // ONLY WS_EX_TRANSPARENT changes here. WS_EX_LAYERED is already set at
+  // creation and must NOT be added/removed at runtime: doing so makes DWM throw
+  // away and rebuild this window's redirection surface, which is what made the
+  // overlay flash black (maximizing a browser forces that rebuild most
+  // reliably; QQ never did).
   LONG ex = ::GetWindowLong(window_handle_, GWL_EXSTYLE);
-  ex |= WS_EX_LAYERED;
   if (interactive) {
     ex &= ~WS_EX_TRANSPARENT;
   } else {
     ex |= WS_EX_TRANSPARENT;
   }
   ::SetWindowLong(window_handle_, GWL_EXSTYLE, ex);
-  ::SetLayeredWindowAttributes(window_handle_, 0, 255, LWA_ALPHA);
   ::SetWindowPos(window_handle_, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
                      SWP_FRAMECHANGED);
@@ -713,7 +828,7 @@ void AylaLiveWindowHost::SetBallInteractive(bool interactive) {
 /// messages, so there is no event to react to. 16 ms is below the perception
 /// threshold and the work is one GetCursorPos + a handful of rect comparisons.
 void AylaLiveWindowHost::TickHitRects() {
-  if (window_handle_ == nullptr || kind_ != AylaOverlayKind::kActivityBall) {
+  if (window_handle_ == nullptr) {
     return;
   }
   POINT cursor = {};
@@ -722,8 +837,8 @@ void AylaLiveWindowHost::TickHitRects() {
   }
   ::ScreenToClient(window_handle_, &cursor);
 
-  // The rects arrive in the SECOND ENGINE's logical pixels; convert the cursor
-  // to the same space (the window's client origin is where that view starts).
+  // Cursor arrives in PHYSICAL client px; the rects are LOGICAL. Divide by the
+  // window's DPI factor so both sides speak the same units (see region code).
   const UINT dpi = FlutterDesktopGetDpiForHWND(window_handle_);
   const double scale = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
   const double cx = static_cast<double>(cursor.x) / scale;
@@ -736,7 +851,59 @@ void AylaLiveWindowHost::TickHitRects() {
       break;
     }
   }
-  SetBallInteractive(over);
+
+  if (kind_ == AylaOverlayKind::kActivityBall) {
+    SetBallInteractive(over);
+    return;
+  }
+
+  // ---- Live mini window: click-through by WINDOW REGION, not by layering ----
+  //
+  // SetWindowRgn removes everything outside the card from the window entirely:
+  // those pixels are neither painted nor hit-tested, so clicks reach whatever is
+  // underneath - for any process - and the video stays perfectly sharp because
+  // the window is never composited through the layered (redirection) path.
+  if (ball_hit_rects_.empty()) {
+    return;
+  }
+  const RECT& card = ball_hit_rects_.front();
+  // NOTE: the rect arriving here ALREADY includes the close-button overhang.
+  // That overhang is applied on the Dart side (live_window_surface.dart) because
+  // the card's RenderBox does not cover the button (it is painted outside with
+  // Clip.none). Adding it again here would double it and shift the clickable
+  // area past the card.
+  // Multiply by [scale] to go from Flutter LOGICAL px to window PHYSICAL px.
+  //
+  // ⚠️ Do not "optimise" this away by comparing MediaQuery.size with GetWindowRect:
+  // MediaQuery.size is 1536x824 LOGICAL (screen 1920x1080 at 125%), while the
+  // client area is 1920x1030 PHYSICAL. They only look equal if you forget that
+  // the outer 1536 itself is the DPI-virtualised number. Dropping the factor
+  // shifts the region left/up and clips the close button - a mistake made twice.
+  //
+  // SetWindowRgn wants CLIENT coordinates, so translate by the client origin
+  // (the point where the Flutter view starts).
+  POINT origin = {0, 0};
+  ::ClientToScreen(window_handle_, &origin);
+  // Clamp to the client rect: SetWindowRgn accepts anything, but a region that
+  // extends past the window simply loses the overflow - and if the CARD does that
+  // (dragged hard against the right edge), the close button living outside the
+  // card falls off the window and becomes invisible/unclickable. Clamping keeps
+  // the region honest about what actually exists.
+  RECT client_rect = {};
+  ::GetClientRect(window_handle_, &client_rect);
+  const int left_px = std::max(0L, static_cast<LONG>(card.left * scale) - origin.x);
+  const int top_px = std::max(0L, static_cast<LONG>(card.top * scale) - origin.y);
+  const int right_px =
+      std::min(client_rect.right, static_cast<LONG>(card.right * scale) - origin.x);
+  const int bottom_px =
+      std::min(client_rect.bottom, static_cast<LONG>(card.bottom * scale) - origin.y);
+  HRGN region = ::CreateRectRgn(left_px, top_px, right_px, bottom_px);
+  if (region == nullptr) {
+    return;
+  }
+  if (::SetWindowRgn(window_handle_, region, TRUE) == 0) {
+    ::DeleteObject(region);
+  }
 }
 
 LRESULT CALLBACK AylaLiveWindowHost::WndProc(HWND window,
@@ -769,6 +936,38 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
                                           UINT message,
                                           WPARAM wparam,
                                           LPARAM lparam) {
+  // ⚠️ WM_NCHITTEST must be answered BEFORE the engine sees it.
+  //
+  // The Flutter view is a CHILD window covering the whole client area, so it
+  // receives the hit test first and answers HTCLIENT; forwarding to the engine
+  // here therefore swallows our HTCAPTION and the window can never be dragged
+  // (measured: the window rect never changed at all).
+  if (message == WM_NCHITTEST && kind_ != AylaOverlayKind::kActivityBall) {
+    POINT hp = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    ::ScreenToClient(window, &hp);
+    RECT hc = {};
+    ::GetWindowRect(window, &hc);
+    RECT crect = {};
+    ::GetClientRect(window, &crect);
+    const UINT hdpi = FlutterDesktopGetDpiForHWND(window);
+    const double hs = hdpi > 0 ? (static_cast<double>(hdpi) / 96.0) : 1.0;
+    const LONG close_left =
+        crect.right - static_cast<LONG>((kLiveCloseSize + kLiveCloseInset) * hs);
+    const LONG close_bottom =
+        static_cast<LONG>((kLiveCloseSize - kLiveCloseInset) * hs);
+    const bool on_close = hp.x >= close_left && hp.y < close_bottom;
+    const LONG grip = static_cast<LONG>(kLiveDragBandLogicalPx * hs);
+    const LONG edge_r = static_cast<LONG>(kLiveDragEdgeLogicalPx * hs);
+    const bool in_grip = hp.y >= 0 && hp.y < grip;
+    const bool in_margin = hp.x < edge_r ||
+                           hp.x > crect.right - edge_r ||
+                           hp.y > crect.bottom - edge_r;
+    if (!on_close && (in_grip || in_margin)) {
+      return HTCAPTION;
+    }
+    return HTCLIENT;
+  }
+
   // Every top-level window that hosts a Flutter view MUST forward its messages
   // to the engine, otherwise keyboard / IME / lifecycle are dead in it.
   if (controller_) {
@@ -782,7 +981,57 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
   switch (message) {
     case WM_NCHITTEST: {
       if (kind_ != AylaOverlayKind::kActivityBall) {
-        break;  // the live window is fully opaque and fully clickable.
+        // ---- Live mini window: draggable anywhere on screen ----------------
+        //
+        // It is a WS_POPUP with no title bar, so without this the user cannot
+        // move it at all. The trick that keeps every existing interaction
+        // working: only a thin INVISIBLE band along the top edge reports
+        // HTCAPTION (which makes Windows run its native modal drag loop); the
+        // rest of the client area stays HTCLIENT so Flutter still receives
+        // clicks. The close button lives in that band, so its 24x24 box is
+        // carved back out.
+        POINT p = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ::ScreenToClient(window, &p);
+        RECT client_rect = {};
+        ::GetClientRect(window, &client_rect);
+        const UINT dpi_live = FlutterDesktopGetDpiForHWND(window);
+        const double sc =
+            dpi_live > 0 ? (static_cast<double>(dpi_live) / 96.0) : 1.0;
+
+        // Close button: 24x24 at the card's top-right OUTSIDE corner
+        // (live_mini_player.dart: Positioned(top: -10, right: -10)), so inside
+        // the client area it occupies roughly [right-14, right] x [0, 14]. Keep
+        // a margin so it stays comfortably clickable.
+        const LONG close_left =
+            client_rect.right - static_cast<LONG>((kLiveCloseSize + kLiveCloseInset) * sc);
+        const LONG close_bottom =
+            static_cast<LONG>((kLiveCloseSize - kLiveCloseInset) * sc);
+        const bool on_close_button = p.x >= close_left && p.y < close_bottom;
+
+        // The grip must be GENEROUS: with a thin band the native modal drag
+        // loop ends the moment the cursor leaves it, so the window only moves
+        // a few pixels (user report: "dragged, but a tiny box limits it").
+        //
+        // Instead the WHOLE card is a drag surface EXCEPT the close button. A
+        // plain click still reaches Flutter: HTCAPTION starts the modal move
+        // loop, which only moves the window once the mouse actually moves, and
+        // on release without movement Windows delivers a normal click. The
+        // close button keeps HTCLIENT so it stays clickable.
+        if (!on_close_button) {
+          // Still let the video area's own gestures work: report HTCLIENT for
+          // the inner region so clicking the card ("go back to the room") is
+          // preserved, and use HTCAPTION only along the top grip band plus the
+          // left/right/bottom margins - i.e. the frame, not the content.
+          const LONG grip = static_cast<LONG>(kLiveDragBandLogicalPx * sc);
+          const LONG edge_r = static_cast<LONG>(kLiveDragEdgeLogicalPx * sc);
+          const bool in_grip = p.y >= 0 && p.y < grip;
+          const bool in_margin = p.x < edge_r || p.x > client_rect.right - edge_r ||
+                                 p.y > client_rect.bottom - edge_r;
+          if (in_grip || in_margin) {
+            return HTCAPTION;
+          }
+        }
+        break;  // everything else is Flutter's.
       }
       // The floating-ball window covers the WHOLE work area but only a small
       // group (44px balls + 28px handle, ~132 x 44 logical px at the right
@@ -830,12 +1079,42 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
       return in_band ? HTCLIENT : HTTRANSPARENT;
     }
     case WM_TIMER: {
-      if (wparam == kHitRectsTimerId &&
-          kind_ == AylaOverlayKind::kActivityBall) {
+      if (wparam == kHitRectsTimerId) {
         TickHitRects();
+        // NOTE: a timer-driven ForceRedraw() "heartbeat" was tried here and
+        // has been REMOVED. It did not fix the black flash, and it is suspected
+        // of destabilising the GPU driver (a blue screen happened while it was
+        // active). Do not reintroduce a timer-driven redraw.
       }
       return 0;
     }
+    case WM_WINDOWPOSCHANGED:
+    case WM_SHOWWINDOW: {
+
+      // Repaint defence for the reported "overlay flashes black" issue.
+      //
+      // Observed facts: only maximizing a BROWSER reproduces it (QQ does not),
+      // it recovers on its own after a moment, and taking a screenshot makes it
+      // recover instantly. That points at the DWM redirection surface being
+      // recreated empty and Flutter being idle (it only submits frames when
+      // something animates).
+      //
+      // This is EVENT-driven (only when this window actually moves/changes
+      // visibility), so it costs nothing while idle. User feedback: it made the
+      // recovery noticeably faster, but did NOT eliminate the flash - the root
+      // cause is still open.
+      //
+      // ⚠️ Do NOT extend this into a timer-driven heartbeat: that was tried and
+      // removed. It did not help and coincided with a GPU-driver blue screen.
+      if (controller_) {
+        controller_->ForceRedraw();
+      }
+      break;
+    }
+    case WM_ERASEBKGND:
+      // The window is either fully covered by the Flutter view or entirely
+      // transparent; letting GDI erase it would just flicker.
+      return 1;
     case WM_SIZE: {
       if (controller_ && controller_->view() != nullptr) {
         RECT rect = {};

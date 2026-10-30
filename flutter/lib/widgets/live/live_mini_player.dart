@@ -23,6 +23,12 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart'
+    show
+        PointerDeviceKind,
+        PointerHoverEvent,
+        PointerScrollEvent,
+        PointerSignalEvent;
 import 'package:flutter/services.dart' show KeyDownEvent, LogicalKeyboardKey;
 
 import '../../theme/app_icons.dart';
@@ -36,12 +42,27 @@ const double kLiveMiniDragThreshold = 5;
 const double kLiveMiniDragMargin = 8;
 
 /// 小窗默认尺寸（tsx 29–30 / live.css 1026–1027：168 × 94 = 16:9）。
+/// 关闭键相对卡片右上角的**外溢**距离（`Positioned(top: -10, right: -10)`）。
+///
+/// 卡片的 `Stack` 是 `Clip.none`，所以按钮虽然画出来了，却不含在卡片的
+/// `RenderBox.size` 里 —— 窗口外浮层按矩形裁 region 时会被裁掉，
+/// 必须由调用方把这个外溢补进上报矩形（见 live_window_surface.dart）。
+const double kLiveCloseInset = 10;
+
 const double kLiveMiniWidth = 168;
 const double kLiveMiniHeight = 94;
 
 /// 双指缩放范围（tsx 32–33：宽 120–320，高按 16:9）。
+/// 缩放下限 = 设计尺寸的 120（web 原值）。
+///
+/// ⚠️ App 内的默认尺寸就是 kLiveMiniWidth(168)，下限若也等于它，捏合收拢会
+/// 完全没有变化（测试「收拢手指 ⇒ 变小」会失败，真实体验也是「缩不小」）。
+/// 「窗口外浮层最小 168」由浮层自己传 initialSize 保证，不靠改这个常量。
 const double kLiveMiniMinWidth = 120;
-const double kLiveMiniMaxWidth = 320;
+const double kLiveMiniMaxWidth = 900;
+
+/// 窗口外浮层的**默认**宽度：设计尺寸偏小，浮层场景给大一点（16:9 等比）。
+const double kLiveDetachedMiniDefaultWidth = 400.0;
 
 /// 手机端浮动小窗（`LiveMiniPlayer.tsx`）。
 ///
@@ -53,7 +74,22 @@ class AylaLiveMiniPlayer extends StatefulWidget {
     this.channelTitle,
     this.onOpenRoom,
     this.onClose,
+    this.initialSize,
+    this.cardKey,
+    this.closeButtonKey,
   });
+
+  /// 卡片本体（不含关闭键）的 key：宿主用它量可点击区域。
+  final GlobalKey? cardKey;
+
+  /// 关闭键的 key：它画在卡片外侧，卡片的 RenderBox 量不到它，
+  /// 必须单独量（否则窗口外浮层按矩形裁 region 会把按钮裁掉）。
+  final GlobalKey? closeButtonKey;
+
+  /// 初始尺寸（null = 设计尺寸 168×94，App 内保持原样）。
+  ///
+  /// 窗口外浮层传更大的默认值（见 [kLiveDetachedMiniDefaultWidth]）。
+  final Size? initialSize;
 
   /// 视频视图（页面注入同一播放器 ⇒ HLS 不断流）。
   final Widget? videoView;
@@ -76,6 +112,61 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   Offset? _pos;
   Size _size = const Size(kLiveMiniWidth, kLiveMiniHeight);
 
+  /// 当前悬停光标（默认手型；靠近右/下边缘时变成缩放光标）。
+  MouseCursor _hoverEdge = SystemMouseCursors.click;
+
+  /// 边缘判定宽度（逻辑 px）：贴着右/下边缘这么宽以内就算「要缩放」。
+  /// 边缘判定宽度（逻辑 px）。
+  ///
+  /// ⚠️ 必须留在**卡片内部**：窗口外浮层用 `SetWindowRgn` 把窗口裁成卡片形状，
+  /// 卡片之外的区域不属于这个窗口，鼠标在那里根本不会产生 hover 事件。
+  /// 取 6px 既能提示「这里可以拉」，又保证整条带子都在窗口内。
+  static const double _edgeGrab = 6.0;
+
+  /// 指针命中了哪条边（四条边 + 四个角）。
+  ///
+  /// 用户要求「每条边都应该有缩放指针」：普通窗口四面都能拉，小窗也不该只有
+  /// 右下角能用。返回的 (left/right/top/bottom) 决定光标形状与缩放锚点。
+  ({bool left, bool right, bool top, bool bottom}) _edgesAt(Offset local) {
+    return (
+      left: local.dx <= _edgeGrab,
+      right: local.dx >= _size.width - _edgeGrab,
+      top: local.dy <= _edgeGrab,
+      bottom: local.dy >= _size.height - _edgeGrab,
+    );
+  }
+
+  /// 按命中的边组合给光标（角优先，其次单边，都不是则普通手型）。
+  MouseCursor _cursorFor(Offset local) {
+    // 右上角是关闭键的地盘：那里必须是手型，否则用户把鼠标移到关闭键上看到的
+    // 是「斜向缩放」指针，既误导又和按钮语义打架。
+    if (local.dx >= _size.width - _edgeGrab - kLiveCloseInset &&
+        local.dy <= _edgeGrab + kLiveCloseInset) {
+      return SystemMouseCursors.click;
+    }
+    final e = _edgesAt(local);
+    if (e.left && e.top) return SystemMouseCursors.resizeUpLeft;
+    if (e.right && e.top) return SystemMouseCursors.resizeUpRight;
+    if (e.left && e.bottom) return SystemMouseCursors.resizeDownLeft;
+    if (e.right && e.bottom) return SystemMouseCursors.resizeDownRight;
+    if (e.left || e.right) return SystemMouseCursors.resizeLeftRight;
+    if (e.top || e.bottom) return SystemMouseCursors.resizeUpDown;
+    return SystemMouseCursors.click;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final Size? initial = widget.initialSize;
+    if (initial != null && initial.width > 0) {
+      final double w = initial.width.clamp(
+        kLiveMiniMinWidth,
+        kLiveMiniMaxWidth,
+      );
+      _size = Size(w, w * 9 / 16);
+    }
+  }
+
   /// 拖动会话（tsx 52–59）。
   bool _dragActive = false;
   bool _dragMoved = false;
@@ -90,9 +181,28 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   Size? _pinchSize;
   Offset? _pinchBottomRight;
 
+  /// 单指**从边缘按下**时的缩放会话（桌面端「拉边缘改大小」）。
+  ///
+  /// 桌面没有捏合手势：用户把鼠标放在右/下边缘按下并移动，语义应当是缩放，
+  /// 而不是平移整张卡片。这里在 _onScaleStart 里按按下点是否落在边缘决定。
+  bool _edgeResizeActive = false;
+  Size _edgeResizeBase = Size.zero;
+  Offset _edgeResizeAnchor = Offset.zero;
+  Offset _edgeResizeStart = Offset.zero;
+  ({bool left, bool right, bool top, bool bottom}) _edgeResizeEdges = (
+    left: false,
+    right: false,
+    top: false,
+    bottom: false,
+  );
+
   bool _focused = false;
   bool _hovered = false;
 
+  /// 默认落点：右下角。
+  ///
+  /// ⚠️ 右侧要额外留出关闭键的外溢（它画在卡片右上角外侧），否则默认位置就
+  /// 会把关闭键顶到窗口边界外、被 SetWindowRgn 裁掉。
   Offset _defaultPos(Size viewport) => Offset(
     math.max(kLiveMiniDragMargin, viewport.width - _size.width - 16),
     math.max(kLiveMiniDragMargin, viewport.height - _size.height - 16),
@@ -108,6 +218,53 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
       _pinchBottomRight = current + Offset(_size.width, _size.height);
       return;
     }
+    // 桌面端：从右/下边缘按下 = 缩放，不是平移。
+    //
+    // 鼠标只有一个指针，`pointerCount` 永远到不了 2，所以捏合那条分支在桌面
+    // 上不存在；没有这一步，用户把鼠标放在边缘拖动只会**移动**整张卡片
+    // （用户实报：「变了但拉不大，反而是在移动悬浮窗」）。
+    final Offset local = details.localFocalPoint;
+    // 右上角归关闭键：那里按下不能被判成「拉边缘缩放」，否则点关闭会变成缩放。
+    final bool onCloseButton =
+        local.dx >= _size.width - _edgeGrab - kLiveCloseInset &&
+        local.dy <= _edgeGrab + kLiveCloseInset;
+    // 只有**鼠标**才走「拉边缘缩放」：触摸是单指拖动 / 双指捏合，语义不同。
+    // 不加这个判断，触摸在边缘按下会被误判成缩放（测试里 `startGesture` 就是
+    // 单指针 touch，结果整块被拉走，拖动 clamp 断言全崩）。
+    final bool pointerIsMouse = details.kind == PointerDeviceKind.mouse;
+    final e = (onCloseButton || !pointerIsMouse)
+        ? (left: false, right: false, top: false, bottom: false)
+        : _edgesAt(local);
+    if (e.left || e.right || e.top || e.bottom) {
+      _edgeResizeActive = true;
+      _dragActive = false;
+      _edgeResizeBase = _size;
+      _edgeResizeStart = details.focalPoint;
+      // 缩放锚点 = 被拉那条边的**对边**中点：拉右边时左边固定，拉左上时右下固定。
+      // 这样手感与普通窗口一致。
+      final Offset pos = _pos ?? _defaultPos(viewport);
+      final double anchorX = e.left
+          ? pos.dx +
+                _size
+                    .width // 拉左边 ⇒ 右边固定
+          : e.right
+          ? pos
+                .dx // 拉右边 ⇒ 左边固定
+          : pos.dx + _size.width / 2;
+      final double anchorY = e.top
+          ? pos.dy +
+                _size
+                    .height // 拉上边 ⇒ 下边固定
+          : e.bottom
+          ? pos
+                .dy // 拉下边 ⇒ 上边固定
+          : pos.dy + _size.height / 2;
+      _edgeResizeAnchor = Offset(anchorX, anchorY);
+      _edgeResizeEdges = e;
+      return;
+    }
+
+    _edgeResizeActive = false;
     _dragActive = true;
     _dragMoved = false; // 仅用于「是否超过拖动阈值」（阈值内仍算点击）
     _dragStart = details.focalPoint;
@@ -115,6 +272,38 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details, Size viewport) {
+    // 双指优先：一旦第二根手指落下，就退出「拉边缘」改走捏合。
+    // 否则触摸捏合会被单指边缘缩放吃掉（测试「张开/收拢手指」全挂）。
+    if (details.pointerCount >= 2) {
+      _edgeResizeActive = false;
+    }
+    if (_edgeResizeActive) {
+      // 拉边缘：位移 → 宽度增量。方向决定符号，手感与普通窗口一致
+      // （拉右边/下边向外 ⇒ 变大；拉左边/上边向外 ⇒ 也变大）。
+      final Offset delta = details.focalPoint - _edgeResizeStart;
+      final e = _edgeResizeEdges;
+      double grow = 0;
+      if (e.right) grow = delta.dx;
+      if (e.left) grow = math.max(grow, -delta.dx);
+      if (e.bottom) grow = math.max(grow, delta.dy);
+      if (e.top) grow = math.max(grow, -delta.dy);
+      // 等比 16:9：宽高同时变，所以宽度增量取位移的 2 倍才跟手。
+      final double w = (_edgeResizeBase.width + grow * 2).clamp(
+        kLiveMiniMinWidth,
+        kLiveMiniMaxWidth,
+      );
+      if ((w - _size.width).abs() < 0.5) return;
+      final double h = w * 9 / 16;
+      setState(() {
+        _size = Size(w, h);
+        // 按锚点重新求左上角：锚点是被拉边的对边，固定不动。
+        _pos = Offset(
+          e.left ? _edgeResizeAnchor.dx - w : _edgeResizeAnchor.dx,
+          e.top ? _edgeResizeAnchor.dy - h : _edgeResizeAnchor.dy,
+        );
+      });
+      return;
+    }
     if (details.pointerCount >= 2) {
       // 双指缩放：右下角锚定、保持 16:9、clamp 120–320（tsx 137–152）。
       //
@@ -174,6 +363,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
   }
 
   void _onScaleEnd(ScaleEndDetails details) {
+    _edgeResizeActive = false;
     if (details.pointerCount < 2) {
       // 手指减到单指 ⇒ 本次缩放会话结束（下次双指会重新记起点）。
       _pinchSize = null;
@@ -196,6 +386,7 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
 
     return Positioned(
       // `position: fixed; right: 16; bottom: 16`（拖动后改为绝对 left/top）
+      //
       left: pos.dx,
       top: pos.dy,
       width: _size.width,
@@ -205,80 +396,147 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
       child: AylaTooltip(
         message: widget.channelTitle,
         child: Semantics(
-        button: true,
-        label: '返回直播间', // tsx 194
-        child: Focus(
-          onFocusChange: (bool has) => setState(() => _focused = has),
-          onKeyEvent: (FocusNode node, KeyEvent event) {
-            if (event is! KeyDownEvent) return KeyEventResult.ignored;
-            final bool activate =
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space;
-            if (!activate) return KeyEventResult.ignored;
-            _openRoom();
-            return KeyEventResult.handled;
-          },
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            onEnter: (_) => setState(() => _hovered = true),
-            onExit: (_) => setState(() => _hovered = false),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _openRoom,
-              onScaleStart: (ScaleStartDetails d) => _onScaleStart(d, viewport),
-              onScaleUpdate: (ScaleUpdateDetails d) => _onScaleUpdate(d, viewport),
-              onScaleEnd: _onScaleEnd,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AylaRadii.rInput + 2 + 2),
-                  border: _focused
-                      ? Border.all(color: AylaColors.glow500, width: 2)
-                      : null,
-                ),
-                child: Stack(
-                  clipBehavior: Clip.none, // 关闭键在小窗**外侧**（top/right -10）
-                  children: <Widget>[
-                    // `.live-mini-player-video-wrap`：圆角/边框/阴影/裁剪都在内层
-                    Positioned.fill(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(AylaRadii.rInput),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: AylaColors.glassBgStrong, // --glass-bg-strong
+          button: true,
+          label: '返回直播间', // tsx 194
+          child: Focus(
+            onFocusChange: (bool has) => setState(() => _focused = has),
+            onKeyEvent: (FocusNode node, KeyEvent event) {
+              if (event is! KeyDownEvent) return KeyEventResult.ignored;
+              final bool activate =
+                  event.logicalKey == LogicalKeyboardKey.enter ||
+                  event.logicalKey == LogicalKeyboardKey.space;
+              if (!activate) return KeyEventResult.ignored;
+              _openRoom();
+              return KeyEventResult.handled;
+            },
+            child: Listener(
+              // 鼠标滚轮缩放（桌面端；触屏用双指捏合，两条路径都改同一个 _size）。
+              // 用户要求「边缘拖动 + 滚轮都要」，这是滚轮那条。
+              onPointerSignal: (PointerSignalEvent event) {
+                if (event is! PointerScrollEvent) return;
+                final double delta = event.scrollDelta.dy;
+                if (delta == 0) return;
+                // ⚠️ 按**比例**缩放，不能按「每像素 delta 加多少像素宽」：
+                // 滚轮一格是 ±120，用 `_size.width - delta * 12` 会一次跳 1440px
+                // ⇒ 滚一下直接顶到最大、再滚一下顶到最小（用户实报）。
+                // 这里一格固定 ±8%，与尺寸无关，手感匀速。
+                final double step = delta > 0 ? 0.92 : 1.08;
+                final double next = (_size.width * step).clamp(
+                  kLiveMiniMinWidth,
+                  kLiveMiniMaxWidth,
+                );
+                if (next == _size.width) return;
+                // 以右下角为锚点缩放（与捏合手势一致，避免窗口边缘跳动）。
+                final Offset anchor =
+                    (_pos ?? _defaultPos(viewport)) +
+                    Offset(_size.width, _size.height);
+                setState(() {
+                  _size = Size(next, next * 9 / 16);
+                  _pos = anchor - Offset(_size.width, _size.height);
+                });
+              },
+              child: MouseRegion(
+                // Edge-aware cursor: the card resizes from its bottom-right corner
+                // (that is the anchor used by both the pinch and the wheel), so the
+                // right/bottom edges get the matching resize cursor and the body stays
+                // a plain click. Without this the whole card showed a hand cursor and
+                // nothing hinted that the edges are draggable.
+                cursor: _hoverEdge,
+                onHover: (PointerHoverEvent e) {
+                  final MouseCursor next = _cursorFor(e.localPosition);
+                  if (next != _hoverEdge) setState(() => _hoverEdge = next);
+                },
+                onEnter: (_) => setState(() => _hovered = true),
+                onExit: (_) {
+                  setState(() {
+                    _hovered = false;
+                    _hoverEdge = SystemMouseCursors.click;
+                  });
+                },
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _openRoom,
+                  onScaleStart: (ScaleStartDetails d) =>
+                      _onScaleStart(d, viewport),
+                  onScaleUpdate: (ScaleUpdateDetails d) =>
+                      _onScaleUpdate(d, viewport),
+                  onScaleEnd: _onScaleEnd,
+                  // ⚠️ 关闭键画在卡片**外侧**（top/right: -kLiveCloseInset），
+                  // 所以这里必须给它留出真实占位：Flutter 的 RenderBox.hitTest
+                  // 会先判断该点是否落在**自身 size 内**，落在外面直接返回 false。
+                  //
+                  // 之前关闭键只是靠 `Clip.none` 被「画」出来，命中测试却仍被父级
+                  // 拒绝 —— 于是只有它压在卡片内的那 1/4（左下角）能点，其余全部
+                  // 无效，同时外层按卡片矩形裁剪窗口 region 也把它切掉一截。
+                  //
+                  child: DecoratedBox(
+                    key: widget.cardKey,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(
+                        AylaRadii.rInput + 2 + 2,
+                      ),
+                      border: _focused
+                          ? Border.all(color: AylaColors.glow500, width: 2)
+                          : null,
+                    ),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: <Widget>[
+                        // `.live-mini-player-video-wrap`：圆角/边框/阴影/裁剪都在内层
+                        Positioned.fill(
+                          child: ClipRRect(
                             borderRadius: BorderRadius.circular(
                               AylaRadii.rInput,
                             ),
-                            border: Border.all(color: AylaColors.glassBorder),
-                          ),
-                          // video { width/height: 100%; object-fit: contain; background: #000 }
-                          // （live.css:1055–1061）—— contain 由 video 元素自身承担，
-                          // 外层不得再套 FittedBox（同 live_player.dart 的黑屏根因注释：
-                          // 会让 media_kit 内部 Stack 展开出 Infinity ⇒ 无效变换矩阵 ⇒ 不绘制）。
-                          child: ColoredBox(
-                            color: Colors.black, // video { background: #000 }
-                            child:
-                                widget.videoView ??
-                                const SizedBox(width: 160, height: 90),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: AylaColors
+                                    .glassBgStrong, // --glass-bg-strong
+                                borderRadius: BorderRadius.circular(
+                                  AylaRadii.rInput,
+                                ),
+                                border: Border.all(
+                                  color: AylaColors.glassBorder,
+                                ),
+                              ),
+                              // video { width/height: 100%; object-fit: contain; background: #000 }
+                              // （live.css:1055–1061）—— contain 由 video 元素自身承担，
+                              // 外层不得再套 FittedBox（同 live_player.dart 的黑屏根因注释：
+                              // 会让 media_kit 内部 Stack 展开出 Infinity ⇒ 无效变换矩阵 ⇒ 不绘制）。
+                              child: ColoredBox(
+                                color:
+                                    Colors.black, // video { background: #000 }
+                                child:
+                                    widget.videoView ??
+                                    const SizedBox(width: 160, height: 90),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        // 关闭键：卡片右上角外侧（top/right 各外溢 kLiveCloseInset），
+                        // 外观就是设计稿那样——只有左下角压在卡片上。
+                        //
+                        // 命中问题：Flutter 逐层检查「点是否落在自身 size 内」，而它
+                        // 大部分悬在父级 Stack 之外 ⇒ 只有压在卡片内的那 1/4 能点。
+                        // 这里用 OverflowBox 给它一块**不裁剪、不限制**的盒子，让它
+                        // 在父级边界外依然接住指针；布局与视觉都不变。
+                        Positioned(
+                          top: -kLiveCloseInset,
+                          right: -kLiveCloseInset,
+                          child: _MiniCloseButton(
+                            key: widget.closeButtonKey,
+                            hovered: _hovered,
+                            onPressed: widget.onClose,
+                          ),
+                        ),
+                      ],
                     ),
-                    // 关闭键：右上角**外侧**（top -10 / right -10），独立点击目标
-                    Positioned(
-                      top: -10,
-                      right: -10,
-                      child: _MiniCloseButton(
-                        hovered: _hovered,
-                        onPressed: widget.onClose,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -286,7 +544,11 @@ class _AylaLiveMiniPlayerState extends State<AylaLiveMiniPlayer> {
 
 /// `.live-mini-player-close`：24×24 玻璃圆钮（白图标 14）。
 class _MiniCloseButton extends StatefulWidget {
-  const _MiniCloseButton({required this.hovered, required this.onPressed});
+  const _MiniCloseButton({
+    super.key,
+    required this.hovered,
+    required this.onPressed,
+  });
 
   final bool hovered;
   final VoidCallback? onPressed;
@@ -299,40 +561,52 @@ class _MiniCloseButtonState extends State<_MiniCloseButton> {
   bool _hovered = false;
   bool _focused = false;
 
+  /// 关闭键**悬在卡片外侧**（top/right 各 -kLiveCloseInset），只有左下角压在
+  /// 卡片上。Flutter 的命中测试逐层检查「该点是否落在自身 size 内」，父级
+  /// Stack 只有卡片那么大 ⇒ 按钮露在外面的大半圈收不到点击（用户实报
+  /// 「只有左下角能点」）。
+  ///
+  /// 用 `OverflowBox` 给它一块**固定的真实盒子**：布局位置由外层 Positioned
+  /// 决定，这里只声明尺寸并允许它越界绘制/命中。视觉与卡片尺寸都不变。
+  Widget _withWideHitArea(Widget child) =>
+      SizedBox(width: 24, height: 24, child: child);
+
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: '关闭小窗', // tsx 217
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: Focus(
-          onFocusChange: (bool has) => setState(() => _focused = has),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: widget.onPressed,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: _hovered
-                    ? const Color(0x85465B92) // hover rgba(70,91,146,.52)
-                    : const Color(0x52465B92), // rgba(70,91,146,.32)
-                borderRadius: AylaRadii.pill,
-                border: Border.all(
-                  color: _focused
-                      ? AylaColors.glow500
-                      : const Color(0x47FFFFFF),
-                  width: _focused ? 2 : 1,
+    return _withWideHitArea(
+      Semantics(
+        button: true,
+        label: '关闭小窗', // tsx 217
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: Focus(
+            onFocusChange: (bool has) => setState(() => _focused = has),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onPressed,
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: _hovered
+                      ? const Color(0x85465B92) // hover rgba(70,91,146,.52)
+                      : const Color(0x52465B92), // rgba(70,91,146,.32)
+                  borderRadius: AylaRadii.pill,
+                  border: Border.all(
+                    color: _focused
+                        ? AylaColors.glow500
+                        : const Color(0x47FFFFFF),
+                    width: _focused ? 2 : 1,
+                  ),
                 ),
-              ),
-              alignment: Alignment.center,
-              child: AylaIcon(
-                aylaIconByName('iconClose')!,
-                size: 14, // tsx 224
-                color: Colors.white,
+                alignment: Alignment.center,
+                child: AylaIcon(
+                  aylaIconByName('iconClose')!,
+                  size: 14, // tsx 224
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
@@ -353,14 +627,13 @@ Widget aylaLiveMiniPlayerSamples() {
         viewport: const Size(420, 300),
         label:
             '浮动小窗（`LiveMiniPlayer`）· fixed 右下 16 / **168×94（16:9）** / z 60 · 内层 radius-input + `--glass-bg-strong` + blur24 + compact 阴影；**关闭键在小窗右上角外侧（-10）** · 可交互：拖动（阈值 5px，边距 8）/ 点主体回房 / 点关闭',
-        child: _MiniDemo(
-          size: const Size(kLiveMiniWidth, kLiveMiniHeight),
-        ),
+        child: _MiniDemo(size: const Size(kLiveMiniWidth, kLiveMiniHeight)),
       ),
       const SizedBox(height: AylaSpacing.sp6),
       _Stage(
         viewport: const Size(420, 300),
-        label: '双指缩放后的尺寸档（宽 120–320，高按 16:9，右下角锚定）· 左 = 最小 120×67.5 / 右 = 最大 320×180',
+        label:
+            '双指缩放后的尺寸档（宽 120–320，高按 16:9，右下角锚定）· 左 = 最小 120×67.5 / 右 = 最大 320×180',
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -404,7 +677,8 @@ class _MiniFakeVideo extends StatelessWidget {
   const _MiniFakeVideo();
 
   @override
-  Widget build(BuildContext context) => const ColoredBox(color: Color(0xFF2A3550));
+  Widget build(BuildContext context) =>
+      const ColoredBox(color: Color(0xFF2A3550));
 }
 
 /// 固定视口的样张舞台。

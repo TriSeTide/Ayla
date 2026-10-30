@@ -228,6 +228,7 @@ class AylaLiveWindowHost {
   bool ball_interactive_ = true;
 
 
+
   /// Pending "user clicked the ball" (see TakePendingBallTap).
   bool ball_tap_pending_ = false;
   std::string ball_tap_kind_;

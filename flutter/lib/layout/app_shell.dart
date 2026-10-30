@@ -965,13 +965,14 @@ class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
     if (_busy) return;
     final AylaLiveMiniPlayerState? mini = widget.mini;
     if (mini == null) {
-      if (!_open) return;
-      _busy = true;
-      _open = false;
-      _openedChannelId = null;
-      _openedUrl = null;
-      await aylaCloseDetachedLive();
-      _busy = false;
+      // ⚠️ 会话结束（用户退出直播间 / 返回列表）**不关闭**窗口外小窗。
+      //
+      // 用户定稿：「应用内退出直播间不应该退出小窗」，小窗要一直播到用户
+      // 亲自点它的关闭键为止。这里曾经无条件 `aylaCloseDetachedLive()`，
+      // 于是每次退出直播间小窗就跟着消失。
+      //
+      // 真正的关闭时机只有两个：用户在**小窗里**点关闭键（原生发
+      // `liveWindowClosed` 事件，见 initState 的订阅）、或宿主窗口被销毁。
       return;
     }
     // 平台不支持（iOS / Web / 原生未实现）：明确降级 —— 应用内不再有浮层，
