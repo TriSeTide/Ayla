@@ -28,12 +28,8 @@
 ///    播放地址由主窗口在打开时一次性传入（`openLiveWindow.playUrl`，已归一 + 带鉴权 query）。
 /// 2. 不再有「脱离应用」键：它**本身已经**脱离应用，再给一个同样的键是重复语义
 ///    （用户 2026-10-31 明确要求删掉那个键，组件侧已不再有该参数）。
-/// 3. 拖动/双指缩放在独立窗口里只能移动**窗口内**的位置（改不了宿主窗口几何）——
-///    这是组件的真实语义，保持不变。
-///    2026-11-01 起「移动整个窗口」与「拖边缘改大小」由**原生侧**提供
-///    （`live_window.cpp`：自绘图拖动 + WS_THICKFRAME 边带缩放），
-///    组件源码一行未改：窗口拖动走 WM_NCHITTEST/WM_MOUSEMOVE，客户区缩放由
-///    [AylaDetachedMiniPlayerHost] 用 FittedBox 把设计尺寸铺满真实客户区。
+/// 3. 拖动/双指缩放在独立窗口里只能移动**窗口内**的位置（改不了宿主窗口几何），
+///    这是已知限制：组件原样复用优先于为它加一个「脱离态专用」分支。
 ///
 /// ## 公开面
 /// `AylaDetachedLiveWindowApp`（第二引擎的 runApp 目标）· `AylaDetachedWindowChannel`
@@ -111,9 +107,6 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
   /// 已经在播的地址（入口参数与宿主 `play` 指令会各来一次，必须幂等）。
   String? _openedUrl;
 
-  /// 宿主报上来的**真实客户区**逻辑尺寸（用户拖边缘缩放后变化；null = 设计尺寸）。
-  Size? _clientSize;
-
   @override
   void initState() {
     super.initState();
@@ -123,19 +116,11 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
     }
     // 宿主在收到 `ready` 之后才会把播放地址发过来：这样 `play` 不可能早于
     // handler 注册（平台→Dart 的消息在 handler 未挂时会被丢弃）。
-    // 两条宿主指令必须在**同一处**注册：一个 MethodChannel 只有一个 handler。
-    _channel.setHostCallbacks(
-      onPlay: (String url, String title) {
-        if (_disposed) return;
-        setState(() => _title = title.isEmpty ? _title : title);
-        unawaited(_open(url));
-      },
-      onClientSize: (Size size) {
-        if (_disposed) return;
-        if (_clientSize == size) return;
-        setState(() => _clientSize = size);
-      },
-    );
+    _channel.setHandler((String url, String title) {
+      if (_disposed) return;
+      setState(() => _title = title.isEmpty ? _title : title);
+      unawaited(_open(url));
+    });
     final String? initialUrl = widget.initialUrl;
     if (initialUrl != null && initialUrl.isNotEmpty) {
       // 兜底路径：不等宿主指令，直接起播（重复的 `play` 由 `_open` 的
@@ -232,9 +217,6 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
         videoView: video,
         title: _title,
         statusText: _status,
-        // 用户拖边缘改了窗口大小 ⇒ 表面跟着等比铺满（否则多出来的客户区是透明的，
-        // 又会挡住下层点击，见 AylaDetachedMiniPlayerHost 的注释）。
-        clientSize: _clientSize,
         onOpenRoom: () => unawaited(_channel.activateMain()),
         onClose: () => unawaited(_channel.close()),
       ),
@@ -247,18 +229,6 @@ class _AylaDetachedLiveWindowAppState extends State<AylaDetachedLiveWindowApp> {
 /// 视口用 [kAylaDetachedMiniViewport] 覆写 ⇒ 组件默认落点 (10,10)，
 /// 168×94 的卡片 + 外侧键位正好落在 [kAylaDetachedMiniWindowWidth] ×
 /// [kAylaDetachedMiniWindowHeight] 的宿主窗口内。
-///
-/// ## 客户区缩放（2026-11-01 用户实报「小窗要能用鼠标拖边缘调大小」）
-/// 宿主窗口现在是**可缩放**的（`live_window.cpp` 用 `WS_POPUP | WS_THICKFRAME`，
-/// 原生 WM_NCHITTEST 给出 HTLEFT/HTTOP/... 五档边带 + WM_SIZING 锁 194:120 比例）。
-/// 窗口变大时，客户区也跟着变大 —— 如果这里仍按固定 194×120 布局，
-/// 多出来的区域是**透明的**，鼠标点上去不会穿到下层，于是又变成用户投诉的
-/// 「背景一大片点不了」。
-///
-/// 所以整块表面用 [FittedBox] + [BoxFit.fill] 均匀铺满真实客户区：
-/// **组件源码一行不动**（它仍按设计尺寸 194×120 布局），只是被整体缩放。
-/// 因为原生侧锁定了客户区比例 == 设计比例，这个缩放在 x/y 上是**等比的**，
-/// 卡片不会被拉扁，视频也仍然走 `BoxFit.contain` 自己等比。
 class AylaDetachedMiniPlayerHost extends StatelessWidget {
   const AylaDetachedMiniPlayerHost({
     super.key,
@@ -267,7 +237,6 @@ class AylaDetachedMiniPlayerHost extends StatelessWidget {
     this.statusText,
     this.onOpenRoom,
     this.onClose,
-    this.clientSize,
   });
 
   /// 视频画面（`media_kit` 的 `Video`）。
@@ -285,17 +254,10 @@ class AylaDetachedMiniPlayerHost extends StatelessWidget {
   /// 关闭键 = 关掉独立小窗（会话本身不销毁）。
   final VoidCallback? onClose;
 
-  /// 当前**真实客户区**的逻辑尺寸（原生 WM_SIZE 报上来的）。
-  ///
-  /// null / 与设计尺寸相同 ⇒ 不缩放（画布样张、单测、窗口未被拖动缩放时）。
-  /// 这里**不做 16:9 兜底计算**：锁比例是原生侧的职责（WM_SIZING），
-  /// Dart 只负责把设计尺寸铺满实际客户区，避免两处各算一遍比例而漂移。
-  final Size? clientSize;
-
   @override
   Widget build(BuildContext context) {
     final String? status = statusText;
-    final Widget surface = MediaQuery(
+    return MediaQuery(
       data: MediaQuery.of(context).copyWith(
         size: kAylaDetachedMiniViewport,
         padding: EdgeInsets.zero,
@@ -337,19 +299,6 @@ class AylaDetachedMiniPlayerHost extends StatelessWidget {
               ),
           ],
         ),
-      ),
-    );
-
-    final Size? target = clientSize;
-    if (target == null || target.isEmpty) return surface;
-    return FittedBox(
-      // fill = 铺满（配合原生锁定的等比客户区 ⇒ 实际是等比放大，不拉伸）。
-      fit: BoxFit.fill,
-      alignment: Alignment.topLeft,
-      child: SizedBox(
-        width: kAylaDetachedMiniWindowWidth,
-        height: kAylaDetachedMiniWindowHeight,
-        child: surface,
       ),
     );
   }
@@ -413,37 +362,9 @@ class AylaDetachedWindowChannel {
     }
   }
 
-  /// 注册宿主 → 本引擎的「客户区尺寸」回调（原生 `live_window.cpp` 的 WM_SIZE 发出）。
-  ///
-  /// 与 [setHandler] **共用同一个 MethodCallHandler**（一个通道只有一个 handler，
-  /// 后来的会覆盖前面的）⇒ 两者必须由同一处注册，见
-  /// [setHostCallbacks]。这里保留独立的 setter 供只关心尺寸的场景使用。
-  void setClientSizeHandler(void Function(Size size) onClientSize) {
-    setHostCallbacks(onPlay: null, onClientSize: onClientSize);
-  }
-
-  /// 注册宿主 → 本引擎的全部指令回调（`play` + `clientSize`）。
-  ///
-  /// 一个 [MethodChannel] 只能挂一个 `setMethodCallHandler`，所以两条指令必须
-  /// 在**同一处**分发；分开注册会互相覆盖（后者生效，前者静默失效）。
-  void setHostCallbacks({
-    void Function(String url, String title)? onPlay,
-    void Function(Size size)? onClientSize,
-  }) {
+  /// 注册宿主 → 本引擎的指令回调（`play` / `ballPayload`）。
+  void setHandler(void Function(String url, String title) onPlay) {
     _channel.setMethodCallHandler((MethodCall call) async {
-      if (call.method == 'clientSize') {
-        final Object? raw = call.arguments;
-        if (raw is Map) {
-          final Object? w = raw['width'];
-          final Object? h = raw['height'];
-          final double? width = w is num ? w.toDouble() : null;
-          final double? height = h is num ? h.toDouble() : null;
-          if (width != null && height != null && width > 0 && height > 0) {
-            onClientSize?.call(Size(width, height));
-          }
-        }
-        return null;
-      }
       if (call.method != 'play') return null;
       final Object? raw = call.arguments;
       String url = '';
@@ -454,14 +375,9 @@ class AylaDetachedWindowChannel {
         if (u is String) url = u;
         if (t is String) title = t;
       }
-      onPlay?.call(url, title);
+      onPlay(url, title);
       return null;
     });
-  }
-
-  /// 注册宿主 → 本引擎的指令回调（`play` 专用；等价于 [setHostCallbacks]）。
-  void setHandler(void Function(String url, String title) onPlay) {
-    setHostCallbacks(onPlay: onPlay);
   }
 }
 

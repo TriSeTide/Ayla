@@ -51,141 +51,58 @@ constexpr int kLiveWindowHeight = 120;
 // and a little breathing room for the hover glow (scale 1.08) => 176 wide.
 constexpr int kBallWindowWidth = 176;
 
-/// Slack above the ball group inside the ball-sized window (hover glow at scale
-/// 1.08 plus the 2px focus ring). The widget positions the group with
-/// `Positioned(top: 0)` inside this window, so the window's top edge is the
-/// group's top edge minus this pad.
-constexpr int kBallWindowPadTop = 16;
-
-// Height: the group is 44 tall plus its shadow on BOTH sides.
-// _kActivityShadow is BoxShadow(blurRadius: 12, offset.dy: 2), so the painted
-// extent reaches ~14px past the circle; the old fixed 132 left only 8px of
-// slack above the group and clipped the top of the glow (the truncated look).
-constexpr int kBallWindowMinHeight = 44 + 2 * kBallWindowPadTop;
-
-/// Design resting position of the ball group: `top: 80px` (shell.css:462) in the
-/// wide档 the overlay always uses. Only used for the window's INITIAL placement;
-/// after that Dart reports the real top on every drag (setBallGroupTop).
-constexpr int kBallDefaultGroupTop = 80;
-
-// ---- Ball geometry constants are gone on purpose ---------------------------
+// The ball window is as TALL AS THE WHOLE WORK AREA on purpose.
 //
-// Earlier revisions kept the group size plus hover-glow/focus-ring padding as
-// explicit constants and fed them to SetWindowRgn / WM_NCHITTEST / a colour key.
-// None of that exists any more: the window IS the group, so there is nothing to
-// compute and no hit test to fake.
+// Why not a snug 176x132 box (the first attempt):
+//   * the widget positions itself with `Positioned(top: <px>)` and CLAMPS the
+//     drag to `[8, viewportHeight - 44 - 8]`. In a 132-tall viewport that is
+//     `[8, 80]` - and on a 176-wide viewport the widget is in its NARROW档
+//     (breakpoint is 768) whose default top is 104, i.e. ALREADY outside the
+//     clamp range and 16px past the window's bottom edge => the balls get
+//     clipped and dragging does nothing at all.
+//   * moving the WINDOW on drag does not fix it either: the widget still
+//     applies the same clamp to its own coordinate, so the window offset and
+//     the in-window offset double-count and the ball runs away from the
+//     cursor.
+// With a full-height window the widget's own coordinate space IS the screen's
+// vertical space: the clamp becomes `[8, workAreaHeight - 52]`, dragging is a
+// plain 1:1 follow, and nothing ever leaves the window.
+//
+// The cost is a large transparent window, which is why WM_NCHITTEST below is
+// load-bearing: every pixel that is not the ball/handle group is reported as
+// HTTRANSPARENT so clicks reach the app underneath.
+constexpr int kBallWindowMinHeight = 132;
+
+// ---- Hit-test geometry of the ball group (Flutter LOGICAL pixels) ----------
+//
+// The group is 132 x 44 (two 44px balls + 28px handle + two 8px gaps, no detach
+// key). The hit band is that rectangle plus a little tolerance for the hover
+// glow (scale 1.08 => ~3.5px) and the focus ring (2px outline + 2px offset),
+// rounded up generously - a too-small band makes the ball feel "sticky".
+constexpr double kBallGroupWidth = 132.0;
+constexpr double kBallGroupHeight = 44.0;
+
+// Individual pieces of the group, used for the EXACT (circle/pill) hit test in
+// TickBallHit. Keep in sync with session_activity.dart:
+//   ballSize = 44, toggleWidth = 28, gap = AylaSpacing.sp2 = 8.
+constexpr double kBallSizePx = 44.0;
+constexpr double kToggleWidthPx = 28.0;
+constexpr double kBallGapPx = 8.0;
+constexpr double kBallHitTestPadTop = 12.0;
+constexpr double kBallHitTestPadBottom = 12.0;
+constexpr double kBallHitTestPadLeft = 12.0;
+
+/// `.session-activity-group { right: 24px }` (shell.css:461) in the wide档 the
+/// overlay always uses (see hostViewportWidth on the Dart side).
+constexpr double kBallRightInset = 24.0;
+
+/// Timer that polls the cursor against the rects Flutter measured.
+/// 16 ms is below the perception threshold; the work is one GetCursorPos plus a
+/// few rect comparisons.
+constexpr UINT_PTR kHitRectsTimerId = 0xA71C;
 
 /// Distance from the work-area right/bottom edge.
 constexpr int kLiveWindowMargin = 24;
-
-// ---- Live mini window: native drag / edge resize (2026-11-01 user request) --
-//
-// «希望改成能拖动到任意位置的小窗，并且鼠标放在小窗边缘可以调节小窗大小»
-//
-// Both are handed to the OS instead of the Dart side on purpose: AylaLiveMiniPlayer
-// is an EXISTING component the user forbade rewriting, and a WS_POPUP window has
-// no non-client area for the user to grab, so the window procedure fakes one
-// (WM_NCHITTEST -> HTCAPTION / HTLEFT / ...). Sizing therefore goes through the
-// normal modal resize loop, which also gives the user the standard resize cursors.
-//
-// The window is created with the "resizable popup" recipe:
-//     WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN | WS_CLIPSIBLINGS
-// WS_THICKFRAME on a WS_POPUP window adds the resize frame WITHOUT any caption or
-// menu bar. WS_CAPTION (== WS_BORDER | WS_DLGFRAME) is deliberately NOT requested
-// - it is what would draw a title bar.
-constexpr DWORD kResizablePopupStyle = static_cast<DWORD>(
-    WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-
-/// Logical (unscaled) size of the client area the Flutter view was built for; the
-/// "minimum" of the resize band is enforced as "never smaller than this", which
-/// keeps the hosted widget's layout at exactly the size it was designed for.
-constexpr int kLiveWindowLogicalWidth = 194;   // == kLiveWindowWidth
-constexpr int kLiveWindowLogicalHeight = 120;  // == kLiveWindowHeight
-
-/// Logical thickness of the invisible resize band around the client area
-/// (task-8 asked for 6-8px; 6 is used so the band cannot swallow the 24px close
-/// button that sits OUTSIDE the card at top/right -10).
-constexpr double kResizeBorderThickness = 6.0;
-
-/// Where the live window pushes its client size on every WM_SIZE, in physical
-/// pixels (the embedded Flutter view is resized in WM_SIZE; see the note there).
-constexpr UINT kDetachedClientSizeMessage = WM_APP + 4;
-
-/// Thickness of the invisible native drag band at the top of the live mini window
-/// (logical px).
-///
-/// 6 is the smaller end of the range the task asked for (6-8) ON PURPOSE: the
-/// hosted widget draws its 24x24 close button OUTSIDE the card, at
-/// top/right = -10 (live_mini_player.dart:267-274), so inside the client area the
-/// button occupies only y in [0, 14). A thicker band would turn half of that
-/// button into "drag the window". The close button's 24x24 box (+2px of margin)
-/// is additionally carved OUT of the band in LiveHitTest(), so it stays fully
-/// clickable no matter what this value is.
-constexpr double kCaptionBandHeight = 6.0;
-
-/// Size + inset of the hosted widget's close button in LOGICAL px, used to keep it
-/// out of the caption band / out of nothing else.
-///
-/// Source of truth: lib/widgets/live/live_mini_player.dart:267-274
-/// (Positioned(top: -10, right: -10) + _MiniCloseButton's 24x24 Container).
-constexpr double kAylaMiniCloseSize = 24.0;
-constexpr double kAylaMiniCloseInset = 10.0;
-
-/// How far the mouse may move (physical px) with the button down before a press
-/// that started on HTCLIENT is re-classified as a window drag.
-constexpr int kDragThreshold = 3;
-
-/// Per-window state attached through GWLP_USERDATA (WM_NCCREATE wires |host|).
-struct LiveWindowContext {
-  AylaLiveWindowHost* host = nullptr;
-
-  /// Manual window drag (see kClientDragHit). Only used by the live window.
-  ///
-  /// dragging    = pressed inside the client area, threshold not reached yet
-  ///               (=> still a click for the Flutter surface);
-  /// drag_moving = threshold passed => the window is following the mouse.
-  bool dragging = false;
-  bool drag_moving = false;
-
-  /// Cursor position (SCREEN physical px) when the move started.
-  POINT drag_origin = {};
-
-  /// Window rect when the move started.
-  RECT drag_rect = {};
-
-  /// Number of synthetic WM_LBUTTONDOWN/WM_LBUTTONUP messages this window has
-  /// queued for itself (see the re-dispatch note in HandleMessage).
-  ///
-  /// Without it the re-dispatched pair would be swallowed AGAIN by the very same
-  /// "start of a drag" branch, which would queue yet another pair: an endless
-  /// PostMessage ping-pong that would freeze the overlay's input.
-  int pending_synthetic_clicks = 0;
-};
-
-/// Device pixels per Flutter logical pixel for |window|.
-double ScaleForWindow(HWND window) {
-  const UINT dpi = FlutterDesktopGetDpiForHWND(window);
-  return dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
-}
-
-// ---- Floating-ball window: the click-through band (shared by region + hit test) ----
-//
-// ONE definition feeds BOTH SetWindowRgn and WM_NCHITTEST so the two can never
-// disagree: whatever the region keeps is exactly what the hit test calls content.
-//
-// The widget keeps `right: 24px` (wide档, shell.css:461) and slides the group right
-// by another 24 when collapsed, so inside a 176-wide window the group occupies
-//     expanded : [176-24-132, 176-24] = [20,  152]
-//     collapsed: [176-132,    176]     = [44,  176]
-// => the union is [20, 176] and the RIGHT edge is the window edge. The widest single
-// band is therefore [W-24-132, W] - one band covering both states, which is exactly
-// what the task asked for ("region 固定为最宽的那一档，避免收起动画期间丢点击").
-//
-// The band is also padded for the hover glow (scale 1.08 => ~3.5px) and the focus
-// ring (2px outline + 2px offset), otherwise the ball feels sticky at its edges.
-//
-// The vertical extent is a parameter (not derived inside) so the region and the
-// hit test can be given the exact same numbers by their single shared caller.
 
 /// DWMWA_WINDOW_CORNER_PREFERENCE (Win11). See win32_window.cpp.
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
@@ -198,6 +115,21 @@ double ScaleForWindow(HWND window) {
 /// Name of the Dart entrypoint (must exist in lib/main.dart and be a top-level
 /// function decorated with @pragma('vm:entry-point')).
 constexpr const char* kDartEntrypoint = "aylaLiveWindowMain";
+
+// Per-window state attached through GWLP_USERDATA (WM_NCCREATE wires |host|).
+struct LiveWindowContext {
+  AylaLiveWindowHost* host = nullptr;
+
+  /// Timer id used by the floating ball to re-evaluate whether the cursor is
+  /// over a clickable part of the overlay (see AylaLiveWindowHost::TickBallHit).
+  ///
+  /// A timer is REQUIRED rather than WM_MOUSEMOVE: while WS_EX_TRANSPARENT is
+  /// set the window receives no mouse messages at all, so it could never notice
+  /// the cursor coming back in.
+  UINT_PTR hit_timer = 0;
+};
+
+
 
 /// Minimal JSON string escaping for the Dart entrypoint payload.
 ///
@@ -333,16 +265,9 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   window_class.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
   // A transparent window must NOT paint a background brush at all; the opaque
   // live window keeps the black brush so its very first frames are not garbage.
-  // The ball window must NEVER paint a background brush: its pixels are meant to
-  // be transparent (see EnablePerPixelTransparency), and a brush would put opaque
-  // black behind everything Flutter leaves unpainted — the black slab the user
-  // screenshotted. `transparent` is therefore the right predicate for the OPAQUE
-  // live window only; the ball window is forced to nullptr regardless of the flag
-  // so a future caller cannot reintroduce the black slab by passing false.
   window_class.hbrBackground =
-      (kind_ == AylaOverlayKind::kActivityBall || transparent)
-          ? nullptr
-          : static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
+      transparent ? nullptr
+                  : static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
   window_class.lpszClassName = class_name;
   // Fails with ERROR_CLASS_ALREADY_EXISTS on re-open; that is fine.
   ::RegisterClassExW(&window_class);
@@ -378,17 +303,12 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   }
 
   if (align_top_right) {
-    // The floating ball hugs the right edge of the work area (the widget keeps
-    // its own 24px inset inside the window).
+    // The floating ball lives at the top-right corner of the work area. Its
+    // right edge coincides with the work-area right edge because the widget
+    // itself keeps a 24px inset and slides the last 24px right when collapsed
+    // (that is what "the handle sticks to the screen edge" means in-app).
     window_x = work_area.right - window_width;
-    // Vertically the window must start where the widget will PAINT the group:
-    // the design default is `top: 80px` (shell.css:462) measured from the top of
-    // the work area, and the widget leaves kBallWindowPadTop of glow slack above
-    // it inside the window. Landing on work_area.top would put the group 80px too
-    // high until the first drag reports its real position.
-    window_y =
-        work_area.top + static_cast<int>(kBallDefaultGroupTop * scale) -
-        static_cast<int>(kBallWindowPadTop * scale);
+    window_y = work_area.top;
   } else {
     const int margin = static_cast<int>(kLiveWindowMargin * scale);
     window_x = work_area.right - window_width - margin;
@@ -402,36 +322,17 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   // WS_EX_TOOLWINDOW    : keeps it out of Alt-Tab and the taskbar.
   // WS_EX_NOACTIVATE    : (ball only) clicking the overlay must not steal focus
   //                       from whatever the user is typing in.
-  // NOTE: no WS_EX_LAYERED. The ball window is exactly the size of the ball
-  // group, so there is nothing to make transparent: outside it there is no
-  // window of ours, and clicks reach the app underneath by definition.
   DWORD ex_style = WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
   if (kind_ == AylaOverlayKind::kActivityBall) {
     ex_style |= WS_EX_NOACTIVATE;
   }
-  // The live mini window is created as a RESIZABLE popup (see kResizablePopupStyle):
-  // WS_THICKFRAME gives the user a real grab band for edge-resizing while WS_POPUP
-  // keeps the window free of any title bar. The floating ball stays a plain
-  // non-resizable popup - it must never look like a window at all.
-  const DWORD style = kind_ == AylaOverlayKind::kActivityBall
-                          ? static_cast<DWORD>(WS_POPUP | WS_CLIPCHILDREN |
-                                               WS_CLIPSIBLINGS)
-                          : kResizablePopupStyle;
-  window_handle_ =
-      ::CreateWindowExW(ex_style, class_name, L"", style, window_x, window_y,
-                        window_width, window_height, nullptr, nullptr,
-                        instance, this);
+  window_handle_ = ::CreateWindowExW(
+      ex_style, class_name, L"", WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+      window_x, window_y, window_width, window_height, nullptr, nullptr,
+      instance, this);
   if (window_handle_ == nullptr) {
     return false;
   }
-
-  // The window class is registered ONCE and reused (RegisterClassEx fails with
-  // ERROR_CLASS_ALREADY_EXISTS on the second open), so the hbrBackground picked
-  // above is not necessarily what is in effect for THIS window. Force it: the
-  // ball must have no background brush at all, otherwise every pixel Flutter
-  // leaves unpainted is filled opaque black.
-  ::SetClassLongPtrW(window_handle_, GCLP_HBRBACKGROUND,
-                     reinterpret_cast<LONG_PTR>(nullptr));
 
   // Square corners: a borderless always-on-top window with Win11 rounding shows
   // the desktop colour in the four corner notches.
@@ -439,41 +340,8 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   ::DwmSetWindowAttribute(window_handle_, DWMWA_WINDOW_CORNER_PREFERENCE,
                           &corner_preference, sizeof(corner_preference));
 
-  if (kind_ == AylaOverlayKind::kActivityBall) {
-    // Click-through comes from GEOMETRY, not from any transparency trick: this
-    // window is exactly the size of the ball group, so outside it there is no
-    // window of ours at all and input reaches whatever is underneath - for ANY
-    // process. That part is settled.
-    //
-    // But the ball is ROUND and it has a glow, so the window's own corners are
-    // still not painted by Flutter. Without DWM compositing those pixels show up
-    // as a BLACK slab - exactly the regression the user screenshotted. So the
-    // window still needs `EnablePerPixelTransparency`: it is what turns the
-    // Flutter surface's transparent pixels into "see the desktop", including the
-    // area outside the circle and the glow fall-off.
-    //
-    // NOTE the two are NOT interchangeable and must not be confused:
-    //   * DWM per-pixel alpha  -> makes unpainted pixels see-through (visual),
-    //   * window geometry      -> decides where clicks go (input).
-    // An earlier revision used a layered colour key over a FULL-SCREEN window:
-    //   * Flutter's Windows swapchain has no alpha, so unpainted pixels were pure
-    //     black, and black never matches a colour key => the black slab ate every
-    //     click. Both symptoms, one cause.
+  if (transparent) {
     EnablePerPixelTransparency(window_handle_);
-  } else {
-    if (transparent) {
-      EnablePerPixelTransparency(window_handle_);
-    }
-    // WS_THICKFRAME changes how the requested width/height map to the CLIENT area
-    // (CreateWindowEx sizes the WINDOW rect, and the resize frame now eats a few px
-    // per side), but the hosted widget was laid out for exactly
-    // kLiveWindowWidth x kLiveWindowHeight logical px. Pin the client size back to
-    // that so the second engine's view starts at its designed geometry.
-    RECT pin = {0, 0, window_width, window_height};
-    ::AdjustWindowRectEx(&pin, style, FALSE, ex_style);
-    ::SetWindowPos(window_handle_, nullptr, window_x, window_y,
-                   pin.right - pin.left, pin.bottom - pin.top,
-                   SWP_NOZORDER | SWP_NOACTIVATE);
   }
 
   // ---- second engine -------------------------------------------------------
@@ -521,6 +389,14 @@ bool AylaLiveWindowHost::CreateWindowAndEngine(
   // SW_SHOWNOACTIVATE: never steal focus from whatever the user is doing.
   ::ShowWindow(window_handle_, SW_SHOWNOACTIVATE);
   controller_->ForceRedraw();
+
+  if (kind_ == AylaOverlayKind::kActivityBall) {
+    // The window is click-through until Flutter reports the button rects; poll
+    // the cursor so a transparent window can become interactive again (while
+    // transparent it receives no mouse messages at all).
+    ::SetTimer(window_handle_, kHitRectsTimerId, 16, nullptr);
+  }
+
 
   // NOTE: playback / the first payload are handed over by the "ready" call
   // coming back FROM the second engine (see CreateChannel), not here. Doing it
@@ -570,61 +446,17 @@ bool AylaLiveWindowHost::ShowBall(const std::string& payload_json) {
     Close(false);
   }
 
-  // Geometry the Dart host needs: the widget lays itself out in SCREEN
-  // coordinates (so its own drag clamp covers the whole screen) and then a
-  // Transform maps that into this small window.
-  HMONITOR monitor = ::MonitorFromWindow(
-      owner_window_ != nullptr ? owner_window_ : ::GetActiveWindow(),
-      MONITOR_DEFAULTTONEAREST);
-  MONITORINFO monitor_info = {};
-  monitor_info.cbSize = sizeof(MONITORINFO);
-  RECT work_area = {};
-  if (::GetMonitorInfoW(monitor, &monitor_info)) {
-    work_area = monitor_info.rcWork;
-  } else {
-    ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
-  }
-  const UINT monitor_dpi = FlutterDesktopGetDpiForMonitor(monitor);
-  const double monitor_scale =
-      monitor_dpi > 0 ? (static_cast<double>(monitor_dpi) / 96.0) : 1.0;
-  const double work_w =
-      static_cast<double>(work_area.right - work_area.left) / monitor_scale;
-  const double work_h =
-      static_cast<double>(work_area.bottom - work_area.top) / monitor_scale;
-  // Window origin in SCREEN logical px (the window hugs the right edge and the
-  // group's first resting position is the design default top: 80px, shell.css:462).
-  const double win_x = work_w - static_cast<double>(kBallWindowWidth);
-  const double win_y = 0.0;
-
   std::ostringstream entrypoint;
   entrypoint << "{\"kind\":\"activityBall\",\"payload\":"
-             << (payload_json.empty() ? "{}" : payload_json) << ","
-             << "\"viewportWidth\":" << work_w << ","
-             << "\"viewportHeight\":" << work_h << ","
-             << "\"windowRect\":{\"left\":" << win_x
-             << ",\"top\":" << win_y
-             << ",\"width\":" << kBallWindowWidth
-             << ",\"height\":" << kBallWindowMinHeight << "}}";
+             << (payload_json.empty() ? "{}" : payload_json) << "}";
 
-  // ⚠️ 2026-11-01 重做（用户：「为什么人家是一个按钮能直接丢出来，
-  // 你却要创建一个透明窗口？」）—— 窗口**只包住球组**。
-  //
-  // 为什么这条路才是对的（微软文档 + Flutter embedder 事实）：
-  //   1. Flutter Windows embedder 的 DXGI swapchain **没有 alpha 模式**
-  //      （flutter_windows.h 没有任何透明度开关），所以「大透明窗口」里
-  //      凡是 Flutter 没画到的像素必然是**纯黑**——这就是用户截图里的黑底。
-  //   2. 微软文档（Window Features / Layered Windows）说明：SetLayeredWindowAttributes
-  //      的 LWA_COLORKEY 只在像素**精确等于** key 色时才穿孔，黑(0,0,0) 与
-  //      key(1,2,3) 永不相等 ⇒ 整块黑底吃掉所有点击。
-  //   3. 两者的前提（要透明 vs 要穿透）互相排斥，无论怎么调参数都是错的。
-  //
-  // 正解：**窗口本身就只有球组那么大**。窗口之外根本不存在矩形 ⇒ 天然穿透；
-  // 没有黑底（窗口内只有球组被 Flutter 画满）；也不需要颜色键或 DWM 透明。
-  // 拖动由原生跟随（`setBallGroupTop` → 移动窗口），组件坐标经 Transform 映射。
+  // The window is as tall as the work area (see kBallWindowMinHeight) so the
+  // widget's own drag clamp covers the whole screen and no window movement is
+  // needed while dragging.
   return CreateWindowAndEngine(entrypoint.str(), kBallWindowWidth,
-                               kBallWindowMinHeight, /*transparent=*/false,
+                               kBallWindowMinHeight, /*transparent=*/true,
                                /*align_top_right=*/true,
-                               /*fill_work_area_height=*/false);
+                               /*fill_work_area_height=*/true);
 }
 
 bool AylaLiveWindowHost::UpdateBall(const std::string& payload_json) {
@@ -759,13 +591,51 @@ void AylaLiveWindowHost::CreateChannel() {
           }
           return;
         }
+        if (method == "setHitRects") {
+          // Flutter measured the visible buttons with RenderBox and sent their
+          // exact rectangles (logical px, view coordinates). TickHitRects polls
+          // the cursor against these to decide whether the window should accept
+          // the mouse. No layout knowledge is duplicated here on purpose.
+          ball_hit_rects_.clear();
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args != nullptr) {
+            auto it = args->find(flutter::EncodableValue("rects"));
+            if (it != args->end()) {
+              const auto* list = std::get_if<flutter::EncodableList>(&it->second);
+              if (list != nullptr) {
+                for (const flutter::EncodableValue& entry : *list) {
+                  const auto* m = std::get_if<flutter::EncodableMap>(&entry);
+                  if (m == nullptr) continue;
+                  auto num = [m](const char* key) -> double {
+                    auto f = m->find(flutter::EncodableValue(key));
+                    if (f == m->end()) return 0.0;
+                    if (const auto* d = std::get_if<double>(&f->second)) return *d;
+                    if (const auto* i = std::get_if<int32_t>(&f->second))
+                      return static_cast<double>(*i);
+                    if (const auto* l = std::get_if<int64_t>(&f->second))
+                      return static_cast<double>(*l);
+                    return 0.0;
+                  };
+                  RECT r = {};
+                  r.left = static_cast<LONG>(num("left"));
+                  r.top = static_cast<LONG>(num("top"));
+                  r.right = static_cast<LONG>(num("right"));
+                  r.bottom = static_cast<LONG>(num("bottom"));
+                  ball_hit_rects_.push_back(r);
+                }
+              }
+            }
+          }
+          TickHitRects();
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
         if (method == "setBallGroupTop") {
-          // The Dart side reports the ball group's new top (SCREEN logical px).
-          //
-          // The window is now exactly the size of the ball group, so this is what
-          // MOVES THE WINDOW: the ball stays at a fixed place *inside* the window
-          // and the window travels with it. That is the whole trick - no
-          // transparent backdrop, no hit-test region, no colour key.
+          // The Dart side reports where the ball group currently sits inside
+          // this (full-height) window, in logical pixels from the top. Only
+          // WM_NCHITTEST consumes it - the window itself never moves while
+          // dragging, because the widget's own coordinate space already
+          // covers the whole screen (see kBallWindowMinHeight).
           const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
           if (args != nullptr) {
             auto it = args->find(flutter::EncodableValue("top"));
@@ -780,7 +650,6 @@ void AylaLiveWindowHost::CreateChannel() {
               } else if (as_long != nullptr) {
                 ball_group_top_ = static_cast<double>(*as_long);
               }
-              MoveBallWindowToGroupTop();
             }
           }
           result->Success(flutter::EncodableValue(true));
@@ -790,53 +659,84 @@ void AylaLiveWindowHost::CreateChannel() {
       });
 }
 
-void AylaLiveWindowHost::MoveBallWindowToGroupTop() {
-  if (window_handle_ == nullptr) {
-    return;
-  }
-  if (kind_ != AylaOverlayKind::kActivityBall) {
-    return;
-  }
-
-  // Work area of whatever monitor the window is currently on (multi-monitor safe).
-  HMONITOR monitor = ::MonitorFromWindow(window_handle_, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO monitor_info = {};
-  monitor_info.cbSize = sizeof(MONITORINFO);
-  RECT work_area = {};
-  if (::GetMonitorInfoW(monitor, &monitor_info)) {
-    work_area = monitor_info.rcWork;
-  } else {
-    ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
-  }
-  const UINT dpi = FlutterDesktopGetDpiForHWND(window_handle_);
-  const double scale = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
-
-  // The widget keeps a small pad above the group (hover glow + focus ring), so
-  // the window's top edge is the group's top minus that pad - the value Dart
-  // reports is the GROUP's top, not the window's.
-  const double group_top_px = ball_group_top_ * scale - kBallWindowPadTop * scale;
-  int y = work_area.top + static_cast<int>(group_top_px);
-  const int max_y = work_area.bottom - kBallWindowMinHeight;
-  if (y > max_y) {
-    y = max_y;
-  }
-  if (y < work_area.top) {
-    y = work_area.top;
-  }
-  const int x = work_area.right - kBallWindowWidth;
-
-  // SWP_NOSIZE keeps the client geometry the Flutter view was laid out for;
-  // SWP_NOACTIVATE so dragging the ball never steals focus from the app the user
-  // is typing in.
-  ::SetWindowPos(window_handle_, nullptr, x, y, 0, 0,
-                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-}
-
 void AylaLiveWindowHost::TearDown() {
   // Order is load-bearing: |channel_| holds the engine's messenger, which the
   // controller destroys with the engine. Channel first, controller second.
   channel_.reset();
   controller_.reset();
+}
+
+/// Applies the interactive/click-through state of the floating-ball window.
+///
+/// `interactive == true`  -> the window accepts mouse input (buttons work)
+/// `interactive == false` -> the whole window is skipped by hit testing, so
+///                           clicks reach whatever application is underneath
+///                           (cross-process; this is the only mechanism that
+///                           does that, HTTRANSPARENT stays in-process).
+///
+/// Implementation notes that cost this project a lot of time:
+///   * WS_EX_TRANSPARENT only reroutes input for a LAYERED window; on a plain
+///     window Windows still treats it as an opaque rectangle. Hence WS_EX_LAYERED
+///     plus SetLayeredWindowAttributes(0, 255, LWA_ALPHA) - full opacity, so the
+///     visuals are untouched.
+///   * The flag is all-or-nothing per window, so the DECISION cannot come from
+///     the window itself: once transparent it receives no mouse messages at all
+///     and could never notice the cursor coming back. A timer polls the cursor
+///     against the rects Flutter measured (see TickHitRects).
+void AylaLiveWindowHost::SetBallInteractive(bool interactive) {
+  if (window_handle_ == nullptr || kind_ != AylaOverlayKind::kActivityBall) {
+    return;
+  }
+  if (interactive == ball_interactive_) {
+    return;
+  }
+  ball_interactive_ = interactive;
+
+  LONG ex = ::GetWindowLong(window_handle_, GWL_EXSTYLE);
+  ex |= WS_EX_LAYERED;
+  if (interactive) {
+    ex &= ~WS_EX_TRANSPARENT;
+  } else {
+    ex |= WS_EX_TRANSPARENT;
+  }
+  ::SetWindowLong(window_handle_, GWL_EXSTYLE, ex);
+  ::SetLayeredWindowAttributes(window_handle_, 0, 255, LWA_ALPHA);
+  ::SetWindowPos(window_handle_, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                     SWP_FRAMECHANGED);
+}
+
+/// Polls the cursor against the rects Flutter measured and flips the click-through
+/// state accordingly.
+///
+/// This has to be a timer: while the window is click-through it receives no mouse
+/// messages, so there is no event to react to. 16 ms is below the perception
+/// threshold and the work is one GetCursorPos + a handful of rect comparisons.
+void AylaLiveWindowHost::TickHitRects() {
+  if (window_handle_ == nullptr || kind_ != AylaOverlayKind::kActivityBall) {
+    return;
+  }
+  POINT cursor = {};
+  if (!::GetCursorPos(&cursor)) {
+    return;
+  }
+  ::ScreenToClient(window_handle_, &cursor);
+
+  // The rects arrive in the SECOND ENGINE's logical pixels; convert the cursor
+  // to the same space (the window's client origin is where that view starts).
+  const UINT dpi = FlutterDesktopGetDpiForHWND(window_handle_);
+  const double scale = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
+  const double cx = static_cast<double>(cursor.x) / scale;
+  const double cy = static_cast<double>(cursor.y) / scale;
+
+  bool over = false;
+  for (const RECT& r : ball_hit_rects_) {
+    if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+      over = true;
+      break;
+    }
+  }
+  SetBallInteractive(over);
 }
 
 LRESULT CALLBACK AylaLiveWindowHost::WndProc(HWND window,
@@ -879,264 +779,60 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
     }
   }
 
-  // ---- manual window drag (live mini window only) -------------------------
-  //
-  // Why not HTCAPTION (the obvious way to get a draggable WS_POPUP window): a
-  // caption drag runs in a MODAL message loop owned by DefWindowProc, so the
-  // Flutter view inside the window NEVER sees the press - "click the mini player
-  // to go back to the room" and its close button would stop working.
-  //
-  // So the drag is done by hand: the press is swallowed (the surface must not see
-  // a button-down it will never get a matching up for), the window only starts
-  // moving once the mouse passes [kDragThreshold], and a release below that
-  // threshold is re-dispatched as a synthetic press+release pair so the surface's
-  // own click handlers keep working exactly as before.
-  if (kind_ != AylaOverlayKind::kActivityBall) {
-    if (message == WM_LBUTTONDOWN) {
-      auto context = reinterpret_cast<LiveWindowContext*>(
-          ::GetWindowLongPtrW(window, GWLP_USERDATA));
-      if (context != nullptr && context->pending_synthetic_clicks > 0) {
-        // Our own re-dispatched click: it must reach the Flutter surface, so it
-        // is forwarded WITHOUT starting a new drag session.
-        --context->pending_synthetic_clicks;
-        return ::DefWindowProcW(window, message, wparam, lparam);
-      }
-      if (context != nullptr) {
-        POINT cursor = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        ::ClientToScreen(window, &cursor);
-        context->dragging = true;
-        context->drag_moving = false;
-        context->drag_origin = cursor;
-        ::GetWindowRect(window, &context->drag_rect);
-        ::SetCapture(window);
-        return 0;
-      }
-    } else if (message == WM_MOUSEMOVE) {
-      auto context = reinterpret_cast<LiveWindowContext*>(
-          ::GetWindowLongPtrW(window, GWLP_USERDATA));
-      if (context != nullptr && context->dragging) {
-        POINT cursor = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        ::ClientToScreen(window, &cursor);
-        const int dx = cursor.x - context->drag_origin.x;
-        const int dy = cursor.y - context->drag_origin.y;
-        if (!context->drag_moving &&
-            (dx * dx + dy * dy) >= kDragThreshold * kDragThreshold) {
-          context->drag_moving = true;
-        }
-        if (context->drag_moving) {
-          ::MoveWindow(window, context->drag_rect.left + dx,
-                       context->drag_rect.top + dy,
-                       context->drag_rect.right - context->drag_rect.left,
-                       context->drag_rect.bottom - context->drag_rect.top,
-                       TRUE);
-        }
-        return 0;
-      }
-    } else if (message == WM_LBUTTONUP) {
-      auto context = reinterpret_cast<LiveWindowContext*>(
-          ::GetWindowLongPtrW(window, GWLP_USERDATA));
-      if (context != nullptr && !context->dragging &&
-          context->pending_synthetic_clicks == 0) {
-        // Nothing was swallowed => this is an ordinary release; let the surface
-        // have it. (`return DefWindowProc` == the `break` this block would do if
-        // it were inside the switch below - `break` is illegal in this if-chain.)
-        return ::DefWindowProcW(window, message, wparam, lparam);
-      }
-      if (context != nullptr && context->dragging) {
-        const bool moved = context->drag_moving;
-        context->dragging = false;
-        context->drag_moving = false;
-        ::ReleaseCapture();
-        if (moved) {
-          return 0;  // end of a drag: not a click
-        }
-        // Not a drag => hand the press/release pair to the Flutter surface. Both
-        // messages were swallowed above, so synthesize them at the same position.
-        context->pending_synthetic_clicks += 1;
-        const LPARAM point = lparam;
-        ::PostMessageW(window, WM_LBUTTONDOWN, wparam, point);
-        ::PostMessageW(window, WM_LBUTTONUP, wparam, point);
-        return 0;
-      }
-    } else if (message == WM_CAPTURECHANGED) {
-      auto context = reinterpret_cast<LiveWindowContext*>(
-          ::GetWindowLongPtrW(window, GWLP_USERDATA));
-      if (context != nullptr) {
-        context->dragging = false;
-        context->drag_moving = false;
-      }
-      return 0;
-    }
-  }
-
   switch (message) {
     case WM_NCHITTEST: {
+      if (kind_ != AylaOverlayKind::kActivityBall) {
+        break;  // the live window is fully opaque and fully clickable.
+      }
+      // The floating-ball window covers the WHOLE work area but only a small
+      // group (44px balls + 28px handle, ~132 x 44 logical px at the right
+      // edge) is real content. Everything else is transparent empty space and
+      // MUST NOT swallow clicks meant for the app underneath - which includes
+      // a maximized app's close button at the top-right corner.
+      //
+      // HTTRANSPARENT makes Windows skip this window and keep hit-testing
+      // whatever is below it.
+      const LRESULT base = ::DefWindowProcW(window, message, wparam, lparam);
+      if (base != HTCLIENT) {
+        return base;  // borders / caption still belong to us.
+      }
       POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-      if (kind_ == AylaOverlayKind::kActivityBall) {
-        // The whole window IS the ball group, so every point inside it belongs
-        // to us - there is no empty area to pass through. Click-through happens
-        // at a much simpler level: the window is only as big as the group, so
-        // the desktop outside it is not ours at all.
-        break;
-      }
+      ::ScreenToClient(window, &point);
+      RECT client = {};
+      ::GetClientRect(window, &client);
+      const UINT dpi = FlutterDesktopGetDpiForHWND(window);
+      const double scale = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
 
-      // ---- live mini window: fake non-client area -> OS drag / resize --------
+      // The group band: from the group's current top (reported by Dart on
+      // every drag) down by one group height, plus a few px of tolerance for
+      // the hover glow (scale 1.08) and the focus ring.
+      const LONG band_top =
+          static_cast<LONG>((ball_group_top_ - kBallHitTestPadTop) * scale);
+      const LONG band_bottom = static_cast<LONG>(
+          (ball_group_top_ + kBallGroupHeight + kBallHitTestPadBottom) * scale);
+      // ... and only the rightmost slice of the window is content at all.
       //
-      // A WS_POPUP window has no frame, so the user has nothing to grab. The
-      // window procedure reports the standard non-client hit codes and Windows
-      // runs its own (modal) move loop / resize loop for us - which is also what
-      // gives the correct resize cursors.
-      RECT window_rect = {};
-      ::GetWindowRect(window, &window_rect);
-      const double scale = ScaleForWindow(window);
-      const LONG resize = static_cast<LONG>(kResizeBorderThickness * scale);
-      const bool at_left = point.x < window_rect.left + resize;
-      const bool at_right = point.x >= window_rect.right - resize;
-      const bool at_top = point.y < window_rect.top + resize;
-      const bool at_bottom = point.y >= window_rect.bottom - resize;
-      if (at_top && at_left) {
-        return HTTOPLEFT;
-      }
-      if (at_top && at_right) {
-        return HTTOPRIGHT;
-      }
-      if (at_bottom && at_left) {
-        return HTBOTTOMLEFT;
-      }
-      if (at_bottom && at_right) {
-        return HTBOTTOMRIGHT;
-      }
-      if (at_left) {
-        return HTLEFT;
-      }
-      if (at_right) {
-        return HTRIGHT;
-      }
-      if (at_top) {
-        return HTTOP;
-      }
-      if (at_bottom) {
-        return HTBOTTOM;
-      }
+      // The widget keeps `right: 24` (wide档, shell.css:461) and slides the
+      // group right by another 24 when collapsed, so the group occupies
+      //   expanded : [W-24-132, W-24]
+      //   collapsed: [W-132,    W]
+      // => the leftmost content edge is W-24-132. Subtracting only the pad
+      // (and NOT the 24 inset) is deliberate: it covers both states with one
+      // band and leaves a few px of slack for the hover glow.
+      const LONG band_left = static_cast<LONG>(
+          (static_cast<double>(logical_width_) - kBallGroupWidth -
+           kBallHitTestPadLeft) *
+          scale) -
+                          static_cast<LONG>(kBallRightInset * scale);
 
-      // Invisible drag band across the top of the card - except under the close
-      // button, which sits OUTSIDE the card at top/right -10 (24x24, so it pokes
-      // 14px INTO the client area) and must stay a normal click target.
-      POINT client = point;
-      ::ScreenToClient(window, &client);
-      RECT client_rect = {};
-      ::GetClientRect(window, &client_rect);
-      RECT close_rect = {};
-      close_rect.right =
-          client_rect.right - static_cast<LONG>(kAylaMiniCloseInset * scale);
-      close_rect.left = close_rect.right - static_cast<LONG>(kAylaMiniCloseSize * scale);
-      close_rect.top =
-          client_rect.top - static_cast<LONG>(kAylaMiniCloseInset * scale);
-      close_rect.bottom = close_rect.top + static_cast<LONG>(kAylaMiniCloseSize * scale);
-      const bool over_close = client.x >= close_rect.left - resize &&
-                              client.x < close_rect.right + resize &&
-                              client.y >= close_rect.top - resize &&
-                              client.y < close_rect.bottom + resize;
-      if (!over_close && client.y < static_cast<LONG>(kCaptionBandHeight * scale)) {
-        return HTCAPTION;
-      }
-      return HTCLIENT;
+      const bool in_band = point.y >= band_top && point.y < band_bottom &&
+                           point.x >= band_left;
+      return in_band ? HTCLIENT : HTTRANSPARENT;
     }
-    case WM_SIZING: {
-      if (kind_ == AylaOverlayKind::kActivityBall) {
-        break;
-      }
-      // Keep the CLIENT area at the design aspect ratio (194 : 120) while the user
-      // drags an edge or a corner.
-      //
-      // Why: the hosted widget is a fixed 16:9 card whose close button sits 10px
-      // outside it. Now that the window really is resizable (see WM_NCHITTEST), an
-      // arbitrary aspect would have to be resolved by either (a) letterboxing =>
-      // the extra band is TRANSPARENT and swallows clicks again (the exact complaint
-      // this task is about) or (b) non-uniform scaling => the picture is stretched.
-      // Locking the ratio keeps the Dart surface a pure UNIFORM scale, so the card
-      // and the video keep their proportions at every size.
-      auto* sizing = reinterpret_cast<RECT*>(lparam);
-      if (sizing == nullptr) {
-        break;
-      }
-      const double scale = ScaleForWindow(window);
-      RECT ratio = {0, 0, static_cast<LONG>(kLiveWindowLogicalWidth * scale),
-                    static_cast<LONG>(kLiveWindowLogicalHeight * scale)};
-      DWORD style = static_cast<DWORD>(::GetWindowLongPtrW(window, GWL_STYLE));
-      DWORD ex_style = static_cast<DWORD>(::GetWindowLongPtrW(window, GWL_EXSTYLE));
-      if (!::AdjustWindowRectEx(&ratio, style, FALSE, ex_style)) {
-        break;
-      }
-      // Frame overhead around the client area (the resize frame itself is not part
-      // of the ratio).
-      const LONG frame_x = (ratio.right - ratio.left) -
-                           static_cast<LONG>(kLiveWindowLogicalWidth * scale);
-      const LONG frame_y = (ratio.bottom - ratio.top) -
-                           static_cast<LONG>(kLiveWindowLogicalHeight * scale);
-      const double client_aspect = static_cast<double>(kLiveWindowLogicalWidth) /
-                                   static_cast<double>(kLiveWindowLogicalHeight);
-      const int edge = static_cast<int>(wparam);
-      if (edge == WMSZ_LEFT || edge == WMSZ_RIGHT) {
-        const LONG client_height = static_cast<LONG>(
-            (sizing->right - sizing->left - frame_x) / client_aspect);
-        if (edge == WMSZ_LEFT) {
-          sizing->left = sizing->right - (static_cast<LONG>(
-                                              client_height * client_aspect) +
-                                          frame_x);
-        } else {
-          sizing->right = sizing->left + (static_cast<LONG>(
-                                             client_height * client_aspect) +
-                                         frame_x);
-        }
-        sizing->bottom = sizing->top + client_height + frame_y;
-      } else if (edge == WMSZ_TOP || edge == WMSZ_BOTTOM) {
-        const LONG client_width = static_cast<LONG>(
-            (sizing->bottom - sizing->top - frame_y) * client_aspect);
-        sizing->right = sizing->left + client_width + frame_x;
-        if (edge == WMSZ_TOP) {
-          sizing->top = sizing->bottom - (static_cast<LONG>(client_width /
-                                                            client_aspect) +
-                                          frame_y);
-        } else {
-          sizing->bottom = sizing->top + (static_cast<LONG>(client_width /
-                                                            client_aspect) +
-                                          frame_y);
-        }
-      } else {
-        // Corner drag: the WIDTH dominates and the height follows it. (Following
-        // the height instead would let a purely vertical mouse movement change
-        // the width, which makes the corner feel like it is fighting the mouse.)
-        const LONG client_width = sizing->right - sizing->left - frame_x;
-        const LONG corrected_height =
-            static_cast<LONG>(client_width / client_aspect) + frame_y;
-        if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT) {
-          sizing->top = sizing->bottom - corrected_height;
-        } else {
-          sizing->bottom = sizing->top + corrected_height;
-        }
-      }
-      return TRUE;
-    }
-    case WM_GETMINMAXINFO: {
-      if (kind_ == AylaOverlayKind::kActivityBall) {
-        break;
-      }
-      // Never let the resize loop shrink the window below the size the hosted
-      // widget was laid out for: AylaLiveMiniPlayer's card is a fixed 168x94 and
-      // its close button lives outside it, so anything smaller clips real content.
-      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
-      if (info == nullptr) {
-        break;
-      }
-      const double scale = ScaleForWindow(window);
-      RECT minimum = {0, 0, static_cast<LONG>(kLiveWindowLogicalWidth * scale),
-                      static_cast<LONG>(kLiveWindowLogicalHeight * scale)};
-      DWORD style = static_cast<DWORD>(::GetWindowLongPtrW(window, GWL_STYLE));
-      DWORD ex_style = static_cast<DWORD>(::GetWindowLongPtrW(window, GWL_EXSTYLE));
-      if (::AdjustWindowRectEx(&minimum, style, FALSE, ex_style)) {
-        info->ptMinTrackSize.x = minimum.right - minimum.left;
-        info->ptMinTrackSize.y = minimum.bottom - minimum.top;
+    case WM_TIMER: {
+      if (wparam == kHitRectsTimerId &&
+          kind_ == AylaOverlayKind::kActivityBall) {
+        TickHitRects();
       }
       return 0;
     }
@@ -1147,28 +843,6 @@ LRESULT AylaLiveWindowHost::HandleMessage(HWND window,
         ::MoveWindow(controller_->view()->GetNativeWindow(), rect.left,
                      rect.top, rect.right - rect.left, rect.bottom - rect.top,
                      TRUE);
-      }
-      if (kind_ != AylaOverlayKind::kActivityBall && channel_ != nullptr &&
-          wparam != SIZE_MINIMIZED) {
-        // The user can now drag the window's edges (see WM_NCHITTEST). The Flutter
-        // surface has to follow, otherwise the extra pixels stay TRANSPARENT and
-        // the window goes back to "a big block of the desktop that eats clicks".
-        // The Dart side scales the design-sized surface (194x120) up to this
-        // client size, so the second engine is never asked to relayout a bigger
-        // viewport - only to paint bigger.
-        const double scale = ScaleForWindow(window);
-        const int64_t logical_width =
-            static_cast<int64_t>(static_cast<double>(LOWORD(lparam)) / scale);
-        const int64_t logical_height =
-            static_cast<int64_t>(static_cast<double>(HIWORD(lparam)) / scale);
-        channel_->InvokeMethod(
-            "clientSize",
-            std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
-                {flutter::EncodableValue("width"),
-                 flutter::EncodableValue(logical_width)},
-                {flutter::EncodableValue("height"),
-                 flutter::EncodableValue(logical_height)},
-            }));
       }
       return 0;
     }

@@ -131,7 +131,35 @@ class AylaSessionActivityIndicator extends StatefulWidget {
     this.live,
     this.onOpenSession,
     this.onTopChanged,
+    this.onHoverChanged,
+    this.onHitRectsChanged,
   });
+
+  /// 当前**可见按钮**在视口坐标系里的精确矩形（圆的按外接方框给）。
+  ///
+  /// ## 为什么用矩形列表而不是让原生算
+  /// 浮层窗口要覆盖整个工作区（不然拖动 clamp 会把球夹死），但只有按钮本身该
+  /// 接住点击。Win32 侧能做的只有「整窗放行/整窗接收」这一个开关
+  /// （`WS_EX_TRANSPARENT`），而它一旦放行窗口就收不到鼠标消息 ⇒ 必须由
+  /// **外部**（定时器轮询光标）来判断该不该放行。
+  ///
+  /// 那个判断需要知道按钮在哪。**不在这里给出，原生就只能复制一份布局** ——
+  /// 那正是之前反复算出「一个大矩形」的原因（球的组合/收起态/单双球全在变）。
+  /// 这里用 [RenderBox] 直接量真实几何，原生只做「点在不在矩形里」。
+  final ValueChanged<List<Rect>>? onHitRectsChanged;
+
+  /// 鼠标是否停在**任何一个可点按钮（球 / 把手）上**（null = 不上报）。
+  ///
+  /// ## 为什么需要它（窗口外浮层的穿透开关）
+  /// 浮层窗口要覆盖整个工作区（否则拖动 clamp 会把球夹死），但只有球/把手
+  /// 本身该接住点击。Win32 的 `WS_EX_TRANSPARENT` 能整窗放行点击，
+  /// 但它一旦打开窗口就**收不到任何鼠标消息** —— 所以不能用它来判断
+  /// 「鼠标在不在球上」（那样会自己把自己锁死）。
+  ///
+  /// ⇒ 判断交给 Flutter：组件本来就有 `MouseRegion.onEnter/onExit`
+  /// （悬停高亮用），这里把它汇总成「有没有停在按钮上」，宿主据此切换
+  /// `WS_EX_TRANSPARENT`。原生侧不需要知道任何布局/圆形/矩形。
+  final ValueChanged<bool>? onHoverChanged;
 
   /// 进行中的语音会话；**null = 不渲染语音球**（等价 web `showVoice === false`）。
   final AylaActivitySession? voice;
@@ -204,6 +232,81 @@ class _AylaSessionActivityIndicatorState
 
   /// 拖动后的绝对 top（px）；**null = 未拖动**，走 CSS 默认（宽屏 80 / 窄屏 calc）。
   double? _topPx;
+
+  /// 当前有几个子按钮处于悬停态（球 / 把手各自独立上报）。
+  ///
+  /// 用计数而不是布尔：鼠标从一个球滑到把手时，`onExit` 与 `onEnter` 的先后
+  /// 顺序不保证，单布尔会在中间瞬间归零，导致浮层窗口闪一下「可穿透」并把
+  /// 这次点击漏给桌面。
+  int _hoverCount = 0;
+
+  void _onChildHoverChanged(bool hovering) {
+    final int next = (_hoverCount + (hovering ? 1 : -1)).clamp(0, 8);
+    if (next == _hoverCount) return;
+    final bool wasAny = _hoverCount > 0;
+    _hoverCount = next;
+    final bool isAny = _hoverCount > 0;
+    if (wasAny != isAny) widget.onHoverChanged?.call(isAny);
+  }
+
+  // ---- 精确命中矩形上报（窗口外浮层的穿透开关用） ----
+  final GlobalKey _voiceBallKey = GlobalKey();
+  final GlobalKey _liveBallKey = GlobalKey();
+  final GlobalKey _toggleKey = GlobalKey();
+  List<Rect> _lastHitRects = const <Rect>[];
+
+  /// 每帧后量一次**真实**按钮几何并上报（用 [RenderBox]，不是推算布局）。
+  ///
+  /// 收起态只报把手：球已 `opacity:0` 且滑出，若仍报它们，那块区域会继续接住
+  /// 点击（用户实报「收起后球以前的矩形范围还是点不穿」）。
+  void _scheduleHitRectReport({Duration? delay}) {
+    void report() {
+      if (!mounted) return;
+      final List<Rect> rects = <Rect>[];
+      void addIf(GlobalKey key, bool visible) {
+        if (!visible) return;
+        final RenderObject? ro = key.currentContext?.findRenderObject();
+        if (ro is! RenderBox || !ro.hasSize) return;
+        rects.add(ro.localToGlobal(Offset.zero) & ro.size);
+      }
+
+      addIf(_voiceBallKey, widget.voice != null && !_collapsed);
+      addIf(_liveBallKey, widget.live != null && !_collapsed);
+      addIf(_toggleKey, true);
+
+      if (rects.length == _lastHitRects.length) {
+        bool same = true;
+        for (int i = 0; i < rects.length; i++) {
+          if (rects[i] != _lastHitRects[i]) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return;
+      }
+      _lastHitRects = rects;
+      widget.onHitRectsChanged?.call(rects);
+    }
+
+    // 用「连续 N 帧各报一次」覆盖收起/展开动画，而不是 Future.delayed：
+    // 后者会在 flutter_test 里留下未完成的 timer，触发
+    // `!timersPending` 断言失败（overlay_window_root_test 就是这么挂的）。
+    if (delay == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => report());
+    } else {
+      final int frames = delay.inMilliseconds ~/ 16;
+      int remaining = frames;
+      void step(Duration _) {
+        if (!mounted) return;
+        report();
+        if (--remaining > 0) {
+          WidgetsBinding.instance.addPostFrameCallback(step);
+        }
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback(step);
+    }
+  }
 
   // ---- 拖动会话（tsx 30 `dragRef`）----
   bool _dragActive = false;
@@ -309,23 +412,29 @@ class _AylaSessionActivityIndicatorState
         // JSX 顺序（tsx 144–178）：语音球 → 直播球 → 把手
         if (voice != null)
           _ActivityBall(
+            key: _voiceBallKey,
             kind: _ActivityBallKind.voice,
             collapsed: _collapsed,
             reduceMotion: reduceMotion,
+            onHoverChanged: _onChildHoverChanged,
             title: voice.title, // tsx 150
             onPressed: () => widget.onOpenSession?.call(voice),
           ),
         if (live != null)
           _ActivityBall(
+            key: _liveBallKey,
             kind: _ActivityBallKind.live,
             collapsed: _collapsed,
             reduceMotion: reduceMotion,
+            onHoverChanged: _onChildHoverChanged,
             title: live.title, // tsx 161
             onPressed: () => widget.onOpenSession?.call(live),
           ),
         _ActivityToggle(
+          key: _toggleKey,
           collapsed: _collapsed,
           reduceMotion: reduceMotion,
+          onHoverChanged: _onChildHoverChanged,
           onPressed: _onToggleClick,
           onPointerDown: _onPointerDown,
           onPointerMove: _onPointerMove,
@@ -333,6 +442,18 @@ class _AylaSessionActivityIndicatorState
         ),
       ],
     );
+
+    // 每帧后量一次真实几何并上报（收起态只报把手）。
+    // 收起/展开有 ~200ms 动画，矩形在这期间持续变化。只报一帧会让原生拿到
+    // 中间态（把手位置漂移/球还没消失），表现为「收起后按钮判定错位」。
+    // 所以在动画时长内每帧都报一次。
+    if (widget.onHitRectsChanged != null) {
+      _scheduleHitRectReport();
+      _scheduleHitRectReport(delay: const Duration(milliseconds: 60));
+      _scheduleHitRectReport(delay: const Duration(milliseconds: 120));
+      _scheduleHitRectReport(delay: const Duration(milliseconds: 200));
+      _scheduleHitRectReport(delay: const Duration(milliseconds: 260));
+    }
 
     return Positioned(
       right: narrow
@@ -381,12 +502,17 @@ enum _ActivityBallKind { voice, live }
 /// （文件头「未完成项」）—— 接线时在这里加 `title` 参数并把 `session.title` 传进来即可。
 class _ActivityBall extends StatefulWidget {
   const _ActivityBall({
+    super.key,
     required this.kind,
     required this.collapsed,
     required this.reduceMotion,
+    this.onHoverChanged,
     this.title,
     this.onPressed,
   });
+
+  /// 悬停变化（true = 鼠标停在本球上）。见 [AylaSessionActivityIndicator.onHoverChanged]。
+  final ValueChanged<bool>? onHoverChanged;
 
   final _ActivityBallKind kind;
   final bool collapsed;
@@ -514,8 +640,14 @@ class _ActivityBallState extends State<_ActivityBall> {
         semanticLabel: label,
         child: MouseRegion(
           // cursor: pointer 由 AylaPressScale 自己给（enabled 时 click）
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
+          onEnter: (_) {
+            setState(() => _hovered = true);
+            widget.onHoverChanged?.call(true);
+          },
+          onExit: (_) {
+            setState(() => _hovered = false);
+            widget.onHoverChanged?.call(false);
+          },
           child: animated,
         ),
         ),
@@ -543,13 +675,18 @@ class _ActivityBallState extends State<_ActivityBall> {
 /// `.session-activity-toggle` —— 28×44 玻璃把手（`shell.css:529–567`）。
 class _ActivityToggle extends StatefulWidget {
   const _ActivityToggle({
+    super.key,
     required this.collapsed,
     required this.reduceMotion,
     required this.onPressed,
     required this.onPointerDown,
     required this.onPointerMove,
     required this.onPointerUp,
+    this.onHoverChanged,
   });
+
+  /// 悬停变化（true = 鼠标停在把手上）。见 [AylaSessionActivityIndicator.onHoverChanged]。
+  final ValueChanged<bool>? onHoverChanged;
 
   final bool collapsed;
   final bool reduceMotion;
@@ -700,8 +837,14 @@ class _ActivityToggleState extends State<_ActivityToggle> {
               // tsx 174：aria-label 随收起态切换
               semanticLabel: widget.collapsed ? '展开媒体控制' : '收起媒体控制',
               child: MouseRegion(
-                onEnter: (_) => setState(() => _hovered = true),
-                onExit: (_) => setState(() => _hovered = false),
+                onEnter: (_) {
+                  setState(() => _hovered = true);
+                  widget.onHoverChanged?.call(true);
+                },
+                onExit: (_) {
+                  setState(() => _hovered = false);
+                  widget.onHoverChanged?.call(false);
+                },
                 child: box,
               ),
             ),

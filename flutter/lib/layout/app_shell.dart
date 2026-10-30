@@ -513,16 +513,15 @@ class _AppShellState extends ConsumerState<AppShell> {
         // 所以这里只保留**数据投影**：`miniPlayer` 出现 ⇒ 打开窗口外小窗；
         // 消失 ⇒ 关掉它。widget 本体仍是同一份 `AylaLiveMiniPlayer`（跑在第二引擎里）。
         //
-        // ## 平台分工（2026-11-01 订正：两个平台都走「窗口外小窗」）
+        // ## 平台分工（能力边界，如实登记）
         // - **Windows**：`aylaEnterDetachedLive` 走 `openLiveWindow` ⇒ 第二引擎 + 置顶透明窗，
         //   里面 build 同一份 `AylaLiveMiniPlayer`（含 media_kit 那一路 HLS）。
-        // - **Android**：走 `showLiveWindow` ⇒ `TYPE_APPLICATION_OVERLAY` 窗口 + 第二引擎，
-        //   里面 build 的仍是**同一份** `AylaLiveMiniPlayer`；播放内核换成
-        //   **video_player / ExoPlayer**（本工程只打包了 Windows 的 media_kit 运行库，
-        //   Android 上没有 libmpv ⇒ media_kit 必然黑屏）。
-        //   ⚠️ 订正一条旧结论：2026-10 之前 Android 走**系统 PiP**（把整个 App 界面缩小），
-        //   用户判定「那不是我原来的窗口」⇒ 已废止；PiP 的通道与按 Home 自动进画中画
-        //   仍在（作为系统级能力），但「点小窗」不再走它。
+        // - **Android**：第二引擎**不注册任何插件**（见 `OverlayFlutterHost.kt` 文件头），
+        //   放不了 media_kit 视频面；Android 的「视频离开应用」由**既有 Android PiP** 承担
+        //   （`enterPip`，系统原生画中画）。此时本件拿到 `ok=false` ⇒ 不打开窗口外小窗，
+        //   但**会话与观看登记继续**（PiP 是同一 Activity 同一 engine）。
+        //   叠加层那边仍然显示**同一个悬浮球组**（含直播球，点一下回房）——
+        //   这是用户「用现有悬浮球」那条需求的直接实现。
         //
         // 无渲染子级 ⇒ 本件不占 `Stack` 的任何位置（也不再有 z 60 的层序问题）。
         _LiveMiniPlayerHost(
@@ -903,10 +902,9 @@ AylaActivitySession _activitySession({
 /// 不参与 `Stack` 的层序（应用内不再有任何浮层）。
 ///
 /// ## 同步语义
-/// - `mini != null` 且窗口没开 ⇒ `aylaEnterDetachedLive`
-///   （Windows = `openLiveWindow` / Android = `showLiveWindow`，都带归一后的 HLS 地址）；
-/// - `mini != null` 且窗口已开且**换了频道或地址** ⇒ 重新 `aylaEnterDetachedLive`；
-/// - `mini == null` 且窗口已开 ⇒ `aylaCloseDetachedLive`。
+/// - `mini != null` 且窗口没开 ⇒ `openLiveWindow`（带归一后的 HLS 地址 + 标题）；
+/// - `mini != null` 且窗口已开 ⇒ 只更新标题/地址（切台）；
+/// - `mini == null` 且窗口已开 ⇒ `closeLiveWindow`。
 ///
 /// 原生侧「用户关掉小窗」会回 `onLiveWindowClosed` ⇒ 清掉本地认知，
 /// 下一次 `miniPlayer` 变化还能重开（不会「关一次就再也不出现」）。
@@ -999,7 +997,7 @@ class _LiveMiniPlayerHostState extends State<_LiveMiniPlayerHost> {
 
   @override
   Widget build(BuildContext context) {
-    // 通道调用必须在构建之外：小窗窗口会建第二个 engine，
+    // 通道调用必须在构建之外：`openLiveWindow` 会建第二个 engine，
     // 在 build 里 await 会卡住首帧。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

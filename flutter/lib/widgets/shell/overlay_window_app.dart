@@ -147,7 +147,12 @@ class AylaOverlayWindowApp extends StatelessWidget {
     required this.onOpenSession,
     this.onToggleCollapsed,
     this.onGroupTopChanged,
+    this.onHoverChanged,
+    this.onHitRectsChanged,
   });
+
+  /// 可见按钮的精确矩形（视口坐标）。宿主转给原生做穿透判定。
+  final ValueChanged<List<Rect>>? onHitRectsChanged;
 
   final AylaOverlayPayload payload;
 
@@ -159,6 +164,13 @@ class AylaOverlayWindowApp extends StatelessWidget {
 
   /// 拖动把手后的 top（状态由主引擎持有；null = 不接线）。
   final ValueChanged<double>? onGroupTopChanged;
+
+  /// 鼠标是否停在任一按钮（球 / 把手）上。
+  ///
+  /// 宿主用它切换浮层窗口的 `WS_EX_TRANSPARENT`：停在按钮上 ⇒ 窗口接住点击；
+  /// 否则 ⇒ 整窗放行给桌面。判断交给 Flutter（组件本就有 MouseRegion），
+  /// 原生侧不需要复制任何布局常量。
+  final ValueChanged<bool>? onHoverChanged;
 
   /// 宿主窗口的内容宽度（逻辑像素；见 `live_window.cpp` 的 kBallWindowWidth）。
   ///
@@ -221,6 +233,14 @@ class AylaOverlayWindowApp extends StatelessWidget {
               voice: voice,
               live: live,
               onOpenSession: onOpenSession,
+              // ⚠️ MUST be wired: the native side uses this top to decide which
+              // strip of the (full-work-area) window is clickable. Without it
+              // `ball_group_top_` stays at its initial 80 while the balls move,
+              // so after a drag the clickable band no longer covers them and
+              // every click on the ball gets passed through to the desktop.
+              onTopChanged: onGroupTopChanged,
+              onHoverChanged: onHoverChanged,
+              onHitRectsChanged: onHitRectsChanged,
             ),
           ],
         ),
@@ -268,6 +288,9 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
   /// 上一次已知的组 top（用于把拖动换算成**窗口位移增量**）。
   double _lastGroupTop = 0;
 
+  /// Last reported on-screen width of the group (see _reportGroupTop).
+  double _lastVisibleWidth = 0;
+
   @override
   void initState() {
     super.initState();
@@ -278,18 +301,6 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       if (_disposed) return;
       unawaited(_ready());
     });
-    // ⚠️ 再把**静止态**的组 top 主动报一次 —— 原生用它算 SetWindowRgn 的可见/可点区域。
-    //
-    // 组件只在「手动手势拖动」时回调 onTopChanged（session_activity.dart:272），
-    // 所以不拖的时候这次通道调用**永远不会发生**。而窗口一打开 region 就按默认 top
-    // 设好了；一旦组件因重建/收起落在别处，region 就停在旧位置
-    // （表现：球在那里却点不到，或者球上方一块空白吃掉点击）。
-    //
-    // 取值依据：组件是 `Positioned(top: _topPx ?? _defaultTop(context))`
-    // （session_activity.dart:342）。未拖动时 = 宽屏档 wideTop（shell.css:462
-    // `top: 80px`）——浮层宿主的视口宽度被固定成宽屏档（见 hostViewportWidth），
-    // 所以这里恒为 80，与原生 ball_group_top_ 的初值同源。
-    unawaited(_reportGroupTop(AylaSessionActivityIndicator.wideTop));
   }
 
   Future<Object?> _handleHostCall(MethodCall call) async {
@@ -306,9 +317,7 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
     return null;
   }
 
-  /// 把组的**当前 top** 告诉原生（拖动时更新；首帧后再报一次静止值）。
-  ///
-  /// **不移动窗口**：窗口恒为整个工作区高，组件的 top 坐标空间 = 屏幕垂直空间。
+  /// 拖动把手 ⇒ 把组的**新 top** 告诉原生（**不移动窗口**）。
   ///
   /// ## 为什么是「报告位置」而不是「移动窗口」（2026-10-31 实测订正）
   /// 第一版设计是「原生按 `新top - 旧top` 平移窗口」。那是**错的**，两个缺陷：
@@ -325,16 +334,64 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
   /// 组件的 `top` 坐标空间 = 屏幕的垂直空间 ⇒ clamp 覆盖全屏、拖动天然 1:1、
   /// 什么都不用平移。这里只把位置报给原生，**唯一用途是 `WM_NCHITTEST`**：
   /// 让原生知道哪一小块是球（可点），其余透明区域要 `HTTRANSPARENT` 放行给下层应用。
-  Future<void> _reportGroupTop(double top) async {
+  Future<void> _reportGroupTop(double top, {double? visibleWidth}) async {
     if (_disposed) return;
-    if (top == _lastGroupTop) return;
+    final double width = visibleWidth ?? _lastVisibleWidth;
+    if (top == _lastGroupTop && width == _lastVisibleWidth) return;
     _lastGroupTop = top;
+    _lastVisibleWidth = width;
     try {
       await _channel.invokeMethod<bool>('setBallGroupTop', <String, Object?>{
         'top': top,
+        // Width of the part that is actually ON SCREEN right now. Collapsed =>
+        // only the 28px handle remains, so the native hit band must shrink to
+        // it; otherwise the empty strip to its left keeps swallowing clicks.
+        'visibleWidth': width,
       });
     } on MissingPluginException {
       // 宿主未实现（画布 / 单测）：静默，不影响拖动本身。
+    } on PlatformException {
+      // 同上。
+    }
+  }
+
+  /// 上报可见按钮的精确矩形（视口逻辑坐标）。
+  ///
+  /// 原生用定时器轮询光标，只在这些矩形内才「接收点击」，其余位置整窗放行。
+  /// 矩形来自 Flutter 的 `RenderBox`（真实几何），所以收起态只剩把手、
+  /// 单球/双球、球之间的缝隙，全都自动正确。
+  Future<void> _reportHitRects(List<Rect> rects) async {
+    if (_disposed) return;
+    try {
+      await _channel.invokeMethod<bool>('setHitRects', <String, Object?>{
+        'rects': rects
+            .map((Rect r) => <String, Object?>{
+                  'left': r.left,
+                  'top': r.top,
+                  'right': r.right,
+                  'bottom': r.bottom,
+                })
+            .toList(),
+      });
+    } on MissingPluginException {
+      // 宿主未实现（画布 / 单测）：静默。
+    } on PlatformException {
+      // 同上。
+    }
+  }
+
+  /// 鼠标进出按钮 ⇒ 告诉原生切换整窗点击穿透。
+  ///
+  /// 这是**唯一**可靠的判断来源：`WS_EX_TRANSPARENT` 打开后窗口收不到鼠标消息，
+  /// 原生侧无法自己检测「鼠标又回来了」。
+  Future<void> _reportHover(bool hovering) async {
+    if (_disposed) return;
+    try {
+      await _channel.invokeMethod<bool>('setInteractive', <String, Object?>{
+        'interactive': hovering,
+      });
+    } on MissingPluginException {
+      // 宿主未实现（画布 / 单测）：静默。
     } on PlatformException {
       // 同上。
     }
@@ -389,6 +446,8 @@ class _AylaOverlayBallWindowAppState extends State<AylaOverlayBallWindowApp> {
       // 这里把新 top 交给原生：`SetWindowPos` 把窗口挪到对应屏幕位置，
       // 组件内部坐标保持不变（所以视觉上球仍在窗口内同一个相对位置）。
       onGroupTopChanged: (double top) => unawaited(_reportGroupTop(top)),
+      onHoverChanged: (bool hovering) => unawaited(_reportHover(hovering)),
+      onHitRectsChanged: (List<Rect> rects) => unawaited(_reportHitRects(rects)),
       onOpenSession: (AylaActivitySession session) {
         // 组件只回传会话（web 的真实口径），种类要在这里按 id 反查：
         // 直播球的 id 与语音球的 id 不会相同（一个房间只有一个身份）。

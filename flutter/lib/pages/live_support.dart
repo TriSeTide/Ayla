@@ -699,13 +699,11 @@ class AylaLiveRoomSession extends ChangeNotifier {
   Future<bool> enterDetachedPresentation({Rect? videoRect}) async {
     if (!_alive) return false;
     if (_detached) return true; // 幂等：已经在脱离态
-    // 「第二个窗口」从 2026-11-01 起 **Android 也有**：直播小窗改成系统叠加层里的
-    // 第二引擎（用户：「新的删掉，用我原来的窗口」），不再是同一 Activity 的 PiP。
-    // ⇒ 两边都要订阅窗口生命周期，也都要停掉主引擎那一路播放（避免同一路流解两遍：
-    //   流量翻倍 + 音频叠两个）。
+    // 独立窗口的生命周期只存在于 Windows（第二引擎那个窗口）。
+    // Android PiP 是**同一 Activity 同一 engine**，系统不会给「窗口关闭」事件 ——
+    // 订阅了也永远收不到，但订阅本身会多一条流引用，故只在桌面订阅。
     final bool secondWindow = !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.windows ||
-            defaultTargetPlatform == TargetPlatform.android);
+        defaultTargetPlatform == TargetPlatform.windows;
     if (secondWindow) _bindDetachedWindowLifecycle();
     final bool ok = await _detachedPresenter.enter(
       channelId: channelId,
@@ -717,15 +715,12 @@ class AylaLiveRoomSession extends ChangeNotifier {
     );
     if (ok) {
       _detached = true;
-      // ⚠️ **两个平台都要停主窗口那一路播放**（2026-11-01 起 Android 也是第二引擎）：
-      // 小窗现在是**独立叠加层里的第二个 Flutter engine + 第二个 HLS 播放器**
-      // （Windows = media_kit，Android = video_player），不停就会两路音频叠在一起。
+      // ⚠️ **只有 Windows 需要停主窗口那一路播放**：那边是第二个 Flutter engine +
+      // 第二个 HLS 播放器，不停就会两路音频叠在一起（独立小窗旁边还能听见主窗口回声）。
       //
-      // 历史（已作废，勿照旧注释改回去）：2026-10 之前 Android 走系统 PiP，
-      // 画中画显示的就是**本 Activity 本 engine** 的那张画面，那时绝不能停；
-      // 现在 Android 不再走 PiP，那条约束不再成立。
-      //
-      // 弹幕 WS / 在看登记**不受影响**（它们不依赖播放器实例）⇒ 小窗观看仍算观看人。
+      // ❌ **Android 绝对不能停**：PiP 显示的就是**本 Activity 本 engine** 的这张画面，
+      // 一旦把 `_player.destroy()` 掉，画中画里就是一个纯黑窗口（功能表面成功、实际全黑）。
+      // 这也是「PiP 里继续算观看人」的前提：同一路 HLS / 同一条弹幕 WS 原样继续跑。
       if (secondWindow) await _suspendMainPlayerForDetached();
       // 原生已接管：把「在播」事实再同步一次（进入 PiP 后 onResume 不会再走一遍武装）。
       await _syncPipSessionActive();
@@ -794,26 +789,13 @@ class AylaLiveRoomSession extends ChangeNotifier {
   void _onDetachedWindowClosed() {
     final bool wasDetached = _detached;
     _detached = false;
-    // Android 的「小窗」就是那个系统叠加层窗口本身（2026-11-01 起不再走 PiP），
-    // **没有**「App 内小窗」这个承接面：重新登记小窗投影只会让 AppShell 把
-    // 叠加层窗口立刻再开一遍（关不掉）。⇒ 窗口关掉 == 用户不看了，按 web
-    // `LiveMiniPlayer.tsx:93–96` 的口径完整销毁会话（X 键与点卡片回 App 同一条路径）。
-    final bool overlayOnly = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android;
     if (_alive) {
-      if (overlayOnly) {
-        if (wasDetached) {
-          unawaited(stop().whenComplete(dispose));
-          return;
-        }
-      } else {
-        unawaited(_resumeMainPlayerAfterDetached());
-        // Windows：「回到 App 内小窗」复用既有路径。只在**页面已经卸载**时登记小窗投影：
-        // 用户就站在直播间页里时画面由页面自己的 videoView 接管，再挂一层小窗
-        // 投影会多出一个盖在页面上的浮层。
-        if (wasDetached && !identical(_activeViewSession, this)) {
-          _enterMiniPlayer();
-        }
+      unawaited(_resumeMainPlayerAfterDetached());
+      // 「回到 App 内小窗」复用既有路径。只在**页面已经卸载**时登记小窗投影：
+      // 用户就站在直播间页里时画面由页面自己的 videoView 接管，再挂一层小窗
+      // 投影会多出一个盖在页面上的浮层。
+      if (wasDetached && !identical(_activeViewSession, this)) {
+        _enterMiniPlayer();
       }
     }
     if (!_disposed) notifyListeners();

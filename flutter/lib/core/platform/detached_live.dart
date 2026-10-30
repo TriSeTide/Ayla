@@ -150,33 +150,22 @@ Future<bool> aylaEnterDetachedLive({
     }
   }
   if (defaultTargetPlatform == TargetPlatform.android) {
-    // ===== 2026-11-01 起：Android 也走「叠加层里 build 同一份小窗」 =====
-    //
-    // 用户实报（逐字）：「手机端直播小窗重做，打开的小窗**仍然不是原来的小窗口**，
-    // 而是直接打开了重新搓的那个新的，**新的删掉，用我原来的窗口**」。
-    // 旧实现在 Android 上走**系统 PiP**（把整个 App 界面缩小）⇒ 那是「另一个东西」，
-    // 不是 App 内那张 `AylaLiveMiniPlayer`。
-    //
-    // ⇒ 现在与 Windows 同构：原生建一个 `TYPE_APPLICATION_OVERLAY` 窗口，
-    //   第二引擎里 build **同一份** `AylaLiveMiniPlayer`。差别只在播放内核：
-    //   本工程只打包了 Windows 的 media_kit 运行库（没有 libmpv）⇒
-    //   Android 用 video_player / ExoPlayer（与主引擎 Android 同一条 HLS 路径）。
-    //
-    // ⚠️ **PiP 那套保留但不再用于直播小窗**：`enterPip` / `setSessionActive`
-    // 与「按 Home 自动进 PiP」的原生武装都还在（用户按 Home 仍可用系统画中画），
-    // 只是「点小窗的脱离键」这条路径不再走它。
     try {
-      final String? result = await _pipChannel.invokeMethod<String>(
-        'showLiveWindow',
+      final bool? ok = await _pipChannel.invokeMethod<bool>(
+        'enterPip',
         <String, Object?>{
-          'channelId': channelId,
-          'title': title,
-          'playUrl': playUrl,
+          'aspectX': aspectX,
+          'aspectY': aspectY,
+          if (videoRect != null) ...<String, Object?>{
+            'x': videoRect.left.round(),
+            'y': videoRect.top.round(),
+            'w': videoRect.width.round(),
+            'h': videoRect.height.round(),
+          },
         },
       );
-      return result == 'shown';
+      return ok ?? false;
     } on MissingPluginException {
-      // 原生未实现（旧 APK / 单测）：明确回落，不伪装成已接管。
       return false;
     } on PlatformException {
       return false;
@@ -223,50 +212,13 @@ Future<void> aylaSetLivePipSessionActive(bool active) async {
 ///
 /// 幂等：没有脱离态时调用不产生副作用。
 Future<void> aylaCloseDetachedLive() async {
-  if (defaultTargetPlatform == TargetPlatform.windows) {
-    try {
-      await _desktopChannel.invokeMethod<void>('closeLiveWindow');
-    } on MissingPluginException {
-      // 原生未实现：静默（这是「关闭」，静默安全）
-    } on PlatformException {
-      // 同上
-    }
-    return;
-  }
-  // Android：关掉那个叠加层窗口（2026-11-01 起小窗也在系统层，不再是 PiP）。
-  // 原生侧**不回** `onLiveWindowClosed`（关窗是 Dart 自己发起的，回传只会绕一圈）。
-  if (defaultTargetPlatform == TargetPlatform.android) {
-    try {
-      await _pipChannel.invokeMethod<void>('closeLiveWindow');
-    } on MissingPluginException {
-      // 原生未实现：静默。
-    } on PlatformException {
-      // 同上。
-    }
-  }
-}
-
-/// Android：更新已在系统层的直播小窗（切台 / 换地址）。
-///
-/// 返回 true = 已送达；false = 当前没有叠加层窗口（调用方应改走 [aylaEnterDetachedLive]）。
-/// 非 Android 平台恒 false（Windows 用 `openLiveWindow` 的幂等重入，不走这条）。
-///
-/// 幂等：同一份参数重复推送只是同一件事（原生侧只更新播放地址）。
-Future<bool> aylaUpdateDetachedLiveWindow({
-  required String title,
-  String? playUrl,
-}) async {
-  if (defaultTargetPlatform != TargetPlatform.android) return false;
+  if (defaultTargetPlatform != TargetPlatform.windows) return;
   try {
-    final String? result = await _pipChannel.invokeMethod<String>(
-      'updateLiveWindow',
-      <String, Object?>{'title': title, 'playUrl': playUrl},
-    );
-    return result == 'shown';
+    await _desktopChannel.invokeMethod<void>('closeLiveWindow');
   } on MissingPluginException {
-    return false;
+    // 原生未实现：静默（这是「关闭」，静默安全）
   } on PlatformException {
-    return false;
+    // 同上
   }
 }
 

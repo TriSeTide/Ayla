@@ -9,6 +9,9 @@
 
 #include <memory>
 #include <string>
+#include <vector>
+
+
 
 // ---------------------------------------------------------------------------
 // Detached overlay window: an independent, borderless, always-on-top top-level
@@ -155,19 +158,21 @@ class AylaLiveWindowHost {
   /// the destructor.
   void TearDown();
 
+  /// One tick of the floating ball's click-through evaluation (see the .cpp).
+  ///
+  /// Toggles WS_EX_TRANSPARENT based on whether the cursor is over the ball
+  /// group: that is the only way a click can reach a window belonging to
+  /// ANOTHER PROCESS (HTTRANSPARENT stays inside this thread).
+  /// Flips the click-through state of the floating-ball window.
+  void SetBallInteractive(bool interactive);
+
+  /// Polls the cursor against [ball_hit_rects_] and calls SetBallInteractive.
+  void TickHitRects();
+
+
   /// Creates the MethodChannel used for engine -> Dart notifications and for
   /// the Dart -> engine commands of the overlay itself.
   void CreateChannel();
-
-  /// Recomputes + applies the click-through window REGION of the floating-ball
-  /// window (no-op for the live mini window).
-  ///
-  // NOTE: there is deliberately no region / band helper any more. The
-  // floating ball uses a WS_EX_LAYERED colour key instead (see
-  // EnableColorKeyPassThrough in live_window.cpp): Windows then treats every
-  // pixel painted in the key colour as "no window here", PER PIXEL and for
-  // OTHER PROCESSES too. That is what makes "only the ball itself is
-  // clickable" actually true, without cropping the window into a box.
 
   /// Creates the top-level popup window + the second engine + the view.
   ///
@@ -199,31 +204,29 @@ class AylaLiveWindowHost {
   /// Latest floating-ball payload (sent to the engine on "ready").
   std::string overlay_payload_;
 
-  /// Client width of the window in Flutter LOGICAL pixels.
+  /// Client width of the window in Flutter LOGICAL pixels (WM_NCHITTEST needs
+  /// it to compute the group's left edge).
   int logical_width_ = 0;
 
-  /// Moves the (ball-sized) window so that the ball group's top edge sits at
-  /// [ball_group_top_] on screen, clamped to the monitor's work area.
-  ///
-  /// Called on every drag step reported through "setBallGroupTop". Cheap by
-  /// design: one SetWindowPos with SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE.
-  void MoveBallWindowToGroupTop();
-
-  /// Where the ball/handle group currently sits on screen, in Flutter LOGICAL
-  /// pixels measured from the TOP OF THE WORK AREA.
+  /// Where the ball/handle group currently sits inside the (full-height)
+  /// floating-ball window, in Flutter LOGICAL pixels from the window's top.
   ///
   /// The Dart side reports it on every drag via the "setBallGroupTop" channel
-  /// call, and [MoveBallWindowToGroupTop] turns it into the window position.
-  ///
-  /// The ball window is exactly the size of the ball group (see kBallWindowWidth
-  /// / kBallWindowMinHeight in live_window.cpp), so "where the group is" and
-  /// "where the window is" are the same question - that is what makes the
-  /// overlay click-through without any transparency trickery.
+  /// call; WM_NCHITTEST uses it to decide which pixels are the group (real,
+  /// clickable) and which are the empty transparent rest of the window
+  /// (HTTRANSPARENT => clicks fall through to whatever is underneath).
   ///
   /// 80 = the widget's WIDE档 default top (shell.css:462 `top: 80px`). The Dart
   /// side forces the wide档 on the overlay (see hostViewportWidth), so this is
   /// the correct initial value until Dart reports its own on the first drag.
   double ball_group_top_ = 80.0;
+
+  /// Visible button rects measured by Flutter (logical px, view coords).
+  std::vector<RECT> ball_hit_rects_;
+
+  /// Current click-through state (true = accepting mouse input).
+  bool ball_interactive_ = true;
+
 
   /// Pending "user clicked the ball" (see TakePendingBallTap).
   bool ball_tap_pending_ = false;
